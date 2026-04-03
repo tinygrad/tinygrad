@@ -357,6 +357,10 @@ class TestUOpReduce(unittest.TestCase):
     result = Tensor(a.uop.max(axis=0)).numpy()
     assert result[0] == 4 and result[1] == 5 and result[2] == 6
 
+  def test_uop_std(self):
+    a = Tensor([2.0, 4, 4, 4, 5, 5, 7, 9])
+    self.assertAlmostEqual(Tensor(a.uop.std()).item(), a.std().item(), places=5)
+
 class TestUOpWhere(unittest.TestCase):
   def test_uop_where_both_const(self):
     cond = Tensor([True, False, True])

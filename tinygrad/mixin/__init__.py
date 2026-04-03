@@ -1,8 +1,9 @@
 from typing import Self, Sequence
 from tinygrad.mixin.elementwise import ElementwiseMixin
 from tinygrad.mixin.reduce import ReduceMixin
-from tinygrad.uop.ops import _broadcast_shape
-from tinygrad.dtype import DTypeLike, least_upper_dtype, to_dtype
+from tinygrad.uop.ops import _broadcast_shape, resolve
+from tinygrad.dtype import DTypeLike, dtypes, least_upper_dtype, sum_acc_dtype, to_dtype
+from tinygrad.helpers import prod
 
 
 class OpMixin(ElementwiseMixin, ReduceMixin):
@@ -83,3 +84,116 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     """
     return self._inverse().max(axis=axis, keepdim=keepdim)._inverse()
 
+  def mean(self, axis:int|Sequence[int]|None=None, keepdim=False) -> Self:
+    """
+    Returns the mean value of the tensor along the specified axis or axes.
+
+    You can pass in `axis` and `keepdim` keyword arguments to control the axis along
+    which the mean is computed and whether the reduced dimensions are retained.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    t = Tensor.normal(2, 3, mean=2.5, std=0.5)
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.mean().numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.mean(axis=0).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.mean(axis=1).numpy())
+    ```
+    """
+    output_dtype = self.dtype if dtypes.is_float(self.dtype) else dtypes.float32
+    numerator = self.cast(sum_acc_dtype(self.dtype)).sum(axis=axis, keepdim=keepdim)
+    denominator = prod([si for si, so in zip(self.shape, self.sum(axis=axis, keepdim=True).shape) if resolve(si != so)])
+    return numerator.div(denominator).cast(output_dtype)  # type: ignore[arg-type]
+
+  def var(self, axis:int|Sequence[int]|None=None, keepdim=False, correction=1) -> Self:
+    """
+    Returns the variance of the tensor along the specified axis or axes.
+
+    You can pass in `axis`, `keepdim`, and `correction` keyword arguments to control the axis along
+    which the variance is computed, whether the reduced dimensions are retained, and the Bessel's correction applied.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    t = Tensor.normal(2, 3, mean=2.5, std=0.5)
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.var().numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.var(axis=0).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.var(axis=1).numpy())
+    ```
+    """
+    squares = (self - self.mean(axis=axis, keepdim=True)).square()
+    n = prod([si for si, so in zip(self.shape, squares.sum(axis=axis, keepdim=True).shape) if resolve(si != so)])
+    reduced = squares.sum(axis=axis, keepdim=keepdim)
+    denominator = reduced.const_like(n) - correction  # type: ignore[arg-type]
+    # TODO: remove relu?
+    return reduced.div(denominator.relu())
+
+  def var_mean(self, axis:int|Sequence[int]|None=None, keepdim=False, correction=1) -> tuple[Self, Self]:
+    """
+    Calculates the variance and mean over the dimensions specified by dim.
+    Syntactic sugar around `Tensor.var` and `Tensor.mean` to match `torch.var_mean`.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    t = Tensor.normal(2, 3, mean=2.5, std=0.5)
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    var, mean = t.var_mean()
+    print(var.numpy(), mean.numpy())
+    ```
+    """
+    return self.var(axis, keepdim, correction), self.mean(axis, keepdim)
+
+  def std(self, axis:int|Sequence[int]|None=None, keepdim=False, correction=1) -> Self:
+    """
+    Returns the standard deviation of the tensor along the specified axis or axes.
+
+    You can pass in `axis`, `keepdim`, and `correction` keyword arguments to control the axis along
+    which the standard deviation is computed, whether the reduced dimensions are retained, and the Bessel's correction applied.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    t = Tensor.normal(2, 3, mean=2.5, std=0.5)
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.std().numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.std(axis=0).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.std(axis=1).numpy())
+    ```
+    """
+    return self.var(axis, keepdim, correction).sqrt()
+
+  def std_mean(self, axis:int|Sequence[int]|None=None, keepdim=False, correction=1) -> tuple[Self, Self]:
+    """
+    Calculates the standard deviation and mean over the dimensions specified by dim.
+    Syntactic sugar around `Tensor.std` and `Tensor.mean` to match `torch.std_mean`.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    t = Tensor.normal(2, 3, mean=2.5, std=0.5)
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    std, mean = t.std_mean()
+    print(std.numpy(), mean.numpy())
+    ```
+    """
+    return self.std(axis, keepdim, correction), self.mean(axis, keepdim)
