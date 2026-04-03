@@ -6,7 +6,7 @@ from tinygrad.renderer import Estimates
 from tinygrad.helpers import getenv, all_same, DEBUG
 from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
 from tinygrad.runtime.autogen.amd.cdna.ins import *
-from examples.mlperf.models.flat_llama import FP8_DTYPE, FP8_GRAD_DTYPE, matmul
+from examples.mlperf.models.flat_llama import FP8_DTYPE, FP8_GRAD_DTYPE, matmul, quantize_fp8
 
 # ** CDNA4 assembly gemm
 
@@ -2703,10 +2703,14 @@ def custom_gemm_bw(gradient:UOp, kernel:UOp):
     out, a, b, scale = inputs
     a_t, b_t, g_t, s_t = Tensor(a, device=a.device), Tensor(b, device=a.device), Tensor(gradient, device=a.device), Tensor(scale, device=a.device)
     g_t = g_t[:a.shape[0]]
-    # backward GEMMs in bf16, scale applied after (scale is small so bf16 result won't overflow)
-    grad_a = (matmul(g_t, b_t.T, fp8=False) * s_t).uop
-    grad_b = (matmul(g_t.reshape(-1, g_t.shape[-1]).T, a_t.reshape(-1, a_t.shape[-1]).T, fp8=False) * s_t).uop
-    return (None, grad_a, grad_b, None)
+    # backward GEMMs in fp8 with scale applied inside kernel to prevent bf16 overflow
+    g_fp8, g_scale = quantize_fp8(g_t)
+    bw_scale = g_scale * s_t
+    # dgrad: g_fp8 @ weight (asm_gemm computes a@b)
+    grad_a = asm_gemm(g_fp8, b_t, combined_scale=bw_scale)
+    # wgrad: g_fp8.T @ activation = (N, batch*seq) @ (batch*seq, K) → use permute to preserve sharding
+    grad_b = asm_gemm(g_fp8.permute(2, 0, 1).reshape(g_t.shape[-1], -1), a_t.reshape(-1, a_t.shape[-1]), combined_scale=bw_scale)
+    return (None, grad_a.uop, grad_b.uop, None)
   else:
     out, a, b = inputs
     assert all_same([gradient.device, a.device, b.device, out.device])
