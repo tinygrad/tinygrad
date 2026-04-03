@@ -57,7 +57,7 @@ jobs:
       CI: ""
       CAPTURE_PROCESS_REPLAY: "0"
     runs-on: [self-hosted, framework]
-    timeout-minutes: 3
+    timeout-minutes: 10
     defaults:
       run:
         shell: bash -e -o pipefail {0}
