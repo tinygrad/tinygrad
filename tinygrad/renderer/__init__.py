@@ -131,8 +131,7 @@ class ProgramSpec:
                        sorted(_vars, key=lambda v: v.arg), sorted(dedup(_globals)), sorted(dedup(outs)), sorted(dedup(ins)))
 
 class Renderer:
-  target: Target = Target()
-  device: str = ""
+  target: Target
   suffix: str = ""
   # TODO: make this generic with a list of supported types
   supports_float4: bool = True
@@ -152,6 +151,7 @@ class Renderer:
 
   compiler: Compiler = Compiler()
 
-  def __reduce__(self): return self.__class__, ()
+  def __init__(self, target:Target): self.target = target
+  def __reduce__(self): return self.__class__, (self.target,)
   def render(self, uops:list[UOp]) -> str: raise NotImplementedError("needs a renderer")
   def aux(self, uops:list[UOp]) -> dict: raise NotImplementedError("needs aux")

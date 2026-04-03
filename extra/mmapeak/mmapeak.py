@@ -4,7 +4,7 @@ import os
 os.environ["AMD_AQL"] = "1"
 
 from tinygrad import Tensor, Device
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, DEV
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.renderer import Estimates
 from tinygrad.renderer.amd.dsl import Reg, Inst, s, v

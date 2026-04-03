@@ -6,7 +6,7 @@ from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, TrackedPatternMatch
 from tinygrad.uop.symbolic import sym
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import PROFILE, colored, ansistrip, flatten, TracingKey, ProfileRangeEvent, ProfileEvent, Context, cpu_events, profile_marker
-from tinygrad.helpers import VIZ, cpu_profile, ProfilePointEvent, Target
+from tinygrad.helpers import VIZ, cpu_profile, ProfilePointEvent
 from tinygrad.device import Buffer
 
 @track_rewrites(name=True)
@@ -669,7 +669,6 @@ from tinygrad.renderer.amd.dsl import s
 from tinygrad.runtime.autogen.amd.rdna3.ins import (s_add_u32, s_branch, s_cbranch_execz, s_cbranch_scc0, s_cbranch_scc1, s_cmp_eq_i32,
                                                     s_cmp_eq_u64, s_code_end, s_endpgm, s_mov_b32, s_nop)
 from extra.gemm.amd_asm_matmul import Kernel
-from tinygrad.renderer.cstyle import AMDHIPRenderer
 
 class TestCfg(unittest.TestCase):
   def setUp(self): self.arch = "gfx1100"
@@ -681,11 +680,9 @@ class TestCfg(unittest.TestCase):
       gidx = UOp.special(1, "gidx0")
       sink = UOp.sink(out.base, lidx, gidx, arg=KernelInfo(name=name))
       return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg="NULL"), UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=x) for x in insts]))))
-    with Context(EMULATE="AMD"):
-      out = Tensor.custom_kernel(Tensor.empty(1, device="NULL"), fxn=fxn)[0]
-      # TODO: uncomment the better version once EMULATE works in Context
-      #prg = out.schedule()[-1].lower().prg.p
-      prg = get_program(out.schedule()[-1].ast, AMDHIPRenderer(Target("AMD", arch=self.arch)))
+    with Context(DEV=f"NULL:HIP:{self.arch}"):
+      out = Tensor.custom_kernel(Tensor.empty(1), fxn=fxn)[0]
+      prg = out.schedule()[-1].lower().prg.p
       return amdgpu_cfg(prg.lib, self.arch)
 
   def test_simple(self):

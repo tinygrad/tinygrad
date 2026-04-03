@@ -1,5 +1,5 @@
 from typing import Literal, Callable, cast
-import os, math, sys, struct
+import math, sys, struct
 from collections import defaultdict, Counter
 from tinygrad.codegen.opt import tc
 from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat, range_str, axis_letters
@@ -218,7 +218,6 @@ class CStyleLanguage(Renderer):
   def render(self, uops:list[UOp]) -> str: return self.render_kernel(*self._render(uops), uops)
 
 class ClangRenderer(CStyleLanguage):
-  device = "CPU"
   float4 = "(float4)"
   float4_style = ('{', '}')
   gep_arr_threshold = 0
@@ -278,12 +277,12 @@ class ClangRenderer(CStyleLanguage):
     return defines + "\n" + self._render_body(function_name, kernel, bufs, uops, prefix) + "\n" + self._render_entry(function_name, bufs)
 
 class ClangJITRenderer(ClangRenderer):
-  def __init__(self):
+  def __init__(self, target:Target):
+    super().__init__(target)
     from tinygrad.runtime.support.compiler_cpu import ClangJITCompiler
     self.compiler = ClangJITCompiler()
 
 class OpenCLRenderer(CStyleLanguage):
-  device = "CL"
   has_aux = True
 
   # language options
@@ -325,7 +324,7 @@ class OpenCLRenderer(CStyleLanguage):
     return tuple(tuple(a) for a in arg_dtypes),
 
 class IntelRenderer(OpenCLRenderer):
-  device, suffix, kernel_typedef = "CL", "INTEL", "__attribute__((intel_reqd_sub_group_size(8)))\n" + "__kernel void"
+  suffix, kernel_typedef = "INTEL", "__attribute__((intel_reqd_sub_group_size(8)))\n" + "__kernel void"
   tensor_cores = tc.intel
 
   string_rewrite = PatternMatcher([
@@ -342,11 +341,11 @@ class IntelRenderer(OpenCLRenderer):
     return super().render_kernel(function_name, kernel, bufs, uops, prefix or None)
 
 class MetalRenderer(CStyleLanguage):
-  device = "METAL"
   shared_max = 32768
-  def __init__(self):
+  def __init__(self, target:Target):
+    super().__init__(target)
     from tinygrad.runtime.ops_metal import MetalCompiler
-    self.compiler, self.tensor_cores = MetalCompiler(), tc.metal if hasattr(os, 'uname') and os.uname().machine == "arm64" else []
+    self.compiler, self.tensor_cores = MetalCompiler(), tc.metal if target.arch == "arm64" else []
 
   # language options
   kernel_typedef = "kernel void"
@@ -393,12 +392,12 @@ class CUDARenderer(CStyleLanguage):
   shared_max = 49152
 
   def __init__(self, target:Target, use_nvcc=False):
+    super().__init__(target)
     from tinygrad.runtime.support.compiler_cuda import NVRTCCompiler, NVCCCompiler
     from tinygrad.runtime.support.hcq import MOCKGPU
-    self.target, self.device, arch = target, target.device, target.arch
-    self.compiler = (NVCCCompiler if use_nvcc else NVRTCCompiler)(arch, ptx=bool(MOCKGPU) or self.device == "CUDA", cache_key=self.device.lower())
-    self.tensor_cores = tc.cuda_sm89 if (ver:=int(arch[3:])) >= 89 else tc.cuda_sm80 if ver >= 80 else tc.cuda_sm75 if ver >= 75 else []
-  def __reduce__(self): return self.__class__, (self.target,)
+    dev, arch = target.device, target.arch
+    self.compiler = (NVCCCompiler if use_nvcc else NVRTCCompiler)(arch, ptx=bool(MOCKGPU) or dev == "CUDA", cache_key=dev.lower())
+    self.tensor_cores = tc.get_cuda(arch)
 
   # language options
   # https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html
@@ -466,23 +465,20 @@ class NVCCRenderer(CUDARenderer):
 def fp8_index(dtype: DType): return (dtypes.fp8e4m3, dtypes.fp8e5m2).index(dtype.scalar())
 def _ocml(op): return lambda x,dtype: f"__ocml_{op}_f{ {dtypes.half:16, dtypes.double:64}.get(dtype, 32)}({x})"
 
-class AMDHIPRenderer(CStyleLanguage):
-  device = "AMD"
+class HIPRenderer(CStyleLanguage):
   shared_max = 65536
   # NOTE: this is only really needed on gfx12, even though gfx11 reports the same limitation
   global_max = (2147483647, 65535, 65535)
   global_prod_max = (0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF)
 
   @staticmethod
-  def get_tensor_cores(arch):
-    return {"gfx942": tc.amd_cdna3, "gfx950": tc.amd_cdna4, "gfx1200": tc.amd_rdna4, "gfx1201": tc.amd_rdna4}.get(arch.split(":")[0], tc.amd_rdna3)
-  @staticmethod
   def is_cdna(arch): return arch.split(":")[0] in {"gfx942", "gfx950"}
   @staticmethod
   def is_cdna4(arch): return arch.split(":")[0] == "gfx950"
   def __init__(self, target:Target): # gfx942 => MI300, gfx1100 => RX 7900, gfx1201 => RX 9700
+    super().__init__(target)
     from tinygrad.runtime.support.compiler_amd import HIPCompiler
-    self.target, self.compiler, self.tensor_cores = target, HIPCompiler(target.arch), self.get_tensor_cores(target.arch)
+    self.compiler, self.tensor_cores = HIPCompiler(target.arch), tc.get_amd(target.arch)
     if not self.is_cdna4(target.arch): self.extra_matcher += pm_manual_bf16_cast + extra_pm
     if self.is_cdna(target.arch):
       self.string_rewrite = PatternMatcher([
@@ -494,7 +490,6 @@ class AMDHIPRenderer(CStyleLanguage):
         (UPat(Ops.CAST, dtypes.float, (UPat.var("y", dtypes.fp8s),), name="x",),
           lambda ctx,x,y: f"__builtin_amdgcn_cvt_f32_{('fp8', 'bf8')[fp8_index(y.dtype)]}((unsigned int){ctx[x.src[0]]}, 0)"),
       ]) + base_rewrite
-  def __reduce__(self): return self.__class__, (self.target,)
 
   # https://clang.llvm.org/docs/AttributeReference.html#amdgpu-flat-work-group-size
   # NOTE: this makes hlb_cifar10 twice as fast, there may be more gains in tweaking these parameters
@@ -562,18 +557,14 @@ class AMDHIPRenderer(CStyleLanguage):
   for (int n = 0; n < 8; n++) { d[n] = c_frag[n*2]; } return d;\n}""")
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 
-class HIPRenderer(AMDHIPRenderer): device = "HIP"
-class AMDHIPCCRenderer(AMDHIPRenderer):
+class HIPCCRenderer(HIPRenderer):
   def __init__(self, target:Target):
-    from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
     super().__init__(target)
+    from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
     self.compiler = HIPCCCompiler(target.arch)
 
 class QCOMCLRenderer(OpenCLRenderer):
-  device = "QCOM"
-
   def __init__(self, target:Target):
+    super().__init__(target)
     from tinygrad.runtime.support.compiler_qcom import QCOMCompiler
-    self.target, self.compiler = target, QCOMCompiler(target.arch)
-
-  def __reduce__(self): return self.__class__, (self.target,)
+    self.compiler = QCOMCompiler(target.arch)

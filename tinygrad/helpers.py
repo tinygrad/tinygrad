@@ -119,18 +119,16 @@ def suppress_finalizing(func):
       if not getattr(sys, 'is_finalizing', lambda: True)(): raise # re-raise if not finalizing
   return wrapper
 
-def select_first_inited(candidates:Sequence[Callable[...,T]], err_msg:str, cache:dict|None=None):
+def select_first_inited(candidates:Sequence[Callable[...,T]], err_msg:str, cache:dict|None=None, **kwargs):
   excs = []
   for typ in candidates:
     if cache is not None and typ in cache: return cache[typ]
     try:
-      x = typ()
+      x = typ(**kwargs)
       if cache is not None: cache[typ] = x
       return x
     except Exception as e: excs.append(e)
   raise excs[0] if len(excs) == 1 else ExceptionGroup(err_msg, excs)
-
-def unwrap_class_type(cls_t): return cls_t.func if isinstance(cls_t, functools.partial) else cls_t
 
 def pluralize(st:str, cnt:int): return f"{cnt} {st}"+('' if cnt == 1 else 's')
 
@@ -188,6 +186,8 @@ class Target:
     assert len(parts) <= 3, f"too many colons in target string: {s!r}"
     return Target(*parts)
   def __repr__(self) -> str: return re.sub(":*$", "", ":".join(asdict(self).values()))
+  # replaces if not already set
+  def replacedefault(self, **kwargs) -> Target: return replace(self, **{k:v for k,v in kwargs.items() if not getattr(self, k)})
 
 class _DEV(ContextVar):
   _value = Target()
@@ -196,9 +196,9 @@ class _DEV(ContextVar):
   @value.setter
   def value(self, v:str|Target): self._value = v if isinstance(v, Target) else Target.parse(v)
   def __getattr__(self, k): return getattr(self.value, k)
-  # get target for device string
-  def target(self, dev:str) -> Target:
-    t = self.value if self.device == dev or not self.device else Target(device=dev)
+  # get target for device string, kwargs are passed if not already specified
+  def target(self, dev:str, **kwargs) -> Target:
+    t = self.value.replacedefault(**kwargs) if self.device == dev or not self.device else Target(device=dev, **kwargs)
     # TODO: remove this once DEV supports secondary targets
     if (cv:=ContextVar._cache.get(f"{dev}_CC", None)) is not None and cv.value:
       assert not t.renderer, f"renderer set in DEV and {dev}_CC"
@@ -218,7 +218,7 @@ VALIDATE_WITH_CPU, DISABLE_FAST_IDIV = ContextVar("VALIDATE_WITH_CPU", 0), Conte
 CORRECT_DIVMOD_FOLDING, FUSE_OPTIM = ContextVar("CORRECT_DIVMOD_FOLDING", 0), ContextVar("FUSE_OPTIM", 0)
 ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE = ContextVar("ALLOW_DEVICE_USAGE", 1), ContextVar("MAX_BUFFER_SIZE", 0)
 MAX_KERNEL_BUFFERS = ContextVar("MAX_KERNEL_BUFFERS", 0)
-EMULATE, EMULATED_DTYPES = ContextVar("EMULATE", ""), ContextVar("EMULATED_DTYPES", "")
+EMULATED_DTYPES = ContextVar("EMULATED_DTYPES", "")
 CAPTURE_PROCESS_REPLAY = ContextVar("CAPTURE_PROCESS_REPLAY", 0)
 CPU_COUNT = ContextVar("CPU_COUNT", max(1, len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else (os.cpu_count() or 1)))
 # Compilers
