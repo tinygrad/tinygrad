@@ -478,8 +478,7 @@ class HIPRenderer(CStyleLanguage):
   def __init__(self, target:Target): # gfx942 => MI300, gfx1100 => RX 7900, gfx1201 => RX 9700
     super().__init__(target)
     from tinygrad.runtime.support.compiler_amd import HIPCompiler
-    self.compiler = HIPCompiler(target.arch)
-    self.tensor_cores = tc.get_amd(target.arch)
+    self.compiler, self.tensor_cores = HIPCompiler(target.arch), tc.get_amd(target.arch)
     if not self.is_cdna4(target.arch): self.extra_matcher += pm_manual_bf16_cast + extra_pm
     if self.is_cdna(target.arch):
       self.string_rewrite = PatternMatcher([

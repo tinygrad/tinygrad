@@ -45,7 +45,8 @@ def launchBenchmark(instruction, vgprIndices, dense=True, accum=False, **kwargs)
   print(f"{inst.op_name.lower():<29} : {FLOPs/elapsed/10**12:.2f} T(FL)OPS")
 
 if __name__=="__main__":
-  arch = DEV.arch
+  DEV = Device[Device.DEFAULT]
+  arch = DEV.renderer.target.arch
 
   if arch in {'gfx1100', 'gfx1103', 'gfx1151'}:
     from tinygrad.runtime.autogen.amd.rdna3.ins import *
