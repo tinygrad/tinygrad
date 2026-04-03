@@ -4,7 +4,7 @@ import time, math, itertools, functools, struct, sys, inspect, pathlib, string, 
 from contextlib import ContextDecorator
 from typing import Any, Callable, ClassVar, Sequence, cast, get_args, Literal, SupportsIndex, ParamSpec, TypeVar, Generic, TYPE_CHECKING
 if TYPE_CHECKING: import numpy
-from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_float, least_upper_dtype, sum_acc_dtype, to_dtype, truncate
+from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_float, least_upper_dtype, to_dtype, truncate
 from tinygrad.dtype import _from_np_dtype, _to_np_dtype, PyConst, Invalid, InvalidType
 from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten
 from tinygrad.helpers import IMAGE, FLOAT16, WINO, Metadata, TRACEMETA, ASM_GEMM, ceildiv, fetch, is_numpy_ndarray, TracingKey, cpu_profile
@@ -1468,119 +1468,6 @@ class Tensor(OpMixin):
     Check if all self and other are close. Return True or False.
     """
     return bool(self.isclose(other, rtol=rtol, atol=atol, equal_nan=equal_nan).all().item())
-
-  def mean(self, axis:int|Sequence[int]|None=None, keepdim=False) -> Tensor:
-    """
-    Returns the mean value of the tensor along the specified axis or axes.
-
-    You can pass in `axis` and `keepdim` keyword arguments to control the axis along
-    which the mean is computed and whether the reduced dimensions are retained.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    Tensor.manual_seed(42)
-    t = Tensor.normal(2, 3, mean=2.5, std=0.5)
-    print(t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.mean().numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.mean(axis=0).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.mean(axis=1).numpy())
-    ```
-    """
-    output_dtype = self.dtype if dtypes.is_float(self.dtype) else dtypes.float32
-    numerator = self.cast(sum_acc_dtype(self.dtype)).sum(axis=axis, keepdim=keepdim)
-    denominator = prod([si for si, so in zip(self.shape, self.sum(axis=axis, keepdim=True).shape) if resolve(si != so)])
-    return numerator.div(denominator).cast(output_dtype)
-
-  def var(self, axis:int|Sequence[int]|None=None, keepdim=False, correction=1) -> Tensor:
-    """
-    Returns the variance of the tensor along the specified axis or axes.
-
-    You can pass in `axis`, `keepdim`, and `correction` keyword arguments to control the axis along
-    which the variance is computed, whether the reduced dimensions are retained, and the Bessel's correction applied.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    Tensor.manual_seed(42)
-    t = Tensor.normal(2, 3, mean=2.5, std=0.5)
-    print(t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.var().numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.var(axis=0).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.var(axis=1).numpy())
-    ```
-    """
-    squares = (self - self.mean(axis=axis, keepdim=True)).square()
-    n = prod([si for si, so in zip(self.shape, squares.sum(axis=axis, keepdim=True).shape) if resolve(si != so)])
-    denominator = Tensor(n, device=self.device) - correction
-    # TODO: infer device and remove relu
-    return squares.sum(axis=axis, keepdim=keepdim).div(denominator.relu())
-
-  def var_mean(self, axis:int|Sequence[int]|None=None, keepdim=False, correction=1) -> tuple[Tensor, Tensor]:
-    """
-    Calculates the variance and mean over the dimensions specified by dim.
-    Syntactic sugar around `Tensor.var` and `Tensor.mean` to match `torch.var_mean`.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    Tensor.manual_seed(42)
-    t = Tensor.normal(2, 3, mean=2.5, std=0.5)
-    print(t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    var, mean = t.var_mean()
-    print(var.numpy(), mean.numpy())
-    ```
-    """
-    return self.var(axis, keepdim, correction), self.mean(axis, keepdim)
-
-  def std(self, axis:int|Sequence[int]|None=None, keepdim=False, correction=1) -> Tensor:
-    """
-    Returns the standard deviation of the tensor along the specified axis or axes.
-
-    You can pass in `axis`, `keepdim`, and `correction` keyword arguments to control the axis along
-    which the standard deviation is computed, whether the reduced dimensions are retained, and the Bessel's correction applied.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    Tensor.manual_seed(42)
-    t = Tensor.normal(2, 3, mean=2.5, std=0.5)
-    print(t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.std().numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.std(axis=0).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.std(axis=1).numpy())
-    ```
-    """
-    return self.var(axis, keepdim, correction).sqrt()
-
-  def std_mean(self, axis:int|Sequence[int]|None=None, keepdim=False, correction=1) -> tuple[Tensor, Tensor]:
-    """
-    Calculates the standard deviation and mean over the dimensions specified by dim.
-    Syntactic sugar around `Tensor.std` and `Tensor.mean` to match `torch.std_mean`.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    Tensor.manual_seed(42)
-    t = Tensor.normal(2, 3, mean=2.5, std=0.5)
-    print(t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    std, mean = t.std_mean()
-    print(std.numpy(), mean.numpy())
-    ```
-    """
-    return self.std(axis, keepdim, correction), self.mean(axis, keepdim)
 
   def keccak(self, cfg:str|tuple[int, int]="sha3_256"):
     """
