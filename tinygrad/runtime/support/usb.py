@@ -1,4 +1,4 @@
-import ctypes, struct, dataclasses, array, itertools, time
+import ctypes, struct, dataclasses, array, itertools
 from typing import Sequence
 from tinygrad.runtime.autogen import libusb
 from tinygrad.helpers import DEBUG, to_mv, round_up, OSX, getenv
