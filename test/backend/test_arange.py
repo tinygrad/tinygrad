@@ -236,7 +236,7 @@ class TestIndexing(unittest.TestCase):
     prg = sched[0].lower().prg.p
     bwd_ops = prg.estimates.ops
     # bfloat16 on non CDNA4 has ~10x ops overhead because of the software emulation
-    if dtype == dtypes.bfloat16 and not Device[Device.DEFAULT].renderer.arch.startswith("gfx950"): ops_scale = 10
+    if dtype == dtypes.bfloat16 and not Device[Device.DEFAULT].renderer.target.arch.startswith("gfx950"): ops_scale = 10
     else: ops_scale = 1
     expected_ops = bs*seqlen*dim*dim*ops_scale
     print(f"rope matmul bwd ({dtype}): {GlobalCounters.kernel_count} kernels, {bwd_ops:,} ops")
