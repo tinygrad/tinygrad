@@ -287,6 +287,7 @@ class Compiled:
     assert (rn:=next((self._renderer_name(r) for r in self.renderers if getenv(f"{self.device}_{self._renderer_name(r)}")), None)) is None, \
       f"{self.device}_{rn}=1 is deprecated, use DEV={self.device}:{rn} or {self.device}_CC={rn} instead"
     renderers = [r for r in self.renderers if self._renderer_name(r) == rn] if (rn:=DEV.target(self.device).renderer) else self.renderers
+    assert renderers, f"No renderer for {self.device} " + (f"matches request {rn!r}" if rn else "is available")
     return select_first_inited(renderers, f"No renderer for {self.device} is available", self.cached_renderer)
 
   def synchronize(self):

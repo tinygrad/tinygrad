@@ -678,8 +678,10 @@ jobs:
         run: |
           PYTHONPATH=. DEV=NULL EMULATE=AMD python extra/mmapeak/mmapeak.py
           PYTHONPATH=. DEV=NULL EMULATE=AMD_CDNA4 python3 -m pytest -n=auto test/testextra/test_tk.py test/backend/test_asm_gemm.py
-      - name: Run ASM matmul on MOCKGPU
-        run: PYTHONPATH="." DEV=AMD MOCKGPU=1 N=256 python3 extra/gemm/amd_asm_matmul.py
+      - name: Run matmul on MOCKGPU
+        run: |
+          PYTHONPATH="." DEV=AMD MOCKGPU=1 N=256 python3 extra/gemm/amd_asm_matmul.py
+          PYTHONPATH="." DEV=AMD MOCKGPU=1 N=256 python3 extra/gemm/amd_copy_matmul.py
       - name: Run LLVM test
         run: DEV=AMD:LLVM python test/device/test_amd_llvm.py
 

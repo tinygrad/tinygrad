@@ -4,14 +4,12 @@ from tinygrad.uop import Ops
 from tinygrad.dtype import dtypes, ConstType, least_upper_dtype, least_upper_float
 from tinygrad.helpers import polyN
 from tinygrad.mixin.dtype import DTypeMixin
+from tinygrad.mixin.creation import CreationMixin
 
 
-class ElementwiseMixin(DTypeMixin):
+class ElementwiseMixin(DTypeMixin, CreationMixin):
   # required to implement
   def alu(self, op: Ops, *src: Self) -> Self:
-    raise NotImplementedError
-
-  def const_like(self, b: ConstType) -> Self:
     raise NotImplementedError
 
   def _broadcasted(self, y: Self | ConstType, reverse: bool = False) -> tuple[Self, Self]:
@@ -319,11 +317,9 @@ class ElementwiseMixin(DTypeMixin):
     return ((self-m).exp() + (self._broadcasted(other)[1]-m).exp()).log() + m
 
   def where(self, x: Self | ConstType, y: Self | ConstType) -> Self:
-    if isinstance(x, type(self)):
-      return self.alu(Ops.WHERE, x, x.ufix(y))
-    if isinstance(y, type(self)):
-      return self.alu(Ops.WHERE, y.ufix(x), y)
-    raise RuntimeError("where needs at least one UOp arg")
+    ref: Self = x if isinstance(x, type(self)) else y if isinstance(y, type(self)) else \
+      self.cast(least_upper_dtype(dtypes.from_py(x), dtypes.from_py(y)))
+    return self.alu(Ops.WHERE, ref.ufix(x), ref.ufix(y))
 
   def threefry(self, seed: Self) -> Self:
     return self.alu(Ops.THREEFRY, seed)

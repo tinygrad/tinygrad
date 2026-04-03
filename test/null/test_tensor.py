@@ -170,6 +170,25 @@ class TestRand(unittest.TestCase):
     Tensor.rand(2**17, 2**17).schedule()
     Tensor.rand(2**17, 2**17).schedule()
 
+class TestTensorConstLike(unittest.TestCase):
+  def test_const_like_shape(self):
+    t = Tensor.ones(3, 4)
+    c = t.const_like(0)
+    self.assertEqual(c.shape, (3, 4))
+    self.assertEqual(c.dtype, t.dtype)
+
+  def test_const_like_multi_device(self):
+    devs = ("NULL:0", "NULL:1")
+    t = Tensor.ones(8, 4).shard(devs, axis=0)
+    c = t.const_like(5)
+    self.assertEqual(c.shape, (8, 4))
+    self.assertEqual(c.device, t.device)
+    self.assertEqual(c.uop.axis, 0)
+
+  def test_full_like_device_on_multi_raises(self):
+    t = Tensor.ones(8, 4).shard(("NULL:0", "NULL:1"), axis=0)
+    with self.assertRaises(RuntimeError): t.full_like(5, device="NULL")
+
 class TestTensorDevice(unittest.TestCase):
   def test_create_from_single_device_tuple(self):
     (Tensor([1.0], device=(Device.DEFAULT,)) + Tensor([2.0])).realize()

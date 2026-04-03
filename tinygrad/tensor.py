@@ -184,7 +184,7 @@ class Tensor(OpMixin):
     lhs,rhs = self._broadcasted(x, reverse)
     return lhs._apply_uop(lambda *u: u[0].alu(op, *u[1:]), rhs)
   def alu(self, op: Ops, *src: Tensor) -> Tensor: return self._apply_uop(lambda *u: u[0].alu(op, *u[1:]), *src)
-  def const_like(self, b:ConstType) -> Tensor: return Tensor(self.dtype.const(b), self.device, self.dtype, requires_grad=False)
+  def const_like(self, b:ConstType) -> Tensor: return Tensor(self.uop.const_like(b), requires_grad=False)
 
   def requires_grad_(self, requires_grad=True) -> Tensor:
     # make the UOp unique if it's a CONST to prevent gradient accumulation bugs with cached const UOps
@@ -798,49 +798,24 @@ class Tensor(OpMixin):
     stacked = UOp.mstack(*[fxn(self.uop.shard_shape, *args, device=d, dtype=dtype, **kwargs).uop for d in self.device])
     return Tensor(stacked.multi(self.uop.axis))
 
-  def full_like(self, fill_value:PyConst, **kwargs) -> Tensor:
+  def full_like(self, fill_value:ConstType, dtype=None, device=None, requires_grad=None) -> Tensor:
     """
     Creates a tensor with the same shape as `self`, filled with the given value.
     If `dtype` is not specified, the dtype of `self` is used.
 
     You can pass in the `device` keyword argument to control device of the tensor.
-    Additionally, all other keyword arguments are passed to the constructor of the tensor.
 
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor.ones(2, 3)
     print(Tensor.full_like(t, 42).numpy())
     ```
     """
-    if isinstance(self.device, tuple): return self._multi_like(Tensor.full, fill_value, **kwargs)
-    return Tensor.full(self.shape, fill_value, dtype=kwargs.pop("dtype", self.dtype), device=kwargs.pop("device", self.device), **kwargs)
-
-  def zeros_like(self, **kwargs) -> Tensor:
-    """
-    Creates a tensor with the same shape as `self`, filled with zeros.
-
-    You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
-    Additionally, all other keyword arguments are passed to the constructor of the tensor.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor.ones(2, 3)
-    print(Tensor.zeros_like(t).numpy())
-    ```
-    """
-    return self.full_like(0, **kwargs)
-
-  def ones_like(self, **kwargs) -> Tensor:
-    """
-    Creates a tensor with the same shape as `self`, filled with ones.
-
-    You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
-    Additionally, all other keyword arguments are passed to the constructor of the tensor.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor.zeros(2, 3)
-    print(Tensor.ones_like(t).numpy())
-    ```
-    """
-    return self.full_like(1, **kwargs)
+    if device is not None:
+      if isinstance(self.device, tuple): raise RuntimeError("cannot specify `device` on `full_like` of a multi device tensor")
+      return Tensor.full(self.shape, fill_value, dtype=dtype or self.dtype, device=device).requires_grad_(requires_grad)
+    if requires_grad:
+      return Tensor.full(self.shape, fill_value, dtype=dtype or self.dtype, device=self.device).requires_grad_(requires_grad)
+    return self.const_like(fill_value) if dtype is None else self.const_like(fill_value).cast(dtype)
 
   def rand_like(self, **kwargs) -> Tensor:
     """
@@ -2187,7 +2162,7 @@ class Tensor(OpMixin):
     assert self.shape[axis] != 0 and op in (Ops.ADD, Ops.MAX, Ops.MUL)
     pl_sz = self.shape[axis] - int(not _include_initial)
     pooled = self.transpose(axis,-1).pad((pl_sz, -int(_include_initial)), value=identity_element(op, self.dtype))._pool((self.shape[axis],))
-    return {Ops.ADD: pooled.sum(-1), Ops.MAX: pooled.max(-1), Ops.MUL: pooled.prod(-1)}[op].transpose(axis, -1)
+    return getattr(pooled, {Ops.ADD: "sum", Ops.MAX: "max", Ops.MUL: "prod"}[op])(-1).transpose(axis, -1)
 
   def _split_cumalu(self, axis:int, op:Ops) -> Tensor:
     axis = self._resolve_dim(axis)
@@ -2200,8 +2175,7 @@ class Tensor(OpMixin):
     base = ret[..., -1]._cumalu(-1, op, _include_initial=True)
     base = base.unsqueeze(-1).expand(*base.shape, ret.shape[-1])
     def fix(x: Tensor) -> Tensor: return x.flatten(start_dim=-2)[..., -s:].transpose(axis,-1)
-    reduce_fxns: dict[Ops, Callable[[Tensor, Tensor], Tensor]] = {Ops.ADD: Tensor.__add__, Ops.MAX: Tensor.maximum, Ops.MUL: Tensor.__mul__}
-    return reduce_fxns[op](fix(ret), fix(base))
+    return getattr(fix(ret), {Ops.ADD: "add", Ops.MAX: "maximum", Ops.MUL: "mul"}[op])(fix(base))
 
   def cumsum(self, axis:int=0) -> Tensor:
     """
