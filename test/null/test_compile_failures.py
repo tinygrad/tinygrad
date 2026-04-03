@@ -9,7 +9,7 @@ class TestCompileFailures(unittest.TestCase):
   def compile(self, out:Tensor):
     for si in out.schedule(): si.lower()
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.uchar, Device.DEFAULT), f"no uint8 on {Device.DEFAULT}")
+  @unittest.skipUnless(is_dtype_supported(dtypes.uchar), f"no uint8 on {Device.DEFAULT}")
   def test_interpolate_atari(self):
     self.compile(Tensor.empty(210, 160, dtype='uint8').interpolate((64, 64)))
 

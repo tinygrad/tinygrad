@@ -208,6 +208,7 @@ class PythonRenderer(Renderer):
   def __init__(self, target:Target):
     assert (emu:=getenv("EMULATE", "")) == "", ("EMULATE is deprecated, use DEV=PYTHON::" +
       {"AMD":"gfx1100", "AMD_RDNA4":"gfx1201", "AMD_MFMA":"gfx950", "CUDA":"sm_80", "CUDA_SM75":"sm_75", "CUDA_SM89":"sm_89"}.get(emu, emu))
+    target = replace(target, renderer="PYTHON")
     if target.arch == "METAL": self.target, self.tensor_cores = replace(target, device="METAL"), tc.metal
     elif target.arch == "INTEL": self.target, self.suffix, self.tensor_cores = replace(target, device="INTEL"), "INTEL", tc.intel
     elif target.arch == "AMX": self.target, self.tensor_cores = replace(target, device="CPU"), tc.amx
