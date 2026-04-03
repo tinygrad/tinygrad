@@ -24,7 +24,7 @@ NVJITLINK_INPUT_FATBIN = nvJitLinkInputType.define('NVJITLINK_INPUT_FATBIN', 4)
 NVJITLINK_INPUT_OBJECT = nvJitLinkInputType.define('NVJITLINK_INPUT_OBJECT', 5)
 NVJITLINK_INPUT_LIBRARY = nvJitLinkInputType.define('NVJITLINK_INPUT_LIBRARY', 6)
 
-class struct_nvJitLink(ctypes.Structure): pass
+class struct_nvJitLink(c.Struct): SIZE = 0
 nvJitLinkHandle: TypeAlias = c.POINTER[struct_nvJitLink]
 uint32_t: TypeAlias = Annotated[int, ctypes.c_uint32]
 @dll.bind

@@ -9,57 +9,57 @@ import sysconfig, os
 dll = c.DLL('webgpu', os.path.join(sysconfig.get_paths()['purelib'], 'pydawn', 'lib', 'libwebgpu_dawn.dll') if WIN else 'webgpu_dawn')
 WGPUFlags: TypeAlias = Annotated[int, ctypes.c_uint64]
 WGPUBool: TypeAlias = Annotated[int, ctypes.c_uint32]
-class struct_WGPUAdapterImpl(ctypes.Structure): pass
+class struct_WGPUAdapterImpl(c.Struct): SIZE = 0
 WGPUAdapter: TypeAlias = c.POINTER[struct_WGPUAdapterImpl]
-class struct_WGPUBindGroupImpl(ctypes.Structure): pass
+class struct_WGPUBindGroupImpl(c.Struct): SIZE = 0
 WGPUBindGroup: TypeAlias = c.POINTER[struct_WGPUBindGroupImpl]
-class struct_WGPUBindGroupLayoutImpl(ctypes.Structure): pass
+class struct_WGPUBindGroupLayoutImpl(c.Struct): SIZE = 0
 WGPUBindGroupLayout: TypeAlias = c.POINTER[struct_WGPUBindGroupLayoutImpl]
-class struct_WGPUBufferImpl(ctypes.Structure): pass
+class struct_WGPUBufferImpl(c.Struct): SIZE = 0
 WGPUBuffer: TypeAlias = c.POINTER[struct_WGPUBufferImpl]
-class struct_WGPUCommandBufferImpl(ctypes.Structure): pass
+class struct_WGPUCommandBufferImpl(c.Struct): SIZE = 0
 WGPUCommandBuffer: TypeAlias = c.POINTER[struct_WGPUCommandBufferImpl]
-class struct_WGPUCommandEncoderImpl(ctypes.Structure): pass
+class struct_WGPUCommandEncoderImpl(c.Struct): SIZE = 0
 WGPUCommandEncoder: TypeAlias = c.POINTER[struct_WGPUCommandEncoderImpl]
-class struct_WGPUComputePassEncoderImpl(ctypes.Structure): pass
+class struct_WGPUComputePassEncoderImpl(c.Struct): SIZE = 0
 WGPUComputePassEncoder: TypeAlias = c.POINTER[struct_WGPUComputePassEncoderImpl]
-class struct_WGPUComputePipelineImpl(ctypes.Structure): pass
+class struct_WGPUComputePipelineImpl(c.Struct): SIZE = 0
 WGPUComputePipeline: TypeAlias = c.POINTER[struct_WGPUComputePipelineImpl]
-class struct_WGPUDeviceImpl(ctypes.Structure): pass
+class struct_WGPUDeviceImpl(c.Struct): SIZE = 0
 WGPUDevice: TypeAlias = c.POINTER[struct_WGPUDeviceImpl]
-class struct_WGPUExternalTextureImpl(ctypes.Structure): pass
+class struct_WGPUExternalTextureImpl(c.Struct): SIZE = 0
 WGPUExternalTexture: TypeAlias = c.POINTER[struct_WGPUExternalTextureImpl]
-class struct_WGPUInstanceImpl(ctypes.Structure): pass
+class struct_WGPUInstanceImpl(c.Struct): SIZE = 0
 WGPUInstance: TypeAlias = c.POINTER[struct_WGPUInstanceImpl]
-class struct_WGPUPipelineLayoutImpl(ctypes.Structure): pass
+class struct_WGPUPipelineLayoutImpl(c.Struct): SIZE = 0
 WGPUPipelineLayout: TypeAlias = c.POINTER[struct_WGPUPipelineLayoutImpl]
-class struct_WGPUQuerySetImpl(ctypes.Structure): pass
+class struct_WGPUQuerySetImpl(c.Struct): SIZE = 0
 WGPUQuerySet: TypeAlias = c.POINTER[struct_WGPUQuerySetImpl]
-class struct_WGPUQueueImpl(ctypes.Structure): pass
+class struct_WGPUQueueImpl(c.Struct): SIZE = 0
 WGPUQueue: TypeAlias = c.POINTER[struct_WGPUQueueImpl]
-class struct_WGPURenderBundleImpl(ctypes.Structure): pass
+class struct_WGPURenderBundleImpl(c.Struct): SIZE = 0
 WGPURenderBundle: TypeAlias = c.POINTER[struct_WGPURenderBundleImpl]
-class struct_WGPURenderBundleEncoderImpl(ctypes.Structure): pass
+class struct_WGPURenderBundleEncoderImpl(c.Struct): SIZE = 0
 WGPURenderBundleEncoder: TypeAlias = c.POINTER[struct_WGPURenderBundleEncoderImpl]
-class struct_WGPURenderPassEncoderImpl(ctypes.Structure): pass
+class struct_WGPURenderPassEncoderImpl(c.Struct): SIZE = 0
 WGPURenderPassEncoder: TypeAlias = c.POINTER[struct_WGPURenderPassEncoderImpl]
-class struct_WGPURenderPipelineImpl(ctypes.Structure): pass
+class struct_WGPURenderPipelineImpl(c.Struct): SIZE = 0
 WGPURenderPipeline: TypeAlias = c.POINTER[struct_WGPURenderPipelineImpl]
-class struct_WGPUSamplerImpl(ctypes.Structure): pass
+class struct_WGPUSamplerImpl(c.Struct): SIZE = 0
 WGPUSampler: TypeAlias = c.POINTER[struct_WGPUSamplerImpl]
-class struct_WGPUShaderModuleImpl(ctypes.Structure): pass
+class struct_WGPUShaderModuleImpl(c.Struct): SIZE = 0
 WGPUShaderModule: TypeAlias = c.POINTER[struct_WGPUShaderModuleImpl]
-class struct_WGPUSharedBufferMemoryImpl(ctypes.Structure): pass
+class struct_WGPUSharedBufferMemoryImpl(c.Struct): SIZE = 0
 WGPUSharedBufferMemory: TypeAlias = c.POINTER[struct_WGPUSharedBufferMemoryImpl]
-class struct_WGPUSharedFenceImpl(ctypes.Structure): pass
+class struct_WGPUSharedFenceImpl(c.Struct): SIZE = 0
 WGPUSharedFence: TypeAlias = c.POINTER[struct_WGPUSharedFenceImpl]
-class struct_WGPUSharedTextureMemoryImpl(ctypes.Structure): pass
+class struct_WGPUSharedTextureMemoryImpl(c.Struct): SIZE = 0
 WGPUSharedTextureMemory: TypeAlias = c.POINTER[struct_WGPUSharedTextureMemoryImpl]
-class struct_WGPUSurfaceImpl(ctypes.Structure): pass
+class struct_WGPUSurfaceImpl(c.Struct): SIZE = 0
 WGPUSurface: TypeAlias = c.POINTER[struct_WGPUSurfaceImpl]
-class struct_WGPUTextureImpl(ctypes.Structure): pass
+class struct_WGPUTextureImpl(c.Struct): SIZE = 0
 WGPUTexture: TypeAlias = c.POINTER[struct_WGPUTextureImpl]
-class struct_WGPUTextureViewImpl(ctypes.Structure): pass
+class struct_WGPUTextureViewImpl(c.Struct): SIZE = 0
 WGPUTextureView: TypeAlias = c.POINTER[struct_WGPUTextureViewImpl]
 @c.record
 class struct_WGPUINTERNAL__HAVE_EMDAWNWEBGPU_HEADER(c.Struct):
