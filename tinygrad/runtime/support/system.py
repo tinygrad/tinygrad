@@ -151,6 +151,8 @@ System = _System()
 # *** PCI Devices
 
 class PCIDevice:
+  peer_group: str = "pci"
+
   def __init__(self, devpref:str, pcibus:str):
     self.lock_fd = System.flock_acquire(f"{devpref.lower()}_{pcibus.lower()}.lock")
     self.pcibus, self.irq_poller = pcibus, None
@@ -211,6 +213,7 @@ class PCIDevice:
     except OSError as e: raise RuntimeError(f"Cannot resize BAR {bar_idx}: {e}. Ensure the resizable BAR option is enabled.") from e
 
 class USBPCIDevice(PCIDevice):
+  peer_group: str = "usb"
   def __init__(self, devpref:str, pcibus:str):
     self.lock_fd = System.flock_acquire(f"{devpref.lower()}_{pcibus.lower()}.lock")
     self.usb = ASM24Controller()
@@ -233,6 +236,8 @@ class USBPCIDevice(PCIDevice):
 class PCIAllocationMeta: mapping:VirtMapping; has_cpu_mapping:bool; hMemory:int=0 # noqa: E702
 
 class PCIIfaceBase:
+  @property
+  def peer_group(self) -> str: return self.pci_dev.peer_group
   def is_local(self) -> bool: return not isinstance(self.pci_dev, RemotePCIDevice)
   def is_bar_small(self) -> bool: return self.pci_dev.bar_info(self.vram_bar)[1] == (256 << 20)
 
@@ -361,6 +366,7 @@ class RemotePCIDevice(PCIDevice):
 
   def __init__(self, devpref:str, pcibus:str, sock:socket.socket):
     self.sock, self.pcibus, self.dev_id = sock, pcibus, int(pcibus.split(':')[-1]) if ':' in pcibus else 0
+    self.peer_group = sock.getpeername()[0]
     for buft in [socket.SO_SNDBUF, socket.SO_RCVBUF]: self.sock.setsockopt(socket.SOL_SOCKET, buft, 64 << 20)
 
     self.lock_fd = System.flock_acquire(f"{devpref.lower()}_{pcibus.lower()}.lock")

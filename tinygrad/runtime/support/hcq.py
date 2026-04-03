@@ -370,8 +370,7 @@ class HCQCompiled(Compiled, Generic[SignalType]):
     from tinygrad.runtime.graph.hcq import HCQGraph
     super().__init__(device, allocator, compilers, runtime, HCQGraph)
 
-    # TODO: peer logic is determined based on device name.
-    self.peer_group = device.split(":")[0]
+    self.peer_group = self.iface.peer_group if hasattr(self, 'iface') else device.split(":")[0]
     HCQCompiled.peer_groups[self.peer_group].append(self)
 
     # Map signals if any
