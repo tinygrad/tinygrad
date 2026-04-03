@@ -8,7 +8,7 @@ from tinygrad.runtime.support.hcq import MMIOInterface, FileIOInterface, MOCKGPU
 from tinygrad.uop.ops import sint
 from tinygrad.device import Compiled, BufferSpec
 from tinygrad.renderer import Renderer
-from tinygrad.helpers import getenv, mv_address, round_up, data64, data64_le, prod, OSX, hi32, lo32, PROFILE, ContextVar, VIZ, ProfileEvent
+from tinygrad.helpers import getenv, mv_address, round_up, data64, data64_le, prod, OSX, hi32, lo32, PROFILE, ContextVar, VIZ, ProfileEvent, Target
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.cstyle import CUDARenderer, NVCCRenderer
 from tinygrad.runtime.autogen import nv_570, nv_580, mesa
@@ -616,10 +616,9 @@ class NVDevice(HCQCompiled[NVSignal]):
     self.arch: str = "sm_120" if self.sm_version==0xa04 else f"sm_{(self.sm_version>>8)&0xff}{(val>>4) if (val:=self.sm_version&0xff) > 0xf else val}"
     self.sass_version = ((self.sm_version & 0xf00) >> 4) | (self.sm_version & 0xf)
 
-    renderers:list[type[Renderer]|functools.partial] = [
-      functools.partial(CUDARenderer, self.arch), functools.partial(PTXRenderer, self.arch, device="NV"),
-      functools.partial(NVCCRenderer, self.arch), functools.partial(NAKRenderer, self.arch)
-    ]
+    t = Target("NV", arch=self.arch)
+    renderers:list[type[Renderer]|functools.partial] = [functools.partial(CUDARenderer, t), functools.partial(PTXRenderer, t),
+                                                        functools.partial(NVCCRenderer, t), functools.partial(NAKRenderer, t)]
     super().__init__(device, NVAllocator(self), renderers, functools.partial(NVProgram, self), NVSignal, NVComputeQueue, NVCopyQueue)
 
     self.pma_enabled = PMA.value > 0 and PROFILE >= 1

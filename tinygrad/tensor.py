@@ -817,32 +817,6 @@ class Tensor(OpMixin):
       return Tensor.full(self.shape, fill_value, dtype=dtype or self.dtype, device=self.device).requires_grad_(requires_grad)
     return self.const_like(fill_value) if dtype is None else self.const_like(fill_value).cast(dtype)
 
-  def zeros_like(self, **kwargs) -> Tensor:
-    """
-    Creates a tensor with the same shape as `self`, filled with zeros.
-
-    You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor.ones(2, 3)
-    print(Tensor.zeros_like(t).numpy())
-    ```
-    """
-    return self.full_like(0, **kwargs)
-
-  def ones_like(self, **kwargs) -> Tensor:
-    """
-    Creates a tensor with the same shape as `self`, filled with ones.
-
-    You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor.zeros(2, 3)
-    print(Tensor.ones_like(t).numpy())
-    ```
-    """
-    return self.full_like(1, **kwargs)
-
   def rand_like(self, **kwargs) -> Tensor:
     """
     Creates a tensor with the same shape and sharding as `self`, filled with random values from a uniform distribution over the interval `[0, 1)`.
@@ -2188,7 +2162,7 @@ class Tensor(OpMixin):
     assert self.shape[axis] != 0 and op in (Ops.ADD, Ops.MAX, Ops.MUL)
     pl_sz = self.shape[axis] - int(not _include_initial)
     pooled = self.transpose(axis,-1).pad((pl_sz, -int(_include_initial)), value=identity_element(op, self.dtype))._pool((self.shape[axis],))
-    return {Ops.ADD: pooled.sum(-1), Ops.MAX: pooled.max(-1), Ops.MUL: pooled.prod(-1)}[op].transpose(axis, -1)
+    return getattr(pooled, {Ops.ADD: "sum", Ops.MAX: "max", Ops.MUL: "prod"}[op])(-1).transpose(axis, -1)
 
   def _split_cumalu(self, axis:int, op:Ops) -> Tensor:
     axis = self._resolve_dim(axis)
@@ -2201,8 +2175,7 @@ class Tensor(OpMixin):
     base = ret[..., -1]._cumalu(-1, op, _include_initial=True)
     base = base.unsqueeze(-1).expand(*base.shape, ret.shape[-1])
     def fix(x: Tensor) -> Tensor: return x.flatten(start_dim=-2)[..., -s:].transpose(axis,-1)
-    reduce_fxns: dict[Ops, Callable[[Tensor, Tensor], Tensor]] = {Ops.ADD: Tensor.__add__, Ops.MAX: Tensor.maximum, Ops.MUL: Tensor.__mul__}
-    return reduce_fxns[op](fix(ret), fix(base))
+    return getattr(fix(ret), {Ops.ADD: "add", Ops.MAX: "maximum", Ops.MUL: "mul"}[op])(fix(base))
 
   def cumsum(self, axis:int=0) -> Tensor:
     """

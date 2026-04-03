@@ -51,6 +51,39 @@ jobs:
     - name: openpilot compile3 0.10.1 driving_vision
       run: FLOAT16=1 DEV=CL IMAGE=1 python3.11 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/720392c9a5b986981fdbed1bb8c47a6c5573a50e/selfdrive/modeld/models/driving_vision.onnx
 
+  testframeworkpytest:
+    name: framework pytest
+    env:
+      CI: ""
+      CAPTURE_PROCESS_REPLAY: "0"
+    runs-on: [self-hosted, framework]
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash -e -o pipefail {0}
+    if: github.repository_owner == 'tinygrad'
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v6
+    - name: setup python environment
+      run: |
+        rm -rf /tmp/tinygrad_pytest_ci
+        uv venv /tmp/tinygrad_pytest_ci
+        source /tmp/tinygrad_pytest_ci/bin/activate
+        uv pip install .[testing]
+    - name: setup other stuff
+      run: |
+        mkdir -p extra/remu/target/release/
+        ln -s ~/tinygrad/extra/remu/target/release/libremu.so extra/remu/target/release/libremu.so
+    - name: setup staging db
+      run: |
+        echo "CACHEDB=/tmp/pytest-db-ci.db" >> $GITHUB_ENV
+        rm -f /tmp/pytest-db-ci*
+    - name: Run pytest -nauto
+      run: |
+        source /tmp/tinygrad_pytest_ci/bin/activate
+        pytest -nauto --durations=20
+
   testmacbenchmark:
     name: Mac Benchmark
     env:
@@ -192,6 +225,8 @@ jobs:
       run: sudo -E PYTHONPATH=. GMMU=0 DEV=AMD AMD_IFACE=USB python3.11 test/external/external_test_usb_asm24.py TestDevCopySpeeds
     #- name: UsbGPU openpilot test
     #  run: sudo -E PYTHONPATH=. GMMU=0 DEV=AMD AMD_IFACE=USB GRAPH_ONE_KERNEL=1 python3.11 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/9118973ed03c1ae1d40cf69a29507ec2cc78efd7/selfdrive/modeld/models/supercombo.onnx
+    - name: UsbGPU (USB4/TB) install script
+      run: PYTHONPATH=. sh extra/setup_tinygpu_osx.sh
     - name: UsbGPU (USB4/TB) boot time
       run: PYTHONPATH=. DEBUG=3 DEV=NV:NAK NV_IFACE=PCI time python3.11 test/test_tiny.py TestTiny.test_plus
     - name: UsbGPU (USB4/TB) tiny tests

@@ -4,7 +4,7 @@ START_TIME = time.perf_counter()
 import os, functools, platform, re, contextlib, operator, hashlib, pickle, sqlite3, tempfile, pathlib, string, ctypes, sys, gzip, getpass, gc
 from collections import defaultdict
 import subprocess, shutil, math, types, copyreg, inspect, importlib, decimal, itertools
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field, replace, asdict
 from typing import ClassVar, Iterable, Any, TypeVar, Callable, Sequence, TypeGuard, Iterator, Generic, Generator, cast, overload
 
 T = TypeVar("T")
@@ -119,16 +119,16 @@ def suppress_finalizing(func):
       if not getattr(sys, 'is_finalizing', lambda: True)(): raise # re-raise if not finalizing
   return wrapper
 
-def select_first_inited(candidates:Sequence[Callable[...,T]|Sequence[Callable[...,T]|None]], err_msg:str, cache:dict|None=None):
+def select_first_inited(candidates:Sequence[Callable[...,T]], err_msg:str, cache:dict|None=None):
   excs = []
   for typ in candidates:
     if cache is not None and typ in cache: return cache[typ]
     try:
-      x = tuple([cast(Callable, t)() if t is not None else None for t in typ]) if isinstance(typ, Sequence) else cast(Callable, typ)()
+      x = typ()
       if cache is not None: cache[typ] = x
       return x
     except Exception as e: excs.append(e)
-  raise ExceptionGroup(err_msg, excs)
+  raise excs[0] if len(excs) == 1 else ExceptionGroup(err_msg, excs)
 
 def unwrap_class_type(cls_t): return cls_t.func if isinstance(cls_t, functools.partial) else cls_t
 
@@ -180,10 +180,14 @@ class ContextVar(Generic[T]):
 class Target:
   device: str = ""
   renderer: str = ""
+  arch: str = ""
 
   @staticmethod
-  def parse(s:str) -> Target: return Target(*(x.upper() for x in s.split(':')))
-  def __repr__(self) -> str: return self.device + (":" + self.renderer if self.renderer else "")
+  def parse(s:str) -> Target:
+    parts = [x.upper() if i < 2 else x for i,x in enumerate(s.split(':'))]
+    assert len(parts) <= 3, f"too many colons in target string: {s!r}"
+    return Target(*parts)
+  def __repr__(self) -> str: return re.sub(":*$", "", ":".join(asdict(self).values()))
 
 class _DEV(ContextVar):
   _value = Target()

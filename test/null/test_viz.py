@@ -6,7 +6,7 @@ from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, TrackedPatternMatch
 from tinygrad.uop.symbolic import sym
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import PROFILE, colored, ansistrip, flatten, TracingKey, ProfileRangeEvent, ProfileEvent, Context, cpu_events, profile_marker
-from tinygrad.helpers import VIZ, cpu_profile, ProfilePointEvent
+from tinygrad.helpers import VIZ, cpu_profile, ProfilePointEvent, Target
 from tinygrad.device import Buffer
 
 @track_rewrites(name=True)
@@ -685,7 +685,7 @@ class TestCfg(unittest.TestCase):
       out = Tensor.custom_kernel(Tensor.empty(1, device="NULL"), fxn=fxn)[0]
       # TODO: uncomment the better version once EMULATE works in Context
       #prg = out.schedule()[-1].lower().prg.p
-      prg = get_program(out.schedule()[-1].ast, AMDHIPRenderer(self.arch))
+      prg = get_program(out.schedule()[-1].ast, AMDHIPRenderer(Target("AMD", arch=self.arch)))
       return amdgpu_cfg(prg.lib, self.arch)
 
   def test_simple(self):

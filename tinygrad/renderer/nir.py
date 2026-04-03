@@ -1,6 +1,6 @@
 from typing import Callable, cast, Any
 from tinygrad.dtype import AddrSpace, DType, PtrDType, ImageDType, dtypes, truncate
-from tinygrad.helpers import DEBUG, OSX, unwrap, fromimport
+from tinygrad.helpers import DEBUG, OSX, unwrap, fromimport, Target
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import CUDARenderer, OpenCLRenderer
 from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat, range_str
@@ -164,11 +164,11 @@ class NIRRenderer(Renderer):
     (UPat(Ops.ENDIF, name="x"), lambda ctx,x: (lambda _: mesa.nir_def())(mesa.nir_pop_if(ctx.b, ctx.r[x.src[0]])))
   ])
 
-  def __reduce__(self): return self.__class__, (self.arch,)
+  def __reduce__(self): return self.__class__, (self.target,)
 
-  def __init__(self, arch:str):
-    self.arch = arch
-    self.compiler = fromimport("tinygrad.runtime.support.compiler_mesa", self.__class__.__name__.replace("Renderer", "Compiler"))(arch)
+  def __init__(self, target:Target):
+    self.target = target
+    self.compiler = fromimport("tinygrad.runtime.support.compiler_mesa", self.__class__.__name__.replace("Renderer", "Compiler"))(target.arch)
     if hasattr(self.compiler, "nir_options"): self.nir_options = self.compiler.nir_options
     mesa.glsl_type_singleton_init_or_ref()
 
