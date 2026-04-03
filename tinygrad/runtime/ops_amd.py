@@ -922,9 +922,9 @@ class AMDDevice(HCQCompiled):
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
     self.iface = self._select_iface(KFDIface, PCIIface, USBIface)
     self.target:tuple[int, ...] = ((trgt:=self.iface.props['gfx_target_version']) // 10000, (trgt // 100) % 100, trgt % 100)
-    arch = "gfx%d%x%x" % self.target
-    if self.target < (9,4,2) or self.target >= (13,0,0): raise RuntimeError(f"Unsupported arch: {arch}")
-    if DEBUG >= 1: print(f"AMDDevice: opening {self.device_id} with target {self.target} arch {arch}")
+    self.arch = "gfx%d%x%x" % self.target
+    if self.target < (9,4,2) or self.target >= (13,0,0): raise RuntimeError(f"Unsupported arch: {self.arch}")
+    if DEBUG >= 1: print(f"AMDDevice: opening {self.device_id} with target {self.target} arch {self.arch}")
 
     self.xccs = self.iface.props.get('num_xcc', 1)
     self.se_cnt = self.iface.props['array_count'] // self.iface.props['simd_arrays_per_engine'] // self.xccs
@@ -967,7 +967,7 @@ class AMDDevice(HCQCompiled):
     self.sdma_queues:dict = {}
     self.has_sdma_queue = self.sdma_queue(0) is not None
 
-    t = Target("AMD", arch=arch)
+    t = Target("AMD", arch=self.arch)
     renderers:list[type[Renderer]|functools.partial] = [functools.partial(AMDHIPRenderer, t), functools.partial(AMDLLVMRenderer, t),
                                                         functools.partial(AMDHIPCCRenderer, t)]
 
