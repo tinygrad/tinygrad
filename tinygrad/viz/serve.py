@@ -627,7 +627,7 @@ def get_render(query:str) -> dict:
     ret:dict = {}
     renderer, lib = data
     if renderer.device.startswith("AMD"):
-      with soft_err(lambda err: ret.update(err)): ret.update(amdgpu_cfg(lib, renderer.arch))
+      with soft_err(lambda err: ret.update(err)): ret.update(amdgpu_cfg(lib, renderer.target.arch))
     else: ret["src"] = get_stdout(lambda: renderer.compiler.disassemble(lib))
     return ret
   if fmt == "all-pmc":
