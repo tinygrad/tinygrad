@@ -6,7 +6,7 @@ from tinygrad.uop.ops import Ops, UOp, PatternMatcher, UPat, GroupOp
 from tinygrad.dtype import dtypes, DType, PtrDType, AddrSpace
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import CUDARenderer
-from tinygrad.helpers import flatten, get_single_element, prod, unwrap
+from tinygrad.helpers import flatten, get_single_element, prod, unwrap, Target
 
 def render_val(x, dtype):
   if dtypes.is_float(dtype):
@@ -143,12 +143,13 @@ class PTXRenderer(Renderer):
   tc_sm80 = [x for x in tc.cuda_sm80 if x.dtype_in in [dtypes.half, dtypes.float]]
   code_for_op = asm_for_op
   extra_matcher = ptx_matcher
-  def __init__(self, arch:str, device="NV"):
+  def __init__(self, target:Target):
     from tinygrad.runtime.support.compiler_cuda import NVPTXCompiler, PTXCompiler
     from tinygrad.runtime.support.hcq import MOCKGPU
-    self.compiler, self.device, self.arch = (PTXCompiler if bool(MOCKGPU) or device == "CUDA" else NVPTXCompiler)(arch), device, arch
-    self.tensor_cores = PTXRenderer.tc_sm80 if (ver:=int(arch[3:])) >= 80 else tc.cuda_sm75 if ver >= 75 else []
-  def __reduce__(self): return self.__class__, (self.arch, self.device)
+    self.target, self.device = target, target.device
+    self.compiler = (PTXCompiler if bool(MOCKGPU) or target.device == "CUDA" else NVPTXCompiler)(target.arch)
+    self.tensor_cores = PTXRenderer.tc_sm80 if (ver:=int(target.arch[3:])) >= 80 else tc.cuda_sm75 if ver >= 75 else []
+  def __reduce__(self): return self.__class__, (self.target,)
 
   # language options
   kernel_prefix = """.version VERSION

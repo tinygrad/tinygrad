@@ -8,7 +8,7 @@ from tinygrad.runtime.support.hcq import MMIOInterface, BumpAllocator, hcq_filte
 from tinygrad.uop.ops import sint
 from tinygrad.device import Compiled, BufferSpec
 from tinygrad.renderer import Renderer
-from tinygrad.helpers import getenv, round_up, data64_le, DEBUG, PROFILE, ProfileEvent, lo32, hi32, colored, prod, ContextVar
+from tinygrad.helpers import getenv, round_up, data64_le, DEBUG, PROFILE, ProfileEvent, lo32, hi32, colored, prod, ContextVar, Target
 from tinygrad.helpers import VIZ, ceildiv, unwrap
 from tinygrad.renderer.cstyle import AMDHIPRenderer, AMDHIPCCRenderer
 from tinygrad.renderer.llvmir import AMDLLVMRenderer
@@ -922,9 +922,9 @@ class AMDDevice(HCQCompiled):
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
     self.iface = self._select_iface(KFDIface, PCIIface, USBIface)
     self.target:tuple[int, ...] = ((trgt:=self.iface.props['gfx_target_version']) // 10000, (trgt // 100) % 100, trgt % 100)
-    self.arch = "gfx%d%x%x" % self.target
-    if self.target < (9,4,2) or self.target >= (13,0,0): raise RuntimeError(f"Unsupported arch: {self.arch}")
-    if DEBUG >= 1: print(f"AMDDevice: opening {self.device_id} with target {self.target} arch {self.arch}")
+    arch = "gfx%d%x%x" % self.target
+    if self.target < (9,4,2) or self.target >= (13,0,0): raise RuntimeError(f"Unsupported arch: {arch}")
+    if DEBUG >= 1: print(f"AMDDevice: opening {self.device_id} with target {self.target} arch {arch}")
 
     self.xccs = self.iface.props.get('num_xcc', 1)
     self.se_cnt = self.iface.props['array_count'] // self.iface.props['simd_arrays_per_engine'] // self.xccs
@@ -967,8 +967,9 @@ class AMDDevice(HCQCompiled):
     self.sdma_queues:dict = {}
     self.has_sdma_queue = self.sdma_queue(0) is not None
 
-    renderers:list[type[Renderer]|functools.partial] = [functools.partial(AMDHIPRenderer, self.arch), functools.partial(AMDLLVMRenderer, self.arch),
-                                                        functools.partial(AMDHIPCCRenderer, self.arch)]
+    t = Target("AMD", arch=arch)
+    renderers:list[type[Renderer]|functools.partial] = [functools.partial(AMDHIPRenderer, t), functools.partial(AMDLLVMRenderer, t),
+                                                        functools.partial(AMDHIPCCRenderer, t)]
 
     super().__init__(device, AMDAllocator(self), renderers, functools.partial(AMDProgram, self), AMDSignal,
                      functools.partial(AMDComputeAQLQueue if self.is_aql else AMDComputeQueue, self),
