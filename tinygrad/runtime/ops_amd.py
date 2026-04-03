@@ -8,7 +8,7 @@ from tinygrad.runtime.support.hcq import MMIOInterface, BumpAllocator, hcq_filte
 from tinygrad.uop.ops import sint
 from tinygrad.device import Compiled, BufferSpec
 from tinygrad.renderer import Renderer
-from tinygrad.helpers import getenv, round_up, data64_le, DEBUG, PROFILE, ProfileEvent, lo32, hi32, colored, prod, ContextVar
+from tinygrad.helpers import getenv, round_up, data64_le, DEBUG, PROFILE, ProfileEvent, lo32, hi32, colored, prod, ContextVar, Target
 from tinygrad.helpers import VIZ, ceildiv, unwrap
 from tinygrad.renderer.cstyle import AMDHIPRenderer, AMDHIPCCRenderer
 from tinygrad.renderer.llvmir import AMDLLVMRenderer
@@ -967,8 +967,9 @@ class AMDDevice(HCQCompiled):
     self.sdma_queues:dict = {}
     self.has_sdma_queue = self.sdma_queue(0) is not None
 
-    renderers:list[type[Renderer]|functools.partial] = [functools.partial(AMDHIPRenderer, self.arch), functools.partial(AMDLLVMRenderer, self.arch),
-                                                        functools.partial(AMDHIPCCRenderer, self.arch)]
+    t = Target("AMD", arch=self.arch)
+    renderers:list[type[Renderer]|functools.partial] = [functools.partial(AMDHIPRenderer, t), functools.partial(AMDLLVMRenderer, t),
+                                                        functools.partial(AMDHIPCCRenderer, t)]
 
     super().__init__(device, AMDAllocator(self), renderers, functools.partial(AMDProgram, self), AMDSignal,
                      functools.partial(AMDComputeAQLQueue if self.is_aql else AMDComputeQueue, self),

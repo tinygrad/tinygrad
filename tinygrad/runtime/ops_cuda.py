@@ -1,6 +1,6 @@
 from __future__ import annotations
 import ctypes, functools
-from tinygrad.helpers import DEBUG, getenv, mv_address, suppress_finalizing
+from tinygrad.helpers import DEBUG, getenv, mv_address, suppress_finalizing, Target
 from tinygrad.device import Compiled, BufferSpec, LRUAllocator
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import CUDARenderer, NVCCRenderer
@@ -114,14 +114,13 @@ class CUDADevice(Compiled):
       check(cuda.cuCtxEnablePeerAccess(dev.context, 0))
       CUDADevice.peer_access = True
 
-    self.arch = f"sm_{major.value}{minor.value}"
     self.pending_copyin: list[tuple[int, int, BufferSpec|None]] = []
     CUDADevice.devices.append(self)
 
+    t = Target("CUDA", arch=f"sm_{major.value}{minor.value}")
+    renderers:list[type[Renderer]|functools.partial] = [functools.partial(CUDARenderer, t), functools.partial(PTXRenderer, t),
+                                                        functools.partial(NVCCRenderer, t)]
     from tinygrad.runtime.graph.cuda import CUDAGraph
-    renderers:list[type[Renderer]|functools.partial] = [functools.partial(CUDARenderer, self.arch, device="CUDA"),
-                                                        functools.partial(PTXRenderer, self.arch, device="CUDA"),
-                                                        functools.partial(NVCCRenderer, self.arch, device="CUDA")]
     super().__init__(device, CUDAAllocator(self), renderers, functools.partial(CUDAProgram, self), None if MOCKGPU else CUDAGraph)
 
   def synchronize(self):
