@@ -46,7 +46,7 @@ def launchBenchmark(instruction, vgprIndices, dense=True, accum=False, **kwargs)
 
 if __name__=="__main__":
   DEV = Device[Device.DEFAULT]
-  arch = DEV.renderer.arch
+  arch = DEV.renderer.target.arch
 
   if arch in {'gfx1100', 'gfx1103', 'gfx1151'}:
     from tinygrad.runtime.autogen.amd.rdna3.ins import *
