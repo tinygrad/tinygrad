@@ -32,9 +32,14 @@ def quantize_fp8(x:Tensor):
 
 def matmul(x:Tensor, w:Tensor, fp8=FP8) -> Tensor:
   if not fp8: return x @ w.T
-  # weights are already FP8, just quantize activations
+  from tinygrad.helpers import ASM_GEMM
   x_fp8, x_scale = quantize_fp8(x)
-  return x_fp8.dot(w.T, dtype=dtypes.float) * x_scale
+  w_fp8, w_scale = quantize_fp8(w)
+  combined_scale = x_scale * w_scale
+  if ASM_GEMM:
+    from extra.gemm.cdna_asm_gemm import can_use_asm_gemm, asm_gemm
+    if can_use_asm_gemm(x_fp8, w_fp8.T): return asm_gemm(x_fp8, w_fp8.T, combined_scale=combined_scale)
+  return x_fp8.dot(w_fp8.T, dtype=dtypes.float) * combined_scale
 
 def rmsnorm(x_in:Tensor, eps:float):
   x = x_in.float()
@@ -74,14 +79,13 @@ class FlatTransformer:
     # output
     self.norm = nn.RMSNorm(dim, norm_eps)
     self.tok_embeddings = nn.Embedding(vocab_size, dim)
-    self.tok_embeddings.weight = Tensor.normal(vocab_size, dim, mean=0.0, std=0.02, dtype=FP8_DTYPE if FP8 else dtypes.bfloat16)
-    self.output = Tensor.normal(1, vocab_size, dim, mean=0.0, std=0.02, dtype=FP8_DTYPE if FP8 else dtypes.bfloat16)
+    self.tok_embeddings.weight = Tensor.normal(vocab_size, dim, mean=0.0, std=0.02, dtype=dtypes.bfloat16)
+    self.output = Tensor.normal(1, vocab_size, dim, mean=0.0, std=0.02, dtype=dtypes.bfloat16)
     self.freqs_cis = precompute_freqs_cis(dim // n_heads, max_context * 2, rope_theta).contiguous().requires_grad_(False)
 
   def lin_per_layer(self, in_features:int, out_features:int, std:float=0.02):
-    dt = FP8_DTYPE if FP8 else None
-    if getenv("ZEROS"): return Tensor.zeros(self.n_layers, out_features, in_features, dtype=dt)
-    return Tensor.normal(self.n_layers, out_features, in_features, mean=0.0, std=std, dtype=dt)
+    if getenv("ZEROS"): return Tensor.zeros(self.n_layers, out_features, in_features)
+    return Tensor.normal(self.n_layers, out_features, in_features, mean=0.0, std=std)
 
   def attention(self, x:Tensor, freqs_cis:Tensor, attention_norm:Tensor, wo:Tensor, wqkv:Tensor|None=None,
                 wq:Tensor|None=None, wk:Tensor|None=None, wv:Tensor|None=None):
@@ -190,7 +194,7 @@ if __name__ == "__main__":
     model.shard(tuple(f"{Device.DEFAULT}:{i}" for i in range(MP)), mp=True)
 
   # preallocate all the grad buffers and zero them out
-  grads = {x:Tensor.zeros(x.shape, dtype=FP8_GRAD_DTYPE if x.dtype == FP8_DTYPE else x.dtype, device=x.device).contiguous()
+  grads = {x:Tensor.zeros(x.shape, dtype=x.dtype, device=x.device).contiguous()
            for x in state.values() if x.requires_grad is None}
 
   # print model size
