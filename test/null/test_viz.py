@@ -685,7 +685,7 @@ class TestCfg(unittest.TestCase):
       out = Tensor.custom_kernel(Tensor.empty(1, device="NULL"), fxn=fxn)[0]
       # TODO: uncomment the better version once EMULATE works in Context
       #prg = out.schedule()[-1].lower().prg.p
-      prg = get_program(out.schedule()[-1].ast, AMDHIPRenderer(self.arch))
+      prg = get_program(out.schedule()[-1].ast, AMDHIPRenderer(Target("AMD", arch=self.arch)))
       return amdgpu_cfg(prg.lib, self.arch)
 
   def test_simple(self):
