@@ -575,4 +575,5 @@ class QCOMCLRenderer(OpenCLRenderer):
   def __init__(self, target:Target):
     from tinygrad.runtime.support.compiler_qcom import QCOMCompiler
     self.target, self.compiler = target, QCOMCompiler(target.arch)
+
   def __reduce__(self): return self.__class__, (self.target,)
