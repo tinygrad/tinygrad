@@ -196,7 +196,7 @@ class _DEV(ContextVar):
   @value.setter
   def value(self, v:str|Target): self._value = v if isinstance(v, Target) else Target.parse(v)
   def __getattr__(self, k): return getattr(self.value, k)
-  # get target for device string, kwargs are passed if not already specified DEV
+  # get target for device string, kwargs are passed if not already specified
   def target(self, dev:str, **kwargs) -> Target:
     t = self.value.replacedefault(**kwargs) if self.device == dev or not self.device else Target(device=dev, **kwargs)
     # TODO: remove this once DEV supports secondary targets
