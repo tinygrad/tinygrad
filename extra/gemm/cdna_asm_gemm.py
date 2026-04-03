@@ -2669,7 +2669,7 @@ def can_use_asm_gemm(a:Tensor, b:Tensor) -> bool:
     else: return todo(f"sharding mismatch a.ndim={a.ndim} a.uop.axis={a.uop.axis} b.uop.axis={b.uop.axis}")
     dname = a.device[0]
   else: dname = a.device
-  arch = getattr(Device[dname].renderer, "arch", "")
+  arch = Device[dname].renderer.target.arch
   if batch not in {1, 2}: return todo(f"GEMM batch size {batch}")
   # blacklist slow matmul
   # TODO: why is this slow?
@@ -2743,7 +2743,7 @@ def asm_gemm(a:Tensor, b:Tensor) -> Tensor:
     out = Tensor.invalid(batch, M, N, dtype=out_dtype, device=a.device)
 
   renderer = Device[dname:=(a.device[0] if is_multi else a.device)].renderer
-  dname, arch = dname.split(":")[0], getattr(renderer, "arch", "")
+  dname, arch = dname.split(":")[0], renderer.target.arch
   if arch.startswith("gfx950") and getenv("USE_ASM", 1):
     # fp8 gemm computes a@b.T
     if a.dtype == FP8_DTYPE:

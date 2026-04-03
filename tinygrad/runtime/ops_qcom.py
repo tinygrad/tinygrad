@@ -8,7 +8,7 @@ from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface
 from tinygrad.runtime.autogen import kgsl, mesa
 from tinygrad.renderer.cstyle import QCOMCLRenderer
 from tinygrad.renderer.nir import IR3Renderer
-from tinygrad.helpers import getenv, mv_address, to_mv, round_up, data64_le, ceildiv, prod, cpu_profile, lo32, suppress_finalizing
+from tinygrad.helpers import getenv, mv_address, to_mv, round_up, data64_le, ceildiv, prod, cpu_profile, lo32, suppress_finalizing, Target
 from tinygrad.helpers import next_power2, flatten, PROFILE
 from tinygrad.dtype import ImageDType, dtypes
 from tinygrad.runtime.support.system import System
@@ -378,8 +378,8 @@ class QCOMDevice(HCQCompiled):
     if PROFILE and self.gpu_id[:2] < (7, 3):
       System.write_sysfs("/sys/class/kgsl/kgsl-3d0/idle_timer", value="4000000000", msg="Failed to disable suspend mode", expected="4294967276")
 
-    super().__init__(device, QCOMAllocator(self),
-                     [functools.partial(QCOMCLRenderer, info.chip_id), functools.partial(IR3Renderer, "a%d%d%d" % self.gpu_id)],
+    t = Target("QCOM", arch="a%d%d%d" % self.gpu_id)
+    super().__init__(device, QCOMAllocator(self), [functools.partial(QCOMCLRenderer, t), functools.partial(IR3Renderer, t)],
                      functools.partial(QCOMProgram, self), QCOMSignal, functools.partial(QCOMComputeQueue, self), None)
 
   def _gpu_alloc(self, size:int, flags:int=0, uncached=False, fill_zeroes=False) -> HCQBuffer:
