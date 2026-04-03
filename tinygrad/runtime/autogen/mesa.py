@@ -7,7 +7,7 @@ from tinygrad.runtime.support import c
 from tinygrad.helpers import CPU_CC, DEV
 import gzip, base64
 dll = c.DLL('mesa', ([] if CPU_CC.value == 'LVP' or DEV.renderer == 'LVP' else ['tinymesa']) + ['tinymesa_cpu'])
-class struct_u_printf_info(ctypes.Structure): pass
+class struct_u_printf_info(c.Struct): SIZE = 0
 u_printf_info: TypeAlias = struct_u_printf_info
 uint32_t: TypeAlias = Annotated[int, ctypes.c_uint32]
 try: nir_debug = uint32_t.in_dll(dll, 'nir_debug') # type: ignore
@@ -1614,7 +1614,7 @@ class struct_nir_shader(c.Struct):
   printf_info: Annotated[c.POINTER[u_printf_info], 504]
   has_debug_info: Annotated[Annotated[bool, ctypes.c_bool], 512]
 nir_shader: TypeAlias = struct_nir_shader
-class struct_gc_ctx(ctypes.Structure): pass
+class struct_gc_ctx(c.Struct): SIZE = 0
 gc_ctx: TypeAlias = struct_gc_ctx
 @c.record
 class struct_nir_shader_compiler_options(c.Struct):
@@ -2132,7 +2132,7 @@ class struct_shader_info_mesh(c.Struct):
   max_primitives_out: Annotated[uint16_t, 22]
   primitive_type: Annotated[enum_mesa_prim, 24]
   nv: Annotated[Annotated[bool, ctypes.c_bool], 25]
-class struct_nir_xfb_info(ctypes.Structure): pass
+class struct_nir_xfb_info(c.Struct): SIZE = 0
 nir_xfb_info: TypeAlias = struct_nir_xfb_info
 @c.record
 class struct_nir_parameter(c.Struct):
@@ -3526,12 +3526,12 @@ class struct__IO_FILE(c.Struct):
   _mode: Annotated[Annotated[int, ctypes.c_int32], 192]
   _unused2: Annotated[c.Array[Annotated[bytes, ctypes.c_char], Literal[20]], 196]
 FILE: TypeAlias = struct__IO_FILE
-class struct__IO_marker(ctypes.Structure): pass
+class struct__IO_marker(c.Struct): SIZE = 0
 __off_t: TypeAlias = Annotated[int, ctypes.c_int64]
 _IO_lock_t: TypeAlias = None
 __off64_t: TypeAlias = Annotated[int, ctypes.c_int64]
-class struct__IO_codecvt(ctypes.Structure): pass
-class struct__IO_wide_data(ctypes.Structure): pass
+class struct__IO_codecvt(c.Struct): SIZE = 0
+class struct__IO_wide_data(c.Struct): SIZE = 0
 size_t: TypeAlias = Annotated[int, ctypes.c_uint64]
 @dll.bind
 def nir_print_shader(shader:c.POINTER[nir_shader], fp:c.POINTER[FILE]) -> None: ...
@@ -4955,7 +4955,7 @@ def nir_remove_tex_shadow(shader:c.POINTER[nir_shader], textures_bitmask:Annotat
 def nir_trivialize_registers(s:c.POINTER[nir_shader]) -> Annotated[bool, ctypes.c_bool]: ...
 @dll.bind
 def nir_static_workgroup_size(s:c.POINTER[nir_shader]) -> Annotated[int, ctypes.c_uint32]: ...
-class struct_nir_use_dominance_state(ctypes.Structure): pass
+class struct_nir_use_dominance_state(c.Struct): SIZE = 0
 nir_use_dominance_state: TypeAlias = struct_nir_use_dominance_state
 @dll.bind
 def nir_calc_use_dominance_impl(impl:c.POINTER[nir_function_impl], post_dominance:Annotated[bool, ctypes.c_bool]) -> c.POINTER[nir_use_dominance_state]: ...
@@ -5216,7 +5216,7 @@ class struct_nv_device_info_pci(c.Struct):
   dev: Annotated[uint8_t, 3]
   func: Annotated[uint8_t, 4]
   revision_id: Annotated[uint8_t, 5]
-class struct_nak_compiler(ctypes.Structure): pass
+class struct_nak_compiler(c.Struct): SIZE = 0
 @dll.bind
 def nak_compiler_create(dev:c.POINTER[struct_nv_device_info]) -> c.POINTER[struct_nak_compiler]: ...
 @dll.bind
@@ -5383,15 +5383,15 @@ class struct_lp_context_ref(c.Struct):
   SIZE = 16
   ref: Annotated[LLVMContextRef, 0]
   owned: Annotated[Annotated[bool, ctypes.c_bool], 8]
-class struct_LLVMOpaqueContext(ctypes.Structure): pass
+class struct_LLVMOpaqueContext(c.Struct): SIZE = 0
 LLVMContextRef: TypeAlias = c.POINTER[struct_LLVMOpaqueContext]
 lp_context_ref: TypeAlias = struct_lp_context_ref
-class struct_lp_passmgr(ctypes.Structure): pass
-class struct_LLVMOpaqueModule(ctypes.Structure): pass
+class struct_lp_passmgr(c.Struct): SIZE = 0
+class struct_LLVMOpaqueModule(c.Struct): SIZE = 0
 LLVMModuleRef: TypeAlias = c.POINTER[struct_LLVMOpaqueModule]
 @dll.bind
 def lp_passmgr_create(module:LLVMModuleRef, mgr:c.POINTER[c.POINTER[struct_lp_passmgr]]) -> Annotated[bool, ctypes.c_bool]: ...
-class struct_LLVMOpaqueTargetMachine(ctypes.Structure): pass
+class struct_LLVMOpaqueTargetMachine(c.Struct): SIZE = 0
 LLVMTargetMachineRef: TypeAlias = c.POINTER[struct_LLVMOpaqueTargetMachine]
 @dll.bind
 def lp_passmgr_run(mgr:c.POINTER[struct_lp_passmgr], module:LLVMModuleRef, tm:LLVMTargetMachineRef, module_name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> None: ...
@@ -5404,8 +5404,8 @@ class struct_lp_cached_code(c.Struct):
   data_size: Annotated[size_t, 8]
   dont_cache: Annotated[Annotated[bool, ctypes.c_bool], 16]
   jit_obj_cache: Annotated[ctypes.c_void_p, 24]
-class struct_lp_generated_code(ctypes.Structure): pass
-class struct_LLVMOpaqueTargetLibraryInfotData(ctypes.Structure): pass
+class struct_lp_generated_code(c.Struct): SIZE = 0
+class struct_LLVMOpaqueTargetLibraryInfotData(c.Struct): SIZE = 0
 LLVMTargetLibraryInfoRef: TypeAlias = c.POINTER[struct_LLVMOpaqueTargetLibraryInfotData]
 @dll.bind
 def gallivm_create_target_library_info(triple:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> LLVMTargetLibraryInfoRef: ...
@@ -5415,9 +5415,9 @@ def gallivm_dispose_target_library_info(library_info:LLVMTargetLibraryInfoRef) -
 def lp_set_target_options() -> None: ...
 @dll.bind
 def lp_bld_init_native_targets() -> None: ...
-class struct_LLVMOpaqueExecutionEngine(ctypes.Structure): pass
+class struct_LLVMOpaqueExecutionEngine(c.Struct): SIZE = 0
 LLVMExecutionEngineRef: TypeAlias = c.POINTER[struct_LLVMOpaqueExecutionEngine]
-class struct_LLVMOpaqueMCJITMemoryManager(ctypes.Structure): pass
+class struct_LLVMOpaqueMCJITMemoryManager(c.Struct): SIZE = 0
 LLVMMCJITMemoryManagerRef: TypeAlias = c.POINTER[struct_LLVMOpaqueMCJITMemoryManager]
 @dll.bind
 def lp_build_create_jit_compiler_for_module(OutJIT:c.POINTER[LLVMExecutionEngineRef], OutCode:c.POINTER[c.POINTER[struct_lp_generated_code]], cache_out:c.POINTER[struct_lp_cached_code], M:LLVMModuleRef, MM:LLVMMCJITMemoryManagerRef, OptLevel:Annotated[int, ctypes.c_uint32], OutError:c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]]) -> Annotated[int, ctypes.c_int32]: ...
@@ -5427,7 +5427,7 @@ def lp_free_generated_code(code:c.POINTER[struct_lp_generated_code]) -> None: ..
 def lp_get_default_memory_manager() -> LLVMMCJITMemoryManagerRef: ...
 @dll.bind
 def lp_free_memory_manager(memorymgr:LLVMMCJITMemoryManagerRef) -> None: ...
-class struct_LLVMOpaqueValue(ctypes.Structure): pass
+class struct_LLVMOpaqueValue(c.Struct): SIZE = 0
 LLVMValueRef: TypeAlias = c.POINTER[struct_LLVMOpaqueValue]
 @dll.bind
 def lp_get_called_value(call:LLVMValueRef) -> LLVMValueRef: ...
@@ -5489,7 +5489,7 @@ class struct_gallivm_state(c.Struct):
   texture_descriptor: Annotated[LLVMValueRef, 168]
   texture_dynamic_state: Annotated[c.POINTER[struct_lp_jit_texture], 176]
   sampler_descriptor: Annotated[LLVMValueRef, 184]
-class struct_LLVMOpaqueType(ctypes.Structure): pass
+class struct_LLVMOpaqueType(c.Struct): SIZE = 0
 LLVMTypeRef: TypeAlias = c.POINTER[struct_LLVMOpaqueType]
 @dll.bind
 def lp_build_elem_type(gallivm:c.POINTER[struct_gallivm_state], type:struct_lp_type) -> LLVMTypeRef: ...
@@ -5559,13 +5559,13 @@ class struct_lp_jit_texture(c.Struct):
   last_level: Annotated[uint8_t, 145]
   mip_offsets: Annotated[c.Array[uint32_t, Literal[16]], 148]
   sampler_index: Annotated[uint32_t, 212]
-class struct_LLVMOpaqueTargetData(ctypes.Structure): pass
+class struct_LLVMOpaqueTargetData(c.Struct): SIZE = 0
 LLVMTargetDataRef: TypeAlias = c.POINTER[struct_LLVMOpaqueTargetData]
-class struct_LLVMOpaqueBuilder(ctypes.Structure): pass
+class struct_LLVMOpaqueBuilder(c.Struct): SIZE = 0
 LLVMBuilderRef: TypeAlias = c.POINTER[struct_LLVMOpaqueBuilder]
-class struct_LLVMOpaqueDIBuilder(ctypes.Structure): pass
+class struct_LLVMOpaqueDIBuilder(c.Struct): SIZE = 0
 LLVMDIBuilderRef: TypeAlias = c.POINTER[struct_LLVMOpaqueDIBuilder]
-class struct_LLVMOpaqueMetadata(ctypes.Structure): pass
+class struct_LLVMOpaqueMetadata(c.Struct): SIZE = 0
 LLVMMetadataRef: TypeAlias = c.POINTER[struct_LLVMOpaqueMetadata]
 @dll.bind
 def lp_build_init_native_width() -> Annotated[int, ctypes.c_uint32]: ...
@@ -5640,7 +5640,7 @@ class struct_lp_build_skip_context(c.Struct):
   SIZE = 16
   gallivm: Annotated[c.POINTER[struct_gallivm_state], 0]
   block: Annotated[LLVMBasicBlockRef, 8]
-class struct_LLVMOpaqueBasicBlock(ctypes.Structure): pass
+class struct_LLVMOpaqueBasicBlock(c.Struct): SIZE = 0
 LLVMBasicBlockRef: TypeAlias = c.POINTER[struct_LLVMOpaqueBasicBlock]
 @c.record
 class struct_lp_bld_tgsi_system_values(c.Struct):
@@ -5871,7 +5871,7 @@ LLVMAtomicRMWBinOpUDecWrap = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpUDecWr
 LLVMAtomicRMWBinOpUSubCond = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpUSubCond', 17)
 LLVMAtomicRMWBinOpUSubSat = LLVMAtomicRMWBinOp.define('LLVMAtomicRMWBinOpUSubSat', 18)
 
-class struct_lp_build_coro_suspend_info(ctypes.Structure): pass
+class struct_lp_build_coro_suspend_info(c.Struct): SIZE = 0
 @c.record
 class struct_lp_build_fs_iface(c.Struct):
   SIZE = 16
@@ -6445,7 +6445,7 @@ def fd_dev_info_raw_by_name(name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> 
 def fd_dev_name(id:c.POINTER[struct_fd_dev_id]) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
 @dll.bind
 def fd_dev_info_apply_dbg_options(info:c.POINTER[struct_fd_dev_info]) -> None: ...
-class struct_ir3_ra_reg_set(ctypes.Structure): pass
+class struct_ir3_ra_reg_set(c.Struct): SIZE = 0
 @c.record
 class struct_ir3_shader(c.Struct):
   SIZE = 1216
@@ -6549,8 +6549,8 @@ class struct_ir3_compiler(c.Struct):
   has_alias_rt: Annotated[Annotated[bool, ctypes.c_bool], 441]
   reading_shading_rate_requires_smask_quirk: Annotated[Annotated[bool, ctypes.c_bool], 442]
   delay_slots: Annotated[struct_ir3_compiler_delay_slots, 444]
-class struct_fd_device(ctypes.Structure): pass
-class struct_disk_cache(ctypes.Structure): pass
+class struct_fd_device(c.Struct): SIZE = 0
+class struct_disk_cache(c.Struct): SIZE = 0
 class type_t(Annotated[int, ctypes.c_uint32], c.Enum): pass
 TYPE_F16 = type_t.define('TYPE_F16', 0)
 TYPE_F32 = type_t.define('TYPE_F32', 1)
@@ -7238,7 +7238,7 @@ class struct_ir3_shader_output(c.Struct):
   view: Annotated[uint8_t, 2]
   aliased_components: Annotated[uint8_t, 3, 4, 0]
   half: Annotated[Annotated[bool, ctypes.c_bool], 3, 1, 4]
-class struct_fd_bo(ctypes.Structure): pass
+class struct_fd_bo(c.Struct): SIZE = 0
 @c.record
 class struct_ir3(c.Struct):
   SIZE = 152
@@ -8262,7 +8262,7 @@ def gc_sweep_start(ctx:c.POINTER[gc_ctx]) -> None: ...
 def gc_mark_live(ctx:c.POINTER[gc_ctx], mem:ctypes.c_void_p) -> None: ...
 @dll.bind
 def gc_sweep_end(ctx:c.POINTER[gc_ctx]) -> None: ...
-class struct_linear_ctx(ctypes.Structure): pass
+class struct_linear_ctx(c.Struct): SIZE = 0
 linear_ctx: TypeAlias = struct_linear_ctx
 @dll.bind
 def linear_alloc_child(ctx:c.POINTER[linear_ctx], size:Annotated[int, ctypes.c_uint32]) -> ctypes.c_void_p: ...
@@ -8342,7 +8342,7 @@ class struct_isa_entrypoint(c.Struct):
 def ir3_isa_disasm(bin:ctypes.c_void_p, sz:Annotated[int, ctypes.c_int32], out:c.POINTER[FILE], options:c.POINTER[struct_isa_decode_options]) -> None: ...
 @dll.bind
 def ir3_isa_decode(out:ctypes.c_void_p, bin:ctypes.c_void_p, options:c.POINTER[struct_isa_decode_options]) -> Annotated[bool, ctypes.c_bool]: ...
-class struct_decode_scope(ctypes.Structure): pass
+class struct_decode_scope(c.Struct): SIZE = 0
 @dll.bind
 def ir3_isa_get_gpu_id(scope:c.POINTER[struct_decode_scope]) -> uint32_t: ...
 try: glsl_type_builtin_error = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_error') # type: ignore

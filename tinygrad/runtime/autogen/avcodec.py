@@ -244,9 +244,9 @@ class struct_H265RawVUI(c.Struct):
   log2_max_mv_length_horizontal: Annotated[uint8_t, 7732]
   log2_max_mv_length_vertical: Annotated[uint8_t, 7733]
 H265RawVUI: TypeAlias = struct_H265RawVUI
-class struct_H265RawExtensionData(ctypes.Structure): pass
+class struct_H265RawExtensionData(c.Struct): SIZE = 0
 H265RawExtensionData: TypeAlias = struct_H265RawExtensionData
-class struct_H265RawVPS(ctypes.Structure): pass
+class struct_H265RawVPS(c.Struct): SIZE = 0
 H265RawVPS: TypeAlias = struct_H265RawVPS
 @c.record
 class struct_H265RawSTRefPicSet(c.Struct):
@@ -274,9 +274,9 @@ class struct_H265RawScalingList(c.Struct):
 int16_t: TypeAlias = Annotated[int, ctypes.c_int16]
 int8_t: TypeAlias = Annotated[int, ctypes.c_byte]
 H265RawScalingList: TypeAlias = struct_H265RawScalingList
-class struct_H265RawSPS(ctypes.Structure): pass
+class struct_H265RawSPS(c.Struct): SIZE = 0
 H265RawSPS: TypeAlias = struct_H265RawSPS
-class struct_H265RawPPS(ctypes.Structure): pass
+class struct_H265RawPPS(c.Struct): SIZE = 0
 H265RawPPS: TypeAlias = struct_H265RawPPS
 @c.record
 class struct_H265RawAUD(c.Struct):
@@ -356,7 +356,7 @@ class struct_H265RawSliceHeader(c.Struct):
   slice_segment_header_extension_length: Annotated[uint16_t, 11512]
   slice_segment_header_extension_data_byte: Annotated[c.Array[uint8_t, Literal[256]], 11514]
 H265RawSliceHeader: TypeAlias = struct_H265RawSliceHeader
-class struct_H265RawSlice(ctypes.Structure): pass
+class struct_H265RawSlice(c.Struct): SIZE = 0
 H265RawSlice: TypeAlias = struct_H265RawSlice
 @c.record
 class struct_H265RawSEIBufferingPeriod(c.Struct):
@@ -541,6 +541,6 @@ class struct_H265RawFiller(c.Struct):
   nal_unit_header: Annotated[H265RawNALUnitHeader, 0]
   filler_size: Annotated[uint32_t, 4]
 H265RawFiller: TypeAlias = struct_H265RawFiller
-class struct_CodedBitstreamH265Context(ctypes.Structure): pass
+class struct_CodedBitstreamH265Context(c.Struct): SIZE = 0
 CodedBitstreamH265Context: TypeAlias = struct_CodedBitstreamH265Context
 c.init_records()

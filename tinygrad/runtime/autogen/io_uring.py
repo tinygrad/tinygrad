@@ -131,9 +131,9 @@ class struct_io_uring_cqe_iter(c.Struct):
   shift: Annotated[Annotated[int, ctypes.c_uint32], 12]
   head: Annotated[Annotated[int, ctypes.c_uint32], 16]
   tail: Annotated[Annotated[int, ctypes.c_uint32], 20]
-class struct_epoll_event(ctypes.Structure): pass
-class struct_statx(ctypes.Structure): pass
-class struct_futex_waitv(ctypes.Structure): pass
+class struct_epoll_event(c.Struct): SIZE = 0
+class struct_statx(c.Struct): SIZE = 0
+class struct_futex_waitv(c.Struct): SIZE = 0
 @c.record
 class struct_io_uring_attr_pi(c.Struct):
   SIZE = 32
@@ -411,7 +411,7 @@ class struct_io_uring_buf_ring(c.Struct):
   tail: Annotated[Annotated[int, ctypes.c_uint16], 14]
   __empty_bufs: Annotated[struct_io_uring_buf_ring___empty_bufs, 0]
   bufs: Annotated[c.Array[struct_io_uring_buf, Literal[0]], 0]
-class struct_io_uring_buf_ring___empty_bufs(ctypes.Structure): pass
+class struct_io_uring_buf_ring___empty_bufs(c.Struct): SIZE = 0
 class enum_io_uring_register_pbuf_ring_flags(Annotated[int, ctypes.c_uint32], c.Enum): pass
 IOU_PBUF_RING_MMAP = enum_io_uring_register_pbuf_ring_flags.define('IOU_PBUF_RING_MMAP', 1)
 IOU_PBUF_RING_INC = enum_io_uring_register_pbuf_ring_flags.define('IOU_PBUF_RING_INC', 2)

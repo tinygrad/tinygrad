@@ -259,9 +259,9 @@ class struct_libusb_control_setup(c.Struct):
   wValue: Annotated[uint16_t, 2]
   wIndex: Annotated[uint16_t, 4]
   wLength: Annotated[uint16_t, 6]
-class struct_libusb_context(ctypes.Structure): pass
-class struct_libusb_device(ctypes.Structure): pass
-class struct_libusb_device_handle(ctypes.Structure): pass
+class struct_libusb_context(c.Struct): SIZE = 0
+class struct_libusb_device(c.Struct): SIZE = 0
+class struct_libusb_device_handle(c.Struct): SIZE = 0
 @c.record
 class struct_libusb_version(c.Struct):
   SIZE = 24

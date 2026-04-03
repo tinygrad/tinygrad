@@ -648,9 +648,9 @@ class struct_drm_amdgpu_userq_wait(c.Struct):
   num_bo_write_handles: Annotated[Annotated[int, ctypes.c_uint32], 60]
   out_fences: Annotated[Annotated[int, ctypes.c_uint64], 64]
 __u16: TypeAlias = Annotated[int, ctypes.c_uint16]
-class struct_drm_amdgpu_sem_in(ctypes.Structure): pass
-class union_drm_amdgpu_sem_out(ctypes.Union): pass
-class union_drm_amdgpu_sem(ctypes.Union): pass
+class struct_drm_amdgpu_sem_in(c.Struct): SIZE = 0
+class union_drm_amdgpu_sem_out(c.Struct): SIZE = 0
+class union_drm_amdgpu_sem(c.Struct): SIZE = 0
 @c.record
 class struct_drm_amdgpu_vm_in(c.Struct):
   SIZE = 8
@@ -1074,8 +1074,8 @@ class struct_drm_amdgpu_info_uq_metadata_gfx(c.Struct):
 class struct_drm_amdgpu_info_uq_metadata(c.Struct):
   SIZE = 16
   gfx: Annotated[struct_drm_amdgpu_info_uq_metadata_gfx, 0]
-class _anonstruct0(ctypes.Structure): pass
-class struct_drm_amdgpu_virtual_range(ctypes.Structure): pass
+class _anonstruct0(c.Struct): SIZE = 0
+class struct_drm_amdgpu_virtual_range(c.Struct): SIZE = 0
 @c.record
 class struct_drm_amdgpu_capability(c.Struct):
   SIZE = 8
