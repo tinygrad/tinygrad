@@ -2669,7 +2669,7 @@ def can_use_asm_gemm(a:Tensor, b:Tensor) -> bool:
     else: return todo(f"sharding mismatch a.ndim={a.ndim} a.uop.axis={a.uop.axis} b.uop.axis={b.uop.axis}")
     dname = a.device[0]
   else: dname = a.device
-  arch = getattr(Device[dname].renderer, "arch", "")
+  arch = Device[dname].renderer.target.arch
   if batch not in {1, 2}: return todo(f"GEMM batch size {batch}")
   # blacklist slow matmul
   # TODO: why is this slow?
