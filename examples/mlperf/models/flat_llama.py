@@ -21,7 +21,7 @@ FP8 = getenv("FP8", 0)
 WQKV = getenv("WQKV", 0)
 
 FP8_DTYPE = dtypes.fp8e4m3
-FP8_GRAD_DTYPE = dtypes.fp8e5m2
+FP8_GRAD_DTYPE = dtypes.fp8e5m2 if getenv("BF8_GRAD") else dtypes.bfloat16
 FP8_MAX = 448.0
 
 def quantize_fp8(x:Tensor):
