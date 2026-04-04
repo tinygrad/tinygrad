@@ -1,6 +1,6 @@
 import itertools
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
-from tinygrad.helpers import getenv, DEBUG, prod, NOLOCALS, TC_OPT, TC_SELECT, USE_TC, AMX, IMAGE
+from tinygrad.helpers import getenv, DEBUG, prod, NOLOCALS, TC_OPT, TC_SELECT, USE_TC, AMX, IMAGE, BEAM
 from tinygrad.dtype import PtrDType, ImageDType
 from tinygrad.uop.ops import Ops, resolve, AxisType
 from tinygrad.codegen.opt.postrange import Scheduler
@@ -83,7 +83,7 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
               return k
         if not k.ren.has_local and (MV_CPU_UPCAST > 1 or MV_CPU_UNROLL > 1):
           reduce_axis = k.rngs.index(first_reduce_rng)
-          reduce_unroll_axis = k.unrollable_dims.index(reduce_axis)
+          reduce_unroll_axis = k.unrollable_dims.index(reduce_axis) if reduce_axis in k.unrollable_dims else None
           for global_idx in k.axes_of(AxisType.LOOP):
             if k.full_shape[global_idx] % MV_CPU_UPCAST == 0:
               if DEBUG >= 3:
@@ -92,7 +92,7 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
                 if MV_CPU_UPCAST > 1: k.apply_opt(Opt(OptOps.UPCAST, global_idx, MV_CPU_UPCAST))
               except KernelOptError: pass
               try:
-                if MV_CPU_UNROLL > 1: k.apply_opt(Opt(OptOps.UNROLL, reduce_unroll_axis, MV_CPU_UNROLL))
+                if MV_CPU_UNROLL > 1 and reduce_unroll_axis is not None and BEAM == 0: k.apply_opt(Opt(OptOps.UNROLL, reduce_unroll_axis, MV_CPU_UNROLL))
               except KernelOptError: pass
               return k
 

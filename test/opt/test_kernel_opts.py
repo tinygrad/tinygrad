@@ -3,6 +3,7 @@ from tinygrad import Device, Tensor, dtypes
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 from tinygrad.codegen.opt.heuristic import hand_coded_optimizations
 from tinygrad.codegen.opt.postrange import Scheduler
+from tinygrad.helpers import Context
 from tinygrad.uop.ops import AxisType
 
 # TODO: write a clean version of this
@@ -70,6 +71,16 @@ class TestKernelOpts(unittest.TestCase):
     unrolls = [opt for opt in out.applied_opts if opt.op is OptOps.UNROLL]
     self.assertTrue(upcasts)
     self.assertEqual([opt.axis for opt in unrolls], [expected_unroll_axis])
+    self.assertFalse(any(opt.op in {OptOps.LOCAL, OptOps.GROUP, OptOps.GROUPTOP} for opt in out.applied_opts))
+
+  @unittest.skipUnless(Device.DEFAULT == "CPU", "cpu-specific test")
+  @unittest.skipUnless(not Device[Device.DEFAULT].renderer.has_local, "test requires no-local CPU renderer")
+  def test_cpu_matvec_heuristic_skips_unroll_with_beam(self):
+    r = Tensor.rand(1024) @ Tensor.rand(1024, 4096)
+    with Context(BEAM=2):
+      out = hand_coded_optimizations(Scheduler(r.schedule()[-1].ast, Device[Device.DEFAULT].renderer))
+    self.assertTrue(any(opt.op is OptOps.UPCAST for opt in out.applied_opts))
+    self.assertFalse(any(opt.op is OptOps.UNROLL for opt in out.applied_opts))
     self.assertFalse(any(opt.op in {OptOps.LOCAL, OptOps.GROUP, OptOps.GROUPTOP} for opt in out.applied_opts))
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
