@@ -150,11 +150,13 @@ load_store_folding = PatternMatcher([
 
 # *** correct load/store ***
 
-def supports_wide_float_vec(ctx:Renderer|None) -> bool:
-  return bool(AMX) or (ctx is not None and ctx.target == Target("CPU", "LLVM") and not ctx.has_local)
+def supports_wide_float_vec(ctx:Renderer|Target|None) -> bool:
+  target = ctx.target if isinstance(ctx, Renderer) else ctx if isinstance(ctx, Target) else None
+  has_local = ctx.has_local if isinstance(ctx, Renderer) else False
+  return bool(AMX) or (target == Target("CPU", "LLVM") and not has_local)
 
-def supports_float_vector_alu(ctx:Renderer|None, alu:UOp) -> bool:
-  return supports_wide_float_vec(ctx) and alu.dtype.scalar() in dtypes.floats
+def supports_float_vector_alu(ctx:Renderer|Target|None, alu:UOp) -> bool:
+  return supports_wide_float_vec(ctx) and alu.op in GroupOp.ALU and alu.dtype.vcount > 4 and alu.dtype.scalar() in dtypes.floats
 
 def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
   # this splits loads and stores into multiple chunks

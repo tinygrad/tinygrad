@@ -177,13 +177,16 @@ class TestCPULLVMWideVec(unittest.TestCase):
   def test_cpullvm_float_alu_stays_vectorized(self):
     a = Tensor.empty(2, 16).realize()
     b = Tensor.empty(2, 16).realize()
-    opts = [Opt(op=OptOps.UPCAST, axis=0, arg=4), Opt(op=OptOps.UPCAST, axis=0, arg=4)]
+    wide_opts = [Opt(op=OptOps.UPCAST, axis=0, arg=4), Opt(op=OptOps.UPCAST, axis=0, arg=4)]
+    narrow_opts = [Opt(op=OptOps.UPCAST, axis=0, arg=4)]
     realized_ast = (a + b).schedule()[0].ast
 
-    cpu_uops = get_program(realized_ast, renderer=_TestCPULLVMRenderer(), opts=opts).uops
-    generic_uops = get_program(realized_ast, renderer=_TestNoLocalLLVMRenderer(), opts=opts).uops
+    cpu_wide_uops = get_program(realized_ast, renderer=_TestCPULLVMRenderer(), opts=wide_opts).uops
+    cpu_narrow_uops = get_program(realized_ast, renderer=_TestCPULLVMRenderer(), opts=narrow_opts).uops
+    generic_uops = get_program(realized_ast, renderer=_TestNoLocalLLVMRenderer(), opts=wide_opts).uops
 
-    self.assertEqual(TestFloat4.count_float_alu(cpu_uops, Ops.ADD, 16), 1)
+    self.assertEqual(TestFloat4.count_float_alu(cpu_wide_uops, Ops.ADD, 16), 1)
+    self.assertEqual(TestFloat4.count_float_alu(cpu_narrow_uops, Ops.ADD, 4), 0)
     self.assertEqual(TestFloat4.count_float_alu(generic_uops, Ops.ADD, 16), 0)
 
 if __name__ == '__main__':
