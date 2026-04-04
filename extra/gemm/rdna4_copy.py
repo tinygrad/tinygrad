@@ -1,6 +1,7 @@
 from tinygrad.helpers import getenv
 from tinygrad.renderer.amd import Inst
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
+from tinygrad.renderer.amd.dsl import ttmp
 from tinygrad.runtime.autogen.amd.rdna4.ins import *
 
 N = getenv("N", 256)
@@ -18,7 +19,7 @@ def kernel(*args:tuple[UOp, ...]) -> UOp:
   e(s_wait_kmcnt(simm16=0))
 
   # global_thread_id = gidx0 * NUM_THREADS + tid
-  e(s_lshl_b32(s[2], s[2], 5))              # s[2] = gidx0 * 32
+  e(s_lshl_b32(s[2], ttmp[9], 5))           # s[2] = gidx0 * 32
   e(v_add_nc_u32_e32(v[0], s[2], v[0]))     # v[0] = global thread id
 
   # byte offset = global_thread_id * 2 (half = 2 bytes), zero-extend to 64-bit
