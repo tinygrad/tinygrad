@@ -60,8 +60,8 @@ def found_after(ctx:dict[UOp, UOp], after:UOp, src:UOp):
 @functools.cache
 def _move_index_through_movement_cached(r:UOp, idx:UOp):
   base, rngs = r.src[0], idx.src[1:]
-  if base._shape is None or len(rngs) != len(r.shape): return None
-  base_shape, marg = base.shape, r.marg
+  marg = r.arg if r.arg is not None else r.marg
+  if (base_shape:=base._shape) is None or len(rngs) != len(marg): return None
   match r.op:
     case Ops.SHRINK:  new_rngs = tuple(a if ss == 0 else a+ss for a,(ss,_) in zip(rngs, marg))
     case Ops.PERMUTE: new_rngs = tuple(rngs[p] for p in argsort(marg))
@@ -232,6 +232,7 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   (UPat(GroupOp.All-{Ops.SINK}, name="x"), lambda x: x.const_like(0).rtag(x.tag) if (shape:=x._shape) is not None and
     any((int(s.vmax) if isinstance(s, UOp) else s) == 0 for s in shape) else None),
 ])
+pm_earliest_rewrites = pm_syntactic_sugar + pm_mops + earliest_rewrites
 
 # *****************
 # 3.5 cleanups
@@ -244,23 +245,24 @@ def cleanup_dead_axes(b:UOp):
   base = b.src[0]
   if base.op in ALWAYS_RUN_OPS or base.op is Ops.AFTER: return None
 
-  new_rng = []
-  hit = False
-  reshape: list[sint] = []
   base_ranges = base.ranges
-  shape, rngs = b.shape, b.src[1:]
-  for s,rng in zip(shape, rngs):
+  rngs = b.src[1:]
+  hit = False
+  for rng in rngs:
     # skip for symbolic. TODO: fix this
     if rng.op is Ops.RANGE and rng.src[0].op is not Ops.CONST: return None
-    # CONSTs are already dead axes
-    if rng.op is Ops.CONST or (rng.op is Ops.RANGE and rng not in base_ranges):
-      reshape.append(1)
-      hit = True
+    hit |= rng.op is Ops.CONST or (rng.op is Ops.RANGE and rng not in base_ranges)
+  if not hit: return None
+
+  new_rng = []
+  reshape: list[sint] = []
+  shape = b.shape
+  for s,rng in zip(shape, rngs):
+    if rng.op is Ops.CONST or (rng.op is Ops.RANGE and rng not in base_ranges): reshape.append(1)
     else:
       reshape.append(s)
       new_rng.append(rng)
-  if hit:
-    return b.replace(src=(base,)+tuple(new_rng)).reshape(tuple(reshape)).expand(shape)
+  return b.replace(src=(base,)+tuple(new_rng)).reshape(tuple(reshape)).expand(shape)
 
 def _ranges_gated_substitute(src:UOp, replaced:dict[UOp, UOp]) -> UOp:
   keys = tuple(replaced)
@@ -294,32 +296,30 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
 
   accessed_buffers: dict[UOp, None] = {}
   indexes: list[UOp] = []
-  reduces: list[UOp] = []
-  def red_gate(x:UOp):
-    if (x.op is Ops.BUFFERIZE and x.arg.addrspace == AddrSpace.GLOBAL) or x.op is Ops.MSTACK:
-      accessed_buffers[x] = None
-      return False
-    if x.op is Ops.PARAM:
-      accessed_buffers[x] = None
-    if x.op is Ops.INDEX:
-      indexes.append(x)
-    if x.op is Ops.REDUCE: reduces.append(x)
-    return True
-  _walk_graph(src, red_gate)
-  del red_gate
+  buffer_in_reduce = False
+  stack = [(src, False)]
+  seen: dict[UOp, int] = {}
+  while stack:
+    node, in_reduce = stack.pop()
+    mask = 2 if in_reduce else 1
+    if seen.get(node, 0) & mask: continue
+    seen[node] = seen.get(node, 0) | mask
+    if in_reduce and node.op in {Ops.PARAM, Ops.BUFFERIZE}: buffer_in_reduce = True
+    if (node.op is Ops.BUFFERIZE and node.arg.addrspace == AddrSpace.GLOBAL) or node.op is Ops.MSTACK:
+      accessed_buffers[node] = None
+      continue
+    if node.op is Ops.PARAM:
+      accessed_buffers[node] = None
+      continue
+    if node.op is Ops.INDEX: indexes.append(node)
+    next_in_reduce = in_reduce or node.op is Ops.REDUCE
+    for s in reversed(node.src): stack.append((s, next_in_reduce))
   accessed_buffers_list = list(accessed_buffers)
 
   # if this is generated from multiple buffers, don't remove this buffer
   if len(accessed_buffers_list) > 3 and not (PCONTIG > 2): return None
 
   # if any reduces access a buffer, don't remove this buffer
-  buffer_in_reduce = False
-  def buf_gate(x:UOp):
-    nonlocal buffer_in_reduce
-    if x.op in {Ops.PARAM, Ops.BUFFERIZE}: buffer_in_reduce = True
-    return not buffer_in_reduce
-  _walk_graph(UOp.sink(*[x.src[0] for x in reduces]), buf_gate)
-  del buf_gate
   if buffer_in_reduce:
     if PCONTIG > 2:
       out_in_ratio = (prod(buf.shape)+1) / (sum(x.size for x in accessed_buffers_list)+1)
@@ -364,7 +364,6 @@ pm_const_buffer_folding = pm_mops+PatternMatcher([
   (UPat(Ops.MSTACK, src=(UPat.var("s"),), allow_any_len=True).f(Ops.INDEX, allow_any_len=True),
    lambda s: UOp.const(c.dtype, c.arg) if (c:=s.base).op is Ops.CONST else None),
 ])
-
 pm_remove_bufferize = PatternMatcher([
   # remove reindexing with cost function
   (UPat.var("src").f(Ops.BUFFERIZE, allow_any_len=True, name="buf").f(Ops.INDEX, allow_any_len=True, name="idx"), remove_bufferize),
@@ -531,15 +530,18 @@ def renumber_range(ctx:LocalAddBufferContext, r:UOp):
   return ret
 
 def find_bufs(x:UOp):
-  idxs: list[UOp] = []
-  def idx_gate(node:UOp):
-    if node.op is Ops.AFTER: return False
-    if node.op is Ops.INDEX: idxs.append(node)
-    return True
-  _walk_graph(x, idx_gate)
   read_from: dict[UOp, Ops] = {}
-  if any((buf:=idx.buf_uop).op in {Ops.BUFFER, Ops.PARAM} and read_from.setdefault(buf, op:=idx.src[0].op) is not op for idx in idxs):
-    raise RuntimeError(f"cycle detected while indexing {buf}")
+  stack = [x]
+  seen: set[UOp] = set()
+  while stack:
+    node = stack.pop()
+    if node in seen: continue
+    seen.add(node)
+    if node.op is Ops.AFTER: continue
+    if node.op is Ops.INDEX and (buf:=node.buf_uop).op in {Ops.BUFFER, Ops.PARAM}:
+      if (prev:=read_from.setdefault(buf, op:=node.src[0].op)) is not op:
+        raise RuntimeError(f"cycle detected while indexing {buf}")
+    stack.extend(reversed(node.src))
 
 to_define_global = PatternMatcher([
   (UPat(Ops.STORE, name="x"), find_bufs),
@@ -587,6 +589,9 @@ rangeify_codegen = PatternMatcher([
 pm_add_range_tags = PatternMatcher([
   (UPat(Ops.RANGE, name="x"), lambda x: x.rtag(())),
 ])
+pm_symbolic_reduce_debuf = symbolic + pm_reduce_simplify + pm_const_buffer_folding + pm_remove_bufferize
+pm_kernel_split_rewrite = to_define_global + pm_flatten_range + rangeify_codegen
+pm_add_buffers_and_tags = pm_add_buffers + pm_add_range_tags
 
 def split_store(x:UOp) -> UOp|None:
   if x.ranges: return None
@@ -595,7 +600,7 @@ def split_store(x:UOp) -> UOp|None:
 
   # local kernel rewrite
   lctx = LocalAddBufferContext()
-  ret = graph_rewrite(x, to_define_global+pm_flatten_range+rangeify_codegen, ctx=lctx, name="kernel split", bottom_up=True)
+  ret = graph_rewrite(x, pm_kernel_split_rewrite, ctx=lctx, name="kernel split", bottom_up=True)
 
   # SINK requires all buffers on the same device, but COPY/BUFFER_VIEW are cross-device or special hardware ops
   if ret.op is Ops.STORE: stored = ret.src[1]
@@ -617,12 +622,12 @@ split_kernels = PatternMatcher([
 def get_kernel_graph(sink:UOp) -> UOp:
   tsink = graph_rewrite(sink, multi_pm, name="multi_pm")
   if OPENPILOT_HACKS: tsink = graph_rewrite(tsink, pm_fold_moved_after, ctx={}, name="fold moved afters")
-  tsink = graph_rewrite(tsink, pm_syntactic_sugar+pm_mops+earliest_rewrites, bottom_up=True, name="earliest rewrites")
+  tsink = graph_rewrite(tsink, pm_earliest_rewrites, bottom_up=True, name="earliest rewrites")
 
   # convert movement ops to ranges
   tsink, rctx = run_rangeify(tsink, bool(DEBUG_RANGEIFY))
 
-  tsink = graph_rewrite(tsink, symbolic+pm_reduce_simplify+pm_const_buffer_folding+pm_remove_bufferize, name="symbolic+reduce_collapse+debuf")
+  tsink = graph_rewrite(tsink, pm_symbolic_reduce_debuf, name="symbolic+reduce_collapse+debuf")
 
   need_limit_bufs = True
   if MAX_KERNEL_BUFFERS.value == 0 and (device:=tsink._device) is not None:
@@ -634,20 +639,25 @@ def get_kernel_graph(sink:UOp) -> UOp:
 
   # bufferize -> store
   lunique_start: int = max((x.arg for x in tsink.toposort() if x.op is Ops.LUNIQUE), default=-1) + 1
-  tsink = graph_rewrite(tsink, pm_add_buffers+pm_add_range_tags, ctx=itertools.count(lunique_start), bottom_up=True, name="bufferize to store")
+  tsink = graph_rewrite(tsink, pm_add_buffers_and_tags, ctx=itertools.count(lunique_start), bottom_up=True, name="bufferize to store")
 
-  tsink = graph_rewrite(tsink, split_kernels, bottom_up=True, name="split kernels")
+  tsink_after_buffers_topo = tuple(tsink.toposort())
+  # split_kernels runs after bufferize_to_store, before any CALL nodes are created, so a single full topo covers both uses here.
+  has_split_candidates = any((u.op is Ops.END and not u.ranges) or (u.op is Ops.STORE and not u.ranges and u.src[0]._shape is None)
+                             for u in tsink_after_buffers_topo)
+  if has_split_candidates: tsink = graph_rewrite(tsink, split_kernels, bottom_up=True, name="split kernels")
 
   # WAR deps: if kernel U reads buffer S, and S is also written by another kernel, S's write must wait for U to finish
-  afters = [u for u in tsink.toposort() if u.op is Ops.AFTER]
+  afters = [u for u in (tsink_after_buffers_topo if not has_split_candidates else tsink.toposort()) if u.op is Ops.AFTER]
   kernel_assign: dict[UOp, UOp] = {u.buf_uop:u for u in afters}
   assign_rep: dict[UOp, UOp] = {}
   for u in afters:
+    current_kernel = kernel_assign[u.buf_uop]
     for s in u.src[1].src:
       # TODO: this is probably broken for MSELECT/MSTACK
       if s.op not in {Ops.BUFFER, Ops.PARAM} or s is u.buf_uop or (a:=kernel_assign.get(s)) is None: continue
       if a.src[1] is u.src[1]: continue  # same kernel (multi-output custom kernels)
-      if any(x.op is Ops.AFTER and x.buf_uop is s for x in kernel_assign[u.buf_uop].backward_slice):
+      if current_kernel.contains_in_backward_slice_with_self(a):
         raise RuntimeError(f"cycle detected in assign graph, buffers {s} and {u.buf_uop} have circular dependency")
       assign_rep[a] = kernel_assign[s] = a.replace(src=a.src+(u,))
   if assign_rep: tsink = graph_rewrite(tsink, _substitute, ctx=assign_rep, bottom_up=True, name="fix_assign")

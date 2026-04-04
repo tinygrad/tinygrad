@@ -9,6 +9,7 @@ def flatten_range(r:UOp) -> UOp|None:
   off = range_start[r.op]
   rngs = r.src[off:]
   if not len(rngs): return None
+  if all(x.op is Ops.RANGE for x in rngs): return None
   new_rngs = [x for x in UOp.sink(*rngs).toposort() if x.op is Ops.RANGE]
   return r.replace(src=r.src[:off]+tuple(new_rngs))
 
@@ -16,25 +17,43 @@ pm_flatten_range = PatternMatcher([
   # real ranges only
   (UPat((Ops.REDUCE, Ops.STORE, Ops.END), name="r"), flatten_range),
 ])
+pm_simplify_merge_adjacent_rewrite = _substitute + symbolic + pm_flatten_range
 
 def count_divmod(x:UOp) -> int: return sum(u.op in {Ops.IDIV, Ops.MOD} for u in x.backward_slice)
 def simplify_merge_adjacent(u:UOp) -> UOp|None:
-  reduce_ranges = [x.ranges for x in u.backward_slice_with_self if x.op is Ops.REDUCE]
-  # on END we only want to merge adjacent ranges, on REDUCE we want to try all combinations
-  for r0, r1 in (zip(u.ended_ranges, u.ended_ranges[1:]) if u.op is Ops.END else itertools.permutations(u.ended_ranges, 2)):
-    # check same type
-    if r0.arg[-1] == r1.arg[-1]:
-      # check if the ranges to merge are in the same reduces
-      if all((r0 in rngs) == (r1 in rngs) for rngs in reduce_ranges):
-        s0, s1 = r0.src[0], r1.src[0]
-        # do the merge
-        new_range = r0.replace(src=(s0*s1,))
-        nidx = graph_rewrite(u, _substitute+symbolic+pm_flatten_range, ctx={r0:new_range//s1, r1:new_range%s1},
-                             name=f"check_merge_{r0.arg[0]}_{r1.arg[0]}")
+  if len(ended_ranges:=u.ended_ranges) < 2: return None
+  reduce_ranges = tuple(x.ranges for x in u.backward_slice_with_self if x.op is Ops.REDUCE)
+  range_membership: dict[UOp, int] = {}
+  for r in ended_ranges:
+    membership = 0
+    for i, rngs in enumerate(reduce_ranges):
+      if r in rngs: membership |= 1 << i
+    range_membership[r] = membership
+  best_divmod = count_divmod(u)
+  if u.op is Ops.END:
+    candidate_pairs = zip(ended_ranges, ended_ranges[1:])
+  else:
+    grouped_ranges: dict[tuple[AxisType, int], list[UOp]] = {}
+    for r in ended_ranges:
+      grouped_ranges.setdefault((r.arg[-1], range_membership[r]), []).append(r)
+    candidate_pairs = itertools.chain.from_iterable(itertools.permutations(grp, 2) for grp in grouped_ranges.values() if len(grp) > 1)
 
-        # check if it simplifies
-        if count_divmod(nidx) <= count_divmod(u):
-          u = nidx
+  for r0, r1 in candidate_pairs:
+    # check same type
+    if u.op is Ops.END and r0.arg[-1] != r1.arg[-1]: continue
+    # check if the ranges to merge are in the same reduces
+    if u.op is Ops.END and range_membership[r0] != range_membership[r1]: continue
+    s0, s1 = r0.src[0], r1.src[0]
+    # do the merge
+    new_range = r0.replace(src=(s0*s1,))
+    nidx = graph_rewrite(u, pm_simplify_merge_adjacent_rewrite, ctx={r0:new_range//s1, r1:new_range%s1},
+                         name=f"check_merge_{r0.arg[0]}_{r1.arg[0]}")
+    if nidx is u: continue
+
+    # check if it simplifies
+    if (new_divmod:=count_divmod(nidx)) <= best_divmod:
+      u = nidx
+      best_divmod = new_divmod
   return u
 
 def mark_gated(ctx, idx):

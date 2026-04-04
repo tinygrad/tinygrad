@@ -144,23 +144,31 @@ def _reshape_movement_template(in_shape:tuple[sint, ...], out_shape:tuple[sint, 
 def _substitute_template(template:UOp, mapping:dict[UOp, UOp]) -> tuple[UOp, ...]:
   replaced: dict[UOp, UOp] = {}
   stack: list[tuple[UOp, bool]] = [(template, False)]
+  stack_append, stack_pop = stack.append, stack.pop
+  mapping_get = mapping.get
+  replaced_get = replaced.get
   while stack:
-    node, visited = stack.pop()
-    if node in replaced: continue
-    if (mapped:=mapping.get(node)) is not None:
+    node, visited = stack_pop()
+    if replaced_get(node) is not None: continue
+    if (mapped:=mapping_get(node)) is not None:
       replaced[node] = mapped
       continue
     if visited:
       new_src = tuple(replaced[s] for s in node.src)
       replaced[node] = node if new_src == node.src else UOp(node.op, node.dtype, new_src, node.arg, node.tag)
     else:
-      stack.append((node, True))
+      stack_append((node, True))
       for s in reversed(node.src):
-        if s not in replaced: stack.append((s, False))
+        if replaced_get(s) is None: stack_append((s, False))
   return replaced[template].src
 
 def _has_placeholder_ranges(rngs:tuple[UOp, ...]) -> bool:
-  return any(r.op is Ops.RANGE and r.arg[-1] == AxisType.PLACEHOLDER for rng in rngs for r in rng.ranges)
+  for rng in rngs:
+    if rng.op is Ops.RANGE:
+      if rng.arg[-1] == AxisType.PLACEHOLDER: return True
+      continue
+    if any(r.arg[-1] == AxisType.PLACEHOLDER for r in rng.ranges): return True
+  return False
 
 def _shape_eq(a:sint, b:sint) -> bool:
   return (isinstance(a, int) and isinstance(b, int) and a == b) or a is b

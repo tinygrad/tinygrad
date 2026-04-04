@@ -547,3 +547,18 @@ pm_dtype_decomps = PatternMatcher([
   # do the rewrites
   (UPat(Ops.SINK, name="sink"), do_dtype_decomps),
 ])
+
+def needs_dtype_decomps(sink:UOp, device:str, arch:str) -> bool:
+  emulate = set(EMULATED_DTYPES.tolist(dtypes))
+  targets = set((*dtypes.fp8s, dtypes.bfloat16, dtypes.half, dtypes.long, dtypes.ulong))
+  stack = [sink]
+  seen: set[UOp] = set()
+  while stack:
+    node = stack.pop()
+    if node in seen: continue
+    seen.add(node)
+    if (dt:=node.dtype.base.scalar()) in targets:
+      check_dt = dtypes.long if dt is dtypes.ulong else dt
+      if check_dt in emulate or not is_dtype_supported(check_dt, device, arch): return True
+    stack.extend(node.src)
+  return False

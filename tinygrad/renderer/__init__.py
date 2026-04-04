@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Callable, cast
 import functools
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from tinygrad.helpers import to_function_name, dedup, prod, DEBUG
 from tinygrad.uop.ops import Ops, UOp, sym_infer, sint, Variable, ssimplify, smin, GroupOp, PatternMatcher, print_uops
 from tinygrad.dtype import AddrSpace, PtrDType
@@ -53,8 +53,11 @@ class Estimates:
         buf = u
         while len(buf.src): buf = buf.src[0]
         if buf.op is Ops.PARAM:
+          # Use the actual access width instead of the pointer element width so estimates remain correct
+          # even before late renderer-specific lowering flattens vectorized / typed accesses.
+          access_bytes = (u.dtype.itemsize if u.op is Ops.LOAD else u.src[1].dtype.itemsize) * mults
           # u.src[0] is INDEX, cap at buffer size for re-reads (e.g. matmul)
-          accessed = mem.get((buf, u.op), 0) + u.src[0].dtype.base.itemsize * mults
+          accessed = mem.get((buf, u.op), 0) + access_bytes
           mem[(buf, u.op)] = smin(accessed, buf.ptrdtype.nbytes()) if buf.ptrdtype.size != -1 else accessed
       if u.op is Ops.RANGE:
         mult_stack.append(mults)
@@ -108,13 +111,9 @@ class ProgramSpec:
     return global_size, local_size
 
   @staticmethod
-  def from_uop(prg:UOp) -> ProgramSpec:
-    """Construct ProgramSpec from a PROGRAM UOp."""
-    assert prg.op is Ops.PROGRAM, f"expected PROGRAM, got {prg.op}"
-    # SINK/DEVICE/LINEAR/SOURCE/BINARY?
-    sink, device, linear, source = prg.src[:4]
-    lib = prg.src[4].arg if len(prg.src) > 4 else None
-    uops = list(linear.src)
+  def _from_uops(sink:UOp, device:str, uops:list[UOp], src:str="", lib:bytes|None=None, aux:list|None=None) -> ProgramSpec:
+    if sink.arg is not None and sink.arg.estimates is None:
+      sink = sink.replace(arg=replace(sink.arg, estimates=Estimates.from_uops(tuple(uops), ignore_indexing=True)))
     if DEBUG >= 6: print_uops(uops)  # LINEAR is src[2]
 
     # single pass through the uops to extract metadata
@@ -124,7 +123,7 @@ class ProgramSpec:
     ins: list[int] = []
     global_size: list[int] = [1, 1, 1]
     local_size: list[int]|None = [1, 1, 1]
-    for u in sink.toposort():
+    for u in uops:
       if u.op is Ops.DEFINE_VAR: _vars.append(u)
       if u.op is Ops.PARAM: _globals.append(u.arg)
       if u.op in (Ops.STORE, Ops.LOAD):
@@ -138,8 +137,21 @@ class ProgramSpec:
         if special_size is not None: special_size[int(u.arg[-1])] = cast(int, u.src[0].ssimplify())
       if u.op is Ops.DEFINE_VAR and u.arg[0] == 'core_id': global_size[0] = u.arg[2] + 1
 
-    return ProgramSpec(sink.arg.name, source.arg, device.arg, sink, uops, lib, list(prg.arg) if prg.arg else [], global_size, local_size,
+    return ProgramSpec(sink.arg.name, src, device, sink, uops, lib, [] if aux is None else aux, global_size, local_size,
                        sorted(_vars, key=lambda v: v.arg), sorted(dedup(_globals)), sorted(dedup(outs)), sorted(dedup(ins)))
+
+  @staticmethod
+  def from_uop(prg:UOp) -> ProgramSpec:
+    """Construct ProgramSpec from a PROGRAM UOp."""
+    assert prg.op is Ops.PROGRAM, f"expected PROGRAM, got {prg.op}"
+    # SINK/DEVICE/LINEAR/SOURCE/BINARY?
+    sink, device, linear, source = prg.src[:4]
+    lib = prg.src[4].arg if len(prg.src) > 4 else None
+    return ProgramSpec._from_uops(sink, device.arg, list(linear.src), source.arg, lib, list(prg.arg) if prg.arg else [])
+
+  @staticmethod
+  def from_null_sink(sink:UOp, device:str, uops:list[UOp]) -> ProgramSpec:
+    return ProgramSpec._from_uops(sink, device, uops, "", b"")
 
 class Renderer:
   device: str = ""

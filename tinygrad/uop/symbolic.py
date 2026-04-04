@@ -292,6 +292,7 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
 
 # ******** we take a small aside to "simplify_valid" to rewrite valids ********
 
+@functools.lru_cache(None)
 def parse_valid(v:UOp) -> tuple[UOp, bool, int]|None:
   # if it's X <= c, returns X, True, c
   # if it's X >= c, returns X, False, c
@@ -319,6 +320,7 @@ def uop_given_valid(valid:UOp, uop:UOp, try_simplex=True) -> UOp:
   # simplify uop given that valid is True
   all_candidates = []
   for i,(expr,v) in enumerate(bounds.items()):
+    if not uop.contains_in_backward_slice_with_self(expr): continue
     v0, v1 = (expr.vmin if v[0] is None else v[0], expr.vmax if v[1] is None else v[1])
     # try checking the whole clause
     all_candidates.append((expr, UOp.variable(f"fake{i}", v0, v1, expr.dtype)))

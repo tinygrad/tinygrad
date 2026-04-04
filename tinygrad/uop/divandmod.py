@@ -3,6 +3,13 @@ from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import cdiv, cmod, CORRECT_DIVMOD_FOLDING, unwrap
 
+def _uadd_terms(base: UOp, const: int, terms: list[UOp]) -> UOp:
+  if not terms: return base.const_like(const)
+  if const == 0:
+    head, *tail = terms
+    return head if not tail else head.usum(*tail)
+  return base.const_like(const).usum(*terms)
+
 # NOTE: this cache is only on index UOps
 @functools.cache
 def fold_divmod_general(d: UOp, correct_divmod_folding: bool) -> UOp|None:
@@ -78,8 +85,8 @@ def fold_divmod_general(d: UOp, correct_divmod_folding: bool) -> UOp|None:
             fixed_rem_min += r*vmax
             fixed_rem_max += r*vmin
         if not is_mod and (q:=(f-r)//c) != 0: fixed_quo_terms.append(q*v)
-      fixed_rem = sum(fixed_rem_terms, start=x.const_like(const%c))
-      if not is_mod: fixed_quo = sum(fixed_quo_terms, start=x.const_like(const//c))
+      fixed_rem = _uadd_terms(x, const%c, fixed_rem_terms)
+      if not is_mod: fixed_quo = _uadd_terms(x, const//c, fixed_quo_terms)
 
       if is_mod and not tie_variants_mod:
         if fixed_rem_min//c==fixed_rem_max//c: return fixed_rem - (fixed_rem_min//c)*c
@@ -124,8 +131,7 @@ def fold_divmod_general(d: UOp, correct_divmod_folding: bool) -> UOp|None:
             results.append((len(newxs.backward_slice), newxs // (c // div)))
           else:
             b_parts = [f%div*t for f, t in zip(factors, terms) if f%div]
-            if const % div: b_parts.append(x.const_like(const % div))
-            b = UOp.usum(*b_parts) if b_parts else x.const_like(0)
+            b = _uadd_terms(x, const % div, b_parts)
             if 0 <= b.vmin and b.vmax < div:
               results.append((len((r:=(newxs % x.ufix(c//div))*div + b).backward_slice), r))
       if results: return min(results, key=lambda r: r[0])[1]
@@ -157,9 +163,9 @@ def fold_divmod_general(d: UOp, correct_divmod_folding: bool) -> UOp|None:
     else: rem.append(u)
 
   if not quo: return None
-  new_x = sum(rem)+x.const_like(0)
+  new_x = _uadd_terms(x, 0, rem)
   if new_x.vmin<0: return None
-  return new_x%y if d.op is Ops.MOD else new_x//y+sum(quo)
+  return new_x%y if d.op is Ops.MOD else new_x//y + _uadd_terms(x, 0, quo)
 
 div_and_mod_symbolic = PatternMatcher([
   # ** 1. Fast Inline Rules **
