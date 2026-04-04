@@ -82,6 +82,8 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
               if MV_ROWS_PER_THREAD > 1: k.apply_opt(Opt(OptOps.UPCAST, global_idx, MV_ROWS_PER_THREAD))
               return k
         if not k.ren.has_local and (MV_CPU_UPCAST > 1 or MV_CPU_UNROLL > 1):
+          reduce_axis = k.rngs.index(first_reduce_rng)
+          reduce_unroll_axis = k.unrollable_dims.index(reduce_axis)
           for global_idx in k.axes_of(AxisType.LOOP):
             if k.full_shape[global_idx] % MV_CPU_UPCAST == 0:
               if DEBUG >= 3:
@@ -90,7 +92,7 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
                 if MV_CPU_UPCAST > 1: k.apply_opt(Opt(OptOps.UPCAST, global_idx, MV_CPU_UPCAST))
               except KernelOptError: pass
               try:
-                if MV_CPU_UNROLL > 1: k.apply_opt(Opt(OptOps.UNROLL, 0, MV_CPU_UNROLL))
+                if MV_CPU_UNROLL > 1: k.apply_opt(Opt(OptOps.UNROLL, reduce_unroll_axis, MV_CPU_UNROLL))
               except KernelOptError: pass
               return k
 
