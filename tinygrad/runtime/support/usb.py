@@ -217,6 +217,7 @@ class CustomASM24Controller:
     # Read TLPs and config writes: read completion via 0xF0 IN. Retry on error/timeout.
     data, cpl_status, ret_status = self._f0_in()
     if ret_status != 0:
+      time.sleep(0.001)  # TODO: this sleep is very picky
       if cnt > 0:
         return self.pcie_request(fmt_type, address, value, size, cnt=cnt-1)
       raise RuntimeError(f"TLP error after retries: ret_status={ret_status}, address={address:#x}")
