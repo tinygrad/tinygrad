@@ -13,7 +13,7 @@ Flags: VIZ=-1 to only save the trace to a file, VIZ=1 also launches a web server
 
 Use `extra/viz/cli.py --profile` to list all sources.
 
-List top slowest kernels on a source: `--profile -s "AMD" | head 10`
+List top slowest kernels on a source: `--profile -s "AMD"`
 List samples of a kernel on a source: `--profile -s "AMD" -i E_3 | head 4`
 
 ## Inspect codegen and PatternMatcher
