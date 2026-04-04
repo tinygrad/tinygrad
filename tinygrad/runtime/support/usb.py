@@ -238,28 +238,21 @@ class CustomASM24Controller:
     return self.pcie_request(0x60 if value is not None else 0x20, address, value, size)
 
   def pcie_mem_write(self, address:int, values:list[int], size:int):
-    """Streaming PCIe memory write via 0xF0 mode 1 + bulk OUT. Data is big-endian dwords on the wire."""
+    """Streaming PCIe memory write via 0xF0 mode 1 + bulk OUT. Data is little-endian dwords on the wire."""
     if not values: return
-    # Set up streaming write mode: fmt_type=MWR64 (0x60), byte_en=0x0F, mode=1
-    self._f0_out(0x60, 0x0F, address, 0, mode=1)
-    # Build big-endian dword payload
-    if size == 4:
-      payload = struct.pack(f'>{len(values)}I', *values)
-    else:
-      payload = b''.join(struct.pack('>I', v & 0xFFFFFFFF) for v in values)
-    self.usb._bulk_out(0x02, payload)
+    self._f0_out(0x60, 0x0F, address, len(values), mode=1)
+    self.usb._bulk_out(0x02, struct.pack(f'<{len(values)}I', *values))
 
   def pcie_mem_read(self, address:int, nbytes:int) -> bytes:
     """Streaming PCIe memory read via 0xF0 mode 2 + bulk IN. Returns little-endian bytes."""
     assert nbytes % 4 == 0, f"pcie_mem_read requires 4-byte aligned size, got {nbytes}"
-    chunk_dwords = 0x10
-    chunk_bytes = chunk_dwords * 4
-    # Set up streaming read: fmt_type=MRD64 (0x20), byte_en=0x0F, mode=2, count=chunk_dwords
-    self._f0_out(0x20, 0x0F, address, 0, mode=2, count=chunk_dwords)
+    chunk_bytes = 0x10 * 4  # MAX_CHUNK_DWORDS * 4
+    self._f0_out(0x20, 0x0F, address, nbytes // 4, mode=2)
     chunks = []
-    for _ in range(0, nbytes, chunk_bytes):
-      be_data = self.usb._bulk_in(0x81, chunk_bytes)
-      chunks.append(array.array('I', [struct.unpack('>I', be_data[i:i+4])[0] for i in range(0, len(be_data), 4)]).tobytes())
+    remaining = nbytes
+    while remaining > 0:
+      chunks.append(self.usb._bulk_in(0x81, min(chunk_bytes, remaining)))
+      remaining -= chunk_bytes
     return b''.join(chunks)[:nbytes]
 
   # === XDATA read/write (0xE4/0xE5 vendor control transfers) ===
