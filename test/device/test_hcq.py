@@ -194,7 +194,7 @@ class TestHCQ(unittest.TestCase):
     if TestHCQ.d0.hw_copy_queue_t is None: self.skipTest("device does not support copy queue")
 
     TestHCQ.d0.hw_copy_queue_t().wait(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value - 1) \
-                                .copy(TestHCQ.b.uop.buffer._buf.va_addr, TestHCQ.a.uop.buffer._buf.va_addr, 8) \
+                                .copy(TestHCQ.b.uop.buffer._buf, TestHCQ.a.uop.buffer._buf, 8) \
                                 .signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
 
     TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
@@ -212,7 +212,7 @@ class TestHCQ(unittest.TestCase):
     ctypes.memset(buf2._buf.va_addr, 1, sz)
 
     TestHCQ.d0.hw_copy_queue_t().wait(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value - 1) \
-                                .copy(buf1._buf.va_addr, buf2._buf.va_addr, sz) \
+                                .copy(buf1._buf, buf2._buf, sz) \
                                 .signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
 
     TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
@@ -236,7 +236,7 @@ class TestHCQ(unittest.TestCase):
         for j in range(32): buf2_q_view[min(max(i + j - 16, 0), (sz // 8) - 1)] = random.randint(0, 0xffffffffffffffff)
 
       TestHCQ.d0.hw_copy_queue_t().wait(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value - 1) \
-                                  .copy(buf1._buf.va_addr, buf2._buf.va_addr, sz) \
+                                  .copy(buf1._buf, buf2._buf, sz) \
                                   .signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
 
       TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
@@ -252,7 +252,7 @@ class TestHCQ(unittest.TestCase):
     virt_dest_addr = Variable("virt_dest_addr", 0, 0xffffffffffffffff, dtypes.uint64)
 
     q = TestHCQ.d0.hw_copy_queue_t().wait(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value - 1) \
-                                    .copy(virt_dest_addr, virt_src_addr, 8) \
+                                    .copy(HCQBuffer(virt_dest_addr, 8), HCQBuffer(virt_src_addr, 8), 8) \
                                     .signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
 
     q.submit(TestHCQ.d0, {virt_src_addr.expr: TestHCQ.a.uop.buffer._buf.va_addr, virt_dest_addr.expr: TestHCQ.b.uop.buffer._buf.va_addr})
@@ -275,7 +275,7 @@ class TestHCQ(unittest.TestCase):
     ctypes.memset(buf2._buf.va_addr, 1, sz)
 
     q = TestHCQ.d0.hw_copy_queue_t().wait(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value - 1) \
-                                    .copy(virt_dest_addr, virt_src_addr, sz) \
+                                    .copy(HCQBuffer(virt_dest_addr, sz), HCQBuffer(virt_src_addr, sz), sz) \
                                     .signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
 
     q.submit(TestHCQ.d0, {virt_src_addr.expr: buf2._buf.va_addr, virt_dest_addr.expr: buf1._buf.va_addr})
@@ -350,7 +350,7 @@ class TestHCQ(unittest.TestCase):
 
     sig_st, sig_en = TestHCQ.d0.new_signal(), TestHCQ.d0.new_signal()
     TestHCQ.d0.hw_copy_queue_t().timestamp(sig_st) \
-                                .copy(a._buf.va_addr, b._buf.va_addr, SZ) \
+                                .copy(a._buf, b._buf, SZ) \
                                 .timestamp(sig_en) \
                                 .signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
 
@@ -377,7 +377,7 @@ class TestHCQ(unittest.TestCase):
 
     sig_st, sig_en = TestHCQ.d0.new_signal(), TestHCQ.d0.new_signal()
     TestHCQ.d0.hw_copy_queue_t().timestamp(sig_st) \
-                                .copy(a._buf.va_addr, b._buf.va_addr, SZ) \
+                                .copy(a._buf, b._buf, SZ) \
                                 .timestamp(sig_en) \
                                 .signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
 
@@ -416,7 +416,7 @@ class TestHCQ(unittest.TestCase):
       ctypes.memset(buf2._buf.va_addr, i, 1)
 
       TestHCQ.d0.hw_copy_queue_t().wait(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value - 1) \
-                                  .copy(buf1._buf.va_addr, buf2._buf.va_addr, 1) \
+                                  .copy(buf1._buf, buf2._buf, 1) \
                                   .signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
       TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
       TestHCQ.d0.timeline_value += 1
@@ -434,8 +434,8 @@ class TestHCQ(unittest.TestCase):
       ctypes.memset(buf3._buf.va_addr, i, 1)
 
       TestHCQ.d0.hw_copy_queue_t().wait(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value - 1) \
-                                  .copy(buf1._buf.va_addr, buf3._buf.va_addr, 1) \
-                                  .copy(buf2._buf.va_addr, buf1._buf.va_addr, 1) \
+                                  .copy(buf1._buf, buf3._buf, 1) \
+                                  .copy(buf2._buf, buf1._buf, 1) \
                                   .signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
       TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
       TestHCQ.d0.timeline_value += 1
@@ -457,8 +457,8 @@ class TestHCQ(unittest.TestCase):
       ctypes.memset(buf3._buf.va_addr, i, 1)
 
       TestHCQ.d0.hw_copy_queue_t().wait(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value - 1) \
-                                  .copy(buf1._buf.va_addr, buf3._buf.va_addr, 1) \
-                                  .copy(buf2._buf.va_addr, buf1._buf.va_addr, 1) \
+                                  .copy(buf1._buf, buf3._buf, 1) \
+                                  .copy(buf2._buf, buf1._buf, 1) \
                                   .signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
       TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
       TestHCQ.d0.timeline_value += 1
@@ -505,8 +505,8 @@ class TestHCQ(unittest.TestCase):
       TestHCQ.d0.timeline_value += 1
 
       TestHCQ.d0.hw_copy_queue_t().wait(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value - 1) \
-                                  .copy(buf1._buf.va_addr, buf3._buf.va_addr, 1) \
-                                  .copy(buf2._buf.va_addr, buf1._buf.va_addr, 1) \
+                                  .copy(buf1._buf, buf3._buf, 1) \
+                                  .copy(buf2._buf, buf1._buf, 1) \
                                   .signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
       TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
       TestHCQ.d0.timeline_value += 1
@@ -531,7 +531,7 @@ class TestHCQ(unittest.TestCase):
       d.allocator.map(cpu_buffer._buf)
 
       d.hw_copy_queue_t().wait(d.timeline_signal, d.timeline_value - 1) \
-                         .copy(local_buf._buf.va_addr, cpu_buffer._buf.va_addr, sz) \
+                         .copy(local_buf._buf, cpu_buffer._buf, sz) \
                          .signal(d.timeline_signal, d.timeline_value).submit(d)
       d.timeline_signal.wait(d.timeline_value)
       d.timeline_value += 1

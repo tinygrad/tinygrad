@@ -5,7 +5,7 @@ from typing import Annotated, Literal, TypeAlias
 from tinygrad.runtime.support.c import _IO, _IOW, _IOR, _IOWR
 from tinygrad.runtime.support import c
 dll = c.DLL('iokit', 'IOKit')
-class struct_IONotificationPort(ctypes.Structure): pass
+class struct_IONotificationPort(c.Struct): SIZE = 0
 IONotificationPortRef: TypeAlias = c.POINTER[struct_IONotificationPort]
 IOServiceMatchingCallback: TypeAlias = c.CFUNCTYPE[None, [ctypes.c_void_p, Annotated[int, ctypes.c_uint32]]]
 IOServiceInterestCallback: TypeAlias = c.CFUNCTYPE[None, [ctypes.c_void_p, Annotated[int, ctypes.c_uint32], Annotated[int, ctypes.c_uint32], ctypes.c_void_p]]
@@ -23,7 +23,7 @@ def IOMasterPort(bootstrapPort:mach_port_t, mainPort:c.POINTER[mach_port_t]) -> 
 def IONotificationPortCreate(mainPort:mach_port_t) -> IONotificationPortRef: ...
 @dll.bind
 def IONotificationPortDestroy(notify:IONotificationPortRef) -> None: ...
-class struct___CFRunLoopSource(ctypes.Structure): pass
+class struct___CFRunLoopSource(c.Struct): SIZE = 0
 CFRunLoopSourceRef: TypeAlias = c.POINTER[struct___CFRunLoopSource]
 @dll.bind
 def IONotificationPortGetRunLoopSource(notify:IONotificationPortRef) -> CFRunLoopSourceRef: ...
@@ -31,7 +31,7 @@ def IONotificationPortGetRunLoopSource(notify:IONotificationPortRef) -> CFRunLoo
 def IONotificationPortGetMachPort(notify:IONotificationPortRef) -> mach_port_t: ...
 @dll.bind
 def IONotificationPortSetImportanceReceiver(notify:IONotificationPortRef) -> kern_return_t: ...
-class struct_dispatch_queue_s(ctypes.Structure): pass
+class struct_dispatch_queue_s(c.Struct): SIZE = 0
 dispatch_queue_t: TypeAlias = c.POINTER[struct_dispatch_queue_s]
 @dll.bind
 def IONotificationPortSetDispatchQueue(notify:IONotificationPortRef, queue:dispatch_queue_t) -> None: ...
@@ -61,7 +61,7 @@ def IOObjectRetain(object:io_object_t) -> kern_return_t: ...
 io_name_t: TypeAlias = c.Array[Annotated[bytes, ctypes.c_char], Literal[128]]
 @dll.bind
 def IOObjectGetClass(object:io_object_t, className:io_name_t) -> kern_return_t: ...
-class struct___CFString(ctypes.Structure): pass
+class struct___CFString(c.Struct): SIZE = 0
 CFStringRef: TypeAlias = c.POINTER[struct___CFString]
 @dll.bind
 def IOObjectCopyClass(object:io_object_t) -> CFStringRef: ...
@@ -87,7 +87,7 @@ def IOIteratorNext(iterator:io_iterator_t) -> io_object_t: ...
 def IOIteratorReset(iterator:io_iterator_t) -> None: ...
 @dll.bind
 def IOIteratorIsValid(iterator:io_iterator_t) -> boolean_t: ...
-class struct___CFDictionary(ctypes.Structure): pass
+class struct___CFDictionary(c.Struct): SIZE = 0
 CFDictionaryRef: TypeAlias = c.POINTER[struct___CFDictionary]
 io_service_t: TypeAlias = Annotated[int, ctypes.c_uint32]
 @dll.bind
@@ -222,7 +222,7 @@ def IORegistryEntryCopyPath(entry:io_registry_entry_t, plane:io_name_t) -> CFStr
 @dll.bind
 def IORegistryEntryGetRegistryEntryID(entry:io_registry_entry_t, entryID:c.POINTER[uint64_t]) -> kern_return_t: ...
 CFMutableDictionaryRef: TypeAlias = c.POINTER[struct___CFDictionary]
-class struct___CFAllocator(ctypes.Structure): pass
+class struct___CFAllocator(c.Struct): SIZE = 0
 CFAllocatorRef: TypeAlias = c.POINTER[struct___CFAllocator]
 @dll.bind
 def IORegistryEntryCreateCFProperties(entry:io_registry_entry_t, properties:c.POINTER[CFMutableDictionaryRef], allocator:CFAllocatorRef, options:IOOptionBits) -> kern_return_t: ...

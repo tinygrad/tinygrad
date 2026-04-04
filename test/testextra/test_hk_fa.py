@@ -12,7 +12,7 @@ def assert_allclose(cmp:Tensor, ref:Tensor, **kwargs) -> None:
 
 class TestFA(unittest.TestCase):
   def setUp(self):
-    arch = getattr(Device[Device.DEFAULT].renderer, "arch", "")
+    arch = Device[Device.DEFAULT].renderer.target.arch
     if not arch.startswith("gfx9"):
       self.skipTest(f"arch {arch} not supported")
 

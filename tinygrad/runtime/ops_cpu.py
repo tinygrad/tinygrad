@@ -137,5 +137,5 @@ class CPUDevice(HCQCompiled):
   def __init__(self, device:str=""):
     self.tasks:queue.Queue = queue.Queue()
     CPUWorker(self, self.tasks, thread_id=0).start()
-    renderers:list[type[Renderer]|functools.partial] = [ClangJITRenderer, CPULLVMRenderer, functools.partial(LVPRenderer, ""), X86Renderer]
+    renderers:list[type[Renderer]] = [ClangJITRenderer, CPULLVMRenderer, LVPRenderer, X86Renderer]
     super().__init__(device, CPUAllocator(self), renderers, functools.partial(CPUProgram, self), CPUSignal, CPUComputeQueue)

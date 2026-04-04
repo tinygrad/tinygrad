@@ -13,8 +13,9 @@ if __name__ == "__main__":
   devs = RemotePCIDevice.remote_list(0x1002, ((0, (0,)),), 0) or RemotePCIDevice.remote_list(0x10de, ((0, (0,)),), 0x03)
   if not devs: raise RuntimeError("no GPU found on remote")
 
-  pci = RemotePCIDevice("BN", devs[0])
-  print(f"connected to {os.environ['REMOTE']}, device: {devs[0]}\n")
+  sock, name = devs[0]
+  pci = RemotePCIDevice("BN", name, sock=sock)
+  print(f"connected to {os.environ['REMOTE']}, device: {name}\n")
 
   # ping (minimal server round-trip, no device I/O)
   from tinygrad.runtime.support.system import RemoteCmd
