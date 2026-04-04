@@ -63,7 +63,7 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
 
   # should use matvec - TODO: adjust/tune based on the wide vs tall/large vs small mat
   MV_BLOCKSIZE, MV_THREADS_PER_ROW, MV_ROWS_PER_THREAD = getenv("MV_BLOCKSIZE", 4), getenv("MV_THREADS_PER_ROW", 8), getenv("MV_ROWS_PER_THREAD", 4)
-  MV_CPU_UPCAST, MV_CPU_UNROLL = getenv("MV_CPU_UPCAST", 8), getenv("MV_CPU_UNROLL", 8)
+  MV_CPU_UPCAST, MV_CPU_UNROLL = getenv("MV_CPU_UPCAST", 16), getenv("MV_CPU_UNROLL", 4)
   if getenv("MV",1) != 0 and k.reduceop is not None and k.reduceop.arg[0] is Ops.ADD and len(k.full_shape) >= 2 and \
     (mulop:=k.reduceop.src[0]).op is Ops.MUL and mulop.src[0].op is Ops.INDEX and mulop.src[1].op is Ops.INDEX:
     idx0, idx1 = mulop.src[0].src[1].get_idx(), mulop.src[1].src[1].get_idx()

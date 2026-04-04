@@ -6,7 +6,7 @@ from tinygrad.runtime.autogen import llvm
 
 class ClangJITCompiler(Compiler):
   def __init__(self, cachekey=None):
-    self.opt_level = getenv("CPUOPT", 3 if platform.machine() in {"x86_64", "AMD64"} else 2)
+    self.opt_level = getenv("CPUOPT", 2)
     super().__init__(cachekey or f"compile_clang_jit_o{self.opt_level}")
 
   def compile_to_obj(self, src:str) -> bytes:
@@ -43,7 +43,7 @@ class LLVMCompiler(Compiler):
                                                        llvm.LLVMCodeGenLevelDefault, llvm.LLVMRelocPIC, llvm.LLVMCodeModelDefault)
 
     self.pbo = llvm.LLVMCreatePassBuilderOptions()
-    self.opt_level = getenv("CPUOPT", 3 if self.target_arch == "X86" else 2)
+    self.opt_level = getenv("CPUOPT", 2)
     if (opt:=bool(getenv("LLVMOPT", "1"))):
       self.passes = f'default<O{self.opt_level}>'.encode()
       if self.opt_level >= 3: llvm.LLVMPassBuilderOptionsSetLoopInterleaving(self.pbo, True)
