@@ -117,7 +117,12 @@ def main(args) -> None:
     if agg and total > 0:
       from tabulate import tabulate
       items = sorted(agg.items(), key=lambda kv:kv[1][0], reverse=True)
-      table = [[format_colored(name), time_to_str(t, w=9), c, f"{(t/total*100.0):.2f}%"] for name,(t,c) in items]
+      rows = 20
+      table = [[format_colored(name), time_to_str(t, w=9), c, f"{(t/total*100.0):.2f}%"] for name,(t,c) in items[:rows]]
+      if items[rows:]:
+        other_t = sum(t for _,(t,_) in items[rows:])
+        other_c = sum(c for _,(_,c) in items[rows:])
+        table.append(["Other", time_to_str(other_t, w=9), other_c, f"{(other_t/total*100.0):.2f}%"])
       print(tabulate(table, headers=["name", "total", "count", "pct"], tablefmt="github"))
     return None
 
