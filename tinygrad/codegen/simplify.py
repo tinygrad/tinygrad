@@ -1,4 +1,3 @@
-import itertools
 from typing import Callable
 from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, graph_rewrite, _substitute, range_start, AxisType
 from tinygrad.uop.symbolic import symbolic
@@ -33,10 +32,10 @@ def simplify_merge_adjacent(u:UOp) -> UOp|None:
   if u.op is Ops.END:
     candidate_pairs = zip(ended_ranges, ended_ranges[1:])
   else:
-    grouped_ranges: dict[tuple[AxisType, int], list[UOp]] = {}
-    for r in ended_ranges:
-      grouped_ranges.setdefault((r.arg[-1], range_membership[r]), []).append(r)
-    candidate_pairs = itertools.chain.from_iterable(itertools.permutations(grp, 2) for grp in grouped_ranges.values() if len(grp) > 1)
+    # For REDUCE, the useful merges are order-preserving adjacent ranges.
+    # Exploring all permutations burns time on reverse/non-adjacent pairs that don't help this rule.
+    candidate_pairs = ((r0, r1) for r0, r1 in zip(ended_ranges, ended_ranges[1:])
+                       if r0.arg[-1] == r1.arg[-1] and range_membership[r0] == range_membership[r1])
 
   for r0, r1 in candidate_pairs:
     # check same type
