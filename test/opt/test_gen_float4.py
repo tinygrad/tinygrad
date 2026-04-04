@@ -3,7 +3,15 @@ from tinygrad import Device, Tensor, dtypes
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.engine.realize import get_program
-from tinygrad.helpers import AMX
+from tinygrad.helpers import AMX, Target
+from tinygrad.renderer import Renderer
+from tinygrad.renderer.llvmir import CPULLVMRenderer
+
+class _TestCPULLVMRenderer(CPULLVMRenderer):
+  def __init__(self): Renderer.__init__(self, Target("CPU", "LLVM"))
+
+class _TestNoLocalLLVMRenderer(CPULLVMRenderer):
+  def __init__(self): Renderer.__init__(self, Target("LLVM"))
 
 @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "need backends that support float4")
 class TestFloat4(unittest.TestCase):
@@ -152,6 +160,20 @@ class TestFloat4(unittest.TestCase):
     uops = get_program(s.ast, renderer=Device[Device.DEFAULT].renderer, opts=[Opt(op=OptOps.UPCAST, axis=0, arg=4)]).uops
 
     assert TestFloat4.count_float4(uops) == (1, 1)
+
+class TestCPULLVMWideVec(unittest.TestCase):
+  def test_cpullvm_float_upcasts_to_wide_vec(self):
+    a = Tensor.empty(2, 16).realize()
+    b = Tensor.empty(2, 16).realize()
+    opts = [Opt(op=OptOps.UPCAST, axis=0, arg=4), Opt(op=OptOps.UPCAST, axis=0, arg=4)]
+    realized_ast = (a + b).schedule()[0].ast
+
+    cpu_uops = get_program(realized_ast, renderer=_TestCPULLVMRenderer(), opts=opts).uops
+    generic_uops = get_program(realized_ast, renderer=_TestNoLocalLLVMRenderer(), opts=opts).uops
+
+    self.assertEqual(TestFloat4.count_float4(cpu_uops, 16), (2, 1))
+    self.assertEqual(TestFloat4.count_float4(generic_uops, 16), (0, 0))
+    self.assertEqual(TestFloat4.count_float4(generic_uops), (8, 4))
 
 if __name__ == '__main__':
   unittest.main()

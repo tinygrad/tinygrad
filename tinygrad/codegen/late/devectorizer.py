@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from tinygrad.dtype import dtypes, ImageDType, DType, AddrSpace, Invalid, PtrDType
 from tinygrad.uop.ops import UOp, Ops, UPat, PatternMatcher, GroupOp, identity_element
 from tinygrad.uop.symbolic import uop_given_valid, parse_valid, invalid_gate
-from tinygrad.helpers import getenv, flatten, AMX, prod
+from tinygrad.helpers import getenv, flatten, AMX, prod, Target
 from tinygrad.renderer import Renderer
 
 # ***** image load valid simplification *****
@@ -150,6 +150,9 @@ load_store_folding = PatternMatcher([
 
 # *** correct load/store ***
 
+def supports_wide_float_vec(ctx:Renderer|None) -> bool:
+  return AMX or (ctx is not None and ctx.target == Target("CPU", "LLVM") and not ctx.has_local)
+
 def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
   # this splits loads and stores into multiple chunks
 
@@ -171,7 +174,7 @@ def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
     lengths = [4]
   elif ctx is not None and ctx.supports_float4:
     # TODO: a better way to get this than ctx
-    lengths = [8,4,2] if buf.dtype.base == dtypes.half and getenv("ALLOW_HALF8") else ([16,8,4,2] if AMX else [4,2])
+    lengths = [8,4,2] if buf.dtype.base == dtypes.half and getenv("ALLOW_HALF8") else ([16,8,4,2] if supports_wide_float_vec(ctx) else [4,2])
   lengths.append(1)  # worst case, it's not folded
 
   # filter fold lengths that don't divide
