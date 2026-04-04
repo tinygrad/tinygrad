@@ -82,7 +82,7 @@ class _System:
     cl, pcibus = hcq_filter_visible_devices(self.list_devices(vendor, devices, base_class))[dev_id]
     return cl(devpref, pcibus)
 
-  def pci_setup_usb_bars(self, usb:ASM24Controller, gpu_bus:int, mem_base:int, pref_mem_base:int) -> dict[int, tuple[int, int]]:
+  def pci_setup_usb_bars(self, usb:CustomASM24Controller|ASM24Controller, gpu_bus:int, mem_base:int, pref_mem_base:int) -> dict[int, tuple[int, int]]:
     for bus in range(gpu_bus):
       # All 3 values must be written at the same time.
       buses = (0 << 0) | ((bus+1) << 8) | ((gpu_bus) << 16)
