@@ -249,6 +249,19 @@ class CustomASM24Controller:
       payload = b''.join(struct.pack('>I', v & 0xFFFFFFFF) for v in values)
     self.usb._bulk_out(0x02, payload)
 
+  def pcie_mem_read(self, address:int, nbytes:int) -> bytes:
+    """Streaming PCIe memory read via 0xF0 mode 2 + bulk IN. Returns little-endian bytes."""
+    assert nbytes % 4 == 0, f"pcie_mem_read requires 4-byte aligned size, got {nbytes}"
+    chunk_dwords = 0x10
+    chunk_bytes = chunk_dwords * 4
+    # Set up streaming read: fmt_type=MRD64 (0x20), byte_en=0x0F, mode=2, count=chunk_dwords
+    self._f0_out(0x20, 0x0F, address, 0, mode=2, count=chunk_dwords)
+    chunks = []
+    for _ in range(0, nbytes, chunk_bytes):
+      be_data = self.usb._bulk_in(0x81, chunk_bytes)
+      chunks.append(array.array('I', [struct.unpack('>I', be_data[i:i+4])[0] for i in range(0, len(be_data), 4)]).tobytes())
+    return b''.join(chunks)[:nbytes]
+
   # === XDATA read/write (0xE4/0xE5 vendor control transfers) ===
 
   def read(self, base_addr:int, length:int, **kwargs) -> bytes:
@@ -421,6 +434,10 @@ class USBMMIOInterface(MMIOInterface):
     if data is None: # read op
       if not self.pcimem:
         return int.from_bytes(self.usb.read(self.addr + off, sz), "little") if sz == self.el_sz else self.usb.read(self.addr + off, sz)
+
+      # Fast path: streaming PCIe read if controller supports it
+      if hasattr(self.usb, 'pcie_mem_read') and sz >= 4 and sz % 4 == 0:
+        return self.usb.pcie_mem_read(self.addr + off, sz)
 
       acc, acc_size = self._acc_size(sz)
       return bytes(array.array(acc, [self._acc_one(off + i * acc_size, acc_size) for i in range(sz // acc_size)]))
