@@ -20,9 +20,8 @@ class TestFloat4(unittest.TestCase):
     return (len([uop for uop in uops if uop.op is Ops.LOAD and uop.dtype == dtypes.float.vec(n)]),
             len([uop for uop in uops if uop.op is Ops.STORE and uop.src[1].dtype == dtypes.float.vec(n)]))
   @staticmethod
-  def count_half4(uops: list[UOp]):
-    return (len([uop for uop in uops if uop.op is Ops.LOAD and uop.dtype == dtypes.half.vec(4)]),
-            len([uop for uop in uops if uop.op is Ops.STORE and uop.src[1].dtype == dtypes.half.vec(4)]))
+  def count_float_alu(uops: list[UOp], op: Ops, n=4):
+    return len([uop for uop in uops if uop.op is op and uop.dtype == dtypes.float.vec(n)])
 
   def test_float4_basic(self):
     a = Tensor.empty(2, 8).realize()
@@ -174,6 +173,18 @@ class TestCPULLVMWideVec(unittest.TestCase):
     self.assertEqual(TestFloat4.count_float4(cpu_uops, 16), (2, 1))
     self.assertEqual(TestFloat4.count_float4(generic_uops, 16), (0, 0))
     self.assertEqual(TestFloat4.count_float4(generic_uops), (8, 4))
+
+  def test_cpullvm_float_alu_stays_vectorized(self):
+    a = Tensor.empty(2, 16).realize()
+    b = Tensor.empty(2, 16).realize()
+    opts = [Opt(op=OptOps.UPCAST, axis=0, arg=4), Opt(op=OptOps.UPCAST, axis=0, arg=4)]
+    realized_ast = (a + b).schedule()[0].ast
+
+    cpu_uops = get_program(realized_ast, renderer=_TestCPULLVMRenderer(), opts=opts).uops
+    generic_uops = get_program(realized_ast, renderer=_TestNoLocalLLVMRenderer(), opts=opts).uops
+
+    self.assertEqual(TestFloat4.count_float_alu(cpu_uops, Ops.ADD, 16), 1)
+    self.assertEqual(TestFloat4.count_float_alu(generic_uops, Ops.ADD, 16), 0)
 
 if __name__ == '__main__':
   unittest.main()
