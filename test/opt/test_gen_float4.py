@@ -168,12 +168,21 @@ class TestCPULLVMWideVec(unittest.TestCase):
     opts = [Opt(op=OptOps.UPCAST, axis=0, arg=4), Opt(op=OptOps.UPCAST, axis=0, arg=4)]
     realized_ast = (a + b).schedule()[0].ast
 
-    cpu_uops = get_program(realized_ast, renderer=_TestCPULLVMRenderer(), opts=opts).uops
+    cpu_program = get_program(realized_ast, renderer=_TestCPULLVMRenderer(), opts=opts)
+    cpu_uops = cpu_program.uops
     generic_uops = get_program(realized_ast, renderer=_TestNoLocalLLVMRenderer(), opts=opts).uops
 
+    self.assertIn("bitcast float*", cpu_program.src)
+    self.assertIn("to <16 x float>*", cpu_program.src)
     self.assertEqual(TestFloat4.count_float4(cpu_uops, 16), (2, 1))
     self.assertEqual(TestFloat4.count_float4(generic_uops, 16), (0, 0))
     self.assertEqual(TestFloat4.count_float4(generic_uops), (8, 4))
+
+  def test_cpullvm_reduction_register_alloca_uses_element_ptr(self):
+    src = get_program(Tensor.empty(1024).realize().sum().schedule()[-1].ast, renderer=_TestCPULLVMRenderer()).src
+
+    self.assertIn("alloca float, i32 1", src)
+    self.assertNotIn("alloca [1 x float]", src)
 
 if __name__ == '__main__':
   unittest.main()

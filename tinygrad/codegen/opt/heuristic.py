@@ -92,7 +92,8 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
                 if MV_CPU_UPCAST > 1: k.apply_opt(Opt(OptOps.UPCAST, global_idx, MV_CPU_UPCAST))
               except KernelOptError: pass
               try:
-                if MV_CPU_UNROLL > 1 and reduce_unroll_axis is not None and BEAM == 0: k.apply_opt(Opt(OptOps.UNROLL, reduce_unroll_axis, MV_CPU_UNROLL))
+                if MV_CPU_UNROLL > 1 and reduce_unroll_axis is not None and BEAM == 0:
+                  k.apply_opt(Opt(OptOps.UNROLL, reduce_unroll_axis, MV_CPU_UNROLL))
               except KernelOptError: pass
               return k
 
