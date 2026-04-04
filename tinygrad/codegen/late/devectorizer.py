@@ -155,9 +155,6 @@ def supports_wide_float_vec(ctx:Renderer|Target|None) -> bool:
   has_local = ctx.has_local if isinstance(ctx, Renderer) else False
   return bool(AMX) or (target == Target("CPU", "LLVM") and not has_local)
 
-def supports_float_vector_alu(ctx:Renderer|Target|None, alu:UOp) -> bool:
-  return supports_wide_float_vec(ctx) and alu.op in GroupOp.ALU and alu.dtype.vcount > 4 and alu.dtype.scalar() in dtypes.floats
-
 def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
   # this splits loads and stores into multiple chunks
 
@@ -240,8 +237,8 @@ def no_vectorized_wmma(wmma:UOp):
   wmma_ex = flatten([[e.gep(i) for i in range(out_sz)] for e in wmmas])
   return UOp(Ops.VECTORIZE, wmma.dtype, tuple(wmma_ex))
 
-def no_vectorized_alu(ctx:Renderer|None, alu:UOp):
-  if alu.dtype.vcount == 1 or supports_float_vector_alu(ctx, alu): return None
+def no_vectorized_alu(alu:UOp):
+  if alu.dtype.vcount == 1: return None
   if alu.op is Ops.WHERE and alu.src[2].arg is Invalid: return None  # image load/store has cond.where(idx.vec(2), Invalid) as the index
   alus = tuple(UOp(alu.op, alu.dtype.scalar(), tuple(s.gep(i) for s in alu.src), alu.arg) for i in range(alu.dtype.vcount))
   return UOp(Ops.VECTORIZE, alu.dtype, alus)
