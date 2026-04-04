@@ -97,9 +97,8 @@ def _ensure_buffer_alloc(bufs:list[Buffer]) -> list[Buffer]: return [buf.ensure_
 def get_kernel_actions(s:Scheduler, include_0=True, max_up:int|None=None) -> dict[int, Scheduler]:
   acted, max_up, max_lcl = {0:s} if include_0 else {}, getenv("BEAM_UPCAST_MAX", 256) if max_up is None else max_up, getenv("BEAM_LOCAL_MAX", 1024)
   kernel_actions = actions.copy()
-  if not s.ren.has_local and s.reduceop is not None:
+  if not s.ren.has_local and len(s.axes_of(AxisType.LOOP)) == 1 and len(s.axes_of(AxisType.REDUCE)) == 1:
     kernel_actions += [Opt(op=OptOps.UPCAST, axis=axis, arg=amt) for amt in [8,16] for axis in range(8)]
-    kernel_actions += [Opt(op=OptOps.UNROLL, axis=axis, arg=amt) for amt in [8,16] for axis in range(5)]
 
   for i,a in enumerate(kernel_actions):
     if a.axis is not None and a.op is not OptOps.TC:

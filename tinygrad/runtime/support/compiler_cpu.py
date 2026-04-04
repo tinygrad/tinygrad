@@ -5,9 +5,7 @@ from tinygrad.runtime.support.elf import jit_loader
 from tinygrad.runtime.autogen import llvm
 
 class ClangJITCompiler(Compiler):
-  def __init__(self, cachekey=None):
-    self.opt_level = getenv("CPUOPT", 2)
-    super().__init__(cachekey or f"compile_clang_jit_o{self.opt_level}")
+  def __init__(self, cachekey="compile_clang_jit"): super().__init__(cachekey)
 
   def compile_to_obj(self, src:str) -> bytes:
     """Compile C source to ELF object file (before linking)."""
@@ -16,7 +14,7 @@ class ClangJITCompiler(Compiler):
     target = 'x86_64' if sys.platform == 'win32' else platform.machine()
     # on arm march means "runs on this arch and superset" instead of "optimize for this arch". x86 march == arm mcpu
     arch = {'x86_64': '-march=native', 'AMD64': '-march=native', 'riscv64': '-march=rv64g'}.get(platform.machine(), "-mcpu=native")
-    args = [arch, f'--target={target}-none-unknown-elf', f'-O{self.opt_level}', '-fPIC', '-ffreestanding', '-fno-math-errno', '-nostdlib', '-fno-ident']
+    args = [arch, f'--target={target}-none-unknown-elf', '-O2', '-fPIC', '-ffreestanding', '-fno-math-errno', '-nostdlib', '-fno-ident']
     arch_args = ['-ffixed-x18'] if target == 'arm64' else []
     return subprocess.check_output([getenv("CC", 'clang'), '-c', '-x', 'c', *args, *arch_args, '-', '-o', '-'], input=src.encode('utf-8'))
 
@@ -43,10 +41,8 @@ class LLVMCompiler(Compiler):
                                                        llvm.LLVMCodeGenLevelDefault, llvm.LLVMRelocPIC, llvm.LLVMCodeModelDefault)
 
     self.pbo = llvm.LLVMCreatePassBuilderOptions()
-    self.opt_level = getenv("CPUOPT", 2)
     if (opt:=bool(getenv("LLVMOPT", "1"))):
-      self.passes = f'default<O{self.opt_level}>'.encode()
-      if self.opt_level >= 3: llvm.LLVMPassBuilderOptionsSetLoopInterleaving(self.pbo, True)
+      self.passes = b'default<O2>'
       llvm.LLVMPassBuilderOptionsSetLoopUnrolling(self.pbo, True)
       llvm.LLVMPassBuilderOptionsSetLoopVectorization(self.pbo, True)
       llvm.LLVMPassBuilderOptionsSetSLPVectorization(self.pbo, True)
@@ -65,7 +61,7 @@ class LLVMCompiler(Compiler):
         self.diag_msgs.append(msg)
     self.handle_diag = handle_diag
     llvm.LLVMContextSetDiagnosticHandler(self.context, handle_diag, None)
-    super().__init__(cache_key or f"compile_llvm_{processor}_{feats}{'_jit' if self.jit else ''}{f'_opt{self.opt_level}' if opt else '_opt0'}")
+    super().__init__(cache_key or f"compile_llvm_{processor}_{feats}{'_jit' if self.jit else ''}{'_opt' if opt else ''}")
 
   def __del__(self):
     llvm.LLVMDisposePassBuilderOptions(self.pbo)
