@@ -3,7 +3,7 @@ import time, pprint, random, itertools, math, hashlib
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import all_same, colored, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, Metadata, TRACEMETA, TracingKey
 from tinygrad.helpers import DEVECTORIZE, time_to_str, VALIDATE_WITH_CPU, cpu_profile, PROFILE, ProfilePointEvent, cpu_events, prod, Context, unwrap
-from tinygrad.helpers import EMULATED_DTYPES, diskcache_get, diskcache_put, SCACHE
+from tinygrad.helpers import EMULATED_DTYPES, diskcache_get, diskcache_put, SCACHE, CAPTURE_PROCESS_REPLAY
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer
 from tinygrad.device import Device, Buffer
 from tinygrad.renderer import ProgramSpec, Estimates
@@ -116,9 +116,11 @@ def get_runner(device:str, ast:UOp) -> CompiledRunner:
   if bret:=method_cache.get(bkey):
     method_cache[ckey] = ret = CompiledRunner(replace(bret.p, device=device))
   else:
-    disk_key = hashlib.sha256(ast.key + str((device.split(":")[0], context)).encode()).hexdigest()
-    try: disk_prg = diskcache_get("program_cache", disk_key) if SCACHE else None
-    except Exception: disk_prg = None
+    disk_key = hashlib.sha256(ast.key + str((device.split(":")[0], type(Device[device].compiler).__name__, context)).encode()).hexdigest()
+    try: disk_prg = diskcache_get("program_cache", disk_key) if SCACHE and not CAPTURE_PROCESS_REPLAY else None
+    except Exception as e:
+      if DEBUG >= 1: print(f"program_cache disk read failed: {e}")
+      disk_prg = None
     if disk_prg is not None:
       method_cache[ckey] = method_cache[bkey] = ret = CompiledRunner(replace(disk_prg, device=device))
     else:

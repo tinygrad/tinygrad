@@ -121,7 +121,9 @@ def lower_sink_to_linear(function:UOp) -> UOp|None:
     cache_label = " cache hit"
   elif SCACHE:
     try: disk_linear = diskcache_get("schedule_cache", cache_key.hex())
-    except Exception: disk_linear = None
+    except Exception as e:
+      if DEBUG >= 1: print(f"schedule_cache disk read failed: {e}")
+      disk_linear = None
     if disk_linear is not None:
       schedule_cache[cache_key] = disk_linear
       linear, cache_label = disk_linear, "  disk hit"
