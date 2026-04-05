@@ -13,16 +13,16 @@ class TestScratchStore(unittest.TestCase):
     TEST_OFFSET = 256
     instructions = [
       s_load_b64(s[2:3], s[80:81], 0, soffset=SrcEnum.NULL),
-      s_waitcnt(simm16=0xfc07),
+      s_waitcnt_lgkmcnt(sdst=NULL, simm16=0),
       s_mov_b32(s[4], 0xDEADBEEF),
       v_mov_b32_e32(v[2], s[4]),
       v_mov_b32_e32(v[0], 0),
       # Store via scratch
       scratch_store_b32(addr=v[0], data=v[2], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
-      s_waitcnt(simm16=0x03f7),
+      s_waitcnt_vmcnt(sdst=NULL, simm16=0),
       # Load back via scratch
       scratch_load_b32(addr=v[0], vdst=v[3], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
-      s_waitcnt(simm16=0x03f7),
+      s_waitcnt_vmcnt(sdst=NULL, simm16=0),
       v_mov_b32_e32(v[0], v[3]),
       s_mov_b32(s[2], 0),
       s_mov_b32(s[3], 0),
@@ -35,16 +35,16 @@ class TestScratchStore(unittest.TestCase):
     TEST_OFFSET = 256
     instructions = [
       s_load_b64(s[2:3], s[80:81], 0, soffset=SrcEnum.NULL),
-      s_waitcnt(simm16=0xfc07),
+      s_waitcnt_lgkmcnt(sdst=NULL, simm16=0),
       s_mov_b32(s[4], 0xDEADBEEF),
       s_mov_b32(s[5], 0xCAFEBABE),
       v_mov_b32_e32(v[2], s[4]),
       v_mov_b32_e32(v[3], s[5]),
       v_mov_b32_e32(v[0], 0),
       scratch_store_b64(addr=v[0], data=v[2:3], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
-      s_waitcnt(simm16=0x03f7),
+      s_waitcnt_vmcnt(sdst=NULL, simm16=0),
       scratch_load_b64(addr=v[0], vdst=v[4:5], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
-      s_waitcnt(simm16=0x03f7),
+      s_waitcnt_vmcnt(sdst=NULL, simm16=0),
       v_mov_b32_e32(v[0], v[4]),
       v_mov_b32_e32(v[1], v[5]),
       s_mov_b32(s[2], 0),
@@ -59,20 +59,20 @@ class TestScratchStore(unittest.TestCase):
     TEST_OFFSET = 256
     instructions = [
       s_load_b64(s[2:3], s[80:81], 0, soffset=SrcEnum.NULL),
-      s_waitcnt(simm16=0xfc07),
+      s_waitcnt_lgkmcnt(sdst=NULL, simm16=0),
       # First store full word
       s_mov_b32(s[4], 0xDEADBEEF),
       v_mov_b32_e32(v[2], s[4]),
       v_mov_b32_e32(v[0], 0),
       scratch_store_b32(addr=v[0], data=v[2], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
-      s_waitcnt(simm16=0x03f7),
+      s_waitcnt_vmcnt(sdst=NULL, simm16=0),
       # Store single byte
       v_mov_b32_e32(v[2], 0x42),
       scratch_store_b8(addr=v[0], data=v[2], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
-      s_waitcnt(simm16=0x03f7),
+      s_waitcnt_vmcnt(sdst=NULL, simm16=0),
       # Load back
       scratch_load_b32(addr=v[0], vdst=v[3], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
-      s_waitcnt(simm16=0x03f7),
+      s_waitcnt_vmcnt(sdst=NULL, simm16=0),
       v_mov_b32_e32(v[0], v[3]),
       s_mov_b32(s[2], 0),
       s_mov_b32(s[3], 0),
@@ -86,18 +86,18 @@ class TestScratchStore(unittest.TestCase):
     TEST_OFFSET = 256
     instructions = [
       s_load_b64(s[2:3], s[80:81], 0, soffset=SrcEnum.NULL),
-      s_waitcnt(simm16=0xfc07),
+      s_waitcnt_lgkmcnt(sdst=NULL, simm16=0),
       s_mov_b32(s[4], 0xDEADBEEF),
       v_mov_b32_e32(v[2], s[4]),
       v_mov_b32_e32(v[0], 0),
       scratch_store_b32(addr=v[0], data=v[2], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
-      s_waitcnt(simm16=0x03f7),
+      s_waitcnt_vmcnt(sdst=NULL, simm16=0),
       s_mov_b32(s[4], 0xCAFE),
       v_mov_b32_e32(v[2], s[4]),
       scratch_store_b16(addr=v[0], data=v[2], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
-      s_waitcnt(simm16=0x03f7),
+      s_waitcnt_vmcnt(sdst=NULL, simm16=0),
       scratch_load_b32(addr=v[0], vdst=v[3], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
-      s_waitcnt(simm16=0x03f7),
+      s_waitcnt_vmcnt(sdst=NULL, simm16=0),
       v_mov_b32_e32(v[0], v[3]),
       s_mov_b32(s[2], 0),
       s_mov_b32(s[3], 0),
@@ -114,7 +114,7 @@ class TestScratchLoad(unittest.TestCase):
     TEST_OFFSET = 256
     instructions = [
       s_load_b64(s[2:3], s[80:81], 0, soffset=SrcEnum.NULL),
-      s_waitcnt(simm16=0xfc07),
+      s_waitcnt_lgkmcnt(sdst=NULL, simm16=0),
       v_mov_b32_e32(v[0], 0),
       s_mov_b32(s[4], 0xAAAAAAAA),
       v_mov_b32_e32(v[2], s[4]),
@@ -123,9 +123,9 @@ class TestScratchLoad(unittest.TestCase):
       s_mov_b32(s[4], 0xCCCCCCCC),
       v_mov_b32_e32(v[4], s[4]),
       scratch_store_b96(addr=v[0], data=v[2:4], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
-      s_waitcnt(simm16=0x03f7),
+      s_waitcnt_vmcnt(sdst=NULL, simm16=0),
       scratch_load_b96(addr=v[0], vdst=v[5:7], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
-      s_waitcnt(simm16=0x03f7),
+      s_waitcnt_vmcnt(sdst=NULL, simm16=0),
       v_mov_b32_e32(v[0], v[5]),
       v_mov_b32_e32(v[1], v[6]),
       v_mov_b32_e32(v[2], v[7]),
@@ -142,7 +142,7 @@ class TestScratchLoad(unittest.TestCase):
     TEST_OFFSET = 256
     instructions = [
       s_load_b64(s[2:3], s[80:81], 0, soffset=SrcEnum.NULL),
-      s_waitcnt(simm16=0xfc07),
+      s_waitcnt_lgkmcnt(sdst=NULL, simm16=0),
       v_mov_b32_e32(v[0], 0),
       s_mov_b32(s[4], 0xDEADBEEF),
       v_mov_b32_e32(v[2], s[4]),
@@ -153,9 +153,9 @@ class TestScratchLoad(unittest.TestCase):
       s_mov_b32(s[4], 0x9ABCDEF0),
       v_mov_b32_e32(v[5], s[4]),
       scratch_store_b128(addr=v[0], data=v[2:5], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
-      s_waitcnt(simm16=0x03f7),
+      s_waitcnt_vmcnt(sdst=NULL, simm16=0),
       scratch_load_b128(addr=v[0], vdst=v[6:9], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
-      s_waitcnt(simm16=0x03f7),
+      s_waitcnt_vmcnt(sdst=NULL, simm16=0),
       v_mov_b32_e32(v[0], v[6]),
       v_mov_b32_e32(v[1], v[7]),
       v_mov_b32_e32(v[2], v[8]),
@@ -174,14 +174,14 @@ class TestScratchLoad(unittest.TestCase):
     TEST_OFFSET = 256
     instructions = [
       s_load_b64(s[2:3], s[80:81], 0, soffset=SrcEnum.NULL),
-      s_waitcnt(simm16=0xfc07),
+      s_waitcnt_lgkmcnt(sdst=NULL, simm16=0),
       v_mov_b32_e32(v[0], 0),
       s_mov_b32(s[4], 0xDEADBEAB),
       v_mov_b32_e32(v[2], s[4]),
       scratch_store_b32(addr=v[0], data=v[2], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
-      s_waitcnt(simm16=0x03f7),
+      s_waitcnt_vmcnt(sdst=NULL, simm16=0),
       scratch_load_u8(addr=v[0], vdst=v[3], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
-      s_waitcnt(simm16=0x03f7),
+      s_waitcnt_vmcnt(sdst=NULL, simm16=0),
       v_mov_b32_e32(v[0], v[3]),
       s_mov_b32(s[2], 0),
       s_mov_b32(s[3], 0),
@@ -194,14 +194,14 @@ class TestScratchLoad(unittest.TestCase):
     TEST_OFFSET = 256
     instructions = [
       s_load_b64(s[2:3], s[80:81], 0, soffset=SrcEnum.NULL),
-      s_waitcnt(simm16=0xfc07),
+      s_waitcnt_lgkmcnt(sdst=NULL, simm16=0),
       v_mov_b32_e32(v[0], 0),
       s_mov_b32(s[4], 0x80),  # -128 as signed byte
       v_mov_b32_e32(v[2], s[4]),
       scratch_store_b8(addr=v[0], data=v[2], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
-      s_waitcnt(simm16=0x03f7),
+      s_waitcnt_vmcnt(sdst=NULL, simm16=0),
       scratch_load_i8(addr=v[0], vdst=v[3], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
-      s_waitcnt(simm16=0x03f7),
+      s_waitcnt_vmcnt(sdst=NULL, simm16=0),
       v_mov_b32_e32(v[0], v[3]),
       s_mov_b32(s[2], 0),
       s_mov_b32(s[3], 0),
@@ -214,14 +214,14 @@ class TestScratchLoad(unittest.TestCase):
     TEST_OFFSET = 256
     instructions = [
       s_load_b64(s[2:3], s[80:81], 0, soffset=SrcEnum.NULL),
-      s_waitcnt(simm16=0xfc07),
+      s_waitcnt_lgkmcnt(sdst=NULL, simm16=0),
       v_mov_b32_e32(v[0], 0),
       s_mov_b32(s[4], 0xDEADCAFE),
       v_mov_b32_e32(v[2], s[4]),
       scratch_store_b32(addr=v[0], data=v[2], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
-      s_waitcnt(simm16=0x03f7),
+      s_waitcnt_vmcnt(sdst=NULL, simm16=0),
       scratch_load_u16(addr=v[0], vdst=v[3], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
-      s_waitcnt(simm16=0x03f7),
+      s_waitcnt_vmcnt(sdst=NULL, simm16=0),
       v_mov_b32_e32(v[0], v[3]),
       s_mov_b32(s[2], 0),
       s_mov_b32(s[3], 0),
@@ -234,14 +234,14 @@ class TestScratchLoad(unittest.TestCase):
     TEST_OFFSET = 256
     instructions = [
       s_load_b64(s[2:3], s[80:81], 0, soffset=SrcEnum.NULL),
-      s_waitcnt(simm16=0xfc07),
+      s_waitcnt_lgkmcnt(sdst=NULL, simm16=0),
       v_mov_b32_e32(v[0], 0),
       s_mov_b32(s[4], 0x8000),  # -32768 as signed 16-bit
       v_mov_b32_e32(v[2], s[4]),
       scratch_store_b16(addr=v[0], data=v[2], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
-      s_waitcnt(simm16=0x03f7),
+      s_waitcnt_vmcnt(sdst=NULL, simm16=0),
       scratch_load_i16(addr=v[0], vdst=v[3], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
-      s_waitcnt(simm16=0x03f7),
+      s_waitcnt_vmcnt(sdst=NULL, simm16=0),
       v_mov_b32_e32(v[0], v[3]),
       s_mov_b32(s[2], 0),
       s_mov_b32(s[3], 0),
@@ -262,24 +262,24 @@ class TestScratchSVE(unittest.TestCase):
     # and the store should go to offset 256, not 256+100=356
     instructions = [
       s_load_b64(s[2:3], s[80:81], 0, soffset=SrcEnum.NULL),
-      s_waitcnt(simm16=0xfc07),
+      s_waitcnt_lgkmcnt(sdst=NULL, simm16=0),
       # First, store 0xAAAAAAAA at offset 256 with v[0]=0
       v_mov_b32_e32(v[0], 0),
       s_mov_b32(s[4], 0xAAAAAAAA),
       v_mov_b32_e32(v[2], s[4]),
       scratch_store_b32(addr=v[0], data=v[2], saddr=SrcEnum.NULL, offset=TEST_OFFSET, sve=0),
-      s_waitcnt(simm16=0x03f7),
+      s_waitcnt_vmcnt(sdst=NULL, simm16=0),
       # Now set v[0] to 100 (non-zero) and store 0xBBBBBBBB with SVE=0
       # With SVE=0, v[0] should be IGNORED, so this should overwrite offset 256
       v_mov_b32_e32(v[0], 100),
       s_mov_b32(s[4], 0xBBBBBBBB),
       v_mov_b32_e32(v[2], s[4]),
       scratch_store_b32(addr=v[0], data=v[2], saddr=SrcEnum.NULL, offset=TEST_OFFSET, sve=0),
-      s_waitcnt(simm16=0x03f7),
+      s_waitcnt_vmcnt(sdst=NULL, simm16=0),
       # Load back from offset 256 (with v[0]=0) - should get 0xBBBBBBBB
       v_mov_b32_e32(v[0], 0),
       scratch_load_b32(addr=v[0], vdst=v[3], saddr=SrcEnum.NULL, offset=TEST_OFFSET, sve=0),
-      s_waitcnt(simm16=0x03f7),
+      s_waitcnt_vmcnt(sdst=NULL, simm16=0),
       v_mov_b32_e32(v[0], v[3]),
       s_mov_b32(s[2], 0),
       s_mov_b32(s[3], 0),
@@ -296,24 +296,24 @@ class TestScratchSVE(unittest.TestCase):
     # With SVE=1, the second store should go to 256+100=356, not 256
     instructions = [
       s_load_b64(s[2:3], s[80:81], 0, soffset=SrcEnum.NULL),
-      s_waitcnt(simm16=0xfc07),
+      s_waitcnt_lgkmcnt(sdst=NULL, simm16=0),
       # First, store 0xAAAAAAAA at offset 256 with v[0]=0
       v_mov_b32_e32(v[0], 0),
       s_mov_b32(s[4], 0xAAAAAAAA),
       v_mov_b32_e32(v[2], s[4]),
       scratch_store_b32(addr=v[0], data=v[2], saddr=SrcEnum.NULL, offset=TEST_OFFSET, sve=1),
-      s_waitcnt(simm16=0x03f7),
+      s_waitcnt_vmcnt(sdst=NULL, simm16=0),
       # Now set v[0] to 100 and store 0xBBBBBBBB with SVE=1
       # With SVE=1, v[0] IS used, so this should go to offset 256+100=356
       v_mov_b32_e32(v[0], 100),
       s_mov_b32(s[4], 0xBBBBBBBB),
       v_mov_b32_e32(v[2], s[4]),
       scratch_store_b32(addr=v[0], data=v[2], saddr=SrcEnum.NULL, offset=TEST_OFFSET, sve=1),
-      s_waitcnt(simm16=0x03f7),
+      s_waitcnt_vmcnt(sdst=NULL, simm16=0),
       # Load back from offset 256 (with v[0]=0) - should still be 0xAAAAAAAA
       v_mov_b32_e32(v[0], 0),
       scratch_load_b32(addr=v[0], vdst=v[3], saddr=SrcEnum.NULL, offset=TEST_OFFSET, sve=1),
-      s_waitcnt(simm16=0x03f7),
+      s_waitcnt_vmcnt(sdst=NULL, simm16=0),
       v_mov_b32_e32(v[0], v[3]),
       s_mov_b32(s[2], 0),
       s_mov_b32(s[3], 0),
@@ -331,16 +331,16 @@ class TestScratchMultiLane(unittest.TestCase):
     TEST_OFFSET = 256
     instructions = [
       s_load_b64(s[2:3], s[80:81], 0, soffset=SrcEnum.NULL),
-      s_waitcnt(simm16=0xfc07),
+      s_waitcnt_lgkmcnt(sdst=NULL, simm16=0),
       # Each lane stores its lane ID
       v_mov_b32_e32(v[0], 0),
       v_mov_b32_e32(v[2], v[255]),  # v[255] has packed workitem IDs, low 10 bits = x
       v_and_b32_e32(v[2], 0x3FF, v[2]),  # extract lane ID
       scratch_store_b32(addr=v[0], data=v[2], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
-      s_waitcnt(simm16=0x03f7),
+      s_waitcnt_vmcnt(sdst=NULL, simm16=0),
       # Load back
       scratch_load_b32(addr=v[0], vdst=v[3], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
-      s_waitcnt(simm16=0x03f7),
+      s_waitcnt_vmcnt(sdst=NULL, simm16=0),
       v_mov_b32_e32(v[0], v[3]),
       s_mov_b32(s[2], 0),
       s_mov_b32(s[3], 0),

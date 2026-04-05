@@ -26,7 +26,7 @@ class TestSLoadRegisterOffset(unittest.TestCase):
     instructions = [
       # Load output buffer pointer from args
       s_load_b64(s[2:3], s[80:81], 0, soffset=NULL),
-      s_waitcnt(simm16=0xfc07),
+      s_waitcnt_lgkmcnt(sdst=NULL, simm16=0),
       # Store test values to output buffer: 0xAAAAAAAA at offset, 0xBBBBBBBB at offset+4
       s_mov_b32(s[4], 0xAAAAAAAA),
       s_mov_b32(s[5], 0xBBBBBBBB),
@@ -35,7 +35,7 @@ class TestSLoadRegisterOffset(unittest.TestCase):
       v_mov_b32_e32(v[0], 0),
       global_store_b32(addr=v[0], data=v[2], saddr=s[2:3], offset=TEST_OFFSET),
       global_store_b32(addr=v[0], data=v[3], saddr=s[2:3], offset=TEST_OFFSET+4),
-      s_waitcnt(simm16=0x03f7),
+      s_waitcnt_vmcnt(sdst=NULL, simm16=0),
       *CACHE_INV,
       # Now test s_load with register offset
       # Put offset value in s[4]: offset = 4 bytes (1 dword)
@@ -55,7 +55,7 @@ class TestSLoadRegisterOffset(unittest.TestCase):
     instructions = [
       # Load output buffer pointer from args
       s_load_b64(s[2:3], s[80:81], 0, soffset=NULL),
-      s_waitcnt(simm16=0xfc07),
+      s_waitcnt_lgkmcnt(sdst=NULL, simm16=0),
       # Store test values: 0xAAAAAAAA at offset, 0xBBBBBBBB at offset+4
       s_mov_b32(s[4], 0xAAAAAAAA),
       s_mov_b32(s[5], 0xBBBBBBBB),
@@ -64,7 +64,7 @@ class TestSLoadRegisterOffset(unittest.TestCase):
       v_mov_b32_e32(v[0], 0),
       global_store_b32(addr=v[0], data=v[2], saddr=s[2:3], offset=TEST_OFFSET),
       global_store_b32(addr=v[0], data=v[3], saddr=s[2:3], offset=TEST_OFFSET+4),
-      s_waitcnt(simm16=0x03f7),
+      s_waitcnt_vmcnt(sdst=NULL, simm16=0),
       *CACHE_INV,
       # Load with immediate offset 0
       s_load_b32(s[5], s[2:3], NULL, offset=TEST_OFFSET),
@@ -94,7 +94,7 @@ class TestSLoadRegisterOffset(unittest.TestCase):
     instructions = [
       # Load output buffer pointer from args
       s_load_b64(s[2:3], s[80:81], 0, soffset=NULL),
-      s_waitcnt(simm16=0xfc07),
+      s_waitcnt_lgkmcnt(sdst=NULL, simm16=0),
       # Store test values: 0xAAAAAAAA at offset, 0xBBBBBBBB at offset+4
       s_mov_b32(s[6], 0xAAAAAAAA),
       s_mov_b32(s[7], 0xBBBBBBBB),
@@ -103,7 +103,7 @@ class TestSLoadRegisterOffset(unittest.TestCase):
       v_mov_b32_e32(v[0], 0),
       global_store_b32(addr=v[0], data=v[2], saddr=s[2:3], offset=TEST_OFFSET),
       global_store_b32(addr=v[0], data=v[3], saddr=s[2:3], offset=TEST_OFFSET+4),
-      s_waitcnt(simm16=0x03f7),
+      s_waitcnt_vmcnt(sdst=NULL, simm16=0),
       *CACHE_INV,
       # Set up s[4] = 4 (offset in bytes)
       s_mov_b32(s[4], 4),
@@ -129,13 +129,13 @@ class TestSLoadRegisterOffset(unittest.TestCase):
     instructions = [
       # Load output buffer pointer from args
       s_load_b64(s[2:3], s[80:81], 0, soffset=NULL),
-      s_waitcnt(simm16=0xfc07),
+      s_waitcnt_lgkmcnt(sdst=NULL, simm16=0),
       # Store test value: 0xDEADBEEF at offset
       s_mov_b32(s[7], 0xDEADBEEF),
       v_mov_b32_e32(v[2], s[7]),
       v_mov_b32_e32(v[0], 0),
       global_store_b32(addr=v[0], data=v[2], saddr=s[2:3], offset=TEST_OFFSET),
-      s_waitcnt(simm16=0x03f7),
+      s_waitcnt_vmcnt(sdst=NULL, simm16=0),
       *CACHE_INV,
       # Load with register offset 0
       s_mov_b32(s[4], 0),
@@ -158,7 +158,7 @@ class TestSLoadRegisterOffset(unittest.TestCase):
     instructions = [
       # Load output buffer pointer from args
       s_load_b64(s[2:3], s[80:81], 0, soffset=NULL),
-      s_waitcnt(simm16=0xfc07),
+      s_waitcnt_lgkmcnt(sdst=NULL, simm16=0),
       # Store test values: 0xAAAAAAAA at offset, 0xBBBBBBBB at offset+4
       s_mov_b32(s[8], 0xAAAAAAAA),
       s_mov_b32(s[9], 0xBBBBBBBB),
@@ -167,7 +167,7 @@ class TestSLoadRegisterOffset(unittest.TestCase):
       v_mov_b32_e32(v[0], 0),
       global_store_b32(addr=v[0], data=v[2], saddr=s[2:3], offset=TEST_OFFSET),
       global_store_b32(addr=v[0], data=v[3], saddr=s[2:3], offset=TEST_OFFSET+4),
-      s_waitcnt(simm16=0x03f7),
+      s_waitcnt_vmcnt(sdst=NULL, simm16=0),
       *CACHE_INV,
       # reg offset = 4, imm offset = 0 -> total offset = 4
       s_mov_b32(s[4], 4),
@@ -197,7 +197,7 @@ class TestSLoadMultiDword(unittest.TestCase):
     instructions = [
       # Load output buffer pointer from args
       s_load_b64(s[2:3], s[80:81], 0, soffset=NULL),
-      s_waitcnt(simm16=0xfc07),
+      s_waitcnt_lgkmcnt(sdst=NULL, simm16=0),
       # Store test values: 0xAAAAAAAA, 0xBBBBBBBB at offset
       s_mov_b32(s[10], 0xAAAAAAAA),
       s_mov_b32(s[11], 0xBBBBBBBB),
@@ -206,7 +206,7 @@ class TestSLoadMultiDword(unittest.TestCase):
       v_mov_b32_e32(v[0], 0),
       global_store_b32(addr=v[0], data=v[2], saddr=s[2:3], offset=TEST_OFFSET),
       global_store_b32(addr=v[0], data=v[3], saddr=s[2:3], offset=TEST_OFFSET+4),
-      s_waitcnt(simm16=0x03f7),
+      s_waitcnt_vmcnt(sdst=NULL, simm16=0),
       *CACHE_INV,
       # Load with register offset 0
       s_mov_b32(s[4], 0),
@@ -229,7 +229,7 @@ class TestSLoadMultiDword(unittest.TestCase):
     instructions = [
       # Load output buffer pointer from args
       s_load_b64(s[2:3], s[80:81], 0, soffset=NULL),
-      s_waitcnt(simm16=0xfc07),
+      s_waitcnt_lgkmcnt(sdst=NULL, simm16=0),
       # Store test values: 0xAAAAAAAA, 0xBBBBBBBB, 0xCCCCCCCC, 0xDDDDDDDD at offset
       v_mov_b32_e32(v[0], 0),
       s_mov_b32(s[14], 0xAAAAAAAA),
@@ -244,7 +244,7 @@ class TestSLoadMultiDword(unittest.TestCase):
       s_mov_b32(s[14], 0xDDDDDDDD),
       v_mov_b32_e32(v[2], s[14]),
       global_store_b32(addr=v[0], data=v[2], saddr=s[2:3], offset=TEST_OFFSET+12),
-      s_waitcnt(simm16=0x03f7),
+      s_waitcnt_vmcnt(sdst=NULL, simm16=0),
       *CACHE_INV,
       # Load with register offset 0 (s_load_b128 requires 4-aligned dest: s[4], s[8], s[12], ...)
       s_mov_b32(s[15], 0),
@@ -272,7 +272,7 @@ class TestSLoadLarge(unittest.TestCase):
     """s_load_b256 loads 8 consecutive dwords."""
     instructions = [
       s_load_b64(s[2:3], s[80:81], 0, soffset=NULL),
-      s_waitcnt(simm16=0xfc07),
+      s_waitcnt_lgkmcnt(sdst=NULL, simm16=0),
       v_mov_b32_e32(v[0], 0),
       # Store 8 test values
       s_mov_b32(s[20], 0x11111111),
@@ -299,11 +299,11 @@ class TestSLoadLarge(unittest.TestCase):
       s_mov_b32(s[20], 0x88888888),
       v_mov_b32_e32(v[2], s[20]),
       global_store_b32(addr=v[0], data=v[2], saddr=s[2:3], offset=TEST_OFFSET+28),
-      s_waitcnt(simm16=0x03f7),
+      s_waitcnt_vmcnt(sdst=NULL, simm16=0),
       *CACHE_INV,
       # Load all 8 dwords with s_load_b256
       s_load_b256(s[4:11], s[2:3], NULL, offset=TEST_OFFSET),
-      s_waitcnt(simm16=0xfc07),
+      s_waitcnt_lgkmcnt(sdst=NULL, simm16=0),
       s_mov_b32(s[2], 0), s_mov_b32(s[3], 0),
     ]
     st = run_program(instructions, n_lanes=1)
@@ -320,7 +320,7 @@ class TestSLoadLarge(unittest.TestCase):
     """s_load_b512 loads 16 consecutive dwords."""
     instructions = [
       s_load_b64(s[2:3], s[80:81], 0, soffset=NULL),
-      s_waitcnt(simm16=0xfc07),
+      s_waitcnt_lgkmcnt(sdst=NULL, simm16=0),
       v_mov_b32_e32(v[0], 0),
       # Store 16 test values (use a pattern: 0x10, 0x20, ..., 0x100)
       *[instr for i in range(16) for instr in [
@@ -328,11 +328,11 @@ class TestSLoadLarge(unittest.TestCase):
         v_mov_b32_e32(v[2], s[20]),
         global_store_b32(addr=v[0], data=v[2], saddr=s[2:3], offset=TEST_OFFSET + i * 4),
       ]],
-      s_waitcnt(simm16=0x03f7),
+      s_waitcnt_vmcnt(sdst=NULL, simm16=0),
       *CACHE_INV,
       # Load all 16 dwords with s_load_b512
       s_load_b512(s[64:79], s[2:3], NULL, offset=TEST_OFFSET),
-      s_waitcnt(simm16=0xfc07),
+      s_waitcnt_lgkmcnt(sdst=NULL, simm16=0),
       # Copy results to lower regs for verification (since st.sgpr only has 16 regs in test)
       s_mov_b32(s[4], s[64]),
       s_mov_b32(s[5], s[65]),
@@ -350,7 +350,7 @@ class TestSLoadLarge(unittest.TestCase):
     """s_load_b256 with register offset should add reg offset to address."""
     instructions = [
       s_load_b64(s[2:3], s[80:81], 0, soffset=NULL),
-      s_waitcnt(simm16=0xfc07),
+      s_waitcnt_lgkmcnt(sdst=NULL, simm16=0),
       v_mov_b32_e32(v[0], 0),
       # Store pattern at TEST_OFFSET+8: skip first 2 dwords
       *[instr for i in range(8) for instr in [
@@ -358,12 +358,12 @@ class TestSLoadLarge(unittest.TestCase):
         v_mov_b32_e32(v[2], s[20]),
         global_store_b32(addr=v[0], data=v[2], saddr=s[2:3], offset=TEST_OFFSET + 8 + i * 4),
       ]],
-      s_waitcnt(simm16=0x03f7),
+      s_waitcnt_vmcnt(sdst=NULL, simm16=0),
       *CACHE_INV,
       # Load with register offset 8
       s_mov_b32(s[20], 8),
       s_load_b256(s[4:11], s[2:3], s[20], offset=TEST_OFFSET),
-      s_waitcnt(simm16=0xfc07),
+      s_waitcnt_lgkmcnt(sdst=NULL, simm16=0),
       s_mov_b32(s[2], 0), s_mov_b32(s[3], 0),
     ]
     st = run_program(instructions, n_lanes=1)
@@ -383,7 +383,7 @@ class TestSLoadOffset(unittest.TestCase):
     """Load from two different offsets and verify correct values."""
     instructions = [
       s_load_b64(s[2:3], s[80:81], 0, soffset=NULL),
-      s_waitcnt(simm16=0xfc07),
+      s_waitcnt_lgkmcnt(sdst=NULL, simm16=0),
       v_mov_b32_e32(v[0], 0),
       # Store 0xAAAAAAAA at offset 100
       s_mov_b32(s[4], 0xAAAAAAAA),
@@ -393,13 +393,13 @@ class TestSLoadOffset(unittest.TestCase):
       s_mov_b32(s[4], 0xBBBBBBBB),
       v_mov_b32_e32(v[2], s[4]),
       global_store_b32(addr=v[0], data=v[2], saddr=s[2:3], offset=200),
-      s_waitcnt(simm16=0x03f7),
+      s_waitcnt_vmcnt(sdst=NULL, simm16=0),
       *CACHE_INV,
       # Load from offset 100 -> should get 0xAAAAAAAA
       s_load_b32(s[4], s[2:3], NULL, offset=100),
       # Load from offset 200 -> should get 0xBBBBBBBB
       s_load_b32(s[5], s[2:3], NULL, offset=200),
-      s_waitcnt(simm16=0xfc07),
+      s_waitcnt_lgkmcnt(sdst=NULL, simm16=0),
       s_mov_b32(s[2], 0), s_mov_b32(s[3], 0),
     ]
     st = run_program(instructions, n_lanes=1)
@@ -413,7 +413,7 @@ class TestSLoadOffset(unittest.TestCase):
     Load with offset -100 from base+300 -> should get 0xBBBB."""
     instructions = [
       s_load_b64(s[2:3], s[80:81], 0, soffset=NULL),
-      s_waitcnt(simm16=0xfc07),
+      s_waitcnt_lgkmcnt(sdst=NULL, simm16=0),
       v_mov_b32_e32(v[0], 0),
       # Store 0xAAAAAAAA at offset 100, 0xBBBBBBBB at offset 200
       s_mov_b32(s[8], 0xAAAAAAAA),
@@ -422,7 +422,7 @@ class TestSLoadOffset(unittest.TestCase):
       s_mov_b32(s[8], 0xBBBBBBBB),
       v_mov_b32_e32(v[2], s[8]),
       global_store_b32(addr=v[0], data=v[2], saddr=s[2:3], offset=200),
-      s_waitcnt(simm16=0x03f7),
+      s_waitcnt_vmcnt(sdst=NULL, simm16=0),
       *CACHE_INV,
       # base+200, load with offset -100 -> should get value at 100
       s_add_u32(s[6], s[2], 200),
@@ -432,7 +432,7 @@ class TestSLoadOffset(unittest.TestCase):
       s_add_u32(s[6], s[2], 300),
       s_addc_u32(s[7], s[3], 0),
       s_load_b32(s[5], s[6:7], NULL, offset=-100),
-      s_waitcnt(simm16=0xfc07),
+      s_waitcnt_lgkmcnt(sdst=NULL, simm16=0),
       s_mov_b32(s[2], 0),
       s_mov_b32(s[3], 0),
       s_mov_b32(s[6], 0),
