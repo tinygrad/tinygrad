@@ -365,7 +365,7 @@ class HCQProgram(Generic[HCQDeviceType]):
     """
 
     kernargs = self.fill_kernargs(bufs, vals)
-    q = self.dev.hw_compute_queue_t().wait(self.dev.timeline_signal, self.dev.timeline_value - 1).memory_barrier()
+    q = unwrap(self.dev.hw_compute_queue_t)().wait(self.dev.timeline_signal, self.dev.timeline_value - 1).memory_barrier()
 
     self.dev.prof_exec_counter += 1
     with hcq_profile(self.dev, queue=q, desc=self.name, enabled=wait or PROFILE) as (sig_st, sig_en):
@@ -385,9 +385,9 @@ class HCQCompiled(Compiled, Generic[SignalType]):
   signal_pool: dict[str, list[HCQBuffer]] = collections.defaultdict(list) # per peer group
   cpu_devices: list[HCQCompiled] = []
 
-  def __init__(self, device:str, allocator:HCQAllocatorBase, compilers:list[type[Renderer]], runtime, signal_t:Type[SignalType],
-               comp_queue_t:Callable[..., HWQueue], copy_queue_t:Callable[..., HWQueue]|None=None, kernargs_size=(16 << 20), sigalloc_size=0x1000,
-               can_recover:bool=False, arch=None):
+  def __init__(self, device:str, allocator:HCQAllocatorBase, compilers:list[type[Renderer]], runtime, signal_t:Type[SignalType]|None=None,
+               comp_queue_t:Callable[..., HWQueue]|None=None, copy_queue_t:Callable[..., HWQueue]|None=None, kernargs_size=(16 << 20),
+               sigalloc_size=0x1000, can_recover:bool=False, arch=None):
     self.device_id:int = int(device.split(":")[1]) if ":" in device else 0
 
     from tinygrad.runtime.graph.hcq import HCQGraph
@@ -396,19 +396,23 @@ class HCQCompiled(Compiled, Generic[SignalType]):
     self.peer_group = getattr(getattr(self, 'iface', None), 'peer_group', device.split(":")[0])
     HCQCompiled.peer_groups[self.peer_group].append(self)
 
-    # Map signals if any
-    for sig_page in HCQCompiled.signal_pages[self.peer_group]: cast(HCQAllocator, self.allocator).map(sig_page)
-
-    self.sigalloc_size = sigalloc_size
     self.signal_t, self.hw_compute_queue_t, self.hw_copy_queue_t = signal_t, comp_queue_t, copy_queue_t
+
     self.timeline_value:int = 1
-    self.timeline_signal, self._shadow_timeline_signal = self.new_signal(value=0, is_timeline=True), self.new_signal(value=0, is_timeline=True)
     self.sig_prof_records:list[tuple[HCQSignal, HCQSignal, str|TracingKey, str]] = []
     self.prof_exec_counter:int = 0
     self.prof_prg_counter = itertools.count(0)
 
-    self.kernargs_buf:HCQBuffer = self.allocator.alloc(kernargs_size, BufferSpec(cpu_access=True))
-    self.kernargs_offset_allocator:BumpAllocator = BumpAllocator(self.kernargs_buf.size, wrap=True)
+    if signal_t is not None:
+      # Map signals if any
+      for sig_page in HCQCompiled.signal_pages[self.peer_group]: cast(HCQAllocator, self.allocator).map(sig_page)
+
+      self.sigalloc_size = sigalloc_size
+      self.timeline_signal, self._shadow_timeline_signal = self.new_signal(value=0, is_timeline=True), self.new_signal(value=0, is_timeline=True)
+
+    if comp_queue_t is not None:
+      self.kernargs_buf:HCQBuffer = self.allocator.alloc(kernargs_size, BufferSpec(cpu_access=True))
+      self.kernargs_offset_allocator:BumpAllocator = BumpAllocator(self.kernargs_buf.size, wrap=True)
 
     self.can_recover = can_recover # Whether the device can recover from faults or timeouts
     self.error_state:Exception|None = None # Exception if error is unrecoverable and sync will always fail
@@ -417,6 +421,7 @@ class HCQCompiled(Compiled, Generic[SignalType]):
 
   def synchronize(self, timeout:int|None=None):
     if self.error_state is not None: raise self.error_state
+    if not hasattr(self, 'timeline_signal'): return
 
     # If we have any work on CPU devices, need to synchronize them. This is just an optimization to release GIL allowing to finish faster.
     if not self._is_cpu():
@@ -438,6 +443,7 @@ class HCQCompiled(Compiled, Generic[SignalType]):
     return self.timeline_value - 1
 
   def new_signal(self, **kwargs) -> SignalType:
+    assert self.signal_t is not None, "Device does not support signals"
     if not HCQCompiled.signal_pool[pg:=self.peer_group]:
       HCQCompiled.signal_pages[pg].append(alc:=self.allocator.alloc(self.sigalloc_size, BufferSpec(host=True, uncached=True, cpu_access=True)))
       HCQCompiled.signal_pool[pg] += [alc.offset(offset=off, size=16) for off in range(0, alc.size, 16)]
@@ -446,7 +452,8 @@ class HCQCompiled(Compiled, Generic[SignalType]):
 
   def device_props(self) -> dict[str,Any]: return {} # to be overridden if needed. dict keys are backend dependent.
 
-  def hw_compute_queues(self) -> list[tuple[str|None, Callable[[], HWQueue]]]: return [(None, self.hw_compute_queue_t)]
+  def hw_compute_queues(self) -> list[tuple[str|None, Callable[[], HWQueue]]]:
+    return [(None, self.hw_compute_queue_t)] if self.hw_compute_queue_t is not None else []
   def hw_copy_queues(self) -> list[tuple[str, Callable[[], HWQueue]]]:
     return [("SDMA:0", self.hw_copy_queue_t)] if self.hw_copy_queue_t is not None else []
 
@@ -606,6 +613,6 @@ class HCQAllocator(HCQAllocatorBase, Generic[HCQDeviceType]):
                                .signal(src_dev.timeline_signal, src_dev.next_timeline()).submit(src_dev)
 
     if src_dev != dest_dev:
-      dest_dev.hw_compute_queue_t().wait(src_dev.timeline_signal, src_dev.timeline_value - 1) \
-                                   .wait(dest_dev.timeline_signal, dest_dev.timeline_value - 1) \
-                                   .signal(dest_dev.timeline_signal, dest_dev.next_timeline()).submit(dest_dev)
+      unwrap(dest_dev.hw_compute_queue_t)().wait(src_dev.timeline_signal, src_dev.timeline_value - 1) \
+                                           .wait(dest_dev.timeline_signal, dest_dev.timeline_value - 1) \
+                                           .signal(dest_dev.timeline_signal, dest_dev.next_timeline()).submit(dest_dev)
