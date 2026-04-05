@@ -5,7 +5,7 @@ try: import fcntl # windows misses that
 except ImportError: fcntl = None #type:ignore[assignment]
 from tinygrad.helpers import PROFILE, getenv, to_mv, from_mv, cpu_profile, ProfileRangeEvent, select_first_inited, unwrap, suppress_finalizing
 from tinygrad.helpers import TracingKey
-from tinygrad.device import BufferSpec, Compiled, LRUAllocator, ProfileDeviceEvent, ProfileProgramEvent
+from tinygrad.device import Device, BufferSpec, Compiled, LRUAllocator, ProfileDeviceEvent, ProfileProgramEvent
 from tinygrad.uop.ops import sym_infer, sint, UOp
 from tinygrad.runtime.autogen import libc
 from tinygrad.runtime.support.memory import BumpAllocator
@@ -491,6 +491,12 @@ class HCQCompiled(Compiled, Generic[SignalType]):
 
   def _is_cpu(self) -> bool: return hasattr(self, 'device') and self.device.split(":")[0] == "CPU"
 
+  def rdma_dev(self):
+    for i in itertools.count():
+      if (dev:=next((d for d in HCQCompiled.peer_groups[self.peer_group] if type(d).__name__ == 'RDMADevice'), None)): return dev
+      try: Device[f'RDMA:{i}']
+      except IndexError: raise RuntimeError(f"No RDMA found for peer group '{self.peer_group}'")
+
   def finalize(self):
     try: self.synchronize() # Try to finalize device in any case.
     except RuntimeError as e: print(f"{self.device} synchronization failed before finalizing: {e}")
@@ -512,6 +518,9 @@ class HCQBuffer:
   def cpu_view(self) -> MMIOInterface:
     assert self.view is not None, "buffer has no cpu_view"
     return self.view
+
+  @property
+  def base(self) -> HCQBuffer: return self._base or self
 
   @property
   def mappings(self): return self._mappings if self._base is None else self._base._mappings
@@ -602,6 +611,8 @@ class HCQAllocator(HCQAllocatorBase, Generic[HCQDeviceType]):
         dest.cast('B')[i:i+lsize] = self.b[0].cpu_view().view(size=lsize, fmt='B')[:]
 
   def _transfer(self, dest:HCQBuffer, src:HCQBuffer, sz:int, src_dev:HCQDeviceType, dest_dev:HCQDeviceType):
+    if src_dev.peer_group != dest_dev.peer_group: return src_dev.rdma_dev().allocator._transfer(dest, src, sz, src_dev, dest_dev)
+
     cast(HCQAllocator, src_dev.allocator).map(dest)
 
     assert src_dev.hw_copy_queue_t is not None
