@@ -1432,6 +1432,8 @@ def train_llama3():
     print(f"loading optim checkpoint from {fn}")
     load_state_dict(scheduler, safe_load(fn), realize=False)
 
+  fp8_amax = [t for ts in model._fp8_amax.values() for t in ts] if FP8 else []
+
   @TinyJit
   def minibatch(tokens:Tensor):
     if is_dp: tokens = tokens.to(None).shard(device, 0)
@@ -1444,7 +1446,7 @@ def train_llama3():
       apply_grad(g, new_g.uop)
 
     loss_cpu = loss.flatten().float().to("CPU")
-    return loss_cpu.realize(*grads)
+    return loss_cpu.realize(*grads, *fp8_amax)
 
   @TinyJit
   def optim_step():
