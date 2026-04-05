@@ -147,6 +147,29 @@ class HWQueue(Generic[SignalType, HCQDeviceType, ProgramType, ArgsStateType]):
       local_size: The local work size
     """
 
+  def write(self, b:HCQBuffer, val:sint, b64:bool=False):
+    """
+    Enqueues a command to write a value to a buffer address after all previously enqueued commands are completed. Only on compute queues.
+
+    Args:
+      b: The buffer to write to
+      val: The value to write
+      b64: If True, write a 64-bit value; otherwise write 32-bit
+    """
+    raise NotImplementedError("write not implemented")
+
+  def poll_bit(self, b:HCQBuffer, val:sint, mask:int):
+    """
+    Enqueues a poll command which halts execution until (mem[b] & mask) == val. Only on compute queues.
+    val must be 0 or mask (i.e. checks if masked bits are all clear or all set).
+
+    Args:
+      b: The buffer to poll
+      val: The expected value after masking (0 or mask)
+      mask: The bit mask to test
+    """
+    raise NotImplementedError("poll_bit not implemented")
+
   # *** commands for copy queues ***
 
   def copy(self, dest:HCQBuffer, src:HCQBuffer, copy_size:int):

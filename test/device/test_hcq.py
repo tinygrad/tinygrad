@@ -513,6 +513,43 @@ class TestHCQ(unittest.TestCase):
 
       assert buf2.as_memoryview()[0] == i
 
+  def test_write(self):
+    buf = Buffer(Device.DEFAULT, 4, dtypes.uint32, options=BufferSpec(cpu_access=True, nolru=True)).ensure_allocated()
+
+    try:
+      TestHCQ.d0.hw_compute_queue_t().write(buf._buf, 0x42) \
+                                     .signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
+    except NotImplementedError: self.skipTest("write not implemented")
+
+    TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
+    TestHCQ.d0.timeline_value += 1
+
+    assert buf.as_memoryview().cast("I")[0] == 0x42
+
+  def test_poll_bit_set(self):
+    buf = Buffer(Device.DEFAULT, 4, dtypes.uint32, options=BufferSpec(cpu_access=True, nolru=True)).ensure_allocated()
+
+    try:
+      TestHCQ.d0.hw_compute_queue_t().write(buf._buf, 0x01000000, b64=False) \
+                                     .poll_bit(buf._buf, 0x01000000, 0x01000000) \
+                                     .signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
+    except NotImplementedError: self.skipTest("write/poll_bit not implemented")
+
+    TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
+    TestHCQ.d0.timeline_value += 1
+
+  def test_poll_bit_clear(self):
+    buf = Buffer(Device.DEFAULT, 4, dtypes.uint32, options=BufferSpec(cpu_access=True, nolru=True)).ensure_allocated()
+
+    try:
+      TestHCQ.d0.hw_compute_queue_t().write(buf._buf, 0xFE000000, b64=False) \
+                                     .poll_bit(buf._buf, 0, 0x01000000) \
+                                     .signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
+    except NotImplementedError: self.skipTest("write/poll_bit not implemented")
+
+    TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
+    TestHCQ.d0.timeline_value += 1
+
   def test_map_cpu_buffer_to_device(self):
     if Device[Device.DEFAULT].hw_copy_queue_t is None: self.skipTest("skip device without copy queue")
 
