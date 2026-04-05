@@ -393,7 +393,7 @@ class HCQCompiled(Compiled, Generic[SignalType]):
     from tinygrad.runtime.graph.hcq import HCQGraph
     super().__init__(device, allocator, compilers, runtime, HCQGraph, arch=arch)
 
-    self.peer_group = self.iface.peer_group if hasattr(self, 'iface') else device.split(":")[0]
+    self.peer_group = getattr(getattr(self, 'iface', None), 'peer_group', device.split(":")[0])
     HCQCompiled.peer_groups[self.peer_group].append(self)
 
     self.signal_t, self.hw_compute_queue_t, self.hw_copy_queue_t = signal_t, comp_queue_t, copy_queue_t
