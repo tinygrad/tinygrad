@@ -1,5 +1,5 @@
 from __future__ import annotations
-import struct, time, random, json, sys, socket, ctypes, os, functools, itertools
+import struct, random, socket, ctypes, functools, itertools
 from tinygrad.helpers import getenv, wait_cond, round_up, next_power2, ceildiv, DEBUG, hi32, lo32
 from tinygrad.runtime.support.memory import BumpAllocator
 from tinygrad.runtime.support.system import PCIDevice
@@ -7,8 +7,8 @@ from tinygrad.runtime.autogen import mlx5, pci
 
 MLX_DEBUG = getenv("MLX_DEBUG", 0)
 
-MLX5_CMD_STRUCTS = {v: (getattr(mlx5, f"struct_mlx5_ifc_{n[12:].lower()}_in_bits", None), getattr(mlx5, f"struct_mlx5_ifc_{n[12:].lower()}_out_bits", None))
-                    for n, v in mlx5.__dict__.items() if n.startswith("MLX5_CMD_OP_")}
+MLX5_CMD_STRUCTS = {v: (getattr(mlx5, f"struct_mlx5_ifc_{n[12:].lower()}_in_bits", None),
+  getattr(mlx5, f"struct_mlx5_ifc_{n[12:].lower()}_out_bits", None)) for n, v in mlx5.__dict__.items() if n.startswith("MLX5_CMD_OP_")}
 MLX5_CMD_STRUCTS[mlx5.MLX5_CMD_OP_ACCESS_REG] = (mlx5.struct_mlx5_ifc_access_register_in_bits, mlx5.struct_mlx5_ifc_access_register_out_bits)
 
 def to_be(fmt, val): return struct.unpack('<'+fmt, struct.pack('>'+fmt, val))[0]
@@ -85,18 +85,19 @@ class MLXCmdQueue:
       _in=[int.from_bytes(inp[i:i+4], 'little') for i in range(0, 16, 4)],
       out_ptr=to_be('Q', out_ptr), outlen=to_be('I', 16 + out_sz), token=tok, status_own=mlx5.CMD_OWNER_HW)
     cmd_bytes = bytearray(bytes(cmd))
-    cmd_bytes[mlx5.struct_mlx5_cmd_layout.sig.offset] = (~functools.reduce(lambda a, b: a ^ b, cmd_bytes)) & 0xFF
+    cmd_bytes[mlx5.struct_mlx5_cmd_layout.sig.offset] = (~functools.reduce(lambda a, b: a ^ b, cmd_bytes)) & 0xFF  # type: ignore[attr-defined]
 
     # submit and wait for completion
     slot_view = self.queue.view(slot << self.log_stride, len(cmd_bytes))
     slot_view[:] = cmd_bytes
     self.dev.iseg_w('cmd_dbell', 1 << slot)
-    wait_cond(lambda: slot_view[mlx5.struct_mlx5_cmd_layout.status_own.offset] & mlx5.CMD_OWNER_HW, value=0, msg=f"cmd 0x{opcode:04x}")
+    wait_cond(lambda: slot_view[mlx5.struct_mlx5_cmd_layout.status_own.offset] & mlx5.CMD_OWNER_HW, value=0,  # type: ignore[attr-defined]
+              msg=f"cmd 0x{opcode:04x}")
 
     # check status and read output
-    assert slot_view[mlx5.struct_mlx5_cmd_layout.status_own.offset] >> 1 == 0, f"cmd 0x{opcode:04x} delivery error"
+    assert slot_view[mlx5.struct_mlx5_cmd_layout.status_own.offset] >> 1 == 0, f"cmd 0x{opcode:04x} delivery error"  # type: ignore[attr-defined]
 
-    out_view = slot_view.view(mlx5.struct_mlx5_cmd_layout.out.offset, 16 + out_sz)
+    out_view = slot_view.view(mlx5.struct_mlx5_cmd_layout.out.offset, 16 + out_sz)  # type: ignore[attr-defined]
     status, syndrome = struct.unpack('>I', out_view[0:4])[0] >> 24, struct.unpack('>I', out_view[4:8])[0]
     assert status == 0, f"cmd 0x{opcode:04x} failed status=0x{status:x} syn=0x{syndrome:08x}"
 
@@ -158,7 +159,6 @@ class MLXDev:
     self.cmd.exec(mlx5.MLX5_CMD_OP_SET_ROCE_ADDRESS, roce_address=dict(roce_version=2, source_l3_address=int.from_bytes(self.local_gid, 'big'),
                   roce_l3_type=0, source_mac_47_32=hi32(self.mac), source_mac_31_0=lo32(self.mac)), roce_address_index=0, vhca_port_num=1)
 
-
     if DEBUG >= 2: print(f"mlx5 {self.devfmt}: booted mac={self.mac.to_bytes(6,'big').hex(':')} mkey=0x{self.mkey:x}")
 
   def register_mem(self, paddrs:list[int], size:int, log_page_size:int=12) -> int:
@@ -211,11 +211,13 @@ class MLXQP:
       eq_context_entry=dict(log_eq_size=log_eq_size, uar_page=dev.uar, log_page_size=0))
 
     self.cq_mem, self.cq_paddrs, self.cq_info = self.create_queue(mlx5.MLX5_CMD_OP_CREATE_CQ, log_cq_size, entry_sz=64, owner_off=63,
-      cq_context=dict(log_cq_size=log_cq_size, uar_page=dev.uar, c_eqn_or_apu_element=self.eq_info['eq_number'], dbr_addr=dev.dbr_paddrs[0] + self.cq_dbr, log_page_size=0))
+      cq_context=dict(log_cq_size=log_cq_size, uar_page=dev.uar, c_eqn_or_apu_element=self.eq_info['eq_number'],
+                      dbr_addr=dev.dbr_paddrs[0] + self.cq_dbr, log_page_size=0))
 
     # create QP, buffer is RQ (16B stride) + SQ (64B stride)
     self.sq_offset = (1 << log_rq_size) << 4
-    self.qp_buf, self.qp_paddrs, self.qp_info = self.create_queue(mlx5.MLX5_CMD_OP_CREATE_QP, log_sq_size, entry_sz=64, owner_off=0, extra_sz=self.sq_offset,
+    self.qp_buf, self.qp_paddrs, self.qp_info = self.create_queue(mlx5.MLX5_CMD_OP_CREATE_QP, log_sq_size, entry_sz=64,
+      owner_off=0, extra_sz=self.sq_offset,
       qpc=dict(st=0, pm_state=3, pd=dev.pd, cqn_snd=self.cq_info['cqn'], cqn_rcv=self.cq_info['cqn'], log_msg_max=30, log_rq_size=log_rq_size,
                log_rq_stride=0, log_sq_size=log_sq_size, rlky=1, uar_page=dev.uar, log_page_size=0, dbr_addr=dev.dbr_paddrs[0] + self.qp_dbr))
 
@@ -236,8 +238,8 @@ class MLXQP:
 
   def connect(self, remote:MLXQP):
     self.qp_op(mlx5.MLX5_CMD_OP_INIT2RTR_QP, opt_param_mask=0x1A,
-      qpc_args=dict(mtu=5, log_msg_max=self.dev.caps['log_max_msg'], remote_qpn=remote.qp_info['qpn'], log_ack_req_freq=8, log_rra_max=3, rre=1, rwe=1,
-                    min_rnr_nak=1, next_rcv_psn=0),
+      qpc_args=dict(mtu=5, log_msg_max=self.dev.caps['log_max_msg'], remote_qpn=remote.qp_info['qpn'], log_ack_req_freq=8,
+                    log_rra_max=3, rre=1, rwe=1, min_rnr_nak=1, next_rcv_psn=0),
       addr_args=dict(pkey_index=0, src_addr_index=0, hop_limit=64, udp_sport=udp_sport(self.qp_info['qpn'], remote.qp_info['qpn']), vhca_port_num=1,
                      rmac_47_32=hi32(remote.dev.mac), rmac_31_0=lo32(remote.dev.mac), rgid_rip=int.from_bytes(remote.dev.local_gid, 'big')))
     self.qp_op(mlx5.MLX5_CMD_OP_RTR2RTS_QP, qpc_args=dict(log_ack_req_freq=8, next_send_psn=0, log_sra_max=3, retry_count=7, rnr_retry=7),

@@ -14,7 +14,7 @@ class RDMACopyQueue(HWQueue):
     super().__init__()
 
   def _wqe_data(self, buf:HCQBuffer, sz:int, nic:RDMADevice) -> bytes:
-    nic.allocator.map(buf)
+    cast(HCQAllocatorBase, nic.allocator).map(buf)
     return struct.pack('>IIQ', sz, buf.mappings[nic].meta, buf.mappings[nic].va_addr + (buf.va_addr - buf.base.va_addr))
 
   def encode_ring(self, hwq:HWQueue, dev:HCQCompiled, iface:MLXIface, qp:MLXQP, cq_buf:HCQBuffer,
@@ -27,7 +27,7 @@ class RDMACopyQueue(HWQueue):
     return self
 
   def copy(self, dest:HCQBuffer, src:HCQBuffer, sz:int):
-    src_qp, dest_qp, _, _ = self.dev.iface.connect(remote_nic:=src.owner.rdma_dev())
+    src_qp, dest_qp, _, _ = self.dev.iface.connect(remote_nic:=unwrap(src.owner).rdma_dev())
 
     sq_wqe = bytearray(64)
     sq_wqe[4:8] = struct.pack('>I', (dest_qp.qp_info['qpn'] << 8) | 2)
@@ -77,7 +77,8 @@ class RDMAAllocator(HCQAllocatorBase):
   def __init__(self, dev:RDMADevice): super().__init__(dev, batch_cnt=0)
 
   def _map(self, buf:HCQBuffer) -> HCQBuffer:
-    bar, paddrs = buf.base.owner.iface.pci_dev.bar_info(buf.base.owner.iface.vram_bar)[0], buf.base.meta.mapping.paddrs
+    owner = unwrap(buf.base.owner)
+    bar, paddrs = owner.iface.pci_dev.bar_info(owner.iface.vram_bar)[0], buf.base.meta.mapping.paddrs  # type: ignore[attr-defined]
     page_sz = (2 << 20) if min(sz for _, sz in paddrs) >= (2 << 20) else (4 << 10)
     pages = [bar + p + off for p, sz in paddrs for off in range(0, sz, page_sz)]
     return HCQBuffer(bar + paddrs[0][0], buf.base.size, owner=self.dev,
