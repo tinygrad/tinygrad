@@ -27,28 +27,28 @@ class RDMACopyQueue(HWQueue):
     return self
 
   def copy(self, dest:HCQBuffer, src:HCQBuffer, sz:int):
-    src_qp, dest_qp, _, _ = self.dev.iface.connect(remote_nic:=unwrap(src.owner).rdma_dev())
+    src_qp, dest_qp, _, _ = self.dev.iface.connect(remote_nic:=unwrap(dest.owner).rdma_dev())
 
     sq_wqe = bytearray(64)
-    sq_wqe[4:8] = struct.pack('>I', (dest_qp.qp_info['qpn'] << 8) | 2)
+    sq_wqe[4:8] = struct.pack('>I', (src_qp.qp_info['qpn'] << 8) | 2)
     sq_wqe[11] = 0x08 # CE: signal completion
-    sq_wqe[16:32] = self._wqe_data(src, sz, remote_nic)
+    sq_wqe[16:32] = self._wqe_data(src, sz, self.dev)
 
-    self.q(remote_nic, bytes(sq_wqe), self._wqe_data(dest, sz, self.dev))
+    self.q(remote_nic, bytes(sq_wqe), self._wqe_data(dest, sz, remote_nic))
     return self
 
   def _submit(self, dev:RDMADevice):
     for remote_nic, sq_wqe, rq_wqe in zip(self._q[0::3], self._q[1::3], self._q[2::3]):
       src_qp, dest_qp, _, _ = dev.iface.connect(remote_nic)
-      assert dest_qp.sq_head + 1 - dest_qp.cq_ci <= (1 << dest_qp.log_sq_size), "SQ ring full"
-      assert src_qp.rq_head + 1 - src_qp.cq_ci <= (1 << src_qp.log_rq_size), "RQ ring full"
-      src_qp.qp_buf.view((src_qp.rq_head & ((1 << src_qp.log_rq_size) - 1)) * 16, 16)[:] = rq_wqe
-      src_qp.rq_head += 1
-      sq_view = dest_qp.qp_buf.view(dest_qp.sq_offset + (dest_qp.sq_head & ((1 << dest_qp.log_sq_size) - 1)) * 64, 64)
-      sq_view[:] = struct.pack('>I', (dest_qp.sq_head << 8) | 0x0a) + sq_wqe[4:]
-      dest_qp.sq_head += 1
-      dest_qp.cq_ci += 1
+      assert src_qp.sq_head + 1 - src_qp.cq_ci <= (1 << src_qp.log_sq_size), "SQ ring full"
+      assert dest_qp.rq_head + 1 - dest_qp.cq_ci <= (1 << dest_qp.log_rq_size), "RQ ring full"
+      dest_qp.qp_buf.view((dest_qp.rq_head & ((1 << dest_qp.log_rq_size) - 1)) * 16, 16)[:] = rq_wqe
+      dest_qp.rq_head += 1
+      sq_view = src_qp.qp_buf.view(src_qp.sq_offset + (src_qp.sq_head & ((1 << src_qp.log_sq_size) - 1)) * 64, 64)
+      sq_view[:] = struct.pack('>I', (src_qp.sq_head << 8) | 0x0a) + sq_wqe[4:]
+      src_qp.sq_head += 1
       src_qp.cq_ci += 1
+      dest_qp.cq_ci += 1
 
 class MLXIface(PCIIfaceBase):
   def __init__(self, dev:RDMADevice, dev_id:int):
@@ -92,11 +92,11 @@ class RDMAAllocator(HCQAllocatorBase):
     # rdma body + encode doorbell rings
     src_qp, dest_qp, src_cq_buf, dest_cq_buf = self.dev.iface.connect(remote_nic:=dest_dev.rdma_dev())
     RDMACopyQueue(self.dev).copy(dest, src, sz) \
-                           .encode_ring(dest_q, dest_dev, remote_nic.iface, dest_qp, dest_cq_buf, dest_qp.qp_dbr + 4,
-                                        to_be('I', dest_qp.sq_head + 1), to_be('I', (dest_qp.cq_ci + 1) & 0xFFFFFF), dest_qp.cq_ci,
-                                        uar_db_val=to_be('Q', ((dest_qp.sq_head << 8) | 0x0a) << 32 | ((dest_qp.qp_info['qpn'] << 8) | 2))) \
-                           .encode_ring(src_q, src_dev, self.dev.iface, src_qp, src_cq_buf, src_qp.qp_dbr,
-                                        to_be('I', src_qp.rq_head + 1), to_be('I', (src_qp.cq_ci + 1) & 0xFFFFFF), src_qp.cq_ci) \
+                           .encode_ring(src_q, src_dev, self.dev.iface, src_qp, src_cq_buf, src_qp.qp_dbr + 4,
+                                        to_be('I', src_qp.sq_head + 1), to_be('I', (src_qp.cq_ci + 1) & 0xFFFFFF), src_qp.cq_ci,
+                                        uar_db_val=to_be('Q', ((src_qp.sq_head << 8) | 0x0a) << 32 | ((src_qp.qp_info['qpn'] << 8) | 2))) \
+                           .encode_ring(dest_q, dest_dev, remote_nic.iface, dest_qp, dest_cq_buf, dest_qp.qp_dbr,
+                                        to_be('I', dest_qp.rq_head + 1), to_be('I', (dest_qp.cq_ci + 1) & 0xFFFFFF), dest_qp.cq_ci) \
                            .submit(self.dev)
 
     # signal completion

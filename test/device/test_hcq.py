@@ -629,12 +629,12 @@ class TestHCQ(unittest.TestCase):
     b = Buffer(f"{Device.DEFAULT}:7", SZ, dtypes.uint8, options=BufferSpec(nolru=True)).allocate()
 
     # warmup
-    TestHCQ.d0.allocator._transfer(a._buf, b._buf, SZ, TestHCQ.d0, d1)
+    TestHCQ.d0.allocator._transfer(a._buf, b._buf, SZ, src_dev=d1, dest_dev=TestHCQ.d0)
     TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value - 1)
     d1.timeline_signal.wait(d1.timeline_value - 1)
 
     st = time.perf_counter()
-    TestHCQ.d0.allocator._transfer(a._buf, b._buf, SZ, TestHCQ.d0, d1)
+    TestHCQ.d0.allocator._transfer(a._buf, b._buf, SZ, src_dev=d1, dest_dev=TestHCQ.d0)
     TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value - 1)
     d1.timeline_signal.wait(d1.timeline_value - 1)
     et_ms = (time.perf_counter() - st) * 1e3
