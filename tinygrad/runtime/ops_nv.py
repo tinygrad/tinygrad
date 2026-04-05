@@ -548,12 +548,6 @@ class PCIIface(PCIIfaceBase):
     self.gpfifo_class, self.compute_class, self.dma_class = (gsp:=self.dev_impl.gsp).gpfifo_class, gsp.compute_class, gsp.dma_class
     self.viddec_class = None
 
-  def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, force_devmem=False, **kwargs) -> HCQBuffer:
-    # Force use of huge pages for large allocations. NVDev will attempt to use huge pages in any case,
-    # but if the size is not aligned, the tail will be allocated with 4KB pages, increasing TLB pressure.
-    return super().alloc(round_up(size, mmap.PAGESIZE if uncached or host else ((2 << 20) if size >= (8 << 20) else (4 << 10))),
-      host=host, uncached=uncached, cpu_access=cpu_access, contiguous=contiguous, force_devmem=force_devmem, **kwargs)
-
   def setup_usermode(self): return 0xce000000, self.pci_dev.map_bar(bar=0, fmt='I', off=0xbb0000, size=0x10000)
   def setup_vm(self, vaspace): pass
   def setup_gpfifo_vm(self, gpfifo): pass
