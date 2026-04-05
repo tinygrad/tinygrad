@@ -1,9 +1,44 @@
-import itertools
+import itertools, os
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 from tinygrad.helpers import getenv, DEBUG, prod, NOLOCALS, TC_OPT, TC_SELECT, USE_TC, AMX, IMAGE, BEAM
 from tinygrad.dtype import PtrDType, ImageDType
 from tinygrad.uop.ops import Ops, resolve, AxisType
 from tinygrad.codegen.opt.postrange import Scheduler
+
+def get_mv_cpu_upcasts() -> tuple[int, ...]:
+  return tuple(v for x in os.getenv("MV_CPU_UPCASTS", os.getenv("MV_CPU_UPCAST", "16,2,2")).split(",") if (v:=int(x)) > 1)
+
+def cpu_matvec_heuristic(k:Scheduler, allow_unroll:bool=True) -> Scheduler|None:
+  MV_CPU_UPCASTS, MV_CPU_UNROLL = get_mv_cpu_upcasts(), getenv("MV_CPU_UNROLL", 1)
+  if not (getenv("MV", 1) != 0 and k.reduceop is not None and k.reduceop.arg[0] is Ops.ADD and len(k.full_shape) >= 2 and
+          (mulop:=k.reduceop.src[0]).op is Ops.MUL and mulop.src[0].op is Ops.INDEX and mulop.src[1].op is Ops.INDEX):
+    return None
+  idx0, idx1 = mulop.src[0].src[1].get_idx(), mulop.src[1].src[1].get_idx()
+  if not k.ranges_of(AxisType.REDUCE): return None
+  first_reduce_rng = k.ranges_of(AxisType.REDUCE)[0]
+  if not (any(u is first_reduce_rng for u in idx0.split_uop(Ops.ADD)) and all(r in idx1.ranges for r in idx0.ranges)): return None
+  if k.ren.has_local or (not MV_CPU_UPCASTS and MV_CPU_UNROLL <= 1): return None
+
+  reduce_axis = k.rngs.index(first_reduce_rng)
+  reduce_unroll_axis = k.unrollable_dims.index(reduce_axis) if reduce_axis in k.unrollable_dims else None
+  for global_idx in k.axes_of(AxisType.LOOP):
+    if MV_CPU_UPCASTS and not any(k.full_shape[global_idx] % amt == 0 for amt in MV_CPU_UPCASTS): continue
+    if DEBUG >= 3:
+      print(f"CPU MATVEC: {k.full_shape=} {first_reduce_rng.render()} {MV_CPU_UPCASTS=} {MV_CPU_UNROLL=} {allow_unroll=}")
+    applied_upcasts = []
+    for amt in MV_CPU_UPCASTS:
+      try:
+        if k.full_shape[global_idx] % amt == 0:
+          k.apply_opt(Opt(OptOps.UPCAST, global_idx, amt))
+          applied_upcasts.append(amt)
+      except KernelOptError: pass
+    try:
+      if allow_unroll and MV_CPU_UNROLL > 1 and reduce_unroll_axis is not None:
+        k.apply_opt(Opt(OptOps.UNROLL, reduce_unroll_axis, MV_CPU_UNROLL))
+    except KernelOptError: pass
+    return k if applied_upcasts or any(opt.op is OptOps.UNROLL for opt in k.applied_opts) else None
+  return None
+
 
 def hand_coded_optimizations(k:Scheduler) -> Scheduler:
   # first try the tensor cores
@@ -63,7 +98,6 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
 
   # should use matvec - TODO: adjust/tune based on the wide vs tall/large vs small mat
   MV_BLOCKSIZE, MV_THREADS_PER_ROW, MV_ROWS_PER_THREAD = getenv("MV_BLOCKSIZE", 4), getenv("MV_THREADS_PER_ROW", 8), getenv("MV_ROWS_PER_THREAD", 4)
-  MV_CPU_UPCAST, MV_CPU_UNROLL = getenv("MV_CPU_UPCAST", 16), getenv("MV_CPU_UNROLL", 4)
   if getenv("MV",1) != 0 and k.reduceop is not None and k.reduceop.arg[0] is Ops.ADD and len(k.full_shape) >= 2 and \
     (mulop:=k.reduceop.src[0]).op is Ops.MUL and mulop.src[0].op is Ops.INDEX and mulop.src[1].op is Ops.INDEX:
     idx0, idx1 = mulop.src[0].src[1].get_idx(), mulop.src[1].src[1].get_idx()
@@ -81,21 +115,7 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
               if MV_BLOCKSIZE > 1: k.apply_opt(Opt(OptOps.LOCAL, global_idx, MV_BLOCKSIZE))
               if MV_ROWS_PER_THREAD > 1: k.apply_opt(Opt(OptOps.UPCAST, global_idx, MV_ROWS_PER_THREAD))
               return k
-        if not k.ren.has_local and (MV_CPU_UPCAST > 1 or MV_CPU_UNROLL > 1):
-          reduce_axis = k.rngs.index(first_reduce_rng)
-          reduce_unroll_axis = k.unrollable_dims.index(reduce_axis) if reduce_axis in k.unrollable_dims else None
-          for global_idx in k.axes_of(AxisType.LOOP):
-            if k.full_shape[global_idx] % MV_CPU_UPCAST == 0:
-              if DEBUG >= 3:
-                print(f"CPU MATVEC: {k.full_shape=} {first_reduce_rng.render()} {MV_CPU_UPCAST=} {MV_CPU_UNROLL=}")
-              try:
-                if MV_CPU_UPCAST > 1: k.apply_opt(Opt(OptOps.UPCAST, global_idx, MV_CPU_UPCAST))
-              except KernelOptError: pass
-              try:
-                if MV_CPU_UNROLL > 1 and reduce_unroll_axis is not None and BEAM == 0:
-                  k.apply_opt(Opt(OptOps.UNROLL, reduce_unroll_axis, MV_CPU_UNROLL))
-              except KernelOptError: pass
-              return k
+        if (ret:=cpu_matvec_heuristic(k, allow_unroll=BEAM == 0)) is not None: return ret
 
   # are we grouping? (requires local shape support)
   if resolve(prod(k.output_shape[i] for i in k.upcastable_dims) <= (240 if NOLOCALS else 2048), False):

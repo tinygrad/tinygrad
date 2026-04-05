@@ -1,10 +1,10 @@
 import unittest
+from types import SimpleNamespace
 from tinygrad import Device, Tensor, dtypes
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
-from tinygrad.codegen.opt.heuristic import hand_coded_optimizations
+from tinygrad.codegen.opt.heuristic import hand_coded_optimizations, cpu_matvec_heuristic
 from tinygrad.codegen.opt.postrange import Scheduler
-from tinygrad.helpers import Context
-from tinygrad.uop.ops import AxisType
+from tinygrad.codegen.opt.search import beam_search_cache_key, beam_search_seeds
 
 # TODO: write a clean version of this
 from test.backend.test_linearizer import helper_linearizer_opt
@@ -61,27 +61,45 @@ class TestKernelOpts(unittest.TestCase):
 
   @unittest.skipUnless(Device.DEFAULT == "CPU", "cpu-specific test")
   @unittest.skipUnless(not Device[Device.DEFAULT].renderer.has_local, "test requires no-local CPU renderer")
-  def test_cpu_matvec_heuristic_uses_upcast_unroll(self):
+  def test_cpu_matvec_heuristic_matches_beam_upcasts(self):
+    r = Tensor.rand(1024) @ Tensor.rand(1024, 4096)
+    out = hand_coded_optimizations(Scheduler(r.schedule()[-1].ast, Device[Device.DEFAULT].renderer))
+    upcasts = [opt for opt in out.applied_opts if opt.op is OptOps.UPCAST]
+    self.assertEqual([(opt.axis, opt.arg) for opt in upcasts], [(0, 16), (0, 2), (0, 2)])
+    self.assertFalse(any(opt.op is OptOps.UNROLL for opt in out.applied_opts))
+    self.assertFalse(any(opt.op in {OptOps.LOCAL, OptOps.GROUP, OptOps.GROUPTOP} for opt in out.applied_opts))
+
+  @unittest.skipUnless(Device.DEFAULT == "CPU", "cpu-specific test")
+  @unittest.skipUnless(not Device[Device.DEFAULT].renderer.has_local, "test requires no-local CPU renderer")
+  def test_cpu_matvec_beam_seed_uses_beam_upcasts(self):
     r = Tensor.rand(1024) @ Tensor.rand(1024, 4096)
     k = Scheduler(r.schedule()[-1].ast, Device[Device.DEFAULT].renderer)
-    first_reduce_axis = k.rngs.index(k.ranges_of(AxisType.REDUCE)[0])
-    expected_unroll_axis = k.unrollable_dims.index(first_reduce_axis)
-    out = hand_coded_optimizations(k)
-    upcasts = [opt for opt in out.applied_opts if opt.op is OptOps.UPCAST]
-    unrolls = [opt for opt in out.applied_opts if opt.op is OptOps.UNROLL]
-    self.assertTrue(upcasts)
-    self.assertEqual([opt.axis for opt in unrolls], [expected_unroll_axis])
-    self.assertFalse(any(opt.op in {OptOps.LOCAL, OptOps.GROUP, OptOps.GROUPTOP} for opt in out.applied_opts))
+    seeded = beam_search_seeds(k)
+    self.assertEqual(len(seeded), 2)
+    self.assertEqual([opt.arg for opt in seeded[1].applied_opts if opt.op is OptOps.UPCAST], [16, 2, 2])
+    self.assertFalse(any(opt.op is OptOps.UNROLL for opt in seeded[1].applied_opts))
 
   @unittest.skipUnless(Device.DEFAULT == "CPU", "cpu-specific test")
   @unittest.skipUnless(not Device[Device.DEFAULT].renderer.has_local, "test requires no-local CPU renderer")
   def test_cpu_matvec_heuristic_skips_unroll_with_beam(self):
     r = Tensor.rand(1024) @ Tensor.rand(1024, 4096)
-    with Context(BEAM=2):
-      out = hand_coded_optimizations(Scheduler(r.schedule()[-1].ast, Device[Device.DEFAULT].renderer))
-    self.assertTrue(any(opt.op is OptOps.UPCAST for opt in out.applied_opts))
+    out = cpu_matvec_heuristic(Scheduler(r.schedule()[-1].ast, Device[Device.DEFAULT].renderer), allow_unroll=False)
+    self.assertIsNotNone(out)
+    self.assertEqual([opt.arg for opt in out.applied_opts if opt.op is OptOps.UPCAST], [16, 2, 2])
     self.assertFalse(any(opt.op is OptOps.UNROLL for opt in out.applied_opts))
     self.assertFalse(any(opt.op in {OptOps.LOCAL, OptOps.GROUP, OptOps.GROUPTOP} for opt in out.applied_opts))
+
+  @unittest.skipUnless(Device.DEFAULT == "CPU", "cpu-specific test")
+  @unittest.skipUnless(not Device[Device.DEFAULT].renderer.has_local, "test requires no-local CPU renderer")
+  def test_cpu_matvec_beam_cache_key_tracks_threads_and_seed(self):
+    r = Tensor.rand(1024) @ Tensor.rand(1024, 4096)
+    k = Scheduler(r.schedule()[-1].ast, Device[Device.DEFAULT].renderer)
+    seeded = beam_search_seeds(k)
+    base_key = beam_search_cache_key(k, 2, True, seeded)
+    k_no_threads = k.copy()
+    k_no_threads.ren = SimpleNamespace(target=k.ren.target, suffix=k.ren.suffix, has_threads=not k.ren.has_threads, has_local=k.ren.has_local)
+    self.assertNotEqual(base_key, beam_search_cache_key(k_no_threads, 2, True, [k_no_threads]))
+    self.assertNotEqual(base_key, beam_search_cache_key(k, 2, True, [k]))
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")

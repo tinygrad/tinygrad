@@ -1,6 +1,6 @@
 import functools, math, time, multiprocessing, traceback, signal, atexit
 from dataclasses import replace
-from tinygrad.uop.ops import sym_infer, AxisType, pyrender
+from tinygrad.uop.ops import sym_infer, AxisType, Ops, pyrender
 from tinygrad.device import Device, Buffer, Compiler
 from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, colored, time_to_str, unwrap
 from tinygrad.helpers import IGNORE_BEAM_CACHE
@@ -120,15 +120,32 @@ def get_kernel_actions(s:Scheduler, include_0=True, max_up:int|None=None) -> dic
   return acted
 
 beam_pool, BEAM_DEBUG = None, getenv("BEAM_DEBUG")
+
+def beam_search_seeds(s:Scheduler) -> list[Scheduler]:
+  seeds = [s]
+  if not any(u.op is Ops.BUFFERIZE for u in s.ast.backward_slice):
+    from tinygrad.codegen.opt.heuristic import cpu_matvec_heuristic
+    if (seed:=cpu_matvec_heuristic(s.copy(), allow_unroll=False)) is not None and seed.applied_opts != s.applied_opts:
+      seeds.append(seed)
+  return seeds
+
+def beam_search_cache_key(s:Scheduler, amt:int, allow_test_size:bool, seeds:list[Scheduler]) -> dict[str, str|int|bool]:
+  seed_key = '|'.join(map(repr, (si.applied_opts for si in seeds)))
+  return {"ast": s.ast.key, "amt": amt, "allow_test_size": allow_test_size,
+          "device": repr(s.ren.target), "suffix": f"{s.ren.suffix}|thr={int(s.ren.has_threads)}|lcl={int(s.ren.has_local)}|seed={seed_key}"}
+
 def beam_search(s:Scheduler, rawbufs:list[Buffer], amt:int, allow_test_size=True, disable_cache=IGNORE_BEAM_CACHE.value):
   global beam_pool
-  key = {"ast": s.ast.key, "amt": amt, "allow_test_size": allow_test_size, "device": s.ren.target.device, "suffix": s.ren.suffix}
+  seeds = beam_search_seeds(s)
+  key = beam_search_cache_key(s, amt, allow_test_size, seeds)
   if not disable_cache and CACHELEVEL >= 1 and (val:=diskcache_get("beam_search", key)) is not None:
     ret = s.copy()
-    for o in val[len(s.applied_opts):]: ret.apply_opt(o)
-    return ret
+    try:
+      for o in val[len(s.applied_opts):]: ret.apply_opt(o)
+      return ret
+    except KernelOptError: pass
 
-  beam: list[tuple[Scheduler, float]] = [(s, float("inf"))]
+  beam: list[tuple[Scheduler, float]] = [(si, float("inf")) for si in seeds]
   seen_libs = set()
 
   default_parallel = multiprocessing.cpu_count() if s.ren.target.device in {"CUDA", "AMD", "NV", "METAL", "HIP"} else 0
@@ -146,10 +163,11 @@ def beam_search(s:Scheduler, rawbufs:list[Buffer], amt:int, allow_test_size=True
   try:
     rawbufs = _ensure_buffer_alloc(rawbufs)
     var_vals: dict[str, int] = {k.expr:int(k.vmax+k.vmin)//2 for k in s.ast.variables()}
-    exiting, st = False, time.perf_counter()
+    exiting, st, include_0 = False, time.perf_counter(), len(beam) > 1
     dev = Device[s.ren.target.device]
     while not exiting:
-      candidates: list[Scheduler] = flatten([get_kernel_actions(si, include_0=False).values() for si,_ in beam])
+      candidates: list[Scheduler] = flatten([get_kernel_actions(si, include_0=include_0).values() for si,_ in beam])
+      include_0 = False
       timed: list[tuple[Scheduler, float]] = []
       _compile_fn = functools.partial(_try_compile, compiler=dev.compiler)
       least_compute_ops = math.inf
