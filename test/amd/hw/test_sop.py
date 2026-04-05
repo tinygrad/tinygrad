@@ -951,13 +951,13 @@ class TestBarrier(unittest.TestCase):
       v_lshlrev_b32_e32(v[3], 2, v[1]),
       # Store (tid+1) to LDS[tid*4]
       ds_store_b32(addr=v[3], data0=v[2]),
-      s_waitcnt(lgkmcnt=0),
+      s_waitcnt(simm16=0xfc07),
       s_barrier(),
       # Read from the other wave's slot: LDS[(tid^32)*4]
       v_xor_b32_e32(v[4], 32, v[1]),
       v_lshlrev_b32_e32(v[5], 2, v[4]),
       ds_load_b32(addr=v[5], vdst=v[0]),
-      s_waitcnt(lgkmcnt=0),
+      s_waitcnt(simm16=0xfc07),
     ]
     st = run_program(instructions, n_lanes=64)
     for tid in range(64):
@@ -979,24 +979,24 @@ class TestBarrier(unittest.TestCase):
       v_lshlrev_b32_e32(v[3], 2, v[1]),
       # Phase 1: write (tid+100) to LDS[tid*4]
       ds_store_b32(addr=v[3], data0=v[2]),
-      s_waitcnt(lgkmcnt=0),
+      s_waitcnt(simm16=0xfc07),
       s_barrier(),
       # Phase 2: read from other wave, add 1000, write to separate LDS region
       v_xor_b32_e32(v[4], 32, v[1]),
       v_lshlrev_b32_e32(v[5], 2, v[4]),
       ds_load_b32(addr=v[5], vdst=v[6]),
-      s_waitcnt(lgkmcnt=0),
+      s_waitcnt(simm16=0xfc07),
       v_add_nc_u32_e32(v[7], 0x3e8, v[6]),
       v_add_nc_u32_e32(v[8], 64, v[1]),
       v_lshlrev_b32_e32(v[9], 2, v[8]),
       ds_store_b32(addr=v[9], data0=v[7]),
-      s_waitcnt(lgkmcnt=0),
+      s_waitcnt(simm16=0xfc07),
       s_barrier(),
       # Phase 3: read other wave's phase-2 output into v[0]
       v_add_nc_u32_e32(v[10], 64, v[4]),
       v_lshlrev_b32_e32(v[11], 2, v[10]),
       ds_load_b32(addr=v[11], vdst=v[0]),
-      s_waitcnt(lgkmcnt=0),
+      s_waitcnt(simm16=0xfc07),
     ]
     st = run_program(instructions, n_lanes=64)
     for tid in range(64):

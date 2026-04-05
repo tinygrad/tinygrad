@@ -12,10 +12,10 @@ class TestGlobalAtomic(unittest.TestCase):
     """Helper to create atomic test instructions."""
     instructions = [
       s_load_b64(s[2:3], s[80:81], 0, soffset=SrcEnum.NULL),
-      s_waitcnt(lgkmcnt=0),
+      s_waitcnt(simm16=0xfc07),
       v_mov_b32_e32(v[0], s[2]),
       v_mov_b32_e32(v[1], s[3]),
-    ] + setup_instrs + [atomic_instr, s_waitcnt(vmcnt=0),
+    ] + setup_instrs + [atomic_instr, s_waitcnt(simm16=0x03f7),
       v_mov_b32_e32(v[0], 0),
       v_mov_b32_e32(v[1], 0),
       s_mov_b32(s[2], 0),
@@ -31,7 +31,7 @@ class TestGlobalAtomic(unittest.TestCase):
       s_mov_b32(s[0], 100),
       v_mov_b32_e32(v[2], s[0]),
       global_store_b32(addr=v[0:1], data=v[2], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt(simm16=0x03f7),
       s_mov_b32(s[0], 50),
       v_mov_b32_e32(v[3], s[0]),
     ]
@@ -49,7 +49,7 @@ class TestGlobalAtomic(unittest.TestCase):
       s_mov_b32(s[0], 0x00000000),
       v_mov_b32_e32(v[3], s[0]),
       global_store_b64(addr=v[0:1], data=v[2:3], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt(simm16=0x03f7),
       s_mov_b32(s[0], 0x00000001),
       v_mov_b32_e32(v[4], s[0]),
       s_mov_b32(s[0], 0x00000000),
@@ -70,7 +70,7 @@ class TestGlobalLoad(unittest.TestCase):
     TEST_OFFSET = 2000
     instructions = [
       s_load_b64(s[2:3], s[80:81], 0, soffset=SrcEnum.NULL),
-      s_waitcnt(lgkmcnt=0),
+      s_waitcnt(simm16=0xfc07),
       v_mov_b32_e32(v[0], s[2]),
       v_mov_b32_e32(v[1], s[3]),
       s_mov_b32(s[0], 0xAAAAAAAA),
@@ -80,9 +80,9 @@ class TestGlobalLoad(unittest.TestCase):
       s_mov_b32(s[0], 0xCCCCCCCC),
       v_mov_b32_e32(v[4], s[0]),
       global_store_b96(addr=v[0:1], data=v[2:4], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt(simm16=0x03f7),
       GLOBAL(GLOBALOp.GLOBAL_LOAD_B96, addr=v[0:1], vdst=v[5:7], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt(simm16=0x03f7),
       v_mov_b32_e32(v[0], 0),
       v_mov_b32_e32(v[1], 0),
       s_mov_b32(s[2], 0),
@@ -98,7 +98,7 @@ class TestGlobalLoad(unittest.TestCase):
     TEST_OFFSET = 2000
     instructions = [
       s_load_b64(s[2:3], s[80:81], 0, soffset=SrcEnum.NULL),
-      s_waitcnt(lgkmcnt=0),
+      s_waitcnt(simm16=0xfc07),
       v_mov_b32_e32(v[0], s[2]),
       v_mov_b32_e32(v[1], s[3]),
       s_mov_b32(s[0], 0xDEADBEEF),
@@ -110,9 +110,9 @@ class TestGlobalLoad(unittest.TestCase):
       s_mov_b32(s[0], 0x9ABCDEF0),
       v_mov_b32_e32(v[5], s[0]),
       global_store_b128(addr=v[0:1], data=v[2:5], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt(simm16=0x03f7),
       GLOBAL(GLOBALOp.GLOBAL_LOAD_B128, addr=v[0:1], vdst=v[6:9], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt(simm16=0x03f7),
       v_mov_b32_e32(v[0], 0),
       v_mov_b32_e32(v[1], 0),
       s_mov_b32(s[2], 0),
@@ -133,20 +133,20 @@ class TestGlobalStore(unittest.TestCase):
     TEST_OFFSET = 256
     instructions = [
       s_load_b64(s[2:3], s[80:81], 0, soffset=SrcEnum.NULL),
-      s_waitcnt(lgkmcnt=0),
+      s_waitcnt(simm16=0xfc07),
       # First store 0xDEADBEEF to memory
       s_mov_b32(s[4], 0xDEADBEEF),
       v_mov_b32_e32(v[2], s[4]),
       v_mov_b32_e32(v[0], 0),
       global_store_b32(addr=v[0], data=v[2], saddr=s[2:3], offset=TEST_OFFSET),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt(simm16=0x03f7),
       # Now store single byte 0x42 to same address (should only change byte 0)
       v_mov_b32_e32(v[2], 0x42),
       global_store_b8(addr=v[0], data=v[2], saddr=s[2:3], offset=TEST_OFFSET),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt(simm16=0x03f7),
       # Read back and check
       GLOBAL(GLOBALOp.GLOBAL_LOAD_B32, addr=v[0], vdst=v[3], data=v[3], saddr=s[2:3], offset=TEST_OFFSET),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt(simm16=0x03f7),
       v_mov_b32_e32(v[0], v[3]),
       s_mov_b32(s[2], 0),
       s_mov_b32(s[3], 0),
@@ -160,17 +160,17 @@ class TestGlobalStore(unittest.TestCase):
     TEST_OFFSET = 256
     instructions = [
       s_load_b64(s[2:3], s[80:81], 0, soffset=SrcEnum.NULL),
-      s_waitcnt(lgkmcnt=0),
+      s_waitcnt(simm16=0xfc07),
       s_mov_b32(s[4], 0xDEADBEEF),
       v_mov_b32_e32(v[2], s[4]),
       v_mov_b32_e32(v[0], 0),
       global_store_b32(addr=v[0], data=v[2], saddr=s[2:3], offset=TEST_OFFSET),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt(simm16=0x03f7),
       v_mov_b32_e32(v[2], 0x42),
       global_store_b8(addr=v[0], data=v[2], saddr=s[2:3], offset=TEST_OFFSET+1),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt(simm16=0x03f7),
       GLOBAL(GLOBALOp.GLOBAL_LOAD_B32, addr=v[0], vdst=v[3], data=v[3], saddr=s[2:3], offset=TEST_OFFSET),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt(simm16=0x03f7),
       v_mov_b32_e32(v[0], v[3]),
       s_mov_b32(s[2], 0),
       s_mov_b32(s[3], 0),
@@ -183,18 +183,18 @@ class TestGlobalStore(unittest.TestCase):
     TEST_OFFSET = 256
     instructions = [
       s_load_b64(s[2:3], s[80:81], 0, soffset=SrcEnum.NULL),
-      s_waitcnt(lgkmcnt=0),
+      s_waitcnt(simm16=0xfc07),
       s_mov_b32(s[4], 0xDEADBEEF),
       v_mov_b32_e32(v[2], s[4]),
       v_mov_b32_e32(v[0], 0),
       global_store_b32(addr=v[0], data=v[2], saddr=s[2:3], offset=TEST_OFFSET),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt(simm16=0x03f7),
       s_mov_b32(s[4], 0xCAFE),
       v_mov_b32_e32(v[2], s[4]),
       global_store_b16(addr=v[0], data=v[2], saddr=s[2:3], offset=TEST_OFFSET),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt(simm16=0x03f7),
       GLOBAL(GLOBALOp.GLOBAL_LOAD_B32, addr=v[0], vdst=v[3], data=v[3], saddr=s[2:3], offset=TEST_OFFSET),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt(simm16=0x03f7),
       v_mov_b32_e32(v[0], v[3]),
       s_mov_b32(s[2], 0),
       s_mov_b32(s[3], 0),
@@ -207,18 +207,18 @@ class TestGlobalStore(unittest.TestCase):
     TEST_OFFSET = 256
     instructions = [
       s_load_b64(s[2:3], s[80:81], 0, soffset=SrcEnum.NULL),
-      s_waitcnt(lgkmcnt=0),
+      s_waitcnt(simm16=0xfc07),
       s_mov_b32(s[4], 0xDEADBEEF),
       v_mov_b32_e32(v[2], s[4]),
       v_mov_b32_e32(v[0], 0),
       global_store_b32(addr=v[0], data=v[2], saddr=s[2:3], offset=TEST_OFFSET),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt(simm16=0x03f7),
       s_mov_b32(s[4], 0xCAFE),
       v_mov_b32_e32(v[2], s[4]),
       global_store_b16(addr=v[0], data=v[2], saddr=s[2:3], offset=TEST_OFFSET+2),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt(simm16=0x03f7),
       GLOBAL(GLOBALOp.GLOBAL_LOAD_B32, addr=v[0], vdst=v[3], data=v[3], saddr=s[2:3], offset=TEST_OFFSET),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt(simm16=0x03f7),
       v_mov_b32_e32(v[0], v[3]),
       s_mov_b32(s[2], 0),
       s_mov_b32(s[3], 0),
@@ -231,19 +231,19 @@ class TestGlobalStore(unittest.TestCase):
     TEST_OFFSET = 256
     instructions = [
       s_load_b64(s[2:3], s[80:81], 0, soffset=SrcEnum.NULL),
-      s_waitcnt(lgkmcnt=0),
+      s_waitcnt(simm16=0xfc07),
       s_mov_b32(s[4], 0xDDCCBBAA),
       v_mov_b32_e32(v[2], s[4]),
       v_mov_b32_e32(v[0], 0),
       global_store_b32(addr=v[0], data=v[2], saddr=s[2:3], offset=TEST_OFFSET),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt(simm16=0x03f7),
       # Store 0xBEEF at byte offset 1 (bytes 1-2)
       s_mov_b32(s[4], 0xBEEF),
       v_mov_b32_e32(v[2], s[4]),
       global_store_b16(addr=v[0], data=v[2], saddr=s[2:3], offset=TEST_OFFSET+1),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt(simm16=0x03f7),
       GLOBAL(GLOBALOp.GLOBAL_LOAD_B32, addr=v[0], vdst=v[3], data=v[3], saddr=s[2:3], offset=TEST_OFFSET),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt(simm16=0x03f7),
       v_mov_b32_e32(v[0], v[3]),
       s_mov_b32(s[2], 0),
       s_mov_b32(s[3], 0),
@@ -259,7 +259,7 @@ class TestGlobalStore(unittest.TestCase):
     TEST_OFFSET = 256
     instructions = [
       s_load_b64(s[2:3], s[80:81], 0, soffset=SrcEnum.NULL),
-      s_waitcnt(lgkmcnt=0),
+      s_waitcnt(simm16=0xfc07),
       # Initialize two consecutive words
       s_mov_b32(s[4], 0xDDCCBBAA),
       v_mov_b32_e32(v[2], s[4]),
@@ -268,18 +268,18 @@ class TestGlobalStore(unittest.TestCase):
       s_mov_b32(s[4], 0x44332211),
       v_mov_b32_e32(v[2], s[4]),
       global_store_b32(addr=v[0], data=v[2], saddr=s[2:3], offset=TEST_OFFSET+4),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt(simm16=0x03f7),
       # Store 0xBEEF at byte offset 3 (crosses word boundary)
       # Low byte (0xEF) goes to byte 3 of first word
       # High byte (0xBE) goes to byte 0 of second word
       s_mov_b32(s[4], 0xBEEF),
       v_mov_b32_e32(v[2], s[4]),
       global_store_b16(addr=v[0], data=v[2], saddr=s[2:3], offset=TEST_OFFSET+3),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt(simm16=0x03f7),
       # Load back both words
       GLOBAL(GLOBALOp.GLOBAL_LOAD_B32, addr=v[0], vdst=v[3], data=v[3], saddr=s[2:3], offset=TEST_OFFSET),
       GLOBAL(GLOBALOp.GLOBAL_LOAD_B32, addr=v[0], vdst=v[4], data=v[4], saddr=s[2:3], offset=TEST_OFFSET+4),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt(simm16=0x03f7),
       v_mov_b32_e32(v[0], v[3]),
       v_mov_b32_e32(v[1], v[4]),
       s_mov_b32(s[2], 0),
@@ -296,16 +296,16 @@ class TestGlobalStore(unittest.TestCase):
     TEST_OFFSET = 256
     instructions = [
       s_load_b64(s[2:3], s[80:81], 0, soffset=SrcEnum.NULL),
-      s_waitcnt(lgkmcnt=0),
+      s_waitcnt(simm16=0xfc07),
       s_mov_b32(s[4], 0xDEADBEEF),
       s_mov_b32(s[5], 0xCAFEBABE),
       v_mov_b32_e32(v[2], s[4]),
       v_mov_b32_e32(v[3], s[5]),
       v_mov_b32_e32(v[0], 0),
       global_store_b64(addr=v[0], data=v[2:3], saddr=s[2:3], offset=TEST_OFFSET),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt(simm16=0x03f7),
       GLOBAL(GLOBALOp.GLOBAL_LOAD_B64, addr=v[0], vdst=v[4:5], data=v[4:5], saddr=s[2:3], offset=TEST_OFFSET),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt(simm16=0x03f7),
       v_mov_b32_e32(v[0], v[4]),
       v_mov_b32_e32(v[1], v[5]),
       s_mov_b32(s[2], 0),
@@ -324,17 +324,17 @@ class TestD16HiLoads(unittest.TestCase):
     TEST_OFFSET = 256
     instructions = [
       s_load_b64(s[2:3], s[80:81], 0, soffset=SrcEnum.NULL),
-      s_waitcnt(lgkmcnt=0),
+      s_waitcnt(simm16=0xfc07),
       v_mov_b32_e32(v[0], s[2]),
       v_mov_b32_e32(v[1], s[3]),
       s_mov_b32(s[4], 0xCAFE),
       v_mov_b32_e32(v[2], s[4]),
       global_store_b16(addr=v[0:1], data=v[2], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt(simm16=0x03f7),
       s_mov_b32(s[4], 0x0000BEEF),
       v_mov_b32_e32(v[3], s[4]),
       GLOBAL(GLOBALOp.GLOBAL_LOAD_D16_HI_B16, addr=v[0:1], vdst=v[3], data=v[3], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt(simm16=0x03f7),
       v_mov_b32_e32(v[0], v[3]),
       v_mov_b32_e32(v[1], 0),
       s_mov_b32(s[2], 0),
@@ -349,17 +349,17 @@ class TestD16HiLoads(unittest.TestCase):
     TEST_OFFSET = 256
     instructions = [
       s_load_b64(s[2:3], s[80:81], 0, soffset=SrcEnum.NULL),
-      s_waitcnt(lgkmcnt=0),
+      s_waitcnt(simm16=0xfc07),
       s_mov_b32(s[4], 0xCAFE),
       v_mov_b32_e32(v[2], s[4]),
       v_mov_b32_e32(v[3], 0),
       global_store_b16(addr=v[3], data=v[2], saddr=s[2:3], offset=TEST_OFFSET),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt(simm16=0x03f7),
       s_mov_b32(s[4], 0x0000DEAD),
       v_mov_b32_e32(v[0], s[4]),  # data field - should NOT affect result
       v_mov_b32_e32(v[1], 0),     # vdst - low bits should be preserved
       GLOBAL(GLOBALOp.GLOBAL_LOAD_D16_HI_B16, addr=v[1], vdst=v[1], data=v[0], saddr=s[2:3], offset=TEST_OFFSET),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt(simm16=0x03f7),
       v_mov_b32_e32(v[0], v[1]),
       s_mov_b32(s[2], 0),
       s_mov_b32(s[3], 0),
@@ -373,19 +373,19 @@ class TestD16HiLoads(unittest.TestCase):
     TEST_OFFSET = 256
     instructions = [
       s_load_b64(s[2:3], s[80:81], 0, soffset=SrcEnum.NULL),
-      s_waitcnt(lgkmcnt=0),
+      s_waitcnt(simm16=0xfc07),
       s_mov_b32(s[4], 0xAB),
       v_mov_b32_e32(v[2], s[4]),
       v_mov_b32_e32(v[3], 0),
       global_store_b8(addr=v[3], data=v[2], saddr=s[2:3], offset=TEST_OFFSET),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt(simm16=0x03f7),
       s_mov_b32(s[4], 0x0000DEAD),
       v_mov_b32_e32(v[4], s[4]),  # data field
       s_mov_b32(s[4], 0x0000BEEF),
       v_mov_b32_e32(v[5], s[4]),  # vdst
       v_mov_b32_e32(v[3], 0),
       GLOBAL(GLOBALOp.GLOBAL_LOAD_D16_HI_U8, addr=v[3], vdst=v[5], data=v[4], saddr=s[2:3], offset=TEST_OFFSET),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt(simm16=0x03f7),
       v_mov_b32_e32(v[0], v[5]),
       s_mov_b32(s[2], 0),
       s_mov_b32(s[3], 0),
@@ -399,15 +399,15 @@ class TestD16HiLoads(unittest.TestCase):
     TEST_OFFSET = 256
     instructions = [
       s_load_b64(s[2:3], s[80:81], 0, soffset=SrcEnum.NULL),
-      s_waitcnt(lgkmcnt=0),
+      s_waitcnt(simm16=0xfc07),
       s_mov_b32(s[4], 0xCAFE),
       v_mov_b32_e32(v[2], s[4]),
       v_mov_b32_e32(v[3], 0),
       global_store_b16(addr=v[3], data=v[2], saddr=s[2:3], offset=TEST_OFFSET),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt(simm16=0x03f7),
       v_mov_b32_e32(v[1], 0),
       GLOBAL(GLOBALOp.GLOBAL_LOAD_D16_HI_B16, addr=v[1], vdst=v[1], data=v[1], saddr=s[2:3], offset=TEST_OFFSET),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt(simm16=0x03f7),
       v_mov_b32_e32(v[0], v[1]),
       s_mov_b32(s[2], 0),
       s_mov_b32(s[3], 0),
@@ -421,13 +421,13 @@ class TestD16HiLoads(unittest.TestCase):
     TEST_OFFSET = 256
     instructions = [
       s_load_b64(s[2:3], s[80:81], 0, soffset=SrcEnum.NULL),
-      s_waitcnt(lgkmcnt=0),
+      s_waitcnt(simm16=0xfc07),
       s_mov_b32(s[4], 0x01010101),
       v_mov_b32_e32(v[10], s[4]),
       v_mov_b32_e32(v[3], 0),
       global_store_b32(addr=v[3], data=v[10], saddr=s[2:3], offset=TEST_OFFSET),
       global_store_b32(addr=v[3], data=v[10], saddr=s[2:3], offset=TEST_OFFSET+4),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt(simm16=0x03f7),
       # Set v[0] to 0x0101 (simulating prior u16 load result)
       s_mov_b32(s[4], 0x0101),
       v_mov_b32_e32(v[0], s[4]),
@@ -435,7 +435,7 @@ class TestD16HiLoads(unittest.TestCase):
       v_mov_b32_e32(v[1], 0),
       # Load using v[1] as addr AND vdst, but v[0] as data
       GLOBAL(GLOBALOp.GLOBAL_LOAD_D16_HI_B16, addr=v[1], vdst=v[1], data=v[0], saddr=s[2:3], offset=TEST_OFFSET+6),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt(simm16=0x03f7),
       v_mov_b32_e32(v[0], v[1]),
       s_mov_b32(s[2], 0),
       s_mov_b32(s[3], 0),
@@ -450,19 +450,19 @@ class TestD16HiLoads(unittest.TestCase):
     TEST_OFFSET = 256
     instructions = [
       s_load_b64(s[2:3], s[80:81], 0, soffset=SrcEnum.NULL),
-      s_waitcnt(lgkmcnt=0),
+      s_waitcnt(simm16=0xfc07),
       s_mov_b32(s[4], 0x80),  # negative signed byte = -128
       v_mov_b32_e32(v[2], s[4]),
       v_mov_b32_e32(v[3], 0),
       global_store_b8(addr=v[3], data=v[2], saddr=s[2:3], offset=TEST_OFFSET),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt(simm16=0x03f7),
       s_mov_b32(s[4], 0x0000DEAD),
       v_mov_b32_e32(v[4], s[4]),  # data field
       s_mov_b32(s[4], 0x0000BEEF),
       v_mov_b32_e32(v[5], s[4]),  # vdst
       v_mov_b32_e32(v[3], 0),
       GLOBAL(GLOBALOp.GLOBAL_LOAD_D16_HI_I8, addr=v[3], vdst=v[5], data=v[4], saddr=s[2:3], offset=TEST_OFFSET),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt(simm16=0x03f7),
       v_mov_b32_e32(v[0], v[5]),
       s_mov_b32(s[2], 0),
       s_mov_b32(s[3], 0),
@@ -477,7 +477,7 @@ class TestD16HiLoads(unittest.TestCase):
     TEST_OFFSET = 256
     instructions = [
       s_load_b64(s[2:3], s[80:81], 0, soffset=SrcEnum.NULL),
-      s_waitcnt(lgkmcnt=0),
+      s_waitcnt(simm16=0xfc07),
       s_mov_b32(s[4], 0x01010101),
       v_mov_b32_e32(v[10], s[4]),
       v_mov_b32_e32(v[11], s[4]),
@@ -486,7 +486,7 @@ class TestD16HiLoads(unittest.TestCase):
       v_mov_b32_e32(v[0], 0),
       global_store_b64(addr=v[0], data=v[10:11], saddr=s[2:3], offset=TEST_OFFSET),
       global_store_b8(addr=v[0], data=v[12], saddr=s[2:3], offset=TEST_OFFSET+8),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt(simm16=0x03f7),
 
       v_mov_b32_e32(v[2], 0),
       v_mov_b32_e32(v[1], 0),
@@ -494,7 +494,7 @@ class TestD16HiLoads(unittest.TestCase):
       GLOBAL(GLOBALOp.GLOBAL_LOAD_D16_HI_B16, addr=v[1], vdst=v[1], data=v[1], saddr=s[2:3], offset=TEST_OFFSET+6),
       GLOBAL(GLOBALOp.GLOBAL_LOAD_U8, addr=v[2], vdst=v[3], data=v[3], saddr=s[2:3], offset=TEST_OFFSET),
       GLOBAL(GLOBALOp.GLOBAL_LOAD_U8, addr=v[2], vdst=v[4], data=v[4], saddr=s[2:3], offset=TEST_OFFSET+8),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt(simm16=0x03f7),
 
       v_and_b32_e32(v[5], 0xffff, v[0]),
       v_lshlrev_b32_e32(v[0], 24, v[0]),
@@ -503,10 +503,10 @@ class TestD16HiLoads(unittest.TestCase):
       v_or_b32_e32(v[1], v[5], v[1]),
 
       global_store_b64(addr=v[2], data=v[0:1], saddr=s[2:3], offset=TEST_OFFSET+16),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt(simm16=0x03f7),
 
       GLOBAL(GLOBALOp.GLOBAL_LOAD_B64, addr=v[2], vdst=v[6:7], data=v[6:7], saddr=s[2:3], offset=TEST_OFFSET+16),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt(simm16=0x03f7),
       v_mov_b32_e32(v[0], v[6]),
       v_mov_b32_e32(v[1], v[7]),
       s_mov_b32(s[2], 0),
@@ -534,7 +534,7 @@ class TestGlobalOffset(unittest.TestCase):
     """Load from two different offsets and verify correct values."""
     instructions = [
       s_load_b64(s[2:3], s[80:81], 0, soffset=SrcEnum.NULL),
-      s_waitcnt(lgkmcnt=0),
+      s_waitcnt(simm16=0xfc07),
       v_mov_b32_e32(v[0], s[2]),
       v_mov_b32_e32(v[1], s[3]),
       # Store 0xAAAAAAAA at offset 100
@@ -545,12 +545,12 @@ class TestGlobalOffset(unittest.TestCase):
       s_mov_b32(s[0], 0xBBBBBBBB),
       v_mov_b32_e32(v[2], s[0]),
       global_store_b32(addr=v[0:1], data=v[2], saddr=SrcEnum.NULL, offset=200),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt(simm16=0x03f7),
       # Load from offset 100 -> should get 0xAAAAAAAA
       GLOBAL(GLOBALOp.GLOBAL_LOAD_B32, addr=v[0:1], vdst=v[3], saddr=SrcEnum.NULL, offset=100),
       # Load from offset 200 -> should get 0xBBBBBBBB
       GLOBAL(GLOBALOp.GLOBAL_LOAD_B32, addr=v[0:1], vdst=v[4], saddr=SrcEnum.NULL, offset=200),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt(simm16=0x03f7),
       v_mov_b32_e32(v[0], v[3]),
       v_mov_b32_e32(v[1], v[4]),
       s_mov_b32(s[2], 0),
@@ -564,7 +564,7 @@ class TestGlobalOffset(unittest.TestCase):
     """Store to two different offsets and verify correct values."""
     instructions = [
       s_load_b64(s[2:3], s[80:81], 0, soffset=SrcEnum.NULL),
-      s_waitcnt(lgkmcnt=0),
+      s_waitcnt(simm16=0xfc07),
       v_mov_b32_e32(v[0], s[2]),
       v_mov_b32_e32(v[1], s[3]),
       # Store 0x11111111 at offset 300
@@ -575,11 +575,11 @@ class TestGlobalOffset(unittest.TestCase):
       s_mov_b32(s[0], 0x22222222),
       v_mov_b32_e32(v[3], s[0]),
       global_store_b32(addr=v[0:1], data=v[3], saddr=SrcEnum.NULL, offset=400),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt(simm16=0x03f7),
       # Load back to verify
       GLOBAL(GLOBALOp.GLOBAL_LOAD_B32, addr=v[0:1], vdst=v[4], saddr=SrcEnum.NULL, offset=300),
       GLOBAL(GLOBALOp.GLOBAL_LOAD_B32, addr=v[0:1], vdst=v[5], saddr=SrcEnum.NULL, offset=400),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt(simm16=0x03f7),
       v_mov_b32_e32(v[0], v[4]),
       v_mov_b32_e32(v[1], v[5]),
       s_mov_b32(s[2], 0),
@@ -596,7 +596,7 @@ class TestGlobalOffset(unittest.TestCase):
     Load with offset -100 from vaddr pointing to base+300 -> should get 0xBBBB (at 200)."""
     instructions = [
       s_load_b64(s[2:3], s[80:81], 0, soffset=SrcEnum.NULL),
-      s_waitcnt(lgkmcnt=0),
+      s_waitcnt(simm16=0xfc07),
       v_mov_b32_e32(v[0], s[2]),
       v_mov_b32_e32(v[1], s[3]),
       # Store 0xAAAAAAAA at offset 100, 0xBBBBBBBB at offset 200
@@ -606,7 +606,7 @@ class TestGlobalOffset(unittest.TestCase):
       s_mov_b32(s[0], 0xBBBBBBBB),
       v_mov_b32_e32(v[2], s[0]),
       global_store_b32(addr=v[0:1], data=v[2], saddr=SrcEnum.NULL, offset=200),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt(simm16=0x03f7),
       # vaddr = base+200, load with offset -100 -> should get value at 100
       s_add_u32(s[4], s[2], 200),
       s_addc_u32(s[5], s[3], 0),
@@ -619,7 +619,7 @@ class TestGlobalOffset(unittest.TestCase):
       v_mov_b32_e32(v[4], s[4]),
       v_mov_b32_e32(v[5], s[5]),
       GLOBAL(GLOBALOp.GLOBAL_LOAD_B32, addr=v[4:5], vdst=v[7], saddr=SrcEnum.NULL, offset=-100),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt(simm16=0x03f7),
       v_mov_b32_e32(v[0], v[6]),
       v_mov_b32_e32(v[1], v[7]),
       v_mov_b32_e32(v[4], 0),
@@ -642,7 +642,7 @@ class TestGlobalOffset(unittest.TestCase):
     Load with offset -100 from saddr pointing to base+300 -> should get 0xBBBB (at 200)."""
     instructions = [
       s_load_b64(s[2:3], s[80:81], 0, soffset=SrcEnum.NULL),
-      s_waitcnt(lgkmcnt=0),
+      s_waitcnt(simm16=0xfc07),
       v_mov_b32_e32(v[0], 0),
       # Store 0xAAAAAAAA at offset 100, 0xBBBBBBBB at offset 200
       s_mov_b32(s[0], 0xAAAAAAAA),
@@ -651,7 +651,7 @@ class TestGlobalOffset(unittest.TestCase):
       s_mov_b32(s[0], 0xBBBBBBBB),
       v_mov_b32_e32(v[2], s[0]),
       global_store_b32(addr=v[0], data=v[2], saddr=s[2:3], offset=200),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt(simm16=0x03f7),
       # saddr = base+200, load with offset -100 -> should get value at 100
       s_add_u32(s[4], s[2], 200),
       s_addc_u32(s[5], s[3], 0),
@@ -660,7 +660,7 @@ class TestGlobalOffset(unittest.TestCase):
       s_add_u32(s[4], s[2], 300),
       s_addc_u32(s[5], s[3], 0),
       GLOBAL(GLOBALOp.GLOBAL_LOAD_B32, addr=v[0], vdst=v[7], saddr=s[4:5], offset=-100),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt(simm16=0x03f7),
       v_mov_b32_e32(v[0], v[6]),
       v_mov_b32_e32(v[1], v[7]),
       v_mov_b32_e32(v[6], 0),
