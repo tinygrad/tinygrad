@@ -263,7 +263,8 @@ class PCIIfaceBase:
     return HCQBuffer(mapping.va_addr, size, view=barview, meta=PCIAllocationMeta(mapping, cpu_access, hMemory=mapping.paddrs[0][0]), owner=self.dev)
 
   def free(self, b:HCQBuffer):
-    for dev in b.mapped_devs[1:]: dev.iface.dev_impl.mm.unmap_range(b.va_addr, b.size)
+    for dev in b.mapped_devs[1:]:
+      if hasattr(dev.iface, 'dev_impl'): dev.iface.dev_impl.mm.unmap_range(b.va_addr, b.size)
     if b.meta.mapping.aspace is AddrSpace.PHYS: self.dev_impl.mm.vfree(b.meta.mapping)
     if self.is_local() and b.owner == self.dev and b.meta.has_cpu_mapping: FileIOInterface.munmap(b.va_addr, b.size)
 

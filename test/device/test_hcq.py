@@ -1,4 +1,4 @@
-import unittest, ctypes, struct, os, random, numpy as np
+import unittest, ctypes, struct, os, random, numpy as np, time
 from tinygrad import Device, Tensor, dtypes
 from tinygrad.helpers import getenv, mv_address, DEBUG
 from test.helpers import slow
@@ -617,6 +617,33 @@ class TestHCQ(unittest.TestCase):
       np.testing.assert_equal(buf1.numpy(), buf2.numpy(), "p2p failed")
     _check_copy("AMD", "NV")
     _check_copy("NV", "AMD")
+
+  def test_speed_cross_device_rdma_copy_bandwidth(self):
+    try: d1 = Device[f"{Device.DEFAULT}:7"]
+    except Exception: self.skipTest("no multidevice, test skipped")
+
+    if TestHCQ.d0.peer_group == d1.peer_group: self.skipTest("devices in same peer group, no RDMA path")
+
+    SZ = 200_000_000
+    a = Buffer(Device.DEFAULT, SZ, dtypes.uint8, options=BufferSpec(nolru=True)).allocate()
+    b = Buffer(f"{Device.DEFAULT}:7", SZ, dtypes.uint8, options=BufferSpec(nolru=True)).allocate()
+
+    # warmup
+    TestHCQ.d0.allocator._transfer(a._buf, b._buf, SZ, src_dev=d1, dest_dev=TestHCQ.d0)
+    TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value - 1)
+    d1.timeline_signal.wait(d1.timeline_value - 1)
+
+    st = time.perf_counter()
+    TestHCQ.d0.allocator._transfer(a._buf, b._buf, SZ, src_dev=d1, dest_dev=TestHCQ.d0)
+    TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value - 1)
+    d1.timeline_signal.wait(d1.timeline_value - 1)
+    et_ms = (time.perf_counter() - st) * 1e3
+
+    gb_s = ((SZ / 1e9) / et_ms) * 1e3
+    print(f"cross device rdma copy: {et_ms:.2f} ms, {gb_s:.2f} GB/s")
+    assert 1 <= gb_s <= 100
+
+    np.testing.assert_equal(a.numpy(), b.numpy(), "failed")
 
 if __name__ == "__main__":
   unittest.main()
