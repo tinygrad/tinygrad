@@ -177,6 +177,18 @@ class NVComputeQueue(NVCommandQueue):
     self.active_qmd = None
     return self
 
+  def write(self, b:HCQBuffer, val:sint, b64:bool=False):
+    self.nvm(0, nv_gpu.NVC56F_SEM_ADDR_LO, *data64_le(b.va_addr), *data64_le(val),
+             nv_flags("NVC56F_SEM_EXECUTE", operation="release", release_wfi="en", payload_size="64bit" if b64 else "32bit"))
+    self.active_qmd = None
+    return self
+
+  def poll_bit(self, b:HCQBuffer, val:sint, mask:int):
+    self.nvm(0, nv_gpu.NVC56F_SEM_ADDR_LO, *data64_le(b.va_addr), *data64_le((~mask & 0xFFFFFFFF) if val == 0 else val),
+             nv_flags("NVC56F_SEM_EXECUTE", operation="acq_nor" if val == 0 else "acq_and", payload_size="32bit"))
+    self.active_qmd = None
+    return self
+
   def _submit(self, dev:NVDevice): self._submit_to_gpfifo(dev, dev.compute_gpfifo)
 
 class NVCopyQueue(NVCommandQueue):
