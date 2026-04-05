@@ -1,6 +1,6 @@
 import functools, math, time, multiprocessing, traceback, signal, atexit
 from dataclasses import replace
-from tinygrad.uop.ops import sym_infer, AxisType, pyrender
+from tinygrad.uop.ops import sym_infer, AxisType, Ops, pyrender
 from tinygrad.device import Device, Buffer, Compiler
 from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, colored, time_to_str, unwrap
 from tinygrad.helpers import IGNORE_BEAM_CACHE
@@ -121,7 +121,13 @@ def get_kernel_actions(s:Scheduler, include_0=True, max_up:int|None=None) -> dic
 
 beam_pool, BEAM_DEBUG = None, getenv("BEAM_DEBUG")
 
-def beam_search_seeds(s:Scheduler) -> list[Scheduler]: return [s]
+def beam_search_seeds(s:Scheduler) -> list[Scheduler]:
+  seeds = [s]
+  if not any(u.op is Ops.BUFFERIZE for u in s.ast.backward_slice):
+    from tinygrad.codegen.opt.heuristic import cpu_matvec_heuristic
+    if (seed:=cpu_matvec_heuristic(s.copy(), allow_unroll=False)) is not None and seed.applied_opts != s.applied_opts:
+      seeds.append(seed)
+  return seeds
 
 def beam_search_cache_key(s:Scheduler, amt:int, allow_test_size:bool, seeds:list[Scheduler]) -> dict[str, str|int|bool]:
   seed_key = '|'.join(map(repr, (si.applied_opts for si in seeds)))

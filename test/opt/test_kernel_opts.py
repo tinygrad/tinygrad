@@ -71,12 +71,13 @@ class TestKernelOpts(unittest.TestCase):
 
   @unittest.skipUnless(Device.DEFAULT == "CPU", "cpu-specific test")
   @unittest.skipUnless(not Device[Device.DEFAULT].renderer.has_local, "test requires no-local CPU renderer")
-  def test_cpu_matvec_beam_starts_unseeded(self):
+  def test_cpu_matvec_beam_seed_uses_beam_upcasts(self):
     r = Tensor.rand(1024) @ Tensor.rand(1024, 4096)
     k = Scheduler(r.schedule()[-1].ast, Device[Device.DEFAULT].renderer)
     seeded = beam_search_seeds(k)
-    self.assertEqual(len(seeded), 1)
-    self.assertEqual(seeded[0].applied_opts, k.applied_opts)
+    self.assertEqual(len(seeded), 2)
+    self.assertEqual([opt.arg for opt in seeded[1].applied_opts if opt.op is OptOps.UPCAST], [16, 2, 2])
+    self.assertFalse(any(opt.op is OptOps.UNROLL for opt in seeded[1].applied_opts))
 
   @unittest.skipUnless(Device.DEFAULT == "CPU", "cpu-specific test")
   @unittest.skipUnless(not Device[Device.DEFAULT].renderer.has_local, "test requires no-local CPU renderer")
@@ -98,7 +99,7 @@ class TestKernelOpts(unittest.TestCase):
     k_no_threads = k.copy()
     k_no_threads.ren = SimpleNamespace(target=k.ren.target, suffix=k.ren.suffix, has_threads=not k.ren.has_threads, has_local=k.ren.has_local)
     self.assertNotEqual(base_key, beam_search_cache_key(k_no_threads, 2, True, [k_no_threads]))
-    self.assertEqual(base_key, beam_search_cache_key(k, 2, True, [k]))
+    self.assertNotEqual(base_key, beam_search_cache_key(k, 2, True, [k]))
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
