@@ -1,14 +1,17 @@
+import os
 import unittest
 from tinygrad import Device, Tensor, dtypes
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.engine.realize import get_program
-from tinygrad.helpers import AMX, Context, Target
+from tinygrad.helpers import AMX, Target, getenv
 from tinygrad.renderer import Renderer
-from tinygrad.renderer.llvmir import CPULLVMRenderer
+from tinygrad.renderer.llvmir import BASE_FLOAT_FLAGS, REASSOC_FLOAT_FLAGS, CPULLVMRenderer
 
 class _TestCPULLVMRenderer(CPULLVMRenderer):
-  def __init__(self): Renderer.__init__(self, Target("CPU", "LLVM"))
+  def __init__(self):
+    Renderer.__init__(self, Target("CPU", "LLVM"))
+    self.float_flags = REASSOC_FLOAT_FLAGS if getenv("LLVM_REASSOC", 0) else BASE_FLOAT_FLAGS
 
 class _TestNoLocalLLVMRenderer(CPULLVMRenderer):
   def __init__(self): Renderer.__init__(self, Target("LLVM"))
@@ -162,6 +165,15 @@ class TestFloat4(unittest.TestCase):
     assert TestFloat4.count_float4(uops) == (1, 1)
 
 class TestCPULLVMWideVec(unittest.TestCase):
+  def setUp(self):
+    self.old_llvm_reassoc = os.environ.get("LLVM_REASSOC")
+    getenv.cache_clear()
+
+  def tearDown(self):
+    if self.old_llvm_reassoc is None: os.environ.pop("LLVM_REASSOC", None)
+    else: os.environ["LLVM_REASSOC"] = self.old_llvm_reassoc
+    getenv.cache_clear()
+
   def test_cpullvm_float_upcasts_to_wide_vec(self):
     a = Tensor.empty(2, 16).realize()
     b = Tensor.empty(2, 16).realize()
@@ -184,17 +196,19 @@ class TestCPULLVMWideVec(unittest.TestCase):
     self.assertIn("alloca float, i32 1", src)
     self.assertNotIn("alloca [1 x float]", src)
 
-  def test_cpullvm_matvec_enables_reassoc_without_transcendentals(self):
+  def test_cpullvm_matvec_reassoc_is_env_gated(self):
     opts = [Opt(op=OptOps.UPCAST, axis=0, arg=16)]
     src = get_program((Tensor.rand(1024) @ Tensor.rand(1024, 1024)).schedule()[-1].ast, renderer=_TestCPULLVMRenderer(), opts=opts).src
+    self.assertNotIn("reassoc", src)
 
+    os.environ["LLVM_REASSOC"] = "1"
+    getenv.cache_clear()
+    src = get_program((Tensor.rand(1024) @ Tensor.rand(1024, 1024)).schedule()[-1].ast, renderer=_TestCPULLVMRenderer(), opts=opts).src
     self.assertIn("fmul nsz arcp contract afn reassoc", src)
 
   def test_cpullvm_transcendentals_disable_reassoc(self):
-    with Context(TRANSCENDENTAL=2):
-      src = get_program(Tensor([88.7]).exp().schedule()[-1].ast, renderer=_TestCPULLVMRenderer()).src
+    src = get_program(Tensor([88.7]).exp().schedule()[-1].ast, renderer=_TestCPULLVMRenderer()).src
 
-    self.assertIn("fmul nsz arcp contract afn float", src)
     self.assertNotIn("reassoc", src)
 
 if __name__ == '__main__':

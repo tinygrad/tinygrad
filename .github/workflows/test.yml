@@ -29,9 +29,9 @@ jobs:
         deps: testing_unit
         llvm: 'true'
     - name: Speed Test
-      run: DEV=CPU:LLVM THREADS=0 python3 test/speed/external_test_speed_v_torch.py
+      run: LLVM_REASSOC=1 DEV=CPU:LLVM THREADS=0 python3 test/speed/external_test_speed_v_torch.py
     - name: Speed Test (BEAM=2)
-      run: BEAM=2 DEV=CPU:LLVM THREADS=0 python3 test/speed/external_test_speed_v_torch.py
+      run: LLVM_REASSOC=1 BEAM=2 DEV=CPU:LLVM THREADS=0 python3 test/speed/external_test_speed_v_torch.py
 
   docs:
     name: Docs

@@ -8,7 +8,6 @@ from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, GroupOp, range_str
 from tinygrad.dtype import dtypes, float_to_fp8, DType, PtrDType, truncate
 from tinygrad.helpers import prod, Target, AMX, CPU_COUNT, getenv
 
-TRANSCENDENTAL_OPS = {Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.SQRT, Ops.TRUNC}
 BASE_FLOAT_FLAGS = " nsz arcp contract afn"
 REASSOC_FLOAT_FLAGS = BASE_FLOAT_FLAGS + " reassoc"
 
@@ -215,10 +214,9 @@ class CPULLVMRenderer(LLVMRenderer):
   string_rewrite = base_rewrite + PatternMatcher([(UPat(Ops.WMMA, name="wmma"), render_wmma_amx)])
   def render(self, uops: list[UOp]) -> str: return "\n".join((k:=self._render_kernel(uops))[0] + (k[1], self._render_footer(uops)))
   def _render_footer(self, uops: list[UOp]) -> str: return 'attributes #0 = { alwaysinline nounwind "no-builtins" "no-trapping-math"="true" }'
-  def set_float_flags_for_ast(self, ast:UOp):
-    self.float_flags = BASE_FLOAT_FLAGS if any(u.op in TRANSCENDENTAL_OPS for u in ast.toposort()) else REASSOC_FLOAT_FLAGS
   def __init__(self, target:Target):
     super().__init__(target)
+    self.float_flags = REASSOC_FLOAT_FLAGS if getenv("LLVM_REASSOC", 0) else BASE_FLOAT_FLAGS
     from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler
     self.compiler = CPULLVMCompiler()
 
