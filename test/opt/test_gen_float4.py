@@ -1,5 +1,6 @@
 import os
 import unittest
+from typing import Any, cast
 from tinygrad import Device, Tensor, dtypes
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.codegen.opt import Opt, OptOps
@@ -7,6 +8,9 @@ from tinygrad.engine.realize import get_program
 from tinygrad.helpers import AMX, Target, getenv
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.llvmir import BASE_FLOAT_FLAGS, REASSOC_FLOAT_FLAGS, CPULLVMRenderer
+
+def clear_getenv_cache() -> None:
+  cast(Any, getenv).cache_clear()
 
 class _TestCPULLVMRenderer(CPULLVMRenderer):
   def __init__(self):
@@ -167,12 +171,12 @@ class TestFloat4(unittest.TestCase):
 class TestCPULLVMWideVec(unittest.TestCase):
   def setUp(self):
     self.old_llvm_reassoc = os.environ.get("LLVM_REASSOC")
-    getenv.cache_clear()
+    clear_getenv_cache()
 
   def tearDown(self):
     if self.old_llvm_reassoc is None: os.environ.pop("LLVM_REASSOC", None)
     else: os.environ["LLVM_REASSOC"] = self.old_llvm_reassoc
-    getenv.cache_clear()
+    clear_getenv_cache()
 
   def test_cpullvm_float_upcasts_to_wide_vec(self):
     a = Tensor.empty(2, 16).realize()
@@ -202,7 +206,7 @@ class TestCPULLVMWideVec(unittest.TestCase):
     self.assertNotIn("reassoc", src)
 
     os.environ["LLVM_REASSOC"] = "1"
-    getenv.cache_clear()
+    clear_getenv_cache()
     src = get_program((Tensor.rand(1024) @ Tensor.rand(1024, 1024)).schedule()[-1].ast, renderer=_TestCPULLVMRenderer(), opts=opts).src
     self.assertIn("fmul nsz arcp contract afn reassoc", src)
 
