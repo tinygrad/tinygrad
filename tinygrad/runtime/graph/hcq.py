@@ -91,7 +91,7 @@ class HCQGraph(MultiGraphRunner):
         enqueue_queue = self.copy_queues.setdefault((enqueue_dev, queue_idx),
                                                     enqueue_dev.hw_copy_queue_t(queue_idx=queue_idx).wait(self.signals['KICK'], self.kickoff_var))
 
-      out_signal = self.signals.setdefault(enqueue_queue, enqueue_dev.new_signal(value=0))
+      out_signal = self.signals.setdefault(enqueue_queue, self.devices[0].new_signal(value=0))
 
       # Get dependencies based on input and output buffers.
       rdeps = self._access_resources(ji.bufs, ji.prg.p.outs if is_exec_prg else [0], (enqueue_queue, j + 1)) #type:ignore
