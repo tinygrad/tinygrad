@@ -120,6 +120,7 @@ class NVCommandQueue(HWQueue[HCQSignal, 'NVDevice', 'NVProgram', 'NVArgsState'])
 
     gpfifo.ring[gpfifo.put_value % gpfifo.entries_count] = (cmdq_addr//4 << 2) | (len(self._q) << 42) | (1 << 41)
     gpfifo.gpput[0] = (gpfifo.put_value + 1) % gpfifo.entries_count
+    if getattr(getattr(dev.iface, 'dev_impl', None), 'is_egpu', False): _ = gpfifo.gpput[0]  # flush BAR1 writes before doorbell
 
     System.memory_barrier()
     dev.gpu_mmio[0x90 // 4] = gpfifo.token

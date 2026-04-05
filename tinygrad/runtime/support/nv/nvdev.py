@@ -1,10 +1,10 @@
 from __future__ import annotations
 import ctypes, time, functools, re, gzip, struct
-from tinygrad.helpers import getenv, DEBUG, fetch, getbits
+from tinygrad.helpers import getenv, DEBUG, fetch, getbits, round_up
 from tinygrad.runtime.autogen import pci
 from tinygrad.runtime.support.memory import TLSFAllocator, MemoryManager, AddrSpace
 from tinygrad.runtime.support.nv.ip import NV_FLCN, NV_FLCN_COT, NV_GSP
-from tinygrad.runtime.support.system import PCIDevice, MMIOInterface
+from tinygrad.runtime.support.system import PCIDevice, MMIOInterface, USBPCIDevice, RemotePCIDevice
 
 NV_DEBUG = getenv("NV_DEBUG", 0)
 
@@ -30,9 +30,23 @@ class NVReg:
   def decode(self, val: int) -> dict: return {name:getbits(val, start, end) for name,(start,end) in self.fields.items()}
 
 class NVPageTableEntry:
-  def __init__(self, nvdev, paddr, lv): self.nvdev, self.paddr, self.lv, self.entries = nvdev, paddr, lv, nvdev.vram.view(paddr, 0x1000, fmt='Q')
+  def __init__(self, nvdev, paddr, lv):
+    self.nvdev, self.paddr, self.lv = nvdev, paddr, lv
+    if not nvdev.is_egpu: self.entries = nvdev.vram.view(paddr, 0x1000, fmt='Q')
 
   def _is_dual_pde(self) -> bool: return self.lv == self.nvdev.mm.level_cnt - 2
+
+  def _pramin_base(self, idx:int) -> int:  # VRAM via BAR0 PRAMIN window. single-threaded: NVDev init/page-table ops are not concurrent
+    self.nvdev.mmio[0x1700 // 4] = self.paddr >> 16
+    return (0x700000 + (self.paddr & 0xffff)) // 4 + idx * 2
+
+  def _pramin_read(self, idx:int) -> int:
+    base = self._pramin_base(idx)
+    return self.nvdev.mmio[base] | (self.nvdev.mmio[base + 1] << 32)
+
+  def _pramin_write(self, idx:int, val:int):
+    base = self._pramin_base(idx)
+    self.nvdev.mmio[base], self.nvdev.mmio[base + 1] = val & 0xffffffff, (val >> 32) & 0xffffffff
 
   def set_entry(self, entry_id:int, paddr:int, table=False, uncached=False, aspace=AddrSpace.PHYS, snooped=False, frag=0, valid=True):
     if not table:
@@ -44,10 +58,18 @@ class NVPageTableEntry:
       x = pde.encode(is_pte=False, **{f'aperture{small}': 1 if valid else 0, f'address{small}{sys}': paddr >> 12},
         **({f'pcf{small}': 0b10} if self.nvdev.mmu_ver == 3 else {'no_ats': 1}))
 
-    if self._is_dual_pde(): self.entries[2*entry_id], self.entries[2*entry_id+1] = x & 0xffffffffffffffff, x >> 64
+    if self.nvdev.is_egpu:
+      if self._is_dual_pde():
+        self._pramin_write(2*entry_id, x & 0xffffffffffffffff)
+        self._pramin_write(2*entry_id+1, x >> 64)
+      else: self._pramin_write(entry_id, x)
+    elif self._is_dual_pde(): self.entries[2*entry_id], self.entries[2*entry_id+1] = x & 0xffffffffffffffff, x >> 64
     else: self.entries[entry_id] = x
 
   def entry(self, entry_id:int) -> int:
+    if self.nvdev.is_egpu:
+      if self._is_dual_pde(): return (self._pramin_read(2*entry_id+1) << 64) | self._pramin_read(2*entry_id)
+      return self._pramin_read(entry_id)
     return (self.entries[2*entry_id+1]<<64) | self.entries[2*entry_id] if self._is_dual_pde() else self.entries[entry_id]
 
   def read_fields(self, entry_id:int) -> dict:
@@ -70,12 +92,26 @@ class NVMemoryManager(MemoryManager):
 
   def on_range_mapped(self): self.dev.NV_VIRTUAL_FUNCTION_PRIV_MMU_INVALIDATE.write((1 << 0) | (1 << 1) | (1 << 6) | (1 << 31))
 
+  def palloc(self, size:int, align:int=0x1000, zero=True, boot=False, ptable=False) -> int:
+    # On eGPU, BAR1 writes trigger DART faults after GSP RM init. Zero via PRAMIN (BAR0 window) instead.
+    # GSP zeroes VRAM during init so boot-time allocs (is_booting=True) don't need PRAMIN — BAR1 works pre-GSP.
+    use_pramin = zero and self.dev.is_egpu and not boot
+    paddr = super().palloc(size, align, zero=zero and not use_pramin, boot=boot, ptable=ptable)
+    if use_pramin:
+      for i in range(0, round_up(size, 8), 8):
+        off = paddr + i
+        self.dev.mmio[0x1700 // 4] = off >> 16
+        base = (0x700000 + (off & 0xffff)) // 4
+        self.dev.mmio[base], self.dev.mmio[base + 1] = 0, 0
+    return paddr
+
 class NVDev:
   def __init__(self, pci_dev:PCIDevice):
     self.pci_dev, self.devfmt, self.mmio = pci_dev, pci_dev.pcibus, pci_dev.map_bar(0, fmt='I')
     self.pci_dev.write_config(pci.PCI_COMMAND, self.pci_dev.read_config(pci.PCI_COMMAND, 2) | pci.PCI_COMMAND_MASTER, 2)
 
     self.smi_dev, self.is_booting, self.is_err_state = False, True, False
+    self.is_egpu = isinstance(pci_dev, (USBPCIDevice, RemotePCIDevice))
     self._early_ip_init()
     self._early_mmu_init()
 
@@ -106,13 +142,15 @@ class NVDev:
     if (needs_reset:=self.reg("NV_PFB_PRI_MMU_WPR2_ADDR_HI").read() != 0):
       if DEBUG >= 2: print(f"nv {self.devfmt}: WPR2 is up. Issuing a full reset.", flush=True)
       self.pci_dev.reset()
-      time.sleep(0.1) # wait until device can respond again
+      time.sleep(0.5 if self.is_egpu else 0.1)
 
     self.chip_id = self.reg("NV_PMC_BOOT_0").read()
     self.chip_details = self.reg("NV_PMC_BOOT_42").read_bitfields()
     self.chip_name = {0x17: "GA1", 0x19: "AD1", 0x1b: "GB2"}[self.chip_details['architecture']] + f"{self.chip_details['implementation']:02d}"
     self.fw_name = {"GB2": "GB202", "AD1": "AD102", "GA1": "GA102"}[self.chip_name[:3]]
     self.mmu_ver, self.fmc_boot = (3, True) if self.chip_details['architecture'] >= 0x1a else (2, False)
+    if self.is_egpu and self.chip_details['architecture'] >= 0x1a:
+      raise RuntimeError("eGPU PRAMIN workaround requires NV_PBUS_BAR0_WINDOW at 0x1700 (Ampere/Ada). Hopper+ moved it.")
 
     self.flcn:NV_FLCN|NV_FLCN_COT = NV_FLCN_COT(self) if self.fmc_boot else NV_FLCN(self)
     self.gsp:NV_GSP = NV_GSP(self)
