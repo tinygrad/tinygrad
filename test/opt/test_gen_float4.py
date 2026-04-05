@@ -3,7 +3,7 @@ from tinygrad import Device, Tensor, dtypes
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.engine.realize import get_program
-from tinygrad.helpers import AMX, Target
+from tinygrad.helpers import AMX, Context, Target
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.llvmir import CPULLVMRenderer
 
@@ -183,6 +183,19 @@ class TestCPULLVMWideVec(unittest.TestCase):
 
     self.assertIn("alloca float, i32 1", src)
     self.assertNotIn("alloca [1 x float]", src)
+
+  def test_cpullvm_matvec_enables_reassoc_without_transcendentals(self):
+    opts = [Opt(op=OptOps.UPCAST, axis=0, arg=16)]
+    src = get_program((Tensor.rand(1024) @ Tensor.rand(1024, 1024)).schedule()[-1].ast, renderer=_TestCPULLVMRenderer(), opts=opts).src
+
+    self.assertIn("fmul nsz arcp contract afn reassoc", src)
+
+  def test_cpullvm_transcendentals_disable_reassoc(self):
+    with Context(TRANSCENDENTAL=2):
+      src = get_program(Tensor([88.7]).exp().schedule()[-1].ast, renderer=_TestCPULLVMRenderer()).src
+
+    self.assertIn("fmul nsz arcp contract afn float", src)
+    self.assertNotIn("reassoc", src)
 
 if __name__ == '__main__':
   unittest.main()

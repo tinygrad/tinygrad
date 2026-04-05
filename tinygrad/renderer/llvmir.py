@@ -8,6 +8,10 @@ from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, GroupOp, range_str
 from tinygrad.dtype import dtypes, float_to_fp8, DType, PtrDType, truncate
 from tinygrad.helpers import prod, Target, AMX, CPU_COUNT, getenv
 
+TRANSCENDENTAL_OPS = {Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.SQRT, Ops.TRUNC}
+BASE_FLOAT_FLAGS = " nsz arcp contract afn"
+REASSOC_FLOAT_FLAGS = BASE_FLOAT_FLAGS + " reassoc"
+
 def ldt(dt:DType):
   if dt.vcount > 1: return f"<{dt.vcount} x {ldt(dt.scalar())}>"
   if isinstance(dt, PtrDType): return ldt(dt.base) + "*"
@@ -67,10 +71,20 @@ unsigned_lop = { Ops.ADD: "add", Ops.MUL: "mul", Ops.IDIV: "udiv", Ops.MOD: "ure
                  Ops.CMPLT: "icmp ult", Ops.CMPNE: "icmp ne", Ops.CMPEQ: "icmp eq", Ops.OR: "or", Ops.AND: "and", Ops.XOR: "xor",
                  Ops.SHL: "shl", Ops.SHR: "lshr",}
 signed_lop = {**unsigned_lop, Ops.ADD: "add nsw", Ops.CMPLT: "icmp slt", Ops.IDIV: "sdiv", Ops.MOD: "srem", Ops.SHR: "ashr"}
-flags = " nsz arcp contract afn reassoc"
-float_lop = {Ops.ADD: "fadd"+flags, Ops.MUL: "fmul"+flags, Ops.CMPLT: f"fcmp{flags} olt",
-    Ops.CMPNE: f"fcmp{flags} une", Ops.CMPEQ: f"fcmp{flags} oeq", Ops.FDIV: "fdiv"+flags}
-lop = {**{x:unsigned_lop for x in (dtypes.bool,)+dtypes.uints}, **{x:signed_lop for x in dtypes.sints}, **{x:float_lop for x in dtypes.floats}}
+base_float_lop = {Ops.ADD: "fadd"+BASE_FLOAT_FLAGS, Ops.MUL: "fmul"+BASE_FLOAT_FLAGS, Ops.CMPLT: f"fcmp{BASE_FLOAT_FLAGS} olt",
+    Ops.CMPNE: f"fcmp{BASE_FLOAT_FLAGS} une", Ops.CMPEQ: f"fcmp{BASE_FLOAT_FLAGS} oeq", Ops.FDIV: "fdiv"+BASE_FLOAT_FLAGS}
+reassoc_float_lop = {Ops.ADD: "fadd"+REASSOC_FLOAT_FLAGS, Ops.MUL: "fmul"+REASSOC_FLOAT_FLAGS, Ops.CMPLT: f"fcmp{REASSOC_FLOAT_FLAGS} olt",
+    Ops.CMPNE: f"fcmp{REASSOC_FLOAT_FLAGS} une", Ops.CMPEQ: f"fcmp{REASSOC_FLOAT_FLAGS} oeq", Ops.FDIV: "fdiv"+REASSOC_FLOAT_FLAGS}
+lop = {**{x:unsigned_lop for x in (dtypes.bool,)+dtypes.uints}, **{x:signed_lop for x in dtypes.sints}, **{x:base_float_lop for x in dtypes.floats}}
+
+class LLVMIRContext(dict[UOp, str]):
+  def __init__(self, float_flags:str):
+    super().__init__()
+    self.float_flags = float_flags
+
+def render_binary_op(ctx:LLVMIRContext, x:UOp) -> str:
+  ops = reassoc_float_lop if x.src[0].dtype.scalar() in dtypes.floats and ctx.float_flags == REASSOC_FLOAT_FLAGS else lop[x.src[0].dtype.scalar()]
+  return f"  {ctx[x]} = {ops[x.op]} {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, {ctx[x.src[1]]}"
 
 base_rewrite = PatternMatcher([
   # memory load/store
@@ -101,8 +115,7 @@ base_rewrite = PatternMatcher([
    if isinstance(x.dtype, PtrDType) else f"  {ctx[x]} = {lcast(x.src[0].dtype, x.dtype)} {ldt(x.src[0].dtype)} {ctx[x.src[0]]} to {ldt(x.dtype)}"),
   (UPat(Ops.TRUNC, name="x"),
    lambda ctx,x: f"  {ctx[x]} = call {ldt(x.dtype)} @llvm.trunc.{ldt(x.dtype.scalar())}({ldt(x.src[0].dtype)} {ctx[x.src[0]]})"),
-  (UPat(GroupOp.Binary, name="x"), lambda ctx,x:
-   f"  {ctx[x]} = {lop[x.src[0].dtype.scalar()][x.op]} {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, {ctx[x.src[1]]}"),
+  (UPat(GroupOp.Binary, name="x"), render_binary_op),
   (UPat(Ops.WHERE, name="x"), lambda ctx,x:
    f"  {ctx[x]} = select {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, {ldt(x.src[1].dtype)} {ctx[x.src[1]]}, {ldt(x.src[2].dtype)} {ctx[x.src[2]]}"),
 
@@ -143,7 +156,7 @@ class LLVMRenderer(Renderer):
     sargs = ", ".join([f"{ldt(dt)}{' noalias align 32' if isinstance(dt, PtrDType) else ''} {name}" for name,dt in args])
     return "\n".join((prefix or []) + [f"define{' ' + self.abi if self.abi else ''} void @{name}({sargs}) #0", "{"] + kernel + ["  ret void\n}"])
   def _render_kernel(self, uops: list[UOp], prefix:list[str]|None=None) -> tuple[tuple[str, ...], str]:
-    r: dict[UOp, str] = {}
+    r = LLVMIRContext(getattr(self, "float_flags", BASE_FLOAT_FLAGS))
     args: list[tuple[str, DType]] = []
     kernel: list[str] = []
     vc = -1
@@ -202,6 +215,8 @@ class CPULLVMRenderer(LLVMRenderer):
   string_rewrite = base_rewrite + PatternMatcher([(UPat(Ops.WMMA, name="wmma"), render_wmma_amx)])
   def render(self, uops: list[UOp]) -> str: return "\n".join((k:=self._render_kernel(uops))[0] + (k[1], self._render_footer(uops)))
   def _render_footer(self, uops: list[UOp]) -> str: return 'attributes #0 = { alwaysinline nounwind "no-builtins" "no-trapping-math"="true" }'
+  def set_float_flags_for_ast(self, ast:UOp):
+    self.float_flags = BASE_FLOAT_FLAGS if any(u.op in TRANSCENDENTAL_OPS for u in ast.toposort()) else REASSOC_FLOAT_FLAGS
   def __init__(self, target:Target):
     super().__init__(target)
     from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler

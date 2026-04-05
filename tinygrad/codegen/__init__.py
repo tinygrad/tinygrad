@@ -167,6 +167,7 @@ def get_program(ast:UOp, renderer:Renderer, opts:list[Opt]|None=None) -> Program
   elif ast.op is Ops.SINK:
     # rewrite to prg
     assert isinstance(ast.arg, KernelInfo), "requires KernelInfo on arg to get_program"
+    if hasattr(renderer, "set_float_flags_for_ast"): renderer.set_float_flags_for_ast(ast)
     if opts is not None:
       # TODO: should this be here?
       assert ast.arg.opts_to_apply is None, "can't apply opts if there's already opts to apply"
