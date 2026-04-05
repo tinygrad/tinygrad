@@ -37,5 +37,15 @@ class TestScheduleCache(unittest.TestCase):
       num_events_cache = len(cpu_events)
     self.assertLess(num_events_cache, num_events_no_cache)
 
+  def test_disk_schedule_cache(self):
+    schedule_cache.clear()
+    with Context(SCACHE=1):
+      Tensor([1, 2]).sum().realize()         # populates disk + in-memory
+      cache_size = len(schedule_cache)
+      self.assertGreater(cache_size, 0)
+      schedule_cache.clear()                  # evict in-memory only; disk persists
+      Tensor([1, 2]).sum().realize()         # must hit disk
+    self.assertEqual(len(schedule_cache), cache_size)  # disk hit repopulated in-memory
+
 if __name__ == "__main__":
   unittest.main()

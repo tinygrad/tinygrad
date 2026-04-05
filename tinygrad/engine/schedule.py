@@ -4,7 +4,7 @@ from collections import deque
 from tinygrad.uop.ops import UOp, Ops, buffers, UOpMetaClass, track_rewrites, graph_rewrite, gate_kernel_sink, KernelInfo
 from tinygrad.uop.spec import type_verify, tensor_spec
 from tinygrad.device import Buffer, MultiBuffer
-from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, pluralize, SCACHE, BASEDIR, flatten
+from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, pluralize, SCACHE, BASEDIR, flatten, diskcache_get, diskcache_put
 from tinygrad.engine.realize import ExecItem
 
 # **** schedule linearizer
@@ -116,14 +116,25 @@ def lower_sink_to_linear(function:UOp) -> UOp|None:
   st = time.perf_counter()
   if isinstance(function.arg, KernelInfo): return None
   cache_key = function.key
-  if not SCACHE or (sc_ret:=schedule_cache.get(cache_key, None)) is None:
+  cache_label = "CACHE MISS"
+  if SCACHE and (linear:=schedule_cache.get(cache_key)) is not None:
+    cache_label = " cache hit"
+  elif SCACHE:
+    try: disk_linear = diskcache_get("schedule_cache", cache_key.hex())
+    except Exception: disk_linear = None
+    if disk_linear is not None:
+      schedule_cache[cache_key] = disk_linear
+      linear, cache_label = disk_linear, "  disk hit"
+    else:
+      if SPEC: type_verify(function, tensor_spec)
+      # support recursive CALLs
+      linear = create_schedule(get_kernel_graph(function))
+      schedule_cache[cache_key] = linear
+      diskcache_put("schedule_cache", cache_key.hex(), linear)
+  else:
     if SPEC: type_verify(function, tensor_spec)
     # support recursive CALLs
     linear = create_schedule(get_kernel_graph(function))
-    if SCACHE: schedule_cache[cache_key] = linear
-  else:
-    # schedule cache hit
-    linear = sc_ret
   if (DEBUG >= 1 and len(linear.src) > 1) or DEBUG >= 3:
     for frm in inspect.stack():
       if frm.filename == "<string>": continue
@@ -132,7 +143,7 @@ def lower_sink_to_linear(function:UOp) -> UOp|None:
     else:
       frm = None
     print(f"scheduled {len(linear.src):5d} kernels in {(time.perf_counter()-st)*1000:8.2f} ms"+\
-          f" | {' cache hit' if SCACHE and sc_ret is not None else 'CACHE MISS'} {cache_key.hex()[:8]}"+\
+          f" | {cache_label} {cache_key.hex()[:8]}"+\
           f" | {len(UOpMetaClass.ucache):7d} uops in cache"+("" if frm is None else f" | {frm.filename}:{frm.lineno}"))
   return linear
 

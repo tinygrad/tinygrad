@@ -1,5 +1,5 @@
 import unittest
-from tinygrad import Tensor, Device, Variable
+from tinygrad import Tensor, Device, Variable, Context
 from examples.gpt2 import Transformer
 from tinygrad.nn.state import get_state_dict
 
@@ -29,6 +29,16 @@ class TestMethodCache(unittest.TestCase):
     ((a+b)+(c+d)).realize()
     Device[Device.DEFAULT].compiler.compile_cached = None
     ((c+d)+(a+b)).realize()
+
+  def test_disk_program_cache(self):
+    from tinygrad.engine.realize import method_cache
+    a, b = Tensor([1]), Tensor([2])
+    with Context(SCACHE=1):
+      (a + b).realize()                               # populates disk + in-memory
+      method_cache.clear()                             # evict in-memory only; disk persists
+      Device[Device.DEFAULT].compiler.compile_cached = None  # crash if compilation attempted
+      (a + b).realize()                               # must succeed via disk (no compilation)
+    # tearDown restores compile_cached
 
   @unittest.skip("incorrect use of transformer")
   def test_small_transformer(self):
