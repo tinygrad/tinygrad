@@ -149,7 +149,7 @@ class HWQueue(Generic[SignalType, HCQDeviceType, ProgramType, ArgsStateType]):
 
   def write(self, b:HCQBuffer, val:sint, b64:bool=False):
     """
-    Enqueues a command to write a value to a buffer address after all previously enqueued commands are completed. Only on compute queues.
+    Enqueues a command to write a value to a buffer address after all previously enqueued commands are completed.
 
     Args:
       b: The buffer to write to
@@ -160,7 +160,7 @@ class HWQueue(Generic[SignalType, HCQDeviceType, ProgramType, ArgsStateType]):
 
   def poll_bit(self, b:HCQBuffer, val:sint, mask:int):
     """
-    Enqueues a poll command which halts execution until (mem[b] & mask) == val. Only on compute queues.
+    Enqueues a poll command which halts execution until (mem[b] & mask) == val.
     val must be 0 or mask (i.e. checks if masked bits are all clear or all set).
 
     Args:
