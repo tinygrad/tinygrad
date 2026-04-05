@@ -24,6 +24,8 @@ def fold_divmod_general(d: UOp, correct_divmod_folding: bool) -> UOp|None:
   # split uops for the rest of the processing
   x_peeled, const = x.pop_const()
   uops_no_const = list(x_peeled.split_uop(Ops.ADD))
+  if const == 0 and len(uops_no_const) == 1 and (u:=uops_no_const[0]).op is Ops.RANGE and y.op is Ops.CONST and y.arg > u.const_factor():
+    if u.vmin >= 0 and u.vmax-u.vmin > 1: return None
 
   # ** Constant Denominator Rules **
   # these rules strictly require y to be a scalar constant > 0
@@ -125,7 +127,8 @@ def fold_divmod_general(d: UOp, correct_divmod_folding: bool) -> UOp|None:
     # nest_by_factor: x//c -> (x//f)//(c//f), x%c -> (x//f%(c//f))*f + b where b=x%f
     if x.vmin >= 0:
       results = []
-      for div in {abs(f) for u, f in zip(uops_no_const, factors) if u.op not in (Ops.CONST, Ops.VCONST) and 1 < abs(f) < c and (c%f)==0}:
+      divisors = {abs(f) for u, f in zip(uops_no_const, factors) if u.op not in (Ops.CONST, Ops.VCONST) and 1 < abs(f) < c and (c%f)==0}
+      for div in divisors:
         if (newxs := fold_divmod_general(x//div, correct_divmod_folding)) is not None and newxs.vmin >= 0:
           if d.op is Ops.IDIV:
             results.append((len(newxs.backward_slice), newxs // (c // div)))
@@ -135,17 +138,24 @@ def fold_divmod_general(d: UOp, correct_divmod_folding: bool) -> UOp|None:
             if 0 <= b.vmin and b.vmax < div:
               results.append((len((r:=(newxs % x.ufix(c//div))*div + b).backward_slice), r))
       if results: return min(results, key=lambda r: r[0])[1]
+      if const == 0 and not divisors and math.gcd(*factors, c) == 1 and all(0 <= f < c for f in factors): return None
 
   # ** Variable Denominator / Fallback Rules **
   # These rules apply to variables OR constants that failed the checks above.
-  # Reconstruct all uops including const for these checks.
-  all_uops = list(x.split_uop(Ops.ADD))
+  # Reuse the peeled ADD split instead of walking x again.
+  all_uops = uops_no_const + ([x.const_like(const)] if const != 0 else [])
 
   # divide_by_gcd: x//y -> (x//gcd)//(y//gcd)
   # Constant denominators cannot contribute symbolic factors, so a const-factor gcd
   # of 1 means UOp.gcd would also be 1.
-  if y.op is Ops.CONST and math.gcd(*(u.const_factor() for u in all_uops), y.arg) == 1:
-    gcd = y.const_like(1)
+  if y.op is Ops.CONST:
+    if y.arg > 0:
+      const_factors = factors + ((const,) if const != 0 else ())
+      gcd = y.const_like(1) if math.gcd(*(const_factors or (0,)), y.arg) == 1 else UOp.gcd(*all_uops, y).simplify()
+    elif math.gcd(*(u.const_factor() for u in all_uops), y.arg) == 1:
+      gcd = y.const_like(1)
+    else:
+      gcd = UOp.gcd(*all_uops, y).simplify()
   else:
     gcd = UOp.gcd(*all_uops, y).simplify()
   if not (gcd.op is Ops.CONST and gcd.arg==1):
@@ -185,3 +195,4 @@ div_and_mod_symbolic = PatternMatcher([
   (UPat.var("x", dtypes.weakint) % UPat.var("d"), lambda x,d: -((-x)%d) if x.vmax <= 0 else None),
   (UPat.var("x", dtypes.weakint) % UPat.var("d"), lambda x,d: (x%(-d)) if d.vmax < 0 else None),
 ])
+

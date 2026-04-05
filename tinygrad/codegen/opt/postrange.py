@@ -336,6 +336,10 @@ def bufs_from_ast(ast:UOp, dname:str) -> list[Buffer]:
 
 def apply_opts(ast:UOp, ren:Renderer) -> UOp:
   if ast.tag is not None: return ast
+  if ren.device == "NULL" and (ast.arg is None or ast.arg.opts_to_apply is None):
+    ast = graph_rewrite(ast, pm_flatten_range, name="flatten range")
+    sink_arg = ast.arg if ast.arg is not None else KernelInfo()
+    return ast.replace(arg=KernelInfo(name=sink_arg.name, applied_opts=tuple(sink_arg.applied_opts), dont_use_locals=sink_arg.dont_use_locals), tag=1)
   k = Scheduler(ast, ren)
   k.convert_loop_to_global()
   if ast.arg is not None and ast.arg.opts_to_apply is not None:

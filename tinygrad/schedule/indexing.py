@@ -18,7 +18,7 @@ def realize_srcs(ctx:dict[UOp, None], rb:UOp) -> None:
     if s.base.op not in ALWAYS_CONTIGUOUS: ctx[s] = None
 
 def realize_store_after_src(ctx:dict[UOp, None], dest:UOp, src:UOp):
-  # don't realize COPY/BUFFER_VIEW when they are the direct source of STORE+AFTER — the target buffer is the output
+  # do not realize COPY/BUFFER_VIEW when they are the direct source of STORE+AFTER; the target buffer is the output
   if src.op in {Ops.COPY, Ops.BUFFER_VIEW} and src in ctx \
      and not dest.op_in_backward_slice_with_self(Ops.SHRINK, Ops.PERMUTE, Ops.FLIP, Ops.PAD):
     del ctx[src]
@@ -58,6 +58,7 @@ class IndexingContext:
 def create_bufferize_and_index_based_on_ranges(ctx:IndexingContext, x:UOp):
   if x.op in {Ops.BUFFERIZE, Ops.INDEX}: return None
   x_range_map = ctx.range_map.get(x)
+  if x_range_map is None and all(s not in ctx.realize_map for s in x.src): return None
   x_input_ranges = x_range_map[0] if x_range_map is not None else None
   new_srcs = []
   for s in x.src:
@@ -176,10 +177,22 @@ def _shape_eq(a:sint, b:sint) -> bool:
 def _shape_is_one(s:sint) -> bool:
   return isinstance(s, int) and s == 1
 
+def _reshape_prefix_suffix(in_shape:tuple[sint, ...], out_shape:tuple[sint, ...]) -> tuple[int, int]:
+  prefix = 0
+  while prefix < len(in_shape) and prefix < len(out_shape) and _shape_eq(in_shape[prefix], out_shape[prefix]): prefix += 1
+  suffix = 0
+  while suffix < len(in_shape)-prefix and suffix < len(out_shape)-prefix and _shape_eq(in_shape[-1-suffix], out_shape[-1-suffix]): suffix += 1
+  return prefix, suffix
+
 def _reshape_insert_remove_ones(in_shape:tuple[sint, ...], out_shape:tuple[sint, ...], rngs:tuple[UOp, ...]) -> tuple[UOp, ...]|None:
   if tuple(s for s in in_shape if not _shape_is_one(s)) != tuple(s for s in out_shape if not _shape_is_one(s)): return None
   out_rngs = iter(r for r,s in zip(rngs, out_shape) if not _shape_is_one(s))
   return tuple(next(out_rngs) if not _shape_is_one(s) else UOp.const(dtypes.weakint, 0) for s in in_shape)
+
+def _reshape_insert_remove_ones_recipe(in_shape:tuple[sint, ...], out_shape:tuple[sint, ...]) -> tuple[int, ...]|None:
+  if tuple(s for s in in_shape if not _shape_is_one(s)) != tuple(s for s in out_shape if not _shape_is_one(s)): return None
+  out_rng_idxs = iter(i for i,s in enumerate(out_shape) if not _shape_is_one(s))
+  return tuple(next(out_rng_idxs) if not _shape_is_one(s) else -1 for s in in_shape)
 
 def _reshape_linearize(out_shape:tuple[int, ...], rngs:tuple[UOp, ...]) -> UOp:
   acc: UOp = UOp.const(dtypes.weakint, 0)
@@ -200,42 +213,47 @@ def _reshape_unlinearize(in_shape:tuple[int, ...], rng:UOp) -> tuple[UOp, ...]:
   return tuple(ret[::-1])
 
 @functools.cache
-def _reshape_fastpath_template(in_shape:tuple[sint, ...], out_shape:tuple[sint, ...]) -> tuple[tuple[UOp, ...], UOp]|None:
-  rngs = tuple(UOp.range(s, i, AxisType.PLACEHOLDER) for i,s in enumerate(out_shape))
-  prefix = 0
-  while prefix < len(in_shape) and prefix < len(out_shape) and _shape_eq(in_shape[prefix], out_shape[prefix]): prefix += 1
-  suffix = 0
-  while suffix < len(in_shape)-prefix and suffix < len(out_shape)-prefix and _shape_eq(in_shape[-1-suffix], out_shape[-1-suffix]): suffix += 1
-
+def _reshape_fastpath_recipe(in_shape:tuple[sint, ...], out_shape:tuple[sint, ...]) -> tuple[int, int, int, object]|None:
+  prefix, suffix = _reshape_prefix_suffix(in_shape, out_shape)
   mid_in = in_shape[prefix:len(in_shape)-suffix if suffix else len(in_shape)]
   mid_out = out_shape[prefix:len(out_shape)-suffix if suffix else len(out_shape)]
-  mid_rngs = rngs[prefix:len(rngs)-suffix if suffix else len(rngs)]
-  prefix_rngs = rngs[:prefix]
-  suffix_rngs = rngs[len(rngs)-suffix:] if suffix else ()
 
-  if (fast_mid := _reshape_insert_remove_ones(mid_in, mid_out, mid_rngs)) is not None:
-    return rngs, UOp.sink(*(prefix_rngs + fast_mid + suffix_rngs))
+  if (mid_map := _reshape_insert_remove_ones_recipe(mid_in, mid_out)) is not None:
+    return 0, prefix, suffix, mid_map
   if len(mid_in) == 1 and isinstance(mid_in[0], int) and all(isinstance(s, int) for s in mid_out) and prod(mid_out) == mid_in[0]:
-    mid_out_int = cast(tuple[int, ...], mid_out)
-    return rngs, UOp.sink(*(prefix_rngs + (_reshape_linearize(mid_out_int, mid_rngs),) + suffix_rngs))
+    return 1, prefix, suffix, cast(tuple[int, ...], mid_out)
   if len(mid_out) == 1 and isinstance(mid_out[0], int) and all(isinstance(s, int) for s in mid_in) and prod(mid_in) == mid_out[0]:
-    mid_in_int = cast(tuple[int, ...], mid_in)
-    return rngs, UOp.sink(*(prefix_rngs + _reshape_unlinearize(mid_in_int, mid_rngs[0]) + suffix_rngs))
+    return 2, prefix, suffix, cast(tuple[int, ...], mid_in)
   if (all(isinstance(s, int) for s in mid_in) and
       all(isinstance(s, int) for s in mid_out) and
       (mid_prod:=prod(mid_in)) != 0 and
       mid_prod == prod(mid_out)):
-    mid_in_int = cast(tuple[int, ...], mid_in)
-    mid_out_int = cast(tuple[int, ...], mid_out)
-    linear = _reshape_linearize(mid_out_int, mid_rngs)
-    mid_unlinearized = _reshape_unlinearize(mid_in_int, linear)
-    return rngs, UOp.sink(*(prefix_rngs + mid_unlinearized + suffix_rngs))
+    return 3, prefix, suffix, (cast(tuple[int, ...], mid_in), cast(tuple[int, ...], mid_out))
   return None
 
+def _apply_reshape_fastpath_recipe(recipe:tuple[int, int, int, object], rngs:tuple[UOp, ...]) -> tuple[UOp, ...]:
+  kind, prefix, suffix, data = recipe
+  mid_end = len(rngs)-suffix if suffix else len(rngs)
+  prefix_rngs, mid_rngs, suffix_rngs = rngs[:prefix], rngs[prefix:mid_end], rngs[mid_end:]
+  match kind:
+    case 0:
+      zero = UOp.const(dtypes.weakint, 0)
+      mid = tuple(mid_rngs[i] if i >= 0 else zero for i in cast(tuple[int, ...], data))
+    case 1:
+      mid = (_reshape_linearize(cast(tuple[int, ...], data), mid_rngs),)
+    case 2:
+      mid = _reshape_unlinearize(cast(tuple[int, ...], data), mid_rngs[0])
+    case 3:
+      mid_in, mid_out = cast(tuple[tuple[int, ...], tuple[int, ...]], data)
+      mid = _reshape_unlinearize(mid_in, _reshape_linearize(mid_out, mid_rngs))
+    case _:
+      raise RuntimeError(f"unknown reshape fastpath kind {kind}")
+  return prefix_rngs + mid + suffix_rngs
+
 def _try_cached_reshape(in_shape:tuple[sint, ...], out_shape:tuple[sint, ...], rngs:tuple[UOp, ...]) -> tuple[UOp, ...]|None:
-  template = _reshape_fastpath_template(in_shape, out_shape)
-  if template is None: template = _reshape_movement_template(in_shape, out_shape)
-  prngs, sink = template
+  if (recipe := _reshape_fastpath_recipe(in_shape, out_shape)) is not None:
+    return _apply_reshape_fastpath_recipe(recipe, rngs)
+  prngs, sink = _reshape_movement_template(in_shape, out_shape)
   cached_rngs = cast(tuple[UOp, ...], _substitute_template(sink, dict(zip(prngs, rngs))))
   return None if _has_placeholder_ranges(cached_rngs) else cached_rngs
 

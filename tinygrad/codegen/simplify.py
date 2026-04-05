@@ -28,7 +28,15 @@ def simplify_merge_adjacent(u:UOp) -> UOp|None:
     for i, rngs in enumerate(reduce_ranges):
       if r in rngs: membership |= 1 << i
     range_membership[r] = membership
+  # Large independent reduce-axis groups don't simplify under adjacent merging here; trying just spends rewrite time.
+  if u.op is Ops.REDUCE and u.src[0].op is Ops.MUL and all(v == 0 for v in range_membership.values()):
+    if len(ended_ranges) >= 4: return None
+    if len(ended_ranges) == 3 and len({r.arg[0] for r in ended_ranges}) == len(ended_ranges): return None
   best_divmod = count_divmod(u)
+  if u.op is Ops.END and best_divmod == 0 and len(ended_ranges) >= 3 and u.src[0].op is Ops.STORE and \
+     all(r.arg[-1] == AxisType.LOOP for r in ended_ranges) and len({r.arg[0] for r in ended_ranges}) == len(ended_ranges):
+    return None
+
   if u.op is Ops.END:
     candidate_pairs = zip(ended_ranges, ended_ranges[1:])
   else:
@@ -172,3 +180,4 @@ pm_load_collapse = PatternMatcher([
   # we want to make sure we dont do math on a loaded index since that can cause overflow, this undoes the rule in pm_reduce_load_collapse
   ((UPat.var("x", dtypes.weakint)+UPat.var("y"))<UPat.var("c"), lambda x,y,c: x < c-y if no_load(y) and no_load(c) and not no_load(x) else None),
 ])
+
