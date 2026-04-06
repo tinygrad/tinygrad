@@ -55,7 +55,7 @@ class HCQGraph(MultiGraphRunner):
     self.num_copy_queues: int = getenv("HCQ_NUM_SDMA", min(len(self.devices), 8) if ALL2ALL >= 1 else 1)
     self.num_rdma_ops: dict[tuple[HCQCompiled, HCQCompiled], int] = collections.defaultdict(int)
 
-    self.rdma_vars: dict[tuple[HCQCompiled, HCQCompiled], [Variable, Any]] = {} # value is variable and src_qp
+    self.rdma_vars: dict[tuple[HCQCompiled, HCQCompiled], tuple[Variable, Any]] = {} # value is variable and src_qp
     self.rdma_deps: dict[int, tuple[HWQueue, list[tuple[HCQSignal, int]], HCQSignal, int]] = {}
 
     # Per-peer-group representative device for signal allocation. Prefer non-CPU devices, fall back to devices[0].
@@ -83,7 +83,7 @@ class HCQGraph(MultiGraphRunner):
     self.device_vars: dict[HCQCompiled, dict[str, int]] = {}
 
     for j,ji in enumerate(self.jit_cache):
-      is_rdma = isinstance(ji.prg, BufferXfer) and len(set(Device[cast(Buffer, b).device].peer_group for b in ji.bufs)) > 1
+      is_rdma = isinstance(ji.prg, BufferXfer) and len(set(cast(HCQCompiled, Device[cast(Buffer, b).device]).peer_group for b in ji.bufs)) > 1
 
       if is_exec_prg:=isinstance(ji.prg, CompiledRunner): enqueue_dev: HCQCompiled = ji.prg.dev
       else:
@@ -99,7 +99,8 @@ class HCQGraph(MultiGraphRunner):
         enqueue_queue = self.comp_queues[enqueue_dev]
       elif is_rdma:
         enqueue_queue = self.comp_queues[enqueue_dev]
-        self.rdma_queues.setdefault(tuple(Device[cast(Buffer, b).device] for b in ji.bufs), RDMACopyQueue(enqueue_dev.rdma_dev()))
+        rdma_key = (cast(HCQCompiled, Device[cast(Buffer, ji.bufs[0]).device]), cast(HCQCompiled, Device[cast(Buffer, ji.bufs[1]).device]))
+        self.rdma_queues.setdefault(rdma_key, RDMACopyQueue(enqueue_dev.rdma_dev()))
       else:
         assert (enqueue_dev.hw_copy_queue_t is not None), "device must implement a copy queue"
         queue_idx = self.devices.index(cast(HCQCompiled, Device[cast(Buffer, ji.bufs[0]).device])) % self.num_copy_queues
@@ -119,8 +120,8 @@ class HCQGraph(MultiGraphRunner):
         self.rdma_deps[j] = (peer_queue, peer_sync_signals + peer_opt_deps, peer_out_signal, j + 1)
         self.last_j[peer_queue] = j
       else:
-        sync_signals, opt_deps, rdeps = self._resolve_deps(ji.bufs, ji.prg.p.outs if is_exec_prg else [0], enqueue_queue, enqueue_dev, out_signal, j,
-                                                           is_copy=isinstance(ji.prg, BufferXfer), is_rdma=is_rdma)
+        sync_signals, opt_deps, rdeps = self._resolve_deps(ji.bufs, cast(CompiledRunner, ji.prg).p.outs if is_exec_prg else [0], enqueue_queue,
+          enqueue_dev, out_signal, j, is_copy=isinstance(ji.prg, BufferXfer), is_rdma=is_rdma)
 
       self.ji_schedule[j] = (enqueue_dev, enqueue_queue, sync_signals, opt_deps[::-1], out_signal, None if is_exec_prg else (j + 1))
 
@@ -167,12 +168,12 @@ class HCQGraph(MultiGraphRunner):
       # Encode main commands based on ji type.
       if isinstance(ji.prg, CompiledRunner):
         enqueue_queue.exec(ji.prg._prg, self.ji_args[j], tuple(ji.prg.p.global_size or (1,1,1)), tuple(ji.prg.p.local_size or (1,1,1)))
-      elif isinstance(ji.prg, BufferXfer) and len(set(Device[cast(Buffer, b).device].peer_group for b in ji.bufs)) > 1:
+      elif isinstance(ji.prg, BufferXfer) and len(set(cast(HCQCompiled, Device[cast(Buffer, b).device]).peer_group for b in ji.bufs)) > 1:
         dest_queue, dest_deps, dest_out_signal, dest_out_val = self.rdma_deps[j]
         for sig, val in dest_deps: dest_queue.wait(sig, val)
 
         dest, src = [cast(Buffer, x) for x in ji.bufs[0:2]]
-        dest_dev, src_dev = Device[dest.device], Device[src.device]
+        dest_dev, src_dev = cast(HCQCompiled, Device[dest.device]), cast(HCQCompiled, Device[src.device])
         dest_rdma, src_rdma = dest_dev.rdma_dev(), src_dev.rdma_dev()
 
         # get qp info
@@ -182,7 +183,7 @@ class HCQGraph(MultiGraphRunner):
         head_var = self.rdma_vars.setdefault((dest_rdma, src_rdma), (UOp.variable(f"rdma_var_{j}", 0, 0xffffffff, dtype=dtypes.uint32), src_qp))[0]
         next_head = self.num_rdma_ops[(dest_rdma, src_rdma)]
 
-        rdma_queue = self.rdma_queues[tuple(Device[cast(Buffer, b).device] for b in ji.bufs)]
+        rdma_queue = self.rdma_queues[(dest_dev, src_dev)]
         rdma_queue.copy(self.hcq_bufs[j][0], self.hcq_bufs[j][1], dest.nbytes) \
                   .encode_ring(enqueue_queue, src_dev, src_rdma.iface, src_qp, src_cq_buf, head_var + next_head, ring_uar=True) \
                   .encode_ring(self.comp_queues[dest_dev], dest_dev, dest_rdma.iface, dest_qp, dest_cq_buf, head_var + next_head)
