@@ -511,9 +511,8 @@ tiny_backend_out = {**{f"aten.{x}.out":getattr(Tensor,x) for x in simple_tensor_
   "aten.fmod.Tensor_out": lambda input,other: input-input.div(other, rounding_mode="trunc")*other,
   # TODO: this might result in overflow issues
   "aten.round.decimals_out": lambda self,decimals: (self*10**decimals).round()/10**decimals,
-  # TODO: support this in tinygrad. shift by Tensor not supported
-  "aten.bitwise_left_shift.Tensor_out": lambda x,y: x*(2**y),
-  "aten.bitwise_right_shift.Tensor_out": lambda x,y: x//(2**y),
+  "aten.bitwise_left_shift.Tensor_out": lambda x,y: x<<y,
+  "aten.bitwise_right_shift.Tensor_out": lambda x,y: x>>y,
   # not in tinygrad. are there decomps for these?
   "aten.log1p.out": lambda self: (self+1).log(),
   "aten.expm1.out": lambda self: self.exp() - 1,
