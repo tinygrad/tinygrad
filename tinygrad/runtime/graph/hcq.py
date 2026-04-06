@@ -65,7 +65,7 @@ class HCQGraph(MultiGraphRunner):
 
     self.kick_signals: dict[Any, HCQSignal] = {pg: pg_dev.new_signal(value=0) for pg, pg_dev in self.pg_dev.items()}
     self.signals: dict[Any, HCQSignal] = {**{dev: dev.new_signal(value=0) for dev in self.devices if not dev._is_cpu()},
-      **{dev: self.pg_dev[dev.peer_group].new_signal(value=0) for dev in self.devices if dev._is_cpu()}}
+      **{dev: self.pg_dev.get(dev.peer_group, self.devices[0]).new_signal(value=0) for dev in self.devices if dev._is_cpu()}}
     self.kickoff_value: int = 0
     self.kickoff_var = UOp.variable("kickoff_var", 0, 0xffffffff, dtype=dtypes.uint32)
 
