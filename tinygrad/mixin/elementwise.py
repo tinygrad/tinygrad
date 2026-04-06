@@ -255,9 +255,25 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
   # NOTE: __eq__ isn't overridden, and means the same thing as is by default
 
   def lshift(self, x: Self | int, reverse: bool = False) -> Self:
+    """
+    Computes left arithmetic shift of `self` by `x` bits. `self` must have integer dtype.
+    Equivalent to `self << x`.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([1, 3, 31], dtype=dtypes.uint8).lshift(2).numpy())
+    ```
+    """
     return self._binop(Ops.SHL, x, reverse)
 
   def rshift(self, x: Self | int, reverse: bool = False) -> Self:
+    """
+    Computes right arithmetic shift of `self` by `x` bits. `self` must have integer dtype.
+    Equivalent to `self >> x`.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([4, 13, 125], dtype=dtypes.uint8).rshift(2).numpy())
+    ```
+    """
     return self._binop(Ops.SHR, x, reverse)
 
   def __lshift__(self, x: Self | int) -> Self:
