@@ -6,7 +6,7 @@ from tinygrad.dtype import dtypes, PtrDType, DType, truncate
 from tinygrad.uop import FastEnum, auto, Ops, GroupOp
 from tinygrad.uop.ops import UOp, UPat, PatternMatcher
 from tinygrad.renderer.isa import ISARenderer, IselContext, Register, PreRegAllocContext
-from tinygrad.helpers import getenv, CPU_COUNT, unwrap
+from tinygrad.helpers import getenv, CPU_COUNT, unwrap, Target
 
 # ***** X86 Ops *****
 
@@ -839,7 +839,8 @@ class X86Renderer(ISARenderer):
   post_regalloc_matcher = post_regalloc_matcher
   isa_spec = isa_spec
   code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.AND, Ops.OR, Ops.SHL, Ops.SHR, Ops.NEG, Ops.SUB, Ops.FDIV, Ops.CMPLT, Ops.CMPEQ)}
-  def __init__(self):
+  def __init__(self, target:Target):
+    super().__init__(target)
     from tinygrad.runtime.support.compiler_cpu import X86Compiler
     self.compiler = X86Compiler()
   def is_two_address(self, x:UOp) -> bool: return x.arg in X86GroupOp.TwoAddress
