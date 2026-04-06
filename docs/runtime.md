@@ -4,8 +4,8 @@ tinygrad supports various runtimes, enabling your code to scale across a wide ra
 
 | Runtime | Description | Compiler Options | Requirements |
 |---------|-------------|------------------|--------------|
-| [NV](https://github.com/tinygrad/tinygrad/tree/master/tinygrad/runtime/ops_nv.py) | Provides acceleration for NVIDIA GPUs | nvrtc (default)<br>PTX (`DEV=NV:PTX`) | Ampere/Ada/Blackwell series GPUs.<br>You can select an interface via `NV_IFACE=(NVK\|PCI)`. See [NV interfaces](#nv-interfaces) for details. |
-| [AMD](https://github.com/tinygrad/tinygrad/tree/master/tinygrad/runtime/ops_amd.py) | Provides acceleration for AMD GPUs | LLVM (`DEV=AMD:LLVM`)<br>HIP/COMGR (`DEV=AMD:HIP`) | RDNA2 or newer GPUs.<br>You can select an interface via `AMD_IFACE=(KFD\|PCI\|USB)`. See [AMD interfaces](#amd-interfaces) for details. |
+| [NV](https://github.com/tinygrad/tinygrad/tree/master/tinygrad/runtime/ops_nv.py) | Provides acceleration for NVIDIA GPUs | nvrtc (default)<br>PTX (`DEV=NV:PTX`) | Ampere/Ada/Blackwell series GPUs.<br>You can select an interface via [the `DEV` variable](env_vars.md#dev-variable). See [NV interfaces](#nv-interfaces) for details. |
+| [AMD](https://github.com/tinygrad/tinygrad/tree/master/tinygrad/runtime/ops_amd.py) | Provides acceleration for AMD GPUs | LLVM (`DEV=AMD:LLVM`)<br>HIP/COMGR (`DEV=AMD:HIP`) | RDNA2 or newer GPUs.<br>You can select an interface via [the `DEV` variable](env_vars.md#dev-variable). See [AMD interfaces](#amd-interfaces) for details. |
 | [QCOM](https://github.com/tinygrad/tinygrad/tree/master/tinygrad/runtime/ops_qcom.py) | Provides acceleration for QCOM GPUs | - | 6xx series GPUs |
 | [METAL](https://github.com/tinygrad/tinygrad/tree/master/tinygrad/runtime/ops_metal.py) | Utilizes Metal for acceleration on Apple devices | - | M1+ Macs; Metal 3.0+ for `bfloat` support |
 | [CUDA](https://github.com/tinygrad/tinygrad/tree/master/tinygrad/runtime/ops_cuda.py) | Utilizes CUDA for acceleration on NVIDIA GPUs | nvrtc (default)<br> PTX (`DEV=CUDA:PTX`) | NVIDIA GPU with CUDA support |
@@ -72,7 +72,7 @@ AMD backend supports several interfaces for communicating with devices:
 * `PCI`: uses the [AM driver](developer/am.md)
 * `USB`: USB3 interface for asm24xx chips.
 
-You can force an interface by setting `AMD_IFACE` to one of these values. In the case of `AMD_IFACE=PCI`, this may unbind your GPU from the amdgpu driver.
+You can force an interface by setting the interface component of [the `DEV` environment variable](env_vars.md#dev-variable) to one of these values. When set to `PCI`, this may unbind your GPU from the amdgpu driver.
 
 ## NV Interfaces
 NV backend supports several interfaces for communicating with devices:
