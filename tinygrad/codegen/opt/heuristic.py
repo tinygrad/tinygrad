@@ -6,10 +6,10 @@ from tinygrad.uop.ops import Ops, resolve, AxisType
 from tinygrad.codegen.opt.postrange import Scheduler
 
 def get_mv_cpu_upcasts() -> tuple[int, ...]:
-  return tuple(v for x in os.getenv("MV_CPU_UPCASTS", os.getenv("MV_CPU_UPCAST", "16,2,2")).split(",") if (v:=int(x)) > 1)
+  return tuple(v for x in os.getenv("MV_CPU_UPCASTS", os.getenv("MV_CPU_UPCAST", "16")).split(",") if (v:=int(x)) > 1)
 
 def cpu_matvec_heuristic(k:Scheduler, allow_unroll:bool=True) -> Scheduler|None:
-  MV_CPU_UPCASTS, MV_CPU_UNROLL = get_mv_cpu_upcasts(), getenv("MV_CPU_UNROLL", 1)
+  MV_CPU_UPCASTS, MV_CPU_UNROLL = get_mv_cpu_upcasts(), getenv("MV_CPU_UNROLL", 4)
   if not (getenv("MV", 1) != 0 and k.reduceop is not None and k.reduceop.arg[0] is Ops.ADD and len(k.full_shape) >= 2 and
           (mulop:=k.reduceop.src[0]).op is Ops.MUL and mulop.src[0].op is Ops.INDEX and mulop.src[1].op is Ops.INDEX):
     return None

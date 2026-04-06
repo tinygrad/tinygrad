@@ -65,8 +65,9 @@ class TestKernelOpts(unittest.TestCase):
     r = Tensor.rand(1024) @ Tensor.rand(1024, 4096)
     out = hand_coded_optimizations(Scheduler(r.schedule()[-1].ast, Device[Device.DEFAULT].renderer))
     upcasts = [opt for opt in out.applied_opts if opt.op is OptOps.UPCAST]
-    self.assertEqual([(opt.axis, opt.arg) for opt in upcasts], [(0, 16), (0, 2), (0, 2)])
-    self.assertFalse(any(opt.op is OptOps.UNROLL for opt in out.applied_opts))
+    self.assertEqual([(opt.axis, opt.arg) for opt in upcasts], [(0, 16)])
+    unrolls = [opt for opt in out.applied_opts if opt.op is OptOps.UNROLL]
+    self.assertEqual([(opt.arg) for opt in unrolls], [4])
     self.assertFalse(any(opt.op in {OptOps.LOCAL, OptOps.GROUP, OptOps.GROUPTOP} for opt in out.applied_opts))
 
   @unittest.skipUnless(Device.DEFAULT == "CPU", "cpu-specific test")
@@ -76,7 +77,7 @@ class TestKernelOpts(unittest.TestCase):
     k = Scheduler(r.schedule()[-1].ast, Device[Device.DEFAULT].renderer)
     seeded = beam_search_seeds(k)
     self.assertEqual(len(seeded), 2)
-    self.assertEqual([opt.arg for opt in seeded[1].applied_opts if opt.op is OptOps.UPCAST], [16, 2, 2])
+    self.assertEqual([opt.arg for opt in seeded[1].applied_opts if opt.op is OptOps.UPCAST], [16])
     self.assertFalse(any(opt.op is OptOps.UNROLL for opt in seeded[1].applied_opts))
 
   @unittest.skipUnless(Device.DEFAULT == "CPU", "cpu-specific test")
@@ -85,7 +86,7 @@ class TestKernelOpts(unittest.TestCase):
     r = Tensor.rand(1024) @ Tensor.rand(1024, 4096)
     out = cpu_matvec_heuristic(Scheduler(r.schedule()[-1].ast, Device[Device.DEFAULT].renderer), allow_unroll=False)
     self.assertIsNotNone(out)
-    self.assertEqual([opt.arg for opt in out.applied_opts if opt.op is OptOps.UPCAST], [16, 2, 2])
+    self.assertEqual([opt.arg for opt in out.applied_opts if opt.op is OptOps.UPCAST], [16])
     self.assertFalse(any(opt.op is OptOps.UNROLL for opt in out.applied_opts))
     self.assertFalse(any(opt.op in {OptOps.LOCAL, OptOps.GROUP, OptOps.GROUPTOP} for opt in out.applied_opts))
 
