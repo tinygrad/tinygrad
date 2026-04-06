@@ -224,7 +224,6 @@ class MLXQP:
     # transition to INIT
     self.qp_op(mlx5.MLX5_CMD_OP_RST2INIT_QP, qpc_args=dict(log_ack_req_freq=8), addr_args=dict(pkey_index=0, vhca_port_num=1))
 
-    self.cq_ci = self.sq_head = self.rq_head = 0
     for i in range(self.cq_size): self.cq_mem[i * 64 + 63] = 0x01  # init owner bits so poll_cq waits for real CQEs
     if MLX_DEBUG >= 1: print(f"mlx5: QP 0x{self.qp_info['qpn']:x} (EQ={self.eq_info['eq_number']} CQ=0x{self.cq_info['cqn']:x})")
 
