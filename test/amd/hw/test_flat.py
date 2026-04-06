@@ -12,10 +12,10 @@ class TestFlatAtomic(unittest.TestCase):
     """Helper to create atomic test instructions."""
     instructions = [
       s_load_b64(s[2:3], s[80:81], 0, soffset=SrcEnum.NULL),
-      s_waitcnt(lgkmcnt=0),
+      s_waitcnt_lgkmcnt(sdst=NULL, simm16=0),
       v_mov_b32_e32(v[0], s[2]),
       v_mov_b32_e32(v[1], s[3]),
-    ] + setup_instrs + [atomic_instr, s_waitcnt(vmcnt=0),
+    ] + setup_instrs + [atomic_instr, s_waitcnt_vmcnt(sdst=NULL, simm16=0),
       v_mov_b32_e32(v[0], 0),
       v_mov_b32_e32(v[1], 0),
       s_mov_b32(s[2], 0),
@@ -31,7 +31,7 @@ class TestFlatAtomic(unittest.TestCase):
       s_mov_b32(s[0], 100),
       v_mov_b32_e32(v[2], s[0]),
       global_store_b32(addr=v[0:1], data=v[2], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt_vmcnt(sdst=NULL, simm16=0),
       s_mov_b32(s[0], 50),
       v_mov_b32_e32(v[3], s[0]),
     ]
@@ -47,7 +47,7 @@ class TestFlatAtomic(unittest.TestCase):
       s_mov_b32(s[0], 0xAAAAAAAA),
       v_mov_b32_e32(v[2], s[0]),
       global_store_b32(addr=v[0:1], data=v[2], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt_vmcnt(sdst=NULL, simm16=0),
       s_mov_b32(s[0], 0xBBBBBBBB),
       v_mov_b32_e32(v[3], s[0]),
     ]
@@ -63,7 +63,7 @@ class TestFlatAtomic(unittest.TestCase):
       s_mov_b32(s[0], 0xFF00FF00),
       v_mov_b32_e32(v[2], s[0]),
       global_store_b32(addr=v[0:1], data=v[2], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt_vmcnt(sdst=NULL, simm16=0),
       s_mov_b32(s[0], 0xFFFF0000),
       v_mov_b32_e32(v[3], s[0]),
     ]
@@ -79,7 +79,7 @@ class TestFlatAtomic(unittest.TestCase):
       s_mov_b32(s[0], 0x00FF0000),
       v_mov_b32_e32(v[2], s[0]),
       global_store_b32(addr=v[0:1], data=v[2], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt_vmcnt(sdst=NULL, simm16=0),
       s_mov_b32(s[0], 0x0000FF00),
       v_mov_b32_e32(v[3], s[0]),
     ]
@@ -95,7 +95,7 @@ class TestFlatAtomic(unittest.TestCase):
       s_mov_b32(s[0], 10),
       v_mov_b32_e32(v[2], s[0]),
       global_store_b32(addr=v[0:1], data=v[2], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt_vmcnt(sdst=NULL, simm16=0),
       s_mov_b32(s[0], 100),  # threshold
       v_mov_b32_e32(v[3], s[0]),
     ]
@@ -111,7 +111,7 @@ class TestFlatAtomic(unittest.TestCase):
       s_mov_b32(s[0], 10),
       v_mov_b32_e32(v[2], s[0]),
       global_store_b32(addr=v[0:1], data=v[2], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt_vmcnt(sdst=NULL, simm16=0),
       s_mov_b32(s[0], 100),
       v_mov_b32_e32(v[3], s[0]),
     ]
@@ -127,7 +127,7 @@ class TestFlatAtomic(unittest.TestCase):
       s_mov_b32(s[0], 100),
       v_mov_b32_e32(v[2], s[0]),
       global_store_b32(addr=v[0:1], data=v[2], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt_vmcnt(sdst=NULL, simm16=0),
       s_mov_b32(s[0], 30),
       v_mov_b32_e32(v[3], s[0]),  # sub 30
     ]
@@ -143,7 +143,7 @@ class TestFlatAtomic(unittest.TestCase):
       s_mov_b32(s[0], 0xAAAAAAAA),
       v_mov_b32_e32(v[2], s[0]),
       global_store_b32(addr=v[0:1], data=v[2], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt_vmcnt(sdst=NULL, simm16=0),
       s_mov_b32(s[0], 0xFFFFFFFF),
       v_mov_b32_e32(v[3], s[0]),  # XOR mask
     ]
@@ -159,7 +159,7 @@ class TestFlatAtomic(unittest.TestCase):
       s_mov_b32(s[0], 100),
       v_mov_b32_e32(v[2], s[0]),
       global_store_b32(addr=v[0:1], data=v[2], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt_vmcnt(sdst=NULL, simm16=0),
       s_mov_b32(s[0], 50),
       v_mov_b32_e32(v[3], s[0]),  # compare value (smaller)
     ]
@@ -175,7 +175,7 @@ class TestFlatAtomic(unittest.TestCase):
       s_mov_b32(s[0], 50),
       v_mov_b32_e32(v[2], s[0]),
       global_store_b32(addr=v[0:1], data=v[2], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt_vmcnt(sdst=NULL, simm16=0),
       s_mov_b32(s[0], 100),
       v_mov_b32_e32(v[3], s[0]),  # compare value (larger)
     ]
@@ -194,7 +194,7 @@ class TestFlatAtomic(unittest.TestCase):
       s_mov_b32(s[0], 0xCAFEBABE),
       v_mov_b32_e32(v[3], s[0]),
       global_store_b64(addr=v[0:1], data=v[2:3], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt_vmcnt(sdst=NULL, simm16=0),
       # Threshold: 0xFFFFFFFF_FFFFFFFF
       s_mov_b32(s[0], 0xFFFFFFFF),
       v_mov_b32_e32(v[4], s[0]),
@@ -215,7 +215,7 @@ class TestFlatAtomic(unittest.TestCase):
       s_mov_b32(s[0], 0x22222222),
       v_mov_b32_e32(v[3], s[0]),
       global_store_b64(addr=v[0:1], data=v[2:3], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt_vmcnt(sdst=NULL, simm16=0),
       s_mov_b32(s[0], 0x00000001),  # add 1
       v_mov_b32_e32(v[4], s[0]),
       s_mov_b32(s[0], 0x00000000),
@@ -236,7 +236,7 @@ class TestFlatAtomic(unittest.TestCase):
       s_mov_b32(s[0], 0xBBBBBBBB),
       v_mov_b32_e32(v[3], s[0]),
       global_store_b64(addr=v[0:1], data=v[2:3], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt_vmcnt(sdst=NULL, simm16=0),
       s_mov_b32(s[0], 0xCCCCCCCC),
       v_mov_b32_e32(v[4], s[0]),
       s_mov_b32(s[0], 0xDDDDDDDD),
@@ -257,15 +257,15 @@ class TestFlatLoad(unittest.TestCase):
     TEST_OFFSET = 2000
     instructions = [
       s_load_b64(s[2:3], s[80:81], 0, soffset=SrcEnum.NULL),
-      s_waitcnt(lgkmcnt=0),
+      s_waitcnt_lgkmcnt(sdst=NULL, simm16=0),
       v_mov_b32_e32(v[0], s[2]),
       v_mov_b32_e32(v[1], s[3]),
       s_mov_b32(s[0], 0xDEADBEEF),
       v_mov_b32_e32(v[2], s[0]),
       global_store_b32(addr=v[0:1], data=v[2], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt_vmcnt(sdst=NULL, simm16=0),
       FLAT(FLATOp.FLAT_LOAD_B32, addr=v[0:1], vdst=v[4], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt_vmcnt(sdst=NULL, simm16=0),
       v_mov_b32_e32(v[0], 0),
       v_mov_b32_e32(v[1], 0),
       s_mov_b32(s[2], 0),
@@ -279,7 +279,7 @@ class TestFlatLoad(unittest.TestCase):
     TEST_OFFSET = 2000
     instructions = [
       s_load_b64(s[2:3], s[80:81], 0, soffset=SrcEnum.NULL),
-      s_waitcnt(lgkmcnt=0),
+      s_waitcnt_lgkmcnt(sdst=NULL, simm16=0),
       v_mov_b32_e32(v[0], s[2]),
       v_mov_b32_e32(v[1], s[3]),
       s_mov_b32(s[0], 0xDEADBEEF),
@@ -287,9 +287,9 @@ class TestFlatLoad(unittest.TestCase):
       s_mov_b32(s[0], 0xCAFEBABE),
       v_mov_b32_e32(v[3], s[0]),
       global_store_b64(addr=v[0:1], data=v[2:3], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt_vmcnt(sdst=NULL, simm16=0),
       FLAT(FLATOp.FLAT_LOAD_B64, addr=v[0:1], vdst=v[4:5], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt_vmcnt(sdst=NULL, simm16=0),
       v_mov_b32_e32(v[0], 0),
       v_mov_b32_e32(v[1], 0),
       s_mov_b32(s[2], 0),
@@ -304,7 +304,7 @@ class TestFlatLoad(unittest.TestCase):
     TEST_OFFSET = 2000
     instructions = [
       s_load_b64(s[2:3], s[80:81], 0, soffset=SrcEnum.NULL),
-      s_waitcnt(lgkmcnt=0),
+      s_waitcnt_lgkmcnt(sdst=NULL, simm16=0),
       v_mov_b32_e32(v[0], s[2]),
       v_mov_b32_e32(v[1], s[3]),
       s_mov_b32(s[0], 0x11111111),
@@ -314,9 +314,9 @@ class TestFlatLoad(unittest.TestCase):
       s_mov_b32(s[0], 0x33333333),
       v_mov_b32_e32(v[4], s[0]),
       global_store_b96(addr=v[0:1], data=v[2:4], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt_vmcnt(sdst=NULL, simm16=0),
       FLAT(FLATOp.FLAT_LOAD_B96, addr=v[0:1], vdst=v[5:7], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt_vmcnt(sdst=NULL, simm16=0),
       v_mov_b32_e32(v[0], 0),
       v_mov_b32_e32(v[1], 0),
       s_mov_b32(s[2], 0),
@@ -332,7 +332,7 @@ class TestFlatLoad(unittest.TestCase):
     TEST_OFFSET = 2000
     instructions = [
       s_load_b64(s[2:3], s[80:81], 0, soffset=SrcEnum.NULL),
-      s_waitcnt(lgkmcnt=0),
+      s_waitcnt_lgkmcnt(sdst=NULL, simm16=0),
       v_mov_b32_e32(v[0], s[2]),
       v_mov_b32_e32(v[1], s[3]),
       s_mov_b32(s[0], 0x11111111),
@@ -344,9 +344,9 @@ class TestFlatLoad(unittest.TestCase):
       s_mov_b32(s[0], 0x44444444),
       v_mov_b32_e32(v[5], s[0]),
       global_store_b128(addr=v[0:1], data=v[2:5], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt_vmcnt(sdst=NULL, simm16=0),
       FLAT(FLATOp.FLAT_LOAD_B128, addr=v[0:1], vdst=v[6:9], saddr=SrcEnum.NULL, offset=TEST_OFFSET),
-      s_waitcnt(vmcnt=0),
+      s_waitcnt_vmcnt(sdst=NULL, simm16=0),
       v_mov_b32_e32(v[0], 0),
       v_mov_b32_e32(v[1], 0),
       s_mov_b32(s[2], 0),

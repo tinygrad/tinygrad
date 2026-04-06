@@ -177,6 +177,18 @@ class NVComputeQueue(NVCommandQueue):
     self.active_qmd = None
     return self
 
+  def write(self, b:HCQBuffer, val:sint, b64:bool=False):
+    self.nvm(0, nv_gpu.NVC56F_SEM_ADDR_LO, *data64_le(b.va_addr), *data64_le(val),
+             nv_flags("NVC56F_SEM_EXECUTE", operation="release", release_wfi="en", payload_size="64bit" if b64 else "32bit"))
+    self.active_qmd = None
+    return self
+
+  def poll_bit(self, b:HCQBuffer, val:sint, mask:int):
+    self.nvm(0, nv_gpu.NVC56F_SEM_ADDR_LO, *data64_le(b.va_addr), *data64_le((~mask & 0xFFFFFFFF) if val == 0 else val),
+             nv_flags("NVC56F_SEM_EXECUTE", operation="acq_nor" if val == 0 else "acq_and", payload_size="32bit"))
+    self.active_qmd = None
+    return self
+
   def _submit(self, dev:NVDevice): self._submit_to_gpfifo(dev, dev.compute_gpfifo)
 
 class NVCopyQueue(NVCommandQueue):
@@ -547,12 +559,6 @@ class PCIIface(PCIIfaceBase):
     # Setup classes for the GPU
     self.gpfifo_class, self.compute_class, self.dma_class = (gsp:=self.dev_impl.gsp).gpfifo_class, gsp.compute_class, gsp.dma_class
     self.viddec_class = None
-
-  def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, force_devmem=False, **kwargs) -> HCQBuffer:
-    # Force use of huge pages for large allocations. NVDev will attempt to use huge pages in any case,
-    # but if the size is not aligned, the tail will be allocated with 4KB pages, increasing TLB pressure.
-    return super().alloc(round_up(size, mmap.PAGESIZE if uncached or host else ((2 << 20) if size >= (8 << 20) else (4 << 10))),
-      host=host, uncached=uncached, cpu_access=cpu_access, contiguous=contiguous, force_devmem=force_devmem, **kwargs)
 
   def setup_usermode(self): return 0xce000000, self.pci_dev.map_bar(bar=0, fmt='I', off=0xbb0000, size=0x10000)
   def setup_vm(self, vaspace): pass

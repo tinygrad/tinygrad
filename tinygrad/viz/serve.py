@@ -388,7 +388,7 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
     # barrier on this wave extends to fill the time it was waiting
     if wave is not None:
       if (barrier:=curr_barrier.pop(wave, None)) is not None: barrier.en = Decimal(p._time)
-      if name == "BARRIER": curr_barrier[wave] = e
+      if name in {"BARRIER", "BARRIER_SIGNAL"}: curr_barrier[wave] = e
   NS_PER_TICK = 10  # 100MHz
   prev_pair:tuple[int, int]|None = None # (shader, realtime)
   yield ProfilePointEvent("", "JSON", "waveColors", list(wave_colors.items()), ts=Decimal(0))
