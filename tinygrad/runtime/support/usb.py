@@ -181,20 +181,20 @@ class CustomASM24Controller:
   # === PCIe TLP via 0xF0 vendor command ===
 
   def _f0_out(self, fmt_type:int, byte_en:int, address:int, value:int, mode:int=0):
-    """Send 0xF0 OUT control transfer: configure TLP engine. 12-byte DATA_OUT = addr_lo[4 LE] + addr_hi[4 LE] + value[4 BE]."""
+    """Send 0xF0 OUT control transfer: configure TLP engine. 12-byte DATA_OUT = addr_lo[4 LE] + addr_hi[4 LE] + value[4 LE]."""
     wval = fmt_type | (byte_en << 8)
     widx = mode & 0x03
-    payload = struct.pack('<II', address & 0xFFFFFFFF, address >> 32) + struct.pack('>I', value)
+    payload = struct.pack('<III', address & 0xFFFFFFFF, address >> 32, value)
     buf = (ctypes.c_ubyte * 12)(*payload)
     ret = libusb.libusb_control_transfer(self.usb.handle, 0x40, 0xF0, wval, widx, buf, 12, 5000)
     assert ret == 12, f"F0 OUT failed: {ret}"
 
   def _f0_in(self) -> tuple[int, int, int]:
-    """Read 0xF0 IN: 8 bytes = data[4 BE] + cpl_hdr[2] + compl_status[1] + ret_status[1]. Returns (data, compl_status, ret_status)."""
+    """Read 0xF0 IN: 8 bytes = data[4 LE] + cpl_hdr[2] + compl_status[1] + ret_status[1]. Returns (data, compl_status, ret_status)."""
     buf = (ctypes.c_ubyte * 8)()
     ret = libusb.libusb_control_transfer(self.usb.handle, 0xC0, 0xF0, 0, 0, buf, 8, 5000)
     assert ret == 8, f"F0 IN failed: {ret}"
-    data = struct.unpack('>I', bytes(buf[0:4]))[0]
+    data = struct.unpack('<I', bytes(buf[0:4]))[0]
     cpl_status = (buf[4] >> 5) & 0x7  # completion status from CPL_HDR_HI bits [7:5]
     return data, cpl_status, buf[7]
 
