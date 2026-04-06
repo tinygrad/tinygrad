@@ -141,6 +141,17 @@ class FlatTransformer:
                 amax_xqkv=None, amax_wqkv=None, amax_xq=None, amax_wq=None, amax_xk=None, amax_wk=None,
                 amax_xv=None, amax_wv=None, amax_xo=None, amax_wo=None,
                 amax_x1=None, amax_w1=None, amax_x2=None, amax_w2=None, amax_x3=None, amax_w3=None):
+    return self._run_layer(x, freqs_cis, attention_norm, wo, ffn_norm, w1, w2, w3, wqkv, wq, wk, wv,
+                           amax_xqkv, amax_wqkv, amax_xq, amax_wq, amax_xk, amax_wk, amax_xv, amax_wv,
+                           amax_xo, amax_wo, amax_x1, amax_w1, amax_x2, amax_w2, amax_x3, amax_w3)
+
+  def _run_layer(self, x:Tensor, freqs_cis:Tensor,
+                attention_norm:Tensor, wo:Tensor,
+                ffn_norm:Tensor, w1:Tensor, w2:Tensor, w3:Tensor,
+                wqkv:Tensor|None=None, wq:Tensor|None=None, wk:Tensor|None=None, wv:Tensor|None=None,
+                amax_xqkv=None, amax_wqkv=None, amax_xq=None, amax_wq=None, amax_xk=None, amax_wk=None,
+                amax_xv=None, amax_wv=None, amax_xo=None, amax_wo=None,
+                amax_x1=None, amax_w1=None, amax_x2=None, amax_w2=None, amax_x3=None, amax_w3=None):
     h = x + self.attention(x, freqs_cis, attention_norm, wo, wqkv=wqkv, wq=wq, wk=wk, wv=wv,
                            amax_xqkv=amax_xqkv, amax_wqkv=amax_wqkv, amax_xq=amax_xq, amax_wq=amax_wq,
                            amax_xk=amax_xk, amax_wk=amax_wk, amax_xv=amax_xv, amax_wv=amax_wv,
@@ -172,7 +183,7 @@ class FlatTransformer:
       self.output.shard_(device, axis=1).realize()
       self.freqs_cis.shard_(device, axis=None).realize()
 
-  def __call__(self, tokens:Tensor):
+  def __call__(self, tokens:Tensor, is_8b:bool=False):
     h = self.tok_embeddings(tokens)
     freqs_cis = self.freqs_cis.cast(h.dtype)[:, :tokens.shape[1], :, :, :]
     a = self._fp8_amax if FP8 else None
@@ -189,10 +200,16 @@ class FlatTransformer:
                     "amax_x1": a["x1"][i], "amax_w1": a["w1"][i],
                     "amax_x2": a["x2"][i], "amax_w2": a["w2"][i],
                     "amax_x3": a["x3"][i], "amax_w3": a["w3"][i]} if a else {}
-      h = self.run_layer(h, freqs_cis,
-                         self.attention_norm[i], self.wo[i],
-                         self.ffn_norm[i], self.w1[i], self.w2[i], self.w3[i],
-                         **attn_kwargs, **amax_attn, **amax_layer)
+      if is_8b:
+        h = self._run_layer(h, freqs_cis,
+                           self.attention_norm[i], self.wo[i],
+                           self.ffn_norm[i], self.w1[i], self.w2[i], self.w3[i],
+                           **attn_kwargs, **amax_attn, **amax_layer)
+      else:
+        h = self.run_layer(h, freqs_cis,
+                           self.attention_norm[i], self.wo[i],
+                           self.ffn_norm[i], self.w1[i], self.w2[i], self.w3[i],
+                           **attn_kwargs, **amax_attn, **amax_layer)
     logits = (self.norm(h).contiguous().contiguous_backward() @ self.output[0].T).contiguous_backward()
     return logits
 
