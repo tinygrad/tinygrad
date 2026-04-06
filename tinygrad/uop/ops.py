@@ -170,6 +170,9 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     return self.op in ops or any(x.op in ops for x in self.backward_slice)
 
   def toposort(self, gate:Callable|None=None, enter_calls=True) -> dict[UOp, None]:
+    ungated = gate is None and enter_calls
+    # fast path: return cached result for default (ungated, enter_calls=True) toposort
+    if ungated and (cached := self.__dict__.get('_toposort')) is not None: return dict(cached)
     cache: dict[UOp, None] = {}
     stack: list[tuple[UOp, bool]] = [(self, False)] # each stack entry is (node, visited_flag)
     while stack:
@@ -177,10 +180,17 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       if node in cache: continue
       if not visited:
         if gate is None or gate(node):
+          # subtree shortcircuit: if child has cached toposort, merge and skip its subtree
+          if ungated and node is not self and (node_cached := node.__dict__.get('_toposort')) is not None:
+            cache.update(node_cached)
+            continue
           stack.append((node, True))  # push node back on stack to process after its srcs
           for s in reversed(node.src if enter_calls or node.op is not Ops.CALL else node.src[1:]):
             stack.append((s, False)) # push srcs on the stack
       else: cache[node] = None # second time i'm seeing this node, add it to returned toposort
+    if ungated:
+      self.__dict__['_toposort'] = cache
+      return dict(cache)
     return cache
 
   def topovisit(self, visitor:Callable[[UOp], T], cache:dict[UOp, T]) -> T:
