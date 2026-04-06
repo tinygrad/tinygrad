@@ -2432,7 +2432,7 @@ class Tensor(OpMixin):
     print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).selu().numpy())
     ```
     """
-    return gamma * (self >= 0).detach().where(self, alpha * (self.exp() - 1))
+    return gamma * (self >= 0).where(self, alpha * (self.exp() - 1))
 
   def mish(self) -> Tensor:
     """
