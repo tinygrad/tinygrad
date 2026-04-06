@@ -13,7 +13,7 @@ export HK_FLASH_ATTENTION=1
 export ALL2ALL=1
 export USE_ATOMICS=1
 export ASM_GEMM=1
-export WQKV=0
+export WQKV=1
 export MASTER_WEIGHTS=1
 export FP8=1
 

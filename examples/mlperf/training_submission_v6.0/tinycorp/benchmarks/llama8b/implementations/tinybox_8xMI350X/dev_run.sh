@@ -12,7 +12,7 @@ export HK_FLASH_ATTENTION=${HK_FLASH_ATTENTION:-1}
 export ALL2ALL=${ALL2ALL:-1}
 export USE_ATOMICS=${USE_ATOMICS:-1}
 export ASM_GEMM=${ASM_GEMM:-1}
-export WQKV=${WQKV:-0}
+export WQKV=${WQKV:-1}
 export MASTER_WEIGHTS=${MASTER_WEIGHTS:-1}
 export FP8=${FP8:-1}
 
