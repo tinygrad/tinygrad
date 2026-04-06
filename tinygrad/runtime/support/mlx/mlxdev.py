@@ -11,7 +11,15 @@ MLX5_CMD_STRUCTS = {v: (getattr(mlx5, f"struct_mlx5_ifc_{n[12:].lower()}_in_bits
   getattr(mlx5, f"struct_mlx5_ifc_{n[12:].lower()}_out_bits", None)) for n, v in mlx5.__dict__.items() if n.startswith("MLX5_CMD_OP_")}
 MLX5_CMD_STRUCTS[mlx5.MLX5_CMD_OP_ACCESS_REG] = (mlx5.struct_mlx5_ifc_access_register_in_bits, mlx5.struct_mlx5_ifc_access_register_out_bits)
 
-def to_be(fmt, val): return struct.unpack('<'+fmt, struct.pack('>'+fmt, val))[0]
+def to_be(fmt, val):
+  if isinstance(val, int): return struct.unpack('<'+fmt, struct.pack('>'+fmt, val))[0]
+  # Symbolic byte swap for UOp values
+  if fmt == 'I':
+    return ((val & 0xFF) << 24) | (((val >> 8) & 0xFF) << 16) | (((val >> 16) & 0xFF) << 8) | ((val >> 24) & 0xFF)
+  if fmt == 'Q':
+    return ((val & 0xFF) << 56) | (((val >> 8) & 0xFF) << 48) | (((val >> 16) & 0xFF) << 40) | (((val >> 24) & 0xFF) << 32) | \
+           (((val >> 32) & 0xFF) << 24) | (((val >> 40) & 0xFF) << 16) | (((val >> 48) & 0xFF) << 8) | ((val >> 56) & 0xFF)
+  raise ValueError(f"unsupported format {fmt} for symbolic to_be")
 def ipv4_to_gid(ip): return bytes(10) + b'\xff\xff' + socket.inet_aton(ip)
 
 def udp_sport(lqpn, rqpn):
