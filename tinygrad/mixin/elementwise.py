@@ -867,6 +867,52 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
     """
     return self.maximum(0) + (alpha * ((self / alpha).exp() - 1)).minimum(0)
 
+  def selu(self, alpha=1.67326, gamma=1.0507) -> Self:
+    """
+    Applies the Scaled Exponential Linear Unit (SELU) function element-wise.
+
+    - Paper: https://arxiv.org/abs/1706.02515v5
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).selu().numpy())
+    ```
+    """
+    return gamma * (self >= 0).where(self, alpha * (self.exp() - 1))
+
+  def softplus(self, beta=1.0) -> Self:
+    """
+    Applies the Softplus function element-wise.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).softplus().numpy())
+    ```
+    """
+    return (1/beta) * (self*beta).logaddexp(0.0)
+
+  def mish(self) -> Self:
+    """
+    Applies the Mish function element-wise.
+
+    - Paper: https://arxiv.org/abs/1908.08681v3
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).mish().numpy())
+    ```
+    """
+    return self * self.softplus().tanh()
+
+  def logsigmoid(self) -> Self:
+    """
+    Applies the LogSigmoid function element-wise.
+
+    - See: https://docs.pytorch.org/docs/stable/generated/torch.nn.functional.logsigmoid.html
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).logsigmoid().numpy())
+    ```
+    """
+    return -(-self).softplus()
+
   def sinh(self) -> Self:
     """
     Applies the Hyperbolic Sine (sinh) function element-wise.
