@@ -58,14 +58,12 @@ class HCQGraph(MultiGraphRunner):
     self.rdma_vars: dict[tuple[HCQCompiled, HCQCompiled], [Variable, Any]] = {} # value is variable and src_qp
     self.rdma_deps: dict[int, tuple[HWQueue, list[tuple[HCQSignal, int]], HCQSignal, int]] = {}
 
-    # Per-peer-group representative device for signal allocation.
-    self.pg_dev: dict[Any, HCQCompiled] = {}
-    for dev in self.devices:
-      if not dev._is_cpu(): self.pg_dev.setdefault(dev.peer_group, dev)
+    # Per-peer-group representative device for signal allocation. Prefer non-CPU devices, fall back to devices[0].
+    self.pg_dev: dict[Any, HCQCompiled] = {dev.peer_group: dev for dev in reversed(self.devices)}
 
     self.kick_signals: dict[Any, HCQSignal] = {pg: pg_dev.new_signal(value=0) for pg, pg_dev in self.pg_dev.items()}
     self.signals: dict[Any, HCQSignal] = {**{dev: dev.new_signal(value=0) for dev in self.devices if not dev._is_cpu()},
-      **{dev: self.pg_dev.get(dev.peer_group, self.devices[0]).new_signal(value=0) for dev in self.devices if dev._is_cpu()}}
+      **{dev: self.pg_dev[dev.peer_group].new_signal(value=0) for dev in self.devices if dev._is_cpu()}}
     self.kickoff_value: int = 0
     self.kickoff_var = UOp.variable("kickoff_var", 0, 0xffffffff, dtype=dtypes.uint32)
 
