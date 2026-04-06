@@ -42,6 +42,15 @@ class MovementMixin:
     """
     return prod(self.shape)
 
+  def _normalize_indices(self, indices) -> list:
+    indices = list(indices)
+    if len(ell := [i for i,x in enumerate(indices) if x is Ellipsis]) > 1: raise IndexError("indices can only have a single ellipsis")
+    num_real = len(indices) - len(ell) - sum(1 for i in indices if i is None)
+    if num_real > self.ndim: raise IndexError(f"too many indices ({num_real}) for {self.ndim}D")
+    fill_idx = ell[0] if ell else len(indices)
+    indices[fill_idx:fill_idx+1] = [slice(None)] * (self.ndim - num_real)
+    return indices
+
   def _resolve_dim(self, dim: int, *, extra: bool = False) -> int:
     total = self.ndim + int(extra)
     if not -max(1, total) <= dim <= max(1, total) - 1:
