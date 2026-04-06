@@ -1,6 +1,6 @@
 import unittest, ctypes, struct, os, random, numpy as np, time
 from tinygrad import Device, Tensor, dtypes
-from tinygrad.helpers import getenv, mv_address, DEBUG
+from tinygrad.helpers import getenv, mv_address, DEBUG, DEV
 from test.helpers import slow
 from tinygrad.device import Buffer, BufferSpec
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQBuffer
@@ -76,7 +76,7 @@ class TestHCQ(unittest.TestCase):
         TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
         TestHCQ.d0.timeline_value += 1
 
-  @unittest.skipIf(Device.DEFAULT in {"CPU"} or getenv("AMD_IFACE", "") == "PCI", "Can't handle async update on CPU/MOCKAM device")
+  @unittest.skipIf(Device.DEFAULT in {"CPU"} or (DEV.interace == "PCI" and Device.DEFAULT == "AMD"), "Can't handle async update on CPU/MOCKAM device")
   def test_wait_late_set(self):
     for queue_type in [TestHCQ.d0.hw_compute_queue_t, TestHCQ.d0.hw_copy_queue_t]:
       if queue_type is None: continue
@@ -575,7 +575,7 @@ class TestHCQ(unittest.TestCase):
 
       np.testing.assert_equal(cpu_buffer.numpy(), local_buf.numpy(), "failed")
 
-  @unittest.skipUnless(MOCKGPU and getenv("AMD_IFACE", "") != "PCI", "Emulate this on MOCKGPU to check the path in CI")
+  @unittest.skipUnless(MOCKGPU and DEV.device == "AMD" and DEV.interface == "PCI", "Emulate this on MOCKGPU to check the path in CI")
   def test_on_device_hang(self):
     if not hasattr(self.d0, 'on_device_hang'): self.skipTest("device does not have on_device_hang")
 
