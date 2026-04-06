@@ -13,6 +13,8 @@ export ALL2ALL=${ALL2ALL:-1}
 export USE_ATOMICS=${USE_ATOMICS:-1}
 export ASM_GEMM=${ASM_GEMM:-1}
 export WQKV=${WQKV:-0}
+export MASTER_WEIGHTS=${MASTER_WEIGHTS:-1}
+export FP8=${FP8:-1}
 
 export DEFAULT_FLOAT="bfloat16" OPTIM_DTYPE="bfloat16"
 export DP=${DP:-8} MP=${MP:-1} BS=${BS:-8} EVAL_BS=${EVAL_BS:-8} GRADIENT_ACC_STEPS=${GRADIENT_ACC_STEPS:-4}
