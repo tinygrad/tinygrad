@@ -180,10 +180,10 @@ class CustomASM24Controller:
 
   # === PCIe TLP via 0xF0 vendor command ===
 
-  def _f0_out(self, fmt_type:int, byte_en:int, address:int, value:int, mode:int=0, count:int=0):
+  def _f0_out(self, fmt_type:int, byte_en:int, address:int, value:int, mode:int=0):
     """Send 0xF0 OUT control transfer: configure TLP engine. 12-byte DATA_OUT = addr_lo[4 LE] + addr_hi[4 LE] + value[4 BE]."""
     wval = fmt_type | (byte_en << 8)
-    widx = (mode & 0x03) | ((count & 0x3F) << 2)
+    widx = mode & 0x03
     payload = struct.pack('<II', address & 0xFFFFFFFF, address >> 32) + struct.pack('>I', value)
     buf = (ctypes.c_ubyte * 12)(*payload)
     ret = libusb.libusb_control_transfer(self.usb.handle, 0x40, 0xF0, wval, widx, buf, 12, 5000)
@@ -246,14 +246,8 @@ class CustomASM24Controller:
   def pcie_mem_read(self, address:int, nbytes:int) -> bytes:
     """Streaming PCIe memory read via 0xF0 mode 2 + bulk IN. Returns little-endian bytes."""
     assert nbytes % 4 == 0, f"pcie_mem_read requires 4-byte aligned size, got {nbytes}"
-    chunk_bytes = 0x10 * 4  # MAX_CHUNK_DWORDS * 4
     self._f0_out(0x20, 0x0F, address, nbytes // 4, mode=2)
-    chunks = []
-    remaining = nbytes
-    while remaining > 0:
-      chunks.append(self.usb._bulk_in(0x81, min(chunk_bytes, remaining)))
-      remaining -= chunk_bytes
-    return b''.join(chunks)[:nbytes]
+    return self.usb._bulk_in(0x81, nbytes, timeout=30000)
 
   # === XDATA read/write (0xE4/0xE5 vendor control transfers) ===
 
