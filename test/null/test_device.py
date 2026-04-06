@@ -115,7 +115,8 @@ class TestDevVar(unittest.TestCase):
   def test_parse(self):
     for d, t in [("AMD", Target(device="AMD", renderer="")), ("AMD:LLVM", Target(device="AMD", renderer="LLVM")),
                  (":LLVM", Target(device="", renderer="LLVM")), ("AMD::gfx1100", Target(device="AMD", arch="gfx1100")),
-                 ("AMD:LLVM:gfx1100", Target(device="AMD", renderer="LLVM", arch="gfx1100")), ("::gfx1100", Target(arch="gfx1100"))]:
+                 ("AMD:LLVM:gfx1100", Target(device="AMD", renderer="LLVM", arch="gfx1100")), ("::gfx1100", Target(arch="gfx1100")),
+                 ("USB+", Target(interface="USB")), ("USB+AMD", Target(device="AMD", interface="USB"))]:
       with Context(DEV=d):
         self.assertEqual(DEV.value, t)
         self.assertEqual(str(DEV.value), d)
