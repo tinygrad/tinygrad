@@ -1,4 +1,5 @@
 import unittest
+from typing import cast
 from tinygrad import Device
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.dtype import dtypes
@@ -10,7 +11,7 @@ def ins(op, dt, src, tag=None): return UOp(Ops.INS, arg=op, dtype=dt, src=src, t
 class TestEncodingsX86(unittest.TestCase):
   # NOTE: x86 supports a single displacement as memory address and index without base memory address
   # these have no use cases so they aren't supported
-  def encode(self, u:UOp): return X86Renderer().render([u], lower=False)
+  def encode(self, u:UOp): return cast(X86Renderer, Device[Device.DEFAULT].renderer).render([u], lower=False)
 
   # displacement of 0 isn't emitted
   def test_base_address(self):

@@ -1,4 +1,5 @@
 import unittest
+from typing import cast
 from tinygrad import Device
 from tinygrad.uop import Ops
 from tinygrad.uop.ops import UOp, dtypes, graph_rewrite
@@ -8,7 +9,8 @@ from tinygrad.renderer.isa import IselContext
 # these tests are to catch changes that don't cause incorrect codegen but cause worse codegen
 @unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, X86Renderer), "only x86")
 class TestIselX86(unittest.TestCase):
-  def isel_rewrite(self, x:UOp): return graph_rewrite(x, X86Renderer().isel_matcher, IselContext(x), bottom_up=True)
+  def isel_rewrite(self, x:UOp):
+    return graph_rewrite(x, cast(X86Renderer, Device[Device.DEFAULT].renderer).isel_matcher, IselContext(x), bottom_up=True)
 
   def _check_op(self, dt_op, expr):
     nargs = expr.__code__.co_argcount
