@@ -27,7 +27,7 @@ FP8_MAX = 448.0
 def quantize_fp8(x:Tensor, amax_state:Tensor|None=None):
   if amax_state is not None:
     scale = FP8_MAX / (amax_state + 1e-8)
-    amax_state.assign(x.abs().max().detach())
+    if Tensor.training: amax_state.assign(x.abs().max().detach())
   else:
     scale = FP8_MAX / (x.abs().max().detach() + 1e-8)
   x_scaled = x * scale
