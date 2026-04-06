@@ -76,7 +76,8 @@ class TestHCQ(unittest.TestCase):
         TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
         TestHCQ.d0.timeline_value += 1
 
-  @unittest.skipIf(Device.DEFAULT in {"CPU"} or (DEV.interface == "PCI" and DEV.device == "AMD"), "Can't handle async update on CPU/MOCKAM device")
+  @unittest.skipIf(Device.DEFAULT in {"CPU"} and not (DEV.interface == "PCI" and DEV.device == "AMD"),
+                   "Can't handle async update on CPU/MOCKAM device")
   def test_wait_late_set(self):
     for queue_type in [TestHCQ.d0.hw_compute_queue_t, TestHCQ.d0.hw_copy_queue_t]:
       if queue_type is None: continue
