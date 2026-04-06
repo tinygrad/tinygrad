@@ -39,6 +39,8 @@ class RDMACopyQueue(HWQueue):
   def _submit(self, dev:RDMADevice):
     for remote_nic, sq_wqe, rq_wqe in zip(self._q[0::3], self._q[1::3], self._q[2::3]):
       src_qp, dest_qp, _, _ = dev.iface.connect(remote_nic)
+      assert src_qp.head + 1 - to_be('I', src_qp.dev.dbr[src_qp.qp_dbr // 4 + 1]) <= (1 << src_qp.log_sq_size), "SQ ring full"
+      assert src_qp.head + 1 - to_be('I', dest_qp.dev.dbr[dest_qp.qp_dbr // 4]) <= (1 << dest_qp.log_rq_size), "RQ ring full"
       dest_qp.qp_buf.view((src_qp.head & ((1 << dest_qp.log_rq_size) - 1)) * 16, 16)[:] = rq_wqe
       sq_view = src_qp.qp_buf.view(src_qp.sq_offset + (src_qp.head & ((1 << src_qp.log_sq_size) - 1)) * 64, 64)
       sq_view[:] = struct.pack('>I', (src_qp.head << 8) | 0x0a) + sq_wqe[4:]
@@ -65,7 +67,6 @@ class MLXIface(PCIIfaceBase):
     src_qp, dest_qp = MLXQP(self.mlx_dev, log_sq_size=7, log_rq_size=7), MLXQP(remote_nic.iface.mlx_dev, log_sq_size=7, log_rq_size=7)
     src_qp.connect(dest_qp)
     dest_qp.connect(src_qp)
-    src_qp.head = 0
     return src_qp, dest_qp, self._buf(src_qp.cq_paddrs), remote_nic.iface._buf(dest_qp.cq_paddrs)
 
 class RDMAAllocator(HCQAllocatorBase):

@@ -202,7 +202,7 @@ class MLXDev:
 
 class MLXQP:
   def __init__(self, dev:MLXDev, log_sq_size=4, log_rq_size=4, log_eq_size=7, log_cq_size=7):
-    self.dev, self.cq_size, self.log_sq_size, self.log_rq_size = dev, 1 << log_cq_size, log_sq_size, log_rq_size
+    self.dev, self.cq_size, self.log_sq_size, self.log_rq_size, self.head = dev, 1 << log_cq_size, log_sq_size, log_rq_size, 0
 
     self.cq_dbr, self.qp_dbr = dev.dbr_alloc.alloc(8, alignment=8), dev.dbr_alloc.alloc(8, alignment=8)
 
