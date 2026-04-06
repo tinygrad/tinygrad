@@ -59,7 +59,8 @@ class HCQGraph(MultiGraphRunner):
     self.rdma_deps: dict[int, tuple[HWQueue, list[tuple[HCQSignal, int]], HCQSignal, int]] = {}
 
     # Per-peer-group representative device for signal allocation. Prefer non-CPU devices, fall back to devices[0].
-    self.pg_dev: dict[Any, HCQCompiled] = {dev.peer_group: dev for dev in reversed(self.devices)}
+    self.pg_dev: dict[Any, HCQCompiled] = {dev.peer_group: self.devices[0] for dev in self.devices if dev._is_cpu()} | \
+                                           {dev.peer_group: dev for dev in self.devices if not dev._is_cpu()}
 
     self.kick_signals: dict[Any, HCQSignal] = {pg: pg_dev.new_signal(value=0) for pg, pg_dev in self.pg_dev.items()}
     self.signals: dict[Any, HCQSignal] = {**{dev: dev.new_signal(value=0) for dev in self.devices if not dev._is_cpu()},
@@ -83,7 +84,8 @@ class HCQGraph(MultiGraphRunner):
     self.device_vars: dict[HCQCompiled, dict[str, int]] = {}
 
     for j,ji in enumerate(self.jit_cache):
-      is_rdma = isinstance(ji.prg, BufferXfer) and len(set(cast(HCQCompiled, Device[cast(Buffer, b).device]).peer_group for b in ji.bufs)) > 1
+      ji_devs = [cast(HCQCompiled, Device[cast(Buffer, b).device]) for b in ji.bufs] if isinstance(ji.prg, BufferXfer) else []
+      is_rdma = len(ji_devs) > 0 and not any(d._is_cpu() for d in ji_devs) and len(set(d.peer_group for d in ji_devs)) > 1
 
       if is_exec_prg:=isinstance(ji.prg, CompiledRunner): enqueue_dev: HCQCompiled = ji.prg.dev
       else:
@@ -231,7 +233,8 @@ class HCQGraph(MultiGraphRunner):
     # Ensure device is ready for use in current context: the graph has initialized the device and it's safe to operate on it within this graph.
     # Only sync with same-peer-group devices; cross-peer-group sync is handled by RDMA.
     sync_signals = [(self.signals[d], self.kickoff_var) for b in bufs
-      if (d:=cast(HCQCompiled, Device[cast(Buffer, b).device])) not in self.dev_access[enqueue_queue] and d.peer_group == enqueue_dev.peer_group]
+      if (d:=cast(HCQCompiled, Device[cast(Buffer, b).device])) not in self.dev_access[enqueue_queue]
+      and (d.peer_group == enqueue_dev.peer_group or not is_rdma)]
     self.dev_access[enqueue_queue].update(cast(HCQCompiled, Device[cast(Buffer, b).device]) for b in bufs)
 
     # Remove self-dependency for compute and copy queues.
