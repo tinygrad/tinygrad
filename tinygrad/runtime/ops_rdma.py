@@ -17,13 +17,12 @@ class RDMACopyQueue(HWQueue):
     cast(HCQAllocatorBase, nic.allocator).map(buf)
     return struct.pack('>IIQ', sz, buf.mappings[nic].meta, buf.mappings[nic].va_addr + (buf.va_addr - buf.base.va_addr))
 
-  def encode_ring(self, hwq:HWQueue, dev:HCQCompiled, iface:MLXIface, qp:MLXQP, cq_buf:HCQBuffer,
-                  dbr_off:int, dbr_val:sint, cq_dbr_val:sint, cq_ci:int, uar_db_val:sint|None=None):
-    for buf in [iface.dbr_buf, cq_buf] + ([iface.uar_buf] if uar_db_val is not None else []): cast(HCQAllocator, dev.allocator).map(buf)
-    hwq.write(iface.dbr_buf.offset(dbr_off), dbr_val)
-    if uar_db_val is not None: hwq.write(iface.uar_buf.offset(0x800), uar_db_val, b64=True)
-    hwq.poll_bit(cq_buf.offset((cq_ci & (qp.cq_size - 1)) * 64 + 60, 4), ((cq_ci >> 7) & 1) << 24, mask=0x01000000)
-    hwq.write(iface.dbr_buf.offset(qp.cq_dbr), cq_dbr_val)
+  def encode_ring(self, hwq:HWQueue, dev:HCQCompiled, iface:MLXIface, qp:MLXQP, cq_buf:HCQBuffer, head:sint, ring_uar:bool=False):
+    for buf in [iface.dbr_buf, cq_buf] + ([iface.uar_buf] if ring_uar else []): cast(HCQAllocator, dev.allocator).map(buf)
+    hwq.write(iface.dbr_buf.offset(qp.qp_dbr + (4 if ring_uar else 0)), to_be('I', head + 1))
+    if ring_uar: hwq.write(iface.uar_buf.offset(0x800), to_be('Q', ((head << 8) | 0x0a) << 32 | ((qp.qp_info['qpn'] << 8) | 2)), b64=True)
+    hwq.poll_bit(cq_buf.offset((head & (qp.cq_size - 1)) * 64 + 60, 4), ((head >> 7) & 1) << 24, mask=0x01000000)
+    hwq.write(iface.dbr_buf.offset(qp.cq_dbr), to_be('I', (head + 1) & 0xFFFFFF))
     return self
 
   def copy(self, dest:HCQBuffer, src:HCQBuffer, sz:int):
@@ -40,15 +39,12 @@ class RDMACopyQueue(HWQueue):
   def _submit(self, dev:RDMADevice):
     for remote_nic, sq_wqe, rq_wqe in zip(self._q[0::3], self._q[1::3], self._q[2::3]):
       src_qp, dest_qp, _, _ = dev.iface.connect(remote_nic)
-      assert src_qp.sq_head + 1 - src_qp.cq_ci <= (1 << src_qp.log_sq_size), "SQ ring full"
-      assert dest_qp.rq_head + 1 - dest_qp.cq_ci <= (1 << dest_qp.log_rq_size), "RQ ring full"
-      dest_qp.qp_buf.view((dest_qp.rq_head & ((1 << dest_qp.log_rq_size) - 1)) * 16, 16)[:] = rq_wqe
-      dest_qp.rq_head += 1
-      sq_view = src_qp.qp_buf.view(src_qp.sq_offset + (src_qp.sq_head & ((1 << src_qp.log_sq_size) - 1)) * 64, 64)
-      sq_view[:] = struct.pack('>I', (src_qp.sq_head << 8) | 0x0a) + sq_wqe[4:]
-      src_qp.sq_head += 1
-      src_qp.cq_ci += 1
-      dest_qp.cq_ci += 1
+      assert src_qp.head + 1 - to_be('I', src_qp.dev.dbr[src_qp.qp_dbr // 4 + 1]) <= (1 << src_qp.log_sq_size), "SQ ring full"
+      assert src_qp.head + 1 - to_be('I', dest_qp.dev.dbr[dest_qp.qp_dbr // 4]) <= (1 << dest_qp.log_rq_size), "RQ ring full"
+      dest_qp.qp_buf.view((src_qp.head & ((1 << dest_qp.log_rq_size) - 1)) * 16, 16)[:] = rq_wqe
+      sq_view = src_qp.qp_buf.view(src_qp.sq_offset + (src_qp.head & ((1 << src_qp.log_sq_size) - 1)) * 64, 64)
+      sq_view[:] = struct.pack('>I', (src_qp.head << 8) | 0x0a) + sq_wqe[4:]
+      src_qp.head += 1
 
 class MLXIface(PCIIfaceBase):
   def __init__(self, dev:RDMADevice, dev_id:int):
@@ -92,11 +88,8 @@ class RDMAAllocator(HCQAllocatorBase):
     # rdma body + encode doorbell rings
     src_qp, dest_qp, src_cq_buf, dest_cq_buf = self.dev.iface.connect(remote_nic:=dest_dev.rdma_dev())
     RDMACopyQueue(self.dev).copy(dest, src, sz) \
-                           .encode_ring(src_q, src_dev, self.dev.iface, src_qp, src_cq_buf, src_qp.qp_dbr + 4,
-                                        to_be('I', src_qp.sq_head + 1), to_be('I', (src_qp.cq_ci + 1) & 0xFFFFFF), src_qp.cq_ci,
-                                        uar_db_val=to_be('Q', ((src_qp.sq_head << 8) | 0x0a) << 32 | ((src_qp.qp_info['qpn'] << 8) | 2))) \
-                           .encode_ring(dest_q, dest_dev, remote_nic.iface, dest_qp, dest_cq_buf, dest_qp.qp_dbr,
-                                        to_be('I', dest_qp.rq_head + 1), to_be('I', (dest_qp.cq_ci + 1) & 0xFFFFFF), dest_qp.cq_ci) \
+                           .encode_ring(src_q, src_dev, self.dev.iface, src_qp, src_cq_buf, src_qp.head, ring_uar=True) \
+                           .encode_ring(dest_q, dest_dev, remote_nic.iface, dest_qp, dest_cq_buf, src_qp.head) \
                            .submit(self.dev)
 
     # signal completion

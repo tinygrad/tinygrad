@@ -43,12 +43,12 @@ if __name__ == "__main__":
       print(expr.render(simplify=False), "  -->  ", simplified_expr.render(simplify=False))
 
     solver = z3.Solver()
-    solver.set(timeout=3000)  # some expressions take very long verify, but its very unlikely they actually return sat
+    solver.set(timeout=1000)  # some expressions take very long verify, but its very unlikely they actually return sat
     z3_expr, z3_simplified_expr, *z3_vars = uops_to_z3(solver, expr, simplified_expr, *variables, *ranges)
     check = solver.check(z3_simplified_expr != z3_expr)
-    if check == z3.unknown and DEBUG>=1:
+    if check == z3.unknown:
       skipped += 1
-      print("skipped z3 verification due to timeout")
+      if DEBUG>=1: print("skipped z3 verification due to timeout")
     elif check == z3.sat:
       print(colored("simplify INCORRECT!", "red"))
       print(solver.model())

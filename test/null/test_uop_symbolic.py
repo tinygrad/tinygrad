@@ -424,6 +424,10 @@ class TestSymbolic(unittest.TestCase):
   def test_and_remove(self):
     self.helper_test_variable(uand([uconst(1), Variable("a", 0, 1)]), 0, 1, "a")
 
+  def test_masked_shr_fold(self):
+    x = UOp.variable('x', 0, 255, dtype=dtypes.uint32)
+    self.helper_test_variable((x & -4) >> 2, 0, 63, "(x>>2)", test_z3=False)
+
   def test_bool_or_not_tautology(self):
     a = Variable("a", 0, 10)
     c = a<10
