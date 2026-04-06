@@ -1142,7 +1142,7 @@ class Tensor(OpMixin):
   def _getitem(self, indices, v: Tensor|None = None) -> Tensor:
     # wrap single index into a list
     if (isinstance(indices, list) and all_int(indices)) or not isinstance(indices, (tuple, list)): indices = [indices]
-    x, indices = self, self._normalize_indices(indices)
+    x, indices = self, self._normalize_indices(list(indices))
 
     indices_parsed, dim = [], 0
     for index in indices:
