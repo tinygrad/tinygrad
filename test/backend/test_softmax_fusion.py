@@ -58,7 +58,7 @@ class TestFuse(unittest.TestCase):
     b = Tensor.rand(50,50).realize()
     self._test_fuse(lambda a,b: ((a@b).relu()+a).contiguous().softmax(axis=-1), a,b, allow_multiple=True)
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.float16, Device.DEFAULT), f"no float16 on {Device.DEFAULT}")
+  @unittest.skipUnless(is_dtype_supported(dtypes.float16), f"no float16 on {Device.DEFAULT}")
   @unittest.skip("needs RANGEIFY>1")
   def test_fuse_softmax_dtype(self):
     a = Tensor.rand(50,50).realize()

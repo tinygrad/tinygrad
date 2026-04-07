@@ -7,7 +7,6 @@ from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, H
 from tinygrad.runtime.support.hcq import MMIOInterface, FileIOInterface, MOCKGPU, hcq_filter_visible_devices, hcq_profile
 from tinygrad.uop.ops import sint
 from tinygrad.device import Compiled, BufferSpec
-from tinygrad.renderer import Renderer
 from tinygrad.helpers import getenv, mv_address, round_up, data64, data64_le, prod, OSX, hi32, lo32, PROFILE, ContextVar, VIZ, ProfileEvent
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.cstyle import CUDARenderer, NVCCRenderer
@@ -178,6 +177,18 @@ class NVComputeQueue(NVCommandQueue):
     self.active_qmd = None
     return self
 
+  def write(self, b:HCQBuffer, val:sint, b64:bool=False):
+    self.nvm(0, nv_gpu.NVC56F_SEM_ADDR_LO, *data64_le(b.va_addr), *data64_le(val),
+             nv_flags("NVC56F_SEM_EXECUTE", operation="release", release_wfi="en", payload_size="64bit" if b64 else "32bit"))
+    self.active_qmd = None
+    return self
+
+  def poll_bit(self, b:HCQBuffer, val:sint, mask:int):
+    self.nvm(0, nv_gpu.NVC56F_SEM_ADDR_LO, *data64_le(b.va_addr), *data64_le((~mask & 0xFFFFFFFF) if val == 0 else val),
+             nv_flags("NVC56F_SEM_EXECUTE", operation="acq_nor" if val == 0 else "acq_and", payload_size="32bit"))
+    self.active_qmd = None
+    return self
+
   def _submit(self, dev:NVDevice): self._submit_to_gpfifo(dev, dev.compute_gpfifo)
 
 class NVCopyQueue(NVCommandQueue):
@@ -185,9 +196,9 @@ class NVCopyQueue(NVCommandQueue):
     self.queue_idx = queue_idx
     super().__init__()
 
-  def copy(self, dest:sint, src:sint, copy_size:int):
+  def copy(self, dest:HCQBuffer, src:HCQBuffer, copy_size:int):
     for off in range(0, copy_size, step:=(1 << 31)):
-      self.nvm(4, nv_gpu.NVC6B5_OFFSET_IN_UPPER, *data64(src+off), *data64(dest+off))
+      self.nvm(4, nv_gpu.NVC6B5_OFFSET_IN_UPPER, *data64(src.va_addr+off), *data64(dest.va_addr+off))
       self.nvm(4, nv_gpu.NVC6B5_LINE_LENGTH_IN, min(copy_size-off, step))
       self.nvm(4, nv_gpu.NVC6B5_LAUNCH_DMA,
                nv_flags("NVC6B5_LAUNCH_DMA", data_transfer_type="non_pipelined", src_memory_layout="pitch", dst_memory_layout="pitch"))
@@ -549,12 +560,6 @@ class PCIIface(PCIIfaceBase):
     self.gpfifo_class, self.compute_class, self.dma_class = (gsp:=self.dev_impl.gsp).gpfifo_class, gsp.compute_class, gsp.dma_class
     self.viddec_class = None
 
-  def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, force_devmem=False, **kwargs) -> HCQBuffer:
-    # Force use of huge pages for large allocations. NVDev will attempt to use huge pages in any case,
-    # but if the size is not aligned, the tail will be allocated with 4KB pages, increasing TLB pressure.
-    return super().alloc(round_up(size, mmap.PAGESIZE if uncached or host else ((2 << 20) if size >= (8 << 20) else (4 << 10))),
-      host=host, uncached=uncached, cpu_access=cpu_access, contiguous=contiguous, force_devmem=force_devmem, **kwargs)
-
   def setup_usermode(self): return 0xce000000, self.pci_dev.map_bar(bar=0, fmt='I', off=0xbb0000, size=0x10000)
   def setup_vm(self, vaspace): pass
   def setup_gpfifo_vm(self, gpfifo): pass
@@ -616,11 +621,8 @@ class NVDevice(HCQCompiled[NVSignal]):
     self.arch: str = "sm_120" if self.sm_version==0xa04 else f"sm_{(self.sm_version>>8)&0xff}{(val>>4) if (val:=self.sm_version&0xff) > 0xf else val}"
     self.sass_version = ((self.sm_version & 0xf00) >> 4) | (self.sm_version & 0xf)
 
-    renderers:list[type[Renderer]|functools.partial] = [
-      functools.partial(CUDARenderer, self.arch), functools.partial(PTXRenderer, self.arch, device="NV"),
-      functools.partial(NVCCRenderer, self.arch), functools.partial(NAKRenderer, self.arch, self.max_warps_per_sm)
-    ]
-    super().__init__(device, NVAllocator(self), renderers, functools.partial(NVProgram, self), NVSignal, NVComputeQueue, NVCopyQueue)
+    super().__init__(device, NVAllocator(self), [CUDARenderer, PTXRenderer, NVCCRenderer, NAKRenderer], functools.partial(NVProgram, self), NVSignal,
+                     NVComputeQueue, NVCopyQueue, arch=self.arch)
 
     self.pma_enabled = PMA.value > 0 and PROFILE >= 1
     if self.pma_enabled: self._prof_init()

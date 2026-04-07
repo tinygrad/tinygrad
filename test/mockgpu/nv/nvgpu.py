@@ -136,6 +136,12 @@ class GPFIFO:
     elif typ == 3:
       mval = to_mv(signal, 8).cast('Q')[0]
       return SchedResult.CONT if mval >= val else SchedResult.YIELD
+    elif typ == 4: # ACQ_AND: (mem & payload) != 0
+      mval = to_mv(signal, 4).cast('I')[0]
+      return SchedResult.CONT if (mval & (val & 0xffffffff)) != 0 else SchedResult.YIELD
+    elif typ == 5: # ACQ_NOR: ~(mem | payload) != 0
+      mval = to_mv(signal, 4).cast('I')[0]
+      return SchedResult.CONT if (~(mval | (val & 0xffffffff)) & 0xffffffff) != 0 else SchedResult.YIELD
     else: raise RuntimeError(f"Unsupported type={typ} in exec wait/signal")
     return SchedResult.CONT
 

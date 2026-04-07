@@ -24,6 +24,11 @@ class TestDevice(unittest.TestCase):
     with self.assertRaises(ModuleNotFoundError):
       Device["TYPO"]
 
+  @unittest.skipIf(Device.DEFAULT != "CPU", "only run on CPU")
+  def test_nonexistent_renderer(self):
+    with self.assertRaisesRegex(AssertionError, "No renderer"):
+      with Context(DEV="CPU:TYPO"): Device[Device.DEFAULT].renderer
+
   def test_lowercase_canonicalizes(self):
     device = Device.DEFAULT
     with Context(DEV=device.lower()):
@@ -109,7 +114,9 @@ class TestDevice(unittest.TestCase):
 class TestDevVar(unittest.TestCase):
   def test_parse(self):
     for d, t in [("AMD", Target(device="AMD", renderer="")), ("AMD:LLVM", Target(device="AMD", renderer="LLVM")),
-                 (":LLVM", Target(device="", renderer="LLVM"))]:
+                 (":LLVM", Target(device="", renderer="LLVM")), ("AMD::gfx1100", Target(device="AMD", arch="gfx1100")),
+                 ("AMD:LLVM:gfx1100", Target(device="AMD", renderer="LLVM", arch="gfx1100")), ("::gfx1100", Target(arch="gfx1100")),
+                 ("USB+", Target(interface="USB")), ("USB+AMD", Target(device="AMD", interface="USB"))]:
       with Context(DEV=d):
         self.assertEqual(DEV.value, t)
         self.assertEqual(str(DEV.value), d)
@@ -120,6 +127,10 @@ class TestDevVar(unittest.TestCase):
     with Context(DEV=":LLVM"): self.assertEqual(DEV.target("CPU"), Target("CPU", "LLVM"))
     with Context(DEV="AMD:LLVM"): self.assertEqual(DEV.target("CPU"), Target("CPU"))
     with Context(DEV=""): self.assertEqual(DEV.target("CPU"), Target("CPU"))
+
+  def test_dev_arch_override(self):
+    with Context(DEV="NULL:HIP:gfx1100"):
+      self.assertEqual(Device["NULL"].renderer.target.arch, "gfx1100")
 
 class MockCompiler(Compiler):
   def __init__(self, key): super().__init__(key)

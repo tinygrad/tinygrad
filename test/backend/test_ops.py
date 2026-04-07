@@ -2,7 +2,7 @@ import time, math, unittest, functools, platform, warnings
 import numpy as np
 from typing import List, Callable
 import torch
-from tinygrad.helpers import getenv, CI, DEBUG, DEV, EMULATE, IMAGE, Context
+from tinygrad.helpers import getenv, CI, DEBUG, DEV, IMAGE, Context
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.device import is_dtype_supported
@@ -18,7 +18,7 @@ warnings.filterwarnings("ignore", message="Non-empty compiler output encountered
 
 FORWARD_ONLY = getenv("FORWARD_ONLY", 0)
 PRINT_TENSORS = getenv("PRINT_TENSORS", 0)
-COMPILE_ONLY = Device.DEFAULT == "NULL" and not EMULATE
+COMPILE_ONLY = Device.DEFAULT == "NULL"
 
 def slow_test(test_func):
   return unittest.skipIf(getenv("SKIP_SLOW_TEST"), "Skipping slow test")(test_func)
@@ -836,6 +836,24 @@ class TestOps(unittest.TestCase):
     helper_test_op([], lambda: tor >> 31, lambda: (ten >> 31).cast(dtypes.int32), forward_only=True)
     helper_test_op([], lambda: tor.__rshift__(2), lambda: ten.__rshift__(2).cast(dtypes.int32), forward_only=True)
     helper_test_op([], lambda: tor.bitwise_right_shift(2), lambda: ten.rshift(2).cast(dtypes.int32), forward_only=True)
+
+  def test_lshift_signed(self):
+    data = [[-1, -3, 1, 7], [0, -2147483648, 2147483647, -1]]
+    tor = torch.tensor(data, dtype=torch.int32)
+    ten = Tensor(data, dtype=dtypes.int)
+    helper_test_op([], lambda: tor << 0, lambda: ten << 0, forward_only=True)
+    helper_test_op([], lambda: tor << 2, lambda: ten << 2, forward_only=True)
+    helper_test_op([], lambda: tor << 8, lambda: ten << 8, forward_only=True)
+    helper_test_op([], lambda: tor << 31, lambda: ten << 31, forward_only=True)
+
+  def test_rshift_signed(self):
+    data = [[-1, -3, 1, 7], [0, -2147483648, 2147483647, -1]]
+    tor = torch.tensor(data, dtype=torch.int32)
+    ten = Tensor(data, dtype=dtypes.int)
+    helper_test_op([], lambda: tor >> 0, lambda: ten >> 0, forward_only=True)
+    helper_test_op([], lambda: tor >> 2, lambda: ten >> 2, forward_only=True)
+    helper_test_op([], lambda: tor >> 8, lambda: ten >> 8, forward_only=True)
+    helper_test_op([], lambda: tor >> 31, lambda: ten >> 31, forward_only=True)
 
   def test_idiv_shift_rewrite_negative(self):
     a = Tensor(-5).idiv(2).item()

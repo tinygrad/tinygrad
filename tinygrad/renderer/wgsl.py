@@ -53,7 +53,6 @@ wgsl_matcher = PatternMatcher([
   ]) + extra_pm
 
 class WGSLRenderer(CStyleLanguage):
-  device = "WEBGPU"
   global_max = (65535, 65535, 65535)
   local_max = (256, 256, 64)
   code_for_workitem = {"g": lambda x: f"i32(gindex.{'xyz'[int(x)]})", "l": lambda x: f"i32(lindex.{'xyz'[int(x)]})"}

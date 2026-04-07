@@ -51,6 +51,39 @@ jobs:
     - name: openpilot compile3 0.10.1 driving_vision
       run: FLOAT16=1 DEV=CL IMAGE=1 python3.11 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/720392c9a5b986981fdbed1bb8c47a6c5573a50e/selfdrive/modeld/models/driving_vision.onnx
 
+  testframeworkpytest:
+    name: framework pytest
+    env:
+      CI: ""
+      CAPTURE_PROCESS_REPLAY: "0"
+    runs-on: [self-hosted, framework]
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash -e -o pipefail {0}
+    if: github.repository_owner == 'tinygrad'
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v6
+    - name: setup python environment
+      run: |
+        rm -rf /tmp/tinygrad_pytest_ci
+        uv venv /tmp/tinygrad_pytest_ci
+        source /tmp/tinygrad_pytest_ci/bin/activate
+        uv pip install .[testing]
+    - name: setup other stuff
+      run: |
+        mkdir -p extra/remu/target/release/
+        ln -s ~/tinygrad/extra/remu/target/release/libremu.so extra/remu/target/release/libremu.so
+    - name: setup staging db
+      run: |
+        echo "CACHEDB=/tmp/pytest-db-ci.db" >> $GITHUB_ENV
+        rm -f /tmp/pytest-db-ci*
+    - name: Run pytest -nauto
+      run: |
+        source /tmp/tinygrad_pytest_ci/bin/activate
+        pytest -nauto --durations=20
+
   testmacbenchmark:
     name: Mac Benchmark
     env:
@@ -185,17 +218,19 @@ jobs:
         PYTHONPATH=. ./extra/hcq/hcq_smi.py amd kill_pids
         PYTHONPATH=. ./extra/hcq/hcq_smi.py nv kill_pids
     - name: UsbGPU boot time
-      run: sudo -E PYTHONPATH=. GMMU=0 DEBUG=2 AM_RESET=1 DEV=AMD AMD_IFACE=USB time python3.11 test/test_tiny.py TestTiny.test_plus
+      run: sudo -E PYTHONPATH=. GMMU=0 DEBUG=2 AM_RESET=1 DEV=USB+AMD time python3.11 test/test_tiny.py TestTiny.test_plus
     - name: UsbGPU tiny tests
-      run: sudo -E PYTHONPATH=. GMMU=0 DEV=AMD AMD_IFACE=USB python3.11 test/test_tiny.py
+      run: sudo -E PYTHONPATH=. GMMU=0 DEV=USB+AMD python3.11 test/test_tiny.py
     - name: UsbGPU copy speeds
-      run: sudo -E PYTHONPATH=. GMMU=0 DEV=AMD AMD_IFACE=USB python3.11 test/external/external_test_usb_asm24.py TestDevCopySpeeds
+      run: sudo -E PYTHONPATH=. GMMU=0 DEV=USB+AMD python3.11 test/external/external_test_usb_asm24.py TestDevCopySpeeds
     #- name: UsbGPU openpilot test
-    #  run: sudo -E PYTHONPATH=. GMMU=0 DEV=AMD AMD_IFACE=USB GRAPH_ONE_KERNEL=1 python3.11 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/9118973ed03c1ae1d40cf69a29507ec2cc78efd7/selfdrive/modeld/models/supercombo.onnx
+    #  run: sudo -E PYTHONPATH=. GMMU=0 DEV=USB+AMD GRAPH_ONE_KERNEL=1 python3.11 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/9118973ed03c1ae1d40cf69a29507ec2cc78efd7/selfdrive/modeld/models/supercombo.onnx
+    - name: UsbGPU (USB4/TB) install script
+      run: PYTHONPATH=. sh extra/setup_tinygpu_osx.sh
     - name: UsbGPU (USB4/TB) boot time
-      run: PYTHONPATH=. DEBUG=3 DEV=NV:NAK NV_IFACE=PCI time python3.11 test/test_tiny.py TestTiny.test_plus
+      run: PYTHONPATH=. DEBUG=3 DEV=PCI+NV:NAK time python3.11 test/test_tiny.py TestTiny.test_plus
     - name: UsbGPU (USB4/TB) tiny tests
-      run: PYTHONPATH=. DEV=NV:NAK NV_IFACE=PCI python3.11 test/test_tiny.py
+      run: PYTHONPATH=. DEV=PCI+NV:NAK python3.11 test/test_tiny.py
 
   testnvidiabenchmark:
     name: tinybox green Benchmark
@@ -632,9 +667,9 @@ jobs:
         echo "CACHEDB=/tmp/staging.db" >> $GITHUB_ENV
         rm -f /tmp/staging.db /tmp/staging.db-shm /tmp/staging.db-wal
     - name: openpilot compile3 0.10.1 driving_vision
-      run: BENCHMARK_LOG=usbgpu_openpilot_0_10_1_vision PYTHONPATH="." GMMU=0 DEV=AMD:LLVM AMD_IFACE=USB ASSERT_MIN_STEP_TIME=50 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/720392c9a5b986981fdbed1bb8c47a6c5573a50e/selfdrive/modeld/models/driving_vision.onnx
+      run: BENCHMARK_LOG=usbgpu_openpilot_0_10_1_vision PYTHONPATH="." GMMU=0 DEV=USB+AMD:LLVM ASSERT_MIN_STEP_TIME=50 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/720392c9a5b986981fdbed1bb8c47a6c5573a50e/selfdrive/modeld/models/driving_vision.onnx
     - name: openpilot load_pickle 0.10.1 driving_vision
-      run: BENCHMARK_LOG=usbgpu_openpilot_0_10_1_vision_load_pickle PYTHONPATH="." GMMU=0 DEV=AMD AMD_IFACE=USB ASSERT_MIN_LOAD_TIME=15 python3 examples/openpilot/load_pickle.py
+      run: BENCHMARK_LOG=usbgpu_openpilot_0_10_1_vision_load_pickle PYTHONPATH="." GMMU=0 DEV=USB+AMD ASSERT_MIN_LOAD_TIME=15 python3 examples/openpilot/load_pickle.py
 
   testreddriverbenchmark:
     name: AM Benchmark
@@ -702,8 +737,8 @@ jobs:
         pkill -f 'extra/remote/serve.py' || true
         PYTHONPATH=. python3 extra/remote/serve.py 6482 &
         sleep 1
-        DEBUG=2 PYTHONPATH=. REMOTE=127.0.0.1:6482 AM_RESET=1 DEV=AMD AMD_IFACE=PCI python3 test/test_tiny.py
-        DEBUG=2 PYTHONPATH=. REMOTE=127.0.0.1:6482 AM_RESET=1 DEV=AMD AMD_AQL=1 AMD_IFACE=PCI python3 test/test_tiny.py
+        DEBUG=2 PYTHONPATH=. REMOTE=127.0.0.1:6482 AM_RESET=1 DEV=PCI+AMD python3 test/test_tiny.py
+        DEBUG=2 PYTHONPATH=. REMOTE=127.0.0.1:6482 AM_RESET=1 DEV=PCI+AMD AMD_AQL=1 python3 test/test_tiny.py
         pkill -f 'extra/remote/serve.py' || true
     - name: Run process replay tests
       run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
