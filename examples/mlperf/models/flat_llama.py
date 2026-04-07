@@ -119,19 +119,21 @@ class FlatTransformer:
       xk = matmul(x, wk, amax_x=amax_xk, amax_w=amax_wk).reshape(bsz, seqlen, self.n_kv_heads, self.head_dim)
       xv = matmul(x, wv, amax_x=amax_xv, amax_w=amax_wv).reshape(bsz, seqlen, self.n_kv_heads, self.head_dim)
 
-    xq, xk = apply_rotary_emb(xq, xk, freqs_cis)
-    if FP8: xq, xk, xv = xq.cast(dtypes.bfloat16), xk.cast(dtypes.bfloat16), xv.cast(dtypes.bfloat16)
-    xq, xk, xv = xq.transpose(1, 2), xk.transpose(1, 2), xv.transpose(1, 2)
-    attn = xq.scaled_dot_product_attention(xk, xv, is_causal=True, enable_gqa=True).transpose(1, 2)
-    attn = attn.reshape(bsz, seqlen, -1)
-    return (matmul(attn, wo, amax_x=amax_xo, amax_w=amax_wo),)
+    xqr, xkr = apply_rotary_emb(xq, xk, freqs_cis)
+    xqc, xkc, xvc = xqr.cast(dtypes.bfloat16), xkr.cast(dtypes.bfloat16), xv.cast(dtypes.bfloat16)
+    xqt, xkt, xvt = xqc.transpose(1, 2), xkc.transpose(1, 2), xvc.transpose(1, 2)
+    attn = xqt.scaled_dot_product_attention(xkt, xvt, is_causal=True, enable_gqa=True)
+    attn_reshaped = attn.transpose(1, 2).reshape(bsz, seqlen, -1)
+    out = matmul(attn_reshaped, wo, amax_x=amax_xo, amax_w=amax_wo)
+    return (out, attn, out, xq, xk, xv)
 
   def feed_forward(self, x:Tensor, ffn_norm:Tensor, w1:Tensor, w2:Tensor, w3:Tensor,
                    amax_x1=None, amax_w1=None, amax_x2=None, amax_w2=None, amax_x3=None, amax_w3=None):
     x = rmsnorm(x, self.norm_eps) * ffn_norm
     x_w1 = matmul(x, w1, amax_x=amax_x1, amax_w=amax_w1)
     x_w3 = matmul(x.contiguous_backward(), w3, amax_x=amax_x3, amax_w=amax_w3)
-    return (matmul(x_w1.silu() * x_w3, w2, amax_x=amax_x2, amax_w=amax_w2),)
+    x_w2 = matmul(x_w1.silu() * x_w3, w2, amax_x=amax_x2, amax_w=amax_w2)
+    return (x_w2, x, x_w1, x_w3, x_w2)
 
   @function(precompile=True, precompile_backward=True)
   def run_layer(self, x:Tensor, freqs_cis:Tensor,
@@ -150,7 +152,7 @@ class FlatTransformer:
                                  amax_x1=amax_x1, amax_w1=amax_w1, amax_x2=amax_x2, amax_w2=amax_w2,
                                  amax_x3=amax_x3, amax_w3=amax_w3)
     h = h + ffn
-    return h, attn, *attn_save, ffn, *ffn_save
+    return (h, *attn_save, *ffn_save,)
 
   def shard(self, device:tuple[str, ...], mp:bool=False):
     from tinygrad.nn.state import get_parameters
