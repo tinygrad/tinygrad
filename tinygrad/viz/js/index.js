@@ -199,12 +199,8 @@ function formatCycles(cycles) {
 
 const formatUnit = (d, unit="") => d3.format(".3~s")(d)+unit;
 
-const WAVE_COLORS = {VALU:"#ffffc0", SALU:"#cef263", LOAD:"#ffc0c0", STORE:"#4fa3cc", IMMEDIATE:"#f3b44a", BARRIER:"#d00000", JUMP:"#ffb703",
-  JUMP_NO:"#fb8500", MESSAGE:"#90dbf4", VMEM:"#b2b7c9", LDS:"#9fb4a6", WAVERDY:"#1a2a2a"};
 const waveColor = (op) => {
-  const cat = op.includes("VALU") || op === "VINTERP" ? "VALU" : op.includes("SALU") ? "SALU" : op.includes("VMEM") ? "VMEM"
-            : op.includes("LOAD") || op === "SMEM" ? "LOAD" : op.includes("STORE") ? "STORE" : op;
-  let ret = WAVE_COLORS[cat] ?? "#ffffff";
+  let ret = data.waveColors.find(([pattern]) => op.includes(pattern))?.[1] ?? "#ffffff";
   if (op.includes("OTHER_") || op.includes("_ALT")) { ret = darkenHex(ret, 75) }
   if (op.includes("LDS_")) { ret = darkenHex(ret, 25) }
   return ret
@@ -268,7 +264,7 @@ function timeAtCycle(clk) {
   let cur = data.instSt, ns = 0, freq = null;
   // walk through all frequency changes and accumulate time in nanoseconds
   for (const [s, v] of data.tracks.get("Shader Clock").valueMap) {
-    if (freq != null && cur < s) {
+    if (freq != null && freq > 0 && cur < s) {
       const et = Math.min(clk, s);
       ns += (et - cur) * 1e9 / freq;
       cur = et;
@@ -401,6 +397,7 @@ async function renderProfiler(path, opts) {
   const dur = u32(), tracePeak = u64(), indexLen = u32(), layoutsLen = u32(); data.dur = dur;
   const textDecoder = new TextDecoder("utf-8");
   const { strings, dtypeSize, markers, ...extData } = JSON.parse(textDecoder.decode(new Uint8Array(buf, offset, indexLen))); offset += indexLen;
+  for (const [k,v] of Object.entries(extData)) data[k] = v;
   // place devices on the y axis and set vertical positions
   const [tickSize, padding, baseOffset] = [5, 8, markers.length ? 14 : 0];
   const secondaryTick = opts.unit == "clk" ? timeAtCycle : null;
@@ -574,7 +571,7 @@ async function renderProfiler(path, opts) {
     }
   }
   for (const m of markers) m.label = m.name.split(/(\s+)/).map(st => ({ st, color:m.color, width:ctx.measureText(st).width }));
-  if (extData.pcMap != null) data.pcMap = extData.pcMap; setFocus(focusedShape);
+  if (data.pcMap != null) setFocus(focusedShape);
   // secondary axis mapping
   let instRange = null;
   for (const [k, { shapes }] of data.tracks) if (!k.includes("Clock") && path.includes("pkts")) {

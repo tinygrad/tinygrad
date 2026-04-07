@@ -51,6 +51,39 @@ jobs:
     - name: openpilot compile3 0.10.1 driving_vision
       run: FLOAT16=1 DEV=CL IMAGE=1 python3.11 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/720392c9a5b986981fdbed1bb8c47a6c5573a50e/selfdrive/modeld/models/driving_vision.onnx
 
+  testframeworkpytest:
+    name: framework pytest
+    env:
+      CI: ""
+      CAPTURE_PROCESS_REPLAY: "0"
+    runs-on: [self-hosted, framework]
+    timeout-minutes: 10
+    defaults:
+      run:
+        shell: bash -e -o pipefail {0}
+    if: github.repository_owner == 'tinygrad'
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v6
+    - name: setup python environment
+      run: |
+        rm -rf /tmp/tinygrad_pytest_ci
+        uv venv /tmp/tinygrad_pytest_ci
+        source /tmp/tinygrad_pytest_ci/bin/activate
+        uv pip install .[testing]
+    - name: setup other stuff
+      run: |
+        mkdir -p extra/remu/target/release/
+        ln -s ~/tinygrad/extra/remu/target/release/libremu.so extra/remu/target/release/libremu.so
+    - name: setup staging db
+      run: |
+        echo "CACHEDB=/tmp/pytest-db-ci.db" >> $GITHUB_ENV
+        rm -f /tmp/pytest-db-ci*
+    - name: Run pytest -nauto
+      run: |
+        source /tmp/tinygrad_pytest_ci/bin/activate
+        pytest -nauto --durations=20
+
   testmacbenchmark:
     name: Mac Benchmark
     env:
@@ -101,10 +134,10 @@ jobs:
       run: DEV=METAL python3.11 test/opt/test_tensor_cores.py
     - name: Test AMX tensor cores
       run: |
-        DEBUG=2 DEV=CPU CPU_LLVM=0 AMX=1 python3.11 test/opt/test_tensor_cores.py
-        DEBUG=2 DEV=CPU CPU_LLVM=1 AMX=1 python3.11 test/opt/test_tensor_cores.py
-        DEBUG=2 DEV=CPU CPU_LLVM=0 AMX=1 python3.11 test/opt/test_gen_float4.py TestFloat4.test_float4_multidim_amx TestFloat4.test_float4_multidim_unaligned_load_amx
-        DEBUG=2 DEV=CPU CPU_LLVM=1 AMX=1 python3.11 test/opt/test_gen_float4.py TestFloat4.test_float4_multidim_amx TestFloat4.test_float4_multidim_unaligned_load_amx
+        DEBUG=2 DEV=CPU AMX=1 python3.11 test/opt/test_tensor_cores.py
+        DEBUG=2 DEV=CPU:LLVM AMX=1 python3.11 test/opt/test_tensor_cores.py
+        DEBUG=2 DEV=CPU AMX=1 python3.11 test/opt/test_gen_float4.py TestFloat4.test_float4_multidim_amx TestFloat4.test_float4_multidim_unaligned_load_amx
+        DEBUG=2 DEV=CPU:LLVM AMX=1 python3.11 test/opt/test_gen_float4.py TestFloat4.test_float4_multidim_amx TestFloat4.test_float4_multidim_unaligned_load_amx
     - name: Run Tensor Core GEMM (float)
       run: DEBUG=2 SHOULD_USE_TC=1 python3.11 extra/gemm/simple_matmul.py
     - name: Run Tensor Core GEMM (half)
@@ -185,17 +218,19 @@ jobs:
         PYTHONPATH=. ./extra/hcq/hcq_smi.py amd kill_pids
         PYTHONPATH=. ./extra/hcq/hcq_smi.py nv kill_pids
     - name: UsbGPU boot time
-      run: sudo -E PYTHONPATH=. GMMU=0 DEBUG=2 AM_RESET=1 DEV=AMD AMD_IFACE=USB time python3.11 test/test_tiny.py TestTiny.test_plus
+      run: sudo -E PYTHONPATH=. GMMU=0 DEBUG=2 AM_RESET=1 DEV=USB+AMD time python3.11 test/test_tiny.py TestTiny.test_plus
     - name: UsbGPU tiny tests
-      run: sudo -E PYTHONPATH=. GMMU=0 DEV=AMD AMD_IFACE=USB python3.11 test/test_tiny.py
+      run: sudo -E PYTHONPATH=. GMMU=0 DEV=USB+AMD python3.11 test/test_tiny.py
     - name: UsbGPU copy speeds
-      run: sudo -E PYTHONPATH=. GMMU=0 DEV=AMD AMD_IFACE=USB python3.11 test/external/external_test_usb_asm24.py TestDevCopySpeeds
+      run: sudo -E PYTHONPATH=. GMMU=0 DEV=USB+AMD python3.11 test/external/external_test_usb_asm24.py TestDevCopySpeeds
     #- name: UsbGPU openpilot test
-    #  run: sudo -E PYTHONPATH=. GMMU=0 DEV=AMD AMD_IFACE=USB GRAPH_ONE_KERNEL=1 python3.11 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/9118973ed03c1ae1d40cf69a29507ec2cc78efd7/selfdrive/modeld/models/supercombo.onnx
+    #  run: sudo -E PYTHONPATH=. GMMU=0 DEV=USB+AMD GRAPH_ONE_KERNEL=1 python3.11 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/9118973ed03c1ae1d40cf69a29507ec2cc78efd7/selfdrive/modeld/models/supercombo.onnx
+    - name: UsbGPU (USB4/TB) install script
+      run: PYTHONPATH=. sh extra/setup_tinygpu_osx.sh
     - name: UsbGPU (USB4/TB) boot time
-      run: PYTHONPATH=. DEBUG=3 DEV=NV NV_IFACE=PCI NV_NAK=1 time python3.11 test/test_tiny.py TestTiny.test_plus
+      run: PYTHONPATH=. DEBUG=3 DEV=PCI+NV:NAK time python3.11 test/test_tiny.py TestTiny.test_plus
     - name: UsbGPU (USB4/TB) tiny tests
-      run: PYTHONPATH=. DEV=NV NV_IFACE=PCI NV_NAK=1 python3.11 test/test_tiny.py
+      run: PYTHONPATH=. DEV=PCI+NV:NAK python3.11 test/test_tiny.py
 
   testnvidiabenchmark:
     name: tinybox green Benchmark
@@ -237,7 +272,7 @@ jobs:
     - name: Test tensor cores
       run: |
         DEV=NV ALLOW_TF32=1 python3 test/opt/test_tensor_cores.py
-        DEV=NV NV_PTX=1 ALLOW_TF32=1 python3 test/opt/test_tensor_cores.py
+        DEV=NV:PTX ALLOW_TF32=1 python3 test/opt/test_tensor_cores.py
     - name: Run Tensor Core GEMM (CUDA)
       run: |
         DEV=CUDA SHOULD_USE_TC=1 HALF=1 DEBUG=2 python3 extra/gemm/simple_matmul.py
@@ -245,7 +280,7 @@ jobs:
         DEV=CUDA SHOULD_USE_TC=1 ALLOW_TF32=1 DEBUG=2 ATOL=2e-2 python3 extra/gemm/simple_matmul.py
         DEV=CUDA SHOULD_USE_TC=1 FP8E4M3=1 DEBUG=2 python3 extra/gemm/simple_matmul.py
     - name: Run Tensor Core GEMM (PTX)
-      run: DEV=NV NV_PTX=1 SHOULD_USE_TC=1 HALF=1 DEBUG=2 python3 extra/gemm/simple_matmul.py
+      run: DEV=NV:PTX SHOULD_USE_TC=1 HALF=1 DEBUG=2 python3 extra/gemm/simple_matmul.py
     - name: Run Tensor Core GEMM (NV)
       run: DEV=NV SHOULD_USE_TC=1 HALF=1 DEBUG=2 python3 extra/gemm/simple_matmul.py
     - name: Test DEV=NV
@@ -328,7 +363,7 @@ jobs:
     #   run: DEV=NV M_START=12 M_STOP=20 M_STEP=1 N_START=6 N_STOP=10 N_STEP=1 K_START=28 K_STOP=36 K_STEP=1 HALF=1 TC_OPT=2 python3 ./extra/gemm/fuzz_matmul.py
     # TODO: too slow
     # - name: Fuzz Padded Tensor Core GEMM (PTX)
-    #   run: DEV=NV NV_PTX=1 M_START=12 M_STOP=20 M_STEP=1 N_START=6 N_STOP=10 N_STEP=1 K_START=28 K_STOP=36 K_STEP=1 HALF=1 TC_OPT=2 python3 ./extra/gemm/fuzz_matmul.py
+    #   run: DEV=NV:PTX M_START=12 M_STOP=20 M_STEP=1 N_START=6 N_STOP=10 N_STEP=1 K_START=28 K_STOP=36 K_STEP=1 HALF=1 TC_OPT=2 python3 ./extra/gemm/fuzz_matmul.py
     - name: HEVC Decode Benchmark
       run: VALIDATE=1 MAX_FRAMES=100 ASSERT_FPS=1400 JITBEAM=1 DEV=NV PYTHONPATH=. python3 extra/hevc/decode.py
     - name: Train MNIST
@@ -410,11 +445,11 @@ jobs:
     #    LD_PRELOAD="/opt/rocm/lib/libhsa-runtime64.so" HSA=1 BIG=2 TORCHCUDA=1 python3 test/speed/external_test_speed_v_torch.py
     - name: Test speed vs theoretical
       run: DEV=AMD IGNORE_BEAM_CACHE=1 CCACHE=0 BEAM_DEBUG=1 DEBUG=1 python -m pytest -rA test/external/speed_v_theoretical.py --durations=20
-    - name: Test tensor cores AMD_LLVM=0
-      run: DEV=AMD AMD_LLVM=0 python3 test/opt/test_tensor_cores.py
+    - name: Test tensor cores (no LLVM)
+      run: DEV=AMD python3 test/opt/test_tensor_cores.py
     # TODO: this is flaky
-    # - name: Test tensor cores AMD_LLVM=1
-    #   run: DEV=AMD AMD_LLVM=1 python3 test/opt/test_tensor_cores.py
+    # - name: Test tensor cores AMD:LLVM
+    #   run: DEV=AMD:LLVM python3 test/opt/test_tensor_cores.py
     - name: Run Tensor Core GEMM (AMD)
       run: |
         DEV=AMD SHOULD_USE_TC=1 BFLOAT16=1 DEBUG=2 python3 extra/gemm/simple_matmul.py
@@ -591,7 +626,7 @@ jobs:
     - name: openpilot compile3 0.11.0 driving_vision
       run: BENCHMARK_LOG=openpilot_0_11_0_vision PYTHONPATH="." ASSERT_MIN_STEP_TIME=17 DEV=QCOM FLOAT16=1 IMAGE=1 NOLOCALS=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.11.0/selfdrive/modeld/models/driving_vision.onnx
     - name: IR3 openpilot compile3 0.11.0 driving_vision
-      run: BENCHMARK_LOG=ir3_openpilot_0_11_0_vision PYTHONPATH="." ASSERT_MIN_STEP_TIME=17 DEV=QCOM QCOM_IR3=1 FLOAT16=1 IMAGE=1 NOLOCALS=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.11.0/selfdrive/modeld/models/driving_vision.onnx
+      run: BENCHMARK_LOG=ir3_openpilot_0_11_0_vision PYTHONPATH="." ASSERT_MIN_STEP_TIME=17 DEV=QCOM:IR3 FLOAT16=1 IMAGE=1 NOLOCALS=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.11.0/selfdrive/modeld/models/driving_vision.onnx
     - name: openpilot compile3 0.11.0 driving_policy
       run: BENCHMARK_LOG=openpilot_0_11_0_policy PYTHONPATH="." ASSERT_MIN_STEP_TIME=3 DEV=QCOM FLOAT16=1 IMAGE=1 NOLOCALS=1 taskset -c 4-7 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/v0.11.0/selfdrive/modeld/models/driving_policy.onnx
     - name: openpilot compile3 0.11.0 dmonitoring
@@ -609,7 +644,7 @@ jobs:
         # generate quantized weights
         ln -s /data/home/tiny/tinygrad/extra/datasets/imagenet extra/datasets/imagenet
         ln -s /data/home/tiny/tinygrad/testsig-*.so .
-        PYTHONPATH=. CC=clang-19 DEV=CPU CPU_LLVM=0 QUANT=1 CNT=0 python3 examples/test_onnx_imagenet.py https://github.com/xamcat/mobcat-samples/raw/refs/heads/master/onnx_runtime/InferencingSample/InferencingSample/mobilenetv2-7.onnx /tmp/model.quant.onnx
+        PYTHONPATH=. CC=clang-19 DEV=CPU QUANT=1 CNT=0 python3 examples/test_onnx_imagenet.py https://github.com/xamcat/mobcat-samples/raw/refs/heads/master/onnx_runtime/InferencingSample/InferencingSample/mobilenetv2-7.onnx /tmp/model.quant.onnx
         # benchmark on DSP with NOOPT=1, the devectorizer has issues
         PYTHONPATH=. CC=clang-19 DEV=DSP NOOPT=1 CNT=2 DEBUG=2 python3 examples/test_onnx_imagenet.py /tmp/model.quant.onnx
     - name: Run process replay tests
@@ -632,9 +667,9 @@ jobs:
         echo "CACHEDB=/tmp/staging.db" >> $GITHUB_ENV
         rm -f /tmp/staging.db /tmp/staging.db-shm /tmp/staging.db-wal
     - name: openpilot compile3 0.10.1 driving_vision
-      run: BENCHMARK_LOG=usbgpu_openpilot_0_10_1_vision PYTHONPATH="." GMMU=0 DEV=AMD AMD_LLVM=1 AMD_IFACE=USB ASSERT_MIN_STEP_TIME=50 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/720392c9a5b986981fdbed1bb8c47a6c5573a50e/selfdrive/modeld/models/driving_vision.onnx
+      run: BENCHMARK_LOG=usbgpu_openpilot_0_10_1_vision PYTHONPATH="." GMMU=0 DEV=USB+AMD:LLVM ASSERT_MIN_STEP_TIME=50 python3 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/720392c9a5b986981fdbed1bb8c47a6c5573a50e/selfdrive/modeld/models/driving_vision.onnx
     - name: openpilot load_pickle 0.10.1 driving_vision
-      run: BENCHMARK_LOG=usbgpu_openpilot_0_10_1_vision_load_pickle PYTHONPATH="." GMMU=0 DEV=AMD AMD_IFACE=USB ASSERT_MIN_LOAD_TIME=15 python3 examples/openpilot/load_pickle.py
+      run: BENCHMARK_LOG=usbgpu_openpilot_0_10_1_vision_load_pickle PYTHONPATH="." GMMU=0 DEV=USB+AMD ASSERT_MIN_LOAD_TIME=15 python3 examples/openpilot/load_pickle.py
 
   testreddriverbenchmark:
     name: AM Benchmark
@@ -677,8 +712,8 @@ jobs:
     # Fails on 9070
     # - name: Test tensor cores
     #   run: |
-    #     DEV=AMD AMD_LLVM=0 python3 test/test_linearizer.py test/opt/test_tensor_cores.py
-    #     DEV=AMD AMD_LLVM=1 python3 test/test_linearizer.py test/opt/test_tensor_cores.py
+    #     DEV=AMD python3 test/test_linearizer.py test/opt/test_tensor_cores.py
+    #     DEV=AMD:LLVM python3 test/test_linearizer.py test/opt/test_tensor_cores.py
     #     DEV=AMD SHOULD_USE_TC=1 BFLOAT16=1 DEBUG=2 python3 extra/gemm/simple_matmul.py
     - name: Run Tensor Core GEMM (AMD)
       run: DEV=AMD SHOULD_USE_TC=1 HALF=1 DEBUG=2 ATOL=2e-2 python3 extra/gemm/simple_matmul.py
@@ -702,8 +737,8 @@ jobs:
         pkill -f 'extra/remote/serve.py' || true
         PYTHONPATH=. python3 extra/remote/serve.py 6482 &
         sleep 1
-        DEBUG=2 PYTHONPATH=. REMOTE=127.0.0.1:6482 AM_RESET=1 DEV=AMD AMD_IFACE=PCI python3 test/test_tiny.py
-        DEBUG=2 PYTHONPATH=. REMOTE=127.0.0.1:6482 AM_RESET=1 DEV=AMD AMD_AQL=1 AMD_IFACE=PCI python3 test/test_tiny.py
+        DEBUG=2 PYTHONPATH=. REMOTE=127.0.0.1:6482 AM_RESET=1 DEV=PCI+AMD python3 test/test_tiny.py
+        DEBUG=2 PYTHONPATH=. REMOTE=127.0.0.1:6482 AM_RESET=1 DEV=PCI+AMD AMD_AQL=1 python3 test/test_tiny.py
         pkill -f 'extra/remote/serve.py' || true
     - name: Run process replay tests
       run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py

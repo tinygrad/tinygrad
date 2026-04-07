@@ -2105,7 +2105,7 @@ class struct_amd_runtime_loader_debug_info_s(c.Struct):
   kernel_name: Annotated[c.POINTER[Annotated[bytes, ctypes.c_char]], 16]
   owning_segment: Annotated[ctypes.c_void_p, 24]
 amd_runtime_loader_debug_info_t: TypeAlias = struct_amd_runtime_loader_debug_info_s
-class struct_BrigModuleHeader(ctypes.Structure): pass
+class struct_BrigModuleHeader(c.Struct): SIZE = 0
 BrigModule_t: TypeAlias = c.POINTER[struct_BrigModuleHeader]
 class _anonenum1(Annotated[int, ctypes.c_uint32], c.Enum): pass
 HSA_EXT_STATUS_ERROR_INVALID_PROGRAM = _anonenum1.define('HSA_EXT_STATUS_ERROR_INVALID_PROGRAM', 8192)

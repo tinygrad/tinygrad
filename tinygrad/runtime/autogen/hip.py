@@ -6,13 +6,13 @@ from tinygrad.runtime.support.c import _IO, _IOW, _IOR, _IOWR
 from tinygrad.runtime.support import c
 import os
 dll = c.DLL('hip', os.getenv('ROCM_PATH', '/opt/rocm')+'/lib/libamdhip64.so')
-class ihipModuleSymbol_t(ctypes.Structure): pass
+class ihipModuleSymbol_t(c.Struct): SIZE = 0
 hipFunction_t: TypeAlias = c.POINTER[ihipModuleSymbol_t]
 uint32_t: TypeAlias = Annotated[int, ctypes.c_uint32]
 size_t: TypeAlias = Annotated[int, ctypes.c_uint64]
-class ihipStream_t(ctypes.Structure): pass
+class ihipStream_t(c.Struct): SIZE = 0
 hipStream_t: TypeAlias = c.POINTER[ihipStream_t]
-class ihipEvent_t(ctypes.Structure): pass
+class ihipEvent_t(c.Struct): SIZE = 0
 hipEvent_t: TypeAlias = c.POINTER[ihipEvent_t]
 class hipError_t(Annotated[int, ctypes.c_uint32], c.Enum): pass
 hipSuccess = hipError_t.define('hipSuccess', 0)
@@ -123,13 +123,13 @@ HIPRTC_ERROR_NAME_EXPRESSION_NOT_VALID = hiprtcResult.define('HIPRTC_ERROR_NAME_
 HIPRTC_ERROR_INTERNAL_ERROR = hiprtcResult.define('HIPRTC_ERROR_INTERNAL_ERROR', 11)
 HIPRTC_ERROR_LINKING = hiprtcResult.define('HIPRTC_ERROR_LINKING', 100)
 
-class ihiprtcLinkState(ctypes.Structure): pass
+class ihiprtcLinkState(c.Struct): SIZE = 0
 hiprtcLinkState: TypeAlias = c.POINTER[ihiprtcLinkState]
 @dll.bind
 def hiprtcGetErrorString(result:hiprtcResult) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
 @dll.bind
 def hiprtcVersion(major:c.POINTER[Annotated[int, ctypes.c_int32]], minor:c.POINTER[Annotated[int, ctypes.c_int32]]) -> hiprtcResult: ...
-class _hiprtcProgram(ctypes.Structure): pass
+class _hiprtcProgram(c.Struct): SIZE = 0
 hiprtcProgram: TypeAlias = c.POINTER[_hiprtcProgram]
 @dll.bind
 def hiprtcAddNameExpression(prog:hiprtcProgram, name_expression:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> hiprtcResult: ...
@@ -512,7 +512,7 @@ hipGPUDirectRDMAWritesOrderingAllDevices = hipGPUDirectRDMAWritesOrdering.define
 
 @dll.bind
 def hip_init() -> hipError_t: ...
-class ihipCtx_t(ctypes.Structure): pass
+class ihipCtx_t(c.Struct): SIZE = 0
 hipCtx_t: TypeAlias = c.POINTER[ihipCtx_t]
 hipDevice_t: TypeAlias = Annotated[int, ctypes.c_int32]
 class hipDeviceP2PAttr(Annotated[int, ctypes.c_uint32], c.Enum): pass
@@ -536,15 +536,15 @@ class hipIpcEventHandle_st(c.Struct):
   SIZE = 64
   reserved: Annotated[c.Array[Annotated[bytes, ctypes.c_char], Literal[64]], 0]
 hipIpcEventHandle_t: TypeAlias = hipIpcEventHandle_st
-class ihipModule_t(ctypes.Structure): pass
+class ihipModule_t(c.Struct): SIZE = 0
 hipModule_t: TypeAlias = c.POINTER[ihipModule_t]
-class ihipLinkState_t(ctypes.Structure): pass
+class ihipLinkState_t(c.Struct): SIZE = 0
 hipLinkState_t: TypeAlias = c.POINTER[ihipLinkState_t]
-class ihipLibrary_t(ctypes.Structure): pass
+class ihipLibrary_t(c.Struct): SIZE = 0
 hipLibrary_t: TypeAlias = c.POINTER[ihipLibrary_t]
-class ihipKernel_t(ctypes.Structure): pass
+class ihipKernel_t(c.Struct): SIZE = 0
 hipKernel_t: TypeAlias = c.POINTER[ihipKernel_t]
-class ihipMemPoolHandle_t(ctypes.Structure): pass
+class ihipMemPoolHandle_t(c.Struct): SIZE = 0
 hipMemPool_t: TypeAlias = c.POINTER[ihipMemPoolHandle_t]
 @c.record
 class hipFuncAttributes(c.Struct):
@@ -909,16 +909,16 @@ hipGraphicsRegisterFlagsWriteDiscard = hipGraphicsRegisterFlags.define('hipGraph
 hipGraphicsRegisterFlagsSurfaceLoadStore = hipGraphicsRegisterFlags.define('hipGraphicsRegisterFlagsSurfaceLoadStore', 4)
 hipGraphicsRegisterFlagsTextureGather = hipGraphicsRegisterFlags.define('hipGraphicsRegisterFlagsTextureGather', 8)
 
-class _hipGraphicsResource(ctypes.Structure): pass
+class _hipGraphicsResource(c.Struct): SIZE = 0
 hipGraphicsResource: TypeAlias = _hipGraphicsResource
 hipGraphicsResource_t: TypeAlias = c.POINTER[_hipGraphicsResource]
-class ihipGraph(ctypes.Structure): pass
+class ihipGraph(c.Struct): SIZE = 0
 hipGraph_t: TypeAlias = c.POINTER[ihipGraph]
-class hipGraphNode(ctypes.Structure): pass
+class hipGraphNode(c.Struct): SIZE = 0
 hipGraphNode_t: TypeAlias = c.POINTER[hipGraphNode]
-class hipGraphExec(ctypes.Structure): pass
+class hipGraphExec(c.Struct): SIZE = 0
 hipGraphExec_t: TypeAlias = c.POINTER[hipGraphExec]
-class hipUserObject(ctypes.Structure): pass
+class hipUserObject(c.Struct): SIZE = 0
 hipUserObject_t: TypeAlias = c.POINTER[hipUserObject]
 class hipGraphNodeType(Annotated[int, ctypes.c_uint32], c.Enum): pass
 hipGraphNodeTypeKernel = hipGraphNodeType.define('hipGraphNodeTypeKernel', 0)
@@ -1112,7 +1112,7 @@ class hipExternalSemaphoreWaitNodeParams(c.Struct):
   extSemArray: Annotated[c.POINTER[hipExternalSemaphore_t], 0]
   paramsArray: Annotated[c.POINTER[hipExternalSemaphoreWaitParams], 8]
   numExtSems: Annotated[Annotated[int, ctypes.c_uint32], 16]
-class ihipMemGenericAllocationHandle(ctypes.Structure): pass
+class ihipMemGenericAllocationHandle(c.Struct): SIZE = 0
 hipMemGenericAllocationHandle_t: TypeAlias = c.POINTER[ihipMemGenericAllocationHandle]
 class hipMemAllocationGranularity_flags(Annotated[int, ctypes.c_uint32], c.Enum): pass
 hipMemAllocationGranularityMinimum = hipMemAllocationGranularity_flags.define('hipMemAllocationGranularityMinimum', 0)
@@ -1178,7 +1178,7 @@ HIP_AD_FORMAT_SIGNED_INT32 = hipArray_Format.define('HIP_AD_FORMAT_SIGNED_INT32'
 HIP_AD_FORMAT_HALF = hipArray_Format.define('HIP_AD_FORMAT_HALF', 16)
 HIP_AD_FORMAT_FLOAT = hipArray_Format.define('HIP_AD_FORMAT_FLOAT', 32)
 
-class hipArray(ctypes.Structure): pass
+class hipArray(c.Struct): SIZE = 0
 hipArray_t: TypeAlias = c.POINTER[hipArray]
 @c.record
 class hipArrayMapInfo_subresource(c.Struct):
@@ -2018,7 +2018,7 @@ hipAddressModeClamp = hipTextureAddressMode.define('hipAddressModeClamp', 1)
 hipAddressModeMirror = hipTextureAddressMode.define('hipAddressModeMirror', 2)
 hipAddressModeBorder = hipTextureAddressMode.define('hipAddressModeBorder', 3)
 
-class __hip_texture(ctypes.Structure): pass
+class __hip_texture(c.Struct): SIZE = 0
 hipTextureObject_t: TypeAlias = c.POINTER[__hip_texture]
 @dll.bind
 def hipModuleGetTexRef(texRef:c.POINTER[c.POINTER[textureReference]], hmod:hipModule_t, name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> hipError_t: ...
@@ -2660,7 +2660,7 @@ def hipGraphicsResourceGetMappedPointer(devPtr:c.POINTER[ctypes.c_void_p], size:
 def hipGraphicsUnmapResources(count:Annotated[int, ctypes.c_int32], resources:c.POINTER[hipGraphicsResource_t], stream:hipStream_t) -> hipError_t: ...
 @dll.bind
 def hipGraphicsUnregisterResource(resource:hipGraphicsResource_t) -> hipError_t: ...
-class __hip_surface(ctypes.Structure): pass
+class __hip_surface(c.Struct): SIZE = 0
 hipSurfaceObject_t: TypeAlias = c.POINTER[__hip_surface]
 @dll.bind
 def hipCreateSurfaceObject(pSurfObject:c.POINTER[hipSurfaceObject_t], pResDesc:c.POINTER[hipResourceDesc]) -> hipError_t: ...
