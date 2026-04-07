@@ -65,10 +65,7 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
     if rng.src[0].op is not Ops.CONST: continue
     if not (cuts := [c.src[1].arg for c in k.ast.get_consumer_map()[rng] if c.op is Ops.CMPLT and rng is c.src[0] and c.src[1].op is Ops.CONST]):
       continue
-    # applying the cut removes rng so if we do more than one cut we need to cut the new one
-    cuts = sorted([0] + cuts)
-    for prev_cut, cut in zip(cuts, cuts[1:]):
-      _, rng = k.apply_opt(Opt(OptOps.SPLIT, k.rngs.index(rng), cut - prev_cut))
+    k.apply_opt(Opt(OptOps.SPLIT, k.rngs.index(rng), tuple(sorted(cuts))))
 
   # should use matvec - TODO: adjust/tune based on the wide vs tall/large vs small mat
   MV_BLOCKSIZE, MV_THREADS_PER_ROW, MV_ROWS_PER_THREAD = getenv("MV_BLOCKSIZE", 4), getenv("MV_THREADS_PER_ROW", 8), getenv("MV_ROWS_PER_THREAD", 4)

@@ -102,15 +102,19 @@ class Scheduler:
     self.ast = self.ast.substitute({rng:sub_axis}, name=f"shift {rng.arg[:-1]} {amount} {str(new_type).split('.')[1].lower()}")
     return replaced_rng, new_rng
 
-  def split_to(self, rng:UOp, amt:int):
-    r0, r1 = UOp.range(amt, *(rng.arg[:-1] + (0, rng.arg[-1]))), UOp.range(rng.src[0].arg - amt, *(rng.arg[:-1] + (1, rng.arg[-1])))
+  def split_to(self, rng:UOp, cuts:tuple[int, ...]):
+    offsets = (0, *cuts)
+    new_rngs = [UOp.range(e - s, *(rng.arg[:-1] + (i, rng.arg[-1]))) for i, (s, e) in enumerate(itertools.pairwise((*offsets, rng.src[0].arg)))]
     end = get_single_element([u for u in self.ast.toposort() if u.op is Ops.END and rng in u.src])
     rng_idx = end.src.index(rng)
     inner_rngs, outer_rngs = list(end.src[1:rng_idx]), list(end.src[rng_idx+1:])
-    store0, store1 = end.src[0].substitute({rng: r0}), end.src[0].substitute({rng: r1 + amt})
-    group = UOp.group(store0.end(*inner_rngs, r0), store1.end(*inner_rngs, r1))
-    self.ast = self.ast.substitute({end: group.end(*outer_rngs) if outer_rngs else group}, name=f"split {rng.arg[:-1]} at {amt}")
-    return r0, r1
+    # inner ranges need to be duplicated and given unique numbers per split segment
+    all_inner_rngs = [[UOp.range(r.src[0], *(r.arg[:-1] + (i, r.arg[-1]))) for r in inner_rngs] for i in range(len(new_rngs))]
+    ends = [end.src[0].substitute({rng: new_rngs[i] + offsets[i]}|dict(zip(inner_rngs, all_inner_rngs[i]))).end(*all_inner_rngs[i], new_rngs[i])
+            for i in range(len(new_rngs))]
+    group = UOp.group(*ends)
+    self.ast = self.ast.substitute({end: group.end(*outer_rngs) if outer_rngs else group}, name=f"split {rng.arg[:-1]} at {cuts}")
+    return tuple(new_rngs)
 
   def ranges_of(self, *axis_type:AxisType) -> list[UOp]: return [r for r in self.rngs if r.arg[-1] in axis_type]
   def axes_of(self, *axis_type:AxisType) -> list[int]: return [i for i,t in enumerate(self.axis_types) if t in axis_type]
@@ -215,9 +219,9 @@ class Scheduler:
     elif opt.op is OptOps.SPLIT:
       check(rng.arg[-1] == AxisType.LOOP, "split is only for LOOP ranges")
       check(rng.src[0].op is Ops.CONST, "can only split const-sized ranges")
-      amt = cast(int, opt.arg)
-      check(0 < amt < int(rng.src[0].arg), f"split point {amt} must be between 0 and {int(rng.src[0].arg)}")
-      return self.split_to(rng, amt)
+      assert isinstance(opt.arg, tuple)
+      for s in opt.arg: check(0 < s < int(rng.src[0].arg), f"split point {s} must be between 0 and {int(rng.src[0].arg)}")
+      ret = self.split_to(rng, opt.arg)
     elif opt.op is OptOps.SWAP:
       try:
         altrng:UOp = self.rngs[opt.arg]
