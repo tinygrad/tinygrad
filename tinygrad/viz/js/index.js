@@ -264,7 +264,7 @@ function timeAtCycle(clk) {
   let cur = data.instSt, ns = 0, freq = null;
   // walk through all frequency changes and accumulate time in nanoseconds
   for (const [s, v] of data.tracks.get("Shader Clock").valueMap) {
-    if (freq != null && cur < s) {
+    if (freq != null && freq > 0 && cur < s) {
       const et = Math.min(clk, s);
       ns += (et - cur) * 1e9 / freq;
       cur = et;

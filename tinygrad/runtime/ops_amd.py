@@ -86,6 +86,7 @@ class AMDComputeQueue(HWQueue):
                 | self.pm4.WAIT_REG_MEM_FUNCTION(op) | self.pm4.WAIT_REG_MEM_ENGINE(0)
 
     self.pkt3(self.pm4.PACKET3_WAIT_REG_MEM, wrm_info_dw, *(data64_le(mem) if mem is not None else (reg, reg_done)), value, mask, 4)
+    return self
 
   def acquire_mem(self, addr=0x0, sz=(1 << 64)-1, gli=1, glm=1, glk=1, glv=1, gl1=1, gl2=1):
     if self.dev.target >= (10,0,0):
@@ -103,6 +104,7 @@ class AMDComputeQueue(HWQueue):
                       self.pm4.PACKET3_ACQUIRE_MEM_CP_COHER_CNTL_TCL1_ACTION_ENA(gl1) | \
                       self.pm4.PACKET3_ACQUIRE_MEM_CP_COHER_CNTL_TC_WB_ACTION_ENA(gl2)
       self.pkt3(self.pm4.PACKET3_ACQUIRE_MEM, cp_coher_cntl, *data64_le(sz), *data64_le(addr), 0x0000000A)
+    return self
 
   def release_mem(self, address=0x0, value=0, data_sel=0, int_sel=2, ctxid=0, cache_flush=False):
     if self.dev.target >= (10,0,0):
@@ -125,13 +127,13 @@ class AMDComputeQueue(HWQueue):
       ctxid = 0
 
     self.pkt3(self.pm4.PACKET3_RELEASE_MEM, event_dw | cache_flags_dw, memsel_dw, *data64_le(address), *data64_le(value), ctxid)
+    return self
 
   def memory_barrier(self):
     pf = '' if self.nbio.version[0] == 2 else '0' if self.nbio.version[:2] != (7, 11) else '1'
     self.wait_reg_mem(reg=getattr(self.nbio, f'regBIF_BX_PF{pf}_GPU_HDP_FLUSH_REQ').addr[0],
                       reg_done=getattr(self.nbio, f'regBIF_BX_PF{pf}_GPU_HDP_FLUSH_DONE').addr[0], value=0xffffffff)
-    self.acquire_mem()
-    return self
+    return self.acquire_mem()
 
   def spi_config(self, tracing:bool):
     self.wreg(self.gc.regSPI_CONFIG_CNTL, ps_pkr_priority_cntl=3, exp_priority_order=3, gpr_write_priority=0x2c688,
@@ -366,9 +368,7 @@ class AMDComputeQueue(HWQueue):
     self.pkt3(self.pm4.PACKET3_EVENT_WRITE, self.pm4.EVENT_TYPE(self.soc.CS_PARTIAL_FLUSH) | self.pm4.EVENT_INDEX(EVENT_INDEX_PARTIAL_FLUSH))
     return self
 
-  def wait(self, signal:AMDSignal, value:sint=0):
-    self.wait_reg_mem(mem=signal.value_addr, value=value, mask=0xffffffff)
-    return self
+  def wait(self, signal:AMDSignal, value:sint=0): return self.wait_reg_mem(mem=signal.value_addr, value=value, mask=0xffffffff)
 
   def timestamp(self, signal:AMDSignal):
     with self.pred_exec(xcc_mask=0b1):
@@ -376,6 +376,12 @@ class AMDComputeQueue(HWQueue):
       self.release_mem(signal.timestamp_addr, 0, self.pm4.data_sel__mec_release_mem__send_gpu_clock_counter, self.pm4.int_sel__mec_release_mem__none)
       self.acquire_mem() # ensure timestamp is written
     return self
+
+  def write(self, b:HCQBuffer, val:sint, b64:bool=False):
+    data_sel = self.pm4.data_sel__mec_release_mem__send_64_bit_data if b64 else self.pm4.data_sel__mec_release_mem__send_32_bit_low
+    return self.release_mem(b.va_addr, val, data_sel, self.pm4.int_sel__mec_release_mem__none)
+
+  def poll_bit(self, b:HCQBuffer, val:sint, mask:int): return self.wait_reg_mem(val, mask=mask, mem=b.va_addr, op=WAIT_REG_MEM_FUNCTION_EQ)
 
   def signal(self, signal:AMDSignal, value:sint=0):
     with self.pred_exec(xcc_mask=0b1):
@@ -990,7 +996,7 @@ class AMDDevice(HCQCompiled):
       for k in (PMC_COUNTERS:=getenv("PMC_COUNTERS", pmc_default).split(",")):
         if k not in self.pmc_counters: raise RuntimeError(f"PMC counter {k} is not supported. Available: {','.join(self.pmc_counters.keys())}")
 
-      cast(AMDComputeQueue, self.hw_compute_queue_t()).pmc_start([(k, *self.pmc_counters[k]) for k in PMC_COUNTERS]).submit(self)
+      cast(AMDComputeQueue, unwrap(self.hw_compute_queue_t)()).pmc_start([(k, *self.pmc_counters[k]) for k in PMC_COUNTERS]).submit(self)
       self.pmc_buffer = self.allocator.alloc(self.pmc_sched[-1].off + self.pmc_sched[-1].size, BufferSpec(nolru=True, uncached=True))
       self.allocator._copyin(self.pmc_buffer, memoryview(bytearray(self.pmc_buffer.size))) # zero pmc buffers, some counters have only lo part.
 
@@ -1065,7 +1071,7 @@ class AMDDevice(HCQCompiled):
         self.aql_gart.cpu_view()[:ctypes.sizeof(self.aql_desc)] = bytes(self.aql_desc)
 
   def invalidate_caches(self):
-    self.hw_compute_queue_t().memory_barrier().signal(self.timeline_signal, self.next_timeline()).submit(self)
+    unwrap(self.hw_compute_queue_t)().memory_barrier().signal(self.timeline_signal, self.next_timeline()).submit(self)
     self.synchronize()
 
   def synchronize(self, timeout:int|None=None):

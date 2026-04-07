@@ -88,6 +88,10 @@ class TestIntegration(IntegrationTestBase):
     with self.assertRaises(TypeError):
       self.inst = v_mov_b32_e32(1, v[0])
 
+  def test_invalid_field(self):
+    with self.assertRaises(TypeError):
+      self.inst = s_load_b128(s[4:7], s[0:1], NULL, ioffset=0x8)
+
   def test_simple_int_to_v(self):
     self.inst = v_mov_b32_e32(v[0], 1)
 
