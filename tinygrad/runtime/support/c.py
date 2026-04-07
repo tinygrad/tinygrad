@@ -1,8 +1,8 @@
 from __future__ import annotations
-import ctypes, functools, os, pathlib, re, sys, sysconfig
-from tinygrad.helpers import ceildiv, getenv, unwrap, DEBUG, OSX, WIN
+import ctypes, functools, os, pathlib, re, struct, sys, sysconfig
 from _ctypes import Array as _CArray, _SimpleCData, _Pointer
 from typing import TYPE_CHECKING, get_type_hints, get_args, get_origin, overload, Annotated, Any, Generic, Iterable, ParamSpec, TypeVar
+from tinygrad.helpers import ceildiv, getenv, unwrap, DEBUG, OSX, WIN
 
 def _do_ioctl(__idir, __base, __nr, __struct, __fd, *args, __payload=None, **kwargs):
   assert not WIN, "ioctl not supported"
@@ -82,7 +82,12 @@ else:
 
 def i2b(i:int, sz:int) -> bytes: return i.to_bytes(sz, sys.byteorder)
 def b2i(b:bytes) -> int: return int.from_bytes(b, sys.byteorder)
-def mv(st) -> memoryview: return memoryview(st).cast('B')
+def mv(st:Struct) -> memoryview: return memoryview(st).cast('B').toreadonly() if getattr(st, "_readonly_", False) else memoryview(st).cast('B')
+
+def make_readonly(cls:type[Struct]|type[_CArray], mv:memoryview) -> Struct|_CArray:
+  from tinygrad.runtime.support.python import mv_address
+  setattr(s:=cls.from_address(mv_address(mv)), "_readonly_", mv.readonly)
+  return s
 
 class Struct(ctypes.Structure):
   def __init__(self, *args, **kwargs):
@@ -90,18 +95,21 @@ class Struct(ctypes.Structure):
     self._objects_ = {}
     for f,v in [*zip((rf[0] for rf in self._real_fields_), args), *kwargs.items()]: setattr(self, f, v)
 
+  @classmethod
+  def from_mv(cls, mv:memoryview): return make_readonly(cls, mv)
+
 def record(cls) -> type[Struct]:
-  struct = type(cls.__name__, (Struct,), {'_fields_': [('_mem_', ctypes.c_byte * cls.SIZE)]})
-  _pending_records.append((cls, struct, unwrap(sys._getframe().f_back).f_globals))
-  return struct
+  newcls = type(cls.__name__, (Struct,), {'_fields_': [('_mem_', ctypes.c_byte * cls.SIZE)]})
+  _pending_records.append((cls, newcls, unwrap(sys._getframe().f_back).f_globals))
+  return newcls
 
 def init_records() -> None:
-  for cls, struct, ns in _pending_records:
-    setattr(struct, '_real_fields_', [])
+  for cls, newcls, ns in _pending_records:
+    setattr(newcls, '_real_fields_', [])
     for nm, t in get_type_hints(cls, globalns=ns, include_extras=True).items():
-      if t.__origin__ in (bool, bytes, str, int, float): setattr(struct, nm, Field(*(f:=t.__metadata__)))
-      else: setattr(struct, nm, Field(*(f:=(del_an(t.__origin__), *t.__metadata__))))
-      struct._real_fields_.append((nm,) + f) # type: ignore
+      if t.__origin__ in (bool, bytes, str, int, float): setattr(newcls, nm, Field(*(f:=t.__metadata__)))
+      else: setattr(newcls, nm, Field(*(f:=(del_an(t.__origin__), *t.__metadata__))))
+      newcls._real_fields_.append((nm,) + f) # type: ignore
   _pending_records.clear()
 
 class Field(property):
@@ -111,17 +119,18 @@ class Field(property):
       # FIXME: signedness
       super().__init__(lambda self: (b2i(mv(self)[sl]) >> bit_off) & mask,
                        lambda self,v: mv(self).__setitem__(sl, i2b((b2i(mv(self)[sl]) & set_mask) | (v << bit_off), sz)))
-    else:
+    elif issubclass(typ, (_CArray, Struct)):
       sl = slice(off, off + ctypes.sizeof(typ))
-      def set_with_objs(f):
-        def wrapper(self, v):
-          if hasattr(v, '_objects') and hasattr(self, '_objects_'): self._objects_[off] = {'_self_': v, **(v._objects or {})}
-          mv(self).__setitem__(sl, bytes(v if isinstance(v, typ) else f(v)))
-        return wrapper
-      if issubclass(typ, _CArray):
-        getter = (lambda self: typ.from_buffer(mv(self)[sl]).value) if typ._type_ is ctypes.c_char else (lambda self: typ.from_buffer(mv(self)[sl]))
-        super().__init__(getter, set_with_objs(lambda v: typ(*v)))
-      else: super().__init__(lambda self: v.value if isinstance(v:=typ.from_buffer(mv(self)[sl]), _SimpleCData) else v, set_with_objs(typ))
+      def setter(self, v):
+        if hasattr(v, '_objects') and hasattr(self, '_objects_'): self._objects_[off] = {'_self_': v, **(v._objects or {})}
+        mv(self)[sl] = bytes(v)
+      if issubclass(typ, _CArray) and typ._type_ is ctypes.c_char: super().__init__(lambda self: mv(self)[sl].tobytes().split(b"\x00")[0], setter)
+      else: super().__init__(lambda self: make_readonly(typ, mv(self)[sl]), setter)
+    else:
+      def pget(self): return ctypes.cast(struct.unpack_from("P", mv(self), off)[0], typ)
+      def pset(self, v): return struct.pack_into("P", mv(self), off, ctypes.cast(v, ctypes.c_void_p).value)
+      super().__init__(pget if (p:=issubclass(typ, _Pointer)) else (lambda self: struct.unpack_from(typ._type_, mv(self), off)[0]),
+                       pset if p or typ is ctypes.c_void_p else (lambda self,v: struct.pack_into(typ._type_, mv(self), off, v)))
     self.offset = off
 
 @functools.cache

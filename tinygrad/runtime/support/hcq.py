@@ -4,12 +4,12 @@ import contextlib, decimal, statistics, time, ctypes, array, os, struct, collect
 from dataclasses import replace
 try: import fcntl # windows misses that
 except ImportError: fcntl = None #type:ignore[assignment]
-from tinygrad.helpers import DEV, PROFILE, getenv, to_mv, from_mv, cpu_profile, ProfileRangeEvent, select_first_inited, unwrap, suppress_finalizing
-from tinygrad.helpers import TracingKey
+from tinygrad.helpers import DEV, PROFILE, getenv, cpu_profile, ProfileRangeEvent, select_first_inited, unwrap, suppress_finalizing, TracingKey
 from tinygrad.device import Device, BufferSpec, Compiled, LRUAllocator, ProfileDeviceEvent, ProfileProgramEvent
 from tinygrad.uop.ops import sym_infer, sint, UOp
 from tinygrad.runtime.autogen import libc
 from tinygrad.runtime.support.memory import BumpAllocator
+from tinygrad.runtime.support.python import to_mv, from_mv
 from tinygrad.renderer import Renderer
 
 class MMIOInterface:
