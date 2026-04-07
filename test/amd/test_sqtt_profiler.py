@@ -9,7 +9,7 @@ def save_sqtt():
   Device[Device.DEFAULT].synchronize()
   Device[Device.DEFAULT]._at_profile_finalize()
   load_amd_counters(ret, Compiled.profile_events)
-  ret[:] = [r for r in ret if r["name"].startswith("Exec")]
+  ret[:] = [r for r in ret if r["name"].startswith("SQTT")]
 
 @unittest.skipUnless(Device.DEFAULT == "AMD", "only runs on AMD")
 class TestSQTTProfiler(unittest.TestCase):
@@ -28,7 +28,7 @@ class TestSQTTProfiler(unittest.TestCase):
       ei = t.schedule()[0].lower()
       ei.run()
     self.assertEqual(len(sqtt), 1)
-    self.assertEqual(sqtt[0]["name"], f"Exec {ei.prg.p.function_name}")
+    self.assertEqual(sqtt[0]["name"], f"SQTT {ei.prg.p.function_name}")
 
   def test_multiple_runs(self):
     t = Tensor.empty(1) + 1
@@ -38,7 +38,7 @@ class TestSQTTProfiler(unittest.TestCase):
         ei.run()
     self.assertEqual(len(sqtt), N)
     for i in range(1, N):
-      self.assertEqual(sqtt[i]["name"], f"Exec {ei.prg.p.function_name} n{i+1}")
+      self.assertEqual(sqtt[i]["name"], f"SQTT {ei.prg.p.function_name} n{i+1}")
 
   def test_multiple_kernels(self):
     t = ((Tensor.empty(1) + 1).contiguous() + 2)
@@ -47,7 +47,7 @@ class TestSQTTProfiler(unittest.TestCase):
       for si in sched: si.lower().run()
     self.assertEqual(len(sqtt), len(sched))
     for i,k in enumerate(sched):
-      self.assertEqual(sqtt[i]["name"], f"Exec {k.lower().prg.p.function_name}")
+      self.assertEqual(sqtt[i]["name"], f"SQTT {k.lower().prg.p.function_name}")
 
   def test_multiple_kernels_lower(self):
     t = ((Tensor.empty(1) + 1).contiguous() + 2)
@@ -57,7 +57,7 @@ class TestSQTTProfiler(unittest.TestCase):
       for p in prgs: p.run()
     self.assertEqual(len(sqtt), len(sched))
     for i,ei in enumerate(prgs):
-      self.assertEqual(sqtt[i]["name"], f"Exec {ei.prg.p.function_name}")
+      self.assertEqual(sqtt[i]["name"], f"SQTT {ei.prg.p.function_name}")
 
   def test_jit(self):
     @TinyJit

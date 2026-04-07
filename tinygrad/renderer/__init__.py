@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import Callable, cast
 import functools
 from dataclasses import dataclass, field
-from tinygrad.helpers import to_function_name, dedup, prod, DEBUG
+from tinygrad.helpers import to_function_name, dedup, prod, Target, DEBUG
 from tinygrad.uop.ops import Ops, UOp, sym_infer, sint, Variable, ssimplify, smin, GroupOp, PatternMatcher, print_uops
 from tinygrad.dtype import AddrSpace, PtrDType
 from tinygrad.codegen.opt.tc import TensorCore
@@ -131,7 +131,7 @@ class ProgramSpec:
                        sorted(_vars, key=lambda v: v.arg), sorted(dedup(_globals)), sorted(dedup(outs)), sorted(dedup(ins)))
 
 class Renderer:
-  device: str = ""
+  target: Target
   suffix: str = ""
   # TODO: make this generic with a list of supported types
   supports_float4: bool = True
@@ -151,6 +151,7 @@ class Renderer:
 
   compiler: Compiler = Compiler()
 
-  def __reduce__(self): return self.__class__, ()
+  def __init__(self, target:Target): self.target = target
+  def __reduce__(self): return self.__class__, (self.target,)
   def render(self, uops:list[UOp]) -> str: raise NotImplementedError("needs a renderer")
   def aux(self, uops:list[UOp]) -> dict: raise NotImplementedError("needs aux")

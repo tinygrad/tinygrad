@@ -31,7 +31,7 @@ These control the behavior of core tinygrad even when used as a library.
 Variable | Possible Value(s) | Description
 ---|---|---
 DEBUG               | [1-7]      | enable debugging output (operations, timings, speed, generated code and more)
-DEV                 | [AMD, NV, ...] | enable a specific backend
+DEV                 | [AMD, NV, ...] | enable a specific backend, see [below](#dev-variable)
 BEAM                | [#]        | number of beams in kernel beam search
 DEFAULT_FLOAT       | [HALF, ...]| specify the default float dtype (FLOAT32, HALF, BFLOAT16, FLOAT64, ...), default to FLOAT32
 IMAGE               | [1-2]      | enable 2d specific optimizations
@@ -43,7 +43,23 @@ ALLOW_TF32          | [1]        | enable TensorFloat-32 tensor cores on Ampere 
 WEBGPU_BACKEND      | [WGPUBackendType_Metal, ...]          | Force select a backend for WebGPU (Metal, DirectX, OpenGL, Vulkan...)
 CUDA_PATH           | str        | Use `CUDA_PATH/include` for CUDA headers for CUDA and NV backends. If not set, TinyGrad will use `/usr/local/cuda/include`, `/usr/include` and `/opt/cuda/include`.
 
-## Debug breakdown
+### DEV variable
+
+The `DEV` variable deserves special note due to its more nuanced syntax.
+`DEV` is used to specify the target device, target renderer and target architecture for said device, separated by colons.
+Specifying the renderer and architecture is optional, omitting a preference will cause tinygrad to automatically determine a suitable setting.
+The `DEV` variable may also be used to specify the interface through which to access the device (eg. `PCI`, `USB`). Interfaces may be specified preceding the target triple,
+separated by a plus (eg. `DEV=USB+AMD:LLVM`). Similarly as above, the interface may be omitted. Example usage follows:
+
+`DEV` contents | Interpretation
+--- | ---
+AMD           | use the AMD device
+AMD:LLVM      | use the AMD device with the LLVM renderer
+NV:CUDA:sm_70 | use the NV device with the CUDA renderer targetting sm_70
+AMD::gfx950   | use the AMD device targetting gfx950
+USB+AMD       | use the AMD device over the USB interface
+
+### Debug breakdown
 
 Variable | Value | Description
 ---|---|---

@@ -13,7 +13,7 @@ Flags: VIZ=-1 to only save the trace to a file, VIZ=1 also launches a web server
 
 Use `extra/viz/cli.py --profile` to list all sources.
 
-List top slowest kernels on a source: `--profile -s "AMD" | head 10`
+List top slowest kernels on a source: `--profile -s "AMD"`
 List samples of a kernel on a source: `--profile -s "AMD" -i E_3 | head 4`
 
 ## Inspect codegen and PatternMatcher
@@ -38,8 +38,8 @@ You can select a specific trace with --source, Example workflow:
 VIZ=-2 python extra/gemm/amd_asm_matmul.py
 
 # View barriers
-extra/viz/cli.py --profile -s "Exec kernel SQTT PKTS SE:0" | rg BARRIER | head -10
+extra/viz/cli.py --profile -s "SQTT kernel PKTS SE:0" | rg BARRIER | head -10
 
 # Find the EXEC corresponding to a DISPATCH at cycle 410
-extra/viz/cli.py --profile -s "Exec kernel SQTT PKTS SE:0" | awk '/EXEC/ && $1 - $5 == 410'
+extra/viz/cli.py --profile -s "SQTT kernel PKTS SE:0" | awk '/EXEC/ && $1 - $5 == 410'
 ```

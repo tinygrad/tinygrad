@@ -83,7 +83,7 @@ class TestFmacE64(unittest.TestCase):
     self.assertAlmostEqual(i2f(st.vgpr[0][2]), 7.0, places=5)
 
   def test_v_fmac_f32_e64_with_sgpr_sources(self):
-    """V_FMAC_F32_E64 with SGPR sources (common in AMD_LLVM output).
+    """V_FMAC_F32_E64 with SGPR sources (common in AMD:LLVM output).
 
     This tests the exact pattern that was failing: v_fmac_f32_e64(v[0], s[4], 0)
     where src0 is SGPR and src1 is inline constant 0.
@@ -936,7 +936,7 @@ class TestF16Modifiers(unittest.TestCase):
   def test_v_fmac_f16_hi_dest(self):
     """v_fmac_f16 with .h destination: dst.h = src0 * src1 + dst.h.
 
-    This tests the case from AMD_LLVM sin(0) where V_FMAC_F16 writes to v0.h.
+    This tests the case from AMD:LLVM sin(0) where V_FMAC_F16 writes to v0.h.
     """
     instructions = [
       s_mov_b32(s[0], 0x38003c00),  # v0 = {hi=0.5, lo=1.0}
@@ -1598,7 +1598,7 @@ class TestModifierInteractions(unittest.TestCase):
     instructions = [
       s_mov_b32(s[0], quiet_nan),
       v_mov_b32_e32(v[0], s[0]),
-      VOP3(VOP3Op.V_ADD_F32, vdst=v[1], src0=v[0], src1=0.0, clamp=1),
+      VOP3(VOP3Op.V_ADD_F32, vdst=v[1], src0=v[0], src1=0.0, clmp=1),
     ]
     st = run_program(instructions, n_lanes=1)
     self.assertTrue(math.isnan(i2f(st.vgpr[0][1])))
@@ -2760,7 +2760,7 @@ class TestVOP3VOPC(unittest.TestCase):
       s_mov_b32(s[1], 0x00000000),  # 0.0
       v_mov_b32_e32(v[5], s[0]),
       v_mov_b32_e32(v[3], s[1]),
-      VOP3_SDST(VOP3Op.V_CMP_GE_F32, vdst=s[5], src0=v[5], src1=v[3], abs_=3),
+      VOP3_SDST(VOP3Op.V_CMP_GE_F32, vdst=s[5], src0=v[5], src1=v[3], abs=3),
     ]
     st = run_program(instructions, n_lanes=1)
     self.assertEqual(st.sgpr[5], 0)  # NaN comparison is always FALSE

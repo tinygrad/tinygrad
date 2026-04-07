@@ -891,6 +891,19 @@ class TestUOpGetItem(unittest.TestCase):
     result = p[0]
     self.assertEqual(result.shape, (64,))
 
+  # ellipsis
+  def test_ellipsis_all_slices(self):
+    p = self._placeholder((64, 80))
+    self.assertEqual(p[..., :64].shape, (64, 64))
+  def test_ellipsis_with_int(self):
+    p = self._placeholder((64, 80))
+    r = UOp.range(64, 100)
+    result = p[..., r]
+    self.assertEqual(result.op, Ops.INDEX)
+  def test_ellipsis_only(self):
+    p = self._placeholder((64, 64))
+    self.assertEqual(p[...].shape, (64, 64))
+
   # all slices should not create a bare INDEX
   def test_all_slices_no_index(self):
     p = self._placeholder((64, 80))

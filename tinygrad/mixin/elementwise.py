@@ -4,14 +4,12 @@ from tinygrad.uop import Ops
 from tinygrad.dtype import dtypes, ConstType, least_upper_dtype, least_upper_float
 from tinygrad.helpers import polyN
 from tinygrad.mixin.dtype import DTypeMixin
+from tinygrad.mixin.creation import CreationMixin
 
 
-class ElementwiseMixin(DTypeMixin):
+class ElementwiseMixin(DTypeMixin, CreationMixin):
   # required to implement
   def alu(self, op: Ops, *src: Self) -> Self:
-    raise NotImplementedError
-
-  def const_like(self, b: ConstType) -> Self:
     raise NotImplementedError
 
   def _broadcasted(self, y: Self | ConstType, reverse: bool = False) -> tuple[Self, Self]:
@@ -257,9 +255,25 @@ class ElementwiseMixin(DTypeMixin):
   # NOTE: __eq__ isn't overridden, and means the same thing as is by default
 
   def lshift(self, x: Self | int, reverse: bool = False) -> Self:
+    """
+    Computes left arithmetic shift of `self` by `x` bits. `self` must have integer dtype.
+    Equivalent to `self << x`.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([1, 3, 31], dtype=dtypes.uint8).lshift(2).numpy())
+    ```
+    """
     return self._binop(Ops.SHL, x, reverse)
 
   def rshift(self, x: Self | int, reverse: bool = False) -> Self:
+    """
+    Computes right arithmetic shift of `self` by `x` bits. `self` must have integer dtype.
+    Equivalent to `self >> x`.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([4, 13, 125], dtype=dtypes.uint8).rshift(2).numpy())
+    ```
+    """
     return self._binop(Ops.SHR, x, reverse)
 
   def __lshift__(self, x: Self | int) -> Self:
@@ -319,11 +333,9 @@ class ElementwiseMixin(DTypeMixin):
     return ((self-m).exp() + (self._broadcasted(other)[1]-m).exp()).log() + m
 
   def where(self, x: Self | ConstType, y: Self | ConstType) -> Self:
-    if isinstance(x, type(self)):
-      return self.alu(Ops.WHERE, x, x.ufix(y))
-    if isinstance(y, type(self)):
-      return self.alu(Ops.WHERE, y.ufix(x), y)
-    raise RuntimeError("where needs at least one UOp arg")
+    ref: Self = x if isinstance(x, type(self)) else y if isinstance(y, type(self)) else \
+      self.cast(least_upper_dtype(dtypes.from_py(x), dtypes.from_py(y)))
+    return self.alu(Ops.WHERE, ref.ufix(x), ref.ufix(y))
 
   def threefry(self, seed: Self) -> Self:
     return self.alu(Ops.THREEFRY, seed)
@@ -506,6 +518,26 @@ class ElementwiseMixin(DTypeMixin):
     ```
     """
     return (self.isinf() | self.isnan()).logical_not()
+
+  def isclose(self, other, rtol:float=1e-05, atol:float=1e-08, equal_nan=False) -> Self:
+    """
+    Returns a new tensor with element-wise comparison of closeness to `other` within a tolerance.
+
+    The `rtol` and `atol` keyword arguments control the relative and absolute tolerance of the comparison.
+
+    By default, two `NaN` values are not close to each other. If `equal_nan` is `True`, two `NaN` values are considered close.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([1e-7, 1e-8, 1e-9, float('nan')]).isclose(Tensor([0.0, 0.0, 0.0, float('nan')])).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([float('nan')]).isclose(Tensor([float('nan')]), equal_nan=True).numpy())
+    ```
+    """
+    is_finite_close = self.isfinite() & other.isfinite() & ((self - other).abs() <= atol + rtol * other.abs())
+    is_infinite_close = (self.isinf() | other.isinf()) & (self == other)
+    is_nan_close = (self.isnan() & other.isnan()) & equal_nan
+    return is_finite_close | is_infinite_close | is_nan_close
 
   def ceil(self) -> Self:
     """
@@ -834,6 +866,52 @@ class ElementwiseMixin(DTypeMixin):
     ```
     """
     return self.maximum(0) + (alpha * ((self / alpha).exp() - 1)).minimum(0)
+
+  def selu(self, alpha=1.67326, gamma=1.0507) -> Self:
+    """
+    Applies the Scaled Exponential Linear Unit (SELU) function element-wise.
+
+    - Paper: https://arxiv.org/abs/1706.02515v5
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).selu().numpy())
+    ```
+    """
+    return gamma * (self >= 0).where(self, alpha * (self.exp() - 1))
+
+  def softplus(self, beta=1.0) -> Self:
+    """
+    Applies the Softplus function element-wise.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).softplus().numpy())
+    ```
+    """
+    return (1/beta) * (self*beta).logaddexp(0.0)
+
+  def mish(self) -> Self:
+    """
+    Applies the Mish function element-wise.
+
+    - Paper: https://arxiv.org/abs/1908.08681v3
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).mish().numpy())
+    ```
+    """
+    return self * self.softplus().tanh()
+
+  def logsigmoid(self) -> Self:
+    """
+    Applies the LogSigmoid function element-wise.
+
+    - See: https://docs.pytorch.org/docs/stable/generated/torch.nn.functional.logsigmoid.html
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).logsigmoid().numpy())
+    ```
+    """
+    return -(-self).softplus()
 
   def sinh(self) -> Self:
     """

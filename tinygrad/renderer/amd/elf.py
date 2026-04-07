@@ -42,7 +42,7 @@ def do_assemble_amd(ctx, prg:UOp, lin:UOp) -> UOp:
     elif u.op is Ops.SPECIAL and u.arg.startswith("gidx"): gids.add(int(u.arg[-1]))
   src = "\n".join(str(inst) for inst in insts)
   code_bytes = b"".join(inst.to_bytes() for inst in insts)
-  arch = next(v for k, v in _arch_map.items() if ctx.arch.startswith(k))
+  arch = next(v for k, v in _arch_map.items() if ctx.target.arch.startswith(k))
   is_cdna, is_rdna4 = arch == "cdna", arch == "rdna4"
 
   # ** pad text to ISA alignment

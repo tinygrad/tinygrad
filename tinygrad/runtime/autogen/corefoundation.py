@@ -26,10 +26,10 @@ kCFStringEncodingUTF32LE = _anonenum0.define('kCFStringEncodingUTF32LE', 4697623
 CFTypeID: TypeAlias = Annotated[int, ctypes.c_uint64]
 @dll.bind
 def CFStringGetTypeID() -> CFTypeID: ...
-class struct___CFAllocator(ctypes.Structure): pass
+class struct___CFAllocator(c.Struct): SIZE = 0
 CFAllocatorRef: TypeAlias = c.POINTER[struct___CFAllocator]
 ConstStr255Param: TypeAlias = c.POINTER[Annotated[int, ctypes.c_ubyte]]
-class struct___CFString(ctypes.Structure): pass
+class struct___CFString(c.Struct): SIZE = 0
 CFStringRef: TypeAlias = c.POINTER[struct___CFString]
 @dll.bind
 def CFStringCreateWithPascalString(alloc:CFAllocatorRef, pStr:ConstStr255Param, encoding:CFStringEncoding) -> CFStringRef: ...
@@ -60,13 +60,13 @@ class CFRange(c.Struct):
 def CFStringCreateWithSubstring(alloc:CFAllocatorRef, str:CFStringRef, range:CFRange) -> CFStringRef: ...
 @dll.bind
 def CFStringCreateCopy(alloc:CFAllocatorRef, theString:CFStringRef) -> CFStringRef: ...
-class struct___CFDictionary(ctypes.Structure): pass
+class struct___CFDictionary(c.Struct): SIZE = 0
 CFDictionaryRef: TypeAlias = c.POINTER[struct___CFDictionary]
 @dll.bind
 def CFStringCreateWithFormat(alloc:CFAllocatorRef, formatOptions:CFDictionaryRef, format:CFStringRef) -> CFStringRef: ...
 @dll.bind
 def CFStringCreateWithFormatAndArguments(alloc:CFAllocatorRef, formatOptions:CFDictionaryRef, format:CFStringRef, arguments:Annotated[int, ctypes.c_int32]) -> CFStringRef: ...
-class struct___CFError(ctypes.Structure): pass
+class struct___CFError(c.Struct): SIZE = 0
 CFErrorRef: TypeAlias = c.POINTER[struct___CFError]
 @dll.bind
 def CFStringCreateStringWithValidatedFormat(alloc:CFAllocatorRef, formatOptions:CFDictionaryRef, validFormatSpecifiers:CFStringRef, format:CFStringRef, errorPtr:c.POINTER[CFErrorRef]) -> CFStringRef: ...
@@ -99,7 +99,7 @@ def CFStringGetCStringPtr(theString:CFStringRef, encoding:CFStringEncoding) -> c
 def CFStringGetCharactersPtr(theString:CFStringRef) -> c.POINTER[UniChar]: ...
 @dll.bind
 def CFStringGetBytes(theString:CFStringRef, range:CFRange, encoding:CFStringEncoding, lossByte:UInt8, isExternalRepresentation:Boolean, buffer:c.POINTER[UInt8], maxBufLen:CFIndex, usedBufLen:c.POINTER[CFIndex]) -> CFIndex: ...
-class struct___CFData(ctypes.Structure): pass
+class struct___CFData(c.Struct): SIZE = 0
 CFDataRef: TypeAlias = c.POINTER[struct___CFData]
 @dll.bind
 def CFStringCreateFromExternalRepresentation(alloc:CFAllocatorRef, data:CFDataRef, encoding:CFStringEncoding) -> CFStringRef: ...
@@ -131,7 +131,7 @@ kCFCompareDiacriticInsensitive = _anonenum1.define('kCFCompareDiacriticInsensiti
 kCFCompareWidthInsensitive = _anonenum1.define('kCFCompareWidthInsensitive', 256)
 kCFCompareForcedOrdering = _anonenum1.define('kCFCompareForcedOrdering', 512)
 
-class struct___CFLocale(ctypes.Structure): pass
+class struct___CFLocale(c.Struct): SIZE = 0
 CFLocaleRef: TypeAlias = c.POINTER[struct___CFLocale]
 CFComparisonResult: TypeAlias = Annotated[int, ctypes.c_int64]
 @dll.bind
@@ -144,7 +144,7 @@ def CFStringCompare(theString1:CFStringRef, theString2:CFStringRef, compareOptio
 def CFStringFindWithOptionsAndLocale(theString:CFStringRef, stringToFind:CFStringRef, rangeToSearch:CFRange, searchOptions:CFStringCompareFlags, locale:CFLocaleRef, result:c.POINTER[CFRange]) -> Boolean: ...
 @dll.bind
 def CFStringFindWithOptions(theString:CFStringRef, stringToFind:CFStringRef, rangeToSearch:CFRange, searchOptions:CFStringCompareFlags, result:c.POINTER[CFRange]) -> Boolean: ...
-class struct___CFArray(ctypes.Structure): pass
+class struct___CFArray(c.Struct): SIZE = 0
 CFArrayRef: TypeAlias = c.POINTER[struct___CFArray]
 @dll.bind
 def CFStringCreateArrayWithFindResults(alloc:CFAllocatorRef, theString:CFStringRef, stringToFind:CFStringRef, rangeToSearch:CFRange, compareOptions:CFStringCompareFlags) -> CFArrayRef: ...
@@ -156,7 +156,7 @@ def CFStringHasPrefix(theString:CFStringRef, prefix:CFStringRef) -> Boolean: ...
 def CFStringHasSuffix(theString:CFStringRef, suffix:CFStringRef) -> Boolean: ...
 @dll.bind
 def CFStringGetRangeOfComposedCharactersAtIndex(theString:CFStringRef, theIndex:CFIndex) -> CFRange: ...
-class struct___CFCharacterSet(ctypes.Structure): pass
+class struct___CFCharacterSet(c.Struct): SIZE = 0
 CFCharacterSetRef: TypeAlias = c.POINTER[struct___CFCharacterSet]
 @dll.bind
 def CFStringFindCharacterFromSet(theString:CFStringRef, theSet:CFCharacterSetRef, rangeToSearch:CFRange, searchOptions:CFStringCompareFlags, result:c.POINTER[CFRange]) -> Boolean: ...
