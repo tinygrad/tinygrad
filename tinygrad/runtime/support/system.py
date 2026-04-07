@@ -4,7 +4,7 @@ from tinygrad.helpers import round_up, getenv, OSX, temp, ceildiv, unwrap, fetch
 from tinygrad.runtime.autogen import libc, pci, vfio, iokit, corefoundation
 from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface, HCQBuffer, hcq_filter_visible_devices
 from tinygrad.runtime.support.memory import VirtMapping, AddrSpace, BumpAllocator
-from tinygrad.runtime.support.usb import CustomASM24Controller, ASM24Controller, USBMMIOInterface, asm24_probe_product
+from tinygrad.runtime.support.usb import USB3, CustomASM24Controller, ASM24Controller, USBMMIOInterface
 
 MAP_FIXED, MAP_FIXED_NOREPLACE = 0x10, 0x100000
 MAP_LOCKED, MAP_POPULATE, MAP_NORESERVE = 0 if OSX else 0x2000, getattr(mmap, "MAP_POPULATE", 0 if OSX else 0x008000), 0x400
@@ -213,13 +213,9 @@ class PCIDevice:
 class USBPCIDevice(PCIDevice):
   def __init__(self, devpref:str, pcibus:str):
     self.lock_fd = System.flock_acquire(f"{devpref.lower()}_{pcibus.lower()}.lock")
-    self.usb: CustomASM24Controller | ASM24Controller
-    if getenv("MOCKGPU"):
-      self.usb = ASM24Controller()
-    else:
-      product = asm24_probe_product()
-      if DEBUG >= 1: print(f"am usb: product string: {product!r}")
-      self.usb = CustomASM24Controller() if product.startswith("custom") else ASM24Controller()
+    usb = USB3(0xADD1, 0x0001, 0x81, 0x83, 0x02, 0x04)
+    if DEBUG >= 1: print(f"am usb: product string: {usb.product!r}")
+    self.usb: CustomASM24Controller | ASM24Controller = CustomASM24Controller(usb) if usb.is_custom else ASM24Controller(usb)
     self.pcibus, self._bar_info = pcibus, System.pci_setup_usb_bars(self.usb, gpu_bus=4, mem_base=0x10000000, pref_mem_base=(32 << 30))
     self.sram = BumpAllocator(size=0x80000, wrap=False) # asm24 controller sram
 

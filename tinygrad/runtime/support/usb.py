@@ -17,6 +17,15 @@ class USB3:
     self.handle = libusb.libusb_open_device_with_vid_pid(self.ctx, self.vendor, self.dev)
     if not self.handle: raise RuntimeError(f"device {self.vendor:04x}:{self.dev:04x} not found. sudo required?")
 
+    # Read product string descriptor
+    _buf = (ctypes.c_ubyte * 256)()
+    _desc = libusb.struct_libusb_device_descriptor()
+    libusb.libusb_get_device_descriptor(libusb.libusb_get_device(self.handle), ctypes.byref(_desc))
+    _ret = libusb.libusb_get_string_descriptor_ascii(self.handle, _desc.iProduct, _buf, 256)
+    self.product = bytes(_buf[:max(_ret, 0)]).decode("ascii", errors="replace") if _ret > 0 else ""
+    self.is_custom = self.product.startswith("custom")
+    if self.is_custom: self.use_bot = use_bot = True
+
     # Detach kernel driver if needed
     if libusb.libusb_kernel_driver_active(self.handle, 0):
       libusb.libusb_detach_kernel_driver(self.handle, 0)
@@ -168,26 +177,9 @@ class ReadOp: addr:int; size:int # noqa: E702
 @dataclasses.dataclass(frozen=True)
 class ScsiWriteOp: data:bytes; lba:int=0 # noqa: E702
 
-def asm24_probe_product() -> str:
-  """Open ASM2464 USB device briefly to read its product string descriptor, then close."""
-  ctx = ctypes.POINTER(libusb.struct_libusb_context)()
-  if libusb.libusb_init(ctypes.byref(ctx)): raise RuntimeError("libusb_init failed")
-  handle = libusb.libusb_open_device_with_vid_pid(ctx, 0xADD1, 0x0001)
-  if not handle: raise RuntimeError("device add1:0001 not found. sudo required?")
-  try:
-    buf = (ctypes.c_ubyte * 256)()
-    dev = libusb.libusb_get_device(handle)
-    desc = libusb.struct_libusb_device_descriptor()
-    libusb.libusb_get_device_descriptor(dev, ctypes.byref(desc))
-    ret = libusb.libusb_get_string_descriptor_ascii(handle, desc.iProduct, buf, 256)
-    return bytes(buf[:max(ret, 0)]).decode("ascii", errors="replace") if ret > 0 else ""
-  finally:
-    libusb.libusb_close(handle)
-    libusb.libusb_exit(ctx)
-
 class CustomASM24Controller:
-  def __init__(self):
-    self.usb = USB3(0xADD1, 0x0001, 0x81, 0x83, 0x02, 0x04, use_bot=True)
+  def __init__(self, usb:USB3|None=None):
+    self.usb = usb or USB3(0xADD1, 0x0001, 0x81, 0x83, 0x02, 0x04, use_bot=True)
     self._pci_cacheable: list[tuple[int, int]] = []
     self._pci_cache: dict[int, int|None] = {}
 
@@ -298,8 +290,8 @@ class CustomASM24Controller:
 
 
 class ASM24Controller:
-  def __init__(self):
-    self.usb = USB3(0xADD1, 0x0001, 0x81, 0x83, 0x02, 0x04, use_bot=bool(getenv("USE_BOT", 0)))
+  def __init__(self, usb:USB3|None=None):
+    self.usb = usb or USB3(0xADD1, 0x0001, 0x81, 0x83, 0x02, 0x04, use_bot=bool(getenv("USE_BOT", 0)))
     self._cache: dict[int, int|None] = {}
     self._pci_cacheable: list[tuple[int, int]] = []
     self._pci_cache: dict[int, int|None] = {}
