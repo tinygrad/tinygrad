@@ -168,6 +168,23 @@ class ReadOp: addr:int; size:int # noqa: E702
 @dataclasses.dataclass(frozen=True)
 class ScsiWriteOp: data:bytes; lba:int=0 # noqa: E702
 
+def asm24_probe_product() -> str:
+  """Open ASM2464 USB device briefly to read its product string descriptor, then close."""
+  ctx = ctypes.POINTER(libusb.struct_libusb_context)()
+  if libusb.libusb_init(ctypes.byref(ctx)): raise RuntimeError("libusb_init failed")
+  handle = libusb.libusb_open_device_with_vid_pid(ctx, 0xADD1, 0x0001)
+  if not handle: raise RuntimeError("device add1:0001 not found. sudo required?")
+  try:
+    buf = (ctypes.c_ubyte * 256)()
+    dev = libusb.libusb_get_device(handle)
+    desc = libusb.struct_libusb_device_descriptor()
+    libusb.libusb_get_device_descriptor(dev, ctypes.byref(desc))
+    ret = libusb.libusb_get_string_descriptor_ascii(handle, desc.iProduct, buf, 256)
+    return bytes(buf[:max(ret, 0)]).decode("ascii", errors="replace") if ret > 0 else ""
+  finally:
+    libusb.libusb_close(handle)
+    libusb.libusb_exit(ctx)
+
 class CustomASM24Controller:
   def __init__(self):
     self.usb = USB3(0xADD1, 0x0001, 0x81, 0x83, 0x02, 0x04, use_bot=True)
