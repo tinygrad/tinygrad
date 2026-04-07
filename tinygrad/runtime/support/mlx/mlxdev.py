@@ -1,6 +1,6 @@
 from __future__ import annotations
 import struct, random, socket, ctypes, functools, itertools
-from tinygrad.helpers import getenv, wait_cond, round_up, next_power2, ceildiv, DEBUG, hi32, lo32
+from tinygrad.helpers import getenv, wait_cond, round_up, next_power2, ceildiv, DEBUG, hi32, lo32, to_be32, to_be64
 from tinygrad.runtime.support.memory import BumpAllocator
 from tinygrad.runtime.support.system import PCIDevice
 from tinygrad.runtime.autogen import mlx5, pci
