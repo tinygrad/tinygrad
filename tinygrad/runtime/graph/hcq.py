@@ -144,7 +144,8 @@ class HCQGraph(MultiGraphRunner):
       self.last_j[enqueue_queue] = j
 
     # Check which signals are used in the profile graph.
-    self.prof_signal_is_used = [any(ent.st_id == j or ent.en_id == j for ent in self.prof_graph_entries) for j in range(len(self.jit_cache) * 2)]
+    sig_used_ids = {sid for ent in self.prof_graph_entries for sid in (ent.st_id, ent.en_id)}
+    self.prof_signal_is_used = [j in sig_used_ids for j in range(len(self.jit_cache) * 2)]
 
     # Build hardware queues.
     self.copy_to_devs: dict[HCQCompiled, set[HCQCompiled]] = {dev: set() for dev in self.devices}
