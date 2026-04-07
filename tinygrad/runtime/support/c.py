@@ -1,7 +1,6 @@
 from __future__ import annotations
 import ctypes, functools, os, pathlib, re, struct, sys, sysconfig
 from tinygrad.helpers import ceildiv, getenv, unwrap, DEBUG, OSX, WIN
-from _ctypes import Array as _CArray, _SimpleCData, _Pointer
 from typing import TYPE_CHECKING, get_type_hints, get_args, get_origin, overload, Annotated, Any, Generic, Iterable, ParamSpec, TypeVar
 
 def _do_ioctl(__idir, __base, __nr, __struct, __fd, *args, __payload=None, **kwargs):
@@ -34,22 +33,22 @@ if TYPE_CHECKING:
   from _ctypes import _CData
   class Array(Generic[T, U], _CData):
     @overload
-    def __getitem__(self: Array[_SimpleCData[V], Any], key: int) -> V: ...
+    def __getitem__(self: Array[ctypes._SimpleCData[V], Any], key: int) -> V: ...
     @overload
     def __getitem__(self: Array[T, Any], key: slice) -> list[T]: ...
     @overload
     def __getitem__(self: Array[T, Any], key: int) -> T: ...
     def __getitem__(self, key) -> Any: ...
     @overload
-    def __setitem__(self: Array[_SimpleCData[V], Any], key: int, val: V): ...
+    def __setitem__(self: Array[ctypes._SimpleCData[V], Any], key: int, val: V): ...
     @overload
     def __setitem__(self: Array[T, Any], key: int, val: T): ...
     @overload
     def __setitem__(self: Array[T, Any], key: slice, val: Iterable[T]): ...
     def __setitem__(self, key, val): ...
-  class POINTER(Generic[T], _Pointer): ...
+  class POINTER(Generic[T], ctypes._Pointer): ...
   class CFUNCTYPE(Generic[T, P], _CFunctionType): ...
-  class Enum(_SimpleCData):
+  class Enum(ctypes._SimpleCData):
     @classmethod
     def get(cls, val:int, default="unknown") -> str: ...
     @classmethod
@@ -80,10 +79,6 @@ else:
       return val
   def pointer(obj): return ctypes.pointer(obj)
 
-def i2b(i:int, sz:int) -> bytes: return i.to_bytes(sz, sys.byteorder)
-def b2i(b:bytes) -> int: return int.from_bytes(b, sys.byteorder)
-def mv(st) -> memoryview: return memoryview(st).cast('B')
-
 class Struct(ctypes.Structure):
   def __init__(self, *args, **kwargs):
     ctypes.Structure.__init__(self)
@@ -91,34 +86,34 @@ class Struct(ctypes.Structure):
     for f,v in [*zip((rf[0] for rf in self._real_fields_), args), *kwargs.items()]: setattr(self, f, v)
 
 def record(cls) -> type[Struct]:
-  struct = type(cls.__name__, (Struct,), {'_fields_': [('_mem_', ctypes.c_byte * cls.SIZE)]})
-  _pending_records.append((cls, struct, unwrap(sys._getframe().f_back).f_globals))
-  return struct
+  newcls = type(cls.__name__, (Struct,), {'_fields_': [('_mem_', ctypes.c_byte * cls.SIZE)]})
+  _pending_records.append((cls, newcls, unwrap(sys._getframe().f_back).f_globals))
+  return newcls
 
 def init_records() -> None:
-  for cls, struct, ns in _pending_records:
-    setattr(struct, '_real_fields_', [])
+  for cls, newcls, ns in _pending_records:
+    setattr(newcls, '_real_fields_', [])
     for nm, t in get_type_hints(cls, globalns=ns, include_extras=True).items():
-      if t.__origin__ in (bool, bytes, str, int, float): setattr(struct, nm, Field(*(f:=t.__metadata__)))
-      else: setattr(struct, nm, Field(*(f:=(del_an(t.__origin__), *t.__metadata__))))
-      struct._real_fields_.append((nm,) + f) # type: ignore
+      if t.__origin__ in (bool, bytes, str, int, float): setattr(newcls, nm, Field(*(f:=t.__metadata__)))
+      else: setattr(newcls, nm, Field(*(f:=(del_an(t.__origin__), *t.__metadata__))))
+      newcls._real_fields_.append((nm,) + f) # type: ignore
   _pending_records.clear()
 
 class Field(property):
   def __init__(self, typ, off:int, bit_width=None, bit_off=0):
     if bit_width is not None:
       sl, set_mask = slice(off,off+(sz:=ceildiv(bit_width+bit_off, 8))), ~((mask:=(1 << bit_width) - 1) << bit_off)
+      def b2i(b): return int.from_bytes(memoryview(b).cast("B")[sl], sys.byteorder)
+      def bset(self, v): memoryview(self).cast("B")[sl] = ((b2i(self) & set_mask) | v << bit_off).to_bytes(sz, sys.byteorder)
       # FIXME: signedness
-      super().__init__(lambda self: (b2i(mv(self)[sl]) >> bit_off) & mask,
-                       lambda self,v: mv(self).__setitem__(sl, i2b((b2i(mv(self)[sl]) & set_mask) | (v << bit_off), sz)))
+      super().__init__(lambda self: b2i(self) >> bit_off & mask, bset)
     else:
-      if issubclass(typ, (ctypes._CFuncPtr, Struct)) or not isinstance(fmt:=typ._type_, str):
-        sl = slice(off, off + ctypes.sizeof(typ))
+      if not isinstance(fmt:=getattr(typ, '_type_', None), str):
         def objset(self, v):
           if hasattr(v, '_objects') and hasattr(self, '_objects_'): self._objects_[off] = {'_self_': v, **(v._objects or {})}
-          mv(self).__setitem__(sl, bytes(v if isinstance(v, typ) else typ(v)))
-        super().__init__(lambda self: getattr(v:=typ.from_buffer(mv(self), off), "value", v), objset)
-      else: super().__init__(lambda self: struct.unpack_from(fmt, mv(self), off)[0], lambda self,v: struct.pack_into(fmt, mv(self), off, v))
+          memoryview(self).cast("B")[off:off+ctypes.sizeof(typ)] = memoryview(v if isinstance(v, typ) else typ(v)).cast("B")
+        super().__init__(lambda self: getattr(v:=typ.from_buffer(self, off), "value", v), objset)
+      else: super().__init__(lambda self: struct.unpack_from(fmt, self, off)[0], lambda self,v: struct.pack_into(fmt, self, off, v))
     self.offset = off
 
 @functools.cache
