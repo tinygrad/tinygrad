@@ -1,33 +1,32 @@
 import collections, time
 from typing import Any, cast
-from tinygrad.helpers import round_up, PROFILE, ALL2ALL, merge_dicts, getenv, dedup, suppress_finalizing, TracingKey
+from tinygrad.helpers import round_up, PROFILE, ALL2ALL, merge_dicts, getenv, suppress_finalizing, TracingKey, unwrap
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQSignal, HCQBuffer, HWQueue, HCQArgsState, BumpAllocator, MMIOInterface
 from tinygrad.device import Buffer, BufferSpec, Compiled, Device, ProfileGraphEntry, ProfileGraphEvent
 from tinygrad.dtype import dtypes
-from tinygrad.uop.ops import UOp, Variable
-from tinygrad.engine.realize import ExecItem, BufferXfer, CompiledRunner, BufferCopy
-from tinygrad.engine.jit import MultiGraphRunner
+from tinygrad.uop.ops import UOp, Ops, Variable
+from tinygrad.engine.realize import BufferXfer, CompiledRunner, BufferCopy
+from tinygrad.engine.jit import GraphRunner, MultiGraphRunner
 
 class HCQGraph(MultiGraphRunner):
-  def __init__(self, jit_cache: list[ExecItem], input_buffers: list[Buffer], var_vals: dict[str, int],
-               orig_valid_positions: dict[int, set[int]]|None = None):
-    super().__init__(jit_cache, input_buffers, var_vals, orig_valid_positions)
-    self.devices = list(set(cast(HCQCompiled, d) for ji in jit_cache for d in [Device[cast(Buffer, x).device] for x in ji.bufs]))
+  def __init__(self, *args, **kwargs):
+    super().__init__(*args, **kwargs)
+    self.devices = list(set(cast(HCQCompiled, d) for ji in self.jit_cache for d in [Device[cast(Buffer, x).device] for x in ji.bufs]))
 
     # CPU Device is always last
     self.devices = sorted(self.devices, key=lambda x: 1 if x._is_cpu() else 0)
 
     # Replace input buffers with variables.
-    self.hcq_bufs = [[cast(Buffer, x)._buf for x in ji.bufs] for ji in jit_cache]
+    self.hcq_bufs = [[cast(Buffer, x)._buf for x in ji.bufs] for ji in self.jit_cache]
     self.input_replace_to_var: dict[tuple[int, int], Variable] = {}
 
     for (j,i), input_idx in self.input_replace.items():
       x = self.input_replace_to_var.setdefault((j,i), UOp.variable(f"input_{input_idx}", 0, 0xffffffffffffffff, dtype=dtypes.uint64))
-      self.hcq_bufs[j][i] = HCQBuffer(x, self.hcq_bufs[j][i].size, image=self.hcq_bufs[j][i].image) # Create fake buffer with variable
+      self.hcq_bufs[j][i] = HCQBuffer(x, self.hcq_bufs[j][i].size) # Create fake buffer with variable
 
     # Allocate kernel args.
     kernargs_size: dict[Compiled, int] = collections.defaultdict(int)
-    for ji in jit_cache:
+    for ji in self.jit_cache:
       if not isinstance(ji.prg, CompiledRunner): continue
       kernargs_size[ji.prg.dev] += round_up(ji.prg._prg.kernargs_alloc_size, 16)
     self.kernargs_bufs: dict[Compiled, HCQBuffer] = {d:d.allocator._alloc(max(sz, 1), BufferSpec(cpu_access=True)) for d,sz in kernargs_size.items()}
@@ -36,7 +35,7 @@ class HCQGraph(MultiGraphRunner):
     self.ji_args: dict[int, HCQArgsState] = {}
 
     kargs_alloc: dict[Compiled, BumpAllocator] = {dev:BumpAllocator(buf.size) for dev,buf in self.kernargs_bufs.items()}
-    for j,ji in enumerate(jit_cache):
+    for j,ji in enumerate(self.jit_cache):
       if not isinstance(ji.prg, CompiledRunner): continue
 
       argsbuf = self.kernargs_bufs[ji.prg.dev].offset(kargs_alloc[ji.prg.dev].alloc(ji.prg._prg.kernargs_alloc_size, 16))
@@ -49,7 +48,7 @@ class HCQGraph(MultiGraphRunner):
     # compute queue to ensure exclusive access. The compute queue signals the completion of the graph, synchronizing with the device's copy queue.
     self.ji_schedule: dict[int, tuple[HCQCompiled, HWQueue, list, list, HCQSignal, int|None]] = {}
 
-    self.comp_queues: dict[HCQCompiled, HWQueue] = {dev: dev.hw_compute_queue_t() for dev in self.devices}
+    self.comp_queues: dict[HCQCompiled, HWQueue] = {dev: unwrap(dev.hw_compute_queue_t)() for dev in self.devices}
     self.copy_queues: dict[tuple[HCQCompiled, int], HWQueue] = {} # lazy allocation, keyed by (device, queue_idx)
     self.num_copy_queues: int = getenv("HCQ_NUM_SDMA", min(len(self.devices), 8) if ALL2ALL >= 1 else 1)
 
@@ -73,7 +72,7 @@ class HCQGraph(MultiGraphRunner):
     self.input_replace_map: dict[HCQCompiled, set[int]] = collections.defaultdict(set)
     self.device_vars: dict[HCQCompiled, dict[str, int]] = {}
 
-    for j,ji in enumerate(jit_cache):
+    for j,ji in enumerate(self.jit_cache):
       if is_exec_prg:=isinstance(ji.prg, CompiledRunner): enqueue_dev: HCQCompiled = ji.prg.dev
       else:
         # For copy ops prioritize enqeueuing on the dest device, so reverse the buffers.
@@ -138,7 +137,7 @@ class HCQGraph(MultiGraphRunner):
       last_j[enqueue_queue] = j
 
     # Check which signals are used in the profile graph.
-    self.prof_signal_is_used = [any(ent.st_id == j or ent.en_id == j for ent in self.prof_graph_entries) for j in range(len(jit_cache) * 2)]
+    self.prof_signal_is_used = [any(ent.st_id == j or ent.en_id == j for ent in self.prof_graph_entries) for j in range(len(self.jit_cache) * 2)]
 
     # Build hardware queues.
     self.copy_to_devs: dict[HCQCompiled, set[HCQCompiled]] = {dev: set() for dev in self.devices}
@@ -146,13 +145,13 @@ class HCQGraph(MultiGraphRunner):
     # Create variable timeline signals for each device.
     timeline_sigaddrs = {dev: UOp.variable(f"timeline_sig_{self.dev_name(dev)}", 0, 0xffffffffffffffff, dtype=dtypes.uint64) for dev in self.devices}
     self.virt_timeline_vals = {dev: UOp.variable(f"timeline_var_{self.dev_name(dev)}", 0, 0xffffffff, dtype=dtypes.uint32) for dev in self.devices}
-    self.virt_timeline_signals = {dev: dev.signal_t(HCQBuffer(timeline_sigaddrs[dev], 16), owner=dev, is_timeline=True) for dev in self.devices}
+    self.virt_timeline_signals = {dev: unwrap(dev.signal_t)(HCQBuffer(timeline_sigaddrs[dev], 16),owner=dev,is_timeline=True) for dev in self.devices}
 
     for dev in self.devices:
       self.comp_queues[dev].memory_barrier().wait(self.virt_timeline_signals[dev], self.virt_timeline_vals[dev]) \
                            .wait(self.signals['KICK'], self.kickoff_var).signal(self.signals[dev], self.kickoff_var)
 
-    for j,ji in enumerate(jit_cache):
+    for j,ji in enumerate(self.jit_cache):
       enqueue_dev, enqueue_queue, sync_signals, deps, signal, signal_val = self.ji_schedule[j]
 
       # Lazy allocate signals
@@ -171,7 +170,7 @@ class HCQGraph(MultiGraphRunner):
         for bufid, src in enumerate(cast(list[Buffer], ji.bufs)):
           if (inprep_idx:=self.input_replace.get((j, bufid))) is not None: self.input_replace_map[enqueue_dev].add(inprep_idx)
           else: cast(HCQAllocator, enqueue_dev.allocator).map(self.hcq_bufs[j][bufid])
-        enqueue_queue.copy(self.hcq_bufs[j][0].va_addr, self.hcq_bufs[j][1].va_addr, dest.nbytes)
+        enqueue_queue.copy(self.hcq_bufs[j][0], self.hcq_bufs[j][1], dest.nbytes)
         self.copy_to_devs[cast(HCQCompiled, Device[dest.device])].add(cast(HCQCompiled, Device[src.device]))
 
       # Encode finish profile timestamp (if needed).
@@ -240,9 +239,9 @@ class HCQGraph(MultiGraphRunner):
     for fdev, buf in self.kernargs_bufs.items(): fdev.allocator._free(buf, BufferSpec(cpu_access=True))
 
   @staticmethod
-  def supports_exec_item(devs:list[Compiled], ei:ExecItem) -> bool:
+  def supports_exec_item(batch_devs:list[Compiled], new_call:UOp) -> bool:
     # Check if all devices are HCQ
-    all_devs = cast(list[HCQCompiled], dedup(devs + [Device[b.device] for b in ei.bufs if b]))
+    all_devs = cast(list[HCQCompiled], GraphRunner._all_devs(batch_devs, new_call))
     if not all(issubclass(type(d), HCQCompiled) for d in all_devs): return False
 
     # If all of devices are mapped into CPU address space, can use CPU inside the peer group.
@@ -251,6 +250,8 @@ class HCQGraph(MultiGraphRunner):
     # Check if all devices are within the same peer group. If CPU is supported, don't count it as a separate peer group.
     if len(set(d.peer_group for d in all_devs if not (cpu_support and d._is_cpu()))) > 1: return False
 
-    # MOCKGPU is not supported, since it can't execute commands in parallel
-    copy = (isinstance(ei.prg, BufferCopy) and cast(HCQCompiled, devs[0]).hw_copy_queue_t is not None) and not getenv("MOCKGPU")
-    return isinstance(ei.prg, (CompiledRunner, BufferXfer)) or copy
+    if new_call.src[0].op is Ops.COPY:
+      # MOCKGPU is not supported, since it can't execute commands in parallel
+      is_xfer = len(set(type(d) for d in all_devs)) == 1 and hasattr(alc:=all_devs[0].allocator, '_transfer') and alc.supports_transfer
+      return is_xfer or (all_devs[0].hw_copy_queue_t is not None and not getenv("MOCKGPU"))
+    return new_call.src[0].op in (Ops.SINK, Ops.PROGRAM)

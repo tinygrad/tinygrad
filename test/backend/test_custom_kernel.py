@@ -1,6 +1,6 @@
 import unittest
 from tinygrad import Tensor, UOp
-from tinygrad.dtype import AddrSpace
+from tinygrad.dtype import AddrSpace, dtypes
 from tinygrad.uop.ops import KernelInfo, AxisType
 
 # **** kernels ****
@@ -282,6 +282,93 @@ class TestCustomKernel(unittest.TestCase):
 
     self.assertIsNotNone(custom_idx, "custom_addmul kernel not found in schedule")
     self.assertEqual(custom_idx, 3, f"custom_addmul should be at index 3, got {custom_idx}")
+
+  def test_anonymous_buffers_in_function(self):
+    """Test that custom kernels with anonymous output buffers work inside @function."""
+    a = Tensor.full((4, 4), 3.).contiguous()
+    b = Tensor.full((4, 4), 2.).contiguous()
+    Tensor.realize(a, b)
+
+    def custom_add_with_tmp(o1:UOp, o2:UOp, A:UOp, B:UOp) -> UOp:
+      o1,o2,A,B = o1.flatten(), o2.flatten(), A.flatten(), B.flatten()
+      i = UOp.range(o1.size, 0)
+      store_o1 = o1[i].store(A[i]+B[i])
+      store_o2 = o2[i].store(A[i]+B[i]+2)
+      return UOp.group(store_o1, store_o2).end(i).sink(arg=KernelInfo(name=f"add_with_tmp_{o1.size}")).simplify()
+
+    from tinygrad import function
+    @function(precompile=True)
+    def run(x:Tensor, w:Tensor) -> Tensor:
+      out = Tensor.invalid(*x.shape, dtype=x.dtype)
+      tmp = Tensor.invalid(*x.shape, dtype=x.dtype)
+      out, tmp = Tensor.custom_kernel(out, tmp, x, w, fxn=custom_add_with_tmp)[:2]
+      return out+tmp
+
+    result = run(a, b).flatten().tolist()
+    expected = (3+2)*2+2
+    assert all(x == expected for x in result), f"expected all {expected}, got {result}"
+
+class TestUOpReduce(unittest.TestCase):
+  def test_uop_sum(self):
+    a = Tensor([1.0, 2, 3, 4, 5])
+    self.assertAlmostEqual(Tensor(a.uop.sum(axis=0)).item(), 15.0)
+
+  def test_uop_sum_2d(self):
+    a = Tensor.arange(6).reshape(2, 3).float()
+    result = Tensor(a.uop.sum(axis=1)).numpy()
+    assert result[0] == 3 and result[1] == 12
+
+  def test_uop_sum_all(self):
+    a = Tensor.arange(6).reshape(2, 3).float()
+    self.assertAlmostEqual(Tensor(a.uop.sum()).item(), 15.0)
+
+  def test_uop_sum_keepdim(self):
+    a = Tensor.arange(6).reshape(2, 3).float()
+    result = Tensor(a.uop.sum(axis=1, keepdim=True))
+    assert result.shape == (2, 1)
+
+  def test_uop_sum_negative_axis(self):
+    a = Tensor.arange(6).reshape(2, 3).float()
+    result = Tensor(a.uop.sum(axis=-1)).numpy()
+    assert result[0] == 3 and result[1] == 12
+
+  def test_uop_sum_multi_axis(self):
+    a = Tensor.arange(24).reshape(2, 3, 4).float()
+    ref = a.sum(axis=(0, 2)).numpy()
+    result = Tensor(a.uop.sum(axis=(0, 2))).numpy()
+    for i in range(3): self.assertAlmostEqual(result[i], ref[i])
+
+  def test_uop_sum_dtype(self):
+    a = Tensor([1.0, 2, 3], dtype=dtypes.float16)
+    result = Tensor(a.uop.sum(axis=0, dtype=dtypes.float32))
+    self.assertEqual(result.dtype, dtypes.float)
+    self.assertAlmostEqual(result.item(), 6.0, places=2)
+
+  def test_uop_prod(self):
+    a = Tensor([1.0, 2, 3, 4, 5])
+    self.assertAlmostEqual(Tensor(a.uop.prod(axis=0)).item(), 120.0)
+
+  def test_uop_max(self):
+    a = Tensor([1.0, 5, 3, 2, 4])
+    self.assertAlmostEqual(Tensor(a.uop.max(axis=0)).item(), 5.0)
+
+  def test_uop_max_2d(self):
+    a = Tensor([[1, 5, 3], [4, 2, 6]]).float()
+    result = Tensor(a.uop.max(axis=0)).numpy()
+    assert result[0] == 4 and result[1] == 5 and result[2] == 6
+
+  def test_uop_std(self):
+    a = Tensor([2.0, 4, 4, 4, 5, 5, 7, 9])
+    self.assertAlmostEqual(Tensor(a.uop.std()).item(), a.std().item(), places=5)
+
+class TestUOpWhere(unittest.TestCase):
+  def test_uop_where_both_const(self):
+    cond = Tensor([True, False, True])
+    result = Tensor(cond.uop.where(1, 0))
+    self.assertEqual(result.tolist(), [1, 0, 1])
+
+    result = Tensor(cond.uop.where(1.5, 0))
+    self.assertEqual(result.tolist(), [1.5, 0, 1.5])
 
 if __name__ == '__main__':
   unittest.main()

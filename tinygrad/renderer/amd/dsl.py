@@ -306,6 +306,9 @@ class Inst:
       elif name in kwargs: vals[name] = kwargs[name]
       else: vals[name] = next(args_iter, None)
     assert not (remaining := list(args_iter)), f"too many positional args: {remaining}"
+    known_field_names = [name for name,field in self._fields if not isinstance(field, FixedBitField)]
+    for name in kwargs:
+      if name not in known_field_names: raise TypeError(f"{self.__class__.__name__}() got an unexpected keyword argument {name!r}")
     # Extract modifiers from Reg objects and merge into neg/abs/opsel
     neg_bits, abs_bits, opsel_bits = 0, 0, 0
     for name, bit in [('src0', 0), ('src1', 1), ('src2', 2)]:

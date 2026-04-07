@@ -75,20 +75,20 @@ class TestHelpers(unittest.TestCase):
   def test_dtype_range(self):
     for dt in core_dtypes:
       if dtypes.is_float(dt):
-        np.testing.assert_equal(dtypes.min(dt), -math.inf)
-        np.testing.assert_equal(dtypes.max(dt), math.inf)
+        np.testing.assert_equal(dt.min, -math.inf)
+        np.testing.assert_equal(dt.max, math.inf)
         np.testing.assert_equal(dt.min, -math.inf)
         np.testing.assert_equal(dt.max, math.inf)
       elif dtypes.is_int(dt):
         info = np.iinfo(_to_np_dtype(dt))
-        np.testing.assert_equal(dtypes.min(dt), info.min)
-        np.testing.assert_equal(dtypes.max(dt), info.max)
+        np.testing.assert_equal(dt.min, info.min)
+        np.testing.assert_equal(dt.max, info.max)
         np.testing.assert_equal(dt.min, info.min)
         np.testing.assert_equal(dt.max, info.max)
       else:
         assert dt == dtypes.bool, dt
-        np.testing.assert_equal(dtypes.min(dt), False)
-        np.testing.assert_equal(dtypes.max(dt), True)
+        np.testing.assert_equal(dt.min, False)
+        np.testing.assert_equal(dt.max, True)
         np.testing.assert_equal(dt.min, False)
         np.testing.assert_equal(dt.max, True)
 
@@ -216,6 +216,23 @@ class TestTypePromotion(unittest.TestCase):
     assert least_upper_dtype(dtypes.fp8e4m3, dtypes.uint64) == dtypes.fp8e4m3
     assert least_upper_dtype(dtypes.fp8e5m2, dtypes.int64) == dtypes.fp8e5m2
     assert least_upper_dtype(dtypes.fp8e5m2, dtypes.uint64) == dtypes.fp8e5m2
+
+  def test_weakint_promo(self):
+    # weakint with itself is weakint
+    assert least_upper_dtype(dtypes.weakint, dtypes.weakint) == dtypes.weakint
+    # weakint is above bool
+    assert least_upper_dtype(dtypes.weakint, dtypes.bool) == dtypes.weakint
+    # weakint defers to any concrete int type
+    assert least_upper_dtype(dtypes.weakint, dtypes.int8) == dtypes.int8
+    assert least_upper_dtype(dtypes.weakint, dtypes.uint8) == dtypes.uint8
+    assert least_upper_dtype(dtypes.weakint, dtypes.int16) == dtypes.int16
+    assert least_upper_dtype(dtypes.weakint, dtypes.int32) == dtypes.int32
+    assert least_upper_dtype(dtypes.weakint, dtypes.int64) == dtypes.int64
+    assert least_upper_dtype(dtypes.weakint, dtypes.uint64) == dtypes.uint64
+    # weakint defers to any float type
+    assert least_upper_dtype(dtypes.weakint, dtypes.float16) == dtypes.float16
+    assert least_upper_dtype(dtypes.weakint, dtypes.float32) == dtypes.float32
+    assert least_upper_dtype(dtypes.weakint, dtypes.float64) == dtypes.float64
 
 class TestTypeSpec(unittest.TestCase):
   def setUp(self):

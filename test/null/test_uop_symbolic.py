@@ -12,13 +12,13 @@ from tinygrad.uop.validate import uops_to_z3
 def check_uop_against_string(self, v:UOp, s:str):
   sym_vars = {v.render():v for v in v.toposort() if v.op in (Ops.DEFINE_VAR, Ops.RANGE, Ops.SPECIAL)}
   s_eval = eval(s, sym_vars)
-  if isinstance(s_eval, int) and v.dtype==dtypes.index: s_eval = UOp.const(dtypes.index, s_eval)
+  if isinstance(s_eval, int) and v.dtype==dtypes.weakint: s_eval = UOp.const(dtypes.weakint, s_eval)
   elif isinstance(s_eval, (bool, int, float)): s_eval = UOp.const(dtypes.from_py(s_eval), s_eval)
   s_eval = graph_rewrite(s_eval, commutative, name="cannonicalize eval")
   self.assertIs(s_eval, v, f"eval did not match simplified: {s_eval} != {v.render()} for {s}")
 
-def Variable(name: str, min_val: ConstType, max_val: ConstType, dtype: DType=dtypes.index): return UOp.variable(name,min_val,max_val,dtype)
-def uconst(val): return UOp.const(dtypes.index, val)
+def Variable(name: str, min_val: ConstType, max_val: ConstType, dtype: DType=dtypes.weakint): return UOp.variable(name,min_val,max_val,dtype)
+def uconst(val): return UOp.const(dtypes.weakint, val)
 def usum(ops): return functools.reduce(lambda x,y: x+y, ops)
 def uand(ops): return functools.reduce(lambda x,y: x*y, ops)
 
@@ -149,6 +149,9 @@ class TestSymbolic(unittest.TestCase):
   def test_xor_0(self):
     self.helper_test_variable(Variable("a", 0, 8, dtypes.int) ^ 0, 0, 8, "a", test_z3=False)
 
+  def test_xor_self_inverse(self):
+    self.helper_test_variable((Variable("a", 0, 8, dtypes.int) ^ 5) ^ 5, 0, 8, "a", test_z3=False)
+
   def test_add_1(self):
     self.helper_test_variable(Variable("a", 0, 8)+1, 1, 9, "(a+1)")
 
@@ -245,12 +248,12 @@ class TestSymbolic(unittest.TestCase):
     self.assertEqual((Variable("x", -10, 0)%Variable("y", 1, 10))._min_max, (-9, 0))
 
   def test_range_div_its_symbolic_bound(self):
-    a = Variable("a", 1, 10, dtypes.index)
+    a = Variable("a", 1, 10, dtypes.weakint)
     ridx0 = UOp.range(a+2, 0)
     self.helper_test_variable(ridx0//(a+2), 0, 0, "0")
 
   def test_range_mod_its_symbolic_bound(self):
-    a = Variable("a", 1, 10, dtypes.index)
+    a = Variable("a", 1, 10, dtypes.weakint)
     ridx = UOp.range(a+2, 0)
     self.helper_test_variable(ridx%(a+2), 0, 11, "r0")
 
@@ -285,6 +288,11 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((7+9*Variable("x",0,2)+9*Variable("y",0,2)+Variable("z",0,2))%10, 3, 9,
                               "(((z+(x*-1))+(y*-1))+7)")
     self.helper_test_variable((10+12*Variable("x",0,2)+Variable("y", 0, 4)%3)%13, 8, 12, "(((x*-1)+(y%3))+10)")
+
+  def test_mod_congruence_tied_remainder(self):
+    # when f%c == c/2, both r and r-c have equal abs — try both signs
+    self.helper_test_variable((3+2*Variable("x",0,1)+3*Variable("y",0,1))%4, 0, 3, "((x*-2)+(y*-1)+3)")
+    self.helper_test_variable((3+6*Variable("x",0,1)+7*Variable("y",0,1))%4, 0, 3, "((x*-2)+(y*-1)+3)")
 
   def test_div_congruence(self):
     self.helper_test_variable((3+3*Variable("a",0,3))//4, 0, 3, "a")
@@ -415,6 +423,10 @@ class TestSymbolic(unittest.TestCase):
 
   def test_and_remove(self):
     self.helper_test_variable(uand([uconst(1), Variable("a", 0, 1)]), 0, 1, "a")
+
+  def test_masked_shr_fold(self):
+    x = UOp.variable('x', 0, 255, dtype=dtypes.uint32)
+    self.helper_test_variable((x & -4) >> 2, 0, 63, "(x>>2)", test_z3=False)
 
   def test_bool_or_not_tautology(self):
     a = Variable("a", 0, 10)
@@ -703,6 +715,18 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((31*b+1)//18, 0, 172, "(((b*13)+1)//18+b)")
     self.helper_test_variable((19*b+3)//7, 0, 271, "(((b*5)+3)//7+(b*2))")
 
+  def test_gcd_with_remainder(self):
+    # gcd_with_remainder: factor GCD out of non-constant terms and denominator
+    a = Variable("a", 0, 2)
+    self.helper_test_variable((a*4)//6, 0, 1, "(a*2//3)")
+    self.helper_test_variable((a*4+1)//6, 0, 1, "(a*2//3)")
+    self.helper_test_variable((a*4+2)//6, 0, 1, "((a*2+1)//3)")
+    self.helper_test_variable((a*4+3)//6, 0, 1, "((a*2+1)//3)")
+    self.helper_test_variable((a*4)%6, 0, 4, "(a*2%3*2)")
+    self.helper_test_variable((a*4+1)%6, 1, 5, "(a*2%3*2+1)")
+    self.helper_test_variable((a*4+2)%6, 0, 4, "((a*2+1)%3*2)")
+    self.helper_test_variable((a*4+3)%6, 1, 5, "((a*2+1)%3*2+1)")
+
   def test_div_by_factor_tie_break(self):
     a = Variable("a", 0, 1)
     b = Variable("b", 0, 1)
@@ -715,6 +739,87 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((19*b+3)%7 + ((19*b+3)//7)*7, 3, 1903, "((b*19)+3)")
     a = Variable("a", 0, 10)
     self.helper_test_variable((25*a+3)%10 + ((25*a+3)//10)*10, 3, 253, "((a*25)+3)")
+
+  def test_mod_nest_by_factor(self):
+    # (a*f+b) % (f*k) = (a%k)*f + b when 0<=b<f — mirrors nest_div_by_factor for MOD
+    gidx0 = Variable("gidx0", 0, 15)
+    lidx0 = Variable("lidx0", 0, 3)
+    # f=4, k=2, c=8: (gidx0*4+lidx0)%8 = (gidx0%2)*4 + lidx0
+    self.helper_test_variable((gidx0*4+lidx0)%8, 0, 7, "(lidx0+gidx0%2*4)")
+    # f=2, k=4: (gidx0*2+lidx0)%8 where lidx0 in [0,1]
+    lidx1 = Variable("lidx1", 0, 1)
+    self.helper_test_variable((gidx0*2+lidx1)%8, 0, 7, "(lidx1+gidx0%4*2)")
+    # f=3, k=3: (a*3+b)%9 where b in [0,2]
+    a = Variable("a", 0, 10)
+    b = Variable("b", 0, 2)
+    self.helper_test_variable((a*3+b)%9, 0, 8, "(b+a%3*3)")
+
+  def test_mod_nest_by_factor_with_const(self):
+    # nest_by_factor MOD with non-zero constant offset: (a*f+b+const) % (f*k) = (a%k)*f + b + const when 0<=b+const<f
+    a = Variable("a", 0, 7)
+    b = Variable("b", 0, 1)
+    # f=4, k=2, const=2: (a*4+b+2)%8 = (a%2)*4 + b + 2
+    self.helper_test_variable((a*4+b+2)%8, 2, 7, "(b+a%2*4+2)")
+    # f=6, k=2, const=3: (a*6+b+3)%12 = (a%2)*6 + b + 3
+    b2 = Variable("b", 0, 2)
+    self.helper_test_variable((a*6+b2+3)%12, 3, 11, "(b+a%2*6+3)")
+    # f=3, k=2, const=1: (a*3+b+1)%6 = (a%2)*3 + b + 1
+    self.helper_test_variable((a*3+b+1)%6, 1, 5, "(b+a%2*3+1)")
+
+  def test_div_nest_by_factor_with_const(self):
+    # nest_by_factor IDIV: (160*a + 5*b + 4*c + K) // 60 should pick div=5 (clean) over div=4 (dirty)
+    a = Variable("a", 0, 2)
+    b = Variable("b", 0, 31)
+    c = Variable("c", 0, 1)
+    self.helper_test_variable((160*a + 5*b + 4*c) // 60, 0, 7, "(a*2+(b+a*8)//12)")
+    self.helper_test_variable((160*a + 5*b + 4*c + 1) // 60, 0, 8, "(a*2+(b+c+a*8)//12)")
+    self.helper_test_variable((160*a + 5*b + 4*c + 2) // 60, 0, 8, "(a*2+(b+c+a*8)//12)")
+    self.helper_test_variable((160*a + 5*b + 4*c + 3) // 60, 0, 8, "(a*2+(b+c+a*8)//12)")
+    self.helper_test_variable((160*a + 5*b + 4*c + 59) // 60, 0, 8, "(a*2+(b+c+a*8+11)//12)")
+
+  def test_div_mod_recombine_after_nesting(self):
+    # when nest_div_by_factor simplifies the div, the mod must also nest so recombine can fire
+    gidx0 = Variable("gidx0", 0, 15)
+    lidx0 = Variable("lidx0", 0, 3)
+    x = gidx0*4+lidx0
+    # div nests: x//8 -> gidx0//2, mod nests: x%8 -> (gidx0%2)*4+lidx0, then recombine gives x back
+    self.helper_test_variable((x//8)*8 + x%8, 0, 63, "(lidx0+gidx0*4)")
+    # with a scaling factor: recombine gives x*2
+    self.helper_test_variable((x//8)*16 + (x%8)*2, 0, 126, "(gidx0*8+lidx0*2)")
+    # two variables with different factors
+    a = Variable("a", 0, 7)
+    b = Variable("b", 0, 1)
+    y = a*6+b
+    # div nests: y//12 -> a//2, mod nests: y%12 -> (a%2)*6+b, recombine
+    self.helper_test_variable((y//12)*12 + y%12, 0, 43, "(b+a*6)")
+
+  def test_div_mod_recombine_after_asymmetric_fold(self):
+    a = Variable("a", 0, 7)
+    b = Variable("b", 0, 14)
+    x = a*15+b
+    # TODO: expected "(b+a*15)"
+    self.helper_test_variable((x//10)*10 + x%10, 0, 119, "(a*10+(a+b//5)//2*10+(b+a*5)%10)")
+    self.helper_test_variable((x//10)*2 + (x//5)%2, 0, 23, "(a*3+b//5)")
+
+  def test_div_mod_recombine_in_additive_sum(self):
+    x = Variable("x", 0, 31)
+    y = Variable("y", 0, 5)
+    # recombine should work inside larger additive sums, not just in the two special y+... tree shapes
+    self.helper_test_variable((x//8)*4 + y + (x//2)%4, 0, 20, "(y+x//2)")
+    self.helper_test_variable(y + (x//8)*4 + (x//2)%4, 0, 20, "(y+x//2)")
+
+  def test_div_mod_recompose_low_order_remainder(self):
+    x = Variable("x", 0, 127)
+    self.helper_test_variable((x//2)%4*2 + x%2, 0, 7, "(x%8)")
+
+  def test_reshape_index_roundtrip(self):
+    # simulate reshape index decompose then recompose — the core pattern this enables
+    # (8,8) decomposed for (16,4): combined=r0*8+r1, div and mod by 4
+    r0 = Variable("r0", 0, 7)
+    r1 = Variable("r1", 0, 7)
+    combined = r0*8+r1
+    src_idx = (combined//4)*4 + combined%4
+    self.helper_test_variable(src_idx, 0, 63, "(r1+r0*8)")
 
   def test_gated_load(self):
     idx = Variable("idx", 0, 24)
@@ -843,7 +948,7 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((numerator//denominator)<=0, 1, 1, "True")
 
   def test_symbolic_range_doesnt_collapse(self):
-    r0 = UOp.range((Variable("a", 1, 10)<5).cast(dtypes.index), 0)
+    r0 = UOp.range((Variable("a", 1, 10)<5).cast(dtypes.weakint), 0)
     self.helper_test_variable(r0, 0, 0, "r0")
 
   def test_const_reciprocal(self):
@@ -861,6 +966,12 @@ class TestSymbolic(unittest.TestCase):
     b = Variable("b", 1, 10, dtypes.int)
     self.assertIn((a.cast(dtypes.long)+b.cast(dtypes.long)).render(), "(long)((a+b))")
     self.assertIn((a.cast(dtypes.long)*b.cast(dtypes.long)).render(), "(long)((a*b))")
+
+  def test_nested_mod_negative_range(self):
+    # (x%(k*c))%c = x%c holds for cmod regardless of signs since sign(x%(k*c)) = sign(x)
+    x = Variable("x", 0, 1575)
+    self.helper_test_variable(((x + (-1064)) % 512) % 4, -3, 3, "((x+-1064)%4)")
+    self.helper_test_variable(((x + (-1064)) % 512) % 128, -127, 127, "((x+-1064)%128)")
 
 class TestSymbolicNumeric(unittest.TestCase):
   def helper_test_numeric(self, f):
@@ -916,6 +1027,12 @@ class TestSymbolicVariables(unittest.TestCase):
     a = Variable("a", 0, 10)
     assert (a * a).variables() == [a]
     assert (a//4 + a//6).variables() == [a]
+
+  def test_variable_min_eq_max_bind_folds(self):
+    b = Variable("x", 1, 1).bind(1)
+    s = b.simplify()
+    self.assertEqual(s.op, Ops.CONST)
+    self.assertEqual(s.arg, 1)
 
 class TestSymInfer(unittest.TestCase):
   def test_sym_infer(self):
@@ -1098,16 +1215,16 @@ class TestInvalidIndex(unittest.TestCase):
     self.assertIs((UOp.invalid()<Variable("a",0,10)).simplify().dtype, dtypes.bool)
 
   def test_alu_invalid_vconst(self):
-    c1 = UOp.const(dtypes.index.vec(4), (1, 1, Invalid, Invalid))
-    c2 = UOp.const(dtypes.index.vec(4), (1, Invalid, 1, 1))
-    self.assertIs((c1+c2).simplify(), UOp.const(dtypes.index.vec(4), (2, Invalid, Invalid, Invalid)))
+    c1 = UOp.const(dtypes.weakint.vec(4), (1, 1, Invalid, Invalid))
+    c2 = UOp.const(dtypes.weakint.vec(4), (1, Invalid, 1, 1))
+    self.assertIs((c1+c2).simplify(), UOp.const(dtypes.weakint.vec(4), (2, Invalid, Invalid, Invalid)))
 
 class TestStoreLoadFolding(unittest.TestCase):
   """Tests for store(index, load(index)) -> NOOP rule. This rule matches patterns that EMERGE during simplification."""
   def test_store_load_folding(self):
     # store(idx, load(idx)) -> NOOP, including emergent patterns like store(idx, load(idx) + 0)
     buf = UOp(Ops.PARAM, dtypes.int.ptr(), arg=0)
-    index = buf.index(UOp.const(dtypes.index, 0))
+    index = buf.index(UOp.const(dtypes.weakint, 0))
     # Direct: store(idx, load(idx)) -> NOOP
     self.assertEqual(graph_rewrite(index.store(index.load()), sym).op, Ops.NOOP)
     # Emergent: store(idx, load(idx) + 0) -> store(idx, load(idx)) -> NOOP
@@ -1146,10 +1263,10 @@ class TestGatedUopGivenValid(unittest.TestCase):
 
     idx0 = (r0 + uconst(-1)) // uconst(3)
     idx1 = r0 % uconst(3)
-    idx:UOp = (r0 < 3).where(UOp(Ops.VECTORIZE, dtypes.index.vec(2), (idx0, idx1)), UOp.invalid())
+    idx:UOp = (r0 < 3).where(UOp(Ops.VECTORIZE, dtypes.weakint.vec(2), (idx0, idx1)), UOp.invalid())
     idx = graph_rewrite(idx, pm_simplify_valid)
     # NOTE: independent simplification: (r0-1)//3 -> 0, r0%3 -> r0 when r0 in [0,2]
-    expected_vec = UOp(Ops.VECTORIZE, dtypes.index.vec(2), (uconst(0), r0))
+    expected_vec = UOp(Ops.VECTORIZE, dtypes.weakint.vec(2), (uconst(0), r0))
     self.assertEqual(idx, (r0 < 3).where(expected_vec, UOp.invalid()))
 
 class TestRangeSplitting(unittest.TestCase):

@@ -73,7 +73,7 @@ class struct___locale_struct(c.Struct):
   __ctype_tolower: Annotated[c.POINTER[Annotated[int, ctypes.c_int32]], 112]
   __ctype_toupper: Annotated[c.POINTER[Annotated[int, ctypes.c_int32]], 120]
   __names: Annotated[c.Array[c.POINTER[Annotated[bytes, ctypes.c_char]], Literal[13]], 128]
-class struct___locale_data(ctypes.Structure): pass
+class struct___locale_data(c.Struct): SIZE = 0
 locale_t: TypeAlias = c.POINTER[struct___locale_struct]
 @dll.bind
 def strcoll_l(__s1:c.POINTER[Annotated[bytes, ctypes.c_char]], __s2:c.POINTER[Annotated[bytes, ctypes.c_char]], __l:locale_t) -> Annotated[int, ctypes.c_int32]: ...

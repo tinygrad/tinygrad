@@ -1,7 +1,6 @@
 # schedule tests that pass on NULL backend (no copyout needed)
 import gc, unittest, time
 from tinygrad import nn, dtypes, Device, Tensor
-from tinygrad.device import is_dtype_supported
 from tinygrad.uop.ops import UOp, Ops, GroupOp, UPat
 from tinygrad.helpers import DEBUG, GlobalCounters, Context
 from tinygrad.engine.realize import CompiledRunner, run_schedule
@@ -510,7 +509,6 @@ class TestSchedule(unittest.TestCase):
     d = (a+b).reshape(16,1)
     check_schedule(d, 0, [c])
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   def test_multi_permute_should_collapse(self):
     a = Tensor.empty(4,4,4,4)
     b = Tensor.empty(16)
@@ -662,6 +660,24 @@ class TestSchedule(unittest.TestCase):
     t = Tensor([1.0, 2.0, 3.0]) ** 8
     self.assertEqual(self._alu_from_tensor(t), [Ops.MUL, Ops.MUL, Ops.MUL])
 
+  def test_any_has_no_alu(self):
+    t = Tensor([True, False, True]).any()
+    self.assertEqual(self._alu_from_tensor(t), [])
+
+  def test_all_has_no_alu(self):
+    t = Tensor([True, False, True]).all()
+    self.assertEqual(self._alu_from_tensor(t), [])
+
+  # TODO: min() should be no ALU ops, like max(). currently it's _inverse().max()._inverse() which adds two negations
+  def test_min_float_has_two_mul(self):
+    t = Tensor([1.0, 2.0, 3.0]).min()
+    self.assertEqual(self._alu_from_tensor(t), [Ops.MUL, Ops.MUL])
+
+  # TODO: min() should be no ALU ops, like max(). currently it's _inverse().max()._inverse() which adds two negations
+  def test_min_int_has_two_xor(self):
+    t = Tensor([1, 2, 3]).min()
+    self.assertEqual(self._alu_from_tensor(t), [Ops.XOR, Ops.XOR])
+
   @unittest.skip("const folding is removed")
   def test_pow_const_tensor_to_zero(self):
     x = Tensor([1,2,3,4])
@@ -746,7 +762,6 @@ class TestSchedule(unittest.TestCase):
     out1 = out0[0] + Tensor.empty(1, )
     check_schedule([r, out0, out1], 3)
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   def test_softmax_upcast(self):
     # input half, softmax in float
     Tensor.manual_seed(0)
@@ -754,15 +769,10 @@ class TestSchedule(unittest.TestCase):
     out = x.softmax(dtype=dtypes.float)
     sched = out.schedule()
     self.assertEqual(len(sched), 3)
-    self.assertEqual(sched[0].bufs[0].dtype, dtypes.float)
-
-    # input float, softmax in float
-    Tensor.manual_seed(0)
-    x = Tensor.randn(4, 12, 64, 64, dtype=dtypes.float).realize()
-    out = x.softmax(dtype=dtypes.float)
-    sched = out.schedule()
-    self.assertEqual(len(sched), 3)
-    self.assertEqual(sched[0].bufs[0].dtype, dtypes.float)
+    # max reduction stays in input dtype (no numerical loss), upcast happens after subtracting max
+    self.assertEqual(sched[0].bufs[0].dtype, dtypes.half)
+    self.assertEqual(sched[1].bufs[0].dtype, dtypes.float)
+    self.assertEqual(sched[2].bufs[0].dtype, dtypes.float)
 
   def test_softmax_backward(self):
     Tensor.manual_seed(0)
@@ -1188,6 +1198,67 @@ class TestBufferView(unittest.TestCase):
     a = Tensor.arange(1000).contiguous().realize()
     b = a.shrink(((200, 800),)).shrink(((0, 300),)).reshape((30, 10)).shrink(((20, 25), (0, 10))).contiguous()
     run_schedule(check_schedule(b, 0))
+
+  def test_shrink_non_shard_axis_is_buffer_view_multi(self):
+    # indexing a non-shard axis of a realized sharded tensor should be BUFFER_VIEW on each device, not copy kernels
+    # this is the flat_llama pattern: weight[layer_idx] where weight is (n_layers, out, dim) sharded on axis=1
+    devices = ("NULL:1", "NULL:2")
+    a = Tensor.arange(8*4*10).reshape(8, 4, 10).contiguous().shard(devices, axis=1).realize()
+    run_schedule(check_schedule(a[3].contiguous(), 0))
+
+  def test_shrink_2d_non_shard_axis_multi(self):
+    devices = ("NULL:1", "NULL:2")
+    a = Tensor.arange(6*4).reshape(6, 4).contiguous().shard(devices, axis=1).realize()
+    run_schedule(check_schedule(a.shrink(((1, 4), None)).contiguous(), 0))
+
+  def test_shrink_shard_axis_0_multi(self):
+    # shrinking a middle dim is not contiguous per shard, so this needs copy kernels
+    devices = ("NULL:1", "NULL:2")
+    a = Tensor.arange(4*6*2).reshape(4, 6, 2).contiguous().shard(devices, axis=0).realize()
+    run_schedule(check_schedule(a.shrink((None, (2, 5), None)).contiguous(), 2))
+
+  def test_reshape_then_shrink_multi(self):
+    devices = ("NULL:1", "NULL:2")
+    a = Tensor.arange(8*6).reshape(8, 6).contiguous().shard(devices, axis=1).realize()
+    run_schedule(check_schedule(a.reshape(4, 2, 6)[1].contiguous(), 0))
+
+  def test_permute_then_shrink_multi(self):
+    # permute makes per-shard view non-contiguous, needs copy kernels
+    devices = ("NULL:1", "NULL:2")
+    a = Tensor.arange(4*6*2).reshape(4, 6, 2).contiguous().shard(devices, axis=1).realize()
+    run_schedule(check_schedule(a.permute(1, 0, 2).shrink(((0, 6), (1, 3), None)).contiguous(), 2))
+
+  def test_multi_buffer_view_4_devices(self):
+    devices = tuple(f"NULL:{i}" for i in range(4))
+    a = Tensor.arange(8*12).reshape(8, 12).contiguous().shard(devices, axis=1).realize()
+    run_schedule(check_schedule(a[5].contiguous(), 0))
+
+  def test_chained_shrink_multi(self):
+    devices = ("NULL:1", "NULL:2")
+    a = Tensor.arange(10*8).reshape(10, 8).contiguous().shard(devices, axis=1).realize()
+    run_schedule(check_schedule(a.shrink(((2, 8), None)).shrink(((1, 4), None)).contiguous(), 0))
+
+  # negative tests: these should NOT become BUFFER_VIEW (non-contiguous per shard)
+  def test_expand_multi_not_buffer_view(self):
+    devices = ("NULL:1", "NULL:2")
+    a = Tensor.arange(4*2).reshape(4, 1, 2).contiguous().shard(devices, axis=2).realize()
+    run_schedule(check_schedule(a.expand(4, 3, 2).contiguous(), 2))
+
+  def test_pad_multi_not_buffer_view(self):
+    devices = ("NULL:1", "NULL:2")
+    a = Tensor.arange(4*2).reshape(4, 2).contiguous().shard(devices, axis=1).realize()
+    run_schedule(check_schedule(a.pad(((1, 1), (0, 0))).contiguous(), 2))
+
+  def test_flip_multi_not_buffer_view(self):
+    devices = ("NULL:1", "NULL:2")
+    a = Tensor.arange(4*2).reshape(4, 2).contiguous().shard(devices, axis=1).realize()
+    run_schedule(check_schedule(a.flip(0).contiguous(), 2))
+
+class TestInvalidTensor(unittest.TestCase):
+  def test_full_invalid_is_zero_kernels(self):
+    from tinygrad.dtype import Invalid
+    t = Tensor.full((4,), Invalid, dtype=dtypes.float)
+    check_schedule(t, 0)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

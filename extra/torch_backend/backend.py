@@ -511,9 +511,8 @@ tiny_backend_out = {**{f"aten.{x}.out":getattr(Tensor,x) for x in simple_tensor_
   "aten.fmod.Tensor_out": lambda input,other: input-input.div(other, rounding_mode="trunc")*other,
   # TODO: this might result in overflow issues
   "aten.round.decimals_out": lambda self,decimals: (self*10**decimals).round()/10**decimals,
-  # TODO: support this in tinygrad
-  "aten.bitwise_left_shift.Tensor_out": lambda x,y: x*(2**y),
-  "aten.bitwise_right_shift.Tensor_out": lambda x,y: x//(2**y),
+  "aten.bitwise_left_shift.Tensor_out": lambda x,y: x<<y,
+  "aten.bitwise_right_shift.Tensor_out": lambda x,y: x>>y,
   # not in tinygrad. are there decomps for these?
   "aten.log1p.out": lambda self: (self+1).log(),
   "aten.expm1.out": lambda self: self.exp() - 1,
@@ -555,11 +554,10 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.remainder.Scalar_Tensor": lambda x,y: x%y,
   "aten.floor_divide": lambda x,y: x//y,
   "aten.floor_divide_.Tensor": lambda x,y: x//y,
-  # TODO: use tinygrad methods, but they require x to be unsigned
-  "aten.__lshift__.Scalar": lambda x,y: x*(2**y),
-  "aten.__ilshift__.Scalar": lambda x,y: x*(2**y),
-  "aten.__rshift__.Scalar": lambda x,y: x//(2**y),
-  "aten.__irshift__.Scalar": lambda x,y: x//(2**y),
+  "aten.__lshift__.Scalar": lambda x,y: x<<y,
+  "aten.__ilshift__.Scalar": lambda x,y: x<<y,
+  "aten.__rshift__.Scalar": lambda x,y: x>>y,
+  "aten.__irshift__.Scalar": lambda x,y: x>>y,
   # inplace ops using replace for fusion
   "aten.zero_": lambda x: x.zeros_like(),
   "aten.fill_.Scalar": lambda x, y: x.full_like(y),
@@ -590,7 +588,7 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.repeat": lambda x,*repeats: Tensor.repeat(x,*repeats).contiguous(), # not a view
   "aten._softmax": lambda self,dim,half_to_float: self.softmax(dim),
   "aten._log_softmax": lambda self,dim,half_to_float: self.log_softmax(dim),
-  "aten.random_": lambda self: Tensor.randint(*self.shape, low=dtypes.min(self.dtype), high=dtypes.max(self.dtype), device=self.device, dtype=self.dtype),
+  "aten.random_": lambda self: Tensor.randint(*self.shape, low=self.dtype.min, high=self.dtype.max, device=self.device, dtype=self.dtype),
   "aten.random_.from": lambda self, from_, to: Tensor.randint(*self.shape, low=from_, high=to, device=self.device, dtype=self.dtype),
   "aten.uniform_": lambda self, low=0, high=1: Tensor.uniform(*self.shape, low=low, high=high, dtype=self.dtype),
   "aten.normal_": lambda self, mean=0, std=1: Tensor.normal(*self.shape, mean=mean, std=std, dtype=self.dtype),

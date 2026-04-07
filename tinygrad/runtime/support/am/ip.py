@@ -411,7 +411,7 @@ class AM_IH(AM_IP):
       self.adev.reg(f"regIH_RB_WPTR{suf}").write(0)
       self.adev.reg(f"regIH_RB_RPTR{suf}").write(0)
 
-      self.adev.reg(f"regIH_DOORBELL_RPTR{suf}").write(offset=(am.AMDGPU_NAVI10_DOORBELL_IH + ring_id) * 2, enable=1)
+      self.adev.reg(f"regIH_DOORBELL_RPTR{suf}").write(enable=0)
 
     if self.adev.ip_ver[am.OSSSYS_HWIP] != (4,4,2):
       self.adev.regIH_STORM_CLIENT_LIST_CNTL.update(client18_is_storm_client=1)
@@ -422,8 +422,15 @@ class AM_IH(AM_IP):
     for _, rwptr_vm, suf, ring_id in self.rings:
       self.adev.reg(f"regIH_RB_CNTL{suf}").update(rb_enable=1, **({'enable_intr': 1} if ring_id == 0 else {}))
 
-    if self.adev.ip_ver[am.NBIO_HWIP][:2] != (7,9):
-      self.adev.soc.doorbell_enable(port=1, awid=0x0, awaddr_31_28_value=0x0, offset=am.AMDGPU_NAVI10_DOORBELL_IH*2, size=2)
+  def drain(self):
+    _, _, suf, _ = self.rings[0]
+    wptr = self.adev.reg(f"regIH_RB_WPTR{suf}").read_bitfields()
+    self.adev.regIH_RB_RPTR.write(wptr['offset'] % (self.ring_size // 4))
+
+    if wptr['rb_overflow']:
+      self.adev.reg(f"regIH_RB_WPTR{suf}").update(rb_overflow=0)
+      self.adev.reg(f"regIH_RB_CNTL{suf}").update(wptr_overflow_clear=1)
+      self.adev.reg(f"regIH_RB_CNTL{suf}").update(wptr_overflow_clear=0)
 
   def interrupt_handler(self):
     _, _, suf, _ = self.rings[0]
@@ -432,11 +439,15 @@ class AM_IH(AM_IP):
 
     while rptr != wptr['offset']:
       entry = [self.ring_view[(rptr + i) % (self.ring_size // 4)] for i in range(8)]
+      rptr = (rptr + 8) % (self.ring_size // 4)
+
       client, src, ring_id, vmid, vmid_type, pasid, node = \
         [getattr(am, f'SOC15_{n}_FROM_IH_ENTRY')(entry) for n in ['CLIENT_ID', 'SOURCE_ID', 'RING_ID', 'VMID', 'VMID_TYPE', 'PASID', 'NODEID']]
       ctx = [getattr(am, f'SOC15_CONTEXT_ID{i}_FROM_IH_ENTRY')(entry) for i in range(4)]
 
       src_name = self.adev.soc.ih_srcs_names.get(client, {}).get(src, '')
+      if src_name in {"SDMA_TRAP", "CP_EOP_INTR"}: continue
+
       print(f"am {self.adev.devfmt}: IH ({rptr:#x}/{wptr['offset']:#x}) client={self.adev.soc.ih_clients.get(client)} src={src_name}({src}) "
             f"ring={ring_id} vmid={vmid}({vmid_type}) pasid={pasid} node={node} ctx=[{ctx[0]:#x}, {ctx[1]:#x}, {ctx[2]:#x}, {ctx[3]:#x}]")
 
@@ -454,14 +465,7 @@ class AM_IH(AM_IP):
         self.adev.is_err_state = True
       else: self.adev.is_err_state = True
 
-      rptr = (rptr + 8) % (self.ring_size // 4)
-
-    if wptr['rb_overflow']:
-      self.adev.reg(f"regIH_RB_WPTR{suf}").update(rb_overflow=0)
-      self.adev.reg(f"regIH_RB_CNTL{suf}").update(wptr_overflow_clear=1)
-      self.adev.reg(f"regIH_RB_CNTL{suf}").update(wptr_overflow_clear=0)
-
-    self.adev.regIH_RB_RPTR.write(wptr['offset'] % (self.ring_size // 4))
+    self.drain()
 
     bif_intr = self.adev.regBIF_BX0_BIF_DOORBELL_INT_CNTL.read_bitfields()
     athub_err, cntlr_err = bif_intr['ras_athub_err_event_interrupt_status'], bif_intr['ras_cntlr_interrupt_status']
@@ -492,7 +496,8 @@ class AM_SDMA(AM_IP):
                                                           inst=inst)
         self.adev.reg(f"regSDMA{pipe}_{self.sdma_name}_CNTL").update(halt=0, **{f"{'th1_' if self.sdma_name == 'F32' else ''}reset":0}, inst=inst)
 
-      self.adev.reg(f"regSDMA{pipe}_CNTL").update(**({'utc_l1_enable':1} if self.adev.ip_ver[am.SDMA0_HWIP] <= (5,2,0) else {}), inst=inst)
+      self.adev.reg(f"regSDMA{pipe}_CNTL").update(trap_enable=1,
+        **({'utc_l1_enable':1} if self.adev.ip_ver[am.SDMA0_HWIP] <= (5,2,0) else {}), inst=inst)
 
     if self.adev.ip_ver[am.NBIO_HWIP] in {(7,9,0), (7,9,1)}:
       for aid_id in range(4):
@@ -516,6 +521,8 @@ class AM_SDMA(AM_IP):
       self.adev.regGRBM_SOFT_RESET.write(0x0)
 
   def setup_ring(self, ring_addr:int, ring_size:int, rptr_addr:int, wptr_addr:int, idx:int) -> int:
+    if self.adev.ip_ver[am.SDMA0_HWIP] >= (5,0,0) and idx > 0: raise RuntimeError(f"am {self.adev.devfmt}: sdma queue {idx} is not available")
+
     pipe, queue = idx // 4, idx % 4
     reg, inst = ("regSDMA_GFX", pipe+queue*4) if self.adev.ip_ver[am.SDMA0_HWIP][:2] == (4,4) else (f"regSDMA{pipe}_QUEUE{queue}", 0)
     doorbell = am.AMDGPU_NAVI10_DOORBELL_sDMA_ENGINE0 + (pipe+queue*4) * 0xA
@@ -539,10 +546,10 @@ class AM_PSP(AM_IP):
   def init_sw(self):
     self.reg_pref = "regMP0_SMN_C2PMSG" if self.adev.ip_ver[am.MP0_HWIP] < (14,0,0) else "regMPASP_SMN_C2PMSG"
 
-    msg1_region = next((reg for reg in self.adev.dma_regions or [] if reg[1].nbytes >= (512 << 10)), None)
-    if msg1_region is not None:
-      self.msg1_addr, self.msg1_view = self.adev.mm.alloc_vaddr(size=msg1_region[1].nbytes, align=am.PSP_1_MEG), msg1_region[1]
-      self.adev.mm.map_range(self.msg1_addr, msg1_region[1].nbytes, [(msg1_region[0],msg1_region[1].nbytes)], AddrSpace.SYS, uncached=True, boot=True)
+    if self.adev.devfmt.startswith("usb:"):
+      self.msg1_view, paddrs = self.adev.pci_dev.alloc_sysmem(512 << 10)
+      self.msg1_addr = self.adev.mm.alloc_vaddr(size=self.msg1_view.nbytes, align=am.PSP_1_MEG)
+      self.adev.mm.map_range(self.msg1_addr, self.msg1_view.nbytes, [(paddrs[0], self.msg1_view.nbytes)], AddrSpace.SYS, uncached=True, boot=True)
     else:
       self.msg1_paddr = self.adev.mm.palloc(am.PSP_1_MEG, align=am.PSP_1_MEG, zero=False, boot=True)
       self.msg1_addr, self.msg1_view = self.adev.paddr2mc(self.msg1_paddr), self.adev.vram.view(self.msg1_paddr, am.PSP_1_MEG, 'B')

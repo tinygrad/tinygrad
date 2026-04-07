@@ -126,7 +126,7 @@ class TestValidateOOB(unittest.TestCase):
       buf0 = UOp(Ops.PARAM, dtypes.int.ptr(16), (), 0)
       buf1 = UOp(Ops.PARAM, dtypes.int.ptr(64), (), 1)
       r = UOp.range(42, 0, AxisType.GLOBAL)
-      ld0 = buf0.index(r.valid(r < 8), ptr=True).load(dtype=dtypes.int).cast(dtypes.index)
+      ld0 = buf0.index(r.valid(r < 8), ptr=True).load(dtype=dtypes.int).cast(dtypes.weakint)
       to_uops_list([buf1.index((ld0 * 2).valid((ld0 >= 0) & (ld0 < 32)), ptr=True).load(dtype=dtypes.int)])  # valid
       with self.assertRaises(RuntimeError):
         to_uops_list([buf1.index((ld0 * 2).valid((ld0 >= 0) & (ld0 < 64)), ptr=True).load(dtype=dtypes.int)])  # oob
@@ -135,7 +135,7 @@ class TestValidateOOB(unittest.TestCase):
     with Context(CHECK_OOB=1, SPEC=2):
       buf_bool = UOp(Ops.PARAM, dtypes.bool.ptr(16), (), 0)
       buf_int = UOp(Ops.PARAM, dtypes.int.ptr(8), (), 1)
-      gidx = UOp(Ops.SPECIAL, dtypes.index, (UOp.const(dtypes.index, 16),), "gidx0")
+      gidx = UOp(Ops.SPECIAL, dtypes.weakint, (UOp.const(dtypes.weakint, 16),), "gidx0")
       ld_bool = buf_bool.index(gidx, ptr=True).load()
       with self.assertRaises(RuntimeError):
         to_uops_list([buf_int.index(gidx.valid(ld_bool), ptr=True).load()])  # gidx 0..15, buf_int size 8

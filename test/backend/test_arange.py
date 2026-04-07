@@ -1,13 +1,14 @@
 import unittest
 import numpy as np
 from tinygrad import Tensor, GlobalCounters, dtypes, nn, Device, Variable
-from tinygrad.helpers import Context, getenv, EMULATE
+from tinygrad.helpers import Context, getenv, DEV
 from tinygrad.engine.realize import run_schedule
 from tinygrad.engine.realize import CompiledRunner, get_program
 from tinygrad.engine.schedule import ExecItem
 from tinygrad.uop.ops import Ops
 from tinygrad.renderer import Estimates
 from tinygrad.renderer.ptx import PTXRenderer
+from test.helpers import needs_second_gpu
 
 class TestArange(unittest.TestCase):
   def _get_flops(self, tensor, desired):
@@ -188,7 +189,34 @@ class TestIndexing(unittest.TestCase):
     for i in idx.flatten().numpy(): expected_grad[i] += 2
     np.testing.assert_allclose(emb.weight.grad.numpy(), expected_grad, rtol=1e-5, atol=1e-5)
 
-  @unittest.skipUnless(Device.DEFAULT == "AMD" or (Device.DEFAULT == "NULL" and EMULATE.value.startswith("AMD")), "tests AMD bf16 cast overhead")
+  @needs_second_gpu
+  @unittest.skipIf(Device.DEFAULT not in ("CPU", "AMD"), "atomics only on AMD/CPU")
+  @Context(USE_ATOMICS=1, SPEC=1)
+  def test_embedding_backward_vocab_sharded(self):
+    from tinygrad.renderer.cstyle import CStyleLanguage
+    if Device.DEFAULT == "CPU" and not isinstance(Device["CPU"].renderer, CStyleLanguage): self.skipTest("CPU needs Clang renderer")
+    devices = (f"{Device.DEFAULT}:0", f"{Device.DEFAULT}:1")
+    vocab_size, embed_size = 1000, 128
+    bs, seqlen = 4, 256
+    idx = Tensor.randint(bs, seqlen, high=vocab_size)
+    emb = nn.Embedding(vocab_size, embed_size)
+    emb.weight = Tensor.ones(vocab_size, embed_size, requires_grad=True)
+    gt = Tensor.zeros(bs, seqlen, embed_size)
+    Tensor.realize(idx, emb.weight, gt)
+    # compute expected grad on single device
+    expected_grad = np.zeros((vocab_size, embed_size), dtype=np.float32)
+    for i in idx.flatten().numpy(): expected_grad[i] += 2
+    # now shard the embedding weight on vocab axis and recompute
+    emb.weight = Tensor.ones(vocab_size, embed_size, requires_grad=True)
+    emb.weight.shard_(devices, axis=0)
+    idx = idx.shard(devices, axis=None)
+    gt = gt.shard(devices, axis=None)
+    Tensor.realize(idx, emb.weight, gt)
+    loss = (emb(idx)-gt).square().sum()
+    loss.backward()
+    np.testing.assert_allclose(emb.weight.grad.numpy(), expected_grad, rtol=1e-5, atol=1e-5)
+
+  @unittest.skipUnless(Device.DEFAULT == "AMD" or (Device.DEFAULT == "NULL" and DEV.arch.startswith("gfx")), "tests AMD bf16 cast overhead")
   def base_test_llama_8b_rope_backward(self, dtype):
     from extra.models.llama import precompute_freqs_cis, apply_rotary_emb
     bs, seqlen, dim, n_heads = 1, 512, 256, 4
@@ -208,7 +236,7 @@ class TestIndexing(unittest.TestCase):
     prg = sched[0].lower().prg.p
     bwd_ops = prg.estimates.ops
     # bfloat16 on non CDNA4 has ~10x ops overhead because of the software emulation
-    if dtype == dtypes.bfloat16 and not Device[Device.DEFAULT].renderer.arch.startswith("gfx950"): ops_scale = 10
+    if dtype == dtypes.bfloat16 and not Device[Device.DEFAULT].renderer.target.arch.startswith("gfx950"): ops_scale = 10
     else: ops_scale = 1
     expected_ops = bs*seqlen*dim*dim*ops_scale
     print(f"rope matmul bwd ({dtype}): {GlobalCounters.kernel_count} kernels, {bwd_ops:,} ops")

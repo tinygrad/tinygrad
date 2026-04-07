@@ -130,7 +130,7 @@ def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False,
           real_nm = ((suggested_name or (f"_anon{'struct' if decl.kind==clang.CXCursor_StructDecl else 'union'}{anoncnt()}"))
                      if clang.clang_Cursor_isAnonymous(decl) else _nm)
           types[_nm] = (tnm:=real_nm.replace(' ', '_').replace('::', '_')), len(fields(t)) != 0, (ln:=len(lines))
-          lines.append(f"class {tnm}(ctypes.{'Structure' if decl.kind==clang.CXCursor_StructDecl else 'Union'}): pass")
+          lines.append(f"class {tnm}(c.Struct): SIZE = 0")
           if typedef:
             lines.append(f"{typedef.replace('::', '_')}: TypeAlias = {tnm}")
             types[typedef] = typedef.replace('::', '_'), True

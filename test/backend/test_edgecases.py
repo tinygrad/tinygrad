@@ -124,21 +124,18 @@ class TestInputValidation(unittest.TestCase):
     with self.assertRaises(RuntimeError):
       Tensor([1, 2, 3]).repeat(-1, 2)
 
-  @unittest.expectedFailure
   def test_negative_weight_decay(self):
     with self.assertRaises(ValueError):
       torch.optim.AdamW([torch.tensor([1.], requires_grad=True)], lr=0.1, weight_decay=-0.1)
     with self.assertRaises(ValueError):
       nn.optim.AdamW([Tensor([1.], requires_grad=True)], lr=0.1, weight_decay=-0.1)
 
-  @unittest.expectedFailure
   def test_negative_lr(self):
     with self.assertRaises(ValueError):
       torch.optim.SGD([torch.tensor([1.], requires_grad=True)], lr=-0.1)
     with self.assertRaises(ValueError):
       nn.optim.SGD([Tensor([1.], requires_grad=True)], lr=-0.1)
 
-  @unittest.expectedFailure
   def test_negative_momentum(self):
     with self.assertRaises(ValueError):
       torch.optim.SGD([torch.tensor([1.], requires_grad=True)], lr=0.1, momentum=-0.1)

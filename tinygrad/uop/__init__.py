@@ -39,6 +39,9 @@ class Ops(FastEnum):
   # vector creation / item selection
   GEP = auto(); VECTORIZE = auto()
 
+  # tuple/gettuple for function with multiple returns
+  TUPLE = auto(); GETTUPLE = auto()
+
   # ** 3 -- load/store **
 
   # INDEX is a BinaryOp similar to ADD, but it operates on pointers
@@ -50,7 +53,7 @@ class Ops(FastEnum):
   # ** 4 -- math **
 
   # tensor core math op, not elementwise
-  WMMA = auto()
+  WMMA = auto(); SHAPED_WMMA = auto()
 
   # UnaryOps
   CAST = auto(); BITCAST = auto(); EXP2 = auto(); LOG2 = auto(); SIN = auto()
@@ -82,7 +85,7 @@ class Ops(FastEnum):
   # ** 6 -- ops that don't exist in programs **
 
   # tensor graph ops
-  UNIQUE = auto(); DEVICE = auto(); ASSIGN = auto()
+  UNIQUE = auto(); DEVICE = auto()
 
   # local unique
   LUNIQUE = auto()
@@ -91,7 +94,7 @@ class Ops(FastEnum):
   CONTIGUOUS = auto(); CONTIGUOUS_BACKWARD = auto(); DETACH = auto()
 
   # buffer ops
-  BUFFERIZE = auto(); COPY = auto(); BUFFER = auto(); BUFFER_VIEW = auto(); MSELECT = auto(); MSTACK = auto(); ENCDEC = auto()
+  BUFFERIZE = auto(); COPY = auto(); BUFFER = auto(); BUFFER_VIEW = auto(); MSELECT = auto(); MSTACK = auto(); CUSTOM_FUNCTION = auto()
 
   # the core 6 movement ops! these only exist in the tensor graph
   RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PAD = auto(); SHRINK = auto(); FLIP = auto()

@@ -292,6 +292,13 @@ class TestSetitem(unittest.TestCase):
     np.testing.assert_allclose(a.numpy(), [4, 6, 8, 10])
     np.testing.assert_allclose(b.numpy(), [0, 2, 4, 6])
 
+  def test_setitem_multiple_disjoint_on_invalid(self):
+    z = Tensor.invalid(10, dtype="int").realize()
+    z[2:5] = 2
+    z[6:7] = 3
+    z.realize()
+    self.assertListEqual(z[2:5].tolist(), [2, 2, 2])
+    self.assertListEqual(z[6:7].tolist(), [3])
 
 class TestWithGrad(unittest.TestCase):
   def test_no_requires_grad_works(self):
