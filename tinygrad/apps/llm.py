@@ -21,7 +21,9 @@ class SimpleTokenizer:
       f"[^\\r\\n{r_p_N}{r_p_L}]?[{r_p_L}]+|[{r_p_N}]{{1,3}}| ?[^{r_ws}{r_p_N}{r_p_L}]+[\\r\\n]*|[{r_ws}]*[\\r\\n]+|[{r_ws}]+(?![^{r_ws}])|[{r_ws}]+")
     self._split_to_sentence = re.compile("|".join(re.escape(tok) for tok in special_tokens.keys()) if special_tokens else r"(?!)")
 
-    self._normal_tokens = {tok.encode(): tid for tok, tid in normal_tokens.items()} if preset == "gemma4" else {bytes(self._byte_decoder[c] for c in tok): tid for tok, tid in normal_tokens.items()}
+    self._normal_tokens = {tok.encode(): tid for tok, tid in normal_tokens.items()} if preset == "gemma4" else {
+      bytes(self._byte_decoder[c] for c in tok): tid for tok, tid in normal_tokens.items()
+    }
     self._special_tokens = special_tokens
     self._tok2bytes = {tid: tok for tok, tid in self._normal_tokens.items()} | {tid: tok.encode() for tok, tid in self._special_tokens.items()}
     self.preset = preset
@@ -32,7 +34,9 @@ class SimpleTokenizer:
     # https://github.com/ggml-org/llama.cpp/blob/94933c8c2eeaa9a7983e3f6c08af76bd86724094/src/llama-vocab.cpp#L1818-L1820
     vocab: typing.Iterable[tuple[str, int]] = ((tok, idx) for idx, tok in enumerate(kv["tokenizer.ggml.tokens"]))
     normal_tokens, special_tokens = partition(vocab, lambda e: kv["tokenizer.ggml.token_type"][e[1]] == 1)
-    return SimpleTokenizer(dict(normal_tokens), dict(special_tokens), kv.get("tokenizer.ggml.pre", kv.get("tokenizer.ggml.model", "llama3")), _get_backend_tokenizer(kv))
+    return SimpleTokenizer(
+      dict(normal_tokens), dict(special_tokens),
+      kv.get("tokenizer.ggml.pre", kv.get("tokenizer.ggml.model", "llama3")), _get_backend_tokenizer(kv))
 
   def _encode_word(self, word:bytes) -> list[int]:
     if (early_token:=self._normal_tokens.get(word)) is not None: return [early_token]
@@ -56,7 +60,8 @@ class SimpleTokenizer:
     return tokens + self._encode_sentence(text[pos:])
 
   def decode(self, ids:list[int]) -> str:
-    return self._backend_tokenizer.decode(ids) if self._backend_tokenizer is not None else b''.join(self._tok2bytes[tid] for tid in ids).decode(errors='replace')
+    if self._backend_tokenizer is not None: return self._backend_tokenizer.decode(ids)
+    return b''.join(self._tok2bytes[tid] for tid in ids).decode(errors='replace')
   def role(self, role:str):
     if self.preset == 'olmo': return self.encode("<|" + role + "|>\n")  # OLMoE Instruct format
     if self.preset == 'qwen2': return self.encode("<|im_start|>" + role + "\n")
@@ -118,7 +123,8 @@ def rms_norm_no_weight(x:Tensor, eps:float) -> Tensor:
   return x * (x.square().mean(axis=-1, keepdim=True) + eps).rsqrt()
 
 def repeat_kv(x:Tensor, n_rep:int) -> Tensor:
-  return x if n_rep == 1 else x.unsqueeze(2).expand(x.shape[0], x.shape[1], n_rep, x.shape[2], x.shape[3]).reshape(x.shape[0], x.shape[1] * n_rep, x.shape[2], x.shape[3])
+  return x if n_rep == 1 else x.unsqueeze(2).expand(
+    x.shape[0], x.shape[1], n_rep, x.shape[2], x.shape[3]).reshape(x.shape[0], x.shape[1] * n_rep, x.shape[2], x.shape[3])
 
 def pairwise_topk(x: Tensor, k: int) -> tuple[Tensor, Tensor]:
   n = x.shape[-1]
@@ -144,30 +150,25 @@ class TransformerConfig:
   num_experts: int = 0
   num_experts_per_tok: int = 0
   norm_topk_prob: bool = False
-  ffn_act: str = "silu"
   sliding_window: int = 0
   sliding_window_pattern: tuple[bool, ...] = ()
   per_layer_input_dim: int = 0
-  embed_scale: float = 1.0
-  per_layer_embed_scale: float = 1.0
-  per_layer_input_scale: float = 1.0
-  per_layer_model_projection_scale: float = 1.0
   final_logit_softcap: float = 0.0
   num_kv_shared_layers: int = 0
-  unscaled_attention: bool = False
+  gemma4: bool = False
   expert_hidden_dim: int = 0
   moe_dense_branch: bool = False
 
 class TransformerBlock:
   def __init__(self, config:TransformerConfig, layer_idx:int):
     self.config = config
-    self.layer_idx = layer_idx
     self.hidden_dim = config.hidden_dim[layer_idx] if isinstance(config.hidden_dim, tuple) else config.hidden_dim
     self.head_dim = config.head_dim[layer_idx] if isinstance(config.head_dim, tuple) else config.head_dim
     self.rope_theta = config.rope_theta[layer_idx] if isinstance(config.rope_theta, tuple) else config.rope_theta
     self.qk_norm = config.qk_norm[layer_idx] if isinstance(config.qk_norm, tuple) else config.qk_norm
     self.n_kv_heads = config.n_kv_heads[layer_idx] if isinstance(config.n_kv_heads, tuple) else config.n_kv_heads
     self.is_sliding = config.sliding_window > 0 and bool(config.sliding_window_pattern) and config.sliding_window_pattern[layer_idx]
+    self.use_alternative_attention = config.moe_dense_branch and not self.is_sliding
     self.store_full_length_kv = False
     self.shared_kv_src_idx: int|None = None
     self.full_kv_cache: Tensor|None = None
@@ -177,14 +178,14 @@ class TransformerBlock:
     kv_proj_out      = self.head_dim * self.n_kv_heads
     self.attn_q      = nn.Linear(config.dim, q_proj_out,  bias=False)
     self.attn_k      = nn.Linear(config.dim, kv_proj_out, bias=False)
-    self.attn_v      = nn.Linear(config.dim, kv_proj_out, bias=False)
+    if not self.use_alternative_attention: self.attn_v = nn.Linear(config.dim, kv_proj_out, bias=False)
     self.attn_output = nn.Linear(q_proj_out, config.dim,  bias=False)
 
     # --- RMSNorms --------------------------------------------------------
     self.attn_norm   = nn.RMSNorm(config.dim, config.norm_eps)
     self.ffn_norm    = nn.RMSNorm(config.dim, config.norm_eps)
     if self.qk_norm: self.attn_q_norm, self.attn_k_norm = nn.RMSNorm(self.qk_norm, config.norm_eps), nn.RMSNorm(self.qk_norm, config.norm_eps)
-    if config.unscaled_attention:
+    if config.gemma4:
       self.post_attention_norm = nn.RMSNorm(config.dim, config.norm_eps)
       self.post_ffw_norm = nn.RMSNorm(config.dim, config.norm_eps)
       self.layer_output_scale = ScalarWeight()
@@ -194,6 +195,8 @@ class TransformerBlock:
       self.post_norm = nn.RMSNorm(config.dim, config.norm_eps)
 
     # --- feed-forward (MoE or dense) -------------------------------------
+    self.ffn_gate_inp: nn.Linear|ScaledLinear
+    self.ffn_down_exps: ExpertWeights|ScaledExpertWeights
     if config.moe_dense_branch or config.num_experts == 0:
       self.ffn_gate    = nn.Linear(config.dim, self.hidden_dim, bias=False)
       self.ffn_up      = nn.Linear(config.dim, self.hidden_dim, bias=False)
@@ -207,13 +210,13 @@ class TransformerBlock:
       self.post_ffw_norm_2 = nn.RMSNorm(config.dim, config.norm_eps)
     elif config.num_experts > 0:
       self.ffn_gate_inp = nn.Linear(config.dim, config.num_experts, bias=False)  # router
-      self.ffn_gate_exps = ExpertWeights(config.num_experts, config.dim, config.hidden_dim)
-      self.ffn_up_exps = ExpertWeights(config.num_experts, config.dim, config.hidden_dim)
-      self.ffn_down_exps = ExpertWeights(config.num_experts, config.hidden_dim, config.dim)
+      self.ffn_gate_exps = ExpertWeights(config.num_experts, config.dim, self.hidden_dim)
+      self.ffn_up_exps = ExpertWeights(config.num_experts, config.dim, self.hidden_dim)
+      self.ffn_down_exps = ExpertWeights(config.num_experts, self.hidden_dim, config.dim)
 
   def _attention(self, x:Tensor, start_pos:int|UOp, shared_kv_cache:Tensor|None=None) -> Tensor:
     x_norm = self.attn_norm(x)                       # (B,T,D)
-    q, k, v = self.attn_q(x_norm), self.attn_k(x_norm), self.attn_v(x_norm)
+    q, k = self.attn_q(x_norm), self.attn_k(x_norm)
     if self.qk_norm and self.qk_norm != self.head_dim: q, k = self.attn_q_norm(q), self.attn_k_norm(k)
 
     B, T, _ = x.shape
@@ -224,9 +227,11 @@ class TransformerBlock:
       k = shared_kv_cache[0, :, :, 0:start_pos+T, :]
       v = shared_kv_cache[1, :, :, 0:start_pos+T, :]
     else:
-      k = k.reshape(B, T, self.n_kv_heads, self.head_dim).transpose(1, 2)  # (B,KvH,T,Hd)
+      raw_k = k.reshape(B, T, self.n_kv_heads, self.head_dim)
+      k = raw_k.transpose(1, 2)  # (B,KvH,T,Hd)
       if self.qk_norm == self.head_dim: k = self.attn_k_norm(k)
-      v = rms_norm_no_weight(v.reshape(B, T, self.n_kv_heads, self.head_dim), self.config.norm_eps).transpose(1, 2)  # (B,KvH,T,Hd)
+      raw_v = raw_k if self.use_alternative_attention else self.attn_v(x_norm).reshape(B, T, self.n_kv_heads, self.head_dim)
+      v = rms_norm_no_weight(raw_v, self.config.norm_eps).transpose(1, 2)  # (B,KvH,T,Hd)
       k = apply_rope(k, self.freqs_cis[start_pos:start_pos+T])
 
       # NOTE: we don't want to change self.cache_kv, the function API doesn't support this well
@@ -244,8 +249,9 @@ class TransformerBlock:
     mask = None
     if resolve(T != 1) or self.is_sliding:
       mask = Tensor.full((1, 1, T, start_pos+T), float("-inf"), dtype=x.dtype, device=x.device).triu(start_pos+1)
-      if self.is_sliding: mask = mask + Tensor.full((1, 1, T, start_pos+T), float("-inf"), dtype=x.dtype, device=x.device).tril(start_pos-self.config.sliding_window)
-    if self.config.unscaled_attention:
+      if self.is_sliding:
+        mask = mask + Tensor.full((1, 1, T, start_pos+T), float("-inf"), dtype=x.dtype, device=x.device).tril(start_pos-self.config.sliding_window)
+    if self.config.gemma4:
       k, v = repeat_kv(k, self.config.n_heads // self.n_kv_heads), repeat_kv(v, self.config.n_heads // self.n_kv_heads)
       attn = ((q @ k.transpose(-1, -2)) + (mask if mask is not None else 0)).softmax(-1) @ v
     else:
@@ -256,16 +262,20 @@ class TransformerBlock:
   def _feed_forward(self, h: Tensor) -> Tensor:
     h_norm = self.ffn_norm(h)
     if self.config.moe_dense_branch:
+      ffn_gate_inp = typing.cast(ScaledLinear, self.ffn_gate_inp)
+      ffn_down_exps = typing.cast(ScaledExpertWeights, self.ffn_down_exps)
       dense = self.post_ffw_norm_1(self.ffn_down((self.ffn_gate(h_norm).gelu().contiguous()) * self.ffn_up(h_norm)))
-      router_probs = (rms_norm_no_weight(h, self.config.norm_eps) * (self.config.dim ** -0.5) * self.ffn_gate_inp.scale) @ self.ffn_gate_inp.weight.transpose(-1, -2)
+      router_probs = (
+        rms_norm_no_weight(h, self.config.norm_eps) * (self.config.dim ** -0.5) * ffn_gate_inp.scale
+      ) @ ffn_gate_inp.weight.transpose(-1, -2)
       vals, sel = pairwise_topk(router_probs.softmax(-1), self.config.num_experts_per_tok)
-      probs = vals / vals.sum(axis=-1, keepdim=True) * self.ffn_down_exps.scale[sel]
+      probs = vals / vals.sum(axis=-1, keepdim=True) * ffn_down_exps.scale[sel]
       x = self.pre_ffw_norm_2(h).unsqueeze(2)
       gate_up = self.ffn_gate_up_exps(sel, x)
       gate, up = gate_up.chunk(2, dim=-1)
-      moe = self.post_ffw_norm_2((self.ffn_down_exps(sel, gate.gelu().contiguous() * up) * probs.unsqueeze(-1)).sum(axis=2))
+      moe = self.post_ffw_norm_2((ffn_down_exps(sel, gate.gelu().contiguous() * up) * probs.unsqueeze(-1)).sum(axis=2))
       return dense + moe
-    if hasattr(self, 'ffn_gate_exps'):
+    if self.config.num_experts > 0:
       x = h_norm.unsqueeze(2)  # (B, T, 1, D) - add expert dim for broadcasting
       logits = self.ffn_gate_inp(h_norm)
       vals, sel = pairwise_topk(logits, self.config.num_experts_per_tok)
@@ -273,7 +283,7 @@ class TransformerBlock:
       x_down = self.ffn_down_exps(sel, self.ffn_gate_exps(sel, x).silu() * self.ffn_up_exps(sel, x))  # (B, T, k, D)
       return (x_down * probs.unsqueeze(-1)).sum(axis=2)  # (B, T, D)
     # TODO: remove the need for this contiguous
-    act = self.ffn_gate(h_norm).gelu() if self.config.ffn_act == "gelu" else self.ffn_gate(h_norm).silu()
+    act = self.ffn_gate(h_norm).gelu() if self.config.gemma4 else self.ffn_gate(h_norm).silu()
     gated  = act.contiguous() * self.ffn_up(h_norm)
     return self.ffn_down(gated)
 
@@ -285,11 +295,13 @@ class TransformerBlock:
     # we pass in the weights implicitly so we unpack the GGUF on the fly
     @function(precompile=True, allow_implicit=True)
     def _run(x:Tensor, start_pos:int|UOp, per_layer_input:Tensor|None=None, shared_kv_cache:Tensor|None=None):
-      h = x + self._attention(x, start_pos, shared_kv_cache) if not hasattr(self, 'post_attention_norm') else x + self.post_attention_norm(self._attention(x, start_pos, shared_kv_cache))
-      h = h + self._feed_forward(h) if not hasattr(self, 'post_ffw_norm') else h + self.post_ffw_norm(self._feed_forward(h))
+      attn = self._attention(x, start_pos, shared_kv_cache)
+      h = x + (self.post_attention_norm(attn) if self.config.gemma4 else attn)
+      ffn = self._feed_forward(h)
+      h = h + (self.post_ffw_norm(ffn) if self.config.gemma4 else ffn)
       if per_layer_input is not None:
         h = h + self.post_norm(self.proj(self.inp_gate(h).gelu() * per_layer_input))
-      if hasattr(self, 'layer_output_scale'): h = h * self.layer_output_scale.weight
+      if self.config.gemma4: h = h * self.layer_output_scale.weight
       return h.contiguous()
     return _run(x, start_pos, per_layer_input, shared_kv_cache)
 
@@ -304,10 +316,10 @@ class Transformer:
       self.per_layer_proj_norm = nn.RMSNorm(config.per_layer_input_dim, config.norm_eps)
       self.per_layer_token_embd = nn.Embedding(config.vocab_size, config.num_blocks * config.per_layer_input_dim)
     self.max_context = config.max_context
-    self.embed_scale = config.embed_scale
-    self.per_layer_embed_scale = config.per_layer_embed_scale
-    self.per_layer_input_scale = config.per_layer_input_scale
-    self.per_layer_model_projection_scale = config.per_layer_model_projection_scale
+    self.embed_scale = config.dim ** 0.5 if config.gemma4 else 1.0
+    self.per_layer_embed_scale = config.per_layer_input_dim ** 0.5 if config.per_layer_input_dim else 1.0
+    self.per_layer_input_scale = 2 ** -0.5
+    self.per_layer_model_projection_scale = config.dim ** -0.5 if config.gemma4 else 1.0
     self.final_logit_softcap = config.final_logit_softcap
     if config.num_kv_shared_layers:
       first_shared = config.num_blocks - config.num_kv_shared_layers
@@ -315,7 +327,8 @@ class Transformer:
                       True: max(i for i in range(first_shared) if config.sliding_window_pattern[i])}
       for idx, block in enumerate(self.blk[:first_shared]):
         if bool(config.sliding_window_pattern) and idx == last_of_type[config.sliding_window_pattern[idx]]: block.store_full_length_kv = True
-      for idx, block in enumerate(self.blk[first_shared:], start=first_shared): block.shared_kv_src_idx = last_of_type[config.sliding_window_pattern[idx]]
+      for idx, block in enumerate(self.blk[first_shared:], start=first_shared):
+        block.shared_kv_src_idx = last_of_type[config.sliding_window_pattern[idx]]
     self._cached_tokens: list[int] = []
     # we specialize the JIT for prefill and rollout
     self.prefill_jit = TinyJit(self.forward)
@@ -326,8 +339,11 @@ class Transformer:
     per_layer_inputs = None
     if hasattr(self, 'per_layer_token_embd'):
       B, T, _ = x.shape
-      per_layer_inputs = self.per_layer_proj_norm((self.per_layer_model_proj(x) * self.per_layer_model_projection_scale).reshape(B, T, len(self.blk), -1))
-      per_layer_inputs = (per_layer_inputs + self.per_layer_token_embd(tokens).float().reshape(B, T, len(self.blk), -1) * self.per_layer_embed_scale) * self.per_layer_input_scale
+      per_layer_inputs = self.per_layer_proj_norm(
+        (self.per_layer_model_proj(x) * self.per_layer_model_projection_scale).reshape(B, T, len(self.blk), -1))
+      per_layer_inputs = (
+        per_layer_inputs + self.per_layer_token_embd(tokens).float().reshape(B, T, len(self.blk), -1) * self.per_layer_embed_scale
+      ) * self.per_layer_input_scale
     for i, block in enumerate(self.blk):
       shared_kv_cache = self.blk[block.shared_kv_src_idx].full_kv_cache if block.shared_kv_src_idx is not None else None
       x = block(x, start_pos, None if per_layer_inputs is None else per_layer_inputs[:,:,i,:], shared_kv_cache)
@@ -360,12 +376,15 @@ class Transformer:
         if 'attn_q.weight' in name: state_dict[name] = state_dict[name].rearrange("(n h two) d -> (n two h) d", n=n_heads, two=2)
         if 'attn_k.weight' in name: state_dict[name] = state_dict[name].rearrange("(n h two) d -> (n two h) d", n=n_kv_heads, two=2)
 
-    hidden_dim = tuple(kv[f'{arch}.feed_forward_length']) if isinstance(kv.get(f'{arch}.feed_forward_length'), list) else kv.get(f'{arch}.expert_feed_forward_length', kv[f'{arch}.feed_forward_length'])
+    hidden_dim = tuple(kv[f'{arch}.feed_forward_length']) if isinstance(kv.get(f'{arch}.feed_forward_length'), list) else (
+      kv[f'{arch}.feed_forward_length'] if arch == 'gemma4' else kv.get(f'{arch}.expert_feed_forward_length', kv[f'{arch}.feed_forward_length']))
     if arch == 'gemma4':
       sliding_window_pattern = tuple(kv[f'{arch}.attention.sliding_window_pattern'])
       n_kv_heads = tuple(n_kv_heads) if isinstance(n_kv_heads, list) else n_kv_heads
-      head_dim = tuple(kv[f'{arch}.attention.key_length_swa'] if is_sliding else kv[f'{arch}.attention.key_length'] for is_sliding in sliding_window_pattern)
-      rope_theta = tuple(kv.get(f'{arch}.rope.freq_base_swa', kv[f'{arch}.rope.freq_base']) if is_sliding else kv[f'{arch}.rope.freq_base'] for is_sliding in sliding_window_pattern)
+      head_dim = tuple(kv[f'{arch}.attention.key_length_swa'] if is_sliding else kv[f'{arch}.attention.key_length']
+                       for is_sliding in sliding_window_pattern)
+      rope_theta = tuple(kv.get(f'{arch}.rope.freq_base_swa', kv[f'{arch}.rope.freq_base']) if is_sliding else kv[f'{arch}.rope.freq_base']
+                         for is_sliding in sliding_window_pattern)
     else:
       sliding_window_pattern = ()
       head_dim = kv.get(f'{arch}.attention.key_length', kv[f'{arch}.embedding_length'] // n_heads)
@@ -377,15 +396,14 @@ class Transformer:
       n_heads=n_heads, n_kv_heads=n_kv_heads, norm_eps=kv[f'{arch}.attention.layer_norm_rms_epsilon'],
       vocab_size=len(kv['tokenizer.ggml.tokens']),
       head_dim=head_dim, rope_theta=rope_theta, max_context=max_context,
-      qk_norm=tuple(head_dim) if arch == 'gemma4' else (int(state_dict['blk.0.attn_q_norm.weight'].shape[0]) if 'blk.0.attn_q_norm.weight' in state_dict else 0),
+      qk_norm=tuple(head_dim) if arch == 'gemma4' else (
+        int(state_dict['blk.0.attn_q_norm.weight'].shape[0]) if 'blk.0.attn_q_norm.weight' in state_dict else 0),
       num_experts=kv.get(f'{arch}.expert_count', 0), num_experts_per_tok=kv.get(f'{arch}.expert_used_count', 0),
-      norm_topk_prob=arch == 'qwen3moe', ffn_act='gelu' if arch == 'gemma4' else 'silu',
+      norm_topk_prob=arch == 'qwen3moe',
       sliding_window=kv.get(f'{arch}.attention.sliding_window', 0), sliding_window_pattern=sliding_window_pattern,
-      per_layer_input_dim=kv.get(f'{arch}.embedding_length_per_layer_input', 0), embed_scale=kv[f'{arch}.embedding_length'] ** 0.5 if arch == 'gemma4' else 1.0,
-      per_layer_embed_scale=kv.get(f'{arch}.embedding_length_per_layer_input', 1) ** 0.5,
-      per_layer_input_scale=2 ** -0.5, per_layer_model_projection_scale=kv[f'{arch}.embedding_length'] ** -0.5 if arch == 'gemma4' else 1.0,
+      per_layer_input_dim=kv.get(f'{arch}.embedding_length_per_layer_input', 0),
       final_logit_softcap=kv.get(f'{arch}.final_logit_softcapping', 0.0), num_kv_shared_layers=kv.get(f'{arch}.attention.shared_kv_layers', 0),
-      unscaled_attention=arch == 'gemma4', expert_hidden_dim=kv.get(f'{arch}.expert_feed_forward_length', 0),
+      gemma4=arch == 'gemma4', expert_hidden_dim=kv.get(f'{arch}.expert_feed_forward_length', 0),
       moe_dense_branch=arch == 'gemma4' and kv.get(f'{arch}.expert_count', 0) > 0)
     model = Transformer(config)
     nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused
@@ -429,7 +447,6 @@ models = {
   "qwen3:8b": "https://huggingface.co/Qwen/Qwen3-8B-GGUF/resolve/main/Qwen3-8B-Q4_K_M.gguf",
   "qwen3:30b-a3b": "https://huggingface.co/Qwen/Qwen3-30B-A3B-GGUF/resolve/main/Qwen3-30B-A3B-Q4_K_M.gguf",
   "gemma4:e2b-q4": "https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF/resolve/main/gemma-4-E2B-it-Q4_K_M.gguf",
-  "gemma4:e2b-q8": "https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF/resolve/main/gemma-4-E2B-it-Q8_0.gguf",
   "gemma4:26b-a4b-q4": "https://huggingface.co/unsloth/gemma-4-26B-A4B-it-GGUF/resolve/main/gemma-4-26B-A4B-it-UD-Q4_K_M.gguf",
   "olmoe": "https://huggingface.co/allenai/OLMoE-1B-7B-0924-Instruct-GGUF/resolve/main/olmoe-1b-7b-0924-instruct-q4_k_m.gguf",
 }

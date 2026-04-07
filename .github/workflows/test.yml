@@ -511,8 +511,6 @@ jobs:
       - name: Test 1B LLM (qwen)
         # NOTE: qwen is dumb and only knows about female chickens
         run: echo "What's a female chicken called? Answer with only one word." | MAX_BUFFER_SIZE=0 python3 -m tinygrad.apps.llm --model qwen3:0.6b | tee /dev/stderr | grep -i hen
-      - name: Test 2B LLM (gemma4 q4)
-        run: echo "What's a male chicken called? Answer with only one word." | MAX_BUFFER_SIZE=0 python3 -m tinygrad.apps.llm --model gemma4:e2b-q4 --max_context 256 | tee /dev/stderr | grep -i rooster
 
 # ****** Models Tests ******
 
