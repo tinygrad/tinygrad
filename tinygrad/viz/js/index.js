@@ -408,7 +408,7 @@ async function renderProfiler(path, opts) {
   canvas.addEventListener("wheel", e => (e.stopPropagation(), e.preventDefault()), { passive:false });
   const ctx = canvas.getContext("2d");
   const canvasTop = rect(canvas).top;
-  // event name maps to shape color and colored name
+  // map event name to shape and label colors
   const colorMap = new Map(), coloredNames = new Map();
   // map shapes by event key
   const shapeMap = new Map();
