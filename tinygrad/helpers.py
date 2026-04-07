@@ -4,7 +4,7 @@ START_TIME = time.perf_counter()
 import os, functools, platform, re, contextlib, operator, hashlib, pickle, sqlite3, tempfile, pathlib, string, ctypes, sys, gzip, getpass, gc
 from collections import defaultdict
 import subprocess, shutil, math, types, copyreg, inspect, importlib, decimal, itertools
-from dataclasses import dataclass, field, replace, asdict
+from dataclasses import dataclass, field, replace
 from typing import ClassVar, Iterable, Any, TypeVar, Callable, Sequence, TypeGuard, Iterator, Generic, Generator, cast, overload
 
 T = TypeVar("T")
@@ -179,13 +179,19 @@ class Target:
   device: str = ""
   renderer: str = ""
   arch: str = ""
+  interface: str = ""
 
   @staticmethod
   def parse(s:str) -> Target:
-    parts = [x.upper() if i < 2 else x for i,x in enumerate(s.split(':'))]
-    assert len(parts) <= 3, f"too many colons in target string: {s!r}"
-    return Target(*parts)
-  def __repr__(self) -> str: return re.sub(":*$", "", ":".join(asdict(self).values()))
+    if len(iface_split:=s.split('+')) == 2: iface, s = iface_split
+    elif len(iface_split) > 2: raise RuntimeError(f"too many '+' in target string: {s!r}")
+    else: iface = ""
+    match [x.upper() if i < 2 else x for i,x in enumerate(s.split(':'))]:
+      case [dev, ren, arch]: return Target(dev, ren, arch, iface)
+      case [dev, ren]: return Target(dev, ren, interface=iface)
+      case [dev]: return Target(dev, interface=iface)
+      case _: raise RuntimeError(f"too many ':' in target string: {s!r}")
+  def __repr__(self): return re.sub(":*$", "", (self.interface + "+" if self.interface else "") + ":".join([self.device, self.renderer, self.arch]))
   # replaces if not already set
   def replacedefault(self, **kwargs) -> Target: return replace(self, **{k:v for k,v in kwargs.items() if not getattr(self, k)})
 

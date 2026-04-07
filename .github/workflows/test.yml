@@ -690,9 +690,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
-      DEV: AMD
+      DEV: PCI+AMD
       MOCKGPU: 1
-      AMD_IFACE: PCI
     steps:
       - name: Checkout Code
         uses: actions/checkout@v6
@@ -705,7 +704,7 @@ jobs:
       - name: Run test_tiny on MOCKAM
         run: python test/test_tiny.py
       - name: Run test_tiny on MOCKAM USB
-        run: GMMU=0 AMD_IFACE=USB python test/test_tiny.py
+        run: GMMU=0 DEV=USB+AMD python test/test_tiny.py
       - name: Run test_hcq on MOCKAM
         run: python -m pytest test/device/test_hcq.py
       - name: Run disk copy tests on MOCKAM
