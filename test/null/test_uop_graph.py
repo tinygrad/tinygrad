@@ -410,7 +410,7 @@ class TestUOpGraph(unittest.TestCase):
       d0 = UOp(Ops.PARAM, dt.ptr(), arg=0)
       v = d0.index(UOp.const(dtypes.int, 0))
       uops = to_uops_list([v.bitcast(dt)])
-      self.assertEqual(len([x for x in uops if x.op is Ops.BITCAST]), 0, f"dtype = {dt}")
+      self.assertEqual(len([x for x in uops if x.op is Ops.BITCAST and x.dtype is dt]), 0, f"dtype = {dt}")
 
   def test_sub_with_cast_folds(self):
     a = Variable("a", 0, 5)
@@ -452,6 +452,28 @@ class TestUOpGraph(unittest.TestCase):
     for u in uops:
       assert u.op is not Ops.WHERE
       if u.op is Ops.LOAD and u.src[0].src[0].op is Ops.PARAM: assert u.src[1].arg == 5
+
+  def test_where_on_casted_gated_load_extra_cond(self):
+    ridx0 = UOp.range(100, 0)
+    d0 = UOp(Ops.PARAM, dtypes.float.ptr(), (), 0)
+    ld = d0.index(ridx0.valid(ridx0<50))
+    w = ((ridx0<50) & (ridx0>30)).where(ld, UOp.const(dtypes.float, 0)).cast(dtypes.half)
+    # prevent ridx0 from being shrunk
+    red = UOp(Ops.REDUCE, dtypes.long, (ridx0.cast(dtypes.long), ridx0), Ops.ADD)
+    uops = to_uops_list([w, red])
+    for u in uops:
+      assert u.op is not Ops.WHERE
+
+  def test_where_on_casted_gated_load_extra_cond_swapped(self):
+    ridx0 = UOp.range(100, 0)
+    d0 = UOp(Ops.PARAM, dtypes.float.ptr(), (), 0)
+    ld = d0.index(ridx0.valid(ridx0<50))
+    w = ((ridx0<50) & (ridx0>30)).where(UOp.const(dtypes.float, 0), ld).cast(dtypes.half)
+    # prevent ridx0 from being shrunk
+    red = UOp(Ops.REDUCE, dtypes.long, (ridx0.cast(dtypes.long), ridx0), Ops.ADD)
+    uops = to_uops_list([w, red])
+    for u in uops:
+      assert u.op is not Ops.WHERE
 
   def test_where_in_store_becomes_gate(self):
     ridx0 = UOp.range(100, 0)
@@ -815,6 +837,117 @@ class TestUOpTags(unittest.TestCase):
     assert g.ssimplify() == 4
     g = graph_rewrite(g, pm_plus_1)
     assert g.ssimplify() == 6
+
+class TestUOpGetItem(unittest.TestCase):
+  def _placeholder(self, shape, dtype=dtypes.half):
+    return UOp.placeholder(shape, dtype, slot=0, addrspace=AddrSpace.LOCAL)
+
+  # full slices (no shrink)
+  def test_full_slice(self):
+    p = self._placeholder((64, 64))
+    self.assertEqual(p[:, :].shape, (64, 64))
+  def test_full_slice_explicit(self):
+    p = self._placeholder((64, 64))
+    self.assertEqual(p[0:64, 0:64].shape, (64, 64))
+
+  # partial slices (shrink)
+  def test_shrink_cols(self):
+    p = self._placeholder((64, 80))
+    self.assertEqual(p[:, :64].shape, (64, 64))
+  def test_shrink_rows(self):
+    p = self._placeholder((80, 64))
+    self.assertEqual(p[:64, :].shape, (64, 64))
+  def test_shrink_both(self):
+    p = self._placeholder((80, 80))
+    self.assertEqual(p[:64, :64].shape, (64, 64))
+  def test_shrink_start(self):
+    p = self._placeholder((64, 64))
+    self.assertEqual(p[8:, :].shape, (56, 64))
+  def test_shrink_start_and_end(self):
+    p = self._placeholder((64, 64))
+    self.assertEqual(p[8:56, 4:60].shape, (48, 56))
+
+  # mixed slice and index
+  def test_index_and_slice(self):
+    p = self._placeholder((64, 80))
+    r = UOp.range(64, 100)
+    result = p[r, :64]
+    self.assertEqual(result.shape, (64,))
+  def test_slice_and_index(self):
+    p = self._placeholder((80, 64))
+    r = UOp.range(64, 100)
+    result = p[:64, r]
+    self.assertEqual(result.shape, (64,))
+  def test_shrink_then_index(self):
+    p = self._placeholder((64, 80))
+    s = p[:, :64]
+    r = UOp.range(64, 100)
+    result = s[r]
+    self.assertEqual(result.shape, (64,))
+
+  # integer index (no slice)
+  def test_int_index(self):
+    p = self._placeholder((64, 64))
+    result = p[0]
+    self.assertEqual(result.shape, (64,))
+
+  # ellipsis
+  def test_ellipsis_all_slices(self):
+    p = self._placeholder((64, 80))
+    self.assertEqual(p[..., :64].shape, (64, 64))
+  def test_ellipsis_with_int(self):
+    p = self._placeholder((64, 80))
+    r = UOp.range(64, 100)
+    result = p[..., r]
+    self.assertEqual(result.op, Ops.INDEX)
+  def test_ellipsis_only(self):
+    p = self._placeholder((64, 64))
+    self.assertEqual(p[...].shape, (64, 64))
+
+  # all slices should not create a bare INDEX
+  def test_all_slices_no_index(self):
+    p = self._placeholder((64, 80))
+    result = p[:, :64]
+    self.assertNotEqual(result.op, Ops.INDEX)
+  def test_all_full_slices_no_index(self):
+    p = self._placeholder((64, 64))
+    result = p[:, :]
+    self.assertNotEqual(result.op, Ops.INDEX)
+
+class TestUOpBroadcast(unittest.TestCase):
+  def test_broadcast_row(self):
+    a = UOp.const(dtypes.float, 1, shape=(4, 8))
+    b = UOp.const(dtypes.float, 2, shape=(4, 1))
+    c = a + b
+    self.assertEqual(c.shape, (4, 8))
+    self.assertEqual(c.op, Ops.ADD)
+
+  def test_broadcast_col(self):
+    a = UOp.const(dtypes.float, 1, shape=(4, 8))
+    b = UOp.const(dtypes.float, 2, shape=(1, 8))
+    c = a + b
+    self.assertEqual(c.shape, (4, 8))
+    self.assertEqual(c.op, Ops.ADD)
+
+  def test_broadcast_lower_dim(self):
+    a = UOp.const(dtypes.float, 1, shape=(4, 8))
+    b = UOp.const(dtypes.float, 2, shape=(8,))
+    c = a * b
+    self.assertEqual(c.shape, (4, 8))
+    self.assertEqual(c.op, Ops.MUL)
+
+  def test_broadcast_scalar(self):
+    a = UOp.const(dtypes.float, 1, shape=(4, 8))
+    c = a * 2
+    self.assertEqual(c.shape, (4, 8))
+    self.assertEqual(c.op, Ops.MUL)
+
+  def test_broadcast_symbolic_same_shape(self):
+    t = Variable("t", 1, 10)
+    a = UOp.const(dtypes.float, 1, shape=(1, 1, t))
+    b = UOp.const(dtypes.float, 2, shape=(1, 1, t))
+    c = a + b
+    self.assertEqual(c.op, Ops.ADD)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

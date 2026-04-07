@@ -485,7 +485,8 @@ class Parser:
         if op == '*' and left.dtype.itemsize == 2 and left.dtype in (dtypes.int16, dtypes.short, dtypes.uint16, dtypes.ushort):
           pdt = dtypes.int if left.dtype in (dtypes.int16, dtypes.short) else dtypes.uint
           left, right = left.cast(pdt), right.cast(pdt)
-        return (left * right) if op == '*' else (left / right)
+        if op == '*': return left * right
+        return (left // right) if dtypes.is_int(left.dtype) else (left / right)
       case '**': return UOp(Ops.EXP2, left.dtype, (right.cast(left.dtype),)) if left.op == Ops.CONST and left.arg == 2.0 else left
 
   _PREC = [('||',), ('&&',), ('|',), ('^',), ('&',), ('==', '!=', '<>'), ('>=', '<=', '>', '<'), ('>>', '<<'), ('+', '-'), ('*', '/'), ('**',)]
@@ -1073,7 +1074,7 @@ def parse_block(lines: list[str], start: int, env: dict[str, VarVal], funcs: dic
           ws = env.get('_wave_size', 32)
           vgpr_idx = _to_u32(rg) * _u32(ws) + _to_u32(ln)
           if assigns is not None:
-            assigns.append((f'VGPR[{_tok_str(lane_toks)}][{_tok_str(reg_toks)}][{hi_val}:{lo_val}]', (vgpr_idx, val, hi_val, lo_val)))
+            assigns.append((f'VGPR[{_tok_str(lane_toks)}][{_tok_str(reg_toks)}][{hi_val}:{lo_val}]', (vgpr_idx, val, _u32(hi_val), _u32(lo_val))))
           i += 1
           continue
         if j < len(toks) and toks[j].type == 'DOT': j += 2  # skip .type suffix

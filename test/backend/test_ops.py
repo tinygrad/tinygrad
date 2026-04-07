@@ -2,7 +2,7 @@ import time, math, unittest, functools, platform, warnings
 import numpy as np
 from typing import List, Callable
 import torch
-from tinygrad.helpers import getenv, IMAGE, DEBUG, CI, Context, CPU_LLVM, AMD_LLVM, EMULATE
+from tinygrad.helpers import getenv, CI, DEBUG, DEV, IMAGE, Context
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.device import is_dtype_supported
@@ -18,7 +18,7 @@ warnings.filterwarnings("ignore", message="Non-empty compiler output encountered
 
 FORWARD_ONLY = getenv("FORWARD_ONLY", 0)
 PRINT_TENSORS = getenv("PRINT_TENSORS", 0)
-COMPILE_ONLY = Device.DEFAULT == "NULL" and not EMULATE
+COMPILE_ONLY = Device.DEFAULT == "NULL"
 
 def slow_test(test_func):
   return unittest.skipIf(getenv("SKIP_SLOW_TEST"), "Skipping slow test")(test_func)
@@ -560,7 +560,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(45,65), (45,65)], lambda x,y: x/y)
     helper_test_op([(), ()], lambda x,y: x/y)
 
-  @unittest.skipIf(Device.DEFAULT == "AMD" and AMD_LLVM, "AMD with LLVM backend generate rcp in FP division causes trunc/floor errors")
+  @unittest.skipIf(Device.DEFAULT == "AMD" and DEV.renderer == "LLVM", "AMD with LLVM backend generate rcp in FP division causes trunc/floor errors")
   def test_div_rounding_mode(self):
     for denominator in [-10, -5, -3, -2, -1, 1, 2, 3, 5, 10]:
       # int numerator
@@ -837,13 +837,31 @@ class TestOps(unittest.TestCase):
     helper_test_op([], lambda: tor.__rshift__(2), lambda: ten.__rshift__(2).cast(dtypes.int32), forward_only=True)
     helper_test_op([], lambda: tor.bitwise_right_shift(2), lambda: ten.rshift(2).cast(dtypes.int32), forward_only=True)
 
+  def test_lshift_signed(self):
+    data = [[-1, -3, 1, 7], [0, -2147483648, 2147483647, -1]]
+    tor = torch.tensor(data, dtype=torch.int32)
+    ten = Tensor(data, dtype=dtypes.int)
+    helper_test_op([], lambda: tor << 0, lambda: ten << 0, forward_only=True)
+    helper_test_op([], lambda: tor << 2, lambda: ten << 2, forward_only=True)
+    helper_test_op([], lambda: tor << 8, lambda: ten << 8, forward_only=True)
+    helper_test_op([], lambda: tor << 31, lambda: ten << 31, forward_only=True)
+
+  def test_rshift_signed(self):
+    data = [[-1, -3, 1, 7], [0, -2147483648, 2147483647, -1]]
+    tor = torch.tensor(data, dtype=torch.int32)
+    ten = Tensor(data, dtype=dtypes.int)
+    helper_test_op([], lambda: tor >> 0, lambda: ten >> 0, forward_only=True)
+    helper_test_op([], lambda: tor >> 2, lambda: ten >> 2, forward_only=True)
+    helper_test_op([], lambda: tor >> 8, lambda: ten >> 8, forward_only=True)
+    helper_test_op([], lambda: tor >> 31, lambda: ten >> 31, forward_only=True)
+
   def test_idiv_shift_rewrite_negative(self):
     a = Tensor(-5).idiv(2).item()
     b = Tensor(-5).contiguous().idiv(2).item()
     self.assertEqual(a, b)
     self.assertEqual(Tensor(-1).contiguous().idiv(4).item(), 0)  # NOTE this is trunc-div behaviour
 
-  @unittest.skipIf(getenv("NV_NAK"), "MUFU.SIN is not accurate enough")
+  @unittest.skipIf(DEV.renderer == "NAK", "MUFU.SIN is not accurate enough")
   def test_sin(self):
     helper_test_op([(45,65)], lambda x: x.sin())
     helper_test_op([()], lambda x: x.sin())
@@ -853,7 +871,7 @@ class TestOps(unittest.TestCase):
       helper_test_op(None, lambda x: x.sin(), vals=[[1e1, 1e2, 1e3, 1e4, 1e5, 1e6, -1e1, -1e2, -1e3, -1e4, -1e5, -1e6]],
                     atol=3e-3, rtol=3e-3, grad_atol=3e-3, grad_rtol=3e-3)
   @unittest.skipIf(Device.DEFAULT == "WEBGPU" and platform.system() == "Windows", "Not accurate enough with DirectX backend")
-  @unittest.skipIf(getenv("NV_NAK"), "MUFU.SIN is not accurate enough")
+  @unittest.skipIf(DEV.renderer == "NAK", "MUFU.SIN is not accurate enough")
   def test_cos(self):
     helper_test_op([(45,65)], lambda x: x.cos())
     helper_test_op([()], lambda x: x.cos())
@@ -862,7 +880,7 @@ class TestOps(unittest.TestCase):
       helper_test_op(None, lambda x: x.cos(), vals=[[1e1, 1e2, 1e3, 1e4, 1e5, 1e6, -1e1, -1e2, -1e3, -1e4, -1e5, -1e6]],
                     atol=3e-3, rtol=3e-3, grad_atol=3e-3, grad_rtol=3e-3)
   @unittest.skipIf(Device.DEFAULT == "WEBGPU" and platform.system() == "Windows", "Not accurate enough with DirectX backend")
-  @unittest.skipIf(getenv("NV_NAK"), "MUFU.SIN is not accurate enough")
+  @unittest.skipIf(DEV.renderer == "NAK", "MUFU.SIN is not accurate enough")
   def test_tan(self):
     # NOTE: backward has much higher diff with input close to pi/2 and -pi/2
     helper_test_op([(45,65)], lambda x: x.tan(), low=-1.5, high=1.5)
@@ -1398,7 +1416,7 @@ class TestOps(unittest.TestCase):
                                                                          np.arange(64,128,dtype=np.float32).reshape(8,8)])
   def test_small_gemm_eye(self):
     helper_test_op(None, lambda x,y: x.matmul(y), lambda x,y: x@y, vals=[np.eye(8).astype(np.float32), np.eye(8).astype(np.float32)])
-  @unittest.skipIf(CI and Device.DEFAULT in ["NV", "CL", "CUDA"] or (Device.DEFAULT == "CPU" and CPU_LLVM) or IMAGE
+  @unittest.skipIf(CI and Device.DEFAULT in ["NV", "CL", "CUDA"] or (Device.DEFAULT == "CPU" and DEV.renderer == "LLVM") or IMAGE
   or (Device.DEFAULT == "WEBGPU" and platform.system() == "Windows"), "not supported on these in CI/IMAGE")
   @unittest.skipIf(Device.DEFAULT == "QCOM", "not precise enough")
   def test_gemm_fp16(self):
@@ -2396,7 +2414,7 @@ class TestOps(unittest.TestCase):
       lambda x,w: torch.nn.functional.conv2d(x,w,stride=2),
       lambda x,w: Tensor.conv2d(x,w,stride=2))
 
-  @unittest.skipUnless(Device.DEFAULT == "CPU" and CPU_LLVM, "DEVECTORIZE=0 only for LLVM")
+  @unittest.skipUnless(Device.DEFAULT == "CPU" and DEV.renderer == "LLVM", "DEVECTORIZE=0 only for LLVM")
   def test_strided_conv2d_simple_vec(self):
     with Context(DEVECTORIZE=0): self.test_strided_conv2d_simple()
 
@@ -2715,9 +2733,9 @@ class TestOps(unittest.TestCase):
       lambda x: Tensor.avg_pool2d(x, kernel_size=(11,28)), rtol=1e-5)
 
   def test_avg_pool3d(self):
-    # TODO: AMD_LLVM has larger atol
-    # TODO: PYTHON=1 backward hangs?
-    atol = 1e-2 if AMD_LLVM else 1e-6
+    # TODO: AMD:LLVM has larger atol
+    # TODO: DEV=PYTHON backward hangs?
+    atol = 1e-2 if DEV.device == "AMD" and DEV.renderer == "LLVM" else 1e-6
     helper_test_op([(1,1,16,16,16)],
       lambda x: torch.nn.functional.avg_pool3d(x, kernel_size=(8,8,8), stride=5, padding=1, count_include_pad=False),
       lambda x: Tensor.avg_pool2d(x, kernel_size=(8,8,8), stride=5, padding=1, count_include_pad=False), atol=atol, rtol=1e-5, forward_only=True)

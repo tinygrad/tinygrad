@@ -67,9 +67,9 @@ def reduce_multi(root:UOp, multi:UOp):
   op, axis = root.arg
   if multi.axis is not None and multi.axis in axis:
     # all-reduce on sharded axes
-    return multi.src[0].r(op, axis).allreduce(op, multi.device)
+    return multi.src[0]._rop(op, axis).allreduce(op, multi.device)
   # reduce on non sharded axes, piecewise is fine. if axis is None this is also correct
-  return multi.src[0].r(op, axis).multi(axis=multi.axis)
+  return multi.src[0]._rop(op, axis).multi(axis=multi.axis)
 
 def reshape_multi(root:UOp, multi:UOp):
   if prod(multi.shape) != prod(new_shape:=root.marg): raise RuntimeError("reshape must maintain prod(shape)")

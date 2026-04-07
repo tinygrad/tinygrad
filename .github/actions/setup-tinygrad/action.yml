@@ -54,7 +54,7 @@ runs:
   steps:
     - name: Set up Python ${{ inputs.python-version }}
       id: setup-python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v6
       with:
         python-version: ${{ inputs.python-version }}
 
@@ -70,7 +70,7 @@ runs:
     - name: Cache Python packages
       if: github.event_name != 'pull_request'
       id: restore-venv
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: ${{ github.workspace }}/.venv
         key: venv-${{ runner.os }}-${{ runner.arch }}-python-${{ steps.setup-python.outputs.python-version }}-${{ inputs.deps }}-${{ inputs.pydeps }}-${{ env.CACHE_VERSION }}
@@ -85,7 +85,7 @@ runs:
         key: downloads-${{ github.job }}-${{ inputs.key }}-${{ env.CACHE_VERSION }}
     - name: Cache downloads
       if: inputs.key != '' && github.event_name != 'pull_request'
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: ${{ runner.os == 'Linux' && '~/.cache/tinygrad/downloads/' || '~/Library/Caches/tinygrad/downloads/' }}
         key: downloads-${{ github.job }}-${{ inputs.key }}-${{ env.CACHE_VERSION }}
@@ -202,7 +202,7 @@ runs:
         key: ${{ runner.os }}-${{ runner.arch }}-apt-${{ steps.apt-pkgs.outputs.hash }}-${{ env.CACHE_VERSION }}
     - name: Cache apt
       if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.cuda == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true') && github.event_name != 'pull_request'
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       with:
         path: /var/cache/apt/archives/
         key: ${{ runner.os }}-${{ runner.arch }}-apt-${{ steps.apt-pkgs.outputs.hash }}-${{ env.CACHE_VERSION }}
@@ -269,7 +269,7 @@ runs:
     - name: Cache gpuocelot
       if: inputs.ocelot == 'true' && github.event_name != 'pull_request'
       id: cache-build
-      uses: actions/cache@v4
+      uses: actions/cache@v5
       env:
         cache-name: cache-gpuocelot-build-1
       with:
@@ -279,7 +279,6 @@ runs:
       if: inputs.ocelot == 'true' && steps.cache-build-pr.outputs.cache-hit != 'true' && steps.cache-build.outputs.cache-hit != 'true'
       shell: bash
       run: |
-        sudo xcode-select -s /Applications/Xcode_16.2.app/Contents/Developer
         git clone --recurse-submodules https://github.com/gpuocelot/gpuocelot.git ${{ github.workspace }}/gpuocelot
         cd ${{ github.workspace }}/gpuocelot/ocelot
         git checkout b16039dc940dc6bc4ea0a98380495769ff35ed99
@@ -288,6 +287,7 @@ runs:
 
         CMAKE_ARGS="-Wno-dev -G Ninja -DOCELOT_BUILD_TOOLS=OFF -DCMAKE_BUILD_ALWAYS=0 -DBUILD_TESTS_CUDA=OFF -DCMAKE_POLICY_VERSION_MINIMUM=3.5"
         if [[ "${{ runner.os }}" == "macOS" ]]; then
+          sudo xcode-select -s /Applications/Xcode_16.2.app/Contents/Developer
           CMAKE_ARGS="$CMAKE_ARGS -DBoost_INCLUDE_DIR=$(brew --prefix boost)/include -DBoost_LIBRARY_DIR=$(brew --prefix boost)/lib"
         fi
 

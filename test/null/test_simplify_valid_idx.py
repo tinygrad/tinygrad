@@ -366,7 +366,7 @@ class TestImageSimplification(unittest.TestCase):
     self.check(load, None, "((gidx*3)+-1438)", "0")
 
   def test_simplify2(self):
-    # from CL=1 DEBUG=4 FORWARD_ONLY=1 IMAGE=2 python3 test/test_ops.py TestOps.test_simple_padding_conv2d
+    # from DEV=CL DEBUG=4 FORWARD_ONLY=1 IMAGE=2 python3 test/test_ops.py TestOps.test_simple_padding_conv2d
     lidx = Special("lidx", 4)
     valid = (lidx<3) & (lidx<1).ne(True)
     idx = ((lidx+1)%2, (lidx+1)//2-1)
@@ -454,23 +454,62 @@ class TestImageSimplification(unittest.TestCase):
     load = get_load_image_uop((32, 1024, 4), valid, (alu0, alu1))
     self.check(load, "(lidx1<7)", "((gidx0*2+lidx1*512+(lidx0*8192+r0*4096)+-11711)//4%1024)", "(lidx0*2+r0+-3)")
 
-class TestUnfoldableImageChannelSelection(unittest.TestCase):
-  def _count_nans(self, load):
-    with Context(NOOPT=1, SPEC=0):
-      result = full_rewrite_to_sink(load.sink()).src[0]
-    return sum(1 for u in result.toposort() if u.op is Ops.CONST and u.arg != u.arg)
+  def test_simplify8(self):
+    # from openpilot compile3, kernel r_4_16_8_16_4_4_3_3n1
+    # valid guarantees A >= 0, so divmod simplifies and gate is removed
+    gidx0 = Special("gidx0", 16)
+    gidx1 = Special("gidx1", 4)
+    lidx0 = Special("lidx0", 8)
+    lidx1 = Special("lidx1", 16)
+    A = gidx0 + gidx1*8192 + lidx0*1024 + lidx1*64 - 1040
+    valid = ((lidx1 < 1).ne(True)) & (((gidx1 + lidx0) < 1).ne(True))
+    load = get_load_image_uop((32, 1024, 4), valid, (A % 1024, A // 1024))
+    self.check(load, None, "(gidx0+lidx1*64+-16)", "(lidx0+gidx1*8+-1)")
 
-  def test_bounded_channel_no_nan(self):
-    # unfoldable image load with bounded idx % 4 range [0,1] -> no NAN fallback needed
-    lidx = Special("lidx", 2)
-    load = UOp(Ops.LOAD, dtypes.float, (UOp(Ops.PARAM, dtypes.imagef((10, 10, 4)), arg=0).index(lidx, ptr=True), UOp.const(dtypes.float, 0)))
-    self.assertEqual(self._count_nans(load), 0)
+  def test_simplify9(self):
+    # from openpilot compile3, kernel r_32_16_8_4_4_7_7 (image 1x16384)
+    # valid guarantees A1 >= 0 and A1 < 512, gate should be removable
+    gidx0 = Special("gidx0", 32)
+    lidx0 = Special("lidx0", 16)
+    lidx1 = Special("lidx1", 8)
+    r0 = Range(0, 7)
+    A1 = lidx0*32 + r0*32 + lidx1*4 - 99
+    valid = ((lidx1 < 1).ne(True)) & ((lidx0 + r0) < 3).ne(True) & ((lidx0 + r0) < 19)
+    alu0 = gidx0 + (A1 % 32)*32 + (A1 // 32 % 16)*1024
+    load = get_load_image_uop((1, 16384, 4), valid, (alu0, UOp.const(dtypes.weakint, 0)))
+    try:
+      self.check(load, None, "(gidx0+lidx0*1024+r0*1024+lidx1*128+-3168)", "0")
+    except AssertionError:
+      # TODO: fold valid
+      self.check(load, "(((lidx1<1)!=True)&(((lidx0+r0)<3)!=True)&((lidx0+r0)<19))",
+                       "(gidx0+lidx1*128+(lidx0*1024+r0*1024)+-3168)", "0")
 
-  def test_unbounded_channel_has_nan(self):
-    # variable with negative range -> x % 4 can be negative -> needs NAN fallback
-    x = Variable("x", -10, 10)
-    load = UOp(Ops.LOAD, dtypes.float, (UOp(Ops.PARAM, dtypes.imagef((10, 10, 4)), arg=0).index(x, ptr=True), UOp.const(dtypes.float, 0)))
-    self.assertEqual(self._count_nans(load), 1)
+  def test_simplify10(self):
+    # from openpilot compile3, kernel r_16_8_4_4_4_4_7_7 (image 1x8192)
+    # valid guarantees A1 >= 0 and A1 < 128, gate should be removable
+    gidx0 = Special("gidx0", 16)
+    lidx0 = Special("lidx0", 8)
+    lidx1 = Special("lidx1", 4)
+    lidx2 = Special("lidx2", 4)
+    r0 = Range(0, 7)
+    A1 = lidx0*16 + r0*16 + lidx1*4 - 51
+    valid = ((lidx1 < 1).ne(True)) & ((lidx0 + r0) < 3).ne(True) & ((lidx0 + r0) < 11)
+    alu0 = lidx2 + gidx0*4 + (A1 % 16)*64 + (A1 // 16 % 8)*1024
+    load = get_load_image_uop((1, 8192, 4), valid, (alu0, UOp.const(dtypes.weakint, 0)))
+    try:
+      self.check(load, None, "(lidx2+gidx0*4+lidx0*1024+r0*1024+lidx1*256+-3264)", "0")
+    except AssertionError:
+      # TODO: fold valid
+      self.check(load, "(((lidx1<1)!=True)&(((lidx0+r0)<3)!=True)&((lidx0+r0)<11))",
+                       "(lidx2+gidx0*4+lidx1*256+(lidx0*1024+r0*1024)+-3264)", "0")
+
+class TestUnfoldableImage(unittest.TestCase):
+  def test_unfoldable_becomes_buffer(self):
+    with Context(SPEC=0):
+      lidx = Special("lidx", 2)
+      load = UOp(Ops.LOAD, dtypes.float, (UOp(Ops.PARAM, dtypes.imagef((10, 10, 4)), arg=0).index(lidx, ptr=True), UOp.const(dtypes.float, 0)))
+      res = full_rewrite_to_sink(load.sink()).src[0]
+      self.assertEqual(res.src[0].src[0].dtype, dtypes.float.ptr(400))
 
 class TestDropTrueGate(unittest.TestCase):
   def test_drop_true_gate_on_index(self):

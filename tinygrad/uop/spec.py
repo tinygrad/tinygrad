@@ -69,17 +69,17 @@ shared_spec = PatternMatcher([
 # ***** UOp spec in the Tensor graph *****
 
 movement_ops = PatternMatcher([
-  (UPat((Ops.RESHAPE, Ops.EXPAND), name="mv", src=(UPat.var("x"), UPat(dtype=dtypes.weakint))), lambda mv,x: True),
-  (UPat((Ops.PAD, Ops.SHRINK), name="mv", src=(UPat.var("x"), UPat(dtype=dtypes.weakint), UPat(dtype=dtypes.weakint))), lambda mv,x: True),
-  (UPat((Ops.PERMUTE, Ops.FLIP), name="mv", src=(UPat.var("x"),)), lambda mv,x: isinstance(mv.arg, tuple)),
+  (UPat((Ops.RESHAPE, Ops.EXPAND), src=(UPat(), UPat(dtype=dtypes.weakint))), lambda: True),
+  (UPat((Ops.PAD, Ops.SHRINK), src=(UPat(), UPat(dtype=dtypes.weakint), UPat(dtype=dtypes.weakint))), lambda: True),
+  (UPat((Ops.PERMUTE, Ops.FLIP), name="mv", src=(UPat(),)), lambda mv: isinstance(mv.arg, tuple)),
 
   # inputs to movement ops
   (UPat((Ops.VECTORIZE, Ops.VCONST), dtype=dtypes.weakint), lambda: True),
   (UPat({Ops.ADD, Ops.MUL, Ops.IDIV}, dtype=dtypes.weakint), lambda: True),
 
-  # AFTER on Movement Op, BUFFER, COPY, or BITCAST
-  (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.MULTI, Ops.CONTIGUOUS, Ops.BUFFER, Ops.BITCAST, Ops.COPY})),), allow_any_len=True),
-   lambda: True),
+  # AFTER on Movement Op, INDEX, BUFFER, COPY, or BITCAST
+  (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.INDEX, Ops.MULTI, Ops.CONTIGUOUS, Ops.BUFFER, Ops.BITCAST, Ops.COPY})),),
+   allow_any_len=True), lambda: True),
 ])
 
 _tensor_spec = PatternMatcher([
@@ -89,7 +89,7 @@ _tensor_spec = PatternMatcher([
   (UPat(Ops.DEVICE, dtypes.void, (), name="d"), lambda d:
    isinstance(d.arg, str) or (isinstance(d.arg, tuple) and all(isinstance(s, str) for s in d.arg))),
   (UPat(Ops.BUFFER, src=(UPat((Ops.LUNIQUE, Ops.UNIQUE)), UPat(Ops.DEVICE)), name="buf"),
-   lambda buf: isinstance(buf.arg, int) and isinstance(buf.dtype, (DType, ImageDType))),
+   lambda buf: isinstance(buf.arg, int) and isinstance(buf.dtype, DType)),
 
   # BUFFER_VIEW on BUFFER is allowed if BUFFER is
   (UPat(Ops.BUFFER_VIEW, src=(UPat(Ops.BUFFER),)), lambda: True),
@@ -205,11 +205,15 @@ kernel_spec = PatternMatcher([
   (UPat(Ops.CONTRACT, name="x"), lambda x: x.dtype.count == prod(y[1] for y in x.arg)),
   (UPat(Ops.UNROLL, name="x"), lambda x: x.src[0].dtype.count == prod(y[1] for y in x.arg)),
 
+  # SHAPED_WMMA has <a, b, acc> with shaped inputs, arg=((M,N,K), device, threads), lowered to WMMA+CONTRACT later
+  (UPat(Ops.SHAPED_WMMA, src=(UPat(), UPat(), UPat()), name="x"),
+   lambda x: isinstance(x.arg, tuple) and len(x.arg) == 3 and isinstance(x.arg[0], tuple)),
+
   # END can end multiple axes here
   (UPat(Ops.END, src=(UPat(), UPat()), allow_any_len=True), lambda: True),
 
   # bufferize can be on anything
-  (UPat(Ops.BUFFERIZE, src=(UPat(),), allow_any_len=True, name="x"), lambda x: True),
+  (UPat(Ops.BUFFERIZE, src=(UPat(),), allow_any_len=True), lambda: True),
 
   # reduce must be on ranges
   (UPat(Ops.REDUCE, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(y.dtype in (dtypes.weakint, dtypes.int) for y in x.src[1:])),
@@ -282,7 +286,7 @@ full_spec = PatternMatcher([
   (UPat(Ops.BIND, (dtypes.int, dtypes.weakint), (UPat(), UPat()), arg=None), lambda: True),
 
   # in progress MSTACK may lose device
-  (UPat((Ops.MSELECT, Ops.MSTACK), name="x"), lambda x: True),
+  (UPat((Ops.MSELECT, Ops.MSTACK)), lambda: True),
 
   # temp VECTORIZE/INDEX during rewrite have the wrong dtype
   (UPat(Ops.VECTORIZE), lambda: True),

@@ -9,7 +9,7 @@ from hypothesis import assume, given, settings, strategies as strat
 
 from tinygrad import nn, dtypes, Device, Tensor, Variable
 from tinygrad.device import is_dtype_supported
-from tinygrad.dtype import DType, ImageDType
+from tinygrad.dtype import DType
 from tinygrad.uop.ops import UOp, Ops, UPat
 from tinygrad.helpers import CI, DEBUG, OSX, GlobalCounters, Context, getenv, all_same, temp
 from tinygrad.engine.realize import CompiledRunner, run_schedule
@@ -784,18 +784,6 @@ class TestSchedule(unittest.TestCase):
     self.assertEqual(GlobalCounters.mem_used-base, 1024)
 
   @unittest.skipIf(Device.DEFAULT != "CL", "image only supported on CL")
-  def test_image_matmul(self):
-    with Context(IMAGE=2):
-      x = Tensor.randn((9, 9)).realize()
-      y = Tensor.randn((9, 9)).realize()
-      out = x@y
-      run_schedule(check_schedule(out, 3))
-      np.testing.assert_allclose(out.numpy(), x.numpy()@y.numpy(), atol=1e-4, rtol=1e-4)
-      self.assertIsInstance(out.dtype, ImageDType)
-      self.assertIsNotNone(out.uop.base.realized)
-      self.assertIsInstance(out.uop.base.realized.dtype, ImageDType)
-
-  @unittest.skipIf(Device.DEFAULT != "CL", "image only supported on CL")
   def test_image_dot_f16_fusion(self):
     with Context(FLOAT16=1, OPENPILOT_HACKS=1):
       def cnt():
@@ -805,11 +793,8 @@ class TestSchedule(unittest.TestCase):
         for si in sched: si.lower()
         return len([si for si in sched if isinstance(si.prg, CompiledRunner)])
 
-      with Context(IMAGE=1): cnt1 = cnt()
-      with Context(IMAGE=2): cnt2 = cnt()
-
-      self.assertEqual(cnt1, 5)
-      self.assertEqual(cnt2, 5)
+      with Context(IMAGE=1):
+        self.assertEqual(cnt(), 5)
 
   @unittest.skipIf(Device.DEFAULT != "CL", "image only supported on CL")
   def test_image_f16_residual_fusion(self):
@@ -825,14 +810,10 @@ class TestSchedule(unittest.TestCase):
         for si in sched: si.lower()
         return len([si for si in sched if isinstance(si.prg, CompiledRunner)])
 
-      with Context(IMAGE=1): cnt1 = cnt()
-      with Context(IMAGE=2): cnt2 = cnt()
-
-      self.assertEqual(cnt1, 9)
-      self.assertEqual(cnt2, 9)
+      with Context(IMAGE=1):
+        self.assertEqual(cnt(), 9)
 
   @unittest.skipIf(Device.DEFAULT != "CL", "image only supported on CL")
-  @unittest.expectedFailure
   def test_image_conv_fusion(self):
     with Context(OPENPILOT_HACKS=1):
       def cnt():
@@ -843,10 +824,8 @@ class TestSchedule(unittest.TestCase):
         for si in sched: si.lower()
         return len([si for si in sched if isinstance(si.prg, CompiledRunner)])
 
-      with Context(IMAGE=1): cnt1 = cnt()
-      with Context(IMAGE=2): cnt2 = cnt()
-
-      self.assertEqual(cnt1, cnt2)
+      with Context(IMAGE=1):
+        self.assertEqual(cnt(), 5)
 
   def _test_fusion(self, shapes, f, cnt):
     with Context(DEBUG=0, TRACK_MATCH_STATS=0): args = [Tensor.randn(s).realize() for s in shapes]

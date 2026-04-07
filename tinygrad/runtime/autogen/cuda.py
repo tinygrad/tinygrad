@@ -11,47 +11,47 @@ CUdeviceptr_v2: TypeAlias = Annotated[int, ctypes.c_uint64]
 CUdeviceptr: TypeAlias = Annotated[int, ctypes.c_uint64]
 CUdevice_v1: TypeAlias = Annotated[int, ctypes.c_int32]
 CUdevice: TypeAlias = Annotated[int, ctypes.c_int32]
-class struct_CUctx_st(ctypes.Structure): pass
+class struct_CUctx_st(c.Struct): SIZE = 0
 CUcontext: TypeAlias = c.POINTER[struct_CUctx_st]
-class struct_CUmod_st(ctypes.Structure): pass
+class struct_CUmod_st(c.Struct): SIZE = 0
 CUmodule: TypeAlias = c.POINTER[struct_CUmod_st]
-class struct_CUfunc_st(ctypes.Structure): pass
+class struct_CUfunc_st(c.Struct): SIZE = 0
 CUfunction: TypeAlias = c.POINTER[struct_CUfunc_st]
-class struct_CUlib_st(ctypes.Structure): pass
+class struct_CUlib_st(c.Struct): SIZE = 0
 CUlibrary: TypeAlias = c.POINTER[struct_CUlib_st]
-class struct_CUkern_st(ctypes.Structure): pass
+class struct_CUkern_st(c.Struct): SIZE = 0
 CUkernel: TypeAlias = c.POINTER[struct_CUkern_st]
-class struct_CUarray_st(ctypes.Structure): pass
+class struct_CUarray_st(c.Struct): SIZE = 0
 CUarray: TypeAlias = c.POINTER[struct_CUarray_st]
-class struct_CUmipmappedArray_st(ctypes.Structure): pass
+class struct_CUmipmappedArray_st(c.Struct): SIZE = 0
 CUmipmappedArray: TypeAlias = c.POINTER[struct_CUmipmappedArray_st]
-class struct_CUtexref_st(ctypes.Structure): pass
+class struct_CUtexref_st(c.Struct): SIZE = 0
 CUtexref: TypeAlias = c.POINTER[struct_CUtexref_st]
-class struct_CUsurfref_st(ctypes.Structure): pass
+class struct_CUsurfref_st(c.Struct): SIZE = 0
 CUsurfref: TypeAlias = c.POINTER[struct_CUsurfref_st]
-class struct_CUevent_st(ctypes.Structure): pass
+class struct_CUevent_st(c.Struct): SIZE = 0
 CUevent: TypeAlias = c.POINTER[struct_CUevent_st]
-class struct_CUstream_st(ctypes.Structure): pass
+class struct_CUstream_st(c.Struct): SIZE = 0
 CUstream: TypeAlias = c.POINTER[struct_CUstream_st]
-class struct_CUgraphicsResource_st(ctypes.Structure): pass
+class struct_CUgraphicsResource_st(c.Struct): SIZE = 0
 CUgraphicsResource: TypeAlias = c.POINTER[struct_CUgraphicsResource_st]
 CUtexObject_v1: TypeAlias = Annotated[int, ctypes.c_uint64]
 CUtexObject: TypeAlias = Annotated[int, ctypes.c_uint64]
 CUsurfObject_v1: TypeAlias = Annotated[int, ctypes.c_uint64]
 CUsurfObject: TypeAlias = Annotated[int, ctypes.c_uint64]
-class struct_CUextMemory_st(ctypes.Structure): pass
+class struct_CUextMemory_st(c.Struct): SIZE = 0
 CUexternalMemory: TypeAlias = c.POINTER[struct_CUextMemory_st]
-class struct_CUextSemaphore_st(ctypes.Structure): pass
+class struct_CUextSemaphore_st(c.Struct): SIZE = 0
 CUexternalSemaphore: TypeAlias = c.POINTER[struct_CUextSemaphore_st]
-class struct_CUgraph_st(ctypes.Structure): pass
+class struct_CUgraph_st(c.Struct): SIZE = 0
 CUgraph: TypeAlias = c.POINTER[struct_CUgraph_st]
-class struct_CUgraphNode_st(ctypes.Structure): pass
+class struct_CUgraphNode_st(c.Struct): SIZE = 0
 CUgraphNode: TypeAlias = c.POINTER[struct_CUgraphNode_st]
-class struct_CUgraphExec_st(ctypes.Structure): pass
+class struct_CUgraphExec_st(c.Struct): SIZE = 0
 CUgraphExec: TypeAlias = c.POINTER[struct_CUgraphExec_st]
-class struct_CUmemPoolHandle_st(ctypes.Structure): pass
+class struct_CUmemPoolHandle_st(c.Struct): SIZE = 0
 CUmemoryPool: TypeAlias = c.POINTER[struct_CUmemPoolHandle_st]
-class struct_CUuserObject_st(ctypes.Structure): pass
+class struct_CUuserObject_st(c.Struct): SIZE = 0
 CUuserObject: TypeAlias = c.POINTER[struct_CUuserObject_st]
 @c.record
 class struct_CUuuid_st(c.Struct):
@@ -591,7 +591,7 @@ CU_JIT_INPUT_NVVM = enum_CUjitInputType_enum.define('CU_JIT_INPUT_NVVM', 5)
 CU_JIT_NUM_INPUT_TYPES = enum_CUjitInputType_enum.define('CU_JIT_NUM_INPUT_TYPES', 6)
 
 CUjitInputType: TypeAlias = enum_CUjitInputType_enum
-class struct_CUlinkState_st(ctypes.Structure): pass
+class struct_CUlinkState_st(c.Struct): SIZE = 0
 CUlinkState: TypeAlias = c.POINTER[struct_CUlinkState_st]
 class enum_CUgraphicsRegisterFlags_enum(Annotated[int, ctypes.c_uint32], c.Enum): pass
 CU_GRAPHICS_REGISTER_FLAGS_NONE = enum_CUgraphicsRegisterFlags_enum.define('CU_GRAPHICS_REGISTER_FLAGS_NONE', 0)

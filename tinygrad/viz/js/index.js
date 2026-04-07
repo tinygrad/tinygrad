@@ -25,6 +25,13 @@ const colored = n => d3.create("span").call(s => s.selectAll("span").data(typeof
 
 const rect = (s) => (typeof s === "string" ? document.querySelector(s) : s).getBoundingClientRect();
 
+// dims of shapes on the canvas aren't tracked by the browser, we compute it
+const canvasRect = (s, pixelScale) => {
+  const { e } = selectShape(s), t = data.tracks.get(s.split("-")[0]);
+  const x = pixelScale(e.x), w = pixelScale(e.x+e.width)-x, y = t.offsetY+e.y;
+  return {x0:x, x1:x+w, y0:y, y1:y+e.height};
+};
+
 let timeout = null;
 const Status = {STARTED:0, COMPLETE:1, ERR:2}
 const updateProgress = (st, msg) => {
@@ -192,12 +199,8 @@ function formatCycles(cycles) {
 
 const formatUnit = (d, unit="") => d3.format(".3~s")(d)+unit;
 
-const WAVE_COLORS = {VALU:"#ffffc0", SALU:"#cef263", LOAD:"#ffc0c0", STORE:"#4fa3cc", IMMEDIATE:"#f3b44a", BARRIER:"#d00000", JUMP:"#ffb703",
-  JUMP_NO:"#fb8500", MESSAGE:"#90dbf4", VMEM:"#b2b7c9", LDS:"#9fb4a6"};
 const waveColor = (op) => {
-  const cat = op.includes("VALU") || op === "VINTERP" ? "VALU" : op.includes("SALU") ? "SALU" : op.includes("VMEM") ? "VMEM"
-            : op.includes("LOAD") || op === "SMEM" ? "LOAD" : op.includes("STORE") ? "STORE" : op;
-  let ret = WAVE_COLORS[cat] ?? "#ffffff";
+  let ret = data.waveColors.find(([pattern]) => op.includes(pattern))?.[1] ?? "#ffffff";
   if (op.includes("OTHER_") || op.includes("_ALT")) { ret = darkenHex(ret, 75) }
   if (op.includes("LDS_")) { ret = darkenHex(ret, 25) }
   return ret
@@ -241,6 +244,11 @@ function tabulate(rows) {
 
 var data, focusedDevice, focusedShape, formatTime, canvasZoom, zoomLevel = d3.zoomIdentity;
 
+const canvasDims = () => {
+  const sideRect = rect("#device-list");
+  return [Math.round(document.querySelector("#profiler").clientWidth-sideRect.width), Math.round(sideRect.height)];
+}
+
 function selectShape(key) {
   if (key == null) return {};
   const [t, idx] = key.split("-");
@@ -249,14 +257,14 @@ function selectShape(key) {
 }
 
 // scaling function for time to pixels
-const timelineScale = () => d3.scaleLinear().domain([data.first, data.dur]).range([0, document.getElementById("timeline").clientWidth])
+const timelineScale = () => d3.scaleLinear().domain([data.first, data.dur]).range([0, canvasDims()[0]]);
 
 function timeAtCycle(clk) {
   if (clk < data.instSt || clk > data.instEt || data.tracks.get("Shader Clock") == null) return "-";
   let cur = data.instSt, ns = 0, freq = null;
   // walk through all frequency changes and accumulate time in nanoseconds
   for (const [s, v] of data.tracks.get("Shader Clock").valueMap) {
-    if (freq != null && cur < s) {
+    if (freq != null && freq > 0 && cur < s) {
       const et = Math.min(clk, s);
       ns += (et - cur) * 1e9 / freq;
       cur = et;
@@ -292,7 +300,11 @@ function setFocus(key) {
       const [st, et] = xscale.range().map(zoomLevel.invertX, zoomLevel).map(xscale.invert, xscale);
       if (x1 < st || x0 > et) zoomLevel = d3.zoomIdentity.translate(-xscale((x0+x1)/2-(et-st)/2)*zoomLevel.k, 0).scale(zoomLevel.k);
     }
+    const link = e?.arg.link ?? data.links.get(key);
+    data.link = link == null ? null : [key, link];
     focusedShape = key; d3.select("#timeline").call(canvasZoom.transform, zoomLevel);
+    const tooltip = document.getElementById("tooltip");
+    if (tooltip.dataset.key !== key) tooltip.style.display = "none";
   }
   const { eventType, e } = selectShape(key);
   if (metadata.querySelector(".info") == null) d3.select(metadata).html("").append("div").classed("info", true);
@@ -306,6 +318,7 @@ function setFocus(key) {
       p.append("span").style("margin-left", "8px").style("color", "#f0f0f566").text(formatTime(e.x));
       tableData.push(["Cycle", formatTime(e.x-data.instSt)], ["Time", p.node()]);
     } else tableData.push(["Start Time", formatTime(e.x)]);
+    if (data.link != null) tableData.push(["Delay", `${formatTime(Math.abs(selectShape(data.link[0]).e.x - selectShape(data.link[1]).e.x))} Cycles`]);
     html.append(() => tabulate(tableData));
     let group = html.append("div").classed("args", true);
     for (const r of rest) group.append("p").text(r);
@@ -352,8 +365,10 @@ function setFocus(key) {
     metadata.insertBefore(instList.parentElement, html.node());
   }
   d3.select(instList).selectAll("span").classed("highlight", false);
-  const instLine = document.getElementById(`inst-${e?.arg.pc}`); instLine?.classList.add("highlight");
+  let instLine = document.getElementById(`inst-${e?.arg.pc}`);
+  if (instLine == null && data.link != null) instLine = document.getElementById(`inst-${selectShape(data.link[1]).e.arg.pc}`);
   if (instLine != null) {
+    instLine.classList.add("highlight");
     const r = rect(instLine), c = rect(instList);
     if (Math.max(c.top-r.bottom, r.top-c.bottom)>=-30) instList.scrollTop = instLine.offsetTop-instList.clientHeight/2+instLine.clientHeight/2;
   }
@@ -366,7 +381,7 @@ async function renderProfiler(path, opts) {
   displaySelection("#profiler");
   // support non realtime x axis units
   formatTime = opts.unit === "ms" ? formatMicroseconds : formatCycles;
-  if (data?.path !== path) { data = {tracks:new Map(), axes:{}, path, first:null}; focusedDevice = null; focusedShape = null; }
+  if (data?.path !== path) { data = {tracks:new Map(), axes:{}, path, first:null, links:new Map()}; focusedDevice = null; focusedShape = null; }
   setFocus(focusedShape);
   // layout once!
   if (data.tracks.size !== 0) return updateProgress(Status.COMPLETE);
@@ -382,6 +397,7 @@ async function renderProfiler(path, opts) {
   const dur = u32(), tracePeak = u64(), indexLen = u32(), layoutsLen = u32(); data.dur = dur;
   const textDecoder = new TextDecoder("utf-8");
   const { strings, dtypeSize, markers, ...extData } = JSON.parse(textDecoder.decode(new Uint8Array(buf, offset, indexLen))); offset += indexLen;
+  for (const [k,v] of Object.entries(extData)) data[k] = v;
   // place devices on the y axis and set vertical positions
   const [tickSize, padding, baseOffset] = [5, 8, markers.length ? 14 : 0];
   const secondaryTick = opts.unit == "clk" ? timeAtCycle : null;
@@ -455,10 +471,11 @@ async function renderProfiler(path, opts) {
         }
         // tiny device events go straight to the rewrite rule
         const key = k.startsWith("TINY") ? null : `${k}-${j}`;
-        let info = e.info != null ? "\n"+e.info : "", trace = null, pc = null
+        let info = e.info != null ? "\n"+e.info : "", trace = null, pc = null, link = null
         if (info.startsWith("\nPC:")) { pc = parseInt(e.info.split(":")[1]); info = ""; }
         if (info.startsWith("\nTB:")) { trace = info; info = ""; }
-        const arg = { tooltipText:" N:"+shapes.length+"\n"+formatTime(e.dur)+info, label, pc, trace, bufs:[], key, ctx:shapeRef?.ctx, step:shapeRef?.step };
+        if (info.startsWith("\nLINK:")) { link = info.replace("\nLINK:", ""); info = ""; data.links.set(link, key); }
+        const arg = { tooltipText:" N:"+shapes.length+"\n"+formatTime(e.dur)+info, label, pc, trace, link, bufs:[], key, ctx:shapeRef?.ctx, step:shapeRef?.step };
         if (e.key != null) shapeMap.set(e.key, key);
         // offset y by depth
         shapes.push({x:e.st, y:levelHeight*depth, width:e.dur, height:levelHeight, arg, label:opts.hideLabels ? null : label, fillColor });
@@ -554,7 +571,7 @@ async function renderProfiler(path, opts) {
     }
   }
   for (const m of markers) m.label = m.name.split(/(\s+)/).map(st => ({ st, color:m.color, width:ctx.measureText(st).width }));
-  if (extData.pcMap != null) data.pcMap = extData.pcMap; setFocus(focusedShape);
+  if (data.pcMap != null) setFocus(focusedShape);
   // secondary axis mapping
   let instRange = null;
   for (const [k, { shapes }] of data.tracks) if (!k.includes("Clock") && path.includes("pkts")) {
@@ -583,7 +600,7 @@ async function renderProfiler(path, opts) {
     const canvasWidth = canvas.clientWidth;
     ctx.clearRect(0, 0, canvasWidth, canvas.clientHeight);
     // rescale to match current zoom
-    const xscale = d3.scaleLinear().domain([data.first, dur]).range([0, canvasWidth]);
+    const xscale = timelineScale();
     const visibleX = xscale.range().map(zoomLevel.invertX, zoomLevel).map(xscale.invert, xscale);
     const st = visibleX[0], et = visibleX[1];
     xscale.domain([st, et]);
@@ -625,13 +642,24 @@ async function renderProfiler(path, opts) {
           // add label
           drawText(ctx, e.label, x+2, y+e.height/2, width);
         }
-        if (focusedShape != null && e.arg?.key === focusedShape) { ctx.strokeStyle = pcolor; ctx.stroke(); }
+        if ((focusedShape != null && e.arg?.key === focusedShape) || (data.link != null && (e.arg?.key === data.link[0] || e.arg?.key === data.link[1]))) {
+          ctx.strokeStyle = pcolor; ctx.stroke();
+        }
       }
       // draw row line
       if (rowBorderColor != null) {
         const y = offsetY+trackHeight-padding/2 - 0.5;
         drawLine(ctx, [0, canvasWidth], [y, y], { color:rowBorderColor });
       }
+    }
+    // draw the link
+    if (data.link != null) {
+      const [a, b] = [canvasRect(data.link[0], xscale), canvasRect(data.link[1], xscale)];
+      const [left, right] = a.x0 <= b.x0 ? [a, b] : [b, a];
+      const startX = left.x1, endX = right.x0;
+      const leftY = (left.y0+left.y1)/2, rightY = (right.y0+right.y1)/2;
+      const dx = endX-startX, bend = Math.max(12, Math.min(40, dx/2));
+      ctx.beginPath(); ctx.moveTo(startX, leftY); ctx.bezierCurveTo(startX+bend, leftY, endX-bend, rightY, endX, rightY); ctx.strokeStyle = "#858b9d"; ctx.stroke();
     }
     // draw axes
     ctx.translate(0, baseOffset);
@@ -680,19 +708,17 @@ async function renderProfiler(path, opts) {
   }
 
   function resize() {
-    const profiler = document.querySelector("#profiler");
-    const sideRect = rect("#device-list");
-    const width = profiler.clientWidth-(sideRect.width+padding), height = Math.round(sideRect.height);
+    const [width, height] = canvasDims();
     if (canvas.width === width*dpr && canvas.height === height*dpr) return;
     canvas.width = width*dpr;
     canvas.height = height*dpr;
     canvas.style.height = `${height}px`;
     canvas.style.width = `${width}px`;
     ctx.scale(dpr, dpr);
-    zoomLevel = getZoomIdentity();
     d3.select(canvas).call(canvasZoom.transform, zoomLevel);
   }
 
+  zoomLevel = getZoomIdentity();
   canvasZoom = d3.zoom().filter(vizZoomFilter).on("zoom", e => render(e.transform));
   d3.select(canvas).call(canvasZoom);
   document.addEventListener("contextmenu", e => e.ctrlKey && e.preventDefault());
@@ -732,6 +758,7 @@ async function renderProfiler(path, opts) {
       tooltip.style.display = "block";
       tooltip.style.left = (e.pageX+10)+"px";
       tooltip.style.top = (e.pageY)+"px";
+      tooltip.dataset.key = foundRect.key ?? "";
     } else tooltip.style.display = "none";
   });
   canvas.addEventListener("mouseleave", () => document.getElementById("tooltip").style.display = "none");

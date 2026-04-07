@@ -1,10 +1,13 @@
 import ctypes, time
+from dataclasses import replace
 from test.mockgpu.gpu import VirtGPU
 from test.mockgpu.helpers import _try_dlopen_remu
-from tinygrad.helpers import getbits, to_mv, getenv
+from tinygrad.helpers import getbits, to_mv, getenv, DEV
 from tinygrad.runtime.support import c
 
-MOCKGPU_ARCH = getenv("MOCKGPU_ARCH", "rdna3")
+MOCKGPU_ARCH = "cdna4" if DEV.arch == "gfx950" else "rdna4" if DEV.arch.startswith("gfx12") else "rdna3"
+assert (ma:=getenv("MOCKGPU_ARCH", "")) == "", "MOCKGPU_ARCH is deprecated, use DEV=" + \
+  str(replace(DEV.value, arch={"cdna4":"gfx950", "rdna4":"gfx1201"}.get(ma, "gfx1100")))
 GFX_TARGET_VERSION = {"rdna2": 103000, "rdna3": 110000, "rdna4": 120000, "cdna4": 90500}[MOCKGPU_ARCH]
 import tinygrad.runtime.autogen.amd_gpu as amd_gpu, tinygrad.runtime.autogen.am.pm4_nv as pm4
 

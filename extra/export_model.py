@@ -1,11 +1,11 @@
 from typing import Tuple, Dict, List, Optional
-from tinygrad.dtype import DType
+from tinygrad.dtype import DType, dtypes
 from tinygrad.renderer import ProgramSpec
-from tinygrad.tensor import Device, Tensor
+from tinygrad.tensor import Tensor
+from tinygrad.device import Device
 from tinygrad.engine.jit import TinyJit
 from tinygrad.nn.state import get_state_dict
 from tinygrad.helpers import Context, to_mv
-from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import Ops
 import json
 from collections import OrderedDict
@@ -13,12 +13,20 @@ from collections import OrderedDict
 EXPORT_SUPPORTED_DEVICE = ["WEBGPU", "CPU", "CUDA", "CL"]
 
 def compile_net(run:TinyJit, special_names:Dict[int,str]) -> Tuple[Dict[str,str],List[Tuple[str,List[str],List[int]]],Dict[str,Tuple[int,DType,int]],Dict[str,Tensor]]:
+  # memory-planned subbuffers can have multiple Buffer objects for the same memory region
+  canon, _seen = {}, {}
+  for ji in run.jit_cache:
+    for b in ji.bufs:
+      if b is not None: canon[id(b)] = _seen.setdefault((id(b.base._buf), b.offset, b.size, b.dtype), b)
+  special_names = {id(canon[k]): v for k, v in special_names.items() if k in canon}
+
   functions, bufs, bufs_to_save, statements, bufnum = {}, {}, {}, [], 0
   for ji in run.jit_cache:
     fxn: ProgramSpec = ji.prg.p
     functions[fxn.function_name] = fxn.src   # NOTE: this assumes all with the same name are the same
     cargs = []
     for i,arg in enumerate(ji.bufs):
+      arg = canon[id(arg)]
       key = id(arg)
       if key not in bufs:
         if key in special_names:

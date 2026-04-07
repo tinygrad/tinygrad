@@ -2,7 +2,7 @@
 set -e
 
 APP_PATH="/Applications/TinyGPU.app"
-DEXT_ID="org.tinygrad.tinygpu.edriver"
+DEXT_ID="org.tinygrad.tinygpu.driver2"
 
 # Install app if not present. TODO: url
 if [[ ! -d "$APP_PATH" ]]; then

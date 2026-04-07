@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from tinygrad.dtype import dtypes, ImageDType, DType, AddrSpace, Invalid, PtrDType
 from tinygrad.uop.ops import UOp, Ops, UPat, PatternMatcher, GroupOp, identity_element
 from tinygrad.uop.symbolic import uop_given_valid, parse_valid, invalid_gate
-from tinygrad.helpers import getenv, flatten, AMX, prod, IMAGE
+from tinygrad.helpers import getenv, flatten, AMX, prod
 from tinygrad.renderer import Renderer
 
 # ***** image load valid simplification *****
@@ -46,7 +46,7 @@ def simplify_valid_load(buf:UOp, start_idx:UOp, valid:UOp) -> UOp|None:
   drop_stmt = _drop_valid_stmts(valid, idx, buf.dtype.shape[0], buf.dtype.shape[1])
 
   if not drop_stmt and idx is start_idx: return None
-  new_valid = UOp.prod(*ss) if (ss:=[s for s in valid.split_uop(Ops.AND) if s not in drop_stmt]) else None
+  new_valid = UOp.uprod(*ss) if (ss:=[s for s in valid.split_uop(Ops.AND) if s not in drop_stmt]) else None
   return buf.index(idx.valid(new_valid) if new_valid is not None else idx, ptr=True)
 
 
@@ -63,7 +63,7 @@ load_store_indexing = PatternMatcher([
 
 def expand_index(buf:UOp, vec:UOp):
   # determine optimal image shapes
-  if IMAGE == 1 and isinstance(dt:=buf.dtype, ImageDType):
+  if isinstance(dt:=buf.dtype, ImageDType):
     x, valid = vec.get_idx().gep(0), vec.get_valid().gep(0)
     # search for dims that drop the most valid statements
     best_drop, cands = -1, []
@@ -73,7 +73,7 @@ def expand_index(buf:UOp, vec:UOp):
       elif dropped == best_drop: cands.append((ch, cw, cidx))
     # and tiebreak with indexing complexity (ie. number of nodes)
     h, w, _ = cands[0] if len(cands) == 1 else min(cands, key=lambda cand: len(cand[2].gep(1).simplify().backward_slice))
-    buf = buf.replace(dtype=(dtypes.imageh if dt.itemsize == 2 else dtypes.imagef)((h, w, 4), w * 4 * dt.itemsize))
+    buf = buf.replace(dtype=(dtypes.imageh if dt.itemsize == 2 else dtypes.imagef)((h, w, 4)))
   if getenv("UNSAFE_DISABLE_MASK", 0): vec = vec.get_idx()
   # generate the individual indexes
   return UOp(Ops.VECTORIZE, buf.dtype, tuple(buf.index(vec.gep(i), ptr=True) for i in range(vec.dtype.count)))
@@ -160,7 +160,7 @@ def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
   # determine fold lengths
   lengths = []
   must_divide = True
-  if ctx is not None and ctx.device == "DSP":
+  if ctx is not None and ctx.target.device == "DSP":
     lengths = [128,64,32,16,8,4]
     must_divide = False
   elif buf.dtype.base not in (dtypes.float, dtypes.half, *dtypes.fp8s) and not isinstance(buf.dtype, ImageDType):
@@ -202,24 +202,14 @@ def get_image_idx(idx:UOp, width:int):
 
 def image_fixup(ls:UOp):
   # normal image load or store, with the CAST from expand_index
-  if ls.src[0].op is Ops.CAST and isinstance(image_dtype:=ls.src[0].src[0].dtype, ImageDType):
+  if isinstance(dt:=ls.src[0].src[0].dtype, ImageDType) and ls.src[0].op is Ops.CAST:
     assert ls.src[0].dtype.count == 4, "image must be casted to 4"
-    idx = get_image_idx(ls.src[0].src[0], image_dtype.shape[1])
-    return ls.replace(src=(idx,)+ls.src[1:])
+    return ls.replace(src=(get_image_idx(ls.src[0].src[0], dt.shape[1]),)+ls.src[1:])
 
-  # this is an unprocessed image without a cast, aka unfoldable image load. this doesn't work for stores
-  if isinstance(image_dtype:=ls.src[0].dtype, ImageDType) and ls.src[0].src[1].get_idx().dtype != dtypes.weakint.vec(2):
-    assert ls.op is Ops.LOAD, "if an image store isn't upcasted to 4, we can't store it"
-    x, idx = ls.src[0].src[1].get_idx(), get_image_idx(ls.src[0], image_dtype.shape[1])
-    vec_load = ls.replace(dtype=ls.dtype.vec(4), src=(idx,)+ls.src[1:])
-    # image pixels have 4 channels (.xyzw), select channel based on x % 4
-    x_mod_4 = x % 4
-    def sel(ret, i): return x_mod_4.ne(i).where(ret, vec_load.gep(i))
-    # if x is non-negative, x % 4 is in [0, 3] and we can skip NAN fallback
-    if x_mod_4.vmin >= 0: return functools.reduce(sel, range(int(x_mod_4.vmin)+1, int(x_mod_4.vmax)+1), vec_load.gep(int(x_mod_4.vmin)))
-    return functools.reduce(sel, range(4), ls.const_like(float('nan')))
-
-  return None
+  # this is an unprocessed image without a cast, we should just make it a buffer
+  if isinstance(dt, ImageDType) and (off:=ls.src[0].src[1]).get_idx().dtype != dtypes.weakint.vec(2):
+    idx = ls.src[0].src[0].replace(dtype=(new_dt:=dtypes.half if dt.itemsize == 2 else dtypes.float).ptr(dt.size)).index(off)
+    return ls.replace(src=(idx,), dtype=new_dt).cast(dtypes.float) if ls.op is Ops.LOAD else ls.replace(src=(idx, ls.src[1].cast(new_dt)))
 
 correct_load_store = PatternMatcher([
   # split LOAD/STORE
@@ -296,12 +286,12 @@ pm_render = PatternMatcher([
       if len(x.src) == 1 or x.src[1].op in (Ops.CUSTOM, Ops.STORE, Ops.BARRIER) else None),
   # Where after gated load becomes alt value
   # NOTE: if a is CAST and a.src[0].dtype == l.dtype, use a.src[0] to avoid roundtrip cast (e.g. uint->float->uint)
-  (UPat.var("c").where(UPat(Ops.LOAD, src=(UPat().index(UPat.var("idx"), UPat.var("c")).or_casted(),), allow_any_len=True, name="l").or_casted(),
-    UPat.var("a")), lambda c,idx,l,a: l.replace(src=(l.src[0], a.src[0] if a.op is Ops.CAST and a.src[0].dtype == l.dtype else a.cast(l.dtype))+
-                                                l.src[2:]).cast(a.dtype)),
-  (UPat.var("c").where(UPat.var("a"), UPat(Ops.LOAD, src=(UPat().index(UPat.var("idx"), UPat.var("c").logical_not()).or_casted(),),
-    allow_any_len=True, name="l").or_casted()), lambda c,idx,l,a: l.replace(src=(l.src[0], a.src[0] if a.op is Ops.CAST and a.src[0].dtype == l.dtype
-                                                                                 else a.cast(l.dtype))+l.src[2:]).cast(a.dtype)),
+  (UPat.var("c").where(UPat(Ops.LOAD, src=(UPat().index(UPat(), UPat.var("c")).or_casted(),), allow_any_len=True, name="l").or_casted(),
+    UPat.var("a")), lambda c,l,a: l.replace(src=(l.src[0], a.src[0] if a.op is Ops.CAST and a.src[0].dtype == l.dtype else a.cast(l.dtype))+
+                                            l.src[2:]).cast(a.dtype)),
+  (UPat.var("c").where(UPat.var("a"), UPat(Ops.LOAD, src=(UPat().index(UPat(), UPat.var("c", dtype=dtypes.bool).logical_not()).or_casted(),),
+    allow_any_len=True, name="l").or_casted()), lambda c,l,a: l.replace(src=(l.src[0], a.src[0] if a.op is Ops.CAST and a.src[0].dtype == l.dtype
+                                                                             else a.cast(l.dtype))+l.src[2:]).cast(a.dtype)),
 ])
 
 # *** Ops.REDUCE -> Ops.DEFINE_ACC ***
@@ -358,9 +348,33 @@ pm_reduce = PatternMatcher([
 
 pm_add_loads = PatternMatcher([
   # add loads to non ptr index
-  (UPat(Ops.INDEX, name="idx"), lambda idx: None if isinstance(idx.dtype, (PtrDType, ImageDType)) else
+  (UPat(Ops.INDEX, name="idx"), lambda idx: None if isinstance(idx.dtype, PtrDType) else
     idx.replace(dtype=idx.src[0].dtype).load(dtype=idx.dtype.base)),
   # remove loads from stores
   (UPat(Ops.STORE, src=(UPat(Ops.LOAD), UPat(name="val")), name="s"), lambda s,val: s.replace(src=(s.src[0].src[0], val))),
 ])
 
+# make images
+
+pm_imageh_store = PatternMatcher([
+  # store<imageh>(idx, x) is actually store(idx, x.cast(half)) so we can pull the cast into the store
+  (UPat.var("x", dtypes.float).cast(dtypes.half), lambda x: x),
+  # store(imageh, a.where(b.half(), c).float()) -> store(imageh, a.where(b, c.float()))
+  (UPat(Ops.WHERE, src=(UPat.var("a"), UPat.var("b", dtypes.float).cast(dtypes.half), UPat.var("c"))), lambda a,b,c: a.where(b,c.cast(dtypes.float))),
+  # otherwise, we cast to float
+  (UPat(GroupOp.All, name="x"), lambda x: x.cast(dtypes.float))
+])
+
+def make_image(ls, buf, off):
+  if (vcount:=buf.dtype.vcount) != 1: buf = buf.src[0]
+  if buf.op == Ops.PARAM and not isinstance(dt:=buf.dtype, ImageDType) and (dims:=ImageDType.valid_dims(dt)):
+    buf = buf.replace(dtype=(dtypes.imageh if dt.base == dtypes.half else dtypes.imagef)((*dims[0], 4)))
+    if vcount != 1: buf = UOp.vectorize(*([buf] * vcount))
+    if ls.op is Ops.LOAD: return ls.replace(src=(buf.index(off, ptr=True),), dtype=dtypes.float.vec(ls.dtype.vcount)).cast(dt.base)
+    return buf.index(off, ptr=True).store(pm_imageh_store.rewrite(ls.src[1]) if dt.base == dtypes.half else ls.src[1])
+
+pm_make_images = PatternMatcher([
+  (UPat((Ops.LOAD, Ops.STORE), src=(UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("off"))),), allow_any_len=True, name="ls"), make_image),
+  # load<imageh> is actually load<half>.cast(float), so load<imageh>.half().float() -> load<half>.float().half().float() -> load<half>.float()
+  (UPat(Ops.LOAD, name="li").cast(dtypes.half).cast(dtypes.float), lambda li: li if isinstance(li.src[0].dtype, ImageDType) else None),
+])

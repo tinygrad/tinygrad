@@ -3,7 +3,7 @@
 Stress test for beam timeout + device recovery on AM devices.
 
 Usage:
-  AMD=1 python test/external/external_test_beam_timeout_recovery.py
+  DEV=AMD python test/external/external_test_beam_timeout_recovery.py
 """
 from tinygrad import Tensor, Device
 from tinygrad.helpers import Context

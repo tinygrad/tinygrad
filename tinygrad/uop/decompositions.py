@@ -2,9 +2,9 @@ from typing import Callable
 import math, functools
 from tinygrad.dtype import dtypes, DType, promo_lattice, truncate
 from tinygrad.device import is_dtype_supported
-from tinygrad.helpers import flatten, polyN
+from tinygrad.helpers import flatten, polyN, Target, EMULATED_DTYPES
 from tinygrad.uop import GroupOp
-from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher
+from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, graph_rewrite
 
 TRANSCENDENTAL_DTYPES = (dtypes.float16, dtypes.float32, dtypes.float64)
 
@@ -279,9 +279,9 @@ def magicgu(vmax:int, d:int) -> tuple[int,int]:
       return m, s
   assert False
 
-def fast_idiv(device: str, x: UOp, d: int, dont_cast=False) -> UOp|None:
+def fast_idiv(target: Target, x: UOp, d: int, dont_cast=False) -> UOp|None:
   # NOTE: disable for METAL due to compiler bug. keccak with -O0 works but not with optimization
-  if device.startswith("METAL"): return None
+  if target.device.startswith("METAL"): return None
   # If d is a power of two this is not valid for signed ints!
   is_unsigned = x.vmin>=0 or x.dtype in dtypes.uints
   assert d>0, "Sign should have been taken out of divisor"
@@ -291,10 +291,10 @@ def fast_idiv(device: str, x: UOp, d: int, dont_cast=False) -> UOp|None:
     return ((x*m) >> s) if is_unsigned else ((x*m) >> s) + (x<0).where(x.ufix(1), 0)
   # before we try casting to a larger dtype (slow), we see if there are powers of two in d we can shift to make x smaller
   if (largest_factor_of_two_in_d := (d & -d)) > 1:
-    if (ret:=fast_idiv(device, x//largest_factor_of_two_in_d, d//largest_factor_of_two_in_d, dont_cast=True)) is not None: return ret
+    if (ret:=fast_idiv(target, x//largest_factor_of_two_in_d, d//largest_factor_of_two_in_d, dont_cast=True)) is not None: return ret
   if dont_cast: return None
   # promo_lattice needs to return an unsigned type if the type is unsigned
-  if dtypes.is_int(next_dtype := promo_lattice[x.dtype.scalar()][-1]) and is_dtype_supported(next_dtype, device):
+  if dtypes.is_int(next_dtype := promo_lattice[x.dtype.scalar()][-1]) and is_dtype_supported(next_dtype, target):
     if m*vmin >= next_dtype.min and m*vmax <= next_dtype.max:
       return ((x.cast(next_dtype)*m) >> s).cast(x.dtype) if is_unsigned else ((x.cast(next_dtype)*m) >> s).cast(x.dtype) + (x<0).where(x.ufix(1), 0)
   return None
@@ -319,7 +319,7 @@ def threefry2x32(x: UOp, key: UOp):
 
 l2i_dt = {dtypes.long: dtypes.int, dtypes.ulong: dtypes.uint}
 def unpack32(v:UOp) -> tuple[UOp, UOp]: return v.bitcast(dtypes.uint) & 0xFFFF, shr(v.bitcast(dtypes.uint), 16)
-def reindex(idx:UOp, off:int, mul=2) -> UOp: return idx.replace(src=(idx.src[0], idx.src[1]*mul+off))
+def reindex(idx:UOp, off:int, mul=2) -> UOp: return idx.replace(src=(idx.src[0], idx.src[1]*mul+off, *idx.src[2:]))
 
 # 4.3.1 is the relevant section in TAOCP
 def l2i(op: Ops, dt: DType, *uops:UOp):
@@ -440,7 +440,7 @@ def get_transcendental_patterns(ops:tuple[Ops, ...], force_transcendental:bool) 
 
 powers_of_two: dict[int, int] = {2**i:i for i in range(64)}
 @functools.cache
-def get_late_rewrite_patterns(ops:tuple[Ops, ...], device:str, disable_fast_idiv:bool) -> PatternMatcher:
+def get_late_rewrite_patterns(ops:tuple[Ops, ...], disable_fast_idiv:bool) -> PatternMatcher:
   pat: list[tuple[UPat, Callable]] = []
   # no real hardware supports THREEFRY, but NullRenderer does
   if Ops.THREEFRY not in ops: pat.append((UPat(Ops.THREEFRY, dtype=dtypes.uint64, src=(UPat.var("x"), UPat.var("key"))), threefry2x32))
@@ -511,10 +511,15 @@ pm_float_decomp = PatternMatcher([
   (UPat((*GroupOp.Defines, Ops.INDEX), name="x"), lambda ctx,x:
    x.replace(dtype=f2f_dt[ctx[0]].ptr(x.dtype.size), tag=ctx[0]) if x.dtype.base == ctx[0] else None),
   (UPat(Ops.LOAD, dtypes.floats, name="x"), lambda ctx,x: f2f_load(x, *ctx) if x.dtype.scalar() == ctx[0] else None),
+  # bitcasted load should just replace load
   (UPat(Ops.BITCAST, src=(UPat(Ops.LOAD, name="ld"),), name="bc"), lambda ctx,bc,ld:
-   ld.replace(dtype=f2f_dt[ctx[0]]).bitcast(bc.dtype) if ld.dtype.bitsize == ctx[0].bitsize else None),
+   ld.replace(dtype=f2f_dt[ctx[0]]).bitcast(bc.dtype) if ld.dtype == ctx[0] else None),
+  # bitcast from
   (UPat(Ops.BITCAST, src=(UPat.var("x", dtypes.floats),), name="bc"), lambda ctx,bc,x:
    bc.replace(src=(f2f(x.bitcast(f2f_dt[ctx[1]]), ctx[1], ctx[0]),)) if x.dtype == ctx[1] and bc.dtype.bitsize == ctx[0].bitsize else None),
+  # bitcast to
+  (UPat(Ops.BITCAST, src=(UPat.var("x"),), name="bc"), lambda ctx,bc,x:
+   f2f(x.bitcast(f2f_dt[ctx[0]]), ctx[0], ctx[1]) if bc.dtype == ctx[0] else None),
   (UPat(Ops.CAST, dtypes.floats, src=(UPat.var("val"),), name="x"), lambda ctx,x,val:
    f2f_clamp(val.cast(ctx[1]), ctx[0]) if x.dtype.scalar() == ctx[0] else None),
   (UPat(GroupOp.All-{Ops.BITCAST}, dtypes.floats, name="x"), lambda ctx,x:
@@ -524,4 +529,21 @@ pm_float_decomp = PatternMatcher([
    st.replace(src=(idx, val.replace(dtype=f2f_dt[ctx[0]]))) if val.dtype == ctx[0] and idx.tag == ctx[0] else None),
   (UPat(Ops.STORE, src=(UPat.var("idx"), UPat.var("val", dtypes.floats)), name='st'), lambda ctx,st,idx,val:
    f2f_store(st, idx, val, *ctx) if val.dtype.scalar() == ctx[1] and (idx:=idx.src[0] if idx.op == Ops.CAST else idx).tag == ctx[0] else None),
+])
+
+def do_dtype_decomps(sink:UOp, ctx:tuple[set[DType], Target]) -> UOp:
+  def _should_emulate(dt): return dt in EMULATED_DTYPES.tolist(dtypes) or not is_dtype_supported(dt, ctx[1])
+  for fr in sorted(filter(_should_emulate, ctx[0])):
+    if fr in dtypes.floats:
+      to = dtypes.half if not _should_emulate(dtypes.half) and fr in dtypes.fp8s else dtypes.float
+      sink = graph_rewrite(sink, pm_float_decomp, name=f"decomp {fr} -> {to}", ctx=(fr, to), bottom_up=True)
+    else: sink = graph_rewrite(sink, pm_long_decomp, name="decomp long -> int", bottom_up=True)
+  return sink
+
+pm_dtype_decomps = PatternMatcher([
+  # detect dtypes to decompose
+  (UPat(GroupOp.All, (*dtypes.fp8s, dtypes.bfloat16, dtypes.half, dtypes.long, dtypes.ulong), name="x"), lambda x,ctx:
+   ctx[0].add({dtypes.ulong:dtypes.long}.get(dt:=x.dtype.base.scalar(), dt))),
+  # do the rewrites
+  (UPat(Ops.SINK, name="sink"), do_dtype_decomps),
 ])
