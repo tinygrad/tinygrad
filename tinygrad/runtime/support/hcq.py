@@ -1,9 +1,10 @@
 from __future__ import annotations
 from typing import cast, Callable, Type, TypeVar, Generic, Any
 import contextlib, decimal, statistics, time, ctypes, array, os, struct, collections, functools, itertools
+from dataclasses import replace
 try: import fcntl # windows misses that
 except ImportError: fcntl = None #type:ignore[assignment]
-from tinygrad.helpers import PROFILE, getenv, to_mv, from_mv, cpu_profile, ProfileRangeEvent, select_first_inited, unwrap, suppress_finalizing
+from tinygrad.helpers import DEV, PROFILE, getenv, to_mv, from_mv, cpu_profile, ProfileRangeEvent, select_first_inited, unwrap, suppress_finalizing
 from tinygrad.helpers import TracingKey
 from tinygrad.device import Device, BufferSpec, Compiled, LRUAllocator, ProfileDeviceEvent, ProfileProgramEvent
 from tinygrad.uop.ops import sym_infer, sint, UOp
@@ -485,9 +486,12 @@ class HCQCompiled(Compiled, Generic[SignalType]):
     return buf, realloced
 
   def _select_iface(self, *ifaces:Type):
-    if val:=getenv(f'{type(self).__name__[:-6].upper()}_IFACE', ""): ifaces = tuple(x for x in ifaces if x.__name__.startswith(val.upper()))
+    assert (v:=getenv(k:=f'{type(self).__name__[:-6].upper()}_IFACE', "")) == "",  \
+      f"{k}={v} is deprecated, use DEV={replace(DEV.target(type(self).__name__[:-6]), interface=v)} instead"
+    if (iface:=DEV.target(dev:=type(self).__name__[:-6]).interface): ifaces = tuple(x for x in ifaces if x.__name__.startswith(iface.upper()))
+    assert len(ifaces), f"No interface for {dev} " + (f"matches request {iface!r}" if iface else "is available")
     return select_first_inited([functools.partial(cast(Callable, iface), self, self.device_id) for iface in ifaces],
-                               f"No interface for {type(self).__name__[:-6]}:{self.device_id} is available")
+                               f"No interface for {dev}:{self.device_id} is available")
 
   def _is_cpu(self) -> bool: return hasattr(self, 'device') and self.device.split(":")[0] == "CPU"
 
