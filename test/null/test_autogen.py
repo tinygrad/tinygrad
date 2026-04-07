@@ -498,4 +498,39 @@ typedef struct ip_discovery_header
     assert ihdr.num_dies == 1
     assert ihdr.base_addr_64_bit == 1
 
+class TestReadonlyStruct(unittest.TestCase):
+  def test_struct_fields(self):
+    @record
+    class S(c.Struct):
+      SIZE = 16
+      a_u8: Annotated[ctypes.c_uint8, 0]
+      b_u16: Annotated[ctypes.c_uint16, 2]
+      c_u32: Annotated[ctypes.c_uint32, 4]
+      d_u64: Annotated[ctypes.c_uint64, 8]
+    init_records()
+
+    buf = struct.pack('<BxHIQ', 0xAB, 0xCDEF, 0xDEADBEEF, 0xCAFEBABE12345678)
+    s = S.from_mv(memoryview(buf))
+    self.assertEqual(s.a_u8, 0xAB)
+    self.assertEqual(s.b_u16, 0xCDEF)
+    self.assertEqual(s.c_u32, 0xDEADBEEF)
+    self.assertEqual(s.d_u64, 0xCAFEBABE12345678)
+
+    with self.assertRaises(TypeError):
+      s.a_u8 = 0xBA
+
+  def test_struct_with_array(self):
+    @record
+    class S(c.Struct):
+      SIZE = 4
+      a: Annotated[ctypes.c_uint8 * 4, 0]
+    init_records()
+
+    buf = struct.pack('<4B', 0xAB, 0xCD, 0xEF, 0x12)
+    s = S.from_mv(memoryview(buf))
+    self.assertEqual(s.a[0], 0xAB)
+    self.assertEqual(s.a[1], 0xCD)
+    self.assertEqual(s.a[2], 0xEF)
+    self.assertEqual(s.a[3], 0x12)
+
 if __name__ == "__main__": unittest.main()
