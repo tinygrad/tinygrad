@@ -107,11 +107,14 @@ class Scheduler:
     new_rngs = [UOp.range(e - s, *(rng.arg[:-1] + (i, rng.arg[-1]))) for i, (s, e) in enumerate(itertools.pairwise((*offsets, rng.src[0].arg)))]
     end = get_single_element([u for u in self.ast.toposort() if u.op is Ops.END and rng in u.src])
     rng_idx = end.src.index(rng)
-    inner_rngs, outer_rngs = list(end.src[1:rng_idx]), list(end.src[rng_idx+1:])
+    end_inner_rngs, outer_rngs = list(end.src[1:rng_idx]), list(end.src[rng_idx+1:])
+    # find all ranges enclosed within rng (END inner ranges + REDUCE ranges nested inside rng)
+    inner_rngs = [r for r in end.src[0].backward_slice_with_self if r.op is Ops.RANGE and rng in r.ranges]
     # inner ranges need to be duplicated and given unique numbers per split segment
     all_inner_rngs = [[UOp.range(r.src[0], *(r.arg[:-1] + (i, r.arg[-1]))) for r in inner_rngs] for i in range(len(new_rngs))]
-    ends = [end.src[0].substitute({rng: new_rngs[i] + offsets[i]}|dict(zip(inner_rngs, all_inner_rngs[i]))).end(*all_inner_rngs[i], new_rngs[i])
-            for i in range(len(new_rngs))]
+    end_inner_set = set(end_inner_rngs)
+    ends = [end.src[0].substitute({rng: new_rngs[i] + offsets[i]}|dict(zip(inner_rngs, all_inner_rngs[i]))).end(
+            *[r for r, orig in zip(all_inner_rngs[i], inner_rngs) if orig in end_inner_set], new_rngs[i]) for i in range(len(new_rngs))]
     group = UOp.group(*ends)
     self.ast = self.ast.substitute({end: group.end(*outer_rngs) if outer_rngs else group}, name=f"split {rng.arg[:-1]} at {cuts}")
     return tuple(new_rngs)
