@@ -1,8 +1,9 @@
 import ctypes, struct, dataclasses, array, itertools, time
 from typing import Sequence
 from tinygrad.runtime.autogen import libusb
-from tinygrad.helpers import DEBUG, to_mv, round_up, OSX, getenv
+from tinygrad.helpers import DEBUG, round_up, OSX, getenv
 from tinygrad.runtime.support.hcq import MMIOInterface
+from tinygrad.runtime.support.python import to_mv
 
 class USB3:
   def __init__(self, vendor:int, dev:int, ep_data_in:int, ep_stat_in:int, ep_data_out:int, ep_cmd_out:int, max_streams:int=31, use_bot=False):

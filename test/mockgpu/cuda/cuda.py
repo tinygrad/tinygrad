@@ -3,7 +3,7 @@ from typing import Any
 import ctypes, time
 from tinygrad.runtime.autogen import cuda as orig_cuda
 from test.mockgpu.helpers import _try_dlopen_gpuocelot
-from tinygrad.helpers import mv_address
+from tinygrad.runtime.support.python import mv_address
 
 for attr in dir(orig_cuda):
   if not attr.startswith('__'):

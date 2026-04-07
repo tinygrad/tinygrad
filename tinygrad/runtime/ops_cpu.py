@@ -1,6 +1,6 @@
 from __future__ import annotations
 import platform, sys, ctypes, functools, time, mmap, threading, queue
-from tinygrad.helpers import to_mv, OSX, WIN, mv_address, suppress_finalizing, unwrap, data64_le
+from tinygrad.helpers import OSX, WIN, suppress_finalizing, unwrap, data64_le
 from tinygrad.device import BufferSpec
 from tinygrad.renderer import Renderer
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, HCQArgsState, HCQSignal, HCQProgram, MMIOInterface
@@ -9,6 +9,7 @@ from tinygrad.renderer.cstyle import ClangJITRenderer
 from tinygrad.renderer.llvmir import CPULLVMRenderer
 from tinygrad.renderer.nir import LVPRenderer
 from tinygrad.runtime.support.elf import jit_loader
+from tinygrad.runtime.support.python import to_mv, mv_address
 from tinygrad.uop.ops import sint
 
 class CPUSignal(HCQSignal):
@@ -104,14 +105,14 @@ class CPUProgram(HCQProgram):
       # libgcc_s comes as shared library but compiler-rt is only a bunch of static library archives which we can't directly load, but fortunately
       # it somehow found its way into libSystem on macos (likely because it used __builtin_clear_cache) and libgcc_s is ~always present on linux
       # Using ["name"] instead of .name because otherwise name is getting mangled: https://docs.python.org/3.12/reference/expressions.html#index-5
-      if CPUProgram.rt_lib is not None:
-        CPUProgram.rt_lib["__clear_cache"](ctypes.c_void_p(mv_address(self.mem)), ctypes.c_void_p(mv_address(self.mem) + len(lib)))
+      if CPUProgram.rt_lib is not None: CPUProgram.rt_lib["__clear_cache"](ctypes.c_void_p(mv_address(memoryview(self.mem))),
+                                                                           ctypes.c_void_p(mv_address(memoryview(self.mem)) + len(lib)))
       else:
         # msync should be a universal POSIX way to do this
         from tinygrad.runtime.autogen import libc
-        libc.msync(ctypes.c_void_p(mv_address(self.mem)), len(lib), libc.MS_SYNC | libc.MS_INVALIDATE)
+        libc.msync(ctypes.c_void_p(mv_address(memoryview(self.mem))), len(lib), libc.MS_SYNC | libc.MS_INVALIDATE)
 
-      self.fxn = ctypes.CFUNCTYPE(None)(mv_address(self.mem))
+      self.fxn = ctypes.CFUNCTYPE(None)(mv_address(memoryview(self.mem)))
 
     super().__init__(LVPArgsState if LVP else HCQArgsState, dev, name, kernargs_alloc_size=12+256 if LVP else 0)
 
@@ -123,8 +124,8 @@ class CPUAllocator(HCQAllocator):
   def __init__(self, dev:CPUDevice): super().__init__(dev, supports_copy_from_disk=False, supports_transfer=False)
   def _alloc(self, size:int, options:BufferSpec) -> HCQBuffer:
     if options.external_ptr is not None: addr, buf = options.external_ptr, None
-    elif WIN: addr = mv_address(buf:=mmap.mmap(-1, size, access=mmap.ACCESS_WRITE))
-    else: addr = mv_address(buf:=mmap.mmap(-1, size, mmap.MAP_ANON | mmap.MAP_SHARED, mmap.PROT_READ | mmap.PROT_WRITE))
+    elif WIN: addr = mv_address(memoryview(buf:=mmap.mmap(-1, size, access=mmap.ACCESS_WRITE)))
+    else: addr = mv_address(memoryview(buf:=mmap.mmap(-1, size, mmap.MAP_ANON | mmap.MAP_SHARED, mmap.PROT_READ | mmap.PROT_WRITE)))
     return HCQBuffer(va:=addr, sz:=size, meta=buf, view=MMIOInterface(va, sz, fmt='B'), owner=self.dev)
   def _as_buffer(self, src) -> memoryview:
     self.dev.synchronize()

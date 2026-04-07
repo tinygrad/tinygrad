@@ -2,8 +2,9 @@ import ctypes, time
 from dataclasses import replace
 from test.mockgpu.gpu import VirtGPU
 from test.mockgpu.helpers import _try_dlopen_remu
-from tinygrad.helpers import getbits, to_mv, getenv, DEV
+from tinygrad.helpers import getbits, getenv, DEV
 from tinygrad.runtime.support import c
+from tinygrad.runtime.support.python import to_mv
 
 MOCKGPU_ARCH = "cdna4" if DEV.arch == "gfx950" else "rdna4" if DEV.arch.startswith("gfx12") else "rdna3"
 assert (ma:=getenv("MOCKGPU_ARCH", "")) == "", "MOCKGPU_ARCH is deprecated, use DEV=" + \

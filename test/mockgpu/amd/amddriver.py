@@ -2,7 +2,7 @@ import pathlib, re, ctypes, mmap, collections, functools, copy, os
 import tinygrad.runtime.autogen.kfd as kfd
 import tinygrad.runtime.autogen.am.am as am
 import tinygrad.runtime.autogen.amdgpu_drm as amdgpu_drm
-from tinygrad.helpers import from_mv
+from tinygrad.runtime.support.python import from_mv
 from test.mockgpu.driver import VirtDriver, VirtFileDesc, TextFileDesc, DirFileDesc, VirtFile
 from test.mockgpu.amd.amdgpu import AMDGPU, gpu_props, GFX_TARGET_VERSION, MOCKGPU_ARCH
 

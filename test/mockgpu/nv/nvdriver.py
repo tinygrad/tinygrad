@@ -1,7 +1,7 @@
 import ctypes, mmap, collections, functools, os
 from tinygrad.runtime.autogen import nv_570 as nv_gpu
 from typing import cast, Any
-from tinygrad.helpers import to_mv
+from tinygrad.runtime.support.python import to_mv
 from test.mockgpu.driver import VirtDriver, VirtFileDesc, VirtFile
 from test.mockgpu.nv.nvgpu import NVGPU
 
