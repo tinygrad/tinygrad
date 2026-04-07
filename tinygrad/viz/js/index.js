@@ -374,7 +374,6 @@ function setFocus(key) {
 }
 
 const EventTypes = { EXEC:0, BUF:1 };
-const GraphConfig = [{ pcolor:"#c9a8ff", unit:"B", fillColor:"#2B1B72"}, { pcolor:"#4fa3cc", unit:"Hz", fillColor:"#4fa3cc"}];
 
 async function renderProfiler(path, opts) {
   displaySelection("#profiler");
@@ -486,7 +485,6 @@ async function renderProfiler(path, opts) {
       div.style("height", levelHeight*levels.length+padding+"px").style("pointerEvents", "none");
     } else {
       const linear = u8(), peak = u64();
-      const config = GraphConfig[linear];
       const timestamps = [], valueMap = new Map();
       // start by unpacking the raw events
       const memEvents = [];
@@ -515,7 +513,7 @@ async function renderProfiler(path, opts) {
       const yscale = d3.scaleLinear().domain([0, peak]).range([height, 0]);
       // generic polygon merger
       const base0 = yscale(0);
-      const sum = {x:[], y0:[], y1:[], fillColor:config.fillColor};
+      const sum = {x:[], y0:[], y1:[], fillColor:linear ? null : "#2b1b72"};
       for (let i=0; i<timestamps.length-1; i++) {
         const yv = yscale(valueMap.get(timestamps[i]));
         sum.x.push(timestamps[i], timestamps[i+1]); sum.y1.push(yv, yv); sum.y0.push(base0, base0);
@@ -554,8 +552,8 @@ async function renderProfiler(path, opts) {
         return bufShapes;
       };
       if (timestamps.length > 0) data.first = data.first == null ? timestamps[0] : Math.min(data.first, timestamps[0]);
-      data.tracks.set(k, { shapes:[sum], eventType, linear, visible, offsetY, pcolor:config.pcolor, height, peak, scaleFactor:maxheight*4/height,
-                           get views() { return [[sum], linear ? null : buildBufShapes()]; }, valueMap, rowBorderColor });
+      data.tracks.set(k, { shapes:[sum], eventType, linear, visible, offsetY, pcolor:linear ? "#4fa3cc" : "#c9a8ff", height, peak, scaleFactor:maxheight*4/height,
+                           get views() { return [[sum], linear ? null : buildBufShapes()]; }, valueMap, rowBorderColor, unit:linear ? "Hz" : "B" });
       div.style("height", height+padding+"px").style("cursor", "pointer").on("click", (e) => {
         if (linear) return;
         const newFocus = e.currentTarget.id === focusedDevice ? null : e.currentTarget.id;
@@ -565,7 +563,7 @@ async function renderProfiler(path, opts) {
           if (tid === newFocus) { track.shapes = track.views[1]; offset += rescaleTrack(track, tid, track.scaleFactor); }
           else if (tid === focusedDevice) { track.shapes = track.views[0]; offset += rescaleTrack(track, tid, 1/track.scaleFactor); }
         }
-        data.axes.y = newFocus != null ? { domain:[0, (t=data.tracks.get(newFocus)).peak], range:[t.offsetY+t.height, t.offsetY], fmt:config.unit } : null;
+        data.axes.y = newFocus != null ? { domain:[0, (t=data.tracks.get(newFocus)).peak], range:[t.offsetY+t.height, t.offsetY], fmt:t.unit } : null;
         toggleCls(document.getElementById(focusedDevice), document.getElementById(newFocus), "expanded");
         focusedDevice = newFocus;
         return resize();
@@ -610,12 +608,11 @@ async function renderProfiler(path, opts) {
     const visibleYStart = profilerEl.scrollTop-canvasTop + rect(profilerEl).top, visibleYEnd = visibleYStart+profilerEl.clientHeight;
     ctx.textBaseline = "middle";
     // draw shapes
-    for (const [k, { shapes, eventType, linear, visible, offsetY, valueMap, pcolor, scolor, rowBorderColor }] of data.tracks) {
+    for (const [k, { shapes, eventType, linear, visible, offsetY, valueMap, pcolor, scolor, unit, rowBorderColor }] of data.tracks) {
       visible.length = 0;
       const trackHeight = rect(document.getElementById(k)).height;
       if (offsetY+trackHeight < visibleYStart || offsetY > visibleYEnd) continue;
       const addBorder = scolor != null ? (w) => { if (w > 10) { ctx.strokeStyle = scolor; ctx.stroke(); } } : null;
-      const config = GraphConfig[linear];
       for (const e of shapes) {
         if (eventType === EventTypes.BUF) { // generic polygon
           if (e.x[0]>et || e.x.at(-1)<st) continue;
@@ -625,10 +622,10 @@ async function renderProfiler(path, opts) {
           for (let i=1; i<x.length; i++) {
             ctx.lineTo(x[i], offsetY+e.y1[i]);
             let arg = e.arg;
-            if (arg == null && valueMap != null) arg = {tooltipText: formatUnit(valueMap.get(e.x[i-1]), config.unit)}
+            if (arg == null && valueMap != null) arg = {tooltipText: formatUnit(valueMap.get(e.x[i-1]), unit)}
             visible.push({ x0:x[i-1], x1:x[i], y0:offsetY+e.y1[i-1], y1:offsetY+e.y0[i], arg });
           }
-          if (linear) { ctx.strokeStyle = e.fillColor; ctx.lineWidth = 2; ctx.stroke(); ctx.lineWidth = 1; }
+          if (linear) { ctx.strokeStyle = pcolor; ctx.lineWidth = 2; ctx.stroke(); ctx.lineWidth = 1; }
           // walk the path back and fill the complete shape
           else { for (let i=x.length-1; i>=0; i--) ctx.lineTo(x[i], offsetY+e.y0[i]); ctx.closePath(); ctx.fillStyle = e.fillColor; ctx.fill(); }
         } else { // contiguous rect
