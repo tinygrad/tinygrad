@@ -1282,7 +1282,7 @@ def train_bert():
         previous_step = i
 
 def train_llama3():
-  from examples.mlperf.models.flat_llama import FlatTransformer, apply_grad, FP8
+  from examples.mlperf.models.flat_llama import FlatTransformer, apply_grad, FP8, FP8_DTYPE, FP8_MAX
   from examples.llama3 import MODEL_PARAMS
   from examples.mlperf.lr_schedulers import CosineAnnealingLRWithWarmup
   from examples.mlperf.optim import GradAccClipAdamW
@@ -1418,7 +1418,8 @@ def train_llama3():
 
   # init grads
   for p in optim.params:
-    p.grad = Tensor.zeros(p.shape, dtype=p.dtype, device=p.device).contiguous()
+    grad_dtype = dtypes.bfloat16 if p.dtype in dtypes.fp8s else p.dtype
+    p.grad = Tensor.zeros(p.shape, dtype=grad_dtype, device=p.device).contiguous()
   grads = [p.grad for p in optim.params]
 
   scheduler = CosineAnnealingLRWithWarmup(optim, opt_base_learning_rate, opt_end_learning_rate, opt_learning_rate_warmup_steps, opt_learning_rate_decay_steps)
@@ -1433,6 +1434,14 @@ def train_llama3():
     load_state_dict(scheduler, safe_load(fn), realize=False)
 
   fp8_amax = [t for ts in model._fp8_amax.values() for t in ts] if FP8 else []
+  fp8_scales = [t for ts in model._fp8_scale.values() for t in ts] if FP8 else []
+
+  # attach scale buffers to fp8 weight params so optimizer can update them in _apply_update
+  if FP8:
+    from tinygrad.nn.state import get_state_dict
+    model_state = get_state_dict(model)
+    for wname in (["wqkv"] if getenv("WQKV") else ["wq", "wk", "wv"]) + ["wo", "w1", "w2", "w3"]:
+      model_state[wname]._scale = model._fp8_scale[wname]
 
   @TinyJit
   def minibatch(tokens:Tensor):
@@ -1457,7 +1466,7 @@ def train_llama3():
 
     lr_cpu = optim.lr.float().to("CPU")
     grad_norm_cpu = grad_norm.float().to("CPU")
-    Tensor.realize(lr_cpu, grad_norm_cpu, *grads)
+    Tensor.realize(lr_cpu, grad_norm_cpu, *grads, *fp8_scales)
 
     return lr_cpu, grad_norm_cpu
 
