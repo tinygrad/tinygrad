@@ -1,6 +1,6 @@
 import itertools
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
-from tinygrad.helpers import getenv, DEBUG, prod, NOLOCALS, TC_OPT, TC_SELECT, USE_TC, AMX, IMAGE
+from tinygrad.helpers import getenv, DEBUG, prod, NOLOCALS, TC_OPT, TC_SELECT, USE_TC, AMX, IMAGE, dedup
 from tinygrad.dtype import PtrDType, ImageDType
 from tinygrad.uop.ops import Ops, resolve, AxisType
 from tinygrad.codegen.opt.postrange import Scheduler
@@ -60,6 +60,15 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
             k.apply_opt(Opt(OptOps.UPCAST, axis, 4))
           elif axis in k.unrollable_dims:
             k.apply_opt(Opt(OptOps.UNROLL, k.unrollable_dims.index(axis), 4))
+
+  for rng in k.ranges_of(AxisType.LOOP):
+    if rng.src[0].op is not Ops.CONST: continue
+    if not (cuts := [c.src[1].arg for c in k.ast.get_consumer_map()[rng] if c.op is Ops.CMPLT and rng is c.src[0] and c.src[1].op is Ops.CONST]):
+      continue
+    # applying the cut removes rng so if we do more than one cut we need to cut the new one
+    cuts = sorted([0] + cuts)
+    for prev_cut, cut in zip(cuts, cuts[1:]):
+      _, rng = k.apply_opt(Opt(OptOps.SPLIT, k.rngs.index(rng), cut - prev_cut))
 
   # should use matvec - TODO: adjust/tune based on the wide vs tall/large vs small mat
   MV_BLOCKSIZE, MV_THREADS_PER_ROW, MV_ROWS_PER_THREAD = getenv("MV_BLOCKSIZE", 4), getenv("MV_THREADS_PER_ROW", 8), getenv("MV_ROWS_PER_THREAD", 4)

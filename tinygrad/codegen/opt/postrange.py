@@ -110,6 +110,7 @@ class Scheduler:
     store0, store1 = end.src[0].substitute({rng: r0}), end.src[0].substitute({rng: r1 + amt})
     group = UOp.group(store0.end(*inner_rngs, r0), store1.end(*inner_rngs, r1))
     self.ast = self.ast.substitute({end: group.end(*outer_rngs) if outer_rngs else group}, name=f"split {rng.arg[:-1]} at {amt}")
+    return r0, r1
 
   def ranges_of(self, *axis_type:AxisType) -> list[UOp]: return [r for r in self.rngs if r.arg[-1] in axis_type]
   def axes_of(self, *axis_type:AxisType) -> list[int]: return [i for i,t in enumerate(self.axis_types) if t in axis_type]
@@ -216,7 +217,7 @@ class Scheduler:
       check(rng.src[0].op is Ops.CONST, "can only split const-sized ranges")
       amt = cast(int, opt.arg)
       check(0 < amt < int(rng.src[0].arg), f"split point {amt} must be between 0 and {int(rng.src[0].arg)}")
-      self.split_to(rng, amt)
+      return self.split_to(rng, amt)
     elif opt.op is OptOps.SWAP:
       try:
         altrng:UOp = self.rngs[opt.arg]
