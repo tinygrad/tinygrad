@@ -102,6 +102,15 @@ class Scheduler:
     self.ast = self.ast.substitute({rng:sub_axis}, name=f"shift {rng.arg[:-1]} {amount} {str(new_type).split('.')[1].lower()}")
     return replaced_rng, new_rng
 
+  def split_to(self, rng:UOp, amt:int):
+    r0, r1 = UOp.range(amt, *(rng.arg[:-1] + (0, rng.arg[-1]))), UOp.range(rng.src[0].arg - amt, *(rng.arg[:-1] + (1, rng.arg[-1])))
+    end = get_single_element([u for u in self.ast.toposort() if u.op is Ops.END and rng in u.src])
+    rng_idx = end.src.index(rng)
+    inner_rngs, outer_rngs = list(end.src[1:rng_idx]), list(end.src[rng_idx+1:])
+    store0, store1 = end.src[0].substitute({rng: r0}), end.src[0].substitute({rng: r1 + amt})
+    group = UOp.group(store0.end(*inner_rngs, r0), store1.end(*inner_rngs, r1))
+    self.ast = self.ast.substitute({end: group.end(*outer_rngs) if outer_rngs else group}, name=f"split {rng.arg[:-1]} at {amt}")
+
   def ranges_of(self, *axis_type:AxisType) -> list[UOp]: return [r for r in self.rngs if r.arg[-1] in axis_type]
   def axes_of(self, *axis_type:AxisType) -> list[int]: return [i for i,t in enumerate(self.axis_types) if t in axis_type]
 
@@ -202,6 +211,12 @@ class Scheduler:
         if rng in (i:=b.src[1].get_idx()).backward_slice_with_self:
           replaces[b] = b.replace(src=(b.src[0],(valid&b.src[1].get_valid()).where(i, UOp.invalid())))
       self.ast = self.ast.substitute(replaces, f"padto {rng.arg[:-1]} {opt.arg}")
+    elif opt.op is OptOps.SPLIT:
+      check(rng.arg[-1] == AxisType.LOOP, "split is only for LOOP ranges")
+      check(rng.src[0].op is Ops.CONST, "can only split const-sized ranges")
+      amt = cast(int, opt.arg)
+      check(0 < amt < int(rng.src[0].arg), f"split point {amt} must be between 0 and {int(rng.src[0].arg)}")
+      self.split_to(rng, amt)
     elif opt.op is OptOps.SWAP:
       try:
         altrng:UOp = self.rngs[opt.arg]
