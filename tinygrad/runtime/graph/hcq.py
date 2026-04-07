@@ -57,8 +57,9 @@ class HCQGraph(MultiGraphRunner):
 
     self.rdma_vars: dict[tuple[HCQCompiled, HCQCompiled], tuple[Variable, Any]] = {} # value is variable and src_qp
     self.rdma_deps: dict[int, tuple[HWQueue, list[tuple[HCQSignal, int]], HCQSignal, int]] = {}
+    self.rdma_last_dest: dict[int, tuple[HWQueue, int]] = {} # per QP id: last (queue, signal_value) for DBR ordering
 
-    # Per-peer-group representative device for signal allocation. Prefer non-CPU devices, fall back to devices[0].
+    # Per-peer-group representative device for signal allocation. For cpu, use devices[0].
     self.pg_dev: dict[Any, HCQCompiled] = {dev.peer_group: self.devices[0] for dev in self.devices if dev._is_cpu()} | \
                                            {dev.peer_group: dev for dev in self.devices if not dev._is_cpu()}
 
@@ -101,7 +102,7 @@ class HCQGraph(MultiGraphRunner):
         enqueue_queue = self.comp_queues[enqueue_dev]
       elif is_rdma:
         enqueue_queue = self.comp_queues[enqueue_dev]
-        rdma_key = (cast(HCQCompiled, Device[cast(Buffer, ji.bufs[0]).device]), cast(HCQCompiled, Device[cast(Buffer, ji.bufs[1]).device]))
+        rdma_key = (cast(HCQCompiled, Device[cast(Buffer, ji.bufs[0]).device]).rdma_dev(), cast(HCQCompiled, Device[cast(Buffer, ji.bufs[1]).device]).rdma_dev())
         self.rdma_queues.setdefault(rdma_key, RDMACopyQueue(enqueue_dev.rdma_dev()))
       else:
         assert (enqueue_dev.hw_copy_queue_t is not None), "device must implement a copy queue"
@@ -113,17 +114,18 @@ class HCQGraph(MultiGraphRunner):
 
       # Get dependencies based on input and output buffers.
       if is_rdma:
+        src_qp, dest_qp = rdma_key[1].iface.connect(rdma_key[0])[:2]
         sync_signals, opt_deps, rdeps = self._resolve_deps(ji.bufs[1:], [], enqueue_queue, enqueue_dev, out_signal, j,
-                                                           is_copy=isinstance(ji.prg, BufferXfer), is_rdma=is_rdma)
+                                                           is_copy=isinstance(ji.prg, BufferXfer), rdma_qp=src_qp)
         peer_queue = self.comp_queues[peer_dev:=cast(HCQCompiled, Device[cast(Buffer, ji.bufs[0]).device])]
         peer_out_signal = self.signals.setdefault(peer_queue, self.pg_dev[peer_dev.peer_group].new_signal(value=0))
         peer_sync_signals, peer_opt_deps, peer_rdeps = self._resolve_deps(ji.bufs[:1], [0], peer_queue, peer_dev, peer_out_signal, j,
-                                                                          is_copy=isinstance(ji.prg, BufferXfer), is_rdma=is_rdma)
+                                                                          is_copy=isinstance(ji.prg, BufferXfer), rdma_qp=dest_qp)
         self.rdma_deps[j] = (peer_queue, peer_sync_signals + peer_opt_deps, peer_out_signal, j + 1)
         self.last_j[peer_queue] = j
       else:
         sync_signals, opt_deps, rdeps = self._resolve_deps(ji.bufs, cast(CompiledRunner, ji.prg).p.outs if is_exec_prg else [0], enqueue_queue,
-          enqueue_dev, out_signal, j, is_copy=isinstance(ji.prg, BufferXfer), is_rdma=is_rdma)
+          enqueue_dev, out_signal, j, is_copy=isinstance(ji.prg, BufferXfer))
 
       self.ji_schedule[j] = (enqueue_dev, enqueue_queue, sync_signals, opt_deps[::-1], out_signal, None if is_exec_prg else (j + 1))
 
@@ -185,7 +187,7 @@ class HCQGraph(MultiGraphRunner):
         head_var = self.rdma_vars.setdefault((dest_rdma, src_rdma), (UOp.variable(f"rdma_var_{j}", 0, 0xffffffff, dtype=dtypes.uint32), src_qp))[0]
         next_head = self.num_rdma_ops[(dest_rdma, src_rdma)]
 
-        rdma_queue = self.rdma_queues[(dest_dev, src_dev)]
+        rdma_queue = self.rdma_queues[(dest_rdma, src_rdma)]
         rdma_queue.copy(self.hcq_bufs[j][0], self.hcq_bufs[j][1], dest.nbytes) \
                   .encode_ring(enqueue_queue, src_dev, src_rdma.iface, src_qp, src_cq_buf, head_var + next_head, ring_uar=True) \
                   .encode_ring(self.comp_queues[dest_dev], dest_dev, dest_rdma.iface, dest_qp, dest_cq_buf, head_var + next_head)
@@ -216,8 +218,14 @@ class HCQGraph(MultiGraphRunner):
     self.last_timeline: dict[HCQCompiled, tuple[HCQSignal, int]] = {dev: (dev.timeline_signal, 0) for dev in self.devices}
     self.queue_signals_to_reset = [self.signals[q] for q in list(self.comp_queues.values()) + list(self.copy_queues.values()) if q in self.signals]
 
-  def _resolve_deps(self, bufs, outs, enqueue_queue, enqueue_dev, out_signal, j, is_copy, is_rdma):
+  def _resolve_deps(self, bufs, outs, enqueue_queue, enqueue_dev, out_signal, j, is_copy, rdma_qp=None):
+    is_rdma = rdma_qp is not None
     rdeps = self._access_resources(bufs, outs, (enqueue_queue, j + 1)) #type:ignore
+
+    # Order shared QP doorbell record writes across different compute queues (head+1 must complete before head+2).
+    if rdma_qp is not None and (prev:=self.rdma_last_dest.get(id(rdma_qp))) is not None and prev[0] is not enqueue_queue:
+      rdeps = rdeps + [(prev[0], prev[1])]
+    if rdma_qp is not None: self.rdma_last_dest[id(rdma_qp)] = (enqueue_queue, j + 1)
 
     # Update dependencies to include previous kernel in queue. This is required for timeline signals.
     opt_deps, deps = [], rdeps + ([(enqueue_queue, prev_ji + 1)] if (prev_ji:=self.last_j[enqueue_queue]) is not None else [])
