@@ -213,6 +213,7 @@ class PCIDevice:
 class USBPCIDevice(PCIDevice):
   def __init__(self, devpref:str, pcibus:str):
     self.lock_fd = System.flock_acquire(f"{devpref.lower()}_{pcibus.lower()}.lock")
+    self.usb: CustomASM24Controller | ASM24Controller
     if getenv("MOCKGPU"):
       self.usb = ASM24Controller()
     else:
