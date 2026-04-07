@@ -470,7 +470,7 @@ class TestVizProfiler(unittest.TestCase):
     j = load_profile(prof)
     event = j['layout']['NV:SDMA:0']['events'][0]
     gbs = sz/(dur*1e-6)*1e-9
-    self.assertEqual(event['fmt'], f"{gbs:.0f} GB/s")
+    self.assertEqual(event['fmt'], f"{gbs:.0f} GB/s\n{sz/1e6:.0f} MB")
 
   def test_graph(self):
     prof = [ProfileDeviceEvent(device='NV', tdiff=decimal.Decimal(-1000)),
@@ -512,7 +512,7 @@ class TestVizProfiler(unittest.TestCase):
     j = load_profile(prof)
     sdma_events = j['layout']['NV:1:SDMA:0']['events']
     gbs = sz/(dur*1e-6)*1e-9
-    self.assertEqual(sdma_events[0]['fmt'], f"{gbs:.0f} GB/s")
+    self.assertEqual(sdma_events[0]["fmt"], f"{gbs:.0f} GB/s\n{sz/1e6:.0f} MB")
 
   def test_block_ordering(self):
     prof = [ProfileDeviceEvent(device='NV', tdiff=decimal.Decimal(-1000)),
