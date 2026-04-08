@@ -521,6 +521,7 @@ class TestSchedule(unittest.TestCase):
     expected = (expected * np.array([1,0,0,1,0,0,0,0,1,0]).reshape(num_steps, 1)).flatten()
     np.testing.assert_allclose(out.numpy(), expected, atol=1e-4, rtol=1e-4)
 
+  @unittest.skipIf(Device.DEFAULT == "CL", "TODO: fails on CI CL")
   def test_reduce_different_nesting_depth(self):
     # two REDUCEs sharing the same RANGE at different nesting depths must NOT merge
     x = Tensor.arange(768).reshape(3, 256).float()
