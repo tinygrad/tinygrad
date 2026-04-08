@@ -1578,7 +1578,8 @@ def train_llama3():
 
       if i == BENCHMARK:
         median_step_time = sorted(step_times)[(BENCHMARK + 1) // 2]
-        estimated_total_minutes = int(median_step_time * (SAMPLES // GBS) / 60)
+        estimated_steps = 200_000 // GBS if getenv("LLAMA3_SIZE", "8B") == "8B" else MAX_STEPS
+        estimated_total_minutes = int(median_step_time * estimated_steps / 60)
         print(f"Estimated training time: {estimated_total_minutes // 60}h{estimated_total_minutes % 60}m")
         print(f"epoch global_ops: {GlobalCounters.global_ops:_}, "
               f"epoch global_mem: {GlobalCounters.global_mem:_}")
