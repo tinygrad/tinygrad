@@ -66,7 +66,9 @@ class _System:
       iokit.IOServiceGetMatchingServices(0, iokit.IOServiceMatching(b"IOPCIDevice"), ctypes.byref(iterator:=ctypes.c_uint()))
       while svc:=iokit.IOIteratorNext(iterator): all_devs.append((v:=read_prop(svc, "vendor-id"), d:=read_prop(svc, "device-id"), f"{v:x}:{d:x}"))
     else:
-      for pcibus in FileIOInterface("/sys/bus/pci/devices").listdir():
+      try: devs = FileIOInterface("/sys/bus/pci/devices")
+      except FileNotFoundError: raise RuntimeError("no pcie")
+      for pcibus in devs.listdir():
         if base_class is not None and int(FileIOInterface(f"/sys/bus/pci/devices/{pcibus}/class").read(), 16) >> 16 != base_class: continue
         all_devs.append((int(FileIOInterface(f"/sys/bus/pci/devices/{pcibus}/vendor").read(), 16),
                          int(FileIOInterface(f"/sys/bus/pci/devices/{pcibus}/device").read(), 16), pcibus))

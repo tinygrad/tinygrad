@@ -246,7 +246,7 @@ def train_resnet():
 
       if i == BENCHMARK:
         assert not math.isnan(loss)
-        median_step_time = sorted(step_times)[(BENCHMARK + 1) // 2]  # in seconds
+        median_step_time = sorted(step_times)[BENCHMARK // 2]  # in seconds
         estimated_total_minutes = int(median_step_time * steps_in_train_epoch * epochs / 60)
         print(f"Estimated training time: {estimated_total_minutes // 60}h{estimated_total_minutes % 60}m")
         print(f"epoch global_ops: {steps_in_train_epoch * GlobalCounters.global_ops:_}, "
@@ -593,7 +593,7 @@ def train_retinanet():
 
       if i == BENCHMARK:
         assert not math.isnan(loss)
-        median_step_time = sorted(step_times)[(BENCHMARK + 1) // 2]  # in seconds
+        median_step_time = sorted(step_times)[BENCHMARK // 2]  # in seconds
         estimated_total_minutes = int(median_step_time * steps_in_train_epoch * EPOCHS / 60)
         print(f"Estimated training time: {estimated_total_minutes // 60}h{estimated_total_minutes % 60}m")
         print(f"epoch global_ops: {steps_in_train_epoch * GlobalCounters.global_ops:_}, "
@@ -868,7 +868,7 @@ def train_unet3d():
         i += 1
 
         if i == BENCHMARK:
-          median_step_time = sorted(step_times)[(BENCHMARK + 1) // 2]  # in seconds
+          median_step_time = sorted(step_times)[BENCHMARK // 2]  # in seconds
           estimated_total_minutes = int(median_step_time * SAMPLES_PER_EPOCH * NUM_EPOCHS / 60)
           print(f"Estimated training time: {estimated_total_minutes // 60}h{estimated_total_minutes % 60}m")
           if (TRAIN_BEAM or EVAL_BEAM) and epoch == start_epoch: break
@@ -1167,7 +1167,7 @@ def train_bert():
       i += 1
 
       if i == BENCHMARK:
-        median_step_time = sorted(step_times)[(BENCHMARK + 1) // 2]  # in seconds
+        median_step_time = sorted(step_times)[BENCHMARK // 2]  # in seconds
         estimated_total_minutes = int(median_step_time * train_steps / 60)
         print(f"Estimated training time: {estimated_total_minutes // 60}h{estimated_total_minutes % 60}m")
         print(f"epoch global_ops: {train_steps * GlobalCounters.global_ops:_}, "
@@ -1544,7 +1544,7 @@ def train_llama3():
 
       mem_gb = GlobalCounters.mem_used / 1e9
       gflops = GlobalCounters.global_ops / 1e9 / dev_time
-      mfu = ((6 * num_params * SEQLEN * GBS) / (dev_time * device_count * 2.3e15)) * 100
+      mfu = ((6 * num_params * SEQLEN * GBS) / (dev_time * device_count * (4.6e15 if FP8 else 2.3e15))) * 100
       tqdm.write(
           f"{i:5} {step_time:.3f} s step, {gbs_time:.3f} s gbs, {optim_time:.3f} s optim, {data_time:.3f} s data, {loss:.4f} loss, " \
           f"{lr:.12f} LR, {grad_norm:.6f} grad_norm, {mem_gb:.2f} GB used, {gflops:9.2f} GFLOPS, {mfu:5.2f}% MFU")
@@ -1577,8 +1577,9 @@ def train_llama3():
         safe_save(get_state_dict(scheduler), fn)
 
       if i == BENCHMARK:
-        median_step_time = sorted(step_times)[(BENCHMARK + 1) // 2]
-        estimated_total_minutes = int(median_step_time * (SAMPLES // GBS) / 60)
+        median_step_time = sorted(step_times)[BENCHMARK // 2]
+        estimated_steps = 200_000 // GBS if getenv("LLAMA3_SIZE", "8B") == "8B" else MAX_STEPS
+        estimated_total_minutes = int(median_step_time * estimated_steps / 60)
         print(f"Estimated training time: {estimated_total_minutes // 60}h{estimated_total_minutes % 60}m")
         print(f"epoch global_ops: {GlobalCounters.global_ops:_}, "
               f"epoch global_mem: {GlobalCounters.global_mem:_}")

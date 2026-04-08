@@ -35,12 +35,15 @@ def quantize_fp8(x:Tensor, amax_state:Tensor|None=None):
   return x_clamped.cast(FP8_DTYPE), scale.float().reciprocal()
 
 def matmul(x:Tensor, w:Tensor, fp8=FP8, amax_x:Tensor|None=None, amax_w:Tensor|None=None) -> Tensor:
-  if not fp8: return x @ w.T
-  from tinygrad.helpers import ASM_GEMM
+  if not fp8:
+    if getenv("ASM_GEMM"):
+      from extra.gemm.cdna_asm_gemm import can_use_asm_gemm, asm_gemm
+      if can_use_asm_gemm(x, w.T): return asm_gemm(x, w.T)
+    return x @ w.T
   x_fp8, x_scale = quantize_fp8(x, amax_state=amax_x)
   w_fp8, w_scale = quantize_fp8(w, amax_state=amax_w)
   combined_scale = x_scale * w_scale
-  if ASM_GEMM:
+  if getenv("ASM_GEMM"):
     from extra.gemm.cdna_asm_gemm import can_use_asm_gemm, asm_gemm
     if can_use_asm_gemm(x_fp8, w_fp8.T): return asm_gemm(x_fp8, w_fp8.T, combined_scale=combined_scale)
   return x_fp8.dot(w_fp8.T, dtype=dtypes.float) * combined_scale
@@ -122,7 +125,11 @@ class FlatTransformer:
     xq, xk = apply_rotary_emb(xq, xk, freqs_cis)
     if FP8: xq, xk, xv = xq.cast(dtypes.bfloat16), xk.cast(dtypes.bfloat16), xv.cast(dtypes.bfloat16)
     xq, xk, xv = xq.transpose(1, 2), xk.transpose(1, 2), xv.transpose(1, 2)
-    attn = xq.scaled_dot_product_attention(xk, xv, is_causal=True, enable_gqa=True).transpose(1, 2)
+    if getenv("HK_FLASH_ATTENTION"):
+      from extra.thunder.amd.fa import flash_attention
+      attn = flash_attention(xq, xk, xv, is_causal=True)
+    else:
+      attn = xq.scaled_dot_product_attention(xk, xv, is_causal=True, enable_gqa=True).transpose(1, 2)
     attn = attn.reshape(bsz, seqlen, -1)
     return matmul(attn, wo, amax_x=amax_xo, amax_w=amax_wo)
 
@@ -193,7 +200,7 @@ class FlatTransformer:
                          self.attention_norm[i], self.wo[i],
                          self.ffn_norm[i], self.w1[i], self.w2[i], self.w3[i],
                          **attn_kwargs, **amax_attn, **amax_layer)
-    logits = (self.norm(h).contiguous().contiguous_backward() @ self.output[0].T).contiguous_backward()
+    logits = matmul(self.norm(h).contiguous().contiguous_backward(), self.output[0], fp8=False).contiguous_backward()
     return logits
 
 def _get_pads(uop:UOp) -> list[UOp]:
