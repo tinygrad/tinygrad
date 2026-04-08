@@ -297,8 +297,11 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
   """
   Converts ggml tensor data to a tinygrad tensor.
 
-  Supported native types: float32 (id: 0), float16 (id: 1), int8 (id: 16), int16 (id: 17), int32 (id: 18), bfloat16 (id: 30)
-  Supported quantized types: Q4_0 (id: 2), Q4_1 (id: 3), Q5_1 (id: 7), Q8_0 (id: 8), Q4_K (id: 12), Q5_K (id: 13), Q6_K (id: 14), MXFP4 (id: 39)
+  Supported native types: float32 (id: 0), float16 (id: 1), bfloat16 (id: 30),
+  int8 (id: 16), int16 (id: 17), int32 (id: 18)
+  Supported quantized types: Q4_0 (id: 2), Q4_1 (id: 3), Q5_0 (id: 6),
+  Q5_1 (id: 7), Q8_0 (id: 8), Q4_K (id: 12), Q5_K (id: 13),
+  Q6_K (id: 14), MXFP4 (id: 39)
   """
   # https://github.com/ggerganov/ggml/blob/323951f1bdcdfbd5b5ff3a9a7c3770e63b1a560e/include/ggml.h#L356
 
@@ -316,7 +319,7 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
 
   # map to (number of elements, number of bytes)
   if (nelements_nbytes := {
-    2:(32,18), 3:(32,20), 7:(32,24), 8:(32,34),
+    2:(32,18), 3:(32,20), 6:(32,22), 7:(32,24), 8:(32,34),
     12:(256,144), 13:(256,176), 14:(256,210), 39:(32,17),
   }.get(ggml_type)) is not None:
     blocks = t[:(n//nelements_nbytes[0])*nelements_nbytes[1]].reshape((-1, nelements_nbytes[1])).contiguous()
@@ -324,11 +327,12 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
     if ggml_type == 3:
       d, m = (blocks[:,s:s+2].bitcast(dtypes.float16).cast(dtypes.float32) for s in [ 0, 2 ])
       return q_to_uint8(blocks[:,4:], 4).bitcast(dtypes.int8) * d + m
-    if ggml_type == 7:
-      d, m = (blocks[:,s:s+2].bitcast(dtypes.float16).cast(dtypes.float32) for s in [ 0, 2 ])
-      shift_tensor = Tensor.stack(*[Tensor(2**i, device=t.device, dtype=blocks.dtype) for i in range(8)])
-      qh = blocks[:,4:8].unsqueeze(-1).expand((-1, 4, 8)).idiv(shift_tensor).bitwise_and(1).flatten(-2)
-      return (q_to_uint8(blocks[:,8:], 4).bitcast(dtypes.int8) + qh.bitcast(dtypes.int8) * 16) * d + m
+    if ggml_type in (6, 7):
+      d = blocks[:,:2].bitcast(dtypes.float16).cast(dtypes.float32)
+      qh_off = 2 if ggml_type == 6 else 4
+      qh = q_to_uint8(blocks[:,qh_off:qh_off+4], 1).reshape((-1, 8, 4)).transpose(-1, -2).flatten(-2).bitcast(dtypes.int8)
+      q = q_to_uint8(blocks[:,qh_off+4:], 4).bitcast(dtypes.int8) + qh * 16
+      return q * d + (blocks[:,2:4].bitcast(dtypes.float16).cast(dtypes.float32) if ggml_type == 7 else -16 * d)
     if ggml_type == 8: return blocks[:,:2].bitcast(dtypes.float16).cast(dtypes.float32) * blocks[:,2:].bitcast(dtypes.int8)
      # Q4_K: 256 elements per 144-byte block (d:2, dmin:2, scales:12, qs:128)
      # Q5_K: 256 elements per 176-byte block (d:2, dmin:2, scales:12, qh:32, qs:128)
