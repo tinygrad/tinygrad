@@ -1,7 +1,7 @@
 from __future__ import annotations
-import os, ctypes, functools, mmap, struct, array, math, sys, weakref, contextlib
+import os, ctypes, functools, mmap, struct, array, sys, weakref, contextlib
 assert sys.platform != 'win32'
-from typing import Any, cast
+from typing import cast
 from tinygrad.device import BufferSpec, Device
 from tinygrad.runtime.support.hcq import HCQBuffer, HWQueue, HCQProgram, HCQCompiled, HCQAllocatorBase, HCQSignal, HCQArgsState, BumpAllocator
 from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface
@@ -9,9 +9,11 @@ from tinygrad.runtime.autogen import kgsl, mesa
 from tinygrad.renderer.cstyle import QCOMCLRenderer
 from tinygrad.renderer.nir import IR3Renderer
 from tinygrad.helpers import getenv, mv_address, to_mv, round_up, data64_le, ceildiv, prod, cpu_profile, lo32, suppress_finalizing
-from tinygrad.helpers import next_power2, flatten, PROFILE
+from tinygrad.helpers import flatten, PROFILE
 from tinygrad.dtype import ImageDType, dtypes
 from tinygrad.runtime.support.system import System
+from tinygrad.runtime.support.adreno import qreg, pkt7_hdr, pkt4_hdr, parse_ir3_shader, compute_program_sizes
+from tinygrad.runtime.support.adreno import build_a6xx_compute_pm4, build_a6xx_tex_descriptor
 if getenv("IOCTL"): import extra.qcom_gpu_driver.opencl_ioctl  # noqa: F401  # pylint: disable=unused-import
 
 BUFTYPE_BUF, BUFTYPE_TEX, BUFTYPE_IBO = 0, 1, 2
@@ -27,25 +29,6 @@ def dcache_flush():
   sink = UOp.sink(flush.end(i), UOp(Ops.CUSTOM, dtypes.void, (), arg='__asm__ volatile("dsb sy" ::: "memory");'), arg=KernelInfo(name="dcache_flush"))
   ps = get_program(UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg="CPU"), UOp(Ops.LINEAR, src=tuple(sink.toposort())))), Device["CPU"].renderer)
   return Device["CPU"].runtime(ps.function_name, ps.lib)
-
-#Parse C-style defines: <regname>_<field_x>__SHIFT and <regname>_<field_y>__MASK from the adreno module into the following format:
-# qreg.<regname>(<field_x>=..., <field_y>=..., ..., <field_n>=...)
-def _qreg_exec(__reg, __val=0, **kwargs):
-  for k, v in kwargs.items():
-    reg_name = f"{__reg[4:]}_{k.removeprefix('_').upper()}"
-    __val |= (getattr(mesa, reg_name) if v else 0) if type(v) is bool else (v << getattr(mesa, f'{reg_name}__SHIFT'))
-  return __val
-qreg: Any = type("QREG", (object,), {name[4:].lower(): functools.partial(_qreg_exec, name) for name in mesa.__dict__.keys() if name[:4] == 'REG_'})
-
-def ctz(v): return (v & -v).bit_length() - 1
-
-def parity(val: int):
-  for i in range(4,1,-1): val ^= val >> (1 << i)
-  return (~0x6996 >> (val & 0xf)) & 1
-
-def pkt7_hdr(opcode: int, cnt: int): return mesa.CP_TYPE7_PKT | cnt & 0x3FFF | parity(cnt) << 15 | (opcode & 0x7F) << 16 | parity(opcode) << 23
-
-def pkt4_hdr(reg: int, cnt: int): return mesa.CP_TYPE4_PKT | cnt & 0x7F | parity(cnt) << 7 | (reg & 0x3FFFF) << 8 | parity(reg) << 27
 
 def _read_lib(lib, off) -> int: return struct.unpack("I", lib[off:off+4])[0]
 
@@ -122,76 +105,8 @@ class QCOMComputeQueue(HWQueue):
 
   def exec(self, prg:QCOMProgram, args_state:QCOMArgsState, global_size, local_size):
     self.bind_args_state(args_state)
-
-    def cast_int(x, ceil=False): return (math.ceil(x) if ceil else int(x)) if isinstance(x, float) else x
-    global_size_mp = [cast_int(g*l) for g,l in zip(global_size, local_size)]
-
-    self.cmd(mesa.CP_SET_MARKER, qreg.a6xx_cp_set_marker_0(mode=mesa.RM6_COMPUTE))
-    self.reg(mesa.REG_A6XX_SP_UPDATE_CNTL, qreg.a6xx_sp_update_cntl(cs_state=True, cs_uav=True))
-    self.reg(mesa.REG_A6XX_SP_UPDATE_CNTL, 0x0)
-    self.reg(mesa.REG_A6XX_SP_CS_TSIZE, qreg.a6xx_sp_cs_tsize(0x80)) # is this right? mesa uses 1
-    self.reg(mesa.REG_A6XX_SP_CS_USIZE, qreg.a6xx_sp_cs_usize(0x40)) # mesa also uses 1
-    self.reg(mesa.REG_A6XX_SP_MODE_CNTL, qreg.a6xx_sp_mode_cntl(isammode=mesa.ISAMMODE_GL if prg.NIR else mesa.ISAMMODE_CL))
-    self.reg(mesa.REG_A6XX_SP_PERFCTR_SHADER_MASK, qreg.a6xx_sp_perfctr_shader_mask(cs=True))
-    self.reg(mesa.REG_A6XX_TPL1_MODE_CNTL, qreg.a6xx_tpl1_mode_cntl(isammode=mesa.ISAMMODE_GL if prg.NIR else mesa.ISAMMODE_CL))
-    self.reg(mesa.REG_A6XX_TPL1_DBG_ECO_CNTL, 0)
-    self.cmd(mesa.CP_WAIT_FOR_IDLE)
-
-    self.reg(mesa.REG_A6XX_SP_CS_NDRANGE_0,
-             qreg.a6xx_sp_cs_ndrange_0(kerneldim=3, localsizex=local_size[0] - 1, localsizey=local_size[1] - 1, localsizez=local_size[2] - 1),
-             global_size_mp[0], 0, global_size_mp[1], 0, global_size_mp[2], 0, 0xccc0cf, 0xfc | qreg.a6xx_sp_cs_wge_cntl(threadsize=mesa.THREAD64),
-             cast_int(global_size[0], ceil=True), cast_int(global_size[1], ceil=True), cast_int(global_size[2], ceil=True))
-
-    self.reg(mesa.REG_A6XX_SP_CS_CNTL_0,
-             qreg.a6xx_sp_cs_cntl_0(threadsize=mesa.THREAD64, halfregfootprint=prg.hregs, fullregfootprint=prg.fregs, branchstack=prg.brnchstck),
-             qreg.a6xx_sp_cs_cntl_1(constantrammode=mesa.CONSTLEN_256, shared_size=prg.shared_size), # should this be CONSTLEN_512?
-             0, prg.prg_offset, *data64_le(prg.lib_gpu.va_addr),
-             qreg.a6xx_sp_cs_pvt_mem_param(memsizeperitem=prg.pvtmem_size_per_item), *data64_le(prg.dev._stack.va_addr),
-             qreg.a6xx_sp_cs_pvt_mem_size(totalpvtmemsize=prg.pvtmem_size_total))
-
-    if prg.NIR and prg.wgsz != 0xfc: to_mv(int(args_state.buf.va_addr) + prg.wgsz * 4, 12)[:] = struct.pack("III", *local_size)
-    self.cmd(mesa.CP_LOAD_STATE6_FRAG, qreg.cp_load_state6_0(state_type=mesa.ST_CONSTANTS, state_src=mesa.SS6_INDIRECT,
-                                                             state_block=mesa.SB6_CS_SHADER, num_unit=1024 // 4),
-             *data64_le(args_state.buf.va_addr))
-    self.cmd(mesa.CP_LOAD_STATE6_FRAG, qreg.cp_load_state6_0(state_type=mesa.ST_SHADER, state_src=mesa.SS6_INDIRECT,
-                                                             state_block=mesa.SB6_CS_SHADER, num_unit=round_up(prg.image_size, 128) // 128),
-             *data64_le(prg.lib_gpu.va_addr))
-
-    self.reg(mesa.REG_A6XX_SP_REG_PROG_ID_0, 0xfcfcfcfc, 0xfcfcfcfc, 0xfcfcfcfc, 0xfc, qreg.a6xx_sp_cs_const_config(constlen=1024 // 4, enabled=True))
-
-    self.reg(mesa.REG_A6XX_SP_CS_PVT_MEM_STACK_OFFSET, qreg.a6xx_sp_cs_pvt_mem_stack_offset(prg.hw_stack_offset))
-    self.reg(mesa.REG_A6XX_SP_CS_INSTR_SIZE, qreg.a6xx_sp_cs_instr_size(prg.image_size // 4))
-
-    if prg.samp_cnt > 0:
-      self.cmd(mesa.CP_LOAD_STATE6_FRAG, qreg.cp_load_state6_0(state_type=mesa.ST_SHADER, state_src=mesa.SS6_INDIRECT,
-                                                               state_block=mesa.SB6_CS_TEX, num_unit=args_state.prg.samp_cnt),
-               *data64_le(args_state.buf.va_addr + args_state.prg.samp_off))
-      self.reg(mesa.REG_A6XX_SP_CS_SAMPLER_BASE, *data64_le(args_state.buf.va_addr + args_state.prg.samp_off))
-      self.reg(mesa.REG_A6XX_TPL1_CS_BORDER_COLOR_BASE, *data64_le(prg.dev.border_color_buf.va_addr))
-
-    if prg.tex_cnt > 0:
-      self.cmd(mesa.CP_LOAD_STATE6_FRAG, qreg.cp_load_state6_0(state_type=mesa.ST_CONSTANTS, state_src=mesa.SS6_INDIRECT,
-                                                               state_block=mesa.SB6_CS_TEX, num_unit=min(16, args_state.prg.tex_cnt)),
-               *data64_le(args_state.buf.va_addr + args_state.prg.tex_off))
-      self.reg(mesa.REG_A6XX_SP_CS_TEXMEMOBJ_BASE, *data64_le(args_state.buf.va_addr + args_state.prg.tex_off))
-
-    if prg.ibo_cnt > 0:
-      self.cmd(mesa.CP_LOAD_STATE6_FRAG, qreg.cp_load_state6_0(state_type=mesa.ST6_UAV, state_src=mesa.SS6_INDIRECT,
-                                                               state_block=mesa.SB6_CS_SHADER, num_unit=args_state.prg.ibo_cnt),
-               *data64_le(args_state.buf.va_addr + args_state.prg.ibo_off))
-      self.reg(mesa.REG_A6XX_SP_CS_UAV_BASE, *data64_le(args_state.buf.va_addr + args_state.prg.ibo_off))
-
-    self.reg(mesa.REG_A6XX_SP_CS_CONFIG,
-             qreg.a6xx_sp_cs_config(enabled=True, nsamp=args_state.prg.samp_cnt, ntex=args_state.prg.tex_cnt, nuav=args_state.prg.ibo_cnt))
-
-    if prg.NIR:
-      self.reg(mesa.REG_A6XX_SP_CS_CONST_CONFIG_0,
-               qreg.a6xx_sp_cs_const_config_0(wgidconstid=prg.wgid, wgsizeconstid=prg.wgsz, wgoffsetconstid=0xfc, localidregid=prg.lid),
-               qreg.a6xx_sp_cs_wge_cntl(linearlocalidregid=0xfc, threadsize=mesa.THREAD64))
-      self.cmd(mesa.CP_EXEC_CS, 0,
-               qreg.cp_exec_cs_1(ngroups_x=global_size[0]), qreg.cp_exec_cs_2(ngroups_y=global_size[1]), qreg.cp_exec_cs_3(_ngroups_z=global_size[2]))
-    else: self.cmd(mesa.CP_RUN_OPENCL, 0)
-
+    build_a6xx_compute_pm4(self.cmd, self.reg, prg, int(args_state.buf.va_addr), prg.lib_gpu.va_addr, prg.dev._stack.va_addr,
+                           prg.dev.border_color_buf.va_addr, global_size, local_size, nir=prg.NIR)
     self._cache_flush(write_back=True, invalidate=False, sync=False, memsync=False)
     return self
 
@@ -215,56 +130,24 @@ class QCOMArgsState(HCQArgsState):
       for i, b in enumerate(ubos): self.bind_sints_to_buf(b.va_addr, buf=self.buf, fmt='Q', offset=prg.buf_offs[i])
       for i, v in enumerate(vals): self.bind_sints_to_buf(v, buf=self.buf, fmt='I', offset=prg.buf_offs[i+len(ubos)])
 
-    def _tex(b, ibo=False):
-      imgdt, buf = b
-      fmt = mesa.FMT6_32_32_32_32_FLOAT if imgdt.itemsize == 4 else mesa.FMT6_16_16_16_16_FLOAT
-      return [qreg.a6xx_tex_const_0(fmt=fmt) if ibo else qreg.a6xx_tex_const_0(0x8, swiz_x=0, swiz_y=1, swiz_z=2, swiz_w=3, fmt=fmt),
-              qreg.a6xx_tex_const_1(width=imgdt.shape[1], height=imgdt.shape[0]),
-              qreg.a6xx_tex_const_2(type=mesa.A6XX_TEX_2D, pitch=imgdt.pitch, pitchalign=ctz(imgdt.pitch)-6), 0, *data64_le(buf.va_addr),
-              qreg.a6xx_tex_const_6(plane_pitch=0x400000), qreg.a6xx_tex_const_7(13), 0, 0, 0, 0, 0, 0, 0, 0]
-
-    self.bind_sints_to_buf(*flatten(map(_tex, texs)), buf=self.buf, fmt='I', offset=prg.tex_off)
-    self.bind_sints_to_buf(*flatten(map(functools.partial(_tex, ibo=True), ibos)), buf=self.buf, fmt='I', offset=prg.ibo_off)
+    self.bind_sints_to_buf(*flatten(build_a6xx_tex_descriptor(dt, b.va_addr) for dt,b in texs), buf=self.buf, fmt='I', offset=prg.tex_off)
+    self.bind_sints_to_buf(*flatten(build_a6xx_tex_descriptor(dt, b.va_addr, ibo=True) for dt,b in ibos), buf=self.buf, fmt='I', offset=prg.ibo_off)
 
 class QCOMProgram(HCQProgram):
   def __init__(self, dev: QCOMDevice, name: str, lib: bytes, buf_dtypes=[], **kwargs):
     self.dev: QCOMDevice = dev
     self.buf_dtypes, self.name, self.NIR = buf_dtypes, name, isinstance(dev.renderer, IR3Renderer)
 
-    if self.NIR:
-      from tinygrad.runtime.support.compiler_mesa import IR3Compiler
-      v, cs, imm_vals, self.image = IR3Compiler.unpack_lib(lib)
-      self.prg_offset, self.brnchstck, self.image_size, self.pvtmem, self.shmem = 0, v.branchstack, v.info.size, v.pvtmem_size, v.shared_size
-      self.wgsz = alloc.offset_vec4 * 4 + 8 if (alloc:=cs.allocs.consts[mesa.IR3_CONST_ALLOC_DRIVER_PARAMS]).size_vec4 else 0xfc
-
-      self.wgid, self.lid = v.cs.work_group_id, v.cs.local_invocation_id # register ids
-      self.buf_off, imm_off = cs.ubo_state.range[0].offset, cs.allocs.max_const_offset_vec4 * 16
-      self.consts_info = [(struct.unpack_from("<I", imm_vals, i)[0], imm_off + i, 4) for i in range(0, len(imm_vals), 4)]
-
-      # see https://elixir.bootlin.com/mesa/mesa-25.3.0/source/src/freedreno/ir3/ir3_shader.h#L525
-      # and https://elixir.bootlin.com/mesa/mesa-25.3.0/source/src/freedreno/ir3/ir3_compiler_nir.c#L5389
-      self.samp_cnt, self.tex_cnt, self.ibo_cnt = (nt:=v.image_mapping.num_tex), nt, v.num_uavs - nt
-      self.tex_to_image = v.image_mapping.tex_to_image[:]
-      # IR3 outputs a sampler for every texture (https://elixir.bootlin.com/mesa/mesa-25.3.0/source/src/freedreno/ir3/ir3_compiler_nir.c#L1714)
-      self.samplers = [qreg.a6xx_tex_samp_0(wrap_s=(clamp_mode:=mesa.A6XX_TEX_CLAMP_TO_BORDER), wrap_t=clamp_mode, wrap_r=clamp_mode),
-                       qreg.a6xx_tex_samp_1(unnorm_coords=True, cubemapseamlessfiltoff=True), 0, 0] * self.samp_cnt
-
-      self.tex_off, self.ibo_off, self.samp_off = 2048, 2048 + 0x40 * self.tex_cnt, 2048 + 0x40 * (self.tex_cnt + self.ibo_cnt)
-      self.fregs, self.hregs = v.info.max_reg + 1, v.info.max_half_reg + 1
+    if self.NIR: parse_ir3_shader(self, lib)
     else: self._parse_lib(lib)
 
     self.lib_gpu: HCQBuffer = self.dev.allocator.alloc(self.image_size, buf_spec:=BufferSpec(cpu_access=True, nolru=True))
     to_mv(self.lib_gpu.va_addr, self.image_size)[:] = self.image
 
-    self.pvtmem_size_per_item: int = round_up(self.pvtmem, 512) >> 9
-    self.pvtmem_size_total: int = self.pvtmem_size_per_item * 128 * 2
-    self.hw_stack_offset: int = round_up(next_power2(round_up(self.pvtmem, 512)) * 128 * 16, 0x1000)
-    self.shared_size: int = max(1, (self.shmem - 1) // 1024)
-    self.max_threads = min(1024, ((384 * 32) // (max(1, (self.fregs + round_up(self.hregs, 2) // 2)) * 128)) * 128)
+    compute_program_sizes(self)
     dev._ensure_stack_size(self.hw_stack_offset * 4)
 
-    kernargs_alloc_size = round_up(2048 + (self.tex_cnt + self.ibo_cnt) * 0x40 + len(self.samplers) * 4, 0x100)
-    super().__init__(QCOMArgsState, self.dev, self.name, kernargs_alloc_size=kernargs_alloc_size)
+    super().__init__(QCOMArgsState, self.dev, self.name, kernargs_alloc_size=self.kernargs_alloc_size)
     weakref.finalize(self, self._fini, self.dev, self.lib_gpu, buf_spec)
 
   def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1),
