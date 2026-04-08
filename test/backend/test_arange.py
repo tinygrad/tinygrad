@@ -24,6 +24,11 @@ class TestArange(unittest.TestCase):
     self.assertEqual(self._get_flops(Tensor.arange(256), np.arange(256)), 0)
     self.assertEqual(self._get_flops(Tensor.arange(2560), np.arange(2560)), 0)
 
+  # TODO: fix merge_reduce_ends merging ENDs at different nesting depths
+  @unittest.expectedFailure
+  def test_arange_cumsum(self):
+    np.testing.assert_equal(Tensor.arange(513).cumsum(0).numpy(), np.arange(513).cumsum())
+
   def test_arange_cat(self):
     t = Tensor.arange(2, dtype=dtypes.int)+Tensor([3])
     self.assertEqual(t.cat(t).tolist(), [3, 4, 3, 4])
