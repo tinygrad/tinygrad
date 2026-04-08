@@ -154,4 +154,3 @@ pm_load_collapse = PatternMatcher([
   # we want to make sure we dont do math on a loaded index since that can cause overflow, this undoes the rule in pm_reduce_load_collapse
   ((UPat.var("x", dtypes.weakint)+UPat.var("y"))<UPat.var("c"), lambda x,y,c: x < c-y if no_load(y) and no_load(c) and not no_load(x) else None),
 ])
-
