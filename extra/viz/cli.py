@@ -61,7 +61,7 @@ def main(args) -> None:
     events:list = viz.load_pickle(args.profile_path, default=[])
     if (profile_bytes:=viz.get_profile(events)) is None: raise RuntimeError(f"empty profile in {args.profile_path}")
     profile = decode_profile(profile_bytes)
-    profile["layout"].update([(f'{c["name"][5:]}{" SQTT" if s["name"].endswith("PKTS") else ''} {s["name"]}', s["data"]) for c in viz.ctxs
+    profile["layout"].update([(f'{c["name"][5:]}{" SQTT" if s["name"].endswith("PKTS") else ""} {s["name"]}', s["data"]) for c in viz.ctxs
                               if c["name"].startswith("SQTT") for s in c["steps"] if s["name"].endswith(("PMC", "PKTS"))])
     if args.src is None:
       for k in profile["layout"]:
