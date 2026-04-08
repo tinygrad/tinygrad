@@ -313,10 +313,14 @@ CHAT_HTML = b'''<!DOCTYPE html><html><head><title>tinygrad chat</title><style>
     const d = document.createElement('div'); d.className = 'msg'; chat.appendChild(d);
     const r = await fetch('/v1/chat/completions', {method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({model: 'llama', messages: msgs, stream: true, temperature: 0.7})});
+    let buf = '';
     for (const rd = r.body.getReader(), dec = new TextDecoder();;) {
       const {done, value} = await rd.read();
       if (done) break;
-      for (const ln of dec.decode(value).split('\\n'))
+      buf += dec.decode(value, {stream: true});
+      const lines = buf.split('\\n');
+      buf = lines.pop();
+      for (const ln of lines)
         if (ln.startsWith('data: ') && !ln.includes('[DONE]'))
           try { d.textContent += JSON.parse(ln.slice(6)).choices[0]?.delta?.content || '' } catch {}
       chat.scrollTop = chat.scrollHeight;
