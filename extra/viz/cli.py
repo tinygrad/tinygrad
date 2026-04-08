@@ -87,7 +87,7 @@ def main(args) -> None:
         op_str = hex_colored(op_name, color) if color and not args.no_color else op_name
         phase, delay = None, 0
         idx = next(pkt_idxs.setdefault(e.device, itertools.count()))
-        if e.device.startswith("WAVE") or e.device == "OTHER_SIMD":
+        if e.device.startswith("WAVE"):
           inst = f"0x{(pc:=int(info.replace('PC:', ''))):05x} {pc_map[pc]}" if info else f"{'':7} {op_name}"
           dispatch_to_inst[f"{e.device}-{idx}"] = (inst, int(e.st))
           phase = "DISPATCH"
