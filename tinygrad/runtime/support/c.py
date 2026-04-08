@@ -85,32 +85,36 @@ class Struct(ctypes.Structure):
     for f,v in [*zip((rf[0] for rf in self._real_fields_), args), *kwargs.items()]: setattr(self, f, v)
 
 def record(cls) -> type[Struct]:
-  newcls = type(cls.__name__, (Struct,), {'_fields_': [('_mem_', ctypes.c_byte * cls.SIZE)]})
-  _pending_records.append((cls, newcls, unwrap(sys._getframe().f_back).f_globals))
-  return newcls
+  struct = type(cls.__name__, (Struct,), {'_fields_': [('_mem_', ctypes.c_byte * cls.SIZE)]})
+  _pending_records.append((cls, struct, unwrap(sys._getframe().f_back).f_globals))
+  return struct
 
 def init_records() -> None:
-  for cls, newcls, ns in _pending_records:
-    setattr(newcls, '_real_fields_', [])
+  for cls, struct, ns in _pending_records:
+    setattr(struct, '_real_fields_', [])
     for i, (nm, t) in enumerate(get_type_hints(cls, globalns=ns, include_extras=True).items()):
-      newcls._real_fields_.append((nm, *(f:=(del_an(t.__origin__), *t.__metadata__) if isinstance(t.__metadata__[0], int) else t.__metadata__)))
-      setattr(newcls, nm, Field(nm, i, *f))
+      struct._real_fields_.append((nm, *(f:=(del_an(t.__origin__), *t.__metadata__) if isinstance(t.__metadata__[0], int) else t.__metadata__))) # type: ignore
+      setattr(struct, nm, Field(nm, i, *f))
   _pending_records.clear()
 
 class Field:
   def __init__(self, nm, idx, typ, off, bit_width=None, bit_off=0):
     self.nm, self.idx, self.typ, self.off, self.bit_width, self.bit_off = nm, idx, typ, off, bit_width, bit_off
+
+  # lazily resolve field descriptors
   def _resolve(self, cls):
-    if self.bit_width:
+    if self.bit_width: # handle bitfields ourselves
       sl, set_mask = slice(self.off, self.off+(sz:=ceildiv(self.bit_width+self.bit_off, 8))), ~((mask:=(1 << self.bit_width) - 1) << self.bit_off)
       def b2i(obj): return int.from_bytes(memoryview(obj).cast("B")[sl], sys.byteorder)
       def bset(obj, v): memoryview(obj).cast("B")[sl] = ((b2i(obj) & set_mask) | v << self.bit_off).to_bytes(sz, sys.byteorder)
       # FIXME: signedness
       cf = property(lambda obj: b2i(obj) >> self.bit_off & mask, bset)
+    # pull the CField descriptor from a dummy class, zero length arrays are so ctypes manages references to child objects for us
     else: cf = type(self.nm, (ctypes.Structure,), {"_layout_": "ms", "_pack_": 1, "_fields_": [(str(i), ctypes.c_byte * 0) for i in range(self.idx)] +
                                                                                               [("_", ctypes.c_byte * self.off), ("v", self.typ)]}).v # type: ignore
     setattr(cls, self.nm, cf)
     return cf
+
   def __get__(self, obj, objtype=None): return self._resolve(objtype).__get__(obj, objtype) if objtype else self
   def __set__(self, obj, value): self._resolve(obj.__class__).__set__(obj, value)
 
@@ -118,7 +122,7 @@ class Field:
 def init_c_struct_t(sz:int, fields: tuple[tuple, ...]):
   CStruct = type("CStruct", (Struct,), {'_fields_': [('_mem_', ctypes.c_byte * sz)], '_real_fields_': []})
   for i,(nm,ty,*args) in enumerate(fields):
-    CStruct._real_fields_.append((nm, *(f:=(del_an(ty), *args))))
+    CStruct._real_fields_.append((nm, *(f:=(del_an(ty), *args)))) # type: ignore
     setattr(CStruct, nm, Field(nm, i, *f))
   return CStruct
 def init_c_var(ty, creat_cb): return (creat_cb(v:=del_an(ty)()), v)[1]
