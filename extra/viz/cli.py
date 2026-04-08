@@ -47,7 +47,9 @@ def decode_profile(data:bytes) -> dict:
 def get(data:dict, key:str):
   for k,v in data.items():
     if ansistrip(k) == key: return v
-  raise RuntimeError(f'item "{key}" not found in list')
+  import difflib
+  match = difflib.get_close_matches(key, [ansistrip(k) for k in data], n=1, cutoff=0.6)
+  raise RuntimeError(f'item "{key}" not found in list'+(f", did you mean {match[0]!r}" if match else ''))
 
 def main(args) -> None:
   viz.trace = viz.load_pickle(args.rewrites_path, default=RewriteTrace([], [], {}))
