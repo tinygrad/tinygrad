@@ -2,7 +2,7 @@ from __future__ import annotations
 import math, itertools
 from collections import defaultdict
 from typing import cast, Final
-from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, KernelInfo, graph_rewrite, AxisType, ssimplify, GroupOp
+from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, KernelInfo, graph_rewrite, AxisType, ssimplify, GroupOp, range_start
 from tinygrad.uop.ops import axis_letters, axis_colors, axis_to_pos
 from tinygrad.device import Buffer
 from tinygrad.dtype import dtypes
@@ -112,7 +112,7 @@ class Scheduler:
     # find all the ranges who's END depends on any of the RANGES in dup_rngs, i.e. if we duplicate any of the dup_rngs, we have to duplicate this too
     new_end = end.src[0].end(*inner_rngs)
     dup_rngs: dict[UOp, None] = {rng: None}
-    while (new := [er for v in new_end.backward_slice_with_self if v.op is Ops.END
+    while (new := [er for v in new_end.backward_slice_with_self if v.op in range_start
                    for er in v.ended_ranges if er.op is Ops.RANGE and er not in dup_rngs and any(r in v.src[0].ranges for r in dup_rngs)]):
       dup_rngs.update({r: None for r in new})
     dup_rngs.pop(rng)
