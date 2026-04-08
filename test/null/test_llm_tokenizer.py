@@ -46,5 +46,14 @@ class TestLLMTokenizer(unittest.TestCase):
   def test_llama_repeat(self): self._test_coding(self.llama_tok, "00000000000000000", [ 931, 931, 931, 931, 931, 410 ])
   def test_llama_pat(self): self._test_coding(self.llama_tok, "today\n  \n", [ 31213, 14211 ])
 
+  def test_stream_decoder(self):
+    """stream_decoder buffers incomplete UTF-8: token 25677 has 3/4 of emoji, token 138 completes it."""
+    bs = [*range(33, 127), *range(161, 173), *range(174, 256)]
+    be = {b: chr(b) for b in bs} | {b: chr(256+i) for i,b in enumerate(b for b in range(256) if b not in bs)}
+    token_bytes = {25677: b'\x20\xf0\x9f\x98', 138: b'\x8a'}  # ' ' + 3/4 emoji | 1/4 emoji (qwen3.5)
+    tok = SimpleTokenizer({"".join(be[b] for b in v): k for k, v in token_bytes.items()}, {})
+    dec = tok.stream_decoder()
+    self.assertEqual(dec(25677) + dec(138) + dec(), " 😊")
+
 if __name__ == '__main__':
   unittest.main()
