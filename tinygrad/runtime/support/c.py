@@ -1,6 +1,6 @@
 from __future__ import annotations
 import ctypes, functools, os, pathlib, re, struct, sys, sysconfig
-from tinygrad.helpers import ceildiv, getenv, unwrap, DEBUG, OSX, WIN
+from tinygrad.helpers import i2u, ceildiv, getenv, unwrap, DEBUG, OSX, WIN
 from typing import TYPE_CHECKING, get_type_hints, get_args, get_origin, overload, Annotated, Any, Generic, Iterable, ParamSpec, TypeVar
 
 def _do_ioctl(__idir, __base, __nr, __struct, __fd, *args, __payload=None, **kwargs):
@@ -113,7 +113,9 @@ class Field(property):
           if hasattr(v, '_objects') and hasattr(self, '_objects_'): self._objects_[off] = {'_self_': v, **(v._objects or {})}
           memoryview(self).cast("B")[off:off+ctypes.sizeof(typ)] = memoryview(v if isinstance(v, typ) else typ(v)).cast("B")
         super().__init__(lambda self: getattr(v:=typ.from_buffer(self, off), "value", v), objset)
-      else: super().__init__(lambda self: struct.unpack_from(fmt, self, off)[0], lambda self,v: struct.pack_into(fmt, self, off, v))
+      else:
+        bits = ctypes.sizeof(typ) * 8
+        super().__init__(lambda self: struct.unpack_from(fmt, self, off)[0], lambda self,v: struct.pack_into(fmt, self, off, i2u(bits, v)))
     self.offset = off
 
 @functools.cache
