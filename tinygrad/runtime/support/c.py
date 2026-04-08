@@ -118,7 +118,7 @@ class Field(property):
       else:
         fmt, bits = typ._type_, ctypes.sizeof(typ) * 8
         if fmt.islower(): super().__init__(lambda self: struct.unpack_from(fmt, self, off)[0], lambda self,v: struct.pack_into(fmt, self, off, v))
-        else: super().__init__(lambda self: struct.unpack_from(fmt, self, off)[0], lambda self,v: struct.pack_into(fmt, self, off, i2u(bits, v)))
+        else: super().__init__(lambda self: struct.unpack_from(fmt, self, off)[0], lambda self,v: struct.pack_into(fmt, self, off, i2u(bits, v or 0)))
     self.type, self.offset = typ, off
 
 @functools.cache

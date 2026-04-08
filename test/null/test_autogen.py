@@ -42,6 +42,21 @@ class TestC(unittest.TestCase):
     assert f.s == -1
     assert f.u == 255
 
+  # this syntax is inherited from ctypes, but it seems a bit nonsensical?
+  def test_voidp_none(self):
+    @record
+    class Foo:
+      SIZE = 8
+      p: Annotated[ctypes.c_void_p, 0]
+    init_records()
+
+    f = Foo(None)
+    assert f.p == 0
+    f.p = 0xDEADBEEF
+    assert f.p == 0xDEADBEEF
+    f.p = None
+    assert f.p == 0
+
   def test_packed_struct(self):
     @record
     class Baz:
