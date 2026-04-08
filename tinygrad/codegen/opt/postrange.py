@@ -117,7 +117,7 @@ class Scheduler:
       dup_rngs.update({r: None for r in new})
     dup_rngs.pop(rng)
 
-    ends = [end.src[0].end(*inner_rngs, rng).substitute({rng: new_rngs[i] + offsets[i]}) for i in range(len(new_rngs))]
+    ends = [end.src[0].end(*inner_rngs, new_rngs[i]).substitute({rng: new_rngs[i] + offsets[i]}) for i in range(len(new_rngs))]
     # give each split segment its own copy of dependent inner ranges so no range has multiple ENDs
     ends = [e.substitute({r: r.replace(arg=r.arg[:-1]+(i,r.arg[-1])) for r in dup_rngs}) for i,e in enumerate(ends)]
     self.ast = self.ast.substitute({end: UOp.group(*ends).end(*outer_rngs)}, name=f"split {rng.arg[:-1]} at {cuts}")
