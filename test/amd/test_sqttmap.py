@@ -131,7 +131,18 @@ class TestSQTTMapBase(unittest.TestCase):
 
 class TestSQTTMapRDNA3(TestSQTTMapBase): target = "gfx1100"
 
-class TestSQTTMapRDNA4(TestSQTTMapBase): target = "gfx1200"
+class TestSQTTMapRDNA4(TestSQTTMapBase):
+  target = "gfx1200"
+
+  @unittest.expectedFailure
+  def test_rdna4_wmma(self):
+    events, kernels, target = self.examples["profile_handwritten_run_0"]
+    row_ends = {}
+    for e in sqtt_timeline(events[0].blob, list(kernels.values())[0].lib, target):
+      if type(e).__name__ != "ProfileRangeEvent": continue
+      if (et:=row_ends.get(e.device)) is not None and e.st < et:
+        raise RuntimeError(f"overlap in {e.device}: {e.st} {et}.")
+      row_ends[e.device] = e.en
 
 class TestSQTTMapCDNA(TestSQTTMapBase):
   target = "gfx950"

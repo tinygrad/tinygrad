@@ -366,11 +366,11 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
       dispatch_id, op_type = exec_pending[name].pop(0)
       # get the number of cycles from the op type
       duration = int(dur_match.group(1)) if (dur_match:=re.match(r".*_(\d+)$", op_type)) else 1
-      # for execs, timestamp is the completion time
-      start_time, end_time = p._time-duration, p._time
+      # for execs, extend end time by the duration
+      start_time, end_time = p._time, p._time+duration
       link = f"LINK:{dispatch_id}"
-      # add wmma in the exec name for coloring
-      if op_type.startswith("WMMA"): name += "_WMMA"
+      # wmma exec gets its own row and color
+      if op_type.startswith("WMMA"): name, row = name+"_WMMA", "ALUEXEC:0 WMMA"
     # queue inst dispatches
     idx = next(row_counts.setdefault(row, itertools.count(0)))
     if isinstance(p, (VALUINST, INST, INST_RDNA4)) and (exec_type:=dispatch_to_exec.get(name.replace("OTHER_", "").split("_")[0])) is not None:
