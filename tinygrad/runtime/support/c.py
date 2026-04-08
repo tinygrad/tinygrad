@@ -82,9 +82,7 @@ else:
 class Struct(ctypes.Structure):
   def __init__(self, *args, **kwargs):
     ctypes.Structure.__init__(self)
-    for f,v in [*zip((rf[0] for rf in self._real_fields_), args), *kwargs.items()]:
-      ty = getattr(self.__class__, f).type
-      setattr(self, f, ty(*v) if issubclass(ty, ctypes.Array) and not isinstance(v, ty) else v)
+    for f,v in [*zip((rf[0] for rf in self._real_fields_), args), *kwargs.items()]: setattr(self, f, v)
 
 def record(cls) -> type[Struct]:
   newcls = type(cls.__name__, (Struct,), {'_fields_': [('_mem_', ctypes.c_byte * cls.SIZE)]})
