@@ -319,7 +319,7 @@ class OpenCLRenderer(CStyleLanguage):
   def aux(self, uops:list[UOp]):
     arg_dtypes:list[list[tuple[int, DType]]] = []
     for i,u in enumerate(u for u in uops if u.op is Ops.PARAM):
-      if len(arg_dtypes) >= u.arg: arg_dtypes.append([])
+      while len(arg_dtypes) <= u.arg: arg_dtypes.append([])
       arg_dtypes[u.arg].append((i, u.dtype))
     return tuple(tuple(a) for a in arg_dtypes),
 
