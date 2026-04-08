@@ -21,9 +21,8 @@ def run_asm_gemm(a_shape, b_shape, dtype=dtypes.float16, a_shard=None, b_shard=N
 
   a, b = a_rand.clone().requires_grad_(), b_rand.clone().requires_grad_()
   if multi: a, b = a.shard(devs, axis=a_shard), b.shard(devs, axis=b_shard)
-  with Context(ASM_GEMM=1):
-    tst = asm_gemm(a, b)
-    tst.sum().backward()
+  tst = asm_gemm(a, b)
+  tst.sum().backward()
   Tensor.realize(tst, a.grad, b.grad)
 
   a_ref, b_ref = a_rand.clone().requires_grad_(), b_rand.clone().requires_grad_()
@@ -32,9 +31,8 @@ def run_asm_gemm(a_shape, b_shape, dtype=dtypes.float16, a_shard=None, b_shard=N
     a_ref = a_ref.cast(dtypes.bfloat16)
     b_ref = b_ref.cast(dtypes.bfloat16)
   if multi: a_ref, b_ref = a_ref.shard(devs, axis=a_shard), b_ref.shard(devs, axis=b_shard)
-  with Context(ASM_GEMM=0):
-    ref = asm_gemm(a_ref, b_ref)
-    ref.sum().backward()
+  ref = a_ref @ b_ref
+  ref.sum().backward()
   Tensor.realize(ref, a_ref.grad, b_ref.grad)
 
   # no validation on the NULL device
@@ -136,14 +134,12 @@ class TestGemmLlama(unittest.TestCase):
     if not is_cdna4() or getenv("MOCKGPU"):
       self.skipTest("very slow on non mi350x")
 
-  @Context(ASM_GEMM=1)
-  def test_empty(self): (Tensor.empty(N:=getenv("N", 4096), N, dtype=self.dtype)@Tensor.empty(N, N, dtype=self.dtype)).realize()
+  def test_empty(self): asm_gemm(Tensor.empty(N:=getenv("N", 4096), N, dtype=self.dtype), Tensor.empty(N, N, dtype=self.dtype)).realize()
 
-  @Context(ASM_GEMM=1)
   def test_empty_bw(self):
     x = Tensor.empty(1, N:=getenv("N", 4096), N, dtype=self.dtype, requires_grad=True)
     y = Tensor.empty((N, N), dtype=self.dtype, requires_grad=True)
-    z = x @ y
+    z = asm_gemm(x, y)
     z.sum().backward()
     Tensor.realize(z, x.grad, y.grad)
     # FP8 forward output is bf16, gradients use fp8e5m2 (aka bf8)

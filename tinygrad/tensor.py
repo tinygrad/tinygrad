@@ -7,7 +7,7 @@ if TYPE_CHECKING: import numpy
 from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_float, least_upper_dtype, to_dtype, truncate
 from tinygrad.dtype import _from_np_dtype, _to_np_dtype, PyConst, Invalid, InvalidType
 from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten
-from tinygrad.helpers import IMAGE, FLOAT16, WINO, Metadata, TRACEMETA, ASM_GEMM, ceildiv, fetch, is_numpy_ndarray, TracingKey, cpu_profile
+from tinygrad.helpers import IMAGE, FLOAT16, WINO, Metadata, TRACEMETA, ceildiv, fetch, is_numpy_ndarray, TracingKey, cpu_profile
 from tinygrad.helpers import suppress_finalizing, disable_gc
 from tinygrad.gradient import compute_gradient
 from tinygrad.mixin import OpMixin
@@ -832,7 +832,7 @@ class Tensor(OpMixin):
     if isinstance(self.device, tuple): return self._multi_like(Tensor.rand, **kwargs)
     return Tensor.rand(*self.shape, device=kwargs.pop("device", self.device), dtype=kwargs.pop("dtype", self.dtype), **kwargs)
 
-  # ***** rng hlops *****
+  # ***** random functions *****
 
   def randn_like(self, dtype:DTypeLike|None=None, requires_grad:bool|None=None, **kwargs) -> Tensor:
     """
@@ -880,9 +880,8 @@ class Tensor(OpMixin):
     print(Tensor.randint(2, 3, low=5, high=10).numpy())
     ```
     """
-    if not isinstance(low, int) or not isinstance(high, int): raise TypeError(f"{low=} and {high=} must be integers")
-    dtype = to_dtype(dtype)
-    if not dtypes.is_int(dtype): raise TypeError(f"{dtype=} must be int")
+    if not all_int([low, high]): raise TypeError(f"{low=} and {high=} must be integers")
+    if not dtypes.is_int(dtype := to_dtype(dtype)): raise TypeError(f"{dtype=} must be int")
     return Tensor.uniform(*shape, low=low, high=high, dtype=dtype, **kwargs)
 
   @staticmethod
@@ -898,7 +897,7 @@ class Tensor(OpMixin):
     print(Tensor.normal(2, 3, mean=10, std=2).numpy())
     ```
     """
-    return ((std * Tensor.randn(*shape, **kwargs)) + mean).requires_grad_(requires_grad)
+    return (std * Tensor.randn(*shape, **kwargs) + mean).requires_grad_(requires_grad)
 
   @staticmethod
   def uniform(*shape, low=0.0, high=1.0, dtype:DTypeLike|None=None, requires_grad:bool|None=None, **kwargs) -> Tensor:
@@ -931,7 +930,6 @@ class Tensor(OpMixin):
     """
     return Tensor.uniform(*shape, low=-1.0, high=1.0, **kwargs).mul(prod(argfix(*shape))**-0.5)
 
-  # https://www.tensorflow.org/api_docs/python/tf/keras/initializers/GlorotUniform
   @staticmethod
   def glorot_uniform(*shape, **kwargs) -> Tensor:
     """
@@ -945,9 +943,9 @@ class Tensor(OpMixin):
     print(Tensor.glorot_uniform(2, 3).numpy())
     ```
     """
-    return Tensor.uniform(*shape, low=-1.0, high=1.0, **kwargs).mul((6/(argfix(*shape)[0]+prod(argfix(*shape)[1:])))**0.5)
+    bound = (6 / (argfix(*shape)[0]+prod(argfix(*shape)[1:]))) ** 0.5
+    return Tensor.uniform(*shape, low=-bound, high=bound, **kwargs)
 
-  # https://pytorch.org/docs/stable/_modules/torch/nn/init.html#kaiming_uniform_
   @staticmethod
   def kaiming_uniform(*shape, a:float = 0.01, **kwargs) -> Tensor:
     """
@@ -961,10 +959,9 @@ class Tensor(OpMixin):
     print(Tensor.kaiming_uniform(2, 3).numpy())
     ```
     """
-    bound = math.sqrt(3.0) * math.sqrt(2.0 / (1 + a ** 2)) / math.sqrt(prod(argfix(*shape)[1:]))
+    bound = (6 / (1 + a ** 2) / prod(argfix(*shape)[1:])) ** 0.5
     return Tensor.uniform(*shape, low=-bound, high=bound, **kwargs)
 
-  # https://pytorch.org/docs/stable/_modules/torch/nn/init.html#kaiming_normal_
   @staticmethod
   def kaiming_normal(*shape, a:float = 0.01, **kwargs) -> Tensor:
     """
@@ -978,7 +975,7 @@ class Tensor(OpMixin):
     print(Tensor.kaiming_normal(2, 3).numpy())
     ```
     """
-    std = math.sqrt(2.0 / (1 + a ** 2)) / math.sqrt(prod(argfix(*shape)[1:]))
+    std = (2 / (1 + a ** 2) / prod(argfix(*shape)[1:])) ** 0.5
     return Tensor.normal(*shape, mean=0.0, std=std, **kwargs)
 
   @staticmethod
@@ -1059,7 +1056,7 @@ class Tensor(OpMixin):
       else: t.grad.assign(t.grad + g.to(t.grad.device))
     return self
 
-  # ***** movement low level ops *****
+  # ***** movement ops *****
 
   def _mop(self, op:Ops, arg) -> Tensor: return self._apply_uop(UOp._mop, extra_args=(op,), arg=arg)
   def _rop(self, op:Ops, axis:tuple[int, ...]) -> Tensor: return self._apply_uop(UOp._rop, op=op, axis=axis)
@@ -1136,8 +1133,6 @@ class Tensor(OpMixin):
     if mode == "circular": return self._pad_circular(pX)
     if mode in {"reflect", "replicate"}: return self._pad_reflect_replicate(pX, mode)
     raise NotImplementedError(f"{mode=} is not supported")
-
-  # ***** movement high level ops *****
 
   def _getitem(self, indices, v: Tensor|None = None) -> Tensor:
     # wrap single index into a list
@@ -2032,9 +2027,6 @@ class Tensor(OpMixin):
 
   def dot(self, w:Tensor, dtype:DTypeLike|None=None) -> Tensor:
     if IMAGE: return self.image_dot(w, dtype)
-    if ASM_GEMM:
-      from extra.gemm.cdna_asm_gemm import can_use_asm_gemm, asm_gemm
-      if can_use_asm_gemm(self, w): return asm_gemm(self, w)
     return super().dot(w, dtype=dtype)
 
   def _cumalu(self, axis:int, op:Ops, _include_initial=False) -> Tensor:
@@ -2385,21 +2377,6 @@ class Tensor(OpMixin):
     """
     return self._apply_uop(UOp.contiguous_backward)
 
-  # ***** math functions *****
-
-  def lerp(self, end:Tensor, weight:Tensor|float) -> Tensor:
-    """
-    Linearly interpolates between `self` and `end` by `weight`.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([1., 2., 3.]).lerp(Tensor([4., 5., 6.]), 0.5).numpy())
-    ```
-    """
-    if self.dtype == dtypes.uint8 and isinstance(weight, Tensor):
-      w_i = (weight * (1<<(W_PREC:=7)) + 0.5).cast(dtypes.int16)
-      return (self+(((end - self).cast(dtypes.int8) * w_i + (1<<W_PREC-1)).cast(dtypes.uint16) >> W_PREC)).cast(dtypes.uint8)
-    return self + (end - self) * weight
-
   # ***** broadcasted elementwise ops *****
 
   def ufix(self, x) -> Tensor:
@@ -2644,14 +2621,6 @@ class Tensor(OpMixin):
     print(q.scaled_dot_product_attention(k, v).numpy())
     ```
     """
-    if getenv("FLASH_ATTENTION"):
-      from extra.thunder.tiny.fa import flash_attention
-      return flash_attention(self, key, value, attn_mask=attn_mask, is_causal=is_causal)
-
-    if getenv("HK_FLASH_ATTENTION"):
-      from extra.thunder.amd.fa import flash_attention
-      return flash_attention(self, key, value, attn_mask=attn_mask, is_causal=is_causal)
-
     # GQA: https://docs.pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html
     if enable_gqa:
       key = key.repeat_interleave(int(self.shape[-3] // key.shape[-3]), dim=-3)
