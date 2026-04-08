@@ -59,7 +59,6 @@ def main(args) -> None:
     events:list = viz.load_pickle(args.profile_path, default=[])
     if (profile_bytes:=viz.get_profile(events)) is None: raise RuntimeError(f"empty profile in {args.profile_path}")
     profile = decode_profile(profile_bytes)
-    viz.load_amd_counters(viz.ctxs, events)
     profile["layout"].update([(f'{c["name"]} {s["name"]}', s["data"]) for c in viz.ctxs if c["name"].startswith("SQTT") for s in c["steps"]
                               if "PKTS" in s["name"]])
     if args.src is None:
