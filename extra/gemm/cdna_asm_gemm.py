@@ -2716,8 +2716,11 @@ def custom_gemm_bw(gradient:UOp, kernel:UOp):
     assert all_same([gradient.device, a.device, b.device, out.device])
     a_t, b_t, g_t = Tensor(a, device=a.device), Tensor(b, device=a.device), Tensor(gradient, device=a.device)
     g_t = g_t[:a.shape[0]]
-    grad_a = asm_gemm(g_t, b_t.T).uop
-    grad_b = asm_gemm(a_t.permute(2, 0, 1).reshape(a_t.shape[2], -1), g_t.reshape(-1, g_t.shape[-1])).uop
+    if can_use_asm_gemm(g_t, b_t.T): grad_a = asm_gemm(g_t, b_t.T).uop
+    else: grad_a = (g_t @ b_t.T).uop
+    a_t_flat, g_t_flat = a_t.permute(2, 0, 1).reshape(a_t.shape[2], -1), g_t.reshape(-1, g_t.shape[-1])
+    if can_use_asm_gemm(a_t_flat, g_t_flat): grad_b = asm_gemm(a_t_flat, g_t_flat).uop
+    else: grad_b = (a_t_flat @ g_t_flat).uop
     return (None, grad_a, grad_b)
 
 # ** main gemm function
