@@ -3235,7 +3235,7 @@ class struct_amdgpu_firmware_info(c.Struct):
   ucode_size: Annotated[Annotated[int, ctypes.c_uint32], 32]
   tmr_mc_addr_lo: Annotated[Annotated[int, ctypes.c_uint32], 36]
   tmr_mc_addr_hi: Annotated[Annotated[int, ctypes.c_uint32], 40]
-class struct_firmware(ctypes.Structure): pass
+class struct_firmware(c.Struct): SIZE = 0
 class enum_psp_gfx_crtl_cmd_id(Annotated[int, ctypes.c_uint32], c.Enum): pass
 GFX_CTRL_CMD_ID_INIT_RBI_RING = enum_psp_gfx_crtl_cmd_id.define('GFX_CTRL_CMD_ID_INIT_RBI_RING', 65536)
 GFX_CTRL_CMD_ID_INIT_GPCOM_RING = enum_psp_gfx_crtl_cmd_id.define('GFX_CTRL_CMD_ID_INIT_GPCOM_RING', 131072)
@@ -3568,10 +3568,10 @@ TA_TYPE_RAP = enum_ta_type_id.define('TA_TYPE_RAP', 5)
 TA_TYPE_SECUREDISPLAY = enum_ta_type_id.define('TA_TYPE_SECUREDISPLAY', 6)
 TA_TYPE_MAX_INDEX = enum_ta_type_id.define('TA_TYPE_MAX_INDEX', 7)
 
-class struct_psp_context(ctypes.Structure): pass
-class struct_psp_xgmi_node_info(ctypes.Structure): pass
-class struct_psp_xgmi_topology_info(ctypes.Structure): pass
-class struct_psp_bin_desc(ctypes.Structure): pass
+class struct_psp_context(c.Struct): SIZE = 0
+class struct_psp_xgmi_node_info(c.Struct): SIZE = 0
+class struct_psp_xgmi_topology_info(c.Struct): SIZE = 0
+class struct_psp_bin_desc(c.Struct): SIZE = 0
 class enum_psp_bootloader_cmd(Annotated[int, ctypes.c_uint32], c.Enum): pass
 PSP_BL__LOAD_SYSDRV = enum_psp_bootloader_cmd.define('PSP_BL__LOAD_SYSDRV', 65536)
 PSP_BL__LOAD_SOSDRV = enum_psp_bootloader_cmd.define('PSP_BL__LOAD_SOSDRV', 131072)
@@ -3630,7 +3630,7 @@ SCPM_DISABLE = enum_psp_runtime_scpm_authentication.define('SCPM_DISABLE', 0)
 SCPM_ENABLE = enum_psp_runtime_scpm_authentication.define('SCPM_ENABLE', 1)
 SCPM_ENABLE_WITH_SCPM_ERR = enum_psp_runtime_scpm_authentication.define('SCPM_ENABLE_WITH_SCPM_ERR', 2)
 
-class struct_amdgpu_device(ctypes.Structure): pass
+class struct_amdgpu_device(c.Struct): SIZE = 0
 class enum_amdgpu_interrupt_state(Annotated[int, ctypes.c_uint32], c.Enum): pass
 AMDGPU_IRQ_STATE_DISABLE = enum_amdgpu_interrupt_state.define('AMDGPU_IRQ_STATE_DISABLE', 0)
 AMDGPU_IRQ_STATE_ENABLE = enum_amdgpu_interrupt_state.define('AMDGPU_IRQ_STATE_ENABLE', 1)

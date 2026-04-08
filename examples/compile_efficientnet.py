@@ -1,9 +1,10 @@
 from pathlib import Path
 from extra.models.efficientnet import EfficientNet
 from tinygrad.tensor import Tensor
+from tinygrad.device import Device
 from tinygrad.nn.state import get_state_dict, safe_save, safe_load, load_state_dict
 from extra.export_model import export_model
-from tinygrad.helpers import getenv, fetch
+from tinygrad.helpers import fetch
 import ast
 
 if __name__ == "__main__":
@@ -12,13 +13,13 @@ if __name__ == "__main__":
   dirname = Path(__file__).parent
   # exporting a model that's loaded from safetensors doesn't work without loading in from safetensors first
   # loading the state dict from a safetensor file changes the generated kernels
-  if getenv("WEBGPU"):
+  if Device.DEFAULT == "WEBGPU":
     safe_save(get_state_dict(model), (dirname / "net.safetensors").as_posix())
     load_state_dict(model, safe_load(str(dirname / "net.safetensors")))
-  mode = "clang" if getenv("CPU", "") != "" else "webgpu" if getenv("WEBGPU", "") != "" else ""
+  mode = "clang" if Device.DEFAULT == "CPU" else "webgpu" if Device.DEFAULT == "WEBGPU" else ""
   prg, inp_sizes, out_sizes, state = export_model(model, mode, Tensor.randn(1,3,224,224))
-  if getenv("CPU", "") == "":
-    ext = "js" if getenv("WEBGPU", "") != "" else "json"
+  if Device.DEFAULT != "CPU":
+    ext = "js" if Device.DEFAULT == "WEBGPU" else "json"
     with open(dirname / f"net.{ext}", "w") as text_file:
       text_file.write(prg)
   else:
@@ -68,6 +69,6 @@ if __name__ == "__main__":
     else printf("%s\\n", lbls[best_idx]);
   }""")
 
-    # CPU=1 python3 examples/compile_efficientnet.py | clang -O2 -lm -x c - -o recognize && DEBUG=1 time ./recognize docs/showcase/stable_diffusion_by_tinygrad.jpg
+    # DEV=CPU python3 examples/compile_efficientnet.py | clang -O2 -lm -x c - -o recognize && DEBUG=1 time ./recognize docs/showcase/stable_diffusion_by_tinygrad.jpg
     # category : 281 (tabby, tabby cat) with 9.452788
     print('\n'.join(cprog))

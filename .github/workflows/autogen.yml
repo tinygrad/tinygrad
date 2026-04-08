@@ -57,6 +57,7 @@ jobs:
         python3 -c "from tinygrad.runtime.autogen import mesa"
         python3 -c "from tinygrad.runtime.autogen import avcodec"
         python3 -c "from tinygrad.runtime.autogen import llvm_qcom"
+        python3 -c "from tinygrad.runtime.autogen import mlx5"
         REGEN=1 python3 -c "from tinygrad.runtime.autogen import libclang"
     - name: Check for differences
       run: |

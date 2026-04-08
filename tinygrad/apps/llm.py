@@ -83,6 +83,14 @@ def apply_rope(x:Tensor, freqs_cis:Tensor) -> Tensor:
   x1, x2 = x.chunk(2, dim=-1)
   return (x1 * cos - x2 * sin).cat(x2 * cos + x1 * sin, dim=-1)
 
+def pairwise_topk(x: Tensor, k: int) -> tuple[Tensor, Tensor]:
+  n = x.shape[-1]
+  vals = Tensor.arange(n).reshape(1,1,n).cast(x.dtype).expand(x.shape)
+  cmp = (x.unsqueeze(-1) > x.unsqueeze(-2)) | ((x.unsqueeze(-1) == x.unsqueeze(-2)) & \
+    (Tensor.arange(n).reshape(1,1,n,1) < Tensor.arange(n).reshape(1,1,1,n)))
+  sel = Tensor.zeros_like(x).scatter(-1, cmp.sum(axis=-1).cast('int32'), vals)[:,:,n-k:].cast('int32')
+  return x.gather(-1, sel), sel
+
 @dataclass(frozen=True)
 class TransformerConfig:
   num_blocks: int
@@ -163,8 +171,9 @@ class TransformerBlock:
     h_norm = self.ffn_norm(h)
     if hasattr(self, 'ffn_gate_exps'):
       x = h_norm.unsqueeze(2)  # (B, T, 1, D) - add expert dim for broadcasting
-      probs, sel = self.ffn_gate_inp(h_norm).softmax(-1).topk(self.config.num_experts_per_tok)  # (B, T, k) each
-      if self.config.norm_topk_prob: probs = probs / probs.sum(axis=-1, keepdim=True)
+      logits = self.ffn_gate_inp(h_norm)
+      vals, sel = pairwise_topk(logits, self.config.num_experts_per_tok)
+      probs = vals.softmax(-1) if self.config.norm_topk_prob else logits.softmax(-1).gather(-1, sel)
       x_down = self.ffn_down_exps(sel, self.ffn_gate_exps(sel, x).silu() * self.ffn_up_exps(sel, x))  # (B, T, k, D)
       return h + (x_down * probs.unsqueeze(-1)).sum(axis=2)  # (B, T, D)
     # TODO: remove the need for this contiguous
@@ -262,7 +271,7 @@ class Transformer:
       # chunked prefill: keep processing until all prompt tokens are consumed
       if start_pos < len(tokens): continue
       tokens.append(int(out.item()))
-      self._cached_tokens = tokens[:]
+      self._cached_tokens = tokens[:-1]
       yield tokens[-1]
 
 models = {
@@ -304,10 +313,14 @@ CHAT_HTML = b'''<!DOCTYPE html><html><head><title>tinygrad chat</title><style>
     const d = document.createElement('div'); d.className = 'msg'; chat.appendChild(d);
     const r = await fetch('/v1/chat/completions', {method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({model: 'llama', messages: msgs, stream: true, temperature: 0.7})});
+    let buf = '';
     for (const rd = r.body.getReader(), dec = new TextDecoder();;) {
       const {done, value} = await rd.read();
       if (done) break;
-      for (const ln of dec.decode(value).split('\\n'))
+      buf += dec.decode(value, {stream: true});
+      const lines = buf.split('\\n');
+      buf = lines.pop();
+      for (const ln of lines)
         if (ln.startsWith('data: ') && !ln.includes('[DONE]'))
           try { d.textContent += JSON.parse(ln.slice(6)).choices[0]?.delta?.content || '' } catch {}
       chat.scrollTop = chat.scrollHeight;
@@ -385,6 +398,7 @@ if __name__ == "__main__":
   parser.add_argument("--model", "-m", default=list(models.keys())[0], help=f"Model choice ({', '.join(models.keys())}) or path to a local GGUF file")
   parser.add_argument("--max_context", type=int, default=4096, help="Max Context Length")
   parser.add_argument("--serve", nargs='?', type=int, const=11434, metavar="PORT", help="Run OpenAI compatible API (optional port, default 11434)")
+  parser.add_argument("--warmup", action="store_true", help="warmup the JIT")
   parser.add_argument("--benchmark", nargs='?', type=int, const=20, metavar="COUNT", help="Benchmark tok/s (optional count, default 20)")
   args = parser.parse_args()
 
@@ -403,8 +417,17 @@ if __name__ == "__main__":
   bos_id: int|None = kv.get('tokenizer.ggml.bos_token_id') if kv.get('tokenizer.ggml.add_bos_token', True) else None
   eos_id: int = kv['tokenizer.ggml.eos_token_id']
 
+  # warmup the JIT
+  if args.warmup or args.serve:
+    # run 2 tokens through the model twice to capture the JIT before serving
+    with Context(DEBUG=max(DEBUG.value, 1)):
+      for _ in range(2): list(zip(range(2), model.generate([0])))
+
+  # start server
+  if args.serve: TCPServerWithReuse(('', args.serve), Handler).serve_forever()
+
   # do benchmark
-  if args.benchmark:
+  if args.benchmark is not None:
     gen = model.generate(toks:=[bos_id or 0])
     for _ in range(args.benchmark):
       GlobalCounters.reset()
@@ -412,13 +435,6 @@ if __name__ == "__main__":
                   f" {GlobalCounters.global_mem//1000000}/{GlobalCounters.mem_used//1000000} MB  --  "+\
                   tok.decode(toks).replace("\n", "\\n")): next(gen)
     exit(0)
-
-  # start server
-  if args.serve:
-    # warmup: run 2 tokens through the model twice to capture the JIT before serving
-    with Context(DEBUG=max(DEBUG.value, 1)):
-      for _ in range(2): list(zip(range(2), model.generate([0])))
-    TCPServerWithReuse(('', args.serve), Handler).serve_forever()
 
   # interactive chat
   ids: list[int] = [bos_id] if bos_id is not None else []

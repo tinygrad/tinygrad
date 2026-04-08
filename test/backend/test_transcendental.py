@@ -1,7 +1,7 @@
 import unittest
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _to_np_dtype
-from tinygrad.helpers import Context, getenv, CI, OSX
+from tinygrad.helpers import Context, getenv, CI, DEV, OSX
 from test.backend.test_schedule import check_schedule
 from test.backend.test_dtype_alu import ht, dtypes_float
 from tinygrad.device import is_dtype_supported
@@ -13,7 +13,7 @@ settings.register_profile("my_profile", max_examples=200, deadline=None, derando
 settings.load_profile("my_profile")
 
 class TestTranscendentalMath(unittest.TestCase):
-  @unittest.skipUnless(is_dtype_supported(dtypes.float64, Device.DEFAULT), f"no float64 on {Device.DEFAULT}")
+  @unittest.skipUnless(is_dtype_supported(dtypes.float64), f"no float64 on {Device.DEFAULT}")
   @unittest.skipIf(getenv("MOCKGPU") and Device.DEFAULT in {"NV", "CUDA"}, "crashed")
   @given(ht.float64, strat.sampled_from([(Tensor.exp, np.exp), (Tensor.log, np.log), (Tensor.sin, np.sin)]))
   def test_float64(self, x, op):
@@ -36,7 +36,7 @@ class TestTranscendentalMath(unittest.TestCase):
                                  op[1](np.array([x], dtype=_to_np_dtype(dtypes.float32))),
                                  atol=2e-5, rtol=1e-5)
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.float16, Device.DEFAULT), f"no float16 on {Device.DEFAULT}")
+  @unittest.skipUnless(is_dtype_supported(dtypes.float16), f"no float16 on {Device.DEFAULT}")
   @given(ht.float16, strat.sampled_from([(Tensor.exp, np.exp),(Tensor.log, np.log)] +
     ([(Tensor.sin, np.sin)] if is_dtype_supported(dtypes.ulong) else [])))
   def test_float16(self, x, op):
@@ -104,7 +104,7 @@ class TestFromFuzzer(unittest.TestCase):
 
 class TestFloat16Log2(unittest.TestCase):
   """Tests for native float16 log2 implementation (no float32 cast)"""
-  @unittest.skipUnless(is_dtype_supported(dtypes.float16, Device.DEFAULT), f"no float16 on {Device.DEFAULT}")
+  @unittest.skipUnless(is_dtype_supported(dtypes.float16), f"no float16 on {Device.DEFAULT}")
   def test_float16_log2_basic(self):
     # basic values
     test_values = [1.0, 2.0, 4.0, 0.5, 0.25, 10.0, 100.0, 1000.0]
@@ -114,7 +114,7 @@ class TestFloat16Log2(unittest.TestCase):
         expected = np.log2(np.float16(val))
         np.testing.assert_allclose(result, expected, rtol=1e-3, err_msg=f"log2({val})")
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.float16, Device.DEFAULT), f"no float16 on {Device.DEFAULT}")
+  @unittest.skipUnless(is_dtype_supported(dtypes.float16), f"no float16 on {Device.DEFAULT}")
   @unittest.skipIf(Device.DEFAULT == "WEBGPU" and CI, "Nan handling differs on Vulkan")
   def test_float16_log2_special(self):
     # special values: inf, -inf, nan, 0, negative
@@ -128,7 +128,7 @@ class TestFloat16Log2(unittest.TestCase):
       # log2(nan) = nan
       assert np.isnan(Tensor([np.nan], dtype=dtypes.float16).log2().numpy()[0])
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.float16, Device.DEFAULT), f"no float16 on {Device.DEFAULT}")
+  @unittest.skipUnless(is_dtype_supported(dtypes.float16), f"no float16 on {Device.DEFAULT}")
   def test_float16_log2_denormal(self):
     # test values near and below float16 min normal (6.1e-5)
     # these exercise the denormal handling path with 2^10 scaling
@@ -187,8 +187,8 @@ class TestTranscendentalVectorized(unittest.TestCase):
   def test_log2_vectorized(self):
     for vec_size in [1,2,3,4,5,127,128]: self._test_vectorized_op(Tensor.log2, np.log2, (0.001, 200), vec_size)
 
-  @unittest.skipIf(getenv("DSP"), "requires int division")
-  @unittest.skipIf(getenv("NV_NAK"), "MUFU.SIN is not accurate enough")
+  @unittest.skipIf(Device.DEFAULT == "DSP", "requires int division")
+  @unittest.skipIf(DEV.renderer == "NAK", "MUFU.SIN is not accurate enough")
   @unittest.skipIf(Device.DEFAULT == "WEBGPU" and OSX, "WEBGPU Metal backend is not accurate enough")
   def test_sin_vectorized(self):
     for vec_size in [1,2,3,4,5,127,128]: self._test_vectorized_op(Tensor.sin, np.sin, (-100, 100), vec_size)

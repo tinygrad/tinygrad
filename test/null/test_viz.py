@@ -1,4 +1,4 @@
-import unittest, decimal, sys, json
+import unittest, decimal, sys, json, contextlib
 from dataclasses import dataclass
 from typing import Generator
 
@@ -6,8 +6,11 @@ from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, TrackedPatternMatch
 from tinygrad.uop.symbolic import sym
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import PROFILE, colored, ansistrip, flatten, TracingKey, ProfileRangeEvent, ProfileEvent, Context, cpu_events, profile_marker
-from tinygrad.helpers import VIZ, cpu_profile, ProfilePointEvent
+from tinygrad.helpers import VIZ, cpu_profile, ProfilePointEvent, unwrap
 from tinygrad.device import Buffer
+
+from tinygrad.uop.ops import tracked_keys, tracked_ctxs, uop_fields, active_rewrites, active_group, _name_cnt, RewriteTrace
+from tinygrad.viz.serve import get_rewrites, get_full_rewrite, uop_to_json
 
 @track_rewrites(name=True)
 def exec_rewrite(sink:UOp, pm_lst:list[PatternMatcher], names:None|list[str]=None) -> UOp:
@@ -15,39 +18,51 @@ def exec_rewrite(sink:UOp, pm_lst:list[PatternMatcher], names:None|list[str]=Non
     sink = graph_rewrite(sink, TrackedPatternMatcher(pm.patterns), name=names[i] if names else None)
   return sink
 
-# real VIZ=1 loads the trace from a file, we just keep it in memory for tests
-from tinygrad.uop.ops import tracked_keys, tracked_ctxs, uop_fields, active_rewrites, active_group, _name_cnt, RewriteTrace
-from tinygrad.viz import serve
-serve.trace = RewriteTrace(tracked_keys, tracked_ctxs, uop_fields)
-from tinygrad.viz.serve import get_rewrites, get_full_rewrite, uop_to_json
-def get_viz_list(): return get_rewrites(serve.trace)
-def get_viz_details(rewrite_idx:int, step:int) -> Generator[dict, None, None]:
-  lst = get_viz_list()
-  assert len(lst) > rewrite_idx, "only loaded {len(lst)} traces, expecting at least {idx}"
-  return get_full_rewrite(tracked_ctxs[rewrite_idx][step])
+# small container class for the viz server module
+class VizTrace:
+  # loader init
+  def __init__(self): self._trace:RewriteTrace|None = None
+  @property
+  def trace(self) -> RewriteTrace: return unwrap(self._trace)
+  def set_trace(self) -> None:
+    self._trace = RewriteTrace(tracked_keys.copy(), tracked_ctxs.copy(), uop_fields.copy())
+    import tinygrad.viz.serve as serve_module
+    serve_module.trace = self._trace
+  # the API
+  def list_items(self) -> list[dict]: return get_rewrites(self.trace)
+  def get_details(self, rewrite_idx:int, step:int) -> Generator[dict, None, None]:
+    lst = self.list_items()
+    assert len(lst) > rewrite_idx, f"only loaded {len(lst)} traces, expecting at least {rewrite_idx}"
+    return get_full_rewrite(self.trace.rewrites[rewrite_idx][step])
 
-class BaseTestViz(unittest.TestCase):
-  def setUp(self):
-    # clear the global context
-    for lst in [tracked_keys, tracked_ctxs, active_rewrites, active_group, _name_cnt]: lst.clear()
-    Buffer.profile_events.clear()
-    cpu_events.clear()
-    self.tms = TRACK_MATCH_STATS.value
-    self.profile = PROFILE.value
-    self.viz = VIZ.value
-    TRACK_MATCH_STATS.value = 2
-    PROFILE.value = 1
-    VIZ.value = 1
-  def tearDown(self):
-    TRACK_MATCH_STATS.value = self.tms
-    PROFILE.value = self.profile
-    VIZ.value = self.viz
+@contextlib.contextmanager
+def save_viz():
+  # clear previous traces
+  for lst in [tracked_keys, tracked_ctxs, active_rewrites, active_group, _name_cnt]: lst.clear()
+  Buffer.profile_events.clear()
+  cpu_events.clear()
+  # set the context vars to enable VIZ
+  prev_viz = VIZ.value
+  VIZ.value = -1
+  prev_tms = TRACK_MATCH_STATS.value
+  TRACK_MATCH_STATS.value = 2
+  prev_profile = PROFILE.value
+  PROFILE.value = 1
+  viz = VizTrace()
+  try:
+    yield viz
+  finally:
+    viz.set_trace()
+    TRACK_MATCH_STATS.value = prev_tms
+    PROFILE.value = prev_profile
+    VIZ.value = prev_viz
 
-class TestViz(BaseTestViz):
+class TestViz(unittest.TestCase):
   def test_simple(self):
-    a = UOp.variable("a", 0, 10)
-    exec_rewrite((a+0)*1, [sym])
-    lst = get_viz_list()
+    with save_viz() as viz:
+      a = UOp.variable("a", 0, 10)
+      exec_rewrite((a+0)*1, [sym])
+    lst = viz.list_items()
     # VIZ displays rewrites in groups of tracked functions
     self.assertEqual(len(lst), 1)
     # each group has a list of steps
@@ -56,19 +71,21 @@ class TestViz(BaseTestViz):
     self.assertEqual(lst[0]["steps"][0]["match_count"], 2)
 
   def test_rewrites(self):
-    a = UOp.variable("a", 0, 10)
-    exec_rewrite(a*1, [sym])
-    exec_rewrite(a*2, [sym])
-    lst = get_viz_list()
+    with save_viz() as viz:
+      a = UOp.variable("a", 0, 10)
+      exec_rewrite(a*1, [sym])
+      exec_rewrite(a*2, [sym])
+    lst = viz.list_items()
     self.assertEqual(len(lst), 2)
     # names dedup using a counter
     self.assertEqual(lst[0]["name"], "exec_rewrite n1")
     self.assertEqual(lst[1]["name"], "exec_rewrite n2")
 
   def test_steps(self):
-    a = UOp.variable("a", 0, 10)
-    exec_rewrite(a+1, [PatternMatcher([]), PatternMatcher([])], ["x", "y"])
-    steps = get_viz_list()[0]["steps"]
+    with save_viz() as viz:
+      a = UOp.variable("a", 0, 10)
+      exec_rewrite(a+1, [PatternMatcher([]), PatternMatcher([])], ["x", "y"])
+    steps = viz.list_items()[0]["steps"]
     # steps can optionally have a name
     self.assertEqual(steps[0]["name"], "x")
     self.assertEqual(steps[1]["name"], "y")
@@ -76,8 +93,9 @@ class TestViz(BaseTestViz):
   def test_rewrite_location(self):
     def inner(sink): return graph_rewrite(sink, PatternMatcher([]))
     def outer(sink): return inner(sink)
-    outer(UOp.variable("a", 1, 10))
-    lst = get_viz_list()
+    with save_viz() as viz:
+      outer(UOp.variable("a", 1, 10))
+    lst = viz.list_items()
     # step location comes from inner rewrite
     fp, lineno = lst[0]["steps"][0]["loc"]
     self.assertEqual(fp, inner.__code__.co_filename)
@@ -90,45 +108,50 @@ class TestViz(BaseTestViz):
       return x.replace(arg=x.arg+1)
     err_pm = PatternMatcher([(UPat.cvar("x"), count_3),])
     a = UOp.const(dtypes.int, 1)
-    with self.assertRaises(AssertionError): exec_rewrite(a, [err_pm])
-    lst = get_viz_list()
+    with save_viz() as viz:
+      with self.assertRaises(AssertionError): exec_rewrite(a, [err_pm])
+    lst = viz.list_items()
     err_step = lst[0]["steps"][0]
     self.assertEqual(err_step["match_count"], 4) # 3 successful rewrites + 1 err
 
   def test_default_name(self):
-    a = UOp.variable("a", 1, 10)
-    @track_rewrites()
-    def name_default(): return graph_rewrite(a, PatternMatcher([]))
-    name_default()
-    lst = get_viz_list()
+    with save_viz() as viz:
+      a = UOp.variable("a", 1, 10)
+      @track_rewrites()
+      def name_default(): return graph_rewrite(a, PatternMatcher([]))
+      name_default()
+    lst = viz.list_items()
     self.assertEqual(lst[0]["name"], "name_default n1")
 
   # name can also come from a function that returns a string
   def test_dyn_name_fxn(self):
-    @track_rewrites(name=lambda *args,ret,**kwargs: ret.render())
-    def name_from_fxn(s:UOp, arg:list|None=None): return graph_rewrite(s, PatternMatcher([]))
-    name_from_fxn(UOp.variable("a", 1, 10)+1, arg=["test"])
-    lst = get_viz_list()
+    with save_viz() as viz:
+      @track_rewrites(name=lambda *args,ret,**kwargs: ret.render())
+      def name_from_fxn(s:UOp, arg:list|None=None): return graph_rewrite(s, PatternMatcher([]))
+      name_from_fxn(UOp.variable("a", 1, 10)+1, arg=["test"])
+    lst = viz.list_items()
     # name gets deduped by the function call counter
     self.assertEqual(lst[0]["name"], "(a+1) n1")
 
   # name can also come from a function that returns a TracingKey
   def test_tracing_key(self):
-    @track_rewrites(name=lambda inp,ret: TracingKey("custom_name", (inp,)))
-    def test(s:UOp): return graph_rewrite(s, PatternMatcher([]))
-    test(UOp.variable("a", 1, 10)+1)
-    lst = get_viz_list()
+    with save_viz() as viz:
+      @track_rewrites(name=lambda inp,ret: TracingKey("custom_name", (inp,)))
+      def test(s:UOp): return graph_rewrite(s, PatternMatcher([]))
+      test(UOp.variable("a", 1, 10)+1)
+    lst = viz.list_items()
     # NOTE: names from TracingKey do not get deduped
     self.assertEqual(lst[0]["name"], "custom_name")
 
   def test_nested_track_rewrites(self):
-    @track_rewrites(name=lambda x,ret: TracingKey(f"inner fxn for {x.render()}", (ret,)))
-    def inner(x:UOp): return graph_rewrite(x, PatternMatcher([]), name="each")
-    @track_rewrites(name=lambda *args,ret: f"outer rewrite of {len(args)} inputs")
-    def outer(*xs:tuple[UOp, ...]): return graph_rewrite(UOp.sink(*[inner(x) for x in xs]), PatternMatcher([]), name="all")
-    items = ["a", "b", "c"]
-    outer(*[UOp.variable(x, 1, 10) for x in items])
-    lst = get_viz_list()
+    with save_viz() as viz:
+      @track_rewrites(name=lambda x,ret: TracingKey(f"inner fxn for {x.render()}", (ret,)))
+      def inner(x:UOp): return graph_rewrite(x, PatternMatcher([]), name="each")
+      @track_rewrites(name=lambda *args,ret: f"outer rewrite of {len(args)} inputs")
+      def outer(*xs:tuple[UOp, ...]): return graph_rewrite(UOp.sink(*[inner(x) for x in xs]), PatternMatcher([]), name="all")
+      items = ["a", "b", "c"]
+      outer(*[UOp.variable(x, 1, 10) for x in items])
+    lst = viz.list_items()
     # inner calls fall outside the outer call
     self.assertEqual(len(lst), len(items)+1)
     self.assertEqual(lst[0]["name"], f"outer rewrite of {len(items)} inputs n1")
@@ -142,26 +165,28 @@ class TestViz(BaseTestViz):
       self.assertEqual(steps[0]["name"], "each")
 
   def test_profile_matches(self):
-    @profile_matches
-    def nested_function(u:UOp):
-      for i in range(2): graph_rewrite(u, PatternMatcher([]), name=f"step {i+1}")
+    with save_viz() as viz:
+      @profile_matches
+      def nested_function(u:UOp):
+        for i in range(2): graph_rewrite(u, PatternMatcher([]), name=f"step {i+1}")
 
-    @track_rewrites()
-    def main_rewrite(u:UOp):
-      graph_rewrite(u, PatternMatcher([]), name="init")
-      nested_function(u)
+      @track_rewrites()
+      def main_rewrite(u:UOp):
+        graph_rewrite(u, PatternMatcher([]), name="init")
+        nested_function(u)
 
-    main_rewrite(UOp.variable("a", 1, 10)+UOp.variable("b", 1, 10))
-    steps = get_viz_list()[0]["steps"]
+      main_rewrite(UOp.variable("a", 1, 10)+UOp.variable("b", 1, 10))
+    steps = viz.list_items()[0]["steps"]
     self.assertEqual(steps[0]["name"], "init")
     self.assertEqual(steps[1]["name"], "nested_function")
     self.assertEqual(len(steps), 4)
 
   def test_profile_matches_invalid_arg(self):
-    @profile_matches
-    def invalid_fxn(arg:str): return graph_rewrite(UOp(Ops.SINK), PatternMatcher([]))
-    with self.assertRaisesRegex(AssertionError, "invalid match tracing input"):
-      invalid_fxn("test")
+    with save_viz():
+      @profile_matches
+      def invalid_fxn(arg:str): return graph_rewrite(UOp(Ops.SINK), PatternMatcher([]))
+      with self.assertRaisesRegex(AssertionError, "invalid match tracing input"):
+        invalid_fxn("test")
 
   def test_colored_label(self):
     # NOTE: dataclass repr prints literal escape codes instead of unicode chars
@@ -173,11 +198,12 @@ class TestViz(BaseTestViz):
     self.assertEqual(ansistrip(a2["label"]), f"CUSTOM\n{TestStruct.__qualname__}(colored_field='xyz12345')")
 
   def test_colored_label_multiline(self):
-    arg = colored("x", "green")+"\n"+colored("y", "red")+colored("z", "yellow")+colored("ww\nw", "magenta")
-    src = [Tensor.empty(1).uop for _ in range(10)]
-    a = UOp(Ops.CUSTOM, src=tuple(src), arg=arg)
-    exec_rewrite(a, [PatternMatcher([])])
-    a2 = next(get_viz_details(0, 0))["graph"][id(a)]
+    with save_viz() as viz:
+      arg = colored("x", "green")+"\n"+colored("y", "red")+colored("z", "yellow")+colored("ww\nw", "magenta")
+      src = [Tensor.empty(1).uop for _ in range(10)]
+      a = UOp(Ops.CUSTOM, src=tuple(src), arg=arg)
+      exec_rewrite(a, [PatternMatcher([])])
+    a2 = next(viz.get_details(0, 0))["graph"][id(a)]
     self.assertEqual(ansistrip(a2["label"]), "CUSTOM\nx\nyzww\nw")
 
   def test_inf_loop(self):
@@ -187,9 +213,10 @@ class TestViz(BaseTestViz):
       (UPat(Ops.CONST, arg=3, name="x"), lambda x: x.replace(arg=4)),
       (UPat(Ops.CONST, arg=4, name="x"), lambda x: x.replace(arg=3)),
     ])
-    # use smaller stack limit for faster test (default is 250000)
-    with Context(REWRITE_STACK_LIMIT=100): self.assertRaises(RuntimeError, exec_rewrite, a, [pm])
-    graphs = flatten(x["graph"].values() for x in get_viz_details(0, 0))
+    with save_viz() as viz:
+      # use smaller stack limit for faster test (default is 250000)
+      with Context(REWRITE_STACK_LIMIT=100): self.assertRaises(RuntimeError, exec_rewrite, a, [pm])
+    graphs = flatten(x["graph"].values() for x in viz.get_details(0, 0))
     self.assertEqual(graphs[0], uop_to_json(a)[id(a)])
     self.assertEqual(graphs[1], uop_to_json(b)[id(b)])
     # fallback to NOOP with the error message
@@ -197,13 +224,14 @@ class TestViz(BaseTestViz):
     self.assertEqual(graphs[2], uop_to_json(nop)[id(nop)])
 
   def test_const_node_visibility(self):
-    a = UOp.variable("a", 0, 10, dtype=dtypes.int)
-    z = UOp.const(a.dtype, 0)
-    alu = a*z
-    exec_rewrite(alu, [sym])
-    lst = get_viz_list()
+    with save_viz() as viz:
+      a = UOp.variable("a", 0, 10, dtype=dtypes.int)
+      z = UOp.const(a.dtype, 0)
+      alu = a*z
+      exec_rewrite(alu, [sym])
+    lst = viz.list_items()
     self.assertEqual(len(lst), 1)
-    graphs = [x["graph"] for x in get_viz_details(0, 0)]
+    graphs = [x["graph"] for x in viz.get_details(0, 0)]
     # embed const in the parent node when possible
     self.assertEqual(list(graphs[0]), [id(a), id(alu)])
     self.assertEqual(list(graphs[1]), [id(z)])
@@ -239,20 +267,21 @@ def root_rewrite(root:UOp):
   return root.replace(src=new_src)
 root = TrackedPatternMatcher([(UPat(Ops.SINK, src=UPat(Ops.ADD), name="root"), root_rewrite),])
 
-class TestVizTree(BaseTestViz):
+class TestVizTree(unittest.TestCase):
   def assertStepEqual(self, step:dict, want:dict):
     for k,v in want.items():
       self.assertEqual(step[k], v, f"failed at '{k}': {v} != {step[k]}\n{step=}")
 
   def test_tree_view(self):
-    a = UOp.variable("a",0,10)
-    b = UOp.variable("b",0,10)
-    c = UOp.variable("c",0,10)
-    d = UOp.variable("d",0,10)
-    sink = UOp.sink(a+b, c+d)
-    def tree_rewrite(): return graph_rewrite(sink, root, name="root")
-    tree_rewrite()
-    lst = get_viz_list()
+    with save_viz() as viz:
+      a = UOp.variable("a",0,10)
+      b = UOp.variable("b",0,10)
+      c = UOp.variable("c",0,10)
+      d = UOp.variable("d",0,10)
+      sink = UOp.sink(a+b, c+d)
+      def tree_rewrite(): return graph_rewrite(sink, root, name="root")
+      tree_rewrite()
+    lst = viz.list_items()
     steps = lst[0]["steps"]
     self.assertEqual(len(steps), 1+2+4)
     self.assertStepEqual(steps[0], {"name":"root", "depth":0, "match_count":1})
@@ -269,26 +298,28 @@ def bufs_allocated() -> int:
   gc.collect()
   return sum([type(x).__name__ == "Buffer" and type(x).__module__ == "tinygrad.device" for x in gc.get_objects()])
 
-class TestVizGC(BaseTestViz):
+class TestVizGC(unittest.TestCase):
   def test_gc(self):
-    init = bufs_allocated()
-    a = UOp.new_buffer("NULL", 10, dtypes.char)
-    a.buffer.allocate()
-    exec_rewrite(a, [PatternMatcher([])])
-    del a
-    self.assertEqual(bufs_allocated()-init, 0)
-    lst = get_viz_list()
+    with save_viz() as viz:
+      init = bufs_allocated()
+      a = UOp.new_buffer("NULL", 10, dtypes.char)
+      a.buffer.allocate()
+      exec_rewrite(a, [PatternMatcher([])])
+      del a
+      self.assertEqual(bufs_allocated()-init, 0)
+    lst = viz.list_items()
     self.assertEqual(len(lst), 1)
 
   @unittest.skip("it's not generic enough to handle arbitrary UOps in arg")
   def test_gc_uop_in_arg(self):
-    init = bufs_allocated()
-    a = UOp.new_buffer("NULL", 10, dtypes.char)
-    a.buffer.allocate()
-    exec_rewrite(UOp(Ops.CUSTOM, src=(a,), arg=a), [PatternMatcher([])])
-    del a
-    self.assertEqual(bufs_allocated()-init, 0)
-    lst = get_viz_list()
+    with save_viz() as viz:
+      init = bufs_allocated()
+      a = UOp.new_buffer("NULL", 10, dtypes.char)
+      a.buffer.allocate()
+      exec_rewrite(UOp(Ops.CUSTOM, src=(a,), arg=a), [PatternMatcher([])])
+      del a
+      self.assertEqual(bufs_allocated()-init, 0)
+    lst = viz.list_items()
     self.assertEqual(len(lst), 1)
 
 # VIZ integrates with other parts of tinygrad
@@ -296,12 +327,13 @@ class TestVizGC(BaseTestViz):
 from tinygrad import Tensor, Device
 from tinygrad.engine.realize import get_program
 
-class TestVizIntegration(BaseTestViz):
+class TestVizIntegration(unittest.TestCase):
   # codegen supports rendering of code blocks
   def test_codegen_tracing(self):
-    ast = Tensor.schedule(Tensor.empty(4)+Tensor.empty(4))[0].ast
-    prg = get_program(ast, Device[Device.DEFAULT].renderer)
-    lst = get_viz_list()
+    with save_viz() as viz:
+      ast = Tensor.schedule(Tensor.empty(4)+Tensor.empty(4))[0].ast
+      prg = get_program(ast, Device[Device.DEFAULT].renderer)
+    lst = viz.list_items()
     self.assertEqual(len(lst), 3)
     self.assertEqual(lst[0]["name"], "Process 1 Buffer n1")
     self.assertEqual(lst[1]["name"], "Schedule 1 Kernel n1")
@@ -309,70 +341,76 @@ class TestVizIntegration(BaseTestViz):
 
   # schedule graph CALL nodes have a link to jump to codegen
   def test_link_sched_codegen(self):
-    c1 = Tensor.empty(4).add(1)
-    c2 = Tensor.empty(8).add(1)
-    sched = Tensor.schedule(c1, c2)
-    prgs = [si.lower().prg.p.name for si in sched]
-    lst = get_viz_list()
+    with save_viz() as viz:
+      c1 = Tensor.empty(4).add(1)
+      c2 = Tensor.empty(8).add(1)
+      sched = Tensor.schedule(c1, c2)
+      prgs = [si.lower().prg.p.name for si in sched]
+    lst = viz.list_items()
     sched_idx = next(i for i,l in enumerate(lst) if l["name"].startswith("Schedule"))
     viz_kernel = next(i for i,s in enumerate(lst[sched_idx]["steps"]) if s["name"] == "View Kernel Graph")
-    graph = next(get_viz_details(sched_idx, viz_kernel))["graph"]
+    graph = next(viz.get_details(sched_idx, viz_kernel))["graph"]
     call_nodes = [n for n in graph.values() if n["label"].startswith("CALL")]
     for i,n in enumerate(call_nodes):
       assert n["ref"] is not None
       self.assertEqual(lst[n["ref"]]["name"], prgs[i])
 
+  @Context(TRACEMETA=2)
   def test_metadata_tracing(self):
-    with Context(TRACEMETA=2):
+    with save_viz() as viz:
       a = Tensor.empty(1)
       b = Tensor.empty(1)
       metadata = (alu:=a+b).uop.metadata
       alu.schedule()
-      graph = next(get_viz_details(0, 0))["graph"]
+    graph = next(viz.get_details(0, 0))["graph"]
     self.assertEqual(len([n for n in graph.values() if repr(metadata) in n["label"]]), 1)
 
   # tracing also works without a track_rewrites context
   # all graph_rewrites get put into the default group
   def test_default_tracing(self):
-    def test(root):
-      return graph_rewrite(root, sym)
-    test(c:=UOp.const(dtypes.int, 1))
-    test(c+1)
-    ls = get_viz_list()
+    with save_viz() as viz:
+      def test(root):
+        return graph_rewrite(root, sym)
+      test(c:=UOp.const(dtypes.int, 1))
+      test(c+1)
+    ls = viz.list_items()
     self.assertEqual(len(ls), 1)
     self.assertEqual(ls[0]["name"], "default graph_rewrite")
 
   # using @track_rewrites organizes function calls into groups
   # and nicely counts function calls.
   def test_group_traces(self):
-    @track_rewrites()
-    def test(root):
-      return graph_rewrite(root, sym)
-    test(c:=UOp.const(dtypes.int, 1))
-    test(c+1)
-    ls = get_viz_list()
+    with save_viz() as viz:
+      @track_rewrites()
+      def test(root):
+        return graph_rewrite(root, sym)
+      test(c:=UOp.const(dtypes.int, 1))
+      test(c+1)
+    ls = viz.list_items()
     self.assertEqual(len(ls), 2)
     for i in range(2): self.assertEqual(ls[i]["name"], f"test n{i+1}")
 
   # @track_rewrites always starts a new group.
   def test_group_combined(self):
-    def default_test(root): return graph_rewrite(root, sym)
-    tracked_test = track_rewrites()(default_test)
-    c = UOp.const(dtypes.int, 1)
-    default_test(c+1) # goes to the default group
-    tracked_test(c)   # all rewrites after this go inside the second group.
-    default_test(c+2)
-    ls = get_viz_list()
+    with save_viz() as viz:
+      def default_test(root): return graph_rewrite(root, sym)
+      tracked_test = track_rewrites()(default_test)
+      c = UOp.const(dtypes.int, 1)
+      default_test(c+1) # goes to the default group
+      tracked_test(c)   # all rewrites after this go inside the second group.
+      default_test(c+2)
+    ls = viz.list_items()
     self.assertEqual(len(ls), 2)
-    self.assertEqual(list(next(get_viz_details(0, 0))["graph"]), [id(c+1)])
-    self.assertEqual(list(next(get_viz_details(1, 0))["graph"]), [id(c)])
-    self.assertEqual(list(next(get_viz_details(1, 1))["graph"]), [id(c+2)])
+    self.assertEqual(list(next(viz.get_details(0, 0))["graph"]), [id(c+1)])
+    self.assertEqual(list(next(viz.get_details(1, 0))["graph"]), [id(c)])
+    self.assertEqual(list(next(viz.get_details(1, 1))["graph"]), [id(c+2)])
 
   def test_recurse(self):
-    a = Tensor.empty(10)
-    for _ in range(10_000): a += a
-    graph_rewrite(a.uop, PatternMatcher([]))
-    lst = get_viz_list()
+    with save_viz() as viz:
+      a = Tensor.empty(10)
+      for _ in range(10_000): a += a
+      graph_rewrite(a.uop, PatternMatcher([]))
+    lst = viz.list_items()
     assert len(lst) == 1
 
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry
@@ -381,10 +419,11 @@ from extra.viz.cli import decode_profile
 
 def load_profile(lst:list[ProfileEvent]) -> dict: return decode_profile(get_profile(lst))
 
-class TestVizProfiler(BaseTestViz):
+class TestVizProfiler(unittest.TestCase):
   def test_transfer_uses_copy_device(self):
-    a = Tensor.ones(1, device="NULL").contiguous().realize()
-    a.to("NULL:1").realize()
+    with save_viz():
+      a = Tensor.ones(1, device="NULL").contiguous().realize()
+      a.to("NULL:1").realize()
     range_events = [e for e in cpu_events if isinstance(e, ProfileRangeEvent)]
     compute_events = [e for e in range_events if e.device == "NULL"]
     copy_events = [e for e in range_events if e.device.endswith(":COPY")]
@@ -528,10 +567,11 @@ class TestVizProfiler(BaseTestViz):
     self.assertLessEqual(sz/n_events, 26)
 
   def test_calltrace(self):
-    def fxn(): return Tensor.empty(10).mul(2).realize()
-    with cpu_profile(TracingKey("test_fxn"), "CUSTOM"):
-      fxn()
-    codegen_trace = get_viz_list()[0]["steps"][0]["trace"]
+    with save_viz() as viz:
+      def fxn(): return Tensor.empty(10).mul(2).realize()
+      with cpu_profile(TracingKey("test_fxn"), "CUSTOM"):
+        fxn()
+    codegen_trace = viz.list_items()[0]["steps"][0]["trace"]
     assert any(fxn.__code__.co_filename == f and fxn.__code__.co_firstlineno == l for f,l,*_ in codegen_trace), str(codegen_trace)
     profile_ret = load_profile(cpu_events)
     e = profile_ret["layout"]["CUSTOM"]["events"][0]
@@ -549,7 +589,7 @@ class TestVizProfiler(BaseTestViz):
       get_profile(prof)
 
   def test_python_marker(self):
-    with Context(VIZ=1):
+    with save_viz():
       a = Tensor.empty(1, device="NULL")
       b = Tensor.empty(1, device="NULL")
       (a+b).realize()
@@ -564,9 +604,10 @@ class TestVizProfiler(BaseTestViz):
     assert markers[1]["ts"] >= kernels[1]["st"]+kernels[1]["dur"]
 
   def test_layout_order(self):
-    def fn(): return
-    for dname in ["TINY", "USER", "TEST:1 N1", "TEST:2 N1", "TEST:1 N2", "TEST:1:ENGINE:0", "TEST:1:ENGINE:0 N1", "TEST:1"]:
-      with cpu_profile("fn", dname): fn()
+    with save_viz():
+      def fn(): return
+      for dname in ["TINY", "USER", "TEST:1 N1", "TEST:2 N1", "TEST:1 N2", "TEST:1:ENGINE:0", "TEST:1:ENGINE:0 N1", "TEST:1"]:
+        with cpu_profile("fn", dname): fn()
     layout = list(load_profile(cpu_events)["layout"])
     self.assertListEqual(layout[:2], ["USER","TINY"])
     self.assertListEqual(layout[2:], ["TEST:1", "TEST:1 N1", "TEST:1 N2", "TEST:1:ENGINE:0", "TEST:1:ENGINE:0 N1", "TEST:2 N1"])
@@ -576,44 +617,48 @@ def _alloc(b:int):
   a.uop.buffer.allocate()
   return a
 
-class TestVizMemoryLayout(BaseTestViz):
+class TestVizMemoryLayout(unittest.TestCase):
   def test_double_alloc(self):
-    a = _alloc(1)
-    _b = _alloc(1)
+    with save_viz():
+      a = _alloc(1)
+      _b = _alloc(1)
     profile_ret = load_profile(Buffer.profile_events)
     ret = profile_ret["layout"][f"{a.device} Memory"]
     self.assertEqual(ret["peak"], 2)
     self.assertEqual(len(ret["events"]), 4)
 
   def test_del_once(self):
-    a = _alloc(1)
-    del a
-    b = _alloc(1)
+    with save_viz():
+      a = _alloc(1)
+      del a
+      b = _alloc(1)
     profile_ret = load_profile(Buffer.profile_events)
     ret = profile_ret["layout"][f"{b.device} Memory"]
     self.assertEqual(ret["peak"], 1)
     self.assertEqual(len(ret["events"]), 4)
 
   def test_alloc_free(self):
-    a = _alloc(1)
-    _b = _alloc(1)
-    del a
-    c = _alloc(1)
+    with save_viz():
+      a = _alloc(1)
+      _b = _alloc(1)
+      del a
+      c = _alloc(1)
     profile_ret = load_profile(Buffer.profile_events)
     ret = profile_ret["layout"][f"{c.device} Memory"]
     self.assertEqual(ret["peak"], 2)
     self.assertEqual(len(ret["events"]), 6)
 
   def test_free_last(self):
-    bufs = []
-    for _ in range(3):
-      bufs.append(_alloc(1))
-      profile_marker("alloc")
-    device = bufs[0].device
-    while bufs:
-      b = bufs.pop()
-      del b
-      profile_marker("free")
+    with save_viz():
+      bufs = []
+      for _ in range(3):
+        bufs.append(_alloc(1))
+        profile_marker("alloc")
+      device = bufs[0].device
+      while bufs:
+        b = bufs.pop()
+        del b
+        profile_marker("free")
     profile = load_profile(cpu_events+Buffer.profile_events)
     ret = profile["layout"][f"{device} Memory"]
     self.assertEqual(ret["peak"], 3)
@@ -621,10 +666,11 @@ class TestVizMemoryLayout(BaseTestViz):
     self.assertEqual(len(profile["markers"]), 6)
 
   def test_producer_simple(self):
-    a = Tensor.ones(10, device="NULL")
-    Tensor.realize(a.add(1).contiguous())
-    b = Tensor.ones(10, device="NULL")
-    Tensor.realize(b.add(1).contiguous())
+    with save_viz():
+      a = Tensor.ones(10, device="NULL")
+      Tensor.realize(a.add(1).contiguous())
+      b = Tensor.ones(10, device="NULL")
+      Tensor.realize(b.add(1).contiguous())
     profile = load_profile(cpu_events+Buffer.profile_events)
     buffers = profile["layout"]["NULL Memory"]["events"]
     programs = profile["layout"]["NULL"]["events"]
@@ -644,10 +690,11 @@ class TestVizMemoryLayout(BaseTestViz):
     assert all(u[3] == 0 for u in input_buf["arg"]["users"])
 
   def test_annotate_read_write(self):
-    a = Tensor.ones(4, device="NULL").contiguous().realize()
-    b = a.assign(a+2)
-    c = a+1
-    Tensor.realize(b, c)
+    with save_viz():
+      a = Tensor.ones(4, device="NULL").contiguous().realize()
+      b = a.assign(a+2)
+      c = a+1
+      Tensor.realize(b, c)
     buf_events = load_profile(cpu_events+Buffer.profile_events)["layout"]["NULL Memory"]["events"]
     users = next((b["arg"]["users"] for b in buf_events if len(b["arg"].get("users",[])) == 3))
     self.assertEqual(users[0][3], 1) # write Tensor.ones
@@ -655,8 +702,9 @@ class TestVizMemoryLayout(BaseTestViz):
     self.assertEqual(users[2][3], 0) # readonly
 
   def test_dedup_users(self):
-    a = Tensor.empty(1, device="NULL")
-    for _ in range(n:=4): a.add(1).realize()
+    with save_viz():
+      a = Tensor.empty(1, device="NULL")
+      for _ in range(n:=4): a.add(1).realize()
     profile = load_profile(cpu_events+Buffer.profile_events)
     programs = profile["layout"][a.device]["events"]
     users = profile["layout"][f"{a.device} Memory"]["events"].pop()["arg"]["users"]
@@ -668,7 +716,6 @@ from tinygrad.renderer.amd.dsl import s
 from tinygrad.runtime.autogen.amd.rdna3.ins import (s_add_u32, s_branch, s_cbranch_execz, s_cbranch_scc0, s_cbranch_scc1, s_cmp_eq_i32,
                                                     s_cmp_eq_u64, s_code_end, s_endpgm, s_mov_b32, s_nop)
 from extra.gemm.amd_asm_matmul import Kernel
-from tinygrad.renderer.cstyle import AMDHIPRenderer
 
 class TestCfg(unittest.TestCase):
   def setUp(self): self.arch = "gfx1100"
@@ -680,11 +727,9 @@ class TestCfg(unittest.TestCase):
       gidx = UOp.special(1, "gidx0")
       sink = UOp.sink(out.base, lidx, gidx, arg=KernelInfo(name=name))
       return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg="NULL"), UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=x) for x in insts]))))
-    with Context(EMULATE="AMD"):
-      out = Tensor.custom_kernel(Tensor.empty(1, device="NULL"), fxn=fxn)[0]
-      # TODO: uncomment the better version once EMULATE works in Context
-      #prg = out.schedule()[-1].lower().prg.p
-      prg = get_program(out.schedule()[-1].ast, AMDHIPRenderer(self.arch))
+    with Context(DEV=f"NULL:HIP:{self.arch}"):
+      out = Tensor.custom_kernel(Tensor.empty(1), fxn=fxn)[0]
+      prg = out.schedule()[-1].lower().prg.p
       return amdgpu_cfg(prg.lib, self.arch)
 
   def test_simple(self):

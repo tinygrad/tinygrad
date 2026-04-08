@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e  # Exit on any error
 
-export PYTHONPATH="." AMD=1
+export PYTHONPATH="." DEV=AMD
 export MODEL="bert"
 export SUBMISSION_PLATFORM="tinybox_red"
 export DEFAULT_FLOAT="HALF" SUM_DTYPE="HALF" GPUS=6 BS=96 EVAL_BS=96

@@ -4,8 +4,8 @@ from extra.f16_decompress import u32_to_f16
 from examples.stable_diffusion import StableDiffusion
 from tinygrad.nn.state import get_state_dict, safe_save, safe_load_metadata, torch_load, load_state_dict
 from tinygrad.tensor import Tensor
-from tinygrad import Device, dtypes
-from tinygrad.helpers import fetch
+from tinygrad import dtypes
+from tinygrad.helpers import DEV, fetch
 from typing import NamedTuple, Any, List
 import requests
 import argparse
@@ -80,7 +80,7 @@ if __name__ == "__main__":
   parser = argparse.ArgumentParser(description='Run Stable Diffusion', formatter_class=argparse.ArgumentDefaultsHelpFormatter)
   parser.add_argument('--remoteweights', action='store_true', help="Use safetensors from Huggingface, or from local")
   args = parser.parse_args()
-  Device.DEFAULT = "WEBGPU"
+  DEV.value = "WEBGPU"
 
   model = StableDiffusion()
 

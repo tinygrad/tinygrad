@@ -286,7 +286,7 @@ NSInvocation._methods_ = [
 NSInvocation._classmethods_ = [
   ('invocationWithMethodSignature:', NSInvocation, [NSMethodSignature]),
 ]
-class struct__NSZone(ctypes.Structure): pass
+class struct__NSZone(c.Struct): SIZE = 0
 class Protocol(objc.Spec): pass
 class NSString(objc.Spec): pass
 unichar: TypeAlias = Annotated[int, ctypes.c_uint16]
@@ -1494,7 +1494,7 @@ MTLArchitecture._methods_ = [
 class MTLHeapDescriptor(objc.Spec): pass
 class MTLDepthStencilState(objc.Spec): pass
 class MTLDepthStencilDescriptor(objc.Spec): pass
-class struct___IOSurface(ctypes.Structure): pass
+class struct___IOSurface(c.Struct): SIZE = 0
 IOSurfaceRef: TypeAlias = c.POINTER[struct___IOSurface]
 class MTLSharedTextureHandle(objc.Spec): pass
 MTLSharedTextureHandle._bases_ = [NSObject]
