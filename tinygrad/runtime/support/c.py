@@ -83,7 +83,9 @@ class Struct(ctypes.Structure):
   def __init__(self, *args, **kwargs):
     ctypes.Structure.__init__(self)
     self._objects_ = {}
-    for f,v in [*zip((rf[0] for rf in self._real_fields_), args), *kwargs.items()]: setattr(self, f, v)
+    for f,v in [*zip((rf[0] for rf in self._real_fields_), args), *kwargs.items()]:
+      ty = getattr(self.__class__, f).type
+      setattr(self, f, ty(*v) if issubclass(ty, ctypes.Array) and not isinstance(v, ty) else v)
 
 def record(cls) -> type[Struct]:
   newcls = type(cls.__name__, (Struct,), {'_fields_': [('_mem_', ctypes.c_byte * cls.SIZE)]})
@@ -108,15 +110,16 @@ class Field(property):
       # FIXME: signedness
       super().__init__(lambda self: b2i(self) >> bit_off & mask, bset)
     else:
-      if not isinstance(fmt:=getattr(typ, '_type_', None), str):
+      if not isinstance(getattr(typ, '_type_', None), str):
         def objset(self, v):
           if hasattr(v, '_objects') and hasattr(self, '_objects_'): self._objects_[off] = {'_self_': v, **(v._objects or {})}
           memoryview(self).cast("B")[off:off+ctypes.sizeof(typ)] = memoryview(v if isinstance(v, typ) else typ(v)).cast("B")
         super().__init__(lambda self: getattr(v:=typ.from_buffer(self, off), "value", v), objset)
       else:
-        bits = ctypes.sizeof(typ) * 8
-        super().__init__(lambda self: struct.unpack_from(fmt, self, off)[0], lambda self,v: struct.pack_into(fmt, self, off, i2u(bits, v)))
-    self.offset = off
+        fmt, bits = typ._type_, ctypes.sizeof(typ) * 8
+        if fmt.islower(): super().__init__(lambda self: struct.unpack_from(fmt, self, off)[0], lambda self,v: struct.pack_into(fmt, self, off, v))
+        else: super().__init__(lambda self: struct.unpack_from(fmt, self, off)[0], lambda self,v: struct.pack_into(fmt, self, off, i2u(bits, v)))
+    self.type, self.offset = typ, off
 
 @functools.cache
 def init_c_struct_t(sz:int, fields: tuple[tuple, ...]):
