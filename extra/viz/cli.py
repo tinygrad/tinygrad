@@ -104,8 +104,15 @@ def main(args) -> None:
     # ** PMC printer
     if "PMC" in args.src:
       table = viz.unpack_pmc(data[0])
+      cols = table["cols"]
+      rows:list = []
+      for r in table["rows"]:
+        if args.item is None: rows.append(r[:2])
+        elif args.item == r[0]:
+          rows = r[2]["rows"] if len(r) > 2 else [r[:2]]
+          cols = r[2]["cols"] if len(r) > 2 else cols
       from tabulate import tabulate
-      print(tabulate([r[:len(table["cols"])] for r in table["rows"]], headers=table["cols"], tablefmt="github"))
+      print(tabulate(rows, headers=cols, tablefmt="github"))
       return None
 
     # ** Profiler printer

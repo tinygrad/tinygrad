@@ -40,9 +40,9 @@ VIZ=-2 python extra/gemm/amd_asm_matmul.py
 # View barriers
 extra/viz/cli.py --profile -s "kernel SQTT SE:0 PKTS" | rg BARRIER | head -10
 
-# View performance counters
+# Get bank conflicts from perf counters
 
-extra/viz/cli.py --profile -s "kernel PMC"
+python extra/viz/cli.py -p -s "kernel PMC" -i "SQC_LDS_IDX_ACTIVE"
 
 # Find the EXEC corresponding to a DISPATCH at cycle 410
 extra/viz/cli.py --profile -s "kernel SQTT SE:0 PKTS" | awk '/EXEC/ && $1 - $5 == 410'
