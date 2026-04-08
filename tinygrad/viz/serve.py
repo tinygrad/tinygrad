@@ -290,7 +290,7 @@ def unpack_pmc(e) -> dict:
   agg_cols = ["Name", "Sum"]
   rows:list[list] = []
   stats:dict[str, tuple[int, int, int]] = {}  # name -> (sum, max, count)
-  view, ptr = memoryview(e.blob).cast("Q"), 0
+  view, ptr = memoryview(e.blob).cast('Q'), 0
   for s in e.sched:
     sample_cols = ["XCC", "INST", "SE", "SA"] + [f"WGP{i}" for i in range(s.wgp)]
     row:list = [s.name, 0, {"cols":sample_cols, "rows":[]}]
