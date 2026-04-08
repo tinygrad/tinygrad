@@ -1,6 +1,6 @@
 from __future__ import annotations
-import ctypes, functools, os, pathlib, re, struct, sys, sysconfig
-from tinygrad.helpers import i2u, ceildiv, getenv, unwrap, DEBUG, OSX, WIN
+import ctypes, functools, os, pathlib, re, sys, sysconfig
+from tinygrad.helpers import ceildiv, getenv, unwrap, DEBUG, OSX, WIN
 from typing import TYPE_CHECKING, get_type_hints, get_args, get_origin, overload, Annotated, Any, Generic, Iterable, ParamSpec, TypeVar
 
 def _do_ioctl(__idir, __base, __nr, __struct, __fd, *args, __payload=None, **kwargs):
@@ -108,7 +108,7 @@ class BitField(property):
 def make_field(cls, nm, *f):
   cls._real_fields_.append((nm, *f))
   setattr(cls, nm, BitField(*f) if len(f) > 2 else
-          type(f"{f[0]}_{f[1]}", (ctypes.Structure,), {"_layout_": "ms", "_pack_": 1, "_fields_": [("_", ctypes.c_byte * f[1]), ("v", f[0])]}).v)
+          type(f"{f[0]}_{f[1]}", (ctypes.Structure,), {"_layout_": "ms", "_pack_": 1, "_fields_": [("_", ctypes.c_byte * f[1]), ("v", f[0])]}).v) # type: ignore
 
 @functools.cache
 def init_c_struct_t(sz:int, fields: tuple[tuple, ...]):
