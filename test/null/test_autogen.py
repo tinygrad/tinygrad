@@ -52,7 +52,7 @@ class TestC(unittest.TestCase):
 
     f = Foo(None)
     assert f.p == 0
-    f.p = 0xDEADBEEF
+    f.p = ctypes.c_void_p(0xDEADBEEF)
     assert f.p == 0xDEADBEEF
     f.p = None
     assert f.p == 0

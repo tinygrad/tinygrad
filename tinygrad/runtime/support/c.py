@@ -116,9 +116,10 @@ class Field(property):
           memoryview(self).cast("B")[off:off+ctypes.sizeof(typ)] = memoryview(v if isinstance(v, typ) else typ(v)).cast("B")
         super().__init__(lambda self: getattr(v:=typ.from_buffer(self, off), "value", v), objset)
       else:
-        fmt, bits = typ._type_, ctypes.sizeof(typ) * 8
-        if fmt.islower(): super().__init__(lambda self: struct.unpack_from(fmt, self, off)[0], lambda self,v: struct.pack_into(fmt, self, off, v))
-        else: super().__init__(lambda self: struct.unpack_from(fmt, self, off)[0], lambda self,v: struct.pack_into(fmt, self, off, i2u(bits, v or 0)))
+        ty, bits, get = typ._type_, ctypes.sizeof(typ) * 8, lambda self: struct.unpack_from(ty, self, off)[0]
+        def mkset(f): return (lambda self,v: struct.pack_into(ty, self, off, f(v))) if f else (lambda self,v: struct.pack_into(ty, self, off, v))
+        #                           c_void_p accepts c_void_p, int, or None                   unsigned fields accept negatives
+        super().__init__(get, mkset((lambda v: getattr(v, "value", v or 0)) if ty == "P" else functools.partial(i2u, bits) if ty.isupper() else None))
     self.type, self.offset = typ, off
 
 @functools.cache
