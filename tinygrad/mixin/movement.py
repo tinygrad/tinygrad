@@ -107,6 +107,12 @@ class MovementMixin:
     ret = self._mop(Ops.RESHAPE, arg=new_shape)
     return self if ret.shape == self.shape else ret
 
+  def pad(self, arg:tuple[tuple[sint, sint] | None, ...]) -> Self:
+    if self.ndim != len(arg):
+      raise ValueError(f"{self.ndim=} != {len(arg)=}")
+    ret = self._mop(Ops.PAD, tuple(x if x is not None else (0, 0) for x in arg))
+    return self if ret.shape == self.shape else ret
+
   def shrink(self, arg: tuple[tuple[sint, sint] | None, ...]) -> Self:
     """
     Returns a tensor that shrinks the each axis based on input arg.
