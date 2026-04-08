@@ -7,7 +7,7 @@ if TYPE_CHECKING: import numpy
 from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_float, least_upper_dtype, to_dtype, truncate
 from tinygrad.dtype import _from_np_dtype, _to_np_dtype, PyConst, Invalid, InvalidType
 from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten
-from tinygrad.helpers import IMAGE, FLOAT16, WINO, Metadata, TRACEMETA, ASM_GEMM, ceildiv, fetch, is_numpy_ndarray, TracingKey, cpu_profile
+from tinygrad.helpers import IMAGE, FLOAT16, WINO, Metadata, TRACEMETA, ceildiv, fetch, is_numpy_ndarray, TracingKey, cpu_profile
 from tinygrad.helpers import suppress_finalizing, disable_gc
 from tinygrad.gradient import compute_gradient
 from tinygrad.mixin import OpMixin
@@ -2032,9 +2032,6 @@ class Tensor(OpMixin):
 
   def dot(self, w:Tensor, dtype:DTypeLike|None=None) -> Tensor:
     if IMAGE: return self.image_dot(w, dtype)
-    if ASM_GEMM:
-      from extra.gemm.cdna_asm_gemm import can_use_asm_gemm, asm_gemm
-      if can_use_asm_gemm(self, w): return asm_gemm(self, w)
     return super().dot(w, dtype=dtype)
 
   def _cumalu(self, axis:int, op:Ops, _include_initial=False) -> Tensor:
@@ -2385,21 +2382,6 @@ class Tensor(OpMixin):
     """
     return self._apply_uop(UOp.contiguous_backward)
 
-  # ***** math functions *****
-
-  def lerp(self, end:Tensor, weight:Tensor|float) -> Tensor:
-    """
-    Linearly interpolates between `self` and `end` by `weight`.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([1., 2., 3.]).lerp(Tensor([4., 5., 6.]), 0.5).numpy())
-    ```
-    """
-    if self.dtype == dtypes.uint8 and isinstance(weight, Tensor):
-      w_i = (weight * (1<<(W_PREC:=7)) + 0.5).cast(dtypes.int16)
-      return (self+(((end - self).cast(dtypes.int8) * w_i + (1<<W_PREC-1)).cast(dtypes.uint16) >> W_PREC)).cast(dtypes.uint8)
-    return self + (end - self) * weight
-
   # ***** broadcasted elementwise ops *****
 
   def ufix(self, x) -> Tensor:
@@ -2644,14 +2626,6 @@ class Tensor(OpMixin):
     print(q.scaled_dot_product_attention(k, v).numpy())
     ```
     """
-    if getenv("FLASH_ATTENTION"):
-      from extra.thunder.tiny.fa import flash_attention
-      return flash_attention(self, key, value, attn_mask=attn_mask, is_causal=is_causal)
-
-    if getenv("HK_FLASH_ATTENTION"):
-      from extra.thunder.amd.fa import flash_attention
-      return flash_attention(self, key, value, attn_mask=attn_mask, is_causal=is_causal)
-
     # GQA: https://docs.pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html
     if enable_gqa:
       key = key.repeat_interleave(int(self.shape[-3] // key.shape[-3]), dim=-3)

@@ -1,6 +1,6 @@
 from __future__ import annotations
 import struct, random, socket, ctypes, functools, itertools
-from tinygrad.helpers import getenv, wait_cond, round_up, next_power2, ceildiv, DEBUG, hi32, lo32
+from tinygrad.helpers import getenv, wait_cond, round_up, next_power2, ceildiv, DEBUG, hi32, lo32, to_be32, to_be64
 from tinygrad.runtime.support.memory import BumpAllocator
 from tinygrad.runtime.support.system import PCIDevice
 from tinygrad.runtime.autogen import mlx5, pci
@@ -11,7 +11,7 @@ MLX5_CMD_STRUCTS = {v: (getattr(mlx5, f"struct_mlx5_ifc_{n[12:].lower()}_in_bits
   getattr(mlx5, f"struct_mlx5_ifc_{n[12:].lower()}_out_bits", None)) for n, v in mlx5.__dict__.items() if n.startswith("MLX5_CMD_OP_")}
 MLX5_CMD_STRUCTS[mlx5.MLX5_CMD_OP_ACCESS_REG] = (mlx5.struct_mlx5_ifc_access_register_in_bits, mlx5.struct_mlx5_ifc_access_register_out_bits)
 
-def to_be(fmt, val): return struct.unpack('<'+fmt, struct.pack('>'+fmt, val))[0]
+def to_be(fmt, val): return to_be32(val) if fmt == 'I' else to_be64(val)
 def ipv4_to_gid(ip): return bytes(10) + b'\xff\xff' + socket.inet_aton(ip)
 
 def udp_sport(lqpn, rqpn):
