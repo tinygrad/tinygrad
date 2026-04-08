@@ -928,8 +928,7 @@ class Tensor(OpMixin):
     print(Tensor.scaled_uniform(2, 3).numpy())
     ```
     """
-    bound = prod(argfix(*shape)) ** -0.5
-    return Tensor.uniform(*shape, low=-bound, high=bound, **kwargs)
+    return Tensor.uniform(*shape, low=-1.0, high=1.0, **kwargs).mul(prod(argfix(*shape))**-0.5)
 
   @staticmethod
   def glorot_uniform(*shape, **kwargs) -> Tensor:
