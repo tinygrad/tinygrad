@@ -122,7 +122,11 @@ class FlatTransformer:
     xq, xk = apply_rotary_emb(xq, xk, freqs_cis)
     if FP8: xq, xk, xv = xq.cast(dtypes.bfloat16), xk.cast(dtypes.bfloat16), xv.cast(dtypes.bfloat16)
     xq, xk, xv = xq.transpose(1, 2), xk.transpose(1, 2), xv.transpose(1, 2)
-    attn = xq.scaled_dot_product_attention(xk, xv, is_causal=True, enable_gqa=True).transpose(1, 2)
+    if getenv("HK_FLASH_ATTENTION"):
+      from extra.thunder.amd.fa import flash_attention
+      attn = flash_attention(xq, xk, xv, is_causal=True)
+    else:
+      attn = xq.scaled_dot_product_attention(xk, xv, is_causal=True, enable_gqa=True).transpose(1, 2)
     attn = attn.reshape(bsz, seqlen, -1)
     return matmul(attn, wo, amax_x=amax_xo, amax_w=amax_wo)
 

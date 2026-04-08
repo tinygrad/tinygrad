@@ -137,13 +137,13 @@ class TestGemmLlama(unittest.TestCase):
       self.skipTest("very slow on non mi350x")
 
   @Context(ASM_GEMM=1)
-  def test_empty(self): (Tensor.empty(N:=getenv("N", 4096), N, dtype=self.dtype)@Tensor.empty(N, N, dtype=self.dtype)).realize()
+  def test_empty(self): asm_gemm(Tensor.empty(N:=getenv("N", 4096), N, dtype=self.dtype), Tensor.empty(N, N, dtype=self.dtype)).realize()
 
   @Context(ASM_GEMM=1)
   def test_empty_bw(self):
     x = Tensor.empty(1, N:=getenv("N", 4096), N, dtype=self.dtype, requires_grad=True)
     y = Tensor.empty((N, N), dtype=self.dtype, requires_grad=True)
-    z = x @ y
+    z = asm_gemm(x, y)
     z.sum().backward()
     Tensor.realize(z, x.grad, y.grad)
     # FP8 forward output is bf16, gradients use fp8e5m2 (aka bf8)
