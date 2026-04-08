@@ -102,14 +102,28 @@ class Scheduler:
     self.ast = self.ast.substitute({rng:sub_axis}, name=f"shift {rng.arg[:-1]} {amount} {str(new_type).split('.')[1].lower()}")
     return replaced_rng, new_rng
 
+  @staticmethod
+  def _dependent_inner_ranges(u: UOp, rngs: list[UOp]) -> list[UOp]:
+    # return the ranges who's END depends on any of the RANGES in rngs, i.e. if we duplicate any of the rngs, we have to duplicate this too
+    return [er for v in u.backward_slice for er in v.ended_ranges if er.op is Ops.RANGE and any(r in v.ranges for r in rngs)]
+
   def split_to(self, rng:UOp, cuts:tuple[int, ...]):
     offsets = (0, *cuts)
     new_rngs = [UOp.range(e - s, *(rng.arg[:-1] + (i, rng.arg[-1]))) for i, (s, e) in enumerate(itertools.pairwise((*offsets, rng.src[0].arg)))]
     end = get_single_element([u for u in self.ast.toposort() if u.op is Ops.END and rng in u.src])
     rng_idx = end.src.index(rng)
-    inner_rngs, outer_rngs = list(end.src[1:rng_idx]), list(end.src[rng_idx+1:])
-    ends = [end.src[0].end(*inner_rngs, rng).substitute({rng: new_rngs[i] + offsets[i]}) for i in range(len(new_rngs))]
-    self.ast = self.ast.substitute({end: UOp.group(*ends).end(*outer_rngs)}, name=f"split {rng.arg[:-1]} at {cuts}")
+    inner_end_rngs, outer_end_rngs = list(end.src[1:rng_idx]), list(end.src[rng_idx+1:])
+
+    inner_end = end.src[0].end(*inner_end_rngs)
+    inner_rngs_dup = [rng]
+    while (append := self._dependent_inner_ranges(inner_end, inner_rngs_dup)):
+      inner_rngs_dup.extend(append)
+    inner_rngs_dup.remove(rng)
+
+    ends = [end.src[0].end(*inner_end_rngs, rng).substitute({rng: new_rngs[i] + offsets[i]}) for i in range(len(new_rngs))]
+    # give each split segment its own copy of inner ranges so no range has multiple ENDs
+    ends = [e.substitute({r: r.replace(arg=r.arg[:-1]+(i,r.arg[-1])) for r in inner_rngs_dup}) for i,e in enumerate(ends)]
+    self.ast = self.ast.substitute({end: UOp.group(*ends).end(*outer_end_rngs)}, name=f"split {rng.arg[:-1]} at {cuts}")
     return tuple(new_rngs)
 
   def ranges_of(self, *axis_type:AxisType) -> list[UOp]: return [r for r in self.rngs if r.arg[-1] in axis_type]
