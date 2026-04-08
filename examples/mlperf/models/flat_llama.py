@@ -35,16 +35,15 @@ def quantize_fp8(x:Tensor, amax_state:Tensor|None=None):
   return x_clamped.cast(FP8_DTYPE), scale.float().reciprocal()
 
 def matmul(x:Tensor, w:Tensor, fp8=FP8, amax_x:Tensor|None=None, amax_w:Tensor|None=None) -> Tensor:
-  from tinygrad.helpers import ASM_GEMM
   if not fp8:
-    if ASM_GEMM:
+    if getenv("ASM_GEMM"):
       from extra.gemm.cdna_asm_gemm import can_use_asm_gemm, asm_gemm
       if can_use_asm_gemm(x, w.T): return asm_gemm(x, w.T)
     return x @ w.T
   x_fp8, x_scale = quantize_fp8(x, amax_state=amax_x)
   w_fp8, w_scale = quantize_fp8(w, amax_state=amax_w)
   combined_scale = x_scale * w_scale
-  if ASM_GEMM:
+  if getenv("ASM_GEMM"):
     from extra.gemm.cdna_asm_gemm import can_use_asm_gemm, asm_gemm
     if can_use_asm_gemm(x_fp8, w_fp8.T): return asm_gemm(x_fp8, w_fp8.T, combined_scale=combined_scale)
   return x_fp8.dot(w_fp8.T, dtype=dtypes.float) * combined_scale
