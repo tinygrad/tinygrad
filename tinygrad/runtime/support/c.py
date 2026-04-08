@@ -92,28 +92,34 @@ def record(cls) -> type[Struct]:
 def init_records() -> None:
   for cls, newcls, ns in _pending_records:
     setattr(newcls, '_real_fields_', [])
-    for nm, t in get_type_hints(cls, globalns=ns, include_extras=True).items():
-      make_field(newcls, nm, *((del_an(t.__origin__), *t.__metadata__) if isinstance(t.__metadata__[0], int) else t.__metadata__))
+    for i, (nm, t) in enumerate(get_type_hints(cls, globalns=ns, include_extras=True).items()):
+      newcls._real_fields_.append((nm, *(f:=(del_an(t.__origin__), *t.__metadata__) if isinstance(t.__metadata__[0], int) else t.__metadata__)))
+      setattr(newcls, nm, Field(nm, i, *f))
   _pending_records.clear()
 
-class BitField(property):
-  def __init__(self, typ, off:int, bit_width, bit_off=0):
-    sl, set_mask = slice(off,off+(sz:=ceildiv(bit_width+bit_off, 8))), ~((mask:=(1 << bit_width) - 1) << bit_off)
-    def b2i(b): return int.from_bytes(memoryview(b).cast("B")[sl], sys.byteorder)
-    def bset(self, v): memoryview(self).cast("B")[sl] = ((b2i(self) & set_mask) | v << bit_off).to_bytes(sz, sys.byteorder)
-    # FIXME: signedness
-    super().__init__(lambda self: b2i(self) >> bit_off & mask, bset)
-    self.type = typ
-
-def make_field(cls, nm, *f):
-  cls._real_fields_.append((nm, *f))
-  setattr(cls, nm, BitField(*f) if len(f) > 2 else
-          type(f"{f[0]}_{f[1]}", (ctypes.Structure,), {"_layout_": "ms", "_pack_": 1, "_fields_": [("_", ctypes.c_byte * f[1]), ("v", f[0])]}).v) # type: ignore
+class Field:
+  def __init__(self, nm, idx, typ, off, bit_width=None, bit_off=0):
+    self.nm, self.idx, self.typ, self.off, self.bit_width, self.bit_off = nm, idx, typ, off, bit_width, bit_off
+  def _resolve(self, cls):
+    if self.bit_width:
+      sl, set_mask = slice(self.off, self.off+(sz:=ceildiv(self.bit_width+self.bit_off, 8))), ~((mask:=(1 << self.bit_width) - 1) << self.bit_off)
+      def b2i(obj): return int.from_bytes(memoryview(obj).cast("B")[sl], sys.byteorder)
+      def bset(obj, v): memoryview(obj).cast("B")[sl] = ((b2i(obj) & set_mask) | v << self.bit_off).to_bytes(sz, sys.byteorder)
+      # FIXME: signedness
+      cf = property(lambda obj: b2i(obj) >> self.bit_off & mask, bset)
+    else: cf = type(self.nm, (ctypes.Structure,), {"_layout_": "ms", "_pack_": 1, "_fields_": [(str(i), ctypes.c_byte * 0) for i in range(self.idx)] +
+                                                                                              [("_", ctypes.c_byte * self.off), ("v", self.typ)]}).v # type: ignore
+    setattr(cls, self.nm, cf)
+    return cf
+  def __get__(self, obj, objtype=None): return self._resolve(objtype).__get__(obj, objtype) if objtype else self
+  def __set__(self, obj, value): self._resolve(obj.__class__).__set__(obj, value)
 
 @functools.cache
 def init_c_struct_t(sz:int, fields: tuple[tuple, ...]):
   CStruct = type("CStruct", (Struct,), {'_fields_': [('_mem_', ctypes.c_byte * sz)], '_real_fields_': []})
-  for nm,ty,*args in fields: make_field(CStruct, nm, del_an(ty), *args)
+  for i,(nm,ty,*args) in enumerate(fields):
+    CStruct._real_fields_.append((nm, *(f:=(del_an(ty), *args))))
+    setattr(CStruct, nm, Field(nm, i, *f))
   return CStruct
 def init_c_var(ty, creat_cb): return (creat_cb(v:=del_an(ty)()), v)[1]
 
