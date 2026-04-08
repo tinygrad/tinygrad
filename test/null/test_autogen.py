@@ -51,11 +51,11 @@ class TestC(unittest.TestCase):
     init_records()
 
     f = Foo(None)
-    assert f.p == 0
+    assert f.p is None
     f.p = ctypes.c_void_p(0xDEADBEEF)
     assert f.p == 0xDEADBEEF
     f.p = None
-    assert f.p == 0
+    assert f.p is None
 
   def test_packed_struct(self):
     @record
