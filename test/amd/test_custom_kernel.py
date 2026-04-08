@@ -105,13 +105,12 @@ def custom_handwritten(A:UOp, arch:str) -> UOp:
   k = Kernel(arch)
   k.emit(r4.s_nop(0))
   k.emit(r4.v_mov_b32_e32(v[1], 10))
-  k.emit(r4.s_lshl_b32(s[13], s[12], 1))
-  k.emit(r4.s_mul_i32(s[14], s[12], 32))
   def emit_alt():
     for i in range(4):
       k.emit(r4.v_mov_b32_e32(v[20+i], 4.0))
       k.emit(r4.v_rcp_f32_e32(v[22+i], v[20+i]))
       k.emit(r4.s_mov_b32(s[20+i], i))
+      k.emit(r4.s_mul_i32(s[14+i], s[12+i], 32))
   def emit_wmma():
     for _ in range(4):
       k.emit(r4.v_wmma_f32_16x16x16_f16(v[0:7], v[8:11], v[8:11], 1))
