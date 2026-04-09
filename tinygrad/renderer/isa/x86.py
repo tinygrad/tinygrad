@@ -238,6 +238,7 @@ def lane(x:UOp, i:int) -> int: return s.arg[0] if (s:=x.src[i]).op is Ops.GEP el
 def to_int(dt:DType): return {dtypes.float16: dtypes.int16, dtypes.float32: dtypes.int32, dtypes.float64: dtypes.int64}[dt]
 def def_reg(dt:DType, reg:Register|None=None) -> UOp: return UOp(Ops.INS, arg=X86Ops.DEFINE_REG, dtype=dt, tag=None if reg is None else (reg,))
 def imm(dt:DType, v:int) -> UOp: return UOp(Ops.CONST, dt, arg=truncate[dt](v), tag="__x86_imm__")
+def _uop_key(u:UOp): return (u.op, u.dtype, u.arg)
 def to_imm(c:UOp) -> UOp|None:
   if c.op is not Ops.CONST: return None
   if c.dtype is dtypes.int64: return imm(dtypes.int32, c.arg) if not c.overflows(dtypes.int32) else None
@@ -327,13 +328,14 @@ def fold_address(x:UOp) -> tuple[UOp, UOp, UOp]:
   if idx.op is Ops.CONST: return (base, UOp(Ops.NOOP), _disp(idx.arg * disp_scale))
   return (base, _cast(idx), _disp(0))
 
-def abi(ctx:IselContext, x:UOp) -> UOp:
-  i = ctx.func_args.index(x)
-  def _stack_arg(disp:int): return (def_reg(dtypes.uint64, RSP), UOp(Ops.NOOP), UOp(Ops.INS, arg=X86Ops.FRAME_INDEX, dtype=dtypes.int32, tag=disp))
-  if sys.platform == "win32": src = (def_reg(x.dtype, (RCX, RDX, GPR[8], GPR[9])[i]),) if i < 4 else _stack_arg((i-3)*8+32)
-  else: src = (def_reg(x.dtype, (RDI, RSI, RDX, RCX, GPR[8], GPR[9])[i]),) if i < 6 else _stack_arg((i-5)*8)
-  # this move "cleanses" the abi register constraint
-  return x.ins(X86Ops.MOV, src=src)
+def alloc_defs(ctx:IselContext, x:UOp) -> UOp|None:
+  if x.dtype is dtypes.void or isinstance(x.tag, tuple): return None
+  if x.op in {Ops.PARAM, Ops.DEFINE_VAR, Ops.SPECIAL}:
+    i = ctx.func_args.index(x)
+    regs = (RCX, RDX, GPR[8], GPR[9]) if sys.platform == "win32" else (RDI, RSI, RDX, RCX, GPR[8], GPR[9])
+    if i < len(regs): return x.replace(tag=(ctx.vreg(regs[i]),))
+  defs = [ctx.vreg(WGPR)] if x.dtype in dtypes.ints+(dtypes.bool,) or isinstance(x.dtype, PtrDType) else [ctx.vreg(XMM)]
+  return x.replace(tag=tuple(defs))
 
 def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
   # immediates and real registers
@@ -351,6 +353,23 @@ def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
   # TODO: add this once the scheduler can track register pressure
   # if x.arg in X86GroupOp.WriteFlags: defs.append(ctx.vreg(RFLAGS))
   return x.replace(tag=tuple(defs))
+
+def lower_abi(ctx, x:UOp):
+  i = ctx.func_arg_idxs[_uop_key(x)]
+  if sys.platform == "win32": regs, stack_base = (RCX, RDX, GPR[8], GPR[9]), 32
+  else: regs, stack_base = (RDI, RSI, RDX, RCX, GPR[8], GPR[9]), 0
+  if i < len(regs):
+    src = def_reg(x.dtype, regs[i])
+    if x.reg == src.reg: return src, [src]
+    return (nx:=x.ins(X86Ops.MOV, src=(src,)), [src, nx])
+  fi = UOp(Ops.INS, arg=X86Ops.FRAME_INDEX, dtype=dtypes.int32, tag=(i-len(regs)+1)*8+stack_base)
+  nx = x.ins(X86Ops.MOV, src=(def_reg(dtypes.uint64, RSP), UOp(Ops.NOOP), fi))
+  return nx, [fi, nx]
+
+def lower_stack_define(ctx, x:UOp):
+  disp = imm(dtypes.int32, ctx.local_offsets[_uop_key(x)])
+  nx = x.ins(X86Ops.LEA, src=(def_reg(dtypes.uint64, RSP), UOp(Ops.NOOP), disp))
+  return nx, [disp, nx]
 
 dts = dtypes.ints + (dtypes.bool, dtypes.float16, dtypes.float32, dtypes.float64)
 dt_16bit = tuple(dt.vec(l) for dt in dts for l in [2,1] if l*dt.itemsize == 2 and dt not in dtypes.int16s)
@@ -371,11 +390,8 @@ isel_matcher = PatternMatcher([
   # so regalloc builds the prologue/epilogue naturally
   (UPat(Ops.SINK, name="x"), lambda x:
    x.ins(X86Ops.RET, src=x.src + tuple(def_reg(dtypes.uint64 if r in GPR else dtypes.float64.vec(2), r) for r in CALLEE_SAVED))),
-  # function abi constraints
-  (UPat((Ops.PARAM, Ops.DEFINE_VAR, Ops.SPECIAL), name="x"), abi),
-  # these are treated the same for now
-  (UPat((Ops.DEFINE_REG, Ops.DEFINE_LOCAL), name="x"), lambda ctx,x:
-   x.ins(X86Ops.LEA, src=(def_reg(dtypes.uint64, RSP), UOp(Ops.NOOP), imm(dtypes.int32, ctx.inc_stack(x.dtype.nbytes()))))),
+  # late lowered function args and stack backed locals still need virtual registers
+  (UPat((Ops.PARAM, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.DEFINE_REG, Ops.DEFINE_LOCAL), name="x"), alloc_defs),
   # constants that can't be immediates, move them to registers
   (UPat.cvar("x", dtypes.int64s), lambda x: x.ins(X86Ops.MOVABS, src=(imm(x.dtype, x.arg),)) if x.tag is None else None),
   (UPat.cvar("x", dtypes.ints+(dtypes.bool,)), lambda x: x.ins(X86Ops.MOVi, src=(imm(x.dtype, x.arg),)) if x.tag is None else None),
@@ -590,6 +606,11 @@ def flag_rematerialize(ctx:PreRegAllocContext, x:UOp):
 
 pre_regalloc_matcher = PatternMatcher([
   (UPat((Ops.INS, Ops.RANGE), name="x"), flag_rematerialize),
+])
+
+late_regalloc_matcher = PatternMatcher([
+  (UPat((Ops.PARAM, Ops.DEFINE_VAR, Ops.SPECIAL), name="x"), lower_abi),
+  (UPat((Ops.DEFINE_REG, Ops.DEFINE_LOCAL), name="x"), lower_stack_define),
 ])
 
 # ***** post register allocation *****
@@ -841,6 +862,7 @@ class X86Renderer(ISARenderer):
   pre_isel_matcher = pre_isel_matcher
   isel_matcher = isel_matcher
   pre_regalloc_matcher = pre_regalloc_matcher
+  late_regalloc_matcher = late_regalloc_matcher
   post_regalloc_matcher = post_regalloc_matcher
   isa_spec = isa_spec
   code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.AND, Ops.OR, Ops.SHL, Ops.SHR, Ops.NEG, Ops.SUB, Ops.FDIV, Ops.CMPLT, Ops.CMPEQ)}

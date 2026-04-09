@@ -106,7 +106,7 @@ def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -
     linear_sink = graph_rewrite(sink, ren.pre_isel_matcher, name="pre instruction selection", bottom_up=True)
     isel_ctx = IselContext(linear_sink)
     linear_sink = graph_rewrite(linear_sink, ren.isel_matcher, ctx=isel_ctx, name="instruction selection", bottom_up=True)
-    sink = sink.replace(src=(linear_sink,)+sink.src, arg=replace(cast(KernelInfo, sink.arg), stack_size=isel_ctx.stack_size))
+    sink = sink.replace(src=(linear_sink,)+sink.src)
 
   # return the rewritten sink
   return sink
@@ -140,8 +140,9 @@ def do_linearize(ctx:Renderer, prg:UOp, sink:UOp) -> UOp:
     from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite
     lst = linearize(sink.src[0] if len(sink.src) != 0 and sink.src[0].op is Ops.INS else sink)
     if ctx.pre_regalloc_matcher is not None: lst = line_rewrite(lst, ctx.pre_regalloc_matcher, PreRegAllocContext())
-    regalloc_ctx = LinearScanRegallocContext(lst, ctx, sink.arg.stack_size)
+    regalloc_ctx = LinearScanRegallocContext(lst, ctx)
     lst = line_rewrite(lst, pm_regalloc_rewrite, regalloc_ctx)
+    if ctx.late_regalloc_matcher is not None: lst = line_rewrite(lst, ctx.late_regalloc_matcher, regalloc_ctx)
     lst = line_rewrite(lst, ctx.post_regalloc_matcher, regalloc_ctx)
     if DEBUG >= 4: print(ctx.asm(lst, sink.arg.function_name))
     if SPEC: type_verify(lst, ctx.isa_spec)

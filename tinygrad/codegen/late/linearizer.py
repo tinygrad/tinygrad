@@ -37,7 +37,7 @@ def linearize(sink:UOp) -> list[UOp]:
     if u.op is Ops.INS:
       from tinygrad.renderer.isa.x86 import X86Ops, RSP
       match u.arg:
-        case X86Ops.DEFINE_REG: priority = -21 if u.tag[0] == RSP else -20
+        case X86Ops.DEFINE_REG: priority, extra = (-21 if u.tag[0] == RSP else -20), u.tag[0].index
 
     priorities[u] = (run_count, priority, extra)
 

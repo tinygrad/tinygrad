@@ -4,10 +4,11 @@ from tinygrad.renderer.isa import ISARenderer, Register
 from tinygrad.dtype import dtypes, PtrDType
 
 PSEUDO_OPS = {Ops.NOOP, Ops.AFTER, Ops.BARRIER, Ops.GROUP}
+def _uop_key(u:UOp): return (u.op, u.dtype, u.arg)
 
 # loosely based on: https://bernsteinbear.com/assets/img/register-spilling-range-splitting-ssa.pdf
 class LinearScanRegallocContext:
-  def __init__(self, uops:list[UOp], ren:ISARenderer, stack_size:int=0):
+  def __init__(self, uops:list[UOp], ren:ISARenderer):
     live_range: dict[Register, list[int]] = {}
     live: dict[Register, Register] = {}
     live_ins: list[dict[Register, Register]] = []
@@ -18,9 +19,16 @@ class LinearScanRegallocContext:
     self.insert_before: dict[int, list[tuple[Register, Register]]] = {} # mapping from program point to fills to be inserted
     self.idx = itertools.count()
     self.ren = ren
-    self.stack_size = stack_size
+    self.stack_size = 0
     # the label associated with each loop NOTE: this is only used post regalloc and should be removed
     self.loop_label: dict[UOp, str] = {}
+    arg_order = {Ops.PARAM: 0, Ops.DEFINE_VAR: 1, Ops.SPECIAL: 2}
+    self.func_arg_idxs = {_uop_key(u): i for i,u in enumerate(sorted({u for u in uops if u.op in arg_order}, key=lambda k: (arg_order[k.op], k.arg)))}
+    self.local_offsets: dict[tuple, int] = {}
+    for u in uops:
+      if u.op not in (Ops.DEFINE_LOCAL, Ops.DEFINE_REG): continue
+      self.local_offsets.setdefault(_uop_key(u), self.stack_size)
+      self.stack_size += u.dtype.nbytes()
     # compute live ranges
     lr = live_range
     ranges: list[Register] = []
@@ -115,5 +123,6 @@ def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
   return nx, fills + [nx] + spills
 
 pm_regalloc_rewrite = PatternMatcher([
-  (UPat({Ops.INS, Ops.CONST, Ops.RANGE, Ops.END, Ops.NOOP, Ops.GROUP, Ops.AFTER, Ops.BARRIER}, name="x"), regalloc_rewrite),
+  (UPat({Ops.INS, Ops.CONST, Ops.RANGE, Ops.END, Ops.NOOP, Ops.GROUP, Ops.AFTER, Ops.BARRIER,
+         Ops.PARAM, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.DEFINE_LOCAL, Ops.DEFINE_REG}, name="x"), regalloc_rewrite),
 ])

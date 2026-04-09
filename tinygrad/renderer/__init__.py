@@ -113,7 +113,8 @@ class ProgramSpec:
     ins: list[int] = []
     global_size: list[int] = [1, 1, 1]
     local_size: list[int]|None = [1, 1, 1]
-    for u in sink.toposort():
+    metadata_sink = sink.replace(src=sink.src[1:]) if len(sink.src) != 0 and sink.src[0].op is Ops.INS else sink
+    for u in metadata_sink.toposort():
       if u.op is Ops.DEFINE_VAR: _vars.append(u)
       if u.op is Ops.PARAM: _globals.append(u.arg)
       if u.op in (Ops.STORE, Ops.LOAD):

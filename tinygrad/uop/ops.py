@@ -966,7 +966,6 @@ class KernelInfo:
   applied_opts: tuple = tuple()
   opts_to_apply: tuple|None = None
   estimates: Estimates|None = None
-  stack_size: int = 0
   @property
   def function_name(self): return to_function_name(self.name)
 
