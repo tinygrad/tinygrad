@@ -71,12 +71,11 @@ def block_128x128_gemm(c:UOp, a:UOp, b:UOp) -> UOp:
     tile_n = UOp.range(TN, 201, AxisType.LOOP)
 
     acc_frag = acc.reshape(TM // WMMA_ACC, WMMA_ACC, TN).permute(0,2,1)[tile_m, tile_n]
+    a_frag = A_local.reshape(WAVES_M, TM // WMMA_ACC, WMMA_M, BLOCK_K // WMMA_K, WMMA_K)[wave_m, tile_m, lane_n, k]
+    b_frag = B_local.reshape(WAVES_N, TN, WMMA_N, BLOCK_K // WMMA_K, WMMA_K)[wave_n, tile_n, lane_n, k]
     if is_rdna4:
-      a_frag = A_local.reshape(WAVES_M, TM // WMMA_ACC, WMMA_M, BLOCK_K // WMMA_K, 2, 2, 4)[wave_m, tile_m, lane_n, k, :, lane_m, :]
-      b_frag = B_local.reshape(WAVES_N, TN, WMMA_N, BLOCK_K // WMMA_K, 2, 2, 4)[wave_n, tile_n, lane_n, k, :, lane_m, :]
-    else:
-      a_frag = A_local.reshape(WAVES_M, TM // WMMA_ACC, WMMA_M, BLOCK_K // WMMA_K, WMMA_K)[wave_m, tile_m, lane_n, k]
-      b_frag = B_local.reshape(WAVES_N, TN, WMMA_N, BLOCK_K // WMMA_K, WMMA_K)[wave_n, tile_n, lane_n, k]
+      a_frag = a_frag.reshape(2, 2, 4)[:, lane_m, :]
+      b_frag = b_frag.reshape(2, 2, 4)[:, lane_m, :]
     wmma = UOp(Ops.SHAPED_WMMA, dtypes.float, (a_frag, b_frag, acc_frag.after(k)), arg=((16, 16, 16), 'AMD', 32))
     acc_store = acc_frag.store(wmma).end(tile_m, tile_n)
   else:
