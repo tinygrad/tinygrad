@@ -195,8 +195,9 @@ class Target:
       case [dev, ren]: return Target(dev, ren, interface=iface, indices=indices)
       case [dev]: return Target(dev, interface=iface, indices=indices)
       case _: raise RuntimeError(f"too many ':' in target string: {s!r}")
-  def __repr__(self): return re.sub(":*$", "", (":".join(filter(bool, [self.interface, self.indices])) + "+" if self.interface else "") +
-                                    ":".join([self.device, self.renderer, self.arch]))
+  def __repr__(self):
+    fst, snd = re.sub(":*$", "", ":".join([self.interface, self.indices])), re.sub(":*$", "", ":".join([self.device, self.renderer, self.arch]))
+    return (fst + "+" if fst else "") + snd
   # replaces if not already set
   def replacedefault(self, **kwargs) -> Target: return replace(self, **{k:v for k,v in kwargs.items() if not getattr(self, k)})
 
