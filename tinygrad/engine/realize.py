@@ -1,7 +1,7 @@
 from typing import cast, Callable
 import time, pprint, random, itertools, math
 from dataclasses import dataclass, replace, field
-from tinygrad.helpers import all_same, colored, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, Metadata, TRACEMETA, TracingKey
+from tinygrad.helpers import all_same, colored, DEBUG, GlobalCounters, ansilen, NOOPT, all_int, Metadata, TRACEMETA, TracingKey
 from tinygrad.helpers import DEVECTORIZE, time_to_str, VALIDATE_WITH_CPU, cpu_profile, PROFILE, ProfilePointEvent, cpu_events, prod, Context, unwrap
 from tinygrad.helpers import EMULATED_DTYPES
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer
@@ -109,7 +109,7 @@ class EncDec(Runner):
 method_cache: dict[tuple[str, type, bytes, tuple, bool], CompiledRunner] = {}
 def get_runner(device:str, ast:UOp) -> CompiledRunner:
   # TODO: this should be all context relevant to rendering
-  context = (BEAM.value, NOOPT.value, DEVECTORIZE.value, EMULATED_DTYPES.value)
+  context = (NOOPT.value, DEVECTORIZE.value, EMULATED_DTYPES.value)
   ckey = (device, type(Device[device].compiler), ast.key, context, False)
   if cret:=method_cache.get(ckey): return cret
   bkey = (device.split(":")[0], type(Device[device].compiler), ast.key, context, True)
@@ -124,7 +124,7 @@ def get_runner(device:str, ast:UOp) -> CompiledRunner:
 
 # NOTE: ctx is the buffers
 si_lowerer = PatternMatcher([
-  (UPat((Ops.SINK, Ops.PROGRAM), name="sink"), lambda ctx,sink: get_runner(ctx[0].device, sink)),
+  (UPat((Ops.SINK, Ops.PROGRAM, Ops.BEAM), name="sink"), lambda ctx,sink: get_runner(ctx[0].device, sink)),
   (UPat(Ops.BUFFER_VIEW), lambda ctx: ViewOp(ctx[0])),
   (UPat(Ops.COPY), lambda ctx: (BufferXfer(ctx[0].nbytes, ctx[0].device, ctx[1].device) \
       if hasattr(alc:=Device[ctx[0].device].allocator, '_transfer') and alc.supports_transfer and all_same([x.device.split(":")[0] for x in ctx]) \
@@ -192,7 +192,8 @@ capturing: list = []  # put classes with an add_linear method in here
 def run_schedule(schedule:list[ExecItem], var_vals:dict[str, int]|None=None, do_update_stats=True):
   while len(schedule):
     ei = schedule.pop(0).lower()
-    if VALIDATE_WITH_CPU and ei.ast.op is Ops.SINK:
+    sink = ei.ast.src[0] if ei.ast.op is Ops.BEAM else ei.ast
+    if VALIDATE_WITH_CPU and sink.op is Ops.SINK:
       # copy in allocated buffers from the GPU
       bufs = [b for b in ei.bufs if b is not None]
       nb: list[Buffer|None] = [Buffer("CPU", b.size, b.dtype) for b in bufs]
@@ -203,7 +204,7 @@ def run_schedule(schedule:list[ExecItem], var_vals:dict[str, int]|None=None, do_
       ei.run(var_vals, do_update_stats=do_update_stats)
 
       # validate the output buffers match (NOTE: this is assuming the output is buffer 0)
-      with Context(BEAM=0): ExecItem(ei.ast, nb, ei.metadata, ei.fixedvars).run(var_vals, do_update_stats=do_update_stats)
+      ExecItem(sink, nb, ei.metadata, ei.fixedvars).run(var_vals, do_update_stats=do_update_stats)
       import numpy as np
       assert nb[0] is not None
       np.testing.assert_allclose(bufs[0].numpy(), nb[0].numpy(), rtol=1e-3, atol=1e-3)
