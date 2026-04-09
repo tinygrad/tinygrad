@@ -55,45 +55,42 @@ def _build_pm4(prg:MSMProgram, args_va:int, global_size, local_size) -> list[int
   return q
 
 class MSMProgram:
-  image_size: int; image: bytes; hw_stack_offset: int; max_threads: int; kernargs_alloc_size: int; buf_off: int
-  tex_to_image: list[int]; tex_cnt: int; ibo_cnt: int; samp_cnt: int; samp_off: int; tex_off: int; ibo_off: int
-  consts_info: list; samplers: list[int]
   def __init__(self, dev:MSMDevice, name:str, lib:bytes, buf_dtypes=[], **kwargs):
     self.dev, self.name, self.buf_dtypes, self.NIR = dev, name, buf_dtypes, True
     parse_ir3_shader(self, lib)
     compute_program_sizes(self)
 
-    self.lib_buf: MSMBuffer = dev.allocator.alloc(self.image_size, BufferSpec())
-    ctypes.memmove(self.lib_buf.offset, self.image, self.image_size)
-    dev._ensure_stack_size(self.hw_stack_offset * 4)
+    self.lib_buf: MSMBuffer = dev.allocator.alloc(self.image_size, BufferSpec())  # type: ignore[attr-defined]
+    ctypes.memmove(self.lib_buf.offset, self.image, self.image_size)  # type: ignore[attr-defined]
+    dev._ensure_stack_size(self.hw_stack_offset * 4)  # type: ignore[attr-defined]
 
   def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1),
                vals:tuple[int, ...]=(), wait=False, **kw):
-    if self.max_threads < prod(local_size): raise RuntimeError("Too many resources requested for launch")
+    if self.max_threads < prod(local_size): raise RuntimeError("Too many resources requested for launch")  # type: ignore[attr-defined]
 
     # fill args buffer
-    args_buf: MSMBuffer = self.dev.allocator.alloc(self.kernargs_alloc_size, BufferSpec())
-    ctypes.memset(args_buf.offset, 0, self.kernargs_alloc_size)
-    args_mv = to_mv(args_buf.offset, self.kernargs_alloc_size)
+    args_buf: MSMBuffer = self.dev.allocator.alloc(self.kernargs_alloc_size, BufferSpec())  # type: ignore[attr-defined]
+    ctypes.memset(args_buf.offset, 0, self.kernargs_alloc_size)  # type: ignore[attr-defined]
+    args_mv = to_mv(args_buf.offset, self.kernargs_alloc_size)  # type: ignore[attr-defined]
 
     ubos = [b for i,b in enumerate(bufs) for _,dt in self.buf_dtypes[i] if not isinstance(dt, ImageDType)]
     uavs = [(dt,b) for i,b in enumerate(bufs) for _,dt in self.buf_dtypes[i] if isinstance(dt, ImageDType)]
-    ibos, texs = uavs[:self.ibo_cnt], [uavs[self.ibo_cnt + self.tex_to_image[i]] for i in range(self.tex_cnt)]
+    ibos, texs = uavs[:self.ibo_cnt], [uavs[self.ibo_cnt + self.tex_to_image[i]] for i in range(self.tex_cnt)]  # type: ignore[attr-defined]
 
-    for cnst_val, cnst_off, cnst_sz in self.consts_info:
+    for cnst_val, cnst_off, cnst_sz in self.consts_info:  # type: ignore[attr-defined]
       args_mv[cnst_off:cnst_off+cnst_sz] = cnst_val.to_bytes(cnst_sz, byteorder='little')
-    if self.samp_cnt > 0:
-      to_mv(args_buf.offset + self.samp_off, len(self.samplers) * 4).cast('I')[:] = array.array('I', self.samplers)
+    if self.samp_cnt > 0:  # type: ignore[attr-defined]
+      to_mv(args_buf.offset + self.samp_off, len(self.samplers) * 4).cast('I')[:] = array.array('I', self.samplers)  # type: ignore[attr-defined]
 
     # write UBO addresses and vals
-    struct.pack_into(f'{len(ubos)}Q', args_mv, self.buf_off, *[b.va_addr for b in ubos])
-    struct.pack_into(f'{len(vals)}I', args_mv, self.buf_off + len(ubos) * 8, *vals)
+    struct.pack_into(f'{len(ubos)}Q', args_mv, self.buf_off, *[b.va_addr for b in ubos])  # type: ignore[attr-defined]
+    struct.pack_into(f'{len(vals)}I', args_mv, self.buf_off + len(ubos) * 8, *vals)  # type: ignore[attr-defined]
 
     # write texture/IBO descriptors
     tex_data = flatten(build_a6xx_tex_descriptor(dt, b.va_addr) for dt,b in texs)
     ibo_data = flatten(build_a6xx_tex_descriptor(dt, b.va_addr, ibo=True) for dt,b in ibos)
-    if tex_data: struct.pack_into(f'{len(tex_data)}I', args_mv, self.tex_off, *tex_data)
-    if ibo_data: struct.pack_into(f'{len(ibo_data)}I', args_mv, self.ibo_off, *ibo_data)
+    if tex_data: struct.pack_into(f'{len(tex_data)}I', args_mv, self.tex_off, *tex_data)  # type: ignore[attr-defined]
+    if ibo_data: struct.pack_into(f'{len(ibo_data)}I', args_mv, self.ibo_off, *ibo_data)  # type: ignore[attr-defined]
 
     # build PM4 command stream
     pm4 = _build_pm4(self, args_buf.va_addr, global_size, local_size)

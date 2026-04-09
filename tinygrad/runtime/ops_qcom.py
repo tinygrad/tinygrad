@@ -118,14 +118,14 @@ class QCOMArgsState(HCQArgsState):
     ubos = [b for i,b in enumerate(bufs) for _,dt in prg.buf_dtypes[i] if not isinstance(dt, ImageDType)]
     uavs = [(dt,b) for i,b in enumerate(bufs) for _,dt in prg.buf_dtypes[i] if isinstance(dt, ImageDType)]
     # NIR can reorder images to different texture slots
-    ibos, texs = uavs[:prg.ibo_cnt], [uavs[prg.ibo_cnt + (prg.tex_to_image[i] if prg.NIR else i)] for i in range(prg.tex_cnt)]
+    ibos, texs = uavs[:prg.ibo_cnt], [uavs[prg.ibo_cnt + (prg.tex_to_image[i] if prg.NIR else i)] for i in range(prg.tex_cnt)]  # type: ignore[attr-defined]
     for cnst_val,cnst_off,cnst_sz in prg.consts_info:
       to_mv(cast(int, self.buf.va_addr) + cnst_off, cnst_sz)[:] = cnst_val.to_bytes(cnst_sz, byteorder='little')
 
     if prg.samp_cnt > 0: to_mv(int(self.buf.va_addr) + prg.samp_off, len(prg.samplers) * 4).cast('I')[:] = array.array('I', prg.samplers)
     if prg.NIR:
-      self.bind_sints_to_buf(*[b.va_addr for b in ubos], buf=self.buf, fmt='Q', offset=prg.buf_off)
-      self.bind_sints_to_buf(*vals, buf=self.buf, fmt='I', offset=prg.buf_off + len(ubos) * 8)
+      self.bind_sints_to_buf(*[b.va_addr for b in ubos], buf=self.buf, fmt='Q', offset=prg.buf_off)  # type: ignore[attr-defined]
+      self.bind_sints_to_buf(*vals, buf=self.buf, fmt='I', offset=prg.buf_off + len(ubos) * 8)  # type: ignore[attr-defined]
     else:
       for i, b in enumerate(ubos): self.bind_sints_to_buf(b.va_addr, buf=self.buf, fmt='Q', offset=prg.buf_offs[i])
       for i, v in enumerate(vals): self.bind_sints_to_buf(v, buf=self.buf, fmt='I', offset=prg.buf_offs[i+len(ubos)])
@@ -134,7 +134,6 @@ class QCOMArgsState(HCQArgsState):
     self.bind_sints_to_buf(*flatten(build_a6xx_tex_descriptor(dt, b.va_addr, ibo=True) for dt,b in ibos), buf=self.buf, fmt='I', offset=prg.ibo_off)
 
 class QCOMProgram(HCQProgram):
-  tex_to_image: list[int]; buf_off: int; hw_stack_offset: int; max_threads: int
   def __init__(self, dev: QCOMDevice, name: str, lib: bytes, buf_dtypes=[], **kwargs):
     self.dev: QCOMDevice = dev
     self.buf_dtypes, self.name, self.NIR = buf_dtypes, name, isinstance(dev.renderer, IR3Renderer)
@@ -146,14 +145,14 @@ class QCOMProgram(HCQProgram):
     to_mv(self.lib_gpu.va_addr, self.image_size)[:] = self.image
 
     compute_program_sizes(self)
-    dev._ensure_stack_size(self.hw_stack_offset * 4)
+    dev._ensure_stack_size(self.hw_stack_offset * 4)  # type: ignore[attr-defined]
 
     super().__init__(QCOMArgsState, self.dev, self.name, kernargs_alloc_size=self.kernargs_alloc_size)
     weakref.finalize(self, self._fini, self.dev, self.lib_gpu, buf_spec)
 
   def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1),
                vals:tuple[int|None, ...]=(), wait=False, **kw):
-    if self.max_threads < prod(local_size): raise RuntimeError("Too many resources requested for launch")
+    if self.max_threads < prod(local_size): raise RuntimeError("Too many resources requested for launch")  # type: ignore[attr-defined]
     if any(g*l>mx for g,l,mx in zip(global_size, local_size, [65536, 65536, 65536])) and any(l>mx for l,mx in zip(local_size, [1024, 1024, 1024])):
       raise RuntimeError(f"Invalid global/local dims {global_size=}, {local_size=}")
     return super().__call__(*bufs, global_size=global_size, local_size=local_size, vals=vals, wait=wait)
