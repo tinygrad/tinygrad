@@ -9,6 +9,10 @@ def _uop_key(u:UOp): return (u.op, u.dtype, u.arg)
 # loosely based on: https://bernsteinbear.com/assets/img/register-spilling-range-splitting-ssa.pdf
 class LinearScanRegallocContext:
   def __init__(self, uops:list[UOp], ren:ISARenderer):
+    if saved:=ren.callee_saved():
+      ret_i = next(i for i,u in reversed(tuple(enumerate(uops))) if u.op is Ops.INS and getattr(u.arg, "name", None) == "RET")
+      uops[0:0] = saved
+      uops[ret_i+len(saved)] = uops[ret_i+len(saved)].replace(src=uops[ret_i+len(saved)].src + saved)
     live_range: dict[Register, list[int]] = {}
     live: dict[Register, Register] = {}
     live_ins: list[dict[Register, Register]] = []

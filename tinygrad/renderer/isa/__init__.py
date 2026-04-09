@@ -36,6 +36,7 @@ class ISARenderer(Renderer):
   late_regalloc_matcher: PatternMatcher|None = None
   post_regalloc_matcher: PatternMatcher
 
+  def callee_saved(self) -> tuple[UOp, ...]: return tuple()
   def is_two_address(self, x:UOp) -> bool: return False
   def copy(self, x:UOp, reg:Register) -> UOp: raise NotImplementedError("arch specific")
   def spill(self, disp:UOp, x:UOp) -> UOp: raise NotImplementedError("arch specific")

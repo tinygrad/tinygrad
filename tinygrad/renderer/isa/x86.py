@@ -386,10 +386,9 @@ isel_matcher = PatternMatcher([
   (UPat(Ops.RANGE, src=(UPat.cvar("c"),), allow_any_len=True, name="x"), lambda c,x: x.replace(src=(imm(c.dtype, c.arg),) + x.src[1:])),
   (UPat(Ops.RANGE, name="x"), lambda ctx,x: x.replace(tag=(ctx.vreg(WGPR),)) if not isinstance(x.tag, tuple) else None),
   # **** Op -> X86Op ****
-  # add callee saved registers to the RET, these will be scheduled at the top of the kernel and will be saved/restored if they are used in regalloc
-  # so regalloc builds the prologue/epilogue naturally
+  # append return, callee-saved live ranges are inserted in regalloc
   (UPat(Ops.SINK, name="x"), lambda x:
-   x.replace(src=(x.ins(X86Ops.RET, src=x.src + tuple(def_reg(dtypes.uint64 if r in GPR else dtypes.float64.vec(2), r) for r in CALLEE_SAVED)),))
+   x.replace(src=(x.ins(X86Ops.RET, src=x.src),))
      if not (len(x.src) == 1 and x.src[0].op is Ops.INS and x.src[0].arg is X86Ops.RET) else None),
   # late lowered function args and stack backed locals still need virtual registers
   (UPat((Ops.PARAM, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.DEFINE_REG, Ops.DEFINE_LOCAL), name="x"), alloc_defs),
@@ -871,6 +870,9 @@ class X86Renderer(ISARenderer):
     super().__init__(target)
     from tinygrad.runtime.support.compiler_cpu import X86Compiler
     self.compiler = X86Compiler()
+  def callee_saved(self):
+    ordered = (RSP,) + tuple(r for r in CALLEE_SAVED if r is not RSP)
+    return tuple(def_reg(dtypes.uint64 if r in GPR else dtypes.float64.vec(2), r) for r in ordered)
   def is_two_address(self, x:UOp) -> bool: return x.arg in X86GroupOp.TwoAddress
   # nasty hacks to deal with pointers TODO: rm pointers
   def copy(self, x:UOp, reg:Register):
