@@ -27,6 +27,9 @@ else:
   LANES_PER_WAVE_M, LANES_PER_WAVE_N = 4, 8
   UNROLL_M, UNROLL_N = 4, 4
 
+# total lanes must be the warp size
+assert LANES_PER_WAVE_M*LANES_PER_WAVE_N == WARP_SIZE
+
 # WARP_SIZE * total waves
 THREADS_PER_BLOCK = WARP_SIZE * WAVES_M * WAVES_N
 
