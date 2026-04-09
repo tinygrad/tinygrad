@@ -55,6 +55,9 @@ def _build_pm4(prg:MSMProgram, args_va:int, global_size, local_size) -> list[int
   return q
 
 class MSMProgram:
+  image_size: int; image: bytes; hw_stack_offset: int; max_threads: int; kernargs_alloc_size: int; buf_off: int
+  tex_to_image: list[int]; tex_cnt: int; ibo_cnt: int; samp_cnt: int; samp_off: int; tex_off: int; ibo_off: int
+  consts_info: list; samplers: list[int]
   def __init__(self, dev:MSMDevice, name:str, lib:bytes, buf_dtypes=[], **kwargs):
     self.dev, self.name, self.buf_dtypes, self.NIR = dev, name, buf_dtypes, True
     parse_ir3_shader(self, lib)
@@ -162,9 +165,9 @@ def _find_msm_device() -> str:
     try:
       fd = os.open(path, os.O_RDWR)
       try:
-        version = bytearray(256)
+        name_buf = (ctypes.c_char * 256)()
         # check driver name via DRM version ioctl
-        ver = msm_drm.DRM_IOCTL_VERSION(fd, name=ctypes.addressof((ctypes.c_char * 256)(*version)),
+        ver = msm_drm.DRM_IOCTL_VERSION(fd, name=ctypes.addressof(name_buf),
                                           name_len=256, date_len=0, desc_len=0)
         name = ctypes.string_at(ver.name, ver.name_len).decode()
         if name == "msm": return path

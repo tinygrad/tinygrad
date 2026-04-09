@@ -43,10 +43,10 @@ def parse_ir3_shader(prg, lib):
 
 def compute_program_sizes(prg):
   """Compute derived sizes from shader metadata. Sets attributes on prg."""
-  prg.pvtmem_size_per_item: int = round_up(prg.pvtmem, 512) >> 9
-  prg.pvtmem_size_total: int = prg.pvtmem_size_per_item * 128 * 2
-  prg.hw_stack_offset: int = round_up(next_power2(round_up(prg.pvtmem, 512)) * 128 * 16, 0x1000)
-  prg.shared_size: int = max(1, (prg.shmem - 1) // 1024)
+  prg.pvtmem_size_per_item = round_up(prg.pvtmem, 512) >> 9
+  prg.pvtmem_size_total = prg.pvtmem_size_per_item * 128 * 2
+  prg.hw_stack_offset = round_up(next_power2(round_up(prg.pvtmem, 512)) * 128 * 16, 0x1000)
+  prg.shared_size = max(1, (prg.shmem - 1) // 1024)
   prg.max_threads = min(1024, ((384 * 32) // (max(1, (prg.fregs + round_up(prg.hregs, 2) // 2)) * 128)) * 128)
   prg.kernargs_alloc_size = round_up(2048 + (prg.tex_cnt + prg.ibo_cnt) * 0x40 + len(prg.samplers) * 4, 0x100)
 

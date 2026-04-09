@@ -134,6 +134,7 @@ class QCOMArgsState(HCQArgsState):
     self.bind_sints_to_buf(*flatten(build_a6xx_tex_descriptor(dt, b.va_addr, ibo=True) for dt,b in ibos), buf=self.buf, fmt='I', offset=prg.ibo_off)
 
 class QCOMProgram(HCQProgram):
+  tex_to_image: list[int]; buf_off: int; hw_stack_offset: int; max_threads: int
   def __init__(self, dev: QCOMDevice, name: str, lib: bytes, buf_dtypes=[], **kwargs):
     self.dev: QCOMDevice = dev
     self.buf_dtypes, self.name, self.NIR = buf_dtypes, name, isinstance(dev.renderer, IR3Renderer)
