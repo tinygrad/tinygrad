@@ -107,43 +107,46 @@ class FlatTransformer:
                 wq:Tensor|None=None, wk:Tensor|None=None, wv:Tensor|None=None,
                 amax_xqkv=None, amax_wqkv=None, amax_xq=None, amax_wq=None, amax_xk=None, amax_wk=None,
                 amax_xv=None, amax_wv=None, amax_xo=None, amax_wo=None):
-    x = rmsnorm(x, self.norm_eps)
-    x_rms = x * attention_norm
-    bsz, seqlen, _ = x.shape
+    x_norm = rmsnorm(x, self.norm_eps) * attention_norm
+    bsz, seqlen, _ = x_norm.shape
 
     if wqkv is not None:
-      xqkv = matmul(x_rms, wqkv, amax_x=amax_xqkv, amax_w=amax_wqkv)
+      xqkv = matmul(x_norm, wqkv, amax_x=amax_xqkv, amax_w=amax_wqkv)
       xqkvr = xqkv.reshape(bsz, seqlen, self.n_kv_heads, self.n_rep + 2, self.head_dim)
       xq = xqkvr[:, :, :, :self.n_rep].reshape(bsz, seqlen, self.n_heads, self.head_dim)
       xk = xqkvr[:, :, :, self.n_rep].reshape(bsz, seqlen, self.n_kv_heads, self.head_dim)
       xv = xqkvr[:, :, :, self.n_rep+1].reshape(bsz, seqlen, self.n_kv_heads, self.head_dim)
     else:
       assert wq is not None and wk is not None and wv is not None
-      xq = matmul(x_rms, wq, amax_x=amax_xq, amax_w=amax_wq).reshape(bsz, seqlen, self.n_heads, self.head_dim)
-      xk = matmul(x_rms, wk, amax_x=amax_xk, amax_w=amax_wk).reshape(bsz, seqlen, self.n_kv_heads, self.head_dim)
-      xv = matmul(x_rms, wv, amax_x=amax_xv, amax_w=amax_wv).reshape(bsz, seqlen, self.n_kv_heads, self.head_dim)
+      xq = matmul(x_norm, wq, amax_x=amax_xq, amax_w=amax_wq).reshape(bsz, seqlen, self.n_heads, self.head_dim)
+      xk = matmul(x_norm, wk, amax_x=amax_xk, amax_w=amax_wk).reshape(bsz, seqlen, self.n_kv_heads, self.head_dim)
+      xv = matmul(x_norm, wv, amax_x=amax_xv, amax_w=amax_wv).reshape(bsz, seqlen, self.n_kv_heads, self.head_dim)
 
     xqr, xkr = apply_rotary_emb(xq, xk, freqs_cis)
-    xqc, xkc, xvc = xqr.cast(dtypes.bfloat16), xkr.cast(dtypes.bfloat16), xv.cast(dtypes.bfloat16)
-    xqt, xkt, xvt = xqc.transpose(1, 2), xkc.transpose(1, 2), xvc.transpose(1, 2)
+    if FP8: xqr, xkr, xv = xqr.cast(dtypes.bfloat16), xkr.cast(dtypes.bfloat16), xv.cast(dtypes.bfloat16)
+    xqt, xkt, xvt = xqr.transpose(1, 2), xkr.transpose(1, 2), xv.transpose(1, 2)
     if getenv("HK_FLASH_ATTENTION"):
       from extra.thunder.amd.fa import flash_attention
-      attn = flash_attention(xqt, xkt, xvt, is_causal=True)
+      attn, attn_raw, l_vec = flash_attention(xqt, xkt, xvt, is_causal=True)
     else:
       attn = xqt.scaled_dot_product_attention(xkt, xvt, is_causal=True, enable_gqa=True)
+      attn_raw, l_vec = attn, attn  # no custom_kernel, still save the result
     attn_reshaped = attn.transpose(1, 2).reshape(bsz, seqlen, -1)
     out = matmul(attn_reshaped, wo, amax_x=amax_xo, amax_w=amax_wo)
-    return (out, attn, out, xq, xk, xv, xqr, xkr, xqc, xkr, xvc, xqt, xkt, xvt, xqkvr, xqkv, x, x_rms)
+    # saves: x_norm (rmsnorm), xqkv (QKV matmul), attn_raw + l_vec (FA AFTER UOps)
+    if wqkv is not None:
+      return out, x_norm, xqkv, attn_raw, l_vec
+    else:
+      return out, x_norm, xq, xk, xv, attn_raw, l_vec
 
   def feed_forward(self, x:Tensor, ffn_norm:Tensor, w1:Tensor, w2:Tensor, w3:Tensor,
                    amax_x1=None, amax_w1=None, amax_x2=None, amax_w2=None, amax_x3=None, amax_w3=None):
-    x = rmsnorm(x, self.norm_eps)
-    x_rms = x * ffn_norm
-    x_w1 = matmul(x_rms, w1, amax_x=amax_x1, amax_w=amax_w1)
-    x_cb = x_rms.contiguous_backward()
-    x_w3 = matmul(x_cb, w3, amax_x=amax_x3, amax_w=amax_w3)
-    x_w2 = matmul(x_w1.silu() * x_w3, w2, amax_x=amax_x2, amax_w=amax_w2)
-    return (x_w2, x, x_rms, x_w1, x_w3, x_w2, x_cb)
+    x_norm = rmsnorm(x, self.norm_eps) * ffn_norm
+    x_w1 = matmul(x_norm, w1, amax_x=amax_x1, amax_w=amax_w1)
+    x_w3 = matmul(x_norm.contiguous_backward(), w3, amax_x=amax_x3, amax_w=amax_w3)
+    out = matmul(x_w1.silu() * x_w3, w2, amax_x=amax_x2, amax_w=amax_w2)
+    # saves: x_norm (rmsnorm), x_w1 (w1 matmul, pre-silu), x_w3 (w3 matmul)
+    return out, x_norm, x_w1, x_w3
 
   @function(precompile=True, precompile_backward=True)
   def run_layer(self, x:Tensor, freqs_cis:Tensor,
