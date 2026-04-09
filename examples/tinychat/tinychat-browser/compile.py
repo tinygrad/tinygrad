@@ -3,7 +3,7 @@ from extra.export_model import export_model
 from examples.llama3 import build_transformer, Tokenizer
 from tinygrad.nn.state import get_state_dict, load_state_dict
 from tinygrad import Device, Variable, Tensor, dtypes, TinyJit
-from tinygrad.helpers import fetch, Context
+from tinygrad.helpers import DEV, fetch, Context
 from tiktoken.load import load_tiktoken_bpe, dump_tiktoken_bpe
 
 def prepare_browser_chunks(model):
@@ -115,7 +115,7 @@ if __name__=="__main__":
   start_pos = Variable("start_pos", 0, max_context).bind(0)
   model_input = lambda: [Tensor([[tok]]), start_pos, TEMPERATURE, TOP_K, TOP_P, ALPHA_F, ALPHA_P]
 
-  Device.DEFAULT="CPU"
+  DEV.value = "CPU"
   model = build_transformer(model_path, model_size="1B", quantize="int8", scale_dtype=dtypes.float32, device=Device.DEFAULT, max_context=max_context)
   state_dict = get_state_dict(model)
   validate_model(model, tokenizer)
@@ -129,7 +129,7 @@ if __name__=="__main__":
   with open(os.path.join(os.path.dirname(__file__), f"{model_name}.c"), "w") as f: f.write(cprog)
   with open(os.path.join(os.path.dirname(__file__), "net_clang.js"), "w") as f: f.write(js_wrapper)
 
-  Device.DEFAULT="WEBGPU"
+  DEV.value = "WEBGPU"
   # float16 is not yet supported for dawn/Vulkan/NVIDIA stack, see: https://issues.chromium.org/issues/42251215
   # therefore for now, we used CLANG to quantize the float16 llama to int8 with float32 scales, then load to WEBGPU
   model = build_transformer(model_path, model_size="1B", quantize="int8", max_context=max_context, load_weights=False)

@@ -4,7 +4,7 @@ from collections import deque
 from tinygrad.uop.ops import UOp, Ops, buffers, UOpMetaClass, track_rewrites, graph_rewrite, gate_kernel_sink, KernelInfo
 from tinygrad.uop.spec import type_verify, tensor_spec
 from tinygrad.device import Buffer, MultiBuffer
-from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, pluralize, SCACHE, BASEDIR, flatten
+from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, pluralize, SCACHE, BASEDIR, flatten, BEAM
 from tinygrad.engine.realize import ExecItem
 
 # **** schedule linearizer
@@ -72,9 +72,13 @@ def linear_to_schedule(linear:UOp) -> list[ExecItem]:
       base = buf_uops[1].buffer
       assert isinstance(base, Buffer), "base can't be MultiBuffer"
       buffers[buf_uops[0]] = base.view(buf_uops[0].arg, ast.dtype, ast.arg[1]*base.dtype.itemsize)
+    # wrap SINK with BEAM UOp when beam search is enabled
+    if ast.op is Ops.SINK and BEAM >= 1: ast = UOp(Ops.BEAM, src=(ast,), arg=BEAM.value)
     ubufs = [b.buffer for b in buf_uops if b.op is not Ops.BIND]
     metadata = si.arg.metadata
-    if any(isinstance(x, MultiBuffer) for x in ubufs):
+    if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "graph":
+      schedule.append(ExecItem(ast, flatten([b.bufs if isinstance(b, MultiBuffer) else [b] for b in ubufs]), metadata))
+    elif any(isinstance(x, MultiBuffer) for x in ubufs):
       assert all(isinstance(x, MultiBuffer) for x in ubufs), "kernel must all be multibuffer"
       dnums = [x for x in ast.variables() if x.expr == '_device_num']
       for j, bufs in enumerate(zip(*[x.bufs for x in cast(tuple[MultiBuffer, ...], ubufs)])):
@@ -83,8 +87,10 @@ def linear_to_schedule(linear:UOp) -> list[ExecItem]:
       schedule.append(ExecItem(ast, cast(list[Buffer|None], ubufs), metadata))
   return schedule
 
-from tinygrad.engine.memory import memory_planner
+from tinygrad.engine.memory import memory_plan_rewrite
+from tinygrad.engine.realize import capturing
 from tinygrad.schedule.rangeify import get_kernel_graph
+from tinygrad.helpers import CAPTURING
 from tinygrad.uop.ops import PatternMatcher, UPat
 
 def create_new_buffer(ctx:tuple[dict[UOp, UOp], tuple[UOp, ...]], b:UOp):
@@ -156,7 +162,14 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[list[ExecItem], di
       if var_vals.get(nm, val) != val: raise RuntimeError(f"bind mismatch on {nm}, {var_vals[nm]} != {val}")
       var_vals[nm] = val
 
+  # jit captures this schedule, no need to execute.
+  if len(capturing) and CAPTURING:
+    capturing[0].add_linear(linear, var_vals)
+    return [], var_vals
+
+  held_bufs = ({b for b in linear_call.src[1:] if b.op is Ops.BUFFER} if linear_call.op is Ops.CALL else set())
+  linear = memory_plan_rewrite(linear, held_bufs)
+
   # convert LINEAR to ExecItems
   schedule: list[ExecItem] = linear_to_schedule(linear)
-  with cpu_profile(TracingKey("memory planner")): schedule = memory_planner(schedule)
   return schedule, var_vals

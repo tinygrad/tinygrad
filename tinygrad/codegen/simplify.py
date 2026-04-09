@@ -1,9 +1,9 @@
 import itertools
 from typing import Callable
-from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, graph_rewrite, _substitute, range_start
+from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, graph_rewrite, _substitute, range_start, AxisType
 from tinygrad.uop.symbolic import symbolic
 from tinygrad.helpers import partition
-from tinygrad.dtype import dtypes, ImageDType
+from tinygrad.dtype import dtypes
 
 def flatten_range(r:UOp) -> UOp|None:
   off = range_start[r.op]
@@ -57,20 +57,15 @@ pm_simplify_ranges = PatternMatcher([
 ])
 
 def mark_range_mod(ctx:dict[UOp, UOp|None], r:UOp, c:UOp) -> None:
-  if r not in ctx and r.src[0].op is Ops.CONST and r.src[0].divides(c.arg) is not None: ctx[r] = c
+  if r not in ctx and r.arg[-1] is not AxisType.WARP and r.src[0].op is Ops.CONST and r.src[0].divides(c.arg) is not None: ctx[r] = c
 
 def do_substitute(ctx:dict, x: UOp, sub_fxn:Callable[[UOp, UOp], UOp]) -> UOp|None:
   ret = x.substitute({k:sub_fxn(k,v) for k,v in ctx.items() if v is not None})
   ctx.clear()
   return None if ret is x else ret.simplify()
 
-def dont_sub_ranges_for_image(ctx:dict[UOp, UOp|None], x:UOp) -> None:
-  if isinstance(x.src[0].src[0].dtype, ImageDType):
-    for s in x.src[0].ranges: ctx[s] = None
-
 pm_split_ranges = PatternMatcher([
   (UPat(Ops.RANGE, name="r")%UPat.cvar("c"), mark_range_mod),
-  (UPat(Ops.STORE, name="x"), dont_sub_ranges_for_image),
   (UPat(Ops.SINK, name="x"), lambda ctx, x: do_substitute(ctx, x,
     lambda k,v: k.replace(src=(k.src[0]//v,), arg=k.arg[0:-1]+(0,k.arg[-1]))*v + k.replace(src=(v,), arg=k.arg[0:-1]+(1,k.arg[-1])))),
 ])
@@ -157,5 +152,5 @@ def no_load(u:UOp) -> bool: return not any(x.op is Ops.INDEX for x in u.backward
 pm_load_collapse = PatternMatcher([
   (UPat(Ops.REDUCE, arg=Ops.ADD, src=(UPat.var("u"), UPat()), name="red"), reduce_load_collapse),
   # we want to make sure we dont do math on a loaded index since that can cause overflow, this undoes the rule in pm_reduce_load_collapse
-  ((UPat.var("x", dtypes.index)+UPat.var("y"))<UPat.var("c"), lambda x,y,c: x < c-y if no_load(y) and no_load(c) and not no_load(x) else None),
+  ((UPat.var("x", dtypes.weakint)+UPat.var("y"))<UPat.var("c"), lambda x,y,c: x < c-y if no_load(y) and no_load(c) and not no_load(x) else None),
 ])

@@ -1,62 +1,38 @@
 import ctypes, struct
 from tinygrad.device import Compiler
 from tinygrad.helpers import DEBUG, system
-from tinygrad.runtime.support.c import DLL
 from tinygrad.runtime.support.compiler_mesa import disas_adreno
-
 # see https://github.com/sirhcm/tinydreno
-dll = DLL("llvm-qcom", ["llvm-qcom"])
-
-(create_llvm_instance:=dll.cl_compiler_create_llvm_instance).restype, create_llvm_instance.argtypes = ctypes.c_void_p, []
-
-(compile_source:=dll.cl_compiler_compile_source).restype = ctypes.c_void_p
-compile_source.argtypes = [ctypes.c_void_p, ctypes.c_uint64, ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_uint64, ctypes.c_uint64,
-                           ctypes.c_char_p, ctypes.c_uint64, ctypes.c_uint64, ctypes.c_void_p]
-
-(link_program:=dll.cl_compiler_link_program).restype = ctypes.c_void_p
-link_program.argtypes = [ctypes.c_void_p, ctypes.c_uint64, ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_void_p]
-
-(get_error_code:=dll.cl_compiler_get_error_code).restype, get_error_code.argtypes = ctypes.c_int, [ctypes.c_void_p]
-(get_build_log:=dll.cl_compiler_get_build_log).restype, get_build_log.argtypes = ctypes.c_char_p, [ctypes.c_void_p]
-
-(handle_create_binary:=dll.cl_compiler_handle_create_binary).restype = None
-handle_create_binary.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(ctypes.c_size_t)]
-
-(free_handle:=dll.cl_compiler_free_handle).restype, free_handle.argtypes = None, [ctypes.c_void_p]
-(free_assembly:=dll.cl_compiler_free_assembly).restype, free_assembly.argtypes = None, [ctypes.c_void_p]
-(destroy_llvm_instance:=dll.cl_compiler_destroy_llvm_instance).restype, destroy_llvm_instance.argtypes = None, [ctypes.c_void_p]
-
-MODE_32BIT, MODE_64BIT, SRC_STR, SRC_BLOB = 0, 1, 0, 1
+from tinygrad.runtime.autogen import llvm_qcom
 
 def _read_lib(lib, off) -> int: return struct.unpack("I", lib[off:off+4])[0]
 
 class QCOMCompiler(Compiler):
-  def __init__(self, chip_id):
-    self.chip_id, self.llvm_inst = chip_id, create_llvm_instance()
-    super().__init__(f"compile_qcomcl_{chip_id}")
+  def __init__(self, arch:str):
+    assert arch == "a630", "only a630 supported"
+    self.arch, self.chip_id, self.llvm_inst = arch, 0x6030001, llvm_qcom.cl_compiler_create_llvm_instance()
+    super().__init__(f"compile_qcomcl_{arch}")
 
-  def __del__(self): destroy_llvm_instance(self.llvm_inst)
+  def __del__(self): llvm_qcom.cl_compiler_destroy_llvm_instance(self.llvm_inst)
 
-  def __reduce__(self): return QCOMCompiler, (self.chip_id,)
+  def __reduce__(self): return QCOMCompiler, (self.arch,)
 
   def checked(self, handle):
-    if handle is None or get_error_code(handle) != 0:
-      destroy_llvm_instance(self.llvm_inst)
-      self.llvm_inst = create_llvm_instance()
-      raise RuntimeError("QCOM Compilation Error" + ("" if handle is None else f": {get_build_log(handle)}"))
+    if not handle or (data:=(hc.executable if (hc:=handle.contents).type == llvm_qcom.CL_HANDLE_LINKED else hc.compiled).contents).error_code != 0:
+      llvm_qcom.cl_compiler_destroy_llvm_instance(self.llvm_inst)
+      self.llvm_inst = llvm_qcom.cl_compiler_create_llvm_instance()
+      raise RuntimeError("QCOM Compilation Error" + ("" if not handle else f": {ctypes.string_at(data.build_log).decode()}"))
     return handle
 
   def compile(self, src) -> bytes:
-    ch = self.checked(compile_source(self.llvm_inst, self.chip_id, MODE_64BIT, b"", 0, 0, 0, src.encode(), 0, SRC_STR, None))
-    if DEBUG >= 8:
-      handle_create_binary(ch, ctypes.byref(ptr:=ctypes.c_void_p()), ctypes.byref(sz:=ctypes.c_size_t()))
-      print(system("llvm-dis", input=ctypes.string_at(ptr, sz.value)[16:]))
-      free_assembly(ptr)
-    lh = self.checked(link_program(self.llvm_inst, self.chip_id, MODE_64BIT, None, 1, ctypes.pointer(ctypes.c_void_p(ch))))
-    handle_create_binary(lh, ctypes.byref(ptr:=ctypes.c_void_p()), ctypes.byref(sz:=ctypes.c_size_t()))
-    for h in [ch, lh]: free_handle(h)
+    ch = self.checked(llvm_qcom.cl_compiler_compile_source(self.llvm_inst, self.chip_id, llvm_qcom.CL_MODE_64BIT, b"", 0, 0, 0, src.encode(), 0,
+                                                           llvm_qcom.CL_SRC_STR, None))
+    if DEBUG >= 8: print(system("llvm-dis", input=ctypes.string_at((comp:=ch.contents.compiled.contents).llvm_bitcode, comp.llvm_bitcode_size)))
+    lh = self.checked(llvm_qcom.cl_compiler_link_program(self.llvm_inst, self.chip_id, llvm_qcom.CL_MODE_64BIT, None, 1, ch))
+    llvm_qcom.cl_compiler_handle_create_binary(lh, ctypes.byref(ptr:=ctypes.c_void_p()), ctypes.byref(sz:=ctypes.c_size_t()))
+    for h in [ch, lh]: llvm_qcom.cl_compiler_free_handle(h)
     ret = ctypes.string_at(ptr, sz.value)
-    free_assembly(ptr)
+    llvm_qcom.cl_compiler_free_assembly(ptr)
     return ret
 
   def disassemble(self, lib: bytes): disas_adreno(lib[(ofs:=_read_lib(lib, 0xc0)):ofs+_read_lib(lib, 0x100)], self.chip_id)

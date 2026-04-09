@@ -5,23 +5,23 @@ from typing import Annotated, Literal, TypeAlias
 from tinygrad.runtime.support.c import _IO, _IOW, _IOR, _IOWR
 from tinygrad.runtime.support import c
 dll = c.DLL('opencl', 'OpenCL')
-class struct__cl_platform_id(ctypes.Structure): pass
+class struct__cl_platform_id(c.Struct): SIZE = 0
 cl_platform_id: TypeAlias = c.POINTER[struct__cl_platform_id]
-class struct__cl_device_id(ctypes.Structure): pass
+class struct__cl_device_id(c.Struct): SIZE = 0
 cl_device_id: TypeAlias = c.POINTER[struct__cl_device_id]
-class struct__cl_context(ctypes.Structure): pass
+class struct__cl_context(c.Struct): SIZE = 0
 cl_context: TypeAlias = c.POINTER[struct__cl_context]
-class struct__cl_command_queue(ctypes.Structure): pass
+class struct__cl_command_queue(c.Struct): SIZE = 0
 cl_command_queue: TypeAlias = c.POINTER[struct__cl_command_queue]
-class struct__cl_mem(ctypes.Structure): pass
+class struct__cl_mem(c.Struct): SIZE = 0
 cl_mem: TypeAlias = c.POINTER[struct__cl_mem]
-class struct__cl_program(ctypes.Structure): pass
+class struct__cl_program(c.Struct): SIZE = 0
 cl_program: TypeAlias = c.POINTER[struct__cl_program]
-class struct__cl_kernel(ctypes.Structure): pass
+class struct__cl_kernel(c.Struct): SIZE = 0
 cl_kernel: TypeAlias = c.POINTER[struct__cl_kernel]
-class struct__cl_event(ctypes.Structure): pass
+class struct__cl_event(c.Struct): SIZE = 0
 cl_event: TypeAlias = c.POINTER[struct__cl_event]
-class struct__cl_sampler(ctypes.Structure): pass
+class struct__cl_sampler(c.Struct): SIZE = 0
 cl_sampler: TypeAlias = c.POINTER[struct__cl_sampler]
 cl_bool: TypeAlias = Annotated[int, ctypes.c_uint32]
 cl_bitfield: TypeAlias = Annotated[int, ctypes.c_uint64]

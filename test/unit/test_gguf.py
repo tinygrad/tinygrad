@@ -30,11 +30,15 @@ class TestGGUF(unittest.TestCase):
 
   def test_dequantization_q4_0(self): self._test_dequantization(GGMLQuantizationType.Q4_0)
   def test_dequantization_q4_1(self): self._test_dequantization(GGMLQuantizationType.Q4_1)
+  def test_dequantization_q5_0(self): self._test_dequantization(GGMLQuantizationType.Q5_0)
+  def test_dequantization_q5_1(self): self._test_dequantization(GGMLQuantizationType.Q5_1)
   def test_dequantization_q8_0(self): self._test_dequantization(GGMLQuantizationType.Q8_0)
   def test_dequantization_q4_k(self): self._test_dequantization(GGMLQuantizationType.Q4_K)
   def test_dequantization_q5_k(self): self._test_dequantization(GGMLQuantizationType.Q5_K)
   def test_dequantization_q6_k(self): self._test_dequantization(GGMLQuantizationType.Q6_K)
   def test_dequantization_mxfp4(self): self._test_dequantization(GGMLQuantizationType.MXFP4)
+  @unittest.skipUnless(is_dtype_supported(dtypes.bfloat16), "Backend must support bfloat16")
+  def test_dequantization_bf16(self): self._test_dequantization(GGMLQuantizationType.BF16)
   def test_dequantization_mxfp4_old(self):
     def encode(nibbles, E):
       packed = [(low & 0xF) | ((high & 0xF) << 4) for low, high in zip(nibbles[:16], nibbles[16:])]
@@ -120,17 +124,21 @@ class TestGGUF(unittest.TestCase):
 class TestGGUFGEMV(unittest.TestCase):
   def _test_gguf_gemv(self, qtype: GGMLQuantizationType):
     block_size, type_size = GGML_QUANT_SIZES[qtype]
-    rows, cols = 8192, 2048
+    rows, cols = (1024, 512) if qtype == GGMLQuantizationType.BF16 else (8192, 2048)
     n_blocks = rows * cols // block_size
     rng = np.random.default_rng(42)
-    # generate random quantized blocks with valid fp16 scale fields (random bytes can produce NaN scales)
-    q_data = rng.integers(0, 256, size=n_blocks * type_size, dtype=np.uint8).reshape(n_blocks, type_size)
-    scales = np.float16(rng.standard_normal(n_blocks * 4)).view(np.uint8).reshape(n_blocks, -1)
-    if qtype == GGMLQuantizationType.Q8_0: q_data[:, :2] = scales[:, :2]                    # d at offset 0
-    elif qtype in (GGMLQuantizationType.Q4_K, GGMLQuantizationType.Q5_K): q_data[:, :4] = scales[:, :4] # d, dmin at offset 0
-    elif qtype == GGMLQuantizationType.Q6_K: q_data[:, -2:] = scales[:, :2]                 # d at end
-    elif qtype == GGMLQuantizationType.MXFP4: q_data[:, 0] = rng.integers(120, 136, size=n_blocks, dtype=np.uint8) # constrain byte0
-    q_data = q_data.flatten()
+    if qtype == GGMLQuantizationType.BF16:
+      q_data = (rng.standard_normal(rows * cols).astype(np.float32).view(np.uint32) >> 16).astype(np.uint16).view(np.uint8)
+    else:
+      # generate random quantized blocks with valid fp16 scale fields (random bytes can produce NaN scales)
+      q_data = rng.integers(0, 256, size=n_blocks * type_size, dtype=np.uint8).reshape(n_blocks, type_size)
+      scales = np.float16(rng.standard_normal(n_blocks * 4)).view(np.uint8).reshape(n_blocks, -1)
+      if qtype in (GGMLQuantizationType.Q5_0, GGMLQuantizationType.Q8_0): q_data[:, :2] = scales[:, :2]  # d at offset 0
+      elif qtype in (GGMLQuantizationType.Q5_1, GGMLQuantizationType.Q4_K, GGMLQuantizationType.Q5_K):
+        q_data[:, :4] = scales[:, :4]  # d, m/dmin at offset 0
+      elif qtype == GGMLQuantizationType.Q6_K: q_data[:, -2:] = scales[:, :2]               # d at end
+      elif qtype == GGMLQuantizationType.MXFP4: q_data[:, 0] = rng.integers(120, 136, size=n_blocks, dtype=np.uint8) # constrain byte0
+      q_data = q_data.flatten()
     ref = dequantize(q_data, qtype).reshape(rows, cols)
 
     # build a minimal gguf in memory: header + 1 tensor info + aligned data
@@ -148,14 +156,18 @@ class TestGGUFGEMV(unittest.TestCase):
 
     x = rng.standard_normal(cols).astype(np.float32)
     np.testing.assert_allclose((tensors["weight"] @ Tensor(x)).numpy(), ref @ x, atol=1e-2, rtol=1e-2)
-    np.testing.assert_equal(tensors["weight"].numpy(), ref)
+    if qtype == GGMLQuantizationType.BF16 or is_dtype_supported(dtypes.half): np.testing.assert_equal(tensors["weight"].numpy(), ref)
     assert np.isfinite(ref).all() and np.isfinite(tensors["weight"].numpy()).all(), f"{qtype.name} has NaN/Inf"
 
   def test_gguf_gemv_q8_0(self): self._test_gguf_gemv(GGMLQuantizationType.Q8_0)
+  def test_gguf_gemv_q5_0(self): self._test_gguf_gemv(GGMLQuantizationType.Q5_0)
+  def test_gguf_gemv_q5_1(self): self._test_gguf_gemv(GGMLQuantizationType.Q5_1)
   def test_gguf_gemv_q4_k(self): self._test_gguf_gemv(GGMLQuantizationType.Q4_K)
   def test_gguf_gemv_q5_k(self): self._test_gguf_gemv(GGMLQuantizationType.Q5_K)
   def test_gguf_gemv_q6_k(self): self._test_gguf_gemv(GGMLQuantizationType.Q6_K)
   def test_gguf_gemv_mxfp4(self): self._test_gguf_gemv(GGMLQuantizationType.MXFP4)
+  @unittest.skipUnless(is_dtype_supported(dtypes.bfloat16), "Backend must support bfloat16")
+  def test_gguf_gemv_bf16(self): self._test_gguf_gemv(GGMLQuantizationType.BF16)
 
 if __name__ == '__main__':
   unittest.main()

@@ -7,7 +7,7 @@ from tinygrad.tensor import _to_np_dtype
 from tinygrad.uop.ops import Ops
 from tinygrad.dtype import DType
 from tinygrad.device import is_dtype_supported
-from tinygrad.helpers import AMX, AMD_LLVM, CPU_LLVM, Context
+from tinygrad.helpers import AMX, DEV, Context
 from test.helpers import slow
 from tinygrad.engine.realize import CompiledRunner, get_program
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
@@ -75,9 +75,9 @@ class TestTensorCores(unittest.TestCase):
       a, b = Tensor.rand(m, k, dtype=tc.dtype_in), Tensor.rand(k, n, dtype=tc.dtype_in)
       r = a.matmul(b, dtype=tc.dtype_out)
       prg = get_program(r.schedule()[-1].ast, Device[Device.DEFAULT].renderer, opts=[Opt(op=OptOps.TC, axis=0, arg=(-1, 2, 1))])
-      if Device.DEFAULT == "CPU" and CPU_LLVM:
+      if Device.DEFAULT == "CPU" and DEV.renderer == "LLVM":
         assert "0x201000" in prg.src
-      elif Device.DEFAULT == "AMD" and AMD_LLVM:
+      elif Device.DEFAULT == "AMD" and DEV.renderer == "LLVM":
         assert "@llvm.amdgcn.wmma" in prg.src
       elif Device[Device.DEFAULT].renderer.suffix == "PTX":
         assert "mma.sync.aligned" in prg.src
@@ -85,7 +85,7 @@ class TestTensorCores(unittest.TestCase):
         assert "__WMMA_" in prg.src
 
   @Context(ALLOW_TF32=1)
-  @unittest.skipIf((Device.DEFAULT == "AMD") or (Device.DEFAULT == "PYTHON" and Device.default.renderer.device == "AMD"), "broken for AMD")
+  @unittest.skipIf((Device.DEFAULT == "AMD") or (Device.DEFAULT == "PYTHON" and Device.default.renderer.target.device == "AMD"), "broken for AMD")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   def test_tensor_cores_padded(self):
     for tc in Device[Device.DEFAULT].renderer.tensor_cores:
@@ -94,7 +94,8 @@ class TestTensorCores(unittest.TestCase):
 
   # AMD compiler bug: AMD miscompiles non-zero padded tc kernels with -O3, producing wrong results, nans or hang (see #9606)
   # Internal bug: zero-stride dimensions combined with a mask may produce wrong index/valid for pad == 1 on AMD
-  @unittest.skipUnless((Device.DEFAULT == "AMD") or (Device.DEFAULT == "PYTHON" and Device.default.renderer.device == "AMD"), "test for AMD's tc")
+  @unittest.skipUnless((Device.DEFAULT == "AMD") or (Device.DEFAULT == "PYTHON" and Device.default.renderer.target.device == "AMD"),
+                       "test for AMD's tc")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores, "test requires tensor cores")
   @unittest.skip("warp elements not duplicated properly across lanes")
   def test_tensor_cores_padded_amd(self):

@@ -2,7 +2,7 @@
 set -e  # Exit on any error
 set -o pipefail  # Make pipeline fail if any command fails
 
-export PYTHONPATH="." NV=1
+export PYTHONPATH="." DEV=NV
 export MODEL="resnet"
 export SUBMISSION_PLATFORM="tinybox_green"
 export DEFAULT_FLOAT="HALF" GPUS=6 BS=1536 EVAL_BS=192

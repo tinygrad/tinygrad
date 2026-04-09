@@ -9,7 +9,7 @@ from hypothesis import assume, given, settings, strategies as strat
 
 from tinygrad import nn, dtypes, Device, Tensor, Variable
 from tinygrad.device import is_dtype_supported
-from tinygrad.dtype import DType, ImageDType
+from tinygrad.dtype import DType
 from tinygrad.uop.ops import UOp, Ops, UPat
 from tinygrad.helpers import CI, DEBUG, OSX, GlobalCounters, Context, getenv, all_same, temp
 from tinygrad.engine.realize import CompiledRunner, run_schedule
@@ -510,7 +510,7 @@ class TestSchedule(unittest.TestCase):
     np.testing.assert_allclose(out[1].numpy(), np.sqrt(np.square(y.numpy() - np_mu).sum(-1)/y.shape[-1]), atol=1e-4, rtol=1e-4)
 
   def test_cumsum_parallel_reduce_fused(self):
-    # two-stage cumsum + ops triggers parallel REDUCEs in one kernel that must share an END
+    # two-stage cumsum + ops triggers parallel REDUCEs in one kernel that must share an END (same nesting context = should merge)
     step, num_steps = 513, 10
     t = Tensor.arange(step).float().realize()
     phase = t.cumsum()
@@ -520,6 +520,12 @@ class TestSchedule(unittest.TestCase):
     expected = np.tile(np.arange(step).astype(np.float32).cumsum(), num_steps).reshape(num_steps, step)
     expected = (expected * np.array([1,0,0,1,0,0,0,0,1,0]).reshape(num_steps, 1)).flatten()
     np.testing.assert_allclose(out.numpy(), expected, atol=1e-4, rtol=1e-4)
+
+  @unittest.skipIf(Device.DEFAULT == "CL", "TODO: fails on CI CL")
+  def test_reduce_different_nesting_depth(self):
+    # two REDUCEs sharing the same RANGE at different nesting depths must NOT merge
+    x = Tensor.arange(768).reshape(3, 256).float()
+    np.testing.assert_allclose((x.sum(axis=1) + x.sum(axis=1).sum()).numpy(), x.numpy().sum(axis=1) + x.numpy().sum(axis=1).sum())
 
   def test_multimatmul_fusion(self):
     Tensor.manual_seed(0)
@@ -784,18 +790,6 @@ class TestSchedule(unittest.TestCase):
     self.assertEqual(GlobalCounters.mem_used-base, 1024)
 
   @unittest.skipIf(Device.DEFAULT != "CL", "image only supported on CL")
-  def test_image_matmul(self):
-    with Context(IMAGE=2):
-      x = Tensor.randn((9, 9)).realize()
-      y = Tensor.randn((9, 9)).realize()
-      out = x@y
-      run_schedule(check_schedule(out, 3))
-      np.testing.assert_allclose(out.numpy(), x.numpy()@y.numpy(), atol=1e-4, rtol=1e-4)
-      self.assertIsInstance(out.dtype, ImageDType)
-      self.assertIsNotNone(out.uop.base.realized)
-      self.assertIsInstance(out.uop.base.realized.dtype, ImageDType)
-
-  @unittest.skipIf(Device.DEFAULT != "CL", "image only supported on CL")
   def test_image_dot_f16_fusion(self):
     with Context(FLOAT16=1, OPENPILOT_HACKS=1):
       def cnt():
@@ -805,11 +799,8 @@ class TestSchedule(unittest.TestCase):
         for si in sched: si.lower()
         return len([si for si in sched if isinstance(si.prg, CompiledRunner)])
 
-      with Context(IMAGE=1): cnt1 = cnt()
-      with Context(IMAGE=2): cnt2 = cnt()
-
-      self.assertEqual(cnt1, 5)
-      self.assertEqual(cnt2, 5)
+      with Context(IMAGE=1):
+        self.assertEqual(cnt(), 5)
 
   @unittest.skipIf(Device.DEFAULT != "CL", "image only supported on CL")
   def test_image_f16_residual_fusion(self):
@@ -825,14 +816,10 @@ class TestSchedule(unittest.TestCase):
         for si in sched: si.lower()
         return len([si for si in sched if isinstance(si.prg, CompiledRunner)])
 
-      with Context(IMAGE=1): cnt1 = cnt()
-      with Context(IMAGE=2): cnt2 = cnt()
-
-      self.assertEqual(cnt1, 9)
-      self.assertEqual(cnt2, 9)
+      with Context(IMAGE=1):
+        self.assertEqual(cnt(), 9)
 
   @unittest.skipIf(Device.DEFAULT != "CL", "image only supported on CL")
-  @unittest.expectedFailure
   def test_image_conv_fusion(self):
     with Context(OPENPILOT_HACKS=1):
       def cnt():
@@ -843,10 +830,8 @@ class TestSchedule(unittest.TestCase):
         for si in sched: si.lower()
         return len([si for si in sched if isinstance(si.prg, CompiledRunner)])
 
-      with Context(IMAGE=1): cnt1 = cnt()
-      with Context(IMAGE=2): cnt2 = cnt()
-
-      self.assertEqual(cnt1, cnt2)
+      with Context(IMAGE=1):
+        self.assertEqual(cnt(), 5)
 
   def _test_fusion(self, shapes, f, cnt):
     with Context(DEBUG=0, TRACK_MATCH_STATS=0): args = [Tensor.randn(s).realize() for s in shapes]

@@ -12,10 +12,10 @@ class TestTensorGradient(unittest.TestCase):
     self.assertListEqual(dx.tolist(), [[2.0, 2.0, 2.0], [0.0, 0.0, 0.0], [-2.0, -2.0, -2.0]])
     self.assertListEqual(dy.tolist(), [[1.0, 1.0, 1.0]])
 
-  def test_raises(self):
+  def test_zero_if_not_used(self):
     x = Tensor([1.0, 2.0, 3.0])
     w = Tensor.randn((3,))
-    with self.assertRaises(RuntimeError): x.sum().gradient(w)
+    self.assertListEqual(x.sum().gradient(w)[0].tolist(), [0.0, 0.0, 0.0])
 
   def test_with_custom_gradient(self):
     x = Tensor([1.0, 2.0, 3.0])

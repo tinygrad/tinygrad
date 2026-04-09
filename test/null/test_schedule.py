@@ -1,7 +1,6 @@
 # schedule tests that pass on NULL backend (no copyout needed)
 import gc, unittest, time
 from tinygrad import nn, dtypes, Device, Tensor
-from tinygrad.device import is_dtype_supported
 from tinygrad.uop.ops import UOp, Ops, GroupOp, UPat
 from tinygrad.helpers import DEBUG, GlobalCounters, Context
 from tinygrad.engine.realize import CompiledRunner, run_schedule
@@ -510,7 +509,6 @@ class TestSchedule(unittest.TestCase):
     d = (a+b).reshape(16,1)
     check_schedule(d, 0, [c])
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   def test_multi_permute_should_collapse(self):
     a = Tensor.empty(4,4,4,4)
     b = Tensor.empty(16)
@@ -662,6 +660,24 @@ class TestSchedule(unittest.TestCase):
     t = Tensor([1.0, 2.0, 3.0]) ** 8
     self.assertEqual(self._alu_from_tensor(t), [Ops.MUL, Ops.MUL, Ops.MUL])
 
+  def test_any_has_no_alu(self):
+    t = Tensor([True, False, True]).any()
+    self.assertEqual(self._alu_from_tensor(t), [])
+
+  def test_all_has_no_alu(self):
+    t = Tensor([True, False, True]).all()
+    self.assertEqual(self._alu_from_tensor(t), [])
+
+  # TODO: min() should be no ALU ops, like max(). currently it's _inverse().max()._inverse() which adds two negations
+  def test_min_float_has_two_mul(self):
+    t = Tensor([1.0, 2.0, 3.0]).min()
+    self.assertEqual(self._alu_from_tensor(t), [Ops.MUL, Ops.MUL])
+
+  # TODO: min() should be no ALU ops, like max(). currently it's _inverse().max()._inverse() which adds two negations
+  def test_min_int_has_two_xor(self):
+    t = Tensor([1, 2, 3]).min()
+    self.assertEqual(self._alu_from_tensor(t), [Ops.XOR, Ops.XOR])
+
   @unittest.skip("const folding is removed")
   def test_pow_const_tensor_to_zero(self):
     x = Tensor([1,2,3,4])
@@ -746,7 +762,6 @@ class TestSchedule(unittest.TestCase):
     out1 = out0[0] + Tensor.empty(1, )
     check_schedule([r, out0, out1], 3)
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
   def test_softmax_upcast(self):
     # input half, softmax in float
     Tensor.manual_seed(0)
@@ -754,15 +769,10 @@ class TestSchedule(unittest.TestCase):
     out = x.softmax(dtype=dtypes.float)
     sched = out.schedule()
     self.assertEqual(len(sched), 3)
-    self.assertEqual(sched[0].bufs[0].dtype, dtypes.float)
-
-    # input float, softmax in float
-    Tensor.manual_seed(0)
-    x = Tensor.randn(4, 12, 64, 64, dtype=dtypes.float).realize()
-    out = x.softmax(dtype=dtypes.float)
-    sched = out.schedule()
-    self.assertEqual(len(sched), 3)
-    self.assertEqual(sched[0].bufs[0].dtype, dtypes.float)
+    # max reduction stays in input dtype (no numerical loss), upcast happens after subtracting max
+    self.assertEqual(sched[0].bufs[0].dtype, dtypes.half)
+    self.assertEqual(sched[1].bufs[0].dtype, dtypes.float)
+    self.assertEqual(sched[2].bufs[0].dtype, dtypes.float)
 
   def test_softmax_backward(self):
     Tensor.manual_seed(0)

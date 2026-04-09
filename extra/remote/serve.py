@@ -51,12 +51,12 @@ def handle(conn, cmd, dev_id, bar, arg0, arg1, arg2):
     conn.sendall(resp())
   elif cmd == RemoteCmd.MMIO_READ:
     bar_view = mapped_bars[(dev_id, bar)]
-    if arg0 % 4 == 0 and arg1 == 4: conn.sendmsg([resp(arg1), struct.pack(f'<{arg1 // 4}I', bar_view.view(arg0, arg1, fmt='I')[0])])
+    if arg0 % 4 == 0 and arg1 == 4: conn.sendmsg([resp(arg1), struct.pack('<I', bar_view.view(fmt='I')[arg0 // 4])])
     else: conn.sendmsg([resp(arg1), bar_view[arg0:arg0+arg1]])
   elif cmd == RemoteCmd.MMIO_WRITE:
     data = conn.recv(arg1, socket.MSG_WAITALL)
     bar_view = mapped_bars[(dev_id, bar)]
-    if arg0 % 4 == 0 and arg1 == 4: bar_view.view(arg0, arg1, fmt='I')[0] = struct.unpack(f'<{arg1 // 4}I', data)[0]
+    if arg0 % 4 == 0 and arg1 == 4: bar_view.view(fmt='I')[arg0 // 4] = struct.unpack('<I', data)[0]
     else: bar_view[arg0:arg0+arg1] = data
   elif cmd == RemoteCmd.MAP_SYSMEM:
     memview, paddrs = pci_dev.alloc_sysmem(arg0, contiguous=bool(arg1))

@@ -12,6 +12,51 @@ class TestC(unittest.TestCase):
       subprocess.check_output(('clang', '-x', 'c', '-fPIC', '-shared', '-', '-o', f.name), input=src.encode())
       return DLL("test", f.name)
 
+  def test_struct_array_init(self):
+    @record
+    class Foo:
+      SIZE = 12
+      a: Annotated[ctypes.c_int * 3, 0]
+    init_records()
+
+    f = Foo((1,2,3))
+    assert f.a[0] == 1
+    assert f.a[1] == 2
+    assert f.a[2] == 3
+    f = Foo((ctypes.c_int * 3)(1,2,3))
+    assert f.a[0] == 1
+    assert f.a[1] == 2
+    assert f.a[2] == 3
+
+  def test_field_ranges(self):
+    @record
+    class Foo:
+      SIZE = 2
+      s: Annotated[ctypes.c_int8, 0]
+      u: Annotated[ctypes.c_uint8, 1]
+    init_records()
+
+    f = Foo()
+    f.s = -1
+    f.u = -1
+    assert f.s == -1
+    assert f.u == 255
+
+  # this syntax is inherited from ctypes, but it seems a bit nonsensical?
+  def test_voidp_none(self):
+    @record
+    class Foo:
+      SIZE = 8
+      p: Annotated[ctypes.c_void_p, 0]
+    init_records()
+
+    f = Foo(None)
+    assert f.p is None
+    f.p = ctypes.c_void_p(0xDEADBEEF)
+    assert f.p == 0xDEADBEEF
+    f.p = None
+    assert f.p is None
+
   def test_packed_struct(self):
     @record
     class Baz:

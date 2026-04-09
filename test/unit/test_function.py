@@ -224,6 +224,20 @@ class TestFunction(unittest.TestCase):
     s = State()
     np.testing.assert_equal(s(Tensor([[5., 6.], [7., 8.]])).numpy(), [[5., 6.], [7., 8.]])
 
+  def test_single_after_store(self):
+    """AFTER(buf, STORE(view, data)) should write data through the view into buf, same as the double-after pattern."""
+    @function
+    def f(buf:Tensor, x:Tensor, start_pos:int|UOp) -> Tensor:
+      slice_uop = buf[:, start_pos:start_pos+1].uop
+      assigned = Tensor(buf.uop.after(slice_uop.store(x.uop)))
+      return assigned
+
+    buf = Tensor.zeros(2, 8).contiguous().realize()
+    x = Tensor([[1.], [2.]]).realize()
+    v = UOp.variable("sp", 0, 7)
+    r0 = f(buf, x, v.bind(0)).numpy()
+    np.testing.assert_equal(r0, [[1.,0.,0.,0.,0.,0.,0.,0.], [2.,0.,0.,0.,0.,0.,0.,0.]])
+
   @unittest.expectedFailure
   def test_assign_slice(self):
     @function
