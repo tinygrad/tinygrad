@@ -106,7 +106,7 @@ def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True) -
     linear_sink = graph_rewrite(sink, ren.pre_isel_matcher, name="pre instruction selection", bottom_up=True)
     isel_ctx = IselContext(linear_sink)
     linear_sink = graph_rewrite(linear_sink, ren.isel_matcher, ctx=isel_ctx, name="instruction selection", bottom_up=True)
-    sink = sink.replace(src=(linear_sink,)+sink.src)
+    sink = linear_sink
 
   # return the rewritten sink
   return sink
@@ -133,12 +133,11 @@ def line_rewrite(lst:list[UOp], pm:PatternMatcher, ctx=None) -> list[UOp]:
 
 def do_linearize(ctx:Renderer, prg:UOp, sink:UOp) -> UOp:
   from tinygrad.renderer.isa import ISARenderer
-  generic_sink = sink.replace(src=sink.src[1:]) if isinstance(ctx, ISARenderer) and len(sink.src) != 0 and sink.src[0].op is Ops.INS else sink
-  generic_lst = line_rewrite(linearize(generic_sink), pm_linearize_cleanups) if sink.arg.estimates is None or not isinstance(ctx, ISARenderer) else None
+  generic_lst = line_rewrite(linearize(sink), pm_linearize_cleanups) if sink.arg.estimates is None and not isinstance(ctx, ISARenderer) else None
   if isinstance(ctx, ISARenderer):
     from tinygrad.renderer.isa import PreRegAllocContext
     from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite
-    lst = linearize(sink.src[0] if len(sink.src) != 0 and sink.src[0].op is Ops.INS else sink)
+    lst = linearize(sink)
     if ctx.pre_regalloc_matcher is not None: lst = line_rewrite(lst, ctx.pre_regalloc_matcher, PreRegAllocContext())
     regalloc_ctx = LinearScanRegallocContext(lst, ctx)
     lst = line_rewrite(lst, pm_regalloc_rewrite, regalloc_ctx)
@@ -146,7 +145,6 @@ def do_linearize(ctx:Renderer, prg:UOp, sink:UOp) -> UOp:
     lst = line_rewrite(lst, ctx.post_regalloc_matcher, regalloc_ctx)
     if DEBUG >= 4: print(ctx.asm(lst, sink.arg.function_name))
     if SPEC: type_verify(lst, ctx.isa_spec)
-    if generic_lst is not None: sink = sink.replace(arg=replace(sink.arg, estimates=Estimates.from_uops(tuple(generic_lst), ignore_indexing=True)))
   else:
     assert generic_lst is not None
     lst = generic_lst

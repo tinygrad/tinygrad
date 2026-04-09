@@ -389,7 +389,8 @@ isel_matcher = PatternMatcher([
   # add callee saved registers to the RET, these will be scheduled at the top of the kernel and will be saved/restored if they are used in regalloc
   # so regalloc builds the prologue/epilogue naturally
   (UPat(Ops.SINK, name="x"), lambda x:
-   x.ins(X86Ops.RET, src=x.src + tuple(def_reg(dtypes.uint64 if r in GPR else dtypes.float64.vec(2), r) for r in CALLEE_SAVED))),
+   x.replace(src=(x.ins(X86Ops.RET, src=x.src + tuple(def_reg(dtypes.uint64 if r in GPR else dtypes.float64.vec(2), r) for r in CALLEE_SAVED)),))
+     if not (len(x.src) == 1 and x.src[0].op is Ops.INS and x.src[0].arg is X86Ops.RET) else None),
   # late lowered function args and stack backed locals still need virtual registers
   (UPat((Ops.PARAM, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.DEFINE_REG, Ops.DEFINE_LOCAL), name="x"), alloc_defs),
   # constants that can't be immediates, move them to registers
