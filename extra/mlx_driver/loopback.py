@@ -6,7 +6,8 @@ from tinygrad.device import Device, BufferSpec
 from tinygrad.runtime.support.system import PCIDevice
 from tinygrad.runtime.support.memory import AddrSpace
 from tinygrad.runtime.ops_amd import AMDComputeQueue
-from extra.mlx_driver.mlxdev import MLXDev, MLXQP, to_be
+from tinygrad.helpers import to_be32, to_be64
+from extra.mlx_driver.mlxdev import MLXDev, MLXQP
 
 BUF_SIZE = 0x1000
 MLX_PCI = getenv("MLX_PCI", "0000:41:00.0")
@@ -49,7 +50,7 @@ rq_wqe = qp.qp_buf.view((qp.rq_head & rq_mask) * 16, 16)
 rq_wqe[:] = struct.pack('>IIQ', len(test_msg), dev.mkey, dst_paddr)
 qp.rq_head += 1
 # ring recv doorbell from CPU (DBR offset 0 = recv counter)
-dev.dbr[qp.qp_dbr // 4] = to_be('I', qp.rq_head)
+dev.dbr[qp.qp_dbr // 4] = to_be32(qp.rq_head)
 
 # build send WQE in SQ from CPU (opcode 0x0a = SEND, ds_count=2)
 sq_head = qp.sq_head
@@ -60,7 +61,7 @@ wqe[0:8] = struct.pack('>II', (sq_head << 8) | 0x0a, (qp.qp_info['qpn'] << 8) | 
 wqe[11] = 0x08  # CE: signal completion
 wqe[16:32] = struct.pack('>IIQ', len(test_msg), dev.mkey, src_paddr)
 qp.sq_head += 1
-doorbell_val = to_be('Q', int.from_bytes(bytes(wqe[0:8]), 'big'))
+doorbell_val = to_be64(int.from_bytes(bytes(wqe[0:8]), 'big'))
 
 # map MLX5 UAR and DBR into GPU VA
 uar_paddr = dev.pci_dev.bar_info(0)[0] + dev.uar * 0x1000
@@ -72,7 +73,7 @@ print(f"UAR gpu_va=0x{uar_gpu_va:x} DBR gpu_va=0x{dbr_gpu_va:x}")
 q = AMDComputeQueue(gpu)
 q.wait(gpu.timeline_signal, gpu.timeline_value - 1)
 # write DBR (32-bit sq_head) - send doorbell at qp_dbr + 4
-q.release_mem(dbr_gpu_va + qp.qp_dbr + 4, to_be('I', qp.sq_head), q.pm4.data_sel__mec_release_mem__send_32_bit_low,
+q.release_mem(dbr_gpu_va + qp.qp_dbr + 4, to_be32(qp.sq_head), q.pm4.data_sel__mec_release_mem__send_32_bit_low,
               q.pm4.int_sel__mec_release_mem__none)
 # write UAR doorbell (64-bit)
 q.release_mem(uar_gpu_va + 0x800, doorbell_val, q.pm4.data_sel__mec_release_mem__send_64_bit_data,
