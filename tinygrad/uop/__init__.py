@@ -34,7 +34,7 @@ class Ops(FastEnum):
 
   # AFTER passes src[0] through and promises in the toposort that any consumers of the AFTER run after src[1:]
   # GROUP is a NOOP that just merges things together
-  SINK = auto(); AFTER = auto(); GROUP = auto()
+  SINK = auto(); AFTER = auto(); GROUP = auto(); BEAM = auto()
 
   # vector creation / item selection
   GEP = auto(); VECTORIZE = auto()

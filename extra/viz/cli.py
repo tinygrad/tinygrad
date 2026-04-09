@@ -47,7 +47,9 @@ def decode_profile(data:bytes) -> dict:
 def get(data:dict, key:str):
   for k,v in data.items():
     if ansistrip(k) == key: return v
-  raise RuntimeError(f'item "{key}" not found in list')
+  import difflib
+  match = difflib.get_close_matches(key, [ansistrip(k) for k in data], n=1, cutoff=0.6)
+  raise RuntimeError(f'item "{key}" not found in list'+(f", did you mean {match[0]!r}?" if match else ''))
 
 def main(args) -> None:
   viz.trace = viz.load_pickle(args.rewrites_path, default=RewriteTrace([], [], {}))
@@ -59,9 +61,8 @@ def main(args) -> None:
     events:list = viz.load_pickle(args.profile_path, default=[])
     if (profile_bytes:=viz.get_profile(events)) is None: raise RuntimeError(f"empty profile in {args.profile_path}")
     profile = decode_profile(profile_bytes)
-    viz.load_amd_counters(viz.ctxs, events)
-    profile["layout"].update([(f'{c["name"]} {s["name"]}', s["data"]) for c in viz.ctxs if c["name"].startswith("SQTT") for s in c["steps"]
-                              if "PKTS" in s["name"]])
+    profile["layout"].update([(f'{c["name"][5:]}{" SQTT" if s["name"].endswith("PKTS") else ""} {s["name"]}', s["data"]) for c in viz.ctxs
+                              if c["name"].startswith("SQTT") for s in c["steps"] if s["name"].endswith(("PMC", "PKTS"))])
     if args.src is None:
       for k in profile["layout"]:
         print(f"  {format_colored(k)}")
@@ -88,7 +89,7 @@ def main(args) -> None:
         op_str = hex_colored(op_name, color) if color and not args.no_color else op_name
         phase, delay = None, 0
         idx = next(pkt_idxs.setdefault(e.device, itertools.count()))
-        if e.device.startswith("WAVE") or e.device == "OTHER_SIMD":
+        if e.device.startswith("WAVE"):
           inst = f"0x{(pc:=int(info.replace('PC:', ''))):05x} {pc_map[pc]}" if info else f"{'':7} {op_name}"
           dispatch_to_inst[f"{e.device}-{idx}"] = (inst, int(e.st))
           phase = "DISPATCH"
@@ -98,6 +99,20 @@ def main(args) -> None:
         if inst and phase: info = f"{phase:<8} {inst}"
         unit = e.device.replace(" ", "-")
         print(f"{int(e.st)-inst_st:<12} {unit:<20} {op_str}{' '*(22-ansilen(op_str))} {int(unwrap(e.en)-e.st):<4} {str(delay or ''):<4} {info}")
+      return None
+
+    # ** PMC printer
+    if "PMC" in args.src:
+      table = viz.unpack_pmc(data[0])
+      cols = table["cols"]
+      rows:list = []
+      for r in table["rows"]:
+        if args.item is None: rows.append(r[:2])
+        elif args.item == r[0]:
+          rows = r[2]["rows"] if len(r) > 2 else [r[:2]]
+          cols = r[2]["cols"] if len(r) > 2 else cols
+      from tabulate import tabulate
+      print(tabulate(rows, headers=cols, tablefmt="github"))
       return None
 
     # ** Profiler printer
