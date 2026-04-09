@@ -57,11 +57,15 @@ class SimpleTokenizer:
       parts[i:i+2] = [parts[i] + parts[i+1]]
     try: return [self._normal_tokens[p] for p in parts]
     except KeyError: raise RuntimeError("token not found")
-  def _encode_sentence(self, chunk:str) -> list[int]:
+  def _encode_sentence(self, chunk:str, add_prefix_space:bool=True) -> list[int]:
     if self.preset == "default":
-      # SentencePiece: prepend space and encode the whole chunk as one piece
-      return self._encode_word((" " + chunk).encode()) if chunk else []
+      # SentencePiece: optionally prepend space
+      prefix = " " if add_prefix_space else ""
+      return self._encode_word((prefix + chunk).encode()) if chunk else []
     return [tok for word in self._split_to_word.findall(chunk) for tok in self._encode_word(word.encode())]
+  def encode_raw(self, text:str) -> list[int]:
+    """Encode without SentencePiece space prefix — used inside chat templates after special tokens."""
+    return self._encode_sentence(text, add_prefix_space=False) if self.preset == "default" else self.encode(text)
   def encode(self, text:str) -> list[int]:
     tokens: list[int] = []
     pos = 0
@@ -187,8 +191,11 @@ class TransformerBlock:
       self.ffn_up      = nn.Linear(config.dim, config.hidden_dim, bias=False)
       self.ffn_down    = nn.Linear(config.hidden_dim, config.dim, bias=False)
 
+  def _norm(self, norm, x:Tensor) -> Tensor:
+    return Transformer._gemma_norm(norm, x) if self.config.is_gemma4 else norm(x)
+
   def _attention(self, x:Tensor, start_pos:int|UOp, shared_kv:Tensor|None=None) -> Tensor:
-    x_norm = self.attn_norm(x)                       # (B,T,D)
+    x_norm = self._norm(self.attn_norm, x)                       # (B,T,D)
     q, k, v = self.attn_q(x_norm), self.attn_k(x_norm), self.attn_v(x_norm)
     if self.config.qk_norm and not self.config.is_gemma4 and self.config.qk_norm != self._head_dim:
       q, k = self.attn_q_norm(q), self.attn_k_norm(k)
@@ -245,11 +252,11 @@ class TransformerBlock:
     attn = self.attn_output(attn)
 
     if self.config.is_gemma4:
-      attn = self.post_attention_norm(attn)
+      attn = self._norm(self.post_attention_norm, attn)
     return x + attn
 
   def _feed_forward(self, h: Tensor) -> Tensor:
-    h_norm = self.ffn_norm(h)
+    h_norm = self._norm(self.ffn_norm, h) if self.config.is_gemma4 else self.ffn_norm(h)
     if hasattr(self, 'ffn_gate_exps'):
       x = h_norm.unsqueeze(2)  # (B, T, 1, D) - add expert dim for broadcasting
       logits = self.ffn_gate_inp(h_norm)
@@ -262,7 +269,7 @@ class TransformerBlock:
     gated = (gate_out.gelu() if self.config.is_gemma4 else gate_out.silu()).contiguous() * self.ffn_up(h_norm)
     ff_out = self.ffn_down(gated)
     if self.config.is_gemma4:
-      ff_out = self.post_ffw_norm(ff_out)
+      ff_out = self._norm(self.post_ffw_norm, ff_out)
     return h + ff_out
 
   def __call__(self, x: Tensor, start_pos: int|UOp, ple_emb:Tensor|None=None, shared_kv:Tensor|None=None):
@@ -280,7 +287,7 @@ class TransformerBlock:
     if ple_emb is not None and hasattr(self, 'inp_gate'):
       residual = result
       gate = self.inp_gate(result).gelu()  # gelu activation per HF reference
-      result = residual + self.post_norm(self.proj(gate * ple_emb))
+      result = residual + self._norm(self.post_norm, self.proj(gate * ple_emb))
 
     if self.config.is_gemma4 and hasattr(self, 'layer_output_scale'):
       result = result * self.layer_output_scale.float()
@@ -306,15 +313,15 @@ class Transformer:
     self.prefill_jit = TinyJit(self.forward)
     self.rollout_jit = TinyJit(self.forward)
 
+  @staticmethod
+  def _gemma_norm(norm, x:Tensor) -> Tensor:
+    """Apply RMSNorm with +1 weight offset (Gemma convention: stored weight is offset from 1.0)."""
+    normed = x * (x.float().square().mean(-1, keepdim=True) + norm.eps).rsqrt()
+    return normed * (norm.weight + 1.0) if norm.weight is not None else normed
+
   def gemma_fixup_norms(self):
-    """Gemma models store some RMSNorm weights as offsets from 1.0, so we add 1.0 once. Must be called before first forward."""
-    if not self.config.is_gemma4: return
-    for block in self.blk:
-      for attr in ['attn_norm', 'ffn_norm', 'post_attention_norm', 'post_ffw_norm', 'post_norm']:
-        norm = getattr(block, attr, None)
-        if norm is not None and norm.weight is not None:
-          norm.weight = Tensor(norm.weight.numpy() + 1.0)
-    self.output_norm.weight = Tensor(self.output_norm.weight.numpy() + 1.0)
+    """No-op — Gemma norm offset is now handled inline in _gemma_norm."""
+    pass
 
   def forward(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor) -> Tensor:
     x = self.token_embd(tokens).float()                   # (B, T, D)
@@ -344,7 +351,8 @@ class Transformer:
             break
       x = block(x, start_pos, ple_emb=ple_emb, shared_kv=shared_kv)
 
-    logits = self.output(self.output_norm(x))[:, -1, :]
+    x_normed = Transformer._gemma_norm(self.output_norm, x) if self.config.is_gemma4 else self.output_norm(x)
+    logits = self.output(x_normed)[:, -1, :]
 
     # gemma4 logit soft capping
     if self.config.logit_softcap:
@@ -549,10 +557,11 @@ class Handler(HTTPRequestHandler):
       for i, msg in enumerate(body["messages"]):
         ids += tok.role(msg["role"])
         content = msg["content"]
-        if isinstance(content, str): ids += tok.encode(content)
+        _encode = tok.encode_raw if tok.preset == "default" else tok.encode
+        if isinstance(content, str): ids += _encode(content)
         elif isinstance(content, list):
           for c in content:
-            if c["type"] == "text": ids += tok.encode(c["text"])
+            if c["type"] == "text": ids += _encode(c["text"])
             else: raise RuntimeError(f"unhandled type: {c['type']}")
         else: raise RuntimeError(f"unknown content type: {type(content)}")
         if msg["role"] == "assistant" and i == len(body["messages"]) - 1: break
@@ -621,7 +630,8 @@ if __name__ == "__main__":
   ids: list[int] = [bos_id] if bos_id is not None else []
   while 1:
     try:
-      ids += tok.role("user") + tok.encode(input('>>> ')) + tok.end_turn(eos_id) + tok.role("assistant")
+      _enc = tok.encode_raw if tok.preset == "default" else tok.encode
+      ids += tok.role("user") + _enc(input('>>> ')) + tok.end_turn(eos_id) + tok.role("assistant")
     except EOFError:
       break
     for next_id in model.generate(ids):
