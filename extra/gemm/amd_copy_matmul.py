@@ -74,8 +74,9 @@ def block_128x128_gemm(c:UOp, a:UOp, b:UOp) -> UOp:
     a_frag = A_local.reshape(WAVES_M, TM // WMMA_ACC, WMMA_M, BLOCK_K // WMMA_K, WMMA_K)[wave_m, tile_m, lane_n, k]
     b_frag = B_local.reshape(WAVES_N, TN, WMMA_N, BLOCK_K // WMMA_K, WMMA_K)[wave_n, tile_n, lane_n, k]
     if is_rdna4:
-      a_frag = a_frag.reshape(2, 2, 4)[:, lane_m, :]
-      b_frag = b_frag.reshape(2, 2, 4)[:, lane_m, :]
+      # NOTE: these 2 can be anywhere in the frags, as long as they match
+      a_frag = a_frag.reshape(2, 8)[lane_m, :]
+      b_frag = b_frag.reshape(2, 8)[lane_m, :]
     wmma = UOp(Ops.SHAPED_WMMA, dtypes.float, (a_frag, b_frag, acc_frag.after(k)), arg=((16, 16, 16), 'AMD', 32))
     acc_store = acc_frag.store(wmma).end(tile_m, tile_n)
   else:
