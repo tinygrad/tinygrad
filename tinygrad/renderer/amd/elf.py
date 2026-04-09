@@ -3,7 +3,7 @@ import ctypes
 from tinygrad.helpers import ceildiv, round_up
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.runtime.autogen import amdgpu_kd, hsa, libc
-from tinygrad.renderer.amd.dsl import Reg, FixedBitField
+from tinygrad.renderer.amd.dsl import Inst, Reg, FixedBitField
 from tinygrad.runtime.autogen.amd.common import OpType
 
 # instructions used for padding
@@ -11,8 +11,9 @@ from tinygrad.runtime.autogen.amd.rdna3.ins import s_code_end # same encoding as
 from tinygrad.runtime.autogen.amd.cdna.ins import s_nop as s_nop_cdna
 
 _arch_map = {"gfx9": "cdna", "gfx10": "rdna3", "gfx11": "rdna3", "gfx12": "rdna4"}
-def do_assemble_amd(ctx, prg:UOp, lin:UOp) -> UOp:
+def do_assemble_amd(ctx, prg:UOp, lin:UOp) -> UOp|None:
   insts = [u.arg for u in lin.src]
+  if not all(isinstance(inst, Inst) for inst in insts): return None
 
   # ** scan for max vgpr/sgpr/accvgpr
   max_vgpr, max_sgpr, max_accvgpr = 0, 0, 0

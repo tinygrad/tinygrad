@@ -369,7 +369,7 @@ isel_matcher = PatternMatcher([
   # add callee saved registers to the RET, these will be scheduled at the top of the kernel and will be saved/restored if they are used in regalloc
   # so regalloc builds the prologue/epilogue naturally
   (UPat(Ops.SINK, name="x"), lambda x:
-   x.ins(X86Ops.RET, src=x.src + tuple(def_reg(dtypes.uint64 if r in GPR else dtypes.float64.vec(2), r) for r in CALLEE_SAVED))),
+   x.ins(X86Ops.RET, src=x.src + tuple(def_reg(dtypes.uint64 if r in GPR else dtypes.float64.vec(2), r) for r in CALLEE_SAVED)).sink(arg=x.arg) if x.src[0].op != Ops.INS or x.src[0].arg != X86Ops.RET else None),
   # function abi constraints
   (UPat((Ops.PARAM, Ops.DEFINE_VAR, Ops.SPECIAL), name="x"), abi),
   # these are treated the same for now
@@ -626,7 +626,7 @@ post_regalloc_matcher = PatternMatcher([
 # TODO: do we even want this?
 isa_spec = PatternMatcher([
   # these are the only non X86Ops allowed
-  (UPat((Ops.NOOP, Ops.GROUP, Ops.AFTER, Ops.BARRIER)), lambda: True),
+  (UPat((Ops.NOOP, Ops.GROUP, Ops.AFTER, Ops.BARRIER, Ops.SINK)), lambda: True),
   (UPat(Ops.INS, name="x"), lambda x: x.arg in X86GroupOp.All),
 ])
 
@@ -889,8 +889,7 @@ class X86Renderer(ISARenderer):
       else: asm.append(_format_op(u) + " " + _format_operands(u))
     return "\n".join(asm)
 
-  def render(self, uops:list[UOp], lower:bool=True) -> str:
-    if lower: uops = self.lower(uops[-1])
+  def render(self, uops:list[UOp]) -> str:
     targets: dict[str, int] = {}
     jumps: dict[UOp, int] = {}
     binary = bytearray()

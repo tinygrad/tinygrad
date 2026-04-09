@@ -2,10 +2,7 @@ from __future__ import annotations
 import itertools
 from dataclasses import dataclass, field
 from tinygrad.renderer import Renderer
-from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, Ops
-from tinygrad.codegen import line_rewrite
-from tinygrad.uop.spec import type_verify
-from tinygrad.helpers import SPEC, DEBUG
+from tinygrad.uop.ops import PatternMatcher, UOp, Ops
 
 @dataclass(frozen=True)
 class Register:
@@ -49,19 +46,3 @@ class ISARenderer(Renderer):
   def spill(self, disp:UOp, x:UOp) -> UOp: raise NotImplementedError("arch specific")
   def fill(self, disp:UOp, x:UOp, reg:Register) -> UOp: raise NotImplementedError("arch specific")
   def asm(self, uops:list[UOp], function_name:str) -> str: raise NotImplementedError("arch specific")
-  # TODO: these should go with the other rewrites in codegen
-  def lower(self, sink:UOp):
-    from tinygrad.codegen.late.linearizer import linearize
-    from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite
-    function_name = sink.arg.function_name
-    sink = graph_rewrite(sink, self.pre_isel_matcher, name="pre instruction selection", bottom_up=True)
-    isel_ctx = IselContext(sink)
-    sink = graph_rewrite(sink, self.isel_matcher, ctx=isel_ctx, name="instruction selection", bottom_up=True)
-    lst = linearize(sink)
-    if self.pre_regalloc_matcher is not None: lst = line_rewrite(lst, self.pre_regalloc_matcher, PreRegAllocContext())
-    regalloc_ctx = LinearScanRegallocContext(lst, self, isel_ctx.stack_size)
-    lst = line_rewrite(lst, pm_regalloc_rewrite, regalloc_ctx)
-    lst = line_rewrite(lst, self.post_regalloc_matcher, regalloc_ctx)
-    if DEBUG >= 4: print(self.asm(lst, function_name))
-    if SPEC: type_verify(lst, self.isa_spec)
-    return lst
