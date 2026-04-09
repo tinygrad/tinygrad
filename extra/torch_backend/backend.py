@@ -352,9 +352,15 @@ def _copy_between_devices(src, dest, cast_dtype, to_device, non_blocking=False):
     _apply_inplace(dest_t, src_t.cast(cast_dtype).to(to_device))
   elif src.is_tiny and dest.is_cpu:
     dest.resize_(src.numel()).resize_(src.shape)
-    dest.copy_(torch.from_numpy(unwrap(src).cast(cast_dtype).numpy()))
+    # bfloat16: roundtrip through float32 since numpy doesn't support bf16
+    np_data = unwrap(src).cast(cast_dtype if cast_dtype != dtypes.bfloat16 else dtypes.float32).numpy()
+    cpu_tensor = torch.from_numpy(np_data)
+    if cast_dtype == dtypes.bfloat16: cpu_tensor = cpu_tensor.to(torch.bfloat16)
+    dest.copy_(cpu_tensor)
   elif src.is_cpu and dest.is_tiny:
-    unwrap(dest).assign(Tensor(src.numpy()).cast(cast_dtype).to(to_device))
+    # bfloat16 doesn't support numpy(), convert via float32
+    src_np = src.float().numpy() if src.dtype == torch.bfloat16 else src.numpy()
+    unwrap(dest).assign(Tensor(src_np).cast(cast_dtype).to(to_device))
   else:
     raise NotImplementedError(f"can't copy from {src.device} -> {dest.device}")
 
@@ -374,7 +380,13 @@ def copy_(self, src, non_blocking=False):
 
 @torch.library.impl("aten::cat.out", "privateuseone")
 def cat_out(tensors, dim=0, out=None):
-  _apply_inplace(unwrap(out), Tensor.cat(*[unwrap(x) for x in tensors], dim=dim))
+  # filter out empty (numel=0) tensors — HF DynamicCache starts KV as shape [0]
+  non_empty = [t for t in tensors if t.numel() > 0]
+  if len(non_empty) == 0: return out
+  if len(non_empty) == 1:
+    _apply_inplace(unwrap(out), unwrap(non_empty[0]))
+    return out
+  _apply_inplace(unwrap(out), Tensor.cat(*[unwrap(x) for x in non_empty], dim=dim))
   return out
 
 @torch.library.impl("aten::topk.values", "privateuseone")
