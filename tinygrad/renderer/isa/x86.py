@@ -13,7 +13,7 @@ from tinygrad.helpers import getenv, CPU_COUNT, unwrap, Target
 class X86Ops(FastEnum):
   # NOTE: X86Ops with i suffix are variants that take an immediate, m suffix are variants that can write to memory instead of read from
   # these aren't real instructions
-  DEFINE_REG = auto(); IMM = auto(); FRAME_INDEX = auto(); LABEL = auto()
+  DEFINE_REG = auto(); FRAME_INDEX = auto(); LABEL = auto()
   # index
   LEA = auto()
   # register / memory / immediate moves
@@ -237,7 +237,7 @@ def base(x:UOp, i:int) -> UOp: return s.src[0] if (s:=x.src[i]).op is Ops.GEP el
 def lane(x:UOp, i:int) -> int: return s.arg[0] if (s:=x.src[i]).op is Ops.GEP else 0
 def to_int(dt:DType): return {dtypes.float16: dtypes.int16, dtypes.float32: dtypes.int32, dtypes.float64: dtypes.int64}[dt]
 def def_reg(dt:DType, reg:Register|None=None) -> UOp: return UOp(Ops.INS, arg=X86Ops.DEFINE_REG, dtype=dt, tag=None if reg is None else (reg,))
-def imm(dt:DType, v:int) -> UOp: return UOp(Ops.INS, arg=X86Ops.IMM, dtype=dt, tag=truncate[dt](v))
+def imm(dt:DType, v:int) -> UOp: return UOp(Ops.CONST, dt, arg=truncate[dt](v), tag="__x86_imm__")
 def to_imm(c:UOp) -> UOp|None:
   if c.op is not Ops.CONST: return None
   if c.dtype is dtypes.int64: return imm(dtypes.int32, c.arg) if not c.overflows(dtypes.int32) else None
@@ -337,7 +337,8 @@ def abi(ctx:IselContext, x:UOp) -> UOp:
 
 def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
   # immediates and real registers
-  if x.arg in (X86Ops.IMM, X86Ops.FRAME_INDEX, X86Ops.DEFINE_REG) and x.tag is not None: return None
+  if x.op is Ops.CONST: return None
+  if x.arg in (X86Ops.FRAME_INDEX, X86Ops.DEFINE_REG) and x.tag is not None: return None
   # no register definition
   if x.dtype is dtypes.void: return None
   # already allocated vregs
@@ -376,10 +377,10 @@ isel_matcher = PatternMatcher([
   (UPat((Ops.DEFINE_REG, Ops.DEFINE_LOCAL), name="x"), lambda ctx,x:
    x.ins(X86Ops.LEA, src=(def_reg(dtypes.uint64, RSP), UOp(Ops.NOOP), imm(dtypes.int32, ctx.inc_stack(x.dtype.nbytes()))))),
   # constants that can't be immediates, move them to registers
-  (UPat.cvar("x", dtypes.int64s), lambda x: x.ins(X86Ops.MOVABS, src=(imm(x.dtype, x.arg),))),
-  (UPat.cvar("x", dtypes.ints+(dtypes.bool,)), lambda x: x.ins(X86Ops.MOVi, src=(imm(x.dtype, x.arg),))),
+  (UPat.cvar("x", dtypes.int64s), lambda x: x.ins(X86Ops.MOVABS, src=(imm(x.dtype, x.arg),)) if x.tag is None else None),
+  (UPat.cvar("x", dtypes.ints+(dtypes.bool,)), lambda x: x.ins(X86Ops.MOVi, src=(imm(x.dtype, x.arg),)) if x.tag is None else None),
   (UPat.cvar("x", dtypes.floats), lambda x:
-   UOp.const(dt:=to_int(x.dtype), struct.unpack(dt.fmt, struct.pack(x.dtype.fmt, x.arg))[0]).bitcast(x.dtype)),
+   UOp.const(dt:=to_int(x.dtype), struct.unpack(dt.fmt, struct.pack(x.dtype.fmt, x.arg))[0]).bitcast(x.dtype) if x.tag is None else None),
   # TODO: these should use a.maximum(b) / a.minimum(b)
   ((UPat.var("a") < UPat.var("b")).where(UPat.var("b", dtypes.float32), UPat.var("a")), lambda a,b:
    a.ins(X86Ops.VMAXSS if a.dtype.count == 1 else X86Ops.VMAXPS, src=(a, b))),
@@ -597,7 +598,7 @@ def lower_range(ctx, x:UOp) -> tuple[UOp, list[UOp]]:
   loop_label = "_".join(str(i) for i in x.arg[:-1])
   acc = x.ins(X86Ops.MOVi, src=(imm(x.dtype, 0),) + x.src[1:])
   label = UOp(Ops.INS, arg=X86Ops.LABEL, tag=f".LOOP_{loop_label}")
-  cmp = UOp(Ops.INS, arg=X86Ops.CMPi if x.src[0].arg is X86Ops.IMM else X86Ops.CMP, src=(acc, x.src[0]))
+  cmp = UOp(Ops.INS, arg=X86Ops.CMPi if x.src[0].op is Ops.CONST else X86Ops.CMP, src=(acc, x.src[0]))
   jump_out = UOp(Ops.INS, arg=X86Ops.JGE, src=(cmp,), tag=f".LOOP_OUT_{loop_label}")
   ctx.loop_label[acc] = loop_label
   return (acc, [acc, label, cmp, jump_out])
@@ -610,8 +611,8 @@ post_regalloc_matcher = PatternMatcher([
   # dealloc stack space
   (UPat(Ops.INS, arg=X86Ops.RET, name="x"), lambda ctx,x: (x, [UOp(Ops.INS, arg=X86Ops.ADDi, dtype=dtypes.uint64,
                       src=(imm(dtypes.uint32, ctx.stack_size),), tag=(RSP,)), x]) if ctx.stack_size > 0 else None),
-  # rewrite FRAME_INDEX to IMM now that the stack size is known
-  (UPat(Ops.INS, arg=X86Ops.FRAME_INDEX, name="x"), lambda ctx,x: (nx:=x.ins(X86Ops.IMM, tag=ctx.stack_size + x.tag), [nx])),
+  # rewrite FRAME_INDEX to CONST now that the stack size is known
+  (UPat(Ops.INS, arg=X86Ops.FRAME_INDEX, name="x"), lambda ctx,x: (nx:=UOp.const(x.dtype, ctx.stack_size + x.tag), [nx])),
   # rewrite RANGE to ACC = 0 -> LABEL -> JUMP if ACC >= loop bound
   (UPat(Ops.RANGE, name="x"), lambda ctx,x: lower_range(ctx, x)),
   # rewrite END to ACC + 1 -> JUMP -> LABEL, also add the out of loop JUMP to the src so this becomes the jump target
@@ -626,6 +627,7 @@ post_regalloc_matcher = PatternMatcher([
 # TODO: do we even want this?
 isa_spec = PatternMatcher([
   # these are the only non X86Ops allowed
+  (UPat(Ops.CONST), lambda: True),
   (UPat((Ops.NOOP, Ops.GROUP, Ops.AFTER, Ops.BARRIER, Ops.SINK)), lambda: True),
   (UPat(Ops.INS, name="x"), lambda x: x.arg in X86GroupOp.All),
 ])
@@ -674,7 +676,7 @@ def encode(x:UOp, opc:int, reg:int|None=None, pp:int=0, sel:int=0, we:int=0) -> 
     if disp_uop is not None:
       assert disp_uop.dtype in (dtypes.int8, dtypes.int32), "displacement can only be 1 or 4 byte signed int"
       # rbp/r13 always require a displacement
-      if disp_uop.tag != 0 or rm == 0b101: mod = 0b01 if disp_uop.dtype.itemsize == 1 else 0b10
+      if disp_uop.arg != 0 or rm == 0b101: mod = 0b01 if disp_uop.dtype.itemsize == 1 else 0b10
       else: mod = 0b00
     else: mod = 0b11
     # x 0b0 and idx 0b100 means rsp which means no index exists
@@ -688,10 +690,10 @@ def encode(x:UOp, opc:int, reg:int|None=None, pp:int=0, sel:int=0, we:int=0) -> 
     # DISP byte
     if mod == 0b01 or mod == 0b10:
       assert disp_uop is not None
-      inst += struct.pack(unwrap(disp_uop.dtype.fmt), disp_uop.tag)
+      inst += struct.pack(unwrap(disp_uop.dtype.fmt), disp_uop.arg)
     # IMM byte
     if imm_uop is not None:
-      if isinstance(imm_uop.tag, int): inst += struct.pack(unwrap(imm_uop.dtype.fmt), imm_uop.tag)
+      if imm_uop.op is Ops.CONST: inst += struct.pack(unwrap(imm_uop.dtype.fmt), imm_uop.arg)
       elif isinstance(imm_uop.reg, Register): inst += bytes([(imm_uop.reg.index & 0b1111) << 4 | 0b0000])
     return inst
 
@@ -706,7 +708,7 @@ def encode(x:UOp, opc:int, reg:int|None=None, pp:int=0, sel:int=0, we:int=0) -> 
   if x.arg in X86GroupOp.Rm1st:
     if len(x.src) > 2: address, rest = x.src[:3], x.src[3:]
     else: address, rest = (x.src[0], None, None), x.src[1:]
-    imm_uop = rest[:1] if rest and isinstance(rest[0].tag, int) else (None,)
+    imm_uop = rest[:1] if rest and (rest[0].op is Ops.CONST or isinstance(rest[0].reg, Register)) else (None,)
     return _encode(x, *address, *(None, *imm_uop)) if reg is None else _encode(None, *address, *(x if sel else None, *imm_uop))
 
   if x.arg in X86GroupOp.Rm2nd:
@@ -724,7 +726,7 @@ def encode(x:UOp, opc:int, reg:int|None=None, pp:int=0, sel:int=0, we:int=0) -> 
 encodings = {
   # moves
   X86Ops.MOVABS: lambda x:
-   bytes([0b0100 << 4 | 0b1 << 3 | 0b00 << 2 | x.tag[0].index >> 3, 0xB8 + (x.tag[0].index & 0b111)]) + struct.pack(x.dtype.fmt, x.src[0].tag),
+   bytes([0b0100 << 4 | 0b1 << 3 | 0b00 << 2 | x.tag[0].index >> 3, 0xB8 + (x.tag[0].index & 0b111)]) + struct.pack(x.dtype.fmt, x.src[0].arg),
   X86Ops.MOV: lambda x: encode(x, 0x8B), X86Ops.MOVi: lambda x: encode(x, 0xC7, reg=0),
   X86Ops.MOVm: lambda x: encode(x, 0x89), X86Ops.LEA: lambda x: encode(x, 0x8D),
   X86Ops.VMOVSS: lambda x: encode(x, 0x10, pp=2, sel=1), X86Ops.VMOVSSm: lambda x: encode(x, 0x11, pp=2, sel=1),
@@ -870,10 +872,10 @@ class X86Renderer(ISARenderer):
     def _format_op(x:UOp) -> str: return f"    {(o[7:-1] if (o:=str(x.arg))[-1] in ('i', 'm') else o[7:]).lower():7s}"
     def _format_operands(x:UOp) -> str:
       def _format(src:tuple[UOp, ...]) -> list[str]:
-        return [reg_strs[o].get(s.dtype.itemsize if not isinstance(s.dtype, PtrDType) else 8, o) if \
-                (o:=str(s.reg)) in reg_strs else o for s in src if s.reg is not None]
+        return [str(s.arg) if s.op is Ops.CONST else reg_strs[o].get(s.dtype.itemsize if not isinstance(s.dtype, PtrDType) else 8, o) if \
+                (o:=str(s.reg)) in reg_strs else o for s in src if s.op is Ops.CONST or s.reg is not None]
       def _mem_adress(base:UOp, idx:UOp, disp:UOp) -> str:
-        return f"[{base.reg}" + (f" + {idx.reg}*{base.dtype.itemsize}" if idx.reg else "") + (f" + {disp.tag}" if disp.tag else "") + "]"
+        return f"[{base.reg}" + (f" + {idx.reg}*{base.dtype.itemsize}" if idx.reg else "") + (f" + {disp.arg}" if disp.arg else "") + "]"
 
       if len(x.src) > 3 and x.arg in X86GroupOp.WriteMem: return ", ".join([_mem_adress(*x.src[:3])] + _format(x.src[3:]))
       elif len(x.src) > 2 and x.arg in X86GroupOp.Rm1st: return ", ".join(_format((x,)) + [_mem_adress(*x.src[:3])] + _format(x.src[3:]))
@@ -883,7 +885,7 @@ class X86Renderer(ISARenderer):
     asm = [f".{function_name}:"]
     for u in uops:
       if u.op is not Ops.INS: continue
-      if u.arg in (X86Ops.IMM, X86Ops.DEFINE_REG): continue
+      if u.arg is X86Ops.DEFINE_REG: continue
       if u.arg is X86Ops.LABEL: asm.append(f"{str(u.tag)}:")
       elif u.arg is X86Ops.RET: asm.append(_format_op(u))
       else: asm.append(_format_op(u) + " " + _format_operands(u))
@@ -895,7 +897,7 @@ class X86Renderer(ISARenderer):
     binary = bytearray()
     for u in uops:
       if u.op is not Ops.INS: continue
-      if u.arg in (X86Ops.IMM, X86Ops.DEFINE_REG): continue
+      if u.arg is X86Ops.DEFINE_REG: continue
       if u.arg is X86Ops.LABEL:
         targets[u.tag] = len(binary)
         continue

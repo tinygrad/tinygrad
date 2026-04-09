@@ -1020,9 +1020,11 @@ def exec_alu(op:Ops, dtype:DType, operands, truncate_output=True):
 
 def print_uops(uops:list[UOp]):
   uops_index = {u:i for i,u in enumerate(uops)}
+  arg_width = max((len(str(u.arg)) for u in uops), default=0)
   for i,u in enumerate(uops):
     formatted_srcs = [(uops_index[x] if x.op is not Ops.CONST else f"{x.arg}") if x in uops else "--" for x in u.src]
-    print(f"{i:4d} {str(u.op):20s}: {multirange_str(u.ranges, color=True, pad=10)} {str(u.dtype):40s} " f"{str(formatted_srcs):32s} {u.arg}")
+    tag = "" if u.tag is None or u.op is Ops.CONST else f" {u.tag}"
+    print(f"{i:4d} {str(u.op):20s}: {multirange_str(u.ranges, color=True, pad=10)} {str(u.dtype):40s} " f"{str(formatted_srcs):32s} {str(u.arg):{arg_width}s}{tag}")
 
 # ***** pattern matcher *****
 

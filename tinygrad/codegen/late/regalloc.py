@@ -115,5 +115,5 @@ def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
   return nx, fills + [nx] + spills
 
 pm_regalloc_rewrite = PatternMatcher([
-  (UPat({Ops.INS, Ops.RANGE, Ops.END, Ops.NOOP, Ops.GROUP, Ops.AFTER, Ops.BARRIER}, name="x"), regalloc_rewrite),
+  (UPat({Ops.INS, Ops.CONST, Ops.RANGE, Ops.END, Ops.NOOP, Ops.GROUP, Ops.AFTER, Ops.BARRIER}, name="x"), regalloc_rewrite),
 ])

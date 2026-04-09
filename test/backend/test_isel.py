@@ -128,7 +128,7 @@ class TestIselX86(unittest.TestCase):
     load = UOp(Ops.PARAM, dtypes.int32.ptr(), arg=0).index(a + 1, ptr=True).load()
     n = self.isel_rewrite(load)
     # displacement is the constant in "a" scaled to the buffer element size, dtype is int8 when the value fits otherwise int32
-    self.assertTrue(n.src[2].arg is X86Ops.IMM and n.src[2].dtype is dtypes.int8 and n.src[2].tag == 4)
+    self.assertTrue(n.src[2].op is Ops.CONST and n.src[2].dtype is dtypes.int8 and n.src[2].arg == 4)
 
   def test_fold_load(self):
     load1 = UOp(Ops.PARAM, dtypes.int32.ptr(), arg=0).index(UOp.const(dtypes.int32, 0), ptr=True).load()
