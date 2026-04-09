@@ -7,6 +7,7 @@ from tinygrad.uop.ops import Ops
 from tinygrad.helpers import getenv, prod, strides_for_shape, argfix
 import torch.lib
 TORCH_DEBUG = getenv("TORCH_DEBUG")
+TORCH_EAGER = getenv("TORCH_EAGER", 0)  # 1=realize each op immediately, 0=lazy (default)
 import torch, pathlib, operator, functools, weakref
 torch.autograd.grad_mode.set_multithreading_enabled(False)
 from tinygrad.dtype import _from_torch_dtype, _to_torch_dtype
@@ -191,13 +192,44 @@ for i in [
 
 # *** end bad functions on CPU ***
 
+# *** fp16 precision: upcast normalization ops to fp32 (like PyTorch CUDA AMP) ***
+@torch.library.impl("aten::native_layer_norm", "privateuseone")
+def native_layer_norm(input, normalized_shape, weight, bias, eps):
+  orig_dtype = input.dtype
+  x = unwrap(input).cast(dtypes.float32)
+  axes = tuple(range(x.ndim - len(normalized_shape), x.ndim))
+  mean = x.mean(axes, keepdim=True)
+  var = ((x - mean) ** 2).mean(axes, keepdim=True)
+  out = (x - mean) / (var + eps).sqrt()
+  if weight is not None: out = out * unwrap(weight).cast(dtypes.float32)
+  if bias is not None: out = out + unwrap(bias).cast(dtypes.float32)
+  out = out.cast(_from_torch_dtype(orig_dtype))
+  # Return mean and rstd with the normalized dims removed
+  mean_out = mean.reshape(*mean.shape[:x.ndim - len(normalized_shape)])
+  rstd_out = (var + eps).rsqrt().reshape(*mean.shape[:x.ndim - len(normalized_shape)])
+  return wrap(out), wrap(mean_out), wrap(rstd_out)
+
+@torch.library.impl("aten::native_group_norm", "privateuseone")
+def native_group_norm(input, weight, bias, N, C, HxW, group, eps):
+  orig_dtype = input.dtype
+  x = unwrap(input).cast(dtypes.float32).reshape(N, group, C // group, HxW)
+  mean = x.mean((2, 3), keepdim=True)
+  var = ((x - mean) ** 2).mean((2, 3), keepdim=True)
+  out = ((x - mean) / (var + eps).sqrt()).reshape(N, C, HxW)
+  if weight is not None: out = out * unwrap(weight).cast(dtypes.float32).reshape(1, C, 1)
+  if bias is not None: out = out + unwrap(bias).cast(dtypes.float32).reshape(1, C, 1)
+  out = out.cast(_from_torch_dtype(orig_dtype))
+  return wrap(out.reshape(*unwrap(input).shape)), wrap(mean.reshape(N, group)), wrap((var + eps).rsqrt().reshape(N, group))
+
 @torch.library.impl("aten::index.Tensor", "privateuseone")
 def index_tensor(x, y):
   return wrap(unwrap(x)[[unwrap(_y.to(x.device)) if _y is not None else slice(None) for _y in y]])
 
 
 @torch.library.impl("aten::_local_scalar_dense", "privateuseone")
-def _local_scalar_dense(tensor): return unwrap(tensor).item()
+def _local_scalar_dense(tensor):
+  # NV backend faults on scalar readback (DMA timeout), route through CPU
+  return tensor.cpu().item()
 
 @wrap_view_op
 def _as_strided(tensor:Tensor, size, stride, storage_offset=0):
@@ -332,11 +364,22 @@ for dim in [1, 2, 3]:
     torch.library.impl(f"aten::{pad_type}_pad{dim}d", "privateuseone")(functools.partial(pad_forward, mode=mode))
     torch.library.impl(f"aten::{pad_type}_pad{dim}d_backward", "privateuseone")(functools.partial(pad_backward, mode=mode))
 
-def upsample(self, size, align_corners=False, mode=None): return wrap(Tensor.interpolate(unwrap(self), size, mode=mode, align_corners=align_corners))
+# ATen upsample signatures differ: linear has align_corners, nearest does not
+# Use *args to handle varying ATen dispatch signatures across PyTorch versions
+def _upsample_linear(self, *args, **kwargs):
+  output_size = args[0] if len(args) > 0 else kwargs.get('output_size')
+  align_corners = args[1] if len(args) > 1 else kwargs.get('align_corners', False)
+  return wrap(Tensor.interpolate(unwrap(self), output_size, mode="linear", align_corners=align_corners))
+def _upsample_nearest(self, *args, **kwargs):
+  output_size = args[0] if len(args) > 0 else kwargs.get('output_size')
+  return wrap(Tensor.interpolate(unwrap(self), output_size, mode="nearest"))
+def _upsample_nearest_exact(self, *args, **kwargs):
+  output_size = args[0] if len(args) > 0 else kwargs.get('output_size')
+  return wrap(Tensor.interpolate(unwrap(self), output_size, mode="nearest-exact"))
 for i,pre in enumerate(["", "bi", "tri"]):
-  torch.library.impl(f"aten::upsample_{pre}linear{i+1}d", "privateuseone")(functools.partial(upsample, mode="linear"))
-  torch.library.impl(f"aten::upsample_nearest{i+1}d", "privateuseone")(functools.partial(upsample, mode="nearest"))
-  torch.library.impl(f"aten::_upsample_nearest_exact{i+1}d", "privateuseone")(functools.partial(upsample, mode="nearest-exact"))
+  torch.library.impl(f"aten::upsample_{pre}linear{i+1}d", "privateuseone")(_upsample_linear)
+  torch.library.impl(f"aten::upsample_nearest{i+1}d", "privateuseone")(_upsample_nearest)
+  torch.library.impl(f"aten::_upsample_nearest_exact{i+1}d", "privateuseone")(_upsample_nearest_exact)
 
 @torch.library.impl("aten::scatter_add.out", "privateuseone")
 def scatter_add(self, dim, index, src, out):
@@ -598,7 +641,8 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.gather": lambda self, dim, index: self.gather(dim, index.cast(dtypes.int)),
   "aten.where.self": Tensor.where, # NOTE: this is needed as well as the out type
   "aten.repeat": lambda x,*repeats: Tensor.repeat(x,*repeats).contiguous(), # not a view
-  "aten._softmax": lambda self,dim,half_to_float: self.softmax(dim),
+  # upcast softmax to fp32 for fp16 inputs — prevents precision loss through transformer layers
+  "aten._softmax": lambda self,dim,half_to_float: (self.cast(dtypes.float32).softmax(dim).cast(self.dtype)) if not half_to_float else self.cast(dtypes.float32).softmax(dim),
   "aten._log_softmax": lambda self,dim,half_to_float: self.log_softmax(dim),
   "aten.random_": lambda self: Tensor.randint(*self.shape, low=self.dtype.min, high=self.dtype.max, device=self.device, dtype=self.dtype),
   "aten.random_.from": lambda self, from_, to: Tensor.randint(*self.shape, low=from_, high=to, device=self.device, dtype=self.dtype),
@@ -688,8 +732,17 @@ def wrap_fxn(k,f):
                           {k:v.shape if isinstance(v, torch.Tensor) else v for k,v in kwargs.items()})
     args, kwargs = unwrap_args(args, kwargs)
     out = f(*args, **kwargs)
-    if isinstance(out, Tensor): return wrap(out)
-    elif isinstance(out, tuple): return tuple(wrap(x) for x in out)
+    # TORCH_EAGER: realize immediately to prevent lazy graph accumulation.
+    # Without this, the lazy graph grows unbounded during large forward passes (e.g. UNet),
+    # causing GPU OOM / MMU page faults when all kernels are realized at once.
+    if isinstance(out, Tensor):
+      if TORCH_EAGER: out.realize()
+      return wrap(out)
+    elif isinstance(out, tuple):
+      if TORCH_EAGER:
+        for x in out:
+          if isinstance(x, Tensor): x.realize()
+      return tuple(wrap(x) for x in out)
     else: raise RuntimeError(f"unknown output type {type(out)}")
   return nf
 

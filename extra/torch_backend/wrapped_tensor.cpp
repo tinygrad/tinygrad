@@ -126,9 +126,14 @@ at::Tensor wrap_tensor(py::object &py_obj, c10::ScalarType dtype, c10::DeviceInd
 
 py::object unwrap_tensor(const at::Tensor &tensor) {
   auto* impl = tensor.unsafeGetTensorImpl();
+  TORCH_CHECK(impl != nullptr, "unwrap_tensor: TensorImpl is null");
   auto* opaque_impl = static_cast<at::TinyOpaqueTensorImpl<std::shared_ptr<c10::SafePyObject>>*>(impl);
   std::shared_ptr<c10::SafePyObject> tiny = opaque_impl->opaque_handle();
-  return py::reinterpret_borrow<py::object>(tiny->ptr(getPyInterpreter()));
+  TORCH_CHECK(tiny != nullptr, "unwrap_tensor: opaque handle is null — tensor on tiny device has no tinygrad backing. "
+    "This can happen when PyTorch creates an intermediate tensor without going through the backend's empty_strided.");
+  PyObject* raw = tiny->ptr(getPyInterpreter());
+  TORCH_CHECK(raw != nullptr, "unwrap_tensor: SafePyObject wraps a null PyObject* — the tinygrad Tensor may have been garbage collected");
+  return py::reinterpret_borrow<py::object>(raw);
 }
 
 void update_metadata(const at::Tensor &tensor, const std::vector<int64_t> &sizes,
