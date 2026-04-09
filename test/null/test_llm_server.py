@@ -10,6 +10,7 @@ class TestLLMServer(unittest.TestCase):
     cls.mock_tok.role = Mock(return_value=[100, 101])
     cls.mock_tok.encode = Mock(return_value=[200, 201, 202])
     cls.mock_tok.decode = Mock(return_value="Hello")
+    cls.mock_tok.stream_decoder = Mock(return_value=lambda tid=None: "Hello" if tid is not None else "")
     cls.mock_tok.end_turn = Mock(return_value=[998])
 
     cls.mock_model = Mock()
@@ -42,10 +43,6 @@ class TestLLMServer(unittest.TestCase):
   def tearDownClass(cls):
     cls.server.shutdown()
     cls.server.server_close()
-
-  def setUp(self):
-    self.mock_model._cached_msg_count = 0
-    self.mock_model._cached_tokens = []
 
   def test_chat_completion_stream(self):
     stream = self.client.chat.completions.create(
