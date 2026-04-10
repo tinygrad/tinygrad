@@ -14,14 +14,9 @@ from tinygrad.mixin import OpMixin
 from tinygrad.uop.ops import smax, smin, resolve, UOp, Ops, sint, identity_element, all_metadata, _index_to_concrete_int, sint_to_uop, Variable
 from tinygrad.uop.ops import _broadcast_shape
 from tinygrad.engine.schedule import ExecItem, complete_create_schedule_with_vars
-from tinygrad.device import Buffer
+from tinygrad.device import Buffer, canonicalize_device
 from tinygrad.engine.realize import run_schedule
 from tinygrad.engine.allocations import transform_to_call
-
-def canonicalize_device(device:str|tuple|list|None) -> str|tuple[str, ...]:
-  from tinygrad.device import Device
-  if not isinstance(device, (tuple, list)): return Device.canonicalize(device)
-  return canonical[0] if len(canonical:=tuple(Device.canonicalize(d) for d in device)) == 1 else canonical
 
 # *** all in scope Tensors are here. this gets relevant UOps ***
 
