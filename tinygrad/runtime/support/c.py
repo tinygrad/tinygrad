@@ -92,7 +92,10 @@ class Struct(ctypes.Structure):
     for i, (name, *args) in enumerate(fields): setattr(cls, name, Field(*args, name=name, idx=i))
 
 def record(cls) -> type[Struct]:
-  struct = type(cls.__name__, (Struct,), {'_fields_': [('_mem_', ctypes.c_byte * cls.SIZE)], '_real_fields_': []})
+  if hasattr(cls, "_real_fields_"):
+    setattr(cls, "_fields_", [('_mem_', ctypes.c_byte * cls.SIZE)])
+    return cls
+  struct = type(cls.__name__, (Struct,), {'_fields_': [('_mem_', ctypes.c_byte * cls.SIZE)], '_real_fields_': getattr(cls, "_real_fields_", [])})
   _pending_records.append((cls, struct, unwrap(sys._getframe().f_back).f_globals))
   return struct
 
