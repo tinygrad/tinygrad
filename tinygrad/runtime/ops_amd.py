@@ -925,7 +925,7 @@ class USBIface(PCIIface):
     return HCQBuffer(vaddr, size, meta=PCIAllocationMeta(region, has_cpu_mapping=False), view=self.pci_dev.dma_view(ctrl_addr, size), owner=self.dev)
 
   def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, force_devmem=False, **kwargs) -> HCQBuffer:
-    if (host or (uncached and cpu_access)) and self.sys_next_off + size < self.sys_buf.size:
+    if (host or (not self.pci_dev.usb.usb.is_custom and uncached and cpu_access)) and self.sys_next_off + size < self.sys_buf.size:
       self.sys_next_off += size
       return self.sys_buf.offset(self.sys_next_off - size, size)
 
