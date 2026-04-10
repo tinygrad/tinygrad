@@ -80,12 +80,25 @@ else:
   def pointer(obj): return ctypes.pointer(obj)
 
 class Struct(ctypes.Structure):
+  SIZE = 0
+
   def __init__(self, *args, **kwargs):
     ctypes.Structure.__init__(self)
     for f,v in [*zip((rf[0] for rf in self._real_fields_), args), *kwargs.items()]: setattr(self, f, v)
 
+  @classmethod
+  def _register(cls, f:Field):
+    entry = (f.name, f.typ, f.off) + ((f.bit_width, f.bit_off) if f.bit_width else ())
+    if hasattr(cls, "_real_fields_"): cls._real_fields_.append(entry)
+    else: setattr(cls, "_real_fields_", [entry])
+
+  @classmethod
+  def register_field(cls, name, *args):
+    cls._register(f:=Field(*args, name=name, idx=len(getattr(cls, "_real_fields_", []))))
+    setattr(cls, name, f)
+
 def record(cls) -> type[Struct]:
-  struct = type(cls.__name__, (Struct,), {'_fields_': [('_mem_', ctypes.c_byte * cls.SIZE)]})
+  struct = type(cls.__name__, (Struct,), {'_fields_': [('_mem_', ctypes.c_byte * cls.SIZE)], '_real_fields_': []})
   _pending_records.append((cls, struct, unwrap(sys._getframe().f_back).f_globals))
   return struct
 
@@ -94,12 +107,16 @@ def init_records() -> None:
     setattr(struct, '_real_fields_', [])
     for i, (nm, t) in enumerate(get_type_hints(cls, globalns=ns, include_extras=True).items()):
       struct._real_fields_.append((nm, *(f:=(del_an(t.__origin__), *t.__metadata__) if isinstance(t.__metadata__[0], int) else t.__metadata__))) # type: ignore
-      setattr(struct, nm, Field(nm, i, *f))
+      setattr(struct, nm, Field(*f, name=nm, idx=i))
   _pending_records.clear()
 
 class Field:
-  def __init__(self, nm, idx, typ, off, bit_width=None, bit_off=0):
-    self.nm, self.idx, self.typ, self.off, self.bit_width, self.bit_off = nm, idx, typ, off, bit_width, bit_off
+  def __init__(self, typ, off, bit_width=None, bit_off=0, name=None, idx=0):
+    self.typ, self.off, self.bit_width, self.bit_off, self.name, self.idx = typ, off, bit_width, bit_off, name, idx
+
+  def __set_name__(self, owner, name):
+    owner._register(name, self)
+    self.name, self.idx = name, len(owner._real_fields_) - 1
 
   # lazily resolve field descriptors
   def _resolve(self, cls):
@@ -110,9 +127,9 @@ class Field:
       # FIXME: signedness
       cf = property(lambda obj: b2i(obj) >> self.bit_off & mask, bset)
     # pull the CField descriptor from a dummy class, zero length arrays are so ctypes manages references to child objects for us
-    else: cf = type(self.nm, (ctypes.Structure,), {"_layout_": "ms", "_pack_": 1, "_fields_": [(str(i), ctypes.c_byte * 0) for i in range(self.idx)] +
-                                                                                              [("_", ctypes.c_byte * self.off), ("v", self.typ)]}).v # type: ignore
-    setattr(cls, self.nm, cf)
+    else: cf = type(self.name, (ctypes.Structure,), {"_layout_": "ms", "_pack_": 1, "_fields_": [(str(i), ctypes.c_byte*0) for i in range(self.idx)] +
+                                                                                                [("_", ctypes.c_byte * self.off), ("v", self.typ)]}).v # type: ignore
+    setattr(cls, self.name, cf)
     return cf
 
   def __get__(self, obj, objtype=None): return self._resolve(objtype).__get__(obj, objtype) if objtype else self

@@ -91,17 +91,16 @@ fps, specs = (clang.CXType_FunctionProto, clang.CXType_FunctionNoProto), (clang.
 arc_families = ['alloc', 'copy', 'mutableCopy', 'new']
 
 def normalize(a): return ("_" + n if keyword.iskeyword(n:=nm(a)) else n)
-def an(py, dt): return f"Annotated[{py}, ctypes.c_{dt}]"
 
 def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False, errno=False, anon_names={}, types={}, parse_macros=True, paths=[]):
-  macros, lines, anoncnt, types, objc, fns = [], [], itertools.count().__next__, {k:(v,True) for k,v in types.items()}, False, set()
+  macros, lines, anoncnt, objc, fns = [], [], itertools.count().__next__, False, set()
   def tname(t, suggested_name=None, typedef=None) -> str:
     suggested_name = anon_names.get(f"{loc_file(loc(decl:=clang.clang_getTypeDeclaration(t)))}:{loc_line(loc(decl))}", suggested_name)
     nonlocal lines, types, anoncnt, objc
-    tmap = {clang.CXType_Void:"None",clang.CXType_Char_U:an("int","ubyte"),clang.CXType_UChar:an("int","ubyte"),clang.CXType_WChar:an("str","wchar"),
-            clang.CXType_Char_S:an("bytes","char"),clang.CXType_SChar:an("int","byte"),clang.CXType_Bool:an("bool","bool"),
-            **{getattr(clang, f'CXType_{k}'):an("float", k.lower()) for k in ["Float", "Double", "LongDouble"]},
-            **{getattr(clang, f'CXType_{k}'):an("int", f"{'u' if 'U' in k else ''}int{sz}") for sz,k in
+    tmap = {clang.CXType_Void:"None", clang.CXType_Char_U:"ctypes.c_ubyte", clang.CXType_UChar:"ctypes.c_ubyte", clang.CXType_WChar:"ctypes.c_wchar",
+            clang.CXType_Char_S:"ctypes.c_char", clang.CXType_SChar:"ctypes.c_byte", clang.CXType_Bool:"ctypes.c_bool",
+            **{getattr(clang, f'CXType_{k}'):f"ctypes.c_{k.lower()}" for k in ["Float", "Double", "LongDouble"]},
+            **{getattr(clang, f'CXType_{k}'):f"ctypes.c_{'u' if 'U' in k else ''}int{sz}" for sz,k in
                [(16, "UShort"), (16, "Short"), (32, "UInt"), (32, "Int"), (64, "ULong"), (64, "Long"), (64, "ULongLong"), (64, "LongLong")]}}
 
     if t.kind in tmap: return tmap[t.kind]
@@ -124,21 +123,24 @@ def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False,
         # TODO: packed unions
         # libclang does not use CXType_Elaborated for function parameters with type qualifiers (eg. void (*)(const struct foo))
         if (_nm:=re.sub(r"^const ", "", nm(t))) in types and types[_nm][1]: return types[_nm][0]
-        # check for forward declaration
-        if _nm in types: types[_nm] = (tnm:=types[_nm][0]), len(fields(t)) != 0, (ln:=types[_nm][2])
+
+        # check if previously declared
+        if _nm in types: types[_nm] = (tnm:=types[_nm][0]), types[_nm][1] or len(fields(t)) != 0, (ln:=types[_nm][2])
         else:
           real_nm = ((suggested_name or (f"_anon{'struct' if decl.kind==clang.CXCursor_StructDecl else 'union'}{anoncnt()}"))
                      if clang.clang_Cursor_isAnonymous(decl) else _nm)
           types[_nm] = (tnm:=real_nm.replace(' ', '_').replace('::', '_')), len(fields(t)) != 0, (ln:=len(lines))
-          lines.append(f"class {tnm}(c.Struct): SIZE = 0")
+          lines.append(f"class {tnm}(c.Struct): pass")
           if typedef:
             lines.append(f"{typedef.replace('::', '_')}: TypeAlias = {tnm}")
             types[typedef] = typedef.replace('::', '_'), True
-        ff=[(f, tname(clang.clang_getCursorType(f), f"{tnm}_{nm(f)}"), offset) +
-            ((clang.clang_getFieldDeclBitWidth(f), clang.clang_Cursor_getOffsetOfField(f) % 8) *clang.clang_Cursor_isBitField(f))
-            for f,offset in all_fields(t)]
-        if ff: lines[ln] = '\n'.join(["@c.record", f"class {tnm}(c.Struct):", f"  SIZE = {clang.clang_Type_getSizeOf(t)}",
-                                      *[f"  {normalize(f)}: Annotated[{', '.join(str(a) for a in args)}]" for f,*args in ff]])
+        ff = [(normalize(f), ty:=tname(clang.clang_getCursorType(f), f"{tnm}_{nm(f)}"), ty, offset) +
+              ((clang.clang_getFieldDeclBitWidth(f), clang.clang_Cursor_getOffsetOfField(f) % 8) * clang.clang_Cursor_isBitField(f))
+              for f,offset in all_fields(t)]
+        if ff:
+          lines[ln] = "\n".join(["@c.record", f"class {tnm}(c.Struct):", f"  SIZE = {clang.clang_Type_getSizeOf(t)}"] +
+                                [f"  {f}: {ty}" for f,ty,*args in ff])
+          lines.extend([f"{tnm}.register_field('{f}', {', '.join(str(a) for a in args)})" for f,ty,*args in ff])
         return tnm
       case clang.CXType_Enum:
         # TODO: C++ and GNU C have forward declared enums
@@ -256,11 +258,11 @@ def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False,
     clang.clang_disposeTranslationUnit(tu)
     clang.clang_disposeIndex(idx)
   main = '\n'.join(['# mypy: disable-error-code="empty-body"', "from __future__ import annotations", "import ctypes",
-                    "from typing import Annotated, Literal, TypeAlias", "from tinygrad.runtime.support.c import _IO, _IOW, _IOR, _IOWR",
+                    "from typing import Literal, TypeAlias", "from tinygrad.runtime.support.c import _IO, _IOW, _IOR, _IOWR",
                     "from tinygrad.runtime.support import c", *prolog, *(["from tinygrad.runtime.support import objc"]*objc),
-                    *([f"dll = c.DLL('{name}', {dll}{f', {paths}'*bool(paths)}{', use_errno=True'*errno})"] if dll else []), *lines,
-                    "c.init_records()"]) + '\n'
+                    *([f"dll = c.DLL('{name}', {dll}{f', {paths}'*bool(paths)}{', use_errno=True'*errno})"] if dll else []), *lines]) + '\n'
   macros = [f"{r} # type: ignore" for m in macros if (r:=functools.reduce(lambda s,r:re.sub(r[0], r[1], s), rules + base_rules, m))]
+  with open("out.py", "w") as f: f.write(main + '\n'.join(macros))
   while True:
     try:
       exec(main + '\n'.join(macros), {})
