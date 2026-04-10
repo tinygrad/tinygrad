@@ -80,9 +80,9 @@ class _System:
     if getenv("REMOTE", ""): return [(functools.partial(RemotePCIDevice,sock=s), x) for s,x in RemotePCIDevice.remote_list(vendor,devices,base_class)]
     return [(APLRemotePCIDevice if OSX else PCIDevice, x) for x in System.pci_scan_bus(vendor, devices, base_class)]
 
-  def pci_probe_device(self, devpref:str, dev_id:int, vendor:int, devices:tuple[tuple[int, tuple[int, ...]], ...], base_class:int|None=None):
-    cl, pcibus = hcq_filter_visible_devices(self.list_devices(vendor, devices, base_class))[dev_id]
-    return cl(devpref, pcibus)
+  def pci_probe_device(self, device:str, dev_id:int, vendor:int, devices:tuple[tuple[int, tuple[int, ...]], ...], base_class:int|None=None):
+    cl, pcibus = hcq_filter_visible_devices(self.list_devices(vendor, devices, base_class), device)[dev_id]
+    return cl(device[:2], pcibus)
 
   def pci_setup_usb_bars(self, usb:CustomASM24Controller|ASM24Controller, gpu_bus:int, mem_base:int, pref_mem_base:int) -> dict[int, tuple[int, int]]:
     for bus in range(gpu_bus):
@@ -244,7 +244,7 @@ class PCIIfaceBase:
 
   def __init__(self, dev, dev_id, vendor, devices:tuple[tuple[int, tuple[int, ...]], ...], vram_bar, va_start, va_size,
                dev_impl_t, base_class:int|None=None):
-    self.pci_dev = System.pci_probe_device(dev.__class__.__name__[:2], dev_id, vendor, devices, base_class=base_class)
+    self.pci_dev = System.pci_probe_device(dev.__class__.__name__[:-6], dev_id, vendor, devices, base_class=base_class)
     if self.is_local(): System.reserve_va(va_start, va_size)
     with contextlib.suppress(Exception): self.pci_dev.resize_bar(vram_bar)
     self.dev_impl = dev_impl_t(self.pci_dev)

@@ -288,18 +288,22 @@ metrics:dict[str, Callable[[dict[str, tuple[int, int, int]]], str]] = {
 
 def unpack_pmc(e) -> dict:
   agg_cols = ["Name", "Sum"]
-  sample_cols = ["XCC", "INST", "SE", "SA", "WGP", "Value"]
   rows:list[list] = []
   stats:dict[str, tuple[int, int, int]] = {}  # name -> (sum, max, count)
   view, ptr = memoryview(e.blob).cast('Q'), 0
   for s in e.sched:
+    sample_cols = ["XCC", "INST", "SE", "SA"] + [f"WGP:{i}" for i in range(s.wgp)]
     row:list = [s.name, 0, {"cols":sample_cols, "rows":[]}]
     max_val, cnt = 0, 0
-    for sample in itertools.product(range(s.xcc), range(s.inst), range(s.se), range(s.sa), range(s.wgp)):
-      row[1] += (val:=int(view[ptr]))
-      max_val, cnt = max(max_val, val), cnt + 1
-      row[2]["rows"].append(sample+(val,))
-      ptr += 1
+    for sample in itertools.product(range(s.xcc), range(s.inst), range(s.se), range(s.sa)):
+      vals:list[int] = []
+      # pack work group processors on the same se
+      for _ in range(s.wgp):
+        row[1] += (val:=int(view[ptr]))
+        max_val, cnt = max(max_val, val), cnt + 1
+        vals.append(val)
+        ptr += 1
+      row[2]["rows"].append(sample+tuple(vals))
     stats[s.name] = (row[1], max_val, cnt)
     rows.append(row)
   for name, fn in metrics.items():
