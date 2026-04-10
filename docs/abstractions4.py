@@ -98,7 +98,7 @@ if __name__ == "__main__":
                                    UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=x) for x in self.instructions]))))
 
   from tinygrad.runtime.autogen.amd.rdna3.ins import *
-  CU_COUNT = 32
+  CU_COUNT = 1
   LANES = 32
   def asm_sum(out:UOp, buf:UOp) -> UOp:
     V_LANE_ID = 0             # lane_id set on startup
@@ -107,6 +107,9 @@ if __name__ == "__main__":
     k = Kernel()
     # mul lane id by 16 for offsets (4 for float, 4 for b128)
     k.emit(v_mul_lo_u32(v[0], v[0], 16))
+    k.emit(v_add_nc_u32_e32(v[1], 4096, v[0]))
+    k.emit(v_add_nc_u32_e32(v[2], 4096, v[1]))
+    k.emit(v_add_nc_u32_e32(v[3], 4096, v[2]))
     # load both addresses
     k.emit(s_load_b128(sdata=s[4:7], sbase=s[0:1], offset=0x0, soffset=NULL))
     k.waitcnt(lgkm=0)
@@ -118,17 +121,22 @@ if __name__ == "__main__":
     k.emit(VOPD(VOPDOp.V_DUAL_MOV_B32, VOPDOp.V_DUAL_MOV_B32, vdstx=v[4], vdsty=v[5], srcx0=0, srcy0=0))
     k.emit(VOPD(VOPDOp.V_DUAL_MOV_B32, VOPDOp.V_DUAL_MOV_B32, vdstx=v[6], vdsty=v[7], srcx0=0, srcy0=0))
 
-    k.emit(s_mov_b32(s[S_LOOP_CTR], buf.numel()//(CU_COUNT*LANES*4) - 1))
+    LOAD_UNROLL = 32
+    k.emit(s_mov_b32(s[S_LOOP_CTR], buf.numel()//(CU_COUNT*LANES*4*LOAD_UNROLL) - 1))
 
     k.label('LOOP')
-    k.emit(global_load_b128(vdst=v[8:11], addr=v[0], saddr=s[6:7]))
-    k.waitcnt(vm=0)
-    k.emit(VOPD(VOPDOp.V_DUAL_ADD_F32, VOPDOp.V_DUAL_ADD_F32, vdstx=v[4], vdsty=v[5], srcx0=v[4], vsrcx1=v[8], srcy0=v[5], vsrcy1=v[9]))
-    k.emit(VOPD(VOPDOp.V_DUAL_ADD_F32, VOPDOp.V_DUAL_ADD_F32, vdstx=v[6], vdsty=v[7], srcx0=v[6], vsrcx1=v[10], srcy0=v[7], vsrcy1=v[11]))
-
-    # advance buffer pointer by LANES * 16 bytes (32 lanes * 4 floats * 4 bytes)
-    k.emit(s_add_u32(s[6], s[6], LANES * 16))
+    # issue all loads (v[8:71]), offset field is signed 13-bit (max 4095), so bump base halfway
+    for i in range(LOAD_UNROLL):
+      offset = i*LANES*16
+      assert offset < 16384
+      k.emit(global_load_b128(vdst=v[8+i*4:11+i*4], addr=v[offset//4096], saddr=s[6:7], offset=offset%4096))
+    k.emit(s_add_u32(s[6], s[6], LOAD_UNROLL * LANES * 16))
     k.emit(s_addc_u32(s[7], s[7], 0))
+    k.waitcnt(vm=0)
+    # accumulate all loads into v[4:7]
+    for i in range(LOAD_UNROLL):
+      k.emit(VOPD(VOPDOp.V_DUAL_ADD_F32, VOPDOp.V_DUAL_ADD_F32, vdstx=v[4], vdsty=v[5], srcx0=v[4], vsrcx1=v[8+i*4], srcy0=v[5], vsrcy1=v[9+i*4]))
+      k.emit(VOPD(VOPDOp.V_DUAL_ADD_F32, VOPDOp.V_DUAL_ADD_F32, vdstx=v[6], vdsty=v[7], srcx0=v[6], vsrcx1=v[10+i*4], srcy0=v[7], vsrcy1=v[11+i*4]))
 
     k.emit(s_sub_u32(s[S_LOOP_CTR], s[S_LOOP_CTR], 1))
     k.emit(s_cbranch_scc0(), target='LOOP')
