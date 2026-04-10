@@ -100,6 +100,27 @@ class TestGGUF(unittest.TestCase):
 
     np.testing.assert_equal(dq_tensor.numpy(), ref)
 
+  def test_same_shape_tensors_share_kernel(self):
+    """Same-shape weights at different gguf data offsets must compile to a single kernel.
+    Regression for the per-weight INDEX-offset baking that caused ~146 method cache misses on llama loads."""
+    from tinygrad.engine.realize import method_cache, CompiledRunner
+    n_tensors, rows, cols = 8, 64, 32
+    buf = bytearray()
+    buf += struct.pack("<4siqq", b"GGUF", 3, n_tensors, 0)
+    tensor_nbytes = rows * cols * 4
+    for i in range(n_tensors):
+      name = f"t{i}".encode()
+      buf += struct.pack("<Q", len(name)) + name
+      buf += struct.pack("<I", 2) + struct.pack("<QQ", cols, rows) + struct.pack("<i", 0) + struct.pack("<Q", i * tensor_nbytes)
+    buf += b"\x00" * ((32 - len(buf) % 32) % 32)
+    for i in range(n_tensors): buf += np.full(rows * cols, i, dtype=np.float32).tobytes()
+    _, tensors = gguf_load(Tensor(np.frombuffer(bytes(buf), dtype=np.uint8)).to(None))
+    method_cache.clear()
+    sched = Tensor.schedule(*[t.sum() for t in tensors.values()])
+    for si in sched: si.lower()
+    compiled = [si for si in sched if isinstance(si.prg, CompiledRunner)]
+    self.assertEqual(len({id(si.prg) for si in compiled}), 1)
+
   def _test_gguf_load(self, url: str):
     fp = fetch(url)
     model_size = os.stat(fp).st_size
