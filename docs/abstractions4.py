@@ -121,6 +121,7 @@ if __name__ == "__main__":
 
     def emit_loads(base_vreg, reg_len):
       assert reg_len%4 == 0
+      k.emit(s_clause(simm16=(reg_len//4)-1))
       for i in range(reg_len//4):
         offset = i*LANES*16
         assert offset < 16384
@@ -128,7 +129,7 @@ if __name__ == "__main__":
       k.emit(s_add_u32(s[6], s[6], reg_len * LANES * 4))
       k.emit(s_addc_u32(s[7], s[7], 0))
 
-    def emit_reduce_to_4567(base_vreg, reg_len):
+    def tree_reduce_to_4567(base_vreg, reg_len):
       assert reg_len%4 == 0
       reg_len //= 4
       while reg_len > 1:
@@ -143,14 +144,19 @@ if __name__ == "__main__":
       k.emit(VOPD(VOPDOp.V_DUAL_ADD_F32, VOPDOp.V_DUAL_ADD_F32, vdstx=v[4], vdsty=v[5], srcx0=v[4], vsrcx1=v[base_vreg], srcy0=v[5], vsrcy1=v[base_vreg+1]))
       k.emit(VOPD(VOPDOp.V_DUAL_ADD_F32, VOPDOp.V_DUAL_ADD_F32, vdstx=v[6], vdsty=v[7], srcx0=v[6], vsrcx1=v[base_vreg+2], srcy0=v[7], vsrcy1=v[base_vreg+3]))
 
+    BASE_REG = 8
     LOAD_UNROLL = 64
-    total_batches = buf.numel()//(CU_COUNT*LANES*LOAD_UNROLL)
+    INNER_UNROLL = 2
+
+    assert buf.numel() % (CU_COUNT*LANES*LOAD_UNROLL*INNER_UNROLL) == 0
+    total_batches = buf.numel()//(CU_COUNT*LANES*LOAD_UNROLL*INNER_UNROLL)
     k.emit(s_mov_b32(s[S_LOOP_CTR], total_batches-1))
 
     k.label('LOOP')
-    emit_loads(8, reg_len=LOAD_UNROLL)
-    k.waitcnt(vm=0)
-    emit_reduce_to_4567(8, reg_len=LOAD_UNROLL)
+    for _ in range(INNER_UNROLL):
+      emit_loads(BASE_REG, reg_len=LOAD_UNROLL)
+      k.waitcnt(vm=0)
+      tree_reduce_to_4567(BASE_REG, reg_len=LOAD_UNROLL)
     k.emit(s_sub_u32(s[S_LOOP_CTR], s[S_LOOP_CTR], 1))
     k.emit(s_cbranch_scc0(), target='LOOP')
 
