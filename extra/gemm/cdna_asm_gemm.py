@@ -2704,7 +2704,7 @@ def custom_gemm_bw(gradient:UOp, kernel:UOp):
     a_t, b_t, g_t, s_t = Tensor(a, device=a.device), Tensor(b, device=a.device), Tensor(gradient, device=a.device), Tensor(scale, device=a.device)
     g_t = g_t[:a.shape[0]]
     # backward GEMMs in fp8 with scale applied inside kernel to prevent bf16 overflow
-    g_fp8, g_scale = quantize_fp8(g_t)
+    g_fp8, g_scale, _ = quantize_fp8(g_t)
     bw_scale = g_scale * s_t
     # dgrad: g_fp8 @ weight (asm_gemm computes a@b)
     grad_a = asm_gemm(g_fp8, b_t, combined_scale=bw_scale)
