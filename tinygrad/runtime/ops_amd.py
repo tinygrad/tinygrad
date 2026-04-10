@@ -655,7 +655,7 @@ class AMDAllocator(HCQAllocator['AMDDevice']):
 
   def _copyout(self, dest:memoryview, src:HCQBuffer):
     if not self.dev.is_usb(): return super()._copyout(dest, src)
-    if not self.dev.iface.pci_dev.usb.is_custom: return super()._copyout(dest, src)
+    if not self.dev.iface.pci_dev.usb.usb.is_custom: return super()._copyout(dest, src)
     self.dev.synchronize()
 
     with hcq_profile(self.dev, queue_type=self.dev.hw_copy_queue_t, desc=TracingKey(f"{self.dev.device} -> TINY", ret=dest.nbytes), enabled=PROFILE,
