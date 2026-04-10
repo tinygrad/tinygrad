@@ -87,15 +87,9 @@ class Struct(ctypes.Structure):
     for f,v in [*zip((rf[0] for rf in self._real_fields_), args), *kwargs.items()]: setattr(self, f, v)
 
   @classmethod
-  def _register(cls, f:Field):
-    entry = (f.name, f.typ, f.off) + ((f.bit_width, f.bit_off) if f.bit_width else ())
-    if hasattr(cls, "_real_fields_"): cls._real_fields_.append(entry)
-    else: setattr(cls, "_real_fields_", [entry])
-
-  @classmethod
-  def register_field(cls, name, *args):
-    cls._register(f:=Field(*args, name=name, idx=len(getattr(cls, "_real_fields_", []))))
-    setattr(cls, name, f)
+  def register_fields(cls, fields):
+    setattr(cls, "_real_fields_", fields)
+    for i, (name, *args) in enumerate(fields): setattr(cls, name, Field(*args, name=name, idx=i))
 
 def record(cls) -> type[Struct]:
   struct = type(cls.__name__, (Struct,), {'_fields_': [('_mem_', ctypes.c_byte * cls.SIZE)], '_real_fields_': []})
@@ -115,7 +109,9 @@ class Field:
     self.typ, self.off, self.bit_width, self.bit_off, self.name, self.idx = typ, off, bit_width, bit_off, name, idx
 
   def __set_name__(self, owner, name):
-    owner._register(name, self)
+    entry = (name, self.typ, self.off) + ((self.bit_width, self.bit_off) if self.bit_width else ())
+    if hasattr(owner, "_real_fields_"): owner._real_fields_.append(entry)
+    else: setattr(owner, "_real_fields_", [entry])
     self.name, self.idx = name, len(owner._real_fields_) - 1
 
   # lazily resolve field descriptors

@@ -140,7 +140,7 @@ def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False,
         if ff:
           lines[ln] = "\n".join(["@c.record", f"class {tnm}(c.Struct):", f"  SIZE = {clang.clang_Type_getSizeOf(t)}"] +
                                 [f"  {f}: {ty}" for f,ty,*args in ff])
-          lines.extend([f"{tnm}.register_field('{f}', {', '.join(str(a) for a in args)})" for f,ty,*args in ff])
+          lines.append(f"{tnm}.register_fields([" + ", ".join([f"('{f}', {', '.join(str(a) for a in args)})" for f,ty,*args in ff]) + "])")
         return tnm
       case clang.CXType_Enum:
         # TODO: C++ and GNU C have forward declared enums
