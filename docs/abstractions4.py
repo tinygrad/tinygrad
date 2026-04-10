@@ -10,16 +10,14 @@ from tinygrad.dtype import AddrSpace, dtypes
 SZ = 32*1024 if getenv("MOCKGPU") else 1024*1024*1024
 
 if __name__ == "__main__":
-  # First define a Tensor and realize it. We will focus on a 1GB sum kernel on Strix Halo with 32 CUs
-
-  a = Tensor.ones(SZ).contiguous().realize()
-  correct = SZ
+  # First define a Tensor and realize it. We will focus on a 1GB sum kernel on RDNA3
+  a = (Tensor.randn(SZ) if getenv("RAND") else Tensor.ones(SZ)).contiguous().realize()
 
   def eval_harness(name, fxn, check=None):
     print(f"***** {name}")
     GlobalCounters.reset()
     with Context(DEBUG=max(DEBUG.value, 2)): out = fxn(a).item()
-    assert check is None or out == check, f"out was wrong {out}, off by {out/check}x"
+    assert check is None or abs(out - check) < abs(check) * 1e-3, f"out was wrong {out}, expected {check}, off by {out/check}x"
     print(f"computed in {GlobalCounters.time_sum_s*1000:.2f} ms, {(a.nbytes()/1e9)/GlobalCounters.time_sum_s:.2f} GB/s")
     return out
 
@@ -27,7 +25,7 @@ if __name__ == "__main__":
   # This is the high level tinygrad way.
   # Note that this is split into multiple kernels for speed.
 
-  eval_harness("basic kernel", lambda x: x.sum(), check=correct)
+  correct = eval_harness("basic kernel", lambda x: x.sum())
 
   # *****
   # Now we get to the lower abstraction layers.
