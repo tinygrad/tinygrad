@@ -6,72 +6,94 @@ from tinygrad import Tensor, Context, GlobalCounters, UOp, Device
 from tinygrad.helpers import DEBUG, getenv
 from tinygrad.uop.ops import AxisType, KernelInfo, Ops
 from tinygrad.dtype import AddrSpace, dtypes
+from tinygrad.runtime.autogen.amd.rdna3.ins import *
+
+def eval_harness(name, tensor, fxn, check=None):
+  print(f"***** {name}")
+  GlobalCounters.reset()
+  with Context(DEBUG=max(DEBUG.value, 2)): out = fxn(tensor).item()
+  assert check is None or abs(out - check) < abs(check) * 1e-3, f"out was wrong {out}, expected {check}, off by {out/check}x"
+  print(f"computed in {GlobalCounters.time_sum_s*1000:.2f} ms, {(a.nbytes()/1e9)/GlobalCounters.time_sum_s:.2f} GB/s")
+  return out
 
 SZ = 32*1024 if getenv("MOCKGPU") else 1024*1024*1024
 
-if __name__ == "__main__":
-  correct = None
-  # First define a Tensor and realize it. We will focus on a 1GB sum kernel on RDNA3
-  a = (Tensor.randn(SZ) if getenv("RAND") else Tensor.ones(SZ)).contiguous().realize()
+def example_2_custom_uop(a:Tensor):
+  # This GPU has 32 CUs, keep them all busy
+  CU_COUNT = 32
+  def custom_sum(out:UOp, buf:UOp) -> UOp:
+    LCLS = 256
+    buf = buf.reshape(CU_COUNT, -1, LCLS)
 
-  def eval_harness(name, fxn, check=None):
-    print(f"***** {name}")
-    GlobalCounters.reset()
-    with Context(DEBUG=max(DEBUG.value, 2)): out = fxn(a).item()
-    assert check is None or abs(out - check) < abs(check) * 1e-3, f"out was wrong {out}, expected {check}, off by {out/check}x"
-    print(f"computed in {GlobalCounters.time_sum_s*1000:.2f} ms, {(a.nbytes()/1e9)/GlobalCounters.time_sum_s:.2f} GB/s")
-    return out
+    glbl = UOp.range(CU_COUNT, 0, AxisType.GLOBAL)
+    lane = UOp.range(LCLS, 1, AxisType.LOCAL)
 
-  if not getenv("ASM"):
-    # *****
-    # This is the high level tinygrad way.
-    # Note that this is split into multiple kernels for speed.
+    # accumulate the globals into a per lane accumulator
+    reduce_loop = UOp.range(buf.shape[1], 2, AxisType.REDUCE)
+    acc = UOp.placeholder((1,), dtypes.float, slot=6, addrspace=AddrSpace.REG)
+    acc = acc.after(acc.store(0))
+    acc = acc.after(acc[0].store(acc.after(reduce_loop)[0] + buf[glbl, reduce_loop, lane]).end(reduce_loop))
 
-    correct = eval_harness("basic kernel", lambda x: x.sum())
+    # store all the per lane accumulators to LOCAL
+    local_accs = UOp.placeholder((LCLS,), dtypes.float, slot=0, addrspace=AddrSpace.LOCAL)
+    local_accs = local_accs.after(local_accs[lane].store(acc[0]).barrier())
 
-    # *****
-    # Now we get to the lower abstraction layers.
-    # You can write a kernel in UOps, and it's 2.5x faster.
+    # accumulate LOCALs into a single per CU accumulator
+    late_reduce_loop = UOp.range(LCLS, 3, AxisType.REDUCE)
+    acc2 = UOp.placeholder((1,), dtypes.float, slot=7, addrspace=AddrSpace.REG)
+    acc2 = acc2.after(acc2.store(0))
+    acc2 = acc2.after(acc2[0].store(acc2.after(late_reduce_loop)[0] + local_accs[late_reduce_loop]).end(late_reduce_loop))[0]
 
-    # This GPU has 32 CUs, keep them all busy
-    CU_COUNT = 32
-    def custom_sum(out:UOp, buf:UOp) -> UOp:
-      LCLS = 256
-      buf = buf.reshape(CU_COUNT, -1, LCLS)
+    # store (NOTE: since the address doesn't depend on the warp, this will be automatically gated)
+    return out[glbl].store(acc2).end(lane, glbl).sink(arg=KernelInfo(opts_to_apply=()))
 
-      glbl = UOp.range(CU_COUNT, 0, AxisType.GLOBAL)
-      lane = UOp.range(LCLS, 1, AxisType.LOCAL)
+  eval_harness("custom UOp kernel", a, lambda x: Tensor.empty(CU_COUNT).custom_kernel(x, fxn=custom_sum)[0].sum(), check=correct)
 
-      # accumulate the globals into a per lane accumulator
-      reduce_loop = UOp.range(buf.shape[1], 2, AxisType.REDUCE)
-      acc = UOp.placeholder((1,), dtypes.float, slot=6, addrspace=AddrSpace.REG)
-      acc = acc.after(acc.store(0))
-      acc = acc.after(acc[0].store(acc.after(reduce_loop)[0] + buf[glbl, reduce_loop, lane]).end(reduce_loop))
+def example_3_hip(a:Tensor):
 
-      # store all the per lane accumulators to LOCAL
-      local_accs = UOp.placeholder((LCLS,), dtypes.float, slot=0, addrspace=AddrSpace.LOCAL)
-      local_accs = local_accs.after(local_accs[lane].store(acc[0]).barrier())
+  GLOBALS = 1024
+  THREADS = 256
+  def hip_reduce_sum(out:UOp, buf:UOp) -> UOp:
+    code = f"""
+    #include <hip/hip_runtime.h>
+    extern "C" __global__ void reduce_sum_kernel(float* __restrict__ block_sums, const float* __restrict__ x) {{
+      __shared__ float sdata[{THREADS}];
 
-      # accumulate LOCALs into a single per CU accumulator
-      late_reduce_loop = UOp.range(LCLS, 3, AxisType.REDUCE)
-      acc2 = UOp.placeholder((1,), dtypes.float, slot=7, addrspace=AddrSpace.REG)
-      acc2 = acc2.after(acc2.store(0))
-      acc2 = acc2.after(acc2[0].store(acc2.after(late_reduce_loop)[0] + local_accs[late_reduce_loop]).end(late_reduce_loop))[0]
+      unsigned int tid = threadIdx.x;
+      unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
+      unsigned int stride = blockDim.x * gridDim.x;
 
-      # store (NOTE: since the address doesn't depend on the warp, this will be automatically gated)
-      return out[glbl].store(acc2).end(lane, glbl).sink(arg=KernelInfo(opts_to_apply=()))
+      // Each thread accumulates multiple elements
+      float sum = 0.0f;
+      for (; i < {SZ}; i += stride) {{
+        sum += x[i];
+      }}
 
-    eval_harness("custom UOp kernel", lambda x: Tensor.empty(CU_COUNT).custom_kernel(x, fxn=custom_sum)[0].sum(), check=correct)
+      sdata[tid] = sum;
+      __syncthreads();
 
-    # *****
-    # You can also BEAM search stock tinygrad for a faster kernel.
-    # This does even better than the custom kernel in this simple case.
+      // Block reduction in shared memory
+      for (unsigned int s = blockDim.x / 2; s > 0; s >>= 1) {{
+        if (tid < s) {{
+          sdata[tid] += sdata[tid + s];
+        }}
+        __syncthreads();
+      }}
 
-    with Context(BEAM=2): eval_harness("BEAMed kernel", lambda x: x.sum(), check=correct)
+      // One partial sum per block
+      if (tid == 0) {{
+        block_sums[blockIdx.x] = sdata[0];
+      }}
+    }}"""
 
-  # *****
-  # Though if you really want to go crazy with speed, you can code in assembly
+    from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
+    lib = HIPCCCompiler(Device[Device.DEFAULT].renderer.target.arch, []).compile_cached(code)
+    sink = UOp.sink(UOp.special(GLOBALS, 'gidx0'), UOp.special(THREADS, 'lidx0'), out, buf, arg=KernelInfo(name="reduce_sum_kernel"))
+    return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=Device.DEFAULT),
+                UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=code), UOp(Ops.BINARY, arg=lib)))
+  eval_harness("HIP kernel", a, lambda x: Tensor.empty(GLOBALS).custom_kernel(x, fxn=hip_reduce_sum)[0].sum(), check=correct)
 
+def example_5_custom_assembly(a:Tensor):
   # Kernel class copied from amd_asm_matmul
   class Kernel:
     def __init__(self, arch='gfx1100'): self.instructions, self.labels, self.pos, self.arch = [], {}, 0, arch
@@ -95,7 +117,6 @@ if __name__ == "__main__":
       return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=Device.DEFAULT),
                                    UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=x) for x in self.instructions]))))
 
-  from tinygrad.runtime.autogen.amd.rdna3.ins import *
   CU_COUNT = 32
   LANES = 64
   def asm_sum(out:UOp, buf:UOp) -> UOp:
@@ -179,9 +200,43 @@ if __name__ == "__main__":
 
     k.emit(s_sendmsg(simm16=3))  # DEALLOC_VGPRS
     k.emit(s_endpgm())
-    return k.finalize(UOp.sink(UOp.special(CU_COUNT, 'gidx0'), UOp.special(LANES, 'lidx0'), out, buf,
-                               arg=KernelInfo(name="asm_reduce", opts_to_apply=())))
+    return k.finalize(UOp.sink(UOp.special(CU_COUNT, 'gidx0'), UOp.special(LANES, 'lidx0'), out, buf, arg=KernelInfo(name="asm_reduce")))
 
   out = Tensor.zeros(1,).contiguous().realize()
-  eval_harness("RDNA3 assembly kernel", lambda x: out.custom_kernel(x, fxn=asm_sum)[0], check=correct)
+  eval_harness("RDNA3 assembly kernel", a, lambda x: out.custom_kernel(x, fxn=asm_sum)[0], check=correct)
 
+if __name__ == "__main__":
+  examples = [int(x) for x in getenv("EXAMPLES", "1,2,3,4,5").split(",")]
+
+  correct = None
+  # First define a Tensor and realize it. We will focus on a 1GB sum kernel on RDNA3
+  a = (Tensor.randn(SZ) if getenv("RAND") else Tensor.ones(SZ)).contiguous().realize()
+
+  if 1 in examples:
+    # *****
+    # This is the high level tinygrad way.
+    # Note that this is split into multiple kernels for speed.
+    correct = eval_harness("basic kernel", a, lambda x: x.sum())
+
+  if 2 in examples:
+    # *****
+    # Now we get to the lower abstraction layers.
+    # You can write a kernel in UOps, and it's 2.5x faster.
+    example_2_custom_uop(a)
+
+  if 3 in examples:
+    # *****
+    # You can import kernels from CUDA/HIP/Metal
+    example_3_hip(a)
+
+  if 4 in examples:
+    # *****
+    # You can also BEAM search stock tinygrad for a faster kernel.
+    # This does even better than the custom kernel in this simple case.
+    with Context(BEAM=2):
+      eval_harness("BEAMed kernel", a, lambda x: x.sum(), check=correct)
+
+  if 5 in examples:
+    # *****
+    # If you really want to go crazy with speed, you can code in assembly
+    example_5_custom_assembly(a)
