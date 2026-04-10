@@ -8,6 +8,7 @@ from tinygrad.viz.serve import TCPServerWithReuse, HTTPRequestHandler
 
 class SimpleTokenizer:
   def __init__(self, normal_tokens:dict[str, int], special_tokens:dict[str, int], preset:str="llama3"):
+    preset = {"qwen35":"qwen2","qwen35moe":"qwen2"}.get(preset, preset)
     if preset not in ("llama3","llama-v3","llama-bpe","qwen2","olmo"): raise ValueError(f"Invalid tokenizer preset '{preset}'")
     # https://github.com/openai/gpt-2/blob/9b63575ef42771a015060c964af2c3da4cf7c8ab/src/encoder.py#L9
     bs = [*range(33, 127), *range(161, 173), *range(174, 256)]  # bytes that map to themselves
@@ -106,15 +107,68 @@ class TransformerConfig:
   vocab_size: int
   head_dim: int
   rope_theta: float
+  rope_dim: int
   max_context: int = 0
   qk_norm: int = 0
   num_experts: int = 0
   num_experts_per_tok: int = 0
   norm_topk_prob: bool = False
+  shared_expert_dim: int = 0
 
-class TransformerBlock:
+class FFNBlock:
   def __init__(self, config:TransformerConfig):
     self.config = config
+
+    # --- RMSNorms --------------------------------------------------------
+    self.attn_norm   = nn.RMSNorm(config.dim, config.norm_eps)
+    self.ffn_norm    = nn.RMSNorm(config.dim, config.norm_eps)
+
+    # --- feed-forward (MoE or dense) -------------------------------------
+    if config.num_experts > 0:
+      self.ffn_gate_inp = nn.Linear(config.dim, config.num_experts, bias=False)  # router
+      self.ffn_gate_exps = ExpertWeights(config.num_experts, config.dim, config.hidden_dim)
+      self.ffn_up_exps = ExpertWeights(config.num_experts, config.dim, config.hidden_dim)
+      self.ffn_down_exps = ExpertWeights(config.num_experts, config.hidden_dim, config.dim)
+      if config.shared_expert_dim > 0:
+        self.ffn_gate_shexp = nn.Linear(config.dim, config.shared_expert_dim, bias=False)
+        self.ffn_up_shexp = nn.Linear(config.dim, config.shared_expert_dim, bias=False)
+        self.ffn_down_shexp = nn.Linear(config.shared_expert_dim, config.dim, bias=False)
+        self.ffn_gate_inp_shexp = {"weight": Tensor.zeros(config.dim)}
+    else:
+      self.ffn_gate    = nn.Linear(config.dim, config.hidden_dim, bias=False)
+      self.ffn_up      = nn.Linear(config.dim, config.hidden_dim, bias=False)
+      self.ffn_down    = nn.Linear(config.hidden_dim, config.dim, bias=False)
+
+  def _feed_forward(self, x:Tensor) -> Tensor:
+    if hasattr(self, 'ffn_gate_exps'):
+      h = x.unsqueeze(2)  # (B, T, 1, D) - add expert dim for broadcasting
+      logits = self.ffn_gate_inp(x)
+      vals, sel = pairwise_topk(logits, self.config.num_experts_per_tok)
+      probs = vals.softmax(-1) if self.config.norm_topk_prob else logits.softmax(-1).gather(-1, sel)
+      x_down = self.ffn_down_exps(sel, self.ffn_gate_exps(sel, h).silu() * self.ffn_up_exps(sel, h))  # (B, T, k, D)
+      out = (x_down * probs.unsqueeze(-1)).sum(axis=2)  # (B, T, D)
+      if hasattr(self, 'ffn_gate_shexp'):
+        shared_gate = (x * self.ffn_gate_inp_shexp["weight"]).sum(axis=-1, keepdim=True).sigmoid()
+        out = out + self.ffn_down_shexp(self.ffn_gate_shexp(x).silu().contiguous() * self.ffn_up_shexp(x)) * shared_gate
+      return out
+    # TODO: remove the need for this contiguous
+    return self.ffn_down(self.ffn_gate(x).silu().contiguous() * self.ffn_up(x))
+
+  def _init_state(self, x:Tensor): raise NotImplementedError
+  def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor: raise NotImplementedError
+
+  def __call__(self, x: Tensor, start_pos: int|UOp):
+    self._init_state(x)
+    # we pass in the weights implicitly so we unpack the GGUF on the fly
+    @function(precompile=True, allow_implicit=True)
+    def _run(x:Tensor, start_pos:int|UOp):
+      h =     x + self._attention(self.attn_norm(x), start_pos)
+      return (h + self._feed_forward(self.ffn_norm(h))).contiguous()
+    return _run(x, start_pos)
+
+class TransformerBlock(FFNBlock):
+  def __init__(self, config:TransformerConfig):
+    super().__init__(config)
 
     # --- attention projections (all linear, bias-free) ------------------
     q_proj_out       = config.head_dim * config.n_heads
@@ -123,26 +177,10 @@ class TransformerBlock:
     self.attn_k      = nn.Linear(config.dim, kv_proj_out, bias=False)
     self.attn_v      = nn.Linear(config.dim, kv_proj_out, bias=False)
     self.attn_output = nn.Linear(q_proj_out, config.dim,  bias=False)
-
-    # --- RMSNorms --------------------------------------------------------
-    self.attn_norm   = nn.RMSNorm(config.dim, config.norm_eps)
-    self.ffn_norm    = nn.RMSNorm(config.dim, config.norm_eps)
     if config.qk_norm: self.attn_q_norm, self.attn_k_norm = nn.RMSNorm(config.qk_norm, config.norm_eps), nn.RMSNorm(config.qk_norm, config.norm_eps)
 
-    # --- feed-forward (MoE or dense) -------------------------------------
-    if config.num_experts > 0:
-      self.ffn_gate_inp = nn.Linear(config.dim, config.num_experts, bias=False)  # router
-      self.ffn_gate_exps = ExpertWeights(config.num_experts, config.dim, config.hidden_dim)
-      self.ffn_up_exps = ExpertWeights(config.num_experts, config.dim, config.hidden_dim)
-      self.ffn_down_exps = ExpertWeights(config.num_experts, config.hidden_dim, config.dim)
-    else:
-      self.ffn_gate    = nn.Linear(config.dim, config.hidden_dim, bias=False)
-      self.ffn_up      = nn.Linear(config.dim, config.hidden_dim, bias=False)
-      self.ffn_down    = nn.Linear(config.hidden_dim, config.dim, bias=False)
-
   def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
-    x_norm = self.attn_norm(x)                       # (B,T,D)
-    q, k, v = self.attn_q(x_norm), self.attn_k(x_norm), self.attn_v(x_norm)
+    q, k, v = self.attn_q(x), self.attn_k(x), self.attn_v(x)
     if self.config.qk_norm and self.config.qk_norm != self.config.head_dim: q, k = self.attn_q_norm(q), self.attn_k_norm(k)
 
     B, T, _ = x.shape
@@ -151,8 +189,8 @@ class TransformerBlock:
     v = v.reshape(B, T, self.config.n_kv_heads, self.config.head_dim).transpose(1, 2)  # (B,KvH,T,Hd)
     if self.config.qk_norm == self.config.head_dim: q, k = self.attn_q_norm(q), self.attn_k_norm(k)
 
-    q = apply_rope(q, self.freqs_cis[start_pos:start_pos+T])
-    k = apply_rope(k, self.freqs_cis[start_pos:start_pos+T])
+    q = apply_rope(q[..., :self.config.rope_dim], self.freqs_cis[start_pos:start_pos+T]).cat(q[..., self.config.rope_dim:], dim=-1)
+    k = apply_rope(k[..., :self.config.rope_dim], self.freqs_cis[start_pos:start_pos+T]).cat(k[..., self.config.rope_dim:], dim=-1)
 
     # NOTE: we don't want to change self.cache_kv, the function API doesn't support this well
     assigned_kv = Tensor(self.cache_kv.uop.after(self.cache_kv[:, :, :, start_pos:start_pos+T, :].uop.store(Tensor.stack(k, v).uop)))
@@ -168,31 +206,13 @@ class TransformerBlock:
     mask = Tensor.full((1, 1, T, start_pos+T), float("-inf"), dtype=x.dtype, device=x.device).triu(start_pos+1) if resolve(T != 1) else None
     attn = q.scaled_dot_product_attention(k, v, attn_mask=mask, enable_gqa=True)     # (B,H,T,Hd)
     attn = attn.transpose(1, 2).reshape(B, T, -1)                                    # back to (B,T,D)
-    attn = self.attn_output(attn)
-    return x + attn
+    return self.attn_output(attn)
 
-  def _feed_forward(self, h: Tensor) -> Tensor:
-    h_norm = self.ffn_norm(h)
-    if hasattr(self, 'ffn_gate_exps'):
-      x = h_norm.unsqueeze(2)  # (B, T, 1, D) - add expert dim for broadcasting
-      logits = self.ffn_gate_inp(h_norm)
-      vals, sel = pairwise_topk(logits, self.config.num_experts_per_tok)
-      probs = vals.softmax(-1) if self.config.norm_topk_prob else logits.softmax(-1).gather(-1, sel)
-      x_down = self.ffn_down_exps(sel, self.ffn_gate_exps(sel, x).silu() * self.ffn_up_exps(sel, x))  # (B, T, k, D)
-      return h + (x_down * probs.unsqueeze(-1)).sum(axis=2)  # (B, T, D)
-    # TODO: remove the need for this contiguous
-    gated  = self.ffn_gate(h_norm).silu().contiguous() * self.ffn_up(h_norm)
-    return h + self.ffn_down(gated)
-
-  def __call__(self, x: Tensor, start_pos: int|UOp):
+  def _init_state(self, x:Tensor):
     if not hasattr(self, "cache_kv"):
       # TODO: how is the dtype of this determined?
       self.cache_kv = Tensor.empty(2, x.shape[0], self.config.n_kv_heads, self.config.max_context, self.config.head_dim, device=x.device)
-      self.freqs_cis = precompute_freqs_cis(self.config.head_dim, self.config.max_context, self.config.rope_theta)
-    # we pass in the weights implicitly so we unpack the GGUF on the fly
-    @function(precompile=True, allow_implicit=True)
-    def _run(x:Tensor, start_pos:int|UOp): return self._feed_forward(self._attention(x, start_pos)).contiguous()
-    return _run(x, start_pos)
+      self.freqs_cis = precompute_freqs_cis(self.config.rope_dim, self.config.max_context, self.config.rope_theta)
 
 class Transformer:
   def __init__(self, config:TransformerConfig):
@@ -237,16 +257,17 @@ class Transformer:
         if 'attn_q.weight' in name: state_dict[name] = state_dict[name].rearrange("(n h two) d -> (n two h) d", n=n_heads, two=2)
         if 'attn_k.weight' in name: state_dict[name] = state_dict[name].rearrange("(n h two) d -> (n two h) d", n=n_kv_heads, two=2)
 
+    head_dim = kv.get(f'{arch}.attention.key_length', kv[f'{arch}.embedding_length'] // n_heads)
     config = TransformerConfig(
       num_blocks=kv[f'{arch}.block_count'], dim=kv[f'{arch}.embedding_length'],
       hidden_dim=kv.get(f'{arch}.expert_feed_forward_length', kv[f'{arch}.feed_forward_length']),
       n_heads=n_heads, n_kv_heads=n_kv_heads, norm_eps=kv[f'{arch}.attention.layer_norm_rms_epsilon'],
       vocab_size=len(kv['tokenizer.ggml.tokens']),
-      head_dim=kv.get(f'{arch}.attention.key_length', kv[f'{arch}.embedding_length'] // n_heads),
-      rope_theta=kv[f'{arch}.rope.freq_base'], max_context=max_context,
+      head_dim=head_dim,
+      rope_theta=kv[f'{arch}.rope.freq_base'], rope_dim=kv.get(f'{arch}.rope.dimension_count', head_dim), max_context=max_context,
       qk_norm=int(state_dict['blk.0.attn_q_norm.weight'].shape[0]) if 'blk.0.attn_q_norm.weight' in state_dict else 0,
       num_experts=kv.get(f'{arch}.expert_count', 0), num_experts_per_tok=kv.get(f'{arch}.expert_used_count', 0),
-      norm_topk_prob=arch == 'qwen3moe')
+      norm_topk_prob=arch in ('qwen3moe', 'qwen35moe'), shared_expert_dim=kv.get(f'{arch}.expert_shared_feed_forward_length', 0))
     model = Transformer(config)
     nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused
     # NOTE: without this contiguous, it unpacks the weights from the model every time. we shouldn't need this, but for now it's faster
