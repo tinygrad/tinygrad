@@ -34,9 +34,9 @@ class TestMLA(unittest.TestCase):
     k_rope = apply_rope_interleaved(k_rope, freqs[0:T])
 
     # --- Naive (non-absorbed): expand K and V, do standard attention ---
-    k_nope_naive = c_kv.unsqueeze(1) @ block.attn_k_b_weight  # (B, H, T, nope)
+    k_nope_naive = c_kv.unsqueeze(1) @ block.attn_k_b["weight"]  # (B, H, T, nope)
     k_naive = k_nope_naive.cat(k_rope.expand(-1, c.n_heads, -1, -1), dim=-1)  # (B, H, T, nope+rope)
-    v_naive = c_kv.unsqueeze(1) @ block.attn_v_b_weight.transpose(-1, -2)  # (B, H, T, v_dim)
+    v_naive = c_kv.unsqueeze(1) @ block.attn_v_b["weight"].transpose(-1, -2)  # (B, H, T, v_dim)
 
     q_naive = q_nope.cat(q_rope, dim=-1)
     scale = 1.0 / (c.qk_nope_head_dim + c.qk_rope_head_dim) ** 0.5
@@ -47,14 +47,14 @@ class TestMLA(unittest.TestCase):
     out_naive = block.attn_output(attn_naive.transpose(1, 2).reshape(B, T, -1))
 
     # --- Absorbed: q_nope @ wk_b^T, then dot with compressed kv ---
-    q_nope_abs = q_nope @ block.attn_k_b_weight.transpose(-1, -2)  # (B, H, T, lora)
+    q_nope_abs = q_nope @ block.attn_k_b["weight"].transpose(-1, -2)  # (B, H, T, lora)
     q_abs = q_nope_abs.cat(q_rope, dim=-1)  # (B, H, T, lora+rope)
     k_abs = c_kv.reshape(B, 1, T, c.kv_lora_rank).cat(k_rope.reshape(B, 1, T, c.qk_rope_head_dim), dim=-1)
     scores_abs = (q_abs @ k_abs.transpose(-1, -2)) * scale
     attn_abs = (scores_abs + mask).softmax(-1)
     # attn @ v_compressed @ wv_b
     v_compressed = c_kv.reshape(B, 1, T, c.kv_lora_rank)
-    attn_abs_out = (attn_abs @ v_compressed) @ block.attn_v_b_weight.transpose(-1, -2)
+    attn_abs_out = (attn_abs @ v_compressed) @ block.attn_v_b["weight"].transpose(-1, -2)
     out_abs = block.attn_output(attn_abs_out.transpose(1, 2).reshape(B, T, -1))
 
     # Compare

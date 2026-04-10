@@ -139,7 +139,7 @@ class FFNBlock:
     # --- feed-forward (MoE or dense) -------------------------------------
     if config.num_experts > 0:
       self.ffn_gate_inp = nn.Linear(config.dim, config.num_experts, bias=False)  # router
-      if config.kv_lora_rank > 0: self.exp_probs_b_bias = Tensor.zeros(config.num_experts)
+      if config.kv_lora_rank > 0: self.exp_probs_b = {"bias": Tensor.zeros(config.num_experts)}
       self.ffn_gate_exps = ExpertWeights(config.num_experts, config.dim, config.hidden_dim)
       self.ffn_up_exps = ExpertWeights(config.num_experts, config.dim, config.hidden_dim)
       self.ffn_down_exps = ExpertWeights(config.num_experts, config.hidden_dim, config.dim)
@@ -157,9 +157,9 @@ class FFNBlock:
     if hasattr(self, 'ffn_gate_exps'):
       h = x.unsqueeze(2)  # (B, T, 1, D) - add expert dim for broadcasting
       logits = self.ffn_gate_inp(x)
-      if hasattr(self, 'exp_probs_b_bias'):
+      if hasattr(self, 'exp_probs_b'):
         probs = logits.sigmoid()
-        _, sel = pairwise_topk(probs + self.exp_probs_b_bias, self.config.num_experts_per_tok)
+        _, sel = pairwise_topk(probs + self.exp_probs_b["bias"], self.config.num_experts_per_tok)
         probs = probs.gather(-1, sel)
         if self.config.norm_topk_prob: probs = probs / probs.sum(axis=-1, keepdim=True)
       else:
@@ -242,15 +242,15 @@ class MLATransformerBlock(FFNBlock):
     self.attn_q = nn.Linear(config.dim, config.n_heads * (config.qk_nope_head_dim + config.qk_rope_head_dim), bias=False)
     self.attn_kv_a_mqa = nn.Linear(config.dim, config.kv_lora_rank + config.qk_rope_head_dim, bias=False)
     self.attn_kv_a_norm = nn.RMSNorm(config.kv_lora_rank, config.norm_eps)
-    self.attn_k_b_weight = Tensor.zeros(config.n_heads, config.kv_lora_rank, config.qk_nope_head_dim)
-    self.attn_v_b_weight = Tensor.zeros(config.n_heads, config.v_head_dim, config.kv_lora_rank)
+    self.attn_k_b = {"weight": Tensor.zeros(config.n_heads, config.kv_lora_rank, config.qk_nope_head_dim)}
+    self.attn_v_b = {"weight": Tensor.zeros(config.n_heads, config.v_head_dim, config.kv_lora_rank)}
     self.attn_output = nn.Linear(config.n_heads * config.v_head_dim, config.dim, bias=False)
 
   def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
     B, T, _ = x.shape
     q = self.attn_q(x).reshape(B, T, self.config.n_heads, self.config.qk_nope_head_dim + self.config.qk_rope_head_dim).transpose(1, 2)
     q_nope, q_rope = q[..., :self.config.qk_nope_head_dim], q[..., self.config.qk_nope_head_dim:]
-    q = (q_nope @ self.attn_k_b_weight.transpose(-1, -2)).cat(apply_rope_interleaved(q_rope, self.freqs_cis[start_pos:start_pos+T]), dim=-1)
+    q = (q_nope @ self.attn_k_b["weight"].transpose(-1, -2)).cat(apply_rope_interleaved(q_rope, self.freqs_cis[start_pos:start_pos+T]), dim=-1)
 
     kv_a = self.attn_kv_a_mqa(x)
     c_kv = self.attn_kv_a_norm(kv_a[..., :self.config.kv_lora_rank])
@@ -268,7 +268,7 @@ class MLATransformerBlock(FFNBlock):
     attn = q @ k.transpose(-1, -2) * (1.0 / (self.config.qk_nope_head_dim + self.config.qk_rope_head_dim) ** 0.5)
     if mask is not None: attn = attn + mask
     attn = attn.softmax(-1)
-    attn = ((attn @ v) @ self.attn_v_b_weight.transpose(-1, -2)).transpose(1, 2).reshape(B, T, -1)
+    attn = ((attn @ v) @ self.attn_v_b["weight"].transpose(-1, -2)).transpose(1, 2).reshape(B, T, -1)
     return self.attn_output(attn)
 
   def _init_state(self, x:Tensor):
@@ -324,9 +324,6 @@ class Transformer:
 
     head_dim = kv.get(f'{arch}.attention.key_length', kv[f'{arch}.embedding_length'] // n_heads)
     kv_lora_rank = kv.get(f'{arch}.attention.kv_lora_rank', 0)
-    if kv_lora_rank:
-      renames = {'attn_k_b.weight': 'attn_k_b_weight', 'attn_v_b.weight': 'attn_v_b_weight', 'exp_probs_b.bias': 'exp_probs_b_bias'}
-      state_dict = {functools.reduce(lambda k, r: k.replace(*r), renames.items(), k): v for k, v in state_dict.items()}
     leading_dense_blocks = kv.get(f'{arch}.leading_dense_block_count', 0)
     shared_expert_dim = kv.get(f'{arch}.expert_shared_feed_forward_length', kv.get(f'{arch}.expert_shared_count', 0) * kv.get(f'{arch}.expert_feed_forward_length', 0))
     shared_expert_gate = shared_expert_dim > 0 and f'blk.{leading_dense_blocks}.ffn_gate_inp_shexp.weight' in state_dict
