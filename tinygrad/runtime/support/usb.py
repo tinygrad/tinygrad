@@ -175,8 +175,7 @@ class CustomASM24Controller:
     self._pci_cacheable: list[tuple[int, int]] = []
     self._pci_cache: dict[int, int|None] = {}
 
-    # Pre-allocate buffers for _f0_out (12 bytes) and _f0_in (8 bytes)
-    self._f0_out_buf, self._f0_out_mv = alloc_cbuffer(12)
+    self._f0_out_buf, self._f0_out_mv = alloc_cbuffer(0x1000) # for f0 and e4, allocate big enough for e4
     self._f0_in_buf, _ = alloc_cbuffer(8)
 
     # Verify custom firmware is running and PCIe link is up (LTSSM=0x78).
