@@ -13,9 +13,9 @@ class TestMLA(unittest.TestCase):
 
   def test_mla_attention_matches_naive(self):
     config = self._make_config(max_context=16)
-    from tinygrad.apps.llm import TransformerBlock, precompute_freqs_cis
+    from tinygrad.apps.llm import MLATransformerBlock, precompute_freqs_cis
 
-    block = TransformerBlock(config)
+    block = MLATransformerBlock(config)
     c = config
     B, T = 1, 4
 

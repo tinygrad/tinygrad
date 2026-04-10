@@ -199,83 +199,94 @@ class TransformerBlock(FFNBlock):
     super().__init__(config)
 
     # --- attention projections (all linear, bias-free) ------------------
-    if config.kv_lora_rank > 0:
-      self.attn_q = nn.Linear(config.dim, config.n_heads * (config.qk_nope_head_dim + config.qk_rope_head_dim), bias=False)
-      self.attn_kv_a_mqa = nn.Linear(config.dim, config.kv_lora_rank + config.qk_rope_head_dim, bias=False)
-      self.attn_kv_a_norm = nn.RMSNorm(config.kv_lora_rank, config.norm_eps)
-      self.attn_k_b_weight = Tensor.zeros(config.n_heads, config.kv_lora_rank, config.qk_nope_head_dim)
-      self.attn_v_b_weight = Tensor.zeros(config.n_heads, config.v_head_dim, config.kv_lora_rank)
-      self.attn_output = nn.Linear(config.n_heads * config.v_head_dim, config.dim, bias=False)
-    else:
-      q_proj_out       = config.head_dim * config.n_heads
-      kv_proj_out      = config.head_dim * config.n_kv_heads
-      self.attn_q      = nn.Linear(config.dim, q_proj_out,  bias=False)
-      self.attn_k      = nn.Linear(config.dim, kv_proj_out, bias=False)
-      self.attn_v      = nn.Linear(config.dim, kv_proj_out, bias=False)
-      self.attn_output = nn.Linear(q_proj_out, config.dim,  bias=False)
+    q_proj_out       = config.head_dim * config.n_heads
+    kv_proj_out      = config.head_dim * config.n_kv_heads
+    self.attn_q      = nn.Linear(config.dim, q_proj_out,  bias=False)
+    self.attn_k      = nn.Linear(config.dim, kv_proj_out, bias=False)
+    self.attn_v      = nn.Linear(config.dim, kv_proj_out, bias=False)
+    self.attn_output = nn.Linear(q_proj_out, config.dim,  bias=False)
     if config.qk_norm: self.attn_q_norm, self.attn_k_norm = nn.RMSNorm(config.qk_norm, config.norm_eps), nn.RMSNorm(config.qk_norm, config.norm_eps)
 
   def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
-    B, T, _ = x.shape
-    c = self.config
-
-    if c.kv_lora_rank > 0:
-      q = self.attn_q(x).reshape(B, T, c.n_heads, c.qk_nope_head_dim + c.qk_rope_head_dim).transpose(1, 2)
-      q_nope, q_rope = q[..., :c.qk_nope_head_dim], q[..., c.qk_nope_head_dim:]
-      q = (q_nope @ self.attn_k_b_weight.transpose(-1, -2)).cat(apply_rope_interleaved(q_rope, self.freqs_cis[start_pos:start_pos+T]), dim=-1)
-
-      kv_a = self.attn_kv_a_mqa(x)
-      c_kv, k_rope = self.attn_kv_a_norm(kv_a[..., :c.kv_lora_rank]), kv_a[..., c.kv_lora_rank:]
-      k_rope = apply_rope_interleaved(k_rope.reshape(B, T, 1, c.qk_rope_head_dim).transpose(1, 2), self.freqs_cis[start_pos:start_pos+T])
-
-      k_store = c_kv.reshape(B, 1, T, c.kv_lora_rank).cat(k_rope.reshape(B, 1, T, c.qk_rope_head_dim), dim=-1)
-      v_store = c_kv.reshape(B, 1, T, c.kv_lora_rank).pad((0, c.qk_rope_head_dim))
-      assigned = Tensor(self.cache_kv.uop.after(
-        self.cache_kv[:, :, :, start_pos:start_pos+T, :].uop.store(Tensor.stack(k_store, v_store).uop)))
-      k = assigned[0, :, :, 0:start_pos+T, :]
-      v = assigned[1, :, :, 0:start_pos+T, :c.kv_lora_rank]
-
-      mask = Tensor.full((1, 1, T, start_pos+T), float("-inf"), dtype=x.dtype, device=x.device).triu(start_pos+1) if resolve(T != 1) else None
-      scale = 1.0 / (c.qk_nope_head_dim + c.qk_rope_head_dim) ** 0.5
-      attn = q @ k.transpose(-1, -2) * scale
-      if mask is not None: attn = attn + mask
-      attn = attn.softmax(-1)
-      attn = ((attn @ v) @ self.attn_v_b_weight.transpose(-1, -2)).transpose(1, 2).reshape(B, T, -1)
-      return self.attn_output(attn)
-
     q, k, v = self.attn_q(x), self.attn_k(x), self.attn_v(x)
-    if c.qk_norm and c.qk_norm != c.head_dim: q, k = self.attn_q_norm(q), self.attn_k_norm(k)
-    q = q.reshape(B, T, c.n_heads,    c.head_dim).transpose(1, 2)
-    k = k.reshape(B, T, c.n_kv_heads, c.head_dim).transpose(1, 2)
-    v = v.reshape(B, T, c.n_kv_heads, c.head_dim).transpose(1, 2)
-    if c.qk_norm == c.head_dim: q, k = self.attn_q_norm(q), self.attn_k_norm(k)
+    if self.config.qk_norm and self.config.qk_norm != self.config.head_dim: q, k = self.attn_q_norm(q), self.attn_k_norm(k)
 
-    q = apply_rope(q[..., :c.rope_dim], self.freqs_cis[start_pos:start_pos+T]).cat(q[..., c.rope_dim:], dim=-1)
-    k = apply_rope(k[..., :c.rope_dim], self.freqs_cis[start_pos:start_pos+T]).cat(k[..., c.rope_dim:], dim=-1)
+    B, T, _ = x.shape
+    q = q.reshape(B, T, self.config.n_heads,    self.config.head_dim).transpose(1, 2)  # (B,H,T,Hd)
+    k = k.reshape(B, T, self.config.n_kv_heads, self.config.head_dim).transpose(1, 2)  # (B,KvH,T,Hd)
+    v = v.reshape(B, T, self.config.n_kv_heads, self.config.head_dim).transpose(1, 2)  # (B,KvH,T,Hd)
+    if self.config.qk_norm == self.config.head_dim: q, k = self.attn_q_norm(q), self.attn_k_norm(k)
 
+    q = apply_rope(q[..., :self.config.rope_dim], self.freqs_cis[start_pos:start_pos+T]).cat(q[..., self.config.rope_dim:], dim=-1)
+    k = apply_rope(k[..., :self.config.rope_dim], self.freqs_cis[start_pos:start_pos+T]).cat(k[..., self.config.rope_dim:], dim=-1)
+
+    # NOTE: we don't want to change self.cache_kv, the function API doesn't support this well
     assigned_kv = Tensor(self.cache_kv.uop.after(self.cache_kv[:, :, :, start_pos:start_pos+T, :].uop.store(Tensor.stack(k, v).uop)))
     k = assigned_kv[0, :, :, 0:start_pos+T, :]
     v = assigned_kv[1, :, :, 0:start_pos+T, :]
 
+    #self.cache_kv[:, :, :, start_pos:start_pos+T, :].assign(Tensor.stack(k, v))
+    #k = self.cache_kv[0, :, :, 0:start_pos+T, :]
+    #v = self.cache_kv[1, :, :, 0:start_pos+T, :]
+
+    # NOTE: this mask is causal_lower_right, not the causal_upper_left generated by is_casual = True
+    # TODO: this if statement should be removed and it shouldn't generate extra kernels
     mask = Tensor.full((1, 1, T, start_pos+T), float("-inf"), dtype=x.dtype, device=x.device).triu(start_pos+1) if resolve(T != 1) else None
     attn = q.scaled_dot_product_attention(k, v, attn_mask=mask, enable_gqa=True).transpose(1, 2).reshape(B, T, -1)
     return self.attn_output(attn)
 
   def _init_state(self, x:Tensor):
     if not hasattr(self, "cache_kv"):
-      c = self.config
-      if c.kv_lora_rank > 0:
-        self.cache_kv = Tensor.empty(2, x.shape[0], 1, c.max_context, c.kv_lora_rank + c.qk_rope_head_dim, device=x.device)
-        self.freqs_cis = precompute_freqs_cis(c.qk_rope_head_dim, c.max_context, c.rope_theta)
-      else:
-        self.cache_kv = Tensor.empty(2, x.shape[0], c.n_kv_heads, c.max_context, c.head_dim, device=x.device)
-        self.freqs_cis = precompute_freqs_cis(c.rope_dim, c.max_context, c.rope_theta)
+      # TODO: how is the dtype of this determined?
+      self.cache_kv = Tensor.empty(2, x.shape[0], self.config.n_kv_heads, self.config.max_context, self.config.head_dim, device=x.device)
+      self.freqs_cis = precompute_freqs_cis(self.config.rope_dim, self.config.max_context, self.config.rope_theta)
+
+class MLATransformerBlock(FFNBlock):
+  def __init__(self, config:TransformerConfig):
+    super().__init__(config)
+    self.attn_q = nn.Linear(config.dim, config.n_heads * (config.qk_nope_head_dim + config.qk_rope_head_dim), bias=False)
+    self.attn_kv_a_mqa = nn.Linear(config.dim, config.kv_lora_rank + config.qk_rope_head_dim, bias=False)
+    self.attn_kv_a_norm = nn.RMSNorm(config.kv_lora_rank, config.norm_eps)
+    self.attn_k_b_weight = Tensor.zeros(config.n_heads, config.kv_lora_rank, config.qk_nope_head_dim)
+    self.attn_v_b_weight = Tensor.zeros(config.n_heads, config.v_head_dim, config.kv_lora_rank)
+    self.attn_output = nn.Linear(config.n_heads * config.v_head_dim, config.dim, bias=False)
+
+  def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
+    B, T, _ = x.shape
+    q = self.attn_q(x).reshape(B, T, self.config.n_heads, self.config.qk_nope_head_dim + self.config.qk_rope_head_dim).transpose(1, 2)
+    q_nope, q_rope = q[..., :self.config.qk_nope_head_dim], q[..., self.config.qk_nope_head_dim:]
+    q = (q_nope @ self.attn_k_b_weight.transpose(-1, -2)).cat(apply_rope_interleaved(q_rope, self.freqs_cis[start_pos:start_pos+T]), dim=-1)
+
+    kv_a = self.attn_kv_a_mqa(x)
+    c_kv = self.attn_kv_a_norm(kv_a[..., :self.config.kv_lora_rank])
+    k_rope = apply_rope_interleaved(kv_a[..., self.config.kv_lora_rank:].reshape(B, T, 1, self.config.qk_rope_head_dim).transpose(1, 2),
+                                    self.freqs_cis[start_pos:start_pos+T])
+
+    k_store = c_kv.reshape(B, 1, T, self.config.kv_lora_rank).cat(k_rope.reshape(B, 1, T, self.config.qk_rope_head_dim), dim=-1)
+    v_store = c_kv.reshape(B, 1, T, self.config.kv_lora_rank).pad((0, self.config.qk_rope_head_dim))
+    assigned = Tensor(self.cache_kv.uop.after(
+      self.cache_kv[:, :, :, start_pos:start_pos+T, :].uop.store(Tensor.stack(k_store, v_store).uop)))
+    k = assigned[0, :, :, 0:start_pos+T, :]
+    v = assigned[1, :, :, 0:start_pos+T, :self.config.kv_lora_rank]
+
+    mask = Tensor.full((1, 1, T, start_pos+T), float("-inf"), dtype=x.dtype, device=x.device).triu(start_pos+1) if resolve(T != 1) else None
+    attn = q @ k.transpose(-1, -2) * (1.0 / (self.config.qk_nope_head_dim + self.config.qk_rope_head_dim) ** 0.5)
+    if mask is not None: attn = attn + mask
+    attn = attn.softmax(-1)
+    attn = ((attn @ v) @ self.attn_v_b_weight.transpose(-1, -2)).transpose(1, 2).reshape(B, T, -1)
+    return self.attn_output(attn)
+
+  def _init_state(self, x:Tensor):
+    if not hasattr(self, "cache_kv"):
+      self.cache_kv = Tensor.empty(2, x.shape[0], 1, self.config.max_context, self.config.kv_lora_rank + self.config.qk_rope_head_dim, device=x.device)
+      self.freqs_cis = precompute_freqs_cis(self.config.qk_rope_head_dim, self.config.max_context, self.config.rope_theta)
 
 class Transformer:
   def __init__(self, config:TransformerConfig):
     from dataclasses import replace
     dense_config = replace(config, num_experts=0, num_experts_per_tok=0, shared_expert_dim=0, hidden_dim=config.dense_hidden_dim or config.hidden_dim)
-    self.blk = [TransformerBlock(dense_config if i < config.leading_dense_blocks else config) for i in range(config.num_blocks)]
+    block_cls = MLATransformerBlock if config.kv_lora_rank > 0 else TransformerBlock
+    self.blk = [block_cls(dense_config if i < config.leading_dense_blocks else config) for i in range(config.num_blocks)]
     self.token_embd  = nn.Embedding(config.vocab_size, config.dim)
     self.output_norm = nn.RMSNorm(config.dim, config.norm_eps)
     self.output = nn.Linear(config.dim, config.vocab_size, bias=False)
@@ -321,8 +332,9 @@ class Transformer:
     if kv_lora_rank:
       renames = {'attn_k_b.weight': 'attn_k_b_weight', 'attn_v_b.weight': 'attn_v_b_weight', 'exp_probs_b.bias': 'exp_probs_b_bias'}
       state_dict = {functools.reduce(lambda k, r: k.replace(*r), renames.items(), k): v for k, v in state_dict.items()}
+    leading_dense_blocks = kv.get(f'{arch}.leading_dense_block_count', 0)
     shared_expert_dim = kv.get(f'{arch}.expert_shared_feed_forward_length', kv.get(f'{arch}.expert_shared_count', 0) * kv.get(f'{arch}.expert_feed_forward_length', 0))
-    shared_expert_gate = any('.ffn_gate_inp_shexp.weight' in k for k in state_dict)
+    shared_expert_gate = shared_expert_dim > 0 and f'blk.{leading_dense_blocks}.ffn_gate_inp_shexp.weight' in state_dict
     config = TransformerConfig(
       num_blocks=kv[f'{arch}.block_count'], dim=kv[f'{arch}.embedding_length'],
       hidden_dim=kv.get(f'{arch}.expert_feed_forward_length', kv[f'{arch}.feed_forward_length']),
@@ -339,8 +351,8 @@ class Transformer:
       v_head_dim=kv.get(f'{arch}.attention.value_length_mla', 0),
       shared_expert_dim=shared_expert_dim,
       shared_expert_gate=shared_expert_gate,
-      leading_dense_blocks=kv.get(f'{arch}.leading_dense_block_count', 0),
-      dense_hidden_dim=kv.get(f'{arch}.feed_forward_length', 0) if kv.get(f'{arch}.leading_dense_block_count', 0) else 0,
+      leading_dense_blocks=leading_dense_blocks,
+      dense_hidden_dim=kv.get(f'{arch}.feed_forward_length', 0) if leading_dense_blocks else 0,
       routed_scaling_factor=kv.get(f'{arch}.expert_weights_scale', 1.0))
     model = Transformer(config)
     nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused
