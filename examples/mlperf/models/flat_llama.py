@@ -25,14 +25,11 @@ FP8_GRAD_DTYPE = dtypes.fp8e5m2
 FP8_MAX = 448.0
 
 def quantize_fp8(x:Tensor, amax_state:Tensor|None=None):
-  if amax_state is not None:
-    scale = FP8_MAX / (amax_state + 1e-8)
-    amax_state.assign(x.abs().max().detach())
-  else:
-    scale = FP8_MAX / (x.abs().max().detach() + 1e-8)
+  new_amax = x.abs().max().detach()
+  scale = FP8_MAX / ((amax_state or new_amax) + 1e-8)
   x_scaled = x * scale
   x_clamped = x_scaled + (x_scaled.detach().clamp(-FP8_MAX, FP8_MAX) - x_scaled.detach())  # STE
-  return x_clamped.cast(FP8_DTYPE), scale.float().reciprocal()
+  return x_clamped.cast(FP8_DTYPE), scale.float().reciprocal(), new_amax
 
 def matmul(x:Tensor, w:Tensor, fp8=FP8, amax_x:Tensor|None=None, amax_w:Tensor|None=None) -> Tensor:
   if not fp8:
