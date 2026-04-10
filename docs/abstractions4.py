@@ -10,6 +10,7 @@ from tinygrad.dtype import AddrSpace, dtypes
 SZ = 32*1024 if getenv("MOCKGPU") else 1024*1024*1024
 
 if __name__ == "__main__":
+  correct = None
   # First define a Tensor and realize it. We will focus on a 1GB sum kernel on RDNA3
   a = (Tensor.randn(SZ) if getenv("RAND") else Tensor.ones(SZ)).contiguous().realize()
 
@@ -21,51 +22,52 @@ if __name__ == "__main__":
     print(f"computed in {GlobalCounters.time_sum_s*1000:.2f} ms, {(a.nbytes()/1e9)/GlobalCounters.time_sum_s:.2f} GB/s")
     return out
 
-  # *****
-  # This is the high level tinygrad way.
-  # Note that this is split into multiple kernels for speed.
+  if not getenv("ASM"):
+    # *****
+    # This is the high level tinygrad way.
+    # Note that this is split into multiple kernels for speed.
 
-  correct = eval_harness("basic kernel", lambda x: x.sum())
+    correct = eval_harness("basic kernel", lambda x: x.sum())
 
-  # *****
-  # Now we get to the lower abstraction layers.
-  # You can write a kernel in UOps, and it's 2.5x faster.
+    # *****
+    # Now we get to the lower abstraction layers.
+    # You can write a kernel in UOps, and it's 2.5x faster.
 
-  # This GPU has 32 CUs, keep them all busy
-  CU_COUNT = 32
-  def custom_sum(out:UOp, buf:UOp) -> UOp:
-    LCLS = 256
-    buf = buf.reshape(CU_COUNT, -1, LCLS)
+    # This GPU has 32 CUs, keep them all busy
+    CU_COUNT = 32
+    def custom_sum(out:UOp, buf:UOp) -> UOp:
+      LCLS = 256
+      buf = buf.reshape(CU_COUNT, -1, LCLS)
 
-    glbl = UOp.range(CU_COUNT, 0, AxisType.GLOBAL)
-    lane = UOp.range(LCLS, 1, AxisType.LOCAL)
+      glbl = UOp.range(CU_COUNT, 0, AxisType.GLOBAL)
+      lane = UOp.range(LCLS, 1, AxisType.LOCAL)
 
-    # accumulate the globals into a per lane accumulator
-    reduce_loop = UOp.range(buf.shape[1], 2, AxisType.REDUCE)
-    acc = UOp.placeholder((1,), dtypes.float, slot=6, addrspace=AddrSpace.REG)
-    acc = acc.after(acc.store(0))
-    acc = acc.after(acc[0].store(acc.after(reduce_loop)[0] + buf[glbl, reduce_loop, lane]).end(reduce_loop))
+      # accumulate the globals into a per lane accumulator
+      reduce_loop = UOp.range(buf.shape[1], 2, AxisType.REDUCE)
+      acc = UOp.placeholder((1,), dtypes.float, slot=6, addrspace=AddrSpace.REG)
+      acc = acc.after(acc.store(0))
+      acc = acc.after(acc[0].store(acc.after(reduce_loop)[0] + buf[glbl, reduce_loop, lane]).end(reduce_loop))
 
-    # store all the per lane accumulators to LOCAL
-    local_accs = UOp.placeholder((LCLS,), dtypes.float, slot=0, addrspace=AddrSpace.LOCAL)
-    local_accs = local_accs.after(local_accs[lane].store(acc[0]).barrier())
+      # store all the per lane accumulators to LOCAL
+      local_accs = UOp.placeholder((LCLS,), dtypes.float, slot=0, addrspace=AddrSpace.LOCAL)
+      local_accs = local_accs.after(local_accs[lane].store(acc[0]).barrier())
 
-    # accumulate LOCALs into a single per CU accumulator
-    late_reduce_loop = UOp.range(LCLS, 3, AxisType.REDUCE)
-    acc2 = UOp.placeholder((1,), dtypes.float, slot=7, addrspace=AddrSpace.REG)
-    acc2 = acc2.after(acc2.store(0))
-    acc2 = acc2.after(acc2[0].store(acc2.after(late_reduce_loop)[0] + local_accs[late_reduce_loop]).end(late_reduce_loop))[0]
+      # accumulate LOCALs into a single per CU accumulator
+      late_reduce_loop = UOp.range(LCLS, 3, AxisType.REDUCE)
+      acc2 = UOp.placeholder((1,), dtypes.float, slot=7, addrspace=AddrSpace.REG)
+      acc2 = acc2.after(acc2.store(0))
+      acc2 = acc2.after(acc2[0].store(acc2.after(late_reduce_loop)[0] + local_accs[late_reduce_loop]).end(late_reduce_loop))[0]
 
-    # store (NOTE: since the address doesn't depend on the warp, this will be automatically gated)
-    return out[glbl].store(acc2).end(lane, glbl).sink(arg=KernelInfo(opts_to_apply=()))
+      # store (NOTE: since the address doesn't depend on the warp, this will be automatically gated)
+      return out[glbl].store(acc2).end(lane, glbl).sink(arg=KernelInfo(opts_to_apply=()))
 
-  eval_harness("custom UOp kernel", lambda x: Tensor.empty(CU_COUNT).custom_kernel(x, fxn=custom_sum)[0].sum(), check=correct)
+    eval_harness("custom UOp kernel", lambda x: Tensor.empty(CU_COUNT).custom_kernel(x, fxn=custom_sum)[0].sum(), check=correct)
 
-  # *****
-  # You can also BEAM search stock tinygrad for a faster kernel.
-  # This does even better than the custom kernel in this simple case.
+    # *****
+    # You can also BEAM search stock tinygrad for a faster kernel.
+    # This does even better than the custom kernel in this simple case.
 
-  with Context(BEAM=2): eval_harness("BEAMed kernel", lambda x: x.sum(), check=correct)
+    with Context(BEAM=2): eval_harness("BEAMed kernel", lambda x: x.sum(), check=correct)
 
   # *****
   # Though if you really want to go crazy with speed, you can code in assembly
@@ -117,33 +119,38 @@ if __name__ == "__main__":
     k.emit(VOPD(VOPDOp.V_DUAL_MOV_B32, VOPDOp.V_DUAL_MOV_B32, vdstx=v[4], vdsty=v[5], srcx0=0, srcy0=0))
     k.emit(VOPD(VOPDOp.V_DUAL_MOV_B32, VOPDOp.V_DUAL_MOV_B32, vdstx=v[6], vdsty=v[7], srcx0=0, srcy0=0))
 
-    LOAD_UNROLL = 16
-    k.emit(s_mov_b32(s[S_LOOP_CTR], buf.numel()//(CU_COUNT*LANES*4*LOAD_UNROLL) - 1))
+    def emit_loads(base_vreg, reg_len):
+      assert reg_len%4 == 0
+      for i in range(reg_len//4):
+        offset = i*LANES*16
+        assert offset < 16384
+        k.emit(global_load_b128(vdst=v[base_vreg+i*4:base_vreg+i*4+3], addr=v[offset//4096], saddr=s[6:7], offset=offset%4096))
+      k.emit(s_add_u32(s[6], s[6], reg_len * LANES * 4))
+      k.emit(s_addc_u32(s[7], s[7], 0))
+
+    def emit_reduce_to_4567(base_vreg, reg_len):
+      assert reg_len%4 == 0
+      reg_len //= 4
+      while reg_len > 1:
+        half = reg_len // 2
+        for j in range(half):
+          a, b = base_vreg + j*4, base_vreg + (j+half)*4
+          # v[a+0](bank0) += v[b+2](bank2), v[a+1](bank1) += v[b+3](bank3) — src0 and src1 on different banks
+          k.emit(VOPD(VOPDOp.V_DUAL_ADD_F32, VOPDOp.V_DUAL_ADD_F32, vdstx=v[a], vdsty=v[a+1], srcx0=v[a], vsrcx1=v[b+2], srcy0=v[a+1], vsrcy1=v[b+3]))
+          # v[a+2](bank2) += v[b+0](bank0), v[a+3](bank3) += v[b+1](bank1) — src0 and src1 on different banks
+          k.emit(VOPD(VOPDOp.V_DUAL_ADD_F32, VOPDOp.V_DUAL_ADD_F32, vdstx=v[a+2], vdsty=v[a+3], srcx0=v[a+2], vsrcx1=v[b], srcy0=v[a+3], vsrcy1=v[b+1]))
+        reg_len = half
+      k.emit(VOPD(VOPDOp.V_DUAL_ADD_F32, VOPDOp.V_DUAL_ADD_F32, vdstx=v[4], vdsty=v[5], srcx0=v[4], vsrcx1=v[base_vreg], srcy0=v[5], vsrcy1=v[base_vreg+1]))
+      k.emit(VOPD(VOPDOp.V_DUAL_ADD_F32, VOPDOp.V_DUAL_ADD_F32, vdstx=v[6], vdsty=v[7], srcx0=v[6], vsrcx1=v[base_vreg+2], srcy0=v[7], vsrcy1=v[base_vreg+3]))
+
+    LOAD_UNROLL = 64
+    total_batches = buf.numel()//(CU_COUNT*LANES*LOAD_UNROLL)
+    k.emit(s_mov_b32(s[S_LOOP_CTR], total_batches-1))
 
     k.label('LOOP')
-    # issue all loads (v[8:71]), offset field is signed 13-bit (max 4095), so bump base halfway
-    for i in range(LOAD_UNROLL):
-      offset = i*LANES*16
-      assert offset < 16384
-      k.emit(global_load_b128(vdst=v[8+i*4:11+i*4], addr=v[offset//4096], saddr=s[6:7], offset=offset%4096))
-    k.emit(s_add_u32(s[6], s[6], LOAD_UNROLL * LANES * 16))
-    k.emit(s_addc_u32(s[7], s[7], 0))
+    emit_loads(8, reg_len=LOAD_UNROLL)
     k.waitcnt(vm=0)
-    # tree reduce loads into v[8:11], cross float positions so srcx0 (bank 0,1) and vsrcx1 (bank 2,3) avoid bank conflicts
-    n = LOAD_UNROLL
-    while n > 1:
-      half = n // 2
-      for j in range(half):
-        a, b = 8 + j*4, 8 + (j+half)*4
-        # v[a+0](bank0) += v[b+2](bank2), v[a+1](bank1) += v[b+3](bank3)
-        k.emit(VOPD(VOPDOp.V_DUAL_ADD_F32, VOPDOp.V_DUAL_ADD_F32, vdstx=v[a], vdsty=v[a+1], srcx0=v[a], vsrcx1=v[b+2], srcy0=v[a+1], vsrcy1=v[b+3]))
-        # v[a+2](bank2) += v[b+0](bank0), v[a+3](bank3) += v[b+1](bank1)
-        k.emit(VOPD(VOPDOp.V_DUAL_ADD_F32, VOPDOp.V_DUAL_ADD_F32, vdstx=v[a+2], vdsty=v[a+3], srcx0=v[a+2], vsrcx1=v[b], srcy0=v[a+3], vsrcy1=v[b+1]))
-      n = half
-    # accumulate into v[4:7]
-    k.emit(VOPD(VOPDOp.V_DUAL_ADD_F32, VOPDOp.V_DUAL_ADD_F32, vdstx=v[4], vdsty=v[5], srcx0=v[4], vsrcx1=v[8], srcy0=v[5], vsrcy1=v[9]))
-    k.emit(VOPD(VOPDOp.V_DUAL_ADD_F32, VOPDOp.V_DUAL_ADD_F32, vdstx=v[6], vdsty=v[7], srcx0=v[6], vsrcx1=v[10], srcy0=v[7], vsrcy1=v[11]))
-
+    emit_reduce_to_4567(8, reg_len=LOAD_UNROLL)
     k.emit(s_sub_u32(s[S_LOOP_CTR], s[S_LOOP_CTR], 1))
     k.emit(s_cbranch_scc0(), target='LOOP')
 
@@ -166,7 +173,8 @@ if __name__ == "__main__":
 
     k.emit(s_sendmsg(simm16=3))  # DEALLOC_VGPRS
     k.emit(s_endpgm())
-    return k.finalize(UOp.sink(UOp.special(CU_COUNT, 'gidx0'), UOp.special(LANES, 'lidx0'), out, buf, arg=KernelInfo(opts_to_apply=())))
+    return k.finalize(UOp.sink(UOp.special(CU_COUNT, 'gidx0'), UOp.special(LANES, 'lidx0'), out, buf,
+                               arg=KernelInfo(name="asm_reduce", opts_to_apply=())))
 
   out = Tensor.zeros(1,).contiguous().realize()
   eval_harness("RDNA3 assembly kernel", lambda x: out.custom_kernel(x, fxn=asm_sum)[0], check=correct)
