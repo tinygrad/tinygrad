@@ -18,7 +18,7 @@ def eval_harness(name, tensor, fxn, check=None):
 
 SZ = 32*1024 if getenv("MOCKGPU") else 1024*1024*1024
 
-def example_2_hip(a:Tensor):
+def example_2_hip(a:Tensor, correct):
   GLOBALS = 1024
   THREADS = 256
   def hip_reduce_sum(out:UOp, buf:UOp) -> UOp:
@@ -70,7 +70,7 @@ def example_2_hip(a:Tensor):
                 UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=code), UOp(Ops.BINARY, arg=lib)))
   eval_harness("HIP kernel", a, lambda x: Tensor.empty(GLOBALS).custom_kernel(x, fxn=hip_reduce_sum)[0].sum(), check=correct)
 
-def example_3_custom_uop(a:Tensor):
+def example_3_custom_uop(a:Tensor, correct):
   # This GPU has 32 CUs, keep them all busy
   CU_COUNT = 32
   def custom_sum(out:UOp, buf:UOp) -> UOp:
@@ -101,7 +101,7 @@ def example_3_custom_uop(a:Tensor):
 
   eval_harness("custom UOp kernel", a, lambda x: Tensor.empty(CU_COUNT).custom_kernel(x, fxn=custom_sum)[0].sum(), check=correct)
 
-def example_5_custom_assembly(a:Tensor):
+def example_5_custom_assembly(a:Tensor, correct):
   # Kernel class copied from amd_asm_matmul
   class Kernel:
     def __init__(self, arch='gfx1100'): self.instructions, self.labels, self.pos, self.arch = [], {}, 0, arch
@@ -230,13 +230,13 @@ if __name__ == "__main__":
     # *****
     # You can import kernels from CUDA/HIP/Metal.
     # ChatGPT is great at writing these Kernel
-    example_2_hip(a)
+    example_2_hip(a, correct)
 
   if 3 in examples:
     # *****
     # Now we get to the lower abstraction layers of tinygrad.
     # You can write a kernel in UOps, and it's 2.5x faster than normal.
-    example_3_custom_uop(a)
+    example_3_custom_uop(a, correct)
 
   if 4 in examples:
     # *****
@@ -249,4 +249,4 @@ if __name__ == "__main__":
     # *****
     # If you really want to go crazy with speed, you can code in assembly.
     # There's not too much to gain here over BEAM, but it's a few percent faster.
-    example_5_custom_assembly(a)
+    example_5_custom_assembly(a, correct)
