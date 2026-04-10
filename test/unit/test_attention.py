@@ -32,7 +32,7 @@ class TestAttention(unittest.TestCase):
     precompute_freqs_cis.cache_clear()
     block.cache_kv = Tensor.empty(2, 1, 1, config.max_context, dim, device=x.device)
     block.freqs_cis = precompute_freqs_cis(rope_dim, config.max_context, config.rope_theta)
-    block._attention(x, 0).realize()
+    block._attention(x_norm, 0).realize()
 
     expected = apply_rope_new(k[..., :rope_dim], block.freqs_cis[:seqlen]).cat(k[..., rope_dim:], dim=-1)
     np.testing.assert_allclose(block.cache_kv[0, :, :, :seqlen, :].numpy(), expected.numpy(), rtol=1e-5, atol=1e-5)

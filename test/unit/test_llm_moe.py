@@ -25,10 +25,10 @@ class TestMoEFeedForward(unittest.TestCase):
 
     # input of ones -> after norm still ~ones -> experts 0,2 selected -> weighted sum of silu outputs
     h = Tensor.ones(1, 1, dim)
-    out = block._feed_forward(h)
+    out = block._feed_forward(block.ffn_norm(h))
 
-    # expected: residual + moe_output ≈ 1 + avg(silu(1), silu(3))
-    expected = 1 + (Tensor([1.0]).silu().item() + Tensor([3.0]).silu().item()) / 2
+    # expected moe_output ≈ avg(silu(1), silu(3))
+    expected = (Tensor([1.0]).silu().item() + Tensor([3.0]).silu().item()) / 2
     np.testing.assert_allclose(out.numpy()[0, 0, 0], expected, rtol=1e-2)
 
   def test_moe_feed_forward_batched(self):
@@ -46,10 +46,10 @@ class TestMoEFeedForward(unittest.TestCase):
 
     # test with BS=2, T=3
     h = Tensor.ones(2, 3, dim)
-    out = block._feed_forward(h)
+    out = block._feed_forward(block.ffn_norm(h))
 
     # all outputs should match the BS=1 expected value
-    expected = 1 + (Tensor([1.0]).silu().item() + Tensor([3.0]).silu().item()) / 2
+    expected = (Tensor([1.0]).silu().item() + Tensor([3.0]).silu().item()) / 2
     np.testing.assert_allclose(out.numpy(), expected, rtol=1e-2)
 
   def test_moe_feed_forward_norm_topk_prob(self):
@@ -65,9 +65,9 @@ class TestMoEFeedForward(unittest.TestCase):
     block.ffn_norm.weight = Tensor.ones(dim)
 
     h = Tensor.ones(1, 1, dim)
-    out = block._feed_forward(h)
+    out = block._feed_forward(block.ffn_norm(h))
 
-    expected = 1 + (Tensor([1.0]).silu().item() + Tensor([3.0]).silu().item()) / 2
+    expected = (Tensor([1.0]).silu().item() + Tensor([3.0]).silu().item()) / 2
     np.testing.assert_allclose(out.numpy()[0, 0, 0], expected, rtol=1e-2)
 
   def test_moe_feed_forward_shared_expert(self):
@@ -87,11 +87,11 @@ class TestMoEFeedForward(unittest.TestCase):
     block.ffn_norm.weight = Tensor.ones(dim)
 
     h = Tensor.ones(1, 1, dim)
-    out = block._feed_forward(h)
+    out = block._feed_forward(block.ffn_norm(h))
 
     moe_expected = (Tensor([1.0]).silu().item() + Tensor([3.0]).silu().item()) / 2
     shared_expected = Tensor([2.0]).silu().item() * 0.5
-    expected = 1 + moe_expected + shared_expected
+    expected = moe_expected + shared_expected
     np.testing.assert_allclose(out.numpy(), expected, rtol=1e-2)
 
 if __name__ == '__main__':
