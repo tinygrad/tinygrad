@@ -18,7 +18,59 @@ def eval_harness(name, tensor, fxn, check=None):
 
 SZ = 32*1024 if getenv("MOCKGPU") else 1024*1024*1024
 
-def example_2_custom_uop(a:Tensor):
+def example_2_hip(a:Tensor):
+  GLOBALS = 1024
+  THREADS = 256
+  def hip_reduce_sum(out:UOp, buf:UOp) -> UOp:
+    CHUNK = SZ // (GLOBALS * THREADS)
+    # NOTE: tinygrad doesn't populate HIP hidden kernargs, so blockDim.x/gridDim.x read as 0.
+    # We hardcode block/grid sizes as constexpr to avoid any dependency on those builtins.
+    code = f"""
+    #include <hip/hip_runtime.h>
+    constexpr unsigned int BLOCK = {THREADS};
+    constexpr unsigned int CHUNK = {CHUNK};
+    extern "C" __global__ void hip_reduce_sum_kernel(float* __restrict__ block_sums, const float* __restrict__ x) {{
+      __shared__ float sdata[BLOCK];
+
+      unsigned int tid = threadIdx.x;
+      unsigned int gid = blockIdx.x * BLOCK + tid;
+
+      // Each thread sums CHUNK consecutive elements from its own region
+      float sum = 0.0f;
+      const float* base = x + gid * CHUNK;
+      #pragma unroll 16
+      for (unsigned int k = 0; k < CHUNK; k++) {{
+        sum += base[k];
+      }}
+
+      sdata[tid] = sum;
+      __syncthreads();
+
+      // Block reduction in shared memory
+      for (unsigned int s = BLOCK / 2; s > 0; s >>= 1) {{
+        if (tid < s) {{
+          sdata[tid] += sdata[tid + s];
+        }}
+        __syncthreads();
+      }}
+
+      // One partial sum per block
+      if (tid == 0) {{
+        block_sums[blockIdx.x] = sdata[0];
+      }}
+    }}"""
+
+    # TODO: remove the need for the compiler here, you should just be able to remove Ops.BINARY
+    from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
+    lib = HIPCCCompiler(Device[Device.DEFAULT].renderer.target.arch, []).compile_cached(code)
+    # the sink specifies the GLOBAL and LOCAL sizes, along with the input buffers and name
+    sink = UOp.sink(UOp.special(GLOBALS, 'gidx0'), UOp.special(THREADS, 'lidx0'), out, buf,
+                    arg=KernelInfo(name="hip_reduce_sum_kernel"))
+    return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=Device.DEFAULT),
+                UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=code), UOp(Ops.BINARY, arg=lib)))
+  eval_harness("HIP kernel", a, lambda x: Tensor.empty(GLOBALS).custom_kernel(x, fxn=hip_reduce_sum)[0].sum(), check=correct)
+
+def example_3_custom_uop(a:Tensor):
   # This GPU has 32 CUs, keep them all busy
   CU_COUNT = 32
   def custom_sum(out:UOp, buf:UOp) -> UOp:
@@ -48,50 +100,6 @@ def example_2_custom_uop(a:Tensor):
     return out[glbl].store(acc2).end(lane, glbl).sink(arg=KernelInfo(opts_to_apply=()))
 
   eval_harness("custom UOp kernel", a, lambda x: Tensor.empty(CU_COUNT).custom_kernel(x, fxn=custom_sum)[0].sum(), check=correct)
-
-def example_3_hip(a:Tensor):
-
-  GLOBALS = 1024
-  THREADS = 256
-  def hip_reduce_sum(out:UOp, buf:UOp) -> UOp:
-    code = f"""
-    #include <hip/hip_runtime.h>
-    extern "C" __global__ void reduce_sum_kernel(float* __restrict__ block_sums, const float* __restrict__ x) {{
-      __shared__ float sdata[{THREADS}];
-
-      unsigned int tid = threadIdx.x;
-      unsigned int i = blockIdx.x * blockDim.x + threadIdx.x;
-      unsigned int stride = blockDim.x * gridDim.x;
-
-      // Each thread accumulates multiple elements
-      float sum = 0.0f;
-      for (; i < {SZ}; i += stride) {{
-        sum += x[i];
-      }}
-
-      sdata[tid] = sum;
-      __syncthreads();
-
-      // Block reduction in shared memory
-      for (unsigned int s = blockDim.x / 2; s > 0; s >>= 1) {{
-        if (tid < s) {{
-          sdata[tid] += sdata[tid + s];
-        }}
-        __syncthreads();
-      }}
-
-      // One partial sum per block
-      if (tid == 0) {{
-        block_sums[blockIdx.x] = sdata[0];
-      }}
-    }}"""
-
-    from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
-    lib = HIPCCCompiler(Device[Device.DEFAULT].renderer.target.arch, []).compile_cached(code)
-    sink = UOp.sink(UOp.special(GLOBALS, 'gidx0'), UOp.special(THREADS, 'lidx0'), out, buf, arg=KernelInfo(name="reduce_sum_kernel"))
-    return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=Device.DEFAULT),
-                UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=code), UOp(Ops.BINARY, arg=lib)))
-  eval_harness("HIP kernel", a, lambda x: Tensor.empty(GLOBALS).custom_kernel(x, fxn=hip_reduce_sum)[0].sum(), check=correct)
 
 def example_5_custom_assembly(a:Tensor):
   # Kernel class copied from amd_asm_matmul
@@ -220,23 +228,25 @@ if __name__ == "__main__":
 
   if 2 in examples:
     # *****
-    # Now we get to the lower abstraction layers.
-    # You can write a kernel in UOps, and it's 2.5x faster.
-    example_2_custom_uop(a)
+    # You can import kernels from CUDA/HIP/Metal.
+    # ChatGPT is great at writing these Kernel
+    example_2_hip(a)
 
   if 3 in examples:
     # *****
-    # You can import kernels from CUDA/HIP/Metal
-    example_3_hip(a)
+    # Now we get to the lower abstraction layers of tinygrad.
+    # You can write a kernel in UOps, and it's 2.5x faster than normal.
+    example_3_custom_uop(a)
 
   if 4 in examples:
     # *****
     # You can also BEAM search stock tinygrad for a faster kernel.
-    # This does even better than the custom kernel in this simple case.
+    # This does even better than all the kernels to date in this simple case.
     with Context(BEAM=2):
       eval_harness("BEAMed kernel", a, lambda x: x.sum(), check=correct)
 
   if 5 in examples:
     # *****
-    # If you really want to go crazy with speed, you can code in assembly
+    # If you really want to go crazy with speed, you can code in assembly.
+    # There's not too much to gain here over BEAM, but it's a few percent faster.
     example_5_custom_assembly(a)
