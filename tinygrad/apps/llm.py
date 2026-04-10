@@ -96,6 +96,9 @@ def apply_rope(x:Tensor, freqs_cis:Tensor) -> Tensor:
   x1, x2 = x.chunk(2, dim=-1)
   return (x1 * cos - x2 * sin).cat(x2 * cos + x1 * sin, dim=-1)
 
+def apply_rope_interleaved(x:Tensor, freqs_cis:Tensor) -> Tensor:
+  return apply_rope(x.rearrange("... (d two) -> ... (two d)", two=2), freqs_cis).rearrange("... (two d) -> ... (d two)", two=2)
+
 def pairwise_topk(x: Tensor, k: int) -> tuple[Tensor, Tensor]:
   n = x.shape[-1]
   vals = Tensor.arange(n).reshape(1,1,n).cast(x.dtype).expand(x.shape)
@@ -126,6 +129,7 @@ class TransformerConfig:
   qk_rope_head_dim: int = 0
   v_head_dim: int = 0
   shared_expert_dim: int = 0
+  shared_expert_gate: bool = True
   leading_dense_blocks: int = 0
   dense_hidden_dim: int = 0
   routed_scaling_factor: float = 1.0
@@ -149,7 +153,7 @@ class FFNBlock:
         self.ffn_gate_shexp = nn.Linear(config.dim, config.shared_expert_dim, bias=False)
         self.ffn_up_shexp = nn.Linear(config.dim, config.shared_expert_dim, bias=False)
         self.ffn_down_shexp = nn.Linear(config.shared_expert_dim, config.dim, bias=False)
-        self.ffn_gate_inp_shexp = {"weight": Tensor.zeros(config.dim)}
+        if config.shared_expert_gate: self.ffn_gate_inp_shexp = {"weight": Tensor.zeros(config.dim)}
     else:
       self.ffn_gate    = nn.Linear(config.dim, config.hidden_dim, bias=False)
       self.ffn_up      = nn.Linear(config.dim, config.hidden_dim, bias=False)
@@ -171,8 +175,9 @@ class FFNBlock:
       x_down = self.ffn_down_exps(sel, self.ffn_gate_exps(sel, h).silu() * self.ffn_up_exps(sel, h))  # (B, T, k, D)
       out = (x_down * probs.unsqueeze(-1)).sum(axis=2)  # (B, T, D)
       if hasattr(self, 'ffn_gate_shexp'):
-        shared_gate = (x * self.ffn_gate_inp_shexp["weight"]).sum(axis=-1, keepdim=True).sigmoid()
-        out = out + self.ffn_down_shexp(self.ffn_gate_shexp(x).silu().contiguous() * self.ffn_up_shexp(x)) * shared_gate
+        shexp = self.ffn_down_shexp(self.ffn_gate_shexp(x).silu().contiguous() * self.ffn_up_shexp(x))
+        if hasattr(self, 'ffn_gate_inp_shexp'): shexp = shexp * (x * self.ffn_gate_inp_shexp["weight"]).sum(axis=-1, keepdim=True).sigmoid()
+        out = out + shexp
       return out
     # TODO: remove the need for this contiguous
     return self.ffn_down(self.ffn_gate(x).silu().contiguous() * self.ffn_up(x))
@@ -215,16 +220,13 @@ class TransformerBlock(FFNBlock):
     c = self.config
 
     if c.kv_lora_rank > 0:
-      def rope_interleaved(x, freqs):
-        return apply_rope(x.rearrange("... (d two) -> ... (two d)", two=2), freqs).rearrange("... (two d) -> ... (d two)", two=2)
       q = self.attn_q(x).reshape(B, T, c.n_heads, c.qk_nope_head_dim + c.qk_rope_head_dim).transpose(1, 2)
       q_nope, q_rope = q[..., :c.qk_nope_head_dim], q[..., c.qk_nope_head_dim:]
-      q_rope = rope_interleaved(q_rope, self.freqs_cis[start_pos:start_pos+T])
-      q_nope = q_nope @ self.attn_k_b_weight.transpose(-1, -2)
+      q = (q_nope @ self.attn_k_b_weight.transpose(-1, -2)).cat(apply_rope_interleaved(q_rope, self.freqs_cis[start_pos:start_pos+T]), dim=-1)
 
       kv_a = self.attn_kv_a_mqa(x)
       c_kv, k_rope = self.attn_kv_a_norm(kv_a[..., :c.kv_lora_rank]), kv_a[..., c.kv_lora_rank:]
-      k_rope = rope_interleaved(k_rope.reshape(B, T, 1, c.qk_rope_head_dim).transpose(1, 2), self.freqs_cis[start_pos:start_pos+T])
+      k_rope = apply_rope_interleaved(k_rope.reshape(B, T, 1, c.qk_rope_head_dim).transpose(1, 2), self.freqs_cis[start_pos:start_pos+T])
 
       k_store = c_kv.reshape(B, 1, T, c.kv_lora_rank).cat(k_rope.reshape(B, 1, T, c.qk_rope_head_dim), dim=-1)
       v_store = c_kv.reshape(B, 1, T, c.kv_lora_rank).pad((0, c.qk_rope_head_dim))
@@ -233,10 +235,11 @@ class TransformerBlock(FFNBlock):
       k = assigned[0, :, :, 0:start_pos+T, :]
       v = assigned[1, :, :, 0:start_pos+T, :c.kv_lora_rank]
 
-      q = q_nope.cat(q_rope, dim=-1)
       mask = Tensor.full((1, 1, T, start_pos+T), float("-inf"), dtype=x.dtype, device=x.device).triu(start_pos+1) if resolve(T != 1) else None
       scale = 1.0 / (c.qk_nope_head_dim + c.qk_rope_head_dim) ** 0.5
-      attn = (q @ k.transpose(-1, -2) * scale + mask if mask is not None else q @ k.transpose(-1, -2) * scale).softmax(-1)
+      attn = q @ k.transpose(-1, -2) * scale
+      if mask is not None: attn = attn + mask
+      attn = attn.softmax(-1)
       attn = ((attn @ v) @ self.attn_v_b_weight.transpose(-1, -2)).transpose(1, 2).reshape(B, T, -1)
       return self.attn_output(attn)
 
@@ -318,6 +321,8 @@ class Transformer:
     if kv_lora_rank:
       renames = {'attn_k_b.weight': 'attn_k_b_weight', 'attn_v_b.weight': 'attn_v_b_weight', 'exp_probs_b.bias': 'exp_probs_b_bias'}
       state_dict = {functools.reduce(lambda k, r: k.replace(*r), renames.items(), k): v for k, v in state_dict.items()}
+    shared_expert_dim = kv.get(f'{arch}.expert_shared_feed_forward_length', kv.get(f'{arch}.expert_shared_count', 0) * kv.get(f'{arch}.expert_feed_forward_length', 0))
+    shared_expert_gate = any('.ffn_gate_inp_shexp.weight' in k for k in state_dict)
     config = TransformerConfig(
       num_blocks=kv[f'{arch}.block_count'], dim=kv[f'{arch}.embedding_length'],
       hidden_dim=kv.get(f'{arch}.expert_feed_forward_length', kv[f'{arch}.feed_forward_length']),
@@ -332,7 +337,8 @@ class Transformer:
       qk_nope_head_dim=kv.get(f'{arch}.attention.key_length_mla', 0) - kv.get(f'{arch}.rope.dimension_count', 0) if kv_lora_rank else 0,
       qk_rope_head_dim=kv.get(f'{arch}.rope.dimension_count', 0) if kv_lora_rank else 0,
       v_head_dim=kv.get(f'{arch}.attention.value_length_mla', 0),
-      shared_expert_dim=kv.get(f'{arch}.expert_shared_feed_forward_length', kv.get(f'{arch}.expert_shared_count', 0) * kv.get(f'{arch}.expert_feed_forward_length', 0)),
+      shared_expert_dim=shared_expert_dim,
+      shared_expert_gate=shared_expert_gate,
       leading_dense_blocks=kv.get(f'{arch}.leading_dense_block_count', 0),
       dense_hidden_dim=kv.get(f'{arch}.feed_forward_length', 0) if kv.get(f'{arch}.leading_dense_block_count', 0) else 0,
       routed_scaling_factor=kv.get(f'{arch}.expert_weights_scale', 1.0))

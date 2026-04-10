@@ -2,13 +2,18 @@
 import unittest
 import numpy as np
 from tinygrad import Tensor
-from tinygrad.apps.llm import Transformer, TransformerConfig
+from tinygrad.apps.llm import Transformer, TransformerConfig, apply_rope_interleaved
 
 class TestMLA(unittest.TestCase):
   def _make_config(self, max_context=32):
     return TransformerConfig(num_blocks=1, dim=64, hidden_dim=128, n_heads=4, n_kv_heads=1,
       norm_eps=1e-5, vocab_size=100, head_dim=0, rope_theta=10000.0, rope_dim=0, max_context=max_context,
       kv_lora_rank=16, qk_nope_head_dim=8, qk_rope_head_dim=8, v_head_dim=8)
+
+  def _make_moe_config(self, shared_expert_gate=True):
+    return TransformerConfig(num_blocks=1, dim=64, hidden_dim=128, n_heads=4, n_kv_heads=1, norm_eps=1e-5, vocab_size=100,
+      head_dim=0, rope_theta=10000.0, rope_dim=0, max_context=32, num_experts=4, num_experts_per_tok=2,
+      kv_lora_rank=16, qk_nope_head_dim=8, qk_rope_head_dim=8, v_head_dim=8, shared_expert_dim=32, shared_expert_gate=shared_expert_gate)
 
   def test_mla_generate_diverse(self):
     """MLA model should generate more than 1 unique token."""
@@ -52,10 +57,7 @@ class TestMLA(unittest.TestCase):
   def test_mla_attention_matches_naive(self):
     """MLA absorbed attention should match naive (non-absorbed) MLA computation."""
     config = self._make_config(max_context=16)
-    from tinygrad.apps.llm import TransformerBlock, precompute_freqs_cis, apply_rope
-
-    def rope_interleaved(x, freqs):
-      return apply_rope(x.rearrange("... (d two) -> ... (two d)", two=2), freqs).rearrange("... (two d) -> ... (d two)", two=2)
+    from tinygrad.apps.llm import TransformerBlock, precompute_freqs_cis
 
     block = TransformerBlock(config)
     c = config
@@ -68,12 +70,12 @@ class TestMLA(unittest.TestCase):
     q = block.attn_q(x_norm).reshape(B, T, c.n_heads, c.qk_nope_head_dim + c.qk_rope_head_dim).transpose(1, 2)
     q_nope, q_rope = q[..., :c.qk_nope_head_dim], q[..., c.qk_nope_head_dim:]
     freqs = precompute_freqs_cis(c.qk_rope_head_dim, 16, c.rope_theta)
-    q_rope = rope_interleaved(q_rope, freqs[0:T])
+    q_rope = apply_rope_interleaved(q_rope, freqs[0:T])
 
     kv_a = block.attn_kv_a_mqa(x_norm)
     c_kv = block.attn_kv_a_norm(kv_a[..., :c.kv_lora_rank])
     k_rope = kv_a[..., c.kv_lora_rank:].reshape(B, T, 1, c.qk_rope_head_dim).transpose(1, 2)
-    k_rope = rope_interleaved(k_rope, freqs[0:T])
+    k_rope = apply_rope_interleaved(k_rope, freqs[0:T])
 
     # --- Naive (non-absorbed): expand K and V, do standard attention ---
     k_nope_naive = c_kv.unsqueeze(1) @ block.attn_k_b_weight  # (B, H, T, nope)
@@ -104,6 +106,14 @@ class TestMLA(unittest.TestCase):
     abs_np = out_abs.realize().numpy()
     np.testing.assert_allclose(naive_np, abs_np, atol=1e-4, rtol=1e-4,
       err_msg="Absorbed MLA should match naive MLA")
+
+  def test_shared_expert_gate_optional(self):
+    """DeepSeek2 shared experts should work without a separate shared gate weight."""
+    from tinygrad import nn
+    model = Transformer(self._make_moe_config(shared_expert_gate=False))
+    self.assertNotIn('blk.0.ffn_gate_inp_shexp.weight', nn.state.get_state_dict(model))
+    out = [t for _, t in zip(range(5), model.generate([1, 2, 3, 4]))]
+    self.assertEqual(len(out), 5)
 
 if __name__ == '__main__':
   unittest.main()
