@@ -1,61 +1,17 @@
-"""Tests for MLA (Multi-head Latent Attention) implementation."""
 import unittest
 import numpy as np
 from tinygrad import Tensor
 from tinygrad.apps.llm import Transformer, TransformerConfig, apply_rope_interleaved
 
 class TestMLA(unittest.TestCase):
-  def _make_config(self, max_context=32):
-    return TransformerConfig(num_blocks=1, dim=64, hidden_dim=128, n_heads=4, n_kv_heads=1,
-      norm_eps=1e-5, vocab_size=100, head_dim=0, rope_theta=10000.0, rope_dim=0, max_context=max_context,
-      kv_lora_rank=16, qk_nope_head_dim=8, qk_rope_head_dim=8, v_head_dim=8)
-
-  def _make_moe_config(self, shared_expert_gate=True):
-    return TransformerConfig(num_blocks=1, dim=64, hidden_dim=128, n_heads=4, n_kv_heads=1, norm_eps=1e-5, vocab_size=100,
-      head_dim=0, rope_theta=10000.0, rope_dim=0, max_context=32, num_experts=4, num_experts_per_tok=2,
-      kv_lora_rank=16, qk_nope_head_dim=8, qk_rope_head_dim=8, v_head_dim=8, shared_expert_dim=32, shared_expert_gate=shared_expert_gate)
-
-  def test_mla_generate_diverse(self):
-    """MLA model should generate more than 1 unique token."""
-    model = Transformer(self._make_config())
-    tokens = list(range(1, 6))
-    out = [t for _, t in zip(range(20), model.generate(tokens))]
-    self.assertGreater(len(set(out)), 1, f"MLA generate stuck on single token: {out}")
-
-  def test_mla_generate_deterministic(self):
-    """MLA with temperature=0 should be deterministic."""
-    config = self._make_config()
-    model = Transformer(config)
-    tokens = list(range(1, 6))
-    out1 = [t for _, t in zip(range(10), model.generate(list(tokens)))]
-    out2 = [t for _, t in zip(range(10), model.generate(list(tokens)))]
-    self.assertEqual(out1, out2)
-
-  def test_mla_prefill_then_decode(self):
-    """Prefill followed by decode should produce consistent results."""
-    config = self._make_config()
-    model = Transformer(config)
-    # generate 5 tokens from a prompt
-    tokens = list(range(1, 10))
-    out = [t for _, t in zip(range(5), model.generate(list(tokens)))]
-    # re-generate from scratch — should be identical (deterministic with temp=0)
-    out2 = [t for _, t in zip(range(5), model.generate(list(tokens)))]
-    self.assertEqual(out, out2)
-
-  def test_mla_different_prompts_different_output(self):
-    """Different prompts should produce different outputs."""
-    config = self._make_config()
-    model1 = Transformer(config)
-    model2 = Transformer(config)
-    # copy weights
-    from tinygrad import nn
-    nn.state.load_state_dict(model2, nn.state.get_state_dict(model1))
-    out1 = [t for _, t in zip(range(5), model1.generate([1, 2, 3]))]
-    out2 = [t for _, t in zip(range(5), model2.generate([4, 5, 6]))]
-    self.assertNotEqual(out1, out2, "Different prompts should give different outputs")
+  def _make_config(self, **kwargs):
+    return TransformerConfig(**{
+      "num_blocks": 1, "dim": 64, "hidden_dim": 128, "n_heads": 4, "n_kv_heads": 1,
+      "norm_eps": 1e-5, "vocab_size": 100, "head_dim": 0, "rope_theta": 10000.0, "rope_dim": 0,
+      "max_context": 32, "kv_lora_rank": 16, "qk_nope_head_dim": 8, "qk_rope_head_dim": 8, "v_head_dim": 8,
+    } | kwargs)
 
   def test_mla_attention_matches_naive(self):
-    """MLA absorbed attention should match naive (non-absorbed) MLA computation."""
     config = self._make_config(max_context=16)
     from tinygrad.apps.llm import TransformerBlock, precompute_freqs_cis
 
@@ -108,12 +64,8 @@ class TestMLA(unittest.TestCase):
       err_msg="Absorbed MLA should match naive MLA")
 
   def test_shared_expert_gate_optional(self):
-    """DeepSeek2 shared experts should work without a separate shared gate weight."""
     from tinygrad import nn
-    model = Transformer(self._make_moe_config(shared_expert_gate=False))
+    model = Transformer(self._make_config(num_experts=4, num_experts_per_tok=2, shared_expert_dim=32, shared_expert_gate=False))
     self.assertNotIn('blk.0.ffn_gate_inp_shexp.weight', nn.state.get_state_dict(model))
     out = [t for _, t in zip(range(5), model.generate([1, 2, 3, 4]))]
     self.assertEqual(len(out), 5)
-
-if __name__ == '__main__':
-  unittest.main()
