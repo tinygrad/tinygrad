@@ -612,7 +612,7 @@ async function renderProfiler(path, opts) {
       visible.length = 0;
       const trackHeight = rect(document.getElementById(k)).height;
       if (offsetY+trackHeight < visibleYStart || offsetY > visibleYEnd) continue;
-      const link0 = data.link?.[0]; const link1 = data.link?.[1]; highlightRect = focusedShape != null || link0 != null || link1 != null;
+      const link0 = data.link?.[0]; const link1 = data.link?.[1], highlightRect = focusedShape != null || data.link != null;
       if (eventType === EventTypes.BUF) { // generic polygon
         for (const e of shapes) {
           if (e.x[0]>et || e.x.at(-1)<st) continue;
@@ -639,9 +639,10 @@ async function renderProfiler(path, opts) {
           visible.push({ y0:y, y1:y+e.height, x0:x, x1:x+width, arg:e.arg });
           ctx.fillStyle = e.fillColor;
           ctx.fillRect(x, y, width, e.height);
+          // draw highlights
           const key = e.arg.key;
           if (highlightRect && (key === focusedShape || key === link0 || key === link1)) { ctx.strokeStyle = pcolor; ctx.strokeRect(x, y, width, e.height); }
-          else if (scolor != null && width > 5) { ctx.strokeStyle = pcolor; ctx.strokeRect(x, y, width, e.height); }
+          else if (scolor != null && width > 10) { ctx.strokeStyle = scolor; ctx.strokeRect(x, y, width, e.height); }
           // add label
           drawText(ctx, e.label, x+2, y+e.height/2, width);
         }
