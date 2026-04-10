@@ -27,7 +27,6 @@ if __name__ == "__main__":
   # This is the high level tinygrad way.
   # Note that this is split into multiple kernels for speed.
 
-  """
   eval_harness("basic kernel", lambda x: x.sum(), check=correct)
 
   # *****
@@ -69,12 +68,11 @@ if __name__ == "__main__":
   # This does even better than the custom kernel in this simple case.
 
   with Context(BEAM=2): eval_harness("BEAMed kernel", lambda x: x.sum(), check=correct)
-  """
 
   # *****
   # Though if you really want to go crazy with speed, you can code in assembly
 
-  # copied from amd_asm_matmul
+  # Kernel class copied from amd_asm_matmul
   class Kernel:
     def __init__(self, arch='gfx1100'): self.instructions, self.labels, self.pos, self.arch = [], {}, 0, arch
     def label(self, name): self.labels[name] = self.pos
@@ -98,15 +96,15 @@ if __name__ == "__main__":
                                    UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=x) for x in self.instructions]))))
 
   from tinygrad.runtime.autogen.amd.rdna3.ins import *
-  CU_COUNT = 1
-  LANES = 32
+  CU_COUNT = 32
+  LANES = 64
   def asm_sum(out:UOp, buf:UOp) -> UOp:
     V_LANE_ID = 0             # lane_id set on startup
     S_WORKGROUP_X = 2         # workgroup_id_x
     S_LOOP_CTR = 3
     k = Kernel()
     # mul lane id by 16 for offsets (4 for float, 4 for b128)
-    k.emit(v_mul_lo_u32(v[0], v[0], 16))
+    k.emit(v_mul_lo_u32(v[0], v[V_LANE_ID], 16))
     k.emit(v_add_nc_u32_e32(v[1], 4096, v[0]))
     k.emit(v_add_nc_u32_e32(v[2], 4096, v[1]))
     k.emit(v_add_nc_u32_e32(v[3], 4096, v[2]))
@@ -121,7 +119,7 @@ if __name__ == "__main__":
     k.emit(VOPD(VOPDOp.V_DUAL_MOV_B32, VOPDOp.V_DUAL_MOV_B32, vdstx=v[4], vdsty=v[5], srcx0=0, srcy0=0))
     k.emit(VOPD(VOPDOp.V_DUAL_MOV_B32, VOPDOp.V_DUAL_MOV_B32, vdstx=v[6], vdsty=v[7], srcx0=0, srcy0=0))
 
-    LOAD_UNROLL = 32
+    LOAD_UNROLL = 16
     k.emit(s_mov_b32(s[S_LOOP_CTR], buf.numel()//(CU_COUNT*LANES*4*LOAD_UNROLL) - 1))
 
     k.label('LOOP')
@@ -133,10 +131,20 @@ if __name__ == "__main__":
     k.emit(s_add_u32(s[6], s[6], LOAD_UNROLL * LANES * 16))
     k.emit(s_addc_u32(s[7], s[7], 0))
     k.waitcnt(vm=0)
-    # accumulate all loads into v[4:7]
-    for i in range(LOAD_UNROLL):
-      k.emit(VOPD(VOPDOp.V_DUAL_ADD_F32, VOPDOp.V_DUAL_ADD_F32, vdstx=v[4], vdsty=v[5], srcx0=v[4], vsrcx1=v[8+i*4], srcy0=v[5], vsrcy1=v[9+i*4]))
-      k.emit(VOPD(VOPDOp.V_DUAL_ADD_F32, VOPDOp.V_DUAL_ADD_F32, vdstx=v[6], vdsty=v[7], srcx0=v[6], vsrcx1=v[10+i*4], srcy0=v[7], vsrcy1=v[11+i*4]))
+    # tree reduce loads into v[8:11], cross float positions so srcx0 (bank 0,1) and vsrcx1 (bank 2,3) avoid bank conflicts
+    n = LOAD_UNROLL
+    while n > 1:
+      half = n // 2
+      for j in range(half):
+        a, b = 8 + j*4, 8 + (j+half)*4
+        # v[a+0](bank0) += v[b+2](bank2), v[a+1](bank1) += v[b+3](bank3)
+        k.emit(VOPD(VOPDOp.V_DUAL_ADD_F32, VOPDOp.V_DUAL_ADD_F32, vdstx=v[a], vdsty=v[a+1], srcx0=v[a], vsrcx1=v[b+2], srcy0=v[a+1], vsrcy1=v[b+3]))
+        # v[a+2](bank2) += v[b+0](bank0), v[a+3](bank3) += v[b+1](bank1)
+        k.emit(VOPD(VOPDOp.V_DUAL_ADD_F32, VOPDOp.V_DUAL_ADD_F32, vdstx=v[a+2], vdsty=v[a+3], srcx0=v[a+2], vsrcx1=v[b], srcy0=v[a+3], vsrcy1=v[b+1]))
+      n = half
+    # accumulate into v[4:7]
+    k.emit(VOPD(VOPDOp.V_DUAL_ADD_F32, VOPDOp.V_DUAL_ADD_F32, vdstx=v[4], vdsty=v[5], srcx0=v[4], vsrcx1=v[8], srcy0=v[5], vsrcy1=v[9]))
+    k.emit(VOPD(VOPDOp.V_DUAL_ADD_F32, VOPDOp.V_DUAL_ADD_F32, vdstx=v[6], vdsty=v[7], srcx0=v[6], vsrcx1=v[10], srcy0=v[7], vsrcy1=v[11]))
 
     k.emit(s_sub_u32(s[S_LOOP_CTR], s[S_LOOP_CTR], 1))
     k.emit(s_cbranch_scc0(), target='LOOP')
@@ -163,5 +171,5 @@ if __name__ == "__main__":
     return k.finalize(UOp.sink(UOp.special(CU_COUNT, 'gidx0'), UOp.special(LANES, 'lidx0'), out, buf, arg=KernelInfo(opts_to_apply=())))
 
   out = Tensor.zeros(1,).contiguous().realize()
-  eval_harness("custom UOp kernel", lambda x: out.custom_kernel(x, fxn=asm_sum)[0], check=correct)
+  eval_harness("RDNA3 assembly kernel", lambda x: out.custom_kernel(x, fxn=asm_sum)[0], check=correct)
 
