@@ -13,6 +13,7 @@ if __name__ == "__main__":
   # First define a Tensor and realize it. We will focus on a 1GB sum kernel on Strix Halo with 32 CUs
 
   a = Tensor.ones(SZ).contiguous().realize()
+  correct = SZ
 
   def eval_harness(name, fxn, check=None):
     print(f"***** {name}")
@@ -26,7 +27,8 @@ if __name__ == "__main__":
   # This is the high level tinygrad way.
   # Note that this is split into multiple kernels for speed.
 
-  correct = eval_harness("basic kernel", lambda x: x.sum())
+  """
+  eval_harness("basic kernel", lambda x: x.sum(), check=correct)
 
   # *****
   # Now we get to the lower abstraction layers.
@@ -67,6 +69,7 @@ if __name__ == "__main__":
   # This does even better than the custom kernel in this simple case.
 
   with Context(BEAM=2): eval_harness("BEAMed kernel", lambda x: x.sum(), check=correct)
+  """
 
   # *****
   # Though if you really want to go crazy with speed, you can code in assembly
@@ -81,7 +84,7 @@ if __name__ == "__main__":
       self.pos += inst.size()
       return inst
     def waitcnt(self, lgkm=None, vm=None):
-      """Wait for memory operations. lgkm=N waits until N lgkm ops remain, vm=N waits until N vmem ops remain."""
+      # Wait for memory operations. lgkm=N waits until N lgkm ops remain, vm=N waits until N vmem ops remain.
       vmcnt, lgkmcnt, expcnt = vm if vm is not None else 63, lgkm if lgkm is not None else 63, 7
       waitcnt = (expcnt & 0x7) | ((lgkmcnt & 0x3f) << 4) | ((vmcnt & 0x3f) << 10)
       self.emit(s_waitcnt(simm16=waitcnt))
@@ -107,21 +110,45 @@ if __name__ == "__main__":
     # load both addresses
     k.emit(s_load_b128(sdata=s[4:7], sbase=s[0:1], offset=0x0, soffset=NULL))
     k.waitcnt(lgkm=0)
+    # offset buffer pointer by workgroup_id_x * chunk_size_bytes
+    k.emit(s_mul_i32(s[S_LOOP_CTR], s[S_WORKGROUP_X], buf.numel()*4//CU_COUNT))
+    k.emit(s_add_u32(s[6], s[6], s[S_LOOP_CTR]))
+    k.emit(s_addc_u32(s[7], s[7], 0))
     # zero the accumulators
-    k.emit(VOPD(VOPDOp.V_DUAL_MOV_B32, VOPDOp.V_DUAL_MOV_B32, vdstx=v[8], vdsty=v[9], srcx0=0, srcy0=0))
-    k.emit(VOPD(VOPDOp.V_DUAL_MOV_B32, VOPDOp.V_DUAL_MOV_B32, vdstx=v[10], vdsty=v[11], srcx0=0, srcy0=0))
+    k.emit(VOPD(VOPDOp.V_DUAL_MOV_B32, VOPDOp.V_DUAL_MOV_B32, vdstx=v[4], vdsty=v[5], srcx0=0, srcy0=0))
+    k.emit(VOPD(VOPDOp.V_DUAL_MOV_B32, VOPDOp.V_DUAL_MOV_B32, vdstx=v[6], vdsty=v[7], srcx0=0, srcy0=0))
 
-    k.emit(s_mov_b32(s[S_LOOP_CTR], 0))
+    k.emit(s_mov_b32(s[S_LOOP_CTR], buf.numel()//(CU_COUNT*LANES*4) - 1))
 
     k.label('LOOP')
-    k.emit(global_load_b128(vdst=v[4:7], addr=v[0], saddr=s[6:7]))
-    k.emit(VOPD(VOPDOp.V_DUAL_ADD_F32, VOPDOp.V_DUAL_ADD_F32, vdstx=v[8], vdsty=v[9], srcx0=v[8], vsrcx1=v[4], srcy0=v[9], vsrcy1=v[5]))
-    k.emit(VOPD(VOPDOp.V_DUAL_ADD_F32, VOPDOp.V_DUAL_ADD_F32, vdstx=v[10], vdsty=v[11], srcx0=v[10], vsrcx1=v[6], srcy0=v[11], vsrcy1=v[7]))
+    k.emit(global_load_b128(vdst=v[8:11], addr=v[0], saddr=s[6:7]))
+    k.waitcnt(vm=0)
+    k.emit(VOPD(VOPDOp.V_DUAL_ADD_F32, VOPDOp.V_DUAL_ADD_F32, vdstx=v[4], vdsty=v[5], srcx0=v[4], vsrcx1=v[8], srcy0=v[5], vsrcy1=v[9]))
+    k.emit(VOPD(VOPDOp.V_DUAL_ADD_F32, VOPDOp.V_DUAL_ADD_F32, vdstx=v[6], vdsty=v[7], srcx0=v[6], vsrcx1=v[10], srcy0=v[7], vsrcy1=v[11]))
 
-    k.emit(s_add_i32(s[S_LOOP_CTR], s[S_LOOP_CTR], 1))
-    k.emit(s_cmp_ge_i32(s[S_LOOP_CTR], buf.numel()//(CU_COUNT*LANES)))
+    # advance buffer pointer by LANES * 16 bytes (32 lanes * 4 floats * 4 bytes)
+    k.emit(s_add_u32(s[6], s[6], LANES * 16))
+    k.emit(s_addc_u32(s[7], s[7], 0))
+
+    k.emit(s_sub_u32(s[S_LOOP_CTR], s[S_LOOP_CTR], 1))
     k.emit(s_cbranch_scc0(), target='LOOP')
 
+    # add into v[4]
+    k.emit(v_add_f32_e32(v[4], v[4], v[5]))
+    k.emit(v_add_f32_e32(v[6], v[6], v[7]))
+    k.emit(v_add_f32_e32(v[4], v[4], v[6]))
+
+    # warp shuffle into v[4] on lane 0 using DPP row_shl within each 16-lane row
+    for shift in [1, 2, 4, 8]:
+      k.emit(v_add_f32_e32(v[4], DPP, v[4], vsrc0=v[4], dpp=0x100 | shift, row_mask=0xf, bank_mask=0xf, bc=1))
+    # combine rows: get lane 16's value to lane 0 via permlanex16
+    k.emit(v_permlanex16_b32(v[5], v[4], 0, 0))
+    k.emit(v_add_f32_e32(v[4], v[4], v[5]))
+
+    # atomic store (only on lane 0)
+    k.emit(s_mov_b32(EXEC_LO, 1))
+    k.emit(v_mov_b32_e32(v[0], 0))
+    k.emit(global_atomic_add_f32(addr=v[0], saddr=s[4:5], data=v[4]))
 
     k.emit(s_sendmsg(simm16=3))  # DEALLOC_VGPRS
     k.emit(s_endpgm())
