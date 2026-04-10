@@ -612,7 +612,6 @@ async function renderProfiler(path, opts) {
       visible.length = 0;
       const trackHeight = rect(document.getElementById(k)).height;
       if (offsetY+trackHeight < visibleYStart || offsetY > visibleYEnd) continue;
-      const addBorder = scolor != null ? (w) => { if (w > 10) { ctx.strokeStyle = scolor; ctx.stroke(); } } : null;
       const link0 = data.link?.[0]; const link1 = data.link?.[1]; highlightRect = focusedShape != null || link0 != null || link1 != null;
       if (eventType === EventTypes.BUF) { // generic polygon
         for (const e of shapes) {
@@ -642,7 +641,7 @@ async function renderProfiler(path, opts) {
           ctx.fillRect(x, y, width, e.height);
           const key = e.arg.key;
           if (highlightRect && (key === focusedShape || key === link0 || key === link1)) { ctx.strokeStyle = pcolor; ctx.strokeRect(x, y, width, e.height); }
-          addBorder?.(width);
+          else if (scolor != null && width > 5) { ctx.strokeStyle = pcolor; ctx.strokeRect(x, y, width, e.height); }
           // add label
           drawText(ctx, e.label, x+2, y+e.height/2, width);
         }
