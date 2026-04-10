@@ -112,7 +112,7 @@ class FlatTransformer:
     xq, xk, xv = xq.transpose(1, 2), xk.transpose(1, 2), xv.transpose(1, 2)
     if getenv("HK_FLASH_ATTENTION"):
       from extra.thunder.amd.fa import flash_attention
-      attn = flash_attention(xq, xk, xv, is_causal=True)
+      attn = flash_attention(xq, xk, xv, is_causal=True).transpose(1, 2)
     else:
       attn = xq.scaled_dot_product_attention(xk, xv, is_causal=True, enable_gqa=True).transpose(1, 2)
     attn = attn.reshape(bsz, seqlen, -1)
