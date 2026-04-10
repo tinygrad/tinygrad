@@ -1,5 +1,5 @@
 from __future__ import annotations
-import sys, argparse, typing, re, unicodedata, json, uuid, time, functools, itertools
+import sys, argparse, codecs, typing, re, unicodedata, json, uuid, time, functools, itertools
 from dataclasses import dataclass
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function
 from tinygrad.uop.ops import resolve
@@ -54,6 +54,10 @@ class SimpleTokenizer:
     return tokens + self._encode_sentence(text[pos:])
 
   def decode(self, ids:list[int]) -> str: return b''.join(self._tok2bytes[tid] for tid in ids).decode(errors='replace')
+  def stream_decoder(self) -> typing.Callable[[int|None], str]:
+    dec = codecs.getincrementaldecoder('utf-8')('replace')
+    def _decode(tid:int|None=None) -> str: return dec.decode(self._tok2bytes[tid]) if tid is not None else dec.decode(b'', final=True)
+    return _decode
   def role(self, role:str):
     if self.preset == 'olmo': return self.encode("<|" + role + "|>\n")  # OLMoE Instruct format
     if self.preset == 'qwen2': return self.encode("<|im_start|>" + role + "\n")
@@ -342,14 +346,16 @@ class Handler(HTTPRequestHandler):
     out: list[int] = []
     finish_reason = "stop"
     st = time.perf_counter()
+    dec = tok.stream_decoder()
     for next_id in model.generate(ids, temperature=temperature):
       if len(out) == 0: stderr_log(f"prefill:{(len(ids)-cache_start_pos)/((pt:=time.perf_counter())-st):4.0f} tok/s  {colored('--', 'BLACK')}  ")
       if next_id == eos_id: break
       out.append(next_id)
-      yield {"choices": [{"index":0, "delta":{"content":tok.decode([next_id])}, "finish_reason":None}], **tmpl}
+      yield {"choices": [{"index":0, "delta":{"content":dec(next_id)}, "finish_reason":None}], **tmpl}
       if max_tokens is not None and len(out) >= max_tokens:
         finish_reason = "length"
         break
+    if (tail := dec()): yield {"choices": [{"index":0, "delta":{"content":tail}, "finish_reason":None}], **tmpl}
     yield {"choices": [{"index":0, "delta":{},"finish_reason":finish_reason}], **tmpl}
     if include_usage:
       yield {"choices": [], "usage": {"prompt_tokens": len(ids), "completion_tokens": len(out), "total_tokens": len(ids) + len(out)}, **tmpl}
@@ -442,7 +448,8 @@ if __name__ == "__main__":
       ids += tok.role("user") + tok.encode(input('>>> ')) + tok.end_turn(eos_id) + tok.role("assistant")
     except EOFError:
       break
+    dec = tok.stream_decoder()
     for next_id in model.generate(ids):
-      sys.stdout.write(tok.decode([next_id]) if next_id != eos_id else "\n\n")
+      sys.stdout.write(dec(next_id) if next_id != eos_id else dec() + "\n\n")
       sys.stdout.flush()
       if next_id == eos_id: break
