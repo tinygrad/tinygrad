@@ -298,6 +298,8 @@ full_spec = PatternMatcher([
   (UPat(Ops.DEFINE_VAR, dtype=dtypes.floats), lambda: True),
   # allow any AFTER
   (UPat(Ops.AFTER, src=(UPat(),), allow_any_len=True), lambda: True),
+  # BEAM wraps a SINK for beam search
+  (UPat(Ops.BEAM, src=(UPat(Ops.SINK),)), lambda: True),
 ])+_tensor_spec+kernel_spec+program_spec+shared_spec
 
 # ***** uop helpers *****

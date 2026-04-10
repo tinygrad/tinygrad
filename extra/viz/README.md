@@ -24,7 +24,7 @@ List all codegen steps for a kernel: `--rewrites -s E_3`
 Get source code: `--rewrites -s E_3 -i "View Source"`
 Inspect a graph rewrite: `--rewrites -s E_3 -i "initial symbolic"`
 
-# SQTT tracing
+## SQTT tracing
 
 Supported on AMD for RDNA3 and RDNA4 (best) and CDNA (developing).
 
@@ -38,8 +38,12 @@ You can select a specific trace with --source, Example workflow:
 VIZ=-2 python extra/gemm/amd_asm_matmul.py
 
 # View barriers
-extra/viz/cli.py --profile -s "SQTT kernel PKTS SE:0" | rg BARRIER | head -10
+extra/viz/cli.py --profile -s "kernel SQTT SE:0 PKTS" | rg BARRIER | head -10
+
+# Get bank conflicts from performance counters
+
+python extra/viz/cli.py -p -s "kernel PMC" -i "SQC_LDS_BANK_CONFLICT"
 
 # Find the EXEC corresponding to a DISPATCH at cycle 410
-extra/viz/cli.py --profile -s "SQTT kernel PKTS SE:0" | awk '/EXEC/ && $1 - $5 == 410'
+extra/viz/cli.py --profile -s "kernel SQTT SE:0 PKTS" | awk '/EXEC/ && $1 - $5 == 410'
 ```
