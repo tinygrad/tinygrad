@@ -1,7 +1,7 @@
 import unittest
 import numpy as np
 from tinygrad import Tensor, dtypes
-from tinygrad.apps.llm import apply_rope as apply_rope_new, precompute_freqs_cis, pairwise_topk
+from tinygrad.apps.llm import TransformerBlock, TransformerConfig, apply_rope as apply_rope_new, precompute_freqs_cis, pairwise_topk
 
 def apply_rope(x:Tensor, start_pos:int):
   B, H, T, Hd = x.shape
@@ -17,6 +17,25 @@ class TestAttention(unittest.TestCase):
     self.assertEqual(result.dtype, x.dtype)
     self.assertGreater((result - apply_rope(x, 5)).abs().max().item(), 1e-6)
     with self.assertRaises(AssertionError): apply_rope(Tensor.randn(1, 1, 4, 7, dtype=dtypes.float32), 0)
+
+  def test_partial_rope_in_attention(self):
+    dim, rope_dim, seqlen = 8, 4, 3
+    config = TransformerConfig(num_blocks=1, dim=dim, hidden_dim=16, n_heads=1, n_kv_heads=1,
+                               norm_eps=1e-5, vocab_size=32, head_dim=dim, rope_theta=10000.0,
+                               rope_dim=rope_dim, max_context=8)
+    block = TransformerBlock(config)
+
+    x = Tensor.randn(1, seqlen, dim, dtype=dtypes.float32)
+    x_norm = block.attn_norm(x)
+    k = block.attn_k(x_norm).reshape(1, seqlen, 1, dim).transpose(1, 2)
+
+    precompute_freqs_cis.cache_clear()
+    block.cache_kv = Tensor.empty(2, 1, 1, config.max_context, dim, device=x.device)
+    block.freqs_cis = precompute_freqs_cis(rope_dim, config.max_context, config.rope_theta)
+    block._attention(x_norm, 0).realize()
+
+    expected = apply_rope_new(k[..., :rope_dim], block.freqs_cis[:seqlen]).cat(k[..., rope_dim:], dim=-1)
+    np.testing.assert_allclose(block.cache_kv[0, :, :, :seqlen, :].numpy(), expected.numpy(), rtol=1e-5, atol=1e-5)
 
 class TestPairwiseTopk(unittest.TestCase):
   def test_basic_topk(self):
