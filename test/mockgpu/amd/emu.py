@@ -698,7 +698,8 @@ class _Ctx:
           raw_sum = a + b
           int_saturate = (raw_sum < a).where(_c(0xFFFFFFFF), raw_sum)  # overflow -> MAX
 
-    raw_stores: list[str] = []
+    #raw_stores: list[str] = []
+    raw_stores: list = []
     vcc_val, exec_val = None, None
     for dest, val in assigns:
       # VGPR bit-slice assignment: VGPR[lane][reg][hi:lo] = (vgpr_idx, rhs_val, hi, lo[, cond]) -> read-modify-write
