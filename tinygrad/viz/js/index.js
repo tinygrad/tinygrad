@@ -637,12 +637,11 @@ async function renderProfiler(path, opts) {
           const x = xscale(e.x);
           const y = offsetY+e.y;
           const width = xscale(e.x+e.width)-x;
-          ctx.beginPath();
-          ctx.rect(x, y, width, e.height);
           visible.push({ y0:y, y1:y+e.height, x0:x, x1:x+width, arg:e.arg });
-          ctx.fillStyle = e.fillColor; ctx.fill();
+          ctx.fillStyle = e.fillColor;
+          ctx.fillRect(x, y, width, e.height);
           const key = e.arg.key;
-          if (highlightRect && (key === focusedShape || key === link0 || key === link1)) { ctx.strokeStyle = pcolor; ctx.stroke(); }
+          if (highlightRect && (key === focusedShape || key === link0 || key === link1)) { ctx.strokeStyle = pcolor; ctx.strokeRect(x, y, width, e.height); }
           addBorder?.(width);
           // add label
           drawText(ctx, e.label, x+2, y+e.height/2, width);
