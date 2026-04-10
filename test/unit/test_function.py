@@ -2,7 +2,7 @@ import numpy as np
 import unittest
 from tinygrad.function import function
 from tinygrad import Tensor, GlobalCounters
-from tinygrad.uop.ops import UOp
+from tinygrad.uop.ops import UOp, KernelInfo
 
 class TestFunction(unittest.TestCase):
   def test_simple(self):
@@ -397,6 +397,74 @@ class TestFunctionTuple(unittest.TestCase):
     (t1+t2).sum().backward()
     np.testing.assert_allclose(x.grad.numpy(), [1., 1., 1.])
     np.testing.assert_allclose(y.grad.numpy(), [1., 1., 1.])
+
+  def test_grad_unused_tuple_output_recursive(self):
+    # only one output is used
+    @function(precompile=True, precompile_backward=True)
+    def f(x:Tensor, w:Tensor):
+      a = x @ w
+      b = (x @ w) * 2  # shares x@w with a
+      return (a, b)
+
+    x = Tensor([[1., 2.], [3., 4.]], requires_grad=True).contiguous()
+    w = Tensor([[1., 0.], [0., 1.]], requires_grad=True).contiguous()
+    Tensor.realize(x, w)
+    t1, _ = f(x, w)
+    t1.sum().backward()
+    Tensor.realize(x.grad, w.grad)
+    # only t1 = x @ w flows to loss; dL/dw = x.T @ ones(2,2)
+    np.testing.assert_allclose(w.grad.numpy(), np.array([[1., 2.], [3., 4.]]).T @ np.ones((2, 2)))
+    np.testing.assert_allclose(x.grad.numpy(), np.ones((2, 2)) @ np.array([[1., 0.], [0., 1.]]).T)
+
+  def test_custom_kernel_save_unused_output(self):
+    def my_kernel(C:UOp, D:UOp, A:UOp) -> UOp:
+      i = UOp.range(A.size, 0)
+      j = UOp.range(D.size, 1)
+      store_c = C[i].store(A[i] * 2.0).end(i)
+      store_d = D[j].store(A[j]).end(j)
+      return UOp.group(store_c, store_d).sink(arg=KernelInfo(name="my_kernel"))
+
+    def my_grad(d_c:UOp, call:UOp):
+      a_input = call.src[3]
+      return (None, None, (Tensor(d_c) * 2.0 + Tensor(a_input) * 0).uop)
+
+    @function(precompile=True, precompile_backward=True)
+    def f(a:Tensor):
+      c = Tensor.invalid(*a.shape, dtype=a.dtype, device=a.device)
+      d = Tensor.invalid(3, dtype=a.dtype, device=a.device)
+      c, d = Tensor.custom_kernel(c, d, a, fxn=my_kernel, grad_fxn=my_grad)[:2]
+      return c, d
+
+    a = Tensor([1., 2., 3., 4.], requires_grad=True).contiguous()
+    Tensor.realize(a)
+    c, _ = f(a)
+    c.sum().backward()
+    Tensor.realize(a.grad)
+    np.testing.assert_allclose(a.grad.numpy(), [2., 2., 2., 2.])
+
+  def test_custom_kernel_both_outputs_used(self):
+    def my_kernel(C:UOp, D:UOp, A:UOp) -> UOp:
+      i = UOp.range(A.size, 0)
+      store_c = C[i].store(A[i] * 2.0)
+      store_d = D[i].store(A[i] * 3.0)
+      return UOp.group(store_c, store_d).end(i).sink(arg=KernelInfo(name="my_kernel"))
+
+    def my_grad(d_combined:UOp, call:UOp):
+      return (None, None, Tensor(d_combined).uop)
+
+    @function(precompile=True, precompile_backward=True)
+    def f(a:Tensor):
+      c = Tensor.invalid(*a.shape, dtype=a.dtype, device=a.device)
+      d = Tensor.invalid(*a.shape, dtype=a.dtype, device=a.device)
+      c, d = Tensor.custom_kernel(c, d, a, fxn=my_kernel, grad_fxn=my_grad)[:2]
+      return (c, d)
+
+    a = Tensor([1., 2., 3., 4.], requires_grad=True).contiguous()
+    Tensor.realize(a)
+    c, d = f(a)
+    (c.sum() + d.sum()).backward()  # dL/da = (1 + 1) since grad_fxn passes d_combined through
+    Tensor.realize(a.grad)
+    np.testing.assert_allclose(a.grad.numpy(), [2., 2., 2., 2.])
 
 class TestFunctionGrad(unittest.TestCase):
   def test_function_grad_ops(self, precompile=False, precompile_backward=False):
