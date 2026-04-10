@@ -613,8 +613,9 @@ async function renderProfiler(path, opts) {
       const trackHeight = rect(document.getElementById(k)).height;
       if (offsetY+trackHeight < visibleYStart || offsetY > visibleYEnd) continue;
       const addBorder = scolor != null ? (w) => { if (w > 10) { ctx.strokeStyle = scolor; ctx.stroke(); } } : null;
-      for (const e of shapes) {
-        if (eventType === EventTypes.BUF) { // generic polygon
+      const link0 = data.link?.[0]; const link1 = data.link?.[1]; highlightRect = focusedShape != null || link0 != null || link1 != null;
+      if (eventType === EventTypes.BUF) { // generic polygon
+        for (const e of shapes) {
           if (e.x[0]>et || e.x.at(-1)<st) continue;
           ctx.beginPath();
           const x = e.x.map(xscale);
@@ -628,7 +629,10 @@ async function renderProfiler(path, opts) {
           if (linear) { ctx.strokeStyle = pcolor; ctx.lineWidth = 2; ctx.stroke(); ctx.lineWidth = 1; }
           // walk the path back and fill the complete shape
           else { for (let i=x.length-1; i>=0; i--) ctx.lineTo(x[i], offsetY+e.y0[i]); ctx.closePath(); ctx.fillStyle = e.fillColor; ctx.fill(); }
-        } else { // contiguous rect
+          if (focusedShape != null && e.arg?.key === focusedShape) { ctx.strokeStyle = pcolor; ctx.stroke(); }
+        }
+      } else { // contiguous rect
+        for (const e of shapes) {
           if (e.x>et || e.x+e.width<st) continue;
           const x = xscale(e.x);
           const y = offsetY+e.y;
@@ -637,12 +641,11 @@ async function renderProfiler(path, opts) {
           ctx.rect(x, y, width, e.height);
           visible.push({ y0:y, y1:y+e.height, x0:x, x1:x+width, arg:e.arg });
           ctx.fillStyle = e.fillColor; ctx.fill();
+          const key = e.arg.key;
+          if (highlightRect && (key === focusedShape || key === link0 || key === link1)) { ctx.strokeStyle = pcolor; ctx.stroke(); }
           addBorder?.(width);
           // add label
           drawText(ctx, e.label, x+2, y+e.height/2, width);
-        }
-        if ((focusedShape != null && e.arg?.key === focusedShape) || (data.link != null && (e.arg?.key === data.link[0] || e.arg?.key === data.link[1]))) {
-          ctx.strokeStyle = pcolor; ctx.stroke();
         }
       }
       // draw row line
