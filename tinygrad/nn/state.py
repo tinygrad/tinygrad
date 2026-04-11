@@ -320,7 +320,7 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
   # map to (number of elements, number of bytes)
   if (nelements_nbytes := {
     2:(32,18), 3:(32,20), 6:(32,22), 7:(32,24), 8:(32,34),
-    12:(256,144), 13:(256,176), 14:(256,210), 39:(32,17), 
+    12:(256,144), 13:(256,176), 14:(256,210), 39:(32,17),
     41:(128,18)
   }.get(ggml_type)) is not None:
     blocks = t[:(n//nelements_nbytes[0])*nelements_nbytes[1]].reshape((-1, nelements_nbytes[1])).contiguous()
