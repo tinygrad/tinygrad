@@ -5,9 +5,11 @@ from tinygrad import Tensor
 from tinygrad.apps.llm import TransformerBlock, TransformerConfig
 
 def _moe_config(dim=8, hidden=16, n_heads=2, num_experts=4, num_experts_per_tok=2):
-  return TransformerConfig(num_blocks=1, dim=dim, hidden_dim=hidden, n_heads=n_heads, n_kv_heads=n_heads,
-                           norm_eps=1e-5, vocab_size=100, head_dim=dim//n_heads, rope_theta=10000, rope_dim=dim//n_heads, max_context=16,
-                           num_experts=num_experts, num_experts_per_tok=num_experts_per_tok)
+  return TransformerConfig(
+    num_blocks=1, dim=dim, hidden_dim=hidden, n_heads=n_heads, n_kv_heads=n_heads,
+    norm_eps=1e-5, vocab_size=100, head_dim=dim//n_heads, rope_theta=10000,
+    rope_dim=dim//n_heads, v_head_dim=dim//n_heads, max_context=16,
+    num_experts=num_experts, num_experts_per_tok=num_experts_per_tok)
 
 class TestMoEFeedForward(unittest.TestCase):
   def test_moe_feed_forward(self):
