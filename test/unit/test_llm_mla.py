@@ -1,7 +1,7 @@
 import unittest
 import numpy as np
 from tinygrad import Tensor
-from tinygrad.apps.llm import Transformer, TransformerConfig, apply_rope_interleaved
+from tinygrad.apps.llm import Transformer, TransformerConfig, apply_rope
 
 class TestMLA(unittest.TestCase):
   def _make_config(self, **kwargs):
@@ -27,12 +27,12 @@ class TestMLA(unittest.TestCase):
     q = block.attn_q(x_norm).reshape(B, T, c.n_heads, c.head_dim).transpose(1, 2)
     q_nope, q_rope = q[..., :q_nope_head_dim], q[..., q_nope_head_dim:]
     freqs = precompute_freqs_cis(c.rope_dim, 16, c.rope_theta)
-    q_rope = apply_rope_interleaved(q_rope, freqs[0:T])
+    q_rope = apply_rope(q_rope, freqs[0:T])
 
     kv_a = block.attn_kv_a_mqa(x_norm)
     c_kv = block.attn_kv_a_norm(kv_a[..., :c.kv_lora_rank])
     k_rope = kv_a[..., c.kv_lora_rank:].reshape(B, T, 1, c.rope_dim).transpose(1, 2)
-    k_rope = apply_rope_interleaved(k_rope, freqs[0:T])
+    k_rope = apply_rope(k_rope, freqs[0:T])
 
     # --- Naive (non-absorbed): expand K and V, do standard attention ---
     k_nope_naive = c_kv.unsqueeze(1) @ block.attn_k_b["weight"]  # (B, H, T, nope)
