@@ -82,7 +82,7 @@ class TestGGUF(unittest.TestCase):
     np.testing.assert_equal(out.numpy(), expected)
 
   def test_dequantization_q1_0(self):
-    # Q1_0: 2 bytes fp16 scale + 16 bytes (128 bits)
+    # Q1_0: 2 bytes fp16 scale + 16 bytes (128 1-bit values)
     block = np.frombuffer(np.float16(2.0).tobytes() + np.packbits(np.random.choice([0, 1], size=128)).tobytes(), dtype=np.uint8).copy()
     expected = np.float16(2.0) * (np.unpackbits(block[2:], bitorder="little").astype(np.int8) * 2 - 1)
     # TODO: replace 41 with GGMLQuantizationType.Q1_0.value on next gguf-py release
