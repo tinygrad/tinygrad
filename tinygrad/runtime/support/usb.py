@@ -178,9 +178,15 @@ class CustomASM24Controller:
     self._f0_out_buf, self._f0_out_mv = alloc_cbuffer(0x1000) # for f0 and e4, allocate big enough for e4
     self._f0_in_buf, _ = alloc_cbuffer(8)
 
-    # Verify custom firmware is running and PCIe link is up (LTSSM=0x78).
+    # Custom firmware now boots with PCIe off. Power it on before probing the link.
+    ltssm = self.read(0xB450, 1)[0]
+    if ltssm != 0x78: self.set_pcie_power(True)
     ltssm = self.read(0xB450, 1)[0]
     if ltssm != 0x78: raise RuntimeError(f"PCIe link not up (LTSSM=0x{ltssm:02X}), custom firmware not ready")
+
+  def set_pcie_power(self, enabled:bool, timeout:int=10000):
+    ret = libusb.libusb_control_transfer(self.usb.handle, 0x40, 0xF3, int(enabled), 0, None, 0, timeout)
+    assert ret >= 0, f"F3 PCIe power {'on' if enabled else 'off'} failed: {ret}"
 
   # === PCIe TLP via 0xF0 vendor command ===
 
