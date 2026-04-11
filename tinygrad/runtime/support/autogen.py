@@ -93,8 +93,7 @@ tmap = {clang.CXType_Void:"None", clang.CXType_Char_U:"ctypes.c_ubyte", clang.CX
         **{getattr(clang, f'CXType_{k}'):f"ctypes.c_{k.lower()}" for k in ["Float", "Double", "LongDouble"]},
         **{getattr(clang, f'CXType_{k}'):f"ctypes.c_{'u' if 'U' in k else ''}int{sz}" for sz,k in
            [(16, "UShort"), (16, "Short"), (32, "UInt"), (32, "Int"), (64, "ULong"), (64, "Long"), (64, "ULongLong"), (64, "LongLong")]}}
-mypymap = {**{k:"int" for k in ints}, **{k:"float" for k in [clang.CXType_Float, clang.CXType_Double, clang.CXType_LongDouble]},
-           clang.CXType_Enum:"int", clang.CXType_WChar:"str", clang.CXType_SChar:"int", clang.CXType_Char_S:"bytes", clang.CXType_Bool:"bool"}
+
 # https://clang.llvm.org/docs/AutomaticReferenceCounting.html#arc-method-families
 arc_families = ['alloc', 'copy', 'mutableCopy', 'new']
 
@@ -109,10 +108,10 @@ def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False,
     if t.kind in tmap: return tmap[t.kind]
     if nm(t) in types and types[nm(t)][1]: return types[nm(t)][0]
     if ((f:=t).kind in fps) or (t.kind == clang.CXType_Pointer and (f:=clang.clang_getPointeeType(t)).kind in fps):
-      return (f"c.CFUNCTYPE[{tname(clang.clang_getResultType(f))}, [" + ', '.join(map(tname, arguments(f))) + "]]")
+      return (f"ctypes.CFUNCTYPE({tname(clang.clang_getResultType(f))}, " + ', '.join(map(tname, arguments(f))) + ")")
     match t.kind:
       case clang.CXType_Pointer:
-        return "ctypes.c_void_p" if (p:=clang.clang_getPointeeType(t)).kind==clang.CXType_Void else f"c.POINTER[{tname(p)}]"
+        return "ctypes.c_void_p" if (p:=clang.clang_getPointeeType(t)).kind==clang.CXType_Void else f"ctypes.POINTER({tname(p)})"
       case clang.CXType_ObjCObjectPointer: return tname(clang.clang_getPointeeType(t)) # TODO: this seems wrong
       case clang.CXType_Elaborated: return tname(clang.clang_Type_getNamedType(t), suggested_name)
       case clang.CXType_Typedef if nm(t) == nm(canon:=clang.clang_getCanonicalType(t)): return tname(canon)
@@ -127,6 +126,18 @@ def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False,
         # libclang does not use CXType_Elaborated for function parameters with type qualifiers (eg. void (*)(const struct foo))
         if (_nm:=re.sub(r"^const ", "", nm(t))) in types and types[_nm][1]: return types[_nm][0]
 
+        # mypy wants types hints which are invalid python.
+        def typehint(ty) -> str:
+          if (hint:={clang.CXType_Enum:"int", clang.CXType_WChar:"str", clang.CXType_SChar:"int",
+                     clang.CXType_Char_S:"bytes", clang.CXType_Bool:"bool"}.get(ty.kind, None)): return hint
+          if ty.kind in [clang.CXType_Float, clang.CXType_Double, clang.CXType_LongDouble]: return "float"
+          if ty.kind in ints: return "int"
+          if ty.kind in fps or (ty.kind == clang.CXType_Pointer and clang.clang_getPointeeType(ty).kind in fps): return "ctypes._CFunctionType"
+          if ty.kind == clang.CXType_Pointer:
+            return "ctypes.c_void_p" if (p:=clang.clang_getPointeeType(ty)).kind==clang.CXType_Void else f"ctypes._Pointer[{typehint(p)}]"
+          if ty.kind in (clang.CXType_ConstantArray, clang.CXType_IncompleteArray): return f"list[{typehint(p)}]"
+          return repr(tname(ty))
+
         # check if previously declared
         if _nm in types: types[_nm] = (tnm:=types[_nm][0]), types[_nm][1] or len(fields(t)) != 0, (ln:=types[_nm][2])
         else:
@@ -137,12 +148,12 @@ def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False,
           if typedef:
             lines.append(f"{typedef.replace('::', '_')}: TypeAlias = {tnm}")
             types[typedef] = typedef.replace('::', '_'), True
-        ff = [(normalize(f), clang.clang_getCanonicalType(ty:=clang.clang_getCursorType(f)).kind, tname(ty, f"{tnm}_{nm(f)}"), offset) +
+        ff = [(normalize(f), clang.clang_getCanonicalType(ty:=clang.clang_getCursorType(f)), tname(ty, f"{tnm}_{nm(f)}"), offset) +
               ((clang.clang_getFieldDeclBitWidth(f), clang.clang_Cursor_getOffsetOfField(f) % 8) * clang.clang_Cursor_isBitField(f))
               for f,offset in all_fields(t)]
         if ff:
           lines[ln] = "\n".join(["@c.record", f"class {tnm}(c.Struct):", f"  SIZE = {clang.clang_Type_getSizeOf(t)}"] +
-                                [f"  {f}: {mypymap.get(ty, repr(args[0]))}" for f,ty,*args in ff])
+                                [f"  {f}: {typehint(ty)}" for f,ty,*args in ff])
           lines.append(f"{tnm}.register_fields([" + ", ".join([f"('{f}', {', '.join(str(a) for a in args)})" for f,ty,*args in ff]) + "])")
         return tnm
       case clang.CXType_Enum:
@@ -153,10 +164,9 @@ def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False,
         lines.append(f"{enm}: dict[int, str] = {{" + ", ".join(f"({nm(e)}:={value(e)}): '{nm(e)}'" for e in children(decl)
                                                                if e.kind == clang.CXCursor_EnumConstantDecl) + "}")
         return types[nm(t)][0]
-      case clang.CXType_ConstantArray: return ("c.Array[" + tname(clang.clang_getArrayElementType(t), suggested_name and suggested_name.rstrip('s'))
-                                               + f", Literal[{clang.clang_getArraySize(t)}]]")
-      case clang.CXType_IncompleteArray:
-        return f"c.Array[{tname(clang.clang_getArrayElementType(t), suggested_name and suggested_name.rstrip('s'))}, Literal[0]]"
+      case clang.CXType_ConstantArray:
+        return f"{tname(clang.clang_getArrayElementType(t), suggested_name and suggested_name.rstrip('s'))} * {clang.clang_getArraySize(t)}"
+      case clang.CXType_IncompleteArray: return f"{tname(clang.clang_getArrayElementType(t), suggested_name and suggested_name.rstrip('s'))} * 0"
       case clang.CXType_ObjCInterface:
         is_defn = bool([f.kind for f in children(decl) if f.kind in (clang.CXCursor_ObjCInstanceMethodDecl, clang.CXCursor_ObjCClassMethodDecl)])
         if (tnm:=nm(t)) not in types: lines.append(f"class {tnm}(objc.Spec): pass")
