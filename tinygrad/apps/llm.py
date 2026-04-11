@@ -252,7 +252,9 @@ class MLATransformerBlock(FFNBlock):
 
     kv_a = self.attn_kv_a_mqa(x)
     c_kv = self.attn_kv_a_norm(kv_a[..., :self.config.kv_lora_rank])
-    k_rope = apply_rope(kv_a[..., self.config.kv_lora_rank:].reshape(B, T, 1, self.config.rope_dim).transpose(1, 2), self.freqs_cis[start_pos:start_pos+T])
+    k_rope = apply_rope(
+      kv_a[..., self.config.kv_lora_rank:].reshape(B, T, 1, self.config.rope_dim).transpose(1, 2),
+      self.freqs_cis[start_pos:start_pos+T])
 
     k_store = c_kv.reshape(B, 1, T, self.config.kv_lora_rank).cat(k_rope.reshape(B, 1, T, self.config.rope_dim), dim=-1)
     v_store = c_kv.reshape(B, 1, T, self.config.kv_lora_rank)
@@ -341,8 +343,10 @@ class Transformer:
       norm_topk_prob=kv.get(f'{arch}.expert_weights_norm', arch in ('qwen3moe', 'qwen35moe')),
       kv_lora_rank=kv_lora_rank,
       leading_dense_blocks=kv.get(f'{arch}.leading_dense_block_count', 0),
-      shared_expert_dim=kv.get(f'{arch}.expert_shared_feed_forward_length', kv.get(f'{arch}.expert_shared_count', 0) * kv.get(f'{arch}.expert_feed_forward_length', 0)),
-      shared_expert_gate=f'blk.{kv.get(f'{arch}.leading_dense_block_count', 0)}.ffn_gate_inp_shexp.weight' in state_dict,
+      shared_expert_dim=kv.get(
+        f'{arch}.expert_shared_feed_forward_length',
+        kv.get(f'{arch}.expert_shared_count', 0) * kv.get(f'{arch}.expert_feed_forward_length', 0)),
+      shared_expert_gate=f"blk.{kv.get(f'{arch}.leading_dense_block_count', 0)}.ffn_gate_inp_shexp.weight" in state_dict,
       dense_hidden_dim=kv.get(f'{arch}.feed_forward_length', 0) if kv.get(f'{arch}.leading_dense_block_count', 0) else 0,
       routed_scaling_factor=kv.get(f'{arch}.expert_weights_scale', 1.0))
     model = Transformer(config)
