@@ -1,18 +1,17 @@
 # mypy: disable-error-code="empty-body"
-from __future__ import annotations
 import ctypes
-from typing import Annotated, Literal, TypeAlias
+from typing import Literal, TypeAlias
 from tinygrad.runtime.support.c import _IO, _IOW, _IOR, _IOWR
 from tinygrad.runtime.support import c
 dll = c.DLL('iokit', 'IOKit')
-class struct_IONotificationPort(c.Struct): SIZE = 0
+class struct_IONotificationPort(c.Struct): pass
 IONotificationPortRef: TypeAlias = c.POINTER[struct_IONotificationPort]
-IOServiceMatchingCallback: TypeAlias = c.CFUNCTYPE[None, [ctypes.c_void_p, Annotated[int, ctypes.c_uint32]]]
-IOServiceInterestCallback: TypeAlias = c.CFUNCTYPE[None, [ctypes.c_void_p, Annotated[int, ctypes.c_uint32], Annotated[int, ctypes.c_uint32], ctypes.c_void_p]]
-mach_port_t: TypeAlias = Annotated[int, ctypes.c_uint32]
+IOServiceMatchingCallback: TypeAlias = c.CFUNCTYPE[None, [ctypes.c_void_p, ctypes.c_uint32]]
+IOServiceInterestCallback: TypeAlias = c.CFUNCTYPE[None, [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p]]
+mach_port_t: TypeAlias = ctypes.c_uint32
 try: kIOMainPortDefault = mach_port_t.in_dll(dll, 'kIOMainPortDefault') # type: ignore
 except (ValueError,AttributeError): pass
-kern_return_t: TypeAlias = Annotated[int, ctypes.c_int32]
+kern_return_t: TypeAlias = ctypes.c_int32
 @dll.bind
 def IOMainPort(bootstrapPort:mach_port_t, mainPort:c.POINTER[mach_port_t]) -> kern_return_t: ...
 try: kIOMasterPortDefault = mach_port_t.in_dll(dll, 'kIOMasterPortDefault') # type: ignore
@@ -23,7 +22,7 @@ def IOMasterPort(bootstrapPort:mach_port_t, mainPort:c.POINTER[mach_port_t]) -> 
 def IONotificationPortCreate(mainPort:mach_port_t) -> IONotificationPortRef: ...
 @dll.bind
 def IONotificationPortDestroy(notify:IONotificationPortRef) -> None: ...
-class struct___CFRunLoopSource(c.Struct): SIZE = 0
+class struct___CFRunLoopSource(c.Struct): pass
 CFRunLoopSourceRef: TypeAlias = c.POINTER[struct___CFRunLoopSource]
 @dll.bind
 def IONotificationPortGetRunLoopSource(notify:IONotificationPortRef) -> CFRunLoopSourceRef: ...
@@ -31,37 +30,38 @@ def IONotificationPortGetRunLoopSource(notify:IONotificationPortRef) -> CFRunLoo
 def IONotificationPortGetMachPort(notify:IONotificationPortRef) -> mach_port_t: ...
 @dll.bind
 def IONotificationPortSetImportanceReceiver(notify:IONotificationPortRef) -> kern_return_t: ...
-class struct_dispatch_queue_s(c.Struct): SIZE = 0
+class struct_dispatch_queue_s(c.Struct): pass
 dispatch_queue_t: TypeAlias = c.POINTER[struct_dispatch_queue_s]
 @dll.bind
 def IONotificationPortSetDispatchQueue(notify:IONotificationPortRef, queue:dispatch_queue_t) -> None: ...
 @c.record
 class mach_msg_header_t(c.Struct):
   SIZE = 24
-  msgh_bits: Annotated[mach_msg_bits_t, 0]
-  msgh_size: Annotated[mach_msg_size_t, 4]
-  msgh_remote_port: Annotated[mach_port_t, 8]
-  msgh_local_port: Annotated[mach_port_t, 12]
-  msgh_voucher_port: Annotated[mach_port_name_t, 16]
-  msgh_id: Annotated[mach_msg_id_t, 20]
-mach_msg_bits_t: TypeAlias = Annotated[int, ctypes.c_uint32]
-mach_msg_size_t: TypeAlias = Annotated[int, ctypes.c_uint32]
-mach_port_name_t: TypeAlias = Annotated[int, ctypes.c_uint32]
-mach_msg_id_t: TypeAlias = Annotated[int, ctypes.c_int32]
+  msgh_bits: 'mach_msg_bits_t'
+  msgh_size: 'mach_msg_size_t'
+  msgh_remote_port: 'mach_port_t'
+  msgh_local_port: 'mach_port_t'
+  msgh_voucher_port: 'mach_port_name_t'
+  msgh_id: 'mach_msg_id_t'
+mach_msg_bits_t: TypeAlias = ctypes.c_uint32
+mach_msg_size_t: TypeAlias = ctypes.c_uint32
+mach_port_name_t: TypeAlias = ctypes.c_uint32
+mach_msg_id_t: TypeAlias = ctypes.c_int32
+mach_msg_header_t.register_fields([('msgh_bits', mach_msg_bits_t, 0), ('msgh_size', mach_msg_size_t, 4), ('msgh_remote_port', mach_port_t, 8), ('msgh_local_port', mach_port_t, 12), ('msgh_voucher_port', mach_port_name_t, 16), ('msgh_id', mach_msg_id_t, 20)])
 @dll.bind
 def IODispatchCalloutFromMessage(unused:ctypes.c_void_p, msg:c.POINTER[mach_msg_header_t], reference:ctypes.c_void_p) -> None: ...
-uint32_t: TypeAlias = Annotated[int, ctypes.c_uint32]
+uint32_t: TypeAlias = ctypes.c_uint32
 @dll.bind
 def IOCreateReceivePort(msgType:uint32_t, recvPort:c.POINTER[mach_port_t]) -> kern_return_t: ...
-io_object_t: TypeAlias = Annotated[int, ctypes.c_uint32]
+io_object_t: TypeAlias = ctypes.c_uint32
 @dll.bind
 def IOObjectRelease(object:io_object_t) -> kern_return_t: ...
 @dll.bind
 def IOObjectRetain(object:io_object_t) -> kern_return_t: ...
-io_name_t: TypeAlias = c.Array[Annotated[bytes, ctypes.c_char], Literal[128]]
+io_name_t: TypeAlias = c.Array[ctypes.c_char, Literal[128]]
 @dll.bind
 def IOObjectGetClass(object:io_object_t, className:io_name_t) -> kern_return_t: ...
-class struct___CFString(c.Struct): SIZE = 0
+class struct___CFString(c.Struct): pass
 CFStringRef: TypeAlias = c.POINTER[struct___CFString]
 @dll.bind
 def IOObjectCopyClass(object:io_object_t) -> CFStringRef: ...
@@ -69,7 +69,7 @@ def IOObjectCopyClass(object:io_object_t) -> CFStringRef: ...
 def IOObjectCopySuperclassForClass(classname:CFStringRef) -> CFStringRef: ...
 @dll.bind
 def IOObjectCopyBundleIdentifierForClass(classname:CFStringRef) -> CFStringRef: ...
-boolean_t: TypeAlias = Annotated[int, ctypes.c_int32]
+boolean_t: TypeAlias = ctypes.c_int32
 @dll.bind
 def IOObjectConformsTo(object:io_object_t, className:io_name_t) -> boolean_t: ...
 @dll.bind
@@ -80,21 +80,21 @@ def IOObjectGetKernelRetainCount(object:io_object_t) -> uint32_t: ...
 def IOObjectGetUserRetainCount(object:io_object_t) -> uint32_t: ...
 @dll.bind
 def IOObjectGetRetainCount(object:io_object_t) -> uint32_t: ...
-io_iterator_t: TypeAlias = Annotated[int, ctypes.c_uint32]
+io_iterator_t: TypeAlias = ctypes.c_uint32
 @dll.bind
 def IOIteratorNext(iterator:io_iterator_t) -> io_object_t: ...
 @dll.bind
 def IOIteratorReset(iterator:io_iterator_t) -> None: ...
 @dll.bind
 def IOIteratorIsValid(iterator:io_iterator_t) -> boolean_t: ...
-class struct___CFDictionary(c.Struct): SIZE = 0
+class struct___CFDictionary(c.Struct): pass
 CFDictionaryRef: TypeAlias = c.POINTER[struct___CFDictionary]
-io_service_t: TypeAlias = Annotated[int, ctypes.c_uint32]
+io_service_t: TypeAlias = ctypes.c_uint32
 @dll.bind
 def IOServiceGetMatchingService(mainPort:mach_port_t, matching:CFDictionaryRef) -> io_service_t: ...
 @dll.bind
 def IOServiceGetMatchingServices(mainPort:mach_port_t, matching:CFDictionaryRef, existing:c.POINTER[io_iterator_t]) -> kern_return_t: ...
-uintptr_t: TypeAlias = Annotated[int, ctypes.c_uint64]
+uintptr_t: TypeAlias = ctypes.c_uint64
 @dll.bind
 def IOServiceAddNotification(mainPort:mach_port_t, notificationType:io_name_t, matching:CFDictionaryRef, wakePort:mach_port_t, reference:uintptr_t, notification:c.POINTER[io_iterator_t]) -> kern_return_t: ...
 @dll.bind
@@ -108,32 +108,33 @@ def IOServiceGetBusyState(service:io_service_t, busyState:c.POINTER[uint32_t]) -
 @c.record
 class struct_mach_timespec(c.Struct):
   SIZE = 8
-  tv_sec: Annotated[Annotated[int, ctypes.c_uint32], 0]
-  tv_nsec: Annotated[clock_res_t, 4]
+  tv_sec: 'ctypes.c_uint32'
+  tv_nsec: 'clock_res_t'
 mach_timespec_t: TypeAlias = struct_mach_timespec
-clock_res_t: TypeAlias = Annotated[int, ctypes.c_int32]
+clock_res_t: TypeAlias = ctypes.c_int32
+struct_mach_timespec.register_fields([('tv_sec', ctypes.c_uint32, 0), ('tv_nsec', clock_res_t, 4)])
 @dll.bind
 def IOServiceWaitQuiet(service:io_service_t, waitTime:c.POINTER[mach_timespec_t]) -> kern_return_t: ...
 @dll.bind
 def IOKitGetBusyState(mainPort:mach_port_t, busyState:c.POINTER[uint32_t]) -> kern_return_t: ...
-IOOptionBits: TypeAlias = Annotated[int, ctypes.c_uint32]
+IOOptionBits: TypeAlias = ctypes.c_uint32
 @dll.bind
 def IOKitWaitQuietWithOptions(mainPort:mach_port_t, waitTime:c.POINTER[mach_timespec_t], options:IOOptionBits) -> kern_return_t: ...
 @dll.bind
 def IOKitWaitQuiet(mainPort:mach_port_t, waitTime:c.POINTER[mach_timespec_t]) -> kern_return_t: ...
-task_port_t: TypeAlias = Annotated[int, ctypes.c_uint32]
-io_connect_t: TypeAlias = Annotated[int, ctypes.c_uint32]
+task_port_t: TypeAlias = ctypes.c_uint32
+io_connect_t: TypeAlias = ctypes.c_uint32
 @dll.bind
 def IOServiceOpen(service:io_service_t, owningTask:task_port_t, type:uint32_t, connect:c.POINTER[io_connect_t]) -> kern_return_t: ...
 @dll.bind
 def IOServiceRequestProbe(service:io_service_t, options:uint32_t) -> kern_return_t: ...
-class _anonenum0(Annotated[int, ctypes.c_uint32], c.Enum): pass
+class _anonenum0(ctypes.c_uint32, c.Enum): pass
 kIOServiceInteractionAllowed = _anonenum0.define('kIOServiceInteractionAllowed', 1)
 
 @dll.bind
 def IOServiceAuthorize(service:io_service_t, options:uint32_t) -> kern_return_t: ...
 @dll.bind
-def IOServiceOpenAsFileDescriptor(service:io_service_t, oflag:Annotated[int, ctypes.c_int32]) -> Annotated[int, ctypes.c_int32]: ...
+def IOServiceOpenAsFileDescriptor(service:io_service_t, oflag:ctypes.c_int32) -> ctypes.c_int32: ...
 @dll.bind
 def IOServiceClose(connect:io_connect_t) -> kern_return_t: ...
 @dll.bind
@@ -144,8 +145,8 @@ def IOConnectRelease(connect:io_connect_t) -> kern_return_t: ...
 def IOConnectGetService(connect:io_connect_t, service:c.POINTER[io_service_t]) -> kern_return_t: ...
 @dll.bind
 def IOConnectSetNotificationPort(connect:io_connect_t, type:uint32_t, port:mach_port_t, reference:uintptr_t) -> kern_return_t: ...
-mach_vm_address_t: TypeAlias = Annotated[int, ctypes.c_uint64]
-mach_vm_size_t: TypeAlias = Annotated[int, ctypes.c_uint64]
+mach_vm_address_t: TypeAlias = ctypes.c_uint64
+mach_vm_size_t: TypeAlias = ctypes.c_uint64
 @dll.bind
 def IOConnectMapMemory(connect:io_connect_t, memoryType:uint32_t, intoTask:task_port_t, atAddress:c.POINTER[mach_vm_address_t], ofSize:c.POINTER[mach_vm_size_t], options:IOOptionBits) -> kern_return_t: ...
 @dll.bind
@@ -159,8 +160,8 @@ CFTypeRef: TypeAlias = ctypes.c_void_p
 def IOConnectSetCFProperties(connect:io_connect_t, properties:CFTypeRef) -> kern_return_t: ...
 @dll.bind
 def IOConnectSetCFProperty(connect:io_connect_t, propertyName:CFStringRef, property:CFTypeRef) -> kern_return_t: ...
-uint64_t: TypeAlias = Annotated[int, ctypes.c_uint64]
-size_t: TypeAlias = Annotated[int, ctypes.c_uint64]
+uint64_t: TypeAlias = ctypes.c_uint64
+size_t: TypeAlias = ctypes.c_uint64
 @dll.bind
 def IOConnectCallMethod(connection:mach_port_t, selector:uint32_t, input:c.POINTER[uint64_t], inputCnt:uint32_t, inputStruct:ctypes.c_void_p, inputStructCnt:size_t, output:c.POINTER[uint64_t], outputCnt:c.POINTER[uint32_t], outputStruct:ctypes.c_void_p, outputStructCnt:c.POINTER[size_t]) -> kern_return_t: ...
 @dll.bind
@@ -189,15 +190,15 @@ def IOConnectTrap5(connect:io_connect_t, index:uint32_t, p1:uintptr_t, p2:uintpt
 def IOConnectTrap6(connect:io_connect_t, index:uint32_t, p1:uintptr_t, p2:uintptr_t, p3:uintptr_t, p4:uintptr_t, p5:uintptr_t, p6:uintptr_t) -> kern_return_t: ...
 @dll.bind
 def IOConnectAddClient(connect:io_connect_t, client:io_connect_t) -> kern_return_t: ...
-io_registry_entry_t: TypeAlias = Annotated[int, ctypes.c_uint32]
+io_registry_entry_t: TypeAlias = ctypes.c_uint32
 @dll.bind
 def IORegistryGetRootEntry(mainPort:mach_port_t) -> io_registry_entry_t: ...
-io_string_t: TypeAlias = c.Array[Annotated[bytes, ctypes.c_char], Literal[512]]
+io_string_t: TypeAlias = c.Array[ctypes.c_char, Literal[512]]
 @dll.bind
 def IORegistryEntryFromPath(mainPort:mach_port_t, path:io_string_t) -> io_registry_entry_t: ...
 @dll.bind
 def IORegistryEntryCopyFromPath(mainPort:mach_port_t, path:CFStringRef) -> io_registry_entry_t: ...
-class _anonenum1(Annotated[int, ctypes.c_uint32], c.Enum): pass
+class _anonenum1(ctypes.c_uint32, c.Enum): pass
 kIORegistryIterateRecursively = _anonenum1.define('kIORegistryIterateRecursively', 1)
 kIORegistryIterateParents = _anonenum1.define('kIORegistryIterateParents', 2)
 
@@ -222,7 +223,7 @@ def IORegistryEntryCopyPath(entry:io_registry_entry_t, plane:io_name_t) -> CFStr
 @dll.bind
 def IORegistryEntryGetRegistryEntryID(entry:io_registry_entry_t, entryID:c.POINTER[uint64_t]) -> kern_return_t: ...
 CFMutableDictionaryRef: TypeAlias = c.POINTER[struct___CFDictionary]
-class struct___CFAllocator(c.Struct): SIZE = 0
+class struct___CFAllocator(c.Struct): pass
 CFAllocatorRef: TypeAlias = c.POINTER[struct___CFAllocator]
 @dll.bind
 def IORegistryEntryCreateCFProperties(entry:io_registry_entry_t, properties:c.POINTER[CFMutableDictionaryRef], allocator:CFAllocatorRef, options:IOOptionBits) -> kern_return_t: ...
@@ -230,7 +231,7 @@ def IORegistryEntryCreateCFProperties(entry:io_registry_entry_t, properties:c.PO
 def IORegistryEntryCreateCFProperty(entry:io_registry_entry_t, key:CFStringRef, allocator:CFAllocatorRef, options:IOOptionBits) -> CFTypeRef: ...
 @dll.bind
 def IORegistryEntrySearchCFProperty(entry:io_registry_entry_t, plane:io_name_t, key:CFStringRef, allocator:CFAllocatorRef, options:IOOptionBits) -> CFTypeRef: ...
-io_struct_inband_t: TypeAlias = c.Array[Annotated[bytes, ctypes.c_char], Literal[4096]]
+io_struct_inband_t: TypeAlias = c.Array[ctypes.c_char, Literal[4096]]
 @dll.bind
 def IORegistryEntryGetProperty(entry:io_registry_entry_t, propertyName:io_name_t, buffer:io_struct_inband_t, size:c.POINTER[uint32_t]) -> kern_return_t: ...
 @dll.bind
@@ -248,32 +249,31 @@ def IORegistryEntryGetParentEntry(entry:io_registry_entry_t, plane:io_name_t, pa
 @dll.bind
 def IORegistryEntryInPlane(entry:io_registry_entry_t, plane:io_name_t) -> boolean_t: ...
 @dll.bind
-def IOServiceMatching(name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> CFMutableDictionaryRef: ...
+def IOServiceMatching(name:c.POINTER[ctypes.c_char]) -> CFMutableDictionaryRef: ...
 @dll.bind
-def IOServiceNameMatching(name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> CFMutableDictionaryRef: ...
+def IOServiceNameMatching(name:c.POINTER[ctypes.c_char]) -> CFMutableDictionaryRef: ...
 @dll.bind
-def IOBSDNameMatching(mainPort:mach_port_t, options:uint32_t, bsdName:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> CFMutableDictionaryRef: ...
+def IOBSDNameMatching(mainPort:mach_port_t, options:uint32_t, bsdName:c.POINTER[ctypes.c_char]) -> CFMutableDictionaryRef: ...
 @dll.bind
-def IOOpenFirmwarePathMatching(mainPort:mach_port_t, options:uint32_t, path:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> CFMutableDictionaryRef: ...
+def IOOpenFirmwarePathMatching(mainPort:mach_port_t, options:uint32_t, path:c.POINTER[ctypes.c_char]) -> CFMutableDictionaryRef: ...
 @dll.bind
 def IORegistryEntryIDMatching(entryID:uint64_t) -> CFMutableDictionaryRef: ...
 @dll.bind
 def IOServiceOFPathToBSDName(mainPort:mach_port_t, openFirmwarePath:io_name_t, bsdName:io_name_t) -> kern_return_t: ...
-IOAsyncCallback0: TypeAlias = c.CFUNCTYPE[None, [ctypes.c_void_p, Annotated[int, ctypes.c_int32]]]
-IOAsyncCallback1: TypeAlias = c.CFUNCTYPE[None, [ctypes.c_void_p, Annotated[int, ctypes.c_int32], ctypes.c_void_p]]
-IOAsyncCallback2: TypeAlias = c.CFUNCTYPE[None, [ctypes.c_void_p, Annotated[int, ctypes.c_int32], ctypes.c_void_p, ctypes.c_void_p]]
-IOAsyncCallback: TypeAlias = c.CFUNCTYPE[None, [ctypes.c_void_p, Annotated[int, ctypes.c_int32], c.POINTER[ctypes.c_void_p], Annotated[int, ctypes.c_uint32]]]
-vm_size_t: TypeAlias = Annotated[int, ctypes.c_uint64]
+IOAsyncCallback0: TypeAlias = c.CFUNCTYPE[None, [ctypes.c_void_p, ctypes.c_int32]]
+IOAsyncCallback1: TypeAlias = c.CFUNCTYPE[None, [ctypes.c_void_p, ctypes.c_int32, ctypes.c_void_p]]
+IOAsyncCallback2: TypeAlias = c.CFUNCTYPE[None, [ctypes.c_void_p, ctypes.c_int32, ctypes.c_void_p, ctypes.c_void_p]]
+IOAsyncCallback: TypeAlias = c.CFUNCTYPE[None, [ctypes.c_void_p, ctypes.c_int32, c.POINTER[ctypes.c_void_p], ctypes.c_uint32]]
+vm_size_t: TypeAlias = ctypes.c_uint64
 @dll.bind
 def OSGetNotificationFromMessage(msg:c.POINTER[mach_msg_header_t], index:uint32_t, type:c.POINTER[uint32_t], reference:c.POINTER[uintptr_t], content:c.POINTER[ctypes.c_void_p], size:c.POINTER[vm_size_t]) -> kern_return_t: ...
 @dll.bind
-def IOCatalogueSendData(mainPort:mach_port_t, flag:uint32_t, buffer:c.POINTER[Annotated[bytes, ctypes.c_char]], size:uint32_t) -> kern_return_t: ...
+def IOCatalogueSendData(mainPort:mach_port_t, flag:uint32_t, buffer:c.POINTER[ctypes.c_char], size:uint32_t) -> kern_return_t: ...
 @dll.bind
 def IOCatalogueTerminate(mainPort:mach_port_t, flag:uint32_t, description:io_name_t) -> kern_return_t: ...
 @dll.bind
-def IOCatalogueGetData(mainPort:mach_port_t, flag:uint32_t, buffer:c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]], size:c.POINTER[uint32_t]) -> kern_return_t: ...
+def IOCatalogueGetData(mainPort:mach_port_t, flag:uint32_t, buffer:c.POINTER[c.POINTER[ctypes.c_char]], size:c.POINTER[uint32_t]) -> kern_return_t: ...
 @dll.bind
 def IOCatalogueModuleLoaded(mainPort:mach_port_t, name:io_name_t) -> kern_return_t: ...
 @dll.bind
 def IOCatalogueReset(mainPort:mach_port_t, flag:uint32_t) -> kern_return_t: ...
-c.init_records()

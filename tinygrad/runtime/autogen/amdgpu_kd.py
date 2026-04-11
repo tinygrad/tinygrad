@@ -1,10 +1,9 @@
 # mypy: disable-error-code="empty-body"
-from __future__ import annotations
 import ctypes
-from typing import Annotated, Literal, TypeAlias
+from typing import Literal, TypeAlias
 from tinygrad.runtime.support.c import _IO, _IOW, _IOR, _IOWR
 from tinygrad.runtime.support import c
-uint8_t: TypeAlias = Annotated[int, ctypes.c_ubyte]
+uint8_t: TypeAlias = ctypes.c_ubyte
 class _anonenum0(uint8_t, c.Enum): pass
 FLOAT_ROUND_MODE_NEAR_EVEN = _anonenum0.define('FLOAT_ROUND_MODE_NEAR_EVEN', 0)
 FLOAT_ROUND_MODE_PLUS_INFINITY = _anonenum0.define('FLOAT_ROUND_MODE_PLUS_INFINITY', 1)
@@ -23,7 +22,7 @@ SYSTEM_VGPR_WORKITEM_ID_X_Y = _anonenum2.define('SYSTEM_VGPR_WORKITEM_ID_X_Y', 1
 SYSTEM_VGPR_WORKITEM_ID_X_Y_Z = _anonenum2.define('SYSTEM_VGPR_WORKITEM_ID_X_Y_Z', 2)
 SYSTEM_VGPR_WORKITEM_ID_UNDEFINED = _anonenum2.define('SYSTEM_VGPR_WORKITEM_ID_UNDEFINED', 3)
 
-int32_t: TypeAlias = Annotated[int, ctypes.c_int32]
+int32_t: TypeAlias = ctypes.c_int32
 class _anonenum3(int32_t, c.Enum): pass
 COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT_SHIFT = _anonenum3.define('COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT_SHIFT', 0)
 COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT_WIDTH = _anonenum3.define('COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT_WIDTH', 6)
@@ -255,21 +254,22 @@ KERNARG_PRELOAD_SPEC_OFFSET = _anonenum8.define('KERNARG_PRELOAD_SPEC_OFFSET', 6
 @c.record
 class llvm_amdhsa_kernel_descriptor_t(c.Struct):
   SIZE = 64
-  group_segment_fixed_size: Annotated[uint32_t, 0]
-  private_segment_fixed_size: Annotated[uint32_t, 4]
-  kernarg_size: Annotated[uint32_t, 8]
-  reserved0: Annotated[c.Array[uint8_t, Literal[4]], 12]
-  kernel_code_entry_byte_offset: Annotated[int64_t, 16]
-  reserved1: Annotated[c.Array[uint8_t, Literal[20]], 24]
-  compute_pgm_rsrc3: Annotated[uint32_t, 44]
-  compute_pgm_rsrc1: Annotated[uint32_t, 48]
-  compute_pgm_rsrc2: Annotated[uint32_t, 52]
-  kernel_code_properties: Annotated[uint16_t, 56]
-  kernarg_preload: Annotated[uint16_t, 58]
-  reserved3: Annotated[c.Array[uint8_t, Literal[4]], 60]
-uint32_t: TypeAlias = Annotated[int, ctypes.c_uint32]
-int64_t: TypeAlias = Annotated[int, ctypes.c_int64]
-uint16_t: TypeAlias = Annotated[int, ctypes.c_uint16]
+  group_segment_fixed_size: 'uint32_t'
+  private_segment_fixed_size: 'uint32_t'
+  kernarg_size: 'uint32_t'
+  reserved0: 'c.Array[uint8_t, Literal[4]]'
+  kernel_code_entry_byte_offset: 'int64_t'
+  reserved1: 'c.Array[uint8_t, Literal[20]]'
+  compute_pgm_rsrc3: 'uint32_t'
+  compute_pgm_rsrc1: 'uint32_t'
+  compute_pgm_rsrc2: 'uint32_t'
+  kernel_code_properties: 'uint16_t'
+  kernarg_preload: 'uint16_t'
+  reserved3: 'c.Array[uint8_t, Literal[4]]'
+uint32_t: TypeAlias = ctypes.c_uint32
+int64_t: TypeAlias = ctypes.c_int64
+uint16_t: TypeAlias = ctypes.c_uint16
+llvm_amdhsa_kernel_descriptor_t.register_fields([('group_segment_fixed_size', uint32_t, 0), ('private_segment_fixed_size', uint32_t, 4), ('kernarg_size', uint32_t, 8), ('reserved0', c.Array[uint8_t, Literal[4]], 12), ('kernel_code_entry_byte_offset', int64_t, 16), ('reserved1', c.Array[uint8_t, Literal[20]], 24), ('compute_pgm_rsrc3', uint32_t, 44), ('compute_pgm_rsrc1', uint32_t, 48), ('compute_pgm_rsrc2', uint32_t, 52), ('kernel_code_properties', uint16_t, 56), ('kernarg_preload', uint16_t, 58), ('reserved3', c.Array[uint8_t, Literal[4]], 60)])
 class _anonenum9(uint32_t, c.Enum): pass
 GROUP_SEGMENT_FIXED_SIZE_OFFSET = _anonenum9.define('GROUP_SEGMENT_FIXED_SIZE_OFFSET', 0)
 PRIVATE_SEGMENT_FIXED_SIZE_OFFSET = _anonenum9.define('PRIVATE_SEGMENT_FIXED_SIZE_OFFSET', 4)
@@ -284,4 +284,3 @@ KERNEL_CODE_PROPERTIES_OFFSET = _anonenum9.define('KERNEL_CODE_PROPERTIES_OFFSET
 KERNARG_PRELOAD_OFFSET = _anonenum9.define('KERNARG_PRELOAD_OFFSET', 58)
 RESERVED3_OFFSET = _anonenum9.define('RESERVED3_OFFSET', 60)
 
-c.init_records()
