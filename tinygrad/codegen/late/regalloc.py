@@ -3,7 +3,7 @@ from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat
 from tinygrad.renderer.isa import ISARenderer, Register
 from tinygrad.dtype import dtypes, PtrDType
 
-PSEUDO_OPS = {Ops.NOOP, Ops.AFTER, Ops.BARRIER, Ops.GROUP}
+PSEUDO_OPS = {Ops.CONST, Ops.NOOP, Ops.AFTER, Ops.BARRIER, Ops.GROUP}
 
 # loosely based on: https://bernsteinbear.com/assets/img/register-spilling-range-splitting-ssa.pdf
 class LinearScanRegallocContext:
@@ -115,5 +115,5 @@ def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
   return nx, fills + [nx] + spills
 
 pm_regalloc_rewrite = PatternMatcher([
-  (UPat({Ops.INS, Ops.RANGE, Ops.END, Ops.NOOP, Ops.GROUP, Ops.AFTER, Ops.BARRIER}, name="x"), regalloc_rewrite),
+  (UPat({Ops.INS, Ops.RANGE, Ops.END} | PSEUDO_OPS, name="x"), regalloc_rewrite),
 ])
