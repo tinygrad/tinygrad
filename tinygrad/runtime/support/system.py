@@ -4,7 +4,7 @@ from tinygrad.helpers import round_up, getenv, OSX, temp, ceildiv, unwrap, fetch
 from tinygrad.runtime.autogen import libc, pci, vfio, iokit, corefoundation
 from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface, HCQBuffer, hcq_filter_visible_devices
 from tinygrad.runtime.support.memory import VirtMapping, AddrSpace, BumpAllocator
-from tinygrad.runtime.support.usb import USB3, CustomASM24Controller, ASM24Controller, USBMMIOInterface
+from tinygrad.runtime.support.usb import USB3, CustomASM24Controller, USBMMIOInterface
 
 MAP_FIXED, MAP_FIXED_NOREPLACE = 0x10, 0x100000
 MAP_LOCKED, MAP_POPULATE, MAP_NORESERVE = 0 if OSX else 0x2000, getattr(mmap, "MAP_POPULATE", 0 if OSX else 0x008000), 0x400
@@ -85,54 +85,54 @@ class _System:
     except IndexError: raise RuntimeError(f"{device}:{dev_id} does not exist ({pluralize('device', len(ds))} available)")
     return cl(device[:2], pcibus)
 
-  def pci_setup_usb_bars(self, usb:CustomASM24Controller|ASM24Controller, gpu_bus:int, mem_base:int, pref_mem_base:int) -> dict[int, tuple[int, int]]:
+  def pci_setup_usb_bars(self, usb:CustomASM24Controller, gpu_bus:int, mem_base:int, pref_mem_base:int) -> dict[int, tuple[int, int]]:
     for bus in range(gpu_bus):
       # All 3 values must be written at the same time.
       buses = (0 << 0) | ((bus+1) << 8) | ((gpu_bus) << 16)
-      usb.pcie_cfg_req(pci.PCI_PRIMARY_BUS, bus=bus, dev=0, fn=0, value=buses, size=4)
+      usb.pcie_cfg_req(pci.PCI_PRIMARY_BUS, bus=bus, value=buses, size=4)
 
-      usb.pcie_cfg_req(pci.PCI_MEMORY_BASE, bus=bus, dev=0, fn=0, value=(mem_base>>16) & 0xffff, size=2)
-      usb.pcie_cfg_req(pci.PCI_MEMORY_LIMIT, bus=bus, dev=0, fn=0, value=0xffff, size=2)
-      usb.pcie_cfg_req(pci.PCI_PREF_MEMORY_BASE, bus=bus, dev=0, fn=0, value=(pref_mem_base>>16) & 0xffff, size=2)
-      usb.pcie_cfg_req(pci.PCI_PREF_MEMORY_LIMIT, bus=bus, dev=0, fn=0, value=0xffff, size=2)
-      usb.pcie_cfg_req(pci.PCI_PREF_BASE_UPPER32,  bus=bus, dev=0, fn=0, value=pref_mem_base >> 32, size=4)
-      usb.pcie_cfg_req(pci.PCI_PREF_LIMIT_UPPER32, bus=bus, dev=0, fn=0, value=0xffffffff, size=4)
+      usb.pcie_cfg_req(pci.PCI_MEMORY_BASE, bus=bus, value=(mem_base>>16) & 0xffff, size=2)
+      usb.pcie_cfg_req(pci.PCI_MEMORY_LIMIT, bus=bus, value=0xffff, size=2)
+      usb.pcie_cfg_req(pci.PCI_PREF_MEMORY_BASE, bus=bus, value=(pref_mem_base>>16) & 0xffff, size=2)
+      usb.pcie_cfg_req(pci.PCI_PREF_MEMORY_LIMIT, bus=bus, value=0xffff, size=2)
+      usb.pcie_cfg_req(pci.PCI_PREF_BASE_UPPER32,  bus=bus, value=pref_mem_base >> 32, size=4)
+      usb.pcie_cfg_req(pci.PCI_PREF_LIMIT_UPPER32, bus=bus, value=0xffffffff, size=4)
 
-      usb.pcie_cfg_req(pci.PCI_COMMAND, bus=bus, dev=0, fn=0, value=pci.PCI_COMMAND_IO | pci.PCI_COMMAND_MEMORY | pci.PCI_COMMAND_MASTER, size=1)
+      usb.pcie_cfg_req(pci.PCI_COMMAND, bus=bus, value=pci.PCI_COMMAND_IO | pci.PCI_COMMAND_MEMORY | pci.PCI_COMMAND_MASTER, size=1)
 
     # resize bar 0
     cap_ptr = 0x100
     while cap_ptr:
-      if pci.PCI_EXT_CAP_ID(hdr:=usb.pcie_cfg_req(cap_ptr, bus=gpu_bus, dev=0, fn=0, size=4)) == pci.PCI_EXT_CAP_ID_REBAR:
-        cap = usb.pcie_cfg_req(cap_ptr + 0x04, bus=gpu_bus, dev=0, fn=0, size=4)
-        new_ctrl = (usb.pcie_cfg_req(cap_ptr + 0x08, bus=gpu_bus, dev=0, fn=0, size=4) & ~0x1F00) | ((int(cap >> 4).bit_length() - 1) << 8)
-        usb.pcie_cfg_req(cap_ptr + 0x08, bus=gpu_bus, dev=0, fn=0, value=new_ctrl, size=4)
+      if pci.PCI_EXT_CAP_ID(hdr:=usb.pcie_cfg_req(cap_ptr, bus=gpu_bus, size=4)) == pci.PCI_EXT_CAP_ID_REBAR:
+        cap = usb.pcie_cfg_req(cap_ptr + 0x04, bus=gpu_bus, size=4)
+        new_ctrl = (usb.pcie_cfg_req(cap_ptr + 0x08, bus=gpu_bus, size=4) & ~0x1F00) | ((int(cap >> 4).bit_length() - 1) << 8)
+        usb.pcie_cfg_req(cap_ptr + 0x08, bus=gpu_bus, value=new_ctrl, size=4)
 
       cap_ptr = pci.PCI_EXT_CAP_NEXT(hdr)
 
     mem_space_addr, bar_off, bars = [mem_base, pref_mem_base], 0, {}
     while bar_off < 24:
-      cfg = usb.pcie_cfg_req(pci.PCI_BASE_ADDRESS_0 + bar_off, bus=gpu_bus, dev=0, fn=0, size=4)
+      cfg = usb.pcie_cfg_req(pci.PCI_BASE_ADDRESS_0 + bar_off, bus=gpu_bus, size=4)
       bar_mem, bar_64 = bool(cfg & pci.PCI_BASE_ADDRESS_MEM_PREFETCH), cfg & pci.PCI_BASE_ADDRESS_MEM_TYPE_64
 
       if (cfg & pci.PCI_BASE_ADDRESS_SPACE) == pci.PCI_BASE_ADDRESS_SPACE_MEMORY:
-        usb.pcie_cfg_req(pci.PCI_BASE_ADDRESS_0 + bar_off, bus=gpu_bus, dev=0, fn=0, value=0xffffffff, size=4)
-        lo = (usb.pcie_cfg_req(pci.PCI_BASE_ADDRESS_0 + bar_off, bus=gpu_bus, dev=0, fn=0, size=4) & 0xfffffff0)
+        usb.pcie_cfg_req(pci.PCI_BASE_ADDRESS_0 + bar_off, bus=gpu_bus, value=0xffffffff, size=4)
+        lo = (usb.pcie_cfg_req(pci.PCI_BASE_ADDRESS_0 + bar_off, bus=gpu_bus, size=4) & 0xfffffff0)
 
-        if bar_64: usb.pcie_cfg_req(pci.PCI_BASE_ADDRESS_0 + bar_off + 4, bus=gpu_bus, dev=0, fn=0, value=0xffffffff, size=4)
-        hi = (usb.pcie_cfg_req(pci.PCI_BASE_ADDRESS_0 + bar_off + 4, bus=gpu_bus, dev=0, fn=0, size=4) if bar_64 else 0)
+        if bar_64: usb.pcie_cfg_req(pci.PCI_BASE_ADDRESS_0 + bar_off + 4, bus=gpu_bus, value=0xffffffff, size=4)
+        hi = (usb.pcie_cfg_req(pci.PCI_BASE_ADDRESS_0 + bar_off + 4, bus=gpu_bus, size=4) if bar_64 else 0)
 
         bar_size = ((~(((hi << 32) | lo) & ~0xf)) + 1) & (0xffffffffffffffff if bar_64 else 0xffffffff)
 
-        usb.pcie_cfg_req(pci.PCI_BASE_ADDRESS_0 + bar_off, bus=gpu_bus, dev=0, fn=0, value=mem_space_addr[bar_mem] & 0xffffffff, size=4)
-        if bar_64: usb.pcie_cfg_req(pci.PCI_BASE_ADDRESS_0 + bar_off + 4, bus=gpu_bus, dev=0, fn=0, value=mem_space_addr[bar_mem] >> 32, size=4)
+        usb.pcie_cfg_req(pci.PCI_BASE_ADDRESS_0 + bar_off, bus=gpu_bus, value=mem_space_addr[bar_mem] & 0xffffffff, size=4)
+        if bar_64: usb.pcie_cfg_req(pci.PCI_BASE_ADDRESS_0 + bar_off + 4, bus=gpu_bus, value=mem_space_addr[bar_mem] >> 32, size=4)
 
         bars[bar_off // 4] = (mem_space_addr[bar_mem], bar_size)
         mem_space_addr[bar_mem] += round_up(bar_size, 2 << 20)
 
       bar_off += 8 if bar_64 else 4
 
-    usb.pcie_cfg_req(pci.PCI_COMMAND, bus=gpu_bus, dev=0, fn=0, value=pci.PCI_COMMAND_IO | pci.PCI_COMMAND_MEMORY | pci.PCI_COMMAND_MASTER, size=1)
+    usb.pcie_cfg_req(pci.PCI_COMMAND, bus=gpu_bus, value=pci.PCI_COMMAND_IO | pci.PCI_COMMAND_MEMORY | pci.PCI_COMMAND_MASTER, size=1)
     return bars
 
   def flock_acquire(self, name:str) -> int:
@@ -221,9 +221,9 @@ class USBPCIDevice(PCIDevice):
   def __init__(self, devpref:str, dev, pcibus):
     self.pcibus, self.peer_group = pcibus, f"USBPCIDevice_{pcibus}"
     self.lock_fd = System.flock_acquire(f"{devpref.lower()}_{pcibus.lower()}.lock")
-    usb = USB3(dev, 0x81, 0x83, 0x02, 0x04)
+    usb = USB3(dev)
     if DEBUG >= 1: print(f"am {self.pcibus}: product string: {usb.product!r}")
-    self.usb: CustomASM24Controller | ASM24Controller = CustomASM24Controller(usb) if usb.is_custom else ASM24Controller(usb)
+    self.usb: CustomASM24Controller = CustomASM24Controller(usb)
     self._bar_info = System.pci_setup_usb_bars(self.usb, gpu_bus=4, mem_base=0x10000000, pref_mem_base=(32 << 30))
     self.sram = BumpAllocator(size=0x80000, wrap=False) # asm24 controller sram
 
@@ -231,8 +231,8 @@ class USBPCIDevice(PCIDevice):
   def alloc_sysmem(self, size:int, vaddr:int=0, contiguous:bool=False) -> tuple[MMIOInterface, list[int]]:
     return self.dma_view(0xf000 + (off:=self.sram.alloc(size)), size), [0x200000 + off]
 
-  def read_config(self, offset:int, size:int): return self.usb.pcie_cfg_req(offset, bus=4, dev=0, fn=0, size=size)
-  def write_config(self, offset:int, value:int, size:int): self.usb.pcie_cfg_req(offset, bus=4, dev=0, fn=0, value=value, size=size)
+  def read_config(self, offset:int, size:int): return self.usb.pcie_cfg_req(offset, bus=4, size=size)
+  def write_config(self, offset:int, value:int, size:int): self.usb.pcie_cfg_req(offset, bus=4, value=value, size=size)
 
   def bar_info(self, bar_idx:int) -> tuple[int, int]: return self._bar_info[bar_idx]  # type: ignore[override]
   def map_bar(self, bar, off=0, addr=0, size=None, fmt='B'):

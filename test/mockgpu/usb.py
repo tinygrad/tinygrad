@@ -6,12 +6,9 @@ class MockUSB:
   def __init__(self, mem):
     self.mem = mem
   def read(self, address, size): return bytes(self.mem[address:address+size])
-  def write(self, address, data, ignore_cache=False): self.mem[address:address+len(data)] = data
-  def pcie_mem_req(self, address, value=None, size=1):
-    if value is None: return int.from_bytes(self.mem[address:address+size], "little")
-    else: self.mem[address:address+size] = value.to_bytes(size, "little")
-  def pcie_mem_write(self, address, values, size):
-    for i, value in enumerate(values): self.pcie_mem_req(address + i * size, value, size)
+  def write(self, address, data): self.mem[address:address+len(data)] = data
+  def pcie_mem_read(self, address, nbytes): return bytes(self.mem[address:address+nbytes])
+  def pcie_mem_write(self, address, data): self.mem[address:address+len(data)] = data
 
 # *** ASM24 Controller Mock ***
 
@@ -205,7 +202,7 @@ class MockUSB3:
   @classmethod
   def list_devices(cls, vendor, dev): return [(0, "usb:mock")]
   def __init__(self, *args, **kwargs):
-    self.product, self.is_custom = "", False
+    self.product = "custom mock"
   def send_batch(self, cdbs:list[bytes], idata:list[int]|None=None, odata:list[bytes|None]|None=None) -> list[bytes|None]:
     assert _mock_usb_state is not None
     idata, odata = idata or [0] * len(cdbs), odata or [None] * len(cdbs)
