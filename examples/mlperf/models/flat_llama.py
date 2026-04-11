@@ -41,8 +41,8 @@ def matmul(x:Tensor, w:Tensor, fp8=FP8, amax_x:Tensor|None=None, amax_w:Tensor|N
   combined_scale = x_scale * w_scale
   if getenv("ASM_GEMM"):
     from extra.gemm.cdna_asm_gemm import can_use_asm_gemm, asm_gemm
-    if can_use_asm_gemm(x_fp8, w_fp8.T): return asm_gemm(x_fp8, w_fp8.T, combined_scale=combined_scale), x_new_amax, w_new_amax
-  return x_fp8.dot(w_fp8.T, dtype=dtypes.float) * combined_scale, x_new_amax, w_new_amax
+    if can_use_asm_gemm(x_fp8, w_fp8.T): return asm_gemm(x_fp8, w_fp8.T, combined_scale=combined_scale), x_new_amax, w_new_amax, x_fp8, w_fp8
+  return x_fp8.dot(w_fp8.T, dtype=dtypes.float) * combined_scale, x_new_amax, w_new_amax, x_fp8, w_fp8
 
 def rmsnorm(x_in:Tensor, eps:float):
   x = x_in.float()
@@ -100,9 +100,9 @@ class FlatTransformer:
 
     x = rmsnorm(x, self.norm_eps) * attention_norm
 
-    xqkv, *amaxs = matmul(x, wqkv, amax_x=amax_xqkv, amax_w=amax_wqkv)
-    new_amaxs.extend(amaxs)
-    saves.extend([xqkv])
+    xqkv, *ret = matmul(x, wqkv, amax_x=amax_xqkv, amax_w=amax_wqkv)
+    new_amaxs.extend(ret[:2])
+    saves.extend(ret[2:] + [xqkv])
     xqkv = xqkv.reshape(bsz, seqlen, self.n_kv_heads, self.n_rep + 2, self.head_dim)
     xq = xqkv[:, :, :, :self.n_rep].reshape(bsz, seqlen, self.n_heads, self.head_dim)
     xk = xqkv[:, :, :, self.n_rep].reshape(bsz, seqlen, self.n_kv_heads, self.head_dim)
@@ -119,9 +119,9 @@ class FlatTransformer:
       attn = xq.scaled_dot_product_attention(xk, xv, is_causal=True, enable_gqa=True)
     attn = attn.transpose(1, 2).reshape(bsz, seqlen, -1)
 
-    out, *amaxs = matmul(attn, wo, amax_x=amax_xo, amax_w=amax_wo)
-    new_amaxs.extend(amaxs)
-    saves.extend([out])
+    out, *ret = matmul(attn, wo, amax_x=amax_xo, amax_w=amax_wo)
+    new_amaxs.extend(ret[:2])
+    saves.extend(ret[2:] + [out])
     return (out, *new_amaxs, *saves)
 
   def feed_forward(self, x:Tensor, ffn_norm:Tensor, w1:Tensor, w2:Tensor, w3:Tensor,
@@ -130,15 +130,15 @@ class FlatTransformer:
 
     x = rmsnorm(x, self.norm_eps) * ffn_norm
 
-    x_w1, *amaxs = matmul(x, w1, amax_x=amax_x1, amax_w=amax_w1)
-    new_amaxs.extend(amaxs)
-    saves.extend([x_w1])
-    x_w3, *amaxs = matmul(x.contiguous_backward(), w3, amax_x=amax_x3, amax_w=amax_w3)
-    new_amaxs.extend(amaxs)
-    saves.extend([x_w3])
-    out, *amaxs = matmul(x_w1.silu() * x_w3, w2, amax_x=amax_x2, amax_w=amax_w2)
-    new_amaxs.extend(amaxs)
-    saves.extend([out])
+    x_w1, *ret = matmul(x, w1, amax_x=amax_x1, amax_w=amax_w1)
+    new_amaxs.extend(ret[:2])
+    saves.extend(ret[2:] + [x_w1])
+    x_w3, *ret = matmul(x.contiguous_backward(), w3, amax_x=amax_x3, amax_w=amax_w3)
+    new_amaxs.extend(ret[:2])
+    saves.extend(ret[2:] + [x_w3])
+    out, *ret = matmul(x_w1.silu() * x_w3, w2, amax_x=amax_x2, amax_w=amax_w2)
+    new_amaxs.extend(ret[:2])
+    saves.extend(ret[2:] + [out])
     return (out, *new_amaxs, *saves)
 
   @function(precompile=True, precompile_backward=True)
