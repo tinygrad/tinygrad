@@ -7,7 +7,7 @@ from tinygrad.helpers import partition, DEBUG, Timing, GlobalCounters, stderr_lo
 from tinygrad.viz.serve import TCPServerWithReuse, HTTPRequestHandler
 
 class SimpleTokenizer:
-  def __init__(self, normal_tokens:dict[str, int], special_tokens:dict[str, int], preset:str="llama3", backend_tokenizer=None):
+  def __init__(self, normal_tokens:dict[str, int], special_tokens:dict[str, int], preset:str="llama3"):
     preset = {"qwen35":"qwen2","qwen35moe":"qwen2"}.get(preset, preset)
     if preset not in ("llama3","llama-v3","llama-bpe","qwen2","olmo","kimi-k2","gemma4"): raise ValueError(f"Invalid tokenizer preset '{preset}'")
     # https://github.com/openai/gpt-2/blob/9b63575ef42771a015060c964af2c3da4cf7c8ab/src/encoder.py#L9
@@ -25,9 +25,9 @@ class SimpleTokenizer:
     self._normal_tokens = {tok.encode(): tid for tok, tid in normal_tokens.items()} if preset == "gemma4" else {
       bytes(self._byte_decoder[c] for c in tok): tid for tok, tid in normal_tokens.items()}
     self._special_tokens = special_tokens
+    self._special_token_ids = set(special_tokens.values())
     self._tok2bytes = {tid: tok for tok, tid in self._normal_tokens.items()} | {tid: tok.encode() for tok, tid in self._special_tokens.items()}
     self.preset = preset
-    self._backend_tokenizer = backend_tokenizer
 
   @staticmethod
   def from_gguf_kv(kv:dict):
@@ -36,7 +36,7 @@ class SimpleTokenizer:
     normal_tokens, special_tokens = partition(vocab, lambda e: kv["tokenizer.ggml.token_type"][e[1]] == 1)
     return SimpleTokenizer(
       dict(normal_tokens), dict(special_tokens),
-      kv.get("tokenizer.ggml.pre") or kv.get("tokenizer.ggml.model", "llama3"), _get_backend_tokenizer(kv))
+      kv.get("tokenizer.ggml.pre") or kv.get("tokenizer.ggml.model", "llama3"))
 
   def _encode_word(self, word:bytes) -> list[int]:
     if (early_token:=self._normal_tokens.get(word)) is not None: return [early_token]
@@ -49,9 +49,11 @@ class SimpleTokenizer:
     try: return [self._normal_tokens[p] for p in parts]
     except KeyError: raise RuntimeError("token not found")
   def _encode_sentence(self, chunk:str) -> list[int]:
+    if self.preset == "gemma4":
+      words = self._split_to_word.findall(chunk)
+      return [tok for word in words for tok in self._encode_word(("▁" * (len(word) - len(word.lstrip(" "))) + word.lstrip(" ")).encode())]
     return [tok for word in self._split_to_word.findall(chunk) for tok in self._encode_word(word.encode())]
   def encode(self, text:str) -> list[int]:
-    if self._backend_tokenizer is not None: return self._backend_tokenizer.encode(text, add_special_tokens=False).ids
     tokens: list[int] = []
     pos = 0
     for match in self._split_to_sentence.finditer(text):
@@ -60,11 +62,12 @@ class SimpleTokenizer:
     return tokens + self._encode_sentence(text[pos:])
 
   def decode(self, ids:list[int]) -> str:
-    if self._backend_tokenizer is not None: return self._backend_tokenizer.decode(ids)
-    return b''.join(self._tok2bytes[tid] for tid in ids).decode(errors='replace')
+    if self.preset == "gemma4": ids = [tid for tid in ids if tid not in self._special_token_ids]
+    dec = b''.join(self._tok2bytes[tid] for tid in ids).decode(errors='replace')
+    return dec.replace("▁", " ") if self.preset == "gemma4" else dec
   def stream_decoder(self) -> typing.Callable[[int|None], str]:
-    if self._backend_tokenizer is not None:
-      def _decode(tid:int|None=None) -> str: return self._backend_tokenizer.decode([tid]) if tid is not None else ""
+    if self.preset == "gemma4":
+      def _decode(tid:int|None=None) -> str: return self.decode([tid]) if tid is not None else ""
       return _decode
     dec = codecs.getincrementaldecoder('utf-8')('replace')
     def _decode(tid:int|None=None) -> str: return dec.decode(self._tok2bytes[tid]) if tid is not None else dec.decode(b'', final=True)
@@ -115,19 +118,6 @@ class ScaledExpertWeights(ExpertWeights):
 
 class ScalarWeight:
   def __init__(self): self.weight = Tensor.ones(1)
-
-@functools.cache
-def _get_gemma4_backend_tokenizer():
-  try:
-    import urllib.request
-    from tokenizers import Tokenizer
-    with urllib.request.urlopen("https://huggingface.co/google/gemma-4-E2B-it/resolve/main/tokenizer.json") as r:
-      return Tokenizer.from_str(r.read().decode())
-  except Exception:
-    return None
-
-def _get_backend_tokenizer(kv:dict):
-  return _get_gemma4_backend_tokenizer() if kv.get("tokenizer.ggml.model") == "gemma4" else None
 
 def rms_norm_no_weight(x:Tensor, eps:float) -> Tensor:
   return x * (x.square().mean(axis=-1, keepdim=True) + eps).rsqrt()
