@@ -287,7 +287,7 @@ class MLATransformerBlock(FFNBlock):
       self.cache_k = Tensor.empty(x.shape[0], 1, self.config.max_context, self.config.kv_lora_rank + self.config.rope_dim, device=x.device)
       self.cache_v = Tensor.empty(x.shape[0], 1, self.config.max_context, self.config.kv_lora_rank, device=x.device)
       self.freqs_cis = precompute_freqs_cis(self.config.rope_dim, self.config.max_context, self.config.rope_theta)
-      
+
 class GatedDeltaNetBlock(FFNBlock):
   def __init__(self, config:TransformerConfig, ssm:SSMConfig):
     super().__init__(config)
@@ -338,8 +338,10 @@ class GatedDeltaNetBlock(FFNBlock):
 
 class Transformer:
   def __init__(self, config:TransformerConfig):
+    self.blk: list[FFNBlock]
     if config.kv_lora_rank > 0:
-      dense_config = replace(config, num_experts=0, num_experts_per_tok=0, shared_expert_dim=0, hidden_dim=config.dense_hidden_dim or config.hidden_dim)
+      dense_config = replace(config, num_experts=0, num_experts_per_tok=0, shared_expert_dim=0,
+                             hidden_dim=config.dense_hidden_dim or config.hidden_dim)
       block_cls = MLATransformerBlock if config.kv_lora_rank > 0 else TransformerBlock
       self.blk = [block_cls(dense_config if i < config.leading_dense_blocks else config) for i in range(config.num_blocks)]
     else:
@@ -386,7 +388,7 @@ class Transformer:
     if arch in ('qwen35', 'qwen35moe'):
       ssm = SSMConfig(**{k: kv[f'{arch}.ssm.{k}'] for k in ('conv_kernel','state_size','group_count','time_step_rank','inner_size')})
       state_dict = {k.replace('post_attention_norm', 'ffn_norm'):v for k,v in state_dict.items()}
-      
+
     kv_lora_rank = kv.get(f'{arch}.attention.kv_lora_rank', 0)
     head_dim = kv.get(f'{arch}.attention.key_length_mla', kv.get(f'{arch}.attention.key_length', kv[f'{arch}.embedding_length'] // n_heads))
     rope_dim = kv.get(f'{arch}.rope.dimension_count', head_dim)
@@ -414,8 +416,6 @@ class Transformer:
       max_context=max_context,
       qk_norm=int(state_dict['blk.0.attn_q_norm.weight'].shape[0]) if 'blk.0.attn_q_norm.weight' in state_dict else 0,
       num_experts=kv.get(f'{arch}.expert_count', 0), num_experts_per_tok=kv.get(f'{arch}.expert_used_count', 0),
-      norm_topk_prob=arch in ('qwen3moe', 'qwen35moe'), shared_expert_dim=kv.get(f'{arch}.expert_shared_feed_forward_length', 0),
-      ssm=ssm, full_attention_interval=kv.get(f'{arch}.full_attention_interval', 0))
       norm_topk_prob=kv.get(f'{arch}.expert_weights_norm', arch in ('qwen3moe', 'qwen35moe')),
       kv_lora_rank=kv_lora_rank,
       leading_dense_blocks=kv.get(f'{arch}.leading_dense_block_count', 0),
@@ -424,7 +424,8 @@ class Transformer:
         kv.get(f'{arch}.expert_shared_count', 0) * kv.get(f'{arch}.expert_feed_forward_length', 0)),
       shared_expert_gate=f"blk.{kv.get(f'{arch}.leading_dense_block_count', 0)}.ffn_gate_inp_shexp.weight" in state_dict,
       dense_hidden_dim=kv.get(f'{arch}.feed_forward_length', 0) if kv.get(f'{arch}.leading_dense_block_count', 0) else 0,
-      routed_scaling_factor=kv.get(f'{arch}.expert_weights_scale', 1.0))
+      routed_scaling_factor=kv.get(f'{arch}.expert_weights_scale', 1.0), attn_output_gate=arch in ('qwen35', 'qwen35moe'), ssm=ssm,
+      full_attention_interval=kv.get(f'{arch}.full_attention_interval', 0))
     model = Transformer(config)
     nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused
     # NOTE: without this contiguous, it unpacks the weights from the model every time. we shouldn't need this, but for now it's faster
