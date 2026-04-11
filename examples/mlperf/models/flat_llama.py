@@ -1,4 +1,4 @@
-import math, os
+import math, os, functools
 if __name__ == "__main__":
   os.environ["DEFAULT_FLOAT"] = "bfloat16"
   os.environ["OPTIM_DTYPE"] = "bfloat16"
@@ -44,10 +44,25 @@ def matmul(x:Tensor, w:Tensor, fp8=FP8, amax_x:Tensor|None=None, amax_w:Tensor|N
     if can_use_asm_gemm(x_fp8, w_fp8.T): return asm_gemm(x_fp8, w_fp8.T, combined_scale=combined_scale), x_new_amax, w_new_amax, x_fp8, w_fp8
   return x_fp8.dot(w_fp8.T, dtype=dtypes.float) * combined_scale, x_new_amax, w_new_amax, x_fp8, w_fp8
 
-def rmsnorm(x_in:Tensor, eps:float):
+def _rmsnorm_fwd(x_in:Tensor, eps:float) -> tuple[Tensor, Tensor]:
   x = x_in.float()
-  x = x * (x.square().mean(-1, keepdim=True) + eps).rsqrt()
-  return x.cast(x_in.dtype)
+  rrms = (x.square().mean(-1, keepdim=True) + eps).rsqrt()
+  return (x * rrms).cast(x_in.dtype), rrms
+
+@functools.cache
+def _rmsnorm_fwd_fxn(x_in_p, eps, device):
+  return _rmsnorm_fwd(Tensor(x_in_p, device=device), eps)
+
+def _rmsnorm_bwd(grad:UOp, call:UOp) -> tuple:
+  x_normed = Tensor(call.gettuple(0)).float()
+  do_float = Tensor(grad).float()
+  d_x = Tensor(call.gettuple(1)) * (do_float - x_normed * (do_float * x_normed).mean(-1, keepdim=True))
+  return (d_x.cast(call.src[1].dtype).uop,)
+
+def rmsnorm(x_in:Tensor, eps:float) -> tuple[Tensor, Tensor]:
+  fxn = _rmsnorm_fwd_fxn(x_in.as_param(0).uop, eps, x_in.device)
+  call = UOp.maketuple(fxn[0].uop, fxn[1].uop).call(x_in.uop, grad_fxn=_rmsnorm_bwd)
+  return Tensor(call.gettuple(0)), Tensor(call.gettuple(1))
 
 class FlatTransformer:
   def __init__(self, dim:int, hidden_dim:int, n_heads:int, n_layers:int, norm_eps:float, vocab_size:int, n_kv_heads:int|None=None,
@@ -98,7 +113,9 @@ class FlatTransformer:
     bsz, seqlen, _ = x.shape
     new_amaxs, saves = [], []
 
-    x = rmsnorm(x, self.norm_eps) * attention_norm
+    x, rrms = rmsnorm(x, self.norm_eps)
+    saves.extend([x, rrms])
+    x = x * attention_norm
 
     xqkv, *ret = matmul(x, wqkv, amax_x=amax_xqkv, amax_w=amax_wqkv)
     new_amaxs.extend(ret[:2])
@@ -128,7 +145,9 @@ class FlatTransformer:
                    amax_x1=None, amax_w1=None, amax_x2=None, amax_w2=None, amax_x3=None, amax_w3=None):
     new_amaxs, saves = [], []
 
-    x = rmsnorm(x, self.norm_eps) * ffn_norm
+    x, rrms = rmsnorm(x, self.norm_eps)
+    saves.extend([x, rrms])
+    x = x * ffn_norm
 
     x_w1, *ret = matmul(x, w1, amax_x=amax_x1, amax_w=amax_w1)
     new_amaxs.extend(ret[:2])
