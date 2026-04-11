@@ -87,6 +87,14 @@ base_rules = [(r'\s*\\\n\s*', ' '), (r'\s*\n\s*', ' '), (r'//.*', ''), (r'/\*.*?
 uints = (clang.CXType_Char_U, clang.CXType_UChar, clang.CXType_UShort, clang.CXType_UInt, clang.CXType_ULong, clang.CXType_ULongLong)
 ints = uints + (clang.CXType_Char_S, clang.CXType_Short, clang.CXType_Int, clang.CXType_ULong, clang.CXType_LongLong)
 fps, specs = (clang.CXType_FunctionProto, clang.CXType_FunctionNoProto), (clang.CXCursor_ObjCSuperClassRef,) # this could include protocols
+
+tmap = {clang.CXType_Void:"None", clang.CXType_Char_U:"ctypes.c_ubyte", clang.CXType_UChar:"ctypes.c_ubyte", clang.CXType_WChar:"ctypes.c_wchar",
+        clang.CXType_Char_S:"ctypes.c_char", clang.CXType_SChar:"ctypes.c_byte", clang.CXType_Bool:"ctypes.c_bool",
+        **{getattr(clang, f'CXType_{k}'):f"ctypes.c_{k.lower()}" for k in ["Float", "Double", "LongDouble"]},
+        **{getattr(clang, f'CXType_{k}'):f"ctypes.c_{'u' if 'U' in k else ''}int{sz}" for sz,k in
+           [(16, "UShort"), (16, "Short"), (32, "UInt"), (32, "Int"), (64, "ULong"), (64, "Long"), (64, "ULongLong"), (64, "LongLong")]}}
+mypymap = {**{k:"int" for k in ints}, **{k:"float" for k in [clang.CXType_Float, clang.CXType_Double, clang.CXType_LongDouble]},
+           clang.CXType_WChar:"str", clang.CXType_SChar:"int", clang.CXType_Char_S:"bytes", clang.CXType_Bool:"bool"}
 # https://clang.llvm.org/docs/AutomaticReferenceCounting.html#arc-method-families
 arc_families = ['alloc', 'copy', 'mutableCopy', 'new']
 
@@ -97,11 +105,6 @@ def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False,
   def tname(t, suggested_name=None, typedef=None) -> str:
     suggested_name = anon_names.get(f"{loc_file(loc(decl:=clang.clang_getTypeDeclaration(t)))}:{loc_line(loc(decl))}", suggested_name)
     nonlocal lines, types, anoncnt, objc
-    tmap = {clang.CXType_Void:"None", clang.CXType_Char_U:"ctypes.c_ubyte", clang.CXType_UChar:"ctypes.c_ubyte", clang.CXType_WChar:"ctypes.c_wchar",
-            clang.CXType_Char_S:"ctypes.c_char", clang.CXType_SChar:"ctypes.c_byte", clang.CXType_Bool:"ctypes.c_bool",
-            **{getattr(clang, f'CXType_{k}'):f"ctypes.c_{k.lower()}" for k in ["Float", "Double", "LongDouble"]},
-            **{getattr(clang, f'CXType_{k}'):f"ctypes.c_{'u' if 'U' in k else ''}int{sz}" for sz,k in
-               [(16, "UShort"), (16, "Short"), (32, "UInt"), (32, "Int"), (64, "ULong"), (64, "Long"), (64, "ULongLong"), (64, "LongLong")]}}
 
     if t.kind in tmap: return tmap[t.kind]
     if nm(t) in types and types[nm(t)][1]: return types[nm(t)][0]
@@ -134,12 +137,12 @@ def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False,
           if typedef:
             lines.append(f"{typedef.replace('::', '_')}: TypeAlias = {tnm}")
             types[typedef] = typedef.replace('::', '_'), True
-        ff = [(normalize(f), ty:=tname(clang.clang_getCursorType(f), f"{tnm}_{nm(f)}"), ty, offset) +
+        ff = [(normalize(f), (ty:=clang.clang_getCursorType(f)).kind, tname(ty, f"{tnm}_{nm(f)}"), offset) +
               ((clang.clang_getFieldDeclBitWidth(f), clang.clang_Cursor_getOffsetOfField(f) % 8) * clang.clang_Cursor_isBitField(f))
               for f,offset in all_fields(t)]
         if ff:
           lines[ln] = "\n".join(["@c.record", f"class {tnm}(c.Struct):", f"  SIZE = {clang.clang_Type_getSizeOf(t)}"] +
-                                [f"  {f}: '{ty}'" for f,ty,*args in ff])
+                                [f"  {f}: {mypymap.get(ty, repr(args[0]))}" for f,ty,*args in ff])
           lines.append(f"{tnm}.register_fields([" + ", ".join([f"('{f}', {', '.join(str(a) for a in args)})" for f,ty,*args in ff]) + "])")
         return tnm
       case clang.CXType_Enum:
