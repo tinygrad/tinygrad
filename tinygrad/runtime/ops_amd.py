@@ -1097,7 +1097,7 @@ class AMDDevice(HCQCompiled):
 
   def synchronize(self, timeout:int|None=None):
     super().synchronize(timeout)
-    if self.is_am() and self.error_state is None: self.iface._collect_interrupts(reset=False, drain_only=True)
+    if self.is_am() and not self.is_usb() and self.error_state is None: self.iface._collect_interrupts(reset=False, drain_only=True)
 
   def on_device_hang(self): self.iface.on_device_hang()
 
