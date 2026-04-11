@@ -302,7 +302,8 @@ class GatedDeltaNetBlock(FFNBlock):
     self.ssm_norm, self.ssm_out = nn.RMSNorm(self.head_v_dim, config.norm_eps), nn.Linear(ssm.inner_size, config.dim, bias=False)
 
   def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
-    B, _, _ = x.shape
+    B, T, _ = x.shape
+    assert T == 1, "GatedDeltaNetBlock currently only supports T=1"
     x = x.half()
     out_gate = self.attn_gate(x).reshape(B, 1, self.num_v_heads, self.head_v_dim)
     beta = self.ssm_beta(x).sigmoid().reshape(B, self.num_v_heads, 1, 1)
@@ -338,16 +339,11 @@ class GatedDeltaNetBlock(FFNBlock):
 
 class Transformer:
   def __init__(self, config:TransformerConfig):
-    self.blk: list[FFNBlock]
-    if config.kv_lora_rank > 0:
-      dense_config = replace(config, num_experts=0, num_experts_per_tok=0, shared_expert_dim=0,
-                             hidden_dim=config.dense_hidden_dim or config.hidden_dim)
-      block_cls = MLATransformerBlock if config.kv_lora_rank > 0 else TransformerBlock
-      self.blk = [block_cls(dense_config if i < config.leading_dense_blocks else config) for i in range(config.num_blocks)]
-    else:
-      attn_config = config if not config.ssm else replace(config, qk_norm=config.head_dim)
-      self.blk = [GatedDeltaNetBlock(config, config.ssm) if config.ssm and (i+1) % config.full_attention_interval != 0 else
-                  TransformerBlock(attn_config) for i in range(config.num_blocks)]
+    dense_config = replace(config, num_experts=0, num_experts_per_tok=0, shared_expert_dim=0, hidden_dim=config.dense_hidden_dim or config.hidden_dim)
+    if config.ssm: config = replace(config, qk_norm=config.head_dim)
+    block_cls = MLATransformerBlock if config.kv_lora_rank > 0 else TransformerBlock
+    self.blk:list[FFNBlock] = [GatedDeltaNetBlock(config, config.ssm) if config.ssm and (i+1) % config.full_attention_interval != 0 else
+                               block_cls(dense_config if i < config.leading_dense_blocks else config) for i in range(config.num_blocks)]
     self.token_embd  = nn.Embedding(config.vocab_size, config.dim)
     self.output_norm = nn.RMSNorm(config.dim, config.norm_eps)
     self.output = nn.Linear(config.dim, config.vocab_size, bias=False)
@@ -449,8 +445,8 @@ class Transformer:
     # recompute start_pos from what's currently valid in the kv/ssm cache
     start_pos = self.get_start_pos(tokens)
     # SSM state is sequential: if tokens diverge from cache, state is invalid and must be rebuilt
-    if self.has_ssm and start_pos < len(self._cached_tokens):
-      Tensor.realize(*[b.delta_cache.assign(Tensor.zeros_like(b.delta_cache)) for b in self.blk if hasattr(b, 'delta_cache')])
+    if start_pos < len(self._cached_tokens) and (ssm_blks:=[b for b in self.blk if hasattr(b, 'delta_cache')]):
+      Tensor.realize(*[b.delta_cache.assign(Tensor.zeros_like(b.delta_cache)) for b in ssm_blks])
     out, prompt_len = None, len(tokens)
     while len(tokens) < self.max_context:
       sp, nt = v_start_pos.bind(start_pos), v_toks.bind(min(chunk_size, len(tokens) - start_pos))
