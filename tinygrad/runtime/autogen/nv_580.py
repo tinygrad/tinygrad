@@ -710,8 +710,8 @@ class struct__nvdec_vc1_pic_s(c.Struct):
   vstransform: int
   refdist: bytes
   reserved1: 'c.Array[ctypes.c_char, Literal[3]]'
-  fcm: 'vc1_fcm_e'
-  ptype: 'syntax_vc1_ptype_e'
+  fcm: int
+  ptype: int
   tfcntr: int
   rptfrm: int
   tff: int
@@ -727,13 +727,13 @@ class struct__nvdec_vc1_pic_s(c.Struct):
   pqdiff: int
   abspq: int
   dquantfrm: int
-  dqprofile: 'vc1_dqprofile_e'
+  dqprofile: int
   dqsbedge: int
   dqdbedge: int
   dqbilevel: int
   mvrange: int
-  mvmode: 'ctypes.c_uint32'
-  mvmode2: 'ctypes.c_uint32'
+  mvmode: int
+  mvmode2: int
   lumscale: int
   lumshift: int
   mvtab: int
@@ -741,7 +741,7 @@ class struct__nvdec_vc1_pic_s(c.Struct):
   ttmbf: int
   ttfrm: int
   bfraction: int
-  fptype: 'vc1_fptype_e'
+  fptype: int
   numref: int
   reffield: int
   dmvrange: int
@@ -3241,7 +3241,7 @@ class NV50VAIO_CHANNELDMA_ALLOCATION_PARAMETERS(c.Struct):
   offset: int
   pControl: 'NvP64'
   flags: int
-  channelPBSize: 'ctypes.c_uint32'
+  channelPBSize: int
   subDeviceId: int
 NV50VAIO_CHANNELDMA_ALLOCATION_PARAMETERS.register_fields([('channelInstance', NvV32, 0), ('hObjectBuffer', NvHandle, 4), ('hObjectNotify', NvHandle, 8), ('offset', NvU32, 12), ('pControl', NvP64, 16), ('flags', NvU32, 24), ('channelPBSize', ctypes.c_uint32, 28), ('subDeviceId', NvU32, 32)])
 @c.record
@@ -3378,7 +3378,7 @@ class NV_VIDMEM_ACCESS_BIT_ALLOCATION_PARAMS(c.Struct):
   granularity: int
   accessBitMask: 'c.Array[NvU64, Literal[64]]'
   noOfEntries: int
-  addrSpace: 'ctypes.c_uint32'
+  addrSpace: int
 NV_VIDMEM_ACCESS_BIT_ALLOCATION_PARAMS.register_fields([('bDirtyTracking', NvBool, 0), ('granularity', NvU32, 4), ('accessBitMask', c.Array[NvU64, Literal[64]], 8), ('noOfEntries', NvU32, 520), ('addrSpace', ctypes.c_uint32, 524)])
 @c.record
 class NV_HOPPER_USERMODE_A_PARAMS(c.Struct):
@@ -3538,7 +3538,7 @@ NVA06C_CTRL_PROGRAM_VIDMEM_PROMOTE_SIZE: TypeAlias = ctypes.c_uint32
 @c.record
 class struct_NVA06C_CTRL_PROGRAM_VIDMEM_PROMOTE_FIELD(c.Struct):
   SIZE = 4
-  size: 'NVA06C_CTRL_PROGRAM_VIDMEM_PROMOTE_SIZE'
+  size: int
 struct_NVA06C_CTRL_PROGRAM_VIDMEM_PROMOTE_FIELD.register_fields([('size', NVA06C_CTRL_PROGRAM_VIDMEM_PROMOTE_SIZE, 0)])
 NVA06C_CTRL_PROGRAM_VIDMEM_PROMOTE_FIELD: TypeAlias = struct_NVA06C_CTRL_PROGRAM_VIDMEM_PROMOTE_FIELD
 @c.record
@@ -4372,7 +4372,7 @@ class struct_NV0000_CTRL_SYSTEM_GET_CPU_INFO_PARAMS(c.Struct):
   stepping: int
   coresOnDie: int
   bCCEnabled: int
-  selfHostedSocType: 'NV0000_CTRL_SYSTEM_SH_SOC_TYPE'
+  selfHostedSocType: int
 struct_NV0000_CTRL_SYSTEM_GET_CPU_INFO_PARAMS.register_fields([('type', NvU32, 0), ('capabilities', NvU32, 4), ('clock', NvU32, 8), ('L1DataCacheSize', NvU32, 12), ('L2DataCacheSize', NvU32, 16), ('dataCacheLineSize', NvU32, 20), ('numLogicalCpus', NvU32, 24), ('numPhysicalCpus', NvU32, 28), ('name', c.Array[NvU8, Literal[52]], 32), ('family', NvU32, 84), ('model', NvU32, 88), ('stepping', NvU8, 92), ('coresOnDie', NvU32, 96), ('bCCEnabled', NvBool, 100), ('selfHostedSocType', NV0000_CTRL_SYSTEM_SH_SOC_TYPE, 104)])
 NV0000_CTRL_SYSTEM_GET_CPU_INFO_PARAMS: TypeAlias = struct_NV0000_CTRL_SYSTEM_GET_CPU_INFO_PARAMS
 @c.record
@@ -4619,7 +4619,7 @@ NV0000_CTRL_GET_SYSTEM_FABRIC_STATUS: TypeAlias = ctypes.c_uint32
 @c.record
 class struct_NV0000_CTRL_SYSTEM_GET_FABRIC_STATUS_PARAMS(c.Struct):
   SIZE = 4
-  fabricStatus: 'NV0000_CTRL_GET_SYSTEM_FABRIC_STATUS'
+  fabricStatus: int
 struct_NV0000_CTRL_SYSTEM_GET_FABRIC_STATUS_PARAMS.register_fields([('fabricStatus', NV0000_CTRL_GET_SYSTEM_FABRIC_STATUS, 0)])
 NV0000_CTRL_SYSTEM_GET_FABRIC_STATUS_PARAMS: TypeAlias = struct_NV0000_CTRL_SYSTEM_GET_FABRIC_STATUS_PARAMS
 @c.record
@@ -4696,7 +4696,7 @@ class struct_NV0000_CTRL_SYSTEM_NVPCF_GET_POWER_MODE_INFO_PARAMS(c.Struct):
   sysPwrLimitsTableVersion: int
   type: int
   cpuTdpmw: int
-  cpuTdpControlType: 'QBOOST_CPU_TDP_CONTROL_TYPE'
+  cpuTdpControlType: int
 @c.record
 class struct_NV0000_CTRL_SYSTEM_NVPCF_GET_POWER_MODE_INFO_PARAMS_filterParam(c.Struct):
   SIZE = 1
@@ -4834,7 +4834,7 @@ NV0000_CTRL_OS_UNIX_EXPORT_OBJECT_TYPE: TypeAlias = ctypes.c_uint32
 @c.record
 class struct_NV0000_CTRL_OS_UNIX_EXPORT_OBJECT(c.Struct):
   SIZE = 16
-  type: 'NV0000_CTRL_OS_UNIX_EXPORT_OBJECT_TYPE'
+  type: int
   data: 'struct_NV0000_CTRL_OS_UNIX_EXPORT_OBJECT_data'
 @c.record
 class struct_NV0000_CTRL_OS_UNIX_EXPORT_OBJECT_data(c.Struct):
@@ -5472,7 +5472,7 @@ NV0080_CTRL_GR_TPC_PARTITION_MODE: TypeAlias = ctypes.c_uint32
 class struct_NV0080_CTRL_GR_TPC_PARTITION_MODE_PARAMS(c.Struct):
   SIZE = 32
   hChannelGroup: int
-  mode: 'NV0080_CTRL_GR_TPC_PARTITION_MODE'
+  mode: int
   bEnableAllTpcs: int
   grRouteInfo: 'NV0080_CTRL_GR_ROUTE_INFO'
 struct_NV0080_CTRL_GR_TPC_PARTITION_MODE_PARAMS.register_fields([('hChannelGroup', NvHandle, 0), ('mode', NV0080_CTRL_GR_TPC_PARTITION_MODE, 4), ('bEnableAllTpcs', NvBool, 8), ('grRouteInfo', NV0080_CTRL_GR_ROUTE_INFO, 16)])
@@ -6565,7 +6565,7 @@ NV2080_CTRL_CE_LCE_TYPE: TypeAlias = ctypes.c_uint32
 @c.record
 class struct_NV2080_CTRL_INTERNAL_CE_GET_PCE_CONFIG_FOR_LCE_TYPE_PARAMS(c.Struct):
   SIZE = 28
-  lceType: 'NV2080_CTRL_CE_LCE_TYPE'
+  lceType: int
   metadataForLceType: int
   numPces: int
   numLces: int
@@ -6759,7 +6759,7 @@ class struct_NV2080_CTRL_EVENT_VIDEO_BIND_EVTBUF_PARAMS(c.Struct):
   SIZE = 20
   hEventBuffer: int
   recordSize: int
-  levelOfDetail: 'NV2080_CTRL_EVENT_VIDEO_BIND_EVTBUF_LOD'
+  levelOfDetail: int
   eventFilter: int
   bAllUsers: int
 struct_NV2080_CTRL_EVENT_VIDEO_BIND_EVTBUF_PARAMS.register_fields([('hEventBuffer', NvHandle, 0), ('recordSize', NvU32, 4), ('levelOfDetail', NV2080_CTRL_EVENT_VIDEO_BIND_EVTBUF_LOD, 8), ('eventFilter', NvU32, 12), ('bAllUsers', NvBool, 16)])
@@ -6941,8 +6941,8 @@ ACR_FALCON_LS_STATUS: TypeAlias = struct_ACR_FALCON_LS_STATUS
 @c.record
 class struct_NV2080_CTRL_CMD_FB_QUERY_ACR_REGION_PARAMS(c.Struct):
   SIZE = 96
-  queryType: 'NV2080_CTRL_CMD_FB_ACR_QUERY_TYPE'
-  errorCode: 'NV2080_CTRL_CMD_FB_ACR_QUERY_ERROR_CODE'
+  queryType: int
+  errorCode: int
   acrRegionIdProp: 'ACR_REGION_ID_PROP'
   clientReq: 'ACR_REQUEST_PARAMS'
   clientReqStatus: 'ACR_STATUS_PARAMS'
@@ -7049,7 +7049,7 @@ CTRL_CMD_FB_CBC_OP: TypeAlias = ctypes.c_uint32
 @c.record
 class struct_NV2080_CTRL_CMD_FB_CBC_OP_PARAMS(c.Struct):
   SIZE = 4
-  fbCBCOp: 'CTRL_CMD_FB_CBC_OP'
+  fbCBCOp: int
 struct_NV2080_CTRL_CMD_FB_CBC_OP_PARAMS.register_fields([('fbCBCOp', CTRL_CMD_FB_CBC_OP, 0)])
 NV2080_CTRL_CMD_FB_CBC_OP_PARAMS: TypeAlias = struct_NV2080_CTRL_CMD_FB_CBC_OP_PARAMS
 @c.record
@@ -7097,7 +7097,7 @@ VPR_STATUS_PARAMS: TypeAlias = struct_VPR_STATUS_PARAMS
 @c.record
 class struct_NV2080_CTRL_CMD_FB_SETUP_VPR_REGION_PARAMS(c.Struct):
   SIZE = 16
-  requestType: 'NV2080_CTRL_CMD_FB_VPR_REQUEST_TYPE'
+  requestType: int
   requestParams: 'VPR_REQUEST_PARAMS'
   statusParams: 'VPR_STATUS_PARAMS'
 struct_NV2080_CTRL_CMD_FB_SETUP_VPR_REGION_PARAMS.register_fields([('requestType', NV2080_CTRL_CMD_FB_VPR_REQUEST_TYPE, 0), ('requestParams', VPR_REQUEST_PARAMS, 4), ('statusParams', VPR_STATUS_PARAMS, 12)])
@@ -7534,7 +7534,7 @@ class struct_NV2080_CTRL_FB_GET_CARVEOUT_REGION_INFO(c.Struct):
   SIZE = 24
   base: int
   size: int
-  carveoutType: 'NV2080_CTRL_FB_GET_CARVEOUT_REGION_CARVEOUT_TYPE'
+  carveoutType: int
 struct_NV2080_CTRL_FB_GET_CARVEOUT_REGION_INFO.register_fields([('base', NvU64, 0), ('size', NvU64, 8), ('carveoutType', NV2080_CTRL_FB_GET_CARVEOUT_REGION_CARVEOUT_TYPE, 16)])
 NV2080_CTRL_FB_GET_CARVEOUT_REGION_INFO: TypeAlias = struct_NV2080_CTRL_FB_GET_CARVEOUT_REGION_INFO
 @c.record
@@ -7827,8 +7827,8 @@ NV2080_CTRL_FLA_ACTION: TypeAlias = ctypes.c_uint32
 class struct_NV2080_CTRL_FLA_SETUP_INSTANCE_MEM_BLOCK_PARAMS(c.Struct):
   SIZE = 16
   imbPhysAddr: int
-  addrSpace: 'NV2080_CTRL_FLA_ADDRSPACE'
-  flaAction: 'NV2080_CTRL_FLA_ACTION'
+  addrSpace: int
+  flaAction: int
 struct_NV2080_CTRL_FLA_SETUP_INSTANCE_MEM_BLOCK_PARAMS.register_fields([('imbPhysAddr', NvU64, 0), ('addrSpace', NV2080_CTRL_FLA_ADDRSPACE, 8), ('flaAction', NV2080_CTRL_FLA_ACTION, 12)])
 NV2080_CTRL_FLA_SETUP_INSTANCE_MEM_BLOCK_PARAMS: TypeAlias = struct_NV2080_CTRL_FLA_SETUP_INSTANCE_MEM_BLOCK_PARAMS
 @c.record
@@ -8379,7 +8379,7 @@ NV2080_CTRL_VPR_INFO_QUERY_TYPE: TypeAlias = ctypes.c_uint32
 @c.record
 class struct_NV2080_CTRL_GPU_GET_VPR_INFO_PARAMS(c.Struct):
   SIZE = 24
-  queryType: 'NV2080_CTRL_VPR_INFO_QUERY_TYPE'
+  queryType: int
   bIsVprEnabled: int
   vprStartAddressInBytes: int
   vprEndAddressInBytes: int
@@ -8390,7 +8390,7 @@ NV2080_CTRL_ENCODER_CAPACITY_QUERY_TYPE: TypeAlias = ctypes.c_uint32
 @c.record
 class struct_NV2080_CTRL_GPU_GET_ENCODER_CAPACITY_PARAMS(c.Struct):
   SIZE = 8
-  queryType: 'NV2080_CTRL_ENCODER_CAPACITY_QUERY_TYPE'
+  queryType: int
   encoderCapacity: int
 struct_NV2080_CTRL_GPU_GET_ENCODER_CAPACITY_PARAMS.register_fields([('queryType', NV2080_CTRL_ENCODER_CAPACITY_QUERY_TYPE, 0), ('encoderCapacity', NvU32, 4)])
 NV2080_CTRL_GPU_GET_ENCODER_CAPACITY_PARAMS: TypeAlias = struct_NV2080_CTRL_GPU_GET_ENCODER_CAPACITY_PARAMS
@@ -8724,7 +8724,7 @@ class struct_NV2080_CTRL_GPU_COMPUTE_POLICY_CONFIG(c.Struct):
 @c.record
 class struct_NV2080_CTRL_GPU_COMPUTE_POLICY_CONFIG_data(c.Struct):
   SIZE = 4
-  timeslice: 'NV2080_CTRL_GPU_COMPUTE_POLICY_CONFIG_DATA_TIMESLICE'
+  timeslice: int
 struct_NV2080_CTRL_GPU_COMPUTE_POLICY_CONFIG_data.register_fields([('timeslice', NV2080_CTRL_GPU_COMPUTE_POLICY_CONFIG_DATA_TIMESLICE, 0)])
 struct_NV2080_CTRL_GPU_COMPUTE_POLICY_CONFIG.register_fields([('type', NvU32, 0), ('data', struct_NV2080_CTRL_GPU_COMPUTE_POLICY_CONFIG_data, 4)])
 NV2080_CTRL_GPU_COMPUTE_POLICY_CONFIG: TypeAlias = struct_NV2080_CTRL_GPU_COMPUTE_POLICY_CONFIG
@@ -8952,7 +8952,7 @@ NV2080_CTRL_GPU_RECOVERY_ACTION: TypeAlias = ctypes.c_uint32
 @c.record
 class struct_NV2080_CTRL_GPU_GET_RECOVERY_ACTION_PARAMS(c.Struct):
   SIZE = 4
-  action: 'NV2080_CTRL_GPU_RECOVERY_ACTION'
+  action: int
 struct_NV2080_CTRL_GPU_GET_RECOVERY_ACTION_PARAMS.register_fields([('action', NV2080_CTRL_GPU_RECOVERY_ACTION, 0)])
 NV2080_CTRL_GPU_GET_RECOVERY_ACTION_PARAMS: TypeAlias = struct_NV2080_CTRL_GPU_GET_RECOVERY_ACTION_PARAMS
 @c.record
@@ -8966,7 +8966,7 @@ NV2080_RAFTS_FLOORSWEEP_UNIT_MASK_TYPE: TypeAlias = ctypes.c_uint32
 @c.record
 class struct_NV2080_RAFTS_FLOORSWEEP_INFO(c.Struct):
   SIZE = 12
-  unitType: 'NV2080_RAFTS_FLOORSWEEP_UNIT_MASK_TYPE'
+  unitType: int
   parentId: int
   mask: int
 struct_NV2080_RAFTS_FLOORSWEEP_INFO.register_fields([('unitType', NV2080_RAFTS_FLOORSWEEP_UNIT_MASK_TYPE, 0), ('parentId', NvU32, 4), ('mask', NvU32, 8)])
@@ -9406,7 +9406,7 @@ class struct_NV2080_CTRL_GR_FECS_BIND_EVTBUF_FOR_UID_PARAMS(c.Struct):
   SIZE = 20
   hEventBuffer: int
   recordSize: int
-  levelOfDetail: 'NV2080_CTRL_GR_FECS_BIND_EVTBUF_LOD'
+  levelOfDetail: int
   eventFilter: int
   bAllUsers: int
 struct_NV2080_CTRL_GR_FECS_BIND_EVTBUF_FOR_UID_PARAMS.register_fields([('hEventBuffer', NvHandle, 0), ('recordSize', NvU32, 4), ('levelOfDetail', NV2080_CTRL_GR_FECS_BIND_EVTBUF_LOD, 8), ('eventFilter', NvU32, 12), ('bAllUsers', NvBool, 16)])
@@ -9459,7 +9459,7 @@ class struct_NV2080_CTRL_GR_FECS_BIND_EVTBUF_FOR_UID_V2_PARAMS(c.Struct):
   SIZE = 24
   hEventBuffer: int
   recordSize: int
-  levelOfDetail: 'NV2080_CTRL_GR_FECS_BIND_EVTBUF_LOD'
+  levelOfDetail: int
   eventFilter: int
   bAllUsers: int
   reasonCode: int
@@ -11075,7 +11075,7 @@ class struct_NV2080_CTRL_INTERNAL_MEMMGR_MEMORY_TRANSFER_WITH_GSP_PARAMS(c.Struc
   dst: 'NV2080_CTRL_INTERNAL_TRANSFER_SURFACE_INFO'
   transferSize: int
   value: int
-  memop: 'NV2080_CTRL_MEMMGR_MEMORY_OP'
+  memop: int
 struct_NV2080_CTRL_INTERNAL_MEMMGR_MEMORY_TRANSFER_WITH_GSP_PARAMS.register_fields([('src', NV2080_CTRL_INTERNAL_TRANSFER_SURFACE_INFO, 0), ('authTag', c.Array[NvU8, Literal[16]], 32), ('dst', NV2080_CTRL_INTERNAL_TRANSFER_SURFACE_INFO, 48), ('transferSize', NvU64, 80), ('value', NvU32, 88), ('memop', NV2080_CTRL_MEMMGR_MEMORY_OP, 92)])
 NV2080_CTRL_INTERNAL_MEMMGR_MEMORY_TRANSFER_WITH_GSP_PARAMS: TypeAlias = struct_NV2080_CTRL_INTERNAL_MEMMGR_MEMORY_TRANSFER_WITH_GSP_PARAMS
 @c.record
@@ -12108,7 +12108,7 @@ NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE: TypeAlias = ctypes.c_uint32
 @c.record
 class struct_NV2080_CTRL_NVLINK_HW_ERROR_INJECT_CFG(c.Struct):
   SIZE = 16
-  errType: 'NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE'
+  errType: int
   errSettings: int
 struct_NV2080_CTRL_NVLINK_HW_ERROR_INJECT_CFG.register_fields([('errType', NV2080_CTRL_NVLINK_HW_ERROR_INJECT_ERR_TYPE, 0), ('errSettings', NvU64, 8)])
 NV2080_CTRL_NVLINK_HW_ERROR_INJECT_CFG: TypeAlias = struct_NV2080_CTRL_NVLINK_HW_ERROR_INJECT_CFG
@@ -12215,15 +12215,15 @@ NV2080_CTRL_NVLINK_INJECT_TLC_RX_LNK_REPORT_ERROR_TYPE: TypeAlias = ctypes.c_uin
 @c.record
 class union_NV2080_CTRL_NVLINK_INJECT_TLC_ERROR_TYPE(c.Struct):
   SIZE = 4
-  txSysErrorType: 'NV2080_CTRL_NVLINK_INJECT_TLC_TX_SYS_REPORT_ERROR_TYPE'
-  rxLnkErrorType: 'NV2080_CTRL_NVLINK_INJECT_TLC_RX_LNK_REPORT_ERROR_TYPE'
+  txSysErrorType: int
+  rxLnkErrorType: int
 union_NV2080_CTRL_NVLINK_INJECT_TLC_ERROR_TYPE.register_fields([('txSysErrorType', NV2080_CTRL_NVLINK_INJECT_TLC_TX_SYS_REPORT_ERROR_TYPE, 0), ('rxLnkErrorType', NV2080_CTRL_NVLINK_INJECT_TLC_RX_LNK_REPORT_ERROR_TYPE, 0)])
 NV2080_CTRL_NVLINK_INJECT_TLC_ERROR_TYPE: TypeAlias = union_NV2080_CTRL_NVLINK_INJECT_TLC_ERROR_TYPE
 @c.record
 class struct_NV2080_CTRL_NVLINK_INJECT_TLC_ERROR_PARAMS(c.Struct):
   SIZE = 16
   linkId: int
-  device: 'NV2080_CTRL_NVLINK_INJECT_TLC_ERROR_DEVICE'
+  device: int
   bBroadcast: int
   errorType: 'NV2080_CTRL_NVLINK_INJECT_TLC_ERROR_TYPE'
 struct_NV2080_CTRL_NVLINK_INJECT_TLC_ERROR_PARAMS.register_fields([('linkId', NvU32, 0), ('device', NV2080_CTRL_NVLINK_INJECT_TLC_ERROR_DEVICE, 4), ('bBroadcast', NvBool, 8), ('errorType', NV2080_CTRL_NVLINK_INJECT_TLC_ERROR_TYPE, 12)])
@@ -12385,7 +12385,7 @@ NV2080_CTRL_NVLINK_EOM_MEASUREMENT: TypeAlias = struct_NV2080_CTRL_NVLINK_EOM_ME
 @c.record
 class struct_NV2080_CTRL_NVLINK_EOM_CONTROL_PARAMS(c.Struct):
   SIZE = 28
-  cmd: 'NV2080_CTRL_CMD_NVLINK_EOM_CONTROL_PARAMS_COMMAND'
+  cmd: int
   linkId: int
   params: int
   measurements: 'c.Array[NV2080_CTRL_NVLINK_EOM_MEASUREMENT, Literal[4]]'
@@ -13055,7 +13055,7 @@ class struct_NV2080_CTRL_NVLINK_INJECT_SW_ERROR_PARAMS(c.Struct):
   SIZE = 32
   linkMask: int
   links: 'NV2080_CTRL_NVLINK_LINK_MASK'
-  severity: 'NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY'
+  severity: int
 struct_NV2080_CTRL_NVLINK_INJECT_SW_ERROR_PARAMS.register_fields([('linkMask', NvU32, 0), ('links', NV2080_CTRL_NVLINK_LINK_MASK, 8), ('severity', NV2080_CTRL_NVLINK_INJECT_SW_ERROR_SEVERITY, 24)])
 NV2080_CTRL_NVLINK_INJECT_SW_ERROR_PARAMS: TypeAlias = struct_NV2080_CTRL_NVLINK_INJECT_SW_ERROR_PARAMS
 @c.record
@@ -13080,7 +13080,7 @@ NV2080_CTRL_NVLINK_CONFIGURE_L1_TOGGLE_MODE: TypeAlias = ctypes.c_uint32
 @c.record
 class struct_NV2080_CTRL_NVLINK_L1_FORCE_CONFIG(c.Struct):
   SIZE = 8
-  mode: 'NV2080_CTRL_NVLINK_CONFIGURE_L1_TOGGLE_MODE'
+  mode: int
   toggleActiveTime: int
   toggleInactiveTime: int
   bTrigger: int
@@ -13266,16 +13266,16 @@ NV2080_CTRL_PERF_RATED_TDP_VPSTATE_TYPE: TypeAlias = ctypes.c_uint32
 @c.record
 class struct_NV2080_CTRL_PERF_RATED_TDP_CLIENT_REQUEST(c.Struct):
   SIZE = 8
-  action: 'NV2080_CTRL_PERF_RATED_TDP_ACTION'
-  vPstateType: 'NV2080_CTRL_PERF_RATED_TDP_VPSTATE_TYPE'
+  action: int
+  vPstateType: int
 struct_NV2080_CTRL_PERF_RATED_TDP_CLIENT_REQUEST.register_fields([('action', NV2080_CTRL_PERF_RATED_TDP_ACTION, 0), ('vPstateType', NV2080_CTRL_PERF_RATED_TDP_VPSTATE_TYPE, 4)])
 NV2080_CTRL_PERF_RATED_TDP_CLIENT_REQUEST: TypeAlias = struct_NV2080_CTRL_PERF_RATED_TDP_CLIENT_REQUEST
 @c.record
 class struct_NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS(c.Struct):
   SIZE = 56
   rm: 'struct_NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS_rm'
-  output: 'NV2080_CTRL_PERF_RATED_TDP_ACTION'
-  outputVPstate: 'NV2080_CTRL_PERF_RATED_TDP_VPSTATE_TYPE'
+  output: int
+  outputVPstate: int
   inputs: 'c.Array[NV2080_CTRL_PERF_RATED_TDP_ACTION, Literal[5]]'
   vPstateTypes: 'c.Array[NV2080_CTRL_PERF_RATED_TDP_VPSTATE_TYPE, Literal[5]]'
 @c.record
@@ -13289,9 +13289,9 @@ NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS: TypeAlias = struct_NV2080_CTRL_PERF_RA
 @c.record
 class struct_NV2080_CTRL_PERF_RATED_TDP_CONTROL_PARAMS(c.Struct):
   SIZE = 12
-  client: 'NV2080_CTRL_PERF_RATED_TDP_CLIENT'
-  input: 'NV2080_CTRL_PERF_RATED_TDP_ACTION'
-  vPstateType: 'NV2080_CTRL_PERF_RATED_TDP_VPSTATE_TYPE'
+  client: int
+  input: int
+  vPstateType: int
 struct_NV2080_CTRL_PERF_RATED_TDP_CONTROL_PARAMS.register_fields([('client', NV2080_CTRL_PERF_RATED_TDP_CLIENT, 0), ('input', NV2080_CTRL_PERF_RATED_TDP_ACTION, 4), ('vPstateType', NV2080_CTRL_PERF_RATED_TDP_VPSTATE_TYPE, 8)])
 NV2080_CTRL_PERF_RATED_TDP_CONTROL_PARAMS: TypeAlias = struct_NV2080_CTRL_PERF_RATED_TDP_CONTROL_PARAMS
 NV2080_CTRL_PERF_RATED_TDP_GET_CONTROL_PARAMS: TypeAlias = struct_NV2080_CTRL_PERF_RATED_TDP_CONTROL_PARAMS
@@ -13380,7 +13380,7 @@ NV2080_CTRL_CMD_PERF_VID_ENG: TypeAlias = ctypes.c_uint32
 @c.record
 class struct_NV2080_CTRL_PERF_GET_VID_ENG_PERFMON_SAMPLE_PARAMS(c.Struct):
   SIZE = 12
-  engineType: 'NV2080_CTRL_CMD_PERF_VID_ENG'
+  engineType: int
   clkPercentBusy: int
   samplingPeriodUs: int
 struct_NV2080_CTRL_PERF_GET_VID_ENG_PERFMON_SAMPLE_PARAMS.register_fields([('engineType', NV2080_CTRL_CMD_PERF_VID_ENG, 0), ('clkPercentBusy', NvU32, 4), ('samplingPeriodUs', NvU32, 8)])
@@ -13424,7 +13424,7 @@ NV2080_CTRL_GC6_FLAVOR_ID: TypeAlias = ctypes.c_uint32
 @c.record
 class struct_NV2080_CTRL_GC6_ENTRY_PARAMS(c.Struct):
   SIZE = 12
-  flavorId: 'NV2080_CTRL_GC6_FLAVOR_ID'
+  flavorId: int
   stepMask: int
   params: 'struct_NV2080_CTRL_GC6_ENTRY_PARAMS_params'
 @c.record
@@ -13439,7 +13439,7 @@ NV2080_CTRL_GC6_ENTRY_PARAMS: TypeAlias = struct_NV2080_CTRL_GC6_ENTRY_PARAMS
 @c.record
 class struct_NV2080_CTRL_GC6_EXIT_PARAMS(c.Struct):
   SIZE = 8
-  flavorId: 'NV2080_CTRL_GC6_FLAVOR_ID'
+  flavorId: int
   params: 'struct_NV2080_CTRL_GC6_EXIT_PARAMS_params'
 @c.record
 class struct_NV2080_CTRL_GC6_EXIT_PARAMS_params(c.Struct):
@@ -13455,7 +13455,7 @@ NV2080_CTRL_GC6_STEP_ID: TypeAlias = ctypes.c_uint32
 @c.record
 class struct_NV2080_CTRL_GC6_FLAVOR_INFO(c.Struct):
   SIZE = 8
-  flavorId: 'NV2080_CTRL_GC6_FLAVOR_ID'
+  flavorId: int
   stepMask: int
 struct_NV2080_CTRL_GC6_FLAVOR_INFO.register_fields([('flavorId', NV2080_CTRL_GC6_FLAVOR_ID, 0), ('stepMask', NvU32, 4)])
 NV2080_CTRL_GC6_FLAVOR_INFO: TypeAlias = struct_NV2080_CTRL_GC6_FLAVOR_INFO
@@ -13910,7 +13910,7 @@ class struct_NV2080_GUEST_VM_INFO(c.Struct):
   licenseExpiryStatus: int
   guestDriverVersion: 'c.Array[NvU8, Literal[64]]'
   guestDriverBranch: 'c.Array[NvU8, Literal[64]]'
-  guestVmInfoState: 'GUEST_VM_INFO_STATE'
+  guestVmInfoState: int
 enum_GUEST_VM_INFO_STATE: dict[int, str] = {(GUEST_VM_INFO_STATE_UNINITIALIZED:=0): 'GUEST_VM_INFO_STATE_UNINITIALIZED', (GUEST_VM_INFO_STATE_INITIALIZED:=1): 'GUEST_VM_INFO_STATE_INITIALIZED'}
 GUEST_VM_INFO_STATE: TypeAlias = ctypes.c_uint32
 struct_NV2080_GUEST_VM_INFO.register_fields([('vmPid', NvU32, 0), ('guestOs', NvU32, 4), ('migrationProhibited', NvU32, 8), ('guestNegotiatedVgpuVersion', NvU32, 12), ('frameRateLimit', NvU32, 16), ('licensed', NvBool, 20), ('licenseState', NvU32, 24), ('licenseExpiryTimestamp', NvU32, 28), ('licenseExpiryStatus', NvU8, 32), ('guestDriverVersion', c.Array[NvU8, Literal[64]], 33), ('guestDriverBranch', c.Array[NvU8, Literal[64]], 97), ('guestVmInfoState', GUEST_VM_INFO_STATE, 164)])
@@ -14423,7 +14423,7 @@ NVB0CC_REGOPS_MODE: TypeAlias = ctypes.c_uint32
 class struct_NVB0CC_CTRL_EXEC_REG_OPS_PARAMS(c.Struct):
   SIZE = 3980
   regOpCount: int
-  mode: 'NVB0CC_REGOPS_MODE'
+  mode: int
   bPassed: int
   bDirect: int
   regOps: 'c.Array[NVB0CC_GPU_REG_OP, Literal[124]]'
@@ -14489,7 +14489,7 @@ NVB0CC_CTRL_RESERVE_HES_PARAMS: TypeAlias = struct_NVB0CC_CTRL_RESERVE_HES_PARAM
 @c.record
 class struct_NVB0CC_CTRL_RELEASE_HES_PARAMS(c.Struct):
   SIZE = 4
-  type: 'NVB0CC_CTRL_HES_TYPE'
+  type: int
 struct_NVB0CC_CTRL_RELEASE_HES_PARAMS.register_fields([('type', NVB0CC_CTRL_HES_TYPE, 0)])
 NVB0CC_CTRL_RELEASE_HES_PARAMS: TypeAlias = struct_NVB0CC_CTRL_RELEASE_HES_PARAMS
 @c.record

@@ -3145,7 +3145,7 @@ enum_amdgpu_firmware_load_type: dict[int, str] = {(AMDGPU_FW_LOAD_DIRECT:=0): 'A
 @c.record
 class struct_amdgpu_firmware_info(c.Struct):
   SIZE = 48
-  ucode_id: 'ctypes.c_uint32'
+  ucode_id: int
   fw: 'c.POINTER[struct_firmware]'
   mc_addr: int
   kaddr: 'ctypes.c_void_p'
@@ -3231,7 +3231,7 @@ class struct_psp_gfx_cmd_load_ip_fw(c.Struct):
   fw_phy_addr_lo: int
   fw_phy_addr_hi: int
   fw_size: int
-  fw_type: 'ctypes.c_uint32'
+  fw_type: int
 struct_psp_gfx_cmd_load_ip_fw.register_fields([('fw_phy_addr_lo', ctypes.c_uint32, 0), ('fw_phy_addr_hi', ctypes.c_uint32, 4), ('fw_size', ctypes.c_uint32, 8), ('fw_type', ctypes.c_uint32, 12)])
 @c.record
 class struct_psp_gfx_cmd_save_restore_ip_fw(c.Struct):
@@ -3240,7 +3240,7 @@ class struct_psp_gfx_cmd_save_restore_ip_fw(c.Struct):
   save_restore_addr_lo: int
   save_restore_addr_hi: int
   buf_size: int
-  fw_type: 'ctypes.c_uint32'
+  fw_type: int
 struct_psp_gfx_cmd_save_restore_ip_fw.register_fields([('save_fw', ctypes.c_uint32, 0), ('save_restore_addr_lo', ctypes.c_uint32, 4), ('save_restore_addr_hi', ctypes.c_uint32, 8), ('buf_size', ctypes.c_uint32, 12), ('fw_type', ctypes.c_uint32, 16)])
 @c.record
 class struct_psp_gfx_cmd_reg_prog(c.Struct):
@@ -3259,7 +3259,7 @@ struct_psp_gfx_cmd_load_toc.register_fields([('toc_phy_addr_lo', ctypes.c_uint32
 class struct_psp_gfx_cmd_boot_cfg(c.Struct):
   SIZE = 16
   timestamp: int
-  sub_cmd: 'ctypes.c_uint32'
+  sub_cmd: int
   boot_config: int
   boot_config_valid: int
 struct_psp_gfx_cmd_boot_cfg.register_fields([('timestamp', ctypes.c_uint32, 0), ('sub_cmd', ctypes.c_uint32, 4), ('boot_config', ctypes.c_uint32, 8), ('boot_config_valid', ctypes.c_uint32, 12)])

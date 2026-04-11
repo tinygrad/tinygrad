@@ -2338,7 +2338,7 @@ LLVMMCJITMemoryManagerRef: TypeAlias = c.POINTER[struct_LLVMOpaqueMCJITMemoryMan
 class struct_LLVMMCJITCompilerOptions(c.Struct):
   SIZE = 24
   OptLevel: int
-  CodeModel: 'ctypes.c_uint32'
+  CodeModel: int
   NoFramePointerElim: int
   EnableFastISel: int
   MCJMM: 'LLVMMCJITMemoryManagerRef'
@@ -2443,7 +2443,7 @@ LLVMOrcLookupKind: dict[int, str] = {(LLVMOrcLookupKindStatic:=0): 'LLVMOrcLooku
 class LLVMOrcCJITDylibSearchOrderElement(c.Struct):
   SIZE = 16
   JD: 'LLVMOrcJITDylibRef'
-  JDLookupFlags: 'ctypes.c_uint32'
+  JDLookupFlags: int
 class struct_LLVMOrcOpaqueJITDylib(c.Struct): pass
 LLVMOrcJITDylibRef: TypeAlias = c.POINTER[struct_LLVMOrcOpaqueJITDylib]
 LLVMOrcJITDylibLookupFlags: dict[int, str] = {(LLVMOrcJITDylibLookupFlagsMatchExportedSymbolsOnly:=0): 'LLVMOrcJITDylibLookupFlagsMatchExportedSymbolsOnly', (LLVMOrcJITDylibLookupFlagsMatchAllSymbols:=1): 'LLVMOrcJITDylibLookupFlagsMatchAllSymbols'}
@@ -2453,7 +2453,7 @@ LLVMOrcCJITDylibSearchOrder: TypeAlias = c.POINTER[LLVMOrcCJITDylibSearchOrderEl
 class LLVMOrcCLookupSetElement(c.Struct):
   SIZE = 16
   Name: 'LLVMOrcSymbolStringPoolEntryRef'
-  LookupFlags: 'ctypes.c_uint32'
+  LookupFlags: int
 LLVMOrcSymbolLookupFlags: dict[int, str] = {(LLVMOrcSymbolLookupFlagsRequiredSymbol:=0): 'LLVMOrcSymbolLookupFlagsRequiredSymbol', (LLVMOrcSymbolLookupFlagsWeaklyReferencedSymbol:=1): 'LLVMOrcSymbolLookupFlagsWeaklyReferencedSymbol'}
 LLVMOrcCLookupSetElement.register_fields([('Name', LLVMOrcSymbolStringPoolEntryRef, 0), ('LookupFlags', ctypes.c_uint32, 8)])
 LLVMOrcCLookupSet: TypeAlias = c.POINTER[LLVMOrcCLookupSetElement]

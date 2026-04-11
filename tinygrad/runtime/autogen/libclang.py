@@ -143,7 +143,7 @@ def clang_getTUResourceUsageName(kind:ctypes.c_uint32) -> c.POINTER[ctypes.c_cha
 @c.record
 class struct_CXTUResourceUsageEntry(c.Struct):
   SIZE = 16
-  kind: 'ctypes.c_uint32'
+  kind: int
   amount: int
 struct_CXTUResourceUsageEntry.register_fields([('kind', ctypes.c_uint32, 0), ('amount', ctypes.c_uint64, 8)])
 CXTUResourceUsageEntry: TypeAlias = struct_CXTUResourceUsageEntry
@@ -171,7 +171,7 @@ enum_CXCursorKind: dict[int, str] = {(CXCursor_UnexposedDecl:=1): 'CXCursor_Unex
 @c.record
 class CXCursor(c.Struct):
   SIZE = 32
-  kind: 'ctypes.c_uint32'
+  kind: int
   xdata: int
   data: 'c.Array[ctypes.c_void_p, Literal[3]]'
 CXCursor.register_fields([('kind', ctypes.c_uint32, 0), ('xdata', ctypes.c_int32, 4), ('data', c.Array[ctypes.c_void_p, Literal[3]], 8)])
@@ -277,7 +277,7 @@ enum_CXCallingConv: dict[int, str] = {(CXCallingConv_Default:=0): 'CXCallingConv
 @c.record
 class CXType(c.Struct):
   SIZE = 24
-  kind: 'ctypes.c_uint32'
+  kind: int
   data: 'c.Array[ctypes.c_void_p, Literal[2]]'
 CXType.register_fields([('kind', ctypes.c_uint32, 0), ('data', c.Array[ctypes.c_void_p, Literal[2]], 8)])
 @dll.bind
@@ -621,7 +621,7 @@ CXCompletionString: TypeAlias = ctypes.c_void_p
 @c.record
 class CXCompletionResult(c.Struct):
   SIZE = 16
-  CursorKind: 'ctypes.c_uint32'
+  CursorKind: int
   CompletionString: 'CXCompletionString'
 CXCompletionResult.register_fields([('CursorKind', ctypes.c_uint32, 0), ('CompletionString', CXCompletionString, 8)])
 enum_CXCompletionChunkKind: dict[int, str] = {(CXCompletionChunk_Optional:=0): 'CXCompletionChunk_Optional', (CXCompletionChunk_TypedText:=1): 'CXCompletionChunk_TypedText', (CXCompletionChunk_Text:=2): 'CXCompletionChunk_Text', (CXCompletionChunk_Placeholder:=3): 'CXCompletionChunk_Placeholder', (CXCompletionChunk_Informative:=4): 'CXCompletionChunk_Informative', (CXCompletionChunk_CurrentParameter:=5): 'CXCompletionChunk_CurrentParameter', (CXCompletionChunk_LeftParen:=6): 'CXCompletionChunk_LeftParen', (CXCompletionChunk_RightParen:=7): 'CXCompletionChunk_RightParen', (CXCompletionChunk_LeftBracket:=8): 'CXCompletionChunk_LeftBracket', (CXCompletionChunk_RightBracket:=9): 'CXCompletionChunk_RightBracket', (CXCompletionChunk_LeftBrace:=10): 'CXCompletionChunk_LeftBrace', (CXCompletionChunk_RightBrace:=11): 'CXCompletionChunk_RightBrace', (CXCompletionChunk_LeftAngle:=12): 'CXCompletionChunk_LeftAngle', (CXCompletionChunk_RightAngle:=13): 'CXCompletionChunk_RightAngle', (CXCompletionChunk_Comma:=14): 'CXCompletionChunk_Comma', (CXCompletionChunk_ResultType:=15): 'CXCompletionChunk_ResultType', (CXCompletionChunk_Colon:=16): 'CXCompletionChunk_Colon', (CXCompletionChunk_SemiColon:=17): 'CXCompletionChunk_SemiColon', (CXCompletionChunk_Equal:=18): 'CXCompletionChunk_Equal', (CXCompletionChunk_HorizontalSpace:=19): 'CXCompletionChunk_HorizontalSpace', (CXCompletionChunk_VerticalSpace:=20): 'CXCompletionChunk_VerticalSpace'}
@@ -771,16 +771,16 @@ CXIdxAttrKind: dict[int, str] = {(CXIdxAttr_Unexposed:=0): 'CXIdxAttr_Unexposed'
 @c.record
 class CXIdxAttrInfo(c.Struct):
   SIZE = 64
-  kind: 'ctypes.c_uint32'
+  kind: int
   cursor: 'CXCursor'
   loc: 'CXIdxLoc'
 CXIdxAttrInfo.register_fields([('kind', ctypes.c_uint32, 0), ('cursor', CXCursor, 8), ('loc', CXIdxLoc, 40)])
 @c.record
 class CXIdxEntityInfo(c.Struct):
   SIZE = 80
-  kind: 'ctypes.c_uint32'
-  templateKind: 'ctypes.c_uint32'
-  lang: 'ctypes.c_uint32'
+  kind: int
+  templateKind: int
+  lang: int
   name: 'c.POINTER[ctypes.c_char]'
   USR: 'c.POINTER[ctypes.c_char]'
   cursor: 'CXCursor'
@@ -823,7 +823,7 @@ CXIdxObjCContainerKind: dict[int, str] = {(CXIdxObjCContainer_ForwardRef:=0): 'C
 class CXIdxObjCContainerDeclInfo(c.Struct):
   SIZE = 16
   declInfo: 'c.POINTER[CXIdxDeclInfo]'
-  kind: 'ctypes.c_uint32'
+  kind: int
 CXIdxObjCContainerDeclInfo.register_fields([('declInfo', c.POINTER[CXIdxDeclInfo], 0), ('kind', ctypes.c_uint32, 8)])
 @c.record
 class CXIdxBaseClassInfo(c.Struct):
@@ -880,13 +880,13 @@ CXSymbolRole: dict[int, str] = {(CXSymbolRole_None:=0): 'CXSymbolRole_None', (CX
 @c.record
 class CXIdxEntityRefInfo(c.Struct):
   SIZE = 96
-  kind: 'ctypes.c_uint32'
+  kind: int
   cursor: 'CXCursor'
   loc: 'CXIdxLoc'
   referencedEntity: 'c.POINTER[CXIdxEntityInfo]'
   parentEntity: 'c.POINTER[CXIdxEntityInfo]'
   container: 'c.POINTER[CXIdxContainerInfo]'
-  role: 'ctypes.c_uint32'
+  role: int
 CXIdxEntityRefInfo.register_fields([('kind', ctypes.c_uint32, 0), ('cursor', CXCursor, 8), ('loc', CXIdxLoc, 40), ('referencedEntity', c.POINTER[CXIdxEntityInfo], 64), ('parentEntity', c.POINTER[CXIdxEntityInfo], 72), ('container', c.POINTER[CXIdxContainerInfo], 80), ('role', ctypes.c_uint32, 88)])
 @c.record
 class IndexerCallbacks(c.Struct):

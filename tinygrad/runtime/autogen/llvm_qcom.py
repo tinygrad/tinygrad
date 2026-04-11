@@ -38,7 +38,7 @@ struct_cl_executable_data.register_fields([('num_kernels', int32_t, 0), ('kernel
 @c.record
 class cl_handle(c.Struct):
   SIZE = 16
-  type: 'ctypes.c_uint32'
+  type: int
   compiled: 'c.POINTER[struct_cl_compiled_data]'
   executable: 'c.POINTER[struct_cl_executable_data]'
 cl_handle.register_fields([('type', ctypes.c_uint32, 0), ('compiled', c.POINTER[struct_cl_compiled_data], 8), ('executable', c.POINTER[struct_cl_executable_data], 8)])

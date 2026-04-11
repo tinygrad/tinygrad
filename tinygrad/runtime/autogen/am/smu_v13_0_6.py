@@ -312,8 +312,8 @@ enum_smu_state_classification_flag: dict[int, str] = {(SMU_STATE_CLASSIFICATION_
 @c.record
 class struct_smu_state_classification_block(c.Struct):
   SIZE = 16
-  ui_label: 'ctypes.c_uint32'
-  flags: 'ctypes.c_uint32'
+  ui_label: int
+  flags: int
   bios_index: int
   temporary_state: bool
   to_be_deleted: bool
@@ -329,7 +329,7 @@ class struct_smu_state_display_block(c.Struct):
   SIZE = 20
   disable_frame_modulation: bool
   limit_refreshrate: bool
-  refreshrate_source: 'ctypes.c_uint32'
+  refreshrate_source: int
   explicit_refreshrate: int
   edid_refreshrate_index: int
   enable_vari_bright: bool

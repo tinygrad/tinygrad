@@ -103,7 +103,7 @@ CUstreamMemoryBarrier_flags: TypeAlias = ctypes.c_uint32
 @c.record
 class union_CUstreamBatchMemOpParams_union(c.Struct):
   SIZE = 48
-  operation: 'CUstreamBatchMemOpType'
+  operation: int
   waitValue: 'struct_CUstreamMemOpWaitValueParams_st'
   writeValue: 'struct_CUstreamMemOpWriteValueParams_st'
   flushRemoteWrites: 'struct_CUstreamMemOpFlushRemoteWritesParams_st'
@@ -112,7 +112,7 @@ class union_CUstreamBatchMemOpParams_union(c.Struct):
 @c.record
 class struct_CUstreamMemOpWaitValueParams_st(c.Struct):
   SIZE = 40
-  operation: 'CUstreamBatchMemOpType'
+  operation: int
   address: int
   value: int
   value64: int
@@ -122,7 +122,7 @@ struct_CUstreamMemOpWaitValueParams_st.register_fields([('operation', CUstreamBa
 @c.record
 class struct_CUstreamMemOpWriteValueParams_st(c.Struct):
   SIZE = 40
-  operation: 'CUstreamBatchMemOpType'
+  operation: int
   address: int
   value: int
   value64: int
@@ -132,13 +132,13 @@ struct_CUstreamMemOpWriteValueParams_st.register_fields([('operation', CUstreamB
 @c.record
 class struct_CUstreamMemOpFlushRemoteWritesParams_st(c.Struct):
   SIZE = 8
-  operation: 'CUstreamBatchMemOpType'
+  operation: int
   flags: int
 struct_CUstreamMemOpFlushRemoteWritesParams_st.register_fields([('operation', CUstreamBatchMemOpType, 0), ('flags', ctypes.c_uint32, 4)])
 @c.record
 class struct_CUstreamMemOpMemoryBarrierParams_st(c.Struct):
   SIZE = 8
-  operation: 'CUstreamBatchMemOpType'
+  operation: int
   flags: int
 struct_CUstreamMemOpMemoryBarrierParams_st.register_fields([('operation', CUstreamBatchMemOpType, 0), ('flags', ctypes.c_uint32, 4)])
 union_CUstreamBatchMemOpParams_union.register_fields([('operation', CUstreamBatchMemOpType, 0), ('waitValue', struct_CUstreamMemOpWaitValueParams_st, 0), ('writeValue', struct_CUstreamMemOpWriteValueParams_st, 0), ('flushRemoteWrites', struct_CUstreamMemOpFlushRemoteWritesParams_st, 0), ('memoryBarrier', struct_CUstreamMemOpMemoryBarrierParams_st, 0), ('pad', c.Array[cuuint64_t, Literal[6]], 0)])
@@ -230,8 +230,8 @@ class struct_CUaccessPolicyWindow_st(c.Struct):
   base_ptr: 'ctypes.c_void_p'
   num_bytes: int
   hitRatio: float
-  hitProp: 'CUaccessProperty'
-  missProp: 'CUaccessProperty'
+  hitProp: int
+  missProp: int
 size_t: TypeAlias = ctypes.c_uint64
 struct_CUaccessPolicyWindow_st.register_fields([('base_ptr', ctypes.c_void_p, 0), ('num_bytes', size_t, 8), ('hitRatio', ctypes.c_float, 16), ('hitProp', CUaccessProperty, 20), ('missProp', CUaccessProperty, 24)])
 CUaccessPolicyWindow_v1: TypeAlias = struct_CUaccessPolicyWindow_st
@@ -299,7 +299,7 @@ class struct_CUDA_GRAPH_INSTANTIATE_PARAMS_st(c.Struct):
   flags: int
   hUploadStream: 'CUstream'
   hErrNode_out: 'CUgraphNode'
-  result_out: 'CUgraphInstantiateResult'
+  result_out: int
 struct_CUDA_GRAPH_INSTANTIATE_PARAMS_st.register_fields([('flags', cuuint64_t, 0), ('hUploadStream', CUstream, 8), ('hErrNode_out', CUgraphNode, 16), ('result_out', CUgraphInstantiateResult, 24)])
 CUDA_GRAPH_INSTANTIATE_PARAMS: TypeAlias = struct_CUDA_GRAPH_INSTANTIATE_PARAMS_st
 enum_CUsynchronizationPolicy_enum: dict[int, str] = {(CU_SYNC_POLICY_AUTO:=1): 'CU_SYNC_POLICY_AUTO', (CU_SYNC_POLICY_SPIN:=2): 'CU_SYNC_POLICY_SPIN', (CU_SYNC_POLICY_YIELD:=3): 'CU_SYNC_POLICY_YIELD', (CU_SYNC_POLICY_BLOCKING_SYNC:=4): 'CU_SYNC_POLICY_BLOCKING_SYNC'}
@@ -323,14 +323,14 @@ class union_CUlaunchAttributeValue_union(c.Struct):
   pad: 'c.Array[ctypes.c_char, Literal[64]]'
   accessPolicyWindow: 'CUaccessPolicyWindow'
   cooperative: int
-  syncPolicy: 'CUsynchronizationPolicy'
+  syncPolicy: int
   clusterDim: 'union_CUlaunchAttributeValue_union_clusterDim'
-  clusterSchedulingPolicyPreference: 'CUclusterSchedulingPolicy'
+  clusterSchedulingPolicyPreference: int
   programmaticStreamSerializationAllowed: int
   programmaticEvent: 'union_CUlaunchAttributeValue_union_programmaticEvent'
   priority: int
   memSyncDomainMap: 'CUlaunchMemSyncDomainMap'
-  memSyncDomain: 'CUlaunchMemSyncDomain'
+  memSyncDomain: int
 @c.record
 class union_CUlaunchAttributeValue_union_clusterDim(c.Struct):
   SIZE = 12
@@ -350,7 +350,7 @@ CUlaunchAttributeValue: TypeAlias = union_CUlaunchAttributeValue_union
 @c.record
 class struct_CUlaunchAttribute_st(c.Struct):
   SIZE = 72
-  id: 'CUlaunchAttributeID'
+  id: int
   pad: 'c.Array[ctypes.c_char, Literal[4]]'
   value: 'CUlaunchAttributeValue'
 struct_CUlaunchAttribute_st.register_fields([('id', CUlaunchAttributeID, 0), ('pad', c.Array[ctypes.c_char, Literal[4]], 4), ('value', CUlaunchAttributeValue, 8)])
@@ -396,7 +396,7 @@ CUexecAffinitySmCount: TypeAlias = struct_CUexecAffinitySmCount_st
 @c.record
 class struct_CUexecAffinityParam_st(c.Struct):
   SIZE = 8
-  type: 'CUexecAffinityType'
+  type: int
   param: 'struct_CUexecAffinityParam_st_param'
 @c.record
 class struct_CUexecAffinityParam_st_param(c.Struct):
@@ -428,14 +428,14 @@ class struct_CUDA_MEMCPY2D_st(c.Struct):
   SIZE = 128
   srcXInBytes: int
   srcY: int
-  srcMemoryType: 'CUmemorytype'
+  srcMemoryType: int
   srcHost: 'ctypes.c_void_p'
   srcDevice: int
   srcArray: 'CUarray'
   srcPitch: int
   dstXInBytes: int
   dstY: int
-  dstMemoryType: 'CUmemorytype'
+  dstMemoryType: int
   dstHost: 'ctypes.c_void_p'
   dstDevice: int
   dstArray: 'CUarray'
@@ -452,7 +452,7 @@ class struct_CUDA_MEMCPY3D_st(c.Struct):
   srcY: int
   srcZ: int
   srcLOD: int
-  srcMemoryType: 'CUmemorytype'
+  srcMemoryType: int
   srcHost: 'ctypes.c_void_p'
   srcDevice: int
   srcArray: 'CUarray'
@@ -463,7 +463,7 @@ class struct_CUDA_MEMCPY3D_st(c.Struct):
   dstY: int
   dstZ: int
   dstLOD: int
-  dstMemoryType: 'CUmemorytype'
+  dstMemoryType: int
   dstHost: 'ctypes.c_void_p'
   dstDevice: int
   dstArray: 'CUarray'
@@ -483,7 +483,7 @@ class struct_CUDA_MEMCPY3D_PEER_st(c.Struct):
   srcY: int
   srcZ: int
   srcLOD: int
-  srcMemoryType: 'CUmemorytype'
+  srcMemoryType: int
   srcHost: 'ctypes.c_void_p'
   srcDevice: int
   srcArray: 'CUarray'
@@ -494,7 +494,7 @@ class struct_CUDA_MEMCPY3D_PEER_st(c.Struct):
   dstY: int
   dstZ: int
   dstLOD: int
-  dstMemoryType: 'CUmemorytype'
+  dstMemoryType: int
   dstHost: 'ctypes.c_void_p'
   dstDevice: int
   dstArray: 'CUarray'
@@ -512,7 +512,7 @@ class struct_CUDA_ARRAY_DESCRIPTOR_st(c.Struct):
   SIZE = 24
   Width: int
   Height: int
-  Format: 'CUarray_format'
+  Format: int
   NumChannels: int
 struct_CUDA_ARRAY_DESCRIPTOR_st.register_fields([('Width', size_t, 0), ('Height', size_t, 8), ('Format', CUarray_format, 16), ('NumChannels', ctypes.c_uint32, 20)])
 CUDA_ARRAY_DESCRIPTOR_v2: TypeAlias = struct_CUDA_ARRAY_DESCRIPTOR_st
@@ -523,7 +523,7 @@ class struct_CUDA_ARRAY3D_DESCRIPTOR_st(c.Struct):
   Width: int
   Height: int
   Depth: int
-  Format: 'CUarray_format'
+  Format: int
   NumChannels: int
   Flags: int
 struct_CUDA_ARRAY3D_DESCRIPTOR_st.register_fields([('Width', size_t, 0), ('Height', size_t, 8), ('Depth', size_t, 16), ('Format', CUarray_format, 24), ('NumChannels', ctypes.c_uint32, 28), ('Flags', ctypes.c_uint32, 32)])
@@ -559,7 +559,7 @@ CUDA_ARRAY_MEMORY_REQUIREMENTS: TypeAlias = struct_CUDA_ARRAY_MEMORY_REQUIREMENT
 @c.record
 class struct_CUDA_RESOURCE_DESC_st(c.Struct):
   SIZE = 144
-  resType: 'CUresourcetype'
+  resType: int
   res: 'struct_CUDA_RESOURCE_DESC_st_res'
   flags: int
 @c.record
@@ -584,7 +584,7 @@ struct_CUDA_RESOURCE_DESC_st_res_mipmap.register_fields([('hMipmappedArray', CUm
 class struct_CUDA_RESOURCE_DESC_st_res_linear(c.Struct):
   SIZE = 24
   devPtr: int
-  format: 'CUarray_format'
+  format: int
   numChannels: int
   sizeInBytes: int
 struct_CUDA_RESOURCE_DESC_st_res_linear.register_fields([('devPtr', CUdeviceptr, 0), ('format', CUarray_format, 8), ('numChannels', ctypes.c_uint32, 12), ('sizeInBytes', size_t, 16)])
@@ -592,7 +592,7 @@ struct_CUDA_RESOURCE_DESC_st_res_linear.register_fields([('devPtr', CUdeviceptr,
 class struct_CUDA_RESOURCE_DESC_st_res_pitch2D(c.Struct):
   SIZE = 40
   devPtr: int
-  format: 'CUarray_format'
+  format: int
   numChannels: int
   width: int
   height: int
@@ -611,10 +611,10 @@ CUDA_RESOURCE_DESC: TypeAlias = struct_CUDA_RESOURCE_DESC_st
 class struct_CUDA_TEXTURE_DESC_st(c.Struct):
   SIZE = 104
   addressMode: 'c.Array[CUaddress_mode, Literal[3]]'
-  filterMode: 'CUfilter_mode'
+  filterMode: int
   flags: int
   maxAnisotropy: int
-  mipmapFilterMode: 'CUfilter_mode'
+  mipmapFilterMode: int
   mipmapLevelBias: float
   minMipmapLevelClamp: float
   maxMipmapLevelClamp: float
@@ -628,7 +628,7 @@ CUresourceViewFormat: TypeAlias = ctypes.c_uint32
 @c.record
 class struct_CUDA_RESOURCE_VIEW_DESC_st(c.Struct):
   SIZE = 112
-  format: 'CUresourceViewFormat'
+  format: int
   width: int
   height: int
   depth: int
@@ -687,7 +687,7 @@ CUexternalMemoryHandleType: TypeAlias = ctypes.c_uint32
 @c.record
 class struct_CUDA_EXTERNAL_MEMORY_HANDLE_DESC_st(c.Struct):
   SIZE = 104
-  type: 'CUexternalMemoryHandleType'
+  type: int
   handle: 'struct_CUDA_EXTERNAL_MEMORY_HANDLE_DESC_st_handle'
   size: int
   flags: int
@@ -733,7 +733,7 @@ CUexternalSemaphoreHandleType: TypeAlias = ctypes.c_uint32
 @c.record
 class struct_CUDA_EXTERNAL_SEMAPHORE_HANDLE_DESC_st(c.Struct):
   SIZE = 96
-  type: 'CUexternalSemaphoreHandleType'
+  type: int
   handle: 'struct_CUDA_EXTERNAL_SEMAPHORE_HANDLE_DESC_st_handle'
   flags: int
   reserved: 'c.Array[ctypes.c_uint32, Literal[16]]'
@@ -861,12 +861,12 @@ CUmemHandleType: TypeAlias = ctypes.c_uint32
 @c.record
 class struct_CUarrayMapInfo_st(c.Struct):
   SIZE = 96
-  resourceType: 'CUresourcetype'
+  resourceType: int
   resource: 'struct_CUarrayMapInfo_st_resource'
-  subresourceType: 'CUarraySparseSubresourceType'
+  subresourceType: int
   subresource: 'struct_CUarrayMapInfo_st_subresource'
-  memOperationType: 'CUmemOperationType'
-  memHandleType: 'CUmemHandleType'
+  memOperationType: int
+  memHandleType: int
   memHandle: 'struct_CUarrayMapInfo_st_memHandle'
   offset: int
   deviceBitMask: int
@@ -914,7 +914,7 @@ CUarrayMapInfo: TypeAlias = struct_CUarrayMapInfo_st
 @c.record
 class struct_CUmemLocation_st(c.Struct):
   SIZE = 8
-  type: 'CUmemLocationType'
+  type: int
   id: int
 struct_CUmemLocation_st.register_fields([('type', CUmemLocationType, 0), ('id', ctypes.c_int32, 4)])
 CUmemLocation_v1: TypeAlias = struct_CUmemLocation_st
@@ -924,8 +924,8 @@ CUmemAllocationCompType: TypeAlias = ctypes.c_uint32
 @c.record
 class struct_CUmemAllocationProp_st(c.Struct):
   SIZE = 32
-  type: 'CUmemAllocationType'
-  requestedHandleTypes: 'CUmemAllocationHandleType'
+  type: int
+  requestedHandleTypes: int
   location: 'CUmemLocation'
   win32HandleMetaData: 'ctypes.c_void_p'
   allocFlags: 'struct_CUmemAllocationProp_st_allocFlags'
@@ -944,7 +944,7 @@ CUmemAllocationProp: TypeAlias = struct_CUmemAllocationProp_st
 class struct_CUmemAccessDesc_st(c.Struct):
   SIZE = 12
   location: 'CUmemLocation'
-  flags: 'CUmemAccess_flags'
+  flags: int
 struct_CUmemAccessDesc_st.register_fields([('location', CUmemLocation, 0), ('flags', CUmemAccess_flags, 8)])
 CUmemAccessDesc_v1: TypeAlias = struct_CUmemAccessDesc_st
 CUmemAccessDesc: TypeAlias = struct_CUmemAccessDesc_st
@@ -953,7 +953,7 @@ CUgraphExecUpdateResult: TypeAlias = ctypes.c_uint32
 @c.record
 class struct_CUgraphExecUpdateResultInfo_st(c.Struct):
   SIZE = 24
-  result: 'CUgraphExecUpdateResult'
+  result: int
   errorNode: 'CUgraphNode'
   errorFromNode: 'CUgraphNode'
 struct_CUgraphExecUpdateResultInfo_st.register_fields([('result', CUgraphExecUpdateResult, 0), ('errorNode', CUgraphNode, 8), ('errorFromNode', CUgraphNode, 16)])
@@ -964,8 +964,8 @@ CUmemPool_attribute: TypeAlias = ctypes.c_uint32
 @c.record
 class struct_CUmemPoolProps_st(c.Struct):
   SIZE = 88
-  allocType: 'CUmemAllocationType'
-  handleTypes: 'CUmemAllocationHandleType'
+  allocType: int
+  handleTypes: int
   location: 'CUmemLocation'
   win32SecurityAttributes: 'ctypes.c_void_p'
   reserved: 'c.Array[ctypes.c_ubyte, Literal[64]]'
@@ -1787,14 +1787,14 @@ class struct_CUDA_MEMCPY2D_v1_st(c.Struct):
   SIZE = 96
   srcXInBytes: int
   srcY: int
-  srcMemoryType: 'CUmemorytype'
+  srcMemoryType: int
   srcHost: 'ctypes.c_void_p'
   srcDevice: int
   srcArray: 'CUarray'
   srcPitch: int
   dstXInBytes: int
   dstY: int
-  dstMemoryType: 'CUmemorytype'
+  dstMemoryType: int
   dstHost: 'ctypes.c_void_p'
   dstDevice: int
   dstArray: 'CUarray'
@@ -1810,7 +1810,7 @@ class struct_CUDA_MEMCPY3D_v1_st(c.Struct):
   srcY: int
   srcZ: int
   srcLOD: int
-  srcMemoryType: 'CUmemorytype'
+  srcMemoryType: int
   srcHost: 'ctypes.c_void_p'
   srcDevice: int
   srcArray: 'CUarray'
@@ -1821,7 +1821,7 @@ class struct_CUDA_MEMCPY3D_v1_st(c.Struct):
   dstY: int
   dstZ: int
   dstLOD: int
-  dstMemoryType: 'CUmemorytype'
+  dstMemoryType: int
   dstHost: 'ctypes.c_void_p'
   dstDevice: int
   dstArray: 'CUarray'
@@ -1838,7 +1838,7 @@ class struct_CUDA_ARRAY_DESCRIPTOR_v1_st(c.Struct):
   SIZE = 16
   Width: int
   Height: int
-  Format: 'CUarray_format'
+  Format: int
   NumChannels: int
 struct_CUDA_ARRAY_DESCRIPTOR_v1_st.register_fields([('Width', ctypes.c_uint32, 0), ('Height', ctypes.c_uint32, 4), ('Format', CUarray_format, 8), ('NumChannels', ctypes.c_uint32, 12)])
 CUDA_ARRAY_DESCRIPTOR_v1: TypeAlias = struct_CUDA_ARRAY_DESCRIPTOR_v1_st
@@ -1848,7 +1848,7 @@ class struct_CUDA_ARRAY3D_DESCRIPTOR_v1_st(c.Struct):
   Width: int
   Height: int
   Depth: int
-  Format: 'CUarray_format'
+  Format: int
   NumChannels: int
   Flags: int
 struct_CUDA_ARRAY3D_DESCRIPTOR_v1_st.register_fields([('Width', ctypes.c_uint32, 0), ('Height', ctypes.c_uint32, 4), ('Depth', ctypes.c_uint32, 8), ('Format', CUarray_format, 12), ('NumChannels', ctypes.c_uint32, 16), ('Flags', ctypes.c_uint32, 20)])

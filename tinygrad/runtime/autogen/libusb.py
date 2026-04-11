@@ -207,7 +207,7 @@ class struct_libusb_iso_packet_descriptor(c.Struct):
   SIZE = 12
   length: int
   actual_length: int
-  status: 'ctypes.c_uint32'
+  status: int
 struct_libusb_iso_packet_descriptor.register_fields([('length', ctypes.c_uint32, 0), ('actual_length', ctypes.c_uint32, 4), ('status', ctypes.c_uint32, 8)])
 @c.record
 class struct_libusb_transfer(c.Struct):
@@ -217,7 +217,7 @@ class struct_libusb_transfer(c.Struct):
   endpoint: int
   type: int
   timeout: int
-  status: 'ctypes.c_uint32'
+  status: int
   length: int
   actual_length: int
   callback: 'libusb_transfer_cb_fn'
@@ -235,7 +235,7 @@ libusb_log_cb: TypeAlias = c.CFUNCTYPE[None, [c.POINTER[struct_libusb_context], 
 @c.record
 class struct_libusb_init_option(c.Struct):
   SIZE = 16
-  option: 'ctypes.c_uint32'
+  option: int
   value: 'struct_libusb_init_option_value'
 @c.record
 class struct_libusb_init_option_value(c.Struct):

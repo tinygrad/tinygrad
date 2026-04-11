@@ -71,7 +71,7 @@ GSP_FMC_INIT_PARAMS: TypeAlias = struct_GSP_FMC_INIT_PARAMS
 @c.record
 class struct_GSP_ACR_BOOT_GSP_RM_PARAMS(c.Struct):
   SIZE = 32
-  target: 'ctypes.c_uint32'
+  target: int
   gspRmDescSize: int
   gspRmDescOffset: int
   wprCarveoutOffset: int
@@ -82,14 +82,14 @@ GSP_ACR_BOOT_GSP_RM_PARAMS: TypeAlias = struct_GSP_ACR_BOOT_GSP_RM_PARAMS
 @c.record
 class struct_GSP_RM_PARAMS(c.Struct):
   SIZE = 16
-  target: 'ctypes.c_uint32'
+  target: int
   bootArgsOffset: int
 struct_GSP_RM_PARAMS.register_fields([('target', ctypes.c_uint32, 0), ('bootArgsOffset', NvU64, 8)])
 GSP_RM_PARAMS: TypeAlias = struct_GSP_RM_PARAMS
 @c.record
 class struct_GSP_SPDM_PARAMS(c.Struct):
   SIZE = 24
-  target: 'ctypes.c_uint32'
+  target: int
   payloadBufferOffset: int
   payloadBufferSize: int
 struct_GSP_SPDM_PARAMS.register_fields([('target', ctypes.c_uint32, 0), ('payloadBufferOffset', NvU64, 8), ('payloadBufferSize', NvU32, 16)])
@@ -1090,7 +1090,7 @@ vgpuGetEngineUtilization_data_v1F_0E: TypeAlias = union_vgpuGetEngineUtilization
 @c.record
 class struct_NV2080_CTRL_PERF_GET_VID_ENG_PERFMON_SAMPLE_PARAMS_v05_00(c.Struct):
   SIZE = 12
-  engineType: 'NV2080_CTRL_CMD_PERF_VID_ENG'
+  engineType: int
   clkPercentBusy: int
   samplingPeriodUs: int
 NV2080_CTRL_PERF_GET_VID_ENG_PERFMON_SAMPLE_PARAMS_v05_00: TypeAlias = struct_NV2080_CTRL_PERF_GET_VID_ENG_PERFMON_SAMPLE_PARAMS_v05_00
@@ -1360,7 +1360,7 @@ class struct_rpc_update_bar_pde_v15_00(c.Struct):
 @c.record
 class struct_UpdateBarPde_v15_00(c.Struct):
   SIZE = 24
-  barType: 'ctypes.c_uint32'
+  barType: int
   entryValue: int
   entryLevelShift: int
 UpdateBarPde_v15_00: TypeAlias = struct_UpdateBarPde_v15_00
@@ -2174,7 +2174,7 @@ class struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_v1A_07(c.Struct):
   format: int
   index: int
   bIndexValid: int
-  tableType: 'NV9096_CTRL_ZBC_CLEAR_TABLE_TYPE'
+  tableType: int
 NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_v1A_07: TypeAlias = struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_v1A_07
 @c.record
 class struct_NV9096_CTRL_GET_ZBC_CLEAR_TABLE_ENTRY_PARAMS_value_v1A_07(c.Struct):
@@ -2380,7 +2380,7 @@ class struct_rpc_ctrl_b0cc_exec_reg_ops_v1A_0F(c.Struct):
 class struct_NVB0CC_CTRL_EXEC_REG_OPS_PARAMS_v1A_0F(c.Struct):
   SIZE = 3980
   regOpCount: int
-  mode: 'NVB0CC_REGOPS_MODE'
+  mode: int
   bPassed: int
   bDirect: int
   regOps: 'c.Array[NV2080_CTRL_GPU_REG_OP_v03_00, Literal[124]]'
@@ -2884,7 +2884,7 @@ class struct_rpc_ctrl_perf_rated_tdp_get_status_v1A_1F(c.Struct):
 class struct_NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS_v1A_1F(c.Struct):
   SIZE = 32
   rm: 'PERF_RATED_TDP_RM_INTERNAL_STATE_STRUCT_v1A_1F'
-  output: 'NV2080_CTRL_PERF_RATED_TDP_ACTION'
+  output: int
   inputs: 'c.Array[NV2080_CTRL_PERF_RATED_TDP_ACTION, Literal[5]]'
 NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS_v1A_1F: TypeAlias = struct_NV2080_CTRL_PERF_RATED_TDP_STATUS_PARAMS_v1A_1F
 @c.record
@@ -2909,8 +2909,8 @@ class struct_rpc_ctrl_perf_rated_tdp_set_control_v1A_1F(c.Struct):
 @c.record
 class struct_NV2080_CTRL_PERF_RATED_TDP_CONTROL_PARAMS_v1A_1F(c.Struct):
   SIZE = 8
-  client: 'NV2080_CTRL_PERF_RATED_TDP_CLIENT'
-  input: 'NV2080_CTRL_PERF_RATED_TDP_ACTION'
+  client: int
+  input: int
 NV2080_CTRL_PERF_RATED_TDP_CONTROL_PARAMS_v1A_1F: TypeAlias = struct_NV2080_CTRL_PERF_RATED_TDP_CONTROL_PARAMS_v1A_1F
 enum_NV2080_CTRL_PERF_RATED_TDP_CLIENT: dict[int, str] = {(NV2080_CTRL_PERF_RATED_TDP_CLIENT_RM:=0): 'NV2080_CTRL_PERF_RATED_TDP_CLIENT_RM', (NV2080_CTRL_PERF_RATED_TDP_CLIENT_WAR_BUG_1785342:=1): 'NV2080_CTRL_PERF_RATED_TDP_CLIENT_WAR_BUG_1785342', (NV2080_CTRL_PERF_RATED_TDP_CLIENT_GLOBAL:=2): 'NV2080_CTRL_PERF_RATED_TDP_CLIENT_GLOBAL', (NV2080_CTRL_PERF_RATED_TDP_CLIENT_OS:=3): 'NV2080_CTRL_PERF_RATED_TDP_CLIENT_OS', (NV2080_CTRL_PERF_RATED_TDP_CLIENT_PROFILE:=4): 'NV2080_CTRL_PERF_RATED_TDP_CLIENT_PROFILE', (NV2080_CTRL_PERF_RATED_TDP_CLIENT_NUM_CLIENTS:=5): 'NV2080_CTRL_PERF_RATED_TDP_CLIENT_NUM_CLIENTS'}
 NV2080_CTRL_PERF_RATED_TDP_CLIENT: TypeAlias = ctypes.c_uint32
@@ -2992,7 +2992,7 @@ class struct_rpc_ctrl_gr_get_tpc_partition_mode_v1C_04(c.Struct):
 class struct_NV0080_CTRL_GR_TPC_PARTITION_MODE_PARAMS_v1C_04(c.Struct):
   SIZE = 32
   hChannelGroup: int
-  mode: 'NV0080_CTRL_GR_TPC_PARTITION_MODE'
+  mode: int
   bEnableAllTpcs: int
   grRouteInfo: 'NV2080_CTRL_GR_ROUTE_INFO_v12_01'
 NV0080_CTRL_GR_TPC_PARTITION_MODE_PARAMS_v1C_04: TypeAlias = struct_NV0080_CTRL_GR_TPC_PARTITION_MODE_PARAMS_v1C_04
@@ -4197,10 +4197,10 @@ ACPI_DSM_CACHE.register_fields([('suppFuncStatus', NvU32, 0), ('suppFuncs', c.Ar
 class ACPI_DATA(c.Struct):
   SIZE = 472
   dsm: 'c.Array[ACPI_DSM_CACHE, Literal[12]]'
-  dispStatusHotplugFunc: 'ACPI_DSM_FUNCTION'
-  dispStatusConfigFunc: 'ACPI_DSM_FUNCTION'
-  perfPostPowerStateFunc: 'ACPI_DSM_FUNCTION'
-  stereo3dStateActiveFunc: 'ACPI_DSM_FUNCTION'
+  dispStatusHotplugFunc: int
+  dispStatusConfigFunc: int
+  perfPostPowerStateFunc: int
+  stereo3dStateActiveFunc: int
   dsmPlatCapsCache: 'c.Array[NvU32, Literal[12]]'
   MDTLFeatureSupport: int
   dsmCurrentFunc: 'c.Array[ACPI_DSM_FUNCTION, Literal[8]]'

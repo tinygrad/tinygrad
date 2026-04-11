@@ -70,7 +70,7 @@ struct_drm_block.register_fields([('unused', ctypes.c_int32, 0)])
 @c.record
 class struct_drm_control(c.Struct):
   SIZE = 8
-  func: 'ctypes.c_uint32'
+  func: int
   irq: int
 struct_drm_control_func: dict[int, str] = {(DRM_ADD_COMMAND:=0): 'DRM_ADD_COMMAND', (DRM_RM_COMMAND:=1): 'DRM_RM_COMMAND', (DRM_INST_HANDLER:=2): 'DRM_INST_HANDLER', (DRM_UNINST_HANDLER:=3): 'DRM_UNINST_HANDLER'}
 struct_drm_control.register_fields([('func', ctypes.c_uint32, 0), ('irq', ctypes.c_int32, 4)])
@@ -87,8 +87,8 @@ class struct_drm_map(c.Struct):
   SIZE = 40
   offset: int
   size: int
-  type: 'ctypes.c_uint32'
-  flags: 'ctypes.c_uint32'
+  type: int
+  flags: int
   handle: 'ctypes.c_void_p'
   mtrr: int
 struct_drm_map.register_fields([('offset', ctypes.c_uint64, 0), ('size', ctypes.c_uint64, 8), ('type', ctypes.c_uint32, 16), ('flags', ctypes.c_uint32, 20), ('handle', ctypes.c_void_p, 24), ('mtrr', ctypes.c_int32, 32)])
@@ -112,7 +112,7 @@ class struct_drm_stats(c.Struct):
 class struct_drm_stats_data(c.Struct):
   SIZE = 16
   value: int
-  type: 'ctypes.c_uint32'
+  type: int
 struct_drm_stats_data.register_fields([('value', ctypes.c_uint64, 0), ('type', ctypes.c_uint32, 8)])
 struct_drm_stats.register_fields([('count', ctypes.c_uint64, 0), ('data', c.Array[struct_drm_stats_data, Literal[15]], 8)])
 enum_drm_lock_flags: dict[int, str] = {(_DRM_LOCK_READY:=1): '_DRM_LOCK_READY', (_DRM_LOCK_QUIESCENT:=2): '_DRM_LOCK_QUIESCENT', (_DRM_LOCK_FLUSH:=4): '_DRM_LOCK_FLUSH', (_DRM_LOCK_FLUSH_ALL:=8): '_DRM_LOCK_FLUSH_ALL', (_DRM_HALT_ALL_QUEUES:=16): '_DRM_HALT_ALL_QUEUES', (_DRM_HALT_CUR_QUEUES:=32): '_DRM_HALT_CUR_QUEUES'}
@@ -120,7 +120,7 @@ enum_drm_lock_flags: dict[int, str] = {(_DRM_LOCK_READY:=1): '_DRM_LOCK_READY', 
 class struct_drm_lock(c.Struct):
   SIZE = 8
   context: int
-  flags: 'ctypes.c_uint32'
+  flags: int
 struct_drm_lock.register_fields([('context', ctypes.c_int32, 0), ('flags', ctypes.c_uint32, 4)])
 enum_drm_dma_flags: dict[int, str] = {(_DRM_DMA_BLOCK:=1): '_DRM_DMA_BLOCK', (_DRM_DMA_WHILE_LOCKED:=2): '_DRM_DMA_WHILE_LOCKED', (_DRM_DMA_PRIORITY:=4): '_DRM_DMA_PRIORITY', (_DRM_DMA_WAIT:=16): '_DRM_DMA_WAIT', (_DRM_DMA_SMALLER_OK:=32): '_DRM_DMA_SMALLER_OK', (_DRM_DMA_LARGER_OK:=64): '_DRM_DMA_LARGER_OK'}
 @c.record
@@ -130,7 +130,7 @@ class struct_drm_buf_desc(c.Struct):
   size: int
   low_mark: int
   high_mark: int
-  flags: 'ctypes.c_uint32'
+  flags: int
   agp_start: int
 struct_drm_buf_desc_flags: dict[int, str] = {(_DRM_PAGE_ALIGN:=1): '_DRM_PAGE_ALIGN', (_DRM_AGP_BUFFER:=2): '_DRM_AGP_BUFFER', (_DRM_SG_BUFFER:=4): '_DRM_SG_BUFFER', (_DRM_FB_BUFFER:=8): '_DRM_FB_BUFFER', (_DRM_PCI_BUFFER_RO:=16): '_DRM_PCI_BUFFER_RO'}
 struct_drm_buf_desc.register_fields([('count', ctypes.c_int32, 0), ('size', ctypes.c_int32, 4), ('low_mark', ctypes.c_int32, 8), ('high_mark', ctypes.c_int32, 12), ('flags', ctypes.c_uint32, 16), ('agp_start', ctypes.c_uint64, 24)])
@@ -168,7 +168,7 @@ class struct_drm_dma(c.Struct):
   send_count: int
   send_indices: 'c.POINTER[ctypes.c_int32]'
   send_sizes: 'c.POINTER[ctypes.c_int32]'
-  flags: 'ctypes.c_uint32'
+  flags: int
   request_count: int
   request_size: int
   request_indices: 'c.POINTER[ctypes.c_int32]'
@@ -180,7 +180,7 @@ enum_drm_ctx_flags: dict[int, str] = {(_DRM_CONTEXT_PRESERVED:=1): '_DRM_CONTEXT
 class struct_drm_ctx(c.Struct):
   SIZE = 8
   handle: int
-  flags: 'ctypes.c_uint32'
+  flags: int
 struct_drm_ctx.register_fields([('handle', drm_context_t, 0), ('flags', ctypes.c_uint32, 4)])
 @c.record
 class struct_drm_ctx_res(c.Struct):
@@ -219,14 +219,14 @@ enum_drm_vblank_seq_type: dict[int, str] = {(_DRM_VBLANK_ABSOLUTE:=0): '_DRM_VBL
 @c.record
 class struct_drm_wait_vblank_request(c.Struct):
   SIZE = 16
-  type: 'ctypes.c_uint32'
+  type: int
   sequence: int
   signal: int
 struct_drm_wait_vblank_request.register_fields([('type', ctypes.c_uint32, 0), ('sequence', ctypes.c_uint32, 4), ('signal', ctypes.c_uint64, 8)])
 @c.record
 class struct_drm_wait_vblank_reply(c.Struct):
   SIZE = 24
-  type: 'ctypes.c_uint32'
+  type: int
   sequence: int
   tval_sec: 'ctypes.c_int64'
   tval_usec: 'ctypes.c_int64'

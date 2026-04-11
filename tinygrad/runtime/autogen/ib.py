@@ -65,8 +65,8 @@ class struct_ibv_context(c.Struct):
 class struct_ibv_device(c.Struct):
   SIZE = 664
   _ops: 'struct__ibv_device_ops'
-  node_type: 'ctypes.c_int32'
-  transport_type: 'ctypes.c_int32'
+  node_type: int
+  transport_type: int
   name: 'c.Array[ctypes.c_char, Literal[64]]'
   dev_name: 'c.Array[ctypes.c_char, Literal[64]]'
   dev_path: 'c.Array[ctypes.c_char, Literal[256]]'
@@ -138,7 +138,7 @@ class struct_ibv_device_attr(c.Struct):
   max_res_rd_atom: int
   max_qp_init_rd_atom: int
   max_ee_init_rd_atom: int
-  atomic_cap: 'ctypes.c_uint32'
+  atomic_cap: int
   max_ee: int
   max_rdd: int
   max_mw: int
@@ -167,7 +167,7 @@ class struct_ibv_mw(c.Struct):
   pd: 'c.POINTER[struct_ibv_pd]'
   rkey: int
   handle: int
-  type: 'ctypes.c_uint32'
+  type: int
 @c.record
 class struct_ibv_pd(c.Struct):
   SIZE = 16
@@ -187,8 +187,8 @@ class struct_ibv_qp(c.Struct):
   srq: 'c.POINTER[struct_ibv_srq]'
   handle: int
   qp_num: int
-  state: 'ctypes.c_uint32'
-  qp_type: 'ctypes.c_uint32'
+  state: int
+  qp_type: int
   mutex: 'pthread_mutex_t'
   cond: 'pthread_cond_t'
   events_completed: int
@@ -312,8 +312,8 @@ struct_ibv_mw_bind.register_fields([('wr_id', uint64_t, 0), ('send_flags', ctype
 class struct_ibv_wc(c.Struct):
   SIZE = 48
   wr_id: int
-  status: 'ctypes.c_uint32'
-  opcode: 'ctypes.c_uint32'
+  status: int
+  opcode: int
   vendor_err: int
   byte_len: int
   imm_data: int
@@ -351,7 +351,7 @@ class struct_ibv_send_wr(c.Struct):
   next: 'c.POINTER[struct_ibv_send_wr]'
   sg_list: 'c.POINTER[struct_ibv_sge]'
   num_sge: int
-  opcode: 'ctypes.c_uint32'
+  opcode: int
   send_flags: int
   imm_data: int
   invalidate_rkey: int
@@ -521,9 +521,9 @@ enum_ibv_port_cap_flags2: dict[int, str] = {(IBV_PORT_SET_NODE_DESC_SUP:=1): 'IB
 @c.record
 class struct_ibv_port_attr(c.Struct):
   SIZE = 56
-  state: 'ctypes.c_uint32'
-  max_mtu: 'ctypes.c_uint32'
-  active_mtu: 'ctypes.c_uint32'
+  state: int
+  max_mtu: int
+  active_mtu: int
   gid_tbl_len: int
   port_cap_flags: int
   max_msg_sz: int
@@ -550,7 +550,7 @@ enum_ibv_event_type: dict[int, str] = {(IBV_EVENT_CQ_ERR:=0): 'IBV_EVENT_CQ_ERR'
 class struct_ibv_async_event(c.Struct):
   SIZE = 16
   element: 'struct_ibv_async_event_element'
-  event_type: 'ctypes.c_uint32'
+  event_type: int
 @c.record
 class struct_ibv_async_event_element(c.Struct):
   SIZE = 8
@@ -568,8 +568,8 @@ class struct_ibv_wq(c.Struct):
   cq: 'c.POINTER[struct_ibv_cq]'
   wq_num: int
   handle: int
-  state: 'ctypes.c_uint32'
-  wq_type: 'ctypes.c_uint32'
+  state: int
+  wq_type: int
   post_recv: 'c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_wq], c.POINTER[struct_ibv_recv_wr], c.POINTER[c.POINTER[struct_ibv_recv_wr]]]]'
   mutex: 'pthread_mutex_t'
   cond: 'pthread_cond_t'
@@ -680,7 +680,7 @@ class struct_ibv_srq_init_attr_ex(c.Struct):
   srq_context: 'ctypes.c_void_p'
   attr: 'struct_ibv_srq_attr'
   comp_mask: int
-  srq_type: 'ctypes.c_uint32'
+  srq_type: int
   pd: 'c.POINTER[struct_ibv_pd]'
   xrcd: 'c.POINTER[struct_ibv_xrcd]'
   cq: 'c.POINTER[struct_ibv_cq]'
@@ -692,7 +692,7 @@ enum_ibv_wq_flags: dict[int, str] = {(IBV_WQ_FLAGS_CVLAN_STRIPPING:=1): 'IBV_WQ_
 class struct_ibv_wq_init_attr(c.Struct):
   SIZE = 48
   wq_context: 'ctypes.c_void_p'
-  wq_type: 'ctypes.c_uint32'
+  wq_type: int
   max_wr: int
   max_sge: int
   pd: 'c.POINTER[struct_ibv_pd]'
@@ -705,8 +705,8 @@ enum_ibv_wq_attr_mask: dict[int, str] = {(IBV_WQ_ATTR_STATE:=1): 'IBV_WQ_ATTR_ST
 class struct_ibv_wq_attr(c.Struct):
   SIZE = 20
   attr_mask: int
-  wq_state: 'ctypes.c_uint32'
-  curr_wq_state: 'ctypes.c_uint32'
+  wq_state: int
+  curr_wq_state: int
   flags: int
   flags_mask: int
 struct_ibv_wq_attr.register_fields([('attr_mask', uint32_t, 0), ('wq_state', ctypes.c_uint32, 4), ('curr_wq_state', ctypes.c_uint32, 8), ('flags', uint32_t, 12), ('flags_mask', uint32_t, 16)])
@@ -743,7 +743,7 @@ class struct_ibv_qp_init_attr(c.Struct):
   recv_cq: 'c.POINTER[struct_ibv_cq]'
   srq: 'c.POINTER[struct_ibv_srq]'
   cap: 'struct_ibv_qp_cap'
-  qp_type: 'ctypes.c_uint32'
+  qp_type: int
   sq_sig_all: int
 struct_ibv_qp_init_attr.register_fields([('qp_context', ctypes.c_void_p, 0), ('send_cq', c.POINTER[struct_ibv_cq], 8), ('recv_cq', c.POINTER[struct_ibv_cq], 16), ('srq', c.POINTER[struct_ibv_srq], 24), ('cap', struct_ibv_qp_cap, 32), ('qp_type', ctypes.c_uint32, 52), ('sq_sig_all', ctypes.c_int32, 56)])
 enum_ibv_qp_init_attr_mask: dict[int, str] = {(IBV_QP_INIT_ATTR_PD:=1): 'IBV_QP_INIT_ATTR_PD', (IBV_QP_INIT_ATTR_XRCD:=2): 'IBV_QP_INIT_ATTR_XRCD', (IBV_QP_INIT_ATTR_CREATE_FLAGS:=4): 'IBV_QP_INIT_ATTR_CREATE_FLAGS', (IBV_QP_INIT_ATTR_MAX_TSO_HEADER:=8): 'IBV_QP_INIT_ATTR_MAX_TSO_HEADER', (IBV_QP_INIT_ATTR_IND_TABLE:=16): 'IBV_QP_INIT_ATTR_IND_TABLE', (IBV_QP_INIT_ATTR_RX_HASH:=32): 'IBV_QP_INIT_ATTR_RX_HASH', (IBV_QP_INIT_ATTR_SEND_OPS_FLAGS:=64): 'IBV_QP_INIT_ATTR_SEND_OPS_FLAGS'}
@@ -765,7 +765,7 @@ class struct_ibv_qp_init_attr_ex(c.Struct):
   recv_cq: 'c.POINTER[struct_ibv_cq]'
   srq: 'c.POINTER[struct_ibv_srq]'
   cap: 'struct_ibv_qp_cap'
-  qp_type: 'ctypes.c_uint32'
+  qp_type: int
   sq_sig_all: int
   comp_mask: int
   pd: 'c.POINTER[struct_ibv_pd]'
@@ -785,7 +785,7 @@ class struct_ibv_qp_open_attr(c.Struct):
   qp_num: int
   xrcd: 'c.POINTER[struct_ibv_xrcd]'
   qp_context: 'ctypes.c_void_p'
-  qp_type: 'ctypes.c_uint32'
+  qp_type: int
 struct_ibv_qp_open_attr.register_fields([('comp_mask', uint32_t, 0), ('qp_num', uint32_t, 4), ('xrcd', c.POINTER[struct_ibv_xrcd], 8), ('qp_context', ctypes.c_void_p, 16), ('qp_type', ctypes.c_uint32, 24)])
 enum_ibv_qp_attr_mask: dict[int, str] = {(IBV_QP_STATE:=1): 'IBV_QP_STATE', (IBV_QP_CUR_STATE:=2): 'IBV_QP_CUR_STATE', (IBV_QP_EN_SQD_ASYNC_NOTIFY:=4): 'IBV_QP_EN_SQD_ASYNC_NOTIFY', (IBV_QP_ACCESS_FLAGS:=8): 'IBV_QP_ACCESS_FLAGS', (IBV_QP_PKEY_INDEX:=16): 'IBV_QP_PKEY_INDEX', (IBV_QP_PORT:=32): 'IBV_QP_PORT', (IBV_QP_QKEY:=64): 'IBV_QP_QKEY', (IBV_QP_AV:=128): 'IBV_QP_AV', (IBV_QP_PATH_MTU:=256): 'IBV_QP_PATH_MTU', (IBV_QP_TIMEOUT:=512): 'IBV_QP_TIMEOUT', (IBV_QP_RETRY_CNT:=1024): 'IBV_QP_RETRY_CNT', (IBV_QP_RNR_RETRY:=2048): 'IBV_QP_RNR_RETRY', (IBV_QP_RQ_PSN:=4096): 'IBV_QP_RQ_PSN', (IBV_QP_MAX_QP_RD_ATOMIC:=8192): 'IBV_QP_MAX_QP_RD_ATOMIC', (IBV_QP_ALT_PATH:=16384): 'IBV_QP_ALT_PATH', (IBV_QP_MIN_RNR_TIMER:=32768): 'IBV_QP_MIN_RNR_TIMER', (IBV_QP_SQ_PSN:=65536): 'IBV_QP_SQ_PSN', (IBV_QP_MAX_DEST_RD_ATOMIC:=131072): 'IBV_QP_MAX_DEST_RD_ATOMIC', (IBV_QP_PATH_MIG_STATE:=262144): 'IBV_QP_PATH_MIG_STATE', (IBV_QP_CAP:=524288): 'IBV_QP_CAP', (IBV_QP_DEST_QPN:=1048576): 'IBV_QP_DEST_QPN', (IBV_QP_RATE_LIMIT:=33554432): 'IBV_QP_RATE_LIMIT'}
 enum_ibv_query_qp_data_in_order_flags: dict[int, str] = {(IBV_QUERY_QP_DATA_IN_ORDER_RETURN_CAPS:=1): 'IBV_QUERY_QP_DATA_IN_ORDER_RETURN_CAPS'}
@@ -794,10 +794,10 @@ enum_ibv_mig_state: dict[int, str] = {(IBV_MIG_MIGRATED:=0): 'IBV_MIG_MIGRATED',
 @c.record
 class struct_ibv_qp_attr(c.Struct):
   SIZE = 144
-  qp_state: 'ctypes.c_uint32'
-  cur_qp_state: 'ctypes.c_uint32'
-  path_mtu: 'ctypes.c_uint32'
-  path_mig_state: 'ctypes.c_uint32'
+  qp_state: int
+  cur_qp_state: int
+  path_mtu: int
+  path_mig_state: int
   qkey: int
   rq_psn: int
   sq_psn: int
@@ -847,7 +847,7 @@ class struct_ibv_ops_wr(c.Struct):
   SIZE = 72
   wr_id: int
   next: 'c.POINTER[struct_ibv_ops_wr]'
-  opcode: 'ctypes.c_uint32'
+  opcode: int
   flags: int
   tm: 'struct_ibv_ops_wr_tm'
 @c.record
@@ -930,7 +930,7 @@ class struct_ibv_cq_ex(c.Struct):
   comp_events_completed: int
   async_events_completed: int
   comp_mask: int
-  status: 'ctypes.c_uint32'
+  status: int
   wr_id: int
   start_poll: 'c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_cq_ex], c.POINTER[struct_ibv_poll_cq_attr]]]'
   next_poll: 'c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_cq_ex]]]'
@@ -978,7 +978,7 @@ struct_ibv_flow_eth_filter.register_fields([('dst_mac', c.Array[uint8_t, Literal
 @c.record
 class struct_ibv_flow_spec_eth(c.Struct):
   SIZE = 40
-  type: 'ctypes.c_uint32'
+  type: int
   size: int
   val: 'struct_ibv_flow_eth_filter'
   mask: 'struct_ibv_flow_eth_filter'
@@ -992,7 +992,7 @@ struct_ibv_flow_ipv4_filter.register_fields([('src_ip', uint32_t, 0), ('dst_ip',
 @c.record
 class struct_ibv_flow_spec_ipv4(c.Struct):
   SIZE = 24
-  type: 'ctypes.c_uint32'
+  type: int
   size: int
   val: 'struct_ibv_flow_ipv4_filter'
   mask: 'struct_ibv_flow_ipv4_filter'
@@ -1010,7 +1010,7 @@ struct_ibv_flow_ipv4_ext_filter.register_fields([('src_ip', uint32_t, 0), ('dst_
 @c.record
 class struct_ibv_flow_spec_ipv4_ext(c.Struct):
   SIZE = 32
-  type: 'ctypes.c_uint32'
+  type: int
   size: int
   val: 'struct_ibv_flow_ipv4_ext_filter'
   mask: 'struct_ibv_flow_ipv4_ext_filter'
@@ -1028,7 +1028,7 @@ struct_ibv_flow_ipv6_filter.register_fields([('src_ip', c.Array[uint8_t, Literal
 @c.record
 class struct_ibv_flow_spec_ipv6(c.Struct):
   SIZE = 88
-  type: 'ctypes.c_uint32'
+  type: int
   size: int
   val: 'struct_ibv_flow_ipv6_filter'
   mask: 'struct_ibv_flow_ipv6_filter'
@@ -1042,7 +1042,7 @@ struct_ibv_flow_esp_filter.register_fields([('spi', uint32_t, 0), ('seq', uint32
 @c.record
 class struct_ibv_flow_spec_esp(c.Struct):
   SIZE = 24
-  type: 'ctypes.c_uint32'
+  type: int
   size: int
   val: 'struct_ibv_flow_esp_filter'
   mask: 'struct_ibv_flow_esp_filter'
@@ -1056,7 +1056,7 @@ struct_ibv_flow_tcp_udp_filter.register_fields([('dst_port', uint16_t, 0), ('src
 @c.record
 class struct_ibv_flow_spec_tcp_udp(c.Struct):
   SIZE = 16
-  type: 'ctypes.c_uint32'
+  type: int
   size: int
   val: 'struct_ibv_flow_tcp_udp_filter'
   mask: 'struct_ibv_flow_tcp_udp_filter'
@@ -1071,7 +1071,7 @@ struct_ibv_flow_gre_filter.register_fields([('c_ks_res0_ver', uint16_t, 0), ('pr
 @c.record
 class struct_ibv_flow_spec_gre(c.Struct):
   SIZE = 24
-  type: 'ctypes.c_uint32'
+  type: int
   size: int
   val: 'struct_ibv_flow_gre_filter'
   mask: 'struct_ibv_flow_gre_filter'
@@ -1084,7 +1084,7 @@ struct_ibv_flow_mpls_filter.register_fields([('label', uint32_t, 0)])
 @c.record
 class struct_ibv_flow_spec_mpls(c.Struct):
   SIZE = 16
-  type: 'ctypes.c_uint32'
+  type: int
   size: int
   val: 'struct_ibv_flow_mpls_filter'
   mask: 'struct_ibv_flow_mpls_filter'
@@ -1097,7 +1097,7 @@ struct_ibv_flow_tunnel_filter.register_fields([('tunnel_id', uint32_t, 0)])
 @c.record
 class struct_ibv_flow_spec_tunnel(c.Struct):
   SIZE = 16
-  type: 'ctypes.c_uint32'
+  type: int
   size: int
   val: 'struct_ibv_flow_tunnel_filter'
   mask: 'struct_ibv_flow_tunnel_filter'
@@ -1105,20 +1105,20 @@ struct_ibv_flow_spec_tunnel.register_fields([('type', ctypes.c_uint32, 0), ('siz
 @c.record
 class struct_ibv_flow_spec_action_tag(c.Struct):
   SIZE = 12
-  type: 'ctypes.c_uint32'
+  type: int
   size: int
   tag_id: int
 struct_ibv_flow_spec_action_tag.register_fields([('type', ctypes.c_uint32, 0), ('size', uint16_t, 4), ('tag_id', uint32_t, 8)])
 @c.record
 class struct_ibv_flow_spec_action_drop(c.Struct):
   SIZE = 8
-  type: 'ctypes.c_uint32'
+  type: int
   size: int
 struct_ibv_flow_spec_action_drop.register_fields([('type', ctypes.c_uint32, 0), ('size', uint16_t, 4)])
 @c.record
 class struct_ibv_flow_spec_action_handle(c.Struct):
   SIZE = 16
-  type: 'ctypes.c_uint32'
+  type: int
   size: int
   action: 'c.POINTER[struct_ibv_flow_action]'
 @c.record
@@ -1130,7 +1130,7 @@ struct_ibv_flow_spec_action_handle.register_fields([('type', ctypes.c_uint32, 0)
 @c.record
 class struct_ibv_flow_spec_counter_action(c.Struct):
   SIZE = 16
-  type: 'ctypes.c_uint32'
+  type: int
   size: int
   counters: 'c.POINTER[struct_ibv_counters]'
 @c.record
@@ -1159,7 +1159,7 @@ class struct_ibv_flow_spec(c.Struct):
 @c.record
 class struct_ibv_flow_spec_hdr(c.Struct):
   SIZE = 8
-  type: 'ctypes.c_uint32'
+  type: int
   size: int
 struct_ibv_flow_spec_hdr.register_fields([('type', ctypes.c_uint32, 0), ('size', uint16_t, 4)])
 struct_ibv_flow_spec.register_fields([('hdr', struct_ibv_flow_spec_hdr, 0), ('eth', struct_ibv_flow_spec_eth, 0), ('ipv4', struct_ibv_flow_spec_ipv4, 0), ('tcp_udp', struct_ibv_flow_spec_tcp_udp, 0), ('ipv4_ext', struct_ibv_flow_spec_ipv4_ext, 0), ('ipv6', struct_ibv_flow_spec_ipv6, 0), ('esp', struct_ibv_flow_spec_esp, 0), ('tunnel', struct_ibv_flow_spec_tunnel, 0), ('gre', struct_ibv_flow_spec_gre, 0), ('mpls', struct_ibv_flow_spec_mpls, 0), ('flow_tag', struct_ibv_flow_spec_action_tag, 0), ('drop', struct_ibv_flow_spec_action_drop, 0), ('handle', struct_ibv_flow_spec_action_handle, 0), ('flow_count', struct_ibv_flow_spec_counter_action, 0)])
@@ -1167,7 +1167,7 @@ struct_ibv_flow_spec.register_fields([('hdr', struct_ibv_flow_spec_hdr, 0), ('et
 class struct_ibv_flow_attr(c.Struct):
   SIZE = 20
   comp_mask: int
-  type: 'ctypes.c_uint32'
+  type: int
   size: int
   priority: int
   num_of_specs: int
@@ -1186,10 +1186,10 @@ enum_ibv_flow_action_esp_mask: dict[int, str] = {(IBV_FLOW_ACTION_ESP_MASK_ESN:=
 class struct_ibv_flow_action_esp_attr(c.Struct):
   SIZE = 56
   esp_attr: 'c.POINTER[struct_ib_uverbs_flow_action_esp]'
-  keymat_proto: 'ctypes.c_uint32'
+  keymat_proto: int
   keymat_len: int
   keymat_ptr: 'ctypes.c_void_p'
-  replay_proto: 'ctypes.c_uint32'
+  replay_proto: int
   replay_len: int
   replay_ptr: 'ctypes.c_void_p'
   esp_encap: 'c.POINTER[struct_ib_uverbs_flow_action_esp_encap]'
@@ -1255,7 +1255,7 @@ enum_ibv_counter_description: dict[int, str] = {(IBV_COUNTER_PACKETS:=0): 'IBV_C
 @c.record
 class struct_ibv_counter_attach_attr(c.Struct):
   SIZE = 12
-  counter_desc: 'ctypes.c_uint32'
+  counter_desc: int
   index: int
   comp_mask: int
 struct_ibv_counter_attach_attr.register_fields([('counter_desc', ctypes.c_uint32, 0), ('index', uint32_t, 4), ('comp_mask', uint32_t, 8)])

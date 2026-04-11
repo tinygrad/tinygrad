@@ -886,7 +886,7 @@ hsa_amd_image_descriptor_t: TypeAlias = struct_hsa_amd_image_descriptor_s
 @c.record
 class struct_hsa_ext_image_descriptor_s(c.Struct):
   SIZE = 48
-  geometry: 'ctypes.c_uint32'
+  geometry: int
   width: int
   height: int
   depth: int
@@ -971,7 +971,7 @@ class struct_hsa_amd_memory_pool_link_info_s(c.Struct):
   atomic_support_32bit: bool
   atomic_support_64bit: bool
   coherent_support: bool
-  link_type: 'ctypes.c_uint32'
+  link_type: int
   numa_distance: int
 struct_hsa_amd_memory_pool_link_info_s.register_fields([('min_latency', uint32_t, 0), ('max_latency', uint32_t, 4), ('min_bandwidth', uint32_t, 8), ('max_bandwidth', uint32_t, 12), ('atomic_support_32bit', ctypes.c_bool, 16), ('atomic_support_64bit', ctypes.c_bool, 17), ('coherent_support', ctypes.c_bool, 18), ('link_type', ctypes.c_uint32, 20), ('numa_distance', uint32_t, 24)])
 hsa_amd_memory_pool_link_info_t: TypeAlias = struct_hsa_amd_memory_pool_link_info_s
@@ -1001,7 +1001,7 @@ hsa_amd_pointer_type_t: dict[int, str] = {(HSA_EXT_POINTER_TYPE_UNKNOWN:=0): 'HS
 class struct_hsa_amd_pointer_info_s(c.Struct):
   SIZE = 56
   size: int
-  type: 'ctypes.c_uint32'
+  type: int
   agentBaseAddress: 'ctypes.c_void_p'
   hostBaseAddress: 'ctypes.c_void_p'
   sizeInBytes: int
@@ -1058,14 +1058,14 @@ hsa_amd_hw_exception_reset_cause_t: dict[int, str] = {(HSA_AMD_HW_EXCEPTION_CAUS
 class struct_hsa_amd_gpu_hw_exception_info_s(c.Struct):
   SIZE = 16
   agent: 'hsa_agent_t'
-  reset_type: 'ctypes.c_uint32'
-  reset_cause: 'ctypes.c_uint32'
+  reset_type: int
+  reset_cause: int
 struct_hsa_amd_gpu_hw_exception_info_s.register_fields([('agent', hsa_agent_t, 0), ('reset_type', ctypes.c_uint32, 8), ('reset_cause', ctypes.c_uint32, 12)])
 hsa_amd_gpu_hw_exception_info_t: TypeAlias = struct_hsa_amd_gpu_hw_exception_info_s
 @c.record
 class struct_hsa_amd_event_s(c.Struct):
   SIZE = 32
-  event_type: 'hsa_amd_event_type_t'
+  event_type: int
   memory_fault: 'hsa_amd_gpu_memory_fault_info_t'
   hw_exception: 'hsa_amd_gpu_hw_exception_info_t'
   memory_error: 'hsa_amd_gpu_memory_error_info_t'
@@ -1139,7 +1139,7 @@ def hsa_amd_vmem_unmap(va:ctypes.c_void_p, size:size_t) -> ctypes.c_uint32: ...
 @c.record
 class struct_hsa_amd_memory_access_desc_s(c.Struct):
   SIZE = 16
-  permissions: 'ctypes.c_uint32'
+  permissions: int
   agent_handle: 'hsa_agent_t'
 struct_hsa_amd_memory_access_desc_s.register_fields([('permissions', ctypes.c_uint32, 0), ('agent_handle', hsa_agent_t, 8)])
 hsa_amd_memory_access_desc_t: TypeAlias = struct_hsa_amd_memory_access_desc_s
@@ -1524,7 +1524,7 @@ hsa_ven_amd_aqlprofile_block_name_t: dict[int, str] = {(HSA_VEN_AMD_AQLPROFILE_B
 @c.record
 class hsa_ven_amd_aqlprofile_event_t(c.Struct):
   SIZE = 12
-  block_name: 'ctypes.c_uint32'
+  block_name: int
   block_index: int
   counter_id: int
 hsa_ven_amd_aqlprofile_event_t.register_fields([('block_name', ctypes.c_uint32, 0), ('block_index', uint32_t, 4), ('counter_id', uint32_t, 8)])
@@ -1534,7 +1534,7 @@ hsa_ven_amd_aqlprofile_parameter_name_t: dict[int, str] = {(HSA_VEN_AMD_AQLPROFI
 @c.record
 class hsa_ven_amd_aqlprofile_parameter_t(c.Struct):
   SIZE = 8
-  parameter_name: 'ctypes.c_uint32'
+  parameter_name: int
   value: int
 hsa_ven_amd_aqlprofile_parameter_t.register_fields([('parameter_name', ctypes.c_uint32, 0), ('value', uint32_t, 4)])
 hsa_ven_amd_aqlprofile_att_marker_channel_t: dict[int, str] = {(HSA_VEN_AMD_AQLPROFILE_ATT_CHANNEL_0:=0): 'HSA_VEN_AMD_AQLPROFILE_ATT_CHANNEL_0', (HSA_VEN_AMD_AQLPROFILE_ATT_CHANNEL_1:=1): 'HSA_VEN_AMD_AQLPROFILE_ATT_CHANNEL_1', (HSA_VEN_AMD_AQLPROFILE_ATT_CHANNEL_2:=2): 'HSA_VEN_AMD_AQLPROFILE_ATT_CHANNEL_2', (HSA_VEN_AMD_AQLPROFILE_ATT_CHANNEL_3:=3): 'HSA_VEN_AMD_AQLPROFILE_ATT_CHANNEL_3'}
@@ -1548,7 +1548,7 @@ hsa_ven_amd_aqlprofile_descriptor_t.register_fields([('ptr', ctypes.c_void_p, 0)
 class hsa_ven_amd_aqlprofile_profile_t(c.Struct):
   SIZE = 80
   agent: 'hsa_agent_t'
-  type: 'ctypes.c_uint32'
+  type: int
   events: 'c.POINTER[hsa_ven_amd_aqlprofile_event_t]'
   event_count: int
   parameters: 'c.POINTER[hsa_ven_amd_aqlprofile_parameter_t]'

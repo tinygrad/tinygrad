@@ -291,7 +291,7 @@ fastrpc_async_callback_t: TypeAlias = struct_fastrpc_async_callback
 @c.record
 class struct_fastrpc_async_descriptor(c.Struct):
   SIZE = 32
-  type: 'ctypes.c_uint32'
+  type: int
   jobid: int
   cb: 'fastrpc_async_callback_t'
 struct_fastrpc_async_descriptor.register_fields([('type', ctypes.c_uint32, 0), ('jobid', fastrpc_async_jobid, 8), ('cb', fastrpc_async_callback_t, 16)])
@@ -303,7 +303,7 @@ remote_rpc_control_latency_t: TypeAlias = ctypes.c_uint32
 @c.record
 class struct_remote_rpc_control_latency(c.Struct):
   SIZE = 8
-  enable: 'remote_rpc_control_latency_t'
+  enable: int
   latency: int
 struct_remote_rpc_control_latency.register_fields([('enable', remote_rpc_control_latency_t, 0), ('latency', uint32_t, 4)])
 enum_remote_dsp_attributes: dict[int, str] = {(DOMAIN_SUPPORT:=0): 'DOMAIN_SUPPORT', (UNSIGNED_PD_SUPPORT:=1): 'UNSIGNED_PD_SUPPORT', (HVX_SUPPORT_64B:=2): 'HVX_SUPPORT_64B', (HVX_SUPPORT_128B:=3): 'HVX_SUPPORT_128B', (VTCM_PAGE:=4): 'VTCM_PAGE', (VTCM_COUNT:=5): 'VTCM_COUNT', (ARCH_VER:=6): 'ARCH_VER', (HMX_SUPPORT_DEPTH:=7): 'HMX_SUPPORT_DEPTH', (HMX_SUPPORT_SPATIAL:=8): 'HMX_SUPPORT_SPATIAL', (ASYNC_FASTRPC_SUPPORT:=9): 'ASYNC_FASTRPC_SUPPORT', (STATUS_NOTIFICATION_SUPPORT:=10): 'STATUS_NOTIFICATION_SUPPORT', (FASTRPC_MAX_DSP_ATTRIBUTES:=11): 'FASTRPC_MAX_DSP_ATTRIBUTES'}

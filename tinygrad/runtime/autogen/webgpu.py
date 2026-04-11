@@ -74,7 +74,7 @@ class struct_WGPUAdapterPropertiesD3D(c.Struct):
 class struct_WGPUChainedStructOut(c.Struct):
   SIZE = 16
   next: 'c.POINTER[struct_WGPUChainedStructOut]'
-  sType: 'WGPUSType'
+  sType: int
 WGPUChainedStructOut: TypeAlias = struct_WGPUChainedStructOut
 enum_WGPUSType: dict[int, str] = {(WGPUSType_ShaderSourceSPIRV:=1): 'WGPUSType_ShaderSourceSPIRV', (WGPUSType_ShaderSourceWGSL:=2): 'WGPUSType_ShaderSourceWGSL', (WGPUSType_RenderPassMaxDrawCount:=3): 'WGPUSType_RenderPassMaxDrawCount', (WGPUSType_SurfaceSourceMetalLayer:=4): 'WGPUSType_SurfaceSourceMetalLayer', (WGPUSType_SurfaceSourceWindowsHWND:=5): 'WGPUSType_SurfaceSourceWindowsHWND', (WGPUSType_SurfaceSourceXlibWindow:=6): 'WGPUSType_SurfaceSourceXlibWindow', (WGPUSType_SurfaceSourceWaylandSurface:=7): 'WGPUSType_SurfaceSourceWaylandSurface', (WGPUSType_SurfaceSourceAndroidNativeWindow:=8): 'WGPUSType_SurfaceSourceAndroidNativeWindow', (WGPUSType_SurfaceSourceXCBWindow:=9): 'WGPUSType_SurfaceSourceXCBWindow', (WGPUSType_AdapterPropertiesSubgroups:=10): 'WGPUSType_AdapterPropertiesSubgroups', (WGPUSType_TextureBindingViewDimensionDescriptor:=131072): 'WGPUSType_TextureBindingViewDimensionDescriptor', (WGPUSType_SurfaceSourceCanvasHTMLSelector_Emscripten:=262144): 'WGPUSType_SurfaceSourceCanvasHTMLSelector_Emscripten', (WGPUSType_SurfaceDescriptorFromWindowsCoreWindow:=327680): 'WGPUSType_SurfaceDescriptorFromWindowsCoreWindow', (WGPUSType_ExternalTextureBindingEntry:=327681): 'WGPUSType_ExternalTextureBindingEntry', (WGPUSType_ExternalTextureBindingLayout:=327682): 'WGPUSType_ExternalTextureBindingLayout', (WGPUSType_SurfaceDescriptorFromWindowsSwapChainPanel:=327683): 'WGPUSType_SurfaceDescriptorFromWindowsSwapChainPanel', (WGPUSType_DawnTextureInternalUsageDescriptor:=327684): 'WGPUSType_DawnTextureInternalUsageDescriptor', (WGPUSType_DawnEncoderInternalUsageDescriptor:=327685): 'WGPUSType_DawnEncoderInternalUsageDescriptor', (WGPUSType_DawnInstanceDescriptor:=327686): 'WGPUSType_DawnInstanceDescriptor', (WGPUSType_DawnCacheDeviceDescriptor:=327687): 'WGPUSType_DawnCacheDeviceDescriptor', (WGPUSType_DawnAdapterPropertiesPowerPreference:=327688): 'WGPUSType_DawnAdapterPropertiesPowerPreference', (WGPUSType_DawnBufferDescriptorErrorInfoFromWireClient:=327689): 'WGPUSType_DawnBufferDescriptorErrorInfoFromWireClient', (WGPUSType_DawnTogglesDescriptor:=327690): 'WGPUSType_DawnTogglesDescriptor', (WGPUSType_DawnShaderModuleSPIRVOptionsDescriptor:=327691): 'WGPUSType_DawnShaderModuleSPIRVOptionsDescriptor', (WGPUSType_RequestAdapterOptionsLUID:=327692): 'WGPUSType_RequestAdapterOptionsLUID', (WGPUSType_RequestAdapterOptionsGetGLProc:=327693): 'WGPUSType_RequestAdapterOptionsGetGLProc', (WGPUSType_RequestAdapterOptionsD3D11Device:=327694): 'WGPUSType_RequestAdapterOptionsD3D11Device', (WGPUSType_DawnRenderPassColorAttachmentRenderToSingleSampled:=327695): 'WGPUSType_DawnRenderPassColorAttachmentRenderToSingleSampled', (WGPUSType_RenderPassPixelLocalStorage:=327696): 'WGPUSType_RenderPassPixelLocalStorage', (WGPUSType_PipelineLayoutPixelLocalStorage:=327697): 'WGPUSType_PipelineLayoutPixelLocalStorage', (WGPUSType_BufferHostMappedPointer:=327698): 'WGPUSType_BufferHostMappedPointer', (WGPUSType_DawnExperimentalSubgroupLimits:=327699): 'WGPUSType_DawnExperimentalSubgroupLimits', (WGPUSType_AdapterPropertiesMemoryHeaps:=327700): 'WGPUSType_AdapterPropertiesMemoryHeaps', (WGPUSType_AdapterPropertiesD3D:=327701): 'WGPUSType_AdapterPropertiesD3D', (WGPUSType_AdapterPropertiesVk:=327702): 'WGPUSType_AdapterPropertiesVk', (WGPUSType_DawnWireWGSLControl:=327703): 'WGPUSType_DawnWireWGSLControl', (WGPUSType_DawnWGSLBlocklist:=327704): 'WGPUSType_DawnWGSLBlocklist', (WGPUSType_DrmFormatCapabilities:=327705): 'WGPUSType_DrmFormatCapabilities', (WGPUSType_ShaderModuleCompilationOptions:=327706): 'WGPUSType_ShaderModuleCompilationOptions', (WGPUSType_ColorTargetStateExpandResolveTextureDawn:=327707): 'WGPUSType_ColorTargetStateExpandResolveTextureDawn', (WGPUSType_RenderPassDescriptorExpandResolveRect:=327708): 'WGPUSType_RenderPassDescriptorExpandResolveRect', (WGPUSType_SharedTextureMemoryVkDedicatedAllocationDescriptor:=327709): 'WGPUSType_SharedTextureMemoryVkDedicatedAllocationDescriptor', (WGPUSType_SharedTextureMemoryAHardwareBufferDescriptor:=327710): 'WGPUSType_SharedTextureMemoryAHardwareBufferDescriptor', (WGPUSType_SharedTextureMemoryDmaBufDescriptor:=327711): 'WGPUSType_SharedTextureMemoryDmaBufDescriptor', (WGPUSType_SharedTextureMemoryOpaqueFDDescriptor:=327712): 'WGPUSType_SharedTextureMemoryOpaqueFDDescriptor', (WGPUSType_SharedTextureMemoryZirconHandleDescriptor:=327713): 'WGPUSType_SharedTextureMemoryZirconHandleDescriptor', (WGPUSType_SharedTextureMemoryDXGISharedHandleDescriptor:=327714): 'WGPUSType_SharedTextureMemoryDXGISharedHandleDescriptor', (WGPUSType_SharedTextureMemoryD3D11Texture2DDescriptor:=327715): 'WGPUSType_SharedTextureMemoryD3D11Texture2DDescriptor', (WGPUSType_SharedTextureMemoryIOSurfaceDescriptor:=327716): 'WGPUSType_SharedTextureMemoryIOSurfaceDescriptor', (WGPUSType_SharedTextureMemoryEGLImageDescriptor:=327717): 'WGPUSType_SharedTextureMemoryEGLImageDescriptor', (WGPUSType_SharedTextureMemoryInitializedBeginState:=327718): 'WGPUSType_SharedTextureMemoryInitializedBeginState', (WGPUSType_SharedTextureMemoryInitializedEndState:=327719): 'WGPUSType_SharedTextureMemoryInitializedEndState', (WGPUSType_SharedTextureMemoryVkImageLayoutBeginState:=327720): 'WGPUSType_SharedTextureMemoryVkImageLayoutBeginState', (WGPUSType_SharedTextureMemoryVkImageLayoutEndState:=327721): 'WGPUSType_SharedTextureMemoryVkImageLayoutEndState', (WGPUSType_SharedTextureMemoryD3DSwapchainBeginState:=327722): 'WGPUSType_SharedTextureMemoryD3DSwapchainBeginState', (WGPUSType_SharedFenceVkSemaphoreOpaqueFDDescriptor:=327723): 'WGPUSType_SharedFenceVkSemaphoreOpaqueFDDescriptor', (WGPUSType_SharedFenceVkSemaphoreOpaqueFDExportInfo:=327724): 'WGPUSType_SharedFenceVkSemaphoreOpaqueFDExportInfo', (WGPUSType_SharedFenceSyncFDDescriptor:=327725): 'WGPUSType_SharedFenceSyncFDDescriptor', (WGPUSType_SharedFenceSyncFDExportInfo:=327726): 'WGPUSType_SharedFenceSyncFDExportInfo', (WGPUSType_SharedFenceVkSemaphoreZirconHandleDescriptor:=327727): 'WGPUSType_SharedFenceVkSemaphoreZirconHandleDescriptor', (WGPUSType_SharedFenceVkSemaphoreZirconHandleExportInfo:=327728): 'WGPUSType_SharedFenceVkSemaphoreZirconHandleExportInfo', (WGPUSType_SharedFenceDXGISharedHandleDescriptor:=327729): 'WGPUSType_SharedFenceDXGISharedHandleDescriptor', (WGPUSType_SharedFenceDXGISharedHandleExportInfo:=327730): 'WGPUSType_SharedFenceDXGISharedHandleExportInfo', (WGPUSType_SharedFenceMTLSharedEventDescriptor:=327731): 'WGPUSType_SharedFenceMTLSharedEventDescriptor', (WGPUSType_SharedFenceMTLSharedEventExportInfo:=327732): 'WGPUSType_SharedFenceMTLSharedEventExportInfo', (WGPUSType_SharedBufferMemoryD3D12ResourceDescriptor:=327733): 'WGPUSType_SharedBufferMemoryD3D12ResourceDescriptor', (WGPUSType_StaticSamplerBindingLayout:=327734): 'WGPUSType_StaticSamplerBindingLayout', (WGPUSType_YCbCrVkDescriptor:=327735): 'WGPUSType_YCbCrVkDescriptor', (WGPUSType_SharedTextureMemoryAHardwareBufferProperties:=327736): 'WGPUSType_SharedTextureMemoryAHardwareBufferProperties', (WGPUSType_AHardwareBufferProperties:=327737): 'WGPUSType_AHardwareBufferProperties', (WGPUSType_DawnExperimentalImmediateDataLimits:=327738): 'WGPUSType_DawnExperimentalImmediateDataLimits', (WGPUSType_DawnTexelCopyBufferRowAlignmentLimits:=327739): 'WGPUSType_DawnTexelCopyBufferRowAlignmentLimits', (WGPUSType_Force32:=2147483647): 'WGPUSType_Force32'}
 WGPUSType: TypeAlias = ctypes.c_uint32
@@ -108,7 +108,7 @@ class struct_WGPUBindGroupEntry(c.Struct):
 class struct_WGPUChainedStruct(c.Struct):
   SIZE = 16
   next: 'c.POINTER[struct_WGPUChainedStruct]'
-  sType: 'WGPUSType'
+  sType: int
 WGPUChainedStruct: TypeAlias = struct_WGPUChainedStruct
 struct_WGPUChainedStruct.register_fields([('next', c.POINTER[struct_WGPUChainedStruct], 0), ('sType', WGPUSType, 8)])
 uint64_t: TypeAlias = ctypes.c_uint64
@@ -116,9 +116,9 @@ struct_WGPUBindGroupEntry.register_fields([('nextInChain', c.POINTER[WGPUChained
 @c.record
 class struct_WGPUBlendComponent(c.Struct):
   SIZE = 12
-  operation: 'WGPUBlendOperation'
-  srcFactor: 'WGPUBlendFactor'
-  dstFactor: 'WGPUBlendFactor'
+  operation: int
+  srcFactor: int
+  dstFactor: int
 enum_WGPUBlendOperation: dict[int, str] = {(WGPUBlendOperation_Undefined:=0): 'WGPUBlendOperation_Undefined', (WGPUBlendOperation_Add:=1): 'WGPUBlendOperation_Add', (WGPUBlendOperation_Subtract:=2): 'WGPUBlendOperation_Subtract', (WGPUBlendOperation_ReverseSubtract:=3): 'WGPUBlendOperation_ReverseSubtract', (WGPUBlendOperation_Min:=4): 'WGPUBlendOperation_Min', (WGPUBlendOperation_Max:=5): 'WGPUBlendOperation_Max', (WGPUBlendOperation_Force32:=2147483647): 'WGPUBlendOperation_Force32'}
 WGPUBlendOperation: TypeAlias = ctypes.c_uint32
 enum_WGPUBlendFactor: dict[int, str] = {(WGPUBlendFactor_Undefined:=0): 'WGPUBlendFactor_Undefined', (WGPUBlendFactor_Zero:=1): 'WGPUBlendFactor_Zero', (WGPUBlendFactor_One:=2): 'WGPUBlendFactor_One', (WGPUBlendFactor_Src:=3): 'WGPUBlendFactor_Src', (WGPUBlendFactor_OneMinusSrc:=4): 'WGPUBlendFactor_OneMinusSrc', (WGPUBlendFactor_SrcAlpha:=5): 'WGPUBlendFactor_SrcAlpha', (WGPUBlendFactor_OneMinusSrcAlpha:=6): 'WGPUBlendFactor_OneMinusSrcAlpha', (WGPUBlendFactor_Dst:=7): 'WGPUBlendFactor_Dst', (WGPUBlendFactor_OneMinusDst:=8): 'WGPUBlendFactor_OneMinusDst', (WGPUBlendFactor_DstAlpha:=9): 'WGPUBlendFactor_DstAlpha', (WGPUBlendFactor_OneMinusDstAlpha:=10): 'WGPUBlendFactor_OneMinusDstAlpha', (WGPUBlendFactor_SrcAlphaSaturated:=11): 'WGPUBlendFactor_SrcAlphaSaturated', (WGPUBlendFactor_Constant:=12): 'WGPUBlendFactor_Constant', (WGPUBlendFactor_OneMinusConstant:=13): 'WGPUBlendFactor_OneMinusConstant', (WGPUBlendFactor_Src1:=14): 'WGPUBlendFactor_Src1', (WGPUBlendFactor_OneMinusSrc1:=15): 'WGPUBlendFactor_OneMinusSrc1', (WGPUBlendFactor_Src1Alpha:=16): 'WGPUBlendFactor_Src1Alpha', (WGPUBlendFactor_OneMinusSrc1Alpha:=17): 'WGPUBlendFactor_OneMinusSrc1Alpha', (WGPUBlendFactor_Force32:=2147483647): 'WGPUBlendFactor_Force32'}
@@ -128,7 +128,7 @@ struct_WGPUBlendComponent.register_fields([('operation', WGPUBlendOperation, 0),
 class struct_WGPUBufferBindingLayout(c.Struct):
   SIZE = 24
   nextInChain: 'c.POINTER[WGPUChainedStruct]'
-  type: 'WGPUBufferBindingType'
+  type: int
   hasDynamicOffset: int
   minBindingSize: int
 enum_WGPUBufferBindingType: dict[int, str] = {(WGPUBufferBindingType_BindingNotUsed:=0): 'WGPUBufferBindingType_BindingNotUsed', (WGPUBufferBindingType_Uniform:=1): 'WGPUBufferBindingType_Uniform', (WGPUBufferBindingType_Storage:=2): 'WGPUBufferBindingType_Storage', (WGPUBufferBindingType_ReadOnlyStorage:=3): 'WGPUBufferBindingType_ReadOnlyStorage', (WGPUBufferBindingType_Force32:=2147483647): 'WGPUBufferBindingType_Force32'}
@@ -147,7 +147,7 @@ struct_WGPUBufferHostMappedPointer.register_fields([('chain', WGPUChainedStruct,
 class struct_WGPUBufferMapCallbackInfo(c.Struct):
   SIZE = 32
   nextInChain: 'c.POINTER[WGPUChainedStruct]'
-  mode: 'WGPUCallbackMode'
+  mode: int
   callback: 'WGPUBufferMapCallback'
   userdata: 'ctypes.c_void_p'
 enum_WGPUCallbackMode: dict[int, str] = {(WGPUCallbackMode_WaitAnyOnly:=1): 'WGPUCallbackMode_WaitAnyOnly', (WGPUCallbackMode_AllowProcessEvents:=2): 'WGPUCallbackMode_AllowProcessEvents', (WGPUCallbackMode_AllowSpontaneous:=3): 'WGPUCallbackMode_AllowSpontaneous', (WGPUCallbackMode_Force32:=2147483647): 'WGPUCallbackMode_Force32'}
@@ -173,7 +173,7 @@ struct_WGPUColorTargetStateExpandResolveTextureDawn.register_fields([('chain', W
 class struct_WGPUCompilationInfoCallbackInfo(c.Struct):
   SIZE = 32
   nextInChain: 'c.POINTER[WGPUChainedStruct]'
-  mode: 'WGPUCallbackMode'
+  mode: int
   callback: 'WGPUCompilationInfoCallback'
   userdata: 'ctypes.c_void_p'
 enum_WGPUCompilationInfoRequestStatus: dict[int, str] = {(WGPUCompilationInfoRequestStatus_Success:=1): 'WGPUCompilationInfoRequestStatus_Success', (WGPUCompilationInfoRequestStatus_InstanceDropped:=2): 'WGPUCompilationInfoRequestStatus_InstanceDropped', (WGPUCompilationInfoRequestStatus_Error:=3): 'WGPUCompilationInfoRequestStatus_Error', (WGPUCompilationInfoRequestStatus_DeviceLost:=4): 'WGPUCompilationInfoRequestStatus_DeviceLost', (WGPUCompilationInfoRequestStatus_Unknown:=5): 'WGPUCompilationInfoRequestStatus_Unknown', (WGPUCompilationInfoRequestStatus_Force32:=2147483647): 'WGPUCompilationInfoRequestStatus_Force32'}
@@ -189,7 +189,7 @@ class struct_WGPUCompilationMessage(c.Struct):
   SIZE = 88
   nextInChain: 'c.POINTER[WGPUChainedStruct]'
   message: 'WGPUStringView'
-  type: 'WGPUCompilationMessageType'
+  type: int
   lineNum: int
   linePos: int
   offset: int
@@ -224,11 +224,11 @@ class struct_WGPUCopyTextureForBrowserOptions(c.Struct):
   nextInChain: 'c.POINTER[WGPUChainedStruct]'
   flipY: int
   needsColorSpaceConversion: int
-  srcAlphaMode: 'WGPUAlphaMode'
+  srcAlphaMode: int
   srcTransferFunctionParameters: 'c.POINTER[ctypes.c_float]'
   conversionMatrix: 'c.POINTER[ctypes.c_float]'
   dstTransferFunctionParameters: 'c.POINTER[ctypes.c_float]'
-  dstAlphaMode: 'WGPUAlphaMode'
+  dstAlphaMode: int
   internalUsage: int
 enum_WGPUAlphaMode: dict[int, str] = {(WGPUAlphaMode_Opaque:=1): 'WGPUAlphaMode_Opaque', (WGPUAlphaMode_Premultiplied:=2): 'WGPUAlphaMode_Premultiplied', (WGPUAlphaMode_Unpremultiplied:=3): 'WGPUAlphaMode_Unpremultiplied', (WGPUAlphaMode_Force32:=2147483647): 'WGPUAlphaMode_Force32'}
 WGPUAlphaMode: TypeAlias = ctypes.c_uint32
@@ -237,7 +237,7 @@ struct_WGPUCopyTextureForBrowserOptions.register_fields([('nextInChain', c.POINT
 class struct_WGPUCreateComputePipelineAsyncCallbackInfo(c.Struct):
   SIZE = 32
   nextInChain: 'c.POINTER[WGPUChainedStruct]'
-  mode: 'WGPUCallbackMode'
+  mode: int
   callback: 'WGPUCreateComputePipelineAsyncCallback'
   userdata: 'ctypes.c_void_p'
 enum_WGPUCreatePipelineAsyncStatus: dict[int, str] = {(WGPUCreatePipelineAsyncStatus_Success:=1): 'WGPUCreatePipelineAsyncStatus_Success', (WGPUCreatePipelineAsyncStatus_InstanceDropped:=2): 'WGPUCreatePipelineAsyncStatus_InstanceDropped', (WGPUCreatePipelineAsyncStatus_ValidationError:=3): 'WGPUCreatePipelineAsyncStatus_ValidationError', (WGPUCreatePipelineAsyncStatus_InternalError:=4): 'WGPUCreatePipelineAsyncStatus_InternalError', (WGPUCreatePipelineAsyncStatus_DeviceLost:=5): 'WGPUCreatePipelineAsyncStatus_DeviceLost', (WGPUCreatePipelineAsyncStatus_DeviceDestroyed:=6): 'WGPUCreatePipelineAsyncStatus_DeviceDestroyed', (WGPUCreatePipelineAsyncStatus_Unknown:=7): 'WGPUCreatePipelineAsyncStatus_Unknown', (WGPUCreatePipelineAsyncStatus_Force32:=2147483647): 'WGPUCreatePipelineAsyncStatus_Force32'}
@@ -247,7 +247,7 @@ struct_WGPUCreateComputePipelineAsyncCallbackInfo.register_fields([('nextInChain
 class struct_WGPUCreateRenderPipelineAsyncCallbackInfo(c.Struct):
   SIZE = 32
   nextInChain: 'c.POINTER[WGPUChainedStruct]'
-  mode: 'WGPUCallbackMode'
+  mode: int
   callback: 'WGPUCreateRenderPipelineAsyncCallback'
   userdata: 'ctypes.c_void_p'
 WGPUCreateRenderPipelineAsyncCallback: TypeAlias = c.CFUNCTYPE[None, [ctypes.c_uint32, c.POINTER[struct_WGPURenderPipelineImpl], struct_WGPUStringView, ctypes.c_void_p]]
@@ -263,7 +263,7 @@ struct_WGPUDawnWGSLBlocklist.register_fields([('chain', WGPUChainedStruct, 0), (
 class struct_WGPUDawnAdapterPropertiesPowerPreference(c.Struct):
   SIZE = 24
   chain: 'WGPUChainedStructOut'
-  powerPreference: 'WGPUPowerPreference'
+  powerPreference: int
 enum_WGPUPowerPreference: dict[int, str] = {(WGPUPowerPreference_Undefined:=0): 'WGPUPowerPreference_Undefined', (WGPUPowerPreference_LowPower:=1): 'WGPUPowerPreference_LowPower', (WGPUPowerPreference_HighPerformance:=2): 'WGPUPowerPreference_HighPerformance', (WGPUPowerPreference_Force32:=2147483647): 'WGPUPowerPreference_Force32'}
 WGPUPowerPreference: TypeAlias = ctypes.c_uint32
 struct_WGPUDawnAdapterPropertiesPowerPreference.register_fields([('chain', WGPUChainedStructOut, 0), ('powerPreference', WGPUPowerPreference, 16)])
@@ -338,7 +338,7 @@ struct_WGPUDawnWireWGSLControl.register_fields([('chain', WGPUChainedStruct, 0),
 class struct_WGPUDeviceLostCallbackInfo(c.Struct):
   SIZE = 32
   nextInChain: 'c.POINTER[WGPUChainedStruct]'
-  mode: 'WGPUCallbackMode'
+  mode: int
   callback: 'WGPUDeviceLostCallbackNew'
   userdata: 'ctypes.c_void_p'
 enum_WGPUDeviceLostReason: dict[int, str] = {(WGPUDeviceLostReason_Unknown:=1): 'WGPUDeviceLostReason_Unknown', (WGPUDeviceLostReason_Destroyed:=2): 'WGPUDeviceLostReason_Destroyed', (WGPUDeviceLostReason_InstanceDropped:=3): 'WGPUDeviceLostReason_InstanceDropped', (WGPUDeviceLostReason_FailedCreation:=4): 'WGPUDeviceLostReason_FailedCreation', (WGPUDeviceLostReason_Force32:=2147483647): 'WGPUDeviceLostReason_Force32'}
@@ -463,7 +463,7 @@ struct_WGPUOrigin3D.register_fields([('x', uint32_t, 0), ('y', uint32_t, 4), ('z
 class struct_WGPUPipelineLayoutStorageAttachment(c.Struct):
   SIZE = 16
   offset: int
-  format: 'WGPUTextureFormat'
+  format: int
 enum_WGPUTextureFormat: dict[int, str] = {(WGPUTextureFormat_Undefined:=0): 'WGPUTextureFormat_Undefined', (WGPUTextureFormat_R8Unorm:=1): 'WGPUTextureFormat_R8Unorm', (WGPUTextureFormat_R8Snorm:=2): 'WGPUTextureFormat_R8Snorm', (WGPUTextureFormat_R8Uint:=3): 'WGPUTextureFormat_R8Uint', (WGPUTextureFormat_R8Sint:=4): 'WGPUTextureFormat_R8Sint', (WGPUTextureFormat_R16Uint:=5): 'WGPUTextureFormat_R16Uint', (WGPUTextureFormat_R16Sint:=6): 'WGPUTextureFormat_R16Sint', (WGPUTextureFormat_R16Float:=7): 'WGPUTextureFormat_R16Float', (WGPUTextureFormat_RG8Unorm:=8): 'WGPUTextureFormat_RG8Unorm', (WGPUTextureFormat_RG8Snorm:=9): 'WGPUTextureFormat_RG8Snorm', (WGPUTextureFormat_RG8Uint:=10): 'WGPUTextureFormat_RG8Uint', (WGPUTextureFormat_RG8Sint:=11): 'WGPUTextureFormat_RG8Sint', (WGPUTextureFormat_R32Float:=12): 'WGPUTextureFormat_R32Float', (WGPUTextureFormat_R32Uint:=13): 'WGPUTextureFormat_R32Uint', (WGPUTextureFormat_R32Sint:=14): 'WGPUTextureFormat_R32Sint', (WGPUTextureFormat_RG16Uint:=15): 'WGPUTextureFormat_RG16Uint', (WGPUTextureFormat_RG16Sint:=16): 'WGPUTextureFormat_RG16Sint', (WGPUTextureFormat_RG16Float:=17): 'WGPUTextureFormat_RG16Float', (WGPUTextureFormat_RGBA8Unorm:=18): 'WGPUTextureFormat_RGBA8Unorm', (WGPUTextureFormat_RGBA8UnormSrgb:=19): 'WGPUTextureFormat_RGBA8UnormSrgb', (WGPUTextureFormat_RGBA8Snorm:=20): 'WGPUTextureFormat_RGBA8Snorm', (WGPUTextureFormat_RGBA8Uint:=21): 'WGPUTextureFormat_RGBA8Uint', (WGPUTextureFormat_RGBA8Sint:=22): 'WGPUTextureFormat_RGBA8Sint', (WGPUTextureFormat_BGRA8Unorm:=23): 'WGPUTextureFormat_BGRA8Unorm', (WGPUTextureFormat_BGRA8UnormSrgb:=24): 'WGPUTextureFormat_BGRA8UnormSrgb', (WGPUTextureFormat_RGB10A2Uint:=25): 'WGPUTextureFormat_RGB10A2Uint', (WGPUTextureFormat_RGB10A2Unorm:=26): 'WGPUTextureFormat_RGB10A2Unorm', (WGPUTextureFormat_RG11B10Ufloat:=27): 'WGPUTextureFormat_RG11B10Ufloat', (WGPUTextureFormat_RGB9E5Ufloat:=28): 'WGPUTextureFormat_RGB9E5Ufloat', (WGPUTextureFormat_RG32Float:=29): 'WGPUTextureFormat_RG32Float', (WGPUTextureFormat_RG32Uint:=30): 'WGPUTextureFormat_RG32Uint', (WGPUTextureFormat_RG32Sint:=31): 'WGPUTextureFormat_RG32Sint', (WGPUTextureFormat_RGBA16Uint:=32): 'WGPUTextureFormat_RGBA16Uint', (WGPUTextureFormat_RGBA16Sint:=33): 'WGPUTextureFormat_RGBA16Sint', (WGPUTextureFormat_RGBA16Float:=34): 'WGPUTextureFormat_RGBA16Float', (WGPUTextureFormat_RGBA32Float:=35): 'WGPUTextureFormat_RGBA32Float', (WGPUTextureFormat_RGBA32Uint:=36): 'WGPUTextureFormat_RGBA32Uint', (WGPUTextureFormat_RGBA32Sint:=37): 'WGPUTextureFormat_RGBA32Sint', (WGPUTextureFormat_Stencil8:=38): 'WGPUTextureFormat_Stencil8', (WGPUTextureFormat_Depth16Unorm:=39): 'WGPUTextureFormat_Depth16Unorm', (WGPUTextureFormat_Depth24Plus:=40): 'WGPUTextureFormat_Depth24Plus', (WGPUTextureFormat_Depth24PlusStencil8:=41): 'WGPUTextureFormat_Depth24PlusStencil8', (WGPUTextureFormat_Depth32Float:=42): 'WGPUTextureFormat_Depth32Float', (WGPUTextureFormat_Depth32FloatStencil8:=43): 'WGPUTextureFormat_Depth32FloatStencil8', (WGPUTextureFormat_BC1RGBAUnorm:=44): 'WGPUTextureFormat_BC1RGBAUnorm', (WGPUTextureFormat_BC1RGBAUnormSrgb:=45): 'WGPUTextureFormat_BC1RGBAUnormSrgb', (WGPUTextureFormat_BC2RGBAUnorm:=46): 'WGPUTextureFormat_BC2RGBAUnorm', (WGPUTextureFormat_BC2RGBAUnormSrgb:=47): 'WGPUTextureFormat_BC2RGBAUnormSrgb', (WGPUTextureFormat_BC3RGBAUnorm:=48): 'WGPUTextureFormat_BC3RGBAUnorm', (WGPUTextureFormat_BC3RGBAUnormSrgb:=49): 'WGPUTextureFormat_BC3RGBAUnormSrgb', (WGPUTextureFormat_BC4RUnorm:=50): 'WGPUTextureFormat_BC4RUnorm', (WGPUTextureFormat_BC4RSnorm:=51): 'WGPUTextureFormat_BC4RSnorm', (WGPUTextureFormat_BC5RGUnorm:=52): 'WGPUTextureFormat_BC5RGUnorm', (WGPUTextureFormat_BC5RGSnorm:=53): 'WGPUTextureFormat_BC5RGSnorm', (WGPUTextureFormat_BC6HRGBUfloat:=54): 'WGPUTextureFormat_BC6HRGBUfloat', (WGPUTextureFormat_BC6HRGBFloat:=55): 'WGPUTextureFormat_BC6HRGBFloat', (WGPUTextureFormat_BC7RGBAUnorm:=56): 'WGPUTextureFormat_BC7RGBAUnorm', (WGPUTextureFormat_BC7RGBAUnormSrgb:=57): 'WGPUTextureFormat_BC7RGBAUnormSrgb', (WGPUTextureFormat_ETC2RGB8Unorm:=58): 'WGPUTextureFormat_ETC2RGB8Unorm', (WGPUTextureFormat_ETC2RGB8UnormSrgb:=59): 'WGPUTextureFormat_ETC2RGB8UnormSrgb', (WGPUTextureFormat_ETC2RGB8A1Unorm:=60): 'WGPUTextureFormat_ETC2RGB8A1Unorm', (WGPUTextureFormat_ETC2RGB8A1UnormSrgb:=61): 'WGPUTextureFormat_ETC2RGB8A1UnormSrgb', (WGPUTextureFormat_ETC2RGBA8Unorm:=62): 'WGPUTextureFormat_ETC2RGBA8Unorm', (WGPUTextureFormat_ETC2RGBA8UnormSrgb:=63): 'WGPUTextureFormat_ETC2RGBA8UnormSrgb', (WGPUTextureFormat_EACR11Unorm:=64): 'WGPUTextureFormat_EACR11Unorm', (WGPUTextureFormat_EACR11Snorm:=65): 'WGPUTextureFormat_EACR11Snorm', (WGPUTextureFormat_EACRG11Unorm:=66): 'WGPUTextureFormat_EACRG11Unorm', (WGPUTextureFormat_EACRG11Snorm:=67): 'WGPUTextureFormat_EACRG11Snorm', (WGPUTextureFormat_ASTC4x4Unorm:=68): 'WGPUTextureFormat_ASTC4x4Unorm', (WGPUTextureFormat_ASTC4x4UnormSrgb:=69): 'WGPUTextureFormat_ASTC4x4UnormSrgb', (WGPUTextureFormat_ASTC5x4Unorm:=70): 'WGPUTextureFormat_ASTC5x4Unorm', (WGPUTextureFormat_ASTC5x4UnormSrgb:=71): 'WGPUTextureFormat_ASTC5x4UnormSrgb', (WGPUTextureFormat_ASTC5x5Unorm:=72): 'WGPUTextureFormat_ASTC5x5Unorm', (WGPUTextureFormat_ASTC5x5UnormSrgb:=73): 'WGPUTextureFormat_ASTC5x5UnormSrgb', (WGPUTextureFormat_ASTC6x5Unorm:=74): 'WGPUTextureFormat_ASTC6x5Unorm', (WGPUTextureFormat_ASTC6x5UnormSrgb:=75): 'WGPUTextureFormat_ASTC6x5UnormSrgb', (WGPUTextureFormat_ASTC6x6Unorm:=76): 'WGPUTextureFormat_ASTC6x6Unorm', (WGPUTextureFormat_ASTC6x6UnormSrgb:=77): 'WGPUTextureFormat_ASTC6x6UnormSrgb', (WGPUTextureFormat_ASTC8x5Unorm:=78): 'WGPUTextureFormat_ASTC8x5Unorm', (WGPUTextureFormat_ASTC8x5UnormSrgb:=79): 'WGPUTextureFormat_ASTC8x5UnormSrgb', (WGPUTextureFormat_ASTC8x6Unorm:=80): 'WGPUTextureFormat_ASTC8x6Unorm', (WGPUTextureFormat_ASTC8x6UnormSrgb:=81): 'WGPUTextureFormat_ASTC8x6UnormSrgb', (WGPUTextureFormat_ASTC8x8Unorm:=82): 'WGPUTextureFormat_ASTC8x8Unorm', (WGPUTextureFormat_ASTC8x8UnormSrgb:=83): 'WGPUTextureFormat_ASTC8x8UnormSrgb', (WGPUTextureFormat_ASTC10x5Unorm:=84): 'WGPUTextureFormat_ASTC10x5Unorm', (WGPUTextureFormat_ASTC10x5UnormSrgb:=85): 'WGPUTextureFormat_ASTC10x5UnormSrgb', (WGPUTextureFormat_ASTC10x6Unorm:=86): 'WGPUTextureFormat_ASTC10x6Unorm', (WGPUTextureFormat_ASTC10x6UnormSrgb:=87): 'WGPUTextureFormat_ASTC10x6UnormSrgb', (WGPUTextureFormat_ASTC10x8Unorm:=88): 'WGPUTextureFormat_ASTC10x8Unorm', (WGPUTextureFormat_ASTC10x8UnormSrgb:=89): 'WGPUTextureFormat_ASTC10x8UnormSrgb', (WGPUTextureFormat_ASTC10x10Unorm:=90): 'WGPUTextureFormat_ASTC10x10Unorm', (WGPUTextureFormat_ASTC10x10UnormSrgb:=91): 'WGPUTextureFormat_ASTC10x10UnormSrgb', (WGPUTextureFormat_ASTC12x10Unorm:=92): 'WGPUTextureFormat_ASTC12x10Unorm', (WGPUTextureFormat_ASTC12x10UnormSrgb:=93): 'WGPUTextureFormat_ASTC12x10UnormSrgb', (WGPUTextureFormat_ASTC12x12Unorm:=94): 'WGPUTextureFormat_ASTC12x12Unorm', (WGPUTextureFormat_ASTC12x12UnormSrgb:=95): 'WGPUTextureFormat_ASTC12x12UnormSrgb', (WGPUTextureFormat_R16Unorm:=327680): 'WGPUTextureFormat_R16Unorm', (WGPUTextureFormat_RG16Unorm:=327681): 'WGPUTextureFormat_RG16Unorm', (WGPUTextureFormat_RGBA16Unorm:=327682): 'WGPUTextureFormat_RGBA16Unorm', (WGPUTextureFormat_R16Snorm:=327683): 'WGPUTextureFormat_R16Snorm', (WGPUTextureFormat_RG16Snorm:=327684): 'WGPUTextureFormat_RG16Snorm', (WGPUTextureFormat_RGBA16Snorm:=327685): 'WGPUTextureFormat_RGBA16Snorm', (WGPUTextureFormat_R8BG8Biplanar420Unorm:=327686): 'WGPUTextureFormat_R8BG8Biplanar420Unorm', (WGPUTextureFormat_R10X6BG10X6Biplanar420Unorm:=327687): 'WGPUTextureFormat_R10X6BG10X6Biplanar420Unorm', (WGPUTextureFormat_R8BG8A8Triplanar420Unorm:=327688): 'WGPUTextureFormat_R8BG8A8Triplanar420Unorm', (WGPUTextureFormat_R8BG8Biplanar422Unorm:=327689): 'WGPUTextureFormat_R8BG8Biplanar422Unorm', (WGPUTextureFormat_R8BG8Biplanar444Unorm:=327690): 'WGPUTextureFormat_R8BG8Biplanar444Unorm', (WGPUTextureFormat_R10X6BG10X6Biplanar422Unorm:=327691): 'WGPUTextureFormat_R10X6BG10X6Biplanar422Unorm', (WGPUTextureFormat_R10X6BG10X6Biplanar444Unorm:=327692): 'WGPUTextureFormat_R10X6BG10X6Biplanar444Unorm', (WGPUTextureFormat_External:=327693): 'WGPUTextureFormat_External', (WGPUTextureFormat_Force32:=2147483647): 'WGPUTextureFormat_Force32'}
 WGPUTextureFormat: TypeAlias = ctypes.c_uint32
 struct_WGPUPipelineLayoutStorageAttachment.register_fields([('offset', uint64_t, 0), ('format', WGPUTextureFormat, 8)])
@@ -471,7 +471,7 @@ struct_WGPUPipelineLayoutStorageAttachment.register_fields([('offset', uint64_t,
 class struct_WGPUPopErrorScopeCallbackInfo(c.Struct):
   SIZE = 40
   nextInChain: 'c.POINTER[WGPUChainedStruct]'
-  mode: 'WGPUCallbackMode'
+  mode: int
   callback: 'WGPUPopErrorScopeCallback'
   oldCallback: 'WGPUErrorCallback'
   userdata: 'ctypes.c_void_p'
@@ -484,10 +484,10 @@ struct_WGPUPopErrorScopeCallbackInfo.register_fields([('nextInChain', c.POINTER[
 class struct_WGPUPrimitiveState(c.Struct):
   SIZE = 32
   nextInChain: 'c.POINTER[WGPUChainedStruct]'
-  topology: 'WGPUPrimitiveTopology'
-  stripIndexFormat: 'WGPUIndexFormat'
-  frontFace: 'WGPUFrontFace'
-  cullMode: 'WGPUCullMode'
+  topology: int
+  stripIndexFormat: int
+  frontFace: int
+  cullMode: int
   unclippedDepth: int
 enum_WGPUPrimitiveTopology: dict[int, str] = {(WGPUPrimitiveTopology_Undefined:=0): 'WGPUPrimitiveTopology_Undefined', (WGPUPrimitiveTopology_PointList:=1): 'WGPUPrimitiveTopology_PointList', (WGPUPrimitiveTopology_LineList:=2): 'WGPUPrimitiveTopology_LineList', (WGPUPrimitiveTopology_LineStrip:=3): 'WGPUPrimitiveTopology_LineStrip', (WGPUPrimitiveTopology_TriangleList:=4): 'WGPUPrimitiveTopology_TriangleList', (WGPUPrimitiveTopology_TriangleStrip:=5): 'WGPUPrimitiveTopology_TriangleStrip', (WGPUPrimitiveTopology_Force32:=2147483647): 'WGPUPrimitiveTopology_Force32'}
 WGPUPrimitiveTopology: TypeAlias = ctypes.c_uint32
@@ -502,7 +502,7 @@ struct_WGPUPrimitiveState.register_fields([('nextInChain', c.POINTER[WGPUChained
 class struct_WGPUQueueWorkDoneCallbackInfo(c.Struct):
   SIZE = 32
   nextInChain: 'c.POINTER[WGPUChainedStruct]'
-  mode: 'WGPUCallbackMode'
+  mode: int
   callback: 'WGPUQueueWorkDoneCallback'
   userdata: 'ctypes.c_void_p'
 enum_WGPUQueueWorkDoneStatus: dict[int, str] = {(WGPUQueueWorkDoneStatus_Success:=1): 'WGPUQueueWorkDoneStatus_Success', (WGPUQueueWorkDoneStatus_InstanceDropped:=2): 'WGPUQueueWorkDoneStatus_InstanceDropped', (WGPUQueueWorkDoneStatus_Error:=3): 'WGPUQueueWorkDoneStatus_Error', (WGPUQueueWorkDoneStatus_Unknown:=4): 'WGPUQueueWorkDoneStatus_Unknown', (WGPUQueueWorkDoneStatus_DeviceLost:=5): 'WGPUQueueWorkDoneStatus_DeviceLost', (WGPUQueueWorkDoneStatus_Force32:=2147483647): 'WGPUQueueWorkDoneStatus_Force32'}
@@ -512,12 +512,12 @@ struct_WGPUQueueWorkDoneCallbackInfo.register_fields([('nextInChain', c.POINTER[
 class struct_WGPURenderPassDepthStencilAttachment(c.Struct):
   SIZE = 40
   view: 'WGPUTextureView'
-  depthLoadOp: 'WGPULoadOp'
-  depthStoreOp: 'WGPUStoreOp'
+  depthLoadOp: int
+  depthStoreOp: int
   depthClearValue: float
   depthReadOnly: int
-  stencilLoadOp: 'WGPULoadOp'
-  stencilStoreOp: 'WGPUStoreOp'
+  stencilLoadOp: int
+  stencilStoreOp: int
   stencilClearValue: int
   stencilReadOnly: int
 enum_WGPULoadOp: dict[int, str] = {(WGPULoadOp_Undefined:=0): 'WGPULoadOp_Undefined', (WGPULoadOp_Load:=1): 'WGPULoadOp_Load', (WGPULoadOp_Clear:=2): 'WGPULoadOp_Clear', (WGPULoadOp_ExpandResolveTexture:=327683): 'WGPULoadOp_ExpandResolveTexture', (WGPULoadOp_Force32:=2147483647): 'WGPULoadOp_Force32'}
@@ -551,7 +551,7 @@ struct_WGPURenderPassTimestampWrites.register_fields([('querySet', WGPUQuerySet,
 class struct_WGPURequestAdapterCallbackInfo(c.Struct):
   SIZE = 32
   nextInChain: 'c.POINTER[WGPUChainedStruct]'
-  mode: 'WGPUCallbackMode'
+  mode: int
   callback: 'WGPURequestAdapterCallback'
   userdata: 'ctypes.c_void_p'
 enum_WGPURequestAdapterStatus: dict[int, str] = {(WGPURequestAdapterStatus_Success:=1): 'WGPURequestAdapterStatus_Success', (WGPURequestAdapterStatus_InstanceDropped:=2): 'WGPURequestAdapterStatus_InstanceDropped', (WGPURequestAdapterStatus_Unavailable:=3): 'WGPURequestAdapterStatus_Unavailable', (WGPURequestAdapterStatus_Error:=4): 'WGPURequestAdapterStatus_Error', (WGPURequestAdapterStatus_Unknown:=5): 'WGPURequestAdapterStatus_Unknown', (WGPURequestAdapterStatus_Force32:=2147483647): 'WGPURequestAdapterStatus_Force32'}
@@ -562,9 +562,9 @@ class struct_WGPURequestAdapterOptions(c.Struct):
   SIZE = 40
   nextInChain: 'c.POINTER[WGPUChainedStruct]'
   compatibleSurface: 'WGPUSurface'
-  featureLevel: 'WGPUFeatureLevel'
-  powerPreference: 'WGPUPowerPreference'
-  backendType: 'WGPUBackendType'
+  featureLevel: int
+  powerPreference: int
+  backendType: int
   forceFallbackAdapter: int
   compatibilityMode: int
 enum_WGPUFeatureLevel: dict[int, str] = {(WGPUFeatureLevel_Undefined:=0): 'WGPUFeatureLevel_Undefined', (WGPUFeatureLevel_Compatibility:=1): 'WGPUFeatureLevel_Compatibility', (WGPUFeatureLevel_Core:=2): 'WGPUFeatureLevel_Core', (WGPUFeatureLevel_Force32:=2147483647): 'WGPUFeatureLevel_Force32'}
@@ -576,7 +576,7 @@ struct_WGPURequestAdapterOptions.register_fields([('nextInChain', c.POINTER[WGPU
 class struct_WGPURequestDeviceCallbackInfo(c.Struct):
   SIZE = 32
   nextInChain: 'c.POINTER[WGPUChainedStruct]'
-  mode: 'WGPUCallbackMode'
+  mode: int
   callback: 'WGPURequestDeviceCallback'
   userdata: 'ctypes.c_void_p'
 enum_WGPURequestDeviceStatus: dict[int, str] = {(WGPURequestDeviceStatus_Success:=1): 'WGPURequestDeviceStatus_Success', (WGPURequestDeviceStatus_InstanceDropped:=2): 'WGPURequestDeviceStatus_InstanceDropped', (WGPURequestDeviceStatus_Error:=3): 'WGPURequestDeviceStatus_Error', (WGPURequestDeviceStatus_Unknown:=4): 'WGPURequestDeviceStatus_Unknown', (WGPURequestDeviceStatus_Force32:=2147483647): 'WGPURequestDeviceStatus_Force32'}
@@ -586,7 +586,7 @@ struct_WGPURequestDeviceCallbackInfo.register_fields([('nextInChain', c.POINTER[
 class struct_WGPUSamplerBindingLayout(c.Struct):
   SIZE = 16
   nextInChain: 'c.POINTER[WGPUChainedStruct]'
-  type: 'WGPUSamplerBindingType'
+  type: int
 enum_WGPUSamplerBindingType: dict[int, str] = {(WGPUSamplerBindingType_BindingNotUsed:=0): 'WGPUSamplerBindingType_BindingNotUsed', (WGPUSamplerBindingType_Filtering:=1): 'WGPUSamplerBindingType_Filtering', (WGPUSamplerBindingType_NonFiltering:=2): 'WGPUSamplerBindingType_NonFiltering', (WGPUSamplerBindingType_Comparison:=3): 'WGPUSamplerBindingType_Comparison', (WGPUSamplerBindingType_Force32:=2147483647): 'WGPUSamplerBindingType_Force32'}
 WGPUSamplerBindingType: TypeAlias = ctypes.c_uint32
 struct_WGPUSamplerBindingLayout.register_fields([('nextInChain', c.POINTER[WGPUChainedStruct], 0), ('type', WGPUSamplerBindingType, 8)])
@@ -657,7 +657,7 @@ struct_WGPUSharedFenceMTLSharedEventExportInfo.register_fields([('chain', WGPUCh
 class struct_WGPUSharedFenceExportInfo(c.Struct):
   SIZE = 16
   nextInChain: 'c.POINTER[WGPUChainedStructOut]'
-  type: 'WGPUSharedFenceType'
+  type: int
 enum_WGPUSharedFenceType: dict[int, str] = {(WGPUSharedFenceType_VkSemaphoreOpaqueFD:=1): 'WGPUSharedFenceType_VkSemaphoreOpaqueFD', (WGPUSharedFenceType_SyncFD:=2): 'WGPUSharedFenceType_SyncFD', (WGPUSharedFenceType_VkSemaphoreZirconHandle:=3): 'WGPUSharedFenceType_VkSemaphoreZirconHandle', (WGPUSharedFenceType_DXGISharedHandle:=4): 'WGPUSharedFenceType_DXGISharedHandle', (WGPUSharedFenceType_MTLSharedEvent:=5): 'WGPUSharedFenceType_MTLSharedEvent', (WGPUSharedFenceType_Force32:=2147483647): 'WGPUSharedFenceType_Force32'}
 WGPUSharedFenceType: TypeAlias = ctypes.c_uint32
 struct_WGPUSharedFenceExportInfo.register_fields([('nextInChain', c.POINTER[WGPUChainedStructOut], 0), ('type', WGPUSharedFenceType, 8)])
@@ -803,10 +803,10 @@ struct_WGPUStaticSamplerBindingLayout.register_fields([('chain', WGPUChainedStru
 @c.record
 class struct_WGPUStencilFaceState(c.Struct):
   SIZE = 16
-  compare: 'WGPUCompareFunction'
-  failOp: 'WGPUStencilOperation'
-  depthFailOp: 'WGPUStencilOperation'
-  passOp: 'WGPUStencilOperation'
+  compare: int
+  failOp: int
+  depthFailOp: int
+  passOp: int
 enum_WGPUCompareFunction: dict[int, str] = {(WGPUCompareFunction_Undefined:=0): 'WGPUCompareFunction_Undefined', (WGPUCompareFunction_Never:=1): 'WGPUCompareFunction_Never', (WGPUCompareFunction_Less:=2): 'WGPUCompareFunction_Less', (WGPUCompareFunction_Equal:=3): 'WGPUCompareFunction_Equal', (WGPUCompareFunction_LessEqual:=4): 'WGPUCompareFunction_LessEqual', (WGPUCompareFunction_Greater:=5): 'WGPUCompareFunction_Greater', (WGPUCompareFunction_NotEqual:=6): 'WGPUCompareFunction_NotEqual', (WGPUCompareFunction_GreaterEqual:=7): 'WGPUCompareFunction_GreaterEqual', (WGPUCompareFunction_Always:=8): 'WGPUCompareFunction_Always', (WGPUCompareFunction_Force32:=2147483647): 'WGPUCompareFunction_Force32'}
 WGPUCompareFunction: TypeAlias = ctypes.c_uint32
 enum_WGPUStencilOperation: dict[int, str] = {(WGPUStencilOperation_Undefined:=0): 'WGPUStencilOperation_Undefined', (WGPUStencilOperation_Keep:=1): 'WGPUStencilOperation_Keep', (WGPUStencilOperation_Zero:=2): 'WGPUStencilOperation_Zero', (WGPUStencilOperation_Replace:=3): 'WGPUStencilOperation_Replace', (WGPUStencilOperation_Invert:=4): 'WGPUStencilOperation_Invert', (WGPUStencilOperation_IncrementClamp:=5): 'WGPUStencilOperation_IncrementClamp', (WGPUStencilOperation_DecrementClamp:=6): 'WGPUStencilOperation_DecrementClamp', (WGPUStencilOperation_IncrementWrap:=7): 'WGPUStencilOperation_IncrementWrap', (WGPUStencilOperation_DecrementWrap:=8): 'WGPUStencilOperation_DecrementWrap', (WGPUStencilOperation_Force32:=2147483647): 'WGPUStencilOperation_Force32'}
@@ -816,9 +816,9 @@ struct_WGPUStencilFaceState.register_fields([('compare', WGPUCompareFunction, 0)
 class struct_WGPUStorageTextureBindingLayout(c.Struct):
   SIZE = 24
   nextInChain: 'c.POINTER[WGPUChainedStruct]'
-  access: 'WGPUStorageTextureAccess'
-  format: 'WGPUTextureFormat'
-  viewDimension: 'WGPUTextureViewDimension'
+  access: int
+  format: int
+  viewDimension: int
 enum_WGPUStorageTextureAccess: dict[int, str] = {(WGPUStorageTextureAccess_BindingNotUsed:=0): 'WGPUStorageTextureAccess_BindingNotUsed', (WGPUStorageTextureAccess_WriteOnly:=1): 'WGPUStorageTextureAccess_WriteOnly', (WGPUStorageTextureAccess_ReadOnly:=2): 'WGPUStorageTextureAccess_ReadOnly', (WGPUStorageTextureAccess_ReadWrite:=3): 'WGPUStorageTextureAccess_ReadWrite', (WGPUStorageTextureAccess_Force32:=2147483647): 'WGPUStorageTextureAccess_Force32'}
 WGPUStorageTextureAccess: TypeAlias = ctypes.c_uint32
 enum_WGPUTextureViewDimension: dict[int, str] = {(WGPUTextureViewDimension_Undefined:=0): 'WGPUTextureViewDimension_Undefined', (WGPUTextureViewDimension_1D:=1): 'WGPUTextureViewDimension_1D', (WGPUTextureViewDimension_2D:=2): 'WGPUTextureViewDimension_2D', (WGPUTextureViewDimension_2DArray:=3): 'WGPUTextureViewDimension_2DArray', (WGPUTextureViewDimension_Cube:=4): 'WGPUTextureViewDimension_Cube', (WGPUTextureViewDimension_CubeArray:=5): 'WGPUTextureViewDimension_CubeArray', (WGPUTextureViewDimension_3D:=6): 'WGPUTextureViewDimension_3D', (WGPUTextureViewDimension_Force32:=2147483647): 'WGPUTextureViewDimension_Force32'}
@@ -853,14 +853,14 @@ class struct_WGPUSurfaceConfiguration(c.Struct):
   SIZE = 64
   nextInChain: 'c.POINTER[WGPUChainedStruct]'
   device: 'WGPUDevice'
-  format: 'WGPUTextureFormat'
+  format: int
   usage: int
   viewFormatCount: int
   viewFormats: 'c.POINTER[WGPUTextureFormat]'
-  alphaMode: 'WGPUCompositeAlphaMode'
+  alphaMode: int
   width: int
   height: int
-  presentMode: 'WGPUPresentMode'
+  presentMode: int
 struct_WGPUSurfaceConfiguration.register_fields([('nextInChain', c.POINTER[WGPUChainedStruct], 0), ('device', WGPUDevice, 8), ('format', WGPUTextureFormat, 16), ('usage', WGPUTextureUsage, 24), ('viewFormatCount', size_t, 32), ('viewFormats', c.POINTER[WGPUTextureFormat], 40), ('alphaMode', WGPUCompositeAlphaMode, 48), ('width', uint32_t, 52), ('height', uint32_t, 56), ('presentMode', WGPUPresentMode, 60)])
 @c.record
 class struct_WGPUSurfaceDescriptorFromWindowsCoreWindow(c.Struct):
@@ -919,7 +919,7 @@ class struct_WGPUSurfaceTexture(c.Struct):
   SIZE = 16
   texture: 'WGPUTexture'
   suboptimal: int
-  status: 'WGPUSurfaceGetCurrentTextureStatus'
+  status: int
 enum_WGPUSurfaceGetCurrentTextureStatus: dict[int, str] = {(WGPUSurfaceGetCurrentTextureStatus_Success:=1): 'WGPUSurfaceGetCurrentTextureStatus_Success', (WGPUSurfaceGetCurrentTextureStatus_Timeout:=2): 'WGPUSurfaceGetCurrentTextureStatus_Timeout', (WGPUSurfaceGetCurrentTextureStatus_Outdated:=3): 'WGPUSurfaceGetCurrentTextureStatus_Outdated', (WGPUSurfaceGetCurrentTextureStatus_Lost:=4): 'WGPUSurfaceGetCurrentTextureStatus_Lost', (WGPUSurfaceGetCurrentTextureStatus_OutOfMemory:=5): 'WGPUSurfaceGetCurrentTextureStatus_OutOfMemory', (WGPUSurfaceGetCurrentTextureStatus_DeviceLost:=6): 'WGPUSurfaceGetCurrentTextureStatus_DeviceLost', (WGPUSurfaceGetCurrentTextureStatus_Error:=7): 'WGPUSurfaceGetCurrentTextureStatus_Error', (WGPUSurfaceGetCurrentTextureStatus_Force32:=2147483647): 'WGPUSurfaceGetCurrentTextureStatus_Force32'}
 WGPUSurfaceGetCurrentTextureStatus: TypeAlias = ctypes.c_uint32
 struct_WGPUSurfaceTexture.register_fields([('texture', WGPUTexture, 0), ('suboptimal', WGPUBool, 8), ('status', WGPUSurfaceGetCurrentTextureStatus, 12)])
@@ -927,8 +927,8 @@ struct_WGPUSurfaceTexture.register_fields([('texture', WGPUTexture, 0), ('subopt
 class struct_WGPUTextureBindingLayout(c.Struct):
   SIZE = 24
   nextInChain: 'c.POINTER[WGPUChainedStruct]'
-  sampleType: 'WGPUTextureSampleType'
-  viewDimension: 'WGPUTextureViewDimension'
+  sampleType: int
+  viewDimension: int
   multisampled: int
 enum_WGPUTextureSampleType: dict[int, str] = {(WGPUTextureSampleType_BindingNotUsed:=0): 'WGPUTextureSampleType_BindingNotUsed', (WGPUTextureSampleType_Float:=1): 'WGPUTextureSampleType_Float', (WGPUTextureSampleType_UnfilterableFloat:=2): 'WGPUTextureSampleType_UnfilterableFloat', (WGPUTextureSampleType_Depth:=3): 'WGPUTextureSampleType_Depth', (WGPUTextureSampleType_Sint:=4): 'WGPUTextureSampleType_Sint', (WGPUTextureSampleType_Uint:=5): 'WGPUTextureSampleType_Uint', (WGPUTextureSampleType_Force32:=2147483647): 'WGPUTextureSampleType_Force32'}
 WGPUTextureSampleType: TypeAlias = ctypes.c_uint32
@@ -937,7 +937,7 @@ struct_WGPUTextureBindingLayout.register_fields([('nextInChain', c.POINTER[WGPUC
 class struct_WGPUTextureBindingViewDimensionDescriptor(c.Struct):
   SIZE = 24
   chain: 'WGPUChainedStruct'
-  textureBindingViewDimension: 'WGPUTextureViewDimension'
+  textureBindingViewDimension: int
 struct_WGPUTextureBindingViewDimensionDescriptor.register_fields([('chain', WGPUChainedStruct, 0), ('textureBindingViewDimension', WGPUTextureViewDimension, 16)])
 @c.record
 class struct_WGPUTextureDataLayout(c.Struct):
@@ -957,7 +957,7 @@ struct_WGPUUncapturedErrorCallbackInfo.register_fields([('nextInChain', c.POINTE
 @c.record
 class struct_WGPUVertexAttribute(c.Struct):
   SIZE = 24
-  format: 'WGPUVertexFormat'
+  format: int
   offset: int
   shaderLocation: int
 enum_WGPUVertexFormat: dict[int, str] = {(WGPUVertexFormat_Uint8:=1): 'WGPUVertexFormat_Uint8', (WGPUVertexFormat_Uint8x2:=2): 'WGPUVertexFormat_Uint8x2', (WGPUVertexFormat_Uint8x4:=3): 'WGPUVertexFormat_Uint8x4', (WGPUVertexFormat_Sint8:=4): 'WGPUVertexFormat_Sint8', (WGPUVertexFormat_Sint8x2:=5): 'WGPUVertexFormat_Sint8x2', (WGPUVertexFormat_Sint8x4:=6): 'WGPUVertexFormat_Sint8x4', (WGPUVertexFormat_Unorm8:=7): 'WGPUVertexFormat_Unorm8', (WGPUVertexFormat_Unorm8x2:=8): 'WGPUVertexFormat_Unorm8x2', (WGPUVertexFormat_Unorm8x4:=9): 'WGPUVertexFormat_Unorm8x4', (WGPUVertexFormat_Snorm8:=10): 'WGPUVertexFormat_Snorm8', (WGPUVertexFormat_Snorm8x2:=11): 'WGPUVertexFormat_Snorm8x2', (WGPUVertexFormat_Snorm8x4:=12): 'WGPUVertexFormat_Snorm8x4', (WGPUVertexFormat_Uint16:=13): 'WGPUVertexFormat_Uint16', (WGPUVertexFormat_Uint16x2:=14): 'WGPUVertexFormat_Uint16x2', (WGPUVertexFormat_Uint16x4:=15): 'WGPUVertexFormat_Uint16x4', (WGPUVertexFormat_Sint16:=16): 'WGPUVertexFormat_Sint16', (WGPUVertexFormat_Sint16x2:=17): 'WGPUVertexFormat_Sint16x2', (WGPUVertexFormat_Sint16x4:=18): 'WGPUVertexFormat_Sint16x4', (WGPUVertexFormat_Unorm16:=19): 'WGPUVertexFormat_Unorm16', (WGPUVertexFormat_Unorm16x2:=20): 'WGPUVertexFormat_Unorm16x2', (WGPUVertexFormat_Unorm16x4:=21): 'WGPUVertexFormat_Unorm16x4', (WGPUVertexFormat_Snorm16:=22): 'WGPUVertexFormat_Snorm16', (WGPUVertexFormat_Snorm16x2:=23): 'WGPUVertexFormat_Snorm16x2', (WGPUVertexFormat_Snorm16x4:=24): 'WGPUVertexFormat_Snorm16x4', (WGPUVertexFormat_Float16:=25): 'WGPUVertexFormat_Float16', (WGPUVertexFormat_Float16x2:=26): 'WGPUVertexFormat_Float16x2', (WGPUVertexFormat_Float16x4:=27): 'WGPUVertexFormat_Float16x4', (WGPUVertexFormat_Float32:=28): 'WGPUVertexFormat_Float32', (WGPUVertexFormat_Float32x2:=29): 'WGPUVertexFormat_Float32x2', (WGPUVertexFormat_Float32x3:=30): 'WGPUVertexFormat_Float32x3', (WGPUVertexFormat_Float32x4:=31): 'WGPUVertexFormat_Float32x4', (WGPUVertexFormat_Uint32:=32): 'WGPUVertexFormat_Uint32', (WGPUVertexFormat_Uint32x2:=33): 'WGPUVertexFormat_Uint32x2', (WGPUVertexFormat_Uint32x3:=34): 'WGPUVertexFormat_Uint32x3', (WGPUVertexFormat_Uint32x4:=35): 'WGPUVertexFormat_Uint32x4', (WGPUVertexFormat_Sint32:=36): 'WGPUVertexFormat_Sint32', (WGPUVertexFormat_Sint32x2:=37): 'WGPUVertexFormat_Sint32x2', (WGPUVertexFormat_Sint32x3:=38): 'WGPUVertexFormat_Sint32x3', (WGPUVertexFormat_Sint32x4:=39): 'WGPUVertexFormat_Sint32x4', (WGPUVertexFormat_Unorm10_10_10_2:=40): 'WGPUVertexFormat_Unorm10_10_10_2', (WGPUVertexFormat_Unorm8x4BGRA:=41): 'WGPUVertexFormat_Unorm8x4BGRA', (WGPUVertexFormat_Force32:=2147483647): 'WGPUVertexFormat_Force32'}
@@ -976,7 +976,7 @@ class struct_WGPUYCbCrVkDescriptor(c.Struct):
   vkComponentSwizzleAlpha: int
   vkXChromaOffset: int
   vkYChromaOffset: int
-  vkChromaFilter: 'WGPUFilterMode'
+  vkChromaFilter: int
   forceExplicitReconstruction: int
   externalFormat: int
 enum_WGPUFilterMode: dict[int, str] = {(WGPUFilterMode_Undefined:=0): 'WGPUFilterMode_Undefined', (WGPUFilterMode_Nearest:=1): 'WGPUFilterMode_Nearest', (WGPUFilterMode_Linear:=2): 'WGPUFilterMode_Linear', (WGPUFilterMode_Force32:=2147483647): 'WGPUFilterMode_Force32'}
@@ -996,8 +996,8 @@ class struct_WGPUAdapterInfo(c.Struct):
   architecture: 'WGPUStringView'
   device: 'WGPUStringView'
   description: 'WGPUStringView'
-  backendType: 'WGPUBackendType'
-  adapterType: 'WGPUAdapterType'
+  backendType: int
+  adapterType: int
   vendorID: int
   deviceID: int
   compatibilityMode: int
@@ -1096,9 +1096,9 @@ struct_WGPUDawnCacheDeviceDescriptor.register_fields([('chain', WGPUChainedStruc
 class struct_WGPUDepthStencilState(c.Struct):
   SIZE = 72
   nextInChain: 'c.POINTER[WGPUChainedStruct]'
-  format: 'WGPUTextureFormat'
-  depthWriteEnabled: 'WGPUOptionalBool'
-  depthCompare: 'WGPUCompareFunction'
+  format: int
+  depthWriteEnabled: int
+  depthCompare: int
   stencilFront: 'WGPUStencilFaceState'
   stencilBack: 'WGPUStencilFaceState'
   stencilReadMask: int
@@ -1134,7 +1134,7 @@ class struct_WGPUExternalTextureDescriptor(c.Struct):
   dstTransferFunctionParameters: 'c.POINTER[ctypes.c_float]'
   gamutConversionMatrix: 'c.POINTER[ctypes.c_float]'
   mirrored: int
-  rotation: 'WGPUExternalTextureRotation'
+  rotation: int
 WGPUOrigin2D: TypeAlias = struct_WGPUOrigin2D
 WGPUExtent2D: TypeAlias = struct_WGPUExtent2D
 enum_WGPUExternalTextureRotation: dict[int, str] = {(WGPUExternalTextureRotation_Rotate0Degrees:=1): 'WGPUExternalTextureRotation_Rotate0Degrees', (WGPUExternalTextureRotation_Rotate90Degrees:=2): 'WGPUExternalTextureRotation_Rotate90Degrees', (WGPUExternalTextureRotation_Rotate180Degrees:=3): 'WGPUExternalTextureRotation_Rotate180Degrees', (WGPUExternalTextureRotation_Rotate270Degrees:=4): 'WGPUExternalTextureRotation_Rotate270Degrees', (WGPUExternalTextureRotation_Force32:=2147483647): 'WGPUExternalTextureRotation_Force32'}
@@ -1169,7 +1169,7 @@ class struct_WGPUImageCopyTexture(c.Struct):
   texture: 'WGPUTexture'
   mipLevel: int
   origin: 'WGPUOrigin3D'
-  aspect: 'WGPUTextureAspect'
+  aspect: int
 enum_WGPUTextureAspect: dict[int, str] = {(WGPUTextureAspect_Undefined:=0): 'WGPUTextureAspect_Undefined', (WGPUTextureAspect_All:=1): 'WGPUTextureAspect_All', (WGPUTextureAspect_StencilOnly:=2): 'WGPUTextureAspect_StencilOnly', (WGPUTextureAspect_DepthOnly:=3): 'WGPUTextureAspect_DepthOnly', (WGPUTextureAspect_Plane0Only:=327680): 'WGPUTextureAspect_Plane0Only', (WGPUTextureAspect_Plane1Only:=327681): 'WGPUTextureAspect_Plane1Only', (WGPUTextureAspect_Plane2Only:=327682): 'WGPUTextureAspect_Plane2Only', (WGPUTextureAspect_Force32:=2147483647): 'WGPUTextureAspect_Force32'}
 WGPUTextureAspect: TypeAlias = ctypes.c_uint32
 struct_WGPUImageCopyTexture.register_fields([('texture', WGPUTexture, 0), ('mipLevel', uint32_t, 8), ('origin', WGPUOrigin3D, 12), ('aspect', WGPUTextureAspect, 24)])
@@ -1203,7 +1203,7 @@ class struct_WGPUQuerySetDescriptor(c.Struct):
   SIZE = 32
   nextInChain: 'c.POINTER[WGPUChainedStruct]'
   label: 'WGPUStringView'
-  type: 'WGPUQueryType'
+  type: int
   count: int
 enum_WGPUQueryType: dict[int, str] = {(WGPUQueryType_Occlusion:=1): 'WGPUQueryType_Occlusion', (WGPUQueryType_Timestamp:=2): 'WGPUQueryType_Timestamp', (WGPUQueryType_Force32:=2147483647): 'WGPUQueryType_Force32'}
 WGPUQueryType: TypeAlias = ctypes.c_uint32
@@ -1227,7 +1227,7 @@ class struct_WGPURenderBundleEncoderDescriptor(c.Struct):
   label: 'WGPUStringView'
   colorFormatCount: int
   colorFormats: 'c.POINTER[WGPUTextureFormat]'
-  depthStencilFormat: 'WGPUTextureFormat'
+  depthStencilFormat: int
   sampleCount: int
   depthReadOnly: int
   stencilReadOnly: int
@@ -1239,8 +1239,8 @@ class struct_WGPURenderPassColorAttachment(c.Struct):
   view: 'WGPUTextureView'
   depthSlice: int
   resolveTarget: 'WGPUTextureView'
-  loadOp: 'WGPULoadOp'
-  storeOp: 'WGPUStoreOp'
+  loadOp: int
+  storeOp: int
   clearValue: 'WGPUColor'
 WGPUColor: TypeAlias = struct_WGPUColor
 struct_WGPURenderPassColorAttachment.register_fields([('nextInChain', c.POINTER[WGPUChainedStruct], 0), ('view', WGPUTextureView, 8), ('depthSlice', uint32_t, 16), ('resolveTarget', WGPUTextureView, 24), ('loadOp', WGPULoadOp, 32), ('storeOp', WGPUStoreOp, 36), ('clearValue', WGPUColor, 40)])
@@ -1250,8 +1250,8 @@ class struct_WGPURenderPassStorageAttachment(c.Struct):
   nextInChain: 'c.POINTER[WGPUChainedStruct]'
   offset: int
   storage: 'WGPUTextureView'
-  loadOp: 'WGPULoadOp'
-  storeOp: 'WGPUStoreOp'
+  loadOp: int
+  storeOp: int
   clearValue: 'WGPUColor'
 struct_WGPURenderPassStorageAttachment.register_fields([('nextInChain', c.POINTER[WGPUChainedStruct], 0), ('offset', uint64_t, 8), ('storage', WGPUTextureView, 16), ('loadOp', WGPULoadOp, 24), ('storeOp', WGPUStoreOp, 28), ('clearValue', WGPUColor, 32)])
 @c.record
@@ -1266,15 +1266,15 @@ class struct_WGPUSamplerDescriptor(c.Struct):
   SIZE = 64
   nextInChain: 'c.POINTER[WGPUChainedStruct]'
   label: 'WGPUStringView'
-  addressModeU: 'WGPUAddressMode'
-  addressModeV: 'WGPUAddressMode'
-  addressModeW: 'WGPUAddressMode'
-  magFilter: 'WGPUFilterMode'
-  minFilter: 'WGPUFilterMode'
-  mipmapFilter: 'WGPUMipmapFilterMode'
+  addressModeU: int
+  addressModeV: int
+  addressModeW: int
+  magFilter: int
+  minFilter: int
+  mipmapFilter: int
   lodMinClamp: float
   lodMaxClamp: float
-  compare: 'WGPUCompareFunction'
+  compare: int
   maxAnisotropy: int
 enum_WGPUAddressMode: dict[int, str] = {(WGPUAddressMode_Undefined:=0): 'WGPUAddressMode_Undefined', (WGPUAddressMode_ClampToEdge:=1): 'WGPUAddressMode_ClampToEdge', (WGPUAddressMode_Repeat:=2): 'WGPUAddressMode_Repeat', (WGPUAddressMode_MirrorRepeat:=3): 'WGPUAddressMode_MirrorRepeat', (WGPUAddressMode_Force32:=2147483647): 'WGPUAddressMode_Force32'}
 WGPUAddressMode: TypeAlias = ctypes.c_uint32
@@ -1336,7 +1336,7 @@ class struct_WGPUSharedTextureMemoryProperties(c.Struct):
   nextInChain: 'c.POINTER[WGPUChainedStructOut]'
   usage: int
   size: 'WGPUExtent3D'
-  format: 'WGPUTextureFormat'
+  format: int
 struct_WGPUSharedTextureMemoryProperties.register_fields([('nextInChain', c.POINTER[WGPUChainedStructOut], 0), ('usage', WGPUTextureUsage, 8), ('size', WGPUExtent3D, 16), ('format', WGPUTextureFormat, 28)])
 @c.record
 class struct_WGPUSupportedLimits(c.Struct):
@@ -1362,9 +1362,9 @@ class struct_WGPUTextureDescriptor(c.Struct):
   nextInChain: 'c.POINTER[WGPUChainedStruct]'
   label: 'WGPUStringView'
   usage: int
-  dimension: 'WGPUTextureDimension'
+  dimension: int
   size: 'WGPUExtent3D'
-  format: 'WGPUTextureFormat'
+  format: int
   mipLevelCount: int
   sampleCount: int
   viewFormatCount: int
@@ -1377,20 +1377,20 @@ class struct_WGPUTextureViewDescriptor(c.Struct):
   SIZE = 64
   nextInChain: 'c.POINTER[WGPUChainedStruct]'
   label: 'WGPUStringView'
-  format: 'WGPUTextureFormat'
-  dimension: 'WGPUTextureViewDimension'
+  format: int
+  dimension: int
   baseMipLevel: int
   mipLevelCount: int
   baseArrayLayer: int
   arrayLayerCount: int
-  aspect: 'WGPUTextureAspect'
+  aspect: int
   usage: int
 struct_WGPUTextureViewDescriptor.register_fields([('nextInChain', c.POINTER[WGPUChainedStruct], 0), ('label', WGPUStringView, 8), ('format', WGPUTextureFormat, 24), ('dimension', WGPUTextureViewDimension, 28), ('baseMipLevel', uint32_t, 32), ('mipLevelCount', uint32_t, 36), ('baseArrayLayer', uint32_t, 40), ('arrayLayerCount', uint32_t, 44), ('aspect', WGPUTextureAspect, 48), ('usage', WGPUTextureUsage, 56)])
 @c.record
 class struct_WGPUVertexBufferLayout(c.Struct):
   SIZE = 32
   arrayStride: int
-  stepMode: 'WGPUVertexStepMode'
+  stepMode: int
   attributeCount: int
   attributes: 'c.POINTER[WGPUVertexAttribute]'
 enum_WGPUVertexStepMode: dict[int, str] = {(WGPUVertexStepMode_Undefined:=0): 'WGPUVertexStepMode_Undefined', (WGPUVertexStepMode_Vertex:=1): 'WGPUVertexStepMode_Vertex', (WGPUVertexStepMode_Instance:=2): 'WGPUVertexStepMode_Instance', (WGPUVertexStepMode_Force32:=2147483647): 'WGPUVertexStepMode_Force32'}
@@ -1410,7 +1410,7 @@ struct_WGPUBindGroupLayoutDescriptor.register_fields([('nextInChain', c.POINTER[
 class struct_WGPUColorTargetState(c.Struct):
   SIZE = 32
   nextInChain: 'c.POINTER[WGPUChainedStruct]'
-  format: 'WGPUTextureFormat'
+  format: int
   blend: 'c.POINTER[WGPUBlendState]'
   writeMask: int
 WGPUBlendState: TypeAlias = struct_WGPUBlendState
@@ -1443,7 +1443,7 @@ WGPUQueueDescriptor: TypeAlias = struct_WGPUQueueDescriptor
 class struct_WGPUDeviceLostCallbackInfo2(c.Struct):
   SIZE = 40
   nextInChain: 'c.POINTER[WGPUChainedStruct]'
-  mode: 'WGPUCallbackMode'
+  mode: int
   callback: 'WGPUDeviceLostCallback2'
   userdata1: 'ctypes.c_void_p'
   userdata2: 'ctypes.c_void_p'
@@ -1573,7 +1573,7 @@ WGPURequestDeviceCallback2: TypeAlias = c.CFUNCTYPE[None, [ctypes.c_uint32, c.PO
 class struct_WGPUBufferMapCallbackInfo2(c.Struct):
   SIZE = 40
   nextInChain: 'c.POINTER[WGPUChainedStruct]'
-  mode: 'WGPUCallbackMode'
+  mode: int
   callback: 'WGPUBufferMapCallback2'
   userdata1: 'ctypes.c_void_p'
   userdata2: 'ctypes.c_void_p'
@@ -1583,7 +1583,7 @@ WGPUBufferMapCallbackInfo2: TypeAlias = struct_WGPUBufferMapCallbackInfo2
 class struct_WGPUCompilationInfoCallbackInfo2(c.Struct):
   SIZE = 40
   nextInChain: 'c.POINTER[WGPUChainedStruct]'
-  mode: 'WGPUCallbackMode'
+  mode: int
   callback: 'WGPUCompilationInfoCallback2'
   userdata1: 'ctypes.c_void_p'
   userdata2: 'ctypes.c_void_p'
@@ -1593,7 +1593,7 @@ WGPUCompilationInfoCallbackInfo2: TypeAlias = struct_WGPUCompilationInfoCallback
 class struct_WGPUCreateComputePipelineAsyncCallbackInfo2(c.Struct):
   SIZE = 40
   nextInChain: 'c.POINTER[WGPUChainedStruct]'
-  mode: 'WGPUCallbackMode'
+  mode: int
   callback: 'WGPUCreateComputePipelineAsyncCallback2'
   userdata1: 'ctypes.c_void_p'
   userdata2: 'ctypes.c_void_p'
@@ -1603,7 +1603,7 @@ WGPUCreateComputePipelineAsyncCallbackInfo2: TypeAlias = struct_WGPUCreateComput
 class struct_WGPUCreateRenderPipelineAsyncCallbackInfo2(c.Struct):
   SIZE = 40
   nextInChain: 'c.POINTER[WGPUChainedStruct]'
-  mode: 'WGPUCallbackMode'
+  mode: int
   callback: 'WGPUCreateRenderPipelineAsyncCallback2'
   userdata1: 'ctypes.c_void_p'
   userdata2: 'ctypes.c_void_p'
@@ -1613,7 +1613,7 @@ WGPUCreateRenderPipelineAsyncCallbackInfo2: TypeAlias = struct_WGPUCreateRenderP
 class struct_WGPUPopErrorScopeCallbackInfo2(c.Struct):
   SIZE = 40
   nextInChain: 'c.POINTER[WGPUChainedStruct]'
-  mode: 'WGPUCallbackMode'
+  mode: int
   callback: 'WGPUPopErrorScopeCallback2'
   userdata1: 'ctypes.c_void_p'
   userdata2: 'ctypes.c_void_p'
@@ -1623,7 +1623,7 @@ WGPUPopErrorScopeCallbackInfo2: TypeAlias = struct_WGPUPopErrorScopeCallbackInfo
 class struct_WGPUQueueWorkDoneCallbackInfo2(c.Struct):
   SIZE = 40
   nextInChain: 'c.POINTER[WGPUChainedStruct]'
-  mode: 'WGPUCallbackMode'
+  mode: int
   callback: 'WGPUQueueWorkDoneCallback2'
   userdata1: 'ctypes.c_void_p'
   userdata2: 'ctypes.c_void_p'
@@ -1633,7 +1633,7 @@ WGPUQueueWorkDoneCallbackInfo2: TypeAlias = struct_WGPUQueueWorkDoneCallbackInfo
 class struct_WGPURequestAdapterCallbackInfo2(c.Struct):
   SIZE = 40
   nextInChain: 'c.POINTER[WGPUChainedStruct]'
-  mode: 'WGPUCallbackMode'
+  mode: int
   callback: 'WGPURequestAdapterCallback2'
   userdata1: 'ctypes.c_void_p'
   userdata2: 'ctypes.c_void_p'
@@ -1643,7 +1643,7 @@ WGPURequestAdapterCallbackInfo2: TypeAlias = struct_WGPURequestAdapterCallbackIn
 class struct_WGPURequestDeviceCallbackInfo2(c.Struct):
   SIZE = 40
   nextInChain: 'c.POINTER[WGPUChainedStruct]'
-  mode: 'WGPUCallbackMode'
+  mode: int
   callback: 'WGPURequestDeviceCallback2'
   userdata1: 'ctypes.c_void_p'
   userdata2: 'ctypes.c_void_p'

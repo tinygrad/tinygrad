@@ -53,10 +53,10 @@ MTLTextureCompressionType: TypeAlias = NSInteger
 @c.record
 class MTLTextureSwizzleChannels(c.Struct):
   SIZE = 4
-  red: 'MTLTextureSwizzle'
-  green: 'MTLTextureSwizzle'
-  blue: 'MTLTextureSwizzle'
-  alpha: 'MTLTextureSwizzle'
+  red: int
+  green: int
+  blue: int
+  alpha: int
 uint8_t: TypeAlias = ctypes.c_ubyte
 enum_MTLTextureSwizzle: dict[int, str] = {(MTLTextureSwizzleZero:=0): 'MTLTextureSwizzleZero', (MTLTextureSwizzleOne:=1): 'MTLTextureSwizzleOne', (MTLTextureSwizzleRed:=2): 'MTLTextureSwizzleRed', (MTLTextureSwizzleGreen:=3): 'MTLTextureSwizzleGreen', (MTLTextureSwizzleBlue:=4): 'MTLTextureSwizzleBlue', (MTLTextureSwizzleAlpha:=5): 'MTLTextureSwizzleAlpha'}
 MTLTextureSwizzle: TypeAlias = uint8_t

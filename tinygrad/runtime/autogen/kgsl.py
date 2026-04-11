@@ -143,7 +143,7 @@ class struct_kgsl_map_user_mem(c.Struct):
   len: int
   offset: int
   hostptr: int
-  memtype: 'ctypes.c_uint32'
+  memtype: int
   flags: int
 struct_kgsl_map_user_mem.register_fields([('fd', ctypes.c_int32, 0), ('gpuaddr', ctypes.c_uint64, 8), ('len', ctypes.c_uint64, 16), ('offset', ctypes.c_uint64, 24), ('hostptr', ctypes.c_uint64, 32), ('memtype', ctypes.c_uint32, 40), ('flags', ctypes.c_uint32, 44)])
 @c.record
@@ -231,7 +231,7 @@ enum_kgsl_cmdwindow_type: dict[int, str] = {(KGSL_CMDWINDOW_MIN:=0): 'KGSL_CMDWI
 @c.record
 class struct_kgsl_cmdwindow_write(c.Struct):
   SIZE = 12
-  target: 'ctypes.c_uint32'
+  target: int
   addr: int
   data: int
 struct_kgsl_cmdwindow_write.register_fields([('target', ctypes.c_uint32, 0), ('addr', ctypes.c_uint32, 4), ('data', ctypes.c_uint32, 8)])

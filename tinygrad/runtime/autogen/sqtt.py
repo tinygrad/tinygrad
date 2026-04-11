@@ -104,8 +104,8 @@ class struct_sqtt_file_chunk_asic_info(c.Struct):
   minimum_sgpr_alloc: int
   sgpr_alloc_granularity: int
   hardware_contexts: int
-  gpu_type: 'ctypes.c_uint32'
-  gfxip_level: 'ctypes.c_uint32'
+  gpu_type: int
+  gfxip_level: int
   gpu_index: int
   gds_size: int
   gds_per_shader_engine: int
@@ -127,7 +127,7 @@ class struct_sqtt_file_chunk_asic_info(c.Struct):
   max_shader_core_clock: int
   max_memory_clock: int
   memory_ops_per_clock: int
-  memory_chip_type: 'ctypes.c_uint32'
+  memory_chip_type: int
   lds_granularity: int
   cu_mask: 'c.Array[c.Array[uint16_t, Literal[2]], Literal[32]]'
   reserved1: 'c.Array[ctypes.c_char, Literal[128]]'
@@ -190,13 +190,13 @@ union_sqtt_instruction_trace_data.register_fields([('api_pso_data', union_sqtt_i
 class struct_sqtt_file_chunk_api_info(c.Struct):
   SIZE = 560
   header: 'struct_sqtt_file_chunk_header'
-  api_type: 'ctypes.c_uint32'
+  api_type: int
   major_version: int
   minor_version: int
-  profiling_mode: 'ctypes.c_uint32'
+  profiling_mode: int
   reserved: int
   profiling_mode_data: 'union_sqtt_profiling_mode_data'
-  instruction_trace_mode: 'ctypes.c_uint32'
+  instruction_trace_mode: int
   reserved2: int
   instruction_trace_data: 'union_sqtt_instruction_trace_data'
 struct_sqtt_file_chunk_api_info.register_fields([('header', struct_sqtt_file_chunk_header, 0), ('api_type', ctypes.c_uint32, 16), ('major_version', uint16_t, 20), ('minor_version', uint16_t, 22), ('profiling_mode', ctypes.c_uint32, 24), ('reserved', uint32_t, 28), ('profiling_mode_data', union_sqtt_profiling_mode_data, 32), ('instruction_trace_mode', ctypes.c_uint32, 544), ('reserved2', uint32_t, 548), ('instruction_trace_data', union_sqtt_instruction_trace_data, 552)])
@@ -253,7 +253,7 @@ class struct_sqtt_file_chunk_sqtt_desc(c.Struct):
   SIZE = 32
   header: 'struct_sqtt_file_chunk_header'
   shader_engine_index: int
-  sqtt_version: 'ctypes.c_uint32'
+  sqtt_version: int
   v0: 'struct_sqtt_file_chunk_sqtt_desc_v0'
   v1: 'struct_sqtt_file_chunk_sqtt_desc_v1'
 @c.record
@@ -308,7 +308,7 @@ enum_sqtt_queue_event_type: dict[int, str] = {(SQTT_QUEUE_TIMING_EVENT_CMDBUF_SU
 @c.record
 class struct_sqtt_queue_event_record(c.Struct):
   SIZE = 56
-  event_type: 'ctypes.c_uint32'
+  event_type: int
   sqtt_cb_id: int
   frame_index: int
   queue_info_index: int

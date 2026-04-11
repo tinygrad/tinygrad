@@ -213,7 +213,7 @@ hipMemoryType: dict[int, str] = {(hipMemoryTypeUnregistered:=0): 'hipMemoryTypeU
 @c.record
 class hipPointerAttribute_t(c.Struct):
   SIZE = 32
-  type: 'ctypes.c_uint32'
+  type: int
   device: int
   devicePointer: 'ctypes.c_void_p'
   hostPointer: 'ctypes.c_void_p'
@@ -273,7 +273,7 @@ hipStreamBatchMemOpType: dict[int, str] = {(hipStreamMemOpWaitValue32:=1): 'hipS
 @c.record
 class hipStreamBatchMemOpParams_union(c.Struct):
   SIZE = 48
-  operation: 'ctypes.c_uint32'
+  operation: int
   waitValue: 'hipStreamBatchMemOpParams_union_hipStreamMemOpWaitValueParams_t'
   writeValue: 'hipStreamBatchMemOpParams_union_hipStreamMemOpWriteValueParams_t'
   flushRemoteWrites: 'hipStreamBatchMemOpParams_union_hipStreamMemOpFlushRemoteWritesParams_t'
@@ -282,7 +282,7 @@ class hipStreamBatchMemOpParams_union(c.Struct):
 @c.record
 class hipStreamBatchMemOpParams_union_hipStreamMemOpWaitValueParams_t(c.Struct):
   SIZE = 40
-  operation: 'ctypes.c_uint32'
+  operation: int
   address: 'hipDeviceptr_t'
   value: int
   value64: int
@@ -294,7 +294,7 @@ hipStreamBatchMemOpParams_union_hipStreamMemOpWaitValueParams_t.register_fields(
 @c.record
 class hipStreamBatchMemOpParams_union_hipStreamMemOpWriteValueParams_t(c.Struct):
   SIZE = 40
-  operation: 'ctypes.c_uint32'
+  operation: int
   address: 'hipDeviceptr_t'
   value: int
   value64: int
@@ -304,13 +304,13 @@ hipStreamBatchMemOpParams_union_hipStreamMemOpWriteValueParams_t.register_fields
 @c.record
 class hipStreamBatchMemOpParams_union_hipStreamMemOpFlushRemoteWritesParams_t(c.Struct):
   SIZE = 8
-  operation: 'ctypes.c_uint32'
+  operation: int
   flags: int
 hipStreamBatchMemOpParams_union_hipStreamMemOpFlushRemoteWritesParams_t.register_fields([('operation', ctypes.c_uint32, 0), ('flags', ctypes.c_uint32, 4)])
 @c.record
 class hipStreamBatchMemOpParams_union_hipStreamMemOpMemoryBarrierParams_t(c.Struct):
   SIZE = 8
-  operation: 'ctypes.c_uint32'
+  operation: int
   flags: int
 hipStreamBatchMemOpParams_union_hipStreamMemOpMemoryBarrierParams_t.register_fields([('operation', ctypes.c_uint32, 0), ('flags', ctypes.c_uint32, 4)])
 hipStreamBatchMemOpParams_union.register_fields([('operation', ctypes.c_uint32, 0), ('waitValue', hipStreamBatchMemOpParams_union_hipStreamMemOpWaitValueParams_t, 0), ('writeValue', hipStreamBatchMemOpParams_union_hipStreamMemOpWriteValueParams_t, 0), ('flushRemoteWrites', hipStreamBatchMemOpParams_union_hipStreamMemOpFlushRemoteWritesParams_t, 0), ('memoryBarrier', hipStreamBatchMemOpParams_union_hipStreamMemOpMemoryBarrierParams_t, 0), ('pad', c.Array[uint64_t, Literal[6]], 0)])
@@ -332,11 +332,11 @@ hipMemAccessFlags: dict[int, str] = {(hipMemAccessFlagsProtNone:=0): 'hipMemAcce
 class hipMemAccessDesc(c.Struct):
   SIZE = 12
   location: 'hipMemLocation'
-  flags: 'ctypes.c_uint32'
+  flags: int
 @c.record
 class hipMemLocation(c.Struct):
   SIZE = 8
-  type: 'ctypes.c_uint32'
+  type: int
   id: int
 hipMemLocationType: dict[int, str] = {(hipMemLocationTypeInvalid:=0): 'hipMemLocationTypeInvalid', (hipMemLocationTypeNone:=0): 'hipMemLocationTypeNone', (hipMemLocationTypeDevice:=1): 'hipMemLocationTypeDevice', (hipMemLocationTypeHost:=2): 'hipMemLocationTypeHost', (hipMemLocationTypeHostNuma:=3): 'hipMemLocationTypeHostNuma', (hipMemLocationTypeHostNumaCurrent:=4): 'hipMemLocationTypeHostNumaCurrent'}
 hipMemLocation.register_fields([('type', ctypes.c_uint32, 0), ('id', ctypes.c_int32, 4)])
@@ -346,8 +346,8 @@ hipMemAllocationHandleType: dict[int, str] = {(hipMemHandleTypeNone:=0): 'hipMem
 @c.record
 class hipMemPoolProps(c.Struct):
   SIZE = 88
-  allocType: 'ctypes.c_uint32'
-  handleTypes: 'ctypes.c_uint32'
+  allocType: int
+  handleTypes: int
   location: 'hipMemLocation'
   win32SecurityAttributes: 'ctypes.c_void_p'
   maxSize: int
@@ -392,7 +392,7 @@ hipExternalMemoryHandleType: TypeAlias = ctypes.c_uint32
 @c.record
 class hipExternalMemoryHandleDesc_st(c.Struct):
   SIZE = 104
-  type: 'hipExternalMemoryHandleType'
+  type: int
   handle: 'hipExternalMemoryHandleDesc_st_handle'
   size: int
   flags: int
@@ -436,7 +436,7 @@ class hipChannelFormatDesc(c.Struct):
   y: int
   z: int
   w: int
-  f: 'ctypes.c_uint32'
+  f: int
 hipChannelFormatKind: dict[int, str] = {(hipChannelFormatKindSigned:=0): 'hipChannelFormatKindSigned', (hipChannelFormatKindUnsigned:=1): 'hipChannelFormatKindUnsigned', (hipChannelFormatKindFloat:=2): 'hipChannelFormatKindFloat', (hipChannelFormatKindNone:=3): 'hipChannelFormatKindNone'}
 hipChannelFormatDesc.register_fields([('x', ctypes.c_int32, 0), ('y', ctypes.c_int32, 4), ('z', ctypes.c_int32, 8), ('w', ctypes.c_int32, 12), ('f', ctypes.c_uint32, 16)])
 @c.record
@@ -454,7 +454,7 @@ hipExternalSemaphoreHandleType: TypeAlias = ctypes.c_uint32
 @c.record
 class hipExternalSemaphoreHandleDesc_st(c.Struct):
   SIZE = 96
-  type: 'hipExternalSemaphoreHandleType'
+  type: int
   handle: 'hipExternalSemaphoreHandleDesc_st_handle'
   flags: int
   reserved: 'c.Array[ctypes.c_uint32, Literal[16]]'
@@ -595,9 +595,9 @@ hipAccessProperty: dict[int, str] = {(hipAccessPropertyNormal:=0): 'hipAccessPro
 class hipAccessPolicyWindow(c.Struct):
   SIZE = 32
   base_ptr: 'ctypes.c_void_p'
-  hitProp: 'ctypes.c_uint32'
+  hitProp: int
   hitRatio: float
-  missProp: 'ctypes.c_uint32'
+  missProp: int
   num_bytes: int
 hipAccessPolicyWindow.register_fields([('base_ptr', ctypes.c_void_p, 0), ('hitProp', ctypes.c_uint32, 8), ('hitRatio', ctypes.c_float, 12), ('missProp', ctypes.c_uint32, 16), ('num_bytes', size_t, 24)])
 @c.record
@@ -616,9 +616,9 @@ class hipLaunchAttributeValue(c.Struct):
   accessPolicyWindow: 'hipAccessPolicyWindow'
   cooperative: int
   priority: int
-  syncPolicy: 'ctypes.c_uint32'
+  syncPolicy: int
   memSyncDomainMap: 'hipLaunchMemSyncDomainMap'
-  memSyncDomain: 'ctypes.c_uint32'
+  memSyncDomain: int
 hipLaunchAttributeValue.register_fields([('pad', c.Array[ctypes.c_char, Literal[64]], 0), ('accessPolicyWindow', hipAccessPolicyWindow, 0), ('cooperative', ctypes.c_int32, 0), ('priority', ctypes.c_int32, 0), ('syncPolicy', ctypes.c_uint32, 0), ('memSyncDomainMap', hipLaunchMemSyncDomainMap, 0), ('memSyncDomain', ctypes.c_uint32, 0)])
 hipGraphExecUpdateResult: dict[int, str] = {(hipGraphExecUpdateSuccess:=0): 'hipGraphExecUpdateSuccess', (hipGraphExecUpdateError:=1): 'hipGraphExecUpdateError', (hipGraphExecUpdateErrorTopologyChanged:=2): 'hipGraphExecUpdateErrorTopologyChanged', (hipGraphExecUpdateErrorNodeTypeChanged:=3): 'hipGraphExecUpdateErrorNodeTypeChanged', (hipGraphExecUpdateErrorFunctionChanged:=4): 'hipGraphExecUpdateErrorFunctionChanged', (hipGraphExecUpdateErrorParametersChanged:=5): 'hipGraphExecUpdateErrorParametersChanged', (hipGraphExecUpdateErrorNotSupported:=6): 'hipGraphExecUpdateErrorNotSupported', (hipGraphExecUpdateErrorUnsupportedFunctionChange:=7): 'hipGraphExecUpdateErrorUnsupportedFunctionChange'}
 hipStreamCaptureMode: dict[int, str] = {(hipStreamCaptureModeGlobal:=0): 'hipStreamCaptureModeGlobal', (hipStreamCaptureModeThreadLocal:=1): 'hipStreamCaptureModeThreadLocal', (hipStreamCaptureModeRelaxed:=2): 'hipStreamCaptureModeRelaxed'}
@@ -635,15 +635,15 @@ class hipGraphInstantiateParams(c.Struct):
   SIZE = 32
   errNode_out: 'hipGraphNode_t'
   flags: int
-  result_out: 'ctypes.c_uint32'
+  result_out: int
   uploadStream: 'hipStream_t'
 hipGraphInstantiateParams.register_fields([('errNode_out', hipGraphNode_t, 0), ('flags', ctypes.c_uint64, 8), ('result_out', ctypes.c_uint32, 16), ('uploadStream', hipStream_t, 24)])
 @c.record
 class hipMemAllocationProp(c.Struct):
   SIZE = 32
-  type: 'ctypes.c_uint32'
-  requestedHandleType: 'ctypes.c_uint32'
-  requestedHandleTypes: 'ctypes.c_uint32'
+  type: int
+  requestedHandleType: int
+  requestedHandleTypes: int
   location: 'hipMemLocation'
   win32HandleMetaData: 'ctypes.c_void_p'
   allocFlags: 'hipMemAllocationProp_allocFlags'
@@ -678,12 +678,12 @@ hipArraySparseSubresourceType: dict[int, str] = {(hipArraySparseSubresourceTypeS
 @c.record
 class hipArrayMapInfo(c.Struct):
   SIZE = 152
-  resourceType: 'ctypes.c_uint32'
+  resourceType: int
   resource: 'hipArrayMapInfo_resource'
-  subresourceType: 'ctypes.c_uint32'
+  subresourceType: int
   subresource: 'hipArrayMapInfo_subresource'
-  memOperationType: 'ctypes.c_uint32'
-  memHandleType: 'ctypes.c_uint32'
+  memOperationType: int
+  memHandleType: int
   memHandle: 'hipArrayMapInfo_memHandle'
   offset: int
   deviceBitMask: int
@@ -707,7 +707,7 @@ class hipMipmappedArray(c.Struct):
   min_mipmap_level: int
   max_mipmap_level: int
   flags: int
-  format: 'ctypes.c_uint32'
+  format: int
   num_channels: int
 hipArray_Format: dict[int, str] = {(HIP_AD_FORMAT_UNSIGNED_INT8:=1): 'HIP_AD_FORMAT_UNSIGNED_INT8', (HIP_AD_FORMAT_UNSIGNED_INT16:=2): 'HIP_AD_FORMAT_UNSIGNED_INT16', (HIP_AD_FORMAT_UNSIGNED_INT32:=3): 'HIP_AD_FORMAT_UNSIGNED_INT32', (HIP_AD_FORMAT_SIGNED_INT8:=8): 'HIP_AD_FORMAT_SIGNED_INT8', (HIP_AD_FORMAT_SIGNED_INT16:=9): 'HIP_AD_FORMAT_SIGNED_INT16', (HIP_AD_FORMAT_SIGNED_INT32:=10): 'HIP_AD_FORMAT_SIGNED_INT32', (HIP_AD_FORMAT_HALF:=16): 'HIP_AD_FORMAT_HALF', (HIP_AD_FORMAT_FLOAT:=32): 'HIP_AD_FORMAT_FLOAT'}
 hipMipmappedArray.register_fields([('data', ctypes.c_void_p, 0), ('desc', hipChannelFormatDesc, 8), ('type', ctypes.c_uint32, 28), ('width', ctypes.c_uint32, 32), ('height', ctypes.c_uint32, 36), ('depth', ctypes.c_uint32, 40), ('min_mipmap_level', ctypes.c_uint32, 44), ('max_mipmap_level', ctypes.c_uint32, 48), ('flags', ctypes.c_uint32, 52), ('format', ctypes.c_uint32, 56), ('num_channels', ctypes.c_uint32, 60)])
@@ -761,7 +761,7 @@ class hipMemcpy3DParms(c.Struct):
   dstPos: 'hipPos'
   dstPtr: 'hipPitchedPtr'
   extent: 'hipExtent'
-  kind: 'ctypes.c_uint32'
+  kind: int
 @c.record
 class hipPos(c.Struct):
   SIZE = 24
@@ -803,7 +803,7 @@ hipMemFreeNodeParams.register_fields([('dptr', ctypes.c_void_p, 0)])
 @c.record
 class hipGraphNodeParams(c.Struct):
   SIZE = 256
-  type: 'ctypes.c_uint32'
+  type: int
   reserved0: 'c.Array[ctypes.c_int32, Literal[3]]'
   reserved1: 'c.Array[ctypes.c_int64, Literal[29]]'
   kernel: 'hipKernelNodeParams'
@@ -831,7 +831,7 @@ hipGraphEdgeData.register_fields([('from_port', ctypes.c_ubyte, 0), ('reserved',
 @c.record
 class hipLaunchAttribute_st(c.Struct):
   SIZE = 72
-  id: 'ctypes.c_uint32'
+  id: int
   pad: 'c.Array[ctypes.c_char, Literal[4]]'
   val: 'hipLaunchAttributeValue'
   value: 'hipLaunchAttributeValue'
@@ -1221,7 +1221,7 @@ class HIP_ARRAY_DESCRIPTOR(c.Struct):
   SIZE = 24
   Width: int
   Height: int
-  Format: 'ctypes.c_uint32'
+  Format: int
   NumChannels: int
 HIP_ARRAY_DESCRIPTOR.register_fields([('Width', size_t, 0), ('Height', size_t, 8), ('Format', ctypes.c_uint32, 16), ('NumChannels', ctypes.c_uint32, 20)])
 @dll.bind
@@ -1234,7 +1234,7 @@ class HIP_ARRAY3D_DESCRIPTOR(c.Struct):
   Width: int
   Height: int
   Depth: int
-  Format: 'ctypes.c_uint32'
+  Format: int
   NumChannels: int
   Flags: int
 HIP_ARRAY3D_DESCRIPTOR.register_fields([('Width', size_t, 0), ('Height', size_t, 8), ('Depth', size_t, 16), ('Format', ctypes.c_uint32, 24), ('NumChannels', ctypes.c_uint32, 28), ('Flags', ctypes.c_uint32, 32)])
@@ -1259,14 +1259,14 @@ class hip_Memcpy2D(c.Struct):
   SIZE = 128
   srcXInBytes: int
   srcY: int
-  srcMemoryType: 'ctypes.c_uint32'
+  srcMemoryType: int
   srcHost: 'ctypes.c_void_p'
   srcDevice: 'hipDeviceptr_t'
   srcArray: 'hipArray_t'
   srcPitch: int
   dstXInBytes: int
   dstY: int
-  dstMemoryType: 'ctypes.c_uint32'
+  dstMemoryType: int
   dstHost: 'ctypes.c_void_p'
   dstDevice: 'hipDeviceptr_t'
   dstArray: 'hipArray_t'
@@ -1310,7 +1310,7 @@ class HIP_MEMCPY3D(c.Struct):
   srcY: int
   srcZ: int
   srcLOD: int
-  srcMemoryType: 'ctypes.c_uint32'
+  srcMemoryType: int
   srcHost: 'ctypes.c_void_p'
   srcDevice: 'hipDeviceptr_t'
   srcArray: 'hipArray_t'
@@ -1320,7 +1320,7 @@ class HIP_MEMCPY3D(c.Struct):
   dstY: int
   dstZ: int
   dstLOD: int
-  dstMemoryType: 'ctypes.c_uint32'
+  dstMemoryType: int
   dstHost: 'ctypes.c_void_p'
   dstDevice: 'hipDeviceptr_t'
   dstArray: 'hipArray_t'
@@ -1339,7 +1339,7 @@ def hipMemGetAddressRange(pbase:c.POINTER[hipDeviceptr_t], psize:c.POINTER[size_
 @c.record
 class hipMemcpyAttributes(c.Struct):
   SIZE = 24
-  srcAccessOrder: 'ctypes.c_uint32'
+  srcAccessOrder: int
   srcLocHint: 'hipMemLocation'
   dstLocHint: 'hipMemLocation'
   flags: int
@@ -1353,12 +1353,12 @@ class hipMemcpy3DBatchOp(c.Struct):
   src: 'hipMemcpy3DOperand'
   dst: 'hipMemcpy3DOperand'
   extent: 'hipExtent'
-  srcAccessOrder: 'ctypes.c_uint32'
+  srcAccessOrder: int
   flags: int
 @c.record
 class hipMemcpy3DOperand(c.Struct):
   SIZE = 40
-  type: 'ctypes.c_uint32'
+  type: int
   op: 'hipMemcpy3DOperand_op'
 hipMemcpy3DOperandType: dict[int, str] = {(hipMemcpyOperandTypePointer:=1): 'hipMemcpyOperandTypePointer', (hipMemcpyOperandTypeArray:=2): 'hipMemcpyOperandTypeArray', (hipMemcpyOperandTypeMax:=2147483647): 'hipMemcpyOperandTypeMax'}
 @c.record
@@ -1496,19 +1496,19 @@ def hipGetDriverEntryPoint(symbol:c.POINTER[ctypes.c_char], funcPtr:c.POINTER[ct
 class textureReference(c.Struct):
   SIZE = 88
   normalized: int
-  readMode: 'ctypes.c_uint32'
-  filterMode: 'ctypes.c_uint32'
+  readMode: int
+  filterMode: int
   addressMode: 'c.Array[ctypes.c_uint32, Literal[3]]'
   channelDesc: 'hipChannelFormatDesc'
   sRGB: int
   maxAnisotropy: int
-  mipmapFilterMode: 'ctypes.c_uint32'
+  mipmapFilterMode: int
   mipmapLevelBias: float
   minMipmapLevelClamp: float
   maxMipmapLevelClamp: float
   textureObject: 'hipTextureObject_t'
   numChannels: int
-  format: 'ctypes.c_uint32'
+  format: int
 hipTextureReadMode: dict[int, str] = {(hipReadModeElementType:=0): 'hipReadModeElementType', (hipReadModeNormalizedFloat:=1): 'hipReadModeNormalizedFloat'}
 hipTextureFilterMode: dict[int, str] = {(hipFilterModePoint:=0): 'hipFilterModePoint', (hipFilterModeLinear:=1): 'hipFilterModeLinear'}
 hipTextureAddressMode: dict[int, str] = {(hipAddressModeWrap:=0): 'hipAddressModeWrap', (hipAddressModeClamp:=1): 'hipAddressModeClamp', (hipAddressModeMirror:=2): 'hipAddressModeMirror', (hipAddressModeBorder:=3): 'hipAddressModeBorder'}
@@ -1586,7 +1586,7 @@ def hipDrvMemcpy2DUnaligned(pCopy:c.POINTER[hip_Memcpy2D]) -> ctypes.c_uint32: .
 @c.record
 class hipResourceDesc(c.Struct):
   SIZE = 64
-  resType: 'ctypes.c_uint32'
+  resType: int
   res: 'hipResourceDesc_res'
 @c.record
 class hipResourceDesc_res(c.Struct):
@@ -1627,13 +1627,13 @@ hipResourceDesc.register_fields([('resType', ctypes.c_uint32, 0), ('res', hipRes
 class hipTextureDesc(c.Struct):
   SIZE = 64
   addressMode: 'c.Array[ctypes.c_uint32, Literal[3]]'
-  filterMode: 'ctypes.c_uint32'
-  readMode: 'ctypes.c_uint32'
+  filterMode: int
+  readMode: int
   sRGB: int
   borderColor: 'c.Array[ctypes.c_float, Literal[4]]'
   normalizedCoords: int
   maxAnisotropy: int
-  mipmapFilterMode: 'ctypes.c_uint32'
+  mipmapFilterMode: int
   mipmapLevelBias: float
   minMipmapLevelClamp: float
   maxMipmapLevelClamp: float
@@ -1641,7 +1641,7 @@ hipTextureDesc.register_fields([('addressMode', c.Array[ctypes.c_uint32, Literal
 @c.record
 class hipResourceViewDesc(c.Struct):
   SIZE = 48
-  format: 'ctypes.c_uint32'
+  format: int
   width: int
   height: int
   depth: int
@@ -1666,7 +1666,7 @@ def hipGetTextureObjectTextureDesc(pTexDesc:c.POINTER[hipTextureDesc], textureOb
 @c.record
 class HIP_RESOURCE_DESC_st(c.Struct):
   SIZE = 144
-  resType: 'HIPresourcetype'
+  resType: int
   res: 'HIP_RESOURCE_DESC_st_res'
   flags: int
 HIP_RESOURCE_DESC: TypeAlias = HIP_RESOURCE_DESC_st
@@ -1694,7 +1694,7 @@ HIP_RESOURCE_DESC_st_res_mipmap.register_fields([('hMipmappedArray', hipMipmappe
 class HIP_RESOURCE_DESC_st_res_linear(c.Struct):
   SIZE = 24
   devPtr: 'hipDeviceptr_t'
-  format: 'ctypes.c_uint32'
+  format: int
   numChannels: int
   sizeInBytes: int
 HIP_RESOURCE_DESC_st_res_linear.register_fields([('devPtr', hipDeviceptr_t, 0), ('format', ctypes.c_uint32, 8), ('numChannels', ctypes.c_uint32, 12), ('sizeInBytes', size_t, 16)])
@@ -1702,7 +1702,7 @@ HIP_RESOURCE_DESC_st_res_linear.register_fields([('devPtr', hipDeviceptr_t, 0), 
 class HIP_RESOURCE_DESC_st_res_pitch2D(c.Struct):
   SIZE = 40
   devPtr: 'hipDeviceptr_t'
-  format: 'ctypes.c_uint32'
+  format: int
   numChannels: int
   width: int
   height: int
@@ -1719,10 +1719,10 @@ HIP_RESOURCE_DESC_st.register_fields([('resType', HIPresourcetype, 0), ('res', H
 class HIP_TEXTURE_DESC_st(c.Struct):
   SIZE = 104
   addressMode: 'c.Array[HIPaddress_mode, Literal[3]]'
-  filterMode: 'HIPfilter_mode'
+  filterMode: int
   flags: int
   maxAnisotropy: int
-  mipmapFilterMode: 'HIPfilter_mode'
+  mipmapFilterMode: int
   mipmapLevelBias: float
   minMipmapLevelClamp: float
   maxMipmapLevelClamp: float
@@ -1737,7 +1737,7 @@ HIP_TEXTURE_DESC_st.register_fields([('addressMode', c.Array[HIPaddress_mode, Li
 @c.record
 class HIP_RESOURCE_VIEW_DESC_st(c.Struct):
   SIZE = 112
-  format: 'HIPresourceViewFormat'
+  format: int
   width: int
   height: int
   depth: int
