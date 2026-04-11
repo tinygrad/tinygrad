@@ -22,10 +22,11 @@ class SimpleTokenizer:
       f"[^\\r\\n{r_p_N}{r_p_L}]?[{r_p_L}]+|[{r_p_N}]{{1,3}}| ?[^{r_ws}{r_p_N}{r_p_L}]+[\\r\\n]*|[{r_ws}]*[\\r\\n]+|[{r_ws}]+(?![^{r_ws}])|[{r_ws}]+")
     self._split_to_sentence = re.compile("|".join(re.escape(tok) for tok in special_tokens.keys()) if special_tokens else r"(?!)")
 
-    self._normal_tokens = {tok.encode(): tid for tok, tid in normal_tokens.items()} if preset == "gemma4" else {
-      bytes(self._byte_decoder[c] for c in tok): tid for tok, tid in normal_tokens.items()}
+    tok_bytes = (lambda tok: tok.replace("▁", " ").encode()) if preset == "gemma4" else (lambda tok: bytes(self._byte_decoder[c] for c in tok))
+    self._normal_tokens = {tok_bytes(tok): tid for tok, tid in normal_tokens.items()}
     self._special_tokens = special_tokens
-    self._tok2bytes = {tid: tok for tok, tid in self._normal_tokens.items()} | {tid: tok.encode() for tok, tid in self._special_tokens.items()}
+    self._tok2bytes = {tid: tok for tok, tid in self._normal_tokens.items()} | {
+      tid: (b'' if preset == "gemma4" else tok.encode()) for tok, tid in self._special_tokens.items()}
     self.preset = preset
 
   @staticmethod
@@ -48,9 +49,6 @@ class SimpleTokenizer:
     try: return [self._normal_tokens[p] for p in parts]
     except KeyError: raise RuntimeError("token not found")
   def _encode_sentence(self, chunk:str) -> list[int]:
-    if self.preset == "gemma4":
-      words = self._split_to_word.findall(chunk)
-      return [tok for word in words for tok in self._encode_word(("▁" * (len(word) - len(word.lstrip(" "))) + word.lstrip(" ")).encode())]
     return [tok for word in self._split_to_word.findall(chunk) for tok in self._encode_word(word.encode())]
   def encode(self, text:str) -> list[int]:
     tokens: list[int] = []
@@ -60,14 +58,8 @@ class SimpleTokenizer:
       pos = match.end(0)
     return tokens + self._encode_sentence(text[pos:])
 
-  def decode(self, ids:list[int]) -> str:
-    if self.preset == "gemma4": ids = [tid for tid in ids if tid not in self._special_tokens.values()]
-    dec = b''.join(self._tok2bytes[tid] for tid in ids).decode(errors='replace')
-    return dec.replace("▁", " ") if self.preset == "gemma4" else dec
+  def decode(self, ids:list[int]) -> str: return b''.join(self._tok2bytes[tid] for tid in ids).decode(errors='replace')
   def stream_decoder(self) -> typing.Callable[[int|None], str]:
-    if self.preset == "gemma4":
-      def _decode(tid:int|None=None) -> str: return self.decode([tid]) if tid is not None else ""
-      return _decode
     dec = codecs.getincrementaldecoder('utf-8')('replace')
     def _decode(tid:int|None=None) -> str: return dec.decode(self._tok2bytes[tid]) if tid is not None else dec.decode(b'', final=True)
     return _decode
@@ -166,9 +158,9 @@ class TransformerConfig:
   expert_hidden_dim: int = 0
 
 class FFNBlock:
-  def __init__(self, config:TransformerConfig, layer_idx:int=0):
+  def __init__(self, config:TransformerConfig):
     self.config = config
-    self.hidden_dim = config.hidden_dim[layer_idx] if isinstance(config.hidden_dim, tuple) else config.hidden_dim
+    self.hidden_dim = config.hidden_dim
     gemma_moe = config.gemma4 and config.num_experts > 0
 
     # --- RMSNorms --------------------------------------------------------
@@ -250,13 +242,13 @@ class FFNBlock:
     return _run(x, start_pos)
 
 class TransformerBlock(FFNBlock):
-  def __init__(self, config:TransformerConfig, layer_idx:int=0):
-    super().__init__(config, layer_idx)
-    self.head_dim = config.head_dim[layer_idx] if isinstance(config.head_dim, tuple) else config.head_dim
-    self.rope_theta = config.rope_theta[layer_idx] if isinstance(config.rope_theta, tuple) else config.rope_theta
-    self.qk_norm = config.qk_norm[layer_idx] if isinstance(config.qk_norm, tuple) else config.qk_norm
-    self.n_kv_heads = config.n_kv_heads[layer_idx] if isinstance(config.n_kv_heads, tuple) else config.n_kv_heads
-    self.is_sliding = config.sliding_window > 0 and bool(config.sliding_window_pattern) and config.sliding_window_pattern[layer_idx]
+  def __init__(self, config:TransformerConfig):
+    super().__init__(config)
+    self.head_dim = config.head_dim
+    self.rope_theta = config.rope_theta
+    self.qk_norm = config.qk_norm
+    self.n_kv_heads = config.n_kv_heads
+    self.is_sliding = config.sliding_window > 0 and bool(config.sliding_window_pattern) and config.sliding_window_pattern[0]
     self.use_alternative_attention = config.gemma4 and config.num_experts > 0 and not self.is_sliding
     self.store_full_length_kv = False
     self.shared_kv_src_idx: int|None = None
@@ -403,17 +395,23 @@ class MLATransformerBlock(FFNBlock):
 class Transformer:
   def __init__(self, config:TransformerConfig):
     self.config = config
+    def layer_config(i:int) -> TransformerConfig:
+      return replace(
+        config,
+        hidden_dim=config.hidden_dim[i] if isinstance(config.hidden_dim, tuple) else config.hidden_dim,
+        n_kv_heads=config.n_kv_heads[i] if isinstance(config.n_kv_heads, tuple) else config.n_kv_heads,
+        head_dim=config.head_dim[i] if isinstance(config.head_dim, tuple) else config.head_dim,
+        rope_theta=config.rope_theta[i] if isinstance(config.rope_theta, tuple) else config.rope_theta,
+        qk_norm=config.qk_norm[i] if isinstance(config.qk_norm, tuple) else config.qk_norm,
+        sliding_window_pattern=(config.sliding_window_pattern[i],) if config.sliding_window_pattern else ())
     if config.gemma4:
-      self.blk = [TransformerBlock(config, i) for i in range(config.num_blocks)]
+      self.blk = [TransformerBlock(layer_config(i)) for i in range(config.num_blocks)]
     else:
       dense_config = replace(
         config, num_experts=0, num_experts_per_tok=0, shared_expert_dim=0,
         hidden_dim=config.dense_hidden_dim or config.hidden_dim)
       block_cls = MLATransformerBlock if config.kv_lora_rank > 0 else TransformerBlock
-      self.blk = [
-        block_cls(dense_config if i < config.leading_dense_blocks else config, i) if block_cls is TransformerBlock
-        else block_cls(dense_config if i < config.leading_dense_blocks else config)
-        for i in range(config.num_blocks)]
+      self.blk = [block_cls(dense_config if i < config.leading_dense_blocks else config) for i in range(config.num_blocks)]
     self.token_embd  = nn.Embedding(config.vocab_size, config.dim)
     self.output_norm = nn.RMSNorm(config.dim, config.norm_eps)
     self.output = nn.Linear(config.dim, config.vocab_size, bias=False)
