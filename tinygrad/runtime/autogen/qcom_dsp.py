@@ -8,29 +8,29 @@ enum_ion_heap_type: dict[int, str] = {(ION_HEAP_TYPE_SYSTEM:=0): 'ION_HEAP_TYPE_
 @c.record
 class struct_ion_allocation_data(c.Struct):
   SIZE = 32
-  len: int
-  align: int
-  heap_id_mask: int
-  flags: int
-  handle: int
+  len: 'int'
+  align: 'int'
+  heap_id_mask: 'int'
+  flags: 'int'
+  handle: 'int'
 size_t: TypeAlias = ctypes.c_uint64
 struct_ion_allocation_data.register_fields([('len', size_t, 0), ('align', size_t, 8), ('heap_id_mask', ctypes.c_uint32, 16), ('flags', ctypes.c_uint32, 20), ('handle', ion_user_handle_t, 24)])
 @c.record
 class struct_ion_fd_data(c.Struct):
   SIZE = 8
-  handle: int
-  fd: int
+  handle: 'int'
+  fd: 'int'
 struct_ion_fd_data.register_fields([('handle', ion_user_handle_t, 0), ('fd', ctypes.c_int32, 4)])
 @c.record
 class struct_ion_handle_data(c.Struct):
   SIZE = 4
-  handle: int
+  handle: 'int'
 struct_ion_handle_data.register_fields([('handle', ion_user_handle_t, 0)])
 @c.record
 class struct_ion_custom_data(c.Struct):
   SIZE = 16
-  cmd: int
-  arg: int
+  cmd: 'int'
+  arg: 'int'
 struct_ion_custom_data.register_fields([('cmd', ctypes.c_uint32, 0), ('arg', ctypes.c_uint64, 8)])
 enum_msm_ion_heap_types: dict[int, str] = {(ION_HEAP_TYPE_MSM_START:=6): 'ION_HEAP_TYPE_MSM_START', (ION_HEAP_TYPE_SECURE_DMA:=6): 'ION_HEAP_TYPE_SECURE_DMA', (ION_HEAP_TYPE_SYSTEM_SECURE:=7): 'ION_HEAP_TYPE_SYSTEM_SECURE', (ION_HEAP_TYPE_HYP_CMA:=8): 'ION_HEAP_TYPE_HYP_CMA'}
 enum_ion_heap_ids: dict[int, str] = {(INVALID_HEAP_ID:=-1): 'INVALID_HEAP_ID', (ION_CP_MM_HEAP_ID:=8): 'ION_CP_MM_HEAP_ID', (ION_SECURE_HEAP_ID:=9): 'ION_SECURE_HEAP_ID', (ION_SECURE_DISPLAY_HEAP_ID:=10): 'ION_SECURE_DISPLAY_HEAP_ID', (ION_CP_MFC_HEAP_ID:=12): 'ION_CP_MFC_HEAP_ID', (ION_CP_WB_HEAP_ID:=16): 'ION_CP_WB_HEAP_ID', (ION_CAMERA_HEAP_ID:=20): 'ION_CAMERA_HEAP_ID', (ION_SYSTEM_CONTIG_HEAP_ID:=21): 'ION_SYSTEM_CONTIG_HEAP_ID', (ION_ADSP_HEAP_ID:=22): 'ION_ADSP_HEAP_ID', (ION_PIL1_HEAP_ID:=23): 'ION_PIL1_HEAP_ID', (ION_SF_HEAP_ID:=24): 'ION_SF_HEAP_ID', (ION_SYSTEM_HEAP_ID:=25): 'ION_SYSTEM_HEAP_ID', (ION_PIL2_HEAP_ID:=26): 'ION_PIL2_HEAP_ID', (ION_QSECOM_HEAP_ID:=27): 'ION_QSECOM_HEAP_ID', (ION_AUDIO_HEAP_ID:=28): 'ION_AUDIO_HEAP_ID', (ION_MM_FIRMWARE_HEAP_ID:=29): 'ION_MM_FIRMWARE_HEAP_ID', (ION_HEAP_ID_RESERVED:=31): 'ION_HEAP_ID_RESERVED'}
@@ -39,40 +39,40 @@ enum_cp_mem_usage: dict[int, str] = {(VIDEO_BITSTREAM:=1): 'VIDEO_BITSTREAM', (V
 @c.record
 class struct_ion_flush_data(c.Struct):
   SIZE = 24
-  handle: int
-  fd: int
+  handle: 'int'
+  fd: 'int'
   vaddr: 'ctypes.c_void_p'
-  offset: int
-  length: int
+  offset: 'int'
+  length: 'int'
 struct_ion_flush_data.register_fields([('handle', ion_user_handle_t, 0), ('fd', ctypes.c_int32, 4), ('vaddr', ctypes.c_void_p, 8), ('offset', ctypes.c_uint32, 16), ('length', ctypes.c_uint32, 20)])
 @c.record
 class struct_ion_prefetch_regions(c.Struct):
   SIZE = 24
-  vmid: int
-  sizes: 'c.POINTER[size_t]'
-  nr_sizes: int
-struct_ion_prefetch_regions.register_fields([('vmid', ctypes.c_uint32, 0), ('sizes', c.POINTER[size_t], 8), ('nr_sizes', ctypes.c_uint32, 16)])
+  vmid: 'int'
+  sizes: 'ctypes._Pointer[int]'
+  nr_sizes: 'int'
+struct_ion_prefetch_regions.register_fields([('vmid', ctypes.c_uint32, 0), ('sizes', ctypes.POINTER(size_t), 8), ('nr_sizes', ctypes.c_uint32, 16)])
 @c.record
 class struct_ion_prefetch_data(c.Struct):
   SIZE = 32
-  heap_id: int
-  len: int
-  regions: 'c.POINTER[struct_ion_prefetch_regions]'
-  nr_regions: int
-struct_ion_prefetch_data.register_fields([('heap_id', ctypes.c_int32, 0), ('len', ctypes.c_uint64, 8), ('regions', c.POINTER[struct_ion_prefetch_regions], 16), ('nr_regions', ctypes.c_uint32, 24)])
+  heap_id: 'int'
+  len: 'int'
+  regions: 'ctypes._Pointer[struct_ion_prefetch_regions]'
+  nr_regions: 'int'
+struct_ion_prefetch_data.register_fields([('heap_id', ctypes.c_int32, 0), ('len', ctypes.c_uint64, 8), ('regions', ctypes.POINTER(struct_ion_prefetch_regions), 16), ('nr_regions', ctypes.c_uint32, 24)])
 @c.record
 class struct_remote_buf64(c.Struct):
   SIZE = 16
-  pv: int
-  len: int
+  pv: 'int'
+  len: 'int'
 uint64_t: TypeAlias = ctypes.c_uint64
 struct_remote_buf64.register_fields([('pv', uint64_t, 0), ('len', uint64_t, 8)])
 @c.record
 class struct_remote_dma_handle64(c.Struct):
   SIZE = 12
-  fd: int
-  offset: int
-  len: int
+  fd: 'int'
+  offset: 'int'
+  len: 'int'
 uint32_t: TypeAlias = ctypes.c_uint32
 struct_remote_dma_handle64.register_fields([('fd', ctypes.c_int32, 0), ('offset', uint32_t, 4), ('len', uint32_t, 8)])
 @c.record
@@ -80,65 +80,65 @@ class union_remote_arg64(c.Struct):
   SIZE = 16
   buf: 'struct_remote_buf64'
   dma: 'struct_remote_dma_handle64'
-  h: int
+  h: 'int'
 union_remote_arg64.register_fields([('buf', struct_remote_buf64, 0), ('dma', struct_remote_dma_handle64, 0), ('h', uint32_t, 0)])
 @c.record
 class struct_remote_buf(c.Struct):
   SIZE = 16
   pv: 'ctypes.c_void_p'
-  len: int
+  len: 'int'
 struct_remote_buf.register_fields([('pv', ctypes.c_void_p, 0), ('len', size_t, 8)])
 @c.record
 class struct_remote_dma_handle(c.Struct):
   SIZE = 8
-  fd: int
-  offset: int
+  fd: 'int'
+  offset: 'int'
 struct_remote_dma_handle.register_fields([('fd', ctypes.c_int32, 0), ('offset', uint32_t, 4)])
 @c.record
 class union_remote_arg(c.Struct):
   SIZE = 16
   buf: 'struct_remote_buf'
   dma: 'struct_remote_dma_handle'
-  h: int
+  h: 'int'
 union_remote_arg.register_fields([('buf', struct_remote_buf, 0), ('dma', struct_remote_dma_handle, 0), ('h', uint32_t, 0)])
 @c.record
 class struct_fastrpc_ioctl_invoke(c.Struct):
   SIZE = 16
-  handle: int
-  sc: int
-  pra: 'c.POINTER[union_remote_arg]'
-struct_fastrpc_ioctl_invoke.register_fields([('handle', uint32_t, 0), ('sc', uint32_t, 4), ('pra', c.POINTER[union_remote_arg], 8)])
+  handle: 'int'
+  sc: 'int'
+  pra: 'ctypes._Pointer[union_remote_arg]'
+struct_fastrpc_ioctl_invoke.register_fields([('handle', uint32_t, 0), ('sc', uint32_t, 4), ('pra', ctypes.POINTER(union_remote_arg), 8)])
 @c.record
 class struct_fastrpc_ioctl_invoke_fd(c.Struct):
   SIZE = 24
   inv: 'struct_fastrpc_ioctl_invoke'
-  fds: 'c.POINTER[ctypes.c_int32]'
-struct_fastrpc_ioctl_invoke_fd.register_fields([('inv', struct_fastrpc_ioctl_invoke, 0), ('fds', c.POINTER[ctypes.c_int32], 16)])
+  fds: 'ctypes._Pointer[int]'
+struct_fastrpc_ioctl_invoke_fd.register_fields([('inv', struct_fastrpc_ioctl_invoke, 0), ('fds', ctypes.POINTER(ctypes.c_int32), 16)])
 @c.record
 class struct_fastrpc_ioctl_invoke_attrs(c.Struct):
   SIZE = 32
   inv: 'struct_fastrpc_ioctl_invoke'
-  fds: 'c.POINTER[ctypes.c_int32]'
-  attrs: 'c.POINTER[ctypes.c_uint32]'
-struct_fastrpc_ioctl_invoke_attrs.register_fields([('inv', struct_fastrpc_ioctl_invoke, 0), ('fds', c.POINTER[ctypes.c_int32], 16), ('attrs', c.POINTER[ctypes.c_uint32], 24)])
+  fds: 'ctypes._Pointer[int]'
+  attrs: 'ctypes._Pointer[int]'
+struct_fastrpc_ioctl_invoke_attrs.register_fields([('inv', struct_fastrpc_ioctl_invoke, 0), ('fds', ctypes.POINTER(ctypes.c_int32), 16), ('attrs', ctypes.POINTER(ctypes.c_uint32), 24)])
 @c.record
 class struct_fastrpc_ioctl_invoke_crc(c.Struct):
   SIZE = 40
   inv: 'struct_fastrpc_ioctl_invoke'
-  fds: 'c.POINTER[ctypes.c_int32]'
-  attrs: 'c.POINTER[ctypes.c_uint32]'
-  crc: 'c.POINTER[ctypes.c_uint32]'
-struct_fastrpc_ioctl_invoke_crc.register_fields([('inv', struct_fastrpc_ioctl_invoke, 0), ('fds', c.POINTER[ctypes.c_int32], 16), ('attrs', c.POINTER[ctypes.c_uint32], 24), ('crc', c.POINTER[ctypes.c_uint32], 32)])
+  fds: 'ctypes._Pointer[int]'
+  attrs: 'ctypes._Pointer[int]'
+  crc: 'ctypes._Pointer[int]'
+struct_fastrpc_ioctl_invoke_crc.register_fields([('inv', struct_fastrpc_ioctl_invoke, 0), ('fds', ctypes.POINTER(ctypes.c_int32), 16), ('attrs', ctypes.POINTER(ctypes.c_uint32), 24), ('crc', ctypes.POINTER(ctypes.c_uint32), 32)])
 @c.record
 class struct_fastrpc_ioctl_init(c.Struct):
   SIZE = 40
-  flags: int
-  file: int
-  filelen: int
-  filefd: int
-  mem: int
-  memlen: int
-  memfd: int
+  flags: 'int'
+  file: 'int'
+  filelen: 'int'
+  filefd: 'int'
+  mem: 'int'
+  memlen: 'int'
+  memfd: 'int'
 uintptr_t: TypeAlias = ctypes.c_uint64
 int32_t: TypeAlias = ctypes.c_int32
 struct_fastrpc_ioctl_init.register_fields([('flags', uint32_t, 0), ('file', uintptr_t, 8), ('filelen', uint32_t, 16), ('filefd', int32_t, 20), ('mem', uintptr_t, 24), ('memlen', uint32_t, 32), ('memfd', int32_t, 36)])
@@ -146,75 +146,75 @@ struct_fastrpc_ioctl_init.register_fields([('flags', uint32_t, 0), ('file', uint
 class struct_fastrpc_ioctl_init_attrs(c.Struct):
   SIZE = 48
   init: 'struct_fastrpc_ioctl_init'
-  attrs: int
-  siglen: int
+  attrs: 'int'
+  siglen: 'int'
 struct_fastrpc_ioctl_init_attrs.register_fields([('init', struct_fastrpc_ioctl_init, 0), ('attrs', ctypes.c_int32, 40), ('siglen', ctypes.c_uint32, 44)])
 @c.record
 class struct_fastrpc_ioctl_munmap(c.Struct):
   SIZE = 16
-  vaddrout: int
-  size: int
+  vaddrout: 'int'
+  size: 'int'
 struct_fastrpc_ioctl_munmap.register_fields([('vaddrout', uintptr_t, 0), ('size', size_t, 8)])
 @c.record
 class struct_fastrpc_ioctl_munmap_64(c.Struct):
   SIZE = 16
-  vaddrout: int
-  size: int
+  vaddrout: 'int'
+  size: 'int'
 struct_fastrpc_ioctl_munmap_64.register_fields([('vaddrout', uint64_t, 0), ('size', size_t, 8)])
 @c.record
 class struct_fastrpc_ioctl_mmap(c.Struct):
   SIZE = 32
-  fd: int
-  flags: int
-  vaddrin: int
-  size: int
-  vaddrout: int
+  fd: 'int'
+  flags: 'int'
+  vaddrin: 'int'
+  size: 'int'
+  vaddrout: 'int'
 struct_fastrpc_ioctl_mmap.register_fields([('fd', ctypes.c_int32, 0), ('flags', uint32_t, 4), ('vaddrin', uintptr_t, 8), ('size', size_t, 16), ('vaddrout', uintptr_t, 24)])
 @c.record
 class struct_fastrpc_ioctl_mmap_64(c.Struct):
   SIZE = 32
-  fd: int
-  flags: int
-  vaddrin: int
-  size: int
-  vaddrout: int
+  fd: 'int'
+  flags: 'int'
+  vaddrin: 'int'
+  size: 'int'
+  vaddrout: 'int'
 struct_fastrpc_ioctl_mmap_64.register_fields([('fd', ctypes.c_int32, 0), ('flags', uint32_t, 4), ('vaddrin', uint64_t, 8), ('size', size_t, 16), ('vaddrout', uint64_t, 24)])
 @c.record
 class struct_fastrpc_ioctl_munmap_fd(c.Struct):
   SIZE = 24
-  fd: int
-  flags: int
-  va: int
-  len: 'ssize_t'
+  fd: 'int'
+  flags: 'int'
+  va: 'int'
+  len: 'ctypes.c_int64'
 ssize_t: TypeAlias = ctypes.c_int64
 struct_fastrpc_ioctl_munmap_fd.register_fields([('fd', ctypes.c_int32, 0), ('flags', uint32_t, 4), ('va', uintptr_t, 8), ('len', ssize_t, 16)])
 @c.record
 class struct_fastrpc_ioctl_perf(c.Struct):
   SIZE = 24
-  data: int
-  numkeys: int
-  keys: int
+  data: 'int'
+  numkeys: 'int'
+  keys: 'int'
 struct_fastrpc_ioctl_perf.register_fields([('data', uintptr_t, 0), ('numkeys', uint32_t, 8), ('keys', uintptr_t, 16)])
 @c.record
 class struct_fastrpc_ctrl_latency(c.Struct):
   SIZE = 8
-  enable: int
-  level: int
+  enable: 'int'
+  level: 'int'
 struct_fastrpc_ctrl_latency.register_fields([('enable', uint32_t, 0), ('level', uint32_t, 4)])
 @c.record
 class struct_fastrpc_ctrl_smmu(c.Struct):
   SIZE = 4
-  sharedcb: int
+  sharedcb: 'int'
 struct_fastrpc_ctrl_smmu.register_fields([('sharedcb', uint32_t, 0)])
 @c.record
 class struct_fastrpc_ctrl_kalloc(c.Struct):
   SIZE = 4
-  kalloc_support: int
+  kalloc_support: 'int'
 struct_fastrpc_ctrl_kalloc.register_fields([('kalloc_support', uint32_t, 0)])
 @c.record
 class struct_fastrpc_ioctl_control(c.Struct):
   SIZE = 12
-  req: int
+  req: 'int'
   lp: 'struct_fastrpc_ctrl_latency'
   smmu: 'struct_fastrpc_ctrl_smmu'
   kalloc: 'struct_fastrpc_ctrl_kalloc'
@@ -222,21 +222,21 @@ struct_fastrpc_ioctl_control.register_fields([('req', uint32_t, 0), ('lp', struc
 @c.record
 class struct_smq_null_invoke(c.Struct):
   SIZE = 16
-  ctx: int
-  handle: int
-  sc: int
+  ctx: 'int'
+  handle: 'int'
+  sc: 'int'
 struct_smq_null_invoke.register_fields([('ctx', uint64_t, 0), ('handle', uint32_t, 8), ('sc', uint32_t, 12)])
 @c.record
 class struct_smq_phy_page(c.Struct):
   SIZE = 16
-  addr: int
-  size: int
+  addr: 'int'
+  size: 'int'
 struct_smq_phy_page.register_fields([('addr', uint64_t, 0), ('size', uint64_t, 8)])
 @c.record
 class struct_smq_invoke_buf(c.Struct):
   SIZE = 8
-  num: int
-  pgidx: int
+  num: 'int'
+  pgidx: 'int'
 struct_smq_invoke_buf.register_fields([('num', ctypes.c_int32, 0), ('pgidx', ctypes.c_int32, 4)])
 @c.record
 class struct_smq_invoke(c.Struct):
@@ -247,15 +247,15 @@ struct_smq_invoke.register_fields([('header', struct_smq_null_invoke, 0), ('page
 @c.record
 class struct_smq_msg(c.Struct):
   SIZE = 40
-  pid: int
-  tid: int
+  pid: 'int'
+  tid: 'int'
   invoke: 'struct_smq_invoke'
 struct_smq_msg.register_fields([('pid', uint32_t, 0), ('tid', uint32_t, 4), ('invoke', struct_smq_invoke, 8)])
 @c.record
 class struct_smq_invoke_rsp(c.Struct):
   SIZE = 16
-  ctx: int
-  retval: int
+  ctx: 'int'
+  retval: 'int'
 struct_smq_invoke_rsp.register_fields([('ctx', uint64_t, 0), ('retval', ctypes.c_int32, 8)])
 remote_handle: TypeAlias = ctypes.c_uint32
 remote_handle64: TypeAlias = ctypes.c_uint64
@@ -264,36 +264,36 @@ fastrpc_async_jobid: TypeAlias = ctypes.c_uint64
 class remote_buf(c.Struct):
   SIZE = 16
   pv: 'ctypes.c_void_p'
-  nLen: int
+  nLen: 'int'
 remote_buf.register_fields([('pv', ctypes.c_void_p, 0), ('nLen', size_t, 8)])
 @c.record
 class remote_dma_handle(c.Struct):
   SIZE = 8
-  fd: int
-  offset: int
+  fd: 'int'
+  offset: 'int'
 remote_dma_handle.register_fields([('fd', int32_t, 0), ('offset', uint32_t, 4)])
 @c.record
 class remote_arg(c.Struct):
   SIZE = 16
   buf: 'remote_buf'
-  h: int
-  h64: int
+  h: 'int'
+  h64: 'int'
   dma: 'remote_dma_handle'
 remote_arg.register_fields([('buf', remote_buf, 0), ('h', remote_handle, 0), ('h64', remote_handle64, 0), ('dma', remote_dma_handle, 0)])
 enum_fastrpc_async_notify_type: dict[int, str] = {(FASTRPC_ASYNC_NO_SYNC:=0): 'FASTRPC_ASYNC_NO_SYNC', (FASTRPC_ASYNC_CALLBACK:=1): 'FASTRPC_ASYNC_CALLBACK', (FASTRPC_ASYNC_POLL:=2): 'FASTRPC_ASYNC_POLL', (FASTRPC_ASYNC_TYPE_MAX:=3): 'FASTRPC_ASYNC_TYPE_MAX'}
 @c.record
 class struct_fastrpc_async_callback(c.Struct):
   SIZE = 16
-  fn: 'c.CFUNCTYPE[None, [fastrpc_async_jobid, ctypes.c_void_p, ctypes.c_int32]]'
+  fn: 'ctypes._CFunctionType'
   context: 'ctypes.c_void_p'
-struct_fastrpc_async_callback.register_fields([('fn', c.CFUNCTYPE[None, [fastrpc_async_jobid, ctypes.c_void_p, ctypes.c_int32]], 0), ('context', ctypes.c_void_p, 8)])
+struct_fastrpc_async_callback.register_fields([('fn', ctypes.CFUNCTYPE(None, fastrpc_async_jobid, ctypes.c_void_p, ctypes.c_int32), 0), ('context', ctypes.c_void_p, 8)])
 fastrpc_async_callback_t: TypeAlias = struct_fastrpc_async_callback
 @c.record
 class struct_fastrpc_async_descriptor(c.Struct):
   SIZE = 32
-  type: int
-  jobid: int
-  cb: 'fastrpc_async_callback_t'
+  type: 'int'
+  jobid: 'int'
+  cb: 'struct_fastrpc_async_callback'
 struct_fastrpc_async_descriptor.register_fields([('type', ctypes.c_uint32, 0), ('jobid', fastrpc_async_jobid, 8), ('cb', fastrpc_async_callback_t, 16)])
 fastrpc_async_descriptor_t: TypeAlias = struct_fastrpc_async_descriptor
 enum_fastrpc_process_type: dict[int, str] = {(PROCESS_TYPE_SIGNED:=0): 'PROCESS_TYPE_SIGNED', (PROCESS_TYPE_UNSIGNED:=1): 'PROCESS_TYPE_UNSIGNED'}
@@ -303,81 +303,81 @@ remote_rpc_control_latency_t: TypeAlias = ctypes.c_uint32
 @c.record
 class struct_remote_rpc_control_latency(c.Struct):
   SIZE = 8
-  enable: int
-  latency: int
+  enable: 'int'
+  latency: 'int'
 struct_remote_rpc_control_latency.register_fields([('enable', remote_rpc_control_latency_t, 0), ('latency', uint32_t, 4)])
 enum_remote_dsp_attributes: dict[int, str] = {(DOMAIN_SUPPORT:=0): 'DOMAIN_SUPPORT', (UNSIGNED_PD_SUPPORT:=1): 'UNSIGNED_PD_SUPPORT', (HVX_SUPPORT_64B:=2): 'HVX_SUPPORT_64B', (HVX_SUPPORT_128B:=3): 'HVX_SUPPORT_128B', (VTCM_PAGE:=4): 'VTCM_PAGE', (VTCM_COUNT:=5): 'VTCM_COUNT', (ARCH_VER:=6): 'ARCH_VER', (HMX_SUPPORT_DEPTH:=7): 'HMX_SUPPORT_DEPTH', (HMX_SUPPORT_SPATIAL:=8): 'HMX_SUPPORT_SPATIAL', (ASYNC_FASTRPC_SUPPORT:=9): 'ASYNC_FASTRPC_SUPPORT', (STATUS_NOTIFICATION_SUPPORT:=10): 'STATUS_NOTIFICATION_SUPPORT', (FASTRPC_MAX_DSP_ATTRIBUTES:=11): 'FASTRPC_MAX_DSP_ATTRIBUTES'}
 @c.record
 class struct_remote_dsp_capability(c.Struct):
   SIZE = 12
-  domain: int
-  attribute_ID: int
-  capability: int
+  domain: 'int'
+  attribute_ID: 'int'
+  capability: 'int'
 struct_remote_dsp_capability.register_fields([('domain', uint32_t, 0), ('attribute_ID', uint32_t, 4), ('capability', uint32_t, 8)])
 fastrpc_capability: TypeAlias = struct_remote_dsp_capability
 @c.record
 class struct_remote_rpc_control_wakelock(c.Struct):
   SIZE = 4
-  enable: int
+  enable: 'int'
 struct_remote_rpc_control_wakelock.register_fields([('enable', uint32_t, 0)])
 @c.record
 class struct_remote_rpc_get_domain(c.Struct):
   SIZE = 4
-  domain: int
+  domain: 'int'
 struct_remote_rpc_get_domain.register_fields([('domain', ctypes.c_int32, 0)])
 remote_rpc_get_domain_t: TypeAlias = struct_remote_rpc_get_domain
 enum_session_control_req_id: dict[int, str] = {(FASTRPC_THREAD_PARAMS:=1): 'FASTRPC_THREAD_PARAMS', (DSPRPC_CONTROL_UNSIGNED_MODULE:=2): 'DSPRPC_CONTROL_UNSIGNED_MODULE', (FASTRPC_RELATIVE_THREAD_PRIORITY:=4): 'FASTRPC_RELATIVE_THREAD_PRIORITY', (FASTRPC_REMOTE_PROCESS_KILL:=6): 'FASTRPC_REMOTE_PROCESS_KILL', (FASTRPC_SESSION_CLOSE:=7): 'FASTRPC_SESSION_CLOSE', (FASTRPC_CONTROL_PD_DUMP:=8): 'FASTRPC_CONTROL_PD_DUMP', (FASTRPC_REMOTE_PROCESS_EXCEPTION:=9): 'FASTRPC_REMOTE_PROCESS_EXCEPTION', (FASTRPC_REMOTE_PROCESS_TYPE:=10): 'FASTRPC_REMOTE_PROCESS_TYPE', (FASTRPC_REGISTER_STATUS_NOTIFICATIONS:=11): 'FASTRPC_REGISTER_STATUS_NOTIFICATIONS'}
 @c.record
 class struct_remote_rpc_thread_params(c.Struct):
   SIZE = 12
-  domain: int
-  prio: int
-  stack_size: int
+  domain: 'int'
+  prio: 'int'
+  stack_size: 'int'
 struct_remote_rpc_thread_params.register_fields([('domain', ctypes.c_int32, 0), ('prio', ctypes.c_int32, 4), ('stack_size', ctypes.c_int32, 8)])
 @c.record
 class struct_remote_rpc_control_unsigned_module(c.Struct):
   SIZE = 8
-  domain: int
-  enable: int
+  domain: 'int'
+  enable: 'int'
 struct_remote_rpc_control_unsigned_module.register_fields([('domain', ctypes.c_int32, 0), ('enable', ctypes.c_int32, 4)])
 @c.record
 class struct_remote_rpc_relative_thread_priority(c.Struct):
   SIZE = 8
-  domain: int
-  relative_thread_priority: int
+  domain: 'int'
+  relative_thread_priority: 'int'
 struct_remote_rpc_relative_thread_priority.register_fields([('domain', ctypes.c_int32, 0), ('relative_thread_priority', ctypes.c_int32, 4)])
 @c.record
 class struct_remote_rpc_process_clean_params(c.Struct):
   SIZE = 4
-  domain: int
+  domain: 'int'
 struct_remote_rpc_process_clean_params.register_fields([('domain', ctypes.c_int32, 0)])
 @c.record
 class struct_remote_rpc_session_close(c.Struct):
   SIZE = 4
-  domain: int
+  domain: 'int'
 struct_remote_rpc_session_close.register_fields([('domain', ctypes.c_int32, 0)])
 @c.record
 class struct_remote_rpc_control_pd_dump(c.Struct):
   SIZE = 8
-  domain: int
-  enable: int
+  domain: 'int'
+  enable: 'int'
 struct_remote_rpc_control_pd_dump.register_fields([('domain', ctypes.c_int32, 0), ('enable', ctypes.c_int32, 4)])
 @c.record
 class struct_remote_process_type(c.Struct):
   SIZE = 8
-  domain: int
-  process_type: int
+  domain: 'int'
+  process_type: 'int'
 struct_remote_process_type.register_fields([('domain', ctypes.c_int32, 0), ('process_type', ctypes.c_int32, 4)])
 remote_rpc_process_exception: TypeAlias = struct_remote_rpc_process_clean_params
 enum_remote_rpc_status_flags: dict[int, str] = {(FASTRPC_USER_PD_UP:=0): 'FASTRPC_USER_PD_UP', (FASTRPC_USER_PD_EXIT:=1): 'FASTRPC_USER_PD_EXIT', (FASTRPC_USER_PD_FORCE_KILL:=2): 'FASTRPC_USER_PD_FORCE_KILL', (FASTRPC_USER_PD_EXCEPTION:=3): 'FASTRPC_USER_PD_EXCEPTION', (FASTRPC_DSP_SSR:=4): 'FASTRPC_DSP_SSR'}
 remote_rpc_status_flags_t: TypeAlias = ctypes.c_uint32
-fastrpc_notif_fn_t: TypeAlias = c.CFUNCTYPE[ctypes.c_int32, [ctypes.c_void_p, ctypes.c_int32, ctypes.c_int32, ctypes.c_uint32]]
+fastrpc_notif_fn_t: TypeAlias = ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.c_void_p, ctypes.c_int32, ctypes.c_int32, ctypes.c_uint32)
 @c.record
 class struct_remote_rpc_notif_register(c.Struct):
   SIZE = 24
   context: 'ctypes.c_void_p'
-  domain: int
-  notifier_fn: 'fastrpc_notif_fn_t'
+  domain: 'int'
+  notifier_fn: 'ctypes._CFunctionType'
 struct_remote_rpc_notif_register.register_fields([('context', ctypes.c_void_p, 0), ('domain', ctypes.c_int32, 8), ('notifier_fn', fastrpc_notif_fn_t, 16)])
 remote_rpc_notif_register_t: TypeAlias = struct_remote_rpc_notif_register
 enum_remote_mem_map_flags: dict[int, str] = {(REMOTE_MAP_MEM_STATIC:=0): 'REMOTE_MAP_MEM_STATIC', (REMOTE_MAP_MAX_FLAG:=1): 'REMOTE_MAP_MAX_FLAG'}
@@ -386,9 +386,9 @@ enum_fastrpc_map_flags: dict[int, str] = {(FASTRPC_MAP_STATIC:=0): 'FASTRPC_MAP_
 @c.record
 class struct__cstring1_s(c.Struct):
   SIZE = 16
-  data: 'c.POINTER[ctypes.c_char]'
-  dataLen: int
-struct__cstring1_s.register_fields([('data', c.POINTER[ctypes.c_char], 0), ('dataLen', ctypes.c_int32, 8)])
+  data: 'ctypes._Pointer[bytes]'
+  dataLen: 'int'
+struct__cstring1_s.register_fields([('data', ctypes.POINTER(ctypes.c_char), 0), ('dataLen', ctypes.c_int32, 8)])
 _cstring1_t: TypeAlias = struct__cstring1_s
 apps_std_FILE: TypeAlias = ctypes.c_int32
 enum_apps_std_SEEK: dict[int, str] = {(APPS_STD_SEEK_SET:=0): 'APPS_STD_SEEK_SET', (APPS_STD_SEEK_CUR:=1): 'APPS_STD_SEEK_CUR', (APPS_STD_SEEK_END:=2): 'APPS_STD_SEEK_END', (_32BIT_PLACEHOLDER_apps_std_SEEK:=2147483647): '_32BIT_PLACEHOLDER_apps_std_SEEK'}
@@ -396,33 +396,33 @@ apps_std_SEEK: TypeAlias = ctypes.c_uint32
 @c.record
 class struct_apps_std_DIR(c.Struct):
   SIZE = 8
-  handle: int
+  handle: 'int'
 uint64: TypeAlias = ctypes.c_uint64
 struct_apps_std_DIR.register_fields([('handle', uint64, 0)])
 apps_std_DIR: TypeAlias = struct_apps_std_DIR
 @c.record
 class struct_apps_std_DIRENT(c.Struct):
   SIZE = 260
-  ino: int
-  name: 'c.Array[ctypes.c_char, Literal[255]]'
-struct_apps_std_DIRENT.register_fields([('ino', ctypes.c_int32, 0), ('name', c.Array[ctypes.c_char, Literal[255]], 4)])
+  ino: 'int'
+  name: 'list[bytes]'
+struct_apps_std_DIRENT.register_fields([('ino', ctypes.c_int32, 0), ('name', (ctypes.c_char * 255), 4)])
 apps_std_DIRENT: TypeAlias = struct_apps_std_DIRENT
 @c.record
 class struct_apps_std_STAT(c.Struct):
   SIZE = 96
-  tsz: int
-  dev: int
-  ino: int
-  mode: int
-  nlink: int
-  rdev: int
-  size: int
-  atime: int
-  atimensec: int
-  mtime: int
-  mtimensec: int
-  ctime: int
-  ctimensec: int
+  tsz: 'int'
+  dev: 'int'
+  ino: 'int'
+  mode: 'int'
+  nlink: 'int'
+  rdev: 'int'
+  size: 'int'
+  atime: 'int'
+  atimensec: 'int'
+  mtime: 'int'
+  mtimensec: 'int'
+  ctime: 'int'
+  ctimensec: 'int'
 uint32: TypeAlias = ctypes.c_uint32
 int64: TypeAlias = ctypes.c_int64
 struct_apps_std_STAT.register_fields([('tsz', uint64, 0), ('dev', uint64, 8), ('ino', uint64, 16), ('mode', uint32, 24), ('nlink', uint32, 28), ('rdev', uint64, 32), ('size', uint64, 40), ('atime', int64, 48), ('atimensec', int64, 56), ('mtime', int64, 64), ('mtimensec', int64, 72), ('ctime', int64, 80), ('ctimensec', int64, 88)])

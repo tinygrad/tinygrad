@@ -10,68 +10,68 @@ drm_magic_t: TypeAlias = ctypes.c_uint32
 @c.record
 class struct_drm_clip_rect(c.Struct):
   SIZE = 8
-  x1: int
-  y1: int
-  x2: int
-  y2: int
+  x1: 'int'
+  y1: 'int'
+  x2: 'int'
+  y2: 'int'
 struct_drm_clip_rect.register_fields([('x1', ctypes.c_uint16, 0), ('y1', ctypes.c_uint16, 2), ('x2', ctypes.c_uint16, 4), ('y2', ctypes.c_uint16, 6)])
 @c.record
 class struct_drm_drawable_info(c.Struct):
   SIZE = 16
-  num_rects: int
-  rects: 'c.POINTER[struct_drm_clip_rect]'
-struct_drm_drawable_info.register_fields([('num_rects', ctypes.c_uint32, 0), ('rects', c.POINTER[struct_drm_clip_rect], 8)])
+  num_rects: 'int'
+  rects: 'ctypes._Pointer[struct_drm_clip_rect]'
+struct_drm_drawable_info.register_fields([('num_rects', ctypes.c_uint32, 0), ('rects', ctypes.POINTER(struct_drm_clip_rect), 8)])
 @c.record
 class struct_drm_tex_region(c.Struct):
   SIZE = 8
-  next: int
-  prev: int
-  in_use: int
-  padding: int
-  age: int
+  next: 'int'
+  prev: 'int'
+  in_use: 'int'
+  padding: 'int'
+  age: 'int'
 struct_drm_tex_region.register_fields([('next', ctypes.c_ubyte, 0), ('prev', ctypes.c_ubyte, 1), ('in_use', ctypes.c_ubyte, 2), ('padding', ctypes.c_ubyte, 3), ('age', ctypes.c_uint32, 4)])
 @c.record
 class struct_drm_hw_lock(c.Struct):
   SIZE = 64
-  lock: int
-  padding: 'c.Array[ctypes.c_char, Literal[60]]'
-struct_drm_hw_lock.register_fields([('lock', ctypes.c_uint32, 0), ('padding', c.Array[ctypes.c_char, Literal[60]], 4)])
+  lock: 'int'
+  padding: 'list[bytes]'
+struct_drm_hw_lock.register_fields([('lock', ctypes.c_uint32, 0), ('padding', (ctypes.c_char * 60), 4)])
 @c.record
 class struct_drm_version(c.Struct):
   SIZE = 64
-  version_major: int
-  version_minor: int
-  version_patchlevel: int
-  name_len: int
-  name: 'c.POINTER[ctypes.c_char]'
-  date_len: int
-  date: 'c.POINTER[ctypes.c_char]'
-  desc_len: int
-  desc: 'c.POINTER[ctypes.c_char]'
+  version_major: 'int'
+  version_minor: 'int'
+  version_patchlevel: 'int'
+  name_len: 'int'
+  name: 'ctypes._Pointer[bytes]'
+  date_len: 'int'
+  date: 'ctypes._Pointer[bytes]'
+  desc_len: 'int'
+  desc: 'ctypes._Pointer[bytes]'
 __kernel_size_t: TypeAlias = ctypes.c_uint64
-struct_drm_version.register_fields([('version_major', ctypes.c_int32, 0), ('version_minor', ctypes.c_int32, 4), ('version_patchlevel', ctypes.c_int32, 8), ('name_len', ctypes.c_uint64, 16), ('name', c.POINTER[ctypes.c_char], 24), ('date_len', ctypes.c_uint64, 32), ('date', c.POINTER[ctypes.c_char], 40), ('desc_len', ctypes.c_uint64, 48), ('desc', c.POINTER[ctypes.c_char], 56)])
+struct_drm_version.register_fields([('version_major', ctypes.c_int32, 0), ('version_minor', ctypes.c_int32, 4), ('version_patchlevel', ctypes.c_int32, 8), ('name_len', ctypes.c_uint64, 16), ('name', ctypes.POINTER(ctypes.c_char), 24), ('date_len', ctypes.c_uint64, 32), ('date', ctypes.POINTER(ctypes.c_char), 40), ('desc_len', ctypes.c_uint64, 48), ('desc', ctypes.POINTER(ctypes.c_char), 56)])
 @c.record
 class struct_drm_unique(c.Struct):
   SIZE = 16
-  unique_len: int
-  unique: 'c.POINTER[ctypes.c_char]'
-struct_drm_unique.register_fields([('unique_len', ctypes.c_uint64, 0), ('unique', c.POINTER[ctypes.c_char], 8)])
+  unique_len: 'int'
+  unique: 'ctypes._Pointer[bytes]'
+struct_drm_unique.register_fields([('unique_len', ctypes.c_uint64, 0), ('unique', ctypes.POINTER(ctypes.c_char), 8)])
 @c.record
 class struct_drm_list(c.Struct):
   SIZE = 16
-  count: int
-  version: 'c.POINTER[struct_drm_version]'
-struct_drm_list.register_fields([('count', ctypes.c_int32, 0), ('version', c.POINTER[struct_drm_version], 8)])
+  count: 'int'
+  version: 'ctypes._Pointer[struct_drm_version]'
+struct_drm_list.register_fields([('count', ctypes.c_int32, 0), ('version', ctypes.POINTER(struct_drm_version), 8)])
 @c.record
 class struct_drm_block(c.Struct):
   SIZE = 4
-  unused: int
+  unused: 'int'
 struct_drm_block.register_fields([('unused', ctypes.c_int32, 0)])
 @c.record
 class struct_drm_control(c.Struct):
   SIZE = 8
-  func: int
-  irq: int
+  func: 'int'
+  irq: 'int'
 struct_drm_control_func: dict[int, str] = {(DRM_ADD_COMMAND:=0): 'DRM_ADD_COMMAND', (DRM_RM_COMMAND:=1): 'DRM_RM_COMMAND', (DRM_INST_HANDLER:=2): 'DRM_INST_HANDLER', (DRM_UNINST_HANDLER:=3): 'DRM_UNINST_HANDLER'}
 struct_drm_control.register_fields([('func', ctypes.c_uint32, 0), ('irq', ctypes.c_int32, 4)])
 enum_drm_map_type: dict[int, str] = {(_DRM_FRAME_BUFFER:=0): '_DRM_FRAME_BUFFER', (_DRM_REGISTERS:=1): '_DRM_REGISTERS', (_DRM_SHM:=2): '_DRM_SHM', (_DRM_AGP:=3): '_DRM_AGP', (_DRM_SCATTER_GATHER:=4): '_DRM_SCATTER_GATHER', (_DRM_CONSISTENT:=5): '_DRM_CONSISTENT'}
@@ -79,155 +79,155 @@ enum_drm_map_flags: dict[int, str] = {(_DRM_RESTRICTED:=1): '_DRM_RESTRICTED', (
 @c.record
 class struct_drm_ctx_priv_map(c.Struct):
   SIZE = 16
-  ctx_id: int
+  ctx_id: 'int'
   handle: 'ctypes.c_void_p'
 struct_drm_ctx_priv_map.register_fields([('ctx_id', ctypes.c_uint32, 0), ('handle', ctypes.c_void_p, 8)])
 @c.record
 class struct_drm_map(c.Struct):
   SIZE = 40
-  offset: int
-  size: int
-  type: int
-  flags: int
+  offset: 'int'
+  size: 'int'
+  type: 'int'
+  flags: 'int'
   handle: 'ctypes.c_void_p'
-  mtrr: int
+  mtrr: 'int'
 struct_drm_map.register_fields([('offset', ctypes.c_uint64, 0), ('size', ctypes.c_uint64, 8), ('type', ctypes.c_uint32, 16), ('flags', ctypes.c_uint32, 20), ('handle', ctypes.c_void_p, 24), ('mtrr', ctypes.c_int32, 32)])
 @c.record
 class struct_drm_client(c.Struct):
   SIZE = 40
-  idx: int
-  auth: int
-  pid: int
-  uid: int
-  magic: int
-  iocs: int
+  idx: 'int'
+  auth: 'int'
+  pid: 'int'
+  uid: 'int'
+  magic: 'int'
+  iocs: 'int'
 struct_drm_client.register_fields([('idx', ctypes.c_int32, 0), ('auth', ctypes.c_int32, 4), ('pid', ctypes.c_uint64, 8), ('uid', ctypes.c_uint64, 16), ('magic', ctypes.c_uint64, 24), ('iocs', ctypes.c_uint64, 32)])
 enum_drm_stat_type: dict[int, str] = {(_DRM_STAT_LOCK:=0): '_DRM_STAT_LOCK', (_DRM_STAT_OPENS:=1): '_DRM_STAT_OPENS', (_DRM_STAT_CLOSES:=2): '_DRM_STAT_CLOSES', (_DRM_STAT_IOCTLS:=3): '_DRM_STAT_IOCTLS', (_DRM_STAT_LOCKS:=4): '_DRM_STAT_LOCKS', (_DRM_STAT_UNLOCKS:=5): '_DRM_STAT_UNLOCKS', (_DRM_STAT_VALUE:=6): '_DRM_STAT_VALUE', (_DRM_STAT_BYTE:=7): '_DRM_STAT_BYTE', (_DRM_STAT_COUNT:=8): '_DRM_STAT_COUNT', (_DRM_STAT_IRQ:=9): '_DRM_STAT_IRQ', (_DRM_STAT_PRIMARY:=10): '_DRM_STAT_PRIMARY', (_DRM_STAT_SECONDARY:=11): '_DRM_STAT_SECONDARY', (_DRM_STAT_DMA:=12): '_DRM_STAT_DMA', (_DRM_STAT_SPECIAL:=13): '_DRM_STAT_SPECIAL', (_DRM_STAT_MISSED:=14): '_DRM_STAT_MISSED'}
 @c.record
 class struct_drm_stats(c.Struct):
   SIZE = 248
-  count: int
-  data: 'c.Array[struct_drm_stats_data, Literal[15]]'
+  count: 'int'
+  data: 'list[struct_drm_stats_data]'
 @c.record
 class struct_drm_stats_data(c.Struct):
   SIZE = 16
-  value: int
-  type: int
+  value: 'int'
+  type: 'int'
 struct_drm_stats_data.register_fields([('value', ctypes.c_uint64, 0), ('type', ctypes.c_uint32, 8)])
-struct_drm_stats.register_fields([('count', ctypes.c_uint64, 0), ('data', c.Array[struct_drm_stats_data, Literal[15]], 8)])
+struct_drm_stats.register_fields([('count', ctypes.c_uint64, 0), ('data', (struct_drm_stats_data * 15), 8)])
 enum_drm_lock_flags: dict[int, str] = {(_DRM_LOCK_READY:=1): '_DRM_LOCK_READY', (_DRM_LOCK_QUIESCENT:=2): '_DRM_LOCK_QUIESCENT', (_DRM_LOCK_FLUSH:=4): '_DRM_LOCK_FLUSH', (_DRM_LOCK_FLUSH_ALL:=8): '_DRM_LOCK_FLUSH_ALL', (_DRM_HALT_ALL_QUEUES:=16): '_DRM_HALT_ALL_QUEUES', (_DRM_HALT_CUR_QUEUES:=32): '_DRM_HALT_CUR_QUEUES'}
 @c.record
 class struct_drm_lock(c.Struct):
   SIZE = 8
-  context: int
-  flags: int
+  context: 'int'
+  flags: 'int'
 struct_drm_lock.register_fields([('context', ctypes.c_int32, 0), ('flags', ctypes.c_uint32, 4)])
 enum_drm_dma_flags: dict[int, str] = {(_DRM_DMA_BLOCK:=1): '_DRM_DMA_BLOCK', (_DRM_DMA_WHILE_LOCKED:=2): '_DRM_DMA_WHILE_LOCKED', (_DRM_DMA_PRIORITY:=4): '_DRM_DMA_PRIORITY', (_DRM_DMA_WAIT:=16): '_DRM_DMA_WAIT', (_DRM_DMA_SMALLER_OK:=32): '_DRM_DMA_SMALLER_OK', (_DRM_DMA_LARGER_OK:=64): '_DRM_DMA_LARGER_OK'}
 @c.record
 class struct_drm_buf_desc(c.Struct):
   SIZE = 32
-  count: int
-  size: int
-  low_mark: int
-  high_mark: int
-  flags: int
-  agp_start: int
+  count: 'int'
+  size: 'int'
+  low_mark: 'int'
+  high_mark: 'int'
+  flags: 'int'
+  agp_start: 'int'
 struct_drm_buf_desc_flags: dict[int, str] = {(_DRM_PAGE_ALIGN:=1): '_DRM_PAGE_ALIGN', (_DRM_AGP_BUFFER:=2): '_DRM_AGP_BUFFER', (_DRM_SG_BUFFER:=4): '_DRM_SG_BUFFER', (_DRM_FB_BUFFER:=8): '_DRM_FB_BUFFER', (_DRM_PCI_BUFFER_RO:=16): '_DRM_PCI_BUFFER_RO'}
 struct_drm_buf_desc.register_fields([('count', ctypes.c_int32, 0), ('size', ctypes.c_int32, 4), ('low_mark', ctypes.c_int32, 8), ('high_mark', ctypes.c_int32, 12), ('flags', ctypes.c_uint32, 16), ('agp_start', ctypes.c_uint64, 24)])
 @c.record
 class struct_drm_buf_info(c.Struct):
   SIZE = 16
-  count: int
-  list: 'c.POINTER[struct_drm_buf_desc]'
-struct_drm_buf_info.register_fields([('count', ctypes.c_int32, 0), ('list', c.POINTER[struct_drm_buf_desc], 8)])
+  count: 'int'
+  list: 'ctypes._Pointer[struct_drm_buf_desc]'
+struct_drm_buf_info.register_fields([('count', ctypes.c_int32, 0), ('list', ctypes.POINTER(struct_drm_buf_desc), 8)])
 @c.record
 class struct_drm_buf_free(c.Struct):
   SIZE = 16
-  count: int
-  list: 'c.POINTER[ctypes.c_int32]'
-struct_drm_buf_free.register_fields([('count', ctypes.c_int32, 0), ('list', c.POINTER[ctypes.c_int32], 8)])
+  count: 'int'
+  list: 'ctypes._Pointer[int]'
+struct_drm_buf_free.register_fields([('count', ctypes.c_int32, 0), ('list', ctypes.POINTER(ctypes.c_int32), 8)])
 @c.record
 class struct_drm_buf_pub(c.Struct):
   SIZE = 24
-  idx: int
-  total: int
-  used: int
+  idx: 'int'
+  total: 'int'
+  used: 'int'
   address: 'ctypes.c_void_p'
 struct_drm_buf_pub.register_fields([('idx', ctypes.c_int32, 0), ('total', ctypes.c_int32, 4), ('used', ctypes.c_int32, 8), ('address', ctypes.c_void_p, 16)])
 @c.record
 class struct_drm_buf_map(c.Struct):
   SIZE = 24
-  count: int
+  count: 'int'
   virtual: 'ctypes.c_void_p'
-  list: 'c.POINTER[struct_drm_buf_pub]'
-struct_drm_buf_map.register_fields([('count', ctypes.c_int32, 0), ('virtual', ctypes.c_void_p, 8), ('list', c.POINTER[struct_drm_buf_pub], 16)])
+  list: 'ctypes._Pointer[struct_drm_buf_pub]'
+struct_drm_buf_map.register_fields([('count', ctypes.c_int32, 0), ('virtual', ctypes.c_void_p, 8), ('list', ctypes.POINTER(struct_drm_buf_pub), 16)])
 @c.record
 class struct_drm_dma(c.Struct):
   SIZE = 64
-  context: int
-  send_count: int
-  send_indices: 'c.POINTER[ctypes.c_int32]'
-  send_sizes: 'c.POINTER[ctypes.c_int32]'
-  flags: int
-  request_count: int
-  request_size: int
-  request_indices: 'c.POINTER[ctypes.c_int32]'
-  request_sizes: 'c.POINTER[ctypes.c_int32]'
-  granted_count: int
-struct_drm_dma.register_fields([('context', ctypes.c_int32, 0), ('send_count', ctypes.c_int32, 4), ('send_indices', c.POINTER[ctypes.c_int32], 8), ('send_sizes', c.POINTER[ctypes.c_int32], 16), ('flags', ctypes.c_uint32, 24), ('request_count', ctypes.c_int32, 28), ('request_size', ctypes.c_int32, 32), ('request_indices', c.POINTER[ctypes.c_int32], 40), ('request_sizes', c.POINTER[ctypes.c_int32], 48), ('granted_count', ctypes.c_int32, 56)])
+  context: 'int'
+  send_count: 'int'
+  send_indices: 'ctypes._Pointer[int]'
+  send_sizes: 'ctypes._Pointer[int]'
+  flags: 'int'
+  request_count: 'int'
+  request_size: 'int'
+  request_indices: 'ctypes._Pointer[int]'
+  request_sizes: 'ctypes._Pointer[int]'
+  granted_count: 'int'
+struct_drm_dma.register_fields([('context', ctypes.c_int32, 0), ('send_count', ctypes.c_int32, 4), ('send_indices', ctypes.POINTER(ctypes.c_int32), 8), ('send_sizes', ctypes.POINTER(ctypes.c_int32), 16), ('flags', ctypes.c_uint32, 24), ('request_count', ctypes.c_int32, 28), ('request_size', ctypes.c_int32, 32), ('request_indices', ctypes.POINTER(ctypes.c_int32), 40), ('request_sizes', ctypes.POINTER(ctypes.c_int32), 48), ('granted_count', ctypes.c_int32, 56)])
 enum_drm_ctx_flags: dict[int, str] = {(_DRM_CONTEXT_PRESERVED:=1): '_DRM_CONTEXT_PRESERVED', (_DRM_CONTEXT_2DONLY:=2): '_DRM_CONTEXT_2DONLY'}
 @c.record
 class struct_drm_ctx(c.Struct):
   SIZE = 8
-  handle: int
-  flags: int
+  handle: 'int'
+  flags: 'int'
 struct_drm_ctx.register_fields([('handle', drm_context_t, 0), ('flags', ctypes.c_uint32, 4)])
 @c.record
 class struct_drm_ctx_res(c.Struct):
   SIZE = 16
-  count: int
-  contexts: 'c.POINTER[struct_drm_ctx]'
-struct_drm_ctx_res.register_fields([('count', ctypes.c_int32, 0), ('contexts', c.POINTER[struct_drm_ctx], 8)])
+  count: 'int'
+  contexts: 'ctypes._Pointer[struct_drm_ctx]'
+struct_drm_ctx_res.register_fields([('count', ctypes.c_int32, 0), ('contexts', ctypes.POINTER(struct_drm_ctx), 8)])
 @c.record
 class struct_drm_draw(c.Struct):
   SIZE = 4
-  handle: int
+  handle: 'int'
 struct_drm_draw.register_fields([('handle', drm_drawable_t, 0)])
 drm_drawable_info_type_t: dict[int, str] = {(DRM_DRAWABLE_CLIPRECTS:=0): 'DRM_DRAWABLE_CLIPRECTS'}
 @c.record
 class struct_drm_update_draw(c.Struct):
   SIZE = 24
-  handle: int
-  type: int
-  num: int
-  data: int
+  handle: 'int'
+  type: 'int'
+  num: 'int'
+  data: 'int'
 struct_drm_update_draw.register_fields([('handle', drm_drawable_t, 0), ('type', ctypes.c_uint32, 4), ('num', ctypes.c_uint32, 8), ('data', ctypes.c_uint64, 16)])
 @c.record
 class struct_drm_auth(c.Struct):
   SIZE = 4
-  magic: int
+  magic: 'int'
 struct_drm_auth.register_fields([('magic', drm_magic_t, 0)])
 @c.record
 class struct_drm_irq_busid(c.Struct):
   SIZE = 16
-  irq: int
-  busnum: int
-  devnum: int
-  funcnum: int
+  irq: 'int'
+  busnum: 'int'
+  devnum: 'int'
+  funcnum: 'int'
 struct_drm_irq_busid.register_fields([('irq', ctypes.c_int32, 0), ('busnum', ctypes.c_int32, 4), ('devnum', ctypes.c_int32, 8), ('funcnum', ctypes.c_int32, 12)])
 enum_drm_vblank_seq_type: dict[int, str] = {(_DRM_VBLANK_ABSOLUTE:=0): '_DRM_VBLANK_ABSOLUTE', (_DRM_VBLANK_RELATIVE:=1): '_DRM_VBLANK_RELATIVE', (_DRM_VBLANK_HIGH_CRTC_MASK:=62): '_DRM_VBLANK_HIGH_CRTC_MASK', (_DRM_VBLANK_EVENT:=67108864): '_DRM_VBLANK_EVENT', (_DRM_VBLANK_FLIP:=134217728): '_DRM_VBLANK_FLIP', (_DRM_VBLANK_NEXTONMISS:=268435456): '_DRM_VBLANK_NEXTONMISS', (_DRM_VBLANK_SECONDARY:=536870912): '_DRM_VBLANK_SECONDARY', (_DRM_VBLANK_SIGNAL:=1073741824): '_DRM_VBLANK_SIGNAL'}
 @c.record
 class struct_drm_wait_vblank_request(c.Struct):
   SIZE = 16
-  type: int
-  sequence: int
-  signal: int
+  type: 'int'
+  sequence: 'int'
+  signal: 'int'
 struct_drm_wait_vblank_request.register_fields([('type', ctypes.c_uint32, 0), ('sequence', ctypes.c_uint32, 4), ('signal', ctypes.c_uint64, 8)])
 @c.record
 class struct_drm_wait_vblank_reply(c.Struct):
   SIZE = 24
-  type: int
-  sequence: int
+  type: 'int'
+  sequence: 'int'
   tval_sec: 'ctypes.c_int64'
   tval_usec: 'ctypes.c_int64'
 struct_drm_wait_vblank_reply.register_fields([('type', ctypes.c_uint32, 0), ('sequence', ctypes.c_uint32, 4), ('tval_sec', ctypes.c_int64, 8), ('tval_usec', ctypes.c_int64, 16)])
@@ -240,213 +240,213 @@ union_drm_wait_vblank.register_fields([('request', struct_drm_wait_vblank_reques
 @c.record
 class struct_drm_modeset_ctl(c.Struct):
   SIZE = 8
-  crtc: int
-  cmd: int
+  crtc: 'int'
+  cmd: 'int'
 __u32: TypeAlias = ctypes.c_uint32
 struct_drm_modeset_ctl.register_fields([('crtc', ctypes.c_uint32, 0), ('cmd', ctypes.c_uint32, 4)])
 @c.record
 class struct_drm_agp_mode(c.Struct):
   SIZE = 8
-  mode: int
+  mode: 'int'
 struct_drm_agp_mode.register_fields([('mode', ctypes.c_uint64, 0)])
 @c.record
 class struct_drm_agp_buffer(c.Struct):
   SIZE = 32
-  size: int
-  handle: int
-  type: int
-  physical: int
+  size: 'int'
+  handle: 'int'
+  type: 'int'
+  physical: 'int'
 struct_drm_agp_buffer.register_fields([('size', ctypes.c_uint64, 0), ('handle', ctypes.c_uint64, 8), ('type', ctypes.c_uint64, 16), ('physical', ctypes.c_uint64, 24)])
 @c.record
 class struct_drm_agp_binding(c.Struct):
   SIZE = 16
-  handle: int
-  offset: int
+  handle: 'int'
+  offset: 'int'
 struct_drm_agp_binding.register_fields([('handle', ctypes.c_uint64, 0), ('offset', ctypes.c_uint64, 8)])
 @c.record
 class struct_drm_agp_info(c.Struct):
   SIZE = 56
-  agp_version_major: int
-  agp_version_minor: int
-  mode: int
-  aperture_base: int
-  aperture_size: int
-  memory_allowed: int
-  memory_used: int
-  id_vendor: int
-  id_device: int
+  agp_version_major: 'int'
+  agp_version_minor: 'int'
+  mode: 'int'
+  aperture_base: 'int'
+  aperture_size: 'int'
+  memory_allowed: 'int'
+  memory_used: 'int'
+  id_vendor: 'int'
+  id_device: 'int'
 struct_drm_agp_info.register_fields([('agp_version_major', ctypes.c_int32, 0), ('agp_version_minor', ctypes.c_int32, 4), ('mode', ctypes.c_uint64, 8), ('aperture_base', ctypes.c_uint64, 16), ('aperture_size', ctypes.c_uint64, 24), ('memory_allowed', ctypes.c_uint64, 32), ('memory_used', ctypes.c_uint64, 40), ('id_vendor', ctypes.c_uint16, 48), ('id_device', ctypes.c_uint16, 50)])
 @c.record
 class struct_drm_scatter_gather(c.Struct):
   SIZE = 16
-  size: int
-  handle: int
+  size: 'int'
+  handle: 'int'
 struct_drm_scatter_gather.register_fields([('size', ctypes.c_uint64, 0), ('handle', ctypes.c_uint64, 8)])
 @c.record
 class struct_drm_set_version(c.Struct):
   SIZE = 16
-  drm_di_major: int
-  drm_di_minor: int
-  drm_dd_major: int
-  drm_dd_minor: int
+  drm_di_major: 'int'
+  drm_di_minor: 'int'
+  drm_dd_major: 'int'
+  drm_dd_minor: 'int'
 struct_drm_set_version.register_fields([('drm_di_major', ctypes.c_int32, 0), ('drm_di_minor', ctypes.c_int32, 4), ('drm_dd_major', ctypes.c_int32, 8), ('drm_dd_minor', ctypes.c_int32, 12)])
 @c.record
 class struct_drm_gem_close(c.Struct):
   SIZE = 8
-  handle: int
-  pad: int
+  handle: 'int'
+  pad: 'int'
 struct_drm_gem_close.register_fields([('handle', ctypes.c_uint32, 0), ('pad', ctypes.c_uint32, 4)])
 @c.record
 class struct_drm_gem_flink(c.Struct):
   SIZE = 8
-  handle: int
-  name: int
+  handle: 'int'
+  name: 'int'
 struct_drm_gem_flink.register_fields([('handle', ctypes.c_uint32, 0), ('name', ctypes.c_uint32, 4)])
 @c.record
 class struct_drm_gem_open(c.Struct):
   SIZE = 16
-  name: int
-  handle: int
-  size: int
+  name: 'int'
+  handle: 'int'
+  size: 'int'
 __u64: TypeAlias = ctypes.c_uint64
 struct_drm_gem_open.register_fields([('name', ctypes.c_uint32, 0), ('handle', ctypes.c_uint32, 4), ('size', ctypes.c_uint64, 8)])
 @c.record
 class struct_drm_get_cap(c.Struct):
   SIZE = 16
-  capability: int
-  value: int
+  capability: 'int'
+  value: 'int'
 struct_drm_get_cap.register_fields([('capability', ctypes.c_uint64, 0), ('value', ctypes.c_uint64, 8)])
 @c.record
 class struct_drm_set_client_cap(c.Struct):
   SIZE = 16
-  capability: int
-  value: int
+  capability: 'int'
+  value: 'int'
 struct_drm_set_client_cap.register_fields([('capability', ctypes.c_uint64, 0), ('value', ctypes.c_uint64, 8)])
 @c.record
 class struct_drm_prime_handle(c.Struct):
   SIZE = 12
-  handle: int
-  flags: int
-  fd: int
+  handle: 'int'
+  flags: 'int'
+  fd: 'int'
 __s32: TypeAlias = ctypes.c_int32
 struct_drm_prime_handle.register_fields([('handle', ctypes.c_uint32, 0), ('flags', ctypes.c_uint32, 4), ('fd', ctypes.c_int32, 8)])
 @c.record
 class struct_drm_syncobj_create(c.Struct):
   SIZE = 8
-  handle: int
-  flags: int
+  handle: 'int'
+  flags: 'int'
 struct_drm_syncobj_create.register_fields([('handle', ctypes.c_uint32, 0), ('flags', ctypes.c_uint32, 4)])
 @c.record
 class struct_drm_syncobj_destroy(c.Struct):
   SIZE = 8
-  handle: int
-  pad: int
+  handle: 'int'
+  pad: 'int'
 struct_drm_syncobj_destroy.register_fields([('handle', ctypes.c_uint32, 0), ('pad', ctypes.c_uint32, 4)])
 @c.record
 class struct_drm_syncobj_handle(c.Struct):
   SIZE = 16
-  handle: int
-  flags: int
-  fd: int
-  pad: int
+  handle: 'int'
+  flags: 'int'
+  fd: 'int'
+  pad: 'int'
 struct_drm_syncobj_handle.register_fields([('handle', ctypes.c_uint32, 0), ('flags', ctypes.c_uint32, 4), ('fd', ctypes.c_int32, 8), ('pad', ctypes.c_uint32, 12)])
 @c.record
 class struct_drm_syncobj_transfer(c.Struct):
   SIZE = 32
-  src_handle: int
-  dst_handle: int
-  src_point: int
-  dst_point: int
-  flags: int
-  pad: int
+  src_handle: 'int'
+  dst_handle: 'int'
+  src_point: 'int'
+  dst_point: 'int'
+  flags: 'int'
+  pad: 'int'
 struct_drm_syncobj_transfer.register_fields([('src_handle', ctypes.c_uint32, 0), ('dst_handle', ctypes.c_uint32, 4), ('src_point', ctypes.c_uint64, 8), ('dst_point', ctypes.c_uint64, 16), ('flags', ctypes.c_uint32, 24), ('pad', ctypes.c_uint32, 28)])
 @c.record
 class struct_drm_syncobj_wait(c.Struct):
   SIZE = 40
-  handles: int
-  timeout_nsec: int
-  count_handles: int
-  flags: int
-  first_signaled: int
-  pad: int
-  deadline_nsec: int
+  handles: 'int'
+  timeout_nsec: 'int'
+  count_handles: 'int'
+  flags: 'int'
+  first_signaled: 'int'
+  pad: 'int'
+  deadline_nsec: 'int'
 __s64: TypeAlias = ctypes.c_int64
 struct_drm_syncobj_wait.register_fields([('handles', ctypes.c_uint64, 0), ('timeout_nsec', ctypes.c_int64, 8), ('count_handles', ctypes.c_uint32, 16), ('flags', ctypes.c_uint32, 20), ('first_signaled', ctypes.c_uint32, 24), ('pad', ctypes.c_uint32, 28), ('deadline_nsec', ctypes.c_uint64, 32)])
 @c.record
 class struct_drm_syncobj_timeline_wait(c.Struct):
   SIZE = 48
-  handles: int
-  points: int
-  timeout_nsec: int
-  count_handles: int
-  flags: int
-  first_signaled: int
-  pad: int
-  deadline_nsec: int
+  handles: 'int'
+  points: 'int'
+  timeout_nsec: 'int'
+  count_handles: 'int'
+  flags: 'int'
+  first_signaled: 'int'
+  pad: 'int'
+  deadline_nsec: 'int'
 struct_drm_syncobj_timeline_wait.register_fields([('handles', ctypes.c_uint64, 0), ('points', ctypes.c_uint64, 8), ('timeout_nsec', ctypes.c_int64, 16), ('count_handles', ctypes.c_uint32, 24), ('flags', ctypes.c_uint32, 28), ('first_signaled', ctypes.c_uint32, 32), ('pad', ctypes.c_uint32, 36), ('deadline_nsec', ctypes.c_uint64, 40)])
 @c.record
 class struct_drm_syncobj_eventfd(c.Struct):
   SIZE = 24
-  handle: int
-  flags: int
-  point: int
-  fd: int
-  pad: int
+  handle: 'int'
+  flags: 'int'
+  point: 'int'
+  fd: 'int'
+  pad: 'int'
 struct_drm_syncobj_eventfd.register_fields([('handle', ctypes.c_uint32, 0), ('flags', ctypes.c_uint32, 4), ('point', ctypes.c_uint64, 8), ('fd', ctypes.c_int32, 16), ('pad', ctypes.c_uint32, 20)])
 @c.record
 class struct_drm_syncobj_array(c.Struct):
   SIZE = 16
-  handles: int
-  count_handles: int
-  pad: int
+  handles: 'int'
+  count_handles: 'int'
+  pad: 'int'
 struct_drm_syncobj_array.register_fields([('handles', ctypes.c_uint64, 0), ('count_handles', ctypes.c_uint32, 8), ('pad', ctypes.c_uint32, 12)])
 @c.record
 class struct_drm_syncobj_timeline_array(c.Struct):
   SIZE = 24
-  handles: int
-  points: int
-  count_handles: int
-  flags: int
+  handles: 'int'
+  points: 'int'
+  count_handles: 'int'
+  flags: 'int'
 struct_drm_syncobj_timeline_array.register_fields([('handles', ctypes.c_uint64, 0), ('points', ctypes.c_uint64, 8), ('count_handles', ctypes.c_uint32, 16), ('flags', ctypes.c_uint32, 20)])
 @c.record
 class struct_drm_crtc_get_sequence(c.Struct):
   SIZE = 24
-  crtc_id: int
-  active: int
-  sequence: int
-  sequence_ns: int
+  crtc_id: 'int'
+  active: 'int'
+  sequence: 'int'
+  sequence_ns: 'int'
 struct_drm_crtc_get_sequence.register_fields([('crtc_id', ctypes.c_uint32, 0), ('active', ctypes.c_uint32, 4), ('sequence', ctypes.c_uint64, 8), ('sequence_ns', ctypes.c_int64, 16)])
 @c.record
 class struct_drm_crtc_queue_sequence(c.Struct):
   SIZE = 24
-  crtc_id: int
-  flags: int
-  sequence: int
-  user_data: int
+  crtc_id: 'int'
+  flags: 'int'
+  sequence: 'int'
+  user_data: 'int'
 struct_drm_crtc_queue_sequence.register_fields([('crtc_id', ctypes.c_uint32, 0), ('flags', ctypes.c_uint32, 4), ('sequence', ctypes.c_uint64, 8), ('user_data', ctypes.c_uint64, 16)])
 @c.record
 class struct_drm_event(c.Struct):
   SIZE = 8
-  type: int
-  length: int
+  type: 'int'
+  length: 'int'
 struct_drm_event.register_fields([('type', ctypes.c_uint32, 0), ('length', ctypes.c_uint32, 4)])
 @c.record
 class struct_drm_event_vblank(c.Struct):
   SIZE = 32
   base: 'struct_drm_event'
-  user_data: int
-  tv_sec: int
-  tv_usec: int
-  sequence: int
-  crtc_id: int
+  user_data: 'int'
+  tv_sec: 'int'
+  tv_usec: 'int'
+  sequence: 'int'
+  crtc_id: 'int'
 struct_drm_event_vblank.register_fields([('base', struct_drm_event, 0), ('user_data', ctypes.c_uint64, 8), ('tv_sec', ctypes.c_uint32, 16), ('tv_usec', ctypes.c_uint32, 20), ('sequence', ctypes.c_uint32, 24), ('crtc_id', ctypes.c_uint32, 28)])
 @c.record
 class struct_drm_event_crtc_sequence(c.Struct):
   SIZE = 32
   base: 'struct_drm_event'
-  user_data: int
-  time_ns: int
-  sequence: int
+  user_data: 'int'
+  time_ns: 'int'
+  sequence: 'int'
 struct_drm_event_crtc_sequence.register_fields([('base', struct_drm_event, 0), ('user_data', ctypes.c_uint64, 8), ('time_ns', ctypes.c_int64, 16), ('sequence', ctypes.c_uint64, 24)])
 drm_clip_rect_t: TypeAlias = struct_drm_clip_rect
 drm_drawable_info_t: TypeAlias = struct_drm_drawable_info
@@ -491,16 +491,16 @@ drm_set_version_t: TypeAlias = struct_drm_set_version
 @c.record
 class struct_drm_amdgpu_gem_create_in(c.Struct):
   SIZE = 32
-  bo_size: int
-  alignment: int
-  domains: int
-  domain_flags: int
+  bo_size: 'int'
+  alignment: 'int'
+  domains: 'int'
+  domain_flags: 'int'
 struct_drm_amdgpu_gem_create_in.register_fields([('bo_size', ctypes.c_uint64, 0), ('alignment', ctypes.c_uint64, 8), ('domains', ctypes.c_uint64, 16), ('domain_flags', ctypes.c_uint64, 24)])
 @c.record
 class struct_drm_amdgpu_gem_create_out(c.Struct):
   SIZE = 8
-  handle: int
-  _pad: int
+  handle: 'int'
+  _pad: 'int'
 struct_drm_amdgpu_gem_create_out.register_fields([('handle', ctypes.c_uint32, 0), ('_pad', ctypes.c_uint32, 4)])
 @c.record
 class union_drm_amdgpu_gem_create(c.Struct):
@@ -511,23 +511,23 @@ union_drm_amdgpu_gem_create.register_fields([('_in', struct_drm_amdgpu_gem_creat
 @c.record
 class struct_drm_amdgpu_bo_list_in(c.Struct):
   SIZE = 24
-  operation: int
-  list_handle: int
-  bo_number: int
-  bo_info_size: int
-  bo_info_ptr: int
+  operation: 'int'
+  list_handle: 'int'
+  bo_number: 'int'
+  bo_info_size: 'int'
+  bo_info_ptr: 'int'
 struct_drm_amdgpu_bo_list_in.register_fields([('operation', ctypes.c_uint32, 0), ('list_handle', ctypes.c_uint32, 4), ('bo_number', ctypes.c_uint32, 8), ('bo_info_size', ctypes.c_uint32, 12), ('bo_info_ptr', ctypes.c_uint64, 16)])
 @c.record
 class struct_drm_amdgpu_bo_list_entry(c.Struct):
   SIZE = 8
-  bo_handle: int
-  bo_priority: int
+  bo_handle: 'int'
+  bo_priority: 'int'
 struct_drm_amdgpu_bo_list_entry.register_fields([('bo_handle', ctypes.c_uint32, 0), ('bo_priority', ctypes.c_uint32, 4)])
 @c.record
 class struct_drm_amdgpu_bo_list_out(c.Struct):
   SIZE = 8
-  list_handle: int
-  _pad: int
+  list_handle: 'int'
+  _pad: 'int'
 struct_drm_amdgpu_bo_list_out.register_fields([('list_handle', ctypes.c_uint32, 0), ('_pad', ctypes.c_uint32, 4)])
 @c.record
 class union_drm_amdgpu_bo_list(c.Struct):
@@ -538,10 +538,10 @@ union_drm_amdgpu_bo_list.register_fields([('_in', struct_drm_amdgpu_bo_list_in, 
 @c.record
 class struct_drm_amdgpu_ctx_in(c.Struct):
   SIZE = 16
-  op: int
-  flags: int
-  ctx_id: int
-  priority: int
+  op: 'int'
+  flags: 'int'
+  ctx_id: 'int'
+  priority: 'int'
 struct_drm_amdgpu_ctx_in.register_fields([('op', ctypes.c_uint32, 0), ('flags', ctypes.c_uint32, 4), ('ctx_id', ctypes.c_uint32, 8), ('priority', ctypes.c_int32, 12)])
 @c.record
 class union_drm_amdgpu_ctx_out(c.Struct):
@@ -552,21 +552,21 @@ class union_drm_amdgpu_ctx_out(c.Struct):
 @c.record
 class union_drm_amdgpu_ctx_out_alloc(c.Struct):
   SIZE = 8
-  ctx_id: int
-  _pad: int
+  ctx_id: 'int'
+  _pad: 'int'
 union_drm_amdgpu_ctx_out_alloc.register_fields([('ctx_id', ctypes.c_uint32, 0), ('_pad', ctypes.c_uint32, 4)])
 @c.record
 class union_drm_amdgpu_ctx_out_state(c.Struct):
   SIZE = 16
-  flags: int
-  hangs: int
-  reset_status: int
+  flags: 'int'
+  hangs: 'int'
+  reset_status: 'int'
 union_drm_amdgpu_ctx_out_state.register_fields([('flags', ctypes.c_uint64, 0), ('hangs', ctypes.c_uint32, 8), ('reset_status', ctypes.c_uint32, 12)])
 @c.record
 class union_drm_amdgpu_ctx_out_pstate(c.Struct):
   SIZE = 8
-  flags: int
-  _pad: int
+  flags: 'int'
+  _pad: 'int'
 union_drm_amdgpu_ctx_out_pstate.register_fields([('flags', ctypes.c_uint32, 0), ('_pad', ctypes.c_uint32, 4)])
 union_drm_amdgpu_ctx_out.register_fields([('alloc', union_drm_amdgpu_ctx_out_alloc, 0), ('state', union_drm_amdgpu_ctx_out_state, 0), ('pstate', union_drm_amdgpu_ctx_out_pstate, 0)])
 @c.record
@@ -578,24 +578,24 @@ union_drm_amdgpu_ctx.register_fields([('_in', struct_drm_amdgpu_ctx_in, 0), ('ou
 @c.record
 class struct_drm_amdgpu_userq_in(c.Struct):
   SIZE = 72
-  op: int
-  queue_id: int
-  ip_type: int
-  doorbell_handle: int
-  doorbell_offset: int
-  flags: int
-  queue_va: int
-  queue_size: int
-  rptr_va: int
-  wptr_va: int
-  mqd: int
-  mqd_size: int
+  op: 'int'
+  queue_id: 'int'
+  ip_type: 'int'
+  doorbell_handle: 'int'
+  doorbell_offset: 'int'
+  flags: 'int'
+  queue_va: 'int'
+  queue_size: 'int'
+  rptr_va: 'int'
+  wptr_va: 'int'
+  mqd: 'int'
+  mqd_size: 'int'
 struct_drm_amdgpu_userq_in.register_fields([('op', ctypes.c_uint32, 0), ('queue_id', ctypes.c_uint32, 4), ('ip_type', ctypes.c_uint32, 8), ('doorbell_handle', ctypes.c_uint32, 12), ('doorbell_offset', ctypes.c_uint32, 16), ('flags', ctypes.c_uint32, 20), ('queue_va', ctypes.c_uint64, 24), ('queue_size', ctypes.c_uint64, 32), ('rptr_va', ctypes.c_uint64, 40), ('wptr_va', ctypes.c_uint64, 48), ('mqd', ctypes.c_uint64, 56), ('mqd_size', ctypes.c_uint64, 64)])
 @c.record
 class struct_drm_amdgpu_userq_out(c.Struct):
   SIZE = 8
-  queue_id: int
-  _pad: int
+  queue_id: 'int'
+  _pad: 'int'
 struct_drm_amdgpu_userq_out.register_fields([('queue_id', ctypes.c_uint32, 0), ('_pad', ctypes.c_uint32, 4)])
 @c.record
 class union_drm_amdgpu_userq(c.Struct):
@@ -606,53 +606,53 @@ union_drm_amdgpu_userq.register_fields([('_in', struct_drm_amdgpu_userq_in, 0), 
 @c.record
 class struct_drm_amdgpu_userq_mqd_gfx11(c.Struct):
   SIZE = 16
-  shadow_va: int
-  csa_va: int
+  shadow_va: 'int'
+  csa_va: 'int'
 struct_drm_amdgpu_userq_mqd_gfx11.register_fields([('shadow_va', ctypes.c_uint64, 0), ('csa_va', ctypes.c_uint64, 8)])
 @c.record
 class struct_drm_amdgpu_userq_mqd_sdma_gfx11(c.Struct):
   SIZE = 8
-  csa_va: int
+  csa_va: 'int'
 struct_drm_amdgpu_userq_mqd_sdma_gfx11.register_fields([('csa_va', ctypes.c_uint64, 0)])
 @c.record
 class struct_drm_amdgpu_userq_mqd_compute_gfx11(c.Struct):
   SIZE = 8
-  eop_va: int
+  eop_va: 'int'
 struct_drm_amdgpu_userq_mqd_compute_gfx11.register_fields([('eop_va', ctypes.c_uint64, 0)])
 @c.record
 class struct_drm_amdgpu_userq_signal(c.Struct):
   SIZE = 48
-  queue_id: int
-  pad: int
-  syncobj_handles: int
-  num_syncobj_handles: int
-  bo_read_handles: int
-  bo_write_handles: int
-  num_bo_read_handles: int
-  num_bo_write_handles: int
+  queue_id: 'int'
+  pad: 'int'
+  syncobj_handles: 'int'
+  num_syncobj_handles: 'int'
+  bo_read_handles: 'int'
+  bo_write_handles: 'int'
+  num_bo_read_handles: 'int'
+  num_bo_write_handles: 'int'
 struct_drm_amdgpu_userq_signal.register_fields([('queue_id', ctypes.c_uint32, 0), ('pad', ctypes.c_uint32, 4), ('syncobj_handles', ctypes.c_uint64, 8), ('num_syncobj_handles', ctypes.c_uint64, 16), ('bo_read_handles', ctypes.c_uint64, 24), ('bo_write_handles', ctypes.c_uint64, 32), ('num_bo_read_handles', ctypes.c_uint32, 40), ('num_bo_write_handles', ctypes.c_uint32, 44)])
 @c.record
 class struct_drm_amdgpu_userq_fence_info(c.Struct):
   SIZE = 16
-  va: int
-  value: int
+  va: 'int'
+  value: 'int'
 struct_drm_amdgpu_userq_fence_info.register_fields([('va', ctypes.c_uint64, 0), ('value', ctypes.c_uint64, 8)])
 @c.record
 class struct_drm_amdgpu_userq_wait(c.Struct):
   SIZE = 72
-  waitq_id: int
-  pad: int
-  syncobj_handles: int
-  syncobj_timeline_handles: int
-  syncobj_timeline_points: int
-  bo_read_handles: int
-  bo_write_handles: int
-  num_syncobj_timeline_handles: int
-  num_fences: int
-  num_syncobj_handles: int
-  num_bo_read_handles: int
-  num_bo_write_handles: int
-  out_fences: int
+  waitq_id: 'int'
+  pad: 'int'
+  syncobj_handles: 'int'
+  syncobj_timeline_handles: 'int'
+  syncobj_timeline_points: 'int'
+  bo_read_handles: 'int'
+  bo_write_handles: 'int'
+  num_syncobj_timeline_handles: 'int'
+  num_fences: 'int'
+  num_syncobj_handles: 'int'
+  num_bo_read_handles: 'int'
+  num_bo_write_handles: 'int'
+  out_fences: 'int'
 __u16: TypeAlias = ctypes.c_uint16
 struct_drm_amdgpu_userq_wait.register_fields([('waitq_id', ctypes.c_uint32, 0), ('pad', ctypes.c_uint32, 4), ('syncobj_handles', ctypes.c_uint64, 8), ('syncobj_timeline_handles', ctypes.c_uint64, 16), ('syncobj_timeline_points', ctypes.c_uint64, 24), ('bo_read_handles', ctypes.c_uint64, 32), ('bo_write_handles', ctypes.c_uint64, 40), ('num_syncobj_timeline_handles', ctypes.c_uint16, 48), ('num_fences', ctypes.c_uint16, 50), ('num_syncobj_handles', ctypes.c_uint32, 52), ('num_bo_read_handles', ctypes.c_uint32, 56), ('num_bo_write_handles', ctypes.c_uint32, 60), ('out_fences', ctypes.c_uint64, 64)])
 class struct_drm_amdgpu_sem_in(c.Struct): pass
@@ -661,13 +661,13 @@ class union_drm_amdgpu_sem(c.Struct): pass
 @c.record
 class struct_drm_amdgpu_vm_in(c.Struct):
   SIZE = 8
-  op: int
-  flags: int
+  op: 'int'
+  flags: 'int'
 struct_drm_amdgpu_vm_in.register_fields([('op', ctypes.c_uint32, 0), ('flags', ctypes.c_uint32, 4)])
 @c.record
 class struct_drm_amdgpu_vm_out(c.Struct):
   SIZE = 8
-  flags: int
+  flags: 'int'
 struct_drm_amdgpu_vm_out.register_fields([('flags', ctypes.c_uint64, 0)])
 @c.record
 class union_drm_amdgpu_vm(c.Struct):
@@ -678,10 +678,10 @@ union_drm_amdgpu_vm.register_fields([('_in', struct_drm_amdgpu_vm_in, 0), ('out'
 @c.record
 class struct_drm_amdgpu_sched_in(c.Struct):
   SIZE = 16
-  op: int
-  fd: int
-  priority: int
-  ctx_id: int
+  op: 'int'
+  fd: 'int'
+  priority: 'int'
+  ctx_id: 'int'
 struct_drm_amdgpu_sched_in.register_fields([('op', ctypes.c_uint32, 0), ('fd', ctypes.c_uint32, 4), ('priority', ctypes.c_int32, 8), ('ctx_id', ctypes.c_uint32, 12)])
 @c.record
 class union_drm_amdgpu_sched(c.Struct):
@@ -691,44 +691,44 @@ union_drm_amdgpu_sched.register_fields([('_in', struct_drm_amdgpu_sched_in, 0)])
 @c.record
 class struct_drm_amdgpu_gem_userptr(c.Struct):
   SIZE = 24
-  addr: int
-  size: int
-  flags: int
-  handle: int
+  addr: 'int'
+  size: 'int'
+  flags: 'int'
+  handle: 'int'
 struct_drm_amdgpu_gem_userptr.register_fields([('addr', ctypes.c_uint64, 0), ('size', ctypes.c_uint64, 8), ('flags', ctypes.c_uint32, 16), ('handle', ctypes.c_uint32, 20)])
 @c.record
 class struct_drm_amdgpu_gem_dgma(c.Struct):
   SIZE = 24
-  addr: int
-  size: int
-  op: int
-  handle: int
+  addr: 'int'
+  size: 'int'
+  op: 'int'
+  handle: 'int'
 struct_drm_amdgpu_gem_dgma.register_fields([('addr', ctypes.c_uint64, 0), ('size', ctypes.c_uint64, 8), ('op', ctypes.c_uint32, 16), ('handle', ctypes.c_uint32, 20)])
 @c.record
 class struct_drm_amdgpu_gem_metadata(c.Struct):
   SIZE = 288
-  handle: int
-  op: int
+  handle: 'int'
+  op: 'int'
   data: 'struct_drm_amdgpu_gem_metadata_data'
 @c.record
 class struct_drm_amdgpu_gem_metadata_data(c.Struct):
   SIZE = 280
-  flags: int
-  tiling_info: int
-  data_size_bytes: int
-  data: 'c.Array[ctypes.c_uint32, Literal[64]]'
-struct_drm_amdgpu_gem_metadata_data.register_fields([('flags', ctypes.c_uint64, 0), ('tiling_info', ctypes.c_uint64, 8), ('data_size_bytes', ctypes.c_uint32, 16), ('data', c.Array[ctypes.c_uint32, Literal[64]], 20)])
+  flags: 'int'
+  tiling_info: 'int'
+  data_size_bytes: 'int'
+  data: 'list[int]'
+struct_drm_amdgpu_gem_metadata_data.register_fields([('flags', ctypes.c_uint64, 0), ('tiling_info', ctypes.c_uint64, 8), ('data_size_bytes', ctypes.c_uint32, 16), ('data', (ctypes.c_uint32 * 64), 20)])
 struct_drm_amdgpu_gem_metadata.register_fields([('handle', ctypes.c_uint32, 0), ('op', ctypes.c_uint32, 4), ('data', struct_drm_amdgpu_gem_metadata_data, 8)])
 @c.record
 class struct_drm_amdgpu_gem_mmap_in(c.Struct):
   SIZE = 8
-  handle: int
-  _pad: int
+  handle: 'int'
+  _pad: 'int'
 struct_drm_amdgpu_gem_mmap_in.register_fields([('handle', ctypes.c_uint32, 0), ('_pad', ctypes.c_uint32, 4)])
 @c.record
 class struct_drm_amdgpu_gem_mmap_out(c.Struct):
   SIZE = 8
-  addr_ptr: int
+  addr_ptr: 'int'
 struct_drm_amdgpu_gem_mmap_out.register_fields([('addr_ptr', ctypes.c_uint64, 0)])
 @c.record
 class union_drm_amdgpu_gem_mmap(c.Struct):
@@ -739,15 +739,15 @@ union_drm_amdgpu_gem_mmap.register_fields([('_in', struct_drm_amdgpu_gem_mmap_in
 @c.record
 class struct_drm_amdgpu_gem_wait_idle_in(c.Struct):
   SIZE = 16
-  handle: int
-  flags: int
-  timeout: int
+  handle: 'int'
+  flags: 'int'
+  timeout: 'int'
 struct_drm_amdgpu_gem_wait_idle_in.register_fields([('handle', ctypes.c_uint32, 0), ('flags', ctypes.c_uint32, 4), ('timeout', ctypes.c_uint64, 8)])
 @c.record
 class struct_drm_amdgpu_gem_wait_idle_out(c.Struct):
   SIZE = 8
-  status: int
-  domain: int
+  status: 'int'
+  domain: 'int'
 struct_drm_amdgpu_gem_wait_idle_out.register_fields([('status', ctypes.c_uint32, 0), ('domain', ctypes.c_uint32, 4)])
 @c.record
 class union_drm_amdgpu_gem_wait_idle(c.Struct):
@@ -758,17 +758,17 @@ union_drm_amdgpu_gem_wait_idle.register_fields([('_in', struct_drm_amdgpu_gem_wa
 @c.record
 class struct_drm_amdgpu_wait_cs_in(c.Struct):
   SIZE = 32
-  handle: int
-  timeout: int
-  ip_type: int
-  ip_instance: int
-  ring: int
-  ctx_id: int
+  handle: 'int'
+  timeout: 'int'
+  ip_type: 'int'
+  ip_instance: 'int'
+  ring: 'int'
+  ctx_id: 'int'
 struct_drm_amdgpu_wait_cs_in.register_fields([('handle', ctypes.c_uint64, 0), ('timeout', ctypes.c_uint64, 8), ('ip_type', ctypes.c_uint32, 16), ('ip_instance', ctypes.c_uint32, 20), ('ring', ctypes.c_uint32, 24), ('ctx_id', ctypes.c_uint32, 28)])
 @c.record
 class struct_drm_amdgpu_wait_cs_out(c.Struct):
   SIZE = 8
-  status: int
+  status: 'int'
 struct_drm_amdgpu_wait_cs_out.register_fields([('status', ctypes.c_uint64, 0)])
 @c.record
 class union_drm_amdgpu_wait_cs(c.Struct):
@@ -779,25 +779,25 @@ union_drm_amdgpu_wait_cs.register_fields([('_in', struct_drm_amdgpu_wait_cs_in, 
 @c.record
 class struct_drm_amdgpu_fence(c.Struct):
   SIZE = 24
-  ctx_id: int
-  ip_type: int
-  ip_instance: int
-  ring: int
-  seq_no: int
+  ctx_id: 'int'
+  ip_type: 'int'
+  ip_instance: 'int'
+  ring: 'int'
+  seq_no: 'int'
 struct_drm_amdgpu_fence.register_fields([('ctx_id', ctypes.c_uint32, 0), ('ip_type', ctypes.c_uint32, 4), ('ip_instance', ctypes.c_uint32, 8), ('ring', ctypes.c_uint32, 12), ('seq_no', ctypes.c_uint64, 16)])
 @c.record
 class struct_drm_amdgpu_wait_fences_in(c.Struct):
   SIZE = 24
-  fences: int
-  fence_count: int
-  wait_all: int
-  timeout_ns: int
+  fences: 'int'
+  fence_count: 'int'
+  wait_all: 'int'
+  timeout_ns: 'int'
 struct_drm_amdgpu_wait_fences_in.register_fields([('fences', ctypes.c_uint64, 0), ('fence_count', ctypes.c_uint32, 8), ('wait_all', ctypes.c_uint32, 12), ('timeout_ns', ctypes.c_uint64, 16)])
 @c.record
 class struct_drm_amdgpu_wait_fences_out(c.Struct):
   SIZE = 8
-  status: int
-  first_signaled: int
+  status: 'int'
+  first_signaled: 'int'
 struct_drm_amdgpu_wait_fences_out.register_fields([('status', ctypes.c_uint32, 0), ('first_signaled', ctypes.c_uint32, 4)])
 @c.record
 class union_drm_amdgpu_wait_fences(c.Struct):
@@ -808,45 +808,45 @@ union_drm_amdgpu_wait_fences.register_fields([('_in', struct_drm_amdgpu_wait_fen
 @c.record
 class struct_drm_amdgpu_gem_op(c.Struct):
   SIZE = 16
-  handle: int
-  op: int
-  value: int
+  handle: 'int'
+  op: 'int'
+  value: 'int'
 struct_drm_amdgpu_gem_op.register_fields([('handle', ctypes.c_uint32, 0), ('op', ctypes.c_uint32, 4), ('value', ctypes.c_uint64, 8)])
 @c.record
 class struct_drm_amdgpu_gem_va(c.Struct):
   SIZE = 64
-  handle: int
-  _pad: int
-  operation: int
-  flags: int
-  va_address: int
-  offset_in_bo: int
-  map_size: int
-  vm_timeline_point: int
-  vm_timeline_syncobj_out: int
-  num_syncobj_handles: int
-  input_fence_syncobj_handles: int
+  handle: 'int'
+  _pad: 'int'
+  operation: 'int'
+  flags: 'int'
+  va_address: 'int'
+  offset_in_bo: 'int'
+  map_size: 'int'
+  vm_timeline_point: 'int'
+  vm_timeline_syncobj_out: 'int'
+  num_syncobj_handles: 'int'
+  input_fence_syncobj_handles: 'int'
 struct_drm_amdgpu_gem_va.register_fields([('handle', ctypes.c_uint32, 0), ('_pad', ctypes.c_uint32, 4), ('operation', ctypes.c_uint32, 8), ('flags', ctypes.c_uint32, 12), ('va_address', ctypes.c_uint64, 16), ('offset_in_bo', ctypes.c_uint64, 24), ('map_size', ctypes.c_uint64, 32), ('vm_timeline_point', ctypes.c_uint64, 40), ('vm_timeline_syncobj_out', ctypes.c_uint32, 48), ('num_syncobj_handles', ctypes.c_uint32, 52), ('input_fence_syncobj_handles', ctypes.c_uint64, 56)])
 @c.record
 class struct_drm_amdgpu_cs_chunk(c.Struct):
   SIZE = 16
-  chunk_id: int
-  length_dw: int
-  chunk_data: int
+  chunk_id: 'int'
+  length_dw: 'int'
+  chunk_data: 'int'
 struct_drm_amdgpu_cs_chunk.register_fields([('chunk_id', ctypes.c_uint32, 0), ('length_dw', ctypes.c_uint32, 4), ('chunk_data', ctypes.c_uint64, 8)])
 @c.record
 class struct_drm_amdgpu_cs_in(c.Struct):
   SIZE = 24
-  ctx_id: int
-  bo_list_handle: int
-  num_chunks: int
-  flags: int
-  chunks: int
+  ctx_id: 'int'
+  bo_list_handle: 'int'
+  num_chunks: 'int'
+  flags: 'int'
+  chunks: 'int'
 struct_drm_amdgpu_cs_in.register_fields([('ctx_id', ctypes.c_uint32, 0), ('bo_list_handle', ctypes.c_uint32, 4), ('num_chunks', ctypes.c_uint32, 8), ('flags', ctypes.c_uint32, 12), ('chunks', ctypes.c_uint64, 16)])
 @c.record
 class struct_drm_amdgpu_cs_out(c.Struct):
   SIZE = 8
-  handle: int
+  handle: 'int'
 struct_drm_amdgpu_cs_out.register_fields([('handle', ctypes.c_uint64, 0)])
 @c.record
 class union_drm_amdgpu_cs(c.Struct):
@@ -857,40 +857,40 @@ union_drm_amdgpu_cs.register_fields([('_in', struct_drm_amdgpu_cs_in, 0), ('out'
 @c.record
 class struct_drm_amdgpu_cs_chunk_ib(c.Struct):
   SIZE = 32
-  _pad: int
-  flags: int
-  va_start: int
-  ib_bytes: int
-  ip_type: int
-  ip_instance: int
-  ring: int
+  _pad: 'int'
+  flags: 'int'
+  va_start: 'int'
+  ib_bytes: 'int'
+  ip_type: 'int'
+  ip_instance: 'int'
+  ring: 'int'
 struct_drm_amdgpu_cs_chunk_ib.register_fields([('_pad', ctypes.c_uint32, 0), ('flags', ctypes.c_uint32, 4), ('va_start', ctypes.c_uint64, 8), ('ib_bytes', ctypes.c_uint32, 16), ('ip_type', ctypes.c_uint32, 20), ('ip_instance', ctypes.c_uint32, 24), ('ring', ctypes.c_uint32, 28)])
 @c.record
 class struct_drm_amdgpu_cs_chunk_dep(c.Struct):
   SIZE = 24
-  ip_type: int
-  ip_instance: int
-  ring: int
-  ctx_id: int
-  handle: int
+  ip_type: 'int'
+  ip_instance: 'int'
+  ring: 'int'
+  ctx_id: 'int'
+  handle: 'int'
 struct_drm_amdgpu_cs_chunk_dep.register_fields([('ip_type', ctypes.c_uint32, 0), ('ip_instance', ctypes.c_uint32, 4), ('ring', ctypes.c_uint32, 8), ('ctx_id', ctypes.c_uint32, 12), ('handle', ctypes.c_uint64, 16)])
 @c.record
 class struct_drm_amdgpu_cs_chunk_fence(c.Struct):
   SIZE = 8
-  handle: int
-  offset: int
+  handle: 'int'
+  offset: 'int'
 struct_drm_amdgpu_cs_chunk_fence.register_fields([('handle', ctypes.c_uint32, 0), ('offset', ctypes.c_uint32, 4)])
 @c.record
 class struct_drm_amdgpu_cs_chunk_sem(c.Struct):
   SIZE = 4
-  handle: int
+  handle: 'int'
 struct_drm_amdgpu_cs_chunk_sem.register_fields([('handle', ctypes.c_uint32, 0)])
 @c.record
 class struct_drm_amdgpu_cs_chunk_syncobj(c.Struct):
   SIZE = 16
-  handle: int
-  flags: int
-  point: int
+  handle: 'int'
+  flags: 'int'
+  point: 'int'
 struct_drm_amdgpu_cs_chunk_syncobj.register_fields([('handle', ctypes.c_uint32, 0), ('flags', ctypes.c_uint32, 4), ('point', ctypes.c_uint64, 8)])
 @c.record
 class union_drm_amdgpu_fence_to_handle(c.Struct):
@@ -901,13 +901,13 @@ class union_drm_amdgpu_fence_to_handle(c.Struct):
 class union_drm_amdgpu_fence_to_handle_in(c.Struct):
   SIZE = 32
   fence: 'struct_drm_amdgpu_fence'
-  what: int
-  pad: int
+  what: 'int'
+  pad: 'int'
 union_drm_amdgpu_fence_to_handle_in.register_fields([('fence', struct_drm_amdgpu_fence, 0), ('what', ctypes.c_uint32, 24), ('pad', ctypes.c_uint32, 28)])
 @c.record
 class union_drm_amdgpu_fence_to_handle_out(c.Struct):
   SIZE = 4
-  handle: int
+  handle: 'int'
 union_drm_amdgpu_fence_to_handle_out.register_fields([('handle', ctypes.c_uint32, 0)])
 union_drm_amdgpu_fence_to_handle.register_fields([('_in', union_drm_amdgpu_fence_to_handle_in, 0), ('out', union_drm_amdgpu_fence_to_handle_out, 0)])
 @c.record
@@ -919,52 +919,52 @@ struct_drm_amdgpu_cs_chunk_data.register_fields([('ib_data', struct_drm_amdgpu_c
 @c.record
 class struct_drm_amdgpu_cs_chunk_cp_gfx_shadow(c.Struct):
   SIZE = 32
-  shadow_va: int
-  csa_va: int
-  gds_va: int
-  flags: int
+  shadow_va: 'int'
+  csa_va: 'int'
+  gds_va: 'int'
+  flags: 'int'
 struct_drm_amdgpu_cs_chunk_cp_gfx_shadow.register_fields([('shadow_va', ctypes.c_uint64, 0), ('csa_va', ctypes.c_uint64, 8), ('gds_va', ctypes.c_uint64, 16), ('flags', ctypes.c_uint64, 24)])
 @c.record
 class struct_drm_amdgpu_query_fw(c.Struct):
   SIZE = 16
-  fw_type: int
-  ip_instance: int
-  index: int
-  _pad: int
+  fw_type: 'int'
+  ip_instance: 'int'
+  index: 'int'
+  _pad: 'int'
 struct_drm_amdgpu_query_fw.register_fields([('fw_type', ctypes.c_uint32, 0), ('ip_instance', ctypes.c_uint32, 4), ('index', ctypes.c_uint32, 8), ('_pad', ctypes.c_uint32, 12)])
 @c.record
 class struct_drm_amdgpu_info(c.Struct):
   SIZE = 16
-  return_pointer: int
-  return_size: int
-  query: int
+  return_pointer: 'int'
+  return_size: 'int'
+  query: 'int'
 struct_drm_amdgpu_info.register_fields([('return_pointer', ctypes.c_uint64, 0), ('return_size', ctypes.c_uint32, 8), ('query', ctypes.c_uint32, 12)])
 @c.record
 class struct_drm_amdgpu_info_gds(c.Struct):
   SIZE = 32
-  gds_gfx_partition_size: int
-  compute_partition_size: int
-  gds_total_size: int
-  gws_per_gfx_partition: int
-  gws_per_compute_partition: int
-  oa_per_gfx_partition: int
-  oa_per_compute_partition: int
-  _pad: int
+  gds_gfx_partition_size: 'int'
+  compute_partition_size: 'int'
+  gds_total_size: 'int'
+  gws_per_gfx_partition: 'int'
+  gws_per_compute_partition: 'int'
+  oa_per_gfx_partition: 'int'
+  oa_per_compute_partition: 'int'
+  _pad: 'int'
 struct_drm_amdgpu_info_gds.register_fields([('gds_gfx_partition_size', ctypes.c_uint32, 0), ('compute_partition_size', ctypes.c_uint32, 4), ('gds_total_size', ctypes.c_uint32, 8), ('gws_per_gfx_partition', ctypes.c_uint32, 12), ('gws_per_compute_partition', ctypes.c_uint32, 16), ('oa_per_gfx_partition', ctypes.c_uint32, 20), ('oa_per_compute_partition', ctypes.c_uint32, 24), ('_pad', ctypes.c_uint32, 28)])
 @c.record
 class struct_drm_amdgpu_info_vram_gtt(c.Struct):
   SIZE = 24
-  vram_size: int
-  vram_cpu_accessible_size: int
-  gtt_size: int
+  vram_size: 'int'
+  vram_cpu_accessible_size: 'int'
+  gtt_size: 'int'
 struct_drm_amdgpu_info_vram_gtt.register_fields([('vram_size', ctypes.c_uint64, 0), ('vram_cpu_accessible_size', ctypes.c_uint64, 8), ('gtt_size', ctypes.c_uint64, 16)])
 @c.record
 class struct_drm_amdgpu_heap_info(c.Struct):
   SIZE = 32
-  total_heap_size: int
-  usable_heap_size: int
-  heap_usage: int
-  max_allocation: int
+  total_heap_size: 'int'
+  usable_heap_size: 'int'
+  heap_usage: 'int'
+  max_allocation: 'int'
 struct_drm_amdgpu_heap_info.register_fields([('total_heap_size', ctypes.c_uint64, 0), ('usable_heap_size', ctypes.c_uint64, 8), ('heap_usage', ctypes.c_uint64, 16), ('max_allocation', ctypes.c_uint64, 24)])
 @c.record
 class struct_drm_amdgpu_memory_info(c.Struct):
@@ -976,107 +976,107 @@ struct_drm_amdgpu_memory_info.register_fields([('vram', struct_drm_amdgpu_heap_i
 @c.record
 class struct_drm_amdgpu_info_firmware(c.Struct):
   SIZE = 8
-  ver: int
-  feature: int
+  ver: 'int'
+  feature: 'int'
 struct_drm_amdgpu_info_firmware.register_fields([('ver', ctypes.c_uint32, 0), ('feature', ctypes.c_uint32, 4)])
 @c.record
 class struct_drm_amdgpu_info_vbios(c.Struct):
   SIZE = 200
-  name: 'c.Array[ctypes.c_ubyte, Literal[64]]'
-  vbios_pn: 'c.Array[ctypes.c_ubyte, Literal[64]]'
-  version: int
-  pad: int
-  vbios_ver_str: 'c.Array[ctypes.c_ubyte, Literal[32]]'
-  date: 'c.Array[ctypes.c_ubyte, Literal[32]]'
+  name: 'list[int]'
+  vbios_pn: 'list[int]'
+  version: 'int'
+  pad: 'int'
+  vbios_ver_str: 'list[int]'
+  date: 'list[int]'
 __u8: TypeAlias = ctypes.c_ubyte
-struct_drm_amdgpu_info_vbios.register_fields([('name', c.Array[ctypes.c_ubyte, Literal[64]], 0), ('vbios_pn', c.Array[ctypes.c_ubyte, Literal[64]], 64), ('version', ctypes.c_uint32, 128), ('pad', ctypes.c_uint32, 132), ('vbios_ver_str', c.Array[ctypes.c_ubyte, Literal[32]], 136), ('date', c.Array[ctypes.c_ubyte, Literal[32]], 168)])
+struct_drm_amdgpu_info_vbios.register_fields([('name', (ctypes.c_ubyte * 64), 0), ('vbios_pn', (ctypes.c_ubyte * 64), 64), ('version', ctypes.c_uint32, 128), ('pad', ctypes.c_uint32, 132), ('vbios_ver_str', (ctypes.c_ubyte * 32), 136), ('date', (ctypes.c_ubyte * 32), 168)])
 @c.record
 class struct_drm_amdgpu_info_device(c.Struct):
   SIZE = 448
-  device_id: int
-  chip_rev: int
-  external_rev: int
-  pci_rev: int
-  family: int
-  num_shader_engines: int
-  num_shader_arrays_per_engine: int
-  gpu_counter_freq: int
-  max_engine_clock: int
-  max_memory_clock: int
-  cu_active_number: int
-  cu_ao_mask: int
-  cu_bitmap: 'c.Array[c.Array[ctypes.c_uint32, Literal[4]], Literal[4]]'
-  enabled_rb_pipes_mask: int
-  num_rb_pipes: int
-  num_hw_gfx_contexts: int
-  pcie_gen: int
-  ids_flags: int
-  virtual_address_offset: int
-  virtual_address_max: int
-  virtual_address_alignment: int
-  pte_fragment_size: int
-  gart_page_size: int
-  ce_ram_size: int
-  vram_type: int
-  vram_bit_width: int
-  vce_harvest_config: int
-  gc_double_offchip_lds_buf: int
-  prim_buf_gpu_addr: int
-  pos_buf_gpu_addr: int
-  cntl_sb_buf_gpu_addr: int
-  param_buf_gpu_addr: int
-  prim_buf_size: int
-  pos_buf_size: int
-  cntl_sb_buf_size: int
-  param_buf_size: int
-  wave_front_size: int
-  num_shader_visible_vgprs: int
-  num_cu_per_sh: int
-  num_tcc_blocks: int
-  gs_vgt_table_depth: int
-  gs_prim_buffer_depth: int
-  max_gs_waves_per_vgt: int
-  pcie_num_lanes: int
-  cu_ao_bitmap: 'c.Array[c.Array[ctypes.c_uint32, Literal[4]], Literal[4]]'
-  high_va_offset: int
-  high_va_max: int
-  pa_sc_tile_steering_override: int
-  tcc_disabled_mask: int
-  min_engine_clock: int
-  min_memory_clock: int
-  tcp_cache_size: int
-  num_sqc_per_wgp: int
-  sqc_data_cache_size: int
-  sqc_inst_cache_size: int
-  gl1c_cache_size: int
-  gl2c_cache_size: int
-  mall_size: int
-  enabled_rb_pipes_mask_hi: int
-  shadow_size: int
-  shadow_alignment: int
-  csa_size: int
-  csa_alignment: int
-  userq_ip_mask: int
-  pad: int
-struct_drm_amdgpu_info_device.register_fields([('device_id', ctypes.c_uint32, 0), ('chip_rev', ctypes.c_uint32, 4), ('external_rev', ctypes.c_uint32, 8), ('pci_rev', ctypes.c_uint32, 12), ('family', ctypes.c_uint32, 16), ('num_shader_engines', ctypes.c_uint32, 20), ('num_shader_arrays_per_engine', ctypes.c_uint32, 24), ('gpu_counter_freq', ctypes.c_uint32, 28), ('max_engine_clock', ctypes.c_uint64, 32), ('max_memory_clock', ctypes.c_uint64, 40), ('cu_active_number', ctypes.c_uint32, 48), ('cu_ao_mask', ctypes.c_uint32, 52), ('cu_bitmap', c.Array[c.Array[ctypes.c_uint32, Literal[4]], Literal[4]], 56), ('enabled_rb_pipes_mask', ctypes.c_uint32, 120), ('num_rb_pipes', ctypes.c_uint32, 124), ('num_hw_gfx_contexts', ctypes.c_uint32, 128), ('pcie_gen', ctypes.c_uint32, 132), ('ids_flags', ctypes.c_uint64, 136), ('virtual_address_offset', ctypes.c_uint64, 144), ('virtual_address_max', ctypes.c_uint64, 152), ('virtual_address_alignment', ctypes.c_uint32, 160), ('pte_fragment_size', ctypes.c_uint32, 164), ('gart_page_size', ctypes.c_uint32, 168), ('ce_ram_size', ctypes.c_uint32, 172), ('vram_type', ctypes.c_uint32, 176), ('vram_bit_width', ctypes.c_uint32, 180), ('vce_harvest_config', ctypes.c_uint32, 184), ('gc_double_offchip_lds_buf', ctypes.c_uint32, 188), ('prim_buf_gpu_addr', ctypes.c_uint64, 192), ('pos_buf_gpu_addr', ctypes.c_uint64, 200), ('cntl_sb_buf_gpu_addr', ctypes.c_uint64, 208), ('param_buf_gpu_addr', ctypes.c_uint64, 216), ('prim_buf_size', ctypes.c_uint32, 224), ('pos_buf_size', ctypes.c_uint32, 228), ('cntl_sb_buf_size', ctypes.c_uint32, 232), ('param_buf_size', ctypes.c_uint32, 236), ('wave_front_size', ctypes.c_uint32, 240), ('num_shader_visible_vgprs', ctypes.c_uint32, 244), ('num_cu_per_sh', ctypes.c_uint32, 248), ('num_tcc_blocks', ctypes.c_uint32, 252), ('gs_vgt_table_depth', ctypes.c_uint32, 256), ('gs_prim_buffer_depth', ctypes.c_uint32, 260), ('max_gs_waves_per_vgt', ctypes.c_uint32, 264), ('pcie_num_lanes', ctypes.c_uint32, 268), ('cu_ao_bitmap', c.Array[c.Array[ctypes.c_uint32, Literal[4]], Literal[4]], 272), ('high_va_offset', ctypes.c_uint64, 336), ('high_va_max', ctypes.c_uint64, 344), ('pa_sc_tile_steering_override', ctypes.c_uint32, 352), ('tcc_disabled_mask', ctypes.c_uint64, 360), ('min_engine_clock', ctypes.c_uint64, 368), ('min_memory_clock', ctypes.c_uint64, 376), ('tcp_cache_size', ctypes.c_uint32, 384), ('num_sqc_per_wgp', ctypes.c_uint32, 388), ('sqc_data_cache_size', ctypes.c_uint32, 392), ('sqc_inst_cache_size', ctypes.c_uint32, 396), ('gl1c_cache_size', ctypes.c_uint32, 400), ('gl2c_cache_size', ctypes.c_uint32, 404), ('mall_size', ctypes.c_uint64, 408), ('enabled_rb_pipes_mask_hi', ctypes.c_uint32, 416), ('shadow_size', ctypes.c_uint32, 420), ('shadow_alignment', ctypes.c_uint32, 424), ('csa_size', ctypes.c_uint32, 428), ('csa_alignment', ctypes.c_uint32, 432), ('userq_ip_mask', ctypes.c_uint32, 436), ('pad', ctypes.c_uint32, 440)])
+  device_id: 'int'
+  chip_rev: 'int'
+  external_rev: 'int'
+  pci_rev: 'int'
+  family: 'int'
+  num_shader_engines: 'int'
+  num_shader_arrays_per_engine: 'int'
+  gpu_counter_freq: 'int'
+  max_engine_clock: 'int'
+  max_memory_clock: 'int'
+  cu_active_number: 'int'
+  cu_ao_mask: 'int'
+  cu_bitmap: 'list[list[int]]'
+  enabled_rb_pipes_mask: 'int'
+  num_rb_pipes: 'int'
+  num_hw_gfx_contexts: 'int'
+  pcie_gen: 'int'
+  ids_flags: 'int'
+  virtual_address_offset: 'int'
+  virtual_address_max: 'int'
+  virtual_address_alignment: 'int'
+  pte_fragment_size: 'int'
+  gart_page_size: 'int'
+  ce_ram_size: 'int'
+  vram_type: 'int'
+  vram_bit_width: 'int'
+  vce_harvest_config: 'int'
+  gc_double_offchip_lds_buf: 'int'
+  prim_buf_gpu_addr: 'int'
+  pos_buf_gpu_addr: 'int'
+  cntl_sb_buf_gpu_addr: 'int'
+  param_buf_gpu_addr: 'int'
+  prim_buf_size: 'int'
+  pos_buf_size: 'int'
+  cntl_sb_buf_size: 'int'
+  param_buf_size: 'int'
+  wave_front_size: 'int'
+  num_shader_visible_vgprs: 'int'
+  num_cu_per_sh: 'int'
+  num_tcc_blocks: 'int'
+  gs_vgt_table_depth: 'int'
+  gs_prim_buffer_depth: 'int'
+  max_gs_waves_per_vgt: 'int'
+  pcie_num_lanes: 'int'
+  cu_ao_bitmap: 'list[list[int]]'
+  high_va_offset: 'int'
+  high_va_max: 'int'
+  pa_sc_tile_steering_override: 'int'
+  tcc_disabled_mask: 'int'
+  min_engine_clock: 'int'
+  min_memory_clock: 'int'
+  tcp_cache_size: 'int'
+  num_sqc_per_wgp: 'int'
+  sqc_data_cache_size: 'int'
+  sqc_inst_cache_size: 'int'
+  gl1c_cache_size: 'int'
+  gl2c_cache_size: 'int'
+  mall_size: 'int'
+  enabled_rb_pipes_mask_hi: 'int'
+  shadow_size: 'int'
+  shadow_alignment: 'int'
+  csa_size: 'int'
+  csa_alignment: 'int'
+  userq_ip_mask: 'int'
+  pad: 'int'
+struct_drm_amdgpu_info_device.register_fields([('device_id', ctypes.c_uint32, 0), ('chip_rev', ctypes.c_uint32, 4), ('external_rev', ctypes.c_uint32, 8), ('pci_rev', ctypes.c_uint32, 12), ('family', ctypes.c_uint32, 16), ('num_shader_engines', ctypes.c_uint32, 20), ('num_shader_arrays_per_engine', ctypes.c_uint32, 24), ('gpu_counter_freq', ctypes.c_uint32, 28), ('max_engine_clock', ctypes.c_uint64, 32), ('max_memory_clock', ctypes.c_uint64, 40), ('cu_active_number', ctypes.c_uint32, 48), ('cu_ao_mask', ctypes.c_uint32, 52), ('cu_bitmap', ((ctypes.c_uint32 * 4) * 4), 56), ('enabled_rb_pipes_mask', ctypes.c_uint32, 120), ('num_rb_pipes', ctypes.c_uint32, 124), ('num_hw_gfx_contexts', ctypes.c_uint32, 128), ('pcie_gen', ctypes.c_uint32, 132), ('ids_flags', ctypes.c_uint64, 136), ('virtual_address_offset', ctypes.c_uint64, 144), ('virtual_address_max', ctypes.c_uint64, 152), ('virtual_address_alignment', ctypes.c_uint32, 160), ('pte_fragment_size', ctypes.c_uint32, 164), ('gart_page_size', ctypes.c_uint32, 168), ('ce_ram_size', ctypes.c_uint32, 172), ('vram_type', ctypes.c_uint32, 176), ('vram_bit_width', ctypes.c_uint32, 180), ('vce_harvest_config', ctypes.c_uint32, 184), ('gc_double_offchip_lds_buf', ctypes.c_uint32, 188), ('prim_buf_gpu_addr', ctypes.c_uint64, 192), ('pos_buf_gpu_addr', ctypes.c_uint64, 200), ('cntl_sb_buf_gpu_addr', ctypes.c_uint64, 208), ('param_buf_gpu_addr', ctypes.c_uint64, 216), ('prim_buf_size', ctypes.c_uint32, 224), ('pos_buf_size', ctypes.c_uint32, 228), ('cntl_sb_buf_size', ctypes.c_uint32, 232), ('param_buf_size', ctypes.c_uint32, 236), ('wave_front_size', ctypes.c_uint32, 240), ('num_shader_visible_vgprs', ctypes.c_uint32, 244), ('num_cu_per_sh', ctypes.c_uint32, 248), ('num_tcc_blocks', ctypes.c_uint32, 252), ('gs_vgt_table_depth', ctypes.c_uint32, 256), ('gs_prim_buffer_depth', ctypes.c_uint32, 260), ('max_gs_waves_per_vgt', ctypes.c_uint32, 264), ('pcie_num_lanes', ctypes.c_uint32, 268), ('cu_ao_bitmap', ((ctypes.c_uint32 * 4) * 4), 272), ('high_va_offset', ctypes.c_uint64, 336), ('high_va_max', ctypes.c_uint64, 344), ('pa_sc_tile_steering_override', ctypes.c_uint32, 352), ('tcc_disabled_mask', ctypes.c_uint64, 360), ('min_engine_clock', ctypes.c_uint64, 368), ('min_memory_clock', ctypes.c_uint64, 376), ('tcp_cache_size', ctypes.c_uint32, 384), ('num_sqc_per_wgp', ctypes.c_uint32, 388), ('sqc_data_cache_size', ctypes.c_uint32, 392), ('sqc_inst_cache_size', ctypes.c_uint32, 396), ('gl1c_cache_size', ctypes.c_uint32, 400), ('gl2c_cache_size', ctypes.c_uint32, 404), ('mall_size', ctypes.c_uint64, 408), ('enabled_rb_pipes_mask_hi', ctypes.c_uint32, 416), ('shadow_size', ctypes.c_uint32, 420), ('shadow_alignment', ctypes.c_uint32, 424), ('csa_size', ctypes.c_uint32, 428), ('csa_alignment', ctypes.c_uint32, 432), ('userq_ip_mask', ctypes.c_uint32, 436), ('pad', ctypes.c_uint32, 440)])
 @c.record
 class struct_drm_amdgpu_info_hw_ip(c.Struct):
   SIZE = 32
-  hw_ip_version_major: int
-  hw_ip_version_minor: int
-  capabilities_flags: int
-  ib_start_alignment: int
-  ib_size_alignment: int
-  available_rings: int
-  ip_discovery_version: int
+  hw_ip_version_major: 'int'
+  hw_ip_version_minor: 'int'
+  capabilities_flags: 'int'
+  ib_start_alignment: 'int'
+  ib_size_alignment: 'int'
+  available_rings: 'int'
+  ip_discovery_version: 'int'
 struct_drm_amdgpu_info_hw_ip.register_fields([('hw_ip_version_major', ctypes.c_uint32, 0), ('hw_ip_version_minor', ctypes.c_uint32, 4), ('capabilities_flags', ctypes.c_uint64, 8), ('ib_start_alignment', ctypes.c_uint32, 16), ('ib_size_alignment', ctypes.c_uint32, 20), ('available_rings', ctypes.c_uint32, 24), ('ip_discovery_version', ctypes.c_uint32, 28)])
 @c.record
 class struct_drm_amdgpu_info_uq_fw_areas_gfx(c.Struct):
   SIZE = 16
-  shadow_size: int
-  shadow_alignment: int
-  csa_size: int
-  csa_alignment: int
+  shadow_size: 'int'
+  shadow_alignment: 'int'
+  csa_size: 'int'
+  csa_alignment: 'int'
 struct_drm_amdgpu_info_uq_fw_areas_gfx.register_fields([('shadow_size', ctypes.c_uint32, 0), ('shadow_alignment', ctypes.c_uint32, 4), ('csa_size', ctypes.c_uint32, 8), ('csa_alignment', ctypes.c_uint32, 12)])
 @c.record
 class struct_drm_amdgpu_info_uq_fw_areas(c.Struct):
@@ -1086,53 +1086,53 @@ struct_drm_amdgpu_info_uq_fw_areas.register_fields([('gfx', struct_drm_amdgpu_in
 @c.record
 class struct_drm_amdgpu_info_num_handles(c.Struct):
   SIZE = 8
-  uvd_max_handles: int
-  uvd_used_handles: int
+  uvd_max_handles: 'int'
+  uvd_used_handles: 'int'
 struct_drm_amdgpu_info_num_handles.register_fields([('uvd_max_handles', ctypes.c_uint32, 0), ('uvd_used_handles', ctypes.c_uint32, 4)])
 @c.record
 class struct_drm_amdgpu_info_vce_clock_table_entry(c.Struct):
   SIZE = 16
-  sclk: int
-  mclk: int
-  eclk: int
-  pad: int
+  sclk: 'int'
+  mclk: 'int'
+  eclk: 'int'
+  pad: 'int'
 struct_drm_amdgpu_info_vce_clock_table_entry.register_fields([('sclk', ctypes.c_uint32, 0), ('mclk', ctypes.c_uint32, 4), ('eclk', ctypes.c_uint32, 8), ('pad', ctypes.c_uint32, 12)])
 @c.record
 class struct_drm_amdgpu_info_vce_clock_table(c.Struct):
   SIZE = 104
-  entries: 'c.Array[struct_drm_amdgpu_info_vce_clock_table_entry, Literal[6]]'
-  num_valid_entries: int
-  pad: int
-struct_drm_amdgpu_info_vce_clock_table.register_fields([('entries', c.Array[struct_drm_amdgpu_info_vce_clock_table_entry, Literal[6]], 0), ('num_valid_entries', ctypes.c_uint32, 96), ('pad', ctypes.c_uint32, 100)])
+  entries: 'list[struct_drm_amdgpu_info_vce_clock_table_entry]'
+  num_valid_entries: 'int'
+  pad: 'int'
+struct_drm_amdgpu_info_vce_clock_table.register_fields([('entries', (struct_drm_amdgpu_info_vce_clock_table_entry * 6), 0), ('num_valid_entries', ctypes.c_uint32, 96), ('pad', ctypes.c_uint32, 100)])
 @c.record
 class struct_drm_amdgpu_info_video_codec_info(c.Struct):
   SIZE = 24
-  valid: int
-  max_width: int
-  max_height: int
-  max_pixels_per_frame: int
-  max_level: int
-  pad: int
+  valid: 'int'
+  max_width: 'int'
+  max_height: 'int'
+  max_pixels_per_frame: 'int'
+  max_level: 'int'
+  pad: 'int'
 struct_drm_amdgpu_info_video_codec_info.register_fields([('valid', ctypes.c_uint32, 0), ('max_width', ctypes.c_uint32, 4), ('max_height', ctypes.c_uint32, 8), ('max_pixels_per_frame', ctypes.c_uint32, 12), ('max_level', ctypes.c_uint32, 16), ('pad', ctypes.c_uint32, 20)])
 @c.record
 class struct_drm_amdgpu_info_video_caps(c.Struct):
   SIZE = 192
-  codec_info: 'c.Array[struct_drm_amdgpu_info_video_codec_info, Literal[8]]'
-struct_drm_amdgpu_info_video_caps.register_fields([('codec_info', c.Array[struct_drm_amdgpu_info_video_codec_info, Literal[8]], 0)])
+  codec_info: 'list[struct_drm_amdgpu_info_video_codec_info]'
+struct_drm_amdgpu_info_video_caps.register_fields([('codec_info', (struct_drm_amdgpu_info_video_codec_info * 8), 0)])
 @c.record
 class struct_drm_amdgpu_info_gpuvm_fault(c.Struct):
   SIZE = 16
-  addr: int
-  status: int
-  vmhub: int
+  addr: 'int'
+  status: 'int'
+  vmhub: 'int'
 struct_drm_amdgpu_info_gpuvm_fault.register_fields([('addr', ctypes.c_uint64, 0), ('status', ctypes.c_uint32, 8), ('vmhub', ctypes.c_uint32, 12)])
 @c.record
 class struct_drm_amdgpu_info_uq_metadata_gfx(c.Struct):
   SIZE = 16
-  shadow_size: int
-  shadow_alignment: int
-  csa_size: int
-  csa_alignment: int
+  shadow_size: 'int'
+  shadow_alignment: 'int'
+  csa_size: 'int'
+  csa_alignment: 'int'
 struct_drm_amdgpu_info_uq_metadata_gfx.register_fields([('shadow_size', ctypes.c_uint32, 0), ('shadow_alignment', ctypes.c_uint32, 4), ('csa_size', ctypes.c_uint32, 8), ('csa_alignment', ctypes.c_uint32, 12)])
 @c.record
 class struct_drm_amdgpu_info_uq_metadata(c.Struct):
@@ -1144,15 +1144,15 @@ class struct_drm_amdgpu_virtual_range(c.Struct): pass
 @c.record
 class struct_drm_amdgpu_capability(c.Struct):
   SIZE = 8
-  flag: int
-  direct_gma_size: int
+  flag: 'int'
+  direct_gma_size: 'int'
 struct_drm_amdgpu_capability.register_fields([('flag', ctypes.c_uint32, 0), ('direct_gma_size', ctypes.c_uint32, 4)])
 @c.record
 class struct_drm_amdgpu_freesync(c.Struct):
   SIZE = 32
-  op: int
-  spare: 'c.Array[ctypes.c_uint32, Literal[7]]'
-struct_drm_amdgpu_freesync.register_fields([('op', ctypes.c_uint32, 0), ('spare', c.Array[ctypes.c_uint32, Literal[7]], 4)])
+  op: 'int'
+  spare: 'list[int]'
+struct_drm_amdgpu_freesync.register_fields([('op', ctypes.c_uint32, 0), ('spare', (ctypes.c_uint32 * 7), 4)])
 DRM_NAME = "drm" # type: ignore
 DRM_MIN_ORDER = 5 # type: ignore
 DRM_MAX_ORDER = 22 # type: ignore

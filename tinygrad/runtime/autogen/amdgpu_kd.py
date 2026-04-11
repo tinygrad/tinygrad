@@ -17,20 +17,20 @@ _anonenum8: dict[int, str] = {(KERNARG_PRELOAD_SPEC_LENGTH_SHIFT:=0): 'KERNARG_P
 @c.record
 class llvm_amdhsa_kernel_descriptor_t(c.Struct):
   SIZE = 64
-  group_segment_fixed_size: int
-  private_segment_fixed_size: int
-  kernarg_size: int
-  reserved0: 'c.Array[uint8_t, Literal[4]]'
-  kernel_code_entry_byte_offset: 'int64_t'
-  reserved1: 'c.Array[uint8_t, Literal[20]]'
-  compute_pgm_rsrc3: int
-  compute_pgm_rsrc1: int
-  compute_pgm_rsrc2: int
-  kernel_code_properties: int
-  kernarg_preload: int
-  reserved3: 'c.Array[uint8_t, Literal[4]]'
+  group_segment_fixed_size: 'int'
+  private_segment_fixed_size: 'int'
+  kernarg_size: 'int'
+  reserved0: 'list[int]'
+  kernel_code_entry_byte_offset: 'ctypes.c_int64'
+  reserved1: 'list[int]'
+  compute_pgm_rsrc3: 'int'
+  compute_pgm_rsrc1: 'int'
+  compute_pgm_rsrc2: 'int'
+  kernel_code_properties: 'int'
+  kernarg_preload: 'int'
+  reserved3: 'list[int]'
 uint32_t: TypeAlias = ctypes.c_uint32
 int64_t: TypeAlias = ctypes.c_int64
 uint16_t: TypeAlias = ctypes.c_uint16
-llvm_amdhsa_kernel_descriptor_t.register_fields([('group_segment_fixed_size', uint32_t, 0), ('private_segment_fixed_size', uint32_t, 4), ('kernarg_size', uint32_t, 8), ('reserved0', c.Array[uint8_t, Literal[4]], 12), ('kernel_code_entry_byte_offset', int64_t, 16), ('reserved1', c.Array[uint8_t, Literal[20]], 24), ('compute_pgm_rsrc3', uint32_t, 44), ('compute_pgm_rsrc1', uint32_t, 48), ('compute_pgm_rsrc2', uint32_t, 52), ('kernel_code_properties', uint16_t, 56), ('kernarg_preload', uint16_t, 58), ('reserved3', c.Array[uint8_t, Literal[4]], 60)])
+llvm_amdhsa_kernel_descriptor_t.register_fields([('group_segment_fixed_size', uint32_t, 0), ('private_segment_fixed_size', uint32_t, 4), ('kernarg_size', uint32_t, 8), ('reserved0', (uint8_t * 4), 12), ('kernel_code_entry_byte_offset', int64_t, 16), ('reserved1', (uint8_t * 20), 24), ('compute_pgm_rsrc3', uint32_t, 44), ('compute_pgm_rsrc1', uint32_t, 48), ('compute_pgm_rsrc2', uint32_t, 52), ('kernel_code_properties', uint16_t, 56), ('kernarg_preload', uint16_t, 58), ('reserved3', (uint8_t * 4), 60)])
 _anonenum9: dict[int, str] = {(GROUP_SEGMENT_FIXED_SIZE_OFFSET:=0): 'GROUP_SEGMENT_FIXED_SIZE_OFFSET', (PRIVATE_SEGMENT_FIXED_SIZE_OFFSET:=4): 'PRIVATE_SEGMENT_FIXED_SIZE_OFFSET', (KERNARG_SIZE_OFFSET:=8): 'KERNARG_SIZE_OFFSET', (RESERVED0_OFFSET:=12): 'RESERVED0_OFFSET', (KERNEL_CODE_ENTRY_BYTE_OFFSET_OFFSET:=16): 'KERNEL_CODE_ENTRY_BYTE_OFFSET_OFFSET', (RESERVED1_OFFSET:=24): 'RESERVED1_OFFSET', (COMPUTE_PGM_RSRC3_OFFSET:=44): 'COMPUTE_PGM_RSRC3_OFFSET', (COMPUTE_PGM_RSRC1_OFFSET:=48): 'COMPUTE_PGM_RSRC1_OFFSET', (COMPUTE_PGM_RSRC2_OFFSET:=52): 'COMPUTE_PGM_RSRC2_OFFSET', (KERNEL_CODE_PROPERTIES_OFFSET:=56): 'KERNEL_CODE_PROPERTIES_OFFSET', (KERNARG_PRELOAD_OFFSET:=58): 'KERNARG_PRELOAD_OFFSET', (RESERVED3_OFFSET:=60): 'RESERVED3_OFFSET'}

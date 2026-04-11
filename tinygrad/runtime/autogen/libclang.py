@@ -7,24 +7,24 @@ from tinygrad.helpers import OSX
 dll = c.DLL('libclang', '/opt/homebrew/opt/llvm@20/lib/libclang.dylib' if OSX else ['clang-20', 'clang'])
 CXIndex: TypeAlias = ctypes.c_void_p
 class struct_CXTargetInfoImpl(c.Struct): pass
-CXTargetInfo: TypeAlias = c.POINTER[struct_CXTargetInfoImpl]
+CXTargetInfo: TypeAlias = ctypes.POINTER(struct_CXTargetInfoImpl)
 class struct_CXTranslationUnitImpl(c.Struct): pass
-CXTranslationUnit: TypeAlias = c.POINTER[struct_CXTranslationUnitImpl]
+CXTranslationUnit: TypeAlias = ctypes.POINTER(struct_CXTranslationUnitImpl)
 CXClientData: TypeAlias = ctypes.c_void_p
 @c.record
 class struct_CXUnsavedFile(c.Struct):
   SIZE = 24
-  Filename: 'c.POINTER[ctypes.c_char]'
-  Contents: 'c.POINTER[ctypes.c_char]'
-  Length: int
-struct_CXUnsavedFile.register_fields([('Filename', c.POINTER[ctypes.c_char], 0), ('Contents', c.POINTER[ctypes.c_char], 8), ('Length', ctypes.c_uint64, 16)])
+  Filename: 'ctypes._Pointer[bytes]'
+  Contents: 'ctypes._Pointer[bytes]'
+  Length: 'int'
+struct_CXUnsavedFile.register_fields([('Filename', ctypes.POINTER(ctypes.c_char), 0), ('Contents', ctypes.POINTER(ctypes.c_char), 8), ('Length', ctypes.c_uint64, 16)])
 enum_CXAvailabilityKind: dict[int, str] = {(CXAvailability_Available:=0): 'CXAvailability_Available', (CXAvailability_Deprecated:=1): 'CXAvailability_Deprecated', (CXAvailability_NotAvailable:=2): 'CXAvailability_NotAvailable', (CXAvailability_NotAccessible:=3): 'CXAvailability_NotAccessible'}
 @c.record
 class struct_CXVersion(c.Struct):
   SIZE = 12
-  Major: int
-  Minor: int
-  Subminor: int
+  Major: 'int'
+  Minor: 'int'
+  Subminor: 'int'
 struct_CXVersion.register_fields([('Major', ctypes.c_int32, 0), ('Minor', ctypes.c_int32, 4), ('Subminor', ctypes.c_int32, 8)])
 CXVersion: TypeAlias = struct_CXVersion
 enum_CXCursor_ExceptionSpecificationKind: dict[int, str] = {(CXCursor_ExceptionSpecificationKind_None:=0): 'CXCursor_ExceptionSpecificationKind_None', (CXCursor_ExceptionSpecificationKind_DynamicNone:=1): 'CXCursor_ExceptionSpecificationKind_DynamicNone', (CXCursor_ExceptionSpecificationKind_Dynamic:=2): 'CXCursor_ExceptionSpecificationKind_Dynamic', (CXCursor_ExceptionSpecificationKind_MSAny:=3): 'CXCursor_ExceptionSpecificationKind_MSAny', (CXCursor_ExceptionSpecificationKind_BasicNoexcept:=4): 'CXCursor_ExceptionSpecificationKind_BasicNoexcept', (CXCursor_ExceptionSpecificationKind_ComputedNoexcept:=5): 'CXCursor_ExceptionSpecificationKind_ComputedNoexcept', (CXCursor_ExceptionSpecificationKind_Unevaluated:=6): 'CXCursor_ExceptionSpecificationKind_Unevaluated', (CXCursor_ExceptionSpecificationKind_Uninstantiated:=7): 'CXCursor_ExceptionSpecificationKind_Uninstantiated', (CXCursor_ExceptionSpecificationKind_Unparsed:=8): 'CXCursor_ExceptionSpecificationKind_Unparsed', (CXCursor_ExceptionSpecificationKind_NoThrow:=9): 'CXCursor_ExceptionSpecificationKind_NoThrow'}
@@ -37,38 +37,38 @@ CXGlobalOptFlags: dict[int, str] = {(CXGlobalOpt_None:=0): 'CXGlobalOpt_None', (
 @c.record
 class struct_CXIndexOptions(c.Struct):
   SIZE = 24
-  Size: int
-  ThreadBackgroundPriorityForIndexing: int
-  ThreadBackgroundPriorityForEditing: int
-  ExcludeDeclarationsFromPCH: int
-  DisplayDiagnostics: int
-  StorePreamblesInMemory: int
-  PreambleStoragePath: 'c.POINTER[ctypes.c_char]'
-  InvocationEmissionPath: 'c.POINTER[ctypes.c_char]'
-struct_CXIndexOptions.register_fields([('Size', ctypes.c_uint32, 0), ('ThreadBackgroundPriorityForIndexing', ctypes.c_ubyte, 4), ('ThreadBackgroundPriorityForEditing', ctypes.c_ubyte, 5), ('ExcludeDeclarationsFromPCH', ctypes.c_uint32, 6, 1, 0), ('DisplayDiagnostics', ctypes.c_uint32, 6, 1, 1), ('StorePreamblesInMemory', ctypes.c_uint32, 6, 1, 2), ('PreambleStoragePath', c.POINTER[ctypes.c_char], 8), ('InvocationEmissionPath', c.POINTER[ctypes.c_char], 16)])
+  Size: 'int'
+  ThreadBackgroundPriorityForIndexing: 'int'
+  ThreadBackgroundPriorityForEditing: 'int'
+  ExcludeDeclarationsFromPCH: 'int'
+  DisplayDiagnostics: 'int'
+  StorePreamblesInMemory: 'int'
+  PreambleStoragePath: 'ctypes._Pointer[bytes]'
+  InvocationEmissionPath: 'ctypes._Pointer[bytes]'
+struct_CXIndexOptions.register_fields([('Size', ctypes.c_uint32, 0), ('ThreadBackgroundPriorityForIndexing', ctypes.c_ubyte, 4), ('ThreadBackgroundPriorityForEditing', ctypes.c_ubyte, 5), ('ExcludeDeclarationsFromPCH', ctypes.c_uint32, 6, 1, 0), ('DisplayDiagnostics', ctypes.c_uint32, 6, 1, 1), ('StorePreamblesInMemory', ctypes.c_uint32, 6, 1, 2), ('PreambleStoragePath', ctypes.POINTER(ctypes.c_char), 8), ('InvocationEmissionPath', ctypes.POINTER(ctypes.c_char), 16)])
 CXIndexOptions: TypeAlias = struct_CXIndexOptions
 @dll.bind
-def clang_createIndexWithOptions(options:c.POINTER[CXIndexOptions]) -> CXIndex: ...
+def clang_createIndexWithOptions(options:ctypes.POINTER(CXIndexOptions)) -> CXIndex: ...
 @dll.bind
 def clang_CXIndex_setGlobalOptions(_0:CXIndex, options:ctypes.c_uint32) -> None: ...
 @dll.bind
 def clang_CXIndex_getGlobalOptions(_0:CXIndex) -> ctypes.c_uint32: ...
 @dll.bind
-def clang_CXIndex_setInvocationEmissionPathOption(_0:CXIndex, Path:c.POINTER[ctypes.c_char]) -> None: ...
+def clang_CXIndex_setInvocationEmissionPathOption(_0:CXIndex, Path:ctypes.POINTER(ctypes.c_char)) -> None: ...
 CXFile: TypeAlias = ctypes.c_void_p
 @dll.bind
 def clang_isFileMultipleIncludeGuarded(tu:CXTranslationUnit, file:CXFile) -> ctypes.c_uint32: ...
 @dll.bind
-def clang_getFile(tu:CXTranslationUnit, file_name:c.POINTER[ctypes.c_char]) -> CXFile: ...
+def clang_getFile(tu:CXTranslationUnit, file_name:ctypes.POINTER(ctypes.c_char)) -> CXFile: ...
 size_t: TypeAlias = ctypes.c_uint64
 @dll.bind
-def clang_getFileContents(tu:CXTranslationUnit, file:CXFile, size:c.POINTER[size_t]) -> c.POINTER[ctypes.c_char]: ...
+def clang_getFileContents(tu:CXTranslationUnit, file:CXFile, size:ctypes.POINTER(size_t)) -> ctypes.POINTER(ctypes.c_char): ...
 @c.record
 class CXSourceLocation(c.Struct):
   SIZE = 24
-  ptr_data: 'c.Array[ctypes.c_void_p, Literal[2]]'
-  int_data: int
-CXSourceLocation.register_fields([('ptr_data', c.Array[ctypes.c_void_p, Literal[2]], 0), ('int_data', ctypes.c_uint32, 16)])
+  ptr_data: 'list[ctypes.c_void_p]'
+  int_data: 'int'
+CXSourceLocation.register_fields([('ptr_data', (ctypes.c_void_p * 2), 0), ('int_data', ctypes.c_uint32, 16)])
 @dll.bind
 def clang_getLocation(tu:CXTranslationUnit, file:CXFile, line:ctypes.c_uint32, column:ctypes.c_uint32) -> CXSourceLocation: ...
 @dll.bind
@@ -76,20 +76,20 @@ def clang_getLocationForOffset(tu:CXTranslationUnit, file:CXFile, offset:ctypes.
 @c.record
 class CXSourceRangeList(c.Struct):
   SIZE = 16
-  count: int
-  ranges: 'c.POINTER[CXSourceRange]'
+  count: 'int'
+  ranges: 'ctypes._Pointer[CXSourceRange]'
 @c.record
 class CXSourceRange(c.Struct):
   SIZE = 24
-  ptr_data: 'c.Array[ctypes.c_void_p, Literal[2]]'
-  begin_int_data: int
-  end_int_data: int
-CXSourceRange.register_fields([('ptr_data', c.Array[ctypes.c_void_p, Literal[2]], 0), ('begin_int_data', ctypes.c_uint32, 16), ('end_int_data', ctypes.c_uint32, 20)])
-CXSourceRangeList.register_fields([('count', ctypes.c_uint32, 0), ('ranges', c.POINTER[CXSourceRange], 8)])
+  ptr_data: 'list[ctypes.c_void_p]'
+  begin_int_data: 'int'
+  end_int_data: 'int'
+CXSourceRange.register_fields([('ptr_data', (ctypes.c_void_p * 2), 0), ('begin_int_data', ctypes.c_uint32, 16), ('end_int_data', ctypes.c_uint32, 20)])
+CXSourceRangeList.register_fields([('count', ctypes.c_uint32, 0), ('ranges', ctypes.POINTER(CXSourceRange), 8)])
 @dll.bind
-def clang_getSkippedRanges(tu:CXTranslationUnit, file:CXFile) -> c.POINTER[CXSourceRangeList]: ...
+def clang_getSkippedRanges(tu:CXTranslationUnit, file:CXFile) -> ctypes.POINTER(CXSourceRangeList): ...
 @dll.bind
-def clang_getAllSkippedRanges(tu:CXTranslationUnit) -> c.POINTER[CXSourceRangeList]: ...
+def clang_getAllSkippedRanges(tu:CXTranslationUnit) -> ctypes.POINTER(CXSourceRangeList): ...
 @dll.bind
 def clang_getNumDiagnostics(Unit:CXTranslationUnit) -> ctypes.c_uint32: ...
 CXDiagnostic: TypeAlias = ctypes.c_void_p
@@ -102,32 +102,32 @@ def clang_getDiagnosticSetFromTU(Unit:CXTranslationUnit) -> CXDiagnosticSet: ...
 class CXString(c.Struct):
   SIZE = 16
   data: 'ctypes.c_void_p'
-  private_flags: int
+  private_flags: 'int'
 CXString.register_fields([('data', ctypes.c_void_p, 0), ('private_flags', ctypes.c_uint32, 8)])
 @dll.bind
 def clang_getTranslationUnitSpelling(CTUnit:CXTranslationUnit) -> CXString: ...
 @dll.bind
-def clang_createTranslationUnitFromSourceFile(CIdx:CXIndex, source_filename:c.POINTER[ctypes.c_char], num_clang_command_line_args:ctypes.c_int32, clang_command_line_args:c.POINTER[c.POINTER[ctypes.c_char]], num_unsaved_files:ctypes.c_uint32, unsaved_files:c.POINTER[struct_CXUnsavedFile]) -> CXTranslationUnit: ...
+def clang_createTranslationUnitFromSourceFile(CIdx:CXIndex, source_filename:ctypes.POINTER(ctypes.c_char), num_clang_command_line_args:ctypes.c_int32, clang_command_line_args:ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), num_unsaved_files:ctypes.c_uint32, unsaved_files:ctypes.POINTER(struct_CXUnsavedFile)) -> CXTranslationUnit: ...
 @dll.bind
-def clang_createTranslationUnit(CIdx:CXIndex, ast_filename:c.POINTER[ctypes.c_char]) -> CXTranslationUnit: ...
+def clang_createTranslationUnit(CIdx:CXIndex, ast_filename:ctypes.POINTER(ctypes.c_char)) -> CXTranslationUnit: ...
 enum_CXErrorCode: dict[int, str] = {(CXError_Success:=0): 'CXError_Success', (CXError_Failure:=1): 'CXError_Failure', (CXError_Crashed:=2): 'CXError_Crashed', (CXError_InvalidArguments:=3): 'CXError_InvalidArguments', (CXError_ASTReadError:=4): 'CXError_ASTReadError'}
 @dll.bind
-def clang_createTranslationUnit2(CIdx:CXIndex, ast_filename:c.POINTER[ctypes.c_char], out_TU:c.POINTER[CXTranslationUnit]) -> ctypes.c_uint32: ...
+def clang_createTranslationUnit2(CIdx:CXIndex, ast_filename:ctypes.POINTER(ctypes.c_char), out_TU:ctypes.POINTER(CXTranslationUnit)) -> ctypes.c_uint32: ...
 enum_CXTranslationUnit_Flags: dict[int, str] = {(CXTranslationUnit_None:=0): 'CXTranslationUnit_None', (CXTranslationUnit_DetailedPreprocessingRecord:=1): 'CXTranslationUnit_DetailedPreprocessingRecord', (CXTranslationUnit_Incomplete:=2): 'CXTranslationUnit_Incomplete', (CXTranslationUnit_PrecompiledPreamble:=4): 'CXTranslationUnit_PrecompiledPreamble', (CXTranslationUnit_CacheCompletionResults:=8): 'CXTranslationUnit_CacheCompletionResults', (CXTranslationUnit_ForSerialization:=16): 'CXTranslationUnit_ForSerialization', (CXTranslationUnit_CXXChainedPCH:=32): 'CXTranslationUnit_CXXChainedPCH', (CXTranslationUnit_SkipFunctionBodies:=64): 'CXTranslationUnit_SkipFunctionBodies', (CXTranslationUnit_IncludeBriefCommentsInCodeCompletion:=128): 'CXTranslationUnit_IncludeBriefCommentsInCodeCompletion', (CXTranslationUnit_CreatePreambleOnFirstParse:=256): 'CXTranslationUnit_CreatePreambleOnFirstParse', (CXTranslationUnit_KeepGoing:=512): 'CXTranslationUnit_KeepGoing', (CXTranslationUnit_SingleFileParse:=1024): 'CXTranslationUnit_SingleFileParse', (CXTranslationUnit_LimitSkipFunctionBodiesToPreamble:=2048): 'CXTranslationUnit_LimitSkipFunctionBodiesToPreamble', (CXTranslationUnit_IncludeAttributedTypes:=4096): 'CXTranslationUnit_IncludeAttributedTypes', (CXTranslationUnit_VisitImplicitAttributes:=8192): 'CXTranslationUnit_VisitImplicitAttributes', (CXTranslationUnit_IgnoreNonErrorsFromIncludedFiles:=16384): 'CXTranslationUnit_IgnoreNonErrorsFromIncludedFiles', (CXTranslationUnit_RetainExcludedConditionalBlocks:=32768): 'CXTranslationUnit_RetainExcludedConditionalBlocks'}
 @dll.bind
 def clang_defaultEditingTranslationUnitOptions() -> ctypes.c_uint32: ...
 @dll.bind
-def clang_parseTranslationUnit(CIdx:CXIndex, source_filename:c.POINTER[ctypes.c_char], command_line_args:c.POINTER[c.POINTER[ctypes.c_char]], num_command_line_args:ctypes.c_int32, unsaved_files:c.POINTER[struct_CXUnsavedFile], num_unsaved_files:ctypes.c_uint32, options:ctypes.c_uint32) -> CXTranslationUnit: ...
+def clang_parseTranslationUnit(CIdx:CXIndex, source_filename:ctypes.POINTER(ctypes.c_char), command_line_args:ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), num_command_line_args:ctypes.c_int32, unsaved_files:ctypes.POINTER(struct_CXUnsavedFile), num_unsaved_files:ctypes.c_uint32, options:ctypes.c_uint32) -> CXTranslationUnit: ...
 @dll.bind
-def clang_parseTranslationUnit2(CIdx:CXIndex, source_filename:c.POINTER[ctypes.c_char], command_line_args:c.POINTER[c.POINTER[ctypes.c_char]], num_command_line_args:ctypes.c_int32, unsaved_files:c.POINTER[struct_CXUnsavedFile], num_unsaved_files:ctypes.c_uint32, options:ctypes.c_uint32, out_TU:c.POINTER[CXTranslationUnit]) -> ctypes.c_uint32: ...
+def clang_parseTranslationUnit2(CIdx:CXIndex, source_filename:ctypes.POINTER(ctypes.c_char), command_line_args:ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), num_command_line_args:ctypes.c_int32, unsaved_files:ctypes.POINTER(struct_CXUnsavedFile), num_unsaved_files:ctypes.c_uint32, options:ctypes.c_uint32, out_TU:ctypes.POINTER(CXTranslationUnit)) -> ctypes.c_uint32: ...
 @dll.bind
-def clang_parseTranslationUnit2FullArgv(CIdx:CXIndex, source_filename:c.POINTER[ctypes.c_char], command_line_args:c.POINTER[c.POINTER[ctypes.c_char]], num_command_line_args:ctypes.c_int32, unsaved_files:c.POINTER[struct_CXUnsavedFile], num_unsaved_files:ctypes.c_uint32, options:ctypes.c_uint32, out_TU:c.POINTER[CXTranslationUnit]) -> ctypes.c_uint32: ...
+def clang_parseTranslationUnit2FullArgv(CIdx:CXIndex, source_filename:ctypes.POINTER(ctypes.c_char), command_line_args:ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), num_command_line_args:ctypes.c_int32, unsaved_files:ctypes.POINTER(struct_CXUnsavedFile), num_unsaved_files:ctypes.c_uint32, options:ctypes.c_uint32, out_TU:ctypes.POINTER(CXTranslationUnit)) -> ctypes.c_uint32: ...
 enum_CXSaveTranslationUnit_Flags: dict[int, str] = {(CXSaveTranslationUnit_None:=0): 'CXSaveTranslationUnit_None'}
 @dll.bind
 def clang_defaultSaveOptions(TU:CXTranslationUnit) -> ctypes.c_uint32: ...
 enum_CXSaveError: dict[int, str] = {(CXSaveError_None:=0): 'CXSaveError_None', (CXSaveError_Unknown:=1): 'CXSaveError_Unknown', (CXSaveError_TranslationErrors:=2): 'CXSaveError_TranslationErrors', (CXSaveError_InvalidTU:=3): 'CXSaveError_InvalidTU'}
 @dll.bind
-def clang_saveTranslationUnit(TU:CXTranslationUnit, FileName:c.POINTER[ctypes.c_char], options:ctypes.c_uint32) -> ctypes.c_int32: ...
+def clang_saveTranslationUnit(TU:CXTranslationUnit, FileName:ctypes.POINTER(ctypes.c_char), options:ctypes.c_uint32) -> ctypes.c_int32: ...
 @dll.bind
 def clang_suspendTranslationUnit(_0:CXTranslationUnit) -> ctypes.c_uint32: ...
 @dll.bind
@@ -136,24 +136,24 @@ enum_CXReparse_Flags: dict[int, str] = {(CXReparse_None:=0): 'CXReparse_None'}
 @dll.bind
 def clang_defaultReparseOptions(TU:CXTranslationUnit) -> ctypes.c_uint32: ...
 @dll.bind
-def clang_reparseTranslationUnit(TU:CXTranslationUnit, num_unsaved_files:ctypes.c_uint32, unsaved_files:c.POINTER[struct_CXUnsavedFile], options:ctypes.c_uint32) -> ctypes.c_int32: ...
+def clang_reparseTranslationUnit(TU:CXTranslationUnit, num_unsaved_files:ctypes.c_uint32, unsaved_files:ctypes.POINTER(struct_CXUnsavedFile), options:ctypes.c_uint32) -> ctypes.c_int32: ...
 enum_CXTUResourceUsageKind: dict[int, str] = {(CXTUResourceUsage_AST:=1): 'CXTUResourceUsage_AST', (CXTUResourceUsage_Identifiers:=2): 'CXTUResourceUsage_Identifiers', (CXTUResourceUsage_Selectors:=3): 'CXTUResourceUsage_Selectors', (CXTUResourceUsage_GlobalCompletionResults:=4): 'CXTUResourceUsage_GlobalCompletionResults', (CXTUResourceUsage_SourceManagerContentCache:=5): 'CXTUResourceUsage_SourceManagerContentCache', (CXTUResourceUsage_AST_SideTables:=6): 'CXTUResourceUsage_AST_SideTables', (CXTUResourceUsage_SourceManager_Membuffer_Malloc:=7): 'CXTUResourceUsage_SourceManager_Membuffer_Malloc', (CXTUResourceUsage_SourceManager_Membuffer_MMap:=8): 'CXTUResourceUsage_SourceManager_Membuffer_MMap', (CXTUResourceUsage_ExternalASTSource_Membuffer_Malloc:=9): 'CXTUResourceUsage_ExternalASTSource_Membuffer_Malloc', (CXTUResourceUsage_ExternalASTSource_Membuffer_MMap:=10): 'CXTUResourceUsage_ExternalASTSource_Membuffer_MMap', (CXTUResourceUsage_Preprocessor:=11): 'CXTUResourceUsage_Preprocessor', (CXTUResourceUsage_PreprocessingRecord:=12): 'CXTUResourceUsage_PreprocessingRecord', (CXTUResourceUsage_SourceManager_DataStructures:=13): 'CXTUResourceUsage_SourceManager_DataStructures', (CXTUResourceUsage_Preprocessor_HeaderSearch:=14): 'CXTUResourceUsage_Preprocessor_HeaderSearch', (CXTUResourceUsage_MEMORY_IN_BYTES_BEGIN:=1): 'CXTUResourceUsage_MEMORY_IN_BYTES_BEGIN', (CXTUResourceUsage_MEMORY_IN_BYTES_END:=14): 'CXTUResourceUsage_MEMORY_IN_BYTES_END', (CXTUResourceUsage_First:=1): 'CXTUResourceUsage_First', (CXTUResourceUsage_Last:=14): 'CXTUResourceUsage_Last'}
 @dll.bind
-def clang_getTUResourceUsageName(kind:ctypes.c_uint32) -> c.POINTER[ctypes.c_char]: ...
+def clang_getTUResourceUsageName(kind:ctypes.c_uint32) -> ctypes.POINTER(ctypes.c_char): ...
 @c.record
 class struct_CXTUResourceUsageEntry(c.Struct):
   SIZE = 16
-  kind: int
-  amount: int
+  kind: 'int'
+  amount: 'int'
 struct_CXTUResourceUsageEntry.register_fields([('kind', ctypes.c_uint32, 0), ('amount', ctypes.c_uint64, 8)])
 CXTUResourceUsageEntry: TypeAlias = struct_CXTUResourceUsageEntry
 @c.record
 class struct_CXTUResourceUsage(c.Struct):
   SIZE = 24
   data: 'ctypes.c_void_p'
-  numEntries: int
-  entries: 'c.POINTER[CXTUResourceUsageEntry]'
-struct_CXTUResourceUsage.register_fields([('data', ctypes.c_void_p, 0), ('numEntries', ctypes.c_uint32, 8), ('entries', c.POINTER[CXTUResourceUsageEntry], 16)])
+  numEntries: 'int'
+  entries: 'ctypes._Pointer[struct_CXTUResourceUsageEntry]'
+struct_CXTUResourceUsage.register_fields([('data', ctypes.c_void_p, 0), ('numEntries', ctypes.c_uint32, 8), ('entries', ctypes.POINTER(CXTUResourceUsageEntry), 16)])
 CXTUResourceUsage: TypeAlias = struct_CXTUResourceUsage
 @dll.bind
 def clang_getCXTUResourceUsage(TU:CXTranslationUnit) -> CXTUResourceUsage: ...
@@ -171,10 +171,10 @@ enum_CXCursorKind: dict[int, str] = {(CXCursor_UnexposedDecl:=1): 'CXCursor_Unex
 @c.record
 class CXCursor(c.Struct):
   SIZE = 32
-  kind: int
-  xdata: int
-  data: 'c.Array[ctypes.c_void_p, Literal[3]]'
-CXCursor.register_fields([('kind', ctypes.c_uint32, 0), ('xdata', ctypes.c_int32, 4), ('data', c.Array[ctypes.c_void_p, Literal[3]], 8)])
+  kind: 'int'
+  xdata: 'int'
+  data: 'list[ctypes.c_void_p]'
+CXCursor.register_fields([('kind', ctypes.c_uint32, 0), ('xdata', ctypes.c_int32, 4), ('data', (ctypes.c_void_p * 3), 8)])
 @dll.bind
 def clang_getNullCursor() -> CXCursor: ...
 @dll.bind
@@ -221,17 +221,17 @@ def clang_getCursorAvailability(cursor:CXCursor) -> ctypes.c_uint32: ...
 class struct_CXPlatformAvailability(c.Struct):
   SIZE = 72
   Platform: 'CXString'
-  Introduced: 'CXVersion'
-  Deprecated: 'CXVersion'
-  Obsoleted: 'CXVersion'
-  Unavailable: int
+  Introduced: 'struct_CXVersion'
+  Deprecated: 'struct_CXVersion'
+  Obsoleted: 'struct_CXVersion'
+  Unavailable: 'int'
   Message: 'CXString'
 struct_CXPlatformAvailability.register_fields([('Platform', CXString, 0), ('Introduced', CXVersion, 16), ('Deprecated', CXVersion, 28), ('Obsoleted', CXVersion, 40), ('Unavailable', ctypes.c_int32, 52), ('Message', CXString, 56)])
 CXPlatformAvailability: TypeAlias = struct_CXPlatformAvailability
 @dll.bind
-def clang_getCursorPlatformAvailability(cursor:CXCursor, always_deprecated:c.POINTER[ctypes.c_int32], deprecated_message:c.POINTER[CXString], always_unavailable:c.POINTER[ctypes.c_int32], unavailable_message:c.POINTER[CXString], availability:c.POINTER[CXPlatformAvailability], availability_size:ctypes.c_int32) -> ctypes.c_int32: ...
+def clang_getCursorPlatformAvailability(cursor:CXCursor, always_deprecated:ctypes.POINTER(ctypes.c_int32), deprecated_message:ctypes.POINTER(CXString), always_unavailable:ctypes.POINTER(ctypes.c_int32), unavailable_message:ctypes.POINTER(CXString), availability:ctypes.POINTER(CXPlatformAvailability), availability_size:ctypes.c_int32) -> ctypes.c_int32: ...
 @dll.bind
-def clang_disposeCXPlatformAvailability(availability:c.POINTER[CXPlatformAvailability]) -> None: ...
+def clang_disposeCXPlatformAvailability(availability:ctypes.POINTER(CXPlatformAvailability)) -> None: ...
 @dll.bind
 def clang_Cursor_getVarDeclInitializer(cursor:CXCursor) -> CXCursor: ...
 @dll.bind
@@ -247,7 +247,7 @@ def clang_getCursorTLSKind(cursor:CXCursor) -> ctypes.c_uint32: ...
 @dll.bind
 def clang_Cursor_getTranslationUnit(_0:CXCursor) -> CXTranslationUnit: ...
 class struct_CXCursorSetImpl(c.Struct): pass
-CXCursorSet: TypeAlias = c.POINTER[struct_CXCursorSetImpl]
+CXCursorSet: TypeAlias = ctypes.POINTER(struct_CXCursorSetImpl)
 @dll.bind
 def clang_createCXCursorSet() -> CXCursorSet: ...
 @dll.bind
@@ -261,9 +261,9 @@ def clang_getCursorSemanticParent(cursor:CXCursor) -> CXCursor: ...
 @dll.bind
 def clang_getCursorLexicalParent(cursor:CXCursor) -> CXCursor: ...
 @dll.bind
-def clang_getOverriddenCursors(cursor:CXCursor, overridden:c.POINTER[c.POINTER[CXCursor]], num_overridden:c.POINTER[ctypes.c_uint32]) -> None: ...
+def clang_getOverriddenCursors(cursor:CXCursor, overridden:ctypes.POINTER(ctypes.POINTER(CXCursor)), num_overridden:ctypes.POINTER(ctypes.c_uint32)) -> None: ...
 @dll.bind
-def clang_disposeOverriddenCursors(overridden:c.POINTER[CXCursor]) -> None: ...
+def clang_disposeOverriddenCursors(overridden:ctypes.POINTER(CXCursor)) -> None: ...
 @dll.bind
 def clang_getIncludedFile(cursor:CXCursor) -> CXFile: ...
 @dll.bind
@@ -277,9 +277,9 @@ enum_CXCallingConv: dict[int, str] = {(CXCallingConv_Default:=0): 'CXCallingConv
 @c.record
 class CXType(c.Struct):
   SIZE = 24
-  kind: int
-  data: 'c.Array[ctypes.c_void_p, Literal[2]]'
-CXType.register_fields([('kind', ctypes.c_uint32, 0), ('data', c.Array[ctypes.c_void_p, Literal[2]], 8)])
+  kind: 'int'
+  data: 'list[ctypes.c_void_p]'
+CXType.register_fields([('kind', ctypes.c_uint32, 0), ('data', (ctypes.c_void_p * 2), 8)])
 @dll.bind
 def clang_getCursorType(C:CXCursor) -> CXType: ...
 @dll.bind
@@ -396,7 +396,7 @@ def clang_Type_getClassType(T:CXType) -> CXType: ...
 @dll.bind
 def clang_Type_getSizeOf(T:CXType) -> ctypes.c_int64: ...
 @dll.bind
-def clang_Type_getOffsetOf(T:CXType, S:c.POINTER[ctypes.c_char]) -> ctypes.c_int64: ...
+def clang_Type_getOffsetOf(T:CXType, S:ctypes.POINTER(ctypes.c_char)) -> ctypes.c_int64: ...
 @dll.bind
 def clang_Type_getModifiedType(T:CXType) -> CXType: ...
 @dll.bind
@@ -438,27 +438,27 @@ def clang_getOverloadedDecl(cursor:CXCursor, index:ctypes.c_uint32) -> CXCursor:
 @dll.bind
 def clang_getIBOutletCollectionType(_0:CXCursor) -> CXType: ...
 enum_CXChildVisitResult: dict[int, str] = {(CXChildVisit_Break:=0): 'CXChildVisit_Break', (CXChildVisit_Continue:=1): 'CXChildVisit_Continue', (CXChildVisit_Recurse:=2): 'CXChildVisit_Recurse'}
-CXCursorVisitor: TypeAlias = c.CFUNCTYPE[ctypes.c_uint32, [CXCursor, CXCursor, ctypes.c_void_p]]
+CXCursorVisitor: TypeAlias = ctypes.CFUNCTYPE(ctypes.c_uint32, CXCursor, CXCursor, ctypes.c_void_p)
 @dll.bind
 def clang_visitChildren(parent:CXCursor, visitor:CXCursorVisitor, client_data:CXClientData) -> ctypes.c_uint32: ...
 class struct__CXChildVisitResult(c.Struct): pass
-CXCursorVisitorBlock: TypeAlias = c.POINTER[struct__CXChildVisitResult]
+CXCursorVisitorBlock: TypeAlias = ctypes.POINTER(struct__CXChildVisitResult)
 @dll.bind
 def clang_visitChildrenWithBlock(parent:CXCursor, block:CXCursorVisitorBlock) -> ctypes.c_uint32: ...
 @dll.bind
 def clang_getCursorUSR(_0:CXCursor) -> CXString: ...
 @dll.bind
-def clang_constructUSR_ObjCClass(class_name:c.POINTER[ctypes.c_char]) -> CXString: ...
+def clang_constructUSR_ObjCClass(class_name:ctypes.POINTER(ctypes.c_char)) -> CXString: ...
 @dll.bind
-def clang_constructUSR_ObjCCategory(class_name:c.POINTER[ctypes.c_char], category_name:c.POINTER[ctypes.c_char]) -> CXString: ...
+def clang_constructUSR_ObjCCategory(class_name:ctypes.POINTER(ctypes.c_char), category_name:ctypes.POINTER(ctypes.c_char)) -> CXString: ...
 @dll.bind
-def clang_constructUSR_ObjCProtocol(protocol_name:c.POINTER[ctypes.c_char]) -> CXString: ...
+def clang_constructUSR_ObjCProtocol(protocol_name:ctypes.POINTER(ctypes.c_char)) -> CXString: ...
 @dll.bind
-def clang_constructUSR_ObjCIvar(name:c.POINTER[ctypes.c_char], classUSR:CXString) -> CXString: ...
+def clang_constructUSR_ObjCIvar(name:ctypes.POINTER(ctypes.c_char), classUSR:CXString) -> CXString: ...
 @dll.bind
-def clang_constructUSR_ObjCMethod(name:c.POINTER[ctypes.c_char], isInstanceMethod:ctypes.c_uint32, classUSR:CXString) -> CXString: ...
+def clang_constructUSR_ObjCMethod(name:ctypes.POINTER(ctypes.c_char), isInstanceMethod:ctypes.c_uint32, classUSR:CXString) -> CXString: ...
 @dll.bind
-def clang_constructUSR_ObjCProperty(property:c.POINTER[ctypes.c_char], classUSR:CXString) -> CXString: ...
+def clang_constructUSR_ObjCProperty(property:ctypes.POINTER(ctypes.c_char), classUSR:CXString) -> CXString: ...
 @dll.bind
 def clang_getCursorSpelling(_0:CXCursor) -> CXString: ...
 @dll.bind
@@ -508,7 +508,7 @@ def clang_Cursor_isObjCOptional(C:CXCursor) -> ctypes.c_uint32: ...
 @dll.bind
 def clang_Cursor_isVariadic(C:CXCursor) -> ctypes.c_uint32: ...
 @dll.bind
-def clang_Cursor_isExternalSymbol(C:CXCursor, language:c.POINTER[CXString], definedIn:c.POINTER[CXString], isGenerated:c.POINTER[ctypes.c_uint32]) -> ctypes.c_uint32: ...
+def clang_Cursor_isExternalSymbol(C:CXCursor, language:ctypes.POINTER(CXString), definedIn:ctypes.POINTER(CXString), isGenerated:ctypes.POINTER(ctypes.c_uint32)) -> ctypes.c_uint32: ...
 @dll.bind
 def clang_Cursor_getCommentRange(C:CXCursor) -> CXSourceRange: ...
 @dll.bind
@@ -520,13 +520,13 @@ def clang_Cursor_getMangling(_0:CXCursor) -> CXString: ...
 @c.record
 class CXStringSet(c.Struct):
   SIZE = 16
-  Strings: 'c.POINTER[CXString]'
-  Count: int
-CXStringSet.register_fields([('Strings', c.POINTER[CXString], 0), ('Count', ctypes.c_uint32, 8)])
+  Strings: 'ctypes._Pointer[CXString]'
+  Count: 'int'
+CXStringSet.register_fields([('Strings', ctypes.POINTER(CXString), 0), ('Count', ctypes.c_uint32, 8)])
 @dll.bind
-def clang_Cursor_getCXXManglings(_0:CXCursor) -> c.POINTER[CXStringSet]: ...
+def clang_Cursor_getCXXManglings(_0:CXCursor) -> ctypes.POINTER(CXStringSet): ...
 @dll.bind
-def clang_Cursor_getObjCManglings(_0:CXCursor) -> c.POINTER[CXStringSet]: ...
+def clang_Cursor_getObjCManglings(_0:CXCursor) -> ctypes.POINTER(CXStringSet): ...
 CXModule: TypeAlias = ctypes.c_void_p
 @dll.bind
 def clang_Cursor_getModule(C:CXCursor) -> CXModule: ...
@@ -590,11 +590,11 @@ CXTokenKind: TypeAlias = ctypes.c_uint32
 @c.record
 class CXToken(c.Struct):
   SIZE = 24
-  int_data: 'c.Array[ctypes.c_uint32, Literal[4]]'
+  int_data: 'list[int]'
   ptr_data: 'ctypes.c_void_p'
-CXToken.register_fields([('int_data', c.Array[ctypes.c_uint32, Literal[4]], 0), ('ptr_data', ctypes.c_void_p, 16)])
+CXToken.register_fields([('int_data', (ctypes.c_uint32 * 4), 0), ('ptr_data', ctypes.c_void_p, 16)])
 @dll.bind
-def clang_getToken(TU:CXTranslationUnit, Location:CXSourceLocation) -> c.POINTER[CXToken]: ...
+def clang_getToken(TU:CXTranslationUnit, Location:CXSourceLocation) -> ctypes.POINTER(CXToken): ...
 @dll.bind
 def clang_getTokenKind(_0:CXToken) -> CXTokenKind: ...
 @dll.bind
@@ -604,25 +604,25 @@ def clang_getTokenLocation(_0:CXTranslationUnit, _1:CXToken) -> CXSourceLocation
 @dll.bind
 def clang_getTokenExtent(_0:CXTranslationUnit, _1:CXToken) -> CXSourceRange: ...
 @dll.bind
-def clang_tokenize(TU:CXTranslationUnit, Range:CXSourceRange, Tokens:c.POINTER[c.POINTER[CXToken]], NumTokens:c.POINTER[ctypes.c_uint32]) -> None: ...
+def clang_tokenize(TU:CXTranslationUnit, Range:CXSourceRange, Tokens:ctypes.POINTER(ctypes.POINTER(CXToken)), NumTokens:ctypes.POINTER(ctypes.c_uint32)) -> None: ...
 @dll.bind
-def clang_annotateTokens(TU:CXTranslationUnit, Tokens:c.POINTER[CXToken], NumTokens:ctypes.c_uint32, Cursors:c.POINTER[CXCursor]) -> None: ...
+def clang_annotateTokens(TU:CXTranslationUnit, Tokens:ctypes.POINTER(CXToken), NumTokens:ctypes.c_uint32, Cursors:ctypes.POINTER(CXCursor)) -> None: ...
 @dll.bind
-def clang_disposeTokens(TU:CXTranslationUnit, Tokens:c.POINTER[CXToken], NumTokens:ctypes.c_uint32) -> None: ...
+def clang_disposeTokens(TU:CXTranslationUnit, Tokens:ctypes.POINTER(CXToken), NumTokens:ctypes.c_uint32) -> None: ...
 @dll.bind
 def clang_getCursorKindSpelling(Kind:ctypes.c_uint32) -> CXString: ...
 @dll.bind
-def clang_getDefinitionSpellingAndExtent(_0:CXCursor, startBuf:c.POINTER[c.POINTER[ctypes.c_char]], endBuf:c.POINTER[c.POINTER[ctypes.c_char]], startLine:c.POINTER[ctypes.c_uint32], startColumn:c.POINTER[ctypes.c_uint32], endLine:c.POINTER[ctypes.c_uint32], endColumn:c.POINTER[ctypes.c_uint32]) -> None: ...
+def clang_getDefinitionSpellingAndExtent(_0:CXCursor, startBuf:ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), endBuf:ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), startLine:ctypes.POINTER(ctypes.c_uint32), startColumn:ctypes.POINTER(ctypes.c_uint32), endLine:ctypes.POINTER(ctypes.c_uint32), endColumn:ctypes.POINTER(ctypes.c_uint32)) -> None: ...
 @dll.bind
 def clang_enableStackTraces() -> None: ...
 @dll.bind
-def clang_executeOnThread(fn:c.CFUNCTYPE[None, [ctypes.c_void_p]], user_data:ctypes.c_void_p, stack_size:ctypes.c_uint32) -> None: ...
+def clang_executeOnThread(fn:ctypes.CFUNCTYPE(None, ctypes.c_void_p), user_data:ctypes.c_void_p, stack_size:ctypes.c_uint32) -> None: ...
 CXCompletionString: TypeAlias = ctypes.c_void_p
 @c.record
 class CXCompletionResult(c.Struct):
   SIZE = 16
-  CursorKind: int
-  CompletionString: 'CXCompletionString'
+  CursorKind: 'int'
+  CompletionString: 'ctypes.c_void_p'
 CXCompletionResult.register_fields([('CursorKind', ctypes.c_uint32, 0), ('CompletionString', CXCompletionString, 8)])
 enum_CXCompletionChunkKind: dict[int, str] = {(CXCompletionChunk_Optional:=0): 'CXCompletionChunk_Optional', (CXCompletionChunk_TypedText:=1): 'CXCompletionChunk_TypedText', (CXCompletionChunk_Text:=2): 'CXCompletionChunk_Text', (CXCompletionChunk_Placeholder:=3): 'CXCompletionChunk_Placeholder', (CXCompletionChunk_Informative:=4): 'CXCompletionChunk_Informative', (CXCompletionChunk_CurrentParameter:=5): 'CXCompletionChunk_CurrentParameter', (CXCompletionChunk_LeftParen:=6): 'CXCompletionChunk_LeftParen', (CXCompletionChunk_RightParen:=7): 'CXCompletionChunk_RightParen', (CXCompletionChunk_LeftBracket:=8): 'CXCompletionChunk_LeftBracket', (CXCompletionChunk_RightBracket:=9): 'CXCompletionChunk_RightBracket', (CXCompletionChunk_LeftBrace:=10): 'CXCompletionChunk_LeftBrace', (CXCompletionChunk_RightBrace:=11): 'CXCompletionChunk_RightBrace', (CXCompletionChunk_LeftAngle:=12): 'CXCompletionChunk_LeftAngle', (CXCompletionChunk_RightAngle:=13): 'CXCompletionChunk_RightAngle', (CXCompletionChunk_Comma:=14): 'CXCompletionChunk_Comma', (CXCompletionChunk_ResultType:=15): 'CXCompletionChunk_ResultType', (CXCompletionChunk_Colon:=16): 'CXCompletionChunk_Colon', (CXCompletionChunk_SemiColon:=17): 'CXCompletionChunk_SemiColon', (CXCompletionChunk_Equal:=18): 'CXCompletionChunk_Equal', (CXCompletionChunk_HorizontalSpace:=19): 'CXCompletionChunk_HorizontalSpace', (CXCompletionChunk_VerticalSpace:=20): 'CXCompletionChunk_VerticalSpace'}
 @dll.bind
@@ -642,7 +642,7 @@ def clang_getCompletionNumAnnotations(completion_string:CXCompletionString) -> c
 @dll.bind
 def clang_getCompletionAnnotation(completion_string:CXCompletionString, annotation_number:ctypes.c_uint32) -> CXString: ...
 @dll.bind
-def clang_getCompletionParent(completion_string:CXCompletionString, kind:c.POINTER[ctypes.c_uint32]) -> CXString: ...
+def clang_getCompletionParent(completion_string:CXCompletionString, kind:ctypes.POINTER(ctypes.c_uint32)) -> CXString: ...
 @dll.bind
 def clang_getCompletionBriefComment(completion_string:CXCompletionString) -> CXString: ...
 @dll.bind
@@ -650,40 +650,40 @@ def clang_getCursorCompletionString(cursor:CXCursor) -> CXCompletionString: ...
 @c.record
 class CXCodeCompleteResults(c.Struct):
   SIZE = 16
-  Results: 'c.POINTER[CXCompletionResult]'
-  NumResults: int
-CXCodeCompleteResults.register_fields([('Results', c.POINTER[CXCompletionResult], 0), ('NumResults', ctypes.c_uint32, 8)])
+  Results: 'ctypes._Pointer[CXCompletionResult]'
+  NumResults: 'int'
+CXCodeCompleteResults.register_fields([('Results', ctypes.POINTER(CXCompletionResult), 0), ('NumResults', ctypes.c_uint32, 8)])
 @dll.bind
-def clang_getCompletionNumFixIts(results:c.POINTER[CXCodeCompleteResults], completion_index:ctypes.c_uint32) -> ctypes.c_uint32: ...
+def clang_getCompletionNumFixIts(results:ctypes.POINTER(CXCodeCompleteResults), completion_index:ctypes.c_uint32) -> ctypes.c_uint32: ...
 @dll.bind
-def clang_getCompletionFixIt(results:c.POINTER[CXCodeCompleteResults], completion_index:ctypes.c_uint32, fixit_index:ctypes.c_uint32, replacement_range:c.POINTER[CXSourceRange]) -> CXString: ...
+def clang_getCompletionFixIt(results:ctypes.POINTER(CXCodeCompleteResults), completion_index:ctypes.c_uint32, fixit_index:ctypes.c_uint32, replacement_range:ctypes.POINTER(CXSourceRange)) -> CXString: ...
 enum_CXCodeComplete_Flags: dict[int, str] = {(CXCodeComplete_IncludeMacros:=1): 'CXCodeComplete_IncludeMacros', (CXCodeComplete_IncludeCodePatterns:=2): 'CXCodeComplete_IncludeCodePatterns', (CXCodeComplete_IncludeBriefComments:=4): 'CXCodeComplete_IncludeBriefComments', (CXCodeComplete_SkipPreamble:=8): 'CXCodeComplete_SkipPreamble', (CXCodeComplete_IncludeCompletionsWithFixIts:=16): 'CXCodeComplete_IncludeCompletionsWithFixIts'}
 enum_CXCompletionContext: dict[int, str] = {(CXCompletionContext_Unexposed:=0): 'CXCompletionContext_Unexposed', (CXCompletionContext_AnyType:=1): 'CXCompletionContext_AnyType', (CXCompletionContext_AnyValue:=2): 'CXCompletionContext_AnyValue', (CXCompletionContext_ObjCObjectValue:=4): 'CXCompletionContext_ObjCObjectValue', (CXCompletionContext_ObjCSelectorValue:=8): 'CXCompletionContext_ObjCSelectorValue', (CXCompletionContext_CXXClassTypeValue:=16): 'CXCompletionContext_CXXClassTypeValue', (CXCompletionContext_DotMemberAccess:=32): 'CXCompletionContext_DotMemberAccess', (CXCompletionContext_ArrowMemberAccess:=64): 'CXCompletionContext_ArrowMemberAccess', (CXCompletionContext_ObjCPropertyAccess:=128): 'CXCompletionContext_ObjCPropertyAccess', (CXCompletionContext_EnumTag:=256): 'CXCompletionContext_EnumTag', (CXCompletionContext_UnionTag:=512): 'CXCompletionContext_UnionTag', (CXCompletionContext_StructTag:=1024): 'CXCompletionContext_StructTag', (CXCompletionContext_ClassTag:=2048): 'CXCompletionContext_ClassTag', (CXCompletionContext_Namespace:=4096): 'CXCompletionContext_Namespace', (CXCompletionContext_NestedNameSpecifier:=8192): 'CXCompletionContext_NestedNameSpecifier', (CXCompletionContext_ObjCInterface:=16384): 'CXCompletionContext_ObjCInterface', (CXCompletionContext_ObjCProtocol:=32768): 'CXCompletionContext_ObjCProtocol', (CXCompletionContext_ObjCCategory:=65536): 'CXCompletionContext_ObjCCategory', (CXCompletionContext_ObjCInstanceMessage:=131072): 'CXCompletionContext_ObjCInstanceMessage', (CXCompletionContext_ObjCClassMessage:=262144): 'CXCompletionContext_ObjCClassMessage', (CXCompletionContext_ObjCSelectorName:=524288): 'CXCompletionContext_ObjCSelectorName', (CXCompletionContext_MacroName:=1048576): 'CXCompletionContext_MacroName', (CXCompletionContext_NaturalLanguage:=2097152): 'CXCompletionContext_NaturalLanguage', (CXCompletionContext_IncludedFile:=4194304): 'CXCompletionContext_IncludedFile', (CXCompletionContext_Unknown:=8388607): 'CXCompletionContext_Unknown'}
 @dll.bind
 def clang_defaultCodeCompleteOptions() -> ctypes.c_uint32: ...
 @dll.bind
-def clang_codeCompleteAt(TU:CXTranslationUnit, complete_filename:c.POINTER[ctypes.c_char], complete_line:ctypes.c_uint32, complete_column:ctypes.c_uint32, unsaved_files:c.POINTER[struct_CXUnsavedFile], num_unsaved_files:ctypes.c_uint32, options:ctypes.c_uint32) -> c.POINTER[CXCodeCompleteResults]: ...
+def clang_codeCompleteAt(TU:CXTranslationUnit, complete_filename:ctypes.POINTER(ctypes.c_char), complete_line:ctypes.c_uint32, complete_column:ctypes.c_uint32, unsaved_files:ctypes.POINTER(struct_CXUnsavedFile), num_unsaved_files:ctypes.c_uint32, options:ctypes.c_uint32) -> ctypes.POINTER(CXCodeCompleteResults): ...
 @dll.bind
-def clang_sortCodeCompletionResults(Results:c.POINTER[CXCompletionResult], NumResults:ctypes.c_uint32) -> None: ...
+def clang_sortCodeCompletionResults(Results:ctypes.POINTER(CXCompletionResult), NumResults:ctypes.c_uint32) -> None: ...
 @dll.bind
-def clang_disposeCodeCompleteResults(Results:c.POINTER[CXCodeCompleteResults]) -> None: ...
+def clang_disposeCodeCompleteResults(Results:ctypes.POINTER(CXCodeCompleteResults)) -> None: ...
 @dll.bind
-def clang_codeCompleteGetNumDiagnostics(Results:c.POINTER[CXCodeCompleteResults]) -> ctypes.c_uint32: ...
+def clang_codeCompleteGetNumDiagnostics(Results:ctypes.POINTER(CXCodeCompleteResults)) -> ctypes.c_uint32: ...
 @dll.bind
-def clang_codeCompleteGetDiagnostic(Results:c.POINTER[CXCodeCompleteResults], Index:ctypes.c_uint32) -> CXDiagnostic: ...
+def clang_codeCompleteGetDiagnostic(Results:ctypes.POINTER(CXCodeCompleteResults), Index:ctypes.c_uint32) -> CXDiagnostic: ...
 @dll.bind
-def clang_codeCompleteGetContexts(Results:c.POINTER[CXCodeCompleteResults]) -> ctypes.c_uint64: ...
+def clang_codeCompleteGetContexts(Results:ctypes.POINTER(CXCodeCompleteResults)) -> ctypes.c_uint64: ...
 @dll.bind
-def clang_codeCompleteGetContainerKind(Results:c.POINTER[CXCodeCompleteResults], IsIncomplete:c.POINTER[ctypes.c_uint32]) -> ctypes.c_uint32: ...
+def clang_codeCompleteGetContainerKind(Results:ctypes.POINTER(CXCodeCompleteResults), IsIncomplete:ctypes.POINTER(ctypes.c_uint32)) -> ctypes.c_uint32: ...
 @dll.bind
-def clang_codeCompleteGetContainerUSR(Results:c.POINTER[CXCodeCompleteResults]) -> CXString: ...
+def clang_codeCompleteGetContainerUSR(Results:ctypes.POINTER(CXCodeCompleteResults)) -> CXString: ...
 @dll.bind
-def clang_codeCompleteGetObjCSelector(Results:c.POINTER[CXCodeCompleteResults]) -> CXString: ...
+def clang_codeCompleteGetObjCSelector(Results:ctypes.POINTER(CXCodeCompleteResults)) -> CXString: ...
 @dll.bind
 def clang_getClangVersion() -> CXString: ...
 @dll.bind
 def clang_toggleCrashRecovery(isEnabled:ctypes.c_uint32) -> None: ...
-CXInclusionVisitor: TypeAlias = c.CFUNCTYPE[None, [ctypes.c_void_p, c.POINTER[CXSourceLocation], ctypes.c_uint32, ctypes.c_void_p]]
+CXInclusionVisitor: TypeAlias = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.POINTER(CXSourceLocation), ctypes.c_uint32, ctypes.c_void_p)
 @dll.bind
 def clang_getInclusions(tu:CXTranslationUnit, visitor:CXInclusionVisitor, client_data:CXClientData) -> None: ...
 CXEvalResultKind: dict[int, str] = {(CXEval_Int:=1): 'CXEval_Int', (CXEval_Float:=2): 'CXEval_Float', (CXEval_ObjCStrLiteral:=3): 'CXEval_ObjCStrLiteral', (CXEval_StrLiteral:=4): 'CXEval_StrLiteral', (CXEval_CFStr:=5): 'CXEval_CFStr', (CXEval_Other:=6): 'CXEval_Other', (CXEval_UnExposed:=0): 'CXEval_UnExposed'}
@@ -703,18 +703,18 @@ def clang_EvalResult_getAsUnsigned(E:CXEvalResult) -> ctypes.c_uint64: ...
 @dll.bind
 def clang_EvalResult_getAsDouble(E:CXEvalResult) -> ctypes.c_double: ...
 @dll.bind
-def clang_EvalResult_getAsStr(E:CXEvalResult) -> c.POINTER[ctypes.c_char]: ...
+def clang_EvalResult_getAsStr(E:CXEvalResult) -> ctypes.POINTER(ctypes.c_char): ...
 @dll.bind
 def clang_EvalResult_dispose(E:CXEvalResult) -> None: ...
 CXRemapping: TypeAlias = ctypes.c_void_p
 @dll.bind
-def clang_getRemappings(path:c.POINTER[ctypes.c_char]) -> CXRemapping: ...
+def clang_getRemappings(path:ctypes.POINTER(ctypes.c_char)) -> CXRemapping: ...
 @dll.bind
-def clang_getRemappingsFromFileList(filePaths:c.POINTER[c.POINTER[ctypes.c_char]], numFiles:ctypes.c_uint32) -> CXRemapping: ...
+def clang_getRemappingsFromFileList(filePaths:ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), numFiles:ctypes.c_uint32) -> CXRemapping: ...
 @dll.bind
 def clang_remap_getNumFiles(_0:CXRemapping) -> ctypes.c_uint32: ...
 @dll.bind
-def clang_remap_getFilenames(_0:CXRemapping, index:ctypes.c_uint32, original:c.POINTER[CXString], transformed:c.POINTER[CXString]) -> None: ...
+def clang_remap_getFilenames(_0:CXRemapping, index:ctypes.c_uint32, original:ctypes.POINTER(CXString), transformed:ctypes.POINTER(CXString)) -> None: ...
 @dll.bind
 def clang_remap_dispose(_0:CXRemapping) -> None: ...
 enum_CXVisitorResult: dict[int, str] = {(CXVisit_Break:=0): 'CXVisit_Break', (CXVisit_Continue:=1): 'CXVisit_Continue'}
@@ -722,8 +722,8 @@ enum_CXVisitorResult: dict[int, str] = {(CXVisit_Break:=0): 'CXVisit_Break', (CX
 class struct_CXCursorAndRangeVisitor(c.Struct):
   SIZE = 16
   context: 'ctypes.c_void_p'
-  visit: 'c.CFUNCTYPE[ctypes.c_uint32, [ctypes.c_void_p, CXCursor, CXSourceRange]]'
-struct_CXCursorAndRangeVisitor.register_fields([('context', ctypes.c_void_p, 0), ('visit', c.CFUNCTYPE[ctypes.c_uint32, [ctypes.c_void_p, CXCursor, CXSourceRange]], 8)])
+  visit: 'ctypes._CFunctionType'
+struct_CXCursorAndRangeVisitor.register_fields([('context', ctypes.c_void_p, 0), ('visit', ctypes.CFUNCTYPE(ctypes.c_uint32, ctypes.c_void_p, CXCursor, CXSourceRange), 8)])
 CXCursorAndRangeVisitor: TypeAlias = struct_CXCursorAndRangeVisitor
 CXResult: dict[int, str] = {(CXResult_Success:=0): 'CXResult_Success', (CXResult_Invalid:=1): 'CXResult_Invalid', (CXResult_VisitBreak:=2): 'CXResult_VisitBreak'}
 @dll.bind
@@ -731,7 +731,7 @@ def clang_findReferencesInFile(cursor:CXCursor, file:CXFile, visitor:CXCursorAnd
 @dll.bind
 def clang_findIncludesInFile(TU:CXTranslationUnit, file:CXFile, visitor:CXCursorAndRangeVisitor) -> ctypes.c_uint32: ...
 class struct__CXCursorAndRangeVisitorBlock(c.Struct): pass
-CXCursorAndRangeVisitorBlock: TypeAlias = c.POINTER[struct__CXCursorAndRangeVisitorBlock]
+CXCursorAndRangeVisitorBlock: TypeAlias = ctypes.POINTER(struct__CXCursorAndRangeVisitorBlock)
 @dll.bind
 def clang_findReferencesInFileWithBlock(_0:CXCursor, _1:CXFile, _2:CXCursorAndRangeVisitorBlock) -> ctypes.c_uint32: ...
 @dll.bind
@@ -743,26 +743,26 @@ CXIdxClientASTFile: TypeAlias = ctypes.c_void_p
 @c.record
 class CXIdxLoc(c.Struct):
   SIZE = 24
-  ptr_data: 'c.Array[ctypes.c_void_p, Literal[2]]'
-  int_data: int
-CXIdxLoc.register_fields([('ptr_data', c.Array[ctypes.c_void_p, Literal[2]], 0), ('int_data', ctypes.c_uint32, 16)])
+  ptr_data: 'list[ctypes.c_void_p]'
+  int_data: 'int'
+CXIdxLoc.register_fields([('ptr_data', (ctypes.c_void_p * 2), 0), ('int_data', ctypes.c_uint32, 16)])
 @c.record
 class CXIdxIncludedFileInfo(c.Struct):
   SIZE = 56
   hashLoc: 'CXIdxLoc'
-  filename: 'c.POINTER[ctypes.c_char]'
-  file: 'CXFile'
-  isImport: int
-  isAngled: int
-  isModuleImport: int
-CXIdxIncludedFileInfo.register_fields([('hashLoc', CXIdxLoc, 0), ('filename', c.POINTER[ctypes.c_char], 24), ('file', CXFile, 32), ('isImport', ctypes.c_int32, 40), ('isAngled', ctypes.c_int32, 44), ('isModuleImport', ctypes.c_int32, 48)])
+  filename: 'ctypes._Pointer[bytes]'
+  file: 'ctypes.c_void_p'
+  isImport: 'int'
+  isAngled: 'int'
+  isModuleImport: 'int'
+CXIdxIncludedFileInfo.register_fields([('hashLoc', CXIdxLoc, 0), ('filename', ctypes.POINTER(ctypes.c_char), 24), ('file', CXFile, 32), ('isImport', ctypes.c_int32, 40), ('isAngled', ctypes.c_int32, 44), ('isModuleImport', ctypes.c_int32, 48)])
 @c.record
 class CXIdxImportedASTFileInfo(c.Struct):
   SIZE = 48
-  file: 'CXFile'
-  module: 'CXModule'
+  file: 'ctypes.c_void_p'
+  module: 'ctypes.c_void_p'
   loc: 'CXIdxLoc'
-  isImplicit: int
+  isImplicit: 'int'
 CXIdxImportedASTFileInfo.register_fields([('file', CXFile, 0), ('module', CXModule, 8), ('loc', CXIdxLoc, 16), ('isImplicit', ctypes.c_int32, 40)])
 CXIdxEntityKind: dict[int, str] = {(CXIdxEntity_Unexposed:=0): 'CXIdxEntity_Unexposed', (CXIdxEntity_Typedef:=1): 'CXIdxEntity_Typedef', (CXIdxEntity_Function:=2): 'CXIdxEntity_Function', (CXIdxEntity_Variable:=3): 'CXIdxEntity_Variable', (CXIdxEntity_Field:=4): 'CXIdxEntity_Field', (CXIdxEntity_EnumConstant:=5): 'CXIdxEntity_EnumConstant', (CXIdxEntity_ObjCClass:=6): 'CXIdxEntity_ObjCClass', (CXIdxEntity_ObjCProtocol:=7): 'CXIdxEntity_ObjCProtocol', (CXIdxEntity_ObjCCategory:=8): 'CXIdxEntity_ObjCCategory', (CXIdxEntity_ObjCInstanceMethod:=9): 'CXIdxEntity_ObjCInstanceMethod', (CXIdxEntity_ObjCClassMethod:=10): 'CXIdxEntity_ObjCClassMethod', (CXIdxEntity_ObjCProperty:=11): 'CXIdxEntity_ObjCProperty', (CXIdxEntity_ObjCIvar:=12): 'CXIdxEntity_ObjCIvar', (CXIdxEntity_Enum:=13): 'CXIdxEntity_Enum', (CXIdxEntity_Struct:=14): 'CXIdxEntity_Struct', (CXIdxEntity_Union:=15): 'CXIdxEntity_Union', (CXIdxEntity_CXXClass:=16): 'CXIdxEntity_CXXClass', (CXIdxEntity_CXXNamespace:=17): 'CXIdxEntity_CXXNamespace', (CXIdxEntity_CXXNamespaceAlias:=18): 'CXIdxEntity_CXXNamespaceAlias', (CXIdxEntity_CXXStaticVariable:=19): 'CXIdxEntity_CXXStaticVariable', (CXIdxEntity_CXXStaticMethod:=20): 'CXIdxEntity_CXXStaticMethod', (CXIdxEntity_CXXInstanceMethod:=21): 'CXIdxEntity_CXXInstanceMethod', (CXIdxEntity_CXXConstructor:=22): 'CXIdxEntity_CXXConstructor', (CXIdxEntity_CXXDestructor:=23): 'CXIdxEntity_CXXDestructor', (CXIdxEntity_CXXConversionFunction:=24): 'CXIdxEntity_CXXConversionFunction', (CXIdxEntity_CXXTypeAlias:=25): 'CXIdxEntity_CXXTypeAlias', (CXIdxEntity_CXXInterface:=26): 'CXIdxEntity_CXXInterface', (CXIdxEntity_CXXConcept:=27): 'CXIdxEntity_CXXConcept'}
 CXIdxEntityLanguage: dict[int, str] = {(CXIdxEntityLang_None:=0): 'CXIdxEntityLang_None', (CXIdxEntityLang_C:=1): 'CXIdxEntityLang_C', (CXIdxEntityLang_ObjC:=2): 'CXIdxEntityLang_ObjC', (CXIdxEntityLang_CXX:=3): 'CXIdxEntityLang_CXX', (CXIdxEntityLang_Swift:=4): 'CXIdxEntityLang_Swift'}
@@ -771,22 +771,22 @@ CXIdxAttrKind: dict[int, str] = {(CXIdxAttr_Unexposed:=0): 'CXIdxAttr_Unexposed'
 @c.record
 class CXIdxAttrInfo(c.Struct):
   SIZE = 64
-  kind: int
+  kind: 'int'
   cursor: 'CXCursor'
   loc: 'CXIdxLoc'
 CXIdxAttrInfo.register_fields([('kind', ctypes.c_uint32, 0), ('cursor', CXCursor, 8), ('loc', CXIdxLoc, 40)])
 @c.record
 class CXIdxEntityInfo(c.Struct):
   SIZE = 80
-  kind: int
-  templateKind: int
-  lang: int
-  name: 'c.POINTER[ctypes.c_char]'
-  USR: 'c.POINTER[ctypes.c_char]'
+  kind: 'int'
+  templateKind: 'int'
+  lang: 'int'
+  name: 'ctypes._Pointer[bytes]'
+  USR: 'ctypes._Pointer[bytes]'
   cursor: 'CXCursor'
-  attributes: 'c.POINTER[c.POINTER[CXIdxAttrInfo]]'
-  numAttributes: int
-CXIdxEntityInfo.register_fields([('kind', ctypes.c_uint32, 0), ('templateKind', ctypes.c_uint32, 4), ('lang', ctypes.c_uint32, 8), ('name', c.POINTER[ctypes.c_char], 16), ('USR', c.POINTER[ctypes.c_char], 24), ('cursor', CXCursor, 32), ('attributes', c.POINTER[c.POINTER[CXIdxAttrInfo]], 64), ('numAttributes', ctypes.c_uint32, 72)])
+  attributes: 'ctypes._Pointer[ctypes._Pointer[CXIdxAttrInfo]]'
+  numAttributes: 'int'
+CXIdxEntityInfo.register_fields([('kind', ctypes.c_uint32, 0), ('templateKind', ctypes.c_uint32, 4), ('lang', ctypes.c_uint32, 8), ('name', ctypes.POINTER(ctypes.c_char), 16), ('USR', ctypes.POINTER(ctypes.c_char), 24), ('cursor', CXCursor, 32), ('attributes', ctypes.POINTER(ctypes.POINTER(CXIdxAttrInfo)), 64), ('numAttributes', ctypes.c_uint32, 72)])
 @c.record
 class CXIdxContainerInfo(c.Struct):
   SIZE = 32
@@ -795,135 +795,135 @@ CXIdxContainerInfo.register_fields([('cursor', CXCursor, 0)])
 @c.record
 class CXIdxIBOutletCollectionAttrInfo(c.Struct):
   SIZE = 72
-  attrInfo: 'c.POINTER[CXIdxAttrInfo]'
-  objcClass: 'c.POINTER[CXIdxEntityInfo]'
+  attrInfo: 'ctypes._Pointer[CXIdxAttrInfo]'
+  objcClass: 'ctypes._Pointer[CXIdxEntityInfo]'
   classCursor: 'CXCursor'
   classLoc: 'CXIdxLoc'
-CXIdxIBOutletCollectionAttrInfo.register_fields([('attrInfo', c.POINTER[CXIdxAttrInfo], 0), ('objcClass', c.POINTER[CXIdxEntityInfo], 8), ('classCursor', CXCursor, 16), ('classLoc', CXIdxLoc, 48)])
+CXIdxIBOutletCollectionAttrInfo.register_fields([('attrInfo', ctypes.POINTER(CXIdxAttrInfo), 0), ('objcClass', ctypes.POINTER(CXIdxEntityInfo), 8), ('classCursor', CXCursor, 16), ('classLoc', CXIdxLoc, 48)])
 CXIdxDeclInfoFlags: dict[int, str] = {(CXIdxDeclFlag_Skipped:=1): 'CXIdxDeclFlag_Skipped'}
 @c.record
 class CXIdxDeclInfo(c.Struct):
   SIZE = 128
-  entityInfo: 'c.POINTER[CXIdxEntityInfo]'
+  entityInfo: 'ctypes._Pointer[CXIdxEntityInfo]'
   cursor: 'CXCursor'
   loc: 'CXIdxLoc'
-  semanticContainer: 'c.POINTER[CXIdxContainerInfo]'
-  lexicalContainer: 'c.POINTER[CXIdxContainerInfo]'
-  isRedeclaration: int
-  isDefinition: int
-  isContainer: int
-  declAsContainer: 'c.POINTER[CXIdxContainerInfo]'
-  isImplicit: int
-  attributes: 'c.POINTER[c.POINTER[CXIdxAttrInfo]]'
-  numAttributes: int
-  flags: int
-CXIdxDeclInfo.register_fields([('entityInfo', c.POINTER[CXIdxEntityInfo], 0), ('cursor', CXCursor, 8), ('loc', CXIdxLoc, 40), ('semanticContainer', c.POINTER[CXIdxContainerInfo], 64), ('lexicalContainer', c.POINTER[CXIdxContainerInfo], 72), ('isRedeclaration', ctypes.c_int32, 80), ('isDefinition', ctypes.c_int32, 84), ('isContainer', ctypes.c_int32, 88), ('declAsContainer', c.POINTER[CXIdxContainerInfo], 96), ('isImplicit', ctypes.c_int32, 104), ('attributes', c.POINTER[c.POINTER[CXIdxAttrInfo]], 112), ('numAttributes', ctypes.c_uint32, 120), ('flags', ctypes.c_uint32, 124)])
+  semanticContainer: 'ctypes._Pointer[CXIdxContainerInfo]'
+  lexicalContainer: 'ctypes._Pointer[CXIdxContainerInfo]'
+  isRedeclaration: 'int'
+  isDefinition: 'int'
+  isContainer: 'int'
+  declAsContainer: 'ctypes._Pointer[CXIdxContainerInfo]'
+  isImplicit: 'int'
+  attributes: 'ctypes._Pointer[ctypes._Pointer[CXIdxAttrInfo]]'
+  numAttributes: 'int'
+  flags: 'int'
+CXIdxDeclInfo.register_fields([('entityInfo', ctypes.POINTER(CXIdxEntityInfo), 0), ('cursor', CXCursor, 8), ('loc', CXIdxLoc, 40), ('semanticContainer', ctypes.POINTER(CXIdxContainerInfo), 64), ('lexicalContainer', ctypes.POINTER(CXIdxContainerInfo), 72), ('isRedeclaration', ctypes.c_int32, 80), ('isDefinition', ctypes.c_int32, 84), ('isContainer', ctypes.c_int32, 88), ('declAsContainer', ctypes.POINTER(CXIdxContainerInfo), 96), ('isImplicit', ctypes.c_int32, 104), ('attributes', ctypes.POINTER(ctypes.POINTER(CXIdxAttrInfo)), 112), ('numAttributes', ctypes.c_uint32, 120), ('flags', ctypes.c_uint32, 124)])
 CXIdxObjCContainerKind: dict[int, str] = {(CXIdxObjCContainer_ForwardRef:=0): 'CXIdxObjCContainer_ForwardRef', (CXIdxObjCContainer_Interface:=1): 'CXIdxObjCContainer_Interface', (CXIdxObjCContainer_Implementation:=2): 'CXIdxObjCContainer_Implementation'}
 @c.record
 class CXIdxObjCContainerDeclInfo(c.Struct):
   SIZE = 16
-  declInfo: 'c.POINTER[CXIdxDeclInfo]'
-  kind: int
-CXIdxObjCContainerDeclInfo.register_fields([('declInfo', c.POINTER[CXIdxDeclInfo], 0), ('kind', ctypes.c_uint32, 8)])
+  declInfo: 'ctypes._Pointer[CXIdxDeclInfo]'
+  kind: 'int'
+CXIdxObjCContainerDeclInfo.register_fields([('declInfo', ctypes.POINTER(CXIdxDeclInfo), 0), ('kind', ctypes.c_uint32, 8)])
 @c.record
 class CXIdxBaseClassInfo(c.Struct):
   SIZE = 64
-  base: 'c.POINTER[CXIdxEntityInfo]'
+  base: 'ctypes._Pointer[CXIdxEntityInfo]'
   cursor: 'CXCursor'
   loc: 'CXIdxLoc'
-CXIdxBaseClassInfo.register_fields([('base', c.POINTER[CXIdxEntityInfo], 0), ('cursor', CXCursor, 8), ('loc', CXIdxLoc, 40)])
+CXIdxBaseClassInfo.register_fields([('base', ctypes.POINTER(CXIdxEntityInfo), 0), ('cursor', CXCursor, 8), ('loc', CXIdxLoc, 40)])
 @c.record
 class CXIdxObjCProtocolRefInfo(c.Struct):
   SIZE = 64
-  protocol: 'c.POINTER[CXIdxEntityInfo]'
+  protocol: 'ctypes._Pointer[CXIdxEntityInfo]'
   cursor: 'CXCursor'
   loc: 'CXIdxLoc'
-CXIdxObjCProtocolRefInfo.register_fields([('protocol', c.POINTER[CXIdxEntityInfo], 0), ('cursor', CXCursor, 8), ('loc', CXIdxLoc, 40)])
+CXIdxObjCProtocolRefInfo.register_fields([('protocol', ctypes.POINTER(CXIdxEntityInfo), 0), ('cursor', CXCursor, 8), ('loc', CXIdxLoc, 40)])
 @c.record
 class CXIdxObjCProtocolRefListInfo(c.Struct):
   SIZE = 16
-  protocols: 'c.POINTER[c.POINTER[CXIdxObjCProtocolRefInfo]]'
-  numProtocols: int
-CXIdxObjCProtocolRefListInfo.register_fields([('protocols', c.POINTER[c.POINTER[CXIdxObjCProtocolRefInfo]], 0), ('numProtocols', ctypes.c_uint32, 8)])
+  protocols: 'ctypes._Pointer[ctypes._Pointer[CXIdxObjCProtocolRefInfo]]'
+  numProtocols: 'int'
+CXIdxObjCProtocolRefListInfo.register_fields([('protocols', ctypes.POINTER(ctypes.POINTER(CXIdxObjCProtocolRefInfo)), 0), ('numProtocols', ctypes.c_uint32, 8)])
 @c.record
 class CXIdxObjCInterfaceDeclInfo(c.Struct):
   SIZE = 24
-  containerInfo: 'c.POINTER[CXIdxObjCContainerDeclInfo]'
-  superInfo: 'c.POINTER[CXIdxBaseClassInfo]'
-  protocols: 'c.POINTER[CXIdxObjCProtocolRefListInfo]'
-CXIdxObjCInterfaceDeclInfo.register_fields([('containerInfo', c.POINTER[CXIdxObjCContainerDeclInfo], 0), ('superInfo', c.POINTER[CXIdxBaseClassInfo], 8), ('protocols', c.POINTER[CXIdxObjCProtocolRefListInfo], 16)])
+  containerInfo: 'ctypes._Pointer[CXIdxObjCContainerDeclInfo]'
+  superInfo: 'ctypes._Pointer[CXIdxBaseClassInfo]'
+  protocols: 'ctypes._Pointer[CXIdxObjCProtocolRefListInfo]'
+CXIdxObjCInterfaceDeclInfo.register_fields([('containerInfo', ctypes.POINTER(CXIdxObjCContainerDeclInfo), 0), ('superInfo', ctypes.POINTER(CXIdxBaseClassInfo), 8), ('protocols', ctypes.POINTER(CXIdxObjCProtocolRefListInfo), 16)])
 @c.record
 class CXIdxObjCCategoryDeclInfo(c.Struct):
   SIZE = 80
-  containerInfo: 'c.POINTER[CXIdxObjCContainerDeclInfo]'
-  objcClass: 'c.POINTER[CXIdxEntityInfo]'
+  containerInfo: 'ctypes._Pointer[CXIdxObjCContainerDeclInfo]'
+  objcClass: 'ctypes._Pointer[CXIdxEntityInfo]'
   classCursor: 'CXCursor'
   classLoc: 'CXIdxLoc'
-  protocols: 'c.POINTER[CXIdxObjCProtocolRefListInfo]'
-CXIdxObjCCategoryDeclInfo.register_fields([('containerInfo', c.POINTER[CXIdxObjCContainerDeclInfo], 0), ('objcClass', c.POINTER[CXIdxEntityInfo], 8), ('classCursor', CXCursor, 16), ('classLoc', CXIdxLoc, 48), ('protocols', c.POINTER[CXIdxObjCProtocolRefListInfo], 72)])
+  protocols: 'ctypes._Pointer[CXIdxObjCProtocolRefListInfo]'
+CXIdxObjCCategoryDeclInfo.register_fields([('containerInfo', ctypes.POINTER(CXIdxObjCContainerDeclInfo), 0), ('objcClass', ctypes.POINTER(CXIdxEntityInfo), 8), ('classCursor', CXCursor, 16), ('classLoc', CXIdxLoc, 48), ('protocols', ctypes.POINTER(CXIdxObjCProtocolRefListInfo), 72)])
 @c.record
 class CXIdxObjCPropertyDeclInfo(c.Struct):
   SIZE = 24
-  declInfo: 'c.POINTER[CXIdxDeclInfo]'
-  getter: 'c.POINTER[CXIdxEntityInfo]'
-  setter: 'c.POINTER[CXIdxEntityInfo]'
-CXIdxObjCPropertyDeclInfo.register_fields([('declInfo', c.POINTER[CXIdxDeclInfo], 0), ('getter', c.POINTER[CXIdxEntityInfo], 8), ('setter', c.POINTER[CXIdxEntityInfo], 16)])
+  declInfo: 'ctypes._Pointer[CXIdxDeclInfo]'
+  getter: 'ctypes._Pointer[CXIdxEntityInfo]'
+  setter: 'ctypes._Pointer[CXIdxEntityInfo]'
+CXIdxObjCPropertyDeclInfo.register_fields([('declInfo', ctypes.POINTER(CXIdxDeclInfo), 0), ('getter', ctypes.POINTER(CXIdxEntityInfo), 8), ('setter', ctypes.POINTER(CXIdxEntityInfo), 16)])
 @c.record
 class CXIdxCXXClassDeclInfo(c.Struct):
   SIZE = 24
-  declInfo: 'c.POINTER[CXIdxDeclInfo]'
-  bases: 'c.POINTER[c.POINTER[CXIdxBaseClassInfo]]'
-  numBases: int
-CXIdxCXXClassDeclInfo.register_fields([('declInfo', c.POINTER[CXIdxDeclInfo], 0), ('bases', c.POINTER[c.POINTER[CXIdxBaseClassInfo]], 8), ('numBases', ctypes.c_uint32, 16)])
+  declInfo: 'ctypes._Pointer[CXIdxDeclInfo]'
+  bases: 'ctypes._Pointer[ctypes._Pointer[CXIdxBaseClassInfo]]'
+  numBases: 'int'
+CXIdxCXXClassDeclInfo.register_fields([('declInfo', ctypes.POINTER(CXIdxDeclInfo), 0), ('bases', ctypes.POINTER(ctypes.POINTER(CXIdxBaseClassInfo)), 8), ('numBases', ctypes.c_uint32, 16)])
 CXIdxEntityRefKind: dict[int, str] = {(CXIdxEntityRef_Direct:=1): 'CXIdxEntityRef_Direct', (CXIdxEntityRef_Implicit:=2): 'CXIdxEntityRef_Implicit'}
 CXSymbolRole: dict[int, str] = {(CXSymbolRole_None:=0): 'CXSymbolRole_None', (CXSymbolRole_Declaration:=1): 'CXSymbolRole_Declaration', (CXSymbolRole_Definition:=2): 'CXSymbolRole_Definition', (CXSymbolRole_Reference:=4): 'CXSymbolRole_Reference', (CXSymbolRole_Read:=8): 'CXSymbolRole_Read', (CXSymbolRole_Write:=16): 'CXSymbolRole_Write', (CXSymbolRole_Call:=32): 'CXSymbolRole_Call', (CXSymbolRole_Dynamic:=64): 'CXSymbolRole_Dynamic', (CXSymbolRole_AddressOf:=128): 'CXSymbolRole_AddressOf', (CXSymbolRole_Implicit:=256): 'CXSymbolRole_Implicit'}
 @c.record
 class CXIdxEntityRefInfo(c.Struct):
   SIZE = 96
-  kind: int
+  kind: 'int'
   cursor: 'CXCursor'
   loc: 'CXIdxLoc'
-  referencedEntity: 'c.POINTER[CXIdxEntityInfo]'
-  parentEntity: 'c.POINTER[CXIdxEntityInfo]'
-  container: 'c.POINTER[CXIdxContainerInfo]'
-  role: int
-CXIdxEntityRefInfo.register_fields([('kind', ctypes.c_uint32, 0), ('cursor', CXCursor, 8), ('loc', CXIdxLoc, 40), ('referencedEntity', c.POINTER[CXIdxEntityInfo], 64), ('parentEntity', c.POINTER[CXIdxEntityInfo], 72), ('container', c.POINTER[CXIdxContainerInfo], 80), ('role', ctypes.c_uint32, 88)])
+  referencedEntity: 'ctypes._Pointer[CXIdxEntityInfo]'
+  parentEntity: 'ctypes._Pointer[CXIdxEntityInfo]'
+  container: 'ctypes._Pointer[CXIdxContainerInfo]'
+  role: 'int'
+CXIdxEntityRefInfo.register_fields([('kind', ctypes.c_uint32, 0), ('cursor', CXCursor, 8), ('loc', CXIdxLoc, 40), ('referencedEntity', ctypes.POINTER(CXIdxEntityInfo), 64), ('parentEntity', ctypes.POINTER(CXIdxEntityInfo), 72), ('container', ctypes.POINTER(CXIdxContainerInfo), 80), ('role', ctypes.c_uint32, 88)])
 @c.record
 class IndexerCallbacks(c.Struct):
   SIZE = 64
-  abortQuery: 'c.CFUNCTYPE[ctypes.c_int32, [CXClientData, ctypes.c_void_p]]'
-  diagnostic: 'c.CFUNCTYPE[None, [CXClientData, CXDiagnosticSet, ctypes.c_void_p]]'
-  enteredMainFile: 'c.CFUNCTYPE[CXIdxClientFile, [CXClientData, CXFile, ctypes.c_void_p]]'
-  ppIncludedFile: 'c.CFUNCTYPE[CXIdxClientFile, [CXClientData, c.POINTER[CXIdxIncludedFileInfo]]]'
-  importedASTFile: 'c.CFUNCTYPE[CXIdxClientASTFile, [CXClientData, c.POINTER[CXIdxImportedASTFileInfo]]]'
-  startedTranslationUnit: 'c.CFUNCTYPE[CXIdxClientContainer, [CXClientData, ctypes.c_void_p]]'
-  indexDeclaration: 'c.CFUNCTYPE[None, [CXClientData, c.POINTER[CXIdxDeclInfo]]]'
-  indexEntityReference: 'c.CFUNCTYPE[None, [CXClientData, c.POINTER[CXIdxEntityRefInfo]]]'
-IndexerCallbacks.register_fields([('abortQuery', c.CFUNCTYPE[ctypes.c_int32, [CXClientData, ctypes.c_void_p]], 0), ('diagnostic', c.CFUNCTYPE[None, [CXClientData, CXDiagnosticSet, ctypes.c_void_p]], 8), ('enteredMainFile', c.CFUNCTYPE[CXIdxClientFile, [CXClientData, CXFile, ctypes.c_void_p]], 16), ('ppIncludedFile', c.CFUNCTYPE[CXIdxClientFile, [CXClientData, c.POINTER[CXIdxIncludedFileInfo]]], 24), ('importedASTFile', c.CFUNCTYPE[CXIdxClientASTFile, [CXClientData, c.POINTER[CXIdxImportedASTFileInfo]]], 32), ('startedTranslationUnit', c.CFUNCTYPE[CXIdxClientContainer, [CXClientData, ctypes.c_void_p]], 40), ('indexDeclaration', c.CFUNCTYPE[None, [CXClientData, c.POINTER[CXIdxDeclInfo]]], 48), ('indexEntityReference', c.CFUNCTYPE[None, [CXClientData, c.POINTER[CXIdxEntityRefInfo]]], 56)])
+  abortQuery: 'ctypes._CFunctionType'
+  diagnostic: 'ctypes._CFunctionType'
+  enteredMainFile: 'ctypes._CFunctionType'
+  ppIncludedFile: 'ctypes._CFunctionType'
+  importedASTFile: 'ctypes._CFunctionType'
+  startedTranslationUnit: 'ctypes._CFunctionType'
+  indexDeclaration: 'ctypes._CFunctionType'
+  indexEntityReference: 'ctypes._CFunctionType'
+IndexerCallbacks.register_fields([('abortQuery', ctypes.CFUNCTYPE(ctypes.c_int32, CXClientData, ctypes.c_void_p), 0), ('diagnostic', ctypes.CFUNCTYPE(None, CXClientData, CXDiagnosticSet, ctypes.c_void_p), 8), ('enteredMainFile', ctypes.CFUNCTYPE(CXIdxClientFile, CXClientData, CXFile, ctypes.c_void_p), 16), ('ppIncludedFile', ctypes.CFUNCTYPE(CXIdxClientFile, CXClientData, ctypes.POINTER(CXIdxIncludedFileInfo)), 24), ('importedASTFile', ctypes.CFUNCTYPE(CXIdxClientASTFile, CXClientData, ctypes.POINTER(CXIdxImportedASTFileInfo)), 32), ('startedTranslationUnit', ctypes.CFUNCTYPE(CXIdxClientContainer, CXClientData, ctypes.c_void_p), 40), ('indexDeclaration', ctypes.CFUNCTYPE(None, CXClientData, ctypes.POINTER(CXIdxDeclInfo)), 48), ('indexEntityReference', ctypes.CFUNCTYPE(None, CXClientData, ctypes.POINTER(CXIdxEntityRefInfo)), 56)])
 @dll.bind
 def clang_index_isEntityObjCContainerKind(_0:ctypes.c_uint32) -> ctypes.c_int32: ...
 @dll.bind
-def clang_index_getObjCContainerDeclInfo(_0:c.POINTER[CXIdxDeclInfo]) -> c.POINTER[CXIdxObjCContainerDeclInfo]: ...
+def clang_index_getObjCContainerDeclInfo(_0:ctypes.POINTER(CXIdxDeclInfo)) -> ctypes.POINTER(CXIdxObjCContainerDeclInfo): ...
 @dll.bind
-def clang_index_getObjCInterfaceDeclInfo(_0:c.POINTER[CXIdxDeclInfo]) -> c.POINTER[CXIdxObjCInterfaceDeclInfo]: ...
+def clang_index_getObjCInterfaceDeclInfo(_0:ctypes.POINTER(CXIdxDeclInfo)) -> ctypes.POINTER(CXIdxObjCInterfaceDeclInfo): ...
 @dll.bind
-def clang_index_getObjCCategoryDeclInfo(_0:c.POINTER[CXIdxDeclInfo]) -> c.POINTER[CXIdxObjCCategoryDeclInfo]: ...
+def clang_index_getObjCCategoryDeclInfo(_0:ctypes.POINTER(CXIdxDeclInfo)) -> ctypes.POINTER(CXIdxObjCCategoryDeclInfo): ...
 @dll.bind
-def clang_index_getObjCProtocolRefListInfo(_0:c.POINTER[CXIdxDeclInfo]) -> c.POINTER[CXIdxObjCProtocolRefListInfo]: ...
+def clang_index_getObjCProtocolRefListInfo(_0:ctypes.POINTER(CXIdxDeclInfo)) -> ctypes.POINTER(CXIdxObjCProtocolRefListInfo): ...
 @dll.bind
-def clang_index_getObjCPropertyDeclInfo(_0:c.POINTER[CXIdxDeclInfo]) -> c.POINTER[CXIdxObjCPropertyDeclInfo]: ...
+def clang_index_getObjCPropertyDeclInfo(_0:ctypes.POINTER(CXIdxDeclInfo)) -> ctypes.POINTER(CXIdxObjCPropertyDeclInfo): ...
 @dll.bind
-def clang_index_getIBOutletCollectionAttrInfo(_0:c.POINTER[CXIdxAttrInfo]) -> c.POINTER[CXIdxIBOutletCollectionAttrInfo]: ...
+def clang_index_getIBOutletCollectionAttrInfo(_0:ctypes.POINTER(CXIdxAttrInfo)) -> ctypes.POINTER(CXIdxIBOutletCollectionAttrInfo): ...
 @dll.bind
-def clang_index_getCXXClassDeclInfo(_0:c.POINTER[CXIdxDeclInfo]) -> c.POINTER[CXIdxCXXClassDeclInfo]: ...
+def clang_index_getCXXClassDeclInfo(_0:ctypes.POINTER(CXIdxDeclInfo)) -> ctypes.POINTER(CXIdxCXXClassDeclInfo): ...
 @dll.bind
-def clang_index_getClientContainer(_0:c.POINTER[CXIdxContainerInfo]) -> CXIdxClientContainer: ...
+def clang_index_getClientContainer(_0:ctypes.POINTER(CXIdxContainerInfo)) -> CXIdxClientContainer: ...
 @dll.bind
-def clang_index_setClientContainer(_0:c.POINTER[CXIdxContainerInfo], _1:CXIdxClientContainer) -> None: ...
+def clang_index_setClientContainer(_0:ctypes.POINTER(CXIdxContainerInfo), _1:CXIdxClientContainer) -> None: ...
 @dll.bind
-def clang_index_getClientEntity(_0:c.POINTER[CXIdxEntityInfo]) -> CXIdxClientEntity: ...
+def clang_index_getClientEntity(_0:ctypes.POINTER(CXIdxEntityInfo)) -> CXIdxClientEntity: ...
 @dll.bind
-def clang_index_setClientEntity(_0:c.POINTER[CXIdxEntityInfo], _1:CXIdxClientEntity) -> None: ...
+def clang_index_setClientEntity(_0:ctypes.POINTER(CXIdxEntityInfo), _1:CXIdxClientEntity) -> None: ...
 CXIndexAction: TypeAlias = ctypes.c_void_p
 @dll.bind
 def clang_IndexAction_create(CIdx:CXIndex) -> CXIndexAction: ...
@@ -931,16 +931,16 @@ def clang_IndexAction_create(CIdx:CXIndex) -> CXIndexAction: ...
 def clang_IndexAction_dispose(_0:CXIndexAction) -> None: ...
 CXIndexOptFlags: dict[int, str] = {(CXIndexOpt_None:=0): 'CXIndexOpt_None', (CXIndexOpt_SuppressRedundantRefs:=1): 'CXIndexOpt_SuppressRedundantRefs', (CXIndexOpt_IndexFunctionLocalSymbols:=2): 'CXIndexOpt_IndexFunctionLocalSymbols', (CXIndexOpt_IndexImplicitTemplateInstantiations:=4): 'CXIndexOpt_IndexImplicitTemplateInstantiations', (CXIndexOpt_SuppressWarnings:=8): 'CXIndexOpt_SuppressWarnings', (CXIndexOpt_SkipParsedBodiesInSession:=16): 'CXIndexOpt_SkipParsedBodiesInSession'}
 @dll.bind
-def clang_indexSourceFile(_0:CXIndexAction, client_data:CXClientData, index_callbacks:c.POINTER[IndexerCallbacks], index_callbacks_size:ctypes.c_uint32, index_options:ctypes.c_uint32, source_filename:c.POINTER[ctypes.c_char], command_line_args:c.POINTER[c.POINTER[ctypes.c_char]], num_command_line_args:ctypes.c_int32, unsaved_files:c.POINTER[struct_CXUnsavedFile], num_unsaved_files:ctypes.c_uint32, out_TU:c.POINTER[CXTranslationUnit], TU_options:ctypes.c_uint32) -> ctypes.c_int32: ...
+def clang_indexSourceFile(_0:CXIndexAction, client_data:CXClientData, index_callbacks:ctypes.POINTER(IndexerCallbacks), index_callbacks_size:ctypes.c_uint32, index_options:ctypes.c_uint32, source_filename:ctypes.POINTER(ctypes.c_char), command_line_args:ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), num_command_line_args:ctypes.c_int32, unsaved_files:ctypes.POINTER(struct_CXUnsavedFile), num_unsaved_files:ctypes.c_uint32, out_TU:ctypes.POINTER(CXTranslationUnit), TU_options:ctypes.c_uint32) -> ctypes.c_int32: ...
 @dll.bind
-def clang_indexSourceFileFullArgv(_0:CXIndexAction, client_data:CXClientData, index_callbacks:c.POINTER[IndexerCallbacks], index_callbacks_size:ctypes.c_uint32, index_options:ctypes.c_uint32, source_filename:c.POINTER[ctypes.c_char], command_line_args:c.POINTER[c.POINTER[ctypes.c_char]], num_command_line_args:ctypes.c_int32, unsaved_files:c.POINTER[struct_CXUnsavedFile], num_unsaved_files:ctypes.c_uint32, out_TU:c.POINTER[CXTranslationUnit], TU_options:ctypes.c_uint32) -> ctypes.c_int32: ...
+def clang_indexSourceFileFullArgv(_0:CXIndexAction, client_data:CXClientData, index_callbacks:ctypes.POINTER(IndexerCallbacks), index_callbacks_size:ctypes.c_uint32, index_options:ctypes.c_uint32, source_filename:ctypes.POINTER(ctypes.c_char), command_line_args:ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), num_command_line_args:ctypes.c_int32, unsaved_files:ctypes.POINTER(struct_CXUnsavedFile), num_unsaved_files:ctypes.c_uint32, out_TU:ctypes.POINTER(CXTranslationUnit), TU_options:ctypes.c_uint32) -> ctypes.c_int32: ...
 @dll.bind
-def clang_indexTranslationUnit(_0:CXIndexAction, client_data:CXClientData, index_callbacks:c.POINTER[IndexerCallbacks], index_callbacks_size:ctypes.c_uint32, index_options:ctypes.c_uint32, _5:CXTranslationUnit) -> ctypes.c_int32: ...
+def clang_indexTranslationUnit(_0:CXIndexAction, client_data:CXClientData, index_callbacks:ctypes.POINTER(IndexerCallbacks), index_callbacks_size:ctypes.c_uint32, index_options:ctypes.c_uint32, _5:CXTranslationUnit) -> ctypes.c_int32: ...
 @dll.bind
-def clang_indexLoc_getFileLocation(loc:CXIdxLoc, indexFile:c.POINTER[CXIdxClientFile], file:c.POINTER[CXFile], line:c.POINTER[ctypes.c_uint32], column:c.POINTER[ctypes.c_uint32], offset:c.POINTER[ctypes.c_uint32]) -> None: ...
+def clang_indexLoc_getFileLocation(loc:CXIdxLoc, indexFile:ctypes.POINTER(CXIdxClientFile), file:ctypes.POINTER(CXFile), line:ctypes.POINTER(ctypes.c_uint32), column:ctypes.POINTER(ctypes.c_uint32), offset:ctypes.POINTER(ctypes.c_uint32)) -> None: ...
 @dll.bind
 def clang_indexLoc_getCXSourceLocation(loc:CXIdxLoc) -> CXSourceLocation: ...
-CXFieldVisitor: TypeAlias = c.CFUNCTYPE[ctypes.c_uint32, [CXCursor, ctypes.c_void_p]]
+CXFieldVisitor: TypeAlias = ctypes.CFUNCTYPE(ctypes.c_uint32, CXCursor, ctypes.c_void_p)
 @dll.bind
 def clang_Type_visitFields(T:CXType, visitor:CXFieldVisitor, client_data:CXClientData) -> ctypes.c_uint32: ...
 @dll.bind
@@ -956,11 +956,11 @@ def clang_getUnaryOperatorKindSpelling(kind:ctypes.c_uint32) -> CXString: ...
 @dll.bind
 def clang_getCursorUnaryOperatorKind(cursor:CXCursor) -> ctypes.c_uint32: ...
 @dll.bind
-def clang_getCString(string:CXString) -> c.POINTER[ctypes.c_char]: ...
+def clang_getCString(string:CXString) -> ctypes.POINTER(ctypes.c_char): ...
 @dll.bind
 def clang_disposeString(string:CXString) -> None: ...
 @dll.bind
-def clang_disposeStringSet(set:c.POINTER[CXStringSet]) -> None: ...
+def clang_disposeStringSet(set:ctypes.POINTER(CXStringSet)) -> None: ...
 @dll.bind
 def clang_getNullLocation() -> CXSourceLocation: ...
 @dll.bind
@@ -980,21 +980,21 @@ def clang_equalRanges(range1:CXSourceRange, range2:CXSourceRange) -> ctypes.c_ui
 @dll.bind
 def clang_Range_isNull(range:CXSourceRange) -> ctypes.c_int32: ...
 @dll.bind
-def clang_getExpansionLocation(location:CXSourceLocation, file:c.POINTER[CXFile], line:c.POINTER[ctypes.c_uint32], column:c.POINTER[ctypes.c_uint32], offset:c.POINTER[ctypes.c_uint32]) -> None: ...
+def clang_getExpansionLocation(location:CXSourceLocation, file:ctypes.POINTER(CXFile), line:ctypes.POINTER(ctypes.c_uint32), column:ctypes.POINTER(ctypes.c_uint32), offset:ctypes.POINTER(ctypes.c_uint32)) -> None: ...
 @dll.bind
-def clang_getPresumedLocation(location:CXSourceLocation, filename:c.POINTER[CXString], line:c.POINTER[ctypes.c_uint32], column:c.POINTER[ctypes.c_uint32]) -> None: ...
+def clang_getPresumedLocation(location:CXSourceLocation, filename:ctypes.POINTER(CXString), line:ctypes.POINTER(ctypes.c_uint32), column:ctypes.POINTER(ctypes.c_uint32)) -> None: ...
 @dll.bind
-def clang_getInstantiationLocation(location:CXSourceLocation, file:c.POINTER[CXFile], line:c.POINTER[ctypes.c_uint32], column:c.POINTER[ctypes.c_uint32], offset:c.POINTER[ctypes.c_uint32]) -> None: ...
+def clang_getInstantiationLocation(location:CXSourceLocation, file:ctypes.POINTER(CXFile), line:ctypes.POINTER(ctypes.c_uint32), column:ctypes.POINTER(ctypes.c_uint32), offset:ctypes.POINTER(ctypes.c_uint32)) -> None: ...
 @dll.bind
-def clang_getSpellingLocation(location:CXSourceLocation, file:c.POINTER[CXFile], line:c.POINTER[ctypes.c_uint32], column:c.POINTER[ctypes.c_uint32], offset:c.POINTER[ctypes.c_uint32]) -> None: ...
+def clang_getSpellingLocation(location:CXSourceLocation, file:ctypes.POINTER(CXFile), line:ctypes.POINTER(ctypes.c_uint32), column:ctypes.POINTER(ctypes.c_uint32), offset:ctypes.POINTER(ctypes.c_uint32)) -> None: ...
 @dll.bind
-def clang_getFileLocation(location:CXSourceLocation, file:c.POINTER[CXFile], line:c.POINTER[ctypes.c_uint32], column:c.POINTER[ctypes.c_uint32], offset:c.POINTER[ctypes.c_uint32]) -> None: ...
+def clang_getFileLocation(location:CXSourceLocation, file:ctypes.POINTER(CXFile), line:ctypes.POINTER(ctypes.c_uint32), column:ctypes.POINTER(ctypes.c_uint32), offset:ctypes.POINTER(ctypes.c_uint32)) -> None: ...
 @dll.bind
 def clang_getRangeStart(range:CXSourceRange) -> CXSourceLocation: ...
 @dll.bind
 def clang_getRangeEnd(range:CXSourceRange) -> CXSourceLocation: ...
 @dll.bind
-def clang_disposeSourceRangeList(ranges:c.POINTER[CXSourceRangeList]) -> None: ...
+def clang_disposeSourceRangeList(ranges:ctypes.POINTER(CXSourceRangeList)) -> None: ...
 @dll.bind
 def clang_getFileName(SFile:CXFile) -> CXString: ...
 time_t: TypeAlias = ctypes.c_int64
@@ -1003,10 +1003,10 @@ def clang_getFileTime(SFile:CXFile) -> time_t: ...
 @c.record
 class CXFileUniqueID(c.Struct):
   SIZE = 24
-  data: 'c.Array[ctypes.c_uint64, Literal[3]]'
-CXFileUniqueID.register_fields([('data', c.Array[ctypes.c_uint64, Literal[3]], 0)])
+  data: 'list[int]'
+CXFileUniqueID.register_fields([('data', (ctypes.c_uint64 * 3), 0)])
 @dll.bind
-def clang_getFileUniqueID(file:CXFile, outID:c.POINTER[CXFileUniqueID]) -> ctypes.c_int32: ...
+def clang_getFileUniqueID(file:CXFile, outID:ctypes.POINTER(CXFileUniqueID)) -> ctypes.c_int32: ...
 @dll.bind
 def clang_File_isEqual(file1:CXFile, file2:CXFile) -> ctypes.c_int32: ...
 @dll.bind
