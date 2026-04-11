@@ -109,7 +109,6 @@ def init_records() -> None:
 
 class Field:
   def __init__(self, typ, off, bit_width=None, bit_off=0, *, name=None, idx=0):
-    if issubclass(typ, Enum): typ = typ.__bases__[0]
     self.typ, self.off, self.bit_width, self.bit_off, self.name, self.idx = typ, off, bit_width, bit_off, name, idx
 
   def __set_name__(self, owner, name):
