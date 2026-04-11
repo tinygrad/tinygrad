@@ -25,7 +25,6 @@ class SimpleTokenizer:
     self._normal_tokens = {tok.encode(): tid for tok, tid in normal_tokens.items()} if preset == "gemma4" else {
       bytes(self._byte_decoder[c] for c in tok): tid for tok, tid in normal_tokens.items()}
     self._special_tokens = special_tokens
-    self._special_token_ids = set(special_tokens.values())
     self._tok2bytes = {tid: tok for tok, tid in self._normal_tokens.items()} | {tid: tok.encode() for tok, tid in self._special_tokens.items()}
     self.preset = preset
 
@@ -62,7 +61,7 @@ class SimpleTokenizer:
     return tokens + self._encode_sentence(text[pos:])
 
   def decode(self, ids:list[int]) -> str:
-    if self.preset == "gemma4": ids = [tid for tid in ids if tid not in self._special_token_ids]
+    if self.preset == "gemma4": ids = [tid for tid in ids if tid not in self._special_tokens.values()]
     dec = b''.join(self._tok2bytes[tid] for tid in ids).decode(errors='replace')
     return dec.replace("▁", " ") if self.preset == "gemma4" else dec
   def stream_decoder(self) -> typing.Callable[[int|None], str]:
@@ -146,7 +145,7 @@ class TransformerConfig:
   head_dim: int|tuple[int, ...]
   rope_theta: float|tuple[float, ...]
   rope_dim: int
-  v_head_dim: int|tuple[int, ...]
+  v_head_dim: int
   max_context: int = 0
   qk_norm: int|tuple[int, ...] = 0
   num_experts: int = 0
@@ -165,12 +164,12 @@ class TransformerConfig:
   num_kv_shared_layers: int = 0
   gemma4: bool = False
   expert_hidden_dim: int = 0
-  moe_dense_branch: bool = False
 
 class FFNBlock:
   def __init__(self, config:TransformerConfig, layer_idx:int=0):
     self.config = config
     self.hidden_dim = config.hidden_dim[layer_idx] if isinstance(config.hidden_dim, tuple) else config.hidden_dim
+    gemma_moe = config.gemma4 and config.num_experts > 0
 
     # --- RMSNorms --------------------------------------------------------
     self.attn_norm   = nn.RMSNorm(config.dim, config.norm_eps)
@@ -179,11 +178,11 @@ class FFNBlock:
     # --- feed-forward (MoE or dense) -------------------------------------
     self.ffn_gate_inp: nn.Linear|ScaledLinear
     self.ffn_down_exps: ExpertWeights|ScaledExpertWeights
-    if config.moe_dense_branch or config.num_experts == 0:
+    if gemma_moe or config.num_experts == 0:
       self.ffn_gate = nn.Linear(config.dim, self.hidden_dim, bias=False)
       self.ffn_up = nn.Linear(config.dim, self.hidden_dim, bias=False)
       self.ffn_down = nn.Linear(self.hidden_dim, config.dim, bias=False)
-    if config.moe_dense_branch:
+    if gemma_moe:
       self.ffn_gate_inp = ScaledLinear(config.dim, config.num_experts)
       self.ffn_gate_up_exps = ExpertWeights(config.num_experts, config.dim, config.expert_hidden_dim * 2)
       self.ffn_down_exps = ScaledExpertWeights(config.num_experts, config.expert_hidden_dim, config.dim)
@@ -204,7 +203,7 @@ class FFNBlock:
 
   def _feed_forward(self, x:Tensor) -> Tensor:
     h_norm = self.ffn_norm(x) if self.config.gemma4 else x
-    if self.config.moe_dense_branch:
+    if self.config.gemma4 and self.config.num_experts > 0:
       ffn_gate_inp = typing.cast(ScaledLinear, self.ffn_gate_inp)
       ffn_down_exps = typing.cast(ScaledExpertWeights, self.ffn_down_exps)
       dense = self.post_ffw_norm_1(self.ffn_down((self.ffn_gate(h_norm).gelu().contiguous()) * self.ffn_up(h_norm)))
@@ -258,7 +257,7 @@ class TransformerBlock(FFNBlock):
     self.qk_norm = config.qk_norm[layer_idx] if isinstance(config.qk_norm, tuple) else config.qk_norm
     self.n_kv_heads = config.n_kv_heads[layer_idx] if isinstance(config.n_kv_heads, tuple) else config.n_kv_heads
     self.is_sliding = config.sliding_window > 0 and bool(config.sliding_window_pattern) and config.sliding_window_pattern[layer_idx]
-    self.use_alternative_attention = config.moe_dense_branch and not self.is_sliding
+    self.use_alternative_attention = config.gemma4 and config.num_experts > 0 and not self.is_sliding
     self.store_full_length_kv = False
     self.shared_kv_src_idx: int|None = None
     self.full_kv_cache: Tensor|None = None
@@ -496,8 +495,9 @@ class Transformer:
         state_dict[name] = w.rearrange("n (h two) d -> n (two h) d", two=2).reshape(-1, w.shape[-1])
       elif kv_lora_rank and 'attn_kv_a_mqa.weight' in name:
         state_dict[name] = state_dict[name][:kv_lora_rank].cat(state_dict[name][kv_lora_rank:].rearrange("(h two) d -> (two h) d", two=2), dim=0)
-    hidden_dim = tuple(kv[f'{arch}.feed_forward_length']) if arch == 'gemma4' and isinstance(kv.get(f'{arch}.feed_forward_length'), list) else (
-      kv[f'{arch}.feed_forward_length'] if arch == 'gemma4' else kv.get(f'{arch}.expert_feed_forward_length', kv[f'{arch}.feed_forward_length']))
+    hidden_dim = kv[f'{arch}.feed_forward_length'] if arch == 'gemma4' else \
+      kv.get(f'{arch}.expert_feed_forward_length', kv[f'{arch}.feed_forward_length'])
+    if arch == 'gemma4' and isinstance(hidden_dim, list): hidden_dim = tuple(hidden_dim)
     if arch == 'gemma4':
       sliding_window_pattern = tuple(kv[f'{arch}.attention.sliding_window_pattern'])
       n_kv_heads = tuple(n_kv_heads) if isinstance(n_kv_heads, list) else n_kv_heads
@@ -519,9 +519,11 @@ class Transformer:
       head_dim=head_dim,
       rope_theta=rope_theta,
       rope_dim=rope_dim,
-      v_head_dim=kv.get(f'{arch}.attention.value_length_mla', kv.get(f'{arch}.attention.value_length', head_dim)),
+      v_head_dim=kv.get(
+        f'{arch}.attention.value_length_mla',
+        kv.get(f'{arch}.attention.value_length', head_dim if isinstance(head_dim, int) else head_dim[0])),
       max_context=max_context,
-      qk_norm=tuple(head_dim) if arch == 'gemma4' and isinstance(head_dim, tuple) else (
+      qk_norm=head_dim if arch == 'gemma4' else (
         int(state_dict['blk.0.attn_q_norm.weight'].shape[0]) if 'blk.0.attn_q_norm.weight' in state_dict else 0),
       num_experts=kv.get(f'{arch}.expert_count', 0), num_experts_per_tok=kv.get(f'{arch}.expert_used_count', 0),
       norm_topk_prob=kv.get(f'{arch}.expert_weights_norm', arch in ('qwen3moe', 'qwen35moe')),
@@ -539,8 +541,7 @@ class Transformer:
       final_logit_softcap=kv.get(f'{arch}.final_logit_softcapping', 0.0),
       num_kv_shared_layers=kv.get(f'{arch}.attention.shared_kv_layers', 0),
       gemma4=arch == 'gemma4',
-      expert_hidden_dim=kv.get(f'{arch}.expert_feed_forward_length', 0),
-      moe_dense_branch=arch == 'gemma4' and kv.get(f'{arch}.expert_count', 0) > 0)
+      expert_hidden_dim=kv.get(f'{arch}.expert_feed_forward_length', 0))
     model = Transformer(config)
     nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused
     # NOTE: without this contiguous, it unpacks the weights from the model every time. we shouldn't need this, but for now it's faster
