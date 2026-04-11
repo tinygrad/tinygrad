@@ -688,6 +688,7 @@ def encode(x:UOp, opc:int, reg:int|None=None, pp:int=0, sel:int=0, we:int=0) -> 
       inst += bytes([scale << 6 | idx << 3 | rm])
     # DISP byte
     if mod == 0b01 or mod == 0b10:
+      assert disp_uop is not None
       inst += struct.pack(unwrap(disp_uop.dtype.fmt), disp_uop.arg)
     # IMM byte
     if imm_uop is not None:
