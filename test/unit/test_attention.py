@@ -22,7 +22,7 @@ class TestAttention(unittest.TestCase):
     dim, rope_dim, seqlen = 8, 4, 3
     config = TransformerConfig(num_blocks=1, dim=dim, hidden_dim=16, n_heads=1, n_kv_heads=1,
                                norm_eps=1e-5, vocab_size=32, head_dim=dim, rope_theta=10000.0,
-                               rope_dim=rope_dim, max_context=8)
+                               rope_dim=rope_dim, v_head_dim=dim, max_context=8)
     block = TransformerBlock(config)
 
     x = Tensor.randn(1, seqlen, dim, dtype=dtypes.float32)
@@ -30,7 +30,7 @@ class TestAttention(unittest.TestCase):
     k = block.attn_k(x_norm).reshape(1, seqlen, 1, dim).transpose(1, 2)
 
     precompute_freqs_cis.cache_clear()
-    block.cache_kv = Tensor.empty(2, 1, 1, config.max_context, dim, device=x.device)
+    block.cache_kv = Tensor.empty(2, 1, 1, config.max_context, max(dim, config.v_head_dim), device=x.device)
     block.freqs_cis = precompute_freqs_cis(rope_dim, config.max_context, config.rope_theta)
     block._attention(x_norm, 0).realize()
 

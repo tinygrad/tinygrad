@@ -54,6 +54,10 @@ class _Device:
 Device: _Device = _Device()
 atexit.register(lambda: [Device[dn].finalize() for dn in Device._opened_devices])
 
+def canonicalize_device(device:str|tuple|list|None) -> str|tuple[str, ...]:
+  if not isinstance(device, (tuple, list)): return Device.canonicalize(device)
+  return canonical[0] if len(canonical:=tuple(Device.canonicalize(d) for d in device)) == 1 else canonical
+
 # **************** Profile ****************
 
 @dataclass(frozen=True)
