@@ -150,7 +150,7 @@ def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False,
         types[nm(t)] = tname(ety:=clang.clang_getEnumDeclIntegerType(decl)), True
         enm = suggested_name or f"_anonenum{anoncnt()}" if clang.clang_Cursor_isAnonymous(decl) else nm(t).replace(' ', '_').replace('::', '_')
         def value(e): return (clang.clang_getEnumConstantDeclUnsignedValue if ety.kind in uints else clang.clang_getEnumConstantDeclValue)(e)
-        lines.append(f"{enm} = {{}}\n" + "\n".join(f"{nm(e)} = {enm}.setdefault({value(e)}, '{nm(e)}')" for e in children(decl)
+        lines.append(f"{enm}: dict[int, val] = {{}}\n" + "\n".join(f"{nm(e)} = {enm}.setdefault({value(e)}, '{nm(e)}')" for e in children(decl)
                                                    if e.kind == clang.CXCursor_EnumConstantDecl))
         return types[nm(t)][0]
       case clang.CXType_ConstantArray: return ("c.Array[" + tname(clang.clang_getArrayElementType(t), suggested_name and suggested_name.rstrip('s'))
