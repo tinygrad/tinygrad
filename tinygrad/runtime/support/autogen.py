@@ -165,8 +165,8 @@ def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False,
                                                                if e.kind == clang.CXCursor_EnumConstantDecl) + "}")
         return types[nm(t)][0]
       case clang.CXType_ConstantArray:
-        return f"{tname(clang.clang_getArrayElementType(t), suggested_name and suggested_name.rstrip('s'))} * {clang.clang_getArraySize(t)}"
-      case clang.CXType_IncompleteArray: return f"{tname(clang.clang_getArrayElementType(t), suggested_name and suggested_name.rstrip('s'))} * 0"
+        return f"({tname(clang.clang_getArrayElementType(t), suggested_name and suggested_name.rstrip('s'))} * {clang.clang_getArraySize(t)})"
+      case clang.CXType_IncompleteArray: return f"({tname(clang.clang_getArrayElementType(t), suggested_name and suggested_name.rstrip('s'))} * 0)"
       case clang.CXType_ObjCInterface:
         is_defn = bool([f.kind for f in children(decl) if f.kind in (clang.CXCursor_ObjCInstanceMethodDecl, clang.CXCursor_ObjCClassMethodDecl)])
         if (tnm:=nm(t)) not in types: lines.append(f"class {tnm}(objc.Spec): pass")
