@@ -108,7 +108,7 @@ def init_records() -> None:
   _pending_records.clear()
 
 class Field:
-  def __init__(self, typ, off, bit_width=None, bit_off=0, name=None, idx=0):
+  def __init__(self, typ, off, bit_width=None, bit_off=0, *, name=None, idx=0):
     if issubclass(typ, Enum): typ = typ.__bases__[0]
     self.typ, self.off, self.bit_width, self.bit_off, self.name, self.idx = typ, off, bit_width, bit_off, name, idx
 
@@ -137,7 +137,7 @@ class Field:
 
 @functools.cache
 def init_c_struct_t(sz:int, fields: tuple[tuple, ...]):
-  (CStruct:=type("CStruct", (Struct,), {'_fields_': [('_mem_', ctypes.c_byte * sz)]})).register_fields(fields)
+  (CStruct:=type("CStruct", (Struct,), {'_fields_': [('_mem_', ctypes.c_byte * sz)]})).register_fields(fields) # type: ignore
   return CStruct
 def init_c_var(ty, creat_cb): return (creat_cb(v:=del_an(ty)()), v)[1]
 
