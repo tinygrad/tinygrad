@@ -137,7 +137,7 @@ def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False,
           if typedef:
             lines.append(f"{typedef.replace('::', '_')}: TypeAlias = {tnm}")
             types[typedef] = typedef.replace('::', '_'), True
-        ff = [(normalize(f), (ty:=clang.clang_getCursorType(f)).kind, tname(ty, f"{tnm}_{nm(f)}"), offset) +
+        ff = [(normalize(f), clang.clang_getCanonicalType(ty:=clang.clang_getCursorType(f)).kind, tname(ty, f"{tnm}_{nm(f)}"), offset) +
               ((clang.clang_getFieldDeclBitWidth(f), clang.clang_Cursor_getOffsetOfField(f) % 8) * clang.clang_Cursor_isBitField(f))
               for f,offset in all_fields(t)]
         if ff:
