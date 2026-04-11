@@ -135,7 +135,7 @@ def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False,
           if ty.kind in fps or (ty.kind == clang.CXType_Pointer and clang.clang_getPointeeType(ty).kind in fps): return "ctypes._CFunctionType"
           if ty.kind == clang.CXType_Pointer:
             return "ctypes.c_void_p" if (p:=clang.clang_getPointeeType(ty)).kind==clang.CXType_Void else f"ctypes._Pointer[{typehint(p)}]"
-          if ty.kind in (clang.CXType_ConstantArray, clang.CXType_IncompleteArray): return f"list[{typehint(p)}]"
+          if ty.kind in (clang.CXType_ConstantArray, clang.CXType_IncompleteArray): return f"list[{typehint(clang.clang_getArrayElementType(ty))}]"
           return repr(tname(ty))
 
         # check if previously declared
