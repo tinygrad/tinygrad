@@ -19,10 +19,10 @@ def eval_harness(name, tensor, fxn, check=None):
 SZ = 32*1024 if getenv("MOCKGPU") else 1024*1024*1024
 
 def example_2_hip(a:Tensor, correct):
-  GLOBALS = 1024
-  THREADS = 256
+  GLOBALS = 8   if getenv("MOCKGPU") else 1024
+  THREADS = 16  if getenv("MOCKGPU") else 256
   def hip_reduce_sum(out:UOp, buf:UOp) -> UOp:
-    CHUNK = SZ // (GLOBALS * THREADS)
+    CHUNK = SZ // (GLOBALS * THREADS)  # 256 for MOCKGPU, 4096 on real hardware
     # NOTE: tinygrad doesn't populate HIP hidden kernargs, so blockDim.x/gridDim.x read as 0.
     # We hardcode block/grid sizes as constexpr to avoid any dependency on those builtins.
     code = f"""
@@ -249,4 +249,5 @@ if __name__ == "__main__":
     # *****
     # If you really want to go crazy with speed, you can code in assembly.
     # There's not too much to gain here over BEAM, but it's a few percent faster.
-    example_5_custom_assembly(a, correct)
+    if getenv("MOCKGPU"): print("***** RDNA3 assembly kernel: SKIPPED (not supported under MOCKGPU)")
+    else: example_5_custom_assembly(a, correct)
