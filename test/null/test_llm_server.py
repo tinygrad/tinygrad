@@ -10,7 +10,9 @@ class TestLLMServer(unittest.TestCase):
     cls.mock_tok.role = Mock(return_value=[100, 101])
     cls.mock_tok.encode = Mock(return_value=[200, 201, 202])
     cls.mock_tok.decode = Mock(return_value="Hello")
+    cls.mock_tok.stream_decoder = Mock(return_value=lambda tid=None: "Hello" if tid is not None else "")
     cls.mock_tok.end_turn = Mock(return_value=[998])
+    cls.mock_tok.preset = "llama3"
 
     cls.mock_model = Mock()
     cls.mock_model.generate = Mock(side_effect=lambda ids, **kwargs: iter([300, 301, 999]))

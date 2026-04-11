@@ -5,7 +5,6 @@ from tinygrad.helpers import Context, getenv, DEV
 from tinygrad.engine.realize import run_schedule
 from tinygrad.engine.realize import CompiledRunner, get_program
 from tinygrad.engine.schedule import ExecItem
-from tinygrad.uop.ops import Ops
 from tinygrad.renderer import Estimates
 from tinygrad.renderer.ptx import PTXRenderer
 from test.helpers import needs_second_gpu
@@ -23,6 +22,10 @@ class TestArange(unittest.TestCase):
   def test_arange_complexity(self):
     self.assertEqual(self._get_flops(Tensor.arange(256), np.arange(256)), 0)
     self.assertEqual(self._get_flops(Tensor.arange(2560), np.arange(2560)), 0)
+
+  @unittest.skipIf(Device.DEFAULT == "CL", "TODO: fails on CI CL")
+  def test_arange_cumsum(self):
+    np.testing.assert_equal(Tensor.arange(513).cumsum(0).numpy(), np.arange(513).cumsum())
 
   def test_arange_cat(self):
     t = Tensor.arange(2, dtype=dtypes.int)+Tensor([3])
@@ -63,7 +66,7 @@ class TestIndexing(unittest.TestCase):
     print("*** indexing ***")
     with Context(NOOPT=1):
       GlobalCounters.reset()
-      rng = Tensor.ones(4, DDIM, DSET, dtype=dtypes.int)._cumalu(axis=-1, op=Ops.ADD, _include_initial=True).reshape(4, DDIM, DSET, 1)
+      rng = Tensor.arange(DSET, dtype=dtypes.int).reshape(1, 1, DSET, 1).expand(4, DDIM, DSET, 1)
       idxs = idxs.reshape(4,1,1,1).expand(4, DDIM, DSET, 1)
       reshape_dataset = dataset.T.reshape(1, DDIM, DSET, 1).expand(4, DDIM, DSET, 1)
       full = (rng==idxs).where(reshape_dataset, Tensor.zeros(4, DDIM, DSET, 1))

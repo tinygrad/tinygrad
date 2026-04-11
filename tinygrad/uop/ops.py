@@ -6,11 +6,11 @@ from enum import Enum, auto
 from tinygrad.uop import Ops, GroupOp
 from tinygrad.dtype import ConstType, ImageDType, dtypes, DType, truncate, PtrDType, least_upper_dtype, Invalid, AddrSpace, ConstFloat, PyConst
 from tinygrad.dtype import storage_fmt_for_dtype, to_storage_scalar, from_storage_scalar
+from tinygrad.device import Buffer, MultiBuffer
 from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, flatten, TRACEMETA
 from tinygrad.helpers import PROFILE, dedup, cdiv, cmod, diskcache_put, to_function_name, cpu_profile, TracingKey, VIZ, SPEC, CAPTURE_PROCESS_REPLAY
 from tinygrad.helpers import strip_parens, colored, ansilen, printable
 if TYPE_CHECKING:
-  from tinygrad.device import Buffer, MultiBuffer
   from tinygrad.renderer import Estimates
 
 class AxisType(Enum):
@@ -633,7 +633,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       case Ops.PERMUTE | Ops.FLIP: return self.arg
       case _: raise RuntimeError(f"{self.op} is not a MovementOp")
 
-  def _mop(self, op:Ops, arg, same_shape_noop:bool=False) -> UOp:
+  def _mop(self, op:Ops, arg) -> UOp:
     # early NOOP
     if op in {Ops.SHRINK, Ops.PAD, Ops.EXPAND} and len(arg) == 0:
       assert len(self.shape) == 0, "0 len arg only valid on zero length shape"
@@ -644,21 +644,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       case Ops.PERMUTE | Ops.FLIP: src_args = []
       case _: raise RuntimeError(f"{op} is not a MovementOp")
     usrcs = [shape_to_shape_arg(arg) for arg in src_args]
-    if len(usrcs) == 0: ret = UOp(op, self.dtype, (self,), arg)
-    else: ret = UOp(op, self.dtype, (self,)+UOp.sink(*usrcs).simplify().src)
-    # for all movement ops, we check shape property to validity check the movement op
-    if ret.shape == self.shape and same_shape_noop: return self
-    return ret
-
-  # in these four, if the shape doesn't change we can return self
-  #def reshape(self, arg:tuple[sint, ...]): return self._mop(Ops.RESHAPE, arg, same_shape_noop=True)
-  #def expand(self, arg:tuple[sint, ...]): return self._mop(Ops.EXPAND, arg, same_shape_noop=True)
-  #def shrink(self, arg:tuple[tuple[sint, sint], ...]): return self._mop(Ops.SHRINK, arg, same_shape_noop=True)
-  def pad(self, arg:tuple[tuple[sint, sint], ...]): return self._mop(Ops.PAD, arg, same_shape_noop=True)
-
-  # in these two, we have custom logic to check if they are a no-op
-  #def permute(self, arg:tuple[int, ...]): return self._mop(Ops.PERMUTE, arg, same_shape_noop=False) if arg != tuple(range(len(self.shape))) else self
-  #def flip(self, arg:tuple[bool, ...]): return self._mop(Ops.FLIP, arg, same_shape_noop=False) if any(arg) and len(arg) == len(self.shape) else self
+    if len(usrcs) == 0: return UOp(op, self.dtype, (self,), arg)
+    return UOp(op, self.dtype, (self,)+UOp.sink(*usrcs).simplify().src)
 
   # *** uop UNIQUE ***
 
@@ -726,7 +713,6 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
   @property
   def buffer(self) -> Buffer|MultiBuffer:
-    from tinygrad.device import Buffer, MultiBuffer
     if self.op in {Ops.CONTIGUOUS, Ops.RESHAPE, Ops.DETACH, Ops.AFTER}: return self.src[0].buffer
     # this buffer can process disk tensors and simple movement ops
     if self is not self.base:

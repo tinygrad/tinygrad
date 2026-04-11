@@ -288,18 +288,22 @@ metrics:dict[str, Callable[[dict[str, tuple[int, int, int]]], str]] = {
 
 def unpack_pmc(e) -> dict:
   agg_cols = ["Name", "Sum"]
-  sample_cols = ["XCC", "INST", "SE", "SA", "WGP", "Value"]
   rows:list[list] = []
   stats:dict[str, tuple[int, int, int]] = {}  # name -> (sum, max, count)
   view, ptr = memoryview(e.blob).cast('Q'), 0
   for s in e.sched:
+    sample_cols = ["XCC", "INST", "SE", "SA"] + [f"WGP:{i}" for i in range(s.wgp)]
     row:list = [s.name, 0, {"cols":sample_cols, "rows":[]}]
     max_val, cnt = 0, 0
-    for sample in itertools.product(range(s.xcc), range(s.inst), range(s.se), range(s.sa), range(s.wgp)):
-      row[1] += (val:=int(view[ptr]))
-      max_val, cnt = max(max_val, val), cnt + 1
-      row[2]["rows"].append(sample+(val,))
-      ptr += 1
+    for sample in itertools.product(range(s.xcc), range(s.inst), range(s.se), range(s.sa)):
+      vals:list[int] = []
+      # pack work group processors on the same se
+      for _ in range(s.wgp):
+        row[1] += (val:=int(view[ptr]))
+        max_val, cnt = max(max_val, val), cnt + 1
+        vals.append(val)
+        ptr += 1
+      row[2]["rows"].append(sample+tuple(vals))
     stats[s.name] = (row[1], max_val, cnt)
     rows.append(row)
   for name, fn in metrics.items():
@@ -352,12 +356,10 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
   row_counts:dict[str, itertools.count] = {}
   curr_barrier:dict[int, ProfileRangeEvent] = {}
   exec_pending:dict[str, list[tuple[str, str]]] = {}
-  is_cdna = target.startswith("gfx9")
   dispatch_to_exec = {"WMMA":"VALU", "VALU":"VALU", "VALU1":"VALU", "VALUT":"VALU", "VALUB":"VALU", "VALUINST":"VALU", "VINTERP":"VALU",
                       "SGMEM":"VMEM", "FLAT":"VMEM", "LDS":"LDS", "SALU":"SALU", "SMEM":"SALU", "VMEM":"VMEM"}
   def add(name:str, p:PacketType, wave:int|None=None, info:InstructionInfo|None=None) -> Generator[ProfileEvent, None, None]:
-    row = "OTHER_SIMD" if name.startswith("OTHER_") else f"WAVE:{wave}" if (wave:=getattr(p, "wave", wave)) is not None \
-        else f"{p.__class__.__name__}:0 {name.replace('_ALT', '')}"
+    row = f"WAVE:{wave}" if (wave:=getattr(p, "wave", wave)) is not None else f"{p.__class__.__name__}:0 {name.replace('_ALT', '')}"
     # by default we extend the packet to one cycle after timestamp
     start_time, end_time = p._time, p._time+1
     # exec links to dispatch, dispatch links to PC
@@ -366,11 +368,11 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
       dispatch_id, op_type = exec_pending[name].pop(0)
       # get the number of cycles from the op type
       duration = int(dur_match.group(1)) if (dur_match:=re.match(r".*_(\d+)$", op_type)) else 1
-      # for execs, timestamp is the completion time
-      start_time, end_time = p._time-duration, p._time
+      # for execs, extend end time by the duration
+      start_time, end_time = p._time, p._time+duration
       link = f"LINK:{dispatch_id}"
-      # add wmma in the exec name for coloring
-      if op_type.startswith("WMMA"): name += "_WMMA"
+      # wmma exec gets its own row and color
+      if op_type.startswith("WMMA"): name, row = name+"_WMMA", "ALUEXEC:0 WMMA"
     # queue inst dispatches
     idx = next(row_counts.setdefault(row, itertools.count(0)))
     if isinstance(p, (VALUINST, INST, INST_RDNA4)) and (exec_type:=dispatch_to_exec.get(name.replace("OTHER_", "").split("_")[0])) is not None:
@@ -382,9 +384,6 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
     # construct and yield the event for this packet
     if row not in row_ends: yield ProfilePointEvent(row, "JSON", "pcMap", pc_map, ts=Decimal(0))
     yield (e:=ProfileRangeEvent(row, TracingKey(name, ret=link), Decimal(start_time), Decimal(end_time)))
-    # allow CDNA packets to overlap, NOT allowed on RDNA.
-    if (et:=row_ends.get(row)) is not None and e.st < et and not is_cdna and not isinstance(p, (ALUEXEC, VMEMEXEC)):
-      RuntimeError(f"packet {row}-{idx} overlaps: {e.st} {et}.")
     row_ends[row] = unwrap(e.en)
     # barrier on this wave extends to fill the time it was waiting
     if wave is not None:

@@ -538,6 +538,8 @@ jobs:
         rm -f /tmp/staging.db /tmp/staging.db-shm /tmp/staging.db-wal
     - name: reset process replay
       run: test/external/process_replay/reset.py
+    - name: Test GPU crash recovery
+      run: DEV=AMD python3 -m pytest -rA test/external/external_test_gpu_crash.py
     - name: Train MNIST
       run: time PYTHONPATH=. DEV=AMD TARGET_EVAL_ACC_PCT=96.0 python3 examples/beautiful_mnist.py
     - name: Run 10 CIFAR training steps
@@ -709,6 +711,8 @@ jobs:
       run: time DEBUG=3 DEV=AMD AM_RESET=1 python3 test/test_tiny.py TestTiny.test_plus
     - name: Test driver warm start time
       run: time DEBUG=3 DEV=AMD python3 test/test_tiny.py TestTiny.test_plus
+    - name: Test GPU crash recovery
+      run: DEV=AMD python3 -m pytest -rA test/external/external_test_gpu_crash.py
     # Fails on 9070
     # - name: Test tensor cores
     #   run: |

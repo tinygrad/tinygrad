@@ -10,6 +10,7 @@ EXAMPLES = {
   "plus":"test/test_tiny.py TestTiny.test_plus",
   "gemm":"-c \"from tinygrad import Tensor; (Tensor.empty(N:=32, N)@Tensor.empty(N, N)).realize()\"",
   "sync":"test/amd/test_custom_kernel.py TestCustomKernel.test_lds_sync",
+  "handwritten":"test/amd/test_custom_kernel.py TestCustomKernel.test_handwritten",
 }
 
 if __name__ == "__main__":
@@ -21,6 +22,6 @@ if __name__ == "__main__":
     for i in range(2):
       # AM_RESET=1 gets a clear trace, does not work on mi300 machines
       subprocess.run([sys.executable, *shlex.split(test)], cwd=EXAMPLES_DIR.parent.parent.parent,
-                     env={**os.environ, "AMD":"1", "AM_RESET":"1" if not arch.startswith("gfx9") else "0", "VIZ":"-2", "PYTHONPATH":"."})
+                     env={**os.environ, "DEV":"AMD", "AM_RESET":"1" if not arch.startswith("gfx9") else "0", "VIZ":"-2", "PYTHONPATH":"."})
       PROFILE_PATH.rename(dest:=EXAMPLES_DIR/arch/f"profile_{name}_run_{i}.pkl")
       print(f"saved SQTT trace to {dest}")
