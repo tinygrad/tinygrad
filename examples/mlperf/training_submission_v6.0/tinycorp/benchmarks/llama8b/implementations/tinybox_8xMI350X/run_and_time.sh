@@ -4,7 +4,6 @@ set -o pipefail  # Make pipeline fail if any command fails
 
 export PYTHONPATH="."
 export DEV=AMD
-export EMULATE="AMD_CDNA4"
 export CHECK_OOB=0
 export REWRITE_STACK_LIMIT=5000000 HCQDEV_WAIT_TIMEOUT_MS=240000
 export DEVICE_IN_FUNCTION_BUG=1
