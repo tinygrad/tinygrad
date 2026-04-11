@@ -6,11 +6,11 @@ from enum import Enum, auto
 from tinygrad.uop import Ops, GroupOp
 from tinygrad.dtype import ConstType, ImageDType, dtypes, DType, truncate, PtrDType, least_upper_dtype, Invalid, AddrSpace, ConstFloat, PyConst
 from tinygrad.dtype import storage_fmt_for_dtype, to_storage_scalar, from_storage_scalar
+from tinygrad.device import Buffer, MultiBuffer
 from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, flatten, TRACEMETA
 from tinygrad.helpers import PROFILE, dedup, cdiv, cmod, diskcache_put, to_function_name, cpu_profile, TracingKey, VIZ, SPEC, CAPTURE_PROCESS_REPLAY
 from tinygrad.helpers import strip_parens, colored, ansilen, printable
 if TYPE_CHECKING:
-  from tinygrad.device import Buffer, MultiBuffer
   from tinygrad.renderer import Estimates
 
 class AxisType(Enum):
@@ -713,7 +713,6 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
   @property
   def buffer(self) -> Buffer|MultiBuffer:
-    from tinygrad.device import Buffer, MultiBuffer
     if self.op in {Ops.CONTIGUOUS, Ops.RESHAPE, Ops.DETACH, Ops.AFTER}: return self.src[0].buffer
     # this buffer can process disk tensors and simple movement ops
     if self is not self.base:
