@@ -127,6 +127,7 @@ class TransformerConfig:
   kv_lora_rank: int = 0
   shared_expert_dim: int = 0
   full_attention_interval: int = 0
+  attn_output_gate: bool = False
   ssm: SSMConfig|None = None
   shared_expert_gate: bool = True
   leading_dense_blocks: int = 0
@@ -198,9 +199,8 @@ class TransformerBlock(FFNBlock):
     super().__init__(config)
     assert config.v_head_dim == config.head_dim, "TransformerBlock requires v_head_dim == head_dim"
 
-    self.has_gate = config.ssm is not None
     # --- attention projections (all linear, bias-free) ------------------
-    q_proj_out       = config.head_dim * config.n_heads * (2 if self.has_gate else 1)
+    q_proj_out       = config.head_dim * config.n_heads * (2 if config.attn_output_gate else 1)
     kv_proj_out      = config.head_dim * config.n_kv_heads
     self.attn_q      = nn.Linear(config.dim, q_proj_out,  bias=False)
     self.attn_k      = nn.Linear(config.dim, kv_proj_out, bias=False)
@@ -213,7 +213,7 @@ class TransformerBlock(FFNBlock):
     if self.config.qk_norm and self.config.qk_norm != self.config.head_dim: q, k = self.attn_q_norm(q), self.attn_k_norm(k)
 
     B, T, _ = x.shape
-    if self.has_gate:
+    if self.config.attn_output_gate:
       qg = q.reshape(B, T, self.config.n_heads, 2, self.config.head_dim)
       q, gate = qg[:, :, :, 0, :], qg[:, :, :, 1, :].reshape(B, T, self.config.n_heads * self.config.head_dim)
     q = q.reshape(B, T, self.config.n_heads,    self.config.head_dim).transpose(1, 2)  # (B,H,T,Hd)
@@ -238,7 +238,7 @@ class TransformerBlock(FFNBlock):
     mask = Tensor.full((1, 1, T, start_pos+T), float("-inf"), dtype=x.dtype, device=x.device).triu(start_pos+1) if resolve(T != 1) else None
     attn = q.scaled_dot_product_attention(k, v, attn_mask=mask, enable_gqa=True)     # (B,H,T,Hd)
     attn = attn.transpose(1, 2).reshape(B, T, -1)                                    # back to (B,T,D)
-    return self.attn_output(attn if not self.has_gate else (attn * gate.sigmoid()))
+    return self.attn_output(attn if not self.config.attn_output_gate else (attn * gate.sigmoid()))
 
   def _init_state(self, x:Tensor):
     if not hasattr(self, "cache_kv"):
