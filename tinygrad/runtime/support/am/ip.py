@@ -211,6 +211,11 @@ class AM_SMU(AM_IP):
       with contextlib.suppress(TimeoutError): self._send_msg(self.smu_mod.PPSMC_MSG_SetSoftMinByFreq, clck << 16 | (vals[level]), timeout=20)
       if self.adev.ip_ver[am.GC_HWIP] >= (10,0,0): self._send_msg(self.smu_mod.PPSMC_MSG_SetSoftMaxByFreq, clck << 16 | (vals[level]))
 
+  def set_power_limit(self, watts:float):
+    ppt_limit = max(int(round(watts)), 1)
+    self._send_msg(self.smu_mod.PPSMC_MSG_SetPptLimit, ppt_limit)
+    if DEBUG >= 2: print(f"am {self.adev.devfmt}: GPU power limit set to {ppt_limit}W")
+
   def _aca_read_reg(self, bank_idx:int, reg_idx:int, ue=True) -> int:
     msg = self.smu_mod.PPSMC_MSG_McaBankDumpDW if ue else self.smu_mod.PPSMC_MSG_McaBankCeDumpDW
     return (self._send_msg(msg, (bank_idx << 16) | (reg_idx * 8 + 4), read_back_arg=True) << 32) | \
