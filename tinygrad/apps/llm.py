@@ -312,21 +312,20 @@ class Transformer:
     n_heads, n_kv_heads = kv[f'{arch}.attention.head_count'], kv[f'{arch}.attention.head_count_kv']
 
     kv_lora_rank = kv.get(f'{arch}.attention.kv_lora_rank', 0)
-    head_dim = kv.get(f'{arch}.attention.key_length_mla', 0) if kv_lora_rank else kv.get(f'{arch}.attention.key_length', kv[f'{arch}.embedding_length'] // n_heads)
-    rope_dim = kv.get(f'{arch}.rope.dimension_count', 0 if kv_lora_rank else head_dim)
+    head_dim = kv.get(f'{arch}.attention.key_length_mla', kv.get(f'{arch}.attention.key_length', kv[f'{arch}.embedding_length'] // n_heads))
+    rope_dim = kv.get(f'{arch}.rope.dimension_count', head_dim)
 
     # Permute RoPE weights from interleaved to half-split layout.
-    rope_weights = []
-    if arch == 'llama': rope_weights += [('attn_q.weight', n_heads, 0), ('attn_k.weight', n_kv_heads, 0)]
-    if kv_lora_rank: rope_weights += [('attn_q.weight', n_heads, head_dim-rope_dim), ('attn_kv_a_mqa.weight', None, kv_lora_rank)]
     for name in state_dict:
-      for suffix, heads, prefix in rope_weights:
-        if suffix in name:
-          if heads is None: state_dict[name] = state_dict[name][:prefix].cat(state_dict[name][prefix:].rearrange("(h two) d -> (two h) d", two=2), dim=0)
-          else:
-            w = state_dict[name].reshape(heads, state_dict[name].shape[0]//heads, -1)
-            state_dict[name] = w[:, :prefix].cat(w[:, prefix:].rearrange("n (h two) d -> n (two h) d", two=2), dim=1).reshape(-1, w.shape[-1])
-          break
+      if 'attn_q.weight' in name and (arch == 'llama' or kv_lora_rank):
+        w = state_dict[name].reshape(n_heads, state_dict[name].shape[0]//n_heads, -1)
+        prefix = head_dim-rope_dim
+        state_dict[name] = w[:, :prefix].cat(w[:, prefix:].rearrange("n (h two) d -> n (two h) d", two=2), dim=1).reshape(-1, w.shape[-1])
+      elif arch == 'llama' and 'attn_k.weight' in name:
+        w = state_dict[name].reshape(n_kv_heads, state_dict[name].shape[0]//n_kv_heads, -1)
+        state_dict[name] = w.rearrange("n (h two) d -> n (two h) d", two=2).reshape(-1, w.shape[-1])
+      elif kv_lora_rank and 'attn_kv_a_mqa.weight' in name:
+        state_dict[name] = state_dict[name][:kv_lora_rank].cat(state_dict[name][kv_lora_rank:].rearrange("(h two) d -> (two h) d", two=2), dim=0)
     config = TransformerConfig(
       num_blocks=kv[f'{arch}.block_count'], dim=kv[f'{arch}.embedding_length'],
       hidden_dim=kv.get(f'{arch}.expert_feed_forward_length', kv[f'{arch}.feed_forward_length']),
@@ -335,7 +334,7 @@ class Transformer:
       head_dim=head_dim,
       rope_theta=kv[f'{arch}.rope.freq_base'],
       rope_dim=rope_dim,
-      v_head_dim=kv.get(f'{arch}.attention.value_length_mla', 0) if kv_lora_rank else kv.get(f'{arch}.attention.value_length', head_dim),
+      v_head_dim=kv.get(f'{arch}.attention.value_length_mla', kv.get(f'{arch}.attention.value_length', head_dim)),
       max_context=max_context,
       qk_norm=int(state_dict['blk.0.attn_q_norm.weight'].shape[0]) if 'blk.0.attn_q_norm.weight' in state_dict else 0,
       num_experts=kv.get(f'{arch}.expert_count', 0), num_experts_per_tok=kv.get(f'{arch}.expert_used_count', 0),
