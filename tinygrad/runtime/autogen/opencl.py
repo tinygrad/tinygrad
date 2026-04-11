@@ -1,121 +1,118 @@
 # mypy: disable-error-code="empty-body"
+from __future__ import annotations
 import ctypes
-from typing import Literal, TypeAlias
+from typing import Annotated, Literal, TypeAlias
 from tinygrad.runtime.support.c import _IO, _IOW, _IOR, _IOWR
 from tinygrad.runtime.support import c
 dll = c.DLL('opencl', 'OpenCL')
-class struct__cl_platform_id(c.Struct): pass
+class struct__cl_platform_id(c.Struct): SIZE = 0
 cl_platform_id: TypeAlias = c.POINTER[struct__cl_platform_id]
-class struct__cl_device_id(c.Struct): pass
+class struct__cl_device_id(c.Struct): SIZE = 0
 cl_device_id: TypeAlias = c.POINTER[struct__cl_device_id]
-class struct__cl_context(c.Struct): pass
+class struct__cl_context(c.Struct): SIZE = 0
 cl_context: TypeAlias = c.POINTER[struct__cl_context]
-class struct__cl_command_queue(c.Struct): pass
+class struct__cl_command_queue(c.Struct): SIZE = 0
 cl_command_queue: TypeAlias = c.POINTER[struct__cl_command_queue]
-class struct__cl_mem(c.Struct): pass
+class struct__cl_mem(c.Struct): SIZE = 0
 cl_mem: TypeAlias = c.POINTER[struct__cl_mem]
-class struct__cl_program(c.Struct): pass
+class struct__cl_program(c.Struct): SIZE = 0
 cl_program: TypeAlias = c.POINTER[struct__cl_program]
-class struct__cl_kernel(c.Struct): pass
+class struct__cl_kernel(c.Struct): SIZE = 0
 cl_kernel: TypeAlias = c.POINTER[struct__cl_kernel]
-class struct__cl_event(c.Struct): pass
+class struct__cl_event(c.Struct): SIZE = 0
 cl_event: TypeAlias = c.POINTER[struct__cl_event]
-class struct__cl_sampler(c.Struct): pass
+class struct__cl_sampler(c.Struct): SIZE = 0
 cl_sampler: TypeAlias = c.POINTER[struct__cl_sampler]
-cl_bool: TypeAlias = ctypes.c_uint32
-cl_bitfield: TypeAlias = ctypes.c_uint64
-cl_properties: TypeAlias = ctypes.c_uint64
-cl_device_type: TypeAlias = ctypes.c_uint64
-cl_platform_info: TypeAlias = ctypes.c_uint32
-cl_device_info: TypeAlias = ctypes.c_uint32
-cl_device_fp_config: TypeAlias = ctypes.c_uint64
-cl_device_mem_cache_type: TypeAlias = ctypes.c_uint32
-cl_device_local_mem_type: TypeAlias = ctypes.c_uint32
-cl_device_exec_capabilities: TypeAlias = ctypes.c_uint64
-cl_device_svm_capabilities: TypeAlias = ctypes.c_uint64
-cl_command_queue_properties: TypeAlias = ctypes.c_uint64
-cl_device_partition_property: TypeAlias = ctypes.c_int64
-cl_device_affinity_domain: TypeAlias = ctypes.c_uint64
-cl_context_properties: TypeAlias = ctypes.c_int64
-cl_context_info: TypeAlias = ctypes.c_uint32
-cl_queue_properties: TypeAlias = ctypes.c_uint64
-cl_command_queue_info: TypeAlias = ctypes.c_uint32
-cl_channel_order: TypeAlias = ctypes.c_uint32
-cl_channel_type: TypeAlias = ctypes.c_uint32
-cl_mem_flags: TypeAlias = ctypes.c_uint64
-cl_svm_mem_flags: TypeAlias = ctypes.c_uint64
-cl_mem_object_type: TypeAlias = ctypes.c_uint32
-cl_mem_info: TypeAlias = ctypes.c_uint32
-cl_mem_migration_flags: TypeAlias = ctypes.c_uint64
-cl_image_info: TypeAlias = ctypes.c_uint32
-cl_buffer_create_type: TypeAlias = ctypes.c_uint32
-cl_addressing_mode: TypeAlias = ctypes.c_uint32
-cl_filter_mode: TypeAlias = ctypes.c_uint32
-cl_sampler_info: TypeAlias = ctypes.c_uint32
-cl_map_flags: TypeAlias = ctypes.c_uint64
-cl_pipe_properties: TypeAlias = ctypes.c_int64
-cl_pipe_info: TypeAlias = ctypes.c_uint32
-cl_program_info: TypeAlias = ctypes.c_uint32
-cl_program_build_info: TypeAlias = ctypes.c_uint32
-cl_program_binary_type: TypeAlias = ctypes.c_uint32
-cl_build_status: TypeAlias = ctypes.c_int32
-cl_kernel_info: TypeAlias = ctypes.c_uint32
-cl_kernel_arg_info: TypeAlias = ctypes.c_uint32
-cl_kernel_arg_address_qualifier: TypeAlias = ctypes.c_uint32
-cl_kernel_arg_access_qualifier: TypeAlias = ctypes.c_uint32
-cl_kernel_arg_type_qualifier: TypeAlias = ctypes.c_uint64
-cl_kernel_work_group_info: TypeAlias = ctypes.c_uint32
-cl_kernel_sub_group_info: TypeAlias = ctypes.c_uint32
-cl_event_info: TypeAlias = ctypes.c_uint32
-cl_command_type: TypeAlias = ctypes.c_uint32
-cl_profiling_info: TypeAlias = ctypes.c_uint32
-cl_sampler_properties: TypeAlias = ctypes.c_uint64
-cl_kernel_exec_info: TypeAlias = ctypes.c_uint32
-cl_device_atomic_capabilities: TypeAlias = ctypes.c_uint64
-cl_device_device_enqueue_capabilities: TypeAlias = ctypes.c_uint64
-cl_khronos_vendor_id: TypeAlias = ctypes.c_uint32
-cl_mem_properties: TypeAlias = ctypes.c_uint64
-cl_version: TypeAlias = ctypes.c_uint32
+cl_bool: TypeAlias = Annotated[int, ctypes.c_uint32]
+cl_bitfield: TypeAlias = Annotated[int, ctypes.c_uint64]
+cl_properties: TypeAlias = Annotated[int, ctypes.c_uint64]
+cl_device_type: TypeAlias = Annotated[int, ctypes.c_uint64]
+cl_platform_info: TypeAlias = Annotated[int, ctypes.c_uint32]
+cl_device_info: TypeAlias = Annotated[int, ctypes.c_uint32]
+cl_device_fp_config: TypeAlias = Annotated[int, ctypes.c_uint64]
+cl_device_mem_cache_type: TypeAlias = Annotated[int, ctypes.c_uint32]
+cl_device_local_mem_type: TypeAlias = Annotated[int, ctypes.c_uint32]
+cl_device_exec_capabilities: TypeAlias = Annotated[int, ctypes.c_uint64]
+cl_device_svm_capabilities: TypeAlias = Annotated[int, ctypes.c_uint64]
+cl_command_queue_properties: TypeAlias = Annotated[int, ctypes.c_uint64]
+cl_device_partition_property: TypeAlias = Annotated[int, ctypes.c_int64]
+cl_device_affinity_domain: TypeAlias = Annotated[int, ctypes.c_uint64]
+cl_context_properties: TypeAlias = Annotated[int, ctypes.c_int64]
+cl_context_info: TypeAlias = Annotated[int, ctypes.c_uint32]
+cl_queue_properties: TypeAlias = Annotated[int, ctypes.c_uint64]
+cl_command_queue_info: TypeAlias = Annotated[int, ctypes.c_uint32]
+cl_channel_order: TypeAlias = Annotated[int, ctypes.c_uint32]
+cl_channel_type: TypeAlias = Annotated[int, ctypes.c_uint32]
+cl_mem_flags: TypeAlias = Annotated[int, ctypes.c_uint64]
+cl_svm_mem_flags: TypeAlias = Annotated[int, ctypes.c_uint64]
+cl_mem_object_type: TypeAlias = Annotated[int, ctypes.c_uint32]
+cl_mem_info: TypeAlias = Annotated[int, ctypes.c_uint32]
+cl_mem_migration_flags: TypeAlias = Annotated[int, ctypes.c_uint64]
+cl_image_info: TypeAlias = Annotated[int, ctypes.c_uint32]
+cl_buffer_create_type: TypeAlias = Annotated[int, ctypes.c_uint32]
+cl_addressing_mode: TypeAlias = Annotated[int, ctypes.c_uint32]
+cl_filter_mode: TypeAlias = Annotated[int, ctypes.c_uint32]
+cl_sampler_info: TypeAlias = Annotated[int, ctypes.c_uint32]
+cl_map_flags: TypeAlias = Annotated[int, ctypes.c_uint64]
+cl_pipe_properties: TypeAlias = Annotated[int, ctypes.c_int64]
+cl_pipe_info: TypeAlias = Annotated[int, ctypes.c_uint32]
+cl_program_info: TypeAlias = Annotated[int, ctypes.c_uint32]
+cl_program_build_info: TypeAlias = Annotated[int, ctypes.c_uint32]
+cl_program_binary_type: TypeAlias = Annotated[int, ctypes.c_uint32]
+cl_build_status: TypeAlias = Annotated[int, ctypes.c_int32]
+cl_kernel_info: TypeAlias = Annotated[int, ctypes.c_uint32]
+cl_kernel_arg_info: TypeAlias = Annotated[int, ctypes.c_uint32]
+cl_kernel_arg_address_qualifier: TypeAlias = Annotated[int, ctypes.c_uint32]
+cl_kernel_arg_access_qualifier: TypeAlias = Annotated[int, ctypes.c_uint32]
+cl_kernel_arg_type_qualifier: TypeAlias = Annotated[int, ctypes.c_uint64]
+cl_kernel_work_group_info: TypeAlias = Annotated[int, ctypes.c_uint32]
+cl_kernel_sub_group_info: TypeAlias = Annotated[int, ctypes.c_uint32]
+cl_event_info: TypeAlias = Annotated[int, ctypes.c_uint32]
+cl_command_type: TypeAlias = Annotated[int, ctypes.c_uint32]
+cl_profiling_info: TypeAlias = Annotated[int, ctypes.c_uint32]
+cl_sampler_properties: TypeAlias = Annotated[int, ctypes.c_uint64]
+cl_kernel_exec_info: TypeAlias = Annotated[int, ctypes.c_uint32]
+cl_device_atomic_capabilities: TypeAlias = Annotated[int, ctypes.c_uint64]
+cl_device_device_enqueue_capabilities: TypeAlias = Annotated[int, ctypes.c_uint64]
+cl_khronos_vendor_id: TypeAlias = Annotated[int, ctypes.c_uint32]
+cl_mem_properties: TypeAlias = Annotated[int, ctypes.c_uint64]
+cl_version: TypeAlias = Annotated[int, ctypes.c_uint32]
 @c.record
 class struct__cl_image_format(c.Struct):
   SIZE = 8
-  image_channel_order: 'cl_channel_order'
-  image_channel_data_type: 'cl_channel_type'
-struct__cl_image_format.register_fields([('image_channel_order', cl_channel_order, 0), ('image_channel_data_type', cl_channel_type, 4)])
+  image_channel_order: Annotated[cl_channel_order, 0]
+  image_channel_data_type: Annotated[cl_channel_type, 4]
 cl_image_format: TypeAlias = struct__cl_image_format
 @c.record
 class struct__cl_image_desc(c.Struct):
   SIZE = 72
-  image_type: 'cl_mem_object_type'
-  image_width: 'size_t'
-  image_height: 'size_t'
-  image_depth: 'size_t'
-  image_array_size: 'size_t'
-  image_row_pitch: 'size_t'
-  image_slice_pitch: 'size_t'
-  num_mip_levels: 'cl_uint'
-  num_samples: 'cl_uint'
-  buffer: 'cl_mem'
-  mem_object: 'cl_mem'
-size_t: TypeAlias = ctypes.c_uint64
-cl_uint: TypeAlias = ctypes.c_uint32
-struct__cl_image_desc.register_fields([('image_type', cl_mem_object_type, 0), ('image_width', size_t, 8), ('image_height', size_t, 16), ('image_depth', size_t, 24), ('image_array_size', size_t, 32), ('image_row_pitch', size_t, 40), ('image_slice_pitch', size_t, 48), ('num_mip_levels', cl_uint, 56), ('num_samples', cl_uint, 60), ('buffer', cl_mem, 64), ('mem_object', cl_mem, 64)])
+  image_type: Annotated[cl_mem_object_type, 0]
+  image_width: Annotated[size_t, 8]
+  image_height: Annotated[size_t, 16]
+  image_depth: Annotated[size_t, 24]
+  image_array_size: Annotated[size_t, 32]
+  image_row_pitch: Annotated[size_t, 40]
+  image_slice_pitch: Annotated[size_t, 48]
+  num_mip_levels: Annotated[cl_uint, 56]
+  num_samples: Annotated[cl_uint, 60]
+  buffer: Annotated[cl_mem, 64]
+  mem_object: Annotated[cl_mem, 64]
+size_t: TypeAlias = Annotated[int, ctypes.c_uint64]
+cl_uint: TypeAlias = Annotated[int, ctypes.c_uint32]
 cl_image_desc: TypeAlias = struct__cl_image_desc
 @c.record
 class struct__cl_buffer_region(c.Struct):
   SIZE = 16
-  origin: 'size_t'
-  size: 'size_t'
-struct__cl_buffer_region.register_fields([('origin', size_t, 0), ('size', size_t, 8)])
+  origin: Annotated[size_t, 0]
+  size: Annotated[size_t, 8]
 cl_buffer_region: TypeAlias = struct__cl_buffer_region
 @c.record
 class struct__cl_name_version(c.Struct):
   SIZE = 68
-  version: 'cl_version'
-  name: 'c.Array[ctypes.c_char, Literal[64]]'
-struct__cl_name_version.register_fields([('version', cl_version, 0), ('name', c.Array[ctypes.c_char, Literal[64]], 4)])
+  version: Annotated[cl_version, 0]
+  name: Annotated[c.Array[Annotated[bytes, ctypes.c_char], Literal[64]], 4]
 cl_name_version: TypeAlias = struct__cl_name_version
-cl_int: TypeAlias = ctypes.c_int32
+cl_int: TypeAlias = Annotated[int, ctypes.c_int32]
 @dll.bind
 def clGetPlatformIDs(num_entries:cl_uint, platforms:c.POINTER[cl_platform_id], num_platforms:c.POINTER[cl_uint]) -> cl_int: ...
 @dll.bind
@@ -132,15 +129,15 @@ def clRetainDevice(device:cl_device_id) -> cl_int: ...
 def clReleaseDevice(device:cl_device_id) -> cl_int: ...
 @dll.bind
 def clSetDefaultDeviceCommandQueue(context:cl_context, device:cl_device_id, command_queue:cl_command_queue) -> cl_int: ...
-cl_ulong: TypeAlias = ctypes.c_uint64
+cl_ulong: TypeAlias = Annotated[int, ctypes.c_uint64]
 @dll.bind
 def clGetDeviceAndHostTimer(device:cl_device_id, device_timestamp:c.POINTER[cl_ulong], host_timestamp:c.POINTER[cl_ulong]) -> cl_int: ...
 @dll.bind
 def clGetHostTimer(device:cl_device_id, host_timestamp:c.POINTER[cl_ulong]) -> cl_int: ...
 @dll.bind
-def clCreateContext(properties:c.POINTER[cl_context_properties], num_devices:cl_uint, devices:c.POINTER[cl_device_id], pfn_notify:c.CFUNCTYPE[None, [c.POINTER[ctypes.c_char], ctypes.c_void_p, size_t, ctypes.c_void_p]], user_data:ctypes.c_void_p, errcode_ret:c.POINTER[cl_int]) -> cl_context: ...
+def clCreateContext(properties:c.POINTER[cl_context_properties], num_devices:cl_uint, devices:c.POINTER[cl_device_id], pfn_notify:c.CFUNCTYPE[None, [c.POINTER[Annotated[bytes, ctypes.c_char]], ctypes.c_void_p, size_t, ctypes.c_void_p]], user_data:ctypes.c_void_p, errcode_ret:c.POINTER[cl_int]) -> cl_context: ...
 @dll.bind
-def clCreateContextFromType(properties:c.POINTER[cl_context_properties], device_type:cl_device_type, pfn_notify:c.CFUNCTYPE[None, [c.POINTER[ctypes.c_char], ctypes.c_void_p, size_t, ctypes.c_void_p]], user_data:ctypes.c_void_p, errcode_ret:c.POINTER[cl_int]) -> cl_context: ...
+def clCreateContextFromType(properties:c.POINTER[cl_context_properties], device_type:cl_device_type, pfn_notify:c.CFUNCTYPE[None, [c.POINTER[Annotated[bytes, ctypes.c_char]], ctypes.c_void_p, size_t, ctypes.c_void_p]], user_data:ctypes.c_void_p, errcode_ret:c.POINTER[cl_int]) -> cl_context: ...
 @dll.bind
 def clRetainContext(context:cl_context) -> cl_int: ...
 @dll.bind
@@ -196,11 +193,11 @@ def clReleaseSampler(sampler:cl_sampler) -> cl_int: ...
 @dll.bind
 def clGetSamplerInfo(sampler:cl_sampler, param_name:cl_sampler_info, param_value_size:size_t, param_value:ctypes.c_void_p, param_value_size_ret:c.POINTER[size_t]) -> cl_int: ...
 @dll.bind
-def clCreateProgramWithSource(context:cl_context, count:cl_uint, strings:c.POINTER[c.POINTER[ctypes.c_char]], lengths:c.POINTER[size_t], errcode_ret:c.POINTER[cl_int]) -> cl_program: ...
+def clCreateProgramWithSource(context:cl_context, count:cl_uint, strings:c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]], lengths:c.POINTER[size_t], errcode_ret:c.POINTER[cl_int]) -> cl_program: ...
 @dll.bind
-def clCreateProgramWithBinary(context:cl_context, num_devices:cl_uint, device_list:c.POINTER[cl_device_id], lengths:c.POINTER[size_t], binaries:c.POINTER[c.POINTER[ctypes.c_ubyte]], binary_status:c.POINTER[cl_int], errcode_ret:c.POINTER[cl_int]) -> cl_program: ...
+def clCreateProgramWithBinary(context:cl_context, num_devices:cl_uint, device_list:c.POINTER[cl_device_id], lengths:c.POINTER[size_t], binaries:c.POINTER[c.POINTER[Annotated[int, ctypes.c_ubyte]]], binary_status:c.POINTER[cl_int], errcode_ret:c.POINTER[cl_int]) -> cl_program: ...
 @dll.bind
-def clCreateProgramWithBuiltInKernels(context:cl_context, num_devices:cl_uint, device_list:c.POINTER[cl_device_id], kernel_names:c.POINTER[ctypes.c_char], errcode_ret:c.POINTER[cl_int]) -> cl_program: ...
+def clCreateProgramWithBuiltInKernels(context:cl_context, num_devices:cl_uint, device_list:c.POINTER[cl_device_id], kernel_names:c.POINTER[Annotated[bytes, ctypes.c_char]], errcode_ret:c.POINTER[cl_int]) -> cl_program: ...
 @dll.bind
 def clCreateProgramWithIL(context:cl_context, il:ctypes.c_void_p, length:size_t, errcode_ret:c.POINTER[cl_int]) -> cl_program: ...
 @dll.bind
@@ -208,11 +205,11 @@ def clRetainProgram(program:cl_program) -> cl_int: ...
 @dll.bind
 def clReleaseProgram(program:cl_program) -> cl_int: ...
 @dll.bind
-def clBuildProgram(program:cl_program, num_devices:cl_uint, device_list:c.POINTER[cl_device_id], options:c.POINTER[ctypes.c_char], pfn_notify:c.CFUNCTYPE[None, [cl_program, ctypes.c_void_p]], user_data:ctypes.c_void_p) -> cl_int: ...
+def clBuildProgram(program:cl_program, num_devices:cl_uint, device_list:c.POINTER[cl_device_id], options:c.POINTER[Annotated[bytes, ctypes.c_char]], pfn_notify:c.CFUNCTYPE[None, [cl_program, ctypes.c_void_p]], user_data:ctypes.c_void_p) -> cl_int: ...
 @dll.bind
-def clCompileProgram(program:cl_program, num_devices:cl_uint, device_list:c.POINTER[cl_device_id], options:c.POINTER[ctypes.c_char], num_input_headers:cl_uint, input_headers:c.POINTER[cl_program], header_include_names:c.POINTER[c.POINTER[ctypes.c_char]], pfn_notify:c.CFUNCTYPE[None, [cl_program, ctypes.c_void_p]], user_data:ctypes.c_void_p) -> cl_int: ...
+def clCompileProgram(program:cl_program, num_devices:cl_uint, device_list:c.POINTER[cl_device_id], options:c.POINTER[Annotated[bytes, ctypes.c_char]], num_input_headers:cl_uint, input_headers:c.POINTER[cl_program], header_include_names:c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]], pfn_notify:c.CFUNCTYPE[None, [cl_program, ctypes.c_void_p]], user_data:ctypes.c_void_p) -> cl_int: ...
 @dll.bind
-def clLinkProgram(context:cl_context, num_devices:cl_uint, device_list:c.POINTER[cl_device_id], options:c.POINTER[ctypes.c_char], num_input_programs:cl_uint, input_programs:c.POINTER[cl_program], pfn_notify:c.CFUNCTYPE[None, [cl_program, ctypes.c_void_p]], user_data:ctypes.c_void_p, errcode_ret:c.POINTER[cl_int]) -> cl_program: ...
+def clLinkProgram(context:cl_context, num_devices:cl_uint, device_list:c.POINTER[cl_device_id], options:c.POINTER[Annotated[bytes, ctypes.c_char]], num_input_programs:cl_uint, input_programs:c.POINTER[cl_program], pfn_notify:c.CFUNCTYPE[None, [cl_program, ctypes.c_void_p]], user_data:ctypes.c_void_p, errcode_ret:c.POINTER[cl_int]) -> cl_program: ...
 @dll.bind
 def clSetProgramReleaseCallback(program:cl_program, pfn_notify:c.CFUNCTYPE[None, [cl_program, ctypes.c_void_p]], user_data:ctypes.c_void_p) -> cl_int: ...
 @dll.bind
@@ -224,7 +221,7 @@ def clGetProgramInfo(program:cl_program, param_name:cl_program_info, param_value
 @dll.bind
 def clGetProgramBuildInfo(program:cl_program, device:cl_device_id, param_name:cl_program_build_info, param_value_size:size_t, param_value:ctypes.c_void_p, param_value_size_ret:c.POINTER[size_t]) -> cl_int: ...
 @dll.bind
-def clCreateKernel(program:cl_program, kernel_name:c.POINTER[ctypes.c_char], errcode_ret:c.POINTER[cl_int]) -> cl_kernel: ...
+def clCreateKernel(program:cl_program, kernel_name:c.POINTER[Annotated[bytes, ctypes.c_char]], errcode_ret:c.POINTER[cl_int]) -> cl_kernel: ...
 @dll.bind
 def clCreateKernelsInProgram(program:cl_program, num_kernels:cl_uint, kernels:c.POINTER[cl_kernel], num_kernels_ret:c.POINTER[cl_uint]) -> cl_int: ...
 @dll.bind
@@ -322,7 +319,7 @@ def clEnqueueSVMUnmap(command_queue:cl_command_queue, svm_ptr:ctypes.c_void_p, n
 @dll.bind
 def clEnqueueSVMMigrateMem(command_queue:cl_command_queue, num_svm_pointers:cl_uint, svm_pointers:c.POINTER[ctypes.c_void_p], sizes:c.POINTER[size_t], flags:cl_mem_migration_flags, num_events_in_wait_list:cl_uint, event_wait_list:c.POINTER[cl_event], event:c.POINTER[cl_event]) -> cl_int: ...
 @dll.bind
-def clGetExtensionFunctionAddressForPlatform(platform:cl_platform_id, func_name:c.POINTER[ctypes.c_char]) -> ctypes.c_void_p: ...
+def clGetExtensionFunctionAddressForPlatform(platform:cl_platform_id, func_name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> ctypes.c_void_p: ...
 @dll.bind
 def clCreateImage2D(context:cl_context, flags:cl_mem_flags, image_format:c.POINTER[cl_image_format], image_width:size_t, image_height:size_t, image_row_pitch:size_t, host_ptr:ctypes.c_void_p, errcode_ret:c.POINTER[cl_int]) -> cl_mem: ...
 @dll.bind
@@ -336,13 +333,14 @@ def clEnqueueBarrier(command_queue:cl_command_queue) -> cl_int: ...
 @dll.bind
 def clUnloadCompiler() -> cl_int: ...
 @dll.bind
-def clGetExtensionFunctionAddress(func_name:c.POINTER[ctypes.c_char]) -> ctypes.c_void_p: ...
+def clGetExtensionFunctionAddress(func_name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> ctypes.c_void_p: ...
 @dll.bind
 def clCreateCommandQueue(context:cl_context, device:cl_device_id, properties:cl_command_queue_properties, errcode_ret:c.POINTER[cl_int]) -> cl_command_queue: ...
 @dll.bind
 def clCreateSampler(context:cl_context, normalized_coords:cl_bool, addressing_mode:cl_addressing_mode, filter_mode:cl_filter_mode, errcode_ret:c.POINTER[cl_int]) -> cl_sampler: ...
 @dll.bind
 def clEnqueueTask(command_queue:cl_command_queue, kernel:cl_kernel, num_events_in_wait_list:cl_uint, event_wait_list:c.POINTER[cl_event], event:c.POINTER[cl_event]) -> cl_int: ...
+c.init_records()
 CL_NAME_VERSION_MAX_NAME_SIZE = 64 # type: ignore
 CL_SUCCESS = 0 # type: ignore
 CL_DEVICE_NOT_FOUND = -1 # type: ignore

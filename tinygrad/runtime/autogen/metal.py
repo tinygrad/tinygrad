@@ -1,6 +1,7 @@
 # mypy: disable-error-code="empty-body"
+from __future__ import annotations
 import ctypes
-from typing import Literal, TypeAlias
+from typing import Annotated, Literal, TypeAlias
 from tinygrad.runtime.support.c import _IO, _IOW, _IOR, _IOWR
 from tinygrad.runtime.support import c
 from tinygrad.runtime.support import objc
@@ -8,28 +9,25 @@ dll = c.DLL('metal', 'Metal')
 @c.record
 class MTLDispatchThreadgroupsIndirectArguments(c.Struct):
   SIZE = 12
-  threadgroupsPerGrid: 'c.Array[uint32_t, Literal[3]]'
-uint32_t: TypeAlias = ctypes.c_uint32
-MTLDispatchThreadgroupsIndirectArguments.register_fields([('threadgroupsPerGrid', c.Array[uint32_t, Literal[3]], 0)])
+  threadgroupsPerGrid: Annotated[c.Array[uint32_t, Literal[3]], 0]
+uint32_t: TypeAlias = Annotated[int, ctypes.c_uint32]
 @c.record
 class MTLStageInRegionIndirectArguments(c.Struct):
   SIZE = 24
-  stageInOrigin: 'c.Array[uint32_t, Literal[3]]'
-  stageInSize: 'c.Array[uint32_t, Literal[3]]'
-MTLStageInRegionIndirectArguments.register_fields([('stageInOrigin', c.Array[uint32_t, Literal[3]], 0), ('stageInSize', c.Array[uint32_t, Literal[3]], 12)])
+  stageInOrigin: Annotated[c.Array[uint32_t, Literal[3]], 0]
+  stageInSize: Annotated[c.Array[uint32_t, Literal[3]], 12]
 class MTLComputeCommandEncoder(objc.Spec): pass
 class MTLCommandEncoder(objc.Spec): pass
 class MTLComputePipelineState(objc.Spec): pass
-NSUInteger: TypeAlias = ctypes.c_uint64
+NSUInteger: TypeAlias = Annotated[int, ctypes.c_uint64]
 class MTLBuffer(objc.Spec): pass
 class MTLResource(objc.Spec): pass
 @c.record
 class struct__NSRange(c.Struct):
   SIZE = 16
-  location: 'NSUInteger'
-  length: 'NSUInteger'
+  location: Annotated[NSUInteger, 0]
+  length: Annotated[NSUInteger, 8]
 NSRange: TypeAlias = struct__NSRange
-struct__NSRange.register_fields([('location', NSUInteger, 0), ('length', NSUInteger, 8)])
 class MTLTexture(objc.Spec): pass
 class MTLTextureDescriptor(objc.Spec): pass
 class enum_MTLTextureType(NSUInteger, c.Enum): pass
@@ -228,8 +226,8 @@ MTLTextureUsagePixelFormatView = enum_MTLTextureUsage.define('MTLTextureUsagePix
 MTLTextureUsageShaderAtomic = enum_MTLTextureUsage.define('MTLTextureUsageShaderAtomic', 32)
 
 MTLTextureUsage: TypeAlias = enum_MTLTextureUsage
-BOOL: TypeAlias = ctypes.c_int32
-NSInteger: TypeAlias = ctypes.c_int64
+BOOL: TypeAlias = Annotated[int, ctypes.c_int32]
+NSInteger: TypeAlias = Annotated[int, ctypes.c_int64]
 class enum_MTLTextureCompressionType(NSInteger, c.Enum): pass
 MTLTextureCompressionTypeLossless = enum_MTLTextureCompressionType.define('MTLTextureCompressionTypeLossless', 0)
 MTLTextureCompressionTypeLossy = enum_MTLTextureCompressionType.define('MTLTextureCompressionTypeLossy', 1)
@@ -238,11 +236,11 @@ MTLTextureCompressionType: TypeAlias = enum_MTLTextureCompressionType
 @c.record
 class MTLTextureSwizzleChannels(c.Struct):
   SIZE = 4
-  red: 'MTLTextureSwizzle'
-  green: 'MTLTextureSwizzle'
-  blue: 'MTLTextureSwizzle'
-  alpha: 'MTLTextureSwizzle'
-uint8_t: TypeAlias = ctypes.c_ubyte
+  red: Annotated[MTLTextureSwizzle, 0]
+  green: Annotated[MTLTextureSwizzle, 1]
+  blue: Annotated[MTLTextureSwizzle, 2]
+  alpha: Annotated[MTLTextureSwizzle, 3]
+uint8_t: TypeAlias = Annotated[int, ctypes.c_ubyte]
 class enum_MTLTextureSwizzle(uint8_t, c.Enum): pass
 MTLTextureSwizzleZero = enum_MTLTextureSwizzle.define('MTLTextureSwizzleZero', 0)
 MTLTextureSwizzleOne = enum_MTLTextureSwizzle.define('MTLTextureSwizzleOne', 1)
@@ -252,22 +250,21 @@ MTLTextureSwizzleBlue = enum_MTLTextureSwizzle.define('MTLTextureSwizzleBlue', 4
 MTLTextureSwizzleAlpha = enum_MTLTextureSwizzle.define('MTLTextureSwizzleAlpha', 5)
 
 MTLTextureSwizzle: TypeAlias = enum_MTLTextureSwizzle
-MTLTextureSwizzleChannels.register_fields([('red', MTLTextureSwizzle, 0), ('green', MTLTextureSwizzle, 1), ('blue', MTLTextureSwizzle, 2), ('alpha', MTLTextureSwizzle, 3)])
 class NSObject(objc.Spec): pass
 IMP: TypeAlias = c.CFUNCTYPE[None, []]
 class NSInvocation(objc.Spec): pass
 class NSMethodSignature(objc.Spec): pass
 NSMethodSignature._bases_ = [NSObject]
 NSMethodSignature._methods_ = [
-  ('getArgumentTypeAtIndex:', c.POINTER[ctypes.c_char], [NSUInteger]),
+  ('getArgumentTypeAtIndex:', c.POINTER[Annotated[bytes, ctypes.c_char]], [NSUInteger]),
   ('isOneway', BOOL, []),
   ('numberOfArguments', NSUInteger, []),
   ('frameLength', NSUInteger, []),
-  ('methodReturnType', c.POINTER[ctypes.c_char], []),
+  ('methodReturnType', c.POINTER[Annotated[bytes, ctypes.c_char]], []),
   ('methodReturnLength', NSUInteger, []),
 ]
 NSMethodSignature._classmethods_ = [
-  ('signatureWithObjCTypes:', NSMethodSignature, [c.POINTER[ctypes.c_char]]),
+  ('signatureWithObjCTypes:', NSMethodSignature, [c.POINTER[Annotated[bytes, ctypes.c_char]]]),
 ]
 NSInvocation._bases_ = [NSObject]
 NSInvocation._methods_ = [
@@ -289,10 +286,10 @@ NSInvocation._methods_ = [
 NSInvocation._classmethods_ = [
   ('invocationWithMethodSignature:', NSInvocation, [NSMethodSignature]),
 ]
-class struct__NSZone(c.Struct): pass
+class struct__NSZone(c.Struct): SIZE = 0
 class Protocol(objc.Spec): pass
 class NSString(objc.Spec): pass
-unichar: TypeAlias = ctypes.c_uint16
+unichar: TypeAlias = Annotated[int, ctypes.c_uint16]
 class NSCoder(objc.Spec): pass
 class NSData(objc.Spec): pass
 NSData._bases_ = [NSObject]
@@ -302,10 +299,10 @@ NSData._methods_ = [
 ]
 NSCoder._bases_ = [NSObject]
 NSCoder._methods_ = [
-  ('encodeValueOfObjCType:at:', None, [c.POINTER[ctypes.c_char], ctypes.c_void_p]),
+  ('encodeValueOfObjCType:at:', None, [c.POINTER[Annotated[bytes, ctypes.c_char]], ctypes.c_void_p]),
   ('encodeDataObject:', None, [NSData]),
   ('decodeDataObject', NSData, []),
-  ('decodeValueOfObjCType:at:size:', None, [c.POINTER[ctypes.c_char], ctypes.c_void_p, NSUInteger]),
+  ('decodeValueOfObjCType:at:size:', None, [c.POINTER[Annotated[bytes, ctypes.c_char]], ctypes.c_void_p, NSUInteger]),
   ('versionForClassName:', NSInteger, [NSString]),
 ]
 NSString._bases_ = [NSObject]
@@ -388,7 +385,7 @@ MTLTextureDescriptor._classmethods_ = [
   ('textureBufferDescriptorWithPixelFormat:width:resourceOptions:usage:', MTLTextureDescriptor, [MTLPixelFormat, NSUInteger, MTLResourceOptions, MTLTextureUsage]),
 ]
 class MTLDevice(objc.Spec): pass
-uint64_t: TypeAlias = ctypes.c_uint64
+uint64_t: TypeAlias = Annotated[int, ctypes.c_uint64]
 MTLBuffer._bases_ = [MTLResource]
 MTLBuffer._methods_ = [
   ('contents', ctypes.c_void_p, []),
@@ -408,23 +405,20 @@ class MTLSamplerState(objc.Spec): pass
 @c.record
 class MTLRegion(c.Struct):
   SIZE = 48
-  origin: 'MTLOrigin'
-  size: 'MTLSize'
+  origin: Annotated[MTLOrigin, 0]
+  size: Annotated[MTLSize, 24]
 @c.record
 class MTLOrigin(c.Struct):
   SIZE = 24
-  x: 'NSUInteger'
-  y: 'NSUInteger'
-  z: 'NSUInteger'
-MTLOrigin.register_fields([('x', NSUInteger, 0), ('y', NSUInteger, 8), ('z', NSUInteger, 16)])
+  x: Annotated[NSUInteger, 0]
+  y: Annotated[NSUInteger, 8]
+  z: Annotated[NSUInteger, 16]
 @c.record
 class MTLSize(c.Struct):
   SIZE = 24
-  width: 'NSUInteger'
-  height: 'NSUInteger'
-  depth: 'NSUInteger'
-MTLSize.register_fields([('width', NSUInteger, 0), ('height', NSUInteger, 8), ('depth', NSUInteger, 16)])
-MTLRegion.register_fields([('origin', MTLOrigin, 0), ('size', MTLSize, 24)])
+  width: Annotated[NSUInteger, 0]
+  height: Annotated[NSUInteger, 8]
+  depth: Annotated[NSUInteger, 16]
 class MTLFence(objc.Spec): pass
 MTLFence._bases_ = [NSObject]
 MTLFence._methods_ = [
@@ -439,8 +433,8 @@ MTLPurgeableStateVolatile = enum_MTLPurgeableState.define('MTLPurgeableStateVola
 MTLPurgeableStateEmpty = enum_MTLPurgeableState.define('MTLPurgeableStateEmpty', 4)
 
 MTLPurgeableState: TypeAlias = enum_MTLPurgeableState
-kern_return_t: TypeAlias = ctypes.c_int32
-task_id_token_t: TypeAlias = ctypes.c_uint32
+kern_return_t: TypeAlias = Annotated[int, ctypes.c_int32]
+task_id_token_t: TypeAlias = Annotated[int, ctypes.c_uint32]
 class MTLHeap(objc.Spec): pass
 MTLResource._bases_ = [NSObject]
 MTLResource._methods_ = [
@@ -505,8 +499,8 @@ MTLComputeCommandEncoder._methods_ = [
   ('setTextures:withRange:', None, [c.POINTER[MTLTexture], NSRange]),
   ('setSamplerState:atIndex:', None, [MTLSamplerState, NSUInteger]),
   ('setSamplerStates:withRange:', None, [c.POINTER[MTLSamplerState], NSRange]),
-  ('setSamplerState:lodMinClamp:lodMaxClamp:atIndex:', None, [MTLSamplerState, ctypes.c_float, ctypes.c_float, NSUInteger]),
-  ('setSamplerStates:lodMinClamps:lodMaxClamps:withRange:', None, [c.POINTER[MTLSamplerState], c.POINTER[ctypes.c_float], c.POINTER[ctypes.c_float], NSRange]),
+  ('setSamplerState:lodMinClamp:lodMaxClamp:atIndex:', None, [MTLSamplerState, Annotated[float, ctypes.c_float], Annotated[float, ctypes.c_float], NSUInteger]),
+  ('setSamplerStates:lodMinClamps:lodMaxClamps:withRange:', None, [c.POINTER[MTLSamplerState], c.POINTER[Annotated[float, ctypes.c_float]], c.POINTER[Annotated[float, ctypes.c_float]], NSRange]),
   ('setThreadgroupMemoryLength:atIndex:', None, [NSUInteger, NSUInteger]),
   ('setImageblockWidth:height:', None, [NSUInteger, NSUInteger]),
   ('setStageInRegion:', None, [MTLRegion]),
@@ -932,9 +926,8 @@ class MTLIntersectionFunctionTableDescriptor(objc.Spec): pass
 @c.record
 class struct_MTLResourceID(c.Struct):
   SIZE = 8
-  _impl: 'uint64_t'
+  _impl: Annotated[uint64_t, 0]
 MTLResourceID: TypeAlias = struct_MTLResourceID
-struct_MTLResourceID.register_fields([('_impl', uint64_t, 0)])
 MTLComputePipelineState._bases_ = [NSObject]
 MTLComputePipelineState._methods_ = [
   ('imageblockMemoryLengthForDimensions:', NSUInteger, [MTLSize]),
@@ -952,7 +945,7 @@ MTLComputePipelineState._methods_ = [
 class MTLCommandQueue(objc.Spec): pass
 class MTLCommandBuffer(objc.Spec): pass
 class MTLDrawable(objc.Spec): pass
-CFTimeInterval: TypeAlias = ctypes.c_double
+CFTimeInterval: TypeAlias = Annotated[float, ctypes.c_double]
 class MTLBlitCommandEncoder(objc.Spec): pass
 class enum_MTLBlitOption(NSUInteger, c.Enum): pass
 MTLBlitOptionNone = enum_MTLBlitOption.define('MTLBlitOptionNone', 0)
@@ -994,19 +987,17 @@ class MTLRenderPassDescriptor(objc.Spec): pass
 @c.record
 class MTLSamplePosition(c.Struct):
   SIZE = 8
-  x: 'ctypes.c_float'
-  y: 'ctypes.c_float'
-MTLSamplePosition.register_fields([('x', ctypes.c_float, 0), ('y', ctypes.c_float, 4)])
+  x: Annotated[Annotated[float, ctypes.c_float], 0]
+  y: Annotated[Annotated[float, ctypes.c_float], 4]
 class MTLRenderPassColorAttachmentDescriptorArray(objc.Spec): pass
 class MTLRenderPassColorAttachmentDescriptor(objc.Spec): pass
 @c.record
 class MTLClearColor(c.Struct):
   SIZE = 32
-  red: 'ctypes.c_double'
-  green: 'ctypes.c_double'
-  blue: 'ctypes.c_double'
-  alpha: 'ctypes.c_double'
-MTLClearColor.register_fields([('red', ctypes.c_double, 0), ('green', ctypes.c_double, 8), ('blue', ctypes.c_double, 16), ('alpha', ctypes.c_double, 24)])
+  red: Annotated[Annotated[float, ctypes.c_double], 0]
+  green: Annotated[Annotated[float, ctypes.c_double], 8]
+  blue: Annotated[Annotated[float, ctypes.c_double], 16]
+  alpha: Annotated[Annotated[float, ctypes.c_double], 24]
 class MTLRenderPassAttachmentDescriptor(objc.Spec): pass
 class enum_MTLLoadAction(NSUInteger, c.Enum): pass
 MTLLoadActionDontCare = enum_MTLLoadAction.define('MTLLoadActionDontCare', 0)
@@ -1072,8 +1063,8 @@ MTLMultisampleDepthResolveFilterMax = enum_MTLMultisampleDepthResolveFilter.defi
 MTLMultisampleDepthResolveFilter: TypeAlias = enum_MTLMultisampleDepthResolveFilter
 MTLRenderPassDepthAttachmentDescriptor._bases_ = [MTLRenderPassAttachmentDescriptor]
 MTLRenderPassDepthAttachmentDescriptor._methods_ = [
-  ('clearDepth', ctypes.c_double, []),
-  ('setClearDepth:', None, [ctypes.c_double]),
+  ('clearDepth', Annotated[float, ctypes.c_double], []),
+  ('setClearDepth:', None, [Annotated[float, ctypes.c_double]]),
   ('depthResolveFilter', MTLMultisampleDepthResolveFilter, []),
   ('setDepthResolveFilter:', None, [MTLMultisampleDepthResolveFilter]),
 ]
@@ -1459,10 +1450,9 @@ MTLSparsePageSize: TypeAlias = enum_MTLSparsePageSize
 @c.record
 class MTLAccelerationStructureSizes(c.Struct):
   SIZE = 24
-  accelerationStructureSize: 'NSUInteger'
-  buildScratchBufferSize: 'NSUInteger'
-  refitScratchBufferSize: 'NSUInteger'
-MTLAccelerationStructureSizes.register_fields([('accelerationStructureSize', NSUInteger, 0), ('buildScratchBufferSize', NSUInteger, 8), ('refitScratchBufferSize', NSUInteger, 16)])
+  accelerationStructureSize: Annotated[NSUInteger, 0]
+  buildScratchBufferSize: Annotated[NSUInteger, 8]
+  refitScratchBufferSize: Annotated[NSUInteger, 16]
 class enum_MTLCounterSamplingPoint(NSUInteger, c.Enum): pass
 MTLCounterSamplingPointAtStageBoundary = enum_MTLCounterSamplingPoint.define('MTLCounterSamplingPointAtStageBoundary', 0)
 MTLCounterSamplingPointAtDrawBoundary = enum_MTLCounterSamplingPoint.define('MTLCounterSamplingPointAtDrawBoundary', 1)
@@ -1474,9 +1464,8 @@ MTLCounterSamplingPoint: TypeAlias = enum_MTLCounterSamplingPoint
 @c.record
 class MTLSizeAndAlign(c.Struct):
   SIZE = 16
-  size: 'NSUInteger'
-  align: 'NSUInteger'
-MTLSizeAndAlign.register_fields([('size', NSUInteger, 0), ('align', NSUInteger, 8)])
+  size: Annotated[NSUInteger, 0]
+  align: Annotated[NSUInteger, 8]
 class MTLRenderPipelineReflection(objc.Spec): pass
 class MTLArgumentDescriptor(objc.Spec): pass
 MTLArgumentDescriptor._bases_ = [NSObject]
@@ -1505,7 +1494,7 @@ MTLArchitecture._methods_ = [
 class MTLHeapDescriptor(objc.Spec): pass
 class MTLDepthStencilState(objc.Spec): pass
 class MTLDepthStencilDescriptor(objc.Spec): pass
-class struct___IOSurface(c.Struct): pass
+class struct___IOSurface(c.Struct): SIZE = 0
 IOSurfaceRef: TypeAlias = c.POINTER[struct___IOSurface]
 class MTLSharedTextureHandle(objc.Spec): pass
 MTLSharedTextureHandle._bases_ = [NSObject]
@@ -1586,49 +1575,49 @@ class NSValue(objc.Spec): pass
 NSValue._bases_ = [NSObject]
 NSValue._methods_ = [
   ('getValue:size:', None, [ctypes.c_void_p, NSUInteger]),
-  ('initWithBytes:objCType:', 'instancetype', [ctypes.c_void_p, c.POINTER[ctypes.c_char]]),
+  ('initWithBytes:objCType:', 'instancetype', [ctypes.c_void_p, c.POINTER[Annotated[bytes, ctypes.c_char]]]),
   ('initWithCoder:', 'instancetype', [NSCoder]),
-  ('objCType', c.POINTER[ctypes.c_char], []),
+  ('objCType', c.POINTER[Annotated[bytes, ctypes.c_char]], []),
 ]
 NSNumber._bases_ = [NSValue]
 NSNumber._methods_ = [
   ('initWithCoder:', 'instancetype', [NSCoder]),
-  ('initWithChar:', NSNumber, [ctypes.c_char]),
-  ('initWithUnsignedChar:', NSNumber, [ctypes.c_ubyte]),
-  ('initWithShort:', NSNumber, [ctypes.c_int16]),
-  ('initWithUnsignedShort:', NSNumber, [ctypes.c_uint16]),
-  ('initWithInt:', NSNumber, [ctypes.c_int32]),
-  ('initWithUnsignedInt:', NSNumber, [ctypes.c_uint32]),
-  ('initWithLong:', NSNumber, [ctypes.c_int64]),
-  ('initWithUnsignedLong:', NSNumber, [ctypes.c_uint64]),
-  ('initWithLongLong:', NSNumber, [ctypes.c_int64]),
-  ('initWithUnsignedLongLong:', NSNumber, [ctypes.c_uint64]),
-  ('initWithFloat:', NSNumber, [ctypes.c_float]),
-  ('initWithDouble:', NSNumber, [ctypes.c_double]),
+  ('initWithChar:', NSNumber, [Annotated[bytes, ctypes.c_char]]),
+  ('initWithUnsignedChar:', NSNumber, [Annotated[int, ctypes.c_ubyte]]),
+  ('initWithShort:', NSNumber, [Annotated[int, ctypes.c_int16]]),
+  ('initWithUnsignedShort:', NSNumber, [Annotated[int, ctypes.c_uint16]]),
+  ('initWithInt:', NSNumber, [Annotated[int, ctypes.c_int32]]),
+  ('initWithUnsignedInt:', NSNumber, [Annotated[int, ctypes.c_uint32]]),
+  ('initWithLong:', NSNumber, [Annotated[int, ctypes.c_int64]]),
+  ('initWithUnsignedLong:', NSNumber, [Annotated[int, ctypes.c_uint64]]),
+  ('initWithLongLong:', NSNumber, [Annotated[int, ctypes.c_int64]]),
+  ('initWithUnsignedLongLong:', NSNumber, [Annotated[int, ctypes.c_uint64]]),
+  ('initWithFloat:', NSNumber, [Annotated[float, ctypes.c_float]]),
+  ('initWithDouble:', NSNumber, [Annotated[float, ctypes.c_double]]),
   ('initWithBool:', NSNumber, [BOOL]),
   ('initWithInteger:', NSNumber, [NSInteger]),
   ('initWithUnsignedInteger:', NSNumber, [NSUInteger]),
   ('compare:', NSComparisonResult, [NSNumber]),
   ('isEqualToNumber:', BOOL, [NSNumber]),
   ('descriptionWithLocale:', NSString, [objc.id_]),
-  ('charValue', ctypes.c_char, []),
-  ('unsignedCharValue', ctypes.c_ubyte, []),
-  ('shortValue', ctypes.c_int16, []),
-  ('unsignedShortValue', ctypes.c_uint16, []),
-  ('intValue', ctypes.c_int32, []),
-  ('unsignedIntValue', ctypes.c_uint32, []),
-  ('longValue', ctypes.c_int64, []),
-  ('unsignedLongValue', ctypes.c_uint64, []),
-  ('longLongValue', ctypes.c_int64, []),
-  ('unsignedLongLongValue', ctypes.c_uint64, []),
-  ('floatValue', ctypes.c_float, []),
-  ('doubleValue', ctypes.c_double, []),
+  ('charValue', Annotated[bytes, ctypes.c_char], []),
+  ('unsignedCharValue', Annotated[int, ctypes.c_ubyte], []),
+  ('shortValue', Annotated[int, ctypes.c_int16], []),
+  ('unsignedShortValue', Annotated[int, ctypes.c_uint16], []),
+  ('intValue', Annotated[int, ctypes.c_int32], []),
+  ('unsignedIntValue', Annotated[int, ctypes.c_uint32], []),
+  ('longValue', Annotated[int, ctypes.c_int64], []),
+  ('unsignedLongValue', Annotated[int, ctypes.c_uint64], []),
+  ('longLongValue', Annotated[int, ctypes.c_int64], []),
+  ('unsignedLongLongValue', Annotated[int, ctypes.c_uint64], []),
+  ('floatValue', Annotated[float, ctypes.c_float], []),
+  ('doubleValue', Annotated[float, ctypes.c_double], []),
   ('boolValue', BOOL, []),
   ('integerValue', NSInteger, []),
   ('unsignedIntegerValue', NSUInteger, []),
   ('stringValue', NSString, []),
 ]
-NSURLBookmarkFileCreationOptions: TypeAlias = ctypes.c_uint64
+NSURLBookmarkFileCreationOptions: TypeAlias = Annotated[int, ctypes.c_uint64]
 NSURL._bases_ = [NSObject]
 NSURL._methods_ = [
   ('initWithScheme:host:path:', 'instancetype', [NSString, NSString, NSString]),
@@ -1636,13 +1625,13 @@ NSURL._methods_ = [
   ('initFileURLWithPath:relativeToURL:', 'instancetype', [NSString, NSURL]),
   ('initFileURLWithPath:isDirectory:', 'instancetype', [NSString, BOOL]),
   ('initFileURLWithPath:', 'instancetype', [NSString]),
-  ('initFileURLWithFileSystemRepresentation:isDirectory:relativeToURL:', 'instancetype', [c.POINTER[ctypes.c_char], BOOL, NSURL]),
+  ('initFileURLWithFileSystemRepresentation:isDirectory:relativeToURL:', 'instancetype', [c.POINTER[Annotated[bytes, ctypes.c_char]], BOOL, NSURL]),
   ('initWithString:', 'instancetype', [NSString]),
   ('initWithString:relativeToURL:', 'instancetype', [NSString, NSURL]),
   ('initWithString:encodingInvalidCharacters:', 'instancetype', [NSString, BOOL]),
   ('initWithDataRepresentation:relativeToURL:', 'instancetype', [NSData, NSURL]),
   ('initAbsoluteURLWithDataRepresentation:relativeToURL:', 'instancetype', [NSData, NSURL]),
-  ('getFileSystemRepresentation:maxLength:', BOOL, [c.POINTER[ctypes.c_char], NSUInteger]),
+  ('getFileSystemRepresentation:maxLength:', BOOL, [c.POINTER[Annotated[bytes, ctypes.c_char]], NSUInteger]),
   ('isFileReferenceURL', BOOL, []),
   ('fileReferenceURL', NSURL, []),
   ('getResourceValue:forKey:error:', BOOL, [c.POINTER[objc.id_], NSURLResourceKey, c.POINTER[NSError]]),
@@ -1670,7 +1659,7 @@ NSURL._methods_ = [
   ('query', NSString, []),
   ('relativePath', NSString, []),
   ('hasDirectoryPath', BOOL, []),
-  ('fileSystemRepresentation', c.POINTER[ctypes.c_char], []),
+  ('fileSystemRepresentation', c.POINTER[Annotated[bytes, ctypes.c_char]], []),
   ('isFileURL', BOOL, []),
   ('standardizedURL', NSURL, []),
   ('filePathURL', NSURL, []),
@@ -1680,7 +1669,7 @@ NSURL._classmethods_ = [
   ('fileURLWithPath:relativeToURL:', NSURL, [NSString, NSURL]),
   ('fileURLWithPath:isDirectory:', NSURL, [NSString, BOOL]),
   ('fileURLWithPath:', NSURL, [NSString]),
-  ('fileURLWithFileSystemRepresentation:isDirectory:relativeToURL:', NSURL, [c.POINTER[ctypes.c_char], BOOL, NSURL]),
+  ('fileURLWithFileSystemRepresentation:isDirectory:relativeToURL:', NSURL, [c.POINTER[Annotated[bytes, ctypes.c_char]], BOOL, NSURL]),
   ('URLWithString:', 'instancetype', [NSString]),
   ('URLWithString:relativeToURL:', 'instancetype', [NSString, NSURL]),
   ('URLWithString:encodingInvalidCharacters:', 'instancetype', [NSString, BOOL]),
@@ -1816,7 +1805,7 @@ MTLCounterSampleBufferDescriptor._methods_ = [
   ('sampleCount', NSUInteger, []),
   ('setSampleCount:', None, [NSUInteger]),
 ]
-MTLTimestamp: TypeAlias = ctypes.c_uint64
+MTLTimestamp: TypeAlias = Annotated[int, ctypes.c_uint64]
 class MTLBufferBinding(objc.Spec): pass
 class MTLBinding(objc.Spec): pass
 MTLBufferBinding._bases_ = [MTLBinding]
@@ -1953,9 +1942,8 @@ MTLIndirectCommandType: TypeAlias = enum_MTLIndirectCommandType
 @c.record
 class MTLIndirectCommandBufferExecutionRange(c.Struct):
   SIZE = 8
-  location: 'uint32_t'
-  length: 'uint32_t'
-MTLIndirectCommandBufferExecutionRange.register_fields([('location', uint32_t, 0), ('length', uint32_t, 4)])
+  location: Annotated[uint32_t, 0]
+  length: Annotated[uint32_t, 4]
 MTLIndirectCommandBufferDescriptor._bases_ = [NSObject]
 MTLIndirectCommandBufferDescriptor._methods_ = [
   ('commandTypes', MTLIndirectCommandType, []),
@@ -2044,6 +2032,7 @@ MTLCommandEncoder._methods_ = [
   ('label', NSString, []),
   ('setLabel:', None, [NSString]),
 ]
+c.init_records()
 MTLResourceCPUCacheModeShift = 0 # type: ignore
 MTLResourceCPUCacheModeMask = (0xf << MTLResourceCPUCacheModeShift) # type: ignore
 MTLResourceStorageModeShift = 4 # type: ignore

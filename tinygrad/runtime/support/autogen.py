@@ -147,13 +147,10 @@ def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False,
         return tnm
       case clang.CXType_Enum:
         # TODO: C++ and GNU C have forward declared enums
-        if clang.clang_Cursor_isAnonymous(decl): types[nm(t)] = suggested_name or f"_anonenum{anoncnt()}", True
-        else: types[nm(t)] = nm(t).replace(' ', '_').replace('::', '_'), True
-        ety = clang.clang_getEnumDeclIntegerType(decl)
+        types[nm(t)] = tname(ety:=clang.clang_getEnumDeclIntegerType(decl)), True
+        enm = suggested_name or f"_anonenum{anoncnt()}" if clang.clang_Cursor_isAnonymous(decl) else nm(t).replace(' ', '_').replace('::', '_')
         def value(e): return (clang.clang_getEnumConstantDeclUnsignedValue if ety.kind in uints else clang.clang_getEnumConstantDeclValue)(e)
-        lines.append(f"class {types[nm(t)][0]}({tname(ety)}, c.Enum): pass\n" +
-                     "\n".join(f"{nm(e)} = {types[nm(t)][0]}.define('{nm(e)}', {value(e)})" for e in children(decl)
-                     if e.kind == clang.CXCursor_EnumConstantDecl) + "\n")
+        lines.append(f"{enm} = {{" + ", ".join(f"{nm(e)}: {value(e)}" for e in children(decl) if e.kind == clang.CXCursor_EnumConstantDecl) + "}")
         return types[nm(t)][0]
       case clang.CXType_ConstantArray: return ("c.Array[" + tname(clang.clang_getArrayElementType(t), suggested_name and suggested_name.rstrip('s'))
                                                + f", Literal[{clang.clang_getArraySize(t)}]]")
