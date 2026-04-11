@@ -81,6 +81,13 @@ class TestGGUF(unittest.TestCase):
     out = ggml_data_to_tensor(Tensor(block), 32, GGMLQuantizationType.MXFP4.value)
     np.testing.assert_equal(out.numpy(), expected)
 
+  def test_dequantization_q1_0(self):
+    # Q1_0: 2 bytes fp16 scale + 16 bytes (128 1-bit values)
+    block = np.frombuffer(np.float16(2.0).tobytes() + np.packbits(np.random.choice([0, 1], size=128)).tobytes(), dtype=np.uint8).copy()
+    expected = np.float16(2.0) * (np.unpackbits(block[2:], bitorder="little").astype(np.int8) * 2 - 1)
+    # TODO: replace 41 with GGMLQuantizationType.Q1_0.value on next gguf-py release
+    np.testing.assert_equal(ggml_data_to_tensor(Tensor(block), 128, 41).numpy().flatten(), expected)
+
   def test_expected_failure_unknown_type(self):
     with self.assertRaises(ValueError):
       ggml_data_to_tensor(Tensor.empty(512, dtype=dtypes.uint8), 256, 1337)
