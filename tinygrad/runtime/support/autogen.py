@@ -136,7 +136,7 @@ def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False,
           if ty.kind == clang.CXType_Pointer:
             return "ctypes.c_void_p" if (p:=clang.clang_getPointeeType(ty)).kind==clang.CXType_Void else f"ctypes._Pointer[{typehint(p)}]"
           if ty.kind in (clang.CXType_ConstantArray, clang.CXType_IncompleteArray): return f"list[{typehint(clang.clang_getArrayElementType(ty))}]"
-          return repr(tname(ty))
+          return tname(ty)
 
         # check if previously declared
         if _nm in types: types[_nm] = (tnm:=types[_nm][0]), types[_nm][1] or len(fields(t)) != 0, (ln:=types[_nm][2])
@@ -153,7 +153,7 @@ def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False,
               for f,offset in all_fields(t)]
         if ff:
           lines[ln] = "\n".join(["@c.record", f"class {tnm}(c.Struct):", f"  SIZE = {clang.clang_Type_getSizeOf(t)}"] +
-                                [f"  {f}: {typehint(ty)}" for f,ty,*args in ff])
+                                [f"  {f}: '{typehint(ty)}'" for f,ty,*args in ff])
           lines.append(f"{tnm}.register_fields([" + ", ".join([f"('{f}', {', '.join(str(a) for a in args)})" for f,ty,*args in ff]) + "])")
         return tnm
       case clang.CXType_Enum:
