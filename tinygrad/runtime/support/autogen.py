@@ -93,7 +93,7 @@ arc_families = ['alloc', 'copy', 'mutableCopy', 'new']
 def normalize(a): return ("_" + n if keyword.iskeyword(n:=nm(a)) else n)
 
 def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False, errno=False, anon_names={}, types={}, parse_macros=True, paths=[]):
-  macros, lines, anoncnt, objc, fns = [], [], itertools.count().__next__, False, set()
+  macros, lines, anoncnt, types, objc, fns = [], [], itertools.count().__next__, types.copy(), False, set()
   def tname(t, suggested_name=None, typedef=None) -> str:
     suggested_name = anon_names.get(f"{loc_file(loc(decl:=clang.clang_getTypeDeclaration(t)))}:{loc_line(loc(decl))}", suggested_name)
     nonlocal lines, types, anoncnt, objc
