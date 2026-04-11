@@ -139,7 +139,7 @@ def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False,
               for f,offset in all_fields(t)]
         if ff:
           lines[ln] = "\n".join(["@c.record", f"class {tnm}(c.Struct):", f"  SIZE = {clang.clang_Type_getSizeOf(t)}"] +
-                                [f"  {f}: {ty}" for f,ty,*args in ff])
+                                [f"  {f}: '{ty}'" for f,ty,*args in ff])
           lines.append(f"{tnm}.register_fields([" + ", ".join([f"('{f}', {', '.join(str(a) for a in args)})" for f,ty,*args in ff]) + "])")
         return tnm
       case clang.CXType_Enum:
@@ -257,7 +257,7 @@ def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False,
         lines, types = rollback
     clang.clang_disposeTranslationUnit(tu)
     clang.clang_disposeIndex(idx)
-  main = '\n'.join(['# mypy: disable-error-code="empty-body"', "from __future__ import annotations", "import ctypes",
+  main = '\n'.join(['# mypy: disable-error-code="empty-body"', "import ctypes",
                     "from typing import Literal, TypeAlias", "from tinygrad.runtime.support.c import _IO, _IOW, _IOR, _IOWR",
                     "from tinygrad.runtime.support import c", *prolog, *(["from tinygrad.runtime.support import objc"]*objc),
                     *([f"dll = c.DLL('{name}', {dll}{f', {paths}'*bool(paths)}{', use_errno=True'*errno})"] if dll else []), *lines]) + '\n'
