@@ -94,7 +94,7 @@ tmap = {clang.CXType_Void:"None", clang.CXType_Char_U:"ctypes.c_ubyte", clang.CX
         **{getattr(clang, f'CXType_{k}'):f"ctypes.c_{'u' if 'U' in k else ''}int{sz}" for sz,k in
            [(16, "UShort"), (16, "Short"), (32, "UInt"), (32, "Int"), (64, "ULong"), (64, "Long"), (64, "ULongLong"), (64, "LongLong")]}}
 mypymap = {**{k:"int" for k in ints}, **{k:"float" for k in [clang.CXType_Float, clang.CXType_Double, clang.CXType_LongDouble]},
-           clang.CXType_WChar:"str", clang.CXType_SChar:"int", clang.CXType_Char_S:"bytes", clang.CXType_Bool:"bool"}
+           clang.CXType_Enum:"int", clang.CXType_WChar:"str", clang.CXType_SChar:"int", clang.CXType_Char_S:"bytes", clang.CXType_Bool:"bool"}
 # https://clang.llvm.org/docs/AutomaticReferenceCounting.html#arc-method-families
 arc_families = ['alloc', 'copy', 'mutableCopy', 'new']
 
