@@ -35,6 +35,12 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
     """
     return self.cast(dtypes.bool).ne(True)
 
+  def contiguous_backward(self) -> Self:
+    """
+    Inserts a contiguous operation in the backward pass.
+    """
+    return self.alu(Ops.CONTIGUOUS_BACKWARD)
+
   def neg(self) -> Self:
     """
     Negates the tensor element-wise.

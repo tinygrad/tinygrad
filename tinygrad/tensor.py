@@ -1589,54 +1589,6 @@ class Tensor(OpMixin):
     m, _, ss = self._softmax(axis, dtype)
     return m - ss.log()
 
-  def normalize(self, p:float=2.0, dim:int=1, eps:float=1e-12) -> Tensor:
-    """
-    Performs Lp normalization of the tensor along the specified dimension.
-
-    See: https://pytorch.org/docs/stable/generated/torch.nn.functional.normalize.html
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    Tensor.manual_seed(42)
-    t = Tensor.randn(2, 3)
-    print(t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.normalize().numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.normalize(p=1, dim=0).numpy())
-    ```
-    """
-    if p == 0: return self / (self != 0).sum(dim, keepdim=True).maximum(eps)
-    return self / self.abs().pow(p).sum(dim, keepdim=True).pow(1/p).maximum(eps)
-
-  def logsumexp(self, axis=None, keepdim=False) -> Tensor:
-    """
-    Computes the log-sum-exp of the tensor along the specified axis or axes.
-
-    The log-sum-exp function is a numerically stable way to compute the logarithm of the sum of exponentials.
-
-    You can pass in `axis` and `keepdim` keyword arguments to control the axis along
-    which the log-sum-exp is computed and whether the reduced dimensions are retained.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    Tensor.manual_seed(42)
-    t = Tensor.randn(2, 3)
-    print(t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.logsumexp().numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.logsumexp(axis=0).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.logsumexp(axis=1).numpy())
-    ```
-    """
-    m = self.max(axis=axis, keepdim=True)
-    return (self - m).exp().sum(axis=axis, keepdim=keepdim).log() + (m if keepdim else m.squeeze(axis))
-
   def logcumsumexp(self, axis=0) -> Tensor:
     """
     Computes the log-cumsum-exp of the tensor along the specified axis or axes.
@@ -2365,12 +2317,6 @@ class Tensor(OpMixin):
     Returns a contiguous tensor.
     """
     return self._apply_uop(UOp.contiguous, extra_args=args, **kwargs)
-
-  def contiguous_backward(self) -> Tensor:
-    """
-    Inserts a contiguous operation in the backward pass.
-    """
-    return self._apply_uop(UOp.contiguous_backward)
 
   # ***** broadcasted elementwise ops *****
 
