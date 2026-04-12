@@ -11,7 +11,7 @@ from tinygrad.helpers import IMAGE, FLOAT16, WINO, Metadata, TRACEMETA, ceildiv,
 from tinygrad.helpers import suppress_finalizing, disable_gc
 from tinygrad.gradient import compute_gradient
 from tinygrad.mixin import OpMixin, ReductionStr
-from tinygrad.uop.ops import smax, smin, resolve, UOp, Ops, sint, identity_element, all_metadata, _index_to_concrete_int, sint_to_uop, Variable
+from tinygrad.uop.ops import smax, resolve, UOp, Ops, sint, all_metadata, _index_to_concrete_int, sint_to_uop, Variable
 from tinygrad.uop.ops import _broadcast_shape
 from tinygrad.engine.schedule import ExecItem, complete_create_schedule_with_vars
 from tinygrad.device import Buffer, canonicalize_device
@@ -1054,14 +1054,6 @@ class Tensor(OpMixin):
   def _mop(self, op:Ops, arg) -> Tensor: return self._apply_uop(UOp._mop, extra_args=(op,), arg=arg)
   def _rop(self, op:Ops, axis:tuple[int, ...]) -> Tensor: return self._apply_uop(UOp._rop, op=op, axis=axis)
 
-  def _pad_constant(self, pX:tuple[tuple[sint, sint], ...], value:float) -> Tensor:
-    # shrink first for negative pads, then pad with only non-negative values
-    has_neg = not all(resolve(p >= 0) for p in flatten(pX))
-    X = self.shrink(tuple((-smin(pB,0),smin(pA+s,s)) for (pB,pA),s in zip(pX, self.shape))) if has_neg else self
-    pads = tuple((smax(pB,0), smax(pA,0)) for pB,pA in pX) if has_neg else pX
-    if value == 0: return X._apply_uop(UOp.pad, arg=pads)
-    return X._apply_uop(UOp.pad, arg=pads) + Tensor.ones_like(X)._apply_uop(UOp.pad, arg=pads).where(0, value)
-
   def _pad_circular(self, pX:tuple[tuple[sint, sint], ...]) -> Tensor:
     if any(pB>sh or pA>sh for (pB,pA),sh in zip(pX, self.shape)): raise ValueError('Padding value causes wrapping around more than once.')
     if any(pB<0 or pA<0 for pB,pA in pX): raise NotImplementedError("Negative pads with circular pads is not supported")
@@ -1955,53 +1947,6 @@ class Tensor(OpMixin):
   def dot(self, w:Tensor, dtype:DTypeLike|None=None) -> Tensor:
     if IMAGE: return self.image_dot(w, dtype)
     return super().dot(w, dtype=dtype)
-
-  def _cumalu(self, axis:int, op:Ops) -> Tensor:
-    assert self.shape[axis] != 0 and op in (Ops.ADD, Ops.MAX, Ops.MUL)
-    pooled = self.transpose(axis,-1).pad((self.shape[axis]-1, 0), value=identity_element(op, self.dtype))._pool((self.shape[axis],))
-    return getattr(pooled, {Ops.ADD: "sum", Ops.MAX: "max", Ops.MUL: "prod"}[op])(-1).transpose(axis, -1)
-
-  def _split_cumalu(self, axis:int, op:Ops) -> Tensor:
-    axis = self._resolve_dim(axis)
-    if self.ndim == 0 or 0 in self.shape: return self
-    # TODO: someday the optimizer will find this on its own
-    # for now this is a two stage cumsum
-    SPLIT = 256
-    value = identity_element(op, self.dtype)
-    if not isinstance(s:=self.shape[axis], int) or s <= SPLIT*2: return self._cumalu(axis, op)
-    ret = self.transpose(axis,-1).pad((round_up(s, SPLIT)-s, 0), value=value).unflatten(-1, (-1, SPLIT))._cumalu(-1, op)
-    base = ret[..., -1]._cumalu(-1, op).pad((1, -1), value=value)
-    base = base.unsqueeze(-1).expand(*base.shape, ret.shape[-1])
-    def fix(x: Tensor) -> Tensor: return x.flatten(start_dim=-2)[..., -s:].transpose(axis,-1)
-    return getattr(fix(ret), {Ops.ADD: "add", Ops.MAX: "maximum", Ops.MUL: "mul"}[op])(fix(base))
-
-  def cumsum(self, axis:int=0) -> Tensor:
-    """
-    Computes the cumulative sum of the tensor along the specified `axis`.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor.ones(2, 3)
-    print(t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.cumsum(1).numpy())
-    ```
-    """
-    return self._split_cumalu(axis, Ops.ADD)
-
-  def cumprod(self, axis:int) -> Tensor:
-    """
-    Computes the cumulative product of the elements of the tensor along the specified `axis`.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor.arange(1, 7).reshape(2, 3)
-    print(t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.cumprod(axis=0).numpy())
-    ```
-    """
-    return self._split_cumalu(axis, Ops.MUL)
 
   def cummax(self, axis:int=0) -> tuple[Tensor, Tensor]:
     """
