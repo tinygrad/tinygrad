@@ -1,9 +1,12 @@
-from typing import Self, Sequence
+import functools
+from typing import Self, Sequence, Literal, get_args
 from tinygrad.mixin.elementwise import ElementwiseMixin
 from tinygrad.mixin.reduce import ReduceMixin
 from tinygrad.uop.ops import _broadcast_shape, resolve
 from tinygrad.dtype import DTypeLike, dtypes, least_upper_dtype, sum_acc_dtype, to_dtype
 from tinygrad.helpers import argfix, prod
+
+ReductionStr = Literal["mean", "sum", "none"]
 
 
 class OpMixin(ElementwiseMixin, ReduceMixin):
@@ -306,3 +309,72 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     if weight is not None: x = x * weight.reshape(shape)
     ret = x.mul(invstd.reshape(shape) if len(invstd.shape) == len(axis_) else invstd)
     return (ret + bias.reshape(shape)) if bias is not None else ret
+
+  # ***** loss ops *****
+
+  def _do_reduction(self, reduction:ReductionStr="mean") -> Self:
+    if reduction == "none": return self
+    if reduction == "sum": return self.sum()
+    if reduction == "mean": return self.mean()
+    raise ValueError(f"{reduction=} must be one of {get_args(ReductionStr)}")
+
+  def binary_crossentropy(self, Y:Self, reduction:ReductionStr="mean") -> Self:
+    """
+    Computes the binary cross-entropy loss between `self` and `Y`.
+
+    See: https://pytorch.org/docs/stable/generated/torch.nn.BCELoss.html
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([0.1, 0.9, 0.2])
+    Y = Tensor([0, 1, 0])
+    print(t.binary_crossentropy(Y).item())
+    ```
+    """
+    return (-Y*self.log() - (1-Y)*(1-self).log())._do_reduction(reduction)
+
+  def binary_crossentropy_logits(self, Y:Self, reduction:ReductionStr="mean", pos_weight:Self|None=None) -> Self:
+    """
+    Computes the binary cross-entropy loss between `self` and `Y` where `self` is logits.
+
+    See: https://pytorch.org/docs/stable/generated/torch.nn.BCEWithLogitsLoss.html
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([-1, 2, -3])
+    Y = Tensor([0, 1, 0])
+    print(t.binary_crossentropy_logits(Y).item())
+    ```
+    """
+    log_p, log_1_minus_p = self.logsigmoid(), (-self).logsigmoid()
+    return (-((1 if pos_weight is None else pos_weight) * Y * log_p + (1-Y) * log_1_minus_p))._do_reduction(reduction)
+
+  # ***** matrix ops *****
+
+  def newton_schulz(self, steps:int, params:tuple[int, ...], eps:float=1.0e-7) -> Self:
+    """
+    Performs the newton-schulz algorithm for odd polynomials. The degree of the odd polynomial depends on the number of params.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.randn(4, 4)
+    print(t.newton_schulz(steps=5, params=(2,-1.5,0.5)).numpy())
+    ```
+    """
+    assert self.ndim > 1, "NS only works for two or more dims"
+    if self.shape[-2] > self.shape[-1]: return self.transpose(-2, -1).newton_schulz(steps, params, eps).transpose(-2, -1)
+    G = self / (self.square().sum(axis=(-2, -1), keepdim=True).sqrt() + eps)
+    for _ in range(steps):
+      G = functools.reduce(lambda a, b: a + b, (p * functools.reduce(lambda x, y: (y @ y.transpose(-2, -1)) @ x, [G]*i, G)  # type: ignore[operator]
+                                                 for i,p in enumerate(params)))
+    return G
+
+  # ***** tensor properties *****
+
+  def nbytes(self) -> int:
+    """
+    Returns the total number of bytes of all elements in the tensor.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([8, 9], dtype=dtypes.float)
+    print(t.nbytes())
+    ```
+    """
+    return int(self.numel()) * self.element_size()
