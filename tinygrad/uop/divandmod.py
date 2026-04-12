@@ -1,11 +1,11 @@
 import functools, itertools, math
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import cdiv, cmod, CORRECT_DIVMOD_FOLDING, unwrap
+from tinygrad.helpers import cdiv, cmod, unwrap
 
 # NOTE: this cache is only on index UOps
 @functools.cache
-def fold_divmod_general(d: UOp, correct_divmod_folding: bool) -> UOp|None:
+def fold_divmod_general(d: UOp) -> UOp|None:
   x, y = d.src
 
   # cancel_divmod: simple cancel div/mod case when the range of the numerator lies within a single denominator interval
@@ -47,7 +47,7 @@ def fold_divmod_general(d: UOp, correct_divmod_folding: bool) -> UOp|None:
       return (y2-y1)*(v-v.vmin) + y1
 
     # fold_divmod_congruence: fold if a is congruent to an expression whose range is between 0 and c
-    if not (x.vmin<0 and correct_divmod_folding):
+    if x.vmin >= 0:
       # when f%c == c//2, abs(r) == abs(r-c) is a tie, try both signs since either may fit in one period
       rem_choices = [(r, r-c) if (r:=f%c)*2 == c else (min(r, r-c, key=abs),) for f in factors]
       for rems in itertools.product(*rem_choices):
@@ -66,7 +66,7 @@ def fold_divmod_general(d: UOp, correct_divmod_folding: bool) -> UOp|None:
     if x.vmin >= 0:
       results = []
       for div in {abs(f) for u, f in zip(uops_no_const, factors) if u.op not in (Ops.CONST, Ops.VCONST) and 1 < abs(f) < c and (c%f)==0}:
-        if (newxs := fold_divmod_general(x//div, correct_divmod_folding)) is not None and newxs.vmin >= 0:
+        if (newxs := fold_divmod_general(x//div)) is not None and newxs.vmin >= 0:
           if d.op is Ops.IDIV:
             results.append((len(newxs.backward_slice), newxs // (c // div)))
           else:
@@ -115,7 +115,7 @@ div_and_mod_symbolic = PatternMatcher([
     lambda x,c,n,d: (-(-(c.arg%d.arg + x - (d.arg-1))//d) + c.arg//d.arg) if x.vmax<=0 and n.vmin>=0 and d.arg>0 else None),
 
   # ** 2. Slow Rules **
-  (UPat((Ops.IDIV, Ops.MOD), dtypes.weakint, name="d"), lambda d: fold_divmod_general(d, bool(CORRECT_DIVMOD_FOLDING))),
+  (UPat((Ops.IDIV, Ops.MOD), dtypes.weakint, name="d"), lambda d: fold_divmod_general(d)),
 
   # NOTE: these have to go at the bottom or TestSymbolicOps.test_var loops
   (UPat.var("x", dtypes.weakint) % UPat.var("d"), lambda x,d: -((-x)%d) if x.vmax <= 0 else None),

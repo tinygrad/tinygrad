@@ -1,9 +1,9 @@
 # all of symbolic lives here now
-import math, operator, struct, functools
+import math, operator, struct, functools, itertools
 from collections import defaultdict
 from tinygrad.uop.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, exec_alu
 from tinygrad.dtype import ConstType, dtypes, PtrDType, can_lossless_cast, Invalid
-from tinygrad.helpers import partition, all_same, prod, flatten, get_single_element, unwrap, IMAGE, dedup
+from tinygrad.helpers import partition, all_same, prod, flatten, get_single_element, unwrap, dedup
 from tinygrad.uop.decompositions import xpow
 from tinygrad.uop.divandmod import div_and_mod_symbolic
 
@@ -321,6 +321,7 @@ def uop_given_valid(valid:UOp, uop:UOp, try_simplex=True) -> UOp:
 
   # simplify uop given that valid is True
   all_candidates = []
+  simplex_groups:list[list[tuple[UOp, UOp]]] = []
   for i,(expr,v) in enumerate(bounds.items()):
     v0, v1 = (expr.vmin if v[0] is None else v[0], expr.vmax if v[1] is None else v[1])
     # try checking the whole clause
@@ -329,19 +330,46 @@ def uop_given_valid(valid:UOp, uop:UOp, try_simplex=True) -> UOp:
     if try_simplex:
       # every candidate is a set of constrained UOp based on valid, and if every item in a set simplifies the uop into a same output, we rewrite uop
       candidates = [[all_candidates[-1]]]
-      if expr.op is Ops.ADD and v0 == 1 and all(u.op in GroupOp.Irreducible for u in expr.split_uop(Ops.ADD)):
-        # if the constraint is a simplex: X0 + X1 + ... > 0, we can check if all Xi > 0 simplify into the same output
-        candidates.append([(Xi, UOp.variable(f"fake{i}", 1, Xi.vmax, Xi.dtype)) for Xi in expr.split_uop(Ops.ADD)])
+      if expr.op is Ops.ADD and isinstance(v0, int) and v0 == 1 and all(u.op in GroupOp.Irreducible for u in expr.split_uop(Ops.ADD)):
+        # simplex: X0 + X1 + ... >= 1, each branch assumes Xi >= 1
+        simplex_cands = [(Xi, UOp.variable(f"fake{i}_{j}", 1, Xi.vmax, Xi.dtype)) for j,Xi in enumerate(expr.split_uop(Ops.ADD))]
+        candidates.append(simplex_cands)
+        simplex_groups.append(simplex_cands)
+      elif expr.op is Ops.ADD and isinstance(v0, int) and v0 > 1:
+        # generalized simplex: c0*X0 + c1*X1 + ... >= v0 implies each Xi >= ceil(v0/ci)
+        simplex: list[tuple[UOp, UOp]] = []
+        for atom in expr.split_uop(Ops.ADD):
+          if (base:=atom.divides(cf:=atom.const_factor())) is None or cf <= 0: break
+          base, lo = base.simplify(), max(math.ceil(v0 / cf), int(base.vmin))
+          if lo >= base.vmax: break  # singleton range: fake becomes constant, can't substitute back
+          simplex.append((base, UOp.variable(f"fake{i}_{len(simplex)}", lo, int(base.vmax), base.dtype)))
+        else:
+          if simplex:
+            candidates.append(simplex)
+            simplex_groups.append(simplex)
 
       for candidate in candidates:
         # if every branch in candidate gives the same simplified uop, we can rewrite the uop
-        newuops = [uop.substitute({X:newX}) for X,newX in candidate]
+        # include previously accumulated bounds so multiple constraints interact
+        prior_subs = {old:new for old,new in all_candidates[:-1] if old not in dict(candidate)}
+        newuops = [uop.substitute({**prior_subs, X:newX}) for X,newX in candidate]
         if any(u is uop for u in newuops): continue  # if any branch doesnt appear in uop, skip
-        newuops = [u.simplify().substitute({newX:X}).simplify() for (X,newX),u in zip(candidate,newuops)]
+        inv_prior = {v:k for k,v in prior_subs.items()}
+        newuops = [u.simplify().substitute({**inv_prior, newX:X}).simplify() for (X,newX),u in zip(candidate,newuops)]
         if all_same(newuops): uop = newuops[0]
         elif uop.op is Ops.VECTORIZE and len(uop.src) == 2:
           if all_same([uops.src[0] for uops in newuops]): uop = uop.replace(src=(newuops[0].src[0], uop.src[1]))
           if all_same([uops.src[1] for uops in newuops]): uop = uop.replace(src=(uop.src[0], newuops[0].src[1]))
+
+  # try cross-product of simplex branches from different constraints
+  if try_simplex and len(simplex_groups) > 1:
+    cross_results = []
+    for combo in itertools.product(*simplex_groups):
+      sub_dict = dict(combo)
+      if (s_uop:=uop.substitute(sub_dict)) is uop: break
+      cross_results.append(s_uop.simplify().substitute({v:k for k,v in sub_dict.items()}).simplify())
+    else:
+      if cross_results and all_same(cross_results): uop = cross_results[0]
 
   # try all the valids together (but only the whole expressions)
   if (s_uop:=uop.substitute(sub_dict:=dict(all_candidates))) is not uop:
@@ -402,9 +430,7 @@ pm_move_where_on_load = PatternMatcher([
 
 def gated_given_valid(cond:UOp, x:UOp, i:UOp) -> UOp|None:
   if x.dtype.scalar() is not dtypes.weakint: return None
-  # Skip if x contains DIV/MOD AND IMAGE mode is enabled -> image index e.g. openpilot
-  if IMAGE.value > 0 and x.op_in_backward_slice_with_self(Ops.IDIV, Ops.MOD): return None
-  return cond.where(uop_given_valid(cond, x, try_simplex=False), i)
+  return cond.where(uop_given_valid(cond, x, try_simplex=True), i)
 
 # TODO: this is O(number of WHERE * number of node)
 # def fold_where_closure(cond:UOp, t:UOp, f:UOp) -> UOp|None:
