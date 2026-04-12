@@ -1,7 +1,7 @@
 import math, functools, operator
 from typing import Self
 from tinygrad.uop import Ops
-from tinygrad.dtype import dtypes, ConstType, least_upper_dtype, least_upper_float
+from tinygrad.dtype import dtypes, ConstType, PyConst, least_upper_dtype, least_upper_float
 from tinygrad.helpers import argfix, polyN
 from tinygrad.mixin.dtype import DTypeMixin
 from tinygrad.mixin.creation import CreationMixin
@@ -345,6 +345,24 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
     ref: Self = x if isinstance(x, type(self)) else y if isinstance(y, type(self)) else \
       self.cast(least_upper_dtype(dtypes.from_py(x), dtypes.from_py(y)))
     return self.alu(Ops.WHERE, ref.ufix(x), ref.ufix(y))
+
+  def masked_fill(self, mask:Self, value:Self|PyConst) -> Self:
+    """
+    Replaces `self` with `value` wherever the elements of `mask` are True.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([1, 2, 3, 4, 5])
+    mask = Tensor([True, False, True, False, False])
+    print(t.masked_fill(mask, -12).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([1, 2, 3, 4, 5])
+    mask = Tensor([True, False, True, False, False])
+    value = Tensor([-1, -2, -3, -4, -5])
+    print(t.masked_fill(mask, value).numpy())
+    ```
+    """
+    return mask.where(value, self)
 
   def threefry(self, seed: Self) -> Self:
     return self.alu(Ops.THREEFRY, seed)

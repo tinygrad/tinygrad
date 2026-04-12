@@ -1425,24 +1425,6 @@ class Tensor(OpMixin):
                              for i, s in enumerate(self.shape)], dim=-1)
     return indices.masked_select(mask.unsqueeze(-1).expand(*mask.shape, self.ndim)).reshape(-1, self.ndim)
 
-  def masked_fill(self:Tensor, mask:Tensor, value:Tensor|PyConst) -> Tensor:
-    """
-    Replaces `self` with `value` wherever the elements of `mask` are True.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([1, 2, 3, 4, 5])
-    mask = Tensor([True, False, True, False, False])
-    print(t.masked_fill(mask, -12).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([1, 2, 3, 4, 5])
-    mask = Tensor([True, False, True, False, False])
-    value = Tensor([-1, -2, -3, -4, -5])
-    print(t.masked_fill(mask, value).numpy())
-    ```
-    """
-    return mask.where(value, self)
-
   # ***** reduce ops *****
 
   def allclose(self, other:Tensor, rtol:float=1e-05, atol:float=1e-08, equal_nan=False) -> bool:
@@ -2437,23 +2419,6 @@ class Tensor(OpMixin):
 
   # ***** functional nn ops *****
 
-  def linear(self, weight:Tensor, bias:Tensor|None=None, dtype:DTypeLike|None=None) -> Tensor:
-    """
-    Applies a linear transformation to `self` using `weight` and `bias`.
-
-    See: https://pytorch.org/docs/stable/generated/torch.nn.Linear.html
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([[1, 2], [3, 4]])
-    weight = Tensor([[1, 2], [3, 4]])
-    bias = Tensor([1, 2])
-    print(t.linear(weight, bias).numpy())
-    ```
-    """
-    if dtype is not None: return self.cast(dtype).linear(weight.cast(dtype), bias.cast(dtype) if bias is not None else bias)
-    x = self.mul(weight) if len(weight.shape) == 1 else self.dot(weight)
-    return x.add(bias) if bias is not None else x
-
   def sequential(self, ll:list[Callable[[Tensor], Tensor]]) -> Tensor:
     """
     Applies a sequence of functions to `self` chaining the output of each function to the input of the next.
@@ -2464,46 +2429,6 @@ class Tensor(OpMixin):
     ```
     """
     return functools.reduce(lambda x,f: f(x), ll, self)
-
-  def layernorm(self, axis:int|tuple[int,...]=-1, eps:float=1e-5) -> Tensor:
-    """
-    Applies Layer Normalization over a mini-batch of inputs.
-
-    - Paper: https://arxiv.org/abs/1607.06450v1
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor.randn(8, 10, 16) * 2 + 8
-    print(t.mean().item(), t.std().item())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = t.layernorm()
-    print(t.mean().item(), t.std().item())
-    ```
-    """
-    y = (self - self.mean(axis, keepdim=True))
-    return y.mul((y*y).mean(axis, keepdim=True).add(eps).rsqrt())
-
-  def batchnorm(self, weight:Tensor|None, bias:Tensor|None, mean:Tensor, invstd:Tensor, axis:int|tuple[int, ...]=1) -> Tensor:
-    """
-    Applies Batch Normalization over a mini-batch of inputs.
-
-    - Paper: https://arxiv.org/abs/1502.03167
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor.randn(8, 4, 16, 16) * 2 + 8
-    print(t.mean().item(), t.std().item())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = t.batchnorm(None, None, t.mean(axis=(0,2,3)), t.var(axis=(0,2,3)).add(1e-5).rsqrt())
-    print(t.mean().item(), t.std().item())
-    ```
-    """
-    axis_ = argfix(axis)
-    shape = tuple(s if ax in axis_ else 1 for ax, s in enumerate(self.shape))
-    x = self - mean.reshape(shape)
-    if weight is not None: x = x * weight.reshape(shape)
-    ret = x.mul(invstd.reshape(shape) if len(invstd.shape) == len(axis_) else invstd)
-    return (ret + bias.reshape(shape)) if bias is not None else ret
 
   def dropout(self, p=0.5) -> Tensor:
     """
