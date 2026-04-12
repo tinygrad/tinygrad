@@ -3,7 +3,7 @@ from tinygrad.mixin.elementwise import ElementwiseMixin
 from tinygrad.mixin.reduce import ReduceMixin
 from tinygrad.uop.ops import _broadcast_shape, resolve
 from tinygrad.dtype import DTypeLike, dtypes, least_upper_dtype, sum_acc_dtype, to_dtype
-from tinygrad.helpers import prod
+from tinygrad.helpers import argfix, prod
 
 
 class OpMixin(ElementwiseMixin, ReduceMixin):
@@ -197,3 +197,112 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     ```
     """
     return self.std(axis, keepdim, correction), self.mean(axis, keepdim)
+
+  def normalize(self, p:float=2.0, dim:int=1, eps:float=1e-12) -> Self:
+    """
+    Performs Lp normalization of the tensor along the specified dimension.
+
+    See: https://pytorch.org/docs/stable/generated/torch.nn.functional.normalize.html
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    t = Tensor.randn(2, 3)
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.normalize().numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.normalize(p=1, dim=0).numpy())
+    ```
+    """
+    if p == 0: return self / (self != 0).sum(dim, keepdim=True).maximum(eps)  # type: ignore[comparison-overlap]
+    return self / self.abs().pow(p).sum(dim, keepdim=True).pow(1/p).maximum(eps)
+
+  def logsumexp(self, axis=None, keepdim=False) -> Self:
+    """
+    Computes the log-sum-exp of the tensor along the specified axis or axes.
+
+    The log-sum-exp function is a numerically stable way to compute the logarithm of the sum of exponentials.
+
+    You can pass in `axis` and `keepdim` keyword arguments to control the axis along
+    which the log-sum-exp is computed and whether the reduced dimensions are retained.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    t = Tensor.randn(2, 3)
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.logsumexp().numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.logsumexp(axis=0).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.logsumexp(axis=1).numpy())
+    ```
+    """
+    m = self.max(axis=axis, keepdim=True)
+    return (self - m).exp().sum(axis=axis, keepdim=keepdim).log() + (m if keepdim else m.squeeze(axis))
+
+  # ***** functional nn ops *****
+
+  def linear(self, weight:Self, bias:Self|None=None, dtype:DTypeLike|None=None) -> Self:
+    """
+    Applies a linear transformation to `self` using `weight` and `bias`.
+
+    See: https://pytorch.org/docs/stable/generated/torch.nn.Linear.html
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([[1, 2], [3, 4]])
+    weight = Tensor([[1, 2], [3, 4]])
+    bias = Tensor([1, 2])
+    print(t.linear(weight, bias).numpy())
+    ```
+    """
+    if dtype is not None:
+      dt = to_dtype(dtype)
+      return self.cast(dt).linear(weight.cast(dt), bias.cast(dt) if bias is not None else bias)
+    x = self.mul(weight) if len(weight.shape) == 1 else self.dot(weight)
+    return x.add(bias) if bias is not None else x
+
+  def layernorm(self, axis:int|tuple[int,...]=-1, eps:float=1e-5) -> Self:
+    """
+    Applies Layer Normalization over a mini-batch of inputs.
+
+    - Paper: https://arxiv.org/abs/1607.06450v1
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.randn(8, 10, 16) * 2 + 8
+    print(t.mean().item(), t.std().item())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = t.layernorm()
+    print(t.mean().item(), t.std().item())
+    ```
+    """
+    y = (self - self.mean(axis, keepdim=True))
+    return y.mul((y*y).mean(axis, keepdim=True).add(eps).rsqrt())
+
+  def batchnorm(self, weight:Self|None, bias:Self|None, mean:Self, invstd:Self, axis:int|tuple[int, ...]=1) -> Self:
+    """
+    Applies Batch Normalization over a mini-batch of inputs.
+
+    - Paper: https://arxiv.org/abs/1502.03167
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.randn(8, 4, 16, 16) * 2 + 8
+    print(t.mean().item(), t.std().item())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = t.batchnorm(None, None, t.mean(axis=(0,2,3)), t.var(axis=(0,2,3)).add(1e-5).rsqrt())
+    print(t.mean().item(), t.std().item())
+    ```
+    """
+    axis_ = argfix(axis)
+    shape = tuple(s if ax in axis_ else 1 for ax, s in enumerate(self.shape))
+    x = self - mean.reshape(shape)
+    if weight is not None: x = x * weight.reshape(shape)
+    ret = x.mul(invstd.reshape(shape) if len(invstd.shape) == len(axis_) else invstd)
+    return (ret + bias.reshape(shape)) if bias is not None else ret
