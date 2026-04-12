@@ -303,33 +303,40 @@ class GatedDeltaNetBlock(FFNBlock):
 
   def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
     B, T, _ = x.shape
-    assert T == 1, "GatedDeltaNetBlock currently only supports T=1"
     x = x.half()
-    out_gate = self.attn_gate(x).reshape(B, 1, self.num_v_heads, self.head_v_dim)
-    beta = self.ssm_beta(x).sigmoid().reshape(B, self.num_v_heads, 1, 1)
-    alpha = ((self.ssm_alpha(x).float() + self.ssm_dt["bias"]).softplus() * self.ssm_a).reshape(B, self.num_v_heads, 1, 1).exp()
+    out_gate = self.attn_gate(x).reshape(B, T, self.num_v_heads, self.head_v_dim)
+    beta_all = self.ssm_beta(x).sigmoid()
+    alpha_all = ((self.ssm_alpha(x).float() + self.ssm_dt["bias"]).softplus() * self.ssm_a).exp()
+    qkv_all = self.attn_qkv(x)
     conv_flat = (self.ssm_conv_kernel - 1) * self.conv_channels
     ssm_flat = self.num_v_heads * self.head_v_dim * self.head_v_dim
     conv_state = self.delta_cache[:, :conv_flat].reshape(B, self.ssm_conv_kernel - 1, self.conv_channels)
     recurrent_state = self.delta_cache[:, conv_flat:conv_flat + ssm_flat].reshape(B, self.num_v_heads, self.head_v_dim, self.head_v_dim)
-    conv_window = conv_state.cat(self.attn_qkv(x), dim=1)
-    conv_out = (conv_window * self.ssm_conv1d["weight"].T.unsqueeze(0)).sum(1).silu()
-    q, k, v = conv_out.split([self.q_dim, self.q_dim, self.conv_channels - 2*self.q_dim], dim=-1)
-    q, k = q.reshape(B, self.num_k_heads, self.head_k_dim).normalize(dim=-1), k.reshape(B, self.num_k_heads, self.head_k_dim).normalize(dim=-1)
-    v = v.reshape(B, self.num_v_heads, self.head_v_dim)
-    if self.num_v_heads != self.num_k_heads:
-      k_repeat = self.num_v_heads // self.num_k_heads
-      q = q.unsqueeze(1).expand(B, k_repeat, self.num_k_heads, self.head_k_dim).reshape(B, self.num_v_heads, self.head_k_dim)
-      k = k.unsqueeze(1).expand(B, k_repeat, self.num_k_heads, self.head_k_dim).reshape(B, self.num_v_heads, self.head_k_dim)
-    q, k, v = (q * self.head_k_dim**-0.5).unsqueeze(-1), k.unsqueeze(-1), v.unsqueeze(-1)
-    recurrent_state = recurrent_state * alpha
-    recurrent_state = recurrent_state + ((v - recurrent_state@k) * beta)@k.transpose(-1, -2)
-    new_cache = conv_window[:, 1:, :].reshape(B, -1).cat(recurrent_state.reshape(B, -1), dim=-1).contiguous()
+    outs = []
+    for i in range(T):
+      conv_window = conv_state.cat(qkv_all[:, i:i+1, :], dim=1)
+      conv_out = (conv_window * self.ssm_conv1d["weight"].T.unsqueeze(0)).sum(1).silu()
+      q, k, v = conv_out.split([self.q_dim, self.q_dim, self.conv_channels - 2*self.q_dim], dim=-1)
+      q, k = q.reshape(B, self.num_k_heads, self.head_k_dim).normalize(dim=-1), k.reshape(B, self.num_k_heads, self.head_k_dim).normalize(dim=-1)
+      v = v.reshape(B, self.num_v_heads, self.head_v_dim)
+      if self.num_v_heads != self.num_k_heads:
+        k_repeat = self.num_v_heads // self.num_k_heads
+        q = q.unsqueeze(1).expand(B, k_repeat, self.num_k_heads, self.head_k_dim).reshape(B, self.num_v_heads, self.head_k_dim)
+        k = k.unsqueeze(1).expand(B, k_repeat, self.num_k_heads, self.head_k_dim).reshape(B, self.num_v_heads, self.head_k_dim)
+      q, k, v = (q * self.head_k_dim**-0.5).unsqueeze(-1), k.unsqueeze(-1), v.unsqueeze(-1)
+      alpha = alpha_all[:, i, :].reshape(B, self.num_v_heads, 1, 1)
+      beta = beta_all[:, i, :].reshape(B, self.num_v_heads, 1, 1)
+      recurrent_state = recurrent_state * alpha
+      recurrent_state = recurrent_state + ((v - recurrent_state@k) * beta)@k.transpose(-1, -2)
+      conv_state = conv_window[:, 1:, :]
+      if i < T - 1: outs.append((recurrent_state@q).squeeze(-1).reshape(B, 1, self.num_v_heads, self.head_v_dim))
+    new_cache = conv_state.reshape(B, -1).cat(recurrent_state.reshape(B, -1), dim=-1).contiguous()
     assigned = self.delta_cache.uop.after(self.delta_cache.uop.store(new_cache.cast(self.delta_cache.dtype).uop))
     cache_tensor = Tensor(assigned, device=self.delta_cache.device)
     final_state = cache_tensor[:, conv_flat:conv_flat + ssm_flat].reshape(B, self.num_v_heads, self.head_v_dim, self.head_v_dim)
-    core_attn_out = self.ssm_norm((final_state@q).squeeze(-1).reshape(B, 1, self.num_v_heads, self.head_v_dim))
-    return self.ssm_out((core_attn_out * out_gate.silu()).reshape(B, 1, -1).cast(x.dtype))
+    outs.append((final_state@q).squeeze(-1).reshape(B, 1, self.num_v_heads, self.head_v_dim))
+    core_attn_out = self.ssm_norm(outs[0] if len(outs) == 1 else outs[0].cat(*outs[1:], dim=1))
+    return self.ssm_out((core_attn_out * out_gate.silu()).reshape(B, T, -1).cast(x.dtype))
 
   def _init_state(self, x):
     if not hasattr(self, "delta_cache"):
@@ -435,7 +442,6 @@ class Transformer:
     return 0 if self.has_ssm and pos < len(self._cached_tokens) else pos
 
   def generate(self, tokens:list[int], chunk_size:int=32, temperature:float=0.0):
-    if self.has_ssm: chunk_size = 1
     v_start_pos = UOp.variable("start_pos", 0, self.max_context-1)
     v_toks = UOp.variable("toks", 1, chunk_size)
     # TODO: use UOp.variable for temperature once float variables are supported
@@ -449,9 +455,11 @@ class Transformer:
       Tensor.realize(*[b.delta_cache.assign(Tensor.zeros_like(b.delta_cache)) for b in ssm_blks])
     out, prompt_len = None, len(tokens)
     while len(tokens) < self.max_context:
-      sp, nt = v_start_pos.bind(start_pos), v_toks.bind(min(chunk_size, len(tokens) - start_pos))
+      sp, n = v_start_pos.bind(start_pos), min(chunk_size, len(tokens) - start_pos)
+      # SSM needs concrete T so the per-block Python loop unrolls, non-SSM keeps symbolic T
+      n, nt = ((chunk_size, chunk_size) if n == chunk_size else (1, 1)) if self.has_ssm else (n, v_toks.bind(n))
       out = self(t[:, sp:sp+nt] if start_pos < prompt_len or out is None else out, sp, temp).realize()
-      start_pos += nt.val
+      start_pos += n
       # chunked prefill: keep processing until all prompt tokens are consumed
       if start_pos < len(tokens): continue
       tokens.append(int(out.item()))
@@ -612,7 +620,7 @@ if __name__ == "__main__":
   if args.warmup or args.serve:
     # run 2 tokens through the model twice to capture the JIT before serving
     with Context(DEBUG=max(DEBUG.value, 1)):
-      for _ in range(2): list(zip(range(2), model.generate([0])))
+      for _ in range(2): list(zip(range(2), model.generate([0]*(32 if model.has_ssm else 1))))
 
   # start server
   if args.serve: TCPServerWithReuse(('', args.serve), Handler).serve_forever()
