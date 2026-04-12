@@ -1200,9 +1200,9 @@ class Tensor(OpMixin):
       consecutive = dims == list(range(dims[0], dims[0] + len(dims)))
       if v is None and len(dims) > 1 and consecutive and all_int(ishp := tuple(x.shape[d] for d in dims)):
         strides = tuple(prod(ishp[i+1:]) for i in range(len(dims)))
-        try: linear_idx = functools.reduce(Tensor.add, (t._broadcast_to(big_shape) * s for t, s in zip(tensors, strides)))
+        try: linear_idx = Tensor.usum(*[t._broadcast_to(big_shape) * s for t, s in zip(tensors, strides)])
         except ValueError as err: raise IndexError(f"cannot broadcast indices: {err}") from err
-        valid = functools.reduce(Tensor.__and__, ((t >= 0) & (t < s) for t, s in zip(tensors, ishp)))
+        valid = Tensor.uprod(*[(t >= 0) & (t < s) for t, s in zip(tensors, ishp)])
         pre, post = x.shape[:dims[0]], x.shape[dims[-1]+1:]
         x = x.reshape(pre + (prod(ishp),) + post)[tuple([slice(None)] * len(pre)) + (valid.where(linear_idx, 0),)]
         return valid.reshape((1,) * len(pre) + big_shape + (1,) * len(post)).where(x, 0)
@@ -1216,7 +1216,7 @@ class Tensor(OpMixin):
         masks.append(i._one_hot_along_dim(num_classes=x.shape[dim], dim=(dim - x.ndim)))
 
       # reduce masks to 1 mask
-      mask: Tensor = functools.reduce(lambda x,y: x.mul(y), masks)
+      mask: Tensor = Tensor.uprod(*masks)
 
       # inject 1's for the extra dims added in create masks
       reshape_arg = x.shape[:dims[0]] + (1,) * len(big_shape) + x.shape[dims[0]:]
@@ -1250,7 +1250,7 @@ class Tensor(OpMixin):
       per_dim.append((idx >= s) & (idx < e) & (((e-1-idx) if m['stride'] < 0 else (idx-s)) % st == 0))
     vb = vb.flip(tuple(d for d, m in enumerate(mops) if m['stride'] < 0))
     vb = vb.pad(tuple((m['boundary'][0], self.shape[d] - m['boundary'][1]) for d, m in enumerate(mops)))
-    return (functools.reduce(lambda a, b: a & b, per_dim) if per_dim else Tensor(True, dtype=dtypes.bool, device=self.device)).where(vb, self)
+    return (Tensor.uprod(*per_dim) if per_dim else Tensor(True, dtype=dtypes.bool, device=self.device)).where(vb, self)
 
   def __getitem__(self, indices) -> Tensor:
     """
@@ -1361,7 +1361,7 @@ class Tensor(OpMixin):
     tensors = [self, *args]
     dim_cumsum = list(itertools.accumulate([t.shape[dim] for t in tensors], initial=0))
     for i,t in enumerate(tensors): tensors[i] = t.pad([(dim_cumsum[i], dim_cumsum[-1]-dim_cumsum[i+1]) if j==dim else None for j in range(t.ndim)])
-    return functools.reduce(Tensor.add, tensors)
+    return Tensor.usum(*tensors)
 
   def stack(self:Tensor, *args:Tensor, dim:int=0) -> Tensor:
     """
@@ -1759,7 +1759,7 @@ class Tensor(OpMixin):
     # align all tensors to alphabet, multiply, sum non-output, permute to output order
     xs = [x.permute(*[s.index(c) for c in sorted(s)]).reshape([sz[c] if c in s else 1 for c in alpha]).expand([sz[c] for c in alpha]) if s else x
           for s, x in zip(inputs, xs)]
-    return functools.reduce(lambda a,b:a*b, xs).sum([i for i,c in enumerate(alpha) if c not in rhs], dtype=dtype).permute(argsort(argsort(list(rhs))))
+    return Tensor.uprod(*xs).sum([i for i,c in enumerate(alpha) if c not in rhs], dtype=dtype).permute(argsort(argsort(list(rhs))))
 
   # ***** processing ops *****
 
@@ -2900,7 +2900,7 @@ class Tensor(OpMixin):
       if ns > os:
         tmp = tmp.reshape(self.shape[:-1] + (self.shape[-1]//(rate := ns//os), rate))
         nones = (None,) * (tmp.ndim - 1)
-        return functools.reduce(Tensor.add, (tmp.shrink(nones + ((i, i+1),)).cast(new_uint)<<8*i*os for i in range(rate))).squeeze(-1).bitcast(dtype)
+        return Tensor.usum(*[tmp.shrink(nones + ((i, i+1),)).cast(new_uint)<<8*i*os for i in range(rate)]).squeeze(-1).bitcast(dtype)
       return Tensor.stack(*(tmp>>8*i*ns for i in range(os//ns)), dim=-1).flatten(-2).cast(new_uint).bitcast(dtype)
     return self._apply_uop(UOp.bitcast, dtype=dt) if self.dtype != dt else self
 
