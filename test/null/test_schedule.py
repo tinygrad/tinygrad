@@ -778,7 +778,7 @@ class TestSchedule(unittest.TestCase):
     Tensor.manual_seed(0)
     x = Tensor.randn(4, 12, 64, 64, requires_grad=True).realize()
     x.softmax().sum().backward()
-    run_schedule(check_schedule(x.grad, 4))
+    run_schedule(check_schedule(x.grad, 3))
 
   def test_scaled_dot_product_attention_fusion(self):
     x, y, z, m = (Tensor.empty(32, 8, 16, 16) for _ in range(4))
