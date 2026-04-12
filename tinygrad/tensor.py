@@ -1538,7 +1538,7 @@ class Tensor(OpMixin):
     return data[:16]
 
   def _softmax(self, axis, dtype:DTypeLike|None=None) -> tuple[Tensor, Tensor, Tensor]:
-    m = self - self.max(axis=axis, keepdim=True).detach()
+    m = self - self.max(axis=axis, keepdim=True)
     if dtype is not None: m = m.cast(dtype)
     e = m.exp()
     return m, e, e.sum(axis=axis, keepdim=True)

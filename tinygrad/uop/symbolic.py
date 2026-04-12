@@ -1,5 +1,5 @@
 # all of symbolic lives here now
-import math, operator, struct, functools
+import collections, math, operator, struct, functools
 from collections import defaultdict
 from tinygrad.uop.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, exec_alu
 from tinygrad.dtype import ConstType, dtypes, PtrDType, can_lossless_cast, Invalid
@@ -465,4 +465,41 @@ sym = symbolic+pm_simplify_valid+PatternMatcher([
   (-1 * (UPat.var("x") + UPat.var("y")), lambda x,y: (-x)+(-y)),  # -(x+y) -> -x + -y
   # (x+y)*c -> x*c+y*c. only for int, float has inf*0=nan issue
   ((UPat.var("x", dtypes.weakint) + UPat.var("y")) * UPat.cvar("c"), lambda x,y,c: x*c+y*c),
+])
+
+# *** tensor-level REDUCE_AXIS simplification (runs before rangeify) ***
+def _reduce_inv(u:UOp, s:tuple) -> UOp|None:
+  if (shape:=u._shape) is None: return None
+  if shape == (): return u
+  while u.op is Ops.EXPAND: u = u.src[0]
+  if u.op in GroupOp.ALU | {Ops.CAST, Ops.BITCAST}:
+    src = tuple(_reduce_inv(x, s) if x._shape is not None else x for x in u.src)
+    if any(x is None for x in src): return None
+    if src != u.src: u = u.replace(src=src)
+  return u if u.shape == s else u.expand(s) if len(u.shape) == len(s) and all(a == b or a == 1 for a, b in zip(u.shape, s)) else None
+def _umul(terms:list[UOp]) -> UOp: return functools.reduce(operator.mul, terms)
+def _reduce_sum_simplify(r:UOp) -> UOp|None:
+  if r.arg[0] is not Ops.ADD: return None
+  factors = list(r.src[0].split_uop(Ops.MUL))
+  if any(x.op is Ops.EXP2 for x in factors):
+    for i, f in enumerate(factors):
+      if f.op is not Ops.ADD or len(f.src) != 2: continue
+      rest, inv0, inv1 = _umul(factors[:i] + factors[i+1:]), _reduce_inv(f.src[0], r.shape), _reduce_inv(f.src[1], r.shape)
+      if inv0 is not None: return r.replace(src=(rest * f.src[1],)) + inv0 * r.replace(src=(rest,))
+      if inv1 is not None: return r.replace(src=(rest * f.src[0],)) + inv1 * r.replace(src=(rest,))
+  inside, outside = [], []
+  for m in factors:
+    if (inv:=_reduce_inv(m, r.shape)) is not None: outside.append(inv)
+    else: inside.append(m)
+  if not outside: return None
+  return r.replace(src=(_umul(inside) if inside else r.src[0].const_like(1),)) * _umul(outside)
+def _fold_mul_common(root:UOp) -> UOp|None:
+  ca, cb = collections.Counter(root.src[0].split_uop(Ops.MUL)), collections.Counter(root.src[1].split_uop(Ops.MUL))
+  common = ca & cb
+  if not common or not any(c.op is Ops.REDUCE_AXIS for c in common): return None
+  ra, rb = ca - common, cb - common
+  return _umul(list(common.elements())) * ((_umul(list(ra.elements())) if ra else root.const_like(1)) + (_umul(list(rb.elements())) if rb else root.const_like(1)))
+pm_tensor_reduce_simplify = PatternMatcher([
+  (UPat(Ops.REDUCE_AXIS, src=(UPat(Ops.MUL),), name="r"), _reduce_sum_simplify),
+  (UPat(Ops.ADD, src=(UPat(Ops.MUL), UPat(Ops.MUL)), name="root"), _fold_mul_common),
 ])

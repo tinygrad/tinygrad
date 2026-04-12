@@ -415,8 +415,7 @@ class TestSchedule(unittest.TestCase):
     b = Tensor.randn(4, 32).realize()
     c = Tensor.randn(4, 32).realize()
     out = (c * a.sum(-1, keepdim=True)).sum(-1) + (b * a.sum(-1, keepdim=True)).sum(-1) # a.sum has >1 children but should still fuse
-    # run_schedule(check_schedule(out, 1))
-    run_schedule(check_schedule(out, 2))
+    run_schedule(check_schedule(out, 1))
     np.testing.assert_allclose(out.numpy(), \
       (c.numpy()*a.numpy().sum(axis=-1,keepdims=True)).sum(-1) + (b.numpy()*a.numpy().sum(axis=-1,keepdims=True)).sum(-1), atol=1e-4, rtol=1e-4)
 
