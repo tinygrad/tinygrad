@@ -1,5 +1,5 @@
 # all of symbolic lives here now
-import math, operator, struct, functools
+import math, struct
 from collections import defaultdict
 from tinygrad.uop.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, exec_alu
 from tinygrad.dtype import ConstType, dtypes, PtrDType, can_lossless_cast, Invalid
@@ -41,11 +41,11 @@ def fold_add_divmod_recombine(x:UOp) -> UOp|None:
       # ((base//d)%div)*mul + (base//(d*div))*(div*mul) -> (base//d)*mul
       if not exact and base.op is Ops.IDIV and base.src[1].op is Ops.CONST:
         exact = q.op is Ops.IDIV and q.src[1].op is Ops.CONST and q.src[0] is base.src[0] and q.src[1].arg == base.src[1].arg*div
-      if exact: return functools.reduce(operator.add, (t for k,t in enumerate(terms) if k not in (i,j)), base*mul)
+      if exact: return (base*mul).usum(*[t for k,t in enumerate(terms) if k not in (i,j)])
       # ((base//div)%d)*div + base%div -> base%(div*d)
       if mul == 1 and div > 0 and q.op is Ops.MOD and q.src[1].op is Ops.CONST and (d:=q.src[1].arg) > 0 and q.src[0].op is Ops.IDIV:
         if q.src[0].src[0] is base and q.src[0].src[1].op is Ops.CONST and q.src[0].src[1].arg == div:
-          return functools.reduce(operator.add, (t for k,t in enumerate(terms) if k not in (i,j)), base % (div*d))
+          return (base % (div*d)).usum(*[t for k,t in enumerate(terms) if k not in (i,j)])
   return None
 
 # this needs to be before symbolic so that 0*something_that_might_be_invalid doesnt become 0
@@ -390,7 +390,7 @@ def where_on_load(cond:UOp, buf:UOp, idx:UOp, or_cast:UOp) -> UOp|None:
     return c.ranges.keys() <= idx.ranges.keys() and all(u in idx_index for u in c.backward_slice_with_self if u.op is Ops.INDEX)
   moved, keep = partition([c for c in where_clauses if c not in in_load], can_move)
   if len(keep) == len(where_clauses): return None
-  idx = buf.index(idx.get_idx().valid(functools.reduce(operator.and_, moved, load_valid)))
+  idx = buf.index(idx.get_idx().valid(load_valid.uprod(*moved)))
   return UOp.const(dtypes.bool, True).uprod(*keep).where(idx.cast(or_cast.dtype) if or_cast.op is Ops.CAST else idx, 0)
 
 # where after gated load becomes alt value, TODO: this is sort of duplicated with rules in devectorizer

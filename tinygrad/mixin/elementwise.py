@@ -1,8 +1,8 @@
-import math
+import math, functools, operator
 from typing import Self
 from tinygrad.uop import Ops
 from tinygrad.dtype import dtypes, ConstType, least_upper_dtype, least_upper_float
-from tinygrad.helpers import polyN
+from tinygrad.helpers import argfix, polyN
 from tinygrad.mixin.dtype import DTypeMixin
 from tinygrad.mixin.creation import CreationMixin
 
@@ -21,6 +21,9 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
 
   def _binop(self, op: Ops, x: Self | ConstType, reverse: bool) -> Self:
     return self.ufix(x).alu(op, self) if reverse else self.alu(op, self.ufix(x))
+
+  def usum(self, *uops) -> Self: return functools.reduce(operator.or_ if self.dtype is dtypes.bool else operator.add, argfix(*uops), self)
+  def uprod(self, *uops) -> Self: return functools.reduce(operator.and_ if self.dtype is dtypes.bool else operator.mul, argfix(*uops), self)
 
   def logical_not(self) -> Self:
     """
