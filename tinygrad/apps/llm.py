@@ -182,7 +182,10 @@ class FFNBlock:
     # TODO: remove the need for this contiguous
     return self.ffn_down(self.ffn_gate(x).silu().contiguous() * self.ffn_up(x))
 
-  def _reset_cache(self) -> list[Tensor]: return []
+  # given the token-prefix match, return how much cached state this block can still reuse
+  def _reusable_prefix_len(self, prefix_len:int, cached_len:int) -> int: return prefix_len
+  # return writes that reset this block's state after a cache mismatch
+  def _state_reset_ops(self) -> list[Tensor]: return []
   def _init_state(self, x:Tensor): raise NotImplementedError
   def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor: raise NotImplementedError
 
@@ -339,7 +342,9 @@ class GatedDeltaNetBlock(FFNBlock):
     core_attn_out = self.ssm_norm(outs[0] if len(outs) == 1 else outs[0].cat(*outs[1:], dim=1))
     return self.ssm_out((core_attn_out * out_gate.silu()).reshape(B, T, -1).cast(x.dtype))
 
-  def _reset_cache(self): return [self.delta_cache.assign(Tensor.zeros_like(self.delta_cache))] if hasattr(self, "delta_cache") else []
+  # recurrent state can't be partially reused after divergence, force a full rebuild
+  def _state_reset_ops(self): return [self.delta_cache.assign(Tensor.zeros_like(self.delta_cache))] if hasattr(self, "delta_cache") else []
+  def _reusable_prefix_len(self, prefix_len:int, cached_len:int) -> int: return 0 if prefix_len != cached_len else prefix_len
 
   def _init_state(self, x):
     if not hasattr(self, "delta_cache"):
@@ -358,7 +363,7 @@ class Transformer:
     self.output_norm = nn.RMSNorm(config.dim, config.norm_eps)
     self.output = nn.Linear(config.dim, config.vocab_size, bias=False)
     self.max_context = config.max_context
-    self.is_cache_sequential = any(isinstance(b, GatedDeltaNetBlock) for b in self.blk)
+    self.has_recurrent_block = any(isinstance(b, GatedDeltaNetBlock) for b in self.blk)
     self._cached_tokens: list[int] = []
     # we specialize the JIT for prefill and rollout
     self.prefill_jit = TinyJit(self.forward)
@@ -440,8 +445,10 @@ class Transformer:
     return model, kv
 
   def get_start_pos(self, tokens:list[int]) -> int:
-    pos = sum(1 for _ in itertools.takewhile(lambda ab: ab[0] == ab[1], zip(tokens[:-1], self._cached_tokens)))
-    return 0 if pos < len(self._cached_tokens) and self.is_cache_sequential else pos
+    prefix_len = sum(1 for _ in itertools.takewhile(lambda ab: ab[0] == ab[1], zip(tokens[:-1], self._cached_tokens)))
+    return min(block._reusable_prefix_len(prefix_len, len(self._cached_tokens)) for block in self.blk)
+
+  def warmup_prompt_len(self, chunk_size:int=32) -> int: return chunk_size if self.has_recurrent_block else 1
 
   def generate(self, tokens:list[int], chunk_size:int=32, temperature:float=0.0):
     v_start_pos = UOp.variable("start_pos", 0, self.max_context-1)
@@ -450,13 +457,14 @@ class Transformer:
     temp = Tensor(temperature).contiguous()
     # assign all input tokens once, then slice from start_pos for the model call
     t = Tensor(tokens + [0] * (self.max_context - len(tokens)), dtype="int32").reshape(1, self.max_context)
+    # recompute start_pos from what's currently valid in the caches
     start_pos = self.get_start_pos(tokens)
-    if start_pos < len(self._cached_tokens) and (resets := [r for b in self.blk for r in b._reset_cache()]): Tensor.realize(*resets)
+    if start_pos < len(self._cached_tokens) and (resets := [r for b in self.blk for r in b._state_reset_ops()]): Tensor.realize(*resets)
     out, prompt_len = None, len(tokens)
     while len(tokens) < self.max_context:
       sp, n = v_start_pos.bind(start_pos), min(chunk_size, len(tokens) - start_pos)
-      # SSM needs concrete T so the per-block Python loop unrolls, non-SSM keeps symbolic T
-      n, nt = ((chunk_size, chunk_size) if n == chunk_size else (1, 1)) if self.is_cache_sequential else (n, v_toks.bind(n))
+      # recurrent blocks need concrete T so the per-block Python loop unrolls.
+      n, nt = ((chunk_size, chunk_size) if n == chunk_size else (1, 1)) if self.has_recurrent_block else (n, v_toks.bind(n))
       out = self(t[:, sp:sp+nt] if start_pos < prompt_len or out is None else out, sp, temp).realize()
       start_pos += n
       # chunked prefill: keep processing until all prompt tokens are consumed
@@ -619,7 +627,7 @@ if __name__ == "__main__":
   if args.warmup or args.serve:
     # run 2 tokens through the model twice to capture the JIT before serving
     with Context(DEBUG=max(DEBUG.value, 1)):
-      for _ in range(2): list(zip(range(2), model.generate([0]*(32 if model.is_cache_sequential else 1))))
+      for _ in range(2): list(zip(range(2), model.generate([0] * model.warmup_prompt_len())))
 
   # start server
   if args.serve: TCPServerWithReuse(('', args.serve), Handler).serve_forever()
