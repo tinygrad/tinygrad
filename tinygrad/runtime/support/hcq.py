@@ -9,11 +9,12 @@ from tinygrad.device import Device, BufferSpec, Compiled, LRUAllocator, ProfileD
 from tinygrad.uop.ops import sym_infer, sint, UOp
 from tinygrad.runtime.autogen import libc
 from tinygrad.runtime.support.memory import BumpAllocator
-from tinygrad.runtime.support.python import to_mv, from_mv
+from tinygrad.runtime.support import python
+from tinygrad.runtime.support.python import from_mv
 from tinygrad.renderer import Renderer
 
 class MMIOInterface:
-  def __init__(self, addr:int, nbytes:int, fmt='B'): self.mv, self.addr, self.nbytes, self.fmt = to_mv(addr, nbytes).cast(fmt), addr, nbytes, fmt
+  def __init__(self, addr:int, nbytes:int, fmt='B'): self.mv, self.addr, self.nbytes, self.fmt = python.to_mv(addr, nbytes).cast(fmt), addr, nbytes, fmt
   def __len__(self): return self.nbytes // struct.calcsize(self.fmt)
   def __getitem__(self, k): return (self.mv[k] if self.fmt == 'B' else self.mv[k].tolist()) if isinstance(k, slice) else self.mv[k]
   def __setitem__(self, k, v): self.mv[k] = v

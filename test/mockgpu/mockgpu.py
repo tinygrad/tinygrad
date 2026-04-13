@@ -1,6 +1,7 @@
 import ctypes, ctypes.util, time, os, builtins, fcntl
 from tinygrad.helpers import DEV
 from tinygrad.runtime.support.hcq import FileIOInterface
+from tinygrad.runtime.support import python
 from test.mockgpu.nv.nvdriver import NVDriver
 from test.mockgpu.amd.amddriver import AMDDriver
 from test.mockgpu.am.amdriver import AMDriver, AMUSBDriver
@@ -48,6 +49,14 @@ def _memoryview(cls, mem):
 class _MockMemoryviewMeta(type):
   def __instancecheck__(cls, instance): return isinstance(instance, (original_memoryview, TrackedMemoryView))
 builtins.memoryview = _MockMemoryviewMeta("memoryview", (), {'__new__': _memoryview}) # type: ignore
+
+_original_to_mv = python.to_mv
+def _to_mv(ptr:int, sz:int):
+  for d in drivers:
+    for st,en,rcb,wcb in d.tracked_addresses:
+      if st <= ptr <= en: return TrackedMemoryView(_original_to_mv(ptr, sz), rcb, wcb)
+  return _original_to_mv(ptr, sz)
+python.to_mv = _to_mv
 
 def _open(path, flags):
   for d in drivers:
