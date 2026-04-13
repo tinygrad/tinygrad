@@ -54,7 +54,6 @@ def get(data:dict, key:str):
 def main(args) -> None:
   viz.data = viz.VizData(viz.load_pickle(args.rewrites_path, default=RewriteTrace([], [], {})))
   viz.load_rewrites(viz.data)
-  ctxs = viz.data.ctxs
 
   def format_colored(s:str) -> str: return ansistrip(s) if args.no_color else s
 
@@ -62,7 +61,7 @@ def main(args) -> None:
     events:list = viz.load_pickle(args.profile_path, default=[])
     if (profile_bytes:=viz.get_profile(events, data=viz.data)) is None: raise RuntimeError(f"empty profile in {args.profile_path}")
     profile = decode_profile(profile_bytes)
-    profile["layout"].update([(f'{c["name"][5:]}{" SQTT" if s["name"].endswith("PKTS") else ""} {s["name"]}', s["data"]) for c in ctxs
+    profile["layout"].update([(f'{c["name"][5:]}{" SQTT" if s["name"].endswith("PKTS") else ""} {s["name"]}', s["data"]) for c in viz.data.ctxs
                               if c["name"].startswith("SQTT") for s in c["steps"] if s["name"].endswith(("PMC", "PKTS"))])
     if args.src is None:
       for k in profile["layout"]:
@@ -143,7 +142,7 @@ def main(args) -> None:
     return None
 
   # ** Graph rewrites printer
-  rewrites = {c["name"]:{s["name"]:s for s in c["steps"]} for c in ctxs if c.get("steps")}
+  rewrites = {c["name"]:{s["name"]:s for s in c["steps"]} for c in viz.data.ctxs if c.get("steps")}
   if args.src is None:
     for k in rewrites: print(f"  {format_colored(k)}")
     return None
