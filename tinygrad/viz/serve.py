@@ -69,24 +69,21 @@ class VizData:
   ref_map:dict[Any, int] = field(default_factory=dict)
   all_uops:dict[int, UOp] = field(default_factory=dict)
 
-# ** list all saved rewrites
+# ** load all saved rewrites
 
-def populate_ref_map(data:VizData) -> None:
+def load_rewrites(data:VizData) -> None:
+  data.ctxs.clear()
   data.ref_map.clear()
   for i,k in enumerate(data.trace.keys):
-    for key in k.keys: data.ref_map[key] = i
-
-def get_rewrites(data:VizData) -> list[dict]:
-  ret = []
-  for i,(k,v) in enumerate(zip(data.trace.keys, data.trace.rewrites)):
+    v = data.trace.rewrites[i]
     steps = [create_step(s.name, ("/graph-rewrites", i, j), loc=s.loc, match_count=len(s.matches), code_line=printable(s.loc),
                          trace=k.tb if j==0 else None, depth=s.depth) for j,s in enumerate(v)]
     if (p:=get_prg_uop(data, i)) is not None:
       steps.append(create_step("View UOp List", ("/uops", i, len(steps))))
       steps.append(create_step("View Source", ("/code", i, len(steps)), p.src[3].arg))
       steps.append(create_step("View Disassembly", ("/asm", i, len(steps)), (k.ret, p.src[4].arg)))
-    ret.append({"name":k.display_name, "steps":steps})
-  return ret
+    for key in k.keys: data.ref_map[key] = i
+    data.ctxs.append({"name":k.display_name, "steps":steps})
 
 # ** get the complete UOp graphs for one rewrite
 
@@ -628,12 +625,12 @@ def amdgpu_cfg(lib:bytes, target:str) -> dict:
 
 # ** Main render function to get the complete details about a trace event
 
-def get_render(query:str) -> dict:
+def get_render(viz_data:VizData, query:str) -> dict:
   url = urlparse(query)
   i, j, fmt = get_int(qs:=parse_qs(url.query), "ctx"), get_int(qs, "step"), url.path.lstrip("/")
-  data = ctxs[i]["steps"][j]["data"]
-  if fmt == "graph-rewrites": return {"value":get_full_rewrite(trace.rewrites[i][j]), "content_type":"text/event-stream"}
-  if fmt == "uops": return {"src":get_stdout(lambda: print_uops(_reconstruct(trace.rewrites[i][j-1].sink).src[2].src)), "lang":"txt"}
+  data = viz_data.ctxs[i]["steps"][j]["data"]
+  if fmt == "graph-rewrites": return {"value":get_full_rewrite(viz_data, viz_data.trace.rewrites[i][j]), "content_type":"text/event-stream"}
+  if fmt == "uops": return {"src":get_stdout(lambda: print_uops(_reconstruct(viz_data, viz_data.trace.rewrites[i][j-1].sink).src[2].src)), "lang":"txt"}
   if fmt == "code": return {"src":data, "lang":"cpp"}
   if fmt == "asm":
     ret:dict = {}
@@ -655,13 +652,13 @@ def get_render(query:str) -> dict:
   if fmt.startswith("prg-pkts"):
     ret = {}
     with soft_err(lambda err:ret.update(err)):
-      if (events:=get_profile(list(itertools.islice(sqtt_timeline(*data), getenv("MAX_SQTT_PKTS", 50_000))), sort_fn=row_tuple)):
+      if (events:=get_profile(list(itertools.islice(sqtt_timeline(*data), getenv("MAX_SQTT_PKTS", 50_000))), sort_fn=row_tuple, data=viz_data)):
         ret = {"value":events, "content_type":"application/octet-stream"}
       else: ret = {"src":"No SQTT trace on this SE."}
     return ret
   if fmt == "prg-sqtt":
     ret = {}
-    if len((steps:=ctxs[i]["steps"])[j+1:]) == 0:
+    if len((steps:=viz_data.ctxs[i]["steps"])[j+1:]) == 0:
       with soft_err(lambda err: ret.update(err)):
         cu_events, units, wave_insts = unpack_sqtt(*data)
         for cu in sorted(cu_events, key=row_tuple):
@@ -670,7 +667,7 @@ def get_render(query:str) -> dict:
           for k in sorted(wave_insts.get(cu, []), key=row_tuple):
             steps.append(create_step(k.replace(cu, ""), ("/sqtt-insts", i, len(steps)), loc=(data:=wave_insts[cu][k])["loc"], depth=2, data=data))
     return {**ret, "steps":[{k:v for k,v in s.items() if k != "data"} for s in steps[j+1:]]}
-  if fmt == "cu-sqtt": return {"value":get_profile(data, sort_fn=row_tuple), "content_type":"application/octet-stream"}
+  if fmt == "cu-sqtt": return {"value":get_profile(data, sort_fn=row_tuple, data=viz_data), "content_type":"application/octet-stream"}
   if fmt == "sqtt-insts":
     columns = ["PC", "Instruction", "Hits", "Cycles", "Stall", "Type"]
     inst_columns = ["N", "Clk", "Idle", "Dur", "Stall"]
@@ -697,11 +694,11 @@ def get_render(query:str) -> dict:
       prev_instr = max(prev_instr, e.time + e.dur)
     summary = [{"label":"Total Cycles", "value":w.end_time-w.begin_time}, {"label":"SE", "value":w.se}, {"label":"CU", "value":w.cu},
                {"label":"SIMD", "value":w.simd}, {"label":"Wave ID", "value":w.wave_id}, {"label":"Run number", "value":data["run_number"]}]
-    return {"rows":[tuple(v.values()) for v in rows.values()], "cols":columns, "metadata":[summary], "ref":ref_map.get(data["prg"].name)}
+    return {"rows":[tuple(v.values()) for v in rows.values()], "cols":columns, "metadata":[summary], "ref":viz_data.ref_map.get(data["prg"].name)}
   if fmt == "prg-pma-pkts":
     ret = {}
     with soft_err(lambda err:ret.update(err)):
-      if (events:=get_profile(pma_timeline(*data), sort_fn=row_tuple)): ret = {"value":events, "content_type":"application/octet-stream"}
+      if (events:=get_profile(pma_timeline(*data), sort_fn=row_tuple, data=viz_data)): ret = {"value":events, "content_type":"application/octet-stream"}
       else: ret = {"src":"No PMA samples found."}
     return ret
   return data
@@ -724,11 +721,11 @@ class Handler(HTTPRequestHandler):
       except FileNotFoundError: status_code = 404
 
     elif url.path == "/ctxs":
-      lst = [{**c, "steps":[{k:v for k, v in s.items() if k != "data"} for s in c["steps"]]} for c in ctxs]
+      lst = [{**c, "steps":[{k:v for k, v in s.items() if k != "data"} for s in c["steps"]]} for c in data.ctxs]
       ret, content_type = json.dumps(lst).encode(), "application/json"
     elif url.path == "/get_profile" and profile_ret: ret, content_type = profile_ret, "application/octet-stream"
     else:
-      if not (render_src:=get_render(self.path)): status_code = 404
+      if not (render_src:=get_render(data, self.path)): status_code = 404
       else:
         if "content_type" in render_src: ret, content_type = render_src["value"], render_src["content_type"]
         else: ret, content_type = json.dumps(render_src).encode(), "application/json"
@@ -767,9 +764,7 @@ if __name__ == "__main__":
   print("*** viz is starting")
 
   data = VizData(load_pickle(args.rewrites_path, default=RewriteTrace([], [], {})))
-  ctxs = get_rewrites(data)
-  data.ctxs.extend(ctxs)
-  populate_ref_map(data)
+  load_rewrites(data)
   profile_ret = get_profile(load_pickle(args.profile_path, default=[]), data=data)
 
   server = TCPServerWithReuse(('', PORT), Handler)

@@ -52,16 +52,17 @@ def get(data:dict, key:str):
   raise RuntimeError(f'item "{key}" not found in list'+(f", did you mean {match[0]!r}?" if match else ''))
 
 def main(args) -> None:
-  viz.trace = viz.load_pickle(args.rewrites_path, default=RewriteTrace([], [], {}))
-  viz.ctxs = viz.get_rewrites(viz.trace)
+  viz.data = viz.VizData(viz.load_pickle(args.rewrites_path, default=RewriteTrace([], [], {})))
+  viz.load_rewrites(viz.data)
+  ctxs = viz.data.ctxs
 
   def format_colored(s:str) -> str: return ansistrip(s) if args.no_color else s
 
   if args.profile:
     events:list = viz.load_pickle(args.profile_path, default=[])
-    if (profile_bytes:=viz.get_profile(events)) is None: raise RuntimeError(f"empty profile in {args.profile_path}")
+    if (profile_bytes:=viz.get_profile(events, data=viz.data)) is None: raise RuntimeError(f"empty profile in {args.profile_path}")
     profile = decode_profile(profile_bytes)
-    profile["layout"].update([(f'{c["name"][5:]}{" SQTT" if s["name"].endswith("PKTS") else ""} {s["name"]}', s["data"]) for c in viz.ctxs
+    profile["layout"].update([(f'{c["name"][5:]}{" SQTT" if s["name"].endswith("PKTS") else ""} {s["name"]}', s["data"]) for c in ctxs
                               if c["name"].startswith("SQTT") for s in c["steps"] if s["name"].endswith(("PMC", "PKTS"))])
     if args.src is None:
       for k in profile["layout"]:
@@ -142,7 +143,7 @@ def main(args) -> None:
     return None
 
   # ** Graph rewrites printer
-  rewrites = {c["name"]:{s["name"]:s for s in c["steps"]} for c in viz.ctxs if c.get("steps")}
+  rewrites = {c["name"]:{s["name"]:s for s in c["steps"]} for c in ctxs if c.get("steps")}
   if args.src is None:
     for k in rewrites: print(f"  {format_colored(k)}")
     return None
@@ -150,7 +151,7 @@ def main(args) -> None:
   if args.item is None:
     for k,v in steps.items(): print(" "*v["depth"]+k+(f" - {v['match_count']}" if v.get('match_count', 0) else ''))
   else:
-    data = viz.get_render(get(steps, args.item)["query"])
+    data = viz.get_render(viz.data, get(steps, args.item)["query"])
     if isinstance(data.get("value"), Iterator):
       for m in data["value"]:
         if m.get("uop"): print(f"Input UOp:\n{m['uop']}")
