@@ -16,12 +16,13 @@ def eval_harness(name, tensor, fxn, check=None):
   print(f"computed in {GlobalCounters.time_sum_s*1000:.2f} ms, {(a.nbytes()/1e9)/GlobalCounters.time_sum_s:.2f} GB/s")
   return out
 
-SZ = 32*1024 if getenv("MOCKGPU") else 1024*1024*1024
+SZ = 256*1024 if getenv("MOCKGPU") else 1024*1024*1024
 
 def example_2_hip(a:Tensor, correct):
   GLOBALS = 1024
   THREADS = 256
   def hip_reduce_sum(out:UOp, buf:UOp) -> UOp:
+    assert SZ % (GLOBALS * THREADS) == 0
     CHUNK = SZ // (GLOBALS * THREADS)
     # NOTE: tinygrad doesn't populate HIP hidden kernargs, so blockDim.x/gridDim.x read as 0.
     # We hardcode block/grid sizes as constexpr to avoid any dependency on those builtins.
