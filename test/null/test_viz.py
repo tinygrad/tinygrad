@@ -21,19 +21,19 @@ def exec_rewrite(sink:UOp, pm_lst:list[PatternMatcher], names:None|list[str]=Non
 # small container class for the viz server module
 class VizTrace:
   # loader init
-  def __init__(self): self._trace:VizData|None = None
+  def __init__(self): self._data:VizData|None = None
   @property
-  def trace(self) -> VizData: return unwrap(self._trace)
-  def set_trace(self) -> None:
-    self._trace = VizData(RewriteTrace(tracked_keys.copy(), tracked_ctxs.copy(), uop_fields.copy()))
+  def data(self) -> VizData: return unwrap(self._data)
+  def set_data(self) -> None:
+    data = VizData(RewriteTrace(tracked_keys.copy(), tracked_ctxs.copy(), uop_fields.copy()))
+    load_rewrites(data)
+    self._data = data
   # the API
   def list_items(self) -> list[dict]:
-    load_rewrites(self.trace)
-    return self.trace.ctxs
+    return self.data.ctxs
   def get_details(self, rewrite_idx:int, step:int) -> Generator[dict, None, None]:
-    lst = self.list_items()
-    assert len(lst) > rewrite_idx, f"only loaded {len(lst)} traces, expecting at least {rewrite_idx}"
-    return get_full_rewrite(self.trace, self.trace.trace.rewrites[rewrite_idx][step])
+    assert len(self.data.trace.rewrites) > rewrite_idx, f"only loaded {len(self.data.trace.rewrites)} traces, expecting at least {rewrite_idx}"
+    return get_full_rewrite(self.data, self.data.trace.rewrites[rewrite_idx][step])
 
 @contextlib.contextmanager
 def save_viz():
@@ -52,7 +52,7 @@ def save_viz():
   try:
     yield viz
   finally:
-    viz.set_trace()
+    viz.set_data()
     TRACK_MATCH_STATS.value = prev_tms
     PROFILE.value = prev_profile
     VIZ.value = prev_viz

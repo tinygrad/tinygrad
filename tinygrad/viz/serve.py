@@ -72,8 +72,7 @@ class VizData:
 # ** load all saved rewrites
 
 def load_rewrites(data:VizData) -> None:
-  data.ctxs.clear()
-  data.ref_map.clear()
+  assert not data.ctxs and not data.ref_map, "load_rewrites called multiple times"
   for i,k in enumerate(data.trace.keys):
     v = data.trace.rewrites[i]
     steps = [create_step(s.name, ("/graph-rewrites", i, j), loc=s.loc, match_count=len(s.matches), code_line=printable(s.loc),
