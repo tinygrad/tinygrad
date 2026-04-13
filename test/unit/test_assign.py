@@ -961,8 +961,7 @@ class TestAfterCachePatterns(unittest.TestCase):
     a = Tensor(a.uop.after(a_store, b_store))
     a.realize()
     np.testing.assert_array_equal(a.numpy(), 1)
-    # TODO: this is broken!
-    #np.testing.assert_array_equal(b.numpy(), 1)
+    np.testing.assert_array_equal(b.numpy(), 1)
 
 if __name__ == "__main__":
   unittest.main()
