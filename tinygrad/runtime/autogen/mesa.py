@@ -12,7 +12,7 @@ u_printf_info: TypeAlias = struct_u_printf_info
 uint32_t: TypeAlias = ctypes.c_uint32
 try: nir_debug = uint32_t.in_dll(dll, 'nir_debug') # type: ignore
 except (ValueError,AttributeError): pass
-try: nir_debug_print_shader = (ctypes.c_bool * 15).in_dll(dll, 'nir_debug_print_shader') # type: ignore
+try: nir_debug_print_shader = c.Array[ctypes.c_bool, Literal[15]].in_dll(dll, 'nir_debug_print_shader') # type: ignore
 except (ValueError,AttributeError): pass
 nir_component_mask_t: TypeAlias = ctypes.c_uint16
 @dll.bind(None)
@@ -24,9 +24,9 @@ def nir_component_mask_reinterpret(mask:nir_component_mask_t, old_bit_size:int, 
 @c.record
 class struct_nir_state_slot(c.Struct):
   SIZE = 8
-  tokens: ctypes.Array[ctypes.c_int16]
+  tokens: c.Array[ctypes.c_int16, Literal[4]]
 gl_state_index16: TypeAlias = ctypes.c_int16
-struct_nir_state_slot.register_fields([('tokens', (gl_state_index16 * 4), 0)])
+struct_nir_state_slot.register_fields([('tokens', c.Array[gl_state_index16, Literal[4]], 0)])
 nir_state_slot: TypeAlias = struct_nir_state_slot
 nir_rounding_mode: dict[int, str] = {(nir_rounding_mode_undef:=0): 'nir_rounding_mode_undef', (nir_rounding_mode_rtne:=1): 'nir_rounding_mode_rtne', (nir_rounding_mode_ru:=2): 'nir_rounding_mode_ru', (nir_rounding_mode_rd:=3): 'nir_rounding_mode_rd', (nir_rounding_mode_rtz:=4): 'nir_rounding_mode_rtz'}
 nir_ray_query_value: dict[int, str] = {(nir_ray_query_value_intersection_type:=0): 'nir_ray_query_value_intersection_type', (nir_ray_query_value_intersection_t:=1): 'nir_ray_query_value_intersection_t', (nir_ray_query_value_intersection_instance_custom_index:=2): 'nir_ray_query_value_intersection_instance_custom_index', (nir_ray_query_value_intersection_instance_id:=3): 'nir_ray_query_value_intersection_instance_id', (nir_ray_query_value_intersection_instance_sbt_index:=4): 'nir_ray_query_value_intersection_instance_sbt_index', (nir_ray_query_value_intersection_geometry_index:=5): 'nir_ray_query_value_intersection_geometry_index', (nir_ray_query_value_intersection_primitive_index:=6): 'nir_ray_query_value_intersection_primitive_index', (nir_ray_query_value_intersection_barycentrics:=7): 'nir_ray_query_value_intersection_barycentrics', (nir_ray_query_value_intersection_front_face:=8): 'nir_ray_query_value_intersection_front_face', (nir_ray_query_value_intersection_object_ray_direction:=9): 'nir_ray_query_value_intersection_object_ray_direction', (nir_ray_query_value_intersection_object_ray_origin:=10): 'nir_ray_query_value_intersection_object_ray_origin', (nir_ray_query_value_intersection_object_to_world:=11): 'nir_ray_query_value_intersection_object_to_world', (nir_ray_query_value_intersection_world_to_object:=12): 'nir_ray_query_value_intersection_world_to_object', (nir_ray_query_value_intersection_candidate_aabb_opaque:=13): 'nir_ray_query_value_intersection_candidate_aabb_opaque', (nir_ray_query_value_tmin:=14): 'nir_ray_query_value_tmin', (nir_ray_query_value_flags:=15): 'nir_ray_query_value_flags', (nir_ray_query_value_world_ray_direction:=16): 'nir_ray_query_value_world_ray_direction', (nir_ray_query_value_world_ray_origin:=17): 'nir_ray_query_value_world_ray_origin', (nir_ray_query_value_intersection_triangle_vertex_positions:=18): 'nir_ray_query_value_intersection_triangle_vertex_positions'}
@@ -62,12 +62,12 @@ def nir_const_value_as_float(value:nir_const_value, bit_size:int) -> float: ...
 @c.record
 class struct_nir_constant(c.Struct):
   SIZE = 144
-  values: ctypes.Array[nir_const_value]
+  values: c.Array[nir_const_value, Literal[16]]
   is_null_constant: bool
   num_elements: int
-  elements: ctypes._Pointer[ctypes.POINTER(struct_nir_constant)]
+  elements: c.POINTER[c.POINTER[struct_nir_constant]]
 nir_constant: TypeAlias = struct_nir_constant
-struct_nir_constant.register_fields([('values', (nir_const_value * 16), 0), ('is_null_constant', ctypes.c_bool, 128), ('num_elements', ctypes.c_uint32, 132), ('elements', ctypes.POINTER(ctypes.POINTER(nir_constant)), 136)])
+struct_nir_constant.register_fields([('values', c.Array[nir_const_value, Literal[16]], 0), ('is_null_constant', ctypes.c_bool, 128), ('num_elements', ctypes.c_uint32, 132), ('elements', c.POINTER[c.POINTER[nir_constant]], 136)])
 nir_depth_layout: dict[int, str] = {(nir_depth_layout_none:=0): 'nir_depth_layout_none', (nir_depth_layout_any:=1): 'nir_depth_layout_any', (nir_depth_layout_greater:=2): 'nir_depth_layout_greater', (nir_depth_layout_less:=3): 'nir_depth_layout_less', (nir_depth_layout_unchanged:=4): 'nir_depth_layout_unchanged'}
 nir_var_declaration_type: dict[int, str] = {(nir_var_declared_normally:=0): 'nir_var_declared_normally', (nir_var_declared_implicitly:=1): 'nir_var_declared_implicitly', (nir_var_hidden:=2): 'nir_var_hidden'}
 @c.record
@@ -124,7 +124,7 @@ class struct_nir_variable_data(c.Struct):
   image: struct_nir_variable_data_image
   sampler: struct_nir_variable_data_sampler
   xfb: struct_nir_variable_data_xfb
-  node_name: ctypes._Pointer[ctypes.c_char]
+  node_name: c.POINTER[ctypes.c_char]
 @c.record
 class struct_nir_variable_data_image(c.Struct):
   SIZE = 4
@@ -145,30 +145,30 @@ class struct_nir_variable_data_xfb(c.Struct):
   buffer: int
   stride: int
 struct_nir_variable_data_xfb.register_fields([('buffer', uint16_t, 0, 2, 0), ('stride', uint16_t, 2)])
-struct_nir_variable_data.register_fields([('mode', ctypes.c_uint32, 0, 21, 0), ('read_only', ctypes.c_uint32, 2, 1, 5), ('centroid', ctypes.c_uint32, 2, 1, 6), ('sample', ctypes.c_uint32, 2, 1, 7), ('patch', ctypes.c_uint32, 3, 1, 0), ('invariant', ctypes.c_uint32, 3, 1, 1), ('explicit_invariant', ctypes.c_uint32, 3, 1, 2), ('ray_query', ctypes.c_uint32, 3, 1, 3), ('precision', ctypes.c_uint32, 3, 2, 4), ('assigned', ctypes.c_uint32, 3, 1, 6), ('cannot_coalesce', ctypes.c_uint32, 3, 1, 7), ('always_active_io', ctypes.c_uint32, 4, 1, 0), ('interpolation', ctypes.c_uint32, 4, 3, 1), ('location_frac', ctypes.c_uint32, 4, 2, 4), ('compact', ctypes.c_uint32, 4, 1, 6), ('fb_fetch_output', ctypes.c_uint32, 4, 1, 7), ('bindless', ctypes.c_uint32, 5, 1, 0), ('explicit_binding', ctypes.c_uint32, 5, 1, 1), ('explicit_location', ctypes.c_uint32, 5, 1, 2), ('implicit_sized_array', ctypes.c_uint32, 5, 1, 3), ('max_array_access', ctypes.c_int32, 8), ('has_initializer', ctypes.c_uint32, 12, 1, 0), ('is_implicit_initializer', ctypes.c_uint32, 12, 1, 1), ('is_xfb', ctypes.c_uint32, 12, 1, 2), ('is_xfb_only', ctypes.c_uint32, 12, 1, 3), ('explicit_xfb_buffer', ctypes.c_uint32, 12, 1, 4), ('explicit_xfb_stride', ctypes.c_uint32, 12, 1, 5), ('explicit_offset', ctypes.c_uint32, 12, 1, 6), ('matrix_layout', ctypes.c_uint32, 12, 2, 7), ('from_named_ifc_block', ctypes.c_uint32, 13, 1, 1), ('from_ssbo_unsized_array', ctypes.c_uint32, 13, 1, 2), ('must_be_shader_input', ctypes.c_uint32, 13, 1, 3), ('used', ctypes.c_uint32, 13, 1, 4), ('how_declared', ctypes.c_uint32, 13, 2, 5), ('per_view', ctypes.c_uint32, 13, 1, 7), ('per_primitive', ctypes.c_uint32, 14, 1, 0), ('per_vertex', ctypes.c_uint32, 14, 1, 1), ('aliased_shared_memory', ctypes.c_uint32, 14, 1, 2), ('depth_layout', ctypes.c_uint32, 14, 3, 3), ('stream', ctypes.c_uint32, 14, 9, 6), ('access', ctypes.c_uint32, 16, 9, 0), ('descriptor_set', ctypes.c_uint32, 17, 5, 1), ('index', ctypes.c_uint32, 20), ('binding', ctypes.c_uint32, 24), ('location', ctypes.c_int32, 28), ('alignment', ctypes.c_uint32, 32), ('driver_location', ctypes.c_uint32, 36), ('offset', ctypes.c_uint32, 40), ('image', struct_nir_variable_data_image, 44), ('sampler', struct_nir_variable_data_sampler, 44), ('xfb', struct_nir_variable_data_xfb, 44), ('node_name', ctypes.POINTER(ctypes.c_char), 48)])
+struct_nir_variable_data.register_fields([('mode', ctypes.c_uint32, 0, 21, 0), ('read_only', ctypes.c_uint32, 2, 1, 5), ('centroid', ctypes.c_uint32, 2, 1, 6), ('sample', ctypes.c_uint32, 2, 1, 7), ('patch', ctypes.c_uint32, 3, 1, 0), ('invariant', ctypes.c_uint32, 3, 1, 1), ('explicit_invariant', ctypes.c_uint32, 3, 1, 2), ('ray_query', ctypes.c_uint32, 3, 1, 3), ('precision', ctypes.c_uint32, 3, 2, 4), ('assigned', ctypes.c_uint32, 3, 1, 6), ('cannot_coalesce', ctypes.c_uint32, 3, 1, 7), ('always_active_io', ctypes.c_uint32, 4, 1, 0), ('interpolation', ctypes.c_uint32, 4, 3, 1), ('location_frac', ctypes.c_uint32, 4, 2, 4), ('compact', ctypes.c_uint32, 4, 1, 6), ('fb_fetch_output', ctypes.c_uint32, 4, 1, 7), ('bindless', ctypes.c_uint32, 5, 1, 0), ('explicit_binding', ctypes.c_uint32, 5, 1, 1), ('explicit_location', ctypes.c_uint32, 5, 1, 2), ('implicit_sized_array', ctypes.c_uint32, 5, 1, 3), ('max_array_access', ctypes.c_int32, 8), ('has_initializer', ctypes.c_uint32, 12, 1, 0), ('is_implicit_initializer', ctypes.c_uint32, 12, 1, 1), ('is_xfb', ctypes.c_uint32, 12, 1, 2), ('is_xfb_only', ctypes.c_uint32, 12, 1, 3), ('explicit_xfb_buffer', ctypes.c_uint32, 12, 1, 4), ('explicit_xfb_stride', ctypes.c_uint32, 12, 1, 5), ('explicit_offset', ctypes.c_uint32, 12, 1, 6), ('matrix_layout', ctypes.c_uint32, 12, 2, 7), ('from_named_ifc_block', ctypes.c_uint32, 13, 1, 1), ('from_ssbo_unsized_array', ctypes.c_uint32, 13, 1, 2), ('must_be_shader_input', ctypes.c_uint32, 13, 1, 3), ('used', ctypes.c_uint32, 13, 1, 4), ('how_declared', ctypes.c_uint32, 13, 2, 5), ('per_view', ctypes.c_uint32, 13, 1, 7), ('per_primitive', ctypes.c_uint32, 14, 1, 0), ('per_vertex', ctypes.c_uint32, 14, 1, 1), ('aliased_shared_memory', ctypes.c_uint32, 14, 1, 2), ('depth_layout', ctypes.c_uint32, 14, 3, 3), ('stream', ctypes.c_uint32, 14, 9, 6), ('access', ctypes.c_uint32, 16, 9, 0), ('descriptor_set', ctypes.c_uint32, 17, 5, 1), ('index', ctypes.c_uint32, 20), ('binding', ctypes.c_uint32, 24), ('location', ctypes.c_int32, 28), ('alignment', ctypes.c_uint32, 32), ('driver_location', ctypes.c_uint32, 36), ('offset', ctypes.c_uint32, 40), ('image', struct_nir_variable_data_image, 44), ('sampler', struct_nir_variable_data_sampler, 44), ('xfb', struct_nir_variable_data_xfb, 44), ('node_name', c.POINTER[ctypes.c_char], 48)])
 nir_variable_data: TypeAlias = struct_nir_variable_data
 @c.record
 class struct_nir_variable(c.Struct):
   SIZE = 152
   node: struct_exec_node
-  type: ctypes._Pointer[struct_glsl_type]
-  name: ctypes._Pointer[ctypes.c_char]
+  type: c.POINTER[struct_glsl_type]
+  name: c.POINTER[ctypes.c_char]
   data: struct_nir_variable_data
   index: int
   num_members: int
-  max_ifc_array_access: ctypes._Pointer[ctypes.c_int32]
+  max_ifc_array_access: c.POINTER[ctypes.c_int32]
   num_state_slots: int
-  state_slots: ctypes._Pointer[struct_nir_state_slot]
-  constant_initializer: ctypes._Pointer[struct_nir_constant]
-  pointer_initializer: ctypes._Pointer[struct_nir_variable]
-  interface_type: ctypes._Pointer[struct_glsl_type]
-  members: ctypes._Pointer[struct_nir_variable_data]
+  state_slots: c.POINTER[struct_nir_state_slot]
+  constant_initializer: c.POINTER[struct_nir_constant]
+  pointer_initializer: c.POINTER[struct_nir_variable]
+  interface_type: c.POINTER[struct_glsl_type]
+  members: c.POINTER[struct_nir_variable_data]
 @c.record
 class struct_exec_node(c.Struct):
   SIZE = 16
-  next: ctypes._Pointer[struct_exec_node]
-  prev: ctypes._Pointer[struct_exec_node]
-struct_exec_node.register_fields([('next', ctypes.POINTER(struct_exec_node), 0), ('prev', ctypes.POINTER(struct_exec_node), 8)])
+  next: c.POINTER[struct_exec_node]
+  prev: c.POINTER[struct_exec_node]
+struct_exec_node.register_fields([('next', c.POINTER[struct_exec_node], 0), ('prev', c.POINTER[struct_exec_node], 8)])
 @c.record
 class struct_glsl_type(c.Struct):
   SIZE = 48
@@ -204,14 +204,14 @@ uintptr_t: TypeAlias = ctypes.c_uint64
 @c.record
 class struct_glsl_type_fields(c.Struct):
   SIZE = 8
-  array: ctypes._Pointer[struct_glsl_type]
-  structure: ctypes._Pointer[struct_glsl_struct_field]
+  array: c.POINTER[struct_glsl_type]
+  structure: c.POINTER[struct_glsl_struct_field]
 glsl_type: TypeAlias = struct_glsl_type
 @c.record
 class struct_glsl_struct_field(c.Struct):
   SIZE = 48
-  type: ctypes._Pointer[struct_glsl_type]
-  name: ctypes._Pointer[ctypes.c_char]
+  type: c.POINTER[struct_glsl_type]
+  name: c.POINTER[ctypes.c_char]
   location: int
   component: int
   offset: int
@@ -233,17 +233,17 @@ class struct_glsl_struct_field(c.Struct):
   implicit_sized_array: int
   flags: int
 glsl_struct_field: TypeAlias = struct_glsl_struct_field
-struct_glsl_struct_field.register_fields([('type', ctypes.POINTER(glsl_type), 0), ('name', ctypes.POINTER(ctypes.c_char), 8), ('location', ctypes.c_int32, 16), ('component', ctypes.c_int32, 20), ('offset', ctypes.c_int32, 24), ('xfb_buffer', ctypes.c_int32, 28), ('xfb_stride', ctypes.c_int32, 32), ('image_format', ctypes.c_uint32, 36), ('interpolation', ctypes.c_uint32, 40, 3, 0), ('centroid', ctypes.c_uint32, 40, 1, 3), ('sample', ctypes.c_uint32, 40, 1, 4), ('matrix_layout', ctypes.c_uint32, 40, 2, 5), ('patch', ctypes.c_uint32, 40, 1, 7), ('precision', ctypes.c_uint32, 41, 2, 0), ('memory_read_only', ctypes.c_uint32, 41, 1, 2), ('memory_write_only', ctypes.c_uint32, 41, 1, 3), ('memory_coherent', ctypes.c_uint32, 41, 1, 4), ('memory_volatile', ctypes.c_uint32, 41, 1, 5), ('memory_restrict', ctypes.c_uint32, 41, 1, 6), ('explicit_xfb_buffer', ctypes.c_uint32, 41, 1, 7), ('implicit_sized_array', ctypes.c_uint32, 42, 1, 0), ('flags', ctypes.c_uint32, 40)])
-struct_glsl_type_fields.register_fields([('array', ctypes.POINTER(glsl_type), 0), ('structure', ctypes.POINTER(glsl_struct_field), 0)])
+struct_glsl_struct_field.register_fields([('type', c.POINTER[glsl_type], 0), ('name', c.POINTER[ctypes.c_char], 8), ('location', ctypes.c_int32, 16), ('component', ctypes.c_int32, 20), ('offset', ctypes.c_int32, 24), ('xfb_buffer', ctypes.c_int32, 28), ('xfb_stride', ctypes.c_int32, 32), ('image_format', ctypes.c_uint32, 36), ('interpolation', ctypes.c_uint32, 40, 3, 0), ('centroid', ctypes.c_uint32, 40, 1, 3), ('sample', ctypes.c_uint32, 40, 1, 4), ('matrix_layout', ctypes.c_uint32, 40, 2, 5), ('patch', ctypes.c_uint32, 40, 1, 7), ('precision', ctypes.c_uint32, 41, 2, 0), ('memory_read_only', ctypes.c_uint32, 41, 1, 2), ('memory_write_only', ctypes.c_uint32, 41, 1, 3), ('memory_coherent', ctypes.c_uint32, 41, 1, 4), ('memory_volatile', ctypes.c_uint32, 41, 1, 5), ('memory_restrict', ctypes.c_uint32, 41, 1, 6), ('explicit_xfb_buffer', ctypes.c_uint32, 41, 1, 7), ('implicit_sized_array', ctypes.c_uint32, 42, 1, 0), ('flags', ctypes.c_uint32, 40)])
+struct_glsl_type_fields.register_fields([('array', c.POINTER[glsl_type], 0), ('structure', c.POINTER[glsl_struct_field], 0)])
 struct_glsl_type.register_fields([('gl_type', uint32_t, 0), ('base_type', ctypes.c_uint32, 4, 8, 0), ('sampled_type', ctypes.c_uint32, 5, 8, 0), ('sampler_dimensionality', ctypes.c_uint32, 6, 4, 0), ('sampler_shadow', ctypes.c_uint32, 6, 1, 4), ('sampler_array', ctypes.c_uint32, 6, 1, 5), ('interface_packing', ctypes.c_uint32, 6, 2, 6), ('interface_row_major', ctypes.c_uint32, 7, 1, 0), ('cmat_desc', struct_glsl_cmat_description, 8), ('packed', ctypes.c_uint32, 12, 1, 0), ('has_builtin_name', ctypes.c_uint32, 12, 1, 1), ('vector_elements', uint8_t, 13), ('matrix_columns', uint8_t, 14), ('length', ctypes.c_uint32, 16), ('name_id', uintptr_t, 24), ('explicit_stride', ctypes.c_uint32, 32), ('explicit_alignment', ctypes.c_uint32, 36), ('fields', struct_glsl_type_fields, 40)])
 nir_variable: TypeAlias = struct_nir_variable
-struct_nir_variable.register_fields([('node', struct_exec_node, 0), ('type', ctypes.POINTER(struct_glsl_type), 16), ('name', ctypes.POINTER(ctypes.c_char), 24), ('data', struct_nir_variable_data, 32), ('index', ctypes.c_uint32, 88), ('num_members', uint16_t, 92), ('max_ifc_array_access', ctypes.POINTER(ctypes.c_int32), 96), ('num_state_slots', uint16_t, 104), ('state_slots', ctypes.POINTER(nir_state_slot), 112), ('constant_initializer', ctypes.POINTER(nir_constant), 120), ('pointer_initializer', ctypes.POINTER(nir_variable), 128), ('interface_type', ctypes.POINTER(struct_glsl_type), 136), ('members', ctypes.POINTER(nir_variable_data), 144)])
+struct_nir_variable.register_fields([('node', struct_exec_node, 0), ('type', c.POINTER[struct_glsl_type], 16), ('name', c.POINTER[ctypes.c_char], 24), ('data', struct_nir_variable_data, 32), ('index', ctypes.c_uint32, 88), ('num_members', uint16_t, 92), ('max_ifc_array_access', c.POINTER[ctypes.c_int32], 96), ('num_state_slots', uint16_t, 104), ('state_slots', c.POINTER[nir_state_slot], 112), ('constant_initializer', c.POINTER[nir_constant], 120), ('pointer_initializer', c.POINTER[nir_variable], 128), ('interface_type', c.POINTER[struct_glsl_type], 136), ('members', c.POINTER[nir_variable_data], 144)])
 nir_instr_type: dict[int, str] = {(nir_instr_type_alu:=0): 'nir_instr_type_alu', (nir_instr_type_deref:=1): 'nir_instr_type_deref', (nir_instr_type_call:=2): 'nir_instr_type_call', (nir_instr_type_tex:=3): 'nir_instr_type_tex', (nir_instr_type_intrinsic:=4): 'nir_instr_type_intrinsic', (nir_instr_type_load_const:=5): 'nir_instr_type_load_const', (nir_instr_type_jump:=6): 'nir_instr_type_jump', (nir_instr_type_undef:=7): 'nir_instr_type_undef', (nir_instr_type_phi:=8): 'nir_instr_type_phi', (nir_instr_type_parallel_copy:=9): 'nir_instr_type_parallel_copy'}
 @c.record
 class struct_nir_instr(c.Struct):
   SIZE = 32
   node: struct_exec_node
-  block: ctypes._Pointer[struct_nir_block]
+  block: c.POINTER[struct_nir_block]
   type: int
   pass_flags: int
   has_debug_info: bool
@@ -255,28 +255,28 @@ class struct_nir_block(c.Struct):
   instr_list: struct_exec_list
   index: int
   divergent: bool
-  successors: ctypes.Array[ctypes.POINTER(struct_nir_block)]
-  predecessors: ctypes._Pointer[struct_set]
-  imm_dom: ctypes._Pointer[struct_nir_block]
+  successors: c.Array[c.POINTER[struct_nir_block], Literal[2]]
+  predecessors: c.POINTER[struct_set]
+  imm_dom: c.POINTER[struct_nir_block]
   num_dom_children: int
-  dom_children: ctypes._Pointer[ctypes.POINTER(struct_nir_block)]
-  dom_frontier: ctypes._Pointer[struct_set]
+  dom_children: c.POINTER[c.POINTER[struct_nir_block]]
+  dom_frontier: c.POINTER[struct_set]
   dom_pre_index: int
   dom_post_index: int
   start_ip: int
   end_ip: int
-  live_in: ctypes._Pointer[ctypes.c_uint32]
-  live_out: ctypes._Pointer[ctypes.c_uint32]
+  live_in: c.POINTER[ctypes.c_uint32]
+  live_out: c.POINTER[ctypes.c_uint32]
 nir_block: TypeAlias = struct_nir_block
 @c.record
 class struct_nir_cf_node(c.Struct):
   SIZE = 32
   node: struct_exec_node
   type: int
-  parent: ctypes._Pointer[struct_nir_cf_node]
+  parent: c.POINTER[struct_nir_cf_node]
 nir_cf_node: TypeAlias = struct_nir_cf_node
 nir_cf_node_type: dict[int, str] = {(nir_cf_node_block:=0): 'nir_cf_node_block', (nir_cf_node_if:=1): 'nir_cf_node_if', (nir_cf_node_loop:=2): 'nir_cf_node_loop', (nir_cf_node_function:=3): 'nir_cf_node_function'}
-struct_nir_cf_node.register_fields([('node', struct_exec_node, 0), ('type', ctypes.c_uint32, 16), ('parent', ctypes.POINTER(nir_cf_node), 24)])
+struct_nir_cf_node.register_fields([('node', struct_exec_node, 0), ('type', ctypes.c_uint32, 16), ('parent', c.POINTER[nir_cf_node], 24)])
 @c.record
 class struct_exec_list(c.Struct):
   SIZE = 32
@@ -286,10 +286,10 @@ struct_exec_list.register_fields([('head_sentinel', struct_exec_node, 0), ('tail
 @c.record
 class struct_set(c.Struct):
   SIZE = 72
-  mem_ctx: int|None
-  table: ctypes._Pointer[struct_set_entry]
-  key_hash_function: ctypes._CFunctionType
-  key_equals_function: ctypes._CFunctionType
+  mem_ctx: ctypes.c_void_p
+  table: c.POINTER[struct_set_entry]
+  key_hash_function: c.CFUNCTYPE[ctypes.c_uint32, [ctypes.c_void_p]]
+  key_equals_function: c.CFUNCTYPE[ctypes.c_bool, [ctypes.c_void_p, ctypes.c_void_p]]
   size: int
   rehash: int
   size_magic: int
@@ -302,16 +302,16 @@ class struct_set(c.Struct):
 class struct_set_entry(c.Struct):
   SIZE = 16
   hash: int
-  key: int|None
+  key: ctypes.c_void_p
 struct_set_entry.register_fields([('hash', uint32_t, 0), ('key', ctypes.c_void_p, 8)])
-struct_set.register_fields([('mem_ctx', ctypes.c_void_p, 0), ('table', ctypes.POINTER(struct_set_entry), 8), ('key_hash_function', ctypes.CFUNCTYPE(uint32_t, ctypes.c_void_p), 16), ('key_equals_function', ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p), 24), ('size', uint32_t, 32), ('rehash', uint32_t, 36), ('size_magic', uint64_t, 40), ('rehash_magic', uint64_t, 48), ('max_entries', uint32_t, 56), ('size_index', uint32_t, 60), ('entries', uint32_t, 64), ('deleted_entries', uint32_t, 68)])
-struct_nir_block.register_fields([('cf_node', nir_cf_node, 0), ('instr_list', struct_exec_list, 32), ('index', ctypes.c_uint32, 64), ('divergent', ctypes.c_bool, 68), ('successors', (ctypes.POINTER(nir_block) * 2), 72), ('predecessors', ctypes.POINTER(struct_set), 88), ('imm_dom', ctypes.POINTER(nir_block), 96), ('num_dom_children', ctypes.c_uint32, 104), ('dom_children', ctypes.POINTER(ctypes.POINTER(nir_block)), 112), ('dom_frontier', ctypes.POINTER(struct_set), 120), ('dom_pre_index', uint32_t, 128), ('dom_post_index', uint32_t, 132), ('start_ip', uint32_t, 136), ('end_ip', uint32_t, 140), ('live_in', ctypes.POINTER(ctypes.c_uint32), 144), ('live_out', ctypes.POINTER(ctypes.c_uint32), 152)])
-struct_nir_instr.register_fields([('node', struct_exec_node, 0), ('block', ctypes.POINTER(nir_block), 16), ('type', ctypes.c_ubyte, 24), ('pass_flags', uint8_t, 25), ('has_debug_info', ctypes.c_bool, 26), ('index', uint32_t, 28)])
+struct_set.register_fields([('mem_ctx', ctypes.c_void_p, 0), ('table', c.POINTER[struct_set_entry], 8), ('key_hash_function', c.CFUNCTYPE[uint32_t, [ctypes.c_void_p]], 16), ('key_equals_function', c.CFUNCTYPE[ctypes.c_bool, [ctypes.c_void_p, ctypes.c_void_p]], 24), ('size', uint32_t, 32), ('rehash', uint32_t, 36), ('size_magic', uint64_t, 40), ('rehash_magic', uint64_t, 48), ('max_entries', uint32_t, 56), ('size_index', uint32_t, 60), ('entries', uint32_t, 64), ('deleted_entries', uint32_t, 68)])
+struct_nir_block.register_fields([('cf_node', nir_cf_node, 0), ('instr_list', struct_exec_list, 32), ('index', ctypes.c_uint32, 64), ('divergent', ctypes.c_bool, 68), ('successors', c.Array[c.POINTER[nir_block], Literal[2]], 72), ('predecessors', c.POINTER[struct_set], 88), ('imm_dom', c.POINTER[nir_block], 96), ('num_dom_children', ctypes.c_uint32, 104), ('dom_children', c.POINTER[c.POINTER[nir_block]], 112), ('dom_frontier', c.POINTER[struct_set], 120), ('dom_pre_index', uint32_t, 128), ('dom_post_index', uint32_t, 132), ('start_ip', uint32_t, 136), ('end_ip', uint32_t, 140), ('live_in', c.POINTER[ctypes.c_uint32], 144), ('live_out', c.POINTER[ctypes.c_uint32], 152)])
+struct_nir_instr.register_fields([('node', struct_exec_node, 0), ('block', c.POINTER[nir_block], 16), ('type', ctypes.c_ubyte, 24), ('pass_flags', uint8_t, 25), ('has_debug_info', ctypes.c_bool, 26), ('index', uint32_t, 28)])
 nir_instr: TypeAlias = struct_nir_instr
 @c.record
 class struct_nir_def(c.Struct):
   SIZE = 32
-  parent_instr: ctypes._Pointer[struct_nir_instr]
+  parent_instr: c.POINTER[struct_nir_instr]
   uses: struct_list_head
   index: int
   num_components: int
@@ -321,27 +321,27 @@ class struct_nir_def(c.Struct):
 @c.record
 class struct_list_head(c.Struct):
   SIZE = 16
-  prev: ctypes._Pointer[struct_list_head]
-  next: ctypes._Pointer[struct_list_head]
-struct_list_head.register_fields([('prev', ctypes.POINTER(struct_list_head), 0), ('next', ctypes.POINTER(struct_list_head), 8)])
-struct_nir_def.register_fields([('parent_instr', ctypes.POINTER(nir_instr), 0), ('uses', struct_list_head, 8), ('index', ctypes.c_uint32, 24), ('num_components', uint8_t, 28), ('bit_size', uint8_t, 29), ('divergent', ctypes.c_bool, 30), ('loop_invariant', ctypes.c_bool, 31)])
+  prev: c.POINTER[struct_list_head]
+  next: c.POINTER[struct_list_head]
+struct_list_head.register_fields([('prev', c.POINTER[struct_list_head], 0), ('next', c.POINTER[struct_list_head], 8)])
+struct_nir_def.register_fields([('parent_instr', c.POINTER[nir_instr], 0), ('uses', struct_list_head, 8), ('index', ctypes.c_uint32, 24), ('num_components', uint8_t, 28), ('bit_size', uint8_t, 29), ('divergent', ctypes.c_bool, 30), ('loop_invariant', ctypes.c_bool, 31)])
 nir_def: TypeAlias = struct_nir_def
 @c.record
 class struct_nir_src(c.Struct):
   SIZE = 32
   _parent: int
   use_link: struct_list_head
-  ssa: ctypes._Pointer[struct_nir_def]
-struct_nir_src.register_fields([('_parent', uintptr_t, 0), ('use_link', struct_list_head, 8), ('ssa', ctypes.POINTER(nir_def), 24)])
+  ssa: c.POINTER[struct_nir_def]
+struct_nir_src.register_fields([('_parent', uintptr_t, 0), ('use_link', struct_list_head, 8), ('ssa', c.POINTER[nir_def], 24)])
 nir_src: TypeAlias = struct_nir_src
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_src))
-def nir_src_is_divergent(src:ctypes._Pointer[nir_src]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_src])
+def nir_src_is_divergent(src:c.POINTER[nir_src]) -> bool: ...
 @c.record
 class struct_nir_alu_src(c.Struct):
   SIZE = 48
   src: struct_nir_src
-  swizzle: ctypes.Array[ctypes.c_ubyte]
-struct_nir_alu_src.register_fields([('src', nir_src, 0), ('swizzle', (uint8_t * 16), 32)])
+  swizzle: c.Array[ctypes.c_ubyte, Literal[16]]
+struct_nir_alu_src.register_fields([('src', nir_src, 0), ('swizzle', c.Array[uint8_t, Literal[16]], 32)])
 nir_alu_src: TypeAlias = struct_nir_alu_src
 nir_alu_type: dict[int, str] = {(nir_type_invalid:=0): 'nir_type_invalid', (nir_type_int:=2): 'nir_type_int', (nir_type_uint:=4): 'nir_type_uint', (nir_type_bool:=6): 'nir_type_bool', (nir_type_float:=128): 'nir_type_float', (nir_type_bool1:=7): 'nir_type_bool1', (nir_type_bool8:=14): 'nir_type_bool8', (nir_type_bool16:=22): 'nir_type_bool16', (nir_type_bool32:=38): 'nir_type_bool32', (nir_type_int1:=3): 'nir_type_int1', (nir_type_int8:=10): 'nir_type_int8', (nir_type_int16:=18): 'nir_type_int16', (nir_type_int32:=34): 'nir_type_int32', (nir_type_int64:=66): 'nir_type_int64', (nir_type_uint1:=5): 'nir_type_uint1', (nir_type_uint8:=12): 'nir_type_uint8', (nir_type_uint16:=20): 'nir_type_uint16', (nir_type_uint32:=36): 'nir_type_uint32', (nir_type_uint64:=68): 'nir_type_uint64', (nir_type_float16:=144): 'nir_type_float16', (nir_type_float32:=160): 'nir_type_float32', (nir_type_float64:=192): 'nir_type_float64'}
 @dll.bind(ctypes.c_ubyte, ctypes.c_uint32)
@@ -362,17 +362,17 @@ nir_op_algebraic_property: dict[int, str] = {(NIR_OP_IS_2SRC_COMMUTATIVE:=1): 'N
 @c.record
 class struct_nir_op_info(c.Struct):
   SIZE = 56
-  name: ctypes._Pointer[ctypes.c_char]
+  name: c.POINTER[ctypes.c_char]
   num_inputs: int
   output_size: int
   output_type: int
-  input_sizes: ctypes.Array[ctypes.c_ubyte]
-  input_types: ctypes.Array[ctypes.c_ubyte]
+  input_sizes: c.Array[ctypes.c_ubyte, Literal[16]]
+  input_types: c.Array[ctypes.c_ubyte, Literal[16]]
   algebraic_properties: int
   is_conversion: bool
-struct_nir_op_info.register_fields([('name', ctypes.POINTER(ctypes.c_char), 0), ('num_inputs', uint8_t, 8), ('output_size', uint8_t, 9), ('output_type', ctypes.c_ubyte, 10), ('input_sizes', (uint8_t * 16), 11), ('input_types', (ctypes.c_ubyte * 16), 27), ('algebraic_properties', ctypes.c_uint32, 44), ('is_conversion', ctypes.c_bool, 48)])
+struct_nir_op_info.register_fields([('name', c.POINTER[ctypes.c_char], 0), ('num_inputs', uint8_t, 8), ('output_size', uint8_t, 9), ('output_type', ctypes.c_ubyte, 10), ('input_sizes', c.Array[uint8_t, Literal[16]], 11), ('input_types', c.Array[ctypes.c_ubyte, Literal[16]], 27), ('algebraic_properties', ctypes.c_uint32, 44), ('is_conversion', ctypes.c_bool, 48)])
 nir_op_info: TypeAlias = struct_nir_op_info
-try: nir_op_infos = (nir_op_info * 489).in_dll(dll, 'nir_op_infos') # type: ignore
+try: nir_op_infos = c.Array[nir_op_info, Literal[489]].in_dll(dll, 'nir_op_infos') # type: ignore
 except (ValueError,AttributeError): pass
 @c.record
 class struct_nir_alu_instr(c.Struct):
@@ -384,27 +384,27 @@ class struct_nir_alu_instr(c.Struct):
   no_unsigned_wrap: bool
   fp_fast_math: int
   _def: struct_nir_def
-  src: ctypes.Array[struct_nir_alu_src]
-struct_nir_alu_instr.register_fields([('instr', nir_instr, 0), ('op', ctypes.c_uint32, 32), ('exact', ctypes.c_bool, 36, 1, 0), ('no_signed_wrap', ctypes.c_bool, 36, 1, 1), ('no_unsigned_wrap', ctypes.c_bool, 36, 1, 2), ('fp_fast_math', uint32_t, 36, 9, 3), ('_def', nir_def, 40), ('src', (nir_alu_src * 0), 72)])
+  src: c.Array[struct_nir_alu_src, Literal[0]]
+struct_nir_alu_instr.register_fields([('instr', nir_instr, 0), ('op', ctypes.c_uint32, 32), ('exact', ctypes.c_bool, 36, 1, 0), ('no_signed_wrap', ctypes.c_bool, 36, 1, 1), ('no_unsigned_wrap', ctypes.c_bool, 36, 1, 2), ('fp_fast_math', uint32_t, 36, 9, 3), ('_def', nir_def, 40), ('src', c.Array[nir_alu_src, Literal[0]], 72)])
 nir_alu_instr: TypeAlias = struct_nir_alu_instr
-@dll.bind(None, ctypes.POINTER(nir_alu_src), ctypes.POINTER(nir_alu_src))
-def nir_alu_src_copy(dest:ctypes._Pointer[nir_alu_src], src:ctypes._Pointer[nir_alu_src]) -> None: ...
-@dll.bind(nir_component_mask_t, ctypes.POINTER(nir_alu_instr), ctypes.c_uint32)
-def nir_alu_instr_src_read_mask(instr:ctypes._Pointer[nir_alu_instr], src:int) -> nir_component_mask_t: ...
-@dll.bind(ctypes.c_uint32, ctypes.POINTER(nir_alu_instr), ctypes.c_uint32)
-def nir_ssa_alu_instr_src_components(instr:ctypes._Pointer[nir_alu_instr], src:int) -> int: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_alu_instr))
-def nir_alu_instr_is_comparison(instr:ctypes._Pointer[nir_alu_instr]) -> bool: ...
+@dll.bind(None, c.POINTER[nir_alu_src], c.POINTER[nir_alu_src])
+def nir_alu_src_copy(dest:c.POINTER[nir_alu_src], src:c.POINTER[nir_alu_src]) -> None: ...
+@dll.bind(nir_component_mask_t, c.POINTER[nir_alu_instr], ctypes.c_uint32)
+def nir_alu_instr_src_read_mask(instr:c.POINTER[nir_alu_instr], src:int) -> nir_component_mask_t: ...
+@dll.bind(ctypes.c_uint32, c.POINTER[nir_alu_instr], ctypes.c_uint32)
+def nir_ssa_alu_instr_src_components(instr:c.POINTER[nir_alu_instr], src:int) -> int: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_alu_instr])
+def nir_alu_instr_is_comparison(instr:c.POINTER[nir_alu_instr]) -> bool: ...
 @dll.bind(ctypes.c_bool, nir_const_value, nir_const_value, ctypes.c_ubyte)
 def nir_const_value_negative_equal(c1:nir_const_value, c2:nir_const_value, full_type:ctypes.c_ubyte) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_alu_instr), ctypes.POINTER(nir_alu_instr), ctypes.c_uint32, ctypes.c_uint32)
-def nir_alu_srcs_equal(alu1:ctypes._Pointer[nir_alu_instr], alu2:ctypes._Pointer[nir_alu_instr], src1:int, src2:int) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_alu_instr), ctypes.POINTER(nir_alu_instr), ctypes.c_uint32, ctypes.c_uint32, ctypes.c_ubyte)
-def nir_alu_srcs_negative_equal_typed(alu1:ctypes._Pointer[nir_alu_instr], alu2:ctypes._Pointer[nir_alu_instr], src1:int, src2:int, base_type:ctypes.c_ubyte) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_alu_instr), ctypes.POINTER(nir_alu_instr), ctypes.c_uint32, ctypes.c_uint32)
-def nir_alu_srcs_negative_equal(alu1:ctypes._Pointer[nir_alu_instr], alu2:ctypes._Pointer[nir_alu_instr], src1:int, src2:int) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_alu_instr), ctypes.c_uint32)
-def nir_alu_src_is_trivial_ssa(alu:ctypes._Pointer[nir_alu_instr], srcn:int) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_alu_instr], c.POINTER[nir_alu_instr], ctypes.c_uint32, ctypes.c_uint32)
+def nir_alu_srcs_equal(alu1:c.POINTER[nir_alu_instr], alu2:c.POINTER[nir_alu_instr], src1:int, src2:int) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_alu_instr], c.POINTER[nir_alu_instr], ctypes.c_uint32, ctypes.c_uint32, ctypes.c_ubyte)
+def nir_alu_srcs_negative_equal_typed(alu1:c.POINTER[nir_alu_instr], alu2:c.POINTER[nir_alu_instr], src1:int, src2:int, base_type:ctypes.c_ubyte) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_alu_instr], c.POINTER[nir_alu_instr], ctypes.c_uint32, ctypes.c_uint32)
+def nir_alu_srcs_negative_equal(alu1:c.POINTER[nir_alu_instr], alu2:c.POINTER[nir_alu_instr], src1:int, src2:int) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_alu_instr], ctypes.c_uint32)
+def nir_alu_src_is_trivial_ssa(alu:c.POINTER[nir_alu_instr], srcn:int) -> bool: ...
 nir_deref_type: dict[int, str] = {(nir_deref_type_var:=0): 'nir_deref_type_var', (nir_deref_type_array:=1): 'nir_deref_type_array', (nir_deref_type_array_wildcard:=2): 'nir_deref_type_array_wildcard', (nir_deref_type_ptr_as_array:=3): 'nir_deref_type_ptr_as_array', (nir_deref_type_struct:=4): 'nir_deref_type_struct', (nir_deref_type_cast:=5): 'nir_deref_type_cast'}
 @c.record
 class struct_nir_deref_instr(c.Struct):
@@ -412,8 +412,8 @@ class struct_nir_deref_instr(c.Struct):
   instr: struct_nir_instr
   deref_type: int
   modes: int
-  type: ctypes._Pointer[struct_glsl_type]
-  var: ctypes._Pointer[struct_nir_variable]
+  type: c.POINTER[struct_glsl_type]
+  var: c.POINTER[struct_nir_variable]
   parent: struct_nir_src
   arr: struct_nir_deref_instr_arr
   strct: struct_nir_deref_instr_strct
@@ -438,58 +438,58 @@ class struct_nir_deref_instr_cast(c.Struct):
   align_mul: int
   align_offset: int
 struct_nir_deref_instr_cast.register_fields([('ptr_stride', ctypes.c_uint32, 0), ('align_mul', ctypes.c_uint32, 4), ('align_offset', ctypes.c_uint32, 8)])
-struct_nir_deref_instr.register_fields([('instr', nir_instr, 0), ('deref_type', ctypes.c_uint32, 32), ('modes', ctypes.c_uint32, 36), ('type', ctypes.POINTER(struct_glsl_type), 40), ('var', ctypes.POINTER(nir_variable), 48), ('parent', nir_src, 48), ('arr', struct_nir_deref_instr_arr, 80), ('strct', struct_nir_deref_instr_strct, 80), ('cast', struct_nir_deref_instr_cast, 80), ('_def', nir_def, 120)])
+struct_nir_deref_instr.register_fields([('instr', nir_instr, 0), ('deref_type', ctypes.c_uint32, 32), ('modes', ctypes.c_uint32, 36), ('type', c.POINTER[struct_glsl_type], 40), ('var', c.POINTER[nir_variable], 48), ('parent', nir_src, 48), ('arr', struct_nir_deref_instr_arr, 80), ('strct', struct_nir_deref_instr_strct, 80), ('cast', struct_nir_deref_instr_cast, 80), ('_def', nir_def, 120)])
 nir_deref_instr: TypeAlias = struct_nir_deref_instr
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_deref_instr))
-def nir_deref_cast_is_trivial(cast:ctypes._Pointer[nir_deref_instr]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_deref_instr))
-def nir_deref_instr_has_indirect(instr:ctypes._Pointer[nir_deref_instr]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_deref_instr))
-def nir_deref_instr_is_known_out_of_bounds(instr:ctypes._Pointer[nir_deref_instr]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_deref_instr])
+def nir_deref_cast_is_trivial(cast:c.POINTER[nir_deref_instr]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_deref_instr])
+def nir_deref_instr_has_indirect(instr:c.POINTER[nir_deref_instr]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_deref_instr])
+def nir_deref_instr_is_known_out_of_bounds(instr:c.POINTER[nir_deref_instr]) -> bool: ...
 nir_deref_instr_has_complex_use_options: dict[int, str] = {(nir_deref_instr_has_complex_use_allow_memcpy_src:=1): 'nir_deref_instr_has_complex_use_allow_memcpy_src', (nir_deref_instr_has_complex_use_allow_memcpy_dst:=2): 'nir_deref_instr_has_complex_use_allow_memcpy_dst', (nir_deref_instr_has_complex_use_allow_atomics:=4): 'nir_deref_instr_has_complex_use_allow_atomics'}
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_deref_instr), ctypes.c_uint32)
-def nir_deref_instr_has_complex_use(instr:ctypes._Pointer[nir_deref_instr], opts:ctypes.c_uint32) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_deref_instr))
-def nir_deref_instr_remove_if_unused(instr:ctypes._Pointer[nir_deref_instr]) -> bool: ...
-@dll.bind(ctypes.c_uint32, ctypes.POINTER(nir_deref_instr))
-def nir_deref_instr_array_stride(instr:ctypes._Pointer[nir_deref_instr]) -> int: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_deref_instr], ctypes.c_uint32)
+def nir_deref_instr_has_complex_use(instr:c.POINTER[nir_deref_instr], opts:ctypes.c_uint32) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_deref_instr])
+def nir_deref_instr_remove_if_unused(instr:c.POINTER[nir_deref_instr]) -> bool: ...
+@dll.bind(ctypes.c_uint32, c.POINTER[nir_deref_instr])
+def nir_deref_instr_array_stride(instr:c.POINTER[nir_deref_instr]) -> int: ...
 @c.record
 class struct_nir_call_instr(c.Struct):
   SIZE = 80
   instr: struct_nir_instr
-  callee: ctypes._Pointer[struct_nir_function]
+  callee: c.POINTER[struct_nir_function]
   indirect_callee: struct_nir_src
   num_params: int
-  params: ctypes.Array[struct_nir_src]
+  params: c.Array[struct_nir_src, Literal[0]]
 @c.record
 class struct_nir_function(c.Struct):
   SIZE = 104
   node: struct_exec_node
-  name: ctypes._Pointer[ctypes.c_char]
-  shader: ctypes._Pointer[struct_nir_shader]
+  name: c.POINTER[ctypes.c_char]
+  shader: c.POINTER[struct_nir_shader]
   num_params: int
-  params: ctypes._Pointer[struct_nir_parameter]
-  impl: ctypes._Pointer[struct_nir_function_impl]
+  params: c.POINTER[struct_nir_parameter]
+  impl: c.POINTER[struct_nir_function_impl]
   driver_attributes: int
   is_entrypoint: bool
   is_exported: bool
   is_preamble: bool
   should_inline: bool
   dont_inline: bool
-  workgroup_size: ctypes.Array[ctypes.c_uint32]
+  workgroup_size: c.Array[ctypes.c_uint32, Literal[3]]
   is_subroutine: bool
   is_tmp_globals_wrapper: bool
   num_subroutine_types: int
-  subroutine_types: ctypes._Pointer[ctypes.POINTER(struct_glsl_type)]
+  subroutine_types: c.POINTER[c.POINTER[struct_glsl_type]]
   subroutine_index: int
   pass_flags: int
 nir_function: TypeAlias = struct_nir_function
 @c.record
 class struct_nir_shader(c.Struct):
   SIZE = 520
-  gctx: ctypes._Pointer[struct_gc_ctx]
+  gctx: c.POINTER[struct_gc_ctx]
   variables: struct_exec_list
-  options: ctypes._Pointer[struct_nir_shader_compiler_options]
+  options: c.POINTER[struct_nir_shader_compiler_options]
   info: struct_shader_info
   functions: struct_exec_list
   num_inputs: int
@@ -497,11 +497,11 @@ class struct_nir_shader(c.Struct):
   num_outputs: int
   global_mem_size: int
   scratch_size: int
-  constant_data: int|None
+  constant_data: ctypes.c_void_p
   constant_data_size: int
-  xfb_info: ctypes._Pointer[struct_nir_xfb_info]
+  xfb_info: c.POINTER[struct_nir_xfb_info]
   printf_info_count: int
-  printf_info: ctypes._Pointer[struct_u_printf_info]
+  printf_info: c.POINTER[struct_u_printf_info]
   has_debug_info: bool
 nir_shader: TypeAlias = struct_nir_shader
 class struct_gc_ctx(c.Struct): pass
@@ -600,7 +600,7 @@ class struct_nir_shader_compiler_options(c.Struct):
   lower_bfloat16_conversions: bool
   vectorize_tess_levels: bool
   lower_to_scalar: bool
-  lower_to_scalar_filter: ctypes._CFunctionType
+  lower_to_scalar_filter: c.CFUNCTYPE[ctypes.c_bool, [c.POINTER[struct_nir_instr], ctypes.c_void_p]]
   vectorize_vec2_16bit: bool
   unify_interfaces: bool
   lower_interpolate_at: bool
@@ -679,24 +679,24 @@ class struct_nir_shader_compiler_options(c.Struct):
   compact_view_index: bool
   io_options: int
   skip_lower_packing_ops: int
-  lower_mediump_io: ctypes._CFunctionType
-  varying_expression_max_cost: ctypes._CFunctionType
-  varying_estimate_instr_cost: ctypes._CFunctionType
+  lower_mediump_io: c.CFUNCTYPE[None, [c.POINTER[struct_nir_shader]]]
+  varying_expression_max_cost: c.CFUNCTYPE[ctypes.c_uint32, [c.POINTER[struct_nir_shader], c.POINTER[struct_nir_shader]]]
+  varying_estimate_instr_cost: c.CFUNCTYPE[ctypes.c_uint32, [c.POINTER[struct_nir_instr]]]
   max_varying_expression_cost: int
 nir_shader_compiler_options: TypeAlias = struct_nir_shader_compiler_options
-nir_instr_filter_cb: TypeAlias = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(struct_nir_instr), ctypes.c_void_p)
+nir_instr_filter_cb: TypeAlias = c.CFUNCTYPE[ctypes.c_bool, [c.POINTER[struct_nir_instr], ctypes.c_void_p]]
 nir_lower_int64_options: dict[int, str] = {(nir_lower_imul64:=1): 'nir_lower_imul64', (nir_lower_isign64:=2): 'nir_lower_isign64', (nir_lower_divmod64:=4): 'nir_lower_divmod64', (nir_lower_imul_high64:=8): 'nir_lower_imul_high64', (nir_lower_bcsel64:=16): 'nir_lower_bcsel64', (nir_lower_icmp64:=32): 'nir_lower_icmp64', (nir_lower_iadd64:=64): 'nir_lower_iadd64', (nir_lower_iabs64:=128): 'nir_lower_iabs64', (nir_lower_ineg64:=256): 'nir_lower_ineg64', (nir_lower_logic64:=512): 'nir_lower_logic64', (nir_lower_minmax64:=1024): 'nir_lower_minmax64', (nir_lower_shift64:=2048): 'nir_lower_shift64', (nir_lower_imul_2x32_64:=4096): 'nir_lower_imul_2x32_64', (nir_lower_extract64:=8192): 'nir_lower_extract64', (nir_lower_ufind_msb64:=16384): 'nir_lower_ufind_msb64', (nir_lower_bit_count64:=32768): 'nir_lower_bit_count64', (nir_lower_subgroup_shuffle64:=65536): 'nir_lower_subgroup_shuffle64', (nir_lower_scan_reduce_bitwise64:=131072): 'nir_lower_scan_reduce_bitwise64', (nir_lower_scan_reduce_iadd64:=262144): 'nir_lower_scan_reduce_iadd64', (nir_lower_vote_ieq64:=524288): 'nir_lower_vote_ieq64', (nir_lower_usub_sat64:=1048576): 'nir_lower_usub_sat64', (nir_lower_iadd_sat64:=2097152): 'nir_lower_iadd_sat64', (nir_lower_find_lsb64:=4194304): 'nir_lower_find_lsb64', (nir_lower_conv64:=8388608): 'nir_lower_conv64', (nir_lower_uadd_sat64:=16777216): 'nir_lower_uadd_sat64', (nir_lower_iadd3_64:=33554432): 'nir_lower_iadd3_64', (nir_lower_bitfield_reverse64:=67108864): 'nir_lower_bitfield_reverse64', (nir_lower_bitfield_extract64:=134217728): 'nir_lower_bitfield_extract64'}
 nir_lower_doubles_options: dict[int, str] = {(nir_lower_drcp:=1): 'nir_lower_drcp', (nir_lower_dsqrt:=2): 'nir_lower_dsqrt', (nir_lower_drsq:=4): 'nir_lower_drsq', (nir_lower_dtrunc:=8): 'nir_lower_dtrunc', (nir_lower_dfloor:=16): 'nir_lower_dfloor', (nir_lower_dceil:=32): 'nir_lower_dceil', (nir_lower_dfract:=64): 'nir_lower_dfract', (nir_lower_dround_even:=128): 'nir_lower_dround_even', (nir_lower_dmod:=256): 'nir_lower_dmod', (nir_lower_dsub:=512): 'nir_lower_dsub', (nir_lower_ddiv:=1024): 'nir_lower_ddiv', (nir_lower_dsign:=2048): 'nir_lower_dsign', (nir_lower_dminmax:=4096): 'nir_lower_dminmax', (nir_lower_dsat:=8192): 'nir_lower_dsat', (nir_lower_fp64_full_software:=16384): 'nir_lower_fp64_full_software'}
 nir_divergence_options: dict[int, str] = {(nir_divergence_single_prim_per_subgroup:=1): 'nir_divergence_single_prim_per_subgroup', (nir_divergence_single_patch_per_tcs_subgroup:=2): 'nir_divergence_single_patch_per_tcs_subgroup', (nir_divergence_single_patch_per_tes_subgroup:=4): 'nir_divergence_single_patch_per_tes_subgroup', (nir_divergence_view_index_uniform:=8): 'nir_divergence_view_index_uniform', (nir_divergence_single_frag_shading_rate_per_subgroup:=16): 'nir_divergence_single_frag_shading_rate_per_subgroup', (nir_divergence_multiple_workgroup_per_compute_subgroup:=32): 'nir_divergence_multiple_workgroup_per_compute_subgroup', (nir_divergence_shader_record_ptr_uniform:=64): 'nir_divergence_shader_record_ptr_uniform', (nir_divergence_uniform_load_tears:=128): 'nir_divergence_uniform_load_tears', (nir_divergence_ignore_undef_if_phi_srcs:=256): 'nir_divergence_ignore_undef_if_phi_srcs'}
 nir_io_options: dict[int, str] = {(nir_io_has_flexible_input_interpolation_except_flat:=1): 'nir_io_has_flexible_input_interpolation_except_flat', (nir_io_dont_use_pos_for_non_fs_varyings:=2): 'nir_io_dont_use_pos_for_non_fs_varyings', (nir_io_16bit_input_output_support:=4): 'nir_io_16bit_input_output_support', (nir_io_mediump_is_32bit:=8): 'nir_io_mediump_is_32bit', (nir_io_prefer_scalar_fs_inputs:=16): 'nir_io_prefer_scalar_fs_inputs', (nir_io_mix_convergent_flat_with_interpolated:=32): 'nir_io_mix_convergent_flat_with_interpolated', (nir_io_vectorizer_ignores_types:=64): 'nir_io_vectorizer_ignores_types', (nir_io_always_interpolate_convergent_fs_inputs:=128): 'nir_io_always_interpolate_convergent_fs_inputs', (nir_io_compaction_rotates_color_channels:=256): 'nir_io_compaction_rotates_color_channels', (nir_io_compaction_groups_tes_inputs_into_pos_and_var_groups:=512): 'nir_io_compaction_groups_tes_inputs_into_pos_and_var_groups', (nir_io_radv_intrinsic_component_workaround:=1024): 'nir_io_radv_intrinsic_component_workaround', (nir_io_has_intrinsics:=65536): 'nir_io_has_intrinsics', (nir_io_separate_clip_cull_distance_arrays:=131072): 'nir_io_separate_clip_cull_distance_arrays'}
-struct_nir_shader_compiler_options.register_fields([('lower_fdiv', ctypes.c_bool, 0), ('lower_ffma16', ctypes.c_bool, 1), ('lower_ffma32', ctypes.c_bool, 2), ('lower_ffma64', ctypes.c_bool, 3), ('fuse_ffma16', ctypes.c_bool, 4), ('fuse_ffma32', ctypes.c_bool, 5), ('fuse_ffma64', ctypes.c_bool, 6), ('lower_flrp16', ctypes.c_bool, 7), ('lower_flrp32', ctypes.c_bool, 8), ('lower_flrp64', ctypes.c_bool, 9), ('lower_fpow', ctypes.c_bool, 10), ('lower_fsat', ctypes.c_bool, 11), ('lower_fsqrt', ctypes.c_bool, 12), ('lower_sincos', ctypes.c_bool, 13), ('lower_fmod', ctypes.c_bool, 14), ('lower_bitfield_extract8', ctypes.c_bool, 15), ('lower_bitfield_extract16', ctypes.c_bool, 16), ('lower_bitfield_extract', ctypes.c_bool, 17), ('lower_bitfield_insert', ctypes.c_bool, 18), ('lower_bitfield_reverse', ctypes.c_bool, 19), ('lower_bit_count', ctypes.c_bool, 20), ('lower_ifind_msb', ctypes.c_bool, 21), ('lower_ufind_msb', ctypes.c_bool, 22), ('lower_find_lsb', ctypes.c_bool, 23), ('lower_uadd_carry', ctypes.c_bool, 24), ('lower_usub_borrow', ctypes.c_bool, 25), ('lower_mul_high', ctypes.c_bool, 26), ('lower_mul_high16', ctypes.c_bool, 27), ('lower_fneg', ctypes.c_bool, 28), ('lower_ineg', ctypes.c_bool, 29), ('lower_fisnormal', ctypes.c_bool, 30), ('lower_scmp', ctypes.c_bool, 31), ('lower_vector_cmp', ctypes.c_bool, 32), ('lower_bitops', ctypes.c_bool, 33), ('lower_isign', ctypes.c_bool, 34), ('lower_fsign', ctypes.c_bool, 35), ('lower_iabs', ctypes.c_bool, 36), ('lower_umax', ctypes.c_bool, 37), ('lower_umin', ctypes.c_bool, 38), ('lower_fminmax_signed_zero', ctypes.c_bool, 39), ('lower_fdph', ctypes.c_bool, 40), ('fdot_replicates', ctypes.c_bool, 41), ('lower_ffloor', ctypes.c_bool, 42), ('lower_ffract', ctypes.c_bool, 43), ('lower_fceil', ctypes.c_bool, 44), ('lower_ftrunc', ctypes.c_bool, 45), ('lower_fround_even', ctypes.c_bool, 46), ('lower_ldexp', ctypes.c_bool, 47), ('lower_pack_half_2x16', ctypes.c_bool, 48), ('lower_pack_unorm_2x16', ctypes.c_bool, 49), ('lower_pack_snorm_2x16', ctypes.c_bool, 50), ('lower_pack_unorm_4x8', ctypes.c_bool, 51), ('lower_pack_snorm_4x8', ctypes.c_bool, 52), ('lower_pack_64_2x32', ctypes.c_bool, 53), ('lower_pack_64_4x16', ctypes.c_bool, 54), ('lower_pack_32_2x16', ctypes.c_bool, 55), ('lower_pack_64_2x32_split', ctypes.c_bool, 56), ('lower_pack_32_2x16_split', ctypes.c_bool, 57), ('lower_unpack_half_2x16', ctypes.c_bool, 58), ('lower_unpack_unorm_2x16', ctypes.c_bool, 59), ('lower_unpack_snorm_2x16', ctypes.c_bool, 60), ('lower_unpack_unorm_4x8', ctypes.c_bool, 61), ('lower_unpack_snorm_4x8', ctypes.c_bool, 62), ('lower_unpack_64_2x32_split', ctypes.c_bool, 63), ('lower_unpack_32_2x16_split', ctypes.c_bool, 64), ('lower_pack_split', ctypes.c_bool, 65), ('lower_extract_byte', ctypes.c_bool, 66), ('lower_extract_word', ctypes.c_bool, 67), ('lower_insert_byte', ctypes.c_bool, 68), ('lower_insert_word', ctypes.c_bool, 69), ('vertex_id_zero_based', ctypes.c_bool, 70), ('lower_base_vertex', ctypes.c_bool, 71), ('instance_id_includes_base_index', ctypes.c_bool, 72), ('lower_helper_invocation', ctypes.c_bool, 73), ('optimize_sample_mask_in', ctypes.c_bool, 74), ('optimize_load_front_face_fsign', ctypes.c_bool, 75), ('optimize_quad_vote_to_reduce', ctypes.c_bool, 76), ('lower_cs_local_index_to_id', ctypes.c_bool, 77), ('lower_cs_local_id_to_index', ctypes.c_bool, 78), ('has_cs_global_id', ctypes.c_bool, 79), ('lower_device_index_to_zero', ctypes.c_bool, 80), ('lower_wpos_pntc', ctypes.c_bool, 81), ('lower_hadd', ctypes.c_bool, 82), ('lower_hadd64', ctypes.c_bool, 83), ('lower_uadd_sat', ctypes.c_bool, 84), ('lower_usub_sat', ctypes.c_bool, 85), ('lower_iadd_sat', ctypes.c_bool, 86), ('lower_mul_32x16', ctypes.c_bool, 87), ('lower_bfloat16_conversions', ctypes.c_bool, 88), ('vectorize_tess_levels', ctypes.c_bool, 89), ('lower_to_scalar', ctypes.c_bool, 90), ('lower_to_scalar_filter', nir_instr_filter_cb, 96), ('vectorize_vec2_16bit', ctypes.c_bool, 104), ('unify_interfaces', ctypes.c_bool, 105), ('lower_interpolate_at', ctypes.c_bool, 106), ('lower_mul_2x32_64', ctypes.c_bool, 107), ('has_rotate8', ctypes.c_bool, 108), ('has_rotate16', ctypes.c_bool, 109), ('has_rotate32', ctypes.c_bool, 110), ('has_shfr32', ctypes.c_bool, 111), ('has_iadd3', ctypes.c_bool, 112), ('has_amul', ctypes.c_bool, 113), ('has_imul24', ctypes.c_bool, 114), ('has_umul24', ctypes.c_bool, 115), ('has_mul24_relaxed', ctypes.c_bool, 116), ('has_imad32', ctypes.c_bool, 117), ('has_umad24', ctypes.c_bool, 118), ('has_fused_comp_and_csel', ctypes.c_bool, 119), ('has_icsel_eqz64', ctypes.c_bool, 120), ('has_icsel_eqz32', ctypes.c_bool, 121), ('has_icsel_eqz16', ctypes.c_bool, 122), ('has_fneo_fcmpu', ctypes.c_bool, 123), ('has_ford_funord', ctypes.c_bool, 124), ('has_fsub', ctypes.c_bool, 125), ('has_isub', ctypes.c_bool, 126), ('has_pack_32_4x8', ctypes.c_bool, 127), ('has_texture_scaling', ctypes.c_bool, 128), ('has_sdot_4x8', ctypes.c_bool, 129), ('has_udot_4x8', ctypes.c_bool, 130), ('has_sudot_4x8', ctypes.c_bool, 131), ('has_sdot_4x8_sat', ctypes.c_bool, 132), ('has_udot_4x8_sat', ctypes.c_bool, 133), ('has_sudot_4x8_sat', ctypes.c_bool, 134), ('has_dot_2x16', ctypes.c_bool, 135), ('has_bfdot2_bfadd', ctypes.c_bool, 136), ('has_fmulz', ctypes.c_bool, 137), ('has_fmulz_no_denorms', ctypes.c_bool, 138), ('has_find_msb_rev', ctypes.c_bool, 139), ('has_pack_half_2x16_rtz', ctypes.c_bool, 140), ('has_bit_test', ctypes.c_bool, 141), ('has_bfe', ctypes.c_bool, 142), ('has_bfm', ctypes.c_bool, 143), ('has_bfi', ctypes.c_bool, 144), ('has_bitfield_select', ctypes.c_bool, 145), ('has_uclz', ctypes.c_bool, 146), ('has_msad', ctypes.c_bool, 147), ('has_f2e4m3fn_satfn', ctypes.c_bool, 148), ('has_load_global_bounded', ctypes.c_bool, 149), ('intel_vec4', ctypes.c_bool, 150), ('avoid_ternary_with_two_constants', ctypes.c_bool, 151), ('support_8bit_alu', ctypes.c_bool, 152), ('support_16bit_alu', ctypes.c_bool, 153), ('max_unroll_iterations', ctypes.c_uint32, 156), ('max_unroll_iterations_aggressive', ctypes.c_uint32, 160), ('max_unroll_iterations_fp64', ctypes.c_uint32, 164), ('lower_uniforms_to_ubo', ctypes.c_bool, 168), ('force_indirect_unrolling_sampler', ctypes.c_bool, 169), ('no_integers', ctypes.c_bool, 170), ('force_indirect_unrolling', ctypes.c_uint32, 172), ('driver_functions', ctypes.c_bool, 176), ('late_lower_int64', ctypes.c_bool, 177), ('lower_int64_options', ctypes.c_uint32, 180), ('lower_doubles_options', ctypes.c_uint32, 184), ('divergence_analysis_options', ctypes.c_uint32, 188), ('support_indirect_inputs', uint8_t, 192), ('support_indirect_outputs', uint8_t, 193), ('lower_image_offset_to_range_base', ctypes.c_bool, 194), ('lower_atomic_offset_to_range_base', ctypes.c_bool, 195), ('preserve_mediump', ctypes.c_bool, 196), ('lower_fquantize2f16', ctypes.c_bool, 197), ('force_f2f16_rtz', ctypes.c_bool, 198), ('lower_layer_fs_input_to_sysval', ctypes.c_bool, 199), ('compact_arrays', ctypes.c_bool, 200), ('discard_is_demote', ctypes.c_bool, 201), ('has_ddx_intrinsics', ctypes.c_bool, 202), ('scalarize_ddx', ctypes.c_bool, 203), ('per_view_unique_driver_locations', ctypes.c_bool, 204), ('compact_view_index', ctypes.c_bool, 205), ('io_options', ctypes.c_uint32, 208), ('skip_lower_packing_ops', ctypes.c_uint32, 212), ('lower_mediump_io', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_nir_shader)), 216), ('varying_expression_max_cost', ctypes.CFUNCTYPE(ctypes.c_uint32, ctypes.POINTER(struct_nir_shader), ctypes.POINTER(struct_nir_shader)), 224), ('varying_estimate_instr_cost', ctypes.CFUNCTYPE(ctypes.c_uint32, ctypes.POINTER(struct_nir_instr)), 232), ('max_varying_expression_cost', ctypes.c_uint32, 240)])
+struct_nir_shader_compiler_options.register_fields([('lower_fdiv', ctypes.c_bool, 0), ('lower_ffma16', ctypes.c_bool, 1), ('lower_ffma32', ctypes.c_bool, 2), ('lower_ffma64', ctypes.c_bool, 3), ('fuse_ffma16', ctypes.c_bool, 4), ('fuse_ffma32', ctypes.c_bool, 5), ('fuse_ffma64', ctypes.c_bool, 6), ('lower_flrp16', ctypes.c_bool, 7), ('lower_flrp32', ctypes.c_bool, 8), ('lower_flrp64', ctypes.c_bool, 9), ('lower_fpow', ctypes.c_bool, 10), ('lower_fsat', ctypes.c_bool, 11), ('lower_fsqrt', ctypes.c_bool, 12), ('lower_sincos', ctypes.c_bool, 13), ('lower_fmod', ctypes.c_bool, 14), ('lower_bitfield_extract8', ctypes.c_bool, 15), ('lower_bitfield_extract16', ctypes.c_bool, 16), ('lower_bitfield_extract', ctypes.c_bool, 17), ('lower_bitfield_insert', ctypes.c_bool, 18), ('lower_bitfield_reverse', ctypes.c_bool, 19), ('lower_bit_count', ctypes.c_bool, 20), ('lower_ifind_msb', ctypes.c_bool, 21), ('lower_ufind_msb', ctypes.c_bool, 22), ('lower_find_lsb', ctypes.c_bool, 23), ('lower_uadd_carry', ctypes.c_bool, 24), ('lower_usub_borrow', ctypes.c_bool, 25), ('lower_mul_high', ctypes.c_bool, 26), ('lower_mul_high16', ctypes.c_bool, 27), ('lower_fneg', ctypes.c_bool, 28), ('lower_ineg', ctypes.c_bool, 29), ('lower_fisnormal', ctypes.c_bool, 30), ('lower_scmp', ctypes.c_bool, 31), ('lower_vector_cmp', ctypes.c_bool, 32), ('lower_bitops', ctypes.c_bool, 33), ('lower_isign', ctypes.c_bool, 34), ('lower_fsign', ctypes.c_bool, 35), ('lower_iabs', ctypes.c_bool, 36), ('lower_umax', ctypes.c_bool, 37), ('lower_umin', ctypes.c_bool, 38), ('lower_fminmax_signed_zero', ctypes.c_bool, 39), ('lower_fdph', ctypes.c_bool, 40), ('fdot_replicates', ctypes.c_bool, 41), ('lower_ffloor', ctypes.c_bool, 42), ('lower_ffract', ctypes.c_bool, 43), ('lower_fceil', ctypes.c_bool, 44), ('lower_ftrunc', ctypes.c_bool, 45), ('lower_fround_even', ctypes.c_bool, 46), ('lower_ldexp', ctypes.c_bool, 47), ('lower_pack_half_2x16', ctypes.c_bool, 48), ('lower_pack_unorm_2x16', ctypes.c_bool, 49), ('lower_pack_snorm_2x16', ctypes.c_bool, 50), ('lower_pack_unorm_4x8', ctypes.c_bool, 51), ('lower_pack_snorm_4x8', ctypes.c_bool, 52), ('lower_pack_64_2x32', ctypes.c_bool, 53), ('lower_pack_64_4x16', ctypes.c_bool, 54), ('lower_pack_32_2x16', ctypes.c_bool, 55), ('lower_pack_64_2x32_split', ctypes.c_bool, 56), ('lower_pack_32_2x16_split', ctypes.c_bool, 57), ('lower_unpack_half_2x16', ctypes.c_bool, 58), ('lower_unpack_unorm_2x16', ctypes.c_bool, 59), ('lower_unpack_snorm_2x16', ctypes.c_bool, 60), ('lower_unpack_unorm_4x8', ctypes.c_bool, 61), ('lower_unpack_snorm_4x8', ctypes.c_bool, 62), ('lower_unpack_64_2x32_split', ctypes.c_bool, 63), ('lower_unpack_32_2x16_split', ctypes.c_bool, 64), ('lower_pack_split', ctypes.c_bool, 65), ('lower_extract_byte', ctypes.c_bool, 66), ('lower_extract_word', ctypes.c_bool, 67), ('lower_insert_byte', ctypes.c_bool, 68), ('lower_insert_word', ctypes.c_bool, 69), ('vertex_id_zero_based', ctypes.c_bool, 70), ('lower_base_vertex', ctypes.c_bool, 71), ('instance_id_includes_base_index', ctypes.c_bool, 72), ('lower_helper_invocation', ctypes.c_bool, 73), ('optimize_sample_mask_in', ctypes.c_bool, 74), ('optimize_load_front_face_fsign', ctypes.c_bool, 75), ('optimize_quad_vote_to_reduce', ctypes.c_bool, 76), ('lower_cs_local_index_to_id', ctypes.c_bool, 77), ('lower_cs_local_id_to_index', ctypes.c_bool, 78), ('has_cs_global_id', ctypes.c_bool, 79), ('lower_device_index_to_zero', ctypes.c_bool, 80), ('lower_wpos_pntc', ctypes.c_bool, 81), ('lower_hadd', ctypes.c_bool, 82), ('lower_hadd64', ctypes.c_bool, 83), ('lower_uadd_sat', ctypes.c_bool, 84), ('lower_usub_sat', ctypes.c_bool, 85), ('lower_iadd_sat', ctypes.c_bool, 86), ('lower_mul_32x16', ctypes.c_bool, 87), ('lower_bfloat16_conversions', ctypes.c_bool, 88), ('vectorize_tess_levels', ctypes.c_bool, 89), ('lower_to_scalar', ctypes.c_bool, 90), ('lower_to_scalar_filter', nir_instr_filter_cb, 96), ('vectorize_vec2_16bit', ctypes.c_bool, 104), ('unify_interfaces', ctypes.c_bool, 105), ('lower_interpolate_at', ctypes.c_bool, 106), ('lower_mul_2x32_64', ctypes.c_bool, 107), ('has_rotate8', ctypes.c_bool, 108), ('has_rotate16', ctypes.c_bool, 109), ('has_rotate32', ctypes.c_bool, 110), ('has_shfr32', ctypes.c_bool, 111), ('has_iadd3', ctypes.c_bool, 112), ('has_amul', ctypes.c_bool, 113), ('has_imul24', ctypes.c_bool, 114), ('has_umul24', ctypes.c_bool, 115), ('has_mul24_relaxed', ctypes.c_bool, 116), ('has_imad32', ctypes.c_bool, 117), ('has_umad24', ctypes.c_bool, 118), ('has_fused_comp_and_csel', ctypes.c_bool, 119), ('has_icsel_eqz64', ctypes.c_bool, 120), ('has_icsel_eqz32', ctypes.c_bool, 121), ('has_icsel_eqz16', ctypes.c_bool, 122), ('has_fneo_fcmpu', ctypes.c_bool, 123), ('has_ford_funord', ctypes.c_bool, 124), ('has_fsub', ctypes.c_bool, 125), ('has_isub', ctypes.c_bool, 126), ('has_pack_32_4x8', ctypes.c_bool, 127), ('has_texture_scaling', ctypes.c_bool, 128), ('has_sdot_4x8', ctypes.c_bool, 129), ('has_udot_4x8', ctypes.c_bool, 130), ('has_sudot_4x8', ctypes.c_bool, 131), ('has_sdot_4x8_sat', ctypes.c_bool, 132), ('has_udot_4x8_sat', ctypes.c_bool, 133), ('has_sudot_4x8_sat', ctypes.c_bool, 134), ('has_dot_2x16', ctypes.c_bool, 135), ('has_bfdot2_bfadd', ctypes.c_bool, 136), ('has_fmulz', ctypes.c_bool, 137), ('has_fmulz_no_denorms', ctypes.c_bool, 138), ('has_find_msb_rev', ctypes.c_bool, 139), ('has_pack_half_2x16_rtz', ctypes.c_bool, 140), ('has_bit_test', ctypes.c_bool, 141), ('has_bfe', ctypes.c_bool, 142), ('has_bfm', ctypes.c_bool, 143), ('has_bfi', ctypes.c_bool, 144), ('has_bitfield_select', ctypes.c_bool, 145), ('has_uclz', ctypes.c_bool, 146), ('has_msad', ctypes.c_bool, 147), ('has_f2e4m3fn_satfn', ctypes.c_bool, 148), ('has_load_global_bounded', ctypes.c_bool, 149), ('intel_vec4', ctypes.c_bool, 150), ('avoid_ternary_with_two_constants', ctypes.c_bool, 151), ('support_8bit_alu', ctypes.c_bool, 152), ('support_16bit_alu', ctypes.c_bool, 153), ('max_unroll_iterations', ctypes.c_uint32, 156), ('max_unroll_iterations_aggressive', ctypes.c_uint32, 160), ('max_unroll_iterations_fp64', ctypes.c_uint32, 164), ('lower_uniforms_to_ubo', ctypes.c_bool, 168), ('force_indirect_unrolling_sampler', ctypes.c_bool, 169), ('no_integers', ctypes.c_bool, 170), ('force_indirect_unrolling', ctypes.c_uint32, 172), ('driver_functions', ctypes.c_bool, 176), ('late_lower_int64', ctypes.c_bool, 177), ('lower_int64_options', ctypes.c_uint32, 180), ('lower_doubles_options', ctypes.c_uint32, 184), ('divergence_analysis_options', ctypes.c_uint32, 188), ('support_indirect_inputs', uint8_t, 192), ('support_indirect_outputs', uint8_t, 193), ('lower_image_offset_to_range_base', ctypes.c_bool, 194), ('lower_atomic_offset_to_range_base', ctypes.c_bool, 195), ('preserve_mediump', ctypes.c_bool, 196), ('lower_fquantize2f16', ctypes.c_bool, 197), ('force_f2f16_rtz', ctypes.c_bool, 198), ('lower_layer_fs_input_to_sysval', ctypes.c_bool, 199), ('compact_arrays', ctypes.c_bool, 200), ('discard_is_demote', ctypes.c_bool, 201), ('has_ddx_intrinsics', ctypes.c_bool, 202), ('scalarize_ddx', ctypes.c_bool, 203), ('per_view_unique_driver_locations', ctypes.c_bool, 204), ('compact_view_index', ctypes.c_bool, 205), ('io_options', ctypes.c_uint32, 208), ('skip_lower_packing_ops', ctypes.c_uint32, 212), ('lower_mediump_io', c.CFUNCTYPE[None, [c.POINTER[struct_nir_shader]]], 216), ('varying_expression_max_cost', c.CFUNCTYPE[ctypes.c_uint32, [c.POINTER[struct_nir_shader], c.POINTER[struct_nir_shader]]], 224), ('varying_estimate_instr_cost', c.CFUNCTYPE[ctypes.c_uint32, [c.POINTER[struct_nir_instr]]], 232), ('max_varying_expression_cost', ctypes.c_uint32, 240)])
 @c.record
 class struct_shader_info(c.Struct):
   SIZE = 368
-  name: ctypes._Pointer[ctypes.c_char]
-  label: ctypes._Pointer[ctypes.c_char]
+  name: c.POINTER[ctypes.c_char]
+  label: c.POINTER[ctypes.c_char]
   internal: bool
-  source_blake3: ctypes.Array[ctypes.c_ubyte]
+  source_blake3: c.Array[ctypes.c_ubyte, Literal[32]]
   stage: int
   prev_stage: int
   next_stage: int
@@ -710,7 +710,7 @@ class struct_shader_info(c.Struct):
   dual_slot_inputs: int
   outputs_written: int
   outputs_read: int
-  system_values_read: ctypes.Array[ctypes.c_uint32]
+  system_values_read: c.Array[ctypes.c_uint32, Literal[4]]
   per_primitive_inputs: int
   per_primitive_outputs: int
   per_view_outputs: int
@@ -730,22 +730,22 @@ class struct_shader_info(c.Struct):
   patch_inputs_read_indirectly: int
   patch_outputs_read_indirectly: int
   patch_outputs_written_indirectly: int
-  textures_used: ctypes.Array[ctypes.c_uint32]
-  textures_used_by_txf: ctypes.Array[ctypes.c_uint32]
-  samplers_used: ctypes.Array[ctypes.c_uint32]
-  images_used: ctypes.Array[ctypes.c_uint32]
-  image_buffers: ctypes.Array[ctypes.c_uint32]
-  msaa_images: ctypes.Array[ctypes.c_uint32]
+  textures_used: c.Array[ctypes.c_uint32, Literal[4]]
+  textures_used_by_txf: c.Array[ctypes.c_uint32, Literal[4]]
+  samplers_used: c.Array[ctypes.c_uint32, Literal[1]]
+  images_used: c.Array[ctypes.c_uint32, Literal[2]]
+  image_buffers: c.Array[ctypes.c_uint32, Literal[2]]
+  msaa_images: c.Array[ctypes.c_uint32, Literal[2]]
   float_controls_execution_mode: int
   shared_size: int
   task_payload_size: int
   ray_queries: int
-  workgroup_size: ctypes.Array[ctypes.c_uint16]
+  workgroup_size: c.Array[ctypes.c_uint16, Literal[3]]
   subgroup_size: int
   num_subgroups: int
   uses_wide_subgroup_intrinsics: bool
-  xfb_stride: ctypes.Array[ctypes.c_ubyte]
-  inlinable_uniform_dw_offsets: ctypes.Array[ctypes.c_uint16]
+  xfb_stride: c.Array[ctypes.c_ubyte, Literal[4]]
+  inlinable_uniform_dw_offsets: c.Array[ctypes.c_uint16, Literal[4]]
   num_inlinable_uniforms: int
   clip_distance_array_size: int
   cull_distance_array_size: int
@@ -779,7 +779,7 @@ class struct_shader_info(c.Struct):
   cs: struct_shader_info_cs
   tess: struct_shader_info_tess
   mesh: struct_shader_info_mesh
-blake3_hash: TypeAlias = (ctypes.c_ubyte * 32)
+blake3_hash: TypeAlias = c.Array[ctypes.c_ubyte, Literal[32]]
 enum_pipe_shader_type: dict[int, str] = {(MESA_SHADER_NONE:=-1): 'MESA_SHADER_NONE', (MESA_SHADER_VERTEX:=0): 'MESA_SHADER_VERTEX', (PIPE_SHADER_VERTEX:=0): 'PIPE_SHADER_VERTEX', (MESA_SHADER_TESS_CTRL:=1): 'MESA_SHADER_TESS_CTRL', (PIPE_SHADER_TESS_CTRL:=1): 'PIPE_SHADER_TESS_CTRL', (MESA_SHADER_TESS_EVAL:=2): 'MESA_SHADER_TESS_EVAL', (PIPE_SHADER_TESS_EVAL:=2): 'PIPE_SHADER_TESS_EVAL', (MESA_SHADER_GEOMETRY:=3): 'MESA_SHADER_GEOMETRY', (PIPE_SHADER_GEOMETRY:=3): 'PIPE_SHADER_GEOMETRY', (MESA_SHADER_FRAGMENT:=4): 'MESA_SHADER_FRAGMENT', (PIPE_SHADER_FRAGMENT:=4): 'PIPE_SHADER_FRAGMENT', (MESA_SHADER_COMPUTE:=5): 'MESA_SHADER_COMPUTE', (PIPE_SHADER_COMPUTE:=5): 'PIPE_SHADER_COMPUTE', (PIPE_SHADER_TYPES:=6): 'PIPE_SHADER_TYPES', (MESA_SHADER_TASK:=6): 'MESA_SHADER_TASK', (PIPE_SHADER_TASK:=6): 'PIPE_SHADER_TASK', (MESA_SHADER_MESH:=7): 'MESA_SHADER_MESH', (PIPE_SHADER_MESH:=7): 'PIPE_SHADER_MESH', (PIPE_SHADER_MESH_TYPES:=8): 'PIPE_SHADER_MESH_TYPES', (MESA_SHADER_RAYGEN:=8): 'MESA_SHADER_RAYGEN', (MESA_SHADER_ANY_HIT:=9): 'MESA_SHADER_ANY_HIT', (MESA_SHADER_CLOSEST_HIT:=10): 'MESA_SHADER_CLOSEST_HIT', (MESA_SHADER_MISS:=11): 'MESA_SHADER_MISS', (MESA_SHADER_INTERSECTION:=12): 'MESA_SHADER_INTERSECTION', (MESA_SHADER_CALLABLE:=13): 'MESA_SHADER_CALLABLE', (MESA_SHADER_KERNEL:=14): 'MESA_SHADER_KERNEL'}
 gl_shader_stage: TypeAlias = ctypes.c_int32
 enum_gl_subgroup_size: dict[int, str] = {(SUBGROUP_SIZE_VARYING:=0): 'SUBGROUP_SIZE_VARYING', (SUBGROUP_SIZE_UNIFORM:=1): 'SUBGROUP_SIZE_UNIFORM', (SUBGROUP_SIZE_API_CONSTANT:=2): 'SUBGROUP_SIZE_API_CONSTANT', (SUBGROUP_SIZE_FULL_SUBGROUPS:=3): 'SUBGROUP_SIZE_FULL_SUBGROUPS', (SUBGROUP_SIZE_REQUIRE_4:=4): 'SUBGROUP_SIZE_REQUIRE_4', (SUBGROUP_SIZE_REQUIRE_8:=8): 'SUBGROUP_SIZE_REQUIRE_8', (SUBGROUP_SIZE_REQUIRE_16:=16): 'SUBGROUP_SIZE_REQUIRE_16', (SUBGROUP_SIZE_REQUIRE_32:=32): 'SUBGROUP_SIZE_REQUIRE_32', (SUBGROUP_SIZE_REQUIRE_64:=64): 'SUBGROUP_SIZE_REQUIRE_64', (SUBGROUP_SIZE_REQUIRE_128:=128): 'SUBGROUP_SIZE_REQUIRE_128'}
@@ -845,7 +845,7 @@ struct_shader_info_fs.register_fields([('uses_discard', ctypes.c_bool, 0, 1, 0),
 @c.record
 class struct_shader_info_cs(c.Struct):
   SIZE = 32
-  workgroup_size_hint: ctypes.Array[ctypes.c_uint16]
+  workgroup_size_hint: c.Array[ctypes.c_uint16, Literal[3]]
   user_data_components_amd: int
   has_variable_shared_mem: bool
   has_cooperative_matrix: bool
@@ -853,8 +853,8 @@ class struct_shader_info_cs(c.Struct):
   ptr_size: int
   shader_index: int
   node_payloads_size: int
-  workgroup_count: ctypes.Array[ctypes.c_uint32]
-struct_shader_info_cs.register_fields([('workgroup_size_hint', (uint16_t * 3), 0), ('user_data_components_amd', uint8_t, 6, 4, 0), ('has_variable_shared_mem', ctypes.c_bool, 6, 1, 4), ('has_cooperative_matrix', ctypes.c_bool, 6, 1, 5), ('image_block_size_per_thread_agx', uint8_t, 7), ('ptr_size', ctypes.c_uint32, 8), ('shader_index', uint32_t, 12), ('node_payloads_size', uint32_t, 16), ('workgroup_count', (uint32_t * 3), 20)])
+  workgroup_count: c.Array[ctypes.c_uint32, Literal[3]]
+struct_shader_info_cs.register_fields([('workgroup_size_hint', c.Array[uint16_t, Literal[3]], 0), ('user_data_components_amd', uint8_t, 6, 4, 0), ('has_variable_shared_mem', ctypes.c_bool, 6, 1, 4), ('has_cooperative_matrix', ctypes.c_bool, 6, 1, 5), ('image_block_size_per_thread_agx', uint8_t, 7), ('ptr_size', ctypes.c_uint32, 8), ('shader_index', uint32_t, 12), ('node_payloads_size', uint32_t, 16), ('workgroup_count', c.Array[uint32_t, Literal[3]], 20)])
 @c.record
 class struct_shader_info_tess(c.Struct):
   SIZE = 56
@@ -876,16 +876,16 @@ struct_shader_info_tess.register_fields([('_primitive_mode', ctypes.c_uint32, 0)
 class struct_shader_info_mesh(c.Struct):
   SIZE = 32
   ms_cross_invocation_output_access: int
-  ts_mesh_dispatch_dimensions: ctypes.Array[ctypes.c_uint32]
+  ts_mesh_dispatch_dimensions: c.Array[ctypes.c_uint32, Literal[3]]
   max_vertices_out: int
   max_primitives_out: int
   primitive_type: int
   nv: bool
-struct_shader_info_mesh.register_fields([('ms_cross_invocation_output_access', uint64_t, 0), ('ts_mesh_dispatch_dimensions', (uint32_t * 3), 8), ('max_vertices_out', uint16_t, 20), ('max_primitives_out', uint16_t, 22), ('primitive_type', ctypes.c_ubyte, 24), ('nv', ctypes.c_bool, 25)])
-struct_shader_info.register_fields([('name', ctypes.POINTER(ctypes.c_char), 0), ('label', ctypes.POINTER(ctypes.c_char), 8), ('internal', ctypes.c_bool, 16), ('source_blake3', blake3_hash, 17), ('stage', gl_shader_stage, 49, 8, 0), ('prev_stage', gl_shader_stage, 50, 8, 0), ('next_stage', gl_shader_stage, 51, 8, 0), ('prev_stage_has_xfb', ctypes.c_bool, 52), ('num_textures', uint8_t, 53), ('num_ubos', uint8_t, 54), ('num_abos', uint8_t, 55), ('num_ssbos', uint8_t, 56), ('num_images', uint8_t, 57), ('inputs_read', uint64_t, 64), ('dual_slot_inputs', uint64_t, 72), ('outputs_written', uint64_t, 80), ('outputs_read', uint64_t, 88), ('system_values_read', (ctypes.c_uint32 * 4), 96), ('per_primitive_inputs', uint64_t, 112), ('per_primitive_outputs', uint64_t, 120), ('per_view_outputs', uint64_t, 128), ('view_mask', uint32_t, 136), ('inputs_read_16bit', uint16_t, 140), ('outputs_written_16bit', uint16_t, 142), ('outputs_read_16bit', uint16_t, 144), ('inputs_read_indirectly_16bit', uint16_t, 146), ('outputs_read_indirectly_16bit', uint16_t, 148), ('outputs_written_indirectly_16bit', uint16_t, 150), ('patch_inputs_read', uint32_t, 152), ('patch_outputs_written', uint32_t, 156), ('patch_outputs_read', uint32_t, 160), ('inputs_read_indirectly', uint64_t, 168), ('outputs_read_indirectly', uint64_t, 176), ('outputs_written_indirectly', uint64_t, 184), ('patch_inputs_read_indirectly', uint32_t, 192), ('patch_outputs_read_indirectly', uint32_t, 196), ('patch_outputs_written_indirectly', uint32_t, 200), ('textures_used', (ctypes.c_uint32 * 4), 204), ('textures_used_by_txf', (ctypes.c_uint32 * 4), 220), ('samplers_used', (ctypes.c_uint32 * 1), 236), ('images_used', (ctypes.c_uint32 * 2), 240), ('image_buffers', (ctypes.c_uint32 * 2), 248), ('msaa_images', (ctypes.c_uint32 * 2), 256), ('float_controls_execution_mode', uint32_t, 264), ('shared_size', ctypes.c_uint32, 268), ('task_payload_size', ctypes.c_uint32, 272), ('ray_queries', ctypes.c_uint32, 276), ('workgroup_size', (uint16_t * 3), 280), ('subgroup_size', ctypes.c_ubyte, 286), ('num_subgroups', uint8_t, 287), ('uses_wide_subgroup_intrinsics', ctypes.c_bool, 288), ('xfb_stride', (uint8_t * 4), 289), ('inlinable_uniform_dw_offsets', (uint16_t * 4), 294), ('num_inlinable_uniforms', uint8_t, 302, 4, 0), ('clip_distance_array_size', uint8_t, 302, 4, 4), ('cull_distance_array_size', uint8_t, 303, 4, 0), ('uses_texture_gather', ctypes.c_bool, 303, 1, 4), ('uses_resource_info_query', ctypes.c_bool, 303, 1, 5), ('bit_sizes_float', uint8_t, 304), ('bit_sizes_int', uint8_t, 305), ('first_ubo_is_default_ubo', ctypes.c_bool, 306, 1, 0), ('separate_shader', ctypes.c_bool, 306, 1, 1), ('has_transform_feedback_varyings', ctypes.c_bool, 306, 1, 2), ('flrp_lowered', ctypes.c_bool, 306, 1, 3), ('io_lowered', ctypes.c_bool, 306, 1, 4), ('var_copies_lowered', ctypes.c_bool, 306, 1, 5), ('writes_memory', ctypes.c_bool, 306, 1, 6), ('layer_viewport_relative', ctypes.c_bool, 306, 1, 7), ('uses_control_barrier', ctypes.c_bool, 307, 1, 0), ('uses_memory_barrier', ctypes.c_bool, 307, 1, 1), ('uses_bindless', ctypes.c_bool, 307, 1, 2), ('shared_memory_explicit_layout', ctypes.c_bool, 307, 1, 3), ('zero_initialize_shared_memory', ctypes.c_bool, 307, 1, 4), ('workgroup_size_variable', ctypes.c_bool, 307, 1, 5), ('uses_printf', ctypes.c_bool, 307, 1, 6), ('maximally_reconverges', ctypes.c_bool, 307, 1, 7), ('use_aco_amd', ctypes.c_bool, 308, 1, 0), ('use_lowered_image_to_global', ctypes.c_bool, 308, 1, 1), ('use_legacy_math_rules', ctypes.c_bool, 309), ('derivative_group', ctypes.c_uint32, 310, 2, 0), ('vs', struct_shader_info_vs, 312), ('gs', struct_shader_info_gs, 312), ('fs', struct_shader_info_fs, 312), ('cs', struct_shader_info_cs, 312), ('tess', struct_shader_info_tess, 312), ('mesh', struct_shader_info_mesh, 312)])
+struct_shader_info_mesh.register_fields([('ms_cross_invocation_output_access', uint64_t, 0), ('ts_mesh_dispatch_dimensions', c.Array[uint32_t, Literal[3]], 8), ('max_vertices_out', uint16_t, 20), ('max_primitives_out', uint16_t, 22), ('primitive_type', ctypes.c_ubyte, 24), ('nv', ctypes.c_bool, 25)])
+struct_shader_info.register_fields([('name', c.POINTER[ctypes.c_char], 0), ('label', c.POINTER[ctypes.c_char], 8), ('internal', ctypes.c_bool, 16), ('source_blake3', blake3_hash, 17), ('stage', gl_shader_stage, 49, 8, 0), ('prev_stage', gl_shader_stage, 50, 8, 0), ('next_stage', gl_shader_stage, 51, 8, 0), ('prev_stage_has_xfb', ctypes.c_bool, 52), ('num_textures', uint8_t, 53), ('num_ubos', uint8_t, 54), ('num_abos', uint8_t, 55), ('num_ssbos', uint8_t, 56), ('num_images', uint8_t, 57), ('inputs_read', uint64_t, 64), ('dual_slot_inputs', uint64_t, 72), ('outputs_written', uint64_t, 80), ('outputs_read', uint64_t, 88), ('system_values_read', c.Array[ctypes.c_uint32, Literal[4]], 96), ('per_primitive_inputs', uint64_t, 112), ('per_primitive_outputs', uint64_t, 120), ('per_view_outputs', uint64_t, 128), ('view_mask', uint32_t, 136), ('inputs_read_16bit', uint16_t, 140), ('outputs_written_16bit', uint16_t, 142), ('outputs_read_16bit', uint16_t, 144), ('inputs_read_indirectly_16bit', uint16_t, 146), ('outputs_read_indirectly_16bit', uint16_t, 148), ('outputs_written_indirectly_16bit', uint16_t, 150), ('patch_inputs_read', uint32_t, 152), ('patch_outputs_written', uint32_t, 156), ('patch_outputs_read', uint32_t, 160), ('inputs_read_indirectly', uint64_t, 168), ('outputs_read_indirectly', uint64_t, 176), ('outputs_written_indirectly', uint64_t, 184), ('patch_inputs_read_indirectly', uint32_t, 192), ('patch_outputs_read_indirectly', uint32_t, 196), ('patch_outputs_written_indirectly', uint32_t, 200), ('textures_used', c.Array[ctypes.c_uint32, Literal[4]], 204), ('textures_used_by_txf', c.Array[ctypes.c_uint32, Literal[4]], 220), ('samplers_used', c.Array[ctypes.c_uint32, Literal[1]], 236), ('images_used', c.Array[ctypes.c_uint32, Literal[2]], 240), ('image_buffers', c.Array[ctypes.c_uint32, Literal[2]], 248), ('msaa_images', c.Array[ctypes.c_uint32, Literal[2]], 256), ('float_controls_execution_mode', uint32_t, 264), ('shared_size', ctypes.c_uint32, 268), ('task_payload_size', ctypes.c_uint32, 272), ('ray_queries', ctypes.c_uint32, 276), ('workgroup_size', c.Array[uint16_t, Literal[3]], 280), ('subgroup_size', ctypes.c_ubyte, 286), ('num_subgroups', uint8_t, 287), ('uses_wide_subgroup_intrinsics', ctypes.c_bool, 288), ('xfb_stride', c.Array[uint8_t, Literal[4]], 289), ('inlinable_uniform_dw_offsets', c.Array[uint16_t, Literal[4]], 294), ('num_inlinable_uniforms', uint8_t, 302, 4, 0), ('clip_distance_array_size', uint8_t, 302, 4, 4), ('cull_distance_array_size', uint8_t, 303, 4, 0), ('uses_texture_gather', ctypes.c_bool, 303, 1, 4), ('uses_resource_info_query', ctypes.c_bool, 303, 1, 5), ('bit_sizes_float', uint8_t, 304), ('bit_sizes_int', uint8_t, 305), ('first_ubo_is_default_ubo', ctypes.c_bool, 306, 1, 0), ('separate_shader', ctypes.c_bool, 306, 1, 1), ('has_transform_feedback_varyings', ctypes.c_bool, 306, 1, 2), ('flrp_lowered', ctypes.c_bool, 306, 1, 3), ('io_lowered', ctypes.c_bool, 306, 1, 4), ('var_copies_lowered', ctypes.c_bool, 306, 1, 5), ('writes_memory', ctypes.c_bool, 306, 1, 6), ('layer_viewport_relative', ctypes.c_bool, 306, 1, 7), ('uses_control_barrier', ctypes.c_bool, 307, 1, 0), ('uses_memory_barrier', ctypes.c_bool, 307, 1, 1), ('uses_bindless', ctypes.c_bool, 307, 1, 2), ('shared_memory_explicit_layout', ctypes.c_bool, 307, 1, 3), ('zero_initialize_shared_memory', ctypes.c_bool, 307, 1, 4), ('workgroup_size_variable', ctypes.c_bool, 307, 1, 5), ('uses_printf', ctypes.c_bool, 307, 1, 6), ('maximally_reconverges', ctypes.c_bool, 307, 1, 7), ('use_aco_amd', ctypes.c_bool, 308, 1, 0), ('use_lowered_image_to_global', ctypes.c_bool, 308, 1, 1), ('use_legacy_math_rules', ctypes.c_bool, 309), ('derivative_group', ctypes.c_uint32, 310, 2, 0), ('vs', struct_shader_info_vs, 312), ('gs', struct_shader_info_gs, 312), ('fs', struct_shader_info_fs, 312), ('cs', struct_shader_info_cs, 312), ('tess', struct_shader_info_tess, 312), ('mesh', struct_shader_info_mesh, 312)])
 class struct_nir_xfb_info(c.Struct): pass
 nir_xfb_info: TypeAlias = struct_nir_xfb_info
-struct_nir_shader.register_fields([('gctx', ctypes.POINTER(gc_ctx), 0), ('variables', struct_exec_list, 8), ('options', ctypes.POINTER(nir_shader_compiler_options), 40), ('info', struct_shader_info, 48), ('functions', struct_exec_list, 416), ('num_inputs', ctypes.c_uint32, 448), ('num_uniforms', ctypes.c_uint32, 452), ('num_outputs', ctypes.c_uint32, 456), ('global_mem_size', ctypes.c_uint32, 460), ('scratch_size', ctypes.c_uint32, 464), ('constant_data', ctypes.c_void_p, 472), ('constant_data_size', ctypes.c_uint32, 480), ('xfb_info', ctypes.POINTER(nir_xfb_info), 488), ('printf_info_count', ctypes.c_uint32, 496), ('printf_info', ctypes.POINTER(u_printf_info), 504), ('has_debug_info', ctypes.c_bool, 512)])
+struct_nir_shader.register_fields([('gctx', c.POINTER[gc_ctx], 0), ('variables', struct_exec_list, 8), ('options', c.POINTER[nir_shader_compiler_options], 40), ('info', struct_shader_info, 48), ('functions', struct_exec_list, 416), ('num_inputs', ctypes.c_uint32, 448), ('num_uniforms', ctypes.c_uint32, 452), ('num_outputs', ctypes.c_uint32, 456), ('global_mem_size', ctypes.c_uint32, 460), ('scratch_size', ctypes.c_uint32, 464), ('constant_data', ctypes.c_void_p, 472), ('constant_data_size', ctypes.c_uint32, 480), ('xfb_info', c.POINTER[nir_xfb_info], 488), ('printf_info_count', ctypes.c_uint32, 496), ('printf_info', c.POINTER[u_printf_info], 504), ('has_debug_info', ctypes.c_bool, 512)])
 @c.record
 class struct_nir_parameter(c.Struct):
   SIZE = 32
@@ -896,18 +896,18 @@ class struct_nir_parameter(c.Struct):
   is_uniform: bool
   mode: int
   driver_attributes: int
-  type: ctypes._Pointer[struct_glsl_type]
-  name: ctypes._Pointer[ctypes.c_char]
+  type: c.POINTER[struct_glsl_type]
+  name: c.POINTER[ctypes.c_char]
 nir_parameter: TypeAlias = struct_nir_parameter
-struct_nir_parameter.register_fields([('num_components', uint8_t, 0), ('bit_size', uint8_t, 1), ('is_return', ctypes.c_bool, 2), ('implicit_conversion_prohibited', ctypes.c_bool, 3), ('is_uniform', ctypes.c_bool, 4), ('mode', ctypes.c_uint32, 8), ('driver_attributes', uint32_t, 12), ('type', ctypes.POINTER(struct_glsl_type), 16), ('name', ctypes.POINTER(ctypes.c_char), 24)])
+struct_nir_parameter.register_fields([('num_components', uint8_t, 0), ('bit_size', uint8_t, 1), ('is_return', ctypes.c_bool, 2), ('implicit_conversion_prohibited', ctypes.c_bool, 3), ('is_uniform', ctypes.c_bool, 4), ('mode', ctypes.c_uint32, 8), ('driver_attributes', uint32_t, 12), ('type', c.POINTER[struct_glsl_type], 16), ('name', c.POINTER[ctypes.c_char], 24)])
 @c.record
 class struct_nir_function_impl(c.Struct):
   SIZE = 144
   cf_node: struct_nir_cf_node
-  function: ctypes._Pointer[struct_nir_function]
-  preamble: ctypes._Pointer[struct_nir_function]
+  function: c.POINTER[struct_nir_function]
+  preamble: c.POINTER[struct_nir_function]
   body: struct_exec_list
-  end_block: ctypes._Pointer[struct_nir_block]
+  end_block: c.POINTER[struct_nir_block]
   locals: struct_exec_list
   ssa_alloc: int
   num_blocks: int
@@ -917,9 +917,9 @@ class struct_nir_function_impl(c.Struct):
   loop_analysis_force_unroll_sampler_indirect: bool
 nir_function_impl: TypeAlias = struct_nir_function_impl
 nir_metadata: dict[int, str] = {(nir_metadata_none:=0): 'nir_metadata_none', (nir_metadata_block_index:=1): 'nir_metadata_block_index', (nir_metadata_dominance:=2): 'nir_metadata_dominance', (nir_metadata_live_defs:=4): 'nir_metadata_live_defs', (nir_metadata_not_properly_reset:=8): 'nir_metadata_not_properly_reset', (nir_metadata_loop_analysis:=16): 'nir_metadata_loop_analysis', (nir_metadata_instr_index:=32): 'nir_metadata_instr_index', (nir_metadata_divergence:=64): 'nir_metadata_divergence', (nir_metadata_control_flow:=3): 'nir_metadata_control_flow', (nir_metadata_all:=-9): 'nir_metadata_all'}
-struct_nir_function_impl.register_fields([('cf_node', nir_cf_node, 0), ('function', ctypes.POINTER(nir_function), 32), ('preamble', ctypes.POINTER(nir_function), 40), ('body', struct_exec_list, 48), ('end_block', ctypes.POINTER(nir_block), 80), ('locals', struct_exec_list, 88), ('ssa_alloc', ctypes.c_uint32, 120), ('num_blocks', ctypes.c_uint32, 124), ('structured', ctypes.c_bool, 128), ('valid_metadata', ctypes.c_int32, 132), ('loop_analysis_indirect_mask', ctypes.c_uint32, 136), ('loop_analysis_force_unroll_sampler_indirect', ctypes.c_bool, 140)])
-struct_nir_function.register_fields([('node', struct_exec_node, 0), ('name', ctypes.POINTER(ctypes.c_char), 16), ('shader', ctypes.POINTER(nir_shader), 24), ('num_params', ctypes.c_uint32, 32), ('params', ctypes.POINTER(nir_parameter), 40), ('impl', ctypes.POINTER(nir_function_impl), 48), ('driver_attributes', uint32_t, 56), ('is_entrypoint', ctypes.c_bool, 60), ('is_exported', ctypes.c_bool, 61), ('is_preamble', ctypes.c_bool, 62), ('should_inline', ctypes.c_bool, 63), ('dont_inline', ctypes.c_bool, 64), ('workgroup_size', (ctypes.c_uint32 * 3), 68), ('is_subroutine', ctypes.c_bool, 80), ('is_tmp_globals_wrapper', ctypes.c_bool, 81), ('num_subroutine_types', ctypes.c_int32, 84), ('subroutine_types', ctypes.POINTER(ctypes.POINTER(struct_glsl_type)), 88), ('subroutine_index', ctypes.c_int32, 96), ('pass_flags', uint32_t, 100)])
-struct_nir_call_instr.register_fields([('instr', nir_instr, 0), ('callee', ctypes.POINTER(nir_function), 32), ('indirect_callee', nir_src, 40), ('num_params', ctypes.c_uint32, 72), ('params', (nir_src * 0), 80)])
+struct_nir_function_impl.register_fields([('cf_node', nir_cf_node, 0), ('function', c.POINTER[nir_function], 32), ('preamble', c.POINTER[nir_function], 40), ('body', struct_exec_list, 48), ('end_block', c.POINTER[nir_block], 80), ('locals', struct_exec_list, 88), ('ssa_alloc', ctypes.c_uint32, 120), ('num_blocks', ctypes.c_uint32, 124), ('structured', ctypes.c_bool, 128), ('valid_metadata', ctypes.c_int32, 132), ('loop_analysis_indirect_mask', ctypes.c_uint32, 136), ('loop_analysis_force_unroll_sampler_indirect', ctypes.c_bool, 140)])
+struct_nir_function.register_fields([('node', struct_exec_node, 0), ('name', c.POINTER[ctypes.c_char], 16), ('shader', c.POINTER[nir_shader], 24), ('num_params', ctypes.c_uint32, 32), ('params', c.POINTER[nir_parameter], 40), ('impl', c.POINTER[nir_function_impl], 48), ('driver_attributes', uint32_t, 56), ('is_entrypoint', ctypes.c_bool, 60), ('is_exported', ctypes.c_bool, 61), ('is_preamble', ctypes.c_bool, 62), ('should_inline', ctypes.c_bool, 63), ('dont_inline', ctypes.c_bool, 64), ('workgroup_size', c.Array[ctypes.c_uint32, Literal[3]], 68), ('is_subroutine', ctypes.c_bool, 80), ('is_tmp_globals_wrapper', ctypes.c_bool, 81), ('num_subroutine_types', ctypes.c_int32, 84), ('subroutine_types', c.POINTER[c.POINTER[struct_glsl_type]], 88), ('subroutine_index', ctypes.c_int32, 96), ('pass_flags', uint32_t, 100)])
+struct_nir_call_instr.register_fields([('instr', nir_instr, 0), ('callee', c.POINTER[nir_function], 32), ('indirect_callee', nir_src, 40), ('num_params', ctypes.c_uint32, 72), ('params', c.Array[nir_src, Literal[0]], 80)])
 nir_call_instr: TypeAlias = struct_nir_call_instr
 @c.record
 class struct_nir_intrinsic_instr(c.Struct):
@@ -928,11 +928,11 @@ class struct_nir_intrinsic_instr(c.Struct):
   intrinsic: int
   _def: struct_nir_def
   num_components: int
-  const_index: ctypes.Array[ctypes.c_int32]
-  name: ctypes._Pointer[ctypes.c_char]
-  src: ctypes.Array[struct_nir_src]
+  const_index: c.Array[ctypes.c_int32, Literal[8]]
+  name: c.POINTER[ctypes.c_char]
+  src: c.Array[struct_nir_src, Literal[0]]
 nir_intrinsic_op: dict[int, str] = {(nir_intrinsic_accept_ray_intersection:=0): 'nir_intrinsic_accept_ray_intersection', (nir_intrinsic_addr_mode_is:=1): 'nir_intrinsic_addr_mode_is', (nir_intrinsic_al2p_nv:=2): 'nir_intrinsic_al2p_nv', (nir_intrinsic_ald_nv:=3): 'nir_intrinsic_ald_nv', (nir_intrinsic_alpha_to_coverage:=4): 'nir_intrinsic_alpha_to_coverage', (nir_intrinsic_as_uniform:=5): 'nir_intrinsic_as_uniform', (nir_intrinsic_ast_nv:=6): 'nir_intrinsic_ast_nv', (nir_intrinsic_atomic_add_gen_prim_count_amd:=7): 'nir_intrinsic_atomic_add_gen_prim_count_amd', (nir_intrinsic_atomic_add_gs_emit_prim_count_amd:=8): 'nir_intrinsic_atomic_add_gs_emit_prim_count_amd', (nir_intrinsic_atomic_add_shader_invocation_count_amd:=9): 'nir_intrinsic_atomic_add_shader_invocation_count_amd', (nir_intrinsic_atomic_add_xfb_prim_count_amd:=10): 'nir_intrinsic_atomic_add_xfb_prim_count_amd', (nir_intrinsic_atomic_counter_add:=11): 'nir_intrinsic_atomic_counter_add', (nir_intrinsic_atomic_counter_add_deref:=12): 'nir_intrinsic_atomic_counter_add_deref', (nir_intrinsic_atomic_counter_and:=13): 'nir_intrinsic_atomic_counter_and', (nir_intrinsic_atomic_counter_and_deref:=14): 'nir_intrinsic_atomic_counter_and_deref', (nir_intrinsic_atomic_counter_comp_swap:=15): 'nir_intrinsic_atomic_counter_comp_swap', (nir_intrinsic_atomic_counter_comp_swap_deref:=16): 'nir_intrinsic_atomic_counter_comp_swap_deref', (nir_intrinsic_atomic_counter_exchange:=17): 'nir_intrinsic_atomic_counter_exchange', (nir_intrinsic_atomic_counter_exchange_deref:=18): 'nir_intrinsic_atomic_counter_exchange_deref', (nir_intrinsic_atomic_counter_inc:=19): 'nir_intrinsic_atomic_counter_inc', (nir_intrinsic_atomic_counter_inc_deref:=20): 'nir_intrinsic_atomic_counter_inc_deref', (nir_intrinsic_atomic_counter_max:=21): 'nir_intrinsic_atomic_counter_max', (nir_intrinsic_atomic_counter_max_deref:=22): 'nir_intrinsic_atomic_counter_max_deref', (nir_intrinsic_atomic_counter_min:=23): 'nir_intrinsic_atomic_counter_min', (nir_intrinsic_atomic_counter_min_deref:=24): 'nir_intrinsic_atomic_counter_min_deref', (nir_intrinsic_atomic_counter_or:=25): 'nir_intrinsic_atomic_counter_or', (nir_intrinsic_atomic_counter_or_deref:=26): 'nir_intrinsic_atomic_counter_or_deref', (nir_intrinsic_atomic_counter_post_dec:=27): 'nir_intrinsic_atomic_counter_post_dec', (nir_intrinsic_atomic_counter_post_dec_deref:=28): 'nir_intrinsic_atomic_counter_post_dec_deref', (nir_intrinsic_atomic_counter_pre_dec:=29): 'nir_intrinsic_atomic_counter_pre_dec', (nir_intrinsic_atomic_counter_pre_dec_deref:=30): 'nir_intrinsic_atomic_counter_pre_dec_deref', (nir_intrinsic_atomic_counter_read:=31): 'nir_intrinsic_atomic_counter_read', (nir_intrinsic_atomic_counter_read_deref:=32): 'nir_intrinsic_atomic_counter_read_deref', (nir_intrinsic_atomic_counter_xor:=33): 'nir_intrinsic_atomic_counter_xor', (nir_intrinsic_atomic_counter_xor_deref:=34): 'nir_intrinsic_atomic_counter_xor_deref', (nir_intrinsic_ballot:=35): 'nir_intrinsic_ballot', (nir_intrinsic_ballot_bit_count_exclusive:=36): 'nir_intrinsic_ballot_bit_count_exclusive', (nir_intrinsic_ballot_bit_count_inclusive:=37): 'nir_intrinsic_ballot_bit_count_inclusive', (nir_intrinsic_ballot_bit_count_reduce:=38): 'nir_intrinsic_ballot_bit_count_reduce', (nir_intrinsic_ballot_bitfield_extract:=39): 'nir_intrinsic_ballot_bitfield_extract', (nir_intrinsic_ballot_find_lsb:=40): 'nir_intrinsic_ballot_find_lsb', (nir_intrinsic_ballot_find_msb:=41): 'nir_intrinsic_ballot_find_msb', (nir_intrinsic_ballot_relaxed:=42): 'nir_intrinsic_ballot_relaxed', (nir_intrinsic_bar_break_nv:=43): 'nir_intrinsic_bar_break_nv', (nir_intrinsic_bar_set_nv:=44): 'nir_intrinsic_bar_set_nv', (nir_intrinsic_bar_sync_nv:=45): 'nir_intrinsic_bar_sync_nv', (nir_intrinsic_barrier:=46): 'nir_intrinsic_barrier', (nir_intrinsic_begin_invocation_interlock:=47): 'nir_intrinsic_begin_invocation_interlock', (nir_intrinsic_bindgen_return:=48): 'nir_intrinsic_bindgen_return', (nir_intrinsic_bindless_image_agx:=49): 'nir_intrinsic_bindless_image_agx', (nir_intrinsic_bindless_image_atomic:=50): 'nir_intrinsic_bindless_image_atomic', (nir_intrinsic_bindless_image_atomic_swap:=51): 'nir_intrinsic_bindless_image_atomic_swap', (nir_intrinsic_bindless_image_descriptor_amd:=52): 'nir_intrinsic_bindless_image_descriptor_amd', (nir_intrinsic_bindless_image_format:=53): 'nir_intrinsic_bindless_image_format', (nir_intrinsic_bindless_image_fragment_mask_load_amd:=54): 'nir_intrinsic_bindless_image_fragment_mask_load_amd', (nir_intrinsic_bindless_image_levels:=55): 'nir_intrinsic_bindless_image_levels', (nir_intrinsic_bindless_image_load:=56): 'nir_intrinsic_bindless_image_load', (nir_intrinsic_bindless_image_load_raw_intel:=57): 'nir_intrinsic_bindless_image_load_raw_intel', (nir_intrinsic_bindless_image_order:=58): 'nir_intrinsic_bindless_image_order', (nir_intrinsic_bindless_image_samples:=59): 'nir_intrinsic_bindless_image_samples', (nir_intrinsic_bindless_image_samples_identical:=60): 'nir_intrinsic_bindless_image_samples_identical', (nir_intrinsic_bindless_image_size:=61): 'nir_intrinsic_bindless_image_size', (nir_intrinsic_bindless_image_sparse_load:=62): 'nir_intrinsic_bindless_image_sparse_load', (nir_intrinsic_bindless_image_store:=63): 'nir_intrinsic_bindless_image_store', (nir_intrinsic_bindless_image_store_block_agx:=64): 'nir_intrinsic_bindless_image_store_block_agx', (nir_intrinsic_bindless_image_store_raw_intel:=65): 'nir_intrinsic_bindless_image_store_raw_intel', (nir_intrinsic_bindless_image_texel_address:=66): 'nir_intrinsic_bindless_image_texel_address', (nir_intrinsic_bindless_resource_ir3:=67): 'nir_intrinsic_bindless_resource_ir3', (nir_intrinsic_brcst_active_ir3:=68): 'nir_intrinsic_brcst_active_ir3', (nir_intrinsic_btd_retire_intel:=69): 'nir_intrinsic_btd_retire_intel', (nir_intrinsic_btd_spawn_intel:=70): 'nir_intrinsic_btd_spawn_intel', (nir_intrinsic_btd_stack_push_intel:=71): 'nir_intrinsic_btd_stack_push_intel', (nir_intrinsic_bvh64_intersect_ray_amd:=72): 'nir_intrinsic_bvh64_intersect_ray_amd', (nir_intrinsic_bvh8_intersect_ray_amd:=73): 'nir_intrinsic_bvh8_intersect_ray_amd', (nir_intrinsic_bvh_stack_rtn_amd:=74): 'nir_intrinsic_bvh_stack_rtn_amd', (nir_intrinsic_cmat_binary_op:=75): 'nir_intrinsic_cmat_binary_op', (nir_intrinsic_cmat_bitcast:=76): 'nir_intrinsic_cmat_bitcast', (nir_intrinsic_cmat_construct:=77): 'nir_intrinsic_cmat_construct', (nir_intrinsic_cmat_convert:=78): 'nir_intrinsic_cmat_convert', (nir_intrinsic_cmat_copy:=79): 'nir_intrinsic_cmat_copy', (nir_intrinsic_cmat_extract:=80): 'nir_intrinsic_cmat_extract', (nir_intrinsic_cmat_insert:=81): 'nir_intrinsic_cmat_insert', (nir_intrinsic_cmat_length:=82): 'nir_intrinsic_cmat_length', (nir_intrinsic_cmat_load:=83): 'nir_intrinsic_cmat_load', (nir_intrinsic_cmat_muladd:=84): 'nir_intrinsic_cmat_muladd', (nir_intrinsic_cmat_muladd_amd:=85): 'nir_intrinsic_cmat_muladd_amd', (nir_intrinsic_cmat_muladd_nv:=86): 'nir_intrinsic_cmat_muladd_nv', (nir_intrinsic_cmat_scalar_op:=87): 'nir_intrinsic_cmat_scalar_op', (nir_intrinsic_cmat_store:=88): 'nir_intrinsic_cmat_store', (nir_intrinsic_cmat_transpose:=89): 'nir_intrinsic_cmat_transpose', (nir_intrinsic_cmat_unary_op:=90): 'nir_intrinsic_cmat_unary_op', (nir_intrinsic_convert_alu_types:=91): 'nir_intrinsic_convert_alu_types', (nir_intrinsic_convert_cmat_intel:=92): 'nir_intrinsic_convert_cmat_intel', (nir_intrinsic_copy_deref:=93): 'nir_intrinsic_copy_deref', (nir_intrinsic_copy_fs_outputs_nv:=94): 'nir_intrinsic_copy_fs_outputs_nv', (nir_intrinsic_copy_global_to_uniform_ir3:=95): 'nir_intrinsic_copy_global_to_uniform_ir3', (nir_intrinsic_copy_push_const_to_uniform_ir3:=96): 'nir_intrinsic_copy_push_const_to_uniform_ir3', (nir_intrinsic_copy_ubo_to_uniform_ir3:=97): 'nir_intrinsic_copy_ubo_to_uniform_ir3', (nir_intrinsic_ddx:=98): 'nir_intrinsic_ddx', (nir_intrinsic_ddx_coarse:=99): 'nir_intrinsic_ddx_coarse', (nir_intrinsic_ddx_fine:=100): 'nir_intrinsic_ddx_fine', (nir_intrinsic_ddy:=101): 'nir_intrinsic_ddy', (nir_intrinsic_ddy_coarse:=102): 'nir_intrinsic_ddy_coarse', (nir_intrinsic_ddy_fine:=103): 'nir_intrinsic_ddy_fine', (nir_intrinsic_debug_break:=104): 'nir_intrinsic_debug_break', (nir_intrinsic_decl_reg:=105): 'nir_intrinsic_decl_reg', (nir_intrinsic_demote:=106): 'nir_intrinsic_demote', (nir_intrinsic_demote_if:=107): 'nir_intrinsic_demote_if', (nir_intrinsic_demote_samples:=108): 'nir_intrinsic_demote_samples', (nir_intrinsic_deref_atomic:=109): 'nir_intrinsic_deref_atomic', (nir_intrinsic_deref_atomic_swap:=110): 'nir_intrinsic_deref_atomic_swap', (nir_intrinsic_deref_buffer_array_length:=111): 'nir_intrinsic_deref_buffer_array_length', (nir_intrinsic_deref_implicit_array_length:=112): 'nir_intrinsic_deref_implicit_array_length', (nir_intrinsic_deref_mode_is:=113): 'nir_intrinsic_deref_mode_is', (nir_intrinsic_deref_texture_src:=114): 'nir_intrinsic_deref_texture_src', (nir_intrinsic_doorbell_agx:=115): 'nir_intrinsic_doorbell_agx', (nir_intrinsic_dpas_intel:=116): 'nir_intrinsic_dpas_intel', (nir_intrinsic_dpp16_shift_amd:=117): 'nir_intrinsic_dpp16_shift_amd', (nir_intrinsic_elect:=118): 'nir_intrinsic_elect', (nir_intrinsic_elect_any_ir3:=119): 'nir_intrinsic_elect_any_ir3', (nir_intrinsic_emit_primitive_poly:=120): 'nir_intrinsic_emit_primitive_poly', (nir_intrinsic_emit_vertex:=121): 'nir_intrinsic_emit_vertex', (nir_intrinsic_emit_vertex_nv:=122): 'nir_intrinsic_emit_vertex_nv', (nir_intrinsic_emit_vertex_with_counter:=123): 'nir_intrinsic_emit_vertex_with_counter', (nir_intrinsic_end_invocation_interlock:=124): 'nir_intrinsic_end_invocation_interlock', (nir_intrinsic_end_primitive:=125): 'nir_intrinsic_end_primitive', (nir_intrinsic_end_primitive_nv:=126): 'nir_intrinsic_end_primitive_nv', (nir_intrinsic_end_primitive_with_counter:=127): 'nir_intrinsic_end_primitive_with_counter', (nir_intrinsic_enqueue_node_payloads:=128): 'nir_intrinsic_enqueue_node_payloads', (nir_intrinsic_exclusive_scan:=129): 'nir_intrinsic_exclusive_scan', (nir_intrinsic_exclusive_scan_clusters_ir3:=130): 'nir_intrinsic_exclusive_scan_clusters_ir3', (nir_intrinsic_execute_callable:=131): 'nir_intrinsic_execute_callable', (nir_intrinsic_execute_closest_hit_amd:=132): 'nir_intrinsic_execute_closest_hit_amd', (nir_intrinsic_execute_miss_amd:=133): 'nir_intrinsic_execute_miss_amd', (nir_intrinsic_export_agx:=134): 'nir_intrinsic_export_agx', (nir_intrinsic_export_amd:=135): 'nir_intrinsic_export_amd', (nir_intrinsic_export_dual_src_blend_amd:=136): 'nir_intrinsic_export_dual_src_blend_amd', (nir_intrinsic_export_row_amd:=137): 'nir_intrinsic_export_row_amd', (nir_intrinsic_fence_helper_exit_agx:=138): 'nir_intrinsic_fence_helper_exit_agx', (nir_intrinsic_fence_mem_to_tex_agx:=139): 'nir_intrinsic_fence_mem_to_tex_agx', (nir_intrinsic_fence_pbe_to_tex_agx:=140): 'nir_intrinsic_fence_pbe_to_tex_agx', (nir_intrinsic_fence_pbe_to_tex_pixel_agx:=141): 'nir_intrinsic_fence_pbe_to_tex_pixel_agx', (nir_intrinsic_final_primitive_nv:=142): 'nir_intrinsic_final_primitive_nv', (nir_intrinsic_finalize_incoming_node_payload:=143): 'nir_intrinsic_finalize_incoming_node_payload', (nir_intrinsic_first_invocation:=144): 'nir_intrinsic_first_invocation', (nir_intrinsic_fs_out_nv:=145): 'nir_intrinsic_fs_out_nv', (nir_intrinsic_gds_atomic_add_amd:=146): 'nir_intrinsic_gds_atomic_add_amd', (nir_intrinsic_get_ssbo_size:=147): 'nir_intrinsic_get_ssbo_size', (nir_intrinsic_get_ubo_size:=148): 'nir_intrinsic_get_ubo_size', (nir_intrinsic_global_atomic:=149): 'nir_intrinsic_global_atomic', (nir_intrinsic_global_atomic_2x32:=150): 'nir_intrinsic_global_atomic_2x32', (nir_intrinsic_global_atomic_agx:=151): 'nir_intrinsic_global_atomic_agx', (nir_intrinsic_global_atomic_amd:=152): 'nir_intrinsic_global_atomic_amd', (nir_intrinsic_global_atomic_swap:=153): 'nir_intrinsic_global_atomic_swap', (nir_intrinsic_global_atomic_swap_2x32:=154): 'nir_intrinsic_global_atomic_swap_2x32', (nir_intrinsic_global_atomic_swap_agx:=155): 'nir_intrinsic_global_atomic_swap_agx', (nir_intrinsic_global_atomic_swap_amd:=156): 'nir_intrinsic_global_atomic_swap_amd', (nir_intrinsic_ignore_ray_intersection:=157): 'nir_intrinsic_ignore_ray_intersection', (nir_intrinsic_imadsp_nv:=158): 'nir_intrinsic_imadsp_nv', (nir_intrinsic_image_atomic:=159): 'nir_intrinsic_image_atomic', (nir_intrinsic_image_atomic_swap:=160): 'nir_intrinsic_image_atomic_swap', (nir_intrinsic_image_deref_atomic:=161): 'nir_intrinsic_image_deref_atomic', (nir_intrinsic_image_deref_atomic_swap:=162): 'nir_intrinsic_image_deref_atomic_swap', (nir_intrinsic_image_deref_descriptor_amd:=163): 'nir_intrinsic_image_deref_descriptor_amd', (nir_intrinsic_image_deref_format:=164): 'nir_intrinsic_image_deref_format', (nir_intrinsic_image_deref_fragment_mask_load_amd:=165): 'nir_intrinsic_image_deref_fragment_mask_load_amd', (nir_intrinsic_image_deref_levels:=166): 'nir_intrinsic_image_deref_levels', (nir_intrinsic_image_deref_load:=167): 'nir_intrinsic_image_deref_load', (nir_intrinsic_image_deref_load_info_nv:=168): 'nir_intrinsic_image_deref_load_info_nv', (nir_intrinsic_image_deref_load_param_intel:=169): 'nir_intrinsic_image_deref_load_param_intel', (nir_intrinsic_image_deref_load_raw_intel:=170): 'nir_intrinsic_image_deref_load_raw_intel', (nir_intrinsic_image_deref_order:=171): 'nir_intrinsic_image_deref_order', (nir_intrinsic_image_deref_samples:=172): 'nir_intrinsic_image_deref_samples', (nir_intrinsic_image_deref_samples_identical:=173): 'nir_intrinsic_image_deref_samples_identical', (nir_intrinsic_image_deref_size:=174): 'nir_intrinsic_image_deref_size', (nir_intrinsic_image_deref_sparse_load:=175): 'nir_intrinsic_image_deref_sparse_load', (nir_intrinsic_image_deref_store:=176): 'nir_intrinsic_image_deref_store', (nir_intrinsic_image_deref_store_block_agx:=177): 'nir_intrinsic_image_deref_store_block_agx', (nir_intrinsic_image_deref_store_raw_intel:=178): 'nir_intrinsic_image_deref_store_raw_intel', (nir_intrinsic_image_deref_texel_address:=179): 'nir_intrinsic_image_deref_texel_address', (nir_intrinsic_image_descriptor_amd:=180): 'nir_intrinsic_image_descriptor_amd', (nir_intrinsic_image_format:=181): 'nir_intrinsic_image_format', (nir_intrinsic_image_fragment_mask_load_amd:=182): 'nir_intrinsic_image_fragment_mask_load_amd', (nir_intrinsic_image_levels:=183): 'nir_intrinsic_image_levels', (nir_intrinsic_image_load:=184): 'nir_intrinsic_image_load', (nir_intrinsic_image_load_raw_intel:=185): 'nir_intrinsic_image_load_raw_intel', (nir_intrinsic_image_order:=186): 'nir_intrinsic_image_order', (nir_intrinsic_image_samples:=187): 'nir_intrinsic_image_samples', (nir_intrinsic_image_samples_identical:=188): 'nir_intrinsic_image_samples_identical', (nir_intrinsic_image_size:=189): 'nir_intrinsic_image_size', (nir_intrinsic_image_sparse_load:=190): 'nir_intrinsic_image_sparse_load', (nir_intrinsic_image_store:=191): 'nir_intrinsic_image_store', (nir_intrinsic_image_store_block_agx:=192): 'nir_intrinsic_image_store_block_agx', (nir_intrinsic_image_store_raw_intel:=193): 'nir_intrinsic_image_store_raw_intel', (nir_intrinsic_image_texel_address:=194): 'nir_intrinsic_image_texel_address', (nir_intrinsic_inclusive_scan:=195): 'nir_intrinsic_inclusive_scan', (nir_intrinsic_inclusive_scan_clusters_ir3:=196): 'nir_intrinsic_inclusive_scan_clusters_ir3', (nir_intrinsic_initialize_node_payloads:=197): 'nir_intrinsic_initialize_node_payloads', (nir_intrinsic_interp_deref_at_centroid:=198): 'nir_intrinsic_interp_deref_at_centroid', (nir_intrinsic_interp_deref_at_offset:=199): 'nir_intrinsic_interp_deref_at_offset', (nir_intrinsic_interp_deref_at_sample:=200): 'nir_intrinsic_interp_deref_at_sample', (nir_intrinsic_interp_deref_at_vertex:=201): 'nir_intrinsic_interp_deref_at_vertex', (nir_intrinsic_inverse_ballot:=202): 'nir_intrinsic_inverse_ballot', (nir_intrinsic_ipa_nv:=203): 'nir_intrinsic_ipa_nv', (nir_intrinsic_is_helper_invocation:=204): 'nir_intrinsic_is_helper_invocation', (nir_intrinsic_is_sparse_resident_zink:=205): 'nir_intrinsic_is_sparse_resident_zink', (nir_intrinsic_is_sparse_texels_resident:=206): 'nir_intrinsic_is_sparse_texels_resident', (nir_intrinsic_is_subgroup_invocation_lt_amd:=207): 'nir_intrinsic_is_subgroup_invocation_lt_amd', (nir_intrinsic_isberd_nv:=208): 'nir_intrinsic_isberd_nv', (nir_intrinsic_lane_permute_16_amd:=209): 'nir_intrinsic_lane_permute_16_amd', (nir_intrinsic_last_invocation:=210): 'nir_intrinsic_last_invocation', (nir_intrinsic_launch_mesh_workgroups:=211): 'nir_intrinsic_launch_mesh_workgroups', (nir_intrinsic_launch_mesh_workgroups_with_payload_deref:=212): 'nir_intrinsic_launch_mesh_workgroups_with_payload_deref', (nir_intrinsic_ldc_nv:=213): 'nir_intrinsic_ldc_nv', (nir_intrinsic_ldcx_nv:=214): 'nir_intrinsic_ldcx_nv', (nir_intrinsic_ldtram_nv:=215): 'nir_intrinsic_ldtram_nv', (nir_intrinsic_load_aa_line_width:=216): 'nir_intrinsic_load_aa_line_width', (nir_intrinsic_load_accel_struct_amd:=217): 'nir_intrinsic_load_accel_struct_amd', (nir_intrinsic_load_active_samples_agx:=218): 'nir_intrinsic_load_active_samples_agx', (nir_intrinsic_load_active_subgroup_count_agx:=219): 'nir_intrinsic_load_active_subgroup_count_agx', (nir_intrinsic_load_active_subgroup_invocation_agx:=220): 'nir_intrinsic_load_active_subgroup_invocation_agx', (nir_intrinsic_load_agx:=221): 'nir_intrinsic_load_agx', (nir_intrinsic_load_alpha_reference_amd:=222): 'nir_intrinsic_load_alpha_reference_amd', (nir_intrinsic_load_api_sample_mask_agx:=223): 'nir_intrinsic_load_api_sample_mask_agx', (nir_intrinsic_load_attrib_clamp_agx:=224): 'nir_intrinsic_load_attrib_clamp_agx', (nir_intrinsic_load_attribute_pan:=225): 'nir_intrinsic_load_attribute_pan', (nir_intrinsic_load_back_face_agx:=226): 'nir_intrinsic_load_back_face_agx', (nir_intrinsic_load_barycentric_at_offset:=227): 'nir_intrinsic_load_barycentric_at_offset', (nir_intrinsic_load_barycentric_at_offset_nv:=228): 'nir_intrinsic_load_barycentric_at_offset_nv', (nir_intrinsic_load_barycentric_at_sample:=229): 'nir_intrinsic_load_barycentric_at_sample', (nir_intrinsic_load_barycentric_centroid:=230): 'nir_intrinsic_load_barycentric_centroid', (nir_intrinsic_load_barycentric_coord_at_offset:=231): 'nir_intrinsic_load_barycentric_coord_at_offset', (nir_intrinsic_load_barycentric_coord_at_sample:=232): 'nir_intrinsic_load_barycentric_coord_at_sample', (nir_intrinsic_load_barycentric_coord_centroid:=233): 'nir_intrinsic_load_barycentric_coord_centroid', (nir_intrinsic_load_barycentric_coord_pixel:=234): 'nir_intrinsic_load_barycentric_coord_pixel', (nir_intrinsic_load_barycentric_coord_sample:=235): 'nir_intrinsic_load_barycentric_coord_sample', (nir_intrinsic_load_barycentric_model:=236): 'nir_intrinsic_load_barycentric_model', (nir_intrinsic_load_barycentric_optimize_amd:=237): 'nir_intrinsic_load_barycentric_optimize_amd', (nir_intrinsic_load_barycentric_pixel:=238): 'nir_intrinsic_load_barycentric_pixel', (nir_intrinsic_load_barycentric_sample:=239): 'nir_intrinsic_load_barycentric_sample', (nir_intrinsic_load_base_global_invocation_id:=240): 'nir_intrinsic_load_base_global_invocation_id', (nir_intrinsic_load_base_instance:=241): 'nir_intrinsic_load_base_instance', (nir_intrinsic_load_base_vertex:=242): 'nir_intrinsic_load_base_vertex', (nir_intrinsic_load_base_workgroup_id:=243): 'nir_intrinsic_load_base_workgroup_id', (nir_intrinsic_load_blend_const_color_a_float:=244): 'nir_intrinsic_load_blend_const_color_a_float', (nir_intrinsic_load_blend_const_color_aaaa8888_unorm:=245): 'nir_intrinsic_load_blend_const_color_aaaa8888_unorm', (nir_intrinsic_load_blend_const_color_b_float:=246): 'nir_intrinsic_load_blend_const_color_b_float', (nir_intrinsic_load_blend_const_color_g_float:=247): 'nir_intrinsic_load_blend_const_color_g_float', (nir_intrinsic_load_blend_const_color_r_float:=248): 'nir_intrinsic_load_blend_const_color_r_float', (nir_intrinsic_load_blend_const_color_rgba:=249): 'nir_intrinsic_load_blend_const_color_rgba', (nir_intrinsic_load_blend_const_color_rgba8888_unorm:=250): 'nir_intrinsic_load_blend_const_color_rgba8888_unorm', (nir_intrinsic_load_btd_global_arg_addr_intel:=251): 'nir_intrinsic_load_btd_global_arg_addr_intel', (nir_intrinsic_load_btd_local_arg_addr_intel:=252): 'nir_intrinsic_load_btd_local_arg_addr_intel', (nir_intrinsic_load_btd_resume_sbt_addr_intel:=253): 'nir_intrinsic_load_btd_resume_sbt_addr_intel', (nir_intrinsic_load_btd_shader_type_intel:=254): 'nir_intrinsic_load_btd_shader_type_intel', (nir_intrinsic_load_btd_stack_id_intel:=255): 'nir_intrinsic_load_btd_stack_id_intel', (nir_intrinsic_load_buffer_amd:=256): 'nir_intrinsic_load_buffer_amd', (nir_intrinsic_load_callable_sbt_addr_intel:=257): 'nir_intrinsic_load_callable_sbt_addr_intel', (nir_intrinsic_load_callable_sbt_stride_intel:=258): 'nir_intrinsic_load_callable_sbt_stride_intel', (nir_intrinsic_load_clamp_vertex_color_amd:=259): 'nir_intrinsic_load_clamp_vertex_color_amd', (nir_intrinsic_load_clip_half_line_width_amd:=260): 'nir_intrinsic_load_clip_half_line_width_amd', (nir_intrinsic_load_clip_z_coeff_agx:=261): 'nir_intrinsic_load_clip_z_coeff_agx', (nir_intrinsic_load_coalesced_input_count:=262): 'nir_intrinsic_load_coalesced_input_count', (nir_intrinsic_load_coefficients_agx:=263): 'nir_intrinsic_load_coefficients_agx', (nir_intrinsic_load_color0:=264): 'nir_intrinsic_load_color0', (nir_intrinsic_load_color1:=265): 'nir_intrinsic_load_color1', (nir_intrinsic_load_const_buf_base_addr_lvp:=266): 'nir_intrinsic_load_const_buf_base_addr_lvp', (nir_intrinsic_load_const_ir3:=267): 'nir_intrinsic_load_const_ir3', (nir_intrinsic_load_constant:=268): 'nir_intrinsic_load_constant', (nir_intrinsic_load_constant_agx:=269): 'nir_intrinsic_load_constant_agx', (nir_intrinsic_load_constant_base_ptr:=270): 'nir_intrinsic_load_constant_base_ptr', (nir_intrinsic_load_converted_output_pan:=271): 'nir_intrinsic_load_converted_output_pan', (nir_intrinsic_load_core_id_agx:=272): 'nir_intrinsic_load_core_id_agx', (nir_intrinsic_load_cull_any_enabled_amd:=273): 'nir_intrinsic_load_cull_any_enabled_amd', (nir_intrinsic_load_cull_back_face_enabled_amd:=274): 'nir_intrinsic_load_cull_back_face_enabled_amd', (nir_intrinsic_load_cull_ccw_amd:=275): 'nir_intrinsic_load_cull_ccw_amd', (nir_intrinsic_load_cull_front_face_enabled_amd:=276): 'nir_intrinsic_load_cull_front_face_enabled_amd', (nir_intrinsic_load_cull_line_viewport_xy_scale_and_offset_amd:=277): 'nir_intrinsic_load_cull_line_viewport_xy_scale_and_offset_amd', (nir_intrinsic_load_cull_mask:=278): 'nir_intrinsic_load_cull_mask', (nir_intrinsic_load_cull_mask_and_flags_amd:=279): 'nir_intrinsic_load_cull_mask_and_flags_amd', (nir_intrinsic_load_cull_small_line_precision_amd:=280): 'nir_intrinsic_load_cull_small_line_precision_amd', (nir_intrinsic_load_cull_small_lines_enabled_amd:=281): 'nir_intrinsic_load_cull_small_lines_enabled_amd', (nir_intrinsic_load_cull_small_triangle_precision_amd:=282): 'nir_intrinsic_load_cull_small_triangle_precision_amd', (nir_intrinsic_load_cull_small_triangles_enabled_amd:=283): 'nir_intrinsic_load_cull_small_triangles_enabled_amd', (nir_intrinsic_load_cull_triangle_viewport_xy_scale_and_offset_amd:=284): 'nir_intrinsic_load_cull_triangle_viewport_xy_scale_and_offset_amd', (nir_intrinsic_load_debug_log_desc_amd:=285): 'nir_intrinsic_load_debug_log_desc_amd', (nir_intrinsic_load_depth_never_agx:=286): 'nir_intrinsic_load_depth_never_agx', (nir_intrinsic_load_deref:=287): 'nir_intrinsic_load_deref', (nir_intrinsic_load_deref_block_intel:=288): 'nir_intrinsic_load_deref_block_intel', (nir_intrinsic_load_draw_id:=289): 'nir_intrinsic_load_draw_id', (nir_intrinsic_load_esgs_vertex_stride_amd:=290): 'nir_intrinsic_load_esgs_vertex_stride_amd', (nir_intrinsic_load_exported_agx:=291): 'nir_intrinsic_load_exported_agx', (nir_intrinsic_load_fb_layers_v3d:=292): 'nir_intrinsic_load_fb_layers_v3d', (nir_intrinsic_load_fbfetch_image_desc_amd:=293): 'nir_intrinsic_load_fbfetch_image_desc_amd', (nir_intrinsic_load_fbfetch_image_fmask_desc_amd:=294): 'nir_intrinsic_load_fbfetch_image_fmask_desc_amd', (nir_intrinsic_load_fep_w_v3d:=295): 'nir_intrinsic_load_fep_w_v3d', (nir_intrinsic_load_first_vertex:=296): 'nir_intrinsic_load_first_vertex', (nir_intrinsic_load_fixed_point_size_agx:=297): 'nir_intrinsic_load_fixed_point_size_agx', (nir_intrinsic_load_flat_mask:=298): 'nir_intrinsic_load_flat_mask', (nir_intrinsic_load_force_vrs_rates_amd:=299): 'nir_intrinsic_load_force_vrs_rates_amd', (nir_intrinsic_load_frag_coord:=300): 'nir_intrinsic_load_frag_coord', (nir_intrinsic_load_frag_coord_unscaled_ir3:=301): 'nir_intrinsic_load_frag_coord_unscaled_ir3', (nir_intrinsic_load_frag_coord_w:=302): 'nir_intrinsic_load_frag_coord_w', (nir_intrinsic_load_frag_coord_z:=303): 'nir_intrinsic_load_frag_coord_z', (nir_intrinsic_load_frag_coord_zw_pan:=304): 'nir_intrinsic_load_frag_coord_zw_pan', (nir_intrinsic_load_frag_invocation_count:=305): 'nir_intrinsic_load_frag_invocation_count', (nir_intrinsic_load_frag_offset_ir3:=306): 'nir_intrinsic_load_frag_offset_ir3', (nir_intrinsic_load_frag_shading_rate:=307): 'nir_intrinsic_load_frag_shading_rate', (nir_intrinsic_load_frag_size:=308): 'nir_intrinsic_load_frag_size', (nir_intrinsic_load_frag_size_ir3:=309): 'nir_intrinsic_load_frag_size_ir3', (nir_intrinsic_load_from_texture_handle_agx:=310): 'nir_intrinsic_load_from_texture_handle_agx', (nir_intrinsic_load_front_face:=311): 'nir_intrinsic_load_front_face', (nir_intrinsic_load_front_face_fsign:=312): 'nir_intrinsic_load_front_face_fsign', (nir_intrinsic_load_fs_input_interp_deltas:=313): 'nir_intrinsic_load_fs_input_interp_deltas', (nir_intrinsic_load_fs_msaa_intel:=314): 'nir_intrinsic_load_fs_msaa_intel', (nir_intrinsic_load_fully_covered:=315): 'nir_intrinsic_load_fully_covered', (nir_intrinsic_load_geometry_param_buffer_poly:=316): 'nir_intrinsic_load_geometry_param_buffer_poly', (nir_intrinsic_load_global:=317): 'nir_intrinsic_load_global', (nir_intrinsic_load_global_2x32:=318): 'nir_intrinsic_load_global_2x32', (nir_intrinsic_load_global_amd:=319): 'nir_intrinsic_load_global_amd', (nir_intrinsic_load_global_base_ptr:=320): 'nir_intrinsic_load_global_base_ptr', (nir_intrinsic_load_global_block_intel:=321): 'nir_intrinsic_load_global_block_intel', (nir_intrinsic_load_global_bounded:=322): 'nir_intrinsic_load_global_bounded', (nir_intrinsic_load_global_constant:=323): 'nir_intrinsic_load_global_constant', (nir_intrinsic_load_global_constant_bounded:=324): 'nir_intrinsic_load_global_constant_bounded', (nir_intrinsic_load_global_constant_offset:=325): 'nir_intrinsic_load_global_constant_offset', (nir_intrinsic_load_global_constant_uniform_block_intel:=326): 'nir_intrinsic_load_global_constant_uniform_block_intel', (nir_intrinsic_load_global_etna:=327): 'nir_intrinsic_load_global_etna', (nir_intrinsic_load_global_invocation_id:=328): 'nir_intrinsic_load_global_invocation_id', (nir_intrinsic_load_global_invocation_index:=329): 'nir_intrinsic_load_global_invocation_index', (nir_intrinsic_load_global_ir3:=330): 'nir_intrinsic_load_global_ir3', (nir_intrinsic_load_global_size:=331): 'nir_intrinsic_load_global_size', (nir_intrinsic_load_gs_header_ir3:=332): 'nir_intrinsic_load_gs_header_ir3', (nir_intrinsic_load_gs_vertex_offset_amd:=333): 'nir_intrinsic_load_gs_vertex_offset_amd', (nir_intrinsic_load_gs_wave_id_amd:=334): 'nir_intrinsic_load_gs_wave_id_amd', (nir_intrinsic_load_helper_arg_hi_agx:=335): 'nir_intrinsic_load_helper_arg_hi_agx', (nir_intrinsic_load_helper_arg_lo_agx:=336): 'nir_intrinsic_load_helper_arg_lo_agx', (nir_intrinsic_load_helper_invocation:=337): 'nir_intrinsic_load_helper_invocation', (nir_intrinsic_load_helper_op_id_agx:=338): 'nir_intrinsic_load_helper_op_id_agx', (nir_intrinsic_load_hit_attrib_amd:=339): 'nir_intrinsic_load_hit_attrib_amd', (nir_intrinsic_load_hs_out_patch_data_offset_amd:=340): 'nir_intrinsic_load_hs_out_patch_data_offset_amd', (nir_intrinsic_load_hs_patch_stride_ir3:=341): 'nir_intrinsic_load_hs_patch_stride_ir3', (nir_intrinsic_load_initial_edgeflags_amd:=342): 'nir_intrinsic_load_initial_edgeflags_amd', (nir_intrinsic_load_inline_data_intel:=343): 'nir_intrinsic_load_inline_data_intel', (nir_intrinsic_load_input:=344): 'nir_intrinsic_load_input', (nir_intrinsic_load_input_assembly_buffer_poly:=345): 'nir_intrinsic_load_input_assembly_buffer_poly', (nir_intrinsic_load_input_attachment_conv_pan:=346): 'nir_intrinsic_load_input_attachment_conv_pan', (nir_intrinsic_load_input_attachment_coord:=347): 'nir_intrinsic_load_input_attachment_coord', (nir_intrinsic_load_input_attachment_target_pan:=348): 'nir_intrinsic_load_input_attachment_target_pan', (nir_intrinsic_load_input_topology_poly:=349): 'nir_intrinsic_load_input_topology_poly', (nir_intrinsic_load_input_vertex:=350): 'nir_intrinsic_load_input_vertex', (nir_intrinsic_load_instance_id:=351): 'nir_intrinsic_load_instance_id', (nir_intrinsic_load_interpolated_input:=352): 'nir_intrinsic_load_interpolated_input', (nir_intrinsic_load_intersection_opaque_amd:=353): 'nir_intrinsic_load_intersection_opaque_amd', (nir_intrinsic_load_invocation_id:=354): 'nir_intrinsic_load_invocation_id', (nir_intrinsic_load_is_first_fan_agx:=355): 'nir_intrinsic_load_is_first_fan_agx', (nir_intrinsic_load_is_indexed_draw:=356): 'nir_intrinsic_load_is_indexed_draw', (nir_intrinsic_load_kernel_input:=357): 'nir_intrinsic_load_kernel_input', (nir_intrinsic_load_layer_id:=358): 'nir_intrinsic_load_layer_id', (nir_intrinsic_load_lds_ngg_gs_out_vertex_base_amd:=359): 'nir_intrinsic_load_lds_ngg_gs_out_vertex_base_amd', (nir_intrinsic_load_leaf_opaque_intel:=360): 'nir_intrinsic_load_leaf_opaque_intel', (nir_intrinsic_load_leaf_procedural_intel:=361): 'nir_intrinsic_load_leaf_procedural_intel', (nir_intrinsic_load_line_coord:=362): 'nir_intrinsic_load_line_coord', (nir_intrinsic_load_line_width:=363): 'nir_intrinsic_load_line_width', (nir_intrinsic_load_local_invocation_id:=364): 'nir_intrinsic_load_local_invocation_id', (nir_intrinsic_load_local_invocation_index:=365): 'nir_intrinsic_load_local_invocation_index', (nir_intrinsic_load_local_pixel_agx:=366): 'nir_intrinsic_load_local_pixel_agx', (nir_intrinsic_load_local_shared_r600:=367): 'nir_intrinsic_load_local_shared_r600', (nir_intrinsic_load_lshs_vertex_stride_amd:=368): 'nir_intrinsic_load_lshs_vertex_stride_amd', (nir_intrinsic_load_max_polygon_intel:=369): 'nir_intrinsic_load_max_polygon_intel', (nir_intrinsic_load_merged_wave_info_amd:=370): 'nir_intrinsic_load_merged_wave_info_amd', (nir_intrinsic_load_mesh_view_count:=371): 'nir_intrinsic_load_mesh_view_count', (nir_intrinsic_load_mesh_view_indices:=372): 'nir_intrinsic_load_mesh_view_indices', (nir_intrinsic_load_multisampled_pan:=373): 'nir_intrinsic_load_multisampled_pan', (nir_intrinsic_load_noperspective_varyings_pan:=374): 'nir_intrinsic_load_noperspective_varyings_pan', (nir_intrinsic_load_num_subgroups:=375): 'nir_intrinsic_load_num_subgroups', (nir_intrinsic_load_num_vertices:=376): 'nir_intrinsic_load_num_vertices', (nir_intrinsic_load_num_vertices_per_primitive_amd:=377): 'nir_intrinsic_load_num_vertices_per_primitive_amd', (nir_intrinsic_load_num_workgroups:=378): 'nir_intrinsic_load_num_workgroups', (nir_intrinsic_load_ordered_id_amd:=379): 'nir_intrinsic_load_ordered_id_amd', (nir_intrinsic_load_output:=380): 'nir_intrinsic_load_output', (nir_intrinsic_load_packed_passthrough_primitive_amd:=381): 'nir_intrinsic_load_packed_passthrough_primitive_amd', (nir_intrinsic_load_param:=382): 'nir_intrinsic_load_param', (nir_intrinsic_load_patch_vertices_in:=383): 'nir_intrinsic_load_patch_vertices_in', (nir_intrinsic_load_per_primitive_input:=384): 'nir_intrinsic_load_per_primitive_input', (nir_intrinsic_load_per_primitive_output:=385): 'nir_intrinsic_load_per_primitive_output', (nir_intrinsic_load_per_primitive_remap_intel:=386): 'nir_intrinsic_load_per_primitive_remap_intel', (nir_intrinsic_load_per_vertex_input:=387): 'nir_intrinsic_load_per_vertex_input', (nir_intrinsic_load_per_vertex_output:=388): 'nir_intrinsic_load_per_vertex_output', (nir_intrinsic_load_per_view_output:=389): 'nir_intrinsic_load_per_view_output', (nir_intrinsic_load_persp_center_rhw_ir3:=390): 'nir_intrinsic_load_persp_center_rhw_ir3', (nir_intrinsic_load_pipeline_stat_query_enabled_amd:=391): 'nir_intrinsic_load_pipeline_stat_query_enabled_amd', (nir_intrinsic_load_pixel_coord:=392): 'nir_intrinsic_load_pixel_coord', (nir_intrinsic_load_point_coord:=393): 'nir_intrinsic_load_point_coord', (nir_intrinsic_load_point_coord_maybe_flipped:=394): 'nir_intrinsic_load_point_coord_maybe_flipped', (nir_intrinsic_load_poly_line_smooth_enabled:=395): 'nir_intrinsic_load_poly_line_smooth_enabled', (nir_intrinsic_load_polygon_stipple_agx:=396): 'nir_intrinsic_load_polygon_stipple_agx', (nir_intrinsic_load_polygon_stipple_buffer_amd:=397): 'nir_intrinsic_load_polygon_stipple_buffer_amd', (nir_intrinsic_load_preamble:=398): 'nir_intrinsic_load_preamble', (nir_intrinsic_load_prim_gen_query_enabled_amd:=399): 'nir_intrinsic_load_prim_gen_query_enabled_amd', (nir_intrinsic_load_prim_xfb_query_enabled_amd:=400): 'nir_intrinsic_load_prim_xfb_query_enabled_amd', (nir_intrinsic_load_primitive_id:=401): 'nir_intrinsic_load_primitive_id', (nir_intrinsic_load_primitive_location_ir3:=402): 'nir_intrinsic_load_primitive_location_ir3', (nir_intrinsic_load_printf_buffer_address:=403): 'nir_intrinsic_load_printf_buffer_address', (nir_intrinsic_load_printf_buffer_size:=404): 'nir_intrinsic_load_printf_buffer_size', (nir_intrinsic_load_provoking_last:=405): 'nir_intrinsic_load_provoking_last', (nir_intrinsic_load_provoking_vtx_amd:=406): 'nir_intrinsic_load_provoking_vtx_amd', (nir_intrinsic_load_provoking_vtx_in_prim_amd:=407): 'nir_intrinsic_load_provoking_vtx_in_prim_amd', (nir_intrinsic_load_push_constant:=408): 'nir_intrinsic_load_push_constant', (nir_intrinsic_load_push_constant_zink:=409): 'nir_intrinsic_load_push_constant_zink', (nir_intrinsic_load_r600_indirect_per_vertex_input:=410): 'nir_intrinsic_load_r600_indirect_per_vertex_input', (nir_intrinsic_load_rasterization_primitive_amd:=411): 'nir_intrinsic_load_rasterization_primitive_amd', (nir_intrinsic_load_rasterization_samples_amd:=412): 'nir_intrinsic_load_rasterization_samples_amd', (nir_intrinsic_load_rasterization_stream:=413): 'nir_intrinsic_load_rasterization_stream', (nir_intrinsic_load_raw_output_pan:=414): 'nir_intrinsic_load_raw_output_pan', (nir_intrinsic_load_raw_vertex_id_pan:=415): 'nir_intrinsic_load_raw_vertex_id_pan', (nir_intrinsic_load_raw_vertex_offset_pan:=416): 'nir_intrinsic_load_raw_vertex_offset_pan', (nir_intrinsic_load_ray_base_mem_addr_intel:=417): 'nir_intrinsic_load_ray_base_mem_addr_intel', (nir_intrinsic_load_ray_flags:=418): 'nir_intrinsic_load_ray_flags', (nir_intrinsic_load_ray_geometry_index:=419): 'nir_intrinsic_load_ray_geometry_index', (nir_intrinsic_load_ray_hit_kind:=420): 'nir_intrinsic_load_ray_hit_kind', (nir_intrinsic_load_ray_hit_sbt_addr_intel:=421): 'nir_intrinsic_load_ray_hit_sbt_addr_intel', (nir_intrinsic_load_ray_hit_sbt_stride_intel:=422): 'nir_intrinsic_load_ray_hit_sbt_stride_intel', (nir_intrinsic_load_ray_hw_stack_size_intel:=423): 'nir_intrinsic_load_ray_hw_stack_size_intel', (nir_intrinsic_load_ray_instance_custom_index:=424): 'nir_intrinsic_load_ray_instance_custom_index', (nir_intrinsic_load_ray_launch_id:=425): 'nir_intrinsic_load_ray_launch_id', (nir_intrinsic_load_ray_launch_size:=426): 'nir_intrinsic_load_ray_launch_size', (nir_intrinsic_load_ray_miss_sbt_addr_intel:=427): 'nir_intrinsic_load_ray_miss_sbt_addr_intel', (nir_intrinsic_load_ray_miss_sbt_stride_intel:=428): 'nir_intrinsic_load_ray_miss_sbt_stride_intel', (nir_intrinsic_load_ray_num_dss_rt_stacks_intel:=429): 'nir_intrinsic_load_ray_num_dss_rt_stacks_intel', (nir_intrinsic_load_ray_object_direction:=430): 'nir_intrinsic_load_ray_object_direction', (nir_intrinsic_load_ray_object_origin:=431): 'nir_intrinsic_load_ray_object_origin', (nir_intrinsic_load_ray_object_to_world:=432): 'nir_intrinsic_load_ray_object_to_world', (nir_intrinsic_load_ray_query_global_intel:=433): 'nir_intrinsic_load_ray_query_global_intel', (nir_intrinsic_load_ray_sw_stack_size_intel:=434): 'nir_intrinsic_load_ray_sw_stack_size_intel', (nir_intrinsic_load_ray_t_max:=435): 'nir_intrinsic_load_ray_t_max', (nir_intrinsic_load_ray_t_min:=436): 'nir_intrinsic_load_ray_t_min', (nir_intrinsic_load_ray_tracing_stack_base_lvp:=437): 'nir_intrinsic_load_ray_tracing_stack_base_lvp', (nir_intrinsic_load_ray_triangle_vertex_positions:=438): 'nir_intrinsic_load_ray_triangle_vertex_positions', (nir_intrinsic_load_ray_world_direction:=439): 'nir_intrinsic_load_ray_world_direction', (nir_intrinsic_load_ray_world_origin:=440): 'nir_intrinsic_load_ray_world_origin', (nir_intrinsic_load_ray_world_to_object:=441): 'nir_intrinsic_load_ray_world_to_object', (nir_intrinsic_load_readonly_output_pan:=442): 'nir_intrinsic_load_readonly_output_pan', (nir_intrinsic_load_reg:=443): 'nir_intrinsic_load_reg', (nir_intrinsic_load_reg_indirect:=444): 'nir_intrinsic_load_reg_indirect', (nir_intrinsic_load_rel_patch_id_ir3:=445): 'nir_intrinsic_load_rel_patch_id_ir3', (nir_intrinsic_load_reloc_const_intel:=446): 'nir_intrinsic_load_reloc_const_intel', (nir_intrinsic_load_resume_shader_address_amd:=447): 'nir_intrinsic_load_resume_shader_address_amd', (nir_intrinsic_load_ring_attr_amd:=448): 'nir_intrinsic_load_ring_attr_amd', (nir_intrinsic_load_ring_attr_offset_amd:=449): 'nir_intrinsic_load_ring_attr_offset_amd', (nir_intrinsic_load_ring_es2gs_offset_amd:=450): 'nir_intrinsic_load_ring_es2gs_offset_amd', (nir_intrinsic_load_ring_esgs_amd:=451): 'nir_intrinsic_load_ring_esgs_amd', (nir_intrinsic_load_ring_gs2vs_offset_amd:=452): 'nir_intrinsic_load_ring_gs2vs_offset_amd', (nir_intrinsic_load_ring_gsvs_amd:=453): 'nir_intrinsic_load_ring_gsvs_amd', (nir_intrinsic_load_ring_mesh_scratch_amd:=454): 'nir_intrinsic_load_ring_mesh_scratch_amd', (nir_intrinsic_load_ring_mesh_scratch_offset_amd:=455): 'nir_intrinsic_load_ring_mesh_scratch_offset_amd', (nir_intrinsic_load_ring_task_draw_amd:=456): 'nir_intrinsic_load_ring_task_draw_amd', (nir_intrinsic_load_ring_task_payload_amd:=457): 'nir_intrinsic_load_ring_task_payload_amd', (nir_intrinsic_load_ring_tess_factors_amd:=458): 'nir_intrinsic_load_ring_tess_factors_amd', (nir_intrinsic_load_ring_tess_factors_offset_amd:=459): 'nir_intrinsic_load_ring_tess_factors_offset_amd', (nir_intrinsic_load_ring_tess_offchip_amd:=460): 'nir_intrinsic_load_ring_tess_offchip_amd', (nir_intrinsic_load_ring_tess_offchip_offset_amd:=461): 'nir_intrinsic_load_ring_tess_offchip_offset_amd', (nir_intrinsic_load_root_agx:=462): 'nir_intrinsic_load_root_agx', (nir_intrinsic_load_rt_arg_scratch_offset_amd:=463): 'nir_intrinsic_load_rt_arg_scratch_offset_amd', (nir_intrinsic_load_rt_conversion_pan:=464): 'nir_intrinsic_load_rt_conversion_pan', (nir_intrinsic_load_sample_id:=465): 'nir_intrinsic_load_sample_id', (nir_intrinsic_load_sample_id_no_per_sample:=466): 'nir_intrinsic_load_sample_id_no_per_sample', (nir_intrinsic_load_sample_mask:=467): 'nir_intrinsic_load_sample_mask', (nir_intrinsic_load_sample_mask_in:=468): 'nir_intrinsic_load_sample_mask_in', (nir_intrinsic_load_sample_pos:=469): 'nir_intrinsic_load_sample_pos', (nir_intrinsic_load_sample_pos_from_id:=470): 'nir_intrinsic_load_sample_pos_from_id', (nir_intrinsic_load_sample_pos_or_center:=471): 'nir_intrinsic_load_sample_pos_or_center', (nir_intrinsic_load_sample_positions_agx:=472): 'nir_intrinsic_load_sample_positions_agx', (nir_intrinsic_load_sample_positions_amd:=473): 'nir_intrinsic_load_sample_positions_amd', (nir_intrinsic_load_sample_positions_pan:=474): 'nir_intrinsic_load_sample_positions_pan', (nir_intrinsic_load_sampler_handle_agx:=475): 'nir_intrinsic_load_sampler_handle_agx', (nir_intrinsic_load_sampler_lod_parameters:=476): 'nir_intrinsic_load_sampler_lod_parameters', (nir_intrinsic_load_samples_log2_agx:=477): 'nir_intrinsic_load_samples_log2_agx', (nir_intrinsic_load_sbt_base_amd:=478): 'nir_intrinsic_load_sbt_base_amd', (nir_intrinsic_load_sbt_offset_amd:=479): 'nir_intrinsic_load_sbt_offset_amd', (nir_intrinsic_load_sbt_stride_amd:=480): 'nir_intrinsic_load_sbt_stride_amd', (nir_intrinsic_load_scalar_arg_amd:=481): 'nir_intrinsic_load_scalar_arg_amd', (nir_intrinsic_load_scratch:=482): 'nir_intrinsic_load_scratch', (nir_intrinsic_load_scratch_base_ptr:=483): 'nir_intrinsic_load_scratch_base_ptr', (nir_intrinsic_load_shader_call_data_offset_lvp:=484): 'nir_intrinsic_load_shader_call_data_offset_lvp', (nir_intrinsic_load_shader_index:=485): 'nir_intrinsic_load_shader_index', (nir_intrinsic_load_shader_output_pan:=486): 'nir_intrinsic_load_shader_output_pan', (nir_intrinsic_load_shader_part_tests_zs_agx:=487): 'nir_intrinsic_load_shader_part_tests_zs_agx', (nir_intrinsic_load_shader_record_ptr:=488): 'nir_intrinsic_load_shader_record_ptr', (nir_intrinsic_load_shared:=489): 'nir_intrinsic_load_shared', (nir_intrinsic_load_shared2_amd:=490): 'nir_intrinsic_load_shared2_amd', (nir_intrinsic_load_shared_base_ptr:=491): 'nir_intrinsic_load_shared_base_ptr', (nir_intrinsic_load_shared_block_intel:=492): 'nir_intrinsic_load_shared_block_intel', (nir_intrinsic_load_shared_ir3:=493): 'nir_intrinsic_load_shared_ir3', (nir_intrinsic_load_shared_lock_nv:=494): 'nir_intrinsic_load_shared_lock_nv', (nir_intrinsic_load_shared_uniform_block_intel:=495): 'nir_intrinsic_load_shared_uniform_block_intel', (nir_intrinsic_load_simd_width_intel:=496): 'nir_intrinsic_load_simd_width_intel', (nir_intrinsic_load_sm_count_nv:=497): 'nir_intrinsic_load_sm_count_nv', (nir_intrinsic_load_sm_id_nv:=498): 'nir_intrinsic_load_sm_id_nv', (nir_intrinsic_load_smem_amd:=499): 'nir_intrinsic_load_smem_amd', (nir_intrinsic_load_ssbo:=500): 'nir_intrinsic_load_ssbo', (nir_intrinsic_load_ssbo_address:=501): 'nir_intrinsic_load_ssbo_address', (nir_intrinsic_load_ssbo_block_intel:=502): 'nir_intrinsic_load_ssbo_block_intel', (nir_intrinsic_load_ssbo_intel:=503): 'nir_intrinsic_load_ssbo_intel', (nir_intrinsic_load_ssbo_ir3:=504): 'nir_intrinsic_load_ssbo_ir3', (nir_intrinsic_load_ssbo_uniform_block_intel:=505): 'nir_intrinsic_load_ssbo_uniform_block_intel', (nir_intrinsic_load_stack:=506): 'nir_intrinsic_load_stack', (nir_intrinsic_load_stat_query_address_agx:=507): 'nir_intrinsic_load_stat_query_address_agx', (nir_intrinsic_load_streamout_buffer_amd:=508): 'nir_intrinsic_load_streamout_buffer_amd', (nir_intrinsic_load_streamout_config_amd:=509): 'nir_intrinsic_load_streamout_config_amd', (nir_intrinsic_load_streamout_offset_amd:=510): 'nir_intrinsic_load_streamout_offset_amd', (nir_intrinsic_load_streamout_write_index_amd:=511): 'nir_intrinsic_load_streamout_write_index_amd', (nir_intrinsic_load_subgroup_eq_mask:=512): 'nir_intrinsic_load_subgroup_eq_mask', (nir_intrinsic_load_subgroup_ge_mask:=513): 'nir_intrinsic_load_subgroup_ge_mask', (nir_intrinsic_load_subgroup_gt_mask:=514): 'nir_intrinsic_load_subgroup_gt_mask', (nir_intrinsic_load_subgroup_id:=515): 'nir_intrinsic_load_subgroup_id', (nir_intrinsic_load_subgroup_id_shift_ir3:=516): 'nir_intrinsic_load_subgroup_id_shift_ir3', (nir_intrinsic_load_subgroup_invocation:=517): 'nir_intrinsic_load_subgroup_invocation', (nir_intrinsic_load_subgroup_le_mask:=518): 'nir_intrinsic_load_subgroup_le_mask', (nir_intrinsic_load_subgroup_lt_mask:=519): 'nir_intrinsic_load_subgroup_lt_mask', (nir_intrinsic_load_subgroup_size:=520): 'nir_intrinsic_load_subgroup_size', (nir_intrinsic_load_sysval_agx:=521): 'nir_intrinsic_load_sysval_agx', (nir_intrinsic_load_sysval_nv:=522): 'nir_intrinsic_load_sysval_nv', (nir_intrinsic_load_task_payload:=523): 'nir_intrinsic_load_task_payload', (nir_intrinsic_load_task_ring_entry_amd:=524): 'nir_intrinsic_load_task_ring_entry_amd', (nir_intrinsic_load_tcs_header_ir3:=525): 'nir_intrinsic_load_tcs_header_ir3', (nir_intrinsic_load_tcs_in_param_base_r600:=526): 'nir_intrinsic_load_tcs_in_param_base_r600', (nir_intrinsic_load_tcs_mem_attrib_stride:=527): 'nir_intrinsic_load_tcs_mem_attrib_stride', (nir_intrinsic_load_tcs_num_patches_amd:=528): 'nir_intrinsic_load_tcs_num_patches_amd', (nir_intrinsic_load_tcs_out_param_base_r600:=529): 'nir_intrinsic_load_tcs_out_param_base_r600', (nir_intrinsic_load_tcs_primitive_mode_amd:=530): 'nir_intrinsic_load_tcs_primitive_mode_amd', (nir_intrinsic_load_tcs_rel_patch_id_r600:=531): 'nir_intrinsic_load_tcs_rel_patch_id_r600', (nir_intrinsic_load_tcs_tess_factor_base_r600:=532): 'nir_intrinsic_load_tcs_tess_factor_base_r600', (nir_intrinsic_load_tcs_tess_levels_to_tes_amd:=533): 'nir_intrinsic_load_tcs_tess_levels_to_tes_amd', (nir_intrinsic_load_tess_coord:=534): 'nir_intrinsic_load_tess_coord', (nir_intrinsic_load_tess_coord_xy:=535): 'nir_intrinsic_load_tess_coord_xy', (nir_intrinsic_load_tess_factor_base_ir3:=536): 'nir_intrinsic_load_tess_factor_base_ir3', (nir_intrinsic_load_tess_level_inner:=537): 'nir_intrinsic_load_tess_level_inner', (nir_intrinsic_load_tess_level_inner_default:=538): 'nir_intrinsic_load_tess_level_inner_default', (nir_intrinsic_load_tess_level_outer:=539): 'nir_intrinsic_load_tess_level_outer', (nir_intrinsic_load_tess_level_outer_default:=540): 'nir_intrinsic_load_tess_level_outer_default', (nir_intrinsic_load_tess_param_base_ir3:=541): 'nir_intrinsic_load_tess_param_base_ir3', (nir_intrinsic_load_tess_param_buffer_poly:=542): 'nir_intrinsic_load_tess_param_buffer_poly', (nir_intrinsic_load_tess_rel_patch_id_amd:=543): 'nir_intrinsic_load_tess_rel_patch_id_amd', (nir_intrinsic_load_tex_sprite_mask_agx:=544): 'nir_intrinsic_load_tex_sprite_mask_agx', (nir_intrinsic_load_texture_handle_agx:=545): 'nir_intrinsic_load_texture_handle_agx', (nir_intrinsic_load_texture_scale:=546): 'nir_intrinsic_load_texture_scale', (nir_intrinsic_load_texture_size_etna:=547): 'nir_intrinsic_load_texture_size_etna', (nir_intrinsic_load_tlb_color_brcm:=548): 'nir_intrinsic_load_tlb_color_brcm', (nir_intrinsic_load_topology_id_intel:=549): 'nir_intrinsic_load_topology_id_intel', (nir_intrinsic_load_typed_buffer_amd:=550): 'nir_intrinsic_load_typed_buffer_amd', (nir_intrinsic_load_uav_ir3:=551): 'nir_intrinsic_load_uav_ir3', (nir_intrinsic_load_ubo:=552): 'nir_intrinsic_load_ubo', (nir_intrinsic_load_ubo_uniform_block_intel:=553): 'nir_intrinsic_load_ubo_uniform_block_intel', (nir_intrinsic_load_ubo_vec4:=554): 'nir_intrinsic_load_ubo_vec4', (nir_intrinsic_load_uniform:=555): 'nir_intrinsic_load_uniform', (nir_intrinsic_load_user_clip_plane:=556): 'nir_intrinsic_load_user_clip_plane', (nir_intrinsic_load_user_data_amd:=557): 'nir_intrinsic_load_user_data_amd', (nir_intrinsic_load_uvs_index_agx:=558): 'nir_intrinsic_load_uvs_index_agx', (nir_intrinsic_load_vbo_base_agx:=559): 'nir_intrinsic_load_vbo_base_agx', (nir_intrinsic_load_vector_arg_amd:=560): 'nir_intrinsic_load_vector_arg_amd', (nir_intrinsic_load_vertex_id:=561): 'nir_intrinsic_load_vertex_id', (nir_intrinsic_load_vertex_id_zero_base:=562): 'nir_intrinsic_load_vertex_id_zero_base', (nir_intrinsic_load_view_index:=563): 'nir_intrinsic_load_view_index', (nir_intrinsic_load_viewport_offset:=564): 'nir_intrinsic_load_viewport_offset', (nir_intrinsic_load_viewport_scale:=565): 'nir_intrinsic_load_viewport_scale', (nir_intrinsic_load_viewport_x_offset:=566): 'nir_intrinsic_load_viewport_x_offset', (nir_intrinsic_load_viewport_x_scale:=567): 'nir_intrinsic_load_viewport_x_scale', (nir_intrinsic_load_viewport_y_offset:=568): 'nir_intrinsic_load_viewport_y_offset', (nir_intrinsic_load_viewport_y_scale:=569): 'nir_intrinsic_load_viewport_y_scale', (nir_intrinsic_load_viewport_z_offset:=570): 'nir_intrinsic_load_viewport_z_offset', (nir_intrinsic_load_viewport_z_scale:=571): 'nir_intrinsic_load_viewport_z_scale', (nir_intrinsic_load_vs_output_buffer_poly:=572): 'nir_intrinsic_load_vs_output_buffer_poly', (nir_intrinsic_load_vs_outputs_poly:=573): 'nir_intrinsic_load_vs_outputs_poly', (nir_intrinsic_load_vs_primitive_stride_ir3:=574): 'nir_intrinsic_load_vs_primitive_stride_ir3', (nir_intrinsic_load_vs_vertex_stride_ir3:=575): 'nir_intrinsic_load_vs_vertex_stride_ir3', (nir_intrinsic_load_vulkan_descriptor:=576): 'nir_intrinsic_load_vulkan_descriptor', (nir_intrinsic_load_warp_id_nv:=577): 'nir_intrinsic_load_warp_id_nv', (nir_intrinsic_load_warps_per_sm_nv:=578): 'nir_intrinsic_load_warps_per_sm_nv', (nir_intrinsic_load_work_dim:=579): 'nir_intrinsic_load_work_dim', (nir_intrinsic_load_workgroup_id:=580): 'nir_intrinsic_load_workgroup_id', (nir_intrinsic_load_workgroup_index:=581): 'nir_intrinsic_load_workgroup_index', (nir_intrinsic_load_workgroup_num_input_primitives_amd:=582): 'nir_intrinsic_load_workgroup_num_input_primitives_amd', (nir_intrinsic_load_workgroup_num_input_vertices_amd:=583): 'nir_intrinsic_load_workgroup_num_input_vertices_amd', (nir_intrinsic_load_workgroup_size:=584): 'nir_intrinsic_load_workgroup_size', (nir_intrinsic_load_xfb_address:=585): 'nir_intrinsic_load_xfb_address', (nir_intrinsic_load_xfb_index_buffer:=586): 'nir_intrinsic_load_xfb_index_buffer', (nir_intrinsic_load_xfb_size:=587): 'nir_intrinsic_load_xfb_size', (nir_intrinsic_load_xfb_state_address_gfx12_amd:=588): 'nir_intrinsic_load_xfb_state_address_gfx12_amd', (nir_intrinsic_masked_swizzle_amd:=589): 'nir_intrinsic_masked_swizzle_amd', (nir_intrinsic_mbcnt_amd:=590): 'nir_intrinsic_mbcnt_amd', (nir_intrinsic_memcpy_deref:=591): 'nir_intrinsic_memcpy_deref', (nir_intrinsic_nop:=592): 'nir_intrinsic_nop', (nir_intrinsic_nop_amd:=593): 'nir_intrinsic_nop_amd', (nir_intrinsic_optimization_barrier_sgpr_amd:=594): 'nir_intrinsic_optimization_barrier_sgpr_amd', (nir_intrinsic_optimization_barrier_vgpr_amd:=595): 'nir_intrinsic_optimization_barrier_vgpr_amd', (nir_intrinsic_ordered_add_loop_gfx12_amd:=596): 'nir_intrinsic_ordered_add_loop_gfx12_amd', (nir_intrinsic_ordered_xfb_counter_add_gfx11_amd:=597): 'nir_intrinsic_ordered_xfb_counter_add_gfx11_amd', (nir_intrinsic_overwrite_tes_arguments_amd:=598): 'nir_intrinsic_overwrite_tes_arguments_amd', (nir_intrinsic_overwrite_vs_arguments_amd:=599): 'nir_intrinsic_overwrite_vs_arguments_amd', (nir_intrinsic_pin_cx_handle_nv:=600): 'nir_intrinsic_pin_cx_handle_nv', (nir_intrinsic_preamble_end_ir3:=601): 'nir_intrinsic_preamble_end_ir3', (nir_intrinsic_preamble_start_ir3:=602): 'nir_intrinsic_preamble_start_ir3', (nir_intrinsic_prefetch_sam_ir3:=603): 'nir_intrinsic_prefetch_sam_ir3', (nir_intrinsic_prefetch_tex_ir3:=604): 'nir_intrinsic_prefetch_tex_ir3', (nir_intrinsic_prefetch_ubo_ir3:=605): 'nir_intrinsic_prefetch_ubo_ir3', (nir_intrinsic_printf:=606): 'nir_intrinsic_printf', (nir_intrinsic_printf_abort:=607): 'nir_intrinsic_printf_abort', (nir_intrinsic_quad_ballot_agx:=608): 'nir_intrinsic_quad_ballot_agx', (nir_intrinsic_quad_broadcast:=609): 'nir_intrinsic_quad_broadcast', (nir_intrinsic_quad_swap_diagonal:=610): 'nir_intrinsic_quad_swap_diagonal', (nir_intrinsic_quad_swap_horizontal:=611): 'nir_intrinsic_quad_swap_horizontal', (nir_intrinsic_quad_swap_vertical:=612): 'nir_intrinsic_quad_swap_vertical', (nir_intrinsic_quad_swizzle_amd:=613): 'nir_intrinsic_quad_swizzle_amd', (nir_intrinsic_quad_vote_all:=614): 'nir_intrinsic_quad_vote_all', (nir_intrinsic_quad_vote_any:=615): 'nir_intrinsic_quad_vote_any', (nir_intrinsic_r600_indirect_vertex_at_index:=616): 'nir_intrinsic_r600_indirect_vertex_at_index', (nir_intrinsic_ray_intersection_ir3:=617): 'nir_intrinsic_ray_intersection_ir3', (nir_intrinsic_read_attribute_payload_intel:=618): 'nir_intrinsic_read_attribute_payload_intel', (nir_intrinsic_read_first_invocation:=619): 'nir_intrinsic_read_first_invocation', (nir_intrinsic_read_getlast_ir3:=620): 'nir_intrinsic_read_getlast_ir3', (nir_intrinsic_read_invocation:=621): 'nir_intrinsic_read_invocation', (nir_intrinsic_read_invocation_cond_ir3:=622): 'nir_intrinsic_read_invocation_cond_ir3', (nir_intrinsic_reduce:=623): 'nir_intrinsic_reduce', (nir_intrinsic_reduce_clusters_ir3:=624): 'nir_intrinsic_reduce_clusters_ir3', (nir_intrinsic_report_ray_intersection:=625): 'nir_intrinsic_report_ray_intersection', (nir_intrinsic_resource_intel:=626): 'nir_intrinsic_resource_intel', (nir_intrinsic_rotate:=627): 'nir_intrinsic_rotate', (nir_intrinsic_rq_confirm_intersection:=628): 'nir_intrinsic_rq_confirm_intersection', (nir_intrinsic_rq_generate_intersection:=629): 'nir_intrinsic_rq_generate_intersection', (nir_intrinsic_rq_initialize:=630): 'nir_intrinsic_rq_initialize', (nir_intrinsic_rq_load:=631): 'nir_intrinsic_rq_load', (nir_intrinsic_rq_proceed:=632): 'nir_intrinsic_rq_proceed', (nir_intrinsic_rq_terminate:=633): 'nir_intrinsic_rq_terminate', (nir_intrinsic_rt_execute_callable:=634): 'nir_intrinsic_rt_execute_callable', (nir_intrinsic_rt_resume:=635): 'nir_intrinsic_rt_resume', (nir_intrinsic_rt_return_amd:=636): 'nir_intrinsic_rt_return_amd', (nir_intrinsic_rt_trace_ray:=637): 'nir_intrinsic_rt_trace_ray', (nir_intrinsic_sample_mask_agx:=638): 'nir_intrinsic_sample_mask_agx', (nir_intrinsic_select_vertex_poly:=639): 'nir_intrinsic_select_vertex_poly', (nir_intrinsic_sendmsg_amd:=640): 'nir_intrinsic_sendmsg_amd', (nir_intrinsic_set_vertex_and_primitive_count:=641): 'nir_intrinsic_set_vertex_and_primitive_count', (nir_intrinsic_shader_clock:=642): 'nir_intrinsic_shader_clock', (nir_intrinsic_shared_append_amd:=643): 'nir_intrinsic_shared_append_amd', (nir_intrinsic_shared_atomic:=644): 'nir_intrinsic_shared_atomic', (nir_intrinsic_shared_atomic_swap:=645): 'nir_intrinsic_shared_atomic_swap', (nir_intrinsic_shared_consume_amd:=646): 'nir_intrinsic_shared_consume_amd', (nir_intrinsic_shuffle:=647): 'nir_intrinsic_shuffle', (nir_intrinsic_shuffle_down:=648): 'nir_intrinsic_shuffle_down', (nir_intrinsic_shuffle_down_uniform_ir3:=649): 'nir_intrinsic_shuffle_down_uniform_ir3', (nir_intrinsic_shuffle_up:=650): 'nir_intrinsic_shuffle_up', (nir_intrinsic_shuffle_up_uniform_ir3:=651): 'nir_intrinsic_shuffle_up_uniform_ir3', (nir_intrinsic_shuffle_xor:=652): 'nir_intrinsic_shuffle_xor', (nir_intrinsic_shuffle_xor_uniform_ir3:=653): 'nir_intrinsic_shuffle_xor_uniform_ir3', (nir_intrinsic_sleep_amd:=654): 'nir_intrinsic_sleep_amd', (nir_intrinsic_sparse_residency_code_and:=655): 'nir_intrinsic_sparse_residency_code_and', (nir_intrinsic_ssa_bar_nv:=656): 'nir_intrinsic_ssa_bar_nv', (nir_intrinsic_ssbo_atomic:=657): 'nir_intrinsic_ssbo_atomic', (nir_intrinsic_ssbo_atomic_ir3:=658): 'nir_intrinsic_ssbo_atomic_ir3', (nir_intrinsic_ssbo_atomic_swap:=659): 'nir_intrinsic_ssbo_atomic_swap', (nir_intrinsic_ssbo_atomic_swap_ir3:=660): 'nir_intrinsic_ssbo_atomic_swap_ir3', (nir_intrinsic_stack_map_agx:=661): 'nir_intrinsic_stack_map_agx', (nir_intrinsic_stack_unmap_agx:=662): 'nir_intrinsic_stack_unmap_agx', (nir_intrinsic_store_agx:=663): 'nir_intrinsic_store_agx', (nir_intrinsic_store_buffer_amd:=664): 'nir_intrinsic_store_buffer_amd', (nir_intrinsic_store_combined_output_pan:=665): 'nir_intrinsic_store_combined_output_pan', (nir_intrinsic_store_const_ir3:=666): 'nir_intrinsic_store_const_ir3', (nir_intrinsic_store_deref:=667): 'nir_intrinsic_store_deref', (nir_intrinsic_store_deref_block_intel:=668): 'nir_intrinsic_store_deref_block_intel', (nir_intrinsic_store_global:=669): 'nir_intrinsic_store_global', (nir_intrinsic_store_global_2x32:=670): 'nir_intrinsic_store_global_2x32', (nir_intrinsic_store_global_amd:=671): 'nir_intrinsic_store_global_amd', (nir_intrinsic_store_global_block_intel:=672): 'nir_intrinsic_store_global_block_intel', (nir_intrinsic_store_global_etna:=673): 'nir_intrinsic_store_global_etna', (nir_intrinsic_store_global_ir3:=674): 'nir_intrinsic_store_global_ir3', (nir_intrinsic_store_hit_attrib_amd:=675): 'nir_intrinsic_store_hit_attrib_amd', (nir_intrinsic_store_local_pixel_agx:=676): 'nir_intrinsic_store_local_pixel_agx', (nir_intrinsic_store_local_shared_r600:=677): 'nir_intrinsic_store_local_shared_r600', (nir_intrinsic_store_output:=678): 'nir_intrinsic_store_output', (nir_intrinsic_store_per_primitive_output:=679): 'nir_intrinsic_store_per_primitive_output', (nir_intrinsic_store_per_primitive_payload_intel:=680): 'nir_intrinsic_store_per_primitive_payload_intel', (nir_intrinsic_store_per_vertex_output:=681): 'nir_intrinsic_store_per_vertex_output', (nir_intrinsic_store_per_view_output:=682): 'nir_intrinsic_store_per_view_output', (nir_intrinsic_store_preamble:=683): 'nir_intrinsic_store_preamble', (nir_intrinsic_store_raw_output_pan:=684): 'nir_intrinsic_store_raw_output_pan', (nir_intrinsic_store_reg:=685): 'nir_intrinsic_store_reg', (nir_intrinsic_store_reg_indirect:=686): 'nir_intrinsic_store_reg_indirect', (nir_intrinsic_store_scalar_arg_amd:=687): 'nir_intrinsic_store_scalar_arg_amd', (nir_intrinsic_store_scratch:=688): 'nir_intrinsic_store_scratch', (nir_intrinsic_store_shared:=689): 'nir_intrinsic_store_shared', (nir_intrinsic_store_shared2_amd:=690): 'nir_intrinsic_store_shared2_amd', (nir_intrinsic_store_shared_block_intel:=691): 'nir_intrinsic_store_shared_block_intel', (nir_intrinsic_store_shared_ir3:=692): 'nir_intrinsic_store_shared_ir3', (nir_intrinsic_store_shared_unlock_nv:=693): 'nir_intrinsic_store_shared_unlock_nv', (nir_intrinsic_store_ssbo:=694): 'nir_intrinsic_store_ssbo', (nir_intrinsic_store_ssbo_block_intel:=695): 'nir_intrinsic_store_ssbo_block_intel', (nir_intrinsic_store_ssbo_intel:=696): 'nir_intrinsic_store_ssbo_intel', (nir_intrinsic_store_ssbo_ir3:=697): 'nir_intrinsic_store_ssbo_ir3', (nir_intrinsic_store_stack:=698): 'nir_intrinsic_store_stack', (nir_intrinsic_store_task_payload:=699): 'nir_intrinsic_store_task_payload', (nir_intrinsic_store_tf_r600:=700): 'nir_intrinsic_store_tf_r600', (nir_intrinsic_store_tlb_sample_color_v3d:=701): 'nir_intrinsic_store_tlb_sample_color_v3d', (nir_intrinsic_store_uvs_agx:=702): 'nir_intrinsic_store_uvs_agx', (nir_intrinsic_store_vector_arg_amd:=703): 'nir_intrinsic_store_vector_arg_amd', (nir_intrinsic_store_zs_agx:=704): 'nir_intrinsic_store_zs_agx', (nir_intrinsic_strict_wqm_coord_amd:=705): 'nir_intrinsic_strict_wqm_coord_amd', (nir_intrinsic_subfm_nv:=706): 'nir_intrinsic_subfm_nv', (nir_intrinsic_suclamp_nv:=707): 'nir_intrinsic_suclamp_nv', (nir_intrinsic_sueau_nv:=708): 'nir_intrinsic_sueau_nv', (nir_intrinsic_suldga_nv:=709): 'nir_intrinsic_suldga_nv', (nir_intrinsic_sustga_nv:=710): 'nir_intrinsic_sustga_nv', (nir_intrinsic_task_payload_atomic:=711): 'nir_intrinsic_task_payload_atomic', (nir_intrinsic_task_payload_atomic_swap:=712): 'nir_intrinsic_task_payload_atomic_swap', (nir_intrinsic_terminate:=713): 'nir_intrinsic_terminate', (nir_intrinsic_terminate_if:=714): 'nir_intrinsic_terminate_if', (nir_intrinsic_terminate_ray:=715): 'nir_intrinsic_terminate_ray', (nir_intrinsic_trace_ray:=716): 'nir_intrinsic_trace_ray', (nir_intrinsic_trace_ray_intel:=717): 'nir_intrinsic_trace_ray_intel', (nir_intrinsic_unit_test_amd:=718): 'nir_intrinsic_unit_test_amd', (nir_intrinsic_unit_test_divergent_amd:=719): 'nir_intrinsic_unit_test_divergent_amd', (nir_intrinsic_unit_test_uniform_amd:=720): 'nir_intrinsic_unit_test_uniform_amd', (nir_intrinsic_unpin_cx_handle_nv:=721): 'nir_intrinsic_unpin_cx_handle_nv', (nir_intrinsic_use:=722): 'nir_intrinsic_use', (nir_intrinsic_vild_nv:=723): 'nir_intrinsic_vild_nv', (nir_intrinsic_vote_all:=724): 'nir_intrinsic_vote_all', (nir_intrinsic_vote_any:=725): 'nir_intrinsic_vote_any', (nir_intrinsic_vote_feq:=726): 'nir_intrinsic_vote_feq', (nir_intrinsic_vote_ieq:=727): 'nir_intrinsic_vote_ieq', (nir_intrinsic_vulkan_resource_index:=728): 'nir_intrinsic_vulkan_resource_index', (nir_intrinsic_vulkan_resource_reindex:=729): 'nir_intrinsic_vulkan_resource_reindex', (nir_intrinsic_write_invocation_amd:=730): 'nir_intrinsic_write_invocation_amd', (nir_intrinsic_xfb_counter_sub_gfx11_amd:=731): 'nir_intrinsic_xfb_counter_sub_gfx11_amd', (nir_last_intrinsic:=731): 'nir_last_intrinsic', (nir_num_intrinsics:=732): 'nir_num_intrinsics'}
-struct_nir_intrinsic_instr.register_fields([('instr', nir_instr, 0), ('intrinsic', ctypes.c_uint32, 32), ('_def', nir_def, 40), ('num_components', uint8_t, 72), ('const_index', (ctypes.c_int32 * 8), 76), ('name', ctypes.POINTER(ctypes.c_char), 112), ('src', (nir_src * 0), 120)])
+struct_nir_intrinsic_instr.register_fields([('instr', nir_instr, 0), ('intrinsic', ctypes.c_uint32, 32), ('_def', nir_def, 40), ('num_components', uint8_t, 72), ('const_index', c.Array[ctypes.c_int32, Literal[8]], 76), ('name', c.POINTER[ctypes.c_char], 112), ('src', c.Array[nir_src, Literal[0]], 120)])
 nir_intrinsic_instr: TypeAlias = struct_nir_intrinsic_instr
 nir_memory_semantics: dict[int, str] = {(NIR_MEMORY_ACQUIRE:=1): 'NIR_MEMORY_ACQUIRE', (NIR_MEMORY_RELEASE:=2): 'NIR_MEMORY_RELEASE', (NIR_MEMORY_ACQ_REL:=3): 'NIR_MEMORY_ACQ_REL', (NIR_MEMORY_MAKE_AVAILABLE:=4): 'NIR_MEMORY_MAKE_AVAILABLE', (NIR_MEMORY_MAKE_VISIBLE:=8): 'NIR_MEMORY_MAKE_VISIBLE'}
 nir_intrinsic_semantic_flag: dict[int, str] = {(NIR_INTRINSIC_CAN_ELIMINATE:=1): 'NIR_INTRINSIC_CAN_ELIMINATE', (NIR_INTRINSIC_CAN_REORDER:=2): 'NIR_INTRINSIC_CAN_REORDER', (NIR_INTRINSIC_SUBGROUP:=4): 'NIR_INTRINSIC_SUBGROUP', (NIR_INTRINSIC_QUADGROUP:=8): 'NIR_INTRINSIC_QUADGROUP'}
@@ -958,7 +958,7 @@ nir_io_semantics: TypeAlias = struct_nir_io_semantics
 @c.record
 class struct_nir_io_xfb(c.Struct):
   SIZE = 4
-  out: ctypes.Array[struct_nir_io_xfb_out]
+  out: c.Array[struct_nir_io_xfb_out, Literal[2]]
 @c.record
 class struct_nir_io_xfb_out(c.Struct):
   SIZE = 2
@@ -966,46 +966,46 @@ class struct_nir_io_xfb_out(c.Struct):
   buffer: int
   offset: int
 struct_nir_io_xfb_out.register_fields([('num_components', uint8_t, 0, 4, 0), ('buffer', uint8_t, 0, 4, 4), ('offset', uint8_t, 1)])
-struct_nir_io_xfb.register_fields([('out', (struct_nir_io_xfb_out * 2), 0)])
+struct_nir_io_xfb.register_fields([('out', c.Array[struct_nir_io_xfb_out, Literal[2]], 0)])
 nir_io_xfb: TypeAlias = struct_nir_io_xfb
-@dll.bind(ctypes.c_uint32, ctypes.POINTER(nir_intrinsic_instr))
-def nir_instr_xfb_write_mask(instr:ctypes._Pointer[nir_intrinsic_instr]) -> int: ...
+@dll.bind(ctypes.c_uint32, c.POINTER[nir_intrinsic_instr])
+def nir_instr_xfb_write_mask(instr:c.POINTER[nir_intrinsic_instr]) -> int: ...
 @c.record
 class struct_nir_intrinsic_info(c.Struct):
   SIZE = 112
-  name: ctypes._Pointer[ctypes.c_char]
+  name: c.POINTER[ctypes.c_char]
   num_srcs: int
-  src_components: ctypes.Array[ctypes.c_byte]
+  src_components: c.Array[ctypes.c_byte, Literal[11]]
   has_dest: bool
   dest_components: int
   dest_bit_sizes: int
   bit_size_src: int
   num_indices: int
-  indices: ctypes.Array[ctypes.c_ubyte]
-  index_map: ctypes.Array[ctypes.c_ubyte]
+  indices: c.Array[ctypes.c_ubyte, Literal[8]]
+  index_map: c.Array[ctypes.c_ubyte, Literal[75]]
   flags: int
-struct_nir_intrinsic_info.register_fields([('name', ctypes.POINTER(ctypes.c_char), 0), ('num_srcs', uint8_t, 8), ('src_components', (int8_t * 11), 9), ('has_dest', ctypes.c_bool, 20), ('dest_components', uint8_t, 21), ('dest_bit_sizes', uint8_t, 22), ('bit_size_src', int8_t, 23), ('num_indices', uint8_t, 24), ('indices', (uint8_t * 8), 25), ('index_map', (uint8_t * 75), 33), ('flags', ctypes.c_uint32, 108)])
+struct_nir_intrinsic_info.register_fields([('name', c.POINTER[ctypes.c_char], 0), ('num_srcs', uint8_t, 8), ('src_components', c.Array[int8_t, Literal[11]], 9), ('has_dest', ctypes.c_bool, 20), ('dest_components', uint8_t, 21), ('dest_bit_sizes', uint8_t, 22), ('bit_size_src', int8_t, 23), ('num_indices', uint8_t, 24), ('indices', c.Array[uint8_t, Literal[8]], 25), ('index_map', c.Array[uint8_t, Literal[75]], 33), ('flags', ctypes.c_uint32, 108)])
 nir_intrinsic_info: TypeAlias = struct_nir_intrinsic_info
-try: nir_intrinsic_infos = (nir_intrinsic_info * 732).in_dll(dll, 'nir_intrinsic_infos') # type: ignore
+try: nir_intrinsic_infos = c.Array[nir_intrinsic_info, Literal[732]].in_dll(dll, 'nir_intrinsic_infos') # type: ignore
 except (ValueError,AttributeError): pass
-@dll.bind(ctypes.c_uint32, ctypes.POINTER(nir_intrinsic_instr), ctypes.c_uint32)
-def nir_intrinsic_src_components(intr:ctypes._Pointer[nir_intrinsic_instr], srcn:int) -> int: ...
-@dll.bind(ctypes.c_uint32, ctypes.POINTER(nir_intrinsic_instr))
-def nir_intrinsic_dest_components(intr:ctypes._Pointer[nir_intrinsic_instr]) -> int: ...
-@dll.bind(ctypes.c_ubyte, ctypes.POINTER(nir_intrinsic_instr), ctypes.c_uint32)
-def nir_intrinsic_instr_src_type(intrin:ctypes._Pointer[nir_intrinsic_instr], src:int) -> ctypes.c_ubyte: ...
-@dll.bind(ctypes.c_ubyte, ctypes.POINTER(nir_intrinsic_instr))
-def nir_intrinsic_instr_dest_type(intrin:ctypes._Pointer[nir_intrinsic_instr]) -> ctypes.c_ubyte: ...
-@dll.bind(None, ctypes.POINTER(nir_intrinsic_instr), ctypes.POINTER(nir_intrinsic_instr))
-def nir_intrinsic_copy_const_indices(dst:ctypes._Pointer[nir_intrinsic_instr], src:ctypes._Pointer[nir_intrinsic_instr]) -> None: ...
-@dll.bind(ctypes.c_uint32, ctypes.POINTER(nir_intrinsic_instr))
-def nir_image_intrinsic_coord_components(instr:ctypes._Pointer[nir_intrinsic_instr]) -> int: ...
-@dll.bind(None, ctypes.POINTER(nir_intrinsic_instr), ctypes.POINTER(nir_def), ctypes.c_bool)
-def nir_rewrite_image_intrinsic(instr:ctypes._Pointer[nir_intrinsic_instr], handle:ctypes._Pointer[nir_def], bindless:bool) -> None: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_intrinsic_instr))
-def nir_intrinsic_can_reorder(instr:ctypes._Pointer[nir_intrinsic_instr]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_intrinsic_instr))
-def nir_intrinsic_writes_external_memory(instr:ctypes._Pointer[nir_intrinsic_instr]) -> bool: ...
+@dll.bind(ctypes.c_uint32, c.POINTER[nir_intrinsic_instr], ctypes.c_uint32)
+def nir_intrinsic_src_components(intr:c.POINTER[nir_intrinsic_instr], srcn:int) -> int: ...
+@dll.bind(ctypes.c_uint32, c.POINTER[nir_intrinsic_instr])
+def nir_intrinsic_dest_components(intr:c.POINTER[nir_intrinsic_instr]) -> int: ...
+@dll.bind(ctypes.c_ubyte, c.POINTER[nir_intrinsic_instr], ctypes.c_uint32)
+def nir_intrinsic_instr_src_type(intrin:c.POINTER[nir_intrinsic_instr], src:int) -> ctypes.c_ubyte: ...
+@dll.bind(ctypes.c_ubyte, c.POINTER[nir_intrinsic_instr])
+def nir_intrinsic_instr_dest_type(intrin:c.POINTER[nir_intrinsic_instr]) -> ctypes.c_ubyte: ...
+@dll.bind(None, c.POINTER[nir_intrinsic_instr], c.POINTER[nir_intrinsic_instr])
+def nir_intrinsic_copy_const_indices(dst:c.POINTER[nir_intrinsic_instr], src:c.POINTER[nir_intrinsic_instr]) -> None: ...
+@dll.bind(ctypes.c_uint32, c.POINTER[nir_intrinsic_instr])
+def nir_image_intrinsic_coord_components(instr:c.POINTER[nir_intrinsic_instr]) -> int: ...
+@dll.bind(None, c.POINTER[nir_intrinsic_instr], c.POINTER[nir_def], ctypes.c_bool)
+def nir_rewrite_image_intrinsic(instr:c.POINTER[nir_intrinsic_instr], handle:c.POINTER[nir_def], bindless:bool) -> None: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_intrinsic_instr])
+def nir_intrinsic_can_reorder(instr:c.POINTER[nir_intrinsic_instr]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_intrinsic_instr])
+def nir_intrinsic_writes_external_memory(instr:c.POINTER[nir_intrinsic_instr]) -> bool: ...
 enum_nir_tex_src_type: dict[int, str] = {(nir_tex_src_coord:=0): 'nir_tex_src_coord', (nir_tex_src_projector:=1): 'nir_tex_src_projector', (nir_tex_src_comparator:=2): 'nir_tex_src_comparator', (nir_tex_src_offset:=3): 'nir_tex_src_offset', (nir_tex_src_bias:=4): 'nir_tex_src_bias', (nir_tex_src_lod:=5): 'nir_tex_src_lod', (nir_tex_src_min_lod:=6): 'nir_tex_src_min_lod', (nir_tex_src_lod_bias_min_agx:=7): 'nir_tex_src_lod_bias_min_agx', (nir_tex_src_ms_index:=8): 'nir_tex_src_ms_index', (nir_tex_src_ms_mcs_intel:=9): 'nir_tex_src_ms_mcs_intel', (nir_tex_src_ddx:=10): 'nir_tex_src_ddx', (nir_tex_src_ddy:=11): 'nir_tex_src_ddy', (nir_tex_src_texture_deref:=12): 'nir_tex_src_texture_deref', (nir_tex_src_sampler_deref:=13): 'nir_tex_src_sampler_deref', (nir_tex_src_texture_offset:=14): 'nir_tex_src_texture_offset', (nir_tex_src_sampler_offset:=15): 'nir_tex_src_sampler_offset', (nir_tex_src_texture_handle:=16): 'nir_tex_src_texture_handle', (nir_tex_src_sampler_handle:=17): 'nir_tex_src_sampler_handle', (nir_tex_src_sampler_deref_intrinsic:=18): 'nir_tex_src_sampler_deref_intrinsic', (nir_tex_src_texture_deref_intrinsic:=19): 'nir_tex_src_texture_deref_intrinsic', (nir_tex_src_plane:=20): 'nir_tex_src_plane', (nir_tex_src_backend1:=21): 'nir_tex_src_backend1', (nir_tex_src_backend2:=22): 'nir_tex_src_backend2', (nir_num_tex_src_types:=23): 'nir_num_tex_src_types'}
 nir_tex_src_type: TypeAlias = ctypes.c_uint32
 @c.record
@@ -1025,7 +1025,7 @@ class struct_nir_tex_instr(c.Struct):
   dest_type: int
   op: int
   _def: struct_nir_def
-  src: ctypes._Pointer[struct_nir_tex_src]
+  src: c.POINTER[struct_nir_tex_src]
   num_srcs: int
   coord_components: int
   is_array: bool
@@ -1036,7 +1036,7 @@ class struct_nir_tex_instr(c.Struct):
   array_is_lowered_cube: int
   is_gather_implicit_lod: int
   skip_helpers: int
-  tg4_offsets: ctypes.Array[(ctypes.c_byte * 2)]
+  tg4_offsets: c.Array[c.Array[ctypes.c_byte, Literal[2]], Literal[4]]
   texture_non_uniform: bool
   sampler_non_uniform: bool
   offset_non_uniform: bool
@@ -1044,33 +1044,33 @@ class struct_nir_tex_instr(c.Struct):
   sampler_index: int
   backend_flags: int
 enum_glsl_sampler_dim: dict[int, str] = {(GLSL_SAMPLER_DIM_1D:=0): 'GLSL_SAMPLER_DIM_1D', (GLSL_SAMPLER_DIM_2D:=1): 'GLSL_SAMPLER_DIM_2D', (GLSL_SAMPLER_DIM_3D:=2): 'GLSL_SAMPLER_DIM_3D', (GLSL_SAMPLER_DIM_CUBE:=3): 'GLSL_SAMPLER_DIM_CUBE', (GLSL_SAMPLER_DIM_RECT:=4): 'GLSL_SAMPLER_DIM_RECT', (GLSL_SAMPLER_DIM_BUF:=5): 'GLSL_SAMPLER_DIM_BUF', (GLSL_SAMPLER_DIM_EXTERNAL:=6): 'GLSL_SAMPLER_DIM_EXTERNAL', (GLSL_SAMPLER_DIM_MS:=7): 'GLSL_SAMPLER_DIM_MS', (GLSL_SAMPLER_DIM_SUBPASS:=8): 'GLSL_SAMPLER_DIM_SUBPASS', (GLSL_SAMPLER_DIM_SUBPASS_MS:=9): 'GLSL_SAMPLER_DIM_SUBPASS_MS'}
-struct_nir_tex_instr.register_fields([('instr', nir_instr, 0), ('sampler_dim', ctypes.c_uint32, 32), ('dest_type', ctypes.c_ubyte, 36), ('op', nir_texop, 40), ('_def', nir_def, 48), ('src', ctypes.POINTER(nir_tex_src), 80), ('num_srcs', ctypes.c_uint32, 88), ('coord_components', ctypes.c_uint32, 92), ('is_array', ctypes.c_bool, 96), ('is_shadow', ctypes.c_bool, 97), ('is_new_style_shadow', ctypes.c_bool, 98), ('is_sparse', ctypes.c_bool, 99), ('component', ctypes.c_uint32, 100, 2, 0), ('array_is_lowered_cube', ctypes.c_uint32, 100, 1, 2), ('is_gather_implicit_lod', ctypes.c_uint32, 100, 1, 3), ('skip_helpers', ctypes.c_uint32, 100, 1, 4), ('tg4_offsets', ((int8_t * 2) * 4), 101), ('texture_non_uniform', ctypes.c_bool, 109), ('sampler_non_uniform', ctypes.c_bool, 110), ('offset_non_uniform', ctypes.c_bool, 111), ('texture_index', ctypes.c_uint32, 112), ('sampler_index', ctypes.c_uint32, 116), ('backend_flags', uint32_t, 120)])
+struct_nir_tex_instr.register_fields([('instr', nir_instr, 0), ('sampler_dim', ctypes.c_uint32, 32), ('dest_type', ctypes.c_ubyte, 36), ('op', nir_texop, 40), ('_def', nir_def, 48), ('src', c.POINTER[nir_tex_src], 80), ('num_srcs', ctypes.c_uint32, 88), ('coord_components', ctypes.c_uint32, 92), ('is_array', ctypes.c_bool, 96), ('is_shadow', ctypes.c_bool, 97), ('is_new_style_shadow', ctypes.c_bool, 98), ('is_sparse', ctypes.c_bool, 99), ('component', ctypes.c_uint32, 100, 2, 0), ('array_is_lowered_cube', ctypes.c_uint32, 100, 1, 2), ('is_gather_implicit_lod', ctypes.c_uint32, 100, 1, 3), ('skip_helpers', ctypes.c_uint32, 100, 1, 4), ('tg4_offsets', c.Array[c.Array[int8_t, Literal[2]], Literal[4]], 101), ('texture_non_uniform', ctypes.c_bool, 109), ('sampler_non_uniform', ctypes.c_bool, 110), ('offset_non_uniform', ctypes.c_bool, 111), ('texture_index', ctypes.c_uint32, 112), ('sampler_index', ctypes.c_uint32, 116), ('backend_flags', uint32_t, 120)])
 nir_tex_instr: TypeAlias = struct_nir_tex_instr
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_tex_instr))
-def nir_tex_instr_need_sampler(instr:ctypes._Pointer[nir_tex_instr]) -> bool: ...
-@dll.bind(ctypes.c_uint32, ctypes.POINTER(nir_tex_instr))
-def nir_tex_instr_result_size(instr:ctypes._Pointer[nir_tex_instr]) -> int: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_tex_instr))
-def nir_tex_instr_is_query(instr:ctypes._Pointer[nir_tex_instr]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_tex_instr))
-def nir_tex_instr_has_implicit_derivative(instr:ctypes._Pointer[nir_tex_instr]) -> bool: ...
-@dll.bind(ctypes.c_ubyte, ctypes.POINTER(nir_tex_instr), ctypes.c_uint32)
-def nir_tex_instr_src_type(instr:ctypes._Pointer[nir_tex_instr], src:int) -> ctypes.c_ubyte: ...
-@dll.bind(ctypes.c_uint32, ctypes.POINTER(nir_tex_instr), ctypes.c_uint32)
-def nir_tex_instr_src_size(instr:ctypes._Pointer[nir_tex_instr], src:int) -> int: ...
-@dll.bind(None, ctypes.POINTER(nir_tex_instr), nir_tex_src_type, ctypes.POINTER(nir_def))
-def nir_tex_instr_add_src(tex:ctypes._Pointer[nir_tex_instr], src_type:nir_tex_src_type, src:ctypes._Pointer[nir_def]) -> None: ...
-@dll.bind(None, ctypes.POINTER(nir_tex_instr), ctypes.c_uint32)
-def nir_tex_instr_remove_src(tex:ctypes._Pointer[nir_tex_instr], src_idx:int) -> None: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_tex_instr))
-def nir_tex_instr_has_explicit_tg4_offsets(tex:ctypes._Pointer[nir_tex_instr]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_tex_instr])
+def nir_tex_instr_need_sampler(instr:c.POINTER[nir_tex_instr]) -> bool: ...
+@dll.bind(ctypes.c_uint32, c.POINTER[nir_tex_instr])
+def nir_tex_instr_result_size(instr:c.POINTER[nir_tex_instr]) -> int: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_tex_instr])
+def nir_tex_instr_is_query(instr:c.POINTER[nir_tex_instr]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_tex_instr])
+def nir_tex_instr_has_implicit_derivative(instr:c.POINTER[nir_tex_instr]) -> bool: ...
+@dll.bind(ctypes.c_ubyte, c.POINTER[nir_tex_instr], ctypes.c_uint32)
+def nir_tex_instr_src_type(instr:c.POINTER[nir_tex_instr], src:int) -> ctypes.c_ubyte: ...
+@dll.bind(ctypes.c_uint32, c.POINTER[nir_tex_instr], ctypes.c_uint32)
+def nir_tex_instr_src_size(instr:c.POINTER[nir_tex_instr], src:int) -> int: ...
+@dll.bind(None, c.POINTER[nir_tex_instr], nir_tex_src_type, c.POINTER[nir_def])
+def nir_tex_instr_add_src(tex:c.POINTER[nir_tex_instr], src_type:nir_tex_src_type, src:c.POINTER[nir_def]) -> None: ...
+@dll.bind(None, c.POINTER[nir_tex_instr], ctypes.c_uint32)
+def nir_tex_instr_remove_src(tex:c.POINTER[nir_tex_instr], src_idx:int) -> None: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_tex_instr])
+def nir_tex_instr_has_explicit_tg4_offsets(tex:c.POINTER[nir_tex_instr]) -> bool: ...
 @c.record
 class struct_nir_load_const_instr(c.Struct):
   SIZE = 64
   instr: struct_nir_instr
   _def: struct_nir_def
-  value: ctypes.Array[nir_const_value]
-struct_nir_load_const_instr.register_fields([('instr', nir_instr, 0), ('_def', nir_def, 32), ('value', (nir_const_value * 0), 64)])
+  value: c.Array[nir_const_value, Literal[0]]
+struct_nir_load_const_instr.register_fields([('instr', nir_instr, 0), ('_def', nir_def, 32), ('value', c.Array[nir_const_value, Literal[0]], 64)])
 nir_load_const_instr: TypeAlias = struct_nir_load_const_instr
 nir_jump_type: dict[int, str] = {(nir_jump_return:=0): 'nir_jump_return', (nir_jump_halt:=1): 'nir_jump_halt', (nir_jump_break:=2): 'nir_jump_break', (nir_jump_continue:=3): 'nir_jump_continue', (nir_jump_goto:=4): 'nir_jump_goto', (nir_jump_goto_if:=5): 'nir_jump_goto_if'}
 @c.record
@@ -1079,9 +1079,9 @@ class struct_nir_jump_instr(c.Struct):
   instr: struct_nir_instr
   type: int
   condition: struct_nir_src
-  target: ctypes._Pointer[struct_nir_block]
-  else_target: ctypes._Pointer[struct_nir_block]
-struct_nir_jump_instr.register_fields([('instr', nir_instr, 0), ('type', ctypes.c_uint32, 32), ('condition', nir_src, 40), ('target', ctypes.POINTER(nir_block), 72), ('else_target', ctypes.POINTER(nir_block), 80)])
+  target: c.POINTER[struct_nir_block]
+  else_target: c.POINTER[struct_nir_block]
+struct_nir_jump_instr.register_fields([('instr', nir_instr, 0), ('type', ctypes.c_uint32, 32), ('condition', nir_src, 40), ('target', c.POINTER[nir_block], 72), ('else_target', c.POINTER[nir_block], 80)])
 nir_jump_instr: TypeAlias = struct_nir_jump_instr
 @c.record
 class struct_nir_undef_instr(c.Struct):
@@ -1094,9 +1094,9 @@ nir_undef_instr: TypeAlias = struct_nir_undef_instr
 class struct_nir_phi_src(c.Struct):
   SIZE = 56
   node: struct_exec_node
-  pred: ctypes._Pointer[struct_nir_block]
+  pred: c.POINTER[struct_nir_block]
   src: struct_nir_src
-struct_nir_phi_src.register_fields([('node', struct_exec_node, 0), ('pred', ctypes.POINTER(nir_block), 16), ('src', nir_src, 24)])
+struct_nir_phi_src.register_fields([('node', struct_exec_node, 0), ('pred', c.POINTER[nir_block], 16), ('src', nir_src, 24)])
 nir_phi_src: TypeAlias = struct_nir_phi_src
 @c.record
 class struct_nir_phi_instr(c.Struct):
@@ -1132,21 +1132,21 @@ nir_parallel_copy_instr: TypeAlias = struct_nir_parallel_copy_instr
 @c.record
 class struct_nir_instr_debug_info(c.Struct):
   SIZE = 64
-  filename: ctypes._Pointer[ctypes.c_char]
+  filename: c.POINTER[ctypes.c_char]
   line: int
   column: int
   spirv_offset: int
   nir_line: int
-  variable_name: ctypes._Pointer[ctypes.c_char]
+  variable_name: c.POINTER[ctypes.c_char]
   instr: struct_nir_instr
-struct_nir_instr_debug_info.register_fields([('filename', ctypes.POINTER(ctypes.c_char), 0), ('line', uint32_t, 8), ('column', uint32_t, 12), ('spirv_offset', uint32_t, 16), ('nir_line', uint32_t, 20), ('variable_name', ctypes.POINTER(ctypes.c_char), 24), ('instr', nir_instr, 32)])
+struct_nir_instr_debug_info.register_fields([('filename', c.POINTER[ctypes.c_char], 0), ('line', uint32_t, 8), ('column', uint32_t, 12), ('spirv_offset', uint32_t, 16), ('nir_line', uint32_t, 20), ('variable_name', c.POINTER[ctypes.c_char], 24), ('instr', nir_instr, 32)])
 nir_instr_debug_info: TypeAlias = struct_nir_instr_debug_info
 @c.record
 class struct_nir_scalar(c.Struct):
   SIZE = 16
-  _def: ctypes._Pointer[struct_nir_def]
+  _def: c.POINTER[struct_nir_def]
   comp: int
-struct_nir_scalar.register_fields([('_def', ctypes.POINTER(nir_def), 0), ('comp', ctypes.c_uint32, 8)])
+struct_nir_scalar.register_fields([('_def', c.POINTER[nir_def], 0), ('comp', ctypes.c_uint32, 8)])
 nir_scalar: TypeAlias = struct_nir_scalar
 @dll.bind(nir_scalar, nir_scalar)
 def nir_scalar_chase_movs(s:nir_scalar) -> nir_scalar: ...
@@ -1154,20 +1154,20 @@ def nir_scalar_chase_movs(s:nir_scalar) -> nir_scalar: ...
 class struct_nir_binding(c.Struct):
   SIZE = 168
   success: bool
-  var: ctypes._Pointer[struct_nir_variable]
+  var: c.POINTER[struct_nir_variable]
   desc_set: int
   binding: int
   num_indices: int
-  indices: ctypes.Array[struct_nir_src]
+  indices: c.Array[struct_nir_src, Literal[4]]
   read_first_invocation: bool
-struct_nir_binding.register_fields([('success', ctypes.c_bool, 0), ('var', ctypes.POINTER(nir_variable), 8), ('desc_set', ctypes.c_uint32, 16), ('binding', ctypes.c_uint32, 20), ('num_indices', ctypes.c_uint32, 24), ('indices', (nir_src * 4), 32), ('read_first_invocation', ctypes.c_bool, 160)])
+struct_nir_binding.register_fields([('success', ctypes.c_bool, 0), ('var', c.POINTER[nir_variable], 8), ('desc_set', ctypes.c_uint32, 16), ('binding', ctypes.c_uint32, 20), ('num_indices', ctypes.c_uint32, 24), ('indices', c.Array[nir_src, Literal[4]], 32), ('read_first_invocation', ctypes.c_bool, 160)])
 nir_binding: TypeAlias = struct_nir_binding
 @dll.bind(nir_binding, nir_src)
 def nir_chase_binding(rsrc:nir_src) -> nir_binding: ...
-@dll.bind(ctypes.POINTER(nir_variable), ctypes.POINTER(nir_shader), nir_binding)
-def nir_get_binding_variable(shader:ctypes._Pointer[nir_shader], binding:nir_binding) -> ctypes._Pointer[nir_variable]: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_block))
-def nir_block_contains_work(block:ctypes._Pointer[nir_block]) -> bool: ...
+@dll.bind(c.POINTER[nir_variable], c.POINTER[nir_shader], nir_binding)
+def nir_get_binding_variable(shader:c.POINTER[nir_shader], binding:nir_binding) -> c.POINTER[nir_variable]: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_block])
+def nir_block_contains_work(block:c.POINTER[nir_block]) -> bool: ...
 nir_selection_control: dict[int, str] = {(nir_selection_control_none:=0): 'nir_selection_control_none', (nir_selection_control_flatten:=1): 'nir_selection_control_flatten', (nir_selection_control_dont_flatten:=2): 'nir_selection_control_dont_flatten', (nir_selection_control_divergent_always_taken:=3): 'nir_selection_control_divergent_always_taken'}
 @c.record
 class struct_nir_if(c.Struct):
@@ -1182,24 +1182,24 @@ nir_if: TypeAlias = struct_nir_if
 @c.record
 class struct_nir_loop_terminator(c.Struct):
   SIZE = 56
-  nif: ctypes._Pointer[struct_nir_if]
-  conditional_instr: ctypes._Pointer[struct_nir_instr]
-  break_block: ctypes._Pointer[struct_nir_block]
-  continue_from_block: ctypes._Pointer[struct_nir_block]
+  nif: c.POINTER[struct_nir_if]
+  conditional_instr: c.POINTER[struct_nir_instr]
+  break_block: c.POINTER[struct_nir_block]
+  continue_from_block: c.POINTER[struct_nir_block]
   continue_from_then: bool
   induction_rhs: bool
   exact_trip_count_unknown: bool
   loop_terminator_link: struct_list_head
-struct_nir_loop_terminator.register_fields([('nif', ctypes.POINTER(nir_if), 0), ('conditional_instr', ctypes.POINTER(nir_instr), 8), ('break_block', ctypes.POINTER(nir_block), 16), ('continue_from_block', ctypes.POINTER(nir_block), 24), ('continue_from_then', ctypes.c_bool, 32), ('induction_rhs', ctypes.c_bool, 33), ('exact_trip_count_unknown', ctypes.c_bool, 34), ('loop_terminator_link', struct_list_head, 40)])
+struct_nir_loop_terminator.register_fields([('nif', c.POINTER[nir_if], 0), ('conditional_instr', c.POINTER[nir_instr], 8), ('break_block', c.POINTER[nir_block], 16), ('continue_from_block', c.POINTER[nir_block], 24), ('continue_from_then', ctypes.c_bool, 32), ('induction_rhs', ctypes.c_bool, 33), ('exact_trip_count_unknown', ctypes.c_bool, 34), ('loop_terminator_link', struct_list_head, 40)])
 nir_loop_terminator: TypeAlias = struct_nir_loop_terminator
 @c.record
 class struct_nir_loop_induction_variable(c.Struct):
   SIZE = 32
-  basis: ctypes._Pointer[struct_nir_def]
-  _def: ctypes._Pointer[struct_nir_def]
-  init_src: ctypes._Pointer[struct_nir_src]
-  update_src: ctypes._Pointer[struct_nir_alu_src]
-struct_nir_loop_induction_variable.register_fields([('basis', ctypes.POINTER(nir_def), 0), ('_def', ctypes.POINTER(nir_def), 8), ('init_src', ctypes.POINTER(nir_src), 16), ('update_src', ctypes.POINTER(nir_alu_src), 24)])
+  basis: c.POINTER[struct_nir_def]
+  _def: c.POINTER[struct_nir_def]
+  init_src: c.POINTER[struct_nir_src]
+  update_src: c.POINTER[struct_nir_alu_src]
+struct_nir_loop_induction_variable.register_fields([('basis', c.POINTER[nir_def], 0), ('_def', c.POINTER[nir_def], 8), ('init_src', c.POINTER[nir_src], 16), ('update_src', c.POINTER[nir_alu_src], 24)])
 nir_loop_induction_variable: TypeAlias = struct_nir_loop_induction_variable
 @c.record
 class struct_nir_loop_info(c.Struct):
@@ -1211,16 +1211,16 @@ class struct_nir_loop_info(c.Struct):
   exact_trip_count_known: bool
   force_unroll: bool
   complex_loop: bool
-  limiting_terminator: ctypes._Pointer[struct_nir_loop_terminator]
+  limiting_terminator: c.POINTER[struct_nir_loop_terminator]
   loop_terminator_list: struct_list_head
-  induction_vars: ctypes._Pointer[struct_hash_table]
+  induction_vars: c.POINTER[struct_hash_table]
 @c.record
 class struct_hash_table(c.Struct):
   SIZE = 72
-  table: ctypes._Pointer[struct_hash_entry]
-  key_hash_function: ctypes._CFunctionType
-  key_equals_function: ctypes._CFunctionType
-  deleted_key: int|None
+  table: c.POINTER[struct_hash_entry]
+  key_hash_function: c.CFUNCTYPE[ctypes.c_uint32, [ctypes.c_void_p]]
+  key_equals_function: c.CFUNCTYPE[ctypes.c_bool, [ctypes.c_void_p, ctypes.c_void_p]]
+  deleted_key: ctypes.c_void_p
   size: int
   rehash: int
   size_magic: int
@@ -1233,11 +1233,11 @@ class struct_hash_table(c.Struct):
 class struct_hash_entry(c.Struct):
   SIZE = 24
   hash: int
-  key: int|None
-  data: int|None
+  key: ctypes.c_void_p
+  data: ctypes.c_void_p
 struct_hash_entry.register_fields([('hash', uint32_t, 0), ('key', ctypes.c_void_p, 8), ('data', ctypes.c_void_p, 16)])
-struct_hash_table.register_fields([('table', ctypes.POINTER(struct_hash_entry), 0), ('key_hash_function', ctypes.CFUNCTYPE(uint32_t, ctypes.c_void_p), 8), ('key_equals_function', ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p), 16), ('deleted_key', ctypes.c_void_p, 24), ('size', uint32_t, 32), ('rehash', uint32_t, 36), ('size_magic', uint64_t, 40), ('rehash_magic', uint64_t, 48), ('max_entries', uint32_t, 56), ('size_index', uint32_t, 60), ('entries', uint32_t, 64), ('deleted_entries', uint32_t, 68)])
-struct_nir_loop_info.register_fields([('instr_cost', ctypes.c_uint32, 0), ('has_soft_fp64', ctypes.c_bool, 4), ('guessed_trip_count', ctypes.c_uint32, 8), ('max_trip_count', ctypes.c_uint32, 12), ('exact_trip_count_known', ctypes.c_bool, 16), ('force_unroll', ctypes.c_bool, 17), ('complex_loop', ctypes.c_bool, 18), ('limiting_terminator', ctypes.POINTER(nir_loop_terminator), 24), ('loop_terminator_list', struct_list_head, 32), ('induction_vars', ctypes.POINTER(struct_hash_table), 48)])
+struct_hash_table.register_fields([('table', c.POINTER[struct_hash_entry], 0), ('key_hash_function', c.CFUNCTYPE[uint32_t, [ctypes.c_void_p]], 8), ('key_equals_function', c.CFUNCTYPE[ctypes.c_bool, [ctypes.c_void_p, ctypes.c_void_p]], 16), ('deleted_key', ctypes.c_void_p, 24), ('size', uint32_t, 32), ('rehash', uint32_t, 36), ('size_magic', uint64_t, 40), ('rehash_magic', uint64_t, 48), ('max_entries', uint32_t, 56), ('size_index', uint32_t, 60), ('entries', uint32_t, 64), ('deleted_entries', uint32_t, 68)])
+struct_nir_loop_info.register_fields([('instr_cost', ctypes.c_uint32, 0), ('has_soft_fp64', ctypes.c_bool, 4), ('guessed_trip_count', ctypes.c_uint32, 8), ('max_trip_count', ctypes.c_uint32, 12), ('exact_trip_count_known', ctypes.c_bool, 16), ('force_unroll', ctypes.c_bool, 17), ('complex_loop', ctypes.c_bool, 18), ('limiting_terminator', c.POINTER[nir_loop_terminator], 24), ('loop_terminator_list', struct_list_head, 32), ('induction_vars', c.POINTER[struct_hash_table], 48)])
 nir_loop_info: TypeAlias = struct_nir_loop_info
 nir_loop_control: dict[int, str] = {(nir_loop_control_none:=0): 'nir_loop_control_none', (nir_loop_control_unroll:=1): 'nir_loop_control_unroll', (nir_loop_control_dont_unroll:=2): 'nir_loop_control_dont_unroll'}
 @c.record
@@ -1246,92 +1246,92 @@ class struct_nir_loop(c.Struct):
   cf_node: struct_nir_cf_node
   body: struct_exec_list
   continue_list: struct_exec_list
-  info: ctypes._Pointer[struct_nir_loop_info]
+  info: c.POINTER[struct_nir_loop_info]
   control: int
   partially_unrolled: bool
   divergent_continue: bool
   divergent_break: bool
-struct_nir_loop.register_fields([('cf_node', nir_cf_node, 0), ('body', struct_exec_list, 32), ('continue_list', struct_exec_list, 64), ('info', ctypes.POINTER(nir_loop_info), 96), ('control', ctypes.c_uint32, 104), ('partially_unrolled', ctypes.c_bool, 108), ('divergent_continue', ctypes.c_bool, 109), ('divergent_break', ctypes.c_bool, 110)])
+struct_nir_loop.register_fields([('cf_node', nir_cf_node, 0), ('body', struct_exec_list, 32), ('continue_list', struct_exec_list, 64), ('info', c.POINTER[nir_loop_info], 96), ('control', ctypes.c_uint32, 104), ('partially_unrolled', ctypes.c_bool, 108), ('divergent_continue', ctypes.c_bool, 109), ('divergent_break', ctypes.c_bool, 110)])
 nir_loop: TypeAlias = struct_nir_loop
-nir_intrin_filter_cb: TypeAlias = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(struct_nir_intrinsic_instr), ctypes.c_void_p)
-nir_vectorize_cb: TypeAlias = ctypes.CFUNCTYPE(ctypes.c_ubyte, ctypes.POINTER(struct_nir_instr), ctypes.c_void_p)
-@dll.bind(None, ctypes.POINTER(nir_shader))
-def nir_remove_non_entrypoints(shader:ctypes._Pointer[nir_shader]) -> None: ...
-@dll.bind(None, ctypes.POINTER(nir_shader))
-def nir_remove_non_exported(shader:ctypes._Pointer[nir_shader]) -> None: ...
-@dll.bind(None, ctypes.POINTER(nir_shader))
-def nir_remove_entrypoints(shader:ctypes._Pointer[nir_shader]) -> None: ...
-@dll.bind(None, ctypes.POINTER(nir_shader))
-def nir_fixup_is_exported(shader:ctypes._Pointer[nir_shader]) -> None: ...
+nir_intrin_filter_cb: TypeAlias = c.CFUNCTYPE[ctypes.c_bool, [c.POINTER[struct_nir_intrinsic_instr], ctypes.c_void_p]]
+nir_vectorize_cb: TypeAlias = c.CFUNCTYPE[ctypes.c_ubyte, [c.POINTER[struct_nir_instr], ctypes.c_void_p]]
+@dll.bind(None, c.POINTER[nir_shader])
+def nir_remove_non_entrypoints(shader:c.POINTER[nir_shader]) -> None: ...
+@dll.bind(None, c.POINTER[nir_shader])
+def nir_remove_non_exported(shader:c.POINTER[nir_shader]) -> None: ...
+@dll.bind(None, c.POINTER[nir_shader])
+def nir_remove_entrypoints(shader:c.POINTER[nir_shader]) -> None: ...
+@dll.bind(None, c.POINTER[nir_shader])
+def nir_fixup_is_exported(shader:c.POINTER[nir_shader]) -> None: ...
 shader_info: TypeAlias = struct_shader_info
-@dll.bind(ctypes.POINTER(nir_shader), ctypes.c_void_p, gl_shader_stage, ctypes.POINTER(nir_shader_compiler_options), ctypes.POINTER(shader_info))
-def nir_shader_create(mem_ctx:int|None, stage:gl_shader_stage, options:ctypes._Pointer[nir_shader_compiler_options], si:ctypes._Pointer[shader_info]) -> ctypes._Pointer[nir_shader]: ...
-@dll.bind(None, ctypes.POINTER(nir_shader), ctypes.POINTER(nir_variable))
-def nir_shader_add_variable(shader:ctypes._Pointer[nir_shader], var:ctypes._Pointer[nir_variable]) -> None: ...
-@dll.bind(ctypes.POINTER(nir_variable), ctypes.POINTER(nir_shader), ctypes.c_uint32, ctypes.POINTER(struct_glsl_type), ctypes.POINTER(ctypes.c_char))
-def nir_variable_create(shader:ctypes._Pointer[nir_shader], mode:ctypes.c_uint32, type:ctypes._Pointer[struct_glsl_type], name:ctypes._Pointer[ctypes.c_char]) -> ctypes._Pointer[nir_variable]: ...
-@dll.bind(ctypes.POINTER(nir_variable), ctypes.POINTER(nir_function_impl), ctypes.POINTER(struct_glsl_type), ctypes.POINTER(ctypes.c_char))
-def nir_local_variable_create(impl:ctypes._Pointer[nir_function_impl], type:ctypes._Pointer[struct_glsl_type], name:ctypes._Pointer[ctypes.c_char]) -> ctypes._Pointer[nir_variable]: ...
-@dll.bind(ctypes.POINTER(nir_variable), ctypes.POINTER(nir_shader), ctypes.POINTER(struct_glsl_type), ctypes.POINTER(ctypes.c_char), (gl_state_index16 * 4))
-def nir_state_variable_create(shader:ctypes._Pointer[nir_shader], type:ctypes._Pointer[struct_glsl_type], name:ctypes._Pointer[ctypes.c_char], tokens:ctypes.Array[gl_state_index16]) -> ctypes._Pointer[nir_variable]: ...
-@dll.bind(ctypes.POINTER(nir_variable), ctypes.POINTER(nir_shader), ctypes.c_uint32, ctypes.c_int32, ctypes.POINTER(struct_glsl_type))
-def nir_get_variable_with_location(shader:ctypes._Pointer[nir_shader], mode:ctypes.c_uint32, location:int, type:ctypes._Pointer[struct_glsl_type]) -> ctypes._Pointer[nir_variable]: ...
-@dll.bind(ctypes.POINTER(nir_variable), ctypes.POINTER(nir_shader), ctypes.c_uint32, ctypes.c_int32, ctypes.POINTER(struct_glsl_type))
-def nir_create_variable_with_location(shader:ctypes._Pointer[nir_shader], mode:ctypes.c_uint32, location:int, type:ctypes._Pointer[struct_glsl_type]) -> ctypes._Pointer[nir_variable]: ...
-@dll.bind(ctypes.POINTER(nir_variable), ctypes.POINTER(nir_shader), ctypes.c_uint32, ctypes.c_uint32)
-def nir_find_variable_with_location(shader:ctypes._Pointer[nir_shader], mode:ctypes.c_uint32, location:int) -> ctypes._Pointer[nir_variable]: ...
-@dll.bind(ctypes.POINTER(nir_variable), ctypes.POINTER(nir_shader), ctypes.c_uint32, ctypes.c_uint32)
-def nir_find_variable_with_driver_location(shader:ctypes._Pointer[nir_shader], mode:ctypes.c_uint32, location:int) -> ctypes._Pointer[nir_variable]: ...
-@dll.bind(ctypes.POINTER(nir_variable), ctypes.POINTER(nir_shader), (gl_state_index16 * 4))
-def nir_find_state_variable(s:ctypes._Pointer[nir_shader], tokens:ctypes.Array[gl_state_index16]) -> ctypes._Pointer[nir_variable]: ...
-@dll.bind(ctypes.POINTER(nir_variable), ctypes.POINTER(nir_shader), ctypes.c_uint32)
-def nir_find_sampler_variable_with_tex_index(shader:ctypes._Pointer[nir_shader], texture_index:int) -> ctypes._Pointer[nir_variable]: ...
-@dll.bind(None, ctypes.POINTER(nir_shader), ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(nir_variable), ctypes.POINTER(nir_variable)), ctypes.c_uint32)
-def nir_sort_variables_with_modes(shader:ctypes._Pointer[nir_shader], compar:ctypes._CFunctionType, modes:ctypes.c_uint32) -> None: ...
-@dll.bind(ctypes.POINTER(nir_function), ctypes.POINTER(nir_shader), ctypes.POINTER(ctypes.c_char))
-def nir_function_create(shader:ctypes._Pointer[nir_shader], name:ctypes._Pointer[ctypes.c_char]) -> ctypes._Pointer[nir_function]: ...
-@dll.bind(ctypes.POINTER(nir_function_impl), ctypes.POINTER(nir_function))
-def nir_function_impl_create(func:ctypes._Pointer[nir_function]) -> ctypes._Pointer[nir_function_impl]: ...
-@dll.bind(ctypes.POINTER(nir_function_impl), ctypes.POINTER(nir_shader))
-def nir_function_impl_create_bare(shader:ctypes._Pointer[nir_shader]) -> ctypes._Pointer[nir_function_impl]: ...
-@dll.bind(ctypes.POINTER(nir_block), ctypes.POINTER(nir_shader))
-def nir_block_create(shader:ctypes._Pointer[nir_shader]) -> ctypes._Pointer[nir_block]: ...
-@dll.bind(ctypes.POINTER(nir_if), ctypes.POINTER(nir_shader))
-def nir_if_create(shader:ctypes._Pointer[nir_shader]) -> ctypes._Pointer[nir_if]: ...
-@dll.bind(ctypes.POINTER(nir_loop), ctypes.POINTER(nir_shader))
-def nir_loop_create(shader:ctypes._Pointer[nir_shader]) -> ctypes._Pointer[nir_loop]: ...
-@dll.bind(ctypes.POINTER(nir_function_impl), ctypes.POINTER(nir_cf_node))
-def nir_cf_node_get_function(node:ctypes._Pointer[nir_cf_node]) -> ctypes._Pointer[nir_function_impl]: ...
-@dll.bind(None, ctypes.POINTER(nir_function_impl), ctypes.c_int32)
-def nir_metadata_require(impl:ctypes._Pointer[nir_function_impl], required:ctypes.c_int32) -> None: ...
-@dll.bind(None, ctypes.POINTER(nir_shader))
-def nir_shader_preserve_all_metadata(shader:ctypes._Pointer[nir_shader]) -> None: ...
-@dll.bind(None, ctypes.POINTER(nir_shader))
-def nir_metadata_invalidate(shader:ctypes._Pointer[nir_shader]) -> None: ...
-@dll.bind(ctypes.c_bool, ctypes.c_bool, ctypes.POINTER(nir_function_impl), ctypes.c_int32)
-def nir_progress(progress:bool, impl:ctypes._Pointer[nir_function_impl], preserved:ctypes.c_int32) -> bool: ...
-@dll.bind(ctypes.POINTER(nir_alu_instr), ctypes.POINTER(nir_shader), ctypes.c_uint32)
-def nir_alu_instr_create(shader:ctypes._Pointer[nir_shader], op:ctypes.c_uint32) -> ctypes._Pointer[nir_alu_instr]: ...
-@dll.bind(ctypes.POINTER(nir_deref_instr), ctypes.POINTER(nir_shader), ctypes.c_uint32)
-def nir_deref_instr_create(shader:ctypes._Pointer[nir_shader], deref_type:ctypes.c_uint32) -> ctypes._Pointer[nir_deref_instr]: ...
-@dll.bind(ctypes.POINTER(nir_jump_instr), ctypes.POINTER(nir_shader), ctypes.c_uint32)
-def nir_jump_instr_create(shader:ctypes._Pointer[nir_shader], type:ctypes.c_uint32) -> ctypes._Pointer[nir_jump_instr]: ...
-@dll.bind(ctypes.POINTER(nir_load_const_instr), ctypes.POINTER(nir_shader), ctypes.c_uint32, ctypes.c_uint32)
-def nir_load_const_instr_create(shader:ctypes._Pointer[nir_shader], num_components:int, bit_size:int) -> ctypes._Pointer[nir_load_const_instr]: ...
-@dll.bind(ctypes.POINTER(nir_intrinsic_instr), ctypes.POINTER(nir_shader), ctypes.c_uint32)
-def nir_intrinsic_instr_create(shader:ctypes._Pointer[nir_shader], op:ctypes.c_uint32) -> ctypes._Pointer[nir_intrinsic_instr]: ...
-@dll.bind(ctypes.POINTER(nir_call_instr), ctypes.POINTER(nir_shader), ctypes.POINTER(nir_function))
-def nir_call_instr_create(shader:ctypes._Pointer[nir_shader], callee:ctypes._Pointer[nir_function]) -> ctypes._Pointer[nir_call_instr]: ...
-@dll.bind(ctypes.POINTER(nir_tex_instr), ctypes.POINTER(nir_shader), ctypes.c_uint32)
-def nir_tex_instr_create(shader:ctypes._Pointer[nir_shader], num_srcs:int) -> ctypes._Pointer[nir_tex_instr]: ...
-@dll.bind(ctypes.POINTER(nir_phi_instr), ctypes.POINTER(nir_shader))
-def nir_phi_instr_create(shader:ctypes._Pointer[nir_shader]) -> ctypes._Pointer[nir_phi_instr]: ...
-@dll.bind(ctypes.POINTER(nir_phi_src), ctypes.POINTER(nir_phi_instr), ctypes.POINTER(nir_block), ctypes.POINTER(nir_def))
-def nir_phi_instr_add_src(instr:ctypes._Pointer[nir_phi_instr], pred:ctypes._Pointer[nir_block], src:ctypes._Pointer[nir_def]) -> ctypes._Pointer[nir_phi_src]: ...
-@dll.bind(ctypes.POINTER(nir_parallel_copy_instr), ctypes.POINTER(nir_shader))
-def nir_parallel_copy_instr_create(shader:ctypes._Pointer[nir_shader]) -> ctypes._Pointer[nir_parallel_copy_instr]: ...
-@dll.bind(ctypes.POINTER(nir_undef_instr), ctypes.POINTER(nir_shader), ctypes.c_uint32, ctypes.c_uint32)
-def nir_undef_instr_create(shader:ctypes._Pointer[nir_shader], num_components:int, bit_size:int) -> ctypes._Pointer[nir_undef_instr]: ...
+@dll.bind(c.POINTER[nir_shader], ctypes.c_void_p, gl_shader_stage, c.POINTER[nir_shader_compiler_options], c.POINTER[shader_info])
+def nir_shader_create(mem_ctx:ctypes.c_void_p, stage:gl_shader_stage, options:c.POINTER[nir_shader_compiler_options], si:c.POINTER[shader_info]) -> c.POINTER[nir_shader]: ...
+@dll.bind(None, c.POINTER[nir_shader], c.POINTER[nir_variable])
+def nir_shader_add_variable(shader:c.POINTER[nir_shader], var:c.POINTER[nir_variable]) -> None: ...
+@dll.bind(c.POINTER[nir_variable], c.POINTER[nir_shader], ctypes.c_uint32, c.POINTER[struct_glsl_type], c.POINTER[ctypes.c_char])
+def nir_variable_create(shader:c.POINTER[nir_shader], mode:ctypes.c_uint32, type:c.POINTER[struct_glsl_type], name:c.POINTER[ctypes.c_char]) -> c.POINTER[nir_variable]: ...
+@dll.bind(c.POINTER[nir_variable], c.POINTER[nir_function_impl], c.POINTER[struct_glsl_type], c.POINTER[ctypes.c_char])
+def nir_local_variable_create(impl:c.POINTER[nir_function_impl], type:c.POINTER[struct_glsl_type], name:c.POINTER[ctypes.c_char]) -> c.POINTER[nir_variable]: ...
+@dll.bind(c.POINTER[nir_variable], c.POINTER[nir_shader], c.POINTER[struct_glsl_type], c.POINTER[ctypes.c_char], c.Array[gl_state_index16, Literal[4]])
+def nir_state_variable_create(shader:c.POINTER[nir_shader], type:c.POINTER[struct_glsl_type], name:c.POINTER[ctypes.c_char], tokens:c.Array[gl_state_index16, Literal[4]]) -> c.POINTER[nir_variable]: ...
+@dll.bind(c.POINTER[nir_variable], c.POINTER[nir_shader], ctypes.c_uint32, ctypes.c_int32, c.POINTER[struct_glsl_type])
+def nir_get_variable_with_location(shader:c.POINTER[nir_shader], mode:ctypes.c_uint32, location:int, type:c.POINTER[struct_glsl_type]) -> c.POINTER[nir_variable]: ...
+@dll.bind(c.POINTER[nir_variable], c.POINTER[nir_shader], ctypes.c_uint32, ctypes.c_int32, c.POINTER[struct_glsl_type])
+def nir_create_variable_with_location(shader:c.POINTER[nir_shader], mode:ctypes.c_uint32, location:int, type:c.POINTER[struct_glsl_type]) -> c.POINTER[nir_variable]: ...
+@dll.bind(c.POINTER[nir_variable], c.POINTER[nir_shader], ctypes.c_uint32, ctypes.c_uint32)
+def nir_find_variable_with_location(shader:c.POINTER[nir_shader], mode:ctypes.c_uint32, location:int) -> c.POINTER[nir_variable]: ...
+@dll.bind(c.POINTER[nir_variable], c.POINTER[nir_shader], ctypes.c_uint32, ctypes.c_uint32)
+def nir_find_variable_with_driver_location(shader:c.POINTER[nir_shader], mode:ctypes.c_uint32, location:int) -> c.POINTER[nir_variable]: ...
+@dll.bind(c.POINTER[nir_variable], c.POINTER[nir_shader], c.Array[gl_state_index16, Literal[4]])
+def nir_find_state_variable(s:c.POINTER[nir_shader], tokens:c.Array[gl_state_index16, Literal[4]]) -> c.POINTER[nir_variable]: ...
+@dll.bind(c.POINTER[nir_variable], c.POINTER[nir_shader], ctypes.c_uint32)
+def nir_find_sampler_variable_with_tex_index(shader:c.POINTER[nir_shader], texture_index:int) -> c.POINTER[nir_variable]: ...
+@dll.bind(None, c.POINTER[nir_shader], c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[nir_variable], c.POINTER[nir_variable]]], ctypes.c_uint32)
+def nir_sort_variables_with_modes(shader:c.POINTER[nir_shader], compar:c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[nir_variable], c.POINTER[nir_variable]]], modes:ctypes.c_uint32) -> None: ...
+@dll.bind(c.POINTER[nir_function], c.POINTER[nir_shader], c.POINTER[ctypes.c_char])
+def nir_function_create(shader:c.POINTER[nir_shader], name:c.POINTER[ctypes.c_char]) -> c.POINTER[nir_function]: ...
+@dll.bind(c.POINTER[nir_function_impl], c.POINTER[nir_function])
+def nir_function_impl_create(func:c.POINTER[nir_function]) -> c.POINTER[nir_function_impl]: ...
+@dll.bind(c.POINTER[nir_function_impl], c.POINTER[nir_shader])
+def nir_function_impl_create_bare(shader:c.POINTER[nir_shader]) -> c.POINTER[nir_function_impl]: ...
+@dll.bind(c.POINTER[nir_block], c.POINTER[nir_shader])
+def nir_block_create(shader:c.POINTER[nir_shader]) -> c.POINTER[nir_block]: ...
+@dll.bind(c.POINTER[nir_if], c.POINTER[nir_shader])
+def nir_if_create(shader:c.POINTER[nir_shader]) -> c.POINTER[nir_if]: ...
+@dll.bind(c.POINTER[nir_loop], c.POINTER[nir_shader])
+def nir_loop_create(shader:c.POINTER[nir_shader]) -> c.POINTER[nir_loop]: ...
+@dll.bind(c.POINTER[nir_function_impl], c.POINTER[nir_cf_node])
+def nir_cf_node_get_function(node:c.POINTER[nir_cf_node]) -> c.POINTER[nir_function_impl]: ...
+@dll.bind(None, c.POINTER[nir_function_impl], ctypes.c_int32)
+def nir_metadata_require(impl:c.POINTER[nir_function_impl], required:ctypes.c_int32) -> None: ...
+@dll.bind(None, c.POINTER[nir_shader])
+def nir_shader_preserve_all_metadata(shader:c.POINTER[nir_shader]) -> None: ...
+@dll.bind(None, c.POINTER[nir_shader])
+def nir_metadata_invalidate(shader:c.POINTER[nir_shader]) -> None: ...
+@dll.bind(ctypes.c_bool, ctypes.c_bool, c.POINTER[nir_function_impl], ctypes.c_int32)
+def nir_progress(progress:bool, impl:c.POINTER[nir_function_impl], preserved:ctypes.c_int32) -> bool: ...
+@dll.bind(c.POINTER[nir_alu_instr], c.POINTER[nir_shader], ctypes.c_uint32)
+def nir_alu_instr_create(shader:c.POINTER[nir_shader], op:ctypes.c_uint32) -> c.POINTER[nir_alu_instr]: ...
+@dll.bind(c.POINTER[nir_deref_instr], c.POINTER[nir_shader], ctypes.c_uint32)
+def nir_deref_instr_create(shader:c.POINTER[nir_shader], deref_type:ctypes.c_uint32) -> c.POINTER[nir_deref_instr]: ...
+@dll.bind(c.POINTER[nir_jump_instr], c.POINTER[nir_shader], ctypes.c_uint32)
+def nir_jump_instr_create(shader:c.POINTER[nir_shader], type:ctypes.c_uint32) -> c.POINTER[nir_jump_instr]: ...
+@dll.bind(c.POINTER[nir_load_const_instr], c.POINTER[nir_shader], ctypes.c_uint32, ctypes.c_uint32)
+def nir_load_const_instr_create(shader:c.POINTER[nir_shader], num_components:int, bit_size:int) -> c.POINTER[nir_load_const_instr]: ...
+@dll.bind(c.POINTER[nir_intrinsic_instr], c.POINTER[nir_shader], ctypes.c_uint32)
+def nir_intrinsic_instr_create(shader:c.POINTER[nir_shader], op:ctypes.c_uint32) -> c.POINTER[nir_intrinsic_instr]: ...
+@dll.bind(c.POINTER[nir_call_instr], c.POINTER[nir_shader], c.POINTER[nir_function])
+def nir_call_instr_create(shader:c.POINTER[nir_shader], callee:c.POINTER[nir_function]) -> c.POINTER[nir_call_instr]: ...
+@dll.bind(c.POINTER[nir_tex_instr], c.POINTER[nir_shader], ctypes.c_uint32)
+def nir_tex_instr_create(shader:c.POINTER[nir_shader], num_srcs:int) -> c.POINTER[nir_tex_instr]: ...
+@dll.bind(c.POINTER[nir_phi_instr], c.POINTER[nir_shader])
+def nir_phi_instr_create(shader:c.POINTER[nir_shader]) -> c.POINTER[nir_phi_instr]: ...
+@dll.bind(c.POINTER[nir_phi_src], c.POINTER[nir_phi_instr], c.POINTER[nir_block], c.POINTER[nir_def])
+def nir_phi_instr_add_src(instr:c.POINTER[nir_phi_instr], pred:c.POINTER[nir_block], src:c.POINTER[nir_def]) -> c.POINTER[nir_phi_src]: ...
+@dll.bind(c.POINTER[nir_parallel_copy_instr], c.POINTER[nir_shader])
+def nir_parallel_copy_instr_create(shader:c.POINTER[nir_shader]) -> c.POINTER[nir_parallel_copy_instr]: ...
+@dll.bind(c.POINTER[nir_undef_instr], c.POINTER[nir_shader], ctypes.c_uint32, ctypes.c_uint32)
+def nir_undef_instr_create(shader:c.POINTER[nir_shader], num_components:int, bit_size:int) -> c.POINTER[nir_undef_instr]: ...
 @dll.bind(nir_const_value, ctypes.c_uint32, ctypes.c_uint32)
 def nir_alu_binop_identity(binop:ctypes.c_uint32, bit_size:int) -> nir_const_value: ...
 nir_cursor_option: dict[int, str] = {(nir_cursor_before_block:=0): 'nir_cursor_before_block', (nir_cursor_after_block:=1): 'nir_cursor_after_block', (nir_cursor_before_instr:=2): 'nir_cursor_before_instr', (nir_cursor_after_instr:=3): 'nir_cursor_after_instr'}
@@ -1339,134 +1339,134 @@ nir_cursor_option: dict[int, str] = {(nir_cursor_before_block:=0): 'nir_cursor_b
 class struct_nir_cursor(c.Struct):
   SIZE = 16
   option: int
-  block: ctypes._Pointer[struct_nir_block]
-  instr: ctypes._Pointer[struct_nir_instr]
-struct_nir_cursor.register_fields([('option', ctypes.c_uint32, 0), ('block', ctypes.POINTER(nir_block), 8), ('instr', ctypes.POINTER(nir_instr), 8)])
+  block: c.POINTER[struct_nir_block]
+  instr: c.POINTER[struct_nir_instr]
+struct_nir_cursor.register_fields([('option', ctypes.c_uint32, 0), ('block', c.POINTER[nir_block], 8), ('instr', c.POINTER[nir_instr], 8)])
 nir_cursor: TypeAlias = struct_nir_cursor
 @dll.bind(ctypes.c_bool, nir_cursor, nir_cursor)
 def nir_cursors_equal(a:nir_cursor, b:nir_cursor) -> bool: ...
-@dll.bind(None, nir_cursor, ctypes.POINTER(nir_instr))
-def nir_instr_insert(cursor:nir_cursor, instr:ctypes._Pointer[nir_instr]) -> None: ...
-@dll.bind(ctypes.c_bool, nir_cursor, ctypes.POINTER(nir_instr))
-def nir_instr_move(cursor:nir_cursor, instr:ctypes._Pointer[nir_instr]) -> bool: ...
-@dll.bind(None, ctypes.POINTER(nir_instr))
-def nir_instr_remove_v(instr:ctypes._Pointer[nir_instr]) -> None: ...
-@dll.bind(None, ctypes.POINTER(nir_instr))
-def nir_instr_free(instr:ctypes._Pointer[nir_instr]) -> None: ...
-@dll.bind(None, ctypes.POINTER(struct_exec_list))
-def nir_instr_free_list(list:ctypes._Pointer[struct_exec_list]) -> None: ...
-@dll.bind(nir_cursor, ctypes.POINTER(nir_instr))
-def nir_instr_free_and_dce(instr:ctypes._Pointer[nir_instr]) -> nir_cursor: ...
-@dll.bind(ctypes.POINTER(nir_def), ctypes.POINTER(nir_instr))
-def nir_instr_def(instr:ctypes._Pointer[nir_instr]) -> ctypes._Pointer[nir_def]: ...
-nir_foreach_def_cb: TypeAlias = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(struct_nir_def), ctypes.c_void_p)
-nir_foreach_src_cb: TypeAlias = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(struct_nir_src), ctypes.c_void_p)
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_block), nir_foreach_src_cb, ctypes.c_void_p)
-def nir_foreach_phi_src_leaving_block(instr:ctypes._Pointer[nir_block], cb:nir_foreach_src_cb, state:int|None) -> bool: ...
-@dll.bind(ctypes.POINTER(nir_const_value), nir_src)
-def nir_src_as_const_value(src:nir_src) -> ctypes._Pointer[nir_const_value]: ...
-@dll.bind(ctypes.POINTER(ctypes.c_char), nir_src)
-def nir_src_as_string(src:nir_src) -> ctypes._Pointer[ctypes.c_char]: ...
+@dll.bind(None, nir_cursor, c.POINTER[nir_instr])
+def nir_instr_insert(cursor:nir_cursor, instr:c.POINTER[nir_instr]) -> None: ...
+@dll.bind(ctypes.c_bool, nir_cursor, c.POINTER[nir_instr])
+def nir_instr_move(cursor:nir_cursor, instr:c.POINTER[nir_instr]) -> bool: ...
+@dll.bind(None, c.POINTER[nir_instr])
+def nir_instr_remove_v(instr:c.POINTER[nir_instr]) -> None: ...
+@dll.bind(None, c.POINTER[nir_instr])
+def nir_instr_free(instr:c.POINTER[nir_instr]) -> None: ...
+@dll.bind(None, c.POINTER[struct_exec_list])
+def nir_instr_free_list(list:c.POINTER[struct_exec_list]) -> None: ...
+@dll.bind(nir_cursor, c.POINTER[nir_instr])
+def nir_instr_free_and_dce(instr:c.POINTER[nir_instr]) -> nir_cursor: ...
+@dll.bind(c.POINTER[nir_def], c.POINTER[nir_instr])
+def nir_instr_def(instr:c.POINTER[nir_instr]) -> c.POINTER[nir_def]: ...
+nir_foreach_def_cb: TypeAlias = c.CFUNCTYPE[ctypes.c_bool, [c.POINTER[struct_nir_def], ctypes.c_void_p]]
+nir_foreach_src_cb: TypeAlias = c.CFUNCTYPE[ctypes.c_bool, [c.POINTER[struct_nir_src], ctypes.c_void_p]]
+@dll.bind(ctypes.c_bool, c.POINTER[nir_block], nir_foreach_src_cb, ctypes.c_void_p)
+def nir_foreach_phi_src_leaving_block(instr:c.POINTER[nir_block], cb:nir_foreach_src_cb, state:ctypes.c_void_p) -> bool: ...
+@dll.bind(c.POINTER[nir_const_value], nir_src)
+def nir_src_as_const_value(src:nir_src) -> c.POINTER[nir_const_value]: ...
+@dll.bind(c.POINTER[ctypes.c_char], nir_src)
+def nir_src_as_string(src:nir_src) -> c.POINTER[ctypes.c_char]: ...
 @dll.bind(ctypes.c_bool, nir_src)
 def nir_src_is_always_uniform(src:nir_src) -> bool: ...
 @dll.bind(ctypes.c_bool, nir_src, nir_src)
 def nir_srcs_equal(src1:nir_src, src2:nir_src) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_instr), ctypes.POINTER(nir_instr))
-def nir_instrs_equal(instr1:ctypes._Pointer[nir_instr], instr2:ctypes._Pointer[nir_instr]) -> bool: ...
-@dll.bind(ctypes.POINTER(nir_block), ctypes.POINTER(nir_src))
-def nir_src_get_block(src:ctypes._Pointer[nir_src]) -> ctypes._Pointer[nir_block]: ...
-@dll.bind(None, ctypes.POINTER(nir_instr), ctypes.POINTER(nir_src), ctypes.POINTER(nir_def))
-def nir_instr_init_src(instr:ctypes._Pointer[nir_instr], src:ctypes._Pointer[nir_src], _def:ctypes._Pointer[nir_def]) -> None: ...
-@dll.bind(None, ctypes.POINTER(nir_instr), ctypes.POINTER(nir_src))
-def nir_instr_clear_src(instr:ctypes._Pointer[nir_instr], src:ctypes._Pointer[nir_src]) -> None: ...
-@dll.bind(None, ctypes.POINTER(nir_instr), ctypes.POINTER(nir_src), ctypes.POINTER(nir_src))
-def nir_instr_move_src(dest_instr:ctypes._Pointer[nir_instr], dest:ctypes._Pointer[nir_src], src:ctypes._Pointer[nir_src]) -> None: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_instr), ctypes.POINTER(nir_instr))
-def nir_instr_is_before(first:ctypes._Pointer[nir_instr], second:ctypes._Pointer[nir_instr]) -> bool: ...
-@dll.bind(None, ctypes.POINTER(nir_instr), ctypes.POINTER(nir_def), ctypes.c_uint32, ctypes.c_uint32)
-def nir_def_init(instr:ctypes._Pointer[nir_instr], _def:ctypes._Pointer[nir_def], num_components:int, bit_size:int) -> None: ...
-@dll.bind(None, ctypes.POINTER(nir_def), ctypes.POINTER(nir_def))
-def nir_def_rewrite_uses(_def:ctypes._Pointer[nir_def], new_ssa:ctypes._Pointer[nir_def]) -> None: ...
-@dll.bind(None, ctypes.POINTER(nir_def), nir_src)
-def nir_def_rewrite_uses_src(_def:ctypes._Pointer[nir_def], new_src:nir_src) -> None: ...
-@dll.bind(None, ctypes.POINTER(nir_def), ctypes.POINTER(nir_def), ctypes.POINTER(nir_instr))
-def nir_def_rewrite_uses_after(_def:ctypes._Pointer[nir_def], new_ssa:ctypes._Pointer[nir_def], after_me:ctypes._Pointer[nir_instr]) -> None: ...
-@dll.bind(nir_component_mask_t, ctypes.POINTER(nir_src))
-def nir_src_components_read(src:ctypes._Pointer[nir_src]) -> nir_component_mask_t: ...
-@dll.bind(nir_component_mask_t, ctypes.POINTER(nir_def))
-def nir_def_components_read(_def:ctypes._Pointer[nir_def]) -> nir_component_mask_t: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_def))
-def nir_def_all_uses_are_fsat(_def:ctypes._Pointer[nir_def]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_def))
-def nir_def_all_uses_ignore_sign_bit(_def:ctypes._Pointer[nir_def]) -> bool: ...
-@dll.bind(None, ctypes.POINTER(nir_function_impl))
-def nir_sort_unstructured_blocks(impl:ctypes._Pointer[nir_function_impl]) -> None: ...
-@dll.bind(ctypes.POINTER(nir_block), ctypes.POINTER(nir_block))
-def nir_block_unstructured_next(block:ctypes._Pointer[nir_block]) -> ctypes._Pointer[nir_block]: ...
-@dll.bind(ctypes.POINTER(nir_block), ctypes.POINTER(nir_function_impl))
-def nir_unstructured_start_block(impl:ctypes._Pointer[nir_function_impl]) -> ctypes._Pointer[nir_block]: ...
-@dll.bind(ctypes.POINTER(nir_block), ctypes.POINTER(nir_block))
-def nir_block_cf_tree_next(block:ctypes._Pointer[nir_block]) -> ctypes._Pointer[nir_block]: ...
-@dll.bind(ctypes.POINTER(nir_block), ctypes.POINTER(nir_block))
-def nir_block_cf_tree_prev(block:ctypes._Pointer[nir_block]) -> ctypes._Pointer[nir_block]: ...
-@dll.bind(ctypes.POINTER(nir_block), ctypes.POINTER(nir_cf_node))
-def nir_cf_node_cf_tree_first(node:ctypes._Pointer[nir_cf_node]) -> ctypes._Pointer[nir_block]: ...
-@dll.bind(ctypes.POINTER(nir_block), ctypes.POINTER(nir_cf_node))
-def nir_cf_node_cf_tree_last(node:ctypes._Pointer[nir_cf_node]) -> ctypes._Pointer[nir_block]: ...
-@dll.bind(ctypes.POINTER(nir_block), ctypes.POINTER(nir_cf_node))
-def nir_cf_node_cf_tree_next(node:ctypes._Pointer[nir_cf_node]) -> ctypes._Pointer[nir_block]: ...
-@dll.bind(ctypes.POINTER(nir_block), ctypes.POINTER(nir_cf_node))
-def nir_cf_node_cf_tree_prev(node:ctypes._Pointer[nir_cf_node]) -> ctypes._Pointer[nir_block]: ...
-@dll.bind(ctypes.POINTER(nir_if), ctypes.POINTER(nir_block))
-def nir_block_get_following_if(block:ctypes._Pointer[nir_block]) -> ctypes._Pointer[nir_if]: ...
-@dll.bind(ctypes.POINTER(nir_loop), ctypes.POINTER(nir_block))
-def nir_block_get_following_loop(block:ctypes._Pointer[nir_block]) -> ctypes._Pointer[nir_loop]: ...
-@dll.bind(ctypes.POINTER(ctypes.POINTER(nir_block)), ctypes.POINTER(nir_block), ctypes.c_void_p)
-def nir_block_get_predecessors_sorted(block:ctypes._Pointer[nir_block], mem_ctx:int|None) -> ctypes._Pointer[ctypes.POINTER(nir_block)]: ...
-@dll.bind(None, ctypes.POINTER(nir_function_impl))
-def nir_index_ssa_defs(impl:ctypes._Pointer[nir_function_impl]) -> None: ...
-@dll.bind(ctypes.c_uint32, ctypes.POINTER(nir_function_impl))
-def nir_index_instrs(impl:ctypes._Pointer[nir_function_impl]) -> int: ...
-@dll.bind(None, ctypes.POINTER(nir_function_impl))
-def nir_index_blocks(impl:ctypes._Pointer[nir_function_impl]) -> None: ...
-@dll.bind(None, ctypes.POINTER(nir_shader))
-def nir_shader_clear_pass_flags(shader:ctypes._Pointer[nir_shader]) -> None: ...
-@dll.bind(ctypes.c_uint32, ctypes.POINTER(nir_shader), ctypes.c_uint32)
-def nir_shader_index_vars(shader:ctypes._Pointer[nir_shader], modes:ctypes.c_uint32) -> int: ...
-@dll.bind(ctypes.c_uint32, ctypes.POINTER(nir_function_impl))
-def nir_function_impl_index_vars(impl:ctypes._Pointer[nir_function_impl]) -> int: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_instr], c.POINTER[nir_instr])
+def nir_instrs_equal(instr1:c.POINTER[nir_instr], instr2:c.POINTER[nir_instr]) -> bool: ...
+@dll.bind(c.POINTER[nir_block], c.POINTER[nir_src])
+def nir_src_get_block(src:c.POINTER[nir_src]) -> c.POINTER[nir_block]: ...
+@dll.bind(None, c.POINTER[nir_instr], c.POINTER[nir_src], c.POINTER[nir_def])
+def nir_instr_init_src(instr:c.POINTER[nir_instr], src:c.POINTER[nir_src], _def:c.POINTER[nir_def]) -> None: ...
+@dll.bind(None, c.POINTER[nir_instr], c.POINTER[nir_src])
+def nir_instr_clear_src(instr:c.POINTER[nir_instr], src:c.POINTER[nir_src]) -> None: ...
+@dll.bind(None, c.POINTER[nir_instr], c.POINTER[nir_src], c.POINTER[nir_src])
+def nir_instr_move_src(dest_instr:c.POINTER[nir_instr], dest:c.POINTER[nir_src], src:c.POINTER[nir_src]) -> None: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_instr], c.POINTER[nir_instr])
+def nir_instr_is_before(first:c.POINTER[nir_instr], second:c.POINTER[nir_instr]) -> bool: ...
+@dll.bind(None, c.POINTER[nir_instr], c.POINTER[nir_def], ctypes.c_uint32, ctypes.c_uint32)
+def nir_def_init(instr:c.POINTER[nir_instr], _def:c.POINTER[nir_def], num_components:int, bit_size:int) -> None: ...
+@dll.bind(None, c.POINTER[nir_def], c.POINTER[nir_def])
+def nir_def_rewrite_uses(_def:c.POINTER[nir_def], new_ssa:c.POINTER[nir_def]) -> None: ...
+@dll.bind(None, c.POINTER[nir_def], nir_src)
+def nir_def_rewrite_uses_src(_def:c.POINTER[nir_def], new_src:nir_src) -> None: ...
+@dll.bind(None, c.POINTER[nir_def], c.POINTER[nir_def], c.POINTER[nir_instr])
+def nir_def_rewrite_uses_after(_def:c.POINTER[nir_def], new_ssa:c.POINTER[nir_def], after_me:c.POINTER[nir_instr]) -> None: ...
+@dll.bind(nir_component_mask_t, c.POINTER[nir_src])
+def nir_src_components_read(src:c.POINTER[nir_src]) -> nir_component_mask_t: ...
+@dll.bind(nir_component_mask_t, c.POINTER[nir_def])
+def nir_def_components_read(_def:c.POINTER[nir_def]) -> nir_component_mask_t: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_def])
+def nir_def_all_uses_are_fsat(_def:c.POINTER[nir_def]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_def])
+def nir_def_all_uses_ignore_sign_bit(_def:c.POINTER[nir_def]) -> bool: ...
+@dll.bind(None, c.POINTER[nir_function_impl])
+def nir_sort_unstructured_blocks(impl:c.POINTER[nir_function_impl]) -> None: ...
+@dll.bind(c.POINTER[nir_block], c.POINTER[nir_block])
+def nir_block_unstructured_next(block:c.POINTER[nir_block]) -> c.POINTER[nir_block]: ...
+@dll.bind(c.POINTER[nir_block], c.POINTER[nir_function_impl])
+def nir_unstructured_start_block(impl:c.POINTER[nir_function_impl]) -> c.POINTER[nir_block]: ...
+@dll.bind(c.POINTER[nir_block], c.POINTER[nir_block])
+def nir_block_cf_tree_next(block:c.POINTER[nir_block]) -> c.POINTER[nir_block]: ...
+@dll.bind(c.POINTER[nir_block], c.POINTER[nir_block])
+def nir_block_cf_tree_prev(block:c.POINTER[nir_block]) -> c.POINTER[nir_block]: ...
+@dll.bind(c.POINTER[nir_block], c.POINTER[nir_cf_node])
+def nir_cf_node_cf_tree_first(node:c.POINTER[nir_cf_node]) -> c.POINTER[nir_block]: ...
+@dll.bind(c.POINTER[nir_block], c.POINTER[nir_cf_node])
+def nir_cf_node_cf_tree_last(node:c.POINTER[nir_cf_node]) -> c.POINTER[nir_block]: ...
+@dll.bind(c.POINTER[nir_block], c.POINTER[nir_cf_node])
+def nir_cf_node_cf_tree_next(node:c.POINTER[nir_cf_node]) -> c.POINTER[nir_block]: ...
+@dll.bind(c.POINTER[nir_block], c.POINTER[nir_cf_node])
+def nir_cf_node_cf_tree_prev(node:c.POINTER[nir_cf_node]) -> c.POINTER[nir_block]: ...
+@dll.bind(c.POINTER[nir_if], c.POINTER[nir_block])
+def nir_block_get_following_if(block:c.POINTER[nir_block]) -> c.POINTER[nir_if]: ...
+@dll.bind(c.POINTER[nir_loop], c.POINTER[nir_block])
+def nir_block_get_following_loop(block:c.POINTER[nir_block]) -> c.POINTER[nir_loop]: ...
+@dll.bind(c.POINTER[c.POINTER[nir_block]], c.POINTER[nir_block], ctypes.c_void_p)
+def nir_block_get_predecessors_sorted(block:c.POINTER[nir_block], mem_ctx:ctypes.c_void_p) -> c.POINTER[c.POINTER[nir_block]]: ...
+@dll.bind(None, c.POINTER[nir_function_impl])
+def nir_index_ssa_defs(impl:c.POINTER[nir_function_impl]) -> None: ...
+@dll.bind(ctypes.c_uint32, c.POINTER[nir_function_impl])
+def nir_index_instrs(impl:c.POINTER[nir_function_impl]) -> int: ...
+@dll.bind(None, c.POINTER[nir_function_impl])
+def nir_index_blocks(impl:c.POINTER[nir_function_impl]) -> None: ...
+@dll.bind(None, c.POINTER[nir_shader])
+def nir_shader_clear_pass_flags(shader:c.POINTER[nir_shader]) -> None: ...
+@dll.bind(ctypes.c_uint32, c.POINTER[nir_shader], ctypes.c_uint32)
+def nir_shader_index_vars(shader:c.POINTER[nir_shader], modes:ctypes.c_uint32) -> int: ...
+@dll.bind(ctypes.c_uint32, c.POINTER[nir_function_impl])
+def nir_function_impl_index_vars(impl:c.POINTER[nir_function_impl]) -> int: ...
 @c.record
 class struct__IO_FILE(c.Struct):
   SIZE = 216
   _flags: int
-  _IO_read_ptr: ctypes._Pointer[ctypes.c_char]
-  _IO_read_end: ctypes._Pointer[ctypes.c_char]
-  _IO_read_base: ctypes._Pointer[ctypes.c_char]
-  _IO_write_base: ctypes._Pointer[ctypes.c_char]
-  _IO_write_ptr: ctypes._Pointer[ctypes.c_char]
-  _IO_write_end: ctypes._Pointer[ctypes.c_char]
-  _IO_buf_base: ctypes._Pointer[ctypes.c_char]
-  _IO_buf_end: ctypes._Pointer[ctypes.c_char]
-  _IO_save_base: ctypes._Pointer[ctypes.c_char]
-  _IO_backup_base: ctypes._Pointer[ctypes.c_char]
-  _IO_save_end: ctypes._Pointer[ctypes.c_char]
-  _markers: ctypes._Pointer[struct__IO_marker]
-  _chain: ctypes._Pointer[struct__IO_FILE]
+  _IO_read_ptr: c.POINTER[ctypes.c_char]
+  _IO_read_end: c.POINTER[ctypes.c_char]
+  _IO_read_base: c.POINTER[ctypes.c_char]
+  _IO_write_base: c.POINTER[ctypes.c_char]
+  _IO_write_ptr: c.POINTER[ctypes.c_char]
+  _IO_write_end: c.POINTER[ctypes.c_char]
+  _IO_buf_base: c.POINTER[ctypes.c_char]
+  _IO_buf_end: c.POINTER[ctypes.c_char]
+  _IO_save_base: c.POINTER[ctypes.c_char]
+  _IO_backup_base: c.POINTER[ctypes.c_char]
+  _IO_save_end: c.POINTER[ctypes.c_char]
+  _markers: c.POINTER[struct__IO_marker]
+  _chain: c.POINTER[struct__IO_FILE]
   _fileno: int
   _flags2: int
   _old_offset: ctypes.c_int64
   _cur_column: int
   _vtable_offset: int
-  _shortbuf: ctypes.Array[ctypes.c_char]
-  _lock: int|None
+  _shortbuf: c.Array[ctypes.c_char, Literal[1]]
+  _lock: ctypes.c_void_p
   _offset: ctypes.c_int64
-  _codecvt: ctypes._Pointer[struct__IO_codecvt]
-  _wide_data: ctypes._Pointer[struct__IO_wide_data]
-  _freeres_list: ctypes._Pointer[struct__IO_FILE]
-  _freeres_buf: int|None
+  _codecvt: c.POINTER[struct__IO_codecvt]
+  _wide_data: c.POINTER[struct__IO_wide_data]
+  _freeres_list: c.POINTER[struct__IO_FILE]
+  _freeres_buf: ctypes.c_void_p
   __pad5: int
   _mode: int
-  _unused2: ctypes.Array[ctypes.c_char]
+  _unused2: c.Array[ctypes.c_char, Literal[20]]
 FILE: TypeAlias = struct__IO_FILE
 class struct__IO_marker(c.Struct): pass
 __off_t: TypeAlias = ctypes.c_int64
@@ -1475,195 +1475,195 @@ __off64_t: TypeAlias = ctypes.c_int64
 class struct__IO_codecvt(c.Struct): pass
 class struct__IO_wide_data(c.Struct): pass
 size_t: TypeAlias = ctypes.c_uint64
-struct__IO_FILE.register_fields([('_flags', ctypes.c_int32, 0), ('_IO_read_ptr', ctypes.POINTER(ctypes.c_char), 8), ('_IO_read_end', ctypes.POINTER(ctypes.c_char), 16), ('_IO_read_base', ctypes.POINTER(ctypes.c_char), 24), ('_IO_write_base', ctypes.POINTER(ctypes.c_char), 32), ('_IO_write_ptr', ctypes.POINTER(ctypes.c_char), 40), ('_IO_write_end', ctypes.POINTER(ctypes.c_char), 48), ('_IO_buf_base', ctypes.POINTER(ctypes.c_char), 56), ('_IO_buf_end', ctypes.POINTER(ctypes.c_char), 64), ('_IO_save_base', ctypes.POINTER(ctypes.c_char), 72), ('_IO_backup_base', ctypes.POINTER(ctypes.c_char), 80), ('_IO_save_end', ctypes.POINTER(ctypes.c_char), 88), ('_markers', ctypes.POINTER(struct__IO_marker), 96), ('_chain', ctypes.POINTER(struct__IO_FILE), 104), ('_fileno', ctypes.c_int32, 112), ('_flags2', ctypes.c_int32, 116), ('_old_offset', ctypes.c_int64, 120), ('_cur_column', ctypes.c_uint16, 128), ('_vtable_offset', ctypes.c_byte, 130), ('_shortbuf', (ctypes.c_char * 1), 131), ('_lock', ctypes.POINTER(_IO_lock_t), 136), ('_offset', ctypes.c_int64, 144), ('_codecvt', ctypes.POINTER(struct__IO_codecvt), 152), ('_wide_data', ctypes.POINTER(struct__IO_wide_data), 160), ('_freeres_list', ctypes.POINTER(struct__IO_FILE), 168), ('_freeres_buf', ctypes.c_void_p, 176), ('__pad5', size_t, 184), ('_mode', ctypes.c_int32, 192), ('_unused2', (ctypes.c_char * 20), 196)])
-@dll.bind(None, ctypes.POINTER(nir_shader), ctypes.POINTER(FILE))
-def nir_print_shader(shader:ctypes._Pointer[nir_shader], fp:ctypes._Pointer[FILE]) -> None: ...
-@dll.bind(None, ctypes.POINTER(nir_function_impl), ctypes.POINTER(FILE))
-def nir_print_function_body(impl:ctypes._Pointer[nir_function_impl], fp:ctypes._Pointer[FILE]) -> None: ...
-@dll.bind(None, ctypes.POINTER(nir_shader), ctypes.POINTER(FILE), ctypes.POINTER(struct_hash_table))
-def nir_print_shader_annotated(shader:ctypes._Pointer[nir_shader], fp:ctypes._Pointer[FILE], errors:ctypes._Pointer[struct_hash_table]) -> None: ...
-@dll.bind(None, ctypes.POINTER(nir_instr), ctypes.POINTER(FILE))
-def nir_print_instr(instr:ctypes._Pointer[nir_instr], fp:ctypes._Pointer[FILE]) -> None: ...
-@dll.bind(None, ctypes.POINTER(nir_deref_instr), ctypes.POINTER(FILE))
-def nir_print_deref(deref:ctypes._Pointer[nir_deref_instr], fp:ctypes._Pointer[FILE]) -> None: ...
+struct__IO_FILE.register_fields([('_flags', ctypes.c_int32, 0), ('_IO_read_ptr', c.POINTER[ctypes.c_char], 8), ('_IO_read_end', c.POINTER[ctypes.c_char], 16), ('_IO_read_base', c.POINTER[ctypes.c_char], 24), ('_IO_write_base', c.POINTER[ctypes.c_char], 32), ('_IO_write_ptr', c.POINTER[ctypes.c_char], 40), ('_IO_write_end', c.POINTER[ctypes.c_char], 48), ('_IO_buf_base', c.POINTER[ctypes.c_char], 56), ('_IO_buf_end', c.POINTER[ctypes.c_char], 64), ('_IO_save_base', c.POINTER[ctypes.c_char], 72), ('_IO_backup_base', c.POINTER[ctypes.c_char], 80), ('_IO_save_end', c.POINTER[ctypes.c_char], 88), ('_markers', c.POINTER[struct__IO_marker], 96), ('_chain', c.POINTER[struct__IO_FILE], 104), ('_fileno', ctypes.c_int32, 112), ('_flags2', ctypes.c_int32, 116), ('_old_offset', ctypes.c_int64, 120), ('_cur_column', ctypes.c_uint16, 128), ('_vtable_offset', ctypes.c_byte, 130), ('_shortbuf', c.Array[ctypes.c_char, Literal[1]], 131), ('_lock', c.POINTER[_IO_lock_t], 136), ('_offset', ctypes.c_int64, 144), ('_codecvt', c.POINTER[struct__IO_codecvt], 152), ('_wide_data', c.POINTER[struct__IO_wide_data], 160), ('_freeres_list', c.POINTER[struct__IO_FILE], 168), ('_freeres_buf', ctypes.c_void_p, 176), ('__pad5', size_t, 184), ('_mode', ctypes.c_int32, 192), ('_unused2', c.Array[ctypes.c_char, Literal[20]], 196)])
+@dll.bind(None, c.POINTER[nir_shader], c.POINTER[FILE])
+def nir_print_shader(shader:c.POINTER[nir_shader], fp:c.POINTER[FILE]) -> None: ...
+@dll.bind(None, c.POINTER[nir_function_impl], c.POINTER[FILE])
+def nir_print_function_body(impl:c.POINTER[nir_function_impl], fp:c.POINTER[FILE]) -> None: ...
+@dll.bind(None, c.POINTER[nir_shader], c.POINTER[FILE], c.POINTER[struct_hash_table])
+def nir_print_shader_annotated(shader:c.POINTER[nir_shader], fp:c.POINTER[FILE], errors:c.POINTER[struct_hash_table]) -> None: ...
+@dll.bind(None, c.POINTER[nir_instr], c.POINTER[FILE])
+def nir_print_instr(instr:c.POINTER[nir_instr], fp:c.POINTER[FILE]) -> None: ...
+@dll.bind(None, c.POINTER[nir_deref_instr], c.POINTER[FILE])
+def nir_print_deref(deref:c.POINTER[nir_deref_instr], fp:c.POINTER[FILE]) -> None: ...
 enum_mesa_log_level: dict[int, str] = {(MESA_LOG_ERROR:=0): 'MESA_LOG_ERROR', (MESA_LOG_WARN:=1): 'MESA_LOG_WARN', (MESA_LOG_INFO:=2): 'MESA_LOG_INFO', (MESA_LOG_DEBUG:=3): 'MESA_LOG_DEBUG'}
-@dll.bind(None, ctypes.c_uint32, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(nir_shader), ctypes.POINTER(struct_hash_table))
-def nir_log_shader_annotated_tagged(level:ctypes.c_uint32, tag:ctypes._Pointer[ctypes.c_char], shader:ctypes._Pointer[nir_shader], annotations:ctypes._Pointer[struct_hash_table]) -> None: ...
-@dll.bind(ctypes.POINTER(ctypes.c_char), ctypes.POINTER(nir_shader), ctypes.c_void_p)
-def nir_shader_as_str(nir:ctypes._Pointer[nir_shader], mem_ctx:int|None) -> ctypes._Pointer[ctypes.c_char]: ...
-@dll.bind(ctypes.POINTER(ctypes.c_char), ctypes.POINTER(nir_shader), ctypes.POINTER(struct_hash_table), ctypes.c_void_p)
-def nir_shader_as_str_annotated(nir:ctypes._Pointer[nir_shader], annotations:ctypes._Pointer[struct_hash_table], mem_ctx:int|None) -> ctypes._Pointer[ctypes.c_char]: ...
-@dll.bind(ctypes.POINTER(ctypes.c_char), ctypes.POINTER(nir_instr), ctypes.c_void_p)
-def nir_instr_as_str(instr:ctypes._Pointer[nir_instr], mem_ctx:int|None) -> ctypes._Pointer[ctypes.c_char]: ...
-@dll.bind(ctypes.POINTER(ctypes.c_char), ctypes.POINTER(nir_shader), ctypes.POINTER(ctypes.c_char), uint32_t)
-def nir_shader_gather_debug_info(shader:ctypes._Pointer[nir_shader], filename:ctypes._Pointer[ctypes.c_char], first_line:uint32_t) -> ctypes._Pointer[ctypes.c_char]: ...
-@dll.bind(ctypes.POINTER(nir_instr), ctypes.POINTER(nir_shader), ctypes.POINTER(nir_instr))
-def nir_instr_clone(s:ctypes._Pointer[nir_shader], orig:ctypes._Pointer[nir_instr]) -> ctypes._Pointer[nir_instr]: ...
-@dll.bind(ctypes.POINTER(nir_instr), ctypes.POINTER(nir_shader), ctypes.POINTER(nir_instr), ctypes.POINTER(struct_hash_table))
-def nir_instr_clone_deep(s:ctypes._Pointer[nir_shader], orig:ctypes._Pointer[nir_instr], remap_table:ctypes._Pointer[struct_hash_table]) -> ctypes._Pointer[nir_instr]: ...
-@dll.bind(ctypes.POINTER(nir_alu_instr), ctypes.POINTER(nir_shader), ctypes.POINTER(nir_alu_instr))
-def nir_alu_instr_clone(s:ctypes._Pointer[nir_shader], orig:ctypes._Pointer[nir_alu_instr]) -> ctypes._Pointer[nir_alu_instr]: ...
-@dll.bind(ctypes.POINTER(nir_shader), ctypes.c_void_p, ctypes.POINTER(nir_shader))
-def nir_shader_clone(mem_ctx:int|None, s:ctypes._Pointer[nir_shader]) -> ctypes._Pointer[nir_shader]: ...
-@dll.bind(ctypes.POINTER(nir_function), ctypes.POINTER(nir_shader), ctypes.POINTER(nir_function))
-def nir_function_clone(ns:ctypes._Pointer[nir_shader], fxn:ctypes._Pointer[nir_function]) -> ctypes._Pointer[nir_function]: ...
-@dll.bind(ctypes.POINTER(nir_function_impl), ctypes.POINTER(nir_shader), ctypes.POINTER(nir_function_impl))
-def nir_function_impl_clone(shader:ctypes._Pointer[nir_shader], fi:ctypes._Pointer[nir_function_impl]) -> ctypes._Pointer[nir_function_impl]: ...
-@dll.bind(ctypes.POINTER(nir_function_impl), ctypes.POINTER(nir_shader), ctypes.POINTER(nir_function_impl), ctypes.POINTER(struct_hash_table))
-def nir_function_impl_clone_remap_globals(shader:ctypes._Pointer[nir_shader], fi:ctypes._Pointer[nir_function_impl], remap_table:ctypes._Pointer[struct_hash_table]) -> ctypes._Pointer[nir_function_impl]: ...
-@dll.bind(ctypes.POINTER(nir_constant), ctypes.POINTER(nir_constant), ctypes.POINTER(nir_variable))
-def nir_constant_clone(c:ctypes._Pointer[nir_constant], var:ctypes._Pointer[nir_variable]) -> ctypes._Pointer[nir_constant]: ...
-@dll.bind(ctypes.POINTER(nir_variable), ctypes.POINTER(nir_variable), ctypes.POINTER(nir_shader))
-def nir_variable_clone(c:ctypes._Pointer[nir_variable], shader:ctypes._Pointer[nir_shader]) -> ctypes._Pointer[nir_variable]: ...
-@dll.bind(None, ctypes.POINTER(nir_shader), ctypes.POINTER(nir_shader))
-def nir_shader_replace(dest:ctypes._Pointer[nir_shader], src:ctypes._Pointer[nir_shader]) -> None: ...
-@dll.bind(None, ctypes.POINTER(nir_shader))
-def nir_shader_serialize_deserialize(s:ctypes._Pointer[nir_shader]) -> None: ...
-@dll.bind(None, ctypes.POINTER(nir_shader), ctypes.POINTER(ctypes.c_char))
-def nir_validate_shader(shader:ctypes._Pointer[nir_shader], when:ctypes._Pointer[ctypes.c_char]) -> None: ...
-@dll.bind(None, ctypes.POINTER(nir_shader), ctypes.POINTER(ctypes.c_char))
-def nir_validate_ssa_dominance(shader:ctypes._Pointer[nir_shader], when:ctypes._Pointer[ctypes.c_char]) -> None: ...
-@dll.bind(None, ctypes.POINTER(nir_shader))
-def nir_metadata_set_validation_flag(shader:ctypes._Pointer[nir_shader]) -> None: ...
-@dll.bind(None, ctypes.POINTER(nir_shader))
-def nir_metadata_check_validation_flag(shader:ctypes._Pointer[nir_shader]) -> None: ...
-@dll.bind(None, ctypes.POINTER(nir_shader))
-def nir_metadata_require_all(shader:ctypes._Pointer[nir_shader]) -> None: ...
-nir_instr_writemask_filter_cb: TypeAlias = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(struct_nir_instr), ctypes.c_uint32, ctypes.c_void_p)
+@dll.bind(None, ctypes.c_uint32, c.POINTER[ctypes.c_char], c.POINTER[nir_shader], c.POINTER[struct_hash_table])
+def nir_log_shader_annotated_tagged(level:ctypes.c_uint32, tag:c.POINTER[ctypes.c_char], shader:c.POINTER[nir_shader], annotations:c.POINTER[struct_hash_table]) -> None: ...
+@dll.bind(c.POINTER[ctypes.c_char], c.POINTER[nir_shader], ctypes.c_void_p)
+def nir_shader_as_str(nir:c.POINTER[nir_shader], mem_ctx:ctypes.c_void_p) -> c.POINTER[ctypes.c_char]: ...
+@dll.bind(c.POINTER[ctypes.c_char], c.POINTER[nir_shader], c.POINTER[struct_hash_table], ctypes.c_void_p)
+def nir_shader_as_str_annotated(nir:c.POINTER[nir_shader], annotations:c.POINTER[struct_hash_table], mem_ctx:ctypes.c_void_p) -> c.POINTER[ctypes.c_char]: ...
+@dll.bind(c.POINTER[ctypes.c_char], c.POINTER[nir_instr], ctypes.c_void_p)
+def nir_instr_as_str(instr:c.POINTER[nir_instr], mem_ctx:ctypes.c_void_p) -> c.POINTER[ctypes.c_char]: ...
+@dll.bind(c.POINTER[ctypes.c_char], c.POINTER[nir_shader], c.POINTER[ctypes.c_char], uint32_t)
+def nir_shader_gather_debug_info(shader:c.POINTER[nir_shader], filename:c.POINTER[ctypes.c_char], first_line:uint32_t) -> c.POINTER[ctypes.c_char]: ...
+@dll.bind(c.POINTER[nir_instr], c.POINTER[nir_shader], c.POINTER[nir_instr])
+def nir_instr_clone(s:c.POINTER[nir_shader], orig:c.POINTER[nir_instr]) -> c.POINTER[nir_instr]: ...
+@dll.bind(c.POINTER[nir_instr], c.POINTER[nir_shader], c.POINTER[nir_instr], c.POINTER[struct_hash_table])
+def nir_instr_clone_deep(s:c.POINTER[nir_shader], orig:c.POINTER[nir_instr], remap_table:c.POINTER[struct_hash_table]) -> c.POINTER[nir_instr]: ...
+@dll.bind(c.POINTER[nir_alu_instr], c.POINTER[nir_shader], c.POINTER[nir_alu_instr])
+def nir_alu_instr_clone(s:c.POINTER[nir_shader], orig:c.POINTER[nir_alu_instr]) -> c.POINTER[nir_alu_instr]: ...
+@dll.bind(c.POINTER[nir_shader], ctypes.c_void_p, c.POINTER[nir_shader])
+def nir_shader_clone(mem_ctx:ctypes.c_void_p, s:c.POINTER[nir_shader]) -> c.POINTER[nir_shader]: ...
+@dll.bind(c.POINTER[nir_function], c.POINTER[nir_shader], c.POINTER[nir_function])
+def nir_function_clone(ns:c.POINTER[nir_shader], fxn:c.POINTER[nir_function]) -> c.POINTER[nir_function]: ...
+@dll.bind(c.POINTER[nir_function_impl], c.POINTER[nir_shader], c.POINTER[nir_function_impl])
+def nir_function_impl_clone(shader:c.POINTER[nir_shader], fi:c.POINTER[nir_function_impl]) -> c.POINTER[nir_function_impl]: ...
+@dll.bind(c.POINTER[nir_function_impl], c.POINTER[nir_shader], c.POINTER[nir_function_impl], c.POINTER[struct_hash_table])
+def nir_function_impl_clone_remap_globals(shader:c.POINTER[nir_shader], fi:c.POINTER[nir_function_impl], remap_table:c.POINTER[struct_hash_table]) -> c.POINTER[nir_function_impl]: ...
+@dll.bind(c.POINTER[nir_constant], c.POINTER[nir_constant], c.POINTER[nir_variable])
+def nir_constant_clone(c:c.POINTER[nir_constant], var:c.POINTER[nir_variable]) -> c.POINTER[nir_constant]: ...
+@dll.bind(c.POINTER[nir_variable], c.POINTER[nir_variable], c.POINTER[nir_shader])
+def nir_variable_clone(c:c.POINTER[nir_variable], shader:c.POINTER[nir_shader]) -> c.POINTER[nir_variable]: ...
+@dll.bind(None, c.POINTER[nir_shader], c.POINTER[nir_shader])
+def nir_shader_replace(dest:c.POINTER[nir_shader], src:c.POINTER[nir_shader]) -> None: ...
+@dll.bind(None, c.POINTER[nir_shader])
+def nir_shader_serialize_deserialize(s:c.POINTER[nir_shader]) -> None: ...
+@dll.bind(None, c.POINTER[nir_shader], c.POINTER[ctypes.c_char])
+def nir_validate_shader(shader:c.POINTER[nir_shader], when:c.POINTER[ctypes.c_char]) -> None: ...
+@dll.bind(None, c.POINTER[nir_shader], c.POINTER[ctypes.c_char])
+def nir_validate_ssa_dominance(shader:c.POINTER[nir_shader], when:c.POINTER[ctypes.c_char]) -> None: ...
+@dll.bind(None, c.POINTER[nir_shader])
+def nir_metadata_set_validation_flag(shader:c.POINTER[nir_shader]) -> None: ...
+@dll.bind(None, c.POINTER[nir_shader])
+def nir_metadata_check_validation_flag(shader:c.POINTER[nir_shader]) -> None: ...
+@dll.bind(None, c.POINTER[nir_shader])
+def nir_metadata_require_all(shader:c.POINTER[nir_shader]) -> None: ...
+nir_instr_writemask_filter_cb: TypeAlias = c.CFUNCTYPE[ctypes.c_bool, [c.POINTER[struct_nir_instr], ctypes.c_uint32, ctypes.c_void_p]]
 @c.record
 class struct_nir_builder(c.Struct):
   SIZE = 40
   cursor: struct_nir_cursor
   exact: bool
   fp_fast_math: int
-  shader: ctypes._Pointer[struct_nir_shader]
-  impl: ctypes._Pointer[struct_nir_function_impl]
-nir_lower_instr_cb: TypeAlias = ctypes.CFUNCTYPE(ctypes.POINTER(struct_nir_def), ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_instr), ctypes.c_void_p)
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_function_impl), nir_instr_filter_cb, nir_lower_instr_cb, ctypes.c_void_p)
-def nir_function_impl_lower_instructions(impl:ctypes._Pointer[nir_function_impl], filter:nir_instr_filter_cb, lower:nir_lower_instr_cb, cb_data:int|None) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), nir_instr_filter_cb, nir_lower_instr_cb, ctypes.c_void_p)
-def nir_shader_lower_instructions(shader:ctypes._Pointer[nir_shader], filter:nir_instr_filter_cb, lower:nir_lower_instr_cb, cb_data:int|None) -> bool: ...
-@dll.bind(None, ctypes.POINTER(nir_function_impl))
-def nir_calc_dominance_impl(impl:ctypes._Pointer[nir_function_impl]) -> None: ...
-@dll.bind(None, ctypes.POINTER(nir_shader))
-def nir_calc_dominance(shader:ctypes._Pointer[nir_shader]) -> None: ...
-@dll.bind(ctypes.POINTER(nir_block), ctypes.POINTER(nir_block), ctypes.POINTER(nir_block))
-def nir_dominance_lca(b1:ctypes._Pointer[nir_block], b2:ctypes._Pointer[nir_block]) -> ctypes._Pointer[nir_block]: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_block), ctypes.POINTER(nir_block))
-def nir_block_dominates(parent:ctypes._Pointer[nir_block], child:ctypes._Pointer[nir_block]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_block))
-def nir_block_is_unreachable(block:ctypes._Pointer[nir_block]) -> bool: ...
-@dll.bind(None, ctypes.POINTER(nir_function_impl), ctypes.POINTER(FILE))
-def nir_dump_dom_tree_impl(impl:ctypes._Pointer[nir_function_impl], fp:ctypes._Pointer[FILE]) -> None: ...
-@dll.bind(None, ctypes.POINTER(nir_shader), ctypes.POINTER(FILE))
-def nir_dump_dom_tree(shader:ctypes._Pointer[nir_shader], fp:ctypes._Pointer[FILE]) -> None: ...
-@dll.bind(None, ctypes.POINTER(nir_function_impl), ctypes.POINTER(FILE))
-def nir_dump_dom_frontier_impl(impl:ctypes._Pointer[nir_function_impl], fp:ctypes._Pointer[FILE]) -> None: ...
-@dll.bind(None, ctypes.POINTER(nir_shader), ctypes.POINTER(FILE))
-def nir_dump_dom_frontier(shader:ctypes._Pointer[nir_shader], fp:ctypes._Pointer[FILE]) -> None: ...
-@dll.bind(None, ctypes.POINTER(nir_function_impl), ctypes.POINTER(FILE))
-def nir_dump_cfg_impl(impl:ctypes._Pointer[nir_function_impl], fp:ctypes._Pointer[FILE]) -> None: ...
-@dll.bind(None, ctypes.POINTER(nir_shader), ctypes.POINTER(FILE))
-def nir_dump_cfg(shader:ctypes._Pointer[nir_shader], fp:ctypes._Pointer[FILE]) -> None: ...
-@dll.bind(None, ctypes.POINTER(nir_shader), ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.c_int32), ctypes.c_uint32)
-def nir_gs_count_vertices_and_primitives(shader:ctypes._Pointer[nir_shader], out_vtxcnt:ctypes._Pointer[ctypes.c_int32], out_prmcnt:ctypes._Pointer[ctypes.c_int32], out_decomposed_prmcnt:ctypes._Pointer[ctypes.c_int32], num_streams:int) -> None: ...
+  shader: c.POINTER[struct_nir_shader]
+  impl: c.POINTER[struct_nir_function_impl]
+nir_lower_instr_cb: TypeAlias = c.CFUNCTYPE[c.POINTER[struct_nir_def], [c.POINTER[struct_nir_builder], c.POINTER[struct_nir_instr], ctypes.c_void_p]]
+@dll.bind(ctypes.c_bool, c.POINTER[nir_function_impl], nir_instr_filter_cb, nir_lower_instr_cb, ctypes.c_void_p)
+def nir_function_impl_lower_instructions(impl:c.POINTER[nir_function_impl], filter:nir_instr_filter_cb, lower:nir_lower_instr_cb, cb_data:ctypes.c_void_p) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], nir_instr_filter_cb, nir_lower_instr_cb, ctypes.c_void_p)
+def nir_shader_lower_instructions(shader:c.POINTER[nir_shader], filter:nir_instr_filter_cb, lower:nir_lower_instr_cb, cb_data:ctypes.c_void_p) -> bool: ...
+@dll.bind(None, c.POINTER[nir_function_impl])
+def nir_calc_dominance_impl(impl:c.POINTER[nir_function_impl]) -> None: ...
+@dll.bind(None, c.POINTER[nir_shader])
+def nir_calc_dominance(shader:c.POINTER[nir_shader]) -> None: ...
+@dll.bind(c.POINTER[nir_block], c.POINTER[nir_block], c.POINTER[nir_block])
+def nir_dominance_lca(b1:c.POINTER[nir_block], b2:c.POINTER[nir_block]) -> c.POINTER[nir_block]: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_block], c.POINTER[nir_block])
+def nir_block_dominates(parent:c.POINTER[nir_block], child:c.POINTER[nir_block]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_block])
+def nir_block_is_unreachable(block:c.POINTER[nir_block]) -> bool: ...
+@dll.bind(None, c.POINTER[nir_function_impl], c.POINTER[FILE])
+def nir_dump_dom_tree_impl(impl:c.POINTER[nir_function_impl], fp:c.POINTER[FILE]) -> None: ...
+@dll.bind(None, c.POINTER[nir_shader], c.POINTER[FILE])
+def nir_dump_dom_tree(shader:c.POINTER[nir_shader], fp:c.POINTER[FILE]) -> None: ...
+@dll.bind(None, c.POINTER[nir_function_impl], c.POINTER[FILE])
+def nir_dump_dom_frontier_impl(impl:c.POINTER[nir_function_impl], fp:c.POINTER[FILE]) -> None: ...
+@dll.bind(None, c.POINTER[nir_shader], c.POINTER[FILE])
+def nir_dump_dom_frontier(shader:c.POINTER[nir_shader], fp:c.POINTER[FILE]) -> None: ...
+@dll.bind(None, c.POINTER[nir_function_impl], c.POINTER[FILE])
+def nir_dump_cfg_impl(impl:c.POINTER[nir_function_impl], fp:c.POINTER[FILE]) -> None: ...
+@dll.bind(None, c.POINTER[nir_shader], c.POINTER[FILE])
+def nir_dump_cfg(shader:c.POINTER[nir_shader], fp:c.POINTER[FILE]) -> None: ...
+@dll.bind(None, c.POINTER[nir_shader], c.POINTER[ctypes.c_int32], c.POINTER[ctypes.c_int32], c.POINTER[ctypes.c_int32], ctypes.c_uint32)
+def nir_gs_count_vertices_and_primitives(shader:c.POINTER[nir_shader], out_vtxcnt:c.POINTER[ctypes.c_int32], out_prmcnt:c.POINTER[ctypes.c_int32], out_decomposed_prmcnt:c.POINTER[ctypes.c_int32], num_streams:int) -> None: ...
 nir_load_grouping: dict[int, str] = {(nir_group_all:=0): 'nir_group_all', (nir_group_same_resource_only:=1): 'nir_group_same_resource_only'}
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_uint32, ctypes.c_uint32)
-def nir_group_loads(shader:ctypes._Pointer[nir_shader], grouping:ctypes.c_uint32, max_distance:int) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_uint32)
-def nir_shrink_vec_array_vars(shader:ctypes._Pointer[nir_shader], modes:ctypes.c_uint32) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_uint32)
-def nir_split_array_vars(shader:ctypes._Pointer[nir_shader], modes:ctypes.c_uint32) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_split_var_copies(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_split_per_member_structs(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_uint32)
-def nir_split_struct_vars(shader:ctypes._Pointer[nir_shader], modes:ctypes.c_uint32) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_function_impl))
-def nir_lower_returns_impl(impl:ctypes._Pointer[nir_function_impl]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_lower_returns(shader:ctypes._Pointer[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_uint32, ctypes.c_uint32)
+def nir_group_loads(shader:c.POINTER[nir_shader], grouping:ctypes.c_uint32, max_distance:int) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_uint32)
+def nir_shrink_vec_array_vars(shader:c.POINTER[nir_shader], modes:ctypes.c_uint32) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_uint32)
+def nir_split_array_vars(shader:c.POINTER[nir_shader], modes:ctypes.c_uint32) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_split_var_copies(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_split_per_member_structs(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_uint32)
+def nir_split_struct_vars(shader:c.POINTER[nir_shader], modes:ctypes.c_uint32) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_function_impl])
+def nir_lower_returns_impl(impl:c.POINTER[nir_function_impl]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_lower_returns(shader:c.POINTER[nir_shader]) -> bool: ...
 nir_builder: TypeAlias = struct_nir_builder
-@dll.bind(ctypes.POINTER(nir_def), ctypes.POINTER(nir_builder), ctypes.POINTER(nir_function_impl), ctypes.POINTER(ctypes.POINTER(nir_def)), ctypes.POINTER(struct_hash_table))
-def nir_inline_function_impl(b:ctypes._Pointer[nir_builder], impl:ctypes._Pointer[nir_function_impl], params:ctypes._Pointer[ctypes.POINTER(nir_def)], shader_var_remap:ctypes._Pointer[struct_hash_table]) -> ctypes._Pointer[nir_def]: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_inline_functions(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(None, ctypes.POINTER(nir_shader))
-def nir_cleanup_functions(shader:ctypes._Pointer[nir_shader]) -> None: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.POINTER(nir_shader))
-def nir_link_shader_functions(shader:ctypes._Pointer[nir_shader], link_shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_lower_calls_to_builtins(s:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(None, ctypes.POINTER(nir_shader))
-def nir_find_inlinable_uniforms(shader:ctypes._Pointer[nir_shader]) -> None: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_uint32, ctypes.POINTER(uint32_t), ctypes.POINTER(uint16_t))
-def nir_inline_uniforms(shader:ctypes._Pointer[nir_shader], num_uniforms:int, uniform_values:ctypes._Pointer[uint32_t], uniform_dw_offsets:ctypes._Pointer[uint16_t]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_src), ctypes.c_int32, ctypes.POINTER(uint32_t), ctypes.POINTER(uint8_t), ctypes.c_uint32, ctypes.c_uint32)
-def nir_collect_src_uniforms(src:ctypes._Pointer[nir_src], component:int, uni_offsets:ctypes._Pointer[uint32_t], num_offsets:ctypes._Pointer[uint8_t], max_num_bo:int, max_offset:int) -> bool: ...
-@dll.bind(None, ctypes.POINTER(nir_src), ctypes.POINTER(nir_loop_info), ctypes.POINTER(uint32_t), ctypes.POINTER(uint8_t), ctypes.c_uint32, ctypes.c_uint32)
-def nir_add_inlinable_uniforms(cond:ctypes._Pointer[nir_src], info:ctypes._Pointer[nir_loop_info], uni_offsets:ctypes._Pointer[uint32_t], num_offsets:ctypes._Pointer[uint8_t], max_num_bo:int, max_offset:int) -> None: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_bool)
-def nir_propagate_invariant(shader:ctypes._Pointer[nir_shader], invariant_prim:bool) -> bool: ...
-@dll.bind(None, ctypes.POINTER(nir_intrinsic_instr), ctypes.POINTER(nir_shader))
-def nir_lower_var_copy_instr(copy:ctypes._Pointer[nir_intrinsic_instr], shader:ctypes._Pointer[nir_shader]) -> None: ...
-@dll.bind(None, ctypes.POINTER(nir_builder), ctypes.POINTER(nir_intrinsic_instr))
-def nir_lower_deref_copy_instr(b:ctypes._Pointer[nir_builder], copy:ctypes._Pointer[nir_intrinsic_instr]) -> None: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_lower_var_copies(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_opt_memcpy(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_lower_memcpy(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_fixup_deref_modes(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_fixup_deref_types(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_lower_global_vars_to_local(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(None, ctypes.POINTER(nir_shader))
-def nir_lower_constant_to_temp(shader:ctypes._Pointer[nir_shader]) -> None: ...
+@dll.bind(c.POINTER[nir_def], c.POINTER[nir_builder], c.POINTER[nir_function_impl], c.POINTER[c.POINTER[nir_def]], c.POINTER[struct_hash_table])
+def nir_inline_function_impl(b:c.POINTER[nir_builder], impl:c.POINTER[nir_function_impl], params:c.POINTER[c.POINTER[nir_def]], shader_var_remap:c.POINTER[struct_hash_table]) -> c.POINTER[nir_def]: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_inline_functions(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(None, c.POINTER[nir_shader])
+def nir_cleanup_functions(shader:c.POINTER[nir_shader]) -> None: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], c.POINTER[nir_shader])
+def nir_link_shader_functions(shader:c.POINTER[nir_shader], link_shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_lower_calls_to_builtins(s:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(None, c.POINTER[nir_shader])
+def nir_find_inlinable_uniforms(shader:c.POINTER[nir_shader]) -> None: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_uint32, c.POINTER[uint32_t], c.POINTER[uint16_t])
+def nir_inline_uniforms(shader:c.POINTER[nir_shader], num_uniforms:int, uniform_values:c.POINTER[uint32_t], uniform_dw_offsets:c.POINTER[uint16_t]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_src], ctypes.c_int32, c.POINTER[uint32_t], c.POINTER[uint8_t], ctypes.c_uint32, ctypes.c_uint32)
+def nir_collect_src_uniforms(src:c.POINTER[nir_src], component:int, uni_offsets:c.POINTER[uint32_t], num_offsets:c.POINTER[uint8_t], max_num_bo:int, max_offset:int) -> bool: ...
+@dll.bind(None, c.POINTER[nir_src], c.POINTER[nir_loop_info], c.POINTER[uint32_t], c.POINTER[uint8_t], ctypes.c_uint32, ctypes.c_uint32)
+def nir_add_inlinable_uniforms(cond:c.POINTER[nir_src], info:c.POINTER[nir_loop_info], uni_offsets:c.POINTER[uint32_t], num_offsets:c.POINTER[uint8_t], max_num_bo:int, max_offset:int) -> None: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_bool)
+def nir_propagate_invariant(shader:c.POINTER[nir_shader], invariant_prim:bool) -> bool: ...
+@dll.bind(None, c.POINTER[nir_intrinsic_instr], c.POINTER[nir_shader])
+def nir_lower_var_copy_instr(copy:c.POINTER[nir_intrinsic_instr], shader:c.POINTER[nir_shader]) -> None: ...
+@dll.bind(None, c.POINTER[nir_builder], c.POINTER[nir_intrinsic_instr])
+def nir_lower_deref_copy_instr(b:c.POINTER[nir_builder], copy:c.POINTER[nir_intrinsic_instr]) -> None: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_lower_var_copies(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_opt_memcpy(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_lower_memcpy(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_fixup_deref_modes(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_fixup_deref_types(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_lower_global_vars_to_local(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(None, c.POINTER[nir_shader])
+def nir_lower_constant_to_temp(shader:c.POINTER[nir_shader]) -> None: ...
 nir_lower_array_deref_of_vec_options: dict[int, str] = {(nir_lower_direct_array_deref_of_vec_load:=1): 'nir_lower_direct_array_deref_of_vec_load', (nir_lower_indirect_array_deref_of_vec_load:=2): 'nir_lower_indirect_array_deref_of_vec_load', (nir_lower_direct_array_deref_of_vec_store:=4): 'nir_lower_direct_array_deref_of_vec_store', (nir_lower_indirect_array_deref_of_vec_store:=8): 'nir_lower_indirect_array_deref_of_vec_store'}
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_uint32, ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(nir_variable)), ctypes.c_uint32)
-def nir_lower_array_deref_of_vec(shader:ctypes._Pointer[nir_shader], modes:ctypes.c_uint32, filter:ctypes._CFunctionType, options:ctypes.c_uint32) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_uint32, uint32_t)
-def nir_lower_indirect_derefs(shader:ctypes._Pointer[nir_shader], modes:ctypes.c_uint32, max_lower_array_len:uint32_t) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.POINTER(struct_set))
-def nir_lower_indirect_var_derefs(shader:ctypes._Pointer[nir_shader], vars:ctypes._Pointer[struct_set]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), uint8_t)
-def nir_lower_locals_to_regs(shader:ctypes._Pointer[nir_shader], bool_bitsize:uint8_t) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.POINTER(nir_function_impl), ctypes.c_bool, ctypes.c_bool)
-def nir_lower_io_vars_to_temporaries(shader:ctypes._Pointer[nir_shader], entrypoint:ctypes._Pointer[nir_function_impl], outputs:bool, inputs:bool) -> bool: ...
-glsl_type_size_align_func: TypeAlias = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_glsl_type), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32))
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_uint32, ctypes.c_int32, glsl_type_size_align_func, glsl_type_size_align_func)
-def nir_lower_vars_to_scratch(shader:ctypes._Pointer[nir_shader], modes:ctypes.c_uint32, size_threshold:int, variable_size_align:glsl_type_size_align_func, scratch_layout_size_align:glsl_type_size_align_func) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_lower_scratch_to_var(nir:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_lower_clip_halfz(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(None, ctypes.POINTER(nir_shader), ctypes.POINTER(nir_function_impl))
-def nir_shader_gather_info(shader:ctypes._Pointer[nir_shader], entrypoint:ctypes._Pointer[nir_function_impl]) -> None: ...
-@dll.bind(None, ctypes.POINTER(nir_function_impl), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32))
-def nir_gather_types(impl:ctypes._Pointer[nir_function_impl], float_types:ctypes._Pointer[ctypes.c_uint32], int_types:ctypes._Pointer[ctypes.c_uint32]) -> None: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.POINTER(nir_shader))
-def nir_remove_unused_varyings(producer:ctypes._Pointer[nir_shader], consumer:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_uint32, ctypes.POINTER(uint64_t), ctypes.POINTER(uint64_t))
-def nir_remove_unused_io_vars(shader:ctypes._Pointer[nir_shader], mode:ctypes.c_uint32, used_by_other_stage:ctypes._Pointer[uint64_t], used_by_other_stage_patches:ctypes._Pointer[uint64_t]) -> bool: ...
-@dll.bind(None, ctypes.POINTER(nir_shader), ctypes.POINTER(nir_shader), ctypes.c_bool)
-def nir_compact_varyings(producer:ctypes._Pointer[nir_shader], consumer:ctypes._Pointer[nir_shader], default_to_smooth_interp:bool) -> None: ...
-@dll.bind(None, ctypes.POINTER(nir_shader), ctypes.POINTER(nir_shader))
-def nir_link_xfb_varyings(producer:ctypes._Pointer[nir_shader], consumer:ctypes._Pointer[nir_shader]) -> None: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.POINTER(nir_shader))
-def nir_link_opt_varyings(producer:ctypes._Pointer[nir_shader], consumer:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(None, ctypes.POINTER(nir_shader), ctypes.POINTER(nir_shader))
-def nir_link_varying_precision(producer:ctypes._Pointer[nir_shader], consumer:ctypes._Pointer[nir_shader]) -> None: ...
-@dll.bind(ctypes.POINTER(nir_variable), ctypes.POINTER(nir_shader), ctypes.POINTER(nir_variable), ctypes.c_bool)
-def nir_clone_uniform_variable(nir:ctypes._Pointer[nir_shader], uniform:ctypes._Pointer[nir_variable], spirv:bool) -> ctypes._Pointer[nir_variable]: ...
-@dll.bind(ctypes.POINTER(nir_deref_instr), ctypes.POINTER(nir_builder), ctypes.POINTER(nir_variable), ctypes.POINTER(nir_deref_instr))
-def nir_clone_deref_instr(b:ctypes._Pointer[nir_builder], var:ctypes._Pointer[nir_variable], deref:ctypes._Pointer[nir_deref_instr]) -> ctypes._Pointer[nir_deref_instr]: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_uint32, c.CFUNCTYPE[ctypes.c_bool, [c.POINTER[nir_variable]]], ctypes.c_uint32)
+def nir_lower_array_deref_of_vec(shader:c.POINTER[nir_shader], modes:ctypes.c_uint32, filter:c.CFUNCTYPE[ctypes.c_bool, [c.POINTER[nir_variable]]], options:ctypes.c_uint32) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_uint32, uint32_t)
+def nir_lower_indirect_derefs(shader:c.POINTER[nir_shader], modes:ctypes.c_uint32, max_lower_array_len:uint32_t) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], c.POINTER[struct_set])
+def nir_lower_indirect_var_derefs(shader:c.POINTER[nir_shader], vars:c.POINTER[struct_set]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], uint8_t)
+def nir_lower_locals_to_regs(shader:c.POINTER[nir_shader], bool_bitsize:uint8_t) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], c.POINTER[nir_function_impl], ctypes.c_bool, ctypes.c_bool)
+def nir_lower_io_vars_to_temporaries(shader:c.POINTER[nir_shader], entrypoint:c.POINTER[nir_function_impl], outputs:bool, inputs:bool) -> bool: ...
+glsl_type_size_align_func: TypeAlias = c.CFUNCTYPE[None, [c.POINTER[struct_glsl_type], c.POINTER[ctypes.c_uint32], c.POINTER[ctypes.c_uint32]]]
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_uint32, ctypes.c_int32, glsl_type_size_align_func, glsl_type_size_align_func)
+def nir_lower_vars_to_scratch(shader:c.POINTER[nir_shader], modes:ctypes.c_uint32, size_threshold:int, variable_size_align:glsl_type_size_align_func, scratch_layout_size_align:glsl_type_size_align_func) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_lower_scratch_to_var(nir:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_lower_clip_halfz(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(None, c.POINTER[nir_shader], c.POINTER[nir_function_impl])
+def nir_shader_gather_info(shader:c.POINTER[nir_shader], entrypoint:c.POINTER[nir_function_impl]) -> None: ...
+@dll.bind(None, c.POINTER[nir_function_impl], c.POINTER[ctypes.c_uint32], c.POINTER[ctypes.c_uint32])
+def nir_gather_types(impl:c.POINTER[nir_function_impl], float_types:c.POINTER[ctypes.c_uint32], int_types:c.POINTER[ctypes.c_uint32]) -> None: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], c.POINTER[nir_shader])
+def nir_remove_unused_varyings(producer:c.POINTER[nir_shader], consumer:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_uint32, c.POINTER[uint64_t], c.POINTER[uint64_t])
+def nir_remove_unused_io_vars(shader:c.POINTER[nir_shader], mode:ctypes.c_uint32, used_by_other_stage:c.POINTER[uint64_t], used_by_other_stage_patches:c.POINTER[uint64_t]) -> bool: ...
+@dll.bind(None, c.POINTER[nir_shader], c.POINTER[nir_shader], ctypes.c_bool)
+def nir_compact_varyings(producer:c.POINTER[nir_shader], consumer:c.POINTER[nir_shader], default_to_smooth_interp:bool) -> None: ...
+@dll.bind(None, c.POINTER[nir_shader], c.POINTER[nir_shader])
+def nir_link_xfb_varyings(producer:c.POINTER[nir_shader], consumer:c.POINTER[nir_shader]) -> None: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], c.POINTER[nir_shader])
+def nir_link_opt_varyings(producer:c.POINTER[nir_shader], consumer:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(None, c.POINTER[nir_shader], c.POINTER[nir_shader])
+def nir_link_varying_precision(producer:c.POINTER[nir_shader], consumer:c.POINTER[nir_shader]) -> None: ...
+@dll.bind(c.POINTER[nir_variable], c.POINTER[nir_shader], c.POINTER[nir_variable], ctypes.c_bool)
+def nir_clone_uniform_variable(nir:c.POINTER[nir_shader], uniform:c.POINTER[nir_variable], spirv:bool) -> c.POINTER[nir_variable]: ...
+@dll.bind(c.POINTER[nir_deref_instr], c.POINTER[nir_builder], c.POINTER[nir_variable], c.POINTER[nir_deref_instr])
+def nir_clone_deref_instr(b:c.POINTER[nir_builder], var:c.POINTER[nir_variable], deref:c.POINTER[nir_deref_instr]) -> c.POINTER[nir_deref_instr]: ...
 nir_opt_varyings_progress: dict[int, str] = {(nir_progress_producer:=1): 'nir_progress_producer', (nir_progress_consumer:=2): 'nir_progress_consumer'}
-@dll.bind(ctypes.c_uint32, ctypes.POINTER(nir_shader), ctypes.POINTER(nir_shader), ctypes.c_bool, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_bool)
-def nir_opt_varyings(producer:ctypes._Pointer[nir_shader], consumer:ctypes._Pointer[nir_shader], spirv:bool, max_uniform_components:int, max_ubos_per_stage:int, debug_no_algebraic:bool) -> ctypes.c_uint32: ...
+@dll.bind(ctypes.c_uint32, c.POINTER[nir_shader], c.POINTER[nir_shader], ctypes.c_bool, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_bool)
+def nir_opt_varyings(producer:c.POINTER[nir_shader], consumer:c.POINTER[nir_shader], spirv:bool, max_uniform_components:int, max_ubos_per_stage:int, debug_no_algebraic:bool) -> ctypes.c_uint32: ...
 gl_varying_slot: dict[int, str] = {(VARYING_SLOT_POS:=0): 'VARYING_SLOT_POS', (VARYING_SLOT_COL0:=1): 'VARYING_SLOT_COL0', (VARYING_SLOT_COL1:=2): 'VARYING_SLOT_COL1', (VARYING_SLOT_FOGC:=3): 'VARYING_SLOT_FOGC', (VARYING_SLOT_TEX0:=4): 'VARYING_SLOT_TEX0', (VARYING_SLOT_TEX1:=5): 'VARYING_SLOT_TEX1', (VARYING_SLOT_TEX2:=6): 'VARYING_SLOT_TEX2', (VARYING_SLOT_TEX3:=7): 'VARYING_SLOT_TEX3', (VARYING_SLOT_TEX4:=8): 'VARYING_SLOT_TEX4', (VARYING_SLOT_TEX5:=9): 'VARYING_SLOT_TEX5', (VARYING_SLOT_TEX6:=10): 'VARYING_SLOT_TEX6', (VARYING_SLOT_TEX7:=11): 'VARYING_SLOT_TEX7', (VARYING_SLOT_PSIZ:=12): 'VARYING_SLOT_PSIZ', (VARYING_SLOT_BFC0:=13): 'VARYING_SLOT_BFC0', (VARYING_SLOT_BFC1:=14): 'VARYING_SLOT_BFC1', (VARYING_SLOT_EDGE:=15): 'VARYING_SLOT_EDGE', (VARYING_SLOT_CLIP_VERTEX:=16): 'VARYING_SLOT_CLIP_VERTEX', (VARYING_SLOT_CLIP_DIST0:=17): 'VARYING_SLOT_CLIP_DIST0', (VARYING_SLOT_CLIP_DIST1:=18): 'VARYING_SLOT_CLIP_DIST1', (VARYING_SLOT_CULL_DIST0:=19): 'VARYING_SLOT_CULL_DIST0', (VARYING_SLOT_CULL_DIST1:=20): 'VARYING_SLOT_CULL_DIST1', (VARYING_SLOT_PRIMITIVE_ID:=21): 'VARYING_SLOT_PRIMITIVE_ID', (VARYING_SLOT_LAYER:=22): 'VARYING_SLOT_LAYER', (VARYING_SLOT_VIEWPORT:=23): 'VARYING_SLOT_VIEWPORT', (VARYING_SLOT_FACE:=24): 'VARYING_SLOT_FACE', (VARYING_SLOT_PNTC:=25): 'VARYING_SLOT_PNTC', (VARYING_SLOT_TESS_LEVEL_OUTER:=26): 'VARYING_SLOT_TESS_LEVEL_OUTER', (VARYING_SLOT_TESS_LEVEL_INNER:=27): 'VARYING_SLOT_TESS_LEVEL_INNER', (VARYING_SLOT_BOUNDING_BOX0:=28): 'VARYING_SLOT_BOUNDING_BOX0', (VARYING_SLOT_BOUNDING_BOX1:=29): 'VARYING_SLOT_BOUNDING_BOX1', (VARYING_SLOT_VIEW_INDEX:=30): 'VARYING_SLOT_VIEW_INDEX', (VARYING_SLOT_VIEWPORT_MASK:=31): 'VARYING_SLOT_VIEWPORT_MASK', (VARYING_SLOT_PRIMITIVE_SHADING_RATE:=24): 'VARYING_SLOT_PRIMITIVE_SHADING_RATE', (VARYING_SLOT_PRIMITIVE_COUNT:=26): 'VARYING_SLOT_PRIMITIVE_COUNT', (VARYING_SLOT_PRIMITIVE_INDICES:=27): 'VARYING_SLOT_PRIMITIVE_INDICES', (VARYING_SLOT_TASK_COUNT:=28): 'VARYING_SLOT_TASK_COUNT', (VARYING_SLOT_CULL_PRIMITIVE:=28): 'VARYING_SLOT_CULL_PRIMITIVE', (VARYING_SLOT_VAR0:=32): 'VARYING_SLOT_VAR0', (VARYING_SLOT_VAR1:=33): 'VARYING_SLOT_VAR1', (VARYING_SLOT_VAR2:=34): 'VARYING_SLOT_VAR2', (VARYING_SLOT_VAR3:=35): 'VARYING_SLOT_VAR3', (VARYING_SLOT_VAR4:=36): 'VARYING_SLOT_VAR4', (VARYING_SLOT_VAR5:=37): 'VARYING_SLOT_VAR5', (VARYING_SLOT_VAR6:=38): 'VARYING_SLOT_VAR6', (VARYING_SLOT_VAR7:=39): 'VARYING_SLOT_VAR7', (VARYING_SLOT_VAR8:=40): 'VARYING_SLOT_VAR8', (VARYING_SLOT_VAR9:=41): 'VARYING_SLOT_VAR9', (VARYING_SLOT_VAR10:=42): 'VARYING_SLOT_VAR10', (VARYING_SLOT_VAR11:=43): 'VARYING_SLOT_VAR11', (VARYING_SLOT_VAR12:=44): 'VARYING_SLOT_VAR12', (VARYING_SLOT_VAR13:=45): 'VARYING_SLOT_VAR13', (VARYING_SLOT_VAR14:=46): 'VARYING_SLOT_VAR14', (VARYING_SLOT_VAR15:=47): 'VARYING_SLOT_VAR15', (VARYING_SLOT_VAR16:=48): 'VARYING_SLOT_VAR16', (VARYING_SLOT_VAR17:=49): 'VARYING_SLOT_VAR17', (VARYING_SLOT_VAR18:=50): 'VARYING_SLOT_VAR18', (VARYING_SLOT_VAR19:=51): 'VARYING_SLOT_VAR19', (VARYING_SLOT_VAR20:=52): 'VARYING_SLOT_VAR20', (VARYING_SLOT_VAR21:=53): 'VARYING_SLOT_VAR21', (VARYING_SLOT_VAR22:=54): 'VARYING_SLOT_VAR22', (VARYING_SLOT_VAR23:=55): 'VARYING_SLOT_VAR23', (VARYING_SLOT_VAR24:=56): 'VARYING_SLOT_VAR24', (VARYING_SLOT_VAR25:=57): 'VARYING_SLOT_VAR25', (VARYING_SLOT_VAR26:=58): 'VARYING_SLOT_VAR26', (VARYING_SLOT_VAR27:=59): 'VARYING_SLOT_VAR27', (VARYING_SLOT_VAR28:=60): 'VARYING_SLOT_VAR28', (VARYING_SLOT_VAR29:=61): 'VARYING_SLOT_VAR29', (VARYING_SLOT_VAR30:=62): 'VARYING_SLOT_VAR30', (VARYING_SLOT_VAR31:=63): 'VARYING_SLOT_VAR31', (VARYING_SLOT_PATCH0:=64): 'VARYING_SLOT_PATCH0', (VARYING_SLOT_PATCH1:=65): 'VARYING_SLOT_PATCH1', (VARYING_SLOT_PATCH2:=66): 'VARYING_SLOT_PATCH2', (VARYING_SLOT_PATCH3:=67): 'VARYING_SLOT_PATCH3', (VARYING_SLOT_PATCH4:=68): 'VARYING_SLOT_PATCH4', (VARYING_SLOT_PATCH5:=69): 'VARYING_SLOT_PATCH5', (VARYING_SLOT_PATCH6:=70): 'VARYING_SLOT_PATCH6', (VARYING_SLOT_PATCH7:=71): 'VARYING_SLOT_PATCH7', (VARYING_SLOT_PATCH8:=72): 'VARYING_SLOT_PATCH8', (VARYING_SLOT_PATCH9:=73): 'VARYING_SLOT_PATCH9', (VARYING_SLOT_PATCH10:=74): 'VARYING_SLOT_PATCH10', (VARYING_SLOT_PATCH11:=75): 'VARYING_SLOT_PATCH11', (VARYING_SLOT_PATCH12:=76): 'VARYING_SLOT_PATCH12', (VARYING_SLOT_PATCH13:=77): 'VARYING_SLOT_PATCH13', (VARYING_SLOT_PATCH14:=78): 'VARYING_SLOT_PATCH14', (VARYING_SLOT_PATCH15:=79): 'VARYING_SLOT_PATCH15', (VARYING_SLOT_PATCH16:=80): 'VARYING_SLOT_PATCH16', (VARYING_SLOT_PATCH17:=81): 'VARYING_SLOT_PATCH17', (VARYING_SLOT_PATCH18:=82): 'VARYING_SLOT_PATCH18', (VARYING_SLOT_PATCH19:=83): 'VARYING_SLOT_PATCH19', (VARYING_SLOT_PATCH20:=84): 'VARYING_SLOT_PATCH20', (VARYING_SLOT_PATCH21:=85): 'VARYING_SLOT_PATCH21', (VARYING_SLOT_PATCH22:=86): 'VARYING_SLOT_PATCH22', (VARYING_SLOT_PATCH23:=87): 'VARYING_SLOT_PATCH23', (VARYING_SLOT_PATCH24:=88): 'VARYING_SLOT_PATCH24', (VARYING_SLOT_PATCH25:=89): 'VARYING_SLOT_PATCH25', (VARYING_SLOT_PATCH26:=90): 'VARYING_SLOT_PATCH26', (VARYING_SLOT_PATCH27:=91): 'VARYING_SLOT_PATCH27', (VARYING_SLOT_PATCH28:=92): 'VARYING_SLOT_PATCH28', (VARYING_SLOT_PATCH29:=93): 'VARYING_SLOT_PATCH29', (VARYING_SLOT_PATCH30:=94): 'VARYING_SLOT_PATCH30', (VARYING_SLOT_PATCH31:=95): 'VARYING_SLOT_PATCH31', (VARYING_SLOT_VAR0_16BIT:=96): 'VARYING_SLOT_VAR0_16BIT', (VARYING_SLOT_VAR1_16BIT:=97): 'VARYING_SLOT_VAR1_16BIT', (VARYING_SLOT_VAR2_16BIT:=98): 'VARYING_SLOT_VAR2_16BIT', (VARYING_SLOT_VAR3_16BIT:=99): 'VARYING_SLOT_VAR3_16BIT', (VARYING_SLOT_VAR4_16BIT:=100): 'VARYING_SLOT_VAR4_16BIT', (VARYING_SLOT_VAR5_16BIT:=101): 'VARYING_SLOT_VAR5_16BIT', (VARYING_SLOT_VAR6_16BIT:=102): 'VARYING_SLOT_VAR6_16BIT', (VARYING_SLOT_VAR7_16BIT:=103): 'VARYING_SLOT_VAR7_16BIT', (VARYING_SLOT_VAR8_16BIT:=104): 'VARYING_SLOT_VAR8_16BIT', (VARYING_SLOT_VAR9_16BIT:=105): 'VARYING_SLOT_VAR9_16BIT', (VARYING_SLOT_VAR10_16BIT:=106): 'VARYING_SLOT_VAR10_16BIT', (VARYING_SLOT_VAR11_16BIT:=107): 'VARYING_SLOT_VAR11_16BIT', (VARYING_SLOT_VAR12_16BIT:=108): 'VARYING_SLOT_VAR12_16BIT', (VARYING_SLOT_VAR13_16BIT:=109): 'VARYING_SLOT_VAR13_16BIT', (VARYING_SLOT_VAR14_16BIT:=110): 'VARYING_SLOT_VAR14_16BIT', (VARYING_SLOT_VAR15_16BIT:=111): 'VARYING_SLOT_VAR15_16BIT', (NUM_TOTAL_VARYING_SLOTS:=112): 'NUM_TOTAL_VARYING_SLOTS'}
 @dll.bind(ctypes.c_bool, ctypes.c_uint32, gl_shader_stage)
 def nir_slot_is_sysval_output(slot:ctypes.c_uint32, next_shader:gl_shader_stage) -> bool: ...
@@ -1671,60 +1671,60 @@ def nir_slot_is_sysval_output(slot:ctypes.c_uint32, next_shader:gl_shader_stage)
 def nir_slot_is_varying(slot:ctypes.c_uint32, next_shader:gl_shader_stage) -> bool: ...
 @dll.bind(ctypes.c_bool, ctypes.c_uint32, gl_shader_stage)
 def nir_slot_is_sysval_output_and_varying(slot:ctypes.c_uint32, next_shader:gl_shader_stage) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_intrinsic_instr), gl_shader_stage)
-def nir_remove_varying(intr:ctypes._Pointer[nir_intrinsic_instr], next_shader:gl_shader_stage) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_intrinsic_instr), gl_shader_stage)
-def nir_remove_sysval_output(intr:ctypes._Pointer[nir_intrinsic_instr], next_shader:gl_shader_stage) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(struct_glsl_type), ctypes.c_bool))
-def nir_lower_amul(shader:ctypes._Pointer[nir_shader], type_size:ctypes._CFunctionType) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_lower_ubo_vec4(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(None, ctypes.POINTER(nir_shader), ctypes.c_uint32)
-def nir_sort_variables_by_location(shader:ctypes._Pointer[nir_shader], mode:ctypes.c_uint32) -> None: ...
-@dll.bind(None, ctypes.POINTER(nir_shader), ctypes.c_uint32, ctypes.POINTER(ctypes.c_uint32), gl_shader_stage)
-def nir_assign_io_var_locations(shader:ctypes._Pointer[nir_shader], mode:ctypes.c_uint32, size:ctypes._Pointer[ctypes.c_uint32], stage:gl_shader_stage) -> None: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_opt_clip_cull_const(shader:ctypes._Pointer[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_intrinsic_instr], gl_shader_stage)
+def nir_remove_varying(intr:c.POINTER[nir_intrinsic_instr], next_shader:gl_shader_stage) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_intrinsic_instr], gl_shader_stage)
+def nir_remove_sysval_output(intr:c.POINTER[nir_intrinsic_instr], next_shader:gl_shader_stage) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_glsl_type], ctypes.c_bool]])
+def nir_lower_amul(shader:c.POINTER[nir_shader], type_size:c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_glsl_type], ctypes.c_bool]]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_lower_ubo_vec4(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(None, c.POINTER[nir_shader], ctypes.c_uint32)
+def nir_sort_variables_by_location(shader:c.POINTER[nir_shader], mode:ctypes.c_uint32) -> None: ...
+@dll.bind(None, c.POINTER[nir_shader], ctypes.c_uint32, c.POINTER[ctypes.c_uint32], gl_shader_stage)
+def nir_assign_io_var_locations(shader:c.POINTER[nir_shader], mode:ctypes.c_uint32, size:c.POINTER[ctypes.c_uint32], stage:gl_shader_stage) -> None: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_opt_clip_cull_const(shader:c.POINTER[nir_shader]) -> bool: ...
 nir_lower_io_options: dict[int, str] = {(nir_lower_io_lower_64bit_to_32:=1): 'nir_lower_io_lower_64bit_to_32', (nir_lower_io_lower_64bit_float_to_32:=2): 'nir_lower_io_lower_64bit_float_to_32', (nir_lower_io_lower_64bit_to_32_new:=4): 'nir_lower_io_lower_64bit_to_32_new', (nir_lower_io_use_interpolated_input_intrinsics:=8): 'nir_lower_io_use_interpolated_input_intrinsics'}
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_uint32, ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(struct_glsl_type), ctypes.c_bool), ctypes.c_uint32)
-def nir_lower_io(shader:ctypes._Pointer[nir_shader], modes:ctypes.c_uint32, type_size:ctypes._CFunctionType, _3:ctypes.c_uint32) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_uint32)
-def nir_io_add_const_offset_to_base(nir:ctypes._Pointer[nir_shader], modes:ctypes.c_uint32) -> bool: ...
-@dll.bind(None, ctypes.POINTER(nir_shader), ctypes.c_bool)
-def nir_lower_io_passes(nir:ctypes._Pointer[nir_shader], renumber_vs_inputs:bool) -> None: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_io_add_intrinsic_xfb_info(nir:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_uint32)
-def nir_lower_io_indirect_loads(nir:ctypes._Pointer[nir_shader], modes:ctypes.c_uint32) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_uint32, glsl_type_size_align_func)
-def nir_lower_vars_to_explicit_types(shader:ctypes._Pointer[nir_shader], modes:ctypes.c_uint32, type_info:glsl_type_size_align_func) -> bool: ...
-@dll.bind(None, ctypes.POINTER(nir_shader), ctypes.c_void_p, size_t, ctypes.c_uint32)
-def nir_gather_explicit_io_initializers(shader:ctypes._Pointer[nir_shader], dst:int|None, dst_size:size_t, mode:ctypes.c_uint32) -> None: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_uint32)
-def nir_lower_vec3_to_vec4(shader:ctypes._Pointer[nir_shader], modes:ctypes.c_uint32) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_uint32, c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_glsl_type], ctypes.c_bool]], ctypes.c_uint32)
+def nir_lower_io(shader:c.POINTER[nir_shader], modes:ctypes.c_uint32, type_size:c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_glsl_type], ctypes.c_bool]], _3:ctypes.c_uint32) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_uint32)
+def nir_io_add_const_offset_to_base(nir:c.POINTER[nir_shader], modes:ctypes.c_uint32) -> bool: ...
+@dll.bind(None, c.POINTER[nir_shader], ctypes.c_bool)
+def nir_lower_io_passes(nir:c.POINTER[nir_shader], renumber_vs_inputs:bool) -> None: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_io_add_intrinsic_xfb_info(nir:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_uint32)
+def nir_lower_io_indirect_loads(nir:c.POINTER[nir_shader], modes:ctypes.c_uint32) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_uint32, glsl_type_size_align_func)
+def nir_lower_vars_to_explicit_types(shader:c.POINTER[nir_shader], modes:ctypes.c_uint32, type_info:glsl_type_size_align_func) -> bool: ...
+@dll.bind(None, c.POINTER[nir_shader], ctypes.c_void_p, size_t, ctypes.c_uint32)
+def nir_gather_explicit_io_initializers(shader:c.POINTER[nir_shader], dst:ctypes.c_void_p, dst_size:size_t, mode:ctypes.c_uint32) -> None: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_uint32)
+def nir_lower_vec3_to_vec4(shader:c.POINTER[nir_shader], modes:ctypes.c_uint32) -> bool: ...
 nir_address_format: dict[int, str] = {(nir_address_format_32bit_global:=0): 'nir_address_format_32bit_global', (nir_address_format_64bit_global:=1): 'nir_address_format_64bit_global', (nir_address_format_2x32bit_global:=2): 'nir_address_format_2x32bit_global', (nir_address_format_64bit_global_32bit_offset:=3): 'nir_address_format_64bit_global_32bit_offset', (nir_address_format_64bit_bounded_global:=4): 'nir_address_format_64bit_bounded_global', (nir_address_format_32bit_index_offset:=5): 'nir_address_format_32bit_index_offset', (nir_address_format_32bit_index_offset_pack64:=6): 'nir_address_format_32bit_index_offset_pack64', (nir_address_format_vec2_index_32bit_offset:=7): 'nir_address_format_vec2_index_32bit_offset', (nir_address_format_62bit_generic:=8): 'nir_address_format_62bit_generic', (nir_address_format_32bit_offset:=9): 'nir_address_format_32bit_offset', (nir_address_format_32bit_offset_as_64bit:=10): 'nir_address_format_32bit_offset_as_64bit', (nir_address_format_logical:=11): 'nir_address_format_logical'}
 @dll.bind(ctypes.c_uint32, ctypes.c_uint32)
 def nir_address_format_bit_size(addr_format:ctypes.c_uint32) -> int: ...
 @dll.bind(ctypes.c_uint32, ctypes.c_uint32)
 def nir_address_format_num_components(addr_format:ctypes.c_uint32) -> int: ...
-@dll.bind(ctypes.POINTER(nir_const_value), ctypes.c_uint32)
-def nir_address_format_null_value(addr_format:ctypes.c_uint32) -> ctypes._Pointer[nir_const_value]: ...
-@dll.bind(ctypes.POINTER(nir_def), ctypes.POINTER(nir_builder), ctypes.POINTER(nir_def), ctypes.c_uint32, ctypes.c_uint32, ctypes.POINTER(nir_def))
-def nir_build_addr_iadd(b:ctypes._Pointer[nir_builder], addr:ctypes._Pointer[nir_def], addr_format:ctypes.c_uint32, modes:ctypes.c_uint32, offset:ctypes._Pointer[nir_def]) -> ctypes._Pointer[nir_def]: ...
-@dll.bind(ctypes.POINTER(nir_def), ctypes.POINTER(nir_builder), ctypes.POINTER(nir_def), ctypes.c_uint32, ctypes.c_uint32, int64_t)
-def nir_build_addr_iadd_imm(b:ctypes._Pointer[nir_builder], addr:ctypes._Pointer[nir_def], addr_format:ctypes.c_uint32, modes:ctypes.c_uint32, offset:int64_t) -> ctypes._Pointer[nir_def]: ...
-@dll.bind(ctypes.POINTER(nir_def), ctypes.POINTER(nir_builder), ctypes.POINTER(nir_def), ctypes.POINTER(nir_def), ctypes.c_uint32)
-def nir_build_addr_ieq(b:ctypes._Pointer[nir_builder], addr0:ctypes._Pointer[nir_def], addr1:ctypes._Pointer[nir_def], addr_format:ctypes.c_uint32) -> ctypes._Pointer[nir_def]: ...
-@dll.bind(ctypes.POINTER(nir_def), ctypes.POINTER(nir_builder), ctypes.POINTER(nir_def), ctypes.POINTER(nir_def), ctypes.c_uint32)
-def nir_build_addr_isub(b:ctypes._Pointer[nir_builder], addr0:ctypes._Pointer[nir_def], addr1:ctypes._Pointer[nir_def], addr_format:ctypes.c_uint32) -> ctypes._Pointer[nir_def]: ...
-@dll.bind(ctypes.POINTER(nir_def), ctypes.POINTER(nir_builder), ctypes.POINTER(nir_deref_instr), ctypes.POINTER(nir_def), ctypes.c_uint32)
-def nir_explicit_io_address_from_deref(b:ctypes._Pointer[nir_builder], deref:ctypes._Pointer[nir_deref_instr], base_addr:ctypes._Pointer[nir_def], addr_format:ctypes.c_uint32) -> ctypes._Pointer[nir_def]: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_deref_instr), ctypes.c_bool, ctypes.POINTER(uint32_t), ctypes.POINTER(uint32_t))
-def nir_get_explicit_deref_align(deref:ctypes._Pointer[nir_deref_instr], default_to_type_align:bool, align_mul:ctypes._Pointer[uint32_t], align_offset:ctypes._Pointer[uint32_t]) -> bool: ...
-@dll.bind(None, ctypes.POINTER(nir_builder), ctypes.POINTER(nir_intrinsic_instr), ctypes.POINTER(nir_def), ctypes.c_uint32)
-def nir_lower_explicit_io_instr(b:ctypes._Pointer[nir_builder], io_instr:ctypes._Pointer[nir_intrinsic_instr], addr:ctypes._Pointer[nir_def], addr_format:ctypes.c_uint32) -> None: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_uint32, ctypes.c_uint32)
-def nir_lower_explicit_io(shader:ctypes._Pointer[nir_shader], modes:ctypes.c_uint32, _2:ctypes.c_uint32) -> bool: ...
+@dll.bind(c.POINTER[nir_const_value], ctypes.c_uint32)
+def nir_address_format_null_value(addr_format:ctypes.c_uint32) -> c.POINTER[nir_const_value]: ...
+@dll.bind(c.POINTER[nir_def], c.POINTER[nir_builder], c.POINTER[nir_def], ctypes.c_uint32, ctypes.c_uint32, c.POINTER[nir_def])
+def nir_build_addr_iadd(b:c.POINTER[nir_builder], addr:c.POINTER[nir_def], addr_format:ctypes.c_uint32, modes:ctypes.c_uint32, offset:c.POINTER[nir_def]) -> c.POINTER[nir_def]: ...
+@dll.bind(c.POINTER[nir_def], c.POINTER[nir_builder], c.POINTER[nir_def], ctypes.c_uint32, ctypes.c_uint32, int64_t)
+def nir_build_addr_iadd_imm(b:c.POINTER[nir_builder], addr:c.POINTER[nir_def], addr_format:ctypes.c_uint32, modes:ctypes.c_uint32, offset:int64_t) -> c.POINTER[nir_def]: ...
+@dll.bind(c.POINTER[nir_def], c.POINTER[nir_builder], c.POINTER[nir_def], c.POINTER[nir_def], ctypes.c_uint32)
+def nir_build_addr_ieq(b:c.POINTER[nir_builder], addr0:c.POINTER[nir_def], addr1:c.POINTER[nir_def], addr_format:ctypes.c_uint32) -> c.POINTER[nir_def]: ...
+@dll.bind(c.POINTER[nir_def], c.POINTER[nir_builder], c.POINTER[nir_def], c.POINTER[nir_def], ctypes.c_uint32)
+def nir_build_addr_isub(b:c.POINTER[nir_builder], addr0:c.POINTER[nir_def], addr1:c.POINTER[nir_def], addr_format:ctypes.c_uint32) -> c.POINTER[nir_def]: ...
+@dll.bind(c.POINTER[nir_def], c.POINTER[nir_builder], c.POINTER[nir_deref_instr], c.POINTER[nir_def], ctypes.c_uint32)
+def nir_explicit_io_address_from_deref(b:c.POINTER[nir_builder], deref:c.POINTER[nir_deref_instr], base_addr:c.POINTER[nir_def], addr_format:ctypes.c_uint32) -> c.POINTER[nir_def]: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_deref_instr], ctypes.c_bool, c.POINTER[uint32_t], c.POINTER[uint32_t])
+def nir_get_explicit_deref_align(deref:c.POINTER[nir_deref_instr], default_to_type_align:bool, align_mul:c.POINTER[uint32_t], align_offset:c.POINTER[uint32_t]) -> bool: ...
+@dll.bind(None, c.POINTER[nir_builder], c.POINTER[nir_intrinsic_instr], c.POINTER[nir_def], ctypes.c_uint32)
+def nir_lower_explicit_io_instr(b:c.POINTER[nir_builder], io_instr:c.POINTER[nir_intrinsic_instr], addr:c.POINTER[nir_def], addr_format:ctypes.c_uint32) -> None: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_uint32, ctypes.c_uint32)
+def nir_lower_explicit_io(shader:c.POINTER[nir_shader], modes:ctypes.c_uint32, _2:ctypes.c_uint32) -> bool: ...
 nir_mem_access_shift_method: dict[int, str] = {(nir_mem_access_shift_method_scalar:=0): 'nir_mem_access_shift_method_scalar', (nir_mem_access_shift_method_shift64:=1): 'nir_mem_access_shift_method_shift64', (nir_mem_access_shift_method_bytealign_amd:=2): 'nir_mem_access_shift_method_bytealign_amd'}
 @c.record
 class struct_nir_mem_access_size_align(c.Struct):
@@ -1736,188 +1736,188 @@ class struct_nir_mem_access_size_align(c.Struct):
 struct_nir_mem_access_size_align.register_fields([('num_components', uint8_t, 0), ('bit_size', uint8_t, 1), ('align', uint16_t, 2), ('shift', ctypes.c_uint32, 4)])
 nir_mem_access_size_align: TypeAlias = struct_nir_mem_access_size_align
 enum_gl_access_qualifier: dict[int, str] = {(ACCESS_COHERENT:=1): 'ACCESS_COHERENT', (ACCESS_RESTRICT:=2): 'ACCESS_RESTRICT', (ACCESS_VOLATILE:=4): 'ACCESS_VOLATILE', (ACCESS_NON_READABLE:=8): 'ACCESS_NON_READABLE', (ACCESS_NON_WRITEABLE:=16): 'ACCESS_NON_WRITEABLE', (ACCESS_NON_UNIFORM:=32): 'ACCESS_NON_UNIFORM', (ACCESS_CAN_REORDER:=64): 'ACCESS_CAN_REORDER', (ACCESS_NON_TEMPORAL:=128): 'ACCESS_NON_TEMPORAL', (ACCESS_INCLUDE_HELPERS:=256): 'ACCESS_INCLUDE_HELPERS', (ACCESS_IS_SWIZZLED_AMD:=512): 'ACCESS_IS_SWIZZLED_AMD', (ACCESS_USES_FORMAT_AMD:=1024): 'ACCESS_USES_FORMAT_AMD', (ACCESS_FMASK_LOWERED_AMD:=2048): 'ACCESS_FMASK_LOWERED_AMD', (ACCESS_CAN_SPECULATE:=4096): 'ACCESS_CAN_SPECULATE', (ACCESS_CP_GE_COHERENT_AMD:=8192): 'ACCESS_CP_GE_COHERENT_AMD', (ACCESS_IN_BOUNDS:=16384): 'ACCESS_IN_BOUNDS', (ACCESS_KEEP_SCALAR:=32768): 'ACCESS_KEEP_SCALAR', (ACCESS_SMEM_AMD:=65536): 'ACCESS_SMEM_AMD'}
-nir_lower_mem_access_bit_sizes_cb: TypeAlias = ctypes.CFUNCTYPE(struct_nir_mem_access_size_align, ctypes.c_uint32, ctypes.c_ubyte, ctypes.c_ubyte, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_bool, ctypes.c_uint32, ctypes.c_void_p)
+nir_lower_mem_access_bit_sizes_cb: TypeAlias = c.CFUNCTYPE[struct_nir_mem_access_size_align, [ctypes.c_uint32, ctypes.c_ubyte, ctypes.c_ubyte, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_bool, ctypes.c_uint32, ctypes.c_void_p]]
 @c.record
 class struct_nir_lower_mem_access_bit_sizes_options(c.Struct):
   SIZE = 24
-  callback: ctypes._CFunctionType
+  callback: c.CFUNCTYPE[struct_nir_mem_access_size_align, [ctypes.c_uint32, ctypes.c_ubyte, ctypes.c_ubyte, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_bool, ctypes.c_uint32, ctypes.c_void_p]]
   modes: int
   may_lower_unaligned_stores_to_atomics: bool
-  cb_data: int|None
+  cb_data: ctypes.c_void_p
 struct_nir_lower_mem_access_bit_sizes_options.register_fields([('callback', nir_lower_mem_access_bit_sizes_cb, 0), ('modes', ctypes.c_uint32, 8), ('may_lower_unaligned_stores_to_atomics', ctypes.c_bool, 12), ('cb_data', ctypes.c_void_p, 16)])
 nir_lower_mem_access_bit_sizes_options: TypeAlias = struct_nir_lower_mem_access_bit_sizes_options
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.POINTER(nir_lower_mem_access_bit_sizes_options))
-def nir_lower_mem_access_bit_sizes(shader:ctypes._Pointer[nir_shader], options:ctypes._Pointer[nir_lower_mem_access_bit_sizes_options]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), nir_intrin_filter_cb, ctypes.c_void_p)
-def nir_lower_robust_access(s:ctypes._Pointer[nir_shader], filter:nir_intrin_filter_cb, data:int|None) -> bool: ...
-nir_should_vectorize_mem_func: TypeAlias = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_int64, ctypes.POINTER(struct_nir_intrinsic_instr), ctypes.POINTER(struct_nir_intrinsic_instr), ctypes.c_void_p)
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], c.POINTER[nir_lower_mem_access_bit_sizes_options])
+def nir_lower_mem_access_bit_sizes(shader:c.POINTER[nir_shader], options:c.POINTER[nir_lower_mem_access_bit_sizes_options]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], nir_intrin_filter_cb, ctypes.c_void_p)
+def nir_lower_robust_access(s:c.POINTER[nir_shader], filter:nir_intrin_filter_cb, data:ctypes.c_void_p) -> bool: ...
+nir_should_vectorize_mem_func: TypeAlias = c.CFUNCTYPE[ctypes.c_bool, [ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_int64, c.POINTER[struct_nir_intrinsic_instr], c.POINTER[struct_nir_intrinsic_instr], ctypes.c_void_p]]
 @c.record
 class struct_nir_load_store_vectorize_options(c.Struct):
   SIZE = 32
-  callback: ctypes._CFunctionType
+  callback: c.CFUNCTYPE[ctypes.c_bool, [ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_int64, c.POINTER[struct_nir_intrinsic_instr], c.POINTER[struct_nir_intrinsic_instr], ctypes.c_void_p]]
   modes: int
   robust_modes: int
-  cb_data: int|None
+  cb_data: ctypes.c_void_p
   has_shared2_amd: bool
 struct_nir_load_store_vectorize_options.register_fields([('callback', nir_should_vectorize_mem_func, 0), ('modes', ctypes.c_uint32, 8), ('robust_modes', ctypes.c_uint32, 12), ('cb_data', ctypes.c_void_p, 16), ('has_shared2_amd', ctypes.c_bool, 24)])
 nir_load_store_vectorize_options: TypeAlias = struct_nir_load_store_vectorize_options
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.POINTER(nir_load_store_vectorize_options))
-def nir_opt_load_store_vectorize(shader:ctypes._Pointer[nir_shader], options:ctypes._Pointer[nir_load_store_vectorize_options]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_opt_load_store_update_alignments(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-nir_lower_shader_calls_should_remat_func: TypeAlias = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(struct_nir_instr), ctypes.c_void_p)
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], c.POINTER[nir_load_store_vectorize_options])
+def nir_opt_load_store_vectorize(shader:c.POINTER[nir_shader], options:c.POINTER[nir_load_store_vectorize_options]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_opt_load_store_update_alignments(shader:c.POINTER[nir_shader]) -> bool: ...
+nir_lower_shader_calls_should_remat_func: TypeAlias = c.CFUNCTYPE[ctypes.c_bool, [c.POINTER[struct_nir_instr], ctypes.c_void_p]]
 @c.record
 class struct_nir_lower_shader_calls_options(c.Struct):
   SIZE = 48
   address_format: int
   stack_alignment: int
   localized_loads: bool
-  vectorizer_callback: ctypes._CFunctionType
-  vectorizer_data: int|None
-  should_remat_callback: ctypes._CFunctionType
-  should_remat_data: int|None
+  vectorizer_callback: c.CFUNCTYPE[ctypes.c_bool, [ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_int64, c.POINTER[struct_nir_intrinsic_instr], c.POINTER[struct_nir_intrinsic_instr], ctypes.c_void_p]]
+  vectorizer_data: ctypes.c_void_p
+  should_remat_callback: c.CFUNCTYPE[ctypes.c_bool, [c.POINTER[struct_nir_instr], ctypes.c_void_p]]
+  should_remat_data: ctypes.c_void_p
 struct_nir_lower_shader_calls_options.register_fields([('address_format', ctypes.c_uint32, 0), ('stack_alignment', ctypes.c_uint32, 4), ('localized_loads', ctypes.c_bool, 8), ('vectorizer_callback', nir_should_vectorize_mem_func, 16), ('vectorizer_data', ctypes.c_void_p, 24), ('should_remat_callback', nir_lower_shader_calls_should_remat_func, 32), ('should_remat_data', ctypes.c_void_p, 40)])
 nir_lower_shader_calls_options: TypeAlias = struct_nir_lower_shader_calls_options
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.POINTER(nir_lower_shader_calls_options), ctypes.POINTER(ctypes.POINTER(ctypes.POINTER(nir_shader))), ctypes.POINTER(uint32_t), ctypes.c_void_p)
-def nir_lower_shader_calls(shader:ctypes._Pointer[nir_shader], options:ctypes._Pointer[nir_lower_shader_calls_options], resume_shaders_out:ctypes._Pointer[ctypes.POINTER(ctypes.POINTER(nir_shader))], num_resume_shaders_out:ctypes._Pointer[uint32_t], mem_ctx:int|None) -> bool: ...
-@dll.bind(ctypes.c_int32, ctypes.POINTER(nir_intrinsic_instr))
-def nir_get_io_offset_src_number(instr:ctypes._Pointer[nir_intrinsic_instr]) -> int: ...
-@dll.bind(ctypes.c_int32, ctypes.POINTER(nir_intrinsic_instr))
-def nir_get_io_index_src_number(instr:ctypes._Pointer[nir_intrinsic_instr]) -> int: ...
-@dll.bind(ctypes.c_int32, ctypes.POINTER(nir_intrinsic_instr))
-def nir_get_io_arrayed_index_src_number(instr:ctypes._Pointer[nir_intrinsic_instr]) -> int: ...
-@dll.bind(ctypes.POINTER(nir_src), ctypes.POINTER(nir_intrinsic_instr))
-def nir_get_io_offset_src(instr:ctypes._Pointer[nir_intrinsic_instr]) -> ctypes._Pointer[nir_src]: ...
-@dll.bind(ctypes.POINTER(nir_src), ctypes.POINTER(nir_intrinsic_instr))
-def nir_get_io_index_src(instr:ctypes._Pointer[nir_intrinsic_instr]) -> ctypes._Pointer[nir_src]: ...
-@dll.bind(ctypes.POINTER(nir_src), ctypes.POINTER(nir_intrinsic_instr))
-def nir_get_io_arrayed_index_src(instr:ctypes._Pointer[nir_intrinsic_instr]) -> ctypes._Pointer[nir_src]: ...
-@dll.bind(ctypes.POINTER(nir_src), ctypes.POINTER(nir_intrinsic_instr))
-def nir_get_shader_call_payload_src(call:ctypes._Pointer[nir_intrinsic_instr]) -> ctypes._Pointer[nir_src]: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_intrinsic_instr))
-def nir_is_output_load(intr:ctypes._Pointer[nir_intrinsic_instr]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_variable), gl_shader_stage)
-def nir_is_arrayed_io(var:ctypes._Pointer[nir_variable], stage:gl_shader_stage) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_function_impl))
-def nir_lower_reg_intrinsics_to_ssa_impl(impl:ctypes._Pointer[nir_function_impl]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_lower_reg_intrinsics_to_ssa(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_lower_vars_to_ssa(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_remove_dead_derefs(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_function_impl))
-def nir_remove_dead_derefs_impl(impl:ctypes._Pointer[nir_function_impl]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], c.POINTER[nir_lower_shader_calls_options], c.POINTER[c.POINTER[c.POINTER[nir_shader]]], c.POINTER[uint32_t], ctypes.c_void_p)
+def nir_lower_shader_calls(shader:c.POINTER[nir_shader], options:c.POINTER[nir_lower_shader_calls_options], resume_shaders_out:c.POINTER[c.POINTER[c.POINTER[nir_shader]]], num_resume_shaders_out:c.POINTER[uint32_t], mem_ctx:ctypes.c_void_p) -> bool: ...
+@dll.bind(ctypes.c_int32, c.POINTER[nir_intrinsic_instr])
+def nir_get_io_offset_src_number(instr:c.POINTER[nir_intrinsic_instr]) -> int: ...
+@dll.bind(ctypes.c_int32, c.POINTER[nir_intrinsic_instr])
+def nir_get_io_index_src_number(instr:c.POINTER[nir_intrinsic_instr]) -> int: ...
+@dll.bind(ctypes.c_int32, c.POINTER[nir_intrinsic_instr])
+def nir_get_io_arrayed_index_src_number(instr:c.POINTER[nir_intrinsic_instr]) -> int: ...
+@dll.bind(c.POINTER[nir_src], c.POINTER[nir_intrinsic_instr])
+def nir_get_io_offset_src(instr:c.POINTER[nir_intrinsic_instr]) -> c.POINTER[nir_src]: ...
+@dll.bind(c.POINTER[nir_src], c.POINTER[nir_intrinsic_instr])
+def nir_get_io_index_src(instr:c.POINTER[nir_intrinsic_instr]) -> c.POINTER[nir_src]: ...
+@dll.bind(c.POINTER[nir_src], c.POINTER[nir_intrinsic_instr])
+def nir_get_io_arrayed_index_src(instr:c.POINTER[nir_intrinsic_instr]) -> c.POINTER[nir_src]: ...
+@dll.bind(c.POINTER[nir_src], c.POINTER[nir_intrinsic_instr])
+def nir_get_shader_call_payload_src(call:c.POINTER[nir_intrinsic_instr]) -> c.POINTER[nir_src]: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_intrinsic_instr])
+def nir_is_output_load(intr:c.POINTER[nir_intrinsic_instr]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_variable], gl_shader_stage)
+def nir_is_arrayed_io(var:c.POINTER[nir_variable], stage:gl_shader_stage) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_function_impl])
+def nir_lower_reg_intrinsics_to_ssa_impl(impl:c.POINTER[nir_function_impl]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_lower_reg_intrinsics_to_ssa(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_lower_vars_to_ssa(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_remove_dead_derefs(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_function_impl])
+def nir_remove_dead_derefs_impl(impl:c.POINTER[nir_function_impl]) -> bool: ...
 @c.record
 class struct_nir_remove_dead_variables_options(c.Struct):
   SIZE = 16
-  can_remove_var: ctypes._CFunctionType
-  can_remove_var_data: int|None
-struct_nir_remove_dead_variables_options.register_fields([('can_remove_var', ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(nir_variable), ctypes.c_void_p), 0), ('can_remove_var_data', ctypes.c_void_p, 8)])
+  can_remove_var: c.CFUNCTYPE[ctypes.c_bool, [c.POINTER[struct_nir_variable], ctypes.c_void_p]]
+  can_remove_var_data: ctypes.c_void_p
+struct_nir_remove_dead_variables_options.register_fields([('can_remove_var', c.CFUNCTYPE[ctypes.c_bool, [c.POINTER[nir_variable], ctypes.c_void_p]], 0), ('can_remove_var_data', ctypes.c_void_p, 8)])
 nir_remove_dead_variables_options: TypeAlias = struct_nir_remove_dead_variables_options
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_uint32, ctypes.POINTER(nir_remove_dead_variables_options))
-def nir_remove_dead_variables(shader:ctypes._Pointer[nir_shader], modes:ctypes.c_uint32, options:ctypes._Pointer[nir_remove_dead_variables_options]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_uint32)
-def nir_lower_variable_initializers(shader:ctypes._Pointer[nir_shader], modes:ctypes.c_uint32) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_uint32, ctypes.c_uint32)
-def nir_zero_initialize_shared_memory(shader:ctypes._Pointer[nir_shader], shared_size:int, chunk_size:int) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_uint32, ctypes.c_uint32)
-def nir_clear_shared_memory(shader:ctypes._Pointer[nir_shader], shared_size:int, chunk_size:int) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_uint32, c.POINTER[nir_remove_dead_variables_options])
+def nir_remove_dead_variables(shader:c.POINTER[nir_shader], modes:ctypes.c_uint32, options:c.POINTER[nir_remove_dead_variables_options]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_uint32)
+def nir_lower_variable_initializers(shader:c.POINTER[nir_shader], modes:ctypes.c_uint32) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_uint32, ctypes.c_uint32)
+def nir_zero_initialize_shared_memory(shader:c.POINTER[nir_shader], shared_size:int, chunk_size:int) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_uint32, ctypes.c_uint32)
+def nir_clear_shared_memory(shader:c.POINTER[nir_shader], shared_size:int, chunk_size:int) -> bool: ...
 nir_opt_move_to_top_options: dict[int, str] = {(nir_move_to_entry_block_only:=1): 'nir_move_to_entry_block_only', (nir_move_to_top_input_loads:=2): 'nir_move_to_top_input_loads', (nir_move_to_top_load_smem_amd:=4): 'nir_move_to_top_load_smem_amd'}
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_uint32)
-def nir_opt_move_to_top(nir:ctypes._Pointer[nir_shader], options:ctypes.c_uint32) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_bool)
-def nir_move_vec_src_uses_to_dest(shader:ctypes._Pointer[nir_shader], skip_const_srcs:bool) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_move_output_stores_to_end(nir:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), nir_instr_writemask_filter_cb, ctypes.c_void_p)
-def nir_lower_vec_to_regs(shader:ctypes._Pointer[nir_shader], cb:nir_instr_writemask_filter_cb, _data:int|None) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_uint32)
+def nir_opt_move_to_top(nir:c.POINTER[nir_shader], options:ctypes.c_uint32) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_bool)
+def nir_move_vec_src_uses_to_dest(shader:c.POINTER[nir_shader], skip_const_srcs:bool) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_move_output_stores_to_end(nir:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], nir_instr_writemask_filter_cb, ctypes.c_void_p)
+def nir_lower_vec_to_regs(shader:c.POINTER[nir_shader], cb:nir_instr_writemask_filter_cb, _data:ctypes.c_void_p) -> bool: ...
 enum_compare_func: dict[int, str] = {(COMPARE_FUNC_NEVER:=0): 'COMPARE_FUNC_NEVER', (COMPARE_FUNC_LESS:=1): 'COMPARE_FUNC_LESS', (COMPARE_FUNC_EQUAL:=2): 'COMPARE_FUNC_EQUAL', (COMPARE_FUNC_LEQUAL:=3): 'COMPARE_FUNC_LEQUAL', (COMPARE_FUNC_GREATER:=4): 'COMPARE_FUNC_GREATER', (COMPARE_FUNC_NOTEQUAL:=5): 'COMPARE_FUNC_NOTEQUAL', (COMPARE_FUNC_GEQUAL:=6): 'COMPARE_FUNC_GEQUAL', (COMPARE_FUNC_ALWAYS:=7): 'COMPARE_FUNC_ALWAYS'}
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_uint32, ctypes.c_bool, ctypes.POINTER(gl_state_index16))
-def nir_lower_alpha_test(shader:ctypes._Pointer[nir_shader], func:ctypes.c_uint32, alpha_to_one:bool, alpha_ref_state_tokens:ctypes._Pointer[gl_state_index16]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), uint8_t, ctypes.c_bool)
-def nir_lower_alpha_to_coverage(shader:ctypes._Pointer[nir_shader], nr_samples:uint8_t, has_intrinsic:bool) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_lower_alpha_to_one(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_lower_alu(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_uint32, ctypes.c_bool)
-def nir_lower_flrp(shader:ctypes._Pointer[nir_shader], lowering_mask:int, always_precise:bool) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_scale_fdiv(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), nir_instr_filter_cb, ctypes.c_void_p)
-def nir_lower_alu_to_scalar(shader:ctypes._Pointer[nir_shader], cb:nir_instr_filter_cb, data:int|None) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), nir_vectorize_cb, ctypes.c_void_p)
-def nir_lower_alu_width(shader:ctypes._Pointer[nir_shader], cb:nir_vectorize_cb, data:int|None) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_lower_alu_vec8_16_srcs(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_lower_bool_to_bitsize(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_bool)
-def nir_lower_bool_to_float(shader:ctypes._Pointer[nir_shader], has_fcsel_ne:bool) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_lower_bool_to_int32(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_opt_simplify_convert_alu_types(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_uint32)
-def nir_lower_const_arrays_to_uniforms(shader:ctypes._Pointer[nir_shader], max_uniform_components:int) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(nir_intrinsic_instr)))
-def nir_lower_convert_alu_types(shader:ctypes._Pointer[nir_shader], should_lower:ctypes._CFunctionType) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_lower_constant_convert_alu_types(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_lower_alu_conversion_to_intrinsic(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_lower_int_to_float(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_lower_load_const_to_scalar(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_lower_read_invocation_to_scalar(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), nir_vectorize_cb, ctypes.c_void_p)
-def nir_lower_phis_to_scalar(shader:ctypes._Pointer[nir_shader], cb:nir_vectorize_cb, data:int|None) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_lower_all_phis_to_scalar(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(None, ctypes.POINTER(nir_shader), ctypes.POINTER(nir_shader))
-def nir_lower_io_array_vars_to_elements(producer:ctypes._Pointer[nir_shader], consumer:ctypes._Pointer[nir_shader]) -> None: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_bool)
-def nir_lower_io_array_vars_to_elements_no_indirects(shader:ctypes._Pointer[nir_shader], outputs_only:bool) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_uint32, nir_instr_filter_cb, ctypes.c_void_p)
-def nir_lower_io_to_scalar(shader:ctypes._Pointer[nir_shader], mask:ctypes.c_uint32, filter:nir_instr_filter_cb, filter_data:int|None) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_uint32)
-def nir_lower_io_vars_to_scalar(shader:ctypes._Pointer[nir_shader], mask:ctypes.c_uint32) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_uint32)
-def nir_opt_vectorize_io_vars(shader:ctypes._Pointer[nir_shader], mask:ctypes.c_uint32) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_lower_tess_level_array_vars_to_vec(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.POINTER(nir_shader), ctypes.POINTER(nir_shader_compiler_options), ctypes.POINTER(ctypes.c_uint32), ctypes.c_uint32, uint8_t)
-def nir_create_passthrough_tcs_impl(options:ctypes._Pointer[nir_shader_compiler_options], locations:ctypes._Pointer[ctypes.c_uint32], num_locations:int, patch_vertices:uint8_t) -> ctypes._Pointer[nir_shader]: ...
-@dll.bind(ctypes.POINTER(nir_shader), ctypes.POINTER(nir_shader_compiler_options), ctypes.POINTER(nir_shader), uint8_t)
-def nir_create_passthrough_tcs(options:ctypes._Pointer[nir_shader_compiler_options], vs:ctypes._Pointer[nir_shader], patch_vertices:uint8_t) -> ctypes._Pointer[nir_shader]: ...
-@dll.bind(ctypes.POINTER(nir_shader), ctypes.POINTER(nir_shader_compiler_options), ctypes.POINTER(nir_shader), ctypes.c_ubyte, ctypes.c_ubyte, ctypes.c_bool, ctypes.c_bool, ctypes.c_bool)
-def nir_create_passthrough_gs(options:ctypes._Pointer[nir_shader_compiler_options], prev_stage:ctypes._Pointer[nir_shader], primitive_type:ctypes.c_ubyte, output_primitive_type:ctypes.c_ubyte, emulate_edgeflags:bool, force_line_strip_out:bool, passthrough_prim_id:bool) -> ctypes._Pointer[nir_shader]: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_uint32)
-def nir_lower_fragcolor(shader:ctypes._Pointer[nir_shader], max_cbufs:int) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_lower_fragcoord_wtrans(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_opt_frag_coord_to_pixel_coord(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_lower_frag_coord_to_pixel_coord(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_lower_viewport_transform(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_bool, ctypes.c_bool)
-def nir_lower_uniforms_to_ubo(shader:ctypes._Pointer[nir_shader], dword_packed:bool, load_vec4:bool) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_lower_is_helper_invocation(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_lower_single_sampled(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), nir_instr_filter_cb)
-def nir_lower_atomics(shader:ctypes._Pointer[nir_shader], filter:nir_instr_filter_cb) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_uint32, ctypes.c_bool, c.POINTER[gl_state_index16])
+def nir_lower_alpha_test(shader:c.POINTER[nir_shader], func:ctypes.c_uint32, alpha_to_one:bool, alpha_ref_state_tokens:c.POINTER[gl_state_index16]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], uint8_t, ctypes.c_bool)
+def nir_lower_alpha_to_coverage(shader:c.POINTER[nir_shader], nr_samples:uint8_t, has_intrinsic:bool) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_lower_alpha_to_one(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_lower_alu(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_uint32, ctypes.c_bool)
+def nir_lower_flrp(shader:c.POINTER[nir_shader], lowering_mask:int, always_precise:bool) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_scale_fdiv(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], nir_instr_filter_cb, ctypes.c_void_p)
+def nir_lower_alu_to_scalar(shader:c.POINTER[nir_shader], cb:nir_instr_filter_cb, data:ctypes.c_void_p) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], nir_vectorize_cb, ctypes.c_void_p)
+def nir_lower_alu_width(shader:c.POINTER[nir_shader], cb:nir_vectorize_cb, data:ctypes.c_void_p) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_lower_alu_vec8_16_srcs(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_lower_bool_to_bitsize(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_bool)
+def nir_lower_bool_to_float(shader:c.POINTER[nir_shader], has_fcsel_ne:bool) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_lower_bool_to_int32(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_opt_simplify_convert_alu_types(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_uint32)
+def nir_lower_const_arrays_to_uniforms(shader:c.POINTER[nir_shader], max_uniform_components:int) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], c.CFUNCTYPE[ctypes.c_bool, [c.POINTER[nir_intrinsic_instr]]])
+def nir_lower_convert_alu_types(shader:c.POINTER[nir_shader], should_lower:c.CFUNCTYPE[ctypes.c_bool, [c.POINTER[nir_intrinsic_instr]]]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_lower_constant_convert_alu_types(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_lower_alu_conversion_to_intrinsic(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_lower_int_to_float(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_lower_load_const_to_scalar(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_lower_read_invocation_to_scalar(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], nir_vectorize_cb, ctypes.c_void_p)
+def nir_lower_phis_to_scalar(shader:c.POINTER[nir_shader], cb:nir_vectorize_cb, data:ctypes.c_void_p) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_lower_all_phis_to_scalar(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(None, c.POINTER[nir_shader], c.POINTER[nir_shader])
+def nir_lower_io_array_vars_to_elements(producer:c.POINTER[nir_shader], consumer:c.POINTER[nir_shader]) -> None: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_bool)
+def nir_lower_io_array_vars_to_elements_no_indirects(shader:c.POINTER[nir_shader], outputs_only:bool) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_uint32, nir_instr_filter_cb, ctypes.c_void_p)
+def nir_lower_io_to_scalar(shader:c.POINTER[nir_shader], mask:ctypes.c_uint32, filter:nir_instr_filter_cb, filter_data:ctypes.c_void_p) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_uint32)
+def nir_lower_io_vars_to_scalar(shader:c.POINTER[nir_shader], mask:ctypes.c_uint32) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_uint32)
+def nir_opt_vectorize_io_vars(shader:c.POINTER[nir_shader], mask:ctypes.c_uint32) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_lower_tess_level_array_vars_to_vec(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(c.POINTER[nir_shader], c.POINTER[nir_shader_compiler_options], c.POINTER[ctypes.c_uint32], ctypes.c_uint32, uint8_t)
+def nir_create_passthrough_tcs_impl(options:c.POINTER[nir_shader_compiler_options], locations:c.POINTER[ctypes.c_uint32], num_locations:int, patch_vertices:uint8_t) -> c.POINTER[nir_shader]: ...
+@dll.bind(c.POINTER[nir_shader], c.POINTER[nir_shader_compiler_options], c.POINTER[nir_shader], uint8_t)
+def nir_create_passthrough_tcs(options:c.POINTER[nir_shader_compiler_options], vs:c.POINTER[nir_shader], patch_vertices:uint8_t) -> c.POINTER[nir_shader]: ...
+@dll.bind(c.POINTER[nir_shader], c.POINTER[nir_shader_compiler_options], c.POINTER[nir_shader], ctypes.c_ubyte, ctypes.c_ubyte, ctypes.c_bool, ctypes.c_bool, ctypes.c_bool)
+def nir_create_passthrough_gs(options:c.POINTER[nir_shader_compiler_options], prev_stage:c.POINTER[nir_shader], primitive_type:ctypes.c_ubyte, output_primitive_type:ctypes.c_ubyte, emulate_edgeflags:bool, force_line_strip_out:bool, passthrough_prim_id:bool) -> c.POINTER[nir_shader]: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_uint32)
+def nir_lower_fragcolor(shader:c.POINTER[nir_shader], max_cbufs:int) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_lower_fragcoord_wtrans(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_opt_frag_coord_to_pixel_coord(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_lower_frag_coord_to_pixel_coord(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_lower_viewport_transform(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_bool, ctypes.c_bool)
+def nir_lower_uniforms_to_ubo(shader:c.POINTER[nir_shader], dword_packed:bool, load_vec4:bool) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_lower_is_helper_invocation(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_lower_single_sampled(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], nir_instr_filter_cb)
+def nir_lower_atomics(shader:c.POINTER[nir_shader], filter:nir_instr_filter_cb) -> bool: ...
 @c.record
 class struct_nir_lower_subgroups_options(c.Struct):
   SIZE = 24
-  filter: ctypes._CFunctionType
-  filter_data: int|None
+  filter: c.CFUNCTYPE[ctypes.c_bool, [c.POINTER[struct_nir_instr], ctypes.c_void_p]]
+  filter_data: ctypes.c_void_p
   subgroup_size: int
   ballot_bit_size: int
   ballot_components: int
@@ -1948,12 +1948,12 @@ class struct_nir_lower_subgroups_options(c.Struct):
   lower_boolean_shuffle: bool
 struct_nir_lower_subgroups_options.register_fields([('filter', nir_instr_filter_cb, 0), ('filter_data', ctypes.c_void_p, 8), ('subgroup_size', uint8_t, 16), ('ballot_bit_size', uint8_t, 17), ('ballot_components', uint8_t, 18), ('lower_to_scalar', ctypes.c_bool, 19, 1, 0), ('lower_vote_trivial', ctypes.c_bool, 19, 1, 1), ('lower_vote_feq', ctypes.c_bool, 19, 1, 2), ('lower_vote_ieq', ctypes.c_bool, 19, 1, 3), ('lower_vote_bool_eq', ctypes.c_bool, 19, 1, 4), ('lower_first_invocation_to_ballot', ctypes.c_bool, 19, 1, 5), ('lower_read_first_invocation', ctypes.c_bool, 19, 1, 6), ('lower_subgroup_masks', ctypes.c_bool, 19, 1, 7), ('lower_relative_shuffle', ctypes.c_bool, 20, 1, 0), ('lower_shuffle_to_32bit', ctypes.c_bool, 20, 1, 1), ('lower_shuffle_to_swizzle_amd', ctypes.c_bool, 20, 1, 2), ('lower_shuffle', ctypes.c_bool, 20, 1, 3), ('lower_quad', ctypes.c_bool, 20, 1, 4), ('lower_quad_broadcast_dynamic', ctypes.c_bool, 20, 1, 5), ('lower_quad_broadcast_dynamic_to_const', ctypes.c_bool, 20, 1, 6), ('lower_quad_vote', ctypes.c_bool, 20, 1, 7), ('lower_elect', ctypes.c_bool, 21, 1, 0), ('lower_read_invocation_to_cond', ctypes.c_bool, 21, 1, 1), ('lower_rotate_to_shuffle', ctypes.c_bool, 21, 1, 2), ('lower_rotate_clustered_to_shuffle', ctypes.c_bool, 21, 1, 3), ('lower_ballot_bit_count_to_mbcnt_amd', ctypes.c_bool, 21, 1, 4), ('lower_inverse_ballot', ctypes.c_bool, 21, 1, 5), ('lower_reduce', ctypes.c_bool, 21, 1, 6), ('lower_boolean_reduce', ctypes.c_bool, 21, 1, 7), ('lower_boolean_shuffle', ctypes.c_bool, 22, 1, 0)])
 nir_lower_subgroups_options: TypeAlias = struct_nir_lower_subgroups_options
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.POINTER(nir_lower_subgroups_options))
-def nir_lower_subgroups(shader:ctypes._Pointer[nir_shader], options:ctypes._Pointer[nir_lower_subgroups_options]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_lower_system_values(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.POINTER(nir_def), ctypes.POINTER(nir_builder))
-def nir_build_lowered_load_helper_invocation(b:ctypes._Pointer[nir_builder]) -> ctypes._Pointer[nir_def]: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], c.POINTER[nir_lower_subgroups_options])
+def nir_lower_subgroups(shader:c.POINTER[nir_shader], options:c.POINTER[nir_lower_subgroups_options]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_lower_system_values(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(c.POINTER[nir_def], c.POINTER[nir_builder])
+def nir_build_lowered_load_helper_invocation(b:c.POINTER[nir_builder]) -> c.POINTER[nir_def]: ...
 @c.record
 class struct_nir_lower_compute_system_values_options(c.Struct):
   SIZE = 16
@@ -1966,11 +1966,11 @@ class struct_nir_lower_compute_system_values_options(c.Struct):
   lower_workgroup_id_to_index: bool
   global_id_is_32bit: bool
   shortcut_1d_workgroup_id: bool
-  num_workgroups: ctypes.Array[ctypes.c_uint32]
-struct_nir_lower_compute_system_values_options.register_fields([('has_base_global_invocation_id', ctypes.c_bool, 0, 1, 0), ('has_base_workgroup_id', ctypes.c_bool, 0, 1, 1), ('has_global_size', ctypes.c_bool, 0, 1, 2), ('shuffle_local_ids_for_quad_derivatives', ctypes.c_bool, 0, 1, 3), ('lower_local_invocation_index', ctypes.c_bool, 0, 1, 4), ('lower_cs_local_id_to_index', ctypes.c_bool, 0, 1, 5), ('lower_workgroup_id_to_index', ctypes.c_bool, 0, 1, 6), ('global_id_is_32bit', ctypes.c_bool, 0, 1, 7), ('shortcut_1d_workgroup_id', ctypes.c_bool, 1, 1, 0), ('num_workgroups', (uint32_t * 3), 4)])
+  num_workgroups: c.Array[ctypes.c_uint32, Literal[3]]
+struct_nir_lower_compute_system_values_options.register_fields([('has_base_global_invocation_id', ctypes.c_bool, 0, 1, 0), ('has_base_workgroup_id', ctypes.c_bool, 0, 1, 1), ('has_global_size', ctypes.c_bool, 0, 1, 2), ('shuffle_local_ids_for_quad_derivatives', ctypes.c_bool, 0, 1, 3), ('lower_local_invocation_index', ctypes.c_bool, 0, 1, 4), ('lower_cs_local_id_to_index', ctypes.c_bool, 0, 1, 5), ('lower_workgroup_id_to_index', ctypes.c_bool, 0, 1, 6), ('global_id_is_32bit', ctypes.c_bool, 0, 1, 7), ('shortcut_1d_workgroup_id', ctypes.c_bool, 1, 1, 0), ('num_workgroups', c.Array[uint32_t, Literal[3]], 4)])
 nir_lower_compute_system_values_options: TypeAlias = struct_nir_lower_compute_system_values_options
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.POINTER(nir_lower_compute_system_values_options))
-def nir_lower_compute_system_values(shader:ctypes._Pointer[nir_shader], options:ctypes._Pointer[nir_lower_compute_system_values_options]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], c.POINTER[nir_lower_compute_system_values_options])
+def nir_lower_compute_system_values(shader:c.POINTER[nir_shader], options:c.POINTER[nir_lower_compute_system_values_options]) -> bool: ...
 @c.record
 class struct_nir_lower_sysvals_to_varyings_options(c.Struct):
   SIZE = 1
@@ -1979,8 +1979,8 @@ class struct_nir_lower_sysvals_to_varyings_options(c.Struct):
   point_coord: bool
 struct_nir_lower_sysvals_to_varyings_options.register_fields([('frag_coord', ctypes.c_bool, 0, 1, 0), ('front_face', ctypes.c_bool, 0, 1, 1), ('point_coord', ctypes.c_bool, 0, 1, 2)])
 nir_lower_sysvals_to_varyings_options: TypeAlias = struct_nir_lower_sysvals_to_varyings_options
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.POINTER(nir_lower_sysvals_to_varyings_options))
-def nir_lower_sysvals_to_varyings(shader:ctypes._Pointer[nir_shader], options:ctypes._Pointer[nir_lower_sysvals_to_varyings_options]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], c.POINTER[nir_lower_sysvals_to_varyings_options])
+def nir_lower_sysvals_to_varyings(shader:c.POINTER[nir_shader], options:c.POINTER[nir_lower_sysvals_to_varyings_options]) -> bool: ...
 enum_nir_lower_tex_packing: dict[int, str] = {(nir_lower_tex_packing_none:=0): 'nir_lower_tex_packing_none', (nir_lower_tex_packing_16:=1): 'nir_lower_tex_packing_16', (nir_lower_tex_packing_8:=2): 'nir_lower_tex_packing_8'}
 @c.record
 class struct_nir_lower_tex_options(c.Struct):
@@ -1989,7 +1989,7 @@ class struct_nir_lower_tex_options(c.Struct):
   lower_txp_array: bool
   lower_txf_offset: bool
   lower_rect_offset: bool
-  lower_offset_filter: ctypes._CFunctionType
+  lower_offset_filter: c.CFUNCTYPE[ctypes.c_bool, [c.POINTER[struct_nir_instr], ctypes.c_void_p]]
   lower_rect: bool
   lower_1d: bool
   lower_1d_shadow: bool
@@ -2015,8 +2015,8 @@ class struct_nir_lower_tex_options(c.Struct):
   saturate_t: int
   saturate_r: int
   swizzle_result: int
-  swizzles: ctypes.Array[(ctypes.c_ubyte * 4)]
-  scale_factors: ctypes.Array[ctypes.c_float]
+  swizzles: c.Array[c.Array[ctypes.c_ubyte, Literal[4]], Literal[32]]
+  scale_factors: c.Array[ctypes.c_float, Literal[32]]
   lower_srgb: int
   lower_txd_cube_map: bool
   lower_txd_3d: bool
@@ -2034,17 +2034,17 @@ class struct_nir_lower_tex_options(c.Struct):
   lower_tg4_broadcom_swizzle: bool
   lower_tg4_offsets: bool
   lower_to_fragment_fetch_amd: bool
-  lower_tex_packing_cb: ctypes._CFunctionType
-  lower_tex_packing_data: int|None
+  lower_tex_packing_cb: c.CFUNCTYPE[ctypes.c_ubyte, [c.POINTER[struct_nir_tex_instr], ctypes.c_void_p]]
+  lower_tex_packing_data: ctypes.c_void_p
   lower_lod_zero_width: bool
   lower_sampler_lod_bias: bool
   lower_invalid_implicit_lod: bool
   lower_index_to_offset: bool
-  callback_data: int|None
-struct_nir_lower_tex_options.register_fields([('lower_txp', ctypes.c_uint32, 0), ('lower_txp_array', ctypes.c_bool, 4), ('lower_txf_offset', ctypes.c_bool, 5), ('lower_rect_offset', ctypes.c_bool, 6), ('lower_offset_filter', nir_instr_filter_cb, 8), ('lower_rect', ctypes.c_bool, 16), ('lower_1d', ctypes.c_bool, 17), ('lower_1d_shadow', ctypes.c_bool, 18), ('lower_y_uv_external', ctypes.c_uint32, 20), ('lower_y_vu_external', ctypes.c_uint32, 24), ('lower_y_u_v_external', ctypes.c_uint32, 28), ('lower_yx_xuxv_external', ctypes.c_uint32, 32), ('lower_yx_xvxu_external', ctypes.c_uint32, 36), ('lower_xy_uxvx_external', ctypes.c_uint32, 40), ('lower_xy_vxux_external', ctypes.c_uint32, 44), ('lower_ayuv_external', ctypes.c_uint32, 48), ('lower_xyuv_external', ctypes.c_uint32, 52), ('lower_yuv_external', ctypes.c_uint32, 56), ('lower_yu_yv_external', ctypes.c_uint32, 60), ('lower_yv_yu_external', ctypes.c_uint32, 64), ('lower_y41x_external', ctypes.c_uint32, 68), ('lower_sx10_external', ctypes.c_uint32, 72), ('lower_sx12_external', ctypes.c_uint32, 76), ('bt709_external', ctypes.c_uint32, 80), ('bt2020_external', ctypes.c_uint32, 84), ('yuv_full_range_external', ctypes.c_uint32, 88), ('saturate_s', ctypes.c_uint32, 92), ('saturate_t', ctypes.c_uint32, 96), ('saturate_r', ctypes.c_uint32, 100), ('swizzle_result', ctypes.c_uint32, 104), ('swizzles', ((uint8_t * 4) * 32), 108), ('scale_factors', (ctypes.c_float * 32), 236), ('lower_srgb', ctypes.c_uint32, 364), ('lower_txd_cube_map', ctypes.c_bool, 368), ('lower_txd_3d', ctypes.c_bool, 369), ('lower_txd_array', ctypes.c_bool, 370), ('lower_txd_shadow', ctypes.c_bool, 371), ('lower_txd', ctypes.c_bool, 372), ('lower_txd_clamp', ctypes.c_bool, 373), ('lower_txb_shadow_clamp', ctypes.c_bool, 374), ('lower_txd_shadow_clamp', ctypes.c_bool, 375), ('lower_txd_offset_clamp', ctypes.c_bool, 376), ('lower_txd_clamp_bindless_sampler', ctypes.c_bool, 377), ('lower_txd_clamp_if_sampler_index_not_lt_16', ctypes.c_bool, 378), ('lower_txs_lod', ctypes.c_bool, 379), ('lower_txs_cube_array', ctypes.c_bool, 380), ('lower_tg4_broadcom_swizzle', ctypes.c_bool, 381), ('lower_tg4_offsets', ctypes.c_bool, 382), ('lower_to_fragment_fetch_amd', ctypes.c_bool, 383), ('lower_tex_packing_cb', ctypes.CFUNCTYPE(ctypes.c_ubyte, ctypes.POINTER(nir_tex_instr), ctypes.c_void_p), 384), ('lower_tex_packing_data', ctypes.c_void_p, 392), ('lower_lod_zero_width', ctypes.c_bool, 400), ('lower_sampler_lod_bias', ctypes.c_bool, 401), ('lower_invalid_implicit_lod', ctypes.c_bool, 402), ('lower_index_to_offset', ctypes.c_bool, 403), ('callback_data', ctypes.c_void_p, 408)])
+  callback_data: ctypes.c_void_p
+struct_nir_lower_tex_options.register_fields([('lower_txp', ctypes.c_uint32, 0), ('lower_txp_array', ctypes.c_bool, 4), ('lower_txf_offset', ctypes.c_bool, 5), ('lower_rect_offset', ctypes.c_bool, 6), ('lower_offset_filter', nir_instr_filter_cb, 8), ('lower_rect', ctypes.c_bool, 16), ('lower_1d', ctypes.c_bool, 17), ('lower_1d_shadow', ctypes.c_bool, 18), ('lower_y_uv_external', ctypes.c_uint32, 20), ('lower_y_vu_external', ctypes.c_uint32, 24), ('lower_y_u_v_external', ctypes.c_uint32, 28), ('lower_yx_xuxv_external', ctypes.c_uint32, 32), ('lower_yx_xvxu_external', ctypes.c_uint32, 36), ('lower_xy_uxvx_external', ctypes.c_uint32, 40), ('lower_xy_vxux_external', ctypes.c_uint32, 44), ('lower_ayuv_external', ctypes.c_uint32, 48), ('lower_xyuv_external', ctypes.c_uint32, 52), ('lower_yuv_external', ctypes.c_uint32, 56), ('lower_yu_yv_external', ctypes.c_uint32, 60), ('lower_yv_yu_external', ctypes.c_uint32, 64), ('lower_y41x_external', ctypes.c_uint32, 68), ('lower_sx10_external', ctypes.c_uint32, 72), ('lower_sx12_external', ctypes.c_uint32, 76), ('bt709_external', ctypes.c_uint32, 80), ('bt2020_external', ctypes.c_uint32, 84), ('yuv_full_range_external', ctypes.c_uint32, 88), ('saturate_s', ctypes.c_uint32, 92), ('saturate_t', ctypes.c_uint32, 96), ('saturate_r', ctypes.c_uint32, 100), ('swizzle_result', ctypes.c_uint32, 104), ('swizzles', c.Array[c.Array[uint8_t, Literal[4]], Literal[32]], 108), ('scale_factors', c.Array[ctypes.c_float, Literal[32]], 236), ('lower_srgb', ctypes.c_uint32, 364), ('lower_txd_cube_map', ctypes.c_bool, 368), ('lower_txd_3d', ctypes.c_bool, 369), ('lower_txd_array', ctypes.c_bool, 370), ('lower_txd_shadow', ctypes.c_bool, 371), ('lower_txd', ctypes.c_bool, 372), ('lower_txd_clamp', ctypes.c_bool, 373), ('lower_txb_shadow_clamp', ctypes.c_bool, 374), ('lower_txd_shadow_clamp', ctypes.c_bool, 375), ('lower_txd_offset_clamp', ctypes.c_bool, 376), ('lower_txd_clamp_bindless_sampler', ctypes.c_bool, 377), ('lower_txd_clamp_if_sampler_index_not_lt_16', ctypes.c_bool, 378), ('lower_txs_lod', ctypes.c_bool, 379), ('lower_txs_cube_array', ctypes.c_bool, 380), ('lower_tg4_broadcom_swizzle', ctypes.c_bool, 381), ('lower_tg4_offsets', ctypes.c_bool, 382), ('lower_to_fragment_fetch_amd', ctypes.c_bool, 383), ('lower_tex_packing_cb', c.CFUNCTYPE[ctypes.c_ubyte, [c.POINTER[nir_tex_instr], ctypes.c_void_p]], 384), ('lower_tex_packing_data', ctypes.c_void_p, 392), ('lower_lod_zero_width', ctypes.c_bool, 400), ('lower_sampler_lod_bias', ctypes.c_bool, 401), ('lower_invalid_implicit_lod', ctypes.c_bool, 402), ('lower_index_to_offset', ctypes.c_bool, 403), ('callback_data', ctypes.c_void_p, 408)])
 nir_lower_tex_options: TypeAlias = struct_nir_lower_tex_options
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.POINTER(nir_lower_tex_options))
-def nir_lower_tex(shader:ctypes._Pointer[nir_shader], options:ctypes._Pointer[nir_lower_tex_options]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], c.POINTER[nir_lower_tex_options])
+def nir_lower_tex(shader:c.POINTER[nir_shader], options:c.POINTER[nir_lower_tex_options]) -> bool: ...
 @c.record
 class struct_nir_lower_tex_shadow_swizzle(c.Struct):
   SIZE = 4
@@ -2054,8 +2054,8 @@ class struct_nir_lower_tex_shadow_swizzle(c.Struct):
   swizzle_a: int
 struct_nir_lower_tex_shadow_swizzle.register_fields([('swizzle_r', ctypes.c_uint32, 0, 3, 0), ('swizzle_g', ctypes.c_uint32, 0, 3, 3), ('swizzle_b', ctypes.c_uint32, 0, 3, 6), ('swizzle_a', ctypes.c_uint32, 1, 3, 1)])
 nir_lower_tex_shadow_swizzle: TypeAlias = struct_nir_lower_tex_shadow_swizzle
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_uint32, ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(nir_lower_tex_shadow_swizzle), ctypes.c_bool)
-def nir_lower_tex_shadow(s:ctypes._Pointer[nir_shader], n_states:int, compare_func:ctypes._Pointer[ctypes.c_uint32], tex_swizzles:ctypes._Pointer[nir_lower_tex_shadow_swizzle], is_fixed_point_format:bool) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_uint32, c.POINTER[ctypes.c_uint32], c.POINTER[nir_lower_tex_shadow_swizzle], ctypes.c_bool)
+def nir_lower_tex_shadow(s:c.POINTER[nir_shader], n_states:int, compare_func:c.POINTER[ctypes.c_uint32], tex_swizzles:c.POINTER[nir_lower_tex_shadow_swizzle], is_fixed_point_format:bool) -> bool: ...
 @c.record
 class struct_nir_lower_image_options(c.Struct):
   SIZE = 3
@@ -2064,38 +2064,38 @@ class struct_nir_lower_image_options(c.Struct):
   lower_image_samples_to_one: bool
 struct_nir_lower_image_options.register_fields([('lower_cube_size', ctypes.c_bool, 0), ('lower_to_fragment_mask_load_amd', ctypes.c_bool, 1), ('lower_image_samples_to_one', ctypes.c_bool, 2)])
 nir_lower_image_options: TypeAlias = struct_nir_lower_image_options
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.POINTER(nir_lower_image_options))
-def nir_lower_image(nir:ctypes._Pointer[nir_shader], options:ctypes._Pointer[nir_lower_image_options]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), nir_intrin_filter_cb, ctypes.c_void_p)
-def nir_lower_image_atomics_to_global(s:ctypes._Pointer[nir_shader], filter:nir_intrin_filter_cb, data:int|None) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_bool)
-def nir_lower_readonly_images_to_tex(shader:ctypes._Pointer[nir_shader], per_variable:bool) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], c.POINTER[nir_lower_image_options])
+def nir_lower_image(nir:c.POINTER[nir_shader], options:c.POINTER[nir_lower_image_options]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], nir_intrin_filter_cb, ctypes.c_void_p)
+def nir_lower_image_atomics_to_global(s:c.POINTER[nir_shader], filter:nir_intrin_filter_cb, data:ctypes.c_void_p) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_bool)
+def nir_lower_readonly_images_to_tex(shader:c.POINTER[nir_shader], per_variable:bool) -> bool: ...
 enum_nir_lower_non_uniform_access_type: dict[int, str] = {(nir_lower_non_uniform_ubo_access:=1): 'nir_lower_non_uniform_ubo_access', (nir_lower_non_uniform_ssbo_access:=2): 'nir_lower_non_uniform_ssbo_access', (nir_lower_non_uniform_texture_access:=4): 'nir_lower_non_uniform_texture_access', (nir_lower_non_uniform_image_access:=8): 'nir_lower_non_uniform_image_access', (nir_lower_non_uniform_get_ssbo_size:=16): 'nir_lower_non_uniform_get_ssbo_size', (nir_lower_non_uniform_texture_offset_access:=32): 'nir_lower_non_uniform_texture_offset_access', (nir_lower_non_uniform_access_type_count:=6): 'nir_lower_non_uniform_access_type_count'}
-nir_lower_non_uniform_src_access_callback: TypeAlias = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(struct_nir_tex_instr), ctypes.c_uint32, ctypes.c_void_p)
-nir_lower_non_uniform_access_callback: TypeAlias = ctypes.CFUNCTYPE(ctypes.c_uint16, ctypes.POINTER(struct_nir_src), ctypes.c_void_p)
+nir_lower_non_uniform_src_access_callback: TypeAlias = c.CFUNCTYPE[ctypes.c_bool, [c.POINTER[struct_nir_tex_instr], ctypes.c_uint32, ctypes.c_void_p]]
+nir_lower_non_uniform_access_callback: TypeAlias = c.CFUNCTYPE[ctypes.c_uint16, [c.POINTER[struct_nir_src], ctypes.c_void_p]]
 @c.record
 class struct_nir_lower_non_uniform_access_options(c.Struct):
   SIZE = 32
   types: int
-  tex_src_callback: ctypes._CFunctionType
-  callback: ctypes._CFunctionType
-  callback_data: int|None
+  tex_src_callback: c.CFUNCTYPE[ctypes.c_bool, [c.POINTER[struct_nir_tex_instr], ctypes.c_uint32, ctypes.c_void_p]]
+  callback: c.CFUNCTYPE[ctypes.c_uint16, [c.POINTER[struct_nir_src], ctypes.c_void_p]]
+  callback_data: ctypes.c_void_p
 struct_nir_lower_non_uniform_access_options.register_fields([('types', ctypes.c_uint32, 0), ('tex_src_callback', nir_lower_non_uniform_src_access_callback, 8), ('callback', nir_lower_non_uniform_access_callback, 16), ('callback_data', ctypes.c_void_p, 24)])
 nir_lower_non_uniform_access_options: TypeAlias = struct_nir_lower_non_uniform_access_options
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_uint32)
-def nir_has_non_uniform_access(shader:ctypes._Pointer[nir_shader], types:ctypes.c_uint32) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_opt_non_uniform_access(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.POINTER(nir_lower_non_uniform_access_options))
-def nir_lower_non_uniform_access(shader:ctypes._Pointer[nir_shader], options:ctypes._Pointer[nir_lower_non_uniform_access_options]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_uint32)
+def nir_has_non_uniform_access(shader:c.POINTER[nir_shader], types:ctypes.c_uint32) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_opt_non_uniform_access(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], c.POINTER[nir_lower_non_uniform_access_options])
+def nir_lower_non_uniform_access(shader:c.POINTER[nir_shader], options:c.POINTER[nir_lower_non_uniform_access_options]) -> bool: ...
 @c.record
 class struct_nir_lower_idiv_options(c.Struct):
   SIZE = 1
   allow_fp16: bool
 struct_nir_lower_idiv_options.register_fields([('allow_fp16', ctypes.c_bool, 0)])
 nir_lower_idiv_options: TypeAlias = struct_nir_lower_idiv_options
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.POINTER(nir_lower_idiv_options))
-def nir_lower_idiv(shader:ctypes._Pointer[nir_shader], options:ctypes._Pointer[nir_lower_idiv_options]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], c.POINTER[nir_lower_idiv_options])
+def nir_lower_idiv(shader:c.POINTER[nir_shader], options:c.POINTER[nir_lower_idiv_options]) -> bool: ...
 @c.record
 class struct_nir_input_attachment_options(c.Struct):
   SIZE = 12
@@ -2107,68 +2107,68 @@ class struct_nir_input_attachment_options(c.Struct):
   unscaled_input_attachment_ir3: int
 struct_nir_input_attachment_options.register_fields([('use_ia_coord_intrin', ctypes.c_bool, 0), ('use_fragcoord_sysval', ctypes.c_bool, 1), ('use_layer_id_sysval', ctypes.c_bool, 2), ('use_view_id_for_layer', ctypes.c_bool, 3), ('unscaled_depth_stencil_ir3', ctypes.c_bool, 4), ('unscaled_input_attachment_ir3', uint32_t, 8)])
 nir_input_attachment_options: TypeAlias = struct_nir_input_attachment_options
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.POINTER(nir_input_attachment_options))
-def nir_lower_input_attachments(shader:ctypes._Pointer[nir_shader], options:ctypes._Pointer[nir_input_attachment_options]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_uint32, ctypes.c_bool, ctypes.c_bool, ((gl_state_index16 * 4) * 0))
-def nir_lower_clip_vs(shader:ctypes._Pointer[nir_shader], ucp_enables:int, use_vars:bool, use_clipdist_array:bool, clipplane_state_tokens:ctypes.Array[(gl_state_index16 * 4)]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_uint32, ctypes.c_bool, ((gl_state_index16 * 4) * 0))
-def nir_lower_clip_gs(shader:ctypes._Pointer[nir_shader], ucp_enables:int, use_clipdist_array:bool, clipplane_state_tokens:ctypes.Array[(gl_state_index16 * 4)]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_uint32, ctypes.c_bool, ctypes.c_bool)
-def nir_lower_clip_fs(shader:ctypes._Pointer[nir_shader], ucp_enables:int, use_clipdist_array:bool, use_load_interp:bool) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_lower_clip_cull_distance_to_vec4s(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_lower_clip_cull_distance_array_vars(nir:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_uint32)
-def nir_lower_clip_disable(shader:ctypes._Pointer[nir_shader], clip_plane_enable:int) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.POINTER(gl_state_index16))
-def nir_lower_point_size_mov(shader:ctypes._Pointer[nir_shader], pointsize_state_tokens:ctypes._Pointer[gl_state_index16]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_lower_frexp(nir:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_bool)
-def nir_lower_two_sided_color(shader:ctypes._Pointer[nir_shader], face_sysval:bool) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_lower_clamp_color_outputs(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_lower_flatshade(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_lower_passthrough_edgeflags(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_uint32, ctypes.POINTER(gl_state_index16))
-def nir_lower_patch_vertices(nir:ctypes._Pointer[nir_shader], static_count:int, uniform_state_tokens:ctypes._Pointer[gl_state_index16]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], c.POINTER[nir_input_attachment_options])
+def nir_lower_input_attachments(shader:c.POINTER[nir_shader], options:c.POINTER[nir_input_attachment_options]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_uint32, ctypes.c_bool, ctypes.c_bool, c.Array[c.Array[gl_state_index16, Literal[4]], Literal[0]])
+def nir_lower_clip_vs(shader:c.POINTER[nir_shader], ucp_enables:int, use_vars:bool, use_clipdist_array:bool, clipplane_state_tokens:c.Array[c.Array[gl_state_index16, Literal[4]], Literal[0]]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_uint32, ctypes.c_bool, c.Array[c.Array[gl_state_index16, Literal[4]], Literal[0]])
+def nir_lower_clip_gs(shader:c.POINTER[nir_shader], ucp_enables:int, use_clipdist_array:bool, clipplane_state_tokens:c.Array[c.Array[gl_state_index16, Literal[4]], Literal[0]]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_uint32, ctypes.c_bool, ctypes.c_bool)
+def nir_lower_clip_fs(shader:c.POINTER[nir_shader], ucp_enables:int, use_clipdist_array:bool, use_load_interp:bool) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_lower_clip_cull_distance_to_vec4s(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_lower_clip_cull_distance_array_vars(nir:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_uint32)
+def nir_lower_clip_disable(shader:c.POINTER[nir_shader], clip_plane_enable:int) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], c.POINTER[gl_state_index16])
+def nir_lower_point_size_mov(shader:c.POINTER[nir_shader], pointsize_state_tokens:c.POINTER[gl_state_index16]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_lower_frexp(nir:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_bool)
+def nir_lower_two_sided_color(shader:c.POINTER[nir_shader], face_sysval:bool) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_lower_clamp_color_outputs(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_lower_flatshade(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_lower_passthrough_edgeflags(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_uint32, c.POINTER[gl_state_index16])
+def nir_lower_patch_vertices(nir:c.POINTER[nir_shader], static_count:int, uniform_state_tokens:c.POINTER[gl_state_index16]) -> bool: ...
 @c.record
 class struct_nir_lower_wpos_ytransform_options(c.Struct):
   SIZE = 10
-  state_tokens: ctypes.Array[ctypes.c_int16]
+  state_tokens: c.Array[ctypes.c_int16, Literal[4]]
   fs_coord_origin_upper_left: bool
   fs_coord_origin_lower_left: bool
   fs_coord_pixel_center_integer: bool
   fs_coord_pixel_center_half_integer: bool
-struct_nir_lower_wpos_ytransform_options.register_fields([('state_tokens', (gl_state_index16 * 4), 0), ('fs_coord_origin_upper_left', ctypes.c_bool, 8, 1, 0), ('fs_coord_origin_lower_left', ctypes.c_bool, 8, 1, 1), ('fs_coord_pixel_center_integer', ctypes.c_bool, 8, 1, 2), ('fs_coord_pixel_center_half_integer', ctypes.c_bool, 8, 1, 3)])
+struct_nir_lower_wpos_ytransform_options.register_fields([('state_tokens', c.Array[gl_state_index16, Literal[4]], 0), ('fs_coord_origin_upper_left', ctypes.c_bool, 8, 1, 0), ('fs_coord_origin_lower_left', ctypes.c_bool, 8, 1, 1), ('fs_coord_pixel_center_integer', ctypes.c_bool, 8, 1, 2), ('fs_coord_pixel_center_half_integer', ctypes.c_bool, 8, 1, 3)])
 nir_lower_wpos_ytransform_options: TypeAlias = struct_nir_lower_wpos_ytransform_options
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.POINTER(nir_lower_wpos_ytransform_options))
-def nir_lower_wpos_ytransform(shader:ctypes._Pointer[nir_shader], options:ctypes._Pointer[nir_lower_wpos_ytransform_options]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_lower_wpos_center(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ((gl_state_index16 * 4) * 0))
-def nir_lower_pntc_ytransform(shader:ctypes._Pointer[nir_shader], clipplane_state_tokens:ctypes.Array[(gl_state_index16 * 4)]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), nir_instr_filter_cb, ctypes.c_void_p)
-def nir_lower_wrmasks(shader:ctypes._Pointer[nir_shader], cb:nir_instr_filter_cb, data:int|None) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_lower_fb_read(shader:ctypes._Pointer[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], c.POINTER[nir_lower_wpos_ytransform_options])
+def nir_lower_wpos_ytransform(shader:c.POINTER[nir_shader], options:c.POINTER[nir_lower_wpos_ytransform_options]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_lower_wpos_center(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], c.Array[c.Array[gl_state_index16, Literal[4]], Literal[0]])
+def nir_lower_pntc_ytransform(shader:c.POINTER[nir_shader], clipplane_state_tokens:c.Array[c.Array[gl_state_index16, Literal[4]], Literal[0]]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], nir_instr_filter_cb, ctypes.c_void_p)
+def nir_lower_wrmasks(shader:c.POINTER[nir_shader], cb:nir_instr_filter_cb, data:ctypes.c_void_p) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_lower_fb_read(shader:c.POINTER[nir_shader]) -> bool: ...
 @c.record
 class struct_nir_lower_drawpixels_options(c.Struct):
   SIZE = 36
-  texcoord_state_tokens: ctypes.Array[ctypes.c_int16]
-  scale_state_tokens: ctypes.Array[ctypes.c_int16]
-  bias_state_tokens: ctypes.Array[ctypes.c_int16]
+  texcoord_state_tokens: c.Array[ctypes.c_int16, Literal[4]]
+  scale_state_tokens: c.Array[ctypes.c_int16, Literal[4]]
+  bias_state_tokens: c.Array[ctypes.c_int16, Literal[4]]
   drawpix_sampler: int
   pixelmap_sampler: int
   pixel_maps: bool
   scale_and_bias: bool
-struct_nir_lower_drawpixels_options.register_fields([('texcoord_state_tokens', (gl_state_index16 * 4), 0), ('scale_state_tokens', (gl_state_index16 * 4), 8), ('bias_state_tokens', (gl_state_index16 * 4), 16), ('drawpix_sampler', ctypes.c_uint32, 24), ('pixelmap_sampler', ctypes.c_uint32, 28), ('pixel_maps', ctypes.c_bool, 32, 1, 0), ('scale_and_bias', ctypes.c_bool, 32, 1, 1)])
+struct_nir_lower_drawpixels_options.register_fields([('texcoord_state_tokens', c.Array[gl_state_index16, Literal[4]], 0), ('scale_state_tokens', c.Array[gl_state_index16, Literal[4]], 8), ('bias_state_tokens', c.Array[gl_state_index16, Literal[4]], 16), ('drawpix_sampler', ctypes.c_uint32, 24), ('pixelmap_sampler', ctypes.c_uint32, 28), ('pixel_maps', ctypes.c_bool, 32, 1, 0), ('scale_and_bias', ctypes.c_bool, 32, 1, 1)])
 nir_lower_drawpixels_options: TypeAlias = struct_nir_lower_drawpixels_options
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.POINTER(nir_lower_drawpixels_options))
-def nir_lower_drawpixels(shader:ctypes._Pointer[nir_shader], options:ctypes._Pointer[nir_lower_drawpixels_options]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], c.POINTER[nir_lower_drawpixels_options])
+def nir_lower_drawpixels(shader:c.POINTER[nir_shader], options:c.POINTER[nir_lower_drawpixels_options]) -> bool: ...
 @c.record
 class struct_nir_lower_bitmap_options(c.Struct):
   SIZE = 8
@@ -2176,17 +2176,17 @@ class struct_nir_lower_bitmap_options(c.Struct):
   swizzle_xxxx: bool
 struct_nir_lower_bitmap_options.register_fields([('sampler', ctypes.c_uint32, 0), ('swizzle_xxxx', ctypes.c_bool, 4)])
 nir_lower_bitmap_options: TypeAlias = struct_nir_lower_bitmap_options
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.POINTER(nir_lower_bitmap_options))
-def nir_lower_bitmap(shader:ctypes._Pointer[nir_shader], options:ctypes._Pointer[nir_lower_bitmap_options]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_uint32)
-def nir_lower_atomics_to_ssbo(shader:ctypes._Pointer[nir_shader], offset_align_state:int) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], c.POINTER[nir_lower_bitmap_options])
+def nir_lower_bitmap(shader:c.POINTER[nir_shader], options:c.POINTER[nir_lower_bitmap_options]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_uint32)
+def nir_lower_atomics_to_ssbo(shader:c.POINTER[nir_shader], offset_align_state:int) -> bool: ...
 nir_lower_gs_intrinsics_flags: dict[int, str] = {(nir_lower_gs_intrinsics_per_stream:=1): 'nir_lower_gs_intrinsics_per_stream', (nir_lower_gs_intrinsics_count_primitives:=2): 'nir_lower_gs_intrinsics_count_primitives', (nir_lower_gs_intrinsics_count_vertices_per_primitive:=4): 'nir_lower_gs_intrinsics_count_vertices_per_primitive', (nir_lower_gs_intrinsics_overwrite_incomplete:=8): 'nir_lower_gs_intrinsics_overwrite_incomplete'}
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_uint32)
-def nir_lower_gs_intrinsics(shader:ctypes._Pointer[nir_shader], options:ctypes.c_uint32) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_lower_halt_to_return(nir:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_bool)
-def nir_lower_tess_coord_z(shader:ctypes._Pointer[nir_shader], triangles:bool) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_uint32)
+def nir_lower_gs_intrinsics(shader:c.POINTER[nir_shader], options:ctypes.c_uint32) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_lower_halt_to_return(nir:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_bool)
+def nir_lower_tess_coord_z(shader:c.POINTER[nir_shader], triangles:bool) -> bool: ...
 @c.record
 class struct_nir_lower_task_shader_options(c.Struct):
   SIZE = 8
@@ -2195,47 +2195,47 @@ class struct_nir_lower_task_shader_options(c.Struct):
   payload_offset_in_bytes: int
 struct_nir_lower_task_shader_options.register_fields([('payload_to_shared_for_atomics', ctypes.c_bool, 0, 1, 0), ('payload_to_shared_for_small_types', ctypes.c_bool, 0, 1, 1), ('payload_offset_in_bytes', uint32_t, 4)])
 nir_lower_task_shader_options: TypeAlias = struct_nir_lower_task_shader_options
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), nir_lower_task_shader_options)
-def nir_lower_task_shader(shader:ctypes._Pointer[nir_shader], options:nir_lower_task_shader_options) -> bool: ...
-nir_lower_bit_size_callback: TypeAlias = ctypes.CFUNCTYPE(ctypes.c_uint32, ctypes.POINTER(struct_nir_instr), ctypes.c_void_p)
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), nir_lower_bit_size_callback, ctypes.c_void_p)
-def nir_lower_bit_size(shader:ctypes._Pointer[nir_shader], callback:nir_lower_bit_size_callback, callback_data:int|None) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_lower_64bit_phis(shader:ctypes._Pointer[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], nir_lower_task_shader_options)
+def nir_lower_task_shader(shader:c.POINTER[nir_shader], options:nir_lower_task_shader_options) -> bool: ...
+nir_lower_bit_size_callback: TypeAlias = c.CFUNCTYPE[ctypes.c_uint32, [c.POINTER[struct_nir_instr], ctypes.c_void_p]]
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], nir_lower_bit_size_callback, ctypes.c_void_p)
+def nir_lower_bit_size(shader:c.POINTER[nir_shader], callback:nir_lower_bit_size_callback, callback_data:ctypes.c_void_p) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_lower_64bit_phis(shader:c.POINTER[nir_shader]) -> bool: ...
 @c.record
 class struct_nir_split_conversions_options(c.Struct):
   SIZE = 24
-  callback: ctypes._CFunctionType
-  callback_data: int|None
+  callback: c.CFUNCTYPE[ctypes.c_uint32, [c.POINTER[struct_nir_instr], ctypes.c_void_p]]
+  callback_data: ctypes.c_void_p
   has_convert_alu_types: bool
 struct_nir_split_conversions_options.register_fields([('callback', nir_lower_bit_size_callback, 0), ('callback_data', ctypes.c_void_p, 8), ('has_convert_alu_types', ctypes.c_bool, 16)])
 nir_split_conversions_options: TypeAlias = struct_nir_split_conversions_options
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.POINTER(nir_split_conversions_options))
-def nir_split_conversions(shader:ctypes._Pointer[nir_shader], options:ctypes._Pointer[nir_split_conversions_options]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_split_64bit_vec3_and_vec4(shader:ctypes._Pointer[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], c.POINTER[nir_split_conversions_options])
+def nir_split_conversions(shader:c.POINTER[nir_shader], options:c.POINTER[nir_split_conversions_options]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_split_64bit_vec3_and_vec4(shader:c.POINTER[nir_shader]) -> bool: ...
 @dll.bind(ctypes.c_uint32, ctypes.c_uint32)
 def nir_lower_int64_op_to_options_mask(opcode:ctypes.c_uint32) -> ctypes.c_uint32: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_lower_int64(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_lower_int64_float_conversions(shader:ctypes._Pointer[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_lower_int64(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_lower_int64_float_conversions(shader:c.POINTER[nir_shader]) -> bool: ...
 @dll.bind(ctypes.c_uint32, ctypes.c_uint32)
 def nir_lower_doubles_op_to_options_mask(opcode:ctypes.c_uint32) -> ctypes.c_uint32: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.POINTER(nir_shader), ctypes.c_uint32)
-def nir_lower_doubles(shader:ctypes._Pointer[nir_shader], softfp64:ctypes._Pointer[nir_shader], options:ctypes.c_uint32) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_lower_pack(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.POINTER(nir_intrinsic_instr), ctypes.POINTER(nir_instr), ctypes.c_uint32, ctypes.POINTER(ctypes.c_uint32))
-def nir_get_io_intrinsic(instr:ctypes._Pointer[nir_instr], modes:ctypes.c_uint32, out_mode:ctypes._Pointer[ctypes.c_uint32]) -> ctypes._Pointer[nir_intrinsic_instr]: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_uint32)
-def nir_recompute_io_bases(nir:ctypes._Pointer[nir_shader], modes:ctypes.c_uint32) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_uint32)
-def nir_lower_mediump_vars(nir:ctypes._Pointer[nir_shader], modes:ctypes.c_uint32) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_uint32, uint64_t, ctypes.c_bool)
-def nir_lower_mediump_io(nir:ctypes._Pointer[nir_shader], modes:ctypes.c_uint32, varying_mask:uint64_t, use_16bit_slots:bool) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_clear_mediump_io_flag(nir:ctypes._Pointer[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], c.POINTER[nir_shader], ctypes.c_uint32)
+def nir_lower_doubles(shader:c.POINTER[nir_shader], softfp64:c.POINTER[nir_shader], options:ctypes.c_uint32) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_lower_pack(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(c.POINTER[nir_intrinsic_instr], c.POINTER[nir_instr], ctypes.c_uint32, c.POINTER[ctypes.c_uint32])
+def nir_get_io_intrinsic(instr:c.POINTER[nir_instr], modes:ctypes.c_uint32, out_mode:c.POINTER[ctypes.c_uint32]) -> c.POINTER[nir_intrinsic_instr]: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_uint32)
+def nir_recompute_io_bases(nir:c.POINTER[nir_shader], modes:ctypes.c_uint32) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_uint32)
+def nir_lower_mediump_vars(nir:c.POINTER[nir_shader], modes:ctypes.c_uint32) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_uint32, uint64_t, ctypes.c_bool)
+def nir_lower_mediump_io(nir:c.POINTER[nir_shader], modes:ctypes.c_uint32, varying_mask:uint64_t, use_16bit_slots:bool) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_clear_mediump_io_flag(nir:c.POINTER[nir_shader]) -> bool: ...
 @c.record
 class struct_nir_opt_tex_srcs_options(c.Struct):
   SIZE = 8
@@ -2253,11 +2253,11 @@ class struct_nir_opt_16bit_tex_image_options(c.Struct):
   opt_image_store_data: bool
   opt_image_srcs: bool
   opt_srcs_options_count: int
-  opt_srcs_options: ctypes._Pointer[struct_nir_opt_tex_srcs_options]
-struct_nir_opt_16bit_tex_image_options.register_fields([('rounding_mode', ctypes.c_uint32, 0), ('opt_tex_dest_types', ctypes.c_ubyte, 4), ('opt_image_dest_types', ctypes.c_ubyte, 5), ('integer_dest_saturates', ctypes.c_bool, 6), ('opt_image_store_data', ctypes.c_bool, 7), ('opt_image_srcs', ctypes.c_bool, 8), ('opt_srcs_options_count', ctypes.c_uint32, 12), ('opt_srcs_options', ctypes.POINTER(nir_opt_tex_srcs_options), 16)])
+  opt_srcs_options: c.POINTER[struct_nir_opt_tex_srcs_options]
+struct_nir_opt_16bit_tex_image_options.register_fields([('rounding_mode', ctypes.c_uint32, 0), ('opt_tex_dest_types', ctypes.c_ubyte, 4), ('opt_image_dest_types', ctypes.c_ubyte, 5), ('integer_dest_saturates', ctypes.c_bool, 6), ('opt_image_store_data', ctypes.c_bool, 7), ('opt_image_srcs', ctypes.c_bool, 8), ('opt_srcs_options_count', ctypes.c_uint32, 12), ('opt_srcs_options', c.POINTER[nir_opt_tex_srcs_options], 16)])
 nir_opt_16bit_tex_image_options: TypeAlias = struct_nir_opt_16bit_tex_image_options
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.POINTER(nir_opt_16bit_tex_image_options))
-def nir_opt_16bit_tex_image(nir:ctypes._Pointer[nir_shader], options:ctypes._Pointer[nir_opt_16bit_tex_image_options]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], c.POINTER[nir_opt_16bit_tex_image_options])
+def nir_opt_16bit_tex_image(nir:c.POINTER[nir_shader], options:c.POINTER[nir_opt_16bit_tex_image_options]) -> bool: ...
 @c.record
 class struct_nir_tex_src_type_constraint(c.Struct):
   SIZE = 8
@@ -2266,31 +2266,31 @@ class struct_nir_tex_src_type_constraint(c.Struct):
   match_src: int
 struct_nir_tex_src_type_constraint.register_fields([('legalize_type', ctypes.c_bool, 0), ('bit_size', uint8_t, 1), ('match_src', nir_tex_src_type, 4)])
 nir_tex_src_type_constraint: TypeAlias = struct_nir_tex_src_type_constraint
-nir_tex_src_type_constraints: TypeAlias = (struct_nir_tex_src_type_constraint * 23)
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), nir_tex_src_type_constraints)
-def nir_legalize_16bit_sampler_srcs(nir:ctypes._Pointer[nir_shader], constraints:nir_tex_src_type_constraints) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_float, ctypes.c_float)
-def nir_lower_point_size(shader:ctypes._Pointer[nir_shader], min:float, max:float) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_lower_default_point_size(nir:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_uint32, ctypes.c_bool, ctypes.c_bool)
-def nir_lower_texcoord_replace(s:ctypes._Pointer[nir_shader], coord_replace:int, point_coord_is_sysval:bool, yinvert:bool) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_uint32, ctypes.c_bool)
-def nir_lower_texcoord_replace_late(s:ctypes._Pointer[nir_shader], coord_replace:int, point_coord_is_sysval:bool) -> bool: ...
+nir_tex_src_type_constraints: TypeAlias = c.Array[struct_nir_tex_src_type_constraint, Literal[23]]
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], nir_tex_src_type_constraints)
+def nir_legalize_16bit_sampler_srcs(nir:c.POINTER[nir_shader], constraints:nir_tex_src_type_constraints) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_float, ctypes.c_float)
+def nir_lower_point_size(shader:c.POINTER[nir_shader], min:float, max:float) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_lower_default_point_size(nir:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_uint32, ctypes.c_bool, ctypes.c_bool)
+def nir_lower_texcoord_replace(s:c.POINTER[nir_shader], coord_replace:int, point_coord_is_sysval:bool, yinvert:bool) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_uint32, ctypes.c_bool)
+def nir_lower_texcoord_replace_late(s:c.POINTER[nir_shader], coord_replace:int, point_coord_is_sysval:bool) -> bool: ...
 nir_lower_interpolation_options: dict[int, str] = {(nir_lower_interpolation_at_sample:=2): 'nir_lower_interpolation_at_sample', (nir_lower_interpolation_at_offset:=4): 'nir_lower_interpolation_at_offset', (nir_lower_interpolation_centroid:=8): 'nir_lower_interpolation_centroid', (nir_lower_interpolation_pixel:=16): 'nir_lower_interpolation_pixel', (nir_lower_interpolation_sample:=32): 'nir_lower_interpolation_sample'}
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_uint32)
-def nir_lower_interpolation(shader:ctypes._Pointer[nir_shader], options:ctypes.c_uint32) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_uint32)
+def nir_lower_interpolation(shader:c.POINTER[nir_shader], options:ctypes.c_uint32) -> bool: ...
 nir_lower_discard_if_options: dict[int, str] = {(nir_lower_demote_if_to_cf:=1): 'nir_lower_demote_if_to_cf', (nir_lower_terminate_if_to_cf:=2): 'nir_lower_terminate_if_to_cf', (nir_move_terminate_out_of_loops:=4): 'nir_move_terminate_out_of_loops'}
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_uint32)
-def nir_lower_discard_if(shader:ctypes._Pointer[nir_shader], options:ctypes.c_uint32) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_lower_terminate_to_demote(nir:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_lower_memory_model(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_lower_goto_ifs(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_lower_continue_constructs(shader:ctypes._Pointer[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_uint32)
+def nir_lower_discard_if(shader:c.POINTER[nir_shader], options:ctypes.c_uint32) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_lower_terminate_to_demote(nir:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_lower_memory_model(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_lower_goto_ifs(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_lower_continue_constructs(shader:c.POINTER[nir_shader]) -> bool: ...
 @c.record
 class struct_nir_lower_multiview_options(c.Struct):
   SIZE = 16
@@ -2298,63 +2298,63 @@ class struct_nir_lower_multiview_options(c.Struct):
   allowed_per_view_outputs: int
 struct_nir_lower_multiview_options.register_fields([('view_mask', uint32_t, 0), ('allowed_per_view_outputs', uint64_t, 8)])
 nir_lower_multiview_options: TypeAlias = struct_nir_lower_multiview_options
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_shader_uses_view_index(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), nir_lower_multiview_options)
-def nir_can_lower_multiview(shader:ctypes._Pointer[nir_shader], options:nir_lower_multiview_options) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), nir_lower_multiview_options)
-def nir_lower_multiview(shader:ctypes._Pointer[nir_shader], options:nir_lower_multiview_options) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_lower_view_index_to_device_index(shader:ctypes._Pointer[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_shader_uses_view_index(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], nir_lower_multiview_options)
+def nir_can_lower_multiview(shader:c.POINTER[nir_shader], options:nir_lower_multiview_options) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], nir_lower_multiview_options)
+def nir_lower_multiview(shader:c.POINTER[nir_shader], options:nir_lower_multiview_options) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_lower_view_index_to_device_index(shader:c.POINTER[nir_shader]) -> bool: ...
 nir_lower_fp16_cast_options: dict[int, str] = {(nir_lower_fp16_rtz:=1): 'nir_lower_fp16_rtz', (nir_lower_fp16_rtne:=2): 'nir_lower_fp16_rtne', (nir_lower_fp16_ru:=4): 'nir_lower_fp16_ru', (nir_lower_fp16_rd:=8): 'nir_lower_fp16_rd', (nir_lower_fp16_all:=15): 'nir_lower_fp16_all', (nir_lower_fp16_split_fp64:=16): 'nir_lower_fp16_split_fp64'}
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_uint32)
-def nir_lower_fp16_casts(shader:ctypes._Pointer[nir_shader], options:ctypes.c_uint32) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_normalize_cubemap_coords(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_shader_supports_implicit_lod(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(None, ctypes.POINTER(nir_function_impl))
-def nir_live_defs_impl(impl:ctypes._Pointer[nir_function_impl]) -> None: ...
-@dll.bind(ctypes.POINTER(ctypes.c_uint32), nir_cursor, ctypes.c_void_p)
-def nir_get_live_defs(cursor:nir_cursor, mem_ctx:int|None) -> ctypes._Pointer[ctypes.c_uint32]: ...
-@dll.bind(None, ctypes.POINTER(nir_function_impl), ctypes.c_uint32, ctypes.c_bool)
-def nir_loop_analyze_impl(impl:ctypes._Pointer[nir_function_impl], indirect_mask:ctypes.c_uint32, force_unroll_sampler_indirect:bool) -> None: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_def), ctypes.POINTER(nir_def))
-def nir_defs_interfere(a:ctypes._Pointer[nir_def], b:ctypes._Pointer[nir_def]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_function_impl))
-def nir_repair_ssa_impl(impl:ctypes._Pointer[nir_function_impl]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_repair_ssa(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(None, ctypes.POINTER(nir_loop))
-def nir_convert_loop_to_lcssa(loop:ctypes._Pointer[nir_loop]) -> None: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_bool, ctypes.c_bool)
-def nir_convert_to_lcssa(shader:ctypes._Pointer[nir_shader], skip_invariants:bool, skip_bool_invariants:bool) -> bool: ...
-@dll.bind(None, ctypes.POINTER(nir_function_impl), ctypes.c_uint32)
-def nir_divergence_analysis_impl(impl:ctypes._Pointer[nir_function_impl], options:ctypes.c_uint32) -> None: ...
-@dll.bind(None, ctypes.POINTER(nir_shader))
-def nir_divergence_analysis(shader:ctypes._Pointer[nir_shader]) -> None: ...
-@dll.bind(None, ctypes.POINTER(nir_shader))
-def nir_vertex_divergence_analysis(shader:ctypes._Pointer[nir_shader]) -> None: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_has_divergent_loop(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(None, ctypes.POINTER(nir_builder), ctypes.POINTER(nir_def), ctypes.POINTER(nir_def))
-def nir_rewrite_uses_to_load_reg(b:ctypes._Pointer[nir_builder], old:ctypes._Pointer[nir_def], reg:ctypes._Pointer[nir_def]) -> None: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_bool, ctypes.c_bool)
-def nir_convert_from_ssa(shader:ctypes._Pointer[nir_shader], phi_webs_only:bool, consider_divergence:bool) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_block), ctypes.c_bool)
-def nir_lower_phis_to_regs_block(block:ctypes._Pointer[nir_block], place_writes_in_imm_preds:bool) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_block))
-def nir_lower_ssa_defs_to_regs_block(block:ctypes._Pointer[nir_block]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_deref_instr))
-def nir_rematerialize_deref_in_use_blocks(instr:ctypes._Pointer[nir_deref_instr]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_function_impl))
-def nir_rematerialize_derefs_in_use_blocks_impl(impl:ctypes._Pointer[nir_function_impl]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_lower_samplers(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_bool, ctypes.c_bool)
-def nir_lower_cl_images(shader:ctypes._Pointer[nir_shader], lower_image_derefs:bool, lower_sampler_derefs:bool) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_dedup_inline_samplers(shader:ctypes._Pointer[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_uint32)
+def nir_lower_fp16_casts(shader:c.POINTER[nir_shader], options:ctypes.c_uint32) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_normalize_cubemap_coords(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_shader_supports_implicit_lod(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(None, c.POINTER[nir_function_impl])
+def nir_live_defs_impl(impl:c.POINTER[nir_function_impl]) -> None: ...
+@dll.bind(c.POINTER[ctypes.c_uint32], nir_cursor, ctypes.c_void_p)
+def nir_get_live_defs(cursor:nir_cursor, mem_ctx:ctypes.c_void_p) -> c.POINTER[ctypes.c_uint32]: ...
+@dll.bind(None, c.POINTER[nir_function_impl], ctypes.c_uint32, ctypes.c_bool)
+def nir_loop_analyze_impl(impl:c.POINTER[nir_function_impl], indirect_mask:ctypes.c_uint32, force_unroll_sampler_indirect:bool) -> None: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_def], c.POINTER[nir_def])
+def nir_defs_interfere(a:c.POINTER[nir_def], b:c.POINTER[nir_def]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_function_impl])
+def nir_repair_ssa_impl(impl:c.POINTER[nir_function_impl]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_repair_ssa(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(None, c.POINTER[nir_loop])
+def nir_convert_loop_to_lcssa(loop:c.POINTER[nir_loop]) -> None: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_bool, ctypes.c_bool)
+def nir_convert_to_lcssa(shader:c.POINTER[nir_shader], skip_invariants:bool, skip_bool_invariants:bool) -> bool: ...
+@dll.bind(None, c.POINTER[nir_function_impl], ctypes.c_uint32)
+def nir_divergence_analysis_impl(impl:c.POINTER[nir_function_impl], options:ctypes.c_uint32) -> None: ...
+@dll.bind(None, c.POINTER[nir_shader])
+def nir_divergence_analysis(shader:c.POINTER[nir_shader]) -> None: ...
+@dll.bind(None, c.POINTER[nir_shader])
+def nir_vertex_divergence_analysis(shader:c.POINTER[nir_shader]) -> None: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_has_divergent_loop(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(None, c.POINTER[nir_builder], c.POINTER[nir_def], c.POINTER[nir_def])
+def nir_rewrite_uses_to_load_reg(b:c.POINTER[nir_builder], old:c.POINTER[nir_def], reg:c.POINTER[nir_def]) -> None: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_bool, ctypes.c_bool)
+def nir_convert_from_ssa(shader:c.POINTER[nir_shader], phi_webs_only:bool, consider_divergence:bool) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_block], ctypes.c_bool)
+def nir_lower_phis_to_regs_block(block:c.POINTER[nir_block], place_writes_in_imm_preds:bool) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_block])
+def nir_lower_ssa_defs_to_regs_block(block:c.POINTER[nir_block]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_deref_instr])
+def nir_rematerialize_deref_in_use_blocks(instr:c.POINTER[nir_deref_instr]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_function_impl])
+def nir_rematerialize_derefs_in_use_blocks_impl(impl:c.POINTER[nir_function_impl]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_lower_samplers(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_bool, ctypes.c_bool)
+def nir_lower_cl_images(shader:c.POINTER[nir_shader], lower_image_derefs:bool, lower_sampler_derefs:bool) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_dedup_inline_samplers(shader:c.POINTER[nir_shader]) -> bool: ...
 @c.record
 class struct_nir_lower_ssbo_options(c.Struct):
   SIZE = 2
@@ -2362,10 +2362,10 @@ class struct_nir_lower_ssbo_options(c.Struct):
   native_offset: bool
 struct_nir_lower_ssbo_options.register_fields([('native_loads', ctypes.c_bool, 0), ('native_offset', ctypes.c_bool, 1)])
 nir_lower_ssbo_options: TypeAlias = struct_nir_lower_ssbo_options
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.POINTER(nir_lower_ssbo_options))
-def nir_lower_ssbo(shader:ctypes._Pointer[nir_shader], opts:ctypes._Pointer[nir_lower_ssbo_options]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_bool)
-def nir_lower_helper_writes(shader:ctypes._Pointer[nir_shader], lower_plain_stores:bool) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], c.POINTER[nir_lower_ssbo_options])
+def nir_lower_ssbo(shader:c.POINTER[nir_shader], opts:c.POINTER[nir_lower_ssbo_options]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_bool)
+def nir_lower_helper_writes(shader:c.POINTER[nir_shader], lower_plain_stores:bool) -> bool: ...
 @c.record
 class struct_nir_lower_printf_options(c.Struct):
   SIZE = 12
@@ -2374,102 +2374,102 @@ class struct_nir_lower_printf_options(c.Struct):
   hash_format_strings: bool
 struct_nir_lower_printf_options.register_fields([('max_buffer_size', ctypes.c_uint32, 0), ('ptr_bit_size', ctypes.c_uint32, 4), ('hash_format_strings', ctypes.c_bool, 8)])
 nir_lower_printf_options: TypeAlias = struct_nir_lower_printf_options
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.POINTER(nir_lower_printf_options))
-def nir_lower_printf(nir:ctypes._Pointer[nir_shader], options:ctypes._Pointer[nir_lower_printf_options]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), uint64_t, uint32_t)
-def nir_lower_printf_buffer(nir:ctypes._Pointer[nir_shader], address:uint64_t, size:uint32_t) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_function_impl))
-def nir_opt_comparison_pre_impl(impl:ctypes._Pointer[nir_function_impl]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_opt_comparison_pre(shader:ctypes._Pointer[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], c.POINTER[nir_lower_printf_options])
+def nir_lower_printf(nir:c.POINTER[nir_shader], options:c.POINTER[nir_lower_printf_options]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], uint64_t, uint32_t)
+def nir_lower_printf_buffer(nir:c.POINTER[nir_shader], address:uint64_t, size:uint32_t) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_function_impl])
+def nir_opt_comparison_pre_impl(impl:c.POINTER[nir_function_impl]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_opt_comparison_pre(shader:c.POINTER[nir_shader]) -> bool: ...
 @c.record
 class struct_nir_opt_access_options(c.Struct):
   SIZE = 1
   is_vulkan: bool
 struct_nir_opt_access_options.register_fields([('is_vulkan', ctypes.c_bool, 0)])
 nir_opt_access_options: TypeAlias = struct_nir_opt_access_options
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.POINTER(nir_opt_access_options))
-def nir_opt_access(shader:ctypes._Pointer[nir_shader], options:ctypes._Pointer[nir_opt_access_options]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_opt_algebraic(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_opt_algebraic_before_ffma(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_opt_algebraic_before_lower_int64(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_opt_algebraic_late(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_opt_algebraic_distribute_src_mods(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_opt_algebraic_integer_promotion(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_opt_reassociate_matrix_mul(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_opt_constant_folding(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-nir_combine_barrier_cb: TypeAlias = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(struct_nir_intrinsic_instr), ctypes.POINTER(struct_nir_intrinsic_instr), ctypes.c_void_p)
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), nir_combine_barrier_cb, ctypes.c_void_p)
-def nir_opt_combine_barriers(shader:ctypes._Pointer[nir_shader], combine_cb:nir_combine_barrier_cb, data:int|None) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], c.POINTER[nir_opt_access_options])
+def nir_opt_access(shader:c.POINTER[nir_shader], options:c.POINTER[nir_opt_access_options]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_opt_algebraic(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_opt_algebraic_before_ffma(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_opt_algebraic_before_lower_int64(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_opt_algebraic_late(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_opt_algebraic_distribute_src_mods(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_opt_algebraic_integer_promotion(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_opt_reassociate_matrix_mul(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_opt_constant_folding(shader:c.POINTER[nir_shader]) -> bool: ...
+nir_combine_barrier_cb: TypeAlias = c.CFUNCTYPE[ctypes.c_bool, [c.POINTER[struct_nir_intrinsic_instr], c.POINTER[struct_nir_intrinsic_instr], ctypes.c_void_p]]
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], nir_combine_barrier_cb, ctypes.c_void_p)
+def nir_opt_combine_barriers(shader:c.POINTER[nir_shader], combine_cb:nir_combine_barrier_cb, data:ctypes.c_void_p) -> bool: ...
 mesa_scope: dict[int, str] = {(SCOPE_NONE:=0): 'SCOPE_NONE', (SCOPE_INVOCATION:=1): 'SCOPE_INVOCATION', (SCOPE_SUBGROUP:=2): 'SCOPE_SUBGROUP', (SCOPE_SHADER_CALL:=3): 'SCOPE_SHADER_CALL', (SCOPE_WORKGROUP:=4): 'SCOPE_WORKGROUP', (SCOPE_QUEUE_FAMILY:=5): 'SCOPE_QUEUE_FAMILY', (SCOPE_DEVICE:=6): 'SCOPE_DEVICE'}
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_uint32)
-def nir_opt_acquire_release_barriers(shader:ctypes._Pointer[nir_shader], max_scope:ctypes.c_uint32) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_opt_barrier_modes(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_minimize_call_live_states(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_uint32)
-def nir_opt_combine_stores(shader:ctypes._Pointer[nir_shader], modes:ctypes.c_uint32) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_function_impl))
-def nir_copy_prop_impl(impl:ctypes._Pointer[nir_function_impl]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_copy_prop(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_opt_copy_prop_vars(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_opt_cse(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_opt_dce(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_opt_dead_cf(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_opt_dead_write_vars(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_function_impl))
-def nir_opt_deref_impl(impl:ctypes._Pointer[nir_function_impl]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_opt_deref(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_opt_find_array_copies(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_def))
-def nir_def_is_frag_coord_z(_def:ctypes._Pointer[nir_def]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_opt_fragdepth(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_bool)
-def nir_opt_gcm(shader:ctypes._Pointer[nir_shader], value_number:bool) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_opt_generate_bfi(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_uint32)
-def nir_opt_idiv_const(shader:ctypes._Pointer[nir_shader], min_bit_size:int) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_opt_mqsad(shader:ctypes._Pointer[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_uint32)
+def nir_opt_acquire_release_barriers(shader:c.POINTER[nir_shader], max_scope:ctypes.c_uint32) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_opt_barrier_modes(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_minimize_call_live_states(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_uint32)
+def nir_opt_combine_stores(shader:c.POINTER[nir_shader], modes:ctypes.c_uint32) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_function_impl])
+def nir_copy_prop_impl(impl:c.POINTER[nir_function_impl]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_copy_prop(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_opt_copy_prop_vars(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_opt_cse(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_opt_dce(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_opt_dead_cf(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_opt_dead_write_vars(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_function_impl])
+def nir_opt_deref_impl(impl:c.POINTER[nir_function_impl]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_opt_deref(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_opt_find_array_copies(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_def])
+def nir_def_is_frag_coord_z(_def:c.POINTER[nir_def]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_opt_fragdepth(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_bool)
+def nir_opt_gcm(shader:c.POINTER[nir_shader], value_number:bool) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_opt_generate_bfi(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_uint32)
+def nir_opt_idiv_const(shader:c.POINTER[nir_shader], min_bit_size:int) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_opt_mqsad(shader:c.POINTER[nir_shader]) -> bool: ...
 nir_opt_if_options: dict[int, str] = {(nir_opt_if_optimize_phi_true_false:=1): 'nir_opt_if_optimize_phi_true_false', (nir_opt_if_avoid_64bit_phis:=2): 'nir_opt_if_avoid_64bit_phis'}
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_uint32)
-def nir_opt_if(shader:ctypes._Pointer[nir_shader], options:ctypes.c_uint32) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_opt_intrinsics(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), glsl_type_size_align_func, ctypes.c_uint32)
-def nir_opt_large_constants(shader:ctypes._Pointer[nir_shader], size_align:glsl_type_size_align_func, threshold:int) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_opt_licm(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_opt_loop(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_opt_loop_unroll(shader:ctypes._Pointer[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_uint32)
+def nir_opt_if(shader:c.POINTER[nir_shader], options:ctypes.c_uint32) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_opt_intrinsics(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], glsl_type_size_align_func, ctypes.c_uint32)
+def nir_opt_large_constants(shader:c.POINTER[nir_shader], size_align:glsl_type_size_align_func, threshold:int) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_opt_licm(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_opt_loop(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_opt_loop_unroll(shader:c.POINTER[nir_shader]) -> bool: ...
 nir_move_options: dict[int, str] = {(nir_move_const_undef:=1): 'nir_move_const_undef', (nir_move_load_ubo:=2): 'nir_move_load_ubo', (nir_move_load_input:=4): 'nir_move_load_input', (nir_move_comparisons:=8): 'nir_move_comparisons', (nir_move_copies:=16): 'nir_move_copies', (nir_move_load_ssbo:=32): 'nir_move_load_ssbo', (nir_move_load_uniform:=64): 'nir_move_load_uniform', (nir_move_alu:=128): 'nir_move_alu', (nir_dont_move_byte_word_vecs:=256): 'nir_dont_move_byte_word_vecs'}
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_instr), ctypes.c_uint32)
-def nir_can_move_instr(instr:ctypes._Pointer[nir_instr], options:ctypes.c_uint32) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_uint32)
-def nir_opt_sink(shader:ctypes._Pointer[nir_shader], options:ctypes.c_uint32) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_uint32)
-def nir_opt_move(shader:ctypes._Pointer[nir_shader], options:ctypes.c_uint32) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_instr], ctypes.c_uint32)
+def nir_can_move_instr(instr:c.POINTER[nir_instr], options:ctypes.c_uint32) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_uint32)
+def nir_opt_sink(shader:c.POINTER[nir_shader], options:ctypes.c_uint32) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_uint32)
+def nir_opt_move(shader:c.POINTER[nir_shader], options:ctypes.c_uint32) -> bool: ...
 @c.record
 class struct_nir_opt_offsets_options(c.Struct):
   SIZE = 48
@@ -2478,13 +2478,13 @@ class struct_nir_opt_offsets_options(c.Struct):
   shared_max: int
   shared_atomic_max: int
   buffer_max: int
-  max_offset_cb: ctypes._CFunctionType
-  max_offset_data: int|None
+  max_offset_cb: c.CFUNCTYPE[ctypes.c_uint32, [c.POINTER[struct_nir_intrinsic_instr], ctypes.c_void_p]]
+  max_offset_data: ctypes.c_void_p
   allow_offset_wrap: bool
-struct_nir_opt_offsets_options.register_fields([('uniform_max', uint32_t, 0), ('ubo_vec4_max', uint32_t, 4), ('shared_max', uint32_t, 8), ('shared_atomic_max', uint32_t, 12), ('buffer_max', uint32_t, 16), ('max_offset_cb', ctypes.CFUNCTYPE(uint32_t, ctypes.POINTER(nir_intrinsic_instr), ctypes.c_void_p), 24), ('max_offset_data', ctypes.c_void_p, 32), ('allow_offset_wrap', ctypes.c_bool, 40)])
+struct_nir_opt_offsets_options.register_fields([('uniform_max', uint32_t, 0), ('ubo_vec4_max', uint32_t, 4), ('shared_max', uint32_t, 8), ('shared_atomic_max', uint32_t, 12), ('buffer_max', uint32_t, 16), ('max_offset_cb', c.CFUNCTYPE[uint32_t, [c.POINTER[nir_intrinsic_instr], ctypes.c_void_p]], 24), ('max_offset_data', ctypes.c_void_p, 32), ('allow_offset_wrap', ctypes.c_bool, 40)])
 nir_opt_offsets_options: TypeAlias = struct_nir_opt_offsets_options
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.POINTER(nir_opt_offsets_options))
-def nir_opt_offsets(shader:ctypes._Pointer[nir_shader], options:ctypes._Pointer[nir_opt_offsets_options]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], c.POINTER[nir_opt_offsets_options])
+def nir_opt_offsets(shader:c.POINTER[nir_shader], options:c.POINTER[nir_opt_offsets_options]) -> bool: ...
 @c.record
 class struct_nir_opt_peephole_select_options(c.Struct):
   SIZE = 8
@@ -2494,46 +2494,46 @@ class struct_nir_opt_peephole_select_options(c.Struct):
   discard_ok: bool
 struct_nir_opt_peephole_select_options.register_fields([('limit', ctypes.c_uint32, 0), ('indirect_load_ok', ctypes.c_bool, 4), ('expensive_alu_ok', ctypes.c_bool, 5), ('discard_ok', ctypes.c_bool, 6)])
 nir_opt_peephole_select_options: TypeAlias = struct_nir_opt_peephole_select_options
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.POINTER(nir_opt_peephole_select_options))
-def nir_opt_peephole_select(shader:ctypes._Pointer[nir_shader], options:ctypes._Pointer[nir_opt_peephole_select_options]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_opt_reassociate_bfi(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_opt_rematerialize_compares(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_opt_remove_phis(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_block))
-def nir_remove_single_src_phis_block(block:ctypes._Pointer[nir_block]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_opt_phi_precision(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_opt_phi_to_bool(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_bool)
-def nir_opt_shrink_stores(shader:ctypes._Pointer[nir_shader], shrink_image_store:bool) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_bool)
-def nir_opt_shrink_vectors(shader:ctypes._Pointer[nir_shader], shrink_start:bool) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_opt_undef(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_lower_undef_to_zero(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_bool)
-def nir_opt_uniform_atomics(shader:ctypes._Pointer[nir_shader], fs_atomics_predicated:bool) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.POINTER(nir_lower_subgroups_options))
-def nir_opt_uniform_subgroup(shader:ctypes._Pointer[nir_shader], _1:ctypes._Pointer[nir_lower_subgroups_options]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), nir_vectorize_cb, ctypes.c_void_p)
-def nir_opt_vectorize(shader:ctypes._Pointer[nir_shader], filter:nir_vectorize_cb, data:int|None) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_uint32, ctypes.c_bool)
-def nir_opt_vectorize_io(shader:ctypes._Pointer[nir_shader], modes:ctypes.c_uint32, allow_holes:bool) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_opt_move_discards_to_top(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_opt_ray_queries(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_opt_ray_query_ranges(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_bool)
-def nir_opt_tex_skip_helpers(shader:ctypes._Pointer[nir_shader], no_add_divergence:bool) -> bool: ...
-@dll.bind(None, ctypes.POINTER(nir_shader))
-def nir_sweep(shader:ctypes._Pointer[nir_shader]) -> None: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], c.POINTER[nir_opt_peephole_select_options])
+def nir_opt_peephole_select(shader:c.POINTER[nir_shader], options:c.POINTER[nir_opt_peephole_select_options]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_opt_reassociate_bfi(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_opt_rematerialize_compares(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_opt_remove_phis(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_block])
+def nir_remove_single_src_phis_block(block:c.POINTER[nir_block]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_opt_phi_precision(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_opt_phi_to_bool(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_bool)
+def nir_opt_shrink_stores(shader:c.POINTER[nir_shader], shrink_image_store:bool) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_bool)
+def nir_opt_shrink_vectors(shader:c.POINTER[nir_shader], shrink_start:bool) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_opt_undef(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_lower_undef_to_zero(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_bool)
+def nir_opt_uniform_atomics(shader:c.POINTER[nir_shader], fs_atomics_predicated:bool) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], c.POINTER[nir_lower_subgroups_options])
+def nir_opt_uniform_subgroup(shader:c.POINTER[nir_shader], _1:c.POINTER[nir_lower_subgroups_options]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], nir_vectorize_cb, ctypes.c_void_p)
+def nir_opt_vectorize(shader:c.POINTER[nir_shader], filter:nir_vectorize_cb, data:ctypes.c_void_p) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_uint32, ctypes.c_bool)
+def nir_opt_vectorize_io(shader:c.POINTER[nir_shader], modes:ctypes.c_uint32, allow_holes:bool) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_opt_move_discards_to_top(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_opt_ray_queries(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_opt_ray_query_ranges(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_bool)
+def nir_opt_tex_skip_helpers(shader:c.POINTER[nir_shader], no_add_divergence:bool) -> bool: ...
+@dll.bind(None, c.POINTER[nir_shader])
+def nir_sweep(shader:c.POINTER[nir_shader]) -> None: ...
 gl_system_value: dict[int, str] = {(SYSTEM_VALUE_SUBGROUP_SIZE:=0): 'SYSTEM_VALUE_SUBGROUP_SIZE', (SYSTEM_VALUE_SUBGROUP_INVOCATION:=1): 'SYSTEM_VALUE_SUBGROUP_INVOCATION', (SYSTEM_VALUE_SUBGROUP_EQ_MASK:=2): 'SYSTEM_VALUE_SUBGROUP_EQ_MASK', (SYSTEM_VALUE_SUBGROUP_GE_MASK:=3): 'SYSTEM_VALUE_SUBGROUP_GE_MASK', (SYSTEM_VALUE_SUBGROUP_GT_MASK:=4): 'SYSTEM_VALUE_SUBGROUP_GT_MASK', (SYSTEM_VALUE_SUBGROUP_LE_MASK:=5): 'SYSTEM_VALUE_SUBGROUP_LE_MASK', (SYSTEM_VALUE_SUBGROUP_LT_MASK:=6): 'SYSTEM_VALUE_SUBGROUP_LT_MASK', (SYSTEM_VALUE_NUM_SUBGROUPS:=7): 'SYSTEM_VALUE_NUM_SUBGROUPS', (SYSTEM_VALUE_SUBGROUP_ID:=8): 'SYSTEM_VALUE_SUBGROUP_ID', (SYSTEM_VALUE_VERTEX_ID:=9): 'SYSTEM_VALUE_VERTEX_ID', (SYSTEM_VALUE_INSTANCE_ID:=10): 'SYSTEM_VALUE_INSTANCE_ID', (SYSTEM_VALUE_INSTANCE_INDEX:=11): 'SYSTEM_VALUE_INSTANCE_INDEX', (SYSTEM_VALUE_VERTEX_ID_ZERO_BASE:=12): 'SYSTEM_VALUE_VERTEX_ID_ZERO_BASE', (SYSTEM_VALUE_BASE_VERTEX:=13): 'SYSTEM_VALUE_BASE_VERTEX', (SYSTEM_VALUE_FIRST_VERTEX:=14): 'SYSTEM_VALUE_FIRST_VERTEX', (SYSTEM_VALUE_IS_INDEXED_DRAW:=15): 'SYSTEM_VALUE_IS_INDEXED_DRAW', (SYSTEM_VALUE_BASE_INSTANCE:=16): 'SYSTEM_VALUE_BASE_INSTANCE', (SYSTEM_VALUE_DRAW_ID:=17): 'SYSTEM_VALUE_DRAW_ID', (SYSTEM_VALUE_INVOCATION_ID:=18): 'SYSTEM_VALUE_INVOCATION_ID', (SYSTEM_VALUE_FRAG_COORD:=19): 'SYSTEM_VALUE_FRAG_COORD', (SYSTEM_VALUE_PIXEL_COORD:=20): 'SYSTEM_VALUE_PIXEL_COORD', (SYSTEM_VALUE_FRAG_COORD_Z:=21): 'SYSTEM_VALUE_FRAG_COORD_Z', (SYSTEM_VALUE_FRAG_COORD_W:=22): 'SYSTEM_VALUE_FRAG_COORD_W', (SYSTEM_VALUE_POINT_COORD:=23): 'SYSTEM_VALUE_POINT_COORD', (SYSTEM_VALUE_LINE_COORD:=24): 'SYSTEM_VALUE_LINE_COORD', (SYSTEM_VALUE_FRONT_FACE:=25): 'SYSTEM_VALUE_FRONT_FACE', (SYSTEM_VALUE_FRONT_FACE_FSIGN:=26): 'SYSTEM_VALUE_FRONT_FACE_FSIGN', (SYSTEM_VALUE_SAMPLE_ID:=27): 'SYSTEM_VALUE_SAMPLE_ID', (SYSTEM_VALUE_SAMPLE_POS:=28): 'SYSTEM_VALUE_SAMPLE_POS', (SYSTEM_VALUE_SAMPLE_POS_OR_CENTER:=29): 'SYSTEM_VALUE_SAMPLE_POS_OR_CENTER', (SYSTEM_VALUE_SAMPLE_MASK_IN:=30): 'SYSTEM_VALUE_SAMPLE_MASK_IN', (SYSTEM_VALUE_LAYER_ID:=31): 'SYSTEM_VALUE_LAYER_ID', (SYSTEM_VALUE_HELPER_INVOCATION:=32): 'SYSTEM_VALUE_HELPER_INVOCATION', (SYSTEM_VALUE_COLOR0:=33): 'SYSTEM_VALUE_COLOR0', (SYSTEM_VALUE_COLOR1:=34): 'SYSTEM_VALUE_COLOR1', (SYSTEM_VALUE_TESS_COORD:=35): 'SYSTEM_VALUE_TESS_COORD', (SYSTEM_VALUE_VERTICES_IN:=36): 'SYSTEM_VALUE_VERTICES_IN', (SYSTEM_VALUE_PRIMITIVE_ID:=37): 'SYSTEM_VALUE_PRIMITIVE_ID', (SYSTEM_VALUE_TESS_LEVEL_OUTER:=38): 'SYSTEM_VALUE_TESS_LEVEL_OUTER', (SYSTEM_VALUE_TESS_LEVEL_INNER:=39): 'SYSTEM_VALUE_TESS_LEVEL_INNER', (SYSTEM_VALUE_TESS_LEVEL_OUTER_DEFAULT:=40): 'SYSTEM_VALUE_TESS_LEVEL_OUTER_DEFAULT', (SYSTEM_VALUE_TESS_LEVEL_INNER_DEFAULT:=41): 'SYSTEM_VALUE_TESS_LEVEL_INNER_DEFAULT', (SYSTEM_VALUE_LOCAL_INVOCATION_ID:=42): 'SYSTEM_VALUE_LOCAL_INVOCATION_ID', (SYSTEM_VALUE_LOCAL_INVOCATION_INDEX:=43): 'SYSTEM_VALUE_LOCAL_INVOCATION_INDEX', (SYSTEM_VALUE_GLOBAL_INVOCATION_ID:=44): 'SYSTEM_VALUE_GLOBAL_INVOCATION_ID', (SYSTEM_VALUE_BASE_GLOBAL_INVOCATION_ID:=45): 'SYSTEM_VALUE_BASE_GLOBAL_INVOCATION_ID', (SYSTEM_VALUE_GLOBAL_INVOCATION_INDEX:=46): 'SYSTEM_VALUE_GLOBAL_INVOCATION_INDEX', (SYSTEM_VALUE_WORKGROUP_ID:=47): 'SYSTEM_VALUE_WORKGROUP_ID', (SYSTEM_VALUE_BASE_WORKGROUP_ID:=48): 'SYSTEM_VALUE_BASE_WORKGROUP_ID', (SYSTEM_VALUE_WORKGROUP_INDEX:=49): 'SYSTEM_VALUE_WORKGROUP_INDEX', (SYSTEM_VALUE_NUM_WORKGROUPS:=50): 'SYSTEM_VALUE_NUM_WORKGROUPS', (SYSTEM_VALUE_WORKGROUP_SIZE:=51): 'SYSTEM_VALUE_WORKGROUP_SIZE', (SYSTEM_VALUE_GLOBAL_GROUP_SIZE:=52): 'SYSTEM_VALUE_GLOBAL_GROUP_SIZE', (SYSTEM_VALUE_WORK_DIM:=53): 'SYSTEM_VALUE_WORK_DIM', (SYSTEM_VALUE_USER_DATA_AMD:=54): 'SYSTEM_VALUE_USER_DATA_AMD', (SYSTEM_VALUE_DEVICE_INDEX:=55): 'SYSTEM_VALUE_DEVICE_INDEX', (SYSTEM_VALUE_VIEW_INDEX:=56): 'SYSTEM_VALUE_VIEW_INDEX', (SYSTEM_VALUE_VERTEX_CNT:=57): 'SYSTEM_VALUE_VERTEX_CNT', (SYSTEM_VALUE_BARYCENTRIC_PERSP_PIXEL:=58): 'SYSTEM_VALUE_BARYCENTRIC_PERSP_PIXEL', (SYSTEM_VALUE_BARYCENTRIC_PERSP_SAMPLE:=59): 'SYSTEM_VALUE_BARYCENTRIC_PERSP_SAMPLE', (SYSTEM_VALUE_BARYCENTRIC_PERSP_CENTROID:=60): 'SYSTEM_VALUE_BARYCENTRIC_PERSP_CENTROID', (SYSTEM_VALUE_BARYCENTRIC_PERSP_CENTER_RHW:=61): 'SYSTEM_VALUE_BARYCENTRIC_PERSP_CENTER_RHW', (SYSTEM_VALUE_BARYCENTRIC_LINEAR_PIXEL:=62): 'SYSTEM_VALUE_BARYCENTRIC_LINEAR_PIXEL', (SYSTEM_VALUE_BARYCENTRIC_LINEAR_CENTROID:=63): 'SYSTEM_VALUE_BARYCENTRIC_LINEAR_CENTROID', (SYSTEM_VALUE_BARYCENTRIC_LINEAR_SAMPLE:=64): 'SYSTEM_VALUE_BARYCENTRIC_LINEAR_SAMPLE', (SYSTEM_VALUE_BARYCENTRIC_PULL_MODEL:=65): 'SYSTEM_VALUE_BARYCENTRIC_PULL_MODEL', (SYSTEM_VALUE_BARYCENTRIC_PERSP_COORD:=66): 'SYSTEM_VALUE_BARYCENTRIC_PERSP_COORD', (SYSTEM_VALUE_BARYCENTRIC_LINEAR_COORD:=67): 'SYSTEM_VALUE_BARYCENTRIC_LINEAR_COORD', (SYSTEM_VALUE_RAY_LAUNCH_ID:=68): 'SYSTEM_VALUE_RAY_LAUNCH_ID', (SYSTEM_VALUE_RAY_LAUNCH_SIZE:=69): 'SYSTEM_VALUE_RAY_LAUNCH_SIZE', (SYSTEM_VALUE_RAY_WORLD_ORIGIN:=70): 'SYSTEM_VALUE_RAY_WORLD_ORIGIN', (SYSTEM_VALUE_RAY_WORLD_DIRECTION:=71): 'SYSTEM_VALUE_RAY_WORLD_DIRECTION', (SYSTEM_VALUE_RAY_OBJECT_ORIGIN:=72): 'SYSTEM_VALUE_RAY_OBJECT_ORIGIN', (SYSTEM_VALUE_RAY_OBJECT_DIRECTION:=73): 'SYSTEM_VALUE_RAY_OBJECT_DIRECTION', (SYSTEM_VALUE_RAY_T_MIN:=74): 'SYSTEM_VALUE_RAY_T_MIN', (SYSTEM_VALUE_RAY_T_MAX:=75): 'SYSTEM_VALUE_RAY_T_MAX', (SYSTEM_VALUE_RAY_OBJECT_TO_WORLD:=76): 'SYSTEM_VALUE_RAY_OBJECT_TO_WORLD', (SYSTEM_VALUE_RAY_WORLD_TO_OBJECT:=77): 'SYSTEM_VALUE_RAY_WORLD_TO_OBJECT', (SYSTEM_VALUE_RAY_HIT_KIND:=78): 'SYSTEM_VALUE_RAY_HIT_KIND', (SYSTEM_VALUE_RAY_FLAGS:=79): 'SYSTEM_VALUE_RAY_FLAGS', (SYSTEM_VALUE_RAY_GEOMETRY_INDEX:=80): 'SYSTEM_VALUE_RAY_GEOMETRY_INDEX', (SYSTEM_VALUE_RAY_INSTANCE_CUSTOM_INDEX:=81): 'SYSTEM_VALUE_RAY_INSTANCE_CUSTOM_INDEX', (SYSTEM_VALUE_CULL_MASK:=82): 'SYSTEM_VALUE_CULL_MASK', (SYSTEM_VALUE_RAY_TRIANGLE_VERTEX_POSITIONS:=83): 'SYSTEM_VALUE_RAY_TRIANGLE_VERTEX_POSITIONS', (SYSTEM_VALUE_MESH_VIEW_COUNT:=84): 'SYSTEM_VALUE_MESH_VIEW_COUNT', (SYSTEM_VALUE_MESH_VIEW_INDICES:=85): 'SYSTEM_VALUE_MESH_VIEW_INDICES', (SYSTEM_VALUE_GS_HEADER_IR3:=86): 'SYSTEM_VALUE_GS_HEADER_IR3', (SYSTEM_VALUE_TCS_HEADER_IR3:=87): 'SYSTEM_VALUE_TCS_HEADER_IR3', (SYSTEM_VALUE_REL_PATCH_ID_IR3:=88): 'SYSTEM_VALUE_REL_PATCH_ID_IR3', (SYSTEM_VALUE_FRAG_SHADING_RATE:=89): 'SYSTEM_VALUE_FRAG_SHADING_RATE', (SYSTEM_VALUE_FULLY_COVERED:=90): 'SYSTEM_VALUE_FULLY_COVERED', (SYSTEM_VALUE_FRAG_SIZE:=91): 'SYSTEM_VALUE_FRAG_SIZE', (SYSTEM_VALUE_FRAG_INVOCATION_COUNT:=92): 'SYSTEM_VALUE_FRAG_INVOCATION_COUNT', (SYSTEM_VALUE_SHADER_INDEX:=93): 'SYSTEM_VALUE_SHADER_INDEX', (SYSTEM_VALUE_COALESCED_INPUT_COUNT:=94): 'SYSTEM_VALUE_COALESCED_INPUT_COUNT', (SYSTEM_VALUE_WARPS_PER_SM_NV:=95): 'SYSTEM_VALUE_WARPS_PER_SM_NV', (SYSTEM_VALUE_SM_COUNT_NV:=96): 'SYSTEM_VALUE_SM_COUNT_NV', (SYSTEM_VALUE_WARP_ID_NV:=97): 'SYSTEM_VALUE_WARP_ID_NV', (SYSTEM_VALUE_SM_ID_NV:=98): 'SYSTEM_VALUE_SM_ID_NV', (SYSTEM_VALUE_MAX:=99): 'SYSTEM_VALUE_MAX'}
 @dll.bind(ctypes.c_uint32, ctypes.c_uint32)
 def nir_intrinsic_from_system_value(val:ctypes.c_uint32) -> ctypes.c_uint32: ...
@@ -2545,192 +2545,192 @@ class struct_nir_unsigned_upper_bound_config(c.Struct):
   min_subgroup_size: int
   max_subgroup_size: int
   max_workgroup_invocations: int
-  max_workgroup_count: ctypes.Array[ctypes.c_uint32]
-  max_workgroup_size: ctypes.Array[ctypes.c_uint32]
-  vertex_attrib_max: ctypes.Array[ctypes.c_uint32]
-struct_nir_unsigned_upper_bound_config.register_fields([('min_subgroup_size', ctypes.c_uint32, 0), ('max_subgroup_size', ctypes.c_uint32, 4), ('max_workgroup_invocations', ctypes.c_uint32, 8), ('max_workgroup_count', (ctypes.c_uint32 * 3), 12), ('max_workgroup_size', (ctypes.c_uint32 * 3), 24), ('vertex_attrib_max', (uint32_t * 32), 36)])
+  max_workgroup_count: c.Array[ctypes.c_uint32, Literal[3]]
+  max_workgroup_size: c.Array[ctypes.c_uint32, Literal[3]]
+  vertex_attrib_max: c.Array[ctypes.c_uint32, Literal[32]]
+struct_nir_unsigned_upper_bound_config.register_fields([('min_subgroup_size', ctypes.c_uint32, 0), ('max_subgroup_size', ctypes.c_uint32, 4), ('max_workgroup_invocations', ctypes.c_uint32, 8), ('max_workgroup_count', c.Array[ctypes.c_uint32, Literal[3]], 12), ('max_workgroup_size', c.Array[ctypes.c_uint32, Literal[3]], 24), ('vertex_attrib_max', c.Array[uint32_t, Literal[32]], 36)])
 nir_unsigned_upper_bound_config: TypeAlias = struct_nir_unsigned_upper_bound_config
-@dll.bind(uint32_t, ctypes.POINTER(nir_shader), ctypes.POINTER(struct_hash_table), nir_scalar, ctypes.POINTER(nir_unsigned_upper_bound_config))
-def nir_unsigned_upper_bound(shader:ctypes._Pointer[nir_shader], range_ht:ctypes._Pointer[struct_hash_table], scalar:nir_scalar, config:ctypes._Pointer[nir_unsigned_upper_bound_config]) -> uint32_t: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.POINTER(struct_hash_table), nir_scalar, ctypes.c_uint32, ctypes.POINTER(nir_unsigned_upper_bound_config))
-def nir_addition_might_overflow(shader:ctypes._Pointer[nir_shader], range_ht:ctypes._Pointer[struct_hash_table], ssa:nir_scalar, const_val:int, config:ctypes._Pointer[nir_unsigned_upper_bound_config]) -> bool: ...
+@dll.bind(uint32_t, c.POINTER[nir_shader], c.POINTER[struct_hash_table], nir_scalar, c.POINTER[nir_unsigned_upper_bound_config])
+def nir_unsigned_upper_bound(shader:c.POINTER[nir_shader], range_ht:c.POINTER[struct_hash_table], scalar:nir_scalar, config:c.POINTER[nir_unsigned_upper_bound_config]) -> uint32_t: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], c.POINTER[struct_hash_table], nir_scalar, ctypes.c_uint32, c.POINTER[nir_unsigned_upper_bound_config])
+def nir_addition_might_overflow(shader:c.POINTER[nir_shader], range_ht:c.POINTER[struct_hash_table], ssa:nir_scalar, const_val:int, config:c.POINTER[nir_unsigned_upper_bound_config]) -> bool: ...
 @c.record
 class struct_nir_opt_preamble_options(c.Struct):
   SIZE = 56
   drawid_uniform: bool
   subgroup_size_uniform: bool
   load_workgroup_size_allowed: bool
-  def_size: ctypes._CFunctionType
-  preamble_storage_size: ctypes.Array[ctypes.c_uint32]
-  instr_cost_cb: ctypes._CFunctionType
-  rewrite_cost_cb: ctypes._CFunctionType
-  avoid_instr_cb: ctypes._CFunctionType
-  cb_data: int|None
-struct_nir_opt_preamble_options.register_fields([('drawid_uniform', ctypes.c_bool, 0), ('subgroup_size_uniform', ctypes.c_bool, 1), ('load_workgroup_size_allowed', ctypes.c_bool, 2), ('def_size', ctypes.CFUNCTYPE(None, ctypes.POINTER(nir_def), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)), 8), ('preamble_storage_size', (ctypes.c_uint32 * 2), 16), ('instr_cost_cb', ctypes.CFUNCTYPE(ctypes.c_float, ctypes.POINTER(nir_instr), ctypes.c_void_p), 24), ('rewrite_cost_cb', ctypes.CFUNCTYPE(ctypes.c_float, ctypes.POINTER(nir_def), ctypes.c_void_p), 32), ('avoid_instr_cb', nir_instr_filter_cb, 40), ('cb_data', ctypes.c_void_p, 48)])
+  def_size: c.CFUNCTYPE[None, [c.POINTER[struct_nir_def], c.POINTER[ctypes.c_uint32], c.POINTER[ctypes.c_uint32], c.POINTER[ctypes.c_uint32]]]
+  preamble_storage_size: c.Array[ctypes.c_uint32, Literal[2]]
+  instr_cost_cb: c.CFUNCTYPE[ctypes.c_float, [c.POINTER[struct_nir_instr], ctypes.c_void_p]]
+  rewrite_cost_cb: c.CFUNCTYPE[ctypes.c_float, [c.POINTER[struct_nir_def], ctypes.c_void_p]]
+  avoid_instr_cb: c.CFUNCTYPE[ctypes.c_bool, [c.POINTER[struct_nir_instr], ctypes.c_void_p]]
+  cb_data: ctypes.c_void_p
+struct_nir_opt_preamble_options.register_fields([('drawid_uniform', ctypes.c_bool, 0), ('subgroup_size_uniform', ctypes.c_bool, 1), ('load_workgroup_size_allowed', ctypes.c_bool, 2), ('def_size', c.CFUNCTYPE[None, [c.POINTER[nir_def], c.POINTER[ctypes.c_uint32], c.POINTER[ctypes.c_uint32], c.POINTER[ctypes.c_uint32]]], 8), ('preamble_storage_size', c.Array[ctypes.c_uint32, Literal[2]], 16), ('instr_cost_cb', c.CFUNCTYPE[ctypes.c_float, [c.POINTER[nir_instr], ctypes.c_void_p]], 24), ('rewrite_cost_cb', c.CFUNCTYPE[ctypes.c_float, [c.POINTER[nir_def], ctypes.c_void_p]], 32), ('avoid_instr_cb', nir_instr_filter_cb, 40), ('cb_data', ctypes.c_void_p, 48)])
 nir_opt_preamble_options: TypeAlias = struct_nir_opt_preamble_options
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.POINTER(nir_opt_preamble_options), ctypes.POINTER(ctypes.c_uint32))
-def nir_opt_preamble(shader:ctypes._Pointer[nir_shader], options:ctypes._Pointer[nir_opt_preamble_options], size:ctypes._Pointer[ctypes.c_uint32]) -> bool: ...
-@dll.bind(ctypes.POINTER(nir_function_impl), ctypes.POINTER(nir_shader))
-def nir_shader_get_preamble(shader:ctypes._Pointer[nir_shader]) -> ctypes._Pointer[nir_function_impl]: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_bool)
-def nir_lower_point_smooth(shader:ctypes._Pointer[nir_shader], set_barycentrics:bool) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_uint32)
-def nir_lower_poly_line_smooth(shader:ctypes._Pointer[nir_shader], num_smooth_aa_sample:int) -> bool: ...
-@dll.bind(ctypes.c_bool, nir_scalar, ctypes.c_ubyte, ctypes.c_uint32, ctypes.POINTER(ctypes.c_uint32))
-def nir_mod_analysis(val:nir_scalar, val_type:ctypes.c_ubyte, div:int, mod:ctypes._Pointer[ctypes.c_uint32]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.c_uint32)
-def nir_remove_tex_shadow(shader:ctypes._Pointer[nir_shader], textures_bitmask:int) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def nir_trivialize_registers(s:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_uint32, ctypes.POINTER(nir_shader))
-def nir_static_workgroup_size(s:ctypes._Pointer[nir_shader]) -> int: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], c.POINTER[nir_opt_preamble_options], c.POINTER[ctypes.c_uint32])
+def nir_opt_preamble(shader:c.POINTER[nir_shader], options:c.POINTER[nir_opt_preamble_options], size:c.POINTER[ctypes.c_uint32]) -> bool: ...
+@dll.bind(c.POINTER[nir_function_impl], c.POINTER[nir_shader])
+def nir_shader_get_preamble(shader:c.POINTER[nir_shader]) -> c.POINTER[nir_function_impl]: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_bool)
+def nir_lower_point_smooth(shader:c.POINTER[nir_shader], set_barycentrics:bool) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_uint32)
+def nir_lower_poly_line_smooth(shader:c.POINTER[nir_shader], num_smooth_aa_sample:int) -> bool: ...
+@dll.bind(ctypes.c_bool, nir_scalar, ctypes.c_ubyte, ctypes.c_uint32, c.POINTER[ctypes.c_uint32])
+def nir_mod_analysis(val:nir_scalar, val_type:ctypes.c_ubyte, div:int, mod:c.POINTER[ctypes.c_uint32]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], ctypes.c_uint32)
+def nir_remove_tex_shadow(shader:c.POINTER[nir_shader], textures_bitmask:int) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def nir_trivialize_registers(s:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_uint32, c.POINTER[nir_shader])
+def nir_static_workgroup_size(s:c.POINTER[nir_shader]) -> int: ...
 class struct_nir_use_dominance_state(c.Struct): pass
 nir_use_dominance_state: TypeAlias = struct_nir_use_dominance_state
-@dll.bind(ctypes.POINTER(nir_use_dominance_state), ctypes.POINTER(nir_function_impl), ctypes.c_bool)
-def nir_calc_use_dominance_impl(impl:ctypes._Pointer[nir_function_impl], post_dominance:bool) -> ctypes._Pointer[nir_use_dominance_state]: ...
-@dll.bind(ctypes.POINTER(nir_instr), ctypes.POINTER(nir_use_dominance_state), ctypes.POINTER(nir_instr))
-def nir_get_immediate_use_dominator(state:ctypes._Pointer[nir_use_dominance_state], instr:ctypes._Pointer[nir_instr]) -> ctypes._Pointer[nir_instr]: ...
-@dll.bind(ctypes.POINTER(nir_instr), ctypes.POINTER(nir_use_dominance_state), ctypes.POINTER(nir_instr), ctypes.POINTER(nir_instr))
-def nir_use_dominance_lca(state:ctypes._Pointer[nir_use_dominance_state], i1:ctypes._Pointer[nir_instr], i2:ctypes._Pointer[nir_instr]) -> ctypes._Pointer[nir_instr]: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_use_dominance_state), ctypes.POINTER(nir_instr), ctypes.POINTER(nir_instr))
-def nir_instr_dominates_use(state:ctypes._Pointer[nir_use_dominance_state], parent:ctypes._Pointer[nir_instr], child:ctypes._Pointer[nir_instr]) -> bool: ...
-@dll.bind(None, ctypes.POINTER(nir_use_dominance_state), ctypes.POINTER(ctypes.POINTER(nir_instr)), ctypes.c_uint32)
-def nir_print_use_dominators(state:ctypes._Pointer[nir_use_dominance_state], instructions:ctypes._Pointer[ctypes.POINTER(nir_instr)], num_instructions:int) -> None: ...
+@dll.bind(c.POINTER[nir_use_dominance_state], c.POINTER[nir_function_impl], ctypes.c_bool)
+def nir_calc_use_dominance_impl(impl:c.POINTER[nir_function_impl], post_dominance:bool) -> c.POINTER[nir_use_dominance_state]: ...
+@dll.bind(c.POINTER[nir_instr], c.POINTER[nir_use_dominance_state], c.POINTER[nir_instr])
+def nir_get_immediate_use_dominator(state:c.POINTER[nir_use_dominance_state], instr:c.POINTER[nir_instr]) -> c.POINTER[nir_instr]: ...
+@dll.bind(c.POINTER[nir_instr], c.POINTER[nir_use_dominance_state], c.POINTER[nir_instr], c.POINTER[nir_instr])
+def nir_use_dominance_lca(state:c.POINTER[nir_use_dominance_state], i1:c.POINTER[nir_instr], i2:c.POINTER[nir_instr]) -> c.POINTER[nir_instr]: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_use_dominance_state], c.POINTER[nir_instr], c.POINTER[nir_instr])
+def nir_instr_dominates_use(state:c.POINTER[nir_use_dominance_state], parent:c.POINTER[nir_instr], child:c.POINTER[nir_instr]) -> bool: ...
+@dll.bind(None, c.POINTER[nir_use_dominance_state], c.POINTER[c.POINTER[nir_instr]], ctypes.c_uint32)
+def nir_print_use_dominators(state:c.POINTER[nir_use_dominance_state], instructions:c.POINTER[c.POINTER[nir_instr]], num_instructions:int) -> None: ...
 @c.record
 class nir_output_deps(c.Struct):
   SIZE = 1792
-  output: ctypes.Array[nir_output_deps_output]
+  output: c.Array[nir_output_deps_output, Literal[112]]
 @c.record
 class nir_output_deps_output(c.Struct):
   SIZE = 16
-  instr_list: ctypes._Pointer[ctypes.POINTER(struct_nir_instr)]
+  instr_list: c.POINTER[c.POINTER[struct_nir_instr]]
   num_instr: int
-nir_output_deps_output.register_fields([('instr_list', ctypes.POINTER(ctypes.POINTER(nir_instr)), 0), ('num_instr', ctypes.c_uint32, 8)])
-nir_output_deps.register_fields([('output', (nir_output_deps_output * 112), 0)])
-@dll.bind(None, ctypes.POINTER(nir_shader), ctypes.POINTER(nir_output_deps))
-def nir_gather_output_dependencies(nir:ctypes._Pointer[nir_shader], deps:ctypes._Pointer[nir_output_deps]) -> None: ...
-@dll.bind(None, ctypes.POINTER(nir_output_deps))
-def nir_free_output_dependencies(deps:ctypes._Pointer[nir_output_deps]) -> None: ...
+nir_output_deps_output.register_fields([('instr_list', c.POINTER[c.POINTER[nir_instr]], 0), ('num_instr', ctypes.c_uint32, 8)])
+nir_output_deps.register_fields([('output', c.Array[nir_output_deps_output, Literal[112]], 0)])
+@dll.bind(None, c.POINTER[nir_shader], c.POINTER[nir_output_deps])
+def nir_gather_output_dependencies(nir:c.POINTER[nir_shader], deps:c.POINTER[nir_output_deps]) -> None: ...
+@dll.bind(None, c.POINTER[nir_output_deps])
+def nir_free_output_dependencies(deps:c.POINTER[nir_output_deps]) -> None: ...
 @c.record
 class nir_input_to_output_deps(c.Struct):
   SIZE = 12992
-  output: ctypes.Array[nir_input_to_output_deps_output]
+  output: c.Array[nir_input_to_output_deps_output, Literal[112]]
 @c.record
 class nir_input_to_output_deps_output(c.Struct):
   SIZE = 116
-  inputs: ctypes.Array[ctypes.c_uint32]
+  inputs: c.Array[ctypes.c_uint32, Literal[28]]
   defined: bool
   uses_ssbo_reads: bool
   uses_image_reads: bool
-nir_input_to_output_deps_output.register_fields([('inputs', (ctypes.c_uint32 * 28), 0), ('defined', ctypes.c_bool, 112), ('uses_ssbo_reads', ctypes.c_bool, 113), ('uses_image_reads', ctypes.c_bool, 114)])
-nir_input_to_output_deps.register_fields([('output', (nir_input_to_output_deps_output * 112), 0)])
-@dll.bind(None, ctypes.POINTER(nir_shader), ctypes.POINTER(nir_input_to_output_deps))
-def nir_gather_input_to_output_dependencies(nir:ctypes._Pointer[nir_shader], out_deps:ctypes._Pointer[nir_input_to_output_deps]) -> None: ...
-@dll.bind(None, ctypes.POINTER(nir_input_to_output_deps), ctypes.POINTER(nir_shader), ctypes.POINTER(FILE))
-def nir_print_input_to_output_deps(deps:ctypes._Pointer[nir_input_to_output_deps], nir:ctypes._Pointer[nir_shader], f:ctypes._Pointer[FILE]) -> None: ...
+nir_input_to_output_deps_output.register_fields([('inputs', c.Array[ctypes.c_uint32, Literal[28]], 0), ('defined', ctypes.c_bool, 112), ('uses_ssbo_reads', ctypes.c_bool, 113), ('uses_image_reads', ctypes.c_bool, 114)])
+nir_input_to_output_deps.register_fields([('output', c.Array[nir_input_to_output_deps_output, Literal[112]], 0)])
+@dll.bind(None, c.POINTER[nir_shader], c.POINTER[nir_input_to_output_deps])
+def nir_gather_input_to_output_dependencies(nir:c.POINTER[nir_shader], out_deps:c.POINTER[nir_input_to_output_deps]) -> None: ...
+@dll.bind(None, c.POINTER[nir_input_to_output_deps], c.POINTER[nir_shader], c.POINTER[FILE])
+def nir_print_input_to_output_deps(deps:c.POINTER[nir_input_to_output_deps], nir:c.POINTER[nir_shader], f:c.POINTER[FILE]) -> None: ...
 @c.record
 class nir_output_clipper_var_groups(c.Struct):
   SIZE = 336
-  pos_only: ctypes.Array[ctypes.c_uint32]
-  var_only: ctypes.Array[ctypes.c_uint32]
-  both: ctypes.Array[ctypes.c_uint32]
-nir_output_clipper_var_groups.register_fields([('pos_only', (ctypes.c_uint32 * 28), 0), ('var_only', (ctypes.c_uint32 * 28), 112), ('both', (ctypes.c_uint32 * 28), 224)])
-@dll.bind(None, ctypes.POINTER(nir_shader), ctypes.POINTER(nir_output_clipper_var_groups))
-def nir_gather_output_clipper_var_groups(nir:ctypes._Pointer[nir_shader], groups:ctypes._Pointer[nir_output_clipper_var_groups]) -> None: ...
-struct_nir_builder.register_fields([('cursor', nir_cursor, 0), ('exact', ctypes.c_bool, 16), ('fp_fast_math', uint32_t, 20), ('shader', ctypes.POINTER(nir_shader), 24), ('impl', ctypes.POINTER(nir_function_impl), 32)])
-@dll.bind(nir_builder, gl_shader_stage, ctypes.POINTER(nir_shader_compiler_options), ctypes.POINTER(ctypes.c_char))
-def nir_builder_init_simple_shader(stage:gl_shader_stage, options:ctypes._Pointer[nir_shader_compiler_options], name:ctypes._Pointer[ctypes.c_char]) -> nir_builder: ...
-nir_instr_pass_cb: TypeAlias = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_instr), ctypes.c_void_p)
-nir_intrinsic_pass_cb: TypeAlias = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_intrinsic_instr), ctypes.c_void_p)
-nir_alu_pass_cb: TypeAlias = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_alu_instr), ctypes.c_void_p)
-nir_tex_pass_cb: TypeAlias = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_tex_instr), ctypes.c_void_p)
-nir_phi_pass_cb: TypeAlias = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.POINTER(struct_nir_builder), ctypes.POINTER(struct_nir_phi_instr), ctypes.c_void_p)
-@dll.bind(None, ctypes.POINTER(nir_builder), ctypes.POINTER(nir_instr))
-def nir_builder_instr_insert(build:ctypes._Pointer[nir_builder], instr:ctypes._Pointer[nir_instr]) -> None: ...
-@dll.bind(None, ctypes.POINTER(nir_builder), ctypes.POINTER(nir_instr))
-def nir_builder_instr_insert_at_top(build:ctypes._Pointer[nir_builder], instr:ctypes._Pointer[nir_instr]) -> None: ...
-@dll.bind(ctypes.POINTER(nir_def), ctypes.POINTER(nir_builder), ctypes.c_uint32, ctypes.POINTER(nir_def), ctypes.POINTER(nir_def), ctypes.POINTER(nir_def), ctypes.POINTER(nir_def))
-def nir_build_alu(build:ctypes._Pointer[nir_builder], op:ctypes.c_uint32, src0:ctypes._Pointer[nir_def], src1:ctypes._Pointer[nir_def], src2:ctypes._Pointer[nir_def], src3:ctypes._Pointer[nir_def]) -> ctypes._Pointer[nir_def]: ...
-@dll.bind(ctypes.POINTER(nir_def), ctypes.POINTER(nir_builder), ctypes.c_uint32, ctypes.POINTER(nir_def))
-def nir_build_alu1(build:ctypes._Pointer[nir_builder], op:ctypes.c_uint32, src0:ctypes._Pointer[nir_def]) -> ctypes._Pointer[nir_def]: ...
-@dll.bind(ctypes.POINTER(nir_def), ctypes.POINTER(nir_builder), ctypes.c_uint32, ctypes.POINTER(nir_def), ctypes.POINTER(nir_def))
-def nir_build_alu2(build:ctypes._Pointer[nir_builder], op:ctypes.c_uint32, src0:ctypes._Pointer[nir_def], src1:ctypes._Pointer[nir_def]) -> ctypes._Pointer[nir_def]: ...
-@dll.bind(ctypes.POINTER(nir_def), ctypes.POINTER(nir_builder), ctypes.c_uint32, ctypes.POINTER(nir_def), ctypes.POINTER(nir_def), ctypes.POINTER(nir_def))
-def nir_build_alu3(build:ctypes._Pointer[nir_builder], op:ctypes.c_uint32, src0:ctypes._Pointer[nir_def], src1:ctypes._Pointer[nir_def], src2:ctypes._Pointer[nir_def]) -> ctypes._Pointer[nir_def]: ...
-@dll.bind(ctypes.POINTER(nir_def), ctypes.POINTER(nir_builder), ctypes.c_uint32, ctypes.POINTER(nir_def), ctypes.POINTER(nir_def), ctypes.POINTER(nir_def), ctypes.POINTER(nir_def))
-def nir_build_alu4(build:ctypes._Pointer[nir_builder], op:ctypes.c_uint32, src0:ctypes._Pointer[nir_def], src1:ctypes._Pointer[nir_def], src2:ctypes._Pointer[nir_def], src3:ctypes._Pointer[nir_def]) -> ctypes._Pointer[nir_def]: ...
-@dll.bind(ctypes.POINTER(nir_def), ctypes.POINTER(nir_builder), ctypes.c_uint32, ctypes.POINTER(ctypes.POINTER(nir_def)))
-def nir_build_alu_src_arr(build:ctypes._Pointer[nir_builder], op:ctypes.c_uint32, srcs:ctypes._Pointer[ctypes.POINTER(nir_def)]) -> ctypes._Pointer[nir_def]: ...
-@dll.bind(ctypes.POINTER(nir_def), ctypes.POINTER(nir_builder), nir_texop, ctypes.POINTER(nir_deref_instr), ctypes.POINTER(nir_deref_instr), ctypes.c_uint32, ctypes.POINTER(nir_tex_src))
-def nir_build_tex_deref_instr(build:ctypes._Pointer[nir_builder], op:nir_texop, texture:ctypes._Pointer[nir_deref_instr], sampler:ctypes._Pointer[nir_deref_instr], num_extra_srcs:int, extra_srcs:ctypes._Pointer[nir_tex_src]) -> ctypes._Pointer[nir_def]: ...
-@dll.bind(None, ctypes.POINTER(nir_builder), ctypes.POINTER(nir_cf_node))
-def nir_builder_cf_insert(build:ctypes._Pointer[nir_builder], cf:ctypes._Pointer[nir_cf_node]) -> None: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_builder), ctypes.POINTER(nir_cf_node))
-def nir_builder_is_inside_cf(build:ctypes._Pointer[nir_builder], cf_node:ctypes._Pointer[nir_cf_node]) -> bool: ...
-@dll.bind(ctypes.POINTER(nir_if), ctypes.POINTER(nir_builder), ctypes.POINTER(nir_def))
-def nir_push_if(build:ctypes._Pointer[nir_builder], condition:ctypes._Pointer[nir_def]) -> ctypes._Pointer[nir_if]: ...
-@dll.bind(ctypes.POINTER(nir_if), ctypes.POINTER(nir_builder), ctypes.POINTER(nir_if))
-def nir_push_else(build:ctypes._Pointer[nir_builder], nif:ctypes._Pointer[nir_if]) -> ctypes._Pointer[nir_if]: ...
-@dll.bind(None, ctypes.POINTER(nir_builder), ctypes.POINTER(nir_if))
-def nir_pop_if(build:ctypes._Pointer[nir_builder], nif:ctypes._Pointer[nir_if]) -> None: ...
-@dll.bind(ctypes.POINTER(nir_def), ctypes.POINTER(nir_builder), ctypes.POINTER(nir_def), ctypes.POINTER(nir_def))
-def nir_if_phi(build:ctypes._Pointer[nir_builder], then_def:ctypes._Pointer[nir_def], else_def:ctypes._Pointer[nir_def]) -> ctypes._Pointer[nir_def]: ...
-@dll.bind(ctypes.POINTER(nir_loop), ctypes.POINTER(nir_builder))
-def nir_push_loop(build:ctypes._Pointer[nir_builder]) -> ctypes._Pointer[nir_loop]: ...
-@dll.bind(ctypes.POINTER(nir_loop), ctypes.POINTER(nir_builder), ctypes.POINTER(nir_loop))
-def nir_push_continue(build:ctypes._Pointer[nir_builder], loop:ctypes._Pointer[nir_loop]) -> ctypes._Pointer[nir_loop]: ...
-@dll.bind(None, ctypes.POINTER(nir_builder), ctypes.POINTER(nir_loop))
-def nir_pop_loop(build:ctypes._Pointer[nir_builder], loop:ctypes._Pointer[nir_loop]) -> None: ...
-@dll.bind(ctypes.POINTER(nir_def), ctypes.POINTER(nir_builder), ctypes.POINTER(nir_alu_instr))
-def nir_builder_alu_instr_finish_and_insert(build:ctypes._Pointer[nir_builder], instr:ctypes._Pointer[nir_alu_instr]) -> ctypes._Pointer[nir_def]: ...
-@dll.bind(ctypes.POINTER(nir_def), ctypes.POINTER(nir_builder), ctypes.c_uint32, ctypes.c_int32, ctypes.c_uint32, ctypes.c_uint32)
-def nir_load_system_value(build:ctypes._Pointer[nir_builder], op:ctypes.c_uint32, index:int, num_components:int, bit_size:int) -> ctypes._Pointer[nir_def]: ...
-@dll.bind(ctypes.POINTER(nir_def), ctypes.POINTER(nir_builder), ctypes.POINTER(nir_def), ctypes.c_ubyte, ctypes.c_ubyte, ctypes.c_uint32)
-def nir_type_convert(b:ctypes._Pointer[nir_builder], src:ctypes._Pointer[nir_def], src_type:ctypes.c_ubyte, dest_type:ctypes.c_ubyte, rnd:ctypes.c_uint32) -> ctypes._Pointer[nir_def]: ...
-@dll.bind(ctypes.POINTER(nir_def), ctypes.POINTER(nir_builder), ctypes.POINTER(nir_scalar), ctypes.c_uint32)
-def nir_vec_scalars(build:ctypes._Pointer[nir_builder], comp:ctypes._Pointer[nir_scalar], num_components:int) -> ctypes._Pointer[nir_def]: ...
-@dll.bind(ctypes.POINTER(nir_def), ctypes.POINTER(nir_builder), ctypes.POINTER(nir_alu_instr), ctypes.c_uint32)
-def nir_ssa_for_alu_src(build:ctypes._Pointer[nir_builder], instr:ctypes._Pointer[nir_alu_instr], srcn:int) -> ctypes._Pointer[nir_def]: ...
-@dll.bind(ctypes.POINTER(nir_def), ctypes.POINTER(nir_builder), ctypes.POINTER(ctypes.c_char))
-def nir_build_string(build:ctypes._Pointer[nir_builder], value:ctypes._Pointer[ctypes.c_char]) -> ctypes._Pointer[nir_def]: ...
-@dll.bind(ctypes.POINTER(nir_def), ctypes.POINTER(nir_builder), ctypes.c_uint32, ctypes.POINTER(nir_def), ctypes.POINTER(nir_def))
-def nir_compare_func(b:ctypes._Pointer[nir_builder], func:ctypes.c_uint32, src0:ctypes._Pointer[nir_def], src1:ctypes._Pointer[nir_def]) -> ctypes._Pointer[nir_def]: ...
-@dll.bind(ctypes.POINTER(nir_def), ctypes.POINTER(nir_builder), ctypes.POINTER(nir_def), ctypes.POINTER(nir_def))
-def nir_gen_rect_vertices(b:ctypes._Pointer[nir_builder], z:ctypes._Pointer[nir_def], w:ctypes._Pointer[nir_def]) -> ctypes._Pointer[nir_def]: ...
-@dll.bind(None, ctypes.POINTER(nir_builder), ctypes.c_uint32, ctypes.POINTER(ctypes.c_char))
-def nir_printf_fmt(b:ctypes._Pointer[nir_builder], ptr_bit_size:int, fmt:ctypes._Pointer[ctypes.c_char]) -> None: ...
-@dll.bind(None, ctypes.POINTER(nir_builder), ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.POINTER(ctypes.c_char))
-def nir_printf_fmt_at_px(b:ctypes._Pointer[nir_builder], ptr_bit_size:int, x:int, y:int, fmt:ctypes._Pointer[ctypes.c_char]) -> None: ...
-@dll.bind(ctypes.POINTER(nir_def), ctypes.POINTER(nir_builder), ctypes.POINTER(uint32_t), size_t, ctypes.POINTER(ctypes.POINTER(nir_def)))
-def nir_call_serialized(build:ctypes._Pointer[nir_builder], serialized:ctypes._Pointer[uint32_t], serialized_size_B:size_t, args:ctypes._Pointer[ctypes.POINTER(nir_def)]) -> ctypes._Pointer[nir_def]: ...
+  pos_only: c.Array[ctypes.c_uint32, Literal[28]]
+  var_only: c.Array[ctypes.c_uint32, Literal[28]]
+  both: c.Array[ctypes.c_uint32, Literal[28]]
+nir_output_clipper_var_groups.register_fields([('pos_only', c.Array[ctypes.c_uint32, Literal[28]], 0), ('var_only', c.Array[ctypes.c_uint32, Literal[28]], 112), ('both', c.Array[ctypes.c_uint32, Literal[28]], 224)])
+@dll.bind(None, c.POINTER[nir_shader], c.POINTER[nir_output_clipper_var_groups])
+def nir_gather_output_clipper_var_groups(nir:c.POINTER[nir_shader], groups:c.POINTER[nir_output_clipper_var_groups]) -> None: ...
+struct_nir_builder.register_fields([('cursor', nir_cursor, 0), ('exact', ctypes.c_bool, 16), ('fp_fast_math', uint32_t, 20), ('shader', c.POINTER[nir_shader], 24), ('impl', c.POINTER[nir_function_impl], 32)])
+@dll.bind(nir_builder, gl_shader_stage, c.POINTER[nir_shader_compiler_options], c.POINTER[ctypes.c_char])
+def nir_builder_init_simple_shader(stage:gl_shader_stage, options:c.POINTER[nir_shader_compiler_options], name:c.POINTER[ctypes.c_char]) -> nir_builder: ...
+nir_instr_pass_cb: TypeAlias = c.CFUNCTYPE[ctypes.c_bool, [c.POINTER[struct_nir_builder], c.POINTER[struct_nir_instr], ctypes.c_void_p]]
+nir_intrinsic_pass_cb: TypeAlias = c.CFUNCTYPE[ctypes.c_bool, [c.POINTER[struct_nir_builder], c.POINTER[struct_nir_intrinsic_instr], ctypes.c_void_p]]
+nir_alu_pass_cb: TypeAlias = c.CFUNCTYPE[ctypes.c_bool, [c.POINTER[struct_nir_builder], c.POINTER[struct_nir_alu_instr], ctypes.c_void_p]]
+nir_tex_pass_cb: TypeAlias = c.CFUNCTYPE[ctypes.c_bool, [c.POINTER[struct_nir_builder], c.POINTER[struct_nir_tex_instr], ctypes.c_void_p]]
+nir_phi_pass_cb: TypeAlias = c.CFUNCTYPE[ctypes.c_bool, [c.POINTER[struct_nir_builder], c.POINTER[struct_nir_phi_instr], ctypes.c_void_p]]
+@dll.bind(None, c.POINTER[nir_builder], c.POINTER[nir_instr])
+def nir_builder_instr_insert(build:c.POINTER[nir_builder], instr:c.POINTER[nir_instr]) -> None: ...
+@dll.bind(None, c.POINTER[nir_builder], c.POINTER[nir_instr])
+def nir_builder_instr_insert_at_top(build:c.POINTER[nir_builder], instr:c.POINTER[nir_instr]) -> None: ...
+@dll.bind(c.POINTER[nir_def], c.POINTER[nir_builder], ctypes.c_uint32, c.POINTER[nir_def], c.POINTER[nir_def], c.POINTER[nir_def], c.POINTER[nir_def])
+def nir_build_alu(build:c.POINTER[nir_builder], op:ctypes.c_uint32, src0:c.POINTER[nir_def], src1:c.POINTER[nir_def], src2:c.POINTER[nir_def], src3:c.POINTER[nir_def]) -> c.POINTER[nir_def]: ...
+@dll.bind(c.POINTER[nir_def], c.POINTER[nir_builder], ctypes.c_uint32, c.POINTER[nir_def])
+def nir_build_alu1(build:c.POINTER[nir_builder], op:ctypes.c_uint32, src0:c.POINTER[nir_def]) -> c.POINTER[nir_def]: ...
+@dll.bind(c.POINTER[nir_def], c.POINTER[nir_builder], ctypes.c_uint32, c.POINTER[nir_def], c.POINTER[nir_def])
+def nir_build_alu2(build:c.POINTER[nir_builder], op:ctypes.c_uint32, src0:c.POINTER[nir_def], src1:c.POINTER[nir_def]) -> c.POINTER[nir_def]: ...
+@dll.bind(c.POINTER[nir_def], c.POINTER[nir_builder], ctypes.c_uint32, c.POINTER[nir_def], c.POINTER[nir_def], c.POINTER[nir_def])
+def nir_build_alu3(build:c.POINTER[nir_builder], op:ctypes.c_uint32, src0:c.POINTER[nir_def], src1:c.POINTER[nir_def], src2:c.POINTER[nir_def]) -> c.POINTER[nir_def]: ...
+@dll.bind(c.POINTER[nir_def], c.POINTER[nir_builder], ctypes.c_uint32, c.POINTER[nir_def], c.POINTER[nir_def], c.POINTER[nir_def], c.POINTER[nir_def])
+def nir_build_alu4(build:c.POINTER[nir_builder], op:ctypes.c_uint32, src0:c.POINTER[nir_def], src1:c.POINTER[nir_def], src2:c.POINTER[nir_def], src3:c.POINTER[nir_def]) -> c.POINTER[nir_def]: ...
+@dll.bind(c.POINTER[nir_def], c.POINTER[nir_builder], ctypes.c_uint32, c.POINTER[c.POINTER[nir_def]])
+def nir_build_alu_src_arr(build:c.POINTER[nir_builder], op:ctypes.c_uint32, srcs:c.POINTER[c.POINTER[nir_def]]) -> c.POINTER[nir_def]: ...
+@dll.bind(c.POINTER[nir_def], c.POINTER[nir_builder], nir_texop, c.POINTER[nir_deref_instr], c.POINTER[nir_deref_instr], ctypes.c_uint32, c.POINTER[nir_tex_src])
+def nir_build_tex_deref_instr(build:c.POINTER[nir_builder], op:nir_texop, texture:c.POINTER[nir_deref_instr], sampler:c.POINTER[nir_deref_instr], num_extra_srcs:int, extra_srcs:c.POINTER[nir_tex_src]) -> c.POINTER[nir_def]: ...
+@dll.bind(None, c.POINTER[nir_builder], c.POINTER[nir_cf_node])
+def nir_builder_cf_insert(build:c.POINTER[nir_builder], cf:c.POINTER[nir_cf_node]) -> None: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_builder], c.POINTER[nir_cf_node])
+def nir_builder_is_inside_cf(build:c.POINTER[nir_builder], cf_node:c.POINTER[nir_cf_node]) -> bool: ...
+@dll.bind(c.POINTER[nir_if], c.POINTER[nir_builder], c.POINTER[nir_def])
+def nir_push_if(build:c.POINTER[nir_builder], condition:c.POINTER[nir_def]) -> c.POINTER[nir_if]: ...
+@dll.bind(c.POINTER[nir_if], c.POINTER[nir_builder], c.POINTER[nir_if])
+def nir_push_else(build:c.POINTER[nir_builder], nif:c.POINTER[nir_if]) -> c.POINTER[nir_if]: ...
+@dll.bind(None, c.POINTER[nir_builder], c.POINTER[nir_if])
+def nir_pop_if(build:c.POINTER[nir_builder], nif:c.POINTER[nir_if]) -> None: ...
+@dll.bind(c.POINTER[nir_def], c.POINTER[nir_builder], c.POINTER[nir_def], c.POINTER[nir_def])
+def nir_if_phi(build:c.POINTER[nir_builder], then_def:c.POINTER[nir_def], else_def:c.POINTER[nir_def]) -> c.POINTER[nir_def]: ...
+@dll.bind(c.POINTER[nir_loop], c.POINTER[nir_builder])
+def nir_push_loop(build:c.POINTER[nir_builder]) -> c.POINTER[nir_loop]: ...
+@dll.bind(c.POINTER[nir_loop], c.POINTER[nir_builder], c.POINTER[nir_loop])
+def nir_push_continue(build:c.POINTER[nir_builder], loop:c.POINTER[nir_loop]) -> c.POINTER[nir_loop]: ...
+@dll.bind(None, c.POINTER[nir_builder], c.POINTER[nir_loop])
+def nir_pop_loop(build:c.POINTER[nir_builder], loop:c.POINTER[nir_loop]) -> None: ...
+@dll.bind(c.POINTER[nir_def], c.POINTER[nir_builder], c.POINTER[nir_alu_instr])
+def nir_builder_alu_instr_finish_and_insert(build:c.POINTER[nir_builder], instr:c.POINTER[nir_alu_instr]) -> c.POINTER[nir_def]: ...
+@dll.bind(c.POINTER[nir_def], c.POINTER[nir_builder], ctypes.c_uint32, ctypes.c_int32, ctypes.c_uint32, ctypes.c_uint32)
+def nir_load_system_value(build:c.POINTER[nir_builder], op:ctypes.c_uint32, index:int, num_components:int, bit_size:int) -> c.POINTER[nir_def]: ...
+@dll.bind(c.POINTER[nir_def], c.POINTER[nir_builder], c.POINTER[nir_def], ctypes.c_ubyte, ctypes.c_ubyte, ctypes.c_uint32)
+def nir_type_convert(b:c.POINTER[nir_builder], src:c.POINTER[nir_def], src_type:ctypes.c_ubyte, dest_type:ctypes.c_ubyte, rnd:ctypes.c_uint32) -> c.POINTER[nir_def]: ...
+@dll.bind(c.POINTER[nir_def], c.POINTER[nir_builder], c.POINTER[nir_scalar], ctypes.c_uint32)
+def nir_vec_scalars(build:c.POINTER[nir_builder], comp:c.POINTER[nir_scalar], num_components:int) -> c.POINTER[nir_def]: ...
+@dll.bind(c.POINTER[nir_def], c.POINTER[nir_builder], c.POINTER[nir_alu_instr], ctypes.c_uint32)
+def nir_ssa_for_alu_src(build:c.POINTER[nir_builder], instr:c.POINTER[nir_alu_instr], srcn:int) -> c.POINTER[nir_def]: ...
+@dll.bind(c.POINTER[nir_def], c.POINTER[nir_builder], c.POINTER[ctypes.c_char])
+def nir_build_string(build:c.POINTER[nir_builder], value:c.POINTER[ctypes.c_char]) -> c.POINTER[nir_def]: ...
+@dll.bind(c.POINTER[nir_def], c.POINTER[nir_builder], ctypes.c_uint32, c.POINTER[nir_def], c.POINTER[nir_def])
+def nir_compare_func(b:c.POINTER[nir_builder], func:ctypes.c_uint32, src0:c.POINTER[nir_def], src1:c.POINTER[nir_def]) -> c.POINTER[nir_def]: ...
+@dll.bind(c.POINTER[nir_def], c.POINTER[nir_builder], c.POINTER[nir_def], c.POINTER[nir_def])
+def nir_gen_rect_vertices(b:c.POINTER[nir_builder], z:c.POINTER[nir_def], w:c.POINTER[nir_def]) -> c.POINTER[nir_def]: ...
+@dll.bind(None, c.POINTER[nir_builder], ctypes.c_uint32, c.POINTER[ctypes.c_char])
+def nir_printf_fmt(b:c.POINTER[nir_builder], ptr_bit_size:int, fmt:c.POINTER[ctypes.c_char]) -> None: ...
+@dll.bind(None, c.POINTER[nir_builder], ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, c.POINTER[ctypes.c_char])
+def nir_printf_fmt_at_px(b:c.POINTER[nir_builder], ptr_bit_size:int, x:int, y:int, fmt:c.POINTER[ctypes.c_char]) -> None: ...
+@dll.bind(c.POINTER[nir_def], c.POINTER[nir_builder], c.POINTER[uint32_t], size_t, c.POINTER[c.POINTER[nir_def]])
+def nir_call_serialized(build:c.POINTER[nir_builder], serialized:c.POINTER[uint32_t], serialized_size_B:size_t, args:c.POINTER[c.POINTER[nir_def]]) -> c.POINTER[nir_def]: ...
 nir_lower_packing_op: dict[int, str] = {(nir_lower_packing_op_pack_64_2x32:=0): 'nir_lower_packing_op_pack_64_2x32', (nir_lower_packing_op_unpack_64_2x32:=1): 'nir_lower_packing_op_unpack_64_2x32', (nir_lower_packing_op_pack_64_4x16:=2): 'nir_lower_packing_op_pack_64_4x16', (nir_lower_packing_op_unpack_64_4x16:=3): 'nir_lower_packing_op_unpack_64_4x16', (nir_lower_packing_op_pack_32_2x16:=4): 'nir_lower_packing_op_pack_32_2x16', (nir_lower_packing_op_unpack_32_2x16:=5): 'nir_lower_packing_op_unpack_32_2x16', (nir_lower_packing_op_pack_32_4x8:=6): 'nir_lower_packing_op_pack_32_4x8', (nir_lower_packing_op_unpack_32_4x8:=7): 'nir_lower_packing_op_unpack_32_4x8', (nir_lower_packing_num_ops:=8): 'nir_lower_packing_num_ops'}
 @c.record
 class struct_blob(c.Struct):
   SIZE = 32
-  data: ctypes._Pointer[ctypes.c_ubyte]
+  data: c.POINTER[ctypes.c_ubyte]
   allocated: int
   size: int
   fixed_allocation: bool
   out_of_memory: bool
-struct_blob.register_fields([('data', ctypes.POINTER(uint8_t), 0), ('allocated', size_t, 8), ('size', size_t, 16), ('fixed_allocation', ctypes.c_bool, 24), ('out_of_memory', ctypes.c_bool, 25)])
-@dll.bind(None, ctypes.POINTER(struct_blob), ctypes.POINTER(nir_shader), ctypes.c_bool)
-def nir_serialize(blob:ctypes._Pointer[struct_blob], nir:ctypes._Pointer[nir_shader], strip:bool) -> None: ...
+struct_blob.register_fields([('data', c.POINTER[uint8_t], 0), ('allocated', size_t, 8), ('size', size_t, 16), ('fixed_allocation', ctypes.c_bool, 24), ('out_of_memory', ctypes.c_bool, 25)])
+@dll.bind(None, c.POINTER[struct_blob], c.POINTER[nir_shader], ctypes.c_bool)
+def nir_serialize(blob:c.POINTER[struct_blob], nir:c.POINTER[nir_shader], strip:bool) -> None: ...
 @c.record
 class struct_blob_reader(c.Struct):
   SIZE = 32
-  data: ctypes._Pointer[ctypes.c_ubyte]
-  end: ctypes._Pointer[ctypes.c_ubyte]
-  current: ctypes._Pointer[ctypes.c_ubyte]
+  data: c.POINTER[ctypes.c_ubyte]
+  end: c.POINTER[ctypes.c_ubyte]
+  current: c.POINTER[ctypes.c_ubyte]
   overrun: bool
-struct_blob_reader.register_fields([('data', ctypes.POINTER(uint8_t), 0), ('end', ctypes.POINTER(uint8_t), 8), ('current', ctypes.POINTER(uint8_t), 16), ('overrun', ctypes.c_bool, 24)])
-@dll.bind(ctypes.POINTER(nir_shader), ctypes.c_void_p, ctypes.POINTER(struct_nir_shader_compiler_options), ctypes.POINTER(struct_blob_reader))
-def nir_deserialize(mem_ctx:int|None, options:ctypes._Pointer[struct_nir_shader_compiler_options], blob:ctypes._Pointer[struct_blob_reader]) -> ctypes._Pointer[nir_shader]: ...
-@dll.bind(None, ctypes.POINTER(struct_blob), ctypes.POINTER(nir_function))
-def nir_serialize_function(blob:ctypes._Pointer[struct_blob], fxn:ctypes._Pointer[nir_function]) -> None: ...
-@dll.bind(ctypes.POINTER(nir_function), ctypes.c_void_p, ctypes.POINTER(struct_nir_shader_compiler_options), ctypes.POINTER(struct_blob_reader))
-def nir_deserialize_function(mem_ctx:int|None, options:ctypes._Pointer[struct_nir_shader_compiler_options], blob:ctypes._Pointer[struct_blob_reader]) -> ctypes._Pointer[nir_function]: ...
+struct_blob_reader.register_fields([('data', c.POINTER[uint8_t], 0), ('end', c.POINTER[uint8_t], 8), ('current', c.POINTER[uint8_t], 16), ('overrun', ctypes.c_bool, 24)])
+@dll.bind(c.POINTER[nir_shader], ctypes.c_void_p, c.POINTER[struct_nir_shader_compiler_options], c.POINTER[struct_blob_reader])
+def nir_deserialize(mem_ctx:ctypes.c_void_p, options:c.POINTER[struct_nir_shader_compiler_options], blob:c.POINTER[struct_blob_reader]) -> c.POINTER[nir_shader]: ...
+@dll.bind(None, c.POINTER[struct_blob], c.POINTER[nir_function])
+def nir_serialize_function(blob:c.POINTER[struct_blob], fxn:c.POINTER[nir_function]) -> None: ...
+@dll.bind(c.POINTER[nir_function], ctypes.c_void_p, c.POINTER[struct_nir_shader_compiler_options], c.POINTER[struct_blob_reader])
+def nir_deserialize_function(mem_ctx:ctypes.c_void_p, options:c.POINTER[struct_nir_shader_compiler_options], blob:c.POINTER[struct_blob_reader]) -> c.POINTER[nir_function]: ...
 nir_intrinsic_index_flag: dict[int, str] = {(NIR_INTRINSIC_BASE:=0): 'NIR_INTRINSIC_BASE', (NIR_INTRINSIC_WRITE_MASK:=1): 'NIR_INTRINSIC_WRITE_MASK', (NIR_INTRINSIC_STREAM_ID:=2): 'NIR_INTRINSIC_STREAM_ID', (NIR_INTRINSIC_UCP_ID:=3): 'NIR_INTRINSIC_UCP_ID', (NIR_INTRINSIC_RANGE_BASE:=4): 'NIR_INTRINSIC_RANGE_BASE', (NIR_INTRINSIC_RANGE:=5): 'NIR_INTRINSIC_RANGE', (NIR_INTRINSIC_DESC_SET:=6): 'NIR_INTRINSIC_DESC_SET', (NIR_INTRINSIC_BINDING:=7): 'NIR_INTRINSIC_BINDING', (NIR_INTRINSIC_COMPONENT:=8): 'NIR_INTRINSIC_COMPONENT', (NIR_INTRINSIC_COLUMN:=9): 'NIR_INTRINSIC_COLUMN', (NIR_INTRINSIC_INTERP_MODE:=10): 'NIR_INTRINSIC_INTERP_MODE', (NIR_INTRINSIC_REDUCTION_OP:=11): 'NIR_INTRINSIC_REDUCTION_OP', (NIR_INTRINSIC_CLUSTER_SIZE:=12): 'NIR_INTRINSIC_CLUSTER_SIZE', (NIR_INTRINSIC_PARAM_IDX:=13): 'NIR_INTRINSIC_PARAM_IDX', (NIR_INTRINSIC_IMAGE_DIM:=14): 'NIR_INTRINSIC_IMAGE_DIM', (NIR_INTRINSIC_IMAGE_ARRAY:=15): 'NIR_INTRINSIC_IMAGE_ARRAY', (NIR_INTRINSIC_FORMAT:=16): 'NIR_INTRINSIC_FORMAT', (NIR_INTRINSIC_ACCESS:=17): 'NIR_INTRINSIC_ACCESS', (NIR_INTRINSIC_CALL_IDX:=18): 'NIR_INTRINSIC_CALL_IDX', (NIR_INTRINSIC_STACK_SIZE:=19): 'NIR_INTRINSIC_STACK_SIZE', (NIR_INTRINSIC_ALIGN_MUL:=20): 'NIR_INTRINSIC_ALIGN_MUL', (NIR_INTRINSIC_ALIGN_OFFSET:=21): 'NIR_INTRINSIC_ALIGN_OFFSET', (NIR_INTRINSIC_DESC_TYPE:=22): 'NIR_INTRINSIC_DESC_TYPE', (NIR_INTRINSIC_SRC_TYPE:=23): 'NIR_INTRINSIC_SRC_TYPE', (NIR_INTRINSIC_DEST_TYPE:=24): 'NIR_INTRINSIC_DEST_TYPE', (NIR_INTRINSIC_SRC_BASE_TYPE:=25): 'NIR_INTRINSIC_SRC_BASE_TYPE', (NIR_INTRINSIC_SRC_BASE_TYPE2:=26): 'NIR_INTRINSIC_SRC_BASE_TYPE2', (NIR_INTRINSIC_DEST_BASE_TYPE:=27): 'NIR_INTRINSIC_DEST_BASE_TYPE', (NIR_INTRINSIC_SWIZZLE_MASK:=28): 'NIR_INTRINSIC_SWIZZLE_MASK', (NIR_INTRINSIC_FETCH_INACTIVE:=29): 'NIR_INTRINSIC_FETCH_INACTIVE', (NIR_INTRINSIC_OFFSET0:=30): 'NIR_INTRINSIC_OFFSET0', (NIR_INTRINSIC_OFFSET1:=31): 'NIR_INTRINSIC_OFFSET1', (NIR_INTRINSIC_ST64:=32): 'NIR_INTRINSIC_ST64', (NIR_INTRINSIC_ARG_UPPER_BOUND_U32_AMD:=33): 'NIR_INTRINSIC_ARG_UPPER_BOUND_U32_AMD', (NIR_INTRINSIC_DST_ACCESS:=34): 'NIR_INTRINSIC_DST_ACCESS', (NIR_INTRINSIC_SRC_ACCESS:=35): 'NIR_INTRINSIC_SRC_ACCESS', (NIR_INTRINSIC_DRIVER_LOCATION:=36): 'NIR_INTRINSIC_DRIVER_LOCATION', (NIR_INTRINSIC_MEMORY_SEMANTICS:=37): 'NIR_INTRINSIC_MEMORY_SEMANTICS', (NIR_INTRINSIC_MEMORY_MODES:=38): 'NIR_INTRINSIC_MEMORY_MODES', (NIR_INTRINSIC_MEMORY_SCOPE:=39): 'NIR_INTRINSIC_MEMORY_SCOPE', (NIR_INTRINSIC_EXECUTION_SCOPE:=40): 'NIR_INTRINSIC_EXECUTION_SCOPE', (NIR_INTRINSIC_IO_SEMANTICS:=41): 'NIR_INTRINSIC_IO_SEMANTICS', (NIR_INTRINSIC_IO_XFB:=42): 'NIR_INTRINSIC_IO_XFB', (NIR_INTRINSIC_IO_XFB2:=43): 'NIR_INTRINSIC_IO_XFB2', (NIR_INTRINSIC_RAY_QUERY_VALUE:=44): 'NIR_INTRINSIC_RAY_QUERY_VALUE', (NIR_INTRINSIC_COMMITTED:=45): 'NIR_INTRINSIC_COMMITTED', (NIR_INTRINSIC_ROUNDING_MODE:=46): 'NIR_INTRINSIC_ROUNDING_MODE', (NIR_INTRINSIC_SATURATE:=47): 'NIR_INTRINSIC_SATURATE', (NIR_INTRINSIC_SYNCHRONOUS:=48): 'NIR_INTRINSIC_SYNCHRONOUS', (NIR_INTRINSIC_VALUE_ID:=49): 'NIR_INTRINSIC_VALUE_ID', (NIR_INTRINSIC_SIGN_EXTEND:=50): 'NIR_INTRINSIC_SIGN_EXTEND', (NIR_INTRINSIC_FLAGS:=51): 'NIR_INTRINSIC_FLAGS', (NIR_INTRINSIC_ATOMIC_OP:=52): 'NIR_INTRINSIC_ATOMIC_OP', (NIR_INTRINSIC_RESOURCE_BLOCK_INTEL:=53): 'NIR_INTRINSIC_RESOURCE_BLOCK_INTEL', (NIR_INTRINSIC_RESOURCE_ACCESS_INTEL:=54): 'NIR_INTRINSIC_RESOURCE_ACCESS_INTEL', (NIR_INTRINSIC_NUM_COMPONENTS:=55): 'NIR_INTRINSIC_NUM_COMPONENTS', (NIR_INTRINSIC_NUM_ARRAY_ELEMS:=56): 'NIR_INTRINSIC_NUM_ARRAY_ELEMS', (NIR_INTRINSIC_BIT_SIZE:=57): 'NIR_INTRINSIC_BIT_SIZE', (NIR_INTRINSIC_DIVERGENT:=58): 'NIR_INTRINSIC_DIVERGENT', (NIR_INTRINSIC_LEGACY_FABS:=59): 'NIR_INTRINSIC_LEGACY_FABS', (NIR_INTRINSIC_LEGACY_FNEG:=60): 'NIR_INTRINSIC_LEGACY_FNEG', (NIR_INTRINSIC_LEGACY_FSAT:=61): 'NIR_INTRINSIC_LEGACY_FSAT', (NIR_INTRINSIC_CMAT_DESC:=62): 'NIR_INTRINSIC_CMAT_DESC', (NIR_INTRINSIC_MATRIX_LAYOUT:=63): 'NIR_INTRINSIC_MATRIX_LAYOUT', (NIR_INTRINSIC_CMAT_SIGNED_MASK:=64): 'NIR_INTRINSIC_CMAT_SIGNED_MASK', (NIR_INTRINSIC_ALU_OP:=65): 'NIR_INTRINSIC_ALU_OP', (NIR_INTRINSIC_NEG_LO_AMD:=66): 'NIR_INTRINSIC_NEG_LO_AMD', (NIR_INTRINSIC_NEG_HI_AMD:=67): 'NIR_INTRINSIC_NEG_HI_AMD', (NIR_INTRINSIC_SYSTOLIC_DEPTH:=68): 'NIR_INTRINSIC_SYSTOLIC_DEPTH', (NIR_INTRINSIC_REPEAT_COUNT:=69): 'NIR_INTRINSIC_REPEAT_COUNT', (NIR_INTRINSIC_DST_CMAT_DESC:=70): 'NIR_INTRINSIC_DST_CMAT_DESC', (NIR_INTRINSIC_SRC_CMAT_DESC:=71): 'NIR_INTRINSIC_SRC_CMAT_DESC', (NIR_INTRINSIC_EXPLICIT_COORD:=72): 'NIR_INTRINSIC_EXPLICIT_COORD', (NIR_INTRINSIC_FMT_IDX:=73): 'NIR_INTRINSIC_FMT_IDX', (NIR_INTRINSIC_PREAMBLE_CLASS:=74): 'NIR_INTRINSIC_PREAMBLE_CLASS', (NIR_INTRINSIC_NUM_INDEX_FLAGS:=75): 'NIR_INTRINSIC_NUM_INDEX_FLAGS'}
-try: nir_intrinsic_index_names = (ctypes.POINTER(ctypes.c_char) * 75).in_dll(dll, 'nir_intrinsic_index_names') # type: ignore
+try: nir_intrinsic_index_names = c.Array[c.POINTER[ctypes.c_char], Literal[75]].in_dll(dll, 'nir_intrinsic_index_names') # type: ignore
 except (ValueError,AttributeError): pass
 enum_nv_device_type: dict[int, str] = {(NV_DEVICE_TYPE_IGP:=0): 'NV_DEVICE_TYPE_IGP', (NV_DEVICE_TYPE_DIS:=1): 'NV_DEVICE_TYPE_DIS', (NV_DEVICE_TYPE_SOC:=2): 'NV_DEVICE_TYPE_SOC'}
 @c.record
@@ -2739,8 +2739,8 @@ class struct_nv_device_info(c.Struct):
   type: int
   device_id: int
   chipset: int
-  device_name: ctypes.Array[ctypes.c_char]
-  chipset_name: ctypes.Array[ctypes.c_char]
+  device_name: c.Array[ctypes.c_char, Literal[64]]
+  chipset_name: c.Array[ctypes.c_char, Literal[16]]
   pci: struct_nv_device_info_pci
   sm: int
   gpc_count: int
@@ -2763,20 +2763,20 @@ class struct_nv_device_info_pci(c.Struct):
   func: int
   revision_id: int
 struct_nv_device_info_pci.register_fields([('domain', uint16_t, 0), ('bus', uint8_t, 2), ('dev', uint8_t, 3), ('func', uint8_t, 4), ('revision_id', uint8_t, 5)])
-struct_nv_device_info.register_fields([('type', ctypes.c_ubyte, 0), ('device_id', uint16_t, 2), ('chipset', uint16_t, 4), ('device_name', (ctypes.c_char * 64), 6), ('chipset_name', (ctypes.c_char * 16), 70), ('pci', struct_nv_device_info_pci, 86), ('sm', uint8_t, 92), ('gpc_count', uint8_t, 93), ('tpc_count', uint16_t, 94), ('mp_per_tpc', uint8_t, 96), ('max_warps_per_mp', uint8_t, 97), ('cls_copy', uint16_t, 98), ('cls_eng2d', uint16_t, 100), ('cls_eng3d', uint16_t, 102), ('cls_m2mf', uint16_t, 104), ('cls_compute', uint16_t, 106), ('vram_size_B', uint64_t, 112), ('bar_size_B', uint64_t, 120)])
+struct_nv_device_info.register_fields([('type', ctypes.c_ubyte, 0), ('device_id', uint16_t, 2), ('chipset', uint16_t, 4), ('device_name', c.Array[ctypes.c_char, Literal[64]], 6), ('chipset_name', c.Array[ctypes.c_char, Literal[16]], 70), ('pci', struct_nv_device_info_pci, 86), ('sm', uint8_t, 92), ('gpc_count', uint8_t, 93), ('tpc_count', uint16_t, 94), ('mp_per_tpc', uint8_t, 96), ('max_warps_per_mp', uint8_t, 97), ('cls_copy', uint16_t, 98), ('cls_eng2d', uint16_t, 100), ('cls_eng3d', uint16_t, 102), ('cls_m2mf', uint16_t, 104), ('cls_compute', uint16_t, 106), ('vram_size_B', uint64_t, 112), ('bar_size_B', uint64_t, 120)])
 class struct_nak_compiler(c.Struct): pass
-@dll.bind(ctypes.POINTER(struct_nak_compiler), ctypes.POINTER(struct_nv_device_info))
-def nak_compiler_create(dev:ctypes._Pointer[struct_nv_device_info]) -> ctypes._Pointer[struct_nak_compiler]: ...
-@dll.bind(None, ctypes.POINTER(struct_nak_compiler))
-def nak_compiler_destroy(nak:ctypes._Pointer[struct_nak_compiler]) -> None: ...
-@dll.bind(uint64_t, ctypes.POINTER(struct_nak_compiler))
-def nak_debug_flags(nak:ctypes._Pointer[struct_nak_compiler]) -> uint64_t: ...
-@dll.bind(ctypes.POINTER(struct_nir_shader_compiler_options), ctypes.POINTER(struct_nak_compiler))
-def nak_nir_options(nak:ctypes._Pointer[struct_nak_compiler]) -> ctypes._Pointer[struct_nir_shader_compiler_options]: ...
-@dll.bind(None, ctypes.POINTER(nir_shader), ctypes.POINTER(struct_nak_compiler))
-def nak_preprocess_nir(nir:ctypes._Pointer[nir_shader], nak:ctypes._Pointer[struct_nak_compiler]) -> None: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.POINTER(struct_nak_compiler))
-def nak_nir_lower_image_addrs(nir:ctypes._Pointer[nir_shader], nak:ctypes._Pointer[struct_nak_compiler]) -> bool: ...
+@dll.bind(c.POINTER[struct_nak_compiler], c.POINTER[struct_nv_device_info])
+def nak_compiler_create(dev:c.POINTER[struct_nv_device_info]) -> c.POINTER[struct_nak_compiler]: ...
+@dll.bind(None, c.POINTER[struct_nak_compiler])
+def nak_compiler_destroy(nak:c.POINTER[struct_nak_compiler]) -> None: ...
+@dll.bind(uint64_t, c.POINTER[struct_nak_compiler])
+def nak_debug_flags(nak:c.POINTER[struct_nak_compiler]) -> uint64_t: ...
+@dll.bind(c.POINTER[struct_nir_shader_compiler_options], c.POINTER[struct_nak_compiler])
+def nak_nir_options(nak:c.POINTER[struct_nak_compiler]) -> c.POINTER[struct_nir_shader_compiler_options]: ...
+@dll.bind(None, c.POINTER[nir_shader], c.POINTER[struct_nak_compiler])
+def nak_preprocess_nir(nir:c.POINTER[nir_shader], nak:c.POINTER[struct_nak_compiler]) -> None: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], c.POINTER[struct_nak_compiler])
+def nak_nir_lower_image_addrs(nir:c.POINTER[nir_shader], nak:c.POINTER[struct_nak_compiler]) -> bool: ...
 @c.record
 class struct_nak_sample_location(c.Struct):
   SIZE = 1
@@ -2798,19 +2798,19 @@ class struct_nak_fs_key(c.Struct):
   sample_locations_offset: int
   sample_masks_offset: int
 struct_nak_fs_key.register_fields([('zs_self_dep', ctypes.c_bool, 0), ('force_sample_shading', ctypes.c_bool, 1), ('uses_underestimate', ctypes.c_bool, 2), ('sample_info_cb', uint8_t, 3), ('sample_locations_offset', uint32_t, 4), ('sample_masks_offset', uint32_t, 8)])
-@dll.bind(None, ctypes.POINTER(nir_shader), ctypes.POINTER(struct_nak_compiler), ctypes.c_uint32, ctypes.POINTER(struct_nak_fs_key))
-def nak_postprocess_nir(nir:ctypes._Pointer[nir_shader], nak:ctypes._Pointer[struct_nak_compiler], robust2_modes:ctypes.c_uint32, fs_key:ctypes._Pointer[struct_nak_fs_key]) -> None: ...
+@dll.bind(None, c.POINTER[nir_shader], c.POINTER[struct_nak_compiler], ctypes.c_uint32, c.POINTER[struct_nak_fs_key])
+def nak_postprocess_nir(nir:c.POINTER[nir_shader], nak:c.POINTER[struct_nak_compiler], robust2_modes:ctypes.c_uint32, fs_key:c.POINTER[struct_nak_fs_key]) -> None: ...
 enum_nak_ts_domain: dict[int, str] = {(NAK_TS_DOMAIN_ISOLINE:=0): 'NAK_TS_DOMAIN_ISOLINE', (NAK_TS_DOMAIN_TRIANGLE:=1): 'NAK_TS_DOMAIN_TRIANGLE', (NAK_TS_DOMAIN_QUAD:=2): 'NAK_TS_DOMAIN_QUAD'}
 enum_nak_ts_spacing: dict[int, str] = {(NAK_TS_SPACING_INTEGER:=0): 'NAK_TS_SPACING_INTEGER', (NAK_TS_SPACING_FRACT_ODD:=1): 'NAK_TS_SPACING_FRACT_ODD', (NAK_TS_SPACING_FRACT_EVEN:=2): 'NAK_TS_SPACING_FRACT_EVEN'}
 enum_nak_ts_prims: dict[int, str] = {(NAK_TS_PRIMS_POINTS:=0): 'NAK_TS_PRIMS_POINTS', (NAK_TS_PRIMS_LINES:=1): 'NAK_TS_PRIMS_LINES', (NAK_TS_PRIMS_TRIANGLES_CW:=2): 'NAK_TS_PRIMS_TRIANGLES_CW', (NAK_TS_PRIMS_TRIANGLES_CCW:=3): 'NAK_TS_PRIMS_TRIANGLES_CCW'}
 @c.record
 class struct_nak_xfb_info(c.Struct):
   SIZE = 536
-  stride: ctypes.Array[ctypes.c_uint32]
-  stream: ctypes.Array[ctypes.c_ubyte]
-  attr_count: ctypes.Array[ctypes.c_ubyte]
-  attr_index: ctypes.Array[(ctypes.c_ubyte * 128)]
-struct_nak_xfb_info.register_fields([('stride', (uint32_t * 4), 0), ('stream', (uint8_t * 4), 16), ('attr_count', (uint8_t * 4), 20), ('attr_index', ((uint8_t * 128) * 4), 24)])
+  stride: c.Array[ctypes.c_uint32, Literal[4]]
+  stream: c.Array[ctypes.c_ubyte, Literal[4]]
+  attr_count: c.Array[ctypes.c_ubyte, Literal[4]]
+  attr_index: c.Array[c.Array[ctypes.c_ubyte, Literal[128]], Literal[4]]
+struct_nak_xfb_info.register_fields([('stride', c.Array[uint32_t, Literal[4]], 0), ('stream', c.Array[uint8_t, Literal[4]], 16), ('attr_count', c.Array[uint8_t, Literal[4]], 20), ('attr_index', c.Array[c.Array[uint8_t, Literal[128]], Literal[4]], 24)])
 @c.record
 class struct_nak_shader_info(c.Struct):
   SIZE = 728
@@ -2831,16 +2831,16 @@ class struct_nak_shader_info(c.Struct):
   cs: struct_nak_shader_info_cs
   fs: struct_nak_shader_info_fs
   ts: struct_nak_shader_info_ts
-  _pad: ctypes.Array[ctypes.c_ubyte]
+  _pad: c.Array[ctypes.c_ubyte, Literal[12]]
   vtg: struct_nak_shader_info_vtg
-  hdr: ctypes.Array[ctypes.c_uint32]
+  hdr: c.Array[ctypes.c_uint32, Literal[32]]
 @c.record
 class struct_nak_shader_info_cs(c.Struct):
   SIZE = 12
-  local_size: ctypes.Array[ctypes.c_uint16]
+  local_size: c.Array[ctypes.c_uint16, Literal[3]]
   smem_size: int
-  _pad: ctypes.Array[ctypes.c_ubyte]
-struct_nak_shader_info_cs.register_fields([('local_size', (uint16_t * 3), 0), ('smem_size', uint16_t, 6), ('_pad', (uint8_t * 4), 8)])
+  _pad: c.Array[ctypes.c_ubyte, Literal[4]]
+struct_nak_shader_info_cs.register_fields([('local_size', c.Array[uint16_t, Literal[3]], 0), ('smem_size', uint16_t, 6), ('_pad', c.Array[uint8_t, Literal[4]], 8)])
 @c.record
 class struct_nak_shader_info_fs(c.Struct):
   SIZE = 12
@@ -2849,16 +2849,16 @@ class struct_nak_shader_info_fs(c.Struct):
   post_depth_coverage: bool
   uses_sample_shading: bool
   early_fragment_tests: bool
-  _pad: ctypes.Array[ctypes.c_ubyte]
-struct_nak_shader_info_fs.register_fields([('writes_depth', ctypes.c_bool, 0), ('reads_sample_mask', ctypes.c_bool, 1), ('post_depth_coverage', ctypes.c_bool, 2), ('uses_sample_shading', ctypes.c_bool, 3), ('early_fragment_tests', ctypes.c_bool, 4), ('_pad', (uint8_t * 7), 5)])
+  _pad: c.Array[ctypes.c_ubyte, Literal[7]]
+struct_nak_shader_info_fs.register_fields([('writes_depth', ctypes.c_bool, 0), ('reads_sample_mask', ctypes.c_bool, 1), ('post_depth_coverage', ctypes.c_bool, 2), ('uses_sample_shading', ctypes.c_bool, 3), ('early_fragment_tests', ctypes.c_bool, 4), ('_pad', c.Array[uint8_t, Literal[7]], 5)])
 @c.record
 class struct_nak_shader_info_ts(c.Struct):
   SIZE = 12
   domain: int
   spacing: int
   prims: int
-  _pad: ctypes.Array[ctypes.c_ubyte]
-struct_nak_shader_info_ts.register_fields([('domain', ctypes.c_ubyte, 0), ('spacing', ctypes.c_ubyte, 1), ('prims', ctypes.c_ubyte, 2), ('_pad', (uint8_t * 9), 3)])
+  _pad: c.Array[ctypes.c_ubyte, Literal[9]]
+struct_nak_shader_info_ts.register_fields([('domain', ctypes.c_ubyte, 0), ('spacing', ctypes.c_ubyte, 1), ('prims', ctypes.c_ubyte, 2), ('_pad', c.Array[uint8_t, Literal[9]], 3)])
 @c.record
 class struct_nak_shader_info_vtg(c.Struct):
   SIZE = 544
@@ -2867,22 +2867,22 @@ class struct_nak_shader_info_vtg(c.Struct):
   writes_vprs_table_index: bool
   clip_enable: int
   cull_enable: int
-  _pad: ctypes.Array[ctypes.c_ubyte]
+  _pad: c.Array[ctypes.c_ubyte, Literal[3]]
   xfb: struct_nak_xfb_info
-struct_nak_shader_info_vtg.register_fields([('writes_layer', ctypes.c_bool, 0), ('writes_point_size', ctypes.c_bool, 1), ('writes_vprs_table_index', ctypes.c_bool, 2), ('clip_enable', uint8_t, 3), ('cull_enable', uint8_t, 4), ('_pad', (uint8_t * 3), 5), ('xfb', struct_nak_xfb_info, 8)])
-struct_nak_shader_info.register_fields([('stage', gl_shader_stage, 0), ('sm', uint8_t, 4), ('num_gprs', uint8_t, 5), ('num_control_barriers', uint8_t, 6), ('_pad0', uint8_t, 7), ('max_warps_per_sm', uint32_t, 8), ('num_instrs', uint32_t, 12), ('num_static_cycles', uint32_t, 16), ('num_spills_to_mem', uint32_t, 20), ('num_fills_from_mem', uint32_t, 24), ('num_spills_to_reg', uint32_t, 28), ('num_fills_from_reg', uint32_t, 32), ('slm_size', uint32_t, 36), ('crs_size', uint32_t, 40), ('cs', struct_nak_shader_info_cs, 44), ('fs', struct_nak_shader_info_fs, 44), ('ts', struct_nak_shader_info_ts, 44), ('_pad', (uint8_t * 12), 44), ('vtg', struct_nak_shader_info_vtg, 56), ('hdr', (uint32_t * 32), 600)])
+struct_nak_shader_info_vtg.register_fields([('writes_layer', ctypes.c_bool, 0), ('writes_point_size', ctypes.c_bool, 1), ('writes_vprs_table_index', ctypes.c_bool, 2), ('clip_enable', uint8_t, 3), ('cull_enable', uint8_t, 4), ('_pad', c.Array[uint8_t, Literal[3]], 5), ('xfb', struct_nak_xfb_info, 8)])
+struct_nak_shader_info.register_fields([('stage', gl_shader_stage, 0), ('sm', uint8_t, 4), ('num_gprs', uint8_t, 5), ('num_control_barriers', uint8_t, 6), ('_pad0', uint8_t, 7), ('max_warps_per_sm', uint32_t, 8), ('num_instrs', uint32_t, 12), ('num_static_cycles', uint32_t, 16), ('num_spills_to_mem', uint32_t, 20), ('num_fills_from_mem', uint32_t, 24), ('num_spills_to_reg', uint32_t, 28), ('num_fills_from_reg', uint32_t, 32), ('slm_size', uint32_t, 36), ('crs_size', uint32_t, 40), ('cs', struct_nak_shader_info_cs, 44), ('fs', struct_nak_shader_info_fs, 44), ('ts', struct_nak_shader_info_ts, 44), ('_pad', c.Array[uint8_t, Literal[12]], 44), ('vtg', struct_nak_shader_info_vtg, 56), ('hdr', c.Array[uint32_t, Literal[32]], 600)])
 @c.record
 class struct_nak_shader_bin(c.Struct):
   SIZE = 752
   info: struct_nak_shader_info
   code_size: int
-  code: int|None
-  asm_str: ctypes._Pointer[ctypes.c_char]
-struct_nak_shader_bin.register_fields([('info', struct_nak_shader_info, 0), ('code_size', uint32_t, 728), ('code', ctypes.c_void_p, 736), ('asm_str', ctypes.POINTER(ctypes.c_char), 744)])
-@dll.bind(None, ctypes.POINTER(struct_nak_shader_bin))
-def nak_shader_bin_destroy(bin:ctypes._Pointer[struct_nak_shader_bin]) -> None: ...
-@dll.bind(ctypes.POINTER(struct_nak_shader_bin), ctypes.POINTER(nir_shader), ctypes.c_bool, ctypes.POINTER(struct_nak_compiler), ctypes.c_uint32, ctypes.POINTER(struct_nak_fs_key))
-def nak_compile_shader(nir:ctypes._Pointer[nir_shader], dump_asm:bool, nak:ctypes._Pointer[struct_nak_compiler], robust2_modes:ctypes.c_uint32, fs_key:ctypes._Pointer[struct_nak_fs_key]) -> ctypes._Pointer[struct_nak_shader_bin]: ...
+  code: ctypes.c_void_p
+  asm_str: c.POINTER[ctypes.c_char]
+struct_nak_shader_bin.register_fields([('info', struct_nak_shader_info, 0), ('code_size', uint32_t, 728), ('code', ctypes.c_void_p, 736), ('asm_str', c.POINTER[ctypes.c_char], 744)])
+@dll.bind(None, c.POINTER[struct_nak_shader_bin])
+def nak_shader_bin_destroy(bin:c.POINTER[struct_nak_shader_bin]) -> None: ...
+@dll.bind(c.POINTER[struct_nak_shader_bin], c.POINTER[nir_shader], ctypes.c_bool, c.POINTER[struct_nak_compiler], ctypes.c_uint32, c.POINTER[struct_nak_fs_key])
+def nak_compile_shader(nir:c.POINTER[nir_shader], dump_asm:bool, nak:c.POINTER[struct_nak_compiler], robust2_modes:ctypes.c_uint32, fs_key:c.POINTER[struct_nak_fs_key]) -> c.POINTER[struct_nak_shader_bin]: ...
 @c.record
 class struct_nak_qmd_cbuf(c.Struct):
   SIZE = 16
@@ -2896,14 +2896,14 @@ class struct_nak_qmd_info(c.Struct):
   addr: int
   smem_size: int
   smem_max: int
-  global_size: ctypes.Array[ctypes.c_uint32]
+  global_size: c.Array[ctypes.c_uint32, Literal[3]]
   num_cbufs: int
-  cbufs: ctypes.Array[struct_nak_qmd_cbuf]
-struct_nak_qmd_info.register_fields([('addr', uint64_t, 0), ('smem_size', uint16_t, 8), ('smem_max', uint16_t, 10), ('global_size', (uint32_t * 3), 12), ('num_cbufs', uint32_t, 24), ('cbufs', (struct_nak_qmd_cbuf * 8), 32)])
-@dll.bind(uint32_t, ctypes.POINTER(struct_nv_device_info))
-def nak_qmd_size_B(dev:ctypes._Pointer[struct_nv_device_info]) -> uint32_t: ...
-@dll.bind(None, ctypes.POINTER(struct_nv_device_info), ctypes.POINTER(struct_nak_shader_info), ctypes.POINTER(struct_nak_qmd_info), ctypes.c_void_p, size_t)
-def nak_fill_qmd(dev:ctypes._Pointer[struct_nv_device_info], info:ctypes._Pointer[struct_nak_shader_info], qmd_info:ctypes._Pointer[struct_nak_qmd_info], qmd_out:int|None, qmd_size:size_t) -> None: ...
+  cbufs: c.Array[struct_nak_qmd_cbuf, Literal[8]]
+struct_nak_qmd_info.register_fields([('addr', uint64_t, 0), ('smem_size', uint16_t, 8), ('smem_max', uint16_t, 10), ('global_size', c.Array[uint32_t, Literal[3]], 12), ('num_cbufs', uint32_t, 24), ('cbufs', c.Array[struct_nak_qmd_cbuf, Literal[8]], 32)])
+@dll.bind(uint32_t, c.POINTER[struct_nv_device_info])
+def nak_qmd_size_B(dev:c.POINTER[struct_nv_device_info]) -> uint32_t: ...
+@dll.bind(None, c.POINTER[struct_nv_device_info], c.POINTER[struct_nak_shader_info], c.POINTER[struct_nak_qmd_info], ctypes.c_void_p, size_t)
+def nak_fill_qmd(dev:c.POINTER[struct_nv_device_info], info:c.POINTER[struct_nak_shader_info], qmd_info:c.POINTER[struct_nak_qmd_info], qmd_out:ctypes.c_void_p, qmd_size:size_t) -> None: ...
 @c.record
 class struct_nak_qmd_dispatch_size_layout(c.Struct):
   SIZE = 12
@@ -2914,8 +2914,8 @@ class struct_nak_qmd_dispatch_size_layout(c.Struct):
   z_start: int
   z_end: int
 struct_nak_qmd_dispatch_size_layout.register_fields([('x_start', uint16_t, 0), ('x_end', uint16_t, 2), ('y_start', uint16_t, 4), ('y_end', uint16_t, 6), ('z_start', uint16_t, 8), ('z_end', uint16_t, 10)])
-@dll.bind(struct_nak_qmd_dispatch_size_layout, ctypes.POINTER(struct_nv_device_info))
-def nak_get_qmd_dispatch_size_layout(dev:ctypes._Pointer[struct_nv_device_info]) -> struct_nak_qmd_dispatch_size_layout: ...
+@dll.bind(struct_nak_qmd_dispatch_size_layout, c.POINTER[struct_nv_device_info])
+def nak_get_qmd_dispatch_size_layout(dev:c.POINTER[struct_nv_device_info]) -> struct_nak_qmd_dispatch_size_layout: ...
 @c.record
 class struct_nak_qmd_cbuf_desc_layout(c.Struct):
   SIZE = 10
@@ -2925,41 +2925,41 @@ class struct_nak_qmd_cbuf_desc_layout(c.Struct):
   addr_hi_start: int
   addr_hi_end: int
 struct_nak_qmd_cbuf_desc_layout.register_fields([('addr_shift', uint16_t, 0), ('addr_lo_start', uint16_t, 2), ('addr_lo_end', uint16_t, 4), ('addr_hi_start', uint16_t, 6), ('addr_hi_end', uint16_t, 8)])
-@dll.bind(struct_nak_qmd_cbuf_desc_layout, ctypes.POINTER(struct_nv_device_info), uint8_t)
-def nak_get_qmd_cbuf_desc_layout(dev:ctypes._Pointer[struct_nv_device_info], idx:uint8_t) -> struct_nak_qmd_cbuf_desc_layout: ...
+@dll.bind(struct_nak_qmd_cbuf_desc_layout, c.POINTER[struct_nv_device_info], uint8_t)
+def nak_get_qmd_cbuf_desc_layout(dev:c.POINTER[struct_nv_device_info], idx:uint8_t) -> struct_nak_qmd_cbuf_desc_layout: ...
 @c.record
 class struct_lp_context_ref(c.Struct):
   SIZE = 16
-  ref: ctypes._Pointer[struct_LLVMOpaqueContext]
+  ref: c.POINTER[struct_LLVMOpaqueContext]
   owned: bool
 class struct_LLVMOpaqueContext(c.Struct): pass
-LLVMContextRef: TypeAlias = ctypes.POINTER(struct_LLVMOpaqueContext)
+LLVMContextRef: TypeAlias = c.POINTER[struct_LLVMOpaqueContext]
 struct_lp_context_ref.register_fields([('ref', LLVMContextRef, 0), ('owned', ctypes.c_bool, 8)])
 lp_context_ref: TypeAlias = struct_lp_context_ref
 class struct_lp_passmgr(c.Struct): pass
 class struct_LLVMOpaqueModule(c.Struct): pass
-LLVMModuleRef: TypeAlias = ctypes.POINTER(struct_LLVMOpaqueModule)
-@dll.bind(ctypes.c_bool, LLVMModuleRef, ctypes.POINTER(ctypes.POINTER(struct_lp_passmgr)))
-def lp_passmgr_create(module:LLVMModuleRef, mgr:ctypes._Pointer[ctypes.POINTER(struct_lp_passmgr)]) -> bool: ...
+LLVMModuleRef: TypeAlias = c.POINTER[struct_LLVMOpaqueModule]
+@dll.bind(ctypes.c_bool, LLVMModuleRef, c.POINTER[c.POINTER[struct_lp_passmgr]])
+def lp_passmgr_create(module:LLVMModuleRef, mgr:c.POINTER[c.POINTER[struct_lp_passmgr]]) -> bool: ...
 class struct_LLVMOpaqueTargetMachine(c.Struct): pass
-LLVMTargetMachineRef: TypeAlias = ctypes.POINTER(struct_LLVMOpaqueTargetMachine)
-@dll.bind(None, ctypes.POINTER(struct_lp_passmgr), LLVMModuleRef, LLVMTargetMachineRef, ctypes.POINTER(ctypes.c_char))
-def lp_passmgr_run(mgr:ctypes._Pointer[struct_lp_passmgr], module:LLVMModuleRef, tm:LLVMTargetMachineRef, module_name:ctypes._Pointer[ctypes.c_char]) -> None: ...
-@dll.bind(None, ctypes.POINTER(struct_lp_passmgr))
-def lp_passmgr_dispose(mgr:ctypes._Pointer[struct_lp_passmgr]) -> None: ...
+LLVMTargetMachineRef: TypeAlias = c.POINTER[struct_LLVMOpaqueTargetMachine]
+@dll.bind(None, c.POINTER[struct_lp_passmgr], LLVMModuleRef, LLVMTargetMachineRef, c.POINTER[ctypes.c_char])
+def lp_passmgr_run(mgr:c.POINTER[struct_lp_passmgr], module:LLVMModuleRef, tm:LLVMTargetMachineRef, module_name:c.POINTER[ctypes.c_char]) -> None: ...
+@dll.bind(None, c.POINTER[struct_lp_passmgr])
+def lp_passmgr_dispose(mgr:c.POINTER[struct_lp_passmgr]) -> None: ...
 @c.record
 class struct_lp_cached_code(c.Struct):
   SIZE = 32
-  data: int|None
+  data: ctypes.c_void_p
   data_size: int
   dont_cache: bool
-  jit_obj_cache: int|None
+  jit_obj_cache: ctypes.c_void_p
 struct_lp_cached_code.register_fields([('data', ctypes.c_void_p, 0), ('data_size', size_t, 8), ('dont_cache', ctypes.c_bool, 16), ('jit_obj_cache', ctypes.c_void_p, 24)])
 class struct_lp_generated_code(c.Struct): pass
 class struct_LLVMOpaqueTargetLibraryInfotData(c.Struct): pass
-LLVMTargetLibraryInfoRef: TypeAlias = ctypes.POINTER(struct_LLVMOpaqueTargetLibraryInfotData)
-@dll.bind(LLVMTargetLibraryInfoRef, ctypes.POINTER(ctypes.c_char))
-def gallivm_create_target_library_info(triple:ctypes._Pointer[ctypes.c_char]) -> LLVMTargetLibraryInfoRef: ...
+LLVMTargetLibraryInfoRef: TypeAlias = c.POINTER[struct_LLVMOpaqueTargetLibraryInfotData]
+@dll.bind(LLVMTargetLibraryInfoRef, c.POINTER[ctypes.c_char])
+def gallivm_create_target_library_info(triple:c.POINTER[ctypes.c_char]) -> LLVMTargetLibraryInfoRef: ...
 @dll.bind(None, LLVMTargetLibraryInfoRef)
 def gallivm_dispose_target_library_info(library_info:LLVMTargetLibraryInfoRef) -> None: ...
 @dll.bind(None)
@@ -2967,25 +2967,25 @@ def lp_set_target_options() -> None: ...
 @dll.bind(None)
 def lp_bld_init_native_targets() -> None: ...
 class struct_LLVMOpaqueExecutionEngine(c.Struct): pass
-LLVMExecutionEngineRef: TypeAlias = ctypes.POINTER(struct_LLVMOpaqueExecutionEngine)
+LLVMExecutionEngineRef: TypeAlias = c.POINTER[struct_LLVMOpaqueExecutionEngine]
 class struct_LLVMOpaqueMCJITMemoryManager(c.Struct): pass
-LLVMMCJITMemoryManagerRef: TypeAlias = ctypes.POINTER(struct_LLVMOpaqueMCJITMemoryManager)
-@dll.bind(ctypes.c_int32, ctypes.POINTER(LLVMExecutionEngineRef), ctypes.POINTER(ctypes.POINTER(struct_lp_generated_code)), ctypes.POINTER(struct_lp_cached_code), LLVMModuleRef, LLVMMCJITMemoryManagerRef, ctypes.c_uint32, ctypes.POINTER(ctypes.POINTER(ctypes.c_char)))
-def lp_build_create_jit_compiler_for_module(OutJIT:ctypes._Pointer[LLVMExecutionEngineRef], OutCode:ctypes._Pointer[ctypes.POINTER(struct_lp_generated_code)], cache_out:ctypes._Pointer[struct_lp_cached_code], M:LLVMModuleRef, MM:LLVMMCJITMemoryManagerRef, OptLevel:int, OutError:ctypes._Pointer[ctypes.POINTER(ctypes.c_char)]) -> int: ...
-@dll.bind(None, ctypes.POINTER(struct_lp_generated_code))
-def lp_free_generated_code(code:ctypes._Pointer[struct_lp_generated_code]) -> None: ...
+LLVMMCJITMemoryManagerRef: TypeAlias = c.POINTER[struct_LLVMOpaqueMCJITMemoryManager]
+@dll.bind(ctypes.c_int32, c.POINTER[LLVMExecutionEngineRef], c.POINTER[c.POINTER[struct_lp_generated_code]], c.POINTER[struct_lp_cached_code], LLVMModuleRef, LLVMMCJITMemoryManagerRef, ctypes.c_uint32, c.POINTER[c.POINTER[ctypes.c_char]])
+def lp_build_create_jit_compiler_for_module(OutJIT:c.POINTER[LLVMExecutionEngineRef], OutCode:c.POINTER[c.POINTER[struct_lp_generated_code]], cache_out:c.POINTER[struct_lp_cached_code], M:LLVMModuleRef, MM:LLVMMCJITMemoryManagerRef, OptLevel:int, OutError:c.POINTER[c.POINTER[ctypes.c_char]]) -> int: ...
+@dll.bind(None, c.POINTER[struct_lp_generated_code])
+def lp_free_generated_code(code:c.POINTER[struct_lp_generated_code]) -> None: ...
 @dll.bind(LLVMMCJITMemoryManagerRef)
 def lp_get_default_memory_manager() -> LLVMMCJITMemoryManagerRef: ...
 @dll.bind(None, LLVMMCJITMemoryManagerRef)
 def lp_free_memory_manager(memorymgr:LLVMMCJITMemoryManagerRef) -> None: ...
 class struct_LLVMOpaqueValue(c.Struct): pass
-LLVMValueRef: TypeAlias = ctypes.POINTER(struct_LLVMOpaqueValue)
+LLVMValueRef: TypeAlias = c.POINTER[struct_LLVMOpaqueValue]
 @dll.bind(LLVMValueRef, LLVMValueRef)
 def lp_get_called_value(call:LLVMValueRef) -> LLVMValueRef: ...
 @dll.bind(ctypes.c_bool, LLVMValueRef)
 def lp_is_function(v:LLVMValueRef) -> bool: ...
 @dll.bind(None, ctypes.c_void_p)
-def lp_free_objcache(objcache:int|None) -> None: ...
+def lp_free_objcache(objcache:ctypes.c_void_p) -> None: ...
 @dll.bind(None, LLVMModuleRef, ctypes.c_uint32)
 def lp_set_module_stack_alignment_override(M:LLVMModuleRef, align:int) -> None: ...
 try: lp_native_vector_width = ctypes.c_uint32.in_dll(dll, 'lp_native_vector_width') # type: ignore
@@ -3005,59 +3005,59 @@ struct_lp_type.register_fields([('floating', ctypes.c_uint32, 0, 1, 0), ('fixed'
 @c.record
 class struct_lp_build_context(c.Struct):
   SIZE = 72
-  gallivm: ctypes._Pointer[struct_gallivm_state]
+  gallivm: c.POINTER[struct_gallivm_state]
   type: struct_lp_type
-  elem_type: ctypes._Pointer[struct_LLVMOpaqueType]
-  vec_type: ctypes._Pointer[struct_LLVMOpaqueType]
-  int_elem_type: ctypes._Pointer[struct_LLVMOpaqueType]
-  int_vec_type: ctypes._Pointer[struct_LLVMOpaqueType]
-  undef: ctypes._Pointer[struct_LLVMOpaqueValue]
-  zero: ctypes._Pointer[struct_LLVMOpaqueValue]
-  one: ctypes._Pointer[struct_LLVMOpaqueValue]
+  elem_type: c.POINTER[struct_LLVMOpaqueType]
+  vec_type: c.POINTER[struct_LLVMOpaqueType]
+  int_elem_type: c.POINTER[struct_LLVMOpaqueType]
+  int_vec_type: c.POINTER[struct_LLVMOpaqueType]
+  undef: c.POINTER[struct_LLVMOpaqueValue]
+  zero: c.POINTER[struct_LLVMOpaqueValue]
+  one: c.POINTER[struct_LLVMOpaqueValue]
 @c.record
 class struct_gallivm_state(c.Struct):
   SIZE = 192
-  module_name: ctypes._Pointer[ctypes.c_char]
-  file_name: ctypes._Pointer[ctypes.c_char]
-  module: ctypes._Pointer[struct_LLVMOpaqueModule]
-  target: ctypes._Pointer[struct_LLVMOpaqueTargetData]
-  engine: ctypes._Pointer[struct_LLVMOpaqueExecutionEngine]
-  passmgr: ctypes._Pointer[struct_lp_passmgr]
-  memorymgr: ctypes._Pointer[struct_LLVMOpaqueMCJITMemoryManager]
-  code: ctypes._Pointer[struct_lp_generated_code]
-  context: ctypes._Pointer[struct_LLVMOpaqueContext]
-  builder: ctypes._Pointer[struct_LLVMOpaqueBuilder]
-  di_builder: ctypes._Pointer[struct_LLVMOpaqueDIBuilder]
-  cache: ctypes._Pointer[struct_lp_cached_code]
+  module_name: c.POINTER[ctypes.c_char]
+  file_name: c.POINTER[ctypes.c_char]
+  module: c.POINTER[struct_LLVMOpaqueModule]
+  target: c.POINTER[struct_LLVMOpaqueTargetData]
+  engine: c.POINTER[struct_LLVMOpaqueExecutionEngine]
+  passmgr: c.POINTER[struct_lp_passmgr]
+  memorymgr: c.POINTER[struct_LLVMOpaqueMCJITMemoryManager]
+  code: c.POINTER[struct_lp_generated_code]
+  context: c.POINTER[struct_LLVMOpaqueContext]
+  builder: c.POINTER[struct_LLVMOpaqueBuilder]
+  di_builder: c.POINTER[struct_LLVMOpaqueDIBuilder]
+  cache: c.POINTER[struct_lp_cached_code]
   compiled: int
-  coro_malloc_hook: ctypes._Pointer[struct_LLVMOpaqueValue]
-  coro_free_hook: ctypes._Pointer[struct_LLVMOpaqueValue]
-  debug_printf_hook: ctypes._Pointer[struct_LLVMOpaqueValue]
-  coro_malloc_hook_type: ctypes._Pointer[struct_LLVMOpaqueType]
-  coro_free_hook_type: ctypes._Pointer[struct_LLVMOpaqueType]
-  di_function: ctypes._Pointer[struct_LLVMOpaqueMetadata]
-  file: ctypes._Pointer[struct_LLVMOpaqueMetadata]
-  get_time_hook: ctypes._Pointer[struct_LLVMOpaqueValue]
-  texture_descriptor: ctypes._Pointer[struct_LLVMOpaqueValue]
-  texture_dynamic_state: ctypes._Pointer[struct_lp_jit_texture]
-  sampler_descriptor: ctypes._Pointer[struct_LLVMOpaqueValue]
+  coro_malloc_hook: c.POINTER[struct_LLVMOpaqueValue]
+  coro_free_hook: c.POINTER[struct_LLVMOpaqueValue]
+  debug_printf_hook: c.POINTER[struct_LLVMOpaqueValue]
+  coro_malloc_hook_type: c.POINTER[struct_LLVMOpaqueType]
+  coro_free_hook_type: c.POINTER[struct_LLVMOpaqueType]
+  di_function: c.POINTER[struct_LLVMOpaqueMetadata]
+  file: c.POINTER[struct_LLVMOpaqueMetadata]
+  get_time_hook: c.POINTER[struct_LLVMOpaqueValue]
+  texture_descriptor: c.POINTER[struct_LLVMOpaqueValue]
+  texture_dynamic_state: c.POINTER[struct_lp_jit_texture]
+  sampler_descriptor: c.POINTER[struct_LLVMOpaqueValue]
 class struct_LLVMOpaqueType(c.Struct): pass
-LLVMTypeRef: TypeAlias = ctypes.POINTER(struct_LLVMOpaqueType)
-struct_lp_build_context.register_fields([('gallivm', ctypes.POINTER(struct_gallivm_state), 0), ('type', struct_lp_type, 8), ('elem_type', LLVMTypeRef, 16), ('vec_type', LLVMTypeRef, 24), ('int_elem_type', LLVMTypeRef, 32), ('int_vec_type', LLVMTypeRef, 40), ('undef', LLVMValueRef, 48), ('zero', LLVMValueRef, 56), ('one', LLVMValueRef, 64)])
-@dll.bind(LLVMTypeRef, ctypes.POINTER(struct_gallivm_state), struct_lp_type)
-def lp_build_elem_type(gallivm:ctypes._Pointer[struct_gallivm_state], type:struct_lp_type) -> LLVMTypeRef: ...
-@dll.bind(LLVMTypeRef, ctypes.POINTER(struct_gallivm_state), struct_lp_type)
-def lp_build_vec_type(gallivm:ctypes._Pointer[struct_gallivm_state], type:struct_lp_type) -> LLVMTypeRef: ...
+LLVMTypeRef: TypeAlias = c.POINTER[struct_LLVMOpaqueType]
+struct_lp_build_context.register_fields([('gallivm', c.POINTER[struct_gallivm_state], 0), ('type', struct_lp_type, 8), ('elem_type', LLVMTypeRef, 16), ('vec_type', LLVMTypeRef, 24), ('int_elem_type', LLVMTypeRef, 32), ('int_vec_type', LLVMTypeRef, 40), ('undef', LLVMValueRef, 48), ('zero', LLVMValueRef, 56), ('one', LLVMValueRef, 64)])
+@dll.bind(LLVMTypeRef, c.POINTER[struct_gallivm_state], struct_lp_type)
+def lp_build_elem_type(gallivm:c.POINTER[struct_gallivm_state], type:struct_lp_type) -> LLVMTypeRef: ...
+@dll.bind(LLVMTypeRef, c.POINTER[struct_gallivm_state], struct_lp_type)
+def lp_build_vec_type(gallivm:c.POINTER[struct_gallivm_state], type:struct_lp_type) -> LLVMTypeRef: ...
 @dll.bind(ctypes.c_bool, struct_lp_type, LLVMTypeRef)
 def lp_check_elem_type(type:struct_lp_type, elem_type:LLVMTypeRef) -> bool: ...
 @dll.bind(ctypes.c_bool, struct_lp_type, LLVMTypeRef)
 def lp_check_vec_type(type:struct_lp_type, vec_type:LLVMTypeRef) -> bool: ...
 @dll.bind(ctypes.c_bool, struct_lp_type, LLVMValueRef)
 def lp_check_value(type:struct_lp_type, val:LLVMValueRef) -> bool: ...
-@dll.bind(LLVMTypeRef, ctypes.POINTER(struct_gallivm_state), struct_lp_type)
-def lp_build_int_elem_type(gallivm:ctypes._Pointer[struct_gallivm_state], type:struct_lp_type) -> LLVMTypeRef: ...
-@dll.bind(LLVMTypeRef, ctypes.POINTER(struct_gallivm_state), struct_lp_type)
-def lp_build_int_vec_type(gallivm:ctypes._Pointer[struct_gallivm_state], type:struct_lp_type) -> LLVMTypeRef: ...
+@dll.bind(LLVMTypeRef, c.POINTER[struct_gallivm_state], struct_lp_type)
+def lp_build_int_elem_type(gallivm:c.POINTER[struct_gallivm_state], type:struct_lp_type) -> LLVMTypeRef: ...
+@dll.bind(LLVMTypeRef, c.POINTER[struct_gallivm_state], struct_lp_type)
+def lp_build_int_vec_type(gallivm:c.POINTER[struct_gallivm_state], type:struct_lp_type) -> LLVMTypeRef: ...
 @dll.bind(struct_lp_type, struct_lp_type)
 def lp_elem_type(type:struct_lp_type) -> struct_lp_type: ...
 @dll.bind(struct_lp_type, struct_lp_type)
@@ -3069,232 +3069,232 @@ def lp_wider_type(type:struct_lp_type) -> struct_lp_type: ...
 @dll.bind(ctypes.c_uint32, LLVMTypeRef)
 def lp_sizeof_llvm_type(t:LLVMTypeRef) -> int: ...
 LLVMTypeKind: dict[int, str] = {(LLVMVoidTypeKind:=0): 'LLVMVoidTypeKind', (LLVMHalfTypeKind:=1): 'LLVMHalfTypeKind', (LLVMFloatTypeKind:=2): 'LLVMFloatTypeKind', (LLVMDoubleTypeKind:=3): 'LLVMDoubleTypeKind', (LLVMX86_FP80TypeKind:=4): 'LLVMX86_FP80TypeKind', (LLVMFP128TypeKind:=5): 'LLVMFP128TypeKind', (LLVMPPC_FP128TypeKind:=6): 'LLVMPPC_FP128TypeKind', (LLVMLabelTypeKind:=7): 'LLVMLabelTypeKind', (LLVMIntegerTypeKind:=8): 'LLVMIntegerTypeKind', (LLVMFunctionTypeKind:=9): 'LLVMFunctionTypeKind', (LLVMStructTypeKind:=10): 'LLVMStructTypeKind', (LLVMArrayTypeKind:=11): 'LLVMArrayTypeKind', (LLVMPointerTypeKind:=12): 'LLVMPointerTypeKind', (LLVMVectorTypeKind:=13): 'LLVMVectorTypeKind', (LLVMMetadataTypeKind:=14): 'LLVMMetadataTypeKind', (LLVMTokenTypeKind:=16): 'LLVMTokenTypeKind', (LLVMScalableVectorTypeKind:=17): 'LLVMScalableVectorTypeKind', (LLVMBFloatTypeKind:=18): 'LLVMBFloatTypeKind', (LLVMX86_AMXTypeKind:=19): 'LLVMX86_AMXTypeKind', (LLVMTargetExtTypeKind:=20): 'LLVMTargetExtTypeKind'}
-@dll.bind(ctypes.POINTER(ctypes.c_char), ctypes.c_uint32)
-def lp_typekind_name(t:ctypes.c_uint32) -> ctypes._Pointer[ctypes.c_char]: ...
+@dll.bind(c.POINTER[ctypes.c_char], ctypes.c_uint32)
+def lp_typekind_name(t:ctypes.c_uint32) -> c.POINTER[ctypes.c_char]: ...
 @dll.bind(None, LLVMTypeRef)
 def lp_dump_llvmtype(t:LLVMTypeRef) -> None: ...
-@dll.bind(None, ctypes.POINTER(struct_lp_build_context), ctypes.POINTER(struct_gallivm_state), struct_lp_type)
-def lp_build_context_init(bld:ctypes._Pointer[struct_lp_build_context], gallivm:ctypes._Pointer[struct_gallivm_state], type:struct_lp_type) -> None: ...
+@dll.bind(None, c.POINTER[struct_lp_build_context], c.POINTER[struct_gallivm_state], struct_lp_type)
+def lp_build_context_init(bld:c.POINTER[struct_lp_build_context], gallivm:c.POINTER[struct_gallivm_state], type:struct_lp_type) -> None: ...
 @dll.bind(ctypes.c_uint32, LLVMModuleRef)
 def lp_build_count_ir_module(module:LLVMModuleRef) -> int: ...
 @c.record
 class struct_lp_jit_texture(c.Struct):
   SIZE = 216
-  base: int|None
+  base: ctypes.c_void_p
   width: int
   height: int
   depth: int
-  row_stride: ctypes.Array[ctypes.c_uint32]
-  img_stride: ctypes.Array[ctypes.c_uint32]
-  residency: int|None
+  row_stride: c.Array[ctypes.c_uint32, Literal[16]]
+  img_stride: c.Array[ctypes.c_uint32, Literal[16]]
+  residency: ctypes.c_void_p
   first_level: int
   last_level: int
-  mip_offsets: ctypes.Array[ctypes.c_uint32]
+  mip_offsets: c.Array[ctypes.c_uint32, Literal[16]]
   sampler_index: int
 class struct_LLVMOpaqueTargetData(c.Struct): pass
-LLVMTargetDataRef: TypeAlias = ctypes.POINTER(struct_LLVMOpaqueTargetData)
+LLVMTargetDataRef: TypeAlias = c.POINTER[struct_LLVMOpaqueTargetData]
 class struct_LLVMOpaqueBuilder(c.Struct): pass
-LLVMBuilderRef: TypeAlias = ctypes.POINTER(struct_LLVMOpaqueBuilder)
+LLVMBuilderRef: TypeAlias = c.POINTER[struct_LLVMOpaqueBuilder]
 class struct_LLVMOpaqueDIBuilder(c.Struct): pass
-LLVMDIBuilderRef: TypeAlias = ctypes.POINTER(struct_LLVMOpaqueDIBuilder)
+LLVMDIBuilderRef: TypeAlias = c.POINTER[struct_LLVMOpaqueDIBuilder]
 class struct_LLVMOpaqueMetadata(c.Struct): pass
-LLVMMetadataRef: TypeAlias = ctypes.POINTER(struct_LLVMOpaqueMetadata)
-struct_gallivm_state.register_fields([('module_name', ctypes.POINTER(ctypes.c_char), 0), ('file_name', ctypes.POINTER(ctypes.c_char), 8), ('module', LLVMModuleRef, 16), ('target', LLVMTargetDataRef, 24), ('engine', LLVMExecutionEngineRef, 32), ('passmgr', ctypes.POINTER(struct_lp_passmgr), 40), ('memorymgr', LLVMMCJITMemoryManagerRef, 48), ('code', ctypes.POINTER(struct_lp_generated_code), 56), ('context', LLVMContextRef, 64), ('builder', LLVMBuilderRef, 72), ('di_builder', LLVMDIBuilderRef, 80), ('cache', ctypes.POINTER(struct_lp_cached_code), 88), ('compiled', ctypes.c_uint32, 96), ('coro_malloc_hook', LLVMValueRef, 104), ('coro_free_hook', LLVMValueRef, 112), ('debug_printf_hook', LLVMValueRef, 120), ('coro_malloc_hook_type', LLVMTypeRef, 128), ('coro_free_hook_type', LLVMTypeRef, 136), ('di_function', LLVMMetadataRef, 144), ('file', LLVMMetadataRef, 152), ('get_time_hook', LLVMValueRef, 160), ('texture_descriptor', LLVMValueRef, 168), ('texture_dynamic_state', ctypes.POINTER(struct_lp_jit_texture), 176), ('sampler_descriptor', LLVMValueRef, 184)])
+LLVMMetadataRef: TypeAlias = c.POINTER[struct_LLVMOpaqueMetadata]
+struct_gallivm_state.register_fields([('module_name', c.POINTER[ctypes.c_char], 0), ('file_name', c.POINTER[ctypes.c_char], 8), ('module', LLVMModuleRef, 16), ('target', LLVMTargetDataRef, 24), ('engine', LLVMExecutionEngineRef, 32), ('passmgr', c.POINTER[struct_lp_passmgr], 40), ('memorymgr', LLVMMCJITMemoryManagerRef, 48), ('code', c.POINTER[struct_lp_generated_code], 56), ('context', LLVMContextRef, 64), ('builder', LLVMBuilderRef, 72), ('di_builder', LLVMDIBuilderRef, 80), ('cache', c.POINTER[struct_lp_cached_code], 88), ('compiled', ctypes.c_uint32, 96), ('coro_malloc_hook', LLVMValueRef, 104), ('coro_free_hook', LLVMValueRef, 112), ('debug_printf_hook', LLVMValueRef, 120), ('coro_malloc_hook_type', LLVMTypeRef, 128), ('coro_free_hook_type', LLVMTypeRef, 136), ('di_function', LLVMMetadataRef, 144), ('file', LLVMMetadataRef, 152), ('get_time_hook', LLVMValueRef, 160), ('texture_descriptor', LLVMValueRef, 168), ('texture_dynamic_state', c.POINTER[struct_lp_jit_texture], 176), ('sampler_descriptor', LLVMValueRef, 184)])
 @dll.bind(ctypes.c_uint32)
 def lp_build_init_native_width() -> int: ...
 @dll.bind(ctypes.c_bool)
 def lp_build_init() -> bool: ...
-@dll.bind(ctypes.POINTER(struct_gallivm_state), ctypes.POINTER(ctypes.c_char), ctypes.POINTER(lp_context_ref), ctypes.POINTER(struct_lp_cached_code))
-def gallivm_create(name:ctypes._Pointer[ctypes.c_char], context:ctypes._Pointer[lp_context_ref], cache:ctypes._Pointer[struct_lp_cached_code]) -> ctypes._Pointer[struct_gallivm_state]: ...
-@dll.bind(None, ctypes.POINTER(struct_gallivm_state))
-def gallivm_destroy(gallivm:ctypes._Pointer[struct_gallivm_state]) -> None: ...
-@dll.bind(None, ctypes.POINTER(struct_gallivm_state))
-def gallivm_free_ir(gallivm:ctypes._Pointer[struct_gallivm_state]) -> None: ...
-@dll.bind(None, ctypes.POINTER(struct_gallivm_state), LLVMValueRef)
-def gallivm_verify_function(gallivm:ctypes._Pointer[struct_gallivm_state], func:LLVMValueRef) -> None: ...
-@dll.bind(None, ctypes.POINTER(struct_gallivm_state), LLVMValueRef, ctypes.c_void_p)
-def gallivm_add_global_mapping(gallivm:ctypes._Pointer[struct_gallivm_state], sym:LLVMValueRef, addr:int|None) -> None: ...
-@dll.bind(None, ctypes.POINTER(struct_gallivm_state))
-def gallivm_compile_module(gallivm:ctypes._Pointer[struct_gallivm_state]) -> None: ...
-func_pointer: TypeAlias = ctypes.CFUNCTYPE(None, )
-@dll.bind(func_pointer, ctypes.POINTER(struct_gallivm_state), LLVMValueRef, ctypes.POINTER(ctypes.c_char))
-def gallivm_jit_function(gallivm:ctypes._Pointer[struct_gallivm_state], func:LLVMValueRef, func_name:ctypes._Pointer[ctypes.c_char]) -> func_pointer: ...
-@dll.bind(None, ctypes.POINTER(struct_gallivm_state), LLVMValueRef)
-def gallivm_stub_func(gallivm:ctypes._Pointer[struct_gallivm_state], func:LLVMValueRef) -> None: ...
+@dll.bind(c.POINTER[struct_gallivm_state], c.POINTER[ctypes.c_char], c.POINTER[lp_context_ref], c.POINTER[struct_lp_cached_code])
+def gallivm_create(name:c.POINTER[ctypes.c_char], context:c.POINTER[lp_context_ref], cache:c.POINTER[struct_lp_cached_code]) -> c.POINTER[struct_gallivm_state]: ...
+@dll.bind(None, c.POINTER[struct_gallivm_state])
+def gallivm_destroy(gallivm:c.POINTER[struct_gallivm_state]) -> None: ...
+@dll.bind(None, c.POINTER[struct_gallivm_state])
+def gallivm_free_ir(gallivm:c.POINTER[struct_gallivm_state]) -> None: ...
+@dll.bind(None, c.POINTER[struct_gallivm_state], LLVMValueRef)
+def gallivm_verify_function(gallivm:c.POINTER[struct_gallivm_state], func:LLVMValueRef) -> None: ...
+@dll.bind(None, c.POINTER[struct_gallivm_state], LLVMValueRef, ctypes.c_void_p)
+def gallivm_add_global_mapping(gallivm:c.POINTER[struct_gallivm_state], sym:LLVMValueRef, addr:ctypes.c_void_p) -> None: ...
+@dll.bind(None, c.POINTER[struct_gallivm_state])
+def gallivm_compile_module(gallivm:c.POINTER[struct_gallivm_state]) -> None: ...
+func_pointer: TypeAlias = c.CFUNCTYPE[None, []]
+@dll.bind(func_pointer, c.POINTER[struct_gallivm_state], LLVMValueRef, c.POINTER[ctypes.c_char])
+def gallivm_jit_function(gallivm:c.POINTER[struct_gallivm_state], func:LLVMValueRef, func_name:c.POINTER[ctypes.c_char]) -> func_pointer: ...
+@dll.bind(None, c.POINTER[struct_gallivm_state], LLVMValueRef)
+def gallivm_stub_func(gallivm:c.POINTER[struct_gallivm_state], func:LLVMValueRef) -> None: ...
 @dll.bind(ctypes.c_uint32)
 def gallivm_get_perf_flags() -> int: ...
-@dll.bind(None, ctypes.POINTER(struct_gallivm_state))
-def lp_init_clock_hook(gallivm:ctypes._Pointer[struct_gallivm_state]) -> None: ...
+@dll.bind(None, c.POINTER[struct_gallivm_state])
+def lp_init_clock_hook(gallivm:c.POINTER[struct_gallivm_state]) -> None: ...
 @dll.bind(None)
 def lp_init_env_options() -> None: ...
 @c.record
 class struct_lp_build_tgsi_params(c.Struct):
   SIZE = 248
   type: struct_lp_type
-  mask: ctypes._Pointer[struct_lp_build_mask_context]
-  consts_ptr: ctypes._Pointer[struct_LLVMOpaqueValue]
-  const_sizes_ptr: ctypes._Pointer[struct_LLVMOpaqueValue]
-  system_values: ctypes._Pointer[struct_lp_bld_tgsi_system_values]
-  inputs: ctypes._Pointer[(ctypes.POINTER(struct_LLVMOpaqueValue) * 4)]
+  mask: c.POINTER[struct_lp_build_mask_context]
+  consts_ptr: c.POINTER[struct_LLVMOpaqueValue]
+  const_sizes_ptr: c.POINTER[struct_LLVMOpaqueValue]
+  system_values: c.POINTER[struct_lp_bld_tgsi_system_values]
+  inputs: c.POINTER[c.Array[c.POINTER[struct_LLVMOpaqueValue], Literal[4]]]
   num_inputs: int
-  context_type: ctypes._Pointer[struct_LLVMOpaqueType]
-  context_ptr: ctypes._Pointer[struct_LLVMOpaqueValue]
-  resources_type: ctypes._Pointer[struct_LLVMOpaqueType]
-  resources_ptr: ctypes._Pointer[struct_LLVMOpaqueValue]
-  thread_data_type: ctypes._Pointer[struct_LLVMOpaqueType]
-  thread_data_ptr: ctypes._Pointer[struct_LLVMOpaqueValue]
-  sampler: ctypes._Pointer[struct_lp_build_sampler_soa]
-  info: ctypes._Pointer[struct_tgsi_shader_info]
-  gs_iface: ctypes._Pointer[struct_lp_build_gs_iface]
-  tcs_iface: ctypes._Pointer[struct_lp_build_tcs_iface]
-  tes_iface: ctypes._Pointer[struct_lp_build_tes_iface]
-  mesh_iface: ctypes._Pointer[struct_lp_build_mesh_iface]
-  ssbo_ptr: ctypes._Pointer[struct_LLVMOpaqueValue]
-  ssbo_sizes_ptr: ctypes._Pointer[struct_LLVMOpaqueValue]
-  image: ctypes._Pointer[struct_lp_build_image_soa]
-  shared_ptr: ctypes._Pointer[struct_LLVMOpaqueValue]
-  payload_ptr: ctypes._Pointer[struct_LLVMOpaqueValue]
-  coro: ctypes._Pointer[struct_lp_build_coro_suspend_info]
-  fs_iface: ctypes._Pointer[struct_lp_build_fs_iface]
+  context_type: c.POINTER[struct_LLVMOpaqueType]
+  context_ptr: c.POINTER[struct_LLVMOpaqueValue]
+  resources_type: c.POINTER[struct_LLVMOpaqueType]
+  resources_ptr: c.POINTER[struct_LLVMOpaqueValue]
+  thread_data_type: c.POINTER[struct_LLVMOpaqueType]
+  thread_data_ptr: c.POINTER[struct_LLVMOpaqueValue]
+  sampler: c.POINTER[struct_lp_build_sampler_soa]
+  info: c.POINTER[struct_tgsi_shader_info]
+  gs_iface: c.POINTER[struct_lp_build_gs_iface]
+  tcs_iface: c.POINTER[struct_lp_build_tcs_iface]
+  tes_iface: c.POINTER[struct_lp_build_tes_iface]
+  mesh_iface: c.POINTER[struct_lp_build_mesh_iface]
+  ssbo_ptr: c.POINTER[struct_LLVMOpaqueValue]
+  ssbo_sizes_ptr: c.POINTER[struct_LLVMOpaqueValue]
+  image: c.POINTER[struct_lp_build_image_soa]
+  shared_ptr: c.POINTER[struct_LLVMOpaqueValue]
+  payload_ptr: c.POINTER[struct_LLVMOpaqueValue]
+  coro: c.POINTER[struct_lp_build_coro_suspend_info]
+  fs_iface: c.POINTER[struct_lp_build_fs_iface]
   gs_vertex_streams: int
-  current_func: ctypes._Pointer[struct_LLVMOpaqueValue]
-  fns: ctypes._Pointer[struct_hash_table]
-  scratch_ptr: ctypes._Pointer[struct_LLVMOpaqueValue]
-  call_context_ptr: ctypes._Pointer[struct_LLVMOpaqueValue]
+  current_func: c.POINTER[struct_LLVMOpaqueValue]
+  fns: c.POINTER[struct_hash_table]
+  scratch_ptr: c.POINTER[struct_LLVMOpaqueValue]
+  call_context_ptr: c.POINTER[struct_LLVMOpaqueValue]
 @c.record
 class struct_lp_build_mask_context(c.Struct):
   SIZE = 40
   skip: struct_lp_build_skip_context
-  reg_type: ctypes._Pointer[struct_LLVMOpaqueType]
-  var_type: ctypes._Pointer[struct_LLVMOpaqueType]
-  var: ctypes._Pointer[struct_LLVMOpaqueValue]
+  reg_type: c.POINTER[struct_LLVMOpaqueType]
+  var_type: c.POINTER[struct_LLVMOpaqueType]
+  var: c.POINTER[struct_LLVMOpaqueValue]
 @c.record
 class struct_lp_build_skip_context(c.Struct):
   SIZE = 16
-  gallivm: ctypes._Pointer[struct_gallivm_state]
-  block: ctypes._Pointer[struct_LLVMOpaqueBasicBlock]
+  gallivm: c.POINTER[struct_gallivm_state]
+  block: c.POINTER[struct_LLVMOpaqueBasicBlock]
 class struct_LLVMOpaqueBasicBlock(c.Struct): pass
-LLVMBasicBlockRef: TypeAlias = ctypes.POINTER(struct_LLVMOpaqueBasicBlock)
-struct_lp_build_skip_context.register_fields([('gallivm', ctypes.POINTER(struct_gallivm_state), 0), ('block', LLVMBasicBlockRef, 8)])
+LLVMBasicBlockRef: TypeAlias = c.POINTER[struct_LLVMOpaqueBasicBlock]
+struct_lp_build_skip_context.register_fields([('gallivm', c.POINTER[struct_gallivm_state], 0), ('block', LLVMBasicBlockRef, 8)])
 struct_lp_build_mask_context.register_fields([('skip', struct_lp_build_skip_context, 0), ('reg_type', LLVMTypeRef, 16), ('var_type', LLVMTypeRef, 24), ('var', LLVMValueRef, 32)])
 @c.record
 class struct_lp_bld_tgsi_system_values(c.Struct):
   SIZE = 272
-  instance_id: ctypes._Pointer[struct_LLVMOpaqueValue]
-  base_instance: ctypes._Pointer[struct_LLVMOpaqueValue]
-  vertex_id: ctypes._Pointer[struct_LLVMOpaqueValue]
-  vertex_id_nobase: ctypes._Pointer[struct_LLVMOpaqueValue]
-  prim_id: ctypes._Pointer[struct_LLVMOpaqueValue]
-  basevertex: ctypes._Pointer[struct_LLVMOpaqueValue]
-  firstvertex: ctypes._Pointer[struct_LLVMOpaqueValue]
-  invocation_id: ctypes._Pointer[struct_LLVMOpaqueValue]
-  draw_id: ctypes._Pointer[struct_LLVMOpaqueValue]
-  thread_id: ctypes.Array[ctypes.POINTER(struct_LLVMOpaqueValue)]
-  block_id: ctypes.Array[ctypes.POINTER(struct_LLVMOpaqueValue)]
-  grid_size: ctypes.Array[ctypes.POINTER(struct_LLVMOpaqueValue)]
-  front_facing: ctypes._Pointer[struct_LLVMOpaqueValue]
-  work_dim: ctypes._Pointer[struct_LLVMOpaqueValue]
-  block_size: ctypes.Array[ctypes.POINTER(struct_LLVMOpaqueValue)]
-  tess_coord: ctypes._Pointer[struct_LLVMOpaqueValue]
-  tess_outer: ctypes._Pointer[struct_LLVMOpaqueValue]
-  tess_inner: ctypes._Pointer[struct_LLVMOpaqueValue]
-  vertices_in: ctypes._Pointer[struct_LLVMOpaqueValue]
-  sample_id: ctypes._Pointer[struct_LLVMOpaqueValue]
-  sample_pos_type: ctypes._Pointer[struct_LLVMOpaqueType]
-  sample_pos: ctypes._Pointer[struct_LLVMOpaqueValue]
-  sample_mask_in: ctypes._Pointer[struct_LLVMOpaqueValue]
-  view_index: ctypes._Pointer[struct_LLVMOpaqueValue]
-  subgroup_id: ctypes._Pointer[struct_LLVMOpaqueValue]
-  num_subgroups: ctypes._Pointer[struct_LLVMOpaqueValue]
-struct_lp_bld_tgsi_system_values.register_fields([('instance_id', LLVMValueRef, 0), ('base_instance', LLVMValueRef, 8), ('vertex_id', LLVMValueRef, 16), ('vertex_id_nobase', LLVMValueRef, 24), ('prim_id', LLVMValueRef, 32), ('basevertex', LLVMValueRef, 40), ('firstvertex', LLVMValueRef, 48), ('invocation_id', LLVMValueRef, 56), ('draw_id', LLVMValueRef, 64), ('thread_id', (LLVMValueRef * 3), 72), ('block_id', (LLVMValueRef * 3), 96), ('grid_size', (LLVMValueRef * 3), 120), ('front_facing', LLVMValueRef, 144), ('work_dim', LLVMValueRef, 152), ('block_size', (LLVMValueRef * 3), 160), ('tess_coord', LLVMValueRef, 184), ('tess_outer', LLVMValueRef, 192), ('tess_inner', LLVMValueRef, 200), ('vertices_in', LLVMValueRef, 208), ('sample_id', LLVMValueRef, 216), ('sample_pos_type', LLVMTypeRef, 224), ('sample_pos', LLVMValueRef, 232), ('sample_mask_in', LLVMValueRef, 240), ('view_index', LLVMValueRef, 248), ('subgroup_id', LLVMValueRef, 256), ('num_subgroups', LLVMValueRef, 264)])
+  instance_id: c.POINTER[struct_LLVMOpaqueValue]
+  base_instance: c.POINTER[struct_LLVMOpaqueValue]
+  vertex_id: c.POINTER[struct_LLVMOpaqueValue]
+  vertex_id_nobase: c.POINTER[struct_LLVMOpaqueValue]
+  prim_id: c.POINTER[struct_LLVMOpaqueValue]
+  basevertex: c.POINTER[struct_LLVMOpaqueValue]
+  firstvertex: c.POINTER[struct_LLVMOpaqueValue]
+  invocation_id: c.POINTER[struct_LLVMOpaqueValue]
+  draw_id: c.POINTER[struct_LLVMOpaqueValue]
+  thread_id: c.Array[c.POINTER[struct_LLVMOpaqueValue], Literal[3]]
+  block_id: c.Array[c.POINTER[struct_LLVMOpaqueValue], Literal[3]]
+  grid_size: c.Array[c.POINTER[struct_LLVMOpaqueValue], Literal[3]]
+  front_facing: c.POINTER[struct_LLVMOpaqueValue]
+  work_dim: c.POINTER[struct_LLVMOpaqueValue]
+  block_size: c.Array[c.POINTER[struct_LLVMOpaqueValue], Literal[3]]
+  tess_coord: c.POINTER[struct_LLVMOpaqueValue]
+  tess_outer: c.POINTER[struct_LLVMOpaqueValue]
+  tess_inner: c.POINTER[struct_LLVMOpaqueValue]
+  vertices_in: c.POINTER[struct_LLVMOpaqueValue]
+  sample_id: c.POINTER[struct_LLVMOpaqueValue]
+  sample_pos_type: c.POINTER[struct_LLVMOpaqueType]
+  sample_pos: c.POINTER[struct_LLVMOpaqueValue]
+  sample_mask_in: c.POINTER[struct_LLVMOpaqueValue]
+  view_index: c.POINTER[struct_LLVMOpaqueValue]
+  subgroup_id: c.POINTER[struct_LLVMOpaqueValue]
+  num_subgroups: c.POINTER[struct_LLVMOpaqueValue]
+struct_lp_bld_tgsi_system_values.register_fields([('instance_id', LLVMValueRef, 0), ('base_instance', LLVMValueRef, 8), ('vertex_id', LLVMValueRef, 16), ('vertex_id_nobase', LLVMValueRef, 24), ('prim_id', LLVMValueRef, 32), ('basevertex', LLVMValueRef, 40), ('firstvertex', LLVMValueRef, 48), ('invocation_id', LLVMValueRef, 56), ('draw_id', LLVMValueRef, 64), ('thread_id', c.Array[LLVMValueRef, Literal[3]], 72), ('block_id', c.Array[LLVMValueRef, Literal[3]], 96), ('grid_size', c.Array[LLVMValueRef, Literal[3]], 120), ('front_facing', LLVMValueRef, 144), ('work_dim', LLVMValueRef, 152), ('block_size', c.Array[LLVMValueRef, Literal[3]], 160), ('tess_coord', LLVMValueRef, 184), ('tess_outer', LLVMValueRef, 192), ('tess_inner', LLVMValueRef, 200), ('vertices_in', LLVMValueRef, 208), ('sample_id', LLVMValueRef, 216), ('sample_pos_type', LLVMTypeRef, 224), ('sample_pos', LLVMValueRef, 232), ('sample_mask_in', LLVMValueRef, 240), ('view_index', LLVMValueRef, 248), ('subgroup_id', LLVMValueRef, 256), ('num_subgroups', LLVMValueRef, 264)])
 @c.record
 class struct_lp_build_sampler_soa(c.Struct):
   SIZE = 16
-  emit_tex_sample: ctypes._CFunctionType
-  emit_size_query: ctypes._CFunctionType
+  emit_tex_sample: c.CFUNCTYPE[None, [c.POINTER[struct_lp_build_sampler_soa], c.POINTER[struct_gallivm_state], c.POINTER[struct_lp_sampler_params]]]
+  emit_size_query: c.CFUNCTYPE[None, [c.POINTER[struct_lp_build_sampler_soa], c.POINTER[struct_gallivm_state], c.POINTER[struct_lp_sampler_size_query_params]]]
 @c.record
 class struct_lp_sampler_params(c.Struct):
   SIZE = 152
   type: struct_lp_type
   texture_index: int
   sampler_index: int
-  texture_index_offset: ctypes._Pointer[struct_LLVMOpaqueValue]
+  texture_index_offset: c.POINTER[struct_LLVMOpaqueValue]
   sample_key: int
-  resources_type: ctypes._Pointer[struct_LLVMOpaqueType]
-  resources_ptr: ctypes._Pointer[struct_LLVMOpaqueValue]
-  thread_data_type: ctypes._Pointer[struct_LLVMOpaqueType]
-  thread_data_ptr: ctypes._Pointer[struct_LLVMOpaqueValue]
-  coords: ctypes._Pointer[ctypes.POINTER(struct_LLVMOpaqueValue)]
-  offsets: ctypes._Pointer[ctypes.POINTER(struct_LLVMOpaqueValue)]
-  ms_index: ctypes._Pointer[struct_LLVMOpaqueValue]
-  lod: ctypes._Pointer[struct_LLVMOpaqueValue]
-  min_lod: ctypes._Pointer[struct_LLVMOpaqueValue]
-  derivs: ctypes._Pointer[struct_lp_derivatives]
-  texel: ctypes._Pointer[ctypes.POINTER(struct_LLVMOpaqueValue)]
-  texture_resource: ctypes._Pointer[struct_LLVMOpaqueValue]
-  sampler_resource: ctypes._Pointer[struct_LLVMOpaqueValue]
-  exec_mask: ctypes._Pointer[struct_LLVMOpaqueValue]
+  resources_type: c.POINTER[struct_LLVMOpaqueType]
+  resources_ptr: c.POINTER[struct_LLVMOpaqueValue]
+  thread_data_type: c.POINTER[struct_LLVMOpaqueType]
+  thread_data_ptr: c.POINTER[struct_LLVMOpaqueValue]
+  coords: c.POINTER[c.POINTER[struct_LLVMOpaqueValue]]
+  offsets: c.POINTER[c.POINTER[struct_LLVMOpaqueValue]]
+  ms_index: c.POINTER[struct_LLVMOpaqueValue]
+  lod: c.POINTER[struct_LLVMOpaqueValue]
+  min_lod: c.POINTER[struct_LLVMOpaqueValue]
+  derivs: c.POINTER[struct_lp_derivatives]
+  texel: c.POINTER[c.POINTER[struct_LLVMOpaqueValue]]
+  texture_resource: c.POINTER[struct_LLVMOpaqueValue]
+  sampler_resource: c.POINTER[struct_LLVMOpaqueValue]
+  exec_mask: c.POINTER[struct_LLVMOpaqueValue]
   exec_mask_nz: bool
 @c.record
 class struct_lp_derivatives(c.Struct):
   SIZE = 48
-  ddx: ctypes.Array[ctypes.POINTER(struct_LLVMOpaqueValue)]
-  ddy: ctypes.Array[ctypes.POINTER(struct_LLVMOpaqueValue)]
-struct_lp_derivatives.register_fields([('ddx', (LLVMValueRef * 3), 0), ('ddy', (LLVMValueRef * 3), 24)])
-struct_lp_sampler_params.register_fields([('type', struct_lp_type, 0), ('texture_index', ctypes.c_uint32, 8), ('sampler_index', ctypes.c_uint32, 12), ('texture_index_offset', LLVMValueRef, 16), ('sample_key', ctypes.c_uint32, 24), ('resources_type', LLVMTypeRef, 32), ('resources_ptr', LLVMValueRef, 40), ('thread_data_type', LLVMTypeRef, 48), ('thread_data_ptr', LLVMValueRef, 56), ('coords', ctypes.POINTER(LLVMValueRef), 64), ('offsets', ctypes.POINTER(LLVMValueRef), 72), ('ms_index', LLVMValueRef, 80), ('lod', LLVMValueRef, 88), ('min_lod', LLVMValueRef, 96), ('derivs', ctypes.POINTER(struct_lp_derivatives), 104), ('texel', ctypes.POINTER(LLVMValueRef), 112), ('texture_resource', LLVMValueRef, 120), ('sampler_resource', LLVMValueRef, 128), ('exec_mask', LLVMValueRef, 136), ('exec_mask_nz', ctypes.c_bool, 144)])
+  ddx: c.Array[c.POINTER[struct_LLVMOpaqueValue], Literal[3]]
+  ddy: c.Array[c.POINTER[struct_LLVMOpaqueValue], Literal[3]]
+struct_lp_derivatives.register_fields([('ddx', c.Array[LLVMValueRef, Literal[3]], 0), ('ddy', c.Array[LLVMValueRef, Literal[3]], 24)])
+struct_lp_sampler_params.register_fields([('type', struct_lp_type, 0), ('texture_index', ctypes.c_uint32, 8), ('sampler_index', ctypes.c_uint32, 12), ('texture_index_offset', LLVMValueRef, 16), ('sample_key', ctypes.c_uint32, 24), ('resources_type', LLVMTypeRef, 32), ('resources_ptr', LLVMValueRef, 40), ('thread_data_type', LLVMTypeRef, 48), ('thread_data_ptr', LLVMValueRef, 56), ('coords', c.POINTER[LLVMValueRef], 64), ('offsets', c.POINTER[LLVMValueRef], 72), ('ms_index', LLVMValueRef, 80), ('lod', LLVMValueRef, 88), ('min_lod', LLVMValueRef, 96), ('derivs', c.POINTER[struct_lp_derivatives], 104), ('texel', c.POINTER[LLVMValueRef], 112), ('texture_resource', LLVMValueRef, 120), ('sampler_resource', LLVMValueRef, 128), ('exec_mask', LLVMValueRef, 136), ('exec_mask_nz', ctypes.c_bool, 144)])
 @c.record
 class struct_lp_sampler_size_query_params(c.Struct):
   SIZE = 96
   int_type: struct_lp_type
   texture_unit: int
-  texture_unit_offset: ctypes._Pointer[struct_LLVMOpaqueValue]
+  texture_unit_offset: c.POINTER[struct_LLVMOpaqueValue]
   target: int
-  resources_type: ctypes._Pointer[struct_LLVMOpaqueType]
-  resources_ptr: ctypes._Pointer[struct_LLVMOpaqueValue]
+  resources_type: c.POINTER[struct_LLVMOpaqueType]
+  resources_ptr: c.POINTER[struct_LLVMOpaqueValue]
   is_sviewinfo: bool
   samples_only: bool
   ms: bool
   lod_property: int
-  explicit_lod: ctypes._Pointer[struct_LLVMOpaqueValue]
-  sizes_out: ctypes._Pointer[ctypes.POINTER(struct_LLVMOpaqueValue)]
-  resource: ctypes._Pointer[struct_LLVMOpaqueValue]
-  exec_mask: ctypes._Pointer[struct_LLVMOpaqueValue]
+  explicit_lod: c.POINTER[struct_LLVMOpaqueValue]
+  sizes_out: c.POINTER[c.POINTER[struct_LLVMOpaqueValue]]
+  resource: c.POINTER[struct_LLVMOpaqueValue]
+  exec_mask: c.POINTER[struct_LLVMOpaqueValue]
   exec_mask_nz: bool
   format: int
 enum_lp_sampler_lod_property: dict[int, str] = {(LP_SAMPLER_LOD_SCALAR:=0): 'LP_SAMPLER_LOD_SCALAR', (LP_SAMPLER_LOD_PER_ELEMENT:=1): 'LP_SAMPLER_LOD_PER_ELEMENT', (LP_SAMPLER_LOD_PER_QUAD:=2): 'LP_SAMPLER_LOD_PER_QUAD'}
-struct_lp_sampler_size_query_params.register_fields([('int_type', struct_lp_type, 0), ('texture_unit', ctypes.c_uint32, 8), ('texture_unit_offset', LLVMValueRef, 16), ('target', ctypes.c_uint32, 24), ('resources_type', LLVMTypeRef, 32), ('resources_ptr', LLVMValueRef, 40), ('is_sviewinfo', ctypes.c_bool, 48), ('samples_only', ctypes.c_bool, 49), ('ms', ctypes.c_bool, 50), ('lod_property', ctypes.c_uint32, 52), ('explicit_lod', LLVMValueRef, 56), ('sizes_out', ctypes.POINTER(LLVMValueRef), 64), ('resource', LLVMValueRef, 72), ('exec_mask', LLVMValueRef, 80), ('exec_mask_nz', ctypes.c_bool, 88), ('format', ctypes.c_uint32, 92)])
-struct_lp_build_sampler_soa.register_fields([('emit_tex_sample', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_lp_build_sampler_soa), ctypes.POINTER(struct_gallivm_state), ctypes.POINTER(struct_lp_sampler_params)), 0), ('emit_size_query', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_lp_build_sampler_soa), ctypes.POINTER(struct_gallivm_state), ctypes.POINTER(struct_lp_sampler_size_query_params)), 8)])
+struct_lp_sampler_size_query_params.register_fields([('int_type', struct_lp_type, 0), ('texture_unit', ctypes.c_uint32, 8), ('texture_unit_offset', LLVMValueRef, 16), ('target', ctypes.c_uint32, 24), ('resources_type', LLVMTypeRef, 32), ('resources_ptr', LLVMValueRef, 40), ('is_sviewinfo', ctypes.c_bool, 48), ('samples_only', ctypes.c_bool, 49), ('ms', ctypes.c_bool, 50), ('lod_property', ctypes.c_uint32, 52), ('explicit_lod', LLVMValueRef, 56), ('sizes_out', c.POINTER[LLVMValueRef], 64), ('resource', LLVMValueRef, 72), ('exec_mask', LLVMValueRef, 80), ('exec_mask_nz', ctypes.c_bool, 88), ('format', ctypes.c_uint32, 92)])
+struct_lp_build_sampler_soa.register_fields([('emit_tex_sample', c.CFUNCTYPE[None, [c.POINTER[struct_lp_build_sampler_soa], c.POINTER[struct_gallivm_state], c.POINTER[struct_lp_sampler_params]]], 0), ('emit_size_query', c.CFUNCTYPE[None, [c.POINTER[struct_lp_build_sampler_soa], c.POINTER[struct_gallivm_state], c.POINTER[struct_lp_sampler_size_query_params]]], 8)])
 @c.record
 class struct_tgsi_shader_info(c.Struct):
   SIZE = 2744
   num_inputs: int
   num_outputs: int
-  input_semantic_name: ctypes.Array[ctypes.c_ubyte]
-  input_semantic_index: ctypes.Array[ctypes.c_ubyte]
-  input_interpolate: ctypes.Array[ctypes.c_ubyte]
-  input_interpolate_loc: ctypes.Array[ctypes.c_ubyte]
-  input_usage_mask: ctypes.Array[ctypes.c_ubyte]
-  output_semantic_name: ctypes.Array[ctypes.c_ubyte]
-  output_semantic_index: ctypes.Array[ctypes.c_ubyte]
-  output_usagemask: ctypes.Array[ctypes.c_ubyte]
-  output_streams: ctypes.Array[ctypes.c_ubyte]
+  input_semantic_name: c.Array[ctypes.c_ubyte, Literal[80]]
+  input_semantic_index: c.Array[ctypes.c_ubyte, Literal[80]]
+  input_interpolate: c.Array[ctypes.c_ubyte, Literal[80]]
+  input_interpolate_loc: c.Array[ctypes.c_ubyte, Literal[80]]
+  input_usage_mask: c.Array[ctypes.c_ubyte, Literal[80]]
+  output_semantic_name: c.Array[ctypes.c_ubyte, Literal[80]]
+  output_semantic_index: c.Array[ctypes.c_ubyte, Literal[80]]
+  output_usagemask: c.Array[ctypes.c_ubyte, Literal[80]]
+  output_streams: c.Array[ctypes.c_ubyte, Literal[80]]
   num_system_values: int
-  system_value_semantic_name: ctypes.Array[ctypes.c_ubyte]
+  system_value_semantic_name: c.Array[ctypes.c_ubyte, Literal[80]]
   processor: int
-  file_mask: ctypes.Array[ctypes.c_uint32]
-  file_count: ctypes.Array[ctypes.c_uint32]
-  file_max: ctypes.Array[ctypes.c_int32]
-  const_file_max: ctypes.Array[ctypes.c_int32]
+  file_mask: c.Array[ctypes.c_uint32, Literal[15]]
+  file_count: c.Array[ctypes.c_uint32, Literal[15]]
+  file_max: c.Array[ctypes.c_int32, Literal[15]]
+  const_file_max: c.Array[ctypes.c_int32, Literal[32]]
   const_buffers_declared: int
   samplers_declared: int
-  sampler_targets: ctypes.Array[ctypes.c_ubyte]
-  sampler_type: ctypes.Array[ctypes.c_ubyte]
-  num_stream_output_components: ctypes.Array[ctypes.c_ubyte]
-  input_array_first: ctypes.Array[ctypes.c_ubyte]
-  output_array_first: ctypes.Array[ctypes.c_ubyte]
+  sampler_targets: c.Array[ctypes.c_ubyte, Literal[128]]
+  sampler_type: c.Array[ctypes.c_ubyte, Literal[128]]
+  num_stream_output_components: c.Array[ctypes.c_ubyte, Literal[4]]
+  input_array_first: c.Array[ctypes.c_ubyte, Literal[80]]
+  output_array_first: c.Array[ctypes.c_ubyte, Literal[80]]
   immediate_count: int
   num_instructions: int
-  opcode_count: ctypes.Array[ctypes.c_uint32]
+  opcode_count: c.Array[ctypes.c_uint32, Literal[252]]
   reads_pervertex_outputs: bool
   reads_perpatch_outputs: bool
   reads_tessfactor_outputs: bool
@@ -3331,119 +3331,119 @@ class struct_tgsi_shader_info(c.Struct):
   hw_atomic_declared: int
   indirect_files: int
   dim_indirect_files: int
-  properties: ctypes.Array[ctypes.c_uint32]
-struct_tgsi_shader_info.register_fields([('num_inputs', uint8_t, 0), ('num_outputs', uint8_t, 1), ('input_semantic_name', (uint8_t * 80), 2), ('input_semantic_index', (uint8_t * 80), 82), ('input_interpolate', (uint8_t * 80), 162), ('input_interpolate_loc', (uint8_t * 80), 242), ('input_usage_mask', (uint8_t * 80), 322), ('output_semantic_name', (uint8_t * 80), 402), ('output_semantic_index', (uint8_t * 80), 482), ('output_usagemask', (uint8_t * 80), 562), ('output_streams', (uint8_t * 80), 642), ('num_system_values', uint8_t, 722), ('system_value_semantic_name', (uint8_t * 80), 723), ('processor', uint8_t, 803), ('file_mask', (uint32_t * 15), 804), ('file_count', (ctypes.c_uint32 * 15), 864), ('file_max', (ctypes.c_int32 * 15), 924), ('const_file_max', (ctypes.c_int32 * 32), 984), ('const_buffers_declared', ctypes.c_uint32, 1112), ('samplers_declared', ctypes.c_uint32, 1116), ('sampler_targets', (uint8_t * 128), 1120), ('sampler_type', (uint8_t * 128), 1248), ('num_stream_output_components', (uint8_t * 4), 1376), ('input_array_first', (uint8_t * 80), 1380), ('output_array_first', (uint8_t * 80), 1460), ('immediate_count', ctypes.c_uint32, 1540), ('num_instructions', ctypes.c_uint32, 1544), ('opcode_count', (ctypes.c_uint32 * 252), 1548), ('reads_pervertex_outputs', ctypes.c_bool, 2556), ('reads_perpatch_outputs', ctypes.c_bool, 2557), ('reads_tessfactor_outputs', ctypes.c_bool, 2558), ('reads_z', ctypes.c_bool, 2559), ('writes_z', ctypes.c_bool, 2560), ('writes_stencil', ctypes.c_bool, 2561), ('writes_samplemask', ctypes.c_bool, 2562), ('writes_edgeflag', ctypes.c_bool, 2563), ('uses_kill', ctypes.c_bool, 2564), ('uses_instanceid', ctypes.c_bool, 2565), ('uses_vertexid', ctypes.c_bool, 2566), ('uses_vertexid_nobase', ctypes.c_bool, 2567), ('uses_basevertex', ctypes.c_bool, 2568), ('uses_primid', ctypes.c_bool, 2569), ('uses_frontface', ctypes.c_bool, 2570), ('uses_invocationid', ctypes.c_bool, 2571), ('uses_grid_size', ctypes.c_bool, 2572), ('writes_position', ctypes.c_bool, 2573), ('writes_psize', ctypes.c_bool, 2574), ('writes_clipvertex', ctypes.c_bool, 2575), ('writes_viewport_index', ctypes.c_bool, 2576), ('writes_layer', ctypes.c_bool, 2577), ('writes_memory', ctypes.c_bool, 2578), ('uses_fbfetch', ctypes.c_bool, 2579), ('num_written_culldistance', ctypes.c_uint32, 2580), ('num_written_clipdistance', ctypes.c_uint32, 2584), ('images_declared', ctypes.c_uint32, 2588), ('msaa_images_declared', ctypes.c_uint32, 2592), ('images_buffers', ctypes.c_uint32, 2596), ('shader_buffers_declared', ctypes.c_uint32, 2600), ('shader_buffers_load', ctypes.c_uint32, 2604), ('shader_buffers_store', ctypes.c_uint32, 2608), ('shader_buffers_atomic', ctypes.c_uint32, 2612), ('hw_atomic_declared', ctypes.c_uint32, 2616), ('indirect_files', ctypes.c_uint32, 2620), ('dim_indirect_files', ctypes.c_uint32, 2624), ('properties', (ctypes.c_uint32 * 29), 2628)])
+  properties: c.Array[ctypes.c_uint32, Literal[29]]
+struct_tgsi_shader_info.register_fields([('num_inputs', uint8_t, 0), ('num_outputs', uint8_t, 1), ('input_semantic_name', c.Array[uint8_t, Literal[80]], 2), ('input_semantic_index', c.Array[uint8_t, Literal[80]], 82), ('input_interpolate', c.Array[uint8_t, Literal[80]], 162), ('input_interpolate_loc', c.Array[uint8_t, Literal[80]], 242), ('input_usage_mask', c.Array[uint8_t, Literal[80]], 322), ('output_semantic_name', c.Array[uint8_t, Literal[80]], 402), ('output_semantic_index', c.Array[uint8_t, Literal[80]], 482), ('output_usagemask', c.Array[uint8_t, Literal[80]], 562), ('output_streams', c.Array[uint8_t, Literal[80]], 642), ('num_system_values', uint8_t, 722), ('system_value_semantic_name', c.Array[uint8_t, Literal[80]], 723), ('processor', uint8_t, 803), ('file_mask', c.Array[uint32_t, Literal[15]], 804), ('file_count', c.Array[ctypes.c_uint32, Literal[15]], 864), ('file_max', c.Array[ctypes.c_int32, Literal[15]], 924), ('const_file_max', c.Array[ctypes.c_int32, Literal[32]], 984), ('const_buffers_declared', ctypes.c_uint32, 1112), ('samplers_declared', ctypes.c_uint32, 1116), ('sampler_targets', c.Array[uint8_t, Literal[128]], 1120), ('sampler_type', c.Array[uint8_t, Literal[128]], 1248), ('num_stream_output_components', c.Array[uint8_t, Literal[4]], 1376), ('input_array_first', c.Array[uint8_t, Literal[80]], 1380), ('output_array_first', c.Array[uint8_t, Literal[80]], 1460), ('immediate_count', ctypes.c_uint32, 1540), ('num_instructions', ctypes.c_uint32, 1544), ('opcode_count', c.Array[ctypes.c_uint32, Literal[252]], 1548), ('reads_pervertex_outputs', ctypes.c_bool, 2556), ('reads_perpatch_outputs', ctypes.c_bool, 2557), ('reads_tessfactor_outputs', ctypes.c_bool, 2558), ('reads_z', ctypes.c_bool, 2559), ('writes_z', ctypes.c_bool, 2560), ('writes_stencil', ctypes.c_bool, 2561), ('writes_samplemask', ctypes.c_bool, 2562), ('writes_edgeflag', ctypes.c_bool, 2563), ('uses_kill', ctypes.c_bool, 2564), ('uses_instanceid', ctypes.c_bool, 2565), ('uses_vertexid', ctypes.c_bool, 2566), ('uses_vertexid_nobase', ctypes.c_bool, 2567), ('uses_basevertex', ctypes.c_bool, 2568), ('uses_primid', ctypes.c_bool, 2569), ('uses_frontface', ctypes.c_bool, 2570), ('uses_invocationid', ctypes.c_bool, 2571), ('uses_grid_size', ctypes.c_bool, 2572), ('writes_position', ctypes.c_bool, 2573), ('writes_psize', ctypes.c_bool, 2574), ('writes_clipvertex', ctypes.c_bool, 2575), ('writes_viewport_index', ctypes.c_bool, 2576), ('writes_layer', ctypes.c_bool, 2577), ('writes_memory', ctypes.c_bool, 2578), ('uses_fbfetch', ctypes.c_bool, 2579), ('num_written_culldistance', ctypes.c_uint32, 2580), ('num_written_clipdistance', ctypes.c_uint32, 2584), ('images_declared', ctypes.c_uint32, 2588), ('msaa_images_declared', ctypes.c_uint32, 2592), ('images_buffers', ctypes.c_uint32, 2596), ('shader_buffers_declared', ctypes.c_uint32, 2600), ('shader_buffers_load', ctypes.c_uint32, 2604), ('shader_buffers_store', ctypes.c_uint32, 2608), ('shader_buffers_atomic', ctypes.c_uint32, 2612), ('hw_atomic_declared', ctypes.c_uint32, 2616), ('indirect_files', ctypes.c_uint32, 2620), ('dim_indirect_files', ctypes.c_uint32, 2624), ('properties', c.Array[ctypes.c_uint32, Literal[29]], 2628)])
 @c.record
 class struct_lp_build_gs_iface(c.Struct):
   SIZE = 32
-  fetch_input: ctypes._CFunctionType
-  emit_vertex: ctypes._CFunctionType
-  end_primitive: ctypes._CFunctionType
-  gs_epilogue: ctypes._CFunctionType
-struct_lp_build_gs_iface.register_fields([('fetch_input', ctypes.CFUNCTYPE(LLVMValueRef, ctypes.POINTER(struct_lp_build_gs_iface), ctypes.POINTER(struct_lp_build_context), ctypes.c_bool, LLVMValueRef, ctypes.c_bool, LLVMValueRef, LLVMValueRef), 0), ('emit_vertex', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_lp_build_gs_iface), ctypes.POINTER(struct_lp_build_context), ctypes.POINTER((LLVMValueRef * 4)), LLVMValueRef, LLVMValueRef, LLVMValueRef), 8), ('end_primitive', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_lp_build_gs_iface), ctypes.POINTER(struct_lp_build_context), LLVMValueRef, LLVMValueRef, LLVMValueRef, LLVMValueRef, ctypes.c_uint32), 16), ('gs_epilogue', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_lp_build_gs_iface), LLVMValueRef, LLVMValueRef, ctypes.c_uint32), 24)])
+  fetch_input: c.CFUNCTYPE[c.POINTER[struct_LLVMOpaqueValue], [c.POINTER[struct_lp_build_gs_iface], c.POINTER[struct_lp_build_context], ctypes.c_bool, c.POINTER[struct_LLVMOpaqueValue], ctypes.c_bool, c.POINTER[struct_LLVMOpaqueValue], c.POINTER[struct_LLVMOpaqueValue]]]
+  emit_vertex: c.CFUNCTYPE[None, [c.POINTER[struct_lp_build_gs_iface], c.POINTER[struct_lp_build_context], c.POINTER[c.Array[c.POINTER[struct_LLVMOpaqueValue], Literal[4]]], c.POINTER[struct_LLVMOpaqueValue], c.POINTER[struct_LLVMOpaqueValue], c.POINTER[struct_LLVMOpaqueValue]]]
+  end_primitive: c.CFUNCTYPE[None, [c.POINTER[struct_lp_build_gs_iface], c.POINTER[struct_lp_build_context], c.POINTER[struct_LLVMOpaqueValue], c.POINTER[struct_LLVMOpaqueValue], c.POINTER[struct_LLVMOpaqueValue], c.POINTER[struct_LLVMOpaqueValue], ctypes.c_uint32]]
+  gs_epilogue: c.CFUNCTYPE[None, [c.POINTER[struct_lp_build_gs_iface], c.POINTER[struct_LLVMOpaqueValue], c.POINTER[struct_LLVMOpaqueValue], ctypes.c_uint32]]
+struct_lp_build_gs_iface.register_fields([('fetch_input', c.CFUNCTYPE[LLVMValueRef, [c.POINTER[struct_lp_build_gs_iface], c.POINTER[struct_lp_build_context], ctypes.c_bool, LLVMValueRef, ctypes.c_bool, LLVMValueRef, LLVMValueRef]], 0), ('emit_vertex', c.CFUNCTYPE[None, [c.POINTER[struct_lp_build_gs_iface], c.POINTER[struct_lp_build_context], c.POINTER[c.Array[LLVMValueRef, Literal[4]]], LLVMValueRef, LLVMValueRef, LLVMValueRef]], 8), ('end_primitive', c.CFUNCTYPE[None, [c.POINTER[struct_lp_build_gs_iface], c.POINTER[struct_lp_build_context], LLVMValueRef, LLVMValueRef, LLVMValueRef, LLVMValueRef, ctypes.c_uint32]], 16), ('gs_epilogue', c.CFUNCTYPE[None, [c.POINTER[struct_lp_build_gs_iface], LLVMValueRef, LLVMValueRef, ctypes.c_uint32]], 24)])
 @c.record
 class struct_lp_build_tcs_iface(c.Struct):
   SIZE = 48
-  emit_prologue: ctypes._CFunctionType
-  emit_epilogue: ctypes._CFunctionType
-  emit_barrier: ctypes._CFunctionType
-  emit_store_output: ctypes._CFunctionType
-  emit_fetch_input: ctypes._CFunctionType
-  emit_fetch_output: ctypes._CFunctionType
-struct_lp_build_tcs_iface.register_fields([('emit_prologue', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_lp_build_context)), 0), ('emit_epilogue', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_lp_build_context)), 8), ('emit_barrier', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_lp_build_context)), 16), ('emit_store_output', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_lp_build_tcs_iface), ctypes.POINTER(struct_lp_build_context), ctypes.c_uint32, ctypes.c_bool, LLVMValueRef, ctypes.c_bool, LLVMValueRef, ctypes.c_bool, LLVMValueRef, LLVMValueRef, LLVMValueRef), 24), ('emit_fetch_input', ctypes.CFUNCTYPE(LLVMValueRef, ctypes.POINTER(struct_lp_build_tcs_iface), ctypes.POINTER(struct_lp_build_context), ctypes.c_bool, LLVMValueRef, ctypes.c_bool, LLVMValueRef, ctypes.c_bool, LLVMValueRef), 32), ('emit_fetch_output', ctypes.CFUNCTYPE(LLVMValueRef, ctypes.POINTER(struct_lp_build_tcs_iface), ctypes.POINTER(struct_lp_build_context), ctypes.c_bool, LLVMValueRef, ctypes.c_bool, LLVMValueRef, ctypes.c_bool, LLVMValueRef, uint32_t), 40)])
+  emit_prologue: c.CFUNCTYPE[None, [c.POINTER[struct_lp_build_context]]]
+  emit_epilogue: c.CFUNCTYPE[None, [c.POINTER[struct_lp_build_context]]]
+  emit_barrier: c.CFUNCTYPE[None, [c.POINTER[struct_lp_build_context]]]
+  emit_store_output: c.CFUNCTYPE[None, [c.POINTER[struct_lp_build_tcs_iface], c.POINTER[struct_lp_build_context], ctypes.c_uint32, ctypes.c_bool, c.POINTER[struct_LLVMOpaqueValue], ctypes.c_bool, c.POINTER[struct_LLVMOpaqueValue], ctypes.c_bool, c.POINTER[struct_LLVMOpaqueValue], c.POINTER[struct_LLVMOpaqueValue], c.POINTER[struct_LLVMOpaqueValue]]]
+  emit_fetch_input: c.CFUNCTYPE[c.POINTER[struct_LLVMOpaqueValue], [c.POINTER[struct_lp_build_tcs_iface], c.POINTER[struct_lp_build_context], ctypes.c_bool, c.POINTER[struct_LLVMOpaqueValue], ctypes.c_bool, c.POINTER[struct_LLVMOpaqueValue], ctypes.c_bool, c.POINTER[struct_LLVMOpaqueValue]]]
+  emit_fetch_output: c.CFUNCTYPE[c.POINTER[struct_LLVMOpaqueValue], [c.POINTER[struct_lp_build_tcs_iface], c.POINTER[struct_lp_build_context], ctypes.c_bool, c.POINTER[struct_LLVMOpaqueValue], ctypes.c_bool, c.POINTER[struct_LLVMOpaqueValue], ctypes.c_bool, c.POINTER[struct_LLVMOpaqueValue], ctypes.c_uint32]]
+struct_lp_build_tcs_iface.register_fields([('emit_prologue', c.CFUNCTYPE[None, [c.POINTER[struct_lp_build_context]]], 0), ('emit_epilogue', c.CFUNCTYPE[None, [c.POINTER[struct_lp_build_context]]], 8), ('emit_barrier', c.CFUNCTYPE[None, [c.POINTER[struct_lp_build_context]]], 16), ('emit_store_output', c.CFUNCTYPE[None, [c.POINTER[struct_lp_build_tcs_iface], c.POINTER[struct_lp_build_context], ctypes.c_uint32, ctypes.c_bool, LLVMValueRef, ctypes.c_bool, LLVMValueRef, ctypes.c_bool, LLVMValueRef, LLVMValueRef, LLVMValueRef]], 24), ('emit_fetch_input', c.CFUNCTYPE[LLVMValueRef, [c.POINTER[struct_lp_build_tcs_iface], c.POINTER[struct_lp_build_context], ctypes.c_bool, LLVMValueRef, ctypes.c_bool, LLVMValueRef, ctypes.c_bool, LLVMValueRef]], 32), ('emit_fetch_output', c.CFUNCTYPE[LLVMValueRef, [c.POINTER[struct_lp_build_tcs_iface], c.POINTER[struct_lp_build_context], ctypes.c_bool, LLVMValueRef, ctypes.c_bool, LLVMValueRef, ctypes.c_bool, LLVMValueRef, uint32_t]], 40)])
 @c.record
 class struct_lp_build_tes_iface(c.Struct):
   SIZE = 16
-  fetch_vertex_input: ctypes._CFunctionType
-  fetch_patch_input: ctypes._CFunctionType
-struct_lp_build_tes_iface.register_fields([('fetch_vertex_input', ctypes.CFUNCTYPE(LLVMValueRef, ctypes.POINTER(struct_lp_build_tes_iface), ctypes.POINTER(struct_lp_build_context), ctypes.c_bool, LLVMValueRef, ctypes.c_bool, LLVMValueRef, ctypes.c_bool, LLVMValueRef), 0), ('fetch_patch_input', ctypes.CFUNCTYPE(LLVMValueRef, ctypes.POINTER(struct_lp_build_tes_iface), ctypes.POINTER(struct_lp_build_context), ctypes.c_bool, LLVMValueRef, LLVMValueRef), 8)])
+  fetch_vertex_input: c.CFUNCTYPE[c.POINTER[struct_LLVMOpaqueValue], [c.POINTER[struct_lp_build_tes_iface], c.POINTER[struct_lp_build_context], ctypes.c_bool, c.POINTER[struct_LLVMOpaqueValue], ctypes.c_bool, c.POINTER[struct_LLVMOpaqueValue], ctypes.c_bool, c.POINTER[struct_LLVMOpaqueValue]]]
+  fetch_patch_input: c.CFUNCTYPE[c.POINTER[struct_LLVMOpaqueValue], [c.POINTER[struct_lp_build_tes_iface], c.POINTER[struct_lp_build_context], ctypes.c_bool, c.POINTER[struct_LLVMOpaqueValue], c.POINTER[struct_LLVMOpaqueValue]]]
+struct_lp_build_tes_iface.register_fields([('fetch_vertex_input', c.CFUNCTYPE[LLVMValueRef, [c.POINTER[struct_lp_build_tes_iface], c.POINTER[struct_lp_build_context], ctypes.c_bool, LLVMValueRef, ctypes.c_bool, LLVMValueRef, ctypes.c_bool, LLVMValueRef]], 0), ('fetch_patch_input', c.CFUNCTYPE[LLVMValueRef, [c.POINTER[struct_lp_build_tes_iface], c.POINTER[struct_lp_build_context], ctypes.c_bool, LLVMValueRef, LLVMValueRef]], 8)])
 @c.record
 class struct_lp_build_mesh_iface(c.Struct):
   SIZE = 16
-  emit_store_output: ctypes._CFunctionType
-  emit_vertex_and_primitive_count: ctypes._CFunctionType
-struct_lp_build_mesh_iface.register_fields([('emit_store_output', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_lp_build_mesh_iface), ctypes.POINTER(struct_lp_build_context), ctypes.c_uint32, ctypes.c_bool, LLVMValueRef, ctypes.c_bool, LLVMValueRef, ctypes.c_bool, LLVMValueRef, LLVMValueRef, LLVMValueRef), 0), ('emit_vertex_and_primitive_count', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_lp_build_mesh_iface), ctypes.POINTER(struct_lp_build_context), LLVMValueRef, LLVMValueRef), 8)])
+  emit_store_output: c.CFUNCTYPE[None, [c.POINTER[struct_lp_build_mesh_iface], c.POINTER[struct_lp_build_context], ctypes.c_uint32, ctypes.c_bool, c.POINTER[struct_LLVMOpaqueValue], ctypes.c_bool, c.POINTER[struct_LLVMOpaqueValue], ctypes.c_bool, c.POINTER[struct_LLVMOpaqueValue], c.POINTER[struct_LLVMOpaqueValue], c.POINTER[struct_LLVMOpaqueValue]]]
+  emit_vertex_and_primitive_count: c.CFUNCTYPE[None, [c.POINTER[struct_lp_build_mesh_iface], c.POINTER[struct_lp_build_context], c.POINTER[struct_LLVMOpaqueValue], c.POINTER[struct_LLVMOpaqueValue]]]
+struct_lp_build_mesh_iface.register_fields([('emit_store_output', c.CFUNCTYPE[None, [c.POINTER[struct_lp_build_mesh_iface], c.POINTER[struct_lp_build_context], ctypes.c_uint32, ctypes.c_bool, LLVMValueRef, ctypes.c_bool, LLVMValueRef, ctypes.c_bool, LLVMValueRef, LLVMValueRef, LLVMValueRef]], 0), ('emit_vertex_and_primitive_count', c.CFUNCTYPE[None, [c.POINTER[struct_lp_build_mesh_iface], c.POINTER[struct_lp_build_context], LLVMValueRef, LLVMValueRef]], 8)])
 @c.record
 class struct_lp_build_image_soa(c.Struct):
   SIZE = 16
-  emit_op: ctypes._CFunctionType
-  emit_size_query: ctypes._CFunctionType
+  emit_op: c.CFUNCTYPE[None, [c.POINTER[struct_lp_build_image_soa], c.POINTER[struct_gallivm_state], c.POINTER[struct_lp_img_params]]]
+  emit_size_query: c.CFUNCTYPE[None, [c.POINTER[struct_lp_build_image_soa], c.POINTER[struct_gallivm_state], c.POINTER[struct_lp_sampler_size_query_params]]]
 @c.record
 class struct_lp_img_params(c.Struct):
   SIZE = 192
   type: struct_lp_type
   image_index: int
-  image_index_offset: ctypes._Pointer[struct_LLVMOpaqueValue]
+  image_index_offset: c.POINTER[struct_LLVMOpaqueValue]
   img_op: int
   target: int
   packed_op: int
   op: int
-  exec_mask: ctypes._Pointer[struct_LLVMOpaqueValue]
+  exec_mask: c.POINTER[struct_LLVMOpaqueValue]
   exec_mask_nz: bool
-  resources_type: ctypes._Pointer[struct_LLVMOpaqueType]
-  resources_ptr: ctypes._Pointer[struct_LLVMOpaqueValue]
-  thread_data_type: ctypes._Pointer[struct_LLVMOpaqueType]
-  thread_data_ptr: ctypes._Pointer[struct_LLVMOpaqueValue]
-  coords: ctypes._Pointer[ctypes.POINTER(struct_LLVMOpaqueValue)]
-  ms_index: ctypes._Pointer[struct_LLVMOpaqueValue]
-  indata: ctypes.Array[ctypes.POINTER(struct_LLVMOpaqueValue)]
-  indata2: ctypes.Array[ctypes.POINTER(struct_LLVMOpaqueValue)]
-  outdata: ctypes._Pointer[ctypes.POINTER(struct_LLVMOpaqueValue)]
-  resource: ctypes._Pointer[struct_LLVMOpaqueValue]
+  resources_type: c.POINTER[struct_LLVMOpaqueType]
+  resources_ptr: c.POINTER[struct_LLVMOpaqueValue]
+  thread_data_type: c.POINTER[struct_LLVMOpaqueType]
+  thread_data_ptr: c.POINTER[struct_LLVMOpaqueValue]
+  coords: c.POINTER[c.POINTER[struct_LLVMOpaqueValue]]
+  ms_index: c.POINTER[struct_LLVMOpaqueValue]
+  indata: c.Array[c.POINTER[struct_LLVMOpaqueValue], Literal[4]]
+  indata2: c.Array[c.POINTER[struct_LLVMOpaqueValue], Literal[4]]
+  outdata: c.POINTER[c.POINTER[struct_LLVMOpaqueValue]]
+  resource: c.POINTER[struct_LLVMOpaqueValue]
   format: int
 LLVMAtomicRMWBinOp: dict[int, str] = {(LLVMAtomicRMWBinOpXchg:=0): 'LLVMAtomicRMWBinOpXchg', (LLVMAtomicRMWBinOpAdd:=1): 'LLVMAtomicRMWBinOpAdd', (LLVMAtomicRMWBinOpSub:=2): 'LLVMAtomicRMWBinOpSub', (LLVMAtomicRMWBinOpAnd:=3): 'LLVMAtomicRMWBinOpAnd', (LLVMAtomicRMWBinOpNand:=4): 'LLVMAtomicRMWBinOpNand', (LLVMAtomicRMWBinOpOr:=5): 'LLVMAtomicRMWBinOpOr', (LLVMAtomicRMWBinOpXor:=6): 'LLVMAtomicRMWBinOpXor', (LLVMAtomicRMWBinOpMax:=7): 'LLVMAtomicRMWBinOpMax', (LLVMAtomicRMWBinOpMin:=8): 'LLVMAtomicRMWBinOpMin', (LLVMAtomicRMWBinOpUMax:=9): 'LLVMAtomicRMWBinOpUMax', (LLVMAtomicRMWBinOpUMin:=10): 'LLVMAtomicRMWBinOpUMin', (LLVMAtomicRMWBinOpFAdd:=11): 'LLVMAtomicRMWBinOpFAdd', (LLVMAtomicRMWBinOpFSub:=12): 'LLVMAtomicRMWBinOpFSub', (LLVMAtomicRMWBinOpFMax:=13): 'LLVMAtomicRMWBinOpFMax', (LLVMAtomicRMWBinOpFMin:=14): 'LLVMAtomicRMWBinOpFMin', (LLVMAtomicRMWBinOpUIncWrap:=15): 'LLVMAtomicRMWBinOpUIncWrap', (LLVMAtomicRMWBinOpUDecWrap:=16): 'LLVMAtomicRMWBinOpUDecWrap', (LLVMAtomicRMWBinOpUSubCond:=17): 'LLVMAtomicRMWBinOpUSubCond', (LLVMAtomicRMWBinOpUSubSat:=18): 'LLVMAtomicRMWBinOpUSubSat'}
-struct_lp_img_params.register_fields([('type', struct_lp_type, 0), ('image_index', ctypes.c_uint32, 8), ('image_index_offset', LLVMValueRef, 16), ('img_op', ctypes.c_uint32, 24), ('target', ctypes.c_uint32, 28), ('packed_op', ctypes.c_uint32, 32), ('op', ctypes.c_uint32, 36), ('exec_mask', LLVMValueRef, 40), ('exec_mask_nz', ctypes.c_bool, 48), ('resources_type', LLVMTypeRef, 56), ('resources_ptr', LLVMValueRef, 64), ('thread_data_type', LLVMTypeRef, 72), ('thread_data_ptr', LLVMValueRef, 80), ('coords', ctypes.POINTER(LLVMValueRef), 88), ('ms_index', LLVMValueRef, 96), ('indata', (LLVMValueRef * 4), 104), ('indata2', (LLVMValueRef * 4), 136), ('outdata', ctypes.POINTER(LLVMValueRef), 168), ('resource', LLVMValueRef, 176), ('format', ctypes.c_uint32, 184)])
-struct_lp_build_image_soa.register_fields([('emit_op', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_lp_build_image_soa), ctypes.POINTER(struct_gallivm_state), ctypes.POINTER(struct_lp_img_params)), 0), ('emit_size_query', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_lp_build_image_soa), ctypes.POINTER(struct_gallivm_state), ctypes.POINTER(struct_lp_sampler_size_query_params)), 8)])
+struct_lp_img_params.register_fields([('type', struct_lp_type, 0), ('image_index', ctypes.c_uint32, 8), ('image_index_offset', LLVMValueRef, 16), ('img_op', ctypes.c_uint32, 24), ('target', ctypes.c_uint32, 28), ('packed_op', ctypes.c_uint32, 32), ('op', ctypes.c_uint32, 36), ('exec_mask', LLVMValueRef, 40), ('exec_mask_nz', ctypes.c_bool, 48), ('resources_type', LLVMTypeRef, 56), ('resources_ptr', LLVMValueRef, 64), ('thread_data_type', LLVMTypeRef, 72), ('thread_data_ptr', LLVMValueRef, 80), ('coords', c.POINTER[LLVMValueRef], 88), ('ms_index', LLVMValueRef, 96), ('indata', c.Array[LLVMValueRef, Literal[4]], 104), ('indata2', c.Array[LLVMValueRef, Literal[4]], 136), ('outdata', c.POINTER[LLVMValueRef], 168), ('resource', LLVMValueRef, 176), ('format', ctypes.c_uint32, 184)])
+struct_lp_build_image_soa.register_fields([('emit_op', c.CFUNCTYPE[None, [c.POINTER[struct_lp_build_image_soa], c.POINTER[struct_gallivm_state], c.POINTER[struct_lp_img_params]]], 0), ('emit_size_query', c.CFUNCTYPE[None, [c.POINTER[struct_lp_build_image_soa], c.POINTER[struct_gallivm_state], c.POINTER[struct_lp_sampler_size_query_params]]], 8)])
 class struct_lp_build_coro_suspend_info(c.Struct): pass
 @c.record
 class struct_lp_build_fs_iface(c.Struct):
   SIZE = 16
-  interp_fn: ctypes._CFunctionType
-  fb_fetch: ctypes._CFunctionType
-struct_lp_build_fs_iface.register_fields([('interp_fn', ctypes.CFUNCTYPE(LLVMValueRef, ctypes.POINTER(struct_lp_build_fs_iface), ctypes.POINTER(struct_lp_build_context), ctypes.c_uint32, ctypes.c_uint32, ctypes.c_bool, ctypes.c_bool, LLVMValueRef, (LLVMValueRef * 2)), 0), ('fb_fetch', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_lp_build_fs_iface), ctypes.POINTER(struct_lp_build_context), ctypes.c_int32, (LLVMValueRef * 4)), 8)])
-struct_lp_build_tgsi_params.register_fields([('type', struct_lp_type, 0), ('mask', ctypes.POINTER(struct_lp_build_mask_context), 8), ('consts_ptr', LLVMValueRef, 16), ('const_sizes_ptr', LLVMValueRef, 24), ('system_values', ctypes.POINTER(struct_lp_bld_tgsi_system_values), 32), ('inputs', ctypes.POINTER((LLVMValueRef * 4)), 40), ('num_inputs', ctypes.c_int32, 48), ('context_type', LLVMTypeRef, 56), ('context_ptr', LLVMValueRef, 64), ('resources_type', LLVMTypeRef, 72), ('resources_ptr', LLVMValueRef, 80), ('thread_data_type', LLVMTypeRef, 88), ('thread_data_ptr', LLVMValueRef, 96), ('sampler', ctypes.POINTER(struct_lp_build_sampler_soa), 104), ('info', ctypes.POINTER(struct_tgsi_shader_info), 112), ('gs_iface', ctypes.POINTER(struct_lp_build_gs_iface), 120), ('tcs_iface', ctypes.POINTER(struct_lp_build_tcs_iface), 128), ('tes_iface', ctypes.POINTER(struct_lp_build_tes_iface), 136), ('mesh_iface', ctypes.POINTER(struct_lp_build_mesh_iface), 144), ('ssbo_ptr', LLVMValueRef, 152), ('ssbo_sizes_ptr', LLVMValueRef, 160), ('image', ctypes.POINTER(struct_lp_build_image_soa), 168), ('shared_ptr', LLVMValueRef, 176), ('payload_ptr', LLVMValueRef, 184), ('coro', ctypes.POINTER(struct_lp_build_coro_suspend_info), 192), ('fs_iface', ctypes.POINTER(struct_lp_build_fs_iface), 200), ('gs_vertex_streams', ctypes.c_uint32, 208), ('current_func', LLVMValueRef, 216), ('fns', ctypes.POINTER(struct_hash_table), 224), ('scratch_ptr', LLVMValueRef, 232), ('call_context_ptr', LLVMValueRef, 240)])
-@dll.bind(None, ctypes.POINTER(struct_gallivm_state), ctypes.POINTER(struct_nir_shader), ctypes.POINTER(struct_lp_build_tgsi_params), ctypes.POINTER((LLVMValueRef * 4)))
-def lp_build_nir_soa(gallivm:ctypes._Pointer[struct_gallivm_state], shader:ctypes._Pointer[struct_nir_shader], params:ctypes._Pointer[struct_lp_build_tgsi_params], outputs:ctypes._Pointer[(LLVMValueRef * 4)]) -> None: ...
-@dll.bind(None, ctypes.POINTER(struct_gallivm_state), ctypes.POINTER(struct_nir_shader), ctypes.POINTER(nir_function_impl), ctypes.POINTER(struct_lp_build_tgsi_params), ctypes.POINTER((LLVMValueRef * 4)))
-def lp_build_nir_soa_func(gallivm:ctypes._Pointer[struct_gallivm_state], shader:ctypes._Pointer[struct_nir_shader], impl:ctypes._Pointer[nir_function_impl], params:ctypes._Pointer[struct_lp_build_tgsi_params], outputs:ctypes._Pointer[(LLVMValueRef * 4)]) -> None: ...
+  interp_fn: c.CFUNCTYPE[c.POINTER[struct_LLVMOpaqueValue], [c.POINTER[struct_lp_build_fs_iface], c.POINTER[struct_lp_build_context], ctypes.c_uint32, ctypes.c_uint32, ctypes.c_bool, ctypes.c_bool, c.POINTER[struct_LLVMOpaqueValue], c.POINTER[c.POINTER[struct_LLVMOpaqueValue]]]]
+  fb_fetch: c.CFUNCTYPE[None, [c.POINTER[struct_lp_build_fs_iface], c.POINTER[struct_lp_build_context], ctypes.c_int32, c.POINTER[c.POINTER[struct_LLVMOpaqueValue]]]]
+struct_lp_build_fs_iface.register_fields([('interp_fn', c.CFUNCTYPE[LLVMValueRef, [c.POINTER[struct_lp_build_fs_iface], c.POINTER[struct_lp_build_context], ctypes.c_uint32, ctypes.c_uint32, ctypes.c_bool, ctypes.c_bool, LLVMValueRef, c.Array[LLVMValueRef, Literal[2]]]], 0), ('fb_fetch', c.CFUNCTYPE[None, [c.POINTER[struct_lp_build_fs_iface], c.POINTER[struct_lp_build_context], ctypes.c_int32, c.Array[LLVMValueRef, Literal[4]]]], 8)])
+struct_lp_build_tgsi_params.register_fields([('type', struct_lp_type, 0), ('mask', c.POINTER[struct_lp_build_mask_context], 8), ('consts_ptr', LLVMValueRef, 16), ('const_sizes_ptr', LLVMValueRef, 24), ('system_values', c.POINTER[struct_lp_bld_tgsi_system_values], 32), ('inputs', c.POINTER[c.Array[LLVMValueRef, Literal[4]]], 40), ('num_inputs', ctypes.c_int32, 48), ('context_type', LLVMTypeRef, 56), ('context_ptr', LLVMValueRef, 64), ('resources_type', LLVMTypeRef, 72), ('resources_ptr', LLVMValueRef, 80), ('thread_data_type', LLVMTypeRef, 88), ('thread_data_ptr', LLVMValueRef, 96), ('sampler', c.POINTER[struct_lp_build_sampler_soa], 104), ('info', c.POINTER[struct_tgsi_shader_info], 112), ('gs_iface', c.POINTER[struct_lp_build_gs_iface], 120), ('tcs_iface', c.POINTER[struct_lp_build_tcs_iface], 128), ('tes_iface', c.POINTER[struct_lp_build_tes_iface], 136), ('mesh_iface', c.POINTER[struct_lp_build_mesh_iface], 144), ('ssbo_ptr', LLVMValueRef, 152), ('ssbo_sizes_ptr', LLVMValueRef, 160), ('image', c.POINTER[struct_lp_build_image_soa], 168), ('shared_ptr', LLVMValueRef, 176), ('payload_ptr', LLVMValueRef, 184), ('coro', c.POINTER[struct_lp_build_coro_suspend_info], 192), ('fs_iface', c.POINTER[struct_lp_build_fs_iface], 200), ('gs_vertex_streams', ctypes.c_uint32, 208), ('current_func', LLVMValueRef, 216), ('fns', c.POINTER[struct_hash_table], 224), ('scratch_ptr', LLVMValueRef, 232), ('call_context_ptr', LLVMValueRef, 240)])
+@dll.bind(None, c.POINTER[struct_gallivm_state], c.POINTER[struct_nir_shader], c.POINTER[struct_lp_build_tgsi_params], c.POINTER[c.Array[LLVMValueRef, Literal[4]]])
+def lp_build_nir_soa(gallivm:c.POINTER[struct_gallivm_state], shader:c.POINTER[struct_nir_shader], params:c.POINTER[struct_lp_build_tgsi_params], outputs:c.POINTER[c.Array[LLVMValueRef, Literal[4]]]) -> None: ...
+@dll.bind(None, c.POINTER[struct_gallivm_state], c.POINTER[struct_nir_shader], c.POINTER[nir_function_impl], c.POINTER[struct_lp_build_tgsi_params], c.POINTER[c.Array[LLVMValueRef, Literal[4]]])
+def lp_build_nir_soa_func(gallivm:c.POINTER[struct_gallivm_state], shader:c.POINTER[struct_nir_shader], impl:c.POINTER[nir_function_impl], params:c.POINTER[struct_lp_build_tgsi_params], outputs:c.POINTER[c.Array[LLVMValueRef, Literal[4]]]) -> None: ...
 @c.record
 class struct_lp_build_sampler_aos(c.Struct):
   SIZE = 8
-  emit_fetch_texel: ctypes._CFunctionType
+  emit_fetch_texel: c.CFUNCTYPE[c.POINTER[struct_LLVMOpaqueValue], [c.POINTER[struct_lp_build_sampler_aos], c.POINTER[struct_lp_build_context], ctypes.c_uint32, ctypes.c_uint32, c.POINTER[struct_LLVMOpaqueValue], struct_lp_derivatives, ctypes.c_uint32]]
 enum_tgsi_texture_type: dict[int, str] = {(TGSI_TEXTURE_BUFFER:=0): 'TGSI_TEXTURE_BUFFER', (TGSI_TEXTURE_1D:=1): 'TGSI_TEXTURE_1D', (TGSI_TEXTURE_2D:=2): 'TGSI_TEXTURE_2D', (TGSI_TEXTURE_3D:=3): 'TGSI_TEXTURE_3D', (TGSI_TEXTURE_CUBE:=4): 'TGSI_TEXTURE_CUBE', (TGSI_TEXTURE_RECT:=5): 'TGSI_TEXTURE_RECT', (TGSI_TEXTURE_SHADOW1D:=6): 'TGSI_TEXTURE_SHADOW1D', (TGSI_TEXTURE_SHADOW2D:=7): 'TGSI_TEXTURE_SHADOW2D', (TGSI_TEXTURE_SHADOWRECT:=8): 'TGSI_TEXTURE_SHADOWRECT', (TGSI_TEXTURE_1D_ARRAY:=9): 'TGSI_TEXTURE_1D_ARRAY', (TGSI_TEXTURE_2D_ARRAY:=10): 'TGSI_TEXTURE_2D_ARRAY', (TGSI_TEXTURE_SHADOW1D_ARRAY:=11): 'TGSI_TEXTURE_SHADOW1D_ARRAY', (TGSI_TEXTURE_SHADOW2D_ARRAY:=12): 'TGSI_TEXTURE_SHADOW2D_ARRAY', (TGSI_TEXTURE_SHADOWCUBE:=13): 'TGSI_TEXTURE_SHADOWCUBE', (TGSI_TEXTURE_2D_MSAA:=14): 'TGSI_TEXTURE_2D_MSAA', (TGSI_TEXTURE_2D_ARRAY_MSAA:=15): 'TGSI_TEXTURE_2D_ARRAY_MSAA', (TGSI_TEXTURE_CUBE_ARRAY:=16): 'TGSI_TEXTURE_CUBE_ARRAY', (TGSI_TEXTURE_SHADOWCUBE_ARRAY:=17): 'TGSI_TEXTURE_SHADOWCUBE_ARRAY', (TGSI_TEXTURE_UNKNOWN:=18): 'TGSI_TEXTURE_UNKNOWN', (TGSI_TEXTURE_COUNT:=19): 'TGSI_TEXTURE_COUNT'}
 enum_lp_build_tex_modifier: dict[int, str] = {(LP_BLD_TEX_MODIFIER_NONE:=0): 'LP_BLD_TEX_MODIFIER_NONE', (LP_BLD_TEX_MODIFIER_PROJECTED:=1): 'LP_BLD_TEX_MODIFIER_PROJECTED', (LP_BLD_TEX_MODIFIER_LOD_BIAS:=2): 'LP_BLD_TEX_MODIFIER_LOD_BIAS', (LP_BLD_TEX_MODIFIER_EXPLICIT_LOD:=3): 'LP_BLD_TEX_MODIFIER_EXPLICIT_LOD', (LP_BLD_TEX_MODIFIER_EXPLICIT_DERIV:=4): 'LP_BLD_TEX_MODIFIER_EXPLICIT_DERIV', (LP_BLD_TEX_MODIFIER_LOD_ZERO:=5): 'LP_BLD_TEX_MODIFIER_LOD_ZERO'}
-struct_lp_build_sampler_aos.register_fields([('emit_fetch_texel', ctypes.CFUNCTYPE(LLVMValueRef, ctypes.POINTER(struct_lp_build_sampler_aos), ctypes.POINTER(struct_lp_build_context), ctypes.c_uint32, ctypes.c_uint32, LLVMValueRef, struct_lp_derivatives, ctypes.c_uint32), 0)])
-@dll.bind(None, ctypes.POINTER(struct_gallivm_state), ctypes.POINTER(struct_nir_shader), struct_lp_type, (ctypes.c_ubyte * 4), LLVMValueRef, ctypes.POINTER(LLVMValueRef), ctypes.POINTER(LLVMValueRef), ctypes.POINTER(struct_lp_build_sampler_aos))
-def lp_build_nir_aos(gallivm:ctypes._Pointer[struct_gallivm_state], shader:ctypes._Pointer[struct_nir_shader], type:struct_lp_type, swizzles:ctypes.Array[ctypes.c_ubyte], consts_ptr:LLVMValueRef, inputs:ctypes._Pointer[LLVMValueRef], outputs:ctypes._Pointer[LLVMValueRef], sampler:ctypes._Pointer[struct_lp_build_sampler_aos]) -> None: ...
+struct_lp_build_sampler_aos.register_fields([('emit_fetch_texel', c.CFUNCTYPE[LLVMValueRef, [c.POINTER[struct_lp_build_sampler_aos], c.POINTER[struct_lp_build_context], ctypes.c_uint32, ctypes.c_uint32, LLVMValueRef, struct_lp_derivatives, ctypes.c_uint32]], 0)])
+@dll.bind(None, c.POINTER[struct_gallivm_state], c.POINTER[struct_nir_shader], struct_lp_type, c.Array[ctypes.c_ubyte, Literal[4]], LLVMValueRef, c.POINTER[LLVMValueRef], c.POINTER[LLVMValueRef], c.POINTER[struct_lp_build_sampler_aos])
+def lp_build_nir_aos(gallivm:c.POINTER[struct_gallivm_state], shader:c.POINTER[struct_nir_shader], type:struct_lp_type, swizzles:c.Array[ctypes.c_ubyte, Literal[4]], consts_ptr:LLVMValueRef, inputs:c.POINTER[LLVMValueRef], outputs:c.POINTER[LLVMValueRef], sampler:c.POINTER[struct_lp_build_sampler_aos]) -> None: ...
 @c.record
 class struct_lp_build_fn(c.Struct):
   SIZE = 16
-  fn_type: ctypes._Pointer[struct_LLVMOpaqueType]
-  fn: ctypes._Pointer[struct_LLVMOpaqueValue]
+  fn_type: c.POINTER[struct_LLVMOpaqueType]
+  fn: c.POINTER[struct_LLVMOpaqueValue]
 struct_lp_build_fn.register_fields([('fn_type', LLVMTypeRef, 0), ('fn', LLVMValueRef, 8)])
-@dll.bind(None, ctypes.POINTER(struct_nir_shader))
-def lp_build_nir_soa_prepasses(nir:ctypes._Pointer[struct_nir_shader]) -> None: ...
-@dll.bind(None, ctypes.POINTER(struct_nir_shader))
-def lp_build_opt_nir(nir:ctypes._Pointer[struct_nir_shader]) -> None: ...
+@dll.bind(None, c.POINTER[struct_nir_shader])
+def lp_build_nir_soa_prepasses(nir:c.POINTER[struct_nir_shader]) -> None: ...
+@dll.bind(None, c.POINTER[struct_nir_shader])
+def lp_build_opt_nir(nir:c.POINTER[struct_nir_shader]) -> None: ...
 @dll.bind(ctypes.c_uint32, ctypes.c_uint32)
 def lp_translate_atomic_op(op:ctypes.c_uint32) -> ctypes.c_uint32: ...
-@dll.bind(uint32_t, gl_shader_stage, ctypes.POINTER(nir_tex_instr))
-def lp_build_nir_sample_key(stage:gl_shader_stage, instr:ctypes._Pointer[nir_tex_instr]) -> uint32_t: ...
-@dll.bind(None, ctypes.POINTER(struct_lp_img_params), ctypes.POINTER(nir_intrinsic_instr))
-def lp_img_op_from_intrinsic(params:ctypes._Pointer[struct_lp_img_params], instr:ctypes._Pointer[nir_intrinsic_instr]) -> None: ...
-@dll.bind(uint32_t, ctypes.POINTER(nir_intrinsic_instr))
-def lp_packed_img_op_from_intrinsic(instr:ctypes._Pointer[nir_intrinsic_instr]) -> uint32_t: ...
+@dll.bind(uint32_t, gl_shader_stage, c.POINTER[nir_tex_instr])
+def lp_build_nir_sample_key(stage:gl_shader_stage, instr:c.POINTER[nir_tex_instr]) -> uint32_t: ...
+@dll.bind(None, c.POINTER[struct_lp_img_params], c.POINTER[nir_intrinsic_instr])
+def lp_img_op_from_intrinsic(params:c.POINTER[struct_lp_img_params], instr:c.POINTER[nir_intrinsic_instr]) -> None: ...
+@dll.bind(uint32_t, c.POINTER[nir_intrinsic_instr])
+def lp_packed_img_op_from_intrinsic(instr:c.POINTER[nir_intrinsic_instr]) -> uint32_t: ...
 enum_lp_nir_call_context_args: dict[int, str] = {(LP_NIR_CALL_CONTEXT_CONTEXT:=0): 'LP_NIR_CALL_CONTEXT_CONTEXT', (LP_NIR_CALL_CONTEXT_RESOURCES:=1): 'LP_NIR_CALL_CONTEXT_RESOURCES', (LP_NIR_CALL_CONTEXT_SHARED:=2): 'LP_NIR_CALL_CONTEXT_SHARED', (LP_NIR_CALL_CONTEXT_SCRATCH:=3): 'LP_NIR_CALL_CONTEXT_SCRATCH', (LP_NIR_CALL_CONTEXT_WORK_DIM:=4): 'LP_NIR_CALL_CONTEXT_WORK_DIM', (LP_NIR_CALL_CONTEXT_THREAD_ID_0:=5): 'LP_NIR_CALL_CONTEXT_THREAD_ID_0', (LP_NIR_CALL_CONTEXT_THREAD_ID_1:=6): 'LP_NIR_CALL_CONTEXT_THREAD_ID_1', (LP_NIR_CALL_CONTEXT_THREAD_ID_2:=7): 'LP_NIR_CALL_CONTEXT_THREAD_ID_2', (LP_NIR_CALL_CONTEXT_BLOCK_ID_0:=8): 'LP_NIR_CALL_CONTEXT_BLOCK_ID_0', (LP_NIR_CALL_CONTEXT_BLOCK_ID_1:=9): 'LP_NIR_CALL_CONTEXT_BLOCK_ID_1', (LP_NIR_CALL_CONTEXT_BLOCK_ID_2:=10): 'LP_NIR_CALL_CONTEXT_BLOCK_ID_2', (LP_NIR_CALL_CONTEXT_GRID_SIZE_0:=11): 'LP_NIR_CALL_CONTEXT_GRID_SIZE_0', (LP_NIR_CALL_CONTEXT_GRID_SIZE_1:=12): 'LP_NIR_CALL_CONTEXT_GRID_SIZE_1', (LP_NIR_CALL_CONTEXT_GRID_SIZE_2:=13): 'LP_NIR_CALL_CONTEXT_GRID_SIZE_2', (LP_NIR_CALL_CONTEXT_BLOCK_SIZE_0:=14): 'LP_NIR_CALL_CONTEXT_BLOCK_SIZE_0', (LP_NIR_CALL_CONTEXT_BLOCK_SIZE_1:=15): 'LP_NIR_CALL_CONTEXT_BLOCK_SIZE_1', (LP_NIR_CALL_CONTEXT_BLOCK_SIZE_2:=16): 'LP_NIR_CALL_CONTEXT_BLOCK_SIZE_2', (LP_NIR_CALL_CONTEXT_MAX_ARGS:=17): 'LP_NIR_CALL_CONTEXT_MAX_ARGS'}
-@dll.bind(LLVMTypeRef, ctypes.POINTER(struct_gallivm_state), ctypes.c_int32, LLVMTypeRef, LLVMTypeRef)
-def lp_build_cs_func_call_context(gallivm:ctypes._Pointer[struct_gallivm_state], length:int, context_type:LLVMTypeRef, resources_type:LLVMTypeRef) -> LLVMTypeRef: ...
-@dll.bind(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.c_uint32, ctypes.POINTER(ctypes.c_char))
-def lp_build_struct_get_ptr2(gallivm:ctypes._Pointer[struct_gallivm_state], ptr_type:LLVMTypeRef, ptr:LLVMValueRef, member:int, name:ctypes._Pointer[ctypes.c_char]) -> LLVMValueRef: ...
-@dll.bind(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.c_uint32, ctypes.POINTER(ctypes.c_char))
-def lp_build_struct_get2(gallivm:ctypes._Pointer[struct_gallivm_state], ptr_type:LLVMTypeRef, ptr:LLVMValueRef, member:int, name:ctypes._Pointer[ctypes.c_char]) -> LLVMValueRef: ...
-@dll.bind(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, LLVMValueRef)
-def lp_build_array_get_ptr2(gallivm:ctypes._Pointer[struct_gallivm_state], array_type:LLVMTypeRef, ptr:LLVMValueRef, index:LLVMValueRef) -> LLVMValueRef: ...
-@dll.bind(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, LLVMValueRef)
-def lp_build_array_get2(gallivm:ctypes._Pointer[struct_gallivm_state], array_type:LLVMTypeRef, ptr:LLVMValueRef, index:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind(LLVMTypeRef, c.POINTER[struct_gallivm_state], ctypes.c_int32, LLVMTypeRef, LLVMTypeRef)
+def lp_build_cs_func_call_context(gallivm:c.POINTER[struct_gallivm_state], length:int, context_type:LLVMTypeRef, resources_type:LLVMTypeRef) -> LLVMTypeRef: ...
+@dll.bind(LLVMValueRef, c.POINTER[struct_gallivm_state], LLVMTypeRef, LLVMValueRef, ctypes.c_uint32, c.POINTER[ctypes.c_char])
+def lp_build_struct_get_ptr2(gallivm:c.POINTER[struct_gallivm_state], ptr_type:LLVMTypeRef, ptr:LLVMValueRef, member:int, name:c.POINTER[ctypes.c_char]) -> LLVMValueRef: ...
+@dll.bind(LLVMValueRef, c.POINTER[struct_gallivm_state], LLVMTypeRef, LLVMValueRef, ctypes.c_uint32, c.POINTER[ctypes.c_char])
+def lp_build_struct_get2(gallivm:c.POINTER[struct_gallivm_state], ptr_type:LLVMTypeRef, ptr:LLVMValueRef, member:int, name:c.POINTER[ctypes.c_char]) -> LLVMValueRef: ...
+@dll.bind(LLVMValueRef, c.POINTER[struct_gallivm_state], LLVMTypeRef, LLVMValueRef, LLVMValueRef)
+def lp_build_array_get_ptr2(gallivm:c.POINTER[struct_gallivm_state], array_type:LLVMTypeRef, ptr:LLVMValueRef, index:LLVMValueRef) -> LLVMValueRef: ...
+@dll.bind(LLVMValueRef, c.POINTER[struct_gallivm_state], LLVMTypeRef, LLVMValueRef, LLVMValueRef)
+def lp_build_array_get2(gallivm:c.POINTER[struct_gallivm_state], array_type:LLVMTypeRef, ptr:LLVMValueRef, index:LLVMValueRef) -> LLVMValueRef: ...
 @dll.bind(LLVMValueRef, LLVMBuilderRef, LLVMTypeRef, LLVMValueRef, LLVMValueRef)
 def lp_build_pointer_get2(builder:LLVMBuilderRef, ptr_type:LLVMTypeRef, ptr:LLVMValueRef, index:LLVMValueRef) -> LLVMValueRef: ...
 @dll.bind(LLVMValueRef, LLVMBuilderRef, LLVMTypeRef, LLVMValueRef, LLVMValueRef, ctypes.c_uint32)
@@ -3455,40 +3455,40 @@ def lp_build_pointer_set_unaligned(builder:LLVMBuilderRef, ptr:LLVMValueRef, ind
 @c.record
 class struct_lp_sampler_dynamic_state(c.Struct):
   SIZE = 144
-  width: ctypes._CFunctionType
-  height: ctypes._CFunctionType
-  depth: ctypes._CFunctionType
-  first_level: ctypes._CFunctionType
-  last_level: ctypes._CFunctionType
-  row_stride: ctypes._CFunctionType
-  img_stride: ctypes._CFunctionType
-  base_ptr: ctypes._CFunctionType
-  mip_offsets: ctypes._CFunctionType
-  num_samples: ctypes._CFunctionType
-  sample_stride: ctypes._CFunctionType
-  min_lod: ctypes._CFunctionType
-  max_lod: ctypes._CFunctionType
-  lod_bias: ctypes._CFunctionType
-  border_color: ctypes._CFunctionType
-  cache_ptr: ctypes._CFunctionType
-  residency: ctypes._CFunctionType
-  base_offset: ctypes._CFunctionType
-struct_lp_sampler_dynamic_state.register_fields([('width', ctypes.CFUNCTYPE(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.c_uint32, LLVMValueRef), 0), ('height', ctypes.CFUNCTYPE(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.c_uint32, LLVMValueRef), 8), ('depth', ctypes.CFUNCTYPE(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.c_uint32, LLVMValueRef), 16), ('first_level', ctypes.CFUNCTYPE(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.c_uint32, LLVMValueRef), 24), ('last_level', ctypes.CFUNCTYPE(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.c_uint32, LLVMValueRef), 32), ('row_stride', ctypes.CFUNCTYPE(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.c_uint32, LLVMValueRef, ctypes.POINTER(LLVMTypeRef)), 40), ('img_stride', ctypes.CFUNCTYPE(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.c_uint32, LLVMValueRef, ctypes.POINTER(LLVMTypeRef)), 48), ('base_ptr', ctypes.CFUNCTYPE(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.c_uint32, LLVMValueRef), 56), ('mip_offsets', ctypes.CFUNCTYPE(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.c_uint32, LLVMValueRef, ctypes.POINTER(LLVMTypeRef)), 64), ('num_samples', ctypes.CFUNCTYPE(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.c_uint32, LLVMValueRef), 72), ('sample_stride', ctypes.CFUNCTYPE(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.c_uint32, LLVMValueRef), 80), ('min_lod', ctypes.CFUNCTYPE(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.c_uint32), 88), ('max_lod', ctypes.CFUNCTYPE(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.c_uint32), 96), ('lod_bias', ctypes.CFUNCTYPE(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.c_uint32), 104), ('border_color', ctypes.CFUNCTYPE(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.c_uint32), 112), ('cache_ptr', ctypes.CFUNCTYPE(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.c_uint32), 120), ('residency', ctypes.CFUNCTYPE(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.c_uint32, LLVMValueRef), 128), ('base_offset', ctypes.CFUNCTYPE(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.c_uint32, LLVMValueRef), 136)])
+  width: c.CFUNCTYPE[c.POINTER[struct_LLVMOpaqueValue], [c.POINTER[struct_gallivm_state], c.POINTER[struct_LLVMOpaqueType], c.POINTER[struct_LLVMOpaqueValue], ctypes.c_uint32, c.POINTER[struct_LLVMOpaqueValue]]]
+  height: c.CFUNCTYPE[c.POINTER[struct_LLVMOpaqueValue], [c.POINTER[struct_gallivm_state], c.POINTER[struct_LLVMOpaqueType], c.POINTER[struct_LLVMOpaqueValue], ctypes.c_uint32, c.POINTER[struct_LLVMOpaqueValue]]]
+  depth: c.CFUNCTYPE[c.POINTER[struct_LLVMOpaqueValue], [c.POINTER[struct_gallivm_state], c.POINTER[struct_LLVMOpaqueType], c.POINTER[struct_LLVMOpaqueValue], ctypes.c_uint32, c.POINTER[struct_LLVMOpaqueValue]]]
+  first_level: c.CFUNCTYPE[c.POINTER[struct_LLVMOpaqueValue], [c.POINTER[struct_gallivm_state], c.POINTER[struct_LLVMOpaqueType], c.POINTER[struct_LLVMOpaqueValue], ctypes.c_uint32, c.POINTER[struct_LLVMOpaqueValue]]]
+  last_level: c.CFUNCTYPE[c.POINTER[struct_LLVMOpaqueValue], [c.POINTER[struct_gallivm_state], c.POINTER[struct_LLVMOpaqueType], c.POINTER[struct_LLVMOpaqueValue], ctypes.c_uint32, c.POINTER[struct_LLVMOpaqueValue]]]
+  row_stride: c.CFUNCTYPE[c.POINTER[struct_LLVMOpaqueValue], [c.POINTER[struct_gallivm_state], c.POINTER[struct_LLVMOpaqueType], c.POINTER[struct_LLVMOpaqueValue], ctypes.c_uint32, c.POINTER[struct_LLVMOpaqueValue], c.POINTER[c.POINTER[struct_LLVMOpaqueType]]]]
+  img_stride: c.CFUNCTYPE[c.POINTER[struct_LLVMOpaqueValue], [c.POINTER[struct_gallivm_state], c.POINTER[struct_LLVMOpaqueType], c.POINTER[struct_LLVMOpaqueValue], ctypes.c_uint32, c.POINTER[struct_LLVMOpaqueValue], c.POINTER[c.POINTER[struct_LLVMOpaqueType]]]]
+  base_ptr: c.CFUNCTYPE[c.POINTER[struct_LLVMOpaqueValue], [c.POINTER[struct_gallivm_state], c.POINTER[struct_LLVMOpaqueType], c.POINTER[struct_LLVMOpaqueValue], ctypes.c_uint32, c.POINTER[struct_LLVMOpaqueValue]]]
+  mip_offsets: c.CFUNCTYPE[c.POINTER[struct_LLVMOpaqueValue], [c.POINTER[struct_gallivm_state], c.POINTER[struct_LLVMOpaqueType], c.POINTER[struct_LLVMOpaqueValue], ctypes.c_uint32, c.POINTER[struct_LLVMOpaqueValue], c.POINTER[c.POINTER[struct_LLVMOpaqueType]]]]
+  num_samples: c.CFUNCTYPE[c.POINTER[struct_LLVMOpaqueValue], [c.POINTER[struct_gallivm_state], c.POINTER[struct_LLVMOpaqueType], c.POINTER[struct_LLVMOpaqueValue], ctypes.c_uint32, c.POINTER[struct_LLVMOpaqueValue]]]
+  sample_stride: c.CFUNCTYPE[c.POINTER[struct_LLVMOpaqueValue], [c.POINTER[struct_gallivm_state], c.POINTER[struct_LLVMOpaqueType], c.POINTER[struct_LLVMOpaqueValue], ctypes.c_uint32, c.POINTER[struct_LLVMOpaqueValue]]]
+  min_lod: c.CFUNCTYPE[c.POINTER[struct_LLVMOpaqueValue], [c.POINTER[struct_gallivm_state], c.POINTER[struct_LLVMOpaqueType], c.POINTER[struct_LLVMOpaqueValue], ctypes.c_uint32]]
+  max_lod: c.CFUNCTYPE[c.POINTER[struct_LLVMOpaqueValue], [c.POINTER[struct_gallivm_state], c.POINTER[struct_LLVMOpaqueType], c.POINTER[struct_LLVMOpaqueValue], ctypes.c_uint32]]
+  lod_bias: c.CFUNCTYPE[c.POINTER[struct_LLVMOpaqueValue], [c.POINTER[struct_gallivm_state], c.POINTER[struct_LLVMOpaqueType], c.POINTER[struct_LLVMOpaqueValue], ctypes.c_uint32]]
+  border_color: c.CFUNCTYPE[c.POINTER[struct_LLVMOpaqueValue], [c.POINTER[struct_gallivm_state], c.POINTER[struct_LLVMOpaqueType], c.POINTER[struct_LLVMOpaqueValue], ctypes.c_uint32]]
+  cache_ptr: c.CFUNCTYPE[c.POINTER[struct_LLVMOpaqueValue], [c.POINTER[struct_gallivm_state], c.POINTER[struct_LLVMOpaqueType], c.POINTER[struct_LLVMOpaqueValue], ctypes.c_uint32]]
+  residency: c.CFUNCTYPE[c.POINTER[struct_LLVMOpaqueValue], [c.POINTER[struct_gallivm_state], c.POINTER[struct_LLVMOpaqueType], c.POINTER[struct_LLVMOpaqueValue], ctypes.c_uint32, c.POINTER[struct_LLVMOpaqueValue]]]
+  base_offset: c.CFUNCTYPE[c.POINTER[struct_LLVMOpaqueValue], [c.POINTER[struct_gallivm_state], c.POINTER[struct_LLVMOpaqueType], c.POINTER[struct_LLVMOpaqueValue], ctypes.c_uint32, c.POINTER[struct_LLVMOpaqueValue]]]
+struct_lp_sampler_dynamic_state.register_fields([('width', c.CFUNCTYPE[LLVMValueRef, [c.POINTER[struct_gallivm_state], LLVMTypeRef, LLVMValueRef, ctypes.c_uint32, LLVMValueRef]], 0), ('height', c.CFUNCTYPE[LLVMValueRef, [c.POINTER[struct_gallivm_state], LLVMTypeRef, LLVMValueRef, ctypes.c_uint32, LLVMValueRef]], 8), ('depth', c.CFUNCTYPE[LLVMValueRef, [c.POINTER[struct_gallivm_state], LLVMTypeRef, LLVMValueRef, ctypes.c_uint32, LLVMValueRef]], 16), ('first_level', c.CFUNCTYPE[LLVMValueRef, [c.POINTER[struct_gallivm_state], LLVMTypeRef, LLVMValueRef, ctypes.c_uint32, LLVMValueRef]], 24), ('last_level', c.CFUNCTYPE[LLVMValueRef, [c.POINTER[struct_gallivm_state], LLVMTypeRef, LLVMValueRef, ctypes.c_uint32, LLVMValueRef]], 32), ('row_stride', c.CFUNCTYPE[LLVMValueRef, [c.POINTER[struct_gallivm_state], LLVMTypeRef, LLVMValueRef, ctypes.c_uint32, LLVMValueRef, c.POINTER[LLVMTypeRef]]], 40), ('img_stride', c.CFUNCTYPE[LLVMValueRef, [c.POINTER[struct_gallivm_state], LLVMTypeRef, LLVMValueRef, ctypes.c_uint32, LLVMValueRef, c.POINTER[LLVMTypeRef]]], 48), ('base_ptr', c.CFUNCTYPE[LLVMValueRef, [c.POINTER[struct_gallivm_state], LLVMTypeRef, LLVMValueRef, ctypes.c_uint32, LLVMValueRef]], 56), ('mip_offsets', c.CFUNCTYPE[LLVMValueRef, [c.POINTER[struct_gallivm_state], LLVMTypeRef, LLVMValueRef, ctypes.c_uint32, LLVMValueRef, c.POINTER[LLVMTypeRef]]], 64), ('num_samples', c.CFUNCTYPE[LLVMValueRef, [c.POINTER[struct_gallivm_state], LLVMTypeRef, LLVMValueRef, ctypes.c_uint32, LLVMValueRef]], 72), ('sample_stride', c.CFUNCTYPE[LLVMValueRef, [c.POINTER[struct_gallivm_state], LLVMTypeRef, LLVMValueRef, ctypes.c_uint32, LLVMValueRef]], 80), ('min_lod', c.CFUNCTYPE[LLVMValueRef, [c.POINTER[struct_gallivm_state], LLVMTypeRef, LLVMValueRef, ctypes.c_uint32]], 88), ('max_lod', c.CFUNCTYPE[LLVMValueRef, [c.POINTER[struct_gallivm_state], LLVMTypeRef, LLVMValueRef, ctypes.c_uint32]], 96), ('lod_bias', c.CFUNCTYPE[LLVMValueRef, [c.POINTER[struct_gallivm_state], LLVMTypeRef, LLVMValueRef, ctypes.c_uint32]], 104), ('border_color', c.CFUNCTYPE[LLVMValueRef, [c.POINTER[struct_gallivm_state], LLVMTypeRef, LLVMValueRef, ctypes.c_uint32]], 112), ('cache_ptr', c.CFUNCTYPE[LLVMValueRef, [c.POINTER[struct_gallivm_state], LLVMTypeRef, LLVMValueRef, ctypes.c_uint32]], 120), ('residency', c.CFUNCTYPE[LLVMValueRef, [c.POINTER[struct_gallivm_state], LLVMTypeRef, LLVMValueRef, ctypes.c_uint32, LLVMValueRef]], 128), ('base_offset', c.CFUNCTYPE[LLVMValueRef, [c.POINTER[struct_gallivm_state], LLVMTypeRef, LLVMValueRef, ctypes.c_uint32, LLVMValueRef]], 136)])
 @c.record
 class struct_lp_jit_buffer(c.Struct):
   SIZE = 16
-  u: ctypes._Pointer[ctypes.c_uint32]
-  f: ctypes._Pointer[ctypes.c_float]
+  u: c.POINTER[ctypes.c_uint32]
+  f: c.POINTER[ctypes.c_float]
   num_elements: int
-struct_lp_jit_buffer.register_fields([('u', ctypes.POINTER(uint32_t), 0), ('f', ctypes.POINTER(ctypes.c_float), 0), ('num_elements', uint32_t, 8)])
+struct_lp_jit_buffer.register_fields([('u', c.POINTER[uint32_t], 0), ('f', c.POINTER[ctypes.c_float], 0), ('num_elements', uint32_t, 8)])
 _anonenum0: dict[int, str] = {(LP_JIT_BUFFER_BASE:=0): 'LP_JIT_BUFFER_BASE', (LP_JIT_BUFFER_NUM_ELEMENTS:=1): 'LP_JIT_BUFFER_NUM_ELEMENTS', (LP_JIT_BUFFER_NUM_FIELDS:=2): 'LP_JIT_BUFFER_NUM_FIELDS'}
-@dll.bind(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), LLVMValueRef, LLVMValueRef, ctypes.c_uint32)
-def lp_llvm_descriptor_base(gallivm:ctypes._Pointer[struct_gallivm_state], buffers_ptr:LLVMValueRef, index:LLVMValueRef, buffers_limit:int) -> LLVMValueRef: ...
-@dll.bind(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), LLVMValueRef, LLVMValueRef, ctypes.c_uint32)
-def lp_llvm_buffer_base(gallivm:ctypes._Pointer[struct_gallivm_state], buffers_ptr:LLVMValueRef, buffers_offset:LLVMValueRef, buffers_limit:int) -> LLVMValueRef: ...
-@dll.bind(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), LLVMValueRef, LLVMValueRef, ctypes.c_uint32)
-def lp_llvm_buffer_num_elements(gallivm:ctypes._Pointer[struct_gallivm_state], buffers_ptr:LLVMValueRef, buffers_offset:LLVMValueRef, buffers_limit:int) -> LLVMValueRef: ...
-struct_lp_jit_texture.register_fields([('base', ctypes.c_void_p, 0), ('width', uint32_t, 8), ('height', uint16_t, 12), ('depth', uint16_t, 14), ('row_stride', (uint32_t * 16), 16), ('img_stride', (uint32_t * 16), 80), ('residency', ctypes.c_void_p, 16), ('first_level', uint8_t, 144), ('last_level', uint8_t, 145), ('mip_offsets', (uint32_t * 16), 148), ('sampler_index', uint32_t, 212)])
+@dll.bind(LLVMValueRef, c.POINTER[struct_gallivm_state], LLVMValueRef, LLVMValueRef, ctypes.c_uint32)
+def lp_llvm_descriptor_base(gallivm:c.POINTER[struct_gallivm_state], buffers_ptr:LLVMValueRef, index:LLVMValueRef, buffers_limit:int) -> LLVMValueRef: ...
+@dll.bind(LLVMValueRef, c.POINTER[struct_gallivm_state], LLVMValueRef, LLVMValueRef, ctypes.c_uint32)
+def lp_llvm_buffer_base(gallivm:c.POINTER[struct_gallivm_state], buffers_ptr:LLVMValueRef, buffers_offset:LLVMValueRef, buffers_limit:int) -> LLVMValueRef: ...
+@dll.bind(LLVMValueRef, c.POINTER[struct_gallivm_state], LLVMValueRef, LLVMValueRef, ctypes.c_uint32)
+def lp_llvm_buffer_num_elements(gallivm:c.POINTER[struct_gallivm_state], buffers_ptr:LLVMValueRef, buffers_offset:LLVMValueRef, buffers_limit:int) -> LLVMValueRef: ...
+struct_lp_jit_texture.register_fields([('base', ctypes.c_void_p, 0), ('width', uint32_t, 8), ('height', uint16_t, 12), ('depth', uint16_t, 14), ('row_stride', c.Array[uint32_t, Literal[16]], 16), ('img_stride', c.Array[uint32_t, Literal[16]], 80), ('residency', ctypes.c_void_p, 16), ('first_level', uint8_t, 144), ('last_level', uint8_t, 145), ('mip_offsets', c.Array[uint32_t, Literal[16]], 148), ('sampler_index', uint32_t, 212)])
 _anonenum1: dict[int, str] = {(LP_JIT_TEXTURE_BASE:=0): 'LP_JIT_TEXTURE_BASE', (LP_JIT_TEXTURE_WIDTH:=1): 'LP_JIT_TEXTURE_WIDTH', (LP_JIT_TEXTURE_HEIGHT:=2): 'LP_JIT_TEXTURE_HEIGHT', (LP_JIT_TEXTURE_DEPTH:=3): 'LP_JIT_TEXTURE_DEPTH', (LP_JIT_TEXTURE_ROW_STRIDE:=4): 'LP_JIT_TEXTURE_ROW_STRIDE', (LP_JIT_TEXTURE_IMG_STRIDE:=5): 'LP_JIT_TEXTURE_IMG_STRIDE', (LP_JIT_TEXTURE_FIRST_LEVEL:=6): 'LP_JIT_TEXTURE_FIRST_LEVEL', (LP_JIT_TEXTURE_LAST_LEVEL:=7): 'LP_JIT_TEXTURE_LAST_LEVEL', (LP_JIT_TEXTURE_MIP_OFFSETS:=8): 'LP_JIT_TEXTURE_MIP_OFFSETS', (LP_JIT_SAMPLER_INDEX_DUMMY:=9): 'LP_JIT_SAMPLER_INDEX_DUMMY', (LP_JIT_TEXTURE_NUM_FIELDS:=10): 'LP_JIT_TEXTURE_NUM_FIELDS'}
 @c.record
 class struct_lp_jit_sampler(c.Struct):
@@ -3496,13 +3496,13 @@ class struct_lp_jit_sampler(c.Struct):
   min_lod: float
   max_lod: float
   lod_bias: float
-  border_color: ctypes.Array[ctypes.c_float]
-struct_lp_jit_sampler.register_fields([('min_lod', ctypes.c_float, 0), ('max_lod', ctypes.c_float, 4), ('lod_bias', ctypes.c_float, 8), ('border_color', (ctypes.c_float * 4), 12)])
+  border_color: c.Array[ctypes.c_float, Literal[4]]
+struct_lp_jit_sampler.register_fields([('min_lod', ctypes.c_float, 0), ('max_lod', ctypes.c_float, 4), ('lod_bias', ctypes.c_float, 8), ('border_color', c.Array[ctypes.c_float, Literal[4]], 12)])
 _anonenum2: dict[int, str] = {(LP_JIT_SAMPLER_MIN_LOD:=0): 'LP_JIT_SAMPLER_MIN_LOD', (LP_JIT_SAMPLER_MAX_LOD:=1): 'LP_JIT_SAMPLER_MAX_LOD', (LP_JIT_SAMPLER_LOD_BIAS:=2): 'LP_JIT_SAMPLER_LOD_BIAS', (LP_JIT_SAMPLER_BORDER_COLOR:=3): 'LP_JIT_SAMPLER_BORDER_COLOR', (LP_JIT_SAMPLER_NUM_FIELDS:=4): 'LP_JIT_SAMPLER_NUM_FIELDS'}
 @c.record
 class struct_lp_jit_image(c.Struct):
   SIZE = 48
-  base: int|None
+  base: ctypes.c_void_p
   width: int
   height: int
   depth: int
@@ -3510,35 +3510,35 @@ class struct_lp_jit_image(c.Struct):
   sample_stride: int
   row_stride: int
   img_stride: int
-  residency: int|None
+  residency: ctypes.c_void_p
   base_offset: int
 struct_lp_jit_image.register_fields([('base', ctypes.c_void_p, 0), ('width', uint32_t, 8), ('height', uint16_t, 12), ('depth', uint16_t, 14), ('num_samples', uint8_t, 16), ('sample_stride', uint32_t, 20), ('row_stride', uint32_t, 24), ('img_stride', uint32_t, 28), ('residency', ctypes.c_void_p, 32), ('base_offset', uint32_t, 40)])
 _anonenum3: dict[int, str] = {(LP_JIT_IMAGE_BASE:=0): 'LP_JIT_IMAGE_BASE', (LP_JIT_IMAGE_WIDTH:=1): 'LP_JIT_IMAGE_WIDTH', (LP_JIT_IMAGE_HEIGHT:=2): 'LP_JIT_IMAGE_HEIGHT', (LP_JIT_IMAGE_DEPTH:=3): 'LP_JIT_IMAGE_DEPTH', (LP_JIT_IMAGE_NUM_SAMPLES:=4): 'LP_JIT_IMAGE_NUM_SAMPLES', (LP_JIT_IMAGE_SAMPLE_STRIDE:=5): 'LP_JIT_IMAGE_SAMPLE_STRIDE', (LP_JIT_IMAGE_ROW_STRIDE:=6): 'LP_JIT_IMAGE_ROW_STRIDE', (LP_JIT_IMAGE_IMG_STRIDE:=7): 'LP_JIT_IMAGE_IMG_STRIDE', (LP_JIT_IMAGE_RESIDENCY:=8): 'LP_JIT_IMAGE_RESIDENCY', (LP_JIT_IMAGE_BASE_OFFSET:=9): 'LP_JIT_IMAGE_BASE_OFFSET', (LP_JIT_IMAGE_NUM_FIELDS:=10): 'LP_JIT_IMAGE_NUM_FIELDS'}
 @c.record
 class struct_lp_jit_resources(c.Struct):
   SIZE = 32384
-  constants: ctypes.Array[struct_lp_jit_buffer]
-  ssbos: ctypes.Array[struct_lp_jit_buffer]
-  textures: ctypes.Array[struct_lp_jit_texture]
-  samplers: ctypes.Array[struct_lp_jit_sampler]
-  images: ctypes.Array[struct_lp_jit_image]
-struct_lp_jit_resources.register_fields([('constants', (struct_lp_jit_buffer * 16), 0), ('ssbos', (struct_lp_jit_buffer * 32), 256), ('textures', (struct_lp_jit_texture * 128), 768), ('samplers', (struct_lp_jit_sampler * 32), 28416), ('images', (struct_lp_jit_image * 64), 29312)])
+  constants: c.Array[struct_lp_jit_buffer, Literal[16]]
+  ssbos: c.Array[struct_lp_jit_buffer, Literal[32]]
+  textures: c.Array[struct_lp_jit_texture, Literal[128]]
+  samplers: c.Array[struct_lp_jit_sampler, Literal[32]]
+  images: c.Array[struct_lp_jit_image, Literal[64]]
+struct_lp_jit_resources.register_fields([('constants', c.Array[struct_lp_jit_buffer, Literal[16]], 0), ('ssbos', c.Array[struct_lp_jit_buffer, Literal[32]], 256), ('textures', c.Array[struct_lp_jit_texture, Literal[128]], 768), ('samplers', c.Array[struct_lp_jit_sampler, Literal[32]], 28416), ('images', c.Array[struct_lp_jit_image, Literal[64]], 29312)])
 _anonenum4: dict[int, str] = {(LP_JIT_RES_CONSTANTS:=0): 'LP_JIT_RES_CONSTANTS', (LP_JIT_RES_SSBOS:=1): 'LP_JIT_RES_SSBOS', (LP_JIT_RES_TEXTURES:=2): 'LP_JIT_RES_TEXTURES', (LP_JIT_RES_SAMPLERS:=3): 'LP_JIT_RES_SAMPLERS', (LP_JIT_RES_IMAGES:=4): 'LP_JIT_RES_IMAGES', (LP_JIT_RES_COUNT:=5): 'LP_JIT_RES_COUNT'}
-@dll.bind(LLVMTypeRef, ctypes.POINTER(struct_gallivm_state))
-def lp_build_jit_resources_type(gallivm:ctypes._Pointer[struct_gallivm_state]) -> LLVMTypeRef: ...
+@dll.bind(LLVMTypeRef, c.POINTER[struct_gallivm_state])
+def lp_build_jit_resources_type(gallivm:c.POINTER[struct_gallivm_state]) -> LLVMTypeRef: ...
 _anonenum5: dict[int, str] = {(LP_JIT_VERTEX_HEADER_VERTEX_ID:=0): 'LP_JIT_VERTEX_HEADER_VERTEX_ID', (LP_JIT_VERTEX_HEADER_CLIP_POS:=1): 'LP_JIT_VERTEX_HEADER_CLIP_POS', (LP_JIT_VERTEX_HEADER_DATA:=2): 'LP_JIT_VERTEX_HEADER_DATA'}
-@dll.bind(LLVMTypeRef, ctypes.POINTER(struct_gallivm_state), ctypes.c_int32)
-def lp_build_create_jit_vertex_header_type(gallivm:ctypes._Pointer[struct_gallivm_state], data_elems:int) -> LLVMTypeRef: ...
-@dll.bind(None, ctypes.POINTER(struct_lp_sampler_dynamic_state))
-def lp_build_jit_fill_sampler_dynamic_state(state:ctypes._Pointer[struct_lp_sampler_dynamic_state]) -> None: ...
-@dll.bind(None, ctypes.POINTER(struct_lp_sampler_dynamic_state))
-def lp_build_jit_fill_image_dynamic_state(state:ctypes._Pointer[struct_lp_sampler_dynamic_state]) -> None: ...
-@dll.bind(LLVMTypeRef, ctypes.POINTER(struct_gallivm_state), uint32_t)
-def lp_build_sample_function_type(gallivm:ctypes._Pointer[struct_gallivm_state], sample_key:uint32_t) -> LLVMTypeRef: ...
-@dll.bind(LLVMTypeRef, ctypes.POINTER(struct_gallivm_state), ctypes.POINTER(struct_lp_sampler_size_query_params))
-def lp_build_size_function_type(gallivm:ctypes._Pointer[struct_gallivm_state], params:ctypes._Pointer[struct_lp_sampler_size_query_params]) -> LLVMTypeRef: ...
-@dll.bind(LLVMTypeRef, ctypes.POINTER(struct_gallivm_state), ctypes.POINTER(struct_lp_img_params), ctypes.c_bool, ctypes.c_bool)
-def lp_build_image_function_type(gallivm:ctypes._Pointer[struct_gallivm_state], params:ctypes._Pointer[struct_lp_img_params], ms:bool, is64:bool) -> LLVMTypeRef: ...
+@dll.bind(LLVMTypeRef, c.POINTER[struct_gallivm_state], ctypes.c_int32)
+def lp_build_create_jit_vertex_header_type(gallivm:c.POINTER[struct_gallivm_state], data_elems:int) -> LLVMTypeRef: ...
+@dll.bind(None, c.POINTER[struct_lp_sampler_dynamic_state])
+def lp_build_jit_fill_sampler_dynamic_state(state:c.POINTER[struct_lp_sampler_dynamic_state]) -> None: ...
+@dll.bind(None, c.POINTER[struct_lp_sampler_dynamic_state])
+def lp_build_jit_fill_image_dynamic_state(state:c.POINTER[struct_lp_sampler_dynamic_state]) -> None: ...
+@dll.bind(LLVMTypeRef, c.POINTER[struct_gallivm_state], uint32_t)
+def lp_build_sample_function_type(gallivm:c.POINTER[struct_gallivm_state], sample_key:uint32_t) -> LLVMTypeRef: ...
+@dll.bind(LLVMTypeRef, c.POINTER[struct_gallivm_state], c.POINTER[struct_lp_sampler_size_query_params])
+def lp_build_size_function_type(gallivm:c.POINTER[struct_gallivm_state], params:c.POINTER[struct_lp_sampler_size_query_params]) -> LLVMTypeRef: ...
+@dll.bind(LLVMTypeRef, c.POINTER[struct_gallivm_state], c.POINTER[struct_lp_img_params], ctypes.c_bool, ctypes.c_bool)
+def lp_build_image_function_type(gallivm:c.POINTER[struct_gallivm_state], params:c.POINTER[struct_lp_img_params], ms:bool, is64:bool) -> LLVMTypeRef: ...
 @c.record
 class struct_lp_texture_handle_state(c.Struct):
   SIZE = 232
@@ -3567,28 +3567,28 @@ struct_lp_texture_handle_state.register_fields([('static_state', struct_lp_stati
 @c.record
 class struct_lp_texture_functions(c.Struct):
   SIZE = 296
-  sample_functions: ctypes._Pointer[ctypes.POINTER(ctypes.c_void_p)]
+  sample_functions: c.POINTER[c.POINTER[ctypes.c_void_p]]
   sampler_count: int
-  fetch_functions: ctypes._Pointer[ctypes.c_void_p]
-  size_function: int|None
-  samples_function: int|None
-  image_functions: ctypes._Pointer[ctypes.c_void_p]
+  fetch_functions: c.POINTER[ctypes.c_void_p]
+  size_function: ctypes.c_void_p
+  samples_function: ctypes.c_void_p
+  image_functions: c.POINTER[ctypes.c_void_p]
   state: struct_lp_texture_handle_state
   sampled: bool
   storage: bool
-  matrix: int|None
-struct_lp_texture_functions.register_fields([('sample_functions', ctypes.POINTER(ctypes.POINTER(ctypes.c_void_p)), 0), ('sampler_count', uint32_t, 8), ('fetch_functions', ctypes.POINTER(ctypes.c_void_p), 16), ('size_function', ctypes.c_void_p, 24), ('samples_function', ctypes.c_void_p, 32), ('image_functions', ctypes.POINTER(ctypes.c_void_p), 40), ('state', struct_lp_texture_handle_state, 48), ('sampled', ctypes.c_bool, 280), ('storage', ctypes.c_bool, 281), ('matrix', ctypes.c_void_p, 288)])
+  matrix: ctypes.c_void_p
+struct_lp_texture_functions.register_fields([('sample_functions', c.POINTER[c.POINTER[ctypes.c_void_p]], 0), ('sampler_count', uint32_t, 8), ('fetch_functions', c.POINTER[ctypes.c_void_p], 16), ('size_function', ctypes.c_void_p, 24), ('samples_function', ctypes.c_void_p, 32), ('image_functions', c.POINTER[ctypes.c_void_p], 40), ('state', struct_lp_texture_handle_state, 48), ('sampled', ctypes.c_bool, 280), ('storage', ctypes.c_bool, 281), ('matrix', ctypes.c_void_p, 288)])
 @c.record
 class struct_lp_texture_handle(c.Struct):
   SIZE = 16
-  functions: int|None
+  functions: ctypes.c_void_p
   sampler_index: int
 struct_lp_texture_handle.register_fields([('functions', ctypes.c_void_p, 0), ('sampler_index', uint32_t, 8)])
 @c.record
 class struct_lp_jit_bindless_texture(c.Struct):
   SIZE = 24
-  base: int|None
-  residency: int|None
+  base: ctypes.c_void_p
+  residency: ctypes.c_void_p
   sampler_index: int
 struct_lp_jit_bindless_texture.register_fields([('base', ctypes.c_void_p, 0), ('residency', ctypes.c_void_p, 8), ('sampler_index', uint32_t, 16)])
 @c.record
@@ -3599,90 +3599,90 @@ class struct_lp_descriptor(c.Struct):
   image: struct_lp_jit_image
   buffer: struct_lp_jit_buffer
   accel_struct: int
-  functions: int|None
+  functions: ctypes.c_void_p
 struct_lp_descriptor.register_fields([('texture', struct_lp_jit_bindless_texture, 0), ('sampler', struct_lp_jit_sampler, 24), ('image', struct_lp_jit_image, 0), ('buffer', struct_lp_jit_buffer, 0), ('accel_struct', uint64_t, 0), ('functions', ctypes.c_void_p, 56)])
-@dll.bind(None, ctypes.POINTER(struct_lp_build_skip_context), ctypes.POINTER(struct_gallivm_state))
-def lp_build_flow_skip_begin(ctx:ctypes._Pointer[struct_lp_build_skip_context], gallivm:ctypes._Pointer[struct_gallivm_state]) -> None: ...
-@dll.bind(None, ctypes.POINTER(struct_lp_build_skip_context), LLVMValueRef)
-def lp_build_flow_skip_cond_break(ctx:ctypes._Pointer[struct_lp_build_skip_context], cond:LLVMValueRef) -> None: ...
-@dll.bind(None, ctypes.POINTER(struct_lp_build_skip_context))
-def lp_build_flow_skip_end(ctx:ctypes._Pointer[struct_lp_build_skip_context]) -> None: ...
-@dll.bind(None, ctypes.POINTER(struct_lp_build_mask_context), ctypes.POINTER(struct_gallivm_state), struct_lp_type, LLVMValueRef)
-def lp_build_mask_begin(mask:ctypes._Pointer[struct_lp_build_mask_context], gallivm:ctypes._Pointer[struct_gallivm_state], type:struct_lp_type, value:LLVMValueRef) -> None: ...
-@dll.bind(LLVMValueRef, ctypes.POINTER(struct_lp_build_mask_context))
-def lp_build_mask_value(mask:ctypes._Pointer[struct_lp_build_mask_context]) -> LLVMValueRef: ...
-@dll.bind(None, ctypes.POINTER(struct_lp_build_mask_context), LLVMValueRef)
-def lp_build_mask_update(mask:ctypes._Pointer[struct_lp_build_mask_context], value:LLVMValueRef) -> None: ...
-@dll.bind(None, ctypes.POINTER(struct_lp_build_mask_context), LLVMValueRef)
-def lp_build_mask_force(mask:ctypes._Pointer[struct_lp_build_mask_context], value:LLVMValueRef) -> None: ...
-@dll.bind(None, ctypes.POINTER(struct_lp_build_mask_context))
-def lp_build_mask_check(mask:ctypes._Pointer[struct_lp_build_mask_context]) -> None: ...
-@dll.bind(LLVMValueRef, ctypes.POINTER(struct_lp_build_mask_context))
-def lp_build_mask_end(mask:ctypes._Pointer[struct_lp_build_mask_context]) -> LLVMValueRef: ...
+@dll.bind(None, c.POINTER[struct_lp_build_skip_context], c.POINTER[struct_gallivm_state])
+def lp_build_flow_skip_begin(ctx:c.POINTER[struct_lp_build_skip_context], gallivm:c.POINTER[struct_gallivm_state]) -> None: ...
+@dll.bind(None, c.POINTER[struct_lp_build_skip_context], LLVMValueRef)
+def lp_build_flow_skip_cond_break(ctx:c.POINTER[struct_lp_build_skip_context], cond:LLVMValueRef) -> None: ...
+@dll.bind(None, c.POINTER[struct_lp_build_skip_context])
+def lp_build_flow_skip_end(ctx:c.POINTER[struct_lp_build_skip_context]) -> None: ...
+@dll.bind(None, c.POINTER[struct_lp_build_mask_context], c.POINTER[struct_gallivm_state], struct_lp_type, LLVMValueRef)
+def lp_build_mask_begin(mask:c.POINTER[struct_lp_build_mask_context], gallivm:c.POINTER[struct_gallivm_state], type:struct_lp_type, value:LLVMValueRef) -> None: ...
+@dll.bind(LLVMValueRef, c.POINTER[struct_lp_build_mask_context])
+def lp_build_mask_value(mask:c.POINTER[struct_lp_build_mask_context]) -> LLVMValueRef: ...
+@dll.bind(None, c.POINTER[struct_lp_build_mask_context], LLVMValueRef)
+def lp_build_mask_update(mask:c.POINTER[struct_lp_build_mask_context], value:LLVMValueRef) -> None: ...
+@dll.bind(None, c.POINTER[struct_lp_build_mask_context], LLVMValueRef)
+def lp_build_mask_force(mask:c.POINTER[struct_lp_build_mask_context], value:LLVMValueRef) -> None: ...
+@dll.bind(None, c.POINTER[struct_lp_build_mask_context])
+def lp_build_mask_check(mask:c.POINTER[struct_lp_build_mask_context]) -> None: ...
+@dll.bind(LLVMValueRef, c.POINTER[struct_lp_build_mask_context])
+def lp_build_mask_end(mask:c.POINTER[struct_lp_build_mask_context]) -> LLVMValueRef: ...
 @c.record
 class struct_lp_build_loop_state(c.Struct):
   SIZE = 40
-  block: ctypes._Pointer[struct_LLVMOpaqueBasicBlock]
-  counter_var: ctypes._Pointer[struct_LLVMOpaqueValue]
-  counter: ctypes._Pointer[struct_LLVMOpaqueValue]
-  counter_type: ctypes._Pointer[struct_LLVMOpaqueType]
-  gallivm: ctypes._Pointer[struct_gallivm_state]
-struct_lp_build_loop_state.register_fields([('block', LLVMBasicBlockRef, 0), ('counter_var', LLVMValueRef, 8), ('counter', LLVMValueRef, 16), ('counter_type', LLVMTypeRef, 24), ('gallivm', ctypes.POINTER(struct_gallivm_state), 32)])
-@dll.bind(None, ctypes.POINTER(struct_lp_build_loop_state), ctypes.POINTER(struct_gallivm_state), LLVMValueRef)
-def lp_build_loop_begin(state:ctypes._Pointer[struct_lp_build_loop_state], gallivm:ctypes._Pointer[struct_gallivm_state], start:LLVMValueRef) -> None: ...
-@dll.bind(None, ctypes.POINTER(struct_lp_build_loop_state), LLVMValueRef, LLVMValueRef)
-def lp_build_loop_end(state:ctypes._Pointer[struct_lp_build_loop_state], end:LLVMValueRef, step:LLVMValueRef) -> None: ...
-@dll.bind(None, ctypes.POINTER(struct_lp_build_loop_state), LLVMValueRef)
-def lp_build_loop_force_set_counter(state:ctypes._Pointer[struct_lp_build_loop_state], end:LLVMValueRef) -> None: ...
-@dll.bind(None, ctypes.POINTER(struct_lp_build_loop_state))
-def lp_build_loop_force_reload_counter(state:ctypes._Pointer[struct_lp_build_loop_state]) -> None: ...
+  block: c.POINTER[struct_LLVMOpaqueBasicBlock]
+  counter_var: c.POINTER[struct_LLVMOpaqueValue]
+  counter: c.POINTER[struct_LLVMOpaqueValue]
+  counter_type: c.POINTER[struct_LLVMOpaqueType]
+  gallivm: c.POINTER[struct_gallivm_state]
+struct_lp_build_loop_state.register_fields([('block', LLVMBasicBlockRef, 0), ('counter_var', LLVMValueRef, 8), ('counter', LLVMValueRef, 16), ('counter_type', LLVMTypeRef, 24), ('gallivm', c.POINTER[struct_gallivm_state], 32)])
+@dll.bind(None, c.POINTER[struct_lp_build_loop_state], c.POINTER[struct_gallivm_state], LLVMValueRef)
+def lp_build_loop_begin(state:c.POINTER[struct_lp_build_loop_state], gallivm:c.POINTER[struct_gallivm_state], start:LLVMValueRef) -> None: ...
+@dll.bind(None, c.POINTER[struct_lp_build_loop_state], LLVMValueRef, LLVMValueRef)
+def lp_build_loop_end(state:c.POINTER[struct_lp_build_loop_state], end:LLVMValueRef, step:LLVMValueRef) -> None: ...
+@dll.bind(None, c.POINTER[struct_lp_build_loop_state], LLVMValueRef)
+def lp_build_loop_force_set_counter(state:c.POINTER[struct_lp_build_loop_state], end:LLVMValueRef) -> None: ...
+@dll.bind(None, c.POINTER[struct_lp_build_loop_state])
+def lp_build_loop_force_reload_counter(state:c.POINTER[struct_lp_build_loop_state]) -> None: ...
 LLVMIntPredicate: dict[int, str] = {(LLVMIntEQ:=32): 'LLVMIntEQ', (LLVMIntNE:=33): 'LLVMIntNE', (LLVMIntUGT:=34): 'LLVMIntUGT', (LLVMIntUGE:=35): 'LLVMIntUGE', (LLVMIntULT:=36): 'LLVMIntULT', (LLVMIntULE:=37): 'LLVMIntULE', (LLVMIntSGT:=38): 'LLVMIntSGT', (LLVMIntSGE:=39): 'LLVMIntSGE', (LLVMIntSLT:=40): 'LLVMIntSLT', (LLVMIntSLE:=41): 'LLVMIntSLE'}
-@dll.bind(None, ctypes.POINTER(struct_lp_build_loop_state), LLVMValueRef, LLVMValueRef, ctypes.c_uint32)
-def lp_build_loop_end_cond(state:ctypes._Pointer[struct_lp_build_loop_state], end:LLVMValueRef, step:LLVMValueRef, cond:ctypes.c_uint32) -> None: ...
+@dll.bind(None, c.POINTER[struct_lp_build_loop_state], LLVMValueRef, LLVMValueRef, ctypes.c_uint32)
+def lp_build_loop_end_cond(state:c.POINTER[struct_lp_build_loop_state], end:LLVMValueRef, step:LLVMValueRef, cond:ctypes.c_uint32) -> None: ...
 @c.record
 class struct_lp_build_for_loop_state(c.Struct):
   SIZE = 80
-  begin: ctypes._Pointer[struct_LLVMOpaqueBasicBlock]
-  body: ctypes._Pointer[struct_LLVMOpaqueBasicBlock]
-  exit: ctypes._Pointer[struct_LLVMOpaqueBasicBlock]
-  counter_var: ctypes._Pointer[struct_LLVMOpaqueValue]
-  counter: ctypes._Pointer[struct_LLVMOpaqueValue]
-  counter_type: ctypes._Pointer[struct_LLVMOpaqueType]
-  step: ctypes._Pointer[struct_LLVMOpaqueValue]
+  begin: c.POINTER[struct_LLVMOpaqueBasicBlock]
+  body: c.POINTER[struct_LLVMOpaqueBasicBlock]
+  exit: c.POINTER[struct_LLVMOpaqueBasicBlock]
+  counter_var: c.POINTER[struct_LLVMOpaqueValue]
+  counter: c.POINTER[struct_LLVMOpaqueValue]
+  counter_type: c.POINTER[struct_LLVMOpaqueType]
+  step: c.POINTER[struct_LLVMOpaqueValue]
   cond: int
-  end: ctypes._Pointer[struct_LLVMOpaqueValue]
-  gallivm: ctypes._Pointer[struct_gallivm_state]
-struct_lp_build_for_loop_state.register_fields([('begin', LLVMBasicBlockRef, 0), ('body', LLVMBasicBlockRef, 8), ('exit', LLVMBasicBlockRef, 16), ('counter_var', LLVMValueRef, 24), ('counter', LLVMValueRef, 32), ('counter_type', LLVMTypeRef, 40), ('step', LLVMValueRef, 48), ('cond', ctypes.c_uint32, 56), ('end', LLVMValueRef, 64), ('gallivm', ctypes.POINTER(struct_gallivm_state), 72)])
-@dll.bind(None, ctypes.POINTER(struct_lp_build_for_loop_state), ctypes.POINTER(struct_gallivm_state), LLVMValueRef, ctypes.c_uint32, LLVMValueRef, LLVMValueRef)
-def lp_build_for_loop_begin(state:ctypes._Pointer[struct_lp_build_for_loop_state], gallivm:ctypes._Pointer[struct_gallivm_state], start:LLVMValueRef, llvm_cond:ctypes.c_uint32, end:LLVMValueRef, step:LLVMValueRef) -> None: ...
-@dll.bind(None, ctypes.POINTER(struct_lp_build_for_loop_state))
-def lp_build_for_loop_end(state:ctypes._Pointer[struct_lp_build_for_loop_state]) -> None: ...
+  end: c.POINTER[struct_LLVMOpaqueValue]
+  gallivm: c.POINTER[struct_gallivm_state]
+struct_lp_build_for_loop_state.register_fields([('begin', LLVMBasicBlockRef, 0), ('body', LLVMBasicBlockRef, 8), ('exit', LLVMBasicBlockRef, 16), ('counter_var', LLVMValueRef, 24), ('counter', LLVMValueRef, 32), ('counter_type', LLVMTypeRef, 40), ('step', LLVMValueRef, 48), ('cond', ctypes.c_uint32, 56), ('end', LLVMValueRef, 64), ('gallivm', c.POINTER[struct_gallivm_state], 72)])
+@dll.bind(None, c.POINTER[struct_lp_build_for_loop_state], c.POINTER[struct_gallivm_state], LLVMValueRef, ctypes.c_uint32, LLVMValueRef, LLVMValueRef)
+def lp_build_for_loop_begin(state:c.POINTER[struct_lp_build_for_loop_state], gallivm:c.POINTER[struct_gallivm_state], start:LLVMValueRef, llvm_cond:ctypes.c_uint32, end:LLVMValueRef, step:LLVMValueRef) -> None: ...
+@dll.bind(None, c.POINTER[struct_lp_build_for_loop_state])
+def lp_build_for_loop_end(state:c.POINTER[struct_lp_build_for_loop_state]) -> None: ...
 @c.record
 class struct_lp_build_if_state(c.Struct):
   SIZE = 48
-  gallivm: ctypes._Pointer[struct_gallivm_state]
-  condition: ctypes._Pointer[struct_LLVMOpaqueValue]
-  entry_block: ctypes._Pointer[struct_LLVMOpaqueBasicBlock]
-  true_block: ctypes._Pointer[struct_LLVMOpaqueBasicBlock]
-  false_block: ctypes._Pointer[struct_LLVMOpaqueBasicBlock]
-  merge_block: ctypes._Pointer[struct_LLVMOpaqueBasicBlock]
-struct_lp_build_if_state.register_fields([('gallivm', ctypes.POINTER(struct_gallivm_state), 0), ('condition', LLVMValueRef, 8), ('entry_block', LLVMBasicBlockRef, 16), ('true_block', LLVMBasicBlockRef, 24), ('false_block', LLVMBasicBlockRef, 32), ('merge_block', LLVMBasicBlockRef, 40)])
-@dll.bind(None, ctypes.POINTER(struct_lp_build_if_state), ctypes.POINTER(struct_gallivm_state), LLVMValueRef)
-def lp_build_if(ctx:ctypes._Pointer[struct_lp_build_if_state], gallivm:ctypes._Pointer[struct_gallivm_state], condition:LLVMValueRef) -> None: ...
-@dll.bind(None, ctypes.POINTER(struct_lp_build_if_state))
-def lp_build_else(ctx:ctypes._Pointer[struct_lp_build_if_state]) -> None: ...
-@dll.bind(None, ctypes.POINTER(struct_lp_build_if_state))
-def lp_build_endif(ctx:ctypes._Pointer[struct_lp_build_if_state]) -> None: ...
-@dll.bind(LLVMBasicBlockRef, ctypes.POINTER(struct_gallivm_state), ctypes.POINTER(ctypes.c_char))
-def lp_build_insert_new_block(gallivm:ctypes._Pointer[struct_gallivm_state], name:ctypes._Pointer[ctypes.c_char]) -> LLVMBasicBlockRef: ...
-@dll.bind(LLVMBuilderRef, ctypes.POINTER(struct_gallivm_state))
-def lp_create_builder_at_entry(gallivm:ctypes._Pointer[struct_gallivm_state]) -> LLVMBuilderRef: ...
-@dll.bind(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, ctypes.POINTER(ctypes.c_char))
-def lp_build_alloca(gallivm:ctypes._Pointer[struct_gallivm_state], type:LLVMTypeRef, name:ctypes._Pointer[ctypes.c_char]) -> LLVMValueRef: ...
-@dll.bind(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, ctypes.POINTER(ctypes.c_char))
-def lp_build_alloca_undef(gallivm:ctypes._Pointer[struct_gallivm_state], type:LLVMTypeRef, name:ctypes._Pointer[ctypes.c_char]) -> LLVMValueRef: ...
-@dll.bind(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), LLVMTypeRef, LLVMValueRef, ctypes.POINTER(ctypes.c_char))
-def lp_build_array_alloca(gallivm:ctypes._Pointer[struct_gallivm_state], type:LLVMTypeRef, count:LLVMValueRef, name:ctypes._Pointer[ctypes.c_char]) -> LLVMValueRef: ...
+  gallivm: c.POINTER[struct_gallivm_state]
+  condition: c.POINTER[struct_LLVMOpaqueValue]
+  entry_block: c.POINTER[struct_LLVMOpaqueBasicBlock]
+  true_block: c.POINTER[struct_LLVMOpaqueBasicBlock]
+  false_block: c.POINTER[struct_LLVMOpaqueBasicBlock]
+  merge_block: c.POINTER[struct_LLVMOpaqueBasicBlock]
+struct_lp_build_if_state.register_fields([('gallivm', c.POINTER[struct_gallivm_state], 0), ('condition', LLVMValueRef, 8), ('entry_block', LLVMBasicBlockRef, 16), ('true_block', LLVMBasicBlockRef, 24), ('false_block', LLVMBasicBlockRef, 32), ('merge_block', LLVMBasicBlockRef, 40)])
+@dll.bind(None, c.POINTER[struct_lp_build_if_state], c.POINTER[struct_gallivm_state], LLVMValueRef)
+def lp_build_if(ctx:c.POINTER[struct_lp_build_if_state], gallivm:c.POINTER[struct_gallivm_state], condition:LLVMValueRef) -> None: ...
+@dll.bind(None, c.POINTER[struct_lp_build_if_state])
+def lp_build_else(ctx:c.POINTER[struct_lp_build_if_state]) -> None: ...
+@dll.bind(None, c.POINTER[struct_lp_build_if_state])
+def lp_build_endif(ctx:c.POINTER[struct_lp_build_if_state]) -> None: ...
+@dll.bind(LLVMBasicBlockRef, c.POINTER[struct_gallivm_state], c.POINTER[ctypes.c_char])
+def lp_build_insert_new_block(gallivm:c.POINTER[struct_gallivm_state], name:c.POINTER[ctypes.c_char]) -> LLVMBasicBlockRef: ...
+@dll.bind(LLVMBuilderRef, c.POINTER[struct_gallivm_state])
+def lp_create_builder_at_entry(gallivm:c.POINTER[struct_gallivm_state]) -> LLVMBuilderRef: ...
+@dll.bind(LLVMValueRef, c.POINTER[struct_gallivm_state], LLVMTypeRef, c.POINTER[ctypes.c_char])
+def lp_build_alloca(gallivm:c.POINTER[struct_gallivm_state], type:LLVMTypeRef, name:c.POINTER[ctypes.c_char]) -> LLVMValueRef: ...
+@dll.bind(LLVMValueRef, c.POINTER[struct_gallivm_state], LLVMTypeRef, c.POINTER[ctypes.c_char])
+def lp_build_alloca_undef(gallivm:c.POINTER[struct_gallivm_state], type:LLVMTypeRef, name:c.POINTER[ctypes.c_char]) -> LLVMValueRef: ...
+@dll.bind(LLVMValueRef, c.POINTER[struct_gallivm_state], LLVMTypeRef, LLVMValueRef, c.POINTER[ctypes.c_char])
+def lp_build_array_alloca(gallivm:c.POINTER[struct_gallivm_state], type:LLVMTypeRef, count:LLVMValueRef, name:c.POINTER[ctypes.c_char]) -> LLVMValueRef: ...
 @dll.bind(ctypes.c_uint32, struct_lp_type)
 def lp_mantissa(type:struct_lp_type) -> int: ...
 @dll.bind(ctypes.c_uint32, struct_lp_type)
@@ -3697,32 +3697,32 @@ def lp_const_min(type:struct_lp_type) -> float: ...
 def lp_const_max(type:struct_lp_type) -> float: ...
 @dll.bind(ctypes.c_double, struct_lp_type)
 def lp_const_eps(type:struct_lp_type) -> float: ...
-@dll.bind(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), struct_lp_type)
-def lp_build_undef(gallivm:ctypes._Pointer[struct_gallivm_state], type:struct_lp_type) -> LLVMValueRef: ...
-@dll.bind(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), struct_lp_type)
-def lp_build_zero(gallivm:ctypes._Pointer[struct_gallivm_state], type:struct_lp_type) -> LLVMValueRef: ...
-@dll.bind(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), struct_lp_type)
-def lp_build_one(gallivm:ctypes._Pointer[struct_gallivm_state], type:struct_lp_type) -> LLVMValueRef: ...
-@dll.bind(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), struct_lp_type, ctypes.c_double)
-def lp_build_const_elem(gallivm:ctypes._Pointer[struct_gallivm_state], type:struct_lp_type, val:float) -> LLVMValueRef: ...
-@dll.bind(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), struct_lp_type, ctypes.c_double)
-def lp_build_const_vec(gallivm:ctypes._Pointer[struct_gallivm_state], type:struct_lp_type, val:float) -> LLVMValueRef: ...
-@dll.bind(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), struct_lp_type, ctypes.c_int64)
-def lp_build_const_int_vec(gallivm:ctypes._Pointer[struct_gallivm_state], type:struct_lp_type, val:int) -> LLVMValueRef: ...
-@dll.bind(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), struct_lp_type)
-def lp_build_const_channel_vec(gallivm:ctypes._Pointer[struct_gallivm_state], type:struct_lp_type) -> LLVMValueRef: ...
-@dll.bind(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), struct_lp_type, ctypes.c_double, ctypes.c_double, ctypes.c_double, ctypes.c_double, ctypes.POINTER(ctypes.c_ubyte))
-def lp_build_const_aos(gallivm:ctypes._Pointer[struct_gallivm_state], type:struct_lp_type, r:float, g:float, b:float, a:float, swizzle:ctypes._Pointer[ctypes.c_ubyte]) -> LLVMValueRef: ...
-@dll.bind(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), struct_lp_type, ctypes.c_uint32, ctypes.c_uint32)
-def lp_build_const_mask_aos(gallivm:ctypes._Pointer[struct_gallivm_state], type:struct_lp_type, mask:int, channels:int) -> LLVMValueRef: ...
-@dll.bind(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), struct_lp_type, ctypes.c_uint32, ctypes.c_uint32, ctypes.POINTER(ctypes.c_ubyte))
-def lp_build_const_mask_aos_swizzled(gallivm:ctypes._Pointer[struct_gallivm_state], type:struct_lp_type, mask:int, channels:int, swizzle:ctypes._Pointer[ctypes.c_ubyte]) -> LLVMValueRef: ...
-@dll.bind(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), ctypes.POINTER(ctypes.c_char))
-def lp_build_const_string(gallivm:ctypes._Pointer[struct_gallivm_state], str:ctypes._Pointer[ctypes.c_char]) -> LLVMValueRef: ...
-@dll.bind(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), ctypes.c_void_p, LLVMTypeRef, ctypes.POINTER(LLVMTypeRef), ctypes.c_uint32, ctypes.POINTER(ctypes.c_char))
-def lp_build_const_func_pointer(gallivm:ctypes._Pointer[struct_gallivm_state], ptr:int|None, ret_type:LLVMTypeRef, arg_types:ctypes._Pointer[LLVMTypeRef], num_args:int, name:ctypes._Pointer[ctypes.c_char]) -> LLVMValueRef: ...
-@dll.bind(LLVMValueRef, ctypes.POINTER(struct_gallivm_state), ctypes.c_void_p, LLVMTypeRef, ctypes.POINTER(ctypes.c_char))
-def lp_build_const_func_pointer_from_type(gallivm:ctypes._Pointer[struct_gallivm_state], ptr:int|None, function_type:LLVMTypeRef, name:ctypes._Pointer[ctypes.c_char]) -> LLVMValueRef: ...
+@dll.bind(LLVMValueRef, c.POINTER[struct_gallivm_state], struct_lp_type)
+def lp_build_undef(gallivm:c.POINTER[struct_gallivm_state], type:struct_lp_type) -> LLVMValueRef: ...
+@dll.bind(LLVMValueRef, c.POINTER[struct_gallivm_state], struct_lp_type)
+def lp_build_zero(gallivm:c.POINTER[struct_gallivm_state], type:struct_lp_type) -> LLVMValueRef: ...
+@dll.bind(LLVMValueRef, c.POINTER[struct_gallivm_state], struct_lp_type)
+def lp_build_one(gallivm:c.POINTER[struct_gallivm_state], type:struct_lp_type) -> LLVMValueRef: ...
+@dll.bind(LLVMValueRef, c.POINTER[struct_gallivm_state], struct_lp_type, ctypes.c_double)
+def lp_build_const_elem(gallivm:c.POINTER[struct_gallivm_state], type:struct_lp_type, val:float) -> LLVMValueRef: ...
+@dll.bind(LLVMValueRef, c.POINTER[struct_gallivm_state], struct_lp_type, ctypes.c_double)
+def lp_build_const_vec(gallivm:c.POINTER[struct_gallivm_state], type:struct_lp_type, val:float) -> LLVMValueRef: ...
+@dll.bind(LLVMValueRef, c.POINTER[struct_gallivm_state], struct_lp_type, ctypes.c_int64)
+def lp_build_const_int_vec(gallivm:c.POINTER[struct_gallivm_state], type:struct_lp_type, val:int) -> LLVMValueRef: ...
+@dll.bind(LLVMValueRef, c.POINTER[struct_gallivm_state], struct_lp_type)
+def lp_build_const_channel_vec(gallivm:c.POINTER[struct_gallivm_state], type:struct_lp_type) -> LLVMValueRef: ...
+@dll.bind(LLVMValueRef, c.POINTER[struct_gallivm_state], struct_lp_type, ctypes.c_double, ctypes.c_double, ctypes.c_double, ctypes.c_double, c.POINTER[ctypes.c_ubyte])
+def lp_build_const_aos(gallivm:c.POINTER[struct_gallivm_state], type:struct_lp_type, r:float, g:float, b:float, a:float, swizzle:c.POINTER[ctypes.c_ubyte]) -> LLVMValueRef: ...
+@dll.bind(LLVMValueRef, c.POINTER[struct_gallivm_state], struct_lp_type, ctypes.c_uint32, ctypes.c_uint32)
+def lp_build_const_mask_aos(gallivm:c.POINTER[struct_gallivm_state], type:struct_lp_type, mask:int, channels:int) -> LLVMValueRef: ...
+@dll.bind(LLVMValueRef, c.POINTER[struct_gallivm_state], struct_lp_type, ctypes.c_uint32, ctypes.c_uint32, c.POINTER[ctypes.c_ubyte])
+def lp_build_const_mask_aos_swizzled(gallivm:c.POINTER[struct_gallivm_state], type:struct_lp_type, mask:int, channels:int, swizzle:c.POINTER[ctypes.c_ubyte]) -> LLVMValueRef: ...
+@dll.bind(LLVMValueRef, c.POINTER[struct_gallivm_state], c.POINTER[ctypes.c_char])
+def lp_build_const_string(gallivm:c.POINTER[struct_gallivm_state], str:c.POINTER[ctypes.c_char]) -> LLVMValueRef: ...
+@dll.bind(LLVMValueRef, c.POINTER[struct_gallivm_state], ctypes.c_void_p, LLVMTypeRef, c.POINTER[LLVMTypeRef], ctypes.c_uint32, c.POINTER[ctypes.c_char])
+def lp_build_const_func_pointer(gallivm:c.POINTER[struct_gallivm_state], ptr:ctypes.c_void_p, ret_type:LLVMTypeRef, arg_types:c.POINTER[LLVMTypeRef], num_args:int, name:c.POINTER[ctypes.c_char]) -> LLVMValueRef: ...
+@dll.bind(LLVMValueRef, c.POINTER[struct_gallivm_state], ctypes.c_void_p, LLVMTypeRef, c.POINTER[ctypes.c_char])
+def lp_build_const_func_pointer_from_type(gallivm:c.POINTER[struct_gallivm_state], ptr:ctypes.c_void_p, function_type:LLVMTypeRef, name:c.POINTER[ctypes.c_char]) -> LLVMValueRef: ...
 @c.record
 class struct_fd_dev_info(c.Struct):
   SIZE = 764
@@ -3799,7 +3799,7 @@ class struct_fd_dev_info_a6xx(c.Struct):
   has_sad: bool
   is_a702: bool
   magic: struct_fd_dev_info_a6xx_magic
-  magic_raw: ctypes.Array[struct_fd_dev_info_a6xx_magic_raw]
+  magic_raw: c.Array[struct_fd_dev_info_a6xx_magic_raw, Literal[64]]
   max_sets: int
   line_width_min: float
   line_width_max: float
@@ -3828,7 +3828,7 @@ class struct_fd_dev_info_a6xx_magic_raw(c.Struct):
   reg: int
   value: int
 struct_fd_dev_info_a6xx_magic_raw.register_fields([('reg', uint32_t, 0), ('value', uint32_t, 4)])
-struct_fd_dev_info_a6xx.register_fields([('reg_size_vec4', uint32_t, 0), ('instr_cache_size', uint32_t, 4), ('has_hw_multiview', ctypes.c_bool, 8), ('has_fs_tex_prefetch', ctypes.c_bool, 9), ('supports_multiview_mask', ctypes.c_bool, 10), ('concurrent_resolve', ctypes.c_bool, 11), ('has_z24uint_s8uint', ctypes.c_bool, 12), ('tess_use_shared', ctypes.c_bool, 13), ('has_legacy_pipeline_shading_rate', ctypes.c_bool, 14), ('storage_16bit', ctypes.c_bool, 15), ('indirect_draw_wfm_quirk', ctypes.c_bool, 16), ('depth_bounds_require_depth_test_quirk', ctypes.c_bool, 17), ('has_tex_filter_cubic', ctypes.c_bool, 18), ('has_separate_chroma_filter', ctypes.c_bool, 19), ('has_sample_locations', ctypes.c_bool, 20), ('has_cp_reg_write', ctypes.c_bool, 21), ('has_8bpp_ubwc', ctypes.c_bool, 22), ('has_lpac', ctypes.c_bool, 23), ('has_getfiberid', ctypes.c_bool, 24), ('mov_half_shared_quirk', ctypes.c_bool, 25), ('has_movs', ctypes.c_bool, 26), ('has_dp2acc', ctypes.c_bool, 27), ('has_dp4acc', ctypes.c_bool, 28), ('enable_lrz_fast_clear', ctypes.c_bool, 29), ('has_lrz_dir_tracking', ctypes.c_bool, 30), ('lrz_track_quirk', ctypes.c_bool, 31), ('has_lrz_feedback', ctypes.c_bool, 32), ('has_per_view_viewport', ctypes.c_bool, 33), ('has_gmem_fast_clear', ctypes.c_bool, 34), ('sysmem_per_ccu_depth_cache_size', uint32_t, 36), ('sysmem_per_ccu_color_cache_size', uint32_t, 40), ('gmem_ccu_color_cache_fraction', uint32_t, 44), ('prim_alloc_threshold', uint32_t, 48), ('vs_max_inputs_count', uint32_t, 52), ('supports_double_threadsize', ctypes.c_bool, 56), ('has_sampler_minmax', ctypes.c_bool, 57), ('broken_ds_ubwc_quirk', ctypes.c_bool, 58), ('has_scalar_alu', ctypes.c_bool, 59), ('has_early_preamble', ctypes.c_bool, 60), ('has_isam_v', ctypes.c_bool, 61), ('has_ssbo_imm_offsets', ctypes.c_bool, 62), ('has_coherent_ubwc_flag_caches', ctypes.c_bool, 63), ('has_attachment_shading_rate', ctypes.c_bool, 64), ('has_ubwc_linear_mipmap_fallback', ctypes.c_bool, 65), ('predtf_nop_quirk', ctypes.c_bool, 66), ('prede_nop_quirk', ctypes.c_bool, 67), ('has_sad', ctypes.c_bool, 68), ('is_a702', ctypes.c_bool, 69), ('magic', struct_fd_dev_info_a6xx_magic, 72), ('magic_raw', (struct_fd_dev_info_a6xx_magic_raw * 64), 128), ('max_sets', uint32_t, 640), ('line_width_min', ctypes.c_float, 644), ('line_width_max', ctypes.c_float, 648), ('has_bin_mask', ctypes.c_bool, 652)])
+struct_fd_dev_info_a6xx.register_fields([('reg_size_vec4', uint32_t, 0), ('instr_cache_size', uint32_t, 4), ('has_hw_multiview', ctypes.c_bool, 8), ('has_fs_tex_prefetch', ctypes.c_bool, 9), ('supports_multiview_mask', ctypes.c_bool, 10), ('concurrent_resolve', ctypes.c_bool, 11), ('has_z24uint_s8uint', ctypes.c_bool, 12), ('tess_use_shared', ctypes.c_bool, 13), ('has_legacy_pipeline_shading_rate', ctypes.c_bool, 14), ('storage_16bit', ctypes.c_bool, 15), ('indirect_draw_wfm_quirk', ctypes.c_bool, 16), ('depth_bounds_require_depth_test_quirk', ctypes.c_bool, 17), ('has_tex_filter_cubic', ctypes.c_bool, 18), ('has_separate_chroma_filter', ctypes.c_bool, 19), ('has_sample_locations', ctypes.c_bool, 20), ('has_cp_reg_write', ctypes.c_bool, 21), ('has_8bpp_ubwc', ctypes.c_bool, 22), ('has_lpac', ctypes.c_bool, 23), ('has_getfiberid', ctypes.c_bool, 24), ('mov_half_shared_quirk', ctypes.c_bool, 25), ('has_movs', ctypes.c_bool, 26), ('has_dp2acc', ctypes.c_bool, 27), ('has_dp4acc', ctypes.c_bool, 28), ('enable_lrz_fast_clear', ctypes.c_bool, 29), ('has_lrz_dir_tracking', ctypes.c_bool, 30), ('lrz_track_quirk', ctypes.c_bool, 31), ('has_lrz_feedback', ctypes.c_bool, 32), ('has_per_view_viewport', ctypes.c_bool, 33), ('has_gmem_fast_clear', ctypes.c_bool, 34), ('sysmem_per_ccu_depth_cache_size', uint32_t, 36), ('sysmem_per_ccu_color_cache_size', uint32_t, 40), ('gmem_ccu_color_cache_fraction', uint32_t, 44), ('prim_alloc_threshold', uint32_t, 48), ('vs_max_inputs_count', uint32_t, 52), ('supports_double_threadsize', ctypes.c_bool, 56), ('has_sampler_minmax', ctypes.c_bool, 57), ('broken_ds_ubwc_quirk', ctypes.c_bool, 58), ('has_scalar_alu', ctypes.c_bool, 59), ('has_early_preamble', ctypes.c_bool, 60), ('has_isam_v', ctypes.c_bool, 61), ('has_ssbo_imm_offsets', ctypes.c_bool, 62), ('has_coherent_ubwc_flag_caches', ctypes.c_bool, 63), ('has_attachment_shading_rate', ctypes.c_bool, 64), ('has_ubwc_linear_mipmap_fallback', ctypes.c_bool, 65), ('predtf_nop_quirk', ctypes.c_bool, 66), ('prede_nop_quirk', ctypes.c_bool, 67), ('has_sad', ctypes.c_bool, 68), ('is_a702', ctypes.c_bool, 69), ('magic', struct_fd_dev_info_a6xx_magic, 72), ('magic_raw', c.Array[struct_fd_dev_info_a6xx_magic_raw, Literal[64]], 128), ('max_sets', uint32_t, 640), ('line_width_min', ctypes.c_float, 644), ('line_width_max', ctypes.c_float, 648), ('has_bin_mask', ctypes.c_bool, 652)])
 @c.record
 class struct_fd_dev_info_a7xx(c.Struct):
   SIZE = 36
@@ -3869,16 +3869,16 @@ class struct_fd_dev_id(c.Struct):
   gpu_id: int
   chip_id: int
 struct_fd_dev_id.register_fields([('gpu_id', uint32_t, 0), ('chip_id', uint64_t, 8)])
-@dll.bind(ctypes.POINTER(struct_fd_dev_info), ctypes.POINTER(struct_fd_dev_id))
-def fd_dev_info_raw(id:ctypes._Pointer[struct_fd_dev_id]) -> ctypes._Pointer[struct_fd_dev_info]: ...
-@dll.bind(struct_fd_dev_info, ctypes.POINTER(struct_fd_dev_id))
-def fd_dev_info(id:ctypes._Pointer[struct_fd_dev_id]) -> struct_fd_dev_info: ...
-@dll.bind(ctypes.POINTER(struct_fd_dev_info), ctypes.POINTER(ctypes.c_char))
-def fd_dev_info_raw_by_name(name:ctypes._Pointer[ctypes.c_char]) -> ctypes._Pointer[struct_fd_dev_info]: ...
-@dll.bind(ctypes.POINTER(ctypes.c_char), ctypes.POINTER(struct_fd_dev_id))
-def fd_dev_name(id:ctypes._Pointer[struct_fd_dev_id]) -> ctypes._Pointer[ctypes.c_char]: ...
-@dll.bind(None, ctypes.POINTER(struct_fd_dev_info))
-def fd_dev_info_apply_dbg_options(info:ctypes._Pointer[struct_fd_dev_info]) -> None: ...
+@dll.bind(c.POINTER[struct_fd_dev_info], c.POINTER[struct_fd_dev_id])
+def fd_dev_info_raw(id:c.POINTER[struct_fd_dev_id]) -> c.POINTER[struct_fd_dev_info]: ...
+@dll.bind(struct_fd_dev_info, c.POINTER[struct_fd_dev_id])
+def fd_dev_info(id:c.POINTER[struct_fd_dev_id]) -> struct_fd_dev_info: ...
+@dll.bind(c.POINTER[struct_fd_dev_info], c.POINTER[ctypes.c_char])
+def fd_dev_info_raw_by_name(name:c.POINTER[ctypes.c_char]) -> c.POINTER[struct_fd_dev_info]: ...
+@dll.bind(c.POINTER[ctypes.c_char], c.POINTER[struct_fd_dev_id])
+def fd_dev_name(id:c.POINTER[struct_fd_dev_id]) -> c.POINTER[ctypes.c_char]: ...
+@dll.bind(None, c.POINTER[struct_fd_dev_info])
+def fd_dev_info_apply_dbg_options(info:c.POINTER[struct_fd_dev_info]) -> None: ...
 class struct_ir3_ra_reg_set(c.Struct): pass
 @c.record
 class struct_ir3_shader(c.Struct):
@@ -3887,16 +3887,16 @@ class struct_ir3_shader(c.Struct):
   id: int
   variant_count: int
   initial_variants_done: bool
-  compiler: ctypes._Pointer[struct_ir3_compiler]
+  compiler: c.POINTER[struct_ir3_compiler]
   options: struct_ir3_shader_options
   nir_finalized: bool
-  nir: ctypes._Pointer[struct_nir_shader]
+  nir: c.POINTER[struct_nir_shader]
   stream_output: struct_ir3_stream_output_info
   cs: struct_ir3_shader_cs
   vs: struct_ir3_shader_vs
-  variants: ctypes._Pointer[struct_ir3_shader_variant]
+  variants: c.POINTER[struct_ir3_shader_variant]
   variants_lock: pthread_mutex_t
-  cache_key: ctypes.Array[ctypes.c_ubyte]
+  cache_key: c.Array[ctypes.c_ubyte, Literal[20]]
   key_mask: struct_ir3_shader_key
 @c.record
 class struct_ir3_compiler_options(c.Struct):
@@ -3915,11 +3915,11 @@ struct_ir3_compiler_options.register_fields([('push_ubo_with_preamble', ctypes.c
 @c.record
 class struct_ir3_compiler(c.Struct):
   SIZE = 456
-  dev: ctypes._Pointer[struct_fd_device]
-  dev_id: ctypes._Pointer[struct_fd_dev_id]
+  dev: c.POINTER[struct_fd_device]
+  dev_id: c.POINTER[struct_fd_dev_id]
   gen: int
   shader_count: int
-  disk_cache: ctypes._Pointer[struct_disk_cache]
+  disk_cache: c.POINTER[struct_disk_cache]
   nir_options: struct_nir_shader_compiler_options
   options: struct_ir3_compiler_options
   is_64bit: bool
@@ -3994,37 +3994,37 @@ class struct_ir3_compiler_delay_slots(c.Struct):
   non_alu: int
   cat3_src2_read: int
 struct_ir3_compiler_delay_slots.register_fields([('alu_to_alu', ctypes.c_uint32, 0), ('non_alu', ctypes.c_uint32, 4), ('cat3_src2_read', ctypes.c_uint32, 8)])
-struct_ir3_compiler.register_fields([('dev', ctypes.POINTER(struct_fd_device), 0), ('dev_id', ctypes.POINTER(struct_fd_dev_id), 8), ('gen', uint8_t, 16), ('shader_count', uint32_t, 20), ('disk_cache', ctypes.POINTER(struct_disk_cache), 24), ('nir_options', struct_nir_shader_compiler_options, 32), ('options', struct_ir3_compiler_options, 280), ('is_64bit', ctypes.c_bool, 312), ('flat_bypass', ctypes.c_bool, 313), ('levels_add_one', ctypes.c_bool, 314), ('unminify_coords', ctypes.c_bool, 315), ('txf_ms_with_isaml', ctypes.c_bool, 316), ('array_index_add_half', ctypes.c_bool, 317), ('samgq_workaround', ctypes.c_bool, 318), ('tess_use_shared', ctypes.c_bool, 319), ('mergedregs', ctypes.c_bool, 320), ('max_const_pipeline', uint16_t, 322), ('max_const_geom', uint16_t, 324), ('max_const_frag', uint16_t, 326), ('max_const_safe', uint16_t, 328), ('max_const_compute', uint16_t, 330), ('compute_lb_size', uint32_t, 332), ('instr_align', uint32_t, 336), ('const_upload_unit', uint32_t, 340), ('threadsize_base', uint32_t, 344), ('wave_granularity', uint32_t, 348), ('max_waves', uint32_t, 352), ('reg_size_vec4', uint32_t, 356), ('local_mem_size', uint32_t, 360), ('branchstack_size', uint32_t, 364), ('pvtmem_per_fiber_align', uint32_t, 368), ('has_clip_cull', ctypes.c_bool, 372), ('has_pvtmem', ctypes.c_bool, 373), ('has_isam_ssbo', ctypes.c_bool, 374), ('has_isam_v', ctypes.c_bool, 375), ('has_ssbo_imm_offsets', ctypes.c_bool, 376), ('has_getfiberid', ctypes.c_bool, 377), ('mov_half_shared_quirk', ctypes.c_bool, 378), ('has_movs', ctypes.c_bool, 379), ('has_shfl', ctypes.c_bool, 380), ('has_bitwise_triops', ctypes.c_bool, 381), ('num_predicates', uint32_t, 384), ('bitops_can_write_predicates', ctypes.c_bool, 388), ('has_branch_and_or', ctypes.c_bool, 389), ('has_predication', ctypes.c_bool, 390), ('predtf_nop_quirk', ctypes.c_bool, 391), ('prede_nop_quirk', ctypes.c_bool, 392), ('max_variable_workgroup_size', uint32_t, 396), ('has_dp2acc', ctypes.c_bool, 400), ('has_dp4acc', ctypes.c_bool, 401), ('has_compliant_dp4acc', ctypes.c_bool, 402), ('bool_type', ctypes.c_uint32, 404), ('has_shared_regfile', ctypes.c_bool, 408), ('has_preamble', ctypes.c_bool, 409), ('shared_consts_base_offset', uint16_t, 410), ('shared_consts_size', uint64_t, 416), ('geom_shared_consts_size_quirk', uint64_t, 424), ('has_fs_tex_prefetch', ctypes.c_bool, 432), ('stsc_duplication_quirk', ctypes.c_bool, 433), ('load_shader_consts_via_preamble', ctypes.c_bool, 434), ('load_inline_uniforms_via_preamble_ldgk', ctypes.c_bool, 435), ('has_scalar_alu', ctypes.c_bool, 436), ('fs_must_have_non_zero_constlen_quirk', ctypes.c_bool, 437), ('has_early_preamble', ctypes.c_bool, 438), ('has_rpt_bary_f', ctypes.c_bool, 439), ('has_alias_tex', ctypes.c_bool, 440), ('has_alias_rt', ctypes.c_bool, 441), ('reading_shading_rate_requires_smask_quirk', ctypes.c_bool, 442), ('delay_slots', struct_ir3_compiler_delay_slots, 444)])
-@dll.bind(None, ctypes.POINTER(struct_ir3_compiler))
-def ir3_compiler_destroy(compiler:ctypes._Pointer[struct_ir3_compiler]) -> None: ...
-@dll.bind(ctypes.POINTER(struct_ir3_compiler), ctypes.POINTER(struct_fd_device), ctypes.POINTER(struct_fd_dev_id), ctypes.POINTER(struct_fd_dev_info), ctypes.POINTER(struct_ir3_compiler_options))
-def ir3_compiler_create(dev:ctypes._Pointer[struct_fd_device], dev_id:ctypes._Pointer[struct_fd_dev_id], dev_info:ctypes._Pointer[struct_fd_dev_info], options:ctypes._Pointer[struct_ir3_compiler_options]) -> ctypes._Pointer[struct_ir3_compiler]: ...
-@dll.bind(None, ctypes.POINTER(struct_ir3_compiler))
-def ir3_disk_cache_init(compiler:ctypes._Pointer[struct_ir3_compiler]) -> None: ...
-@dll.bind(None, ctypes.POINTER(struct_ir3_compiler), ctypes.POINTER(struct_ir3_shader))
-def ir3_disk_cache_init_shader_key(compiler:ctypes._Pointer[struct_ir3_compiler], shader:ctypes._Pointer[struct_ir3_shader]) -> None: ...
+struct_ir3_compiler.register_fields([('dev', c.POINTER[struct_fd_device], 0), ('dev_id', c.POINTER[struct_fd_dev_id], 8), ('gen', uint8_t, 16), ('shader_count', uint32_t, 20), ('disk_cache', c.POINTER[struct_disk_cache], 24), ('nir_options', struct_nir_shader_compiler_options, 32), ('options', struct_ir3_compiler_options, 280), ('is_64bit', ctypes.c_bool, 312), ('flat_bypass', ctypes.c_bool, 313), ('levels_add_one', ctypes.c_bool, 314), ('unminify_coords', ctypes.c_bool, 315), ('txf_ms_with_isaml', ctypes.c_bool, 316), ('array_index_add_half', ctypes.c_bool, 317), ('samgq_workaround', ctypes.c_bool, 318), ('tess_use_shared', ctypes.c_bool, 319), ('mergedregs', ctypes.c_bool, 320), ('max_const_pipeline', uint16_t, 322), ('max_const_geom', uint16_t, 324), ('max_const_frag', uint16_t, 326), ('max_const_safe', uint16_t, 328), ('max_const_compute', uint16_t, 330), ('compute_lb_size', uint32_t, 332), ('instr_align', uint32_t, 336), ('const_upload_unit', uint32_t, 340), ('threadsize_base', uint32_t, 344), ('wave_granularity', uint32_t, 348), ('max_waves', uint32_t, 352), ('reg_size_vec4', uint32_t, 356), ('local_mem_size', uint32_t, 360), ('branchstack_size', uint32_t, 364), ('pvtmem_per_fiber_align', uint32_t, 368), ('has_clip_cull', ctypes.c_bool, 372), ('has_pvtmem', ctypes.c_bool, 373), ('has_isam_ssbo', ctypes.c_bool, 374), ('has_isam_v', ctypes.c_bool, 375), ('has_ssbo_imm_offsets', ctypes.c_bool, 376), ('has_getfiberid', ctypes.c_bool, 377), ('mov_half_shared_quirk', ctypes.c_bool, 378), ('has_movs', ctypes.c_bool, 379), ('has_shfl', ctypes.c_bool, 380), ('has_bitwise_triops', ctypes.c_bool, 381), ('num_predicates', uint32_t, 384), ('bitops_can_write_predicates', ctypes.c_bool, 388), ('has_branch_and_or', ctypes.c_bool, 389), ('has_predication', ctypes.c_bool, 390), ('predtf_nop_quirk', ctypes.c_bool, 391), ('prede_nop_quirk', ctypes.c_bool, 392), ('max_variable_workgroup_size', uint32_t, 396), ('has_dp2acc', ctypes.c_bool, 400), ('has_dp4acc', ctypes.c_bool, 401), ('has_compliant_dp4acc', ctypes.c_bool, 402), ('bool_type', ctypes.c_uint32, 404), ('has_shared_regfile', ctypes.c_bool, 408), ('has_preamble', ctypes.c_bool, 409), ('shared_consts_base_offset', uint16_t, 410), ('shared_consts_size', uint64_t, 416), ('geom_shared_consts_size_quirk', uint64_t, 424), ('has_fs_tex_prefetch', ctypes.c_bool, 432), ('stsc_duplication_quirk', ctypes.c_bool, 433), ('load_shader_consts_via_preamble', ctypes.c_bool, 434), ('load_inline_uniforms_via_preamble_ldgk', ctypes.c_bool, 435), ('has_scalar_alu', ctypes.c_bool, 436), ('fs_must_have_non_zero_constlen_quirk', ctypes.c_bool, 437), ('has_early_preamble', ctypes.c_bool, 438), ('has_rpt_bary_f', ctypes.c_bool, 439), ('has_alias_tex', ctypes.c_bool, 440), ('has_alias_rt', ctypes.c_bool, 441), ('reading_shading_rate_requires_smask_quirk', ctypes.c_bool, 442), ('delay_slots', struct_ir3_compiler_delay_slots, 444)])
+@dll.bind(None, c.POINTER[struct_ir3_compiler])
+def ir3_compiler_destroy(compiler:c.POINTER[struct_ir3_compiler]) -> None: ...
+@dll.bind(c.POINTER[struct_ir3_compiler], c.POINTER[struct_fd_device], c.POINTER[struct_fd_dev_id], c.POINTER[struct_fd_dev_info], c.POINTER[struct_ir3_compiler_options])
+def ir3_compiler_create(dev:c.POINTER[struct_fd_device], dev_id:c.POINTER[struct_fd_dev_id], dev_info:c.POINTER[struct_fd_dev_info], options:c.POINTER[struct_ir3_compiler_options]) -> c.POINTER[struct_ir3_compiler]: ...
+@dll.bind(None, c.POINTER[struct_ir3_compiler])
+def ir3_disk_cache_init(compiler:c.POINTER[struct_ir3_compiler]) -> None: ...
+@dll.bind(None, c.POINTER[struct_ir3_compiler], c.POINTER[struct_ir3_shader])
+def ir3_disk_cache_init_shader_key(compiler:c.POINTER[struct_ir3_compiler], shader:c.POINTER[struct_ir3_shader]) -> None: ...
 @c.record
 class struct_ir3_shader_variant(c.Struct):
   SIZE = 2040
-  bo: ctypes._Pointer[struct_fd_bo]
+  bo: c.POINTER[struct_fd_bo]
   id: int
   shader_id: int
   key: struct_ir3_shader_key
   binning_pass: bool
-  binning: ctypes._Pointer[struct_ir3_shader_variant]
-  nonbinning: ctypes._Pointer[struct_ir3_shader_variant]
-  ir: ctypes._Pointer[struct_ir3]
-  next: ctypes._Pointer[struct_ir3_shader_variant]
+  binning: c.POINTER[struct_ir3_shader_variant]
+  nonbinning: c.POINTER[struct_ir3_shader_variant]
+  ir: c.POINTER[struct_ir3]
+  next: c.POINTER[struct_ir3_shader_variant]
   type: int
-  compiler: ctypes._Pointer[struct_ir3_compiler]
-  name: ctypes._Pointer[ctypes.c_char]
-  constant_data: int|None
+  compiler: c.POINTER[struct_ir3_compiler]
+  name: c.POINTER[ctypes.c_char]
+  constant_data: ctypes.c_void_p
   disasm_info: struct_ir3_disasm_info
-  bin: ctypes._Pointer[ctypes.c_uint32]
-  const_state: ctypes._Pointer[struct_ir3_const_state]
+  bin: c.POINTER[ctypes.c_uint32]
+  const_state: c.POINTER[struct_ir3_const_state]
   imm_state: struct_ir3_imm_const_state
   info: struct_ir3_info
-  sha1_str: ctypes.Array[ctypes.c_char]
+  sha1_str: c.Array[ctypes.c_char, Literal[41]]
   shader_options: struct_ir3_shader_options
   constant_data_size: int
   branchstack: int
@@ -4041,7 +4041,7 @@ class struct_ir3_shader_variant(c.Struct):
   color0_mrt: bool
   fragcoord_compmask: int
   outputs_count: int
-  outputs: ctypes.Array[struct_ir3_shader_output]
+  outputs: c.Array[struct_ir3_shader_output, Literal[34]]
   writes_pos: bool
   writes_smask: bool
   writes_psize: bool
@@ -4050,9 +4050,9 @@ class struct_ir3_shader_variant(c.Struct):
   writes_shading_rate: bool
   output_size: int
   input_size: int
-  output_loc: ctypes.Array[ctypes.c_uint32]
+  output_loc: c.Array[ctypes.c_uint32, Literal[45]]
   inputs_count: int
-  inputs: ctypes.Array[struct_ir3_shader_variant_input]
+  inputs: c.Array[struct_ir3_shader_variant_input, Literal[34]]
   reads_primid: bool
   reads_shading_rate: bool
   reads_smask: bool
@@ -4082,10 +4082,10 @@ class struct_ir3_shader_variant(c.Struct):
   astc_srgb: struct_ir3_shader_variant_astc_srgb
   tg4: struct_ir3_shader_variant_tg4
   num_sampler_prefetch: int
-  sampler_prefetch: ctypes.Array[struct_ir3_sampler_prefetch]
+  sampler_prefetch: c.Array[struct_ir3_sampler_prefetch, Literal[4]]
   prefetch_bary_type: int
   prefetch_end_of_quad: bool
-  local_size: ctypes.Array[ctypes.c_uint16]
+  local_size: c.Array[ctypes.c_uint16, Literal[3]]
   local_size_variable: bool
   has_barrier: bool
   num_ssbos: int
@@ -4096,25 +4096,25 @@ class struct_ir3_shader_variant(c.Struct):
   cs: struct_ir3_shader_variant_cs
   vtxid_base: int
   stream_output: struct_ir3_stream_output_info
-@dll.bind(ctypes.POINTER(struct_ir3_shader_variant), ctypes.POINTER(struct_blob_reader), ctypes.POINTER(struct_ir3_compiler), ctypes.c_void_p)
-def ir3_retrieve_variant(blob:ctypes._Pointer[struct_blob_reader], compiler:ctypes._Pointer[struct_ir3_compiler], mem_ctx:int|None) -> ctypes._Pointer[struct_ir3_shader_variant]: ...
-@dll.bind(None, ctypes.POINTER(struct_blob), ctypes.POINTER(struct_ir3_shader_variant))
-def ir3_store_variant(blob:ctypes._Pointer[struct_blob], v:ctypes._Pointer[struct_ir3_shader_variant]) -> None: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(struct_ir3_shader), ctypes.POINTER(struct_ir3_shader_variant))
-def ir3_disk_cache_retrieve(shader:ctypes._Pointer[struct_ir3_shader], v:ctypes._Pointer[struct_ir3_shader_variant]) -> bool: ...
-@dll.bind(None, ctypes.POINTER(struct_ir3_shader), ctypes.POINTER(struct_ir3_shader_variant))
-def ir3_disk_cache_store(shader:ctypes._Pointer[struct_ir3_shader], v:ctypes._Pointer[struct_ir3_shader_variant]) -> None: ...
-@dll.bind(ctypes.POINTER(nir_shader_compiler_options), ctypes.POINTER(struct_ir3_compiler))
-def ir3_get_compiler_options(compiler:ctypes._Pointer[struct_ir3_compiler]) -> ctypes._Pointer[nir_shader_compiler_options]: ...
-@dll.bind(ctypes.c_int32, ctypes.POINTER(struct_ir3_compiler), ctypes.POINTER(struct_ir3_shader), ctypes.POINTER(struct_ir3_shader_variant))
-def ir3_compile_shader_nir(compiler:ctypes._Pointer[struct_ir3_compiler], shader:ctypes._Pointer[struct_ir3_shader], so:ctypes._Pointer[struct_ir3_shader_variant]) -> int: ...
+@dll.bind(c.POINTER[struct_ir3_shader_variant], c.POINTER[struct_blob_reader], c.POINTER[struct_ir3_compiler], ctypes.c_void_p)
+def ir3_retrieve_variant(blob:c.POINTER[struct_blob_reader], compiler:c.POINTER[struct_ir3_compiler], mem_ctx:ctypes.c_void_p) -> c.POINTER[struct_ir3_shader_variant]: ...
+@dll.bind(None, c.POINTER[struct_blob], c.POINTER[struct_ir3_shader_variant])
+def ir3_store_variant(blob:c.POINTER[struct_blob], v:c.POINTER[struct_ir3_shader_variant]) -> None: ...
+@dll.bind(ctypes.c_bool, c.POINTER[struct_ir3_shader], c.POINTER[struct_ir3_shader_variant])
+def ir3_disk_cache_retrieve(shader:c.POINTER[struct_ir3_shader], v:c.POINTER[struct_ir3_shader_variant]) -> bool: ...
+@dll.bind(None, c.POINTER[struct_ir3_shader], c.POINTER[struct_ir3_shader_variant])
+def ir3_disk_cache_store(shader:c.POINTER[struct_ir3_shader], v:c.POINTER[struct_ir3_shader_variant]) -> None: ...
+@dll.bind(c.POINTER[nir_shader_compiler_options], c.POINTER[struct_ir3_compiler])
+def ir3_get_compiler_options(compiler:c.POINTER[struct_ir3_compiler]) -> c.POINTER[nir_shader_compiler_options]: ...
+@dll.bind(ctypes.c_int32, c.POINTER[struct_ir3_compiler], c.POINTER[struct_ir3_shader], c.POINTER[struct_ir3_shader_variant])
+def ir3_compile_shader_nir(compiler:c.POINTER[struct_ir3_compiler], shader:c.POINTER[struct_ir3_shader], so:c.POINTER[struct_ir3_shader_variant]) -> int: ...
 enum_ir3_shader_debug: dict[int, str] = {(IR3_DBG_SHADER_VS:=1): 'IR3_DBG_SHADER_VS', (IR3_DBG_SHADER_TCS:=2): 'IR3_DBG_SHADER_TCS', (IR3_DBG_SHADER_TES:=4): 'IR3_DBG_SHADER_TES', (IR3_DBG_SHADER_GS:=8): 'IR3_DBG_SHADER_GS', (IR3_DBG_SHADER_FS:=16): 'IR3_DBG_SHADER_FS', (IR3_DBG_SHADER_CS:=32): 'IR3_DBG_SHADER_CS', (IR3_DBG_DISASM:=64): 'IR3_DBG_DISASM', (IR3_DBG_OPTMSGS:=128): 'IR3_DBG_OPTMSGS', (IR3_DBG_FORCES2EN:=256): 'IR3_DBG_FORCES2EN', (IR3_DBG_NOUBOOPT:=512): 'IR3_DBG_NOUBOOPT', (IR3_DBG_NOFP16:=1024): 'IR3_DBG_NOFP16', (IR3_DBG_NOCACHE:=2048): 'IR3_DBG_NOCACHE', (IR3_DBG_SPILLALL:=4096): 'IR3_DBG_SPILLALL', (IR3_DBG_NOPREAMBLE:=8192): 'IR3_DBG_NOPREAMBLE', (IR3_DBG_SHADER_INTERNAL:=16384): 'IR3_DBG_SHADER_INTERNAL', (IR3_DBG_FULLSYNC:=32768): 'IR3_DBG_FULLSYNC', (IR3_DBG_FULLNOP:=65536): 'IR3_DBG_FULLNOP', (IR3_DBG_NOEARLYPREAMBLE:=131072): 'IR3_DBG_NOEARLYPREAMBLE', (IR3_DBG_NODESCPREFETCH:=262144): 'IR3_DBG_NODESCPREFETCH', (IR3_DBG_EXPANDRPT:=524288): 'IR3_DBG_EXPANDRPT', (IR3_DBG_ASM_ROUNDTRIP:=1048576): 'IR3_DBG_ASM_ROUNDTRIP', (IR3_DBG_SCHEDMSGS:=2097152): 'IR3_DBG_SCHEDMSGS', (IR3_DBG_RAMSGS:=4194304): 'IR3_DBG_RAMSGS', (IR3_DBG_NOALIASTEX:=8388608): 'IR3_DBG_NOALIASTEX', (IR3_DBG_NOALIASRT:=16777216): 'IR3_DBG_NOALIASRT'}
 try: ir3_shader_debug = ctypes.c_uint32.in_dll(dll, 'ir3_shader_debug') # type: ignore
 except (ValueError,AttributeError): pass
-try: ir3_shader_override_path = ctypes.POINTER(ctypes.c_char).in_dll(dll, 'ir3_shader_override_path') # type: ignore
+try: ir3_shader_override_path = c.POINTER[ctypes.c_char].in_dll(dll, 'ir3_shader_override_path') # type: ignore
 except (ValueError,AttributeError): pass
-@dll.bind(ctypes.POINTER(ctypes.c_char))
-def ir3_shader_debug_as_string() -> ctypes._Pointer[ctypes.c_char]: ...
+@dll.bind(c.POINTER[ctypes.c_char])
+def ir3_shader_debug_as_string() -> c.POINTER[ctypes.c_char]: ...
 @c.record
 class struct_ir3_driver_params_cs(c.Struct):
   SIZE = 64
@@ -4143,8 +4143,8 @@ class struct_ir3_driver_params_vs(c.Struct):
   instid_base: int
   vtxcnt_max: int
   is_indexed_draw: int
-  ucp: ctypes.Array[struct_ir3_driver_params_vs_ucp]
-  __pad_37_39: ctypes.Array[ctypes.c_uint32]
+  ucp: c.Array[struct_ir3_driver_params_vs_ucp, Literal[8]]
+  __pad_37_39: c.Array[ctypes.c_uint32, Literal[3]]
 @c.record
 class struct_ir3_driver_params_vs_ucp(c.Struct):
   SIZE = 16
@@ -4153,7 +4153,7 @@ class struct_ir3_driver_params_vs_ucp(c.Struct):
   z: int
   w: int
 struct_ir3_driver_params_vs_ucp.register_fields([('x', uint32_t, 0), ('y', uint32_t, 4), ('z', uint32_t, 8), ('w', uint32_t, 12)])
-struct_ir3_driver_params_vs.register_fields([('draw_id', uint32_t, 0), ('vtxid_base', uint32_t, 4), ('instid_base', uint32_t, 8), ('vtxcnt_max', uint32_t, 12), ('is_indexed_draw', uint32_t, 16), ('ucp', (struct_ir3_driver_params_vs_ucp * 8), 20), ('__pad_37_39', (uint32_t * 3), 148)])
+struct_ir3_driver_params_vs.register_fields([('draw_id', uint32_t, 0), ('vtxid_base', uint32_t, 4), ('instid_base', uint32_t, 8), ('vtxcnt_max', uint32_t, 12), ('is_indexed_draw', uint32_t, 16), ('ucp', c.Array[struct_ir3_driver_params_vs_ucp, Literal[8]], 20), ('__pad_37_39', c.Array[uint32_t, Literal[3]], 148)])
 @c.record
 class struct_ir3_driver_params_tcs(c.Struct):
   SIZE = 32
@@ -4163,31 +4163,31 @@ class struct_ir3_driver_params_tcs(c.Struct):
   default_outer_level_w: int
   default_inner_level_x: int
   default_inner_level_y: int
-  __pad_06_07: ctypes.Array[ctypes.c_uint32]
-struct_ir3_driver_params_tcs.register_fields([('default_outer_level_x', uint32_t, 0), ('default_outer_level_y', uint32_t, 4), ('default_outer_level_z', uint32_t, 8), ('default_outer_level_w', uint32_t, 12), ('default_inner_level_x', uint32_t, 16), ('default_inner_level_y', uint32_t, 20), ('__pad_06_07', (uint32_t * 2), 24)])
+  __pad_06_07: c.Array[ctypes.c_uint32, Literal[2]]
+struct_ir3_driver_params_tcs.register_fields([('default_outer_level_x', uint32_t, 0), ('default_outer_level_y', uint32_t, 4), ('default_outer_level_z', uint32_t, 8), ('default_outer_level_w', uint32_t, 12), ('default_inner_level_x', uint32_t, 16), ('default_inner_level_y', uint32_t, 20), ('__pad_06_07', c.Array[uint32_t, Literal[2]], 24)])
 @c.record
 class struct_ir3_driver_params_fs(c.Struct):
   SIZE = 52
   subgroup_size: int
-  __pad_01_03: ctypes.Array[ctypes.c_uint32]
+  __pad_01_03: c.Array[ctypes.c_uint32, Literal[3]]
   frag_invocation_count: int
-  __pad_05_07: ctypes.Array[ctypes.c_uint32]
+  __pad_05_07: c.Array[ctypes.c_uint32, Literal[3]]
   frag_size: int
   __pad_09: int
   frag_offset: int
-  __pad_11_12: ctypes.Array[ctypes.c_uint32]
-struct_ir3_driver_params_fs.register_fields([('subgroup_size', uint32_t, 0), ('__pad_01_03', (uint32_t * 3), 4), ('frag_invocation_count', uint32_t, 16), ('__pad_05_07', (uint32_t * 3), 20), ('frag_size', uint32_t, 32), ('__pad_09', uint32_t, 36), ('frag_offset', uint32_t, 40), ('__pad_11_12', (uint32_t * 2), 44)])
+  __pad_11_12: c.Array[ctypes.c_uint32, Literal[2]]
+struct_ir3_driver_params_fs.register_fields([('subgroup_size', uint32_t, 0), ('__pad_01_03', c.Array[uint32_t, Literal[3]], 4), ('frag_invocation_count', uint32_t, 16), ('__pad_05_07', c.Array[uint32_t, Literal[3]], 20), ('frag_size', uint32_t, 32), ('__pad_09', uint32_t, 36), ('frag_offset', uint32_t, 40), ('__pad_11_12', c.Array[uint32_t, Literal[2]], 44)])
 enum_ir3_bary: dict[int, str] = {(IJ_PERSP_PIXEL:=0): 'IJ_PERSP_PIXEL', (IJ_PERSP_SAMPLE:=1): 'IJ_PERSP_SAMPLE', (IJ_PERSP_CENTROID:=2): 'IJ_PERSP_CENTROID', (IJ_PERSP_CENTER_RHW:=3): 'IJ_PERSP_CENTER_RHW', (IJ_LINEAR_PIXEL:=4): 'IJ_LINEAR_PIXEL', (IJ_LINEAR_CENTROID:=5): 'IJ_LINEAR_CENTROID', (IJ_LINEAR_SAMPLE:=6): 'IJ_LINEAR_SAMPLE', (IJ_COUNT:=7): 'IJ_COUNT'}
 enum_ir3_wavesize_option: dict[int, str] = {(IR3_SINGLE_ONLY:=0): 'IR3_SINGLE_ONLY', (IR3_SINGLE_OR_DOUBLE:=1): 'IR3_SINGLE_OR_DOUBLE', (IR3_DOUBLE_ONLY:=2): 'IR3_DOUBLE_ONLY'}
 @c.record
 class struct_ir3_ubo_info(c.Struct):
   SIZE = 16
-  global_base: ctypes._Pointer[struct_nir_def]
+  global_base: c.POINTER[struct_nir_def]
   block: int
   bindless_base: int
   bindless: bool
   _global: bool
-struct_ir3_ubo_info.register_fields([('global_base', ctypes.POINTER(struct_nir_def), 0), ('block', uint32_t, 8), ('bindless_base', uint16_t, 12), ('bindless', ctypes.c_bool, 14), ('_global', ctypes.c_bool, 15)])
+struct_ir3_ubo_info.register_fields([('global_base', c.POINTER[struct_nir_def], 0), ('block', uint32_t, 8), ('bindless_base', uint16_t, 12), ('bindless', ctypes.c_bool, 14), ('_global', ctypes.c_bool, 15)])
 @c.record
 class struct_ir3_ubo_range(c.Struct):
   SIZE = 32
@@ -4199,10 +4199,10 @@ struct_ir3_ubo_range.register_fields([('ubo', struct_ir3_ubo_info, 0), ('offset'
 @c.record
 class struct_ir3_ubo_analysis_state(c.Struct):
   SIZE = 1032
-  range: ctypes.Array[struct_ir3_ubo_range]
+  range: c.Array[struct_ir3_ubo_range, Literal[32]]
   num_enabled: int
   size: int
-struct_ir3_ubo_analysis_state.register_fields([('range', (struct_ir3_ubo_range * 32), 0), ('num_enabled', uint32_t, 1024), ('size', uint32_t, 1028)])
+struct_ir3_ubo_analysis_state.register_fields([('range', c.Array[struct_ir3_ubo_range, Literal[32]], 0), ('num_enabled', uint32_t, 1024), ('size', uint32_t, 1028)])
 enum_ir3_push_consts_type: dict[int, str] = {(IR3_PUSH_CONSTS_NONE:=0): 'IR3_PUSH_CONSTS_NONE', (IR3_PUSH_CONSTS_PER_STAGE:=1): 'IR3_PUSH_CONSTS_PER_STAGE', (IR3_PUSH_CONSTS_SHARED:=2): 'IR3_PUSH_CONSTS_SHARED', (IR3_PUSH_CONSTS_SHARED_PREAMBLE:=3): 'IR3_PUSH_CONSTS_SHARED_PREAMBLE'}
 @c.record
 class struct_ir3_driver_ubo(c.Struct):
@@ -4222,24 +4222,24 @@ struct_ir3_const_allocation.register_fields([('offset_vec4', uint32_t, 0), ('siz
 @c.record
 class struct_ir3_const_allocations(c.Struct):
   SIZE = 200
-  consts: ctypes.Array[struct_ir3_const_allocation]
+  consts: c.Array[struct_ir3_const_allocation, Literal[12]]
   max_const_offset_vec4: int
   reserved_vec4: int
-struct_ir3_const_allocations.register_fields([('consts', (struct_ir3_const_allocation * 12), 0), ('max_const_offset_vec4', uint32_t, 192), ('reserved_vec4', uint32_t, 196)])
+struct_ir3_const_allocations.register_fields([('consts', c.Array[struct_ir3_const_allocation, Literal[12]], 0), ('max_const_offset_vec4', uint32_t, 192), ('reserved_vec4', uint32_t, 196)])
 @c.record
 class struct_ir3_const_image_dims(c.Struct):
   SIZE = 136
   mask: int
   count: int
-  off: ctypes.Array[ctypes.c_uint32]
-struct_ir3_const_image_dims.register_fields([('mask', uint32_t, 0), ('count', uint32_t, 4), ('off', (uint32_t * 32), 8)])
+  off: c.Array[ctypes.c_uint32, Literal[32]]
+struct_ir3_const_image_dims.register_fields([('mask', uint32_t, 0), ('count', uint32_t, 4), ('off', c.Array[uint32_t, Literal[32]], 8)])
 @c.record
 class struct_ir3_imm_const_state(c.Struct):
   SIZE = 16
   size: int
   count: int
-  values: ctypes._Pointer[ctypes.c_uint32]
-struct_ir3_imm_const_state.register_fields([('size', ctypes.c_uint32, 0), ('count', ctypes.c_uint32, 4), ('values', ctypes.POINTER(uint32_t), 8)])
+  values: c.POINTER[ctypes.c_uint32]
+struct_ir3_imm_const_state.register_fields([('size', ctypes.c_uint32, 0), ('count', ctypes.c_uint32, 4), ('values', c.POINTER[uint32_t], 8)])
 @c.record
 class struct_ir3_const_state(c.Struct):
   SIZE = 1424
@@ -4269,11 +4269,11 @@ struct_ir3_stream_output.register_fields([('register_index', ctypes.c_uint32, 0,
 class struct_ir3_stream_output_info(c.Struct):
   SIZE = 532
   num_outputs: int
-  stride: ctypes.Array[ctypes.c_uint16]
+  stride: c.Array[ctypes.c_uint16, Literal[4]]
   streams_written: int
-  buffer_to_stream: ctypes.Array[ctypes.c_ubyte]
-  output: ctypes.Array[struct_ir3_stream_output]
-struct_ir3_stream_output_info.register_fields([('num_outputs', ctypes.c_uint32, 0), ('stride', (uint16_t * 4), 4), ('streams_written', uint8_t, 12), ('buffer_to_stream', (uint8_t * 4), 13), ('output', (struct_ir3_stream_output * 128), 20)])
+  buffer_to_stream: c.Array[ctypes.c_ubyte, Literal[4]]
+  output: c.Array[struct_ir3_stream_output, Literal[128]]
+struct_ir3_stream_output_info.register_fields([('num_outputs', ctypes.c_uint32, 0), ('stride', c.Array[uint16_t, Literal[4]], 4), ('streams_written', uint8_t, 12), ('buffer_to_stream', c.Array[uint8_t, Literal[4]], 13), ('output', c.Array[struct_ir3_stream_output, Literal[128]], 20)])
 @c.record
 class struct_ir3_sampler_prefetch(c.Struct):
   SIZE = 16
@@ -4307,25 +4307,25 @@ class struct_ir3_shader_key(c.Struct):
   fsamples: int
   vastc_srgb: int
   fastc_srgb: int
-  vsampler_swizzles: ctypes.Array[ctypes.c_uint16]
-  fsampler_swizzles: ctypes.Array[ctypes.c_uint16]
-struct_ir3_shader_key.register_fields([('ucp_enables', ctypes.c_uint32, 0, 8, 0), ('has_per_samp', ctypes.c_uint32, 1, 1, 0), ('sample_shading', ctypes.c_uint32, 1, 1, 1), ('msaa', ctypes.c_uint32, 1, 1, 2), ('rasterflat', ctypes.c_uint32, 1, 1, 3), ('tessellation', ctypes.c_uint32, 1, 2, 4), ('has_gs', ctypes.c_uint32, 1, 1, 6), ('tcs_store_primid', ctypes.c_uint32, 1, 1, 7), ('safe_constlen', ctypes.c_uint32, 2, 1, 0), ('force_dual_color_blend', ctypes.c_uint32, 2, 1, 1), ('_global', uint32_t, 0), ('vsamples', uint32_t, 4), ('fsamples', uint32_t, 8), ('vastc_srgb', uint16_t, 12), ('fastc_srgb', uint16_t, 14), ('vsampler_swizzles', (uint16_t * 16), 16), ('fsampler_swizzles', (uint16_t * 16), 48)])
+  vsampler_swizzles: c.Array[ctypes.c_uint16, Literal[16]]
+  fsampler_swizzles: c.Array[ctypes.c_uint16, Literal[16]]
+struct_ir3_shader_key.register_fields([('ucp_enables', ctypes.c_uint32, 0, 8, 0), ('has_per_samp', ctypes.c_uint32, 1, 1, 0), ('sample_shading', ctypes.c_uint32, 1, 1, 1), ('msaa', ctypes.c_uint32, 1, 1, 2), ('rasterflat', ctypes.c_uint32, 1, 1, 3), ('tessellation', ctypes.c_uint32, 1, 2, 4), ('has_gs', ctypes.c_uint32, 1, 1, 6), ('tcs_store_primid', ctypes.c_uint32, 1, 1, 7), ('safe_constlen', ctypes.c_uint32, 2, 1, 0), ('force_dual_color_blend', ctypes.c_uint32, 2, 1, 1), ('_global', uint32_t, 0), ('vsamples', uint32_t, 4), ('fsamples', uint32_t, 8), ('vastc_srgb', uint16_t, 12), ('fastc_srgb', uint16_t, 14), ('vsampler_swizzles', c.Array[uint16_t, Literal[16]], 16), ('fsampler_swizzles', c.Array[uint16_t, Literal[16]], 48)])
 @c.record
 class struct_ir3_ibo_mapping(c.Struct):
   SIZE = 98
-  ssbo_to_tex: ctypes.Array[ctypes.c_ubyte]
-  image_to_tex: ctypes.Array[ctypes.c_ubyte]
-  tex_to_image: ctypes.Array[ctypes.c_ubyte]
+  ssbo_to_tex: c.Array[ctypes.c_ubyte, Literal[32]]
+  image_to_tex: c.Array[ctypes.c_ubyte, Literal[32]]
+  tex_to_image: c.Array[ctypes.c_ubyte, Literal[32]]
   num_tex: int
   tex_base: int
-struct_ir3_ibo_mapping.register_fields([('ssbo_to_tex', (uint8_t * 32), 0), ('image_to_tex', (uint8_t * 32), 32), ('tex_to_image', (uint8_t * 32), 64), ('num_tex', uint8_t, 96), ('tex_base', uint8_t, 97)])
+struct_ir3_ibo_mapping.register_fields([('ssbo_to_tex', c.Array[uint8_t, Literal[32]], 0), ('image_to_tex', c.Array[uint8_t, Literal[32]], 32), ('tex_to_image', c.Array[uint8_t, Literal[32]], 64), ('num_tex', uint8_t, 96), ('tex_base', uint8_t, 97)])
 @c.record
 class struct_ir3_disasm_info(c.Struct):
   SIZE = 24
   write_disasm: bool
-  nir: ctypes._Pointer[ctypes.c_char]
-  disasm: ctypes._Pointer[ctypes.c_char]
-struct_ir3_disasm_info.register_fields([('write_disasm', ctypes.c_bool, 0), ('nir', ctypes.POINTER(ctypes.c_char), 8), ('disasm', ctypes.POINTER(ctypes.c_char), 16)])
+  nir: c.POINTER[ctypes.c_char]
+  disasm: c.POINTER[ctypes.c_char]
+struct_ir3_disasm_info.register_fields([('write_disasm', ctypes.c_bool, 0), ('nir', c.POINTER[ctypes.c_char], 8), ('disasm', c.POINTER[ctypes.c_char], 16)])
 @c.record
 class struct_ir3_shader_nir_options(c.Struct):
   SIZE = 4
@@ -4356,41 +4356,41 @@ class struct_fd_bo(c.Struct): pass
 @c.record
 class struct_ir3(c.Struct):
   SIZE = 152
-  compiler: ctypes._Pointer[struct_ir3_compiler]
+  compiler: c.POINTER[struct_ir3_compiler]
   type: int
   inputs_count: int
   inputs_sz: int
-  inputs: ctypes._Pointer[ctypes.POINTER(struct_ir3_instruction)]
+  inputs: c.POINTER[c.POINTER[struct_ir3_instruction]]
   baryfs_count: int
   baryfs_sz: int
-  baryfs: ctypes._Pointer[ctypes.POINTER(struct_ir3_instruction)]
+  baryfs: c.POINTER[c.POINTER[struct_ir3_instruction]]
   a0_users_count: int
   a0_users_sz: int
-  a0_users: ctypes._Pointer[ctypes.POINTER(struct_ir3_instruction)]
+  a0_users: c.POINTER[c.POINTER[struct_ir3_instruction]]
   a1_users_count: int
   a1_users_sz: int
-  a1_users: ctypes._Pointer[ctypes.POINTER(struct_ir3_instruction)]
+  a1_users: c.POINTER[c.POINTER[struct_ir3_instruction]]
   astc_srgb_count: int
   astc_srgb_sz: int
-  astc_srgb: ctypes._Pointer[ctypes.POINTER(struct_ir3_instruction)]
+  astc_srgb: c.POINTER[c.POINTER[struct_ir3_instruction]]
   tg4_count: int
   tg4_sz: int
-  tg4: ctypes._Pointer[ctypes.POINTER(struct_ir3_instruction)]
+  tg4: c.POINTER[c.POINTER[struct_ir3_instruction]]
   block_list: struct_list_head
   array_list: struct_list_head
   instr_count: int
 @c.record
 class struct_ir3_instruction(c.Struct):
   SIZE = 184
-  block: ctypes._Pointer[struct_ir3_block]
+  block: c.POINTER[struct_ir3_block]
   opc: int
   flags: int
   repeat: int
   nop: int
   srcs_count: int
   dsts_count: int
-  dsts: ctypes._Pointer[ctypes.POINTER(struct_ir3_register)]
-  srcs: ctypes._Pointer[ctypes.POINTER(struct_ir3_register)]
+  dsts: c.POINTER[c.POINTER[struct_ir3_register]]
+  srcs: c.POINTER[c.POINTER[struct_ir3_register]]
   cat0: struct_ir3_instruction_cat0
   cat1: struct_ir3_instruction_cat1
   cat2: struct_ir3_instruction_cat2
@@ -4406,13 +4406,13 @@ class struct_ir3_instruction(c.Struct):
   push_consts: struct_ir3_instruction_push_consts
   raw: struct_ir3_instruction_raw
   ip: int
-  data: int|None
-  uses: ctypes._Pointer[struct_set]
+  data: ctypes.c_void_p
+  uses: c.POINTER[struct_set]
   use_count: int
-  address: ctypes._Pointer[struct_ir3_register]
+  address: c.POINTER[struct_ir3_register]
   deps_count: int
   deps_sz: int
-  deps: ctypes._Pointer[ctypes.POINTER(struct_ir3_instruction)]
+  deps: c.POINTER[c.POINTER[struct_ir3_instruction]]
   barrier_class: int
   barrier_conflict: int
   node: struct_list_head
@@ -4423,37 +4423,37 @@ class struct_ir3_instruction(c.Struct):
 class struct_ir3_block(c.Struct):
   SIZE = 200
   node: struct_list_head
-  shader: ctypes._Pointer[struct_ir3]
-  nblock: ctypes._Pointer[struct_nir_block]
+  shader: c.POINTER[struct_ir3]
+  nblock: c.POINTER[struct_nir_block]
   instr_list: struct_list_head
-  successors: ctypes.Array[ctypes.POINTER(struct_ir3_block)]
+  successors: c.Array[c.POINTER[struct_ir3_block], Literal[2]]
   divergent_condition: bool
   predecessors_count: int
   predecessors_sz: int
-  predecessors: ctypes._Pointer[ctypes.POINTER(struct_ir3_block)]
+  predecessors: c.POINTER[c.POINTER[struct_ir3_block]]
   physical_predecessors_count: int
   physical_predecessors_sz: int
-  physical_predecessors: ctypes._Pointer[ctypes.POINTER(struct_ir3_block)]
+  physical_predecessors: c.POINTER[c.POINTER[struct_ir3_block]]
   physical_successors_count: int
   physical_successors_sz: int
-  physical_successors: ctypes._Pointer[ctypes.POINTER(struct_ir3_block)]
+  physical_successors: c.POINTER[c.POINTER[struct_ir3_block]]
   start_ip: int
   end_ip: int
   reconvergence_point: bool
   in_early_preamble: bool
   keeps_count: int
   keeps_sz: int
-  keeps: ctypes._Pointer[ctypes.POINTER(struct_ir3_instruction)]
-  data: int|None
+  keeps: c.POINTER[c.POINTER[struct_ir3_instruction]]
+  data: ctypes.c_void_p
   index: int
-  imm_dom: ctypes._Pointer[struct_ir3_block]
+  imm_dom: c.POINTER[struct_ir3_block]
   dom_children_count: int
   dom_children_sz: int
-  dom_children: ctypes._Pointer[ctypes.POINTER(struct_ir3_block)]
+  dom_children: c.POINTER[c.POINTER[struct_ir3_block]]
   dom_pre_index: int
   dom_post_index: int
   loop_depth: int
-struct_ir3_block.register_fields([('node', struct_list_head, 0), ('shader', ctypes.POINTER(struct_ir3), 16), ('nblock', ctypes.POINTER(struct_nir_block), 24), ('instr_list', struct_list_head, 32), ('successors', (ctypes.POINTER(struct_ir3_block) * 2), 48), ('divergent_condition', ctypes.c_bool, 64), ('predecessors_count', ctypes.c_uint32, 68), ('predecessors_sz', ctypes.c_uint32, 72), ('predecessors', ctypes.POINTER(ctypes.POINTER(struct_ir3_block)), 80), ('physical_predecessors_count', ctypes.c_uint32, 88), ('physical_predecessors_sz', ctypes.c_uint32, 92), ('physical_predecessors', ctypes.POINTER(ctypes.POINTER(struct_ir3_block)), 96), ('physical_successors_count', ctypes.c_uint32, 104), ('physical_successors_sz', ctypes.c_uint32, 108), ('physical_successors', ctypes.POINTER(ctypes.POINTER(struct_ir3_block)), 112), ('start_ip', uint16_t, 120), ('end_ip', uint16_t, 122), ('reconvergence_point', ctypes.c_bool, 124), ('in_early_preamble', ctypes.c_bool, 125), ('keeps_count', ctypes.c_uint32, 128), ('keeps_sz', ctypes.c_uint32, 132), ('keeps', ctypes.POINTER(ctypes.POINTER(struct_ir3_instruction)), 136), ('data', ctypes.c_void_p, 144), ('index', uint32_t, 152), ('imm_dom', ctypes.POINTER(struct_ir3_block), 160), ('dom_children_count', ctypes.c_uint32, 168), ('dom_children_sz', ctypes.c_uint32, 172), ('dom_children', ctypes.POINTER(ctypes.POINTER(struct_ir3_block)), 176), ('dom_pre_index', uint32_t, 184), ('dom_post_index', uint32_t, 188), ('loop_depth', uint32_t, 192)])
+struct_ir3_block.register_fields([('node', struct_list_head, 0), ('shader', c.POINTER[struct_ir3], 16), ('nblock', c.POINTER[struct_nir_block], 24), ('instr_list', struct_list_head, 32), ('successors', c.Array[c.POINTER[struct_ir3_block], Literal[2]], 48), ('divergent_condition', ctypes.c_bool, 64), ('predecessors_count', ctypes.c_uint32, 68), ('predecessors_sz', ctypes.c_uint32, 72), ('predecessors', c.POINTER[c.POINTER[struct_ir3_block]], 80), ('physical_predecessors_count', ctypes.c_uint32, 88), ('physical_predecessors_sz', ctypes.c_uint32, 92), ('physical_predecessors', c.POINTER[c.POINTER[struct_ir3_block]], 96), ('physical_successors_count', ctypes.c_uint32, 104), ('physical_successors_sz', ctypes.c_uint32, 108), ('physical_successors', c.POINTER[c.POINTER[struct_ir3_block]], 112), ('start_ip', uint16_t, 120), ('end_ip', uint16_t, 122), ('reconvergence_point', ctypes.c_bool, 124), ('in_early_preamble', ctypes.c_bool, 125), ('keeps_count', ctypes.c_uint32, 128), ('keeps_sz', ctypes.c_uint32, 132), ('keeps', c.POINTER[c.POINTER[struct_ir3_instruction]], 136), ('data', ctypes.c_void_p, 144), ('index', uint32_t, 152), ('imm_dom', c.POINTER[struct_ir3_block], 160), ('dom_children_count', ctypes.c_uint32, 168), ('dom_children_sz', ctypes.c_uint32, 172), ('dom_children', c.POINTER[c.POINTER[struct_ir3_block]], 176), ('dom_pre_index', uint32_t, 184), ('dom_post_index', uint32_t, 188), ('loop_depth', uint32_t, 192)])
 enum_ir3_instruction_flags: dict[int, str] = {(IR3_INSTR_SY:=1): 'IR3_INSTR_SY', (IR3_INSTR_SS:=2): 'IR3_INSTR_SS', (IR3_INSTR_JP:=4): 'IR3_INSTR_JP', (IR3_INSTR_EQ:=8): 'IR3_INSTR_EQ', (IR3_INSTR_UL:=16): 'IR3_INSTR_UL', (IR3_INSTR_3D:=32): 'IR3_INSTR_3D', (IR3_INSTR_A:=64): 'IR3_INSTR_A', (IR3_INSTR_O:=128): 'IR3_INSTR_O', (IR3_INSTR_P:=256): 'IR3_INSTR_P', (IR3_INSTR_S:=512): 'IR3_INSTR_S', (IR3_INSTR_S2EN:=1024): 'IR3_INSTR_S2EN', (IR3_INSTR_SAT:=2048): 'IR3_INSTR_SAT', (IR3_INSTR_B:=4096): 'IR3_INSTR_B', (IR3_INSTR_NONUNIF:=8192): 'IR3_INSTR_NONUNIF', (IR3_INSTR_A1EN:=16384): 'IR3_INSTR_A1EN', (IR3_INSTR_U:=32768): 'IR3_INSTR_U', (IR3_INSTR_MARK:=65536): 'IR3_INSTR_MARK', (IR3_INSTR_SHARED_SPILL:=65536): 'IR3_INSTR_SHARED_SPILL', (IR3_INSTR_UNUSED:=131072): 'IR3_INSTR_UNUSED', (IR3_INSTR_NEEDS_HELPERS:=262144): 'IR3_INSTR_NEEDS_HELPERS', (IR3_INSTR_V:=524288): 'IR3_INSTR_V', (IR3_INSTR_INV_1D:=1048576): 'IR3_INSTR_INV_1D', (IR3_INSTR_IMM_OFFSET:=2097152): 'IR3_INSTR_IMM_OFFSET'}
 @c.record
 class struct_ir3_register(c.Struct):
@@ -4467,13 +4467,13 @@ class struct_ir3_register(c.Struct):
   uim_val: int
   fim_val: float
   array: struct_ir3_register_array
-  instr: ctypes._Pointer[struct_ir3_instruction]
-  _def: ctypes._Pointer[struct_ir3_register]
-  tied: ctypes._Pointer[struct_ir3_register]
+  instr: c.POINTER[struct_ir3_instruction]
+  _def: c.POINTER[struct_ir3_register]
+  tied: c.POINTER[struct_ir3_register]
   spill_slot: int
   next_use: int
   merge_set_offset: int
-  merge_set: ctypes._Pointer[struct_ir3_merge_set]
+  merge_set: c.POINTER[struct_ir3_merge_set]
   interval_start: int
   interval_end: int
 enum_ir3_register_flags: dict[int, str] = {(IR3_REG_CONST:=1): 'IR3_REG_CONST', (IR3_REG_IMMED:=2): 'IR3_REG_IMMED', (IR3_REG_HALF:=4): 'IR3_REG_HALF', (IR3_REG_SHARED:=8): 'IR3_REG_SHARED', (IR3_REG_RELATIV:=16): 'IR3_REG_RELATIV', (IR3_REG_R:=32): 'IR3_REG_R', (IR3_REG_FNEG:=64): 'IR3_REG_FNEG', (IR3_REG_FABS:=128): 'IR3_REG_FABS', (IR3_REG_SNEG:=256): 'IR3_REG_SNEG', (IR3_REG_SABS:=512): 'IR3_REG_SABS', (IR3_REG_BNOT:=1024): 'IR3_REG_BNOT', (IR3_REG_EI:=2048): 'IR3_REG_EI', (IR3_REG_SSA:=4096): 'IR3_REG_SSA', (IR3_REG_ARRAY:=8192): 'IR3_REG_ARRAY', (IR3_REG_KILL:=16384): 'IR3_REG_KILL', (IR3_REG_FIRST_KILL:=32768): 'IR3_REG_FIRST_KILL', (IR3_REG_UNUSED:=65536): 'IR3_REG_UNUSED', (IR3_REG_EARLY_CLOBBER:=131072): 'IR3_REG_EARLY_CLOBBER', (IR3_REG_LAST_USE:=262144): 'IR3_REG_LAST_USE', (IR3_REG_PREDICATE:=524288): 'IR3_REG_PREDICATE', (IR3_REG_RT:=1048576): 'IR3_REG_RT', (IR3_REG_ALIAS:=2097152): 'IR3_REG_ALIAS', (IR3_REG_FIRST_ALIAS:=4194304): 'IR3_REG_FIRST_ALIAS'}
@@ -4493,19 +4493,19 @@ class struct_ir3_merge_set(c.Struct):
   interval_start: int
   spill_slot: int
   regs_count: int
-  regs: ctypes._Pointer[ctypes.POINTER(struct_ir3_register)]
-struct_ir3_merge_set.register_fields([('preferred_reg', uint16_t, 0), ('size', uint16_t, 2), ('alignment', uint16_t, 4), ('interval_start', ctypes.c_uint32, 8), ('spill_slot', ctypes.c_uint32, 12), ('regs_count', ctypes.c_uint32, 16), ('regs', ctypes.POINTER(ctypes.POINTER(struct_ir3_register)), 24)])
-struct_ir3_register.register_fields([('flags', ctypes.c_uint32, 0), ('name', ctypes.c_uint32, 4), ('wrmask', ctypes.c_uint32, 8, 16, 0), ('size', ctypes.c_uint32, 10, 16, 0), ('num', uint16_t, 12), ('iim_val', int32_t, 16), ('uim_val', uint32_t, 16), ('fim_val', ctypes.c_float, 16), ('array', struct_ir3_register_array, 16), ('instr', ctypes.POINTER(struct_ir3_instruction), 24), ('_def', ctypes.POINTER(struct_ir3_register), 32), ('tied', ctypes.POINTER(struct_ir3_register), 40), ('spill_slot', ctypes.c_uint32, 48), ('next_use', ctypes.c_uint32, 52), ('merge_set_offset', ctypes.c_uint32, 56), ('merge_set', ctypes.POINTER(struct_ir3_merge_set), 64), ('interval_start', ctypes.c_uint32, 72), ('interval_end', ctypes.c_uint32, 76)])
+  regs: c.POINTER[c.POINTER[struct_ir3_register]]
+struct_ir3_merge_set.register_fields([('preferred_reg', uint16_t, 0), ('size', uint16_t, 2), ('alignment', uint16_t, 4), ('interval_start', ctypes.c_uint32, 8), ('spill_slot', ctypes.c_uint32, 12), ('regs_count', ctypes.c_uint32, 16), ('regs', c.POINTER[c.POINTER[struct_ir3_register]], 24)])
+struct_ir3_register.register_fields([('flags', ctypes.c_uint32, 0), ('name', ctypes.c_uint32, 4), ('wrmask', ctypes.c_uint32, 8, 16, 0), ('size', ctypes.c_uint32, 10, 16, 0), ('num', uint16_t, 12), ('iim_val', int32_t, 16), ('uim_val', uint32_t, 16), ('fim_val', ctypes.c_float, 16), ('array', struct_ir3_register_array, 16), ('instr', c.POINTER[struct_ir3_instruction], 24), ('_def', c.POINTER[struct_ir3_register], 32), ('tied', c.POINTER[struct_ir3_register], 40), ('spill_slot', ctypes.c_uint32, 48), ('next_use', ctypes.c_uint32, 52), ('merge_set_offset', ctypes.c_uint32, 56), ('merge_set', c.POINTER[struct_ir3_merge_set], 64), ('interval_start', ctypes.c_uint32, 72), ('interval_end', ctypes.c_uint32, 76)])
 @c.record
 class struct_ir3_instruction_cat0(c.Struct):
   SIZE = 32
   inv1: bytes
   inv2: bytes
   immed: int
-  target: ctypes._Pointer[struct_ir3_block]
-  target_label: ctypes._Pointer[ctypes.c_char]
+  target: c.POINTER[struct_ir3_block]
+  target_label: c.POINTER[ctypes.c_char]
   idx: int
-struct_ir3_instruction_cat0.register_fields([('inv1', ctypes.c_char, 0), ('inv2', ctypes.c_char, 1), ('immed', ctypes.c_int32, 4), ('target', ctypes.POINTER(struct_ir3_block), 8), ('target_label', ctypes.POINTER(ctypes.c_char), 16), ('idx', ctypes.c_uint32, 24)])
+struct_ir3_instruction_cat0.register_fields([('inv1', ctypes.c_char, 0), ('inv2', ctypes.c_char, 1), ('immed', ctypes.c_int32, 4), ('target', c.POINTER[struct_ir3_block], 8), ('target_label', c.POINTER[ctypes.c_char], 16), ('idx', ctypes.c_uint32, 24)])
 @c.record
 class struct_ir3_instruction_cat1(c.Struct):
   SIZE = 16
@@ -4572,12 +4572,12 @@ struct_ir3_instruction_split.register_fields([('off', ctypes.c_int32, 0)])
 @c.record
 class struct_ir3_instruction_end(c.Struct):
   SIZE = 8
-  outidxs: ctypes._Pointer[ctypes.c_uint32]
-struct_ir3_instruction_end.register_fields([('outidxs', ctypes.POINTER(ctypes.c_uint32), 0)])
+  outidxs: c.POINTER[ctypes.c_uint32]
+struct_ir3_instruction_end.register_fields([('outidxs', c.POINTER[ctypes.c_uint32], 0)])
 @c.record
 class struct_ir3_instruction_phi(c.Struct):
   SIZE = 16
-  nphi: int|None
+  nphi: ctypes.c_void_p
   comp: int
 struct_ir3_instruction_phi.register_fields([('nphi', ctypes.c_void_p, 0), ('comp', ctypes.c_uint32, 8)])
 @c.record
@@ -4608,8 +4608,8 @@ class struct_ir3_instruction_raw(c.Struct):
   value: int
 struct_ir3_instruction_raw.register_fields([('value', uint64_t, 0)])
 struct_ir3_instruction_barrier_class: dict[int, str] = {(IR3_BARRIER_EVERYTHING:=1): 'IR3_BARRIER_EVERYTHING', (IR3_BARRIER_SHARED_R:=2): 'IR3_BARRIER_SHARED_R', (IR3_BARRIER_SHARED_W:=4): 'IR3_BARRIER_SHARED_W', (IR3_BARRIER_IMAGE_R:=8): 'IR3_BARRIER_IMAGE_R', (IR3_BARRIER_IMAGE_W:=16): 'IR3_BARRIER_IMAGE_W', (IR3_BARRIER_BUFFER_R:=32): 'IR3_BARRIER_BUFFER_R', (IR3_BARRIER_BUFFER_W:=64): 'IR3_BARRIER_BUFFER_W', (IR3_BARRIER_ARRAY_R:=128): 'IR3_BARRIER_ARRAY_R', (IR3_BARRIER_ARRAY_W:=256): 'IR3_BARRIER_ARRAY_W', (IR3_BARRIER_PRIVATE_R:=512): 'IR3_BARRIER_PRIVATE_R', (IR3_BARRIER_PRIVATE_W:=1024): 'IR3_BARRIER_PRIVATE_W', (IR3_BARRIER_CONST_W:=2048): 'IR3_BARRIER_CONST_W', (IR3_BARRIER_ACTIVE_FIBERS_R:=4096): 'IR3_BARRIER_ACTIVE_FIBERS_R', (IR3_BARRIER_ACTIVE_FIBERS_W:=8192): 'IR3_BARRIER_ACTIVE_FIBERS_W'}
-struct_ir3_instruction.register_fields([('block', ctypes.POINTER(struct_ir3_block), 0), ('opc', ctypes.c_uint32, 8), ('flags', ctypes.c_uint32, 12), ('repeat', uint8_t, 16), ('nop', uint8_t, 17), ('srcs_count', ctypes.c_uint32, 20), ('dsts_count', ctypes.c_uint32, 24), ('dsts', ctypes.POINTER(ctypes.POINTER(struct_ir3_register)), 32), ('srcs', ctypes.POINTER(ctypes.POINTER(struct_ir3_register)), 40), ('cat0', struct_ir3_instruction_cat0, 48), ('cat1', struct_ir3_instruction_cat1, 48), ('cat2', struct_ir3_instruction_cat2, 48), ('cat3', struct_ir3_instruction_cat3, 48), ('cat5', struct_ir3_instruction_cat5, 48), ('cat6', struct_ir3_instruction_cat6, 48), ('cat7', struct_ir3_instruction_cat7, 48), ('split', struct_ir3_instruction_split, 48), ('end', struct_ir3_instruction_end, 48), ('phi', struct_ir3_instruction_phi, 48), ('prefetch', struct_ir3_instruction_prefetch, 48), ('input', struct_ir3_instruction_input, 48), ('push_consts', struct_ir3_instruction_push_consts, 48), ('raw', struct_ir3_instruction_raw, 48), ('ip', uint32_t, 80), ('data', ctypes.c_void_p, 88), ('uses', ctypes.POINTER(struct_set), 96), ('use_count', ctypes.c_int32, 104), ('address', ctypes.POINTER(struct_ir3_register), 112), ('deps_count', ctypes.c_uint32, 120), ('deps_sz', ctypes.c_uint32, 124), ('deps', ctypes.POINTER(ctypes.POINTER(struct_ir3_instruction)), 128), ('barrier_class', ctypes.c_uint32, 136), ('barrier_conflict', ctypes.c_uint32, 140), ('node', struct_list_head, 144), ('rpt_node', struct_list_head, 160), ('serialno', uint32_t, 176), ('line', ctypes.c_int32, 180)])
-struct_ir3.register_fields([('compiler', ctypes.POINTER(struct_ir3_compiler), 0), ('type', gl_shader_stage, 8), ('inputs_count', ctypes.c_uint32, 12), ('inputs_sz', ctypes.c_uint32, 16), ('inputs', ctypes.POINTER(ctypes.POINTER(struct_ir3_instruction)), 24), ('baryfs_count', ctypes.c_uint32, 32), ('baryfs_sz', ctypes.c_uint32, 36), ('baryfs', ctypes.POINTER(ctypes.POINTER(struct_ir3_instruction)), 40), ('a0_users_count', ctypes.c_uint32, 48), ('a0_users_sz', ctypes.c_uint32, 52), ('a0_users', ctypes.POINTER(ctypes.POINTER(struct_ir3_instruction)), 56), ('a1_users_count', ctypes.c_uint32, 64), ('a1_users_sz', ctypes.c_uint32, 68), ('a1_users', ctypes.POINTER(ctypes.POINTER(struct_ir3_instruction)), 72), ('astc_srgb_count', ctypes.c_uint32, 80), ('astc_srgb_sz', ctypes.c_uint32, 84), ('astc_srgb', ctypes.POINTER(ctypes.POINTER(struct_ir3_instruction)), 88), ('tg4_count', ctypes.c_uint32, 96), ('tg4_sz', ctypes.c_uint32, 100), ('tg4', ctypes.POINTER(ctypes.POINTER(struct_ir3_instruction)), 104), ('block_list', struct_list_head, 112), ('array_list', struct_list_head, 128), ('instr_count', ctypes.c_uint32, 144)])
+struct_ir3_instruction.register_fields([('block', c.POINTER[struct_ir3_block], 0), ('opc', ctypes.c_uint32, 8), ('flags', ctypes.c_uint32, 12), ('repeat', uint8_t, 16), ('nop', uint8_t, 17), ('srcs_count', ctypes.c_uint32, 20), ('dsts_count', ctypes.c_uint32, 24), ('dsts', c.POINTER[c.POINTER[struct_ir3_register]], 32), ('srcs', c.POINTER[c.POINTER[struct_ir3_register]], 40), ('cat0', struct_ir3_instruction_cat0, 48), ('cat1', struct_ir3_instruction_cat1, 48), ('cat2', struct_ir3_instruction_cat2, 48), ('cat3', struct_ir3_instruction_cat3, 48), ('cat5', struct_ir3_instruction_cat5, 48), ('cat6', struct_ir3_instruction_cat6, 48), ('cat7', struct_ir3_instruction_cat7, 48), ('split', struct_ir3_instruction_split, 48), ('end', struct_ir3_instruction_end, 48), ('phi', struct_ir3_instruction_phi, 48), ('prefetch', struct_ir3_instruction_prefetch, 48), ('input', struct_ir3_instruction_input, 48), ('push_consts', struct_ir3_instruction_push_consts, 48), ('raw', struct_ir3_instruction_raw, 48), ('ip', uint32_t, 80), ('data', ctypes.c_void_p, 88), ('uses', c.POINTER[struct_set], 96), ('use_count', ctypes.c_int32, 104), ('address', c.POINTER[struct_ir3_register], 112), ('deps_count', ctypes.c_uint32, 120), ('deps_sz', ctypes.c_uint32, 124), ('deps', c.POINTER[c.POINTER[struct_ir3_instruction]], 128), ('barrier_class', ctypes.c_uint32, 136), ('barrier_conflict', ctypes.c_uint32, 140), ('node', struct_list_head, 144), ('rpt_node', struct_list_head, 160), ('serialno', uint32_t, 176), ('line', ctypes.c_int32, 180)])
+struct_ir3.register_fields([('compiler', c.POINTER[struct_ir3_compiler], 0), ('type', gl_shader_stage, 8), ('inputs_count', ctypes.c_uint32, 12), ('inputs_sz', ctypes.c_uint32, 16), ('inputs', c.POINTER[c.POINTER[struct_ir3_instruction]], 24), ('baryfs_count', ctypes.c_uint32, 32), ('baryfs_sz', ctypes.c_uint32, 36), ('baryfs', c.POINTER[c.POINTER[struct_ir3_instruction]], 40), ('a0_users_count', ctypes.c_uint32, 48), ('a0_users_sz', ctypes.c_uint32, 52), ('a0_users', c.POINTER[c.POINTER[struct_ir3_instruction]], 56), ('a1_users_count', ctypes.c_uint32, 64), ('a1_users_sz', ctypes.c_uint32, 68), ('a1_users', c.POINTER[c.POINTER[struct_ir3_instruction]], 72), ('astc_srgb_count', ctypes.c_uint32, 80), ('astc_srgb_sz', ctypes.c_uint32, 84), ('astc_srgb', c.POINTER[c.POINTER[struct_ir3_instruction]], 88), ('tg4_count', ctypes.c_uint32, 96), ('tg4_sz', ctypes.c_uint32, 100), ('tg4', c.POINTER[c.POINTER[struct_ir3_instruction]], 104), ('block_list', struct_list_head, 112), ('array_list', struct_list_head, 128), ('instr_count', ctypes.c_uint32, 144)])
 @c.record
 class struct_ir3_info(c.Struct):
   SIZE = 64
@@ -4638,8 +4638,8 @@ class struct_ir3_info(c.Struct):
   systall: int
   last_baryf: int
   last_helper: int
-  instrs_per_cat: ctypes.Array[ctypes.c_uint16]
-struct_ir3_info.register_fields([('size', uint32_t, 0), ('constant_data_offset', uint32_t, 4), ('sizedwords', uint16_t, 8), ('instrs_count', uint16_t, 10), ('preamble_instrs_count', uint16_t, 12), ('nops_count', uint16_t, 14), ('mov_count', uint16_t, 16), ('cov_count', uint16_t, 18), ('stp_count', uint16_t, 20), ('ldp_count', uint16_t, 22), ('max_reg', int8_t, 24), ('max_half_reg', int8_t, 25), ('max_const', int16_t, 26), ('max_waves', int8_t, 28), ('subgroup_size', uint8_t, 29), ('double_threadsize', ctypes.c_bool, 30), ('multi_dword_ldp_stp', ctypes.c_bool, 31), ('early_preamble', ctypes.c_bool, 32), ('uses_ray_intersection', ctypes.c_bool, 33), ('ss', uint16_t, 34), ('sy', uint16_t, 36), ('sstall', uint16_t, 38), ('systall', uint16_t, 40), ('last_baryf', uint16_t, 42), ('last_helper', uint16_t, 44), ('instrs_per_cat', (uint16_t * 8), 46)])
+  instrs_per_cat: c.Array[ctypes.c_uint16, Literal[8]]
+struct_ir3_info.register_fields([('size', uint32_t, 0), ('constant_data_offset', uint32_t, 4), ('sizedwords', uint16_t, 8), ('instrs_count', uint16_t, 10), ('preamble_instrs_count', uint16_t, 12), ('nops_count', uint16_t, 14), ('mov_count', uint16_t, 16), ('cov_count', uint16_t, 18), ('stp_count', uint16_t, 20), ('ldp_count', uint16_t, 22), ('max_reg', int8_t, 24), ('max_half_reg', int8_t, 25), ('max_const', int16_t, 26), ('max_waves', int8_t, 28), ('subgroup_size', uint8_t, 29), ('double_threadsize', ctypes.c_bool, 30), ('multi_dword_ldp_stp', ctypes.c_bool, 31), ('early_preamble', ctypes.c_bool, 32), ('uses_ray_intersection', ctypes.c_bool, 33), ('ss', uint16_t, 34), ('sy', uint16_t, 36), ('sstall', uint16_t, 38), ('systall', uint16_t, 40), ('last_baryf', uint16_t, 42), ('last_helper', uint16_t, 44), ('instrs_per_cat', c.Array[uint16_t, Literal[8]], 46)])
 @c.record
 class struct_ir3_shader_variant_input(c.Struct):
   SIZE = 5
@@ -4658,15 +4658,15 @@ class struct_ir3_shader_variant_astc_srgb(c.Struct):
   SIZE = 72
   base: int
   count: int
-  orig_idx: ctypes.Array[ctypes.c_uint32]
-struct_ir3_shader_variant_astc_srgb.register_fields([('base', ctypes.c_uint32, 0), ('count', ctypes.c_uint32, 4), ('orig_idx', (ctypes.c_uint32 * 16), 8)])
+  orig_idx: c.Array[ctypes.c_uint32, Literal[16]]
+struct_ir3_shader_variant_astc_srgb.register_fields([('base', ctypes.c_uint32, 0), ('count', ctypes.c_uint32, 4), ('orig_idx', c.Array[ctypes.c_uint32, Literal[16]], 8)])
 @c.record
 class struct_ir3_shader_variant_tg4(c.Struct):
   SIZE = 72
   base: int
   count: int
-  orig_idx: ctypes.Array[ctypes.c_uint32]
-struct_ir3_shader_variant_tg4.register_fields([('base', ctypes.c_uint32, 0), ('count', ctypes.c_uint32, 4), ('orig_idx', (ctypes.c_uint32 * 16), 8)])
+  orig_idx: c.Array[ctypes.c_uint32, Literal[16]]
+struct_ir3_shader_variant_tg4.register_fields([('base', ctypes.c_uint32, 0), ('count', ctypes.c_uint32, 4), ('orig_idx', c.Array[ctypes.c_uint32, Literal[16]], 8)])
 @c.record
 class struct_ir3_shader_variant_tess(c.Struct):
   SIZE = 8
@@ -4702,7 +4702,7 @@ class struct_ir3_shader_variant_cs(c.Struct):
   local_invocation_id: int
   work_group_id: int
 struct_ir3_shader_variant_cs.register_fields([('req_local_mem', ctypes.c_uint32, 0), ('force_linear_dispatch', ctypes.c_bool, 4), ('local_invocation_id', uint32_t, 8), ('work_group_id', uint32_t, 12)])
-struct_ir3_shader_variant.register_fields([('bo', ctypes.POINTER(struct_fd_bo), 0), ('id', uint32_t, 8), ('shader_id', uint32_t, 12), ('key', struct_ir3_shader_key, 16), ('binning_pass', ctypes.c_bool, 96), ('binning', ctypes.POINTER(struct_ir3_shader_variant), 104), ('nonbinning', ctypes.POINTER(struct_ir3_shader_variant), 112), ('ir', ctypes.POINTER(struct_ir3), 120), ('next', ctypes.POINTER(struct_ir3_shader_variant), 128), ('type', gl_shader_stage, 136), ('compiler', ctypes.POINTER(struct_ir3_compiler), 144), ('name', ctypes.POINTER(ctypes.c_char), 152), ('constant_data', ctypes.c_void_p, 160), ('disasm_info', struct_ir3_disasm_info, 168), ('bin', ctypes.POINTER(uint32_t), 192), ('const_state', ctypes.POINTER(struct_ir3_const_state), 200), ('imm_state', struct_ir3_imm_const_state, 208), ('info', struct_ir3_info, 224), ('sha1_str', (ctypes.c_char * 41), 288), ('shader_options', struct_ir3_shader_options, 332), ('constant_data_size', uint32_t, 560), ('branchstack', ctypes.c_uint32, 564), ('loops', ctypes.c_uint32, 568), ('instrlen', ctypes.c_uint32, 572), ('constlen', ctypes.c_uint32, 576), ('pvtmem_size', ctypes.c_uint32, 580), ('pvtmem_per_wave', ctypes.c_bool, 584), ('multi_pos_output', ctypes.c_bool, 585), ('dual_src_blend', ctypes.c_bool, 586), ('early_preamble', ctypes.c_bool, 587), ('shared_size', ctypes.c_uint32, 588), ('frag_face', ctypes.c_bool, 592), ('color0_mrt', ctypes.c_bool, 593), ('fragcoord_compmask', uint8_t, 594), ('outputs_count', ctypes.c_uint32, 596), ('outputs', (struct_ir3_shader_output * 34), 600), ('writes_pos', ctypes.c_bool, 736), ('writes_smask', ctypes.c_bool, 737), ('writes_psize', ctypes.c_bool, 738), ('writes_viewport', ctypes.c_bool, 739), ('writes_stencilref', ctypes.c_bool, 740), ('writes_shading_rate', ctypes.c_bool, 741), ('output_size', uint32_t, 744), ('input_size', uint32_t, 748), ('output_loc', (ctypes.c_uint32 * 45), 752), ('inputs_count', ctypes.c_uint32, 932), ('inputs', (struct_ir3_shader_variant_input * 34), 936), ('reads_primid', ctypes.c_bool, 1106), ('reads_shading_rate', ctypes.c_bool, 1107), ('reads_smask', ctypes.c_bool, 1108), ('total_in', ctypes.c_uint32, 1112), ('sysval_in', ctypes.c_uint32, 1116), ('varying_in', ctypes.c_uint32, 1120), ('image_mapping', struct_ir3_ibo_mapping, 1124), ('num_samp', ctypes.c_int32, 1224), ('fb_read', ctypes.c_bool, 1228), ('has_ssbo', ctypes.c_bool, 1229), ('bindless_tex', ctypes.c_bool, 1230), ('bindless_samp', ctypes.c_bool, 1231), ('bindless_ibo', ctypes.c_bool, 1232), ('bindless_ubo', ctypes.c_bool, 1233), ('need_pixlod', ctypes.c_bool, 1234), ('need_full_quad', ctypes.c_bool, 1235), ('need_driver_params', ctypes.c_bool, 1236), ('no_earlyz', ctypes.c_bool, 1237), ('has_kill', ctypes.c_bool, 1238), ('per_samp', ctypes.c_bool, 1239), ('post_depth_coverage', ctypes.c_bool, 1240), ('empty', ctypes.c_bool, 1241), ('writes_only_color', ctypes.c_bool, 1242), ('mergedregs', ctypes.c_bool, 1243), ('clip_mask', uint8_t, 1244), ('cull_mask', uint8_t, 1245), ('astc_srgb', struct_ir3_shader_variant_astc_srgb, 1248), ('tg4', struct_ir3_shader_variant_tg4, 1320), ('num_sampler_prefetch', uint32_t, 1392), ('sampler_prefetch', (struct_ir3_sampler_prefetch * 4), 1396), ('prefetch_bary_type', ctypes.c_uint32, 1460), ('prefetch_end_of_quad', ctypes.c_bool, 1464), ('local_size', (uint16_t * 3), 1466), ('local_size_variable', ctypes.c_bool, 1472), ('has_barrier', ctypes.c_bool, 1473), ('num_ssbos', ctypes.c_uint32, 1476), ('num_uavs', ctypes.c_uint32, 1480), ('tess', struct_ir3_shader_variant_tess, 1484), ('gs', struct_ir3_shader_variant_gs, 1484), ('fs', struct_ir3_shader_variant_fs, 1484), ('cs', struct_ir3_shader_variant_cs, 1484), ('vtxid_base', uint32_t, 1500), ('stream_output', struct_ir3_stream_output_info, 1504)])
+struct_ir3_shader_variant.register_fields([('bo', c.POINTER[struct_fd_bo], 0), ('id', uint32_t, 8), ('shader_id', uint32_t, 12), ('key', struct_ir3_shader_key, 16), ('binning_pass', ctypes.c_bool, 96), ('binning', c.POINTER[struct_ir3_shader_variant], 104), ('nonbinning', c.POINTER[struct_ir3_shader_variant], 112), ('ir', c.POINTER[struct_ir3], 120), ('next', c.POINTER[struct_ir3_shader_variant], 128), ('type', gl_shader_stage, 136), ('compiler', c.POINTER[struct_ir3_compiler], 144), ('name', c.POINTER[ctypes.c_char], 152), ('constant_data', ctypes.c_void_p, 160), ('disasm_info', struct_ir3_disasm_info, 168), ('bin', c.POINTER[uint32_t], 192), ('const_state', c.POINTER[struct_ir3_const_state], 200), ('imm_state', struct_ir3_imm_const_state, 208), ('info', struct_ir3_info, 224), ('sha1_str', c.Array[ctypes.c_char, Literal[41]], 288), ('shader_options', struct_ir3_shader_options, 332), ('constant_data_size', uint32_t, 560), ('branchstack', ctypes.c_uint32, 564), ('loops', ctypes.c_uint32, 568), ('instrlen', ctypes.c_uint32, 572), ('constlen', ctypes.c_uint32, 576), ('pvtmem_size', ctypes.c_uint32, 580), ('pvtmem_per_wave', ctypes.c_bool, 584), ('multi_pos_output', ctypes.c_bool, 585), ('dual_src_blend', ctypes.c_bool, 586), ('early_preamble', ctypes.c_bool, 587), ('shared_size', ctypes.c_uint32, 588), ('frag_face', ctypes.c_bool, 592), ('color0_mrt', ctypes.c_bool, 593), ('fragcoord_compmask', uint8_t, 594), ('outputs_count', ctypes.c_uint32, 596), ('outputs', c.Array[struct_ir3_shader_output, Literal[34]], 600), ('writes_pos', ctypes.c_bool, 736), ('writes_smask', ctypes.c_bool, 737), ('writes_psize', ctypes.c_bool, 738), ('writes_viewport', ctypes.c_bool, 739), ('writes_stencilref', ctypes.c_bool, 740), ('writes_shading_rate', ctypes.c_bool, 741), ('output_size', uint32_t, 744), ('input_size', uint32_t, 748), ('output_loc', c.Array[ctypes.c_uint32, Literal[45]], 752), ('inputs_count', ctypes.c_uint32, 932), ('inputs', c.Array[struct_ir3_shader_variant_input, Literal[34]], 936), ('reads_primid', ctypes.c_bool, 1106), ('reads_shading_rate', ctypes.c_bool, 1107), ('reads_smask', ctypes.c_bool, 1108), ('total_in', ctypes.c_uint32, 1112), ('sysval_in', ctypes.c_uint32, 1116), ('varying_in', ctypes.c_uint32, 1120), ('image_mapping', struct_ir3_ibo_mapping, 1124), ('num_samp', ctypes.c_int32, 1224), ('fb_read', ctypes.c_bool, 1228), ('has_ssbo', ctypes.c_bool, 1229), ('bindless_tex', ctypes.c_bool, 1230), ('bindless_samp', ctypes.c_bool, 1231), ('bindless_ibo', ctypes.c_bool, 1232), ('bindless_ubo', ctypes.c_bool, 1233), ('need_pixlod', ctypes.c_bool, 1234), ('need_full_quad', ctypes.c_bool, 1235), ('need_driver_params', ctypes.c_bool, 1236), ('no_earlyz', ctypes.c_bool, 1237), ('has_kill', ctypes.c_bool, 1238), ('per_samp', ctypes.c_bool, 1239), ('post_depth_coverage', ctypes.c_bool, 1240), ('empty', ctypes.c_bool, 1241), ('writes_only_color', ctypes.c_bool, 1242), ('mergedregs', ctypes.c_bool, 1243), ('clip_mask', uint8_t, 1244), ('cull_mask', uint8_t, 1245), ('astc_srgb', struct_ir3_shader_variant_astc_srgb, 1248), ('tg4', struct_ir3_shader_variant_tg4, 1320), ('num_sampler_prefetch', uint32_t, 1392), ('sampler_prefetch', c.Array[struct_ir3_sampler_prefetch, Literal[4]], 1396), ('prefetch_bary_type', ctypes.c_uint32, 1460), ('prefetch_end_of_quad', ctypes.c_bool, 1464), ('local_size', c.Array[uint16_t, Literal[3]], 1466), ('local_size_variable', ctypes.c_bool, 1472), ('has_barrier', ctypes.c_bool, 1473), ('num_ssbos', ctypes.c_uint32, 1476), ('num_uavs', ctypes.c_uint32, 1480), ('tess', struct_ir3_shader_variant_tess, 1484), ('gs', struct_ir3_shader_variant_gs, 1484), ('fs', struct_ir3_shader_variant_fs, 1484), ('cs', struct_ir3_shader_variant_cs, 1484), ('vtxid_base', uint32_t, 1500), ('stream_output', struct_ir3_stream_output_info, 1504)])
 @c.record
 class struct_ir3_shader_cs(c.Struct):
   SIZE = 8
@@ -4713,13 +4713,13 @@ struct_ir3_shader_cs.register_fields([('req_local_mem', ctypes.c_uint32, 0), ('f
 class struct_ir3_shader_vs(c.Struct):
   SIZE = 264
   passthrough_tcs_compiled: int
-  passthrough_tcs: ctypes.Array[ctypes.POINTER(struct_ir3_shader)]
-struct_ir3_shader_vs.register_fields([('passthrough_tcs_compiled', ctypes.c_uint32, 0), ('passthrough_tcs', (ctypes.POINTER(struct_ir3_shader) * 32), 8)])
+  passthrough_tcs: c.Array[c.POINTER[struct_ir3_shader], Literal[32]]
+struct_ir3_shader_vs.register_fields([('passthrough_tcs_compiled', ctypes.c_uint32, 0), ('passthrough_tcs', c.Array[c.POINTER[struct_ir3_shader], Literal[32]], 8)])
 @c.record
 class pthread_mutex_t(c.Struct):
   SIZE = 40
   __data: struct___pthread_mutex_s
-  __size: ctypes.Array[ctypes.c_char]
+  __size: c.Array[ctypes.c_char, Literal[40]]
   __align: ctypes.c_int64
 mtx_t: TypeAlias = pthread_mutex_t
 @c.record
@@ -4736,51 +4736,51 @@ class struct___pthread_mutex_s(c.Struct):
 @c.record
 class struct___pthread_internal_list(c.Struct):
   SIZE = 16
-  __prev: ctypes._Pointer[struct___pthread_internal_list]
-  __next: ctypes._Pointer[struct___pthread_internal_list]
+  __prev: c.POINTER[struct___pthread_internal_list]
+  __next: c.POINTER[struct___pthread_internal_list]
 __pthread_list_t: TypeAlias = struct___pthread_internal_list
-struct___pthread_internal_list.register_fields([('__prev', ctypes.POINTER(struct___pthread_internal_list), 0), ('__next', ctypes.POINTER(struct___pthread_internal_list), 8)])
+struct___pthread_internal_list.register_fields([('__prev', c.POINTER[struct___pthread_internal_list], 0), ('__next', c.POINTER[struct___pthread_internal_list], 8)])
 struct___pthread_mutex_s.register_fields([('__lock', ctypes.c_int32, 0), ('__count', ctypes.c_uint32, 4), ('__owner', ctypes.c_int32, 8), ('__nusers', ctypes.c_uint32, 12), ('__kind', ctypes.c_int32, 16), ('__spins', ctypes.c_int16, 20), ('__elision', ctypes.c_int16, 22), ('__list', struct___pthread_internal_list, 24)])
-pthread_mutex_t.register_fields([('__data', struct___pthread_mutex_s, 0), ('__size', (ctypes.c_char * 40), 0), ('__align', ctypes.c_int64, 0)])
-cache_key: TypeAlias = (ctypes.c_ubyte * 20)
-struct_ir3_shader.register_fields([('type', gl_shader_stage, 0), ('id', uint32_t, 4), ('variant_count', uint32_t, 8), ('initial_variants_done', ctypes.c_bool, 12), ('compiler', ctypes.POINTER(struct_ir3_compiler), 16), ('options', struct_ir3_shader_options, 24), ('nir_finalized', ctypes.c_bool, 252), ('nir', ctypes.POINTER(struct_nir_shader), 256), ('stream_output', struct_ir3_stream_output_info, 264), ('cs', struct_ir3_shader_cs, 800), ('vs', struct_ir3_shader_vs, 800), ('variants', ctypes.POINTER(struct_ir3_shader_variant), 1064), ('variants_lock', mtx_t, 1072), ('cache_key', cache_key, 1112), ('key_mask', struct_ir3_shader_key, 1132)])
-@dll.bind(ctypes.c_bool, ctypes.POINTER(struct_ir3_shader_variant), ctypes.c_uint32)
-def ir3_const_ensure_imm_size(v:ctypes._Pointer[struct_ir3_shader_variant], size:int) -> bool: ...
-@dll.bind(uint16_t, ctypes.POINTER(struct_ir3_const_state), ctypes.c_uint32)
-def ir3_const_imm_index_to_reg(const_state:ctypes._Pointer[struct_ir3_const_state], i:int) -> uint16_t: ...
-@dll.bind(uint16_t, ctypes.POINTER(struct_ir3_shader_variant), uint32_t)
-def ir3_const_find_imm(v:ctypes._Pointer[struct_ir3_shader_variant], imm:uint32_t) -> uint16_t: ...
-@dll.bind(uint16_t, ctypes.POINTER(struct_ir3_shader_variant), uint32_t)
-def ir3_const_add_imm(v:ctypes._Pointer[struct_ir3_shader_variant], imm:uint32_t) -> uint16_t: ...
-@dll.bind(ctypes.c_void_p, ctypes.POINTER(struct_ir3_shader_variant))
-def ir3_shader_assemble(v:ctypes._Pointer[struct_ir3_shader_variant]) -> int|None: ...
-@dll.bind(ctypes.POINTER(struct_ir3_shader_variant), ctypes.POINTER(struct_ir3_shader), ctypes.POINTER(struct_ir3_shader_key), ctypes.c_bool)
-def ir3_shader_create_variant(shader:ctypes._Pointer[struct_ir3_shader], key:ctypes._Pointer[struct_ir3_shader_key], keep_ir:bool) -> ctypes._Pointer[struct_ir3_shader_variant]: ...
-@dll.bind(ctypes.POINTER(struct_ir3_shader_variant), ctypes.POINTER(struct_ir3_shader), ctypes.POINTER(struct_ir3_shader_key), ctypes.c_bool, ctypes.c_bool, ctypes.POINTER(ctypes.c_bool))
-def ir3_shader_get_variant(shader:ctypes._Pointer[struct_ir3_shader], key:ctypes._Pointer[struct_ir3_shader_key], binning_pass:bool, keep_ir:bool, created:ctypes._Pointer[ctypes.c_bool]) -> ctypes._Pointer[struct_ir3_shader_variant]: ...
-@dll.bind(ctypes.POINTER(struct_ir3_shader), ctypes.POINTER(struct_ir3_compiler), ctypes.POINTER(nir_shader), ctypes.POINTER(struct_ir3_shader_options), ctypes.POINTER(struct_ir3_stream_output_info))
-def ir3_shader_from_nir(compiler:ctypes._Pointer[struct_ir3_compiler], nir:ctypes._Pointer[nir_shader], options:ctypes._Pointer[struct_ir3_shader_options], stream_output:ctypes._Pointer[struct_ir3_stream_output_info]) -> ctypes._Pointer[struct_ir3_shader]: ...
-@dll.bind(uint32_t, ctypes.POINTER(ctypes.POINTER(struct_ir3_shader_variant)), ctypes.POINTER(struct_ir3_compiler))
-def ir3_trim_constlen(variants:ctypes._Pointer[ctypes.POINTER(struct_ir3_shader_variant)], compiler:ctypes._Pointer[struct_ir3_compiler]) -> uint32_t: ...
-@dll.bind(ctypes.POINTER(struct_ir3_shader), ctypes.POINTER(struct_ir3_shader), ctypes.c_uint32)
-def ir3_shader_passthrough_tcs(vs:ctypes._Pointer[struct_ir3_shader], patch_vertices:int) -> ctypes._Pointer[struct_ir3_shader]: ...
-@dll.bind(None, ctypes.POINTER(struct_ir3_shader))
-def ir3_shader_destroy(shader:ctypes._Pointer[struct_ir3_shader]) -> None: ...
-@dll.bind(None, ctypes.POINTER(struct_ir3_shader_variant), ctypes.POINTER(uint32_t), ctypes.POINTER(FILE))
-def ir3_shader_disasm(so:ctypes._Pointer[struct_ir3_shader_variant], bin:ctypes._Pointer[uint32_t], out:ctypes._Pointer[FILE]) -> None: ...
-@dll.bind(uint64_t, ctypes.POINTER(struct_ir3_shader))
-def ir3_shader_outputs(so:ctypes._Pointer[struct_ir3_shader]) -> uint64_t: ...
-@dll.bind(ctypes.c_int32, ctypes.POINTER(struct_glsl_type), ctypes.c_bool)
-def ir3_glsl_type_size(type:ctypes._Pointer[struct_glsl_type], bindless:bool) -> int: ...
-@dll.bind(None, ctypes.POINTER(struct_ir3_compiler), ctypes.POINTER(struct_ir3_shader_options), gl_shader_stage, ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32))
-def ir3_shader_get_subgroup_size(compiler:ctypes._Pointer[struct_ir3_compiler], options:ctypes._Pointer[struct_ir3_shader_options], stage:gl_shader_stage, subgroup_size:ctypes._Pointer[ctypes.c_uint32], max_subgroup_size:ctypes._Pointer[ctypes.c_uint32]) -> None: ...
+pthread_mutex_t.register_fields([('__data', struct___pthread_mutex_s, 0), ('__size', c.Array[ctypes.c_char, Literal[40]], 0), ('__align', ctypes.c_int64, 0)])
+cache_key: TypeAlias = c.Array[ctypes.c_ubyte, Literal[20]]
+struct_ir3_shader.register_fields([('type', gl_shader_stage, 0), ('id', uint32_t, 4), ('variant_count', uint32_t, 8), ('initial_variants_done', ctypes.c_bool, 12), ('compiler', c.POINTER[struct_ir3_compiler], 16), ('options', struct_ir3_shader_options, 24), ('nir_finalized', ctypes.c_bool, 252), ('nir', c.POINTER[struct_nir_shader], 256), ('stream_output', struct_ir3_stream_output_info, 264), ('cs', struct_ir3_shader_cs, 800), ('vs', struct_ir3_shader_vs, 800), ('variants', c.POINTER[struct_ir3_shader_variant], 1064), ('variants_lock', mtx_t, 1072), ('cache_key', cache_key, 1112), ('key_mask', struct_ir3_shader_key, 1132)])
+@dll.bind(ctypes.c_bool, c.POINTER[struct_ir3_shader_variant], ctypes.c_uint32)
+def ir3_const_ensure_imm_size(v:c.POINTER[struct_ir3_shader_variant], size:int) -> bool: ...
+@dll.bind(uint16_t, c.POINTER[struct_ir3_const_state], ctypes.c_uint32)
+def ir3_const_imm_index_to_reg(const_state:c.POINTER[struct_ir3_const_state], i:int) -> uint16_t: ...
+@dll.bind(uint16_t, c.POINTER[struct_ir3_shader_variant], uint32_t)
+def ir3_const_find_imm(v:c.POINTER[struct_ir3_shader_variant], imm:uint32_t) -> uint16_t: ...
+@dll.bind(uint16_t, c.POINTER[struct_ir3_shader_variant], uint32_t)
+def ir3_const_add_imm(v:c.POINTER[struct_ir3_shader_variant], imm:uint32_t) -> uint16_t: ...
+@dll.bind(ctypes.c_void_p, c.POINTER[struct_ir3_shader_variant])
+def ir3_shader_assemble(v:c.POINTER[struct_ir3_shader_variant]) -> ctypes.c_void_p: ...
+@dll.bind(c.POINTER[struct_ir3_shader_variant], c.POINTER[struct_ir3_shader], c.POINTER[struct_ir3_shader_key], ctypes.c_bool)
+def ir3_shader_create_variant(shader:c.POINTER[struct_ir3_shader], key:c.POINTER[struct_ir3_shader_key], keep_ir:bool) -> c.POINTER[struct_ir3_shader_variant]: ...
+@dll.bind(c.POINTER[struct_ir3_shader_variant], c.POINTER[struct_ir3_shader], c.POINTER[struct_ir3_shader_key], ctypes.c_bool, ctypes.c_bool, c.POINTER[ctypes.c_bool])
+def ir3_shader_get_variant(shader:c.POINTER[struct_ir3_shader], key:c.POINTER[struct_ir3_shader_key], binning_pass:bool, keep_ir:bool, created:c.POINTER[ctypes.c_bool]) -> c.POINTER[struct_ir3_shader_variant]: ...
+@dll.bind(c.POINTER[struct_ir3_shader], c.POINTER[struct_ir3_compiler], c.POINTER[nir_shader], c.POINTER[struct_ir3_shader_options], c.POINTER[struct_ir3_stream_output_info])
+def ir3_shader_from_nir(compiler:c.POINTER[struct_ir3_compiler], nir:c.POINTER[nir_shader], options:c.POINTER[struct_ir3_shader_options], stream_output:c.POINTER[struct_ir3_stream_output_info]) -> c.POINTER[struct_ir3_shader]: ...
+@dll.bind(uint32_t, c.POINTER[c.POINTER[struct_ir3_shader_variant]], c.POINTER[struct_ir3_compiler])
+def ir3_trim_constlen(variants:c.POINTER[c.POINTER[struct_ir3_shader_variant]], compiler:c.POINTER[struct_ir3_compiler]) -> uint32_t: ...
+@dll.bind(c.POINTER[struct_ir3_shader], c.POINTER[struct_ir3_shader], ctypes.c_uint32)
+def ir3_shader_passthrough_tcs(vs:c.POINTER[struct_ir3_shader], patch_vertices:int) -> c.POINTER[struct_ir3_shader]: ...
+@dll.bind(None, c.POINTER[struct_ir3_shader])
+def ir3_shader_destroy(shader:c.POINTER[struct_ir3_shader]) -> None: ...
+@dll.bind(None, c.POINTER[struct_ir3_shader_variant], c.POINTER[uint32_t], c.POINTER[FILE])
+def ir3_shader_disasm(so:c.POINTER[struct_ir3_shader_variant], bin:c.POINTER[uint32_t], out:c.POINTER[FILE]) -> None: ...
+@dll.bind(uint64_t, c.POINTER[struct_ir3_shader])
+def ir3_shader_outputs(so:c.POINTER[struct_ir3_shader]) -> uint64_t: ...
+@dll.bind(ctypes.c_int32, c.POINTER[struct_glsl_type], ctypes.c_bool)
+def ir3_glsl_type_size(type:c.POINTER[struct_glsl_type], bindless:bool) -> int: ...
+@dll.bind(None, c.POINTER[struct_ir3_compiler], c.POINTER[struct_ir3_shader_options], gl_shader_stage, c.POINTER[ctypes.c_uint32], c.POINTER[ctypes.c_uint32])
+def ir3_shader_get_subgroup_size(compiler:c.POINTER[struct_ir3_compiler], options:c.POINTER[struct_ir3_shader_options], stage:gl_shader_stage, subgroup_size:c.POINTER[ctypes.c_uint32], max_subgroup_size:c.POINTER[ctypes.c_uint32]) -> None: ...
 @c.record
 class struct_ir3_shader_linkage(c.Struct):
   SIZE = 152
   max_loc: int
   cnt: int
-  varmask: ctypes.Array[ctypes.c_uint32]
-  var: ctypes.Array[struct_ir3_shader_linkage_var]
+  varmask: c.Array[ctypes.c_uint32, Literal[4]]
+  var: c.Array[struct_ir3_shader_linkage_var, Literal[32]]
   primid_loc: int
   viewid_loc: int
   clip0_loc: int
@@ -4793,153 +4793,153 @@ class struct_ir3_shader_linkage_var(c.Struct):
   compmask: int
   loc: int
 struct_ir3_shader_linkage_var.register_fields([('slot', uint8_t, 0), ('regid', uint8_t, 1), ('compmask', uint8_t, 2), ('loc', uint8_t, 3)])
-struct_ir3_shader_linkage.register_fields([('max_loc', uint8_t, 0), ('cnt', uint8_t, 1), ('varmask', (uint32_t * 4), 4), ('var', (struct_ir3_shader_linkage_var * 32), 20), ('primid_loc', uint8_t, 148), ('viewid_loc', uint8_t, 149), ('clip0_loc', uint8_t, 150), ('clip1_loc', uint8_t, 151)])
-@dll.bind(None, ctypes.POINTER(FILE), ctypes.POINTER(ctypes.c_uint32), size_t)
-def print_raw(out:ctypes._Pointer[FILE], data:ctypes._Pointer[ctypes.c_uint32], size:size_t) -> None: ...
-@dll.bind(None, ctypes.POINTER(struct_ir3_shader_linkage), ctypes.POINTER(struct_ir3_shader_variant))
-def ir3_link_stream_out(l:ctypes._Pointer[struct_ir3_shader_linkage], v:ctypes._Pointer[struct_ir3_shader_variant]) -> None: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def ir3_nir_apply_trig_workarounds(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def ir3_nir_lower_imul(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def ir3_nir_lower_io_offsets(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def ir3_nir_lower_load_barycentric_at_sample(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def ir3_nir_lower_load_barycentric_at_offset(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.POINTER(struct_ir3_shader_variant))
-def ir3_nir_lower_push_consts_to_preamble(nir:ctypes._Pointer[nir_shader], v:ctypes._Pointer[struct_ir3_shader_variant]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.POINTER(struct_ir3_shader_variant))
-def ir3_nir_lower_driver_params_to_ubo(nir:ctypes._Pointer[nir_shader], v:ctypes._Pointer[struct_ir3_shader_variant]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def ir3_nir_move_varying_inputs(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_int32, ctypes.POINTER(nir_def), ctypes.POINTER(ctypes.c_uint32))
-def ir3_nir_coord_offset(ssa:ctypes._Pointer[nir_def], bary_type:ctypes._Pointer[ctypes.c_uint32]) -> int: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.POINTER(ctypes.c_uint32))
-def ir3_nir_lower_tex_prefetch(shader:ctypes._Pointer[nir_shader], prefetch_bary_type:ctypes._Pointer[ctypes.c_uint32]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def ir3_nir_lower_layer_id(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def ir3_nir_lower_frag_shading_rate(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def ir3_nir_lower_primitive_shading_rate(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.POINTER(struct_ir3_shader_variant), ctypes.c_uint32)
-def ir3_nir_lower_to_explicit_output(shader:ctypes._Pointer[nir_shader], v:ctypes._Pointer[struct_ir3_shader_variant], topology:int) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.POINTER(struct_ir3_shader_variant))
-def ir3_nir_lower_to_explicit_input(shader:ctypes._Pointer[nir_shader], v:ctypes._Pointer[struct_ir3_shader_variant]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.POINTER(struct_ir3_shader_variant), ctypes.c_uint32)
-def ir3_nir_lower_tess_ctrl(shader:ctypes._Pointer[nir_shader], v:ctypes._Pointer[struct_ir3_shader_variant], topology:int) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.POINTER(struct_ir3_shader_variant), ctypes.c_uint32)
-def ir3_nir_lower_tess_eval(shader:ctypes._Pointer[nir_shader], v:ctypes._Pointer[struct_ir3_shader_variant], topology:int) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def ir3_nir_lower_gs(shader:ctypes._Pointer[nir_shader]) -> bool: ...
+struct_ir3_shader_linkage.register_fields([('max_loc', uint8_t, 0), ('cnt', uint8_t, 1), ('varmask', c.Array[uint32_t, Literal[4]], 4), ('var', c.Array[struct_ir3_shader_linkage_var, Literal[32]], 20), ('primid_loc', uint8_t, 148), ('viewid_loc', uint8_t, 149), ('clip0_loc', uint8_t, 150), ('clip1_loc', uint8_t, 151)])
+@dll.bind(None, c.POINTER[FILE], c.POINTER[ctypes.c_uint32], size_t)
+def print_raw(out:c.POINTER[FILE], data:c.POINTER[ctypes.c_uint32], size:size_t) -> None: ...
+@dll.bind(None, c.POINTER[struct_ir3_shader_linkage], c.POINTER[struct_ir3_shader_variant])
+def ir3_link_stream_out(l:c.POINTER[struct_ir3_shader_linkage], v:c.POINTER[struct_ir3_shader_variant]) -> None: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def ir3_nir_apply_trig_workarounds(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def ir3_nir_lower_imul(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def ir3_nir_lower_io_offsets(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def ir3_nir_lower_load_barycentric_at_sample(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def ir3_nir_lower_load_barycentric_at_offset(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], c.POINTER[struct_ir3_shader_variant])
+def ir3_nir_lower_push_consts_to_preamble(nir:c.POINTER[nir_shader], v:c.POINTER[struct_ir3_shader_variant]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], c.POINTER[struct_ir3_shader_variant])
+def ir3_nir_lower_driver_params_to_ubo(nir:c.POINTER[nir_shader], v:c.POINTER[struct_ir3_shader_variant]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def ir3_nir_move_varying_inputs(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_int32, c.POINTER[nir_def], c.POINTER[ctypes.c_uint32])
+def ir3_nir_coord_offset(ssa:c.POINTER[nir_def], bary_type:c.POINTER[ctypes.c_uint32]) -> int: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], c.POINTER[ctypes.c_uint32])
+def ir3_nir_lower_tex_prefetch(shader:c.POINTER[nir_shader], prefetch_bary_type:c.POINTER[ctypes.c_uint32]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def ir3_nir_lower_layer_id(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def ir3_nir_lower_frag_shading_rate(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def ir3_nir_lower_primitive_shading_rate(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], c.POINTER[struct_ir3_shader_variant], ctypes.c_uint32)
+def ir3_nir_lower_to_explicit_output(shader:c.POINTER[nir_shader], v:c.POINTER[struct_ir3_shader_variant], topology:int) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], c.POINTER[struct_ir3_shader_variant])
+def ir3_nir_lower_to_explicit_input(shader:c.POINTER[nir_shader], v:c.POINTER[struct_ir3_shader_variant]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], c.POINTER[struct_ir3_shader_variant], ctypes.c_uint32)
+def ir3_nir_lower_tess_ctrl(shader:c.POINTER[nir_shader], v:c.POINTER[struct_ir3_shader_variant], topology:int) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], c.POINTER[struct_ir3_shader_variant], ctypes.c_uint32)
+def ir3_nir_lower_tess_eval(shader:c.POINTER[nir_shader], v:c.POINTER[struct_ir3_shader_variant], topology:int) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def ir3_nir_lower_gs(shader:c.POINTER[nir_shader]) -> bool: ...
 @dll.bind(ctypes.c_bool, ctypes.c_uint32)
 def ir3_supports_vectorized_nir_op(op:ctypes.c_uint32) -> bool: ...
-@dll.bind(uint8_t, ctypes.POINTER(nir_instr), ctypes.c_void_p)
-def ir3_nir_vectorize_filter(instr:ctypes._Pointer[nir_instr], data:int|None) -> uint8_t: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def ir3_nir_lower_64b_intrinsics(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def ir3_nir_lower_64b_undef(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def ir3_nir_lower_64b_global(shader:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def ir3_nir_lower_64b_regs(shader:ctypes._Pointer[nir_shader]) -> bool: ...
+@dll.bind(uint8_t, c.POINTER[nir_instr], ctypes.c_void_p)
+def ir3_nir_vectorize_filter(instr:c.POINTER[nir_instr], data:ctypes.c_void_p) -> uint8_t: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def ir3_nir_lower_64b_intrinsics(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def ir3_nir_lower_64b_undef(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def ir3_nir_lower_64b_global(shader:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def ir3_nir_lower_64b_regs(shader:c.POINTER[nir_shader]) -> bool: ...
 @dll.bind(nir_mem_access_size_align, ctypes.c_uint32, uint8_t, uint8_t, uint32_t, uint32_t, ctypes.c_bool, ctypes.c_uint32, ctypes.c_void_p)
-def ir3_mem_access_size_align(intrin:ctypes.c_uint32, bytes:uint8_t, bit_size:uint8_t, align:uint32_t, align_offset:uint32_t, offset_is_const:bool, access:ctypes.c_uint32, cb_data:int|None) -> nir_mem_access_size_align: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def ir3_nir_opt_branch_and_or_not(nir:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def ir3_nir_opt_triops_bitwise(nir:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(struct_ir3_compiler), ctypes.POINTER(struct_ir3_shader_nir_options), ctypes.POINTER(nir_shader))
-def ir3_optimize_loop(compiler:ctypes._Pointer[struct_ir3_compiler], options:ctypes._Pointer[struct_ir3_shader_nir_options], s:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(None, ctypes.POINTER(nir_shader))
-def ir3_nir_lower_io_vars_to_temporaries(s:ctypes._Pointer[nir_shader]) -> None: ...
-@dll.bind(None, ctypes.POINTER(struct_ir3_compiler), ctypes.POINTER(struct_ir3_shader_nir_options), ctypes.POINTER(nir_shader))
-def ir3_finalize_nir(compiler:ctypes._Pointer[struct_ir3_compiler], options:ctypes._Pointer[struct_ir3_shader_nir_options], s:ctypes._Pointer[nir_shader]) -> None: ...
-@dll.bind(None, ctypes.POINTER(struct_ir3_shader))
-def ir3_nir_post_finalize(shader:ctypes._Pointer[struct_ir3_shader]) -> None: ...
-@dll.bind(None, ctypes.POINTER(struct_ir3_shader_variant), ctypes.POINTER(struct_ir3_shader_nir_options), ctypes.POINTER(nir_shader))
-def ir3_nir_lower_variant(so:ctypes._Pointer[struct_ir3_shader_variant], options:ctypes._Pointer[struct_ir3_shader_nir_options], s:ctypes._Pointer[nir_shader]) -> None: ...
-@dll.bind(None, ctypes.POINTER(nir_shader), ctypes.POINTER(struct_ir3_shader_variant), ctypes.POINTER(struct_ir3_const_state))
-def ir3_setup_const_state(nir:ctypes._Pointer[nir_shader], v:ctypes._Pointer[struct_ir3_shader_variant], const_state:ctypes._Pointer[struct_ir3_const_state]) -> None: ...
-@dll.bind(uint32_t, ctypes.POINTER(struct_ir3_shader_variant), ctypes.POINTER(struct_ir3_const_state), uint32_t)
-def ir3_const_state_get_free_space(v:ctypes._Pointer[struct_ir3_shader_variant], const_state:ctypes._Pointer[struct_ir3_const_state], align_vec4:uint32_t) -> uint32_t: ...
-@dll.bind(None, ctypes.POINTER(struct_ir3_const_allocations), ctypes.c_uint32, uint32_t, uint32_t)
-def ir3_const_alloc(const_alloc:ctypes._Pointer[struct_ir3_const_allocations], type:ctypes.c_uint32, size_vec4:uint32_t, align_vec4:uint32_t) -> None: ...
-@dll.bind(None, ctypes.POINTER(struct_ir3_const_allocations), ctypes.c_uint32, uint32_t, uint32_t)
-def ir3_const_reserve_space(const_alloc:ctypes._Pointer[struct_ir3_const_allocations], type:ctypes.c_uint32, size_vec4:uint32_t, align_vec4:uint32_t) -> None: ...
-@dll.bind(None, ctypes.POINTER(struct_ir3_const_allocations), ctypes.c_uint32)
-def ir3_const_free_reserved_space(const_alloc:ctypes._Pointer[struct_ir3_const_allocations], type:ctypes.c_uint32) -> None: ...
-@dll.bind(None, ctypes.POINTER(struct_ir3_const_allocations))
-def ir3_const_alloc_all_reserved_space(const_alloc:ctypes._Pointer[struct_ir3_const_allocations]) -> None: ...
-@dll.bind(uint32_t, ctypes.POINTER(struct_ir3_compiler), ctypes.POINTER(nir_shader), ctypes.POINTER(struct_ir3_const_image_dims))
-def ir3_nir_scan_driver_consts(compiler:ctypes._Pointer[struct_ir3_compiler], shader:ctypes._Pointer[nir_shader], image_dims:ctypes._Pointer[struct_ir3_const_image_dims]) -> uint32_t: ...
-@dll.bind(None, ctypes.POINTER(struct_ir3_const_allocations), ctypes.POINTER(uint32_t), ctypes.POINTER(struct_ir3_compiler), ctypes.c_int32)
-def ir3_alloc_driver_params(const_alloc:ctypes._Pointer[struct_ir3_const_allocations], num_driver_params:ctypes._Pointer[uint32_t], compiler:ctypes._Pointer[struct_ir3_compiler], shader_type:ctypes.c_int32) -> None: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.POINTER(struct_ir3_shader_variant))
-def ir3_nir_lower_load_constant(nir:ctypes._Pointer[nir_shader], v:ctypes._Pointer[struct_ir3_shader_variant]) -> bool: ...
-@dll.bind(None, ctypes.POINTER(nir_shader), ctypes.POINTER(struct_ir3_shader_variant))
-def ir3_nir_analyze_ubo_ranges(nir:ctypes._Pointer[nir_shader], v:ctypes._Pointer[struct_ir3_shader_variant]) -> None: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.POINTER(struct_ir3_shader_variant))
-def ir3_nir_lower_ubo_loads(nir:ctypes._Pointer[nir_shader], v:ctypes._Pointer[struct_ir3_shader_variant]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.POINTER(struct_ir3_shader_variant))
-def ir3_nir_lower_const_global_loads(nir:ctypes._Pointer[nir_shader], v:ctypes._Pointer[struct_ir3_shader_variant]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader))
-def ir3_nir_fixup_load_const_ir3(nir:ctypes._Pointer[nir_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.POINTER(struct_ir3_shader_variant))
-def ir3_nir_opt_preamble(nir:ctypes._Pointer[nir_shader], v:ctypes._Pointer[struct_ir3_shader_variant]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.POINTER(struct_ir3_shader_variant))
-def ir3_nir_opt_prefetch_descriptors(nir:ctypes._Pointer[nir_shader], v:ctypes._Pointer[struct_ir3_shader_variant]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.POINTER(struct_ir3_shader_variant))
-def ir3_nir_lower_preamble(nir:ctypes._Pointer[nir_shader], v:ctypes._Pointer[struct_ir3_shader_variant]) -> bool: ...
-@dll.bind(ctypes.POINTER(nir_def), ctypes.POINTER(nir_builder), ctypes.POINTER(nir_def), int32_t)
-def ir3_nir_try_propagate_bit_shift(b:ctypes._Pointer[nir_builder], offset:ctypes._Pointer[nir_def], shift:int32_t) -> ctypes._Pointer[nir_def]: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_instr), ctypes.c_void_p)
-def ir3_nir_lower_subgroups_filter(instr:ctypes._Pointer[nir_instr], data:int|None) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.POINTER(struct_ir3_shader))
-def ir3_nir_lower_shuffle(nir:ctypes._Pointer[nir_shader], shader:ctypes._Pointer[struct_ir3_shader]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.POINTER(struct_ir3_shader_variant))
-def ir3_nir_opt_subgroups(nir:ctypes._Pointer[nir_shader], v:ctypes._Pointer[struct_ir3_shader_variant]) -> bool: ...
-@dll.bind(ctypes.POINTER(nir_def), ctypes.POINTER(nir_builder), ctypes.POINTER(struct_ir3_driver_ubo))
-def ir3_get_shared_driver_ubo(b:ctypes._Pointer[nir_builder], ubo:ctypes._Pointer[struct_ir3_driver_ubo]) -> ctypes._Pointer[nir_def]: ...
-@dll.bind(ctypes.POINTER(nir_def), ctypes.POINTER(nir_builder), ctypes.POINTER(struct_ir3_driver_ubo))
-def ir3_get_driver_ubo(b:ctypes._Pointer[nir_builder], ubo:ctypes._Pointer[struct_ir3_driver_ubo]) -> ctypes._Pointer[nir_def]: ...
-@dll.bind(ctypes.POINTER(nir_def), ctypes.POINTER(nir_builder), ctypes.POINTER(struct_ir3_shader_variant))
-def ir3_get_driver_consts_ubo(b:ctypes._Pointer[nir_builder], v:ctypes._Pointer[struct_ir3_shader_variant]) -> ctypes._Pointer[nir_def]: ...
-@dll.bind(None, ctypes.POINTER(nir_shader), ctypes.POINTER(struct_ir3_driver_ubo), ctypes.POINTER(ctypes.c_char))
-def ir3_update_driver_ubo(nir:ctypes._Pointer[nir_shader], ubo:ctypes._Pointer[struct_ir3_driver_ubo], name:ctypes._Pointer[ctypes.c_char]) -> None: ...
-@dll.bind(ctypes.POINTER(nir_def), ctypes.POINTER(nir_builder), ctypes.c_uint32, ctypes.POINTER(struct_ir3_driver_ubo), ctypes.c_uint32)
-def ir3_load_shared_driver_ubo(b:ctypes._Pointer[nir_builder], components:int, ubo:ctypes._Pointer[struct_ir3_driver_ubo], offset:int) -> ctypes._Pointer[nir_def]: ...
-@dll.bind(ctypes.POINTER(nir_def), ctypes.POINTER(nir_builder), ctypes.c_uint32, ctypes.POINTER(struct_ir3_driver_ubo), ctypes.c_uint32)
-def ir3_load_driver_ubo(b:ctypes._Pointer[nir_builder], components:int, ubo:ctypes._Pointer[struct_ir3_driver_ubo], offset:int) -> ctypes._Pointer[nir_def]: ...
-@dll.bind(ctypes.POINTER(nir_def), ctypes.POINTER(nir_builder), ctypes.c_uint32, ctypes.POINTER(struct_ir3_driver_ubo), ctypes.c_uint32, ctypes.POINTER(nir_def), ctypes.c_uint32)
-def ir3_load_driver_ubo_indirect(b:ctypes._Pointer[nir_builder], components:int, ubo:ctypes._Pointer[struct_ir3_driver_ubo], base:int, offset:ctypes._Pointer[nir_def], range:int) -> ctypes._Pointer[nir_def]: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_def), ctypes.POINTER(ctypes.POINTER(nir_def)))
-def ir3_def_is_rematerializable_for_preamble(_def:ctypes._Pointer[nir_def], preamble_defs:ctypes._Pointer[ctypes.POINTER(nir_def)]) -> bool: ...
-@dll.bind(ctypes.POINTER(nir_def), ctypes.POINTER(nir_builder), ctypes.POINTER(nir_def), ctypes.POINTER(struct_set), ctypes.POINTER(ctypes.POINTER(nir_def)))
-def ir3_rematerialize_def_for_preamble(b:ctypes._Pointer[nir_builder], _def:ctypes._Pointer[nir_def], instr_set:ctypes._Pointer[struct_set], preamble_defs:ctypes._Pointer[ctypes.POINTER(nir_def)]) -> ctypes._Pointer[nir_def]: ...
+def ir3_mem_access_size_align(intrin:ctypes.c_uint32, bytes:uint8_t, bit_size:uint8_t, align:uint32_t, align_offset:uint32_t, offset_is_const:bool, access:ctypes.c_uint32, cb_data:ctypes.c_void_p) -> nir_mem_access_size_align: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def ir3_nir_opt_branch_and_or_not(nir:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def ir3_nir_opt_triops_bitwise(nir:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[struct_ir3_compiler], c.POINTER[struct_ir3_shader_nir_options], c.POINTER[nir_shader])
+def ir3_optimize_loop(compiler:c.POINTER[struct_ir3_compiler], options:c.POINTER[struct_ir3_shader_nir_options], s:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(None, c.POINTER[nir_shader])
+def ir3_nir_lower_io_vars_to_temporaries(s:c.POINTER[nir_shader]) -> None: ...
+@dll.bind(None, c.POINTER[struct_ir3_compiler], c.POINTER[struct_ir3_shader_nir_options], c.POINTER[nir_shader])
+def ir3_finalize_nir(compiler:c.POINTER[struct_ir3_compiler], options:c.POINTER[struct_ir3_shader_nir_options], s:c.POINTER[nir_shader]) -> None: ...
+@dll.bind(None, c.POINTER[struct_ir3_shader])
+def ir3_nir_post_finalize(shader:c.POINTER[struct_ir3_shader]) -> None: ...
+@dll.bind(None, c.POINTER[struct_ir3_shader_variant], c.POINTER[struct_ir3_shader_nir_options], c.POINTER[nir_shader])
+def ir3_nir_lower_variant(so:c.POINTER[struct_ir3_shader_variant], options:c.POINTER[struct_ir3_shader_nir_options], s:c.POINTER[nir_shader]) -> None: ...
+@dll.bind(None, c.POINTER[nir_shader], c.POINTER[struct_ir3_shader_variant], c.POINTER[struct_ir3_const_state])
+def ir3_setup_const_state(nir:c.POINTER[nir_shader], v:c.POINTER[struct_ir3_shader_variant], const_state:c.POINTER[struct_ir3_const_state]) -> None: ...
+@dll.bind(uint32_t, c.POINTER[struct_ir3_shader_variant], c.POINTER[struct_ir3_const_state], uint32_t)
+def ir3_const_state_get_free_space(v:c.POINTER[struct_ir3_shader_variant], const_state:c.POINTER[struct_ir3_const_state], align_vec4:uint32_t) -> uint32_t: ...
+@dll.bind(None, c.POINTER[struct_ir3_const_allocations], ctypes.c_uint32, uint32_t, uint32_t)
+def ir3_const_alloc(const_alloc:c.POINTER[struct_ir3_const_allocations], type:ctypes.c_uint32, size_vec4:uint32_t, align_vec4:uint32_t) -> None: ...
+@dll.bind(None, c.POINTER[struct_ir3_const_allocations], ctypes.c_uint32, uint32_t, uint32_t)
+def ir3_const_reserve_space(const_alloc:c.POINTER[struct_ir3_const_allocations], type:ctypes.c_uint32, size_vec4:uint32_t, align_vec4:uint32_t) -> None: ...
+@dll.bind(None, c.POINTER[struct_ir3_const_allocations], ctypes.c_uint32)
+def ir3_const_free_reserved_space(const_alloc:c.POINTER[struct_ir3_const_allocations], type:ctypes.c_uint32) -> None: ...
+@dll.bind(None, c.POINTER[struct_ir3_const_allocations])
+def ir3_const_alloc_all_reserved_space(const_alloc:c.POINTER[struct_ir3_const_allocations]) -> None: ...
+@dll.bind(uint32_t, c.POINTER[struct_ir3_compiler], c.POINTER[nir_shader], c.POINTER[struct_ir3_const_image_dims])
+def ir3_nir_scan_driver_consts(compiler:c.POINTER[struct_ir3_compiler], shader:c.POINTER[nir_shader], image_dims:c.POINTER[struct_ir3_const_image_dims]) -> uint32_t: ...
+@dll.bind(None, c.POINTER[struct_ir3_const_allocations], c.POINTER[uint32_t], c.POINTER[struct_ir3_compiler], ctypes.c_int32)
+def ir3_alloc_driver_params(const_alloc:c.POINTER[struct_ir3_const_allocations], num_driver_params:c.POINTER[uint32_t], compiler:c.POINTER[struct_ir3_compiler], shader_type:ctypes.c_int32) -> None: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], c.POINTER[struct_ir3_shader_variant])
+def ir3_nir_lower_load_constant(nir:c.POINTER[nir_shader], v:c.POINTER[struct_ir3_shader_variant]) -> bool: ...
+@dll.bind(None, c.POINTER[nir_shader], c.POINTER[struct_ir3_shader_variant])
+def ir3_nir_analyze_ubo_ranges(nir:c.POINTER[nir_shader], v:c.POINTER[struct_ir3_shader_variant]) -> None: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], c.POINTER[struct_ir3_shader_variant])
+def ir3_nir_lower_ubo_loads(nir:c.POINTER[nir_shader], v:c.POINTER[struct_ir3_shader_variant]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], c.POINTER[struct_ir3_shader_variant])
+def ir3_nir_lower_const_global_loads(nir:c.POINTER[nir_shader], v:c.POINTER[struct_ir3_shader_variant]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader])
+def ir3_nir_fixup_load_const_ir3(nir:c.POINTER[nir_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], c.POINTER[struct_ir3_shader_variant])
+def ir3_nir_opt_preamble(nir:c.POINTER[nir_shader], v:c.POINTER[struct_ir3_shader_variant]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], c.POINTER[struct_ir3_shader_variant])
+def ir3_nir_opt_prefetch_descriptors(nir:c.POINTER[nir_shader], v:c.POINTER[struct_ir3_shader_variant]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], c.POINTER[struct_ir3_shader_variant])
+def ir3_nir_lower_preamble(nir:c.POINTER[nir_shader], v:c.POINTER[struct_ir3_shader_variant]) -> bool: ...
+@dll.bind(c.POINTER[nir_def], c.POINTER[nir_builder], c.POINTER[nir_def], int32_t)
+def ir3_nir_try_propagate_bit_shift(b:c.POINTER[nir_builder], offset:c.POINTER[nir_def], shift:int32_t) -> c.POINTER[nir_def]: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_instr], ctypes.c_void_p)
+def ir3_nir_lower_subgroups_filter(instr:c.POINTER[nir_instr], data:ctypes.c_void_p) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], c.POINTER[struct_ir3_shader])
+def ir3_nir_lower_shuffle(nir:c.POINTER[nir_shader], shader:c.POINTER[struct_ir3_shader]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], c.POINTER[struct_ir3_shader_variant])
+def ir3_nir_opt_subgroups(nir:c.POINTER[nir_shader], v:c.POINTER[struct_ir3_shader_variant]) -> bool: ...
+@dll.bind(c.POINTER[nir_def], c.POINTER[nir_builder], c.POINTER[struct_ir3_driver_ubo])
+def ir3_get_shared_driver_ubo(b:c.POINTER[nir_builder], ubo:c.POINTER[struct_ir3_driver_ubo]) -> c.POINTER[nir_def]: ...
+@dll.bind(c.POINTER[nir_def], c.POINTER[nir_builder], c.POINTER[struct_ir3_driver_ubo])
+def ir3_get_driver_ubo(b:c.POINTER[nir_builder], ubo:c.POINTER[struct_ir3_driver_ubo]) -> c.POINTER[nir_def]: ...
+@dll.bind(c.POINTER[nir_def], c.POINTER[nir_builder], c.POINTER[struct_ir3_shader_variant])
+def ir3_get_driver_consts_ubo(b:c.POINTER[nir_builder], v:c.POINTER[struct_ir3_shader_variant]) -> c.POINTER[nir_def]: ...
+@dll.bind(None, c.POINTER[nir_shader], c.POINTER[struct_ir3_driver_ubo], c.POINTER[ctypes.c_char])
+def ir3_update_driver_ubo(nir:c.POINTER[nir_shader], ubo:c.POINTER[struct_ir3_driver_ubo], name:c.POINTER[ctypes.c_char]) -> None: ...
+@dll.bind(c.POINTER[nir_def], c.POINTER[nir_builder], ctypes.c_uint32, c.POINTER[struct_ir3_driver_ubo], ctypes.c_uint32)
+def ir3_load_shared_driver_ubo(b:c.POINTER[nir_builder], components:int, ubo:c.POINTER[struct_ir3_driver_ubo], offset:int) -> c.POINTER[nir_def]: ...
+@dll.bind(c.POINTER[nir_def], c.POINTER[nir_builder], ctypes.c_uint32, c.POINTER[struct_ir3_driver_ubo], ctypes.c_uint32)
+def ir3_load_driver_ubo(b:c.POINTER[nir_builder], components:int, ubo:c.POINTER[struct_ir3_driver_ubo], offset:int) -> c.POINTER[nir_def]: ...
+@dll.bind(c.POINTER[nir_def], c.POINTER[nir_builder], ctypes.c_uint32, c.POINTER[struct_ir3_driver_ubo], ctypes.c_uint32, c.POINTER[nir_def], ctypes.c_uint32)
+def ir3_load_driver_ubo_indirect(b:c.POINTER[nir_builder], components:int, ubo:c.POINTER[struct_ir3_driver_ubo], base:int, offset:c.POINTER[nir_def], range:int) -> c.POINTER[nir_def]: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_def], c.POINTER[c.POINTER[nir_def]])
+def ir3_def_is_rematerializable_for_preamble(_def:c.POINTER[nir_def], preamble_defs:c.POINTER[c.POINTER[nir_def]]) -> bool: ...
+@dll.bind(c.POINTER[nir_def], c.POINTER[nir_builder], c.POINTER[nir_def], c.POINTER[struct_set], c.POINTER[c.POINTER[nir_def]])
+def ir3_rematerialize_def_for_preamble(b:c.POINTER[nir_builder], _def:c.POINTER[nir_def], instr_set:c.POINTER[struct_set], preamble_defs:c.POINTER[c.POINTER[nir_def]]) -> c.POINTER[nir_def]: ...
 @c.record
 class struct_driver_param_info(c.Struct):
   SIZE = 8
   offset: int
   extra_size: int
 struct_driver_param_info.register_fields([('offset', uint32_t, 0), ('extra_size', uint32_t, 4)])
-@dll.bind(ctypes.c_bool, ctypes.POINTER(nir_shader), ctypes.POINTER(nir_intrinsic_instr), ctypes.POINTER(struct_driver_param_info))
-def ir3_get_driver_param_info(shader:ctypes._Pointer[nir_shader], intr:ctypes._Pointer[nir_intrinsic_instr], param_info:ctypes._Pointer[struct_driver_param_info]) -> bool: ...
-@dll.bind(uint32_t, ctypes.POINTER(nir_intrinsic_instr), ctypes.c_void_p)
-def ir3_nir_max_imm_offset(intrin:ctypes._Pointer[nir_intrinsic_instr], data:int|None) -> uint32_t: ...
-@dll.bind(ctypes.c_uint32, ctypes.POINTER(nir_intrinsic_instr))
-def ir3_nir_intrinsic_barycentric_sysval(intr:ctypes._Pointer[nir_intrinsic_instr]) -> ctypes.c_uint32: ...
+@dll.bind(ctypes.c_bool, c.POINTER[nir_shader], c.POINTER[nir_intrinsic_instr], c.POINTER[struct_driver_param_info])
+def ir3_get_driver_param_info(shader:c.POINTER[nir_shader], intr:c.POINTER[nir_intrinsic_instr], param_info:c.POINTER[struct_driver_param_info]) -> bool: ...
+@dll.bind(uint32_t, c.POINTER[nir_intrinsic_instr], ctypes.c_void_p)
+def ir3_nir_max_imm_offset(intrin:c.POINTER[nir_intrinsic_instr], data:ctypes.c_void_p) -> uint32_t: ...
+@dll.bind(ctypes.c_uint32, c.POINTER[nir_intrinsic_instr])
+def ir3_nir_intrinsic_barycentric_sysval(intr:c.POINTER[nir_intrinsic_instr]) -> ctypes.c_uint32: ...
 @dll.bind(None)
 def glsl_type_singleton_init_or_ref() -> None: ...
 @dll.bind(None)
 def glsl_type_singleton_decref() -> None: ...
-@dll.bind(None, ctypes.POINTER(struct_blob), ctypes.POINTER(glsl_type))
-def encode_type_to_blob(blob:ctypes._Pointer[struct_blob], type:ctypes._Pointer[glsl_type]) -> None: ...
-@dll.bind(ctypes.POINTER(glsl_type), ctypes.POINTER(struct_blob_reader))
-def decode_type_from_blob(blob:ctypes._Pointer[struct_blob_reader]) -> ctypes._Pointer[glsl_type]: ...
+@dll.bind(None, c.POINTER[struct_blob], c.POINTER[glsl_type])
+def encode_type_to_blob(blob:c.POINTER[struct_blob], type:c.POINTER[glsl_type]) -> None: ...
+@dll.bind(c.POINTER[glsl_type], c.POINTER[struct_blob_reader])
+def decode_type_from_blob(blob:c.POINTER[struct_blob_reader]) -> c.POINTER[glsl_type]: ...
 @dll.bind(ctypes.c_uint32, ctypes.c_uint32, ctypes.c_bool)
 def glsl_apply_signedness_to_base_type(type:ctypes.c_uint32, signedness:bool) -> ctypes.c_uint32: ...
 @dll.bind(ctypes.c_int32, ctypes.c_uint32)
@@ -4947,389 +4947,389 @@ def glsl_get_sampler_dim_coordinate_components(dim:ctypes.c_uint32) -> int: ...
 enum_glsl_matrix_layout: dict[int, str] = {(GLSL_MATRIX_LAYOUT_INHERITED:=0): 'GLSL_MATRIX_LAYOUT_INHERITED', (GLSL_MATRIX_LAYOUT_COLUMN_MAJOR:=1): 'GLSL_MATRIX_LAYOUT_COLUMN_MAJOR', (GLSL_MATRIX_LAYOUT_ROW_MAJOR:=2): 'GLSL_MATRIX_LAYOUT_ROW_MAJOR'}
 _anonenum6: dict[int, str] = {(GLSL_PRECISION_NONE:=0): 'GLSL_PRECISION_NONE', (GLSL_PRECISION_HIGH:=1): 'GLSL_PRECISION_HIGH', (GLSL_PRECISION_MEDIUM:=2): 'GLSL_PRECISION_MEDIUM', (GLSL_PRECISION_LOW:=3): 'GLSL_PRECISION_LOW'}
 enum_glsl_cmat_use: dict[int, str] = {(GLSL_CMAT_USE_NONE:=0): 'GLSL_CMAT_USE_NONE', (GLSL_CMAT_USE_A:=1): 'GLSL_CMAT_USE_A', (GLSL_CMAT_USE_B:=2): 'GLSL_CMAT_USE_B', (GLSL_CMAT_USE_ACCUMULATOR:=3): 'GLSL_CMAT_USE_ACCUMULATOR'}
-@dll.bind(ctypes.POINTER(ctypes.c_char), ctypes.POINTER(glsl_type))
-def glsl_get_type_name(type:ctypes._Pointer[glsl_type]) -> ctypes._Pointer[ctypes.c_char]: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(glsl_type))
-def glsl_type_is_vector(t:ctypes._Pointer[glsl_type]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(glsl_type))
-def glsl_type_is_scalar(t:ctypes._Pointer[glsl_type]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(glsl_type))
-def glsl_type_is_vector_or_scalar(t:ctypes._Pointer[glsl_type]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(glsl_type))
-def glsl_type_is_matrix(t:ctypes._Pointer[glsl_type]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(glsl_type))
-def glsl_type_is_array_or_matrix(t:ctypes._Pointer[glsl_type]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(glsl_type))
-def glsl_type_is_dual_slot(t:ctypes._Pointer[glsl_type]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(glsl_type))
-def glsl_type_is_leaf(type:ctypes._Pointer[glsl_type]) -> bool: ...
-@dll.bind(ctypes.POINTER(glsl_type), ctypes.POINTER(glsl_type))
-def glsl_get_bare_type(t:ctypes._Pointer[glsl_type]) -> ctypes._Pointer[glsl_type]: ...
-@dll.bind(ctypes.POINTER(glsl_type), ctypes.POINTER(glsl_type))
-def glsl_get_scalar_type(t:ctypes._Pointer[glsl_type]) -> ctypes._Pointer[glsl_type]: ...
-@dll.bind(ctypes.POINTER(glsl_type), ctypes.POINTER(glsl_type))
-def glsl_get_base_glsl_type(t:ctypes._Pointer[glsl_type]) -> ctypes._Pointer[glsl_type]: ...
-@dll.bind(ctypes.c_uint32, ctypes.POINTER(glsl_type))
-def glsl_get_length(t:ctypes._Pointer[glsl_type]) -> int: ...
-@dll.bind(ctypes.POINTER(glsl_type), ctypes.POINTER(glsl_type), ctypes.POINTER(glsl_type))
-def glsl_type_wrap_in_arrays(t:ctypes._Pointer[glsl_type], arrays:ctypes._Pointer[glsl_type]) -> ctypes._Pointer[glsl_type]: ...
-@dll.bind(ctypes.c_uint32, ctypes.POINTER(glsl_type))
-def glsl_get_aoa_size(t:ctypes._Pointer[glsl_type]) -> int: ...
-@dll.bind(ctypes.POINTER(glsl_type), ctypes.POINTER(glsl_type))
-def glsl_get_array_element(t:ctypes._Pointer[glsl_type]) -> ctypes._Pointer[glsl_type]: ...
-@dll.bind(ctypes.POINTER(glsl_type), ctypes.POINTER(glsl_type))
-def glsl_without_array(t:ctypes._Pointer[glsl_type]) -> ctypes._Pointer[glsl_type]: ...
-@dll.bind(ctypes.POINTER(glsl_type), ctypes.POINTER(glsl_type))
-def glsl_without_array_or_matrix(t:ctypes._Pointer[glsl_type]) -> ctypes._Pointer[glsl_type]: ...
-@dll.bind(ctypes.POINTER(glsl_type), ctypes.POINTER(glsl_type))
-def glsl_get_cmat_element(t:ctypes._Pointer[glsl_type]) -> ctypes._Pointer[glsl_type]: ...
-@dll.bind(ctypes.POINTER(struct_glsl_cmat_description), ctypes.POINTER(glsl_type))
-def glsl_get_cmat_description(t:ctypes._Pointer[glsl_type]) -> ctypes._Pointer[struct_glsl_cmat_description]: ...
-@dll.bind(ctypes.c_uint32, ctypes.POINTER(glsl_type))
-def glsl_atomic_size(type:ctypes._Pointer[glsl_type]) -> int: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(glsl_type))
-def glsl_type_contains_32bit(t:ctypes._Pointer[glsl_type]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(glsl_type))
-def glsl_type_contains_64bit(t:ctypes._Pointer[glsl_type]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(glsl_type))
-def glsl_type_contains_image(t:ctypes._Pointer[glsl_type]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(glsl_type))
-def glsl_contains_atomic(t:ctypes._Pointer[glsl_type]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(glsl_type))
-def glsl_contains_double(t:ctypes._Pointer[glsl_type]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(glsl_type))
-def glsl_contains_integer(t:ctypes._Pointer[glsl_type]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(glsl_type))
-def glsl_contains_opaque(t:ctypes._Pointer[glsl_type]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(glsl_type))
-def glsl_contains_sampler(t:ctypes._Pointer[glsl_type]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(glsl_type))
-def glsl_contains_array(t:ctypes._Pointer[glsl_type]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(glsl_type))
-def glsl_contains_subroutine(t:ctypes._Pointer[glsl_type]) -> bool: ...
-@dll.bind(ctypes.c_int32, ctypes.POINTER(glsl_type))
-def glsl_get_sampler_coordinate_components(t:ctypes._Pointer[glsl_type]) -> int: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(glsl_type), ctypes.POINTER(glsl_type))
-def glsl_type_compare_no_precision(a:ctypes._Pointer[glsl_type], b:ctypes._Pointer[glsl_type]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(glsl_type), ctypes.POINTER(glsl_type), ctypes.c_bool, ctypes.c_bool, ctypes.c_bool)
-def glsl_record_compare(a:ctypes._Pointer[glsl_type], b:ctypes._Pointer[glsl_type], match_name:bool, match_locations:bool, match_precision:bool) -> bool: ...
-@dll.bind(ctypes.POINTER(glsl_type), ctypes.POINTER(glsl_type), ctypes.c_uint32)
-def glsl_get_struct_field(t:ctypes._Pointer[glsl_type], index:int) -> ctypes._Pointer[glsl_type]: ...
-@dll.bind(ctypes.POINTER(glsl_struct_field), ctypes.POINTER(glsl_type), ctypes.c_uint32)
-def glsl_get_struct_field_data(t:ctypes._Pointer[glsl_type], index:int) -> ctypes._Pointer[glsl_struct_field]: ...
-@dll.bind(ctypes.c_uint32, ctypes.POINTER(glsl_type), ctypes.c_uint32)
-def glsl_get_struct_location_offset(t:ctypes._Pointer[glsl_type], length:int) -> int: ...
-@dll.bind(ctypes.c_int32, ctypes.POINTER(glsl_type), ctypes.POINTER(ctypes.c_char))
-def glsl_get_field_index(t:ctypes._Pointer[glsl_type], name:ctypes._Pointer[ctypes.c_char]) -> int: ...
-@dll.bind(ctypes.POINTER(glsl_type), ctypes.POINTER(glsl_type), ctypes.POINTER(ctypes.c_char))
-def glsl_get_field_type(t:ctypes._Pointer[glsl_type], name:ctypes._Pointer[ctypes.c_char]) -> ctypes._Pointer[glsl_type]: ...
-@dll.bind(ctypes.POINTER(glsl_type), ctypes.c_uint32)
-def glsl_vec_type(components:int) -> ctypes._Pointer[glsl_type]: ...
-@dll.bind(ctypes.POINTER(glsl_type), ctypes.c_uint32)
-def glsl_f16vec_type(components:int) -> ctypes._Pointer[glsl_type]: ...
-@dll.bind(ctypes.POINTER(glsl_type), ctypes.c_uint32)
-def glsl_bf16vec_type(components:int) -> ctypes._Pointer[glsl_type]: ...
-@dll.bind(ctypes.POINTER(glsl_type), ctypes.c_uint32)
-def glsl_e4m3fnvec_type(components:int) -> ctypes._Pointer[glsl_type]: ...
-@dll.bind(ctypes.POINTER(glsl_type), ctypes.c_uint32)
-def glsl_e5m2vec_type(components:int) -> ctypes._Pointer[glsl_type]: ...
-@dll.bind(ctypes.POINTER(glsl_type), ctypes.c_uint32)
-def glsl_dvec_type(components:int) -> ctypes._Pointer[glsl_type]: ...
-@dll.bind(ctypes.POINTER(glsl_type), ctypes.c_uint32)
-def glsl_ivec_type(components:int) -> ctypes._Pointer[glsl_type]: ...
-@dll.bind(ctypes.POINTER(glsl_type), ctypes.c_uint32)
-def glsl_uvec_type(components:int) -> ctypes._Pointer[glsl_type]: ...
-@dll.bind(ctypes.POINTER(glsl_type), ctypes.c_uint32)
-def glsl_bvec_type(components:int) -> ctypes._Pointer[glsl_type]: ...
-@dll.bind(ctypes.POINTER(glsl_type), ctypes.c_uint32)
-def glsl_i64vec_type(components:int) -> ctypes._Pointer[glsl_type]: ...
-@dll.bind(ctypes.POINTER(glsl_type), ctypes.c_uint32)
-def glsl_u64vec_type(components:int) -> ctypes._Pointer[glsl_type]: ...
-@dll.bind(ctypes.POINTER(glsl_type), ctypes.c_uint32)
-def glsl_i16vec_type(components:int) -> ctypes._Pointer[glsl_type]: ...
-@dll.bind(ctypes.POINTER(glsl_type), ctypes.c_uint32)
-def glsl_u16vec_type(components:int) -> ctypes._Pointer[glsl_type]: ...
-@dll.bind(ctypes.POINTER(glsl_type), ctypes.c_uint32)
-def glsl_i8vec_type(components:int) -> ctypes._Pointer[glsl_type]: ...
-@dll.bind(ctypes.POINTER(glsl_type), ctypes.c_uint32)
-def glsl_u8vec_type(components:int) -> ctypes._Pointer[glsl_type]: ...
-@dll.bind(ctypes.POINTER(glsl_type), ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_bool, ctypes.c_uint32)
-def glsl_simple_explicit_type(base_type:int, rows:int, columns:int, explicit_stride:int, row_major:bool, explicit_alignment:int) -> ctypes._Pointer[glsl_type]: ...
-@dll.bind(ctypes.POINTER(glsl_type), ctypes.c_uint32, ctypes.c_bool, ctypes.c_bool, ctypes.c_uint32)
-def glsl_sampler_type(dim:ctypes.c_uint32, shadow:bool, array:bool, type:ctypes.c_uint32) -> ctypes._Pointer[glsl_type]: ...
-@dll.bind(ctypes.POINTER(glsl_type))
-def glsl_bare_sampler_type() -> ctypes._Pointer[glsl_type]: ...
-@dll.bind(ctypes.POINTER(glsl_type))
-def glsl_bare_shadow_sampler_type() -> ctypes._Pointer[glsl_type]: ...
-@dll.bind(ctypes.POINTER(glsl_type), ctypes.c_uint32, ctypes.c_bool, ctypes.c_uint32)
-def glsl_texture_type(dim:ctypes.c_uint32, array:bool, type:ctypes.c_uint32) -> ctypes._Pointer[glsl_type]: ...
-@dll.bind(ctypes.POINTER(glsl_type), ctypes.c_uint32, ctypes.c_bool, ctypes.c_uint32)
-def glsl_image_type(dim:ctypes.c_uint32, array:bool, type:ctypes.c_uint32) -> ctypes._Pointer[glsl_type]: ...
-@dll.bind(ctypes.POINTER(glsl_type), ctypes.POINTER(glsl_type), ctypes.c_uint32, ctypes.c_uint32)
-def glsl_array_type(element:ctypes._Pointer[glsl_type], array_size:int, explicit_stride:int) -> ctypes._Pointer[glsl_type]: ...
-@dll.bind(ctypes.POINTER(glsl_type), ctypes.POINTER(struct_glsl_cmat_description))
-def glsl_cmat_type(desc:ctypes._Pointer[struct_glsl_cmat_description]) -> ctypes._Pointer[glsl_type]: ...
-@dll.bind(ctypes.POINTER(glsl_type), ctypes.POINTER(glsl_struct_field), ctypes.c_uint32, ctypes.POINTER(ctypes.c_char), ctypes.c_bool, ctypes.c_uint32)
-def glsl_struct_type_with_explicit_alignment(fields:ctypes._Pointer[glsl_struct_field], num_fields:int, name:ctypes._Pointer[ctypes.c_char], packed:bool, explicit_alignment:int) -> ctypes._Pointer[glsl_type]: ...
+@dll.bind(c.POINTER[ctypes.c_char], c.POINTER[glsl_type])
+def glsl_get_type_name(type:c.POINTER[glsl_type]) -> c.POINTER[ctypes.c_char]: ...
+@dll.bind(ctypes.c_bool, c.POINTER[glsl_type])
+def glsl_type_is_vector(t:c.POINTER[glsl_type]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[glsl_type])
+def glsl_type_is_scalar(t:c.POINTER[glsl_type]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[glsl_type])
+def glsl_type_is_vector_or_scalar(t:c.POINTER[glsl_type]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[glsl_type])
+def glsl_type_is_matrix(t:c.POINTER[glsl_type]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[glsl_type])
+def glsl_type_is_array_or_matrix(t:c.POINTER[glsl_type]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[glsl_type])
+def glsl_type_is_dual_slot(t:c.POINTER[glsl_type]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[glsl_type])
+def glsl_type_is_leaf(type:c.POINTER[glsl_type]) -> bool: ...
+@dll.bind(c.POINTER[glsl_type], c.POINTER[glsl_type])
+def glsl_get_bare_type(t:c.POINTER[glsl_type]) -> c.POINTER[glsl_type]: ...
+@dll.bind(c.POINTER[glsl_type], c.POINTER[glsl_type])
+def glsl_get_scalar_type(t:c.POINTER[glsl_type]) -> c.POINTER[glsl_type]: ...
+@dll.bind(c.POINTER[glsl_type], c.POINTER[glsl_type])
+def glsl_get_base_glsl_type(t:c.POINTER[glsl_type]) -> c.POINTER[glsl_type]: ...
+@dll.bind(ctypes.c_uint32, c.POINTER[glsl_type])
+def glsl_get_length(t:c.POINTER[glsl_type]) -> int: ...
+@dll.bind(c.POINTER[glsl_type], c.POINTER[glsl_type], c.POINTER[glsl_type])
+def glsl_type_wrap_in_arrays(t:c.POINTER[glsl_type], arrays:c.POINTER[glsl_type]) -> c.POINTER[glsl_type]: ...
+@dll.bind(ctypes.c_uint32, c.POINTER[glsl_type])
+def glsl_get_aoa_size(t:c.POINTER[glsl_type]) -> int: ...
+@dll.bind(c.POINTER[glsl_type], c.POINTER[glsl_type])
+def glsl_get_array_element(t:c.POINTER[glsl_type]) -> c.POINTER[glsl_type]: ...
+@dll.bind(c.POINTER[glsl_type], c.POINTER[glsl_type])
+def glsl_without_array(t:c.POINTER[glsl_type]) -> c.POINTER[glsl_type]: ...
+@dll.bind(c.POINTER[glsl_type], c.POINTER[glsl_type])
+def glsl_without_array_or_matrix(t:c.POINTER[glsl_type]) -> c.POINTER[glsl_type]: ...
+@dll.bind(c.POINTER[glsl_type], c.POINTER[glsl_type])
+def glsl_get_cmat_element(t:c.POINTER[glsl_type]) -> c.POINTER[glsl_type]: ...
+@dll.bind(c.POINTER[struct_glsl_cmat_description], c.POINTER[glsl_type])
+def glsl_get_cmat_description(t:c.POINTER[glsl_type]) -> c.POINTER[struct_glsl_cmat_description]: ...
+@dll.bind(ctypes.c_uint32, c.POINTER[glsl_type])
+def glsl_atomic_size(type:c.POINTER[glsl_type]) -> int: ...
+@dll.bind(ctypes.c_bool, c.POINTER[glsl_type])
+def glsl_type_contains_32bit(t:c.POINTER[glsl_type]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[glsl_type])
+def glsl_type_contains_64bit(t:c.POINTER[glsl_type]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[glsl_type])
+def glsl_type_contains_image(t:c.POINTER[glsl_type]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[glsl_type])
+def glsl_contains_atomic(t:c.POINTER[glsl_type]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[glsl_type])
+def glsl_contains_double(t:c.POINTER[glsl_type]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[glsl_type])
+def glsl_contains_integer(t:c.POINTER[glsl_type]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[glsl_type])
+def glsl_contains_opaque(t:c.POINTER[glsl_type]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[glsl_type])
+def glsl_contains_sampler(t:c.POINTER[glsl_type]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[glsl_type])
+def glsl_contains_array(t:c.POINTER[glsl_type]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[glsl_type])
+def glsl_contains_subroutine(t:c.POINTER[glsl_type]) -> bool: ...
+@dll.bind(ctypes.c_int32, c.POINTER[glsl_type])
+def glsl_get_sampler_coordinate_components(t:c.POINTER[glsl_type]) -> int: ...
+@dll.bind(ctypes.c_bool, c.POINTER[glsl_type], c.POINTER[glsl_type])
+def glsl_type_compare_no_precision(a:c.POINTER[glsl_type], b:c.POINTER[glsl_type]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[glsl_type], c.POINTER[glsl_type], ctypes.c_bool, ctypes.c_bool, ctypes.c_bool)
+def glsl_record_compare(a:c.POINTER[glsl_type], b:c.POINTER[glsl_type], match_name:bool, match_locations:bool, match_precision:bool) -> bool: ...
+@dll.bind(c.POINTER[glsl_type], c.POINTER[glsl_type], ctypes.c_uint32)
+def glsl_get_struct_field(t:c.POINTER[glsl_type], index:int) -> c.POINTER[glsl_type]: ...
+@dll.bind(c.POINTER[glsl_struct_field], c.POINTER[glsl_type], ctypes.c_uint32)
+def glsl_get_struct_field_data(t:c.POINTER[glsl_type], index:int) -> c.POINTER[glsl_struct_field]: ...
+@dll.bind(ctypes.c_uint32, c.POINTER[glsl_type], ctypes.c_uint32)
+def glsl_get_struct_location_offset(t:c.POINTER[glsl_type], length:int) -> int: ...
+@dll.bind(ctypes.c_int32, c.POINTER[glsl_type], c.POINTER[ctypes.c_char])
+def glsl_get_field_index(t:c.POINTER[glsl_type], name:c.POINTER[ctypes.c_char]) -> int: ...
+@dll.bind(c.POINTER[glsl_type], c.POINTER[glsl_type], c.POINTER[ctypes.c_char])
+def glsl_get_field_type(t:c.POINTER[glsl_type], name:c.POINTER[ctypes.c_char]) -> c.POINTER[glsl_type]: ...
+@dll.bind(c.POINTER[glsl_type], ctypes.c_uint32)
+def glsl_vec_type(components:int) -> c.POINTER[glsl_type]: ...
+@dll.bind(c.POINTER[glsl_type], ctypes.c_uint32)
+def glsl_f16vec_type(components:int) -> c.POINTER[glsl_type]: ...
+@dll.bind(c.POINTER[glsl_type], ctypes.c_uint32)
+def glsl_bf16vec_type(components:int) -> c.POINTER[glsl_type]: ...
+@dll.bind(c.POINTER[glsl_type], ctypes.c_uint32)
+def glsl_e4m3fnvec_type(components:int) -> c.POINTER[glsl_type]: ...
+@dll.bind(c.POINTER[glsl_type], ctypes.c_uint32)
+def glsl_e5m2vec_type(components:int) -> c.POINTER[glsl_type]: ...
+@dll.bind(c.POINTER[glsl_type], ctypes.c_uint32)
+def glsl_dvec_type(components:int) -> c.POINTER[glsl_type]: ...
+@dll.bind(c.POINTER[glsl_type], ctypes.c_uint32)
+def glsl_ivec_type(components:int) -> c.POINTER[glsl_type]: ...
+@dll.bind(c.POINTER[glsl_type], ctypes.c_uint32)
+def glsl_uvec_type(components:int) -> c.POINTER[glsl_type]: ...
+@dll.bind(c.POINTER[glsl_type], ctypes.c_uint32)
+def glsl_bvec_type(components:int) -> c.POINTER[glsl_type]: ...
+@dll.bind(c.POINTER[glsl_type], ctypes.c_uint32)
+def glsl_i64vec_type(components:int) -> c.POINTER[glsl_type]: ...
+@dll.bind(c.POINTER[glsl_type], ctypes.c_uint32)
+def glsl_u64vec_type(components:int) -> c.POINTER[glsl_type]: ...
+@dll.bind(c.POINTER[glsl_type], ctypes.c_uint32)
+def glsl_i16vec_type(components:int) -> c.POINTER[glsl_type]: ...
+@dll.bind(c.POINTER[glsl_type], ctypes.c_uint32)
+def glsl_u16vec_type(components:int) -> c.POINTER[glsl_type]: ...
+@dll.bind(c.POINTER[glsl_type], ctypes.c_uint32)
+def glsl_i8vec_type(components:int) -> c.POINTER[glsl_type]: ...
+@dll.bind(c.POINTER[glsl_type], ctypes.c_uint32)
+def glsl_u8vec_type(components:int) -> c.POINTER[glsl_type]: ...
+@dll.bind(c.POINTER[glsl_type], ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_bool, ctypes.c_uint32)
+def glsl_simple_explicit_type(base_type:int, rows:int, columns:int, explicit_stride:int, row_major:bool, explicit_alignment:int) -> c.POINTER[glsl_type]: ...
+@dll.bind(c.POINTER[glsl_type], ctypes.c_uint32, ctypes.c_bool, ctypes.c_bool, ctypes.c_uint32)
+def glsl_sampler_type(dim:ctypes.c_uint32, shadow:bool, array:bool, type:ctypes.c_uint32) -> c.POINTER[glsl_type]: ...
+@dll.bind(c.POINTER[glsl_type])
+def glsl_bare_sampler_type() -> c.POINTER[glsl_type]: ...
+@dll.bind(c.POINTER[glsl_type])
+def glsl_bare_shadow_sampler_type() -> c.POINTER[glsl_type]: ...
+@dll.bind(c.POINTER[glsl_type], ctypes.c_uint32, ctypes.c_bool, ctypes.c_uint32)
+def glsl_texture_type(dim:ctypes.c_uint32, array:bool, type:ctypes.c_uint32) -> c.POINTER[glsl_type]: ...
+@dll.bind(c.POINTER[glsl_type], ctypes.c_uint32, ctypes.c_bool, ctypes.c_uint32)
+def glsl_image_type(dim:ctypes.c_uint32, array:bool, type:ctypes.c_uint32) -> c.POINTER[glsl_type]: ...
+@dll.bind(c.POINTER[glsl_type], c.POINTER[glsl_type], ctypes.c_uint32, ctypes.c_uint32)
+def glsl_array_type(element:c.POINTER[glsl_type], array_size:int, explicit_stride:int) -> c.POINTER[glsl_type]: ...
+@dll.bind(c.POINTER[glsl_type], c.POINTER[struct_glsl_cmat_description])
+def glsl_cmat_type(desc:c.POINTER[struct_glsl_cmat_description]) -> c.POINTER[glsl_type]: ...
+@dll.bind(c.POINTER[glsl_type], c.POINTER[glsl_struct_field], ctypes.c_uint32, c.POINTER[ctypes.c_char], ctypes.c_bool, ctypes.c_uint32)
+def glsl_struct_type_with_explicit_alignment(fields:c.POINTER[glsl_struct_field], num_fields:int, name:c.POINTER[ctypes.c_char], packed:bool, explicit_alignment:int) -> c.POINTER[glsl_type]: ...
 enum_glsl_interface_packing: dict[int, str] = {(GLSL_INTERFACE_PACKING_STD140:=0): 'GLSL_INTERFACE_PACKING_STD140', (GLSL_INTERFACE_PACKING_SHARED:=1): 'GLSL_INTERFACE_PACKING_SHARED', (GLSL_INTERFACE_PACKING_PACKED:=2): 'GLSL_INTERFACE_PACKING_PACKED', (GLSL_INTERFACE_PACKING_STD430:=3): 'GLSL_INTERFACE_PACKING_STD430'}
-@dll.bind(ctypes.POINTER(glsl_type), ctypes.POINTER(glsl_struct_field), ctypes.c_uint32, ctypes.c_uint32, ctypes.c_bool, ctypes.POINTER(ctypes.c_char))
-def glsl_interface_type(fields:ctypes._Pointer[glsl_struct_field], num_fields:int, packing:ctypes.c_uint32, row_major:bool, block_name:ctypes._Pointer[ctypes.c_char]) -> ctypes._Pointer[glsl_type]: ...
-@dll.bind(ctypes.POINTER(glsl_type), ctypes.POINTER(ctypes.c_char))
-def glsl_subroutine_type(subroutine_name:ctypes._Pointer[ctypes.c_char]) -> ctypes._Pointer[glsl_type]: ...
-@dll.bind(ctypes.POINTER(glsl_type), ctypes.POINTER(glsl_type))
-def glsl_get_row_type(t:ctypes._Pointer[glsl_type]) -> ctypes._Pointer[glsl_type]: ...
-@dll.bind(ctypes.POINTER(glsl_type), ctypes.POINTER(glsl_type))
-def glsl_get_column_type(t:ctypes._Pointer[glsl_type]) -> ctypes._Pointer[glsl_type]: ...
-@dll.bind(ctypes.POINTER(glsl_type), ctypes.POINTER(glsl_type), glsl_type_size_align_func, ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32))
-def glsl_get_explicit_type_for_size_align(type:ctypes._Pointer[glsl_type], type_info:glsl_type_size_align_func, size:ctypes._Pointer[ctypes.c_uint32], alignment:ctypes._Pointer[ctypes.c_uint32]) -> ctypes._Pointer[glsl_type]: ...
-@dll.bind(ctypes.POINTER(glsl_type), ctypes.POINTER(glsl_type))
-def glsl_type_replace_vec3_with_vec4(type:ctypes._Pointer[glsl_type]) -> ctypes._Pointer[glsl_type]: ...
-@dll.bind(ctypes.POINTER(glsl_type), ctypes.POINTER(glsl_type))
-def glsl_float16_type(t:ctypes._Pointer[glsl_type]) -> ctypes._Pointer[glsl_type]: ...
-@dll.bind(ctypes.POINTER(glsl_type), ctypes.POINTER(glsl_type))
-def glsl_int16_type(t:ctypes._Pointer[glsl_type]) -> ctypes._Pointer[glsl_type]: ...
-@dll.bind(ctypes.POINTER(glsl_type), ctypes.POINTER(glsl_type))
-def glsl_uint16_type(t:ctypes._Pointer[glsl_type]) -> ctypes._Pointer[glsl_type]: ...
-@dll.bind(ctypes.POINTER(glsl_type), ctypes.POINTER(glsl_type))
-def glsl_type_to_16bit(old_type:ctypes._Pointer[glsl_type]) -> ctypes._Pointer[glsl_type]: ...
-@dll.bind(ctypes.POINTER(glsl_type), ctypes.POINTER(glsl_type), ctypes.c_uint32)
-def glsl_replace_vector_type(t:ctypes._Pointer[glsl_type], components:int) -> ctypes._Pointer[glsl_type]: ...
-@dll.bind(ctypes.POINTER(glsl_type), ctypes.POINTER(glsl_type))
-def glsl_channel_type(t:ctypes._Pointer[glsl_type]) -> ctypes._Pointer[glsl_type]: ...
-@dll.bind(ctypes.POINTER(glsl_type), ctypes.POINTER(glsl_type), ctypes.POINTER(glsl_type))
-def glsl_get_mul_type(type_a:ctypes._Pointer[glsl_type], type_b:ctypes._Pointer[glsl_type]) -> ctypes._Pointer[glsl_type]: ...
-@dll.bind(ctypes.c_uint32, ctypes.POINTER(glsl_type))
-def glsl_type_get_sampler_count(t:ctypes._Pointer[glsl_type]) -> int: ...
-@dll.bind(ctypes.c_uint32, ctypes.POINTER(glsl_type))
-def glsl_type_get_texture_count(t:ctypes._Pointer[glsl_type]) -> int: ...
-@dll.bind(ctypes.c_uint32, ctypes.POINTER(glsl_type))
-def glsl_type_get_image_count(t:ctypes._Pointer[glsl_type]) -> int: ...
-@dll.bind(ctypes.c_uint32, ctypes.POINTER(glsl_type), ctypes.c_bool, ctypes.c_bool)
-def glsl_count_vec4_slots(t:ctypes._Pointer[glsl_type], is_gl_vertex_input:bool, is_bindless:bool) -> int: ...
-@dll.bind(ctypes.c_uint32, ctypes.POINTER(glsl_type), ctypes.c_bool)
-def glsl_count_dword_slots(t:ctypes._Pointer[glsl_type], is_bindless:bool) -> int: ...
-@dll.bind(ctypes.c_uint32, ctypes.POINTER(glsl_type))
-def glsl_get_component_slots(t:ctypes._Pointer[glsl_type]) -> int: ...
-@dll.bind(ctypes.c_uint32, ctypes.POINTER(glsl_type), ctypes.c_uint32)
-def glsl_get_component_slots_aligned(t:ctypes._Pointer[glsl_type], offset:int) -> int: ...
-@dll.bind(ctypes.c_uint32, ctypes.POINTER(glsl_type))
-def glsl_varying_count(t:ctypes._Pointer[glsl_type]) -> int: ...
-@dll.bind(ctypes.c_uint32, ctypes.POINTER(glsl_type))
-def glsl_type_uniform_locations(t:ctypes._Pointer[glsl_type]) -> int: ...
-@dll.bind(ctypes.c_uint32, ctypes.POINTER(glsl_type))
-def glsl_get_cl_size(t:ctypes._Pointer[glsl_type]) -> int: ...
-@dll.bind(ctypes.c_uint32, ctypes.POINTER(glsl_type))
-def glsl_get_cl_alignment(t:ctypes._Pointer[glsl_type]) -> int: ...
-@dll.bind(None, ctypes.POINTER(glsl_type), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32))
-def glsl_get_cl_type_size_align(t:ctypes._Pointer[glsl_type], size:ctypes._Pointer[ctypes.c_uint32], align:ctypes._Pointer[ctypes.c_uint32]) -> None: ...
-@dll.bind(ctypes.c_uint32, ctypes.POINTER(glsl_type), ctypes.c_bool)
-def glsl_get_internal_ifc_packing(t:ctypes._Pointer[glsl_type], std430_supported:bool) -> ctypes.c_uint32: ...
-@dll.bind(ctypes.c_uint32, ctypes.POINTER(glsl_type), ctypes.c_bool)
-def glsl_get_std140_base_alignment(t:ctypes._Pointer[glsl_type], row_major:bool) -> int: ...
-@dll.bind(ctypes.c_uint32, ctypes.POINTER(glsl_type), ctypes.c_bool)
-def glsl_get_std140_size(t:ctypes._Pointer[glsl_type], row_major:bool) -> int: ...
-@dll.bind(ctypes.c_uint32, ctypes.POINTER(glsl_type), ctypes.c_bool)
-def glsl_get_std430_array_stride(t:ctypes._Pointer[glsl_type], row_major:bool) -> int: ...
-@dll.bind(ctypes.c_uint32, ctypes.POINTER(glsl_type), ctypes.c_bool)
-def glsl_get_std430_base_alignment(t:ctypes._Pointer[glsl_type], row_major:bool) -> int: ...
-@dll.bind(ctypes.c_uint32, ctypes.POINTER(glsl_type), ctypes.c_bool)
-def glsl_get_std430_size(t:ctypes._Pointer[glsl_type], row_major:bool) -> int: ...
-@dll.bind(ctypes.c_uint32, ctypes.POINTER(glsl_type), ctypes.c_bool)
-def glsl_get_explicit_size(t:ctypes._Pointer[glsl_type], align_to_stride:bool) -> int: ...
-@dll.bind(ctypes.POINTER(glsl_type), ctypes.POINTER(glsl_type), ctypes.c_bool)
-def glsl_get_explicit_std140_type(t:ctypes._Pointer[glsl_type], row_major:bool) -> ctypes._Pointer[glsl_type]: ...
-@dll.bind(ctypes.POINTER(glsl_type), ctypes.POINTER(glsl_type), ctypes.c_bool)
-def glsl_get_explicit_std430_type(t:ctypes._Pointer[glsl_type], row_major:bool) -> ctypes._Pointer[glsl_type]: ...
-@dll.bind(None, ctypes.POINTER(glsl_type), glsl_type_size_align_func, ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32))
-def glsl_size_align_handle_array_and_structs(type:ctypes._Pointer[glsl_type], size_align:glsl_type_size_align_func, size:ctypes._Pointer[ctypes.c_uint32], align:ctypes._Pointer[ctypes.c_uint32]) -> None: ...
-@dll.bind(None, ctypes.POINTER(glsl_type), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32))
-def glsl_get_natural_size_align_bytes(t:ctypes._Pointer[glsl_type], size:ctypes._Pointer[ctypes.c_uint32], align:ctypes._Pointer[ctypes.c_uint32]) -> None: ...
-@dll.bind(None, ctypes.POINTER(glsl_type), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32))
-def glsl_get_word_size_align_bytes(type:ctypes._Pointer[glsl_type], size:ctypes._Pointer[ctypes.c_uint32], align:ctypes._Pointer[ctypes.c_uint32]) -> None: ...
-@dll.bind(None, ctypes.POINTER(glsl_type), ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32))
-def glsl_get_vec4_size_align_bytes(type:ctypes._Pointer[glsl_type], size:ctypes._Pointer[ctypes.c_uint32], align:ctypes._Pointer[ctypes.c_uint32]) -> None: ...
-@dll.bind(None, ctypes.POINTER(struct_blob))
-def blob_init(blob:ctypes._Pointer[struct_blob]) -> None: ...
-@dll.bind(None, ctypes.POINTER(struct_blob), ctypes.c_void_p, size_t)
-def blob_init_fixed(blob:ctypes._Pointer[struct_blob], data:int|None, size:size_t) -> None: ...
-@dll.bind(None, ctypes.POINTER(struct_blob), ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(size_t))
-def blob_finish_get_buffer(blob:ctypes._Pointer[struct_blob], buffer:ctypes._Pointer[ctypes.c_void_p], size:ctypes._Pointer[size_t]) -> None: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(struct_blob), size_t)
-def blob_align(blob:ctypes._Pointer[struct_blob], alignment:size_t) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(struct_blob), ctypes.c_void_p, size_t)
-def blob_write_bytes(blob:ctypes._Pointer[struct_blob], bytes:int|None, to_write:size_t) -> bool: ...
+@dll.bind(c.POINTER[glsl_type], c.POINTER[glsl_struct_field], ctypes.c_uint32, ctypes.c_uint32, ctypes.c_bool, c.POINTER[ctypes.c_char])
+def glsl_interface_type(fields:c.POINTER[glsl_struct_field], num_fields:int, packing:ctypes.c_uint32, row_major:bool, block_name:c.POINTER[ctypes.c_char]) -> c.POINTER[glsl_type]: ...
+@dll.bind(c.POINTER[glsl_type], c.POINTER[ctypes.c_char])
+def glsl_subroutine_type(subroutine_name:c.POINTER[ctypes.c_char]) -> c.POINTER[glsl_type]: ...
+@dll.bind(c.POINTER[glsl_type], c.POINTER[glsl_type])
+def glsl_get_row_type(t:c.POINTER[glsl_type]) -> c.POINTER[glsl_type]: ...
+@dll.bind(c.POINTER[glsl_type], c.POINTER[glsl_type])
+def glsl_get_column_type(t:c.POINTER[glsl_type]) -> c.POINTER[glsl_type]: ...
+@dll.bind(c.POINTER[glsl_type], c.POINTER[glsl_type], glsl_type_size_align_func, c.POINTER[ctypes.c_uint32], c.POINTER[ctypes.c_uint32])
+def glsl_get_explicit_type_for_size_align(type:c.POINTER[glsl_type], type_info:glsl_type_size_align_func, size:c.POINTER[ctypes.c_uint32], alignment:c.POINTER[ctypes.c_uint32]) -> c.POINTER[glsl_type]: ...
+@dll.bind(c.POINTER[glsl_type], c.POINTER[glsl_type])
+def glsl_type_replace_vec3_with_vec4(type:c.POINTER[glsl_type]) -> c.POINTER[glsl_type]: ...
+@dll.bind(c.POINTER[glsl_type], c.POINTER[glsl_type])
+def glsl_float16_type(t:c.POINTER[glsl_type]) -> c.POINTER[glsl_type]: ...
+@dll.bind(c.POINTER[glsl_type], c.POINTER[glsl_type])
+def glsl_int16_type(t:c.POINTER[glsl_type]) -> c.POINTER[glsl_type]: ...
+@dll.bind(c.POINTER[glsl_type], c.POINTER[glsl_type])
+def glsl_uint16_type(t:c.POINTER[glsl_type]) -> c.POINTER[glsl_type]: ...
+@dll.bind(c.POINTER[glsl_type], c.POINTER[glsl_type])
+def glsl_type_to_16bit(old_type:c.POINTER[glsl_type]) -> c.POINTER[glsl_type]: ...
+@dll.bind(c.POINTER[glsl_type], c.POINTER[glsl_type], ctypes.c_uint32)
+def glsl_replace_vector_type(t:c.POINTER[glsl_type], components:int) -> c.POINTER[glsl_type]: ...
+@dll.bind(c.POINTER[glsl_type], c.POINTER[glsl_type])
+def glsl_channel_type(t:c.POINTER[glsl_type]) -> c.POINTER[glsl_type]: ...
+@dll.bind(c.POINTER[glsl_type], c.POINTER[glsl_type], c.POINTER[glsl_type])
+def glsl_get_mul_type(type_a:c.POINTER[glsl_type], type_b:c.POINTER[glsl_type]) -> c.POINTER[glsl_type]: ...
+@dll.bind(ctypes.c_uint32, c.POINTER[glsl_type])
+def glsl_type_get_sampler_count(t:c.POINTER[glsl_type]) -> int: ...
+@dll.bind(ctypes.c_uint32, c.POINTER[glsl_type])
+def glsl_type_get_texture_count(t:c.POINTER[glsl_type]) -> int: ...
+@dll.bind(ctypes.c_uint32, c.POINTER[glsl_type])
+def glsl_type_get_image_count(t:c.POINTER[glsl_type]) -> int: ...
+@dll.bind(ctypes.c_uint32, c.POINTER[glsl_type], ctypes.c_bool, ctypes.c_bool)
+def glsl_count_vec4_slots(t:c.POINTER[glsl_type], is_gl_vertex_input:bool, is_bindless:bool) -> int: ...
+@dll.bind(ctypes.c_uint32, c.POINTER[glsl_type], ctypes.c_bool)
+def glsl_count_dword_slots(t:c.POINTER[glsl_type], is_bindless:bool) -> int: ...
+@dll.bind(ctypes.c_uint32, c.POINTER[glsl_type])
+def glsl_get_component_slots(t:c.POINTER[glsl_type]) -> int: ...
+@dll.bind(ctypes.c_uint32, c.POINTER[glsl_type], ctypes.c_uint32)
+def glsl_get_component_slots_aligned(t:c.POINTER[glsl_type], offset:int) -> int: ...
+@dll.bind(ctypes.c_uint32, c.POINTER[glsl_type])
+def glsl_varying_count(t:c.POINTER[glsl_type]) -> int: ...
+@dll.bind(ctypes.c_uint32, c.POINTER[glsl_type])
+def glsl_type_uniform_locations(t:c.POINTER[glsl_type]) -> int: ...
+@dll.bind(ctypes.c_uint32, c.POINTER[glsl_type])
+def glsl_get_cl_size(t:c.POINTER[glsl_type]) -> int: ...
+@dll.bind(ctypes.c_uint32, c.POINTER[glsl_type])
+def glsl_get_cl_alignment(t:c.POINTER[glsl_type]) -> int: ...
+@dll.bind(None, c.POINTER[glsl_type], c.POINTER[ctypes.c_uint32], c.POINTER[ctypes.c_uint32])
+def glsl_get_cl_type_size_align(t:c.POINTER[glsl_type], size:c.POINTER[ctypes.c_uint32], align:c.POINTER[ctypes.c_uint32]) -> None: ...
+@dll.bind(ctypes.c_uint32, c.POINTER[glsl_type], ctypes.c_bool)
+def glsl_get_internal_ifc_packing(t:c.POINTER[glsl_type], std430_supported:bool) -> ctypes.c_uint32: ...
+@dll.bind(ctypes.c_uint32, c.POINTER[glsl_type], ctypes.c_bool)
+def glsl_get_std140_base_alignment(t:c.POINTER[glsl_type], row_major:bool) -> int: ...
+@dll.bind(ctypes.c_uint32, c.POINTER[glsl_type], ctypes.c_bool)
+def glsl_get_std140_size(t:c.POINTER[glsl_type], row_major:bool) -> int: ...
+@dll.bind(ctypes.c_uint32, c.POINTER[glsl_type], ctypes.c_bool)
+def glsl_get_std430_array_stride(t:c.POINTER[glsl_type], row_major:bool) -> int: ...
+@dll.bind(ctypes.c_uint32, c.POINTER[glsl_type], ctypes.c_bool)
+def glsl_get_std430_base_alignment(t:c.POINTER[glsl_type], row_major:bool) -> int: ...
+@dll.bind(ctypes.c_uint32, c.POINTER[glsl_type], ctypes.c_bool)
+def glsl_get_std430_size(t:c.POINTER[glsl_type], row_major:bool) -> int: ...
+@dll.bind(ctypes.c_uint32, c.POINTER[glsl_type], ctypes.c_bool)
+def glsl_get_explicit_size(t:c.POINTER[glsl_type], align_to_stride:bool) -> int: ...
+@dll.bind(c.POINTER[glsl_type], c.POINTER[glsl_type], ctypes.c_bool)
+def glsl_get_explicit_std140_type(t:c.POINTER[glsl_type], row_major:bool) -> c.POINTER[glsl_type]: ...
+@dll.bind(c.POINTER[glsl_type], c.POINTER[glsl_type], ctypes.c_bool)
+def glsl_get_explicit_std430_type(t:c.POINTER[glsl_type], row_major:bool) -> c.POINTER[glsl_type]: ...
+@dll.bind(None, c.POINTER[glsl_type], glsl_type_size_align_func, c.POINTER[ctypes.c_uint32], c.POINTER[ctypes.c_uint32])
+def glsl_size_align_handle_array_and_structs(type:c.POINTER[glsl_type], size_align:glsl_type_size_align_func, size:c.POINTER[ctypes.c_uint32], align:c.POINTER[ctypes.c_uint32]) -> None: ...
+@dll.bind(None, c.POINTER[glsl_type], c.POINTER[ctypes.c_uint32], c.POINTER[ctypes.c_uint32])
+def glsl_get_natural_size_align_bytes(t:c.POINTER[glsl_type], size:c.POINTER[ctypes.c_uint32], align:c.POINTER[ctypes.c_uint32]) -> None: ...
+@dll.bind(None, c.POINTER[glsl_type], c.POINTER[ctypes.c_uint32], c.POINTER[ctypes.c_uint32])
+def glsl_get_word_size_align_bytes(type:c.POINTER[glsl_type], size:c.POINTER[ctypes.c_uint32], align:c.POINTER[ctypes.c_uint32]) -> None: ...
+@dll.bind(None, c.POINTER[glsl_type], c.POINTER[ctypes.c_uint32], c.POINTER[ctypes.c_uint32])
+def glsl_get_vec4_size_align_bytes(type:c.POINTER[glsl_type], size:c.POINTER[ctypes.c_uint32], align:c.POINTER[ctypes.c_uint32]) -> None: ...
+@dll.bind(None, c.POINTER[struct_blob])
+def blob_init(blob:c.POINTER[struct_blob]) -> None: ...
+@dll.bind(None, c.POINTER[struct_blob], ctypes.c_void_p, size_t)
+def blob_init_fixed(blob:c.POINTER[struct_blob], data:ctypes.c_void_p, size:size_t) -> None: ...
+@dll.bind(None, c.POINTER[struct_blob], c.POINTER[ctypes.c_void_p], c.POINTER[size_t])
+def blob_finish_get_buffer(blob:c.POINTER[struct_blob], buffer:c.POINTER[ctypes.c_void_p], size:c.POINTER[size_t]) -> None: ...
+@dll.bind(ctypes.c_bool, c.POINTER[struct_blob], size_t)
+def blob_align(blob:c.POINTER[struct_blob], alignment:size_t) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[struct_blob], ctypes.c_void_p, size_t)
+def blob_write_bytes(blob:c.POINTER[struct_blob], bytes:ctypes.c_void_p, to_write:size_t) -> bool: ...
 intptr_t: TypeAlias = ctypes.c_int64
-@dll.bind(intptr_t, ctypes.POINTER(struct_blob), size_t)
-def blob_reserve_bytes(blob:ctypes._Pointer[struct_blob], to_write:size_t) -> intptr_t: ...
-@dll.bind(intptr_t, ctypes.POINTER(struct_blob))
-def blob_reserve_uint32(blob:ctypes._Pointer[struct_blob]) -> intptr_t: ...
-@dll.bind(intptr_t, ctypes.POINTER(struct_blob))
-def blob_reserve_intptr(blob:ctypes._Pointer[struct_blob]) -> intptr_t: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(struct_blob), size_t, ctypes.c_void_p, size_t)
-def blob_overwrite_bytes(blob:ctypes._Pointer[struct_blob], offset:size_t, bytes:int|None, to_write:size_t) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(struct_blob), uint8_t)
-def blob_write_uint8(blob:ctypes._Pointer[struct_blob], value:uint8_t) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(struct_blob), size_t, uint8_t)
-def blob_overwrite_uint8(blob:ctypes._Pointer[struct_blob], offset:size_t, value:uint8_t) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(struct_blob), uint16_t)
-def blob_write_uint16(blob:ctypes._Pointer[struct_blob], value:uint16_t) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(struct_blob), uint32_t)
-def blob_write_uint32(blob:ctypes._Pointer[struct_blob], value:uint32_t) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(struct_blob), size_t, uint32_t)
-def blob_overwrite_uint32(blob:ctypes._Pointer[struct_blob], offset:size_t, value:uint32_t) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(struct_blob), uint64_t)
-def blob_write_uint64(blob:ctypes._Pointer[struct_blob], value:uint64_t) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(struct_blob), intptr_t)
-def blob_write_intptr(blob:ctypes._Pointer[struct_blob], value:intptr_t) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(struct_blob), size_t, intptr_t)
-def blob_overwrite_intptr(blob:ctypes._Pointer[struct_blob], offset:size_t, value:intptr_t) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(struct_blob), ctypes.POINTER(ctypes.c_char))
-def blob_write_string(blob:ctypes._Pointer[struct_blob], str:ctypes._Pointer[ctypes.c_char]) -> bool: ...
-@dll.bind(None, ctypes.POINTER(struct_blob_reader), ctypes.c_void_p, size_t)
-def blob_reader_init(blob:ctypes._Pointer[struct_blob_reader], data:int|None, size:size_t) -> None: ...
-@dll.bind(None, ctypes.POINTER(struct_blob_reader), size_t)
-def blob_reader_align(blob:ctypes._Pointer[struct_blob_reader], alignment:size_t) -> None: ...
-@dll.bind(ctypes.c_void_p, ctypes.POINTER(struct_blob_reader), size_t)
-def blob_read_bytes(blob:ctypes._Pointer[struct_blob_reader], size:size_t) -> int|None: ...
-@dll.bind(None, ctypes.POINTER(struct_blob_reader), ctypes.c_void_p, size_t)
-def blob_copy_bytes(blob:ctypes._Pointer[struct_blob_reader], dest:int|None, size:size_t) -> None: ...
-@dll.bind(None, ctypes.POINTER(struct_blob_reader), size_t)
-def blob_skip_bytes(blob:ctypes._Pointer[struct_blob_reader], size:size_t) -> None: ...
-@dll.bind(uint8_t, ctypes.POINTER(struct_blob_reader))
-def blob_read_uint8(blob:ctypes._Pointer[struct_blob_reader]) -> uint8_t: ...
-@dll.bind(uint16_t, ctypes.POINTER(struct_blob_reader))
-def blob_read_uint16(blob:ctypes._Pointer[struct_blob_reader]) -> uint16_t: ...
-@dll.bind(uint32_t, ctypes.POINTER(struct_blob_reader))
-def blob_read_uint32(blob:ctypes._Pointer[struct_blob_reader]) -> uint32_t: ...
-@dll.bind(uint64_t, ctypes.POINTER(struct_blob_reader))
-def blob_read_uint64(blob:ctypes._Pointer[struct_blob_reader]) -> uint64_t: ...
-@dll.bind(intptr_t, ctypes.POINTER(struct_blob_reader))
-def blob_read_intptr(blob:ctypes._Pointer[struct_blob_reader]) -> intptr_t: ...
-@dll.bind(ctypes.POINTER(ctypes.c_char), ctypes.POINTER(struct_blob_reader))
-def blob_read_string(blob:ctypes._Pointer[struct_blob_reader]) -> ctypes._Pointer[ctypes.c_char]: ...
+@dll.bind(intptr_t, c.POINTER[struct_blob], size_t)
+def blob_reserve_bytes(blob:c.POINTER[struct_blob], to_write:size_t) -> intptr_t: ...
+@dll.bind(intptr_t, c.POINTER[struct_blob])
+def blob_reserve_uint32(blob:c.POINTER[struct_blob]) -> intptr_t: ...
+@dll.bind(intptr_t, c.POINTER[struct_blob])
+def blob_reserve_intptr(blob:c.POINTER[struct_blob]) -> intptr_t: ...
+@dll.bind(ctypes.c_bool, c.POINTER[struct_blob], size_t, ctypes.c_void_p, size_t)
+def blob_overwrite_bytes(blob:c.POINTER[struct_blob], offset:size_t, bytes:ctypes.c_void_p, to_write:size_t) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[struct_blob], uint8_t)
+def blob_write_uint8(blob:c.POINTER[struct_blob], value:uint8_t) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[struct_blob], size_t, uint8_t)
+def blob_overwrite_uint8(blob:c.POINTER[struct_blob], offset:size_t, value:uint8_t) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[struct_blob], uint16_t)
+def blob_write_uint16(blob:c.POINTER[struct_blob], value:uint16_t) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[struct_blob], uint32_t)
+def blob_write_uint32(blob:c.POINTER[struct_blob], value:uint32_t) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[struct_blob], size_t, uint32_t)
+def blob_overwrite_uint32(blob:c.POINTER[struct_blob], offset:size_t, value:uint32_t) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[struct_blob], uint64_t)
+def blob_write_uint64(blob:c.POINTER[struct_blob], value:uint64_t) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[struct_blob], intptr_t)
+def blob_write_intptr(blob:c.POINTER[struct_blob], value:intptr_t) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[struct_blob], size_t, intptr_t)
+def blob_overwrite_intptr(blob:c.POINTER[struct_blob], offset:size_t, value:intptr_t) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[struct_blob], c.POINTER[ctypes.c_char])
+def blob_write_string(blob:c.POINTER[struct_blob], str:c.POINTER[ctypes.c_char]) -> bool: ...
+@dll.bind(None, c.POINTER[struct_blob_reader], ctypes.c_void_p, size_t)
+def blob_reader_init(blob:c.POINTER[struct_blob_reader], data:ctypes.c_void_p, size:size_t) -> None: ...
+@dll.bind(None, c.POINTER[struct_blob_reader], size_t)
+def blob_reader_align(blob:c.POINTER[struct_blob_reader], alignment:size_t) -> None: ...
+@dll.bind(ctypes.c_void_p, c.POINTER[struct_blob_reader], size_t)
+def blob_read_bytes(blob:c.POINTER[struct_blob_reader], size:size_t) -> ctypes.c_void_p: ...
+@dll.bind(None, c.POINTER[struct_blob_reader], ctypes.c_void_p, size_t)
+def blob_copy_bytes(blob:c.POINTER[struct_blob_reader], dest:ctypes.c_void_p, size:size_t) -> None: ...
+@dll.bind(None, c.POINTER[struct_blob_reader], size_t)
+def blob_skip_bytes(blob:c.POINTER[struct_blob_reader], size:size_t) -> None: ...
+@dll.bind(uint8_t, c.POINTER[struct_blob_reader])
+def blob_read_uint8(blob:c.POINTER[struct_blob_reader]) -> uint8_t: ...
+@dll.bind(uint16_t, c.POINTER[struct_blob_reader])
+def blob_read_uint16(blob:c.POINTER[struct_blob_reader]) -> uint16_t: ...
+@dll.bind(uint32_t, c.POINTER[struct_blob_reader])
+def blob_read_uint32(blob:c.POINTER[struct_blob_reader]) -> uint32_t: ...
+@dll.bind(uint64_t, c.POINTER[struct_blob_reader])
+def blob_read_uint64(blob:c.POINTER[struct_blob_reader]) -> uint64_t: ...
+@dll.bind(intptr_t, c.POINTER[struct_blob_reader])
+def blob_read_intptr(blob:c.POINTER[struct_blob_reader]) -> intptr_t: ...
+@dll.bind(c.POINTER[ctypes.c_char], c.POINTER[struct_blob_reader])
+def blob_read_string(blob:c.POINTER[struct_blob_reader]) -> c.POINTER[ctypes.c_char]: ...
 @dll.bind(ctypes.c_void_p, ctypes.c_void_p)
-def ralloc_context(ctx:int|None) -> int|None: ...
+def ralloc_context(ctx:ctypes.c_void_p) -> ctypes.c_void_p: ...
 @dll.bind(ctypes.c_void_p, ctypes.c_void_p, size_t)
-def ralloc_size(ctx:int|None, size:size_t) -> int|None: ...
+def ralloc_size(ctx:ctypes.c_void_p, size:size_t) -> ctypes.c_void_p: ...
 @dll.bind(ctypes.c_void_p, ctypes.c_void_p, size_t)
-def rzalloc_size(ctx:int|None, size:size_t) -> int|None: ...
+def rzalloc_size(ctx:ctypes.c_void_p, size:size_t) -> ctypes.c_void_p: ...
 @dll.bind(ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, size_t)
-def reralloc_size(ctx:int|None, ptr:int|None, size:size_t) -> int|None: ...
+def reralloc_size(ctx:ctypes.c_void_p, ptr:ctypes.c_void_p, size:size_t) -> ctypes.c_void_p: ...
 @dll.bind(ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, size_t, size_t)
-def rerzalloc_size(ctx:int|None, ptr:int|None, old_size:size_t, new_size:size_t) -> int|None: ...
+def rerzalloc_size(ctx:ctypes.c_void_p, ptr:ctypes.c_void_p, old_size:size_t, new_size:size_t) -> ctypes.c_void_p: ...
 @dll.bind(ctypes.c_void_p, ctypes.c_void_p, size_t, ctypes.c_uint32)
-def ralloc_array_size(ctx:int|None, size:size_t, count:int) -> int|None: ...
+def ralloc_array_size(ctx:ctypes.c_void_p, size:size_t, count:int) -> ctypes.c_void_p: ...
 @dll.bind(ctypes.c_void_p, ctypes.c_void_p, size_t, ctypes.c_uint32)
-def rzalloc_array_size(ctx:int|None, size:size_t, count:int) -> int|None: ...
+def rzalloc_array_size(ctx:ctypes.c_void_p, size:size_t, count:int) -> ctypes.c_void_p: ...
 @dll.bind(ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, size_t, ctypes.c_uint32)
-def reralloc_array_size(ctx:int|None, ptr:int|None, size:size_t, count:int) -> int|None: ...
+def reralloc_array_size(ctx:ctypes.c_void_p, ptr:ctypes.c_void_p, size:size_t, count:int) -> ctypes.c_void_p: ...
 @dll.bind(ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, size_t, ctypes.c_uint32, ctypes.c_uint32)
-def rerzalloc_array_size(ctx:int|None, ptr:int|None, size:size_t, old_count:int, new_count:int) -> int|None: ...
+def rerzalloc_array_size(ctx:ctypes.c_void_p, ptr:ctypes.c_void_p, size:size_t, old_count:int, new_count:int) -> ctypes.c_void_p: ...
 @dll.bind(None, ctypes.c_void_p)
-def ralloc_free(ptr:int|None) -> None: ...
+def ralloc_free(ptr:ctypes.c_void_p) -> None: ...
 @dll.bind(None, ctypes.c_void_p, ctypes.c_void_p)
-def ralloc_steal(new_ctx:int|None, ptr:int|None) -> None: ...
+def ralloc_steal(new_ctx:ctypes.c_void_p, ptr:ctypes.c_void_p) -> None: ...
 @dll.bind(None, ctypes.c_void_p, ctypes.c_void_p)
-def ralloc_adopt(new_ctx:int|None, old_ctx:int|None) -> None: ...
+def ralloc_adopt(new_ctx:ctypes.c_void_p, old_ctx:ctypes.c_void_p) -> None: ...
 @dll.bind(ctypes.c_void_p, ctypes.c_void_p)
-def ralloc_parent(ptr:int|None) -> int|None: ...
-@dll.bind(None, ctypes.c_void_p, ctypes.CFUNCTYPE(None, ctypes.c_void_p))
-def ralloc_set_destructor(ptr:int|None, destructor:ctypes._CFunctionType) -> None: ...
+def ralloc_parent(ptr:ctypes.c_void_p) -> ctypes.c_void_p: ...
+@dll.bind(None, ctypes.c_void_p, c.CFUNCTYPE[None, [ctypes.c_void_p]])
+def ralloc_set_destructor(ptr:ctypes.c_void_p, destructor:c.CFUNCTYPE[None, [ctypes.c_void_p]]) -> None: ...
 @dll.bind(ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, size_t)
-def ralloc_memdup(ctx:int|None, mem:int|None, n:size_t) -> int|None: ...
-@dll.bind(ctypes.POINTER(ctypes.c_char), ctypes.c_void_p, ctypes.POINTER(ctypes.c_char))
-def ralloc_strdup(ctx:int|None, str:ctypes._Pointer[ctypes.c_char]) -> ctypes._Pointer[ctypes.c_char]: ...
-@dll.bind(ctypes.POINTER(ctypes.c_char), ctypes.c_void_p, ctypes.POINTER(ctypes.c_char), size_t)
-def ralloc_strndup(ctx:int|None, str:ctypes._Pointer[ctypes.c_char], n:size_t) -> ctypes._Pointer[ctypes.c_char]: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_char))
-def ralloc_strcat(dest:ctypes._Pointer[ctypes.POINTER(ctypes.c_char)], str:ctypes._Pointer[ctypes.c_char]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_char), size_t)
-def ralloc_strncat(dest:ctypes._Pointer[ctypes.POINTER(ctypes.c_char)], str:ctypes._Pointer[ctypes.c_char], n:size_t) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_char), size_t, size_t)
-def ralloc_str_append(dest:ctypes._Pointer[ctypes.POINTER(ctypes.c_char)], str:ctypes._Pointer[ctypes.c_char], existing_length:size_t, str_size:size_t) -> bool: ...
-@dll.bind(ctypes.POINTER(ctypes.c_char), ctypes.c_void_p, ctypes.POINTER(ctypes.c_char))
-def ralloc_asprintf(ctx:int|None, fmt:ctypes._Pointer[ctypes.c_char]) -> ctypes._Pointer[ctypes.c_char]: ...
+def ralloc_memdup(ctx:ctypes.c_void_p, mem:ctypes.c_void_p, n:size_t) -> ctypes.c_void_p: ...
+@dll.bind(c.POINTER[ctypes.c_char], ctypes.c_void_p, c.POINTER[ctypes.c_char])
+def ralloc_strdup(ctx:ctypes.c_void_p, str:c.POINTER[ctypes.c_char]) -> c.POINTER[ctypes.c_char]: ...
+@dll.bind(c.POINTER[ctypes.c_char], ctypes.c_void_p, c.POINTER[ctypes.c_char], size_t)
+def ralloc_strndup(ctx:ctypes.c_void_p, str:c.POINTER[ctypes.c_char], n:size_t) -> c.POINTER[ctypes.c_char]: ...
+@dll.bind(ctypes.c_bool, c.POINTER[c.POINTER[ctypes.c_char]], c.POINTER[ctypes.c_char])
+def ralloc_strcat(dest:c.POINTER[c.POINTER[ctypes.c_char]], str:c.POINTER[ctypes.c_char]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[c.POINTER[ctypes.c_char]], c.POINTER[ctypes.c_char], size_t)
+def ralloc_strncat(dest:c.POINTER[c.POINTER[ctypes.c_char]], str:c.POINTER[ctypes.c_char], n:size_t) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[c.POINTER[ctypes.c_char]], c.POINTER[ctypes.c_char], size_t, size_t)
+def ralloc_str_append(dest:c.POINTER[c.POINTER[ctypes.c_char]], str:c.POINTER[ctypes.c_char], existing_length:size_t, str_size:size_t) -> bool: ...
+@dll.bind(c.POINTER[ctypes.c_char], ctypes.c_void_p, c.POINTER[ctypes.c_char])
+def ralloc_asprintf(ctx:ctypes.c_void_p, fmt:c.POINTER[ctypes.c_char]) -> c.POINTER[ctypes.c_char]: ...
 @c.record
 class struct___va_list_tag(c.Struct):
   SIZE = 24
   gp_offset: int
   fp_offset: int
-  overflow_arg_area: int|None
-  reg_save_area: int|None
+  overflow_arg_area: ctypes.c_void_p
+  reg_save_area: ctypes.c_void_p
 struct___va_list_tag.register_fields([('gp_offset', ctypes.c_uint32, 0), ('fp_offset', ctypes.c_uint32, 4), ('overflow_arg_area', ctypes.c_void_p, 8), ('reg_save_area', ctypes.c_void_p, 16)])
-va_list: TypeAlias = (struct___va_list_tag * 1)
-@dll.bind(ctypes.POINTER(ctypes.c_char), ctypes.c_void_p, ctypes.POINTER(ctypes.c_char), va_list)
-def ralloc_vasprintf(ctx:int|None, fmt:ctypes._Pointer[ctypes.c_char], args:va_list) -> ctypes._Pointer[ctypes.c_char]: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(size_t), ctypes.POINTER(ctypes.c_char))
-def ralloc_asprintf_rewrite_tail(str:ctypes._Pointer[ctypes.POINTER(ctypes.c_char)], start:ctypes._Pointer[size_t], fmt:ctypes._Pointer[ctypes.c_char]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(size_t), ctypes.POINTER(ctypes.c_char), va_list)
-def ralloc_vasprintf_rewrite_tail(str:ctypes._Pointer[ctypes.POINTER(ctypes.c_char)], start:ctypes._Pointer[size_t], fmt:ctypes._Pointer[ctypes.c_char], args:va_list) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_char))
-def ralloc_asprintf_append(str:ctypes._Pointer[ctypes.POINTER(ctypes.c_char)], fmt:ctypes._Pointer[ctypes.c_char]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_char), va_list)
-def ralloc_vasprintf_append(str:ctypes._Pointer[ctypes.POINTER(ctypes.c_char)], fmt:ctypes._Pointer[ctypes.c_char], args:va_list) -> bool: ...
+va_list: TypeAlias = c.Array[struct___va_list_tag, Literal[1]]
+@dll.bind(c.POINTER[ctypes.c_char], ctypes.c_void_p, c.POINTER[ctypes.c_char], va_list)
+def ralloc_vasprintf(ctx:ctypes.c_void_p, fmt:c.POINTER[ctypes.c_char], args:va_list) -> c.POINTER[ctypes.c_char]: ...
+@dll.bind(ctypes.c_bool, c.POINTER[c.POINTER[ctypes.c_char]], c.POINTER[size_t], c.POINTER[ctypes.c_char])
+def ralloc_asprintf_rewrite_tail(str:c.POINTER[c.POINTER[ctypes.c_char]], start:c.POINTER[size_t], fmt:c.POINTER[ctypes.c_char]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[c.POINTER[ctypes.c_char]], c.POINTER[size_t], c.POINTER[ctypes.c_char], va_list)
+def ralloc_vasprintf_rewrite_tail(str:c.POINTER[c.POINTER[ctypes.c_char]], start:c.POINTER[size_t], fmt:c.POINTER[ctypes.c_char], args:va_list) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[c.POINTER[ctypes.c_char]], c.POINTER[ctypes.c_char])
+def ralloc_asprintf_append(str:c.POINTER[c.POINTER[ctypes.c_char]], fmt:c.POINTER[ctypes.c_char]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[c.POINTER[ctypes.c_char]], c.POINTER[ctypes.c_char], va_list)
+def ralloc_vasprintf_append(str:c.POINTER[c.POINTER[ctypes.c_char]], fmt:c.POINTER[ctypes.c_char], args:va_list) -> bool: ...
 @dll.bind(size_t, ctypes.c_void_p)
-def ralloc_total_size(ptr:int|None) -> size_t: ...
-@dll.bind(ctypes.POINTER(gc_ctx), ctypes.c_void_p)
-def gc_context(parent:int|None) -> ctypes._Pointer[gc_ctx]: ...
-@dll.bind(ctypes.c_void_p, ctypes.POINTER(gc_ctx), size_t, size_t)
-def gc_alloc_size(ctx:ctypes._Pointer[gc_ctx], size:size_t, alignment:size_t) -> int|None: ...
-@dll.bind(ctypes.c_void_p, ctypes.POINTER(gc_ctx), size_t, size_t)
-def gc_zalloc_size(ctx:ctypes._Pointer[gc_ctx], size:size_t, alignment:size_t) -> int|None: ...
+def ralloc_total_size(ptr:ctypes.c_void_p) -> size_t: ...
+@dll.bind(c.POINTER[gc_ctx], ctypes.c_void_p)
+def gc_context(parent:ctypes.c_void_p) -> c.POINTER[gc_ctx]: ...
+@dll.bind(ctypes.c_void_p, c.POINTER[gc_ctx], size_t, size_t)
+def gc_alloc_size(ctx:c.POINTER[gc_ctx], size:size_t, alignment:size_t) -> ctypes.c_void_p: ...
+@dll.bind(ctypes.c_void_p, c.POINTER[gc_ctx], size_t, size_t)
+def gc_zalloc_size(ctx:c.POINTER[gc_ctx], size:size_t, alignment:size_t) -> ctypes.c_void_p: ...
 @dll.bind(None, ctypes.c_void_p)
-def gc_free(ptr:int|None) -> None: ...
-@dll.bind(ctypes.POINTER(gc_ctx), ctypes.c_void_p)
-def gc_get_context(ptr:int|None) -> ctypes._Pointer[gc_ctx]: ...
-@dll.bind(None, ctypes.POINTER(gc_ctx))
-def gc_sweep_start(ctx:ctypes._Pointer[gc_ctx]) -> None: ...
-@dll.bind(None, ctypes.POINTER(gc_ctx), ctypes.c_void_p)
-def gc_mark_live(ctx:ctypes._Pointer[gc_ctx], mem:int|None) -> None: ...
-@dll.bind(None, ctypes.POINTER(gc_ctx))
-def gc_sweep_end(ctx:ctypes._Pointer[gc_ctx]) -> None: ...
+def gc_free(ptr:ctypes.c_void_p) -> None: ...
+@dll.bind(c.POINTER[gc_ctx], ctypes.c_void_p)
+def gc_get_context(ptr:ctypes.c_void_p) -> c.POINTER[gc_ctx]: ...
+@dll.bind(None, c.POINTER[gc_ctx])
+def gc_sweep_start(ctx:c.POINTER[gc_ctx]) -> None: ...
+@dll.bind(None, c.POINTER[gc_ctx], ctypes.c_void_p)
+def gc_mark_live(ctx:c.POINTER[gc_ctx], mem:ctypes.c_void_p) -> None: ...
+@dll.bind(None, c.POINTER[gc_ctx])
+def gc_sweep_end(ctx:c.POINTER[gc_ctx]) -> None: ...
 class struct_linear_ctx(c.Struct): pass
 linear_ctx: TypeAlias = struct_linear_ctx
-@dll.bind(ctypes.c_void_p, ctypes.POINTER(linear_ctx), ctypes.c_uint32)
-def linear_alloc_child(ctx:ctypes._Pointer[linear_ctx], size:int) -> int|None: ...
+@dll.bind(ctypes.c_void_p, c.POINTER[linear_ctx], ctypes.c_uint32)
+def linear_alloc_child(ctx:c.POINTER[linear_ctx], size:int) -> ctypes.c_void_p: ...
 @c.record
 class linear_opts(c.Struct):
   SIZE = 4
   min_buffer_size: int
 linear_opts.register_fields([('min_buffer_size', ctypes.c_uint32, 0)])
-@dll.bind(ctypes.POINTER(linear_ctx), ctypes.c_void_p)
-def linear_context(ralloc_ctx:int|None) -> ctypes._Pointer[linear_ctx]: ...
-@dll.bind(ctypes.POINTER(linear_ctx), ctypes.c_void_p, ctypes.POINTER(linear_opts))
-def linear_context_with_opts(ralloc_ctx:int|None, opts:ctypes._Pointer[linear_opts]) -> ctypes._Pointer[linear_ctx]: ...
-@dll.bind(ctypes.c_void_p, ctypes.POINTER(linear_ctx), ctypes.c_uint32)
-def linear_zalloc_child(ctx:ctypes._Pointer[linear_ctx], size:int) -> int|None: ...
-@dll.bind(None, ctypes.POINTER(linear_ctx))
-def linear_free_context(ctx:ctypes._Pointer[linear_ctx]) -> None: ...
-@dll.bind(None, ctypes.c_void_p, ctypes.POINTER(linear_ctx))
-def ralloc_steal_linear_context(new_ralloc_ctx:int|None, ctx:ctypes._Pointer[linear_ctx]) -> None: ...
-@dll.bind(ctypes.c_void_p, ctypes.POINTER(linear_ctx))
-def ralloc_parent_of_linear_context(ctx:ctypes._Pointer[linear_ctx]) -> int|None: ...
-@dll.bind(ctypes.c_void_p, ctypes.POINTER(linear_ctx), size_t, ctypes.c_uint32)
-def linear_alloc_child_array(ctx:ctypes._Pointer[linear_ctx], size:size_t, count:int) -> int|None: ...
-@dll.bind(ctypes.c_void_p, ctypes.POINTER(linear_ctx), size_t, ctypes.c_uint32)
-def linear_zalloc_child_array(ctx:ctypes._Pointer[linear_ctx], size:size_t, count:int) -> int|None: ...
-@dll.bind(ctypes.POINTER(ctypes.c_char), ctypes.POINTER(linear_ctx), ctypes.POINTER(ctypes.c_char))
-def linear_strdup(ctx:ctypes._Pointer[linear_ctx], str:ctypes._Pointer[ctypes.c_char]) -> ctypes._Pointer[ctypes.c_char]: ...
-@dll.bind(ctypes.POINTER(ctypes.c_char), ctypes.POINTER(linear_ctx), ctypes.POINTER(ctypes.c_char))
-def linear_asprintf(ctx:ctypes._Pointer[linear_ctx], fmt:ctypes._Pointer[ctypes.c_char]) -> ctypes._Pointer[ctypes.c_char]: ...
-@dll.bind(ctypes.POINTER(ctypes.c_char), ctypes.POINTER(linear_ctx), ctypes.POINTER(ctypes.c_char), va_list)
-def linear_vasprintf(ctx:ctypes._Pointer[linear_ctx], fmt:ctypes._Pointer[ctypes.c_char], args:va_list) -> ctypes._Pointer[ctypes.c_char]: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(linear_ctx), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_char))
-def linear_asprintf_append(ctx:ctypes._Pointer[linear_ctx], str:ctypes._Pointer[ctypes.POINTER(ctypes.c_char)], fmt:ctypes._Pointer[ctypes.c_char]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(linear_ctx), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_char), va_list)
-def linear_vasprintf_append(ctx:ctypes._Pointer[linear_ctx], str:ctypes._Pointer[ctypes.POINTER(ctypes.c_char)], fmt:ctypes._Pointer[ctypes.c_char], args:va_list) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(linear_ctx), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(size_t), ctypes.POINTER(ctypes.c_char))
-def linear_asprintf_rewrite_tail(ctx:ctypes._Pointer[linear_ctx], str:ctypes._Pointer[ctypes.POINTER(ctypes.c_char)], start:ctypes._Pointer[size_t], fmt:ctypes._Pointer[ctypes.c_char]) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(linear_ctx), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(size_t), ctypes.POINTER(ctypes.c_char), va_list)
-def linear_vasprintf_rewrite_tail(ctx:ctypes._Pointer[linear_ctx], str:ctypes._Pointer[ctypes.POINTER(ctypes.c_char)], start:ctypes._Pointer[size_t], fmt:ctypes._Pointer[ctypes.c_char], args:va_list) -> bool: ...
-@dll.bind(ctypes.c_bool, ctypes.POINTER(linear_ctx), ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.c_char))
-def linear_strcat(ctx:ctypes._Pointer[linear_ctx], dest:ctypes._Pointer[ctypes.POINTER(ctypes.c_char)], str:ctypes._Pointer[ctypes.c_char]) -> bool: ...
+@dll.bind(c.POINTER[linear_ctx], ctypes.c_void_p)
+def linear_context(ralloc_ctx:ctypes.c_void_p) -> c.POINTER[linear_ctx]: ...
+@dll.bind(c.POINTER[linear_ctx], ctypes.c_void_p, c.POINTER[linear_opts])
+def linear_context_with_opts(ralloc_ctx:ctypes.c_void_p, opts:c.POINTER[linear_opts]) -> c.POINTER[linear_ctx]: ...
+@dll.bind(ctypes.c_void_p, c.POINTER[linear_ctx], ctypes.c_uint32)
+def linear_zalloc_child(ctx:c.POINTER[linear_ctx], size:int) -> ctypes.c_void_p: ...
+@dll.bind(None, c.POINTER[linear_ctx])
+def linear_free_context(ctx:c.POINTER[linear_ctx]) -> None: ...
+@dll.bind(None, ctypes.c_void_p, c.POINTER[linear_ctx])
+def ralloc_steal_linear_context(new_ralloc_ctx:ctypes.c_void_p, ctx:c.POINTER[linear_ctx]) -> None: ...
+@dll.bind(ctypes.c_void_p, c.POINTER[linear_ctx])
+def ralloc_parent_of_linear_context(ctx:c.POINTER[linear_ctx]) -> ctypes.c_void_p: ...
+@dll.bind(ctypes.c_void_p, c.POINTER[linear_ctx], size_t, ctypes.c_uint32)
+def linear_alloc_child_array(ctx:c.POINTER[linear_ctx], size:size_t, count:int) -> ctypes.c_void_p: ...
+@dll.bind(ctypes.c_void_p, c.POINTER[linear_ctx], size_t, ctypes.c_uint32)
+def linear_zalloc_child_array(ctx:c.POINTER[linear_ctx], size:size_t, count:int) -> ctypes.c_void_p: ...
+@dll.bind(c.POINTER[ctypes.c_char], c.POINTER[linear_ctx], c.POINTER[ctypes.c_char])
+def linear_strdup(ctx:c.POINTER[linear_ctx], str:c.POINTER[ctypes.c_char]) -> c.POINTER[ctypes.c_char]: ...
+@dll.bind(c.POINTER[ctypes.c_char], c.POINTER[linear_ctx], c.POINTER[ctypes.c_char])
+def linear_asprintf(ctx:c.POINTER[linear_ctx], fmt:c.POINTER[ctypes.c_char]) -> c.POINTER[ctypes.c_char]: ...
+@dll.bind(c.POINTER[ctypes.c_char], c.POINTER[linear_ctx], c.POINTER[ctypes.c_char], va_list)
+def linear_vasprintf(ctx:c.POINTER[linear_ctx], fmt:c.POINTER[ctypes.c_char], args:va_list) -> c.POINTER[ctypes.c_char]: ...
+@dll.bind(ctypes.c_bool, c.POINTER[linear_ctx], c.POINTER[c.POINTER[ctypes.c_char]], c.POINTER[ctypes.c_char])
+def linear_asprintf_append(ctx:c.POINTER[linear_ctx], str:c.POINTER[c.POINTER[ctypes.c_char]], fmt:c.POINTER[ctypes.c_char]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[linear_ctx], c.POINTER[c.POINTER[ctypes.c_char]], c.POINTER[ctypes.c_char], va_list)
+def linear_vasprintf_append(ctx:c.POINTER[linear_ctx], str:c.POINTER[c.POINTER[ctypes.c_char]], fmt:c.POINTER[ctypes.c_char], args:va_list) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[linear_ctx], c.POINTER[c.POINTER[ctypes.c_char]], c.POINTER[size_t], c.POINTER[ctypes.c_char])
+def linear_asprintf_rewrite_tail(ctx:c.POINTER[linear_ctx], str:c.POINTER[c.POINTER[ctypes.c_char]], start:c.POINTER[size_t], fmt:c.POINTER[ctypes.c_char]) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[linear_ctx], c.POINTER[c.POINTER[ctypes.c_char]], c.POINTER[size_t], c.POINTER[ctypes.c_char], va_list)
+def linear_vasprintf_rewrite_tail(ctx:c.POINTER[linear_ctx], str:c.POINTER[c.POINTER[ctypes.c_char]], start:c.POINTER[size_t], fmt:c.POINTER[ctypes.c_char], args:va_list) -> bool: ...
+@dll.bind(ctypes.c_bool, c.POINTER[linear_ctx], c.POINTER[c.POINTER[ctypes.c_char]], c.POINTER[ctypes.c_char])
+def linear_strcat(ctx:c.POINTER[linear_ctx], dest:c.POINTER[c.POINTER[ctypes.c_char]], str:c.POINTER[ctypes.c_char]) -> bool: ...
 _anonenum7: dict[int, str] = {(RALLOC_PRINT_INFO_SUMMARY_ONLY:=1): 'RALLOC_PRINT_INFO_SUMMARY_ONLY'}
-@dll.bind(None, ctypes.POINTER(FILE), ctypes.c_void_p, ctypes.c_uint32)
-def ralloc_print_info(f:ctypes._Pointer[FILE], p:int|None, flags:int) -> None: ...
+@dll.bind(None, c.POINTER[FILE], ctypes.c_void_p, ctypes.c_uint32)
+def ralloc_print_info(f:c.POINTER[FILE], p:ctypes.c_void_p, flags:int) -> None: ...
 @c.record
 class struct_isa_decode_options(c.Struct):
   SIZE = 80
@@ -5338,40 +5338,40 @@ class struct_isa_decode_options(c.Struct):
   max_errors: int
   branch_labels: bool
   stop: bool
-  cbdata: int|None
-  field_cb: ctypes._CFunctionType
-  field_print_cb: ctypes._CFunctionType
-  pre_instr_cb: ctypes._CFunctionType
-  post_instr_cb: ctypes._CFunctionType
-  no_match_cb: ctypes._CFunctionType
+  cbdata: ctypes.c_void_p
+  field_cb: c.CFUNCTYPE[None, [ctypes.c_void_p, c.POINTER[ctypes.c_char], c.POINTER[struct_isa_decode_value]]]
+  field_print_cb: c.CFUNCTYPE[None, [c.POINTER[struct_isa_print_state], c.POINTER[ctypes.c_char], ctypes.c_uint64]]
+  pre_instr_cb: c.CFUNCTYPE[None, [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_void_p]]
+  post_instr_cb: c.CFUNCTYPE[None, [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_void_p]]
+  no_match_cb: c.CFUNCTYPE[None, [c.POINTER[struct__IO_FILE], c.POINTER[ctypes.c_uint32], ctypes.c_uint64]]
   entrypoint_count: int
-  entrypoints: ctypes._Pointer[struct_isa_entrypoint]
+  entrypoints: c.POINTER[struct_isa_entrypoint]
 @c.record
 class struct_isa_decode_value(c.Struct):
   SIZE = 16
-  str: ctypes._Pointer[ctypes.c_char]
+  str: c.POINTER[ctypes.c_char]
   num: int
-struct_isa_decode_value.register_fields([('str', ctypes.POINTER(ctypes.c_char), 0), ('num', uint64_t, 8)])
+struct_isa_decode_value.register_fields([('str', c.POINTER[ctypes.c_char], 0), ('num', uint64_t, 8)])
 @c.record
 class struct_isa_print_state(c.Struct):
   SIZE = 16
-  out: ctypes._Pointer[struct__IO_FILE]
+  out: c.POINTER[struct__IO_FILE]
   line_column: int
-struct_isa_print_state.register_fields([('out', ctypes.POINTER(FILE), 0), ('line_column', ctypes.c_uint32, 8)])
+struct_isa_print_state.register_fields([('out', c.POINTER[FILE], 0), ('line_column', ctypes.c_uint32, 8)])
 @c.record
 class struct_isa_entrypoint(c.Struct):
   SIZE = 16
-  name: ctypes._Pointer[ctypes.c_char]
+  name: c.POINTER[ctypes.c_char]
   offset: int
-struct_isa_entrypoint.register_fields([('name', ctypes.POINTER(ctypes.c_char), 0), ('offset', uint32_t, 8)])
-struct_isa_decode_options.register_fields([('gpu_id', uint32_t, 0), ('show_errors', ctypes.c_bool, 4), ('max_errors', ctypes.c_uint32, 8), ('branch_labels', ctypes.c_bool, 12), ('stop', ctypes.c_bool, 13), ('cbdata', ctypes.c_void_p, 16), ('field_cb', ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(struct_isa_decode_value)), 24), ('field_print_cb', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_isa_print_state), ctypes.POINTER(ctypes.c_char), uint64_t), 32), ('pre_instr_cb', ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_uint32, ctypes.c_void_p), 40), ('post_instr_cb', ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.c_uint32, ctypes.c_void_p), 48), ('no_match_cb', ctypes.CFUNCTYPE(None, ctypes.POINTER(FILE), ctypes.POINTER(ctypes.c_uint32), size_t), 56), ('entrypoint_count', ctypes.c_uint32, 64), ('entrypoints', ctypes.POINTER(struct_isa_entrypoint), 72)])
-@dll.bind(None, ctypes.c_void_p, ctypes.c_int32, ctypes.POINTER(FILE), ctypes.POINTER(struct_isa_decode_options))
-def ir3_isa_disasm(bin:int|None, sz:int, out:ctypes._Pointer[FILE], options:ctypes._Pointer[struct_isa_decode_options]) -> None: ...
-@dll.bind(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p, ctypes.POINTER(struct_isa_decode_options))
-def ir3_isa_decode(out:int|None, bin:int|None, options:ctypes._Pointer[struct_isa_decode_options]) -> bool: ...
+struct_isa_entrypoint.register_fields([('name', c.POINTER[ctypes.c_char], 0), ('offset', uint32_t, 8)])
+struct_isa_decode_options.register_fields([('gpu_id', uint32_t, 0), ('show_errors', ctypes.c_bool, 4), ('max_errors', ctypes.c_uint32, 8), ('branch_labels', ctypes.c_bool, 12), ('stop', ctypes.c_bool, 13), ('cbdata', ctypes.c_void_p, 16), ('field_cb', c.CFUNCTYPE[None, [ctypes.c_void_p, c.POINTER[ctypes.c_char], c.POINTER[struct_isa_decode_value]]], 24), ('field_print_cb', c.CFUNCTYPE[None, [c.POINTER[struct_isa_print_state], c.POINTER[ctypes.c_char], uint64_t]], 32), ('pre_instr_cb', c.CFUNCTYPE[None, [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_void_p]], 40), ('post_instr_cb', c.CFUNCTYPE[None, [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_void_p]], 48), ('no_match_cb', c.CFUNCTYPE[None, [c.POINTER[FILE], c.POINTER[ctypes.c_uint32], size_t]], 56), ('entrypoint_count', ctypes.c_uint32, 64), ('entrypoints', c.POINTER[struct_isa_entrypoint], 72)])
+@dll.bind(None, ctypes.c_void_p, ctypes.c_int32, c.POINTER[FILE], c.POINTER[struct_isa_decode_options])
+def ir3_isa_disasm(bin:ctypes.c_void_p, sz:int, out:c.POINTER[FILE], options:c.POINTER[struct_isa_decode_options]) -> None: ...
+@dll.bind(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p, c.POINTER[struct_isa_decode_options])
+def ir3_isa_decode(out:ctypes.c_void_p, bin:ctypes.c_void_p, options:c.POINTER[struct_isa_decode_options]) -> bool: ...
 class struct_decode_scope(c.Struct): pass
-@dll.bind(uint32_t, ctypes.POINTER(struct_decode_scope))
-def ir3_isa_get_gpu_id(scope:ctypes._Pointer[struct_decode_scope]) -> uint32_t: ...
+@dll.bind(uint32_t, c.POINTER[struct_decode_scope])
+def ir3_isa_get_gpu_id(scope:c.POINTER[struct_decode_scope]) -> uint32_t: ...
 try: glsl_type_builtin_error = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_error') # type: ignore
 except (ValueError,AttributeError): pass
 try: glsl_type_builtin_void = struct_glsl_type.in_dll(dll, 'glsl_type_builtin_void') # type: ignore

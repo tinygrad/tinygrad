@@ -16,12 +16,12 @@ class SMU_Firmware_Header(c.Struct):
   SIZE = 256
   ImageVersion: int
   ImageVersion2: int
-  Padding0: ctypes.Array[ctypes.c_uint32]
+  Padding0: c.Array[ctypes.c_uint32, Literal[3]]
   SizeFWSigned: int
-  Padding1: ctypes.Array[ctypes.c_uint32]
+  Padding1: c.Array[ctypes.c_uint32, Literal[25]]
   FirmwareType: int
-  Filler: ctypes.Array[ctypes.c_uint32]
-SMU_Firmware_Header.register_fields([('ImageVersion', uint32_t, 0), ('ImageVersion2', uint32_t, 4), ('Padding0', (uint32_t * 3), 8), ('SizeFWSigned', uint32_t, 20), ('Padding1', (uint32_t * 25), 24), ('FirmwareType', uint32_t, 124), ('Filler', (uint32_t * 32), 128)])
+  Filler: c.Array[ctypes.c_uint32, Literal[32]]
+SMU_Firmware_Header.register_fields([('ImageVersion', uint32_t, 0), ('ImageVersion2', uint32_t, 4), ('Padding0', c.Array[uint32_t, Literal[3]], 8), ('SizeFWSigned', uint32_t, 20), ('Padding1', c.Array[uint32_t, Literal[25]], 24), ('FirmwareType', uint32_t, 124), ('Filler', c.Array[uint32_t, Literal[32]], 128)])
 @c.record
 class FwStatus_t(c.Struct):
   SIZE = 24
@@ -122,15 +122,15 @@ class SwI2cRequest_t(c.Struct):
   I2CSpeed: int
   SlaveAddress: int
   NumCmds: int
-  SwI2cCmds: ctypes.Array[SwI2cCmd_t]
-SwI2cRequest_t.register_fields([('I2CcontrollerPort', uint8_t, 0), ('I2CSpeed', uint8_t, 1), ('SlaveAddress', uint8_t, 2), ('NumCmds', uint8_t, 3), ('SwI2cCmds', (SwI2cCmd_t * 24), 4)])
+  SwI2cCmds: c.Array[SwI2cCmd_t, Literal[24]]
+SwI2cRequest_t.register_fields([('I2CcontrollerPort', uint8_t, 0), ('I2CSpeed', uint8_t, 1), ('SlaveAddress', uint8_t, 2), ('NumCmds', uint8_t, 3), ('SwI2cCmds', c.Array[SwI2cCmd_t, Literal[24]], 4)])
 @c.record
 class SwI2cRequestExternal_t(c.Struct):
   SIZE = 116
   SwI2cRequest: SwI2cRequest_t
-  Spare: ctypes.Array[ctypes.c_uint32]
-  MmHubPadding: ctypes.Array[ctypes.c_uint32]
-SwI2cRequestExternal_t.register_fields([('SwI2cRequest', SwI2cRequest_t, 0), ('Spare', (uint32_t * 8), 52), ('MmHubPadding', (uint32_t * 8), 84)])
+  Spare: c.Array[ctypes.c_uint32, Literal[8]]
+  MmHubPadding: c.Array[ctypes.c_uint32, Literal[8]]
+SwI2cRequestExternal_t.register_fields([('SwI2cRequest', SwI2cRequest_t, 0), ('Spare', c.Array[uint32_t, Literal[8]], 52), ('MmHubPadding', c.Array[uint32_t, Literal[8]], 84)])
 @c.record
 class EccInfo_t(c.Struct):
   SIZE = 24
@@ -145,8 +145,8 @@ EccInfo_t.register_fields([('mca_umc_status', uint64_t, 0), ('mca_umc_addr', uin
 @c.record
 class EccInfoTable_t(c.Struct):
   SIZE = 576
-  EccInfo: ctypes.Array[EccInfo_t]
-EccInfoTable_t.register_fields([('EccInfo', (EccInfo_t * 24), 0)])
+  EccInfo: c.Array[EccInfo_t, Literal[24]]
+EccInfoTable_t.register_fields([('EccInfo', c.Array[EccInfo_t, Literal[24]], 0)])
 EPCS_STATUS_e: dict[int, str] = {(EPCS_SHORTED_LIMIT:=0): 'EPCS_SHORTED_LIMIT', (EPCS_LOW_POWER_LIMIT:=1): 'EPCS_LOW_POWER_LIMIT', (EPCS_NORMAL_POWER_LIMIT:=2): 'EPCS_NORMAL_POWER_LIMIT', (EPCS_HIGH_POWER_LIMIT:=3): 'EPCS_HIGH_POWER_LIMIT', (EPCS_NOT_CONFIGURED:=4): 'EPCS_NOT_CONFIGURED', (EPCS_STATUS_COUNT:=5): 'EPCS_STATUS_COUNT'}
 D3HOTSequence_e: dict[int, str] = {(BACO_SEQUENCE:=0): 'BACO_SEQUENCE', (MSR_SEQUENCE:=1): 'MSR_SEQUENCE', (BAMACO_SEQUENCE:=2): 'BAMACO_SEQUENCE', (ULPS_SEQUENCE:=3): 'ULPS_SEQUENCE', (D3HOT_SEQUENCE_COUNT:=4): 'D3HOT_SEQUENCE_COUNT'}
 PowerGatingMode_e: dict[int, str] = {(PG_DYNAMIC_MODE:=0): 'PG_DYNAMIC_MODE', (PG_STATIC_MODE:=1): 'PG_STATIC_MODE'}
@@ -188,12 +188,12 @@ class DpmDescriptor_t(c.Struct):
   NumDiscreteLevels: int
   CalculateFopt: int
   ConversionToAvfsClk: LinearInt_t
-  Padding3: ctypes.Array[ctypes.c_uint32]
+  Padding3: c.Array[ctypes.c_uint32, Literal[3]]
   Padding4: int
   FoptimalDc: int
   FoptimalAc: int
   Padding2: int
-DpmDescriptor_t.register_fields([('Padding', uint8_t, 0), ('SnapToDiscrete', uint8_t, 1), ('NumDiscreteLevels', uint8_t, 2), ('CalculateFopt', uint8_t, 3), ('ConversionToAvfsClk', LinearInt_t, 4), ('Padding3', (uint32_t * 3), 12), ('Padding4', uint16_t, 24), ('FoptimalDc', uint16_t, 26), ('FoptimalAc', uint16_t, 28), ('Padding2', uint16_t, 30)])
+DpmDescriptor_t.register_fields([('Padding', uint8_t, 0), ('SnapToDiscrete', uint8_t, 1), ('NumDiscreteLevels', uint8_t, 2), ('CalculateFopt', uint8_t, 3), ('ConversionToAvfsClk', LinearInt_t, 4), ('Padding3', c.Array[uint32_t, Literal[3]], 12), ('Padding4', uint16_t, 24), ('FoptimalDc', uint16_t, 26), ('FoptimalAc', uint16_t, 28), ('Padding2', uint16_t, 30)])
 PPT_THROTTLER_e: dict[int, str] = {(PPT_THROTTLER_PPT0:=0): 'PPT_THROTTLER_PPT0', (PPT_THROTTLER_PPT1:=1): 'PPT_THROTTLER_PPT1', (PPT_THROTTLER_PPT2:=2): 'PPT_THROTTLER_PPT2', (PPT_THROTTLER_PPT3:=3): 'PPT_THROTTLER_PPT3', (PPT_THROTTLER_COUNT:=4): 'PPT_THROTTLER_COUNT'}
 TEMP_e: dict[int, str] = {(TEMP_EDGE:=0): 'TEMP_EDGE', (TEMP_HOTSPOT:=1): 'TEMP_HOTSPOT', (TEMP_HOTSPOT_GFX:=2): 'TEMP_HOTSPOT_GFX', (TEMP_HOTSPOT_SOC:=3): 'TEMP_HOTSPOT_SOC', (TEMP_MEM:=4): 'TEMP_MEM', (TEMP_VR_GFX:=5): 'TEMP_VR_GFX', (TEMP_VR_SOC:=6): 'TEMP_VR_SOC', (TEMP_VR_MEM0:=7): 'TEMP_VR_MEM0', (TEMP_VR_MEM1:=8): 'TEMP_VR_MEM1', (TEMP_LIQUID0:=9): 'TEMP_LIQUID0', (TEMP_LIQUID1:=10): 'TEMP_LIQUID1', (TEMP_PLX:=11): 'TEMP_PLX', (TEMP_COUNT:=12): 'TEMP_COUNT'}
 TDC_THROTTLER_e: dict[int, str] = {(TDC_THROTTLER_GFX:=0): 'TDC_THROTTLER_GFX', (TDC_THROTTLER_SOC:=1): 'TDC_THROTTLER_SOC', (TDC_THROTTLER_COUNT:=2): 'TDC_THROTTLER_COUNT'}
@@ -220,7 +220,7 @@ OD_FAIL_e: dict[int, str] = {(OD_NO_ERROR:=0): 'OD_NO_ERROR', (OD_REQUEST_ADVANC
 class OverDriveTable_t(c.Struct):
   SIZE = 156
   FeatureCtrlMask: int
-  VoltageOffsetPerZoneBoundary: ctypes.Array[ctypes.c_int16]
+  VoltageOffsetPerZoneBoundary: c.Array[ctypes.c_int16, Literal[6]]
   VddGfxVmax: int
   VddSocVmax: int
   IdlePwrSavingFeaturesCtrl: int
@@ -234,8 +234,8 @@ class OverDriveTable_t(c.Struct):
   FclkFmax: int
   Ppt: int
   Tdc: int
-  FanLinearPwmPoints: ctypes.Array[ctypes.c_ubyte]
-  FanLinearTempPoints: ctypes.Array[ctypes.c_ubyte]
+  FanLinearPwmPoints: c.Array[ctypes.c_ubyte, Literal[6]]
+  FanLinearTempPoints: c.Array[ctypes.c_ubyte, Literal[6]]
   FanMinimumPwm: int
   AcousticTargetRpmThreshold: int
   AcousticLimitRpmThreshold: int
@@ -245,7 +245,7 @@ class OverDriveTable_t(c.Struct):
   FanMode: int
   MaxOpTemp: int
   AdvancedOdModeEnabled: int
-  Padding2: ctypes.Array[ctypes.c_ubyte]
+  Padding2: c.Array[ctypes.c_ubyte, Literal[3]]
   GfxVoltageFullCtrlMode: int
   SocVoltageFullCtrlMode: int
   GfxclkFullCtrlMode: int
@@ -256,11 +256,11 @@ class OverDriveTable_t(c.Struct):
   GfxPccLimitControl: int
   GfxclkFmaxVmax: int
   GfxclkFmaxVmaxTemperature: int
-  Padding4: ctypes.Array[ctypes.c_ubyte]
-  Spare: ctypes.Array[ctypes.c_uint32]
-  MmHubPadding: ctypes.Array[ctypes.c_uint32]
+  Padding4: c.Array[ctypes.c_ubyte, Literal[1]]
+  Spare: c.Array[ctypes.c_uint32, Literal[9]]
+  MmHubPadding: c.Array[ctypes.c_uint32, Literal[8]]
 int16_t: TypeAlias = ctypes.c_int16
-OverDriveTable_t.register_fields([('FeatureCtrlMask', uint32_t, 0), ('VoltageOffsetPerZoneBoundary', (int16_t * 6), 4), ('VddGfxVmax', uint16_t, 16), ('VddSocVmax', uint16_t, 18), ('IdlePwrSavingFeaturesCtrl', uint8_t, 20), ('RuntimePwrSavingFeaturesCtrl', uint8_t, 21), ('Padding', uint16_t, 22), ('GfxclkFoffset', int16_t, 24), ('Padding1', uint16_t, 26), ('UclkFmin', uint16_t, 28), ('UclkFmax', uint16_t, 30), ('FclkFmin', uint16_t, 32), ('FclkFmax', uint16_t, 34), ('Ppt', int16_t, 36), ('Tdc', int16_t, 38), ('FanLinearPwmPoints', (uint8_t * 6), 40), ('FanLinearTempPoints', (uint8_t * 6), 46), ('FanMinimumPwm', uint16_t, 52), ('AcousticTargetRpmThreshold', uint16_t, 54), ('AcousticLimitRpmThreshold', uint16_t, 56), ('FanTargetTemperature', uint16_t, 58), ('FanZeroRpmEnable', uint8_t, 60), ('FanZeroRpmStopTemp', uint8_t, 61), ('FanMode', uint8_t, 62), ('MaxOpTemp', uint8_t, 63), ('AdvancedOdModeEnabled', uint8_t, 64), ('Padding2', (uint8_t * 3), 65), ('GfxVoltageFullCtrlMode', uint16_t, 68), ('SocVoltageFullCtrlMode', uint16_t, 70), ('GfxclkFullCtrlMode', uint16_t, 72), ('UclkFullCtrlMode', uint16_t, 74), ('FclkFullCtrlMode', uint16_t, 76), ('Padding3', uint16_t, 78), ('GfxEdc', int16_t, 80), ('GfxPccLimitControl', int16_t, 82), ('GfxclkFmaxVmax', uint16_t, 84), ('GfxclkFmaxVmaxTemperature', uint8_t, 86), ('Padding4', (uint8_t * 1), 87), ('Spare', (uint32_t * 9), 88), ('MmHubPadding', (uint32_t * 8), 124)])
+OverDriveTable_t.register_fields([('FeatureCtrlMask', uint32_t, 0), ('VoltageOffsetPerZoneBoundary', c.Array[int16_t, Literal[6]], 4), ('VddGfxVmax', uint16_t, 16), ('VddSocVmax', uint16_t, 18), ('IdlePwrSavingFeaturesCtrl', uint8_t, 20), ('RuntimePwrSavingFeaturesCtrl', uint8_t, 21), ('Padding', uint16_t, 22), ('GfxclkFoffset', int16_t, 24), ('Padding1', uint16_t, 26), ('UclkFmin', uint16_t, 28), ('UclkFmax', uint16_t, 30), ('FclkFmin', uint16_t, 32), ('FclkFmax', uint16_t, 34), ('Ppt', int16_t, 36), ('Tdc', int16_t, 38), ('FanLinearPwmPoints', c.Array[uint8_t, Literal[6]], 40), ('FanLinearTempPoints', c.Array[uint8_t, Literal[6]], 46), ('FanMinimumPwm', uint16_t, 52), ('AcousticTargetRpmThreshold', uint16_t, 54), ('AcousticLimitRpmThreshold', uint16_t, 56), ('FanTargetTemperature', uint16_t, 58), ('FanZeroRpmEnable', uint8_t, 60), ('FanZeroRpmStopTemp', uint8_t, 61), ('FanMode', uint8_t, 62), ('MaxOpTemp', uint8_t, 63), ('AdvancedOdModeEnabled', uint8_t, 64), ('Padding2', c.Array[uint8_t, Literal[3]], 65), ('GfxVoltageFullCtrlMode', uint16_t, 68), ('SocVoltageFullCtrlMode', uint16_t, 70), ('GfxclkFullCtrlMode', uint16_t, 72), ('UclkFullCtrlMode', uint16_t, 74), ('FclkFullCtrlMode', uint16_t, 76), ('Padding3', uint16_t, 78), ('GfxEdc', int16_t, 80), ('GfxPccLimitControl', int16_t, 82), ('GfxclkFmaxVmax', uint16_t, 84), ('GfxclkFmaxVmaxTemperature', uint8_t, 86), ('Padding4', c.Array[uint8_t, Literal[1]], 87), ('Spare', c.Array[uint32_t, Literal[9]], 88), ('MmHubPadding', c.Array[uint32_t, Literal[8]], 124)])
 @c.record
 class OverDriveTableExternal_t(c.Struct):
   SIZE = 156
@@ -270,7 +270,7 @@ OverDriveTableExternal_t.register_fields([('OverDriveTable', OverDriveTable_t, 0
 class OverDriveLimits_t(c.Struct):
   SIZE = 96
   FeatureCtrlMask: int
-  VoltageOffsetPerZoneBoundary: ctypes.Array[ctypes.c_int16]
+  VoltageOffsetPerZoneBoundary: c.Array[ctypes.c_int16, Literal[6]]
   VddGfxVmax: int
   VddSocVmax: int
   GfxclkFoffset: int
@@ -281,15 +281,15 @@ class OverDriveLimits_t(c.Struct):
   FclkFmax: int
   Ppt: int
   Tdc: int
-  FanLinearPwmPoints: ctypes.Array[ctypes.c_ubyte]
-  FanLinearTempPoints: ctypes.Array[ctypes.c_ubyte]
+  FanLinearPwmPoints: c.Array[ctypes.c_ubyte, Literal[6]]
+  FanLinearTempPoints: c.Array[ctypes.c_ubyte, Literal[6]]
   FanMinimumPwm: int
   AcousticTargetRpmThreshold: int
   AcousticLimitRpmThreshold: int
   FanTargetTemperature: int
   FanZeroRpmEnable: int
   MaxOpTemp: int
-  Padding1: ctypes.Array[ctypes.c_ubyte]
+  Padding1: c.Array[ctypes.c_ubyte, Literal[2]]
   GfxVoltageFullCtrlMode: int
   SocVoltageFullCtrlMode: int
   GfxclkFullCtrlMode: int
@@ -298,8 +298,8 @@ class OverDriveLimits_t(c.Struct):
   GfxEdc: int
   GfxPccLimitControl: int
   Padding2: int
-  Spare: ctypes.Array[ctypes.c_uint32]
-OverDriveLimits_t.register_fields([('FeatureCtrlMask', uint32_t, 0), ('VoltageOffsetPerZoneBoundary', (int16_t * 6), 4), ('VddGfxVmax', uint16_t, 16), ('VddSocVmax', uint16_t, 18), ('GfxclkFoffset', int16_t, 20), ('Padding', uint16_t, 22), ('UclkFmin', uint16_t, 24), ('UclkFmax', uint16_t, 26), ('FclkFmin', uint16_t, 28), ('FclkFmax', uint16_t, 30), ('Ppt', int16_t, 32), ('Tdc', int16_t, 34), ('FanLinearPwmPoints', (uint8_t * 6), 36), ('FanLinearTempPoints', (uint8_t * 6), 42), ('FanMinimumPwm', uint16_t, 48), ('AcousticTargetRpmThreshold', uint16_t, 50), ('AcousticLimitRpmThreshold', uint16_t, 52), ('FanTargetTemperature', uint16_t, 54), ('FanZeroRpmEnable', uint8_t, 56), ('MaxOpTemp', uint8_t, 57), ('Padding1', (uint8_t * 2), 58), ('GfxVoltageFullCtrlMode', uint16_t, 60), ('SocVoltageFullCtrlMode', uint16_t, 62), ('GfxclkFullCtrlMode', uint16_t, 64), ('UclkFullCtrlMode', uint16_t, 66), ('FclkFullCtrlMode', uint16_t, 68), ('GfxEdc', int16_t, 70), ('GfxPccLimitControl', int16_t, 72), ('Padding2', int16_t, 74), ('Spare', (uint32_t * 5), 76)])
+  Spare: c.Array[ctypes.c_uint32, Literal[5]]
+OverDriveLimits_t.register_fields([('FeatureCtrlMask', uint32_t, 0), ('VoltageOffsetPerZoneBoundary', c.Array[int16_t, Literal[6]], 4), ('VddGfxVmax', uint16_t, 16), ('VddSocVmax', uint16_t, 18), ('GfxclkFoffset', int16_t, 20), ('Padding', uint16_t, 22), ('UclkFmin', uint16_t, 24), ('UclkFmax', uint16_t, 26), ('FclkFmin', uint16_t, 28), ('FclkFmax', uint16_t, 30), ('Ppt', int16_t, 32), ('Tdc', int16_t, 34), ('FanLinearPwmPoints', c.Array[uint8_t, Literal[6]], 36), ('FanLinearTempPoints', c.Array[uint8_t, Literal[6]], 42), ('FanMinimumPwm', uint16_t, 48), ('AcousticTargetRpmThreshold', uint16_t, 50), ('AcousticLimitRpmThreshold', uint16_t, 52), ('FanTargetTemperature', uint16_t, 54), ('FanZeroRpmEnable', uint8_t, 56), ('MaxOpTemp', uint8_t, 57), ('Padding1', c.Array[uint8_t, Literal[2]], 58), ('GfxVoltageFullCtrlMode', uint16_t, 60), ('SocVoltageFullCtrlMode', uint16_t, 62), ('GfxclkFullCtrlMode', uint16_t, 64), ('UclkFullCtrlMode', uint16_t, 66), ('FclkFullCtrlMode', uint16_t, 68), ('GfxEdc', int16_t, 70), ('GfxPccLimitControl', int16_t, 72), ('Padding2', int16_t, 74), ('Spare', c.Array[uint32_t, Literal[5]], 76)])
 BOARD_GPIO_TYPE_e: dict[int, str] = {(BOARD_GPIO_SMUIO_0:=0): 'BOARD_GPIO_SMUIO_0', (BOARD_GPIO_SMUIO_1:=1): 'BOARD_GPIO_SMUIO_1', (BOARD_GPIO_SMUIO_2:=2): 'BOARD_GPIO_SMUIO_2', (BOARD_GPIO_SMUIO_3:=3): 'BOARD_GPIO_SMUIO_3', (BOARD_GPIO_SMUIO_4:=4): 'BOARD_GPIO_SMUIO_4', (BOARD_GPIO_SMUIO_5:=5): 'BOARD_GPIO_SMUIO_5', (BOARD_GPIO_SMUIO_6:=6): 'BOARD_GPIO_SMUIO_6', (BOARD_GPIO_SMUIO_7:=7): 'BOARD_GPIO_SMUIO_7', (BOARD_GPIO_SMUIO_8:=8): 'BOARD_GPIO_SMUIO_8', (BOARD_GPIO_SMUIO_9:=9): 'BOARD_GPIO_SMUIO_9', (BOARD_GPIO_SMUIO_10:=10): 'BOARD_GPIO_SMUIO_10', (BOARD_GPIO_SMUIO_11:=11): 'BOARD_GPIO_SMUIO_11', (BOARD_GPIO_SMUIO_12:=12): 'BOARD_GPIO_SMUIO_12', (BOARD_GPIO_SMUIO_13:=13): 'BOARD_GPIO_SMUIO_13', (BOARD_GPIO_SMUIO_14:=14): 'BOARD_GPIO_SMUIO_14', (BOARD_GPIO_SMUIO_15:=15): 'BOARD_GPIO_SMUIO_15', (BOARD_GPIO_SMUIO_16:=16): 'BOARD_GPIO_SMUIO_16', (BOARD_GPIO_SMUIO_17:=17): 'BOARD_GPIO_SMUIO_17', (BOARD_GPIO_SMUIO_18:=18): 'BOARD_GPIO_SMUIO_18', (BOARD_GPIO_SMUIO_19:=19): 'BOARD_GPIO_SMUIO_19', (BOARD_GPIO_SMUIO_20:=20): 'BOARD_GPIO_SMUIO_20', (BOARD_GPIO_SMUIO_21:=21): 'BOARD_GPIO_SMUIO_21', (BOARD_GPIO_SMUIO_22:=22): 'BOARD_GPIO_SMUIO_22', (BOARD_GPIO_SMUIO_23:=23): 'BOARD_GPIO_SMUIO_23', (BOARD_GPIO_SMUIO_24:=24): 'BOARD_GPIO_SMUIO_24', (BOARD_GPIO_SMUIO_25:=25): 'BOARD_GPIO_SMUIO_25', (BOARD_GPIO_SMUIO_26:=26): 'BOARD_GPIO_SMUIO_26', (BOARD_GPIO_SMUIO_27:=27): 'BOARD_GPIO_SMUIO_27', (BOARD_GPIO_SMUIO_28:=28): 'BOARD_GPIO_SMUIO_28', (BOARD_GPIO_SMUIO_29:=29): 'BOARD_GPIO_SMUIO_29', (BOARD_GPIO_SMUIO_30:=30): 'BOARD_GPIO_SMUIO_30', (BOARD_GPIO_SMUIO_31:=31): 'BOARD_GPIO_SMUIO_31', (MAX_BOARD_GPIO_SMUIO_NUM:=32): 'MAX_BOARD_GPIO_SMUIO_NUM', (BOARD_GPIO_DC_GEN_A:=33): 'BOARD_GPIO_DC_GEN_A', (BOARD_GPIO_DC_GEN_B:=34): 'BOARD_GPIO_DC_GEN_B', (BOARD_GPIO_DC_GEN_C:=35): 'BOARD_GPIO_DC_GEN_C', (BOARD_GPIO_DC_GEN_D:=36): 'BOARD_GPIO_DC_GEN_D', (BOARD_GPIO_DC_GEN_E:=37): 'BOARD_GPIO_DC_GEN_E', (BOARD_GPIO_DC_GEN_F:=38): 'BOARD_GPIO_DC_GEN_F', (BOARD_GPIO_DC_GEN_G:=39): 'BOARD_GPIO_DC_GEN_G', (BOARD_GPIO_DC_GENLK_CLK:=40): 'BOARD_GPIO_DC_GENLK_CLK', (BOARD_GPIO_DC_GENLK_VSYNC:=41): 'BOARD_GPIO_DC_GENLK_VSYNC', (BOARD_GPIO_DC_SWAPLOCK_A:=42): 'BOARD_GPIO_DC_SWAPLOCK_A', (BOARD_GPIO_DC_SWAPLOCK_B:=43): 'BOARD_GPIO_DC_SWAPLOCK_B', (MAX_BOARD_DC_GPIO_NUM:=44): 'MAX_BOARD_DC_GPIO_NUM', (BOARD_GPIO_LV_EN:=45): 'BOARD_GPIO_LV_EN'}
 @c.record
 class BootValues_t(c.Struct):
@@ -327,7 +327,7 @@ class BootValues_t(c.Struct):
   InitFclk: int
   Padding1: int
   InitUclkLevel: int
-  Padding: ctypes.Array[ctypes.c_ubyte]
+  Padding: c.Array[ctypes.c_ubyte, Literal[3]]
   InitVcoFreqPll0: int
   InitVcoFreqPll1: int
   InitVcoFreqPll2: int
@@ -341,18 +341,18 @@ class BootValues_t(c.Struct):
   InitSoc: int
   InitVddIoMem: int
   InitVddCiMem: int
-  Spare: ctypes.Array[ctypes.c_uint32]
-BootValues_t.register_fields([('InitImuClk', uint16_t, 0), ('InitSocclk', uint16_t, 2), ('InitMpioclk', uint16_t, 4), ('InitSmnclk', uint16_t, 6), ('InitDispClk', uint16_t, 8), ('InitDppClk', uint16_t, 10), ('InitDprefclk', uint16_t, 12), ('InitDcfclk', uint16_t, 14), ('InitDtbclk', uint16_t, 16), ('InitDbguSocClk', uint16_t, 18), ('InitGfxclk_bypass', uint16_t, 20), ('InitMp1clk', uint16_t, 22), ('InitLclk', uint16_t, 24), ('InitDbguBacoClk', uint16_t, 26), ('InitBaco400clk', uint16_t, 28), ('InitBaco1200clk_bypass', uint16_t, 30), ('InitBaco700clk_bypass', uint16_t, 32), ('InitBaco500clk', uint16_t, 34), ('InitDclk0', uint16_t, 36), ('InitVclk0', uint16_t, 38), ('InitFclk', uint16_t, 40), ('Padding1', uint16_t, 42), ('InitUclkLevel', uint8_t, 44), ('Padding', (uint8_t * 3), 45), ('InitVcoFreqPll0', uint32_t, 48), ('InitVcoFreqPll1', uint32_t, 52), ('InitVcoFreqPll2', uint32_t, 56), ('InitVcoFreqPll3', uint32_t, 60), ('InitVcoFreqPll4', uint32_t, 64), ('InitVcoFreqPll5', uint32_t, 68), ('InitVcoFreqPll6', uint32_t, 72), ('InitVcoFreqPll7', uint32_t, 76), ('InitVcoFreqPll8', uint32_t, 80), ('InitGfx', uint16_t, 84), ('InitSoc', uint16_t, 86), ('InitVddIoMem', uint16_t, 88), ('InitVddCiMem', uint16_t, 90), ('Spare', (uint32_t * 8), 92)])
+  Spare: c.Array[ctypes.c_uint32, Literal[8]]
+BootValues_t.register_fields([('InitImuClk', uint16_t, 0), ('InitSocclk', uint16_t, 2), ('InitMpioclk', uint16_t, 4), ('InitSmnclk', uint16_t, 6), ('InitDispClk', uint16_t, 8), ('InitDppClk', uint16_t, 10), ('InitDprefclk', uint16_t, 12), ('InitDcfclk', uint16_t, 14), ('InitDtbclk', uint16_t, 16), ('InitDbguSocClk', uint16_t, 18), ('InitGfxclk_bypass', uint16_t, 20), ('InitMp1clk', uint16_t, 22), ('InitLclk', uint16_t, 24), ('InitDbguBacoClk', uint16_t, 26), ('InitBaco400clk', uint16_t, 28), ('InitBaco1200clk_bypass', uint16_t, 30), ('InitBaco700clk_bypass', uint16_t, 32), ('InitBaco500clk', uint16_t, 34), ('InitDclk0', uint16_t, 36), ('InitVclk0', uint16_t, 38), ('InitFclk', uint16_t, 40), ('Padding1', uint16_t, 42), ('InitUclkLevel', uint8_t, 44), ('Padding', c.Array[uint8_t, Literal[3]], 45), ('InitVcoFreqPll0', uint32_t, 48), ('InitVcoFreqPll1', uint32_t, 52), ('InitVcoFreqPll2', uint32_t, 56), ('InitVcoFreqPll3', uint32_t, 60), ('InitVcoFreqPll4', uint32_t, 64), ('InitVcoFreqPll5', uint32_t, 68), ('InitVcoFreqPll6', uint32_t, 72), ('InitVcoFreqPll7', uint32_t, 76), ('InitVcoFreqPll8', uint32_t, 80), ('InitGfx', uint16_t, 84), ('InitSoc', uint16_t, 86), ('InitVddIoMem', uint16_t, 88), ('InitVddCiMem', uint16_t, 90), ('Spare', c.Array[uint32_t, Literal[8]], 92)])
 @c.record
 class MsgLimits_t(c.Struct):
   SIZE = 116
-  Power: ctypes.Array[(ctypes.c_uint16 * 2)]
-  Tdc: ctypes.Array[ctypes.c_uint16]
-  Temperature: ctypes.Array[ctypes.c_uint16]
+  Power: c.Array[c.Array[ctypes.c_uint16, Literal[2]], Literal[4]]
+  Tdc: c.Array[ctypes.c_uint16, Literal[2]]
+  Temperature: c.Array[ctypes.c_uint16, Literal[12]]
   PwmLimitMin: int
   PwmLimitMax: int
   FanTargetTemperature: int
-  Spare1: ctypes.Array[ctypes.c_ubyte]
+  Spare1: c.Array[ctypes.c_ubyte, Literal[1]]
   AcousticTargetRpmThresholdMin: int
   AcousticTargetRpmThresholdMax: int
   AcousticLimitRpmThresholdMin: int
@@ -363,9 +363,9 @@ class MsgLimits_t(c.Struct):
   FanStopTempMax: int
   FanStartTempMin: int
   FanStartTempMax: int
-  PowerMinPpt0: ctypes.Array[ctypes.c_uint16]
-  Spare: ctypes.Array[ctypes.c_uint32]
-MsgLimits_t.register_fields([('Power', ((uint16_t * 2) * 4), 0), ('Tdc', (uint16_t * 2), 16), ('Temperature', (uint16_t * 12), 20), ('PwmLimitMin', uint8_t, 44), ('PwmLimitMax', uint8_t, 45), ('FanTargetTemperature', uint8_t, 46), ('Spare1', (uint8_t * 1), 47), ('AcousticTargetRpmThresholdMin', uint16_t, 48), ('AcousticTargetRpmThresholdMax', uint16_t, 50), ('AcousticLimitRpmThresholdMin', uint16_t, 52), ('AcousticLimitRpmThresholdMax', uint16_t, 54), ('PccLimitMin', uint16_t, 56), ('PccLimitMax', uint16_t, 58), ('FanStopTempMin', uint16_t, 60), ('FanStopTempMax', uint16_t, 62), ('FanStartTempMin', uint16_t, 64), ('FanStartTempMax', uint16_t, 66), ('PowerMinPpt0', (uint16_t * 2), 68), ('Spare', (uint32_t * 11), 72)])
+  PowerMinPpt0: c.Array[ctypes.c_uint16, Literal[2]]
+  Spare: c.Array[ctypes.c_uint32, Literal[11]]
+MsgLimits_t.register_fields([('Power', c.Array[c.Array[uint16_t, Literal[2]], Literal[4]], 0), ('Tdc', c.Array[uint16_t, Literal[2]], 16), ('Temperature', c.Array[uint16_t, Literal[12]], 20), ('PwmLimitMin', uint8_t, 44), ('PwmLimitMax', uint8_t, 45), ('FanTargetTemperature', uint8_t, 46), ('Spare1', c.Array[uint8_t, Literal[1]], 47), ('AcousticTargetRpmThresholdMin', uint16_t, 48), ('AcousticTargetRpmThresholdMax', uint16_t, 50), ('AcousticLimitRpmThresholdMin', uint16_t, 52), ('AcousticLimitRpmThresholdMax', uint16_t, 54), ('PccLimitMin', uint16_t, 56), ('PccLimitMax', uint16_t, 58), ('FanStopTempMin', uint16_t, 60), ('FanStopTempMax', uint16_t, 62), ('FanStartTempMin', uint16_t, 64), ('FanStartTempMax', uint16_t, 66), ('PowerMinPpt0', c.Array[uint16_t, Literal[2]], 68), ('Spare', c.Array[uint32_t, Literal[11]], 72)])
 @c.record
 class DriverReportedClocks_t(c.Struct):
   SIZE = 28
@@ -377,39 +377,39 @@ class DriverReportedClocks_t(c.Struct):
   BoostClockDc: int
   MaxReportedClock: int
   Padding: int
-  Reserved: ctypes.Array[ctypes.c_uint32]
-DriverReportedClocks_t.register_fields([('BaseClockAc', uint16_t, 0), ('GameClockAc', uint16_t, 2), ('BoostClockAc', uint16_t, 4), ('BaseClockDc', uint16_t, 6), ('GameClockDc', uint16_t, 8), ('BoostClockDc', uint16_t, 10), ('MaxReportedClock', uint16_t, 12), ('Padding', uint16_t, 14), ('Reserved', (uint32_t * 3), 16)])
+  Reserved: c.Array[ctypes.c_uint32, Literal[3]]
+DriverReportedClocks_t.register_fields([('BaseClockAc', uint16_t, 0), ('GameClockAc', uint16_t, 2), ('BoostClockAc', uint16_t, 4), ('BaseClockDc', uint16_t, 6), ('GameClockDc', uint16_t, 8), ('BoostClockDc', uint16_t, 10), ('MaxReportedClock', uint16_t, 12), ('Padding', uint16_t, 14), ('Reserved', c.Array[uint32_t, Literal[3]], 16)])
 @c.record
 class AvfsDcBtcParams_t(c.Struct):
   SIZE = 20
   DcBtcEnabled: int
-  Padding: ctypes.Array[ctypes.c_ubyte]
+  Padding: c.Array[ctypes.c_ubyte, Literal[3]]
   DcTol: int
   DcBtcGb: int
   DcBtcMin: int
   DcBtcMax: int
   DcBtcGbScalar: LinearInt_t
-AvfsDcBtcParams_t.register_fields([('DcBtcEnabled', uint8_t, 0), ('Padding', (uint8_t * 3), 1), ('DcTol', uint16_t, 4), ('DcBtcGb', uint16_t, 6), ('DcBtcMin', uint16_t, 8), ('DcBtcMax', uint16_t, 10), ('DcBtcGbScalar', LinearInt_t, 12)])
+AvfsDcBtcParams_t.register_fields([('DcBtcEnabled', uint8_t, 0), ('Padding', c.Array[uint8_t, Literal[3]], 1), ('DcTol', uint16_t, 4), ('DcBtcGb', uint16_t, 6), ('DcBtcMin', uint16_t, 8), ('DcBtcMax', uint16_t, 10), ('DcBtcGbScalar', LinearInt_t, 12)])
 @c.record
 class AvfsFuseOverride_t(c.Struct):
   SIZE = 56
-  AvfsTemp: ctypes.Array[ctypes.c_uint16]
+  AvfsTemp: c.Array[ctypes.c_uint16, Literal[2]]
   VftFMin: int
   VInversion: int
-  qVft: ctypes.Array[QuadraticInt_t]
+  qVft: c.Array[QuadraticInt_t, Literal[2]]
   qAvfsGb: QuadraticInt_t
   qAvfsGb2: QuadraticInt_t
-AvfsFuseOverride_t.register_fields([('AvfsTemp', (uint16_t * 2), 0), ('VftFMin', uint16_t, 4), ('VInversion', uint16_t, 6), ('qVft', (QuadraticInt_t * 2), 8), ('qAvfsGb', QuadraticInt_t, 32), ('qAvfsGb2', QuadraticInt_t, 44)])
+AvfsFuseOverride_t.register_fields([('AvfsTemp', c.Array[uint16_t, Literal[2]], 0), ('VftFMin', uint16_t, 4), ('VInversion', uint16_t, 6), ('qVft', c.Array[QuadraticInt_t, Literal[2]], 8), ('qAvfsGb', QuadraticInt_t, 32), ('qAvfsGb2', QuadraticInt_t, 44)])
 @c.record
 class PFE_Settings_t(c.Struct):
   SIZE = 28
   Version: int
-  Spare8: ctypes.Array[ctypes.c_ubyte]
-  FeaturesToRun: ctypes.Array[ctypes.c_uint32]
+  Spare8: c.Array[ctypes.c_ubyte, Literal[3]]
+  FeaturesToRun: c.Array[ctypes.c_uint32, Literal[2]]
   FwDStateMask: int
   DebugOverrides: int
-  Spare: ctypes.Array[ctypes.c_uint32]
-PFE_Settings_t.register_fields([('Version', uint8_t, 0), ('Spare8', (uint8_t * 3), 1), ('FeaturesToRun', (uint32_t * 2), 4), ('FwDStateMask', uint32_t, 12), ('DebugOverrides', uint32_t, 16), ('Spare', (uint32_t * 2), 20)])
+  Spare: c.Array[ctypes.c_uint32, Literal[2]]
+PFE_Settings_t.register_fields([('Version', uint8_t, 0), ('Spare8', c.Array[uint8_t, Literal[3]], 1), ('FeaturesToRun', c.Array[uint32_t, Literal[2]], 4), ('FwDStateMask', uint32_t, 12), ('DebugOverrides', uint32_t, 16), ('Spare', c.Array[uint32_t, Literal[2]], 20)])
 @c.record
 class SkuTable_t(c.Struct):
   SIZE = 3552
@@ -418,11 +418,11 @@ class SkuTable_t(c.Struct):
   CustomerVariant: int
   MemoryTemperatureTypeMask: int
   SmartShiftVersion: int
-  SocketPowerLimitSpare: ctypes.Array[ctypes.c_ubyte]
+  SocketPowerLimitSpare: c.Array[ctypes.c_ubyte, Literal[10]]
   EnableLegacyPptLimit: int
   UseInputTelemetry: int
   SmartShiftMinReportedPptinDcs: int
-  PaddingPpt: ctypes.Array[ctypes.c_ubyte]
+  PaddingPpt: c.Array[ctypes.c_ubyte, Literal[7]]
   HwCtfTempLimit: int
   PaddingInfra: int
   FitControllerFailureRateLimit: int
@@ -431,47 +431,47 @@ class SkuTable_t(c.Struct):
   FitControllerSocOffset: int
   GfxApccPlusResidencyLimit: int
   ThrottlerControlMask: int
-  UlvVoltageOffset: ctypes.Array[ctypes.c_uint16]
-  Padding: ctypes.Array[ctypes.c_ubyte]
+  UlvVoltageOffset: c.Array[ctypes.c_uint16, Literal[2]]
+  Padding: c.Array[ctypes.c_ubyte, Literal[2]]
   DeepUlvVoltageOffsetSoc: int
-  DefaultMaxVoltage: ctypes.Array[ctypes.c_uint16]
-  BoostMaxVoltage: ctypes.Array[ctypes.c_uint16]
-  VminTempHystersis: ctypes.Array[ctypes.c_int16]
-  VminTempThreshold: ctypes.Array[ctypes.c_int16]
-  Vmin_Hot_T0: ctypes.Array[ctypes.c_uint16]
-  Vmin_Cold_T0: ctypes.Array[ctypes.c_uint16]
-  Vmin_Hot_Eol: ctypes.Array[ctypes.c_uint16]
-  Vmin_Cold_Eol: ctypes.Array[ctypes.c_uint16]
-  Vmin_Aging_Offset: ctypes.Array[ctypes.c_uint16]
-  Spare_Vmin_Plat_Offset_Hot: ctypes.Array[ctypes.c_uint16]
-  Spare_Vmin_Plat_Offset_Cold: ctypes.Array[ctypes.c_uint16]
-  VcBtcFixedVminAgingOffset: ctypes.Array[ctypes.c_uint16]
-  VcBtcVmin2PsmDegrationGb: ctypes.Array[ctypes.c_uint16]
-  VcBtcPsmA: ctypes.Array[ctypes.c_uint32]
-  VcBtcPsmB: ctypes.Array[ctypes.c_uint32]
-  VcBtcVminA: ctypes.Array[ctypes.c_uint32]
-  VcBtcVminB: ctypes.Array[ctypes.c_uint32]
-  PerPartVminEnabled: ctypes.Array[ctypes.c_ubyte]
-  VcBtcEnabled: ctypes.Array[ctypes.c_ubyte]
-  SocketPowerLimitAcTau: ctypes.Array[ctypes.c_uint16]
-  SocketPowerLimitDcTau: ctypes.Array[ctypes.c_uint16]
+  DefaultMaxVoltage: c.Array[ctypes.c_uint16, Literal[2]]
+  BoostMaxVoltage: c.Array[ctypes.c_uint16, Literal[2]]
+  VminTempHystersis: c.Array[ctypes.c_int16, Literal[2]]
+  VminTempThreshold: c.Array[ctypes.c_int16, Literal[2]]
+  Vmin_Hot_T0: c.Array[ctypes.c_uint16, Literal[2]]
+  Vmin_Cold_T0: c.Array[ctypes.c_uint16, Literal[2]]
+  Vmin_Hot_Eol: c.Array[ctypes.c_uint16, Literal[2]]
+  Vmin_Cold_Eol: c.Array[ctypes.c_uint16, Literal[2]]
+  Vmin_Aging_Offset: c.Array[ctypes.c_uint16, Literal[2]]
+  Spare_Vmin_Plat_Offset_Hot: c.Array[ctypes.c_uint16, Literal[2]]
+  Spare_Vmin_Plat_Offset_Cold: c.Array[ctypes.c_uint16, Literal[2]]
+  VcBtcFixedVminAgingOffset: c.Array[ctypes.c_uint16, Literal[2]]
+  VcBtcVmin2PsmDegrationGb: c.Array[ctypes.c_uint16, Literal[2]]
+  VcBtcPsmA: c.Array[ctypes.c_uint32, Literal[2]]
+  VcBtcPsmB: c.Array[ctypes.c_uint32, Literal[2]]
+  VcBtcVminA: c.Array[ctypes.c_uint32, Literal[2]]
+  VcBtcVminB: c.Array[ctypes.c_uint32, Literal[2]]
+  PerPartVminEnabled: c.Array[ctypes.c_ubyte, Literal[2]]
+  VcBtcEnabled: c.Array[ctypes.c_ubyte, Literal[2]]
+  SocketPowerLimitAcTau: c.Array[ctypes.c_uint16, Literal[4]]
+  SocketPowerLimitDcTau: c.Array[ctypes.c_uint16, Literal[4]]
   Gfx_Vmin_droop: QuadraticInt_t
   Soc_Vmin_droop: QuadraticInt_t
-  SpareVmin: ctypes.Array[ctypes.c_uint32]
-  DpmDescriptor: ctypes.Array[DpmDescriptor_t]
-  FreqTableGfx: ctypes.Array[ctypes.c_uint16]
-  FreqTableVclk: ctypes.Array[ctypes.c_uint16]
-  FreqTableDclk: ctypes.Array[ctypes.c_uint16]
-  FreqTableSocclk: ctypes.Array[ctypes.c_uint16]
-  FreqTableUclk: ctypes.Array[ctypes.c_uint16]
-  FreqTableShadowUclk: ctypes.Array[ctypes.c_uint16]
-  FreqTableDispclk: ctypes.Array[ctypes.c_uint16]
-  FreqTableDppClk: ctypes.Array[ctypes.c_uint16]
-  FreqTableDprefclk: ctypes.Array[ctypes.c_uint16]
-  FreqTableDcfclk: ctypes.Array[ctypes.c_uint16]
-  FreqTableDtbclk: ctypes.Array[ctypes.c_uint16]
-  FreqTableFclk: ctypes.Array[ctypes.c_uint16]
-  DcModeMaxFreq: ctypes.Array[ctypes.c_uint32]
+  SpareVmin: c.Array[ctypes.c_uint32, Literal[6]]
+  DpmDescriptor: c.Array[DpmDescriptor_t, Literal[11]]
+  FreqTableGfx: c.Array[ctypes.c_uint16, Literal[16]]
+  FreqTableVclk: c.Array[ctypes.c_uint16, Literal[8]]
+  FreqTableDclk: c.Array[ctypes.c_uint16, Literal[8]]
+  FreqTableSocclk: c.Array[ctypes.c_uint16, Literal[8]]
+  FreqTableUclk: c.Array[ctypes.c_uint16, Literal[6]]
+  FreqTableShadowUclk: c.Array[ctypes.c_uint16, Literal[6]]
+  FreqTableDispclk: c.Array[ctypes.c_uint16, Literal[8]]
+  FreqTableDppClk: c.Array[ctypes.c_uint16, Literal[8]]
+  FreqTableDprefclk: c.Array[ctypes.c_uint16, Literal[8]]
+  FreqTableDcfclk: c.Array[ctypes.c_uint16, Literal[8]]
+  FreqTableDtbclk: c.Array[ctypes.c_uint16, Literal[8]]
+  FreqTableFclk: c.Array[ctypes.c_uint16, Literal[8]]
+  DcModeMaxFreq: c.Array[ctypes.c_uint32, Literal[11]]
   GfxclkAibFmax: int
   GfxDpmPadding: int
   GfxclkFgfxoffEntry: int
@@ -487,9 +487,9 @@ class SkuTable_t(c.Struct):
   GfxOffEntryForceCGCGDelayEn: int
   GfxOffEntryForceCGCGDelayVal: int
   GfxclkFreqGfxUlv: int
-  GfxIdlePadding2: ctypes.Array[ctypes.c_ubyte]
+  GfxIdlePadding2: c.Array[ctypes.c_ubyte, Literal[2]]
   GfxOffEntryHysteresis: int
-  GfxoffSpare: ctypes.Array[ctypes.c_uint32]
+  GfxoffSpare: c.Array[ctypes.c_uint32, Literal[15]]
   DfllMstrOscConfigA: int
   DfllSlvOscConfigA: int
   DfllBtcMasterScalerM: int
@@ -498,7 +498,7 @@ class SkuTable_t(c.Struct):
   DfllBtcSlaveScalerB: int
   DfllPccAsWaitCtrl: int
   DfllPccAsStepCtrl: int
-  GfxDfllSpare: ctypes.Array[ctypes.c_uint32]
+  GfxDfllSpare: c.Array[ctypes.c_uint32, Literal[9]]
   DvoPsmDownThresholdVoltage: int
   DvoPsmUpThresholdVoltage: int
   DvoFmaxLowScaler: int
@@ -511,66 +511,66 @@ class SkuTable_t(c.Struct):
   DcsPfGfxFopt: int
   DcsPfUclkFopt: int
   FoptEnabled: int
-  DcsSpare2: ctypes.Array[ctypes.c_ubyte]
+  DcsSpare2: c.Array[ctypes.c_ubyte, Literal[3]]
   DcsFoptM: int
   DcsFoptB: int
-  DcsSpare: ctypes.Array[ctypes.c_uint32]
+  DcsSpare: c.Array[ctypes.c_uint32, Literal[9]]
   UseStrobeModeOptimizations: int
-  PaddingMem: ctypes.Array[ctypes.c_ubyte]
-  UclkDpmPstates: ctypes.Array[ctypes.c_ubyte]
-  UclkDpmShadowPstates: ctypes.Array[ctypes.c_ubyte]
-  FreqTableUclkDiv: ctypes.Array[ctypes.c_ubyte]
-  FreqTableShadowUclkDiv: ctypes.Array[ctypes.c_ubyte]
-  MemVmempVoltage: ctypes.Array[ctypes.c_uint16]
-  MemVddioVoltage: ctypes.Array[ctypes.c_uint16]
+  PaddingMem: c.Array[ctypes.c_ubyte, Literal[3]]
+  UclkDpmPstates: c.Array[ctypes.c_ubyte, Literal[6]]
+  UclkDpmShadowPstates: c.Array[ctypes.c_ubyte, Literal[6]]
+  FreqTableUclkDiv: c.Array[ctypes.c_ubyte, Literal[6]]
+  FreqTableShadowUclkDiv: c.Array[ctypes.c_ubyte, Literal[6]]
+  MemVmempVoltage: c.Array[ctypes.c_uint16, Literal[6]]
+  MemVddioVoltage: c.Array[ctypes.c_uint16, Literal[6]]
   DalDcModeMaxUclkFreq: int
-  PaddingsMem: ctypes.Array[ctypes.c_ubyte]
+  PaddingsMem: c.Array[ctypes.c_ubyte, Literal[2]]
   PaddingFclk: int
-  PcieGenSpeed: ctypes.Array[ctypes.c_ubyte]
-  PcieLaneCount: ctypes.Array[ctypes.c_ubyte]
-  LclkFreq: ctypes.Array[ctypes.c_uint16]
+  PcieGenSpeed: c.Array[ctypes.c_ubyte, Literal[3]]
+  PcieLaneCount: c.Array[ctypes.c_ubyte, Literal[3]]
+  LclkFreq: c.Array[ctypes.c_uint16, Literal[3]]
   OverrideGfxAvfsFuses: int
-  GfxAvfsPadding: ctypes.Array[ctypes.c_ubyte]
+  GfxAvfsPadding: c.Array[ctypes.c_ubyte, Literal[1]]
   DroopGBStDev: int
-  SocHwRtAvfsFuses: ctypes.Array[ctypes.c_uint32]
-  GfxL2HwRtAvfsFuses: ctypes.Array[ctypes.c_uint32]
-  PsmDidt_Vcross: ctypes.Array[ctypes.c_uint16]
-  PsmDidt_StaticDroop_A: ctypes.Array[ctypes.c_uint32]
-  PsmDidt_StaticDroop_B: ctypes.Array[ctypes.c_uint32]
-  PsmDidt_DynDroop_A: ctypes.Array[ctypes.c_uint32]
-  PsmDidt_DynDroop_B: ctypes.Array[ctypes.c_uint32]
-  spare_HwRtAvfsFuses: ctypes.Array[ctypes.c_uint32]
-  SocCommonRtAvfs: ctypes.Array[ctypes.c_uint32]
-  GfxCommonRtAvfs: ctypes.Array[ctypes.c_uint32]
-  SocFwRtAvfsFuses: ctypes.Array[ctypes.c_uint32]
-  GfxL2FwRtAvfsFuses: ctypes.Array[ctypes.c_uint32]
-  spare_FwRtAvfsFuses: ctypes.Array[ctypes.c_uint32]
-  Soc_Droop_PWL_F: ctypes.Array[ctypes.c_uint32]
-  Soc_Droop_PWL_a: ctypes.Array[ctypes.c_uint32]
-  Soc_Droop_PWL_b: ctypes.Array[ctypes.c_uint32]
-  Soc_Droop_PWL_c: ctypes.Array[ctypes.c_uint32]
-  Gfx_Droop_PWL_F: ctypes.Array[ctypes.c_uint32]
-  Gfx_Droop_PWL_a: ctypes.Array[ctypes.c_uint32]
-  Gfx_Droop_PWL_b: ctypes.Array[ctypes.c_uint32]
-  Gfx_Droop_PWL_c: ctypes.Array[ctypes.c_uint32]
-  Gfx_Static_PWL_Offset: ctypes.Array[ctypes.c_uint32]
-  Soc_Static_PWL_Offset: ctypes.Array[ctypes.c_uint32]
+  SocHwRtAvfsFuses: c.Array[ctypes.c_uint32, Literal[32]]
+  GfxL2HwRtAvfsFuses: c.Array[ctypes.c_uint32, Literal[32]]
+  PsmDidt_Vcross: c.Array[ctypes.c_uint16, Literal[2]]
+  PsmDidt_StaticDroop_A: c.Array[ctypes.c_uint32, Literal[3]]
+  PsmDidt_StaticDroop_B: c.Array[ctypes.c_uint32, Literal[3]]
+  PsmDidt_DynDroop_A: c.Array[ctypes.c_uint32, Literal[3]]
+  PsmDidt_DynDroop_B: c.Array[ctypes.c_uint32, Literal[3]]
+  spare_HwRtAvfsFuses: c.Array[ctypes.c_uint32, Literal[19]]
+  SocCommonRtAvfs: c.Array[ctypes.c_uint32, Literal[13]]
+  GfxCommonRtAvfs: c.Array[ctypes.c_uint32, Literal[13]]
+  SocFwRtAvfsFuses: c.Array[ctypes.c_uint32, Literal[19]]
+  GfxL2FwRtAvfsFuses: c.Array[ctypes.c_uint32, Literal[19]]
+  spare_FwRtAvfsFuses: c.Array[ctypes.c_uint32, Literal[19]]
+  Soc_Droop_PWL_F: c.Array[ctypes.c_uint32, Literal[5]]
+  Soc_Droop_PWL_a: c.Array[ctypes.c_uint32, Literal[5]]
+  Soc_Droop_PWL_b: c.Array[ctypes.c_uint32, Literal[5]]
+  Soc_Droop_PWL_c: c.Array[ctypes.c_uint32, Literal[5]]
+  Gfx_Droop_PWL_F: c.Array[ctypes.c_uint32, Literal[5]]
+  Gfx_Droop_PWL_a: c.Array[ctypes.c_uint32, Literal[5]]
+  Gfx_Droop_PWL_b: c.Array[ctypes.c_uint32, Literal[5]]
+  Gfx_Droop_PWL_c: c.Array[ctypes.c_uint32, Literal[5]]
+  Gfx_Static_PWL_Offset: c.Array[ctypes.c_uint32, Literal[5]]
+  Soc_Static_PWL_Offset: c.Array[ctypes.c_uint32, Literal[5]]
   dGbV_dT_vmin: int
   dGbV_dT_vmax: int
-  PaddingV2F: ctypes.Array[ctypes.c_uint32]
+  PaddingV2F: c.Array[ctypes.c_uint32, Literal[4]]
   DcBtcGfxParams: AvfsDcBtcParams_t
   SSCurve_GFX: QuadraticInt_t
-  GfxAvfsSpare: ctypes.Array[ctypes.c_uint32]
+  GfxAvfsSpare: c.Array[ctypes.c_uint32, Literal[29]]
   OverrideSocAvfsFuses: int
   MinSocAvfsRevision: int
-  SocAvfsPadding: ctypes.Array[ctypes.c_ubyte]
-  SocAvfsFuseOverride: ctypes.Array[AvfsFuseOverride_t]
-  dBtcGbSoc: ctypes.Array[DroopInt_t]
-  qAgingGb: ctypes.Array[LinearInt_t]
-  qStaticVoltageOffset: ctypes.Array[QuadraticInt_t]
-  DcBtcSocParams: ctypes.Array[AvfsDcBtcParams_t]
+  SocAvfsPadding: c.Array[ctypes.c_ubyte, Literal[2]]
+  SocAvfsFuseOverride: c.Array[AvfsFuseOverride_t, Literal[1]]
+  dBtcGbSoc: c.Array[DroopInt_t, Literal[1]]
+  qAgingGb: c.Array[LinearInt_t, Literal[1]]
+  qStaticVoltageOffset: c.Array[QuadraticInt_t, Literal[1]]
+  DcBtcSocParams: c.Array[AvfsDcBtcParams_t, Literal[1]]
   SSCurve_SOC: QuadraticInt_t
-  SocAvfsSpare: ctypes.Array[ctypes.c_uint32]
+  SocAvfsSpare: c.Array[ctypes.c_uint32, Literal[29]]
   BootValues: BootValues_t
   DriverReportedClocks: DriverReportedClocks_t
   MsgLimits: MsgLimits_t
@@ -579,13 +579,13 @@ class SkuTable_t(c.Struct):
   OverDriveLimitsAdvancedMin: OverDriveLimits_t
   OverDriveLimitsAdvancedMax: OverDriveLimits_t
   TotalBoardPowerSupport: int
-  TotalBoardPowerPadding: ctypes.Array[ctypes.c_ubyte]
+  TotalBoardPowerPadding: c.Array[ctypes.c_ubyte, Literal[1]]
   TotalBoardPowerRoc: int
-  qFeffCoeffGameClock: ctypes.Array[QuadraticInt_t]
-  qFeffCoeffBaseClock: ctypes.Array[QuadraticInt_t]
-  qFeffCoeffBoostClock: ctypes.Array[QuadraticInt_t]
-  AptUclkGfxclkLookup: ctypes.Array[(ctypes.c_int32 * 6)]
-  AptUclkGfxclkLookupHyst: ctypes.Array[(ctypes.c_uint32 * 6)]
+  qFeffCoeffGameClock: c.Array[QuadraticInt_t, Literal[2]]
+  qFeffCoeffBaseClock: c.Array[QuadraticInt_t, Literal[2]]
+  qFeffCoeffBoostClock: c.Array[QuadraticInt_t, Literal[2]]
+  AptUclkGfxclkLookup: c.Array[c.Array[ctypes.c_int32, Literal[6]], Literal[2]]
+  AptUclkGfxclkLookupHyst: c.Array[c.Array[ctypes.c_uint32, Literal[6]], Literal[2]]
   AptPadding: int
   GfxXvminDidtDroopThresh: QuadraticInt_t
   GfxXvminDidtResetDDWait: int
@@ -630,10 +630,10 @@ class SkuTable_t(c.Struct):
   XVmin_Soc_EdcStepUpTime: int
   XVmin_Soc_EdcStepDownTime: int
   XVmin_Soc_EdcInitPccStep: int
-  PaddingSocEdc: ctypes.Array[ctypes.c_ubyte]
+  PaddingSocEdc: c.Array[ctypes.c_ubyte, Literal[3]]
   GfxXvminFuseOverride: int
   SocXvminFuseOverride: int
-  PaddingXvminFuseOverride: ctypes.Array[ctypes.c_ubyte]
+  PaddingXvminFuseOverride: c.Array[ctypes.c_ubyte, Literal[2]]
   GfxXvminFddTempLow: int
   GfxXvminFddTempHigh: int
   SocXvminFddTempLow: int
@@ -644,13 +644,13 @@ class SkuTable_t(c.Struct):
   SocXvminFddVolt0: int
   SocXvminFddVolt1: int
   SocXvminFddVolt2: int
-  GfxXvminDsFddDsm: ctypes.Array[ctypes.c_uint16]
-  GfxXvminEdcFddDsm: ctypes.Array[ctypes.c_uint16]
-  SocXvminEdcFddDsm: ctypes.Array[ctypes.c_uint16]
+  GfxXvminDsFddDsm: c.Array[ctypes.c_uint16, Literal[6]]
+  GfxXvminEdcFddDsm: c.Array[ctypes.c_uint16, Literal[6]]
+  SocXvminEdcFddDsm: c.Array[ctypes.c_uint16, Literal[6]]
   Spare: int
-  MmHubPadding: ctypes.Array[ctypes.c_uint32]
+  MmHubPadding: c.Array[ctypes.c_uint32, Literal[8]]
 int32_t: TypeAlias = ctypes.c_int32
-SkuTable_t.register_fields([('Version', uint32_t, 0), ('TotalPowerConfig', uint8_t, 4), ('CustomerVariant', uint8_t, 5), ('MemoryTemperatureTypeMask', uint8_t, 6), ('SmartShiftVersion', uint8_t, 7), ('SocketPowerLimitSpare', (uint8_t * 10), 8), ('EnableLegacyPptLimit', uint8_t, 18), ('UseInputTelemetry', uint8_t, 19), ('SmartShiftMinReportedPptinDcs', uint8_t, 20), ('PaddingPpt', (uint8_t * 7), 21), ('HwCtfTempLimit', uint16_t, 28), ('PaddingInfra', uint16_t, 30), ('FitControllerFailureRateLimit', uint32_t, 32), ('FitControllerGfxDutyCycle', uint32_t, 36), ('FitControllerSocDutyCycle', uint32_t, 40), ('FitControllerSocOffset', uint32_t, 44), ('GfxApccPlusResidencyLimit', uint32_t, 48), ('ThrottlerControlMask', uint32_t, 52), ('UlvVoltageOffset', (uint16_t * 2), 56), ('Padding', (uint8_t * 2), 60), ('DeepUlvVoltageOffsetSoc', uint16_t, 62), ('DefaultMaxVoltage', (uint16_t * 2), 64), ('BoostMaxVoltage', (uint16_t * 2), 68), ('VminTempHystersis', (int16_t * 2), 72), ('VminTempThreshold', (int16_t * 2), 76), ('Vmin_Hot_T0', (uint16_t * 2), 80), ('Vmin_Cold_T0', (uint16_t * 2), 84), ('Vmin_Hot_Eol', (uint16_t * 2), 88), ('Vmin_Cold_Eol', (uint16_t * 2), 92), ('Vmin_Aging_Offset', (uint16_t * 2), 96), ('Spare_Vmin_Plat_Offset_Hot', (uint16_t * 2), 100), ('Spare_Vmin_Plat_Offset_Cold', (uint16_t * 2), 104), ('VcBtcFixedVminAgingOffset', (uint16_t * 2), 108), ('VcBtcVmin2PsmDegrationGb', (uint16_t * 2), 112), ('VcBtcPsmA', (uint32_t * 2), 116), ('VcBtcPsmB', (uint32_t * 2), 124), ('VcBtcVminA', (uint32_t * 2), 132), ('VcBtcVminB', (uint32_t * 2), 140), ('PerPartVminEnabled', (uint8_t * 2), 148), ('VcBtcEnabled', (uint8_t * 2), 150), ('SocketPowerLimitAcTau', (uint16_t * 4), 152), ('SocketPowerLimitDcTau', (uint16_t * 4), 160), ('Gfx_Vmin_droop', QuadraticInt_t, 168), ('Soc_Vmin_droop', QuadraticInt_t, 180), ('SpareVmin', (uint32_t * 6), 192), ('DpmDescriptor', (DpmDescriptor_t * 11), 216), ('FreqTableGfx', (uint16_t * 16), 568), ('FreqTableVclk', (uint16_t * 8), 600), ('FreqTableDclk', (uint16_t * 8), 616), ('FreqTableSocclk', (uint16_t * 8), 632), ('FreqTableUclk', (uint16_t * 6), 648), ('FreqTableShadowUclk', (uint16_t * 6), 660), ('FreqTableDispclk', (uint16_t * 8), 672), ('FreqTableDppClk', (uint16_t * 8), 688), ('FreqTableDprefclk', (uint16_t * 8), 704), ('FreqTableDcfclk', (uint16_t * 8), 720), ('FreqTableDtbclk', (uint16_t * 8), 736), ('FreqTableFclk', (uint16_t * 8), 752), ('DcModeMaxFreq', (uint32_t * 11), 768), ('GfxclkAibFmax', uint16_t, 812), ('GfxDpmPadding', uint16_t, 814), ('GfxclkFgfxoffEntry', uint16_t, 816), ('GfxclkFgfxoffExitImu', uint16_t, 818), ('GfxclkFgfxoffExitRlc', uint16_t, 820), ('GfxclkThrottleClock', uint16_t, 822), ('EnableGfxPowerStagesGpio', uint8_t, 824), ('GfxIdlePadding', uint8_t, 825), ('SmsRepairWRCKClkDivEn', uint8_t, 826), ('SmsRepairWRCKClkDivVal', uint8_t, 827), ('GfxOffEntryEarlyMGCGEn', uint8_t, 828), ('GfxOffEntryForceCGCGEn', uint8_t, 829), ('GfxOffEntryForceCGCGDelayEn', uint8_t, 830), ('GfxOffEntryForceCGCGDelayVal', uint8_t, 831), ('GfxclkFreqGfxUlv', uint16_t, 832), ('GfxIdlePadding2', (uint8_t * 2), 834), ('GfxOffEntryHysteresis', uint32_t, 836), ('GfxoffSpare', (uint32_t * 15), 840), ('DfllMstrOscConfigA', uint16_t, 900), ('DfllSlvOscConfigA', uint16_t, 902), ('DfllBtcMasterScalerM', uint32_t, 904), ('DfllBtcMasterScalerB', int32_t, 908), ('DfllBtcSlaveScalerM', uint32_t, 912), ('DfllBtcSlaveScalerB', int32_t, 916), ('DfllPccAsWaitCtrl', uint32_t, 920), ('DfllPccAsStepCtrl', uint32_t, 924), ('GfxDfllSpare', (uint32_t * 9), 928), ('DvoPsmDownThresholdVoltage', uint32_t, 964), ('DvoPsmUpThresholdVoltage', uint32_t, 968), ('DvoFmaxLowScaler', uint32_t, 972), ('PaddingDcs', uint32_t, 976), ('DcsMinGfxOffTime', uint16_t, 980), ('DcsMaxGfxOffTime', uint16_t, 982), ('DcsMinCreditAccum', uint32_t, 984), ('DcsExitHysteresis', uint16_t, 988), ('DcsTimeout', uint16_t, 990), ('DcsPfGfxFopt', uint32_t, 992), ('DcsPfUclkFopt', uint32_t, 996), ('FoptEnabled', uint8_t, 1000), ('DcsSpare2', (uint8_t * 3), 1001), ('DcsFoptM', uint32_t, 1004), ('DcsFoptB', uint32_t, 1008), ('DcsSpare', (uint32_t * 9), 1012), ('UseStrobeModeOptimizations', uint8_t, 1048), ('PaddingMem', (uint8_t * 3), 1049), ('UclkDpmPstates', (uint8_t * 6), 1052), ('UclkDpmShadowPstates', (uint8_t * 6), 1058), ('FreqTableUclkDiv', (uint8_t * 6), 1064), ('FreqTableShadowUclkDiv', (uint8_t * 6), 1070), ('MemVmempVoltage', (uint16_t * 6), 1076), ('MemVddioVoltage', (uint16_t * 6), 1088), ('DalDcModeMaxUclkFreq', uint16_t, 1100), ('PaddingsMem', (uint8_t * 2), 1102), ('PaddingFclk', uint32_t, 1104), ('PcieGenSpeed', (uint8_t * 3), 1108), ('PcieLaneCount', (uint8_t * 3), 1111), ('LclkFreq', (uint16_t * 3), 1114), ('OverrideGfxAvfsFuses', uint8_t, 1120), ('GfxAvfsPadding', (uint8_t * 1), 1121), ('DroopGBStDev', uint16_t, 1122), ('SocHwRtAvfsFuses', (uint32_t * 32), 1124), ('GfxL2HwRtAvfsFuses', (uint32_t * 32), 1252), ('PsmDidt_Vcross', (uint16_t * 2), 1380), ('PsmDidt_StaticDroop_A', (uint32_t * 3), 1384), ('PsmDidt_StaticDroop_B', (uint32_t * 3), 1396), ('PsmDidt_DynDroop_A', (uint32_t * 3), 1408), ('PsmDidt_DynDroop_B', (uint32_t * 3), 1420), ('spare_HwRtAvfsFuses', (uint32_t * 19), 1432), ('SocCommonRtAvfs', (uint32_t * 13), 1508), ('GfxCommonRtAvfs', (uint32_t * 13), 1560), ('SocFwRtAvfsFuses', (uint32_t * 19), 1612), ('GfxL2FwRtAvfsFuses', (uint32_t * 19), 1688), ('spare_FwRtAvfsFuses', (uint32_t * 19), 1764), ('Soc_Droop_PWL_F', (uint32_t * 5), 1840), ('Soc_Droop_PWL_a', (uint32_t * 5), 1860), ('Soc_Droop_PWL_b', (uint32_t * 5), 1880), ('Soc_Droop_PWL_c', (uint32_t * 5), 1900), ('Gfx_Droop_PWL_F', (uint32_t * 5), 1920), ('Gfx_Droop_PWL_a', (uint32_t * 5), 1940), ('Gfx_Droop_PWL_b', (uint32_t * 5), 1960), ('Gfx_Droop_PWL_c', (uint32_t * 5), 1980), ('Gfx_Static_PWL_Offset', (uint32_t * 5), 2000), ('Soc_Static_PWL_Offset', (uint32_t * 5), 2020), ('dGbV_dT_vmin', uint32_t, 2040), ('dGbV_dT_vmax', uint32_t, 2044), ('PaddingV2F', (uint32_t * 4), 2048), ('DcBtcGfxParams', AvfsDcBtcParams_t, 2064), ('SSCurve_GFX', QuadraticInt_t, 2084), ('GfxAvfsSpare', (uint32_t * 29), 2096), ('OverrideSocAvfsFuses', uint8_t, 2212), ('MinSocAvfsRevision', uint8_t, 2213), ('SocAvfsPadding', (uint8_t * 2), 2214), ('SocAvfsFuseOverride', (AvfsFuseOverride_t * 1), 2216), ('dBtcGbSoc', (DroopInt_t * 1), 2272), ('qAgingGb', (LinearInt_t * 1), 2284), ('qStaticVoltageOffset', (QuadraticInt_t * 1), 2292), ('DcBtcSocParams', (AvfsDcBtcParams_t * 1), 2304), ('SSCurve_SOC', QuadraticInt_t, 2324), ('SocAvfsSpare', (uint32_t * 29), 2336), ('BootValues', BootValues_t, 2452), ('DriverReportedClocks', DriverReportedClocks_t, 2576), ('MsgLimits', MsgLimits_t, 2604), ('OverDriveLimitsBasicMin', OverDriveLimits_t, 2720), ('OverDriveLimitsBasicMax', OverDriveLimits_t, 2816), ('OverDriveLimitsAdvancedMin', OverDriveLimits_t, 2912), ('OverDriveLimitsAdvancedMax', OverDriveLimits_t, 3008), ('TotalBoardPowerSupport', uint8_t, 3104), ('TotalBoardPowerPadding', (uint8_t * 1), 3105), ('TotalBoardPowerRoc', uint16_t, 3106), ('qFeffCoeffGameClock', (QuadraticInt_t * 2), 3108), ('qFeffCoeffBaseClock', (QuadraticInt_t * 2), 3132), ('qFeffCoeffBoostClock', (QuadraticInt_t * 2), 3156), ('AptUclkGfxclkLookup', ((int32_t * 6) * 2), 3180), ('AptUclkGfxclkLookupHyst', ((uint32_t * 6) * 2), 3228), ('AptPadding', uint32_t, 3276), ('GfxXvminDidtDroopThresh', QuadraticInt_t, 3280), ('GfxXvminDidtResetDDWait', uint32_t, 3292), ('GfxXvminDidtClkStopWait', uint32_t, 3296), ('GfxXvminDidtFcsStepCtrl', uint32_t, 3300), ('GfxXvminDidtFcsWaitCtrl', uint32_t, 3304), ('PsmModeEnabled', uint32_t, 3308), ('P2v_a', uint32_t, 3312), ('P2v_b', uint32_t, 3316), ('P2v_c', uint32_t, 3320), ('T2p_a', uint32_t, 3324), ('T2p_b', uint32_t, 3328), ('T2p_c', uint32_t, 3332), ('P2vTemp', uint32_t, 3336), ('PsmDidtStaticSettings', QuadraticInt_t, 3340), ('PsmDidtDynamicSettings', QuadraticInt_t, 3352), ('PsmDidtAvgDiv', uint8_t, 3364), ('PsmDidtForceStall', uint8_t, 3365), ('PsmDidtReleaseTimer', uint16_t, 3366), ('PsmDidtStallPattern', uint32_t, 3368), ('CacEdcCacLeakageC0', uint32_t, 3372), ('CacEdcCacLeakageC1', uint32_t, 3376), ('CacEdcCacLeakageC2', uint32_t, 3380), ('CacEdcCacLeakageC3', uint32_t, 3384), ('CacEdcCacLeakageC4', uint32_t, 3388), ('CacEdcCacLeakageC5', uint32_t, 3392), ('CacEdcGfxClkScalar', uint32_t, 3396), ('CacEdcGfxClkIntercept', uint32_t, 3400), ('CacEdcCac_m', uint32_t, 3404), ('CacEdcCac_b', uint32_t, 3408), ('CacEdcCurrLimitGuardband', uint32_t, 3412), ('CacEdcDynToTotalCacRatio', uint32_t, 3416), ('XVmin_Gfx_EdcThreshScalar', uint32_t, 3420), ('XVmin_Gfx_EdcEnableFreq', uint32_t, 3424), ('XVmin_Gfx_EdcPccAsStepCtrl', uint32_t, 3428), ('XVmin_Gfx_EdcPccAsWaitCtrl', uint32_t, 3432), ('XVmin_Gfx_EdcThreshold', uint16_t, 3436), ('XVmin_Gfx_EdcFiltHysWaitCtrl', uint16_t, 3438), ('XVmin_Soc_EdcThreshScalar', uint32_t, 3440), ('XVmin_Soc_EdcEnableFreq', uint32_t, 3444), ('XVmin_Soc_EdcThreshold', uint32_t, 3448), ('XVmin_Soc_EdcStepUpTime', uint16_t, 3452), ('XVmin_Soc_EdcStepDownTime', uint16_t, 3454), ('XVmin_Soc_EdcInitPccStep', uint8_t, 3456), ('PaddingSocEdc', (uint8_t * 3), 3457), ('GfxXvminFuseOverride', uint8_t, 3460), ('SocXvminFuseOverride', uint8_t, 3461), ('PaddingXvminFuseOverride', (uint8_t * 2), 3462), ('GfxXvminFddTempLow', uint8_t, 3464), ('GfxXvminFddTempHigh', uint8_t, 3465), ('SocXvminFddTempLow', uint8_t, 3466), ('SocXvminFddTempHigh', uint8_t, 3467), ('GfxXvminFddVolt0', uint16_t, 3468), ('GfxXvminFddVolt1', uint16_t, 3470), ('GfxXvminFddVolt2', uint16_t, 3472), ('SocXvminFddVolt0', uint16_t, 3474), ('SocXvminFddVolt1', uint16_t, 3476), ('SocXvminFddVolt2', uint16_t, 3478), ('GfxXvminDsFddDsm', (uint16_t * 6), 3480), ('GfxXvminEdcFddDsm', (uint16_t * 6), 3492), ('SocXvminEdcFddDsm', (uint16_t * 6), 3504), ('Spare', uint32_t, 3516), ('MmHubPadding', (uint32_t * 8), 3520)])
+SkuTable_t.register_fields([('Version', uint32_t, 0), ('TotalPowerConfig', uint8_t, 4), ('CustomerVariant', uint8_t, 5), ('MemoryTemperatureTypeMask', uint8_t, 6), ('SmartShiftVersion', uint8_t, 7), ('SocketPowerLimitSpare', c.Array[uint8_t, Literal[10]], 8), ('EnableLegacyPptLimit', uint8_t, 18), ('UseInputTelemetry', uint8_t, 19), ('SmartShiftMinReportedPptinDcs', uint8_t, 20), ('PaddingPpt', c.Array[uint8_t, Literal[7]], 21), ('HwCtfTempLimit', uint16_t, 28), ('PaddingInfra', uint16_t, 30), ('FitControllerFailureRateLimit', uint32_t, 32), ('FitControllerGfxDutyCycle', uint32_t, 36), ('FitControllerSocDutyCycle', uint32_t, 40), ('FitControllerSocOffset', uint32_t, 44), ('GfxApccPlusResidencyLimit', uint32_t, 48), ('ThrottlerControlMask', uint32_t, 52), ('UlvVoltageOffset', c.Array[uint16_t, Literal[2]], 56), ('Padding', c.Array[uint8_t, Literal[2]], 60), ('DeepUlvVoltageOffsetSoc', uint16_t, 62), ('DefaultMaxVoltage', c.Array[uint16_t, Literal[2]], 64), ('BoostMaxVoltage', c.Array[uint16_t, Literal[2]], 68), ('VminTempHystersis', c.Array[int16_t, Literal[2]], 72), ('VminTempThreshold', c.Array[int16_t, Literal[2]], 76), ('Vmin_Hot_T0', c.Array[uint16_t, Literal[2]], 80), ('Vmin_Cold_T0', c.Array[uint16_t, Literal[2]], 84), ('Vmin_Hot_Eol', c.Array[uint16_t, Literal[2]], 88), ('Vmin_Cold_Eol', c.Array[uint16_t, Literal[2]], 92), ('Vmin_Aging_Offset', c.Array[uint16_t, Literal[2]], 96), ('Spare_Vmin_Plat_Offset_Hot', c.Array[uint16_t, Literal[2]], 100), ('Spare_Vmin_Plat_Offset_Cold', c.Array[uint16_t, Literal[2]], 104), ('VcBtcFixedVminAgingOffset', c.Array[uint16_t, Literal[2]], 108), ('VcBtcVmin2PsmDegrationGb', c.Array[uint16_t, Literal[2]], 112), ('VcBtcPsmA', c.Array[uint32_t, Literal[2]], 116), ('VcBtcPsmB', c.Array[uint32_t, Literal[2]], 124), ('VcBtcVminA', c.Array[uint32_t, Literal[2]], 132), ('VcBtcVminB', c.Array[uint32_t, Literal[2]], 140), ('PerPartVminEnabled', c.Array[uint8_t, Literal[2]], 148), ('VcBtcEnabled', c.Array[uint8_t, Literal[2]], 150), ('SocketPowerLimitAcTau', c.Array[uint16_t, Literal[4]], 152), ('SocketPowerLimitDcTau', c.Array[uint16_t, Literal[4]], 160), ('Gfx_Vmin_droop', QuadraticInt_t, 168), ('Soc_Vmin_droop', QuadraticInt_t, 180), ('SpareVmin', c.Array[uint32_t, Literal[6]], 192), ('DpmDescriptor', c.Array[DpmDescriptor_t, Literal[11]], 216), ('FreqTableGfx', c.Array[uint16_t, Literal[16]], 568), ('FreqTableVclk', c.Array[uint16_t, Literal[8]], 600), ('FreqTableDclk', c.Array[uint16_t, Literal[8]], 616), ('FreqTableSocclk', c.Array[uint16_t, Literal[8]], 632), ('FreqTableUclk', c.Array[uint16_t, Literal[6]], 648), ('FreqTableShadowUclk', c.Array[uint16_t, Literal[6]], 660), ('FreqTableDispclk', c.Array[uint16_t, Literal[8]], 672), ('FreqTableDppClk', c.Array[uint16_t, Literal[8]], 688), ('FreqTableDprefclk', c.Array[uint16_t, Literal[8]], 704), ('FreqTableDcfclk', c.Array[uint16_t, Literal[8]], 720), ('FreqTableDtbclk', c.Array[uint16_t, Literal[8]], 736), ('FreqTableFclk', c.Array[uint16_t, Literal[8]], 752), ('DcModeMaxFreq', c.Array[uint32_t, Literal[11]], 768), ('GfxclkAibFmax', uint16_t, 812), ('GfxDpmPadding', uint16_t, 814), ('GfxclkFgfxoffEntry', uint16_t, 816), ('GfxclkFgfxoffExitImu', uint16_t, 818), ('GfxclkFgfxoffExitRlc', uint16_t, 820), ('GfxclkThrottleClock', uint16_t, 822), ('EnableGfxPowerStagesGpio', uint8_t, 824), ('GfxIdlePadding', uint8_t, 825), ('SmsRepairWRCKClkDivEn', uint8_t, 826), ('SmsRepairWRCKClkDivVal', uint8_t, 827), ('GfxOffEntryEarlyMGCGEn', uint8_t, 828), ('GfxOffEntryForceCGCGEn', uint8_t, 829), ('GfxOffEntryForceCGCGDelayEn', uint8_t, 830), ('GfxOffEntryForceCGCGDelayVal', uint8_t, 831), ('GfxclkFreqGfxUlv', uint16_t, 832), ('GfxIdlePadding2', c.Array[uint8_t, Literal[2]], 834), ('GfxOffEntryHysteresis', uint32_t, 836), ('GfxoffSpare', c.Array[uint32_t, Literal[15]], 840), ('DfllMstrOscConfigA', uint16_t, 900), ('DfllSlvOscConfigA', uint16_t, 902), ('DfllBtcMasterScalerM', uint32_t, 904), ('DfllBtcMasterScalerB', int32_t, 908), ('DfllBtcSlaveScalerM', uint32_t, 912), ('DfllBtcSlaveScalerB', int32_t, 916), ('DfllPccAsWaitCtrl', uint32_t, 920), ('DfllPccAsStepCtrl', uint32_t, 924), ('GfxDfllSpare', c.Array[uint32_t, Literal[9]], 928), ('DvoPsmDownThresholdVoltage', uint32_t, 964), ('DvoPsmUpThresholdVoltage', uint32_t, 968), ('DvoFmaxLowScaler', uint32_t, 972), ('PaddingDcs', uint32_t, 976), ('DcsMinGfxOffTime', uint16_t, 980), ('DcsMaxGfxOffTime', uint16_t, 982), ('DcsMinCreditAccum', uint32_t, 984), ('DcsExitHysteresis', uint16_t, 988), ('DcsTimeout', uint16_t, 990), ('DcsPfGfxFopt', uint32_t, 992), ('DcsPfUclkFopt', uint32_t, 996), ('FoptEnabled', uint8_t, 1000), ('DcsSpare2', c.Array[uint8_t, Literal[3]], 1001), ('DcsFoptM', uint32_t, 1004), ('DcsFoptB', uint32_t, 1008), ('DcsSpare', c.Array[uint32_t, Literal[9]], 1012), ('UseStrobeModeOptimizations', uint8_t, 1048), ('PaddingMem', c.Array[uint8_t, Literal[3]], 1049), ('UclkDpmPstates', c.Array[uint8_t, Literal[6]], 1052), ('UclkDpmShadowPstates', c.Array[uint8_t, Literal[6]], 1058), ('FreqTableUclkDiv', c.Array[uint8_t, Literal[6]], 1064), ('FreqTableShadowUclkDiv', c.Array[uint8_t, Literal[6]], 1070), ('MemVmempVoltage', c.Array[uint16_t, Literal[6]], 1076), ('MemVddioVoltage', c.Array[uint16_t, Literal[6]], 1088), ('DalDcModeMaxUclkFreq', uint16_t, 1100), ('PaddingsMem', c.Array[uint8_t, Literal[2]], 1102), ('PaddingFclk', uint32_t, 1104), ('PcieGenSpeed', c.Array[uint8_t, Literal[3]], 1108), ('PcieLaneCount', c.Array[uint8_t, Literal[3]], 1111), ('LclkFreq', c.Array[uint16_t, Literal[3]], 1114), ('OverrideGfxAvfsFuses', uint8_t, 1120), ('GfxAvfsPadding', c.Array[uint8_t, Literal[1]], 1121), ('DroopGBStDev', uint16_t, 1122), ('SocHwRtAvfsFuses', c.Array[uint32_t, Literal[32]], 1124), ('GfxL2HwRtAvfsFuses', c.Array[uint32_t, Literal[32]], 1252), ('PsmDidt_Vcross', c.Array[uint16_t, Literal[2]], 1380), ('PsmDidt_StaticDroop_A', c.Array[uint32_t, Literal[3]], 1384), ('PsmDidt_StaticDroop_B', c.Array[uint32_t, Literal[3]], 1396), ('PsmDidt_DynDroop_A', c.Array[uint32_t, Literal[3]], 1408), ('PsmDidt_DynDroop_B', c.Array[uint32_t, Literal[3]], 1420), ('spare_HwRtAvfsFuses', c.Array[uint32_t, Literal[19]], 1432), ('SocCommonRtAvfs', c.Array[uint32_t, Literal[13]], 1508), ('GfxCommonRtAvfs', c.Array[uint32_t, Literal[13]], 1560), ('SocFwRtAvfsFuses', c.Array[uint32_t, Literal[19]], 1612), ('GfxL2FwRtAvfsFuses', c.Array[uint32_t, Literal[19]], 1688), ('spare_FwRtAvfsFuses', c.Array[uint32_t, Literal[19]], 1764), ('Soc_Droop_PWL_F', c.Array[uint32_t, Literal[5]], 1840), ('Soc_Droop_PWL_a', c.Array[uint32_t, Literal[5]], 1860), ('Soc_Droop_PWL_b', c.Array[uint32_t, Literal[5]], 1880), ('Soc_Droop_PWL_c', c.Array[uint32_t, Literal[5]], 1900), ('Gfx_Droop_PWL_F', c.Array[uint32_t, Literal[5]], 1920), ('Gfx_Droop_PWL_a', c.Array[uint32_t, Literal[5]], 1940), ('Gfx_Droop_PWL_b', c.Array[uint32_t, Literal[5]], 1960), ('Gfx_Droop_PWL_c', c.Array[uint32_t, Literal[5]], 1980), ('Gfx_Static_PWL_Offset', c.Array[uint32_t, Literal[5]], 2000), ('Soc_Static_PWL_Offset', c.Array[uint32_t, Literal[5]], 2020), ('dGbV_dT_vmin', uint32_t, 2040), ('dGbV_dT_vmax', uint32_t, 2044), ('PaddingV2F', c.Array[uint32_t, Literal[4]], 2048), ('DcBtcGfxParams', AvfsDcBtcParams_t, 2064), ('SSCurve_GFX', QuadraticInt_t, 2084), ('GfxAvfsSpare', c.Array[uint32_t, Literal[29]], 2096), ('OverrideSocAvfsFuses', uint8_t, 2212), ('MinSocAvfsRevision', uint8_t, 2213), ('SocAvfsPadding', c.Array[uint8_t, Literal[2]], 2214), ('SocAvfsFuseOverride', c.Array[AvfsFuseOverride_t, Literal[1]], 2216), ('dBtcGbSoc', c.Array[DroopInt_t, Literal[1]], 2272), ('qAgingGb', c.Array[LinearInt_t, Literal[1]], 2284), ('qStaticVoltageOffset', c.Array[QuadraticInt_t, Literal[1]], 2292), ('DcBtcSocParams', c.Array[AvfsDcBtcParams_t, Literal[1]], 2304), ('SSCurve_SOC', QuadraticInt_t, 2324), ('SocAvfsSpare', c.Array[uint32_t, Literal[29]], 2336), ('BootValues', BootValues_t, 2452), ('DriverReportedClocks', DriverReportedClocks_t, 2576), ('MsgLimits', MsgLimits_t, 2604), ('OverDriveLimitsBasicMin', OverDriveLimits_t, 2720), ('OverDriveLimitsBasicMax', OverDriveLimits_t, 2816), ('OverDriveLimitsAdvancedMin', OverDriveLimits_t, 2912), ('OverDriveLimitsAdvancedMax', OverDriveLimits_t, 3008), ('TotalBoardPowerSupport', uint8_t, 3104), ('TotalBoardPowerPadding', c.Array[uint8_t, Literal[1]], 3105), ('TotalBoardPowerRoc', uint16_t, 3106), ('qFeffCoeffGameClock', c.Array[QuadraticInt_t, Literal[2]], 3108), ('qFeffCoeffBaseClock', c.Array[QuadraticInt_t, Literal[2]], 3132), ('qFeffCoeffBoostClock', c.Array[QuadraticInt_t, Literal[2]], 3156), ('AptUclkGfxclkLookup', c.Array[c.Array[int32_t, Literal[6]], Literal[2]], 3180), ('AptUclkGfxclkLookupHyst', c.Array[c.Array[uint32_t, Literal[6]], Literal[2]], 3228), ('AptPadding', uint32_t, 3276), ('GfxXvminDidtDroopThresh', QuadraticInt_t, 3280), ('GfxXvminDidtResetDDWait', uint32_t, 3292), ('GfxXvminDidtClkStopWait', uint32_t, 3296), ('GfxXvminDidtFcsStepCtrl', uint32_t, 3300), ('GfxXvminDidtFcsWaitCtrl', uint32_t, 3304), ('PsmModeEnabled', uint32_t, 3308), ('P2v_a', uint32_t, 3312), ('P2v_b', uint32_t, 3316), ('P2v_c', uint32_t, 3320), ('T2p_a', uint32_t, 3324), ('T2p_b', uint32_t, 3328), ('T2p_c', uint32_t, 3332), ('P2vTemp', uint32_t, 3336), ('PsmDidtStaticSettings', QuadraticInt_t, 3340), ('PsmDidtDynamicSettings', QuadraticInt_t, 3352), ('PsmDidtAvgDiv', uint8_t, 3364), ('PsmDidtForceStall', uint8_t, 3365), ('PsmDidtReleaseTimer', uint16_t, 3366), ('PsmDidtStallPattern', uint32_t, 3368), ('CacEdcCacLeakageC0', uint32_t, 3372), ('CacEdcCacLeakageC1', uint32_t, 3376), ('CacEdcCacLeakageC2', uint32_t, 3380), ('CacEdcCacLeakageC3', uint32_t, 3384), ('CacEdcCacLeakageC4', uint32_t, 3388), ('CacEdcCacLeakageC5', uint32_t, 3392), ('CacEdcGfxClkScalar', uint32_t, 3396), ('CacEdcGfxClkIntercept', uint32_t, 3400), ('CacEdcCac_m', uint32_t, 3404), ('CacEdcCac_b', uint32_t, 3408), ('CacEdcCurrLimitGuardband', uint32_t, 3412), ('CacEdcDynToTotalCacRatio', uint32_t, 3416), ('XVmin_Gfx_EdcThreshScalar', uint32_t, 3420), ('XVmin_Gfx_EdcEnableFreq', uint32_t, 3424), ('XVmin_Gfx_EdcPccAsStepCtrl', uint32_t, 3428), ('XVmin_Gfx_EdcPccAsWaitCtrl', uint32_t, 3432), ('XVmin_Gfx_EdcThreshold', uint16_t, 3436), ('XVmin_Gfx_EdcFiltHysWaitCtrl', uint16_t, 3438), ('XVmin_Soc_EdcThreshScalar', uint32_t, 3440), ('XVmin_Soc_EdcEnableFreq', uint32_t, 3444), ('XVmin_Soc_EdcThreshold', uint32_t, 3448), ('XVmin_Soc_EdcStepUpTime', uint16_t, 3452), ('XVmin_Soc_EdcStepDownTime', uint16_t, 3454), ('XVmin_Soc_EdcInitPccStep', uint8_t, 3456), ('PaddingSocEdc', c.Array[uint8_t, Literal[3]], 3457), ('GfxXvminFuseOverride', uint8_t, 3460), ('SocXvminFuseOverride', uint8_t, 3461), ('PaddingXvminFuseOverride', c.Array[uint8_t, Literal[2]], 3462), ('GfxXvminFddTempLow', uint8_t, 3464), ('GfxXvminFddTempHigh', uint8_t, 3465), ('SocXvminFddTempLow', uint8_t, 3466), ('SocXvminFddTempHigh', uint8_t, 3467), ('GfxXvminFddVolt0', uint16_t, 3468), ('GfxXvminFddVolt1', uint16_t, 3470), ('GfxXvminFddVolt2', uint16_t, 3472), ('SocXvminFddVolt0', uint16_t, 3474), ('SocXvminFddVolt1', uint16_t, 3476), ('SocXvminFddVolt2', uint16_t, 3478), ('GfxXvminDsFddDsm', c.Array[uint16_t, Literal[6]], 3480), ('GfxXvminEdcFddDsm', c.Array[uint16_t, Literal[6]], 3492), ('SocXvminEdcFddDsm', c.Array[uint16_t, Literal[6]], 3504), ('Spare', uint32_t, 3516), ('MmHubPadding', c.Array[uint32_t, Literal[8]], 3520)])
 @c.record
 class Svi3RegulatorSettings_t(c.Struct):
   SIZE = 28
@@ -668,19 +668,19 @@ class Svi3RegulatorSettings_t(c.Struct):
   OtpThresh: int
   UvpOvpDeltaRef: int
   PhaseShed: int
-  Padding: ctypes.Array[ctypes.c_ubyte]
+  Padding: c.Array[ctypes.c_ubyte, Literal[10]]
   SettingOverrideMask: int
-Svi3RegulatorSettings_t.register_fields([('SlewRateConditions', uint8_t, 0), ('LoadLineAdjust', uint8_t, 1), ('VoutOffset', uint8_t, 2), ('VidMax', uint8_t, 3), ('VidMin', uint8_t, 4), ('TenBitTelEn', uint8_t, 5), ('SixteenBitTelEn', uint8_t, 6), ('OcpThresh', uint8_t, 7), ('OcpWarnThresh', uint8_t, 8), ('OcpSettings', uint8_t, 9), ('VrhotThresh', uint8_t, 10), ('OtpThresh', uint8_t, 11), ('UvpOvpDeltaRef', uint8_t, 12), ('PhaseShed', uint8_t, 13), ('Padding', (uint8_t * 10), 14), ('SettingOverrideMask', uint32_t, 24)])
+Svi3RegulatorSettings_t.register_fields([('SlewRateConditions', uint8_t, 0), ('LoadLineAdjust', uint8_t, 1), ('VoutOffset', uint8_t, 2), ('VidMax', uint8_t, 3), ('VidMin', uint8_t, 4), ('TenBitTelEn', uint8_t, 5), ('SixteenBitTelEn', uint8_t, 6), ('OcpThresh', uint8_t, 7), ('OcpWarnThresh', uint8_t, 8), ('OcpSettings', uint8_t, 9), ('VrhotThresh', uint8_t, 10), ('OtpThresh', uint8_t, 11), ('UvpOvpDeltaRef', uint8_t, 12), ('PhaseShed', uint8_t, 13), ('Padding', c.Array[uint8_t, Literal[10]], 14), ('SettingOverrideMask', uint32_t, 24)])
 @c.record
 class BoardTable_t(c.Struct):
   SIZE = 528
   Version: int
-  I2cControllers: ctypes.Array[I2cControllerConfig_t]
-  SlaveAddrMapping: ctypes.Array[ctypes.c_ubyte]
-  VrPsiSupport: ctypes.Array[ctypes.c_ubyte]
+  I2cControllers: c.Array[I2cControllerConfig_t, Literal[8]]
+  SlaveAddrMapping: c.Array[ctypes.c_ubyte, Literal[4]]
+  VrPsiSupport: c.Array[ctypes.c_ubyte, Literal[4]]
   Svi3SvcSpeed: int
-  EnablePsi6: ctypes.Array[ctypes.c_ubyte]
-  Svi3RegSettings: ctypes.Array[Svi3RegulatorSettings_t]
+  EnablePsi6: c.Array[ctypes.c_ubyte, Literal[4]]
+  Svi3RegSettings: c.Array[Svi3RegulatorSettings_t, Literal[4]]
   LedOffGpio: int
   FanOffGpio: int
   GfxVrPowerStageOffGpio: int
@@ -700,19 +700,19 @@ class BoardTable_t(c.Struct):
   UclkTrainingModeSpreadPercent: int
   UclkSpreadPadding: int
   UclkSpreadFreq: int
-  UclkSpreadPercent: ctypes.Array[ctypes.c_ubyte]
+  UclkSpreadPercent: c.Array[ctypes.c_ubyte, Literal[16]]
   GfxclkSpreadEnable: int
   FclkSpreadPercent: int
   FclkSpreadFreq: int
   DramWidth: int
-  PaddingMem1: ctypes.Array[ctypes.c_ubyte]
+  PaddingMem1: c.Array[ctypes.c_ubyte, Literal[7]]
   HsrEnabled: int
   VddqOffEnabled: int
-  PaddingUmcFlags: ctypes.Array[ctypes.c_ubyte]
+  PaddingUmcFlags: c.Array[ctypes.c_ubyte, Literal[2]]
   Paddign1: int
   BacoEntryDelay: int
   FuseWritePowerMuxPresent: int
-  FuseWritePadding: ctypes.Array[ctypes.c_ubyte]
+  FuseWritePadding: c.Array[ctypes.c_ubyte, Literal[3]]
   LoadlineGfx: int
   LoadlineSoc: int
   GfxEdcLimit: int
@@ -721,23 +721,23 @@ class BoardTable_t(c.Struct):
   ConnectorsImpedance: int
   EpcsSens0: int
   EpcsSens1: int
-  PaddingEpcs: ctypes.Array[ctypes.c_ubyte]
-  BoardSpare: ctypes.Array[ctypes.c_uint32]
-  MmHubPadding: ctypes.Array[ctypes.c_uint32]
-BoardTable_t.register_fields([('Version', uint32_t, 0), ('I2cControllers', (I2cControllerConfig_t * 8), 4), ('SlaveAddrMapping', (uint8_t * 4), 68), ('VrPsiSupport', (uint8_t * 4), 72), ('Svi3SvcSpeed', uint32_t, 76), ('EnablePsi6', (uint8_t * 4), 80), ('Svi3RegSettings', (Svi3RegulatorSettings_t * 4), 84), ('LedOffGpio', uint8_t, 196), ('FanOffGpio', uint8_t, 197), ('GfxVrPowerStageOffGpio', uint8_t, 198), ('AcDcGpio', uint8_t, 199), ('AcDcPolarity', uint8_t, 200), ('VR0HotGpio', uint8_t, 201), ('VR0HotPolarity', uint8_t, 202), ('GthrGpio', uint8_t, 203), ('GthrPolarity', uint8_t, 204), ('LedPin0', uint8_t, 205), ('LedPin1', uint8_t, 206), ('LedPin2', uint8_t, 207), ('LedEnableMask', uint8_t, 208), ('LedPcie', uint8_t, 209), ('LedError', uint8_t, 210), ('PaddingLed', uint8_t, 211), ('UclkTrainingModeSpreadPercent', uint8_t, 212), ('UclkSpreadPadding', uint8_t, 213), ('UclkSpreadFreq', uint16_t, 214), ('UclkSpreadPercent', (uint8_t * 16), 216), ('GfxclkSpreadEnable', uint8_t, 232), ('FclkSpreadPercent', uint8_t, 233), ('FclkSpreadFreq', uint16_t, 234), ('DramWidth', uint8_t, 236), ('PaddingMem1', (uint8_t * 7), 237), ('HsrEnabled', uint8_t, 244), ('VddqOffEnabled', uint8_t, 245), ('PaddingUmcFlags', (uint8_t * 2), 246), ('Paddign1', uint32_t, 248), ('BacoEntryDelay', uint32_t, 252), ('FuseWritePowerMuxPresent', uint8_t, 256), ('FuseWritePadding', (uint8_t * 3), 257), ('LoadlineGfx', uint32_t, 260), ('LoadlineSoc', uint32_t, 264), ('GfxEdcLimit', uint32_t, 268), ('SocEdcLimit', uint32_t, 272), ('RestBoardPower', uint32_t, 276), ('ConnectorsImpedance', uint32_t, 280), ('EpcsSens0', uint8_t, 284), ('EpcsSens1', uint8_t, 285), ('PaddingEpcs', (uint8_t * 2), 286), ('BoardSpare', (uint32_t * 52), 288), ('MmHubPadding', (uint32_t * 8), 496)])
+  PaddingEpcs: c.Array[ctypes.c_ubyte, Literal[2]]
+  BoardSpare: c.Array[ctypes.c_uint32, Literal[52]]
+  MmHubPadding: c.Array[ctypes.c_uint32, Literal[8]]
+BoardTable_t.register_fields([('Version', uint32_t, 0), ('I2cControllers', c.Array[I2cControllerConfig_t, Literal[8]], 4), ('SlaveAddrMapping', c.Array[uint8_t, Literal[4]], 68), ('VrPsiSupport', c.Array[uint8_t, Literal[4]], 72), ('Svi3SvcSpeed', uint32_t, 76), ('EnablePsi6', c.Array[uint8_t, Literal[4]], 80), ('Svi3RegSettings', c.Array[Svi3RegulatorSettings_t, Literal[4]], 84), ('LedOffGpio', uint8_t, 196), ('FanOffGpio', uint8_t, 197), ('GfxVrPowerStageOffGpio', uint8_t, 198), ('AcDcGpio', uint8_t, 199), ('AcDcPolarity', uint8_t, 200), ('VR0HotGpio', uint8_t, 201), ('VR0HotPolarity', uint8_t, 202), ('GthrGpio', uint8_t, 203), ('GthrPolarity', uint8_t, 204), ('LedPin0', uint8_t, 205), ('LedPin1', uint8_t, 206), ('LedPin2', uint8_t, 207), ('LedEnableMask', uint8_t, 208), ('LedPcie', uint8_t, 209), ('LedError', uint8_t, 210), ('PaddingLed', uint8_t, 211), ('UclkTrainingModeSpreadPercent', uint8_t, 212), ('UclkSpreadPadding', uint8_t, 213), ('UclkSpreadFreq', uint16_t, 214), ('UclkSpreadPercent', c.Array[uint8_t, Literal[16]], 216), ('GfxclkSpreadEnable', uint8_t, 232), ('FclkSpreadPercent', uint8_t, 233), ('FclkSpreadFreq', uint16_t, 234), ('DramWidth', uint8_t, 236), ('PaddingMem1', c.Array[uint8_t, Literal[7]], 237), ('HsrEnabled', uint8_t, 244), ('VddqOffEnabled', uint8_t, 245), ('PaddingUmcFlags', c.Array[uint8_t, Literal[2]], 246), ('Paddign1', uint32_t, 248), ('BacoEntryDelay', uint32_t, 252), ('FuseWritePowerMuxPresent', uint8_t, 256), ('FuseWritePadding', c.Array[uint8_t, Literal[3]], 257), ('LoadlineGfx', uint32_t, 260), ('LoadlineSoc', uint32_t, 264), ('GfxEdcLimit', uint32_t, 268), ('SocEdcLimit', uint32_t, 272), ('RestBoardPower', uint32_t, 276), ('ConnectorsImpedance', uint32_t, 280), ('EpcsSens0', uint8_t, 284), ('EpcsSens1', uint8_t, 285), ('PaddingEpcs', c.Array[uint8_t, Literal[2]], 286), ('BoardSpare', c.Array[uint32_t, Literal[52]], 288), ('MmHubPadding', c.Array[uint32_t, Literal[8]], 496)])
 @c.record
 class CustomSkuTable_t(c.Struct):
   SIZE = 360
-  SocketPowerLimitAc: ctypes.Array[ctypes.c_uint16]
-  VrTdcLimit: ctypes.Array[ctypes.c_uint16]
+  SocketPowerLimitAc: c.Array[ctypes.c_uint16, Literal[4]]
+  VrTdcLimit: c.Array[ctypes.c_uint16, Literal[2]]
   TotalIdleBoardPowerM: int
   TotalIdleBoardPowerB: int
   TotalBoardPowerM: int
   TotalBoardPowerB: int
-  TemperatureLimit: ctypes.Array[ctypes.c_uint16]
-  FanStopTemp: ctypes.Array[ctypes.c_uint16]
-  FanStartTemp: ctypes.Array[ctypes.c_uint16]
-  FanGain: ctypes.Array[ctypes.c_uint16]
+  TemperatureLimit: c.Array[ctypes.c_uint16, Literal[12]]
+  FanStopTemp: c.Array[ctypes.c_uint16, Literal[12]]
+  FanStartTemp: c.Array[ctypes.c_uint16, Literal[12]]
+  FanGain: c.Array[ctypes.c_uint16, Literal[12]]
   FanPwmMin: int
   AcousticTargetRpmThreshold: int
   AcousticLimitRpmThreshold: int
@@ -748,12 +748,12 @@ class CustomSkuTable_t(c.Struct):
   FanZeroRpmEnable: int
   FanTachEdgePerRev: int
   FanPadding: int
-  FanTargetTemperature: ctypes.Array[ctypes.c_uint16]
+  FanTargetTemperature: c.Array[ctypes.c_uint16, Literal[12]]
   FuzzyFan_ErrorSetDelta: int
   FuzzyFan_ErrorRateSetDelta: int
   FuzzyFan_PwmSetDelta: int
   FanPadding2: int
-  FwCtfLimit: ctypes.Array[ctypes.c_uint16]
+  FwCtfLimit: c.Array[ctypes.c_uint16, Literal[12]]
   IntakeTempEnableRPM: int
   IntakeTempOffsetTemp: int
   IntakeTempReleaseTemp: int
@@ -762,22 +762,22 @@ class CustomSkuTable_t(c.Struct):
   FanAbnormalTempLimitOffset: int
   FanStalledTriggerRpm: int
   FanAbnormalTriggerRpmCoeff: int
-  FanSpare: ctypes.Array[ctypes.c_uint16]
+  FanSpare: c.Array[ctypes.c_uint16, Literal[1]]
   FanIntakeSensorSupport: int
   FanIntakePadding: int
-  FanSpare2: ctypes.Array[ctypes.c_uint32]
+  FanSpare2: c.Array[ctypes.c_uint32, Literal[12]]
   ODFeatureCtrlMask: int
   TemperatureLimit_Hynix: int
   TemperatureLimit_Micron: int
   TemperatureFwCtfLimit_Hynix: int
   TemperatureFwCtfLimit_Micron: int
-  PlatformTdcLimit: ctypes.Array[ctypes.c_uint16]
-  SocketPowerLimitDc: ctypes.Array[ctypes.c_uint16]
+  PlatformTdcLimit: c.Array[ctypes.c_uint16, Literal[2]]
+  SocketPowerLimitDc: c.Array[ctypes.c_uint16, Literal[4]]
   SocketPowerLimitSmartShift2: int
   CustomSkuSpare16b: int
-  CustomSkuSpare32b: ctypes.Array[ctypes.c_uint32]
-  MmHubPadding: ctypes.Array[ctypes.c_uint32]
-CustomSkuTable_t.register_fields([('SocketPowerLimitAc', (uint16_t * 4), 0), ('VrTdcLimit', (uint16_t * 2), 8), ('TotalIdleBoardPowerM', int16_t, 12), ('TotalIdleBoardPowerB', int16_t, 14), ('TotalBoardPowerM', int16_t, 16), ('TotalBoardPowerB', int16_t, 18), ('TemperatureLimit', (uint16_t * 12), 20), ('FanStopTemp', (uint16_t * 12), 44), ('FanStartTemp', (uint16_t * 12), 68), ('FanGain', (uint16_t * 12), 92), ('FanPwmMin', uint16_t, 116), ('AcousticTargetRpmThreshold', uint16_t, 118), ('AcousticLimitRpmThreshold', uint16_t, 120), ('FanMaximumRpm', uint16_t, 122), ('MGpuAcousticLimitRpmThreshold', uint16_t, 124), ('FanTargetGfxclk', uint16_t, 126), ('TempInputSelectMask', uint32_t, 128), ('FanZeroRpmEnable', uint8_t, 132), ('FanTachEdgePerRev', uint8_t, 133), ('FanPadding', uint16_t, 134), ('FanTargetTemperature', (uint16_t * 12), 136), ('FuzzyFan_ErrorSetDelta', int16_t, 160), ('FuzzyFan_ErrorRateSetDelta', int16_t, 162), ('FuzzyFan_PwmSetDelta', int16_t, 164), ('FanPadding2', uint16_t, 166), ('FwCtfLimit', (uint16_t * 12), 168), ('IntakeTempEnableRPM', uint16_t, 192), ('IntakeTempOffsetTemp', int16_t, 194), ('IntakeTempReleaseTemp', uint16_t, 196), ('IntakeTempHighIntakeAcousticLimit', uint16_t, 198), ('IntakeTempAcouticLimitReleaseRate', uint16_t, 200), ('FanAbnormalTempLimitOffset', int16_t, 202), ('FanStalledTriggerRpm', uint16_t, 204), ('FanAbnormalTriggerRpmCoeff', uint16_t, 206), ('FanSpare', (uint16_t * 1), 208), ('FanIntakeSensorSupport', uint8_t, 210), ('FanIntakePadding', uint8_t, 211), ('FanSpare2', (uint32_t * 12), 212), ('ODFeatureCtrlMask', uint32_t, 260), ('TemperatureLimit_Hynix', uint16_t, 264), ('TemperatureLimit_Micron', uint16_t, 266), ('TemperatureFwCtfLimit_Hynix', uint16_t, 268), ('TemperatureFwCtfLimit_Micron', uint16_t, 270), ('PlatformTdcLimit', (uint16_t * 2), 272), ('SocketPowerLimitDc', (uint16_t * 4), 276), ('SocketPowerLimitSmartShift2', uint16_t, 284), ('CustomSkuSpare16b', uint16_t, 286), ('CustomSkuSpare32b', (uint32_t * 10), 288), ('MmHubPadding', (uint32_t * 8), 328)])
+  CustomSkuSpare32b: c.Array[ctypes.c_uint32, Literal[10]]
+  MmHubPadding: c.Array[ctypes.c_uint32, Literal[8]]
+CustomSkuTable_t.register_fields([('SocketPowerLimitAc', c.Array[uint16_t, Literal[4]], 0), ('VrTdcLimit', c.Array[uint16_t, Literal[2]], 8), ('TotalIdleBoardPowerM', int16_t, 12), ('TotalIdleBoardPowerB', int16_t, 14), ('TotalBoardPowerM', int16_t, 16), ('TotalBoardPowerB', int16_t, 18), ('TemperatureLimit', c.Array[uint16_t, Literal[12]], 20), ('FanStopTemp', c.Array[uint16_t, Literal[12]], 44), ('FanStartTemp', c.Array[uint16_t, Literal[12]], 68), ('FanGain', c.Array[uint16_t, Literal[12]], 92), ('FanPwmMin', uint16_t, 116), ('AcousticTargetRpmThreshold', uint16_t, 118), ('AcousticLimitRpmThreshold', uint16_t, 120), ('FanMaximumRpm', uint16_t, 122), ('MGpuAcousticLimitRpmThreshold', uint16_t, 124), ('FanTargetGfxclk', uint16_t, 126), ('TempInputSelectMask', uint32_t, 128), ('FanZeroRpmEnable', uint8_t, 132), ('FanTachEdgePerRev', uint8_t, 133), ('FanPadding', uint16_t, 134), ('FanTargetTemperature', c.Array[uint16_t, Literal[12]], 136), ('FuzzyFan_ErrorSetDelta', int16_t, 160), ('FuzzyFan_ErrorRateSetDelta', int16_t, 162), ('FuzzyFan_PwmSetDelta', int16_t, 164), ('FanPadding2', uint16_t, 166), ('FwCtfLimit', c.Array[uint16_t, Literal[12]], 168), ('IntakeTempEnableRPM', uint16_t, 192), ('IntakeTempOffsetTemp', int16_t, 194), ('IntakeTempReleaseTemp', uint16_t, 196), ('IntakeTempHighIntakeAcousticLimit', uint16_t, 198), ('IntakeTempAcouticLimitReleaseRate', uint16_t, 200), ('FanAbnormalTempLimitOffset', int16_t, 202), ('FanStalledTriggerRpm', uint16_t, 204), ('FanAbnormalTriggerRpmCoeff', uint16_t, 206), ('FanSpare', c.Array[uint16_t, Literal[1]], 208), ('FanIntakeSensorSupport', uint8_t, 210), ('FanIntakePadding', uint8_t, 211), ('FanSpare2', c.Array[uint32_t, Literal[12]], 212), ('ODFeatureCtrlMask', uint32_t, 260), ('TemperatureLimit_Hynix', uint16_t, 264), ('TemperatureLimit_Micron', uint16_t, 266), ('TemperatureFwCtfLimit_Hynix', uint16_t, 268), ('TemperatureFwCtfLimit_Micron', uint16_t, 270), ('PlatformTdcLimit', c.Array[uint16_t, Literal[2]], 272), ('SocketPowerLimitDc', c.Array[uint16_t, Literal[4]], 276), ('SocketPowerLimitSmartShift2', uint16_t, 284), ('CustomSkuSpare16b', uint16_t, 286), ('CustomSkuSpare32b', c.Array[uint32_t, Literal[10]], 288), ('MmHubPadding', c.Array[uint32_t, Literal[8]], 328)])
 @c.record
 class PPTable_t(c.Struct):
   SIZE = 4468
@@ -804,32 +804,32 @@ DriverSmuConfig_t.register_fields([('GfxclkAverageLpfTau', uint16_t, 0), ('FclkA
 class DriverSmuConfigExternal_t(c.Struct):
   SIZE = 84
   DriverSmuConfig: DriverSmuConfig_t
-  Spare: ctypes.Array[ctypes.c_uint32]
-  MmHubPadding: ctypes.Array[ctypes.c_uint32]
-DriverSmuConfigExternal_t.register_fields([('DriverSmuConfig', DriverSmuConfig_t, 0), ('Spare', (uint32_t * 8), 20), ('MmHubPadding', (uint32_t * 8), 52)])
+  Spare: c.Array[ctypes.c_uint32, Literal[8]]
+  MmHubPadding: c.Array[ctypes.c_uint32, Literal[8]]
+DriverSmuConfigExternal_t.register_fields([('DriverSmuConfig', DriverSmuConfig_t, 0), ('Spare', c.Array[uint32_t, Literal[8]], 20), ('MmHubPadding', c.Array[uint32_t, Literal[8]], 52)])
 @c.record
 class DriverInfoTable_t(c.Struct):
   SIZE = 372
-  FreqTableGfx: ctypes.Array[ctypes.c_uint16]
-  FreqTableVclk: ctypes.Array[ctypes.c_uint16]
-  FreqTableDclk: ctypes.Array[ctypes.c_uint16]
-  FreqTableSocclk: ctypes.Array[ctypes.c_uint16]
-  FreqTableUclk: ctypes.Array[ctypes.c_uint16]
-  FreqTableDispclk: ctypes.Array[ctypes.c_uint16]
-  FreqTableDppClk: ctypes.Array[ctypes.c_uint16]
-  FreqTableDprefclk: ctypes.Array[ctypes.c_uint16]
-  FreqTableDcfclk: ctypes.Array[ctypes.c_uint16]
-  FreqTableDtbclk: ctypes.Array[ctypes.c_uint16]
-  FreqTableFclk: ctypes.Array[ctypes.c_uint16]
-  DcModeMaxFreq: ctypes.Array[ctypes.c_uint16]
+  FreqTableGfx: c.Array[ctypes.c_uint16, Literal[16]]
+  FreqTableVclk: c.Array[ctypes.c_uint16, Literal[8]]
+  FreqTableDclk: c.Array[ctypes.c_uint16, Literal[8]]
+  FreqTableSocclk: c.Array[ctypes.c_uint16, Literal[8]]
+  FreqTableUclk: c.Array[ctypes.c_uint16, Literal[6]]
+  FreqTableDispclk: c.Array[ctypes.c_uint16, Literal[8]]
+  FreqTableDppClk: c.Array[ctypes.c_uint16, Literal[8]]
+  FreqTableDprefclk: c.Array[ctypes.c_uint16, Literal[8]]
+  FreqTableDcfclk: c.Array[ctypes.c_uint16, Literal[8]]
+  FreqTableDtbclk: c.Array[ctypes.c_uint16, Literal[8]]
+  FreqTableFclk: c.Array[ctypes.c_uint16, Literal[8]]
+  DcModeMaxFreq: c.Array[ctypes.c_uint16, Literal[11]]
   Padding: int
-  Spare: ctypes.Array[ctypes.c_uint32]
-  MmHubPadding: ctypes.Array[ctypes.c_uint32]
-DriverInfoTable_t.register_fields([('FreqTableGfx', (uint16_t * 16), 0), ('FreqTableVclk', (uint16_t * 8), 32), ('FreqTableDclk', (uint16_t * 8), 48), ('FreqTableSocclk', (uint16_t * 8), 64), ('FreqTableUclk', (uint16_t * 6), 80), ('FreqTableDispclk', (uint16_t * 8), 92), ('FreqTableDppClk', (uint16_t * 8), 108), ('FreqTableDprefclk', (uint16_t * 8), 124), ('FreqTableDcfclk', (uint16_t * 8), 140), ('FreqTableDtbclk', (uint16_t * 8), 156), ('FreqTableFclk', (uint16_t * 8), 172), ('DcModeMaxFreq', (uint16_t * 11), 188), ('Padding', uint16_t, 210), ('Spare', (uint32_t * 32), 212), ('MmHubPadding', (uint32_t * 8), 340)])
+  Spare: c.Array[ctypes.c_uint32, Literal[32]]
+  MmHubPadding: c.Array[ctypes.c_uint32, Literal[8]]
+DriverInfoTable_t.register_fields([('FreqTableGfx', c.Array[uint16_t, Literal[16]], 0), ('FreqTableVclk', c.Array[uint16_t, Literal[8]], 32), ('FreqTableDclk', c.Array[uint16_t, Literal[8]], 48), ('FreqTableSocclk', c.Array[uint16_t, Literal[8]], 64), ('FreqTableUclk', c.Array[uint16_t, Literal[6]], 80), ('FreqTableDispclk', c.Array[uint16_t, Literal[8]], 92), ('FreqTableDppClk', c.Array[uint16_t, Literal[8]], 108), ('FreqTableDprefclk', c.Array[uint16_t, Literal[8]], 124), ('FreqTableDcfclk', c.Array[uint16_t, Literal[8]], 140), ('FreqTableDtbclk', c.Array[uint16_t, Literal[8]], 156), ('FreqTableFclk', c.Array[uint16_t, Literal[8]], 172), ('DcModeMaxFreq', c.Array[uint16_t, Literal[11]], 188), ('Padding', uint16_t, 210), ('Spare', c.Array[uint32_t, Literal[32]], 212), ('MmHubPadding', c.Array[uint32_t, Literal[8]], 340)])
 @c.record
 class SmuMetrics_t(c.Struct):
   SIZE = 260
-  CurrClock: ctypes.Array[ctypes.c_uint32]
+  CurrClock: c.Array[ctypes.c_uint32, Literal[11]]
   AverageGfxclkFrequencyTarget: int
   AverageGfxclkFrequencyPreDs: int
   AverageGfxclkFrequencyPostDs: int
@@ -861,8 +861,8 @@ class SmuMetrics_t(c.Struct):
   MovingAverageSocketPower: int
   MovingAveragePadding: int
   MetricsCounter: int
-  AvgVoltage: ctypes.Array[ctypes.c_uint16]
-  AvgCurrent: ctypes.Array[ctypes.c_uint16]
+  AvgVoltage: c.Array[ctypes.c_uint16, Literal[4]]
+  AvgCurrent: c.Array[ctypes.c_uint16, Literal[4]]
   AverageGfxActivity: int
   AverageUclkActivity: int
   AverageVcn0ActivityPercentage: int
@@ -870,69 +870,69 @@ class SmuMetrics_t(c.Struct):
   EnergyAccumulator: int
   AverageSocketPower: int
   AverageTotalBoardPower: int
-  AvgTemperature: ctypes.Array[ctypes.c_uint16]
+  AvgTemperature: c.Array[ctypes.c_uint16, Literal[12]]
   AvgTemperatureFanIntake: int
   PcieRate: int
   PcieWidth: int
   AvgFanPwm: int
-  Padding: ctypes.Array[ctypes.c_ubyte]
+  Padding: c.Array[ctypes.c_ubyte, Literal[1]]
   AvgFanRpm: int
-  ThrottlingPercentage: ctypes.Array[ctypes.c_ubyte]
+  ThrottlingPercentage: c.Array[ctypes.c_ubyte, Literal[21]]
   VmaxThrottlingPercentage: int
-  padding1: ctypes.Array[ctypes.c_ubyte]
-  D3HotEntryCountPerMode: ctypes.Array[ctypes.c_uint32]
-  D3HotExitCountPerMode: ctypes.Array[ctypes.c_uint32]
-  ArmMsgReceivedCountPerMode: ctypes.Array[ctypes.c_uint32]
+  padding1: c.Array[ctypes.c_ubyte, Literal[2]]
+  D3HotEntryCountPerMode: c.Array[ctypes.c_uint32, Literal[4]]
+  D3HotExitCountPerMode: c.Array[ctypes.c_uint32, Literal[4]]
+  ArmMsgReceivedCountPerMode: c.Array[ctypes.c_uint32, Literal[4]]
   ApuSTAPMSmartShiftLimit: int
   ApuSTAPMLimit: int
   AvgApuSocketPower: int
   AverageUclkActivity_MAX: int
   PublicSerialNumberLower: int
   PublicSerialNumberUpper: int
-SmuMetrics_t.register_fields([('CurrClock', (uint32_t * 11), 0), ('AverageGfxclkFrequencyTarget', uint16_t, 44), ('AverageGfxclkFrequencyPreDs', uint16_t, 46), ('AverageGfxclkFrequencyPostDs', uint16_t, 48), ('AverageFclkFrequencyPreDs', uint16_t, 50), ('AverageFclkFrequencyPostDs', uint16_t, 52), ('AverageMemclkFrequencyPreDs', uint16_t, 54), ('AverageMemclkFrequencyPostDs', uint16_t, 56), ('AverageVclk0Frequency', uint16_t, 58), ('AverageDclk0Frequency', uint16_t, 60), ('AverageVclk1Frequency', uint16_t, 62), ('AverageDclk1Frequency', uint16_t, 64), ('AveragePCIeBusy', uint16_t, 66), ('dGPU_W_MAX', uint16_t, 68), ('padding', uint16_t, 70), ('MovingAverageGfxclkFrequencyTarget', uint16_t, 72), ('MovingAverageGfxclkFrequencyPreDs', uint16_t, 74), ('MovingAverageGfxclkFrequencyPostDs', uint16_t, 76), ('MovingAverageFclkFrequencyPreDs', uint16_t, 78), ('MovingAverageFclkFrequencyPostDs', uint16_t, 80), ('MovingAverageMemclkFrequencyPreDs', uint16_t, 82), ('MovingAverageMemclkFrequencyPostDs', uint16_t, 84), ('MovingAverageVclk0Frequency', uint16_t, 86), ('MovingAverageDclk0Frequency', uint16_t, 88), ('MovingAverageGfxActivity', uint16_t, 90), ('MovingAverageUclkActivity', uint16_t, 92), ('MovingAverageVcn0ActivityPercentage', uint16_t, 94), ('MovingAveragePCIeBusy', uint16_t, 96), ('MovingAverageUclkActivity_MAX', uint16_t, 98), ('MovingAverageSocketPower', uint16_t, 100), ('MovingAveragePadding', uint16_t, 102), ('MetricsCounter', uint32_t, 104), ('AvgVoltage', (uint16_t * 4), 108), ('AvgCurrent', (uint16_t * 4), 116), ('AverageGfxActivity', uint16_t, 124), ('AverageUclkActivity', uint16_t, 126), ('AverageVcn0ActivityPercentage', uint16_t, 128), ('Vcn1ActivityPercentage', uint16_t, 130), ('EnergyAccumulator', uint32_t, 132), ('AverageSocketPower', uint16_t, 136), ('AverageTotalBoardPower', uint16_t, 138), ('AvgTemperature', (uint16_t * 12), 140), ('AvgTemperatureFanIntake', uint16_t, 164), ('PcieRate', uint8_t, 166), ('PcieWidth', uint8_t, 167), ('AvgFanPwm', uint8_t, 168), ('Padding', (uint8_t * 1), 169), ('AvgFanRpm', uint16_t, 170), ('ThrottlingPercentage', (uint8_t * 21), 172), ('VmaxThrottlingPercentage', uint8_t, 193), ('padding1', (uint8_t * 2), 194), ('D3HotEntryCountPerMode', (uint32_t * 4), 196), ('D3HotExitCountPerMode', (uint32_t * 4), 212), ('ArmMsgReceivedCountPerMode', (uint32_t * 4), 228), ('ApuSTAPMSmartShiftLimit', uint16_t, 244), ('ApuSTAPMLimit', uint16_t, 246), ('AvgApuSocketPower', uint16_t, 248), ('AverageUclkActivity_MAX', uint16_t, 250), ('PublicSerialNumberLower', uint32_t, 252), ('PublicSerialNumberUpper', uint32_t, 256)])
+SmuMetrics_t.register_fields([('CurrClock', c.Array[uint32_t, Literal[11]], 0), ('AverageGfxclkFrequencyTarget', uint16_t, 44), ('AverageGfxclkFrequencyPreDs', uint16_t, 46), ('AverageGfxclkFrequencyPostDs', uint16_t, 48), ('AverageFclkFrequencyPreDs', uint16_t, 50), ('AverageFclkFrequencyPostDs', uint16_t, 52), ('AverageMemclkFrequencyPreDs', uint16_t, 54), ('AverageMemclkFrequencyPostDs', uint16_t, 56), ('AverageVclk0Frequency', uint16_t, 58), ('AverageDclk0Frequency', uint16_t, 60), ('AverageVclk1Frequency', uint16_t, 62), ('AverageDclk1Frequency', uint16_t, 64), ('AveragePCIeBusy', uint16_t, 66), ('dGPU_W_MAX', uint16_t, 68), ('padding', uint16_t, 70), ('MovingAverageGfxclkFrequencyTarget', uint16_t, 72), ('MovingAverageGfxclkFrequencyPreDs', uint16_t, 74), ('MovingAverageGfxclkFrequencyPostDs', uint16_t, 76), ('MovingAverageFclkFrequencyPreDs', uint16_t, 78), ('MovingAverageFclkFrequencyPostDs', uint16_t, 80), ('MovingAverageMemclkFrequencyPreDs', uint16_t, 82), ('MovingAverageMemclkFrequencyPostDs', uint16_t, 84), ('MovingAverageVclk0Frequency', uint16_t, 86), ('MovingAverageDclk0Frequency', uint16_t, 88), ('MovingAverageGfxActivity', uint16_t, 90), ('MovingAverageUclkActivity', uint16_t, 92), ('MovingAverageVcn0ActivityPercentage', uint16_t, 94), ('MovingAveragePCIeBusy', uint16_t, 96), ('MovingAverageUclkActivity_MAX', uint16_t, 98), ('MovingAverageSocketPower', uint16_t, 100), ('MovingAveragePadding', uint16_t, 102), ('MetricsCounter', uint32_t, 104), ('AvgVoltage', c.Array[uint16_t, Literal[4]], 108), ('AvgCurrent', c.Array[uint16_t, Literal[4]], 116), ('AverageGfxActivity', uint16_t, 124), ('AverageUclkActivity', uint16_t, 126), ('AverageVcn0ActivityPercentage', uint16_t, 128), ('Vcn1ActivityPercentage', uint16_t, 130), ('EnergyAccumulator', uint32_t, 132), ('AverageSocketPower', uint16_t, 136), ('AverageTotalBoardPower', uint16_t, 138), ('AvgTemperature', c.Array[uint16_t, Literal[12]], 140), ('AvgTemperatureFanIntake', uint16_t, 164), ('PcieRate', uint8_t, 166), ('PcieWidth', uint8_t, 167), ('AvgFanPwm', uint8_t, 168), ('Padding', c.Array[uint8_t, Literal[1]], 169), ('AvgFanRpm', uint16_t, 170), ('ThrottlingPercentage', c.Array[uint8_t, Literal[21]], 172), ('VmaxThrottlingPercentage', uint8_t, 193), ('padding1', c.Array[uint8_t, Literal[2]], 194), ('D3HotEntryCountPerMode', c.Array[uint32_t, Literal[4]], 196), ('D3HotExitCountPerMode', c.Array[uint32_t, Literal[4]], 212), ('ArmMsgReceivedCountPerMode', c.Array[uint32_t, Literal[4]], 228), ('ApuSTAPMSmartShiftLimit', uint16_t, 244), ('ApuSTAPMLimit', uint16_t, 246), ('AvgApuSocketPower', uint16_t, 248), ('AverageUclkActivity_MAX', uint16_t, 250), ('PublicSerialNumberLower', uint32_t, 252), ('PublicSerialNumberUpper', uint32_t, 256)])
 @c.record
 class SmuMetricsExternal_t(c.Struct):
   SIZE = 412
   SmuMetrics: SmuMetrics_t
-  Spare: ctypes.Array[ctypes.c_uint32]
-  MmHubPadding: ctypes.Array[ctypes.c_uint32]
-SmuMetricsExternal_t.register_fields([('SmuMetrics', SmuMetrics_t, 0), ('Spare', (uint32_t * 30), 260), ('MmHubPadding', (uint32_t * 8), 380)])
+  Spare: c.Array[ctypes.c_uint32, Literal[30]]
+  MmHubPadding: c.Array[ctypes.c_uint32, Literal[8]]
+SmuMetricsExternal_t.register_fields([('SmuMetrics', SmuMetrics_t, 0), ('Spare', c.Array[uint32_t, Literal[30]], 260), ('MmHubPadding', c.Array[uint32_t, Literal[8]], 380)])
 @c.record
 class WatermarkRowGeneric_t(c.Struct):
   SIZE = 4
   WmSetting: int
   Flags: int
-  Padding: ctypes.Array[ctypes.c_ubyte]
-WatermarkRowGeneric_t.register_fields([('WmSetting', uint8_t, 0), ('Flags', uint8_t, 1), ('Padding', (uint8_t * 2), 2)])
+  Padding: c.Array[ctypes.c_ubyte, Literal[2]]
+WatermarkRowGeneric_t.register_fields([('WmSetting', uint8_t, 0), ('Flags', uint8_t, 1), ('Padding', c.Array[uint8_t, Literal[2]], 2)])
 WATERMARKS_FLAGS_e: dict[int, str] = {(WATERMARKS_CLOCK_RANGE:=0): 'WATERMARKS_CLOCK_RANGE', (WATERMARKS_DUMMY_PSTATE:=1): 'WATERMARKS_DUMMY_PSTATE', (WATERMARKS_MALL:=2): 'WATERMARKS_MALL', (WATERMARKS_COUNT:=3): 'WATERMARKS_COUNT'}
 @c.record
 class Watermarks_t(c.Struct):
   SIZE = 16
-  WatermarkRow: ctypes.Array[WatermarkRowGeneric_t]
-Watermarks_t.register_fields([('WatermarkRow', (WatermarkRowGeneric_t * 4), 0)])
+  WatermarkRow: c.Array[WatermarkRowGeneric_t, Literal[4]]
+Watermarks_t.register_fields([('WatermarkRow', c.Array[WatermarkRowGeneric_t, Literal[4]], 0)])
 @c.record
 class WatermarksExternal_t(c.Struct):
   SIZE = 112
   Watermarks: Watermarks_t
-  Spare: ctypes.Array[ctypes.c_uint32]
-  MmHubPadding: ctypes.Array[ctypes.c_uint32]
-WatermarksExternal_t.register_fields([('Watermarks', Watermarks_t, 0), ('Spare', (uint32_t * 16), 16), ('MmHubPadding', (uint32_t * 8), 80)])
+  Spare: c.Array[ctypes.c_uint32, Literal[16]]
+  MmHubPadding: c.Array[ctypes.c_uint32, Literal[8]]
+WatermarksExternal_t.register_fields([('Watermarks', Watermarks_t, 0), ('Spare', c.Array[uint32_t, Literal[16]], 16), ('MmHubPadding', c.Array[uint32_t, Literal[8]], 80)])
 @c.record
 class AvfsDebugTable_t(c.Struct):
   SIZE = 1368
-  avgPsmCount: ctypes.Array[ctypes.c_uint16]
-  minPsmCount: ctypes.Array[ctypes.c_uint16]
-  maxPsmCount: ctypes.Array[ctypes.c_uint16]
-  avgPsmVoltage: ctypes.Array[ctypes.c_float]
-  minPsmVoltage: ctypes.Array[ctypes.c_float]
-  maxPsmVoltage: ctypes.Array[ctypes.c_float]
-AvfsDebugTable_t.register_fields([('avgPsmCount', (uint16_t * 76), 0), ('minPsmCount', (uint16_t * 76), 152), ('maxPsmCount', (uint16_t * 76), 304), ('avgPsmVoltage', (ctypes.c_float * 76), 456), ('minPsmVoltage', (ctypes.c_float * 76), 760), ('maxPsmVoltage', (ctypes.c_float * 76), 1064)])
+  avgPsmCount: c.Array[ctypes.c_uint16, Literal[76]]
+  minPsmCount: c.Array[ctypes.c_uint16, Literal[76]]
+  maxPsmCount: c.Array[ctypes.c_uint16, Literal[76]]
+  avgPsmVoltage: c.Array[ctypes.c_float, Literal[76]]
+  minPsmVoltage: c.Array[ctypes.c_float, Literal[76]]
+  maxPsmVoltage: c.Array[ctypes.c_float, Literal[76]]
+AvfsDebugTable_t.register_fields([('avgPsmCount', c.Array[uint16_t, Literal[76]], 0), ('minPsmCount', c.Array[uint16_t, Literal[76]], 152), ('maxPsmCount', c.Array[uint16_t, Literal[76]], 304), ('avgPsmVoltage', c.Array[ctypes.c_float, Literal[76]], 456), ('minPsmVoltage', c.Array[ctypes.c_float, Literal[76]], 760), ('maxPsmVoltage', c.Array[ctypes.c_float, Literal[76]], 1064)])
 @c.record
 class AvfsDebugTableExternal_t(c.Struct):
   SIZE = 1400
   AvfsDebugTable: AvfsDebugTable_t
-  MmHubPadding: ctypes.Array[ctypes.c_uint32]
-AvfsDebugTableExternal_t.register_fields([('AvfsDebugTable', AvfsDebugTable_t, 0), ('MmHubPadding', (uint32_t * 8), 1368)])
+  MmHubPadding: c.Array[ctypes.c_uint32, Literal[8]]
+AvfsDebugTableExternal_t.register_fields([('AvfsDebugTable', AvfsDebugTable_t, 0), ('MmHubPadding', c.Array[uint32_t, Literal[8]], 1368)])
 @c.record
 class DpmActivityMonitorCoeffInt_t(c.Struct):
   SIZE = 108
@@ -964,17 +964,17 @@ class DpmActivityMonitorCoeffInt_t(c.Struct):
   Fclk_PD_Data_limit_c: int
   Fclk_PD_Data_error_coeff: int
   Fclk_PD_Data_error_rate_coeff: int
-  Mem_UpThreshold_Limit: ctypes.Array[ctypes.c_uint32]
-  Mem_UpHystLimit: ctypes.Array[ctypes.c_ubyte]
-  Mem_DownHystLimit: ctypes.Array[ctypes.c_uint16]
+  Mem_UpThreshold_Limit: c.Array[ctypes.c_uint32, Literal[6]]
+  Mem_UpHystLimit: c.Array[ctypes.c_ubyte, Literal[6]]
+  Mem_DownHystLimit: c.Array[ctypes.c_uint16, Literal[6]]
   Mem_Fps: int
-DpmActivityMonitorCoeffInt_t.register_fields([('Gfx_ActiveHystLimit', uint8_t, 0), ('Gfx_IdleHystLimit', uint8_t, 1), ('Gfx_FPS', uint8_t, 2), ('Gfx_MinActiveFreqType', uint8_t, 3), ('Gfx_BoosterFreqType', uint8_t, 4), ('PaddingGfx', uint8_t, 5), ('Gfx_MinActiveFreq', uint16_t, 6), ('Gfx_BoosterFreq', uint16_t, 8), ('Gfx_PD_Data_time_constant', uint16_t, 10), ('Gfx_PD_Data_limit_a', uint32_t, 12), ('Gfx_PD_Data_limit_b', uint32_t, 16), ('Gfx_PD_Data_limit_c', uint32_t, 20), ('Gfx_PD_Data_error_coeff', uint32_t, 24), ('Gfx_PD_Data_error_rate_coeff', uint32_t, 28), ('Fclk_ActiveHystLimit', uint8_t, 32), ('Fclk_IdleHystLimit', uint8_t, 33), ('Fclk_FPS', uint8_t, 34), ('Fclk_MinActiveFreqType', uint8_t, 35), ('Fclk_BoosterFreqType', uint8_t, 36), ('PaddingFclk', uint8_t, 37), ('Fclk_MinActiveFreq', uint16_t, 38), ('Fclk_BoosterFreq', uint16_t, 40), ('Fclk_PD_Data_time_constant', uint16_t, 42), ('Fclk_PD_Data_limit_a', uint32_t, 44), ('Fclk_PD_Data_limit_b', uint32_t, 48), ('Fclk_PD_Data_limit_c', uint32_t, 52), ('Fclk_PD_Data_error_coeff', uint32_t, 56), ('Fclk_PD_Data_error_rate_coeff', uint32_t, 60), ('Mem_UpThreshold_Limit', (uint32_t * 6), 64), ('Mem_UpHystLimit', (uint8_t * 6), 88), ('Mem_DownHystLimit', (uint16_t * 6), 94), ('Mem_Fps', uint16_t, 106)])
+DpmActivityMonitorCoeffInt_t.register_fields([('Gfx_ActiveHystLimit', uint8_t, 0), ('Gfx_IdleHystLimit', uint8_t, 1), ('Gfx_FPS', uint8_t, 2), ('Gfx_MinActiveFreqType', uint8_t, 3), ('Gfx_BoosterFreqType', uint8_t, 4), ('PaddingGfx', uint8_t, 5), ('Gfx_MinActiveFreq', uint16_t, 6), ('Gfx_BoosterFreq', uint16_t, 8), ('Gfx_PD_Data_time_constant', uint16_t, 10), ('Gfx_PD_Data_limit_a', uint32_t, 12), ('Gfx_PD_Data_limit_b', uint32_t, 16), ('Gfx_PD_Data_limit_c', uint32_t, 20), ('Gfx_PD_Data_error_coeff', uint32_t, 24), ('Gfx_PD_Data_error_rate_coeff', uint32_t, 28), ('Fclk_ActiveHystLimit', uint8_t, 32), ('Fclk_IdleHystLimit', uint8_t, 33), ('Fclk_FPS', uint8_t, 34), ('Fclk_MinActiveFreqType', uint8_t, 35), ('Fclk_BoosterFreqType', uint8_t, 36), ('PaddingFclk', uint8_t, 37), ('Fclk_MinActiveFreq', uint16_t, 38), ('Fclk_BoosterFreq', uint16_t, 40), ('Fclk_PD_Data_time_constant', uint16_t, 42), ('Fclk_PD_Data_limit_a', uint32_t, 44), ('Fclk_PD_Data_limit_b', uint32_t, 48), ('Fclk_PD_Data_limit_c', uint32_t, 52), ('Fclk_PD_Data_error_coeff', uint32_t, 56), ('Fclk_PD_Data_error_rate_coeff', uint32_t, 60), ('Mem_UpThreshold_Limit', c.Array[uint32_t, Literal[6]], 64), ('Mem_UpHystLimit', c.Array[uint8_t, Literal[6]], 88), ('Mem_DownHystLimit', c.Array[uint16_t, Literal[6]], 94), ('Mem_Fps', uint16_t, 106)])
 @c.record
 class DpmActivityMonitorCoeffIntExternal_t(c.Struct):
   SIZE = 140
   DpmActivityMonitorCoeffInt: DpmActivityMonitorCoeffInt_t
-  MmHubPadding: ctypes.Array[ctypes.c_uint32]
-DpmActivityMonitorCoeffIntExternal_t.register_fields([('DpmActivityMonitorCoeffInt', DpmActivityMonitorCoeffInt_t, 0), ('MmHubPadding', (uint32_t * 8), 108)])
+  MmHubPadding: c.Array[ctypes.c_uint32, Literal[8]]
+DpmActivityMonitorCoeffIntExternal_t.register_fields([('DpmActivityMonitorCoeffInt', DpmActivityMonitorCoeffInt_t, 0), ('MmHubPadding', c.Array[uint32_t, Literal[8]], 108)])
 @c.record
 class struct_smu_hw_power_state(c.Struct):
   SIZE = 4
@@ -1013,8 +1013,8 @@ class struct_smu_state_memory_block(c.Struct):
   SIZE = 5
   dll_off: bool
   m3arb: int
-  unused: ctypes.Array[ctypes.c_ubyte]
-struct_smu_state_memory_block.register_fields([('dll_off', ctypes.c_bool, 0), ('m3arb', ctypes.c_ubyte, 1), ('unused', (ctypes.c_ubyte * 3), 2)])
+  unused: c.Array[ctypes.c_ubyte, Literal[3]]
+struct_smu_state_memory_block.register_fields([('dll_off', ctypes.c_bool, 0), ('m3arb', ctypes.c_ubyte, 1), ('unused', c.Array[ctypes.c_ubyte, Literal[3]], 2)])
 @c.record
 class struct_smu_state_software_algorithm_block(c.Struct):
   SIZE = 2
@@ -1063,9 +1063,9 @@ class struct_smu_user_dpm_profile(c.Struct):
   fan_speed_rpm: int
   flags: int
   user_od: int
-  clk_mask: ctypes.Array[ctypes.c_uint32]
+  clk_mask: c.Array[ctypes.c_uint32, Literal[28]]
   clk_dependency: int
-struct_smu_user_dpm_profile.register_fields([('fan_mode', ctypes.c_uint32, 0), ('power_limit', ctypes.c_uint32, 4), ('fan_speed_pwm', ctypes.c_uint32, 8), ('fan_speed_rpm', ctypes.c_uint32, 12), ('flags', ctypes.c_uint32, 16), ('user_od', ctypes.c_uint32, 20), ('clk_mask', (ctypes.c_uint32 * 28), 24), ('clk_dependency', ctypes.c_uint32, 136)])
+struct_smu_user_dpm_profile.register_fields([('fan_mode', ctypes.c_uint32, 0), ('power_limit', ctypes.c_uint32, 4), ('fan_speed_pwm', ctypes.c_uint32, 8), ('fan_speed_rpm', ctypes.c_uint32, 12), ('flags', ctypes.c_uint32, 16), ('user_od', ctypes.c_uint32, 20), ('clk_mask', c.Array[ctypes.c_uint32, Literal[28]], 24), ('clk_dependency', ctypes.c_uint32, 136)])
 @c.record
 class struct_smu_table(c.Struct):
   SIZE = 48
@@ -1073,11 +1073,11 @@ class struct_smu_table(c.Struct):
   align: int
   domain: int
   mc_address: int
-  cpu_addr: int|None
-  bo: ctypes._Pointer[struct_amdgpu_bo]
+  cpu_addr: ctypes.c_void_p
+  bo: c.POINTER[struct_amdgpu_bo]
   version: int
 class struct_amdgpu_bo(c.Struct): pass
-struct_smu_table.register_fields([('size', ctypes.c_uint64, 0), ('align', ctypes.c_uint32, 8), ('domain', ctypes.c_ubyte, 12), ('mc_address', ctypes.c_uint64, 16), ('cpu_addr', ctypes.c_void_p, 24), ('bo', ctypes.POINTER(struct_amdgpu_bo), 32), ('version', ctypes.c_uint32, 40)])
+struct_smu_table.register_fields([('size', ctypes.c_uint64, 0), ('align', ctypes.c_uint32, 8), ('domain', ctypes.c_ubyte, 12), ('mc_address', ctypes.c_uint64, 16), ('cpu_addr', ctypes.c_void_p, 24), ('bo', c.POINTER[struct_amdgpu_bo], 32), ('version', ctypes.c_uint32, 40)])
 enum_smu_perf_level_designation: dict[int, str] = {(PERF_LEVEL_ACTIVITY:=0): 'PERF_LEVEL_ACTIVITY', (PERF_LEVEL_POWER_CONTAINMENT:=1): 'PERF_LEVEL_POWER_CONTAINMENT'}
 @c.record
 class struct_smu_performance_level(c.Struct):

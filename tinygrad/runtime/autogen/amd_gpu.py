@@ -513,13 +513,13 @@ rocr_AMD_SDMA_PKT_GCR: TypeAlias = rocr_AMD_SDMA_PKT_GCR_TAG
 @c.record
 class IP_BASE_INSTANCE(c.Struct):
   SIZE = 20
-  segment: ctypes.Array[ctypes.c_uint32]
-IP_BASE_INSTANCE.register_fields([('segment', (ctypes.c_uint32 * 5), 0)])
+  segment: c.Array[ctypes.c_uint32, Literal[5]]
+IP_BASE_INSTANCE.register_fields([('segment', c.Array[ctypes.c_uint32, Literal[5]], 0)])
 @c.record
 class IP_BASE(c.Struct):
   SIZE = 140
-  instance: ctypes.Array[IP_BASE_INSTANCE]
-IP_BASE.register_fields([('instance', (IP_BASE_INSTANCE * 7), 0)])
+  instance: c.Array[IP_BASE_INSTANCE, Literal[7]]
+IP_BASE.register_fields([('instance', c.Array[IP_BASE_INSTANCE, Literal[7]], 0)])
 SDMA_OP_COPY = 1 # type: ignore
 SDMA_OP_FENCE = 5 # type: ignore
 SDMA_OP_TRAP = 6 # type: ignore

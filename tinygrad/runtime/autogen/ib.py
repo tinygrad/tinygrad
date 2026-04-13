@@ -8,7 +8,7 @@ dll = c.DLL('ib', 'ibverbs', use_errno=True)
 @c.record
 class union_ibv_gid(c.Struct):
   SIZE = 16
-  raw: ctypes.Array[ctypes.c_ubyte]
+  raw: c.Array[ctypes.c_ubyte, Literal[16]]
   _global: union_ibv_gid_global
 uint8_t: TypeAlias = ctypes.c_ubyte
 @c.record
@@ -18,7 +18,7 @@ class union_ibv_gid_global(c.Struct):
   interface_id: int
 __be64: TypeAlias = ctypes.c_uint64
 union_ibv_gid_global.register_fields([('subnet_prefix', ctypes.c_uint64, 0), ('interface_id', ctypes.c_uint64, 8)])
-union_ibv_gid.register_fields([('raw', (uint8_t * 16), 0), ('_global', union_ibv_gid_global, 0)])
+union_ibv_gid.register_fields([('raw', c.Array[uint8_t, Literal[16]], 0), ('_global', union_ibv_gid_global, 0)])
 enum_ibv_gid_type: dict[int, str] = {(IBV_GID_TYPE_IB:=0): 'IBV_GID_TYPE_IB', (IBV_GID_TYPE_ROCE_V1:=1): 'IBV_GID_TYPE_ROCE_V1', (IBV_GID_TYPE_ROCE_V2:=2): 'IBV_GID_TYPE_ROCE_V2'}
 @c.record
 class struct_ibv_gid_entry(c.Struct):
@@ -47,77 +47,77 @@ enum_ibv_dm_mask: dict[int, str] = {(IBV_DM_MASK_HANDLE:=1): 'IBV_DM_MASK_HANDLE
 @c.record
 class struct_ibv_dm(c.Struct):
   SIZE = 32
-  context: ctypes._Pointer[struct_ibv_context]
-  memcpy_to_dm: ctypes._CFunctionType
-  memcpy_from_dm: ctypes._CFunctionType
+  context: c.POINTER[struct_ibv_context]
+  memcpy_to_dm: c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_dm], ctypes.c_uint64, ctypes.c_void_p, ctypes.c_uint64]]
+  memcpy_from_dm: c.CFUNCTYPE[ctypes.c_int32, [ctypes.c_void_p, c.POINTER[struct_ibv_dm], ctypes.c_uint64, ctypes.c_uint64]]
   comp_mask: int
   handle: int
 @c.record
 class struct_ibv_context(c.Struct):
   SIZE = 328
-  device: ctypes._Pointer[struct_ibv_device]
+  device: c.POINTER[struct_ibv_device]
   ops: struct_ibv_context_ops
   cmd_fd: int
   async_fd: int
   num_comp_vectors: int
   mutex: pthread_mutex_t
-  abi_compat: int|None
+  abi_compat: ctypes.c_void_p
 @c.record
 class struct_ibv_device(c.Struct):
   SIZE = 664
   _ops: struct__ibv_device_ops
   node_type: int
   transport_type: int
-  name: ctypes.Array[ctypes.c_char]
-  dev_name: ctypes.Array[ctypes.c_char]
-  dev_path: ctypes.Array[ctypes.c_char]
-  ibdev_path: ctypes.Array[ctypes.c_char]
+  name: c.Array[ctypes.c_char, Literal[64]]
+  dev_name: c.Array[ctypes.c_char, Literal[64]]
+  dev_path: c.Array[ctypes.c_char, Literal[256]]
+  ibdev_path: c.Array[ctypes.c_char, Literal[256]]
 @c.record
 class struct__ibv_device_ops(c.Struct):
   SIZE = 16
-  _dummy1: ctypes._CFunctionType
-  _dummy2: ctypes._CFunctionType
-struct__ibv_device_ops.register_fields([('_dummy1', ctypes.CFUNCTYPE(ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_device), ctypes.c_int32), 0), ('_dummy2', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_context)), 8)])
-struct_ibv_device.register_fields([('_ops', struct__ibv_device_ops, 0), ('node_type', ctypes.c_int32, 16), ('transport_type', ctypes.c_int32, 20), ('name', (ctypes.c_char * 64), 24), ('dev_name', (ctypes.c_char * 64), 88), ('dev_path', (ctypes.c_char * 256), 152), ('ibdev_path', (ctypes.c_char * 256), 408)])
+  _dummy1: c.CFUNCTYPE[c.POINTER[struct_ibv_context], [c.POINTER[struct_ibv_device], ctypes.c_int32]]
+  _dummy2: c.CFUNCTYPE[None, [c.POINTER[struct_ibv_context]]]
+struct__ibv_device_ops.register_fields([('_dummy1', c.CFUNCTYPE[c.POINTER[struct_ibv_context], [c.POINTER[struct_ibv_device], ctypes.c_int32]], 0), ('_dummy2', c.CFUNCTYPE[None, [c.POINTER[struct_ibv_context]]], 8)])
+struct_ibv_device.register_fields([('_ops', struct__ibv_device_ops, 0), ('node_type', ctypes.c_int32, 16), ('transport_type', ctypes.c_int32, 20), ('name', c.Array[ctypes.c_char, Literal[64]], 24), ('dev_name', c.Array[ctypes.c_char, Literal[64]], 88), ('dev_path', c.Array[ctypes.c_char, Literal[256]], 152), ('ibdev_path', c.Array[ctypes.c_char, Literal[256]], 408)])
 @c.record
 class struct_ibv_context_ops(c.Struct):
   SIZE = 256
-  _compat_query_device: ctypes._CFunctionType
-  _compat_query_port: ctypes._CFunctionType
-  _compat_alloc_pd: ctypes._CFunctionType
-  _compat_dealloc_pd: ctypes._CFunctionType
-  _compat_reg_mr: ctypes._CFunctionType
-  _compat_rereg_mr: ctypes._CFunctionType
-  _compat_dereg_mr: ctypes._CFunctionType
-  alloc_mw: ctypes._CFunctionType
-  bind_mw: ctypes._CFunctionType
-  dealloc_mw: ctypes._CFunctionType
-  _compat_create_cq: ctypes._CFunctionType
-  poll_cq: ctypes._CFunctionType
-  req_notify_cq: ctypes._CFunctionType
-  _compat_cq_event: ctypes._CFunctionType
-  _compat_resize_cq: ctypes._CFunctionType
-  _compat_destroy_cq: ctypes._CFunctionType
-  _compat_create_srq: ctypes._CFunctionType
-  _compat_modify_srq: ctypes._CFunctionType
-  _compat_query_srq: ctypes._CFunctionType
-  _compat_destroy_srq: ctypes._CFunctionType
-  post_srq_recv: ctypes._CFunctionType
-  _compat_create_qp: ctypes._CFunctionType
-  _compat_query_qp: ctypes._CFunctionType
-  _compat_modify_qp: ctypes._CFunctionType
-  _compat_destroy_qp: ctypes._CFunctionType
-  post_send: ctypes._CFunctionType
-  post_recv: ctypes._CFunctionType
-  _compat_create_ah: ctypes._CFunctionType
-  _compat_destroy_ah: ctypes._CFunctionType
-  _compat_attach_mcast: ctypes._CFunctionType
-  _compat_detach_mcast: ctypes._CFunctionType
-  _compat_async_event: ctypes._CFunctionType
+  _compat_query_device: c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_context], c.POINTER[struct_ibv_device_attr]]]
+  _compat_query_port: c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_context], ctypes.c_ubyte, c.POINTER[struct__compat_ibv_port_attr]]]
+  _compat_alloc_pd: c.CFUNCTYPE[ctypes.c_void_p, []]
+  _compat_dealloc_pd: c.CFUNCTYPE[ctypes.c_void_p, []]
+  _compat_reg_mr: c.CFUNCTYPE[ctypes.c_void_p, []]
+  _compat_rereg_mr: c.CFUNCTYPE[ctypes.c_void_p, []]
+  _compat_dereg_mr: c.CFUNCTYPE[ctypes.c_void_p, []]
+  alloc_mw: c.CFUNCTYPE[c.POINTER[struct_ibv_mw], [c.POINTER[struct_ibv_pd], ctypes.c_uint32]]
+  bind_mw: c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_qp], c.POINTER[struct_ibv_mw], c.POINTER[struct_ibv_mw_bind]]]
+  dealloc_mw: c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_mw]]]
+  _compat_create_cq: c.CFUNCTYPE[ctypes.c_void_p, []]
+  poll_cq: c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_cq], ctypes.c_int32, c.POINTER[struct_ibv_wc]]]
+  req_notify_cq: c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_cq], ctypes.c_int32]]
+  _compat_cq_event: c.CFUNCTYPE[ctypes.c_void_p, []]
+  _compat_resize_cq: c.CFUNCTYPE[ctypes.c_void_p, []]
+  _compat_destroy_cq: c.CFUNCTYPE[ctypes.c_void_p, []]
+  _compat_create_srq: c.CFUNCTYPE[ctypes.c_void_p, []]
+  _compat_modify_srq: c.CFUNCTYPE[ctypes.c_void_p, []]
+  _compat_query_srq: c.CFUNCTYPE[ctypes.c_void_p, []]
+  _compat_destroy_srq: c.CFUNCTYPE[ctypes.c_void_p, []]
+  post_srq_recv: c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_srq], c.POINTER[struct_ibv_recv_wr], c.POINTER[c.POINTER[struct_ibv_recv_wr]]]]
+  _compat_create_qp: c.CFUNCTYPE[ctypes.c_void_p, []]
+  _compat_query_qp: c.CFUNCTYPE[ctypes.c_void_p, []]
+  _compat_modify_qp: c.CFUNCTYPE[ctypes.c_void_p, []]
+  _compat_destroy_qp: c.CFUNCTYPE[ctypes.c_void_p, []]
+  post_send: c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_qp], c.POINTER[struct_ibv_send_wr], c.POINTER[c.POINTER[struct_ibv_send_wr]]]]
+  post_recv: c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_qp], c.POINTER[struct_ibv_recv_wr], c.POINTER[c.POINTER[struct_ibv_recv_wr]]]]
+  _compat_create_ah: c.CFUNCTYPE[ctypes.c_void_p, []]
+  _compat_destroy_ah: c.CFUNCTYPE[ctypes.c_void_p, []]
+  _compat_attach_mcast: c.CFUNCTYPE[ctypes.c_void_p, []]
+  _compat_detach_mcast: c.CFUNCTYPE[ctypes.c_void_p, []]
+  _compat_async_event: c.CFUNCTYPE[ctypes.c_void_p, []]
 @c.record
 class struct_ibv_device_attr(c.Struct):
   SIZE = 232
-  fw_ver: ctypes.Array[ctypes.c_char]
+  fw_ver: c.Array[ctypes.c_char, Literal[64]]
   node_guid: int
   sys_image_guid: int
   max_mr_size: int
@@ -159,33 +159,33 @@ class struct_ibv_device_attr(c.Struct):
   phys_port_cnt: int
 uint64_t: TypeAlias = ctypes.c_uint64
 uint16_t: TypeAlias = ctypes.c_uint16
-struct_ibv_device_attr.register_fields([('fw_ver', (ctypes.c_char * 64), 0), ('node_guid', ctypes.c_uint64, 64), ('sys_image_guid', ctypes.c_uint64, 72), ('max_mr_size', uint64_t, 80), ('page_size_cap', uint64_t, 88), ('vendor_id', uint32_t, 96), ('vendor_part_id', uint32_t, 100), ('hw_ver', uint32_t, 104), ('max_qp', ctypes.c_int32, 108), ('max_qp_wr', ctypes.c_int32, 112), ('device_cap_flags', ctypes.c_uint32, 116), ('max_sge', ctypes.c_int32, 120), ('max_sge_rd', ctypes.c_int32, 124), ('max_cq', ctypes.c_int32, 128), ('max_cqe', ctypes.c_int32, 132), ('max_mr', ctypes.c_int32, 136), ('max_pd', ctypes.c_int32, 140), ('max_qp_rd_atom', ctypes.c_int32, 144), ('max_ee_rd_atom', ctypes.c_int32, 148), ('max_res_rd_atom', ctypes.c_int32, 152), ('max_qp_init_rd_atom', ctypes.c_int32, 156), ('max_ee_init_rd_atom', ctypes.c_int32, 160), ('atomic_cap', ctypes.c_uint32, 164), ('max_ee', ctypes.c_int32, 168), ('max_rdd', ctypes.c_int32, 172), ('max_mw', ctypes.c_int32, 176), ('max_raw_ipv6_qp', ctypes.c_int32, 180), ('max_raw_ethy_qp', ctypes.c_int32, 184), ('max_mcast_grp', ctypes.c_int32, 188), ('max_mcast_qp_attach', ctypes.c_int32, 192), ('max_total_mcast_qp_attach', ctypes.c_int32, 196), ('max_ah', ctypes.c_int32, 200), ('max_fmr', ctypes.c_int32, 204), ('max_map_per_fmr', ctypes.c_int32, 208), ('max_srq', ctypes.c_int32, 212), ('max_srq_wr', ctypes.c_int32, 216), ('max_srq_sge', ctypes.c_int32, 220), ('max_pkeys', uint16_t, 224), ('local_ca_ack_delay', uint8_t, 226), ('phys_port_cnt', uint8_t, 227)])
+struct_ibv_device_attr.register_fields([('fw_ver', c.Array[ctypes.c_char, Literal[64]], 0), ('node_guid', ctypes.c_uint64, 64), ('sys_image_guid', ctypes.c_uint64, 72), ('max_mr_size', uint64_t, 80), ('page_size_cap', uint64_t, 88), ('vendor_id', uint32_t, 96), ('vendor_part_id', uint32_t, 100), ('hw_ver', uint32_t, 104), ('max_qp', ctypes.c_int32, 108), ('max_qp_wr', ctypes.c_int32, 112), ('device_cap_flags', ctypes.c_uint32, 116), ('max_sge', ctypes.c_int32, 120), ('max_sge_rd', ctypes.c_int32, 124), ('max_cq', ctypes.c_int32, 128), ('max_cqe', ctypes.c_int32, 132), ('max_mr', ctypes.c_int32, 136), ('max_pd', ctypes.c_int32, 140), ('max_qp_rd_atom', ctypes.c_int32, 144), ('max_ee_rd_atom', ctypes.c_int32, 148), ('max_res_rd_atom', ctypes.c_int32, 152), ('max_qp_init_rd_atom', ctypes.c_int32, 156), ('max_ee_init_rd_atom', ctypes.c_int32, 160), ('atomic_cap', ctypes.c_uint32, 164), ('max_ee', ctypes.c_int32, 168), ('max_rdd', ctypes.c_int32, 172), ('max_mw', ctypes.c_int32, 176), ('max_raw_ipv6_qp', ctypes.c_int32, 180), ('max_raw_ethy_qp', ctypes.c_int32, 184), ('max_mcast_grp', ctypes.c_int32, 188), ('max_mcast_qp_attach', ctypes.c_int32, 192), ('max_total_mcast_qp_attach', ctypes.c_int32, 196), ('max_ah', ctypes.c_int32, 200), ('max_fmr', ctypes.c_int32, 204), ('max_map_per_fmr', ctypes.c_int32, 208), ('max_srq', ctypes.c_int32, 212), ('max_srq_wr', ctypes.c_int32, 216), ('max_srq_sge', ctypes.c_int32, 220), ('max_pkeys', uint16_t, 224), ('local_ca_ack_delay', uint8_t, 226), ('phys_port_cnt', uint8_t, 227)])
 class struct__compat_ibv_port_attr(c.Struct): pass
 @c.record
 class struct_ibv_mw(c.Struct):
   SIZE = 32
-  context: ctypes._Pointer[struct_ibv_context]
-  pd: ctypes._Pointer[struct_ibv_pd]
+  context: c.POINTER[struct_ibv_context]
+  pd: c.POINTER[struct_ibv_pd]
   rkey: int
   handle: int
   type: int
 @c.record
 class struct_ibv_pd(c.Struct):
   SIZE = 16
-  context: ctypes._Pointer[struct_ibv_context]
+  context: c.POINTER[struct_ibv_context]
   handle: int
-struct_ibv_pd.register_fields([('context', ctypes.POINTER(struct_ibv_context), 0), ('handle', uint32_t, 8)])
+struct_ibv_pd.register_fields([('context', c.POINTER[struct_ibv_context], 0), ('handle', uint32_t, 8)])
 enum_ibv_mw_type: dict[int, str] = {(IBV_MW_TYPE_1:=1): 'IBV_MW_TYPE_1', (IBV_MW_TYPE_2:=2): 'IBV_MW_TYPE_2'}
-struct_ibv_mw.register_fields([('context', ctypes.POINTER(struct_ibv_context), 0), ('pd', ctypes.POINTER(struct_ibv_pd), 8), ('rkey', uint32_t, 16), ('handle', uint32_t, 20), ('type', ctypes.c_uint32, 24)])
+struct_ibv_mw.register_fields([('context', c.POINTER[struct_ibv_context], 0), ('pd', c.POINTER[struct_ibv_pd], 8), ('rkey', uint32_t, 16), ('handle', uint32_t, 20), ('type', ctypes.c_uint32, 24)])
 @c.record
 class struct_ibv_qp(c.Struct):
   SIZE = 160
-  context: ctypes._Pointer[struct_ibv_context]
-  qp_context: int|None
-  pd: ctypes._Pointer[struct_ibv_pd]
-  send_cq: ctypes._Pointer[struct_ibv_cq]
-  recv_cq: ctypes._Pointer[struct_ibv_cq]
-  srq: ctypes._Pointer[struct_ibv_srq]
+  context: c.POINTER[struct_ibv_context]
+  qp_context: ctypes.c_void_p
+  pd: c.POINTER[struct_ibv_pd]
+  send_cq: c.POINTER[struct_ibv_cq]
+  recv_cq: c.POINTER[struct_ibv_cq]
+  srq: c.POINTER[struct_ibv_srq]
   handle: int
   qp_num: int
   state: int
@@ -196,9 +196,9 @@ class struct_ibv_qp(c.Struct):
 @c.record
 class struct_ibv_cq(c.Struct):
   SIZE = 128
-  context: ctypes._Pointer[struct_ibv_context]
-  channel: ctypes._Pointer[struct_ibv_comp_channel]
-  cq_context: int|None
+  context: c.POINTER[struct_ibv_context]
+  channel: c.POINTER[struct_ibv_comp_channel]
+  cq_context: ctypes.c_void_p
   handle: int
   cqe: int
   mutex: pthread_mutex_t
@@ -208,15 +208,15 @@ class struct_ibv_cq(c.Struct):
 @c.record
 class struct_ibv_comp_channel(c.Struct):
   SIZE = 16
-  context: ctypes._Pointer[struct_ibv_context]
+  context: c.POINTER[struct_ibv_context]
   fd: int
   refcnt: int
-struct_ibv_comp_channel.register_fields([('context', ctypes.POINTER(struct_ibv_context), 0), ('fd', ctypes.c_int32, 8), ('refcnt', ctypes.c_int32, 12)])
+struct_ibv_comp_channel.register_fields([('context', c.POINTER[struct_ibv_context], 0), ('fd', ctypes.c_int32, 8), ('refcnt', ctypes.c_int32, 12)])
 @c.record
 class pthread_mutex_t(c.Struct):
   SIZE = 40
   __data: struct___pthread_mutex_s
-  __size: ctypes.Array[ctypes.c_char]
+  __size: c.Array[ctypes.c_char, Literal[40]]
   __align: ctypes.c_int64
 @c.record
 class struct___pthread_mutex_s(c.Struct):
@@ -232,28 +232,28 @@ class struct___pthread_mutex_s(c.Struct):
 @c.record
 class struct___pthread_internal_list(c.Struct):
   SIZE = 16
-  __prev: ctypes._Pointer[struct___pthread_internal_list]
-  __next: ctypes._Pointer[struct___pthread_internal_list]
+  __prev: c.POINTER[struct___pthread_internal_list]
+  __next: c.POINTER[struct___pthread_internal_list]
 __pthread_list_t: TypeAlias = struct___pthread_internal_list
-struct___pthread_internal_list.register_fields([('__prev', ctypes.POINTER(struct___pthread_internal_list), 0), ('__next', ctypes.POINTER(struct___pthread_internal_list), 8)])
+struct___pthread_internal_list.register_fields([('__prev', c.POINTER[struct___pthread_internal_list], 0), ('__next', c.POINTER[struct___pthread_internal_list], 8)])
 struct___pthread_mutex_s.register_fields([('__lock', ctypes.c_int32, 0), ('__count', ctypes.c_uint32, 4), ('__owner', ctypes.c_int32, 8), ('__nusers', ctypes.c_uint32, 12), ('__kind', ctypes.c_int32, 16), ('__spins', ctypes.c_int16, 20), ('__elision', ctypes.c_int16, 22), ('__list', struct___pthread_internal_list, 24)])
-pthread_mutex_t.register_fields([('__data', struct___pthread_mutex_s, 0), ('__size', (ctypes.c_char * 40), 0), ('__align', ctypes.c_int64, 0)])
+pthread_mutex_t.register_fields([('__data', struct___pthread_mutex_s, 0), ('__size', c.Array[ctypes.c_char, Literal[40]], 0), ('__align', ctypes.c_int64, 0)])
 @c.record
 class pthread_cond_t(c.Struct):
   SIZE = 48
   __data: struct___pthread_cond_s
-  __size: ctypes.Array[ctypes.c_char]
+  __size: c.Array[ctypes.c_char, Literal[48]]
   __align: int
 @c.record
 class struct___pthread_cond_s(c.Struct):
   SIZE = 48
   __wseq: __atomic_wide_counter
   __g1_start: __atomic_wide_counter
-  __g_refs: ctypes.Array[ctypes.c_uint32]
-  __g_size: ctypes.Array[ctypes.c_uint32]
+  __g_refs: c.Array[ctypes.c_uint32, Literal[2]]
+  __g_size: c.Array[ctypes.c_uint32, Literal[2]]
   __g1_orig_size: int
   __wrefs: int
-  __g_signals: ctypes.Array[ctypes.c_uint32]
+  __g_signals: c.Array[ctypes.c_uint32, Literal[2]]
 @c.record
 class __atomic_wide_counter(c.Struct):
   SIZE = 8
@@ -266,23 +266,23 @@ class __atomic_wide_counter___value32(c.Struct):
   __high: int
 __atomic_wide_counter___value32.register_fields([('__low', ctypes.c_uint32, 0), ('__high', ctypes.c_uint32, 4)])
 __atomic_wide_counter.register_fields([('__value64', ctypes.c_uint64, 0), ('__value32', __atomic_wide_counter___value32, 0)])
-struct___pthread_cond_s.register_fields([('__wseq', __atomic_wide_counter, 0), ('__g1_start', __atomic_wide_counter, 8), ('__g_refs', (ctypes.c_uint32 * 2), 16), ('__g_size', (ctypes.c_uint32 * 2), 24), ('__g1_orig_size', ctypes.c_uint32, 32), ('__wrefs', ctypes.c_uint32, 36), ('__g_signals', (ctypes.c_uint32 * 2), 40)])
-pthread_cond_t.register_fields([('__data', struct___pthread_cond_s, 0), ('__size', (ctypes.c_char * 48), 0), ('__align', ctypes.c_int64, 0)])
-struct_ibv_cq.register_fields([('context', ctypes.POINTER(struct_ibv_context), 0), ('channel', ctypes.POINTER(struct_ibv_comp_channel), 8), ('cq_context', ctypes.c_void_p, 16), ('handle', uint32_t, 24), ('cqe', ctypes.c_int32, 28), ('mutex', pthread_mutex_t, 32), ('cond', pthread_cond_t, 72), ('comp_events_completed', uint32_t, 120), ('async_events_completed', uint32_t, 124)])
+struct___pthread_cond_s.register_fields([('__wseq', __atomic_wide_counter, 0), ('__g1_start', __atomic_wide_counter, 8), ('__g_refs', c.Array[ctypes.c_uint32, Literal[2]], 16), ('__g_size', c.Array[ctypes.c_uint32, Literal[2]], 24), ('__g1_orig_size', ctypes.c_uint32, 32), ('__wrefs', ctypes.c_uint32, 36), ('__g_signals', c.Array[ctypes.c_uint32, Literal[2]], 40)])
+pthread_cond_t.register_fields([('__data', struct___pthread_cond_s, 0), ('__size', c.Array[ctypes.c_char, Literal[48]], 0), ('__align', ctypes.c_int64, 0)])
+struct_ibv_cq.register_fields([('context', c.POINTER[struct_ibv_context], 0), ('channel', c.POINTER[struct_ibv_comp_channel], 8), ('cq_context', ctypes.c_void_p, 16), ('handle', uint32_t, 24), ('cqe', ctypes.c_int32, 28), ('mutex', pthread_mutex_t, 32), ('cond', pthread_cond_t, 72), ('comp_events_completed', uint32_t, 120), ('async_events_completed', uint32_t, 124)])
 @c.record
 class struct_ibv_srq(c.Struct):
   SIZE = 128
-  context: ctypes._Pointer[struct_ibv_context]
-  srq_context: int|None
-  pd: ctypes._Pointer[struct_ibv_pd]
+  context: c.POINTER[struct_ibv_context]
+  srq_context: ctypes.c_void_p
+  pd: c.POINTER[struct_ibv_pd]
   handle: int
   mutex: pthread_mutex_t
   cond: pthread_cond_t
   events_completed: int
-struct_ibv_srq.register_fields([('context', ctypes.POINTER(struct_ibv_context), 0), ('srq_context', ctypes.c_void_p, 8), ('pd', ctypes.POINTER(struct_ibv_pd), 16), ('handle', uint32_t, 24), ('mutex', pthread_mutex_t, 32), ('cond', pthread_cond_t, 72), ('events_completed', uint32_t, 120)])
+struct_ibv_srq.register_fields([('context', c.POINTER[struct_ibv_context], 0), ('srq_context', ctypes.c_void_p, 8), ('pd', c.POINTER[struct_ibv_pd], 16), ('handle', uint32_t, 24), ('mutex', pthread_mutex_t, 32), ('cond', pthread_cond_t, 72), ('events_completed', uint32_t, 120)])
 enum_ibv_qp_state: dict[int, str] = {(IBV_QPS_RESET:=0): 'IBV_QPS_RESET', (IBV_QPS_INIT:=1): 'IBV_QPS_INIT', (IBV_QPS_RTR:=2): 'IBV_QPS_RTR', (IBV_QPS_RTS:=3): 'IBV_QPS_RTS', (IBV_QPS_SQD:=4): 'IBV_QPS_SQD', (IBV_QPS_SQE:=5): 'IBV_QPS_SQE', (IBV_QPS_ERR:=6): 'IBV_QPS_ERR', (IBV_QPS_UNKNOWN:=7): 'IBV_QPS_UNKNOWN'}
 enum_ibv_qp_type: dict[int, str] = {(IBV_QPT_RC:=2): 'IBV_QPT_RC', (IBV_QPT_UC:=3): 'IBV_QPT_UC', (IBV_QPT_UD:=4): 'IBV_QPT_UD', (IBV_QPT_RAW_PACKET:=8): 'IBV_QPT_RAW_PACKET', (IBV_QPT_XRC_SEND:=9): 'IBV_QPT_XRC_SEND', (IBV_QPT_XRC_RECV:=10): 'IBV_QPT_XRC_RECV', (IBV_QPT_DRIVER:=255): 'IBV_QPT_DRIVER'}
-struct_ibv_qp.register_fields([('context', ctypes.POINTER(struct_ibv_context), 0), ('qp_context', ctypes.c_void_p, 8), ('pd', ctypes.POINTER(struct_ibv_pd), 16), ('send_cq', ctypes.POINTER(struct_ibv_cq), 24), ('recv_cq', ctypes.POINTER(struct_ibv_cq), 32), ('srq', ctypes.POINTER(struct_ibv_srq), 40), ('handle', uint32_t, 48), ('qp_num', uint32_t, 52), ('state', ctypes.c_uint32, 56), ('qp_type', ctypes.c_uint32, 60), ('mutex', pthread_mutex_t, 64), ('cond', pthread_cond_t, 104), ('events_completed', uint32_t, 152)])
+struct_ibv_qp.register_fields([('context', c.POINTER[struct_ibv_context], 0), ('qp_context', ctypes.c_void_p, 8), ('pd', c.POINTER[struct_ibv_pd], 16), ('send_cq', c.POINTER[struct_ibv_cq], 24), ('recv_cq', c.POINTER[struct_ibv_cq], 32), ('srq', c.POINTER[struct_ibv_srq], 40), ('handle', uint32_t, 48), ('qp_num', uint32_t, 52), ('state', ctypes.c_uint32, 56), ('qp_type', ctypes.c_uint32, 60), ('mutex', pthread_mutex_t, 64), ('cond', pthread_cond_t, 104), ('events_completed', uint32_t, 152)])
 @c.record
 class struct_ibv_mw_bind(c.Struct):
   SIZE = 48
@@ -292,22 +292,22 @@ class struct_ibv_mw_bind(c.Struct):
 @c.record
 class struct_ibv_mw_bind_info(c.Struct):
   SIZE = 32
-  mr: ctypes._Pointer[struct_ibv_mr]
+  mr: c.POINTER[struct_ibv_mr]
   addr: int
   length: int
   mw_access_flags: int
 @c.record
 class struct_ibv_mr(c.Struct):
   SIZE = 48
-  context: ctypes._Pointer[struct_ibv_context]
-  pd: ctypes._Pointer[struct_ibv_pd]
-  addr: int|None
+  context: c.POINTER[struct_ibv_context]
+  pd: c.POINTER[struct_ibv_pd]
+  addr: ctypes.c_void_p
   length: int
   handle: int
   lkey: int
   rkey: int
-struct_ibv_mr.register_fields([('context', ctypes.POINTER(struct_ibv_context), 0), ('pd', ctypes.POINTER(struct_ibv_pd), 8), ('addr', ctypes.c_void_p, 16), ('length', size_t, 24), ('handle', uint32_t, 32), ('lkey', uint32_t, 36), ('rkey', uint32_t, 40)])
-struct_ibv_mw_bind_info.register_fields([('mr', ctypes.POINTER(struct_ibv_mr), 0), ('addr', uint64_t, 8), ('length', uint64_t, 16), ('mw_access_flags', ctypes.c_uint32, 24)])
+struct_ibv_mr.register_fields([('context', c.POINTER[struct_ibv_context], 0), ('pd', c.POINTER[struct_ibv_pd], 8), ('addr', ctypes.c_void_p, 16), ('length', size_t, 24), ('handle', uint32_t, 32), ('lkey', uint32_t, 36), ('rkey', uint32_t, 40)])
+struct_ibv_mw_bind_info.register_fields([('mr', c.POINTER[struct_ibv_mr], 0), ('addr', uint64_t, 8), ('length', uint64_t, 16), ('mw_access_flags', ctypes.c_uint32, 24)])
 struct_ibv_mw_bind.register_fields([('wr_id', uint64_t, 0), ('send_flags', ctypes.c_uint32, 8), ('bind_info', struct_ibv_mw_bind_info, 16)])
 @c.record
 class struct_ibv_wc(c.Struct):
@@ -334,8 +334,8 @@ struct_ibv_wc.register_fields([('wr_id', uint64_t, 0), ('status', ctypes.c_uint3
 class struct_ibv_recv_wr(c.Struct):
   SIZE = 32
   wr_id: int
-  next: ctypes._Pointer[struct_ibv_recv_wr]
-  sg_list: ctypes._Pointer[struct_ibv_sge]
+  next: c.POINTER[struct_ibv_recv_wr]
+  sg_list: c.POINTER[struct_ibv_sge]
   num_sge: int
 @c.record
 class struct_ibv_sge(c.Struct):
@@ -344,13 +344,13 @@ class struct_ibv_sge(c.Struct):
   length: int
   lkey: int
 struct_ibv_sge.register_fields([('addr', uint64_t, 0), ('length', uint32_t, 8), ('lkey', uint32_t, 12)])
-struct_ibv_recv_wr.register_fields([('wr_id', uint64_t, 0), ('next', ctypes.POINTER(struct_ibv_recv_wr), 8), ('sg_list', ctypes.POINTER(struct_ibv_sge), 16), ('num_sge', ctypes.c_int32, 24)])
+struct_ibv_recv_wr.register_fields([('wr_id', uint64_t, 0), ('next', c.POINTER[struct_ibv_recv_wr], 8), ('sg_list', c.POINTER[struct_ibv_sge], 16), ('num_sge', ctypes.c_int32, 24)])
 @c.record
 class struct_ibv_send_wr(c.Struct):
   SIZE = 128
   wr_id: int
-  next: ctypes._Pointer[struct_ibv_send_wr]
-  sg_list: ctypes._Pointer[struct_ibv_sge]
+  next: c.POINTER[struct_ibv_send_wr]
+  sg_list: c.POINTER[struct_ibv_sge]
   num_sge: int
   opcode: int
   send_flags: int
@@ -384,17 +384,17 @@ struct_ibv_send_wr_wr_atomic.register_fields([('remote_addr', uint64_t, 0), ('co
 @c.record
 class struct_ibv_send_wr_wr_ud(c.Struct):
   SIZE = 16
-  ah: ctypes._Pointer[struct_ibv_ah]
+  ah: c.POINTER[struct_ibv_ah]
   remote_qpn: int
   remote_qkey: int
 @c.record
 class struct_ibv_ah(c.Struct):
   SIZE = 24
-  context: ctypes._Pointer[struct_ibv_context]
-  pd: ctypes._Pointer[struct_ibv_pd]
+  context: c.POINTER[struct_ibv_context]
+  pd: c.POINTER[struct_ibv_pd]
   handle: int
-struct_ibv_ah.register_fields([('context', ctypes.POINTER(struct_ibv_context), 0), ('pd', ctypes.POINTER(struct_ibv_pd), 8), ('handle', uint32_t, 16)])
-struct_ibv_send_wr_wr_ud.register_fields([('ah', ctypes.POINTER(struct_ibv_ah), 0), ('remote_qpn', uint32_t, 8), ('remote_qkey', uint32_t, 12)])
+struct_ibv_ah.register_fields([('context', c.POINTER[struct_ibv_context], 0), ('pd', c.POINTER[struct_ibv_pd], 8), ('handle', uint32_t, 16)])
+struct_ibv_send_wr_wr_ud.register_fields([('ah', c.POINTER[struct_ibv_ah], 0), ('remote_qpn', uint32_t, 8), ('remote_qkey', uint32_t, 12)])
 struct_ibv_send_wr_wr.register_fields([('rdma', struct_ibv_send_wr_wr_rdma, 0), ('atomic', struct_ibv_send_wr_wr_atomic, 0), ('ud', struct_ibv_send_wr_wr_ud, 0)])
 @c.record
 class struct_ibv_send_wr_qp_type(c.Struct):
@@ -409,21 +409,21 @@ struct_ibv_send_wr_qp_type.register_fields([('xrc', struct_ibv_send_wr_qp_type_x
 @c.record
 class struct_ibv_send_wr_bind_mw(c.Struct):
   SIZE = 48
-  mw: ctypes._Pointer[struct_ibv_mw]
+  mw: c.POINTER[struct_ibv_mw]
   rkey: int
   bind_info: struct_ibv_mw_bind_info
-struct_ibv_send_wr_bind_mw.register_fields([('mw', ctypes.POINTER(struct_ibv_mw), 0), ('rkey', uint32_t, 8), ('bind_info', struct_ibv_mw_bind_info, 16)])
+struct_ibv_send_wr_bind_mw.register_fields([('mw', c.POINTER[struct_ibv_mw], 0), ('rkey', uint32_t, 8), ('bind_info', struct_ibv_mw_bind_info, 16)])
 @c.record
 class struct_ibv_send_wr_tso(c.Struct):
   SIZE = 16
-  hdr: int|None
+  hdr: ctypes.c_void_p
   hdr_sz: int
   mss: int
 struct_ibv_send_wr_tso.register_fields([('hdr', ctypes.c_void_p, 0), ('hdr_sz', uint16_t, 8), ('mss', uint16_t, 10)])
-struct_ibv_send_wr.register_fields([('wr_id', uint64_t, 0), ('next', ctypes.POINTER(struct_ibv_send_wr), 8), ('sg_list', ctypes.POINTER(struct_ibv_sge), 16), ('num_sge', ctypes.c_int32, 24), ('opcode', ctypes.c_uint32, 28), ('send_flags', ctypes.c_uint32, 32), ('imm_data', ctypes.c_uint32, 36), ('invalidate_rkey', uint32_t, 36), ('wr', struct_ibv_send_wr_wr, 40), ('qp_type', struct_ibv_send_wr_qp_type, 72), ('bind_mw', struct_ibv_send_wr_bind_mw, 80), ('tso', struct_ibv_send_wr_tso, 80)])
-struct_ibv_context_ops.register_fields([('_compat_query_device', ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_device_attr)), 0), ('_compat_query_port', ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(struct_ibv_context), uint8_t, ctypes.POINTER(struct__compat_ibv_port_attr)), 8), ('_compat_alloc_pd', ctypes.CFUNCTYPE(ctypes.c_void_p, ), 16), ('_compat_dealloc_pd', ctypes.CFUNCTYPE(ctypes.c_void_p, ), 24), ('_compat_reg_mr', ctypes.CFUNCTYPE(ctypes.c_void_p, ), 32), ('_compat_rereg_mr', ctypes.CFUNCTYPE(ctypes.c_void_p, ), 40), ('_compat_dereg_mr', ctypes.CFUNCTYPE(ctypes.c_void_p, ), 48), ('alloc_mw', ctypes.CFUNCTYPE(ctypes.POINTER(struct_ibv_mw), ctypes.POINTER(struct_ibv_pd), ctypes.c_uint32), 56), ('bind_mw', ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(struct_ibv_qp), ctypes.POINTER(struct_ibv_mw), ctypes.POINTER(struct_ibv_mw_bind)), 64), ('dealloc_mw', ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(struct_ibv_mw)), 72), ('_compat_create_cq', ctypes.CFUNCTYPE(ctypes.c_void_p, ), 80), ('poll_cq', ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(struct_ibv_cq), ctypes.c_int32, ctypes.POINTER(struct_ibv_wc)), 88), ('req_notify_cq', ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(struct_ibv_cq), ctypes.c_int32), 96), ('_compat_cq_event', ctypes.CFUNCTYPE(ctypes.c_void_p, ), 104), ('_compat_resize_cq', ctypes.CFUNCTYPE(ctypes.c_void_p, ), 112), ('_compat_destroy_cq', ctypes.CFUNCTYPE(ctypes.c_void_p, ), 120), ('_compat_create_srq', ctypes.CFUNCTYPE(ctypes.c_void_p, ), 128), ('_compat_modify_srq', ctypes.CFUNCTYPE(ctypes.c_void_p, ), 136), ('_compat_query_srq', ctypes.CFUNCTYPE(ctypes.c_void_p, ), 144), ('_compat_destroy_srq', ctypes.CFUNCTYPE(ctypes.c_void_p, ), 152), ('post_srq_recv', ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(struct_ibv_srq), ctypes.POINTER(struct_ibv_recv_wr), ctypes.POINTER(ctypes.POINTER(struct_ibv_recv_wr))), 160), ('_compat_create_qp', ctypes.CFUNCTYPE(ctypes.c_void_p, ), 168), ('_compat_query_qp', ctypes.CFUNCTYPE(ctypes.c_void_p, ), 176), ('_compat_modify_qp', ctypes.CFUNCTYPE(ctypes.c_void_p, ), 184), ('_compat_destroy_qp', ctypes.CFUNCTYPE(ctypes.c_void_p, ), 192), ('post_send', ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(struct_ibv_qp), ctypes.POINTER(struct_ibv_send_wr), ctypes.POINTER(ctypes.POINTER(struct_ibv_send_wr))), 200), ('post_recv', ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(struct_ibv_qp), ctypes.POINTER(struct_ibv_recv_wr), ctypes.POINTER(ctypes.POINTER(struct_ibv_recv_wr))), 208), ('_compat_create_ah', ctypes.CFUNCTYPE(ctypes.c_void_p, ), 216), ('_compat_destroy_ah', ctypes.CFUNCTYPE(ctypes.c_void_p, ), 224), ('_compat_attach_mcast', ctypes.CFUNCTYPE(ctypes.c_void_p, ), 232), ('_compat_detach_mcast', ctypes.CFUNCTYPE(ctypes.c_void_p, ), 240), ('_compat_async_event', ctypes.CFUNCTYPE(ctypes.c_void_p, ), 248)])
-struct_ibv_context.register_fields([('device', ctypes.POINTER(struct_ibv_device), 0), ('ops', struct_ibv_context_ops, 8), ('cmd_fd', ctypes.c_int32, 264), ('async_fd', ctypes.c_int32, 268), ('num_comp_vectors', ctypes.c_int32, 272), ('mutex', pthread_mutex_t, 280), ('abi_compat', ctypes.c_void_p, 320)])
-struct_ibv_dm.register_fields([('context', ctypes.POINTER(struct_ibv_context), 0), ('memcpy_to_dm', ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(struct_ibv_dm), uint64_t, ctypes.c_void_p, size_t), 8), ('memcpy_from_dm', ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.c_void_p, ctypes.POINTER(struct_ibv_dm), uint64_t, size_t), 16), ('comp_mask', uint32_t, 24), ('handle', uint32_t, 28)])
+struct_ibv_send_wr.register_fields([('wr_id', uint64_t, 0), ('next', c.POINTER[struct_ibv_send_wr], 8), ('sg_list', c.POINTER[struct_ibv_sge], 16), ('num_sge', ctypes.c_int32, 24), ('opcode', ctypes.c_uint32, 28), ('send_flags', ctypes.c_uint32, 32), ('imm_data', ctypes.c_uint32, 36), ('invalidate_rkey', uint32_t, 36), ('wr', struct_ibv_send_wr_wr, 40), ('qp_type', struct_ibv_send_wr_qp_type, 72), ('bind_mw', struct_ibv_send_wr_bind_mw, 80), ('tso', struct_ibv_send_wr_tso, 80)])
+struct_ibv_context_ops.register_fields([('_compat_query_device', c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_context], c.POINTER[struct_ibv_device_attr]]], 0), ('_compat_query_port', c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_context], uint8_t, c.POINTER[struct__compat_ibv_port_attr]]], 8), ('_compat_alloc_pd', c.CFUNCTYPE[ctypes.c_void_p, []], 16), ('_compat_dealloc_pd', c.CFUNCTYPE[ctypes.c_void_p, []], 24), ('_compat_reg_mr', c.CFUNCTYPE[ctypes.c_void_p, []], 32), ('_compat_rereg_mr', c.CFUNCTYPE[ctypes.c_void_p, []], 40), ('_compat_dereg_mr', c.CFUNCTYPE[ctypes.c_void_p, []], 48), ('alloc_mw', c.CFUNCTYPE[c.POINTER[struct_ibv_mw], [c.POINTER[struct_ibv_pd], ctypes.c_uint32]], 56), ('bind_mw', c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_qp], c.POINTER[struct_ibv_mw], c.POINTER[struct_ibv_mw_bind]]], 64), ('dealloc_mw', c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_mw]]], 72), ('_compat_create_cq', c.CFUNCTYPE[ctypes.c_void_p, []], 80), ('poll_cq', c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_cq], ctypes.c_int32, c.POINTER[struct_ibv_wc]]], 88), ('req_notify_cq', c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_cq], ctypes.c_int32]], 96), ('_compat_cq_event', c.CFUNCTYPE[ctypes.c_void_p, []], 104), ('_compat_resize_cq', c.CFUNCTYPE[ctypes.c_void_p, []], 112), ('_compat_destroy_cq', c.CFUNCTYPE[ctypes.c_void_p, []], 120), ('_compat_create_srq', c.CFUNCTYPE[ctypes.c_void_p, []], 128), ('_compat_modify_srq', c.CFUNCTYPE[ctypes.c_void_p, []], 136), ('_compat_query_srq', c.CFUNCTYPE[ctypes.c_void_p, []], 144), ('_compat_destroy_srq', c.CFUNCTYPE[ctypes.c_void_p, []], 152), ('post_srq_recv', c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_srq], c.POINTER[struct_ibv_recv_wr], c.POINTER[c.POINTER[struct_ibv_recv_wr]]]], 160), ('_compat_create_qp', c.CFUNCTYPE[ctypes.c_void_p, []], 168), ('_compat_query_qp', c.CFUNCTYPE[ctypes.c_void_p, []], 176), ('_compat_modify_qp', c.CFUNCTYPE[ctypes.c_void_p, []], 184), ('_compat_destroy_qp', c.CFUNCTYPE[ctypes.c_void_p, []], 192), ('post_send', c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_qp], c.POINTER[struct_ibv_send_wr], c.POINTER[c.POINTER[struct_ibv_send_wr]]]], 200), ('post_recv', c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_qp], c.POINTER[struct_ibv_recv_wr], c.POINTER[c.POINTER[struct_ibv_recv_wr]]]], 208), ('_compat_create_ah', c.CFUNCTYPE[ctypes.c_void_p, []], 216), ('_compat_destroy_ah', c.CFUNCTYPE[ctypes.c_void_p, []], 224), ('_compat_attach_mcast', c.CFUNCTYPE[ctypes.c_void_p, []], 232), ('_compat_detach_mcast', c.CFUNCTYPE[ctypes.c_void_p, []], 240), ('_compat_async_event', c.CFUNCTYPE[ctypes.c_void_p, []], 248)])
+struct_ibv_context.register_fields([('device', c.POINTER[struct_ibv_device], 0), ('ops', struct_ibv_context_ops, 8), ('cmd_fd', ctypes.c_int32, 264), ('async_fd', ctypes.c_int32, 268), ('num_comp_vectors', ctypes.c_int32, 272), ('mutex', pthread_mutex_t, 280), ('abi_compat', ctypes.c_void_p, 320)])
+struct_ibv_dm.register_fields([('context', c.POINTER[struct_ibv_context], 0), ('memcpy_to_dm', c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_dm], uint64_t, ctypes.c_void_p, size_t]], 8), ('memcpy_from_dm', c.CFUNCTYPE[ctypes.c_int32, [ctypes.c_void_p, c.POINTER[struct_ibv_dm], uint64_t, size_t]], 16), ('comp_mask', uint32_t, 24), ('handle', uint32_t, 28)])
 @c.record
 class struct_ibv_query_device_ex_input(c.Struct):
   SIZE = 4
@@ -555,34 +555,34 @@ class struct_ibv_async_event(c.Struct):
 @c.record
 class struct_ibv_async_event_element(c.Struct):
   SIZE = 8
-  cq: ctypes._Pointer[struct_ibv_cq]
-  qp: ctypes._Pointer[struct_ibv_qp]
-  srq: ctypes._Pointer[struct_ibv_srq]
-  wq: ctypes._Pointer[struct_ibv_wq]
+  cq: c.POINTER[struct_ibv_cq]
+  qp: c.POINTER[struct_ibv_qp]
+  srq: c.POINTER[struct_ibv_srq]
+  wq: c.POINTER[struct_ibv_wq]
   port_num: int
 @c.record
 class struct_ibv_wq(c.Struct):
   SIZE = 152
-  context: ctypes._Pointer[struct_ibv_context]
-  wq_context: int|None
-  pd: ctypes._Pointer[struct_ibv_pd]
-  cq: ctypes._Pointer[struct_ibv_cq]
+  context: c.POINTER[struct_ibv_context]
+  wq_context: ctypes.c_void_p
+  pd: c.POINTER[struct_ibv_pd]
+  cq: c.POINTER[struct_ibv_cq]
   wq_num: int
   handle: int
   state: int
   wq_type: int
-  post_recv: ctypes._CFunctionType
+  post_recv: c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_wq], c.POINTER[struct_ibv_recv_wr], c.POINTER[c.POINTER[struct_ibv_recv_wr]]]]
   mutex: pthread_mutex_t
   cond: pthread_cond_t
   events_completed: int
   comp_mask: int
 enum_ibv_wq_state: dict[int, str] = {(IBV_WQS_RESET:=0): 'IBV_WQS_RESET', (IBV_WQS_RDY:=1): 'IBV_WQS_RDY', (IBV_WQS_ERR:=2): 'IBV_WQS_ERR', (IBV_WQS_UNKNOWN:=3): 'IBV_WQS_UNKNOWN'}
 enum_ibv_wq_type: dict[int, str] = {(IBV_WQT_RQ:=0): 'IBV_WQT_RQ'}
-struct_ibv_wq.register_fields([('context', ctypes.POINTER(struct_ibv_context), 0), ('wq_context', ctypes.c_void_p, 8), ('pd', ctypes.POINTER(struct_ibv_pd), 16), ('cq', ctypes.POINTER(struct_ibv_cq), 24), ('wq_num', uint32_t, 32), ('handle', uint32_t, 36), ('state', ctypes.c_uint32, 40), ('wq_type', ctypes.c_uint32, 44), ('post_recv', ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(struct_ibv_wq), ctypes.POINTER(struct_ibv_recv_wr), ctypes.POINTER(ctypes.POINTER(struct_ibv_recv_wr))), 48), ('mutex', pthread_mutex_t, 56), ('cond', pthread_cond_t, 96), ('events_completed', uint32_t, 144), ('comp_mask', uint32_t, 148)])
-struct_ibv_async_event_element.register_fields([('cq', ctypes.POINTER(struct_ibv_cq), 0), ('qp', ctypes.POINTER(struct_ibv_qp), 0), ('srq', ctypes.POINTER(struct_ibv_srq), 0), ('wq', ctypes.POINTER(struct_ibv_wq), 0), ('port_num', ctypes.c_int32, 0)])
+struct_ibv_wq.register_fields([('context', c.POINTER[struct_ibv_context], 0), ('wq_context', ctypes.c_void_p, 8), ('pd', c.POINTER[struct_ibv_pd], 16), ('cq', c.POINTER[struct_ibv_cq], 24), ('wq_num', uint32_t, 32), ('handle', uint32_t, 36), ('state', ctypes.c_uint32, 40), ('wq_type', ctypes.c_uint32, 44), ('post_recv', c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_wq], c.POINTER[struct_ibv_recv_wr], c.POINTER[c.POINTER[struct_ibv_recv_wr]]]], 48), ('mutex', pthread_mutex_t, 56), ('cond', pthread_cond_t, 96), ('events_completed', uint32_t, 144), ('comp_mask', uint32_t, 148)])
+struct_ibv_async_event_element.register_fields([('cq', c.POINTER[struct_ibv_cq], 0), ('qp', c.POINTER[struct_ibv_qp], 0), ('srq', c.POINTER[struct_ibv_srq], 0), ('wq', c.POINTER[struct_ibv_wq], 0), ('port_num', ctypes.c_int32, 0)])
 struct_ibv_async_event.register_fields([('element', struct_ibv_async_event_element, 0), ('event_type', ctypes.c_uint32, 8)])
-@dll.bind(ctypes.POINTER(ctypes.c_char), ctypes.c_uint32)
-def ibv_wc_status_str(status:ctypes.c_uint32) -> ctypes._Pointer[ctypes.c_char]: ...
+@dll.bind(c.POINTER[ctypes.c_char], ctypes.c_uint32)
+def ibv_wc_status_str(status:ctypes.c_uint32) -> c.POINTER[ctypes.c_char]: ...
 _anonenum1: dict[int, str] = {(IBV_WC_IP_CSUM_OK_SHIFT:=2): 'IBV_WC_IP_CSUM_OK_SHIFT'}
 enum_ibv_create_cq_wc_flags: dict[int, str] = {(IBV_WC_EX_WITH_BYTE_LEN:=1): 'IBV_WC_EX_WITH_BYTE_LEN', (IBV_WC_EX_WITH_IMM:=2): 'IBV_WC_EX_WITH_IMM', (IBV_WC_EX_WITH_QP_NUM:=4): 'IBV_WC_EX_WITH_QP_NUM', (IBV_WC_EX_WITH_SRC_QP:=8): 'IBV_WC_EX_WITH_SRC_QP', (IBV_WC_EX_WITH_SLID:=16): 'IBV_WC_EX_WITH_SLID', (IBV_WC_EX_WITH_SL:=32): 'IBV_WC_EX_WITH_SL', (IBV_WC_EX_WITH_DLID_PATH_BITS:=64): 'IBV_WC_EX_WITH_DLID_PATH_BITS', (IBV_WC_EX_WITH_COMPLETION_TIMESTAMP:=128): 'IBV_WC_EX_WITH_COMPLETION_TIMESTAMP', (IBV_WC_EX_WITH_CVLAN:=256): 'IBV_WC_EX_WITH_CVLAN', (IBV_WC_EX_WITH_FLOW_TAG:=512): 'IBV_WC_EX_WITH_FLOW_TAG', (IBV_WC_EX_WITH_TM_INFO:=1024): 'IBV_WC_EX_WITH_TM_INFO', (IBV_WC_EX_WITH_COMPLETION_TIMESTAMP_WALLCLOCK:=2048): 'IBV_WC_EX_WITH_COMPLETION_TIMESTAMP_WALLCLOCK'}
 _anonenum2: dict[int, str] = {(IBV_WC_STANDARD_FLAGS:=127): 'IBV_WC_STANDARD_FLAGS'}
@@ -597,8 +597,8 @@ struct_ibv_td_init_attr.register_fields([('comp_mask', uint32_t, 0)])
 @c.record
 class struct_ibv_td(c.Struct):
   SIZE = 8
-  context: ctypes._Pointer[struct_ibv_context]
-struct_ibv_td.register_fields([('context', ctypes.POINTER(struct_ibv_context), 0)])
+  context: c.POINTER[struct_ibv_context]
+struct_ibv_td.register_fields([('context', c.POINTER[struct_ibv_context], 0)])
 enum_ibv_xrcd_init_attr_mask: dict[int, str] = {(IBV_XRCD_INIT_ATTR_FD:=1): 'IBV_XRCD_INIT_ATTR_FD', (IBV_XRCD_INIT_ATTR_OFLAGS:=2): 'IBV_XRCD_INIT_ATTR_OFLAGS', (IBV_XRCD_INIT_ATTR_RESERVED:=4): 'IBV_XRCD_INIT_ATTR_RESERVED'}
 @c.record
 class struct_ibv_xrcd_init_attr(c.Struct):
@@ -610,8 +610,8 @@ struct_ibv_xrcd_init_attr.register_fields([('comp_mask', uint32_t, 0), ('fd', ct
 @c.record
 class struct_ibv_xrcd(c.Struct):
   SIZE = 8
-  context: ctypes._Pointer[struct_ibv_context]
-struct_ibv_xrcd.register_fields([('context', ctypes.POINTER(struct_ibv_context), 0)])
+  context: c.POINTER[struct_ibv_context]
+struct_ibv_xrcd.register_fields([('context', c.POINTER[struct_ibv_context], 0)])
 enum_ibv_rereg_mr_flags: dict[int, str] = {(IBV_REREG_MR_CHANGE_TRANSLATION:=1): 'IBV_REREG_MR_CHANGE_TRANSLATION', (IBV_REREG_MR_CHANGE_PD:=2): 'IBV_REREG_MR_CHANGE_PD', (IBV_REREG_MR_CHANGE_ACCESS:=4): 'IBV_REREG_MR_CHANGE_ACCESS', (IBV_REREG_MR_FLAGS_SUPPORTED:=7): 'IBV_REREG_MR_FLAGS_SUPPORTED'}
 @c.record
 class struct_ibv_global_route(c.Struct):
@@ -664,7 +664,7 @@ struct_ibv_srq_attr.register_fields([('max_wr', uint32_t, 0), ('max_sge', uint32
 @c.record
 class struct_ibv_srq_init_attr(c.Struct):
   SIZE = 24
-  srq_context: int|None
+  srq_context: ctypes.c_void_p
   attr: struct_ibv_srq_attr
 struct_ibv_srq_init_attr.register_fields([('srq_context', ctypes.c_void_p, 0), ('attr', struct_ibv_srq_attr, 8)])
 enum_ibv_srq_type: dict[int, str] = {(IBV_SRQT_BASIC:=0): 'IBV_SRQT_BASIC', (IBV_SRQT_XRC:=1): 'IBV_SRQT_XRC', (IBV_SRQT_TM:=2): 'IBV_SRQT_TM'}
@@ -678,29 +678,29 @@ struct_ibv_tm_cap.register_fields([('max_num_tags', uint32_t, 0), ('max_ops', ui
 @c.record
 class struct_ibv_srq_init_attr_ex(c.Struct):
   SIZE = 64
-  srq_context: int|None
+  srq_context: ctypes.c_void_p
   attr: struct_ibv_srq_attr
   comp_mask: int
   srq_type: int
-  pd: ctypes._Pointer[struct_ibv_pd]
-  xrcd: ctypes._Pointer[struct_ibv_xrcd]
-  cq: ctypes._Pointer[struct_ibv_cq]
+  pd: c.POINTER[struct_ibv_pd]
+  xrcd: c.POINTER[struct_ibv_xrcd]
+  cq: c.POINTER[struct_ibv_cq]
   tm_cap: struct_ibv_tm_cap
-struct_ibv_srq_init_attr_ex.register_fields([('srq_context', ctypes.c_void_p, 0), ('attr', struct_ibv_srq_attr, 8), ('comp_mask', uint32_t, 20), ('srq_type', ctypes.c_uint32, 24), ('pd', ctypes.POINTER(struct_ibv_pd), 32), ('xrcd', ctypes.POINTER(struct_ibv_xrcd), 40), ('cq', ctypes.POINTER(struct_ibv_cq), 48), ('tm_cap', struct_ibv_tm_cap, 56)])
+struct_ibv_srq_init_attr_ex.register_fields([('srq_context', ctypes.c_void_p, 0), ('attr', struct_ibv_srq_attr, 8), ('comp_mask', uint32_t, 20), ('srq_type', ctypes.c_uint32, 24), ('pd', c.POINTER[struct_ibv_pd], 32), ('xrcd', c.POINTER[struct_ibv_xrcd], 40), ('cq', c.POINTER[struct_ibv_cq], 48), ('tm_cap', struct_ibv_tm_cap, 56)])
 enum_ibv_wq_init_attr_mask: dict[int, str] = {(IBV_WQ_INIT_ATTR_FLAGS:=1): 'IBV_WQ_INIT_ATTR_FLAGS', (IBV_WQ_INIT_ATTR_RESERVED:=2): 'IBV_WQ_INIT_ATTR_RESERVED'}
 enum_ibv_wq_flags: dict[int, str] = {(IBV_WQ_FLAGS_CVLAN_STRIPPING:=1): 'IBV_WQ_FLAGS_CVLAN_STRIPPING', (IBV_WQ_FLAGS_SCATTER_FCS:=2): 'IBV_WQ_FLAGS_SCATTER_FCS', (IBV_WQ_FLAGS_DELAY_DROP:=4): 'IBV_WQ_FLAGS_DELAY_DROP', (IBV_WQ_FLAGS_PCI_WRITE_END_PADDING:=8): 'IBV_WQ_FLAGS_PCI_WRITE_END_PADDING', (IBV_WQ_FLAGS_RESERVED:=16): 'IBV_WQ_FLAGS_RESERVED'}
 @c.record
 class struct_ibv_wq_init_attr(c.Struct):
   SIZE = 48
-  wq_context: int|None
+  wq_context: ctypes.c_void_p
   wq_type: int
   max_wr: int
   max_sge: int
-  pd: ctypes._Pointer[struct_ibv_pd]
-  cq: ctypes._Pointer[struct_ibv_cq]
+  pd: c.POINTER[struct_ibv_pd]
+  cq: c.POINTER[struct_ibv_cq]
   comp_mask: int
   create_flags: int
-struct_ibv_wq_init_attr.register_fields([('wq_context', ctypes.c_void_p, 0), ('wq_type', ctypes.c_uint32, 8), ('max_wr', uint32_t, 12), ('max_sge', uint32_t, 16), ('pd', ctypes.POINTER(struct_ibv_pd), 24), ('cq', ctypes.POINTER(struct_ibv_cq), 32), ('comp_mask', uint32_t, 40), ('create_flags', uint32_t, 44)])
+struct_ibv_wq_init_attr.register_fields([('wq_context', ctypes.c_void_p, 0), ('wq_type', ctypes.c_uint32, 8), ('max_wr', uint32_t, 12), ('max_sge', uint32_t, 16), ('pd', c.POINTER[struct_ibv_pd], 24), ('cq', c.POINTER[struct_ibv_cq], 32), ('comp_mask', uint32_t, 40), ('create_flags', uint32_t, 44)])
 enum_ibv_wq_attr_mask: dict[int, str] = {(IBV_WQ_ATTR_STATE:=1): 'IBV_WQ_ATTR_STATE', (IBV_WQ_ATTR_CURR_STATE:=2): 'IBV_WQ_ATTR_CURR_STATE', (IBV_WQ_ATTR_FLAGS:=4): 'IBV_WQ_ATTR_FLAGS', (IBV_WQ_ATTR_RESERVED:=8): 'IBV_WQ_ATTR_RESERVED'}
 @c.record
 class struct_ibv_wq_attr(c.Struct):
@@ -714,19 +714,19 @@ struct_ibv_wq_attr.register_fields([('attr_mask', uint32_t, 0), ('wq_state', cty
 @c.record
 class struct_ibv_rwq_ind_table(c.Struct):
   SIZE = 24
-  context: ctypes._Pointer[struct_ibv_context]
+  context: c.POINTER[struct_ibv_context]
   ind_tbl_handle: int
   ind_tbl_num: int
   comp_mask: int
-struct_ibv_rwq_ind_table.register_fields([('context', ctypes.POINTER(struct_ibv_context), 0), ('ind_tbl_handle', ctypes.c_int32, 8), ('ind_tbl_num', ctypes.c_int32, 12), ('comp_mask', uint32_t, 16)])
+struct_ibv_rwq_ind_table.register_fields([('context', c.POINTER[struct_ibv_context], 0), ('ind_tbl_handle', ctypes.c_int32, 8), ('ind_tbl_num', ctypes.c_int32, 12), ('comp_mask', uint32_t, 16)])
 enum_ibv_ind_table_init_attr_mask: dict[int, str] = {(IBV_CREATE_IND_TABLE_RESERVED:=1): 'IBV_CREATE_IND_TABLE_RESERVED'}
 @c.record
 class struct_ibv_rwq_ind_table_init_attr(c.Struct):
   SIZE = 24
   log_ind_tbl_size: int
-  ind_tbl: ctypes._Pointer[ctypes.POINTER(struct_ibv_wq)]
+  ind_tbl: c.POINTER[c.POINTER[struct_ibv_wq]]
   comp_mask: int
-struct_ibv_rwq_ind_table_init_attr.register_fields([('log_ind_tbl_size', uint32_t, 0), ('ind_tbl', ctypes.POINTER(ctypes.POINTER(struct_ibv_wq)), 8), ('comp_mask', uint32_t, 16)])
+struct_ibv_rwq_ind_table_init_attr.register_fields([('log_ind_tbl_size', uint32_t, 0), ('ind_tbl', c.POINTER[c.POINTER[struct_ibv_wq]], 8), ('comp_mask', uint32_t, 16)])
 @c.record
 class struct_ibv_qp_cap(c.Struct):
   SIZE = 20
@@ -739,14 +739,14 @@ struct_ibv_qp_cap.register_fields([('max_send_wr', uint32_t, 0), ('max_recv_wr',
 @c.record
 class struct_ibv_qp_init_attr(c.Struct):
   SIZE = 64
-  qp_context: int|None
-  send_cq: ctypes._Pointer[struct_ibv_cq]
-  recv_cq: ctypes._Pointer[struct_ibv_cq]
-  srq: ctypes._Pointer[struct_ibv_srq]
+  qp_context: ctypes.c_void_p
+  send_cq: c.POINTER[struct_ibv_cq]
+  recv_cq: c.POINTER[struct_ibv_cq]
+  srq: c.POINTER[struct_ibv_srq]
   cap: struct_ibv_qp_cap
   qp_type: int
   sq_sig_all: int
-struct_ibv_qp_init_attr.register_fields([('qp_context', ctypes.c_void_p, 0), ('send_cq', ctypes.POINTER(struct_ibv_cq), 8), ('recv_cq', ctypes.POINTER(struct_ibv_cq), 16), ('srq', ctypes.POINTER(struct_ibv_srq), 24), ('cap', struct_ibv_qp_cap, 32), ('qp_type', ctypes.c_uint32, 52), ('sq_sig_all', ctypes.c_int32, 56)])
+struct_ibv_qp_init_attr.register_fields([('qp_context', ctypes.c_void_p, 0), ('send_cq', c.POINTER[struct_ibv_cq], 8), ('recv_cq', c.POINTER[struct_ibv_cq], 16), ('srq', c.POINTER[struct_ibv_srq], 24), ('cap', struct_ibv_qp_cap, 32), ('qp_type', ctypes.c_uint32, 52), ('sq_sig_all', ctypes.c_int32, 56)])
 enum_ibv_qp_init_attr_mask: dict[int, str] = {(IBV_QP_INIT_ATTR_PD:=1): 'IBV_QP_INIT_ATTR_PD', (IBV_QP_INIT_ATTR_XRCD:=2): 'IBV_QP_INIT_ATTR_XRCD', (IBV_QP_INIT_ATTR_CREATE_FLAGS:=4): 'IBV_QP_INIT_ATTR_CREATE_FLAGS', (IBV_QP_INIT_ATTR_MAX_TSO_HEADER:=8): 'IBV_QP_INIT_ATTR_MAX_TSO_HEADER', (IBV_QP_INIT_ATTR_IND_TABLE:=16): 'IBV_QP_INIT_ATTR_IND_TABLE', (IBV_QP_INIT_ATTR_RX_HASH:=32): 'IBV_QP_INIT_ATTR_RX_HASH', (IBV_QP_INIT_ATTR_SEND_OPS_FLAGS:=64): 'IBV_QP_INIT_ATTR_SEND_OPS_FLAGS'}
 enum_ibv_qp_create_flags: dict[int, str] = {(IBV_QP_CREATE_BLOCK_SELF_MCAST_LB:=2): 'IBV_QP_CREATE_BLOCK_SELF_MCAST_LB', (IBV_QP_CREATE_SCATTER_FCS:=256): 'IBV_QP_CREATE_SCATTER_FCS', (IBV_QP_CREATE_CVLAN_STRIPPING:=512): 'IBV_QP_CREATE_CVLAN_STRIPPING', (IBV_QP_CREATE_SOURCE_QPN:=1024): 'IBV_QP_CREATE_SOURCE_QPN', (IBV_QP_CREATE_PCI_WRITE_END_PADDING:=2048): 'IBV_QP_CREATE_PCI_WRITE_END_PADDING'}
 enum_ibv_qp_create_send_ops_flags: dict[int, str] = {(IBV_QP_EX_WITH_RDMA_WRITE:=1): 'IBV_QP_EX_WITH_RDMA_WRITE', (IBV_QP_EX_WITH_RDMA_WRITE_WITH_IMM:=2): 'IBV_QP_EX_WITH_RDMA_WRITE_WITH_IMM', (IBV_QP_EX_WITH_SEND:=4): 'IBV_QP_EX_WITH_SEND', (IBV_QP_EX_WITH_SEND_WITH_IMM:=8): 'IBV_QP_EX_WITH_SEND_WITH_IMM', (IBV_QP_EX_WITH_RDMA_READ:=16): 'IBV_QP_EX_WITH_RDMA_READ', (IBV_QP_EX_WITH_ATOMIC_CMP_AND_SWP:=32): 'IBV_QP_EX_WITH_ATOMIC_CMP_AND_SWP', (IBV_QP_EX_WITH_ATOMIC_FETCH_AND_ADD:=64): 'IBV_QP_EX_WITH_ATOMIC_FETCH_AND_ADD', (IBV_QP_EX_WITH_LOCAL_INV:=128): 'IBV_QP_EX_WITH_LOCAL_INV', (IBV_QP_EX_WITH_BIND_MW:=256): 'IBV_QP_EX_WITH_BIND_MW', (IBV_QP_EX_WITH_SEND_WITH_INV:=512): 'IBV_QP_EX_WITH_SEND_WITH_INV', (IBV_QP_EX_WITH_TSO:=1024): 'IBV_QP_EX_WITH_TSO', (IBV_QP_EX_WITH_FLUSH:=2048): 'IBV_QP_EX_WITH_FLUSH', (IBV_QP_EX_WITH_ATOMIC_WRITE:=4096): 'IBV_QP_EX_WITH_ATOMIC_WRITE'}
@@ -755,39 +755,39 @@ class struct_ibv_rx_hash_conf(c.Struct):
   SIZE = 24
   rx_hash_function: int
   rx_hash_key_len: int
-  rx_hash_key: ctypes._Pointer[ctypes.c_ubyte]
+  rx_hash_key: c.POINTER[ctypes.c_ubyte]
   rx_hash_fields_mask: int
-struct_ibv_rx_hash_conf.register_fields([('rx_hash_function', uint8_t, 0), ('rx_hash_key_len', uint8_t, 1), ('rx_hash_key', ctypes.POINTER(uint8_t), 8), ('rx_hash_fields_mask', uint64_t, 16)])
+struct_ibv_rx_hash_conf.register_fields([('rx_hash_function', uint8_t, 0), ('rx_hash_key_len', uint8_t, 1), ('rx_hash_key', c.POINTER[uint8_t], 8), ('rx_hash_fields_mask', uint64_t, 16)])
 @c.record
 class struct_ibv_qp_init_attr_ex(c.Struct):
   SIZE = 136
-  qp_context: int|None
-  send_cq: ctypes._Pointer[struct_ibv_cq]
-  recv_cq: ctypes._Pointer[struct_ibv_cq]
-  srq: ctypes._Pointer[struct_ibv_srq]
+  qp_context: ctypes.c_void_p
+  send_cq: c.POINTER[struct_ibv_cq]
+  recv_cq: c.POINTER[struct_ibv_cq]
+  srq: c.POINTER[struct_ibv_srq]
   cap: struct_ibv_qp_cap
   qp_type: int
   sq_sig_all: int
   comp_mask: int
-  pd: ctypes._Pointer[struct_ibv_pd]
-  xrcd: ctypes._Pointer[struct_ibv_xrcd]
+  pd: c.POINTER[struct_ibv_pd]
+  xrcd: c.POINTER[struct_ibv_xrcd]
   create_flags: int
   max_tso_header: int
-  rwq_ind_tbl: ctypes._Pointer[struct_ibv_rwq_ind_table]
+  rwq_ind_tbl: c.POINTER[struct_ibv_rwq_ind_table]
   rx_hash_conf: struct_ibv_rx_hash_conf
   source_qpn: int
   send_ops_flags: int
-struct_ibv_qp_init_attr_ex.register_fields([('qp_context', ctypes.c_void_p, 0), ('send_cq', ctypes.POINTER(struct_ibv_cq), 8), ('recv_cq', ctypes.POINTER(struct_ibv_cq), 16), ('srq', ctypes.POINTER(struct_ibv_srq), 24), ('cap', struct_ibv_qp_cap, 32), ('qp_type', ctypes.c_uint32, 52), ('sq_sig_all', ctypes.c_int32, 56), ('comp_mask', uint32_t, 60), ('pd', ctypes.POINTER(struct_ibv_pd), 64), ('xrcd', ctypes.POINTER(struct_ibv_xrcd), 72), ('create_flags', uint32_t, 80), ('max_tso_header', uint16_t, 84), ('rwq_ind_tbl', ctypes.POINTER(struct_ibv_rwq_ind_table), 88), ('rx_hash_conf', struct_ibv_rx_hash_conf, 96), ('source_qpn', uint32_t, 120), ('send_ops_flags', uint64_t, 128)])
+struct_ibv_qp_init_attr_ex.register_fields([('qp_context', ctypes.c_void_p, 0), ('send_cq', c.POINTER[struct_ibv_cq], 8), ('recv_cq', c.POINTER[struct_ibv_cq], 16), ('srq', c.POINTER[struct_ibv_srq], 24), ('cap', struct_ibv_qp_cap, 32), ('qp_type', ctypes.c_uint32, 52), ('sq_sig_all', ctypes.c_int32, 56), ('comp_mask', uint32_t, 60), ('pd', c.POINTER[struct_ibv_pd], 64), ('xrcd', c.POINTER[struct_ibv_xrcd], 72), ('create_flags', uint32_t, 80), ('max_tso_header', uint16_t, 84), ('rwq_ind_tbl', c.POINTER[struct_ibv_rwq_ind_table], 88), ('rx_hash_conf', struct_ibv_rx_hash_conf, 96), ('source_qpn', uint32_t, 120), ('send_ops_flags', uint64_t, 128)])
 enum_ibv_qp_open_attr_mask: dict[int, str] = {(IBV_QP_OPEN_ATTR_NUM:=1): 'IBV_QP_OPEN_ATTR_NUM', (IBV_QP_OPEN_ATTR_XRCD:=2): 'IBV_QP_OPEN_ATTR_XRCD', (IBV_QP_OPEN_ATTR_CONTEXT:=4): 'IBV_QP_OPEN_ATTR_CONTEXT', (IBV_QP_OPEN_ATTR_TYPE:=8): 'IBV_QP_OPEN_ATTR_TYPE', (IBV_QP_OPEN_ATTR_RESERVED:=16): 'IBV_QP_OPEN_ATTR_RESERVED'}
 @c.record
 class struct_ibv_qp_open_attr(c.Struct):
   SIZE = 32
   comp_mask: int
   qp_num: int
-  xrcd: ctypes._Pointer[struct_ibv_xrcd]
-  qp_context: int|None
+  xrcd: c.POINTER[struct_ibv_xrcd]
+  qp_context: ctypes.c_void_p
   qp_type: int
-struct_ibv_qp_open_attr.register_fields([('comp_mask', uint32_t, 0), ('qp_num', uint32_t, 4), ('xrcd', ctypes.POINTER(struct_ibv_xrcd), 8), ('qp_context', ctypes.c_void_p, 16), ('qp_type', ctypes.c_uint32, 24)])
+struct_ibv_qp_open_attr.register_fields([('comp_mask', uint32_t, 0), ('qp_num', uint32_t, 4), ('xrcd', c.POINTER[struct_ibv_xrcd], 8), ('qp_context', ctypes.c_void_p, 16), ('qp_type', ctypes.c_uint32, 24)])
 enum_ibv_qp_attr_mask: dict[int, str] = {(IBV_QP_STATE:=1): 'IBV_QP_STATE', (IBV_QP_CUR_STATE:=2): 'IBV_QP_CUR_STATE', (IBV_QP_EN_SQD_ASYNC_NOTIFY:=4): 'IBV_QP_EN_SQD_ASYNC_NOTIFY', (IBV_QP_ACCESS_FLAGS:=8): 'IBV_QP_ACCESS_FLAGS', (IBV_QP_PKEY_INDEX:=16): 'IBV_QP_PKEY_INDEX', (IBV_QP_PORT:=32): 'IBV_QP_PORT', (IBV_QP_QKEY:=64): 'IBV_QP_QKEY', (IBV_QP_AV:=128): 'IBV_QP_AV', (IBV_QP_PATH_MTU:=256): 'IBV_QP_PATH_MTU', (IBV_QP_TIMEOUT:=512): 'IBV_QP_TIMEOUT', (IBV_QP_RETRY_CNT:=1024): 'IBV_QP_RETRY_CNT', (IBV_QP_RNR_RETRY:=2048): 'IBV_QP_RNR_RETRY', (IBV_QP_RQ_PSN:=4096): 'IBV_QP_RQ_PSN', (IBV_QP_MAX_QP_RD_ATOMIC:=8192): 'IBV_QP_MAX_QP_RD_ATOMIC', (IBV_QP_ALT_PATH:=16384): 'IBV_QP_ALT_PATH', (IBV_QP_MIN_RNR_TIMER:=32768): 'IBV_QP_MIN_RNR_TIMER', (IBV_QP_SQ_PSN:=65536): 'IBV_QP_SQ_PSN', (IBV_QP_MAX_DEST_RD_ATOMIC:=131072): 'IBV_QP_MAX_DEST_RD_ATOMIC', (IBV_QP_PATH_MIG_STATE:=262144): 'IBV_QP_PATH_MIG_STATE', (IBV_QP_CAP:=524288): 'IBV_QP_CAP', (IBV_QP_DEST_QPN:=1048576): 'IBV_QP_DEST_QPN', (IBV_QP_RATE_LIMIT:=33554432): 'IBV_QP_RATE_LIMIT'}
 enum_ibv_query_qp_data_in_order_flags: dict[int, str] = {(IBV_QUERY_QP_DATA_IN_ORDER_RETURN_CAPS:=1): 'IBV_QUERY_QP_DATA_IN_ORDER_RETURN_CAPS'}
 enum_ibv_query_qp_data_in_order_caps: dict[int, str] = {(IBV_QUERY_QP_DATA_IN_ORDER_WHOLE_MSG:=1): 'IBV_QUERY_QP_DATA_IN_ORDER_WHOLE_MSG', (IBV_QUERY_QP_DATA_IN_ORDER_ALIGNED_128_BYTES:=2): 'IBV_QUERY_QP_DATA_IN_ORDER_ALIGNED_128_BYTES'}
@@ -830,15 +830,15 @@ class struct_ibv_qp_rate_limit_attr(c.Struct):
   typical_pkt_sz: int
   comp_mask: int
 struct_ibv_qp_rate_limit_attr.register_fields([('rate_limit', uint32_t, 0), ('max_burst_sz', uint32_t, 4), ('typical_pkt_sz', uint16_t, 8), ('comp_mask', uint32_t, 12)])
-@dll.bind(ctypes.POINTER(ctypes.c_char), ctypes.c_uint32)
-def ibv_wr_opcode_str(opcode:ctypes.c_uint32) -> ctypes._Pointer[ctypes.c_char]: ...
+@dll.bind(c.POINTER[ctypes.c_char], ctypes.c_uint32)
+def ibv_wr_opcode_str(opcode:ctypes.c_uint32) -> c.POINTER[ctypes.c_char]: ...
 enum_ibv_send_flags: dict[int, str] = {(IBV_SEND_FENCE:=1): 'IBV_SEND_FENCE', (IBV_SEND_SIGNALED:=2): 'IBV_SEND_SIGNALED', (IBV_SEND_SOLICITED:=4): 'IBV_SEND_SOLICITED', (IBV_SEND_INLINE:=8): 'IBV_SEND_INLINE', (IBV_SEND_IP_CSUM:=16): 'IBV_SEND_IP_CSUM'}
 enum_ibv_placement_type: dict[int, str] = {(IBV_FLUSH_GLOBAL:=1): 'IBV_FLUSH_GLOBAL', (IBV_FLUSH_PERSISTENT:=2): 'IBV_FLUSH_PERSISTENT'}
 enum_ibv_selectivity_level: dict[int, str] = {(IBV_FLUSH_RANGE:=0): 'IBV_FLUSH_RANGE', (IBV_FLUSH_MR:=1): 'IBV_FLUSH_MR'}
 @c.record
 class struct_ibv_data_buf(c.Struct):
   SIZE = 16
-  addr: int|None
+  addr: ctypes.c_void_p
   length: int
 struct_ibv_data_buf.register_fields([('addr', ctypes.c_void_p, 0), ('length', size_t, 8)])
 enum_ibv_ops_wr_opcode: dict[int, str] = {(IBV_WR_TAG_ADD:=0): 'IBV_WR_TAG_ADD', (IBV_WR_TAG_DEL:=1): 'IBV_WR_TAG_DEL', (IBV_WR_TAG_SYNC:=2): 'IBV_WR_TAG_SYNC'}
@@ -847,7 +847,7 @@ enum_ibv_ops_flags: dict[int, str] = {(IBV_OPS_SIGNALED:=1): 'IBV_OPS_SIGNALED',
 class struct_ibv_ops_wr(c.Struct):
   SIZE = 72
   wr_id: int
-  next: ctypes._Pointer[struct_ibv_ops_wr]
+  next: c.POINTER[struct_ibv_ops_wr]
   opcode: int
   flags: int
   tm: struct_ibv_ops_wr_tm
@@ -861,13 +861,13 @@ class struct_ibv_ops_wr_tm(c.Struct):
 class struct_ibv_ops_wr_tm_add(c.Struct):
   SIZE = 40
   recv_wr_id: int
-  sg_list: ctypes._Pointer[struct_ibv_sge]
+  sg_list: c.POINTER[struct_ibv_sge]
   num_sge: int
   tag: int
   mask: int
-struct_ibv_ops_wr_tm_add.register_fields([('recv_wr_id', uint64_t, 0), ('sg_list', ctypes.POINTER(struct_ibv_sge), 8), ('num_sge', ctypes.c_int32, 16), ('tag', uint64_t, 24), ('mask', uint64_t, 32)])
+struct_ibv_ops_wr_tm_add.register_fields([('recv_wr_id', uint64_t, 0), ('sg_list', c.POINTER[struct_ibv_sge], 8), ('num_sge', ctypes.c_int32, 16), ('tag', uint64_t, 24), ('mask', uint64_t, 32)])
 struct_ibv_ops_wr_tm.register_fields([('unexpected_cnt', uint32_t, 0), ('handle', uint32_t, 4), ('add', struct_ibv_ops_wr_tm_add, 8)])
-struct_ibv_ops_wr.register_fields([('wr_id', uint64_t, 0), ('next', ctypes.POINTER(struct_ibv_ops_wr), 8), ('opcode', ctypes.c_uint32, 16), ('flags', ctypes.c_int32, 20), ('tm', struct_ibv_ops_wr_tm, 24)])
+struct_ibv_ops_wr.register_fields([('wr_id', uint64_t, 0), ('next', c.POINTER[struct_ibv_ops_wr], 8), ('opcode', ctypes.c_uint32, 16), ('flags', ctypes.c_int32, 20), ('tm', struct_ibv_ops_wr_tm, 24)])
 @c.record
 class struct_ibv_qp_ex(c.Struct):
   SIZE = 360
@@ -875,31 +875,31 @@ class struct_ibv_qp_ex(c.Struct):
   comp_mask: int
   wr_id: int
   wr_flags: int
-  wr_atomic_cmp_swp: ctypes._CFunctionType
-  wr_atomic_fetch_add: ctypes._CFunctionType
-  wr_bind_mw: ctypes._CFunctionType
-  wr_local_inv: ctypes._CFunctionType
-  wr_rdma_read: ctypes._CFunctionType
-  wr_rdma_write: ctypes._CFunctionType
-  wr_rdma_write_imm: ctypes._CFunctionType
-  wr_send: ctypes._CFunctionType
-  wr_send_imm: ctypes._CFunctionType
-  wr_send_inv: ctypes._CFunctionType
-  wr_send_tso: ctypes._CFunctionType
-  wr_set_ud_addr: ctypes._CFunctionType
-  wr_set_xrc_srqn: ctypes._CFunctionType
-  wr_set_inline_data: ctypes._CFunctionType
-  wr_set_inline_data_list: ctypes._CFunctionType
-  wr_set_sge: ctypes._CFunctionType
-  wr_set_sge_list: ctypes._CFunctionType
-  wr_start: ctypes._CFunctionType
-  wr_complete: ctypes._CFunctionType
-  wr_abort: ctypes._CFunctionType
-  wr_atomic_write: ctypes._CFunctionType
-  wr_flush: ctypes._CFunctionType
-struct_ibv_qp_ex.register_fields([('qp_base', struct_ibv_qp, 0), ('comp_mask', uint64_t, 160), ('wr_id', uint64_t, 168), ('wr_flags', ctypes.c_uint32, 176), ('wr_atomic_cmp_swp', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_qp_ex), uint32_t, uint64_t, uint64_t, uint64_t), 184), ('wr_atomic_fetch_add', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_qp_ex), uint32_t, uint64_t, uint64_t), 192), ('wr_bind_mw', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_qp_ex), ctypes.POINTER(struct_ibv_mw), uint32_t, ctypes.POINTER(struct_ibv_mw_bind_info)), 200), ('wr_local_inv', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_qp_ex), uint32_t), 208), ('wr_rdma_read', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_qp_ex), uint32_t, uint64_t), 216), ('wr_rdma_write', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_qp_ex), uint32_t, uint64_t), 224), ('wr_rdma_write_imm', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_qp_ex), uint32_t, uint64_t, ctypes.c_uint32), 232), ('wr_send', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_qp_ex)), 240), ('wr_send_imm', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_qp_ex), ctypes.c_uint32), 248), ('wr_send_inv', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_qp_ex), uint32_t), 256), ('wr_send_tso', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_qp_ex), ctypes.c_void_p, uint16_t, uint16_t), 264), ('wr_set_ud_addr', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_qp_ex), ctypes.POINTER(struct_ibv_ah), uint32_t, uint32_t), 272), ('wr_set_xrc_srqn', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_qp_ex), uint32_t), 280), ('wr_set_inline_data', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_qp_ex), ctypes.c_void_p, size_t), 288), ('wr_set_inline_data_list', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_qp_ex), size_t, ctypes.POINTER(struct_ibv_data_buf)), 296), ('wr_set_sge', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_qp_ex), uint32_t, uint64_t, uint32_t), 304), ('wr_set_sge_list', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_qp_ex), size_t, ctypes.POINTER(struct_ibv_sge)), 312), ('wr_start', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_qp_ex)), 320), ('wr_complete', ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(struct_ibv_qp_ex)), 328), ('wr_abort', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_qp_ex)), 336), ('wr_atomic_write', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_qp_ex), uint32_t, uint64_t, ctypes.c_void_p), 344), ('wr_flush', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_qp_ex), uint32_t, uint64_t, size_t, uint8_t, uint8_t), 352)])
-@dll.bind(ctypes.POINTER(struct_ibv_qp_ex), ctypes.POINTER(struct_ibv_qp))
-def ibv_qp_to_qp_ex(qp:ctypes._Pointer[struct_ibv_qp]) -> ctypes._Pointer[struct_ibv_qp_ex]: ...
+  wr_atomic_cmp_swp: c.CFUNCTYPE[None, [c.POINTER[struct_ibv_qp_ex], ctypes.c_uint32, ctypes.c_uint64, ctypes.c_uint64, ctypes.c_uint64]]
+  wr_atomic_fetch_add: c.CFUNCTYPE[None, [c.POINTER[struct_ibv_qp_ex], ctypes.c_uint32, ctypes.c_uint64, ctypes.c_uint64]]
+  wr_bind_mw: c.CFUNCTYPE[None, [c.POINTER[struct_ibv_qp_ex], c.POINTER[struct_ibv_mw], ctypes.c_uint32, c.POINTER[struct_ibv_mw_bind_info]]]
+  wr_local_inv: c.CFUNCTYPE[None, [c.POINTER[struct_ibv_qp_ex], ctypes.c_uint32]]
+  wr_rdma_read: c.CFUNCTYPE[None, [c.POINTER[struct_ibv_qp_ex], ctypes.c_uint32, ctypes.c_uint64]]
+  wr_rdma_write: c.CFUNCTYPE[None, [c.POINTER[struct_ibv_qp_ex], ctypes.c_uint32, ctypes.c_uint64]]
+  wr_rdma_write_imm: c.CFUNCTYPE[None, [c.POINTER[struct_ibv_qp_ex], ctypes.c_uint32, ctypes.c_uint64, ctypes.c_uint32]]
+  wr_send: c.CFUNCTYPE[None, [c.POINTER[struct_ibv_qp_ex]]]
+  wr_send_imm: c.CFUNCTYPE[None, [c.POINTER[struct_ibv_qp_ex], ctypes.c_uint32]]
+  wr_send_inv: c.CFUNCTYPE[None, [c.POINTER[struct_ibv_qp_ex], ctypes.c_uint32]]
+  wr_send_tso: c.CFUNCTYPE[None, [c.POINTER[struct_ibv_qp_ex], ctypes.c_void_p, ctypes.c_uint16, ctypes.c_uint16]]
+  wr_set_ud_addr: c.CFUNCTYPE[None, [c.POINTER[struct_ibv_qp_ex], c.POINTER[struct_ibv_ah], ctypes.c_uint32, ctypes.c_uint32]]
+  wr_set_xrc_srqn: c.CFUNCTYPE[None, [c.POINTER[struct_ibv_qp_ex], ctypes.c_uint32]]
+  wr_set_inline_data: c.CFUNCTYPE[None, [c.POINTER[struct_ibv_qp_ex], ctypes.c_void_p, ctypes.c_uint64]]
+  wr_set_inline_data_list: c.CFUNCTYPE[None, [c.POINTER[struct_ibv_qp_ex], ctypes.c_uint64, c.POINTER[struct_ibv_data_buf]]]
+  wr_set_sge: c.CFUNCTYPE[None, [c.POINTER[struct_ibv_qp_ex], ctypes.c_uint32, ctypes.c_uint64, ctypes.c_uint32]]
+  wr_set_sge_list: c.CFUNCTYPE[None, [c.POINTER[struct_ibv_qp_ex], ctypes.c_uint64, c.POINTER[struct_ibv_sge]]]
+  wr_start: c.CFUNCTYPE[None, [c.POINTER[struct_ibv_qp_ex]]]
+  wr_complete: c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_qp_ex]]]
+  wr_abort: c.CFUNCTYPE[None, [c.POINTER[struct_ibv_qp_ex]]]
+  wr_atomic_write: c.CFUNCTYPE[None, [c.POINTER[struct_ibv_qp_ex], ctypes.c_uint32, ctypes.c_uint64, ctypes.c_void_p]]
+  wr_flush: c.CFUNCTYPE[None, [c.POINTER[struct_ibv_qp_ex], ctypes.c_uint32, ctypes.c_uint64, ctypes.c_uint64, ctypes.c_ubyte, ctypes.c_ubyte]]
+struct_ibv_qp_ex.register_fields([('qp_base', struct_ibv_qp, 0), ('comp_mask', uint64_t, 160), ('wr_id', uint64_t, 168), ('wr_flags', ctypes.c_uint32, 176), ('wr_atomic_cmp_swp', c.CFUNCTYPE[None, [c.POINTER[struct_ibv_qp_ex], uint32_t, uint64_t, uint64_t, uint64_t]], 184), ('wr_atomic_fetch_add', c.CFUNCTYPE[None, [c.POINTER[struct_ibv_qp_ex], uint32_t, uint64_t, uint64_t]], 192), ('wr_bind_mw', c.CFUNCTYPE[None, [c.POINTER[struct_ibv_qp_ex], c.POINTER[struct_ibv_mw], uint32_t, c.POINTER[struct_ibv_mw_bind_info]]], 200), ('wr_local_inv', c.CFUNCTYPE[None, [c.POINTER[struct_ibv_qp_ex], uint32_t]], 208), ('wr_rdma_read', c.CFUNCTYPE[None, [c.POINTER[struct_ibv_qp_ex], uint32_t, uint64_t]], 216), ('wr_rdma_write', c.CFUNCTYPE[None, [c.POINTER[struct_ibv_qp_ex], uint32_t, uint64_t]], 224), ('wr_rdma_write_imm', c.CFUNCTYPE[None, [c.POINTER[struct_ibv_qp_ex], uint32_t, uint64_t, ctypes.c_uint32]], 232), ('wr_send', c.CFUNCTYPE[None, [c.POINTER[struct_ibv_qp_ex]]], 240), ('wr_send_imm', c.CFUNCTYPE[None, [c.POINTER[struct_ibv_qp_ex], ctypes.c_uint32]], 248), ('wr_send_inv', c.CFUNCTYPE[None, [c.POINTER[struct_ibv_qp_ex], uint32_t]], 256), ('wr_send_tso', c.CFUNCTYPE[None, [c.POINTER[struct_ibv_qp_ex], ctypes.c_void_p, uint16_t, uint16_t]], 264), ('wr_set_ud_addr', c.CFUNCTYPE[None, [c.POINTER[struct_ibv_qp_ex], c.POINTER[struct_ibv_ah], uint32_t, uint32_t]], 272), ('wr_set_xrc_srqn', c.CFUNCTYPE[None, [c.POINTER[struct_ibv_qp_ex], uint32_t]], 280), ('wr_set_inline_data', c.CFUNCTYPE[None, [c.POINTER[struct_ibv_qp_ex], ctypes.c_void_p, size_t]], 288), ('wr_set_inline_data_list', c.CFUNCTYPE[None, [c.POINTER[struct_ibv_qp_ex], size_t, c.POINTER[struct_ibv_data_buf]]], 296), ('wr_set_sge', c.CFUNCTYPE[None, [c.POINTER[struct_ibv_qp_ex], uint32_t, uint64_t, uint32_t]], 304), ('wr_set_sge_list', c.CFUNCTYPE[None, [c.POINTER[struct_ibv_qp_ex], size_t, c.POINTER[struct_ibv_sge]]], 312), ('wr_start', c.CFUNCTYPE[None, [c.POINTER[struct_ibv_qp_ex]]], 320), ('wr_complete', c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_qp_ex]]], 328), ('wr_abort', c.CFUNCTYPE[None, [c.POINTER[struct_ibv_qp_ex]]], 336), ('wr_atomic_write', c.CFUNCTYPE[None, [c.POINTER[struct_ibv_qp_ex], uint32_t, uint64_t, ctypes.c_void_p]], 344), ('wr_flush', c.CFUNCTYPE[None, [c.POINTER[struct_ibv_qp_ex], uint32_t, uint64_t, size_t, uint8_t, uint8_t]], 352)])
+@dll.bind(c.POINTER[struct_ibv_qp_ex], c.POINTER[struct_ibv_qp])
+def ibv_qp_to_qp_ex(qp:c.POINTER[struct_ibv_qp]) -> c.POINTER[struct_ibv_qp_ex]: ...
 @c.record
 class struct_ibv_ece(c.Struct):
   SIZE = 12
@@ -921,9 +921,9 @@ struct_ibv_wc_tm_info.register_fields([('tag', uint64_t, 0), ('priv', uint32_t, 
 @c.record
 class struct_ibv_cq_ex(c.Struct):
   SIZE = 288
-  context: ctypes._Pointer[struct_ibv_context]
-  channel: ctypes._Pointer[struct_ibv_comp_channel]
-  cq_context: int|None
+  context: c.POINTER[struct_ibv_context]
+  channel: c.POINTER[struct_ibv_comp_channel]
+  cq_context: ctypes.c_void_p
   handle: int
   cqe: int
   mutex: pthread_mutex_t
@@ -933,25 +933,25 @@ class struct_ibv_cq_ex(c.Struct):
   comp_mask: int
   status: int
   wr_id: int
-  start_poll: ctypes._CFunctionType
-  next_poll: ctypes._CFunctionType
-  end_poll: ctypes._CFunctionType
-  read_opcode: ctypes._CFunctionType
-  read_vendor_err: ctypes._CFunctionType
-  read_byte_len: ctypes._CFunctionType
-  read_imm_data: ctypes._CFunctionType
-  read_qp_num: ctypes._CFunctionType
-  read_src_qp: ctypes._CFunctionType
-  read_wc_flags: ctypes._CFunctionType
-  read_slid: ctypes._CFunctionType
-  read_sl: ctypes._CFunctionType
-  read_dlid_path_bits: ctypes._CFunctionType
-  read_completion_ts: ctypes._CFunctionType
-  read_cvlan: ctypes._CFunctionType
-  read_flow_tag: ctypes._CFunctionType
-  read_tm_info: ctypes._CFunctionType
-  read_completion_wallclock_ns: ctypes._CFunctionType
-struct_ibv_cq_ex.register_fields([('context', ctypes.POINTER(struct_ibv_context), 0), ('channel', ctypes.POINTER(struct_ibv_comp_channel), 8), ('cq_context', ctypes.c_void_p, 16), ('handle', uint32_t, 24), ('cqe', ctypes.c_int32, 28), ('mutex', pthread_mutex_t, 32), ('cond', pthread_cond_t, 72), ('comp_events_completed', uint32_t, 120), ('async_events_completed', uint32_t, 124), ('comp_mask', uint32_t, 128), ('status', ctypes.c_uint32, 132), ('wr_id', uint64_t, 136), ('start_poll', ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(struct_ibv_cq_ex), ctypes.POINTER(struct_ibv_poll_cq_attr)), 144), ('next_poll', ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(struct_ibv_cq_ex)), 152), ('end_poll', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_cq_ex)), 160), ('read_opcode', ctypes.CFUNCTYPE(ctypes.c_uint32, ctypes.POINTER(struct_ibv_cq_ex)), 168), ('read_vendor_err', ctypes.CFUNCTYPE(uint32_t, ctypes.POINTER(struct_ibv_cq_ex)), 176), ('read_byte_len', ctypes.CFUNCTYPE(uint32_t, ctypes.POINTER(struct_ibv_cq_ex)), 184), ('read_imm_data', ctypes.CFUNCTYPE(ctypes.c_uint32, ctypes.POINTER(struct_ibv_cq_ex)), 192), ('read_qp_num', ctypes.CFUNCTYPE(uint32_t, ctypes.POINTER(struct_ibv_cq_ex)), 200), ('read_src_qp', ctypes.CFUNCTYPE(uint32_t, ctypes.POINTER(struct_ibv_cq_ex)), 208), ('read_wc_flags', ctypes.CFUNCTYPE(ctypes.c_uint32, ctypes.POINTER(struct_ibv_cq_ex)), 216), ('read_slid', ctypes.CFUNCTYPE(uint32_t, ctypes.POINTER(struct_ibv_cq_ex)), 224), ('read_sl', ctypes.CFUNCTYPE(uint8_t, ctypes.POINTER(struct_ibv_cq_ex)), 232), ('read_dlid_path_bits', ctypes.CFUNCTYPE(uint8_t, ctypes.POINTER(struct_ibv_cq_ex)), 240), ('read_completion_ts', ctypes.CFUNCTYPE(uint64_t, ctypes.POINTER(struct_ibv_cq_ex)), 248), ('read_cvlan', ctypes.CFUNCTYPE(uint16_t, ctypes.POINTER(struct_ibv_cq_ex)), 256), ('read_flow_tag', ctypes.CFUNCTYPE(uint32_t, ctypes.POINTER(struct_ibv_cq_ex)), 264), ('read_tm_info', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_cq_ex), ctypes.POINTER(struct_ibv_wc_tm_info)), 272), ('read_completion_wallclock_ns', ctypes.CFUNCTYPE(uint64_t, ctypes.POINTER(struct_ibv_cq_ex)), 280)])
+  start_poll: c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_cq_ex], c.POINTER[struct_ibv_poll_cq_attr]]]
+  next_poll: c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_cq_ex]]]
+  end_poll: c.CFUNCTYPE[None, [c.POINTER[struct_ibv_cq_ex]]]
+  read_opcode: c.CFUNCTYPE[ctypes.c_uint32, [c.POINTER[struct_ibv_cq_ex]]]
+  read_vendor_err: c.CFUNCTYPE[ctypes.c_uint32, [c.POINTER[struct_ibv_cq_ex]]]
+  read_byte_len: c.CFUNCTYPE[ctypes.c_uint32, [c.POINTER[struct_ibv_cq_ex]]]
+  read_imm_data: c.CFUNCTYPE[ctypes.c_uint32, [c.POINTER[struct_ibv_cq_ex]]]
+  read_qp_num: c.CFUNCTYPE[ctypes.c_uint32, [c.POINTER[struct_ibv_cq_ex]]]
+  read_src_qp: c.CFUNCTYPE[ctypes.c_uint32, [c.POINTER[struct_ibv_cq_ex]]]
+  read_wc_flags: c.CFUNCTYPE[ctypes.c_uint32, [c.POINTER[struct_ibv_cq_ex]]]
+  read_slid: c.CFUNCTYPE[ctypes.c_uint32, [c.POINTER[struct_ibv_cq_ex]]]
+  read_sl: c.CFUNCTYPE[ctypes.c_ubyte, [c.POINTER[struct_ibv_cq_ex]]]
+  read_dlid_path_bits: c.CFUNCTYPE[ctypes.c_ubyte, [c.POINTER[struct_ibv_cq_ex]]]
+  read_completion_ts: c.CFUNCTYPE[ctypes.c_uint64, [c.POINTER[struct_ibv_cq_ex]]]
+  read_cvlan: c.CFUNCTYPE[ctypes.c_uint16, [c.POINTER[struct_ibv_cq_ex]]]
+  read_flow_tag: c.CFUNCTYPE[ctypes.c_uint32, [c.POINTER[struct_ibv_cq_ex]]]
+  read_tm_info: c.CFUNCTYPE[None, [c.POINTER[struct_ibv_cq_ex], c.POINTER[struct_ibv_wc_tm_info]]]
+  read_completion_wallclock_ns: c.CFUNCTYPE[ctypes.c_uint64, [c.POINTER[struct_ibv_cq_ex]]]
+struct_ibv_cq_ex.register_fields([('context', c.POINTER[struct_ibv_context], 0), ('channel', c.POINTER[struct_ibv_comp_channel], 8), ('cq_context', ctypes.c_void_p, 16), ('handle', uint32_t, 24), ('cqe', ctypes.c_int32, 28), ('mutex', pthread_mutex_t, 32), ('cond', pthread_cond_t, 72), ('comp_events_completed', uint32_t, 120), ('async_events_completed', uint32_t, 124), ('comp_mask', uint32_t, 128), ('status', ctypes.c_uint32, 132), ('wr_id', uint64_t, 136), ('start_poll', c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_cq_ex], c.POINTER[struct_ibv_poll_cq_attr]]], 144), ('next_poll', c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_cq_ex]]], 152), ('end_poll', c.CFUNCTYPE[None, [c.POINTER[struct_ibv_cq_ex]]], 160), ('read_opcode', c.CFUNCTYPE[ctypes.c_uint32, [c.POINTER[struct_ibv_cq_ex]]], 168), ('read_vendor_err', c.CFUNCTYPE[uint32_t, [c.POINTER[struct_ibv_cq_ex]]], 176), ('read_byte_len', c.CFUNCTYPE[uint32_t, [c.POINTER[struct_ibv_cq_ex]]], 184), ('read_imm_data', c.CFUNCTYPE[ctypes.c_uint32, [c.POINTER[struct_ibv_cq_ex]]], 192), ('read_qp_num', c.CFUNCTYPE[uint32_t, [c.POINTER[struct_ibv_cq_ex]]], 200), ('read_src_qp', c.CFUNCTYPE[uint32_t, [c.POINTER[struct_ibv_cq_ex]]], 208), ('read_wc_flags', c.CFUNCTYPE[ctypes.c_uint32, [c.POINTER[struct_ibv_cq_ex]]], 216), ('read_slid', c.CFUNCTYPE[uint32_t, [c.POINTER[struct_ibv_cq_ex]]], 224), ('read_sl', c.CFUNCTYPE[uint8_t, [c.POINTER[struct_ibv_cq_ex]]], 232), ('read_dlid_path_bits', c.CFUNCTYPE[uint8_t, [c.POINTER[struct_ibv_cq_ex]]], 240), ('read_completion_ts', c.CFUNCTYPE[uint64_t, [c.POINTER[struct_ibv_cq_ex]]], 248), ('read_cvlan', c.CFUNCTYPE[uint16_t, [c.POINTER[struct_ibv_cq_ex]]], 256), ('read_flow_tag', c.CFUNCTYPE[uint32_t, [c.POINTER[struct_ibv_cq_ex]]], 264), ('read_tm_info', c.CFUNCTYPE[None, [c.POINTER[struct_ibv_cq_ex], c.POINTER[struct_ibv_wc_tm_info]]], 272), ('read_completion_wallclock_ns', c.CFUNCTYPE[uint64_t, [c.POINTER[struct_ibv_cq_ex]]], 280)])
 enum_ibv_cq_attr_mask: dict[int, str] = {(IBV_CQ_ATTR_MODERATE:=1): 'IBV_CQ_ATTR_MODERATE', (IBV_CQ_ATTR_RESERVED:=2): 'IBV_CQ_ATTR_RESERVED'}
 @c.record
 class struct_ibv_moderate_cq(c.Struct):
@@ -971,11 +971,11 @@ enum_ibv_flow_spec_type: dict[int, str] = {(IBV_FLOW_SPEC_ETH:=32): 'IBV_FLOW_SP
 @c.record
 class struct_ibv_flow_eth_filter(c.Struct):
   SIZE = 16
-  dst_mac: ctypes.Array[ctypes.c_ubyte]
-  src_mac: ctypes.Array[ctypes.c_ubyte]
+  dst_mac: c.Array[ctypes.c_ubyte, Literal[6]]
+  src_mac: c.Array[ctypes.c_ubyte, Literal[6]]
   ether_type: int
   vlan_tag: int
-struct_ibv_flow_eth_filter.register_fields([('dst_mac', (uint8_t * 6), 0), ('src_mac', (uint8_t * 6), 6), ('ether_type', uint16_t, 12), ('vlan_tag', uint16_t, 14)])
+struct_ibv_flow_eth_filter.register_fields([('dst_mac', c.Array[uint8_t, Literal[6]], 0), ('src_mac', c.Array[uint8_t, Literal[6]], 6), ('ether_type', uint16_t, 12), ('vlan_tag', uint16_t, 14)])
 @c.record
 class struct_ibv_flow_spec_eth(c.Struct):
   SIZE = 40
@@ -1019,13 +1019,13 @@ struct_ibv_flow_spec_ipv4_ext.register_fields([('type', ctypes.c_uint32, 0), ('s
 @c.record
 class struct_ibv_flow_ipv6_filter(c.Struct):
   SIZE = 40
-  src_ip: ctypes.Array[ctypes.c_ubyte]
-  dst_ip: ctypes.Array[ctypes.c_ubyte]
+  src_ip: c.Array[ctypes.c_ubyte, Literal[16]]
+  dst_ip: c.Array[ctypes.c_ubyte, Literal[16]]
   flow_label: int
   next_hdr: int
   traffic_class: int
   hop_limit: int
-struct_ibv_flow_ipv6_filter.register_fields([('src_ip', (uint8_t * 16), 0), ('dst_ip', (uint8_t * 16), 16), ('flow_label', uint32_t, 32), ('next_hdr', uint8_t, 36), ('traffic_class', uint8_t, 37), ('hop_limit', uint8_t, 38)])
+struct_ibv_flow_ipv6_filter.register_fields([('src_ip', c.Array[uint8_t, Literal[16]], 0), ('dst_ip', c.Array[uint8_t, Literal[16]], 16), ('flow_label', uint32_t, 32), ('next_hdr', uint8_t, 36), ('traffic_class', uint8_t, 37), ('hop_limit', uint8_t, 38)])
 @c.record
 class struct_ibv_flow_spec_ipv6(c.Struct):
   SIZE = 88
@@ -1121,25 +1121,25 @@ class struct_ibv_flow_spec_action_handle(c.Struct):
   SIZE = 16
   type: int
   size: int
-  action: ctypes._Pointer[struct_ibv_flow_action]
+  action: c.POINTER[struct_ibv_flow_action]
 @c.record
 class struct_ibv_flow_action(c.Struct):
   SIZE = 8
-  context: ctypes._Pointer[struct_ibv_context]
-struct_ibv_flow_action.register_fields([('context', ctypes.POINTER(struct_ibv_context), 0)])
-struct_ibv_flow_spec_action_handle.register_fields([('type', ctypes.c_uint32, 0), ('size', uint16_t, 4), ('action', ctypes.POINTER(struct_ibv_flow_action), 8)])
+  context: c.POINTER[struct_ibv_context]
+struct_ibv_flow_action.register_fields([('context', c.POINTER[struct_ibv_context], 0)])
+struct_ibv_flow_spec_action_handle.register_fields([('type', ctypes.c_uint32, 0), ('size', uint16_t, 4), ('action', c.POINTER[struct_ibv_flow_action], 8)])
 @c.record
 class struct_ibv_flow_spec_counter_action(c.Struct):
   SIZE = 16
   type: int
   size: int
-  counters: ctypes._Pointer[struct_ibv_counters]
+  counters: c.POINTER[struct_ibv_counters]
 @c.record
 class struct_ibv_counters(c.Struct):
   SIZE = 8
-  context: ctypes._Pointer[struct_ibv_context]
-struct_ibv_counters.register_fields([('context', ctypes.POINTER(struct_ibv_context), 0)])
-struct_ibv_flow_spec_counter_action.register_fields([('type', ctypes.c_uint32, 0), ('size', uint16_t, 4), ('counters', ctypes.POINTER(struct_ibv_counters), 8)])
+  context: c.POINTER[struct_ibv_context]
+struct_ibv_counters.register_fields([('context', c.POINTER[struct_ibv_context], 0)])
+struct_ibv_flow_spec_counter_action.register_fields([('type', ctypes.c_uint32, 0), ('size', uint16_t, 4), ('counters', c.POINTER[struct_ibv_counters], 8)])
 @c.record
 class struct_ibv_flow_spec(c.Struct):
   SIZE = 88
@@ -1179,21 +1179,21 @@ struct_ibv_flow_attr.register_fields([('comp_mask', uint32_t, 0), ('type', ctype
 class struct_ibv_flow(c.Struct):
   SIZE = 24
   comp_mask: int
-  context: ctypes._Pointer[struct_ibv_context]
+  context: c.POINTER[struct_ibv_context]
   handle: int
-struct_ibv_flow.register_fields([('comp_mask', uint32_t, 0), ('context', ctypes.POINTER(struct_ibv_context), 8), ('handle', uint32_t, 16)])
+struct_ibv_flow.register_fields([('comp_mask', uint32_t, 0), ('context', c.POINTER[struct_ibv_context], 8), ('handle', uint32_t, 16)])
 enum_ibv_flow_action_esp_mask: dict[int, str] = {(IBV_FLOW_ACTION_ESP_MASK_ESN:=1): 'IBV_FLOW_ACTION_ESP_MASK_ESN'}
 @c.record
 class struct_ibv_flow_action_esp_attr(c.Struct):
   SIZE = 56
-  esp_attr: ctypes._Pointer[struct_ib_uverbs_flow_action_esp]
+  esp_attr: c.POINTER[struct_ib_uverbs_flow_action_esp]
   keymat_proto: int
   keymat_len: int
-  keymat_ptr: int|None
+  keymat_ptr: ctypes.c_void_p
   replay_proto: int
   replay_len: int
-  replay_ptr: int|None
-  esp_encap: ctypes._Pointer[struct_ib_uverbs_flow_action_esp_encap]
+  replay_ptr: ctypes.c_void_p
+  esp_encap: c.POINTER[struct_ib_uverbs_flow_action_esp_encap]
   comp_mask: int
   esn: int
 @c.record
@@ -1212,15 +1212,15 @@ enum_ib_uverbs_flow_action_esp_replay: dict[int, str] = {(IB_UVERBS_FLOW_ACTION_
 @c.record
 class struct_ib_uverbs_flow_action_esp_encap(c.Struct):
   SIZE = 24
-  val_ptr: int|None
+  val_ptr: ctypes.c_void_p
   val_ptr_data_u64: int
-  next_ptr: ctypes._Pointer[struct_ib_uverbs_flow_action_esp_encap]
+  next_ptr: c.POINTER[struct_ib_uverbs_flow_action_esp_encap]
   next_ptr_data_u64: int
   len: int
   type: int
 __u16: TypeAlias = ctypes.c_uint16
-struct_ib_uverbs_flow_action_esp_encap.register_fields([('val_ptr', ctypes.c_void_p, 0), ('val_ptr_data_u64', ctypes.c_uint64, 0), ('next_ptr', ctypes.POINTER(struct_ib_uverbs_flow_action_esp_encap), 8), ('next_ptr_data_u64', ctypes.c_uint64, 8), ('len', ctypes.c_uint16, 16), ('type', ctypes.c_uint16, 18)])
-struct_ibv_flow_action_esp_attr.register_fields([('esp_attr', ctypes.POINTER(struct_ib_uverbs_flow_action_esp), 0), ('keymat_proto', ctypes.c_uint32, 8), ('keymat_len', uint16_t, 12), ('keymat_ptr', ctypes.c_void_p, 16), ('replay_proto', ctypes.c_uint32, 24), ('replay_len', uint16_t, 28), ('replay_ptr', ctypes.c_void_p, 32), ('esp_encap', ctypes.POINTER(struct_ib_uverbs_flow_action_esp_encap), 40), ('comp_mask', uint32_t, 48), ('esn', uint32_t, 52)])
+struct_ib_uverbs_flow_action_esp_encap.register_fields([('val_ptr', ctypes.c_void_p, 0), ('val_ptr_data_u64', ctypes.c_uint64, 0), ('next_ptr', c.POINTER[struct_ib_uverbs_flow_action_esp_encap], 8), ('next_ptr_data_u64', ctypes.c_uint64, 8), ('len', ctypes.c_uint16, 16), ('type', ctypes.c_uint16, 18)])
+struct_ibv_flow_action_esp_attr.register_fields([('esp_attr', c.POINTER[struct_ib_uverbs_flow_action_esp], 0), ('keymat_proto', ctypes.c_uint32, 8), ('keymat_len', uint16_t, 12), ('keymat_ptr', ctypes.c_void_p, 16), ('replay_proto', ctypes.c_uint32, 24), ('replay_len', uint16_t, 28), ('replay_ptr', ctypes.c_void_p, 32), ('esp_encap', c.POINTER[struct_ib_uverbs_flow_action_esp_encap], 40), ('comp_mask', uint32_t, 48), ('esn', uint32_t, 52)])
 _anonenum4: dict[int, str] = {(IBV_SYSFS_NAME_MAX:=64): 'IBV_SYSFS_NAME_MAX', (IBV_SYSFS_PATH_MAX:=256): 'IBV_SYSFS_PATH_MAX'}
 enum_ibv_cq_init_attr_mask: dict[int, str] = {(IBV_CQ_INIT_ATTR_MASK_FLAGS:=1): 'IBV_CQ_INIT_ATTR_MASK_FLAGS', (IBV_CQ_INIT_ATTR_MASK_PD:=2): 'IBV_CQ_INIT_ATTR_MASK_PD'}
 enum_ibv_create_cq_attr_flags: dict[int, str] = {(IBV_CREATE_CQ_ATTR_SINGLE_THREADED:=1): 'IBV_CREATE_CQ_ATTR_SINGLE_THREADED', (IBV_CREATE_CQ_ATTR_IGNORE_OVERRUN:=2): 'IBV_CREATE_CQ_ATTR_IGNORE_OVERRUN'}
@@ -1228,25 +1228,25 @@ enum_ibv_create_cq_attr_flags: dict[int, str] = {(IBV_CREATE_CQ_ATTR_SINGLE_THRE
 class struct_ibv_cq_init_attr_ex(c.Struct):
   SIZE = 56
   cqe: int
-  cq_context: int|None
-  channel: ctypes._Pointer[struct_ibv_comp_channel]
+  cq_context: ctypes.c_void_p
+  channel: c.POINTER[struct_ibv_comp_channel]
   comp_vector: int
   wc_flags: int
   comp_mask: int
   flags: int
-  parent_domain: ctypes._Pointer[struct_ibv_pd]
-struct_ibv_cq_init_attr_ex.register_fields([('cqe', uint32_t, 0), ('cq_context', ctypes.c_void_p, 8), ('channel', ctypes.POINTER(struct_ibv_comp_channel), 16), ('comp_vector', uint32_t, 24), ('wc_flags', uint64_t, 32), ('comp_mask', uint32_t, 40), ('flags', uint32_t, 44), ('parent_domain', ctypes.POINTER(struct_ibv_pd), 48)])
+  parent_domain: c.POINTER[struct_ibv_pd]
+struct_ibv_cq_init_attr_ex.register_fields([('cqe', uint32_t, 0), ('cq_context', ctypes.c_void_p, 8), ('channel', c.POINTER[struct_ibv_comp_channel], 16), ('comp_vector', uint32_t, 24), ('wc_flags', uint64_t, 32), ('comp_mask', uint32_t, 40), ('flags', uint32_t, 44), ('parent_domain', c.POINTER[struct_ibv_pd], 48)])
 enum_ibv_parent_domain_init_attr_mask: dict[int, str] = {(IBV_PARENT_DOMAIN_INIT_ATTR_ALLOCATORS:=1): 'IBV_PARENT_DOMAIN_INIT_ATTR_ALLOCATORS', (IBV_PARENT_DOMAIN_INIT_ATTR_PD_CONTEXT:=2): 'IBV_PARENT_DOMAIN_INIT_ATTR_PD_CONTEXT'}
 @c.record
 class struct_ibv_parent_domain_init_attr(c.Struct):
   SIZE = 48
-  pd: ctypes._Pointer[struct_ibv_pd]
-  td: ctypes._Pointer[struct_ibv_td]
+  pd: c.POINTER[struct_ibv_pd]
+  td: c.POINTER[struct_ibv_td]
   comp_mask: int
-  alloc: ctypes._CFunctionType
-  free: ctypes._CFunctionType
-  pd_context: int|None
-struct_ibv_parent_domain_init_attr.register_fields([('pd', ctypes.POINTER(struct_ibv_pd), 0), ('td', ctypes.POINTER(struct_ibv_td), 8), ('comp_mask', uint32_t, 16), ('alloc', ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.POINTER(struct_ibv_pd), ctypes.c_void_p, size_t, size_t, uint64_t), 24), ('free', ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_ibv_pd), ctypes.c_void_p, ctypes.c_void_p, uint64_t), 32), ('pd_context', ctypes.c_void_p, 40)])
+  alloc: c.CFUNCTYPE[ctypes.c_void_p, [c.POINTER[struct_ibv_pd], ctypes.c_void_p, ctypes.c_uint64, ctypes.c_uint64, ctypes.c_uint64]]
+  free: c.CFUNCTYPE[None, [c.POINTER[struct_ibv_pd], ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint64]]
+  pd_context: ctypes.c_void_p
+struct_ibv_parent_domain_init_attr.register_fields([('pd', c.POINTER[struct_ibv_pd], 0), ('td', c.POINTER[struct_ibv_td], 8), ('comp_mask', uint32_t, 16), ('alloc', c.CFUNCTYPE[ctypes.c_void_p, [c.POINTER[struct_ibv_pd], ctypes.c_void_p, size_t, size_t, uint64_t]], 24), ('free', c.CFUNCTYPE[None, [c.POINTER[struct_ibv_pd], ctypes.c_void_p, ctypes.c_void_p, uint64_t]], 32), ('pd_context', ctypes.c_void_p, 40)])
 @c.record
 class struct_ibv_counters_init_attr(c.Struct):
   SIZE = 4
@@ -1279,174 +1279,174 @@ struct_ibv_values_ex.register_fields([('comp_mask', uint32_t, 0), ('raw_clock', 
 @c.record
 class struct_verbs_context(c.Struct):
   SIZE = 648
-  query_port: ctypes._CFunctionType
-  advise_mr: ctypes._CFunctionType
-  alloc_null_mr: ctypes._CFunctionType
-  read_counters: ctypes._CFunctionType
-  attach_counters_point_flow: ctypes._CFunctionType
-  create_counters: ctypes._CFunctionType
-  destroy_counters: ctypes._CFunctionType
-  reg_dm_mr: ctypes._CFunctionType
-  alloc_dm: ctypes._CFunctionType
-  free_dm: ctypes._CFunctionType
-  modify_flow_action_esp: ctypes._CFunctionType
-  destroy_flow_action: ctypes._CFunctionType
-  create_flow_action_esp: ctypes._CFunctionType
-  modify_qp_rate_limit: ctypes._CFunctionType
-  alloc_parent_domain: ctypes._CFunctionType
-  dealloc_td: ctypes._CFunctionType
-  alloc_td: ctypes._CFunctionType
-  modify_cq: ctypes._CFunctionType
-  post_srq_ops: ctypes._CFunctionType
-  destroy_rwq_ind_table: ctypes._CFunctionType
-  create_rwq_ind_table: ctypes._CFunctionType
-  destroy_wq: ctypes._CFunctionType
-  modify_wq: ctypes._CFunctionType
-  create_wq: ctypes._CFunctionType
-  query_rt_values: ctypes._CFunctionType
-  create_cq_ex: ctypes._CFunctionType
-  priv: ctypes._Pointer[struct_verbs_ex_private]
-  query_device_ex: ctypes._CFunctionType
-  ibv_destroy_flow: ctypes._CFunctionType
-  ABI_placeholder2: ctypes._CFunctionType
-  ibv_create_flow: ctypes._CFunctionType
-  ABI_placeholder1: ctypes._CFunctionType
-  open_qp: ctypes._CFunctionType
-  create_qp_ex: ctypes._CFunctionType
-  get_srq_num: ctypes._CFunctionType
-  create_srq_ex: ctypes._CFunctionType
-  open_xrcd: ctypes._CFunctionType
-  close_xrcd: ctypes._CFunctionType
+  query_port: c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_context], ctypes.c_ubyte, c.POINTER[struct_ibv_port_attr], ctypes.c_uint64]]
+  advise_mr: c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_pd], ctypes.c_uint32, ctypes.c_uint32, c.POINTER[struct_ibv_sge], ctypes.c_uint32]]
+  alloc_null_mr: c.CFUNCTYPE[c.POINTER[struct_ibv_mr], [c.POINTER[struct_ibv_pd]]]
+  read_counters: c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_counters], c.POINTER[ctypes.c_uint64], ctypes.c_uint32, ctypes.c_uint32]]
+  attach_counters_point_flow: c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_counters], c.POINTER[struct_ibv_counter_attach_attr], c.POINTER[struct_ibv_flow]]]
+  create_counters: c.CFUNCTYPE[c.POINTER[struct_ibv_counters], [c.POINTER[struct_ibv_context], c.POINTER[struct_ibv_counters_init_attr]]]
+  destroy_counters: c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_counters]]]
+  reg_dm_mr: c.CFUNCTYPE[c.POINTER[struct_ibv_mr], [c.POINTER[struct_ibv_pd], c.POINTER[struct_ibv_dm], ctypes.c_uint64, ctypes.c_uint64, ctypes.c_uint32]]
+  alloc_dm: c.CFUNCTYPE[c.POINTER[struct_ibv_dm], [c.POINTER[struct_ibv_context], c.POINTER[struct_ibv_alloc_dm_attr]]]
+  free_dm: c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_dm]]]
+  modify_flow_action_esp: c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_flow_action], c.POINTER[struct_ibv_flow_action_esp_attr]]]
+  destroy_flow_action: c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_flow_action]]]
+  create_flow_action_esp: c.CFUNCTYPE[c.POINTER[struct_ibv_flow_action], [c.POINTER[struct_ibv_context], c.POINTER[struct_ibv_flow_action_esp_attr]]]
+  modify_qp_rate_limit: c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_qp], c.POINTER[struct_ibv_qp_rate_limit_attr]]]
+  alloc_parent_domain: c.CFUNCTYPE[c.POINTER[struct_ibv_pd], [c.POINTER[struct_ibv_context], c.POINTER[struct_ibv_parent_domain_init_attr]]]
+  dealloc_td: c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_td]]]
+  alloc_td: c.CFUNCTYPE[c.POINTER[struct_ibv_td], [c.POINTER[struct_ibv_context], c.POINTER[struct_ibv_td_init_attr]]]
+  modify_cq: c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_cq], c.POINTER[struct_ibv_modify_cq_attr]]]
+  post_srq_ops: c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_srq], c.POINTER[struct_ibv_ops_wr], c.POINTER[c.POINTER[struct_ibv_ops_wr]]]]
+  destroy_rwq_ind_table: c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_rwq_ind_table]]]
+  create_rwq_ind_table: c.CFUNCTYPE[c.POINTER[struct_ibv_rwq_ind_table], [c.POINTER[struct_ibv_context], c.POINTER[struct_ibv_rwq_ind_table_init_attr]]]
+  destroy_wq: c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_wq]]]
+  modify_wq: c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_wq], c.POINTER[struct_ibv_wq_attr]]]
+  create_wq: c.CFUNCTYPE[c.POINTER[struct_ibv_wq], [c.POINTER[struct_ibv_context], c.POINTER[struct_ibv_wq_init_attr]]]
+  query_rt_values: c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_context], c.POINTER[struct_ibv_values_ex]]]
+  create_cq_ex: c.CFUNCTYPE[c.POINTER[struct_ibv_cq_ex], [c.POINTER[struct_ibv_context], c.POINTER[struct_ibv_cq_init_attr_ex]]]
+  priv: c.POINTER[struct_verbs_ex_private]
+  query_device_ex: c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_context], c.POINTER[struct_ibv_query_device_ex_input], c.POINTER[struct_ibv_device_attr_ex], ctypes.c_uint64]]
+  ibv_destroy_flow: c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_flow]]]
+  ABI_placeholder2: c.CFUNCTYPE[None, []]
+  ibv_create_flow: c.CFUNCTYPE[c.POINTER[struct_ibv_flow], [c.POINTER[struct_ibv_qp], c.POINTER[struct_ibv_flow_attr]]]
+  ABI_placeholder1: c.CFUNCTYPE[None, []]
+  open_qp: c.CFUNCTYPE[c.POINTER[struct_ibv_qp], [c.POINTER[struct_ibv_context], c.POINTER[struct_ibv_qp_open_attr]]]
+  create_qp_ex: c.CFUNCTYPE[c.POINTER[struct_ibv_qp], [c.POINTER[struct_ibv_context], c.POINTER[struct_ibv_qp_init_attr_ex]]]
+  get_srq_num: c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_srq], c.POINTER[ctypes.c_uint32]]]
+  create_srq_ex: c.CFUNCTYPE[c.POINTER[struct_ibv_srq], [c.POINTER[struct_ibv_context], c.POINTER[struct_ibv_srq_init_attr_ex]]]
+  open_xrcd: c.CFUNCTYPE[c.POINTER[struct_ibv_xrcd], [c.POINTER[struct_ibv_context], c.POINTER[struct_ibv_xrcd_init_attr]]]
+  close_xrcd: c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_xrcd]]]
   _ABI_placeholder3: int
   sz: int
   context: struct_ibv_context
 enum_ib_uverbs_advise_mr_advice: dict[int, str] = {(IB_UVERBS_ADVISE_MR_ADVICE_PREFETCH:=0): 'IB_UVERBS_ADVISE_MR_ADVICE_PREFETCH', (IB_UVERBS_ADVISE_MR_ADVICE_PREFETCH_WRITE:=1): 'IB_UVERBS_ADVISE_MR_ADVICE_PREFETCH_WRITE', (IB_UVERBS_ADVISE_MR_ADVICE_PREFETCH_NO_FAULT:=2): 'IB_UVERBS_ADVISE_MR_ADVICE_PREFETCH_NO_FAULT'}
 class struct_verbs_ex_private(c.Struct): pass
-struct_verbs_context.register_fields([('query_port', ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(struct_ibv_context), uint8_t, ctypes.POINTER(struct_ibv_port_attr), size_t), 0), ('advise_mr', ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(struct_ibv_pd), ctypes.c_uint32, uint32_t, ctypes.POINTER(struct_ibv_sge), uint32_t), 8), ('alloc_null_mr', ctypes.CFUNCTYPE(ctypes.POINTER(struct_ibv_mr), ctypes.POINTER(struct_ibv_pd)), 16), ('read_counters', ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(struct_ibv_counters), ctypes.POINTER(uint64_t), uint32_t, uint32_t), 24), ('attach_counters_point_flow', ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(struct_ibv_counters), ctypes.POINTER(struct_ibv_counter_attach_attr), ctypes.POINTER(struct_ibv_flow)), 32), ('create_counters', ctypes.CFUNCTYPE(ctypes.POINTER(struct_ibv_counters), ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_counters_init_attr)), 40), ('destroy_counters', ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(struct_ibv_counters)), 48), ('reg_dm_mr', ctypes.CFUNCTYPE(ctypes.POINTER(struct_ibv_mr), ctypes.POINTER(struct_ibv_pd), ctypes.POINTER(struct_ibv_dm), uint64_t, size_t, ctypes.c_uint32), 56), ('alloc_dm', ctypes.CFUNCTYPE(ctypes.POINTER(struct_ibv_dm), ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_alloc_dm_attr)), 64), ('free_dm', ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(struct_ibv_dm)), 72), ('modify_flow_action_esp', ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(struct_ibv_flow_action), ctypes.POINTER(struct_ibv_flow_action_esp_attr)), 80), ('destroy_flow_action', ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(struct_ibv_flow_action)), 88), ('create_flow_action_esp', ctypes.CFUNCTYPE(ctypes.POINTER(struct_ibv_flow_action), ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_flow_action_esp_attr)), 96), ('modify_qp_rate_limit', ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(struct_ibv_qp), ctypes.POINTER(struct_ibv_qp_rate_limit_attr)), 104), ('alloc_parent_domain', ctypes.CFUNCTYPE(ctypes.POINTER(struct_ibv_pd), ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_parent_domain_init_attr)), 112), ('dealloc_td', ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(struct_ibv_td)), 120), ('alloc_td', ctypes.CFUNCTYPE(ctypes.POINTER(struct_ibv_td), ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_td_init_attr)), 128), ('modify_cq', ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(struct_ibv_cq), ctypes.POINTER(struct_ibv_modify_cq_attr)), 136), ('post_srq_ops', ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(struct_ibv_srq), ctypes.POINTER(struct_ibv_ops_wr), ctypes.POINTER(ctypes.POINTER(struct_ibv_ops_wr))), 144), ('destroy_rwq_ind_table', ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(struct_ibv_rwq_ind_table)), 152), ('create_rwq_ind_table', ctypes.CFUNCTYPE(ctypes.POINTER(struct_ibv_rwq_ind_table), ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_rwq_ind_table_init_attr)), 160), ('destroy_wq', ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(struct_ibv_wq)), 168), ('modify_wq', ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(struct_ibv_wq), ctypes.POINTER(struct_ibv_wq_attr)), 176), ('create_wq', ctypes.CFUNCTYPE(ctypes.POINTER(struct_ibv_wq), ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_wq_init_attr)), 184), ('query_rt_values', ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_values_ex)), 192), ('create_cq_ex', ctypes.CFUNCTYPE(ctypes.POINTER(struct_ibv_cq_ex), ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_cq_init_attr_ex)), 200), ('priv', ctypes.POINTER(struct_verbs_ex_private), 208), ('query_device_ex', ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_query_device_ex_input), ctypes.POINTER(struct_ibv_device_attr_ex), size_t), 216), ('ibv_destroy_flow', ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(struct_ibv_flow)), 224), ('ABI_placeholder2', ctypes.CFUNCTYPE(None, ), 232), ('ibv_create_flow', ctypes.CFUNCTYPE(ctypes.POINTER(struct_ibv_flow), ctypes.POINTER(struct_ibv_qp), ctypes.POINTER(struct_ibv_flow_attr)), 240), ('ABI_placeholder1', ctypes.CFUNCTYPE(None, ), 248), ('open_qp', ctypes.CFUNCTYPE(ctypes.POINTER(struct_ibv_qp), ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_qp_open_attr)), 256), ('create_qp_ex', ctypes.CFUNCTYPE(ctypes.POINTER(struct_ibv_qp), ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_qp_init_attr_ex)), 264), ('get_srq_num', ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(struct_ibv_srq), ctypes.POINTER(uint32_t)), 272), ('create_srq_ex', ctypes.CFUNCTYPE(ctypes.POINTER(struct_ibv_srq), ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_srq_init_attr_ex)), 280), ('open_xrcd', ctypes.CFUNCTYPE(ctypes.POINTER(struct_ibv_xrcd), ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_xrcd_init_attr)), 288), ('close_xrcd', ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(struct_ibv_xrcd)), 296), ('_ABI_placeholder3', uint64_t, 304), ('sz', size_t, 312), ('context', struct_ibv_context, 320)])
-@dll.bind(ctypes.POINTER(ctypes.POINTER(struct_ibv_device)), ctypes.POINTER(ctypes.c_int32))
-def ibv_get_device_list(num_devices:ctypes._Pointer[ctypes.c_int32]) -> ctypes._Pointer[ctypes.POINTER(struct_ibv_device)]: ...
-@dll.bind(None, ctypes.POINTER(ctypes.POINTER(struct_ibv_device)))
-def ibv_free_device_list(list:ctypes._Pointer[ctypes.POINTER(struct_ibv_device)]) -> None: ...
-@dll.bind(ctypes.POINTER(ctypes.c_char), ctypes.POINTER(struct_ibv_device))
-def ibv_get_device_name(device:ctypes._Pointer[struct_ibv_device]) -> ctypes._Pointer[ctypes.c_char]: ...
-@dll.bind(ctypes.c_int32, ctypes.POINTER(struct_ibv_device))
-def ibv_get_device_index(device:ctypes._Pointer[struct_ibv_device]) -> int: ...
-@dll.bind(ctypes.c_uint64, ctypes.POINTER(struct_ibv_device))
-def ibv_get_device_guid(device:ctypes._Pointer[struct_ibv_device]) -> ctypes.c_uint64: ...
-@dll.bind(ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_device))
-def ibv_open_device(device:ctypes._Pointer[struct_ibv_device]) -> ctypes._Pointer[struct_ibv_context]: ...
-@dll.bind(ctypes.c_int32, ctypes.POINTER(struct_ibv_context))
-def ibv_close_device(context:ctypes._Pointer[struct_ibv_context]) -> int: ...
-@dll.bind(ctypes.POINTER(struct_ibv_context), ctypes.c_int32)
-def ibv_import_device(cmd_fd:int) -> ctypes._Pointer[struct_ibv_context]: ...
-@dll.bind(ctypes.POINTER(struct_ibv_pd), ctypes.POINTER(struct_ibv_context), uint32_t)
-def ibv_import_pd(context:ctypes._Pointer[struct_ibv_context], pd_handle:uint32_t) -> ctypes._Pointer[struct_ibv_pd]: ...
-@dll.bind(None, ctypes.POINTER(struct_ibv_pd))
-def ibv_unimport_pd(pd:ctypes._Pointer[struct_ibv_pd]) -> None: ...
-@dll.bind(ctypes.POINTER(struct_ibv_mr), ctypes.POINTER(struct_ibv_pd), uint32_t)
-def ibv_import_mr(pd:ctypes._Pointer[struct_ibv_pd], mr_handle:uint32_t) -> ctypes._Pointer[struct_ibv_mr]: ...
-@dll.bind(None, ctypes.POINTER(struct_ibv_mr))
-def ibv_unimport_mr(mr:ctypes._Pointer[struct_ibv_mr]) -> None: ...
-@dll.bind(ctypes.POINTER(struct_ibv_dm), ctypes.POINTER(struct_ibv_context), uint32_t)
-def ibv_import_dm(context:ctypes._Pointer[struct_ibv_context], dm_handle:uint32_t) -> ctypes._Pointer[struct_ibv_dm]: ...
-@dll.bind(None, ctypes.POINTER(struct_ibv_dm))
-def ibv_unimport_dm(dm:ctypes._Pointer[struct_ibv_dm]) -> None: ...
-@dll.bind(ctypes.c_int32, ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_async_event))
-def ibv_get_async_event(context:ctypes._Pointer[struct_ibv_context], event:ctypes._Pointer[struct_ibv_async_event]) -> int: ...
-@dll.bind(None, ctypes.POINTER(struct_ibv_async_event))
-def ibv_ack_async_event(event:ctypes._Pointer[struct_ibv_async_event]) -> None: ...
-@dll.bind(ctypes.c_int32, ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_device_attr))
-def ibv_query_device(context:ctypes._Pointer[struct_ibv_context], device_attr:ctypes._Pointer[struct_ibv_device_attr]) -> int: ...
-@dll.bind(ctypes.c_int32, ctypes.POINTER(struct_ibv_context), uint8_t, ctypes.POINTER(struct__compat_ibv_port_attr))
-def ibv_query_port(context:ctypes._Pointer[struct_ibv_context], port_num:uint8_t, port_attr:ctypes._Pointer[struct__compat_ibv_port_attr]) -> int: ...
-@dll.bind(ctypes.c_int32, ctypes.POINTER(struct_ibv_context), uint8_t, ctypes.c_int32, ctypes.POINTER(union_ibv_gid))
-def ibv_query_gid(context:ctypes._Pointer[struct_ibv_context], port_num:uint8_t, index:int, gid:ctypes._Pointer[union_ibv_gid]) -> int: ...
-@dll.bind(ctypes.c_int32, ctypes.POINTER(struct_ibv_context), uint32_t, uint32_t, ctypes.POINTER(struct_ibv_gid_entry), uint32_t, size_t)
-def _ibv_query_gid_ex(context:ctypes._Pointer[struct_ibv_context], port_num:uint32_t, gid_index:uint32_t, entry:ctypes._Pointer[struct_ibv_gid_entry], flags:uint32_t, entry_size:size_t) -> int: ...
+struct_verbs_context.register_fields([('query_port', c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_context], uint8_t, c.POINTER[struct_ibv_port_attr], size_t]], 0), ('advise_mr', c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_pd], ctypes.c_uint32, uint32_t, c.POINTER[struct_ibv_sge], uint32_t]], 8), ('alloc_null_mr', c.CFUNCTYPE[c.POINTER[struct_ibv_mr], [c.POINTER[struct_ibv_pd]]], 16), ('read_counters', c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_counters], c.POINTER[uint64_t], uint32_t, uint32_t]], 24), ('attach_counters_point_flow', c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_counters], c.POINTER[struct_ibv_counter_attach_attr], c.POINTER[struct_ibv_flow]]], 32), ('create_counters', c.CFUNCTYPE[c.POINTER[struct_ibv_counters], [c.POINTER[struct_ibv_context], c.POINTER[struct_ibv_counters_init_attr]]], 40), ('destroy_counters', c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_counters]]], 48), ('reg_dm_mr', c.CFUNCTYPE[c.POINTER[struct_ibv_mr], [c.POINTER[struct_ibv_pd], c.POINTER[struct_ibv_dm], uint64_t, size_t, ctypes.c_uint32]], 56), ('alloc_dm', c.CFUNCTYPE[c.POINTER[struct_ibv_dm], [c.POINTER[struct_ibv_context], c.POINTER[struct_ibv_alloc_dm_attr]]], 64), ('free_dm', c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_dm]]], 72), ('modify_flow_action_esp', c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_flow_action], c.POINTER[struct_ibv_flow_action_esp_attr]]], 80), ('destroy_flow_action', c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_flow_action]]], 88), ('create_flow_action_esp', c.CFUNCTYPE[c.POINTER[struct_ibv_flow_action], [c.POINTER[struct_ibv_context], c.POINTER[struct_ibv_flow_action_esp_attr]]], 96), ('modify_qp_rate_limit', c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_qp], c.POINTER[struct_ibv_qp_rate_limit_attr]]], 104), ('alloc_parent_domain', c.CFUNCTYPE[c.POINTER[struct_ibv_pd], [c.POINTER[struct_ibv_context], c.POINTER[struct_ibv_parent_domain_init_attr]]], 112), ('dealloc_td', c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_td]]], 120), ('alloc_td', c.CFUNCTYPE[c.POINTER[struct_ibv_td], [c.POINTER[struct_ibv_context], c.POINTER[struct_ibv_td_init_attr]]], 128), ('modify_cq', c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_cq], c.POINTER[struct_ibv_modify_cq_attr]]], 136), ('post_srq_ops', c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_srq], c.POINTER[struct_ibv_ops_wr], c.POINTER[c.POINTER[struct_ibv_ops_wr]]]], 144), ('destroy_rwq_ind_table', c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_rwq_ind_table]]], 152), ('create_rwq_ind_table', c.CFUNCTYPE[c.POINTER[struct_ibv_rwq_ind_table], [c.POINTER[struct_ibv_context], c.POINTER[struct_ibv_rwq_ind_table_init_attr]]], 160), ('destroy_wq', c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_wq]]], 168), ('modify_wq', c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_wq], c.POINTER[struct_ibv_wq_attr]]], 176), ('create_wq', c.CFUNCTYPE[c.POINTER[struct_ibv_wq], [c.POINTER[struct_ibv_context], c.POINTER[struct_ibv_wq_init_attr]]], 184), ('query_rt_values', c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_context], c.POINTER[struct_ibv_values_ex]]], 192), ('create_cq_ex', c.CFUNCTYPE[c.POINTER[struct_ibv_cq_ex], [c.POINTER[struct_ibv_context], c.POINTER[struct_ibv_cq_init_attr_ex]]], 200), ('priv', c.POINTER[struct_verbs_ex_private], 208), ('query_device_ex', c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_context], c.POINTER[struct_ibv_query_device_ex_input], c.POINTER[struct_ibv_device_attr_ex], size_t]], 216), ('ibv_destroy_flow', c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_flow]]], 224), ('ABI_placeholder2', c.CFUNCTYPE[None, []], 232), ('ibv_create_flow', c.CFUNCTYPE[c.POINTER[struct_ibv_flow], [c.POINTER[struct_ibv_qp], c.POINTER[struct_ibv_flow_attr]]], 240), ('ABI_placeholder1', c.CFUNCTYPE[None, []], 248), ('open_qp', c.CFUNCTYPE[c.POINTER[struct_ibv_qp], [c.POINTER[struct_ibv_context], c.POINTER[struct_ibv_qp_open_attr]]], 256), ('create_qp_ex', c.CFUNCTYPE[c.POINTER[struct_ibv_qp], [c.POINTER[struct_ibv_context], c.POINTER[struct_ibv_qp_init_attr_ex]]], 264), ('get_srq_num', c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_srq], c.POINTER[uint32_t]]], 272), ('create_srq_ex', c.CFUNCTYPE[c.POINTER[struct_ibv_srq], [c.POINTER[struct_ibv_context], c.POINTER[struct_ibv_srq_init_attr_ex]]], 280), ('open_xrcd', c.CFUNCTYPE[c.POINTER[struct_ibv_xrcd], [c.POINTER[struct_ibv_context], c.POINTER[struct_ibv_xrcd_init_attr]]], 288), ('close_xrcd', c.CFUNCTYPE[ctypes.c_int32, [c.POINTER[struct_ibv_xrcd]]], 296), ('_ABI_placeholder3', uint64_t, 304), ('sz', size_t, 312), ('context', struct_ibv_context, 320)])
+@dll.bind(c.POINTER[c.POINTER[struct_ibv_device]], c.POINTER[ctypes.c_int32])
+def ibv_get_device_list(num_devices:c.POINTER[ctypes.c_int32]) -> c.POINTER[c.POINTER[struct_ibv_device]]: ...
+@dll.bind(None, c.POINTER[c.POINTER[struct_ibv_device]])
+def ibv_free_device_list(list:c.POINTER[c.POINTER[struct_ibv_device]]) -> None: ...
+@dll.bind(c.POINTER[ctypes.c_char], c.POINTER[struct_ibv_device])
+def ibv_get_device_name(device:c.POINTER[struct_ibv_device]) -> c.POINTER[ctypes.c_char]: ...
+@dll.bind(ctypes.c_int32, c.POINTER[struct_ibv_device])
+def ibv_get_device_index(device:c.POINTER[struct_ibv_device]) -> int: ...
+@dll.bind(ctypes.c_uint64, c.POINTER[struct_ibv_device])
+def ibv_get_device_guid(device:c.POINTER[struct_ibv_device]) -> ctypes.c_uint64: ...
+@dll.bind(c.POINTER[struct_ibv_context], c.POINTER[struct_ibv_device])
+def ibv_open_device(device:c.POINTER[struct_ibv_device]) -> c.POINTER[struct_ibv_context]: ...
+@dll.bind(ctypes.c_int32, c.POINTER[struct_ibv_context])
+def ibv_close_device(context:c.POINTER[struct_ibv_context]) -> int: ...
+@dll.bind(c.POINTER[struct_ibv_context], ctypes.c_int32)
+def ibv_import_device(cmd_fd:int) -> c.POINTER[struct_ibv_context]: ...
+@dll.bind(c.POINTER[struct_ibv_pd], c.POINTER[struct_ibv_context], uint32_t)
+def ibv_import_pd(context:c.POINTER[struct_ibv_context], pd_handle:uint32_t) -> c.POINTER[struct_ibv_pd]: ...
+@dll.bind(None, c.POINTER[struct_ibv_pd])
+def ibv_unimport_pd(pd:c.POINTER[struct_ibv_pd]) -> None: ...
+@dll.bind(c.POINTER[struct_ibv_mr], c.POINTER[struct_ibv_pd], uint32_t)
+def ibv_import_mr(pd:c.POINTER[struct_ibv_pd], mr_handle:uint32_t) -> c.POINTER[struct_ibv_mr]: ...
+@dll.bind(None, c.POINTER[struct_ibv_mr])
+def ibv_unimport_mr(mr:c.POINTER[struct_ibv_mr]) -> None: ...
+@dll.bind(c.POINTER[struct_ibv_dm], c.POINTER[struct_ibv_context], uint32_t)
+def ibv_import_dm(context:c.POINTER[struct_ibv_context], dm_handle:uint32_t) -> c.POINTER[struct_ibv_dm]: ...
+@dll.bind(None, c.POINTER[struct_ibv_dm])
+def ibv_unimport_dm(dm:c.POINTER[struct_ibv_dm]) -> None: ...
+@dll.bind(ctypes.c_int32, c.POINTER[struct_ibv_context], c.POINTER[struct_ibv_async_event])
+def ibv_get_async_event(context:c.POINTER[struct_ibv_context], event:c.POINTER[struct_ibv_async_event]) -> int: ...
+@dll.bind(None, c.POINTER[struct_ibv_async_event])
+def ibv_ack_async_event(event:c.POINTER[struct_ibv_async_event]) -> None: ...
+@dll.bind(ctypes.c_int32, c.POINTER[struct_ibv_context], c.POINTER[struct_ibv_device_attr])
+def ibv_query_device(context:c.POINTER[struct_ibv_context], device_attr:c.POINTER[struct_ibv_device_attr]) -> int: ...
+@dll.bind(ctypes.c_int32, c.POINTER[struct_ibv_context], uint8_t, c.POINTER[struct__compat_ibv_port_attr])
+def ibv_query_port(context:c.POINTER[struct_ibv_context], port_num:uint8_t, port_attr:c.POINTER[struct__compat_ibv_port_attr]) -> int: ...
+@dll.bind(ctypes.c_int32, c.POINTER[struct_ibv_context], uint8_t, ctypes.c_int32, c.POINTER[union_ibv_gid])
+def ibv_query_gid(context:c.POINTER[struct_ibv_context], port_num:uint8_t, index:int, gid:c.POINTER[union_ibv_gid]) -> int: ...
+@dll.bind(ctypes.c_int32, c.POINTER[struct_ibv_context], uint32_t, uint32_t, c.POINTER[struct_ibv_gid_entry], uint32_t, size_t)
+def _ibv_query_gid_ex(context:c.POINTER[struct_ibv_context], port_num:uint32_t, gid_index:uint32_t, entry:c.POINTER[struct_ibv_gid_entry], flags:uint32_t, entry_size:size_t) -> int: ...
 ssize_t: TypeAlias = ctypes.c_int64
-@dll.bind(ssize_t, ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_gid_entry), size_t, uint32_t, size_t)
-def _ibv_query_gid_table(context:ctypes._Pointer[struct_ibv_context], entries:ctypes._Pointer[struct_ibv_gid_entry], max_entries:size_t, flags:uint32_t, entry_size:size_t) -> ssize_t: ...
-@dll.bind(ctypes.c_int32, ctypes.POINTER(struct_ibv_context), uint8_t, ctypes.c_int32, ctypes.POINTER(ctypes.c_uint16))
-def ibv_query_pkey(context:ctypes._Pointer[struct_ibv_context], port_num:uint8_t, index:int, pkey:ctypes._Pointer[ctypes.c_uint16]) -> int: ...
-@dll.bind(ctypes.c_int32, ctypes.POINTER(struct_ibv_context), uint8_t, ctypes.c_uint16)
-def ibv_get_pkey_index(context:ctypes._Pointer[struct_ibv_context], port_num:uint8_t, pkey:ctypes.c_uint16) -> int: ...
-@dll.bind(ctypes.POINTER(struct_ibv_pd), ctypes.POINTER(struct_ibv_context))
-def ibv_alloc_pd(context:ctypes._Pointer[struct_ibv_context]) -> ctypes._Pointer[struct_ibv_pd]: ...
-@dll.bind(ctypes.c_int32, ctypes.POINTER(struct_ibv_pd))
-def ibv_dealloc_pd(pd:ctypes._Pointer[struct_ibv_pd]) -> int: ...
-@dll.bind(ctypes.POINTER(struct_ibv_mr), ctypes.POINTER(struct_ibv_pd), ctypes.c_void_p, size_t, uint64_t, ctypes.c_uint32)
-def ibv_reg_mr_iova2(pd:ctypes._Pointer[struct_ibv_pd], addr:int|None, length:size_t, iova:uint64_t, access:int) -> ctypes._Pointer[struct_ibv_mr]: ...
-@dll.bind(ctypes.POINTER(struct_ibv_mr), ctypes.POINTER(struct_ibv_pd), ctypes.c_void_p, size_t, ctypes.c_int32)
-def ibv_reg_mr(pd:ctypes._Pointer[struct_ibv_pd], addr:int|None, length:size_t, access:int) -> ctypes._Pointer[struct_ibv_mr]: ...
-@dll.bind(ctypes.POINTER(struct_ibv_mr), ctypes.POINTER(struct_ibv_pd), ctypes.c_void_p, size_t, uint64_t, ctypes.c_int32)
-def ibv_reg_mr_iova(pd:ctypes._Pointer[struct_ibv_pd], addr:int|None, length:size_t, iova:uint64_t, access:int) -> ctypes._Pointer[struct_ibv_mr]: ...
-@dll.bind(ctypes.POINTER(struct_ibv_mr), ctypes.POINTER(struct_ibv_pd), uint64_t, size_t, uint64_t, ctypes.c_int32, ctypes.c_int32)
-def ibv_reg_dmabuf_mr(pd:ctypes._Pointer[struct_ibv_pd], offset:uint64_t, length:size_t, iova:uint64_t, fd:int, access:int) -> ctypes._Pointer[struct_ibv_mr]: ...
+@dll.bind(ssize_t, c.POINTER[struct_ibv_context], c.POINTER[struct_ibv_gid_entry], size_t, uint32_t, size_t)
+def _ibv_query_gid_table(context:c.POINTER[struct_ibv_context], entries:c.POINTER[struct_ibv_gid_entry], max_entries:size_t, flags:uint32_t, entry_size:size_t) -> ssize_t: ...
+@dll.bind(ctypes.c_int32, c.POINTER[struct_ibv_context], uint8_t, ctypes.c_int32, c.POINTER[ctypes.c_uint16])
+def ibv_query_pkey(context:c.POINTER[struct_ibv_context], port_num:uint8_t, index:int, pkey:c.POINTER[ctypes.c_uint16]) -> int: ...
+@dll.bind(ctypes.c_int32, c.POINTER[struct_ibv_context], uint8_t, ctypes.c_uint16)
+def ibv_get_pkey_index(context:c.POINTER[struct_ibv_context], port_num:uint8_t, pkey:ctypes.c_uint16) -> int: ...
+@dll.bind(c.POINTER[struct_ibv_pd], c.POINTER[struct_ibv_context])
+def ibv_alloc_pd(context:c.POINTER[struct_ibv_context]) -> c.POINTER[struct_ibv_pd]: ...
+@dll.bind(ctypes.c_int32, c.POINTER[struct_ibv_pd])
+def ibv_dealloc_pd(pd:c.POINTER[struct_ibv_pd]) -> int: ...
+@dll.bind(c.POINTER[struct_ibv_mr], c.POINTER[struct_ibv_pd], ctypes.c_void_p, size_t, uint64_t, ctypes.c_uint32)
+def ibv_reg_mr_iova2(pd:c.POINTER[struct_ibv_pd], addr:ctypes.c_void_p, length:size_t, iova:uint64_t, access:int) -> c.POINTER[struct_ibv_mr]: ...
+@dll.bind(c.POINTER[struct_ibv_mr], c.POINTER[struct_ibv_pd], ctypes.c_void_p, size_t, ctypes.c_int32)
+def ibv_reg_mr(pd:c.POINTER[struct_ibv_pd], addr:ctypes.c_void_p, length:size_t, access:int) -> c.POINTER[struct_ibv_mr]: ...
+@dll.bind(c.POINTER[struct_ibv_mr], c.POINTER[struct_ibv_pd], ctypes.c_void_p, size_t, uint64_t, ctypes.c_int32)
+def ibv_reg_mr_iova(pd:c.POINTER[struct_ibv_pd], addr:ctypes.c_void_p, length:size_t, iova:uint64_t, access:int) -> c.POINTER[struct_ibv_mr]: ...
+@dll.bind(c.POINTER[struct_ibv_mr], c.POINTER[struct_ibv_pd], uint64_t, size_t, uint64_t, ctypes.c_int32, ctypes.c_int32)
+def ibv_reg_dmabuf_mr(pd:c.POINTER[struct_ibv_pd], offset:uint64_t, length:size_t, iova:uint64_t, fd:int, access:int) -> c.POINTER[struct_ibv_mr]: ...
 enum_ibv_rereg_mr_err_code: dict[int, str] = {(IBV_REREG_MR_ERR_INPUT:=-1): 'IBV_REREG_MR_ERR_INPUT', (IBV_REREG_MR_ERR_DONT_FORK_NEW:=-2): 'IBV_REREG_MR_ERR_DONT_FORK_NEW', (IBV_REREG_MR_ERR_DO_FORK_OLD:=-3): 'IBV_REREG_MR_ERR_DO_FORK_OLD', (IBV_REREG_MR_ERR_CMD:=-4): 'IBV_REREG_MR_ERR_CMD', (IBV_REREG_MR_ERR_CMD_AND_DO_FORK_NEW:=-5): 'IBV_REREG_MR_ERR_CMD_AND_DO_FORK_NEW'}
-@dll.bind(ctypes.c_int32, ctypes.POINTER(struct_ibv_mr), ctypes.c_int32, ctypes.POINTER(struct_ibv_pd), ctypes.c_void_p, size_t, ctypes.c_int32)
-def ibv_rereg_mr(mr:ctypes._Pointer[struct_ibv_mr], flags:int, pd:ctypes._Pointer[struct_ibv_pd], addr:int|None, length:size_t, access:int) -> int: ...
-@dll.bind(ctypes.c_int32, ctypes.POINTER(struct_ibv_mr))
-def ibv_dereg_mr(mr:ctypes._Pointer[struct_ibv_mr]) -> int: ...
-@dll.bind(ctypes.POINTER(struct_ibv_comp_channel), ctypes.POINTER(struct_ibv_context))
-def ibv_create_comp_channel(context:ctypes._Pointer[struct_ibv_context]) -> ctypes._Pointer[struct_ibv_comp_channel]: ...
-@dll.bind(ctypes.c_int32, ctypes.POINTER(struct_ibv_comp_channel))
-def ibv_destroy_comp_channel(channel:ctypes._Pointer[struct_ibv_comp_channel]) -> int: ...
-@dll.bind(ctypes.POINTER(struct_ibv_cq), ctypes.POINTER(struct_ibv_context), ctypes.c_int32, ctypes.c_void_p, ctypes.POINTER(struct_ibv_comp_channel), ctypes.c_int32)
-def ibv_create_cq(context:ctypes._Pointer[struct_ibv_context], cqe:int, cq_context:int|None, channel:ctypes._Pointer[struct_ibv_comp_channel], comp_vector:int) -> ctypes._Pointer[struct_ibv_cq]: ...
-@dll.bind(ctypes.c_int32, ctypes.POINTER(struct_ibv_cq), ctypes.c_int32)
-def ibv_resize_cq(cq:ctypes._Pointer[struct_ibv_cq], cqe:int) -> int: ...
-@dll.bind(ctypes.c_int32, ctypes.POINTER(struct_ibv_cq))
-def ibv_destroy_cq(cq:ctypes._Pointer[struct_ibv_cq]) -> int: ...
-@dll.bind(ctypes.c_int32, ctypes.POINTER(struct_ibv_comp_channel), ctypes.POINTER(ctypes.POINTER(struct_ibv_cq)), ctypes.POINTER(ctypes.c_void_p))
-def ibv_get_cq_event(channel:ctypes._Pointer[struct_ibv_comp_channel], cq:ctypes._Pointer[ctypes.POINTER(struct_ibv_cq)], cq_context:ctypes._Pointer[ctypes.c_void_p]) -> int: ...
-@dll.bind(None, ctypes.POINTER(struct_ibv_cq), ctypes.c_uint32)
-def ibv_ack_cq_events(cq:ctypes._Pointer[struct_ibv_cq], nevents:int) -> None: ...
-@dll.bind(ctypes.POINTER(struct_ibv_srq), ctypes.POINTER(struct_ibv_pd), ctypes.POINTER(struct_ibv_srq_init_attr))
-def ibv_create_srq(pd:ctypes._Pointer[struct_ibv_pd], srq_init_attr:ctypes._Pointer[struct_ibv_srq_init_attr]) -> ctypes._Pointer[struct_ibv_srq]: ...
-@dll.bind(ctypes.c_int32, ctypes.POINTER(struct_ibv_srq), ctypes.POINTER(struct_ibv_srq_attr), ctypes.c_int32)
-def ibv_modify_srq(srq:ctypes._Pointer[struct_ibv_srq], srq_attr:ctypes._Pointer[struct_ibv_srq_attr], srq_attr_mask:int) -> int: ...
-@dll.bind(ctypes.c_int32, ctypes.POINTER(struct_ibv_srq), ctypes.POINTER(struct_ibv_srq_attr))
-def ibv_query_srq(srq:ctypes._Pointer[struct_ibv_srq], srq_attr:ctypes._Pointer[struct_ibv_srq_attr]) -> int: ...
-@dll.bind(ctypes.c_int32, ctypes.POINTER(struct_ibv_srq))
-def ibv_destroy_srq(srq:ctypes._Pointer[struct_ibv_srq]) -> int: ...
-@dll.bind(ctypes.POINTER(struct_ibv_qp), ctypes.POINTER(struct_ibv_pd), ctypes.POINTER(struct_ibv_qp_init_attr))
-def ibv_create_qp(pd:ctypes._Pointer[struct_ibv_pd], qp_init_attr:ctypes._Pointer[struct_ibv_qp_init_attr]) -> ctypes._Pointer[struct_ibv_qp]: ...
-@dll.bind(ctypes.c_int32, ctypes.POINTER(struct_ibv_qp), ctypes.POINTER(struct_ibv_qp_attr), ctypes.c_int32)
-def ibv_modify_qp(qp:ctypes._Pointer[struct_ibv_qp], attr:ctypes._Pointer[struct_ibv_qp_attr], attr_mask:int) -> int: ...
-@dll.bind(ctypes.c_int32, ctypes.POINTER(struct_ibv_qp), ctypes.c_uint32, uint32_t)
-def ibv_query_qp_data_in_order(qp:ctypes._Pointer[struct_ibv_qp], op:ctypes.c_uint32, flags:uint32_t) -> int: ...
-@dll.bind(ctypes.c_int32, ctypes.POINTER(struct_ibv_qp), ctypes.POINTER(struct_ibv_qp_attr), ctypes.c_int32, ctypes.POINTER(struct_ibv_qp_init_attr))
-def ibv_query_qp(qp:ctypes._Pointer[struct_ibv_qp], attr:ctypes._Pointer[struct_ibv_qp_attr], attr_mask:int, init_attr:ctypes._Pointer[struct_ibv_qp_init_attr]) -> int: ...
-@dll.bind(ctypes.c_int32, ctypes.POINTER(struct_ibv_qp))
-def ibv_destroy_qp(qp:ctypes._Pointer[struct_ibv_qp]) -> int: ...
-@dll.bind(ctypes.POINTER(struct_ibv_ah), ctypes.POINTER(struct_ibv_pd), ctypes.POINTER(struct_ibv_ah_attr))
-def ibv_create_ah(pd:ctypes._Pointer[struct_ibv_pd], attr:ctypes._Pointer[struct_ibv_ah_attr]) -> ctypes._Pointer[struct_ibv_ah]: ...
-@dll.bind(ctypes.c_int32, ctypes.POINTER(struct_ibv_context), uint8_t, ctypes.POINTER(struct_ibv_wc), ctypes.POINTER(struct_ibv_grh), ctypes.POINTER(struct_ibv_ah_attr))
-def ibv_init_ah_from_wc(context:ctypes._Pointer[struct_ibv_context], port_num:uint8_t, wc:ctypes._Pointer[struct_ibv_wc], grh:ctypes._Pointer[struct_ibv_grh], ah_attr:ctypes._Pointer[struct_ibv_ah_attr]) -> int: ...
-@dll.bind(ctypes.POINTER(struct_ibv_ah), ctypes.POINTER(struct_ibv_pd), ctypes.POINTER(struct_ibv_wc), ctypes.POINTER(struct_ibv_grh), uint8_t)
-def ibv_create_ah_from_wc(pd:ctypes._Pointer[struct_ibv_pd], wc:ctypes._Pointer[struct_ibv_wc], grh:ctypes._Pointer[struct_ibv_grh], port_num:uint8_t) -> ctypes._Pointer[struct_ibv_ah]: ...
-@dll.bind(ctypes.c_int32, ctypes.POINTER(struct_ibv_ah))
-def ibv_destroy_ah(ah:ctypes._Pointer[struct_ibv_ah]) -> int: ...
-@dll.bind(ctypes.c_int32, ctypes.POINTER(struct_ibv_qp), ctypes.POINTER(union_ibv_gid), uint16_t)
-def ibv_attach_mcast(qp:ctypes._Pointer[struct_ibv_qp], gid:ctypes._Pointer[union_ibv_gid], lid:uint16_t) -> int: ...
-@dll.bind(ctypes.c_int32, ctypes.POINTER(struct_ibv_qp), ctypes.POINTER(union_ibv_gid), uint16_t)
-def ibv_detach_mcast(qp:ctypes._Pointer[struct_ibv_qp], gid:ctypes._Pointer[union_ibv_gid], lid:uint16_t) -> int: ...
+@dll.bind(ctypes.c_int32, c.POINTER[struct_ibv_mr], ctypes.c_int32, c.POINTER[struct_ibv_pd], ctypes.c_void_p, size_t, ctypes.c_int32)
+def ibv_rereg_mr(mr:c.POINTER[struct_ibv_mr], flags:int, pd:c.POINTER[struct_ibv_pd], addr:ctypes.c_void_p, length:size_t, access:int) -> int: ...
+@dll.bind(ctypes.c_int32, c.POINTER[struct_ibv_mr])
+def ibv_dereg_mr(mr:c.POINTER[struct_ibv_mr]) -> int: ...
+@dll.bind(c.POINTER[struct_ibv_comp_channel], c.POINTER[struct_ibv_context])
+def ibv_create_comp_channel(context:c.POINTER[struct_ibv_context]) -> c.POINTER[struct_ibv_comp_channel]: ...
+@dll.bind(ctypes.c_int32, c.POINTER[struct_ibv_comp_channel])
+def ibv_destroy_comp_channel(channel:c.POINTER[struct_ibv_comp_channel]) -> int: ...
+@dll.bind(c.POINTER[struct_ibv_cq], c.POINTER[struct_ibv_context], ctypes.c_int32, ctypes.c_void_p, c.POINTER[struct_ibv_comp_channel], ctypes.c_int32)
+def ibv_create_cq(context:c.POINTER[struct_ibv_context], cqe:int, cq_context:ctypes.c_void_p, channel:c.POINTER[struct_ibv_comp_channel], comp_vector:int) -> c.POINTER[struct_ibv_cq]: ...
+@dll.bind(ctypes.c_int32, c.POINTER[struct_ibv_cq], ctypes.c_int32)
+def ibv_resize_cq(cq:c.POINTER[struct_ibv_cq], cqe:int) -> int: ...
+@dll.bind(ctypes.c_int32, c.POINTER[struct_ibv_cq])
+def ibv_destroy_cq(cq:c.POINTER[struct_ibv_cq]) -> int: ...
+@dll.bind(ctypes.c_int32, c.POINTER[struct_ibv_comp_channel], c.POINTER[c.POINTER[struct_ibv_cq]], c.POINTER[ctypes.c_void_p])
+def ibv_get_cq_event(channel:c.POINTER[struct_ibv_comp_channel], cq:c.POINTER[c.POINTER[struct_ibv_cq]], cq_context:c.POINTER[ctypes.c_void_p]) -> int: ...
+@dll.bind(None, c.POINTER[struct_ibv_cq], ctypes.c_uint32)
+def ibv_ack_cq_events(cq:c.POINTER[struct_ibv_cq], nevents:int) -> None: ...
+@dll.bind(c.POINTER[struct_ibv_srq], c.POINTER[struct_ibv_pd], c.POINTER[struct_ibv_srq_init_attr])
+def ibv_create_srq(pd:c.POINTER[struct_ibv_pd], srq_init_attr:c.POINTER[struct_ibv_srq_init_attr]) -> c.POINTER[struct_ibv_srq]: ...
+@dll.bind(ctypes.c_int32, c.POINTER[struct_ibv_srq], c.POINTER[struct_ibv_srq_attr], ctypes.c_int32)
+def ibv_modify_srq(srq:c.POINTER[struct_ibv_srq], srq_attr:c.POINTER[struct_ibv_srq_attr], srq_attr_mask:int) -> int: ...
+@dll.bind(ctypes.c_int32, c.POINTER[struct_ibv_srq], c.POINTER[struct_ibv_srq_attr])
+def ibv_query_srq(srq:c.POINTER[struct_ibv_srq], srq_attr:c.POINTER[struct_ibv_srq_attr]) -> int: ...
+@dll.bind(ctypes.c_int32, c.POINTER[struct_ibv_srq])
+def ibv_destroy_srq(srq:c.POINTER[struct_ibv_srq]) -> int: ...
+@dll.bind(c.POINTER[struct_ibv_qp], c.POINTER[struct_ibv_pd], c.POINTER[struct_ibv_qp_init_attr])
+def ibv_create_qp(pd:c.POINTER[struct_ibv_pd], qp_init_attr:c.POINTER[struct_ibv_qp_init_attr]) -> c.POINTER[struct_ibv_qp]: ...
+@dll.bind(ctypes.c_int32, c.POINTER[struct_ibv_qp], c.POINTER[struct_ibv_qp_attr], ctypes.c_int32)
+def ibv_modify_qp(qp:c.POINTER[struct_ibv_qp], attr:c.POINTER[struct_ibv_qp_attr], attr_mask:int) -> int: ...
+@dll.bind(ctypes.c_int32, c.POINTER[struct_ibv_qp], ctypes.c_uint32, uint32_t)
+def ibv_query_qp_data_in_order(qp:c.POINTER[struct_ibv_qp], op:ctypes.c_uint32, flags:uint32_t) -> int: ...
+@dll.bind(ctypes.c_int32, c.POINTER[struct_ibv_qp], c.POINTER[struct_ibv_qp_attr], ctypes.c_int32, c.POINTER[struct_ibv_qp_init_attr])
+def ibv_query_qp(qp:c.POINTER[struct_ibv_qp], attr:c.POINTER[struct_ibv_qp_attr], attr_mask:int, init_attr:c.POINTER[struct_ibv_qp_init_attr]) -> int: ...
+@dll.bind(ctypes.c_int32, c.POINTER[struct_ibv_qp])
+def ibv_destroy_qp(qp:c.POINTER[struct_ibv_qp]) -> int: ...
+@dll.bind(c.POINTER[struct_ibv_ah], c.POINTER[struct_ibv_pd], c.POINTER[struct_ibv_ah_attr])
+def ibv_create_ah(pd:c.POINTER[struct_ibv_pd], attr:c.POINTER[struct_ibv_ah_attr]) -> c.POINTER[struct_ibv_ah]: ...
+@dll.bind(ctypes.c_int32, c.POINTER[struct_ibv_context], uint8_t, c.POINTER[struct_ibv_wc], c.POINTER[struct_ibv_grh], c.POINTER[struct_ibv_ah_attr])
+def ibv_init_ah_from_wc(context:c.POINTER[struct_ibv_context], port_num:uint8_t, wc:c.POINTER[struct_ibv_wc], grh:c.POINTER[struct_ibv_grh], ah_attr:c.POINTER[struct_ibv_ah_attr]) -> int: ...
+@dll.bind(c.POINTER[struct_ibv_ah], c.POINTER[struct_ibv_pd], c.POINTER[struct_ibv_wc], c.POINTER[struct_ibv_grh], uint8_t)
+def ibv_create_ah_from_wc(pd:c.POINTER[struct_ibv_pd], wc:c.POINTER[struct_ibv_wc], grh:c.POINTER[struct_ibv_grh], port_num:uint8_t) -> c.POINTER[struct_ibv_ah]: ...
+@dll.bind(ctypes.c_int32, c.POINTER[struct_ibv_ah])
+def ibv_destroy_ah(ah:c.POINTER[struct_ibv_ah]) -> int: ...
+@dll.bind(ctypes.c_int32, c.POINTER[struct_ibv_qp], c.POINTER[union_ibv_gid], uint16_t)
+def ibv_attach_mcast(qp:c.POINTER[struct_ibv_qp], gid:c.POINTER[union_ibv_gid], lid:uint16_t) -> int: ...
+@dll.bind(ctypes.c_int32, c.POINTER[struct_ibv_qp], c.POINTER[union_ibv_gid], uint16_t)
+def ibv_detach_mcast(qp:c.POINTER[struct_ibv_qp], gid:c.POINTER[union_ibv_gid], lid:uint16_t) -> int: ...
 @dll.bind(ctypes.c_int32)
 def ibv_fork_init() -> int: ...
 @dll.bind(ctypes.c_uint32)
 def ibv_is_fork_initialized() -> ctypes.c_uint32: ...
-@dll.bind(ctypes.POINTER(ctypes.c_char), ctypes.c_int32)
-def ibv_node_type_str(node_type:ctypes.c_int32) -> ctypes._Pointer[ctypes.c_char]: ...
-@dll.bind(ctypes.POINTER(ctypes.c_char), ctypes.c_uint32)
-def ibv_port_state_str(port_state:ctypes.c_uint32) -> ctypes._Pointer[ctypes.c_char]: ...
-@dll.bind(ctypes.POINTER(ctypes.c_char), ctypes.c_uint32)
-def ibv_event_type_str(event:ctypes.c_uint32) -> ctypes._Pointer[ctypes.c_char]: ...
-@dll.bind(ctypes.c_int32, ctypes.POINTER(struct_ibv_context), ctypes.POINTER(struct_ibv_ah_attr), (uint8_t * 6), ctypes.POINTER(uint16_t))
-def ibv_resolve_eth_l2_from_gid(context:ctypes._Pointer[struct_ibv_context], attr:ctypes._Pointer[struct_ibv_ah_attr], eth_mac:ctypes.Array[uint8_t], vid:ctypes._Pointer[uint16_t]) -> int: ...
-@dll.bind(ctypes.c_int32, ctypes.POINTER(struct_ibv_qp), ctypes.POINTER(struct_ibv_ece))
-def ibv_set_ece(qp:ctypes._Pointer[struct_ibv_qp], ece:ctypes._Pointer[struct_ibv_ece]) -> int: ...
-@dll.bind(ctypes.c_int32, ctypes.POINTER(struct_ibv_qp), ctypes.POINTER(struct_ibv_ece))
-def ibv_query_ece(qp:ctypes._Pointer[struct_ibv_qp], ece:ctypes._Pointer[struct_ibv_ece]) -> int: ...
+@dll.bind(c.POINTER[ctypes.c_char], ctypes.c_int32)
+def ibv_node_type_str(node_type:ctypes.c_int32) -> c.POINTER[ctypes.c_char]: ...
+@dll.bind(c.POINTER[ctypes.c_char], ctypes.c_uint32)
+def ibv_port_state_str(port_state:ctypes.c_uint32) -> c.POINTER[ctypes.c_char]: ...
+@dll.bind(c.POINTER[ctypes.c_char], ctypes.c_uint32)
+def ibv_event_type_str(event:ctypes.c_uint32) -> c.POINTER[ctypes.c_char]: ...
+@dll.bind(ctypes.c_int32, c.POINTER[struct_ibv_context], c.POINTER[struct_ibv_ah_attr], c.Array[uint8_t, Literal[6]], c.POINTER[uint16_t])
+def ibv_resolve_eth_l2_from_gid(context:c.POINTER[struct_ibv_context], attr:c.POINTER[struct_ibv_ah_attr], eth_mac:c.Array[uint8_t, Literal[6]], vid:c.POINTER[uint16_t]) -> int: ...
+@dll.bind(ctypes.c_int32, c.POINTER[struct_ibv_qp], c.POINTER[struct_ibv_ece])
+def ibv_set_ece(qp:c.POINTER[struct_ibv_qp], ece:c.POINTER[struct_ibv_ece]) -> int: ...
+@dll.bind(ctypes.c_int32, c.POINTER[struct_ibv_qp], c.POINTER[struct_ibv_ece])
+def ibv_query_ece(qp:c.POINTER[struct_ibv_qp], ece:c.POINTER[struct_ibv_ece]) -> int: ...
 enum_ib_uverbs_core_support: dict[int, str] = {(IB_UVERBS_CORE_SUPPORT_OPTIONAL_MR_ACCESS:=1): 'IB_UVERBS_CORE_SUPPORT_OPTIONAL_MR_ACCESS'}
 enum_ib_uverbs_access_flags: dict[int, str] = {(IB_UVERBS_ACCESS_LOCAL_WRITE:=1): 'IB_UVERBS_ACCESS_LOCAL_WRITE', (IB_UVERBS_ACCESS_REMOTE_WRITE:=2): 'IB_UVERBS_ACCESS_REMOTE_WRITE', (IB_UVERBS_ACCESS_REMOTE_READ:=4): 'IB_UVERBS_ACCESS_REMOTE_READ', (IB_UVERBS_ACCESS_REMOTE_ATOMIC:=8): 'IB_UVERBS_ACCESS_REMOTE_ATOMIC', (IB_UVERBS_ACCESS_MW_BIND:=16): 'IB_UVERBS_ACCESS_MW_BIND', (IB_UVERBS_ACCESS_ZERO_BASED:=32): 'IB_UVERBS_ACCESS_ZERO_BASED', (IB_UVERBS_ACCESS_ON_DEMAND:=64): 'IB_UVERBS_ACCESS_ON_DEMAND', (IB_UVERBS_ACCESS_HUGETLB:=128): 'IB_UVERBS_ACCESS_HUGETLB', (IB_UVERBS_ACCESS_FLUSH_GLOBAL:=256): 'IB_UVERBS_ACCESS_FLUSH_GLOBAL', (IB_UVERBS_ACCESS_FLUSH_PERSISTENT:=512): 'IB_UVERBS_ACCESS_FLUSH_PERSISTENT', (IB_UVERBS_ACCESS_RELAXED_ORDERING:=1048576): 'IB_UVERBS_ACCESS_RELAXED_ORDERING', (IB_UVERBS_ACCESS_OPTIONAL_RANGE:=1072693248): 'IB_UVERBS_ACCESS_OPTIONAL_RANGE'}
 enum_ib_uverbs_srq_type: dict[int, str] = {(IB_UVERBS_SRQT_BASIC:=0): 'IB_UVERBS_SRQT_BASIC', (IB_UVERBS_SRQT_XRC:=1): 'IB_UVERBS_SRQT_XRC', (IB_UVERBS_SRQT_TM:=2): 'IB_UVERBS_SRQT_TM'}
@@ -1465,8 +1465,8 @@ class struct_ib_uverbs_flow_action_esp_keymat_aes_gcm(c.Struct):
   salt: int
   icv_len: int
   key_len: int
-  aes_key: ctypes.Array[ctypes.c_uint32]
-struct_ib_uverbs_flow_action_esp_keymat_aes_gcm.register_fields([('iv', ctypes.c_uint64, 0), ('iv_algo', ctypes.c_uint32, 8), ('salt', ctypes.c_uint32, 12), ('icv_len', ctypes.c_uint32, 16), ('key_len', ctypes.c_uint32, 20), ('aes_key', (ctypes.c_uint32 * 8), 24)])
+  aes_key: c.Array[ctypes.c_uint32, Literal[8]]
+struct_ib_uverbs_flow_action_esp_keymat_aes_gcm.register_fields([('iv', ctypes.c_uint64, 0), ('iv_algo', ctypes.c_uint32, 8), ('salt', ctypes.c_uint32, 12), ('icv_len', ctypes.c_uint32, 16), ('key_len', ctypes.c_uint32, 20), ('aes_key', c.Array[ctypes.c_uint32, Literal[8]], 24)])
 @c.record
 class struct_ib_uverbs_flow_action_esp_replay_bmp(c.Struct):
   SIZE = 4
@@ -1480,7 +1480,7 @@ class struct_ib_uverbs_query_port_resp_ex(c.Struct):
   SIZE = 48
   legacy_resp: struct_ib_uverbs_query_port_resp
   port_cap_flags2: int
-  reserved: ctypes.Array[ctypes.c_ubyte]
+  reserved: c.Array[ctypes.c_ubyte, Literal[2]]
   active_speed_ex: int
 @c.record
 class struct_ib_uverbs_query_port_resp(c.Struct):
@@ -1509,7 +1509,7 @@ class struct_ib_uverbs_query_port_resp(c.Struct):
   reserved: int
 __u8: TypeAlias = ctypes.c_ubyte
 struct_ib_uverbs_query_port_resp.register_fields([('port_cap_flags', ctypes.c_uint32, 0), ('max_msg_sz', ctypes.c_uint32, 4), ('bad_pkey_cntr', ctypes.c_uint32, 8), ('qkey_viol_cntr', ctypes.c_uint32, 12), ('gid_tbl_len', ctypes.c_uint32, 16), ('pkey_tbl_len', ctypes.c_uint16, 20), ('lid', ctypes.c_uint16, 22), ('sm_lid', ctypes.c_uint16, 24), ('state', ctypes.c_ubyte, 26), ('max_mtu', ctypes.c_ubyte, 27), ('active_mtu', ctypes.c_ubyte, 28), ('lmc', ctypes.c_ubyte, 29), ('max_vl_num', ctypes.c_ubyte, 30), ('sm_sl', ctypes.c_ubyte, 31), ('subnet_timeout', ctypes.c_ubyte, 32), ('init_type_reply', ctypes.c_ubyte, 33), ('active_width', ctypes.c_ubyte, 34), ('active_speed', ctypes.c_ubyte, 35), ('phys_state', ctypes.c_ubyte, 36), ('link_layer', ctypes.c_ubyte, 37), ('flags', ctypes.c_ubyte, 38), ('reserved', ctypes.c_ubyte, 39)])
-struct_ib_uverbs_query_port_resp_ex.register_fields([('legacy_resp', struct_ib_uverbs_query_port_resp, 0), ('port_cap_flags2', ctypes.c_uint16, 40), ('reserved', (ctypes.c_ubyte * 2), 42), ('active_speed_ex', ctypes.c_uint32, 44)])
+struct_ib_uverbs_query_port_resp_ex.register_fields([('legacy_resp', struct_ib_uverbs_query_port_resp, 0), ('port_cap_flags2', ctypes.c_uint16, 40), ('reserved', c.Array[ctypes.c_ubyte, Literal[2]], 42), ('active_speed_ex', ctypes.c_uint32, 44)])
 @c.record
 class struct_ib_uverbs_qp_cap(c.Struct):
   SIZE = 20
@@ -1524,12 +1524,12 @@ enum_ib_uverbs_gid_type: dict[int, str] = {(IB_UVERBS_GID_TYPE_IB:=0): 'IB_UVERB
 @c.record
 class struct_ib_uverbs_gid_entry(c.Struct):
   SIZE = 32
-  gid: ctypes.Array[ctypes.c_uint64]
+  gid: c.Array[ctypes.c_uint64, Literal[2]]
   gid_index: int
   port_num: int
   gid_type: int
   netdev_ifindex: int
-struct_ib_uverbs_gid_entry.register_fields([('gid', (ctypes.c_uint64 * 2), 0), ('gid_index', ctypes.c_uint32, 16), ('port_num', ctypes.c_uint32, 20), ('gid_type', ctypes.c_uint32, 24), ('netdev_ifindex', ctypes.c_uint32, 28)])
+struct_ib_uverbs_gid_entry.register_fields([('gid', c.Array[ctypes.c_uint64, Literal[2]], 0), ('gid_index', ctypes.c_uint32, 16), ('port_num', ctypes.c_uint32, 20), ('gid_type', ctypes.c_uint32, 24), ('netdev_ifindex', ctypes.c_uint32, 28)])
 enum_ib_uverbs_write_cmds: dict[int, str] = {(IB_USER_VERBS_CMD_GET_CONTEXT:=0): 'IB_USER_VERBS_CMD_GET_CONTEXT', (IB_USER_VERBS_CMD_QUERY_DEVICE:=1): 'IB_USER_VERBS_CMD_QUERY_DEVICE', (IB_USER_VERBS_CMD_QUERY_PORT:=2): 'IB_USER_VERBS_CMD_QUERY_PORT', (IB_USER_VERBS_CMD_ALLOC_PD:=3): 'IB_USER_VERBS_CMD_ALLOC_PD', (IB_USER_VERBS_CMD_DEALLOC_PD:=4): 'IB_USER_VERBS_CMD_DEALLOC_PD', (IB_USER_VERBS_CMD_CREATE_AH:=5): 'IB_USER_VERBS_CMD_CREATE_AH', (IB_USER_VERBS_CMD_MODIFY_AH:=6): 'IB_USER_VERBS_CMD_MODIFY_AH', (IB_USER_VERBS_CMD_QUERY_AH:=7): 'IB_USER_VERBS_CMD_QUERY_AH', (IB_USER_VERBS_CMD_DESTROY_AH:=8): 'IB_USER_VERBS_CMD_DESTROY_AH', (IB_USER_VERBS_CMD_REG_MR:=9): 'IB_USER_VERBS_CMD_REG_MR', (IB_USER_VERBS_CMD_REG_SMR:=10): 'IB_USER_VERBS_CMD_REG_SMR', (IB_USER_VERBS_CMD_REREG_MR:=11): 'IB_USER_VERBS_CMD_REREG_MR', (IB_USER_VERBS_CMD_QUERY_MR:=12): 'IB_USER_VERBS_CMD_QUERY_MR', (IB_USER_VERBS_CMD_DEREG_MR:=13): 'IB_USER_VERBS_CMD_DEREG_MR', (IB_USER_VERBS_CMD_ALLOC_MW:=14): 'IB_USER_VERBS_CMD_ALLOC_MW', (IB_USER_VERBS_CMD_BIND_MW:=15): 'IB_USER_VERBS_CMD_BIND_MW', (IB_USER_VERBS_CMD_DEALLOC_MW:=16): 'IB_USER_VERBS_CMD_DEALLOC_MW', (IB_USER_VERBS_CMD_CREATE_COMP_CHANNEL:=17): 'IB_USER_VERBS_CMD_CREATE_COMP_CHANNEL', (IB_USER_VERBS_CMD_CREATE_CQ:=18): 'IB_USER_VERBS_CMD_CREATE_CQ', (IB_USER_VERBS_CMD_RESIZE_CQ:=19): 'IB_USER_VERBS_CMD_RESIZE_CQ', (IB_USER_VERBS_CMD_DESTROY_CQ:=20): 'IB_USER_VERBS_CMD_DESTROY_CQ', (IB_USER_VERBS_CMD_POLL_CQ:=21): 'IB_USER_VERBS_CMD_POLL_CQ', (IB_USER_VERBS_CMD_PEEK_CQ:=22): 'IB_USER_VERBS_CMD_PEEK_CQ', (IB_USER_VERBS_CMD_REQ_NOTIFY_CQ:=23): 'IB_USER_VERBS_CMD_REQ_NOTIFY_CQ', (IB_USER_VERBS_CMD_CREATE_QP:=24): 'IB_USER_VERBS_CMD_CREATE_QP', (IB_USER_VERBS_CMD_QUERY_QP:=25): 'IB_USER_VERBS_CMD_QUERY_QP', (IB_USER_VERBS_CMD_MODIFY_QP:=26): 'IB_USER_VERBS_CMD_MODIFY_QP', (IB_USER_VERBS_CMD_DESTROY_QP:=27): 'IB_USER_VERBS_CMD_DESTROY_QP', (IB_USER_VERBS_CMD_POST_SEND:=28): 'IB_USER_VERBS_CMD_POST_SEND', (IB_USER_VERBS_CMD_POST_RECV:=29): 'IB_USER_VERBS_CMD_POST_RECV', (IB_USER_VERBS_CMD_ATTACH_MCAST:=30): 'IB_USER_VERBS_CMD_ATTACH_MCAST', (IB_USER_VERBS_CMD_DETACH_MCAST:=31): 'IB_USER_VERBS_CMD_DETACH_MCAST', (IB_USER_VERBS_CMD_CREATE_SRQ:=32): 'IB_USER_VERBS_CMD_CREATE_SRQ', (IB_USER_VERBS_CMD_MODIFY_SRQ:=33): 'IB_USER_VERBS_CMD_MODIFY_SRQ', (IB_USER_VERBS_CMD_QUERY_SRQ:=34): 'IB_USER_VERBS_CMD_QUERY_SRQ', (IB_USER_VERBS_CMD_DESTROY_SRQ:=35): 'IB_USER_VERBS_CMD_DESTROY_SRQ', (IB_USER_VERBS_CMD_POST_SRQ_RECV:=36): 'IB_USER_VERBS_CMD_POST_SRQ_RECV', (IB_USER_VERBS_CMD_OPEN_XRCD:=37): 'IB_USER_VERBS_CMD_OPEN_XRCD', (IB_USER_VERBS_CMD_CLOSE_XRCD:=38): 'IB_USER_VERBS_CMD_CLOSE_XRCD', (IB_USER_VERBS_CMD_CREATE_XSRQ:=39): 'IB_USER_VERBS_CMD_CREATE_XSRQ', (IB_USER_VERBS_CMD_OPEN_QP:=40): 'IB_USER_VERBS_CMD_OPEN_QP'}
 _anonenum5: dict[int, str] = {(IB_USER_VERBS_EX_CMD_QUERY_DEVICE:=1): 'IB_USER_VERBS_EX_CMD_QUERY_DEVICE', (IB_USER_VERBS_EX_CMD_CREATE_CQ:=18): 'IB_USER_VERBS_EX_CMD_CREATE_CQ', (IB_USER_VERBS_EX_CMD_CREATE_QP:=24): 'IB_USER_VERBS_EX_CMD_CREATE_QP', (IB_USER_VERBS_EX_CMD_MODIFY_QP:=26): 'IB_USER_VERBS_EX_CMD_MODIFY_QP', (IB_USER_VERBS_EX_CMD_CREATE_FLOW:=50): 'IB_USER_VERBS_EX_CMD_CREATE_FLOW', (IB_USER_VERBS_EX_CMD_DESTROY_FLOW:=51): 'IB_USER_VERBS_EX_CMD_DESTROY_FLOW', (IB_USER_VERBS_EX_CMD_CREATE_WQ:=52): 'IB_USER_VERBS_EX_CMD_CREATE_WQ', (IB_USER_VERBS_EX_CMD_MODIFY_WQ:=53): 'IB_USER_VERBS_EX_CMD_MODIFY_WQ', (IB_USER_VERBS_EX_CMD_DESTROY_WQ:=54): 'IB_USER_VERBS_EX_CMD_DESTROY_WQ', (IB_USER_VERBS_EX_CMD_CREATE_RWQ_IND_TBL:=55): 'IB_USER_VERBS_EX_CMD_CREATE_RWQ_IND_TBL', (IB_USER_VERBS_EX_CMD_DESTROY_RWQ_IND_TBL:=56): 'IB_USER_VERBS_EX_CMD_DESTROY_RWQ_IND_TBL', (IB_USER_VERBS_EX_CMD_MODIFY_CQ:=57): 'IB_USER_VERBS_EX_CMD_MODIFY_CQ'}
 enum_ib_placement_type: dict[int, str] = {(IB_FLUSH_GLOBAL:=1): 'IB_FLUSH_GLOBAL', (IB_FLUSH_PERSISTENT:=2): 'IB_FLUSH_PERSISTENT'}
@@ -1572,21 +1572,21 @@ struct_ib_uverbs_ex_cmd_hdr.register_fields([('response', ctypes.c_uint64, 0), (
 class struct_ib_uverbs_get_context(c.Struct):
   SIZE = 8
   response: int
-  driver_data: ctypes.Array[ctypes.c_uint64]
-struct_ib_uverbs_get_context.register_fields([('response', ctypes.c_uint64, 0), ('driver_data', (ctypes.c_uint64 * 0), 8)])
+  driver_data: c.Array[ctypes.c_uint64, Literal[0]]
+struct_ib_uverbs_get_context.register_fields([('response', ctypes.c_uint64, 0), ('driver_data', c.Array[ctypes.c_uint64, Literal[0]], 8)])
 @c.record
 class struct_ib_uverbs_get_context_resp(c.Struct):
   SIZE = 8
   async_fd: int
   num_comp_vectors: int
-  driver_data: ctypes.Array[ctypes.c_uint64]
-struct_ib_uverbs_get_context_resp.register_fields([('async_fd', ctypes.c_uint32, 0), ('num_comp_vectors', ctypes.c_uint32, 4), ('driver_data', (ctypes.c_uint64 * 0), 8)])
+  driver_data: c.Array[ctypes.c_uint64, Literal[0]]
+struct_ib_uverbs_get_context_resp.register_fields([('async_fd', ctypes.c_uint32, 0), ('num_comp_vectors', ctypes.c_uint32, 4), ('driver_data', c.Array[ctypes.c_uint64, Literal[0]], 8)])
 @c.record
 class struct_ib_uverbs_query_device(c.Struct):
   SIZE = 8
   response: int
-  driver_data: ctypes.Array[ctypes.c_uint64]
-struct_ib_uverbs_query_device.register_fields([('response', ctypes.c_uint64, 0), ('driver_data', (ctypes.c_uint64 * 0), 8)])
+  driver_data: c.Array[ctypes.c_uint64, Literal[0]]
+struct_ib_uverbs_query_device.register_fields([('response', ctypes.c_uint64, 0), ('driver_data', c.Array[ctypes.c_uint64, Literal[0]], 8)])
 @c.record
 class struct_ib_uverbs_query_device_resp(c.Struct):
   SIZE = 176
@@ -1630,8 +1630,8 @@ class struct_ib_uverbs_query_device_resp(c.Struct):
   max_pkeys: int
   local_ca_ack_delay: int
   phys_port_cnt: int
-  reserved: ctypes.Array[ctypes.c_ubyte]
-struct_ib_uverbs_query_device_resp.register_fields([('fw_ver', ctypes.c_uint64, 0), ('node_guid', ctypes.c_uint64, 8), ('sys_image_guid', ctypes.c_uint64, 16), ('max_mr_size', ctypes.c_uint64, 24), ('page_size_cap', ctypes.c_uint64, 32), ('vendor_id', ctypes.c_uint32, 40), ('vendor_part_id', ctypes.c_uint32, 44), ('hw_ver', ctypes.c_uint32, 48), ('max_qp', ctypes.c_uint32, 52), ('max_qp_wr', ctypes.c_uint32, 56), ('device_cap_flags', ctypes.c_uint32, 60), ('max_sge', ctypes.c_uint32, 64), ('max_sge_rd', ctypes.c_uint32, 68), ('max_cq', ctypes.c_uint32, 72), ('max_cqe', ctypes.c_uint32, 76), ('max_mr', ctypes.c_uint32, 80), ('max_pd', ctypes.c_uint32, 84), ('max_qp_rd_atom', ctypes.c_uint32, 88), ('max_ee_rd_atom', ctypes.c_uint32, 92), ('max_res_rd_atom', ctypes.c_uint32, 96), ('max_qp_init_rd_atom', ctypes.c_uint32, 100), ('max_ee_init_rd_atom', ctypes.c_uint32, 104), ('atomic_cap', ctypes.c_uint32, 108), ('max_ee', ctypes.c_uint32, 112), ('max_rdd', ctypes.c_uint32, 116), ('max_mw', ctypes.c_uint32, 120), ('max_raw_ipv6_qp', ctypes.c_uint32, 124), ('max_raw_ethy_qp', ctypes.c_uint32, 128), ('max_mcast_grp', ctypes.c_uint32, 132), ('max_mcast_qp_attach', ctypes.c_uint32, 136), ('max_total_mcast_qp_attach', ctypes.c_uint32, 140), ('max_ah', ctypes.c_uint32, 144), ('max_fmr', ctypes.c_uint32, 148), ('max_map_per_fmr', ctypes.c_uint32, 152), ('max_srq', ctypes.c_uint32, 156), ('max_srq_wr', ctypes.c_uint32, 160), ('max_srq_sge', ctypes.c_uint32, 164), ('max_pkeys', ctypes.c_uint16, 168), ('local_ca_ack_delay', ctypes.c_ubyte, 170), ('phys_port_cnt', ctypes.c_ubyte, 171), ('reserved', (ctypes.c_ubyte * 4), 172)])
+  reserved: c.Array[ctypes.c_ubyte, Literal[4]]
+struct_ib_uverbs_query_device_resp.register_fields([('fw_ver', ctypes.c_uint64, 0), ('node_guid', ctypes.c_uint64, 8), ('sys_image_guid', ctypes.c_uint64, 16), ('max_mr_size', ctypes.c_uint64, 24), ('page_size_cap', ctypes.c_uint64, 32), ('vendor_id', ctypes.c_uint32, 40), ('vendor_part_id', ctypes.c_uint32, 44), ('hw_ver', ctypes.c_uint32, 48), ('max_qp', ctypes.c_uint32, 52), ('max_qp_wr', ctypes.c_uint32, 56), ('device_cap_flags', ctypes.c_uint32, 60), ('max_sge', ctypes.c_uint32, 64), ('max_sge_rd', ctypes.c_uint32, 68), ('max_cq', ctypes.c_uint32, 72), ('max_cqe', ctypes.c_uint32, 76), ('max_mr', ctypes.c_uint32, 80), ('max_pd', ctypes.c_uint32, 84), ('max_qp_rd_atom', ctypes.c_uint32, 88), ('max_ee_rd_atom', ctypes.c_uint32, 92), ('max_res_rd_atom', ctypes.c_uint32, 96), ('max_qp_init_rd_atom', ctypes.c_uint32, 100), ('max_ee_init_rd_atom', ctypes.c_uint32, 104), ('atomic_cap', ctypes.c_uint32, 108), ('max_ee', ctypes.c_uint32, 112), ('max_rdd', ctypes.c_uint32, 116), ('max_mw', ctypes.c_uint32, 120), ('max_raw_ipv6_qp', ctypes.c_uint32, 124), ('max_raw_ethy_qp', ctypes.c_uint32, 128), ('max_mcast_grp', ctypes.c_uint32, 132), ('max_mcast_qp_attach', ctypes.c_uint32, 136), ('max_total_mcast_qp_attach', ctypes.c_uint32, 140), ('max_ah', ctypes.c_uint32, 144), ('max_fmr', ctypes.c_uint32, 148), ('max_map_per_fmr', ctypes.c_uint32, 152), ('max_srq', ctypes.c_uint32, 156), ('max_srq_wr', ctypes.c_uint32, 160), ('max_srq_sge', ctypes.c_uint32, 164), ('max_pkeys', ctypes.c_uint16, 168), ('local_ca_ack_delay', ctypes.c_ubyte, 170), ('phys_port_cnt', ctypes.c_ubyte, 171), ('reserved', c.Array[ctypes.c_ubyte, Literal[4]], 172)])
 @c.record
 class struct_ib_uverbs_ex_query_device(c.Struct):
   SIZE = 8
@@ -1694,21 +1694,21 @@ class struct_ib_uverbs_query_port(c.Struct):
   SIZE = 16
   response: int
   port_num: int
-  reserved: ctypes.Array[ctypes.c_ubyte]
-  driver_data: ctypes.Array[ctypes.c_uint64]
-struct_ib_uverbs_query_port.register_fields([('response', ctypes.c_uint64, 0), ('port_num', ctypes.c_ubyte, 8), ('reserved', (ctypes.c_ubyte * 7), 9), ('driver_data', (ctypes.c_uint64 * 0), 16)])
+  reserved: c.Array[ctypes.c_ubyte, Literal[7]]
+  driver_data: c.Array[ctypes.c_uint64, Literal[0]]
+struct_ib_uverbs_query_port.register_fields([('response', ctypes.c_uint64, 0), ('port_num', ctypes.c_ubyte, 8), ('reserved', c.Array[ctypes.c_ubyte, Literal[7]], 9), ('driver_data', c.Array[ctypes.c_uint64, Literal[0]], 16)])
 @c.record
 class struct_ib_uverbs_alloc_pd(c.Struct):
   SIZE = 8
   response: int
-  driver_data: ctypes.Array[ctypes.c_uint64]
-struct_ib_uverbs_alloc_pd.register_fields([('response', ctypes.c_uint64, 0), ('driver_data', (ctypes.c_uint64 * 0), 8)])
+  driver_data: c.Array[ctypes.c_uint64, Literal[0]]
+struct_ib_uverbs_alloc_pd.register_fields([('response', ctypes.c_uint64, 0), ('driver_data', c.Array[ctypes.c_uint64, Literal[0]], 8)])
 @c.record
 class struct_ib_uverbs_alloc_pd_resp(c.Struct):
   SIZE = 4
   pd_handle: int
-  driver_data: ctypes.Array[ctypes.c_uint32]
-struct_ib_uverbs_alloc_pd_resp.register_fields([('pd_handle', ctypes.c_uint32, 0), ('driver_data', (ctypes.c_uint32 * 0), 4)])
+  driver_data: c.Array[ctypes.c_uint32, Literal[0]]
+struct_ib_uverbs_alloc_pd_resp.register_fields([('pd_handle', ctypes.c_uint32, 0), ('driver_data', c.Array[ctypes.c_uint32, Literal[0]], 4)])
 @c.record
 class struct_ib_uverbs_dealloc_pd(c.Struct):
   SIZE = 4
@@ -1720,14 +1720,14 @@ class struct_ib_uverbs_open_xrcd(c.Struct):
   response: int
   fd: int
   oflags: int
-  driver_data: ctypes.Array[ctypes.c_uint64]
-struct_ib_uverbs_open_xrcd.register_fields([('response', ctypes.c_uint64, 0), ('fd', ctypes.c_uint32, 8), ('oflags', ctypes.c_uint32, 12), ('driver_data', (ctypes.c_uint64 * 0), 16)])
+  driver_data: c.Array[ctypes.c_uint64, Literal[0]]
+struct_ib_uverbs_open_xrcd.register_fields([('response', ctypes.c_uint64, 0), ('fd', ctypes.c_uint32, 8), ('oflags', ctypes.c_uint32, 12), ('driver_data', c.Array[ctypes.c_uint64, Literal[0]], 16)])
 @c.record
 class struct_ib_uverbs_open_xrcd_resp(c.Struct):
   SIZE = 4
   xrcd_handle: int
-  driver_data: ctypes.Array[ctypes.c_uint32]
-struct_ib_uverbs_open_xrcd_resp.register_fields([('xrcd_handle', ctypes.c_uint32, 0), ('driver_data', (ctypes.c_uint32 * 0), 4)])
+  driver_data: c.Array[ctypes.c_uint32, Literal[0]]
+struct_ib_uverbs_open_xrcd_resp.register_fields([('xrcd_handle', ctypes.c_uint32, 0), ('driver_data', c.Array[ctypes.c_uint32, Literal[0]], 4)])
 @c.record
 class struct_ib_uverbs_close_xrcd(c.Struct):
   SIZE = 4
@@ -1742,16 +1742,16 @@ class struct_ib_uverbs_reg_mr(c.Struct):
   hca_va: int
   pd_handle: int
   access_flags: int
-  driver_data: ctypes.Array[ctypes.c_uint64]
-struct_ib_uverbs_reg_mr.register_fields([('response', ctypes.c_uint64, 0), ('start', ctypes.c_uint64, 8), ('length', ctypes.c_uint64, 16), ('hca_va', ctypes.c_uint64, 24), ('pd_handle', ctypes.c_uint32, 32), ('access_flags', ctypes.c_uint32, 36), ('driver_data', (ctypes.c_uint64 * 0), 40)])
+  driver_data: c.Array[ctypes.c_uint64, Literal[0]]
+struct_ib_uverbs_reg_mr.register_fields([('response', ctypes.c_uint64, 0), ('start', ctypes.c_uint64, 8), ('length', ctypes.c_uint64, 16), ('hca_va', ctypes.c_uint64, 24), ('pd_handle', ctypes.c_uint32, 32), ('access_flags', ctypes.c_uint32, 36), ('driver_data', c.Array[ctypes.c_uint64, Literal[0]], 40)])
 @c.record
 class struct_ib_uverbs_reg_mr_resp(c.Struct):
   SIZE = 12
   mr_handle: int
   lkey: int
   rkey: int
-  driver_data: ctypes.Array[ctypes.c_uint32]
-struct_ib_uverbs_reg_mr_resp.register_fields([('mr_handle', ctypes.c_uint32, 0), ('lkey', ctypes.c_uint32, 4), ('rkey', ctypes.c_uint32, 8), ('driver_data', (ctypes.c_uint32 * 0), 12)])
+  driver_data: c.Array[ctypes.c_uint32, Literal[0]]
+struct_ib_uverbs_reg_mr_resp.register_fields([('mr_handle', ctypes.c_uint32, 0), ('lkey', ctypes.c_uint32, 4), ('rkey', ctypes.c_uint32, 8), ('driver_data', c.Array[ctypes.c_uint32, Literal[0]], 12)])
 @c.record
 class struct_ib_uverbs_rereg_mr(c.Struct):
   SIZE = 48
@@ -1763,15 +1763,15 @@ class struct_ib_uverbs_rereg_mr(c.Struct):
   hca_va: int
   pd_handle: int
   access_flags: int
-  driver_data: ctypes.Array[ctypes.c_uint64]
-struct_ib_uverbs_rereg_mr.register_fields([('response', ctypes.c_uint64, 0), ('mr_handle', ctypes.c_uint32, 8), ('flags', ctypes.c_uint32, 12), ('start', ctypes.c_uint64, 16), ('length', ctypes.c_uint64, 24), ('hca_va', ctypes.c_uint64, 32), ('pd_handle', ctypes.c_uint32, 40), ('access_flags', ctypes.c_uint32, 44), ('driver_data', (ctypes.c_uint64 * 0), 48)])
+  driver_data: c.Array[ctypes.c_uint64, Literal[0]]
+struct_ib_uverbs_rereg_mr.register_fields([('response', ctypes.c_uint64, 0), ('mr_handle', ctypes.c_uint32, 8), ('flags', ctypes.c_uint32, 12), ('start', ctypes.c_uint64, 16), ('length', ctypes.c_uint64, 24), ('hca_va', ctypes.c_uint64, 32), ('pd_handle', ctypes.c_uint32, 40), ('access_flags', ctypes.c_uint32, 44), ('driver_data', c.Array[ctypes.c_uint64, Literal[0]], 48)])
 @c.record
 class struct_ib_uverbs_rereg_mr_resp(c.Struct):
   SIZE = 8
   lkey: int
   rkey: int
-  driver_data: ctypes.Array[ctypes.c_uint64]
-struct_ib_uverbs_rereg_mr_resp.register_fields([('lkey', ctypes.c_uint32, 0), ('rkey', ctypes.c_uint32, 4), ('driver_data', (ctypes.c_uint64 * 0), 8)])
+  driver_data: c.Array[ctypes.c_uint64, Literal[0]]
+struct_ib_uverbs_rereg_mr_resp.register_fields([('lkey', ctypes.c_uint32, 0), ('rkey', ctypes.c_uint32, 4), ('driver_data', c.Array[ctypes.c_uint64, Literal[0]], 8)])
 @c.record
 class struct_ib_uverbs_dereg_mr(c.Struct):
   SIZE = 4
@@ -1783,16 +1783,16 @@ class struct_ib_uverbs_alloc_mw(c.Struct):
   response: int
   pd_handle: int
   mw_type: int
-  reserved: ctypes.Array[ctypes.c_ubyte]
-  driver_data: ctypes.Array[ctypes.c_uint64]
-struct_ib_uverbs_alloc_mw.register_fields([('response', ctypes.c_uint64, 0), ('pd_handle', ctypes.c_uint32, 8), ('mw_type', ctypes.c_ubyte, 12), ('reserved', (ctypes.c_ubyte * 3), 13), ('driver_data', (ctypes.c_uint64 * 0), 16)])
+  reserved: c.Array[ctypes.c_ubyte, Literal[3]]
+  driver_data: c.Array[ctypes.c_uint64, Literal[0]]
+struct_ib_uverbs_alloc_mw.register_fields([('response', ctypes.c_uint64, 0), ('pd_handle', ctypes.c_uint32, 8), ('mw_type', ctypes.c_ubyte, 12), ('reserved', c.Array[ctypes.c_ubyte, Literal[3]], 13), ('driver_data', c.Array[ctypes.c_uint64, Literal[0]], 16)])
 @c.record
 class struct_ib_uverbs_alloc_mw_resp(c.Struct):
   SIZE = 8
   mw_handle: int
   rkey: int
-  driver_data: ctypes.Array[ctypes.c_uint64]
-struct_ib_uverbs_alloc_mw_resp.register_fields([('mw_handle', ctypes.c_uint32, 0), ('rkey', ctypes.c_uint32, 4), ('driver_data', (ctypes.c_uint64 * 0), 8)])
+  driver_data: c.Array[ctypes.c_uint64, Literal[0]]
+struct_ib_uverbs_alloc_mw_resp.register_fields([('mw_handle', ctypes.c_uint32, 0), ('rkey', ctypes.c_uint32, 4), ('driver_data', c.Array[ctypes.c_uint64, Literal[0]], 8)])
 @c.record
 class struct_ib_uverbs_dealloc_mw(c.Struct):
   SIZE = 4
@@ -1817,9 +1817,9 @@ class struct_ib_uverbs_create_cq(c.Struct):
   comp_vector: int
   comp_channel: int
   reserved: int
-  driver_data: ctypes.Array[ctypes.c_uint64]
+  driver_data: c.Array[ctypes.c_uint64, Literal[0]]
 __s32: TypeAlias = ctypes.c_int32
-struct_ib_uverbs_create_cq.register_fields([('response', ctypes.c_uint64, 0), ('user_handle', ctypes.c_uint64, 8), ('cqe', ctypes.c_uint32, 16), ('comp_vector', ctypes.c_uint32, 20), ('comp_channel', ctypes.c_int32, 24), ('reserved', ctypes.c_uint32, 28), ('driver_data', (ctypes.c_uint64 * 0), 32)])
+struct_ib_uverbs_create_cq.register_fields([('response', ctypes.c_uint64, 0), ('user_handle', ctypes.c_uint64, 8), ('cqe', ctypes.c_uint32, 16), ('comp_vector', ctypes.c_uint32, 20), ('comp_channel', ctypes.c_int32, 24), ('reserved', ctypes.c_uint32, 28), ('driver_data', c.Array[ctypes.c_uint64, Literal[0]], 32)])
 enum_ib_uverbs_ex_create_cq_flags: dict[int, str] = {(IB_UVERBS_CQ_FLAGS_TIMESTAMP_COMPLETION:=1): 'IB_UVERBS_CQ_FLAGS_TIMESTAMP_COMPLETION', (IB_UVERBS_CQ_FLAGS_IGNORE_OVERRUN:=2): 'IB_UVERBS_CQ_FLAGS_IGNORE_OVERRUN'}
 @c.record
 class struct_ib_uverbs_ex_create_cq(c.Struct):
@@ -1837,8 +1837,8 @@ class struct_ib_uverbs_create_cq_resp(c.Struct):
   SIZE = 8
   cq_handle: int
   cqe: int
-  driver_data: ctypes.Array[ctypes.c_uint64]
-struct_ib_uverbs_create_cq_resp.register_fields([('cq_handle', ctypes.c_uint32, 0), ('cqe', ctypes.c_uint32, 4), ('driver_data', (ctypes.c_uint64 * 0), 8)])
+  driver_data: c.Array[ctypes.c_uint64, Literal[0]]
+struct_ib_uverbs_create_cq_resp.register_fields([('cq_handle', ctypes.c_uint32, 0), ('cqe', ctypes.c_uint32, 4), ('driver_data', c.Array[ctypes.c_uint64, Literal[0]], 8)])
 @c.record
 class struct_ib_uverbs_ex_create_cq_resp(c.Struct):
   SIZE = 16
@@ -1852,15 +1852,15 @@ class struct_ib_uverbs_resize_cq(c.Struct):
   response: int
   cq_handle: int
   cqe: int
-  driver_data: ctypes.Array[ctypes.c_uint64]
-struct_ib_uverbs_resize_cq.register_fields([('response', ctypes.c_uint64, 0), ('cq_handle', ctypes.c_uint32, 8), ('cqe', ctypes.c_uint32, 12), ('driver_data', (ctypes.c_uint64 * 0), 16)])
+  driver_data: c.Array[ctypes.c_uint64, Literal[0]]
+struct_ib_uverbs_resize_cq.register_fields([('response', ctypes.c_uint64, 0), ('cq_handle', ctypes.c_uint32, 8), ('cqe', ctypes.c_uint32, 12), ('driver_data', c.Array[ctypes.c_uint64, Literal[0]], 16)])
 @c.record
 class struct_ib_uverbs_resize_cq_resp(c.Struct):
   SIZE = 8
   cqe: int
   reserved: int
-  driver_data: ctypes.Array[ctypes.c_uint64]
-struct_ib_uverbs_resize_cq_resp.register_fields([('cqe', ctypes.c_uint32, 0), ('reserved', ctypes.c_uint32, 4), ('driver_data', (ctypes.c_uint64 * 0), 8)])
+  driver_data: c.Array[ctypes.c_uint64, Literal[0]]
+struct_ib_uverbs_resize_cq_resp.register_fields([('cqe', ctypes.c_uint32, 0), ('reserved', ctypes.c_uint32, 4), ('driver_data', c.Array[ctypes.c_uint64, Literal[0]], 8)])
 @c.record
 class struct_ib_uverbs_poll_cq(c.Struct):
   SIZE = 16
@@ -1899,8 +1899,8 @@ class struct_ib_uverbs_poll_cq_resp(c.Struct):
   SIZE = 8
   count: int
   reserved: int
-  wc: ctypes.Array[struct_ib_uverbs_wc]
-struct_ib_uverbs_poll_cq_resp.register_fields([('count', ctypes.c_uint32, 0), ('reserved', ctypes.c_uint32, 4), ('wc', (struct_ib_uverbs_wc * 0), 8)])
+  wc: c.Array[struct_ib_uverbs_wc, Literal[0]]
+struct_ib_uverbs_poll_cq_resp.register_fields([('count', ctypes.c_uint32, 0), ('reserved', ctypes.c_uint32, 4), ('wc', c.Array[struct_ib_uverbs_wc, Literal[0]], 8)])
 @c.record
 class struct_ib_uverbs_req_notify_cq(c.Struct):
   SIZE = 8
@@ -1923,13 +1923,13 @@ struct_ib_uverbs_destroy_cq_resp.register_fields([('comp_events_reported', ctype
 @c.record
 class struct_ib_uverbs_global_route(c.Struct):
   SIZE = 24
-  dgid: ctypes.Array[ctypes.c_ubyte]
+  dgid: c.Array[ctypes.c_ubyte, Literal[16]]
   flow_label: int
   sgid_index: int
   hop_limit: int
   traffic_class: int
   reserved: int
-struct_ib_uverbs_global_route.register_fields([('dgid', (ctypes.c_ubyte * 16), 0), ('flow_label', ctypes.c_uint32, 16), ('sgid_index', ctypes.c_ubyte, 20), ('hop_limit', ctypes.c_ubyte, 21), ('traffic_class', ctypes.c_ubyte, 22), ('reserved', ctypes.c_ubyte, 23)])
+struct_ib_uverbs_global_route.register_fields([('dgid', c.Array[ctypes.c_ubyte, Literal[16]], 0), ('flow_label', ctypes.c_uint32, 16), ('sgid_index', ctypes.c_ubyte, 20), ('hop_limit', ctypes.c_ubyte, 21), ('traffic_class', ctypes.c_ubyte, 22), ('reserved', ctypes.c_ubyte, 23)])
 @c.record
 class struct_ib_uverbs_ah_attr(c.Struct):
   SIZE = 32
@@ -1975,8 +1975,8 @@ class struct_ib_uverbs_qp_attr(c.Struct):
   rnr_retry: int
   alt_port_num: int
   alt_timeout: int
-  reserved: ctypes.Array[ctypes.c_ubyte]
-struct_ib_uverbs_qp_attr.register_fields([('qp_attr_mask', ctypes.c_uint32, 0), ('qp_state', ctypes.c_uint32, 4), ('cur_qp_state', ctypes.c_uint32, 8), ('path_mtu', ctypes.c_uint32, 12), ('path_mig_state', ctypes.c_uint32, 16), ('qkey', ctypes.c_uint32, 20), ('rq_psn', ctypes.c_uint32, 24), ('sq_psn', ctypes.c_uint32, 28), ('dest_qp_num', ctypes.c_uint32, 32), ('qp_access_flags', ctypes.c_uint32, 36), ('ah_attr', struct_ib_uverbs_ah_attr, 40), ('alt_ah_attr', struct_ib_uverbs_ah_attr, 72), ('max_send_wr', ctypes.c_uint32, 104), ('max_recv_wr', ctypes.c_uint32, 108), ('max_send_sge', ctypes.c_uint32, 112), ('max_recv_sge', ctypes.c_uint32, 116), ('max_inline_data', ctypes.c_uint32, 120), ('pkey_index', ctypes.c_uint16, 124), ('alt_pkey_index', ctypes.c_uint16, 126), ('en_sqd_async_notify', ctypes.c_ubyte, 128), ('sq_draining', ctypes.c_ubyte, 129), ('max_rd_atomic', ctypes.c_ubyte, 130), ('max_dest_rd_atomic', ctypes.c_ubyte, 131), ('min_rnr_timer', ctypes.c_ubyte, 132), ('port_num', ctypes.c_ubyte, 133), ('timeout', ctypes.c_ubyte, 134), ('retry_cnt', ctypes.c_ubyte, 135), ('rnr_retry', ctypes.c_ubyte, 136), ('alt_port_num', ctypes.c_ubyte, 137), ('alt_timeout', ctypes.c_ubyte, 138), ('reserved', (ctypes.c_ubyte * 5), 139)])
+  reserved: c.Array[ctypes.c_ubyte, Literal[5]]
+struct_ib_uverbs_qp_attr.register_fields([('qp_attr_mask', ctypes.c_uint32, 0), ('qp_state', ctypes.c_uint32, 4), ('cur_qp_state', ctypes.c_uint32, 8), ('path_mtu', ctypes.c_uint32, 12), ('path_mig_state', ctypes.c_uint32, 16), ('qkey', ctypes.c_uint32, 20), ('rq_psn', ctypes.c_uint32, 24), ('sq_psn', ctypes.c_uint32, 28), ('dest_qp_num', ctypes.c_uint32, 32), ('qp_access_flags', ctypes.c_uint32, 36), ('ah_attr', struct_ib_uverbs_ah_attr, 40), ('alt_ah_attr', struct_ib_uverbs_ah_attr, 72), ('max_send_wr', ctypes.c_uint32, 104), ('max_recv_wr', ctypes.c_uint32, 108), ('max_send_sge', ctypes.c_uint32, 112), ('max_recv_sge', ctypes.c_uint32, 116), ('max_inline_data', ctypes.c_uint32, 120), ('pkey_index', ctypes.c_uint16, 124), ('alt_pkey_index', ctypes.c_uint16, 126), ('en_sqd_async_notify', ctypes.c_ubyte, 128), ('sq_draining', ctypes.c_ubyte, 129), ('max_rd_atomic', ctypes.c_ubyte, 130), ('max_dest_rd_atomic', ctypes.c_ubyte, 131), ('min_rnr_timer', ctypes.c_ubyte, 132), ('port_num', ctypes.c_ubyte, 133), ('timeout', ctypes.c_ubyte, 134), ('retry_cnt', ctypes.c_ubyte, 135), ('rnr_retry', ctypes.c_ubyte, 136), ('alt_port_num', ctypes.c_ubyte, 137), ('alt_timeout', ctypes.c_ubyte, 138), ('reserved', c.Array[ctypes.c_ubyte, Literal[5]], 139)])
 @c.record
 class struct_ib_uverbs_create_qp(c.Struct):
   SIZE = 56
@@ -1995,8 +1995,8 @@ class struct_ib_uverbs_create_qp(c.Struct):
   qp_type: int
   is_srq: int
   reserved: int
-  driver_data: ctypes.Array[ctypes.c_uint64]
-struct_ib_uverbs_create_qp.register_fields([('response', ctypes.c_uint64, 0), ('user_handle', ctypes.c_uint64, 8), ('pd_handle', ctypes.c_uint32, 16), ('send_cq_handle', ctypes.c_uint32, 20), ('recv_cq_handle', ctypes.c_uint32, 24), ('srq_handle', ctypes.c_uint32, 28), ('max_send_wr', ctypes.c_uint32, 32), ('max_recv_wr', ctypes.c_uint32, 36), ('max_send_sge', ctypes.c_uint32, 40), ('max_recv_sge', ctypes.c_uint32, 44), ('max_inline_data', ctypes.c_uint32, 48), ('sq_sig_all', ctypes.c_ubyte, 52), ('qp_type', ctypes.c_ubyte, 53), ('is_srq', ctypes.c_ubyte, 54), ('reserved', ctypes.c_ubyte, 55), ('driver_data', (ctypes.c_uint64 * 0), 56)])
+  driver_data: c.Array[ctypes.c_uint64, Literal[0]]
+struct_ib_uverbs_create_qp.register_fields([('response', ctypes.c_uint64, 0), ('user_handle', ctypes.c_uint64, 8), ('pd_handle', ctypes.c_uint32, 16), ('send_cq_handle', ctypes.c_uint32, 20), ('recv_cq_handle', ctypes.c_uint32, 24), ('srq_handle', ctypes.c_uint32, 28), ('max_send_wr', ctypes.c_uint32, 32), ('max_recv_wr', ctypes.c_uint32, 36), ('max_send_sge', ctypes.c_uint32, 40), ('max_recv_sge', ctypes.c_uint32, 44), ('max_inline_data', ctypes.c_uint32, 48), ('sq_sig_all', ctypes.c_ubyte, 52), ('qp_type', ctypes.c_ubyte, 53), ('is_srq', ctypes.c_ubyte, 54), ('reserved', ctypes.c_ubyte, 55), ('driver_data', c.Array[ctypes.c_uint64, Literal[0]], 56)])
 enum_ib_uverbs_create_qp_mask: dict[int, str] = {(IB_UVERBS_CREATE_QP_MASK_IND_TABLE:=1): 'IB_UVERBS_CREATE_QP_MASK_IND_TABLE'}
 _anonenum6: dict[int, str] = {(IB_UVERBS_CREATE_QP_SUP_COMP_MASK:=1): 'IB_UVERBS_CREATE_QP_SUP_COMP_MASK'}
 @c.record
@@ -2029,9 +2029,9 @@ class struct_ib_uverbs_open_qp(c.Struct):
   pd_handle: int
   qpn: int
   qp_type: int
-  reserved: ctypes.Array[ctypes.c_ubyte]
-  driver_data: ctypes.Array[ctypes.c_uint64]
-struct_ib_uverbs_open_qp.register_fields([('response', ctypes.c_uint64, 0), ('user_handle', ctypes.c_uint64, 8), ('pd_handle', ctypes.c_uint32, 16), ('qpn', ctypes.c_uint32, 20), ('qp_type', ctypes.c_ubyte, 24), ('reserved', (ctypes.c_ubyte * 7), 25), ('driver_data', (ctypes.c_uint64 * 0), 32)])
+  reserved: c.Array[ctypes.c_ubyte, Literal[7]]
+  driver_data: c.Array[ctypes.c_uint64, Literal[0]]
+struct_ib_uverbs_open_qp.register_fields([('response', ctypes.c_uint64, 0), ('user_handle', ctypes.c_uint64, 8), ('pd_handle', ctypes.c_uint32, 16), ('qpn', ctypes.c_uint32, 20), ('qp_type', ctypes.c_ubyte, 24), ('reserved', c.Array[ctypes.c_ubyte, Literal[7]], 25), ('driver_data', c.Array[ctypes.c_uint64, Literal[0]], 32)])
 @c.record
 class struct_ib_uverbs_create_qp_resp(c.Struct):
   SIZE = 32
@@ -2043,8 +2043,8 @@ class struct_ib_uverbs_create_qp_resp(c.Struct):
   max_recv_sge: int
   max_inline_data: int
   reserved: int
-  driver_data: ctypes.Array[ctypes.c_uint32]
-struct_ib_uverbs_create_qp_resp.register_fields([('qp_handle', ctypes.c_uint32, 0), ('qpn', ctypes.c_uint32, 4), ('max_send_wr', ctypes.c_uint32, 8), ('max_recv_wr', ctypes.c_uint32, 12), ('max_send_sge', ctypes.c_uint32, 16), ('max_recv_sge', ctypes.c_uint32, 20), ('max_inline_data', ctypes.c_uint32, 24), ('reserved', ctypes.c_uint32, 28), ('driver_data', (ctypes.c_uint32 * 0), 32)])
+  driver_data: c.Array[ctypes.c_uint32, Literal[0]]
+struct_ib_uverbs_create_qp_resp.register_fields([('qp_handle', ctypes.c_uint32, 0), ('qpn', ctypes.c_uint32, 4), ('max_send_wr', ctypes.c_uint32, 8), ('max_recv_wr', ctypes.c_uint32, 12), ('max_send_sge', ctypes.c_uint32, 16), ('max_recv_sge', ctypes.c_uint32, 20), ('max_inline_data', ctypes.c_uint32, 24), ('reserved', ctypes.c_uint32, 28), ('driver_data', c.Array[ctypes.c_uint32, Literal[0]], 32)])
 @c.record
 class struct_ib_uverbs_ex_create_qp_resp(c.Struct):
   SIZE = 40
@@ -2055,7 +2055,7 @@ struct_ib_uverbs_ex_create_qp_resp.register_fields([('base', struct_ib_uverbs_cr
 @c.record
 class struct_ib_uverbs_qp_dest(c.Struct):
   SIZE = 32
-  dgid: ctypes.Array[ctypes.c_ubyte]
+  dgid: c.Array[ctypes.c_ubyte, Literal[16]]
   flow_label: int
   dlid: int
   reserved: int
@@ -2067,15 +2067,15 @@ class struct_ib_uverbs_qp_dest(c.Struct):
   static_rate: int
   is_global: int
   port_num: int
-struct_ib_uverbs_qp_dest.register_fields([('dgid', (ctypes.c_ubyte * 16), 0), ('flow_label', ctypes.c_uint32, 16), ('dlid', ctypes.c_uint16, 20), ('reserved', ctypes.c_uint16, 22), ('sgid_index', ctypes.c_ubyte, 24), ('hop_limit', ctypes.c_ubyte, 25), ('traffic_class', ctypes.c_ubyte, 26), ('sl', ctypes.c_ubyte, 27), ('src_path_bits', ctypes.c_ubyte, 28), ('static_rate', ctypes.c_ubyte, 29), ('is_global', ctypes.c_ubyte, 30), ('port_num', ctypes.c_ubyte, 31)])
+struct_ib_uverbs_qp_dest.register_fields([('dgid', c.Array[ctypes.c_ubyte, Literal[16]], 0), ('flow_label', ctypes.c_uint32, 16), ('dlid', ctypes.c_uint16, 20), ('reserved', ctypes.c_uint16, 22), ('sgid_index', ctypes.c_ubyte, 24), ('hop_limit', ctypes.c_ubyte, 25), ('traffic_class', ctypes.c_ubyte, 26), ('sl', ctypes.c_ubyte, 27), ('src_path_bits', ctypes.c_ubyte, 28), ('static_rate', ctypes.c_ubyte, 29), ('is_global', ctypes.c_ubyte, 30), ('port_num', ctypes.c_ubyte, 31)])
 @c.record
 class struct_ib_uverbs_query_qp(c.Struct):
   SIZE = 16
   response: int
   qp_handle: int
   attr_mask: int
-  driver_data: ctypes.Array[ctypes.c_uint64]
-struct_ib_uverbs_query_qp.register_fields([('response', ctypes.c_uint64, 0), ('qp_handle', ctypes.c_uint32, 8), ('attr_mask', ctypes.c_uint32, 12), ('driver_data', (ctypes.c_uint64 * 0), 16)])
+  driver_data: c.Array[ctypes.c_uint64, Literal[0]]
+struct_ib_uverbs_query_qp.register_fields([('response', ctypes.c_uint64, 0), ('qp_handle', ctypes.c_uint32, 8), ('attr_mask', ctypes.c_uint32, 12), ('driver_data', c.Array[ctypes.c_uint64, Literal[0]], 16)])
 @c.record
 class struct_ib_uverbs_query_qp_resp(c.Struct):
   SIZE = 128
@@ -2108,9 +2108,9 @@ class struct_ib_uverbs_query_qp_resp(c.Struct):
   alt_port_num: int
   alt_timeout: int
   sq_sig_all: int
-  reserved: ctypes.Array[ctypes.c_ubyte]
-  driver_data: ctypes.Array[ctypes.c_uint64]
-struct_ib_uverbs_query_qp_resp.register_fields([('dest', struct_ib_uverbs_qp_dest, 0), ('alt_dest', struct_ib_uverbs_qp_dest, 32), ('max_send_wr', ctypes.c_uint32, 64), ('max_recv_wr', ctypes.c_uint32, 68), ('max_send_sge', ctypes.c_uint32, 72), ('max_recv_sge', ctypes.c_uint32, 76), ('max_inline_data', ctypes.c_uint32, 80), ('qkey', ctypes.c_uint32, 84), ('rq_psn', ctypes.c_uint32, 88), ('sq_psn', ctypes.c_uint32, 92), ('dest_qp_num', ctypes.c_uint32, 96), ('qp_access_flags', ctypes.c_uint32, 100), ('pkey_index', ctypes.c_uint16, 104), ('alt_pkey_index', ctypes.c_uint16, 106), ('qp_state', ctypes.c_ubyte, 108), ('cur_qp_state', ctypes.c_ubyte, 109), ('path_mtu', ctypes.c_ubyte, 110), ('path_mig_state', ctypes.c_ubyte, 111), ('sq_draining', ctypes.c_ubyte, 112), ('max_rd_atomic', ctypes.c_ubyte, 113), ('max_dest_rd_atomic', ctypes.c_ubyte, 114), ('min_rnr_timer', ctypes.c_ubyte, 115), ('port_num', ctypes.c_ubyte, 116), ('timeout', ctypes.c_ubyte, 117), ('retry_cnt', ctypes.c_ubyte, 118), ('rnr_retry', ctypes.c_ubyte, 119), ('alt_port_num', ctypes.c_ubyte, 120), ('alt_timeout', ctypes.c_ubyte, 121), ('sq_sig_all', ctypes.c_ubyte, 122), ('reserved', (ctypes.c_ubyte * 5), 123), ('driver_data', (ctypes.c_uint64 * 0), 128)])
+  reserved: c.Array[ctypes.c_ubyte, Literal[5]]
+  driver_data: c.Array[ctypes.c_uint64, Literal[0]]
+struct_ib_uverbs_query_qp_resp.register_fields([('dest', struct_ib_uverbs_qp_dest, 0), ('alt_dest', struct_ib_uverbs_qp_dest, 32), ('max_send_wr', ctypes.c_uint32, 64), ('max_recv_wr', ctypes.c_uint32, 68), ('max_send_sge', ctypes.c_uint32, 72), ('max_recv_sge', ctypes.c_uint32, 76), ('max_inline_data', ctypes.c_uint32, 80), ('qkey', ctypes.c_uint32, 84), ('rq_psn', ctypes.c_uint32, 88), ('sq_psn', ctypes.c_uint32, 92), ('dest_qp_num', ctypes.c_uint32, 96), ('qp_access_flags', ctypes.c_uint32, 100), ('pkey_index', ctypes.c_uint16, 104), ('alt_pkey_index', ctypes.c_uint16, 106), ('qp_state', ctypes.c_ubyte, 108), ('cur_qp_state', ctypes.c_ubyte, 109), ('path_mtu', ctypes.c_ubyte, 110), ('path_mig_state', ctypes.c_ubyte, 111), ('sq_draining', ctypes.c_ubyte, 112), ('max_rd_atomic', ctypes.c_ubyte, 113), ('max_dest_rd_atomic', ctypes.c_ubyte, 114), ('min_rnr_timer', ctypes.c_ubyte, 115), ('port_num', ctypes.c_ubyte, 116), ('timeout', ctypes.c_ubyte, 117), ('retry_cnt', ctypes.c_ubyte, 118), ('rnr_retry', ctypes.c_ubyte, 119), ('alt_port_num', ctypes.c_ubyte, 120), ('alt_timeout', ctypes.c_ubyte, 121), ('sq_sig_all', ctypes.c_ubyte, 122), ('reserved', c.Array[ctypes.c_ubyte, Literal[5]], 123), ('driver_data', c.Array[ctypes.c_uint64, Literal[0]], 128)])
 @c.record
 class struct_ib_uverbs_modify_qp(c.Struct):
   SIZE = 112
@@ -2139,9 +2139,9 @@ class struct_ib_uverbs_modify_qp(c.Struct):
   rnr_retry: int
   alt_port_num: int
   alt_timeout: int
-  reserved: ctypes.Array[ctypes.c_ubyte]
-  driver_data: ctypes.Array[ctypes.c_uint64]
-struct_ib_uverbs_modify_qp.register_fields([('dest', struct_ib_uverbs_qp_dest, 0), ('alt_dest', struct_ib_uverbs_qp_dest, 32), ('qp_handle', ctypes.c_uint32, 64), ('attr_mask', ctypes.c_uint32, 68), ('qkey', ctypes.c_uint32, 72), ('rq_psn', ctypes.c_uint32, 76), ('sq_psn', ctypes.c_uint32, 80), ('dest_qp_num', ctypes.c_uint32, 84), ('qp_access_flags', ctypes.c_uint32, 88), ('pkey_index', ctypes.c_uint16, 92), ('alt_pkey_index', ctypes.c_uint16, 94), ('qp_state', ctypes.c_ubyte, 96), ('cur_qp_state', ctypes.c_ubyte, 97), ('path_mtu', ctypes.c_ubyte, 98), ('path_mig_state', ctypes.c_ubyte, 99), ('en_sqd_async_notify', ctypes.c_ubyte, 100), ('max_rd_atomic', ctypes.c_ubyte, 101), ('max_dest_rd_atomic', ctypes.c_ubyte, 102), ('min_rnr_timer', ctypes.c_ubyte, 103), ('port_num', ctypes.c_ubyte, 104), ('timeout', ctypes.c_ubyte, 105), ('retry_cnt', ctypes.c_ubyte, 106), ('rnr_retry', ctypes.c_ubyte, 107), ('alt_port_num', ctypes.c_ubyte, 108), ('alt_timeout', ctypes.c_ubyte, 109), ('reserved', (ctypes.c_ubyte * 2), 110), ('driver_data', (ctypes.c_uint64 * 0), 112)])
+  reserved: c.Array[ctypes.c_ubyte, Literal[2]]
+  driver_data: c.Array[ctypes.c_uint64, Literal[0]]
+struct_ib_uverbs_modify_qp.register_fields([('dest', struct_ib_uverbs_qp_dest, 0), ('alt_dest', struct_ib_uverbs_qp_dest, 32), ('qp_handle', ctypes.c_uint32, 64), ('attr_mask', ctypes.c_uint32, 68), ('qkey', ctypes.c_uint32, 72), ('rq_psn', ctypes.c_uint32, 76), ('sq_psn', ctypes.c_uint32, 80), ('dest_qp_num', ctypes.c_uint32, 84), ('qp_access_flags', ctypes.c_uint32, 88), ('pkey_index', ctypes.c_uint16, 92), ('alt_pkey_index', ctypes.c_uint16, 94), ('qp_state', ctypes.c_ubyte, 96), ('cur_qp_state', ctypes.c_ubyte, 97), ('path_mtu', ctypes.c_ubyte, 98), ('path_mig_state', ctypes.c_ubyte, 99), ('en_sqd_async_notify', ctypes.c_ubyte, 100), ('max_rd_atomic', ctypes.c_ubyte, 101), ('max_dest_rd_atomic', ctypes.c_ubyte, 102), ('min_rnr_timer', ctypes.c_ubyte, 103), ('port_num', ctypes.c_ubyte, 104), ('timeout', ctypes.c_ubyte, 105), ('retry_cnt', ctypes.c_ubyte, 106), ('rnr_retry', ctypes.c_ubyte, 107), ('alt_port_num', ctypes.c_ubyte, 108), ('alt_timeout', ctypes.c_ubyte, 109), ('reserved', c.Array[ctypes.c_ubyte, Literal[2]], 110), ('driver_data', c.Array[ctypes.c_uint64, Literal[0]], 112)])
 @c.record
 class struct_ib_uverbs_ex_modify_qp(c.Struct):
   SIZE = 120
@@ -2230,8 +2230,8 @@ class struct_ib_uverbs_post_send(c.Struct):
   wr_count: int
   sge_count: int
   wqe_size: int
-  send_wr: ctypes.Array[struct_ib_uverbs_send_wr]
-struct_ib_uverbs_post_send.register_fields([('response', ctypes.c_uint64, 0), ('qp_handle', ctypes.c_uint32, 8), ('wr_count', ctypes.c_uint32, 12), ('sge_count', ctypes.c_uint32, 16), ('wqe_size', ctypes.c_uint32, 20), ('send_wr', (struct_ib_uverbs_send_wr * 0), 24)])
+  send_wr: c.Array[struct_ib_uverbs_send_wr, Literal[0]]
+struct_ib_uverbs_post_send.register_fields([('response', ctypes.c_uint64, 0), ('qp_handle', ctypes.c_uint32, 8), ('wr_count', ctypes.c_uint32, 12), ('sge_count', ctypes.c_uint32, 16), ('wqe_size', ctypes.c_uint32, 20), ('send_wr', c.Array[struct_ib_uverbs_send_wr, Literal[0]], 24)])
 @c.record
 class struct_ib_uverbs_post_send_resp(c.Struct):
   SIZE = 4
@@ -2252,8 +2252,8 @@ class struct_ib_uverbs_post_recv(c.Struct):
   wr_count: int
   sge_count: int
   wqe_size: int
-  recv_wr: ctypes.Array[struct_ib_uverbs_recv_wr]
-struct_ib_uverbs_post_recv.register_fields([('response', ctypes.c_uint64, 0), ('qp_handle', ctypes.c_uint32, 8), ('wr_count', ctypes.c_uint32, 12), ('sge_count', ctypes.c_uint32, 16), ('wqe_size', ctypes.c_uint32, 20), ('recv_wr', (struct_ib_uverbs_recv_wr * 0), 24)])
+  recv_wr: c.Array[struct_ib_uverbs_recv_wr, Literal[0]]
+struct_ib_uverbs_post_recv.register_fields([('response', ctypes.c_uint64, 0), ('qp_handle', ctypes.c_uint32, 8), ('wr_count', ctypes.c_uint32, 12), ('sge_count', ctypes.c_uint32, 16), ('wqe_size', ctypes.c_uint32, 20), ('recv_wr', c.Array[struct_ib_uverbs_recv_wr, Literal[0]], 24)])
 @c.record
 class struct_ib_uverbs_post_recv_resp(c.Struct):
   SIZE = 4
@@ -2267,8 +2267,8 @@ class struct_ib_uverbs_post_srq_recv(c.Struct):
   wr_count: int
   sge_count: int
   wqe_size: int
-  recv: ctypes.Array[struct_ib_uverbs_recv_wr]
-struct_ib_uverbs_post_srq_recv.register_fields([('response', ctypes.c_uint64, 0), ('srq_handle', ctypes.c_uint32, 8), ('wr_count', ctypes.c_uint32, 12), ('sge_count', ctypes.c_uint32, 16), ('wqe_size', ctypes.c_uint32, 20), ('recv', (struct_ib_uverbs_recv_wr * 0), 24)])
+  recv: c.Array[struct_ib_uverbs_recv_wr, Literal[0]]
+struct_ib_uverbs_post_srq_recv.register_fields([('response', ctypes.c_uint64, 0), ('srq_handle', ctypes.c_uint32, 8), ('wr_count', ctypes.c_uint32, 12), ('sge_count', ctypes.c_uint32, 16), ('wqe_size', ctypes.c_uint32, 20), ('recv', c.Array[struct_ib_uverbs_recv_wr, Literal[0]], 24)])
 @c.record
 class struct_ib_uverbs_post_srq_recv_resp(c.Struct):
   SIZE = 4
@@ -2282,14 +2282,14 @@ class struct_ib_uverbs_create_ah(c.Struct):
   pd_handle: int
   reserved: int
   attr: struct_ib_uverbs_ah_attr
-  driver_data: ctypes.Array[ctypes.c_uint64]
-struct_ib_uverbs_create_ah.register_fields([('response', ctypes.c_uint64, 0), ('user_handle', ctypes.c_uint64, 8), ('pd_handle', ctypes.c_uint32, 16), ('reserved', ctypes.c_uint32, 20), ('attr', struct_ib_uverbs_ah_attr, 24), ('driver_data', (ctypes.c_uint64 * 0), 56)])
+  driver_data: c.Array[ctypes.c_uint64, Literal[0]]
+struct_ib_uverbs_create_ah.register_fields([('response', ctypes.c_uint64, 0), ('user_handle', ctypes.c_uint64, 8), ('pd_handle', ctypes.c_uint32, 16), ('reserved', ctypes.c_uint32, 20), ('attr', struct_ib_uverbs_ah_attr, 24), ('driver_data', c.Array[ctypes.c_uint64, Literal[0]], 56)])
 @c.record
 class struct_ib_uverbs_create_ah_resp(c.Struct):
   SIZE = 4
   ah_handle: int
-  driver_data: ctypes.Array[ctypes.c_uint32]
-struct_ib_uverbs_create_ah_resp.register_fields([('ah_handle', ctypes.c_uint32, 0), ('driver_data', (ctypes.c_uint32 * 0), 4)])
+  driver_data: c.Array[ctypes.c_uint32, Literal[0]]
+struct_ib_uverbs_create_ah_resp.register_fields([('ah_handle', ctypes.c_uint32, 0), ('driver_data', c.Array[ctypes.c_uint32, Literal[0]], 4)])
 @c.record
 class struct_ib_uverbs_destroy_ah(c.Struct):
   SIZE = 4
@@ -2298,37 +2298,37 @@ struct_ib_uverbs_destroy_ah.register_fields([('ah_handle', ctypes.c_uint32, 0)])
 @c.record
 class struct_ib_uverbs_attach_mcast(c.Struct):
   SIZE = 24
-  gid: ctypes.Array[ctypes.c_ubyte]
+  gid: c.Array[ctypes.c_ubyte, Literal[16]]
   qp_handle: int
   mlid: int
   reserved: int
-  driver_data: ctypes.Array[ctypes.c_uint64]
-struct_ib_uverbs_attach_mcast.register_fields([('gid', (ctypes.c_ubyte * 16), 0), ('qp_handle', ctypes.c_uint32, 16), ('mlid', ctypes.c_uint16, 20), ('reserved', ctypes.c_uint16, 22), ('driver_data', (ctypes.c_uint64 * 0), 24)])
+  driver_data: c.Array[ctypes.c_uint64, Literal[0]]
+struct_ib_uverbs_attach_mcast.register_fields([('gid', c.Array[ctypes.c_ubyte, Literal[16]], 0), ('qp_handle', ctypes.c_uint32, 16), ('mlid', ctypes.c_uint16, 20), ('reserved', ctypes.c_uint16, 22), ('driver_data', c.Array[ctypes.c_uint64, Literal[0]], 24)])
 @c.record
 class struct_ib_uverbs_detach_mcast(c.Struct):
   SIZE = 24
-  gid: ctypes.Array[ctypes.c_ubyte]
+  gid: c.Array[ctypes.c_ubyte, Literal[16]]
   qp_handle: int
   mlid: int
   reserved: int
-  driver_data: ctypes.Array[ctypes.c_uint64]
-struct_ib_uverbs_detach_mcast.register_fields([('gid', (ctypes.c_ubyte * 16), 0), ('qp_handle', ctypes.c_uint32, 16), ('mlid', ctypes.c_uint16, 20), ('reserved', ctypes.c_uint16, 22), ('driver_data', (ctypes.c_uint64 * 0), 24)])
+  driver_data: c.Array[ctypes.c_uint64, Literal[0]]
+struct_ib_uverbs_detach_mcast.register_fields([('gid', c.Array[ctypes.c_ubyte, Literal[16]], 0), ('qp_handle', ctypes.c_uint32, 16), ('mlid', ctypes.c_uint16, 20), ('reserved', ctypes.c_uint16, 22), ('driver_data', c.Array[ctypes.c_uint64, Literal[0]], 24)])
 @c.record
 class struct_ib_uverbs_flow_spec_hdr(c.Struct):
   SIZE = 8
   type: int
   size: int
   reserved: int
-  flow_spec_data: ctypes.Array[ctypes.c_uint64]
-struct_ib_uverbs_flow_spec_hdr.register_fields([('type', ctypes.c_uint32, 0), ('size', ctypes.c_uint16, 4), ('reserved', ctypes.c_uint16, 6), ('flow_spec_data', (ctypes.c_uint64 * 0), 8)])
+  flow_spec_data: c.Array[ctypes.c_uint64, Literal[0]]
+struct_ib_uverbs_flow_spec_hdr.register_fields([('type', ctypes.c_uint32, 0), ('size', ctypes.c_uint16, 4), ('reserved', ctypes.c_uint16, 6), ('flow_spec_data', c.Array[ctypes.c_uint64, Literal[0]], 8)])
 @c.record
 class struct_ib_uverbs_flow_eth_filter(c.Struct):
   SIZE = 16
-  dst_mac: ctypes.Array[ctypes.c_ubyte]
-  src_mac: ctypes.Array[ctypes.c_ubyte]
+  dst_mac: c.Array[ctypes.c_ubyte, Literal[6]]
+  src_mac: c.Array[ctypes.c_ubyte, Literal[6]]
   ether_type: int
   vlan_tag: int
-struct_ib_uverbs_flow_eth_filter.register_fields([('dst_mac', (ctypes.c_ubyte * 6), 0), ('src_mac', (ctypes.c_ubyte * 6), 6), ('ether_type', ctypes.c_uint16, 12), ('vlan_tag', ctypes.c_uint16, 14)])
+struct_ib_uverbs_flow_eth_filter.register_fields([('dst_mac', c.Array[ctypes.c_ubyte, Literal[6]], 0), ('src_mac', c.Array[ctypes.c_ubyte, Literal[6]], 6), ('ether_type', ctypes.c_uint16, 12), ('vlan_tag', ctypes.c_uint16, 14)])
 @c.record
 class struct_ib_uverbs_flow_spec_eth(c.Struct):
   SIZE = 40
@@ -2378,14 +2378,14 @@ struct_ib_uverbs_flow_spec_tcp_udp.register_fields([('hdr', struct_ib_uverbs_flo
 @c.record
 class struct_ib_uverbs_flow_ipv6_filter(c.Struct):
   SIZE = 40
-  src_ip: ctypes.Array[ctypes.c_ubyte]
-  dst_ip: ctypes.Array[ctypes.c_ubyte]
+  src_ip: c.Array[ctypes.c_ubyte, Literal[16]]
+  dst_ip: c.Array[ctypes.c_ubyte, Literal[16]]
   flow_label: int
   next_hdr: int
   traffic_class: int
   hop_limit: int
   reserved: int
-struct_ib_uverbs_flow_ipv6_filter.register_fields([('src_ip', (ctypes.c_ubyte * 16), 0), ('dst_ip', (ctypes.c_ubyte * 16), 16), ('flow_label', ctypes.c_uint32, 32), ('next_hdr', ctypes.c_ubyte, 36), ('traffic_class', ctypes.c_ubyte, 37), ('hop_limit', ctypes.c_ubyte, 38), ('reserved', ctypes.c_ubyte, 39)])
+struct_ib_uverbs_flow_ipv6_filter.register_fields([('src_ip', c.Array[ctypes.c_ubyte, Literal[16]], 0), ('dst_ip', c.Array[ctypes.c_ubyte, Literal[16]], 16), ('flow_label', ctypes.c_uint32, 32), ('next_hdr', ctypes.c_ubyte, 36), ('traffic_class', ctypes.c_ubyte, 37), ('hop_limit', ctypes.c_ubyte, 38), ('reserved', ctypes.c_ubyte, 39)])
 @c.record
 class struct_ib_uverbs_flow_spec_ipv6(c.Struct):
   SIZE = 88
@@ -2504,11 +2504,11 @@ class struct_ib_uverbs_flow_attr(c.Struct):
   size: int
   priority: int
   num_of_specs: int
-  reserved: ctypes.Array[ctypes.c_ubyte]
+  reserved: c.Array[ctypes.c_ubyte, Literal[2]]
   port: int
   flags: int
-  flow_specs: ctypes.Array[struct_ib_uverbs_flow_spec_hdr]
-struct_ib_uverbs_flow_attr.register_fields([('type', ctypes.c_uint32, 0), ('size', ctypes.c_uint16, 4), ('priority', ctypes.c_uint16, 6), ('num_of_specs', ctypes.c_ubyte, 8), ('reserved', (ctypes.c_ubyte * 2), 9), ('port', ctypes.c_ubyte, 11), ('flags', ctypes.c_uint32, 12), ('flow_specs', (struct_ib_uverbs_flow_spec_hdr * 0), 16)])
+  flow_specs: c.Array[struct_ib_uverbs_flow_spec_hdr, Literal[0]]
+struct_ib_uverbs_flow_attr.register_fields([('type', ctypes.c_uint32, 0), ('size', ctypes.c_uint16, 4), ('priority', ctypes.c_uint16, 6), ('num_of_specs', ctypes.c_ubyte, 8), ('reserved', c.Array[ctypes.c_ubyte, Literal[2]], 9), ('port', ctypes.c_ubyte, 11), ('flags', ctypes.c_uint32, 12), ('flow_specs', c.Array[struct_ib_uverbs_flow_spec_hdr, Literal[0]], 16)])
 @c.record
 class struct_ib_uverbs_create_flow(c.Struct):
   SIZE = 24
@@ -2537,8 +2537,8 @@ class struct_ib_uverbs_create_srq(c.Struct):
   max_wr: int
   max_sge: int
   srq_limit: int
-  driver_data: ctypes.Array[ctypes.c_uint64]
-struct_ib_uverbs_create_srq.register_fields([('response', ctypes.c_uint64, 0), ('user_handle', ctypes.c_uint64, 8), ('pd_handle', ctypes.c_uint32, 16), ('max_wr', ctypes.c_uint32, 20), ('max_sge', ctypes.c_uint32, 24), ('srq_limit', ctypes.c_uint32, 28), ('driver_data', (ctypes.c_uint64 * 0), 32)])
+  driver_data: c.Array[ctypes.c_uint64, Literal[0]]
+struct_ib_uverbs_create_srq.register_fields([('response', ctypes.c_uint64, 0), ('user_handle', ctypes.c_uint64, 8), ('pd_handle', ctypes.c_uint32, 16), ('max_wr', ctypes.c_uint32, 20), ('max_sge', ctypes.c_uint32, 24), ('srq_limit', ctypes.c_uint32, 28), ('driver_data', c.Array[ctypes.c_uint64, Literal[0]], 32)])
 @c.record
 class struct_ib_uverbs_create_xsrq(c.Struct):
   SIZE = 48
@@ -2552,8 +2552,8 @@ class struct_ib_uverbs_create_xsrq(c.Struct):
   max_num_tags: int
   xrcd_handle: int
   cq_handle: int
-  driver_data: ctypes.Array[ctypes.c_uint64]
-struct_ib_uverbs_create_xsrq.register_fields([('response', ctypes.c_uint64, 0), ('user_handle', ctypes.c_uint64, 8), ('srq_type', ctypes.c_uint32, 16), ('pd_handle', ctypes.c_uint32, 20), ('max_wr', ctypes.c_uint32, 24), ('max_sge', ctypes.c_uint32, 28), ('srq_limit', ctypes.c_uint32, 32), ('max_num_tags', ctypes.c_uint32, 36), ('xrcd_handle', ctypes.c_uint32, 40), ('cq_handle', ctypes.c_uint32, 44), ('driver_data', (ctypes.c_uint64 * 0), 48)])
+  driver_data: c.Array[ctypes.c_uint64, Literal[0]]
+struct_ib_uverbs_create_xsrq.register_fields([('response', ctypes.c_uint64, 0), ('user_handle', ctypes.c_uint64, 8), ('srq_type', ctypes.c_uint32, 16), ('pd_handle', ctypes.c_uint32, 20), ('max_wr', ctypes.c_uint32, 24), ('max_sge', ctypes.c_uint32, 28), ('srq_limit', ctypes.c_uint32, 32), ('max_num_tags', ctypes.c_uint32, 36), ('xrcd_handle', ctypes.c_uint32, 40), ('cq_handle', ctypes.c_uint32, 44), ('driver_data', c.Array[ctypes.c_uint64, Literal[0]], 48)])
 @c.record
 class struct_ib_uverbs_create_srq_resp(c.Struct):
   SIZE = 16
@@ -2561,8 +2561,8 @@ class struct_ib_uverbs_create_srq_resp(c.Struct):
   max_wr: int
   max_sge: int
   srqn: int
-  driver_data: ctypes.Array[ctypes.c_uint32]
-struct_ib_uverbs_create_srq_resp.register_fields([('srq_handle', ctypes.c_uint32, 0), ('max_wr', ctypes.c_uint32, 4), ('max_sge', ctypes.c_uint32, 8), ('srqn', ctypes.c_uint32, 12), ('driver_data', (ctypes.c_uint32 * 0), 16)])
+  driver_data: c.Array[ctypes.c_uint32, Literal[0]]
+struct_ib_uverbs_create_srq_resp.register_fields([('srq_handle', ctypes.c_uint32, 0), ('max_wr', ctypes.c_uint32, 4), ('max_sge', ctypes.c_uint32, 8), ('srqn', ctypes.c_uint32, 12), ('driver_data', c.Array[ctypes.c_uint32, Literal[0]], 16)])
 @c.record
 class struct_ib_uverbs_modify_srq(c.Struct):
   SIZE = 16
@@ -2570,16 +2570,16 @@ class struct_ib_uverbs_modify_srq(c.Struct):
   attr_mask: int
   max_wr: int
   srq_limit: int
-  driver_data: ctypes.Array[ctypes.c_uint64]
-struct_ib_uverbs_modify_srq.register_fields([('srq_handle', ctypes.c_uint32, 0), ('attr_mask', ctypes.c_uint32, 4), ('max_wr', ctypes.c_uint32, 8), ('srq_limit', ctypes.c_uint32, 12), ('driver_data', (ctypes.c_uint64 * 0), 16)])
+  driver_data: c.Array[ctypes.c_uint64, Literal[0]]
+struct_ib_uverbs_modify_srq.register_fields([('srq_handle', ctypes.c_uint32, 0), ('attr_mask', ctypes.c_uint32, 4), ('max_wr', ctypes.c_uint32, 8), ('srq_limit', ctypes.c_uint32, 12), ('driver_data', c.Array[ctypes.c_uint64, Literal[0]], 16)])
 @c.record
 class struct_ib_uverbs_query_srq(c.Struct):
   SIZE = 16
   response: int
   srq_handle: int
   reserved: int
-  driver_data: ctypes.Array[ctypes.c_uint64]
-struct_ib_uverbs_query_srq.register_fields([('response', ctypes.c_uint64, 0), ('srq_handle', ctypes.c_uint32, 8), ('reserved', ctypes.c_uint32, 12), ('driver_data', (ctypes.c_uint64 * 0), 16)])
+  driver_data: c.Array[ctypes.c_uint64, Literal[0]]
+struct_ib_uverbs_query_srq.register_fields([('response', ctypes.c_uint64, 0), ('srq_handle', ctypes.c_uint32, 8), ('reserved', ctypes.c_uint32, 12), ('driver_data', c.Array[ctypes.c_uint64, Literal[0]], 16)])
 @c.record
 class struct_ib_uverbs_query_srq_resp(c.Struct):
   SIZE = 16
@@ -2652,8 +2652,8 @@ class struct_ib_uverbs_ex_create_rwq_ind_table(c.Struct):
   SIZE = 8
   comp_mask: int
   log_ind_tbl_size: int
-  wq_handles: ctypes.Array[ctypes.c_uint32]
-struct_ib_uverbs_ex_create_rwq_ind_table.register_fields([('comp_mask', ctypes.c_uint32, 0), ('log_ind_tbl_size', ctypes.c_uint32, 4), ('wq_handles', (ctypes.c_uint32 * 0), 8)])
+  wq_handles: c.Array[ctypes.c_uint32, Literal[0]]
+struct_ib_uverbs_ex_create_rwq_ind_table.register_fields([('comp_mask', ctypes.c_uint32, 0), ('log_ind_tbl_size', ctypes.c_uint32, 4), ('wq_handles', c.Array[ctypes.c_uint32, Literal[0]], 8)])
 @c.record
 class struct_ib_uverbs_ex_create_rwq_ind_table_resp(c.Struct):
   SIZE = 16

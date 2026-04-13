@@ -17,7 +17,7 @@ struct_sqtt_data_info.register_fields([('cur_offset', uint32_t, 0), ('trace_stat
 class struct_sqtt_data_se(c.Struct):
   SIZE = 32
   info: struct_sqtt_data_info
-  data_ptr: int|None
+  data_ptr: ctypes.c_void_p
   shader_engine: int
   compute_unit: int
 struct_sqtt_data_se.register_fields([('info', struct_sqtt_data_info, 0), ('data_ptr', ctypes.c_void_p, 16), ('shader_engine', uint32_t, 24), ('compute_unit', uint32_t, 28)])
@@ -71,16 +71,16 @@ struct_sqtt_file_header.register_fields([('magic_number', uint32_t, 0), ('versio
 class struct_sqtt_file_chunk_cpu_info(c.Struct):
   SIZE = 112
   header: struct_sqtt_file_chunk_header
-  vendor_id: ctypes.Array[ctypes.c_uint32]
-  processor_brand: ctypes.Array[ctypes.c_uint32]
-  reserved: ctypes.Array[ctypes.c_uint32]
+  vendor_id: c.Array[ctypes.c_uint32, Literal[4]]
+  processor_brand: c.Array[ctypes.c_uint32, Literal[12]]
+  reserved: c.Array[ctypes.c_uint32, Literal[2]]
   cpu_timestamp_freq: int
   clock_speed: int
   num_logical_cores: int
   num_physical_cores: int
   system_ram_size: int
 uint64_t: TypeAlias = ctypes.c_uint64
-struct_sqtt_file_chunk_cpu_info.register_fields([('header', struct_sqtt_file_chunk_header, 0), ('vendor_id', (uint32_t * 4), 16), ('processor_brand', (uint32_t * 12), 32), ('reserved', (uint32_t * 2), 80), ('cpu_timestamp_freq', uint64_t, 88), ('clock_speed', uint32_t, 96), ('num_logical_cores', uint32_t, 100), ('num_physical_cores', uint32_t, 104), ('system_ram_size', uint32_t, 108)])
+struct_sqtt_file_chunk_cpu_info.register_fields([('header', struct_sqtt_file_chunk_header, 0), ('vendor_id', c.Array[uint32_t, Literal[4]], 16), ('processor_brand', c.Array[uint32_t, Literal[12]], 32), ('reserved', c.Array[uint32_t, Literal[2]], 80), ('cpu_timestamp_freq', uint64_t, 88), ('clock_speed', uint32_t, 96), ('num_logical_cores', uint32_t, 100), ('num_physical_cores', uint32_t, 104), ('system_ram_size', uint32_t, 108)])
 enum_sqtt_file_chunk_asic_info_flags: dict[int, str] = {(SQTT_FILE_CHUNK_ASIC_INFO_FLAG_SC_PACKER_NUMBERING:=1): 'SQTT_FILE_CHUNK_ASIC_INFO_FLAG_SC_PACKER_NUMBERING', (SQTT_FILE_CHUNK_ASIC_INFO_FLAG_PS1_EVENT_TOKENS_ENABLED:=2): 'SQTT_FILE_CHUNK_ASIC_INFO_FLAG_PS1_EVENT_TOKENS_ENABLED'}
 enum_sqtt_gpu_type: dict[int, str] = {(SQTT_GPU_TYPE_UNKNOWN:=0): 'SQTT_GPU_TYPE_UNKNOWN', (SQTT_GPU_TYPE_INTEGRATED:=1): 'SQTT_GPU_TYPE_INTEGRATED', (SQTT_GPU_TYPE_DISCRETE:=2): 'SQTT_GPU_TYPE_DISCRETE', (SQTT_GPU_TYPE_VIRTUAL:=3): 'SQTT_GPU_TYPE_VIRTUAL'}
 enum_sqtt_gfxip_level: dict[int, str] = {(SQTT_GFXIP_LEVEL_NONE:=0): 'SQTT_GFXIP_LEVEL_NONE', (SQTT_GFXIP_LEVEL_GFXIP_6:=1): 'SQTT_GFXIP_LEVEL_GFXIP_6', (SQTT_GFXIP_LEVEL_GFXIP_7:=2): 'SQTT_GFXIP_LEVEL_GFXIP_7', (SQTT_GFXIP_LEVEL_GFXIP_8:=3): 'SQTT_GFXIP_LEVEL_GFXIP_8', (SQTT_GFXIP_LEVEL_GFXIP_8_1:=4): 'SQTT_GFXIP_LEVEL_GFXIP_8_1', (SQTT_GFXIP_LEVEL_GFXIP_9:=5): 'SQTT_GFXIP_LEVEL_GFXIP_9', (SQTT_GFXIP_LEVEL_GFXIP_10_1:=7): 'SQTT_GFXIP_LEVEL_GFXIP_10_1', (SQTT_GFXIP_LEVEL_GFXIP_10_3:=9): 'SQTT_GFXIP_LEVEL_GFXIP_10_3', (SQTT_GFXIP_LEVEL_GFXIP_11_0:=12): 'SQTT_GFXIP_LEVEL_GFXIP_11_0', (SQTT_GFXIP_LEVEL_GFXIP_11_5:=13): 'SQTT_GFXIP_LEVEL_GFXIP_11_5', (SQTT_GFXIP_LEVEL_GFXIP_12:=16): 'SQTT_GFXIP_LEVEL_GFXIP_12'}
@@ -119,7 +119,7 @@ class struct_sqtt_file_chunk_asic_info(c.Struct):
   l2_cache_size: int
   l1_cache_size: int
   lds_size: int
-  gpu_name: ctypes.Array[ctypes.c_char]
+  gpu_name: c.Array[ctypes.c_char, Literal[256]]
   alu_per_clock: float
   texture_per_clock: float
   prims_per_clock: float
@@ -130,17 +130,17 @@ class struct_sqtt_file_chunk_asic_info(c.Struct):
   memory_ops_per_clock: int
   memory_chip_type: int
   lds_granularity: int
-  cu_mask: ctypes.Array[(ctypes.c_uint16 * 2)]
-  reserved1: ctypes.Array[ctypes.c_char]
-  active_pixel_packer_mask: ctypes.Array[ctypes.c_uint32]
-  reserved2: ctypes.Array[ctypes.c_char]
+  cu_mask: c.Array[c.Array[ctypes.c_uint16, Literal[2]], Literal[32]]
+  reserved1: c.Array[ctypes.c_char, Literal[128]]
+  active_pixel_packer_mask: c.Array[ctypes.c_uint32, Literal[4]]
+  reserved2: c.Array[ctypes.c_char, Literal[16]]
   gl1_cache_size: int
   instruction_cache_size: int
   scalar_cache_size: int
   mall_cache_size: int
-  padding: ctypes.Array[ctypes.c_char]
+  padding: c.Array[ctypes.c_char, Literal[4]]
 int64_t: TypeAlias = ctypes.c_int64
-struct_sqtt_file_chunk_asic_info.register_fields([('header', struct_sqtt_file_chunk_header, 0), ('flags', uint64_t, 16), ('trace_shader_core_clock', uint64_t, 24), ('trace_memory_clock', uint64_t, 32), ('device_id', int32_t, 40), ('device_revision_id', int32_t, 44), ('vgprs_per_simd', int32_t, 48), ('sgprs_per_simd', int32_t, 52), ('shader_engines', int32_t, 56), ('compute_unit_per_shader_engine', int32_t, 60), ('simd_per_compute_unit', int32_t, 64), ('wavefronts_per_simd', int32_t, 68), ('minimum_vgpr_alloc', int32_t, 72), ('vgpr_alloc_granularity', int32_t, 76), ('minimum_sgpr_alloc', int32_t, 80), ('sgpr_alloc_granularity', int32_t, 84), ('hardware_contexts', int32_t, 88), ('gpu_type', ctypes.c_uint32, 92), ('gfxip_level', ctypes.c_uint32, 96), ('gpu_index', int32_t, 100), ('gds_size', int32_t, 104), ('gds_per_shader_engine', int32_t, 108), ('ce_ram_size', int32_t, 112), ('ce_ram_size_graphics', int32_t, 116), ('ce_ram_size_compute', int32_t, 120), ('max_number_of_dedicated_cus', int32_t, 124), ('vram_size', int64_t, 128), ('vram_bus_width', int32_t, 136), ('l2_cache_size', int32_t, 140), ('l1_cache_size', int32_t, 144), ('lds_size', int32_t, 148), ('gpu_name', (ctypes.c_char * 256), 152), ('alu_per_clock', ctypes.c_float, 408), ('texture_per_clock', ctypes.c_float, 412), ('prims_per_clock', ctypes.c_float, 416), ('pixels_per_clock', ctypes.c_float, 420), ('gpu_timestamp_frequency', uint64_t, 424), ('max_shader_core_clock', uint64_t, 432), ('max_memory_clock', uint64_t, 440), ('memory_ops_per_clock', uint32_t, 448), ('memory_chip_type', ctypes.c_uint32, 452), ('lds_granularity', uint32_t, 456), ('cu_mask', ((uint16_t * 2) * 32), 460), ('reserved1', (ctypes.c_char * 128), 588), ('active_pixel_packer_mask', (uint32_t * 4), 716), ('reserved2', (ctypes.c_char * 16), 732), ('gl1_cache_size', uint32_t, 748), ('instruction_cache_size', uint32_t, 752), ('scalar_cache_size', uint32_t, 756), ('mall_cache_size', uint32_t, 760), ('padding', (ctypes.c_char * 4), 764)])
+struct_sqtt_file_chunk_asic_info.register_fields([('header', struct_sqtt_file_chunk_header, 0), ('flags', uint64_t, 16), ('trace_shader_core_clock', uint64_t, 24), ('trace_memory_clock', uint64_t, 32), ('device_id', int32_t, 40), ('device_revision_id', int32_t, 44), ('vgprs_per_simd', int32_t, 48), ('sgprs_per_simd', int32_t, 52), ('shader_engines', int32_t, 56), ('compute_unit_per_shader_engine', int32_t, 60), ('simd_per_compute_unit', int32_t, 64), ('wavefronts_per_simd', int32_t, 68), ('minimum_vgpr_alloc', int32_t, 72), ('vgpr_alloc_granularity', int32_t, 76), ('minimum_sgpr_alloc', int32_t, 80), ('sgpr_alloc_granularity', int32_t, 84), ('hardware_contexts', int32_t, 88), ('gpu_type', ctypes.c_uint32, 92), ('gfxip_level', ctypes.c_uint32, 96), ('gpu_index', int32_t, 100), ('gds_size', int32_t, 104), ('gds_per_shader_engine', int32_t, 108), ('ce_ram_size', int32_t, 112), ('ce_ram_size_graphics', int32_t, 116), ('ce_ram_size_compute', int32_t, 120), ('max_number_of_dedicated_cus', int32_t, 124), ('vram_size', int64_t, 128), ('vram_bus_width', int32_t, 136), ('l2_cache_size', int32_t, 140), ('l1_cache_size', int32_t, 144), ('lds_size', int32_t, 148), ('gpu_name', c.Array[ctypes.c_char, Literal[256]], 152), ('alu_per_clock', ctypes.c_float, 408), ('texture_per_clock', ctypes.c_float, 412), ('prims_per_clock', ctypes.c_float, 416), ('pixels_per_clock', ctypes.c_float, 420), ('gpu_timestamp_frequency', uint64_t, 424), ('max_shader_core_clock', uint64_t, 432), ('max_memory_clock', uint64_t, 440), ('memory_ops_per_clock', uint32_t, 448), ('memory_chip_type', ctypes.c_uint32, 452), ('lds_granularity', uint32_t, 456), ('cu_mask', c.Array[c.Array[uint16_t, Literal[2]], Literal[32]], 460), ('reserved1', c.Array[ctypes.c_char, Literal[128]], 588), ('active_pixel_packer_mask', c.Array[uint32_t, Literal[4]], 716), ('reserved2', c.Array[ctypes.c_char, Literal[16]], 732), ('gl1_cache_size', uint32_t, 748), ('instruction_cache_size', uint32_t, 752), ('scalar_cache_size', uint32_t, 756), ('mall_cache_size', uint32_t, 760), ('padding', c.Array[ctypes.c_char, Literal[4]], 764)])
 enum_sqtt_api_type: dict[int, str] = {(SQTT_API_TYPE_DIRECTX_12:=0): 'SQTT_API_TYPE_DIRECTX_12', (SQTT_API_TYPE_VULKAN:=1): 'SQTT_API_TYPE_VULKAN', (SQTT_API_TYPE_GENERIC:=2): 'SQTT_API_TYPE_GENERIC', (SQTT_API_TYPE_OPENCL:=3): 'SQTT_API_TYPE_OPENCL'}
 enum_sqtt_instruction_trace_mode: dict[int, str] = {(SQTT_INSTRUCTION_TRACE_DISABLED:=0): 'SQTT_INSTRUCTION_TRACE_DISABLED', (SQTT_INSTRUCTION_TRACE_FULL_FRAME:=1): 'SQTT_INSTRUCTION_TRACE_FULL_FRAME', (SQTT_INSTRUCTION_TRACE_API_PSO:=2): 'SQTT_INSTRUCTION_TRACE_API_PSO'}
 enum_sqtt_profiling_mode: dict[int, str] = {(SQTT_PROFILING_MODE_PRESENT:=0): 'SQTT_PROFILING_MODE_PRESENT', (SQTT_PROFILING_MODE_USER_MARKERS:=1): 'SQTT_PROFILING_MODE_USER_MARKERS', (SQTT_PROFILING_MODE_INDEX:=2): 'SQTT_PROFILING_MODE_INDEX', (SQTT_PROFILING_MODE_TAG:=3): 'SQTT_PROFILING_MODE_TAG'}
@@ -153,9 +153,9 @@ class union_sqtt_profiling_mode_data(c.Struct):
 @c.record
 class union_sqtt_profiling_mode_data_user_marker_profiling_data(c.Struct):
   SIZE = 512
-  start: ctypes.Array[ctypes.c_char]
-  end: ctypes.Array[ctypes.c_char]
-union_sqtt_profiling_mode_data_user_marker_profiling_data.register_fields([('start', (ctypes.c_char * 256), 0), ('end', (ctypes.c_char * 256), 256)])
+  start: c.Array[ctypes.c_char, Literal[256]]
+  end: c.Array[ctypes.c_char, Literal[256]]
+union_sqtt_profiling_mode_data_user_marker_profiling_data.register_fields([('start', c.Array[ctypes.c_char, Literal[256]], 0), ('end', c.Array[ctypes.c_char, Literal[256]], 256)])
 @c.record
 class union_sqtt_profiling_mode_data_index_profiling_data(c.Struct):
   SIZE = 8
@@ -221,9 +221,9 @@ class struct_sqtt_code_object_loader_events_record(c.Struct):
   loader_event_type: int
   reserved: int
   base_address: int
-  code_object_hash: ctypes.Array[ctypes.c_uint64]
+  code_object_hash: c.Array[ctypes.c_uint64, Literal[2]]
   time_stamp: int
-struct_sqtt_code_object_loader_events_record.register_fields([('loader_event_type', uint32_t, 0), ('reserved', uint32_t, 4), ('base_address', uint64_t, 8), ('code_object_hash', (uint64_t * 2), 16), ('time_stamp', uint64_t, 32)])
+struct_sqtt_code_object_loader_events_record.register_fields([('loader_event_type', uint32_t, 0), ('reserved', uint32_t, 4), ('base_address', uint64_t, 8), ('code_object_hash', c.Array[uint64_t, Literal[2]], 16), ('time_stamp', uint64_t, 32)])
 @c.record
 class struct_sqtt_file_chunk_code_object_loader_events(c.Struct):
   SIZE = 32
@@ -237,9 +237,9 @@ struct_sqtt_file_chunk_code_object_loader_events.register_fields([('header', str
 class struct_sqtt_pso_correlation_record(c.Struct):
   SIZE = 88
   api_pso_hash: int
-  pipeline_hash: ctypes.Array[ctypes.c_uint64]
-  api_level_obj_name: ctypes.Array[ctypes.c_char]
-struct_sqtt_pso_correlation_record.register_fields([('api_pso_hash', uint64_t, 0), ('pipeline_hash', (uint64_t * 2), 8), ('api_level_obj_name', (ctypes.c_char * 64), 24)])
+  pipeline_hash: c.Array[ctypes.c_uint64, Literal[2]]
+  api_level_obj_name: c.Array[ctypes.c_char, Literal[64]]
+struct_sqtt_pso_correlation_record.register_fields([('api_pso_hash', uint64_t, 0), ('pipeline_hash', c.Array[uint64_t, Literal[2]], 8), ('api_level_obj_name', c.Array[ctypes.c_char, Literal[64]], 24)])
 @c.record
 class struct_sqtt_file_chunk_pso_correlation(c.Struct):
   SIZE = 32
@@ -316,8 +316,8 @@ class struct_sqtt_queue_event_record(c.Struct):
   submit_sub_index: int
   api_id: int
   cpu_timestamp: int
-  gpu_timestamps: ctypes.Array[ctypes.c_uint64]
-struct_sqtt_queue_event_record.register_fields([('event_type', ctypes.c_uint32, 0), ('sqtt_cb_id', uint32_t, 4), ('frame_index', uint64_t, 8), ('queue_info_index', uint32_t, 16), ('submit_sub_index', uint32_t, 20), ('api_id', uint64_t, 24), ('cpu_timestamp', uint64_t, 32), ('gpu_timestamps', (uint64_t * 2), 40)])
+  gpu_timestamps: c.Array[ctypes.c_uint64, Literal[2]]
+struct_sqtt_queue_event_record.register_fields([('event_type', ctypes.c_uint32, 0), ('sqtt_cb_id', uint32_t, 4), ('frame_index', uint64_t, 8), ('queue_info_index', uint32_t, 16), ('submit_sub_index', uint32_t, 20), ('api_id', uint64_t, 24), ('cpu_timestamp', uint64_t, 32), ('gpu_timestamps', c.Array[uint64_t, Literal[2]], 40)])
 @c.record
 class struct_sqtt_file_chunk_clock_calibration(c.Struct):
   SIZE = 40
@@ -511,10 +511,10 @@ class struct_rgp_sqtt_marker_pipeline_bind(c.Struct):
   cb_id: int
   reserved: int
   dword01: int
-  api_pso_hash: ctypes.Array[ctypes.c_uint32]
+  api_pso_hash: c.Array[ctypes.c_uint32, Literal[2]]
   dword02: int
   dword03: int
-struct_rgp_sqtt_marker_pipeline_bind.register_fields([('identifier', uint32_t, 0, 4, 0), ('ext_dwords', uint32_t, 0, 3, 4), ('bind_point', uint32_t, 0, 1, 7), ('cb_id', uint32_t, 1, 20, 0), ('reserved', uint32_t, 3, 4, 4), ('dword01', uint32_t, 0), ('api_pso_hash', (uint32_t * 2), 4), ('dword02', uint32_t, 4), ('dword03', uint32_t, 8)])
+struct_rgp_sqtt_marker_pipeline_bind.register_fields([('identifier', uint32_t, 0, 4, 0), ('ext_dwords', uint32_t, 0, 3, 4), ('bind_point', uint32_t, 0, 1, 7), ('cb_id', uint32_t, 1, 20, 0), ('reserved', uint32_t, 3, 4, 4), ('dword01', uint32_t, 0), ('api_pso_hash', c.Array[uint32_t, Literal[2]], 4), ('dword02', uint32_t, 4), ('dword03', uint32_t, 8)])
 SQTT_FILE_MAGIC_NUMBER = 0x50303042 # type: ignore
 SQTT_FILE_VERSION_MAJOR = 1 # type: ignore
 SQTT_FILE_VERSION_MINOR = 5 # type: ignore

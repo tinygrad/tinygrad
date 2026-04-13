@@ -133,10 +133,10 @@ struct_kfd_process_device_apertures.register_fields([('lds_base', ctypes.c_uint6
 @c.record
 class struct_kfd_ioctl_get_process_apertures_args(c.Struct):
   SIZE = 400
-  process_apertures: ctypes.Array[struct_kfd_process_device_apertures]
+  process_apertures: c.Array[struct_kfd_process_device_apertures, Literal[7]]
   num_of_nodes: int
   pad: int
-struct_kfd_ioctl_get_process_apertures_args.register_fields([('process_apertures', (struct_kfd_process_device_apertures * 7), 0), ('num_of_nodes', ctypes.c_uint32, 392), ('pad', ctypes.c_uint32, 396)])
+struct_kfd_ioctl_get_process_apertures_args.register_fields([('process_apertures', c.Array[struct_kfd_process_device_apertures, Literal[7]], 0), ('num_of_nodes', ctypes.c_uint32, 392), ('pad', ctypes.c_uint32, 396)])
 @c.record
 class struct_kfd_ioctl_get_process_apertures_new_args(c.Struct):
   SIZE = 16
@@ -417,20 +417,20 @@ enum_kfd_mmio_remap: dict[int, str] = {(KFD_MMIO_REMAP_HDP_MEM_FLUSH_CNTL:=0): '
 class struct_kfd_ioctl_ipc_export_handle_args(c.Struct):
   SIZE = 32
   handle: int
-  share_handle: ctypes.Array[ctypes.c_uint32]
+  share_handle: c.Array[ctypes.c_uint32, Literal[4]]
   gpu_id: int
   flags: int
-struct_kfd_ioctl_ipc_export_handle_args.register_fields([('handle', ctypes.c_uint64, 0), ('share_handle', (ctypes.c_uint32 * 4), 8), ('gpu_id', ctypes.c_uint32, 24), ('flags', ctypes.c_uint32, 28)])
+struct_kfd_ioctl_ipc_export_handle_args.register_fields([('handle', ctypes.c_uint64, 0), ('share_handle', c.Array[ctypes.c_uint32, Literal[4]], 8), ('gpu_id', ctypes.c_uint32, 24), ('flags', ctypes.c_uint32, 28)])
 @c.record
 class struct_kfd_ioctl_ipc_import_handle_args(c.Struct):
   SIZE = 48
   handle: int
   va_addr: int
   mmap_offset: int
-  share_handle: ctypes.Array[ctypes.c_uint32]
+  share_handle: c.Array[ctypes.c_uint32, Literal[4]]
   gpu_id: int
   flags: int
-struct_kfd_ioctl_ipc_import_handle_args.register_fields([('handle', ctypes.c_uint64, 0), ('va_addr', ctypes.c_uint64, 8), ('mmap_offset', ctypes.c_uint64, 16), ('share_handle', (ctypes.c_uint32 * 4), 24), ('gpu_id', ctypes.c_uint32, 40), ('flags', ctypes.c_uint32, 44)])
+struct_kfd_ioctl_ipc_import_handle_args.register_fields([('handle', ctypes.c_uint64, 0), ('va_addr', ctypes.c_uint64, 8), ('mmap_offset', ctypes.c_uint64, 16), ('share_handle', c.Array[ctypes.c_uint32, Literal[4]], 24), ('gpu_id', ctypes.c_uint32, 40), ('flags', ctypes.c_uint32, 44)])
 @c.record
 class struct_kfd_ioctl_cross_memory_copy_deprecated_args(c.Struct):
   SIZE = 48
@@ -458,8 +458,8 @@ class struct_kfd_ioctl_svm_args(c.Struct):
   size: int
   op: int
   nattr: int
-  attrs: ctypes.Array[struct_kfd_ioctl_svm_attribute]
-struct_kfd_ioctl_svm_args.register_fields([('start_addr', ctypes.c_uint64, 0), ('size', ctypes.c_uint64, 8), ('op', ctypes.c_uint32, 16), ('nattr', ctypes.c_uint32, 20), ('attrs', (struct_kfd_ioctl_svm_attribute * 0), 24)])
+  attrs: c.Array[struct_kfd_ioctl_svm_attribute, Literal[0]]
+struct_kfd_ioctl_svm_args.register_fields([('start_addr', ctypes.c_uint64, 0), ('size', ctypes.c_uint64, 8), ('op', ctypes.c_uint32, 16), ('nattr', ctypes.c_uint32, 20), ('attrs', c.Array[struct_kfd_ioctl_svm_attribute, Literal[0]], 24)])
 @c.record
 class struct_kfd_ioctl_set_xnack_mode_args(c.Struct):
   SIZE = 4

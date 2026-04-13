@@ -7,18 +7,18 @@ from tinygrad.runtime.support import c
 @c.record
 class struct_io_uring_sq(c.Struct):
   SIZE = 104
-  khead: ctypes._Pointer[ctypes.c_uint32]
-  ktail: ctypes._Pointer[ctypes.c_uint32]
-  kring_mask: ctypes._Pointer[ctypes.c_uint32]
-  kring_entries: ctypes._Pointer[ctypes.c_uint32]
-  kflags: ctypes._Pointer[ctypes.c_uint32]
-  kdropped: ctypes._Pointer[ctypes.c_uint32]
-  array: ctypes._Pointer[ctypes.c_uint32]
-  sqes: ctypes._Pointer[struct_io_uring_sqe]
+  khead: c.POINTER[ctypes.c_uint32]
+  ktail: c.POINTER[ctypes.c_uint32]
+  kring_mask: c.POINTER[ctypes.c_uint32]
+  kring_entries: c.POINTER[ctypes.c_uint32]
+  kflags: c.POINTER[ctypes.c_uint32]
+  kdropped: c.POINTER[ctypes.c_uint32]
+  array: c.POINTER[ctypes.c_uint32]
+  sqes: c.POINTER[struct_io_uring_sqe]
   sqe_head: int
   sqe_tail: int
   ring_sz: int
-  ring_ptr: int|None
+  ring_ptr: ctypes.c_void_p
   ring_mask: int
   ring_entries: int
   sqes_sz: int
@@ -63,43 +63,43 @@ class struct_io_uring_sqe(c.Struct):
   splice_fd_in: int
   file_index: int
   addr_len: int
-  __pad3: ctypes.Array[ctypes.c_uint16]
+  __pad3: c.Array[ctypes.c_uint16, Literal[1]]
   addr3: int
-  __pad2: ctypes.Array[ctypes.c_uint64]
-  cmd: ctypes.Array[ctypes.c_ubyte]
+  __pad2: c.Array[ctypes.c_uint64, Literal[1]]
+  cmd: c.Array[ctypes.c_ubyte, Literal[0]]
 __u8: TypeAlias = ctypes.c_ubyte
 __u16: TypeAlias = ctypes.c_uint16
 __s32: TypeAlias = ctypes.c_int32
 __u64: TypeAlias = ctypes.c_uint64
 __u32: TypeAlias = ctypes.c_uint32
 __kernel_rwf_t: TypeAlias = ctypes.c_int32
-struct_io_uring_sqe.register_fields([('opcode', ctypes.c_ubyte, 0), ('flags', ctypes.c_ubyte, 1), ('ioprio', ctypes.c_uint16, 2), ('fd', ctypes.c_int32, 4), ('off', ctypes.c_uint64, 8), ('addr2', ctypes.c_uint64, 8), ('cmd_op', ctypes.c_uint32, 8), ('__pad1', ctypes.c_uint32, 12), ('addr', ctypes.c_uint64, 16), ('splice_off_in', ctypes.c_uint64, 16), ('len', ctypes.c_uint32, 24), ('rw_flags', ctypes.c_int32, 28), ('fsync_flags', ctypes.c_uint32, 28), ('poll_events', ctypes.c_uint16, 28), ('poll32_events', ctypes.c_uint32, 28), ('sync_range_flags', ctypes.c_uint32, 28), ('msg_flags', ctypes.c_uint32, 28), ('timeout_flags', ctypes.c_uint32, 28), ('accept_flags', ctypes.c_uint32, 28), ('cancel_flags', ctypes.c_uint32, 28), ('open_flags', ctypes.c_uint32, 28), ('statx_flags', ctypes.c_uint32, 28), ('fadvise_advice', ctypes.c_uint32, 28), ('splice_flags', ctypes.c_uint32, 28), ('rename_flags', ctypes.c_uint32, 28), ('unlink_flags', ctypes.c_uint32, 28), ('hardlink_flags', ctypes.c_uint32, 28), ('xattr_flags', ctypes.c_uint32, 28), ('msg_ring_flags', ctypes.c_uint32, 28), ('uring_cmd_flags', ctypes.c_uint32, 28), ('user_data', ctypes.c_uint64, 32), ('buf_index', ctypes.c_uint16, 40), ('buf_group', ctypes.c_uint16, 40), ('personality', ctypes.c_uint16, 42), ('splice_fd_in', ctypes.c_int32, 44), ('file_index', ctypes.c_uint32, 44), ('addr_len', ctypes.c_uint16, 44), ('__pad3', (ctypes.c_uint16 * 1), 46), ('addr3', ctypes.c_uint64, 48), ('__pad2', (ctypes.c_uint64 * 1), 56), ('cmd', (ctypes.c_ubyte * 0), 48)])
+struct_io_uring_sqe.register_fields([('opcode', ctypes.c_ubyte, 0), ('flags', ctypes.c_ubyte, 1), ('ioprio', ctypes.c_uint16, 2), ('fd', ctypes.c_int32, 4), ('off', ctypes.c_uint64, 8), ('addr2', ctypes.c_uint64, 8), ('cmd_op', ctypes.c_uint32, 8), ('__pad1', ctypes.c_uint32, 12), ('addr', ctypes.c_uint64, 16), ('splice_off_in', ctypes.c_uint64, 16), ('len', ctypes.c_uint32, 24), ('rw_flags', ctypes.c_int32, 28), ('fsync_flags', ctypes.c_uint32, 28), ('poll_events', ctypes.c_uint16, 28), ('poll32_events', ctypes.c_uint32, 28), ('sync_range_flags', ctypes.c_uint32, 28), ('msg_flags', ctypes.c_uint32, 28), ('timeout_flags', ctypes.c_uint32, 28), ('accept_flags', ctypes.c_uint32, 28), ('cancel_flags', ctypes.c_uint32, 28), ('open_flags', ctypes.c_uint32, 28), ('statx_flags', ctypes.c_uint32, 28), ('fadvise_advice', ctypes.c_uint32, 28), ('splice_flags', ctypes.c_uint32, 28), ('rename_flags', ctypes.c_uint32, 28), ('unlink_flags', ctypes.c_uint32, 28), ('hardlink_flags', ctypes.c_uint32, 28), ('xattr_flags', ctypes.c_uint32, 28), ('msg_ring_flags', ctypes.c_uint32, 28), ('uring_cmd_flags', ctypes.c_uint32, 28), ('user_data', ctypes.c_uint64, 32), ('buf_index', ctypes.c_uint16, 40), ('buf_group', ctypes.c_uint16, 40), ('personality', ctypes.c_uint16, 42), ('splice_fd_in', ctypes.c_int32, 44), ('file_index', ctypes.c_uint32, 44), ('addr_len', ctypes.c_uint16, 44), ('__pad3', c.Array[ctypes.c_uint16, Literal[1]], 46), ('addr3', ctypes.c_uint64, 48), ('__pad2', c.Array[ctypes.c_uint64, Literal[1]], 56), ('cmd', c.Array[ctypes.c_ubyte, Literal[0]], 48)])
 size_t: TypeAlias = ctypes.c_uint64
-struct_io_uring_sq.register_fields([('khead', ctypes.POINTER(ctypes.c_uint32), 0), ('ktail', ctypes.POINTER(ctypes.c_uint32), 8), ('kring_mask', ctypes.POINTER(ctypes.c_uint32), 16), ('kring_entries', ctypes.POINTER(ctypes.c_uint32), 24), ('kflags', ctypes.POINTER(ctypes.c_uint32), 32), ('kdropped', ctypes.POINTER(ctypes.c_uint32), 40), ('array', ctypes.POINTER(ctypes.c_uint32), 48), ('sqes', ctypes.POINTER(struct_io_uring_sqe), 56), ('sqe_head', ctypes.c_uint32, 64), ('sqe_tail', ctypes.c_uint32, 68), ('ring_sz', size_t, 72), ('ring_ptr', ctypes.c_void_p, 80), ('ring_mask', ctypes.c_uint32, 88), ('ring_entries', ctypes.c_uint32, 92), ('sqes_sz', ctypes.c_uint32, 96), ('pad', ctypes.c_uint32, 100)])
+struct_io_uring_sq.register_fields([('khead', c.POINTER[ctypes.c_uint32], 0), ('ktail', c.POINTER[ctypes.c_uint32], 8), ('kring_mask', c.POINTER[ctypes.c_uint32], 16), ('kring_entries', c.POINTER[ctypes.c_uint32], 24), ('kflags', c.POINTER[ctypes.c_uint32], 32), ('kdropped', c.POINTER[ctypes.c_uint32], 40), ('array', c.POINTER[ctypes.c_uint32], 48), ('sqes', c.POINTER[struct_io_uring_sqe], 56), ('sqe_head', ctypes.c_uint32, 64), ('sqe_tail', ctypes.c_uint32, 68), ('ring_sz', size_t, 72), ('ring_ptr', ctypes.c_void_p, 80), ('ring_mask', ctypes.c_uint32, 88), ('ring_entries', ctypes.c_uint32, 92), ('sqes_sz', ctypes.c_uint32, 96), ('pad', ctypes.c_uint32, 100)])
 @c.record
 class struct_io_uring_cq(c.Struct):
   SIZE = 88
-  khead: ctypes._Pointer[ctypes.c_uint32]
-  ktail: ctypes._Pointer[ctypes.c_uint32]
-  kring_mask: ctypes._Pointer[ctypes.c_uint32]
-  kring_entries: ctypes._Pointer[ctypes.c_uint32]
-  kflags: ctypes._Pointer[ctypes.c_uint32]
-  koverflow: ctypes._Pointer[ctypes.c_uint32]
-  cqes: ctypes._Pointer[struct_io_uring_cqe]
+  khead: c.POINTER[ctypes.c_uint32]
+  ktail: c.POINTER[ctypes.c_uint32]
+  kring_mask: c.POINTER[ctypes.c_uint32]
+  kring_entries: c.POINTER[ctypes.c_uint32]
+  kflags: c.POINTER[ctypes.c_uint32]
+  koverflow: c.POINTER[ctypes.c_uint32]
+  cqes: c.POINTER[struct_io_uring_cqe]
   ring_sz: int
-  ring_ptr: int|None
+  ring_ptr: ctypes.c_void_p
   ring_mask: int
   ring_entries: int
-  pad: ctypes.Array[ctypes.c_uint32]
+  pad: c.Array[ctypes.c_uint32, Literal[2]]
 @c.record
 class struct_io_uring_cqe(c.Struct):
   SIZE = 16
   user_data: int
   res: int
   flags: int
-  big_cqe: ctypes.Array[ctypes.c_uint64]
-struct_io_uring_cqe.register_fields([('user_data', ctypes.c_uint64, 0), ('res', ctypes.c_int32, 8), ('flags', ctypes.c_uint32, 12), ('big_cqe', (ctypes.c_uint64 * 0), 16)])
-struct_io_uring_cq.register_fields([('khead', ctypes.POINTER(ctypes.c_uint32), 0), ('ktail', ctypes.POINTER(ctypes.c_uint32), 8), ('kring_mask', ctypes.POINTER(ctypes.c_uint32), 16), ('kring_entries', ctypes.POINTER(ctypes.c_uint32), 24), ('kflags', ctypes.POINTER(ctypes.c_uint32), 32), ('koverflow', ctypes.POINTER(ctypes.c_uint32), 40), ('cqes', ctypes.POINTER(struct_io_uring_cqe), 48), ('ring_sz', size_t, 56), ('ring_ptr', ctypes.c_void_p, 64), ('ring_mask', ctypes.c_uint32, 72), ('ring_entries', ctypes.c_uint32, 76), ('pad', (ctypes.c_uint32 * 2), 80)])
+  big_cqe: c.Array[ctypes.c_uint64, Literal[0]]
+struct_io_uring_cqe.register_fields([('user_data', ctypes.c_uint64, 0), ('res', ctypes.c_int32, 8), ('flags', ctypes.c_uint32, 12), ('big_cqe', c.Array[ctypes.c_uint64, Literal[0]], 16)])
+struct_io_uring_cq.register_fields([('khead', c.POINTER[ctypes.c_uint32], 0), ('ktail', c.POINTER[ctypes.c_uint32], 8), ('kring_mask', c.POINTER[ctypes.c_uint32], 16), ('kring_entries', c.POINTER[ctypes.c_uint32], 24), ('kflags', c.POINTER[ctypes.c_uint32], 32), ('koverflow', c.POINTER[ctypes.c_uint32], 40), ('cqes', c.POINTER[struct_io_uring_cqe], 48), ('ring_sz', size_t, 56), ('ring_ptr', ctypes.c_void_p, 64), ('ring_mask', ctypes.c_uint32, 72), ('ring_entries', ctypes.c_uint32, 76), ('pad', c.Array[ctypes.c_uint32, Literal[2]], 80)])
 @c.record
 class struct_io_uring(c.Struct):
   SIZE = 216
@@ -110,34 +110,34 @@ class struct_io_uring(c.Struct):
   features: int
   enter_ring_fd: int
   int_flags: int
-  pad: ctypes.Array[ctypes.c_ubyte]
+  pad: c.Array[ctypes.c_ubyte, Literal[3]]
   pad2: int
-struct_io_uring.register_fields([('sq', struct_io_uring_sq, 0), ('cq', struct_io_uring_cq, 104), ('flags', ctypes.c_uint32, 192), ('ring_fd', ctypes.c_int32, 196), ('features', ctypes.c_uint32, 200), ('enter_ring_fd', ctypes.c_int32, 204), ('int_flags', ctypes.c_ubyte, 208), ('pad', (ctypes.c_ubyte * 3), 209), ('pad2', ctypes.c_uint32, 212)])
+struct_io_uring.register_fields([('sq', struct_io_uring_sq, 0), ('cq', struct_io_uring_cq, 104), ('flags', ctypes.c_uint32, 192), ('ring_fd', ctypes.c_int32, 196), ('features', ctypes.c_uint32, 200), ('enter_ring_fd', ctypes.c_int32, 204), ('int_flags', ctypes.c_ubyte, 208), ('pad', c.Array[ctypes.c_ubyte, Literal[3]], 209), ('pad2', ctypes.c_uint32, 212)])
 @c.record
 class struct_io_uring_zcrx_rq(c.Struct):
   SIZE = 40
-  khead: ctypes._Pointer[ctypes.c_uint32]
-  ktail: ctypes._Pointer[ctypes.c_uint32]
+  khead: c.POINTER[ctypes.c_uint32]
+  ktail: c.POINTER[ctypes.c_uint32]
   rq_tail: int
   ring_entries: int
-  rqes: ctypes._Pointer[struct_io_uring_zcrx_rqe]
-  ring_ptr: int|None
+  rqes: c.POINTER[struct_io_uring_zcrx_rqe]
+  ring_ptr: ctypes.c_void_p
 @c.record
 class struct_io_uring_zcrx_rqe(c.Struct):
   SIZE = 16
   off: int
   len: int
   __pad: int
-struct_io_uring_zcrx_rq.register_fields([('khead', ctypes.POINTER(ctypes.c_uint32), 0), ('ktail', ctypes.POINTER(ctypes.c_uint32), 8), ('rq_tail', ctypes.c_uint32, 16), ('ring_entries', ctypes.c_uint32, 20), ('rqes', ctypes.POINTER(struct_io_uring_zcrx_rqe), 24), ('ring_ptr', ctypes.c_void_p, 32)])
+struct_io_uring_zcrx_rq.register_fields([('khead', c.POINTER[ctypes.c_uint32], 0), ('ktail', c.POINTER[ctypes.c_uint32], 8), ('rq_tail', ctypes.c_uint32, 16), ('ring_entries', ctypes.c_uint32, 20), ('rqes', c.POINTER[struct_io_uring_zcrx_rqe], 24), ('ring_ptr', ctypes.c_void_p, 32)])
 @c.record
 class struct_io_uring_cqe_iter(c.Struct):
   SIZE = 24
-  cqes: ctypes._Pointer[struct_io_uring_cqe]
+  cqes: c.POINTER[struct_io_uring_cqe]
   mask: int
   shift: int
   head: int
   tail: int
-struct_io_uring_cqe_iter.register_fields([('cqes', ctypes.POINTER(struct_io_uring_cqe), 0), ('mask', ctypes.c_uint32, 8), ('shift', ctypes.c_uint32, 12), ('head', ctypes.c_uint32, 16), ('tail', ctypes.c_uint32, 20)])
+struct_io_uring_cqe_iter.register_fields([('cqes', c.POINTER[struct_io_uring_cqe], 0), ('mask', ctypes.c_uint32, 8), ('shift', ctypes.c_uint32, 12), ('head', ctypes.c_uint32, 16), ('tail', ctypes.c_uint32, 20)])
 class struct_epoll_event(c.Struct): pass
 class struct_statx(c.Struct): pass
 class struct_futex_waitv(c.Struct): pass
@@ -190,10 +190,10 @@ class struct_io_uring_params(c.Struct):
   sq_thread_idle: int
   features: int
   wq_fd: int
-  resv: ctypes.Array[ctypes.c_uint32]
+  resv: c.Array[ctypes.c_uint32, Literal[3]]
   sq_off: struct_io_sqring_offsets
   cq_off: struct_io_cqring_offsets
-struct_io_uring_params.register_fields([('sq_entries', ctypes.c_uint32, 0), ('cq_entries', ctypes.c_uint32, 4), ('flags', ctypes.c_uint32, 8), ('sq_thread_cpu', ctypes.c_uint32, 12), ('sq_thread_idle', ctypes.c_uint32, 16), ('features', ctypes.c_uint32, 20), ('wq_fd', ctypes.c_uint32, 24), ('resv', (ctypes.c_uint32 * 3), 28), ('sq_off', struct_io_sqring_offsets, 40), ('cq_off', struct_io_cqring_offsets, 80)])
+struct_io_uring_params.register_fields([('sq_entries', ctypes.c_uint32, 0), ('cq_entries', ctypes.c_uint32, 4), ('flags', ctypes.c_uint32, 8), ('sq_thread_cpu', ctypes.c_uint32, 12), ('sq_thread_idle', ctypes.c_uint32, 16), ('features', ctypes.c_uint32, 20), ('wq_fd', ctypes.c_uint32, 24), ('resv', c.Array[ctypes.c_uint32, Literal[3]], 28), ('sq_off', struct_io_sqring_offsets, 40), ('cq_off', struct_io_cqring_offsets, 80)])
 enum_io_uring_register_op: dict[int, str] = {(IORING_REGISTER_BUFFERS:=0): 'IORING_REGISTER_BUFFERS', (IORING_UNREGISTER_BUFFERS:=1): 'IORING_UNREGISTER_BUFFERS', (IORING_REGISTER_FILES:=2): 'IORING_REGISTER_FILES', (IORING_UNREGISTER_FILES:=3): 'IORING_UNREGISTER_FILES', (IORING_REGISTER_EVENTFD:=4): 'IORING_REGISTER_EVENTFD', (IORING_UNREGISTER_EVENTFD:=5): 'IORING_UNREGISTER_EVENTFD', (IORING_REGISTER_FILES_UPDATE:=6): 'IORING_REGISTER_FILES_UPDATE', (IORING_REGISTER_EVENTFD_ASYNC:=7): 'IORING_REGISTER_EVENTFD_ASYNC', (IORING_REGISTER_PROBE:=8): 'IORING_REGISTER_PROBE', (IORING_REGISTER_PERSONALITY:=9): 'IORING_REGISTER_PERSONALITY', (IORING_UNREGISTER_PERSONALITY:=10): 'IORING_UNREGISTER_PERSONALITY', (IORING_REGISTER_RESTRICTIONS:=11): 'IORING_REGISTER_RESTRICTIONS', (IORING_REGISTER_ENABLE_RINGS:=12): 'IORING_REGISTER_ENABLE_RINGS', (IORING_REGISTER_FILES2:=13): 'IORING_REGISTER_FILES2', (IORING_REGISTER_FILES_UPDATE2:=14): 'IORING_REGISTER_FILES_UPDATE2', (IORING_REGISTER_BUFFERS2:=15): 'IORING_REGISTER_BUFFERS2', (IORING_REGISTER_BUFFERS_UPDATE:=16): 'IORING_REGISTER_BUFFERS_UPDATE', (IORING_REGISTER_IOWQ_AFF:=17): 'IORING_REGISTER_IOWQ_AFF', (IORING_UNREGISTER_IOWQ_AFF:=18): 'IORING_UNREGISTER_IOWQ_AFF', (IORING_REGISTER_IOWQ_MAX_WORKERS:=19): 'IORING_REGISTER_IOWQ_MAX_WORKERS', (IORING_REGISTER_RING_FDS:=20): 'IORING_REGISTER_RING_FDS', (IORING_UNREGISTER_RING_FDS:=21): 'IORING_UNREGISTER_RING_FDS', (IORING_REGISTER_PBUF_RING:=22): 'IORING_REGISTER_PBUF_RING', (IORING_UNREGISTER_PBUF_RING:=23): 'IORING_UNREGISTER_PBUF_RING', (IORING_REGISTER_SYNC_CANCEL:=24): 'IORING_REGISTER_SYNC_CANCEL', (IORING_REGISTER_FILE_ALLOC_RANGE:=25): 'IORING_REGISTER_FILE_ALLOC_RANGE', (IORING_REGISTER_PBUF_STATUS:=26): 'IORING_REGISTER_PBUF_STATUS', (IORING_REGISTER_NAPI:=27): 'IORING_REGISTER_NAPI', (IORING_UNREGISTER_NAPI:=28): 'IORING_UNREGISTER_NAPI', (IORING_REGISTER_CLOCK:=29): 'IORING_REGISTER_CLOCK', (IORING_REGISTER_CLONE_BUFFERS:=30): 'IORING_REGISTER_CLONE_BUFFERS', (IORING_REGISTER_SEND_MSG_RING:=31): 'IORING_REGISTER_SEND_MSG_RING', (IORING_REGISTER_ZCRX_IFQ:=32): 'IORING_REGISTER_ZCRX_IFQ', (IORING_REGISTER_RESIZE_RINGS:=33): 'IORING_REGISTER_RESIZE_RINGS', (IORING_REGISTER_MEM_REGION:=34): 'IORING_REGISTER_MEM_REGION', (IORING_REGISTER_QUERY:=35): 'IORING_REGISTER_QUERY', (IORING_REGISTER_LAST:=36): 'IORING_REGISTER_LAST', (IORING_REGISTER_USE_REGISTERED_RING:=2147483648): 'IORING_REGISTER_USE_REGISTERED_RING'}
 enum_io_wq_type: dict[int, str] = {(IO_WQ_BOUND:=0): 'IO_WQ_BOUND', (IO_WQ_UNBOUND:=1): 'IO_WQ_UNBOUND'}
 @c.record
@@ -212,16 +212,16 @@ class struct_io_uring_region_desc(c.Struct):
   flags: int
   id: int
   mmap_offset: int
-  __resv: ctypes.Array[ctypes.c_uint64]
-struct_io_uring_region_desc.register_fields([('user_addr', ctypes.c_uint64, 0), ('size', ctypes.c_uint64, 8), ('flags', ctypes.c_uint32, 16), ('id', ctypes.c_uint32, 20), ('mmap_offset', ctypes.c_uint64, 24), ('__resv', (ctypes.c_uint64 * 4), 32)])
+  __resv: c.Array[ctypes.c_uint64, Literal[4]]
+struct_io_uring_region_desc.register_fields([('user_addr', ctypes.c_uint64, 0), ('size', ctypes.c_uint64, 8), ('flags', ctypes.c_uint32, 16), ('id', ctypes.c_uint32, 20), ('mmap_offset', ctypes.c_uint64, 24), ('__resv', c.Array[ctypes.c_uint64, Literal[4]], 32)])
 _anonenum1: dict[int, str] = {(IORING_MEM_REGION_REG_WAIT_ARG:=1): 'IORING_MEM_REGION_REG_WAIT_ARG'}
 @c.record
 class struct_io_uring_mem_region_reg(c.Struct):
   SIZE = 32
   region_uptr: int
   flags: int
-  __resv: ctypes.Array[ctypes.c_uint64]
-struct_io_uring_mem_region_reg.register_fields([('region_uptr', ctypes.c_uint64, 0), ('flags', ctypes.c_uint64, 8), ('__resv', (ctypes.c_uint64 * 2), 16)])
+  __resv: c.Array[ctypes.c_uint64, Literal[2]]
+struct_io_uring_mem_region_reg.register_fields([('region_uptr', ctypes.c_uint64, 0), ('flags', ctypes.c_uint64, 8), ('__resv', c.Array[ctypes.c_uint64, Literal[2]], 16)])
 @c.record
 class struct_io_uring_rsrc_register(c.Struct):
   SIZE = 32
@@ -262,9 +262,9 @@ class struct_io_uring_probe(c.Struct):
   last_op: int
   ops_len: int
   resv: int
-  resv2: ctypes.Array[ctypes.c_uint32]
-  ops: ctypes.Array[struct_io_uring_probe_op]
-struct_io_uring_probe.register_fields([('last_op', ctypes.c_ubyte, 0), ('ops_len', ctypes.c_ubyte, 1), ('resv', ctypes.c_uint16, 2), ('resv2', (ctypes.c_uint32 * 3), 4), ('ops', (struct_io_uring_probe_op * 0), 16)])
+  resv2: c.Array[ctypes.c_uint32, Literal[3]]
+  ops: c.Array[struct_io_uring_probe_op, Literal[0]]
+struct_io_uring_probe.register_fields([('last_op', ctypes.c_ubyte, 0), ('ops_len', ctypes.c_ubyte, 1), ('resv', ctypes.c_uint16, 2), ('resv2', c.Array[ctypes.c_uint32, Literal[3]], 4), ('ops', c.Array[struct_io_uring_probe_op, Literal[0]], 16)])
 @c.record
 class struct_io_uring_restriction(c.Struct):
   SIZE = 16
@@ -273,14 +273,14 @@ class struct_io_uring_restriction(c.Struct):
   sqe_op: int
   sqe_flags: int
   resv: int
-  resv2: ctypes.Array[ctypes.c_uint32]
-struct_io_uring_restriction.register_fields([('opcode', ctypes.c_uint16, 0), ('register_op', ctypes.c_ubyte, 2), ('sqe_op', ctypes.c_ubyte, 2), ('sqe_flags', ctypes.c_ubyte, 2), ('resv', ctypes.c_ubyte, 3), ('resv2', (ctypes.c_uint32 * 3), 4)])
+  resv2: c.Array[ctypes.c_uint32, Literal[3]]
+struct_io_uring_restriction.register_fields([('opcode', ctypes.c_uint16, 0), ('register_op', ctypes.c_ubyte, 2), ('sqe_op', ctypes.c_ubyte, 2), ('sqe_flags', ctypes.c_ubyte, 2), ('resv', ctypes.c_ubyte, 3), ('resv2', c.Array[ctypes.c_uint32, Literal[3]], 4)])
 @c.record
 class struct_io_uring_clock_register(c.Struct):
   SIZE = 16
   clockid: int
-  __resv: ctypes.Array[ctypes.c_uint32]
-struct_io_uring_clock_register.register_fields([('clockid', ctypes.c_uint32, 0), ('__resv', (ctypes.c_uint32 * 3), 4)])
+  __resv: c.Array[ctypes.c_uint32, Literal[3]]
+struct_io_uring_clock_register.register_fields([('clockid', ctypes.c_uint32, 0), ('__resv', c.Array[ctypes.c_uint32, Literal[3]], 4)])
 _anonenum2: dict[int, str] = {(IORING_REGISTER_SRC_REGISTERED:=1): 'IORING_REGISTER_SRC_REGISTERED', (IORING_REGISTER_DST_REPLACE:=2): 'IORING_REGISTER_DST_REPLACE'}
 @c.record
 class struct_io_uring_clone_buffers(c.Struct):
@@ -290,8 +290,8 @@ class struct_io_uring_clone_buffers(c.Struct):
   src_off: int
   dst_off: int
   nr: int
-  pad: ctypes.Array[ctypes.c_uint32]
-struct_io_uring_clone_buffers.register_fields([('src_fd', ctypes.c_uint32, 0), ('flags', ctypes.c_uint32, 4), ('src_off', ctypes.c_uint32, 8), ('dst_off', ctypes.c_uint32, 12), ('nr', ctypes.c_uint32, 16), ('pad', (ctypes.c_uint32 * 3), 20)])
+  pad: c.Array[ctypes.c_uint32, Literal[3]]
+struct_io_uring_clone_buffers.register_fields([('src_fd', ctypes.c_uint32, 0), ('flags', ctypes.c_uint32, 4), ('src_off', ctypes.c_uint32, 8), ('dst_off', ctypes.c_uint32, 12), ('nr', ctypes.c_uint32, 16), ('pad', c.Array[ctypes.c_uint32, Literal[3]], 20)])
 @c.record
 class struct_io_uring_buf(c.Struct):
   SIZE = 16
@@ -308,9 +308,9 @@ class struct_io_uring_buf_ring(c.Struct):
   resv3: int
   tail: int
   __empty_bufs: struct_io_uring_buf_ring___empty_bufs
-  bufs: ctypes.Array[struct_io_uring_buf]
+  bufs: c.Array[struct_io_uring_buf, Literal[0]]
 class struct_io_uring_buf_ring___empty_bufs(c.Struct): pass
-struct_io_uring_buf_ring.register_fields([('resv1', ctypes.c_uint64, 0), ('resv2', ctypes.c_uint32, 8), ('resv3', ctypes.c_uint16, 12), ('tail', ctypes.c_uint16, 14), ('__empty_bufs', struct_io_uring_buf_ring___empty_bufs, 0), ('bufs', (struct_io_uring_buf * 0), 0)])
+struct_io_uring_buf_ring.register_fields([('resv1', ctypes.c_uint64, 0), ('resv2', ctypes.c_uint32, 8), ('resv3', ctypes.c_uint16, 12), ('tail', ctypes.c_uint16, 14), ('__empty_bufs', struct_io_uring_buf_ring___empty_bufs, 0), ('bufs', c.Array[struct_io_uring_buf, Literal[0]], 0)])
 enum_io_uring_register_pbuf_ring_flags: dict[int, str] = {(IOU_PBUF_RING_MMAP:=1): 'IOU_PBUF_RING_MMAP', (IOU_PBUF_RING_INC:=2): 'IOU_PBUF_RING_INC'}
 @c.record
 class struct_io_uring_buf_reg(c.Struct):
@@ -319,15 +319,15 @@ class struct_io_uring_buf_reg(c.Struct):
   ring_entries: int
   bgid: int
   flags: int
-  resv: ctypes.Array[ctypes.c_uint64]
-struct_io_uring_buf_reg.register_fields([('ring_addr', ctypes.c_uint64, 0), ('ring_entries', ctypes.c_uint32, 8), ('bgid', ctypes.c_uint16, 12), ('flags', ctypes.c_uint16, 14), ('resv', (ctypes.c_uint64 * 3), 16)])
+  resv: c.Array[ctypes.c_uint64, Literal[3]]
+struct_io_uring_buf_reg.register_fields([('ring_addr', ctypes.c_uint64, 0), ('ring_entries', ctypes.c_uint32, 8), ('bgid', ctypes.c_uint16, 12), ('flags', ctypes.c_uint16, 14), ('resv', c.Array[ctypes.c_uint64, Literal[3]], 16)])
 @c.record
 class struct_io_uring_buf_status(c.Struct):
   SIZE = 40
   buf_group: int
   head: int
-  resv: ctypes.Array[ctypes.c_uint32]
-struct_io_uring_buf_status.register_fields([('buf_group', ctypes.c_uint32, 0), ('head', ctypes.c_uint32, 4), ('resv', (ctypes.c_uint32 * 8), 8)])
+  resv: c.Array[ctypes.c_uint32, Literal[8]]
+struct_io_uring_buf_status.register_fields([('buf_group', ctypes.c_uint32, 0), ('head', ctypes.c_uint32, 4), ('resv', c.Array[ctypes.c_uint32, Literal[8]], 8)])
 enum_io_uring_napi_op: dict[int, str] = {(IO_URING_NAPI_REGISTER_OP:=0): 'IO_URING_NAPI_REGISTER_OP', (IO_URING_NAPI_STATIC_ADD_ID:=1): 'IO_URING_NAPI_STATIC_ADD_ID', (IO_URING_NAPI_STATIC_DEL_ID:=2): 'IO_URING_NAPI_STATIC_DEL_ID'}
 enum_io_uring_napi_tracking_strategy: dict[int, str] = {(IO_URING_NAPI_TRACKING_DYNAMIC:=0): 'IO_URING_NAPI_TRACKING_DYNAMIC', (IO_URING_NAPI_TRACKING_STATIC:=1): 'IO_URING_NAPI_TRACKING_STATIC', (IO_URING_NAPI_TRACKING_INACTIVE:=255): 'IO_URING_NAPI_TRACKING_INACTIVE'}
 @c.record
@@ -336,10 +336,10 @@ class struct_io_uring_napi(c.Struct):
   busy_poll_to: int
   prefer_busy_poll: int
   opcode: int
-  pad: ctypes.Array[ctypes.c_ubyte]
+  pad: c.Array[ctypes.c_ubyte, Literal[2]]
   op_param: int
   resv: int
-struct_io_uring_napi.register_fields([('busy_poll_to', ctypes.c_uint32, 0), ('prefer_busy_poll', ctypes.c_ubyte, 4), ('opcode', ctypes.c_ubyte, 5), ('pad', (ctypes.c_ubyte * 2), 6), ('op_param', ctypes.c_uint32, 8), ('resv', ctypes.c_uint32, 12)])
+struct_io_uring_napi.register_fields([('busy_poll_to', ctypes.c_uint32, 0), ('prefer_busy_poll', ctypes.c_ubyte, 4), ('opcode', ctypes.c_ubyte, 5), ('pad', c.Array[ctypes.c_ubyte, Literal[2]], 6), ('op_param', ctypes.c_uint32, 8), ('resv', ctypes.c_uint32, 12)])
 enum_io_uring_register_restriction_op: dict[int, str] = {(IORING_RESTRICTION_REGISTER_OP:=0): 'IORING_RESTRICTION_REGISTER_OP', (IORING_RESTRICTION_SQE_OP:=1): 'IORING_RESTRICTION_SQE_OP', (IORING_RESTRICTION_SQE_FLAGS_ALLOWED:=2): 'IORING_RESTRICTION_SQE_FLAGS_ALLOWED', (IORING_RESTRICTION_SQE_FLAGS_REQUIRED:=3): 'IORING_RESTRICTION_SQE_FLAGS_REQUIRED', (IORING_RESTRICTION_LAST:=4): 'IORING_RESTRICTION_LAST'}
 _anonenum3: dict[int, str] = {(IORING_REG_WAIT_TS:=1): 'IORING_REG_WAIT_TS'}
 @c.record
@@ -350,8 +350,8 @@ class struct_io_uring_reg_wait(c.Struct):
   flags: int
   sigmask: int
   sigmask_sz: int
-  pad: ctypes.Array[ctypes.c_uint32]
-  pad2: ctypes.Array[ctypes.c_uint64]
+  pad: c.Array[ctypes.c_uint32, Literal[3]]
+  pad2: c.Array[ctypes.c_uint64, Literal[2]]
 @c.record
 class struct___kernel_timespec(c.Struct):
   SIZE = 16
@@ -359,7 +359,7 @@ class struct___kernel_timespec(c.Struct):
   tv_nsec: int
 __kernel_time64_t: TypeAlias = ctypes.c_int64
 struct___kernel_timespec.register_fields([('tv_sec', ctypes.c_int64, 0), ('tv_nsec', ctypes.c_int64, 8)])
-struct_io_uring_reg_wait.register_fields([('ts', struct___kernel_timespec, 0), ('min_wait_usec', ctypes.c_uint32, 16), ('flags', ctypes.c_uint32, 20), ('sigmask', ctypes.c_uint64, 24), ('sigmask_sz', ctypes.c_uint32, 32), ('pad', (ctypes.c_uint32 * 3), 36), ('pad2', (ctypes.c_uint64 * 2), 48)])
+struct_io_uring_reg_wait.register_fields([('ts', struct___kernel_timespec, 0), ('min_wait_usec', ctypes.c_uint32, 16), ('flags', ctypes.c_uint32, 20), ('sigmask', ctypes.c_uint64, 24), ('sigmask_sz', ctypes.c_uint32, 32), ('pad', c.Array[ctypes.c_uint32, Literal[3]], 36), ('pad2', c.Array[ctypes.c_uint64, Literal[2]], 48)])
 @c.record
 class struct_io_uring_getevents_arg(c.Struct):
   SIZE = 24
@@ -376,9 +376,9 @@ class struct_io_uring_sync_cancel_reg(c.Struct):
   flags: int
   timeout: struct___kernel_timespec
   opcode: int
-  pad: ctypes.Array[ctypes.c_ubyte]
-  pad2: ctypes.Array[ctypes.c_uint64]
-struct_io_uring_sync_cancel_reg.register_fields([('addr', ctypes.c_uint64, 0), ('fd', ctypes.c_int32, 8), ('flags', ctypes.c_uint32, 12), ('timeout', struct___kernel_timespec, 16), ('opcode', ctypes.c_ubyte, 32), ('pad', (ctypes.c_ubyte * 7), 33), ('pad2', (ctypes.c_uint64 * 3), 40)])
+  pad: c.Array[ctypes.c_ubyte, Literal[7]]
+  pad2: c.Array[ctypes.c_uint64, Literal[3]]
+struct_io_uring_sync_cancel_reg.register_fields([('addr', ctypes.c_uint64, 0), ('fd', ctypes.c_int32, 8), ('flags', ctypes.c_uint32, 12), ('timeout', struct___kernel_timespec, 16), ('opcode', ctypes.c_ubyte, 32), ('pad', c.Array[ctypes.c_ubyte, Literal[7]], 33), ('pad2', c.Array[ctypes.c_uint64, Literal[3]], 40)])
 @c.record
 class struct_io_uring_file_index_range(c.Struct):
   SIZE = 16
@@ -415,8 +415,8 @@ class struct_io_uring_zcrx_offsets(c.Struct):
   tail: int
   rqes: int
   __resv2: int
-  __resv: ctypes.Array[ctypes.c_uint64]
-struct_io_uring_zcrx_offsets.register_fields([('head', ctypes.c_uint32, 0), ('tail', ctypes.c_uint32, 4), ('rqes', ctypes.c_uint32, 8), ('__resv2', ctypes.c_uint32, 12), ('__resv', (ctypes.c_uint64 * 2), 16)])
+  __resv: c.Array[ctypes.c_uint64, Literal[2]]
+struct_io_uring_zcrx_offsets.register_fields([('head', ctypes.c_uint32, 0), ('tail', ctypes.c_uint32, 4), ('rqes', ctypes.c_uint32, 8), ('__resv2', ctypes.c_uint32, 12), ('__resv', c.Array[ctypes.c_uint64, Literal[2]], 16)])
 enum_io_uring_zcrx_area_flags: dict[int, str] = {(IORING_ZCRX_AREA_DMABUF:=1): 'IORING_ZCRX_AREA_DMABUF'}
 @c.record
 class struct_io_uring_zcrx_area_reg(c.Struct):
@@ -426,8 +426,8 @@ class struct_io_uring_zcrx_area_reg(c.Struct):
   rq_area_token: int
   flags: int
   dmabuf_fd: int
-  __resv2: ctypes.Array[ctypes.c_uint64]
-struct_io_uring_zcrx_area_reg.register_fields([('addr', ctypes.c_uint64, 0), ('len', ctypes.c_uint64, 8), ('rq_area_token', ctypes.c_uint64, 16), ('flags', ctypes.c_uint32, 24), ('dmabuf_fd', ctypes.c_uint32, 28), ('__resv2', (ctypes.c_uint64 * 2), 32)])
+  __resv2: c.Array[ctypes.c_uint64, Literal[2]]
+struct_io_uring_zcrx_area_reg.register_fields([('addr', ctypes.c_uint64, 0), ('len', ctypes.c_uint64, 8), ('rq_area_token', ctypes.c_uint64, 16), ('flags', ctypes.c_uint32, 24), ('dmabuf_fd', ctypes.c_uint32, 28), ('__resv2', c.Array[ctypes.c_uint64, Literal[2]], 32)])
 @c.record
 class struct_io_uring_zcrx_ifq_reg(c.Struct):
   SIZE = 96
@@ -440,8 +440,8 @@ class struct_io_uring_zcrx_ifq_reg(c.Struct):
   offsets: struct_io_uring_zcrx_offsets
   zcrx_id: int
   __resv2: int
-  __resv: ctypes.Array[ctypes.c_uint64]
-struct_io_uring_zcrx_ifq_reg.register_fields([('if_idx', ctypes.c_uint32, 0), ('if_rxq', ctypes.c_uint32, 4), ('rq_entries', ctypes.c_uint32, 8), ('flags', ctypes.c_uint32, 12), ('area_ptr', ctypes.c_uint64, 16), ('region_ptr', ctypes.c_uint64, 24), ('offsets', struct_io_uring_zcrx_offsets, 32), ('zcrx_id', ctypes.c_uint32, 64), ('__resv2', ctypes.c_uint32, 68), ('__resv', (ctypes.c_uint64 * 3), 72)])
+  __resv: c.Array[ctypes.c_uint64, Literal[3]]
+struct_io_uring_zcrx_ifq_reg.register_fields([('if_idx', ctypes.c_uint32, 0), ('if_rxq', ctypes.c_uint32, 4), ('rq_entries', ctypes.c_uint32, 8), ('flags', ctypes.c_uint32, 12), ('area_ptr', ctypes.c_uint64, 16), ('region_ptr', ctypes.c_uint64, 24), ('offsets', struct_io_uring_zcrx_offsets, 32), ('zcrx_id', ctypes.c_uint32, 64), ('__resv2', ctypes.c_uint32, 68), ('__resv', c.Array[ctypes.c_uint64, Literal[3]], 72)])
 uring_unlikely = lambda cond: __builtin_expect( not  not (cond), 0) # type: ignore
 uring_likely = lambda cond: __builtin_expect( not  not (cond), 1) # type: ignore
 NR_io_uring_setup = 425 # type: ignore

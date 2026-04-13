@@ -42,7 +42,7 @@ class struct_ion_flush_data(c.Struct):
   SIZE = 24
   handle: int
   fd: int
-  vaddr: int|None
+  vaddr: ctypes.c_void_p
   offset: int
   length: int
 struct_ion_flush_data.register_fields([('handle', ion_user_handle_t, 0), ('fd', ctypes.c_int32, 4), ('vaddr', ctypes.c_void_p, 8), ('offset', ctypes.c_uint32, 16), ('length', ctypes.c_uint32, 20)])
@@ -50,17 +50,17 @@ struct_ion_flush_data.register_fields([('handle', ion_user_handle_t, 0), ('fd', 
 class struct_ion_prefetch_regions(c.Struct):
   SIZE = 24
   vmid: int
-  sizes: ctypes._Pointer[ctypes.c_uint64]
+  sizes: c.POINTER[ctypes.c_uint64]
   nr_sizes: int
-struct_ion_prefetch_regions.register_fields([('vmid', ctypes.c_uint32, 0), ('sizes', ctypes.POINTER(size_t), 8), ('nr_sizes', ctypes.c_uint32, 16)])
+struct_ion_prefetch_regions.register_fields([('vmid', ctypes.c_uint32, 0), ('sizes', c.POINTER[size_t], 8), ('nr_sizes', ctypes.c_uint32, 16)])
 @c.record
 class struct_ion_prefetch_data(c.Struct):
   SIZE = 32
   heap_id: int
   len: int
-  regions: ctypes._Pointer[struct_ion_prefetch_regions]
+  regions: c.POINTER[struct_ion_prefetch_regions]
   nr_regions: int
-struct_ion_prefetch_data.register_fields([('heap_id', ctypes.c_int32, 0), ('len', ctypes.c_uint64, 8), ('regions', ctypes.POINTER(struct_ion_prefetch_regions), 16), ('nr_regions', ctypes.c_uint32, 24)])
+struct_ion_prefetch_data.register_fields([('heap_id', ctypes.c_int32, 0), ('len', ctypes.c_uint64, 8), ('regions', c.POINTER[struct_ion_prefetch_regions], 16), ('nr_regions', ctypes.c_uint32, 24)])
 @c.record
 class struct_remote_buf64(c.Struct):
   SIZE = 16
@@ -86,7 +86,7 @@ union_remote_arg64.register_fields([('buf', struct_remote_buf64, 0), ('dma', str
 @c.record
 class struct_remote_buf(c.Struct):
   SIZE = 16
-  pv: int|None
+  pv: ctypes.c_void_p
   len: int
 struct_remote_buf.register_fields([('pv', ctypes.c_void_p, 0), ('len', size_t, 8)])
 @c.record
@@ -107,29 +107,29 @@ class struct_fastrpc_ioctl_invoke(c.Struct):
   SIZE = 16
   handle: int
   sc: int
-  pra: ctypes._Pointer[union_remote_arg]
-struct_fastrpc_ioctl_invoke.register_fields([('handle', uint32_t, 0), ('sc', uint32_t, 4), ('pra', ctypes.POINTER(union_remote_arg), 8)])
+  pra: c.POINTER[union_remote_arg]
+struct_fastrpc_ioctl_invoke.register_fields([('handle', uint32_t, 0), ('sc', uint32_t, 4), ('pra', c.POINTER[union_remote_arg], 8)])
 @c.record
 class struct_fastrpc_ioctl_invoke_fd(c.Struct):
   SIZE = 24
   inv: struct_fastrpc_ioctl_invoke
-  fds: ctypes._Pointer[ctypes.c_int32]
-struct_fastrpc_ioctl_invoke_fd.register_fields([('inv', struct_fastrpc_ioctl_invoke, 0), ('fds', ctypes.POINTER(ctypes.c_int32), 16)])
+  fds: c.POINTER[ctypes.c_int32]
+struct_fastrpc_ioctl_invoke_fd.register_fields([('inv', struct_fastrpc_ioctl_invoke, 0), ('fds', c.POINTER[ctypes.c_int32], 16)])
 @c.record
 class struct_fastrpc_ioctl_invoke_attrs(c.Struct):
   SIZE = 32
   inv: struct_fastrpc_ioctl_invoke
-  fds: ctypes._Pointer[ctypes.c_int32]
-  attrs: ctypes._Pointer[ctypes.c_uint32]
-struct_fastrpc_ioctl_invoke_attrs.register_fields([('inv', struct_fastrpc_ioctl_invoke, 0), ('fds', ctypes.POINTER(ctypes.c_int32), 16), ('attrs', ctypes.POINTER(ctypes.c_uint32), 24)])
+  fds: c.POINTER[ctypes.c_int32]
+  attrs: c.POINTER[ctypes.c_uint32]
+struct_fastrpc_ioctl_invoke_attrs.register_fields([('inv', struct_fastrpc_ioctl_invoke, 0), ('fds', c.POINTER[ctypes.c_int32], 16), ('attrs', c.POINTER[ctypes.c_uint32], 24)])
 @c.record
 class struct_fastrpc_ioctl_invoke_crc(c.Struct):
   SIZE = 40
   inv: struct_fastrpc_ioctl_invoke
-  fds: ctypes._Pointer[ctypes.c_int32]
-  attrs: ctypes._Pointer[ctypes.c_uint32]
-  crc: ctypes._Pointer[ctypes.c_uint32]
-struct_fastrpc_ioctl_invoke_crc.register_fields([('inv', struct_fastrpc_ioctl_invoke, 0), ('fds', ctypes.POINTER(ctypes.c_int32), 16), ('attrs', ctypes.POINTER(ctypes.c_uint32), 24), ('crc', ctypes.POINTER(ctypes.c_uint32), 32)])
+  fds: c.POINTER[ctypes.c_int32]
+  attrs: c.POINTER[ctypes.c_uint32]
+  crc: c.POINTER[ctypes.c_uint32]
+struct_fastrpc_ioctl_invoke_crc.register_fields([('inv', struct_fastrpc_ioctl_invoke, 0), ('fds', c.POINTER[ctypes.c_int32], 16), ('attrs', c.POINTER[ctypes.c_uint32], 24), ('crc', c.POINTER[ctypes.c_uint32], 32)])
 @c.record
 class struct_fastrpc_ioctl_init(c.Struct):
   SIZE = 40
@@ -264,7 +264,7 @@ fastrpc_async_jobid: TypeAlias = ctypes.c_uint64
 @c.record
 class remote_buf(c.Struct):
   SIZE = 16
-  pv: int|None
+  pv: ctypes.c_void_p
   nLen: int
 remote_buf.register_fields([('pv', ctypes.c_void_p, 0), ('nLen', size_t, 8)])
 @c.record
@@ -285,9 +285,9 @@ enum_fastrpc_async_notify_type: dict[int, str] = {(FASTRPC_ASYNC_NO_SYNC:=0): 'F
 @c.record
 class struct_fastrpc_async_callback(c.Struct):
   SIZE = 16
-  fn: ctypes._CFunctionType
-  context: int|None
-struct_fastrpc_async_callback.register_fields([('fn', ctypes.CFUNCTYPE(None, fastrpc_async_jobid, ctypes.c_void_p, ctypes.c_int32), 0), ('context', ctypes.c_void_p, 8)])
+  fn: c.CFUNCTYPE[None, [ctypes.c_uint64, ctypes.c_void_p, ctypes.c_int32]]
+  context: ctypes.c_void_p
+struct_fastrpc_async_callback.register_fields([('fn', c.CFUNCTYPE[None, [fastrpc_async_jobid, ctypes.c_void_p, ctypes.c_int32]], 0), ('context', ctypes.c_void_p, 8)])
 fastrpc_async_callback_t: TypeAlias = struct_fastrpc_async_callback
 @c.record
 class struct_fastrpc_async_descriptor(c.Struct):
@@ -372,13 +372,13 @@ struct_remote_process_type.register_fields([('domain', ctypes.c_int32, 0), ('pro
 remote_rpc_process_exception: TypeAlias = struct_remote_rpc_process_clean_params
 enum_remote_rpc_status_flags: dict[int, str] = {(FASTRPC_USER_PD_UP:=0): 'FASTRPC_USER_PD_UP', (FASTRPC_USER_PD_EXIT:=1): 'FASTRPC_USER_PD_EXIT', (FASTRPC_USER_PD_FORCE_KILL:=2): 'FASTRPC_USER_PD_FORCE_KILL', (FASTRPC_USER_PD_EXCEPTION:=3): 'FASTRPC_USER_PD_EXCEPTION', (FASTRPC_DSP_SSR:=4): 'FASTRPC_DSP_SSR'}
 remote_rpc_status_flags_t: TypeAlias = ctypes.c_uint32
-fastrpc_notif_fn_t: TypeAlias = ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.c_void_p, ctypes.c_int32, ctypes.c_int32, ctypes.c_uint32)
+fastrpc_notif_fn_t: TypeAlias = c.CFUNCTYPE[ctypes.c_int32, [ctypes.c_void_p, ctypes.c_int32, ctypes.c_int32, ctypes.c_uint32]]
 @c.record
 class struct_remote_rpc_notif_register(c.Struct):
   SIZE = 24
-  context: int|None
+  context: ctypes.c_void_p
   domain: int
-  notifier_fn: ctypes._CFunctionType
+  notifier_fn: c.CFUNCTYPE[ctypes.c_int32, [ctypes.c_void_p, ctypes.c_int32, ctypes.c_int32, ctypes.c_uint32]]
 struct_remote_rpc_notif_register.register_fields([('context', ctypes.c_void_p, 0), ('domain', ctypes.c_int32, 8), ('notifier_fn', fastrpc_notif_fn_t, 16)])
 remote_rpc_notif_register_t: TypeAlias = struct_remote_rpc_notif_register
 enum_remote_mem_map_flags: dict[int, str] = {(REMOTE_MAP_MEM_STATIC:=0): 'REMOTE_MAP_MEM_STATIC', (REMOTE_MAP_MAX_FLAG:=1): 'REMOTE_MAP_MAX_FLAG'}
@@ -387,9 +387,9 @@ enum_fastrpc_map_flags: dict[int, str] = {(FASTRPC_MAP_STATIC:=0): 'FASTRPC_MAP_
 @c.record
 class struct__cstring1_s(c.Struct):
   SIZE = 16
-  data: ctypes._Pointer[ctypes.c_char]
+  data: c.POINTER[ctypes.c_char]
   dataLen: int
-struct__cstring1_s.register_fields([('data', ctypes.POINTER(ctypes.c_char), 0), ('dataLen', ctypes.c_int32, 8)])
+struct__cstring1_s.register_fields([('data', c.POINTER[ctypes.c_char], 0), ('dataLen', ctypes.c_int32, 8)])
 _cstring1_t: TypeAlias = struct__cstring1_s
 apps_std_FILE: TypeAlias = ctypes.c_int32
 enum_apps_std_SEEK: dict[int, str] = {(APPS_STD_SEEK_SET:=0): 'APPS_STD_SEEK_SET', (APPS_STD_SEEK_CUR:=1): 'APPS_STD_SEEK_CUR', (APPS_STD_SEEK_END:=2): 'APPS_STD_SEEK_END', (_32BIT_PLACEHOLDER_apps_std_SEEK:=2147483647): '_32BIT_PLACEHOLDER_apps_std_SEEK'}
@@ -405,8 +405,8 @@ apps_std_DIR: TypeAlias = struct_apps_std_DIR
 class struct_apps_std_DIRENT(c.Struct):
   SIZE = 260
   ino: int
-  name: ctypes.Array[ctypes.c_char]
-struct_apps_std_DIRENT.register_fields([('ino', ctypes.c_int32, 0), ('name', (ctypes.c_char * 255), 4)])
+  name: c.Array[ctypes.c_char, Literal[255]]
+struct_apps_std_DIRENT.register_fields([('ino', ctypes.c_int32, 0), ('name', c.Array[ctypes.c_char, Literal[255]], 4)])
 apps_std_DIRENT: TypeAlias = struct_apps_std_DIRENT
 @c.record
 class struct_apps_std_STAT(c.Struct):

@@ -32,28 +32,28 @@ class MetricsTableV0_t(c.Struct):
   GfxclkFrequencyLimit: int
   FclkFrequency: int
   UclkFrequency: int
-  SocclkFrequency: ctypes.Array[ctypes.c_uint32]
-  VclkFrequency: ctypes.Array[ctypes.c_uint32]
-  DclkFrequency: ctypes.Array[ctypes.c_uint32]
-  LclkFrequency: ctypes.Array[ctypes.c_uint32]
-  GfxclkFrequencyAcc: ctypes.Array[ctypes.c_uint64]
-  CclkFrequencyAcc: ctypes.Array[ctypes.c_uint64]
+  SocclkFrequency: c.Array[ctypes.c_uint32, Literal[4]]
+  VclkFrequency: c.Array[ctypes.c_uint32, Literal[4]]
+  DclkFrequency: c.Array[ctypes.c_uint32, Literal[4]]
+  LclkFrequency: c.Array[ctypes.c_uint32, Literal[4]]
+  GfxclkFrequencyAcc: c.Array[ctypes.c_uint64, Literal[8]]
+  CclkFrequencyAcc: c.Array[ctypes.c_uint64, Literal[96]]
   MaxCclkFrequency: int
   MinCclkFrequency: int
   MaxGfxclkFrequency: int
   MinGfxclkFrequency: int
-  FclkFrequencyTable: ctypes.Array[ctypes.c_uint32]
-  UclkFrequencyTable: ctypes.Array[ctypes.c_uint32]
-  SocclkFrequencyTable: ctypes.Array[ctypes.c_uint32]
-  VclkFrequencyTable: ctypes.Array[ctypes.c_uint32]
-  DclkFrequencyTable: ctypes.Array[ctypes.c_uint32]
-  LclkFrequencyTable: ctypes.Array[ctypes.c_uint32]
+  FclkFrequencyTable: c.Array[ctypes.c_uint32, Literal[4]]
+  UclkFrequencyTable: c.Array[ctypes.c_uint32, Literal[4]]
+  SocclkFrequencyTable: c.Array[ctypes.c_uint32, Literal[4]]
+  VclkFrequencyTable: c.Array[ctypes.c_uint32, Literal[4]]
+  DclkFrequencyTable: c.Array[ctypes.c_uint32, Literal[4]]
+  LclkFrequencyTable: c.Array[ctypes.c_uint32, Literal[4]]
   MaxLclkDpmRange: int
   MinLclkDpmRange: int
   XgmiWidth: int
   XgmiBitrate: int
-  XgmiReadBandwidthAcc: ctypes.Array[ctypes.c_uint64]
-  XgmiWriteBandwidthAcc: ctypes.Array[ctypes.c_uint64]
+  XgmiReadBandwidthAcc: c.Array[ctypes.c_uint64, Literal[8]]
+  XgmiWriteBandwidthAcc: c.Array[ctypes.c_uint64, Literal[8]]
   SocketC0Residency: int
   SocketGfxBusy: int
   DramBandwidthUtilization: int
@@ -62,39 +62,39 @@ class MetricsTableV0_t(c.Struct):
   DramBandwidthAcc: int
   MaxDramBandwidth: int
   DramBandwidthUtilizationAcc: int
-  PcieBandwidthAcc: ctypes.Array[ctypes.c_uint64]
+  PcieBandwidthAcc: c.Array[ctypes.c_uint64, Literal[4]]
   ProchotResidencyAcc: int
   PptResidencyAcc: int
   SocketThmResidencyAcc: int
   VrThmResidencyAcc: int
   HbmThmResidencyAcc: int
   GfxLockXCDMak: int
-  GfxclkFrequency: ctypes.Array[ctypes.c_uint32]
-  PublicSerialNumber_AID: ctypes.Array[ctypes.c_uint64]
-  PublicSerialNumber_XCD: ctypes.Array[ctypes.c_uint64]
-  PublicSerialNumber_CCD: ctypes.Array[ctypes.c_uint64]
-  XgmiReadDataSizeAcc: ctypes.Array[ctypes.c_uint64]
-  XgmiWriteDataSizeAcc: ctypes.Array[ctypes.c_uint64]
-  PcieBandwidth: ctypes.Array[ctypes.c_uint32]
+  GfxclkFrequency: c.Array[ctypes.c_uint32, Literal[8]]
+  PublicSerialNumber_AID: c.Array[ctypes.c_uint64, Literal[4]]
+  PublicSerialNumber_XCD: c.Array[ctypes.c_uint64, Literal[8]]
+  PublicSerialNumber_CCD: c.Array[ctypes.c_uint64, Literal[12]]
+  XgmiReadDataSizeAcc: c.Array[ctypes.c_uint64, Literal[8]]
+  XgmiWriteDataSizeAcc: c.Array[ctypes.c_uint64, Literal[8]]
+  PcieBandwidth: c.Array[ctypes.c_uint32, Literal[4]]
   PCIeL0ToRecoveryCountAcc: int
   PCIenReplayAAcc: int
   PCIenReplayARolloverCountAcc: int
   PCIeNAKSentCountAcc: int
   PCIeNAKReceivedCountAcc: int
-  VcnBusy: ctypes.Array[ctypes.c_uint32]
-  JpegBusy: ctypes.Array[ctypes.c_uint32]
+  VcnBusy: c.Array[ctypes.c_uint32, Literal[4]]
+  JpegBusy: c.Array[ctypes.c_uint32, Literal[32]]
   PCIeLinkSpeed: int
   PCIeLinkWidth: int
-  GfxBusy: ctypes.Array[ctypes.c_uint32]
-  GfxBusyAcc: ctypes.Array[ctypes.c_uint64]
+  GfxBusy: c.Array[ctypes.c_uint32, Literal[8]]
+  GfxBusyAcc: c.Array[ctypes.c_uint64, Literal[8]]
   PCIeOtherEndRecoveryAcc: int
-  GfxclkBelowHostLimitPptAcc: ctypes.Array[ctypes.c_uint64]
-  GfxclkBelowHostLimitThmAcc: ctypes.Array[ctypes.c_uint64]
-  GfxclkBelowHostLimitTotalAcc: ctypes.Array[ctypes.c_uint64]
-  GfxclkLowUtilizationAcc: ctypes.Array[ctypes.c_uint64]
+  GfxclkBelowHostLimitPptAcc: c.Array[ctypes.c_uint64, Literal[8]]
+  GfxclkBelowHostLimitThmAcc: c.Array[ctypes.c_uint64, Literal[8]]
+  GfxclkBelowHostLimitTotalAcc: c.Array[ctypes.c_uint64, Literal[8]]
+  GfxclkLowUtilizationAcc: c.Array[ctypes.c_uint64, Literal[8]]
 uint32_t: TypeAlias = ctypes.c_uint32
 uint64_t: TypeAlias = ctypes.c_uint64
-MetricsTableV0_t.register_fields([('AccumulationCounter', uint32_t, 0), ('MaxSocketTemperature', uint32_t, 4), ('MaxVrTemperature', uint32_t, 8), ('MaxHbmTemperature', uint32_t, 12), ('MaxSocketTemperatureAcc', uint64_t, 16), ('MaxVrTemperatureAcc', uint64_t, 24), ('MaxHbmTemperatureAcc', uint64_t, 32), ('SocketPowerLimit', uint32_t, 40), ('MaxSocketPowerLimit', uint32_t, 44), ('SocketPower', uint32_t, 48), ('Timestamp', uint64_t, 52), ('SocketEnergyAcc', uint64_t, 60), ('CcdEnergyAcc', uint64_t, 68), ('XcdEnergyAcc', uint64_t, 76), ('AidEnergyAcc', uint64_t, 84), ('HbmEnergyAcc', uint64_t, 92), ('CclkFrequencyLimit', uint32_t, 100), ('GfxclkFrequencyLimit', uint32_t, 104), ('FclkFrequency', uint32_t, 108), ('UclkFrequency', uint32_t, 112), ('SocclkFrequency', (uint32_t * 4), 116), ('VclkFrequency', (uint32_t * 4), 132), ('DclkFrequency', (uint32_t * 4), 148), ('LclkFrequency', (uint32_t * 4), 164), ('GfxclkFrequencyAcc', (uint64_t * 8), 180), ('CclkFrequencyAcc', (uint64_t * 96), 244), ('MaxCclkFrequency', uint32_t, 1012), ('MinCclkFrequency', uint32_t, 1016), ('MaxGfxclkFrequency', uint32_t, 1020), ('MinGfxclkFrequency', uint32_t, 1024), ('FclkFrequencyTable', (uint32_t * 4), 1028), ('UclkFrequencyTable', (uint32_t * 4), 1044), ('SocclkFrequencyTable', (uint32_t * 4), 1060), ('VclkFrequencyTable', (uint32_t * 4), 1076), ('DclkFrequencyTable', (uint32_t * 4), 1092), ('LclkFrequencyTable', (uint32_t * 4), 1108), ('MaxLclkDpmRange', uint32_t, 1124), ('MinLclkDpmRange', uint32_t, 1128), ('XgmiWidth', uint32_t, 1132), ('XgmiBitrate', uint32_t, 1136), ('XgmiReadBandwidthAcc', (uint64_t * 8), 1140), ('XgmiWriteBandwidthAcc', (uint64_t * 8), 1204), ('SocketC0Residency', uint32_t, 1268), ('SocketGfxBusy', uint32_t, 1272), ('DramBandwidthUtilization', uint32_t, 1276), ('SocketC0ResidencyAcc', uint64_t, 1280), ('SocketGfxBusyAcc', uint64_t, 1288), ('DramBandwidthAcc', uint64_t, 1296), ('MaxDramBandwidth', uint32_t, 1304), ('DramBandwidthUtilizationAcc', uint64_t, 1308), ('PcieBandwidthAcc', (uint64_t * 4), 1316), ('ProchotResidencyAcc', uint32_t, 1348), ('PptResidencyAcc', uint32_t, 1352), ('SocketThmResidencyAcc', uint32_t, 1356), ('VrThmResidencyAcc', uint32_t, 1360), ('HbmThmResidencyAcc', uint32_t, 1364), ('GfxLockXCDMak', uint32_t, 1368), ('GfxclkFrequency', (uint32_t * 8), 1372), ('PublicSerialNumber_AID', (uint64_t * 4), 1404), ('PublicSerialNumber_XCD', (uint64_t * 8), 1436), ('PublicSerialNumber_CCD', (uint64_t * 12), 1500), ('XgmiReadDataSizeAcc', (uint64_t * 8), 1596), ('XgmiWriteDataSizeAcc', (uint64_t * 8), 1660), ('PcieBandwidth', (uint32_t * 4), 1724), ('PCIeL0ToRecoveryCountAcc', uint32_t, 1740), ('PCIenReplayAAcc', uint32_t, 1744), ('PCIenReplayARolloverCountAcc', uint32_t, 1748), ('PCIeNAKSentCountAcc', uint32_t, 1752), ('PCIeNAKReceivedCountAcc', uint32_t, 1756), ('VcnBusy', (uint32_t * 4), 1760), ('JpegBusy', (uint32_t * 32), 1776), ('PCIeLinkSpeed', uint32_t, 1904), ('PCIeLinkWidth', uint32_t, 1908), ('GfxBusy', (uint32_t * 8), 1912), ('GfxBusyAcc', (uint64_t * 8), 1944), ('PCIeOtherEndRecoveryAcc', uint32_t, 2008), ('GfxclkBelowHostLimitPptAcc', (uint64_t * 8), 2012), ('GfxclkBelowHostLimitThmAcc', (uint64_t * 8), 2076), ('GfxclkBelowHostLimitTotalAcc', (uint64_t * 8), 2140), ('GfxclkLowUtilizationAcc', (uint64_t * 8), 2204)])
+MetricsTableV0_t.register_fields([('AccumulationCounter', uint32_t, 0), ('MaxSocketTemperature', uint32_t, 4), ('MaxVrTemperature', uint32_t, 8), ('MaxHbmTemperature', uint32_t, 12), ('MaxSocketTemperatureAcc', uint64_t, 16), ('MaxVrTemperatureAcc', uint64_t, 24), ('MaxHbmTemperatureAcc', uint64_t, 32), ('SocketPowerLimit', uint32_t, 40), ('MaxSocketPowerLimit', uint32_t, 44), ('SocketPower', uint32_t, 48), ('Timestamp', uint64_t, 52), ('SocketEnergyAcc', uint64_t, 60), ('CcdEnergyAcc', uint64_t, 68), ('XcdEnergyAcc', uint64_t, 76), ('AidEnergyAcc', uint64_t, 84), ('HbmEnergyAcc', uint64_t, 92), ('CclkFrequencyLimit', uint32_t, 100), ('GfxclkFrequencyLimit', uint32_t, 104), ('FclkFrequency', uint32_t, 108), ('UclkFrequency', uint32_t, 112), ('SocclkFrequency', c.Array[uint32_t, Literal[4]], 116), ('VclkFrequency', c.Array[uint32_t, Literal[4]], 132), ('DclkFrequency', c.Array[uint32_t, Literal[4]], 148), ('LclkFrequency', c.Array[uint32_t, Literal[4]], 164), ('GfxclkFrequencyAcc', c.Array[uint64_t, Literal[8]], 180), ('CclkFrequencyAcc', c.Array[uint64_t, Literal[96]], 244), ('MaxCclkFrequency', uint32_t, 1012), ('MinCclkFrequency', uint32_t, 1016), ('MaxGfxclkFrequency', uint32_t, 1020), ('MinGfxclkFrequency', uint32_t, 1024), ('FclkFrequencyTable', c.Array[uint32_t, Literal[4]], 1028), ('UclkFrequencyTable', c.Array[uint32_t, Literal[4]], 1044), ('SocclkFrequencyTable', c.Array[uint32_t, Literal[4]], 1060), ('VclkFrequencyTable', c.Array[uint32_t, Literal[4]], 1076), ('DclkFrequencyTable', c.Array[uint32_t, Literal[4]], 1092), ('LclkFrequencyTable', c.Array[uint32_t, Literal[4]], 1108), ('MaxLclkDpmRange', uint32_t, 1124), ('MinLclkDpmRange', uint32_t, 1128), ('XgmiWidth', uint32_t, 1132), ('XgmiBitrate', uint32_t, 1136), ('XgmiReadBandwidthAcc', c.Array[uint64_t, Literal[8]], 1140), ('XgmiWriteBandwidthAcc', c.Array[uint64_t, Literal[8]], 1204), ('SocketC0Residency', uint32_t, 1268), ('SocketGfxBusy', uint32_t, 1272), ('DramBandwidthUtilization', uint32_t, 1276), ('SocketC0ResidencyAcc', uint64_t, 1280), ('SocketGfxBusyAcc', uint64_t, 1288), ('DramBandwidthAcc', uint64_t, 1296), ('MaxDramBandwidth', uint32_t, 1304), ('DramBandwidthUtilizationAcc', uint64_t, 1308), ('PcieBandwidthAcc', c.Array[uint64_t, Literal[4]], 1316), ('ProchotResidencyAcc', uint32_t, 1348), ('PptResidencyAcc', uint32_t, 1352), ('SocketThmResidencyAcc', uint32_t, 1356), ('VrThmResidencyAcc', uint32_t, 1360), ('HbmThmResidencyAcc', uint32_t, 1364), ('GfxLockXCDMak', uint32_t, 1368), ('GfxclkFrequency', c.Array[uint32_t, Literal[8]], 1372), ('PublicSerialNumber_AID', c.Array[uint64_t, Literal[4]], 1404), ('PublicSerialNumber_XCD', c.Array[uint64_t, Literal[8]], 1436), ('PublicSerialNumber_CCD', c.Array[uint64_t, Literal[12]], 1500), ('XgmiReadDataSizeAcc', c.Array[uint64_t, Literal[8]], 1596), ('XgmiWriteDataSizeAcc', c.Array[uint64_t, Literal[8]], 1660), ('PcieBandwidth', c.Array[uint32_t, Literal[4]], 1724), ('PCIeL0ToRecoveryCountAcc', uint32_t, 1740), ('PCIenReplayAAcc', uint32_t, 1744), ('PCIenReplayARolloverCountAcc', uint32_t, 1748), ('PCIeNAKSentCountAcc', uint32_t, 1752), ('PCIeNAKReceivedCountAcc', uint32_t, 1756), ('VcnBusy', c.Array[uint32_t, Literal[4]], 1760), ('JpegBusy', c.Array[uint32_t, Literal[32]], 1776), ('PCIeLinkSpeed', uint32_t, 1904), ('PCIeLinkWidth', uint32_t, 1908), ('GfxBusy', c.Array[uint32_t, Literal[8]], 1912), ('GfxBusyAcc', c.Array[uint64_t, Literal[8]], 1944), ('PCIeOtherEndRecoveryAcc', uint32_t, 2008), ('GfxclkBelowHostLimitPptAcc', c.Array[uint64_t, Literal[8]], 2012), ('GfxclkBelowHostLimitThmAcc', c.Array[uint64_t, Literal[8]], 2076), ('GfxclkBelowHostLimitTotalAcc', c.Array[uint64_t, Literal[8]], 2140), ('GfxclkLowUtilizationAcc', c.Array[uint64_t, Literal[8]], 2204)])
 @c.record
 class MetricsTableV1_t(c.Struct):
   SIZE = 1868
@@ -118,28 +118,28 @@ class MetricsTableV1_t(c.Struct):
   GfxclkFrequencyLimit: int
   FclkFrequency: int
   UclkFrequency: int
-  SocclkFrequency: ctypes.Array[ctypes.c_uint32]
-  VclkFrequency: ctypes.Array[ctypes.c_uint32]
-  DclkFrequency: ctypes.Array[ctypes.c_uint32]
-  LclkFrequency: ctypes.Array[ctypes.c_uint32]
-  GfxclkFrequencyAcc: ctypes.Array[ctypes.c_uint64]
-  CclkFrequencyAcc: ctypes.Array[ctypes.c_uint64]
+  SocclkFrequency: c.Array[ctypes.c_uint32, Literal[4]]
+  VclkFrequency: c.Array[ctypes.c_uint32, Literal[4]]
+  DclkFrequency: c.Array[ctypes.c_uint32, Literal[4]]
+  LclkFrequency: c.Array[ctypes.c_uint32, Literal[4]]
+  GfxclkFrequencyAcc: c.Array[ctypes.c_uint64, Literal[8]]
+  CclkFrequencyAcc: c.Array[ctypes.c_uint64, Literal[96]]
   MaxCclkFrequency: int
   MinCclkFrequency: int
   MaxGfxclkFrequency: int
   MinGfxclkFrequency: int
-  FclkFrequencyTable: ctypes.Array[ctypes.c_uint32]
-  UclkFrequencyTable: ctypes.Array[ctypes.c_uint32]
-  SocclkFrequencyTable: ctypes.Array[ctypes.c_uint32]
-  VclkFrequencyTable: ctypes.Array[ctypes.c_uint32]
-  DclkFrequencyTable: ctypes.Array[ctypes.c_uint32]
-  LclkFrequencyTable: ctypes.Array[ctypes.c_uint32]
+  FclkFrequencyTable: c.Array[ctypes.c_uint32, Literal[4]]
+  UclkFrequencyTable: c.Array[ctypes.c_uint32, Literal[4]]
+  SocclkFrequencyTable: c.Array[ctypes.c_uint32, Literal[4]]
+  VclkFrequencyTable: c.Array[ctypes.c_uint32, Literal[4]]
+  DclkFrequencyTable: c.Array[ctypes.c_uint32, Literal[4]]
+  LclkFrequencyTable: c.Array[ctypes.c_uint32, Literal[4]]
   MaxLclkDpmRange: int
   MinLclkDpmRange: int
   XgmiWidth: int
   XgmiBitrate: int
-  XgmiReadBandwidthAcc: ctypes.Array[ctypes.c_uint64]
-  XgmiWriteBandwidthAcc: ctypes.Array[ctypes.c_uint64]
+  XgmiReadBandwidthAcc: c.Array[ctypes.c_uint64, Literal[8]]
+  XgmiWriteBandwidthAcc: c.Array[ctypes.c_uint64, Literal[8]]
   SocketC0Residency: int
   SocketGfxBusy: int
   DramBandwidthUtilization: int
@@ -148,22 +148,22 @@ class MetricsTableV1_t(c.Struct):
   DramBandwidthAcc: int
   MaxDramBandwidth: int
   DramBandwidthUtilizationAcc: int
-  PcieBandwidthAcc: ctypes.Array[ctypes.c_uint64]
+  PcieBandwidthAcc: c.Array[ctypes.c_uint64, Literal[4]]
   ProchotResidencyAcc: int
   PptResidencyAcc: int
   SocketThmResidencyAcc: int
   VrThmResidencyAcc: int
   HbmThmResidencyAcc: int
   GfxLockXCDMak: int
-  GfxclkFrequency: ctypes.Array[ctypes.c_uint32]
-  PublicSerialNumber_AID: ctypes.Array[ctypes.c_uint64]
-  PublicSerialNumber_XCD: ctypes.Array[ctypes.c_uint64]
-  PublicSerialNumber_CCD: ctypes.Array[ctypes.c_uint64]
-  XgmiReadDataSizeAcc: ctypes.Array[ctypes.c_uint64]
-  XgmiWriteDataSizeAcc: ctypes.Array[ctypes.c_uint64]
-  VcnBusy: ctypes.Array[ctypes.c_uint32]
-  JpegBusy: ctypes.Array[ctypes.c_uint32]
-MetricsTableV1_t.register_fields([('AccumulationCounter', uint32_t, 0), ('MaxSocketTemperature', uint32_t, 4), ('MaxVrTemperature', uint32_t, 8), ('MaxHbmTemperature', uint32_t, 12), ('MaxSocketTemperatureAcc', uint64_t, 16), ('MaxVrTemperatureAcc', uint64_t, 24), ('MaxHbmTemperatureAcc', uint64_t, 32), ('SocketPowerLimit', uint32_t, 40), ('MaxSocketPowerLimit', uint32_t, 44), ('SocketPower', uint32_t, 48), ('Timestamp', uint64_t, 52), ('SocketEnergyAcc', uint64_t, 60), ('CcdEnergyAcc', uint64_t, 68), ('XcdEnergyAcc', uint64_t, 76), ('AidEnergyAcc', uint64_t, 84), ('HbmEnergyAcc', uint64_t, 92), ('CclkFrequencyLimit', uint32_t, 100), ('GfxclkFrequencyLimit', uint32_t, 104), ('FclkFrequency', uint32_t, 108), ('UclkFrequency', uint32_t, 112), ('SocclkFrequency', (uint32_t * 4), 116), ('VclkFrequency', (uint32_t * 4), 132), ('DclkFrequency', (uint32_t * 4), 148), ('LclkFrequency', (uint32_t * 4), 164), ('GfxclkFrequencyAcc', (uint64_t * 8), 180), ('CclkFrequencyAcc', (uint64_t * 96), 244), ('MaxCclkFrequency', uint32_t, 1012), ('MinCclkFrequency', uint32_t, 1016), ('MaxGfxclkFrequency', uint32_t, 1020), ('MinGfxclkFrequency', uint32_t, 1024), ('FclkFrequencyTable', (uint32_t * 4), 1028), ('UclkFrequencyTable', (uint32_t * 4), 1044), ('SocclkFrequencyTable', (uint32_t * 4), 1060), ('VclkFrequencyTable', (uint32_t * 4), 1076), ('DclkFrequencyTable', (uint32_t * 4), 1092), ('LclkFrequencyTable', (uint32_t * 4), 1108), ('MaxLclkDpmRange', uint32_t, 1124), ('MinLclkDpmRange', uint32_t, 1128), ('XgmiWidth', uint32_t, 1132), ('XgmiBitrate', uint32_t, 1136), ('XgmiReadBandwidthAcc', (uint64_t * 8), 1140), ('XgmiWriteBandwidthAcc', (uint64_t * 8), 1204), ('SocketC0Residency', uint32_t, 1268), ('SocketGfxBusy', uint32_t, 1272), ('DramBandwidthUtilization', uint32_t, 1276), ('SocketC0ResidencyAcc', uint64_t, 1280), ('SocketGfxBusyAcc', uint64_t, 1288), ('DramBandwidthAcc', uint64_t, 1296), ('MaxDramBandwidth', uint32_t, 1304), ('DramBandwidthUtilizationAcc', uint64_t, 1308), ('PcieBandwidthAcc', (uint64_t * 4), 1316), ('ProchotResidencyAcc', uint32_t, 1348), ('PptResidencyAcc', uint32_t, 1352), ('SocketThmResidencyAcc', uint32_t, 1356), ('VrThmResidencyAcc', uint32_t, 1360), ('HbmThmResidencyAcc', uint32_t, 1364), ('GfxLockXCDMak', uint32_t, 1368), ('GfxclkFrequency', (uint32_t * 8), 1372), ('PublicSerialNumber_AID', (uint64_t * 4), 1404), ('PublicSerialNumber_XCD', (uint64_t * 8), 1436), ('PublicSerialNumber_CCD', (uint64_t * 12), 1500), ('XgmiReadDataSizeAcc', (uint64_t * 8), 1596), ('XgmiWriteDataSizeAcc', (uint64_t * 8), 1660), ('VcnBusy', (uint32_t * 4), 1724), ('JpegBusy', (uint32_t * 32), 1740)])
+  GfxclkFrequency: c.Array[ctypes.c_uint32, Literal[8]]
+  PublicSerialNumber_AID: c.Array[ctypes.c_uint64, Literal[4]]
+  PublicSerialNumber_XCD: c.Array[ctypes.c_uint64, Literal[8]]
+  PublicSerialNumber_CCD: c.Array[ctypes.c_uint64, Literal[12]]
+  XgmiReadDataSizeAcc: c.Array[ctypes.c_uint64, Literal[8]]
+  XgmiWriteDataSizeAcc: c.Array[ctypes.c_uint64, Literal[8]]
+  VcnBusy: c.Array[ctypes.c_uint32, Literal[4]]
+  JpegBusy: c.Array[ctypes.c_uint32, Literal[32]]
+MetricsTableV1_t.register_fields([('AccumulationCounter', uint32_t, 0), ('MaxSocketTemperature', uint32_t, 4), ('MaxVrTemperature', uint32_t, 8), ('MaxHbmTemperature', uint32_t, 12), ('MaxSocketTemperatureAcc', uint64_t, 16), ('MaxVrTemperatureAcc', uint64_t, 24), ('MaxHbmTemperatureAcc', uint64_t, 32), ('SocketPowerLimit', uint32_t, 40), ('MaxSocketPowerLimit', uint32_t, 44), ('SocketPower', uint32_t, 48), ('Timestamp', uint64_t, 52), ('SocketEnergyAcc', uint64_t, 60), ('CcdEnergyAcc', uint64_t, 68), ('XcdEnergyAcc', uint64_t, 76), ('AidEnergyAcc', uint64_t, 84), ('HbmEnergyAcc', uint64_t, 92), ('CclkFrequencyLimit', uint32_t, 100), ('GfxclkFrequencyLimit', uint32_t, 104), ('FclkFrequency', uint32_t, 108), ('UclkFrequency', uint32_t, 112), ('SocclkFrequency', c.Array[uint32_t, Literal[4]], 116), ('VclkFrequency', c.Array[uint32_t, Literal[4]], 132), ('DclkFrequency', c.Array[uint32_t, Literal[4]], 148), ('LclkFrequency', c.Array[uint32_t, Literal[4]], 164), ('GfxclkFrequencyAcc', c.Array[uint64_t, Literal[8]], 180), ('CclkFrequencyAcc', c.Array[uint64_t, Literal[96]], 244), ('MaxCclkFrequency', uint32_t, 1012), ('MinCclkFrequency', uint32_t, 1016), ('MaxGfxclkFrequency', uint32_t, 1020), ('MinGfxclkFrequency', uint32_t, 1024), ('FclkFrequencyTable', c.Array[uint32_t, Literal[4]], 1028), ('UclkFrequencyTable', c.Array[uint32_t, Literal[4]], 1044), ('SocclkFrequencyTable', c.Array[uint32_t, Literal[4]], 1060), ('VclkFrequencyTable', c.Array[uint32_t, Literal[4]], 1076), ('DclkFrequencyTable', c.Array[uint32_t, Literal[4]], 1092), ('LclkFrequencyTable', c.Array[uint32_t, Literal[4]], 1108), ('MaxLclkDpmRange', uint32_t, 1124), ('MinLclkDpmRange', uint32_t, 1128), ('XgmiWidth', uint32_t, 1132), ('XgmiBitrate', uint32_t, 1136), ('XgmiReadBandwidthAcc', c.Array[uint64_t, Literal[8]], 1140), ('XgmiWriteBandwidthAcc', c.Array[uint64_t, Literal[8]], 1204), ('SocketC0Residency', uint32_t, 1268), ('SocketGfxBusy', uint32_t, 1272), ('DramBandwidthUtilization', uint32_t, 1276), ('SocketC0ResidencyAcc', uint64_t, 1280), ('SocketGfxBusyAcc', uint64_t, 1288), ('DramBandwidthAcc', uint64_t, 1296), ('MaxDramBandwidth', uint32_t, 1304), ('DramBandwidthUtilizationAcc', uint64_t, 1308), ('PcieBandwidthAcc', c.Array[uint64_t, Literal[4]], 1316), ('ProchotResidencyAcc', uint32_t, 1348), ('PptResidencyAcc', uint32_t, 1352), ('SocketThmResidencyAcc', uint32_t, 1356), ('VrThmResidencyAcc', uint32_t, 1360), ('HbmThmResidencyAcc', uint32_t, 1364), ('GfxLockXCDMak', uint32_t, 1368), ('GfxclkFrequency', c.Array[uint32_t, Literal[8]], 1372), ('PublicSerialNumber_AID', c.Array[uint64_t, Literal[4]], 1404), ('PublicSerialNumber_XCD', c.Array[uint64_t, Literal[8]], 1436), ('PublicSerialNumber_CCD', c.Array[uint64_t, Literal[12]], 1500), ('XgmiReadDataSizeAcc', c.Array[uint64_t, Literal[8]], 1596), ('XgmiWriteDataSizeAcc', c.Array[uint64_t, Literal[8]], 1660), ('VcnBusy', c.Array[uint32_t, Literal[4]], 1724), ('JpegBusy', c.Array[uint32_t, Literal[32]], 1740)])
 @c.record
 class MetricsTableV2_t(c.Struct):
   SIZE = 1200
@@ -186,25 +186,25 @@ class MetricsTableV2_t(c.Struct):
   GfxclkFrequencyLimit: int
   FclkFrequency: int
   UclkFrequency: int
-  SocclkFrequency: ctypes.Array[ctypes.c_uint32]
-  VclkFrequency: ctypes.Array[ctypes.c_uint32]
-  DclkFrequency: ctypes.Array[ctypes.c_uint32]
-  LclkFrequency: ctypes.Array[ctypes.c_uint32]
-  GfxclkFrequencyAcc: ctypes.Array[ctypes.c_uint64]
+  SocclkFrequency: c.Array[ctypes.c_uint32, Literal[4]]
+  VclkFrequency: c.Array[ctypes.c_uint32, Literal[4]]
+  DclkFrequency: c.Array[ctypes.c_uint32, Literal[4]]
+  LclkFrequency: c.Array[ctypes.c_uint32, Literal[4]]
+  GfxclkFrequencyAcc: c.Array[ctypes.c_uint64, Literal[8]]
   MaxGfxclkFrequency: int
   MinGfxclkFrequency: int
-  FclkFrequencyTable: ctypes.Array[ctypes.c_uint32]
-  UclkFrequencyTable: ctypes.Array[ctypes.c_uint32]
-  SocclkFrequencyTable: ctypes.Array[ctypes.c_uint32]
-  VclkFrequencyTable: ctypes.Array[ctypes.c_uint32]
-  DclkFrequencyTable: ctypes.Array[ctypes.c_uint32]
-  LclkFrequencyTable: ctypes.Array[ctypes.c_uint32]
+  FclkFrequencyTable: c.Array[ctypes.c_uint32, Literal[4]]
+  UclkFrequencyTable: c.Array[ctypes.c_uint32, Literal[4]]
+  SocclkFrequencyTable: c.Array[ctypes.c_uint32, Literal[4]]
+  VclkFrequencyTable: c.Array[ctypes.c_uint32, Literal[4]]
+  DclkFrequencyTable: c.Array[ctypes.c_uint32, Literal[4]]
+  LclkFrequencyTable: c.Array[ctypes.c_uint32, Literal[4]]
   MaxLclkDpmRange: int
   MinLclkDpmRange: int
   XgmiWidth: int
   XgmiBitrate: int
-  XgmiReadBandwidthAcc: ctypes.Array[ctypes.c_uint64]
-  XgmiWriteBandwidthAcc: ctypes.Array[ctypes.c_uint64]
+  XgmiReadBandwidthAcc: c.Array[ctypes.c_uint64, Literal[8]]
+  XgmiWriteBandwidthAcc: c.Array[ctypes.c_uint64, Literal[8]]
   SocketGfxBusy: int
   DramBandwidthUtilization: int
   SocketC0ResidencyAcc: int
@@ -212,33 +212,33 @@ class MetricsTableV2_t(c.Struct):
   DramBandwidthAcc: int
   MaxDramBandwidth: int
   DramBandwidthUtilizationAcc: int
-  PcieBandwidthAcc: ctypes.Array[ctypes.c_uint64]
+  PcieBandwidthAcc: c.Array[ctypes.c_uint64, Literal[4]]
   ProchotResidencyAcc: int
   PptResidencyAcc: int
   SocketThmResidencyAcc: int
   VrThmResidencyAcc: int
   HbmThmResidencyAcc: int
   GfxLockXCDMak: int
-  GfxclkFrequency: ctypes.Array[ctypes.c_uint32]
-  PublicSerialNumber_AID: ctypes.Array[ctypes.c_uint64]
-  PublicSerialNumber_XCD: ctypes.Array[ctypes.c_uint64]
-  XgmiReadDataSizeAcc: ctypes.Array[ctypes.c_uint64]
-  XgmiWriteDataSizeAcc: ctypes.Array[ctypes.c_uint64]
-  PcieBandwidth: ctypes.Array[ctypes.c_uint32]
+  GfxclkFrequency: c.Array[ctypes.c_uint32, Literal[8]]
+  PublicSerialNumber_AID: c.Array[ctypes.c_uint64, Literal[4]]
+  PublicSerialNumber_XCD: c.Array[ctypes.c_uint64, Literal[8]]
+  XgmiReadDataSizeAcc: c.Array[ctypes.c_uint64, Literal[8]]
+  XgmiWriteDataSizeAcc: c.Array[ctypes.c_uint64, Literal[8]]
+  PcieBandwidth: c.Array[ctypes.c_uint32, Literal[4]]
   PCIeL0ToRecoveryCountAcc: int
   PCIenReplayAAcc: int
   PCIenReplayARolloverCountAcc: int
   PCIeNAKSentCountAcc: int
   PCIeNAKReceivedCountAcc: int
-  VcnBusy: ctypes.Array[ctypes.c_uint32]
-  JpegBusy: ctypes.Array[ctypes.c_uint32]
+  VcnBusy: c.Array[ctypes.c_uint32, Literal[4]]
+  JpegBusy: c.Array[ctypes.c_uint32, Literal[32]]
   PCIeLinkSpeed: int
   PCIeLinkWidth: int
-  GfxBusy: ctypes.Array[ctypes.c_uint32]
-  GfxBusyAcc: ctypes.Array[ctypes.c_uint64]
+  GfxBusy: c.Array[ctypes.c_uint32, Literal[8]]
+  GfxBusyAcc: c.Array[ctypes.c_uint64, Literal[8]]
   PCIeOtherEndRecoveryAcc: int
-  GfxclkBelowHostLimitAcc: ctypes.Array[ctypes.c_uint64]
-MetricsTableV2_t.register_fields([('AccumulationCounter', uint64_t, 0), ('MaxSocketTemperature', uint32_t, 8), ('MaxVrTemperature', uint32_t, 12), ('MaxHbmTemperature', uint32_t, 16), ('MaxSocketTemperatureAcc', uint64_t, 20), ('MaxVrTemperatureAcc', uint64_t, 28), ('MaxHbmTemperatureAcc', uint64_t, 36), ('SocketPowerLimit', uint32_t, 44), ('MaxSocketPowerLimit', uint32_t, 48), ('SocketPower', uint32_t, 52), ('Timestamp', uint64_t, 56), ('SocketEnergyAcc', uint64_t, 64), ('CcdEnergyAcc', uint64_t, 72), ('XcdEnergyAcc', uint64_t, 80), ('AidEnergyAcc', uint64_t, 88), ('HbmEnergyAcc', uint64_t, 96), ('GfxclkFrequencyLimit', uint32_t, 104), ('FclkFrequency', uint32_t, 108), ('UclkFrequency', uint32_t, 112), ('SocclkFrequency', (uint32_t * 4), 116), ('VclkFrequency', (uint32_t * 4), 132), ('DclkFrequency', (uint32_t * 4), 148), ('LclkFrequency', (uint32_t * 4), 164), ('GfxclkFrequencyAcc', (uint64_t * 8), 180), ('MaxGfxclkFrequency', uint32_t, 244), ('MinGfxclkFrequency', uint32_t, 248), ('FclkFrequencyTable', (uint32_t * 4), 252), ('UclkFrequencyTable', (uint32_t * 4), 268), ('SocclkFrequencyTable', (uint32_t * 4), 284), ('VclkFrequencyTable', (uint32_t * 4), 300), ('DclkFrequencyTable', (uint32_t * 4), 316), ('LclkFrequencyTable', (uint32_t * 4), 332), ('MaxLclkDpmRange', uint32_t, 348), ('MinLclkDpmRange', uint32_t, 352), ('XgmiWidth', uint32_t, 356), ('XgmiBitrate', uint32_t, 360), ('XgmiReadBandwidthAcc', (uint64_t * 8), 364), ('XgmiWriteBandwidthAcc', (uint64_t * 8), 428), ('SocketGfxBusy', uint32_t, 492), ('DramBandwidthUtilization', uint32_t, 496), ('SocketC0ResidencyAcc', uint64_t, 500), ('SocketGfxBusyAcc', uint64_t, 508), ('DramBandwidthAcc', uint64_t, 516), ('MaxDramBandwidth', uint32_t, 524), ('DramBandwidthUtilizationAcc', uint64_t, 528), ('PcieBandwidthAcc', (uint64_t * 4), 536), ('ProchotResidencyAcc', uint32_t, 568), ('PptResidencyAcc', uint32_t, 572), ('SocketThmResidencyAcc', uint32_t, 576), ('VrThmResidencyAcc', uint32_t, 580), ('HbmThmResidencyAcc', uint32_t, 584), ('GfxLockXCDMak', uint32_t, 588), ('GfxclkFrequency', (uint32_t * 8), 592), ('PublicSerialNumber_AID', (uint64_t * 4), 624), ('PublicSerialNumber_XCD', (uint64_t * 8), 656), ('XgmiReadDataSizeAcc', (uint64_t * 8), 720), ('XgmiWriteDataSizeAcc', (uint64_t * 8), 784), ('PcieBandwidth', (uint32_t * 4), 848), ('PCIeL0ToRecoveryCountAcc', uint32_t, 864), ('PCIenReplayAAcc', uint32_t, 868), ('PCIenReplayARolloverCountAcc', uint32_t, 872), ('PCIeNAKSentCountAcc', uint32_t, 876), ('PCIeNAKReceivedCountAcc', uint32_t, 880), ('VcnBusy', (uint32_t * 4), 884), ('JpegBusy', (uint32_t * 32), 900), ('PCIeLinkSpeed', uint32_t, 1028), ('PCIeLinkWidth', uint32_t, 1032), ('GfxBusy', (uint32_t * 8), 1036), ('GfxBusyAcc', (uint64_t * 8), 1068), ('PCIeOtherEndRecoveryAcc', uint32_t, 1132), ('GfxclkBelowHostLimitAcc', (uint64_t * 8), 1136)])
+  GfxclkBelowHostLimitAcc: c.Array[ctypes.c_uint64, Literal[8]]
+MetricsTableV2_t.register_fields([('AccumulationCounter', uint64_t, 0), ('MaxSocketTemperature', uint32_t, 8), ('MaxVrTemperature', uint32_t, 12), ('MaxHbmTemperature', uint32_t, 16), ('MaxSocketTemperatureAcc', uint64_t, 20), ('MaxVrTemperatureAcc', uint64_t, 28), ('MaxHbmTemperatureAcc', uint64_t, 36), ('SocketPowerLimit', uint32_t, 44), ('MaxSocketPowerLimit', uint32_t, 48), ('SocketPower', uint32_t, 52), ('Timestamp', uint64_t, 56), ('SocketEnergyAcc', uint64_t, 64), ('CcdEnergyAcc', uint64_t, 72), ('XcdEnergyAcc', uint64_t, 80), ('AidEnergyAcc', uint64_t, 88), ('HbmEnergyAcc', uint64_t, 96), ('GfxclkFrequencyLimit', uint32_t, 104), ('FclkFrequency', uint32_t, 108), ('UclkFrequency', uint32_t, 112), ('SocclkFrequency', c.Array[uint32_t, Literal[4]], 116), ('VclkFrequency', c.Array[uint32_t, Literal[4]], 132), ('DclkFrequency', c.Array[uint32_t, Literal[4]], 148), ('LclkFrequency', c.Array[uint32_t, Literal[4]], 164), ('GfxclkFrequencyAcc', c.Array[uint64_t, Literal[8]], 180), ('MaxGfxclkFrequency', uint32_t, 244), ('MinGfxclkFrequency', uint32_t, 248), ('FclkFrequencyTable', c.Array[uint32_t, Literal[4]], 252), ('UclkFrequencyTable', c.Array[uint32_t, Literal[4]], 268), ('SocclkFrequencyTable', c.Array[uint32_t, Literal[4]], 284), ('VclkFrequencyTable', c.Array[uint32_t, Literal[4]], 300), ('DclkFrequencyTable', c.Array[uint32_t, Literal[4]], 316), ('LclkFrequencyTable', c.Array[uint32_t, Literal[4]], 332), ('MaxLclkDpmRange', uint32_t, 348), ('MinLclkDpmRange', uint32_t, 352), ('XgmiWidth', uint32_t, 356), ('XgmiBitrate', uint32_t, 360), ('XgmiReadBandwidthAcc', c.Array[uint64_t, Literal[8]], 364), ('XgmiWriteBandwidthAcc', c.Array[uint64_t, Literal[8]], 428), ('SocketGfxBusy', uint32_t, 492), ('DramBandwidthUtilization', uint32_t, 496), ('SocketC0ResidencyAcc', uint64_t, 500), ('SocketGfxBusyAcc', uint64_t, 508), ('DramBandwidthAcc', uint64_t, 516), ('MaxDramBandwidth', uint32_t, 524), ('DramBandwidthUtilizationAcc', uint64_t, 528), ('PcieBandwidthAcc', c.Array[uint64_t, Literal[4]], 536), ('ProchotResidencyAcc', uint32_t, 568), ('PptResidencyAcc', uint32_t, 572), ('SocketThmResidencyAcc', uint32_t, 576), ('VrThmResidencyAcc', uint32_t, 580), ('HbmThmResidencyAcc', uint32_t, 584), ('GfxLockXCDMak', uint32_t, 588), ('GfxclkFrequency', c.Array[uint32_t, Literal[8]], 592), ('PublicSerialNumber_AID', c.Array[uint64_t, Literal[4]], 624), ('PublicSerialNumber_XCD', c.Array[uint64_t, Literal[8]], 656), ('XgmiReadDataSizeAcc', c.Array[uint64_t, Literal[8]], 720), ('XgmiWriteDataSizeAcc', c.Array[uint64_t, Literal[8]], 784), ('PcieBandwidth', c.Array[uint32_t, Literal[4]], 848), ('PCIeL0ToRecoveryCountAcc', uint32_t, 864), ('PCIenReplayAAcc', uint32_t, 868), ('PCIenReplayARolloverCountAcc', uint32_t, 872), ('PCIeNAKSentCountAcc', uint32_t, 876), ('PCIeNAKReceivedCountAcc', uint32_t, 880), ('VcnBusy', c.Array[uint32_t, Literal[4]], 884), ('JpegBusy', c.Array[uint32_t, Literal[32]], 900), ('PCIeLinkSpeed', uint32_t, 1028), ('PCIeLinkWidth', uint32_t, 1032), ('GfxBusy', c.Array[uint32_t, Literal[8]], 1036), ('GfxBusyAcc', c.Array[uint64_t, Literal[8]], 1068), ('PCIeOtherEndRecoveryAcc', uint32_t, 1132), ('GfxclkBelowHostLimitAcc', c.Array[uint64_t, Literal[8]], 1136)])
 @c.record
 class VfMetricsTable_t(c.Struct):
   SIZE = 32
@@ -252,8 +252,8 @@ VfMetricsTable_t.register_fields([('AccumulationCounter', uint32_t, 0), ('InstGf
 class StaticMetricsTable_t(c.Struct):
   SIZE = 12
   InputTelemetryVoltageInmV: int
-  pldmVersion: ctypes.Array[ctypes.c_uint32]
-StaticMetricsTable_t.register_fields([('InputTelemetryVoltageInmV', uint32_t, 0), ('pldmVersion', (uint32_t * 2), 4)])
+  pldmVersion: c.Array[ctypes.c_uint32, Literal[2]]
+StaticMetricsTable_t.register_fields([('InputTelemetryVoltageInmV', uint32_t, 0), ('pldmVersion', c.Array[uint32_t, Literal[2]], 4)])
 I2cControllerPort_e: dict[int, str] = {(I2C_CONTROLLER_PORT_0:=0): 'I2C_CONTROLLER_PORT_0', (I2C_CONTROLLER_PORT_1:=1): 'I2C_CONTROLLER_PORT_1', (I2C_CONTROLLER_PORT_COUNT:=2): 'I2C_CONTROLLER_PORT_COUNT'}
 I2cSpeed_e: dict[int, str] = {(UNSUPPORTED_1:=0): 'UNSUPPORTED_1', (I2C_SPEED_STANDARD_100K:=1): 'I2C_SPEED_STANDARD_100K', (I2C_SPEED_FAST_400K:=2): 'I2C_SPEED_FAST_400K', (I2C_SPEED_FAST_PLUS_1M:=3): 'I2C_SPEED_FAST_PLUS_1M', (UNSUPPORTED_2:=4): 'UNSUPPORTED_2', (UNSUPPORTED_3:=5): 'UNSUPPORTED_3', (I2C_SPEED_COUNT:=6): 'I2C_SPEED_COUNT'}
 I2cCmdType_e: dict[int, str] = {(I2C_CMD_READ:=0): 'I2C_CMD_READ', (I2C_CMD_WRITE:=1): 'I2C_CMD_WRITE', (I2C_CMD_COUNT:=2): 'I2C_CMD_COUNT'}
@@ -273,35 +273,35 @@ class SwI2cRequest_t(c.Struct):
   I2CSpeed: int
   SlaveAddress: int
   NumCmds: int
-  SwI2cCmds: ctypes.Array[SwI2cCmd_t]
-SwI2cRequest_t.register_fields([('I2CcontrollerPort', uint8_t, 0), ('I2CSpeed', uint8_t, 1), ('SlaveAddress', uint8_t, 2), ('NumCmds', uint8_t, 3), ('SwI2cCmds', (SwI2cCmd_t * 24), 4)])
+  SwI2cCmds: c.Array[SwI2cCmd_t, Literal[24]]
+SwI2cRequest_t.register_fields([('I2CcontrollerPort', uint8_t, 0), ('I2CSpeed', uint8_t, 1), ('SlaveAddress', uint8_t, 2), ('NumCmds', uint8_t, 3), ('SwI2cCmds', c.Array[SwI2cCmd_t, Literal[24]], 4)])
 @c.record
 class SwI2cRequestExternal_t(c.Struct):
   SIZE = 116
   SwI2cRequest: SwI2cRequest_t
-  Spare: ctypes.Array[ctypes.c_uint32]
-  MmHubPadding: ctypes.Array[ctypes.c_uint32]
-SwI2cRequestExternal_t.register_fields([('SwI2cRequest', SwI2cRequest_t, 0), ('Spare', (uint32_t * 8), 52), ('MmHubPadding', (uint32_t * 8), 84)])
+  Spare: c.Array[ctypes.c_uint32, Literal[8]]
+  MmHubPadding: c.Array[ctypes.c_uint32, Literal[8]]
+SwI2cRequestExternal_t.register_fields([('SwI2cRequest', SwI2cRequest_t, 0), ('Spare', c.Array[uint32_t, Literal[8]], 52), ('MmHubPadding', c.Array[uint32_t, Literal[8]], 84)])
 PPCLK_e: dict[int, str] = {(PPCLK_VCLK:=0): 'PPCLK_VCLK', (PPCLK_DCLK:=1): 'PPCLK_DCLK', (PPCLK_SOCCLK:=2): 'PPCLK_SOCCLK', (PPCLK_UCLK:=3): 'PPCLK_UCLK', (PPCLK_FCLK:=4): 'PPCLK_FCLK', (PPCLK_LCLK:=5): 'PPCLK_LCLK', (PPCLK_COUNT:=6): 'PPCLK_COUNT'}
 GpioIntPolarity_e: dict[int, str] = {(GPIO_INT_POLARITY_ACTIVE_LOW:=0): 'GPIO_INT_POLARITY_ACTIVE_LOW', (GPIO_INT_POLARITY_ACTIVE_HIGH:=1): 'GPIO_INT_POLARITY_ACTIVE_HIGH'}
 UCLK_DPM_MODE_e: dict[int, str] = {(UCLK_DPM_MODE_BANDWIDTH:=0): 'UCLK_DPM_MODE_BANDWIDTH', (UCLK_DPM_MODE_LATENCY:=1): 'UCLK_DPM_MODE_LATENCY'}
 @c.record
 class AvfsDebugTableAid_t(c.Struct):
   SIZE = 360
-  avgPsmCount: ctypes.Array[ctypes.c_uint16]
-  minPsmCount: ctypes.Array[ctypes.c_uint16]
-  avgPsmVoltage: ctypes.Array[ctypes.c_float]
-  minPsmVoltage: ctypes.Array[ctypes.c_float]
+  avgPsmCount: c.Array[ctypes.c_uint16, Literal[30]]
+  minPsmCount: c.Array[ctypes.c_uint16, Literal[30]]
+  avgPsmVoltage: c.Array[ctypes.c_float, Literal[30]]
+  minPsmVoltage: c.Array[ctypes.c_float, Literal[30]]
 uint16_t: TypeAlias = ctypes.c_uint16
-AvfsDebugTableAid_t.register_fields([('avgPsmCount', (uint16_t * 30), 0), ('minPsmCount', (uint16_t * 30), 60), ('avgPsmVoltage', (ctypes.c_float * 30), 120), ('minPsmVoltage', (ctypes.c_float * 30), 240)])
+AvfsDebugTableAid_t.register_fields([('avgPsmCount', c.Array[uint16_t, Literal[30]], 0), ('minPsmCount', c.Array[uint16_t, Literal[30]], 60), ('avgPsmVoltage', c.Array[ctypes.c_float, Literal[30]], 120), ('minPsmVoltage', c.Array[ctypes.c_float, Literal[30]], 240)])
 @c.record
 class AvfsDebugTableXcd_t(c.Struct):
   SIZE = 360
-  avgPsmCount: ctypes.Array[ctypes.c_uint16]
-  minPsmCount: ctypes.Array[ctypes.c_uint16]
-  avgPsmVoltage: ctypes.Array[ctypes.c_float]
-  minPsmVoltage: ctypes.Array[ctypes.c_float]
-AvfsDebugTableXcd_t.register_fields([('avgPsmCount', (uint16_t * 30), 0), ('minPsmCount', (uint16_t * 30), 60), ('avgPsmVoltage', (ctypes.c_float * 30), 120), ('minPsmVoltage', (ctypes.c_float * 30), 240)])
+  avgPsmCount: c.Array[ctypes.c_uint16, Literal[30]]
+  minPsmCount: c.Array[ctypes.c_uint16, Literal[30]]
+  avgPsmVoltage: c.Array[ctypes.c_float, Literal[30]]
+  minPsmVoltage: c.Array[ctypes.c_float, Literal[30]]
+AvfsDebugTableXcd_t.register_fields([('avgPsmCount', c.Array[uint16_t, Literal[30]], 0), ('minPsmCount', c.Array[uint16_t, Literal[30]], 60), ('avgPsmVoltage', c.Array[ctypes.c_float, Literal[30]], 120), ('minPsmVoltage', c.Array[ctypes.c_float, Literal[30]], 240)])
 @c.record
 class struct_smu_hw_power_state(c.Struct):
   SIZE = 4
@@ -340,8 +340,8 @@ class struct_smu_state_memory_block(c.Struct):
   SIZE = 5
   dll_off: bool
   m3arb: int
-  unused: ctypes.Array[ctypes.c_ubyte]
-struct_smu_state_memory_block.register_fields([('dll_off', ctypes.c_bool, 0), ('m3arb', ctypes.c_ubyte, 1), ('unused', (ctypes.c_ubyte * 3), 2)])
+  unused: c.Array[ctypes.c_ubyte, Literal[3]]
+struct_smu_state_memory_block.register_fields([('dll_off', ctypes.c_bool, 0), ('m3arb', ctypes.c_ubyte, 1), ('unused', c.Array[ctypes.c_ubyte, Literal[3]], 2)])
 @c.record
 class struct_smu_state_software_algorithm_block(c.Struct):
   SIZE = 2
@@ -390,9 +390,9 @@ class struct_smu_user_dpm_profile(c.Struct):
   fan_speed_rpm: int
   flags: int
   user_od: int
-  clk_mask: ctypes.Array[ctypes.c_uint32]
+  clk_mask: c.Array[ctypes.c_uint32, Literal[28]]
   clk_dependency: int
-struct_smu_user_dpm_profile.register_fields([('fan_mode', ctypes.c_uint32, 0), ('power_limit', ctypes.c_uint32, 4), ('fan_speed_pwm', ctypes.c_uint32, 8), ('fan_speed_rpm', ctypes.c_uint32, 12), ('flags', ctypes.c_uint32, 16), ('user_od', ctypes.c_uint32, 20), ('clk_mask', (ctypes.c_uint32 * 28), 24), ('clk_dependency', ctypes.c_uint32, 136)])
+struct_smu_user_dpm_profile.register_fields([('fan_mode', ctypes.c_uint32, 0), ('power_limit', ctypes.c_uint32, 4), ('fan_speed_pwm', ctypes.c_uint32, 8), ('fan_speed_rpm', ctypes.c_uint32, 12), ('flags', ctypes.c_uint32, 16), ('user_od', ctypes.c_uint32, 20), ('clk_mask', c.Array[ctypes.c_uint32, Literal[28]], 24), ('clk_dependency', ctypes.c_uint32, 136)])
 @c.record
 class struct_smu_table(c.Struct):
   SIZE = 48
@@ -400,11 +400,11 @@ class struct_smu_table(c.Struct):
   align: int
   domain: int
   mc_address: int
-  cpu_addr: int|None
-  bo: ctypes._Pointer[struct_amdgpu_bo]
+  cpu_addr: ctypes.c_void_p
+  bo: c.POINTER[struct_amdgpu_bo]
   version: int
 class struct_amdgpu_bo(c.Struct): pass
-struct_smu_table.register_fields([('size', ctypes.c_uint64, 0), ('align', ctypes.c_uint32, 8), ('domain', ctypes.c_ubyte, 12), ('mc_address', ctypes.c_uint64, 16), ('cpu_addr', ctypes.c_void_p, 24), ('bo', ctypes.POINTER(struct_amdgpu_bo), 32), ('version', ctypes.c_uint32, 40)])
+struct_smu_table.register_fields([('size', ctypes.c_uint64, 0), ('align', ctypes.c_uint32, 8), ('domain', ctypes.c_ubyte, 12), ('mc_address', ctypes.c_uint64, 16), ('cpu_addr', ctypes.c_void_p, 24), ('bo', c.POINTER[struct_amdgpu_bo], 32), ('version', ctypes.c_uint32, 40)])
 enum_smu_perf_level_designation: dict[int, str] = {(PERF_LEVEL_ACTIVITY:=0): 'PERF_LEVEL_ACTIVITY', (PERF_LEVEL_POWER_CONTAINMENT:=1): 'PERF_LEVEL_POWER_CONTAINMENT'}
 @c.record
 class struct_smu_performance_level(c.Struct):

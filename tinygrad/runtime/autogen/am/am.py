@@ -2353,8 +2353,8 @@ class struct_binary_header(c.Struct):
   version_minor: int
   binary_checksum: int
   binary_size: int
-  table_list: ctypes.Array[struct_table_info]
-struct_binary_header.register_fields([('binary_signature', uint32_t, 0), ('version_major', uint16_t, 4), ('version_minor', uint16_t, 6), ('binary_checksum', uint16_t, 8), ('binary_size', uint16_t, 10), ('table_list', (table_info * 6), 12)])
+  table_list: c.Array[struct_table_info, Literal[6]]
+struct_binary_header.register_fields([('binary_signature', uint32_t, 0), ('version_major', uint16_t, 4), ('version_minor', uint16_t, 6), ('binary_checksum', uint16_t, 8), ('binary_size', uint16_t, 10), ('table_list', c.Array[table_info, Literal[6]], 12)])
 binary_header: TypeAlias = struct_binary_header
 @c.record
 class struct_die_info(c.Struct):
@@ -2371,13 +2371,13 @@ class struct_ip_discovery_header(c.Struct):
   size: int
   id: int
   num_dies: int
-  die_info: ctypes.Array[struct_die_info]
-  padding: ctypes.Array[ctypes.c_uint16]
+  die_info: c.Array[struct_die_info, Literal[16]]
+  padding: c.Array[ctypes.c_uint16, Literal[1]]
   base_addr_64_bit: int
   reserved: int
   reserved2: int
 uint8_t: TypeAlias = ctypes.c_ubyte
-struct_ip_discovery_header.register_fields([('signature', uint32_t, 0), ('version', uint16_t, 4), ('size', uint16_t, 6), ('id', uint32_t, 8), ('num_dies', uint16_t, 12), ('die_info', (die_info * 16), 14), ('padding', (uint16_t * 1), 78), ('base_addr_64_bit', uint8_t, 78, 1, 0), ('reserved', uint8_t, 78, 7, 1), ('reserved2', uint8_t, 79)])
+struct_ip_discovery_header.register_fields([('signature', uint32_t, 0), ('version', uint16_t, 4), ('size', uint16_t, 6), ('id', uint32_t, 8), ('num_dies', uint16_t, 12), ('die_info', c.Array[die_info, Literal[16]], 14), ('padding', c.Array[uint16_t, Literal[1]], 78), ('base_addr_64_bit', uint8_t, 78, 1, 0), ('reserved', uint8_t, 78, 7, 1), ('reserved2', uint8_t, 79)])
 ip_discovery_header: TypeAlias = struct_ip_discovery_header
 @c.record
 class struct_ip(c.Struct):
@@ -2390,8 +2390,8 @@ class struct_ip(c.Struct):
   revision: int
   harvest: int
   reserved: int
-  base_address: ctypes.Array[ctypes.c_uint32]
-struct_ip.register_fields([('hw_id', uint16_t, 0), ('number_instance', uint8_t, 2), ('num_base_address', uint8_t, 3), ('major', uint8_t, 4), ('minor', uint8_t, 5), ('revision', uint8_t, 6), ('harvest', uint8_t, 7, 4, 0), ('reserved', uint8_t, 7, 4, 4), ('base_address', (uint32_t * 0), 8)])
+  base_address: c.Array[ctypes.c_uint32, Literal[0]]
+struct_ip.register_fields([('hw_id', uint16_t, 0), ('number_instance', uint8_t, 2), ('num_base_address', uint8_t, 3), ('major', uint8_t, 4), ('minor', uint8_t, 5), ('revision', uint8_t, 6), ('harvest', uint8_t, 7, 4, 0), ('reserved', uint8_t, 7, 4, 4), ('base_address', c.Array[uint32_t, Literal[0]], 8)])
 ip: TypeAlias = struct_ip
 @c.record
 class struct_ip_v3(c.Struct):
@@ -2404,8 +2404,8 @@ class struct_ip_v3(c.Struct):
   revision: int
   sub_revision: int
   variant: int
-  base_address: ctypes.Array[ctypes.c_uint32]
-struct_ip_v3.register_fields([('hw_id', uint16_t, 0), ('instance_number', uint8_t, 2), ('num_base_address', uint8_t, 3), ('major', uint8_t, 4), ('minor', uint8_t, 5), ('revision', uint8_t, 6), ('sub_revision', uint8_t, 7, 4, 0), ('variant', uint8_t, 7, 4, 4), ('base_address', (uint32_t * 0), 8)])
+  base_address: c.Array[ctypes.c_uint32, Literal[0]]
+struct_ip_v3.register_fields([('hw_id', uint16_t, 0), ('instance_number', uint8_t, 2), ('num_base_address', uint8_t, 3), ('major', uint8_t, 4), ('minor', uint8_t, 5), ('revision', uint8_t, 6), ('sub_revision', uint8_t, 7, 4, 0), ('variant', uint8_t, 7, 4, 4), ('base_address', c.Array[uint32_t, Literal[0]], 8)])
 ip_v3: TypeAlias = struct_ip_v3
 @c.record
 class struct_ip_v4(c.Struct):
@@ -2428,17 +2428,17 @@ die_header: TypeAlias = struct_die_header
 @c.record
 class struct_ip_structure(c.Struct):
   SIZE = 24
-  header: ctypes._Pointer[struct_ip_discovery_header]
+  header: c.POINTER[struct_ip_discovery_header]
   die: struct_die
 @c.record
 class struct_die(c.Struct):
   SIZE = 16
-  die_header: ctypes._Pointer[struct_die_header]
-  ip_list: ctypes._Pointer[struct_ip]
-  ip_v3_list: ctypes._Pointer[struct_ip_v3]
-  ip_v4_list: ctypes._Pointer[struct_ip_v4]
-struct_die.register_fields([('die_header', ctypes.POINTER(die_header), 0), ('ip_list', ctypes.POINTER(ip), 8), ('ip_v3_list', ctypes.POINTER(ip_v3), 8), ('ip_v4_list', ctypes.POINTER(ip_v4), 8)])
-struct_ip_structure.register_fields([('header', ctypes.POINTER(ip_discovery_header), 0), ('die', struct_die, 8)])
+  die_header: c.POINTER[struct_die_header]
+  ip_list: c.POINTER[struct_ip]
+  ip_v3_list: c.POINTER[struct_ip_v3]
+  ip_v4_list: c.POINTER[struct_ip_v4]
+struct_die.register_fields([('die_header', c.POINTER[die_header], 0), ('ip_list', c.POINTER[ip], 8), ('ip_v3_list', c.POINTER[ip_v3], 8), ('ip_v4_list', c.POINTER[ip_v4], 8)])
+struct_ip_structure.register_fields([('header', c.POINTER[ip_discovery_header], 0), ('die', struct_die, 8)])
 ip_structure: TypeAlias = struct_ip_structure
 @c.record
 class struct_gpu_info_header(c.Struct):
@@ -2647,8 +2647,8 @@ harvest_info: TypeAlias = struct_harvest_info
 class struct_harvest_table(c.Struct):
   SIZE = 136
   header: struct_harvest_info_header
-  list: ctypes.Array[struct_harvest_info]
-struct_harvest_table.register_fields([('header', harvest_info_header, 0), ('list', (harvest_info * 32), 8)])
+  list: c.Array[struct_harvest_info, Literal[32]]
+struct_harvest_table.register_fields([('header', harvest_info_header, 0), ('list', c.Array[harvest_info, Literal[32]], 8)])
 harvest_table: TypeAlias = struct_harvest_table
 @c.record
 class struct_mall_info_header(c.Struct):
@@ -2666,15 +2666,15 @@ class struct_mall_info_v1_0(c.Struct):
   m_s_present: int
   m_half_use: int
   m_mall_config: int
-  reserved: ctypes.Array[ctypes.c_uint32]
-struct_mall_info_v1_0.register_fields([('header', struct_mall_info_header, 0), ('mall_size_per_m', uint32_t, 12), ('m_s_present', uint32_t, 16), ('m_half_use', uint32_t, 20), ('m_mall_config', uint32_t, 24), ('reserved', (uint32_t * 5), 28)])
+  reserved: c.Array[ctypes.c_uint32, Literal[5]]
+struct_mall_info_v1_0.register_fields([('header', struct_mall_info_header, 0), ('mall_size_per_m', uint32_t, 12), ('m_s_present', uint32_t, 16), ('m_half_use', uint32_t, 20), ('m_mall_config', uint32_t, 24), ('reserved', c.Array[uint32_t, Literal[5]], 28)])
 @c.record
 class struct_mall_info_v2_0(c.Struct):
   SIZE = 48
   header: struct_mall_info_header
   mall_size_per_umc: int
-  reserved: ctypes.Array[ctypes.c_uint32]
-struct_mall_info_v2_0.register_fields([('header', struct_mall_info_header, 0), ('mall_size_per_umc', uint32_t, 12), ('reserved', (uint32_t * 8), 16)])
+  reserved: c.Array[ctypes.c_uint32, Literal[8]]
+struct_mall_info_v2_0.register_fields([('header', struct_mall_info_header, 0), ('mall_size_per_umc', uint32_t, 12), ('reserved', c.Array[uint32_t, Literal[8]], 16)])
 @c.record
 class struct_vcn_info_header(c.Struct):
   SIZE = 12
@@ -2688,7 +2688,7 @@ class struct_vcn_instance_info_v1_0(c.Struct):
   SIZE = 16
   instance_num: int
   fuse_data: union__fuse_data
-  reserved: ctypes.Array[ctypes.c_uint32]
+  reserved: c.Array[ctypes.c_uint32, Literal[2]]
 @c.record
 class union__fuse_data(c.Struct):
   SIZE = 4
@@ -2704,15 +2704,15 @@ class union__fuse_data_bits(c.Struct):
   reserved: int
 union__fuse_data_bits.register_fields([('av1_disabled', uint32_t, 0, 1, 0), ('vp9_disabled', uint32_t, 0, 1, 1), ('hevc_disabled', uint32_t, 0, 1, 2), ('h264_disabled', uint32_t, 0, 1, 3), ('reserved', uint32_t, 0, 28, 4)])
 union__fuse_data.register_fields([('bits', union__fuse_data_bits, 0), ('all_bits', uint32_t, 0)])
-struct_vcn_instance_info_v1_0.register_fields([('instance_num', uint32_t, 0), ('fuse_data', union__fuse_data, 4), ('reserved', (uint32_t * 2), 8)])
+struct_vcn_instance_info_v1_0.register_fields([('instance_num', uint32_t, 0), ('fuse_data', union__fuse_data, 4), ('reserved', c.Array[uint32_t, Literal[2]], 8)])
 @c.record
 class struct_vcn_info_v1_0(c.Struct):
   SIZE = 96
   header: struct_vcn_info_header
   num_of_instances: int
-  instance_info: ctypes.Array[struct_vcn_instance_info_v1_0]
-  reserved: ctypes.Array[ctypes.c_uint32]
-struct_vcn_info_v1_0.register_fields([('header', struct_vcn_info_header, 0), ('num_of_instances', uint32_t, 12), ('instance_info', (struct_vcn_instance_info_v1_0 * 4), 16), ('reserved', (uint32_t * 4), 80)])
+  instance_info: c.Array[struct_vcn_instance_info_v1_0, Literal[4]]
+  reserved: c.Array[ctypes.c_uint32, Literal[4]]
+struct_vcn_info_v1_0.register_fields([('header', struct_vcn_info_header, 0), ('num_of_instances', uint32_t, 12), ('instance_info', c.Array[struct_vcn_instance_info_v1_0, Literal[4]], 16), ('reserved', c.Array[uint32_t, Literal[4]], 80)])
 @c.record
 class struct_nps_info_header(c.Struct):
   SIZE = 12
@@ -2734,8 +2734,8 @@ class struct_nps_info_v1_0(c.Struct):
   header: struct_nps_info_header
   nps_type: int
   count: int
-  instance_info: ctypes.Array[struct_nps_instance_info_v1_0]
-struct_nps_info_v1_0.register_fields([('header', struct_nps_info_header, 0), ('nps_type', uint32_t, 12), ('count', uint32_t, 16), ('instance_info', (struct_nps_instance_info_v1_0 * 12), 20)])
+  instance_info: c.Array[struct_nps_instance_info_v1_0, Literal[12]]
+struct_nps_info_v1_0.register_fields([('header', struct_nps_info_header, 0), ('nps_type', uint32_t, 12), ('count', uint32_t, 16), ('instance_info', c.Array[struct_nps_instance_info_v1_0, Literal[12]], 20)])
 enum_amd_hw_ip_block_type: dict[int, str] = {(GC_HWIP:=1): 'GC_HWIP', (HDP_HWIP:=2): 'HDP_HWIP', (SDMA0_HWIP:=3): 'SDMA0_HWIP', (SDMA1_HWIP:=4): 'SDMA1_HWIP', (SDMA2_HWIP:=5): 'SDMA2_HWIP', (SDMA3_HWIP:=6): 'SDMA3_HWIP', (SDMA4_HWIP:=7): 'SDMA4_HWIP', (SDMA5_HWIP:=8): 'SDMA5_HWIP', (SDMA6_HWIP:=9): 'SDMA6_HWIP', (SDMA7_HWIP:=10): 'SDMA7_HWIP', (LSDMA_HWIP:=11): 'LSDMA_HWIP', (MMHUB_HWIP:=12): 'MMHUB_HWIP', (ATHUB_HWIP:=13): 'ATHUB_HWIP', (NBIO_HWIP:=14): 'NBIO_HWIP', (MP0_HWIP:=15): 'MP0_HWIP', (MP1_HWIP:=16): 'MP1_HWIP', (UVD_HWIP:=17): 'UVD_HWIP', (VCN_HWIP:=17): 'VCN_HWIP', (JPEG_HWIP:=17): 'JPEG_HWIP', (VCN1_HWIP:=18): 'VCN1_HWIP', (VCE_HWIP:=19): 'VCE_HWIP', (VPE_HWIP:=20): 'VPE_HWIP', (DF_HWIP:=21): 'DF_HWIP', (DCE_HWIP:=22): 'DCE_HWIP', (OSSSYS_HWIP:=23): 'OSSSYS_HWIP', (SMUIO_HWIP:=24): 'SMUIO_HWIP', (PWR_HWIP:=25): 'PWR_HWIP', (NBIF_HWIP:=26): 'NBIF_HWIP', (THM_HWIP:=27): 'THM_HWIP', (CLK_HWIP:=28): 'CLK_HWIP', (UMC_HWIP:=29): 'UMC_HWIP', (RSMU_HWIP:=30): 'RSMU_HWIP', (XGMI_HWIP:=31): 'XGMI_HWIP', (DCI_HWIP:=32): 'DCI_HWIP', (PCIE_HWIP:=33): 'PCIE_HWIP', (ISP_HWIP:=34): 'ISP_HWIP', (MAX_HWIP:=35): 'MAX_HWIP'}
 @c.record
 class struct_common_firmware_header(c.Struct):
@@ -2835,16 +2835,16 @@ class struct_psp_firmware_header_v2_0(c.Struct):
   SIZE = 52
   header: struct_common_firmware_header
   psp_fw_bin_count: int
-  psp_fw_bin: ctypes.Array[struct_psp_fw_bin_desc]
-struct_psp_firmware_header_v2_0.register_fields([('header', struct_common_firmware_header, 0), ('psp_fw_bin_count', ctypes.c_uint32, 32), ('psp_fw_bin', (struct_psp_fw_bin_desc * 1), 36)])
+  psp_fw_bin: c.Array[struct_psp_fw_bin_desc, Literal[1]]
+struct_psp_firmware_header_v2_0.register_fields([('header', struct_common_firmware_header, 0), ('psp_fw_bin_count', ctypes.c_uint32, 32), ('psp_fw_bin', c.Array[struct_psp_fw_bin_desc, Literal[1]], 36)])
 @c.record
 class struct_psp_firmware_header_v2_1(c.Struct):
   SIZE = 56
   header: struct_common_firmware_header
   psp_fw_bin_count: int
   psp_aux_fw_bin_index: int
-  psp_fw_bin: ctypes.Array[struct_psp_fw_bin_desc]
-struct_psp_firmware_header_v2_1.register_fields([('header', struct_common_firmware_header, 0), ('psp_fw_bin_count', ctypes.c_uint32, 32), ('psp_aux_fw_bin_index', ctypes.c_uint32, 36), ('psp_fw_bin', (struct_psp_fw_bin_desc * 1), 40)])
+  psp_fw_bin: c.Array[struct_psp_fw_bin_desc, Literal[1]]
+struct_psp_firmware_header_v2_1.register_fields([('header', struct_common_firmware_header, 0), ('psp_fw_bin_count', ctypes.c_uint32, 32), ('psp_aux_fw_bin_index', ctypes.c_uint32, 36), ('psp_fw_bin', c.Array[struct_psp_fw_bin_desc, Literal[1]], 40)])
 @c.record
 class struct_ta_firmware_header_v1_0(c.Struct):
   SIZE = 92
@@ -2861,8 +2861,8 @@ class struct_ta_firmware_header_v2_0(c.Struct):
   SIZE = 52
   header: struct_common_firmware_header
   ta_fw_bin_count: int
-  ta_fw_bin: ctypes.Array[struct_psp_fw_bin_desc]
-struct_ta_firmware_header_v2_0.register_fields([('header', struct_common_firmware_header, 0), ('ta_fw_bin_count', ctypes.c_uint32, 32), ('ta_fw_bin', (struct_psp_fw_bin_desc * 1), 36)])
+  ta_fw_bin: c.Array[struct_psp_fw_bin_desc, Literal[1]]
+struct_ta_firmware_header_v2_0.register_fields([('header', struct_common_firmware_header, 0), ('ta_fw_bin_count', ctypes.c_uint32, 32), ('ta_fw_bin', c.Array[struct_psp_fw_bin_desc, Literal[1]], 36)])
 @c.record
 class struct_gfx_firmware_header_v1_0(c.Struct):
   SIZE = 44
@@ -3138,8 +3138,8 @@ class union_amdgpu_firmware_header(c.Struct):
   dmcu: struct_dmcu_firmware_header_v1_0
   dmcub: struct_dmcub_firmware_header_v1_0
   imu: struct_imu_firmware_header_v1_0
-  raw: ctypes.Array[ctypes.c_ubyte]
-union_amdgpu_firmware_header.register_fields([('common', struct_common_firmware_header, 0), ('mc', struct_mc_firmware_header_v1_0, 0), ('smc', struct_smc_firmware_header_v1_0, 0), ('smc_v2_0', struct_smc_firmware_header_v2_0, 0), ('psp', struct_psp_firmware_header_v1_0, 0), ('psp_v1_1', struct_psp_firmware_header_v1_1, 0), ('psp_v1_3', struct_psp_firmware_header_v1_3, 0), ('psp_v2_0', struct_psp_firmware_header_v2_0, 0), ('psp_v2_1', struct_psp_firmware_header_v2_0, 0), ('ta', struct_ta_firmware_header_v1_0, 0), ('ta_v2_0', struct_ta_firmware_header_v2_0, 0), ('gfx', struct_gfx_firmware_header_v1_0, 0), ('gfx_v2_0', struct_gfx_firmware_header_v2_0, 0), ('rlc', struct_rlc_firmware_header_v1_0, 0), ('rlc_v2_0', struct_rlc_firmware_header_v2_0, 0), ('rlc_v2_1', struct_rlc_firmware_header_v2_1, 0), ('rlc_v2_2', struct_rlc_firmware_header_v2_2, 0), ('rlc_v2_3', struct_rlc_firmware_header_v2_3, 0), ('rlc_v2_4', struct_rlc_firmware_header_v2_4, 0), ('sdma', struct_sdma_firmware_header_v1_0, 0), ('sdma_v1_1', struct_sdma_firmware_header_v1_1, 0), ('sdma_v2_0', struct_sdma_firmware_header_v2_0, 0), ('sdma_v3_0', struct_sdma_firmware_header_v3_0, 0), ('gpu_info', struct_gpu_info_firmware_header_v1_0, 0), ('dmcu', struct_dmcu_firmware_header_v1_0, 0), ('dmcub', struct_dmcub_firmware_header_v1_0, 0), ('imu', struct_imu_firmware_header_v1_0, 0), ('raw', (ctypes.c_ubyte * 256), 0)])
+  raw: c.Array[ctypes.c_ubyte, Literal[256]]
+union_amdgpu_firmware_header.register_fields([('common', struct_common_firmware_header, 0), ('mc', struct_mc_firmware_header_v1_0, 0), ('smc', struct_smc_firmware_header_v1_0, 0), ('smc_v2_0', struct_smc_firmware_header_v2_0, 0), ('psp', struct_psp_firmware_header_v1_0, 0), ('psp_v1_1', struct_psp_firmware_header_v1_1, 0), ('psp_v1_3', struct_psp_firmware_header_v1_3, 0), ('psp_v2_0', struct_psp_firmware_header_v2_0, 0), ('psp_v2_1', struct_psp_firmware_header_v2_0, 0), ('ta', struct_ta_firmware_header_v1_0, 0), ('ta_v2_0', struct_ta_firmware_header_v2_0, 0), ('gfx', struct_gfx_firmware_header_v1_0, 0), ('gfx_v2_0', struct_gfx_firmware_header_v2_0, 0), ('rlc', struct_rlc_firmware_header_v1_0, 0), ('rlc_v2_0', struct_rlc_firmware_header_v2_0, 0), ('rlc_v2_1', struct_rlc_firmware_header_v2_1, 0), ('rlc_v2_2', struct_rlc_firmware_header_v2_2, 0), ('rlc_v2_3', struct_rlc_firmware_header_v2_3, 0), ('rlc_v2_4', struct_rlc_firmware_header_v2_4, 0), ('sdma', struct_sdma_firmware_header_v1_0, 0), ('sdma_v1_1', struct_sdma_firmware_header_v1_1, 0), ('sdma_v2_0', struct_sdma_firmware_header_v2_0, 0), ('sdma_v3_0', struct_sdma_firmware_header_v3_0, 0), ('gpu_info', struct_gpu_info_firmware_header_v1_0, 0), ('dmcu', struct_dmcu_firmware_header_v1_0, 0), ('dmcub', struct_dmcub_firmware_header_v1_0, 0), ('imu', struct_imu_firmware_header_v1_0, 0), ('raw', c.Array[ctypes.c_ubyte, Literal[256]], 0)])
 enum_AMDGPU_UCODE_ID: dict[int, str] = {(AMDGPU_UCODE_ID_CAP:=0): 'AMDGPU_UCODE_ID_CAP', (AMDGPU_UCODE_ID_SDMA0:=1): 'AMDGPU_UCODE_ID_SDMA0', (AMDGPU_UCODE_ID_SDMA1:=2): 'AMDGPU_UCODE_ID_SDMA1', (AMDGPU_UCODE_ID_SDMA2:=3): 'AMDGPU_UCODE_ID_SDMA2', (AMDGPU_UCODE_ID_SDMA3:=4): 'AMDGPU_UCODE_ID_SDMA3', (AMDGPU_UCODE_ID_SDMA4:=5): 'AMDGPU_UCODE_ID_SDMA4', (AMDGPU_UCODE_ID_SDMA5:=6): 'AMDGPU_UCODE_ID_SDMA5', (AMDGPU_UCODE_ID_SDMA6:=7): 'AMDGPU_UCODE_ID_SDMA6', (AMDGPU_UCODE_ID_SDMA7:=8): 'AMDGPU_UCODE_ID_SDMA7', (AMDGPU_UCODE_ID_SDMA_UCODE_TH0:=9): 'AMDGPU_UCODE_ID_SDMA_UCODE_TH0', (AMDGPU_UCODE_ID_SDMA_UCODE_TH1:=10): 'AMDGPU_UCODE_ID_SDMA_UCODE_TH1', (AMDGPU_UCODE_ID_SDMA_RS64:=11): 'AMDGPU_UCODE_ID_SDMA_RS64', (AMDGPU_UCODE_ID_CP_CE:=12): 'AMDGPU_UCODE_ID_CP_CE', (AMDGPU_UCODE_ID_CP_PFP:=13): 'AMDGPU_UCODE_ID_CP_PFP', (AMDGPU_UCODE_ID_CP_ME:=14): 'AMDGPU_UCODE_ID_CP_ME', (AMDGPU_UCODE_ID_CP_RS64_PFP:=15): 'AMDGPU_UCODE_ID_CP_RS64_PFP', (AMDGPU_UCODE_ID_CP_RS64_ME:=16): 'AMDGPU_UCODE_ID_CP_RS64_ME', (AMDGPU_UCODE_ID_CP_RS64_MEC:=17): 'AMDGPU_UCODE_ID_CP_RS64_MEC', (AMDGPU_UCODE_ID_CP_RS64_PFP_P0_STACK:=18): 'AMDGPU_UCODE_ID_CP_RS64_PFP_P0_STACK', (AMDGPU_UCODE_ID_CP_RS64_PFP_P1_STACK:=19): 'AMDGPU_UCODE_ID_CP_RS64_PFP_P1_STACK', (AMDGPU_UCODE_ID_CP_RS64_ME_P0_STACK:=20): 'AMDGPU_UCODE_ID_CP_RS64_ME_P0_STACK', (AMDGPU_UCODE_ID_CP_RS64_ME_P1_STACK:=21): 'AMDGPU_UCODE_ID_CP_RS64_ME_P1_STACK', (AMDGPU_UCODE_ID_CP_RS64_MEC_P0_STACK:=22): 'AMDGPU_UCODE_ID_CP_RS64_MEC_P0_STACK', (AMDGPU_UCODE_ID_CP_RS64_MEC_P1_STACK:=23): 'AMDGPU_UCODE_ID_CP_RS64_MEC_P1_STACK', (AMDGPU_UCODE_ID_CP_RS64_MEC_P2_STACK:=24): 'AMDGPU_UCODE_ID_CP_RS64_MEC_P2_STACK', (AMDGPU_UCODE_ID_CP_RS64_MEC_P3_STACK:=25): 'AMDGPU_UCODE_ID_CP_RS64_MEC_P3_STACK', (AMDGPU_UCODE_ID_CP_MEC1:=26): 'AMDGPU_UCODE_ID_CP_MEC1', (AMDGPU_UCODE_ID_CP_MEC1_JT:=27): 'AMDGPU_UCODE_ID_CP_MEC1_JT', (AMDGPU_UCODE_ID_CP_MEC2:=28): 'AMDGPU_UCODE_ID_CP_MEC2', (AMDGPU_UCODE_ID_CP_MEC2_JT:=29): 'AMDGPU_UCODE_ID_CP_MEC2_JT', (AMDGPU_UCODE_ID_CP_MES:=30): 'AMDGPU_UCODE_ID_CP_MES', (AMDGPU_UCODE_ID_CP_MES_DATA:=31): 'AMDGPU_UCODE_ID_CP_MES_DATA', (AMDGPU_UCODE_ID_CP_MES1:=32): 'AMDGPU_UCODE_ID_CP_MES1', (AMDGPU_UCODE_ID_CP_MES1_DATA:=33): 'AMDGPU_UCODE_ID_CP_MES1_DATA', (AMDGPU_UCODE_ID_IMU_I:=34): 'AMDGPU_UCODE_ID_IMU_I', (AMDGPU_UCODE_ID_IMU_D:=35): 'AMDGPU_UCODE_ID_IMU_D', (AMDGPU_UCODE_ID_GLOBAL_TAP_DELAYS:=36): 'AMDGPU_UCODE_ID_GLOBAL_TAP_DELAYS', (AMDGPU_UCODE_ID_SE0_TAP_DELAYS:=37): 'AMDGPU_UCODE_ID_SE0_TAP_DELAYS', (AMDGPU_UCODE_ID_SE1_TAP_DELAYS:=38): 'AMDGPU_UCODE_ID_SE1_TAP_DELAYS', (AMDGPU_UCODE_ID_SE2_TAP_DELAYS:=39): 'AMDGPU_UCODE_ID_SE2_TAP_DELAYS', (AMDGPU_UCODE_ID_SE3_TAP_DELAYS:=40): 'AMDGPU_UCODE_ID_SE3_TAP_DELAYS', (AMDGPU_UCODE_ID_RLC_RESTORE_LIST_CNTL:=41): 'AMDGPU_UCODE_ID_RLC_RESTORE_LIST_CNTL', (AMDGPU_UCODE_ID_RLC_RESTORE_LIST_GPM_MEM:=42): 'AMDGPU_UCODE_ID_RLC_RESTORE_LIST_GPM_MEM', (AMDGPU_UCODE_ID_RLC_RESTORE_LIST_SRM_MEM:=43): 'AMDGPU_UCODE_ID_RLC_RESTORE_LIST_SRM_MEM', (AMDGPU_UCODE_ID_RLC_IRAM:=44): 'AMDGPU_UCODE_ID_RLC_IRAM', (AMDGPU_UCODE_ID_RLC_DRAM:=45): 'AMDGPU_UCODE_ID_RLC_DRAM', (AMDGPU_UCODE_ID_RLC_P:=46): 'AMDGPU_UCODE_ID_RLC_P', (AMDGPU_UCODE_ID_RLC_V:=47): 'AMDGPU_UCODE_ID_RLC_V', (AMDGPU_UCODE_ID_RLC_G:=48): 'AMDGPU_UCODE_ID_RLC_G', (AMDGPU_UCODE_ID_STORAGE:=49): 'AMDGPU_UCODE_ID_STORAGE', (AMDGPU_UCODE_ID_SMC:=50): 'AMDGPU_UCODE_ID_SMC', (AMDGPU_UCODE_ID_PPTABLE:=51): 'AMDGPU_UCODE_ID_PPTABLE', (AMDGPU_UCODE_ID_UVD:=52): 'AMDGPU_UCODE_ID_UVD', (AMDGPU_UCODE_ID_UVD1:=53): 'AMDGPU_UCODE_ID_UVD1', (AMDGPU_UCODE_ID_VCE:=54): 'AMDGPU_UCODE_ID_VCE', (AMDGPU_UCODE_ID_VCN:=55): 'AMDGPU_UCODE_ID_VCN', (AMDGPU_UCODE_ID_VCN1:=56): 'AMDGPU_UCODE_ID_VCN1', (AMDGPU_UCODE_ID_DMCU_ERAM:=57): 'AMDGPU_UCODE_ID_DMCU_ERAM', (AMDGPU_UCODE_ID_DMCU_INTV:=58): 'AMDGPU_UCODE_ID_DMCU_INTV', (AMDGPU_UCODE_ID_VCN0_RAM:=59): 'AMDGPU_UCODE_ID_VCN0_RAM', (AMDGPU_UCODE_ID_VCN1_RAM:=60): 'AMDGPU_UCODE_ID_VCN1_RAM', (AMDGPU_UCODE_ID_DMCUB:=61): 'AMDGPU_UCODE_ID_DMCUB', (AMDGPU_UCODE_ID_VPE_CTX:=62): 'AMDGPU_UCODE_ID_VPE_CTX', (AMDGPU_UCODE_ID_VPE_CTL:=63): 'AMDGPU_UCODE_ID_VPE_CTL', (AMDGPU_UCODE_ID_VPE:=64): 'AMDGPU_UCODE_ID_VPE', (AMDGPU_UCODE_ID_UMSCH_MM_UCODE:=65): 'AMDGPU_UCODE_ID_UMSCH_MM_UCODE', (AMDGPU_UCODE_ID_UMSCH_MM_DATA:=66): 'AMDGPU_UCODE_ID_UMSCH_MM_DATA', (AMDGPU_UCODE_ID_UMSCH_MM_CMD_BUFFER:=67): 'AMDGPU_UCODE_ID_UMSCH_MM_CMD_BUFFER', (AMDGPU_UCODE_ID_P2S_TABLE:=68): 'AMDGPU_UCODE_ID_P2S_TABLE', (AMDGPU_UCODE_ID_JPEG_RAM:=69): 'AMDGPU_UCODE_ID_JPEG_RAM', (AMDGPU_UCODE_ID_ISP:=70): 'AMDGPU_UCODE_ID_ISP', (AMDGPU_UCODE_ID_MAXIMUM:=71): 'AMDGPU_UCODE_ID_MAXIMUM'}
 enum_AMDGPU_UCODE_STATUS: dict[int, str] = {(AMDGPU_UCODE_STATUS_INVALID:=0): 'AMDGPU_UCODE_STATUS_INVALID', (AMDGPU_UCODE_STATUS_NOT_LOADED:=1): 'AMDGPU_UCODE_STATUS_NOT_LOADED', (AMDGPU_UCODE_STATUS_LOADED:=2): 'AMDGPU_UCODE_STATUS_LOADED'}
 enum_amdgpu_firmware_load_type: dict[int, str] = {(AMDGPU_FW_LOAD_DIRECT:=0): 'AMDGPU_FW_LOAD_DIRECT', (AMDGPU_FW_LOAD_PSP:=1): 'AMDGPU_FW_LOAD_PSP', (AMDGPU_FW_LOAD_SMU:=2): 'AMDGPU_FW_LOAD_SMU', (AMDGPU_FW_LOAD_RLC_BACKDOOR_AUTO:=3): 'AMDGPU_FW_LOAD_RLC_BACKDOOR_AUTO'}
@@ -3147,14 +3147,14 @@ enum_amdgpu_firmware_load_type: dict[int, str] = {(AMDGPU_FW_LOAD_DIRECT:=0): 'A
 class struct_amdgpu_firmware_info(c.Struct):
   SIZE = 48
   ucode_id: int
-  fw: ctypes._Pointer[struct_firmware]
+  fw: c.POINTER[struct_firmware]
   mc_addr: int
-  kaddr: int|None
+  kaddr: ctypes.c_void_p
   ucode_size: int
   tmr_mc_addr_lo: int
   tmr_mc_addr_hi: int
 class struct_firmware(c.Struct): pass
-struct_amdgpu_firmware_info.register_fields([('ucode_id', ctypes.c_uint32, 0), ('fw', ctypes.POINTER(struct_firmware), 8), ('mc_addr', ctypes.c_uint64, 16), ('kaddr', ctypes.c_void_p, 24), ('ucode_size', ctypes.c_uint32, 32), ('tmr_mc_addr_lo', ctypes.c_uint32, 36), ('tmr_mc_addr_hi', ctypes.c_uint32, 40)])
+struct_amdgpu_firmware_info.register_fields([('ucode_id', ctypes.c_uint32, 0), ('fw', c.POINTER[struct_firmware], 8), ('mc_addr', ctypes.c_uint64, 16), ('kaddr', ctypes.c_void_p, 24), ('ucode_size', ctypes.c_uint32, 32), ('tmr_mc_addr_lo', ctypes.c_uint32, 36), ('tmr_mc_addr_hi', ctypes.c_uint32, 40)])
 enum_psp_gfx_crtl_cmd_id: dict[int, str] = {(GFX_CTRL_CMD_ID_INIT_RBI_RING:=65536): 'GFX_CTRL_CMD_ID_INIT_RBI_RING', (GFX_CTRL_CMD_ID_INIT_GPCOM_RING:=131072): 'GFX_CTRL_CMD_ID_INIT_GPCOM_RING', (GFX_CTRL_CMD_ID_DESTROY_RINGS:=196608): 'GFX_CTRL_CMD_ID_DESTROY_RINGS', (GFX_CTRL_CMD_ID_CAN_INIT_RINGS:=262144): 'GFX_CTRL_CMD_ID_CAN_INIT_RINGS', (GFX_CTRL_CMD_ID_ENABLE_INT:=327680): 'GFX_CTRL_CMD_ID_ENABLE_INT', (GFX_CTRL_CMD_ID_DISABLE_INT:=393216): 'GFX_CTRL_CMD_ID_DISABLE_INT', (GFX_CTRL_CMD_ID_MODE1_RST:=458752): 'GFX_CTRL_CMD_ID_MODE1_RST', (GFX_CTRL_CMD_ID_GBR_IH_SET:=524288): 'GFX_CTRL_CMD_ID_GBR_IH_SET', (GFX_CTRL_CMD_ID_CONSUME_CMD:=589824): 'GFX_CTRL_CMD_ID_CONSUME_CMD', (GFX_CTRL_CMD_ID_DESTROY_GPCOM_RING:=786432): 'GFX_CTRL_CMD_ID_DESTROY_GPCOM_RING', (GFX_CTRL_CMD_ID_MAX:=983040): 'GFX_CTRL_CMD_ID_MAX'}
 @c.record
 class struct_psp_gfx_ctrl(c.Struct):
@@ -3198,8 +3198,8 @@ class struct_psp_gfx_buf_list(c.Struct):
   SIZE = 776
   num_desc: int
   total_size: int
-  buf_desc: ctypes.Array[struct_psp_gfx_buf_desc]
-struct_psp_gfx_buf_list.register_fields([('num_desc', ctypes.c_uint32, 0), ('total_size', ctypes.c_uint32, 4), ('buf_desc', (struct_psp_gfx_buf_desc * 64), 8)])
+  buf_desc: c.Array[struct_psp_gfx_buf_desc, Literal[64]]
+struct_psp_gfx_buf_list.register_fields([('num_desc', ctypes.c_uint32, 0), ('total_size', ctypes.c_uint32, 4), ('buf_desc', c.Array[struct_psp_gfx_buf_desc, Literal[64]], 8)])
 @c.record
 class struct_psp_gfx_cmd_invoke_cmd(c.Struct):
   SIZE = 784
@@ -3290,8 +3290,8 @@ union_psp_gfx_commands.register_fields([('cmd_load_ta', struct_psp_gfx_cmd_load_
 @c.record
 class struct_psp_gfx_uresp_reserved(c.Struct):
   SIZE = 32
-  reserved: ctypes.Array[ctypes.c_uint32]
-struct_psp_gfx_uresp_reserved.register_fields([('reserved', (ctypes.c_uint32 * 8), 0)])
+  reserved: c.Array[ctypes.c_uint32, Literal[8]]
+struct_psp_gfx_uresp_reserved.register_fields([('reserved', c.Array[ctypes.c_uint32, Literal[8]], 0)])
 @c.record
 class struct_psp_gfx_uresp_fwar_db_info(c.Struct):
   SIZE = 8
@@ -3318,9 +3318,9 @@ class struct_psp_gfx_resp(c.Struct):
   fw_addr_lo: int
   fw_addr_hi: int
   tmr_size: int
-  reserved: ctypes.Array[ctypes.c_uint32]
+  reserved: c.Array[ctypes.c_uint32, Literal[11]]
   uresp: union_psp_gfx_uresp
-struct_psp_gfx_resp.register_fields([('status', ctypes.c_uint32, 0), ('session_id', ctypes.c_uint32, 4), ('fw_addr_lo', ctypes.c_uint32, 8), ('fw_addr_hi', ctypes.c_uint32, 12), ('tmr_size', ctypes.c_uint32, 16), ('reserved', (ctypes.c_uint32 * 11), 20), ('uresp', union_psp_gfx_uresp, 64)])
+struct_psp_gfx_resp.register_fields([('status', ctypes.c_uint32, 0), ('session_id', ctypes.c_uint32, 4), ('fw_addr_lo', ctypes.c_uint32, 8), ('fw_addr_hi', ctypes.c_uint32, 12), ('tmr_size', ctypes.c_uint32, 16), ('reserved', c.Array[ctypes.c_uint32, Literal[11]], 20), ('uresp', union_psp_gfx_uresp, 64)])
 @c.record
 class struct_psp_gfx_cmd_resp(c.Struct):
   SIZE = 1024
@@ -3332,10 +3332,10 @@ class struct_psp_gfx_cmd_resp(c.Struct):
   resp_offset: int
   resp_buf_size: int
   cmd: union_psp_gfx_commands
-  reserved_1: ctypes.Array[ctypes.c_ubyte]
+  reserved_1: c.Array[ctypes.c_ubyte, Literal[52]]
   resp: struct_psp_gfx_resp
-  reserved_2: ctypes.Array[ctypes.c_ubyte]
-struct_psp_gfx_cmd_resp.register_fields([('buf_size', ctypes.c_uint32, 0), ('buf_version', ctypes.c_uint32, 4), ('cmd_id', ctypes.c_uint32, 8), ('resp_buf_addr_lo', ctypes.c_uint32, 12), ('resp_buf_addr_hi', ctypes.c_uint32, 16), ('resp_offset', ctypes.c_uint32, 20), ('resp_buf_size', ctypes.c_uint32, 24), ('cmd', union_psp_gfx_commands, 28), ('reserved_1', (ctypes.c_ubyte * 52), 812), ('resp', struct_psp_gfx_resp, 864), ('reserved_2', (ctypes.c_ubyte * 64), 960)])
+  reserved_2: c.Array[ctypes.c_ubyte, Literal[64]]
+struct_psp_gfx_cmd_resp.register_fields([('buf_size', ctypes.c_uint32, 0), ('buf_version', ctypes.c_uint32, 4), ('cmd_id', ctypes.c_uint32, 8), ('resp_buf_addr_lo', ctypes.c_uint32, 12), ('resp_buf_addr_hi', ctypes.c_uint32, 16), ('resp_offset', ctypes.c_uint32, 20), ('resp_buf_size', ctypes.c_uint32, 24), ('cmd', union_psp_gfx_commands, 28), ('reserved_1', c.Array[ctypes.c_ubyte, Literal[52]], 812), ('resp', struct_psp_gfx_resp, 864), ('reserved_2', c.Array[ctypes.c_ubyte, Literal[64]], 960)])
 @c.record
 class struct_psp_gfx_rb_frame(c.Struct):
   SIZE = 64
@@ -3349,9 +3349,9 @@ class struct_psp_gfx_rb_frame(c.Struct):
   sid_hi: int
   vmid: int
   frame_type: int
-  reserved1: ctypes.Array[ctypes.c_ubyte]
-  reserved2: ctypes.Array[ctypes.c_uint32]
-struct_psp_gfx_rb_frame.register_fields([('cmd_buf_addr_lo', ctypes.c_uint32, 0), ('cmd_buf_addr_hi', ctypes.c_uint32, 4), ('cmd_buf_size', ctypes.c_uint32, 8), ('fence_addr_lo', ctypes.c_uint32, 12), ('fence_addr_hi', ctypes.c_uint32, 16), ('fence_value', ctypes.c_uint32, 20), ('sid_lo', ctypes.c_uint32, 24), ('sid_hi', ctypes.c_uint32, 28), ('vmid', ctypes.c_ubyte, 32), ('frame_type', ctypes.c_ubyte, 33), ('reserved1', (ctypes.c_ubyte * 2), 34), ('reserved2', (ctypes.c_uint32 * 7), 36)])
+  reserved1: c.Array[ctypes.c_ubyte, Literal[2]]
+  reserved2: c.Array[ctypes.c_uint32, Literal[7]]
+struct_psp_gfx_rb_frame.register_fields([('cmd_buf_addr_lo', ctypes.c_uint32, 0), ('cmd_buf_addr_hi', ctypes.c_uint32, 4), ('cmd_buf_size', ctypes.c_uint32, 8), ('fence_addr_lo', ctypes.c_uint32, 12), ('fence_addr_hi', ctypes.c_uint32, 16), ('fence_value', ctypes.c_uint32, 20), ('sid_lo', ctypes.c_uint32, 24), ('sid_hi', ctypes.c_uint32, 28), ('vmid', ctypes.c_ubyte, 32), ('frame_type', ctypes.c_ubyte, 33), ('reserved1', c.Array[ctypes.c_ubyte, Literal[2]], 34), ('reserved2', c.Array[ctypes.c_uint32, Literal[7]], 36)])
 enum_tee_error_code: dict[int, str] = {(TEE_SUCCESS:=0): 'TEE_SUCCESS', (TEE_ERROR_NOT_SUPPORTED:=4294901770): 'TEE_ERROR_NOT_SUPPORTED'}
 enum_psp_shared_mem_size: dict[int, str] = {(PSP_ASD_SHARED_MEM_SIZE:=0): 'PSP_ASD_SHARED_MEM_SIZE', (PSP_XGMI_SHARED_MEM_SIZE:=16384): 'PSP_XGMI_SHARED_MEM_SIZE', (PSP_RAS_SHARED_MEM_SIZE:=16384): 'PSP_RAS_SHARED_MEM_SIZE', (PSP_HDCP_SHARED_MEM_SIZE:=16384): 'PSP_HDCP_SHARED_MEM_SIZE', (PSP_DTM_SHARED_MEM_SIZE:=16384): 'PSP_DTM_SHARED_MEM_SIZE', (PSP_RAP_SHARED_MEM_SIZE:=16384): 'PSP_RAP_SHARED_MEM_SIZE', (PSP_SECUREDISPLAY_SHARED_MEM_SIZE:=16384): 'PSP_SECUREDISPLAY_SHARED_MEM_SIZE'}
 enum_ta_type_id: dict[int, str] = {(TA_TYPE_XGMI:=1): 'TA_TYPE_XGMI', (TA_TYPE_RAS:=2): 'TA_TYPE_RAS', (TA_TYPE_HDCP:=3): 'TA_TYPE_HDCP', (TA_TYPE_DTM:=4): 'TA_TYPE_DTM', (TA_TYPE_RAP:=5): 'TA_TYPE_RAP', (TA_TYPE_SECUREDISPLAY:=6): 'TA_TYPE_SECUREDISPLAY', (TA_TYPE_MAX_INDEX:=7): 'TA_TYPE_MAX_INDEX'}
@@ -3381,9 +3381,9 @@ class struct_amdgpu_iv_entry(c.Struct):
   timestamp_src: int
   pasid: int
   node_id: int
-  src_data: ctypes.Array[ctypes.c_uint32]
-  iv_entry: ctypes._Pointer[ctypes.c_uint32]
-struct_amdgpu_iv_entry.register_fields([('client_id', ctypes.c_uint32, 0), ('src_id', ctypes.c_uint32, 4), ('ring_id', ctypes.c_uint32, 8), ('vmid', ctypes.c_uint32, 12), ('vmid_src', ctypes.c_uint32, 16), ('timestamp', ctypes.c_uint64, 24), ('timestamp_src', ctypes.c_uint32, 32), ('pasid', ctypes.c_uint32, 36), ('node_id', ctypes.c_uint32, 40), ('src_data', (ctypes.c_uint32 * 4), 44), ('iv_entry', ctypes.POINTER(ctypes.c_uint32), 64)])
+  src_data: c.Array[ctypes.c_uint32, Literal[4]]
+  iv_entry: c.POINTER[ctypes.c_uint32]
+struct_amdgpu_iv_entry.register_fields([('client_id', ctypes.c_uint32, 0), ('src_id', ctypes.c_uint32, 4), ('ring_id', ctypes.c_uint32, 8), ('vmid', ctypes.c_uint32, 12), ('vmid_src', ctypes.c_uint32, 16), ('timestamp', ctypes.c_uint64, 24), ('timestamp_src', ctypes.c_uint32, 32), ('pasid', ctypes.c_uint32, 36), ('node_id', ctypes.c_uint32, 40), ('src_data', c.Array[ctypes.c_uint32, Literal[4]], 44), ('iv_entry', c.POINTER[ctypes.c_uint32], 64)])
 enum_interrupt_node_id_per_aid: dict[int, str] = {(AID0_NODEID:=0): 'AID0_NODEID', (XCD0_NODEID:=1): 'XCD0_NODEID', (XCD1_NODEID:=2): 'XCD1_NODEID', (AID1_NODEID:=4): 'AID1_NODEID', (XCD2_NODEID:=5): 'XCD2_NODEID', (XCD3_NODEID:=6): 'XCD3_NODEID', (AID2_NODEID:=8): 'AID2_NODEID', (XCD4_NODEID:=9): 'XCD4_NODEID', (XCD5_NODEID:=10): 'XCD5_NODEID', (AID3_NODEID:=12): 'AID3_NODEID', (XCD6_NODEID:=13): 'XCD6_NODEID', (XCD7_NODEID:=14): 'XCD7_NODEID', (NODEID_MAX:=15): 'NODEID_MAX'}
 enum_AMDGPU_DOORBELL_ASSIGNMENT: dict[int, str] = {(AMDGPU_DOORBELL_KIQ:=0): 'AMDGPU_DOORBELL_KIQ', (AMDGPU_DOORBELL_HIQ:=1): 'AMDGPU_DOORBELL_HIQ', (AMDGPU_DOORBELL_DIQ:=2): 'AMDGPU_DOORBELL_DIQ', (AMDGPU_DOORBELL_MEC_RING0:=16): 'AMDGPU_DOORBELL_MEC_RING0', (AMDGPU_DOORBELL_MEC_RING1:=17): 'AMDGPU_DOORBELL_MEC_RING1', (AMDGPU_DOORBELL_MEC_RING2:=18): 'AMDGPU_DOORBELL_MEC_RING2', (AMDGPU_DOORBELL_MEC_RING3:=19): 'AMDGPU_DOORBELL_MEC_RING3', (AMDGPU_DOORBELL_MEC_RING4:=20): 'AMDGPU_DOORBELL_MEC_RING4', (AMDGPU_DOORBELL_MEC_RING5:=21): 'AMDGPU_DOORBELL_MEC_RING5', (AMDGPU_DOORBELL_MEC_RING6:=22): 'AMDGPU_DOORBELL_MEC_RING6', (AMDGPU_DOORBELL_MEC_RING7:=23): 'AMDGPU_DOORBELL_MEC_RING7', (AMDGPU_DOORBELL_GFX_RING0:=32): 'AMDGPU_DOORBELL_GFX_RING0', (AMDGPU_DOORBELL_sDMA_ENGINE0:=480): 'AMDGPU_DOORBELL_sDMA_ENGINE0', (AMDGPU_DOORBELL_sDMA_ENGINE1:=481): 'AMDGPU_DOORBELL_sDMA_ENGINE1', (AMDGPU_DOORBELL_IH:=488): 'AMDGPU_DOORBELL_IH', (AMDGPU_DOORBELL_MAX_ASSIGNMENT:=1023): 'AMDGPU_DOORBELL_MAX_ASSIGNMENT', (AMDGPU_DOORBELL_INVALID:=65535): 'AMDGPU_DOORBELL_INVALID'}
 enum_AMDGPU_VEGA20_DOORBELL_ASSIGNMENT: dict[int, str] = {(AMDGPU_VEGA20_DOORBELL_KIQ:=0): 'AMDGPU_VEGA20_DOORBELL_KIQ', (AMDGPU_VEGA20_DOORBELL_HIQ:=1): 'AMDGPU_VEGA20_DOORBELL_HIQ', (AMDGPU_VEGA20_DOORBELL_DIQ:=2): 'AMDGPU_VEGA20_DOORBELL_DIQ', (AMDGPU_VEGA20_DOORBELL_MEC_RING0:=3): 'AMDGPU_VEGA20_DOORBELL_MEC_RING0', (AMDGPU_VEGA20_DOORBELL_MEC_RING1:=4): 'AMDGPU_VEGA20_DOORBELL_MEC_RING1', (AMDGPU_VEGA20_DOORBELL_MEC_RING2:=5): 'AMDGPU_VEGA20_DOORBELL_MEC_RING2', (AMDGPU_VEGA20_DOORBELL_MEC_RING3:=6): 'AMDGPU_VEGA20_DOORBELL_MEC_RING3', (AMDGPU_VEGA20_DOORBELL_MEC_RING4:=7): 'AMDGPU_VEGA20_DOORBELL_MEC_RING4', (AMDGPU_VEGA20_DOORBELL_MEC_RING5:=8): 'AMDGPU_VEGA20_DOORBELL_MEC_RING5', (AMDGPU_VEGA20_DOORBELL_MEC_RING6:=9): 'AMDGPU_VEGA20_DOORBELL_MEC_RING6', (AMDGPU_VEGA20_DOORBELL_MEC_RING7:=10): 'AMDGPU_VEGA20_DOORBELL_MEC_RING7', (AMDGPU_VEGA20_DOORBELL_USERQUEUE_START:=11): 'AMDGPU_VEGA20_DOORBELL_USERQUEUE_START', (AMDGPU_VEGA20_DOORBELL_USERQUEUE_END:=138): 'AMDGPU_VEGA20_DOORBELL_USERQUEUE_END', (AMDGPU_VEGA20_DOORBELL_GFX_RING0:=139): 'AMDGPU_VEGA20_DOORBELL_GFX_RING0', (AMDGPU_VEGA20_DOORBELL_sDMA_ENGINE0:=256): 'AMDGPU_VEGA20_DOORBELL_sDMA_ENGINE0', (AMDGPU_VEGA20_DOORBELL_sDMA_ENGINE1:=266): 'AMDGPU_VEGA20_DOORBELL_sDMA_ENGINE1', (AMDGPU_VEGA20_DOORBELL_sDMA_ENGINE2:=276): 'AMDGPU_VEGA20_DOORBELL_sDMA_ENGINE2', (AMDGPU_VEGA20_DOORBELL_sDMA_ENGINE3:=286): 'AMDGPU_VEGA20_DOORBELL_sDMA_ENGINE3', (AMDGPU_VEGA20_DOORBELL_sDMA_ENGINE4:=296): 'AMDGPU_VEGA20_DOORBELL_sDMA_ENGINE4', (AMDGPU_VEGA20_DOORBELL_sDMA_ENGINE5:=306): 'AMDGPU_VEGA20_DOORBELL_sDMA_ENGINE5', (AMDGPU_VEGA20_DOORBELL_sDMA_ENGINE6:=316): 'AMDGPU_VEGA20_DOORBELL_sDMA_ENGINE6', (AMDGPU_VEGA20_DOORBELL_sDMA_ENGINE7:=326): 'AMDGPU_VEGA20_DOORBELL_sDMA_ENGINE7', (AMDGPU_VEGA20_DOORBELL_IH:=376): 'AMDGPU_VEGA20_DOORBELL_IH', (AMDGPU_VEGA20_DOORBELL64_VCN0_1:=392): 'AMDGPU_VEGA20_DOORBELL64_VCN0_1', (AMDGPU_VEGA20_DOORBELL64_VCN2_3:=393): 'AMDGPU_VEGA20_DOORBELL64_VCN2_3', (AMDGPU_VEGA20_DOORBELL64_VCN4_5:=394): 'AMDGPU_VEGA20_DOORBELL64_VCN4_5', (AMDGPU_VEGA20_DOORBELL64_VCN6_7:=395): 'AMDGPU_VEGA20_DOORBELL64_VCN6_7', (AMDGPU_VEGA20_DOORBELL64_VCN8_9:=396): 'AMDGPU_VEGA20_DOORBELL64_VCN8_9', (AMDGPU_VEGA20_DOORBELL64_VCNa_b:=397): 'AMDGPU_VEGA20_DOORBELL64_VCNa_b', (AMDGPU_VEGA20_DOORBELL64_VCNc_d:=398): 'AMDGPU_VEGA20_DOORBELL64_VCNc_d', (AMDGPU_VEGA20_DOORBELL64_VCNe_f:=399): 'AMDGPU_VEGA20_DOORBELL64_VCNe_f', (AMDGPU_VEGA20_DOORBELL64_UVD_RING0_1:=392): 'AMDGPU_VEGA20_DOORBELL64_UVD_RING0_1', (AMDGPU_VEGA20_DOORBELL64_UVD_RING2_3:=393): 'AMDGPU_VEGA20_DOORBELL64_UVD_RING2_3', (AMDGPU_VEGA20_DOORBELL64_UVD_RING4_5:=394): 'AMDGPU_VEGA20_DOORBELL64_UVD_RING4_5', (AMDGPU_VEGA20_DOORBELL64_UVD_RING6_7:=395): 'AMDGPU_VEGA20_DOORBELL64_UVD_RING6_7', (AMDGPU_VEGA20_DOORBELL64_VCE_RING0_1:=396): 'AMDGPU_VEGA20_DOORBELL64_VCE_RING0_1', (AMDGPU_VEGA20_DOORBELL64_VCE_RING2_3:=397): 'AMDGPU_VEGA20_DOORBELL64_VCE_RING2_3', (AMDGPU_VEGA20_DOORBELL64_VCE_RING4_5:=398): 'AMDGPU_VEGA20_DOORBELL64_VCE_RING4_5', (AMDGPU_VEGA20_DOORBELL64_VCE_RING6_7:=399): 'AMDGPU_VEGA20_DOORBELL64_VCE_RING6_7', (AMDGPU_VEGA20_DOORBELL64_FIRST_NON_CP:=256): 'AMDGPU_VEGA20_DOORBELL64_FIRST_NON_CP', (AMDGPU_VEGA20_DOORBELL64_LAST_NON_CP:=399): 'AMDGPU_VEGA20_DOORBELL64_LAST_NON_CP', (AMDGPU_VEGA20_DOORBELL_XCC1_KIQ_START:=400): 'AMDGPU_VEGA20_DOORBELL_XCC1_KIQ_START', (AMDGPU_VEGA20_DOORBELL_XCC1_MEC_RING0_START:=407): 'AMDGPU_VEGA20_DOORBELL_XCC1_MEC_RING0_START', (AMDGPU_VEGA20_DOORBELL_AID1_sDMA_START:=464): 'AMDGPU_VEGA20_DOORBELL_AID1_sDMA_START', (AMDGPU_VEGA20_DOORBELL_MAX_ASSIGNMENT:=503): 'AMDGPU_VEGA20_DOORBELL_MAX_ASSIGNMENT', (AMDGPU_VEGA20_DOORBELL_INVALID:=65535): 'AMDGPU_VEGA20_DOORBELL_INVALID'}
@@ -4102,12 +4102,12 @@ struct_v9_de_ib_state.register_fields([('ib_completion_status', uint32_t, 0), ('
 class struct_v9_gfx_meta_data(c.Struct):
   SIZE = 4096
   ce_payload: struct_v9_ce_ib_state
-  reserved1: ctypes.Array[ctypes.c_uint32]
+  reserved1: c.Array[ctypes.c_uint32, Literal[54]]
   de_payload: struct_v9_de_ib_state
   DeIbBaseAddrLo: int
   DeIbBaseAddrHi: int
-  reserved2: ctypes.Array[ctypes.c_uint32]
-struct_v9_gfx_meta_data.register_fields([('ce_payload', struct_v9_ce_ib_state, 0), ('reserved1', (uint32_t * 54), 40), ('de_payload', struct_v9_de_ib_state, 256), ('DeIbBaseAddrLo', uint32_t, 364), ('DeIbBaseAddrHi', uint32_t, 368), ('reserved2', (uint32_t * 931), 372)])
+  reserved2: c.Array[ctypes.c_uint32, Literal[931]]
+struct_v9_gfx_meta_data.register_fields([('ce_payload', struct_v9_ce_ib_state, 0), ('reserved1', c.Array[uint32_t, Literal[54]], 40), ('de_payload', struct_v9_de_ib_state, 256), ('DeIbBaseAddrLo', uint32_t, 364), ('DeIbBaseAddrHi', uint32_t, 368), ('reserved2', c.Array[uint32_t, Literal[931]], 372)])
 enum_soc15_ih_clientid: dict[int, str] = {(SOC15_IH_CLIENTID_IH:=0): 'SOC15_IH_CLIENTID_IH', (SOC15_IH_CLIENTID_ACP:=1): 'SOC15_IH_CLIENTID_ACP', (SOC15_IH_CLIENTID_ATHUB:=2): 'SOC15_IH_CLIENTID_ATHUB', (SOC15_IH_CLIENTID_BIF:=3): 'SOC15_IH_CLIENTID_BIF', (SOC15_IH_CLIENTID_DCE:=4): 'SOC15_IH_CLIENTID_DCE', (SOC15_IH_CLIENTID_ISP:=5): 'SOC15_IH_CLIENTID_ISP', (SOC15_IH_CLIENTID_PCIE0:=6): 'SOC15_IH_CLIENTID_PCIE0', (SOC15_IH_CLIENTID_RLC:=7): 'SOC15_IH_CLIENTID_RLC', (SOC15_IH_CLIENTID_SDMA0:=8): 'SOC15_IH_CLIENTID_SDMA0', (SOC15_IH_CLIENTID_SDMA1:=9): 'SOC15_IH_CLIENTID_SDMA1', (SOC15_IH_CLIENTID_SE0SH:=10): 'SOC15_IH_CLIENTID_SE0SH', (SOC15_IH_CLIENTID_SE1SH:=11): 'SOC15_IH_CLIENTID_SE1SH', (SOC15_IH_CLIENTID_SE2SH:=12): 'SOC15_IH_CLIENTID_SE2SH', (SOC15_IH_CLIENTID_SE3SH:=13): 'SOC15_IH_CLIENTID_SE3SH', (SOC15_IH_CLIENTID_UVD1:=14): 'SOC15_IH_CLIENTID_UVD1', (SOC15_IH_CLIENTID_THM:=15): 'SOC15_IH_CLIENTID_THM', (SOC15_IH_CLIENTID_UVD:=16): 'SOC15_IH_CLIENTID_UVD', (SOC15_IH_CLIENTID_VCE0:=17): 'SOC15_IH_CLIENTID_VCE0', (SOC15_IH_CLIENTID_VMC:=18): 'SOC15_IH_CLIENTID_VMC', (SOC15_IH_CLIENTID_XDMA:=19): 'SOC15_IH_CLIENTID_XDMA', (SOC15_IH_CLIENTID_GRBM_CP:=20): 'SOC15_IH_CLIENTID_GRBM_CP', (SOC15_IH_CLIENTID_ATS:=21): 'SOC15_IH_CLIENTID_ATS', (SOC15_IH_CLIENTID_ROM_SMUIO:=22): 'SOC15_IH_CLIENTID_ROM_SMUIO', (SOC15_IH_CLIENTID_DF:=23): 'SOC15_IH_CLIENTID_DF', (SOC15_IH_CLIENTID_VCE1:=24): 'SOC15_IH_CLIENTID_VCE1', (SOC15_IH_CLIENTID_PWR:=25): 'SOC15_IH_CLIENTID_PWR', (SOC15_IH_CLIENTID_RESERVED:=26): 'SOC15_IH_CLIENTID_RESERVED', (SOC15_IH_CLIENTID_UTCL2:=27): 'SOC15_IH_CLIENTID_UTCL2', (SOC15_IH_CLIENTID_EA:=28): 'SOC15_IH_CLIENTID_EA', (SOC15_IH_CLIENTID_UTCL2LOG:=29): 'SOC15_IH_CLIENTID_UTCL2LOG', (SOC15_IH_CLIENTID_MP0:=30): 'SOC15_IH_CLIENTID_MP0', (SOC15_IH_CLIENTID_MP1:=31): 'SOC15_IH_CLIENTID_MP1', (SOC15_IH_CLIENTID_MAX:=32): 'SOC15_IH_CLIENTID_MAX', (SOC15_IH_CLIENTID_VCN:=16): 'SOC15_IH_CLIENTID_VCN', (SOC15_IH_CLIENTID_VCN1:=14): 'SOC15_IH_CLIENTID_VCN1', (SOC15_IH_CLIENTID_SDMA2:=1): 'SOC15_IH_CLIENTID_SDMA2', (SOC15_IH_CLIENTID_SDMA3:=4): 'SOC15_IH_CLIENTID_SDMA3', (SOC15_IH_CLIENTID_SDMA3_Sienna_Cichlid:=5): 'SOC15_IH_CLIENTID_SDMA3_Sienna_Cichlid', (SOC15_IH_CLIENTID_SDMA4:=5): 'SOC15_IH_CLIENTID_SDMA4', (SOC15_IH_CLIENTID_SDMA5:=17): 'SOC15_IH_CLIENTID_SDMA5', (SOC15_IH_CLIENTID_SDMA6:=19): 'SOC15_IH_CLIENTID_SDMA6', (SOC15_IH_CLIENTID_SDMA7:=24): 'SOC15_IH_CLIENTID_SDMA7', (SOC15_IH_CLIENTID_VMC1:=6): 'SOC15_IH_CLIENTID_VMC1'}
 enum_soc21_ih_clientid: dict[int, str] = {(SOC21_IH_CLIENTID_IH:=0): 'SOC21_IH_CLIENTID_IH', (SOC21_IH_CLIENTID_ATHUB:=2): 'SOC21_IH_CLIENTID_ATHUB', (SOC21_IH_CLIENTID_BIF:=3): 'SOC21_IH_CLIENTID_BIF', (SOC21_IH_CLIENTID_DCN:=4): 'SOC21_IH_CLIENTID_DCN', (SOC21_IH_CLIENTID_ISP:=5): 'SOC21_IH_CLIENTID_ISP', (SOC21_IH_CLIENTID_MP3:=6): 'SOC21_IH_CLIENTID_MP3', (SOC21_IH_CLIENTID_RLC:=7): 'SOC21_IH_CLIENTID_RLC', (SOC21_IH_CLIENTID_GFX:=10): 'SOC21_IH_CLIENTID_GFX', (SOC21_IH_CLIENTID_IMU:=11): 'SOC21_IH_CLIENTID_IMU', (SOC21_IH_CLIENTID_VCN1:=14): 'SOC21_IH_CLIENTID_VCN1', (SOC21_IH_CLIENTID_THM:=15): 'SOC21_IH_CLIENTID_THM', (SOC21_IH_CLIENTID_VCN:=16): 'SOC21_IH_CLIENTID_VCN', (SOC21_IH_CLIENTID_VPE1:=17): 'SOC21_IH_CLIENTID_VPE1', (SOC21_IH_CLIENTID_VMC:=18): 'SOC21_IH_CLIENTID_VMC', (SOC21_IH_CLIENTID_GRBM_CP:=20): 'SOC21_IH_CLIENTID_GRBM_CP', (SOC21_IH_CLIENTID_ROM_SMUIO:=22): 'SOC21_IH_CLIENTID_ROM_SMUIO', (SOC21_IH_CLIENTID_DF:=23): 'SOC21_IH_CLIENTID_DF', (SOC21_IH_CLIENTID_VPE:=24): 'SOC21_IH_CLIENTID_VPE', (SOC21_IH_CLIENTID_PWR:=25): 'SOC21_IH_CLIENTID_PWR', (SOC21_IH_CLIENTID_LSDMA:=26): 'SOC21_IH_CLIENTID_LSDMA', (SOC21_IH_CLIENTID_MP0:=30): 'SOC21_IH_CLIENTID_MP0', (SOC21_IH_CLIENTID_MP1:=31): 'SOC21_IH_CLIENTID_MP1', (SOC21_IH_CLIENTID_MAX:=32): 'SOC21_IH_CLIENTID_MAX'}
 AMDGPU_VM_MAX_UPDATE_SIZE = 0x3FFFF # type: ignore
