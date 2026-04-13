@@ -29,8 +29,10 @@ if TYPE_CHECKING: _CFuncPtr = ctypes._CFunctionType
 else: _CFuncPtr = ctypes._CFuncPtr
 
 class CFUNCTYPE(Generic[T, P], _CFuncPtr):
+  _flags_ = 0
   def __class_getitem__(cls, key): return ctypes.CFUNCTYPE(key[0], *key[1])
 class Array(Generic[T, U], ctypes.Array):
+  _type_, _length_ = ctypes.c_byte, 0
   def __class_getitem__(cls, key): return key[0] * get_args(key[1])[0]
   def __new__(cls, ty, l): return ty * l
 
