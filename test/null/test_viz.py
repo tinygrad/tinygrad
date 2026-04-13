@@ -10,7 +10,7 @@ from tinygrad.helpers import VIZ, cpu_profile, ProfilePointEvent, unwrap
 from tinygrad.device import Buffer
 
 from tinygrad.uop.ops import tracked_keys, tracked_ctxs, uop_fields, active_rewrites, active_group, _name_cnt, RewriteTrace
-from tinygrad.viz.serve import get_rewrites, get_full_rewrite, uop_to_json
+from tinygrad.viz.serve import get_rewrites, get_full_rewrite, uop_to_json, VizData
 
 @track_rewrites(name=True)
 def exec_rewrite(sink:UOp, pm_lst:list[PatternMatcher], names:None|list[str]=None) -> UOp:
@@ -21,13 +21,11 @@ def exec_rewrite(sink:UOp, pm_lst:list[PatternMatcher], names:None|list[str]=Non
 # small container class for the viz server module
 class VizTrace:
   # loader init
-  def __init__(self): self._trace:RewriteTrace|None = None
+  def __init__(self): self._trace:VizData|None = None
   @property
-  def trace(self) -> RewriteTrace: return unwrap(self._trace)
+  def trace(self) -> VizData: return unwrap(self._trace)
   def set_trace(self) -> None:
-    self._trace = RewriteTrace(tracked_keys.copy(), tracked_ctxs.copy(), uop_fields.copy())
-    import tinygrad.viz.serve as serve_module
-    serve_module.trace = self._trace
+    self._trace = VizData(RewriteTrace(tracked_keys.copy(), tracked_ctxs.copy(), uop_fields.copy()))
   # the API
   def list_items(self) -> list[dict]: return get_rewrites(self.trace)
   def get_details(self, rewrite_idx:int, step:int) -> Generator[dict, None, None]:

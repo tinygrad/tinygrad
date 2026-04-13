@@ -3,6 +3,7 @@ import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrow
 import pathlib, traceback, itertools, socketserver
 from contextlib import redirect_stdout, redirect_stderr, contextmanager
 from decimal import Decimal
+from dataclasses import dataclass, field
 from urllib.parse import parse_qs, urlparse
 from http.server import BaseHTTPRequestHandler
 from typing import Any, TypedDict, TypeVar, Generator, Callable
@@ -61,19 +62,23 @@ uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", 
 def create_step(name:str, query:tuple[str, int, int], data=None, depth:int=0, **kwargs) -> dict:
   return {"name":name, "query":f"{query[0]}?ctx={query[1]}&step={query[2]}", "data":data, "depth":depth, **kwargs}
 
+@dataclass(frozen=True)
+class VizData:
+  trace:RewriteTrace
+  ref_map:dict[Any, int] = field(default_factory=dict)
+
 # ** list all saved rewrites
 
-ref_map:dict[Any, int] = {}
-def get_rewrites(t:RewriteTrace) -> list[dict]:
+def get_rewrites(data:VizData) -> list[dict]:
   ret = []
-  for i,(k,v) in enumerate(zip(t.keys, t.rewrites)):
+  for i,(k,v) in enumerate(zip(data.trace.keys, data.trace.rewrites)):
     steps = [create_step(s.name, ("/graph-rewrites", i, j), loc=s.loc, match_count=len(s.matches), code_line=printable(s.loc),
                          trace=k.tb if j==0 else None, depth=s.depth) for j,s in enumerate(v)]
-    if (p:=get_prg_uop(i)) is not None:
+    if (p:=get_prg_uop(data, i)) is not None:
       steps.append(create_step("View UOp List", ("/uops", i, len(steps))))
       steps.append(create_step("View Source", ("/code", i, len(steps)), p.src[3].arg))
       steps.append(create_step("View Disassembly", ("/asm", i, len(steps)), (k.ret, p.src[4].arg)))
-    for key in k.keys: ref_map[key] = i
+    for key in k.keys: data.ref_map[key] = i
     ret.append({"name":k.display_name, "steps":steps})
   return ret
 
@@ -167,8 +172,8 @@ def get_full_rewrite(ctx:TrackedGraphRewrite) -> Generator[GraphRewriteDetails, 
            "diff":list(difflib.unified_diff(pystr(u0).splitlines(), pystr(u1).splitlines())), "upat":(upat_loc, match_repr)}
     if not ctx.bottom_up: next_sink = new_sink
 
-def get_prg_uop(i:int) -> UOp|None:
-  s = next((s for s in trace.rewrites[i] if s.name == "View Program"), None)
+def get_prg_uop(data:VizData, i:int) -> UOp|None:
+  s = next((s for s in data.trace.rewrites[i] if s.name == "View Program"), None)
   return _reconstruct(s.sink, depth=1) if s is not None else None
 
 # encoder helpers
@@ -211,7 +216,7 @@ def timeline_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:
     name, fmt, key = e.name, [], None
     if (ref:=ref_map.get(name)) is not None and ctxs:
       name = ctxs[ref]["name"]
-      if (p:=get_prg_uop(ref)) is not None and (ei:=exec_points.get(p.src[0].arg.name)) is not None:
+      if (p:=get_prg_uop(data, ref)) is not None and (ei:=exec_points.get(p.src[0].arg.name)) is not None:
         flops = sym_infer((estimates:=p.src[0].arg.estimates).ops, var_vals:=ei.arg['var_vals'])/(t:=dur*1e-6)
         membw, ldsbw = sym_infer(estimates.mem, var_vals)/t, sym_infer(estimates.lds, var_vals)/t
         fmt = [f"{flops*1e-9:.0f} GFLOPS" if flops < 1e14 else f"{flops*1e-12:.0f} TFLOPS",
@@ -330,7 +335,7 @@ def load_amd_counters(ctxs:list[dict], profile:list[ProfileEvent]) -> None:
   run_number = {n:0 for n,_ in counter_events}
   for (k, tag),v in counter_events.items():
     # use the colored name if it exists
-    name = unwrap(get_prg_uop(r)).src[0].arg.name if (r:=ref_map.get(pname:=prg_events[k].name)) is not None else pname
+    name = unwrap(get_prg_uop(data, r)).src[0].arg.name if (r:=ref_map.get(pname:=prg_events[k].name)) is not None else pname
     run_number[k] += 1
     steps:list[dict] = []
     if (pmc:=v.get(ProfilePMCEvent)):
@@ -754,7 +759,8 @@ if __name__ == "__main__":
   st = time.perf_counter()
   print("*** viz is starting")
 
-  ctxs = get_rewrites(trace:=load_pickle(args.rewrites_path, default=RewriteTrace([], [], {})))
+  data = VizData(load_pickle(args.rewrites_path, default=RewriteTrace([], [], {})))
+  ctxs = get_rewrites(data)
   profile_ret = get_profile(load_pickle(args.profile_path, default=[]))
 
   server = TCPServerWithReuse(('', PORT), Handler)
