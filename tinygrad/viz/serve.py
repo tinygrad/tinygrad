@@ -346,7 +346,8 @@ def load_amd_counters(data:VizData, profile:list[ProfileEvent]) -> None:
     # to decode a SQTT trace, we need the raw stream, program binary and device properties
     if (sqtt:=v.get(ProfileSQTTEvent)):
       for e in sqtt:
-        if e.itrace: steps.append(create_step(f"SE:{e.se} PKTS", (f"/prg-pkts-{e.se}", len(data.ctxs), len(steps)), data=(e.blob, prg_events[k].lib,arch)))
+        if e.itrace: steps.append(create_step(f"SE:{e.se} PKTS", (f"/prg-pkts-{e.se}", len(data.ctxs), len(steps)),
+                                              data=(e.blob, prg_events[k].lib, arch)))
       steps.append(create_step("OCC", ("/prg-sqtt", len(data.ctxs), len(steps)), ((k, tag), sqtt, prg_events[k], arch)))
     data.ctxs.append({"name":f"SQTT {name}"+(f" n{run_number[k]}" if run_number[k] > 1 else ""), "steps":steps})
 
@@ -595,10 +596,10 @@ def amdgpu_cfg(lib:bytes, target:str) -> dict:
   from tinygrad.renderer.amd.dsl import Reg
   for pc, inst in pc_table.items():
     pc_tokens[pc] = tokens = []
-    for name, field in inst._fields:
+    for name, f in inst._fields:
       if isinstance(val:=getattr(inst, name), Reg): tokens.append({"st":val.fmt(), "keys":[f"r{val.offset+i}" for i in range(val.sz)], "kind":1})
       elif name in {"op","opx","opy"}: tokens.append({"st":(op_name:=val.name.lower()), "keys":[op_name], "kind":0})
-      elif name != "encoding" and val != field.default: tokens.append({"st":(s:=repr(val)), "keys":[s], "kind":1})
+      elif name != "encoding" and val != f.default: tokens.append({"st":(s:=repr(val)), "keys":[s], "kind":1})
   # show a smaller view for repeated instructions in the graph
   lines:list[str] = []
   disasm = {pc:str(inst) for pc,inst in pc_table.items()}
@@ -630,7 +631,7 @@ def get_render(viz_data:VizData, query:str) -> dict:
   i, j, fmt = get_int(qs:=parse_qs(url.query), "ctx"), get_int(qs, "step"), url.path.lstrip("/")
   data = viz_data.ctxs[i]["steps"][j]["data"]
   if fmt == "graph-rewrites": return {"value":get_full_rewrite(viz_data, viz_data.trace.rewrites[i][j]), "content_type":"text/event-stream"}
-  if fmt == "uops": return {"src":get_stdout(lambda: print_uops(_reconstruct(viz_data, viz_data.trace.rewrites[i][j-1].sink).src[2].src)), "lang":"txt"}
+  if fmt == "uops": return {"src":get_stdout(lambda: print_uops(_reconstruct(viz_data, viz_data.trace.rewrites[i][j-1].sink).src[2].src))}
   if fmt == "code": return {"src":data, "lang":"cpp"}
   if fmt == "asm":
     ret:dict = {}
@@ -698,7 +699,7 @@ def get_render(viz_data:VizData, query:str) -> dict:
   if fmt == "prg-pma-pkts":
     ret = {}
     with soft_err(lambda err:ret.update(err)):
-      if (events:=get_profile(pma_timeline(*data), sort_fn=row_tuple, data=viz_data)): ret = {"value":events, "content_type":"application/octet-stream"}
+      if (events:=get_profile(pma_timeline(*data), row_tuple, data=viz_data)): ret = {"value":events, "content_type":"application/octet-stream"}
       else: ret = {"src":"No PMA samples found."}
     return ret
   return data
