@@ -947,5 +947,21 @@ class TestPartialAssignToSharedBuffer(unittest.TestCase):
     for v, s in zip(views, shapes):
       np.testing.assert_allclose(v.numpy(), np.ones(s))
 
+
+class TestAfterCachePatterns(unittest.TestCase):
+  def test_double_store_after(self):
+    a = Tensor.zeros(10).contiguous()
+    b = Tensor.zeros(10).contiguous()
+    c = Tensor.ones(10).contiguous()
+    Tensor.realize(a, b, c)
+
+    a_store = a.uop.store(c.uop)
+    b_store = b.uop.store(c.uop)
+
+    a = Tensor(a.uop.after(a_store, b_store))
+    a.realize()
+    np.testing.assert_array_equal(a.numpy(), 1)
+    np.testing.assert_array_equal(b.numpy(), 1)
+
 if __name__ == "__main__":
   unittest.main()
