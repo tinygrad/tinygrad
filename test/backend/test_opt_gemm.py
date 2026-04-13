@@ -12,7 +12,8 @@ class TestOptGemm(unittest.TestCase):
     N = 64
     cls.a = Tensor.randn(N, N).contiguous().realize()
     cls.b = Tensor.randn(N, N).contiguous().realize()
-    cls.res = cls.a.T.numpy() @ cls.b.T.numpy()
+    with np.errstate(all='ignore'):
+      cls.res = cls.a.T.numpy() @ cls.b.T.numpy()
 
   def _test_gemm_unrolled_permute_l(self, opts=[]):
     t = self.a.T @ self.b.T
