@@ -100,7 +100,7 @@ def pystr(u:UOp) -> str:
   try: return pyrender(u)
   except Exception: return str(u)
 
-def uop_to_json(x:UOp, data:VizData) -> dict[int, dict]:
+def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
   assert isinstance(x, UOp)
   graph: dict[int, dict] = {}
   excluded: set[UOp] = set()
@@ -163,14 +163,14 @@ def _reconstruct(data:VizData, a:int, depth:int|None=None):
 
 def get_full_rewrite(data:VizData, ctx:TrackedGraphRewrite) -> Generator[GraphRewriteDetails, None, None]:
   next_sink = _reconstruct(data, ctx.sink)
-  yield {"graph":uop_to_json(next_sink, data), "uop":pystr(next_sink), "change":None, "diff":None, "upat":None}
+  yield {"graph":uop_to_json(data, next_sink), "uop":pystr(next_sink), "change":None, "diff":None, "upat":None}
   replaces: dict[UOp, UOp] = {}
   for u0_num,u1_num,upat_loc,dur in tqdm(ctx.matches):
     replaces[u0:=_reconstruct(data, u0_num)] = u1 = _reconstruct(data, u1_num)
     try: new_sink = next_sink.substitute(replaces)
     except RuntimeError as e: new_sink = UOp(Ops.NOOP, arg=str(e))
     match_repr = f"# {dur*1e6:.2f} us\n"+printable(upat_loc)
-    yield {"graph":(sink_json:=uop_to_json(new_sink, data)), "uop":pystr(new_sink), "change":[id(x) for x in u1.toposort() if id(x) in sink_json],
+    yield {"graph":(sink_json:=uop_to_json(data, new_sink)), "uop":pystr(new_sink), "change":[id(x) for x in u1.toposort() if id(x) in sink_json],
            "diff":list(difflib.unified_diff(pystr(u0).splitlines(), pystr(u1).splitlines())), "upat":(upat_loc, match_repr)}
     if not ctx.bottom_up: next_sink = new_sink
 
@@ -464,8 +464,7 @@ def device_sort_fn(k:str) -> tuple:
   dev_base = p[0] if len(p) < 2 or not p[1].isdigit() else f"{p[0]}:{p[1]}"
   return (is_memory, special.get(p[0], special['ALLDEVS']), dev_base, k)
 
-def get_profile(profile:list[ProfileEvent], sort_fn:Callable[[str], Any]=device_sort_fn, data:VizData|None=None) -> bytes|None:
-  if data is None: data = VizData(RewriteTrace([], [], {}))
+def get_profile(data:VizData, profile:list[ProfileEvent], sort_fn:Callable[[str], Any]=device_sort_fn) -> bytes|None:
   # start by getting the time diffs
   device_ts_diffs:dict[str, Decimal] = {}
   device_decoders:dict[str, Callable[[VizData, list[ProfileEvent]], None]] = {}
@@ -652,7 +651,7 @@ def get_render(viz_data:VizData, query:str) -> dict:
   if fmt.startswith("prg-pkts"):
     ret = {}
     with soft_err(lambda err:ret.update(err)):
-      if (events:=get_profile(list(itertools.islice(sqtt_timeline(*data), getenv("MAX_SQTT_PKTS", 50_000))), sort_fn=row_tuple, data=viz_data)):
+      if (events:=get_profile(viz_data, list(itertools.islice(sqtt_timeline(*data), getenv("MAX_SQTT_PKTS", 50_000))), sort_fn=row_tuple)):
         ret = {"value":events, "content_type":"application/octet-stream"}
       else: ret = {"src":"No SQTT trace on this SE."}
     return ret
@@ -667,7 +666,7 @@ def get_render(viz_data:VizData, query:str) -> dict:
           for k in sorted(wave_insts.get(cu, []), key=row_tuple):
             steps.append(create_step(k.replace(cu, ""), ("/sqtt-insts", i, len(steps)), loc=(data:=wave_insts[cu][k])["loc"], depth=2, data=data))
     return {**ret, "steps":[{k:v for k,v in s.items() if k != "data"} for s in steps[j+1:]]}
-  if fmt == "cu-sqtt": return {"value":get_profile(data, sort_fn=row_tuple, data=viz_data), "content_type":"application/octet-stream"}
+  if fmt == "cu-sqtt": return {"value":get_profile(viz_data, data, sort_fn=row_tuple), "content_type":"application/octet-stream"}
   if fmt == "sqtt-insts":
     columns = ["PC", "Instruction", "Hits", "Cycles", "Stall", "Type"]
     inst_columns = ["N", "Clk", "Idle", "Dur", "Stall"]
@@ -698,7 +697,7 @@ def get_render(viz_data:VizData, query:str) -> dict:
   if fmt == "prg-pma-pkts":
     ret = {}
     with soft_err(lambda err:ret.update(err)):
-      if (events:=get_profile(pma_timeline(*data), row_tuple, data=viz_data)): ret = {"value":events, "content_type":"application/octet-stream"}
+      if (events:=get_profile(viz_data, pma_timeline(*data), sort_fn=row_tuple)): ret = {"value":events, "content_type":"application/octet-stream"}
       else: ret = {"src":"No PMA samples found."}
     return ret
   return data
@@ -765,7 +764,7 @@ if __name__ == "__main__":
 
   data = VizData(load_pickle(args.rewrites_path, default=RewriteTrace([], [], {})))
   load_rewrites(data)
-  profile_ret = get_profile(load_pickle(args.profile_path, default=[]), data=data)
+  profile_ret = get_profile(data, load_pickle(args.profile_path, default=[]))
 
   server = TCPServerWithReuse(('', PORT), Handler)
   reloader_thread = threading.Thread(target=reloader)

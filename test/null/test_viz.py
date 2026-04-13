@@ -194,7 +194,7 @@ class TestViz(unittest.TestCase):
     class TestStruct:
       colored_field: str
     a = UOp(Ops.CUSTOM, arg=TestStruct(colored("xyz", "magenta")+colored("12345", "blue")))
-    a2 = uop_to_json(a, VizData())[id(a)]
+    a2 = uop_to_json(VizData(), a)[id(a)]
     self.assertEqual(ansistrip(a2["label"]), f"CUSTOM\n{TestStruct.__qualname__}(colored_field='xyz12345')")
 
   def test_colored_label_multiline(self):
@@ -217,11 +217,11 @@ class TestViz(unittest.TestCase):
       # use smaller stack limit for faster test (default is 250000)
       with Context(REWRITE_STACK_LIMIT=100): self.assertRaises(RuntimeError, exec_rewrite, a, [pm])
     graphs = flatten(x["graph"].values() for x in viz.get_details(0, 0))
-    self.assertEqual(graphs[0], uop_to_json(a, VizData())[id(a)])
-    self.assertEqual(graphs[1], uop_to_json(b, VizData())[id(b)])
+    self.assertEqual(graphs[0], uop_to_json(VizData(), a)[id(a)])
+    self.assertEqual(graphs[1], uop_to_json(VizData(), b)[id(b)])
     # fallback to NOOP with the error message
     nop = UOp(Ops.NOOP, arg="infinite loop in fixed_point_rewrite")
-    self.assertEqual(graphs[2], uop_to_json(nop, VizData())[id(nop)])
+    self.assertEqual(graphs[2], uop_to_json(VizData(), nop)[id(nop)])
 
   def test_const_node_visibility(self):
     with save_viz() as viz:
@@ -241,7 +241,7 @@ class TestViz(unittest.TestCase):
     c = UOp.const(dtypes.float, 1.0, device="CPU", shape=(3,4))  # creates CONST->RESHAPE->EXPAND chain
     a = UOp(Ops.DEFINE_VAR, dtypes.float, arg=("a", 0.0, 10.0))
     alu = a + c
-    graph = uop_to_json(alu, VizData())
+    graph = uop_to_json(VizData(), alu)
     # the RESHAPE and EXPAND nodes from the const should not appear in the graph
     labels = {v["label"].split("\n")[0] for v in graph.values()}
     self.assertNotIn("RESHAPE", labels)
@@ -417,7 +417,7 @@ from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphE
 from tinygrad.viz.serve import get_profile
 from extra.viz.cli import decode_profile
 
-def load_profile(lst:list[ProfileEvent]) -> dict: return decode_profile(get_profile(lst))
+def load_profile(lst:list[ProfileEvent]) -> dict: return decode_profile(get_profile(VizData(), lst))
 
 class TestVizProfiler(unittest.TestCase):
   def test_transfer_uses_copy_device(self):
@@ -563,7 +563,7 @@ class TestVizProfiler(unittest.TestCase):
     step = 10
     n_events = 1_000
     prof = [ProfileRangeEvent("CPU", name="k_test", st=decimal.Decimal(ts:=i*step), en=decimal.Decimal(ts)+step) for i in range(n_events)]
-    sz = len(get_profile(prof))
+    sz = len(get_profile(VizData(), prof))
     self.assertLessEqual(sz/n_events, 26)
 
   def test_calltrace(self):
@@ -586,7 +586,7 @@ class TestVizProfiler(unittest.TestCase):
     step = decimal.Decimal(dur_mins*60*1e6//n_events)
     prof = [ProfileRangeEvent("CPU", name="k_test", st=decimal.Decimal(ts:=i*step), en=decimal.Decimal(ts)+step) for i in range(n_events)]
     with self.assertRaisesRegex(ValueError, "timestamp out of range"):
-      get_profile(prof)
+      get_profile(VizData(), prof)
 
   def test_python_marker(self):
     with save_viz():
