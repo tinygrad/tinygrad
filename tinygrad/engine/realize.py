@@ -4,7 +4,7 @@ from dataclasses import dataclass, replace, field
 from tinygrad.helpers import all_same, colored, DEBUG, GlobalCounters, ansilen, NOOPT, all_int, Metadata, TRACEMETA, TracingKey
 from tinygrad.helpers import DEVECTORIZE, time_to_str, VALIDATE_WITH_CPU, cpu_profile, PROFILE, ProfilePointEvent, cpu_events, prod, unwrap
 from tinygrad.helpers import EMULATED_DTYPES
-from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer, buffers, graph_rewrite
+from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer, buffers
 from tinygrad.device import Device, Buffer, MultiBuffer
 from tinygrad.renderer import ProgramSpec, Estimates
 from tinygrad.codegen import get_program
@@ -272,5 +272,8 @@ pm_exec = PatternMatcher([
 ])
 
 def run_linear(linear:UOp, var_vals:dict[str, int]|None=None, do_update_stats=True):
+  """Execute a LINEAR UOp directly."""
   linear = _expand_multibuffer(linear)
-  graph_rewrite(linear, pm_exec, ctx=(var_vals or {}, do_update_stats), bottom_up=True)
+  ctx = (var_vals or {}, do_update_stats)
+  for si in linear.src:
+    pm_exec.rewrite(si, ctx)
