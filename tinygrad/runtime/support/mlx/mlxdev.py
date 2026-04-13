@@ -170,6 +170,8 @@ class MLXDev:
                                  start_addr=paddrs[0], len=size, log_page_size=log_page_size, translations_octword_size=ceildiv(n, 2)))
     return (res['mkey_index'] << 8) | key_lo
 
+  def unregister_mem(self, mkey:int): self.cmd.exec(mlx5.MLX5_CMD_OP_DESTROY_MKEY, mkey_index=mkey >> 8)
+
   def provide_pages(self, mode):
     if (npages:=self.cmd.exec(mlx5.MLX5_CMD_OP_QUERY_PAGES, op_mod=mode)['num_pages']) <= 0: return
     if MLX_DEBUG >= 1: print(f"mlx5 {self.devfmt}: provide_pages mode={mode}, {npages} pages")
