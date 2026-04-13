@@ -3,7 +3,6 @@ import gc, unittest, time
 from tinygrad import nn, dtypes, Device, Tensor
 from tinygrad.uop.ops import UOp, Ops, GroupOp, UPat, KernelInfo
 from tinygrad.helpers import DEBUG, GlobalCounters, Context
-from tinygrad.engine.schedule import create_schedule
 from tinygrad.engine.realize import CompiledRunner, run_schedule
 
 class KernelCountException(Exception): pass
@@ -145,17 +144,29 @@ class TestSimpleSchedule(unittest.TestCase):
 
 class TestSchedule(unittest.TestCase):
   def test_create_schedule_handles_multi_kernel_after_and_after_deps(self):
-    src = UOp.new_buffer(Device.DEFAULT, 4, dtypes.float)
-    src_after = src.after(UOp.sink(arg=KernelInfo(name="ka")).call(src), UOp.sink(arg=KernelInfo(name="kb")).call(src))
+    def named_copy(name:str):
+      def fxn(out:UOp, src:UOp) -> UOp:
+        i = UOp.range(src.size, 0)
+        return out[i].store(src[i]).end(i).sink(arg=KernelInfo(name=name))
+      return fxn
 
-    dep = UOp.new_buffer(Device.DEFAULT, 4, dtypes.float)
-    dep_after = dep.after(UOp.sink(arg=KernelInfo(name="kd")).call(dep))
+    src = Tensor.zeros(4, dtype=dtypes.float).contiguous().realize()
+    dep = Tensor.zeros(4, dtype=dtypes.float).contiguous().realize()
+    out = Tensor.zeros(4, dtype=dtypes.float).contiguous().realize()
+    ones = Tensor.ones(4, dtype=dtypes.float).contiguous().realize()
+    twos = Tensor.full((4,), 2.0, dtype=dtypes.float).contiguous().realize()
+    threes = Tensor.full((4,), 3.0, dtype=dtypes.float).contiguous().realize()
 
-    out = UOp.new_buffer(Device.DEFAULT, 4, dtypes.float)
-    out_after = out.after(UOp.sink(arg=KernelInfo(name="kc")).call(out, src_after), dep_after)
+    ka = Tensor.custom_kernel(src, ones, fxn=named_copy("ka"))[0]
+    kb = Tensor.custom_kernel(src, twos, fxn=named_copy("kb"))[0]
+    src_after = Tensor(src.uop.after(*ka.uop.src[1:], *kb.uop.src[1:]))
 
-    linear = create_schedule(UOp.sink(out_after))
-    names = [si.src[0].arg.name for si in linear.src]
+    kd = Tensor.custom_kernel(dep, threes, fxn=named_copy("kd"))[0]
+    kc = Tensor.custom_kernel(out, src_after, fxn=named_copy("kc"))[0]
+    out_after = Tensor(kc.uop.src[0].after(*kc.uop.src[1:], kd.uop))
+
+    schedule = out_after.schedule()
+    names = [si.ast.arg.name for si in schedule]
     self.assertEqual(set(names), {"ka", "kb", "kc", "kd"})
     self.assertEqual(names[-1], "kc")
     self.assertLess(names.index("ka"), names.index("kc"))

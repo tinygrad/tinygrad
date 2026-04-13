@@ -4,7 +4,7 @@ from collections import deque
 from tinygrad.uop.ops import UOp, Ops, buffers, UOpMetaClass, track_rewrites, graph_rewrite, gate_kernel_sink, KernelInfo
 from tinygrad.uop.spec import type_verify, tensor_spec
 from tinygrad.device import Buffer, MultiBuffer
-from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, pluralize, SCACHE, BASEDIR, flatten, BEAM
+from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, pluralize, SCACHE, BASEDIR, flatten, BEAM, partition
 from tinygrad.engine.realize import ExecItem
 
 # **** schedule linearizer
@@ -15,12 +15,10 @@ def _unwrap_src(s: UOp) -> UOp:
   return s
 
 def _split_after(after: UOp) -> tuple[tuple[UOp, ...], tuple[UOp, ...]]:
-  kernels:list[UOp] = []
-  deps:list[UOp] = []
-  for s in after.src[1:]:
-    if s.op in {Ops.CALL, Ops.END}: kernels.append(s)
-    elif s.op is Ops.AFTER: deps.append(s)
-    elif s.op is not Ops.STORE: raise AssertionError(f"AFTER source should be CALL, END, STORE, or AFTER, not {s.op}")
+  kernels, remaining = partition(after.src[1:], lambda s: s.op in {Ops.CALL, Ops.END})
+  deps, remaining = partition(remaining, lambda s: s.op is Ops.AFTER)
+  if invalid := [s for s in remaining if s.op is not Ops.STORE]:
+    raise AssertionError(f"AFTER source should be CALL, END, STORE, or AFTER, not {invalid[0].op}")
   return tuple(kernels), tuple(deps)
 
 def create_schedule(sched_sink:UOp) -> UOp:
