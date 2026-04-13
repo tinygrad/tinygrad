@@ -64,7 +64,7 @@ def create_step(name:str, query:tuple[str, int, int], data=None, depth:int=0, **
 
 @dataclass(frozen=True)
 class VizData:
-  trace:RewriteTrace
+  trace:RewriteTrace = field(default_factory=lambda: RewriteTrace([], [], {}))
   ctxs:list[dict] = field(default_factory=list)
   ref_map:dict[Any, int] = field(default_factory=dict)
   all_uops:dict[int, UOp] = field(default_factory=dict)
@@ -100,7 +100,7 @@ def pystr(u:UOp) -> str:
   try: return pyrender(u)
   except Exception: return str(u)
 
-def uop_to_json(x:UOp, data:VizData|None=None) -> dict[int, dict]:
+def uop_to_json(x:UOp, data:VizData) -> dict[int, dict]:
   assert isinstance(x, UOp)
   graph: dict[int, dict] = {}
   excluded: set[UOp] = set()

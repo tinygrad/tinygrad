@@ -137,7 +137,7 @@ def print_data(data:dict) -> None:
 def main() -> None:
   import tinygrad.viz.serve as viz
   from tinygrad.uop.ops import RewriteTrace
-  data = viz.VizData(RewriteTrace([], [], {}))
+  data = viz.VizData()
 
   parser = argparse.ArgumentParser()
   parser.add_argument('--profile', type=pathlib.Path, metavar="PATH", help='Path to profile (optional file, default: latest profile)',
