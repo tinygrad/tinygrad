@@ -62,7 +62,7 @@ class MLXCmdQueue:
     n = ceildiv(len(data), chunk_sz:=mlx5.MLX5_CMD_DATA_BLOCK_SIZE)
     for i in range(n):
       off, _ = self.mboxes[base + i]
-      blk = mlx5.struct_mlx5_cmd_prot_block(data=(ctypes.c_ubyte * chunk_sz).from_buffer_copy(data[i*chunk_sz:(i+1)*chunk_sz].ljust(chunk_sz, b'\x00')),
+      blk = mlx5.struct_mlx5_cmd_prot_block(data=(ctypes.c_ubyte*chunk_sz).from_buffer_copy(data[i*chunk_sz:(i+1)*chunk_sz].ljust(chunk_sz, b'\x00')),
         next=to_be64(self.mboxes[base+i+1][1]) if i < n-1 else 0, block_num=to_be32(i), token=tok)
       self.queue[off:off + ctypes.sizeof(mlx5.struct_mlx5_cmd_prot_block)] = bytes(blk)
     return (self.mboxes[base][0], self.mboxes[base][1], n)
@@ -81,7 +81,7 @@ class MLXCmdQueue:
     _, in_ptr, n_in = self.create_mbox_chain(0, tok, inp[16:])
     _, out_ptr, n_out = self.create_mbox_chain(n_in, tok, bytes(out_sz))
     cmd = mlx5.struct_mlx5_cmd_layout(type=mlx5.MLX5_PCI_CMD_XPORT, inlen=to_be32(len(inp)), in_ptr=to_be64(in_ptr),
-      _in=(ctypes.c_uint32 * 4)(*(int.from_bytes(inp[i:i+4], 'little') for i in range(0, 16, 4))),
+      _in=(ctypes.c_uint32*4)(*(int.from_bytes(inp[i:i+4], 'little') for i in range(0, 16, 4))),
       out_ptr=to_be64(out_ptr), outlen=to_be32(16 + out_sz), token=tok, status_own=mlx5.CMD_OWNER_HW)
     cmd_bytes = bytearray(bytes(cmd))
     cmd_bytes[mlx5.struct_mlx5_cmd_layout.sig.offset] = (~functools.reduce(lambda a, b: a ^ b, cmd_bytes)) & 0xFF  # type: ignore[attr-defined]
