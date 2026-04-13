@@ -23,9 +23,12 @@ class SimpleTokenizer:
     self._split_to_sentence = re.compile("|".join(re.escape(tok) for tok in special_tokens.keys()) if special_tokens else r"(?!)")
 
     tok_bytes = (lambda tok: tok.replace("▁", " ").encode()) if preset == "gemma4" else (lambda tok: bytes(self._byte_decoder[c] for c in tok))
-    self._normal_tokens = {tok_bytes(tok): tid for tok, tid in normal_tokens.items()}
+    self._normal_tokens = {tok_bytes(tok): tid for tok, tid in normal_tokens.items() if not re.fullmatch(r'<0x[0-9A-Fa-f]{2}>', tok)}
+    # for gemma4, build a byte fallback table from <0xHH> tokens for _encode_word single-byte lookup
+    self._byte_tokens = {bytes([int(tok[3:-1],16)]): tid for tok, tid in normal_tokens.items() if re.fullmatch(r'<0x[0-9A-Fa-f]{2}>', tok)} \
+      if preset == "gemma4" else {}
     self._special_tokens = special_tokens
-    self._tok2bytes = {tid: tok for tok, tid in self._normal_tokens.items()} | {
+    self._tok2bytes = {tid: tok for tok, tid in self._normal_tokens.items()} | {tid: tok for tok, tid in self._byte_tokens.items()} | {
       tid: (b'' if preset == "gemma4" else tok.encode()) for tok, tid in self._special_tokens.items()}
     self.preset = preset
 
@@ -33,20 +36,23 @@ class SimpleTokenizer:
   def from_gguf_kv(kv:dict):
     # https://github.com/ggml-org/llama.cpp/blob/94933c8c2eeaa9a7983e3f6c08af76bd86724094/src/llama-vocab.cpp#L1818-L1820
     vocab: typing.Iterable[tuple[str, int]] = ((tok, idx) for idx, tok in enumerate(kv["tokenizer.ggml.tokens"]))
-    normal_tokens, special_tokens = partition(vocab, lambda e: kv["tokenizer.ggml.token_type"][e[1]] == 1)
+    normal_tokens, special_tokens = partition(vocab, lambda e: kv["tokenizer.ggml.token_type"][e[1]] in (1, 6))
     return SimpleTokenizer(
       dict(normal_tokens), dict(special_tokens),
       kv.get("tokenizer.ggml.pre") or kv.get("tokenizer.ggml.model", "llama3"))
 
   def _encode_word(self, word:bytes) -> list[int]:
     if (early_token:=self._normal_tokens.get(word)) is not None: return [early_token]
-    parts = [bytes([b]) for b in word]
+    # for gemma4 (sentencepiece), split by UTF-8 chars then byte-fallback unknown chars; for BPE presets, split by bytes
+    if self._byte_tokens:
+      parts = [cb for c in word.decode('utf-8', errors='replace') for cb in ([c.encode()] if c.encode() in self._normal_tokens else [bytes([b]) for b in c.encode()])]
+    else: parts = [bytes([b]) for b in word]
     # greedily merge any parts that we can
     while True:
       i = min([(sys.maxsize, -1)] + [(self._normal_tokens.get(parts[j]+parts[j+1], sys.maxsize), j) for j in range(len(parts)-1)])[1]
       if i == -1: break
       parts[i:i+2] = [parts[i] + parts[i+1]]
-    try: return [self._normal_tokens[p] for p in parts]
+    try: return [self._normal_tokens[p] if p in self._normal_tokens else self._byte_tokens[p] for p in parts]
     except KeyError: raise RuntimeError("token not found")
   def _encode_sentence(self, chunk:str) -> list[int]:
     return [tok for word in self._split_to_word.findall(chunk) for tok in self._encode_word(word.encode())]
