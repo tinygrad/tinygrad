@@ -13,7 +13,8 @@ ARCHS = {
   "rdna4": {"xml": "amdgpu_isa_rdna4.xml", "pdf": "https://docs.amd.com/api/khub/documents/uQpkEvk3pv~kfAb2x~j4uw/content"},
   "cdna": {"xml": "amdgpu_isa_cdna4.xml", "pdf": "https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/instruction-set-architectures/amd-instinct-cdna4-instruction-set-architecture.pdf"},
 }
-XML_URL = "https://gpuopen.com/download/machine-readable-isa/latest/"
+# Pin the September 2025 XML bundle because newer `latest` changed WMMA format bit sizes across archs and breaks generation.
+XML_URL = "https://gpuopen.com/download/AMD_GPU_MR_ISA_XML_2025_09_05.zip"
 # Map XML encoding names to codebase names
 NAME_MAP = {"VOP3_SDST_ENC": "VOP3SD", "VOP3_SDST_ENC_LIT": "VOP3SD_LIT", "VOP3_SDST_ENC_DPP16": "VOP3SD_DPP16",
             "VOP3_SDST_ENC_DPP8": "VOP3SD_DPP8", "VOPDXY": "VOPD", "VOPDXY_LIT": "VOPD_LIT", "VDS": "DS"}

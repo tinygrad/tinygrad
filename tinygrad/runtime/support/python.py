@@ -5,14 +5,13 @@ from tinygrad.runtime.support import c
 @c.record
 class py_buffer(c.Struct):
   SIZE = 80
-  buf: Annotated[ctypes.c_void_p, 0] # there are more fields, but we only care about this one
-c.init_records()
+  buf = c.Field(ctypes.c_void_p, 0) # there are more fields, but we only care about this one
 
-@functools.partial(c.DLL.bind, cast(c.DLL, ctypes.pythonapi))
+@c.DLL.bind(ctypes.pythonapi, ctypes.c_int, ctypes.py_object, c.POINTER[py_buffer], ctypes.c_int)
 def PyObject_GetBuffer(obj:ctypes.py_object, view:c.POINTER[py_buffer], flags:ctypes.c_int) -> ctypes.c_int: pass # type: ignore[empty-body]
-@functools.partial(c.DLL.bind, cast(c.DLL, ctypes.pythonapi))
+@c.DLL.bind(ctypes.pythonapi, None, c.POINTER[py_buffer])
 def PyBuffer_Release(view:c.POINTER[py_buffer]): pass # type: ignore[empty-body]
-@functools.partial(c.DLL.bind, cast(c.DLL, ctypes.pythonapi))
+@c.DLL.bind(ctypes.pythonapi, ctypes.py_object, ctypes.c_void_p, ctypes.c_ssize_t, ctypes.c_int)
 def PyMemoryView_FromMemory(mem:ctypes.c_void_p, size:ctypes.c_ssize_t, flags:ctypes.c_int) -> ctypes.py_object: pass # type: ignore[empty-body]
 
 BUF_SIMPLE = 0

@@ -182,18 +182,22 @@ class Target:
   renderer: str = ""
   arch: str = ""
   interface: str = ""
+  indices: str = ""
 
   @staticmethod
   def parse(s:str) -> Target:
-    if len(iface_split:=s.split('+')) == 2: iface, s = iface_split
-    elif len(iface_split) > 2: raise RuntimeError(f"too many '+' in target string: {s!r}")
-    else: iface = ""
+    if len(split:=s.split('+')) == 2:
+      (iface, indices), s = ((iface_split[0], iface_split[1]) if len(iface_split:=split[0].rsplit(":", 1)) == 2 else (split[0], ""), split[1])
+    elif len(split) > 2: raise RuntimeError(f"too many '+' in target string: {s!r}")
+    else: iface, indices = "", ""
     match [x.upper() if i < 2 else x for i,x in enumerate(s.split(':'))]:
-      case [dev, ren, arch]: return Target(dev, ren, arch, iface)
-      case [dev, ren]: return Target(dev, ren, interface=iface)
-      case [dev]: return Target(dev, interface=iface)
+      case [dev, ren, arch]: return Target(dev, ren, arch, iface, indices)
+      case [dev, ren]: return Target(dev, ren, interface=iface, indices=indices)
+      case [dev]: return Target(dev, interface=iface, indices=indices)
       case _: raise RuntimeError(f"too many ':' in target string: {s!r}")
-  def __repr__(self): return re.sub(":*$", "", (self.interface + "+" if self.interface else "") + ":".join([self.device, self.renderer, self.arch]))
+  def __repr__(self):
+    fst, snd = re.sub(":*$", "", ":".join([self.interface, self.indices])), re.sub(":*$", "", ":".join([self.device, self.renderer, self.arch]))
+    return (fst + "+" if fst else "") + snd
   # replaces if not already set
   def replacedefault(self, **kwargs) -> Target: return replace(self, **{k:v for k,v in kwargs.items() if not getattr(self, k)})
 
@@ -251,8 +255,6 @@ ALLOW_TF32 = ContextVar("ALLOW_TF32", 0)
 SCACHE = ContextVar("SCACHE", 1)
 # allow use of atomics for embedding backward
 USE_ATOMICS = ContextVar("USE_ATOMICS", 0)
-# allow use of assembly for gemm
-ASM_GEMM = ContextVar("ASM_GEMM", 0)
 
 @dataclass(frozen=True)
 class Metadata:

@@ -8,7 +8,7 @@ LABEL = ["A", "B", "C", "D"]
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser()
-  parser.add_argument("--port", "-p", type=int, default=11434)
+  parser.add_argument("--port", "-p", type=int, default=8000)
   parser.add_argument("--limit", "-L", type=int, default=None)
   parser.add_argument("--max_tokens", "-T", type=int, default=4096)
   parser.add_argument("--offset", "-O", type=int, default=0)

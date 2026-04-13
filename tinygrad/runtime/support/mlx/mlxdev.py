@@ -11,7 +11,6 @@ MLX5_CMD_STRUCTS = {v: (getattr(mlx5, f"struct_mlx5_ifc_{n[12:].lower()}_in_bits
   getattr(mlx5, f"struct_mlx5_ifc_{n[12:].lower()}_out_bits", None)) for n, v in mlx5.__dict__.items() if n.startswith("MLX5_CMD_OP_")}
 MLX5_CMD_STRUCTS[mlx5.MLX5_CMD_OP_ACCESS_REG] = (mlx5.struct_mlx5_ifc_access_register_in_bits, mlx5.struct_mlx5_ifc_access_register_out_bits)
 
-def to_be(fmt, val): return to_be32(val) if fmt == 'I' else to_be64(val)
 def ipv4_to_gid(ip): return bytes(10) + b'\xff\xff' + socket.inet_aton(ip)
 
 def udp_sport(lqpn, rqpn):
@@ -63,8 +62,8 @@ class MLXCmdQueue:
     n = ceildiv(len(data), chunk_sz:=mlx5.MLX5_CMD_DATA_BLOCK_SIZE)
     for i in range(n):
       off, _ = self.mboxes[base + i]
-      blk = mlx5.struct_mlx5_cmd_prot_block(data=list(data[i*chunk_sz:(i+1)*chunk_sz].ljust(chunk_sz, b'\x00')),
-        next=to_be('Q', self.mboxes[base+i+1][1]) if i < n-1 else 0, block_num=to_be('I', i), token=tok)
+      blk = mlx5.struct_mlx5_cmd_prot_block(data=(ctypes.c_ubyte*chunk_sz).from_buffer_copy(data[i*chunk_sz:(i+1)*chunk_sz].ljust(chunk_sz, b'\x00')),
+        next=to_be64(self.mboxes[base+i+1][1]) if i < n-1 else 0, block_num=to_be32(i), token=tok)
       self.queue[off:off + ctypes.sizeof(mlx5.struct_mlx5_cmd_prot_block)] = bytes(blk)
     return (self.mboxes[base][0], self.mboxes[base][1], n)
 
@@ -81,9 +80,9 @@ class MLXCmdQueue:
     # prepare mailboxes and build command layout
     _, in_ptr, n_in = self.create_mbox_chain(0, tok, inp[16:])
     _, out_ptr, n_out = self.create_mbox_chain(n_in, tok, bytes(out_sz))
-    cmd = mlx5.struct_mlx5_cmd_layout(type=mlx5.MLX5_PCI_CMD_XPORT, inlen=to_be('I', len(inp)), in_ptr=to_be('Q', in_ptr),
-      _in=[int.from_bytes(inp[i:i+4], 'little') for i in range(0, 16, 4)],
-      out_ptr=to_be('Q', out_ptr), outlen=to_be('I', 16 + out_sz), token=tok, status_own=mlx5.CMD_OWNER_HW)
+    cmd = mlx5.struct_mlx5_cmd_layout(type=mlx5.MLX5_PCI_CMD_XPORT, inlen=to_be32(len(inp)), in_ptr=to_be64(in_ptr),
+      _in=(ctypes.c_uint32*4)(*(int.from_bytes(inp[i:i+4], 'little') for i in range(0, 16, 4))),
+      out_ptr=to_be64(out_ptr), outlen=to_be32(16 + out_sz), token=tok, status_own=mlx5.CMD_OWNER_HW)
     cmd_bytes = bytearray(bytes(cmd))
     cmd_bytes[mlx5.struct_mlx5_cmd_layout.sig.offset] = (~functools.reduce(lambda a, b: a ^ b, cmd_bytes)) & 0xFF  # type: ignore[attr-defined]
 
@@ -115,8 +114,8 @@ class MLXDev:
 
     self.init_hw(ip)
 
-  def rreg(self, off): return to_be('I',self.bar[off // 4])
-  def wreg(self, off, val): self.bar[off // 4] = to_be('I',val)
+  def rreg(self, off): return to_be32(self.bar[off // 4])
+  def wreg(self, off, val): self.bar[off // 4] = to_be32(val)
   def iseg_r(self, field): return self.rreg(getattr(mlx5.struct_mlx5_init_seg, field).offset)
   def iseg_w(self, field, val): self.wreg(getattr(mlx5.struct_mlx5_init_seg, field).offset, val)
 
@@ -170,6 +169,8 @@ class MLXDev:
       memory_key_mkey_entry=dict(access_mode_1_0=1, lr=1, lw=1, rr=1, rw=1, pd=self.pd, qpn=0xFFFFFF, mkey_7_0=(key_lo:=0x33),
                                  start_addr=paddrs[0], len=size, log_page_size=log_page_size, translations_octword_size=ceildiv(n, 2)))
     return (res['mkey_index'] << 8) | key_lo
+
+  def unregister_mem(self, mkey:int): self.cmd.exec(mlx5.MLX5_CMD_OP_DESTROY_MKEY, mkey_index=mkey >> 8)
 
   def provide_pages(self, mode):
     if (npages:=self.cmd.exec(mlx5.MLX5_CMD_OP_QUERY_PAGES, op_mod=mode)['num_pages']) <= 0: return

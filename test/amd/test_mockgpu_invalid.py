@@ -39,7 +39,6 @@ dev.synchronize()
     env = os.environ.copy()
     env["AMD"] = "1"
     env["MOCKGPU"] = "1"
-    env["PYTHON_REMU"] = "1"
     env["HCQDEV_WAIT_TIMEOUT_MS"] = "10000"
 
     st = time.perf_counter()

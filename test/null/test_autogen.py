@@ -1,7 +1,6 @@
 import ctypes, struct, subprocess, tempfile, unittest
-from typing import Annotated
 from tinygrad.helpers import OSX, WIN
-from tinygrad.runtime.support.c import DLL, record, init_records
+from tinygrad.runtime.support.c import DLL, record, Field
 from tinygrad.runtime.support import c
 from tinygrad.runtime.support.autogen import gen
 
@@ -12,15 +11,56 @@ class TestC(unittest.TestCase):
       subprocess.check_output(('clang', '-x', 'c', '-fPIC', '-shared', '-', '-o', f.name), input=src.encode())
       return DLL("test", f.name)
 
+  def test_struct_array_init(self):
+    @record
+    class Foo(c.Struct):
+      SIZE = 12
+      a = Field(ctypes.c_int * 3, 0)
+
+    f = Foo((1,2,3))
+    assert f.a[0] == 1
+    assert f.a[1] == 2
+    assert f.a[2] == 3
+    f = Foo((ctypes.c_int * 3)(1,2,3))
+    assert f.a[0] == 1
+    assert f.a[1] == 2
+    assert f.a[2] == 3
+
+  def test_field_ranges(self):
+    @record
+    class Foo(c.Struct):
+      SIZE = 2
+      s = Field(ctypes.c_int8, 0)
+      u = Field(ctypes.c_uint8, 1)
+
+    f = Foo()
+    f.s = -1
+    f.u = -1
+    assert f.s == -1
+    assert f.u == 255
+
+  # this syntax is inherited from ctypes, but it seems a bit nonsensical?
+  def test_voidp_none(self):
+    @record
+    class Foo(c.Struct):
+      SIZE = 8
+      p = Field(ctypes.c_void_p, 0)
+
+    f = Foo(None)
+    assert f.p is None
+    f.p = ctypes.c_void_p(0xDEADBEEF)
+    assert f.p == 0xDEADBEEF
+    f.p = None
+    assert f.p is None
+
   def test_packed_struct(self):
     @record
-    class Baz:
+    class Baz(c.Struct):
       SIZE = 8
-      a: Annotated[ctypes.c_uint, 0, 30]
-      b: Annotated[ctypes.c_uint, 3, 30, 6]
-      c: Annotated[ctypes.c_uint, 7, 2, 4]
-      d: Annotated[ctypes.c_uint, 7, 2, 6]
-    init_records()
+      a = Field(ctypes.c_uint, 0, 30)
+      b = Field(ctypes.c_uint, 3, 30, 6)
+      c = Field(ctypes.c_uint, 7, 2, 4)
+      d = Field(ctypes.c_uint, 7, 2, 6)
 
     b = Baz(0x3AAADEAD, 0xBEEF, 1, 0)
     assert b.a == 0x3AAADEAD
@@ -36,13 +76,12 @@ class TestC(unittest.TestCase):
 
   def test_packed_struct_interop(self):
     @record
-    class Baz:
+    class Baz(c.Struct):
       SIZE = 8
-      a: Annotated[ctypes.c_int, 0, 30]
-      b: Annotated[ctypes.c_int, 3, 30, 6]
-      c: Annotated[ctypes.c_int, 7, 2, 4]
-      d: Annotated[ctypes.c_int, 7, 2, 6]
-    init_records()
+      a = Field(ctypes.c_int, 0, 30)
+      b = Field(ctypes.c_int, 3, 30, 6)
+      c = Field(ctypes.c_int, 7, 2, 4)
+      d = Field(ctypes.c_int, 7, 2, 6)
 
     src = '''
       struct __attribute__((packed)) baz {
@@ -58,24 +97,23 @@ class TestC(unittest.TestCase):
     '''
     dll = self.compile(src)
     b = Baz(0xAA000, 0x00BB0, 0, 1)
-    @dll.bind
+    @dll.bind(ctypes.c_int, Baz)
     def test(x:Baz) -> ctypes.c_int: ...
     self.assertEqual(test(b), b.a + b.b + b.c + b.d)
 
   # https://github.com/python/cpython/issues/90914
   def test_bitfield_interop(self):
     @record
-    class Baz:
+    class Baz(c.Struct):
       SIZE = 1
-      a: Annotated[ctypes.c_bool, 0, 1, 0]
-      b: Annotated[ctypes.c_bool, 0, 1, 1]
-      c: Annotated[ctypes.c_bool, 0, 1, 2]
-      d: Annotated[ctypes.c_bool, 0, 1, 3]
-      e: Annotated[ctypes.c_bool, 0, 1, 4]
-      f: Annotated[ctypes.c_bool, 0, 1, 5]
-      g: Annotated[ctypes.c_bool, 0, 1, 6]
-      h: Annotated[ctypes.c_bool, 0, 1, 7]
-    init_records()
+      a = Field(ctypes.c_bool, 0, 1, 0)
+      b = Field(ctypes.c_bool, 0, 1, 1)
+      c = Field(ctypes.c_bool, 0, 1, 2)
+      d = Field(ctypes.c_bool, 0, 1, 3)
+      e = Field(ctypes.c_bool, 0, 1, 4)
+      f = Field(ctypes.c_bool, 0, 1, 5)
+      g = Field(ctypes.c_bool, 0, 1, 6)
+      h = Field(ctypes.c_bool, 0, 1, 7)
     src = '''#include <stdbool.h>
       struct baz {
         bool a:1, b:1, c:1, d:1, e:1, f:1, g:1, h:1;
@@ -86,23 +124,22 @@ class TestC(unittest.TestCase):
       }
     '''
     dll = self.compile(src)
-    @dll.bind
+    @dll.bind(ctypes.c_int, Baz)
     def test(x:Baz) -> ctypes.c_int: ...
     for i in range(8): self.assertEqual(test(Baz(*(j==i for j in range(8)))), i==2)
 
   def test_struct_interop(self):
     @record
-    class Baz:
+    class Baz(c.Struct):
       SIZE = 32
-      a: Annotated[ctypes.c_int, 0]
-      b: Annotated[ctypes.c_int, 4]
-      c: Annotated[ctypes.c_int, 8]
-      d: Annotated[ctypes.c_int, 12]
-      e: Annotated[ctypes.c_int, 16]
-      f: Annotated[ctypes.c_int, 20]
-      g: Annotated[ctypes.c_int, 24]
-      h: Annotated[ctypes.c_int, 28]
-    init_records()
+      a = Field(ctypes.c_int, 0)
+      b = Field(ctypes.c_int, 4)
+      c = Field(ctypes.c_int, 8)
+      d = Field(ctypes.c_int, 12)
+      e = Field(ctypes.c_int, 16)
+      f = Field(ctypes.c_int, 20)
+      g = Field(ctypes.c_int, 24)
+      h = Field(ctypes.c_int, 28)
     src = '''#include <stdio.h>
       struct baz {
         int a, b, c, d, e, f, g, h;
@@ -113,16 +150,15 @@ class TestC(unittest.TestCase):
       }
     '''
     dll = self.compile(src)
-    @dll.bind
+    @dll.bind(Baz, Baz)
     def test(x:Baz) -> Baz: ...
     self.assertEqual(bytes(test(Baz(*range(8)))), struct.pack("8i", *range(7, -1, -1)))
 
   def test_aos_interop(self):
     @record
-    class Item:
+    class Item(c.Struct):
       SIZE = 4
-      val: Annotated[ctypes.c_int, 0]
-    init_records()
+      val = Field(ctypes.c_int, 0)
     src = """
     struct item { int val; };
       int test(struct item arr[3]) {
@@ -132,16 +168,15 @@ class TestC(unittest.TestCase):
       }
     """
     dll = self.compile(src)
-    @dll.bind
+    @dll.bind(ctypes.c_int, Item * 3)
     def test(arr:(Item * 3)) -> ctypes.c_int: ...
     self.assertEqual(test((Item * 3)(Item(10), Item(20), Item(30))), 60)
 
   def test_soa_interop(self):
     @record
-    class Row:
+    class Row(c.Struct):
       SIZE = 16
-      data: Annotated[ctypes.c_int * 3, 0]
-    init_records()
+      data = Field(ctypes.c_int * 3, 0)
     src = """
       struct row { int data[3]; };
       struct row test(struct row x) {
@@ -149,7 +184,7 @@ class TestC(unittest.TestCase):
       }
     """
     dll = self.compile(src)
-    @dll.bind
+    @dll.bind(Row, Row)
     def test(x:Row) -> Row: ...
     r = test(Row((ctypes.c_int * 3)(10, 20, 30)))
     self.assertIsInstance(r, Row)
@@ -159,10 +194,9 @@ class TestC(unittest.TestCase):
 
   def test_soa_ptr_interop(self):
     @record
-    class Row:
+    class Row(c.Struct):
       SIZE = 8
-      data: Annotated[c.POINTER[ctypes.c_int], 0]
-    init_records()
+      data = Field(c.POINTER[ctypes.c_int], 0)
     src = """
       struct row { int *data; };
       int test(struct row x) {
@@ -170,21 +204,20 @@ class TestC(unittest.TestCase):
       }
     """
     dll = self.compile(src)
-    @dll.bind
+    @dll.bind(ctypes.c_int, Row)
     def test(x:Row) -> ctypes.c_int: ...
     assert test(Row((ctypes.c_int * 3)(10, 20, 30))) == 60
 
   def test_nested_struct_interop(self):
     @record
-    class Inner:
+    class Inner(c.Struct):
       SIZE = 4
-      a: Annotated[ctypes.c_int, 0]
+      a = Field(ctypes.c_int, 0)
     @record
-    class Outer:
+    class Outer(c.Struct):
       SIZE = 8
-      inner: Annotated[Inner, 0]
-      b: Annotated[ctypes.c_int, 4]
-    init_records()
+      inner = Field(Inner, 0)
+      b = Field(ctypes.c_int, 4)
     src = """
       struct i { int a; };
       struct o { struct i i; int b; };
@@ -193,7 +226,7 @@ class TestC(unittest.TestCase):
       }
     """
     dll = self.compile(src)
-    @dll.bind
+    @dll.bind(Outer, Outer)
     def test(x:Outer) -> Outer: ...
     o = test(Outer(Inner(10), 20))
     self.assertEqual(o.inner.a, 20)
@@ -201,11 +234,10 @@ class TestC(unittest.TestCase):
 
   def test_struct_pointer_interop(self):
     @record
-    class Foo:
+    class Foo(c.Struct):
       SIZE = 8
-      a: Annotated[ctypes.c_int, 0]
-      b: Annotated[ctypes.c_int, 4]
-    init_records()
+      a = Field(ctypes.c_int, 0)
+      b = Field(ctypes.c_int, 4)
     src = """
       struct foo { int a, b; };
       struct foo *test(struct foo *f) {
@@ -216,7 +248,7 @@ class TestC(unittest.TestCase):
       }
     """
     dll = self.compile(src)
-    @dll.bind
+    @dll.bind(ctypes.POINTER(Foo), ctypes.POINTER(Foo))
     def test(f:ctypes.POINTER(Foo)) -> ctypes.POINTER(Foo): ...
     inp = ctypes.pointer(Foo(10, 20))
     out = test(inp)
@@ -228,16 +260,15 @@ class TestC(unittest.TestCase):
     # Mimics how mesa.struct_lp_build_tgsi_params.mask is used
     from tinygrad.runtime.support.c import POINTER
     @record
-    class Inner:
+    class Inner(c.Struct):
       SIZE = 8
-      value: Annotated[ctypes.c_int, 0]
-      flag: Annotated[ctypes.c_int, 4]
+      value = Field(ctypes.c_int, 0)
+      flag = Field(ctypes.c_int, 4)
     @record
-    class Outer:
+    class Outer(c.Struct):
       SIZE = 16
-      x: Annotated[ctypes.c_int, 0]
-      inner_ptr: Annotated[POINTER[Inner], 8]
-    init_records()
+      x = Field(ctypes.c_int, 0)
+      inner_ptr = Field(POINTER[Inner], 8)
 
     src = """
       struct inner { int value; int flag; };
@@ -247,7 +278,7 @@ class TestC(unittest.TestCase):
       }
     """
     dll = self.compile(src)
-    @dll.bind
+    @dll.bind(ctypes.c_int, ctypes.POINTER(Inner))
     def test(p:POINTER[Inner]) -> ctypes.c_int: ...
 
     inner = Inner(value=42, flag=10)
@@ -261,17 +292,16 @@ class TestC(unittest.TestCase):
     # This causes the pointed-to object to be garbage collected, leading to use-after-free.
     from tinygrad.runtime.support.c import POINTER
     @record
-    class MaskContext:
+    class MaskContext(c.Struct):
       SIZE = 16
-      value: Annotated[ctypes.c_int, 0]
-      initialized: Annotated[ctypes.c_int, 4]
-      ptr: Annotated[ctypes.c_void_p, 8]
+      value = Field(ctypes.c_int, 0)
+      initialized = Field(ctypes.c_int, 4)
+      ptr = Field(ctypes.c_void_p, 8)
     @record
-    class Params:
+    class Params(c.Struct):
       SIZE = 16
-      x: Annotated[ctypes.c_int, 0]
-      mask: Annotated[POINTER[MaskContext], 8]
-    init_records()
+      x = Field(ctypes.c_int, 0)
+      mask = Field(POINTER[MaskContext], 8)
 
     src = """
       struct mask_ctx { int value; int initialized; void *ptr; };
@@ -279,9 +309,9 @@ class TestC(unittest.TestCase):
       int mask_end(struct mask_ctx *m) { return m->value + m->initialized; }
     """
     dll = self.compile(src)
-    @dll.bind
+    @dll.bind(None, ctypes.POINTER(MaskContext), ctypes.c_int)
     def mask_begin(m:POINTER[MaskContext], val:ctypes.c_int) -> None: ...
-    @dll.bind
+    @dll.bind(ctypes.c_int, ctypes.POINTER(MaskContext))
     def mask_end(m:POINTER[MaskContext]) -> ctypes.c_int: ...
 
     # When MaskContext() is created inline, it gets garbage collected after the pointer
@@ -399,6 +429,10 @@ typedef struct
     self.assertTrue(hasattr(rect, 'height'))
     self.assertTrue(hasattr(rect, 'color'))
 
+    p2 = Point(10, 20)
+    self.assertEqual(p2.x, 10)
+    self.assertEqual(p2.y, 20)
+
   def test_struct_ordering(self):
     namespace = self.run_gen("""
     struct A;
@@ -503,11 +537,10 @@ class TestReadonlyStruct(unittest.TestCase):
     @record
     class S(c.Struct):
       SIZE = 16
-      a_u8: Annotated[ctypes.c_uint8, 0]
-      b_u16: Annotated[ctypes.c_uint16, 2]
-      c_u32: Annotated[ctypes.c_uint32, 4]
-      d_u64: Annotated[ctypes.c_uint64, 8]
-    init_records()
+      a_u8 = Field(ctypes.c_uint8, 0)
+      b_u16 = Field(ctypes.c_uint16, 2)
+      c_u32 = Field(ctypes.c_uint32, 4)
+      d_u64 = Field(ctypes.c_uint64, 8)
 
     buf = struct.pack('<BxHIQ', 0xAB, 0xCDEF, 0xDEADBEEF, 0xCAFEBABE12345678)
     s = S.from_mv(memoryview(buf))
@@ -523,8 +556,7 @@ class TestReadonlyStruct(unittest.TestCase):
     @record
     class S(c.Struct):
       SIZE = 4
-      a: Annotated[ctypes.c_uint8 * 4, 0]
-    init_records()
+      a = Field(ctypes.c_uint8 * 4, 0)
 
     buf = struct.pack('<4B', 0xAB, 0xCD, 0xEF, 0x12)
     s = S.from_mv(memoryview(buf))

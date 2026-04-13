@@ -312,8 +312,9 @@ class TestSchedule(unittest.TestCase):
     np.testing.assert_allclose(out0.numpy(), np_out0:=np.exp2(a.numpy().sum()), atol=1e-4, rtol=1e-4)
     np.testing.assert_allclose(out1.numpy(), np_out1:=a.numpy().sum()+np_out0, atol=1e-4, rtol=1e-4)
     np_b = (a.numpy() + np_out0 + np_out1)
-    np.testing.assert_allclose(out2.numpy(), np_out2:=np.exp2(np_b.sum()), atol=1e-4, rtol=1e-4)
-    np.testing.assert_allclose(out3.numpy(), np_b.sum()+np_out2, atol=1e-4, rtol=1e-4)
+    with np.errstate(over='ignore'):
+      np.testing.assert_allclose(out2.numpy(), np_out2:=np.exp2(np_b.sum()), atol=1e-4, rtol=1e-4)
+      np.testing.assert_allclose(out3.numpy(), np_b.sum()+np_out2, atol=1e-4, rtol=1e-4)
 
   def test_reduce_ext_reduce_child(self):
     Tensor.manual_seed(0)
@@ -510,7 +511,7 @@ class TestSchedule(unittest.TestCase):
     np.testing.assert_allclose(out[1].numpy(), np.sqrt(np.square(y.numpy() - np_mu).sum(-1)/y.shape[-1]), atol=1e-4, rtol=1e-4)
 
   def test_cumsum_parallel_reduce_fused(self):
-    # two-stage cumsum + ops triggers parallel REDUCEs in one kernel that must share an END
+    # two-stage cumsum + ops triggers parallel REDUCEs in one kernel that must share an END (same nesting context = should merge)
     step, num_steps = 513, 10
     t = Tensor.arange(step).float().realize()
     phase = t.cumsum()
@@ -520,6 +521,12 @@ class TestSchedule(unittest.TestCase):
     expected = np.tile(np.arange(step).astype(np.float32).cumsum(), num_steps).reshape(num_steps, step)
     expected = (expected * np.array([1,0,0,1,0,0,0,0,1,0]).reshape(num_steps, 1)).flatten()
     np.testing.assert_allclose(out.numpy(), expected, atol=1e-4, rtol=1e-4)
+
+  @unittest.skipIf(Device.DEFAULT == "CL", "TODO: fails on CI CL")
+  def test_reduce_different_nesting_depth(self):
+    # two REDUCEs sharing the same RANGE at different nesting depths must NOT merge
+    x = Tensor.arange(768).reshape(3, 256).float()
+    np.testing.assert_allclose((x.sum(axis=1) + x.sum(axis=1).sum()).numpy(), x.numpy().sum(axis=1) + x.numpy().sum(axis=1).sum())
 
   def test_multimatmul_fusion(self):
     Tensor.manual_seed(0)

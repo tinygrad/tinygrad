@@ -1,8 +1,7 @@
 from __future__ import annotations
-import ctypes, functools, os, pathlib, re, struct, sys, sysconfig
-from _ctypes import Array as _CArray, _SimpleCData, _Pointer
-from typing import TYPE_CHECKING, get_type_hints, get_args, get_origin, overload, Annotated, Any, Generic, Iterable, ParamSpec, TypeVar
-from tinygrad.helpers import ceildiv, getenv, unwrap, DEBUG, OSX, WIN
+import ctypes, functools, os, pathlib, re, sys, sysconfig
+from tinygrad.helpers import ceildiv, getenv, DEBUG, OSX, WIN
+from typing import TYPE_CHECKING, get_args, Generic, ParamSpec, TypeVar
 
 def _do_ioctl(__idir, __base, __nr, __struct, __fd, *args, __payload=None, **kwargs):
   assert not WIN, "ioctl not supported"
@@ -14,133 +13,86 @@ def _do_ioctl(__idir, __base, __nr, __struct, __fd, *args, __payload=None, **kwa
   return out
 
 def _IO(base, nr): return functools.partial(_do_ioctl, 0, ord(base) if isinstance(base, str) else base, nr, None)
-def _IOW(base, nr, typ): return functools.partial(_do_ioctl, 1, ord(base) if isinstance(base, str) else base, nr, del_an(typ))
-def _IOR(base, nr, typ): return functools.partial(_do_ioctl, 2, ord(base) if isinstance(base, str) else base, nr, del_an(typ))
-def _IOWR(base, nr, typ): return functools.partial(_do_ioctl, 3, ord(base) if isinstance(base, str) else base, nr, del_an(typ))
-
-def del_an(ty):
-  if isinstance(ty, type) and issubclass(ty, Enum): return del_an(ty.__orig_bases__[0]) # type: ignore
-  return ty.__metadata__[0] if get_origin(ty) is Annotated else (None if ty is type(None) else ty)
-
-_pending_records = []
+def _IOW(base, nr, typ): return functools.partial(_do_ioctl, 1, ord(base) if isinstance(base, str) else base, nr, typ)
+def _IOR(base, nr, typ): return functools.partial(_do_ioctl, 2, ord(base) if isinstance(base, str) else base, nr, typ)
+def _IOWR(base, nr, typ): return functools.partial(_do_ioctl, 3, ord(base) if isinstance(base, str) else base, nr, typ)
 
 T = TypeVar("T")
 U = TypeVar("U")
-V = TypeVar("V")
 P = ParamSpec("P")
 
-if TYPE_CHECKING:
-  from ctypes import _CFunctionType
-  from _ctypes import _CData
-  class Array(Generic[T, U], _CData):
-    @overload
-    def __getitem__(self: Array[_SimpleCData[V], Any], key: int) -> V: ...
-    @overload
-    def __getitem__(self: Array[T, Any], key: slice) -> list[T]: ...
-    @overload
-    def __getitem__(self: Array[T, Any], key: int) -> T: ...
-    def __getitem__(self, key) -> Any: ...
-    @overload
-    def __setitem__(self: Array[_SimpleCData[V], Any], key: int, val: V): ...
-    @overload
-    def __setitem__(self: Array[T, Any], key: int, val: T): ...
-    @overload
-    def __setitem__(self: Array[T, Any], key: slice, val: Iterable[T]): ...
-    def __setitem__(self, key, val): ...
-  class POINTER(Generic[T], _Pointer): ...
-  class CFUNCTYPE(Generic[T, P], _CFunctionType): ...
-  class Enum(_SimpleCData):
-    @classmethod
-    def get(cls, val:int, default="unknown") -> str: ...
-    @classmethod
-    def items(cls) -> Iterable[tuple[int,str]]: ...
-    @classmethod
-    def define(cls, name:str, val:int) -> int: ...
-  CT = TypeVar("CT", bound=_CData)
-  def pointer(obj: CT) -> POINTER[CT]: ...
-else:
-  class _Array:
-    def __getitem__(self, key): return del_an(key[0]) * get_args(key[1])[0]
-    def __call__(self, ty, l): return del_an(ty) * l
-  Array = _Array()
-  class POINTER:
-    def __class_getitem__(cls, key): return ctypes.POINTER(del_an(key))
-  class CFUNCTYPE:
-    def __class_getitem__(cls, key): return ctypes.CFUNCTYPE(del_an(key[0]), *(del_an(a) for a in key[1]))
-  class Enum:
-    def __init_subclass__(cls): cls._val_to_name_ = {}
+# mypy can't understand eg. ctypes.POINTER(ctypes.c_int), and python < 3.14 cannot understand ctypes.POINTER[ctypes.c_int]
+class POINTER(Generic[T], ctypes._Pointer):
+  def __class_getitem__(cls, key): return ctypes.POINTER(key)
+def pointer(x: T) -> POINTER[T]: return ctypes.pointer(x) # type: ignore
 
-    @classmethod
-    def get(cls, val, default="unknown"): return cls._val_to_name_.get(val, default)
-    @classmethod
-    def items(cls): return cls._val_to_name_.items()
-    @classmethod
-    def define(cls, name:str, val:int) -> int:
-      cls._val_to_name_[val] = name
-      return val
-  def pointer(obj): return ctypes.pointer(obj)
+if TYPE_CHECKING: _CFuncPtr = ctypes._CFunctionType
+else: _CFuncPtr = ctypes._CFuncPtr
 
-def i2b(i:int, sz:int) -> bytes: return i.to_bytes(sz, sys.byteorder)
-def b2i(b:bytes) -> int: return int.from_bytes(b, sys.byteorder)
-def mv(st:Struct) -> memoryview: return memoryview(st).cast('B').toreadonly() if getattr(st, "_readonly_", False) else memoryview(st).cast('B')
+class CFUNCTYPE(Generic[T, P], _CFuncPtr):
+  _flags_ = 0
+  def __class_getitem__(cls, key): return ctypes.CFUNCTYPE(key[0], *key[1])
+class Array(Generic[T, U], ctypes.Array):
+  _type_, _length_ = ctypes.c_byte, 0
+  def __class_getitem__(cls, key): return key[0] * get_args(key[1])[0]
+  def __new__(cls, ty, l): return ty * l
 
-def make_readonly(cls:type[Struct]|type[_CArray], mv:memoryview) -> Struct|_CArray:
+def make_readonly(cls, mv:memoryview):
   from tinygrad.runtime.support.python import mv_address
   setattr(s:=cls.from_address(mv_address(mv)), "_readonly_", mv.readonly)
   return s
 
 class Struct(ctypes.Structure):
+  SIZE = 0
+
   def __init__(self, *args, **kwargs):
     ctypes.Structure.__init__(self)
-    self._objects_ = {}
     for f,v in [*zip((rf[0] for rf in self._real_fields_), args), *kwargs.items()]: setattr(self, f, v)
 
   @classmethod
   def from_mv(cls, mv:memoryview): return make_readonly(cls, mv)
 
+  @classmethod
+  def register_fields(cls, fields):
+    setattr(cls, "_real_fields_", fields)
+    for i, (name, *args) in enumerate(fields): setattr(cls, name, Field(*args, name=name, idx=i))
+
 def record(cls) -> type[Struct]:
-  newcls = type(cls.__name__, (Struct,), {'_fields_': [('_mem_', ctypes.c_byte * cls.SIZE)]})
-  _pending_records.append((cls, newcls, unwrap(sys._getframe().f_back).f_globals))
-  return newcls
+  setattr(cls, "_fields_", [('_mem_', ctypes.c_byte * cls.SIZE)])
+  return cls
 
-def init_records() -> None:
-  for cls, newcls, ns in _pending_records:
-    setattr(newcls, '_real_fields_', [])
-    for nm, t in get_type_hints(cls, globalns=ns, include_extras=True).items():
-      if t.__origin__ in (bool, bytes, str, int, float): setattr(newcls, nm, Field(*(f:=t.__metadata__)))
-      else: setattr(newcls, nm, Field(*(f:=(del_an(t.__origin__), *t.__metadata__))))
-      newcls._real_fields_.append((nm,) + f) # type: ignore
-  _pending_records.clear()
+class Field:
+  def __init__(self, typ, off, bit_width=None, bit_off=0, *, name=None, idx=0):
+    self.typ, self.off, self.bit_width, self.bit_off, self.name, self.idx = typ, off, bit_width, bit_off, name, idx
 
-class Field(property):
-  def __init__(self, typ, off:int, bit_width=None, bit_off=0):
-    if bit_width is not None:
-      sl, set_mask = slice(off,off+(sz:=ceildiv(bit_width+bit_off, 8))), ~((mask:=(1 << bit_width) - 1) << bit_off)
+  def __set_name__(self, owner, name):
+    entry = (name, self.typ, self.off) + ((self.bit_width, self.bit_off) if self.bit_width else ())
+    if hasattr(owner, "_real_fields_"): owner._real_fields_.append(entry)
+    else: setattr(owner, "_real_fields_", [entry])
+    self.name, self.idx = name, len(owner._real_fields_) - 1
+
+  # lazily resolve field descriptors
+  def _resolve(self, cls):
+    if self.bit_width: # handle bitfields ourselves
+      sl, set_mask = slice(self.off, self.off+(sz:=ceildiv(self.bit_width+self.bit_off, 8))), ~((mask:=(1 << self.bit_width) - 1) << self.bit_off)
+      def b2i(obj): return int.from_bytes(memoryview(obj).cast("B")[sl], sys.byteorder)
+      def bset(obj, v): memoryview(obj).cast("B")[sl] = ((b2i(obj) & set_mask) | v << self.bit_off).to_bytes(sz, sys.byteorder)
       # FIXME: signedness
-      super().__init__(lambda self: (b2i(mv(self)[sl]) >> bit_off) & mask,
-                       lambda self,v: mv(self).__setitem__(sl, i2b((b2i(mv(self)[sl]) & set_mask) | (v << bit_off), sz)))
-    elif issubclass(typ, (_CArray, Struct)):
-      sl = slice(off, off + ctypes.sizeof(typ))
-      def setter(self, v):
-        if hasattr(v, '_objects') and hasattr(self, '_objects_'): self._objects_[off] = {'_self_': v, **(v._objects or {})}
-        mv(self)[sl] = bytes(v)
-      if issubclass(typ, _CArray) and typ._type_ is ctypes.c_char: super().__init__(lambda self: mv(self)[sl].tobytes().split(b"\x00")[0], setter)
-      else: super().__init__(lambda self: make_readonly(typ, mv(self)[sl]), setter)
-    else:
-      def pget(self): return ctypes.cast(struct.unpack_from("P", mv(self), off)[0], typ)
-      def pset(self, v): return struct.pack_into("P", mv(self), off, ctypes.cast(v, ctypes.c_void_p).value)
-      super().__init__(pget if (p:=issubclass(typ, _Pointer)) else (lambda self: struct.unpack_from(typ._type_, mv(self), off)[0]),
-                       pset if p or typ is ctypes.c_void_p else (lambda self,v: struct.pack_into(typ._type_, mv(self), off, v)))
-    self.offset = off
+      cf = property(lambda obj: b2i(obj) >> self.bit_off & mask, bset)
+    # pull the CField descriptor from a dummy class, zero length arrays are so ctypes manages references to child objects for us
+    else: cf = type(self.name, (ctypes.Structure,), {"_layout_": "ms", "_pack_": 1, "_fields_": [(str(i), ctypes.c_byte*0) for i in range(self.idx)] +
+                                                                                                [("_", ctypes.c_byte * self.off), ("v", self.typ)]}).v # type: ignore
+    setattr(cls, self.name, cf)
+    return cf
+
+  def __get__(self, obj, objtype=None): return self._resolve(objtype).__get__(obj, objtype) if objtype else self
+  def __set__(self, obj, value): self._resolve(obj.__class__).__set__(obj, value)
 
 @functools.cache
 def init_c_struct_t(sz:int, fields: tuple[tuple, ...]):
-  CStruct = type("CStruct", (Struct,), {'_fields_': [('_mem_', ctypes.c_byte * sz)], '_real_fields_': []})
-  for nm,ty,*args in fields:
-    setattr(CStruct, nm, Field(*(f:=(del_an(ty), *args))))
-    CStruct._real_fields_.append((nm,) + f) # type: ignore
+  (CStruct:=type("CStruct", (Struct,), {'_fields_': [('_mem_', ctypes.c_byte * sz)]})).register_fields(fields) # type: ignore
   return CStruct
-def init_c_var(ty, creat_cb): return (creat_cb(v:=del_an(ty)()), v)[1]
+def init_c_var(ty, creat_cb): return (creat_cb(v:=ty()), v)[1]
 
 class DLL(ctypes.CDLL):
   _loaded_: set[str] = set()
@@ -179,14 +131,15 @@ class DLL(ctypes.CDLL):
         if DEBUG >= 3: print(f"loading {nm} failed: {e}")
     elif DEBUG >= 3: print(f"loading {nm} failed: not found on system")
 
-  def bind(self, fn):
-    restype, argtypes = del_an((hints:=get_type_hints(fn, include_extras=True)).pop('return', None)), tuple(del_an(h) for h in hints.values())
-    cfunc = None
-    def wrapper(*args):
-      nonlocal cfunc
-      if cfunc is None: (cfunc:=getattr(self, fn.__name__)).argtypes, cfunc.restype = argtypes, restype
-      return cfunc(*args)
-    return wrapper
+  def bind(self, restype, *argtypes):
+    def wrap(fn):
+      cfunc = None
+      def wrapper(*args):
+        nonlocal cfunc
+        if cfunc is None: (cfunc:=getattr(self, fn.__name__)).argtypes, cfunc.restype = argtypes, restype
+        return cfunc(*args)
+      return wrapper
+    return wrap
 
   def __getattr__(self, nm):
     if self.nm not in self._loaded_:

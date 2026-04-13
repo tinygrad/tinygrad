@@ -6,11 +6,11 @@ from enum import Enum, auto
 from tinygrad.uop import Ops, GroupOp
 from tinygrad.dtype import ConstType, ImageDType, dtypes, DType, truncate, PtrDType, least_upper_dtype, Invalid, AddrSpace, ConstFloat, PyConst
 from tinygrad.dtype import storage_fmt_for_dtype, to_storage_scalar, from_storage_scalar
+from tinygrad.device import Buffer, MultiBuffer
 from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, flatten, TRACEMETA
 from tinygrad.helpers import PROFILE, dedup, cdiv, cmod, diskcache_put, to_function_name, cpu_profile, TracingKey, VIZ, SPEC, CAPTURE_PROCESS_REPLAY
 from tinygrad.helpers import strip_parens, colored, ansilen, printable
 if TYPE_CHECKING:
-  from tinygrad.device import Buffer, MultiBuffer
   from tinygrad.renderer import Estimates
 
 class AxisType(Enum):
@@ -433,6 +433,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   def index(self, *srcs:UOp|None, ptr=False, **kwargs):
     return UOp(Ops.INDEX, kwargs.pop("dtype", self.dtype if ptr else self.dtype.base), (self,)+tuple([x for x in srcs if x is not None]), **kwargs)
   def __getitem__(self, idx):
+    # pointers index into INDEX UOps (scalar lookup); everything else uses the shared mixin view path
+    if not isinstance(self.dtype, PtrDType): return super(UOp, self).__getitem__(idx)
     idx = self._normalize_indices(list(argfix(idx)))
     if len(slice_idx:=[i for i,x in enumerate(idx) if isinstance(x, slice)]):
       # apply SHRINK for slices that aren't the full range
@@ -525,7 +527,6 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     if self.op is Ops.CONTIGUOUS: return self
     if self.has_buffer_identity(): return self
     return UOp(Ops.CONTIGUOUS, dtype=self.dtype, src=(self,)+args, **kwargs)
-  def contiguous_backward(self): return self.alu(Ops.CONTIGUOUS_BACKWARD)
   def bufferize(self, *args, **kwargs): return UOp(Ops.BUFFERIZE, dtype=self.dtype, src=(self,)+args, **kwargs)
   def allreduce(self, op, device:str|tuple[str, ...]|UOp):
     assert isinstance(self.device, tuple), f"allreduce must be on tuple {self.device} isn't"
@@ -633,7 +634,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       case Ops.PERMUTE | Ops.FLIP: return self.arg
       case _: raise RuntimeError(f"{self.op} is not a MovementOp")
 
-  def _mop(self, op:Ops, arg, same_shape_noop:bool=False) -> UOp:
+  def _mop(self, op:Ops, arg) -> UOp:
     # early NOOP
     if op in {Ops.SHRINK, Ops.PAD, Ops.EXPAND} and len(arg) == 0:
       assert len(self.shape) == 0, "0 len arg only valid on zero length shape"
@@ -644,21 +645,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       case Ops.PERMUTE | Ops.FLIP: src_args = []
       case _: raise RuntimeError(f"{op} is not a MovementOp")
     usrcs = [shape_to_shape_arg(arg) for arg in src_args]
-    if len(usrcs) == 0: ret = UOp(op, self.dtype, (self,), arg)
-    else: ret = UOp(op, self.dtype, (self,)+UOp.sink(*usrcs).simplify().src)
-    # for all movement ops, we check shape property to validity check the movement op
-    if ret.shape == self.shape and same_shape_noop: return self
-    return ret
-
-  # in these four, if the shape doesn't change we can return self
-  #def reshape(self, arg:tuple[sint, ...]): return self._mop(Ops.RESHAPE, arg, same_shape_noop=True)
-  #def expand(self, arg:tuple[sint, ...]): return self._mop(Ops.EXPAND, arg, same_shape_noop=True)
-  #def shrink(self, arg:tuple[tuple[sint, sint], ...]): return self._mop(Ops.SHRINK, arg, same_shape_noop=True)
-  def pad(self, arg:tuple[tuple[sint, sint], ...]): return self._mop(Ops.PAD, arg, same_shape_noop=True)
-
-  # in these two, we have custom logic to check if they are a no-op
-  #def permute(self, arg:tuple[int, ...]): return self._mop(Ops.PERMUTE, arg, same_shape_noop=False) if arg != tuple(range(len(self.shape))) else self
-  #def flip(self, arg:tuple[bool, ...]): return self._mop(Ops.FLIP, arg, same_shape_noop=False) if any(arg) and len(arg) == len(self.shape) else self
+    if len(usrcs) == 0: return UOp(op, self.dtype, (self,), arg)
+    return UOp(op, self.dtype, (self,)+UOp.sink(*usrcs).simplify().src)
 
   # *** uop UNIQUE ***
 
@@ -726,7 +714,6 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
   @property
   def buffer(self) -> Buffer|MultiBuffer:
-    from tinygrad.device import Buffer, MultiBuffer
     if self.op in {Ops.CONTIGUOUS, Ops.RESHAPE, Ops.DETACH, Ops.AFTER}: return self.src[0].buffer
     # this buffer can process disk tensors and simple movement ops
     if self is not self.base:
@@ -843,8 +830,6 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       new_count.subtract(div_fac.split_uop(Ops.MUL))
       if const%div_const==0 and all(v>=0 for v in new_count.values()): return math.prod(new_count.elements(), start=self.const_like(const//div_const))
     return None # generic None if we aren't sure
-  def usum(self:UOp, *uops:UOp) -> UOp: return functools.reduce(operator.or_ if self.dtype is dtypes.bool else operator.add, uops, self)
-  def uprod(self:UOp, *uops:UOp) -> UOp: return functools.reduce(operator.and_ if self.dtype is dtypes.bool else operator.mul, uops, self)
   @property
   def vmin(self) -> PyConst: return self._min_max[0]
   @property
@@ -1317,7 +1302,9 @@ if TRACK_MATCH_STATS or PROFILE:
       with open(fn:=temp("rewrites.pkl", append_user=True), "wb") as f:
         print(f"rewrote {len(tracked_ctxs)} graphs and matched {sum(len(r.matches) for x in tracked_ctxs for r in x)} times, saved to {fn}")
         pickle.dump(RewriteTrace(tracked_keys, tracked_ctxs, uop_fields), f)
-    if VIZ > 0: return launch_viz("VIZ", temp("rewrites.pkl", append_user=True))
+    if getenv("VIZ") > 0:
+      VIZ.value = 0
+      return launch_viz("VIZ", temp("rewrites.pkl", append_user=True))
     if getenv("PRINT_MATCH_STATS", TRACK_MATCH_STATS.value and VIZ.value>=0):
       ret = [0,0,0.0,0.0]
       for k,v in sorted(list(match_stats.items()), key=lambda x: x[1][2]+x[1][3]):
@@ -1328,11 +1315,11 @@ if TRACK_MATCH_STATS or PROFILE:
       print(f"{len(match_stats)} rules, {sum(v[0] > 0 for v in match_stats.values())} matched once")
 
   def launch_viz(env_str:str, data:str):
-    os.environ[env_str] = "0"
     os.environ[f"{env_str}_DATA"] = data
-    if not int(os.getenv("VIZ", "0")) and not int(os.getenv("PROFILE", "0")):
-      args = ['--rewrites-path', getenv("VIZ_DATA", "")] if getenv("VIZ_DATA", "") else []
-      args += ['--profile-path', getenv("PROFILE_DATA", "")] if getenv("PROFILE_DATA", "") else []
+    if not VIZ and not PROFILE:
+      os.environ["VIZ"], os.environ["PROFILE"] = "0", "0"
+      args = ['--rewrites-path', os.getenv("VIZ_DATA", "")] if os.getenv("VIZ_DATA", "") else []
+      args += ['--profile-path', os.getenv("PROFILE_DATA", "")] if os.getenv("PROFILE_DATA", "") else []
       viz_path = pathlib.Path(__file__).resolve().parent.parent / "viz" / "serve.py"
       os.execv(sys.executable, [sys.executable, viz_path.as_posix()] + args)
 

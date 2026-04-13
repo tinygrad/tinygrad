@@ -47,21 +47,22 @@ def decode_profile(data:bytes) -> dict:
 def get(data:dict, key:str):
   for k,v in data.items():
     if ansistrip(k) == key: return v
-  raise RuntimeError(f'item "{key}" not found in list')
+  import difflib
+  match = difflib.get_close_matches(key, [ansistrip(k) for k in data], n=1, cutoff=0.6)
+  raise RuntimeError(f'item "{key}" not found in list'+(f", did you mean {match[0]!r}?" if match else ''))
 
 def main(args) -> None:
-  viz.trace = viz.load_pickle(args.rewrites_path, default=RewriteTrace([], [], {}))
-  viz.ctxs = viz.get_rewrites(viz.trace)
+  viz.data = viz.VizData(viz.load_pickle(args.rewrites_path, default=RewriteTrace([], [], {})))
+  viz.load_rewrites(viz.data)
 
   def format_colored(s:str) -> str: return ansistrip(s) if args.no_color else s
 
   if args.profile:
     events:list = viz.load_pickle(args.profile_path, default=[])
-    if (profile_bytes:=viz.get_profile(events)) is None: raise RuntimeError(f"empty profile in {args.profile_path}")
+    if (profile_bytes:=viz.get_profile(events, data=viz.data)) is None: raise RuntimeError(f"empty profile in {args.profile_path}")
     profile = decode_profile(profile_bytes)
-    viz.load_amd_counters(viz.ctxs, events)
-    profile["layout"].update([(f'{c["name"]} {s["name"]}', s["data"]) for c in viz.ctxs if c["name"].startswith("SQTT") for s in c["steps"]
-                              if "PKTS" in s["name"]])
+    profile["layout"].update([(f'{c["name"][5:]}{" SQTT" if s["name"].endswith("PKTS") else ""} {s["name"]}', s["data"]) for c in viz.data.ctxs
+                              if c["name"].startswith("SQTT") for s in c["steps"] if s["name"].endswith(("PMC", "PKTS"))])
     if args.src is None:
       for k in profile["layout"]:
         print(f"  {format_colored(k)}")
@@ -88,7 +89,7 @@ def main(args) -> None:
         op_str = hex_colored(op_name, color) if color and not args.no_color else op_name
         phase, delay = None, 0
         idx = next(pkt_idxs.setdefault(e.device, itertools.count()))
-        if e.device.startswith("WAVE") or e.device == "OTHER_SIMD":
+        if e.device.startswith("WAVE"):
           inst = f"0x{(pc:=int(info.replace('PC:', ''))):05x} {pc_map[pc]}" if info else f"{'':7} {op_name}"
           dispatch_to_inst[f"{e.device}-{idx}"] = (inst, int(e.st))
           phase = "DISPATCH"
@@ -98,6 +99,20 @@ def main(args) -> None:
         if inst and phase: info = f"{phase:<8} {inst}"
         unit = e.device.replace(" ", "-")
         print(f"{int(e.st)-inst_st:<12} {unit:<20} {op_str}{' '*(22-ansilen(op_str))} {int(unwrap(e.en)-e.st):<4} {str(delay or ''):<4} {info}")
+      return None
+
+    # ** PMC printer
+    if "PMC" in args.src:
+      table = viz.unpack_pmc(data[0])
+      cols = table["cols"]
+      rows:list = []
+      for r in table["rows"]:
+        if args.item is None: rows.append(r[:2])
+        elif args.item == r[0]:
+          rows = r[2]["rows"] if len(r) > 2 else [r[:2]]
+          cols = r[2]["cols"] if len(r) > 2 else cols
+      from tabulate import tabulate
+      print(tabulate(rows, headers=cols, tablefmt="github"))
       return None
 
     # ** Profiler printer
@@ -127,7 +142,7 @@ def main(args) -> None:
     return None
 
   # ** Graph rewrites printer
-  rewrites = {c["name"]:{s["name"]:s for s in c["steps"]} for c in viz.ctxs if c.get("steps")}
+  rewrites = {c["name"]:{s["name"]:s for s in c["steps"]} for c in viz.data.ctxs if c.get("steps")}
   if args.src is None:
     for k in rewrites: print(f"  {format_colored(k)}")
     return None
@@ -135,7 +150,7 @@ def main(args) -> None:
   if args.item is None:
     for k,v in steps.items(): print(" "*v["depth"]+k+(f" - {v['match_count']}" if v.get('match_count', 0) else ''))
   else:
-    data = viz.get_render(get(steps, args.item)["query"])
+    data = viz.get_render(viz.data, get(steps, args.item)["query"])
     if isinstance(data.get("value"), Iterator):
       for m in data["value"]:
         if m.get("uop"): print(f"Input UOp:\n{m['uop']}")

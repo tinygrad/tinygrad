@@ -397,7 +397,7 @@ class NVKIface:
       with contextlib.suppress(RuntimeError): self.uvm(nv_gpu.UVM_MM_INITIALIZE, nv_gpu.UVM_MM_INITIALIZE_PARAMS(uvmFd=self.fd_uvm.fd), self.fd_uvm_2)
 
       nv_iowr(NVKIface.fd_ctl, nv_gpu.NV_ESC_CARD_INFO, gpus_info:=(nv_gpu.nv_ioctl_card_info_t*64)())
-      NVKIface.gpus_info = hcq_filter_visible_devices(gpus_info)
+      NVKIface.gpus_info = hcq_filter_visible_devices(gpus_info, "NV")
 
     self.dev, self.device_id = dev, device_id
     if self.device_id >= len(NVKIface.gpus_info) or not NVKIface.gpus_info[self.device_id].valid:
@@ -511,6 +511,7 @@ class NVKIface:
     return self._gpu_uvm_map(va_addr, size, mem_handle, has_cpu_mapping=cpu_access or host)
 
   def free(self, mem:HCQBuffer):
+    if mem.owner != self.dev: return
     if mem.meta.hMemory > NVKIface.host_object_enumerator: # not a host object, clear phys mem.
       made = nv_gpu.NVOS00_PARAMETERS(hRoot=self.root, hObjectParent=self.dev.nvdevice, hObjectOld=mem.meta.hMemory)
       nv_iowr(self.fd_ctl, nv_gpu.NV_ESC_RM_FREE, made)
@@ -519,7 +520,7 @@ class NVKIface:
     self.uvm(nv_gpu.UVM_FREE, nv_gpu.UVM_FREE_PARAMS(base=int(mem.va_addr), length=mem.size))
     if mem.view is not None: FileIOInterface.munmap(int(mem.va_addr), mem.size)
 
-  def _gpu_uvm_map(self, va_base, size, mem_handle, create_range=True, has_cpu_mapping=False) -> HCQBuffer:
+  def _gpu_uvm_map(self, va_base, size, mem_handle, create_range=True, has_cpu_mapping=False, owner=None) -> HCQBuffer:
     if create_range:
       self.uvm(nv_gpu.UVM_CREATE_EXTERNAL_RANGE, nv_gpu.UVM_CREATE_EXTERNAL_RANGE_PARAMS(base=va_base, length=size))
       made = nv_gpu.NVOS46_PARAMETERS(hClient=self.root, hDevice=self.dev.nvdevice, hDma=self.dev.virtmem, hMemory=mem_handle, length=size,
@@ -533,13 +534,14 @@ class NVKIface:
 
     self.uvm(nv_gpu.UVM_MAP_EXTERNAL_ALLOCATION, uvm_map:=nv_gpu.UVM_MAP_EXTERNAL_ALLOCATION_PARAMS(base=va_base, length=size,
       rmCtrlFd=self.fd_ctl.fd, hClient=self.root, hMemory=mem_handle, gpuAttributesCount=1, perGpuAttributes=attrs, mapped_gpu_ids=[self.gpu_uuid]))
-    return HCQBuffer(va_base, size, meta=uvm_map, view=MMIOInterface(va_base, size, fmt='B') if has_cpu_mapping else None, owner=self.dev)
+    return HCQBuffer(va_base, size, meta=uvm_map, view=MMIOInterface(va_base, size, fmt='B') if has_cpu_mapping else None,
+                     owner=self.dev if owner is None else owner)
 
   def map(self, mem:HCQBuffer):
     if mem.owner is not None and mem.owner._is_cpu():
       if not any(x.device.startswith("NV") for x in mem.mapped_devs): return self.alloc(mem.size, host=True, cpu_addr=mem.va_addr)
       mem = mem.mappings[next(x for x in mem.mapped_devs if x.device.startswith("NV"))]
-    self._gpu_uvm_map(mem.va_addr, mem.size, mem.meta.hMemory, create_range=False)
+    return self._gpu_uvm_map(mem.va_addr, mem.size, mem.meta.hMemory, create_range=False, owner=mem.owner)
 
   def _alloc_gpu_vaddr(self, size, alignment=(4 << 10), force_low=False):
     return NVKIface.low_uvm_vaddr_allocator.alloc(size, alignment) if force_low else NVKIface.uvm_vaddr_allocator.alloc(size, alignment)

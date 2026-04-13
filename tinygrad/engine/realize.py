@@ -1,13 +1,34 @@
 from typing import cast, Callable
 import time, pprint, random, itertools, math
 from dataclasses import dataclass, replace, field
-from tinygrad.helpers import all_same, colored, DEBUG, GlobalCounters, ansilen, BEAM, NOOPT, all_int, Metadata, TRACEMETA, TracingKey
-from tinygrad.helpers import DEVECTORIZE, time_to_str, VALIDATE_WITH_CPU, cpu_profile, PROFILE, ProfilePointEvent, cpu_events, prod, Context, unwrap
+from tinygrad.helpers import all_same, colored, DEBUG, GlobalCounters, ansilen, NOOPT, all_int, Metadata, TRACEMETA, TracingKey
+from tinygrad.helpers import DEVECTORIZE, time_to_str, VALIDATE_WITH_CPU, cpu_profile, PROFILE, ProfilePointEvent, cpu_events, prod, unwrap
 from tinygrad.helpers import EMULATED_DTYPES
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer
 from tinygrad.device import Device, Buffer
 from tinygrad.renderer import ProgramSpec, Estimates
 from tinygrad.codegen import get_program
+
+# **************** Stat ****************
+
+def update_stats(display_name:str, device:str, estimates:Estimates, var_vals:dict[str, int], et:float|None, buf_count:int,
+                 jit=False, metadata:tuple[Metadata, ...]=(), first_run=False):
+  GlobalCounters.kernel_count += 1
+  GlobalCounters.global_ops += (op_est:=sym_infer(estimates.ops, var_vals))
+  GlobalCounters.global_mem += (mem_est:=sym_infer(estimates.mem, var_vals))
+  if et is not None: GlobalCounters.time_sum_s += et
+  if DEBUG >= 2:
+    lds_est = sym_infer(estimates.lds, var_vals)
+    header_color = 'magenta' if jit else ('green' if first_run else None)
+    ptm = colored(time_to_str(et, w=9), "yellow" if et > 0.01 else None) if et is not None else ""
+    flops, membw, ldsbw = op_est/(et or 1e-20), mem_est/(et or 1e-20), lds_est/(et or 1e-20)
+    flops_str = f"{flops*1e-9:7.0f} GFLOPS" if flops < 1e14 else colored(f"{flops*1e-12:7.0f} TFLOPS", 'green')
+    mem_str = f"{membw*1e-9:4.0f}|{ldsbw*1e-9:<6.0f} GB/s" if membw < 1e13 and ldsbw < 1e15 else \
+      colored(f"{membw*1e-12:4.0f}|{ldsbw*1e-12:<6.0f} TB/s", 'green')
+    print(f"{colored(f'*** {device[:7]:7s} {GlobalCounters.kernel_count:4d}', header_color)}"+
+      f" {display_name+' '*(46-ansilen(display_name))} arg {buf_count:2d} mem {GlobalCounters.mem_used/1e9:6.2f} GB"+
+      ("" if et is None else f" tm {ptm}/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({flops_str} {mem_str})")+
+      f" {[repr(m) if TRACEMETA >= 2 else str(m) for m in metadata] if metadata else ''}")
 
 # **************** Runners ****************
 
@@ -109,7 +130,7 @@ class EncDec(Runner):
 method_cache: dict[tuple[str, type, bytes, tuple, bool], CompiledRunner] = {}
 def get_runner(device:str, ast:UOp) -> CompiledRunner:
   # TODO: this should be all context relevant to rendering
-  context = (BEAM.value, NOOPT.value, DEVECTORIZE.value, EMULATED_DTYPES.value)
+  context = (NOOPT.value, DEVECTORIZE.value, EMULATED_DTYPES.value)
   ckey = (device, type(Device[device].compiler), ast.key, context, False)
   if cret:=method_cache.get(ckey): return cret
   bkey = (device.split(":")[0], type(Device[device].compiler), ast.key, context, True)
@@ -124,7 +145,7 @@ def get_runner(device:str, ast:UOp) -> CompiledRunner:
 
 # NOTE: ctx is the buffers
 si_lowerer = PatternMatcher([
-  (UPat((Ops.SINK, Ops.PROGRAM), name="sink"), lambda ctx,sink: get_runner(ctx[0].device, sink)),
+  (UPat((Ops.SINK, Ops.PROGRAM, Ops.BEAM), name="sink"), lambda ctx,sink: get_runner(ctx[0].device, sink)),
   (UPat(Ops.BUFFER_VIEW), lambda ctx: ViewOp(ctx[0])),
   (UPat(Ops.COPY), lambda ctx: (BufferXfer(ctx[0].nbytes, ctx[0].device, ctx[1].device) \
       if hasattr(alc:=Device[ctx[0].device].allocator, '_transfer') and alc.supports_transfer and all_same([x.device.split(":")[0] for x in ctx]) \
@@ -166,22 +187,7 @@ class ExecItem:
       cpu_events.append(ProfilePointEvent(self.prg.device, "exec", len(cpu_events), payload))
     et = self.prg(bufs, var_vals, wait=wait or DEBUG >= 2)
     if do_update_stats:
-      GlobalCounters.kernel_count += 1
-      GlobalCounters.global_ops += (op_est:=sym_infer(self.prg.estimates.ops, var_vals))
-      GlobalCounters.global_mem += (mem_est:=sym_infer(self.prg.estimates.mem, var_vals))
-      if et is not None: GlobalCounters.time_sum_s += et
-      if DEBUG >= 2:
-        lds_est = sym_infer(self.prg.estimates.lds, var_vals)
-        header_color = 'magenta' if jit else ('green' if self.prg.first_run else None)
-        ptm = colored(time_to_str(et, w=9), "yellow" if et > 0.01 else None) if et is not None else ""
-        flops, membw, ldsbw = op_est/(et or 1e-20), mem_est/(et or 1e-20), lds_est/(et or 1e-20)
-        flops_str = f"{flops*1e-9:7.0f} GFLOPS" if flops < 1e14 else colored(f"{flops*1e-12:7.0f} TFLOPS", 'green')
-        mem_str = f"{membw*1e-9:4.0f}|{ldsbw*1e-9:<6.0f} GB/s" if membw < 1e13 and ldsbw < 1e15 else \
-          colored(f"{membw*1e-12:4.0f}|{ldsbw*1e-12:<6.0f} TB/s", 'green')
-        print(f"{colored(f'*** {self.prg.device[:7]:7s} {GlobalCounters.kernel_count:4d}', header_color)}"+
-          f" {self.prg.display_name+' '*(46-ansilen(self.prg.display_name))} arg {len(bufs):2d} mem {GlobalCounters.mem_used/1e9:6.2f} GB"+
-          ("" if et is None else f" tm {ptm}/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({flops_str} {mem_str})")+
-          f" {[repr(m) if TRACEMETA >= 2 else str(m) for m in self.metadata] if self.metadata else ''}")
+      update_stats(self.prg.display_name, self.prg.device, self.prg.estimates, var_vals, et, len(bufs), jit, self.metadata, self.prg.first_run)
       self.prg.first_run = False
     return et
 
@@ -192,7 +198,8 @@ capturing: list = []  # put classes with an add_linear method in here
 def run_schedule(schedule:list[ExecItem], var_vals:dict[str, int]|None=None, do_update_stats=True):
   while len(schedule):
     ei = schedule.pop(0).lower()
-    if VALIDATE_WITH_CPU and ei.ast.op is Ops.SINK:
+    sink = ei.ast.src[0] if ei.ast.op is Ops.BEAM else ei.ast
+    if VALIDATE_WITH_CPU and sink.op is Ops.SINK:
       # copy in allocated buffers from the GPU
       bufs = [b for b in ei.bufs if b is not None]
       nb: list[Buffer|None] = [Buffer("CPU", b.size, b.dtype) for b in bufs]
@@ -203,7 +210,7 @@ def run_schedule(schedule:list[ExecItem], var_vals:dict[str, int]|None=None, do_
       ei.run(var_vals, do_update_stats=do_update_stats)
 
       # validate the output buffers match (NOTE: this is assuming the output is buffer 0)
-      with Context(BEAM=0): ExecItem(ei.ast, nb, ei.metadata, ei.fixedvars).run(var_vals, do_update_stats=do_update_stats)
+      ExecItem(sink, nb, ei.metadata, ei.fixedvars).run(var_vals, do_update_stats=do_update_stats)
       import numpy as np
       assert nb[0] is not None
       np.testing.assert_allclose(bufs[0].numpy(), nb[0].numpy(), rtol=1e-3, atol=1e-3)

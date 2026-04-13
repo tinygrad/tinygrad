@@ -5,8 +5,8 @@ from tinygrad.uop.ops import sint
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocatorBase, HCQAllocator, HWQueue, HCQBuffer, FileIOInterface
 from tinygrad.runtime.support.system import System, PCIIfaceBase, PCIAllocationMeta
 from tinygrad.runtime.support.memory import VirtMapping, AddrSpace
-from tinygrad.runtime.support.mlx.mlxdev import MLXDev, MLXQP, to_be
-from tinygrad.helpers import unwrap
+from tinygrad.runtime.support.mlx.mlxdev import MLXDev, MLXQP
+from tinygrad.helpers import unwrap, to_be32, to_be64
 
 class RDMACopyQueue(HWQueue):
   def __init__(self, dev:RDMADevice):
@@ -19,10 +19,10 @@ class RDMACopyQueue(HWQueue):
 
   def encode_ring(self, hwq:HWQueue, dev:HCQCompiled, iface:MLXIface, qp:MLXQP, cq_buf:HCQBuffer, head:sint, ring_uar:bool=False):
     for buf in [iface.dbr_buf, cq_buf] + ([iface.uar_buf] if ring_uar else []): cast(HCQAllocator, dev.allocator).map(buf)
-    hwq.write(iface.dbr_buf.offset(qp.qp_dbr + (4 if ring_uar else 0)), to_be('I', head + 1))
-    if ring_uar: hwq.write(iface.uar_buf.offset(0x800), to_be('Q', ((head << 8) | 0x0a) << 32 | ((qp.qp_info['qpn'] << 8) | 2)), b64=True)
+    hwq.write(iface.dbr_buf.offset(qp.qp_dbr + (4 if ring_uar else 0)), to_be32(head + 1))
+    if ring_uar: hwq.write(iface.uar_buf.offset(0x800), to_be64(((head << 8) | 0x0a) << 32 | ((qp.qp_info['qpn'] << 8) | 2)), b64=True)
     hwq.poll_bit(cq_buf.offset((head & (qp.cq_size - 1)) * 64 + 60, 4), ((head >> (qp.cq_size.bit_length() - 1)) & 1) << 24, mask=0x01000000)
-    hwq.write(iface.dbr_buf.offset(qp.cq_dbr), to_be('I', (head + 1) & 0xFFFFFF))
+    hwq.write(iface.dbr_buf.offset(qp.cq_dbr), to_be32((head + 1) & 0xFFFFFF))
     return self
 
   def copy(self, dest:HCQBuffer, src:HCQBuffer, sz:int):
@@ -39,8 +39,8 @@ class RDMACopyQueue(HWQueue):
   def _submit(self, dev:RDMADevice):
     for remote_nic, sq_wqe, rq_wqe in zip(self._q[0::3], self._q[1::3], self._q[2::3]):
       src_qp, dest_qp, _, _ = dev.iface.connect(remote_nic)
-      assert src_qp.head + 1 - to_be('I', src_qp.dev.dbr[src_qp.qp_dbr // 4 + 1]) <= (1 << src_qp.log_sq_size), "SQ ring full"
-      assert src_qp.head + 1 - to_be('I', dest_qp.dev.dbr[dest_qp.qp_dbr // 4]) <= (1 << dest_qp.log_rq_size), "RQ ring full"
+      assert src_qp.head + 1 - to_be32(src_qp.dev.dbr[src_qp.qp_dbr // 4 + 1]) <= (1 << src_qp.log_sq_size), "SQ ring full"
+      assert src_qp.head + 1 - to_be32(dest_qp.dev.dbr[dest_qp.qp_dbr // 4]) <= (1 << dest_qp.log_rq_size), "RQ ring full"
       dest_qp.qp_buf.view((src_qp.head & ((1 << dest_qp.log_rq_size) - 1)) * 16, 16)[:] = rq_wqe
       sq_view = src_qp.qp_buf.view(src_qp.sq_offset + (src_qp.head & ((1 << src_qp.log_sq_size) - 1)) * 64, 64)
       sq_view[:] = struct.pack('>I', (src_qp.head << 8) | 0x0a) + sq_wqe[4:]
@@ -77,8 +77,10 @@ class RDMAAllocator(HCQAllocatorBase):
     bar, paddrs = owner.iface.pci_dev.bar_info(owner.iface.vram_bar)[0], buf.base.meta.mapping.paddrs  # type: ignore[attr-defined]
     page_sz = (2 << 20) if min(sz for _, sz in paddrs) >= (2 << 20) else (4 << 10)
     pages = [bar + p + off for p, sz in paddrs for off in range(0, sz, page_sz)]
-    return HCQBuffer(bar + paddrs[0][0], buf.base.size, owner=self.dev,
+    return HCQBuffer(bar + paddrs[0][0], buf.base.size, owner=owner,
                      meta=self.dev.iface.mlx_dev.register_mem(pages, len(pages) * page_sz, page_sz.bit_length() - 1))
+
+  def _do_free(self, buf:HCQBuffer, options): self.dev.iface.mlx_dev.unregister_mem(buf.meta)
 
   def _transfer(self, dest:HCQBuffer, src:HCQBuffer, sz:int, src_dev:HCQCompiled, dest_dev:HCQCompiled):
     # sync device

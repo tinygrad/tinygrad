@@ -1,8 +1,8 @@
-import math
+import math, functools, operator
 from typing import Self
 from tinygrad.uop import Ops
-from tinygrad.dtype import dtypes, ConstType, least_upper_dtype, least_upper_float
-from tinygrad.helpers import polyN
+from tinygrad.dtype import dtypes, ConstType, PyConst, least_upper_dtype, least_upper_float
+from tinygrad.helpers import argfix, polyN
 from tinygrad.mixin.dtype import DTypeMixin
 from tinygrad.mixin.creation import CreationMixin
 
@@ -22,6 +22,9 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
   def _binop(self, op: Ops, x: Self | ConstType, reverse: bool) -> Self:
     return self.ufix(x).alu(op, self) if reverse else self.alu(op, self.ufix(x))
 
+  def usum(self, *uops) -> Self: return functools.reduce(operator.or_ if self.dtype is dtypes.bool else operator.add, argfix(*uops), self)
+  def uprod(self, *uops) -> Self: return functools.reduce(operator.and_ if self.dtype is dtypes.bool else operator.mul, argfix(*uops), self)
+
   def logical_not(self) -> Self:
     """
     Computes the logical NOT of the tensor element-wise.
@@ -31,6 +34,12 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
     ```
     """
     return self.cast(dtypes.bool).ne(True)
+
+  def contiguous_backward(self) -> Self:
+    """
+    Inserts a contiguous operation in the backward pass.
+    """
+    return self.alu(Ops.CONTIGUOUS_BACKWARD)
 
   def neg(self) -> Self:
     """
@@ -336,6 +345,24 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
     ref: Self = x if isinstance(x, type(self)) else y if isinstance(y, type(self)) else \
       self.cast(least_upper_dtype(dtypes.from_py(x), dtypes.from_py(y)))
     return self.alu(Ops.WHERE, ref.ufix(x), ref.ufix(y))
+
+  def masked_fill(self, mask:Self, value:Self|PyConst) -> Self:
+    """
+    Replaces `self` with `value` wherever the elements of `mask` are True.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([1, 2, 3, 4, 5])
+    mask = Tensor([True, False, True, False, False])
+    print(t.masked_fill(mask, -12).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([1, 2, 3, 4, 5])
+    mask = Tensor([True, False, True, False, False])
+    value = Tensor([-1, -2, -3, -4, -5])
+    print(t.masked_fill(mask, value).numpy())
+    ```
+    """
+    return mask.where(value, self)
 
   def threefry(self, seed: Self) -> Self:
     return self.alu(Ops.THREEFRY, seed)
@@ -974,3 +1001,16 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
     """
     if self.dtype != dtypes.bool and not dtypes.is_int(self.dtype): raise RuntimeError(f"{self.dtype} is not supported")
     return self.logical_not() if self.dtype == dtypes.bool else self ^ -1
+
+  def lerp(self, end: Self, weight: Self | ConstType) -> Self:
+    """
+    Linearly interpolates between `self` and `end` by `weight`.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([1., 2., 3.]).lerp(Tensor([4., 5., 6.]), 0.5).numpy())
+    ```
+    """
+    if self.dtype == dtypes.uint8 and isinstance(weight, ElementwiseMixin):
+      w_i = (weight * (1<<(W_PREC:=7)) + 0.5).cast(dtypes.int16)
+      return (self+(((end - self).cast(dtypes.int8) * w_i + (1<<W_PREC-1)).cast(dtypes.uint16) >> W_PREC)).cast(dtypes.uint8)
+    return self + (end - self) * weight
