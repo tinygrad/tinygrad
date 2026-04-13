@@ -1,7 +1,10 @@
 import unittest
 import numpy as np
 from tinygrad import Tensor, dtypes
-from tinygrad.apps.llm import GatedDeltaNetBlock, SSMConfig, TransformerBlock, TransformerConfig, apply_rope as apply_rope_new, precompute_freqs_cis, pairwise_topk
+from tinygrad.apps.llm import (
+  GatedDeltaNetBlock, SSMConfig, TransformerBlock, TransformerConfig,
+  apply_rope as apply_rope_new, precompute_freqs_cis, pairwise_topk,
+)
 
 def apply_rope(x:Tensor, start_pos:int):
   B, H, T, Hd = x.shape
@@ -111,7 +114,7 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
       x_half = x_norm.astype(np.float16)
       out_gate = self._linear_np(x_half, gate_weight).reshape(B, 1, block.num_v_heads, block.head_v_dim)
       beta = 1.0 / (1.0 + np.exp(-self._linear_np(x_half, beta_weight))).reshape(B, block.num_v_heads, 1, 1)
-      alpha = np.exp((self._softplus_np(self._linear_np(x_half, alpha_weight) + dt_bias)).reshape(B, block.num_v_heads, 1, 1) * 
+      alpha = np.exp((self._softplus_np(self._linear_np(x_half, alpha_weight) + dt_bias)).reshape(B, block.num_v_heads, 1, 1) *
                      ssm_a.reshape(1, block.num_v_heads, 1, 1))
       conv_window = np.concatenate([conv_state, self._linear_np(x_half, qkv_weight)], axis=1)
       conv_out = self._silu_np((conv_window * conv_weight).sum(axis=1))
