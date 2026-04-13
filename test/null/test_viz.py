@@ -194,7 +194,7 @@ class TestViz(unittest.TestCase):
     class TestStruct:
       colored_field: str
     a = UOp(Ops.CUSTOM, arg=TestStruct(colored("xyz", "magenta")+colored("12345", "blue")))
-    a2 = uop_to_json(a, VizData())[id(a)]
+    a2 = uop_to_json(VizData(), a)[id(a)]
     self.assertEqual(ansistrip(a2["label"]), f"CUSTOM\n{TestStruct.__qualname__}(colored_field='xyz12345')")
 
   def test_colored_label_multiline(self):
@@ -217,11 +217,11 @@ class TestViz(unittest.TestCase):
       # use smaller stack limit for faster test (default is 250000)
       with Context(REWRITE_STACK_LIMIT=100): self.assertRaises(RuntimeError, exec_rewrite, a, [pm])
     graphs = flatten(x["graph"].values() for x in viz.get_details(0, 0))
-    self.assertEqual(graphs[0], uop_to_json(a, VizData())[id(a)])
-    self.assertEqual(graphs[1], uop_to_json(b, VizData())[id(b)])
+    self.assertEqual(graphs[0], uop_to_json(VizData(), a)[id(a)])
+    self.assertEqual(graphs[1], uop_to_json(VizData(), b)[id(b)])
     # fallback to NOOP with the error message
     nop = UOp(Ops.NOOP, arg="infinite loop in fixed_point_rewrite")
-    self.assertEqual(graphs[2], uop_to_json(nop, VizData())[id(nop)])
+    self.assertEqual(graphs[2], uop_to_json(VizData(), nop)[id(nop)])
 
   def test_const_node_visibility(self):
     with save_viz() as viz:
@@ -241,7 +241,7 @@ class TestViz(unittest.TestCase):
     c = UOp.const(dtypes.float, 1.0, device="CPU", shape=(3,4))  # creates CONST->RESHAPE->EXPAND chain
     a = UOp(Ops.DEFINE_VAR, dtypes.float, arg=("a", 0.0, 10.0))
     alu = a + c
-    graph = uop_to_json(alu, VizData())
+    graph = uop_to_json(VizData(), alu)
     # the RESHAPE and EXPAND nodes from the const should not appear in the graph
     labels = {v["label"].split("\n")[0] for v in graph.values()}
     self.assertNotIn("RESHAPE", labels)
