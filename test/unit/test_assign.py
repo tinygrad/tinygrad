@@ -963,5 +963,20 @@ class TestAfterCachePatterns(unittest.TestCase):
     np.testing.assert_array_equal(a.numpy(), 1)
     np.testing.assert_array_equal(b.numpy(), 1)
 
+  def test_double_store_after_different_sizes(self):
+    full = Tensor.zeros(2).contiguous()
+    head = Tensor.zeros(1).contiguous()
+    full_src = Tensor([1, 2], dtype=dtypes.float).contiguous()
+    head_src = Tensor([3], dtype=dtypes.float).contiguous()
+    Tensor.realize(full, head, full_src, head_src)
+
+    full_store = full.uop.store(full_src.uop)
+    head_store = head.uop.store(head_src.uop)
+
+    head = Tensor(head.uop.after(head_store, full_store))
+    head.realize()
+    np.testing.assert_array_equal(head.numpy(), [3])
+    np.testing.assert_array_equal(full.numpy(), [1, 2])
+
 if __name__ == "__main__":
   unittest.main()
