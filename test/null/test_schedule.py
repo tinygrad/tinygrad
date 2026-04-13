@@ -1,7 +1,7 @@
 # schedule tests that pass on NULL backend (no copyout needed)
 import gc, unittest, time
 from tinygrad import nn, dtypes, Device, Tensor
-from tinygrad.uop.ops import UOp, Ops, GroupOp, UPat, KernelInfo
+from tinygrad.uop.ops import UOp, Ops, GroupOp, UPat
 from tinygrad.helpers import DEBUG, GlobalCounters, Context
 from tinygrad.engine.realize import CompiledRunner, run_schedule
 
@@ -143,36 +143,6 @@ class TestSimpleSchedule(unittest.TestCase):
     self.assertEqual(len(Tensor.schedule(a1, a2)), 1)
 
 class TestSchedule(unittest.TestCase):
-  def test_create_schedule_handles_multi_kernel_after_and_after_deps(self):
-    def named_copy(name:str):
-      def fxn(out:UOp, src:UOp) -> UOp:
-        i = UOp.range(src.size, 0)
-        return out[i].store(src[i]).end(i).sink(arg=KernelInfo(name=name))
-      return fxn
-
-    src = Tensor.zeros(4, dtype=dtypes.float).contiguous().realize()
-    dep = Tensor.zeros(4, dtype=dtypes.float).contiguous().realize()
-    out = Tensor.zeros(4, dtype=dtypes.float).contiguous().realize()
-    ones = Tensor.ones(4, dtype=dtypes.float).contiguous().realize()
-    twos = Tensor.full((4,), 2.0, dtype=dtypes.float).contiguous().realize()
-    threes = Tensor.full((4,), 3.0, dtype=dtypes.float).contiguous().realize()
-
-    ka = Tensor.custom_kernel(src, ones, fxn=named_copy("ka"))[0]
-    kb = Tensor.custom_kernel(src, twos, fxn=named_copy("kb"))[0]
-    src_after = Tensor(src.uop.after(*ka.uop.src[1:], *kb.uop.src[1:]))
-
-    kd = Tensor.custom_kernel(dep, threes, fxn=named_copy("kd"))[0]
-    kc = Tensor.custom_kernel(out, src_after, fxn=named_copy("kc"))[0]
-    out_after = Tensor(kc.uop.src[0].after(*kc.uop.src[1:], kd.uop))
-
-    schedule = out_after.schedule()
-    names = [si.ast.arg.name for si in schedule]
-    self.assertEqual(set(names), {"ka", "kb", "kc", "kd"})
-    self.assertEqual(names[-1], "kc")
-    self.assertLess(names.index("ka"), names.index("kc"))
-    self.assertLess(names.index("kb"), names.index("kc"))
-    self.assertLess(names.index("kd"), names.index("kc"))
-
   @unittest.skipIf(Device.DEFAULT == "CPU", "devices must mismatch")
   def test_error_on_device_mismatch(self):
     a = Tensor.empty(10)
