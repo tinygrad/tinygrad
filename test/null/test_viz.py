@@ -417,7 +417,7 @@ from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphE
 from tinygrad.viz.serve import get_profile
 from extra.viz.cli import decode_profile
 
-def load_profile(lst:list[ProfileEvent]) -> dict: return decode_profile(get_profile(lst))
+def load_profile(lst:list[ProfileEvent]) -> dict: return decode_profile(get_profile(VizData(), lst))
 
 class TestVizProfiler(unittest.TestCase):
   def test_transfer_uses_copy_device(self):
@@ -563,7 +563,7 @@ class TestVizProfiler(unittest.TestCase):
     step = 10
     n_events = 1_000
     prof = [ProfileRangeEvent("CPU", name="k_test", st=decimal.Decimal(ts:=i*step), en=decimal.Decimal(ts)+step) for i in range(n_events)]
-    sz = len(get_profile(prof))
+    sz = len(get_profile(VizData(), prof))
     self.assertLessEqual(sz/n_events, 26)
 
   def test_calltrace(self):
@@ -586,7 +586,7 @@ class TestVizProfiler(unittest.TestCase):
     step = decimal.Decimal(dur_mins*60*1e6//n_events)
     prof = [ProfileRangeEvent("CPU", name="k_test", st=decimal.Decimal(ts:=i*step), en=decimal.Decimal(ts)+step) for i in range(n_events)]
     with self.assertRaisesRegex(ValueError, "timestamp out of range"):
-      get_profile(prof)
+      get_profile(VizData(), prof)
 
   def test_python_marker(self):
     with save_viz():
