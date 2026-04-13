@@ -71,10 +71,6 @@ jobs:
         uv venv /tmp/tinygrad_pytest_ci
         source /tmp/tinygrad_pytest_ci/bin/activate
         uv pip install .[testing]
-    - name: setup other stuff
-      run: |
-        mkdir -p extra/remu/target/release/
-        ln -s ~/tinygrad/extra/remu/target/release/libremu.so extra/remu/target/release/libremu.so
     - name: setup staging db
       run: |
         echo "CACHEDB=/tmp/pytest-db-ci.db" >> $GITHUB_ENV
