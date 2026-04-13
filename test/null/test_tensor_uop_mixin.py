@@ -58,5 +58,17 @@ class TestTensorUOpCumalu(unittest.TestCase):
   def test_cumsum_large(self):    _check(self, _t(600), lambda x: x.cumsum())  # exercises _split_cumalu
   def test_cumprod(self):         _check(self, _t(4), lambda x: x.cumprod(0))
 
+class TestTensorUOpCat(unittest.TestCase):
+  def test_cat_dim0(self):     _check(self, _t(2, 3), lambda x: x.cat(x, dim=0))
+  def test_cat_dim1(self):     _check(self, _t(2, 3), lambda x: x.cat(x, dim=1))
+  def test_cat_3tensors(self): _check(self, _t(2, 3), lambda x: x.cat(x, x, dim=0))
+  def test_cat_neg_dim(self):  _check(self, _t(2, 3, 4), lambda x: x.cat(x, dim=-1))
+
+class TestTensorUOpStack(unittest.TestCase):
+  def test_stack_dim0(self):     _check(self, _t(2, 3), lambda x: x.stack(x, dim=0))
+  def test_stack_dim1(self):     _check(self, _t(2, 3), lambda x: x.stack(x, dim=1))
+  def test_stack_3tensors(self): _check(self, _t(2, 3), lambda x: x.stack(x, x, dim=0))
+  def test_stack_new_last(self): _check(self, _t(2, 3), lambda x: x.stack(x, dim=-1))
+
 if __name__ == "__main__":
   unittest.main()
