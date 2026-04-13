@@ -415,8 +415,8 @@ def libusb_unlock_event_waiters(ctx:c.POINTER[libusb_context]) -> None: ...
 @c.record
 class struct_timeval(c.Struct):
   SIZE = 16
-  tv_sec: ctypes.c_int64
-  tv_usec: ctypes.c_int64
+  tv_sec: int
+  tv_usec: int
 __time_t: TypeAlias = ctypes.c_int64
 __suseconds_t: TypeAlias = ctypes.c_int64
 struct_timeval.register_fields([('tv_sec', ctypes.c_int64, 0), ('tv_usec', ctypes.c_int64, 8)])

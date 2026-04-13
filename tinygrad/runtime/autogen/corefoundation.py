@@ -39,8 +39,8 @@ def CFStringCreateWithCharactersNoCopy(alloc:CFAllocatorRef, chars:c.POINTER[Uni
 @c.record
 class CFRange(c.Struct):
   SIZE = 16
-  location: ctypes.c_int64
-  length: ctypes.c_int64
+  location: int
+  length: int
 CFRange.register_fields([('location', CFIndex, 0), ('length', CFIndex, 8)])
 @dll.bind(CFStringRef, CFAllocatorRef, CFStringRef, CFRange)
 def CFStringCreateWithSubstring(alloc:CFAllocatorRef, str:CFStringRef, range:CFRange) -> CFStringRef: ...
@@ -260,8 +260,8 @@ class CFStringInlineBuffer(c.Struct):
   directUniCharBuffer: c.POINTER[ctypes.c_uint16]
   directCStringBuffer: c.POINTER[ctypes.c_char]
   rangeToBuffer: CFRange
-  bufferedRangeStart: ctypes.c_int64
-  bufferedRangeEnd: ctypes.c_int64
+  bufferedRangeStart: int
+  bufferedRangeEnd: int
 CFStringInlineBuffer.register_fields([('buffer', c.Array[UniChar, Literal[64]], 0), ('theString', CFStringRef, 128), ('directUniCharBuffer', c.POINTER[UniChar], 136), ('directCStringBuffer', c.POINTER[ctypes.c_char], 144), ('rangeToBuffer', CFRange, 152), ('bufferedRangeStart', CFIndex, 168), ('bufferedRangeEnd', CFIndex, 176)])
 CFTypeRef: TypeAlias = ctypes.c_void_p
 @dll.bind(None, CFTypeRef)

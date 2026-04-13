@@ -24,6 +24,7 @@ P = ParamSpec("P")
 # mypy can't understand eg. ctypes.POINTER(ctypes.c_int), and python < 3.14 cannot understand ctypes.POINTER[ctypes.c_int]
 class POINTER(Generic[T], ctypes._Pointer):
   def __class_getitem__(cls, key): return ctypes.POINTER(key)
+def pointer(x: T) -> POINTER[T]: return ctypes.pointer(x) # type: ignore
 
 if TYPE_CHECKING: _CFuncPtr = ctypes._CFunctionType
 else: _CFuncPtr = ctypes._CFuncPtr

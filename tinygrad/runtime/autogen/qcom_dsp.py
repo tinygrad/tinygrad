@@ -186,7 +186,7 @@ class struct_fastrpc_ioctl_munmap_fd(c.Struct):
   fd: int
   flags: int
   va: int
-  len: ctypes.c_int64
+  len: int
 ssize_t: TypeAlias = ctypes.c_int64
 struct_fastrpc_ioctl_munmap_fd.register_fields([('fd', ctypes.c_int32, 0), ('flags', uint32_t, 4), ('va', uintptr_t, 8), ('len', ssize_t, 16)])
 @c.record

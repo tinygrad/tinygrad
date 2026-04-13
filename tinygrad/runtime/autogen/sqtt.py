@@ -114,7 +114,7 @@ class struct_sqtt_file_chunk_asic_info(c.Struct):
   ce_ram_size_graphics: int
   ce_ram_size_compute: int
   max_number_of_dedicated_cus: int
-  vram_size: ctypes.c_int64
+  vram_size: int
   vram_bus_width: int
   l2_cache_size: int
   l1_cache_size: int

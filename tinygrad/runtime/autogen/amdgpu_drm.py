@@ -229,8 +229,8 @@ class struct_drm_wait_vblank_reply(c.Struct):
   SIZE = 24
   type: int
   sequence: int
-  tval_sec: ctypes.c_int64
-  tval_usec: ctypes.c_int64
+  tval_sec: int
+  tval_usec: int
 struct_drm_wait_vblank_reply.register_fields([('type', ctypes.c_uint32, 0), ('sequence', ctypes.c_uint32, 4), ('tval_sec', ctypes.c_int64, 8), ('tval_usec', ctypes.c_int64, 16)])
 @c.record
 class union_drm_wait_vblank(c.Struct):

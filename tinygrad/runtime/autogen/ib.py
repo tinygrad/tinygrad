@@ -217,7 +217,7 @@ class pthread_mutex_t(c.Struct):
   SIZE = 40
   __data: struct___pthread_mutex_s
   __size: c.Array[ctypes.c_char, Literal[40]]
-  __align: ctypes.c_int64
+  __align: int
 @c.record
 class struct___pthread_mutex_s(c.Struct):
   SIZE = 40
@@ -1270,8 +1270,8 @@ class struct_ibv_values_ex(c.Struct):
 @c.record
 class struct_timespec(c.Struct):
   SIZE = 16
-  tv_sec: ctypes.c_int64
-  tv_nsec: ctypes.c_int64
+  tv_sec: int
+  tv_nsec: int
 __time_t: TypeAlias = ctypes.c_int64
 __syscall_slong_t: TypeAlias = ctypes.c_int64
 struct_timespec.register_fields([('tv_sec', ctypes.c_int64, 0), ('tv_nsec', ctypes.c_int64, 8)])

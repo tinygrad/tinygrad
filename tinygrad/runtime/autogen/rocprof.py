@@ -80,7 +80,7 @@ rocprofiler_thread_trace_decoder_pc_t: TypeAlias = struct_rocprofiler_thread_tra
 @c.record
 class struct_rocprofiler_thread_trace_decoder_perfevent_t(c.Struct):
   SIZE = 24
-  time: ctypes.c_int64
+  time: int
   events0: int
   events1: int
   events2: int
@@ -123,7 +123,7 @@ class struct_rocprofiler_thread_trace_decoder_inst_t(c.Struct):
   category: int
   stall: int
   duration: int
-  time: ctypes.c_int64
+  time: int
   pc: struct_rocprofiler_thread_trace_decoder_pc_t
 struct_rocprofiler_thread_trace_decoder_inst_t.register_fields([('category', uint32_t, 0, 8, 0), ('stall', uint32_t, 1, 24, 0), ('duration', int32_t, 4), ('time', int64_t, 8), ('pc', rocprofiler_thread_trace_decoder_pc_t, 16)])
 rocprofiler_thread_trace_decoder_inst_t: TypeAlias = struct_rocprofiler_thread_trace_decoder_inst_t
@@ -137,8 +137,8 @@ class struct_rocprofiler_thread_trace_decoder_wave_t(c.Struct):
   _rsvd1: int
   _rsvd2: int
   _rsvd3: int
-  begin_time: ctypes.c_int64
-  end_time: ctypes.c_int64
+  begin_time: int
+  end_time: int
   timeline_size: int
   instructions_size: int
   timeline_array: c.POINTER[struct_rocprofiler_thread_trace_decoder_wave_state_t]
@@ -148,7 +148,7 @@ rocprofiler_thread_trace_decoder_wave_t: TypeAlias = struct_rocprofiler_thread_t
 @c.record
 class struct_rocprofiler_thread_trace_decoder_realtime_t(c.Struct):
   SIZE = 24
-  shader_clock: ctypes.c_int64
+  shader_clock: int
   realtime_clock: int
   reserved: int
 struct_rocprofiler_thread_trace_decoder_realtime_t.register_fields([('shader_clock', int64_t, 0), ('realtime_clock', uint64_t, 8), ('reserved', uint64_t, 16)])
@@ -158,7 +158,7 @@ rocprofiler_thread_trace_decoder_shaderdata_flags_t: TypeAlias = ctypes.c_uint32
 @c.record
 class struct_rocprofiler_thread_trace_decoder_shaderdata_t(c.Struct):
   SIZE = 24
-  time: ctypes.c_int64
+  time: int
   value: int
   cu: int
   simd: int

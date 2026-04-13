@@ -22,7 +22,7 @@ class llvm_amdhsa_kernel_descriptor_t(c.Struct):
   private_segment_fixed_size: int
   kernarg_size: int
   reserved0: c.Array[ctypes.c_ubyte, Literal[4]]
-  kernel_code_entry_byte_offset: ctypes.c_int64
+  kernel_code_entry_byte_offset: int
   reserved1: c.Array[ctypes.c_ubyte, Literal[20]]
   compute_pgm_rsrc3: int
   compute_pgm_rsrc1: int

@@ -45,7 +45,7 @@ class nir_const_value(c.Struct):
   u16: int
   i32: int
   u32: int
-  i64: ctypes.c_int64
+  i64: int
   u64: int
 int8_t: TypeAlias = ctypes.c_byte
 uint8_t: TypeAlias = ctypes.c_ubyte
@@ -1454,12 +1454,12 @@ class struct__IO_FILE(c.Struct):
   _chain: c.POINTER[struct__IO_FILE]
   _fileno: int
   _flags2: int
-  _old_offset: ctypes.c_int64
+  _old_offset: int
   _cur_column: int
   _vtable_offset: int
   _shortbuf: c.Array[ctypes.c_char, Literal[1]]
   _lock: ctypes.c_void_p
-  _offset: ctypes.c_int64
+  _offset: int
   _codecvt: c.POINTER[struct__IO_codecvt]
   _wide_data: c.POINTER[struct__IO_wide_data]
   _freeres_list: c.POINTER[struct__IO_FILE]
@@ -4720,7 +4720,7 @@ class pthread_mutex_t(c.Struct):
   SIZE = 40
   __data: struct___pthread_mutex_s
   __size: c.Array[ctypes.c_char, Literal[40]]
-  __align: ctypes.c_int64
+  __align: int
 mtx_t: TypeAlias = pthread_mutex_t
 @c.record
 class struct___pthread_mutex_s(c.Struct):

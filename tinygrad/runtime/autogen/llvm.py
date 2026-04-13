@@ -12,8 +12,8 @@ def imaxabs(__n:intmax_t) -> intmax_t: ...
 @c.record
 class imaxdiv_t(c.Struct):
   SIZE = 16
-  quot: ctypes.c_int64
-  rem: ctypes.c_int64
+  quot: int
+  rem: int
 imaxdiv_t.register_fields([('quot', ctypes.c_int64, 0), ('rem', ctypes.c_int64, 8)])
 @dll.bind(imaxdiv_t, intmax_t, intmax_t)
 def imaxdiv(__numer:intmax_t, __denom:intmax_t) -> imaxdiv_t: ...
@@ -36,8 +36,8 @@ fd_set.register_fields([('fds_bits', c.Array[ctypes.c_int64, Literal[16]], 0)])
 @c.record
 class struct_timeval(c.Struct):
   SIZE = 16
-  tv_sec: ctypes.c_int64
-  tv_usec: ctypes.c_int64
+  tv_sec: int
+  tv_usec: int
 __time_t: TypeAlias = ctypes.c_int64
 __suseconds_t: TypeAlias = ctypes.c_int64
 struct_timeval.register_fields([('tv_sec', ctypes.c_int64, 0), ('tv_usec', ctypes.c_int64, 8)])
@@ -46,8 +46,8 @@ def select(__nfds:int, __readfds:c.POINTER[fd_set], __writefds:c.POINTER[fd_set]
 @c.record
 class struct_timespec(c.Struct):
   SIZE = 16
-  tv_sec: ctypes.c_int64
-  tv_nsec: ctypes.c_int64
+  tv_sec: int
+  tv_nsec: int
 __syscall_slong_t: TypeAlias = ctypes.c_int64
 struct_timespec.register_fields([('tv_sec', ctypes.c_int64, 0), ('tv_nsec', ctypes.c_int64, 8)])
 @c.record

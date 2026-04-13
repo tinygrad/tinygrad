@@ -768,8 +768,8 @@ class struct_hsa_amd_barrier_value_packet_s(c.Struct):
   header: struct_hsa_amd_packet_header_s
   reserved0: int
   signal: struct_hsa_signal_s
-  value: ctypes.c_int64
-  mask: ctypes.c_int64
+  value: int
+  mask: int
   cond: int
   reserved1: int
   reserved2: int
@@ -1183,8 +1183,8 @@ enum_amd_signal_kind_t: dict[int, str] = {(AMD_SIGNAL_KIND_INVALID:=0): 'AMD_SIG
 @c.record
 class struct_amd_signal_s(c.Struct):
   SIZE = 64
-  kind: ctypes.c_int64
-  value: ctypes.c_int64
+  kind: int
+  value: int
   hardware_doorbell_ptr: c.POINTER[ctypes.c_uint64]
   event_mailbox_ptr: int
   event_id: int
@@ -1316,8 +1316,8 @@ class struct_amd_kernel_code_s(c.Struct):
   amd_machine_version_major: int
   amd_machine_version_minor: int
   amd_machine_version_stepping: int
-  kernel_code_entry_byte_offset: ctypes.c_int64
-  kernel_code_prefetch_byte_offset: ctypes.c_int64
+  kernel_code_entry_byte_offset: int
+  kernel_code_prefetch_byte_offset: int
   kernel_code_prefetch_byte_size: int
   max_scratch_backing_memory_byte_size: int
   compute_pgm_rsrc1: int
