@@ -65,10 +65,16 @@ def create_step(name:str, query:tuple[str, int, int], data=None, depth:int=0, **
 @dataclass(frozen=True)
 class VizData:
   trace:RewriteTrace
+  ctxs:list[dict] = field(default_factory=list)
   ref_map:dict[Any, int] = field(default_factory=dict)
   all_uops:dict[int, UOp] = field(default_factory=dict)
 
 # ** list all saved rewrites
+
+def populate_ref_map(data:VizData) -> None:
+  data.ref_map.clear()
+  for i,k in enumerate(data.trace.keys):
+    for key in k.keys: data.ref_map[key] = i
 
 def get_rewrites(data:VizData) -> list[dict]:
   ret = []
@@ -79,7 +85,6 @@ def get_rewrites(data:VizData) -> list[dict]:
       steps.append(create_step("View UOp List", ("/uops", i, len(steps))))
       steps.append(create_step("View Source", ("/code", i, len(steps)), p.src[3].arg))
       steps.append(create_step("View Disassembly", ("/asm", i, len(steps)), (k.ret, p.src[4].arg)))
-    for key in k.keys: data.ref_map[key] = i
     ret.append({"name":k.display_name, "steps":steps})
   return ret
 
@@ -193,30 +198,29 @@ def rel_ts(ts:int|Decimal, start_ts:int, ctx:str="") -> int:
 
 # Profiler API
 
-device_ts_diffs:dict[str, Decimal] = {}
-def cpu_ts_diff(device:str) -> Decimal: return device_ts_diffs.get(device, Decimal(0))
+def cpu_ts_diff(device_ts_diffs:dict[str, Decimal], device:str) -> Decimal: return device_ts_diffs.get(device, Decimal(0))
 
 DevEvent = ProfileRangeEvent|ProfileGraphEntry|ProfilePointEvent
-def flatten_events(profile:list[ProfileEvent]) -> Generator[tuple[Decimal, Decimal, DevEvent], None, None]:
+def flatten_events(profile:list[ProfileEvent], device_ts_diffs:dict[str, Decimal]) -> Generator[tuple[Decimal, Decimal, DevEvent], None, None]:
   for e in profile:
-    if isinstance(e, ProfileRangeEvent): yield (e.st+(diff:=cpu_ts_diff(e.device)), (e.en if e.en is not None else e.st)+diff, e)
+    if isinstance(e, ProfileRangeEvent): yield (e.st+(diff:=cpu_ts_diff(device_ts_diffs, e.device)), (e.en if e.en is not None else e.st)+diff, e)
     elif isinstance(e, ProfilePointEvent): yield (e.ts, e.ts, e)
     elif isinstance(e, ProfileGraphEvent):
       cpu_ts = []
-      for ent in e.ents: cpu_ts += [e.sigs[ent.st_id]+(diff:=cpu_ts_diff(ent.device)), e.sigs[ent.en_id]+diff]
+      for ent in e.ents: cpu_ts += [e.sigs[ent.st_id]+(diff:=cpu_ts_diff(device_ts_diffs, ent.device)), e.sigs[ent.en_id]+diff]
       yield (st:=min(cpu_ts)), (et:=max(cpu_ts)), ProfileRangeEvent(f"{e.ents[0].device.split(':')[0]} Graph", f"batched {len(e.ents)}", st, et)
       for i,ent in enumerate(e.ents): yield (cpu_ts[i*2], cpu_ts[i*2+1], ent)
 
 # normalize event timestamps and attach kernel metadata
-def timeline_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:int, scache:dict[str, int]) -> bytes|None:
+def timeline_layout(data:VizData, dev_events:list[tuple[int, int, float, DevEvent]], start_ts:int, scache:dict[str, int]) -> bytes|None:
   events:list[bytes] = []
   exec_points:dict[str, ProfilePointEvent] = {}
   for st,et,dur,e in dev_events:
     if isinstance(e, ProfilePointEvent) and e.name == "exec": exec_points[e.arg["name"]] = e
     if dur == 0: continue
     name, fmt, key = e.name, [], None
-    if (ref:=ref_map.get(name)) is not None and ctxs:
-      name = ctxs[ref]["name"]
+    if (ref:=data.ref_map.get(name)) is not None and ref < len(data.ctxs):
+      name = data.ctxs[ref]["name"]
       if (p:=get_prg_uop(data, ref)) is not None and (ei:=exec_points.get(p.src[0].arg.name)) is not None:
         flops = sym_infer((estimates:=p.src[0].arg.estimates).ops, var_vals:=ei.arg['var_vals'])/(t:=dur*1e-6)
         membw, ldsbw = sym_infer(estimates.mem, var_vals)/t, sym_infer(estimates.lds, var_vals)/t
@@ -228,7 +232,7 @@ def timeline_layout(dev_events:list[tuple[int, int, float, DevEvent]], start_ts:
         key = ei.key
     elif isinstance(e.name, TracingKey):
       name = e.name.display_name
-      ref = next((v for k in e.name.keys if (v:=ref_map.get(k)) is not None), None)
+      ref = next((v for k in e.name.keys if (v:=data.ref_map.get(k)) is not None), None)
       if isinstance(e.name.ret, str): fmt.append(e.name.ret)
       elif isinstance(e.name.ret, int):
         membw = (nbytes:=e.name.ret) / (dur * 1e-6)
@@ -319,7 +323,7 @@ def unpack_pmc(e) -> dict:
 
 # ** on startup, list all the performance counter traces
 
-def load_amd_counters(ctxs:list[dict], profile:list[ProfileEvent]) -> None:
+def load_amd_counters(data:VizData, profile:list[ProfileEvent]) -> None:
   from tinygrad.runtime.ops_amd import ProfileSQTTEvent, ProfilePMCEvent
   counter_events:dict[tuple[int, int], dict] = {}
   durations:dict[str, list[float]] = {}
@@ -332,22 +336,22 @@ def load_amd_counters(ctxs:list[dict], profile:list[ProfileEvent]) -> None:
     if isinstance(e, ProfileProgramEvent) and e.tag is not None: prg_events[e.tag] = e
     if isinstance(e, ProfileDeviceEvent) and e.device.startswith("AMD"): arch = f"gfx{unwrap(e.props)['gfx_target_version']//1000}"
   if len(counter_events) == 0: return None
-  ctxs.append({"name":"All Counters", "steps":[create_step("PMC", ("/all-pmc", len(ctxs), 0), (durations, all_counters:={}))]})
+  data.ctxs.append({"name":"All Counters", "steps":[create_step("PMC", ("/all-pmc", len(data.ctxs), 0), (durations, all_counters:={}))]})
   run_number = {n:0 for n,_ in counter_events}
   for (k, tag),v in counter_events.items():
     # use the colored name if it exists
-    name = unwrap(get_prg_uop(data, r)).src[0].arg.name if (r:=ref_map.get(pname:=prg_events[k].name)) is not None else pname
+    name = unwrap(get_prg_uop(data, r)).src[0].arg.name if (r:=data.ref_map.get(pname:=prg_events[k].name)) is not None else pname
     run_number[k] += 1
     steps:list[dict] = []
     if (pmc:=v.get(ProfilePMCEvent)):
-      steps.append(create_step("PMC", ("/prg-pmc", len(ctxs), len(steps)), pmc))
+      steps.append(create_step("PMC", ("/prg-pmc", len(data.ctxs), len(steps)), pmc))
       all_counters[(name, run_number[k], pname)] = pmc[0]
     # to decode a SQTT trace, we need the raw stream, program binary and device properties
     if (sqtt:=v.get(ProfileSQTTEvent)):
       for e in sqtt:
-        if e.itrace: steps.append(create_step(f"SE:{e.se} PKTS", (f"/prg-pkts-{e.se}", len(ctxs), len(steps)), data=(e.blob, prg_events[k].lib,arch)))
-      steps.append(create_step("OCC", ("/prg-sqtt", len(ctxs), len(steps)), ((k, tag), sqtt, prg_events[k], arch)))
-    ctxs.append({"name":f"SQTT {name}"+(f" n{run_number[k]}" if run_number[k] > 1 else ""), "steps":steps})
+        if e.itrace: steps.append(create_step(f"SE:{e.se} PKTS", (f"/prg-pkts-{e.se}", len(data.ctxs), len(steps)), data=(e.blob, prg_events[k].lib,arch)))
+      steps.append(create_step("OCC", ("/prg-sqtt", len(data.ctxs), len(steps)), ((k, tag), sqtt, prg_events[k], arch)))
+    data.ctxs.append({"name":f"SQTT {name}"+(f" n{run_number[k]}" if run_number[k] > 1 else ""), "steps":steps})
 
 wave_colors = {"WMMA": "#1F7857", **{x:"#ffffc0" for x in ["VALU", "VINTERP"]}, "SALU": "#cef263", "SMEM": "#ffc0c0", "STORE": "#4fa3cc",
                **{x:"#b2b7c9" for x in ["VMEM", "SGMEM"]}, "LDS": "#9fb4a6", "IMMEDIATE": "#f3b44a", "BARRIER": "#d00000",
@@ -463,23 +467,25 @@ def device_sort_fn(k:str) -> tuple:
   dev_base = p[0] if len(p) < 2 or not p[1].isdigit() else f"{p[0]}:{p[1]}"
   return (is_memory, special.get(p[0], special['ALLDEVS']), dev_base, k)
 
-def get_profile(profile:list[ProfileEvent], sort_fn:Callable[[str], Any]=device_sort_fn) -> bytes|None:
+def get_profile(profile:list[ProfileEvent], sort_fn:Callable[[str], Any]=device_sort_fn, data:VizData|None=None) -> bytes|None:
+  if data is None: data = VizData(RewriteTrace([], [], {}))
   # start by getting the time diffs
-  device_decoders:dict[str, Callable[[list[dict], list[ProfileEvent]], None]] = {}
+  device_ts_diffs:dict[str, Decimal] = {}
+  device_decoders:dict[str, Callable[[VizData, list[ProfileEvent]], None]] = {}
   for ev in profile:
     if isinstance(ev, ProfileDeviceEvent):
       device_ts_diffs[ev.device] = ev.tdiff
       if (d:=ev.device.split(":")[0]) == "AMD": device_decoders[d] = load_amd_counters
       if d == "NV": device_decoders[d] = load_nv_counters
   # load device specific counters
-  for fxn in device_decoders.values(): fxn(ctxs, profile)
+  for fxn in device_decoders.values(): fxn(data, profile)
   # map events per device
   dev_events:dict[str, list[tuple[int, int, float, DevEvent]]] = {}
   markers:list[ProfilePointEvent] = []
   ext_data:dict[str, Any] = {}
   start_ts:int|None = None
   end_ts:int|None = None
-  for ts,en,e in flatten_events(profile):
+  for ts,en,e in flatten_events(profile, device_ts_diffs):
     dev_events.setdefault(e.device,[]).append((st:=int(ts), et:=int(en), float(en-ts), e))
     if start_ts is None or st < start_ts: start_ts = st
     if end_ts is None or et > end_ts: end_ts = et
@@ -493,7 +499,7 @@ def get_profile(profile:list[ProfileEvent], sort_fn:Callable[[str], Any]=device_
   dtype_size:dict[str, int] = {}
   for k,v in dev_events.items():
     v.sort(key=lambda e:e[0])
-    layout[k] = timeline_layout(v, start_ts, scache)
+    layout[k] = timeline_layout(data, v, start_ts, scache)
     layout.update([graph_layout(k, v, start_ts, unwrap(end_ts), peaks, dtype_size, scache)])
   sorted_layout = sorted([k for k,v in layout.items() if v is not None], key=sort_fn)
   ret = [b"".join([struct.pack("<B", len(k)), k.encode(), unwrap(layout[k])]) for k in sorted_layout]
@@ -504,16 +510,16 @@ def get_profile(profile:list[ProfileEvent], sort_fn:Callable[[str], Any]=device_
 
 # ** PMA counters
 
-def load_nv_counters(ctxs:list[dict], profile:list) -> None:
+def load_nv_counters(data:VizData, profile:list) -> None:
   steps:list[dict] = []
   sm_version = {e.device:e.props.get("sm_version", 0x800) for e in profile if isinstance(e, ProfileDeviceEvent) and e.props is not None}
   run_number:dict[str, int] = {}
   for e in profile:
     if type(e).__name__ == "ProfilePMAEvent":
       run_number[e.kern] = run_num = run_number.get(e.kern, 0)+1
-      steps.append(create_step(f"PMA {e.kern}"+(f"n{run_num}" if run_num>1 else ""), ("/prg-pma-pkts", len(ctxs), len(steps)),
+      steps.append(create_step(f"PMA {e.kern}"+(f"n{run_num}" if run_num>1 else ""), ("/prg-pma-pkts", len(data.ctxs), len(steps)),
                                data=(e.blob, sm_version[e.device])))
-  if steps: ctxs.append({"name":"All Counters", "steps":steps})
+  if steps: data.ctxs.append({"name":"All Counters", "steps":steps})
 
 def pma_timeline(blob:bytes, sm_version:int) -> list[ProfileEvent]:
   from extra.nv_pma.decode import decode, decode_tpc_id
@@ -762,7 +768,9 @@ if __name__ == "__main__":
 
   data = VizData(load_pickle(args.rewrites_path, default=RewriteTrace([], [], {})))
   ctxs = get_rewrites(data)
-  profile_ret = get_profile(load_pickle(args.profile_path, default=[]))
+  data.ctxs.extend(ctxs)
+  populate_ref_map(data)
+  profile_ret = get_profile(load_pickle(args.profile_path, default=[]), data=data)
 
   server = TCPServerWithReuse(('', PORT), Handler)
   reloader_thread = threading.Thread(target=reloader)

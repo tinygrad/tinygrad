@@ -10,7 +10,7 @@ from tinygrad.helpers import VIZ, cpu_profile, ProfilePointEvent, unwrap
 from tinygrad.device import Buffer
 
 from tinygrad.uop.ops import tracked_keys, tracked_ctxs, uop_fields, active_rewrites, active_group, _name_cnt, RewriteTrace
-from tinygrad.viz.serve import get_rewrites, get_full_rewrite, uop_to_json, VizData
+from tinygrad.viz.serve import get_rewrites, get_full_rewrite, uop_to_json, VizData, populate_ref_map
 
 @track_rewrites(name=True)
 def exec_rewrite(sink:UOp, pm_lst:list[PatternMatcher], names:None|list[str]=None) -> UOp:
@@ -27,7 +27,10 @@ class VizTrace:
   def set_trace(self) -> None:
     self._trace = VizData(RewriteTrace(tracked_keys.copy(), tracked_ctxs.copy(), uop_fields.copy()))
   # the API
-  def list_items(self) -> list[dict]: return get_rewrites(self.trace)
+  def list_items(self) -> list[dict]:
+    self.trace.ctxs[:] = get_rewrites(self.trace)
+    populate_ref_map(self.trace)
+    return self.trace.ctxs
   def get_details(self, rewrite_idx:int, step:int) -> Generator[dict, None, None]:
     lst = self.list_items()
     assert len(lst) > rewrite_idx, f"only loaded {len(lst)} traces, expecting at least {rewrite_idx}"
