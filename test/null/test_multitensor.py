@@ -139,6 +139,44 @@ class TestMultiRamUsage(unittest.TestCase):
     mem_4 = run_layers(4)
     self.assertEqual(mem_2, mem_4, f"graph memory should not grow with layers: 2 layers={mem_2}, 4 layers={mem_4}")
 
+class TestMultiScalarALU(unittest.TestCase):
+  """Test that tuple-device scalars work correctly in ALU with MULTI tensors (_shard scalar fix)."""
+  def test_multi_times_replicated_scalar(self):
+    devices = ("NULL:0", "NULL:1")
+    x = Tensor.ones(4).contiguous().shard(devices, axis=0)
+    s = Tensor(2.0).to(devices)
+    result = x * s
+    self.assertEqual(result.shape, (4,))
+    self.assertEqual(result.uop.axis, 0)
+
+  def test_multi_add_replicated_scalar(self):
+    devices = ("NULL:0", "NULL:1")
+    x = Tensor.ones(4).contiguous().shard(devices, axis=0)
+    s = Tensor(1.0).to(devices)
+    result = x + s
+    self.assertEqual(result.shape, (4,))
+    self.assertEqual(result.uop.axis, 0)
+
+  def test_multi_times_call_scalar(self):
+    """Per-device scalar from a CALL (like FP8 local amax) used in ALU with MULTI."""
+    import functools
+    from tinygrad.uop.ops import UOp, Ops
+    devices = ("NULL:0", "NULL:1")
+    x = Tensor.ones(4, 4).contiguous().shard(devices, axis=0)
+    # simulate per-device scalar via CALL (strips MULTI from param body → no allreduce)
+    @functools.cache
+    def _fxn(x_p, device):
+      t = Tensor(x_p, device=device)
+      inner = Tensor(t.uop.src[0]) if t.uop.op is Ops.MULTI else t
+      return (inner.sum(),)
+    param = x.as_param(0)
+    fxn = _fxn(param.uop, x.device)
+    per_dev_scalar = Tensor(fxn[0].uop.call(x.uop).gettuple(0))
+    result = x * per_dev_scalar
+    self.assertEqual(result.shape, (4, 4))
+    self.assertEqual(result.uop.axis, 0)
+    result.realize()
+
 class TestMultiAxis(unittest.TestCase):
   def test_reshape_shard_invalid(self):
     devices = ("NULL:0", "NULL:1")
