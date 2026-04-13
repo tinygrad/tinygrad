@@ -21,29 +21,29 @@ def create_schedule(sched_sink:UOp) -> UOp:
     in_degree: dict[UOp, int] = {}
     for u in sched_sink.toposort(gate_kernel_sink):
       if u.op is not Ops.AFTER: continue
-      k = u.src[1]
-      if k.op is Ops.STORE: continue  # skip unprocessed STORE+AFTER inside precompiled CALL bodies
-      assert k.op in {Ops.CALL, Ops.END}, f"AFTER src[1] should be CALL or END, not {k.op}"
-      in_degree.setdefault(k, 0)
-      if k.op is Ops.END: assert k.src[0].op is Ops.CALL, f"END src[0] should be KERNEL, not {k.src[0].op}"
-      # WAR deps from rangeify are stored in AFTER src[2:]
-      kernel_deps = k.src[0].src[1:] if k.op is Ops.END else k.src[1:]
-      for s in kernel_deps + u.src[2:]:
-        match (s := _unwrap_src(s)).op:
-          case Ops.AFTER:
-            children.setdefault(s.src[1], []).append(k)
-            in_degree[k] += 1
-          case Ops.MSELECT | Ops.MSTACK:
-            for ss in s.src:
-              if ss.op is Ops.MSELECT: ss = ss.src[0]
-              if ss.op not in {Ops.BUFFER, Ops.PARAM}:
-                assert ss.op is Ops.AFTER, f"ss.op is not AFTER, it's {ss.op}"
-                children.setdefault(ss.src[1], []).append(k)
-                in_degree[k] += 1
-          case Ops.BUFFER | Ops.PARAM | Ops.BIND:
-            pass  # BUFFER/PARAM is already realized, BIND is a bound variable (not a buffer dependency)
-          case _:
-            raise RuntimeError(f"input to kernel must be AFTER, BUFFER, PARAM, MSELECT, MSTACK, or BIND, not {s.op}")
+      for k in u.src[1:]:
+        if k.op is Ops.STORE: continue  # skip unprocessed STORE+AFTER inside precompiled CALL bodies
+        assert k.op in {Ops.CALL, Ops.END}, f"AFTER src[1] should be CALL or END, not {k.op}"
+        in_degree.setdefault(k, 0)
+        if k.op is Ops.END: assert k.src[0].op is Ops.CALL, f"END src[0] should be KERNEL, not {k.src[0].op}"
+        # WAR deps from rangeify are stored in AFTER src[2:]
+        kernel_deps = k.src[0].src[1:] if k.op is Ops.END else k.src[1:]
+        for s in kernel_deps + u.src[2:]:
+          match (s := _unwrap_src(s)).op:
+            case Ops.AFTER:
+              for t in s.src[1:]: children.setdefault(t, []).append(k)
+              in_degree[k] += 1
+            case Ops.MSELECT | Ops.MSTACK:
+              for ss in s.src:
+                if ss.op is Ops.MSELECT: ss = ss.src[0]
+                if ss.op not in {Ops.BUFFER, Ops.PARAM}:
+                  assert ss.op is Ops.AFTER, f"ss.op is not AFTER, it's {ss.op}"
+                  children.setdefault(ss.src[1], []).append(k)
+                  in_degree[k] += 1
+            case Ops.BUFFER | Ops.PARAM | Ops.BIND:
+              pass  # BUFFER/PARAM is already realized, BIND is a bound variable (not a buffer dependency)
+            case _:
+              raise RuntimeError(f"input to kernel must be AFTER, BUFFER, PARAM, MSELECT, MSTACK, or BIND, not {s.op}")
 
   with cpu_profile(TracingKey("linearize schedule")):
     queue: deque[UOp] = deque(k for k,v in in_degree.items() if v == 0)
