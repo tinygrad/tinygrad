@@ -952,10 +952,11 @@ class TestAfterCachePatterns(unittest.TestCase):
   def test_double_store_after(self):
     a = Tensor.zeros(10).contiguous()
     b = Tensor.zeros(10).contiguous()
-    Tensor.realize(a, b)
+    c = Tensor.ones(10).contiguous()
+    Tensor.realize(a, b, c)
 
-    a_store = a.uop.store(Tensor.ones(10).contiguous().uop)
-    b_store = b.uop.store(Tensor.ones(10).contiguous().uop)
+    a_store = a.uop.store(c.uop)
+    b_store = b.uop.store(c.uop)
 
     a = Tensor(a.uop.after(a_store, b_store))
     a.realize()
