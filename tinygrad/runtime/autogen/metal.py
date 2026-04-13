@@ -1,4 +1,5 @@
 # mypy: disable-error-code="empty-body"
+from __future__ import annotations
 import ctypes
 from typing import Literal, TypeAlias
 from tinygrad.runtime.support.c import _IO, _IOW, _IOR, _IOWR
@@ -8,14 +9,14 @@ dll = c.DLL('metal', 'Metal')
 @c.record
 class MTLDispatchThreadgroupsIndirectArguments(c.Struct):
   SIZE = 12
-  threadgroupsPerGrid: 'list[int]'
+  threadgroupsPerGrid: ctypes.Array[ctypes.c_uint32]
 uint32_t: TypeAlias = ctypes.c_uint32
 MTLDispatchThreadgroupsIndirectArguments.register_fields([('threadgroupsPerGrid', (uint32_t * 3), 0)])
 @c.record
 class MTLStageInRegionIndirectArguments(c.Struct):
   SIZE = 24
-  stageInOrigin: 'list[int]'
-  stageInSize: 'list[int]'
+  stageInOrigin: ctypes.Array[ctypes.c_uint32]
+  stageInSize: ctypes.Array[ctypes.c_uint32]
 MTLStageInRegionIndirectArguments.register_fields([('stageInOrigin', (uint32_t * 3), 0), ('stageInSize', (uint32_t * 3), 12)])
 class MTLComputeCommandEncoder(objc.Spec): pass
 class MTLCommandEncoder(objc.Spec): pass
@@ -26,8 +27,8 @@ class MTLResource(objc.Spec): pass
 @c.record
 class struct__NSRange(c.Struct):
   SIZE = 16
-  location: 'int'
-  length: 'int'
+  location: int
+  length: int
 NSRange: TypeAlias = struct__NSRange
 struct__NSRange.register_fields([('location', NSUInteger, 0), ('length', NSUInteger, 8)])
 class MTLTexture(objc.Spec): pass
@@ -53,10 +54,10 @@ MTLTextureCompressionType: TypeAlias = NSInteger
 @c.record
 class MTLTextureSwizzleChannels(c.Struct):
   SIZE = 4
-  red: 'int'
-  green: 'int'
-  blue: 'int'
-  alpha: 'int'
+  red: int
+  green: int
+  blue: int
+  alpha: int
 uint8_t: TypeAlias = ctypes.c_ubyte
 enum_MTLTextureSwizzle: dict[int, str] = {(MTLTextureSwizzleZero:=0): 'MTLTextureSwizzleZero', (MTLTextureSwizzleOne:=1): 'MTLTextureSwizzleOne', (MTLTextureSwizzleRed:=2): 'MTLTextureSwizzleRed', (MTLTextureSwizzleGreen:=3): 'MTLTextureSwizzleGreen', (MTLTextureSwizzleBlue:=4): 'MTLTextureSwizzleBlue', (MTLTextureSwizzleAlpha:=5): 'MTLTextureSwizzleAlpha'}
 MTLTextureSwizzle: TypeAlias = uint8_t
@@ -216,21 +217,21 @@ class MTLSamplerState(objc.Spec): pass
 @c.record
 class MTLRegion(c.Struct):
   SIZE = 48
-  origin: 'MTLOrigin'
-  size: 'MTLSize'
+  origin: MTLOrigin
+  size: MTLSize
 @c.record
 class MTLOrigin(c.Struct):
   SIZE = 24
-  x: 'int'
-  y: 'int'
-  z: 'int'
+  x: int
+  y: int
+  z: int
 MTLOrigin.register_fields([('x', NSUInteger, 0), ('y', NSUInteger, 8), ('z', NSUInteger, 16)])
 @c.record
 class MTLSize(c.Struct):
   SIZE = 24
-  width: 'int'
-  height: 'int'
-  depth: 'int'
+  width: int
+  height: int
+  depth: int
 MTLSize.register_fields([('width', NSUInteger, 0), ('height', NSUInteger, 8), ('depth', NSUInteger, 16)])
 MTLRegion.register_fields([('origin', MTLOrigin, 0), ('size', MTLSize, 24)])
 class MTLFence(objc.Spec): pass
@@ -522,7 +523,7 @@ class MTLIntersectionFunctionTableDescriptor(objc.Spec): pass
 @c.record
 class struct_MTLResourceID(c.Struct):
   SIZE = 8
-  _impl: 'int'
+  _impl: int
 MTLResourceID: TypeAlias = struct_MTLResourceID
 struct_MTLResourceID.register_fields([('_impl', uint64_t, 0)])
 MTLComputePipelineState._bases_ = [NSObject]
@@ -579,18 +580,18 @@ class MTLRenderPassDescriptor(objc.Spec): pass
 @c.record
 class MTLSamplePosition(c.Struct):
   SIZE = 8
-  x: 'float'
-  y: 'float'
+  x: float
+  y: float
 MTLSamplePosition.register_fields([('x', ctypes.c_float, 0), ('y', ctypes.c_float, 4)])
 class MTLRenderPassColorAttachmentDescriptorArray(objc.Spec): pass
 class MTLRenderPassColorAttachmentDescriptor(objc.Spec): pass
 @c.record
 class MTLClearColor(c.Struct):
   SIZE = 32
-  red: 'float'
-  green: 'float'
-  blue: 'float'
-  alpha: 'float'
+  red: float
+  green: float
+  blue: float
+  alpha: float
 MTLClearColor.register_fields([('red', ctypes.c_double, 0), ('green', ctypes.c_double, 8), ('blue', ctypes.c_double, 16), ('alpha', ctypes.c_double, 24)])
 class MTLRenderPassAttachmentDescriptor(objc.Spec): pass
 enum_MTLLoadAction: dict[int, str] = {(MTLLoadActionDontCare:=0): 'MTLLoadActionDontCare', (MTLLoadActionLoad:=1): 'MTLLoadActionLoad', (MTLLoadActionClear:=2): 'MTLLoadActionClear'}
@@ -897,7 +898,7 @@ MTLCommandQueue._methods_ = [
 ]
 enum_MTLIOCompressionMethod: dict[int, str] = {(MTLIOCompressionMethodZlib:=0): 'MTLIOCompressionMethodZlib', (MTLIOCompressionMethodLZFSE:=1): 'MTLIOCompressionMethodLZFSE', (MTLIOCompressionMethodLZ4:=2): 'MTLIOCompressionMethodLZ4', (MTLIOCompressionMethodLZMA:=3): 'MTLIOCompressionMethodLZMA', (MTLIOCompressionMethodLZBitmap:=4): 'MTLIOCompressionMethodLZBitmap'}
 MTLIOCompressionMethod: TypeAlias = NSInteger
-@dll.bind
+@dll.bind(MTLDevice)
 def MTLCreateSystemDefaultDevice() -> MTLDevice: ...
 MTLCreateSystemDefaultDevice = objc.returns_retained(MTLCreateSystemDefaultDevice)
 MTLDeviceNotificationName: TypeAlias = NSString
@@ -907,7 +908,7 @@ try: MTLDeviceRemovalRequestedNotification = MTLDeviceNotificationName.in_dll(dl
 except (ValueError,AttributeError): pass
 try: MTLDeviceWasRemovedNotification = MTLDeviceNotificationName.in_dll(dll, 'MTLDeviceWasRemovedNotification') # type: ignore
 except (ValueError,AttributeError): pass
-@dll.bind
+@dll.bind(None, NSObject)
 def MTLRemoveDeviceObserver(observer:NSObject) -> None: ...
 enum_MTLFeatureSet: dict[int, str] = {(MTLFeatureSet_iOS_GPUFamily1_v1:=0): 'MTLFeatureSet_iOS_GPUFamily1_v1', (MTLFeatureSet_iOS_GPUFamily2_v1:=1): 'MTLFeatureSet_iOS_GPUFamily2_v1', (MTLFeatureSet_iOS_GPUFamily1_v2:=2): 'MTLFeatureSet_iOS_GPUFamily1_v2', (MTLFeatureSet_iOS_GPUFamily2_v2:=3): 'MTLFeatureSet_iOS_GPUFamily2_v2', (MTLFeatureSet_iOS_GPUFamily3_v1:=4): 'MTLFeatureSet_iOS_GPUFamily3_v1', (MTLFeatureSet_iOS_GPUFamily1_v3:=5): 'MTLFeatureSet_iOS_GPUFamily1_v3', (MTLFeatureSet_iOS_GPUFamily2_v3:=6): 'MTLFeatureSet_iOS_GPUFamily2_v3', (MTLFeatureSet_iOS_GPUFamily3_v2:=7): 'MTLFeatureSet_iOS_GPUFamily3_v2', (MTLFeatureSet_iOS_GPUFamily1_v4:=8): 'MTLFeatureSet_iOS_GPUFamily1_v4', (MTLFeatureSet_iOS_GPUFamily2_v4:=9): 'MTLFeatureSet_iOS_GPUFamily2_v4', (MTLFeatureSet_iOS_GPUFamily3_v3:=10): 'MTLFeatureSet_iOS_GPUFamily3_v3', (MTLFeatureSet_iOS_GPUFamily4_v1:=11): 'MTLFeatureSet_iOS_GPUFamily4_v1', (MTLFeatureSet_iOS_GPUFamily1_v5:=12): 'MTLFeatureSet_iOS_GPUFamily1_v5', (MTLFeatureSet_iOS_GPUFamily2_v5:=13): 'MTLFeatureSet_iOS_GPUFamily2_v5', (MTLFeatureSet_iOS_GPUFamily3_v4:=14): 'MTLFeatureSet_iOS_GPUFamily3_v4', (MTLFeatureSet_iOS_GPUFamily4_v2:=15): 'MTLFeatureSet_iOS_GPUFamily4_v2', (MTLFeatureSet_iOS_GPUFamily5_v1:=16): 'MTLFeatureSet_iOS_GPUFamily5_v1', (MTLFeatureSet_macOS_GPUFamily1_v1:=10000): 'MTLFeatureSet_macOS_GPUFamily1_v1', (MTLFeatureSet_OSX_GPUFamily1_v1:=10000): 'MTLFeatureSet_OSX_GPUFamily1_v1', (MTLFeatureSet_macOS_GPUFamily1_v2:=10001): 'MTLFeatureSet_macOS_GPUFamily1_v2', (MTLFeatureSet_OSX_GPUFamily1_v2:=10001): 'MTLFeatureSet_OSX_GPUFamily1_v2', (MTLFeatureSet_macOS_ReadWriteTextureTier2:=10002): 'MTLFeatureSet_macOS_ReadWriteTextureTier2', (MTLFeatureSet_OSX_ReadWriteTextureTier2:=10002): 'MTLFeatureSet_OSX_ReadWriteTextureTier2', (MTLFeatureSet_macOS_GPUFamily1_v3:=10003): 'MTLFeatureSet_macOS_GPUFamily1_v3', (MTLFeatureSet_macOS_GPUFamily1_v4:=10004): 'MTLFeatureSet_macOS_GPUFamily1_v4', (MTLFeatureSet_macOS_GPUFamily2_v1:=10005): 'MTLFeatureSet_macOS_GPUFamily2_v1', (MTLFeatureSet_tvOS_GPUFamily1_v1:=30000): 'MTLFeatureSet_tvOS_GPUFamily1_v1', (MTLFeatureSet_TVOS_GPUFamily1_v1:=30000): 'MTLFeatureSet_TVOS_GPUFamily1_v1', (MTLFeatureSet_tvOS_GPUFamily1_v2:=30001): 'MTLFeatureSet_tvOS_GPUFamily1_v2', (MTLFeatureSet_tvOS_GPUFamily1_v3:=30002): 'MTLFeatureSet_tvOS_GPUFamily1_v3', (MTLFeatureSet_tvOS_GPUFamily2_v1:=30003): 'MTLFeatureSet_tvOS_GPUFamily2_v1', (MTLFeatureSet_tvOS_GPUFamily1_v4:=30004): 'MTLFeatureSet_tvOS_GPUFamily1_v4', (MTLFeatureSet_tvOS_GPUFamily2_v2:=30005): 'MTLFeatureSet_tvOS_GPUFamily2_v2'}
 MTLFeatureSet: TypeAlias = NSUInteger
@@ -928,17 +929,17 @@ MTLSparsePageSize: TypeAlias = NSInteger
 @c.record
 class MTLAccelerationStructureSizes(c.Struct):
   SIZE = 24
-  accelerationStructureSize: 'int'
-  buildScratchBufferSize: 'int'
-  refitScratchBufferSize: 'int'
+  accelerationStructureSize: int
+  buildScratchBufferSize: int
+  refitScratchBufferSize: int
 MTLAccelerationStructureSizes.register_fields([('accelerationStructureSize', NSUInteger, 0), ('buildScratchBufferSize', NSUInteger, 8), ('refitScratchBufferSize', NSUInteger, 16)])
 enum_MTLCounterSamplingPoint: dict[int, str] = {(MTLCounterSamplingPointAtStageBoundary:=0): 'MTLCounterSamplingPointAtStageBoundary', (MTLCounterSamplingPointAtDrawBoundary:=1): 'MTLCounterSamplingPointAtDrawBoundary', (MTLCounterSamplingPointAtDispatchBoundary:=2): 'MTLCounterSamplingPointAtDispatchBoundary', (MTLCounterSamplingPointAtTileDispatchBoundary:=3): 'MTLCounterSamplingPointAtTileDispatchBoundary', (MTLCounterSamplingPointAtBlitBoundary:=4): 'MTLCounterSamplingPointAtBlitBoundary'}
 MTLCounterSamplingPoint: TypeAlias = NSUInteger
 @c.record
 class MTLSizeAndAlign(c.Struct):
   SIZE = 16
-  size: 'int'
-  align: 'int'
+  size: int
+  align: int
 MTLSizeAndAlign.register_fields([('size', NSUInteger, 0), ('align', NSUInteger, 8)])
 class MTLRenderPipelineReflection(objc.Spec): pass
 class MTLArgumentDescriptor(objc.Spec): pass
@@ -1371,8 +1372,8 @@ MTLIndirectCommandType: TypeAlias = NSUInteger
 @c.record
 class MTLIndirectCommandBufferExecutionRange(c.Struct):
   SIZE = 8
-  location: 'int'
-  length: 'int'
+  location: int
+  length: int
 MTLIndirectCommandBufferExecutionRange.register_fields([('location', uint32_t, 0), ('length', uint32_t, 4)])
 MTLIndirectCommandBufferDescriptor._bases_ = [NSObject]
 MTLIndirectCommandBufferDescriptor._methods_ = [

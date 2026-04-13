@@ -102,15 +102,10 @@ def normalize(a): return ("_" + n if keyword.iskeyword(n:=nm(a)) else n)
 def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False, errno=False, anon_names={}, types={}, parse_macros=True, paths=[]):
   macros, lines, anoncnt, types, objc, fns = [], [], itertools.count().__next__, {k:(v,True) for k,v in types.items()}, False, set()
 
-  # mypy can't understand eg. ctypes.POINTER(ctypes.c_int), and python < 3.14 cannot understand ctypes.POINTER[ctypes.c_int]
+  # ctypes automatically "unboxes" simple types
   def typehint(ty) -> str:
-    # ctypes automatically "unboxes" simple types
     if (v:={**{i:"int" for i in ints}, **{getattr(clang, f"CXType_{f}"):"float" for f in ['Float', 'Double', 'LongDouble']}, clang.CXType_Enum:"int",
             clang.CXType_WChar:"str", clang.CXType_SChar:"int", clang.CXType_Char_S:"bytes", clang.CXType_Bool:"bool",}.get(ty.kind, None)): return v
-    if ty.kind in fps or (ty.kind == clang.CXType_Pointer and clang.clang_getPointeeType(ty).kind in fps): return "ctypes._CFunctionType"
-    if ty.kind == clang.CXType_Pointer:
-      return "int|None" if (p:=clang.clang_getPointeeType(ty)).kind==clang.CXType_Void else f"ctypes._Pointer[{tname(p)}]"
-    if ty.kind in (clang.CXType_ConstantArray, clang.CXType_IncompleteArray): return f"ctypes.Array[{tname(clang.clang_getArrayElementType(ty))}]"
     return tname(ty)
 
   def tname(t, suggested_name=None, typedef=None) -> str:
@@ -120,10 +115,10 @@ def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False,
     if t.kind in tmap: return tmap[t.kind]
     if nm(t) in types and types[nm(t)][1]: return types[nm(t)][0]
     if ((f:=t).kind in fps) or (t.kind == clang.CXType_Pointer and (f:=clang.clang_getPointeeType(t)).kind in fps):
-      return (f"ctypes.CFUNCTYPE({tname(clang.clang_getResultType(f))}, " + ', '.join(map(tname, arguments(f))) + ")")
+      return (f"c.CFUNCTYPE[{tname(clang.clang_getResultType(f))}, [" + ', '.join(map(tname, arguments(f))) + "]]")
     match t.kind:
       case clang.CXType_Pointer:
-        return "ctypes.c_void_p" if (p:=clang.clang_getPointeeType(t)).kind==clang.CXType_Void else f"ctypes.POINTER({tname(p)})"
+        return "ctypes.c_void_p" if (p:=clang.clang_getPointeeType(t)).kind==clang.CXType_Void else f"c.POINTER[{tname(p)}]"
       case clang.CXType_ObjCObjectPointer: return tname(clang.clang_getPointeeType(t)) # TODO: this seems wrong
       case clang.CXType_Elaborated: return tname(clang.clang_Type_getNamedType(t), suggested_name)
       case clang.CXType_Typedef if nm(t) == nm(canon:=clang.clang_getCanonicalType(t)): return tname(canon)
@@ -164,9 +159,10 @@ def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False,
         lines.append(f"{enm}: dict[int, str] = {{" + ", ".join(f"({nm(e)}:={value(e)}): '{nm(e)}'" for e in children(decl)
                                                                if e.kind == clang.CXCursor_EnumConstantDecl) + "}")
         return types[nm(t)][0]
-      case clang.CXType_ConstantArray:
-        return f"({tname(clang.clang_getArrayElementType(t), suggested_name and suggested_name.rstrip('s'))} * {clang.clang_getArraySize(t)})"
-      case clang.CXType_IncompleteArray: return f"({tname(clang.clang_getArrayElementType(t), suggested_name and suggested_name.rstrip('s'))} * 0)"
+      case clang.CXType_ConstantArray: return (f"c.Array[{tname(clang.clang_getArrayElementType(t), suggested_name and suggested_name.rstrip('s'))}, "
+                                               f"Literal[{clang.clang_getArraySize(t)}]]")
+      case clang.CXType_IncompleteArray:
+        return f"c.Array[{tname(clang.clang_getArrayElementType(t), suggested_name and suggested_name.rstrip('s'))}, Literal[0]]"
       case clang.CXType_ObjCInterface:
         is_defn = bool([f.kind for f in children(decl) if f.kind in (clang.CXCursor_ObjCInstanceMethodDecl, clang.CXCursor_ObjCClassMethodDecl)])
         if (tnm:=nm(t)) not in types: lines.append(f"class {tnm}(objc.Spec): pass")

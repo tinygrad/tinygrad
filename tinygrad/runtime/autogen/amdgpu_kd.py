@@ -1,4 +1,5 @@
 # mypy: disable-error-code="empty-body"
+from __future__ import annotations
 import ctypes
 from typing import Literal, TypeAlias
 from tinygrad.runtime.support.c import _IO, _IOW, _IOR, _IOWR
@@ -17,18 +18,18 @@ _anonenum8: dict[int, str] = {(KERNARG_PRELOAD_SPEC_LENGTH_SHIFT:=0): 'KERNARG_P
 @c.record
 class llvm_amdhsa_kernel_descriptor_t(c.Struct):
   SIZE = 64
-  group_segment_fixed_size: 'int'
-  private_segment_fixed_size: 'int'
-  kernarg_size: 'int'
-  reserved0: 'list[int]'
-  kernel_code_entry_byte_offset: 'ctypes.c_int64'
-  reserved1: 'list[int]'
-  compute_pgm_rsrc3: 'int'
-  compute_pgm_rsrc1: 'int'
-  compute_pgm_rsrc2: 'int'
-  kernel_code_properties: 'int'
-  kernarg_preload: 'int'
-  reserved3: 'list[int]'
+  group_segment_fixed_size: int
+  private_segment_fixed_size: int
+  kernarg_size: int
+  reserved0: ctypes.Array[ctypes.c_ubyte]
+  kernel_code_entry_byte_offset: ctypes.c_int64
+  reserved1: ctypes.Array[ctypes.c_ubyte]
+  compute_pgm_rsrc3: int
+  compute_pgm_rsrc1: int
+  compute_pgm_rsrc2: int
+  kernel_code_properties: int
+  kernarg_preload: int
+  reserved3: ctypes.Array[ctypes.c_ubyte]
 uint32_t: TypeAlias = ctypes.c_uint32
 int64_t: TypeAlias = ctypes.c_int64
 uint16_t: TypeAlias = ctypes.c_uint16

@@ -1,4 +1,5 @@
 # mypy: disable-error-code="empty-body"
+from __future__ import annotations
 import ctypes
 from typing import Literal, TypeAlias
 from tinygrad.runtime.support.c import _IO, _IOW, _IOR, _IOWR
@@ -9,547 +10,547 @@ enum_kgsl_deviceid: dict[int, str] = {(KGSL_DEVICE_3D0:=0): 'KGSL_DEVICE_3D0', (
 @c.record
 class struct_kgsl_devinfo(c.Struct):
   SIZE = 40
-  device_id: 'int'
-  chip_id: 'int'
-  mmu_enabled: 'int'
-  gmem_gpubaseaddr: 'int'
-  gpu_id: 'int'
-  gmem_sizebytes: 'int'
+  device_id: int
+  chip_id: int
+  mmu_enabled: int
+  gmem_gpubaseaddr: int
+  gpu_id: int
+  gmem_sizebytes: int
 struct_kgsl_devinfo.register_fields([('device_id', ctypes.c_uint32, 0), ('chip_id', ctypes.c_uint32, 4), ('mmu_enabled', ctypes.c_uint32, 8), ('gmem_gpubaseaddr', ctypes.c_uint64, 16), ('gpu_id', ctypes.c_uint32, 24), ('gmem_sizebytes', ctypes.c_uint64, 32)])
 @c.record
 class struct_kgsl_devmemstore(c.Struct):
   SIZE = 40
-  soptimestamp: 'int'
-  sbz: 'int'
-  eoptimestamp: 'int'
-  sbz2: 'int'
-  preempted: 'int'
-  sbz3: 'int'
-  ref_wait_ts: 'int'
-  sbz4: 'int'
-  current_context: 'int'
-  sbz5: 'int'
+  soptimestamp: int
+  sbz: int
+  eoptimestamp: int
+  sbz2: int
+  preempted: int
+  sbz3: int
+  ref_wait_ts: int
+  sbz4: int
+  current_context: int
+  sbz5: int
 struct_kgsl_devmemstore.register_fields([('soptimestamp', ctypes.c_uint32, 0), ('sbz', ctypes.c_uint32, 4), ('eoptimestamp', ctypes.c_uint32, 8), ('sbz2', ctypes.c_uint32, 12), ('preempted', ctypes.c_uint32, 16), ('sbz3', ctypes.c_uint32, 20), ('ref_wait_ts', ctypes.c_uint32, 24), ('sbz4', ctypes.c_uint32, 28), ('current_context', ctypes.c_uint32, 32), ('sbz5', ctypes.c_uint32, 36)])
 enum_kgsl_timestamp_type: dict[int, str] = {(KGSL_TIMESTAMP_CONSUMED:=1): 'KGSL_TIMESTAMP_CONSUMED', (KGSL_TIMESTAMP_RETIRED:=2): 'KGSL_TIMESTAMP_RETIRED', (KGSL_TIMESTAMP_QUEUED:=3): 'KGSL_TIMESTAMP_QUEUED'}
 @c.record
 class struct_kgsl_shadowprop(c.Struct):
   SIZE = 24
-  gpuaddr: 'int'
-  size: 'int'
-  flags: 'int'
+  gpuaddr: int
+  size: int
+  flags: int
 struct_kgsl_shadowprop.register_fields([('gpuaddr', ctypes.c_uint64, 0), ('size', ctypes.c_uint64, 8), ('flags', ctypes.c_uint32, 16)])
 @c.record
 class struct_kgsl_version(c.Struct):
   SIZE = 16
-  drv_major: 'int'
-  drv_minor: 'int'
-  dev_major: 'int'
-  dev_minor: 'int'
+  drv_major: int
+  drv_minor: int
+  dev_major: int
+  dev_minor: int
 struct_kgsl_version.register_fields([('drv_major', ctypes.c_uint32, 0), ('drv_minor', ctypes.c_uint32, 4), ('dev_major', ctypes.c_uint32, 8), ('dev_minor', ctypes.c_uint32, 12)])
 @c.record
 class struct_kgsl_sp_generic_mem(c.Struct):
   SIZE = 16
-  local: 'int'
-  pvt: 'int'
+  local: int
+  pvt: int
 struct_kgsl_sp_generic_mem.register_fields([('local', ctypes.c_uint64, 0), ('pvt', ctypes.c_uint64, 8)])
 @c.record
 class struct_kgsl_ucode_version(c.Struct):
   SIZE = 8
-  pfp: 'int'
-  pm4: 'int'
+  pfp: int
+  pm4: int
 struct_kgsl_ucode_version.register_fields([('pfp', ctypes.c_uint32, 0), ('pm4', ctypes.c_uint32, 4)])
 @c.record
 class struct_kgsl_gpmu_version(c.Struct):
   SIZE = 12
-  major: 'int'
-  minor: 'int'
-  features: 'int'
+  major: int
+  minor: int
+  features: int
 struct_kgsl_gpmu_version.register_fields([('major', ctypes.c_uint32, 0), ('minor', ctypes.c_uint32, 4), ('features', ctypes.c_uint32, 8)])
 @c.record
 class struct_kgsl_ibdesc(c.Struct):
   SIZE = 32
-  gpuaddr: 'int'
-  __pad: 'int'
-  sizedwords: 'int'
-  ctrl: 'int'
+  gpuaddr: int
+  __pad: int
+  sizedwords: int
+  ctrl: int
 struct_kgsl_ibdesc.register_fields([('gpuaddr', ctypes.c_uint64, 0), ('__pad', ctypes.c_uint64, 8), ('sizedwords', ctypes.c_uint64, 16), ('ctrl', ctypes.c_uint32, 24)])
 @c.record
 class struct_kgsl_cmdbatch_profiling_buffer(c.Struct):
   SIZE = 40
-  wall_clock_s: 'int'
-  wall_clock_ns: 'int'
-  gpu_ticks_queued: 'int'
-  gpu_ticks_submitted: 'int'
-  gpu_ticks_retired: 'int'
+  wall_clock_s: int
+  wall_clock_ns: int
+  gpu_ticks_queued: int
+  gpu_ticks_submitted: int
+  gpu_ticks_retired: int
 struct_kgsl_cmdbatch_profiling_buffer.register_fields([('wall_clock_s', ctypes.c_uint64, 0), ('wall_clock_ns', ctypes.c_uint64, 8), ('gpu_ticks_queued', ctypes.c_uint64, 16), ('gpu_ticks_submitted', ctypes.c_uint64, 24), ('gpu_ticks_retired', ctypes.c_uint64, 32)])
 @c.record
 class struct_kgsl_device_getproperty(c.Struct):
   SIZE = 24
-  type: 'int'
-  value: 'ctypes.c_void_p'
-  sizebytes: 'int'
+  type: int
+  value: int|None
+  sizebytes: int
 struct_kgsl_device_getproperty.register_fields([('type', ctypes.c_uint32, 0), ('value', ctypes.c_void_p, 8), ('sizebytes', ctypes.c_uint64, 16)])
 @c.record
 class struct_kgsl_device_waittimestamp(c.Struct):
   SIZE = 8
-  timestamp: 'int'
-  timeout: 'int'
+  timestamp: int
+  timeout: int
 struct_kgsl_device_waittimestamp.register_fields([('timestamp', ctypes.c_uint32, 0), ('timeout', ctypes.c_uint32, 4)])
 @c.record
 class struct_kgsl_device_waittimestamp_ctxtid(c.Struct):
   SIZE = 12
-  context_id: 'int'
-  timestamp: 'int'
-  timeout: 'int'
+  context_id: int
+  timestamp: int
+  timeout: int
 struct_kgsl_device_waittimestamp_ctxtid.register_fields([('context_id', ctypes.c_uint32, 0), ('timestamp', ctypes.c_uint32, 4), ('timeout', ctypes.c_uint32, 8)])
 @c.record
 class struct_kgsl_ringbuffer_issueibcmds(c.Struct):
   SIZE = 32
-  drawctxt_id: 'int'
-  ibdesc_addr: 'int'
-  numibs: 'int'
-  timestamp: 'int'
-  flags: 'int'
+  drawctxt_id: int
+  ibdesc_addr: int
+  numibs: int
+  timestamp: int
+  flags: int
 struct_kgsl_ringbuffer_issueibcmds.register_fields([('drawctxt_id', ctypes.c_uint32, 0), ('ibdesc_addr', ctypes.c_uint64, 8), ('numibs', ctypes.c_uint32, 16), ('timestamp', ctypes.c_uint32, 20), ('flags', ctypes.c_uint32, 24)])
 @c.record
 class struct_kgsl_cmdstream_readtimestamp(c.Struct):
   SIZE = 8
-  type: 'int'
-  timestamp: 'int'
+  type: int
+  timestamp: int
 struct_kgsl_cmdstream_readtimestamp.register_fields([('type', ctypes.c_uint32, 0), ('timestamp', ctypes.c_uint32, 4)])
 @c.record
 class struct_kgsl_cmdstream_freememontimestamp(c.Struct):
   SIZE = 16
-  gpuaddr: 'int'
-  type: 'int'
-  timestamp: 'int'
+  gpuaddr: int
+  type: int
+  timestamp: int
 struct_kgsl_cmdstream_freememontimestamp.register_fields([('gpuaddr', ctypes.c_uint64, 0), ('type', ctypes.c_uint32, 8), ('timestamp', ctypes.c_uint32, 12)])
 @c.record
 class struct_kgsl_drawctxt_create(c.Struct):
   SIZE = 8
-  flags: 'int'
-  drawctxt_id: 'int'
+  flags: int
+  drawctxt_id: int
 struct_kgsl_drawctxt_create.register_fields([('flags', ctypes.c_uint32, 0), ('drawctxt_id', ctypes.c_uint32, 4)])
 @c.record
 class struct_kgsl_drawctxt_destroy(c.Struct):
   SIZE = 4
-  drawctxt_id: 'int'
+  drawctxt_id: int
 struct_kgsl_drawctxt_destroy.register_fields([('drawctxt_id', ctypes.c_uint32, 0)])
 @c.record
 class struct_kgsl_map_user_mem(c.Struct):
   SIZE = 48
-  fd: 'int'
-  gpuaddr: 'int'
-  len: 'int'
-  offset: 'int'
-  hostptr: 'int'
-  memtype: 'int'
-  flags: 'int'
+  fd: int
+  gpuaddr: int
+  len: int
+  offset: int
+  hostptr: int
+  memtype: int
+  flags: int
 struct_kgsl_map_user_mem.register_fields([('fd', ctypes.c_int32, 0), ('gpuaddr', ctypes.c_uint64, 8), ('len', ctypes.c_uint64, 16), ('offset', ctypes.c_uint64, 24), ('hostptr', ctypes.c_uint64, 32), ('memtype', ctypes.c_uint32, 40), ('flags', ctypes.c_uint32, 44)])
 @c.record
 class struct_kgsl_cmdstream_readtimestamp_ctxtid(c.Struct):
   SIZE = 12
-  context_id: 'int'
-  type: 'int'
-  timestamp: 'int'
+  context_id: int
+  type: int
+  timestamp: int
 struct_kgsl_cmdstream_readtimestamp_ctxtid.register_fields([('context_id', ctypes.c_uint32, 0), ('type', ctypes.c_uint32, 4), ('timestamp', ctypes.c_uint32, 8)])
 @c.record
 class struct_kgsl_cmdstream_freememontimestamp_ctxtid(c.Struct):
   SIZE = 24
-  context_id: 'int'
-  gpuaddr: 'int'
-  type: 'int'
-  timestamp: 'int'
+  context_id: int
+  gpuaddr: int
+  type: int
+  timestamp: int
 struct_kgsl_cmdstream_freememontimestamp_ctxtid.register_fields([('context_id', ctypes.c_uint32, 0), ('gpuaddr', ctypes.c_uint64, 8), ('type', ctypes.c_uint32, 16), ('timestamp', ctypes.c_uint32, 20)])
 @c.record
 class struct_kgsl_sharedmem_from_pmem(c.Struct):
   SIZE = 24
-  pmem_fd: 'int'
-  gpuaddr: 'int'
-  len: 'int'
-  offset: 'int'
+  pmem_fd: int
+  gpuaddr: int
+  len: int
+  offset: int
 struct_kgsl_sharedmem_from_pmem.register_fields([('pmem_fd', ctypes.c_int32, 0), ('gpuaddr', ctypes.c_uint64, 8), ('len', ctypes.c_uint32, 16), ('offset', ctypes.c_uint32, 20)])
 @c.record
 class struct_kgsl_sharedmem_free(c.Struct):
   SIZE = 8
-  gpuaddr: 'int'
+  gpuaddr: int
 struct_kgsl_sharedmem_free.register_fields([('gpuaddr', ctypes.c_uint64, 0)])
 @c.record
 class struct_kgsl_cff_user_event(c.Struct):
   SIZE = 32
-  cff_opcode: 'int'
-  op1: 'int'
-  op2: 'int'
-  op3: 'int'
-  op4: 'int'
-  op5: 'int'
-  __pad: 'list[int]'
+  cff_opcode: int
+  op1: int
+  op2: int
+  op3: int
+  op4: int
+  op5: int
+  __pad: ctypes.Array[ctypes.c_uint32]
 struct_kgsl_cff_user_event.register_fields([('cff_opcode', ctypes.c_ubyte, 0), ('op1', ctypes.c_uint32, 4), ('op2', ctypes.c_uint32, 8), ('op3', ctypes.c_uint32, 12), ('op4', ctypes.c_uint32, 16), ('op5', ctypes.c_uint32, 20), ('__pad', (ctypes.c_uint32 * 2), 24)])
 @c.record
 class struct_kgsl_gmem_desc(c.Struct):
   SIZE = 20
-  x: 'int'
-  y: 'int'
-  width: 'int'
-  height: 'int'
-  pitch: 'int'
+  x: int
+  y: int
+  width: int
+  height: int
+  pitch: int
 struct_kgsl_gmem_desc.register_fields([('x', ctypes.c_uint32, 0), ('y', ctypes.c_uint32, 4), ('width', ctypes.c_uint32, 8), ('height', ctypes.c_uint32, 12), ('pitch', ctypes.c_uint32, 16)])
 @c.record
 class struct_kgsl_buffer_desc(c.Struct):
   SIZE = 32
-  hostptr: 'ctypes.c_void_p'
-  gpuaddr: 'int'
-  size: 'int'
-  format: 'int'
-  pitch: 'int'
-  enabled: 'int'
+  hostptr: int|None
+  gpuaddr: int
+  size: int
+  format: int
+  pitch: int
+  enabled: int
 struct_kgsl_buffer_desc.register_fields([('hostptr', ctypes.c_void_p, 0), ('gpuaddr', ctypes.c_uint64, 8), ('size', ctypes.c_int32, 16), ('format', ctypes.c_uint32, 20), ('pitch', ctypes.c_uint32, 24), ('enabled', ctypes.c_uint32, 28)])
 @c.record
 class struct_kgsl_bind_gmem_shadow(c.Struct):
   SIZE = 72
-  drawctxt_id: 'int'
-  gmem_desc: 'struct_kgsl_gmem_desc'
-  shadow_x: 'int'
-  shadow_y: 'int'
-  shadow_buffer: 'struct_kgsl_buffer_desc'
-  buffer_id: 'int'
+  drawctxt_id: int
+  gmem_desc: struct_kgsl_gmem_desc
+  shadow_x: int
+  shadow_y: int
+  shadow_buffer: struct_kgsl_buffer_desc
+  buffer_id: int
 struct_kgsl_bind_gmem_shadow.register_fields([('drawctxt_id', ctypes.c_uint32, 0), ('gmem_desc', struct_kgsl_gmem_desc, 4), ('shadow_x', ctypes.c_uint32, 24), ('shadow_y', ctypes.c_uint32, 28), ('shadow_buffer', struct_kgsl_buffer_desc, 32), ('buffer_id', ctypes.c_uint32, 64)])
 @c.record
 class struct_kgsl_sharedmem_from_vmalloc(c.Struct):
   SIZE = 16
-  gpuaddr: 'int'
-  hostptr: 'int'
-  flags: 'int'
+  gpuaddr: int
+  hostptr: int
+  flags: int
 struct_kgsl_sharedmem_from_vmalloc.register_fields([('gpuaddr', ctypes.c_uint64, 0), ('hostptr', ctypes.c_uint32, 8), ('flags', ctypes.c_uint32, 12)])
 @c.record
 class struct_kgsl_drawctxt_set_bin_base_offset(c.Struct):
   SIZE = 8
-  drawctxt_id: 'int'
-  offset: 'int'
+  drawctxt_id: int
+  offset: int
 struct_kgsl_drawctxt_set_bin_base_offset.register_fields([('drawctxt_id', ctypes.c_uint32, 0), ('offset', ctypes.c_uint32, 4)])
 enum_kgsl_cmdwindow_type: dict[int, str] = {(KGSL_CMDWINDOW_MIN:=0): 'KGSL_CMDWINDOW_MIN', (KGSL_CMDWINDOW_2D:=0): 'KGSL_CMDWINDOW_2D', (KGSL_CMDWINDOW_3D:=1): 'KGSL_CMDWINDOW_3D', (KGSL_CMDWINDOW_MMU:=2): 'KGSL_CMDWINDOW_MMU', (KGSL_CMDWINDOW_ARBITER:=255): 'KGSL_CMDWINDOW_ARBITER', (KGSL_CMDWINDOW_MAX:=255): 'KGSL_CMDWINDOW_MAX'}
 @c.record
 class struct_kgsl_cmdwindow_write(c.Struct):
   SIZE = 12
-  target: 'int'
-  addr: 'int'
-  data: 'int'
+  target: int
+  addr: int
+  data: int
 struct_kgsl_cmdwindow_write.register_fields([('target', ctypes.c_uint32, 0), ('addr', ctypes.c_uint32, 4), ('data', ctypes.c_uint32, 8)])
 @c.record
 class struct_kgsl_gpumem_alloc(c.Struct):
   SIZE = 24
-  gpuaddr: 'int'
-  size: 'int'
-  flags: 'int'
+  gpuaddr: int
+  size: int
+  flags: int
 struct_kgsl_gpumem_alloc.register_fields([('gpuaddr', ctypes.c_uint64, 0), ('size', ctypes.c_uint64, 8), ('flags', ctypes.c_uint32, 16)])
 @c.record
 class struct_kgsl_cff_syncmem(c.Struct):
   SIZE = 24
-  gpuaddr: 'int'
-  len: 'int'
-  __pad: 'list[int]'
+  gpuaddr: int
+  len: int
+  __pad: ctypes.Array[ctypes.c_uint32]
 struct_kgsl_cff_syncmem.register_fields([('gpuaddr', ctypes.c_uint64, 0), ('len', ctypes.c_uint64, 8), ('__pad', (ctypes.c_uint32 * 2), 16)])
 @c.record
 class struct_kgsl_timestamp_event(c.Struct):
   SIZE = 32
-  type: 'int'
-  timestamp: 'int'
-  context_id: 'int'
-  priv: 'ctypes.c_void_p'
-  len: 'int'
+  type: int
+  timestamp: int
+  context_id: int
+  priv: int|None
+  len: int
 struct_kgsl_timestamp_event.register_fields([('type', ctypes.c_int32, 0), ('timestamp', ctypes.c_uint32, 4), ('context_id', ctypes.c_uint32, 8), ('priv', ctypes.c_void_p, 16), ('len', ctypes.c_uint64, 24)])
 @c.record
 class struct_kgsl_timestamp_event_genlock(c.Struct):
   SIZE = 4
-  handle: 'int'
+  handle: int
 struct_kgsl_timestamp_event_genlock.register_fields([('handle', ctypes.c_int32, 0)])
 @c.record
 class struct_kgsl_timestamp_event_fence(c.Struct):
   SIZE = 4
-  fence_fd: 'int'
+  fence_fd: int
 struct_kgsl_timestamp_event_fence.register_fields([('fence_fd', ctypes.c_int32, 0)])
 @c.record
 class struct_kgsl_gpumem_alloc_id(c.Struct):
   SIZE = 48
-  id: 'int'
-  flags: 'int'
-  size: 'int'
-  mmapsize: 'int'
-  gpuaddr: 'int'
-  __pad: 'list[int]'
+  id: int
+  flags: int
+  size: int
+  mmapsize: int
+  gpuaddr: int
+  __pad: ctypes.Array[ctypes.c_uint64]
 struct_kgsl_gpumem_alloc_id.register_fields([('id', ctypes.c_uint32, 0), ('flags', ctypes.c_uint32, 4), ('size', ctypes.c_uint64, 8), ('mmapsize', ctypes.c_uint64, 16), ('gpuaddr', ctypes.c_uint64, 24), ('__pad', (ctypes.c_uint64 * 2), 32)])
 @c.record
 class struct_kgsl_gpumem_free_id(c.Struct):
   SIZE = 8
-  id: 'int'
-  __pad: 'int'
+  id: int
+  __pad: int
 struct_kgsl_gpumem_free_id.register_fields([('id', ctypes.c_uint32, 0), ('__pad', ctypes.c_uint32, 4)])
 @c.record
 class struct_kgsl_gpumem_get_info(c.Struct):
   SIZE = 72
-  gpuaddr: 'int'
-  id: 'int'
-  flags: 'int'
-  size: 'int'
-  mmapsize: 'int'
-  useraddr: 'int'
-  __pad: 'list[int]'
+  gpuaddr: int
+  id: int
+  flags: int
+  size: int
+  mmapsize: int
+  useraddr: int
+  __pad: ctypes.Array[ctypes.c_uint64]
 struct_kgsl_gpumem_get_info.register_fields([('gpuaddr', ctypes.c_uint64, 0), ('id', ctypes.c_uint32, 8), ('flags', ctypes.c_uint32, 12), ('size', ctypes.c_uint64, 16), ('mmapsize', ctypes.c_uint64, 24), ('useraddr', ctypes.c_uint64, 32), ('__pad', (ctypes.c_uint64 * 4), 40)])
 @c.record
 class struct_kgsl_gpumem_sync_cache(c.Struct):
   SIZE = 32
-  gpuaddr: 'int'
-  id: 'int'
-  op: 'int'
-  offset: 'int'
-  length: 'int'
+  gpuaddr: int
+  id: int
+  op: int
+  offset: int
+  length: int
 struct_kgsl_gpumem_sync_cache.register_fields([('gpuaddr', ctypes.c_uint64, 0), ('id', ctypes.c_uint32, 8), ('op', ctypes.c_uint32, 12), ('offset', ctypes.c_uint64, 16), ('length', ctypes.c_uint64, 24)])
 @c.record
 class struct_kgsl_perfcounter_get(c.Struct):
   SIZE = 20
-  groupid: 'int'
-  countable: 'int'
-  offset: 'int'
-  offset_hi: 'int'
-  __pad: 'int'
+  groupid: int
+  countable: int
+  offset: int
+  offset_hi: int
+  __pad: int
 struct_kgsl_perfcounter_get.register_fields([('groupid', ctypes.c_uint32, 0), ('countable', ctypes.c_uint32, 4), ('offset', ctypes.c_uint32, 8), ('offset_hi', ctypes.c_uint32, 12), ('__pad', ctypes.c_uint32, 16)])
 @c.record
 class struct_kgsl_perfcounter_put(c.Struct):
   SIZE = 16
-  groupid: 'int'
-  countable: 'int'
-  __pad: 'list[int]'
+  groupid: int
+  countable: int
+  __pad: ctypes.Array[ctypes.c_uint32]
 struct_kgsl_perfcounter_put.register_fields([('groupid', ctypes.c_uint32, 0), ('countable', ctypes.c_uint32, 4), ('__pad', (ctypes.c_uint32 * 2), 8)])
 @c.record
 class struct_kgsl_perfcounter_query(c.Struct):
   SIZE = 32
-  groupid: 'int'
-  countables: 'ctypes._Pointer[int]'
-  count: 'int'
-  max_counters: 'int'
-  __pad: 'list[int]'
+  groupid: int
+  countables: ctypes._Pointer[ctypes.c_uint32]
+  count: int
+  max_counters: int
+  __pad: ctypes.Array[ctypes.c_uint32]
 struct_kgsl_perfcounter_query.register_fields([('groupid', ctypes.c_uint32, 0), ('countables', ctypes.POINTER(ctypes.c_uint32), 8), ('count', ctypes.c_uint32, 16), ('max_counters', ctypes.c_uint32, 20), ('__pad', (ctypes.c_uint32 * 2), 24)])
 @c.record
 class struct_kgsl_perfcounter_read_group(c.Struct):
   SIZE = 16
-  groupid: 'int'
-  countable: 'int'
-  value: 'int'
+  groupid: int
+  countable: int
+  value: int
 struct_kgsl_perfcounter_read_group.register_fields([('groupid', ctypes.c_uint32, 0), ('countable', ctypes.c_uint32, 4), ('value', ctypes.c_uint64, 8)])
 @c.record
 class struct_kgsl_perfcounter_read(c.Struct):
   SIZE = 24
-  reads: 'ctypes._Pointer[struct_kgsl_perfcounter_read_group]'
-  count: 'int'
-  __pad: 'list[int]'
+  reads: ctypes._Pointer[struct_kgsl_perfcounter_read_group]
+  count: int
+  __pad: ctypes.Array[ctypes.c_uint32]
 struct_kgsl_perfcounter_read.register_fields([('reads', ctypes.POINTER(struct_kgsl_perfcounter_read_group), 0), ('count', ctypes.c_uint32, 8), ('__pad', (ctypes.c_uint32 * 2), 12)])
 @c.record
 class struct_kgsl_gpumem_sync_cache_bulk(c.Struct):
   SIZE = 24
-  id_list: 'ctypes._Pointer[int]'
-  count: 'int'
-  op: 'int'
-  __pad: 'list[int]'
+  id_list: ctypes._Pointer[ctypes.c_uint32]
+  count: int
+  op: int
+  __pad: ctypes.Array[ctypes.c_uint32]
 struct_kgsl_gpumem_sync_cache_bulk.register_fields([('id_list', ctypes.POINTER(ctypes.c_uint32), 0), ('count', ctypes.c_uint32, 8), ('op', ctypes.c_uint32, 12), ('__pad', (ctypes.c_uint32 * 2), 16)])
 @c.record
 class struct_kgsl_cmd_syncpoint_timestamp(c.Struct):
   SIZE = 8
-  context_id: 'int'
-  timestamp: 'int'
+  context_id: int
+  timestamp: int
 struct_kgsl_cmd_syncpoint_timestamp.register_fields([('context_id', ctypes.c_uint32, 0), ('timestamp', ctypes.c_uint32, 4)])
 @c.record
 class struct_kgsl_cmd_syncpoint_fence(c.Struct):
   SIZE = 4
-  fd: 'int'
+  fd: int
 struct_kgsl_cmd_syncpoint_fence.register_fields([('fd', ctypes.c_int32, 0)])
 @c.record
 class struct_kgsl_cmd_syncpoint(c.Struct):
   SIZE = 24
-  type: 'int'
-  priv: 'ctypes.c_void_p'
-  size: 'int'
+  type: int
+  priv: int|None
+  size: int
 struct_kgsl_cmd_syncpoint.register_fields([('type', ctypes.c_int32, 0), ('priv', ctypes.c_void_p, 8), ('size', ctypes.c_uint64, 16)])
 @c.record
 class struct_kgsl_submit_commands(c.Struct):
   SIZE = 56
-  context_id: 'int'
-  flags: 'int'
-  cmdlist: 'ctypes._Pointer[struct_kgsl_ibdesc]'
-  numcmds: 'int'
-  synclist: 'ctypes._Pointer[struct_kgsl_cmd_syncpoint]'
-  numsyncs: 'int'
-  timestamp: 'int'
-  __pad: 'list[int]'
+  context_id: int
+  flags: int
+  cmdlist: ctypes._Pointer[struct_kgsl_ibdesc]
+  numcmds: int
+  synclist: ctypes._Pointer[struct_kgsl_cmd_syncpoint]
+  numsyncs: int
+  timestamp: int
+  __pad: ctypes.Array[ctypes.c_uint32]
 struct_kgsl_submit_commands.register_fields([('context_id', ctypes.c_uint32, 0), ('flags', ctypes.c_uint32, 4), ('cmdlist', ctypes.POINTER(struct_kgsl_ibdesc), 8), ('numcmds', ctypes.c_uint32, 16), ('synclist', ctypes.POINTER(struct_kgsl_cmd_syncpoint), 24), ('numsyncs', ctypes.c_uint32, 32), ('timestamp', ctypes.c_uint32, 36), ('__pad', (ctypes.c_uint32 * 4), 40)])
 @c.record
 class struct_kgsl_device_constraint(c.Struct):
   SIZE = 24
-  type: 'int'
-  context_id: 'int'
-  data: 'ctypes.c_void_p'
-  size: 'int'
+  type: int
+  context_id: int
+  data: int|None
+  size: int
 struct_kgsl_device_constraint.register_fields([('type', ctypes.c_uint32, 0), ('context_id', ctypes.c_uint32, 4), ('data', ctypes.c_void_p, 8), ('size', ctypes.c_uint64, 16)])
 @c.record
 class struct_kgsl_device_constraint_pwrlevel(c.Struct):
   SIZE = 4
-  level: 'int'
+  level: int
 struct_kgsl_device_constraint_pwrlevel.register_fields([('level', ctypes.c_uint32, 0)])
 @c.record
 class struct_kgsl_syncsource_create(c.Struct):
   SIZE = 16
-  id: 'int'
-  __pad: 'list[int]'
+  id: int
+  __pad: ctypes.Array[ctypes.c_uint32]
 struct_kgsl_syncsource_create.register_fields([('id', ctypes.c_uint32, 0), ('__pad', (ctypes.c_uint32 * 3), 4)])
 @c.record
 class struct_kgsl_syncsource_destroy(c.Struct):
   SIZE = 16
-  id: 'int'
-  __pad: 'list[int]'
+  id: int
+  __pad: ctypes.Array[ctypes.c_uint32]
 struct_kgsl_syncsource_destroy.register_fields([('id', ctypes.c_uint32, 0), ('__pad', (ctypes.c_uint32 * 3), 4)])
 @c.record
 class struct_kgsl_syncsource_create_fence(c.Struct):
   SIZE = 24
-  id: 'int'
-  fence_fd: 'int'
-  __pad: 'list[int]'
+  id: int
+  fence_fd: int
+  __pad: ctypes.Array[ctypes.c_uint32]
 struct_kgsl_syncsource_create_fence.register_fields([('id', ctypes.c_uint32, 0), ('fence_fd', ctypes.c_int32, 4), ('__pad', (ctypes.c_uint32 * 4), 8)])
 @c.record
 class struct_kgsl_syncsource_signal_fence(c.Struct):
   SIZE = 24
-  id: 'int'
-  fence_fd: 'int'
-  __pad: 'list[int]'
+  id: int
+  fence_fd: int
+  __pad: ctypes.Array[ctypes.c_uint32]
 struct_kgsl_syncsource_signal_fence.register_fields([('id', ctypes.c_uint32, 0), ('fence_fd', ctypes.c_int32, 4), ('__pad', (ctypes.c_uint32 * 4), 8)])
 @c.record
 class struct_kgsl_cff_sync_gpuobj(c.Struct):
   SIZE = 24
-  offset: 'int'
-  length: 'int'
-  id: 'int'
+  offset: int
+  length: int
+  id: int
 struct_kgsl_cff_sync_gpuobj.register_fields([('offset', ctypes.c_uint64, 0), ('length', ctypes.c_uint64, 8), ('id', ctypes.c_uint32, 16)])
 @c.record
 class struct_kgsl_gpuobj_alloc(c.Struct):
   SIZE = 48
-  size: 'int'
-  flags: 'int'
-  va_len: 'int'
-  mmapsize: 'int'
-  id: 'int'
-  metadata_len: 'int'
-  metadata: 'int'
+  size: int
+  flags: int
+  va_len: int
+  mmapsize: int
+  id: int
+  metadata_len: int
+  metadata: int
 struct_kgsl_gpuobj_alloc.register_fields([('size', ctypes.c_uint64, 0), ('flags', ctypes.c_uint64, 8), ('va_len', ctypes.c_uint64, 16), ('mmapsize', ctypes.c_uint64, 24), ('id', ctypes.c_uint32, 32), ('metadata_len', ctypes.c_uint32, 36), ('metadata', ctypes.c_uint64, 40)])
 @c.record
 class struct_kgsl_gpuobj_free(c.Struct):
   SIZE = 32
-  flags: 'int'
-  priv: 'int'
-  id: 'int'
-  type: 'int'
-  len: 'int'
+  flags: int
+  priv: int
+  id: int
+  type: int
+  len: int
 struct_kgsl_gpuobj_free.register_fields([('flags', ctypes.c_uint64, 0), ('priv', ctypes.c_uint64, 8), ('id', ctypes.c_uint32, 16), ('type', ctypes.c_uint32, 20), ('len', ctypes.c_uint32, 24)])
 @c.record
 class struct_kgsl_gpu_event_timestamp(c.Struct):
   SIZE = 8
-  context_id: 'int'
-  timestamp: 'int'
+  context_id: int
+  timestamp: int
 struct_kgsl_gpu_event_timestamp.register_fields([('context_id', ctypes.c_uint32, 0), ('timestamp', ctypes.c_uint32, 4)])
 @c.record
 class struct_kgsl_gpu_event_fence(c.Struct):
   SIZE = 4
-  fd: 'int'
+  fd: int
 struct_kgsl_gpu_event_fence.register_fields([('fd', ctypes.c_int32, 0)])
 @c.record
 class struct_kgsl_gpuobj_info(c.Struct):
   SIZE = 48
-  gpuaddr: 'int'
-  flags: 'int'
-  size: 'int'
-  va_len: 'int'
-  va_addr: 'int'
-  id: 'int'
+  gpuaddr: int
+  flags: int
+  size: int
+  va_len: int
+  va_addr: int
+  id: int
 struct_kgsl_gpuobj_info.register_fields([('gpuaddr', ctypes.c_uint64, 0), ('flags', ctypes.c_uint64, 8), ('size', ctypes.c_uint64, 16), ('va_len', ctypes.c_uint64, 24), ('va_addr', ctypes.c_uint64, 32), ('id', ctypes.c_uint32, 40)])
 @c.record
 class struct_kgsl_gpuobj_import(c.Struct):
   SIZE = 32
-  priv: 'int'
-  priv_len: 'int'
-  flags: 'int'
-  type: 'int'
-  id: 'int'
+  priv: int
+  priv_len: int
+  flags: int
+  type: int
+  id: int
 struct_kgsl_gpuobj_import.register_fields([('priv', ctypes.c_uint64, 0), ('priv_len', ctypes.c_uint64, 8), ('flags', ctypes.c_uint64, 16), ('type', ctypes.c_uint32, 24), ('id', ctypes.c_uint32, 28)])
 @c.record
 class struct_kgsl_gpuobj_import_dma_buf(c.Struct):
   SIZE = 4
-  fd: 'int'
+  fd: int
 struct_kgsl_gpuobj_import_dma_buf.register_fields([('fd', ctypes.c_int32, 0)])
 @c.record
 class struct_kgsl_gpuobj_import_useraddr(c.Struct):
   SIZE = 8
-  virtaddr: 'int'
+  virtaddr: int
 struct_kgsl_gpuobj_import_useraddr.register_fields([('virtaddr', ctypes.c_uint64, 0)])
 @c.record
 class struct_kgsl_gpuobj_sync_obj(c.Struct):
   SIZE = 24
-  offset: 'int'
-  length: 'int'
-  id: 'int'
-  op: 'int'
+  offset: int
+  length: int
+  id: int
+  op: int
 struct_kgsl_gpuobj_sync_obj.register_fields([('offset', ctypes.c_uint64, 0), ('length', ctypes.c_uint64, 8), ('id', ctypes.c_uint32, 16), ('op', ctypes.c_uint32, 20)])
 @c.record
 class struct_kgsl_gpuobj_sync(c.Struct):
   SIZE = 16
-  objs: 'int'
-  obj_len: 'int'
-  count: 'int'
+  objs: int
+  obj_len: int
+  count: int
 struct_kgsl_gpuobj_sync.register_fields([('objs', ctypes.c_uint64, 0), ('obj_len', ctypes.c_uint32, 8), ('count', ctypes.c_uint32, 12)])
 @c.record
 class struct_kgsl_command_object(c.Struct):
   SIZE = 32
-  offset: 'int'
-  gpuaddr: 'int'
-  size: 'int'
-  flags: 'int'
-  id: 'int'
+  offset: int
+  gpuaddr: int
+  size: int
+  flags: int
+  id: int
 struct_kgsl_command_object.register_fields([('offset', ctypes.c_uint64, 0), ('gpuaddr', ctypes.c_uint64, 8), ('size', ctypes.c_uint64, 16), ('flags', ctypes.c_uint32, 24), ('id', ctypes.c_uint32, 28)])
 @c.record
 class struct_kgsl_command_syncpoint(c.Struct):
   SIZE = 24
-  priv: 'int'
-  size: 'int'
-  type: 'int'
+  priv: int
+  size: int
+  type: int
 struct_kgsl_command_syncpoint.register_fields([('priv', ctypes.c_uint64, 0), ('size', ctypes.c_uint64, 8), ('type', ctypes.c_uint32, 16)])
 @c.record
 class struct_kgsl_gpu_command(c.Struct):
   SIZE = 64
-  flags: 'int'
-  cmdlist: 'int'
-  cmdsize: 'int'
-  numcmds: 'int'
-  objlist: 'int'
-  objsize: 'int'
-  numobjs: 'int'
-  synclist: 'int'
-  syncsize: 'int'
-  numsyncs: 'int'
-  context_id: 'int'
-  timestamp: 'int'
+  flags: int
+  cmdlist: int
+  cmdsize: int
+  numcmds: int
+  objlist: int
+  objsize: int
+  numobjs: int
+  synclist: int
+  syncsize: int
+  numsyncs: int
+  context_id: int
+  timestamp: int
 struct_kgsl_gpu_command.register_fields([('flags', ctypes.c_uint64, 0), ('cmdlist', ctypes.c_uint64, 8), ('cmdsize', ctypes.c_uint32, 16), ('numcmds', ctypes.c_uint32, 20), ('objlist', ctypes.c_uint64, 24), ('objsize', ctypes.c_uint32, 32), ('numobjs', ctypes.c_uint32, 36), ('synclist', ctypes.c_uint64, 40), ('syncsize', ctypes.c_uint32, 48), ('numsyncs', ctypes.c_uint32, 52), ('context_id', ctypes.c_uint32, 56), ('timestamp', ctypes.c_uint32, 60)])
 @c.record
 class struct_kgsl_preemption_counters_query(c.Struct):
   SIZE = 24
-  counters: 'int'
-  size_user: 'int'
-  size_priority_level: 'int'
-  max_priority_level: 'int'
+  counters: int
+  size_user: int
+  size_priority_level: int
+  max_priority_level: int
 struct_kgsl_preemption_counters_query.register_fields([('counters', ctypes.c_uint64, 0), ('size_user', ctypes.c_uint32, 8), ('size_priority_level', ctypes.c_uint32, 12), ('max_priority_level', ctypes.c_uint32, 16)])
 @c.record
 class struct_kgsl_gpuobj_set_info(c.Struct):
   SIZE = 32
-  flags: 'int'
-  metadata: 'int'
-  id: 'int'
-  metadata_len: 'int'
-  type: 'int'
+  flags: int
+  metadata: int
+  id: int
+  metadata_len: int
+  type: int
 struct_kgsl_gpuobj_set_info.register_fields([('flags', ctypes.c_uint64, 0), ('metadata', ctypes.c_uint64, 8), ('id', ctypes.c_uint32, 16), ('metadata_len', ctypes.c_uint32, 20), ('type', ctypes.c_uint32, 24)])
 KGSL_VERSION_MAJOR = 3 # type: ignore
 KGSL_VERSION_MINOR = 14 # type: ignore

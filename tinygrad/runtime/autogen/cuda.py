@@ -1,4 +1,5 @@
 # mypy: disable-error-code="empty-body"
+from __future__ import annotations
 import ctypes
 from typing import Literal, TypeAlias
 from tinygrad.runtime.support.c import _IO, _IOW, _IOR, _IOWR
@@ -55,20 +56,20 @@ CUuserObject: TypeAlias = ctypes.POINTER(struct_CUuserObject_st)
 @c.record
 class struct_CUuuid_st(c.Struct):
   SIZE = 16
-  bytes: 'list[bytes]'
+  bytes: ctypes.Array[ctypes.c_char]
 struct_CUuuid_st.register_fields([('bytes', (ctypes.c_char * 16), 0)])
 CUuuid: TypeAlias = struct_CUuuid_st
 @c.record
 class struct_CUipcEventHandle_st(c.Struct):
   SIZE = 64
-  reserved: 'list[bytes]'
+  reserved: ctypes.Array[ctypes.c_char]
 struct_CUipcEventHandle_st.register_fields([('reserved', (ctypes.c_char * 64), 0)])
 CUipcEventHandle_v1: TypeAlias = struct_CUipcEventHandle_st
 CUipcEventHandle: TypeAlias = struct_CUipcEventHandle_st
 @c.record
 class struct_CUipcMemHandle_st(c.Struct):
   SIZE = 64
-  reserved: 'list[bytes]'
+  reserved: ctypes.Array[ctypes.c_char]
 struct_CUipcMemHandle_st.register_fields([('reserved', (ctypes.c_char * 64), 0)])
 CUipcMemHandle_v1: TypeAlias = struct_CUipcMemHandle_st
 CUipcMemHandle: TypeAlias = struct_CUipcMemHandle_st
@@ -103,43 +104,43 @@ CUstreamMemoryBarrier_flags: TypeAlias = ctypes.c_uint32
 @c.record
 class union_CUstreamBatchMemOpParams_union(c.Struct):
   SIZE = 48
-  operation: 'int'
-  waitValue: 'struct_CUstreamMemOpWaitValueParams_st'
-  writeValue: 'struct_CUstreamMemOpWriteValueParams_st'
-  flushRemoteWrites: 'struct_CUstreamMemOpFlushRemoteWritesParams_st'
-  memoryBarrier: 'struct_CUstreamMemOpMemoryBarrierParams_st'
-  pad: 'list[int]'
+  operation: int
+  waitValue: struct_CUstreamMemOpWaitValueParams_st
+  writeValue: struct_CUstreamMemOpWriteValueParams_st
+  flushRemoteWrites: struct_CUstreamMemOpFlushRemoteWritesParams_st
+  memoryBarrier: struct_CUstreamMemOpMemoryBarrierParams_st
+  pad: ctypes.Array[ctypes.c_uint64]
 @c.record
 class struct_CUstreamMemOpWaitValueParams_st(c.Struct):
   SIZE = 40
-  operation: 'int'
-  address: 'int'
-  value: 'int'
-  value64: 'int'
-  flags: 'int'
-  alias: 'int'
+  operation: int
+  address: int
+  value: int
+  value64: int
+  flags: int
+  alias: int
 struct_CUstreamMemOpWaitValueParams_st.register_fields([('operation', CUstreamBatchMemOpType, 0), ('address', CUdeviceptr, 8), ('value', cuuint32_t, 16), ('value64', cuuint64_t, 16), ('flags', ctypes.c_uint32, 24), ('alias', CUdeviceptr, 32)])
 @c.record
 class struct_CUstreamMemOpWriteValueParams_st(c.Struct):
   SIZE = 40
-  operation: 'int'
-  address: 'int'
-  value: 'int'
-  value64: 'int'
-  flags: 'int'
-  alias: 'int'
+  operation: int
+  address: int
+  value: int
+  value64: int
+  flags: int
+  alias: int
 struct_CUstreamMemOpWriteValueParams_st.register_fields([('operation', CUstreamBatchMemOpType, 0), ('address', CUdeviceptr, 8), ('value', cuuint32_t, 16), ('value64', cuuint64_t, 16), ('flags', ctypes.c_uint32, 24), ('alias', CUdeviceptr, 32)])
 @c.record
 class struct_CUstreamMemOpFlushRemoteWritesParams_st(c.Struct):
   SIZE = 8
-  operation: 'int'
-  flags: 'int'
+  operation: int
+  flags: int
 struct_CUstreamMemOpFlushRemoteWritesParams_st.register_fields([('operation', CUstreamBatchMemOpType, 0), ('flags', ctypes.c_uint32, 4)])
 @c.record
 class struct_CUstreamMemOpMemoryBarrierParams_st(c.Struct):
   SIZE = 8
-  operation: 'int'
-  flags: 'int'
+  operation: int
+  flags: int
 struct_CUstreamMemOpMemoryBarrierParams_st.register_fields([('operation', CUstreamBatchMemOpType, 0), ('flags', ctypes.c_uint32, 4)])
 union_CUstreamBatchMemOpParams_union.register_fields([('operation', CUstreamBatchMemOpType, 0), ('waitValue', struct_CUstreamMemOpWaitValueParams_st, 0), ('writeValue', struct_CUstreamMemOpWriteValueParams_st, 0), ('flushRemoteWrites', struct_CUstreamMemOpFlushRemoteWritesParams_st, 0), ('memoryBarrier', struct_CUstreamMemOpMemoryBarrierParams_st, 0), ('pad', (cuuint64_t * 6), 0)])
 CUstreamBatchMemOpParams_v1: TypeAlias = union_CUstreamBatchMemOpParams_union
@@ -147,10 +148,10 @@ CUstreamBatchMemOpParams: TypeAlias = union_CUstreamBatchMemOpParams_union
 @c.record
 class struct_CUDA_BATCH_MEM_OP_NODE_PARAMS_st(c.Struct):
   SIZE = 32
-  ctx: 'ctypes._Pointer[struct_CUctx_st]'
-  count: 'int'
-  paramArray: 'ctypes._Pointer[union_CUstreamBatchMemOpParams_union]'
-  flags: 'int'
+  ctx: ctypes._Pointer[struct_CUctx_st]
+  count: int
+  paramArray: ctypes._Pointer[union_CUstreamBatchMemOpParams_union]
+  flags: int
 struct_CUDA_BATCH_MEM_OP_NODE_PARAMS_st.register_fields([('ctx', CUcontext, 0), ('count', ctypes.c_uint32, 8), ('paramArray', ctypes.POINTER(CUstreamBatchMemOpParams), 16), ('flags', ctypes.c_uint32, 24)])
 CUDA_BATCH_MEM_OP_NODE_PARAMS: TypeAlias = struct_CUDA_BATCH_MEM_OP_NODE_PARAMS_st
 enum_CUoccupancy_flags_enum: dict[int, str] = {(CU_OCCUPANCY_DEFAULT:=0): 'CU_OCCUPANCY_DEFAULT', (CU_OCCUPANCY_DISABLE_CACHING_OVERRIDE:=1): 'CU_OCCUPANCY_DISABLE_CACHING_OVERRIDE'}
@@ -168,16 +169,16 @@ CUdevice_attribute: TypeAlias = ctypes.c_uint32
 @c.record
 class struct_CUdevprop_st(c.Struct):
   SIZE = 56
-  maxThreadsPerBlock: 'int'
-  maxThreadsDim: 'list[int]'
-  maxGridSize: 'list[int]'
-  sharedMemPerBlock: 'int'
-  totalConstantMemory: 'int'
-  SIMDWidth: 'int'
-  memPitch: 'int'
-  regsPerBlock: 'int'
-  clockRate: 'int'
-  textureAlign: 'int'
+  maxThreadsPerBlock: int
+  maxThreadsDim: ctypes.Array[ctypes.c_int32]
+  maxGridSize: ctypes.Array[ctypes.c_int32]
+  sharedMemPerBlock: int
+  totalConstantMemory: int
+  SIMDWidth: int
+  memPitch: int
+  regsPerBlock: int
+  clockRate: int
+  textureAlign: int
 struct_CUdevprop_st.register_fields([('maxThreadsPerBlock', ctypes.c_int32, 0), ('maxThreadsDim', (ctypes.c_int32 * 3), 4), ('maxGridSize', (ctypes.c_int32 * 3), 16), ('sharedMemPerBlock', ctypes.c_int32, 28), ('totalConstantMemory', ctypes.c_int32, 32), ('SIMDWidth', ctypes.c_int32, 36), ('memPitch', ctypes.c_int32, 40), ('regsPerBlock', ctypes.c_int32, 44), ('clockRate', ctypes.c_int32, 48), ('textureAlign', ctypes.c_int32, 52)])
 CUdevprop_v1: TypeAlias = struct_CUdevprop_st
 CUdevprop: TypeAlias = struct_CUdevprop_st
@@ -227,11 +228,11 @@ CUaccessProperty: TypeAlias = ctypes.c_uint32
 @c.record
 class struct_CUaccessPolicyWindow_st(c.Struct):
   SIZE = 32
-  base_ptr: 'ctypes.c_void_p'
-  num_bytes: 'int'
-  hitRatio: 'float'
-  hitProp: 'int'
-  missProp: 'int'
+  base_ptr: int|None
+  num_bytes: int
+  hitRatio: float
+  hitProp: int
+  missProp: int
 size_t: TypeAlias = ctypes.c_uint64
 struct_CUaccessPolicyWindow_st.register_fields([('base_ptr', ctypes.c_void_p, 0), ('num_bytes', size_t, 8), ('hitRatio', ctypes.c_float, 16), ('hitProp', CUaccessProperty, 20), ('missProp', CUaccessProperty, 24)])
 CUaccessPolicyWindow_v1: TypeAlias = struct_CUaccessPolicyWindow_st
@@ -239,53 +240,53 @@ CUaccessPolicyWindow: TypeAlias = struct_CUaccessPolicyWindow_st
 @c.record
 class struct_CUDA_KERNEL_NODE_PARAMS_st(c.Struct):
   SIZE = 56
-  func: 'ctypes._Pointer[struct_CUfunc_st]'
-  gridDimX: 'int'
-  gridDimY: 'int'
-  gridDimZ: 'int'
-  blockDimX: 'int'
-  blockDimY: 'int'
-  blockDimZ: 'int'
-  sharedMemBytes: 'int'
-  kernelParams: 'ctypes._Pointer[ctypes.c_void_p]'
-  extra: 'ctypes._Pointer[ctypes.c_void_p]'
+  func: ctypes._Pointer[struct_CUfunc_st]
+  gridDimX: int
+  gridDimY: int
+  gridDimZ: int
+  blockDimX: int
+  blockDimY: int
+  blockDimZ: int
+  sharedMemBytes: int
+  kernelParams: ctypes._Pointer[ctypes.c_void_p]
+  extra: ctypes._Pointer[ctypes.c_void_p]
 struct_CUDA_KERNEL_NODE_PARAMS_st.register_fields([('func', CUfunction, 0), ('gridDimX', ctypes.c_uint32, 8), ('gridDimY', ctypes.c_uint32, 12), ('gridDimZ', ctypes.c_uint32, 16), ('blockDimX', ctypes.c_uint32, 20), ('blockDimY', ctypes.c_uint32, 24), ('blockDimZ', ctypes.c_uint32, 28), ('sharedMemBytes', ctypes.c_uint32, 32), ('kernelParams', ctypes.POINTER(ctypes.c_void_p), 40), ('extra', ctypes.POINTER(ctypes.c_void_p), 48)])
 CUDA_KERNEL_NODE_PARAMS_v1: TypeAlias = struct_CUDA_KERNEL_NODE_PARAMS_st
 @c.record
 class struct_CUDA_KERNEL_NODE_PARAMS_v2_st(c.Struct):
   SIZE = 72
-  func: 'ctypes._Pointer[struct_CUfunc_st]'
-  gridDimX: 'int'
-  gridDimY: 'int'
-  gridDimZ: 'int'
-  blockDimX: 'int'
-  blockDimY: 'int'
-  blockDimZ: 'int'
-  sharedMemBytes: 'int'
-  kernelParams: 'ctypes._Pointer[ctypes.c_void_p]'
-  extra: 'ctypes._Pointer[ctypes.c_void_p]'
-  kern: 'ctypes._Pointer[struct_CUkern_st]'
-  ctx: 'ctypes._Pointer[struct_CUctx_st]'
+  func: ctypes._Pointer[struct_CUfunc_st]
+  gridDimX: int
+  gridDimY: int
+  gridDimZ: int
+  blockDimX: int
+  blockDimY: int
+  blockDimZ: int
+  sharedMemBytes: int
+  kernelParams: ctypes._Pointer[ctypes.c_void_p]
+  extra: ctypes._Pointer[ctypes.c_void_p]
+  kern: ctypes._Pointer[struct_CUkern_st]
+  ctx: ctypes._Pointer[struct_CUctx_st]
 struct_CUDA_KERNEL_NODE_PARAMS_v2_st.register_fields([('func', CUfunction, 0), ('gridDimX', ctypes.c_uint32, 8), ('gridDimY', ctypes.c_uint32, 12), ('gridDimZ', ctypes.c_uint32, 16), ('blockDimX', ctypes.c_uint32, 20), ('blockDimY', ctypes.c_uint32, 24), ('blockDimZ', ctypes.c_uint32, 28), ('sharedMemBytes', ctypes.c_uint32, 32), ('kernelParams', ctypes.POINTER(ctypes.c_void_p), 40), ('extra', ctypes.POINTER(ctypes.c_void_p), 48), ('kern', CUkernel, 56), ('ctx', CUcontext, 64)])
 CUDA_KERNEL_NODE_PARAMS_v2: TypeAlias = struct_CUDA_KERNEL_NODE_PARAMS_v2_st
 CUDA_KERNEL_NODE_PARAMS: TypeAlias = struct_CUDA_KERNEL_NODE_PARAMS_v2_st
 @c.record
 class struct_CUDA_MEMSET_NODE_PARAMS_st(c.Struct):
   SIZE = 40
-  dst: 'int'
-  pitch: 'int'
-  value: 'int'
-  elementSize: 'int'
-  width: 'int'
-  height: 'int'
+  dst: int
+  pitch: int
+  value: int
+  elementSize: int
+  width: int
+  height: int
 struct_CUDA_MEMSET_NODE_PARAMS_st.register_fields([('dst', CUdeviceptr, 0), ('pitch', size_t, 8), ('value', ctypes.c_uint32, 16), ('elementSize', ctypes.c_uint32, 20), ('width', size_t, 24), ('height', size_t, 32)])
 CUDA_MEMSET_NODE_PARAMS_v1: TypeAlias = struct_CUDA_MEMSET_NODE_PARAMS_st
 CUDA_MEMSET_NODE_PARAMS: TypeAlias = struct_CUDA_MEMSET_NODE_PARAMS_st
 @c.record
 class struct_CUDA_HOST_NODE_PARAMS_st(c.Struct):
   SIZE = 16
-  fn: 'ctypes._CFunctionType'
-  userData: 'ctypes.c_void_p'
+  fn: ctypes._CFunctionType
+  userData: int|None
 struct_CUDA_HOST_NODE_PARAMS_st.register_fields([('fn', CUhostFn, 0), ('userData', ctypes.c_void_p, 8)])
 CUDA_HOST_NODE_PARAMS_v1: TypeAlias = struct_CUDA_HOST_NODE_PARAMS_st
 CUDA_HOST_NODE_PARAMS: TypeAlias = struct_CUDA_HOST_NODE_PARAMS_st
@@ -296,10 +297,10 @@ CUgraphInstantiateResult: TypeAlias = ctypes.c_uint32
 @c.record
 class struct_CUDA_GRAPH_INSTANTIATE_PARAMS_st(c.Struct):
   SIZE = 32
-  flags: 'int'
-  hUploadStream: 'ctypes._Pointer[struct_CUstream_st]'
-  hErrNode_out: 'ctypes._Pointer[struct_CUgraphNode_st]'
-  result_out: 'int'
+  flags: int
+  hUploadStream: ctypes._Pointer[struct_CUstream_st]
+  hErrNode_out: ctypes._Pointer[struct_CUgraphNode_st]
+  result_out: int
 struct_CUDA_GRAPH_INSTANTIATE_PARAMS_st.register_fields([('flags', cuuint64_t, 0), ('hUploadStream', CUstream, 8), ('hErrNode_out', CUgraphNode, 16), ('result_out', CUgraphInstantiateResult, 24)])
 CUDA_GRAPH_INSTANTIATE_PARAMS: TypeAlias = struct_CUDA_GRAPH_INSTANTIATE_PARAMS_st
 enum_CUsynchronizationPolicy_enum: dict[int, str] = {(CU_SYNC_POLICY_AUTO:=1): 'CU_SYNC_POLICY_AUTO', (CU_SYNC_POLICY_SPIN:=2): 'CU_SYNC_POLICY_SPIN', (CU_SYNC_POLICY_YIELD:=3): 'CU_SYNC_POLICY_YIELD', (CU_SYNC_POLICY_BLOCKING_SYNC:=4): 'CU_SYNC_POLICY_BLOCKING_SYNC'}
@@ -311,8 +312,8 @@ CUlaunchMemSyncDomain: TypeAlias = ctypes.c_uint32
 @c.record
 class struct_CUlaunchMemSyncDomainMap_st(c.Struct):
   SIZE = 2
-  default_: 'int'
-  remote: 'int'
+  default_: int
+  remote: int
 struct_CUlaunchMemSyncDomainMap_st.register_fields([('default_', ctypes.c_ubyte, 0), ('remote', ctypes.c_ubyte, 1)])
 CUlaunchMemSyncDomainMap: TypeAlias = struct_CUlaunchMemSyncDomainMap_st
 enum_CUlaunchAttributeID_enum: dict[int, str] = {(CU_LAUNCH_ATTRIBUTE_IGNORE:=0): 'CU_LAUNCH_ATTRIBUTE_IGNORE', (CU_LAUNCH_ATTRIBUTE_ACCESS_POLICY_WINDOW:=1): 'CU_LAUNCH_ATTRIBUTE_ACCESS_POLICY_WINDOW', (CU_LAUNCH_ATTRIBUTE_COOPERATIVE:=2): 'CU_LAUNCH_ATTRIBUTE_COOPERATIVE', (CU_LAUNCH_ATTRIBUTE_SYNCHRONIZATION_POLICY:=3): 'CU_LAUNCH_ATTRIBUTE_SYNCHRONIZATION_POLICY', (CU_LAUNCH_ATTRIBUTE_CLUSTER_DIMENSION:=4): 'CU_LAUNCH_ATTRIBUTE_CLUSTER_DIMENSION', (CU_LAUNCH_ATTRIBUTE_CLUSTER_SCHEDULING_POLICY_PREFERENCE:=5): 'CU_LAUNCH_ATTRIBUTE_CLUSTER_SCHEDULING_POLICY_PREFERENCE', (CU_LAUNCH_ATTRIBUTE_PROGRAMMATIC_STREAM_SERIALIZATION:=6): 'CU_LAUNCH_ATTRIBUTE_PROGRAMMATIC_STREAM_SERIALIZATION', (CU_LAUNCH_ATTRIBUTE_PROGRAMMATIC_EVENT:=7): 'CU_LAUNCH_ATTRIBUTE_PROGRAMMATIC_EVENT', (CU_LAUNCH_ATTRIBUTE_PRIORITY:=8): 'CU_LAUNCH_ATTRIBUTE_PRIORITY', (CU_LAUNCH_ATTRIBUTE_MEM_SYNC_DOMAIN_MAP:=9): 'CU_LAUNCH_ATTRIBUTE_MEM_SYNC_DOMAIN_MAP', (CU_LAUNCH_ATTRIBUTE_MEM_SYNC_DOMAIN:=10): 'CU_LAUNCH_ATTRIBUTE_MEM_SYNC_DOMAIN'}
@@ -320,54 +321,54 @@ CUlaunchAttributeID: TypeAlias = ctypes.c_uint32
 @c.record
 class union_CUlaunchAttributeValue_union(c.Struct):
   SIZE = 64
-  pad: 'list[bytes]'
-  accessPolicyWindow: 'struct_CUaccessPolicyWindow_st'
-  cooperative: 'int'
-  syncPolicy: 'int'
-  clusterDim: 'union_CUlaunchAttributeValue_union_clusterDim'
-  clusterSchedulingPolicyPreference: 'int'
-  programmaticStreamSerializationAllowed: 'int'
-  programmaticEvent: 'union_CUlaunchAttributeValue_union_programmaticEvent'
-  priority: 'int'
-  memSyncDomainMap: 'struct_CUlaunchMemSyncDomainMap_st'
-  memSyncDomain: 'int'
+  pad: ctypes.Array[ctypes.c_char]
+  accessPolicyWindow: struct_CUaccessPolicyWindow_st
+  cooperative: int
+  syncPolicy: int
+  clusterDim: union_CUlaunchAttributeValue_union_clusterDim
+  clusterSchedulingPolicyPreference: int
+  programmaticStreamSerializationAllowed: int
+  programmaticEvent: union_CUlaunchAttributeValue_union_programmaticEvent
+  priority: int
+  memSyncDomainMap: struct_CUlaunchMemSyncDomainMap_st
+  memSyncDomain: int
 @c.record
 class union_CUlaunchAttributeValue_union_clusterDim(c.Struct):
   SIZE = 12
-  x: 'int'
-  y: 'int'
-  z: 'int'
+  x: int
+  y: int
+  z: int
 union_CUlaunchAttributeValue_union_clusterDim.register_fields([('x', ctypes.c_uint32, 0), ('y', ctypes.c_uint32, 4), ('z', ctypes.c_uint32, 8)])
 @c.record
 class union_CUlaunchAttributeValue_union_programmaticEvent(c.Struct):
   SIZE = 16
-  event: 'ctypes._Pointer[struct_CUevent_st]'
-  flags: 'int'
-  triggerAtBlockStart: 'int'
+  event: ctypes._Pointer[struct_CUevent_st]
+  flags: int
+  triggerAtBlockStart: int
 union_CUlaunchAttributeValue_union_programmaticEvent.register_fields([('event', CUevent, 0), ('flags', ctypes.c_int32, 8), ('triggerAtBlockStart', ctypes.c_int32, 12)])
 union_CUlaunchAttributeValue_union.register_fields([('pad', (ctypes.c_char * 64), 0), ('accessPolicyWindow', CUaccessPolicyWindow, 0), ('cooperative', ctypes.c_int32, 0), ('syncPolicy', CUsynchronizationPolicy, 0), ('clusterDim', union_CUlaunchAttributeValue_union_clusterDim, 0), ('clusterSchedulingPolicyPreference', CUclusterSchedulingPolicy, 0), ('programmaticStreamSerializationAllowed', ctypes.c_int32, 0), ('programmaticEvent', union_CUlaunchAttributeValue_union_programmaticEvent, 0), ('priority', ctypes.c_int32, 0), ('memSyncDomainMap', CUlaunchMemSyncDomainMap, 0), ('memSyncDomain', CUlaunchMemSyncDomain, 0)])
 CUlaunchAttributeValue: TypeAlias = union_CUlaunchAttributeValue_union
 @c.record
 class struct_CUlaunchAttribute_st(c.Struct):
   SIZE = 72
-  id: 'int'
-  pad: 'list[bytes]'
-  value: 'union_CUlaunchAttributeValue_union'
+  id: int
+  pad: ctypes.Array[ctypes.c_char]
+  value: union_CUlaunchAttributeValue_union
 struct_CUlaunchAttribute_st.register_fields([('id', CUlaunchAttributeID, 0), ('pad', (ctypes.c_char * 4), 4), ('value', CUlaunchAttributeValue, 8)])
 CUlaunchAttribute: TypeAlias = struct_CUlaunchAttribute_st
 @c.record
 class struct_CUlaunchConfig_st(c.Struct):
   SIZE = 56
-  gridDimX: 'int'
-  gridDimY: 'int'
-  gridDimZ: 'int'
-  blockDimX: 'int'
-  blockDimY: 'int'
-  blockDimZ: 'int'
-  sharedMemBytes: 'int'
-  hStream: 'ctypes._Pointer[struct_CUstream_st]'
-  attrs: 'ctypes._Pointer[struct_CUlaunchAttribute_st]'
-  numAttrs: 'int'
+  gridDimX: int
+  gridDimY: int
+  gridDimZ: int
+  blockDimX: int
+  blockDimY: int
+  blockDimZ: int
+  sharedMemBytes: int
+  hStream: ctypes._Pointer[struct_CUstream_st]
+  attrs: ctypes._Pointer[struct_CUlaunchAttribute_st]
+  numAttrs: int
 struct_CUlaunchConfig_st.register_fields([('gridDimX', ctypes.c_uint32, 0), ('gridDimY', ctypes.c_uint32, 4), ('gridDimZ', ctypes.c_uint32, 8), ('blockDimX', ctypes.c_uint32, 12), ('blockDimY', ctypes.c_uint32, 16), ('blockDimZ', ctypes.c_uint32, 20), ('sharedMemBytes', ctypes.c_uint32, 24), ('hStream', CUstream, 32), ('attrs', ctypes.POINTER(CUlaunchAttribute), 40), ('numAttrs', ctypes.c_uint32, 48)])
 CUlaunchConfig: TypeAlias = struct_CUlaunchConfig_st
 CUkernelNodeAttrID: TypeAlias = ctypes.c_uint32
@@ -389,19 +390,19 @@ CUexecAffinityType: TypeAlias = ctypes.c_uint32
 @c.record
 class struct_CUexecAffinitySmCount_st(c.Struct):
   SIZE = 4
-  val: 'int'
+  val: int
 struct_CUexecAffinitySmCount_st.register_fields([('val', ctypes.c_uint32, 0)])
 CUexecAffinitySmCount_v1: TypeAlias = struct_CUexecAffinitySmCount_st
 CUexecAffinitySmCount: TypeAlias = struct_CUexecAffinitySmCount_st
 @c.record
 class struct_CUexecAffinityParam_st(c.Struct):
   SIZE = 8
-  type: 'int'
-  param: 'struct_CUexecAffinityParam_st_param'
+  type: int
+  param: struct_CUexecAffinityParam_st_param
 @c.record
 class struct_CUexecAffinityParam_st_param(c.Struct):
   SIZE = 4
-  smCount: 'struct_CUexecAffinitySmCount_st'
+  smCount: struct_CUexecAffinitySmCount_st
 struct_CUexecAffinityParam_st_param.register_fields([('smCount', CUexecAffinitySmCount, 0)])
 struct_CUexecAffinityParam_st.register_fields([('type', CUexecAffinityType, 0), ('param', struct_CUexecAffinityParam_st_param, 4)])
 CUexecAffinityParam_v1: TypeAlias = struct_CUexecAffinityParam_st
@@ -411,10 +412,10 @@ CUlibraryOption: TypeAlias = ctypes.c_uint32
 @c.record
 class struct_CUlibraryHostUniversalFunctionAndDataTable_st(c.Struct):
   SIZE = 32
-  functionTable: 'ctypes.c_void_p'
-  functionWindowSize: 'int'
-  dataTable: 'ctypes.c_void_p'
-  dataWindowSize: 'int'
+  functionTable: int|None
+  functionWindowSize: int
+  dataTable: int|None
+  dataWindowSize: int
 struct_CUlibraryHostUniversalFunctionAndDataTable_st.register_fields([('functionTable', ctypes.c_void_p, 0), ('functionWindowSize', size_t, 8), ('dataTable', ctypes.c_void_p, 16), ('dataWindowSize', size_t, 24)])
 CUlibraryHostUniversalFunctionAndDataTable: TypeAlias = struct_CUlibraryHostUniversalFunctionAndDataTable_st
 enum_cudaError_enum: dict[int, str] = {(CUDA_SUCCESS:=0): 'CUDA_SUCCESS', (CUDA_ERROR_INVALID_VALUE:=1): 'CUDA_ERROR_INVALID_VALUE', (CUDA_ERROR_OUT_OF_MEMORY:=2): 'CUDA_ERROR_OUT_OF_MEMORY', (CUDA_ERROR_NOT_INITIALIZED:=3): 'CUDA_ERROR_NOT_INITIALIZED', (CUDA_ERROR_DEINITIALIZED:=4): 'CUDA_ERROR_DEINITIALIZED', (CUDA_ERROR_PROFILER_DISABLED:=5): 'CUDA_ERROR_PROFILER_DISABLED', (CUDA_ERROR_PROFILER_NOT_INITIALIZED:=6): 'CUDA_ERROR_PROFILER_NOT_INITIALIZED', (CUDA_ERROR_PROFILER_ALREADY_STARTED:=7): 'CUDA_ERROR_PROFILER_ALREADY_STARTED', (CUDA_ERROR_PROFILER_ALREADY_STOPPED:=8): 'CUDA_ERROR_PROFILER_ALREADY_STOPPED', (CUDA_ERROR_STUB_LIBRARY:=34): 'CUDA_ERROR_STUB_LIBRARY', (CUDA_ERROR_DEVICE_UNAVAILABLE:=46): 'CUDA_ERROR_DEVICE_UNAVAILABLE', (CUDA_ERROR_NO_DEVICE:=100): 'CUDA_ERROR_NO_DEVICE', (CUDA_ERROR_INVALID_DEVICE:=101): 'CUDA_ERROR_INVALID_DEVICE', (CUDA_ERROR_DEVICE_NOT_LICENSED:=102): 'CUDA_ERROR_DEVICE_NOT_LICENSED', (CUDA_ERROR_INVALID_IMAGE:=200): 'CUDA_ERROR_INVALID_IMAGE', (CUDA_ERROR_INVALID_CONTEXT:=201): 'CUDA_ERROR_INVALID_CONTEXT', (CUDA_ERROR_CONTEXT_ALREADY_CURRENT:=202): 'CUDA_ERROR_CONTEXT_ALREADY_CURRENT', (CUDA_ERROR_MAP_FAILED:=205): 'CUDA_ERROR_MAP_FAILED', (CUDA_ERROR_UNMAP_FAILED:=206): 'CUDA_ERROR_UNMAP_FAILED', (CUDA_ERROR_ARRAY_IS_MAPPED:=207): 'CUDA_ERROR_ARRAY_IS_MAPPED', (CUDA_ERROR_ALREADY_MAPPED:=208): 'CUDA_ERROR_ALREADY_MAPPED', (CUDA_ERROR_NO_BINARY_FOR_GPU:=209): 'CUDA_ERROR_NO_BINARY_FOR_GPU', (CUDA_ERROR_ALREADY_ACQUIRED:=210): 'CUDA_ERROR_ALREADY_ACQUIRED', (CUDA_ERROR_NOT_MAPPED:=211): 'CUDA_ERROR_NOT_MAPPED', (CUDA_ERROR_NOT_MAPPED_AS_ARRAY:=212): 'CUDA_ERROR_NOT_MAPPED_AS_ARRAY', (CUDA_ERROR_NOT_MAPPED_AS_POINTER:=213): 'CUDA_ERROR_NOT_MAPPED_AS_POINTER', (CUDA_ERROR_ECC_UNCORRECTABLE:=214): 'CUDA_ERROR_ECC_UNCORRECTABLE', (CUDA_ERROR_UNSUPPORTED_LIMIT:=215): 'CUDA_ERROR_UNSUPPORTED_LIMIT', (CUDA_ERROR_CONTEXT_ALREADY_IN_USE:=216): 'CUDA_ERROR_CONTEXT_ALREADY_IN_USE', (CUDA_ERROR_PEER_ACCESS_UNSUPPORTED:=217): 'CUDA_ERROR_PEER_ACCESS_UNSUPPORTED', (CUDA_ERROR_INVALID_PTX:=218): 'CUDA_ERROR_INVALID_PTX', (CUDA_ERROR_INVALID_GRAPHICS_CONTEXT:=219): 'CUDA_ERROR_INVALID_GRAPHICS_CONTEXT', (CUDA_ERROR_NVLINK_UNCORRECTABLE:=220): 'CUDA_ERROR_NVLINK_UNCORRECTABLE', (CUDA_ERROR_JIT_COMPILER_NOT_FOUND:=221): 'CUDA_ERROR_JIT_COMPILER_NOT_FOUND', (CUDA_ERROR_UNSUPPORTED_PTX_VERSION:=222): 'CUDA_ERROR_UNSUPPORTED_PTX_VERSION', (CUDA_ERROR_JIT_COMPILATION_DISABLED:=223): 'CUDA_ERROR_JIT_COMPILATION_DISABLED', (CUDA_ERROR_UNSUPPORTED_EXEC_AFFINITY:=224): 'CUDA_ERROR_UNSUPPORTED_EXEC_AFFINITY', (CUDA_ERROR_INVALID_SOURCE:=300): 'CUDA_ERROR_INVALID_SOURCE', (CUDA_ERROR_FILE_NOT_FOUND:=301): 'CUDA_ERROR_FILE_NOT_FOUND', (CUDA_ERROR_SHARED_OBJECT_SYMBOL_NOT_FOUND:=302): 'CUDA_ERROR_SHARED_OBJECT_SYMBOL_NOT_FOUND', (CUDA_ERROR_SHARED_OBJECT_INIT_FAILED:=303): 'CUDA_ERROR_SHARED_OBJECT_INIT_FAILED', (CUDA_ERROR_OPERATING_SYSTEM:=304): 'CUDA_ERROR_OPERATING_SYSTEM', (CUDA_ERROR_INVALID_HANDLE:=400): 'CUDA_ERROR_INVALID_HANDLE', (CUDA_ERROR_ILLEGAL_STATE:=401): 'CUDA_ERROR_ILLEGAL_STATE', (CUDA_ERROR_NOT_FOUND:=500): 'CUDA_ERROR_NOT_FOUND', (CUDA_ERROR_NOT_READY:=600): 'CUDA_ERROR_NOT_READY', (CUDA_ERROR_ILLEGAL_ADDRESS:=700): 'CUDA_ERROR_ILLEGAL_ADDRESS', (CUDA_ERROR_LAUNCH_OUT_OF_RESOURCES:=701): 'CUDA_ERROR_LAUNCH_OUT_OF_RESOURCES', (CUDA_ERROR_LAUNCH_TIMEOUT:=702): 'CUDA_ERROR_LAUNCH_TIMEOUT', (CUDA_ERROR_LAUNCH_INCOMPATIBLE_TEXTURING:=703): 'CUDA_ERROR_LAUNCH_INCOMPATIBLE_TEXTURING', (CUDA_ERROR_PEER_ACCESS_ALREADY_ENABLED:=704): 'CUDA_ERROR_PEER_ACCESS_ALREADY_ENABLED', (CUDA_ERROR_PEER_ACCESS_NOT_ENABLED:=705): 'CUDA_ERROR_PEER_ACCESS_NOT_ENABLED', (CUDA_ERROR_PRIMARY_CONTEXT_ACTIVE:=708): 'CUDA_ERROR_PRIMARY_CONTEXT_ACTIVE', (CUDA_ERROR_CONTEXT_IS_DESTROYED:=709): 'CUDA_ERROR_CONTEXT_IS_DESTROYED', (CUDA_ERROR_ASSERT:=710): 'CUDA_ERROR_ASSERT', (CUDA_ERROR_TOO_MANY_PEERS:=711): 'CUDA_ERROR_TOO_MANY_PEERS', (CUDA_ERROR_HOST_MEMORY_ALREADY_REGISTERED:=712): 'CUDA_ERROR_HOST_MEMORY_ALREADY_REGISTERED', (CUDA_ERROR_HOST_MEMORY_NOT_REGISTERED:=713): 'CUDA_ERROR_HOST_MEMORY_NOT_REGISTERED', (CUDA_ERROR_HARDWARE_STACK_ERROR:=714): 'CUDA_ERROR_HARDWARE_STACK_ERROR', (CUDA_ERROR_ILLEGAL_INSTRUCTION:=715): 'CUDA_ERROR_ILLEGAL_INSTRUCTION', (CUDA_ERROR_MISALIGNED_ADDRESS:=716): 'CUDA_ERROR_MISALIGNED_ADDRESS', (CUDA_ERROR_INVALID_ADDRESS_SPACE:=717): 'CUDA_ERROR_INVALID_ADDRESS_SPACE', (CUDA_ERROR_INVALID_PC:=718): 'CUDA_ERROR_INVALID_PC', (CUDA_ERROR_LAUNCH_FAILED:=719): 'CUDA_ERROR_LAUNCH_FAILED', (CUDA_ERROR_COOPERATIVE_LAUNCH_TOO_LARGE:=720): 'CUDA_ERROR_COOPERATIVE_LAUNCH_TOO_LARGE', (CUDA_ERROR_NOT_PERMITTED:=800): 'CUDA_ERROR_NOT_PERMITTED', (CUDA_ERROR_NOT_SUPPORTED:=801): 'CUDA_ERROR_NOT_SUPPORTED', (CUDA_ERROR_SYSTEM_NOT_READY:=802): 'CUDA_ERROR_SYSTEM_NOT_READY', (CUDA_ERROR_SYSTEM_DRIVER_MISMATCH:=803): 'CUDA_ERROR_SYSTEM_DRIVER_MISMATCH', (CUDA_ERROR_COMPAT_NOT_SUPPORTED_ON_DEVICE:=804): 'CUDA_ERROR_COMPAT_NOT_SUPPORTED_ON_DEVICE', (CUDA_ERROR_MPS_CONNECTION_FAILED:=805): 'CUDA_ERROR_MPS_CONNECTION_FAILED', (CUDA_ERROR_MPS_RPC_FAILURE:=806): 'CUDA_ERROR_MPS_RPC_FAILURE', (CUDA_ERROR_MPS_SERVER_NOT_READY:=807): 'CUDA_ERROR_MPS_SERVER_NOT_READY', (CUDA_ERROR_MPS_MAX_CLIENTS_REACHED:=808): 'CUDA_ERROR_MPS_MAX_CLIENTS_REACHED', (CUDA_ERROR_MPS_MAX_CONNECTIONS_REACHED:=809): 'CUDA_ERROR_MPS_MAX_CONNECTIONS_REACHED', (CUDA_ERROR_MPS_CLIENT_TERMINATED:=810): 'CUDA_ERROR_MPS_CLIENT_TERMINATED', (CUDA_ERROR_CDP_NOT_SUPPORTED:=811): 'CUDA_ERROR_CDP_NOT_SUPPORTED', (CUDA_ERROR_CDP_VERSION_MISMATCH:=812): 'CUDA_ERROR_CDP_VERSION_MISMATCH', (CUDA_ERROR_STREAM_CAPTURE_UNSUPPORTED:=900): 'CUDA_ERROR_STREAM_CAPTURE_UNSUPPORTED', (CUDA_ERROR_STREAM_CAPTURE_INVALIDATED:=901): 'CUDA_ERROR_STREAM_CAPTURE_INVALIDATED', (CUDA_ERROR_STREAM_CAPTURE_MERGE:=902): 'CUDA_ERROR_STREAM_CAPTURE_MERGE', (CUDA_ERROR_STREAM_CAPTURE_UNMATCHED:=903): 'CUDA_ERROR_STREAM_CAPTURE_UNMATCHED', (CUDA_ERROR_STREAM_CAPTURE_UNJOINED:=904): 'CUDA_ERROR_STREAM_CAPTURE_UNJOINED', (CUDA_ERROR_STREAM_CAPTURE_ISOLATION:=905): 'CUDA_ERROR_STREAM_CAPTURE_ISOLATION', (CUDA_ERROR_STREAM_CAPTURE_IMPLICIT:=906): 'CUDA_ERROR_STREAM_CAPTURE_IMPLICIT', (CUDA_ERROR_CAPTURED_EVENT:=907): 'CUDA_ERROR_CAPTURED_EVENT', (CUDA_ERROR_STREAM_CAPTURE_WRONG_THREAD:=908): 'CUDA_ERROR_STREAM_CAPTURE_WRONG_THREAD', (CUDA_ERROR_TIMEOUT:=909): 'CUDA_ERROR_TIMEOUT', (CUDA_ERROR_GRAPH_EXEC_UPDATE_FAILURE:=910): 'CUDA_ERROR_GRAPH_EXEC_UPDATE_FAILURE', (CUDA_ERROR_EXTERNAL_DEVICE:=911): 'CUDA_ERROR_EXTERNAL_DEVICE', (CUDA_ERROR_INVALID_CLUSTER_SIZE:=912): 'CUDA_ERROR_INVALID_CLUSTER_SIZE', (CUDA_ERROR_UNKNOWN:=999): 'CUDA_ERROR_UNKNOWN'}
@@ -426,123 +427,123 @@ CUoccupancyB2DSize: TypeAlias = ctypes.CFUNCTYPE(ctypes.c_uint64, ctypes.c_int32
 @c.record
 class struct_CUDA_MEMCPY2D_st(c.Struct):
   SIZE = 128
-  srcXInBytes: 'int'
-  srcY: 'int'
-  srcMemoryType: 'int'
-  srcHost: 'ctypes.c_void_p'
-  srcDevice: 'int'
-  srcArray: 'ctypes._Pointer[struct_CUarray_st]'
-  srcPitch: 'int'
-  dstXInBytes: 'int'
-  dstY: 'int'
-  dstMemoryType: 'int'
-  dstHost: 'ctypes.c_void_p'
-  dstDevice: 'int'
-  dstArray: 'ctypes._Pointer[struct_CUarray_st]'
-  dstPitch: 'int'
-  WidthInBytes: 'int'
-  Height: 'int'
+  srcXInBytes: int
+  srcY: int
+  srcMemoryType: int
+  srcHost: int|None
+  srcDevice: int
+  srcArray: ctypes._Pointer[struct_CUarray_st]
+  srcPitch: int
+  dstXInBytes: int
+  dstY: int
+  dstMemoryType: int
+  dstHost: int|None
+  dstDevice: int
+  dstArray: ctypes._Pointer[struct_CUarray_st]
+  dstPitch: int
+  WidthInBytes: int
+  Height: int
 struct_CUDA_MEMCPY2D_st.register_fields([('srcXInBytes', size_t, 0), ('srcY', size_t, 8), ('srcMemoryType', CUmemorytype, 16), ('srcHost', ctypes.c_void_p, 24), ('srcDevice', CUdeviceptr, 32), ('srcArray', CUarray, 40), ('srcPitch', size_t, 48), ('dstXInBytes', size_t, 56), ('dstY', size_t, 64), ('dstMemoryType', CUmemorytype, 72), ('dstHost', ctypes.c_void_p, 80), ('dstDevice', CUdeviceptr, 88), ('dstArray', CUarray, 96), ('dstPitch', size_t, 104), ('WidthInBytes', size_t, 112), ('Height', size_t, 120)])
 CUDA_MEMCPY2D_v2: TypeAlias = struct_CUDA_MEMCPY2D_st
 CUDA_MEMCPY2D: TypeAlias = struct_CUDA_MEMCPY2D_st
 @c.record
 class struct_CUDA_MEMCPY3D_st(c.Struct):
   SIZE = 200
-  srcXInBytes: 'int'
-  srcY: 'int'
-  srcZ: 'int'
-  srcLOD: 'int'
-  srcMemoryType: 'int'
-  srcHost: 'ctypes.c_void_p'
-  srcDevice: 'int'
-  srcArray: 'ctypes._Pointer[struct_CUarray_st]'
-  reserved0: 'ctypes.c_void_p'
-  srcPitch: 'int'
-  srcHeight: 'int'
-  dstXInBytes: 'int'
-  dstY: 'int'
-  dstZ: 'int'
-  dstLOD: 'int'
-  dstMemoryType: 'int'
-  dstHost: 'ctypes.c_void_p'
-  dstDevice: 'int'
-  dstArray: 'ctypes._Pointer[struct_CUarray_st]'
-  reserved1: 'ctypes.c_void_p'
-  dstPitch: 'int'
-  dstHeight: 'int'
-  WidthInBytes: 'int'
-  Height: 'int'
-  Depth: 'int'
+  srcXInBytes: int
+  srcY: int
+  srcZ: int
+  srcLOD: int
+  srcMemoryType: int
+  srcHost: int|None
+  srcDevice: int
+  srcArray: ctypes._Pointer[struct_CUarray_st]
+  reserved0: int|None
+  srcPitch: int
+  srcHeight: int
+  dstXInBytes: int
+  dstY: int
+  dstZ: int
+  dstLOD: int
+  dstMemoryType: int
+  dstHost: int|None
+  dstDevice: int
+  dstArray: ctypes._Pointer[struct_CUarray_st]
+  reserved1: int|None
+  dstPitch: int
+  dstHeight: int
+  WidthInBytes: int
+  Height: int
+  Depth: int
 struct_CUDA_MEMCPY3D_st.register_fields([('srcXInBytes', size_t, 0), ('srcY', size_t, 8), ('srcZ', size_t, 16), ('srcLOD', size_t, 24), ('srcMemoryType', CUmemorytype, 32), ('srcHost', ctypes.c_void_p, 40), ('srcDevice', CUdeviceptr, 48), ('srcArray', CUarray, 56), ('reserved0', ctypes.c_void_p, 64), ('srcPitch', size_t, 72), ('srcHeight', size_t, 80), ('dstXInBytes', size_t, 88), ('dstY', size_t, 96), ('dstZ', size_t, 104), ('dstLOD', size_t, 112), ('dstMemoryType', CUmemorytype, 120), ('dstHost', ctypes.c_void_p, 128), ('dstDevice', CUdeviceptr, 136), ('dstArray', CUarray, 144), ('reserved1', ctypes.c_void_p, 152), ('dstPitch', size_t, 160), ('dstHeight', size_t, 168), ('WidthInBytes', size_t, 176), ('Height', size_t, 184), ('Depth', size_t, 192)])
 CUDA_MEMCPY3D_v2: TypeAlias = struct_CUDA_MEMCPY3D_st
 CUDA_MEMCPY3D: TypeAlias = struct_CUDA_MEMCPY3D_st
 @c.record
 class struct_CUDA_MEMCPY3D_PEER_st(c.Struct):
   SIZE = 200
-  srcXInBytes: 'int'
-  srcY: 'int'
-  srcZ: 'int'
-  srcLOD: 'int'
-  srcMemoryType: 'int'
-  srcHost: 'ctypes.c_void_p'
-  srcDevice: 'int'
-  srcArray: 'ctypes._Pointer[struct_CUarray_st]'
-  srcContext: 'ctypes._Pointer[struct_CUctx_st]'
-  srcPitch: 'int'
-  srcHeight: 'int'
-  dstXInBytes: 'int'
-  dstY: 'int'
-  dstZ: 'int'
-  dstLOD: 'int'
-  dstMemoryType: 'int'
-  dstHost: 'ctypes.c_void_p'
-  dstDevice: 'int'
-  dstArray: 'ctypes._Pointer[struct_CUarray_st]'
-  dstContext: 'ctypes._Pointer[struct_CUctx_st]'
-  dstPitch: 'int'
-  dstHeight: 'int'
-  WidthInBytes: 'int'
-  Height: 'int'
-  Depth: 'int'
+  srcXInBytes: int
+  srcY: int
+  srcZ: int
+  srcLOD: int
+  srcMemoryType: int
+  srcHost: int|None
+  srcDevice: int
+  srcArray: ctypes._Pointer[struct_CUarray_st]
+  srcContext: ctypes._Pointer[struct_CUctx_st]
+  srcPitch: int
+  srcHeight: int
+  dstXInBytes: int
+  dstY: int
+  dstZ: int
+  dstLOD: int
+  dstMemoryType: int
+  dstHost: int|None
+  dstDevice: int
+  dstArray: ctypes._Pointer[struct_CUarray_st]
+  dstContext: ctypes._Pointer[struct_CUctx_st]
+  dstPitch: int
+  dstHeight: int
+  WidthInBytes: int
+  Height: int
+  Depth: int
 struct_CUDA_MEMCPY3D_PEER_st.register_fields([('srcXInBytes', size_t, 0), ('srcY', size_t, 8), ('srcZ', size_t, 16), ('srcLOD', size_t, 24), ('srcMemoryType', CUmemorytype, 32), ('srcHost', ctypes.c_void_p, 40), ('srcDevice', CUdeviceptr, 48), ('srcArray', CUarray, 56), ('srcContext', CUcontext, 64), ('srcPitch', size_t, 72), ('srcHeight', size_t, 80), ('dstXInBytes', size_t, 88), ('dstY', size_t, 96), ('dstZ', size_t, 104), ('dstLOD', size_t, 112), ('dstMemoryType', CUmemorytype, 120), ('dstHost', ctypes.c_void_p, 128), ('dstDevice', CUdeviceptr, 136), ('dstArray', CUarray, 144), ('dstContext', CUcontext, 152), ('dstPitch', size_t, 160), ('dstHeight', size_t, 168), ('WidthInBytes', size_t, 176), ('Height', size_t, 184), ('Depth', size_t, 192)])
 CUDA_MEMCPY3D_PEER_v1: TypeAlias = struct_CUDA_MEMCPY3D_PEER_st
 CUDA_MEMCPY3D_PEER: TypeAlias = struct_CUDA_MEMCPY3D_PEER_st
 @c.record
 class struct_CUDA_ARRAY_DESCRIPTOR_st(c.Struct):
   SIZE = 24
-  Width: 'int'
-  Height: 'int'
-  Format: 'int'
-  NumChannels: 'int'
+  Width: int
+  Height: int
+  Format: int
+  NumChannels: int
 struct_CUDA_ARRAY_DESCRIPTOR_st.register_fields([('Width', size_t, 0), ('Height', size_t, 8), ('Format', CUarray_format, 16), ('NumChannels', ctypes.c_uint32, 20)])
 CUDA_ARRAY_DESCRIPTOR_v2: TypeAlias = struct_CUDA_ARRAY_DESCRIPTOR_st
 CUDA_ARRAY_DESCRIPTOR: TypeAlias = struct_CUDA_ARRAY_DESCRIPTOR_st
 @c.record
 class struct_CUDA_ARRAY3D_DESCRIPTOR_st(c.Struct):
   SIZE = 40
-  Width: 'int'
-  Height: 'int'
-  Depth: 'int'
-  Format: 'int'
-  NumChannels: 'int'
-  Flags: 'int'
+  Width: int
+  Height: int
+  Depth: int
+  Format: int
+  NumChannels: int
+  Flags: int
 struct_CUDA_ARRAY3D_DESCRIPTOR_st.register_fields([('Width', size_t, 0), ('Height', size_t, 8), ('Depth', size_t, 16), ('Format', CUarray_format, 24), ('NumChannels', ctypes.c_uint32, 28), ('Flags', ctypes.c_uint32, 32)])
 CUDA_ARRAY3D_DESCRIPTOR_v2: TypeAlias = struct_CUDA_ARRAY3D_DESCRIPTOR_st
 CUDA_ARRAY3D_DESCRIPTOR: TypeAlias = struct_CUDA_ARRAY3D_DESCRIPTOR_st
 @c.record
 class struct_CUDA_ARRAY_SPARSE_PROPERTIES_st(c.Struct):
   SIZE = 48
-  tileExtent: 'struct_CUDA_ARRAY_SPARSE_PROPERTIES_st_tileExtent'
-  miptailFirstLevel: 'int'
-  miptailSize: 'int'
-  flags: 'int'
-  reserved: 'list[int]'
+  tileExtent: struct_CUDA_ARRAY_SPARSE_PROPERTIES_st_tileExtent
+  miptailFirstLevel: int
+  miptailSize: int
+  flags: int
+  reserved: ctypes.Array[ctypes.c_uint32]
 @c.record
 class struct_CUDA_ARRAY_SPARSE_PROPERTIES_st_tileExtent(c.Struct):
   SIZE = 12
-  width: 'int'
-  height: 'int'
-  depth: 'int'
+  width: int
+  height: int
+  depth: int
 struct_CUDA_ARRAY_SPARSE_PROPERTIES_st_tileExtent.register_fields([('width', ctypes.c_uint32, 0), ('height', ctypes.c_uint32, 4), ('depth', ctypes.c_uint32, 8)])
 struct_CUDA_ARRAY_SPARSE_PROPERTIES_st.register_fields([('tileExtent', struct_CUDA_ARRAY_SPARSE_PROPERTIES_st_tileExtent, 0), ('miptailFirstLevel', ctypes.c_uint32, 12), ('miptailSize', ctypes.c_uint64, 16), ('flags', ctypes.c_uint32, 24), ('reserved', (ctypes.c_uint32 * 4), 28)])
 CUDA_ARRAY_SPARSE_PROPERTIES_v1: TypeAlias = struct_CUDA_ARRAY_SPARSE_PROPERTIES_st
@@ -550,58 +551,58 @@ CUDA_ARRAY_SPARSE_PROPERTIES: TypeAlias = struct_CUDA_ARRAY_SPARSE_PROPERTIES_st
 @c.record
 class struct_CUDA_ARRAY_MEMORY_REQUIREMENTS_st(c.Struct):
   SIZE = 32
-  size: 'int'
-  alignment: 'int'
-  reserved: 'list[int]'
+  size: int
+  alignment: int
+  reserved: ctypes.Array[ctypes.c_uint32]
 struct_CUDA_ARRAY_MEMORY_REQUIREMENTS_st.register_fields([('size', size_t, 0), ('alignment', size_t, 8), ('reserved', (ctypes.c_uint32 * 4), 16)])
 CUDA_ARRAY_MEMORY_REQUIREMENTS_v1: TypeAlias = struct_CUDA_ARRAY_MEMORY_REQUIREMENTS_st
 CUDA_ARRAY_MEMORY_REQUIREMENTS: TypeAlias = struct_CUDA_ARRAY_MEMORY_REQUIREMENTS_st
 @c.record
 class struct_CUDA_RESOURCE_DESC_st(c.Struct):
   SIZE = 144
-  resType: 'int'
-  res: 'struct_CUDA_RESOURCE_DESC_st_res'
-  flags: 'int'
+  resType: int
+  res: struct_CUDA_RESOURCE_DESC_st_res
+  flags: int
 @c.record
 class struct_CUDA_RESOURCE_DESC_st_res(c.Struct):
   SIZE = 128
-  array: 'struct_CUDA_RESOURCE_DESC_st_res_array'
-  mipmap: 'struct_CUDA_RESOURCE_DESC_st_res_mipmap'
-  linear: 'struct_CUDA_RESOURCE_DESC_st_res_linear'
-  pitch2D: 'struct_CUDA_RESOURCE_DESC_st_res_pitch2D'
-  reserved: 'struct_CUDA_RESOURCE_DESC_st_res_reserved'
+  array: struct_CUDA_RESOURCE_DESC_st_res_array
+  mipmap: struct_CUDA_RESOURCE_DESC_st_res_mipmap
+  linear: struct_CUDA_RESOURCE_DESC_st_res_linear
+  pitch2D: struct_CUDA_RESOURCE_DESC_st_res_pitch2D
+  reserved: struct_CUDA_RESOURCE_DESC_st_res_reserved
 @c.record
 class struct_CUDA_RESOURCE_DESC_st_res_array(c.Struct):
   SIZE = 8
-  hArray: 'ctypes._Pointer[struct_CUarray_st]'
+  hArray: ctypes._Pointer[struct_CUarray_st]
 struct_CUDA_RESOURCE_DESC_st_res_array.register_fields([('hArray', CUarray, 0)])
 @c.record
 class struct_CUDA_RESOURCE_DESC_st_res_mipmap(c.Struct):
   SIZE = 8
-  hMipmappedArray: 'ctypes._Pointer[struct_CUmipmappedArray_st]'
+  hMipmappedArray: ctypes._Pointer[struct_CUmipmappedArray_st]
 struct_CUDA_RESOURCE_DESC_st_res_mipmap.register_fields([('hMipmappedArray', CUmipmappedArray, 0)])
 @c.record
 class struct_CUDA_RESOURCE_DESC_st_res_linear(c.Struct):
   SIZE = 24
-  devPtr: 'int'
-  format: 'int'
-  numChannels: 'int'
-  sizeInBytes: 'int'
+  devPtr: int
+  format: int
+  numChannels: int
+  sizeInBytes: int
 struct_CUDA_RESOURCE_DESC_st_res_linear.register_fields([('devPtr', CUdeviceptr, 0), ('format', CUarray_format, 8), ('numChannels', ctypes.c_uint32, 12), ('sizeInBytes', size_t, 16)])
 @c.record
 class struct_CUDA_RESOURCE_DESC_st_res_pitch2D(c.Struct):
   SIZE = 40
-  devPtr: 'int'
-  format: 'int'
-  numChannels: 'int'
-  width: 'int'
-  height: 'int'
-  pitchInBytes: 'int'
+  devPtr: int
+  format: int
+  numChannels: int
+  width: int
+  height: int
+  pitchInBytes: int
 struct_CUDA_RESOURCE_DESC_st_res_pitch2D.register_fields([('devPtr', CUdeviceptr, 0), ('format', CUarray_format, 8), ('numChannels', ctypes.c_uint32, 12), ('width', size_t, 16), ('height', size_t, 24), ('pitchInBytes', size_t, 32)])
 @c.record
 class struct_CUDA_RESOURCE_DESC_st_res_reserved(c.Struct):
   SIZE = 128
-  reserved: 'list[int]'
+  reserved: ctypes.Array[ctypes.c_int32]
 struct_CUDA_RESOURCE_DESC_st_res_reserved.register_fields([('reserved', (ctypes.c_int32 * 32), 0)])
 struct_CUDA_RESOURCE_DESC_st_res.register_fields([('array', struct_CUDA_RESOURCE_DESC_st_res_array, 0), ('mipmap', struct_CUDA_RESOURCE_DESC_st_res_mipmap, 0), ('linear', struct_CUDA_RESOURCE_DESC_st_res_linear, 0), ('pitch2D', struct_CUDA_RESOURCE_DESC_st_res_pitch2D, 0), ('reserved', struct_CUDA_RESOURCE_DESC_st_res_reserved, 0)])
 struct_CUDA_RESOURCE_DESC_st.register_fields([('resType', CUresourcetype, 0), ('res', struct_CUDA_RESOURCE_DESC_st_res, 8), ('flags', ctypes.c_uint32, 136)])
@@ -610,16 +611,16 @@ CUDA_RESOURCE_DESC: TypeAlias = struct_CUDA_RESOURCE_DESC_st
 @c.record
 class struct_CUDA_TEXTURE_DESC_st(c.Struct):
   SIZE = 104
-  addressMode: 'list[int]'
-  filterMode: 'int'
-  flags: 'int'
-  maxAnisotropy: 'int'
-  mipmapFilterMode: 'int'
-  mipmapLevelBias: 'float'
-  minMipmapLevelClamp: 'float'
-  maxMipmapLevelClamp: 'float'
-  borderColor: 'list[float]'
-  reserved: 'list[int]'
+  addressMode: ctypes.Array[ctypes.c_uint32]
+  filterMode: int
+  flags: int
+  maxAnisotropy: int
+  mipmapFilterMode: int
+  mipmapLevelBias: float
+  minMipmapLevelClamp: float
+  maxMipmapLevelClamp: float
+  borderColor: ctypes.Array[ctypes.c_float]
+  reserved: ctypes.Array[ctypes.c_int32]
 struct_CUDA_TEXTURE_DESC_st.register_fields([('addressMode', (CUaddress_mode * 3), 0), ('filterMode', CUfilter_mode, 12), ('flags', ctypes.c_uint32, 16), ('maxAnisotropy', ctypes.c_uint32, 20), ('mipmapFilterMode', CUfilter_mode, 24), ('mipmapLevelBias', ctypes.c_float, 28), ('minMipmapLevelClamp', ctypes.c_float, 32), ('maxMipmapLevelClamp', ctypes.c_float, 36), ('borderColor', (ctypes.c_float * 4), 40), ('reserved', (ctypes.c_int32 * 12), 56)])
 CUDA_TEXTURE_DESC_v1: TypeAlias = struct_CUDA_TEXTURE_DESC_st
 CUDA_TEXTURE_DESC: TypeAlias = struct_CUDA_TEXTURE_DESC_st
@@ -628,22 +629,22 @@ CUresourceViewFormat: TypeAlias = ctypes.c_uint32
 @c.record
 class struct_CUDA_RESOURCE_VIEW_DESC_st(c.Struct):
   SIZE = 112
-  format: 'int'
-  width: 'int'
-  height: 'int'
-  depth: 'int'
-  firstMipmapLevel: 'int'
-  lastMipmapLevel: 'int'
-  firstLayer: 'int'
-  lastLayer: 'int'
-  reserved: 'list[int]'
+  format: int
+  width: int
+  height: int
+  depth: int
+  firstMipmapLevel: int
+  lastMipmapLevel: int
+  firstLayer: int
+  lastLayer: int
+  reserved: ctypes.Array[ctypes.c_uint32]
 struct_CUDA_RESOURCE_VIEW_DESC_st.register_fields([('format', CUresourceViewFormat, 0), ('width', size_t, 8), ('height', size_t, 16), ('depth', size_t, 24), ('firstMipmapLevel', ctypes.c_uint32, 32), ('lastMipmapLevel', ctypes.c_uint32, 36), ('firstLayer', ctypes.c_uint32, 40), ('lastLayer', ctypes.c_uint32, 44), ('reserved', (ctypes.c_uint32 * 16), 48)])
 CUDA_RESOURCE_VIEW_DESC_v1: TypeAlias = struct_CUDA_RESOURCE_VIEW_DESC_st
 CUDA_RESOURCE_VIEW_DESC: TypeAlias = struct_CUDA_RESOURCE_VIEW_DESC_st
 @c.record
 class struct_CUtensorMap_st(c.Struct):
   SIZE = 128
-  opaque: 'list[int]'
+  opaque: ctypes.Array[ctypes.c_uint64]
 struct_CUtensorMap_st.register_fields([('opaque', (cuuint64_t * 16), 0)])
 CUtensorMap: TypeAlias = struct_CUtensorMap_st
 enum_CUtensorMapDataType_enum: dict[int, str] = {(CU_TENSOR_MAP_DATA_TYPE_UINT8:=0): 'CU_TENSOR_MAP_DATA_TYPE_UINT8', (CU_TENSOR_MAP_DATA_TYPE_UINT16:=1): 'CU_TENSOR_MAP_DATA_TYPE_UINT16', (CU_TENSOR_MAP_DATA_TYPE_UINT32:=2): 'CU_TENSOR_MAP_DATA_TYPE_UINT32', (CU_TENSOR_MAP_DATA_TYPE_INT32:=3): 'CU_TENSOR_MAP_DATA_TYPE_INT32', (CU_TENSOR_MAP_DATA_TYPE_UINT64:=4): 'CU_TENSOR_MAP_DATA_TYPE_UINT64', (CU_TENSOR_MAP_DATA_TYPE_INT64:=5): 'CU_TENSOR_MAP_DATA_TYPE_INT64', (CU_TENSOR_MAP_DATA_TYPE_FLOAT16:=6): 'CU_TENSOR_MAP_DATA_TYPE_FLOAT16', (CU_TENSOR_MAP_DATA_TYPE_FLOAT32:=7): 'CU_TENSOR_MAP_DATA_TYPE_FLOAT32', (CU_TENSOR_MAP_DATA_TYPE_FLOAT64:=8): 'CU_TENSOR_MAP_DATA_TYPE_FLOAT64', (CU_TENSOR_MAP_DATA_TYPE_BFLOAT16:=9): 'CU_TENSOR_MAP_DATA_TYPE_BFLOAT16', (CU_TENSOR_MAP_DATA_TYPE_FLOAT32_FTZ:=10): 'CU_TENSOR_MAP_DATA_TYPE_FLOAT32_FTZ', (CU_TENSOR_MAP_DATA_TYPE_TFLOAT32:=11): 'CU_TENSOR_MAP_DATA_TYPE_TFLOAT32', (CU_TENSOR_MAP_DATA_TYPE_TFLOAT32_FTZ:=12): 'CU_TENSOR_MAP_DATA_TYPE_TFLOAT32_FTZ'}
@@ -659,8 +660,8 @@ CUtensorMapFloatOOBfill: TypeAlias = ctypes.c_uint32
 @c.record
 class struct_CUDA_POINTER_ATTRIBUTE_P2P_TOKENS_st(c.Struct):
   SIZE = 16
-  p2pToken: 'int'
-  vaSpaceToken: 'int'
+  p2pToken: int
+  vaSpaceToken: int
 struct_CUDA_POINTER_ATTRIBUTE_P2P_TOKENS_st.register_fields([('p2pToken', ctypes.c_uint64, 0), ('vaSpaceToken', ctypes.c_uint32, 8)])
 CUDA_POINTER_ATTRIBUTE_P2P_TOKENS_v1: TypeAlias = struct_CUDA_POINTER_ATTRIBUTE_P2P_TOKENS_st
 CUDA_POINTER_ATTRIBUTE_P2P_TOKENS: TypeAlias = struct_CUDA_POINTER_ATTRIBUTE_P2P_TOKENS_st
@@ -669,16 +670,16 @@ CUDA_POINTER_ATTRIBUTE_ACCESS_FLAGS: TypeAlias = ctypes.c_uint32
 @c.record
 class struct_CUDA_LAUNCH_PARAMS_st(c.Struct):
   SIZE = 56
-  function: 'ctypes._Pointer[struct_CUfunc_st]'
-  gridDimX: 'int'
-  gridDimY: 'int'
-  gridDimZ: 'int'
-  blockDimX: 'int'
-  blockDimY: 'int'
-  blockDimZ: 'int'
-  sharedMemBytes: 'int'
-  hStream: 'ctypes._Pointer[struct_CUstream_st]'
-  kernelParams: 'ctypes._Pointer[ctypes.c_void_p]'
+  function: ctypes._Pointer[struct_CUfunc_st]
+  gridDimX: int
+  gridDimY: int
+  gridDimZ: int
+  blockDimX: int
+  blockDimY: int
+  blockDimZ: int
+  sharedMemBytes: int
+  hStream: ctypes._Pointer[struct_CUstream_st]
+  kernelParams: ctypes._Pointer[ctypes.c_void_p]
 struct_CUDA_LAUNCH_PARAMS_st.register_fields([('function', CUfunction, 0), ('gridDimX', ctypes.c_uint32, 8), ('gridDimY', ctypes.c_uint32, 12), ('gridDimZ', ctypes.c_uint32, 16), ('blockDimX', ctypes.c_uint32, 20), ('blockDimY', ctypes.c_uint32, 24), ('blockDimZ', ctypes.c_uint32, 28), ('sharedMemBytes', ctypes.c_uint32, 32), ('hStream', CUstream, 40), ('kernelParams', ctypes.POINTER(ctypes.c_void_p), 48)])
 CUDA_LAUNCH_PARAMS_v1: TypeAlias = struct_CUDA_LAUNCH_PARAMS_st
 CUDA_LAUNCH_PARAMS: TypeAlias = struct_CUDA_LAUNCH_PARAMS_st
@@ -687,22 +688,22 @@ CUexternalMemoryHandleType: TypeAlias = ctypes.c_uint32
 @c.record
 class struct_CUDA_EXTERNAL_MEMORY_HANDLE_DESC_st(c.Struct):
   SIZE = 104
-  type: 'int'
-  handle: 'struct_CUDA_EXTERNAL_MEMORY_HANDLE_DESC_st_handle'
-  size: 'int'
-  flags: 'int'
-  reserved: 'list[int]'
+  type: int
+  handle: struct_CUDA_EXTERNAL_MEMORY_HANDLE_DESC_st_handle
+  size: int
+  flags: int
+  reserved: ctypes.Array[ctypes.c_uint32]
 @c.record
 class struct_CUDA_EXTERNAL_MEMORY_HANDLE_DESC_st_handle(c.Struct):
   SIZE = 16
-  fd: 'int'
-  win32: 'struct_CUDA_EXTERNAL_MEMORY_HANDLE_DESC_st_handle_win32'
-  nvSciBufObject: 'ctypes.c_void_p'
+  fd: int
+  win32: struct_CUDA_EXTERNAL_MEMORY_HANDLE_DESC_st_handle_win32
+  nvSciBufObject: int|None
 @c.record
 class struct_CUDA_EXTERNAL_MEMORY_HANDLE_DESC_st_handle_win32(c.Struct):
   SIZE = 16
-  handle: 'ctypes.c_void_p'
-  name: 'ctypes.c_void_p'
+  handle: int|None
+  name: int|None
 struct_CUDA_EXTERNAL_MEMORY_HANDLE_DESC_st_handle_win32.register_fields([('handle', ctypes.c_void_p, 0), ('name', ctypes.c_void_p, 8)])
 struct_CUDA_EXTERNAL_MEMORY_HANDLE_DESC_st_handle.register_fields([('fd', ctypes.c_int32, 0), ('win32', struct_CUDA_EXTERNAL_MEMORY_HANDLE_DESC_st_handle_win32, 0), ('nvSciBufObject', ctypes.c_void_p, 0)])
 struct_CUDA_EXTERNAL_MEMORY_HANDLE_DESC_st.register_fields([('type', CUexternalMemoryHandleType, 0), ('handle', struct_CUDA_EXTERNAL_MEMORY_HANDLE_DESC_st_handle, 8), ('size', ctypes.c_uint64, 24), ('flags', ctypes.c_uint32, 32), ('reserved', (ctypes.c_uint32 * 16), 36)])
@@ -711,20 +712,20 @@ CUDA_EXTERNAL_MEMORY_HANDLE_DESC: TypeAlias = struct_CUDA_EXTERNAL_MEMORY_HANDLE
 @c.record
 class struct_CUDA_EXTERNAL_MEMORY_BUFFER_DESC_st(c.Struct):
   SIZE = 88
-  offset: 'int'
-  size: 'int'
-  flags: 'int'
-  reserved: 'list[int]'
+  offset: int
+  size: int
+  flags: int
+  reserved: ctypes.Array[ctypes.c_uint32]
 struct_CUDA_EXTERNAL_MEMORY_BUFFER_DESC_st.register_fields([('offset', ctypes.c_uint64, 0), ('size', ctypes.c_uint64, 8), ('flags', ctypes.c_uint32, 16), ('reserved', (ctypes.c_uint32 * 16), 20)])
 CUDA_EXTERNAL_MEMORY_BUFFER_DESC_v1: TypeAlias = struct_CUDA_EXTERNAL_MEMORY_BUFFER_DESC_st
 CUDA_EXTERNAL_MEMORY_BUFFER_DESC: TypeAlias = struct_CUDA_EXTERNAL_MEMORY_BUFFER_DESC_st
 @c.record
 class struct_CUDA_EXTERNAL_MEMORY_MIPMAPPED_ARRAY_DESC_st(c.Struct):
   SIZE = 120
-  offset: 'int'
-  arrayDesc: 'struct_CUDA_ARRAY3D_DESCRIPTOR_st'
-  numLevels: 'int'
-  reserved: 'list[int]'
+  offset: int
+  arrayDesc: struct_CUDA_ARRAY3D_DESCRIPTOR_st
+  numLevels: int
+  reserved: ctypes.Array[ctypes.c_uint32]
 struct_CUDA_EXTERNAL_MEMORY_MIPMAPPED_ARRAY_DESC_st.register_fields([('offset', ctypes.c_uint64, 0), ('arrayDesc', CUDA_ARRAY3D_DESCRIPTOR, 8), ('numLevels', ctypes.c_uint32, 48), ('reserved', (ctypes.c_uint32 * 16), 52)])
 CUDA_EXTERNAL_MEMORY_MIPMAPPED_ARRAY_DESC_v1: TypeAlias = struct_CUDA_EXTERNAL_MEMORY_MIPMAPPED_ARRAY_DESC_st
 CUDA_EXTERNAL_MEMORY_MIPMAPPED_ARRAY_DESC: TypeAlias = struct_CUDA_EXTERNAL_MEMORY_MIPMAPPED_ARRAY_DESC_st
@@ -733,21 +734,21 @@ CUexternalSemaphoreHandleType: TypeAlias = ctypes.c_uint32
 @c.record
 class struct_CUDA_EXTERNAL_SEMAPHORE_HANDLE_DESC_st(c.Struct):
   SIZE = 96
-  type: 'int'
-  handle: 'struct_CUDA_EXTERNAL_SEMAPHORE_HANDLE_DESC_st_handle'
-  flags: 'int'
-  reserved: 'list[int]'
+  type: int
+  handle: struct_CUDA_EXTERNAL_SEMAPHORE_HANDLE_DESC_st_handle
+  flags: int
+  reserved: ctypes.Array[ctypes.c_uint32]
 @c.record
 class struct_CUDA_EXTERNAL_SEMAPHORE_HANDLE_DESC_st_handle(c.Struct):
   SIZE = 16
-  fd: 'int'
-  win32: 'struct_CUDA_EXTERNAL_SEMAPHORE_HANDLE_DESC_st_handle_win32'
-  nvSciSyncObj: 'ctypes.c_void_p'
+  fd: int
+  win32: struct_CUDA_EXTERNAL_SEMAPHORE_HANDLE_DESC_st_handle_win32
+  nvSciSyncObj: int|None
 @c.record
 class struct_CUDA_EXTERNAL_SEMAPHORE_HANDLE_DESC_st_handle_win32(c.Struct):
   SIZE = 16
-  handle: 'ctypes.c_void_p'
-  name: 'ctypes.c_void_p'
+  handle: int|None
+  name: int|None
 struct_CUDA_EXTERNAL_SEMAPHORE_HANDLE_DESC_st_handle_win32.register_fields([('handle', ctypes.c_void_p, 0), ('name', ctypes.c_void_p, 8)])
 struct_CUDA_EXTERNAL_SEMAPHORE_HANDLE_DESC_st_handle.register_fields([('fd', ctypes.c_int32, 0), ('win32', struct_CUDA_EXTERNAL_SEMAPHORE_HANDLE_DESC_st_handle_win32, 0), ('nvSciSyncObj', ctypes.c_void_p, 0)])
 struct_CUDA_EXTERNAL_SEMAPHORE_HANDLE_DESC_st.register_fields([('type', CUexternalSemaphoreHandleType, 0), ('handle', struct_CUDA_EXTERNAL_SEMAPHORE_HANDLE_DESC_st_handle, 8), ('flags', ctypes.c_uint32, 24), ('reserved', (ctypes.c_uint32 * 16), 28)])
@@ -756,31 +757,31 @@ CUDA_EXTERNAL_SEMAPHORE_HANDLE_DESC: TypeAlias = struct_CUDA_EXTERNAL_SEMAPHORE_
 @c.record
 class struct_CUDA_EXTERNAL_SEMAPHORE_SIGNAL_PARAMS_st(c.Struct):
   SIZE = 144
-  params: 'struct_CUDA_EXTERNAL_SEMAPHORE_SIGNAL_PARAMS_st_params'
-  flags: 'int'
-  reserved: 'list[int]'
+  params: struct_CUDA_EXTERNAL_SEMAPHORE_SIGNAL_PARAMS_st_params
+  flags: int
+  reserved: ctypes.Array[ctypes.c_uint32]
 @c.record
 class struct_CUDA_EXTERNAL_SEMAPHORE_SIGNAL_PARAMS_st_params(c.Struct):
   SIZE = 72
-  fence: 'struct_CUDA_EXTERNAL_SEMAPHORE_SIGNAL_PARAMS_st_params_fence'
-  nvSciSync: 'struct_CUDA_EXTERNAL_SEMAPHORE_SIGNAL_PARAMS_st_params_nvSciSync'
-  keyedMutex: 'struct_CUDA_EXTERNAL_SEMAPHORE_SIGNAL_PARAMS_st_params_keyedMutex'
-  reserved: 'list[int]'
+  fence: struct_CUDA_EXTERNAL_SEMAPHORE_SIGNAL_PARAMS_st_params_fence
+  nvSciSync: struct_CUDA_EXTERNAL_SEMAPHORE_SIGNAL_PARAMS_st_params_nvSciSync
+  keyedMutex: struct_CUDA_EXTERNAL_SEMAPHORE_SIGNAL_PARAMS_st_params_keyedMutex
+  reserved: ctypes.Array[ctypes.c_uint32]
 @c.record
 class struct_CUDA_EXTERNAL_SEMAPHORE_SIGNAL_PARAMS_st_params_fence(c.Struct):
   SIZE = 8
-  value: 'int'
+  value: int
 struct_CUDA_EXTERNAL_SEMAPHORE_SIGNAL_PARAMS_st_params_fence.register_fields([('value', ctypes.c_uint64, 0)])
 @c.record
 class struct_CUDA_EXTERNAL_SEMAPHORE_SIGNAL_PARAMS_st_params_nvSciSync(c.Struct):
   SIZE = 8
-  fence: 'ctypes.c_void_p'
-  reserved: 'int'
+  fence: int|None
+  reserved: int
 struct_CUDA_EXTERNAL_SEMAPHORE_SIGNAL_PARAMS_st_params_nvSciSync.register_fields([('fence', ctypes.c_void_p, 0), ('reserved', ctypes.c_uint64, 0)])
 @c.record
 class struct_CUDA_EXTERNAL_SEMAPHORE_SIGNAL_PARAMS_st_params_keyedMutex(c.Struct):
   SIZE = 8
-  key: 'int'
+  key: int
 struct_CUDA_EXTERNAL_SEMAPHORE_SIGNAL_PARAMS_st_params_keyedMutex.register_fields([('key', ctypes.c_uint64, 0)])
 struct_CUDA_EXTERNAL_SEMAPHORE_SIGNAL_PARAMS_st_params.register_fields([('fence', struct_CUDA_EXTERNAL_SEMAPHORE_SIGNAL_PARAMS_st_params_fence, 0), ('nvSciSync', struct_CUDA_EXTERNAL_SEMAPHORE_SIGNAL_PARAMS_st_params_nvSciSync, 8), ('keyedMutex', struct_CUDA_EXTERNAL_SEMAPHORE_SIGNAL_PARAMS_st_params_keyedMutex, 16), ('reserved', (ctypes.c_uint32 * 12), 24)])
 struct_CUDA_EXTERNAL_SEMAPHORE_SIGNAL_PARAMS_st.register_fields([('params', struct_CUDA_EXTERNAL_SEMAPHORE_SIGNAL_PARAMS_st_params, 0), ('flags', ctypes.c_uint32, 72), ('reserved', (ctypes.c_uint32 * 16), 76)])
@@ -789,32 +790,32 @@ CUDA_EXTERNAL_SEMAPHORE_SIGNAL_PARAMS: TypeAlias = struct_CUDA_EXTERNAL_SEMAPHOR
 @c.record
 class struct_CUDA_EXTERNAL_SEMAPHORE_WAIT_PARAMS_st(c.Struct):
   SIZE = 144
-  params: 'struct_CUDA_EXTERNAL_SEMAPHORE_WAIT_PARAMS_st_params'
-  flags: 'int'
-  reserved: 'list[int]'
+  params: struct_CUDA_EXTERNAL_SEMAPHORE_WAIT_PARAMS_st_params
+  flags: int
+  reserved: ctypes.Array[ctypes.c_uint32]
 @c.record
 class struct_CUDA_EXTERNAL_SEMAPHORE_WAIT_PARAMS_st_params(c.Struct):
   SIZE = 72
-  fence: 'struct_CUDA_EXTERNAL_SEMAPHORE_WAIT_PARAMS_st_params_fence'
-  nvSciSync: 'struct_CUDA_EXTERNAL_SEMAPHORE_WAIT_PARAMS_st_params_nvSciSync'
-  keyedMutex: 'struct_CUDA_EXTERNAL_SEMAPHORE_WAIT_PARAMS_st_params_keyedMutex'
-  reserved: 'list[int]'
+  fence: struct_CUDA_EXTERNAL_SEMAPHORE_WAIT_PARAMS_st_params_fence
+  nvSciSync: struct_CUDA_EXTERNAL_SEMAPHORE_WAIT_PARAMS_st_params_nvSciSync
+  keyedMutex: struct_CUDA_EXTERNAL_SEMAPHORE_WAIT_PARAMS_st_params_keyedMutex
+  reserved: ctypes.Array[ctypes.c_uint32]
 @c.record
 class struct_CUDA_EXTERNAL_SEMAPHORE_WAIT_PARAMS_st_params_fence(c.Struct):
   SIZE = 8
-  value: 'int'
+  value: int
 struct_CUDA_EXTERNAL_SEMAPHORE_WAIT_PARAMS_st_params_fence.register_fields([('value', ctypes.c_uint64, 0)])
 @c.record
 class struct_CUDA_EXTERNAL_SEMAPHORE_WAIT_PARAMS_st_params_nvSciSync(c.Struct):
   SIZE = 8
-  fence: 'ctypes.c_void_p'
-  reserved: 'int'
+  fence: int|None
+  reserved: int
 struct_CUDA_EXTERNAL_SEMAPHORE_WAIT_PARAMS_st_params_nvSciSync.register_fields([('fence', ctypes.c_void_p, 0), ('reserved', ctypes.c_uint64, 0)])
 @c.record
 class struct_CUDA_EXTERNAL_SEMAPHORE_WAIT_PARAMS_st_params_keyedMutex(c.Struct):
   SIZE = 16
-  key: 'int'
-  timeoutMs: 'int'
+  key: int
+  timeoutMs: int
 struct_CUDA_EXTERNAL_SEMAPHORE_WAIT_PARAMS_st_params_keyedMutex.register_fields([('key', ctypes.c_uint64, 0), ('timeoutMs', ctypes.c_uint32, 8)])
 struct_CUDA_EXTERNAL_SEMAPHORE_WAIT_PARAMS_st_params.register_fields([('fence', struct_CUDA_EXTERNAL_SEMAPHORE_WAIT_PARAMS_st_params_fence, 0), ('nvSciSync', struct_CUDA_EXTERNAL_SEMAPHORE_WAIT_PARAMS_st_params_nvSciSync, 8), ('keyedMutex', struct_CUDA_EXTERNAL_SEMAPHORE_WAIT_PARAMS_st_params_keyedMutex, 16), ('reserved', (ctypes.c_uint32 * 10), 32)])
 struct_CUDA_EXTERNAL_SEMAPHORE_WAIT_PARAMS_st.register_fields([('params', struct_CUDA_EXTERNAL_SEMAPHORE_WAIT_PARAMS_st_params, 0), ('flags', ctypes.c_uint32, 72), ('reserved', (ctypes.c_uint32 * 16), 76)])
@@ -823,18 +824,18 @@ CUDA_EXTERNAL_SEMAPHORE_WAIT_PARAMS: TypeAlias = struct_CUDA_EXTERNAL_SEMAPHORE_
 @c.record
 class struct_CUDA_EXT_SEM_SIGNAL_NODE_PARAMS_st(c.Struct):
   SIZE = 24
-  extSemArray: 'ctypes._Pointer[ctypes._Pointer[struct_CUextSemaphore_st]]'
-  paramsArray: 'ctypes._Pointer[struct_CUDA_EXTERNAL_SEMAPHORE_SIGNAL_PARAMS_st]'
-  numExtSems: 'int'
+  extSemArray: ctypes._Pointer[ctypes.POINTER(struct_CUextSemaphore_st)]
+  paramsArray: ctypes._Pointer[struct_CUDA_EXTERNAL_SEMAPHORE_SIGNAL_PARAMS_st]
+  numExtSems: int
 struct_CUDA_EXT_SEM_SIGNAL_NODE_PARAMS_st.register_fields([('extSemArray', ctypes.POINTER(CUexternalSemaphore), 0), ('paramsArray', ctypes.POINTER(CUDA_EXTERNAL_SEMAPHORE_SIGNAL_PARAMS), 8), ('numExtSems', ctypes.c_uint32, 16)])
 CUDA_EXT_SEM_SIGNAL_NODE_PARAMS_v1: TypeAlias = struct_CUDA_EXT_SEM_SIGNAL_NODE_PARAMS_st
 CUDA_EXT_SEM_SIGNAL_NODE_PARAMS: TypeAlias = struct_CUDA_EXT_SEM_SIGNAL_NODE_PARAMS_st
 @c.record
 class struct_CUDA_EXT_SEM_WAIT_NODE_PARAMS_st(c.Struct):
   SIZE = 24
-  extSemArray: 'ctypes._Pointer[ctypes._Pointer[struct_CUextSemaphore_st]]'
-  paramsArray: 'ctypes._Pointer[struct_CUDA_EXTERNAL_SEMAPHORE_WAIT_PARAMS_st]'
-  numExtSems: 'int'
+  extSemArray: ctypes._Pointer[ctypes.POINTER(struct_CUextSemaphore_st)]
+  paramsArray: ctypes._Pointer[struct_CUDA_EXTERNAL_SEMAPHORE_WAIT_PARAMS_st]
+  numExtSems: int
 struct_CUDA_EXT_SEM_WAIT_NODE_PARAMS_st.register_fields([('extSemArray', ctypes.POINTER(CUexternalSemaphore), 0), ('paramsArray', ctypes.POINTER(CUDA_EXTERNAL_SEMAPHORE_WAIT_PARAMS), 8), ('numExtSems', ctypes.c_uint32, 16)])
 CUDA_EXT_SEM_WAIT_NODE_PARAMS_v1: TypeAlias = struct_CUDA_EXT_SEM_WAIT_NODE_PARAMS_st
 CUDA_EXT_SEM_WAIT_NODE_PARAMS: TypeAlias = struct_CUDA_EXT_SEM_WAIT_NODE_PARAMS_st
@@ -861,52 +862,52 @@ CUmemHandleType: TypeAlias = ctypes.c_uint32
 @c.record
 class struct_CUarrayMapInfo_st(c.Struct):
   SIZE = 96
-  resourceType: 'int'
-  resource: 'struct_CUarrayMapInfo_st_resource'
-  subresourceType: 'int'
-  subresource: 'struct_CUarrayMapInfo_st_subresource'
-  memOperationType: 'int'
-  memHandleType: 'int'
-  memHandle: 'struct_CUarrayMapInfo_st_memHandle'
-  offset: 'int'
-  deviceBitMask: 'int'
-  flags: 'int'
-  reserved: 'list[int]'
+  resourceType: int
+  resource: struct_CUarrayMapInfo_st_resource
+  subresourceType: int
+  subresource: struct_CUarrayMapInfo_st_subresource
+  memOperationType: int
+  memHandleType: int
+  memHandle: struct_CUarrayMapInfo_st_memHandle
+  offset: int
+  deviceBitMask: int
+  flags: int
+  reserved: ctypes.Array[ctypes.c_uint32]
 @c.record
 class struct_CUarrayMapInfo_st_resource(c.Struct):
   SIZE = 8
-  mipmap: 'ctypes._Pointer[struct_CUmipmappedArray_st]'
-  array: 'ctypes._Pointer[struct_CUarray_st]'
+  mipmap: ctypes._Pointer[struct_CUmipmappedArray_st]
+  array: ctypes._Pointer[struct_CUarray_st]
 struct_CUarrayMapInfo_st_resource.register_fields([('mipmap', CUmipmappedArray, 0), ('array', CUarray, 0)])
 @c.record
 class struct_CUarrayMapInfo_st_subresource(c.Struct):
   SIZE = 32
-  sparseLevel: 'struct_CUarrayMapInfo_st_subresource_sparseLevel'
-  miptail: 'struct_CUarrayMapInfo_st_subresource_miptail'
+  sparseLevel: struct_CUarrayMapInfo_st_subresource_sparseLevel
+  miptail: struct_CUarrayMapInfo_st_subresource_miptail
 @c.record
 class struct_CUarrayMapInfo_st_subresource_sparseLevel(c.Struct):
   SIZE = 32
-  level: 'int'
-  layer: 'int'
-  offsetX: 'int'
-  offsetY: 'int'
-  offsetZ: 'int'
-  extentWidth: 'int'
-  extentHeight: 'int'
-  extentDepth: 'int'
+  level: int
+  layer: int
+  offsetX: int
+  offsetY: int
+  offsetZ: int
+  extentWidth: int
+  extentHeight: int
+  extentDepth: int
 struct_CUarrayMapInfo_st_subresource_sparseLevel.register_fields([('level', ctypes.c_uint32, 0), ('layer', ctypes.c_uint32, 4), ('offsetX', ctypes.c_uint32, 8), ('offsetY', ctypes.c_uint32, 12), ('offsetZ', ctypes.c_uint32, 16), ('extentWidth', ctypes.c_uint32, 20), ('extentHeight', ctypes.c_uint32, 24), ('extentDepth', ctypes.c_uint32, 28)])
 @c.record
 class struct_CUarrayMapInfo_st_subresource_miptail(c.Struct):
   SIZE = 24
-  layer: 'int'
-  offset: 'int'
-  size: 'int'
+  layer: int
+  offset: int
+  size: int
 struct_CUarrayMapInfo_st_subresource_miptail.register_fields([('layer', ctypes.c_uint32, 0), ('offset', ctypes.c_uint64, 8), ('size', ctypes.c_uint64, 16)])
 struct_CUarrayMapInfo_st_subresource.register_fields([('sparseLevel', struct_CUarrayMapInfo_st_subresource_sparseLevel, 0), ('miptail', struct_CUarrayMapInfo_st_subresource_miptail, 0)])
 @c.record
 class struct_CUarrayMapInfo_st_memHandle(c.Struct):
   SIZE = 8
-  memHandle: 'int'
+  memHandle: int
 struct_CUarrayMapInfo_st_memHandle.register_fields([('memHandle', CUmemGenericAllocationHandle, 0)])
 struct_CUarrayMapInfo_st.register_fields([('resourceType', CUresourcetype, 0), ('resource', struct_CUarrayMapInfo_st_resource, 8), ('subresourceType', CUarraySparseSubresourceType, 16), ('subresource', struct_CUarrayMapInfo_st_subresource, 24), ('memOperationType', CUmemOperationType, 56), ('memHandleType', CUmemHandleType, 60), ('memHandle', struct_CUarrayMapInfo_st_memHandle, 64), ('offset', ctypes.c_uint64, 72), ('deviceBitMask', ctypes.c_uint32, 80), ('flags', ctypes.c_uint32, 84), ('reserved', (ctypes.c_uint32 * 2), 88)])
 CUarrayMapInfo_v1: TypeAlias = struct_CUarrayMapInfo_st
@@ -914,8 +915,8 @@ CUarrayMapInfo: TypeAlias = struct_CUarrayMapInfo_st
 @c.record
 class struct_CUmemLocation_st(c.Struct):
   SIZE = 8
-  type: 'int'
-  id: 'int'
+  type: int
+  id: int
 struct_CUmemLocation_st.register_fields([('type', CUmemLocationType, 0), ('id', ctypes.c_int32, 4)])
 CUmemLocation_v1: TypeAlias = struct_CUmemLocation_st
 CUmemLocation: TypeAlias = struct_CUmemLocation_st
@@ -924,18 +925,18 @@ CUmemAllocationCompType: TypeAlias = ctypes.c_uint32
 @c.record
 class struct_CUmemAllocationProp_st(c.Struct):
   SIZE = 32
-  type: 'int'
-  requestedHandleTypes: 'int'
-  location: 'struct_CUmemLocation_st'
-  win32HandleMetaData: 'ctypes.c_void_p'
-  allocFlags: 'struct_CUmemAllocationProp_st_allocFlags'
+  type: int
+  requestedHandleTypes: int
+  location: struct_CUmemLocation_st
+  win32HandleMetaData: int|None
+  allocFlags: struct_CUmemAllocationProp_st_allocFlags
 @c.record
 class struct_CUmemAllocationProp_st_allocFlags(c.Struct):
   SIZE = 8
-  compressionType: 'int'
-  gpuDirectRDMACapable: 'int'
-  usage: 'int'
-  reserved: 'list[int]'
+  compressionType: int
+  gpuDirectRDMACapable: int
+  usage: int
+  reserved: ctypes.Array[ctypes.c_ubyte]
 struct_CUmemAllocationProp_st_allocFlags.register_fields([('compressionType', ctypes.c_ubyte, 0), ('gpuDirectRDMACapable', ctypes.c_ubyte, 1), ('usage', ctypes.c_uint16, 2), ('reserved', (ctypes.c_ubyte * 4), 4)])
 struct_CUmemAllocationProp_st.register_fields([('type', CUmemAllocationType, 0), ('requestedHandleTypes', CUmemAllocationHandleType, 4), ('location', CUmemLocation, 8), ('win32HandleMetaData', ctypes.c_void_p, 16), ('allocFlags', struct_CUmemAllocationProp_st_allocFlags, 24)])
 CUmemAllocationProp_v1: TypeAlias = struct_CUmemAllocationProp_st
@@ -943,8 +944,8 @@ CUmemAllocationProp: TypeAlias = struct_CUmemAllocationProp_st
 @c.record
 class struct_CUmemAccessDesc_st(c.Struct):
   SIZE = 12
-  location: 'struct_CUmemLocation_st'
-  flags: 'int'
+  location: struct_CUmemLocation_st
+  flags: int
 struct_CUmemAccessDesc_st.register_fields([('location', CUmemLocation, 0), ('flags', CUmemAccess_flags, 8)])
 CUmemAccessDesc_v1: TypeAlias = struct_CUmemAccessDesc_st
 CUmemAccessDesc: TypeAlias = struct_CUmemAccessDesc_st
@@ -953,9 +954,9 @@ CUgraphExecUpdateResult: TypeAlias = ctypes.c_uint32
 @c.record
 class struct_CUgraphExecUpdateResultInfo_st(c.Struct):
   SIZE = 24
-  result: 'int'
-  errorNode: 'ctypes._Pointer[struct_CUgraphNode_st]'
-  errorFromNode: 'ctypes._Pointer[struct_CUgraphNode_st]'
+  result: int
+  errorNode: ctypes._Pointer[struct_CUgraphNode_st]
+  errorFromNode: ctypes._Pointer[struct_CUgraphNode_st]
 struct_CUgraphExecUpdateResultInfo_st.register_fields([('result', CUgraphExecUpdateResult, 0), ('errorNode', CUgraphNode, 8), ('errorFromNode', CUgraphNode, 16)])
 CUgraphExecUpdateResultInfo_v1: TypeAlias = struct_CUgraphExecUpdateResultInfo_st
 CUgraphExecUpdateResultInfo: TypeAlias = struct_CUgraphExecUpdateResultInfo_st
@@ -964,29 +965,29 @@ CUmemPool_attribute: TypeAlias = ctypes.c_uint32
 @c.record
 class struct_CUmemPoolProps_st(c.Struct):
   SIZE = 88
-  allocType: 'int'
-  handleTypes: 'int'
-  location: 'struct_CUmemLocation_st'
-  win32SecurityAttributes: 'ctypes.c_void_p'
-  reserved: 'list[int]'
+  allocType: int
+  handleTypes: int
+  location: struct_CUmemLocation_st
+  win32SecurityAttributes: int|None
+  reserved: ctypes.Array[ctypes.c_ubyte]
 struct_CUmemPoolProps_st.register_fields([('allocType', CUmemAllocationType, 0), ('handleTypes', CUmemAllocationHandleType, 4), ('location', CUmemLocation, 8), ('win32SecurityAttributes', ctypes.c_void_p, 16), ('reserved', (ctypes.c_ubyte * 64), 24)])
 CUmemPoolProps_v1: TypeAlias = struct_CUmemPoolProps_st
 CUmemPoolProps: TypeAlias = struct_CUmemPoolProps_st
 @c.record
 class struct_CUmemPoolPtrExportData_st(c.Struct):
   SIZE = 64
-  reserved: 'list[int]'
+  reserved: ctypes.Array[ctypes.c_ubyte]
 struct_CUmemPoolPtrExportData_st.register_fields([('reserved', (ctypes.c_ubyte * 64), 0)])
 CUmemPoolPtrExportData_v1: TypeAlias = struct_CUmemPoolPtrExportData_st
 CUmemPoolPtrExportData: TypeAlias = struct_CUmemPoolPtrExportData_st
 @c.record
 class struct_CUDA_MEM_ALLOC_NODE_PARAMS_st(c.Struct):
   SIZE = 120
-  poolProps: 'struct_CUmemPoolProps_st'
-  accessDescs: 'ctypes._Pointer[struct_CUmemAccessDesc_st]'
-  accessDescCount: 'int'
-  bytesize: 'int'
-  dptr: 'int'
+  poolProps: struct_CUmemPoolProps_st
+  accessDescs: ctypes._Pointer[struct_CUmemAccessDesc_st]
+  accessDescCount: int
+  bytesize: int
+  dptr: int
 struct_CUDA_MEM_ALLOC_NODE_PARAMS_st.register_fields([('poolProps', CUmemPoolProps, 0), ('accessDescs', ctypes.POINTER(CUmemAccessDesc), 88), ('accessDescCount', size_t, 96), ('bytesize', size_t, 104), ('dptr', CUdeviceptr, 112)])
 CUDA_MEM_ALLOC_NODE_PARAMS: TypeAlias = struct_CUDA_MEM_ALLOC_NODE_PARAMS_st
 enum_CUgraphMem_attribute_enum: dict[int, str] = {(CU_GRAPH_MEM_ATTR_USED_MEM_CURRENT:=0): 'CU_GRAPH_MEM_ATTR_USED_MEM_CURRENT', (CU_GRAPH_MEM_ATTR_USED_MEM_HIGH:=1): 'CU_GRAPH_MEM_ATTR_USED_MEM_HIGH', (CU_GRAPH_MEM_ATTR_RESERVED_MEM_CURRENT:=2): 'CU_GRAPH_MEM_ATTR_RESERVED_MEM_CURRENT', (CU_GRAPH_MEM_ATTR_RESERVED_MEM_HIGH:=3): 'CU_GRAPH_MEM_ATTR_RESERVED_MEM_HIGH'}
@@ -1007,1147 +1008,1147 @@ enum_CUuserObjectRetain_flags_enum: dict[int, str] = {(CU_GRAPH_USER_OBJECT_MOVE
 CUuserObjectRetain_flags: TypeAlias = ctypes.c_uint32
 enum_CUgraphInstantiate_flags_enum: dict[int, str] = {(CUDA_GRAPH_INSTANTIATE_FLAG_AUTO_FREE_ON_LAUNCH:=1): 'CUDA_GRAPH_INSTANTIATE_FLAG_AUTO_FREE_ON_LAUNCH', (CUDA_GRAPH_INSTANTIATE_FLAG_UPLOAD:=2): 'CUDA_GRAPH_INSTANTIATE_FLAG_UPLOAD', (CUDA_GRAPH_INSTANTIATE_FLAG_DEVICE_LAUNCH:=4): 'CUDA_GRAPH_INSTANTIATE_FLAG_DEVICE_LAUNCH', (CUDA_GRAPH_INSTANTIATE_FLAG_USE_NODE_PRIORITY:=8): 'CUDA_GRAPH_INSTANTIATE_FLAG_USE_NODE_PRIORITY'}
 CUgraphInstantiate_flags: TypeAlias = ctypes.c_uint32
-@dll.bind
-def cuGetErrorString(error:CUresult, pStr:ctypes.POINTER(ctypes.POINTER(ctypes.c_char))) -> CUresult: ...
-@dll.bind
-def cuGetErrorName(error:CUresult, pStr:ctypes.POINTER(ctypes.POINTER(ctypes.c_char))) -> CUresult: ...
-@dll.bind
-def cuInit(Flags:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuDriverGetVersion(driverVersion:ctypes.POINTER(ctypes.c_int32)) -> CUresult: ...
-@dll.bind
-def cuDeviceGet(device:ctypes.POINTER(CUdevice), ordinal:ctypes.c_int32) -> CUresult: ...
-@dll.bind
-def cuDeviceGetCount(count:ctypes.POINTER(ctypes.c_int32)) -> CUresult: ...
-@dll.bind
-def cuDeviceGetName(name:ctypes.POINTER(ctypes.c_char), len:ctypes.c_int32, dev:CUdevice) -> CUresult: ...
-@dll.bind
-def cuDeviceGetUuid(uuid:ctypes.POINTER(CUuuid), dev:CUdevice) -> CUresult: ...
-@dll.bind
-def cuDeviceGetUuid_v2(uuid:ctypes.POINTER(CUuuid), dev:CUdevice) -> CUresult: ...
-@dll.bind
-def cuDeviceGetLuid(luid:ctypes.POINTER(ctypes.c_char), deviceNodeMask:ctypes.POINTER(ctypes.c_uint32), dev:CUdevice) -> CUresult: ...
-@dll.bind
-def cuDeviceTotalMem_v2(bytes:ctypes.POINTER(size_t), dev:CUdevice) -> CUresult: ...
-@dll.bind
-def cuDeviceGetTexture1DLinearMaxWidth(maxWidthInElements:ctypes.POINTER(size_t), format:CUarray_format, numChannels:ctypes.c_uint32, dev:CUdevice) -> CUresult: ...
-@dll.bind
-def cuDeviceGetAttribute(pi:ctypes.POINTER(ctypes.c_int32), attrib:CUdevice_attribute, dev:CUdevice) -> CUresult: ...
-@dll.bind
-def cuDeviceGetNvSciSyncAttributes(nvSciSyncAttrList:ctypes.c_void_p, dev:CUdevice, flags:ctypes.c_int32) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, CUresult, ctypes.POINTER(ctypes.POINTER(ctypes.c_char)))
+def cuGetErrorString(error:CUresult, pStr:ctypes._Pointer[ctypes.POINTER(ctypes.c_char)]) -> CUresult: ...
+@dll.bind(CUresult, CUresult, ctypes.POINTER(ctypes.POINTER(ctypes.c_char)))
+def cuGetErrorName(error:CUresult, pStr:ctypes._Pointer[ctypes.POINTER(ctypes.c_char)]) -> CUresult: ...
+@dll.bind(CUresult, ctypes.c_uint32)
+def cuInit(Flags:int) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(ctypes.c_int32))
+def cuDriverGetVersion(driverVersion:ctypes._Pointer[ctypes.c_int32]) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUdevice), ctypes.c_int32)
+def cuDeviceGet(device:ctypes._Pointer[CUdevice], ordinal:int) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(ctypes.c_int32))
+def cuDeviceGetCount(count:ctypes._Pointer[ctypes.c_int32]) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(ctypes.c_char), ctypes.c_int32, CUdevice)
+def cuDeviceGetName(name:ctypes._Pointer[ctypes.c_char], len:int, dev:CUdevice) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUuuid), CUdevice)
+def cuDeviceGetUuid(uuid:ctypes._Pointer[CUuuid], dev:CUdevice) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUuuid), CUdevice)
+def cuDeviceGetUuid_v2(uuid:ctypes._Pointer[CUuuid], dev:CUdevice) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_uint32), CUdevice)
+def cuDeviceGetLuid(luid:ctypes._Pointer[ctypes.c_char], deviceNodeMask:ctypes._Pointer[ctypes.c_uint32], dev:CUdevice) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(size_t), CUdevice)
+def cuDeviceTotalMem_v2(bytes:ctypes._Pointer[size_t], dev:CUdevice) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(size_t), CUarray_format, ctypes.c_uint32, CUdevice)
+def cuDeviceGetTexture1DLinearMaxWidth(maxWidthInElements:ctypes._Pointer[size_t], format:CUarray_format, numChannels:int, dev:CUdevice) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(ctypes.c_int32), CUdevice_attribute, CUdevice)
+def cuDeviceGetAttribute(pi:ctypes._Pointer[ctypes.c_int32], attrib:CUdevice_attribute, dev:CUdevice) -> CUresult: ...
+@dll.bind(CUresult, ctypes.c_void_p, CUdevice, ctypes.c_int32)
+def cuDeviceGetNvSciSyncAttributes(nvSciSyncAttrList:int|None, dev:CUdevice, flags:int) -> CUresult: ...
+@dll.bind(CUresult, CUdevice, CUmemoryPool)
 def cuDeviceSetMemPool(dev:CUdevice, pool:CUmemoryPool) -> CUresult: ...
-@dll.bind
-def cuDeviceGetMemPool(pool:ctypes.POINTER(CUmemoryPool), dev:CUdevice) -> CUresult: ...
-@dll.bind
-def cuDeviceGetDefaultMemPool(pool_out:ctypes.POINTER(CUmemoryPool), dev:CUdevice) -> CUresult: ...
-@dll.bind
-def cuDeviceGetExecAffinitySupport(pi:ctypes.POINTER(ctypes.c_int32), type:CUexecAffinityType, dev:CUdevice) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, ctypes.POINTER(CUmemoryPool), CUdevice)
+def cuDeviceGetMemPool(pool:ctypes._Pointer[CUmemoryPool], dev:CUdevice) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUmemoryPool), CUdevice)
+def cuDeviceGetDefaultMemPool(pool_out:ctypes._Pointer[CUmemoryPool], dev:CUdevice) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(ctypes.c_int32), CUexecAffinityType, CUdevice)
+def cuDeviceGetExecAffinitySupport(pi:ctypes._Pointer[ctypes.c_int32], type:CUexecAffinityType, dev:CUdevice) -> CUresult: ...
+@dll.bind(CUresult, CUflushGPUDirectRDMAWritesTarget, CUflushGPUDirectRDMAWritesScope)
 def cuFlushGPUDirectRDMAWrites(target:CUflushGPUDirectRDMAWritesTarget, scope:CUflushGPUDirectRDMAWritesScope) -> CUresult: ...
-@dll.bind
-def cuDeviceGetProperties(prop:ctypes.POINTER(CUdevprop), dev:CUdevice) -> CUresult: ...
-@dll.bind
-def cuDeviceComputeCapability(major:ctypes.POINTER(ctypes.c_int32), minor:ctypes.POINTER(ctypes.c_int32), dev:CUdevice) -> CUresult: ...
-@dll.bind
-def cuDevicePrimaryCtxRetain(pctx:ctypes.POINTER(CUcontext), dev:CUdevice) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, ctypes.POINTER(CUdevprop), CUdevice)
+def cuDeviceGetProperties(prop:ctypes._Pointer[CUdevprop], dev:CUdevice) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.c_int32), CUdevice)
+def cuDeviceComputeCapability(major:ctypes._Pointer[ctypes.c_int32], minor:ctypes._Pointer[ctypes.c_int32], dev:CUdevice) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUcontext), CUdevice)
+def cuDevicePrimaryCtxRetain(pctx:ctypes._Pointer[CUcontext], dev:CUdevice) -> CUresult: ...
+@dll.bind(CUresult, CUdevice)
 def cuDevicePrimaryCtxRelease_v2(dev:CUdevice) -> CUresult: ...
-@dll.bind
-def cuDevicePrimaryCtxSetFlags_v2(dev:CUdevice, flags:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuDevicePrimaryCtxGetState(dev:CUdevice, flags:ctypes.POINTER(ctypes.c_uint32), active:ctypes.POINTER(ctypes.c_int32)) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, CUdevice, ctypes.c_uint32)
+def cuDevicePrimaryCtxSetFlags_v2(dev:CUdevice, flags:int) -> CUresult: ...
+@dll.bind(CUresult, CUdevice, ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_int32))
+def cuDevicePrimaryCtxGetState(dev:CUdevice, flags:ctypes._Pointer[ctypes.c_uint32], active:ctypes._Pointer[ctypes.c_int32]) -> CUresult: ...
+@dll.bind(CUresult, CUdevice)
 def cuDevicePrimaryCtxReset_v2(dev:CUdevice) -> CUresult: ...
-@dll.bind
-def cuCtxCreate_v2(pctx:ctypes.POINTER(CUcontext), flags:ctypes.c_uint32, dev:CUdevice) -> CUresult: ...
-@dll.bind
-def cuCtxCreate_v3(pctx:ctypes.POINTER(CUcontext), paramsArray:ctypes.POINTER(CUexecAffinityParam), numParams:ctypes.c_int32, flags:ctypes.c_uint32, dev:CUdevice) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, ctypes.POINTER(CUcontext), ctypes.c_uint32, CUdevice)
+def cuCtxCreate_v2(pctx:ctypes._Pointer[CUcontext], flags:int, dev:CUdevice) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUcontext), ctypes.POINTER(CUexecAffinityParam), ctypes.c_int32, ctypes.c_uint32, CUdevice)
+def cuCtxCreate_v3(pctx:ctypes._Pointer[CUcontext], paramsArray:ctypes._Pointer[CUexecAffinityParam], numParams:int, flags:int, dev:CUdevice) -> CUresult: ...
+@dll.bind(CUresult, CUcontext)
 def cuCtxDestroy_v2(ctx:CUcontext) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, CUcontext)
 def cuCtxPushCurrent_v2(ctx:CUcontext) -> CUresult: ...
-@dll.bind
-def cuCtxPopCurrent_v2(pctx:ctypes.POINTER(CUcontext)) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, ctypes.POINTER(CUcontext))
+def cuCtxPopCurrent_v2(pctx:ctypes._Pointer[CUcontext]) -> CUresult: ...
+@dll.bind(CUresult, CUcontext)
 def cuCtxSetCurrent(ctx:CUcontext) -> CUresult: ...
-@dll.bind
-def cuCtxGetCurrent(pctx:ctypes.POINTER(CUcontext)) -> CUresult: ...
-@dll.bind
-def cuCtxGetDevice(device:ctypes.POINTER(CUdevice)) -> CUresult: ...
-@dll.bind
-def cuCtxGetFlags(flags:ctypes.POINTER(ctypes.c_uint32)) -> CUresult: ...
-@dll.bind
-def cuCtxGetId(ctx:CUcontext, ctxId:ctypes.POINTER(ctypes.c_uint64)) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, ctypes.POINTER(CUcontext))
+def cuCtxGetCurrent(pctx:ctypes._Pointer[CUcontext]) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUdevice))
+def cuCtxGetDevice(device:ctypes._Pointer[CUdevice]) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(ctypes.c_uint32))
+def cuCtxGetFlags(flags:ctypes._Pointer[ctypes.c_uint32]) -> CUresult: ...
+@dll.bind(CUresult, CUcontext, ctypes.POINTER(ctypes.c_uint64))
+def cuCtxGetId(ctx:CUcontext, ctxId:ctypes._Pointer[ctypes.c_uint64]) -> CUresult: ...
+@dll.bind(CUresult)
 def cuCtxSynchronize() -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, CUlimit, size_t)
 def cuCtxSetLimit(limit:CUlimit, value:size_t) -> CUresult: ...
-@dll.bind
-def cuCtxGetLimit(pvalue:ctypes.POINTER(size_t), limit:CUlimit) -> CUresult: ...
-@dll.bind
-def cuCtxGetCacheConfig(pconfig:ctypes.POINTER(CUfunc_cache)) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, ctypes.POINTER(size_t), CUlimit)
+def cuCtxGetLimit(pvalue:ctypes._Pointer[size_t], limit:CUlimit) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUfunc_cache))
+def cuCtxGetCacheConfig(pconfig:ctypes._Pointer[CUfunc_cache]) -> CUresult: ...
+@dll.bind(CUresult, CUfunc_cache)
 def cuCtxSetCacheConfig(config:CUfunc_cache) -> CUresult: ...
-@dll.bind
-def cuCtxGetSharedMemConfig(pConfig:ctypes.POINTER(CUsharedconfig)) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, ctypes.POINTER(CUsharedconfig))
+def cuCtxGetSharedMemConfig(pConfig:ctypes._Pointer[CUsharedconfig]) -> CUresult: ...
+@dll.bind(CUresult, CUsharedconfig)
 def cuCtxSetSharedMemConfig(config:CUsharedconfig) -> CUresult: ...
-@dll.bind
-def cuCtxGetApiVersion(ctx:CUcontext, version:ctypes.POINTER(ctypes.c_uint32)) -> CUresult: ...
-@dll.bind
-def cuCtxGetStreamPriorityRange(leastPriority:ctypes.POINTER(ctypes.c_int32), greatestPriority:ctypes.POINTER(ctypes.c_int32)) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, CUcontext, ctypes.POINTER(ctypes.c_uint32))
+def cuCtxGetApiVersion(ctx:CUcontext, version:ctypes._Pointer[ctypes.c_uint32]) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.c_int32))
+def cuCtxGetStreamPriorityRange(leastPriority:ctypes._Pointer[ctypes.c_int32], greatestPriority:ctypes._Pointer[ctypes.c_int32]) -> CUresult: ...
+@dll.bind(CUresult)
 def cuCtxResetPersistingL2Cache() -> CUresult: ...
-@dll.bind
-def cuCtxGetExecAffinity(pExecAffinity:ctypes.POINTER(CUexecAffinityParam), type:CUexecAffinityType) -> CUresult: ...
-@dll.bind
-def cuCtxAttach(pctx:ctypes.POINTER(CUcontext), flags:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, ctypes.POINTER(CUexecAffinityParam), CUexecAffinityType)
+def cuCtxGetExecAffinity(pExecAffinity:ctypes._Pointer[CUexecAffinityParam], type:CUexecAffinityType) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUcontext), ctypes.c_uint32)
+def cuCtxAttach(pctx:ctypes._Pointer[CUcontext], flags:int) -> CUresult: ...
+@dll.bind(CUresult, CUcontext)
 def cuCtxDetach(ctx:CUcontext) -> CUresult: ...
-@dll.bind
-def cuModuleLoad(module:ctypes.POINTER(CUmodule), fname:ctypes.POINTER(ctypes.c_char)) -> CUresult: ...
-@dll.bind
-def cuModuleLoadData(module:ctypes.POINTER(CUmodule), image:ctypes.c_void_p) -> CUresult: ...
-@dll.bind
-def cuModuleLoadDataEx(module:ctypes.POINTER(CUmodule), image:ctypes.c_void_p, numOptions:ctypes.c_uint32, options:ctypes.POINTER(CUjit_option), optionValues:ctypes.POINTER(ctypes.c_void_p)) -> CUresult: ...
-@dll.bind
-def cuModuleLoadFatBinary(module:ctypes.POINTER(CUmodule), fatCubin:ctypes.c_void_p) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, ctypes.POINTER(CUmodule), ctypes.POINTER(ctypes.c_char))
+def cuModuleLoad(module:ctypes._Pointer[CUmodule], fname:ctypes._Pointer[ctypes.c_char]) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUmodule), ctypes.c_void_p)
+def cuModuleLoadData(module:ctypes._Pointer[CUmodule], image:int|None) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUmodule), ctypes.c_void_p, ctypes.c_uint32, ctypes.POINTER(CUjit_option), ctypes.POINTER(ctypes.c_void_p))
+def cuModuleLoadDataEx(module:ctypes._Pointer[CUmodule], image:int|None, numOptions:int, options:ctypes._Pointer[CUjit_option], optionValues:ctypes._Pointer[ctypes.c_void_p]) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUmodule), ctypes.c_void_p)
+def cuModuleLoadFatBinary(module:ctypes._Pointer[CUmodule], fatCubin:int|None) -> CUresult: ...
+@dll.bind(CUresult, CUmodule)
 def cuModuleUnload(hmod:CUmodule) -> CUresult: ...
 enum_CUmoduleLoadingMode_enum: dict[int, str] = {(CU_MODULE_EAGER_LOADING:=1): 'CU_MODULE_EAGER_LOADING', (CU_MODULE_LAZY_LOADING:=2): 'CU_MODULE_LAZY_LOADING'}
 CUmoduleLoadingMode: TypeAlias = ctypes.c_uint32
-@dll.bind
-def cuModuleGetLoadingMode(mode:ctypes.POINTER(CUmoduleLoadingMode)) -> CUresult: ...
-@dll.bind
-def cuModuleGetFunction(hfunc:ctypes.POINTER(CUfunction), hmod:CUmodule, name:ctypes.POINTER(ctypes.c_char)) -> CUresult: ...
-@dll.bind
-def cuModuleGetGlobal_v2(dptr:ctypes.POINTER(CUdeviceptr), bytes:ctypes.POINTER(size_t), hmod:CUmodule, name:ctypes.POINTER(ctypes.c_char)) -> CUresult: ...
-@dll.bind
-def cuLinkCreate_v2(numOptions:ctypes.c_uint32, options:ctypes.POINTER(CUjit_option), optionValues:ctypes.POINTER(ctypes.c_void_p), stateOut:ctypes.POINTER(CUlinkState)) -> CUresult: ...
-@dll.bind
-def cuLinkAddData_v2(state:CUlinkState, type:CUjitInputType, data:ctypes.c_void_p, size:size_t, name:ctypes.POINTER(ctypes.c_char), numOptions:ctypes.c_uint32, options:ctypes.POINTER(CUjit_option), optionValues:ctypes.POINTER(ctypes.c_void_p)) -> CUresult: ...
-@dll.bind
-def cuLinkAddFile_v2(state:CUlinkState, type:CUjitInputType, path:ctypes.POINTER(ctypes.c_char), numOptions:ctypes.c_uint32, options:ctypes.POINTER(CUjit_option), optionValues:ctypes.POINTER(ctypes.c_void_p)) -> CUresult: ...
-@dll.bind
-def cuLinkComplete(state:CUlinkState, cubinOut:ctypes.POINTER(ctypes.c_void_p), sizeOut:ctypes.POINTER(size_t)) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, ctypes.POINTER(CUmoduleLoadingMode))
+def cuModuleGetLoadingMode(mode:ctypes._Pointer[CUmoduleLoadingMode]) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUfunction), CUmodule, ctypes.POINTER(ctypes.c_char))
+def cuModuleGetFunction(hfunc:ctypes._Pointer[CUfunction], hmod:CUmodule, name:ctypes._Pointer[ctypes.c_char]) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUdeviceptr), ctypes.POINTER(size_t), CUmodule, ctypes.POINTER(ctypes.c_char))
+def cuModuleGetGlobal_v2(dptr:ctypes._Pointer[CUdeviceptr], bytes:ctypes._Pointer[size_t], hmod:CUmodule, name:ctypes._Pointer[ctypes.c_char]) -> CUresult: ...
+@dll.bind(CUresult, ctypes.c_uint32, ctypes.POINTER(CUjit_option), ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(CUlinkState))
+def cuLinkCreate_v2(numOptions:int, options:ctypes._Pointer[CUjit_option], optionValues:ctypes._Pointer[ctypes.c_void_p], stateOut:ctypes._Pointer[CUlinkState]) -> CUresult: ...
+@dll.bind(CUresult, CUlinkState, CUjitInputType, ctypes.c_void_p, size_t, ctypes.POINTER(ctypes.c_char), ctypes.c_uint32, ctypes.POINTER(CUjit_option), ctypes.POINTER(ctypes.c_void_p))
+def cuLinkAddData_v2(state:CUlinkState, type:CUjitInputType, data:int|None, size:size_t, name:ctypes._Pointer[ctypes.c_char], numOptions:int, options:ctypes._Pointer[CUjit_option], optionValues:ctypes._Pointer[ctypes.c_void_p]) -> CUresult: ...
+@dll.bind(CUresult, CUlinkState, CUjitInputType, ctypes.POINTER(ctypes.c_char), ctypes.c_uint32, ctypes.POINTER(CUjit_option), ctypes.POINTER(ctypes.c_void_p))
+def cuLinkAddFile_v2(state:CUlinkState, type:CUjitInputType, path:ctypes._Pointer[ctypes.c_char], numOptions:int, options:ctypes._Pointer[CUjit_option], optionValues:ctypes._Pointer[ctypes.c_void_p]) -> CUresult: ...
+@dll.bind(CUresult, CUlinkState, ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(size_t))
+def cuLinkComplete(state:CUlinkState, cubinOut:ctypes._Pointer[ctypes.c_void_p], sizeOut:ctypes._Pointer[size_t]) -> CUresult: ...
+@dll.bind(CUresult, CUlinkState)
 def cuLinkDestroy(state:CUlinkState) -> CUresult: ...
-@dll.bind
-def cuModuleGetTexRef(pTexRef:ctypes.POINTER(CUtexref), hmod:CUmodule, name:ctypes.POINTER(ctypes.c_char)) -> CUresult: ...
-@dll.bind
-def cuModuleGetSurfRef(pSurfRef:ctypes.POINTER(CUsurfref), hmod:CUmodule, name:ctypes.POINTER(ctypes.c_char)) -> CUresult: ...
-@dll.bind
-def cuLibraryLoadData(library:ctypes.POINTER(CUlibrary), code:ctypes.c_void_p, jitOptions:ctypes.POINTER(CUjit_option), jitOptionsValues:ctypes.POINTER(ctypes.c_void_p), numJitOptions:ctypes.c_uint32, libraryOptions:ctypes.POINTER(CUlibraryOption), libraryOptionValues:ctypes.POINTER(ctypes.c_void_p), numLibraryOptions:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuLibraryLoadFromFile(library:ctypes.POINTER(CUlibrary), fileName:ctypes.POINTER(ctypes.c_char), jitOptions:ctypes.POINTER(CUjit_option), jitOptionsValues:ctypes.POINTER(ctypes.c_void_p), numJitOptions:ctypes.c_uint32, libraryOptions:ctypes.POINTER(CUlibraryOption), libraryOptionValues:ctypes.POINTER(ctypes.c_void_p), numLibraryOptions:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, ctypes.POINTER(CUtexref), CUmodule, ctypes.POINTER(ctypes.c_char))
+def cuModuleGetTexRef(pTexRef:ctypes._Pointer[CUtexref], hmod:CUmodule, name:ctypes._Pointer[ctypes.c_char]) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUsurfref), CUmodule, ctypes.POINTER(ctypes.c_char))
+def cuModuleGetSurfRef(pSurfRef:ctypes._Pointer[CUsurfref], hmod:CUmodule, name:ctypes._Pointer[ctypes.c_char]) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUlibrary), ctypes.c_void_p, ctypes.POINTER(CUjit_option), ctypes.POINTER(ctypes.c_void_p), ctypes.c_uint32, ctypes.POINTER(CUlibraryOption), ctypes.POINTER(ctypes.c_void_p), ctypes.c_uint32)
+def cuLibraryLoadData(library:ctypes._Pointer[CUlibrary], code:int|None, jitOptions:ctypes._Pointer[CUjit_option], jitOptionsValues:ctypes._Pointer[ctypes.c_void_p], numJitOptions:int, libraryOptions:ctypes._Pointer[CUlibraryOption], libraryOptionValues:ctypes._Pointer[ctypes.c_void_p], numLibraryOptions:int) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUlibrary), ctypes.POINTER(ctypes.c_char), ctypes.POINTER(CUjit_option), ctypes.POINTER(ctypes.c_void_p), ctypes.c_uint32, ctypes.POINTER(CUlibraryOption), ctypes.POINTER(ctypes.c_void_p), ctypes.c_uint32)
+def cuLibraryLoadFromFile(library:ctypes._Pointer[CUlibrary], fileName:ctypes._Pointer[ctypes.c_char], jitOptions:ctypes._Pointer[CUjit_option], jitOptionsValues:ctypes._Pointer[ctypes.c_void_p], numJitOptions:int, libraryOptions:ctypes._Pointer[CUlibraryOption], libraryOptionValues:ctypes._Pointer[ctypes.c_void_p], numLibraryOptions:int) -> CUresult: ...
+@dll.bind(CUresult, CUlibrary)
 def cuLibraryUnload(library:CUlibrary) -> CUresult: ...
-@dll.bind
-def cuLibraryGetKernel(pKernel:ctypes.POINTER(CUkernel), library:CUlibrary, name:ctypes.POINTER(ctypes.c_char)) -> CUresult: ...
-@dll.bind
-def cuLibraryGetModule(pMod:ctypes.POINTER(CUmodule), library:CUlibrary) -> CUresult: ...
-@dll.bind
-def cuKernelGetFunction(pFunc:ctypes.POINTER(CUfunction), kernel:CUkernel) -> CUresult: ...
-@dll.bind
-def cuLibraryGetGlobal(dptr:ctypes.POINTER(CUdeviceptr), bytes:ctypes.POINTER(size_t), library:CUlibrary, name:ctypes.POINTER(ctypes.c_char)) -> CUresult: ...
-@dll.bind
-def cuLibraryGetManaged(dptr:ctypes.POINTER(CUdeviceptr), bytes:ctypes.POINTER(size_t), library:CUlibrary, name:ctypes.POINTER(ctypes.c_char)) -> CUresult: ...
-@dll.bind
-def cuLibraryGetUnifiedFunction(fptr:ctypes.POINTER(ctypes.c_void_p), library:CUlibrary, symbol:ctypes.POINTER(ctypes.c_char)) -> CUresult: ...
-@dll.bind
-def cuKernelGetAttribute(pi:ctypes.POINTER(ctypes.c_int32), attrib:CUfunction_attribute, kernel:CUkernel, dev:CUdevice) -> CUresult: ...
-@dll.bind
-def cuKernelSetAttribute(attrib:CUfunction_attribute, val:ctypes.c_int32, kernel:CUkernel, dev:CUdevice) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, ctypes.POINTER(CUkernel), CUlibrary, ctypes.POINTER(ctypes.c_char))
+def cuLibraryGetKernel(pKernel:ctypes._Pointer[CUkernel], library:CUlibrary, name:ctypes._Pointer[ctypes.c_char]) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUmodule), CUlibrary)
+def cuLibraryGetModule(pMod:ctypes._Pointer[CUmodule], library:CUlibrary) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUfunction), CUkernel)
+def cuKernelGetFunction(pFunc:ctypes._Pointer[CUfunction], kernel:CUkernel) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUdeviceptr), ctypes.POINTER(size_t), CUlibrary, ctypes.POINTER(ctypes.c_char))
+def cuLibraryGetGlobal(dptr:ctypes._Pointer[CUdeviceptr], bytes:ctypes._Pointer[size_t], library:CUlibrary, name:ctypes._Pointer[ctypes.c_char]) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUdeviceptr), ctypes.POINTER(size_t), CUlibrary, ctypes.POINTER(ctypes.c_char))
+def cuLibraryGetManaged(dptr:ctypes._Pointer[CUdeviceptr], bytes:ctypes._Pointer[size_t], library:CUlibrary, name:ctypes._Pointer[ctypes.c_char]) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(ctypes.c_void_p), CUlibrary, ctypes.POINTER(ctypes.c_char))
+def cuLibraryGetUnifiedFunction(fptr:ctypes._Pointer[ctypes.c_void_p], library:CUlibrary, symbol:ctypes._Pointer[ctypes.c_char]) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(ctypes.c_int32), CUfunction_attribute, CUkernel, CUdevice)
+def cuKernelGetAttribute(pi:ctypes._Pointer[ctypes.c_int32], attrib:CUfunction_attribute, kernel:CUkernel, dev:CUdevice) -> CUresult: ...
+@dll.bind(CUresult, CUfunction_attribute, ctypes.c_int32, CUkernel, CUdevice)
+def cuKernelSetAttribute(attrib:CUfunction_attribute, val:int, kernel:CUkernel, dev:CUdevice) -> CUresult: ...
+@dll.bind(CUresult, CUkernel, CUfunc_cache, CUdevice)
 def cuKernelSetCacheConfig(kernel:CUkernel, config:CUfunc_cache, dev:CUdevice) -> CUresult: ...
-@dll.bind
-def cuMemGetInfo_v2(free:ctypes.POINTER(size_t), total:ctypes.POINTER(size_t)) -> CUresult: ...
-@dll.bind
-def cuMemAlloc_v2(dptr:ctypes.POINTER(CUdeviceptr), bytesize:size_t) -> CUresult: ...
-@dll.bind
-def cuMemAllocPitch_v2(dptr:ctypes.POINTER(CUdeviceptr), pPitch:ctypes.POINTER(size_t), WidthInBytes:size_t, Height:size_t, ElementSizeBytes:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, ctypes.POINTER(size_t), ctypes.POINTER(size_t))
+def cuMemGetInfo_v2(free:ctypes._Pointer[size_t], total:ctypes._Pointer[size_t]) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUdeviceptr), size_t)
+def cuMemAlloc_v2(dptr:ctypes._Pointer[CUdeviceptr], bytesize:size_t) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUdeviceptr), ctypes.POINTER(size_t), size_t, size_t, ctypes.c_uint32)
+def cuMemAllocPitch_v2(dptr:ctypes._Pointer[CUdeviceptr], pPitch:ctypes._Pointer[size_t], WidthInBytes:size_t, Height:size_t, ElementSizeBytes:int) -> CUresult: ...
+@dll.bind(CUresult, CUdeviceptr)
 def cuMemFree_v2(dptr:CUdeviceptr) -> CUresult: ...
-@dll.bind
-def cuMemGetAddressRange_v2(pbase:ctypes.POINTER(CUdeviceptr), psize:ctypes.POINTER(size_t), dptr:CUdeviceptr) -> CUresult: ...
-@dll.bind
-def cuMemAllocHost_v2(pp:ctypes.POINTER(ctypes.c_void_p), bytesize:size_t) -> CUresult: ...
-@dll.bind
-def cuMemFreeHost(p:ctypes.c_void_p) -> CUresult: ...
-@dll.bind
-def cuMemHostAlloc(pp:ctypes.POINTER(ctypes.c_void_p), bytesize:size_t, Flags:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuMemHostGetDevicePointer_v2(pdptr:ctypes.POINTER(CUdeviceptr), p:ctypes.c_void_p, Flags:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuMemHostGetFlags(pFlags:ctypes.POINTER(ctypes.c_uint32), p:ctypes.c_void_p) -> CUresult: ...
-@dll.bind
-def cuMemAllocManaged(dptr:ctypes.POINTER(CUdeviceptr), bytesize:size_t, flags:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuDeviceGetByPCIBusId(dev:ctypes.POINTER(CUdevice), pciBusId:ctypes.POINTER(ctypes.c_char)) -> CUresult: ...
-@dll.bind
-def cuDeviceGetPCIBusId(pciBusId:ctypes.POINTER(ctypes.c_char), len:ctypes.c_int32, dev:CUdevice) -> CUresult: ...
-@dll.bind
-def cuIpcGetEventHandle(pHandle:ctypes.POINTER(CUipcEventHandle), event:CUevent) -> CUresult: ...
-@dll.bind
-def cuIpcOpenEventHandle(phEvent:ctypes.POINTER(CUevent), handle:CUipcEventHandle) -> CUresult: ...
-@dll.bind
-def cuIpcGetMemHandle(pHandle:ctypes.POINTER(CUipcMemHandle), dptr:CUdeviceptr) -> CUresult: ...
-@dll.bind
-def cuIpcOpenMemHandle_v2(pdptr:ctypes.POINTER(CUdeviceptr), handle:CUipcMemHandle, Flags:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, ctypes.POINTER(CUdeviceptr), ctypes.POINTER(size_t), CUdeviceptr)
+def cuMemGetAddressRange_v2(pbase:ctypes._Pointer[CUdeviceptr], psize:ctypes._Pointer[size_t], dptr:CUdeviceptr) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(ctypes.c_void_p), size_t)
+def cuMemAllocHost_v2(pp:ctypes._Pointer[ctypes.c_void_p], bytesize:size_t) -> CUresult: ...
+@dll.bind(CUresult, ctypes.c_void_p)
+def cuMemFreeHost(p:int|None) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(ctypes.c_void_p), size_t, ctypes.c_uint32)
+def cuMemHostAlloc(pp:ctypes._Pointer[ctypes.c_void_p], bytesize:size_t, Flags:int) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUdeviceptr), ctypes.c_void_p, ctypes.c_uint32)
+def cuMemHostGetDevicePointer_v2(pdptr:ctypes._Pointer[CUdeviceptr], p:int|None, Flags:int) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(ctypes.c_uint32), ctypes.c_void_p)
+def cuMemHostGetFlags(pFlags:ctypes._Pointer[ctypes.c_uint32], p:int|None) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUdeviceptr), size_t, ctypes.c_uint32)
+def cuMemAllocManaged(dptr:ctypes._Pointer[CUdeviceptr], bytesize:size_t, flags:int) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUdevice), ctypes.POINTER(ctypes.c_char))
+def cuDeviceGetByPCIBusId(dev:ctypes._Pointer[CUdevice], pciBusId:ctypes._Pointer[ctypes.c_char]) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(ctypes.c_char), ctypes.c_int32, CUdevice)
+def cuDeviceGetPCIBusId(pciBusId:ctypes._Pointer[ctypes.c_char], len:int, dev:CUdevice) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUipcEventHandle), CUevent)
+def cuIpcGetEventHandle(pHandle:ctypes._Pointer[CUipcEventHandle], event:CUevent) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUevent), CUipcEventHandle)
+def cuIpcOpenEventHandle(phEvent:ctypes._Pointer[CUevent], handle:CUipcEventHandle) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUipcMemHandle), CUdeviceptr)
+def cuIpcGetMemHandle(pHandle:ctypes._Pointer[CUipcMemHandle], dptr:CUdeviceptr) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUdeviceptr), CUipcMemHandle, ctypes.c_uint32)
+def cuIpcOpenMemHandle_v2(pdptr:ctypes._Pointer[CUdeviceptr], handle:CUipcMemHandle, Flags:int) -> CUresult: ...
+@dll.bind(CUresult, CUdeviceptr)
 def cuIpcCloseMemHandle(dptr:CUdeviceptr) -> CUresult: ...
-@dll.bind
-def cuMemHostRegister_v2(p:ctypes.c_void_p, bytesize:size_t, Flags:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuMemHostUnregister(p:ctypes.c_void_p) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, ctypes.c_void_p, size_t, ctypes.c_uint32)
+def cuMemHostRegister_v2(p:int|None, bytesize:size_t, Flags:int) -> CUresult: ...
+@dll.bind(CUresult, ctypes.c_void_p)
+def cuMemHostUnregister(p:int|None) -> CUresult: ...
+@dll.bind(CUresult, CUdeviceptr, CUdeviceptr, size_t)
 def cuMemcpy_ptds(dst:CUdeviceptr, src:CUdeviceptr, ByteCount:size_t) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, CUdeviceptr, CUcontext, CUdeviceptr, CUcontext, size_t)
 def cuMemcpyPeer_ptds(dstDevice:CUdeviceptr, dstContext:CUcontext, srcDevice:CUdeviceptr, srcContext:CUcontext, ByteCount:size_t) -> CUresult: ...
-@dll.bind
-def cuMemcpyHtoD_v2_ptds(dstDevice:CUdeviceptr, srcHost:ctypes.c_void_p, ByteCount:size_t) -> CUresult: ...
-@dll.bind
-def cuMemcpyDtoH_v2_ptds(dstHost:ctypes.c_void_p, srcDevice:CUdeviceptr, ByteCount:size_t) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, CUdeviceptr, ctypes.c_void_p, size_t)
+def cuMemcpyHtoD_v2_ptds(dstDevice:CUdeviceptr, srcHost:int|None, ByteCount:size_t) -> CUresult: ...
+@dll.bind(CUresult, ctypes.c_void_p, CUdeviceptr, size_t)
+def cuMemcpyDtoH_v2_ptds(dstHost:int|None, srcDevice:CUdeviceptr, ByteCount:size_t) -> CUresult: ...
+@dll.bind(CUresult, CUdeviceptr, CUdeviceptr, size_t)
 def cuMemcpyDtoD_v2_ptds(dstDevice:CUdeviceptr, srcDevice:CUdeviceptr, ByteCount:size_t) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, CUarray, size_t, CUdeviceptr, size_t)
 def cuMemcpyDtoA_v2_ptds(dstArray:CUarray, dstOffset:size_t, srcDevice:CUdeviceptr, ByteCount:size_t) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, CUdeviceptr, CUarray, size_t, size_t)
 def cuMemcpyAtoD_v2_ptds(dstDevice:CUdeviceptr, srcArray:CUarray, srcOffset:size_t, ByteCount:size_t) -> CUresult: ...
-@dll.bind
-def cuMemcpyHtoA_v2_ptds(dstArray:CUarray, dstOffset:size_t, srcHost:ctypes.c_void_p, ByteCount:size_t) -> CUresult: ...
-@dll.bind
-def cuMemcpyAtoH_v2_ptds(dstHost:ctypes.c_void_p, srcArray:CUarray, srcOffset:size_t, ByteCount:size_t) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, CUarray, size_t, ctypes.c_void_p, size_t)
+def cuMemcpyHtoA_v2_ptds(dstArray:CUarray, dstOffset:size_t, srcHost:int|None, ByteCount:size_t) -> CUresult: ...
+@dll.bind(CUresult, ctypes.c_void_p, CUarray, size_t, size_t)
+def cuMemcpyAtoH_v2_ptds(dstHost:int|None, srcArray:CUarray, srcOffset:size_t, ByteCount:size_t) -> CUresult: ...
+@dll.bind(CUresult, CUarray, size_t, CUarray, size_t, size_t)
 def cuMemcpyAtoA_v2_ptds(dstArray:CUarray, dstOffset:size_t, srcArray:CUarray, srcOffset:size_t, ByteCount:size_t) -> CUresult: ...
-@dll.bind
-def cuMemcpy2D_v2_ptds(pCopy:ctypes.POINTER(CUDA_MEMCPY2D)) -> CUresult: ...
-@dll.bind
-def cuMemcpy2DUnaligned_v2_ptds(pCopy:ctypes.POINTER(CUDA_MEMCPY2D)) -> CUresult: ...
-@dll.bind
-def cuMemcpy3D_v2_ptds(pCopy:ctypes.POINTER(CUDA_MEMCPY3D)) -> CUresult: ...
-@dll.bind
-def cuMemcpy3DPeer_ptds(pCopy:ctypes.POINTER(CUDA_MEMCPY3D_PEER)) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, ctypes.POINTER(CUDA_MEMCPY2D))
+def cuMemcpy2D_v2_ptds(pCopy:ctypes._Pointer[CUDA_MEMCPY2D]) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUDA_MEMCPY2D))
+def cuMemcpy2DUnaligned_v2_ptds(pCopy:ctypes._Pointer[CUDA_MEMCPY2D]) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUDA_MEMCPY3D))
+def cuMemcpy3D_v2_ptds(pCopy:ctypes._Pointer[CUDA_MEMCPY3D]) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUDA_MEMCPY3D_PEER))
+def cuMemcpy3DPeer_ptds(pCopy:ctypes._Pointer[CUDA_MEMCPY3D_PEER]) -> CUresult: ...
+@dll.bind(CUresult, CUdeviceptr, CUdeviceptr, size_t, CUstream)
 def cuMemcpyAsync_ptsz(dst:CUdeviceptr, src:CUdeviceptr, ByteCount:size_t, hStream:CUstream) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, CUdeviceptr, CUcontext, CUdeviceptr, CUcontext, size_t, CUstream)
 def cuMemcpyPeerAsync_ptsz(dstDevice:CUdeviceptr, dstContext:CUcontext, srcDevice:CUdeviceptr, srcContext:CUcontext, ByteCount:size_t, hStream:CUstream) -> CUresult: ...
-@dll.bind
-def cuMemcpyHtoDAsync_v2_ptsz(dstDevice:CUdeviceptr, srcHost:ctypes.c_void_p, ByteCount:size_t, hStream:CUstream) -> CUresult: ...
-@dll.bind
-def cuMemcpyDtoHAsync_v2_ptsz(dstHost:ctypes.c_void_p, srcDevice:CUdeviceptr, ByteCount:size_t, hStream:CUstream) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, CUdeviceptr, ctypes.c_void_p, size_t, CUstream)
+def cuMemcpyHtoDAsync_v2_ptsz(dstDevice:CUdeviceptr, srcHost:int|None, ByteCount:size_t, hStream:CUstream) -> CUresult: ...
+@dll.bind(CUresult, ctypes.c_void_p, CUdeviceptr, size_t, CUstream)
+def cuMemcpyDtoHAsync_v2_ptsz(dstHost:int|None, srcDevice:CUdeviceptr, ByteCount:size_t, hStream:CUstream) -> CUresult: ...
+@dll.bind(CUresult, CUdeviceptr, CUdeviceptr, size_t, CUstream)
 def cuMemcpyDtoDAsync_v2_ptsz(dstDevice:CUdeviceptr, srcDevice:CUdeviceptr, ByteCount:size_t, hStream:CUstream) -> CUresult: ...
-@dll.bind
-def cuMemcpyHtoAAsync_v2_ptsz(dstArray:CUarray, dstOffset:size_t, srcHost:ctypes.c_void_p, ByteCount:size_t, hStream:CUstream) -> CUresult: ...
-@dll.bind
-def cuMemcpyAtoHAsync_v2_ptsz(dstHost:ctypes.c_void_p, srcArray:CUarray, srcOffset:size_t, ByteCount:size_t, hStream:CUstream) -> CUresult: ...
-@dll.bind
-def cuMemcpy2DAsync_v2_ptsz(pCopy:ctypes.POINTER(CUDA_MEMCPY2D), hStream:CUstream) -> CUresult: ...
-@dll.bind
-def cuMemcpy3DAsync_v2_ptsz(pCopy:ctypes.POINTER(CUDA_MEMCPY3D), hStream:CUstream) -> CUresult: ...
-@dll.bind
-def cuMemcpy3DPeerAsync_ptsz(pCopy:ctypes.POINTER(CUDA_MEMCPY3D_PEER), hStream:CUstream) -> CUresult: ...
-@dll.bind
-def cuMemsetD8_v2_ptds(dstDevice:CUdeviceptr, uc:ctypes.c_ubyte, N:size_t) -> CUresult: ...
-@dll.bind
-def cuMemsetD16_v2_ptds(dstDevice:CUdeviceptr, us:ctypes.c_uint16, N:size_t) -> CUresult: ...
-@dll.bind
-def cuMemsetD32_v2_ptds(dstDevice:CUdeviceptr, ui:ctypes.c_uint32, N:size_t) -> CUresult: ...
-@dll.bind
-def cuMemsetD2D8_v2_ptds(dstDevice:CUdeviceptr, dstPitch:size_t, uc:ctypes.c_ubyte, Width:size_t, Height:size_t) -> CUresult: ...
-@dll.bind
-def cuMemsetD2D16_v2_ptds(dstDevice:CUdeviceptr, dstPitch:size_t, us:ctypes.c_uint16, Width:size_t, Height:size_t) -> CUresult: ...
-@dll.bind
-def cuMemsetD2D32_v2_ptds(dstDevice:CUdeviceptr, dstPitch:size_t, ui:ctypes.c_uint32, Width:size_t, Height:size_t) -> CUresult: ...
-@dll.bind
-def cuMemsetD8Async_ptsz(dstDevice:CUdeviceptr, uc:ctypes.c_ubyte, N:size_t, hStream:CUstream) -> CUresult: ...
-@dll.bind
-def cuMemsetD16Async_ptsz(dstDevice:CUdeviceptr, us:ctypes.c_uint16, N:size_t, hStream:CUstream) -> CUresult: ...
-@dll.bind
-def cuMemsetD32Async_ptsz(dstDevice:CUdeviceptr, ui:ctypes.c_uint32, N:size_t, hStream:CUstream) -> CUresult: ...
-@dll.bind
-def cuMemsetD2D8Async_ptsz(dstDevice:CUdeviceptr, dstPitch:size_t, uc:ctypes.c_ubyte, Width:size_t, Height:size_t, hStream:CUstream) -> CUresult: ...
-@dll.bind
-def cuMemsetD2D16Async_ptsz(dstDevice:CUdeviceptr, dstPitch:size_t, us:ctypes.c_uint16, Width:size_t, Height:size_t, hStream:CUstream) -> CUresult: ...
-@dll.bind
-def cuMemsetD2D32Async_ptsz(dstDevice:CUdeviceptr, dstPitch:size_t, ui:ctypes.c_uint32, Width:size_t, Height:size_t, hStream:CUstream) -> CUresult: ...
-@dll.bind
-def cuArrayCreate_v2(pHandle:ctypes.POINTER(CUarray), pAllocateArray:ctypes.POINTER(CUDA_ARRAY_DESCRIPTOR)) -> CUresult: ...
-@dll.bind
-def cuArrayGetDescriptor_v2(pArrayDescriptor:ctypes.POINTER(CUDA_ARRAY_DESCRIPTOR), hArray:CUarray) -> CUresult: ...
-@dll.bind
-def cuArrayGetSparseProperties(sparseProperties:ctypes.POINTER(CUDA_ARRAY_SPARSE_PROPERTIES), array:CUarray) -> CUresult: ...
-@dll.bind
-def cuMipmappedArrayGetSparseProperties(sparseProperties:ctypes.POINTER(CUDA_ARRAY_SPARSE_PROPERTIES), mipmap:CUmipmappedArray) -> CUresult: ...
-@dll.bind
-def cuArrayGetMemoryRequirements(memoryRequirements:ctypes.POINTER(CUDA_ARRAY_MEMORY_REQUIREMENTS), array:CUarray, device:CUdevice) -> CUresult: ...
-@dll.bind
-def cuMipmappedArrayGetMemoryRequirements(memoryRequirements:ctypes.POINTER(CUDA_ARRAY_MEMORY_REQUIREMENTS), mipmap:CUmipmappedArray, device:CUdevice) -> CUresult: ...
-@dll.bind
-def cuArrayGetPlane(pPlaneArray:ctypes.POINTER(CUarray), hArray:CUarray, planeIdx:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, CUarray, size_t, ctypes.c_void_p, size_t, CUstream)
+def cuMemcpyHtoAAsync_v2_ptsz(dstArray:CUarray, dstOffset:size_t, srcHost:int|None, ByteCount:size_t, hStream:CUstream) -> CUresult: ...
+@dll.bind(CUresult, ctypes.c_void_p, CUarray, size_t, size_t, CUstream)
+def cuMemcpyAtoHAsync_v2_ptsz(dstHost:int|None, srcArray:CUarray, srcOffset:size_t, ByteCount:size_t, hStream:CUstream) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUDA_MEMCPY2D), CUstream)
+def cuMemcpy2DAsync_v2_ptsz(pCopy:ctypes._Pointer[CUDA_MEMCPY2D], hStream:CUstream) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUDA_MEMCPY3D), CUstream)
+def cuMemcpy3DAsync_v2_ptsz(pCopy:ctypes._Pointer[CUDA_MEMCPY3D], hStream:CUstream) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUDA_MEMCPY3D_PEER), CUstream)
+def cuMemcpy3DPeerAsync_ptsz(pCopy:ctypes._Pointer[CUDA_MEMCPY3D_PEER], hStream:CUstream) -> CUresult: ...
+@dll.bind(CUresult, CUdeviceptr, ctypes.c_ubyte, size_t)
+def cuMemsetD8_v2_ptds(dstDevice:CUdeviceptr, uc:int, N:size_t) -> CUresult: ...
+@dll.bind(CUresult, CUdeviceptr, ctypes.c_uint16, size_t)
+def cuMemsetD16_v2_ptds(dstDevice:CUdeviceptr, us:int, N:size_t) -> CUresult: ...
+@dll.bind(CUresult, CUdeviceptr, ctypes.c_uint32, size_t)
+def cuMemsetD32_v2_ptds(dstDevice:CUdeviceptr, ui:int, N:size_t) -> CUresult: ...
+@dll.bind(CUresult, CUdeviceptr, size_t, ctypes.c_ubyte, size_t, size_t)
+def cuMemsetD2D8_v2_ptds(dstDevice:CUdeviceptr, dstPitch:size_t, uc:int, Width:size_t, Height:size_t) -> CUresult: ...
+@dll.bind(CUresult, CUdeviceptr, size_t, ctypes.c_uint16, size_t, size_t)
+def cuMemsetD2D16_v2_ptds(dstDevice:CUdeviceptr, dstPitch:size_t, us:int, Width:size_t, Height:size_t) -> CUresult: ...
+@dll.bind(CUresult, CUdeviceptr, size_t, ctypes.c_uint32, size_t, size_t)
+def cuMemsetD2D32_v2_ptds(dstDevice:CUdeviceptr, dstPitch:size_t, ui:int, Width:size_t, Height:size_t) -> CUresult: ...
+@dll.bind(CUresult, CUdeviceptr, ctypes.c_ubyte, size_t, CUstream)
+def cuMemsetD8Async_ptsz(dstDevice:CUdeviceptr, uc:int, N:size_t, hStream:CUstream) -> CUresult: ...
+@dll.bind(CUresult, CUdeviceptr, ctypes.c_uint16, size_t, CUstream)
+def cuMemsetD16Async_ptsz(dstDevice:CUdeviceptr, us:int, N:size_t, hStream:CUstream) -> CUresult: ...
+@dll.bind(CUresult, CUdeviceptr, ctypes.c_uint32, size_t, CUstream)
+def cuMemsetD32Async_ptsz(dstDevice:CUdeviceptr, ui:int, N:size_t, hStream:CUstream) -> CUresult: ...
+@dll.bind(CUresult, CUdeviceptr, size_t, ctypes.c_ubyte, size_t, size_t, CUstream)
+def cuMemsetD2D8Async_ptsz(dstDevice:CUdeviceptr, dstPitch:size_t, uc:int, Width:size_t, Height:size_t, hStream:CUstream) -> CUresult: ...
+@dll.bind(CUresult, CUdeviceptr, size_t, ctypes.c_uint16, size_t, size_t, CUstream)
+def cuMemsetD2D16Async_ptsz(dstDevice:CUdeviceptr, dstPitch:size_t, us:int, Width:size_t, Height:size_t, hStream:CUstream) -> CUresult: ...
+@dll.bind(CUresult, CUdeviceptr, size_t, ctypes.c_uint32, size_t, size_t, CUstream)
+def cuMemsetD2D32Async_ptsz(dstDevice:CUdeviceptr, dstPitch:size_t, ui:int, Width:size_t, Height:size_t, hStream:CUstream) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUarray), ctypes.POINTER(CUDA_ARRAY_DESCRIPTOR))
+def cuArrayCreate_v2(pHandle:ctypes._Pointer[CUarray], pAllocateArray:ctypes._Pointer[CUDA_ARRAY_DESCRIPTOR]) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUDA_ARRAY_DESCRIPTOR), CUarray)
+def cuArrayGetDescriptor_v2(pArrayDescriptor:ctypes._Pointer[CUDA_ARRAY_DESCRIPTOR], hArray:CUarray) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUDA_ARRAY_SPARSE_PROPERTIES), CUarray)
+def cuArrayGetSparseProperties(sparseProperties:ctypes._Pointer[CUDA_ARRAY_SPARSE_PROPERTIES], array:CUarray) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUDA_ARRAY_SPARSE_PROPERTIES), CUmipmappedArray)
+def cuMipmappedArrayGetSparseProperties(sparseProperties:ctypes._Pointer[CUDA_ARRAY_SPARSE_PROPERTIES], mipmap:CUmipmappedArray) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUDA_ARRAY_MEMORY_REQUIREMENTS), CUarray, CUdevice)
+def cuArrayGetMemoryRequirements(memoryRequirements:ctypes._Pointer[CUDA_ARRAY_MEMORY_REQUIREMENTS], array:CUarray, device:CUdevice) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUDA_ARRAY_MEMORY_REQUIREMENTS), CUmipmappedArray, CUdevice)
+def cuMipmappedArrayGetMemoryRequirements(memoryRequirements:ctypes._Pointer[CUDA_ARRAY_MEMORY_REQUIREMENTS], mipmap:CUmipmappedArray, device:CUdevice) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUarray), CUarray, ctypes.c_uint32)
+def cuArrayGetPlane(pPlaneArray:ctypes._Pointer[CUarray], hArray:CUarray, planeIdx:int) -> CUresult: ...
+@dll.bind(CUresult, CUarray)
 def cuArrayDestroy(hArray:CUarray) -> CUresult: ...
-@dll.bind
-def cuArray3DCreate_v2(pHandle:ctypes.POINTER(CUarray), pAllocateArray:ctypes.POINTER(CUDA_ARRAY3D_DESCRIPTOR)) -> CUresult: ...
-@dll.bind
-def cuArray3DGetDescriptor_v2(pArrayDescriptor:ctypes.POINTER(CUDA_ARRAY3D_DESCRIPTOR), hArray:CUarray) -> CUresult: ...
-@dll.bind
-def cuMipmappedArrayCreate(pHandle:ctypes.POINTER(CUmipmappedArray), pMipmappedArrayDesc:ctypes.POINTER(CUDA_ARRAY3D_DESCRIPTOR), numMipmapLevels:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuMipmappedArrayGetLevel(pLevelArray:ctypes.POINTER(CUarray), hMipmappedArray:CUmipmappedArray, level:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, ctypes.POINTER(CUarray), ctypes.POINTER(CUDA_ARRAY3D_DESCRIPTOR))
+def cuArray3DCreate_v2(pHandle:ctypes._Pointer[CUarray], pAllocateArray:ctypes._Pointer[CUDA_ARRAY3D_DESCRIPTOR]) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUDA_ARRAY3D_DESCRIPTOR), CUarray)
+def cuArray3DGetDescriptor_v2(pArrayDescriptor:ctypes._Pointer[CUDA_ARRAY3D_DESCRIPTOR], hArray:CUarray) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUmipmappedArray), ctypes.POINTER(CUDA_ARRAY3D_DESCRIPTOR), ctypes.c_uint32)
+def cuMipmappedArrayCreate(pHandle:ctypes._Pointer[CUmipmappedArray], pMipmappedArrayDesc:ctypes._Pointer[CUDA_ARRAY3D_DESCRIPTOR], numMipmapLevels:int) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUarray), CUmipmappedArray, ctypes.c_uint32)
+def cuMipmappedArrayGetLevel(pLevelArray:ctypes._Pointer[CUarray], hMipmappedArray:CUmipmappedArray, level:int) -> CUresult: ...
+@dll.bind(CUresult, CUmipmappedArray)
 def cuMipmappedArrayDestroy(hMipmappedArray:CUmipmappedArray) -> CUresult: ...
-@dll.bind
-def cuMemGetHandleForAddressRange(handle:ctypes.c_void_p, dptr:CUdeviceptr, size:size_t, handleType:CUmemRangeHandleType, flags:ctypes.c_uint64) -> CUresult: ...
-@dll.bind
-def cuMemAddressReserve(ptr:ctypes.POINTER(CUdeviceptr), size:size_t, alignment:size_t, addr:CUdeviceptr, flags:ctypes.c_uint64) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, ctypes.c_void_p, CUdeviceptr, size_t, CUmemRangeHandleType, ctypes.c_uint64)
+def cuMemGetHandleForAddressRange(handle:int|None, dptr:CUdeviceptr, size:size_t, handleType:CUmemRangeHandleType, flags:int) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUdeviceptr), size_t, size_t, CUdeviceptr, ctypes.c_uint64)
+def cuMemAddressReserve(ptr:ctypes._Pointer[CUdeviceptr], size:size_t, alignment:size_t, addr:CUdeviceptr, flags:int) -> CUresult: ...
+@dll.bind(CUresult, CUdeviceptr, size_t)
 def cuMemAddressFree(ptr:CUdeviceptr, size:size_t) -> CUresult: ...
-@dll.bind
-def cuMemCreate(handle:ctypes.POINTER(CUmemGenericAllocationHandle), size:size_t, prop:ctypes.POINTER(CUmemAllocationProp), flags:ctypes.c_uint64) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, ctypes.POINTER(CUmemGenericAllocationHandle), size_t, ctypes.POINTER(CUmemAllocationProp), ctypes.c_uint64)
+def cuMemCreate(handle:ctypes._Pointer[CUmemGenericAllocationHandle], size:size_t, prop:ctypes._Pointer[CUmemAllocationProp], flags:int) -> CUresult: ...
+@dll.bind(CUresult, CUmemGenericAllocationHandle)
 def cuMemRelease(handle:CUmemGenericAllocationHandle) -> CUresult: ...
-@dll.bind
-def cuMemMap(ptr:CUdeviceptr, size:size_t, offset:size_t, handle:CUmemGenericAllocationHandle, flags:ctypes.c_uint64) -> CUresult: ...
-@dll.bind
-def cuMemMapArrayAsync_ptsz(mapInfoList:ctypes.POINTER(CUarrayMapInfo), count:ctypes.c_uint32, hStream:CUstream) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, CUdeviceptr, size_t, size_t, CUmemGenericAllocationHandle, ctypes.c_uint64)
+def cuMemMap(ptr:CUdeviceptr, size:size_t, offset:size_t, handle:CUmemGenericAllocationHandle, flags:int) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUarrayMapInfo), ctypes.c_uint32, CUstream)
+def cuMemMapArrayAsync_ptsz(mapInfoList:ctypes._Pointer[CUarrayMapInfo], count:int, hStream:CUstream) -> CUresult: ...
+@dll.bind(CUresult, CUdeviceptr, size_t)
 def cuMemUnmap(ptr:CUdeviceptr, size:size_t) -> CUresult: ...
-@dll.bind
-def cuMemSetAccess(ptr:CUdeviceptr, size:size_t, desc:ctypes.POINTER(CUmemAccessDesc), count:size_t) -> CUresult: ...
-@dll.bind
-def cuMemGetAccess(flags:ctypes.POINTER(ctypes.c_uint64), location:ctypes.POINTER(CUmemLocation), ptr:CUdeviceptr) -> CUresult: ...
-@dll.bind
-def cuMemExportToShareableHandle(shareableHandle:ctypes.c_void_p, handle:CUmemGenericAllocationHandle, handleType:CUmemAllocationHandleType, flags:ctypes.c_uint64) -> CUresult: ...
-@dll.bind
-def cuMemImportFromShareableHandle(handle:ctypes.POINTER(CUmemGenericAllocationHandle), osHandle:ctypes.c_void_p, shHandleType:CUmemAllocationHandleType) -> CUresult: ...
-@dll.bind
-def cuMemGetAllocationGranularity(granularity:ctypes.POINTER(size_t), prop:ctypes.POINTER(CUmemAllocationProp), option:CUmemAllocationGranularity_flags) -> CUresult: ...
-@dll.bind
-def cuMemGetAllocationPropertiesFromHandle(prop:ctypes.POINTER(CUmemAllocationProp), handle:CUmemGenericAllocationHandle) -> CUresult: ...
-@dll.bind
-def cuMemRetainAllocationHandle(handle:ctypes.POINTER(CUmemGenericAllocationHandle), addr:ctypes.c_void_p) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, CUdeviceptr, size_t, ctypes.POINTER(CUmemAccessDesc), size_t)
+def cuMemSetAccess(ptr:CUdeviceptr, size:size_t, desc:ctypes._Pointer[CUmemAccessDesc], count:size_t) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(ctypes.c_uint64), ctypes.POINTER(CUmemLocation), CUdeviceptr)
+def cuMemGetAccess(flags:ctypes._Pointer[ctypes.c_uint64], location:ctypes._Pointer[CUmemLocation], ptr:CUdeviceptr) -> CUresult: ...
+@dll.bind(CUresult, ctypes.c_void_p, CUmemGenericAllocationHandle, CUmemAllocationHandleType, ctypes.c_uint64)
+def cuMemExportToShareableHandle(shareableHandle:int|None, handle:CUmemGenericAllocationHandle, handleType:CUmemAllocationHandleType, flags:int) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUmemGenericAllocationHandle), ctypes.c_void_p, CUmemAllocationHandleType)
+def cuMemImportFromShareableHandle(handle:ctypes._Pointer[CUmemGenericAllocationHandle], osHandle:int|None, shHandleType:CUmemAllocationHandleType) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(size_t), ctypes.POINTER(CUmemAllocationProp), CUmemAllocationGranularity_flags)
+def cuMemGetAllocationGranularity(granularity:ctypes._Pointer[size_t], prop:ctypes._Pointer[CUmemAllocationProp], option:CUmemAllocationGranularity_flags) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUmemAllocationProp), CUmemGenericAllocationHandle)
+def cuMemGetAllocationPropertiesFromHandle(prop:ctypes._Pointer[CUmemAllocationProp], handle:CUmemGenericAllocationHandle) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUmemGenericAllocationHandle), ctypes.c_void_p)
+def cuMemRetainAllocationHandle(handle:ctypes._Pointer[CUmemGenericAllocationHandle], addr:int|None) -> CUresult: ...
+@dll.bind(CUresult, CUdeviceptr, CUstream)
 def cuMemFreeAsync_ptsz(dptr:CUdeviceptr, hStream:CUstream) -> CUresult: ...
-@dll.bind
-def cuMemAllocAsync_ptsz(dptr:ctypes.POINTER(CUdeviceptr), bytesize:size_t, hStream:CUstream) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, ctypes.POINTER(CUdeviceptr), size_t, CUstream)
+def cuMemAllocAsync_ptsz(dptr:ctypes._Pointer[CUdeviceptr], bytesize:size_t, hStream:CUstream) -> CUresult: ...
+@dll.bind(CUresult, CUmemoryPool, size_t)
 def cuMemPoolTrimTo(pool:CUmemoryPool, minBytesToKeep:size_t) -> CUresult: ...
-@dll.bind
-def cuMemPoolSetAttribute(pool:CUmemoryPool, attr:CUmemPool_attribute, value:ctypes.c_void_p) -> CUresult: ...
-@dll.bind
-def cuMemPoolGetAttribute(pool:CUmemoryPool, attr:CUmemPool_attribute, value:ctypes.c_void_p) -> CUresult: ...
-@dll.bind
-def cuMemPoolSetAccess(pool:CUmemoryPool, map:ctypes.POINTER(CUmemAccessDesc), count:size_t) -> CUresult: ...
-@dll.bind
-def cuMemPoolGetAccess(flags:ctypes.POINTER(CUmemAccess_flags), memPool:CUmemoryPool, location:ctypes.POINTER(CUmemLocation)) -> CUresult: ...
-@dll.bind
-def cuMemPoolCreate(pool:ctypes.POINTER(CUmemoryPool), poolProps:ctypes.POINTER(CUmemPoolProps)) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, CUmemoryPool, CUmemPool_attribute, ctypes.c_void_p)
+def cuMemPoolSetAttribute(pool:CUmemoryPool, attr:CUmemPool_attribute, value:int|None) -> CUresult: ...
+@dll.bind(CUresult, CUmemoryPool, CUmemPool_attribute, ctypes.c_void_p)
+def cuMemPoolGetAttribute(pool:CUmemoryPool, attr:CUmemPool_attribute, value:int|None) -> CUresult: ...
+@dll.bind(CUresult, CUmemoryPool, ctypes.POINTER(CUmemAccessDesc), size_t)
+def cuMemPoolSetAccess(pool:CUmemoryPool, map:ctypes._Pointer[CUmemAccessDesc], count:size_t) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUmemAccess_flags), CUmemoryPool, ctypes.POINTER(CUmemLocation))
+def cuMemPoolGetAccess(flags:ctypes._Pointer[CUmemAccess_flags], memPool:CUmemoryPool, location:ctypes._Pointer[CUmemLocation]) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUmemoryPool), ctypes.POINTER(CUmemPoolProps))
+def cuMemPoolCreate(pool:ctypes._Pointer[CUmemoryPool], poolProps:ctypes._Pointer[CUmemPoolProps]) -> CUresult: ...
+@dll.bind(CUresult, CUmemoryPool)
 def cuMemPoolDestroy(pool:CUmemoryPool) -> CUresult: ...
-@dll.bind
-def cuMemAllocFromPoolAsync_ptsz(dptr:ctypes.POINTER(CUdeviceptr), bytesize:size_t, pool:CUmemoryPool, hStream:CUstream) -> CUresult: ...
-@dll.bind
-def cuMemPoolExportToShareableHandle(handle_out:ctypes.c_void_p, pool:CUmemoryPool, handleType:CUmemAllocationHandleType, flags:ctypes.c_uint64) -> CUresult: ...
-@dll.bind
-def cuMemPoolImportFromShareableHandle(pool_out:ctypes.POINTER(CUmemoryPool), handle:ctypes.c_void_p, handleType:CUmemAllocationHandleType, flags:ctypes.c_uint64) -> CUresult: ...
-@dll.bind
-def cuMemPoolExportPointer(shareData_out:ctypes.POINTER(CUmemPoolPtrExportData), ptr:CUdeviceptr) -> CUresult: ...
-@dll.bind
-def cuMemPoolImportPointer(ptr_out:ctypes.POINTER(CUdeviceptr), pool:CUmemoryPool, shareData:ctypes.POINTER(CUmemPoolPtrExportData)) -> CUresult: ...
-@dll.bind
-def cuPointerGetAttribute(data:ctypes.c_void_p, attribute:CUpointer_attribute, ptr:CUdeviceptr) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, ctypes.POINTER(CUdeviceptr), size_t, CUmemoryPool, CUstream)
+def cuMemAllocFromPoolAsync_ptsz(dptr:ctypes._Pointer[CUdeviceptr], bytesize:size_t, pool:CUmemoryPool, hStream:CUstream) -> CUresult: ...
+@dll.bind(CUresult, ctypes.c_void_p, CUmemoryPool, CUmemAllocationHandleType, ctypes.c_uint64)
+def cuMemPoolExportToShareableHandle(handle_out:int|None, pool:CUmemoryPool, handleType:CUmemAllocationHandleType, flags:int) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUmemoryPool), ctypes.c_void_p, CUmemAllocationHandleType, ctypes.c_uint64)
+def cuMemPoolImportFromShareableHandle(pool_out:ctypes._Pointer[CUmemoryPool], handle:int|None, handleType:CUmemAllocationHandleType, flags:int) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUmemPoolPtrExportData), CUdeviceptr)
+def cuMemPoolExportPointer(shareData_out:ctypes._Pointer[CUmemPoolPtrExportData], ptr:CUdeviceptr) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUdeviceptr), CUmemoryPool, ctypes.POINTER(CUmemPoolPtrExportData))
+def cuMemPoolImportPointer(ptr_out:ctypes._Pointer[CUdeviceptr], pool:CUmemoryPool, shareData:ctypes._Pointer[CUmemPoolPtrExportData]) -> CUresult: ...
+@dll.bind(CUresult, ctypes.c_void_p, CUpointer_attribute, CUdeviceptr)
+def cuPointerGetAttribute(data:int|None, attribute:CUpointer_attribute, ptr:CUdeviceptr) -> CUresult: ...
+@dll.bind(CUresult, CUdeviceptr, size_t, CUdevice, CUstream)
 def cuMemPrefetchAsync_ptsz(devPtr:CUdeviceptr, count:size_t, dstDevice:CUdevice, hStream:CUstream) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, CUdeviceptr, size_t, CUmem_advise, CUdevice)
 def cuMemAdvise(devPtr:CUdeviceptr, count:size_t, advice:CUmem_advise, device:CUdevice) -> CUresult: ...
-@dll.bind
-def cuMemRangeGetAttribute(data:ctypes.c_void_p, dataSize:size_t, attribute:CUmem_range_attribute, devPtr:CUdeviceptr, count:size_t) -> CUresult: ...
-@dll.bind
-def cuMemRangeGetAttributes(data:ctypes.POINTER(ctypes.c_void_p), dataSizes:ctypes.POINTER(size_t), attributes:ctypes.POINTER(CUmem_range_attribute), numAttributes:size_t, devPtr:CUdeviceptr, count:size_t) -> CUresult: ...
-@dll.bind
-def cuPointerSetAttribute(value:ctypes.c_void_p, attribute:CUpointer_attribute, ptr:CUdeviceptr) -> CUresult: ...
-@dll.bind
-def cuPointerGetAttributes(numAttributes:ctypes.c_uint32, attributes:ctypes.POINTER(CUpointer_attribute), data:ctypes.POINTER(ctypes.c_void_p), ptr:CUdeviceptr) -> CUresult: ...
-@dll.bind
-def cuStreamCreate(phStream:ctypes.POINTER(CUstream), Flags:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuStreamCreateWithPriority(phStream:ctypes.POINTER(CUstream), flags:ctypes.c_uint32, priority:ctypes.c_int32) -> CUresult: ...
-@dll.bind
-def cuStreamGetPriority_ptsz(hStream:CUstream, priority:ctypes.POINTER(ctypes.c_int32)) -> CUresult: ...
-@dll.bind
-def cuStreamGetFlags_ptsz(hStream:CUstream, flags:ctypes.POINTER(ctypes.c_uint32)) -> CUresult: ...
-@dll.bind
-def cuStreamGetId_ptsz(hStream:CUstream, streamId:ctypes.POINTER(ctypes.c_uint64)) -> CUresult: ...
-@dll.bind
-def cuStreamGetCtx_ptsz(hStream:CUstream, pctx:ctypes.POINTER(CUcontext)) -> CUresult: ...
-@dll.bind
-def cuStreamWaitEvent_ptsz(hStream:CUstream, hEvent:CUevent, Flags:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuStreamAddCallback_ptsz(hStream:CUstream, callback:CUstreamCallback, userData:ctypes.c_void_p, flags:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, ctypes.c_void_p, size_t, CUmem_range_attribute, CUdeviceptr, size_t)
+def cuMemRangeGetAttribute(data:int|None, dataSize:size_t, attribute:CUmem_range_attribute, devPtr:CUdeviceptr, count:size_t) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(size_t), ctypes.POINTER(CUmem_range_attribute), size_t, CUdeviceptr, size_t)
+def cuMemRangeGetAttributes(data:ctypes._Pointer[ctypes.c_void_p], dataSizes:ctypes._Pointer[size_t], attributes:ctypes._Pointer[CUmem_range_attribute], numAttributes:size_t, devPtr:CUdeviceptr, count:size_t) -> CUresult: ...
+@dll.bind(CUresult, ctypes.c_void_p, CUpointer_attribute, CUdeviceptr)
+def cuPointerSetAttribute(value:int|None, attribute:CUpointer_attribute, ptr:CUdeviceptr) -> CUresult: ...
+@dll.bind(CUresult, ctypes.c_uint32, ctypes.POINTER(CUpointer_attribute), ctypes.POINTER(ctypes.c_void_p), CUdeviceptr)
+def cuPointerGetAttributes(numAttributes:int, attributes:ctypes._Pointer[CUpointer_attribute], data:ctypes._Pointer[ctypes.c_void_p], ptr:CUdeviceptr) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUstream), ctypes.c_uint32)
+def cuStreamCreate(phStream:ctypes._Pointer[CUstream], Flags:int) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUstream), ctypes.c_uint32, ctypes.c_int32)
+def cuStreamCreateWithPriority(phStream:ctypes._Pointer[CUstream], flags:int, priority:int) -> CUresult: ...
+@dll.bind(CUresult, CUstream, ctypes.POINTER(ctypes.c_int32))
+def cuStreamGetPriority_ptsz(hStream:CUstream, priority:ctypes._Pointer[ctypes.c_int32]) -> CUresult: ...
+@dll.bind(CUresult, CUstream, ctypes.POINTER(ctypes.c_uint32))
+def cuStreamGetFlags_ptsz(hStream:CUstream, flags:ctypes._Pointer[ctypes.c_uint32]) -> CUresult: ...
+@dll.bind(CUresult, CUstream, ctypes.POINTER(ctypes.c_uint64))
+def cuStreamGetId_ptsz(hStream:CUstream, streamId:ctypes._Pointer[ctypes.c_uint64]) -> CUresult: ...
+@dll.bind(CUresult, CUstream, ctypes.POINTER(CUcontext))
+def cuStreamGetCtx_ptsz(hStream:CUstream, pctx:ctypes._Pointer[CUcontext]) -> CUresult: ...
+@dll.bind(CUresult, CUstream, CUevent, ctypes.c_uint32)
+def cuStreamWaitEvent_ptsz(hStream:CUstream, hEvent:CUevent, Flags:int) -> CUresult: ...
+@dll.bind(CUresult, CUstream, CUstreamCallback, ctypes.c_void_p, ctypes.c_uint32)
+def cuStreamAddCallback_ptsz(hStream:CUstream, callback:CUstreamCallback, userData:int|None, flags:int) -> CUresult: ...
+@dll.bind(CUresult, CUstream, CUstreamCaptureMode)
 def cuStreamBeginCapture_v2_ptsz(hStream:CUstream, mode:CUstreamCaptureMode) -> CUresult: ...
-@dll.bind
-def cuThreadExchangeStreamCaptureMode(mode:ctypes.POINTER(CUstreamCaptureMode)) -> CUresult: ...
-@dll.bind
-def cuStreamEndCapture_ptsz(hStream:CUstream, phGraph:ctypes.POINTER(CUgraph)) -> CUresult: ...
-@dll.bind
-def cuStreamIsCapturing_ptsz(hStream:CUstream, captureStatus:ctypes.POINTER(CUstreamCaptureStatus)) -> CUresult: ...
-@dll.bind
-def cuStreamGetCaptureInfo_v2_ptsz(hStream:CUstream, captureStatus_out:ctypes.POINTER(CUstreamCaptureStatus), id_out:ctypes.POINTER(cuuint64_t), graph_out:ctypes.POINTER(CUgraph), dependencies_out:ctypes.POINTER(ctypes.POINTER(CUgraphNode)), numDependencies_out:ctypes.POINTER(size_t)) -> CUresult: ...
-@dll.bind
-def cuStreamUpdateCaptureDependencies_ptsz(hStream:CUstream, dependencies:ctypes.POINTER(CUgraphNode), numDependencies:size_t, flags:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuStreamAttachMemAsync_ptsz(hStream:CUstream, dptr:CUdeviceptr, length:size_t, flags:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, ctypes.POINTER(CUstreamCaptureMode))
+def cuThreadExchangeStreamCaptureMode(mode:ctypes._Pointer[CUstreamCaptureMode]) -> CUresult: ...
+@dll.bind(CUresult, CUstream, ctypes.POINTER(CUgraph))
+def cuStreamEndCapture_ptsz(hStream:CUstream, phGraph:ctypes._Pointer[CUgraph]) -> CUresult: ...
+@dll.bind(CUresult, CUstream, ctypes.POINTER(CUstreamCaptureStatus))
+def cuStreamIsCapturing_ptsz(hStream:CUstream, captureStatus:ctypes._Pointer[CUstreamCaptureStatus]) -> CUresult: ...
+@dll.bind(CUresult, CUstream, ctypes.POINTER(CUstreamCaptureStatus), ctypes.POINTER(cuuint64_t), ctypes.POINTER(CUgraph), ctypes.POINTER(ctypes.POINTER(CUgraphNode)), ctypes.POINTER(size_t))
+def cuStreamGetCaptureInfo_v2_ptsz(hStream:CUstream, captureStatus_out:ctypes._Pointer[CUstreamCaptureStatus], id_out:ctypes._Pointer[cuuint64_t], graph_out:ctypes._Pointer[CUgraph], dependencies_out:ctypes._Pointer[ctypes.POINTER(CUgraphNode)], numDependencies_out:ctypes._Pointer[size_t]) -> CUresult: ...
+@dll.bind(CUresult, CUstream, ctypes.POINTER(CUgraphNode), size_t, ctypes.c_uint32)
+def cuStreamUpdateCaptureDependencies_ptsz(hStream:CUstream, dependencies:ctypes._Pointer[CUgraphNode], numDependencies:size_t, flags:int) -> CUresult: ...
+@dll.bind(CUresult, CUstream, CUdeviceptr, size_t, ctypes.c_uint32)
+def cuStreamAttachMemAsync_ptsz(hStream:CUstream, dptr:CUdeviceptr, length:size_t, flags:int) -> CUresult: ...
+@dll.bind(CUresult, CUstream)
 def cuStreamQuery_ptsz(hStream:CUstream) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, CUstream)
 def cuStreamSynchronize_ptsz(hStream:CUstream) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, CUstream)
 def cuStreamDestroy_v2(hStream:CUstream) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, CUstream, CUstream)
 def cuStreamCopyAttributes_ptsz(dst:CUstream, src:CUstream) -> CUresult: ...
-@dll.bind
-def cuStreamGetAttribute_ptsz(hStream:CUstream, attr:CUstreamAttrID, value_out:ctypes.POINTER(CUstreamAttrValue)) -> CUresult: ...
-@dll.bind
-def cuStreamSetAttribute_ptsz(hStream:CUstream, attr:CUstreamAttrID, value:ctypes.POINTER(CUstreamAttrValue)) -> CUresult: ...
-@dll.bind
-def cuEventCreate(phEvent:ctypes.POINTER(CUevent), Flags:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, CUstream, CUstreamAttrID, ctypes.POINTER(CUstreamAttrValue))
+def cuStreamGetAttribute_ptsz(hStream:CUstream, attr:CUstreamAttrID, value_out:ctypes._Pointer[CUstreamAttrValue]) -> CUresult: ...
+@dll.bind(CUresult, CUstream, CUstreamAttrID, ctypes.POINTER(CUstreamAttrValue))
+def cuStreamSetAttribute_ptsz(hStream:CUstream, attr:CUstreamAttrID, value:ctypes._Pointer[CUstreamAttrValue]) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUevent), ctypes.c_uint32)
+def cuEventCreate(phEvent:ctypes._Pointer[CUevent], Flags:int) -> CUresult: ...
+@dll.bind(CUresult, CUevent, CUstream)
 def cuEventRecord_ptsz(hEvent:CUevent, hStream:CUstream) -> CUresult: ...
-@dll.bind
-def cuEventRecordWithFlags_ptsz(hEvent:CUevent, hStream:CUstream, flags:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, CUevent, CUstream, ctypes.c_uint32)
+def cuEventRecordWithFlags_ptsz(hEvent:CUevent, hStream:CUstream, flags:int) -> CUresult: ...
+@dll.bind(CUresult, CUevent)
 def cuEventQuery(hEvent:CUevent) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, CUevent)
 def cuEventSynchronize(hEvent:CUevent) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, CUevent)
 def cuEventDestroy_v2(hEvent:CUevent) -> CUresult: ...
-@dll.bind
-def cuEventElapsedTime(pMilliseconds:ctypes.POINTER(ctypes.c_float), hStart:CUevent, hEnd:CUevent) -> CUresult: ...
-@dll.bind
-def cuImportExternalMemory(extMem_out:ctypes.POINTER(CUexternalMemory), memHandleDesc:ctypes.POINTER(CUDA_EXTERNAL_MEMORY_HANDLE_DESC)) -> CUresult: ...
-@dll.bind
-def cuExternalMemoryGetMappedBuffer(devPtr:ctypes.POINTER(CUdeviceptr), extMem:CUexternalMemory, bufferDesc:ctypes.POINTER(CUDA_EXTERNAL_MEMORY_BUFFER_DESC)) -> CUresult: ...
-@dll.bind
-def cuExternalMemoryGetMappedMipmappedArray(mipmap:ctypes.POINTER(CUmipmappedArray), extMem:CUexternalMemory, mipmapDesc:ctypes.POINTER(CUDA_EXTERNAL_MEMORY_MIPMAPPED_ARRAY_DESC)) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, ctypes.POINTER(ctypes.c_float), CUevent, CUevent)
+def cuEventElapsedTime(pMilliseconds:ctypes._Pointer[ctypes.c_float], hStart:CUevent, hEnd:CUevent) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUexternalMemory), ctypes.POINTER(CUDA_EXTERNAL_MEMORY_HANDLE_DESC))
+def cuImportExternalMemory(extMem_out:ctypes._Pointer[CUexternalMemory], memHandleDesc:ctypes._Pointer[CUDA_EXTERNAL_MEMORY_HANDLE_DESC]) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUdeviceptr), CUexternalMemory, ctypes.POINTER(CUDA_EXTERNAL_MEMORY_BUFFER_DESC))
+def cuExternalMemoryGetMappedBuffer(devPtr:ctypes._Pointer[CUdeviceptr], extMem:CUexternalMemory, bufferDesc:ctypes._Pointer[CUDA_EXTERNAL_MEMORY_BUFFER_DESC]) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUmipmappedArray), CUexternalMemory, ctypes.POINTER(CUDA_EXTERNAL_MEMORY_MIPMAPPED_ARRAY_DESC))
+def cuExternalMemoryGetMappedMipmappedArray(mipmap:ctypes._Pointer[CUmipmappedArray], extMem:CUexternalMemory, mipmapDesc:ctypes._Pointer[CUDA_EXTERNAL_MEMORY_MIPMAPPED_ARRAY_DESC]) -> CUresult: ...
+@dll.bind(CUresult, CUexternalMemory)
 def cuDestroyExternalMemory(extMem:CUexternalMemory) -> CUresult: ...
-@dll.bind
-def cuImportExternalSemaphore(extSem_out:ctypes.POINTER(CUexternalSemaphore), semHandleDesc:ctypes.POINTER(CUDA_EXTERNAL_SEMAPHORE_HANDLE_DESC)) -> CUresult: ...
-@dll.bind
-def cuSignalExternalSemaphoresAsync_ptsz(extSemArray:ctypes.POINTER(CUexternalSemaphore), paramsArray:ctypes.POINTER(CUDA_EXTERNAL_SEMAPHORE_SIGNAL_PARAMS), numExtSems:ctypes.c_uint32, stream:CUstream) -> CUresult: ...
-@dll.bind
-def cuWaitExternalSemaphoresAsync_ptsz(extSemArray:ctypes.POINTER(CUexternalSemaphore), paramsArray:ctypes.POINTER(CUDA_EXTERNAL_SEMAPHORE_WAIT_PARAMS), numExtSems:ctypes.c_uint32, stream:CUstream) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, ctypes.POINTER(CUexternalSemaphore), ctypes.POINTER(CUDA_EXTERNAL_SEMAPHORE_HANDLE_DESC))
+def cuImportExternalSemaphore(extSem_out:ctypes._Pointer[CUexternalSemaphore], semHandleDesc:ctypes._Pointer[CUDA_EXTERNAL_SEMAPHORE_HANDLE_DESC]) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUexternalSemaphore), ctypes.POINTER(CUDA_EXTERNAL_SEMAPHORE_SIGNAL_PARAMS), ctypes.c_uint32, CUstream)
+def cuSignalExternalSemaphoresAsync_ptsz(extSemArray:ctypes._Pointer[CUexternalSemaphore], paramsArray:ctypes._Pointer[CUDA_EXTERNAL_SEMAPHORE_SIGNAL_PARAMS], numExtSems:int, stream:CUstream) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUexternalSemaphore), ctypes.POINTER(CUDA_EXTERNAL_SEMAPHORE_WAIT_PARAMS), ctypes.c_uint32, CUstream)
+def cuWaitExternalSemaphoresAsync_ptsz(extSemArray:ctypes._Pointer[CUexternalSemaphore], paramsArray:ctypes._Pointer[CUDA_EXTERNAL_SEMAPHORE_WAIT_PARAMS], numExtSems:int, stream:CUstream) -> CUresult: ...
+@dll.bind(CUresult, CUexternalSemaphore)
 def cuDestroyExternalSemaphore(extSem:CUexternalSemaphore) -> CUresult: ...
-@dll.bind
-def cuStreamWaitValue32_v2_ptsz(stream:CUstream, addr:CUdeviceptr, value:cuuint32_t, flags:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuStreamWaitValue64_v2_ptsz(stream:CUstream, addr:CUdeviceptr, value:cuuint64_t, flags:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuStreamWriteValue32_v2_ptsz(stream:CUstream, addr:CUdeviceptr, value:cuuint32_t, flags:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuStreamWriteValue64_v2_ptsz(stream:CUstream, addr:CUdeviceptr, value:cuuint64_t, flags:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuStreamBatchMemOp_v2_ptsz(stream:CUstream, count:ctypes.c_uint32, paramArray:ctypes.POINTER(CUstreamBatchMemOpParams), flags:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuFuncGetAttribute(pi:ctypes.POINTER(ctypes.c_int32), attrib:CUfunction_attribute, hfunc:CUfunction) -> CUresult: ...
-@dll.bind
-def cuFuncSetAttribute(hfunc:CUfunction, attrib:CUfunction_attribute, value:ctypes.c_int32) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, CUstream, CUdeviceptr, cuuint32_t, ctypes.c_uint32)
+def cuStreamWaitValue32_v2_ptsz(stream:CUstream, addr:CUdeviceptr, value:cuuint32_t, flags:int) -> CUresult: ...
+@dll.bind(CUresult, CUstream, CUdeviceptr, cuuint64_t, ctypes.c_uint32)
+def cuStreamWaitValue64_v2_ptsz(stream:CUstream, addr:CUdeviceptr, value:cuuint64_t, flags:int) -> CUresult: ...
+@dll.bind(CUresult, CUstream, CUdeviceptr, cuuint32_t, ctypes.c_uint32)
+def cuStreamWriteValue32_v2_ptsz(stream:CUstream, addr:CUdeviceptr, value:cuuint32_t, flags:int) -> CUresult: ...
+@dll.bind(CUresult, CUstream, CUdeviceptr, cuuint64_t, ctypes.c_uint32)
+def cuStreamWriteValue64_v2_ptsz(stream:CUstream, addr:CUdeviceptr, value:cuuint64_t, flags:int) -> CUresult: ...
+@dll.bind(CUresult, CUstream, ctypes.c_uint32, ctypes.POINTER(CUstreamBatchMemOpParams), ctypes.c_uint32)
+def cuStreamBatchMemOp_v2_ptsz(stream:CUstream, count:int, paramArray:ctypes._Pointer[CUstreamBatchMemOpParams], flags:int) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(ctypes.c_int32), CUfunction_attribute, CUfunction)
+def cuFuncGetAttribute(pi:ctypes._Pointer[ctypes.c_int32], attrib:CUfunction_attribute, hfunc:CUfunction) -> CUresult: ...
+@dll.bind(CUresult, CUfunction, CUfunction_attribute, ctypes.c_int32)
+def cuFuncSetAttribute(hfunc:CUfunction, attrib:CUfunction_attribute, value:int) -> CUresult: ...
+@dll.bind(CUresult, CUfunction, CUfunc_cache)
 def cuFuncSetCacheConfig(hfunc:CUfunction, config:CUfunc_cache) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, CUfunction, CUsharedconfig)
 def cuFuncSetSharedMemConfig(hfunc:CUfunction, config:CUsharedconfig) -> CUresult: ...
-@dll.bind
-def cuFuncGetModule(hmod:ctypes.POINTER(CUmodule), hfunc:CUfunction) -> CUresult: ...
-@dll.bind
-def cuLaunchKernel_ptsz(f:CUfunction, gridDimX:ctypes.c_uint32, gridDimY:ctypes.c_uint32, gridDimZ:ctypes.c_uint32, blockDimX:ctypes.c_uint32, blockDimY:ctypes.c_uint32, blockDimZ:ctypes.c_uint32, sharedMemBytes:ctypes.c_uint32, hStream:CUstream, kernelParams:ctypes.POINTER(ctypes.c_void_p), extra:ctypes.POINTER(ctypes.c_void_p)) -> CUresult: ...
-@dll.bind
-def cuLaunchKernelEx_ptsz(config:ctypes.POINTER(CUlaunchConfig), f:CUfunction, kernelParams:ctypes.POINTER(ctypes.c_void_p), extra:ctypes.POINTER(ctypes.c_void_p)) -> CUresult: ...
-@dll.bind
-def cuLaunchCooperativeKernel_ptsz(f:CUfunction, gridDimX:ctypes.c_uint32, gridDimY:ctypes.c_uint32, gridDimZ:ctypes.c_uint32, blockDimX:ctypes.c_uint32, blockDimY:ctypes.c_uint32, blockDimZ:ctypes.c_uint32, sharedMemBytes:ctypes.c_uint32, hStream:CUstream, kernelParams:ctypes.POINTER(ctypes.c_void_p)) -> CUresult: ...
-@dll.bind
-def cuLaunchCooperativeKernelMultiDevice(launchParamsList:ctypes.POINTER(CUDA_LAUNCH_PARAMS), numDevices:ctypes.c_uint32, flags:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuLaunchHostFunc_ptsz(hStream:CUstream, fn:CUhostFn, userData:ctypes.c_void_p) -> CUresult: ...
-@dll.bind
-def cuFuncSetBlockShape(hfunc:CUfunction, x:ctypes.c_int32, y:ctypes.c_int32, z:ctypes.c_int32) -> CUresult: ...
-@dll.bind
-def cuFuncSetSharedSize(hfunc:CUfunction, bytes:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuParamSetSize(hfunc:CUfunction, numbytes:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuParamSeti(hfunc:CUfunction, offset:ctypes.c_int32, value:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuParamSetf(hfunc:CUfunction, offset:ctypes.c_int32, value:ctypes.c_float) -> CUresult: ...
-@dll.bind
-def cuParamSetv(hfunc:CUfunction, offset:ctypes.c_int32, ptr:ctypes.c_void_p, numbytes:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, ctypes.POINTER(CUmodule), CUfunction)
+def cuFuncGetModule(hmod:ctypes._Pointer[CUmodule], hfunc:CUfunction) -> CUresult: ...
+@dll.bind(CUresult, CUfunction, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, CUstream, ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(ctypes.c_void_p))
+def cuLaunchKernel_ptsz(f:CUfunction, gridDimX:int, gridDimY:int, gridDimZ:int, blockDimX:int, blockDimY:int, blockDimZ:int, sharedMemBytes:int, hStream:CUstream, kernelParams:ctypes._Pointer[ctypes.c_void_p], extra:ctypes._Pointer[ctypes.c_void_p]) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUlaunchConfig), CUfunction, ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(ctypes.c_void_p))
+def cuLaunchKernelEx_ptsz(config:ctypes._Pointer[CUlaunchConfig], f:CUfunction, kernelParams:ctypes._Pointer[ctypes.c_void_p], extra:ctypes._Pointer[ctypes.c_void_p]) -> CUresult: ...
+@dll.bind(CUresult, CUfunction, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, CUstream, ctypes.POINTER(ctypes.c_void_p))
+def cuLaunchCooperativeKernel_ptsz(f:CUfunction, gridDimX:int, gridDimY:int, gridDimZ:int, blockDimX:int, blockDimY:int, blockDimZ:int, sharedMemBytes:int, hStream:CUstream, kernelParams:ctypes._Pointer[ctypes.c_void_p]) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUDA_LAUNCH_PARAMS), ctypes.c_uint32, ctypes.c_uint32)
+def cuLaunchCooperativeKernelMultiDevice(launchParamsList:ctypes._Pointer[CUDA_LAUNCH_PARAMS], numDevices:int, flags:int) -> CUresult: ...
+@dll.bind(CUresult, CUstream, CUhostFn, ctypes.c_void_p)
+def cuLaunchHostFunc_ptsz(hStream:CUstream, fn:CUhostFn, userData:int|None) -> CUresult: ...
+@dll.bind(CUresult, CUfunction, ctypes.c_int32, ctypes.c_int32, ctypes.c_int32)
+def cuFuncSetBlockShape(hfunc:CUfunction, x:int, y:int, z:int) -> CUresult: ...
+@dll.bind(CUresult, CUfunction, ctypes.c_uint32)
+def cuFuncSetSharedSize(hfunc:CUfunction, bytes:int) -> CUresult: ...
+@dll.bind(CUresult, CUfunction, ctypes.c_uint32)
+def cuParamSetSize(hfunc:CUfunction, numbytes:int) -> CUresult: ...
+@dll.bind(CUresult, CUfunction, ctypes.c_int32, ctypes.c_uint32)
+def cuParamSeti(hfunc:CUfunction, offset:int, value:int) -> CUresult: ...
+@dll.bind(CUresult, CUfunction, ctypes.c_int32, ctypes.c_float)
+def cuParamSetf(hfunc:CUfunction, offset:int, value:float) -> CUresult: ...
+@dll.bind(CUresult, CUfunction, ctypes.c_int32, ctypes.c_void_p, ctypes.c_uint32)
+def cuParamSetv(hfunc:CUfunction, offset:int, ptr:int|None, numbytes:int) -> CUresult: ...
+@dll.bind(CUresult, CUfunction)
 def cuLaunch(f:CUfunction) -> CUresult: ...
-@dll.bind
-def cuLaunchGrid(f:CUfunction, grid_width:ctypes.c_int32, grid_height:ctypes.c_int32) -> CUresult: ...
-@dll.bind
-def cuLaunchGridAsync(f:CUfunction, grid_width:ctypes.c_int32, grid_height:ctypes.c_int32, hStream:CUstream) -> CUresult: ...
-@dll.bind
-def cuParamSetTexRef(hfunc:CUfunction, texunit:ctypes.c_int32, hTexRef:CUtexref) -> CUresult: ...
-@dll.bind
-def cuGraphCreate(phGraph:ctypes.POINTER(CUgraph), flags:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuGraphAddKernelNode_v2(phGraphNode:ctypes.POINTER(CUgraphNode), hGraph:CUgraph, dependencies:ctypes.POINTER(CUgraphNode), numDependencies:size_t, nodeParams:ctypes.POINTER(CUDA_KERNEL_NODE_PARAMS)) -> CUresult: ...
-@dll.bind
-def cuGraphKernelNodeGetParams_v2(hNode:CUgraphNode, nodeParams:ctypes.POINTER(CUDA_KERNEL_NODE_PARAMS)) -> CUresult: ...
-@dll.bind
-def cuGraphKernelNodeSetParams_v2(hNode:CUgraphNode, nodeParams:ctypes.POINTER(CUDA_KERNEL_NODE_PARAMS)) -> CUresult: ...
-@dll.bind
-def cuGraphAddMemcpyNode(phGraphNode:ctypes.POINTER(CUgraphNode), hGraph:CUgraph, dependencies:ctypes.POINTER(CUgraphNode), numDependencies:size_t, copyParams:ctypes.POINTER(CUDA_MEMCPY3D), ctx:CUcontext) -> CUresult: ...
-@dll.bind
-def cuGraphMemcpyNodeGetParams(hNode:CUgraphNode, nodeParams:ctypes.POINTER(CUDA_MEMCPY3D)) -> CUresult: ...
-@dll.bind
-def cuGraphMemcpyNodeSetParams(hNode:CUgraphNode, nodeParams:ctypes.POINTER(CUDA_MEMCPY3D)) -> CUresult: ...
-@dll.bind
-def cuGraphAddMemsetNode(phGraphNode:ctypes.POINTER(CUgraphNode), hGraph:CUgraph, dependencies:ctypes.POINTER(CUgraphNode), numDependencies:size_t, memsetParams:ctypes.POINTER(CUDA_MEMSET_NODE_PARAMS), ctx:CUcontext) -> CUresult: ...
-@dll.bind
-def cuGraphMemsetNodeGetParams(hNode:CUgraphNode, nodeParams:ctypes.POINTER(CUDA_MEMSET_NODE_PARAMS)) -> CUresult: ...
-@dll.bind
-def cuGraphMemsetNodeSetParams(hNode:CUgraphNode, nodeParams:ctypes.POINTER(CUDA_MEMSET_NODE_PARAMS)) -> CUresult: ...
-@dll.bind
-def cuGraphAddHostNode(phGraphNode:ctypes.POINTER(CUgraphNode), hGraph:CUgraph, dependencies:ctypes.POINTER(CUgraphNode), numDependencies:size_t, nodeParams:ctypes.POINTER(CUDA_HOST_NODE_PARAMS)) -> CUresult: ...
-@dll.bind
-def cuGraphHostNodeGetParams(hNode:CUgraphNode, nodeParams:ctypes.POINTER(CUDA_HOST_NODE_PARAMS)) -> CUresult: ...
-@dll.bind
-def cuGraphHostNodeSetParams(hNode:CUgraphNode, nodeParams:ctypes.POINTER(CUDA_HOST_NODE_PARAMS)) -> CUresult: ...
-@dll.bind
-def cuGraphAddChildGraphNode(phGraphNode:ctypes.POINTER(CUgraphNode), hGraph:CUgraph, dependencies:ctypes.POINTER(CUgraphNode), numDependencies:size_t, childGraph:CUgraph) -> CUresult: ...
-@dll.bind
-def cuGraphChildGraphNodeGetGraph(hNode:CUgraphNode, phGraph:ctypes.POINTER(CUgraph)) -> CUresult: ...
-@dll.bind
-def cuGraphAddEmptyNode(phGraphNode:ctypes.POINTER(CUgraphNode), hGraph:CUgraph, dependencies:ctypes.POINTER(CUgraphNode), numDependencies:size_t) -> CUresult: ...
-@dll.bind
-def cuGraphAddEventRecordNode(phGraphNode:ctypes.POINTER(CUgraphNode), hGraph:CUgraph, dependencies:ctypes.POINTER(CUgraphNode), numDependencies:size_t, event:CUevent) -> CUresult: ...
-@dll.bind
-def cuGraphEventRecordNodeGetEvent(hNode:CUgraphNode, event_out:ctypes.POINTER(CUevent)) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, CUfunction, ctypes.c_int32, ctypes.c_int32)
+def cuLaunchGrid(f:CUfunction, grid_width:int, grid_height:int) -> CUresult: ...
+@dll.bind(CUresult, CUfunction, ctypes.c_int32, ctypes.c_int32, CUstream)
+def cuLaunchGridAsync(f:CUfunction, grid_width:int, grid_height:int, hStream:CUstream) -> CUresult: ...
+@dll.bind(CUresult, CUfunction, ctypes.c_int32, CUtexref)
+def cuParamSetTexRef(hfunc:CUfunction, texunit:int, hTexRef:CUtexref) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUgraph), ctypes.c_uint32)
+def cuGraphCreate(phGraph:ctypes._Pointer[CUgraph], flags:int) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUgraphNode), CUgraph, ctypes.POINTER(CUgraphNode), size_t, ctypes.POINTER(CUDA_KERNEL_NODE_PARAMS))
+def cuGraphAddKernelNode_v2(phGraphNode:ctypes._Pointer[CUgraphNode], hGraph:CUgraph, dependencies:ctypes._Pointer[CUgraphNode], numDependencies:size_t, nodeParams:ctypes._Pointer[CUDA_KERNEL_NODE_PARAMS]) -> CUresult: ...
+@dll.bind(CUresult, CUgraphNode, ctypes.POINTER(CUDA_KERNEL_NODE_PARAMS))
+def cuGraphKernelNodeGetParams_v2(hNode:CUgraphNode, nodeParams:ctypes._Pointer[CUDA_KERNEL_NODE_PARAMS]) -> CUresult: ...
+@dll.bind(CUresult, CUgraphNode, ctypes.POINTER(CUDA_KERNEL_NODE_PARAMS))
+def cuGraphKernelNodeSetParams_v2(hNode:CUgraphNode, nodeParams:ctypes._Pointer[CUDA_KERNEL_NODE_PARAMS]) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUgraphNode), CUgraph, ctypes.POINTER(CUgraphNode), size_t, ctypes.POINTER(CUDA_MEMCPY3D), CUcontext)
+def cuGraphAddMemcpyNode(phGraphNode:ctypes._Pointer[CUgraphNode], hGraph:CUgraph, dependencies:ctypes._Pointer[CUgraphNode], numDependencies:size_t, copyParams:ctypes._Pointer[CUDA_MEMCPY3D], ctx:CUcontext) -> CUresult: ...
+@dll.bind(CUresult, CUgraphNode, ctypes.POINTER(CUDA_MEMCPY3D))
+def cuGraphMemcpyNodeGetParams(hNode:CUgraphNode, nodeParams:ctypes._Pointer[CUDA_MEMCPY3D]) -> CUresult: ...
+@dll.bind(CUresult, CUgraphNode, ctypes.POINTER(CUDA_MEMCPY3D))
+def cuGraphMemcpyNodeSetParams(hNode:CUgraphNode, nodeParams:ctypes._Pointer[CUDA_MEMCPY3D]) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUgraphNode), CUgraph, ctypes.POINTER(CUgraphNode), size_t, ctypes.POINTER(CUDA_MEMSET_NODE_PARAMS), CUcontext)
+def cuGraphAddMemsetNode(phGraphNode:ctypes._Pointer[CUgraphNode], hGraph:CUgraph, dependencies:ctypes._Pointer[CUgraphNode], numDependencies:size_t, memsetParams:ctypes._Pointer[CUDA_MEMSET_NODE_PARAMS], ctx:CUcontext) -> CUresult: ...
+@dll.bind(CUresult, CUgraphNode, ctypes.POINTER(CUDA_MEMSET_NODE_PARAMS))
+def cuGraphMemsetNodeGetParams(hNode:CUgraphNode, nodeParams:ctypes._Pointer[CUDA_MEMSET_NODE_PARAMS]) -> CUresult: ...
+@dll.bind(CUresult, CUgraphNode, ctypes.POINTER(CUDA_MEMSET_NODE_PARAMS))
+def cuGraphMemsetNodeSetParams(hNode:CUgraphNode, nodeParams:ctypes._Pointer[CUDA_MEMSET_NODE_PARAMS]) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUgraphNode), CUgraph, ctypes.POINTER(CUgraphNode), size_t, ctypes.POINTER(CUDA_HOST_NODE_PARAMS))
+def cuGraphAddHostNode(phGraphNode:ctypes._Pointer[CUgraphNode], hGraph:CUgraph, dependencies:ctypes._Pointer[CUgraphNode], numDependencies:size_t, nodeParams:ctypes._Pointer[CUDA_HOST_NODE_PARAMS]) -> CUresult: ...
+@dll.bind(CUresult, CUgraphNode, ctypes.POINTER(CUDA_HOST_NODE_PARAMS))
+def cuGraphHostNodeGetParams(hNode:CUgraphNode, nodeParams:ctypes._Pointer[CUDA_HOST_NODE_PARAMS]) -> CUresult: ...
+@dll.bind(CUresult, CUgraphNode, ctypes.POINTER(CUDA_HOST_NODE_PARAMS))
+def cuGraphHostNodeSetParams(hNode:CUgraphNode, nodeParams:ctypes._Pointer[CUDA_HOST_NODE_PARAMS]) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUgraphNode), CUgraph, ctypes.POINTER(CUgraphNode), size_t, CUgraph)
+def cuGraphAddChildGraphNode(phGraphNode:ctypes._Pointer[CUgraphNode], hGraph:CUgraph, dependencies:ctypes._Pointer[CUgraphNode], numDependencies:size_t, childGraph:CUgraph) -> CUresult: ...
+@dll.bind(CUresult, CUgraphNode, ctypes.POINTER(CUgraph))
+def cuGraphChildGraphNodeGetGraph(hNode:CUgraphNode, phGraph:ctypes._Pointer[CUgraph]) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUgraphNode), CUgraph, ctypes.POINTER(CUgraphNode), size_t)
+def cuGraphAddEmptyNode(phGraphNode:ctypes._Pointer[CUgraphNode], hGraph:CUgraph, dependencies:ctypes._Pointer[CUgraphNode], numDependencies:size_t) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUgraphNode), CUgraph, ctypes.POINTER(CUgraphNode), size_t, CUevent)
+def cuGraphAddEventRecordNode(phGraphNode:ctypes._Pointer[CUgraphNode], hGraph:CUgraph, dependencies:ctypes._Pointer[CUgraphNode], numDependencies:size_t, event:CUevent) -> CUresult: ...
+@dll.bind(CUresult, CUgraphNode, ctypes.POINTER(CUevent))
+def cuGraphEventRecordNodeGetEvent(hNode:CUgraphNode, event_out:ctypes._Pointer[CUevent]) -> CUresult: ...
+@dll.bind(CUresult, CUgraphNode, CUevent)
 def cuGraphEventRecordNodeSetEvent(hNode:CUgraphNode, event:CUevent) -> CUresult: ...
-@dll.bind
-def cuGraphAddEventWaitNode(phGraphNode:ctypes.POINTER(CUgraphNode), hGraph:CUgraph, dependencies:ctypes.POINTER(CUgraphNode), numDependencies:size_t, event:CUevent) -> CUresult: ...
-@dll.bind
-def cuGraphEventWaitNodeGetEvent(hNode:CUgraphNode, event_out:ctypes.POINTER(CUevent)) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, ctypes.POINTER(CUgraphNode), CUgraph, ctypes.POINTER(CUgraphNode), size_t, CUevent)
+def cuGraphAddEventWaitNode(phGraphNode:ctypes._Pointer[CUgraphNode], hGraph:CUgraph, dependencies:ctypes._Pointer[CUgraphNode], numDependencies:size_t, event:CUevent) -> CUresult: ...
+@dll.bind(CUresult, CUgraphNode, ctypes.POINTER(CUevent))
+def cuGraphEventWaitNodeGetEvent(hNode:CUgraphNode, event_out:ctypes._Pointer[CUevent]) -> CUresult: ...
+@dll.bind(CUresult, CUgraphNode, CUevent)
 def cuGraphEventWaitNodeSetEvent(hNode:CUgraphNode, event:CUevent) -> CUresult: ...
-@dll.bind
-def cuGraphAddExternalSemaphoresSignalNode(phGraphNode:ctypes.POINTER(CUgraphNode), hGraph:CUgraph, dependencies:ctypes.POINTER(CUgraphNode), numDependencies:size_t, nodeParams:ctypes.POINTER(CUDA_EXT_SEM_SIGNAL_NODE_PARAMS)) -> CUresult: ...
-@dll.bind
-def cuGraphExternalSemaphoresSignalNodeGetParams(hNode:CUgraphNode, params_out:ctypes.POINTER(CUDA_EXT_SEM_SIGNAL_NODE_PARAMS)) -> CUresult: ...
-@dll.bind
-def cuGraphExternalSemaphoresSignalNodeSetParams(hNode:CUgraphNode, nodeParams:ctypes.POINTER(CUDA_EXT_SEM_SIGNAL_NODE_PARAMS)) -> CUresult: ...
-@dll.bind
-def cuGraphAddExternalSemaphoresWaitNode(phGraphNode:ctypes.POINTER(CUgraphNode), hGraph:CUgraph, dependencies:ctypes.POINTER(CUgraphNode), numDependencies:size_t, nodeParams:ctypes.POINTER(CUDA_EXT_SEM_WAIT_NODE_PARAMS)) -> CUresult: ...
-@dll.bind
-def cuGraphExternalSemaphoresWaitNodeGetParams(hNode:CUgraphNode, params_out:ctypes.POINTER(CUDA_EXT_SEM_WAIT_NODE_PARAMS)) -> CUresult: ...
-@dll.bind
-def cuGraphExternalSemaphoresWaitNodeSetParams(hNode:CUgraphNode, nodeParams:ctypes.POINTER(CUDA_EXT_SEM_WAIT_NODE_PARAMS)) -> CUresult: ...
-@dll.bind
-def cuGraphAddBatchMemOpNode(phGraphNode:ctypes.POINTER(CUgraphNode), hGraph:CUgraph, dependencies:ctypes.POINTER(CUgraphNode), numDependencies:size_t, nodeParams:ctypes.POINTER(CUDA_BATCH_MEM_OP_NODE_PARAMS)) -> CUresult: ...
-@dll.bind
-def cuGraphBatchMemOpNodeGetParams(hNode:CUgraphNode, nodeParams_out:ctypes.POINTER(CUDA_BATCH_MEM_OP_NODE_PARAMS)) -> CUresult: ...
-@dll.bind
-def cuGraphBatchMemOpNodeSetParams(hNode:CUgraphNode, nodeParams:ctypes.POINTER(CUDA_BATCH_MEM_OP_NODE_PARAMS)) -> CUresult: ...
-@dll.bind
-def cuGraphExecBatchMemOpNodeSetParams(hGraphExec:CUgraphExec, hNode:CUgraphNode, nodeParams:ctypes.POINTER(CUDA_BATCH_MEM_OP_NODE_PARAMS)) -> CUresult: ...
-@dll.bind
-def cuGraphAddMemAllocNode(phGraphNode:ctypes.POINTER(CUgraphNode), hGraph:CUgraph, dependencies:ctypes.POINTER(CUgraphNode), numDependencies:size_t, nodeParams:ctypes.POINTER(CUDA_MEM_ALLOC_NODE_PARAMS)) -> CUresult: ...
-@dll.bind
-def cuGraphMemAllocNodeGetParams(hNode:CUgraphNode, params_out:ctypes.POINTER(CUDA_MEM_ALLOC_NODE_PARAMS)) -> CUresult: ...
-@dll.bind
-def cuGraphAddMemFreeNode(phGraphNode:ctypes.POINTER(CUgraphNode), hGraph:CUgraph, dependencies:ctypes.POINTER(CUgraphNode), numDependencies:size_t, dptr:CUdeviceptr) -> CUresult: ...
-@dll.bind
-def cuGraphMemFreeNodeGetParams(hNode:CUgraphNode, dptr_out:ctypes.POINTER(CUdeviceptr)) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, ctypes.POINTER(CUgraphNode), CUgraph, ctypes.POINTER(CUgraphNode), size_t, ctypes.POINTER(CUDA_EXT_SEM_SIGNAL_NODE_PARAMS))
+def cuGraphAddExternalSemaphoresSignalNode(phGraphNode:ctypes._Pointer[CUgraphNode], hGraph:CUgraph, dependencies:ctypes._Pointer[CUgraphNode], numDependencies:size_t, nodeParams:ctypes._Pointer[CUDA_EXT_SEM_SIGNAL_NODE_PARAMS]) -> CUresult: ...
+@dll.bind(CUresult, CUgraphNode, ctypes.POINTER(CUDA_EXT_SEM_SIGNAL_NODE_PARAMS))
+def cuGraphExternalSemaphoresSignalNodeGetParams(hNode:CUgraphNode, params_out:ctypes._Pointer[CUDA_EXT_SEM_SIGNAL_NODE_PARAMS]) -> CUresult: ...
+@dll.bind(CUresult, CUgraphNode, ctypes.POINTER(CUDA_EXT_SEM_SIGNAL_NODE_PARAMS))
+def cuGraphExternalSemaphoresSignalNodeSetParams(hNode:CUgraphNode, nodeParams:ctypes._Pointer[CUDA_EXT_SEM_SIGNAL_NODE_PARAMS]) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUgraphNode), CUgraph, ctypes.POINTER(CUgraphNode), size_t, ctypes.POINTER(CUDA_EXT_SEM_WAIT_NODE_PARAMS))
+def cuGraphAddExternalSemaphoresWaitNode(phGraphNode:ctypes._Pointer[CUgraphNode], hGraph:CUgraph, dependencies:ctypes._Pointer[CUgraphNode], numDependencies:size_t, nodeParams:ctypes._Pointer[CUDA_EXT_SEM_WAIT_NODE_PARAMS]) -> CUresult: ...
+@dll.bind(CUresult, CUgraphNode, ctypes.POINTER(CUDA_EXT_SEM_WAIT_NODE_PARAMS))
+def cuGraphExternalSemaphoresWaitNodeGetParams(hNode:CUgraphNode, params_out:ctypes._Pointer[CUDA_EXT_SEM_WAIT_NODE_PARAMS]) -> CUresult: ...
+@dll.bind(CUresult, CUgraphNode, ctypes.POINTER(CUDA_EXT_SEM_WAIT_NODE_PARAMS))
+def cuGraphExternalSemaphoresWaitNodeSetParams(hNode:CUgraphNode, nodeParams:ctypes._Pointer[CUDA_EXT_SEM_WAIT_NODE_PARAMS]) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUgraphNode), CUgraph, ctypes.POINTER(CUgraphNode), size_t, ctypes.POINTER(CUDA_BATCH_MEM_OP_NODE_PARAMS))
+def cuGraphAddBatchMemOpNode(phGraphNode:ctypes._Pointer[CUgraphNode], hGraph:CUgraph, dependencies:ctypes._Pointer[CUgraphNode], numDependencies:size_t, nodeParams:ctypes._Pointer[CUDA_BATCH_MEM_OP_NODE_PARAMS]) -> CUresult: ...
+@dll.bind(CUresult, CUgraphNode, ctypes.POINTER(CUDA_BATCH_MEM_OP_NODE_PARAMS))
+def cuGraphBatchMemOpNodeGetParams(hNode:CUgraphNode, nodeParams_out:ctypes._Pointer[CUDA_BATCH_MEM_OP_NODE_PARAMS]) -> CUresult: ...
+@dll.bind(CUresult, CUgraphNode, ctypes.POINTER(CUDA_BATCH_MEM_OP_NODE_PARAMS))
+def cuGraphBatchMemOpNodeSetParams(hNode:CUgraphNode, nodeParams:ctypes._Pointer[CUDA_BATCH_MEM_OP_NODE_PARAMS]) -> CUresult: ...
+@dll.bind(CUresult, CUgraphExec, CUgraphNode, ctypes.POINTER(CUDA_BATCH_MEM_OP_NODE_PARAMS))
+def cuGraphExecBatchMemOpNodeSetParams(hGraphExec:CUgraphExec, hNode:CUgraphNode, nodeParams:ctypes._Pointer[CUDA_BATCH_MEM_OP_NODE_PARAMS]) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUgraphNode), CUgraph, ctypes.POINTER(CUgraphNode), size_t, ctypes.POINTER(CUDA_MEM_ALLOC_NODE_PARAMS))
+def cuGraphAddMemAllocNode(phGraphNode:ctypes._Pointer[CUgraphNode], hGraph:CUgraph, dependencies:ctypes._Pointer[CUgraphNode], numDependencies:size_t, nodeParams:ctypes._Pointer[CUDA_MEM_ALLOC_NODE_PARAMS]) -> CUresult: ...
+@dll.bind(CUresult, CUgraphNode, ctypes.POINTER(CUDA_MEM_ALLOC_NODE_PARAMS))
+def cuGraphMemAllocNodeGetParams(hNode:CUgraphNode, params_out:ctypes._Pointer[CUDA_MEM_ALLOC_NODE_PARAMS]) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUgraphNode), CUgraph, ctypes.POINTER(CUgraphNode), size_t, CUdeviceptr)
+def cuGraphAddMemFreeNode(phGraphNode:ctypes._Pointer[CUgraphNode], hGraph:CUgraph, dependencies:ctypes._Pointer[CUgraphNode], numDependencies:size_t, dptr:CUdeviceptr) -> CUresult: ...
+@dll.bind(CUresult, CUgraphNode, ctypes.POINTER(CUdeviceptr))
+def cuGraphMemFreeNodeGetParams(hNode:CUgraphNode, dptr_out:ctypes._Pointer[CUdeviceptr]) -> CUresult: ...
+@dll.bind(CUresult, CUdevice)
 def cuDeviceGraphMemTrim(device:CUdevice) -> CUresult: ...
-@dll.bind
-def cuDeviceGetGraphMemAttribute(device:CUdevice, attr:CUgraphMem_attribute, value:ctypes.c_void_p) -> CUresult: ...
-@dll.bind
-def cuDeviceSetGraphMemAttribute(device:CUdevice, attr:CUgraphMem_attribute, value:ctypes.c_void_p) -> CUresult: ...
-@dll.bind
-def cuGraphClone(phGraphClone:ctypes.POINTER(CUgraph), originalGraph:CUgraph) -> CUresult: ...
-@dll.bind
-def cuGraphNodeFindInClone(phNode:ctypes.POINTER(CUgraphNode), hOriginalNode:CUgraphNode, hClonedGraph:CUgraph) -> CUresult: ...
-@dll.bind
-def cuGraphNodeGetType(hNode:CUgraphNode, type:ctypes.POINTER(CUgraphNodeType)) -> CUresult: ...
-@dll.bind
-def cuGraphGetNodes(hGraph:CUgraph, nodes:ctypes.POINTER(CUgraphNode), numNodes:ctypes.POINTER(size_t)) -> CUresult: ...
-@dll.bind
-def cuGraphGetRootNodes(hGraph:CUgraph, rootNodes:ctypes.POINTER(CUgraphNode), numRootNodes:ctypes.POINTER(size_t)) -> CUresult: ...
-@dll.bind
-def cuGraphGetEdges(hGraph:CUgraph, _from:ctypes.POINTER(CUgraphNode), to:ctypes.POINTER(CUgraphNode), numEdges:ctypes.POINTER(size_t)) -> CUresult: ...
-@dll.bind
-def cuGraphNodeGetDependencies(hNode:CUgraphNode, dependencies:ctypes.POINTER(CUgraphNode), numDependencies:ctypes.POINTER(size_t)) -> CUresult: ...
-@dll.bind
-def cuGraphNodeGetDependentNodes(hNode:CUgraphNode, dependentNodes:ctypes.POINTER(CUgraphNode), numDependentNodes:ctypes.POINTER(size_t)) -> CUresult: ...
-@dll.bind
-def cuGraphAddDependencies(hGraph:CUgraph, _from:ctypes.POINTER(CUgraphNode), to:ctypes.POINTER(CUgraphNode), numDependencies:size_t) -> CUresult: ...
-@dll.bind
-def cuGraphRemoveDependencies(hGraph:CUgraph, _from:ctypes.POINTER(CUgraphNode), to:ctypes.POINTER(CUgraphNode), numDependencies:size_t) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, CUdevice, CUgraphMem_attribute, ctypes.c_void_p)
+def cuDeviceGetGraphMemAttribute(device:CUdevice, attr:CUgraphMem_attribute, value:int|None) -> CUresult: ...
+@dll.bind(CUresult, CUdevice, CUgraphMem_attribute, ctypes.c_void_p)
+def cuDeviceSetGraphMemAttribute(device:CUdevice, attr:CUgraphMem_attribute, value:int|None) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUgraph), CUgraph)
+def cuGraphClone(phGraphClone:ctypes._Pointer[CUgraph], originalGraph:CUgraph) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUgraphNode), CUgraphNode, CUgraph)
+def cuGraphNodeFindInClone(phNode:ctypes._Pointer[CUgraphNode], hOriginalNode:CUgraphNode, hClonedGraph:CUgraph) -> CUresult: ...
+@dll.bind(CUresult, CUgraphNode, ctypes.POINTER(CUgraphNodeType))
+def cuGraphNodeGetType(hNode:CUgraphNode, type:ctypes._Pointer[CUgraphNodeType]) -> CUresult: ...
+@dll.bind(CUresult, CUgraph, ctypes.POINTER(CUgraphNode), ctypes.POINTER(size_t))
+def cuGraphGetNodes(hGraph:CUgraph, nodes:ctypes._Pointer[CUgraphNode], numNodes:ctypes._Pointer[size_t]) -> CUresult: ...
+@dll.bind(CUresult, CUgraph, ctypes.POINTER(CUgraphNode), ctypes.POINTER(size_t))
+def cuGraphGetRootNodes(hGraph:CUgraph, rootNodes:ctypes._Pointer[CUgraphNode], numRootNodes:ctypes._Pointer[size_t]) -> CUresult: ...
+@dll.bind(CUresult, CUgraph, ctypes.POINTER(CUgraphNode), ctypes.POINTER(CUgraphNode), ctypes.POINTER(size_t))
+def cuGraphGetEdges(hGraph:CUgraph, _from:ctypes._Pointer[CUgraphNode], to:ctypes._Pointer[CUgraphNode], numEdges:ctypes._Pointer[size_t]) -> CUresult: ...
+@dll.bind(CUresult, CUgraphNode, ctypes.POINTER(CUgraphNode), ctypes.POINTER(size_t))
+def cuGraphNodeGetDependencies(hNode:CUgraphNode, dependencies:ctypes._Pointer[CUgraphNode], numDependencies:ctypes._Pointer[size_t]) -> CUresult: ...
+@dll.bind(CUresult, CUgraphNode, ctypes.POINTER(CUgraphNode), ctypes.POINTER(size_t))
+def cuGraphNodeGetDependentNodes(hNode:CUgraphNode, dependentNodes:ctypes._Pointer[CUgraphNode], numDependentNodes:ctypes._Pointer[size_t]) -> CUresult: ...
+@dll.bind(CUresult, CUgraph, ctypes.POINTER(CUgraphNode), ctypes.POINTER(CUgraphNode), size_t)
+def cuGraphAddDependencies(hGraph:CUgraph, _from:ctypes._Pointer[CUgraphNode], to:ctypes._Pointer[CUgraphNode], numDependencies:size_t) -> CUresult: ...
+@dll.bind(CUresult, CUgraph, ctypes.POINTER(CUgraphNode), ctypes.POINTER(CUgraphNode), size_t)
+def cuGraphRemoveDependencies(hGraph:CUgraph, _from:ctypes._Pointer[CUgraphNode], to:ctypes._Pointer[CUgraphNode], numDependencies:size_t) -> CUresult: ...
+@dll.bind(CUresult, CUgraphNode)
 def cuGraphDestroyNode(hNode:CUgraphNode) -> CUresult: ...
-@dll.bind
-def cuGraphInstantiateWithFlags(phGraphExec:ctypes.POINTER(CUgraphExec), hGraph:CUgraph, flags:ctypes.c_uint64) -> CUresult: ...
-@dll.bind
-def cuGraphInstantiateWithParams_ptsz(phGraphExec:ctypes.POINTER(CUgraphExec), hGraph:CUgraph, instantiateParams:ctypes.POINTER(CUDA_GRAPH_INSTANTIATE_PARAMS)) -> CUresult: ...
-@dll.bind
-def cuGraphExecGetFlags(hGraphExec:CUgraphExec, flags:ctypes.POINTER(cuuint64_t)) -> CUresult: ...
-@dll.bind
-def cuGraphExecKernelNodeSetParams_v2(hGraphExec:CUgraphExec, hNode:CUgraphNode, nodeParams:ctypes.POINTER(CUDA_KERNEL_NODE_PARAMS)) -> CUresult: ...
-@dll.bind
-def cuGraphExecMemcpyNodeSetParams(hGraphExec:CUgraphExec, hNode:CUgraphNode, copyParams:ctypes.POINTER(CUDA_MEMCPY3D), ctx:CUcontext) -> CUresult: ...
-@dll.bind
-def cuGraphExecMemsetNodeSetParams(hGraphExec:CUgraphExec, hNode:CUgraphNode, memsetParams:ctypes.POINTER(CUDA_MEMSET_NODE_PARAMS), ctx:CUcontext) -> CUresult: ...
-@dll.bind
-def cuGraphExecHostNodeSetParams(hGraphExec:CUgraphExec, hNode:CUgraphNode, nodeParams:ctypes.POINTER(CUDA_HOST_NODE_PARAMS)) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, ctypes.POINTER(CUgraphExec), CUgraph, ctypes.c_uint64)
+def cuGraphInstantiateWithFlags(phGraphExec:ctypes._Pointer[CUgraphExec], hGraph:CUgraph, flags:int) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUgraphExec), CUgraph, ctypes.POINTER(CUDA_GRAPH_INSTANTIATE_PARAMS))
+def cuGraphInstantiateWithParams_ptsz(phGraphExec:ctypes._Pointer[CUgraphExec], hGraph:CUgraph, instantiateParams:ctypes._Pointer[CUDA_GRAPH_INSTANTIATE_PARAMS]) -> CUresult: ...
+@dll.bind(CUresult, CUgraphExec, ctypes.POINTER(cuuint64_t))
+def cuGraphExecGetFlags(hGraphExec:CUgraphExec, flags:ctypes._Pointer[cuuint64_t]) -> CUresult: ...
+@dll.bind(CUresult, CUgraphExec, CUgraphNode, ctypes.POINTER(CUDA_KERNEL_NODE_PARAMS))
+def cuGraphExecKernelNodeSetParams_v2(hGraphExec:CUgraphExec, hNode:CUgraphNode, nodeParams:ctypes._Pointer[CUDA_KERNEL_NODE_PARAMS]) -> CUresult: ...
+@dll.bind(CUresult, CUgraphExec, CUgraphNode, ctypes.POINTER(CUDA_MEMCPY3D), CUcontext)
+def cuGraphExecMemcpyNodeSetParams(hGraphExec:CUgraphExec, hNode:CUgraphNode, copyParams:ctypes._Pointer[CUDA_MEMCPY3D], ctx:CUcontext) -> CUresult: ...
+@dll.bind(CUresult, CUgraphExec, CUgraphNode, ctypes.POINTER(CUDA_MEMSET_NODE_PARAMS), CUcontext)
+def cuGraphExecMemsetNodeSetParams(hGraphExec:CUgraphExec, hNode:CUgraphNode, memsetParams:ctypes._Pointer[CUDA_MEMSET_NODE_PARAMS], ctx:CUcontext) -> CUresult: ...
+@dll.bind(CUresult, CUgraphExec, CUgraphNode, ctypes.POINTER(CUDA_HOST_NODE_PARAMS))
+def cuGraphExecHostNodeSetParams(hGraphExec:CUgraphExec, hNode:CUgraphNode, nodeParams:ctypes._Pointer[CUDA_HOST_NODE_PARAMS]) -> CUresult: ...
+@dll.bind(CUresult, CUgraphExec, CUgraphNode, CUgraph)
 def cuGraphExecChildGraphNodeSetParams(hGraphExec:CUgraphExec, hNode:CUgraphNode, childGraph:CUgraph) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, CUgraphExec, CUgraphNode, CUevent)
 def cuGraphExecEventRecordNodeSetEvent(hGraphExec:CUgraphExec, hNode:CUgraphNode, event:CUevent) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, CUgraphExec, CUgraphNode, CUevent)
 def cuGraphExecEventWaitNodeSetEvent(hGraphExec:CUgraphExec, hNode:CUgraphNode, event:CUevent) -> CUresult: ...
-@dll.bind
-def cuGraphExecExternalSemaphoresSignalNodeSetParams(hGraphExec:CUgraphExec, hNode:CUgraphNode, nodeParams:ctypes.POINTER(CUDA_EXT_SEM_SIGNAL_NODE_PARAMS)) -> CUresult: ...
-@dll.bind
-def cuGraphExecExternalSemaphoresWaitNodeSetParams(hGraphExec:CUgraphExec, hNode:CUgraphNode, nodeParams:ctypes.POINTER(CUDA_EXT_SEM_WAIT_NODE_PARAMS)) -> CUresult: ...
-@dll.bind
-def cuGraphNodeSetEnabled(hGraphExec:CUgraphExec, hNode:CUgraphNode, isEnabled:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuGraphNodeGetEnabled(hGraphExec:CUgraphExec, hNode:CUgraphNode, isEnabled:ctypes.POINTER(ctypes.c_uint32)) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, CUgraphExec, CUgraphNode, ctypes.POINTER(CUDA_EXT_SEM_SIGNAL_NODE_PARAMS))
+def cuGraphExecExternalSemaphoresSignalNodeSetParams(hGraphExec:CUgraphExec, hNode:CUgraphNode, nodeParams:ctypes._Pointer[CUDA_EXT_SEM_SIGNAL_NODE_PARAMS]) -> CUresult: ...
+@dll.bind(CUresult, CUgraphExec, CUgraphNode, ctypes.POINTER(CUDA_EXT_SEM_WAIT_NODE_PARAMS))
+def cuGraphExecExternalSemaphoresWaitNodeSetParams(hGraphExec:CUgraphExec, hNode:CUgraphNode, nodeParams:ctypes._Pointer[CUDA_EXT_SEM_WAIT_NODE_PARAMS]) -> CUresult: ...
+@dll.bind(CUresult, CUgraphExec, CUgraphNode, ctypes.c_uint32)
+def cuGraphNodeSetEnabled(hGraphExec:CUgraphExec, hNode:CUgraphNode, isEnabled:int) -> CUresult: ...
+@dll.bind(CUresult, CUgraphExec, CUgraphNode, ctypes.POINTER(ctypes.c_uint32))
+def cuGraphNodeGetEnabled(hGraphExec:CUgraphExec, hNode:CUgraphNode, isEnabled:ctypes._Pointer[ctypes.c_uint32]) -> CUresult: ...
+@dll.bind(CUresult, CUgraphExec, CUstream)
 def cuGraphUpload_ptsz(hGraphExec:CUgraphExec, hStream:CUstream) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, CUgraphExec, CUstream)
 def cuGraphLaunch_ptsz(hGraphExec:CUgraphExec, hStream:CUstream) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, CUgraphExec)
 def cuGraphExecDestroy(hGraphExec:CUgraphExec) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, CUgraph)
 def cuGraphDestroy(hGraph:CUgraph) -> CUresult: ...
-@dll.bind
-def cuGraphExecUpdate_v2(hGraphExec:CUgraphExec, hGraph:CUgraph, resultInfo:ctypes.POINTER(CUgraphExecUpdateResultInfo)) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, CUgraphExec, CUgraph, ctypes.POINTER(CUgraphExecUpdateResultInfo))
+def cuGraphExecUpdate_v2(hGraphExec:CUgraphExec, hGraph:CUgraph, resultInfo:ctypes._Pointer[CUgraphExecUpdateResultInfo]) -> CUresult: ...
+@dll.bind(CUresult, CUgraphNode, CUgraphNode)
 def cuGraphKernelNodeCopyAttributes(dst:CUgraphNode, src:CUgraphNode) -> CUresult: ...
-@dll.bind
-def cuGraphKernelNodeGetAttribute(hNode:CUgraphNode, attr:CUkernelNodeAttrID, value_out:ctypes.POINTER(CUkernelNodeAttrValue)) -> CUresult: ...
-@dll.bind
-def cuGraphKernelNodeSetAttribute(hNode:CUgraphNode, attr:CUkernelNodeAttrID, value:ctypes.POINTER(CUkernelNodeAttrValue)) -> CUresult: ...
-@dll.bind
-def cuGraphDebugDotPrint(hGraph:CUgraph, path:ctypes.POINTER(ctypes.c_char), flags:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuUserObjectCreate(object_out:ctypes.POINTER(CUuserObject), ptr:ctypes.c_void_p, destroy:CUhostFn, initialRefcount:ctypes.c_uint32, flags:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuUserObjectRetain(object:CUuserObject, count:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuUserObjectRelease(object:CUuserObject, count:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuGraphRetainUserObject(graph:CUgraph, object:CUuserObject, count:ctypes.c_uint32, flags:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuGraphReleaseUserObject(graph:CUgraph, object:CUuserObject, count:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuOccupancyMaxActiveBlocksPerMultiprocessor(numBlocks:ctypes.POINTER(ctypes.c_int32), func:CUfunction, blockSize:ctypes.c_int32, dynamicSMemSize:size_t) -> CUresult: ...
-@dll.bind
-def cuOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(numBlocks:ctypes.POINTER(ctypes.c_int32), func:CUfunction, blockSize:ctypes.c_int32, dynamicSMemSize:size_t, flags:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuOccupancyMaxPotentialBlockSize(minGridSize:ctypes.POINTER(ctypes.c_int32), blockSize:ctypes.POINTER(ctypes.c_int32), func:CUfunction, blockSizeToDynamicSMemSize:CUoccupancyB2DSize, dynamicSMemSize:size_t, blockSizeLimit:ctypes.c_int32) -> CUresult: ...
-@dll.bind
-def cuOccupancyMaxPotentialBlockSizeWithFlags(minGridSize:ctypes.POINTER(ctypes.c_int32), blockSize:ctypes.POINTER(ctypes.c_int32), func:CUfunction, blockSizeToDynamicSMemSize:CUoccupancyB2DSize, dynamicSMemSize:size_t, blockSizeLimit:ctypes.c_int32, flags:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuOccupancyAvailableDynamicSMemPerBlock(dynamicSmemSize:ctypes.POINTER(size_t), func:CUfunction, numBlocks:ctypes.c_int32, blockSize:ctypes.c_int32) -> CUresult: ...
-@dll.bind
-def cuOccupancyMaxPotentialClusterSize(clusterSize:ctypes.POINTER(ctypes.c_int32), func:CUfunction, config:ctypes.POINTER(CUlaunchConfig)) -> CUresult: ...
-@dll.bind
-def cuOccupancyMaxActiveClusters(numClusters:ctypes.POINTER(ctypes.c_int32), func:CUfunction, config:ctypes.POINTER(CUlaunchConfig)) -> CUresult: ...
-@dll.bind
-def cuTexRefSetArray(hTexRef:CUtexref, hArray:CUarray, Flags:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuTexRefSetMipmappedArray(hTexRef:CUtexref, hMipmappedArray:CUmipmappedArray, Flags:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuTexRefSetAddress_v2(ByteOffset:ctypes.POINTER(size_t), hTexRef:CUtexref, dptr:CUdeviceptr, bytes:size_t) -> CUresult: ...
-@dll.bind
-def cuTexRefSetAddress2D_v3(hTexRef:CUtexref, desc:ctypes.POINTER(CUDA_ARRAY_DESCRIPTOR), dptr:CUdeviceptr, Pitch:size_t) -> CUresult: ...
-@dll.bind
-def cuTexRefSetFormat(hTexRef:CUtexref, fmt:CUarray_format, NumPackedComponents:ctypes.c_int32) -> CUresult: ...
-@dll.bind
-def cuTexRefSetAddressMode(hTexRef:CUtexref, dim:ctypes.c_int32, am:CUaddress_mode) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, CUgraphNode, CUkernelNodeAttrID, ctypes.POINTER(CUkernelNodeAttrValue))
+def cuGraphKernelNodeGetAttribute(hNode:CUgraphNode, attr:CUkernelNodeAttrID, value_out:ctypes._Pointer[CUkernelNodeAttrValue]) -> CUresult: ...
+@dll.bind(CUresult, CUgraphNode, CUkernelNodeAttrID, ctypes.POINTER(CUkernelNodeAttrValue))
+def cuGraphKernelNodeSetAttribute(hNode:CUgraphNode, attr:CUkernelNodeAttrID, value:ctypes._Pointer[CUkernelNodeAttrValue]) -> CUresult: ...
+@dll.bind(CUresult, CUgraph, ctypes.POINTER(ctypes.c_char), ctypes.c_uint32)
+def cuGraphDebugDotPrint(hGraph:CUgraph, path:ctypes._Pointer[ctypes.c_char], flags:int) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUuserObject), ctypes.c_void_p, CUhostFn, ctypes.c_uint32, ctypes.c_uint32)
+def cuUserObjectCreate(object_out:ctypes._Pointer[CUuserObject], ptr:int|None, destroy:CUhostFn, initialRefcount:int, flags:int) -> CUresult: ...
+@dll.bind(CUresult, CUuserObject, ctypes.c_uint32)
+def cuUserObjectRetain(object:CUuserObject, count:int) -> CUresult: ...
+@dll.bind(CUresult, CUuserObject, ctypes.c_uint32)
+def cuUserObjectRelease(object:CUuserObject, count:int) -> CUresult: ...
+@dll.bind(CUresult, CUgraph, CUuserObject, ctypes.c_uint32, ctypes.c_uint32)
+def cuGraphRetainUserObject(graph:CUgraph, object:CUuserObject, count:int, flags:int) -> CUresult: ...
+@dll.bind(CUresult, CUgraph, CUuserObject, ctypes.c_uint32)
+def cuGraphReleaseUserObject(graph:CUgraph, object:CUuserObject, count:int) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(ctypes.c_int32), CUfunction, ctypes.c_int32, size_t)
+def cuOccupancyMaxActiveBlocksPerMultiprocessor(numBlocks:ctypes._Pointer[ctypes.c_int32], func:CUfunction, blockSize:int, dynamicSMemSize:size_t) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(ctypes.c_int32), CUfunction, ctypes.c_int32, size_t, ctypes.c_uint32)
+def cuOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(numBlocks:ctypes._Pointer[ctypes.c_int32], func:CUfunction, blockSize:int, dynamicSMemSize:size_t, flags:int) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.c_int32), CUfunction, CUoccupancyB2DSize, size_t, ctypes.c_int32)
+def cuOccupancyMaxPotentialBlockSize(minGridSize:ctypes._Pointer[ctypes.c_int32], blockSize:ctypes._Pointer[ctypes.c_int32], func:CUfunction, blockSizeToDynamicSMemSize:CUoccupancyB2DSize, dynamicSMemSize:size_t, blockSizeLimit:int) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.c_int32), CUfunction, CUoccupancyB2DSize, size_t, ctypes.c_int32, ctypes.c_uint32)
+def cuOccupancyMaxPotentialBlockSizeWithFlags(minGridSize:ctypes._Pointer[ctypes.c_int32], blockSize:ctypes._Pointer[ctypes.c_int32], func:CUfunction, blockSizeToDynamicSMemSize:CUoccupancyB2DSize, dynamicSMemSize:size_t, blockSizeLimit:int, flags:int) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(size_t), CUfunction, ctypes.c_int32, ctypes.c_int32)
+def cuOccupancyAvailableDynamicSMemPerBlock(dynamicSmemSize:ctypes._Pointer[size_t], func:CUfunction, numBlocks:int, blockSize:int) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(ctypes.c_int32), CUfunction, ctypes.POINTER(CUlaunchConfig))
+def cuOccupancyMaxPotentialClusterSize(clusterSize:ctypes._Pointer[ctypes.c_int32], func:CUfunction, config:ctypes._Pointer[CUlaunchConfig]) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(ctypes.c_int32), CUfunction, ctypes.POINTER(CUlaunchConfig))
+def cuOccupancyMaxActiveClusters(numClusters:ctypes._Pointer[ctypes.c_int32], func:CUfunction, config:ctypes._Pointer[CUlaunchConfig]) -> CUresult: ...
+@dll.bind(CUresult, CUtexref, CUarray, ctypes.c_uint32)
+def cuTexRefSetArray(hTexRef:CUtexref, hArray:CUarray, Flags:int) -> CUresult: ...
+@dll.bind(CUresult, CUtexref, CUmipmappedArray, ctypes.c_uint32)
+def cuTexRefSetMipmappedArray(hTexRef:CUtexref, hMipmappedArray:CUmipmappedArray, Flags:int) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(size_t), CUtexref, CUdeviceptr, size_t)
+def cuTexRefSetAddress_v2(ByteOffset:ctypes._Pointer[size_t], hTexRef:CUtexref, dptr:CUdeviceptr, bytes:size_t) -> CUresult: ...
+@dll.bind(CUresult, CUtexref, ctypes.POINTER(CUDA_ARRAY_DESCRIPTOR), CUdeviceptr, size_t)
+def cuTexRefSetAddress2D_v3(hTexRef:CUtexref, desc:ctypes._Pointer[CUDA_ARRAY_DESCRIPTOR], dptr:CUdeviceptr, Pitch:size_t) -> CUresult: ...
+@dll.bind(CUresult, CUtexref, CUarray_format, ctypes.c_int32)
+def cuTexRefSetFormat(hTexRef:CUtexref, fmt:CUarray_format, NumPackedComponents:int) -> CUresult: ...
+@dll.bind(CUresult, CUtexref, ctypes.c_int32, CUaddress_mode)
+def cuTexRefSetAddressMode(hTexRef:CUtexref, dim:int, am:CUaddress_mode) -> CUresult: ...
+@dll.bind(CUresult, CUtexref, CUfilter_mode)
 def cuTexRefSetFilterMode(hTexRef:CUtexref, fm:CUfilter_mode) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, CUtexref, CUfilter_mode)
 def cuTexRefSetMipmapFilterMode(hTexRef:CUtexref, fm:CUfilter_mode) -> CUresult: ...
-@dll.bind
-def cuTexRefSetMipmapLevelBias(hTexRef:CUtexref, bias:ctypes.c_float) -> CUresult: ...
-@dll.bind
-def cuTexRefSetMipmapLevelClamp(hTexRef:CUtexref, minMipmapLevelClamp:ctypes.c_float, maxMipmapLevelClamp:ctypes.c_float) -> CUresult: ...
-@dll.bind
-def cuTexRefSetMaxAnisotropy(hTexRef:CUtexref, maxAniso:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuTexRefSetBorderColor(hTexRef:CUtexref, pBorderColor:ctypes.POINTER(ctypes.c_float)) -> CUresult: ...
-@dll.bind
-def cuTexRefSetFlags(hTexRef:CUtexref, Flags:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuTexRefGetAddress_v2(pdptr:ctypes.POINTER(CUdeviceptr), hTexRef:CUtexref) -> CUresult: ...
-@dll.bind
-def cuTexRefGetArray(phArray:ctypes.POINTER(CUarray), hTexRef:CUtexref) -> CUresult: ...
-@dll.bind
-def cuTexRefGetMipmappedArray(phMipmappedArray:ctypes.POINTER(CUmipmappedArray), hTexRef:CUtexref) -> CUresult: ...
-@dll.bind
-def cuTexRefGetAddressMode(pam:ctypes.POINTER(CUaddress_mode), hTexRef:CUtexref, dim:ctypes.c_int32) -> CUresult: ...
-@dll.bind
-def cuTexRefGetFilterMode(pfm:ctypes.POINTER(CUfilter_mode), hTexRef:CUtexref) -> CUresult: ...
-@dll.bind
-def cuTexRefGetFormat(pFormat:ctypes.POINTER(CUarray_format), pNumChannels:ctypes.POINTER(ctypes.c_int32), hTexRef:CUtexref) -> CUresult: ...
-@dll.bind
-def cuTexRefGetMipmapFilterMode(pfm:ctypes.POINTER(CUfilter_mode), hTexRef:CUtexref) -> CUresult: ...
-@dll.bind
-def cuTexRefGetMipmapLevelBias(pbias:ctypes.POINTER(ctypes.c_float), hTexRef:CUtexref) -> CUresult: ...
-@dll.bind
-def cuTexRefGetMipmapLevelClamp(pminMipmapLevelClamp:ctypes.POINTER(ctypes.c_float), pmaxMipmapLevelClamp:ctypes.POINTER(ctypes.c_float), hTexRef:CUtexref) -> CUresult: ...
-@dll.bind
-def cuTexRefGetMaxAnisotropy(pmaxAniso:ctypes.POINTER(ctypes.c_int32), hTexRef:CUtexref) -> CUresult: ...
-@dll.bind
-def cuTexRefGetBorderColor(pBorderColor:ctypes.POINTER(ctypes.c_float), hTexRef:CUtexref) -> CUresult: ...
-@dll.bind
-def cuTexRefGetFlags(pFlags:ctypes.POINTER(ctypes.c_uint32), hTexRef:CUtexref) -> CUresult: ...
-@dll.bind
-def cuTexRefCreate(pTexRef:ctypes.POINTER(CUtexref)) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, CUtexref, ctypes.c_float)
+def cuTexRefSetMipmapLevelBias(hTexRef:CUtexref, bias:float) -> CUresult: ...
+@dll.bind(CUresult, CUtexref, ctypes.c_float, ctypes.c_float)
+def cuTexRefSetMipmapLevelClamp(hTexRef:CUtexref, minMipmapLevelClamp:float, maxMipmapLevelClamp:float) -> CUresult: ...
+@dll.bind(CUresult, CUtexref, ctypes.c_uint32)
+def cuTexRefSetMaxAnisotropy(hTexRef:CUtexref, maxAniso:int) -> CUresult: ...
+@dll.bind(CUresult, CUtexref, ctypes.POINTER(ctypes.c_float))
+def cuTexRefSetBorderColor(hTexRef:CUtexref, pBorderColor:ctypes._Pointer[ctypes.c_float]) -> CUresult: ...
+@dll.bind(CUresult, CUtexref, ctypes.c_uint32)
+def cuTexRefSetFlags(hTexRef:CUtexref, Flags:int) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUdeviceptr), CUtexref)
+def cuTexRefGetAddress_v2(pdptr:ctypes._Pointer[CUdeviceptr], hTexRef:CUtexref) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUarray), CUtexref)
+def cuTexRefGetArray(phArray:ctypes._Pointer[CUarray], hTexRef:CUtexref) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUmipmappedArray), CUtexref)
+def cuTexRefGetMipmappedArray(phMipmappedArray:ctypes._Pointer[CUmipmappedArray], hTexRef:CUtexref) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUaddress_mode), CUtexref, ctypes.c_int32)
+def cuTexRefGetAddressMode(pam:ctypes._Pointer[CUaddress_mode], hTexRef:CUtexref, dim:int) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUfilter_mode), CUtexref)
+def cuTexRefGetFilterMode(pfm:ctypes._Pointer[CUfilter_mode], hTexRef:CUtexref) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUarray_format), ctypes.POINTER(ctypes.c_int32), CUtexref)
+def cuTexRefGetFormat(pFormat:ctypes._Pointer[CUarray_format], pNumChannels:ctypes._Pointer[ctypes.c_int32], hTexRef:CUtexref) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUfilter_mode), CUtexref)
+def cuTexRefGetMipmapFilterMode(pfm:ctypes._Pointer[CUfilter_mode], hTexRef:CUtexref) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(ctypes.c_float), CUtexref)
+def cuTexRefGetMipmapLevelBias(pbias:ctypes._Pointer[ctypes.c_float], hTexRef:CUtexref) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(ctypes.c_float), ctypes.POINTER(ctypes.c_float), CUtexref)
+def cuTexRefGetMipmapLevelClamp(pminMipmapLevelClamp:ctypes._Pointer[ctypes.c_float], pmaxMipmapLevelClamp:ctypes._Pointer[ctypes.c_float], hTexRef:CUtexref) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(ctypes.c_int32), CUtexref)
+def cuTexRefGetMaxAnisotropy(pmaxAniso:ctypes._Pointer[ctypes.c_int32], hTexRef:CUtexref) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(ctypes.c_float), CUtexref)
+def cuTexRefGetBorderColor(pBorderColor:ctypes._Pointer[ctypes.c_float], hTexRef:CUtexref) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(ctypes.c_uint32), CUtexref)
+def cuTexRefGetFlags(pFlags:ctypes._Pointer[ctypes.c_uint32], hTexRef:CUtexref) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUtexref))
+def cuTexRefCreate(pTexRef:ctypes._Pointer[CUtexref]) -> CUresult: ...
+@dll.bind(CUresult, CUtexref)
 def cuTexRefDestroy(hTexRef:CUtexref) -> CUresult: ...
-@dll.bind
-def cuSurfRefSetArray(hSurfRef:CUsurfref, hArray:CUarray, Flags:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuSurfRefGetArray(phArray:ctypes.POINTER(CUarray), hSurfRef:CUsurfref) -> CUresult: ...
-@dll.bind
-def cuTexObjectCreate(pTexObject:ctypes.POINTER(CUtexObject), pResDesc:ctypes.POINTER(CUDA_RESOURCE_DESC), pTexDesc:ctypes.POINTER(CUDA_TEXTURE_DESC), pResViewDesc:ctypes.POINTER(CUDA_RESOURCE_VIEW_DESC)) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, CUsurfref, CUarray, ctypes.c_uint32)
+def cuSurfRefSetArray(hSurfRef:CUsurfref, hArray:CUarray, Flags:int) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUarray), CUsurfref)
+def cuSurfRefGetArray(phArray:ctypes._Pointer[CUarray], hSurfRef:CUsurfref) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUtexObject), ctypes.POINTER(CUDA_RESOURCE_DESC), ctypes.POINTER(CUDA_TEXTURE_DESC), ctypes.POINTER(CUDA_RESOURCE_VIEW_DESC))
+def cuTexObjectCreate(pTexObject:ctypes._Pointer[CUtexObject], pResDesc:ctypes._Pointer[CUDA_RESOURCE_DESC], pTexDesc:ctypes._Pointer[CUDA_TEXTURE_DESC], pResViewDesc:ctypes._Pointer[CUDA_RESOURCE_VIEW_DESC]) -> CUresult: ...
+@dll.bind(CUresult, CUtexObject)
 def cuTexObjectDestroy(texObject:CUtexObject) -> CUresult: ...
-@dll.bind
-def cuTexObjectGetResourceDesc(pResDesc:ctypes.POINTER(CUDA_RESOURCE_DESC), texObject:CUtexObject) -> CUresult: ...
-@dll.bind
-def cuTexObjectGetTextureDesc(pTexDesc:ctypes.POINTER(CUDA_TEXTURE_DESC), texObject:CUtexObject) -> CUresult: ...
-@dll.bind
-def cuTexObjectGetResourceViewDesc(pResViewDesc:ctypes.POINTER(CUDA_RESOURCE_VIEW_DESC), texObject:CUtexObject) -> CUresult: ...
-@dll.bind
-def cuSurfObjectCreate(pSurfObject:ctypes.POINTER(CUsurfObject), pResDesc:ctypes.POINTER(CUDA_RESOURCE_DESC)) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, ctypes.POINTER(CUDA_RESOURCE_DESC), CUtexObject)
+def cuTexObjectGetResourceDesc(pResDesc:ctypes._Pointer[CUDA_RESOURCE_DESC], texObject:CUtexObject) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUDA_TEXTURE_DESC), CUtexObject)
+def cuTexObjectGetTextureDesc(pTexDesc:ctypes._Pointer[CUDA_TEXTURE_DESC], texObject:CUtexObject) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUDA_RESOURCE_VIEW_DESC), CUtexObject)
+def cuTexObjectGetResourceViewDesc(pResViewDesc:ctypes._Pointer[CUDA_RESOURCE_VIEW_DESC], texObject:CUtexObject) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUsurfObject), ctypes.POINTER(CUDA_RESOURCE_DESC))
+def cuSurfObjectCreate(pSurfObject:ctypes._Pointer[CUsurfObject], pResDesc:ctypes._Pointer[CUDA_RESOURCE_DESC]) -> CUresult: ...
+@dll.bind(CUresult, CUsurfObject)
 def cuSurfObjectDestroy(surfObject:CUsurfObject) -> CUresult: ...
-@dll.bind
-def cuSurfObjectGetResourceDesc(pResDesc:ctypes.POINTER(CUDA_RESOURCE_DESC), surfObject:CUsurfObject) -> CUresult: ...
-@dll.bind
-def cuTensorMapEncodeTiled(tensorMap:ctypes.POINTER(CUtensorMap), tensorDataType:CUtensorMapDataType, tensorRank:cuuint32_t, globalAddress:ctypes.c_void_p, globalDim:ctypes.POINTER(cuuint64_t), globalStrides:ctypes.POINTER(cuuint64_t), boxDim:ctypes.POINTER(cuuint32_t), elementStrides:ctypes.POINTER(cuuint32_t), interleave:CUtensorMapInterleave, swizzle:CUtensorMapSwizzle, l2Promotion:CUtensorMapL2promotion, oobFill:CUtensorMapFloatOOBfill) -> CUresult: ...
-@dll.bind
-def cuTensorMapEncodeIm2col(tensorMap:ctypes.POINTER(CUtensorMap), tensorDataType:CUtensorMapDataType, tensorRank:cuuint32_t, globalAddress:ctypes.c_void_p, globalDim:ctypes.POINTER(cuuint64_t), globalStrides:ctypes.POINTER(cuuint64_t), pixelBoxLowerCorner:ctypes.POINTER(ctypes.c_int32), pixelBoxUpperCorner:ctypes.POINTER(ctypes.c_int32), channelsPerPixel:cuuint32_t, pixelsPerColumn:cuuint32_t, elementStrides:ctypes.POINTER(cuuint32_t), interleave:CUtensorMapInterleave, swizzle:CUtensorMapSwizzle, l2Promotion:CUtensorMapL2promotion, oobFill:CUtensorMapFloatOOBfill) -> CUresult: ...
-@dll.bind
-def cuTensorMapReplaceAddress(tensorMap:ctypes.POINTER(CUtensorMap), globalAddress:ctypes.c_void_p) -> CUresult: ...
-@dll.bind
-def cuDeviceCanAccessPeer(canAccessPeer:ctypes.POINTER(ctypes.c_int32), dev:CUdevice, peerDev:CUdevice) -> CUresult: ...
-@dll.bind
-def cuCtxEnablePeerAccess(peerContext:CUcontext, Flags:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, ctypes.POINTER(CUDA_RESOURCE_DESC), CUsurfObject)
+def cuSurfObjectGetResourceDesc(pResDesc:ctypes._Pointer[CUDA_RESOURCE_DESC], surfObject:CUsurfObject) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUtensorMap), CUtensorMapDataType, cuuint32_t, ctypes.c_void_p, ctypes.POINTER(cuuint64_t), ctypes.POINTER(cuuint64_t), ctypes.POINTER(cuuint32_t), ctypes.POINTER(cuuint32_t), CUtensorMapInterleave, CUtensorMapSwizzle, CUtensorMapL2promotion, CUtensorMapFloatOOBfill)
+def cuTensorMapEncodeTiled(tensorMap:ctypes._Pointer[CUtensorMap], tensorDataType:CUtensorMapDataType, tensorRank:cuuint32_t, globalAddress:int|None, globalDim:ctypes._Pointer[cuuint64_t], globalStrides:ctypes._Pointer[cuuint64_t], boxDim:ctypes._Pointer[cuuint32_t], elementStrides:ctypes._Pointer[cuuint32_t], interleave:CUtensorMapInterleave, swizzle:CUtensorMapSwizzle, l2Promotion:CUtensorMapL2promotion, oobFill:CUtensorMapFloatOOBfill) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUtensorMap), CUtensorMapDataType, cuuint32_t, ctypes.c_void_p, ctypes.POINTER(cuuint64_t), ctypes.POINTER(cuuint64_t), ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.c_int32), cuuint32_t, cuuint32_t, ctypes.POINTER(cuuint32_t), CUtensorMapInterleave, CUtensorMapSwizzle, CUtensorMapL2promotion, CUtensorMapFloatOOBfill)
+def cuTensorMapEncodeIm2col(tensorMap:ctypes._Pointer[CUtensorMap], tensorDataType:CUtensorMapDataType, tensorRank:cuuint32_t, globalAddress:int|None, globalDim:ctypes._Pointer[cuuint64_t], globalStrides:ctypes._Pointer[cuuint64_t], pixelBoxLowerCorner:ctypes._Pointer[ctypes.c_int32], pixelBoxUpperCorner:ctypes._Pointer[ctypes.c_int32], channelsPerPixel:cuuint32_t, pixelsPerColumn:cuuint32_t, elementStrides:ctypes._Pointer[cuuint32_t], interleave:CUtensorMapInterleave, swizzle:CUtensorMapSwizzle, l2Promotion:CUtensorMapL2promotion, oobFill:CUtensorMapFloatOOBfill) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUtensorMap), ctypes.c_void_p)
+def cuTensorMapReplaceAddress(tensorMap:ctypes._Pointer[CUtensorMap], globalAddress:int|None) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(ctypes.c_int32), CUdevice, CUdevice)
+def cuDeviceCanAccessPeer(canAccessPeer:ctypes._Pointer[ctypes.c_int32], dev:CUdevice, peerDev:CUdevice) -> CUresult: ...
+@dll.bind(CUresult, CUcontext, ctypes.c_uint32)
+def cuCtxEnablePeerAccess(peerContext:CUcontext, Flags:int) -> CUresult: ...
+@dll.bind(CUresult, CUcontext)
 def cuCtxDisablePeerAccess(peerContext:CUcontext) -> CUresult: ...
-@dll.bind
-def cuDeviceGetP2PAttribute(value:ctypes.POINTER(ctypes.c_int32), attrib:CUdevice_P2PAttribute, srcDevice:CUdevice, dstDevice:CUdevice) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, ctypes.POINTER(ctypes.c_int32), CUdevice_P2PAttribute, CUdevice, CUdevice)
+def cuDeviceGetP2PAttribute(value:ctypes._Pointer[ctypes.c_int32], attrib:CUdevice_P2PAttribute, srcDevice:CUdevice, dstDevice:CUdevice) -> CUresult: ...
+@dll.bind(CUresult, CUgraphicsResource)
 def cuGraphicsUnregisterResource(resource:CUgraphicsResource) -> CUresult: ...
-@dll.bind
-def cuGraphicsSubResourceGetMappedArray(pArray:ctypes.POINTER(CUarray), resource:CUgraphicsResource, arrayIndex:ctypes.c_uint32, mipLevel:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuGraphicsResourceGetMappedMipmappedArray(pMipmappedArray:ctypes.POINTER(CUmipmappedArray), resource:CUgraphicsResource) -> CUresult: ...
-@dll.bind
-def cuGraphicsResourceGetMappedPointer_v2(pDevPtr:ctypes.POINTER(CUdeviceptr), pSize:ctypes.POINTER(size_t), resource:CUgraphicsResource) -> CUresult: ...
-@dll.bind
-def cuGraphicsResourceSetMapFlags_v2(resource:CUgraphicsResource, flags:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuGraphicsMapResources_ptsz(count:ctypes.c_uint32, resources:ctypes.POINTER(CUgraphicsResource), hStream:CUstream) -> CUresult: ...
-@dll.bind
-def cuGraphicsUnmapResources_ptsz(count:ctypes.c_uint32, resources:ctypes.POINTER(CUgraphicsResource), hStream:CUstream) -> CUresult: ...
-@dll.bind
-def cuGetProcAddress_v2(symbol:ctypes.POINTER(ctypes.c_char), pfn:ctypes.POINTER(ctypes.c_void_p), cudaVersion:ctypes.c_int32, flags:cuuint64_t, symbolStatus:ctypes.POINTER(CUdriverProcAddressQueryResult)) -> CUresult: ...
-@dll.bind
-def cuGetExportTable(ppExportTable:ctypes.POINTER(ctypes.c_void_p), pExportTableId:ctypes.POINTER(CUuuid)) -> CUresult: ...
-@dll.bind
-def cuMemHostRegister(p:ctypes.c_void_p, bytesize:size_t, Flags:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuGraphicsResourceSetMapFlags(resource:CUgraphicsResource, flags:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuLinkCreate(numOptions:ctypes.c_uint32, options:ctypes.POINTER(CUjit_option), optionValues:ctypes.POINTER(ctypes.c_void_p), stateOut:ctypes.POINTER(CUlinkState)) -> CUresult: ...
-@dll.bind
-def cuLinkAddData(state:CUlinkState, type:CUjitInputType, data:ctypes.c_void_p, size:size_t, name:ctypes.POINTER(ctypes.c_char), numOptions:ctypes.c_uint32, options:ctypes.POINTER(CUjit_option), optionValues:ctypes.POINTER(ctypes.c_void_p)) -> CUresult: ...
-@dll.bind
-def cuLinkAddFile(state:CUlinkState, type:CUjitInputType, path:ctypes.POINTER(ctypes.c_char), numOptions:ctypes.c_uint32, options:ctypes.POINTER(CUjit_option), optionValues:ctypes.POINTER(ctypes.c_void_p)) -> CUresult: ...
-@dll.bind
-def cuTexRefSetAddress2D_v2(hTexRef:CUtexref, desc:ctypes.POINTER(CUDA_ARRAY_DESCRIPTOR), dptr:CUdeviceptr, Pitch:size_t) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUarray), CUgraphicsResource, ctypes.c_uint32, ctypes.c_uint32)
+def cuGraphicsSubResourceGetMappedArray(pArray:ctypes._Pointer[CUarray], resource:CUgraphicsResource, arrayIndex:int, mipLevel:int) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUmipmappedArray), CUgraphicsResource)
+def cuGraphicsResourceGetMappedMipmappedArray(pMipmappedArray:ctypes._Pointer[CUmipmappedArray], resource:CUgraphicsResource) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUdeviceptr), ctypes.POINTER(size_t), CUgraphicsResource)
+def cuGraphicsResourceGetMappedPointer_v2(pDevPtr:ctypes._Pointer[CUdeviceptr], pSize:ctypes._Pointer[size_t], resource:CUgraphicsResource) -> CUresult: ...
+@dll.bind(CUresult, CUgraphicsResource, ctypes.c_uint32)
+def cuGraphicsResourceSetMapFlags_v2(resource:CUgraphicsResource, flags:int) -> CUresult: ...
+@dll.bind(CUresult, ctypes.c_uint32, ctypes.POINTER(CUgraphicsResource), CUstream)
+def cuGraphicsMapResources_ptsz(count:int, resources:ctypes._Pointer[CUgraphicsResource], hStream:CUstream) -> CUresult: ...
+@dll.bind(CUresult, ctypes.c_uint32, ctypes.POINTER(CUgraphicsResource), CUstream)
+def cuGraphicsUnmapResources_ptsz(count:int, resources:ctypes._Pointer[CUgraphicsResource], hStream:CUstream) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_void_p), ctypes.c_int32, cuuint64_t, ctypes.POINTER(CUdriverProcAddressQueryResult))
+def cuGetProcAddress_v2(symbol:ctypes._Pointer[ctypes.c_char], pfn:ctypes._Pointer[ctypes.c_void_p], cudaVersion:int, flags:cuuint64_t, symbolStatus:ctypes._Pointer[CUdriverProcAddressQueryResult]) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(CUuuid))
+def cuGetExportTable(ppExportTable:ctypes._Pointer[ctypes.c_void_p], pExportTableId:ctypes._Pointer[CUuuid]) -> CUresult: ...
+@dll.bind(CUresult, ctypes.c_void_p, size_t, ctypes.c_uint32)
+def cuMemHostRegister(p:int|None, bytesize:size_t, Flags:int) -> CUresult: ...
+@dll.bind(CUresult, CUgraphicsResource, ctypes.c_uint32)
+def cuGraphicsResourceSetMapFlags(resource:CUgraphicsResource, flags:int) -> CUresult: ...
+@dll.bind(CUresult, ctypes.c_uint32, ctypes.POINTER(CUjit_option), ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(CUlinkState))
+def cuLinkCreate(numOptions:int, options:ctypes._Pointer[CUjit_option], optionValues:ctypes._Pointer[ctypes.c_void_p], stateOut:ctypes._Pointer[CUlinkState]) -> CUresult: ...
+@dll.bind(CUresult, CUlinkState, CUjitInputType, ctypes.c_void_p, size_t, ctypes.POINTER(ctypes.c_char), ctypes.c_uint32, ctypes.POINTER(CUjit_option), ctypes.POINTER(ctypes.c_void_p))
+def cuLinkAddData(state:CUlinkState, type:CUjitInputType, data:int|None, size:size_t, name:ctypes._Pointer[ctypes.c_char], numOptions:int, options:ctypes._Pointer[CUjit_option], optionValues:ctypes._Pointer[ctypes.c_void_p]) -> CUresult: ...
+@dll.bind(CUresult, CUlinkState, CUjitInputType, ctypes.POINTER(ctypes.c_char), ctypes.c_uint32, ctypes.POINTER(CUjit_option), ctypes.POINTER(ctypes.c_void_p))
+def cuLinkAddFile(state:CUlinkState, type:CUjitInputType, path:ctypes._Pointer[ctypes.c_char], numOptions:int, options:ctypes._Pointer[CUjit_option], optionValues:ctypes._Pointer[ctypes.c_void_p]) -> CUresult: ...
+@dll.bind(CUresult, CUtexref, ctypes.POINTER(CUDA_ARRAY_DESCRIPTOR), CUdeviceptr, size_t)
+def cuTexRefSetAddress2D_v2(hTexRef:CUtexref, desc:ctypes._Pointer[CUDA_ARRAY_DESCRIPTOR], dptr:CUdeviceptr, Pitch:size_t) -> CUresult: ...
 CUdeviceptr_v1: TypeAlias = ctypes.c_uint32
 @c.record
 class struct_CUDA_MEMCPY2D_v1_st(c.Struct):
   SIZE = 96
-  srcXInBytes: 'int'
-  srcY: 'int'
-  srcMemoryType: 'int'
-  srcHost: 'ctypes.c_void_p'
-  srcDevice: 'int'
-  srcArray: 'ctypes._Pointer[struct_CUarray_st]'
-  srcPitch: 'int'
-  dstXInBytes: 'int'
-  dstY: 'int'
-  dstMemoryType: 'int'
-  dstHost: 'ctypes.c_void_p'
-  dstDevice: 'int'
-  dstArray: 'ctypes._Pointer[struct_CUarray_st]'
-  dstPitch: 'int'
-  WidthInBytes: 'int'
-  Height: 'int'
+  srcXInBytes: int
+  srcY: int
+  srcMemoryType: int
+  srcHost: int|None
+  srcDevice: int
+  srcArray: ctypes._Pointer[struct_CUarray_st]
+  srcPitch: int
+  dstXInBytes: int
+  dstY: int
+  dstMemoryType: int
+  dstHost: int|None
+  dstDevice: int
+  dstArray: ctypes._Pointer[struct_CUarray_st]
+  dstPitch: int
+  WidthInBytes: int
+  Height: int
 struct_CUDA_MEMCPY2D_v1_st.register_fields([('srcXInBytes', ctypes.c_uint32, 0), ('srcY', ctypes.c_uint32, 4), ('srcMemoryType', CUmemorytype, 8), ('srcHost', ctypes.c_void_p, 16), ('srcDevice', CUdeviceptr_v1, 24), ('srcArray', CUarray, 32), ('srcPitch', ctypes.c_uint32, 40), ('dstXInBytes', ctypes.c_uint32, 44), ('dstY', ctypes.c_uint32, 48), ('dstMemoryType', CUmemorytype, 52), ('dstHost', ctypes.c_void_p, 56), ('dstDevice', CUdeviceptr_v1, 64), ('dstArray', CUarray, 72), ('dstPitch', ctypes.c_uint32, 80), ('WidthInBytes', ctypes.c_uint32, 84), ('Height', ctypes.c_uint32, 88)])
 CUDA_MEMCPY2D_v1: TypeAlias = struct_CUDA_MEMCPY2D_v1_st
 @c.record
 class struct_CUDA_MEMCPY3D_v1_st(c.Struct):
   SIZE = 144
-  srcXInBytes: 'int'
-  srcY: 'int'
-  srcZ: 'int'
-  srcLOD: 'int'
-  srcMemoryType: 'int'
-  srcHost: 'ctypes.c_void_p'
-  srcDevice: 'int'
-  srcArray: 'ctypes._Pointer[struct_CUarray_st]'
-  reserved0: 'ctypes.c_void_p'
-  srcPitch: 'int'
-  srcHeight: 'int'
-  dstXInBytes: 'int'
-  dstY: 'int'
-  dstZ: 'int'
-  dstLOD: 'int'
-  dstMemoryType: 'int'
-  dstHost: 'ctypes.c_void_p'
-  dstDevice: 'int'
-  dstArray: 'ctypes._Pointer[struct_CUarray_st]'
-  reserved1: 'ctypes.c_void_p'
-  dstPitch: 'int'
-  dstHeight: 'int'
-  WidthInBytes: 'int'
-  Height: 'int'
-  Depth: 'int'
+  srcXInBytes: int
+  srcY: int
+  srcZ: int
+  srcLOD: int
+  srcMemoryType: int
+  srcHost: int|None
+  srcDevice: int
+  srcArray: ctypes._Pointer[struct_CUarray_st]
+  reserved0: int|None
+  srcPitch: int
+  srcHeight: int
+  dstXInBytes: int
+  dstY: int
+  dstZ: int
+  dstLOD: int
+  dstMemoryType: int
+  dstHost: int|None
+  dstDevice: int
+  dstArray: ctypes._Pointer[struct_CUarray_st]
+  reserved1: int|None
+  dstPitch: int
+  dstHeight: int
+  WidthInBytes: int
+  Height: int
+  Depth: int
 struct_CUDA_MEMCPY3D_v1_st.register_fields([('srcXInBytes', ctypes.c_uint32, 0), ('srcY', ctypes.c_uint32, 4), ('srcZ', ctypes.c_uint32, 8), ('srcLOD', ctypes.c_uint32, 12), ('srcMemoryType', CUmemorytype, 16), ('srcHost', ctypes.c_void_p, 24), ('srcDevice', CUdeviceptr_v1, 32), ('srcArray', CUarray, 40), ('reserved0', ctypes.c_void_p, 48), ('srcPitch', ctypes.c_uint32, 56), ('srcHeight', ctypes.c_uint32, 60), ('dstXInBytes', ctypes.c_uint32, 64), ('dstY', ctypes.c_uint32, 68), ('dstZ', ctypes.c_uint32, 72), ('dstLOD', ctypes.c_uint32, 76), ('dstMemoryType', CUmemorytype, 80), ('dstHost', ctypes.c_void_p, 88), ('dstDevice', CUdeviceptr_v1, 96), ('dstArray', CUarray, 104), ('reserved1', ctypes.c_void_p, 112), ('dstPitch', ctypes.c_uint32, 120), ('dstHeight', ctypes.c_uint32, 124), ('WidthInBytes', ctypes.c_uint32, 128), ('Height', ctypes.c_uint32, 132), ('Depth', ctypes.c_uint32, 136)])
 CUDA_MEMCPY3D_v1: TypeAlias = struct_CUDA_MEMCPY3D_v1_st
 @c.record
 class struct_CUDA_ARRAY_DESCRIPTOR_v1_st(c.Struct):
   SIZE = 16
-  Width: 'int'
-  Height: 'int'
-  Format: 'int'
-  NumChannels: 'int'
+  Width: int
+  Height: int
+  Format: int
+  NumChannels: int
 struct_CUDA_ARRAY_DESCRIPTOR_v1_st.register_fields([('Width', ctypes.c_uint32, 0), ('Height', ctypes.c_uint32, 4), ('Format', CUarray_format, 8), ('NumChannels', ctypes.c_uint32, 12)])
 CUDA_ARRAY_DESCRIPTOR_v1: TypeAlias = struct_CUDA_ARRAY_DESCRIPTOR_v1_st
 @c.record
 class struct_CUDA_ARRAY3D_DESCRIPTOR_v1_st(c.Struct):
   SIZE = 24
-  Width: 'int'
-  Height: 'int'
-  Depth: 'int'
-  Format: 'int'
-  NumChannels: 'int'
-  Flags: 'int'
+  Width: int
+  Height: int
+  Depth: int
+  Format: int
+  NumChannels: int
+  Flags: int
 struct_CUDA_ARRAY3D_DESCRIPTOR_v1_st.register_fields([('Width', ctypes.c_uint32, 0), ('Height', ctypes.c_uint32, 4), ('Depth', ctypes.c_uint32, 8), ('Format', CUarray_format, 12), ('NumChannels', ctypes.c_uint32, 16), ('Flags', ctypes.c_uint32, 20)])
 CUDA_ARRAY3D_DESCRIPTOR_v1: TypeAlias = struct_CUDA_ARRAY3D_DESCRIPTOR_v1_st
-@dll.bind
-def cuDeviceTotalMem(bytes:ctypes.POINTER(ctypes.c_uint32), dev:CUdevice) -> CUresult: ...
-@dll.bind
-def cuCtxCreate(pctx:ctypes.POINTER(CUcontext), flags:ctypes.c_uint32, dev:CUdevice) -> CUresult: ...
-@dll.bind
-def cuModuleGetGlobal(dptr:ctypes.POINTER(CUdeviceptr_v1), bytes:ctypes.POINTER(ctypes.c_uint32), hmod:CUmodule, name:ctypes.POINTER(ctypes.c_char)) -> CUresult: ...
-@dll.bind
-def cuMemGetInfo(free:ctypes.POINTER(ctypes.c_uint32), total:ctypes.POINTER(ctypes.c_uint32)) -> CUresult: ...
-@dll.bind
-def cuMemAlloc(dptr:ctypes.POINTER(CUdeviceptr_v1), bytesize:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuMemAllocPitch(dptr:ctypes.POINTER(CUdeviceptr_v1), pPitch:ctypes.POINTER(ctypes.c_uint32), WidthInBytes:ctypes.c_uint32, Height:ctypes.c_uint32, ElementSizeBytes:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, ctypes.POINTER(ctypes.c_uint32), CUdevice)
+def cuDeviceTotalMem(bytes:ctypes._Pointer[ctypes.c_uint32], dev:CUdevice) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUcontext), ctypes.c_uint32, CUdevice)
+def cuCtxCreate(pctx:ctypes._Pointer[CUcontext], flags:int, dev:CUdevice) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUdeviceptr_v1), ctypes.POINTER(ctypes.c_uint32), CUmodule, ctypes.POINTER(ctypes.c_char))
+def cuModuleGetGlobal(dptr:ctypes._Pointer[CUdeviceptr_v1], bytes:ctypes._Pointer[ctypes.c_uint32], hmod:CUmodule, name:ctypes._Pointer[ctypes.c_char]) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32))
+def cuMemGetInfo(free:ctypes._Pointer[ctypes.c_uint32], total:ctypes._Pointer[ctypes.c_uint32]) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUdeviceptr_v1), ctypes.c_uint32)
+def cuMemAlloc(dptr:ctypes._Pointer[CUdeviceptr_v1], bytesize:int) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUdeviceptr_v1), ctypes.POINTER(ctypes.c_uint32), ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32)
+def cuMemAllocPitch(dptr:ctypes._Pointer[CUdeviceptr_v1], pPitch:ctypes._Pointer[ctypes.c_uint32], WidthInBytes:int, Height:int, ElementSizeBytes:int) -> CUresult: ...
+@dll.bind(CUresult, CUdeviceptr_v1)
 def cuMemFree(dptr:CUdeviceptr_v1) -> CUresult: ...
-@dll.bind
-def cuMemGetAddressRange(pbase:ctypes.POINTER(CUdeviceptr_v1), psize:ctypes.POINTER(ctypes.c_uint32), dptr:CUdeviceptr_v1) -> CUresult: ...
-@dll.bind
-def cuMemAllocHost(pp:ctypes.POINTER(ctypes.c_void_p), bytesize:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuMemHostGetDevicePointer(pdptr:ctypes.POINTER(CUdeviceptr_v1), p:ctypes.c_void_p, Flags:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuMemcpyHtoD(dstDevice:CUdeviceptr_v1, srcHost:ctypes.c_void_p, ByteCount:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuMemcpyDtoH(dstHost:ctypes.c_void_p, srcDevice:CUdeviceptr_v1, ByteCount:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuMemcpyDtoD(dstDevice:CUdeviceptr_v1, srcDevice:CUdeviceptr_v1, ByteCount:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuMemcpyDtoA(dstArray:CUarray, dstOffset:ctypes.c_uint32, srcDevice:CUdeviceptr_v1, ByteCount:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuMemcpyAtoD(dstDevice:CUdeviceptr_v1, srcArray:CUarray, srcOffset:ctypes.c_uint32, ByteCount:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuMemcpyHtoA(dstArray:CUarray, dstOffset:ctypes.c_uint32, srcHost:ctypes.c_void_p, ByteCount:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuMemcpyAtoH(dstHost:ctypes.c_void_p, srcArray:CUarray, srcOffset:ctypes.c_uint32, ByteCount:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuMemcpyAtoA(dstArray:CUarray, dstOffset:ctypes.c_uint32, srcArray:CUarray, srcOffset:ctypes.c_uint32, ByteCount:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuMemcpyHtoAAsync(dstArray:CUarray, dstOffset:ctypes.c_uint32, srcHost:ctypes.c_void_p, ByteCount:ctypes.c_uint32, hStream:CUstream) -> CUresult: ...
-@dll.bind
-def cuMemcpyAtoHAsync(dstHost:ctypes.c_void_p, srcArray:CUarray, srcOffset:ctypes.c_uint32, ByteCount:ctypes.c_uint32, hStream:CUstream) -> CUresult: ...
-@dll.bind
-def cuMemcpy2D(pCopy:ctypes.POINTER(CUDA_MEMCPY2D_v1)) -> CUresult: ...
-@dll.bind
-def cuMemcpy2DUnaligned(pCopy:ctypes.POINTER(CUDA_MEMCPY2D_v1)) -> CUresult: ...
-@dll.bind
-def cuMemcpy3D(pCopy:ctypes.POINTER(CUDA_MEMCPY3D_v1)) -> CUresult: ...
-@dll.bind
-def cuMemcpyHtoDAsync(dstDevice:CUdeviceptr_v1, srcHost:ctypes.c_void_p, ByteCount:ctypes.c_uint32, hStream:CUstream) -> CUresult: ...
-@dll.bind
-def cuMemcpyDtoHAsync(dstHost:ctypes.c_void_p, srcDevice:CUdeviceptr_v1, ByteCount:ctypes.c_uint32, hStream:CUstream) -> CUresult: ...
-@dll.bind
-def cuMemcpyDtoDAsync(dstDevice:CUdeviceptr_v1, srcDevice:CUdeviceptr_v1, ByteCount:ctypes.c_uint32, hStream:CUstream) -> CUresult: ...
-@dll.bind
-def cuMemcpy2DAsync(pCopy:ctypes.POINTER(CUDA_MEMCPY2D_v1), hStream:CUstream) -> CUresult: ...
-@dll.bind
-def cuMemcpy3DAsync(pCopy:ctypes.POINTER(CUDA_MEMCPY3D_v1), hStream:CUstream) -> CUresult: ...
-@dll.bind
-def cuMemsetD8(dstDevice:CUdeviceptr_v1, uc:ctypes.c_ubyte, N:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuMemsetD16(dstDevice:CUdeviceptr_v1, us:ctypes.c_uint16, N:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuMemsetD32(dstDevice:CUdeviceptr_v1, ui:ctypes.c_uint32, N:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuMemsetD2D8(dstDevice:CUdeviceptr_v1, dstPitch:ctypes.c_uint32, uc:ctypes.c_ubyte, Width:ctypes.c_uint32, Height:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuMemsetD2D16(dstDevice:CUdeviceptr_v1, dstPitch:ctypes.c_uint32, us:ctypes.c_uint16, Width:ctypes.c_uint32, Height:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuMemsetD2D32(dstDevice:CUdeviceptr_v1, dstPitch:ctypes.c_uint32, ui:ctypes.c_uint32, Width:ctypes.c_uint32, Height:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuArrayCreate(pHandle:ctypes.POINTER(CUarray), pAllocateArray:ctypes.POINTER(CUDA_ARRAY_DESCRIPTOR_v1)) -> CUresult: ...
-@dll.bind
-def cuArrayGetDescriptor(pArrayDescriptor:ctypes.POINTER(CUDA_ARRAY_DESCRIPTOR_v1), hArray:CUarray) -> CUresult: ...
-@dll.bind
-def cuArray3DCreate(pHandle:ctypes.POINTER(CUarray), pAllocateArray:ctypes.POINTER(CUDA_ARRAY3D_DESCRIPTOR_v1)) -> CUresult: ...
-@dll.bind
-def cuArray3DGetDescriptor(pArrayDescriptor:ctypes.POINTER(CUDA_ARRAY3D_DESCRIPTOR_v1), hArray:CUarray) -> CUresult: ...
-@dll.bind
-def cuTexRefSetAddress(ByteOffset:ctypes.POINTER(ctypes.c_uint32), hTexRef:CUtexref, dptr:CUdeviceptr_v1, bytes:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuTexRefSetAddress2D(hTexRef:CUtexref, desc:ctypes.POINTER(CUDA_ARRAY_DESCRIPTOR_v1), dptr:CUdeviceptr_v1, Pitch:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuTexRefGetAddress(pdptr:ctypes.POINTER(CUdeviceptr_v1), hTexRef:CUtexref) -> CUresult: ...
-@dll.bind
-def cuGraphicsResourceGetMappedPointer(pDevPtr:ctypes.POINTER(CUdeviceptr_v1), pSize:ctypes.POINTER(ctypes.c_uint32), resource:CUgraphicsResource) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, ctypes.POINTER(CUdeviceptr_v1), ctypes.POINTER(ctypes.c_uint32), CUdeviceptr_v1)
+def cuMemGetAddressRange(pbase:ctypes._Pointer[CUdeviceptr_v1], psize:ctypes._Pointer[ctypes.c_uint32], dptr:CUdeviceptr_v1) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(ctypes.c_void_p), ctypes.c_uint32)
+def cuMemAllocHost(pp:ctypes._Pointer[ctypes.c_void_p], bytesize:int) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUdeviceptr_v1), ctypes.c_void_p, ctypes.c_uint32)
+def cuMemHostGetDevicePointer(pdptr:ctypes._Pointer[CUdeviceptr_v1], p:int|None, Flags:int) -> CUresult: ...
+@dll.bind(CUresult, CUdeviceptr_v1, ctypes.c_void_p, ctypes.c_uint32)
+def cuMemcpyHtoD(dstDevice:CUdeviceptr_v1, srcHost:int|None, ByteCount:int) -> CUresult: ...
+@dll.bind(CUresult, ctypes.c_void_p, CUdeviceptr_v1, ctypes.c_uint32)
+def cuMemcpyDtoH(dstHost:int|None, srcDevice:CUdeviceptr_v1, ByteCount:int) -> CUresult: ...
+@dll.bind(CUresult, CUdeviceptr_v1, CUdeviceptr_v1, ctypes.c_uint32)
+def cuMemcpyDtoD(dstDevice:CUdeviceptr_v1, srcDevice:CUdeviceptr_v1, ByteCount:int) -> CUresult: ...
+@dll.bind(CUresult, CUarray, ctypes.c_uint32, CUdeviceptr_v1, ctypes.c_uint32)
+def cuMemcpyDtoA(dstArray:CUarray, dstOffset:int, srcDevice:CUdeviceptr_v1, ByteCount:int) -> CUresult: ...
+@dll.bind(CUresult, CUdeviceptr_v1, CUarray, ctypes.c_uint32, ctypes.c_uint32)
+def cuMemcpyAtoD(dstDevice:CUdeviceptr_v1, srcArray:CUarray, srcOffset:int, ByteCount:int) -> CUresult: ...
+@dll.bind(CUresult, CUarray, ctypes.c_uint32, ctypes.c_void_p, ctypes.c_uint32)
+def cuMemcpyHtoA(dstArray:CUarray, dstOffset:int, srcHost:int|None, ByteCount:int) -> CUresult: ...
+@dll.bind(CUresult, ctypes.c_void_p, CUarray, ctypes.c_uint32, ctypes.c_uint32)
+def cuMemcpyAtoH(dstHost:int|None, srcArray:CUarray, srcOffset:int, ByteCount:int) -> CUresult: ...
+@dll.bind(CUresult, CUarray, ctypes.c_uint32, CUarray, ctypes.c_uint32, ctypes.c_uint32)
+def cuMemcpyAtoA(dstArray:CUarray, dstOffset:int, srcArray:CUarray, srcOffset:int, ByteCount:int) -> CUresult: ...
+@dll.bind(CUresult, CUarray, ctypes.c_uint32, ctypes.c_void_p, ctypes.c_uint32, CUstream)
+def cuMemcpyHtoAAsync(dstArray:CUarray, dstOffset:int, srcHost:int|None, ByteCount:int, hStream:CUstream) -> CUresult: ...
+@dll.bind(CUresult, ctypes.c_void_p, CUarray, ctypes.c_uint32, ctypes.c_uint32, CUstream)
+def cuMemcpyAtoHAsync(dstHost:int|None, srcArray:CUarray, srcOffset:int, ByteCount:int, hStream:CUstream) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUDA_MEMCPY2D_v1))
+def cuMemcpy2D(pCopy:ctypes._Pointer[CUDA_MEMCPY2D_v1]) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUDA_MEMCPY2D_v1))
+def cuMemcpy2DUnaligned(pCopy:ctypes._Pointer[CUDA_MEMCPY2D_v1]) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUDA_MEMCPY3D_v1))
+def cuMemcpy3D(pCopy:ctypes._Pointer[CUDA_MEMCPY3D_v1]) -> CUresult: ...
+@dll.bind(CUresult, CUdeviceptr_v1, ctypes.c_void_p, ctypes.c_uint32, CUstream)
+def cuMemcpyHtoDAsync(dstDevice:CUdeviceptr_v1, srcHost:int|None, ByteCount:int, hStream:CUstream) -> CUresult: ...
+@dll.bind(CUresult, ctypes.c_void_p, CUdeviceptr_v1, ctypes.c_uint32, CUstream)
+def cuMemcpyDtoHAsync(dstHost:int|None, srcDevice:CUdeviceptr_v1, ByteCount:int, hStream:CUstream) -> CUresult: ...
+@dll.bind(CUresult, CUdeviceptr_v1, CUdeviceptr_v1, ctypes.c_uint32, CUstream)
+def cuMemcpyDtoDAsync(dstDevice:CUdeviceptr_v1, srcDevice:CUdeviceptr_v1, ByteCount:int, hStream:CUstream) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUDA_MEMCPY2D_v1), CUstream)
+def cuMemcpy2DAsync(pCopy:ctypes._Pointer[CUDA_MEMCPY2D_v1], hStream:CUstream) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUDA_MEMCPY3D_v1), CUstream)
+def cuMemcpy3DAsync(pCopy:ctypes._Pointer[CUDA_MEMCPY3D_v1], hStream:CUstream) -> CUresult: ...
+@dll.bind(CUresult, CUdeviceptr_v1, ctypes.c_ubyte, ctypes.c_uint32)
+def cuMemsetD8(dstDevice:CUdeviceptr_v1, uc:int, N:int) -> CUresult: ...
+@dll.bind(CUresult, CUdeviceptr_v1, ctypes.c_uint16, ctypes.c_uint32)
+def cuMemsetD16(dstDevice:CUdeviceptr_v1, us:int, N:int) -> CUresult: ...
+@dll.bind(CUresult, CUdeviceptr_v1, ctypes.c_uint32, ctypes.c_uint32)
+def cuMemsetD32(dstDevice:CUdeviceptr_v1, ui:int, N:int) -> CUresult: ...
+@dll.bind(CUresult, CUdeviceptr_v1, ctypes.c_uint32, ctypes.c_ubyte, ctypes.c_uint32, ctypes.c_uint32)
+def cuMemsetD2D8(dstDevice:CUdeviceptr_v1, dstPitch:int, uc:int, Width:int, Height:int) -> CUresult: ...
+@dll.bind(CUresult, CUdeviceptr_v1, ctypes.c_uint32, ctypes.c_uint16, ctypes.c_uint32, ctypes.c_uint32)
+def cuMemsetD2D16(dstDevice:CUdeviceptr_v1, dstPitch:int, us:int, Width:int, Height:int) -> CUresult: ...
+@dll.bind(CUresult, CUdeviceptr_v1, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32)
+def cuMemsetD2D32(dstDevice:CUdeviceptr_v1, dstPitch:int, ui:int, Width:int, Height:int) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUarray), ctypes.POINTER(CUDA_ARRAY_DESCRIPTOR_v1))
+def cuArrayCreate(pHandle:ctypes._Pointer[CUarray], pAllocateArray:ctypes._Pointer[CUDA_ARRAY_DESCRIPTOR_v1]) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUDA_ARRAY_DESCRIPTOR_v1), CUarray)
+def cuArrayGetDescriptor(pArrayDescriptor:ctypes._Pointer[CUDA_ARRAY_DESCRIPTOR_v1], hArray:CUarray) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUarray), ctypes.POINTER(CUDA_ARRAY3D_DESCRIPTOR_v1))
+def cuArray3DCreate(pHandle:ctypes._Pointer[CUarray], pAllocateArray:ctypes._Pointer[CUDA_ARRAY3D_DESCRIPTOR_v1]) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUDA_ARRAY3D_DESCRIPTOR_v1), CUarray)
+def cuArray3DGetDescriptor(pArrayDescriptor:ctypes._Pointer[CUDA_ARRAY3D_DESCRIPTOR_v1], hArray:CUarray) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(ctypes.c_uint32), CUtexref, CUdeviceptr_v1, ctypes.c_uint32)
+def cuTexRefSetAddress(ByteOffset:ctypes._Pointer[ctypes.c_uint32], hTexRef:CUtexref, dptr:CUdeviceptr_v1, bytes:int) -> CUresult: ...
+@dll.bind(CUresult, CUtexref, ctypes.POINTER(CUDA_ARRAY_DESCRIPTOR_v1), CUdeviceptr_v1, ctypes.c_uint32)
+def cuTexRefSetAddress2D(hTexRef:CUtexref, desc:ctypes._Pointer[CUDA_ARRAY_DESCRIPTOR_v1], dptr:CUdeviceptr_v1, Pitch:int) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUdeviceptr_v1), CUtexref)
+def cuTexRefGetAddress(pdptr:ctypes._Pointer[CUdeviceptr_v1], hTexRef:CUtexref) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUdeviceptr_v1), ctypes.POINTER(ctypes.c_uint32), CUgraphicsResource)
+def cuGraphicsResourceGetMappedPointer(pDevPtr:ctypes._Pointer[CUdeviceptr_v1], pSize:ctypes._Pointer[ctypes.c_uint32], resource:CUgraphicsResource) -> CUresult: ...
+@dll.bind(CUresult, CUcontext)
 def cuCtxDestroy(ctx:CUcontext) -> CUresult: ...
-@dll.bind
-def cuCtxPopCurrent(pctx:ctypes.POINTER(CUcontext)) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, ctypes.POINTER(CUcontext))
+def cuCtxPopCurrent(pctx:ctypes._Pointer[CUcontext]) -> CUresult: ...
+@dll.bind(CUresult, CUcontext)
 def cuCtxPushCurrent(ctx:CUcontext) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, CUstream)
 def cuStreamDestroy(hStream:CUstream) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, CUevent)
 def cuEventDestroy(hEvent:CUevent) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, CUdevice)
 def cuDevicePrimaryCtxRelease(dev:CUdevice) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, CUdevice)
 def cuDevicePrimaryCtxReset(dev:CUdevice) -> CUresult: ...
-@dll.bind
-def cuDevicePrimaryCtxSetFlags(dev:CUdevice, flags:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuMemcpyHtoD_v2(dstDevice:CUdeviceptr, srcHost:ctypes.c_void_p, ByteCount:size_t) -> CUresult: ...
-@dll.bind
-def cuMemcpyDtoH_v2(dstHost:ctypes.c_void_p, srcDevice:CUdeviceptr, ByteCount:size_t) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, CUdevice, ctypes.c_uint32)
+def cuDevicePrimaryCtxSetFlags(dev:CUdevice, flags:int) -> CUresult: ...
+@dll.bind(CUresult, CUdeviceptr, ctypes.c_void_p, size_t)
+def cuMemcpyHtoD_v2(dstDevice:CUdeviceptr, srcHost:int|None, ByteCount:size_t) -> CUresult: ...
+@dll.bind(CUresult, ctypes.c_void_p, CUdeviceptr, size_t)
+def cuMemcpyDtoH_v2(dstHost:int|None, srcDevice:CUdeviceptr, ByteCount:size_t) -> CUresult: ...
+@dll.bind(CUresult, CUdeviceptr, CUdeviceptr, size_t)
 def cuMemcpyDtoD_v2(dstDevice:CUdeviceptr, srcDevice:CUdeviceptr, ByteCount:size_t) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, CUarray, size_t, CUdeviceptr, size_t)
 def cuMemcpyDtoA_v2(dstArray:CUarray, dstOffset:size_t, srcDevice:CUdeviceptr, ByteCount:size_t) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, CUdeviceptr, CUarray, size_t, size_t)
 def cuMemcpyAtoD_v2(dstDevice:CUdeviceptr, srcArray:CUarray, srcOffset:size_t, ByteCount:size_t) -> CUresult: ...
-@dll.bind
-def cuMemcpyHtoA_v2(dstArray:CUarray, dstOffset:size_t, srcHost:ctypes.c_void_p, ByteCount:size_t) -> CUresult: ...
-@dll.bind
-def cuMemcpyAtoH_v2(dstHost:ctypes.c_void_p, srcArray:CUarray, srcOffset:size_t, ByteCount:size_t) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, CUarray, size_t, ctypes.c_void_p, size_t)
+def cuMemcpyHtoA_v2(dstArray:CUarray, dstOffset:size_t, srcHost:int|None, ByteCount:size_t) -> CUresult: ...
+@dll.bind(CUresult, ctypes.c_void_p, CUarray, size_t, size_t)
+def cuMemcpyAtoH_v2(dstHost:int|None, srcArray:CUarray, srcOffset:size_t, ByteCount:size_t) -> CUresult: ...
+@dll.bind(CUresult, CUarray, size_t, CUarray, size_t, size_t)
 def cuMemcpyAtoA_v2(dstArray:CUarray, dstOffset:size_t, srcArray:CUarray, srcOffset:size_t, ByteCount:size_t) -> CUresult: ...
-@dll.bind
-def cuMemcpyHtoAAsync_v2(dstArray:CUarray, dstOffset:size_t, srcHost:ctypes.c_void_p, ByteCount:size_t, hStream:CUstream) -> CUresult: ...
-@dll.bind
-def cuMemcpyAtoHAsync_v2(dstHost:ctypes.c_void_p, srcArray:CUarray, srcOffset:size_t, ByteCount:size_t, hStream:CUstream) -> CUresult: ...
-@dll.bind
-def cuMemcpy2D_v2(pCopy:ctypes.POINTER(CUDA_MEMCPY2D)) -> CUresult: ...
-@dll.bind
-def cuMemcpy2DUnaligned_v2(pCopy:ctypes.POINTER(CUDA_MEMCPY2D)) -> CUresult: ...
-@dll.bind
-def cuMemcpy3D_v2(pCopy:ctypes.POINTER(CUDA_MEMCPY3D)) -> CUresult: ...
-@dll.bind
-def cuMemcpyHtoDAsync_v2(dstDevice:CUdeviceptr, srcHost:ctypes.c_void_p, ByteCount:size_t, hStream:CUstream) -> CUresult: ...
-@dll.bind
-def cuMemcpyDtoHAsync_v2(dstHost:ctypes.c_void_p, srcDevice:CUdeviceptr, ByteCount:size_t, hStream:CUstream) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, CUarray, size_t, ctypes.c_void_p, size_t, CUstream)
+def cuMemcpyHtoAAsync_v2(dstArray:CUarray, dstOffset:size_t, srcHost:int|None, ByteCount:size_t, hStream:CUstream) -> CUresult: ...
+@dll.bind(CUresult, ctypes.c_void_p, CUarray, size_t, size_t, CUstream)
+def cuMemcpyAtoHAsync_v2(dstHost:int|None, srcArray:CUarray, srcOffset:size_t, ByteCount:size_t, hStream:CUstream) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUDA_MEMCPY2D))
+def cuMemcpy2D_v2(pCopy:ctypes._Pointer[CUDA_MEMCPY2D]) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUDA_MEMCPY2D))
+def cuMemcpy2DUnaligned_v2(pCopy:ctypes._Pointer[CUDA_MEMCPY2D]) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUDA_MEMCPY3D))
+def cuMemcpy3D_v2(pCopy:ctypes._Pointer[CUDA_MEMCPY3D]) -> CUresult: ...
+@dll.bind(CUresult, CUdeviceptr, ctypes.c_void_p, size_t, CUstream)
+def cuMemcpyHtoDAsync_v2(dstDevice:CUdeviceptr, srcHost:int|None, ByteCount:size_t, hStream:CUstream) -> CUresult: ...
+@dll.bind(CUresult, ctypes.c_void_p, CUdeviceptr, size_t, CUstream)
+def cuMemcpyDtoHAsync_v2(dstHost:int|None, srcDevice:CUdeviceptr, ByteCount:size_t, hStream:CUstream) -> CUresult: ...
+@dll.bind(CUresult, CUdeviceptr, CUdeviceptr, size_t, CUstream)
 def cuMemcpyDtoDAsync_v2(dstDevice:CUdeviceptr, srcDevice:CUdeviceptr, ByteCount:size_t, hStream:CUstream) -> CUresult: ...
-@dll.bind
-def cuMemcpy2DAsync_v2(pCopy:ctypes.POINTER(CUDA_MEMCPY2D), hStream:CUstream) -> CUresult: ...
-@dll.bind
-def cuMemcpy3DAsync_v2(pCopy:ctypes.POINTER(CUDA_MEMCPY3D), hStream:CUstream) -> CUresult: ...
-@dll.bind
-def cuMemsetD8_v2(dstDevice:CUdeviceptr, uc:ctypes.c_ubyte, N:size_t) -> CUresult: ...
-@dll.bind
-def cuMemsetD16_v2(dstDevice:CUdeviceptr, us:ctypes.c_uint16, N:size_t) -> CUresult: ...
-@dll.bind
-def cuMemsetD32_v2(dstDevice:CUdeviceptr, ui:ctypes.c_uint32, N:size_t) -> CUresult: ...
-@dll.bind
-def cuMemsetD2D8_v2(dstDevice:CUdeviceptr, dstPitch:size_t, uc:ctypes.c_ubyte, Width:size_t, Height:size_t) -> CUresult: ...
-@dll.bind
-def cuMemsetD2D16_v2(dstDevice:CUdeviceptr, dstPitch:size_t, us:ctypes.c_uint16, Width:size_t, Height:size_t) -> CUresult: ...
-@dll.bind
-def cuMemsetD2D32_v2(dstDevice:CUdeviceptr, dstPitch:size_t, ui:ctypes.c_uint32, Width:size_t, Height:size_t) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, ctypes.POINTER(CUDA_MEMCPY2D), CUstream)
+def cuMemcpy2DAsync_v2(pCopy:ctypes._Pointer[CUDA_MEMCPY2D], hStream:CUstream) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUDA_MEMCPY3D), CUstream)
+def cuMemcpy3DAsync_v2(pCopy:ctypes._Pointer[CUDA_MEMCPY3D], hStream:CUstream) -> CUresult: ...
+@dll.bind(CUresult, CUdeviceptr, ctypes.c_ubyte, size_t)
+def cuMemsetD8_v2(dstDevice:CUdeviceptr, uc:int, N:size_t) -> CUresult: ...
+@dll.bind(CUresult, CUdeviceptr, ctypes.c_uint16, size_t)
+def cuMemsetD16_v2(dstDevice:CUdeviceptr, us:int, N:size_t) -> CUresult: ...
+@dll.bind(CUresult, CUdeviceptr, ctypes.c_uint32, size_t)
+def cuMemsetD32_v2(dstDevice:CUdeviceptr, ui:int, N:size_t) -> CUresult: ...
+@dll.bind(CUresult, CUdeviceptr, size_t, ctypes.c_ubyte, size_t, size_t)
+def cuMemsetD2D8_v2(dstDevice:CUdeviceptr, dstPitch:size_t, uc:int, Width:size_t, Height:size_t) -> CUresult: ...
+@dll.bind(CUresult, CUdeviceptr, size_t, ctypes.c_uint16, size_t, size_t)
+def cuMemsetD2D16_v2(dstDevice:CUdeviceptr, dstPitch:size_t, us:int, Width:size_t, Height:size_t) -> CUresult: ...
+@dll.bind(CUresult, CUdeviceptr, size_t, ctypes.c_uint32, size_t, size_t)
+def cuMemsetD2D32_v2(dstDevice:CUdeviceptr, dstPitch:size_t, ui:int, Width:size_t, Height:size_t) -> CUresult: ...
+@dll.bind(CUresult, CUdeviceptr, CUdeviceptr, size_t)
 def cuMemcpy(dst:CUdeviceptr, src:CUdeviceptr, ByteCount:size_t) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, CUdeviceptr, CUdeviceptr, size_t, CUstream)
 def cuMemcpyAsync(dst:CUdeviceptr, src:CUdeviceptr, ByteCount:size_t, hStream:CUstream) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, CUdeviceptr, CUcontext, CUdeviceptr, CUcontext, size_t)
 def cuMemcpyPeer(dstDevice:CUdeviceptr, dstContext:CUcontext, srcDevice:CUdeviceptr, srcContext:CUcontext, ByteCount:size_t) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, CUdeviceptr, CUcontext, CUdeviceptr, CUcontext, size_t, CUstream)
 def cuMemcpyPeerAsync(dstDevice:CUdeviceptr, dstContext:CUcontext, srcDevice:CUdeviceptr, srcContext:CUcontext, ByteCount:size_t, hStream:CUstream) -> CUresult: ...
-@dll.bind
-def cuMemcpy3DPeer(pCopy:ctypes.POINTER(CUDA_MEMCPY3D_PEER)) -> CUresult: ...
-@dll.bind
-def cuMemcpy3DPeerAsync(pCopy:ctypes.POINTER(CUDA_MEMCPY3D_PEER), hStream:CUstream) -> CUresult: ...
-@dll.bind
-def cuMemsetD8Async(dstDevice:CUdeviceptr, uc:ctypes.c_ubyte, N:size_t, hStream:CUstream) -> CUresult: ...
-@dll.bind
-def cuMemsetD16Async(dstDevice:CUdeviceptr, us:ctypes.c_uint16, N:size_t, hStream:CUstream) -> CUresult: ...
-@dll.bind
-def cuMemsetD32Async(dstDevice:CUdeviceptr, ui:ctypes.c_uint32, N:size_t, hStream:CUstream) -> CUresult: ...
-@dll.bind
-def cuMemsetD2D8Async(dstDevice:CUdeviceptr, dstPitch:size_t, uc:ctypes.c_ubyte, Width:size_t, Height:size_t, hStream:CUstream) -> CUresult: ...
-@dll.bind
-def cuMemsetD2D16Async(dstDevice:CUdeviceptr, dstPitch:size_t, us:ctypes.c_uint16, Width:size_t, Height:size_t, hStream:CUstream) -> CUresult: ...
-@dll.bind
-def cuMemsetD2D32Async(dstDevice:CUdeviceptr, dstPitch:size_t, ui:ctypes.c_uint32, Width:size_t, Height:size_t, hStream:CUstream) -> CUresult: ...
-@dll.bind
-def cuStreamGetPriority(hStream:CUstream, priority:ctypes.POINTER(ctypes.c_int32)) -> CUresult: ...
-@dll.bind
-def cuStreamGetId(hStream:CUstream, streamId:ctypes.POINTER(ctypes.c_uint64)) -> CUresult: ...
-@dll.bind
-def cuStreamGetFlags(hStream:CUstream, flags:ctypes.POINTER(ctypes.c_uint32)) -> CUresult: ...
-@dll.bind
-def cuStreamGetCtx(hStream:CUstream, pctx:ctypes.POINTER(CUcontext)) -> CUresult: ...
-@dll.bind
-def cuStreamWaitEvent(hStream:CUstream, hEvent:CUevent, Flags:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuStreamAddCallback(hStream:CUstream, callback:CUstreamCallback, userData:ctypes.c_void_p, flags:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuStreamAttachMemAsync(hStream:CUstream, dptr:CUdeviceptr, length:size_t, flags:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, ctypes.POINTER(CUDA_MEMCPY3D_PEER))
+def cuMemcpy3DPeer(pCopy:ctypes._Pointer[CUDA_MEMCPY3D_PEER]) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUDA_MEMCPY3D_PEER), CUstream)
+def cuMemcpy3DPeerAsync(pCopy:ctypes._Pointer[CUDA_MEMCPY3D_PEER], hStream:CUstream) -> CUresult: ...
+@dll.bind(CUresult, CUdeviceptr, ctypes.c_ubyte, size_t, CUstream)
+def cuMemsetD8Async(dstDevice:CUdeviceptr, uc:int, N:size_t, hStream:CUstream) -> CUresult: ...
+@dll.bind(CUresult, CUdeviceptr, ctypes.c_uint16, size_t, CUstream)
+def cuMemsetD16Async(dstDevice:CUdeviceptr, us:int, N:size_t, hStream:CUstream) -> CUresult: ...
+@dll.bind(CUresult, CUdeviceptr, ctypes.c_uint32, size_t, CUstream)
+def cuMemsetD32Async(dstDevice:CUdeviceptr, ui:int, N:size_t, hStream:CUstream) -> CUresult: ...
+@dll.bind(CUresult, CUdeviceptr, size_t, ctypes.c_ubyte, size_t, size_t, CUstream)
+def cuMemsetD2D8Async(dstDevice:CUdeviceptr, dstPitch:size_t, uc:int, Width:size_t, Height:size_t, hStream:CUstream) -> CUresult: ...
+@dll.bind(CUresult, CUdeviceptr, size_t, ctypes.c_uint16, size_t, size_t, CUstream)
+def cuMemsetD2D16Async(dstDevice:CUdeviceptr, dstPitch:size_t, us:int, Width:size_t, Height:size_t, hStream:CUstream) -> CUresult: ...
+@dll.bind(CUresult, CUdeviceptr, size_t, ctypes.c_uint32, size_t, size_t, CUstream)
+def cuMemsetD2D32Async(dstDevice:CUdeviceptr, dstPitch:size_t, ui:int, Width:size_t, Height:size_t, hStream:CUstream) -> CUresult: ...
+@dll.bind(CUresult, CUstream, ctypes.POINTER(ctypes.c_int32))
+def cuStreamGetPriority(hStream:CUstream, priority:ctypes._Pointer[ctypes.c_int32]) -> CUresult: ...
+@dll.bind(CUresult, CUstream, ctypes.POINTER(ctypes.c_uint64))
+def cuStreamGetId(hStream:CUstream, streamId:ctypes._Pointer[ctypes.c_uint64]) -> CUresult: ...
+@dll.bind(CUresult, CUstream, ctypes.POINTER(ctypes.c_uint32))
+def cuStreamGetFlags(hStream:CUstream, flags:ctypes._Pointer[ctypes.c_uint32]) -> CUresult: ...
+@dll.bind(CUresult, CUstream, ctypes.POINTER(CUcontext))
+def cuStreamGetCtx(hStream:CUstream, pctx:ctypes._Pointer[CUcontext]) -> CUresult: ...
+@dll.bind(CUresult, CUstream, CUevent, ctypes.c_uint32)
+def cuStreamWaitEvent(hStream:CUstream, hEvent:CUevent, Flags:int) -> CUresult: ...
+@dll.bind(CUresult, CUstream, CUstreamCallback, ctypes.c_void_p, ctypes.c_uint32)
+def cuStreamAddCallback(hStream:CUstream, callback:CUstreamCallback, userData:int|None, flags:int) -> CUresult: ...
+@dll.bind(CUresult, CUstream, CUdeviceptr, size_t, ctypes.c_uint32)
+def cuStreamAttachMemAsync(hStream:CUstream, dptr:CUdeviceptr, length:size_t, flags:int) -> CUresult: ...
+@dll.bind(CUresult, CUstream)
 def cuStreamQuery(hStream:CUstream) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, CUstream)
 def cuStreamSynchronize(hStream:CUstream) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, CUevent, CUstream)
 def cuEventRecord(hEvent:CUevent, hStream:CUstream) -> CUresult: ...
-@dll.bind
-def cuEventRecordWithFlags(hEvent:CUevent, hStream:CUstream, flags:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuLaunchKernel(f:CUfunction, gridDimX:ctypes.c_uint32, gridDimY:ctypes.c_uint32, gridDimZ:ctypes.c_uint32, blockDimX:ctypes.c_uint32, blockDimY:ctypes.c_uint32, blockDimZ:ctypes.c_uint32, sharedMemBytes:ctypes.c_uint32, hStream:CUstream, kernelParams:ctypes.POINTER(ctypes.c_void_p), extra:ctypes.POINTER(ctypes.c_void_p)) -> CUresult: ...
-@dll.bind
-def cuLaunchKernelEx(config:ctypes.POINTER(CUlaunchConfig), f:CUfunction, kernelParams:ctypes.POINTER(ctypes.c_void_p), extra:ctypes.POINTER(ctypes.c_void_p)) -> CUresult: ...
-@dll.bind
-def cuLaunchHostFunc(hStream:CUstream, fn:CUhostFn, userData:ctypes.c_void_p) -> CUresult: ...
-@dll.bind
-def cuGraphicsMapResources(count:ctypes.c_uint32, resources:ctypes.POINTER(CUgraphicsResource), hStream:CUstream) -> CUresult: ...
-@dll.bind
-def cuGraphicsUnmapResources(count:ctypes.c_uint32, resources:ctypes.POINTER(CUgraphicsResource), hStream:CUstream) -> CUresult: ...
-@dll.bind
-def cuStreamWriteValue32(stream:CUstream, addr:CUdeviceptr, value:cuuint32_t, flags:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuStreamWaitValue32(stream:CUstream, addr:CUdeviceptr, value:cuuint32_t, flags:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuStreamWriteValue64(stream:CUstream, addr:CUdeviceptr, value:cuuint64_t, flags:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuStreamWaitValue64(stream:CUstream, addr:CUdeviceptr, value:cuuint64_t, flags:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuStreamBatchMemOp(stream:CUstream, count:ctypes.c_uint32, paramArray:ctypes.POINTER(CUstreamBatchMemOpParams), flags:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuStreamWriteValue32_ptsz(stream:CUstream, addr:CUdeviceptr, value:cuuint32_t, flags:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuStreamWaitValue32_ptsz(stream:CUstream, addr:CUdeviceptr, value:cuuint32_t, flags:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuStreamWriteValue64_ptsz(stream:CUstream, addr:CUdeviceptr, value:cuuint64_t, flags:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuStreamWaitValue64_ptsz(stream:CUstream, addr:CUdeviceptr, value:cuuint64_t, flags:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuStreamBatchMemOp_ptsz(stream:CUstream, count:ctypes.c_uint32, paramArray:ctypes.POINTER(CUstreamBatchMemOpParams), flags:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuStreamWriteValue32_v2(stream:CUstream, addr:CUdeviceptr, value:cuuint32_t, flags:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuStreamWaitValue32_v2(stream:CUstream, addr:CUdeviceptr, value:cuuint32_t, flags:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuStreamWriteValue64_v2(stream:CUstream, addr:CUdeviceptr, value:cuuint64_t, flags:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuStreamWaitValue64_v2(stream:CUstream, addr:CUdeviceptr, value:cuuint64_t, flags:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuStreamBatchMemOp_v2(stream:CUstream, count:ctypes.c_uint32, paramArray:ctypes.POINTER(CUstreamBatchMemOpParams), flags:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, CUevent, CUstream, ctypes.c_uint32)
+def cuEventRecordWithFlags(hEvent:CUevent, hStream:CUstream, flags:int) -> CUresult: ...
+@dll.bind(CUresult, CUfunction, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, CUstream, ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(ctypes.c_void_p))
+def cuLaunchKernel(f:CUfunction, gridDimX:int, gridDimY:int, gridDimZ:int, blockDimX:int, blockDimY:int, blockDimZ:int, sharedMemBytes:int, hStream:CUstream, kernelParams:ctypes._Pointer[ctypes.c_void_p], extra:ctypes._Pointer[ctypes.c_void_p]) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUlaunchConfig), CUfunction, ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(ctypes.c_void_p))
+def cuLaunchKernelEx(config:ctypes._Pointer[CUlaunchConfig], f:CUfunction, kernelParams:ctypes._Pointer[ctypes.c_void_p], extra:ctypes._Pointer[ctypes.c_void_p]) -> CUresult: ...
+@dll.bind(CUresult, CUstream, CUhostFn, ctypes.c_void_p)
+def cuLaunchHostFunc(hStream:CUstream, fn:CUhostFn, userData:int|None) -> CUresult: ...
+@dll.bind(CUresult, ctypes.c_uint32, ctypes.POINTER(CUgraphicsResource), CUstream)
+def cuGraphicsMapResources(count:int, resources:ctypes._Pointer[CUgraphicsResource], hStream:CUstream) -> CUresult: ...
+@dll.bind(CUresult, ctypes.c_uint32, ctypes.POINTER(CUgraphicsResource), CUstream)
+def cuGraphicsUnmapResources(count:int, resources:ctypes._Pointer[CUgraphicsResource], hStream:CUstream) -> CUresult: ...
+@dll.bind(CUresult, CUstream, CUdeviceptr, cuuint32_t, ctypes.c_uint32)
+def cuStreamWriteValue32(stream:CUstream, addr:CUdeviceptr, value:cuuint32_t, flags:int) -> CUresult: ...
+@dll.bind(CUresult, CUstream, CUdeviceptr, cuuint32_t, ctypes.c_uint32)
+def cuStreamWaitValue32(stream:CUstream, addr:CUdeviceptr, value:cuuint32_t, flags:int) -> CUresult: ...
+@dll.bind(CUresult, CUstream, CUdeviceptr, cuuint64_t, ctypes.c_uint32)
+def cuStreamWriteValue64(stream:CUstream, addr:CUdeviceptr, value:cuuint64_t, flags:int) -> CUresult: ...
+@dll.bind(CUresult, CUstream, CUdeviceptr, cuuint64_t, ctypes.c_uint32)
+def cuStreamWaitValue64(stream:CUstream, addr:CUdeviceptr, value:cuuint64_t, flags:int) -> CUresult: ...
+@dll.bind(CUresult, CUstream, ctypes.c_uint32, ctypes.POINTER(CUstreamBatchMemOpParams), ctypes.c_uint32)
+def cuStreamBatchMemOp(stream:CUstream, count:int, paramArray:ctypes._Pointer[CUstreamBatchMemOpParams], flags:int) -> CUresult: ...
+@dll.bind(CUresult, CUstream, CUdeviceptr, cuuint32_t, ctypes.c_uint32)
+def cuStreamWriteValue32_ptsz(stream:CUstream, addr:CUdeviceptr, value:cuuint32_t, flags:int) -> CUresult: ...
+@dll.bind(CUresult, CUstream, CUdeviceptr, cuuint32_t, ctypes.c_uint32)
+def cuStreamWaitValue32_ptsz(stream:CUstream, addr:CUdeviceptr, value:cuuint32_t, flags:int) -> CUresult: ...
+@dll.bind(CUresult, CUstream, CUdeviceptr, cuuint64_t, ctypes.c_uint32)
+def cuStreamWriteValue64_ptsz(stream:CUstream, addr:CUdeviceptr, value:cuuint64_t, flags:int) -> CUresult: ...
+@dll.bind(CUresult, CUstream, CUdeviceptr, cuuint64_t, ctypes.c_uint32)
+def cuStreamWaitValue64_ptsz(stream:CUstream, addr:CUdeviceptr, value:cuuint64_t, flags:int) -> CUresult: ...
+@dll.bind(CUresult, CUstream, ctypes.c_uint32, ctypes.POINTER(CUstreamBatchMemOpParams), ctypes.c_uint32)
+def cuStreamBatchMemOp_ptsz(stream:CUstream, count:int, paramArray:ctypes._Pointer[CUstreamBatchMemOpParams], flags:int) -> CUresult: ...
+@dll.bind(CUresult, CUstream, CUdeviceptr, cuuint32_t, ctypes.c_uint32)
+def cuStreamWriteValue32_v2(stream:CUstream, addr:CUdeviceptr, value:cuuint32_t, flags:int) -> CUresult: ...
+@dll.bind(CUresult, CUstream, CUdeviceptr, cuuint32_t, ctypes.c_uint32)
+def cuStreamWaitValue32_v2(stream:CUstream, addr:CUdeviceptr, value:cuuint32_t, flags:int) -> CUresult: ...
+@dll.bind(CUresult, CUstream, CUdeviceptr, cuuint64_t, ctypes.c_uint32)
+def cuStreamWriteValue64_v2(stream:CUstream, addr:CUdeviceptr, value:cuuint64_t, flags:int) -> CUresult: ...
+@dll.bind(CUresult, CUstream, CUdeviceptr, cuuint64_t, ctypes.c_uint32)
+def cuStreamWaitValue64_v2(stream:CUstream, addr:CUdeviceptr, value:cuuint64_t, flags:int) -> CUresult: ...
+@dll.bind(CUresult, CUstream, ctypes.c_uint32, ctypes.POINTER(CUstreamBatchMemOpParams), ctypes.c_uint32)
+def cuStreamBatchMemOp_v2(stream:CUstream, count:int, paramArray:ctypes._Pointer[CUstreamBatchMemOpParams], flags:int) -> CUresult: ...
+@dll.bind(CUresult, CUdeviceptr, size_t, CUdevice, CUstream)
 def cuMemPrefetchAsync(devPtr:CUdeviceptr, count:size_t, dstDevice:CUdevice, hStream:CUstream) -> CUresult: ...
-@dll.bind
-def cuLaunchCooperativeKernel(f:CUfunction, gridDimX:ctypes.c_uint32, gridDimY:ctypes.c_uint32, gridDimZ:ctypes.c_uint32, blockDimX:ctypes.c_uint32, blockDimY:ctypes.c_uint32, blockDimZ:ctypes.c_uint32, sharedMemBytes:ctypes.c_uint32, hStream:CUstream, kernelParams:ctypes.POINTER(ctypes.c_void_p)) -> CUresult: ...
-@dll.bind
-def cuSignalExternalSemaphoresAsync(extSemArray:ctypes.POINTER(CUexternalSemaphore), paramsArray:ctypes.POINTER(CUDA_EXTERNAL_SEMAPHORE_SIGNAL_PARAMS), numExtSems:ctypes.c_uint32, stream:CUstream) -> CUresult: ...
-@dll.bind
-def cuWaitExternalSemaphoresAsync(extSemArray:ctypes.POINTER(CUexternalSemaphore), paramsArray:ctypes.POINTER(CUDA_EXTERNAL_SEMAPHORE_WAIT_PARAMS), numExtSems:ctypes.c_uint32, stream:CUstream) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, CUfunction, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32, CUstream, ctypes.POINTER(ctypes.c_void_p))
+def cuLaunchCooperativeKernel(f:CUfunction, gridDimX:int, gridDimY:int, gridDimZ:int, blockDimX:int, blockDimY:int, blockDimZ:int, sharedMemBytes:int, hStream:CUstream, kernelParams:ctypes._Pointer[ctypes.c_void_p]) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUexternalSemaphore), ctypes.POINTER(CUDA_EXTERNAL_SEMAPHORE_SIGNAL_PARAMS), ctypes.c_uint32, CUstream)
+def cuSignalExternalSemaphoresAsync(extSemArray:ctypes._Pointer[CUexternalSemaphore], paramsArray:ctypes._Pointer[CUDA_EXTERNAL_SEMAPHORE_SIGNAL_PARAMS], numExtSems:int, stream:CUstream) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUexternalSemaphore), ctypes.POINTER(CUDA_EXTERNAL_SEMAPHORE_WAIT_PARAMS), ctypes.c_uint32, CUstream)
+def cuWaitExternalSemaphoresAsync(extSemArray:ctypes._Pointer[CUexternalSemaphore], paramsArray:ctypes._Pointer[CUDA_EXTERNAL_SEMAPHORE_WAIT_PARAMS], numExtSems:int, stream:CUstream) -> CUresult: ...
+@dll.bind(CUresult, CUstream)
 def cuStreamBeginCapture(hStream:CUstream) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, CUstream)
 def cuStreamBeginCapture_ptsz(hStream:CUstream) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, CUstream, CUstreamCaptureMode)
 def cuStreamBeginCapture_v2(hStream:CUstream, mode:CUstreamCaptureMode) -> CUresult: ...
-@dll.bind
-def cuStreamEndCapture(hStream:CUstream, phGraph:ctypes.POINTER(CUgraph)) -> CUresult: ...
-@dll.bind
-def cuStreamIsCapturing(hStream:CUstream, captureStatus:ctypes.POINTER(CUstreamCaptureStatus)) -> CUresult: ...
-@dll.bind
-def cuStreamGetCaptureInfo(hStream:CUstream, captureStatus_out:ctypes.POINTER(CUstreamCaptureStatus), id_out:ctypes.POINTER(cuuint64_t)) -> CUresult: ...
-@dll.bind
-def cuStreamGetCaptureInfo_ptsz(hStream:CUstream, captureStatus_out:ctypes.POINTER(CUstreamCaptureStatus), id_out:ctypes.POINTER(cuuint64_t)) -> CUresult: ...
-@dll.bind
-def cuStreamGetCaptureInfo_v2(hStream:CUstream, captureStatus_out:ctypes.POINTER(CUstreamCaptureStatus), id_out:ctypes.POINTER(cuuint64_t), graph_out:ctypes.POINTER(CUgraph), dependencies_out:ctypes.POINTER(ctypes.POINTER(CUgraphNode)), numDependencies_out:ctypes.POINTER(size_t)) -> CUresult: ...
-@dll.bind
-def cuGraphAddKernelNode(phGraphNode:ctypes.POINTER(CUgraphNode), hGraph:CUgraph, dependencies:ctypes.POINTER(CUgraphNode), numDependencies:size_t, nodeParams:ctypes.POINTER(CUDA_KERNEL_NODE_PARAMS_v1)) -> CUresult: ...
-@dll.bind
-def cuGraphKernelNodeGetParams(hNode:CUgraphNode, nodeParams:ctypes.POINTER(CUDA_KERNEL_NODE_PARAMS_v1)) -> CUresult: ...
-@dll.bind
-def cuGraphKernelNodeSetParams(hNode:CUgraphNode, nodeParams:ctypes.POINTER(CUDA_KERNEL_NODE_PARAMS_v1)) -> CUresult: ...
-@dll.bind
-def cuGraphExecKernelNodeSetParams(hGraphExec:CUgraphExec, hNode:CUgraphNode, nodeParams:ctypes.POINTER(CUDA_KERNEL_NODE_PARAMS_v1)) -> CUresult: ...
-@dll.bind
-def cuGraphInstantiateWithParams(phGraphExec:ctypes.POINTER(CUgraphExec), hGraph:CUgraph, instantiateParams:ctypes.POINTER(CUDA_GRAPH_INSTANTIATE_PARAMS)) -> CUresult: ...
-@dll.bind
-def cuGraphExecUpdate(hGraphExec:CUgraphExec, hGraph:CUgraph, hErrorNode_out:ctypes.POINTER(CUgraphNode), updateResult_out:ctypes.POINTER(CUgraphExecUpdateResult)) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, CUstream, ctypes.POINTER(CUgraph))
+def cuStreamEndCapture(hStream:CUstream, phGraph:ctypes._Pointer[CUgraph]) -> CUresult: ...
+@dll.bind(CUresult, CUstream, ctypes.POINTER(CUstreamCaptureStatus))
+def cuStreamIsCapturing(hStream:CUstream, captureStatus:ctypes._Pointer[CUstreamCaptureStatus]) -> CUresult: ...
+@dll.bind(CUresult, CUstream, ctypes.POINTER(CUstreamCaptureStatus), ctypes.POINTER(cuuint64_t))
+def cuStreamGetCaptureInfo(hStream:CUstream, captureStatus_out:ctypes._Pointer[CUstreamCaptureStatus], id_out:ctypes._Pointer[cuuint64_t]) -> CUresult: ...
+@dll.bind(CUresult, CUstream, ctypes.POINTER(CUstreamCaptureStatus), ctypes.POINTER(cuuint64_t))
+def cuStreamGetCaptureInfo_ptsz(hStream:CUstream, captureStatus_out:ctypes._Pointer[CUstreamCaptureStatus], id_out:ctypes._Pointer[cuuint64_t]) -> CUresult: ...
+@dll.bind(CUresult, CUstream, ctypes.POINTER(CUstreamCaptureStatus), ctypes.POINTER(cuuint64_t), ctypes.POINTER(CUgraph), ctypes.POINTER(ctypes.POINTER(CUgraphNode)), ctypes.POINTER(size_t))
+def cuStreamGetCaptureInfo_v2(hStream:CUstream, captureStatus_out:ctypes._Pointer[CUstreamCaptureStatus], id_out:ctypes._Pointer[cuuint64_t], graph_out:ctypes._Pointer[CUgraph], dependencies_out:ctypes._Pointer[ctypes.POINTER(CUgraphNode)], numDependencies_out:ctypes._Pointer[size_t]) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUgraphNode), CUgraph, ctypes.POINTER(CUgraphNode), size_t, ctypes.POINTER(CUDA_KERNEL_NODE_PARAMS_v1))
+def cuGraphAddKernelNode(phGraphNode:ctypes._Pointer[CUgraphNode], hGraph:CUgraph, dependencies:ctypes._Pointer[CUgraphNode], numDependencies:size_t, nodeParams:ctypes._Pointer[CUDA_KERNEL_NODE_PARAMS_v1]) -> CUresult: ...
+@dll.bind(CUresult, CUgraphNode, ctypes.POINTER(CUDA_KERNEL_NODE_PARAMS_v1))
+def cuGraphKernelNodeGetParams(hNode:CUgraphNode, nodeParams:ctypes._Pointer[CUDA_KERNEL_NODE_PARAMS_v1]) -> CUresult: ...
+@dll.bind(CUresult, CUgraphNode, ctypes.POINTER(CUDA_KERNEL_NODE_PARAMS_v1))
+def cuGraphKernelNodeSetParams(hNode:CUgraphNode, nodeParams:ctypes._Pointer[CUDA_KERNEL_NODE_PARAMS_v1]) -> CUresult: ...
+@dll.bind(CUresult, CUgraphExec, CUgraphNode, ctypes.POINTER(CUDA_KERNEL_NODE_PARAMS_v1))
+def cuGraphExecKernelNodeSetParams(hGraphExec:CUgraphExec, hNode:CUgraphNode, nodeParams:ctypes._Pointer[CUDA_KERNEL_NODE_PARAMS_v1]) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUgraphExec), CUgraph, ctypes.POINTER(CUDA_GRAPH_INSTANTIATE_PARAMS))
+def cuGraphInstantiateWithParams(phGraphExec:ctypes._Pointer[CUgraphExec], hGraph:CUgraph, instantiateParams:ctypes._Pointer[CUDA_GRAPH_INSTANTIATE_PARAMS]) -> CUresult: ...
+@dll.bind(CUresult, CUgraphExec, CUgraph, ctypes.POINTER(CUgraphNode), ctypes.POINTER(CUgraphExecUpdateResult))
+def cuGraphExecUpdate(hGraphExec:CUgraphExec, hGraph:CUgraph, hErrorNode_out:ctypes._Pointer[CUgraphNode], updateResult_out:ctypes._Pointer[CUgraphExecUpdateResult]) -> CUresult: ...
+@dll.bind(CUresult, CUgraphExec, CUstream)
 def cuGraphUpload(hGraph:CUgraphExec, hStream:CUstream) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, CUgraphExec, CUstream)
 def cuGraphLaunch(hGraph:CUgraphExec, hStream:CUstream) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, CUstream, CUstream)
 def cuStreamCopyAttributes(dstStream:CUstream, srcStream:CUstream) -> CUresult: ...
-@dll.bind
-def cuStreamGetAttribute(hStream:CUstream, attr:CUstreamAttrID, value:ctypes.POINTER(CUstreamAttrValue)) -> CUresult: ...
-@dll.bind
-def cuStreamSetAttribute(hStream:CUstream, attr:CUstreamAttrID, param:ctypes.POINTER(CUstreamAttrValue)) -> CUresult: ...
-@dll.bind
-def cuIpcOpenMemHandle(pdptr:ctypes.POINTER(CUdeviceptr), handle:CUipcMemHandle, Flags:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuGraphInstantiate(phGraphExec:ctypes.POINTER(CUgraphExec), hGraph:CUgraph, phErrorNode:ctypes.POINTER(CUgraphNode), logBuffer:ctypes.POINTER(ctypes.c_char), bufferSize:size_t) -> CUresult: ...
-@dll.bind
-def cuGraphInstantiate_v2(phGraphExec:ctypes.POINTER(CUgraphExec), hGraph:CUgraph, phErrorNode:ctypes.POINTER(CUgraphNode), logBuffer:ctypes.POINTER(ctypes.c_char), bufferSize:size_t) -> CUresult: ...
-@dll.bind
-def cuMemMapArrayAsync(mapInfoList:ctypes.POINTER(CUarrayMapInfo), count:ctypes.c_uint32, hStream:CUstream) -> CUresult: ...
-@dll.bind
+@dll.bind(CUresult, CUstream, CUstreamAttrID, ctypes.POINTER(CUstreamAttrValue))
+def cuStreamGetAttribute(hStream:CUstream, attr:CUstreamAttrID, value:ctypes._Pointer[CUstreamAttrValue]) -> CUresult: ...
+@dll.bind(CUresult, CUstream, CUstreamAttrID, ctypes.POINTER(CUstreamAttrValue))
+def cuStreamSetAttribute(hStream:CUstream, attr:CUstreamAttrID, param:ctypes._Pointer[CUstreamAttrValue]) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUdeviceptr), CUipcMemHandle, ctypes.c_uint32)
+def cuIpcOpenMemHandle(pdptr:ctypes._Pointer[CUdeviceptr], handle:CUipcMemHandle, Flags:int) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUgraphExec), CUgraph, ctypes.POINTER(CUgraphNode), ctypes.POINTER(ctypes.c_char), size_t)
+def cuGraphInstantiate(phGraphExec:ctypes._Pointer[CUgraphExec], hGraph:CUgraph, phErrorNode:ctypes._Pointer[CUgraphNode], logBuffer:ctypes._Pointer[ctypes.c_char], bufferSize:size_t) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUgraphExec), CUgraph, ctypes.POINTER(CUgraphNode), ctypes.POINTER(ctypes.c_char), size_t)
+def cuGraphInstantiate_v2(phGraphExec:ctypes._Pointer[CUgraphExec], hGraph:CUgraph, phErrorNode:ctypes._Pointer[CUgraphNode], logBuffer:ctypes._Pointer[ctypes.c_char], bufferSize:size_t) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUarrayMapInfo), ctypes.c_uint32, CUstream)
+def cuMemMapArrayAsync(mapInfoList:ctypes._Pointer[CUarrayMapInfo], count:int, hStream:CUstream) -> CUresult: ...
+@dll.bind(CUresult, CUdeviceptr, CUstream)
 def cuMemFreeAsync(dptr:CUdeviceptr, hStream:CUstream) -> CUresult: ...
-@dll.bind
-def cuMemAllocAsync(dptr:ctypes.POINTER(CUdeviceptr), bytesize:size_t, hStream:CUstream) -> CUresult: ...
-@dll.bind
-def cuMemAllocFromPoolAsync(dptr:ctypes.POINTER(CUdeviceptr), bytesize:size_t, pool:CUmemoryPool, hStream:CUstream) -> CUresult: ...
-@dll.bind
-def cuStreamUpdateCaptureDependencies(hStream:CUstream, dependencies:ctypes.POINTER(CUgraphNode), numDependencies:size_t, flags:ctypes.c_uint32) -> CUresult: ...
-@dll.bind
-def cuGetProcAddress(symbol:ctypes.POINTER(ctypes.c_char), pfn:ctypes.POINTER(ctypes.c_void_p), cudaVersion:ctypes.c_int32, flags:cuuint64_t) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUdeviceptr), size_t, CUstream)
+def cuMemAllocAsync(dptr:ctypes._Pointer[CUdeviceptr], bytesize:size_t, hStream:CUstream) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(CUdeviceptr), size_t, CUmemoryPool, CUstream)
+def cuMemAllocFromPoolAsync(dptr:ctypes._Pointer[CUdeviceptr], bytesize:size_t, pool:CUmemoryPool, hStream:CUstream) -> CUresult: ...
+@dll.bind(CUresult, CUstream, ctypes.POINTER(CUgraphNode), size_t, ctypes.c_uint32)
+def cuStreamUpdateCaptureDependencies(hStream:CUstream, dependencies:ctypes._Pointer[CUgraphNode], numDependencies:size_t, flags:int) -> CUresult: ...
+@dll.bind(CUresult, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_void_p), ctypes.c_int32, cuuint64_t)
+def cuGetProcAddress(symbol:ctypes._Pointer[ctypes.c_char], pfn:ctypes._Pointer[ctypes.c_void_p], cudaVersion:int, flags:cuuint64_t) -> CUresult: ...

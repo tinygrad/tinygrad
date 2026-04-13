@@ -1,4 +1,5 @@
 # mypy: disable-error-code="empty-body"
+from __future__ import annotations
 import ctypes
 from typing import Literal, TypeAlias
 from tinygrad.runtime.support.c import _IO, _IOW, _IOR, _IOWR
@@ -20,166 +21,166 @@ enum_libusb_bos_type: dict[int, str] = {(LIBUSB_BT_WIRELESS_USB_DEVICE_CAPABILIT
 @c.record
 class struct_libusb_device_descriptor(c.Struct):
   SIZE = 18
-  bLength: 'int'
-  bDescriptorType: 'int'
-  bcdUSB: 'int'
-  bDeviceClass: 'int'
-  bDeviceSubClass: 'int'
-  bDeviceProtocol: 'int'
-  bMaxPacketSize0: 'int'
-  idVendor: 'int'
-  idProduct: 'int'
-  bcdDevice: 'int'
-  iManufacturer: 'int'
-  iProduct: 'int'
-  iSerialNumber: 'int'
-  bNumConfigurations: 'int'
+  bLength: int
+  bDescriptorType: int
+  bcdUSB: int
+  bDeviceClass: int
+  bDeviceSubClass: int
+  bDeviceProtocol: int
+  bMaxPacketSize0: int
+  idVendor: int
+  idProduct: int
+  bcdDevice: int
+  iManufacturer: int
+  iProduct: int
+  iSerialNumber: int
+  bNumConfigurations: int
 uint8_t: TypeAlias = ctypes.c_ubyte
 uint16_t: TypeAlias = ctypes.c_uint16
 struct_libusb_device_descriptor.register_fields([('bLength', uint8_t, 0), ('bDescriptorType', uint8_t, 1), ('bcdUSB', uint16_t, 2), ('bDeviceClass', uint8_t, 4), ('bDeviceSubClass', uint8_t, 5), ('bDeviceProtocol', uint8_t, 6), ('bMaxPacketSize0', uint8_t, 7), ('idVendor', uint16_t, 8), ('idProduct', uint16_t, 10), ('bcdDevice', uint16_t, 12), ('iManufacturer', uint8_t, 14), ('iProduct', uint8_t, 15), ('iSerialNumber', uint8_t, 16), ('bNumConfigurations', uint8_t, 17)])
 @c.record
 class struct_libusb_endpoint_descriptor(c.Struct):
   SIZE = 32
-  bLength: 'int'
-  bDescriptorType: 'int'
-  bEndpointAddress: 'int'
-  bmAttributes: 'int'
-  wMaxPacketSize: 'int'
-  bInterval: 'int'
-  bRefresh: 'int'
-  bSynchAddress: 'int'
-  extra: 'ctypes._Pointer[int]'
-  extra_length: 'int'
+  bLength: int
+  bDescriptorType: int
+  bEndpointAddress: int
+  bmAttributes: int
+  wMaxPacketSize: int
+  bInterval: int
+  bRefresh: int
+  bSynchAddress: int
+  extra: ctypes._Pointer[ctypes.c_ubyte]
+  extra_length: int
 struct_libusb_endpoint_descriptor.register_fields([('bLength', uint8_t, 0), ('bDescriptorType', uint8_t, 1), ('bEndpointAddress', uint8_t, 2), ('bmAttributes', uint8_t, 3), ('wMaxPacketSize', uint16_t, 4), ('bInterval', uint8_t, 6), ('bRefresh', uint8_t, 7), ('bSynchAddress', uint8_t, 8), ('extra', ctypes.POINTER(ctypes.c_ubyte), 16), ('extra_length', ctypes.c_int32, 24)])
 @c.record
 class struct_libusb_interface_association_descriptor(c.Struct):
   SIZE = 8
-  bLength: 'int'
-  bDescriptorType: 'int'
-  bFirstInterface: 'int'
-  bInterfaceCount: 'int'
-  bFunctionClass: 'int'
-  bFunctionSubClass: 'int'
-  bFunctionProtocol: 'int'
-  iFunction: 'int'
+  bLength: int
+  bDescriptorType: int
+  bFirstInterface: int
+  bInterfaceCount: int
+  bFunctionClass: int
+  bFunctionSubClass: int
+  bFunctionProtocol: int
+  iFunction: int
 struct_libusb_interface_association_descriptor.register_fields([('bLength', uint8_t, 0), ('bDescriptorType', uint8_t, 1), ('bFirstInterface', uint8_t, 2), ('bInterfaceCount', uint8_t, 3), ('bFunctionClass', uint8_t, 4), ('bFunctionSubClass', uint8_t, 5), ('bFunctionProtocol', uint8_t, 6), ('iFunction', uint8_t, 7)])
 @c.record
 class struct_libusb_interface_association_descriptor_array(c.Struct):
   SIZE = 16
-  iad: 'ctypes._Pointer[struct_libusb_interface_association_descriptor]'
-  length: 'int'
+  iad: ctypes._Pointer[struct_libusb_interface_association_descriptor]
+  length: int
 struct_libusb_interface_association_descriptor_array.register_fields([('iad', ctypes.POINTER(struct_libusb_interface_association_descriptor), 0), ('length', ctypes.c_int32, 8)])
 @c.record
 class struct_libusb_interface_descriptor(c.Struct):
   SIZE = 40
-  bLength: 'int'
-  bDescriptorType: 'int'
-  bInterfaceNumber: 'int'
-  bAlternateSetting: 'int'
-  bNumEndpoints: 'int'
-  bInterfaceClass: 'int'
-  bInterfaceSubClass: 'int'
-  bInterfaceProtocol: 'int'
-  iInterface: 'int'
-  endpoint: 'ctypes._Pointer[struct_libusb_endpoint_descriptor]'
-  extra: 'ctypes._Pointer[int]'
-  extra_length: 'int'
+  bLength: int
+  bDescriptorType: int
+  bInterfaceNumber: int
+  bAlternateSetting: int
+  bNumEndpoints: int
+  bInterfaceClass: int
+  bInterfaceSubClass: int
+  bInterfaceProtocol: int
+  iInterface: int
+  endpoint: ctypes._Pointer[struct_libusb_endpoint_descriptor]
+  extra: ctypes._Pointer[ctypes.c_ubyte]
+  extra_length: int
 struct_libusb_interface_descriptor.register_fields([('bLength', uint8_t, 0), ('bDescriptorType', uint8_t, 1), ('bInterfaceNumber', uint8_t, 2), ('bAlternateSetting', uint8_t, 3), ('bNumEndpoints', uint8_t, 4), ('bInterfaceClass', uint8_t, 5), ('bInterfaceSubClass', uint8_t, 6), ('bInterfaceProtocol', uint8_t, 7), ('iInterface', uint8_t, 8), ('endpoint', ctypes.POINTER(struct_libusb_endpoint_descriptor), 16), ('extra', ctypes.POINTER(ctypes.c_ubyte), 24), ('extra_length', ctypes.c_int32, 32)])
 @c.record
 class struct_libusb_interface(c.Struct):
   SIZE = 16
-  altsetting: 'ctypes._Pointer[struct_libusb_interface_descriptor]'
-  num_altsetting: 'int'
+  altsetting: ctypes._Pointer[struct_libusb_interface_descriptor]
+  num_altsetting: int
 struct_libusb_interface.register_fields([('altsetting', ctypes.POINTER(struct_libusb_interface_descriptor), 0), ('num_altsetting', ctypes.c_int32, 8)])
 @c.record
 class struct_libusb_config_descriptor(c.Struct):
   SIZE = 40
-  bLength: 'int'
-  bDescriptorType: 'int'
-  wTotalLength: 'int'
-  bNumInterfaces: 'int'
-  bConfigurationValue: 'int'
-  iConfiguration: 'int'
-  bmAttributes: 'int'
-  MaxPower: 'int'
-  interface: 'ctypes._Pointer[struct_libusb_interface]'
-  extra: 'ctypes._Pointer[int]'
-  extra_length: 'int'
+  bLength: int
+  bDescriptorType: int
+  wTotalLength: int
+  bNumInterfaces: int
+  bConfigurationValue: int
+  iConfiguration: int
+  bmAttributes: int
+  MaxPower: int
+  interface: ctypes._Pointer[struct_libusb_interface]
+  extra: ctypes._Pointer[ctypes.c_ubyte]
+  extra_length: int
 struct_libusb_config_descriptor.register_fields([('bLength', uint8_t, 0), ('bDescriptorType', uint8_t, 1), ('wTotalLength', uint16_t, 2), ('bNumInterfaces', uint8_t, 4), ('bConfigurationValue', uint8_t, 5), ('iConfiguration', uint8_t, 6), ('bmAttributes', uint8_t, 7), ('MaxPower', uint8_t, 8), ('interface', ctypes.POINTER(struct_libusb_interface), 16), ('extra', ctypes.POINTER(ctypes.c_ubyte), 24), ('extra_length', ctypes.c_int32, 32)])
 @c.record
 class struct_libusb_ss_endpoint_companion_descriptor(c.Struct):
   SIZE = 6
-  bLength: 'int'
-  bDescriptorType: 'int'
-  bMaxBurst: 'int'
-  bmAttributes: 'int'
-  wBytesPerInterval: 'int'
+  bLength: int
+  bDescriptorType: int
+  bMaxBurst: int
+  bmAttributes: int
+  wBytesPerInterval: int
 struct_libusb_ss_endpoint_companion_descriptor.register_fields([('bLength', uint8_t, 0), ('bDescriptorType', uint8_t, 1), ('bMaxBurst', uint8_t, 2), ('bmAttributes', uint8_t, 3), ('wBytesPerInterval', uint16_t, 4)])
 @c.record
 class struct_libusb_bos_dev_capability_descriptor(c.Struct):
   SIZE = 3
-  bLength: 'int'
-  bDescriptorType: 'int'
-  bDevCapabilityType: 'int'
-  dev_capability_data: 'list[int]'
+  bLength: int
+  bDescriptorType: int
+  bDevCapabilityType: int
+  dev_capability_data: ctypes.Array[ctypes.c_ubyte]
 struct_libusb_bos_dev_capability_descriptor.register_fields([('bLength', uint8_t, 0), ('bDescriptorType', uint8_t, 1), ('bDevCapabilityType', uint8_t, 2), ('dev_capability_data', (uint8_t * 0), 3)])
 @c.record
 class struct_libusb_bos_descriptor(c.Struct):
   SIZE = 8
-  bLength: 'int'
-  bDescriptorType: 'int'
-  wTotalLength: 'int'
-  bNumDeviceCaps: 'int'
-  dev_capability: 'list[ctypes._Pointer[struct_libusb_bos_dev_capability_descriptor]]'
+  bLength: int
+  bDescriptorType: int
+  wTotalLength: int
+  bNumDeviceCaps: int
+  dev_capability: ctypes.Array[ctypes.POINTER(struct_libusb_bos_dev_capability_descriptor)]
 struct_libusb_bos_descriptor.register_fields([('bLength', uint8_t, 0), ('bDescriptorType', uint8_t, 1), ('wTotalLength', uint16_t, 2), ('bNumDeviceCaps', uint8_t, 4), ('dev_capability', (ctypes.POINTER(struct_libusb_bos_dev_capability_descriptor) * 0), 8)])
 @c.record
 class struct_libusb_usb_2_0_extension_descriptor(c.Struct):
   SIZE = 8
-  bLength: 'int'
-  bDescriptorType: 'int'
-  bDevCapabilityType: 'int'
-  bmAttributes: 'int'
+  bLength: int
+  bDescriptorType: int
+  bDevCapabilityType: int
+  bmAttributes: int
 uint32_t: TypeAlias = ctypes.c_uint32
 struct_libusb_usb_2_0_extension_descriptor.register_fields([('bLength', uint8_t, 0), ('bDescriptorType', uint8_t, 1), ('bDevCapabilityType', uint8_t, 2), ('bmAttributes', uint32_t, 4)])
 @c.record
 class struct_libusb_ss_usb_device_capability_descriptor(c.Struct):
   SIZE = 10
-  bLength: 'int'
-  bDescriptorType: 'int'
-  bDevCapabilityType: 'int'
-  bmAttributes: 'int'
-  wSpeedSupported: 'int'
-  bFunctionalitySupport: 'int'
-  bU1DevExitLat: 'int'
-  bU2DevExitLat: 'int'
+  bLength: int
+  bDescriptorType: int
+  bDevCapabilityType: int
+  bmAttributes: int
+  wSpeedSupported: int
+  bFunctionalitySupport: int
+  bU1DevExitLat: int
+  bU2DevExitLat: int
 struct_libusb_ss_usb_device_capability_descriptor.register_fields([('bLength', uint8_t, 0), ('bDescriptorType', uint8_t, 1), ('bDevCapabilityType', uint8_t, 2), ('bmAttributes', uint8_t, 3), ('wSpeedSupported', uint16_t, 4), ('bFunctionalitySupport', uint8_t, 6), ('bU1DevExitLat', uint8_t, 7), ('bU2DevExitLat', uint16_t, 8)])
 @c.record
 class struct_libusb_container_id_descriptor(c.Struct):
   SIZE = 20
-  bLength: 'int'
-  bDescriptorType: 'int'
-  bDevCapabilityType: 'int'
-  bReserved: 'int'
-  ContainerID: 'list[int]'
+  bLength: int
+  bDescriptorType: int
+  bDevCapabilityType: int
+  bReserved: int
+  ContainerID: ctypes.Array[ctypes.c_ubyte]
 struct_libusb_container_id_descriptor.register_fields([('bLength', uint8_t, 0), ('bDescriptorType', uint8_t, 1), ('bDevCapabilityType', uint8_t, 2), ('bReserved', uint8_t, 3), ('ContainerID', (uint8_t * 16), 4)])
 @c.record
 class struct_libusb_platform_descriptor(c.Struct):
   SIZE = 20
-  bLength: 'int'
-  bDescriptorType: 'int'
-  bDevCapabilityType: 'int'
-  bReserved: 'int'
-  PlatformCapabilityUUID: 'list[int]'
-  CapabilityData: 'list[int]'
+  bLength: int
+  bDescriptorType: int
+  bDevCapabilityType: int
+  bReserved: int
+  PlatformCapabilityUUID: ctypes.Array[ctypes.c_ubyte]
+  CapabilityData: ctypes.Array[ctypes.c_ubyte]
 struct_libusb_platform_descriptor.register_fields([('bLength', uint8_t, 0), ('bDescriptorType', uint8_t, 1), ('bDevCapabilityType', uint8_t, 2), ('bReserved', uint8_t, 3), ('PlatformCapabilityUUID', (uint8_t * 16), 4), ('CapabilityData', (uint8_t * 0), 20)])
 @c.record
 class struct_libusb_control_setup(c.Struct):
   SIZE = 8
-  bmRequestType: 'int'
-  bRequest: 'int'
-  wValue: 'int'
-  wIndex: 'int'
-  wLength: 'int'
+  bmRequestType: int
+  bRequest: int
+  wValue: int
+  wIndex: int
+  wLength: int
 struct_libusb_control_setup.register_fields([('bmRequestType', uint8_t, 0), ('bRequest', uint8_t, 1), ('wValue', uint16_t, 2), ('wIndex', uint16_t, 4), ('wLength', uint16_t, 6)])
 class struct_libusb_context(c.Struct): pass
 class struct_libusb_device(c.Struct): pass
@@ -187,12 +188,12 @@ class struct_libusb_device_handle(c.Struct): pass
 @c.record
 class struct_libusb_version(c.Struct):
   SIZE = 24
-  major: 'int'
-  minor: 'int'
-  micro: 'int'
-  nano: 'int'
-  rc: 'ctypes._Pointer[bytes]'
-  describe: 'ctypes._Pointer[bytes]'
+  major: int
+  minor: int
+  micro: int
+  nano: int
+  rc: ctypes._Pointer[ctypes.c_char]
+  describe: ctypes._Pointer[ctypes.c_char]
 struct_libusb_version.register_fields([('major', uint16_t, 0), ('minor', uint16_t, 2), ('micro', uint16_t, 4), ('nano', uint16_t, 6), ('rc', ctypes.POINTER(ctypes.c_char), 8), ('describe', ctypes.POINTER(ctypes.c_char), 16)])
 libusb_context: TypeAlias = struct_libusb_context
 libusb_device: TypeAlias = struct_libusb_device
@@ -205,26 +206,26 @@ enum_libusb_transfer_flags: dict[int, str] = {(LIBUSB_TRANSFER_SHORT_NOT_OK:=1):
 @c.record
 class struct_libusb_iso_packet_descriptor(c.Struct):
   SIZE = 12
-  length: 'int'
-  actual_length: 'int'
-  status: 'int'
+  length: int
+  actual_length: int
+  status: int
 struct_libusb_iso_packet_descriptor.register_fields([('length', ctypes.c_uint32, 0), ('actual_length', ctypes.c_uint32, 4), ('status', ctypes.c_uint32, 8)])
 @c.record
 class struct_libusb_transfer(c.Struct):
   SIZE = 64
-  dev_handle: 'ctypes._Pointer[struct_libusb_device_handle]'
-  flags: 'int'
-  endpoint: 'int'
-  type: 'int'
-  timeout: 'int'
-  status: 'int'
-  length: 'int'
-  actual_length: 'int'
-  callback: 'ctypes._CFunctionType'
-  user_data: 'ctypes.c_void_p'
-  buffer: 'ctypes._Pointer[int]'
-  num_iso_packets: 'int'
-  iso_packet_desc: 'list[struct_libusb_iso_packet_descriptor]'
+  dev_handle: ctypes._Pointer[struct_libusb_device_handle]
+  flags: int
+  endpoint: int
+  type: int
+  timeout: int
+  status: int
+  length: int
+  actual_length: int
+  callback: ctypes._CFunctionType
+  user_data: int|None
+  buffer: ctypes._Pointer[ctypes.c_ubyte]
+  num_iso_packets: int
+  iso_packet_desc: ctypes.Array[struct_libusb_iso_packet_descriptor]
 libusb_transfer_cb_fn: TypeAlias = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_libusb_transfer))
 struct_libusb_transfer.register_fields([('dev_handle', ctypes.POINTER(libusb_device_handle), 0), ('flags', uint8_t, 8), ('endpoint', ctypes.c_ubyte, 9), ('type', ctypes.c_ubyte, 10), ('timeout', ctypes.c_uint32, 12), ('status', ctypes.c_uint32, 16), ('length', ctypes.c_int32, 20), ('actual_length', ctypes.c_int32, 24), ('callback', libusb_transfer_cb_fn, 32), ('user_data', ctypes.c_void_p, 40), ('buffer', ctypes.POINTER(ctypes.c_ubyte), 48), ('num_iso_packets', ctypes.c_int32, 56), ('iso_packet_desc', (struct_libusb_iso_packet_descriptor * 0), 60)])
 enum_libusb_capability: dict[int, str] = {(LIBUSB_CAP_HAS_CAPABILITY:=0): 'LIBUSB_CAP_HAS_CAPABILITY', (LIBUSB_CAP_HAS_HOTPLUG:=1): 'LIBUSB_CAP_HAS_HOTPLUG', (LIBUSB_CAP_HAS_HID_ACCESS:=256): 'LIBUSB_CAP_HAS_HID_ACCESS', (LIBUSB_CAP_SUPPORTS_DETACH_KERNEL_DRIVER:=257): 'LIBUSB_CAP_SUPPORTS_DETACH_KERNEL_DRIVER'}
@@ -235,232 +236,232 @@ libusb_log_cb: TypeAlias = ctypes.CFUNCTYPE(None, ctypes.POINTER(struct_libusb_c
 @c.record
 class struct_libusb_init_option(c.Struct):
   SIZE = 16
-  option: 'int'
-  value: 'struct_libusb_init_option_value'
+  option: int
+  value: struct_libusb_init_option_value
 @c.record
 class struct_libusb_init_option_value(c.Struct):
   SIZE = 8
-  ival: 'int'
-  log_cbval: 'ctypes._CFunctionType'
+  ival: int
+  log_cbval: ctypes._CFunctionType
 struct_libusb_init_option_value.register_fields([('ival', ctypes.c_int32, 0), ('log_cbval', libusb_log_cb, 0)])
 struct_libusb_init_option.register_fields([('option', ctypes.c_uint32, 0), ('value', struct_libusb_init_option_value, 8)])
-@dll.bind
-def libusb_init(ctx:ctypes.POINTER(ctypes.POINTER(libusb_context))) -> ctypes.c_int32: ...
-@dll.bind
-def libusb_init_context(ctx:ctypes.POINTER(ctypes.POINTER(libusb_context)), options:(struct_libusb_init_option * 0), num_options:ctypes.c_int32) -> ctypes.c_int32: ...
-@dll.bind
-def libusb_exit(ctx:ctypes.POINTER(libusb_context)) -> None: ...
-@dll.bind
-def libusb_set_debug(ctx:ctypes.POINTER(libusb_context), level:ctypes.c_int32) -> None: ...
-@dll.bind
-def libusb_set_log_cb(ctx:ctypes.POINTER(libusb_context), cb:libusb_log_cb, mode:ctypes.c_int32) -> None: ...
-@dll.bind
-def libusb_get_version() -> ctypes.POINTER(struct_libusb_version): ...
-@dll.bind
-def libusb_has_capability(capability:uint32_t) -> ctypes.c_int32: ...
-@dll.bind
-def libusb_error_name(errcode:ctypes.c_int32) -> ctypes.POINTER(ctypes.c_char): ...
-@dll.bind
-def libusb_setlocale(locale:ctypes.POINTER(ctypes.c_char)) -> ctypes.c_int32: ...
-@dll.bind
-def libusb_strerror(errcode:ctypes.c_int32) -> ctypes.POINTER(ctypes.c_char): ...
+@dll.bind(ctypes.c_int32, ctypes.POINTER(ctypes.POINTER(libusb_context)))
+def libusb_init(ctx:ctypes._Pointer[ctypes.POINTER(libusb_context)]) -> int: ...
+@dll.bind(ctypes.c_int32, ctypes.POINTER(ctypes.POINTER(libusb_context)), (struct_libusb_init_option * 0), ctypes.c_int32)
+def libusb_init_context(ctx:ctypes._Pointer[ctypes.POINTER(libusb_context)], options:ctypes.Array[struct_libusb_init_option], num_options:int) -> int: ...
+@dll.bind(None, ctypes.POINTER(libusb_context))
+def libusb_exit(ctx:ctypes._Pointer[libusb_context]) -> None: ...
+@dll.bind(None, ctypes.POINTER(libusb_context), ctypes.c_int32)
+def libusb_set_debug(ctx:ctypes._Pointer[libusb_context], level:int) -> None: ...
+@dll.bind(None, ctypes.POINTER(libusb_context), libusb_log_cb, ctypes.c_int32)
+def libusb_set_log_cb(ctx:ctypes._Pointer[libusb_context], cb:libusb_log_cb, mode:int) -> None: ...
+@dll.bind(ctypes.POINTER(struct_libusb_version))
+def libusb_get_version() -> ctypes._Pointer[struct_libusb_version]: ...
+@dll.bind(ctypes.c_int32, uint32_t)
+def libusb_has_capability(capability:uint32_t) -> int: ...
+@dll.bind(ctypes.POINTER(ctypes.c_char), ctypes.c_int32)
+def libusb_error_name(errcode:int) -> ctypes._Pointer[ctypes.c_char]: ...
+@dll.bind(ctypes.c_int32, ctypes.POINTER(ctypes.c_char))
+def libusb_setlocale(locale:ctypes._Pointer[ctypes.c_char]) -> int: ...
+@dll.bind(ctypes.POINTER(ctypes.c_char), ctypes.c_int32)
+def libusb_strerror(errcode:int) -> ctypes._Pointer[ctypes.c_char]: ...
 ssize_t: TypeAlias = ctypes.c_int64
-@dll.bind
-def libusb_get_device_list(ctx:ctypes.POINTER(libusb_context), list:ctypes.POINTER(ctypes.POINTER(ctypes.POINTER(libusb_device)))) -> ssize_t: ...
-@dll.bind
-def libusb_free_device_list(list:ctypes.POINTER(ctypes.POINTER(libusb_device)), unref_devices:ctypes.c_int32) -> None: ...
-@dll.bind
-def libusb_ref_device(dev:ctypes.POINTER(libusb_device)) -> ctypes.POINTER(libusb_device): ...
-@dll.bind
-def libusb_unref_device(dev:ctypes.POINTER(libusb_device)) -> None: ...
-@dll.bind
-def libusb_get_configuration(dev:ctypes.POINTER(libusb_device_handle), config:ctypes.POINTER(ctypes.c_int32)) -> ctypes.c_int32: ...
-@dll.bind
-def libusb_get_device_descriptor(dev:ctypes.POINTER(libusb_device), desc:ctypes.POINTER(struct_libusb_device_descriptor)) -> ctypes.c_int32: ...
-@dll.bind
-def libusb_get_active_config_descriptor(dev:ctypes.POINTER(libusb_device), config:ctypes.POINTER(ctypes.POINTER(struct_libusb_config_descriptor))) -> ctypes.c_int32: ...
-@dll.bind
-def libusb_get_config_descriptor(dev:ctypes.POINTER(libusb_device), config_index:uint8_t, config:ctypes.POINTER(ctypes.POINTER(struct_libusb_config_descriptor))) -> ctypes.c_int32: ...
-@dll.bind
-def libusb_get_config_descriptor_by_value(dev:ctypes.POINTER(libusb_device), bConfigurationValue:uint8_t, config:ctypes.POINTER(ctypes.POINTER(struct_libusb_config_descriptor))) -> ctypes.c_int32: ...
-@dll.bind
-def libusb_free_config_descriptor(config:ctypes.POINTER(struct_libusb_config_descriptor)) -> None: ...
-@dll.bind
-def libusb_get_ss_endpoint_companion_descriptor(ctx:ctypes.POINTER(libusb_context), endpoint:ctypes.POINTER(struct_libusb_endpoint_descriptor), ep_comp:ctypes.POINTER(ctypes.POINTER(struct_libusb_ss_endpoint_companion_descriptor))) -> ctypes.c_int32: ...
-@dll.bind
-def libusb_free_ss_endpoint_companion_descriptor(ep_comp:ctypes.POINTER(struct_libusb_ss_endpoint_companion_descriptor)) -> None: ...
-@dll.bind
-def libusb_get_bos_descriptor(dev_handle:ctypes.POINTER(libusb_device_handle), bos:ctypes.POINTER(ctypes.POINTER(struct_libusb_bos_descriptor))) -> ctypes.c_int32: ...
-@dll.bind
-def libusb_free_bos_descriptor(bos:ctypes.POINTER(struct_libusb_bos_descriptor)) -> None: ...
-@dll.bind
-def libusb_get_usb_2_0_extension_descriptor(ctx:ctypes.POINTER(libusb_context), dev_cap:ctypes.POINTER(struct_libusb_bos_dev_capability_descriptor), usb_2_0_extension:ctypes.POINTER(ctypes.POINTER(struct_libusb_usb_2_0_extension_descriptor))) -> ctypes.c_int32: ...
-@dll.bind
-def libusb_free_usb_2_0_extension_descriptor(usb_2_0_extension:ctypes.POINTER(struct_libusb_usb_2_0_extension_descriptor)) -> None: ...
-@dll.bind
-def libusb_get_ss_usb_device_capability_descriptor(ctx:ctypes.POINTER(libusb_context), dev_cap:ctypes.POINTER(struct_libusb_bos_dev_capability_descriptor), ss_usb_device_cap:ctypes.POINTER(ctypes.POINTER(struct_libusb_ss_usb_device_capability_descriptor))) -> ctypes.c_int32: ...
-@dll.bind
-def libusb_free_ss_usb_device_capability_descriptor(ss_usb_device_cap:ctypes.POINTER(struct_libusb_ss_usb_device_capability_descriptor)) -> None: ...
-@dll.bind
-def libusb_get_container_id_descriptor(ctx:ctypes.POINTER(libusb_context), dev_cap:ctypes.POINTER(struct_libusb_bos_dev_capability_descriptor), container_id:ctypes.POINTER(ctypes.POINTER(struct_libusb_container_id_descriptor))) -> ctypes.c_int32: ...
-@dll.bind
-def libusb_free_container_id_descriptor(container_id:ctypes.POINTER(struct_libusb_container_id_descriptor)) -> None: ...
-@dll.bind
-def libusb_get_platform_descriptor(ctx:ctypes.POINTER(libusb_context), dev_cap:ctypes.POINTER(struct_libusb_bos_dev_capability_descriptor), platform_descriptor:ctypes.POINTER(ctypes.POINTER(struct_libusb_platform_descriptor))) -> ctypes.c_int32: ...
-@dll.bind
-def libusb_free_platform_descriptor(platform_descriptor:ctypes.POINTER(struct_libusb_platform_descriptor)) -> None: ...
-@dll.bind
-def libusb_get_bus_number(dev:ctypes.POINTER(libusb_device)) -> uint8_t: ...
-@dll.bind
-def libusb_get_port_number(dev:ctypes.POINTER(libusb_device)) -> uint8_t: ...
-@dll.bind
-def libusb_get_port_numbers(dev:ctypes.POINTER(libusb_device), port_numbers:ctypes.POINTER(uint8_t), port_numbers_len:ctypes.c_int32) -> ctypes.c_int32: ...
-@dll.bind
-def libusb_get_port_path(ctx:ctypes.POINTER(libusb_context), dev:ctypes.POINTER(libusb_device), path:ctypes.POINTER(uint8_t), path_length:uint8_t) -> ctypes.c_int32: ...
-@dll.bind
-def libusb_get_parent(dev:ctypes.POINTER(libusb_device)) -> ctypes.POINTER(libusb_device): ...
-@dll.bind
-def libusb_get_device_address(dev:ctypes.POINTER(libusb_device)) -> uint8_t: ...
-@dll.bind
-def libusb_get_device_speed(dev:ctypes.POINTER(libusb_device)) -> ctypes.c_int32: ...
-@dll.bind
-def libusb_get_max_packet_size(dev:ctypes.POINTER(libusb_device), endpoint:ctypes.c_ubyte) -> ctypes.c_int32: ...
-@dll.bind
-def libusb_get_max_iso_packet_size(dev:ctypes.POINTER(libusb_device), endpoint:ctypes.c_ubyte) -> ctypes.c_int32: ...
-@dll.bind
-def libusb_get_max_alt_packet_size(dev:ctypes.POINTER(libusb_device), interface_number:ctypes.c_int32, alternate_setting:ctypes.c_int32, endpoint:ctypes.c_ubyte) -> ctypes.c_int32: ...
-@dll.bind
-def libusb_get_interface_association_descriptors(dev:ctypes.POINTER(libusb_device), config_index:uint8_t, iad_array:ctypes.POINTER(ctypes.POINTER(struct_libusb_interface_association_descriptor_array))) -> ctypes.c_int32: ...
-@dll.bind
-def libusb_get_active_interface_association_descriptors(dev:ctypes.POINTER(libusb_device), iad_array:ctypes.POINTER(ctypes.POINTER(struct_libusb_interface_association_descriptor_array))) -> ctypes.c_int32: ...
-@dll.bind
-def libusb_free_interface_association_descriptors(iad_array:ctypes.POINTER(struct_libusb_interface_association_descriptor_array)) -> None: ...
+@dll.bind(ssize_t, ctypes.POINTER(libusb_context), ctypes.POINTER(ctypes.POINTER(ctypes.POINTER(libusb_device))))
+def libusb_get_device_list(ctx:ctypes._Pointer[libusb_context], list:ctypes._Pointer[ctypes.POINTER(ctypes.POINTER(libusb_device))]) -> ssize_t: ...
+@dll.bind(None, ctypes.POINTER(ctypes.POINTER(libusb_device)), ctypes.c_int32)
+def libusb_free_device_list(list:ctypes._Pointer[ctypes.POINTER(libusb_device)], unref_devices:int) -> None: ...
+@dll.bind(ctypes.POINTER(libusb_device), ctypes.POINTER(libusb_device))
+def libusb_ref_device(dev:ctypes._Pointer[libusb_device]) -> ctypes._Pointer[libusb_device]: ...
+@dll.bind(None, ctypes.POINTER(libusb_device))
+def libusb_unref_device(dev:ctypes._Pointer[libusb_device]) -> None: ...
+@dll.bind(ctypes.c_int32, ctypes.POINTER(libusb_device_handle), ctypes.POINTER(ctypes.c_int32))
+def libusb_get_configuration(dev:ctypes._Pointer[libusb_device_handle], config:ctypes._Pointer[ctypes.c_int32]) -> int: ...
+@dll.bind(ctypes.c_int32, ctypes.POINTER(libusb_device), ctypes.POINTER(struct_libusb_device_descriptor))
+def libusb_get_device_descriptor(dev:ctypes._Pointer[libusb_device], desc:ctypes._Pointer[struct_libusb_device_descriptor]) -> int: ...
+@dll.bind(ctypes.c_int32, ctypes.POINTER(libusb_device), ctypes.POINTER(ctypes.POINTER(struct_libusb_config_descriptor)))
+def libusb_get_active_config_descriptor(dev:ctypes._Pointer[libusb_device], config:ctypes._Pointer[ctypes.POINTER(struct_libusb_config_descriptor)]) -> int: ...
+@dll.bind(ctypes.c_int32, ctypes.POINTER(libusb_device), uint8_t, ctypes.POINTER(ctypes.POINTER(struct_libusb_config_descriptor)))
+def libusb_get_config_descriptor(dev:ctypes._Pointer[libusb_device], config_index:uint8_t, config:ctypes._Pointer[ctypes.POINTER(struct_libusb_config_descriptor)]) -> int: ...
+@dll.bind(ctypes.c_int32, ctypes.POINTER(libusb_device), uint8_t, ctypes.POINTER(ctypes.POINTER(struct_libusb_config_descriptor)))
+def libusb_get_config_descriptor_by_value(dev:ctypes._Pointer[libusb_device], bConfigurationValue:uint8_t, config:ctypes._Pointer[ctypes.POINTER(struct_libusb_config_descriptor)]) -> int: ...
+@dll.bind(None, ctypes.POINTER(struct_libusb_config_descriptor))
+def libusb_free_config_descriptor(config:ctypes._Pointer[struct_libusb_config_descriptor]) -> None: ...
+@dll.bind(ctypes.c_int32, ctypes.POINTER(libusb_context), ctypes.POINTER(struct_libusb_endpoint_descriptor), ctypes.POINTER(ctypes.POINTER(struct_libusb_ss_endpoint_companion_descriptor)))
+def libusb_get_ss_endpoint_companion_descriptor(ctx:ctypes._Pointer[libusb_context], endpoint:ctypes._Pointer[struct_libusb_endpoint_descriptor], ep_comp:ctypes._Pointer[ctypes.POINTER(struct_libusb_ss_endpoint_companion_descriptor)]) -> int: ...
+@dll.bind(None, ctypes.POINTER(struct_libusb_ss_endpoint_companion_descriptor))
+def libusb_free_ss_endpoint_companion_descriptor(ep_comp:ctypes._Pointer[struct_libusb_ss_endpoint_companion_descriptor]) -> None: ...
+@dll.bind(ctypes.c_int32, ctypes.POINTER(libusb_device_handle), ctypes.POINTER(ctypes.POINTER(struct_libusb_bos_descriptor)))
+def libusb_get_bos_descriptor(dev_handle:ctypes._Pointer[libusb_device_handle], bos:ctypes._Pointer[ctypes.POINTER(struct_libusb_bos_descriptor)]) -> int: ...
+@dll.bind(None, ctypes.POINTER(struct_libusb_bos_descriptor))
+def libusb_free_bos_descriptor(bos:ctypes._Pointer[struct_libusb_bos_descriptor]) -> None: ...
+@dll.bind(ctypes.c_int32, ctypes.POINTER(libusb_context), ctypes.POINTER(struct_libusb_bos_dev_capability_descriptor), ctypes.POINTER(ctypes.POINTER(struct_libusb_usb_2_0_extension_descriptor)))
+def libusb_get_usb_2_0_extension_descriptor(ctx:ctypes._Pointer[libusb_context], dev_cap:ctypes._Pointer[struct_libusb_bos_dev_capability_descriptor], usb_2_0_extension:ctypes._Pointer[ctypes.POINTER(struct_libusb_usb_2_0_extension_descriptor)]) -> int: ...
+@dll.bind(None, ctypes.POINTER(struct_libusb_usb_2_0_extension_descriptor))
+def libusb_free_usb_2_0_extension_descriptor(usb_2_0_extension:ctypes._Pointer[struct_libusb_usb_2_0_extension_descriptor]) -> None: ...
+@dll.bind(ctypes.c_int32, ctypes.POINTER(libusb_context), ctypes.POINTER(struct_libusb_bos_dev_capability_descriptor), ctypes.POINTER(ctypes.POINTER(struct_libusb_ss_usb_device_capability_descriptor)))
+def libusb_get_ss_usb_device_capability_descriptor(ctx:ctypes._Pointer[libusb_context], dev_cap:ctypes._Pointer[struct_libusb_bos_dev_capability_descriptor], ss_usb_device_cap:ctypes._Pointer[ctypes.POINTER(struct_libusb_ss_usb_device_capability_descriptor)]) -> int: ...
+@dll.bind(None, ctypes.POINTER(struct_libusb_ss_usb_device_capability_descriptor))
+def libusb_free_ss_usb_device_capability_descriptor(ss_usb_device_cap:ctypes._Pointer[struct_libusb_ss_usb_device_capability_descriptor]) -> None: ...
+@dll.bind(ctypes.c_int32, ctypes.POINTER(libusb_context), ctypes.POINTER(struct_libusb_bos_dev_capability_descriptor), ctypes.POINTER(ctypes.POINTER(struct_libusb_container_id_descriptor)))
+def libusb_get_container_id_descriptor(ctx:ctypes._Pointer[libusb_context], dev_cap:ctypes._Pointer[struct_libusb_bos_dev_capability_descriptor], container_id:ctypes._Pointer[ctypes.POINTER(struct_libusb_container_id_descriptor)]) -> int: ...
+@dll.bind(None, ctypes.POINTER(struct_libusb_container_id_descriptor))
+def libusb_free_container_id_descriptor(container_id:ctypes._Pointer[struct_libusb_container_id_descriptor]) -> None: ...
+@dll.bind(ctypes.c_int32, ctypes.POINTER(libusb_context), ctypes.POINTER(struct_libusb_bos_dev_capability_descriptor), ctypes.POINTER(ctypes.POINTER(struct_libusb_platform_descriptor)))
+def libusb_get_platform_descriptor(ctx:ctypes._Pointer[libusb_context], dev_cap:ctypes._Pointer[struct_libusb_bos_dev_capability_descriptor], platform_descriptor:ctypes._Pointer[ctypes.POINTER(struct_libusb_platform_descriptor)]) -> int: ...
+@dll.bind(None, ctypes.POINTER(struct_libusb_platform_descriptor))
+def libusb_free_platform_descriptor(platform_descriptor:ctypes._Pointer[struct_libusb_platform_descriptor]) -> None: ...
+@dll.bind(uint8_t, ctypes.POINTER(libusb_device))
+def libusb_get_bus_number(dev:ctypes._Pointer[libusb_device]) -> uint8_t: ...
+@dll.bind(uint8_t, ctypes.POINTER(libusb_device))
+def libusb_get_port_number(dev:ctypes._Pointer[libusb_device]) -> uint8_t: ...
+@dll.bind(ctypes.c_int32, ctypes.POINTER(libusb_device), ctypes.POINTER(uint8_t), ctypes.c_int32)
+def libusb_get_port_numbers(dev:ctypes._Pointer[libusb_device], port_numbers:ctypes._Pointer[uint8_t], port_numbers_len:int) -> int: ...
+@dll.bind(ctypes.c_int32, ctypes.POINTER(libusb_context), ctypes.POINTER(libusb_device), ctypes.POINTER(uint8_t), uint8_t)
+def libusb_get_port_path(ctx:ctypes._Pointer[libusb_context], dev:ctypes._Pointer[libusb_device], path:ctypes._Pointer[uint8_t], path_length:uint8_t) -> int: ...
+@dll.bind(ctypes.POINTER(libusb_device), ctypes.POINTER(libusb_device))
+def libusb_get_parent(dev:ctypes._Pointer[libusb_device]) -> ctypes._Pointer[libusb_device]: ...
+@dll.bind(uint8_t, ctypes.POINTER(libusb_device))
+def libusb_get_device_address(dev:ctypes._Pointer[libusb_device]) -> uint8_t: ...
+@dll.bind(ctypes.c_int32, ctypes.POINTER(libusb_device))
+def libusb_get_device_speed(dev:ctypes._Pointer[libusb_device]) -> int: ...
+@dll.bind(ctypes.c_int32, ctypes.POINTER(libusb_device), ctypes.c_ubyte)
+def libusb_get_max_packet_size(dev:ctypes._Pointer[libusb_device], endpoint:int) -> int: ...
+@dll.bind(ctypes.c_int32, ctypes.POINTER(libusb_device), ctypes.c_ubyte)
+def libusb_get_max_iso_packet_size(dev:ctypes._Pointer[libusb_device], endpoint:int) -> int: ...
+@dll.bind(ctypes.c_int32, ctypes.POINTER(libusb_device), ctypes.c_int32, ctypes.c_int32, ctypes.c_ubyte)
+def libusb_get_max_alt_packet_size(dev:ctypes._Pointer[libusb_device], interface_number:int, alternate_setting:int, endpoint:int) -> int: ...
+@dll.bind(ctypes.c_int32, ctypes.POINTER(libusb_device), uint8_t, ctypes.POINTER(ctypes.POINTER(struct_libusb_interface_association_descriptor_array)))
+def libusb_get_interface_association_descriptors(dev:ctypes._Pointer[libusb_device], config_index:uint8_t, iad_array:ctypes._Pointer[ctypes.POINTER(struct_libusb_interface_association_descriptor_array)]) -> int: ...
+@dll.bind(ctypes.c_int32, ctypes.POINTER(libusb_device), ctypes.POINTER(ctypes.POINTER(struct_libusb_interface_association_descriptor_array)))
+def libusb_get_active_interface_association_descriptors(dev:ctypes._Pointer[libusb_device], iad_array:ctypes._Pointer[ctypes.POINTER(struct_libusb_interface_association_descriptor_array)]) -> int: ...
+@dll.bind(None, ctypes.POINTER(struct_libusb_interface_association_descriptor_array))
+def libusb_free_interface_association_descriptors(iad_array:ctypes._Pointer[struct_libusb_interface_association_descriptor_array]) -> None: ...
 intptr_t: TypeAlias = ctypes.c_int64
-@dll.bind
-def libusb_wrap_sys_device(ctx:ctypes.POINTER(libusb_context), sys_dev:intptr_t, dev_handle:ctypes.POINTER(ctypes.POINTER(libusb_device_handle))) -> ctypes.c_int32: ...
-@dll.bind
-def libusb_open(dev:ctypes.POINTER(libusb_device), dev_handle:ctypes.POINTER(ctypes.POINTER(libusb_device_handle))) -> ctypes.c_int32: ...
-@dll.bind
-def libusb_close(dev_handle:ctypes.POINTER(libusb_device_handle)) -> None: ...
-@dll.bind
-def libusb_get_device(dev_handle:ctypes.POINTER(libusb_device_handle)) -> ctypes.POINTER(libusb_device): ...
-@dll.bind
-def libusb_set_configuration(dev_handle:ctypes.POINTER(libusb_device_handle), configuration:ctypes.c_int32) -> ctypes.c_int32: ...
-@dll.bind
-def libusb_claim_interface(dev_handle:ctypes.POINTER(libusb_device_handle), interface_number:ctypes.c_int32) -> ctypes.c_int32: ...
-@dll.bind
-def libusb_release_interface(dev_handle:ctypes.POINTER(libusb_device_handle), interface_number:ctypes.c_int32) -> ctypes.c_int32: ...
-@dll.bind
-def libusb_open_device_with_vid_pid(ctx:ctypes.POINTER(libusb_context), vendor_id:uint16_t, product_id:uint16_t) -> ctypes.POINTER(libusb_device_handle): ...
-@dll.bind
-def libusb_set_interface_alt_setting(dev_handle:ctypes.POINTER(libusb_device_handle), interface_number:ctypes.c_int32, alternate_setting:ctypes.c_int32) -> ctypes.c_int32: ...
-@dll.bind
-def libusb_clear_halt(dev_handle:ctypes.POINTER(libusb_device_handle), endpoint:ctypes.c_ubyte) -> ctypes.c_int32: ...
-@dll.bind
-def libusb_reset_device(dev_handle:ctypes.POINTER(libusb_device_handle)) -> ctypes.c_int32: ...
-@dll.bind
-def libusb_alloc_streams(dev_handle:ctypes.POINTER(libusb_device_handle), num_streams:uint32_t, endpoints:ctypes.POINTER(ctypes.c_ubyte), num_endpoints:ctypes.c_int32) -> ctypes.c_int32: ...
-@dll.bind
-def libusb_free_streams(dev_handle:ctypes.POINTER(libusb_device_handle), endpoints:ctypes.POINTER(ctypes.c_ubyte), num_endpoints:ctypes.c_int32) -> ctypes.c_int32: ...
+@dll.bind(ctypes.c_int32, ctypes.POINTER(libusb_context), intptr_t, ctypes.POINTER(ctypes.POINTER(libusb_device_handle)))
+def libusb_wrap_sys_device(ctx:ctypes._Pointer[libusb_context], sys_dev:intptr_t, dev_handle:ctypes._Pointer[ctypes.POINTER(libusb_device_handle)]) -> int: ...
+@dll.bind(ctypes.c_int32, ctypes.POINTER(libusb_device), ctypes.POINTER(ctypes.POINTER(libusb_device_handle)))
+def libusb_open(dev:ctypes._Pointer[libusb_device], dev_handle:ctypes._Pointer[ctypes.POINTER(libusb_device_handle)]) -> int: ...
+@dll.bind(None, ctypes.POINTER(libusb_device_handle))
+def libusb_close(dev_handle:ctypes._Pointer[libusb_device_handle]) -> None: ...
+@dll.bind(ctypes.POINTER(libusb_device), ctypes.POINTER(libusb_device_handle))
+def libusb_get_device(dev_handle:ctypes._Pointer[libusb_device_handle]) -> ctypes._Pointer[libusb_device]: ...
+@dll.bind(ctypes.c_int32, ctypes.POINTER(libusb_device_handle), ctypes.c_int32)
+def libusb_set_configuration(dev_handle:ctypes._Pointer[libusb_device_handle], configuration:int) -> int: ...
+@dll.bind(ctypes.c_int32, ctypes.POINTER(libusb_device_handle), ctypes.c_int32)
+def libusb_claim_interface(dev_handle:ctypes._Pointer[libusb_device_handle], interface_number:int) -> int: ...
+@dll.bind(ctypes.c_int32, ctypes.POINTER(libusb_device_handle), ctypes.c_int32)
+def libusb_release_interface(dev_handle:ctypes._Pointer[libusb_device_handle], interface_number:int) -> int: ...
+@dll.bind(ctypes.POINTER(libusb_device_handle), ctypes.POINTER(libusb_context), uint16_t, uint16_t)
+def libusb_open_device_with_vid_pid(ctx:ctypes._Pointer[libusb_context], vendor_id:uint16_t, product_id:uint16_t) -> ctypes._Pointer[libusb_device_handle]: ...
+@dll.bind(ctypes.c_int32, ctypes.POINTER(libusb_device_handle), ctypes.c_int32, ctypes.c_int32)
+def libusb_set_interface_alt_setting(dev_handle:ctypes._Pointer[libusb_device_handle], interface_number:int, alternate_setting:int) -> int: ...
+@dll.bind(ctypes.c_int32, ctypes.POINTER(libusb_device_handle), ctypes.c_ubyte)
+def libusb_clear_halt(dev_handle:ctypes._Pointer[libusb_device_handle], endpoint:int) -> int: ...
+@dll.bind(ctypes.c_int32, ctypes.POINTER(libusb_device_handle))
+def libusb_reset_device(dev_handle:ctypes._Pointer[libusb_device_handle]) -> int: ...
+@dll.bind(ctypes.c_int32, ctypes.POINTER(libusb_device_handle), uint32_t, ctypes.POINTER(ctypes.c_ubyte), ctypes.c_int32)
+def libusb_alloc_streams(dev_handle:ctypes._Pointer[libusb_device_handle], num_streams:uint32_t, endpoints:ctypes._Pointer[ctypes.c_ubyte], num_endpoints:int) -> int: ...
+@dll.bind(ctypes.c_int32, ctypes.POINTER(libusb_device_handle), ctypes.POINTER(ctypes.c_ubyte), ctypes.c_int32)
+def libusb_free_streams(dev_handle:ctypes._Pointer[libusb_device_handle], endpoints:ctypes._Pointer[ctypes.c_ubyte], num_endpoints:int) -> int: ...
 size_t: TypeAlias = ctypes.c_uint64
-@dll.bind
-def libusb_dev_mem_alloc(dev_handle:ctypes.POINTER(libusb_device_handle), length:size_t) -> ctypes.POINTER(ctypes.c_ubyte): ...
-@dll.bind
-def libusb_dev_mem_free(dev_handle:ctypes.POINTER(libusb_device_handle), buffer:ctypes.POINTER(ctypes.c_ubyte), length:size_t) -> ctypes.c_int32: ...
-@dll.bind
-def libusb_kernel_driver_active(dev_handle:ctypes.POINTER(libusb_device_handle), interface_number:ctypes.c_int32) -> ctypes.c_int32: ...
-@dll.bind
-def libusb_detach_kernel_driver(dev_handle:ctypes.POINTER(libusb_device_handle), interface_number:ctypes.c_int32) -> ctypes.c_int32: ...
-@dll.bind
-def libusb_attach_kernel_driver(dev_handle:ctypes.POINTER(libusb_device_handle), interface_number:ctypes.c_int32) -> ctypes.c_int32: ...
-@dll.bind
-def libusb_set_auto_detach_kernel_driver(dev_handle:ctypes.POINTER(libusb_device_handle), enable:ctypes.c_int32) -> ctypes.c_int32: ...
-@dll.bind
-def libusb_alloc_transfer(iso_packets:ctypes.c_int32) -> ctypes.POINTER(struct_libusb_transfer): ...
-@dll.bind
-def libusb_submit_transfer(transfer:ctypes.POINTER(struct_libusb_transfer)) -> ctypes.c_int32: ...
-@dll.bind
-def libusb_cancel_transfer(transfer:ctypes.POINTER(struct_libusb_transfer)) -> ctypes.c_int32: ...
-@dll.bind
-def libusb_free_transfer(transfer:ctypes.POINTER(struct_libusb_transfer)) -> None: ...
-@dll.bind
-def libusb_transfer_set_stream_id(transfer:ctypes.POINTER(struct_libusb_transfer), stream_id:uint32_t) -> None: ...
-@dll.bind
-def libusb_transfer_get_stream_id(transfer:ctypes.POINTER(struct_libusb_transfer)) -> uint32_t: ...
-@dll.bind
-def libusb_control_transfer(dev_handle:ctypes.POINTER(libusb_device_handle), request_type:uint8_t, bRequest:uint8_t, wValue:uint16_t, wIndex:uint16_t, data:ctypes.POINTER(ctypes.c_ubyte), wLength:uint16_t, timeout:ctypes.c_uint32) -> ctypes.c_int32: ...
-@dll.bind
-def libusb_bulk_transfer(dev_handle:ctypes.POINTER(libusb_device_handle), endpoint:ctypes.c_ubyte, data:ctypes.POINTER(ctypes.c_ubyte), length:ctypes.c_int32, actual_length:ctypes.POINTER(ctypes.c_int32), timeout:ctypes.c_uint32) -> ctypes.c_int32: ...
-@dll.bind
-def libusb_interrupt_transfer(dev_handle:ctypes.POINTER(libusb_device_handle), endpoint:ctypes.c_ubyte, data:ctypes.POINTER(ctypes.c_ubyte), length:ctypes.c_int32, actual_length:ctypes.POINTER(ctypes.c_int32), timeout:ctypes.c_uint32) -> ctypes.c_int32: ...
-@dll.bind
-def libusb_get_string_descriptor_ascii(dev_handle:ctypes.POINTER(libusb_device_handle), desc_index:uint8_t, data:ctypes.POINTER(ctypes.c_ubyte), length:ctypes.c_int32) -> ctypes.c_int32: ...
-@dll.bind
-def libusb_try_lock_events(ctx:ctypes.POINTER(libusb_context)) -> ctypes.c_int32: ...
-@dll.bind
-def libusb_lock_events(ctx:ctypes.POINTER(libusb_context)) -> None: ...
-@dll.bind
-def libusb_unlock_events(ctx:ctypes.POINTER(libusb_context)) -> None: ...
-@dll.bind
-def libusb_event_handling_ok(ctx:ctypes.POINTER(libusb_context)) -> ctypes.c_int32: ...
-@dll.bind
-def libusb_event_handler_active(ctx:ctypes.POINTER(libusb_context)) -> ctypes.c_int32: ...
-@dll.bind
-def libusb_interrupt_event_handler(ctx:ctypes.POINTER(libusb_context)) -> None: ...
-@dll.bind
-def libusb_lock_event_waiters(ctx:ctypes.POINTER(libusb_context)) -> None: ...
-@dll.bind
-def libusb_unlock_event_waiters(ctx:ctypes.POINTER(libusb_context)) -> None: ...
+@dll.bind(ctypes.POINTER(ctypes.c_ubyte), ctypes.POINTER(libusb_device_handle), size_t)
+def libusb_dev_mem_alloc(dev_handle:ctypes._Pointer[libusb_device_handle], length:size_t) -> ctypes._Pointer[ctypes.c_ubyte]: ...
+@dll.bind(ctypes.c_int32, ctypes.POINTER(libusb_device_handle), ctypes.POINTER(ctypes.c_ubyte), size_t)
+def libusb_dev_mem_free(dev_handle:ctypes._Pointer[libusb_device_handle], buffer:ctypes._Pointer[ctypes.c_ubyte], length:size_t) -> int: ...
+@dll.bind(ctypes.c_int32, ctypes.POINTER(libusb_device_handle), ctypes.c_int32)
+def libusb_kernel_driver_active(dev_handle:ctypes._Pointer[libusb_device_handle], interface_number:int) -> int: ...
+@dll.bind(ctypes.c_int32, ctypes.POINTER(libusb_device_handle), ctypes.c_int32)
+def libusb_detach_kernel_driver(dev_handle:ctypes._Pointer[libusb_device_handle], interface_number:int) -> int: ...
+@dll.bind(ctypes.c_int32, ctypes.POINTER(libusb_device_handle), ctypes.c_int32)
+def libusb_attach_kernel_driver(dev_handle:ctypes._Pointer[libusb_device_handle], interface_number:int) -> int: ...
+@dll.bind(ctypes.c_int32, ctypes.POINTER(libusb_device_handle), ctypes.c_int32)
+def libusb_set_auto_detach_kernel_driver(dev_handle:ctypes._Pointer[libusb_device_handle], enable:int) -> int: ...
+@dll.bind(ctypes.POINTER(struct_libusb_transfer), ctypes.c_int32)
+def libusb_alloc_transfer(iso_packets:int) -> ctypes._Pointer[struct_libusb_transfer]: ...
+@dll.bind(ctypes.c_int32, ctypes.POINTER(struct_libusb_transfer))
+def libusb_submit_transfer(transfer:ctypes._Pointer[struct_libusb_transfer]) -> int: ...
+@dll.bind(ctypes.c_int32, ctypes.POINTER(struct_libusb_transfer))
+def libusb_cancel_transfer(transfer:ctypes._Pointer[struct_libusb_transfer]) -> int: ...
+@dll.bind(None, ctypes.POINTER(struct_libusb_transfer))
+def libusb_free_transfer(transfer:ctypes._Pointer[struct_libusb_transfer]) -> None: ...
+@dll.bind(None, ctypes.POINTER(struct_libusb_transfer), uint32_t)
+def libusb_transfer_set_stream_id(transfer:ctypes._Pointer[struct_libusb_transfer], stream_id:uint32_t) -> None: ...
+@dll.bind(uint32_t, ctypes.POINTER(struct_libusb_transfer))
+def libusb_transfer_get_stream_id(transfer:ctypes._Pointer[struct_libusb_transfer]) -> uint32_t: ...
+@dll.bind(ctypes.c_int32, ctypes.POINTER(libusb_device_handle), uint8_t, uint8_t, uint16_t, uint16_t, ctypes.POINTER(ctypes.c_ubyte), uint16_t, ctypes.c_uint32)
+def libusb_control_transfer(dev_handle:ctypes._Pointer[libusb_device_handle], request_type:uint8_t, bRequest:uint8_t, wValue:uint16_t, wIndex:uint16_t, data:ctypes._Pointer[ctypes.c_ubyte], wLength:uint16_t, timeout:int) -> int: ...
+@dll.bind(ctypes.c_int32, ctypes.POINTER(libusb_device_handle), ctypes.c_ubyte, ctypes.POINTER(ctypes.c_ubyte), ctypes.c_int32, ctypes.POINTER(ctypes.c_int32), ctypes.c_uint32)
+def libusb_bulk_transfer(dev_handle:ctypes._Pointer[libusb_device_handle], endpoint:int, data:ctypes._Pointer[ctypes.c_ubyte], length:int, actual_length:ctypes._Pointer[ctypes.c_int32], timeout:int) -> int: ...
+@dll.bind(ctypes.c_int32, ctypes.POINTER(libusb_device_handle), ctypes.c_ubyte, ctypes.POINTER(ctypes.c_ubyte), ctypes.c_int32, ctypes.POINTER(ctypes.c_int32), ctypes.c_uint32)
+def libusb_interrupt_transfer(dev_handle:ctypes._Pointer[libusb_device_handle], endpoint:int, data:ctypes._Pointer[ctypes.c_ubyte], length:int, actual_length:ctypes._Pointer[ctypes.c_int32], timeout:int) -> int: ...
+@dll.bind(ctypes.c_int32, ctypes.POINTER(libusb_device_handle), uint8_t, ctypes.POINTER(ctypes.c_ubyte), ctypes.c_int32)
+def libusb_get_string_descriptor_ascii(dev_handle:ctypes._Pointer[libusb_device_handle], desc_index:uint8_t, data:ctypes._Pointer[ctypes.c_ubyte], length:int) -> int: ...
+@dll.bind(ctypes.c_int32, ctypes.POINTER(libusb_context))
+def libusb_try_lock_events(ctx:ctypes._Pointer[libusb_context]) -> int: ...
+@dll.bind(None, ctypes.POINTER(libusb_context))
+def libusb_lock_events(ctx:ctypes._Pointer[libusb_context]) -> None: ...
+@dll.bind(None, ctypes.POINTER(libusb_context))
+def libusb_unlock_events(ctx:ctypes._Pointer[libusb_context]) -> None: ...
+@dll.bind(ctypes.c_int32, ctypes.POINTER(libusb_context))
+def libusb_event_handling_ok(ctx:ctypes._Pointer[libusb_context]) -> int: ...
+@dll.bind(ctypes.c_int32, ctypes.POINTER(libusb_context))
+def libusb_event_handler_active(ctx:ctypes._Pointer[libusb_context]) -> int: ...
+@dll.bind(None, ctypes.POINTER(libusb_context))
+def libusb_interrupt_event_handler(ctx:ctypes._Pointer[libusb_context]) -> None: ...
+@dll.bind(None, ctypes.POINTER(libusb_context))
+def libusb_lock_event_waiters(ctx:ctypes._Pointer[libusb_context]) -> None: ...
+@dll.bind(None, ctypes.POINTER(libusb_context))
+def libusb_unlock_event_waiters(ctx:ctypes._Pointer[libusb_context]) -> None: ...
 @c.record
 class struct_timeval(c.Struct):
   SIZE = 16
-  tv_sec: 'ctypes.c_int64'
-  tv_usec: 'ctypes.c_int64'
+  tv_sec: ctypes.c_int64
+  tv_usec: ctypes.c_int64
 __time_t: TypeAlias = ctypes.c_int64
 __suseconds_t: TypeAlias = ctypes.c_int64
 struct_timeval.register_fields([('tv_sec', ctypes.c_int64, 0), ('tv_usec', ctypes.c_int64, 8)])
-@dll.bind
-def libusb_wait_for_event(ctx:ctypes.POINTER(libusb_context), tv:ctypes.POINTER(struct_timeval)) -> ctypes.c_int32: ...
-@dll.bind
-def libusb_handle_events_timeout(ctx:ctypes.POINTER(libusb_context), tv:ctypes.POINTER(struct_timeval)) -> ctypes.c_int32: ...
-@dll.bind
-def libusb_handle_events_timeout_completed(ctx:ctypes.POINTER(libusb_context), tv:ctypes.POINTER(struct_timeval), completed:ctypes.POINTER(ctypes.c_int32)) -> ctypes.c_int32: ...
-@dll.bind
-def libusb_handle_events(ctx:ctypes.POINTER(libusb_context)) -> ctypes.c_int32: ...
-@dll.bind
-def libusb_handle_events_completed(ctx:ctypes.POINTER(libusb_context), completed:ctypes.POINTER(ctypes.c_int32)) -> ctypes.c_int32: ...
-@dll.bind
-def libusb_handle_events_locked(ctx:ctypes.POINTER(libusb_context), tv:ctypes.POINTER(struct_timeval)) -> ctypes.c_int32: ...
-@dll.bind
-def libusb_pollfds_handle_timeouts(ctx:ctypes.POINTER(libusb_context)) -> ctypes.c_int32: ...
-@dll.bind
-def libusb_get_next_timeout(ctx:ctypes.POINTER(libusb_context), tv:ctypes.POINTER(struct_timeval)) -> ctypes.c_int32: ...
+@dll.bind(ctypes.c_int32, ctypes.POINTER(libusb_context), ctypes.POINTER(struct_timeval))
+def libusb_wait_for_event(ctx:ctypes._Pointer[libusb_context], tv:ctypes._Pointer[struct_timeval]) -> int: ...
+@dll.bind(ctypes.c_int32, ctypes.POINTER(libusb_context), ctypes.POINTER(struct_timeval))
+def libusb_handle_events_timeout(ctx:ctypes._Pointer[libusb_context], tv:ctypes._Pointer[struct_timeval]) -> int: ...
+@dll.bind(ctypes.c_int32, ctypes.POINTER(libusb_context), ctypes.POINTER(struct_timeval), ctypes.POINTER(ctypes.c_int32))
+def libusb_handle_events_timeout_completed(ctx:ctypes._Pointer[libusb_context], tv:ctypes._Pointer[struct_timeval], completed:ctypes._Pointer[ctypes.c_int32]) -> int: ...
+@dll.bind(ctypes.c_int32, ctypes.POINTER(libusb_context))
+def libusb_handle_events(ctx:ctypes._Pointer[libusb_context]) -> int: ...
+@dll.bind(ctypes.c_int32, ctypes.POINTER(libusb_context), ctypes.POINTER(ctypes.c_int32))
+def libusb_handle_events_completed(ctx:ctypes._Pointer[libusb_context], completed:ctypes._Pointer[ctypes.c_int32]) -> int: ...
+@dll.bind(ctypes.c_int32, ctypes.POINTER(libusb_context), ctypes.POINTER(struct_timeval))
+def libusb_handle_events_locked(ctx:ctypes._Pointer[libusb_context], tv:ctypes._Pointer[struct_timeval]) -> int: ...
+@dll.bind(ctypes.c_int32, ctypes.POINTER(libusb_context))
+def libusb_pollfds_handle_timeouts(ctx:ctypes._Pointer[libusb_context]) -> int: ...
+@dll.bind(ctypes.c_int32, ctypes.POINTER(libusb_context), ctypes.POINTER(struct_timeval))
+def libusb_get_next_timeout(ctx:ctypes._Pointer[libusb_context], tv:ctypes._Pointer[struct_timeval]) -> int: ...
 @c.record
 class struct_libusb_pollfd(c.Struct):
   SIZE = 8
-  fd: 'int'
-  events: 'int'
+  fd: int
+  events: int
 struct_libusb_pollfd.register_fields([('fd', ctypes.c_int32, 0), ('events', ctypes.c_int16, 4)])
 libusb_pollfd_added_cb: TypeAlias = ctypes.CFUNCTYPE(None, ctypes.c_int32, ctypes.c_int16, ctypes.c_void_p)
 libusb_pollfd_removed_cb: TypeAlias = ctypes.CFUNCTYPE(None, ctypes.c_int32, ctypes.c_void_p)
-@dll.bind
-def libusb_get_pollfds(ctx:ctypes.POINTER(libusb_context)) -> ctypes.POINTER(ctypes.POINTER(struct_libusb_pollfd)): ...
-@dll.bind
-def libusb_free_pollfds(pollfds:ctypes.POINTER(ctypes.POINTER(struct_libusb_pollfd))) -> None: ...
-@dll.bind
-def libusb_set_pollfd_notifiers(ctx:ctypes.POINTER(libusb_context), added_cb:libusb_pollfd_added_cb, removed_cb:libusb_pollfd_removed_cb, user_data:ctypes.c_void_p) -> None: ...
+@dll.bind(ctypes.POINTER(ctypes.POINTER(struct_libusb_pollfd)), ctypes.POINTER(libusb_context))
+def libusb_get_pollfds(ctx:ctypes._Pointer[libusb_context]) -> ctypes._Pointer[ctypes.POINTER(struct_libusb_pollfd)]: ...
+@dll.bind(None, ctypes.POINTER(ctypes.POINTER(struct_libusb_pollfd)))
+def libusb_free_pollfds(pollfds:ctypes._Pointer[ctypes.POINTER(struct_libusb_pollfd)]) -> None: ...
+@dll.bind(None, ctypes.POINTER(libusb_context), libusb_pollfd_added_cb, libusb_pollfd_removed_cb, ctypes.c_void_p)
+def libusb_set_pollfd_notifiers(ctx:ctypes._Pointer[libusb_context], added_cb:libusb_pollfd_added_cb, removed_cb:libusb_pollfd_removed_cb, user_data:int|None) -> None: ...
 libusb_hotplug_callback_handle: TypeAlias = ctypes.c_int32
 libusb_hotplug_event: dict[int, str] = {(LIBUSB_HOTPLUG_EVENT_DEVICE_ARRIVED:=1): 'LIBUSB_HOTPLUG_EVENT_DEVICE_ARRIVED', (LIBUSB_HOTPLUG_EVENT_DEVICE_LEFT:=2): 'LIBUSB_HOTPLUG_EVENT_DEVICE_LEFT'}
 libusb_hotplug_flag: dict[int, str] = {(LIBUSB_HOTPLUG_ENUMERATE:=1): 'LIBUSB_HOTPLUG_ENUMERATE'}
 libusb_hotplug_callback_fn: TypeAlias = ctypes.CFUNCTYPE(ctypes.c_int32, ctypes.POINTER(struct_libusb_context), ctypes.POINTER(struct_libusb_device), ctypes.c_uint32, ctypes.c_void_p)
-@dll.bind
-def libusb_hotplug_register_callback(ctx:ctypes.POINTER(libusb_context), events:ctypes.c_int32, flags:ctypes.c_int32, vendor_id:ctypes.c_int32, product_id:ctypes.c_int32, dev_class:ctypes.c_int32, cb_fn:libusb_hotplug_callback_fn, user_data:ctypes.c_void_p, callback_handle:ctypes.POINTER(libusb_hotplug_callback_handle)) -> ctypes.c_int32: ...
-@dll.bind
-def libusb_hotplug_deregister_callback(ctx:ctypes.POINTER(libusb_context), callback_handle:libusb_hotplug_callback_handle) -> None: ...
-@dll.bind
-def libusb_hotplug_get_user_data(ctx:ctypes.POINTER(libusb_context), callback_handle:libusb_hotplug_callback_handle) -> ctypes.c_void_p: ...
-@dll.bind
-def libusb_set_option(ctx:ctypes.POINTER(libusb_context), option:ctypes.c_uint32) -> ctypes.c_int32: ...
+@dll.bind(ctypes.c_int32, ctypes.POINTER(libusb_context), ctypes.c_int32, ctypes.c_int32, ctypes.c_int32, ctypes.c_int32, ctypes.c_int32, libusb_hotplug_callback_fn, ctypes.c_void_p, ctypes.POINTER(libusb_hotplug_callback_handle))
+def libusb_hotplug_register_callback(ctx:ctypes._Pointer[libusb_context], events:int, flags:int, vendor_id:int, product_id:int, dev_class:int, cb_fn:libusb_hotplug_callback_fn, user_data:int|None, callback_handle:ctypes._Pointer[libusb_hotplug_callback_handle]) -> int: ...
+@dll.bind(None, ctypes.POINTER(libusb_context), libusb_hotplug_callback_handle)
+def libusb_hotplug_deregister_callback(ctx:ctypes._Pointer[libusb_context], callback_handle:libusb_hotplug_callback_handle) -> None: ...
+@dll.bind(ctypes.c_void_p, ctypes.POINTER(libusb_context), libusb_hotplug_callback_handle)
+def libusb_hotplug_get_user_data(ctx:ctypes._Pointer[libusb_context], callback_handle:libusb_hotplug_callback_handle) -> int|None: ...
+@dll.bind(ctypes.c_int32, ctypes.POINTER(libusb_context), ctypes.c_uint32)
+def libusb_set_option(ctx:ctypes._Pointer[libusb_context], option:ctypes.c_uint32) -> int: ...
 LIBUSB_DEPRECATED_FOR = lambda f: __attribute__ ((deprecated)) # type: ignore
 LIBUSB_API_VERSION = 0x0100010A # type: ignore
 LIBUSBX_API_VERSION = LIBUSB_API_VERSION # type: ignore

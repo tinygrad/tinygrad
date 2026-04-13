@@ -1,4 +1,5 @@
 # mypy: disable-error-code="empty-body"
+from __future__ import annotations
 import ctypes
 from typing import Literal, TypeAlias
 from tinygrad.runtime.support.c import _IO, _IOW, _IOR, _IOWR
@@ -6,518 +7,518 @@ from tinygrad.runtime.support import c
 @c.record
 class rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG(c.Struct):
   SIZE = 28
-  HEADER_UNION: 'rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_HEADER_UNION'
-  COUNT_UNION: 'rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_COUNT_UNION'
-  PARAMETER_UNION: 'rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_PARAMETER_UNION'
-  SRC_ADDR_LO_UNION: 'rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_SRC_ADDR_LO_UNION'
-  SRC_ADDR_HI_UNION: 'rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_SRC_ADDR_HI_UNION'
-  DST_ADDR_LO_UNION: 'rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_DST_ADDR_LO_UNION'
-  DST_ADDR_HI_UNION: 'rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_DST_ADDR_HI_UNION'
+  HEADER_UNION: rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_HEADER_UNION
+  COUNT_UNION: rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_COUNT_UNION
+  PARAMETER_UNION: rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_PARAMETER_UNION
+  SRC_ADDR_LO_UNION: rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_SRC_ADDR_LO_UNION
+  SRC_ADDR_HI_UNION: rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_SRC_ADDR_HI_UNION
+  DST_ADDR_LO_UNION: rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_DST_ADDR_LO_UNION
+  DST_ADDR_HI_UNION: rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_DST_ADDR_HI_UNION
 @c.record
 class rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_HEADER_UNION(c.Struct):
   SIZE = 4
-  op: 'int'
-  sub_op: 'int'
-  extra_info: 'int'
-  DW_0_DATA: 'int'
+  op: int
+  sub_op: int
+  extra_info: int
+  DW_0_DATA: int
 rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_HEADER_UNION.register_fields([('op', ctypes.c_uint32, 0, 8, 0), ('sub_op', ctypes.c_uint32, 1, 8, 0), ('extra_info', ctypes.c_uint32, 2, 16, 0), ('DW_0_DATA', ctypes.c_uint32, 0)])
 @c.record
 class rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_COUNT_UNION(c.Struct):
   SIZE = 4
-  count: 'int'
-  reserved_0: 'int'
-  DW_1_DATA: 'int'
+  count: int
+  reserved_0: int
+  DW_1_DATA: int
 rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_COUNT_UNION.register_fields([('count', ctypes.c_uint32, 0, 22, 0), ('reserved_0', ctypes.c_uint32, 2, 10, 6), ('DW_1_DATA', ctypes.c_uint32, 0)])
 @c.record
 class rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_PARAMETER_UNION(c.Struct):
   SIZE = 4
-  reserved_0: 'int'
-  dst_swap: 'int'
-  reserved_1: 'int'
-  src_swap: 'int'
-  reserved_2: 'int'
-  DW_2_DATA: 'int'
+  reserved_0: int
+  dst_swap: int
+  reserved_1: int
+  src_swap: int
+  reserved_2: int
+  DW_2_DATA: int
 rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_PARAMETER_UNION.register_fields([('reserved_0', ctypes.c_uint32, 0, 16, 0), ('dst_swap', ctypes.c_uint32, 2, 2, 0), ('reserved_1', ctypes.c_uint32, 2, 6, 2), ('src_swap', ctypes.c_uint32, 3, 2, 0), ('reserved_2', ctypes.c_uint32, 3, 6, 2), ('DW_2_DATA', ctypes.c_uint32, 0)])
 @c.record
 class rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_SRC_ADDR_LO_UNION(c.Struct):
   SIZE = 4
-  src_addr_31_0: 'int'
-  DW_3_DATA: 'int'
+  src_addr_31_0: int
+  DW_3_DATA: int
 rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_SRC_ADDR_LO_UNION.register_fields([('src_addr_31_0', ctypes.c_uint32, 0, 32, 0), ('DW_3_DATA', ctypes.c_uint32, 0)])
 @c.record
 class rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_SRC_ADDR_HI_UNION(c.Struct):
   SIZE = 4
-  src_addr_63_32: 'int'
-  DW_4_DATA: 'int'
+  src_addr_63_32: int
+  DW_4_DATA: int
 rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_SRC_ADDR_HI_UNION.register_fields([('src_addr_63_32', ctypes.c_uint32, 0, 32, 0), ('DW_4_DATA', ctypes.c_uint32, 0)])
 @c.record
 class rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_DST_ADDR_LO_UNION(c.Struct):
   SIZE = 4
-  dst_addr_31_0: 'int'
-  DW_5_DATA: 'int'
+  dst_addr_31_0: int
+  DW_5_DATA: int
 rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_DST_ADDR_LO_UNION.register_fields([('dst_addr_31_0', ctypes.c_uint32, 0, 32, 0), ('DW_5_DATA', ctypes.c_uint32, 0)])
 @c.record
 class rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_DST_ADDR_HI_UNION(c.Struct):
   SIZE = 4
-  dst_addr_63_32: 'int'
-  DW_6_DATA: 'int'
+  dst_addr_63_32: int
+  DW_6_DATA: int
 rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_DST_ADDR_HI_UNION.register_fields([('dst_addr_63_32', ctypes.c_uint32, 0, 32, 0), ('DW_6_DATA', ctypes.c_uint32, 0)])
 rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG.register_fields([('HEADER_UNION', rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_HEADER_UNION, 0), ('COUNT_UNION', rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_COUNT_UNION, 4), ('PARAMETER_UNION', rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_PARAMETER_UNION, 8), ('SRC_ADDR_LO_UNION', rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_SRC_ADDR_LO_UNION, 12), ('SRC_ADDR_HI_UNION', rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_SRC_ADDR_HI_UNION, 16), ('DST_ADDR_LO_UNION', rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_DST_ADDR_LO_UNION, 20), ('DST_ADDR_HI_UNION', rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG_DST_ADDR_HI_UNION, 24)])
 rocr_AMD_SDMA_PKT_COPY_LINEAR: TypeAlias = rocr_AMD_SDMA_PKT_COPY_LINEAR_TAG
 @c.record
 class rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG(c.Struct):
   SIZE = 52
-  HEADER_UNION: 'rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_HEADER_UNION'
-  SRC_ADDR_LO_UNION: 'rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_SRC_ADDR_LO_UNION'
-  SRC_ADDR_HI_UNION: 'rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_SRC_ADDR_HI_UNION'
-  SRC_PARAMETER_1_UNION: 'rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_SRC_PARAMETER_1_UNION'
-  SRC_PARAMETER_2_UNION: 'rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_SRC_PARAMETER_2_UNION'
-  SRC_PARAMETER_3_UNION: 'rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_SRC_PARAMETER_3_UNION'
-  DST_ADDR_LO_UNION: 'rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_DST_ADDR_LO_UNION'
-  DST_ADDR_HI_UNION: 'rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_DST_ADDR_HI_UNION'
-  DST_PARAMETER_1_UNION: 'rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_DST_PARAMETER_1_UNION'
-  DST_PARAMETER_2_UNION: 'rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_DST_PARAMETER_2_UNION'
-  DST_PARAMETER_3_UNION: 'rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_DST_PARAMETER_3_UNION'
-  RECT_PARAMETER_1_UNION: 'rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_RECT_PARAMETER_1_UNION'
-  RECT_PARAMETER_2_UNION: 'rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_RECT_PARAMETER_2_UNION'
+  HEADER_UNION: rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_HEADER_UNION
+  SRC_ADDR_LO_UNION: rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_SRC_ADDR_LO_UNION
+  SRC_ADDR_HI_UNION: rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_SRC_ADDR_HI_UNION
+  SRC_PARAMETER_1_UNION: rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_SRC_PARAMETER_1_UNION
+  SRC_PARAMETER_2_UNION: rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_SRC_PARAMETER_2_UNION
+  SRC_PARAMETER_3_UNION: rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_SRC_PARAMETER_3_UNION
+  DST_ADDR_LO_UNION: rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_DST_ADDR_LO_UNION
+  DST_ADDR_HI_UNION: rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_DST_ADDR_HI_UNION
+  DST_PARAMETER_1_UNION: rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_DST_PARAMETER_1_UNION
+  DST_PARAMETER_2_UNION: rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_DST_PARAMETER_2_UNION
+  DST_PARAMETER_3_UNION: rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_DST_PARAMETER_3_UNION
+  RECT_PARAMETER_1_UNION: rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_RECT_PARAMETER_1_UNION
+  RECT_PARAMETER_2_UNION: rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_RECT_PARAMETER_2_UNION
 @c.record
 class rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_HEADER_UNION(c.Struct):
   SIZE = 4
-  op: 'int'
-  sub_op: 'int'
-  reserved: 'int'
-  element: 'int'
-  DW_0_DATA: 'int'
+  op: int
+  sub_op: int
+  reserved: int
+  element: int
+  DW_0_DATA: int
 rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_HEADER_UNION.register_fields([('op', ctypes.c_uint32, 0, 8, 0), ('sub_op', ctypes.c_uint32, 1, 8, 0), ('reserved', ctypes.c_uint32, 2, 13, 0), ('element', ctypes.c_uint32, 3, 3, 5), ('DW_0_DATA', ctypes.c_uint32, 0)])
 @c.record
 class rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_SRC_ADDR_LO_UNION(c.Struct):
   SIZE = 4
-  src_addr_31_0: 'int'
-  DW_1_DATA: 'int'
+  src_addr_31_0: int
+  DW_1_DATA: int
 rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_SRC_ADDR_LO_UNION.register_fields([('src_addr_31_0', ctypes.c_uint32, 0, 32, 0), ('DW_1_DATA', ctypes.c_uint32, 0)])
 @c.record
 class rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_SRC_ADDR_HI_UNION(c.Struct):
   SIZE = 4
-  src_addr_63_32: 'int'
-  DW_2_DATA: 'int'
+  src_addr_63_32: int
+  DW_2_DATA: int
 rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_SRC_ADDR_HI_UNION.register_fields([('src_addr_63_32', ctypes.c_uint32, 0, 32, 0), ('DW_2_DATA', ctypes.c_uint32, 0)])
 @c.record
 class rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_SRC_PARAMETER_1_UNION(c.Struct):
   SIZE = 4
-  src_offset_x: 'int'
-  reserved_1: 'int'
-  src_offset_y: 'int'
-  reserved_2: 'int'
-  DW_3_DATA: 'int'
+  src_offset_x: int
+  reserved_1: int
+  src_offset_y: int
+  reserved_2: int
+  DW_3_DATA: int
 rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_SRC_PARAMETER_1_UNION.register_fields([('src_offset_x', ctypes.c_uint32, 0, 14, 0), ('reserved_1', ctypes.c_uint32, 1, 2, 6), ('src_offset_y', ctypes.c_uint32, 2, 14, 0), ('reserved_2', ctypes.c_uint32, 3, 2, 6), ('DW_3_DATA', ctypes.c_uint32, 0)])
 @c.record
 class rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_SRC_PARAMETER_2_UNION(c.Struct):
   SIZE = 4
-  src_offset_z: 'int'
-  reserved_1: 'int'
-  src_pitch: 'int'
-  DW_4_DATA: 'int'
+  src_offset_z: int
+  reserved_1: int
+  src_pitch: int
+  DW_4_DATA: int
 rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_SRC_PARAMETER_2_UNION.register_fields([('src_offset_z', ctypes.c_uint32, 0, 11, 0), ('reserved_1', ctypes.c_uint32, 1, 2, 3), ('src_pitch', ctypes.c_uint32, 1, 19, 5), ('DW_4_DATA', ctypes.c_uint32, 0)])
 @c.record
 class rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_SRC_PARAMETER_3_UNION(c.Struct):
   SIZE = 4
-  src_slice_pitch: 'int'
-  reserved_1: 'int'
-  DW_5_DATA: 'int'
+  src_slice_pitch: int
+  reserved_1: int
+  DW_5_DATA: int
 rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_SRC_PARAMETER_3_UNION.register_fields([('src_slice_pitch', ctypes.c_uint32, 0, 28, 0), ('reserved_1', ctypes.c_uint32, 3, 4, 4), ('DW_5_DATA', ctypes.c_uint32, 0)])
 @c.record
 class rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_DST_ADDR_LO_UNION(c.Struct):
   SIZE = 4
-  dst_addr_31_0: 'int'
-  DW_6_DATA: 'int'
+  dst_addr_31_0: int
+  DW_6_DATA: int
 rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_DST_ADDR_LO_UNION.register_fields([('dst_addr_31_0', ctypes.c_uint32, 0, 32, 0), ('DW_6_DATA', ctypes.c_uint32, 0)])
 @c.record
 class rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_DST_ADDR_HI_UNION(c.Struct):
   SIZE = 4
-  dst_addr_63_32: 'int'
-  DW_7_DATA: 'int'
+  dst_addr_63_32: int
+  DW_7_DATA: int
 rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_DST_ADDR_HI_UNION.register_fields([('dst_addr_63_32', ctypes.c_uint32, 0, 32, 0), ('DW_7_DATA', ctypes.c_uint32, 0)])
 @c.record
 class rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_DST_PARAMETER_1_UNION(c.Struct):
   SIZE = 4
-  dst_offset_x: 'int'
-  reserved_1: 'int'
-  dst_offset_y: 'int'
-  reserved_2: 'int'
-  DW_8_DATA: 'int'
+  dst_offset_x: int
+  reserved_1: int
+  dst_offset_y: int
+  reserved_2: int
+  DW_8_DATA: int
 rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_DST_PARAMETER_1_UNION.register_fields([('dst_offset_x', ctypes.c_uint32, 0, 14, 0), ('reserved_1', ctypes.c_uint32, 1, 2, 6), ('dst_offset_y', ctypes.c_uint32, 2, 14, 0), ('reserved_2', ctypes.c_uint32, 3, 2, 6), ('DW_8_DATA', ctypes.c_uint32, 0)])
 @c.record
 class rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_DST_PARAMETER_2_UNION(c.Struct):
   SIZE = 4
-  dst_offset_z: 'int'
-  reserved_1: 'int'
-  dst_pitch: 'int'
-  DW_9_DATA: 'int'
+  dst_offset_z: int
+  reserved_1: int
+  dst_pitch: int
+  DW_9_DATA: int
 rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_DST_PARAMETER_2_UNION.register_fields([('dst_offset_z', ctypes.c_uint32, 0, 11, 0), ('reserved_1', ctypes.c_uint32, 1, 2, 3), ('dst_pitch', ctypes.c_uint32, 1, 19, 5), ('DW_9_DATA', ctypes.c_uint32, 0)])
 @c.record
 class rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_DST_PARAMETER_3_UNION(c.Struct):
   SIZE = 4
-  dst_slice_pitch: 'int'
-  reserved_1: 'int'
-  DW_10_DATA: 'int'
+  dst_slice_pitch: int
+  reserved_1: int
+  DW_10_DATA: int
 rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_DST_PARAMETER_3_UNION.register_fields([('dst_slice_pitch', ctypes.c_uint32, 0, 28, 0), ('reserved_1', ctypes.c_uint32, 3, 4, 4), ('DW_10_DATA', ctypes.c_uint32, 0)])
 @c.record
 class rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_RECT_PARAMETER_1_UNION(c.Struct):
   SIZE = 4
-  rect_x: 'int'
-  reserved_1: 'int'
-  rect_y: 'int'
-  reserved_2: 'int'
-  DW_11_DATA: 'int'
+  rect_x: int
+  reserved_1: int
+  rect_y: int
+  reserved_2: int
+  DW_11_DATA: int
 rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_RECT_PARAMETER_1_UNION.register_fields([('rect_x', ctypes.c_uint32, 0, 14, 0), ('reserved_1', ctypes.c_uint32, 1, 2, 6), ('rect_y', ctypes.c_uint32, 2, 14, 0), ('reserved_2', ctypes.c_uint32, 3, 2, 6), ('DW_11_DATA', ctypes.c_uint32, 0)])
 @c.record
 class rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_RECT_PARAMETER_2_UNION(c.Struct):
   SIZE = 4
-  rect_z: 'int'
-  reserved_1: 'int'
-  dst_swap: 'int'
-  reserved_2: 'int'
-  src_swap: 'int'
-  reserved_3: 'int'
-  DW_12_DATA: 'int'
+  rect_z: int
+  reserved_1: int
+  dst_swap: int
+  reserved_2: int
+  src_swap: int
+  reserved_3: int
+  DW_12_DATA: int
 rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_RECT_PARAMETER_2_UNION.register_fields([('rect_z', ctypes.c_uint32, 0, 11, 0), ('reserved_1', ctypes.c_uint32, 1, 5, 3), ('dst_swap', ctypes.c_uint32, 2, 2, 0), ('reserved_2', ctypes.c_uint32, 2, 6, 2), ('src_swap', ctypes.c_uint32, 3, 2, 0), ('reserved_3', ctypes.c_uint32, 3, 6, 2), ('DW_12_DATA', ctypes.c_uint32, 0)])
 rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG.register_fields([('HEADER_UNION', rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_HEADER_UNION, 0), ('SRC_ADDR_LO_UNION', rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_SRC_ADDR_LO_UNION, 4), ('SRC_ADDR_HI_UNION', rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_SRC_ADDR_HI_UNION, 8), ('SRC_PARAMETER_1_UNION', rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_SRC_PARAMETER_1_UNION, 12), ('SRC_PARAMETER_2_UNION', rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_SRC_PARAMETER_2_UNION, 16), ('SRC_PARAMETER_3_UNION', rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_SRC_PARAMETER_3_UNION, 20), ('DST_ADDR_LO_UNION', rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_DST_ADDR_LO_UNION, 24), ('DST_ADDR_HI_UNION', rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_DST_ADDR_HI_UNION, 28), ('DST_PARAMETER_1_UNION', rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_DST_PARAMETER_1_UNION, 32), ('DST_PARAMETER_2_UNION', rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_DST_PARAMETER_2_UNION, 36), ('DST_PARAMETER_3_UNION', rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_DST_PARAMETER_3_UNION, 40), ('RECT_PARAMETER_1_UNION', rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_RECT_PARAMETER_1_UNION, 44), ('RECT_PARAMETER_2_UNION', rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG_RECT_PARAMETER_2_UNION, 48)])
 rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT: TypeAlias = rocr_AMD_SDMA_PKT_COPY_LINEAR_RECT_TAG
 @c.record
 class rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG(c.Struct):
   SIZE = 20
-  HEADER_UNION: 'rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG_HEADER_UNION'
-  DST_ADDR_LO_UNION: 'rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG_DST_ADDR_LO_UNION'
-  DST_ADDR_HI_UNION: 'rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG_DST_ADDR_HI_UNION'
-  DATA_UNION: 'rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG_DATA_UNION'
-  COUNT_UNION: 'rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG_COUNT_UNION'
+  HEADER_UNION: rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG_HEADER_UNION
+  DST_ADDR_LO_UNION: rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG_DST_ADDR_LO_UNION
+  DST_ADDR_HI_UNION: rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG_DST_ADDR_HI_UNION
+  DATA_UNION: rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG_DATA_UNION
+  COUNT_UNION: rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG_COUNT_UNION
 @c.record
 class rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG_HEADER_UNION(c.Struct):
   SIZE = 4
-  op: 'int'
-  sub_op: 'int'
-  sw: 'int'
-  reserved_0: 'int'
-  fillsize: 'int'
-  DW_0_DATA: 'int'
+  op: int
+  sub_op: int
+  sw: int
+  reserved_0: int
+  fillsize: int
+  DW_0_DATA: int
 rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG_HEADER_UNION.register_fields([('op', ctypes.c_uint32, 0, 8, 0), ('sub_op', ctypes.c_uint32, 1, 8, 0), ('sw', ctypes.c_uint32, 2, 2, 0), ('reserved_0', ctypes.c_uint32, 2, 12, 2), ('fillsize', ctypes.c_uint32, 3, 2, 6), ('DW_0_DATA', ctypes.c_uint32, 0)])
 @c.record
 class rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG_DST_ADDR_LO_UNION(c.Struct):
   SIZE = 4
-  dst_addr_31_0: 'int'
-  DW_1_DATA: 'int'
+  dst_addr_31_0: int
+  DW_1_DATA: int
 rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG_DST_ADDR_LO_UNION.register_fields([('dst_addr_31_0', ctypes.c_uint32, 0, 32, 0), ('DW_1_DATA', ctypes.c_uint32, 0)])
 @c.record
 class rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG_DST_ADDR_HI_UNION(c.Struct):
   SIZE = 4
-  dst_addr_63_32: 'int'
-  DW_2_DATA: 'int'
+  dst_addr_63_32: int
+  DW_2_DATA: int
 rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG_DST_ADDR_HI_UNION.register_fields([('dst_addr_63_32', ctypes.c_uint32, 0, 32, 0), ('DW_2_DATA', ctypes.c_uint32, 0)])
 @c.record
 class rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG_DATA_UNION(c.Struct):
   SIZE = 4
-  src_data_31_0: 'int'
-  DW_3_DATA: 'int'
+  src_data_31_0: int
+  DW_3_DATA: int
 rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG_DATA_UNION.register_fields([('src_data_31_0', ctypes.c_uint32, 0, 32, 0), ('DW_3_DATA', ctypes.c_uint32, 0)])
 @c.record
 class rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG_COUNT_UNION(c.Struct):
   SIZE = 4
-  count: 'int'
-  reserved_0: 'int'
-  DW_4_DATA: 'int'
+  count: int
+  reserved_0: int
+  DW_4_DATA: int
 rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG_COUNT_UNION.register_fields([('count', ctypes.c_uint32, 0, 22, 0), ('reserved_0', ctypes.c_uint32, 2, 10, 6), ('DW_4_DATA', ctypes.c_uint32, 0)])
 rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG.register_fields([('HEADER_UNION', rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG_HEADER_UNION, 0), ('DST_ADDR_LO_UNION', rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG_DST_ADDR_LO_UNION, 4), ('DST_ADDR_HI_UNION', rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG_DST_ADDR_HI_UNION, 8), ('DATA_UNION', rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG_DATA_UNION, 12), ('COUNT_UNION', rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG_COUNT_UNION, 16)])
 rocr_AMD_SDMA_PKT_CONSTANT_FILL: TypeAlias = rocr_AMD_SDMA_PKT_CONSTANT_FILL_TAG
 @c.record
 class rocr_AMD_SDMA_PKT_FENCE_TAG(c.Struct):
   SIZE = 16
-  HEADER_UNION: 'rocr_AMD_SDMA_PKT_FENCE_TAG_HEADER_UNION'
-  ADDR_LO_UNION: 'rocr_AMD_SDMA_PKT_FENCE_TAG_ADDR_LO_UNION'
-  ADDR_HI_UNION: 'rocr_AMD_SDMA_PKT_FENCE_TAG_ADDR_HI_UNION'
-  DATA_UNION: 'rocr_AMD_SDMA_PKT_FENCE_TAG_DATA_UNION'
+  HEADER_UNION: rocr_AMD_SDMA_PKT_FENCE_TAG_HEADER_UNION
+  ADDR_LO_UNION: rocr_AMD_SDMA_PKT_FENCE_TAG_ADDR_LO_UNION
+  ADDR_HI_UNION: rocr_AMD_SDMA_PKT_FENCE_TAG_ADDR_HI_UNION
+  DATA_UNION: rocr_AMD_SDMA_PKT_FENCE_TAG_DATA_UNION
 @c.record
 class rocr_AMD_SDMA_PKT_FENCE_TAG_HEADER_UNION(c.Struct):
   SIZE = 4
-  op: 'int'
-  sub_op: 'int'
-  mtype: 'int'
-  gcc: 'int'
-  sys: 'int'
-  pad1: 'int'
-  snp: 'int'
-  gpa: 'int'
-  l2_policy: 'int'
-  reserved_0: 'int'
-  DW_0_DATA: 'int'
+  op: int
+  sub_op: int
+  mtype: int
+  gcc: int
+  sys: int
+  pad1: int
+  snp: int
+  gpa: int
+  l2_policy: int
+  reserved_0: int
+  DW_0_DATA: int
 rocr_AMD_SDMA_PKT_FENCE_TAG_HEADER_UNION.register_fields([('op', ctypes.c_uint32, 0, 8, 0), ('sub_op', ctypes.c_uint32, 1, 8, 0), ('mtype', ctypes.c_uint32, 2, 3, 0), ('gcc', ctypes.c_uint32, 2, 1, 3), ('sys', ctypes.c_uint32, 2, 1, 4), ('pad1', ctypes.c_uint32, 2, 1, 5), ('snp', ctypes.c_uint32, 2, 1, 6), ('gpa', ctypes.c_uint32, 2, 1, 7), ('l2_policy', ctypes.c_uint32, 3, 2, 0), ('reserved_0', ctypes.c_uint32, 3, 6, 2), ('DW_0_DATA', ctypes.c_uint32, 0)])
 @c.record
 class rocr_AMD_SDMA_PKT_FENCE_TAG_ADDR_LO_UNION(c.Struct):
   SIZE = 4
-  addr_31_0: 'int'
-  DW_1_DATA: 'int'
+  addr_31_0: int
+  DW_1_DATA: int
 rocr_AMD_SDMA_PKT_FENCE_TAG_ADDR_LO_UNION.register_fields([('addr_31_0', ctypes.c_uint32, 0, 32, 0), ('DW_1_DATA', ctypes.c_uint32, 0)])
 @c.record
 class rocr_AMD_SDMA_PKT_FENCE_TAG_ADDR_HI_UNION(c.Struct):
   SIZE = 4
-  addr_63_32: 'int'
-  DW_2_DATA: 'int'
+  addr_63_32: int
+  DW_2_DATA: int
 rocr_AMD_SDMA_PKT_FENCE_TAG_ADDR_HI_UNION.register_fields([('addr_63_32', ctypes.c_uint32, 0, 32, 0), ('DW_2_DATA', ctypes.c_uint32, 0)])
 @c.record
 class rocr_AMD_SDMA_PKT_FENCE_TAG_DATA_UNION(c.Struct):
   SIZE = 4
-  data: 'int'
-  DW_3_DATA: 'int'
+  data: int
+  DW_3_DATA: int
 rocr_AMD_SDMA_PKT_FENCE_TAG_DATA_UNION.register_fields([('data', ctypes.c_uint32, 0, 32, 0), ('DW_3_DATA', ctypes.c_uint32, 0)])
 rocr_AMD_SDMA_PKT_FENCE_TAG.register_fields([('HEADER_UNION', rocr_AMD_SDMA_PKT_FENCE_TAG_HEADER_UNION, 0), ('ADDR_LO_UNION', rocr_AMD_SDMA_PKT_FENCE_TAG_ADDR_LO_UNION, 4), ('ADDR_HI_UNION', rocr_AMD_SDMA_PKT_FENCE_TAG_ADDR_HI_UNION, 8), ('DATA_UNION', rocr_AMD_SDMA_PKT_FENCE_TAG_DATA_UNION, 12)])
 rocr_AMD_SDMA_PKT_FENCE: TypeAlias = rocr_AMD_SDMA_PKT_FENCE_TAG
 @c.record
 class rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG(c.Struct):
   SIZE = 24
-  HEADER_UNION: 'rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_HEADER_UNION'
-  ADDR_LO_UNION: 'rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_ADDR_LO_UNION'
-  ADDR_HI_UNION: 'rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_ADDR_HI_UNION'
-  VALUE_UNION: 'rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_VALUE_UNION'
-  MASK_UNION: 'rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_MASK_UNION'
-  DW5_UNION: 'rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_DW5_UNION'
+  HEADER_UNION: rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_HEADER_UNION
+  ADDR_LO_UNION: rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_ADDR_LO_UNION
+  ADDR_HI_UNION: rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_ADDR_HI_UNION
+  VALUE_UNION: rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_VALUE_UNION
+  MASK_UNION: rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_MASK_UNION
+  DW5_UNION: rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_DW5_UNION
 @c.record
 class rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_HEADER_UNION(c.Struct):
   SIZE = 4
-  op: 'int'
-  sub_op: 'int'
-  reserved_0: 'int'
-  hdp_flush: 'int'
-  reserved_1: 'int'
-  func: 'int'
-  mem_poll: 'int'
-  DW_0_DATA: 'int'
+  op: int
+  sub_op: int
+  reserved_0: int
+  hdp_flush: int
+  reserved_1: int
+  func: int
+  mem_poll: int
+  DW_0_DATA: int
 rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_HEADER_UNION.register_fields([('op', ctypes.c_uint32, 0, 8, 0), ('sub_op', ctypes.c_uint32, 1, 8, 0), ('reserved_0', ctypes.c_uint32, 2, 10, 0), ('hdp_flush', ctypes.c_uint32, 3, 1, 2), ('reserved_1', ctypes.c_uint32, 3, 1, 3), ('func', ctypes.c_uint32, 3, 3, 4), ('mem_poll', ctypes.c_uint32, 3, 1, 7), ('DW_0_DATA', ctypes.c_uint32, 0)])
 @c.record
 class rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_ADDR_LO_UNION(c.Struct):
   SIZE = 4
-  addr_31_0: 'int'
-  DW_1_DATA: 'int'
+  addr_31_0: int
+  DW_1_DATA: int
 rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_ADDR_LO_UNION.register_fields([('addr_31_0', ctypes.c_uint32, 0, 32, 0), ('DW_1_DATA', ctypes.c_uint32, 0)])
 @c.record
 class rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_ADDR_HI_UNION(c.Struct):
   SIZE = 4
-  addr_63_32: 'int'
-  DW_2_DATA: 'int'
+  addr_63_32: int
+  DW_2_DATA: int
 rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_ADDR_HI_UNION.register_fields([('addr_63_32', ctypes.c_uint32, 0, 32, 0), ('DW_2_DATA', ctypes.c_uint32, 0)])
 @c.record
 class rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_VALUE_UNION(c.Struct):
   SIZE = 4
-  value: 'int'
-  DW_3_DATA: 'int'
+  value: int
+  DW_3_DATA: int
 rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_VALUE_UNION.register_fields([('value', ctypes.c_uint32, 0, 32, 0), ('DW_3_DATA', ctypes.c_uint32, 0)])
 @c.record
 class rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_MASK_UNION(c.Struct):
   SIZE = 4
-  mask: 'int'
-  DW_4_DATA: 'int'
+  mask: int
+  DW_4_DATA: int
 rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_MASK_UNION.register_fields([('mask', ctypes.c_uint32, 0, 32, 0), ('DW_4_DATA', ctypes.c_uint32, 0)])
 @c.record
 class rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_DW5_UNION(c.Struct):
   SIZE = 4
-  interval: 'int'
-  retry_count: 'int'
-  reserved_0: 'int'
-  DW_5_DATA: 'int'
+  interval: int
+  retry_count: int
+  reserved_0: int
+  DW_5_DATA: int
 rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_DW5_UNION.register_fields([('interval', ctypes.c_uint32, 0, 16, 0), ('retry_count', ctypes.c_uint32, 2, 12, 0), ('reserved_0', ctypes.c_uint32, 3, 4, 4), ('DW_5_DATA', ctypes.c_uint32, 0)])
 rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG.register_fields([('HEADER_UNION', rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_HEADER_UNION, 0), ('ADDR_LO_UNION', rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_ADDR_LO_UNION, 4), ('ADDR_HI_UNION', rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_ADDR_HI_UNION, 8), ('VALUE_UNION', rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_VALUE_UNION, 12), ('MASK_UNION', rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_MASK_UNION, 16), ('DW5_UNION', rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG_DW5_UNION, 20)])
 rocr_AMD_SDMA_PKT_POLL_REGMEM: TypeAlias = rocr_AMD_SDMA_PKT_POLL_REGMEM_TAG
 @c.record
 class rocr_AMD_SDMA_PKT_ATOMIC_TAG(c.Struct):
   SIZE = 32
-  HEADER_UNION: 'rocr_AMD_SDMA_PKT_ATOMIC_TAG_HEADER_UNION'
-  ADDR_LO_UNION: 'rocr_AMD_SDMA_PKT_ATOMIC_TAG_ADDR_LO_UNION'
-  ADDR_HI_UNION: 'rocr_AMD_SDMA_PKT_ATOMIC_TAG_ADDR_HI_UNION'
-  SRC_DATA_LO_UNION: 'rocr_AMD_SDMA_PKT_ATOMIC_TAG_SRC_DATA_LO_UNION'
-  SRC_DATA_HI_UNION: 'rocr_AMD_SDMA_PKT_ATOMIC_TAG_SRC_DATA_HI_UNION'
-  CMP_DATA_LO_UNION: 'rocr_AMD_SDMA_PKT_ATOMIC_TAG_CMP_DATA_LO_UNION'
-  CMP_DATA_HI_UNION: 'rocr_AMD_SDMA_PKT_ATOMIC_TAG_CMP_DATA_HI_UNION'
-  LOOP_UNION: 'rocr_AMD_SDMA_PKT_ATOMIC_TAG_LOOP_UNION'
+  HEADER_UNION: rocr_AMD_SDMA_PKT_ATOMIC_TAG_HEADER_UNION
+  ADDR_LO_UNION: rocr_AMD_SDMA_PKT_ATOMIC_TAG_ADDR_LO_UNION
+  ADDR_HI_UNION: rocr_AMD_SDMA_PKT_ATOMIC_TAG_ADDR_HI_UNION
+  SRC_DATA_LO_UNION: rocr_AMD_SDMA_PKT_ATOMIC_TAG_SRC_DATA_LO_UNION
+  SRC_DATA_HI_UNION: rocr_AMD_SDMA_PKT_ATOMIC_TAG_SRC_DATA_HI_UNION
+  CMP_DATA_LO_UNION: rocr_AMD_SDMA_PKT_ATOMIC_TAG_CMP_DATA_LO_UNION
+  CMP_DATA_HI_UNION: rocr_AMD_SDMA_PKT_ATOMIC_TAG_CMP_DATA_HI_UNION
+  LOOP_UNION: rocr_AMD_SDMA_PKT_ATOMIC_TAG_LOOP_UNION
 @c.record
 class rocr_AMD_SDMA_PKT_ATOMIC_TAG_HEADER_UNION(c.Struct):
   SIZE = 4
-  op: 'int'
-  sub_op: 'int'
-  l: 'int'
-  reserved_0: 'int'
-  operation: 'int'
-  DW_0_DATA: 'int'
+  op: int
+  sub_op: int
+  l: int
+  reserved_0: int
+  operation: int
+  DW_0_DATA: int
 rocr_AMD_SDMA_PKT_ATOMIC_TAG_HEADER_UNION.register_fields([('op', ctypes.c_uint32, 0, 8, 0), ('sub_op', ctypes.c_uint32, 1, 8, 0), ('l', ctypes.c_uint32, 2, 1, 0), ('reserved_0', ctypes.c_uint32, 2, 8, 1), ('operation', ctypes.c_uint32, 3, 7, 1), ('DW_0_DATA', ctypes.c_uint32, 0)])
 @c.record
 class rocr_AMD_SDMA_PKT_ATOMIC_TAG_ADDR_LO_UNION(c.Struct):
   SIZE = 4
-  addr_31_0: 'int'
-  DW_1_DATA: 'int'
+  addr_31_0: int
+  DW_1_DATA: int
 rocr_AMD_SDMA_PKT_ATOMIC_TAG_ADDR_LO_UNION.register_fields([('addr_31_0', ctypes.c_uint32, 0, 32, 0), ('DW_1_DATA', ctypes.c_uint32, 0)])
 @c.record
 class rocr_AMD_SDMA_PKT_ATOMIC_TAG_ADDR_HI_UNION(c.Struct):
   SIZE = 4
-  addr_63_32: 'int'
-  DW_2_DATA: 'int'
+  addr_63_32: int
+  DW_2_DATA: int
 rocr_AMD_SDMA_PKT_ATOMIC_TAG_ADDR_HI_UNION.register_fields([('addr_63_32', ctypes.c_uint32, 0, 32, 0), ('DW_2_DATA', ctypes.c_uint32, 0)])
 @c.record
 class rocr_AMD_SDMA_PKT_ATOMIC_TAG_SRC_DATA_LO_UNION(c.Struct):
   SIZE = 4
-  src_data_31_0: 'int'
-  DW_3_DATA: 'int'
+  src_data_31_0: int
+  DW_3_DATA: int
 rocr_AMD_SDMA_PKT_ATOMIC_TAG_SRC_DATA_LO_UNION.register_fields([('src_data_31_0', ctypes.c_uint32, 0, 32, 0), ('DW_3_DATA', ctypes.c_uint32, 0)])
 @c.record
 class rocr_AMD_SDMA_PKT_ATOMIC_TAG_SRC_DATA_HI_UNION(c.Struct):
   SIZE = 4
-  src_data_63_32: 'int'
-  DW_4_DATA: 'int'
+  src_data_63_32: int
+  DW_4_DATA: int
 rocr_AMD_SDMA_PKT_ATOMIC_TAG_SRC_DATA_HI_UNION.register_fields([('src_data_63_32', ctypes.c_uint32, 0, 32, 0), ('DW_4_DATA', ctypes.c_uint32, 0)])
 @c.record
 class rocr_AMD_SDMA_PKT_ATOMIC_TAG_CMP_DATA_LO_UNION(c.Struct):
   SIZE = 4
-  cmp_data_31_0: 'int'
-  DW_5_DATA: 'int'
+  cmp_data_31_0: int
+  DW_5_DATA: int
 rocr_AMD_SDMA_PKT_ATOMIC_TAG_CMP_DATA_LO_UNION.register_fields([('cmp_data_31_0', ctypes.c_uint32, 0, 32, 0), ('DW_5_DATA', ctypes.c_uint32, 0)])
 @c.record
 class rocr_AMD_SDMA_PKT_ATOMIC_TAG_CMP_DATA_HI_UNION(c.Struct):
   SIZE = 4
-  cmp_data_63_32: 'int'
-  DW_6_DATA: 'int'
+  cmp_data_63_32: int
+  DW_6_DATA: int
 rocr_AMD_SDMA_PKT_ATOMIC_TAG_CMP_DATA_HI_UNION.register_fields([('cmp_data_63_32', ctypes.c_uint32, 0, 32, 0), ('DW_6_DATA', ctypes.c_uint32, 0)])
 @c.record
 class rocr_AMD_SDMA_PKT_ATOMIC_TAG_LOOP_UNION(c.Struct):
   SIZE = 4
-  loop_interval: 'int'
-  reserved_0: 'int'
-  DW_7_DATA: 'int'
+  loop_interval: int
+  reserved_0: int
+  DW_7_DATA: int
 rocr_AMD_SDMA_PKT_ATOMIC_TAG_LOOP_UNION.register_fields([('loop_interval', ctypes.c_uint32, 0, 13, 0), ('reserved_0', ctypes.c_uint32, 1, 19, 5), ('DW_7_DATA', ctypes.c_uint32, 0)])
 rocr_AMD_SDMA_PKT_ATOMIC_TAG.register_fields([('HEADER_UNION', rocr_AMD_SDMA_PKT_ATOMIC_TAG_HEADER_UNION, 0), ('ADDR_LO_UNION', rocr_AMD_SDMA_PKT_ATOMIC_TAG_ADDR_LO_UNION, 4), ('ADDR_HI_UNION', rocr_AMD_SDMA_PKT_ATOMIC_TAG_ADDR_HI_UNION, 8), ('SRC_DATA_LO_UNION', rocr_AMD_SDMA_PKT_ATOMIC_TAG_SRC_DATA_LO_UNION, 12), ('SRC_DATA_HI_UNION', rocr_AMD_SDMA_PKT_ATOMIC_TAG_SRC_DATA_HI_UNION, 16), ('CMP_DATA_LO_UNION', rocr_AMD_SDMA_PKT_ATOMIC_TAG_CMP_DATA_LO_UNION, 20), ('CMP_DATA_HI_UNION', rocr_AMD_SDMA_PKT_ATOMIC_TAG_CMP_DATA_HI_UNION, 24), ('LOOP_UNION', rocr_AMD_SDMA_PKT_ATOMIC_TAG_LOOP_UNION, 28)])
 rocr_AMD_SDMA_PKT_ATOMIC: TypeAlias = rocr_AMD_SDMA_PKT_ATOMIC_TAG
 @c.record
 class rocr_AMD_SDMA_PKT_TIMESTAMP_TAG(c.Struct):
   SIZE = 12
-  HEADER_UNION: 'rocr_AMD_SDMA_PKT_TIMESTAMP_TAG_HEADER_UNION'
-  ADDR_LO_UNION: 'rocr_AMD_SDMA_PKT_TIMESTAMP_TAG_ADDR_LO_UNION'
-  ADDR_HI_UNION: 'rocr_AMD_SDMA_PKT_TIMESTAMP_TAG_ADDR_HI_UNION'
+  HEADER_UNION: rocr_AMD_SDMA_PKT_TIMESTAMP_TAG_HEADER_UNION
+  ADDR_LO_UNION: rocr_AMD_SDMA_PKT_TIMESTAMP_TAG_ADDR_LO_UNION
+  ADDR_HI_UNION: rocr_AMD_SDMA_PKT_TIMESTAMP_TAG_ADDR_HI_UNION
 @c.record
 class rocr_AMD_SDMA_PKT_TIMESTAMP_TAG_HEADER_UNION(c.Struct):
   SIZE = 4
-  op: 'int'
-  sub_op: 'int'
-  reserved_0: 'int'
-  DW_0_DATA: 'int'
+  op: int
+  sub_op: int
+  reserved_0: int
+  DW_0_DATA: int
 rocr_AMD_SDMA_PKT_TIMESTAMP_TAG_HEADER_UNION.register_fields([('op', ctypes.c_uint32, 0, 8, 0), ('sub_op', ctypes.c_uint32, 1, 8, 0), ('reserved_0', ctypes.c_uint32, 2, 16, 0), ('DW_0_DATA', ctypes.c_uint32, 0)])
 @c.record
 class rocr_AMD_SDMA_PKT_TIMESTAMP_TAG_ADDR_LO_UNION(c.Struct):
   SIZE = 4
-  addr_31_0: 'int'
-  DW_1_DATA: 'int'
+  addr_31_0: int
+  DW_1_DATA: int
 rocr_AMD_SDMA_PKT_TIMESTAMP_TAG_ADDR_LO_UNION.register_fields([('addr_31_0', ctypes.c_uint32, 0, 32, 0), ('DW_1_DATA', ctypes.c_uint32, 0)])
 @c.record
 class rocr_AMD_SDMA_PKT_TIMESTAMP_TAG_ADDR_HI_UNION(c.Struct):
   SIZE = 4
-  addr_63_32: 'int'
-  DW_2_DATA: 'int'
+  addr_63_32: int
+  DW_2_DATA: int
 rocr_AMD_SDMA_PKT_TIMESTAMP_TAG_ADDR_HI_UNION.register_fields([('addr_63_32', ctypes.c_uint32, 0, 32, 0), ('DW_2_DATA', ctypes.c_uint32, 0)])
 rocr_AMD_SDMA_PKT_TIMESTAMP_TAG.register_fields([('HEADER_UNION', rocr_AMD_SDMA_PKT_TIMESTAMP_TAG_HEADER_UNION, 0), ('ADDR_LO_UNION', rocr_AMD_SDMA_PKT_TIMESTAMP_TAG_ADDR_LO_UNION, 4), ('ADDR_HI_UNION', rocr_AMD_SDMA_PKT_TIMESTAMP_TAG_ADDR_HI_UNION, 8)])
 rocr_AMD_SDMA_PKT_TIMESTAMP: TypeAlias = rocr_AMD_SDMA_PKT_TIMESTAMP_TAG
 @c.record
 class rocr_AMD_SDMA_PKT_TRAP_TAG(c.Struct):
   SIZE = 8
-  HEADER_UNION: 'rocr_AMD_SDMA_PKT_TRAP_TAG_HEADER_UNION'
-  INT_CONTEXT_UNION: 'rocr_AMD_SDMA_PKT_TRAP_TAG_INT_CONTEXT_UNION'
+  HEADER_UNION: rocr_AMD_SDMA_PKT_TRAP_TAG_HEADER_UNION
+  INT_CONTEXT_UNION: rocr_AMD_SDMA_PKT_TRAP_TAG_INT_CONTEXT_UNION
 @c.record
 class rocr_AMD_SDMA_PKT_TRAP_TAG_HEADER_UNION(c.Struct):
   SIZE = 4
-  op: 'int'
-  sub_op: 'int'
-  reserved_0: 'int'
-  DW_0_DATA: 'int'
+  op: int
+  sub_op: int
+  reserved_0: int
+  DW_0_DATA: int
 rocr_AMD_SDMA_PKT_TRAP_TAG_HEADER_UNION.register_fields([('op', ctypes.c_uint32, 0, 8, 0), ('sub_op', ctypes.c_uint32, 1, 8, 0), ('reserved_0', ctypes.c_uint32, 2, 16, 0), ('DW_0_DATA', ctypes.c_uint32, 0)])
 @c.record
 class rocr_AMD_SDMA_PKT_TRAP_TAG_INT_CONTEXT_UNION(c.Struct):
   SIZE = 4
-  int_ctx: 'int'
-  reserved_1: 'int'
-  DW_1_DATA: 'int'
+  int_ctx: int
+  reserved_1: int
+  DW_1_DATA: int
 rocr_AMD_SDMA_PKT_TRAP_TAG_INT_CONTEXT_UNION.register_fields([('int_ctx', ctypes.c_uint32, 0, 28, 0), ('reserved_1', ctypes.c_uint32, 3, 4, 4), ('DW_1_DATA', ctypes.c_uint32, 0)])
 rocr_AMD_SDMA_PKT_TRAP_TAG.register_fields([('HEADER_UNION', rocr_AMD_SDMA_PKT_TRAP_TAG_HEADER_UNION, 0), ('INT_CONTEXT_UNION', rocr_AMD_SDMA_PKT_TRAP_TAG_INT_CONTEXT_UNION, 4)])
 rocr_AMD_SDMA_PKT_TRAP: TypeAlias = rocr_AMD_SDMA_PKT_TRAP_TAG
 @c.record
 class rocr_AMD_SDMA_PKT_HDP_FLUSH_TAG(c.Struct):
   SIZE = 24
-  DW_0_DATA: 'int'
-  DW_1_DATA: 'int'
-  DW_2_DATA: 'int'
-  DW_3_DATA: 'int'
-  DW_4_DATA: 'int'
-  DW_5_DATA: 'int'
+  DW_0_DATA: int
+  DW_1_DATA: int
+  DW_2_DATA: int
+  DW_3_DATA: int
+  DW_4_DATA: int
+  DW_5_DATA: int
 rocr_AMD_SDMA_PKT_HDP_FLUSH_TAG.register_fields([('DW_0_DATA', ctypes.c_uint32, 0), ('DW_1_DATA', ctypes.c_uint32, 4), ('DW_2_DATA', ctypes.c_uint32, 8), ('DW_3_DATA', ctypes.c_uint32, 12), ('DW_4_DATA', ctypes.c_uint32, 16), ('DW_5_DATA', ctypes.c_uint32, 20)])
 rocr_AMD_SDMA_PKT_HDP_FLUSH: TypeAlias = rocr_AMD_SDMA_PKT_HDP_FLUSH_TAG
 @c.record
 class rocr_AMD_SDMA_PKT_GCR_TAG(c.Struct):
   SIZE = 20
-  HEADER_UNION: 'rocr_AMD_SDMA_PKT_GCR_TAG_HEADER_UNION'
-  WORD1_UNION: 'rocr_AMD_SDMA_PKT_GCR_TAG_WORD1_UNION'
-  WORD2_UNION: 'rocr_AMD_SDMA_PKT_GCR_TAG_WORD2_UNION'
-  WORD3_UNION: 'rocr_AMD_SDMA_PKT_GCR_TAG_WORD3_UNION'
-  WORD4_UNION: 'rocr_AMD_SDMA_PKT_GCR_TAG_WORD4_UNION'
+  HEADER_UNION: rocr_AMD_SDMA_PKT_GCR_TAG_HEADER_UNION
+  WORD1_UNION: rocr_AMD_SDMA_PKT_GCR_TAG_WORD1_UNION
+  WORD2_UNION: rocr_AMD_SDMA_PKT_GCR_TAG_WORD2_UNION
+  WORD3_UNION: rocr_AMD_SDMA_PKT_GCR_TAG_WORD3_UNION
+  WORD4_UNION: rocr_AMD_SDMA_PKT_GCR_TAG_WORD4_UNION
 @c.record
 class rocr_AMD_SDMA_PKT_GCR_TAG_HEADER_UNION(c.Struct):
   SIZE = 4
-  op: 'int'
-  sub_op: 'int'
-  DW_0_DATA: 'int'
+  op: int
+  sub_op: int
+  DW_0_DATA: int
 rocr_AMD_SDMA_PKT_GCR_TAG_HEADER_UNION.register_fields([('op', ctypes.c_uint32, 0, 8, 0), ('sub_op', ctypes.c_uint32, 1, 8, 0), ('DW_0_DATA', ctypes.c_uint32, 0)])
 @c.record
 class rocr_AMD_SDMA_PKT_GCR_TAG_WORD1_UNION(c.Struct):
   SIZE = 4
-  BaseVA_LO: 'int'
-  DW_1_DATA: 'int'
+  BaseVA_LO: int
+  DW_1_DATA: int
 rocr_AMD_SDMA_PKT_GCR_TAG_WORD1_UNION.register_fields([('BaseVA_LO', ctypes.c_uint32, 0, 25, 7), ('DW_1_DATA', ctypes.c_uint32, 0)])
 @c.record
 class rocr_AMD_SDMA_PKT_GCR_TAG_WORD2_UNION(c.Struct):
   SIZE = 4
-  BaseVA_HI: 'int'
-  GCR_CONTROL_GLI_INV: 'int'
-  GCR_CONTROL_GL1_RANGE: 'int'
-  GCR_CONTROL_GLM_WB: 'int'
-  GCR_CONTROL_GLM_INV: 'int'
-  GCR_CONTROL_GLK_WB: 'int'
-  GCR_CONTROL_GLK_INV: 'int'
-  GCR_CONTROL_GLV_INV: 'int'
-  GCR_CONTROL_GL1_INV: 'int'
-  GCR_CONTROL_GL2_US: 'int'
-  GCR_CONTROL_GL2_RANGE: 'int'
-  GCR_CONTROL_GL2_DISCARD: 'int'
-  GCR_CONTROL_GL2_INV: 'int'
-  GCR_CONTROL_GL2_WB: 'int'
-  DW_2_DATA: 'int'
+  BaseVA_HI: int
+  GCR_CONTROL_GLI_INV: int
+  GCR_CONTROL_GL1_RANGE: int
+  GCR_CONTROL_GLM_WB: int
+  GCR_CONTROL_GLM_INV: int
+  GCR_CONTROL_GLK_WB: int
+  GCR_CONTROL_GLK_INV: int
+  GCR_CONTROL_GLV_INV: int
+  GCR_CONTROL_GL1_INV: int
+  GCR_CONTROL_GL2_US: int
+  GCR_CONTROL_GL2_RANGE: int
+  GCR_CONTROL_GL2_DISCARD: int
+  GCR_CONTROL_GL2_INV: int
+  GCR_CONTROL_GL2_WB: int
+  DW_2_DATA: int
 rocr_AMD_SDMA_PKT_GCR_TAG_WORD2_UNION.register_fields([('BaseVA_HI', ctypes.c_uint32, 0, 16, 0), ('GCR_CONTROL_GLI_INV', ctypes.c_uint32, 2, 2, 0), ('GCR_CONTROL_GL1_RANGE', ctypes.c_uint32, 2, 2, 2), ('GCR_CONTROL_GLM_WB', ctypes.c_uint32, 2, 1, 4), ('GCR_CONTROL_GLM_INV', ctypes.c_uint32, 2, 1, 5), ('GCR_CONTROL_GLK_WB', ctypes.c_uint32, 2, 1, 6), ('GCR_CONTROL_GLK_INV', ctypes.c_uint32, 2, 1, 7), ('GCR_CONTROL_GLV_INV', ctypes.c_uint32, 3, 1, 0), ('GCR_CONTROL_GL1_INV', ctypes.c_uint32, 3, 1, 1), ('GCR_CONTROL_GL2_US', ctypes.c_uint32, 3, 1, 2), ('GCR_CONTROL_GL2_RANGE', ctypes.c_uint32, 3, 2, 3), ('GCR_CONTROL_GL2_DISCARD', ctypes.c_uint32, 3, 1, 5), ('GCR_CONTROL_GL2_INV', ctypes.c_uint32, 3, 1, 6), ('GCR_CONTROL_GL2_WB', ctypes.c_uint32, 3, 1, 7), ('DW_2_DATA', ctypes.c_uint32, 0)])
 @c.record
 class rocr_AMD_SDMA_PKT_GCR_TAG_WORD3_UNION(c.Struct):
   SIZE = 4
-  GCR_CONTROL_RANGE_IS_PA: 'int'
-  GCR_CONTROL_SEQ: 'int'
-  LimitVA_LO: 'int'
-  DW_3_DATA: 'int'
+  GCR_CONTROL_RANGE_IS_PA: int
+  GCR_CONTROL_SEQ: int
+  LimitVA_LO: int
+  DW_3_DATA: int
 rocr_AMD_SDMA_PKT_GCR_TAG_WORD3_UNION.register_fields([('GCR_CONTROL_RANGE_IS_PA', ctypes.c_uint32, 0, 1, 0), ('GCR_CONTROL_SEQ', ctypes.c_uint32, 0, 2, 1), ('LimitVA_LO', ctypes.c_uint32, 0, 25, 7), ('DW_3_DATA', ctypes.c_uint32, 0)])
 @c.record
 class rocr_AMD_SDMA_PKT_GCR_TAG_WORD4_UNION(c.Struct):
   SIZE = 4
-  LimitVA_HI: 'int'
-  VMID: 'int'
-  DW_4_DATA: 'int'
+  LimitVA_HI: int
+  VMID: int
+  DW_4_DATA: int
 rocr_AMD_SDMA_PKT_GCR_TAG_WORD4_UNION.register_fields([('LimitVA_HI', ctypes.c_uint32, 0, 16, 0), ('VMID', ctypes.c_uint32, 3, 4, 0), ('DW_4_DATA', ctypes.c_uint32, 0)])
 rocr_AMD_SDMA_PKT_GCR_TAG.register_fields([('HEADER_UNION', rocr_AMD_SDMA_PKT_GCR_TAG_HEADER_UNION, 0), ('WORD1_UNION', rocr_AMD_SDMA_PKT_GCR_TAG_WORD1_UNION, 4), ('WORD2_UNION', rocr_AMD_SDMA_PKT_GCR_TAG_WORD2_UNION, 8), ('WORD3_UNION', rocr_AMD_SDMA_PKT_GCR_TAG_WORD3_UNION, 12), ('WORD4_UNION', rocr_AMD_SDMA_PKT_GCR_TAG_WORD4_UNION, 16)])
 rocr_AMD_SDMA_PKT_GCR: TypeAlias = rocr_AMD_SDMA_PKT_GCR_TAG
 @c.record
 class IP_BASE_INSTANCE(c.Struct):
   SIZE = 20
-  segment: 'list[int]'
+  segment: ctypes.Array[ctypes.c_uint32]
 IP_BASE_INSTANCE.register_fields([('segment', (ctypes.c_uint32 * 5), 0)])
 @c.record
 class IP_BASE(c.Struct):
   SIZE = 140
-  instance: 'list[IP_BASE_INSTANCE]'
+  instance: ctypes.Array[IP_BASE_INSTANCE]
 IP_BASE.register_fields([('instance', (IP_BASE_INSTANCE * 7), 0)])
 SDMA_OP_COPY = 1 # type: ignore
 SDMA_OP_FENCE = 5 # type: ignore
