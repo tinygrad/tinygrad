@@ -1129,34 +1129,28 @@ class Tensor(OpMixin):
 
   def _getitem(self, indices, v: Tensor|None = None) -> Tensor:
     # view-only indexing (no Tensor/list indices, no setitem) is handled by MovementMixin.__getitem__
-    view_types = (type(None), type(Ellipsis), slice, int, UOp)
-    if v is None and all(isinstance(idx, view_types) for idx in (indices if isinstance(indices, tuple) else (indices,))):
+    if v is None and not any(isinstance(i, (Tensor, list)) for i in (indices if isinstance(indices, tuple) else (indices,))):
       return super().__getitem__(indices)
     # wrap single index into a list
     if (isinstance(indices, list) and all_int(indices)) or not isinstance(indices, (tuple, list)): indices = [indices]
-    indices = self._normalize_indices(list(indices))
-
-    # parse each index: Tensor/list handled here, view indices delegated to mixin parser
     indices_parsed, dim = [], 0
-    for index in indices:
+    for index in self._normalize_indices(list(indices)):
       size = 1 if index is None else self.shape[dim]
+      parsed = {"size":size, "boundary":(0, size), "stride":1, "collapse_dim":False}
       match index:
         case Tensor():
           if not dtypes.is_int(index.dtype): raise IndexError(f"index dtype {index.dtype} is not supported")
           assert isinstance(size, int), "size must be an int"
           index = (index < 0).where(index+size, index).to(self.device)  # treat negative index values
-          parsed = {"size":size, "boundary":(0, size), "stride":1, "collapse_dim":False}
         case list() | tuple():
           if not dtypes.is_int((ti:=Tensor(index)).dtype): raise IndexError(f"{index=} contains non-int element")
           index = Tensor([i+size if i<0 else i for i in fully_flatten(index)], self.device, requires_grad=False).reshape(ti.shape)
-          parsed = {"size":size, "boundary":(0, size), "stride":1, "collapse_dim":False}
         case _: parsed = self._parse_view_index(index, size)
       indices_parsed.append({**parsed, "index":index})
       if index is not None: dim += 1
 
     # apply view ops then dim injection (None) and collapse (int)
-    mops = [p for p in indices_parsed if p["index"] is not None]
-    x = self._apply_view_ops(mops) if mops else self
+    x = self._apply_view_ops(mops) if (mops := [p for p in indices_parsed if p["index"] is not None]) else self
     x_dims = [p for p in indices_parsed if not p["collapse_dim"]]
     x = x.reshape(tuple(p["size"] for p in x_dims))
 
