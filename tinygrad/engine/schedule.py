@@ -17,8 +17,7 @@ def _unwrap_src(s: UOp) -> UOp:
 def _split_after(after: UOp) -> tuple[tuple[UOp, ...], tuple[UOp, ...]]:
   kernels, remaining = partition(after.src[1:], lambda s: s.op in {Ops.CALL, Ops.END})
   deps, remaining = partition(remaining, lambda s: s.op is Ops.AFTER)
-  if invalid := [s for s in remaining if s.op is not Ops.STORE]:
-    raise AssertionError(f"AFTER source should be CALL, END, STORE, or AFTER, not {invalid[0].op}")
+  if remaining: raise AssertionError(f"AFTER source should be CALL, END, or AFTER, not {remaining[0].op}")
   return tuple(kernels), tuple(deps)
 
 def create_schedule(sched_sink:UOp) -> UOp:
