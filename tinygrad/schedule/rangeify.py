@@ -391,6 +391,9 @@ def bufferize_to_store(ctx:itertools.count, x:UOp, idx:UOp, allow_locals=True):
   if (after:=x.src[0]).op is Ops.AFTER:
     buf = after.src[0].buf_uop.base
     if not (stores := [s for s in after.src[1:] if s.op is Ops.STORE and s.src[0].op is Ops.INDEX]): return buf
+    # the ranges are created on the AFTER, and the stores might be different sizes
+    # so we block all multi store AFTERs
+    assert len(stores) <= 1, "rangeify doesn't support multiple stores on one after"
     # BUFFERIZE(INDEX(...)); store through the underlying global index instead.
     ended_stores = []
     for store in stores:
