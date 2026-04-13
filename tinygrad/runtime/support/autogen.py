@@ -101,6 +101,18 @@ def normalize(a): return ("_" + n if keyword.iskeyword(n:=nm(a)) else n)
 
 def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False, errno=False, anon_names={}, types={}, parse_macros=True, paths=[]):
   macros, lines, anoncnt, types, objc, fns = [], [], itertools.count().__next__, {k:(v,True) for k,v in types.items()}, False, set()
+
+  # mypy can't understand eg. ctypes.POINTER(ctypes.c_int), and python < 3.14 cannot understand ctypes.POINTER[ctypes.c_int]
+  def typehint(ty) -> str:
+    # ctypes automatically "unboxes" simple types
+    if (v:={**{i:"int" for i in ints}, **{getattr(clang, f"CXType_{f}"):"float" for f in ['Float', 'Double', 'LongDouble']}, clang.CXType_Enum:"int",
+            clang.CXType_WChar:"str", clang.CXType_SChar:"int", clang.CXType_Char_S:"bytes", clang.CXType_Bool:"bool",}.get(ty.kind, None)): return v
+    if ty.kind in fps or (ty.kind == clang.CXType_Pointer and clang.clang_getPointeeType(ty).kind in fps): return "ctypes._CFunctionType"
+    if ty.kind == clang.CXType_Pointer:
+      return "int|None" if (p:=clang.clang_getPointeeType(ty)).kind==clang.CXType_Void else f"ctypes._Pointer[{tname(p)}]"
+    if ty.kind in (clang.CXType_ConstantArray, clang.CXType_IncompleteArray): return f"ctypes.Array[{tname(clang.clang_getArrayElementType(ty))}]"
+    return tname(ty)
+
   def tname(t, suggested_name=None, typedef=None) -> str:
     suggested_name = anon_names.get(f"{loc_file(loc(decl:=clang.clang_getTypeDeclaration(t)))}:{loc_line(loc(decl))}", suggested_name)
     nonlocal lines, types, anoncnt, objc
@@ -126,18 +138,6 @@ def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False,
         # libclang does not use CXType_Elaborated for function parameters with type qualifiers (eg. void (*)(const struct foo))
         if (_nm:=re.sub(r"^const ", "", nm(t))) in types and types[_nm][1]: return types[_nm][0]
 
-        # mypy wants types hints which are invalid python.
-        def typehint(ty) -> str:
-          if (hint:={clang.CXType_Enum:"int", clang.CXType_WChar:"str", clang.CXType_SChar:"int",
-                     clang.CXType_Char_S:"bytes", clang.CXType_Bool:"bool"}.get(ty.kind, None)): return hint
-          if ty.kind in [clang.CXType_Float, clang.CXType_Double, clang.CXType_LongDouble]: return "float"
-          if ty.kind in ints: return "int"
-          if ty.kind in fps or (ty.kind == clang.CXType_Pointer and clang.clang_getPointeeType(ty).kind in fps): return "ctypes._CFunctionType"
-          if ty.kind == clang.CXType_Pointer:
-            return "ctypes.c_void_p" if (p:=clang.clang_getPointeeType(ty)).kind==clang.CXType_Void else f"ctypes._Pointer[{typehint(p)}]"
-          if ty.kind in (clang.CXType_ConstantArray, clang.CXType_IncompleteArray): return f"list[{typehint(clang.clang_getArrayElementType(ty))}]"
-          return tname(ty)
-
         # check if previously declared
         if _nm in types: types[_nm] = (tnm:=types[_nm][0]), types[_nm][1] or len(fields(t)) != 0, (ln:=types[_nm][2])
         else:
@@ -153,7 +153,7 @@ def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False,
               for f,offset in all_fields(t)]
         if ff:
           lines[ln] = "\n".join(["@c.record", f"class {tnm}(c.Struct):", f"  SIZE = {clang.clang_Type_getSizeOf(t)}"] +
-                                [f"  {f}: '{typehint(ty)}'" for f,ty,*args in ff])
+                                [f"  {f}: {typehint(ty)}" for f,ty,*args in ff])
           lines.append(f"{tnm}.register_fields([" + ", ".join([f"('{f}', {', '.join(str(a) for a in args)})" for f,ty,*args in ff]) + "])")
         return tnm
       case clang.CXType_Enum:
@@ -237,8 +237,10 @@ def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False,
           case clang.CXCursor_FunctionDecl if clang.clang_getCursorLinkage(c) == clang.CXLinkage_External and dll and nm(c) not in fns:
             # TODO: we could support name-mangling
             fns.add(nm(c))
-            argus = [f"{normalize(arg) or '_' + str(i)}:{tname(clang.clang_getCursorType(arg))}" for i, arg in enumerate(arguments(c))]
-            lines.extend(["@dll.bind", f"def {nm(c)}({', '.join(argus)}) -> {tname(clang.clang_getCursorResultType(c))}: ..."])
+            rt, ats = clang.clang_getCursorResultType(c), [clang.clang_getCursorType(arg) for arg in arguments(c)]
+            anms = [normalize(arg) or '_' + str(i) for i, arg in enumerate(arguments(c))]
+            lines.extend([f"@dll.bind({', '.join([tname(at) for at in [rt] + ats])})",
+                          f"def {nm(c)}({', '.join([f'{anm}:{typehint(at)}' for anm, at in zip(anms, ats)])}) -> {typehint(rt)}: ..."])
             if clang.CXCursor_NSReturnsRetained in attrs(c): lines.append(f"{nm(c)} = objc.returns_retained({nm(c)})")
           case (clang.CXCursor_StructDecl | clang.CXCursor_UnionDecl | clang.CXCursor_TypedefDecl | clang.CXCursor_EnumDecl
                 | clang.CXCursor_ObjCInterfaceDecl): tname(clang.clang_getCursorType(c))
@@ -268,7 +270,7 @@ def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False,
         lines, types = rollback
     clang.clang_disposeTranslationUnit(tu)
     clang.clang_disposeIndex(idx)
-  main = '\n'.join(['# mypy: disable-error-code="empty-body"', "import ctypes",
+  main = '\n'.join(['# mypy: disable-error-code="empty-body"', "from __future__ import annotations", "import ctypes",
                     "from typing import Literal, TypeAlias", "from tinygrad.runtime.support.c import _IO, _IOW, _IOR, _IOWR",
                     "from tinygrad.runtime.support import c", *prolog, *(["from tinygrad.runtime.support import objc"]*objc),
                     *([f"dll = c.DLL('{name}', {dll}{f', {paths}'*bool(paths)}{', use_errno=True'*errno})"] if dll else []), *lines]) + '\n'

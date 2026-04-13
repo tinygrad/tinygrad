@@ -28,9 +28,9 @@ class struct_CXVersion(c.Struct):
 struct_CXVersion.register_fields([('Major', ctypes.c_int32, 0), ('Minor', ctypes.c_int32, 4), ('Subminor', ctypes.c_int32, 8)])
 CXVersion: TypeAlias = struct_CXVersion
 enum_CXCursor_ExceptionSpecificationKind: dict[int, str] = {(CXCursor_ExceptionSpecificationKind_None:=0): 'CXCursor_ExceptionSpecificationKind_None', (CXCursor_ExceptionSpecificationKind_DynamicNone:=1): 'CXCursor_ExceptionSpecificationKind_DynamicNone', (CXCursor_ExceptionSpecificationKind_Dynamic:=2): 'CXCursor_ExceptionSpecificationKind_Dynamic', (CXCursor_ExceptionSpecificationKind_MSAny:=3): 'CXCursor_ExceptionSpecificationKind_MSAny', (CXCursor_ExceptionSpecificationKind_BasicNoexcept:=4): 'CXCursor_ExceptionSpecificationKind_BasicNoexcept', (CXCursor_ExceptionSpecificationKind_ComputedNoexcept:=5): 'CXCursor_ExceptionSpecificationKind_ComputedNoexcept', (CXCursor_ExceptionSpecificationKind_Unevaluated:=6): 'CXCursor_ExceptionSpecificationKind_Unevaluated', (CXCursor_ExceptionSpecificationKind_Uninstantiated:=7): 'CXCursor_ExceptionSpecificationKind_Uninstantiated', (CXCursor_ExceptionSpecificationKind_Unparsed:=8): 'CXCursor_ExceptionSpecificationKind_Unparsed', (CXCursor_ExceptionSpecificationKind_NoThrow:=9): 'CXCursor_ExceptionSpecificationKind_NoThrow'}
-@dll.bind
+@dll._bind
 def clang_createIndex(excludeDeclarationsFromPCH:ctypes.c_int32, displayDiagnostics:ctypes.c_int32) -> CXIndex: ...
-@dll.bind
+@dll._bind
 def clang_disposeIndex(index:CXIndex) -> None: ...
 CXChoice: dict[int, str] = {(CXChoice_Default:=0): 'CXChoice_Default', (CXChoice_Enabled:=1): 'CXChoice_Enabled', (CXChoice_Disabled:=2): 'CXChoice_Disabled'}
 CXGlobalOptFlags: dict[int, str] = {(CXGlobalOpt_None:=0): 'CXGlobalOpt_None', (CXGlobalOpt_ThreadBackgroundPriorityForIndexing:=1): 'CXGlobalOpt_ThreadBackgroundPriorityForIndexing', (CXGlobalOpt_ThreadBackgroundPriorityForEditing:=2): 'CXGlobalOpt_ThreadBackgroundPriorityForEditing', (CXGlobalOpt_ThreadBackgroundPriorityForAll:=3): 'CXGlobalOpt_ThreadBackgroundPriorityForAll'}
@@ -47,21 +47,21 @@ class struct_CXIndexOptions(c.Struct):
   InvocationEmissionPath: 'ctypes._Pointer[bytes]'
 struct_CXIndexOptions.register_fields([('Size', ctypes.c_uint32, 0), ('ThreadBackgroundPriorityForIndexing', ctypes.c_ubyte, 4), ('ThreadBackgroundPriorityForEditing', ctypes.c_ubyte, 5), ('ExcludeDeclarationsFromPCH', ctypes.c_uint32, 6, 1, 0), ('DisplayDiagnostics', ctypes.c_uint32, 6, 1, 1), ('StorePreamblesInMemory', ctypes.c_uint32, 6, 1, 2), ('PreambleStoragePath', ctypes.POINTER(ctypes.c_char), 8), ('InvocationEmissionPath', ctypes.POINTER(ctypes.c_char), 16)])
 CXIndexOptions: TypeAlias = struct_CXIndexOptions
-@dll.bind
+@dll._bind
 def clang_createIndexWithOptions(options:ctypes.POINTER(CXIndexOptions)) -> CXIndex: ...
-@dll.bind
+@dll._bind
 def clang_CXIndex_setGlobalOptions(_0:CXIndex, options:ctypes.c_uint32) -> None: ...
-@dll.bind
+@dll._bind
 def clang_CXIndex_getGlobalOptions(_0:CXIndex) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_CXIndex_setInvocationEmissionPathOption(_0:CXIndex, Path:ctypes.POINTER(ctypes.c_char)) -> None: ...
 CXFile: TypeAlias = ctypes.c_void_p
-@dll.bind
+@dll._bind
 def clang_isFileMultipleIncludeGuarded(tu:CXTranslationUnit, file:CXFile) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_getFile(tu:CXTranslationUnit, file_name:ctypes.POINTER(ctypes.c_char)) -> CXFile: ...
 size_t: TypeAlias = ctypes.c_uint64
-@dll.bind
+@dll._bind
 def clang_getFileContents(tu:CXTranslationUnit, file:CXFile, size:ctypes.POINTER(size_t)) -> ctypes.POINTER(ctypes.c_char): ...
 @c.record
 class CXSourceLocation(c.Struct):
@@ -69,9 +69,9 @@ class CXSourceLocation(c.Struct):
   ptr_data: 'list[ctypes.c_void_p]'
   int_data: 'int'
 CXSourceLocation.register_fields([('ptr_data', (ctypes.c_void_p * 2), 0), ('int_data', ctypes.c_uint32, 16)])
-@dll.bind
+@dll._bind
 def clang_getLocation(tu:CXTranslationUnit, file:CXFile, line:ctypes.c_uint32, column:ctypes.c_uint32) -> CXSourceLocation: ...
-@dll.bind
+@dll._bind
 def clang_getLocationForOffset(tu:CXTranslationUnit, file:CXFile, offset:ctypes.c_uint32) -> CXSourceLocation: ...
 @c.record
 class CXSourceRangeList(c.Struct):
@@ -86,17 +86,17 @@ class CXSourceRange(c.Struct):
   end_int_data: 'int'
 CXSourceRange.register_fields([('ptr_data', (ctypes.c_void_p * 2), 0), ('begin_int_data', ctypes.c_uint32, 16), ('end_int_data', ctypes.c_uint32, 20)])
 CXSourceRangeList.register_fields([('count', ctypes.c_uint32, 0), ('ranges', ctypes.POINTER(CXSourceRange), 8)])
-@dll.bind
+@dll._bind
 def clang_getSkippedRanges(tu:CXTranslationUnit, file:CXFile) -> ctypes.POINTER(CXSourceRangeList): ...
-@dll.bind
+@dll._bind
 def clang_getAllSkippedRanges(tu:CXTranslationUnit) -> ctypes.POINTER(CXSourceRangeList): ...
-@dll.bind
+@dll._bind
 def clang_getNumDiagnostics(Unit:CXTranslationUnit) -> ctypes.c_uint32: ...
 CXDiagnostic: TypeAlias = ctypes.c_void_p
-@dll.bind
+@dll._bind
 def clang_getDiagnostic(Unit:CXTranslationUnit, Index:ctypes.c_uint32) -> CXDiagnostic: ...
 CXDiagnosticSet: TypeAlias = ctypes.c_void_p
-@dll.bind
+@dll._bind
 def clang_getDiagnosticSetFromTU(Unit:CXTranslationUnit) -> CXDiagnosticSet: ...
 @c.record
 class CXString(c.Struct):
@@ -104,41 +104,41 @@ class CXString(c.Struct):
   data: 'ctypes.c_void_p'
   private_flags: 'int'
 CXString.register_fields([('data', ctypes.c_void_p, 0), ('private_flags', ctypes.c_uint32, 8)])
-@dll.bind
+@dll._bind
 def clang_getTranslationUnitSpelling(CTUnit:CXTranslationUnit) -> CXString: ...
-@dll.bind
+@dll._bind
 def clang_createTranslationUnitFromSourceFile(CIdx:CXIndex, source_filename:ctypes.POINTER(ctypes.c_char), num_clang_command_line_args:ctypes.c_int32, clang_command_line_args:ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), num_unsaved_files:ctypes.c_uint32, unsaved_files:ctypes.POINTER(struct_CXUnsavedFile)) -> CXTranslationUnit: ...
-@dll.bind
+@dll._bind
 def clang_createTranslationUnit(CIdx:CXIndex, ast_filename:ctypes.POINTER(ctypes.c_char)) -> CXTranslationUnit: ...
 enum_CXErrorCode: dict[int, str] = {(CXError_Success:=0): 'CXError_Success', (CXError_Failure:=1): 'CXError_Failure', (CXError_Crashed:=2): 'CXError_Crashed', (CXError_InvalidArguments:=3): 'CXError_InvalidArguments', (CXError_ASTReadError:=4): 'CXError_ASTReadError'}
-@dll.bind
+@dll._bind
 def clang_createTranslationUnit2(CIdx:CXIndex, ast_filename:ctypes.POINTER(ctypes.c_char), out_TU:ctypes.POINTER(CXTranslationUnit)) -> ctypes.c_uint32: ...
 enum_CXTranslationUnit_Flags: dict[int, str] = {(CXTranslationUnit_None:=0): 'CXTranslationUnit_None', (CXTranslationUnit_DetailedPreprocessingRecord:=1): 'CXTranslationUnit_DetailedPreprocessingRecord', (CXTranslationUnit_Incomplete:=2): 'CXTranslationUnit_Incomplete', (CXTranslationUnit_PrecompiledPreamble:=4): 'CXTranslationUnit_PrecompiledPreamble', (CXTranslationUnit_CacheCompletionResults:=8): 'CXTranslationUnit_CacheCompletionResults', (CXTranslationUnit_ForSerialization:=16): 'CXTranslationUnit_ForSerialization', (CXTranslationUnit_CXXChainedPCH:=32): 'CXTranslationUnit_CXXChainedPCH', (CXTranslationUnit_SkipFunctionBodies:=64): 'CXTranslationUnit_SkipFunctionBodies', (CXTranslationUnit_IncludeBriefCommentsInCodeCompletion:=128): 'CXTranslationUnit_IncludeBriefCommentsInCodeCompletion', (CXTranslationUnit_CreatePreambleOnFirstParse:=256): 'CXTranslationUnit_CreatePreambleOnFirstParse', (CXTranslationUnit_KeepGoing:=512): 'CXTranslationUnit_KeepGoing', (CXTranslationUnit_SingleFileParse:=1024): 'CXTranslationUnit_SingleFileParse', (CXTranslationUnit_LimitSkipFunctionBodiesToPreamble:=2048): 'CXTranslationUnit_LimitSkipFunctionBodiesToPreamble', (CXTranslationUnit_IncludeAttributedTypes:=4096): 'CXTranslationUnit_IncludeAttributedTypes', (CXTranslationUnit_VisitImplicitAttributes:=8192): 'CXTranslationUnit_VisitImplicitAttributes', (CXTranslationUnit_IgnoreNonErrorsFromIncludedFiles:=16384): 'CXTranslationUnit_IgnoreNonErrorsFromIncludedFiles', (CXTranslationUnit_RetainExcludedConditionalBlocks:=32768): 'CXTranslationUnit_RetainExcludedConditionalBlocks'}
-@dll.bind
+@dll._bind
 def clang_defaultEditingTranslationUnitOptions() -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_parseTranslationUnit(CIdx:CXIndex, source_filename:ctypes.POINTER(ctypes.c_char), command_line_args:ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), num_command_line_args:ctypes.c_int32, unsaved_files:ctypes.POINTER(struct_CXUnsavedFile), num_unsaved_files:ctypes.c_uint32, options:ctypes.c_uint32) -> CXTranslationUnit: ...
-@dll.bind
+@dll._bind
 def clang_parseTranslationUnit2(CIdx:CXIndex, source_filename:ctypes.POINTER(ctypes.c_char), command_line_args:ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), num_command_line_args:ctypes.c_int32, unsaved_files:ctypes.POINTER(struct_CXUnsavedFile), num_unsaved_files:ctypes.c_uint32, options:ctypes.c_uint32, out_TU:ctypes.POINTER(CXTranslationUnit)) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_parseTranslationUnit2FullArgv(CIdx:CXIndex, source_filename:ctypes.POINTER(ctypes.c_char), command_line_args:ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), num_command_line_args:ctypes.c_int32, unsaved_files:ctypes.POINTER(struct_CXUnsavedFile), num_unsaved_files:ctypes.c_uint32, options:ctypes.c_uint32, out_TU:ctypes.POINTER(CXTranslationUnit)) -> ctypes.c_uint32: ...
 enum_CXSaveTranslationUnit_Flags: dict[int, str] = {(CXSaveTranslationUnit_None:=0): 'CXSaveTranslationUnit_None'}
-@dll.bind
+@dll._bind
 def clang_defaultSaveOptions(TU:CXTranslationUnit) -> ctypes.c_uint32: ...
 enum_CXSaveError: dict[int, str] = {(CXSaveError_None:=0): 'CXSaveError_None', (CXSaveError_Unknown:=1): 'CXSaveError_Unknown', (CXSaveError_TranslationErrors:=2): 'CXSaveError_TranslationErrors', (CXSaveError_InvalidTU:=3): 'CXSaveError_InvalidTU'}
-@dll.bind
+@dll._bind
 def clang_saveTranslationUnit(TU:CXTranslationUnit, FileName:ctypes.POINTER(ctypes.c_char), options:ctypes.c_uint32) -> ctypes.c_int32: ...
-@dll.bind
+@dll._bind
 def clang_suspendTranslationUnit(_0:CXTranslationUnit) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_disposeTranslationUnit(_0:CXTranslationUnit) -> None: ...
 enum_CXReparse_Flags: dict[int, str] = {(CXReparse_None:=0): 'CXReparse_None'}
-@dll.bind
+@dll._bind
 def clang_defaultReparseOptions(TU:CXTranslationUnit) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_reparseTranslationUnit(TU:CXTranslationUnit, num_unsaved_files:ctypes.c_uint32, unsaved_files:ctypes.POINTER(struct_CXUnsavedFile), options:ctypes.c_uint32) -> ctypes.c_int32: ...
 enum_CXTUResourceUsageKind: dict[int, str] = {(CXTUResourceUsage_AST:=1): 'CXTUResourceUsage_AST', (CXTUResourceUsage_Identifiers:=2): 'CXTUResourceUsage_Identifiers', (CXTUResourceUsage_Selectors:=3): 'CXTUResourceUsage_Selectors', (CXTUResourceUsage_GlobalCompletionResults:=4): 'CXTUResourceUsage_GlobalCompletionResults', (CXTUResourceUsage_SourceManagerContentCache:=5): 'CXTUResourceUsage_SourceManagerContentCache', (CXTUResourceUsage_AST_SideTables:=6): 'CXTUResourceUsage_AST_SideTables', (CXTUResourceUsage_SourceManager_Membuffer_Malloc:=7): 'CXTUResourceUsage_SourceManager_Membuffer_Malloc', (CXTUResourceUsage_SourceManager_Membuffer_MMap:=8): 'CXTUResourceUsage_SourceManager_Membuffer_MMap', (CXTUResourceUsage_ExternalASTSource_Membuffer_Malloc:=9): 'CXTUResourceUsage_ExternalASTSource_Membuffer_Malloc', (CXTUResourceUsage_ExternalASTSource_Membuffer_MMap:=10): 'CXTUResourceUsage_ExternalASTSource_Membuffer_MMap', (CXTUResourceUsage_Preprocessor:=11): 'CXTUResourceUsage_Preprocessor', (CXTUResourceUsage_PreprocessingRecord:=12): 'CXTUResourceUsage_PreprocessingRecord', (CXTUResourceUsage_SourceManager_DataStructures:=13): 'CXTUResourceUsage_SourceManager_DataStructures', (CXTUResourceUsage_Preprocessor_HeaderSearch:=14): 'CXTUResourceUsage_Preprocessor_HeaderSearch', (CXTUResourceUsage_MEMORY_IN_BYTES_BEGIN:=1): 'CXTUResourceUsage_MEMORY_IN_BYTES_BEGIN', (CXTUResourceUsage_MEMORY_IN_BYTES_END:=14): 'CXTUResourceUsage_MEMORY_IN_BYTES_END', (CXTUResourceUsage_First:=1): 'CXTUResourceUsage_First', (CXTUResourceUsage_Last:=14): 'CXTUResourceUsage_Last'}
-@dll.bind
+@dll._bind
 def clang_getTUResourceUsageName(kind:ctypes.c_uint32) -> ctypes.POINTER(ctypes.c_char): ...
 @c.record
 class struct_CXTUResourceUsageEntry(c.Struct):
@@ -155,17 +155,17 @@ class struct_CXTUResourceUsage(c.Struct):
   entries: 'ctypes._Pointer[struct_CXTUResourceUsageEntry]'
 struct_CXTUResourceUsage.register_fields([('data', ctypes.c_void_p, 0), ('numEntries', ctypes.c_uint32, 8), ('entries', ctypes.POINTER(CXTUResourceUsageEntry), 16)])
 CXTUResourceUsage: TypeAlias = struct_CXTUResourceUsage
-@dll.bind
+@dll._bind
 def clang_getCXTUResourceUsage(TU:CXTranslationUnit) -> CXTUResourceUsage: ...
-@dll.bind
+@dll._bind
 def clang_disposeCXTUResourceUsage(usage:CXTUResourceUsage) -> None: ...
-@dll.bind
+@dll._bind
 def clang_getTranslationUnitTargetInfo(CTUnit:CXTranslationUnit) -> CXTargetInfo: ...
-@dll.bind
+@dll._bind
 def clang_TargetInfo_dispose(Info:CXTargetInfo) -> None: ...
-@dll.bind
+@dll._bind
 def clang_TargetInfo_getTriple(Info:CXTargetInfo) -> CXString: ...
-@dll.bind
+@dll._bind
 def clang_TargetInfo_getPointerWidth(Info:CXTargetInfo) -> ctypes.c_int32: ...
 enum_CXCursorKind: dict[int, str] = {(CXCursor_UnexposedDecl:=1): 'CXCursor_UnexposedDecl', (CXCursor_StructDecl:=2): 'CXCursor_StructDecl', (CXCursor_UnionDecl:=3): 'CXCursor_UnionDecl', (CXCursor_ClassDecl:=4): 'CXCursor_ClassDecl', (CXCursor_EnumDecl:=5): 'CXCursor_EnumDecl', (CXCursor_FieldDecl:=6): 'CXCursor_FieldDecl', (CXCursor_EnumConstantDecl:=7): 'CXCursor_EnumConstantDecl', (CXCursor_FunctionDecl:=8): 'CXCursor_FunctionDecl', (CXCursor_VarDecl:=9): 'CXCursor_VarDecl', (CXCursor_ParmDecl:=10): 'CXCursor_ParmDecl', (CXCursor_ObjCInterfaceDecl:=11): 'CXCursor_ObjCInterfaceDecl', (CXCursor_ObjCCategoryDecl:=12): 'CXCursor_ObjCCategoryDecl', (CXCursor_ObjCProtocolDecl:=13): 'CXCursor_ObjCProtocolDecl', (CXCursor_ObjCPropertyDecl:=14): 'CXCursor_ObjCPropertyDecl', (CXCursor_ObjCIvarDecl:=15): 'CXCursor_ObjCIvarDecl', (CXCursor_ObjCInstanceMethodDecl:=16): 'CXCursor_ObjCInstanceMethodDecl', (CXCursor_ObjCClassMethodDecl:=17): 'CXCursor_ObjCClassMethodDecl', (CXCursor_ObjCImplementationDecl:=18): 'CXCursor_ObjCImplementationDecl', (CXCursor_ObjCCategoryImplDecl:=19): 'CXCursor_ObjCCategoryImplDecl', (CXCursor_TypedefDecl:=20): 'CXCursor_TypedefDecl', (CXCursor_CXXMethod:=21): 'CXCursor_CXXMethod', (CXCursor_Namespace:=22): 'CXCursor_Namespace', (CXCursor_LinkageSpec:=23): 'CXCursor_LinkageSpec', (CXCursor_Constructor:=24): 'CXCursor_Constructor', (CXCursor_Destructor:=25): 'CXCursor_Destructor', (CXCursor_ConversionFunction:=26): 'CXCursor_ConversionFunction', (CXCursor_TemplateTypeParameter:=27): 'CXCursor_TemplateTypeParameter', (CXCursor_NonTypeTemplateParameter:=28): 'CXCursor_NonTypeTemplateParameter', (CXCursor_TemplateTemplateParameter:=29): 'CXCursor_TemplateTemplateParameter', (CXCursor_FunctionTemplate:=30): 'CXCursor_FunctionTemplate', (CXCursor_ClassTemplate:=31): 'CXCursor_ClassTemplate', (CXCursor_ClassTemplatePartialSpecialization:=32): 'CXCursor_ClassTemplatePartialSpecialization', (CXCursor_NamespaceAlias:=33): 'CXCursor_NamespaceAlias', (CXCursor_UsingDirective:=34): 'CXCursor_UsingDirective', (CXCursor_UsingDeclaration:=35): 'CXCursor_UsingDeclaration', (CXCursor_TypeAliasDecl:=36): 'CXCursor_TypeAliasDecl', (CXCursor_ObjCSynthesizeDecl:=37): 'CXCursor_ObjCSynthesizeDecl', (CXCursor_ObjCDynamicDecl:=38): 'CXCursor_ObjCDynamicDecl', (CXCursor_CXXAccessSpecifier:=39): 'CXCursor_CXXAccessSpecifier', (CXCursor_FirstDecl:=1): 'CXCursor_FirstDecl', (CXCursor_LastDecl:=39): 'CXCursor_LastDecl', (CXCursor_FirstRef:=40): 'CXCursor_FirstRef', (CXCursor_ObjCSuperClassRef:=40): 'CXCursor_ObjCSuperClassRef', (CXCursor_ObjCProtocolRef:=41): 'CXCursor_ObjCProtocolRef', (CXCursor_ObjCClassRef:=42): 'CXCursor_ObjCClassRef', (CXCursor_TypeRef:=43): 'CXCursor_TypeRef', (CXCursor_CXXBaseSpecifier:=44): 'CXCursor_CXXBaseSpecifier', (CXCursor_TemplateRef:=45): 'CXCursor_TemplateRef', (CXCursor_NamespaceRef:=46): 'CXCursor_NamespaceRef', (CXCursor_MemberRef:=47): 'CXCursor_MemberRef', (CXCursor_LabelRef:=48): 'CXCursor_LabelRef', (CXCursor_OverloadedDeclRef:=49): 'CXCursor_OverloadedDeclRef', (CXCursor_VariableRef:=50): 'CXCursor_VariableRef', (CXCursor_LastRef:=50): 'CXCursor_LastRef', (CXCursor_FirstInvalid:=70): 'CXCursor_FirstInvalid', (CXCursor_InvalidFile:=70): 'CXCursor_InvalidFile', (CXCursor_NoDeclFound:=71): 'CXCursor_NoDeclFound', (CXCursor_NotImplemented:=72): 'CXCursor_NotImplemented', (CXCursor_InvalidCode:=73): 'CXCursor_InvalidCode', (CXCursor_LastInvalid:=73): 'CXCursor_LastInvalid', (CXCursor_FirstExpr:=100): 'CXCursor_FirstExpr', (CXCursor_UnexposedExpr:=100): 'CXCursor_UnexposedExpr', (CXCursor_DeclRefExpr:=101): 'CXCursor_DeclRefExpr', (CXCursor_MemberRefExpr:=102): 'CXCursor_MemberRefExpr', (CXCursor_CallExpr:=103): 'CXCursor_CallExpr', (CXCursor_ObjCMessageExpr:=104): 'CXCursor_ObjCMessageExpr', (CXCursor_BlockExpr:=105): 'CXCursor_BlockExpr', (CXCursor_IntegerLiteral:=106): 'CXCursor_IntegerLiteral', (CXCursor_FloatingLiteral:=107): 'CXCursor_FloatingLiteral', (CXCursor_ImaginaryLiteral:=108): 'CXCursor_ImaginaryLiteral', (CXCursor_StringLiteral:=109): 'CXCursor_StringLiteral', (CXCursor_CharacterLiteral:=110): 'CXCursor_CharacterLiteral', (CXCursor_ParenExpr:=111): 'CXCursor_ParenExpr', (CXCursor_UnaryOperator:=112): 'CXCursor_UnaryOperator', (CXCursor_ArraySubscriptExpr:=113): 'CXCursor_ArraySubscriptExpr', (CXCursor_BinaryOperator:=114): 'CXCursor_BinaryOperator', (CXCursor_CompoundAssignOperator:=115): 'CXCursor_CompoundAssignOperator', (CXCursor_ConditionalOperator:=116): 'CXCursor_ConditionalOperator', (CXCursor_CStyleCastExpr:=117): 'CXCursor_CStyleCastExpr', (CXCursor_CompoundLiteralExpr:=118): 'CXCursor_CompoundLiteralExpr', (CXCursor_InitListExpr:=119): 'CXCursor_InitListExpr', (CXCursor_AddrLabelExpr:=120): 'CXCursor_AddrLabelExpr', (CXCursor_StmtExpr:=121): 'CXCursor_StmtExpr', (CXCursor_GenericSelectionExpr:=122): 'CXCursor_GenericSelectionExpr', (CXCursor_GNUNullExpr:=123): 'CXCursor_GNUNullExpr', (CXCursor_CXXStaticCastExpr:=124): 'CXCursor_CXXStaticCastExpr', (CXCursor_CXXDynamicCastExpr:=125): 'CXCursor_CXXDynamicCastExpr', (CXCursor_CXXReinterpretCastExpr:=126): 'CXCursor_CXXReinterpretCastExpr', (CXCursor_CXXConstCastExpr:=127): 'CXCursor_CXXConstCastExpr', (CXCursor_CXXFunctionalCastExpr:=128): 'CXCursor_CXXFunctionalCastExpr', (CXCursor_CXXTypeidExpr:=129): 'CXCursor_CXXTypeidExpr', (CXCursor_CXXBoolLiteralExpr:=130): 'CXCursor_CXXBoolLiteralExpr', (CXCursor_CXXNullPtrLiteralExpr:=131): 'CXCursor_CXXNullPtrLiteralExpr', (CXCursor_CXXThisExpr:=132): 'CXCursor_CXXThisExpr', (CXCursor_CXXThrowExpr:=133): 'CXCursor_CXXThrowExpr', (CXCursor_CXXNewExpr:=134): 'CXCursor_CXXNewExpr', (CXCursor_CXXDeleteExpr:=135): 'CXCursor_CXXDeleteExpr', (CXCursor_UnaryExpr:=136): 'CXCursor_UnaryExpr', (CXCursor_ObjCStringLiteral:=137): 'CXCursor_ObjCStringLiteral', (CXCursor_ObjCEncodeExpr:=138): 'CXCursor_ObjCEncodeExpr', (CXCursor_ObjCSelectorExpr:=139): 'CXCursor_ObjCSelectorExpr', (CXCursor_ObjCProtocolExpr:=140): 'CXCursor_ObjCProtocolExpr', (CXCursor_ObjCBridgedCastExpr:=141): 'CXCursor_ObjCBridgedCastExpr', (CXCursor_PackExpansionExpr:=142): 'CXCursor_PackExpansionExpr', (CXCursor_SizeOfPackExpr:=143): 'CXCursor_SizeOfPackExpr', (CXCursor_LambdaExpr:=144): 'CXCursor_LambdaExpr', (CXCursor_ObjCBoolLiteralExpr:=145): 'CXCursor_ObjCBoolLiteralExpr', (CXCursor_ObjCSelfExpr:=146): 'CXCursor_ObjCSelfExpr', (CXCursor_ArraySectionExpr:=147): 'CXCursor_ArraySectionExpr', (CXCursor_ObjCAvailabilityCheckExpr:=148): 'CXCursor_ObjCAvailabilityCheckExpr', (CXCursor_FixedPointLiteral:=149): 'CXCursor_FixedPointLiteral', (CXCursor_OMPArrayShapingExpr:=150): 'CXCursor_OMPArrayShapingExpr', (CXCursor_OMPIteratorExpr:=151): 'CXCursor_OMPIteratorExpr', (CXCursor_CXXAddrspaceCastExpr:=152): 'CXCursor_CXXAddrspaceCastExpr', (CXCursor_ConceptSpecializationExpr:=153): 'CXCursor_ConceptSpecializationExpr', (CXCursor_RequiresExpr:=154): 'CXCursor_RequiresExpr', (CXCursor_CXXParenListInitExpr:=155): 'CXCursor_CXXParenListInitExpr', (CXCursor_PackIndexingExpr:=156): 'CXCursor_PackIndexingExpr', (CXCursor_LastExpr:=156): 'CXCursor_LastExpr', (CXCursor_FirstStmt:=200): 'CXCursor_FirstStmt', (CXCursor_UnexposedStmt:=200): 'CXCursor_UnexposedStmt', (CXCursor_LabelStmt:=201): 'CXCursor_LabelStmt', (CXCursor_CompoundStmt:=202): 'CXCursor_CompoundStmt', (CXCursor_CaseStmt:=203): 'CXCursor_CaseStmt', (CXCursor_DefaultStmt:=204): 'CXCursor_DefaultStmt', (CXCursor_IfStmt:=205): 'CXCursor_IfStmt', (CXCursor_SwitchStmt:=206): 'CXCursor_SwitchStmt', (CXCursor_WhileStmt:=207): 'CXCursor_WhileStmt', (CXCursor_DoStmt:=208): 'CXCursor_DoStmt', (CXCursor_ForStmt:=209): 'CXCursor_ForStmt', (CXCursor_GotoStmt:=210): 'CXCursor_GotoStmt', (CXCursor_IndirectGotoStmt:=211): 'CXCursor_IndirectGotoStmt', (CXCursor_ContinueStmt:=212): 'CXCursor_ContinueStmt', (CXCursor_BreakStmt:=213): 'CXCursor_BreakStmt', (CXCursor_ReturnStmt:=214): 'CXCursor_ReturnStmt', (CXCursor_GCCAsmStmt:=215): 'CXCursor_GCCAsmStmt', (CXCursor_AsmStmt:=215): 'CXCursor_AsmStmt', (CXCursor_ObjCAtTryStmt:=216): 'CXCursor_ObjCAtTryStmt', (CXCursor_ObjCAtCatchStmt:=217): 'CXCursor_ObjCAtCatchStmt', (CXCursor_ObjCAtFinallyStmt:=218): 'CXCursor_ObjCAtFinallyStmt', (CXCursor_ObjCAtThrowStmt:=219): 'CXCursor_ObjCAtThrowStmt', (CXCursor_ObjCAtSynchronizedStmt:=220): 'CXCursor_ObjCAtSynchronizedStmt', (CXCursor_ObjCAutoreleasePoolStmt:=221): 'CXCursor_ObjCAutoreleasePoolStmt', (CXCursor_ObjCForCollectionStmt:=222): 'CXCursor_ObjCForCollectionStmt', (CXCursor_CXXCatchStmt:=223): 'CXCursor_CXXCatchStmt', (CXCursor_CXXTryStmt:=224): 'CXCursor_CXXTryStmt', (CXCursor_CXXForRangeStmt:=225): 'CXCursor_CXXForRangeStmt', (CXCursor_SEHTryStmt:=226): 'CXCursor_SEHTryStmt', (CXCursor_SEHExceptStmt:=227): 'CXCursor_SEHExceptStmt', (CXCursor_SEHFinallyStmt:=228): 'CXCursor_SEHFinallyStmt', (CXCursor_MSAsmStmt:=229): 'CXCursor_MSAsmStmt', (CXCursor_NullStmt:=230): 'CXCursor_NullStmt', (CXCursor_DeclStmt:=231): 'CXCursor_DeclStmt', (CXCursor_OMPParallelDirective:=232): 'CXCursor_OMPParallelDirective', (CXCursor_OMPSimdDirective:=233): 'CXCursor_OMPSimdDirective', (CXCursor_OMPForDirective:=234): 'CXCursor_OMPForDirective', (CXCursor_OMPSectionsDirective:=235): 'CXCursor_OMPSectionsDirective', (CXCursor_OMPSectionDirective:=236): 'CXCursor_OMPSectionDirective', (CXCursor_OMPSingleDirective:=237): 'CXCursor_OMPSingleDirective', (CXCursor_OMPParallelForDirective:=238): 'CXCursor_OMPParallelForDirective', (CXCursor_OMPParallelSectionsDirective:=239): 'CXCursor_OMPParallelSectionsDirective', (CXCursor_OMPTaskDirective:=240): 'CXCursor_OMPTaskDirective', (CXCursor_OMPMasterDirective:=241): 'CXCursor_OMPMasterDirective', (CXCursor_OMPCriticalDirective:=242): 'CXCursor_OMPCriticalDirective', (CXCursor_OMPTaskyieldDirective:=243): 'CXCursor_OMPTaskyieldDirective', (CXCursor_OMPBarrierDirective:=244): 'CXCursor_OMPBarrierDirective', (CXCursor_OMPTaskwaitDirective:=245): 'CXCursor_OMPTaskwaitDirective', (CXCursor_OMPFlushDirective:=246): 'CXCursor_OMPFlushDirective', (CXCursor_SEHLeaveStmt:=247): 'CXCursor_SEHLeaveStmt', (CXCursor_OMPOrderedDirective:=248): 'CXCursor_OMPOrderedDirective', (CXCursor_OMPAtomicDirective:=249): 'CXCursor_OMPAtomicDirective', (CXCursor_OMPForSimdDirective:=250): 'CXCursor_OMPForSimdDirective', (CXCursor_OMPParallelForSimdDirective:=251): 'CXCursor_OMPParallelForSimdDirective', (CXCursor_OMPTargetDirective:=252): 'CXCursor_OMPTargetDirective', (CXCursor_OMPTeamsDirective:=253): 'CXCursor_OMPTeamsDirective', (CXCursor_OMPTaskgroupDirective:=254): 'CXCursor_OMPTaskgroupDirective', (CXCursor_OMPCancellationPointDirective:=255): 'CXCursor_OMPCancellationPointDirective', (CXCursor_OMPCancelDirective:=256): 'CXCursor_OMPCancelDirective', (CXCursor_OMPTargetDataDirective:=257): 'CXCursor_OMPTargetDataDirective', (CXCursor_OMPTaskLoopDirective:=258): 'CXCursor_OMPTaskLoopDirective', (CXCursor_OMPTaskLoopSimdDirective:=259): 'CXCursor_OMPTaskLoopSimdDirective', (CXCursor_OMPDistributeDirective:=260): 'CXCursor_OMPDistributeDirective', (CXCursor_OMPTargetEnterDataDirective:=261): 'CXCursor_OMPTargetEnterDataDirective', (CXCursor_OMPTargetExitDataDirective:=262): 'CXCursor_OMPTargetExitDataDirective', (CXCursor_OMPTargetParallelDirective:=263): 'CXCursor_OMPTargetParallelDirective', (CXCursor_OMPTargetParallelForDirective:=264): 'CXCursor_OMPTargetParallelForDirective', (CXCursor_OMPTargetUpdateDirective:=265): 'CXCursor_OMPTargetUpdateDirective', (CXCursor_OMPDistributeParallelForDirective:=266): 'CXCursor_OMPDistributeParallelForDirective', (CXCursor_OMPDistributeParallelForSimdDirective:=267): 'CXCursor_OMPDistributeParallelForSimdDirective', (CXCursor_OMPDistributeSimdDirective:=268): 'CXCursor_OMPDistributeSimdDirective', (CXCursor_OMPTargetParallelForSimdDirective:=269): 'CXCursor_OMPTargetParallelForSimdDirective', (CXCursor_OMPTargetSimdDirective:=270): 'CXCursor_OMPTargetSimdDirective', (CXCursor_OMPTeamsDistributeDirective:=271): 'CXCursor_OMPTeamsDistributeDirective', (CXCursor_OMPTeamsDistributeSimdDirective:=272): 'CXCursor_OMPTeamsDistributeSimdDirective', (CXCursor_OMPTeamsDistributeParallelForSimdDirective:=273): 'CXCursor_OMPTeamsDistributeParallelForSimdDirective', (CXCursor_OMPTeamsDistributeParallelForDirective:=274): 'CXCursor_OMPTeamsDistributeParallelForDirective', (CXCursor_OMPTargetTeamsDirective:=275): 'CXCursor_OMPTargetTeamsDirective', (CXCursor_OMPTargetTeamsDistributeDirective:=276): 'CXCursor_OMPTargetTeamsDistributeDirective', (CXCursor_OMPTargetTeamsDistributeParallelForDirective:=277): 'CXCursor_OMPTargetTeamsDistributeParallelForDirective', (CXCursor_OMPTargetTeamsDistributeParallelForSimdDirective:=278): 'CXCursor_OMPTargetTeamsDistributeParallelForSimdDirective', (CXCursor_OMPTargetTeamsDistributeSimdDirective:=279): 'CXCursor_OMPTargetTeamsDistributeSimdDirective', (CXCursor_BuiltinBitCastExpr:=280): 'CXCursor_BuiltinBitCastExpr', (CXCursor_OMPMasterTaskLoopDirective:=281): 'CXCursor_OMPMasterTaskLoopDirective', (CXCursor_OMPParallelMasterTaskLoopDirective:=282): 'CXCursor_OMPParallelMasterTaskLoopDirective', (CXCursor_OMPMasterTaskLoopSimdDirective:=283): 'CXCursor_OMPMasterTaskLoopSimdDirective', (CXCursor_OMPParallelMasterTaskLoopSimdDirective:=284): 'CXCursor_OMPParallelMasterTaskLoopSimdDirective', (CXCursor_OMPParallelMasterDirective:=285): 'CXCursor_OMPParallelMasterDirective', (CXCursor_OMPDepobjDirective:=286): 'CXCursor_OMPDepobjDirective', (CXCursor_OMPScanDirective:=287): 'CXCursor_OMPScanDirective', (CXCursor_OMPTileDirective:=288): 'CXCursor_OMPTileDirective', (CXCursor_OMPCanonicalLoop:=289): 'CXCursor_OMPCanonicalLoop', (CXCursor_OMPInteropDirective:=290): 'CXCursor_OMPInteropDirective', (CXCursor_OMPDispatchDirective:=291): 'CXCursor_OMPDispatchDirective', (CXCursor_OMPMaskedDirective:=292): 'CXCursor_OMPMaskedDirective', (CXCursor_OMPUnrollDirective:=293): 'CXCursor_OMPUnrollDirective', (CXCursor_OMPMetaDirective:=294): 'CXCursor_OMPMetaDirective', (CXCursor_OMPGenericLoopDirective:=295): 'CXCursor_OMPGenericLoopDirective', (CXCursor_OMPTeamsGenericLoopDirective:=296): 'CXCursor_OMPTeamsGenericLoopDirective', (CXCursor_OMPTargetTeamsGenericLoopDirective:=297): 'CXCursor_OMPTargetTeamsGenericLoopDirective', (CXCursor_OMPParallelGenericLoopDirective:=298): 'CXCursor_OMPParallelGenericLoopDirective', (CXCursor_OMPTargetParallelGenericLoopDirective:=299): 'CXCursor_OMPTargetParallelGenericLoopDirective', (CXCursor_OMPParallelMaskedDirective:=300): 'CXCursor_OMPParallelMaskedDirective', (CXCursor_OMPMaskedTaskLoopDirective:=301): 'CXCursor_OMPMaskedTaskLoopDirective', (CXCursor_OMPMaskedTaskLoopSimdDirective:=302): 'CXCursor_OMPMaskedTaskLoopSimdDirective', (CXCursor_OMPParallelMaskedTaskLoopDirective:=303): 'CXCursor_OMPParallelMaskedTaskLoopDirective', (CXCursor_OMPParallelMaskedTaskLoopSimdDirective:=304): 'CXCursor_OMPParallelMaskedTaskLoopSimdDirective', (CXCursor_OMPErrorDirective:=305): 'CXCursor_OMPErrorDirective', (CXCursor_OMPScopeDirective:=306): 'CXCursor_OMPScopeDirective', (CXCursor_OMPReverseDirective:=307): 'CXCursor_OMPReverseDirective', (CXCursor_OMPInterchangeDirective:=308): 'CXCursor_OMPInterchangeDirective', (CXCursor_OMPAssumeDirective:=309): 'CXCursor_OMPAssumeDirective', (CXCursor_OpenACCComputeConstruct:=320): 'CXCursor_OpenACCComputeConstruct', (CXCursor_OpenACCLoopConstruct:=321): 'CXCursor_OpenACCLoopConstruct', (CXCursor_OpenACCCombinedConstruct:=322): 'CXCursor_OpenACCCombinedConstruct', (CXCursor_OpenACCDataConstruct:=323): 'CXCursor_OpenACCDataConstruct', (CXCursor_OpenACCEnterDataConstruct:=324): 'CXCursor_OpenACCEnterDataConstruct', (CXCursor_OpenACCExitDataConstruct:=325): 'CXCursor_OpenACCExitDataConstruct', (CXCursor_OpenACCHostDataConstruct:=326): 'CXCursor_OpenACCHostDataConstruct', (CXCursor_OpenACCWaitConstruct:=327): 'CXCursor_OpenACCWaitConstruct', (CXCursor_OpenACCInitConstruct:=328): 'CXCursor_OpenACCInitConstruct', (CXCursor_OpenACCShutdownConstruct:=329): 'CXCursor_OpenACCShutdownConstruct', (CXCursor_OpenACCSetConstruct:=330): 'CXCursor_OpenACCSetConstruct', (CXCursor_OpenACCUpdateConstruct:=331): 'CXCursor_OpenACCUpdateConstruct', (CXCursor_LastStmt:=331): 'CXCursor_LastStmt', (CXCursor_TranslationUnit:=350): 'CXCursor_TranslationUnit', (CXCursor_FirstAttr:=400): 'CXCursor_FirstAttr', (CXCursor_UnexposedAttr:=400): 'CXCursor_UnexposedAttr', (CXCursor_IBActionAttr:=401): 'CXCursor_IBActionAttr', (CXCursor_IBOutletAttr:=402): 'CXCursor_IBOutletAttr', (CXCursor_IBOutletCollectionAttr:=403): 'CXCursor_IBOutletCollectionAttr', (CXCursor_CXXFinalAttr:=404): 'CXCursor_CXXFinalAttr', (CXCursor_CXXOverrideAttr:=405): 'CXCursor_CXXOverrideAttr', (CXCursor_AnnotateAttr:=406): 'CXCursor_AnnotateAttr', (CXCursor_AsmLabelAttr:=407): 'CXCursor_AsmLabelAttr', (CXCursor_PackedAttr:=408): 'CXCursor_PackedAttr', (CXCursor_PureAttr:=409): 'CXCursor_PureAttr', (CXCursor_ConstAttr:=410): 'CXCursor_ConstAttr', (CXCursor_NoDuplicateAttr:=411): 'CXCursor_NoDuplicateAttr', (CXCursor_CUDAConstantAttr:=412): 'CXCursor_CUDAConstantAttr', (CXCursor_CUDADeviceAttr:=413): 'CXCursor_CUDADeviceAttr', (CXCursor_CUDAGlobalAttr:=414): 'CXCursor_CUDAGlobalAttr', (CXCursor_CUDAHostAttr:=415): 'CXCursor_CUDAHostAttr', (CXCursor_CUDASharedAttr:=416): 'CXCursor_CUDASharedAttr', (CXCursor_VisibilityAttr:=417): 'CXCursor_VisibilityAttr', (CXCursor_DLLExport:=418): 'CXCursor_DLLExport', (CXCursor_DLLImport:=419): 'CXCursor_DLLImport', (CXCursor_NSReturnsRetained:=420): 'CXCursor_NSReturnsRetained', (CXCursor_NSReturnsNotRetained:=421): 'CXCursor_NSReturnsNotRetained', (CXCursor_NSReturnsAutoreleased:=422): 'CXCursor_NSReturnsAutoreleased', (CXCursor_NSConsumesSelf:=423): 'CXCursor_NSConsumesSelf', (CXCursor_NSConsumed:=424): 'CXCursor_NSConsumed', (CXCursor_ObjCException:=425): 'CXCursor_ObjCException', (CXCursor_ObjCNSObject:=426): 'CXCursor_ObjCNSObject', (CXCursor_ObjCIndependentClass:=427): 'CXCursor_ObjCIndependentClass', (CXCursor_ObjCPreciseLifetime:=428): 'CXCursor_ObjCPreciseLifetime', (CXCursor_ObjCReturnsInnerPointer:=429): 'CXCursor_ObjCReturnsInnerPointer', (CXCursor_ObjCRequiresSuper:=430): 'CXCursor_ObjCRequiresSuper', (CXCursor_ObjCRootClass:=431): 'CXCursor_ObjCRootClass', (CXCursor_ObjCSubclassingRestricted:=432): 'CXCursor_ObjCSubclassingRestricted', (CXCursor_ObjCExplicitProtocolImpl:=433): 'CXCursor_ObjCExplicitProtocolImpl', (CXCursor_ObjCDesignatedInitializer:=434): 'CXCursor_ObjCDesignatedInitializer', (CXCursor_ObjCRuntimeVisible:=435): 'CXCursor_ObjCRuntimeVisible', (CXCursor_ObjCBoxable:=436): 'CXCursor_ObjCBoxable', (CXCursor_FlagEnum:=437): 'CXCursor_FlagEnum', (CXCursor_ConvergentAttr:=438): 'CXCursor_ConvergentAttr', (CXCursor_WarnUnusedAttr:=439): 'CXCursor_WarnUnusedAttr', (CXCursor_WarnUnusedResultAttr:=440): 'CXCursor_WarnUnusedResultAttr', (CXCursor_AlignedAttr:=441): 'CXCursor_AlignedAttr', (CXCursor_LastAttr:=441): 'CXCursor_LastAttr', (CXCursor_PreprocessingDirective:=500): 'CXCursor_PreprocessingDirective', (CXCursor_MacroDefinition:=501): 'CXCursor_MacroDefinition', (CXCursor_MacroExpansion:=502): 'CXCursor_MacroExpansion', (CXCursor_MacroInstantiation:=502): 'CXCursor_MacroInstantiation', (CXCursor_InclusionDirective:=503): 'CXCursor_InclusionDirective', (CXCursor_FirstPreprocessing:=500): 'CXCursor_FirstPreprocessing', (CXCursor_LastPreprocessing:=503): 'CXCursor_LastPreprocessing', (CXCursor_ModuleImportDecl:=600): 'CXCursor_ModuleImportDecl', (CXCursor_TypeAliasTemplateDecl:=601): 'CXCursor_TypeAliasTemplateDecl', (CXCursor_StaticAssert:=602): 'CXCursor_StaticAssert', (CXCursor_FriendDecl:=603): 'CXCursor_FriendDecl', (CXCursor_ConceptDecl:=604): 'CXCursor_ConceptDecl', (CXCursor_FirstExtraDecl:=600): 'CXCursor_FirstExtraDecl', (CXCursor_LastExtraDecl:=604): 'CXCursor_LastExtraDecl', (CXCursor_OverloadCandidate:=700): 'CXCursor_OverloadCandidate'}
 @c.record
@@ -175,47 +175,47 @@ class CXCursor(c.Struct):
   xdata: 'int'
   data: 'list[ctypes.c_void_p]'
 CXCursor.register_fields([('kind', ctypes.c_uint32, 0), ('xdata', ctypes.c_int32, 4), ('data', (ctypes.c_void_p * 3), 8)])
-@dll.bind
+@dll._bind
 def clang_getNullCursor() -> CXCursor: ...
-@dll.bind
+@dll._bind
 def clang_getTranslationUnitCursor(_0:CXTranslationUnit) -> CXCursor: ...
-@dll.bind
+@dll._bind
 def clang_equalCursors(_0:CXCursor, _1:CXCursor) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_Cursor_isNull(cursor:CXCursor) -> ctypes.c_int32: ...
-@dll.bind
+@dll._bind
 def clang_hashCursor(_0:CXCursor) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_getCursorKind(_0:CXCursor) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_isDeclaration(_0:ctypes.c_uint32) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_isInvalidDeclaration(_0:CXCursor) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_isReference(_0:ctypes.c_uint32) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_isExpression(_0:ctypes.c_uint32) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_isStatement(_0:ctypes.c_uint32) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_isAttribute(_0:ctypes.c_uint32) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_Cursor_hasAttrs(C:CXCursor) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_isInvalid(_0:ctypes.c_uint32) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_isTranslationUnit(_0:ctypes.c_uint32) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_isPreprocessing(_0:ctypes.c_uint32) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_isUnexposed(_0:ctypes.c_uint32) -> ctypes.c_uint32: ...
 enum_CXLinkageKind: dict[int, str] = {(CXLinkage_Invalid:=0): 'CXLinkage_Invalid', (CXLinkage_NoLinkage:=1): 'CXLinkage_NoLinkage', (CXLinkage_Internal:=2): 'CXLinkage_Internal', (CXLinkage_UniqueExternal:=3): 'CXLinkage_UniqueExternal', (CXLinkage_External:=4): 'CXLinkage_External'}
-@dll.bind
+@dll._bind
 def clang_getCursorLinkage(cursor:CXCursor) -> ctypes.c_uint32: ...
 enum_CXVisibilityKind: dict[int, str] = {(CXVisibility_Invalid:=0): 'CXVisibility_Invalid', (CXVisibility_Hidden:=1): 'CXVisibility_Hidden', (CXVisibility_Protected:=2): 'CXVisibility_Protected', (CXVisibility_Default:=3): 'CXVisibility_Default'}
-@dll.bind
+@dll._bind
 def clang_getCursorVisibility(cursor:CXCursor) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_getCursorAvailability(cursor:CXCursor) -> ctypes.c_uint32: ...
 @c.record
 class struct_CXPlatformAvailability(c.Struct):
@@ -228,49 +228,49 @@ class struct_CXPlatformAvailability(c.Struct):
   Message: 'CXString'
 struct_CXPlatformAvailability.register_fields([('Platform', CXString, 0), ('Introduced', CXVersion, 16), ('Deprecated', CXVersion, 28), ('Obsoleted', CXVersion, 40), ('Unavailable', ctypes.c_int32, 52), ('Message', CXString, 56)])
 CXPlatformAvailability: TypeAlias = struct_CXPlatformAvailability
-@dll.bind
+@dll._bind
 def clang_getCursorPlatformAvailability(cursor:CXCursor, always_deprecated:ctypes.POINTER(ctypes.c_int32), deprecated_message:ctypes.POINTER(CXString), always_unavailable:ctypes.POINTER(ctypes.c_int32), unavailable_message:ctypes.POINTER(CXString), availability:ctypes.POINTER(CXPlatformAvailability), availability_size:ctypes.c_int32) -> ctypes.c_int32: ...
-@dll.bind
+@dll._bind
 def clang_disposeCXPlatformAvailability(availability:ctypes.POINTER(CXPlatformAvailability)) -> None: ...
-@dll.bind
+@dll._bind
 def clang_Cursor_getVarDeclInitializer(cursor:CXCursor) -> CXCursor: ...
-@dll.bind
+@dll._bind
 def clang_Cursor_hasVarDeclGlobalStorage(cursor:CXCursor) -> ctypes.c_int32: ...
-@dll.bind
+@dll._bind
 def clang_Cursor_hasVarDeclExternalStorage(cursor:CXCursor) -> ctypes.c_int32: ...
 enum_CXLanguageKind: dict[int, str] = {(CXLanguage_Invalid:=0): 'CXLanguage_Invalid', (CXLanguage_C:=1): 'CXLanguage_C', (CXLanguage_ObjC:=2): 'CXLanguage_ObjC', (CXLanguage_CPlusPlus:=3): 'CXLanguage_CPlusPlus'}
-@dll.bind
+@dll._bind
 def clang_getCursorLanguage(cursor:CXCursor) -> ctypes.c_uint32: ...
 enum_CXTLSKind: dict[int, str] = {(CXTLS_None:=0): 'CXTLS_None', (CXTLS_Dynamic:=1): 'CXTLS_Dynamic', (CXTLS_Static:=2): 'CXTLS_Static'}
-@dll.bind
+@dll._bind
 def clang_getCursorTLSKind(cursor:CXCursor) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_Cursor_getTranslationUnit(_0:CXCursor) -> CXTranslationUnit: ...
 class struct_CXCursorSetImpl(c.Struct): pass
 CXCursorSet: TypeAlias = ctypes.POINTER(struct_CXCursorSetImpl)
-@dll.bind
+@dll._bind
 def clang_createCXCursorSet() -> CXCursorSet: ...
-@dll.bind
+@dll._bind
 def clang_disposeCXCursorSet(cset:CXCursorSet) -> None: ...
-@dll.bind
+@dll._bind
 def clang_CXCursorSet_contains(cset:CXCursorSet, cursor:CXCursor) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_CXCursorSet_insert(cset:CXCursorSet, cursor:CXCursor) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_getCursorSemanticParent(cursor:CXCursor) -> CXCursor: ...
-@dll.bind
+@dll._bind
 def clang_getCursorLexicalParent(cursor:CXCursor) -> CXCursor: ...
-@dll.bind
+@dll._bind
 def clang_getOverriddenCursors(cursor:CXCursor, overridden:ctypes.POINTER(ctypes.POINTER(CXCursor)), num_overridden:ctypes.POINTER(ctypes.c_uint32)) -> None: ...
-@dll.bind
+@dll._bind
 def clang_disposeOverriddenCursors(overridden:ctypes.POINTER(CXCursor)) -> None: ...
-@dll.bind
+@dll._bind
 def clang_getIncludedFile(cursor:CXCursor) -> CXFile: ...
-@dll.bind
+@dll._bind
 def clang_getCursor(_0:CXTranslationUnit, _1:CXSourceLocation) -> CXCursor: ...
-@dll.bind
+@dll._bind
 def clang_getCursorLocation(_0:CXCursor) -> CXSourceLocation: ...
-@dll.bind
+@dll._bind
 def clang_getCursorExtent(_0:CXCursor) -> CXSourceRange: ...
 enum_CXTypeKind: dict[int, str] = {(CXType_Invalid:=0): 'CXType_Invalid', (CXType_Unexposed:=1): 'CXType_Unexposed', (CXType_Void:=2): 'CXType_Void', (CXType_Bool:=3): 'CXType_Bool', (CXType_Char_U:=4): 'CXType_Char_U', (CXType_UChar:=5): 'CXType_UChar', (CXType_Char16:=6): 'CXType_Char16', (CXType_Char32:=7): 'CXType_Char32', (CXType_UShort:=8): 'CXType_UShort', (CXType_UInt:=9): 'CXType_UInt', (CXType_ULong:=10): 'CXType_ULong', (CXType_ULongLong:=11): 'CXType_ULongLong', (CXType_UInt128:=12): 'CXType_UInt128', (CXType_Char_S:=13): 'CXType_Char_S', (CXType_SChar:=14): 'CXType_SChar', (CXType_WChar:=15): 'CXType_WChar', (CXType_Short:=16): 'CXType_Short', (CXType_Int:=17): 'CXType_Int', (CXType_Long:=18): 'CXType_Long', (CXType_LongLong:=19): 'CXType_LongLong', (CXType_Int128:=20): 'CXType_Int128', (CXType_Float:=21): 'CXType_Float', (CXType_Double:=22): 'CXType_Double', (CXType_LongDouble:=23): 'CXType_LongDouble', (CXType_NullPtr:=24): 'CXType_NullPtr', (CXType_Overload:=25): 'CXType_Overload', (CXType_Dependent:=26): 'CXType_Dependent', (CXType_ObjCId:=27): 'CXType_ObjCId', (CXType_ObjCClass:=28): 'CXType_ObjCClass', (CXType_ObjCSel:=29): 'CXType_ObjCSel', (CXType_Float128:=30): 'CXType_Float128', (CXType_Half:=31): 'CXType_Half', (CXType_Float16:=32): 'CXType_Float16', (CXType_ShortAccum:=33): 'CXType_ShortAccum', (CXType_Accum:=34): 'CXType_Accum', (CXType_LongAccum:=35): 'CXType_LongAccum', (CXType_UShortAccum:=36): 'CXType_UShortAccum', (CXType_UAccum:=37): 'CXType_UAccum', (CXType_ULongAccum:=38): 'CXType_ULongAccum', (CXType_BFloat16:=39): 'CXType_BFloat16', (CXType_Ibm128:=40): 'CXType_Ibm128', (CXType_FirstBuiltin:=2): 'CXType_FirstBuiltin', (CXType_LastBuiltin:=40): 'CXType_LastBuiltin', (CXType_Complex:=100): 'CXType_Complex', (CXType_Pointer:=101): 'CXType_Pointer', (CXType_BlockPointer:=102): 'CXType_BlockPointer', (CXType_LValueReference:=103): 'CXType_LValueReference', (CXType_RValueReference:=104): 'CXType_RValueReference', (CXType_Record:=105): 'CXType_Record', (CXType_Enum:=106): 'CXType_Enum', (CXType_Typedef:=107): 'CXType_Typedef', (CXType_ObjCInterface:=108): 'CXType_ObjCInterface', (CXType_ObjCObjectPointer:=109): 'CXType_ObjCObjectPointer', (CXType_FunctionNoProto:=110): 'CXType_FunctionNoProto', (CXType_FunctionProto:=111): 'CXType_FunctionProto', (CXType_ConstantArray:=112): 'CXType_ConstantArray', (CXType_Vector:=113): 'CXType_Vector', (CXType_IncompleteArray:=114): 'CXType_IncompleteArray', (CXType_VariableArray:=115): 'CXType_VariableArray', (CXType_DependentSizedArray:=116): 'CXType_DependentSizedArray', (CXType_MemberPointer:=117): 'CXType_MemberPointer', (CXType_Auto:=118): 'CXType_Auto', (CXType_Elaborated:=119): 'CXType_Elaborated', (CXType_Pipe:=120): 'CXType_Pipe', (CXType_OCLImage1dRO:=121): 'CXType_OCLImage1dRO', (CXType_OCLImage1dArrayRO:=122): 'CXType_OCLImage1dArrayRO', (CXType_OCLImage1dBufferRO:=123): 'CXType_OCLImage1dBufferRO', (CXType_OCLImage2dRO:=124): 'CXType_OCLImage2dRO', (CXType_OCLImage2dArrayRO:=125): 'CXType_OCLImage2dArrayRO', (CXType_OCLImage2dDepthRO:=126): 'CXType_OCLImage2dDepthRO', (CXType_OCLImage2dArrayDepthRO:=127): 'CXType_OCLImage2dArrayDepthRO', (CXType_OCLImage2dMSAARO:=128): 'CXType_OCLImage2dMSAARO', (CXType_OCLImage2dArrayMSAARO:=129): 'CXType_OCLImage2dArrayMSAARO', (CXType_OCLImage2dMSAADepthRO:=130): 'CXType_OCLImage2dMSAADepthRO', (CXType_OCLImage2dArrayMSAADepthRO:=131): 'CXType_OCLImage2dArrayMSAADepthRO', (CXType_OCLImage3dRO:=132): 'CXType_OCLImage3dRO', (CXType_OCLImage1dWO:=133): 'CXType_OCLImage1dWO', (CXType_OCLImage1dArrayWO:=134): 'CXType_OCLImage1dArrayWO', (CXType_OCLImage1dBufferWO:=135): 'CXType_OCLImage1dBufferWO', (CXType_OCLImage2dWO:=136): 'CXType_OCLImage2dWO', (CXType_OCLImage2dArrayWO:=137): 'CXType_OCLImage2dArrayWO', (CXType_OCLImage2dDepthWO:=138): 'CXType_OCLImage2dDepthWO', (CXType_OCLImage2dArrayDepthWO:=139): 'CXType_OCLImage2dArrayDepthWO', (CXType_OCLImage2dMSAAWO:=140): 'CXType_OCLImage2dMSAAWO', (CXType_OCLImage2dArrayMSAAWO:=141): 'CXType_OCLImage2dArrayMSAAWO', (CXType_OCLImage2dMSAADepthWO:=142): 'CXType_OCLImage2dMSAADepthWO', (CXType_OCLImage2dArrayMSAADepthWO:=143): 'CXType_OCLImage2dArrayMSAADepthWO', (CXType_OCLImage3dWO:=144): 'CXType_OCLImage3dWO', (CXType_OCLImage1dRW:=145): 'CXType_OCLImage1dRW', (CXType_OCLImage1dArrayRW:=146): 'CXType_OCLImage1dArrayRW', (CXType_OCLImage1dBufferRW:=147): 'CXType_OCLImage1dBufferRW', (CXType_OCLImage2dRW:=148): 'CXType_OCLImage2dRW', (CXType_OCLImage2dArrayRW:=149): 'CXType_OCLImage2dArrayRW', (CXType_OCLImage2dDepthRW:=150): 'CXType_OCLImage2dDepthRW', (CXType_OCLImage2dArrayDepthRW:=151): 'CXType_OCLImage2dArrayDepthRW', (CXType_OCLImage2dMSAARW:=152): 'CXType_OCLImage2dMSAARW', (CXType_OCLImage2dArrayMSAARW:=153): 'CXType_OCLImage2dArrayMSAARW', (CXType_OCLImage2dMSAADepthRW:=154): 'CXType_OCLImage2dMSAADepthRW', (CXType_OCLImage2dArrayMSAADepthRW:=155): 'CXType_OCLImage2dArrayMSAADepthRW', (CXType_OCLImage3dRW:=156): 'CXType_OCLImage3dRW', (CXType_OCLSampler:=157): 'CXType_OCLSampler', (CXType_OCLEvent:=158): 'CXType_OCLEvent', (CXType_OCLQueue:=159): 'CXType_OCLQueue', (CXType_OCLReserveID:=160): 'CXType_OCLReserveID', (CXType_ObjCObject:=161): 'CXType_ObjCObject', (CXType_ObjCTypeParam:=162): 'CXType_ObjCTypeParam', (CXType_Attributed:=163): 'CXType_Attributed', (CXType_OCLIntelSubgroupAVCMcePayload:=164): 'CXType_OCLIntelSubgroupAVCMcePayload', (CXType_OCLIntelSubgroupAVCImePayload:=165): 'CXType_OCLIntelSubgroupAVCImePayload', (CXType_OCLIntelSubgroupAVCRefPayload:=166): 'CXType_OCLIntelSubgroupAVCRefPayload', (CXType_OCLIntelSubgroupAVCSicPayload:=167): 'CXType_OCLIntelSubgroupAVCSicPayload', (CXType_OCLIntelSubgroupAVCMceResult:=168): 'CXType_OCLIntelSubgroupAVCMceResult', (CXType_OCLIntelSubgroupAVCImeResult:=169): 'CXType_OCLIntelSubgroupAVCImeResult', (CXType_OCLIntelSubgroupAVCRefResult:=170): 'CXType_OCLIntelSubgroupAVCRefResult', (CXType_OCLIntelSubgroupAVCSicResult:=171): 'CXType_OCLIntelSubgroupAVCSicResult', (CXType_OCLIntelSubgroupAVCImeResultSingleReferenceStreamout:=172): 'CXType_OCLIntelSubgroupAVCImeResultSingleReferenceStreamout', (CXType_OCLIntelSubgroupAVCImeResultDualReferenceStreamout:=173): 'CXType_OCLIntelSubgroupAVCImeResultDualReferenceStreamout', (CXType_OCLIntelSubgroupAVCImeSingleReferenceStreamin:=174): 'CXType_OCLIntelSubgroupAVCImeSingleReferenceStreamin', (CXType_OCLIntelSubgroupAVCImeDualReferenceStreamin:=175): 'CXType_OCLIntelSubgroupAVCImeDualReferenceStreamin', (CXType_OCLIntelSubgroupAVCImeResultSingleRefStreamout:=172): 'CXType_OCLIntelSubgroupAVCImeResultSingleRefStreamout', (CXType_OCLIntelSubgroupAVCImeResultDualRefStreamout:=173): 'CXType_OCLIntelSubgroupAVCImeResultDualRefStreamout', (CXType_OCLIntelSubgroupAVCImeSingleRefStreamin:=174): 'CXType_OCLIntelSubgroupAVCImeSingleRefStreamin', (CXType_OCLIntelSubgroupAVCImeDualRefStreamin:=175): 'CXType_OCLIntelSubgroupAVCImeDualRefStreamin', (CXType_ExtVector:=176): 'CXType_ExtVector', (CXType_Atomic:=177): 'CXType_Atomic', (CXType_BTFTagAttributed:=178): 'CXType_BTFTagAttributed', (CXType_HLSLResource:=179): 'CXType_HLSLResource', (CXType_HLSLAttributedResource:=180): 'CXType_HLSLAttributedResource'}
 enum_CXCallingConv: dict[int, str] = {(CXCallingConv_Default:=0): 'CXCallingConv_Default', (CXCallingConv_C:=1): 'CXCallingConv_C', (CXCallingConv_X86StdCall:=2): 'CXCallingConv_X86StdCall', (CXCallingConv_X86FastCall:=3): 'CXCallingConv_X86FastCall', (CXCallingConv_X86ThisCall:=4): 'CXCallingConv_X86ThisCall', (CXCallingConv_X86Pascal:=5): 'CXCallingConv_X86Pascal', (CXCallingConv_AAPCS:=6): 'CXCallingConv_AAPCS', (CXCallingConv_AAPCS_VFP:=7): 'CXCallingConv_AAPCS_VFP', (CXCallingConv_X86RegCall:=8): 'CXCallingConv_X86RegCall', (CXCallingConv_IntelOclBicc:=9): 'CXCallingConv_IntelOclBicc', (CXCallingConv_Win64:=10): 'CXCallingConv_Win64', (CXCallingConv_X86_64Win64:=10): 'CXCallingConv_X86_64Win64', (CXCallingConv_X86_64SysV:=11): 'CXCallingConv_X86_64SysV', (CXCallingConv_X86VectorCall:=12): 'CXCallingConv_X86VectorCall', (CXCallingConv_Swift:=13): 'CXCallingConv_Swift', (CXCallingConv_PreserveMost:=14): 'CXCallingConv_PreserveMost', (CXCallingConv_PreserveAll:=15): 'CXCallingConv_PreserveAll', (CXCallingConv_AArch64VectorCall:=16): 'CXCallingConv_AArch64VectorCall', (CXCallingConv_SwiftAsync:=17): 'CXCallingConv_SwiftAsync', (CXCallingConv_AArch64SVEPCS:=18): 'CXCallingConv_AArch64SVEPCS', (CXCallingConv_M68kRTD:=19): 'CXCallingConv_M68kRTD', (CXCallingConv_PreserveNone:=20): 'CXCallingConv_PreserveNone', (CXCallingConv_RISCVVectorCall:=21): 'CXCallingConv_RISCVVectorCall', (CXCallingConv_Invalid:=100): 'CXCallingConv_Invalid', (CXCallingConv_Unexposed:=200): 'CXCallingConv_Unexposed'}
@@ -280,242 +280,242 @@ class CXType(c.Struct):
   kind: 'int'
   data: 'list[ctypes.c_void_p]'
 CXType.register_fields([('kind', ctypes.c_uint32, 0), ('data', (ctypes.c_void_p * 2), 8)])
-@dll.bind
+@dll._bind
 def clang_getCursorType(C:CXCursor) -> CXType: ...
-@dll.bind
+@dll._bind
 def clang_getTypeSpelling(CT:CXType) -> CXString: ...
-@dll.bind
+@dll._bind
 def clang_getTypedefDeclUnderlyingType(C:CXCursor) -> CXType: ...
-@dll.bind
+@dll._bind
 def clang_getEnumDeclIntegerType(C:CXCursor) -> CXType: ...
-@dll.bind
+@dll._bind
 def clang_getEnumConstantDeclValue(C:CXCursor) -> ctypes.c_int64: ...
-@dll.bind
+@dll._bind
 def clang_getEnumConstantDeclUnsignedValue(C:CXCursor) -> ctypes.c_uint64: ...
-@dll.bind
+@dll._bind
 def clang_Cursor_isBitField(C:CXCursor) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_getFieldDeclBitWidth(C:CXCursor) -> ctypes.c_int32: ...
-@dll.bind
+@dll._bind
 def clang_Cursor_getNumArguments(C:CXCursor) -> ctypes.c_int32: ...
-@dll.bind
+@dll._bind
 def clang_Cursor_getArgument(C:CXCursor, i:ctypes.c_uint32) -> CXCursor: ...
 enum_CXTemplateArgumentKind: dict[int, str] = {(CXTemplateArgumentKind_Null:=0): 'CXTemplateArgumentKind_Null', (CXTemplateArgumentKind_Type:=1): 'CXTemplateArgumentKind_Type', (CXTemplateArgumentKind_Declaration:=2): 'CXTemplateArgumentKind_Declaration', (CXTemplateArgumentKind_NullPtr:=3): 'CXTemplateArgumentKind_NullPtr', (CXTemplateArgumentKind_Integral:=4): 'CXTemplateArgumentKind_Integral', (CXTemplateArgumentKind_Template:=5): 'CXTemplateArgumentKind_Template', (CXTemplateArgumentKind_TemplateExpansion:=6): 'CXTemplateArgumentKind_TemplateExpansion', (CXTemplateArgumentKind_Expression:=7): 'CXTemplateArgumentKind_Expression', (CXTemplateArgumentKind_Pack:=8): 'CXTemplateArgumentKind_Pack', (CXTemplateArgumentKind_Invalid:=9): 'CXTemplateArgumentKind_Invalid'}
-@dll.bind
+@dll._bind
 def clang_Cursor_getNumTemplateArguments(C:CXCursor) -> ctypes.c_int32: ...
-@dll.bind
+@dll._bind
 def clang_Cursor_getTemplateArgumentKind(C:CXCursor, I:ctypes.c_uint32) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_Cursor_getTemplateArgumentType(C:CXCursor, I:ctypes.c_uint32) -> CXType: ...
-@dll.bind
+@dll._bind
 def clang_Cursor_getTemplateArgumentValue(C:CXCursor, I:ctypes.c_uint32) -> ctypes.c_int64: ...
-@dll.bind
+@dll._bind
 def clang_Cursor_getTemplateArgumentUnsignedValue(C:CXCursor, I:ctypes.c_uint32) -> ctypes.c_uint64: ...
-@dll.bind
+@dll._bind
 def clang_equalTypes(A:CXType, B:CXType) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_getCanonicalType(T:CXType) -> CXType: ...
-@dll.bind
+@dll._bind
 def clang_isConstQualifiedType(T:CXType) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_Cursor_isMacroFunctionLike(C:CXCursor) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_Cursor_isMacroBuiltin(C:CXCursor) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_Cursor_isFunctionInlined(C:CXCursor) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_isVolatileQualifiedType(T:CXType) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_isRestrictQualifiedType(T:CXType) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_getAddressSpace(T:CXType) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_getTypedefName(CT:CXType) -> CXString: ...
-@dll.bind
+@dll._bind
 def clang_getPointeeType(T:CXType) -> CXType: ...
-@dll.bind
+@dll._bind
 def clang_getUnqualifiedType(CT:CXType) -> CXType: ...
-@dll.bind
+@dll._bind
 def clang_getNonReferenceType(CT:CXType) -> CXType: ...
-@dll.bind
+@dll._bind
 def clang_getTypeDeclaration(T:CXType) -> CXCursor: ...
-@dll.bind
+@dll._bind
 def clang_getDeclObjCTypeEncoding(C:CXCursor) -> CXString: ...
-@dll.bind
+@dll._bind
 def clang_Type_getObjCEncoding(type:CXType) -> CXString: ...
-@dll.bind
+@dll._bind
 def clang_getTypeKindSpelling(K:ctypes.c_uint32) -> CXString: ...
-@dll.bind
+@dll._bind
 def clang_getFunctionTypeCallingConv(T:CXType) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_getResultType(T:CXType) -> CXType: ...
-@dll.bind
+@dll._bind
 def clang_getExceptionSpecificationType(T:CXType) -> ctypes.c_int32: ...
-@dll.bind
+@dll._bind
 def clang_getNumArgTypes(T:CXType) -> ctypes.c_int32: ...
-@dll.bind
+@dll._bind
 def clang_getArgType(T:CXType, i:ctypes.c_uint32) -> CXType: ...
-@dll.bind
+@dll._bind
 def clang_Type_getObjCObjectBaseType(T:CXType) -> CXType: ...
-@dll.bind
+@dll._bind
 def clang_Type_getNumObjCProtocolRefs(T:CXType) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_Type_getObjCProtocolDecl(T:CXType, i:ctypes.c_uint32) -> CXCursor: ...
-@dll.bind
+@dll._bind
 def clang_Type_getNumObjCTypeArgs(T:CXType) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_Type_getObjCTypeArg(T:CXType, i:ctypes.c_uint32) -> CXType: ...
-@dll.bind
+@dll._bind
 def clang_isFunctionTypeVariadic(T:CXType) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_getCursorResultType(C:CXCursor) -> CXType: ...
-@dll.bind
+@dll._bind
 def clang_getCursorExceptionSpecificationType(C:CXCursor) -> ctypes.c_int32: ...
-@dll.bind
+@dll._bind
 def clang_isPODType(T:CXType) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_getElementType(T:CXType) -> CXType: ...
-@dll.bind
+@dll._bind
 def clang_getNumElements(T:CXType) -> ctypes.c_int64: ...
-@dll.bind
+@dll._bind
 def clang_getArrayElementType(T:CXType) -> CXType: ...
-@dll.bind
+@dll._bind
 def clang_getArraySize(T:CXType) -> ctypes.c_int64: ...
-@dll.bind
+@dll._bind
 def clang_Type_getNamedType(T:CXType) -> CXType: ...
-@dll.bind
+@dll._bind
 def clang_Type_isTransparentTagTypedef(T:CXType) -> ctypes.c_uint32: ...
 enum_CXTypeNullabilityKind: dict[int, str] = {(CXTypeNullability_NonNull:=0): 'CXTypeNullability_NonNull', (CXTypeNullability_Nullable:=1): 'CXTypeNullability_Nullable', (CXTypeNullability_Unspecified:=2): 'CXTypeNullability_Unspecified', (CXTypeNullability_Invalid:=3): 'CXTypeNullability_Invalid', (CXTypeNullability_NullableResult:=4): 'CXTypeNullability_NullableResult'}
-@dll.bind
+@dll._bind
 def clang_Type_getNullability(T:CXType) -> ctypes.c_uint32: ...
 enum_CXTypeLayoutError: dict[int, str] = {(CXTypeLayoutError_Invalid:=-1): 'CXTypeLayoutError_Invalid', (CXTypeLayoutError_Incomplete:=-2): 'CXTypeLayoutError_Incomplete', (CXTypeLayoutError_Dependent:=-3): 'CXTypeLayoutError_Dependent', (CXTypeLayoutError_NotConstantSize:=-4): 'CXTypeLayoutError_NotConstantSize', (CXTypeLayoutError_InvalidFieldName:=-5): 'CXTypeLayoutError_InvalidFieldName', (CXTypeLayoutError_Undeduced:=-6): 'CXTypeLayoutError_Undeduced'}
-@dll.bind
+@dll._bind
 def clang_Type_getAlignOf(T:CXType) -> ctypes.c_int64: ...
-@dll.bind
+@dll._bind
 def clang_Type_getClassType(T:CXType) -> CXType: ...
-@dll.bind
+@dll._bind
 def clang_Type_getSizeOf(T:CXType) -> ctypes.c_int64: ...
-@dll.bind
+@dll._bind
 def clang_Type_getOffsetOf(T:CXType, S:ctypes.POINTER(ctypes.c_char)) -> ctypes.c_int64: ...
-@dll.bind
+@dll._bind
 def clang_Type_getModifiedType(T:CXType) -> CXType: ...
-@dll.bind
+@dll._bind
 def clang_Type_getValueType(CT:CXType) -> CXType: ...
-@dll.bind
+@dll._bind
 def clang_Cursor_getOffsetOfField(C:CXCursor) -> ctypes.c_int64: ...
-@dll.bind
+@dll._bind
 def clang_Cursor_isAnonymous(C:CXCursor) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_Cursor_isAnonymousRecordDecl(C:CXCursor) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_Cursor_isInlineNamespace(C:CXCursor) -> ctypes.c_uint32: ...
 enum_CXRefQualifierKind: dict[int, str] = {(CXRefQualifier_None:=0): 'CXRefQualifier_None', (CXRefQualifier_LValue:=1): 'CXRefQualifier_LValue', (CXRefQualifier_RValue:=2): 'CXRefQualifier_RValue'}
-@dll.bind
+@dll._bind
 def clang_Type_getNumTemplateArguments(T:CXType) -> ctypes.c_int32: ...
-@dll.bind
+@dll._bind
 def clang_Type_getTemplateArgumentAsType(T:CXType, i:ctypes.c_uint32) -> CXType: ...
-@dll.bind
+@dll._bind
 def clang_Type_getCXXRefQualifier(T:CXType) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_isVirtualBase(_0:CXCursor) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_getOffsetOfBase(Parent:CXCursor, Base:CXCursor) -> ctypes.c_int64: ...
 enum_CX_CXXAccessSpecifier: dict[int, str] = {(CX_CXXInvalidAccessSpecifier:=0): 'CX_CXXInvalidAccessSpecifier', (CX_CXXPublic:=1): 'CX_CXXPublic', (CX_CXXProtected:=2): 'CX_CXXProtected', (CX_CXXPrivate:=3): 'CX_CXXPrivate'}
-@dll.bind
+@dll._bind
 def clang_getCXXAccessSpecifier(_0:CXCursor) -> ctypes.c_uint32: ...
 enum_CX_StorageClass: dict[int, str] = {(CX_SC_Invalid:=0): 'CX_SC_Invalid', (CX_SC_None:=1): 'CX_SC_None', (CX_SC_Extern:=2): 'CX_SC_Extern', (CX_SC_Static:=3): 'CX_SC_Static', (CX_SC_PrivateExtern:=4): 'CX_SC_PrivateExtern', (CX_SC_OpenCLWorkGroupLocal:=5): 'CX_SC_OpenCLWorkGroupLocal', (CX_SC_Auto:=6): 'CX_SC_Auto', (CX_SC_Register:=7): 'CX_SC_Register'}
 enum_CX_BinaryOperatorKind: dict[int, str] = {(CX_BO_Invalid:=0): 'CX_BO_Invalid', (CX_BO_PtrMemD:=1): 'CX_BO_PtrMemD', (CX_BO_PtrMemI:=2): 'CX_BO_PtrMemI', (CX_BO_Mul:=3): 'CX_BO_Mul', (CX_BO_Div:=4): 'CX_BO_Div', (CX_BO_Rem:=5): 'CX_BO_Rem', (CX_BO_Add:=6): 'CX_BO_Add', (CX_BO_Sub:=7): 'CX_BO_Sub', (CX_BO_Shl:=8): 'CX_BO_Shl', (CX_BO_Shr:=9): 'CX_BO_Shr', (CX_BO_Cmp:=10): 'CX_BO_Cmp', (CX_BO_LT:=11): 'CX_BO_LT', (CX_BO_GT:=12): 'CX_BO_GT', (CX_BO_LE:=13): 'CX_BO_LE', (CX_BO_GE:=14): 'CX_BO_GE', (CX_BO_EQ:=15): 'CX_BO_EQ', (CX_BO_NE:=16): 'CX_BO_NE', (CX_BO_And:=17): 'CX_BO_And', (CX_BO_Xor:=18): 'CX_BO_Xor', (CX_BO_Or:=19): 'CX_BO_Or', (CX_BO_LAnd:=20): 'CX_BO_LAnd', (CX_BO_LOr:=21): 'CX_BO_LOr', (CX_BO_Assign:=22): 'CX_BO_Assign', (CX_BO_MulAssign:=23): 'CX_BO_MulAssign', (CX_BO_DivAssign:=24): 'CX_BO_DivAssign', (CX_BO_RemAssign:=25): 'CX_BO_RemAssign', (CX_BO_AddAssign:=26): 'CX_BO_AddAssign', (CX_BO_SubAssign:=27): 'CX_BO_SubAssign', (CX_BO_ShlAssign:=28): 'CX_BO_ShlAssign', (CX_BO_ShrAssign:=29): 'CX_BO_ShrAssign', (CX_BO_AndAssign:=30): 'CX_BO_AndAssign', (CX_BO_XorAssign:=31): 'CX_BO_XorAssign', (CX_BO_OrAssign:=32): 'CX_BO_OrAssign', (CX_BO_Comma:=33): 'CX_BO_Comma', (CX_BO_LAST:=33): 'CX_BO_LAST'}
-@dll.bind
+@dll._bind
 def clang_Cursor_getBinaryOpcode(C:CXCursor) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_Cursor_getBinaryOpcodeStr(Op:ctypes.c_uint32) -> CXString: ...
-@dll.bind
+@dll._bind
 def clang_Cursor_getStorageClass(_0:CXCursor) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_getNumOverloadedDecls(cursor:CXCursor) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_getOverloadedDecl(cursor:CXCursor, index:ctypes.c_uint32) -> CXCursor: ...
-@dll.bind
+@dll._bind
 def clang_getIBOutletCollectionType(_0:CXCursor) -> CXType: ...
 enum_CXChildVisitResult: dict[int, str] = {(CXChildVisit_Break:=0): 'CXChildVisit_Break', (CXChildVisit_Continue:=1): 'CXChildVisit_Continue', (CXChildVisit_Recurse:=2): 'CXChildVisit_Recurse'}
 CXCursorVisitor: TypeAlias = ctypes.CFUNCTYPE(ctypes.c_uint32, CXCursor, CXCursor, ctypes.c_void_p)
-@dll.bind
+@dll._bind
 def clang_visitChildren(parent:CXCursor, visitor:CXCursorVisitor, client_data:CXClientData) -> ctypes.c_uint32: ...
 class struct__CXChildVisitResult(c.Struct): pass
 CXCursorVisitorBlock: TypeAlias = ctypes.POINTER(struct__CXChildVisitResult)
-@dll.bind
+@dll._bind
 def clang_visitChildrenWithBlock(parent:CXCursor, block:CXCursorVisitorBlock) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_getCursorUSR(_0:CXCursor) -> CXString: ...
-@dll.bind
+@dll._bind
 def clang_constructUSR_ObjCClass(class_name:ctypes.POINTER(ctypes.c_char)) -> CXString: ...
-@dll.bind
+@dll._bind
 def clang_constructUSR_ObjCCategory(class_name:ctypes.POINTER(ctypes.c_char), category_name:ctypes.POINTER(ctypes.c_char)) -> CXString: ...
-@dll.bind
+@dll._bind
 def clang_constructUSR_ObjCProtocol(protocol_name:ctypes.POINTER(ctypes.c_char)) -> CXString: ...
-@dll.bind
+@dll._bind
 def clang_constructUSR_ObjCIvar(name:ctypes.POINTER(ctypes.c_char), classUSR:CXString) -> CXString: ...
-@dll.bind
+@dll._bind
 def clang_constructUSR_ObjCMethod(name:ctypes.POINTER(ctypes.c_char), isInstanceMethod:ctypes.c_uint32, classUSR:CXString) -> CXString: ...
-@dll.bind
+@dll._bind
 def clang_constructUSR_ObjCProperty(property:ctypes.POINTER(ctypes.c_char), classUSR:CXString) -> CXString: ...
-@dll.bind
+@dll._bind
 def clang_getCursorSpelling(_0:CXCursor) -> CXString: ...
-@dll.bind
+@dll._bind
 def clang_Cursor_getSpellingNameRange(_0:CXCursor, pieceIndex:ctypes.c_uint32, options:ctypes.c_uint32) -> CXSourceRange: ...
 CXPrintingPolicy: TypeAlias = ctypes.c_void_p
 enum_CXPrintingPolicyProperty: dict[int, str] = {(CXPrintingPolicy_Indentation:=0): 'CXPrintingPolicy_Indentation', (CXPrintingPolicy_SuppressSpecifiers:=1): 'CXPrintingPolicy_SuppressSpecifiers', (CXPrintingPolicy_SuppressTagKeyword:=2): 'CXPrintingPolicy_SuppressTagKeyword', (CXPrintingPolicy_IncludeTagDefinition:=3): 'CXPrintingPolicy_IncludeTagDefinition', (CXPrintingPolicy_SuppressScope:=4): 'CXPrintingPolicy_SuppressScope', (CXPrintingPolicy_SuppressUnwrittenScope:=5): 'CXPrintingPolicy_SuppressUnwrittenScope', (CXPrintingPolicy_SuppressInitializers:=6): 'CXPrintingPolicy_SuppressInitializers', (CXPrintingPolicy_ConstantArraySizeAsWritten:=7): 'CXPrintingPolicy_ConstantArraySizeAsWritten', (CXPrintingPolicy_AnonymousTagLocations:=8): 'CXPrintingPolicy_AnonymousTagLocations', (CXPrintingPolicy_SuppressStrongLifetime:=9): 'CXPrintingPolicy_SuppressStrongLifetime', (CXPrintingPolicy_SuppressLifetimeQualifiers:=10): 'CXPrintingPolicy_SuppressLifetimeQualifiers', (CXPrintingPolicy_SuppressTemplateArgsInCXXConstructors:=11): 'CXPrintingPolicy_SuppressTemplateArgsInCXXConstructors', (CXPrintingPolicy_Bool:=12): 'CXPrintingPolicy_Bool', (CXPrintingPolicy_Restrict:=13): 'CXPrintingPolicy_Restrict', (CXPrintingPolicy_Alignof:=14): 'CXPrintingPolicy_Alignof', (CXPrintingPolicy_UnderscoreAlignof:=15): 'CXPrintingPolicy_UnderscoreAlignof', (CXPrintingPolicy_UseVoidForZeroParams:=16): 'CXPrintingPolicy_UseVoidForZeroParams', (CXPrintingPolicy_TerseOutput:=17): 'CXPrintingPolicy_TerseOutput', (CXPrintingPolicy_PolishForDeclaration:=18): 'CXPrintingPolicy_PolishForDeclaration', (CXPrintingPolicy_Half:=19): 'CXPrintingPolicy_Half', (CXPrintingPolicy_MSWChar:=20): 'CXPrintingPolicy_MSWChar', (CXPrintingPolicy_IncludeNewlines:=21): 'CXPrintingPolicy_IncludeNewlines', (CXPrintingPolicy_MSVCFormatting:=22): 'CXPrintingPolicy_MSVCFormatting', (CXPrintingPolicy_ConstantsAsWritten:=23): 'CXPrintingPolicy_ConstantsAsWritten', (CXPrintingPolicy_SuppressImplicitBase:=24): 'CXPrintingPolicy_SuppressImplicitBase', (CXPrintingPolicy_FullyQualifiedName:=25): 'CXPrintingPolicy_FullyQualifiedName', (CXPrintingPolicy_LastProperty:=25): 'CXPrintingPolicy_LastProperty'}
-@dll.bind
+@dll._bind
 def clang_PrintingPolicy_getProperty(Policy:CXPrintingPolicy, Property:ctypes.c_uint32) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_PrintingPolicy_setProperty(Policy:CXPrintingPolicy, Property:ctypes.c_uint32, Value:ctypes.c_uint32) -> None: ...
-@dll.bind
+@dll._bind
 def clang_getCursorPrintingPolicy(_0:CXCursor) -> CXPrintingPolicy: ...
-@dll.bind
+@dll._bind
 def clang_PrintingPolicy_dispose(Policy:CXPrintingPolicy) -> None: ...
-@dll.bind
+@dll._bind
 def clang_getCursorPrettyPrinted(Cursor:CXCursor, Policy:CXPrintingPolicy) -> CXString: ...
-@dll.bind
+@dll._bind
 def clang_getTypePrettyPrinted(CT:CXType, cxPolicy:CXPrintingPolicy) -> CXString: ...
-@dll.bind
+@dll._bind
 def clang_getCursorDisplayName(_0:CXCursor) -> CXString: ...
-@dll.bind
+@dll._bind
 def clang_getCursorReferenced(_0:CXCursor) -> CXCursor: ...
-@dll.bind
+@dll._bind
 def clang_getCursorDefinition(_0:CXCursor) -> CXCursor: ...
-@dll.bind
+@dll._bind
 def clang_isCursorDefinition(_0:CXCursor) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_getCanonicalCursor(_0:CXCursor) -> CXCursor: ...
-@dll.bind
+@dll._bind
 def clang_Cursor_getObjCSelectorIndex(_0:CXCursor) -> ctypes.c_int32: ...
-@dll.bind
+@dll._bind
 def clang_Cursor_isDynamicCall(C:CXCursor) -> ctypes.c_int32: ...
-@dll.bind
+@dll._bind
 def clang_Cursor_getReceiverType(C:CXCursor) -> CXType: ...
 CXObjCPropertyAttrKind: dict[int, str] = {(CXObjCPropertyAttr_noattr:=0): 'CXObjCPropertyAttr_noattr', (CXObjCPropertyAttr_readonly:=1): 'CXObjCPropertyAttr_readonly', (CXObjCPropertyAttr_getter:=2): 'CXObjCPropertyAttr_getter', (CXObjCPropertyAttr_assign:=4): 'CXObjCPropertyAttr_assign', (CXObjCPropertyAttr_readwrite:=8): 'CXObjCPropertyAttr_readwrite', (CXObjCPropertyAttr_retain:=16): 'CXObjCPropertyAttr_retain', (CXObjCPropertyAttr_copy:=32): 'CXObjCPropertyAttr_copy', (CXObjCPropertyAttr_nonatomic:=64): 'CXObjCPropertyAttr_nonatomic', (CXObjCPropertyAttr_setter:=128): 'CXObjCPropertyAttr_setter', (CXObjCPropertyAttr_atomic:=256): 'CXObjCPropertyAttr_atomic', (CXObjCPropertyAttr_weak:=512): 'CXObjCPropertyAttr_weak', (CXObjCPropertyAttr_strong:=1024): 'CXObjCPropertyAttr_strong', (CXObjCPropertyAttr_unsafe_unretained:=2048): 'CXObjCPropertyAttr_unsafe_unretained', (CXObjCPropertyAttr_class:=4096): 'CXObjCPropertyAttr_class'}
-@dll.bind
+@dll._bind
 def clang_Cursor_getObjCPropertyAttributes(C:CXCursor, reserved:ctypes.c_uint32) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_Cursor_getObjCPropertyGetterName(C:CXCursor) -> CXString: ...
-@dll.bind
+@dll._bind
 def clang_Cursor_getObjCPropertySetterName(C:CXCursor) -> CXString: ...
 CXObjCDeclQualifierKind: dict[int, str] = {(CXObjCDeclQualifier_None:=0): 'CXObjCDeclQualifier_None', (CXObjCDeclQualifier_In:=1): 'CXObjCDeclQualifier_In', (CXObjCDeclQualifier_Inout:=2): 'CXObjCDeclQualifier_Inout', (CXObjCDeclQualifier_Out:=4): 'CXObjCDeclQualifier_Out', (CXObjCDeclQualifier_Bycopy:=8): 'CXObjCDeclQualifier_Bycopy', (CXObjCDeclQualifier_Byref:=16): 'CXObjCDeclQualifier_Byref', (CXObjCDeclQualifier_Oneway:=32): 'CXObjCDeclQualifier_Oneway'}
-@dll.bind
+@dll._bind
 def clang_Cursor_getObjCDeclQualifiers(C:CXCursor) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_Cursor_isObjCOptional(C:CXCursor) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_Cursor_isVariadic(C:CXCursor) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_Cursor_isExternalSymbol(C:CXCursor, language:ctypes.POINTER(CXString), definedIn:ctypes.POINTER(CXString), isGenerated:ctypes.POINTER(ctypes.c_uint32)) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_Cursor_getCommentRange(C:CXCursor) -> CXSourceRange: ...
-@dll.bind
+@dll._bind
 def clang_Cursor_getRawCommentText(C:CXCursor) -> CXString: ...
-@dll.bind
+@dll._bind
 def clang_Cursor_getBriefCommentText(C:CXCursor) -> CXString: ...
-@dll.bind
+@dll._bind
 def clang_Cursor_getMangling(_0:CXCursor) -> CXString: ...
 @c.record
 class CXStringSet(c.Struct):
@@ -523,66 +523,66 @@ class CXStringSet(c.Struct):
   Strings: 'ctypes._Pointer[CXString]'
   Count: 'int'
 CXStringSet.register_fields([('Strings', ctypes.POINTER(CXString), 0), ('Count', ctypes.c_uint32, 8)])
-@dll.bind
+@dll._bind
 def clang_Cursor_getCXXManglings(_0:CXCursor) -> ctypes.POINTER(CXStringSet): ...
-@dll.bind
+@dll._bind
 def clang_Cursor_getObjCManglings(_0:CXCursor) -> ctypes.POINTER(CXStringSet): ...
 CXModule: TypeAlias = ctypes.c_void_p
-@dll.bind
+@dll._bind
 def clang_Cursor_getModule(C:CXCursor) -> CXModule: ...
-@dll.bind
+@dll._bind
 def clang_getModuleForFile(_0:CXTranslationUnit, _1:CXFile) -> CXModule: ...
-@dll.bind
+@dll._bind
 def clang_Module_getASTFile(Module:CXModule) -> CXFile: ...
-@dll.bind
+@dll._bind
 def clang_Module_getParent(Module:CXModule) -> CXModule: ...
-@dll.bind
+@dll._bind
 def clang_Module_getName(Module:CXModule) -> CXString: ...
-@dll.bind
+@dll._bind
 def clang_Module_getFullName(Module:CXModule) -> CXString: ...
-@dll.bind
+@dll._bind
 def clang_Module_isSystem(Module:CXModule) -> ctypes.c_int32: ...
-@dll.bind
+@dll._bind
 def clang_Module_getNumTopLevelHeaders(_0:CXTranslationUnit, Module:CXModule) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_Module_getTopLevelHeader(_0:CXTranslationUnit, Module:CXModule, Index:ctypes.c_uint32) -> CXFile: ...
-@dll.bind
+@dll._bind
 def clang_CXXConstructor_isConvertingConstructor(C:CXCursor) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_CXXConstructor_isCopyConstructor(C:CXCursor) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_CXXConstructor_isDefaultConstructor(C:CXCursor) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_CXXConstructor_isMoveConstructor(C:CXCursor) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_CXXField_isMutable(C:CXCursor) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_CXXMethod_isDefaulted(C:CXCursor) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_CXXMethod_isDeleted(C:CXCursor) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_CXXMethod_isPureVirtual(C:CXCursor) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_CXXMethod_isStatic(C:CXCursor) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_CXXMethod_isVirtual(C:CXCursor) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_CXXMethod_isCopyAssignmentOperator(C:CXCursor) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_CXXMethod_isMoveAssignmentOperator(C:CXCursor) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_CXXMethod_isExplicit(C:CXCursor) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_CXXRecord_isAbstract(C:CXCursor) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_EnumDecl_isScoped(C:CXCursor) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_CXXMethod_isConst(C:CXCursor) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_getTemplateCursorKind(C:CXCursor) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_getSpecializedCursorTemplate(C:CXCursor) -> CXCursor: ...
-@dll.bind
+@dll._bind
 def clang_getCursorReferenceNameRange(C:CXCursor, NameFlags:ctypes.c_uint32, PieceIndex:ctypes.c_uint32) -> CXSourceRange: ...
 enum_CXNameRefFlags: dict[int, str] = {(CXNameRange_WantQualifier:=1): 'CXNameRange_WantQualifier', (CXNameRange_WantTemplateArgs:=2): 'CXNameRange_WantTemplateArgs', (CXNameRange_WantSinglePiece:=4): 'CXNameRange_WantSinglePiece'}
 enum_CXTokenKind: dict[int, str] = {(CXToken_Punctuation:=0): 'CXToken_Punctuation', (CXToken_Keyword:=1): 'CXToken_Keyword', (CXToken_Identifier:=2): 'CXToken_Identifier', (CXToken_Literal:=3): 'CXToken_Literal', (CXToken_Comment:=4): 'CXToken_Comment'}
@@ -593,29 +593,29 @@ class CXToken(c.Struct):
   int_data: 'list[int]'
   ptr_data: 'ctypes.c_void_p'
 CXToken.register_fields([('int_data', (ctypes.c_uint32 * 4), 0), ('ptr_data', ctypes.c_void_p, 16)])
-@dll.bind
+@dll._bind
 def clang_getToken(TU:CXTranslationUnit, Location:CXSourceLocation) -> ctypes.POINTER(CXToken): ...
-@dll.bind
+@dll._bind
 def clang_getTokenKind(_0:CXToken) -> CXTokenKind: ...
-@dll.bind
+@dll._bind
 def clang_getTokenSpelling(_0:CXTranslationUnit, _1:CXToken) -> CXString: ...
-@dll.bind
+@dll._bind
 def clang_getTokenLocation(_0:CXTranslationUnit, _1:CXToken) -> CXSourceLocation: ...
-@dll.bind
+@dll._bind
 def clang_getTokenExtent(_0:CXTranslationUnit, _1:CXToken) -> CXSourceRange: ...
-@dll.bind
+@dll._bind
 def clang_tokenize(TU:CXTranslationUnit, Range:CXSourceRange, Tokens:ctypes.POINTER(ctypes.POINTER(CXToken)), NumTokens:ctypes.POINTER(ctypes.c_uint32)) -> None: ...
-@dll.bind
+@dll._bind
 def clang_annotateTokens(TU:CXTranslationUnit, Tokens:ctypes.POINTER(CXToken), NumTokens:ctypes.c_uint32, Cursors:ctypes.POINTER(CXCursor)) -> None: ...
-@dll.bind
+@dll._bind
 def clang_disposeTokens(TU:CXTranslationUnit, Tokens:ctypes.POINTER(CXToken), NumTokens:ctypes.c_uint32) -> None: ...
-@dll.bind
+@dll._bind
 def clang_getCursorKindSpelling(Kind:ctypes.c_uint32) -> CXString: ...
-@dll.bind
+@dll._bind
 def clang_getDefinitionSpellingAndExtent(_0:CXCursor, startBuf:ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), endBuf:ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), startLine:ctypes.POINTER(ctypes.c_uint32), startColumn:ctypes.POINTER(ctypes.c_uint32), endLine:ctypes.POINTER(ctypes.c_uint32), endColumn:ctypes.POINTER(ctypes.c_uint32)) -> None: ...
-@dll.bind
+@dll._bind
 def clang_enableStackTraces() -> None: ...
-@dll.bind
+@dll._bind
 def clang_executeOnThread(fn:ctypes.CFUNCTYPE(None, ctypes.c_void_p), user_data:ctypes.c_void_p, stack_size:ctypes.c_uint32) -> None: ...
 CXCompletionString: TypeAlias = ctypes.c_void_p
 @c.record
@@ -625,27 +625,27 @@ class CXCompletionResult(c.Struct):
   CompletionString: 'ctypes.c_void_p'
 CXCompletionResult.register_fields([('CursorKind', ctypes.c_uint32, 0), ('CompletionString', CXCompletionString, 8)])
 enum_CXCompletionChunkKind: dict[int, str] = {(CXCompletionChunk_Optional:=0): 'CXCompletionChunk_Optional', (CXCompletionChunk_TypedText:=1): 'CXCompletionChunk_TypedText', (CXCompletionChunk_Text:=2): 'CXCompletionChunk_Text', (CXCompletionChunk_Placeholder:=3): 'CXCompletionChunk_Placeholder', (CXCompletionChunk_Informative:=4): 'CXCompletionChunk_Informative', (CXCompletionChunk_CurrentParameter:=5): 'CXCompletionChunk_CurrentParameter', (CXCompletionChunk_LeftParen:=6): 'CXCompletionChunk_LeftParen', (CXCompletionChunk_RightParen:=7): 'CXCompletionChunk_RightParen', (CXCompletionChunk_LeftBracket:=8): 'CXCompletionChunk_LeftBracket', (CXCompletionChunk_RightBracket:=9): 'CXCompletionChunk_RightBracket', (CXCompletionChunk_LeftBrace:=10): 'CXCompletionChunk_LeftBrace', (CXCompletionChunk_RightBrace:=11): 'CXCompletionChunk_RightBrace', (CXCompletionChunk_LeftAngle:=12): 'CXCompletionChunk_LeftAngle', (CXCompletionChunk_RightAngle:=13): 'CXCompletionChunk_RightAngle', (CXCompletionChunk_Comma:=14): 'CXCompletionChunk_Comma', (CXCompletionChunk_ResultType:=15): 'CXCompletionChunk_ResultType', (CXCompletionChunk_Colon:=16): 'CXCompletionChunk_Colon', (CXCompletionChunk_SemiColon:=17): 'CXCompletionChunk_SemiColon', (CXCompletionChunk_Equal:=18): 'CXCompletionChunk_Equal', (CXCompletionChunk_HorizontalSpace:=19): 'CXCompletionChunk_HorizontalSpace', (CXCompletionChunk_VerticalSpace:=20): 'CXCompletionChunk_VerticalSpace'}
-@dll.bind
+@dll._bind
 def clang_getCompletionChunkKind(completion_string:CXCompletionString, chunk_number:ctypes.c_uint32) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_getCompletionChunkText(completion_string:CXCompletionString, chunk_number:ctypes.c_uint32) -> CXString: ...
-@dll.bind
+@dll._bind
 def clang_getCompletionChunkCompletionString(completion_string:CXCompletionString, chunk_number:ctypes.c_uint32) -> CXCompletionString: ...
-@dll.bind
+@dll._bind
 def clang_getNumCompletionChunks(completion_string:CXCompletionString) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_getCompletionPriority(completion_string:CXCompletionString) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_getCompletionAvailability(completion_string:CXCompletionString) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_getCompletionNumAnnotations(completion_string:CXCompletionString) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_getCompletionAnnotation(completion_string:CXCompletionString, annotation_number:ctypes.c_uint32) -> CXString: ...
-@dll.bind
+@dll._bind
 def clang_getCompletionParent(completion_string:CXCompletionString, kind:ctypes.POINTER(ctypes.c_uint32)) -> CXString: ...
-@dll.bind
+@dll._bind
 def clang_getCompletionBriefComment(completion_string:CXCompletionString) -> CXString: ...
-@dll.bind
+@dll._bind
 def clang_getCursorCompletionString(cursor:CXCursor) -> CXCompletionString: ...
 @c.record
 class CXCodeCompleteResults(c.Struct):
@@ -653,69 +653,69 @@ class CXCodeCompleteResults(c.Struct):
   Results: 'ctypes._Pointer[CXCompletionResult]'
   NumResults: 'int'
 CXCodeCompleteResults.register_fields([('Results', ctypes.POINTER(CXCompletionResult), 0), ('NumResults', ctypes.c_uint32, 8)])
-@dll.bind
+@dll._bind
 def clang_getCompletionNumFixIts(results:ctypes.POINTER(CXCodeCompleteResults), completion_index:ctypes.c_uint32) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_getCompletionFixIt(results:ctypes.POINTER(CXCodeCompleteResults), completion_index:ctypes.c_uint32, fixit_index:ctypes.c_uint32, replacement_range:ctypes.POINTER(CXSourceRange)) -> CXString: ...
 enum_CXCodeComplete_Flags: dict[int, str] = {(CXCodeComplete_IncludeMacros:=1): 'CXCodeComplete_IncludeMacros', (CXCodeComplete_IncludeCodePatterns:=2): 'CXCodeComplete_IncludeCodePatterns', (CXCodeComplete_IncludeBriefComments:=4): 'CXCodeComplete_IncludeBriefComments', (CXCodeComplete_SkipPreamble:=8): 'CXCodeComplete_SkipPreamble', (CXCodeComplete_IncludeCompletionsWithFixIts:=16): 'CXCodeComplete_IncludeCompletionsWithFixIts'}
 enum_CXCompletionContext: dict[int, str] = {(CXCompletionContext_Unexposed:=0): 'CXCompletionContext_Unexposed', (CXCompletionContext_AnyType:=1): 'CXCompletionContext_AnyType', (CXCompletionContext_AnyValue:=2): 'CXCompletionContext_AnyValue', (CXCompletionContext_ObjCObjectValue:=4): 'CXCompletionContext_ObjCObjectValue', (CXCompletionContext_ObjCSelectorValue:=8): 'CXCompletionContext_ObjCSelectorValue', (CXCompletionContext_CXXClassTypeValue:=16): 'CXCompletionContext_CXXClassTypeValue', (CXCompletionContext_DotMemberAccess:=32): 'CXCompletionContext_DotMemberAccess', (CXCompletionContext_ArrowMemberAccess:=64): 'CXCompletionContext_ArrowMemberAccess', (CXCompletionContext_ObjCPropertyAccess:=128): 'CXCompletionContext_ObjCPropertyAccess', (CXCompletionContext_EnumTag:=256): 'CXCompletionContext_EnumTag', (CXCompletionContext_UnionTag:=512): 'CXCompletionContext_UnionTag', (CXCompletionContext_StructTag:=1024): 'CXCompletionContext_StructTag', (CXCompletionContext_ClassTag:=2048): 'CXCompletionContext_ClassTag', (CXCompletionContext_Namespace:=4096): 'CXCompletionContext_Namespace', (CXCompletionContext_NestedNameSpecifier:=8192): 'CXCompletionContext_NestedNameSpecifier', (CXCompletionContext_ObjCInterface:=16384): 'CXCompletionContext_ObjCInterface', (CXCompletionContext_ObjCProtocol:=32768): 'CXCompletionContext_ObjCProtocol', (CXCompletionContext_ObjCCategory:=65536): 'CXCompletionContext_ObjCCategory', (CXCompletionContext_ObjCInstanceMessage:=131072): 'CXCompletionContext_ObjCInstanceMessage', (CXCompletionContext_ObjCClassMessage:=262144): 'CXCompletionContext_ObjCClassMessage', (CXCompletionContext_ObjCSelectorName:=524288): 'CXCompletionContext_ObjCSelectorName', (CXCompletionContext_MacroName:=1048576): 'CXCompletionContext_MacroName', (CXCompletionContext_NaturalLanguage:=2097152): 'CXCompletionContext_NaturalLanguage', (CXCompletionContext_IncludedFile:=4194304): 'CXCompletionContext_IncludedFile', (CXCompletionContext_Unknown:=8388607): 'CXCompletionContext_Unknown'}
-@dll.bind
+@dll._bind
 def clang_defaultCodeCompleteOptions() -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_codeCompleteAt(TU:CXTranslationUnit, complete_filename:ctypes.POINTER(ctypes.c_char), complete_line:ctypes.c_uint32, complete_column:ctypes.c_uint32, unsaved_files:ctypes.POINTER(struct_CXUnsavedFile), num_unsaved_files:ctypes.c_uint32, options:ctypes.c_uint32) -> ctypes.POINTER(CXCodeCompleteResults): ...
-@dll.bind
+@dll._bind
 def clang_sortCodeCompletionResults(Results:ctypes.POINTER(CXCompletionResult), NumResults:ctypes.c_uint32) -> None: ...
-@dll.bind
+@dll._bind
 def clang_disposeCodeCompleteResults(Results:ctypes.POINTER(CXCodeCompleteResults)) -> None: ...
-@dll.bind
+@dll._bind
 def clang_codeCompleteGetNumDiagnostics(Results:ctypes.POINTER(CXCodeCompleteResults)) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_codeCompleteGetDiagnostic(Results:ctypes.POINTER(CXCodeCompleteResults), Index:ctypes.c_uint32) -> CXDiagnostic: ...
-@dll.bind
+@dll._bind
 def clang_codeCompleteGetContexts(Results:ctypes.POINTER(CXCodeCompleteResults)) -> ctypes.c_uint64: ...
-@dll.bind
+@dll._bind
 def clang_codeCompleteGetContainerKind(Results:ctypes.POINTER(CXCodeCompleteResults), IsIncomplete:ctypes.POINTER(ctypes.c_uint32)) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_codeCompleteGetContainerUSR(Results:ctypes.POINTER(CXCodeCompleteResults)) -> CXString: ...
-@dll.bind
+@dll._bind
 def clang_codeCompleteGetObjCSelector(Results:ctypes.POINTER(CXCodeCompleteResults)) -> CXString: ...
-@dll.bind
+@dll._bind
 def clang_getClangVersion() -> CXString: ...
-@dll.bind
+@dll._bind
 def clang_toggleCrashRecovery(isEnabled:ctypes.c_uint32) -> None: ...
 CXInclusionVisitor: TypeAlias = ctypes.CFUNCTYPE(None, ctypes.c_void_p, ctypes.POINTER(CXSourceLocation), ctypes.c_uint32, ctypes.c_void_p)
-@dll.bind
+@dll._bind
 def clang_getInclusions(tu:CXTranslationUnit, visitor:CXInclusionVisitor, client_data:CXClientData) -> None: ...
 CXEvalResultKind: dict[int, str] = {(CXEval_Int:=1): 'CXEval_Int', (CXEval_Float:=2): 'CXEval_Float', (CXEval_ObjCStrLiteral:=3): 'CXEval_ObjCStrLiteral', (CXEval_StrLiteral:=4): 'CXEval_StrLiteral', (CXEval_CFStr:=5): 'CXEval_CFStr', (CXEval_Other:=6): 'CXEval_Other', (CXEval_UnExposed:=0): 'CXEval_UnExposed'}
 CXEvalResult: TypeAlias = ctypes.c_void_p
-@dll.bind
+@dll._bind
 def clang_Cursor_Evaluate(C:CXCursor) -> CXEvalResult: ...
-@dll.bind
+@dll._bind
 def clang_EvalResult_getKind(E:CXEvalResult) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_EvalResult_getAsInt(E:CXEvalResult) -> ctypes.c_int32: ...
-@dll.bind
+@dll._bind
 def clang_EvalResult_getAsLongLong(E:CXEvalResult) -> ctypes.c_int64: ...
-@dll.bind
+@dll._bind
 def clang_EvalResult_isUnsignedInt(E:CXEvalResult) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_EvalResult_getAsUnsigned(E:CXEvalResult) -> ctypes.c_uint64: ...
-@dll.bind
+@dll._bind
 def clang_EvalResult_getAsDouble(E:CXEvalResult) -> ctypes.c_double: ...
-@dll.bind
+@dll._bind
 def clang_EvalResult_getAsStr(E:CXEvalResult) -> ctypes.POINTER(ctypes.c_char): ...
-@dll.bind
+@dll._bind
 def clang_EvalResult_dispose(E:CXEvalResult) -> None: ...
 CXRemapping: TypeAlias = ctypes.c_void_p
-@dll.bind
+@dll._bind
 def clang_getRemappings(path:ctypes.POINTER(ctypes.c_char)) -> CXRemapping: ...
-@dll.bind
+@dll._bind
 def clang_getRemappingsFromFileList(filePaths:ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), numFiles:ctypes.c_uint32) -> CXRemapping: ...
-@dll.bind
+@dll._bind
 def clang_remap_getNumFiles(_0:CXRemapping) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_remap_getFilenames(_0:CXRemapping, index:ctypes.c_uint32, original:ctypes.POINTER(CXString), transformed:ctypes.POINTER(CXString)) -> None: ...
-@dll.bind
+@dll._bind
 def clang_remap_dispose(_0:CXRemapping) -> None: ...
 enum_CXVisitorResult: dict[int, str] = {(CXVisit_Break:=0): 'CXVisit_Break', (CXVisit_Continue:=1): 'CXVisit_Continue'}
 @c.record
@@ -726,15 +726,15 @@ class struct_CXCursorAndRangeVisitor(c.Struct):
 struct_CXCursorAndRangeVisitor.register_fields([('context', ctypes.c_void_p, 0), ('visit', ctypes.CFUNCTYPE(ctypes.c_uint32, ctypes.c_void_p, CXCursor, CXSourceRange), 8)])
 CXCursorAndRangeVisitor: TypeAlias = struct_CXCursorAndRangeVisitor
 CXResult: dict[int, str] = {(CXResult_Success:=0): 'CXResult_Success', (CXResult_Invalid:=1): 'CXResult_Invalid', (CXResult_VisitBreak:=2): 'CXResult_VisitBreak'}
-@dll.bind
+@dll._bind
 def clang_findReferencesInFile(cursor:CXCursor, file:CXFile, visitor:CXCursorAndRangeVisitor) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_findIncludesInFile(TU:CXTranslationUnit, file:CXFile, visitor:CXCursorAndRangeVisitor) -> ctypes.c_uint32: ...
 class struct__CXCursorAndRangeVisitorBlock(c.Struct): pass
 CXCursorAndRangeVisitorBlock: TypeAlias = ctypes.POINTER(struct__CXCursorAndRangeVisitorBlock)
-@dll.bind
+@dll._bind
 def clang_findReferencesInFileWithBlock(_0:CXCursor, _1:CXFile, _2:CXCursorAndRangeVisitorBlock) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_findIncludesInFileWithBlock(_0:CXTranslationUnit, _1:CXFile, _2:CXCursorAndRangeVisitorBlock) -> ctypes.c_uint32: ...
 CXIdxClientFile: TypeAlias = ctypes.c_void_p
 CXIdxClientEntity: TypeAlias = ctypes.c_void_p
@@ -900,116 +900,116 @@ class IndexerCallbacks(c.Struct):
   indexDeclaration: 'ctypes._CFunctionType'
   indexEntityReference: 'ctypes._CFunctionType'
 IndexerCallbacks.register_fields([('abortQuery', ctypes.CFUNCTYPE(ctypes.c_int32, CXClientData, ctypes.c_void_p), 0), ('diagnostic', ctypes.CFUNCTYPE(None, CXClientData, CXDiagnosticSet, ctypes.c_void_p), 8), ('enteredMainFile', ctypes.CFUNCTYPE(CXIdxClientFile, CXClientData, CXFile, ctypes.c_void_p), 16), ('ppIncludedFile', ctypes.CFUNCTYPE(CXIdxClientFile, CXClientData, ctypes.POINTER(CXIdxIncludedFileInfo)), 24), ('importedASTFile', ctypes.CFUNCTYPE(CXIdxClientASTFile, CXClientData, ctypes.POINTER(CXIdxImportedASTFileInfo)), 32), ('startedTranslationUnit', ctypes.CFUNCTYPE(CXIdxClientContainer, CXClientData, ctypes.c_void_p), 40), ('indexDeclaration', ctypes.CFUNCTYPE(None, CXClientData, ctypes.POINTER(CXIdxDeclInfo)), 48), ('indexEntityReference', ctypes.CFUNCTYPE(None, CXClientData, ctypes.POINTER(CXIdxEntityRefInfo)), 56)])
-@dll.bind
+@dll._bind
 def clang_index_isEntityObjCContainerKind(_0:ctypes.c_uint32) -> ctypes.c_int32: ...
-@dll.bind
+@dll._bind
 def clang_index_getObjCContainerDeclInfo(_0:ctypes.POINTER(CXIdxDeclInfo)) -> ctypes.POINTER(CXIdxObjCContainerDeclInfo): ...
-@dll.bind
+@dll._bind
 def clang_index_getObjCInterfaceDeclInfo(_0:ctypes.POINTER(CXIdxDeclInfo)) -> ctypes.POINTER(CXIdxObjCInterfaceDeclInfo): ...
-@dll.bind
+@dll._bind
 def clang_index_getObjCCategoryDeclInfo(_0:ctypes.POINTER(CXIdxDeclInfo)) -> ctypes.POINTER(CXIdxObjCCategoryDeclInfo): ...
-@dll.bind
+@dll._bind
 def clang_index_getObjCProtocolRefListInfo(_0:ctypes.POINTER(CXIdxDeclInfo)) -> ctypes.POINTER(CXIdxObjCProtocolRefListInfo): ...
-@dll.bind
+@dll._bind
 def clang_index_getObjCPropertyDeclInfo(_0:ctypes.POINTER(CXIdxDeclInfo)) -> ctypes.POINTER(CXIdxObjCPropertyDeclInfo): ...
-@dll.bind
+@dll._bind
 def clang_index_getIBOutletCollectionAttrInfo(_0:ctypes.POINTER(CXIdxAttrInfo)) -> ctypes.POINTER(CXIdxIBOutletCollectionAttrInfo): ...
-@dll.bind
+@dll._bind
 def clang_index_getCXXClassDeclInfo(_0:ctypes.POINTER(CXIdxDeclInfo)) -> ctypes.POINTER(CXIdxCXXClassDeclInfo): ...
-@dll.bind
+@dll._bind
 def clang_index_getClientContainer(_0:ctypes.POINTER(CXIdxContainerInfo)) -> CXIdxClientContainer: ...
-@dll.bind
+@dll._bind
 def clang_index_setClientContainer(_0:ctypes.POINTER(CXIdxContainerInfo), _1:CXIdxClientContainer) -> None: ...
-@dll.bind
+@dll._bind
 def clang_index_getClientEntity(_0:ctypes.POINTER(CXIdxEntityInfo)) -> CXIdxClientEntity: ...
-@dll.bind
+@dll._bind
 def clang_index_setClientEntity(_0:ctypes.POINTER(CXIdxEntityInfo), _1:CXIdxClientEntity) -> None: ...
 CXIndexAction: TypeAlias = ctypes.c_void_p
-@dll.bind
+@dll._bind
 def clang_IndexAction_create(CIdx:CXIndex) -> CXIndexAction: ...
-@dll.bind
+@dll._bind
 def clang_IndexAction_dispose(_0:CXIndexAction) -> None: ...
 CXIndexOptFlags: dict[int, str] = {(CXIndexOpt_None:=0): 'CXIndexOpt_None', (CXIndexOpt_SuppressRedundantRefs:=1): 'CXIndexOpt_SuppressRedundantRefs', (CXIndexOpt_IndexFunctionLocalSymbols:=2): 'CXIndexOpt_IndexFunctionLocalSymbols', (CXIndexOpt_IndexImplicitTemplateInstantiations:=4): 'CXIndexOpt_IndexImplicitTemplateInstantiations', (CXIndexOpt_SuppressWarnings:=8): 'CXIndexOpt_SuppressWarnings', (CXIndexOpt_SkipParsedBodiesInSession:=16): 'CXIndexOpt_SkipParsedBodiesInSession'}
-@dll.bind
+@dll._bind
 def clang_indexSourceFile(_0:CXIndexAction, client_data:CXClientData, index_callbacks:ctypes.POINTER(IndexerCallbacks), index_callbacks_size:ctypes.c_uint32, index_options:ctypes.c_uint32, source_filename:ctypes.POINTER(ctypes.c_char), command_line_args:ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), num_command_line_args:ctypes.c_int32, unsaved_files:ctypes.POINTER(struct_CXUnsavedFile), num_unsaved_files:ctypes.c_uint32, out_TU:ctypes.POINTER(CXTranslationUnit), TU_options:ctypes.c_uint32) -> ctypes.c_int32: ...
-@dll.bind
+@dll._bind
 def clang_indexSourceFileFullArgv(_0:CXIndexAction, client_data:CXClientData, index_callbacks:ctypes.POINTER(IndexerCallbacks), index_callbacks_size:ctypes.c_uint32, index_options:ctypes.c_uint32, source_filename:ctypes.POINTER(ctypes.c_char), command_line_args:ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), num_command_line_args:ctypes.c_int32, unsaved_files:ctypes.POINTER(struct_CXUnsavedFile), num_unsaved_files:ctypes.c_uint32, out_TU:ctypes.POINTER(CXTranslationUnit), TU_options:ctypes.c_uint32) -> ctypes.c_int32: ...
-@dll.bind
+@dll._bind
 def clang_indexTranslationUnit(_0:CXIndexAction, client_data:CXClientData, index_callbacks:ctypes.POINTER(IndexerCallbacks), index_callbacks_size:ctypes.c_uint32, index_options:ctypes.c_uint32, _5:CXTranslationUnit) -> ctypes.c_int32: ...
-@dll.bind
+@dll._bind
 def clang_indexLoc_getFileLocation(loc:CXIdxLoc, indexFile:ctypes.POINTER(CXIdxClientFile), file:ctypes.POINTER(CXFile), line:ctypes.POINTER(ctypes.c_uint32), column:ctypes.POINTER(ctypes.c_uint32), offset:ctypes.POINTER(ctypes.c_uint32)) -> None: ...
-@dll.bind
+@dll._bind
 def clang_indexLoc_getCXSourceLocation(loc:CXIdxLoc) -> CXSourceLocation: ...
 CXFieldVisitor: TypeAlias = ctypes.CFUNCTYPE(ctypes.c_uint32, CXCursor, ctypes.c_void_p)
-@dll.bind
+@dll._bind
 def clang_Type_visitFields(T:CXType, visitor:CXFieldVisitor, client_data:CXClientData) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_visitCXXBaseClasses(T:CXType, visitor:CXFieldVisitor, client_data:CXClientData) -> ctypes.c_uint32: ...
 enum_CXBinaryOperatorKind: dict[int, str] = {(CXBinaryOperator_Invalid:=0): 'CXBinaryOperator_Invalid', (CXBinaryOperator_PtrMemD:=1): 'CXBinaryOperator_PtrMemD', (CXBinaryOperator_PtrMemI:=2): 'CXBinaryOperator_PtrMemI', (CXBinaryOperator_Mul:=3): 'CXBinaryOperator_Mul', (CXBinaryOperator_Div:=4): 'CXBinaryOperator_Div', (CXBinaryOperator_Rem:=5): 'CXBinaryOperator_Rem', (CXBinaryOperator_Add:=6): 'CXBinaryOperator_Add', (CXBinaryOperator_Sub:=7): 'CXBinaryOperator_Sub', (CXBinaryOperator_Shl:=8): 'CXBinaryOperator_Shl', (CXBinaryOperator_Shr:=9): 'CXBinaryOperator_Shr', (CXBinaryOperator_Cmp:=10): 'CXBinaryOperator_Cmp', (CXBinaryOperator_LT:=11): 'CXBinaryOperator_LT', (CXBinaryOperator_GT:=12): 'CXBinaryOperator_GT', (CXBinaryOperator_LE:=13): 'CXBinaryOperator_LE', (CXBinaryOperator_GE:=14): 'CXBinaryOperator_GE', (CXBinaryOperator_EQ:=15): 'CXBinaryOperator_EQ', (CXBinaryOperator_NE:=16): 'CXBinaryOperator_NE', (CXBinaryOperator_And:=17): 'CXBinaryOperator_And', (CXBinaryOperator_Xor:=18): 'CXBinaryOperator_Xor', (CXBinaryOperator_Or:=19): 'CXBinaryOperator_Or', (CXBinaryOperator_LAnd:=20): 'CXBinaryOperator_LAnd', (CXBinaryOperator_LOr:=21): 'CXBinaryOperator_LOr', (CXBinaryOperator_Assign:=22): 'CXBinaryOperator_Assign', (CXBinaryOperator_MulAssign:=23): 'CXBinaryOperator_MulAssign', (CXBinaryOperator_DivAssign:=24): 'CXBinaryOperator_DivAssign', (CXBinaryOperator_RemAssign:=25): 'CXBinaryOperator_RemAssign', (CXBinaryOperator_AddAssign:=26): 'CXBinaryOperator_AddAssign', (CXBinaryOperator_SubAssign:=27): 'CXBinaryOperator_SubAssign', (CXBinaryOperator_ShlAssign:=28): 'CXBinaryOperator_ShlAssign', (CXBinaryOperator_ShrAssign:=29): 'CXBinaryOperator_ShrAssign', (CXBinaryOperator_AndAssign:=30): 'CXBinaryOperator_AndAssign', (CXBinaryOperator_XorAssign:=31): 'CXBinaryOperator_XorAssign', (CXBinaryOperator_OrAssign:=32): 'CXBinaryOperator_OrAssign', (CXBinaryOperator_Comma:=33): 'CXBinaryOperator_Comma'}
-@dll.bind
+@dll._bind
 def clang_getBinaryOperatorKindSpelling(kind:ctypes.c_uint32) -> CXString: ...
-@dll.bind
+@dll._bind
 def clang_getCursorBinaryOperatorKind(cursor:CXCursor) -> ctypes.c_uint32: ...
 enum_CXUnaryOperatorKind: dict[int, str] = {(CXUnaryOperator_Invalid:=0): 'CXUnaryOperator_Invalid', (CXUnaryOperator_PostInc:=1): 'CXUnaryOperator_PostInc', (CXUnaryOperator_PostDec:=2): 'CXUnaryOperator_PostDec', (CXUnaryOperator_PreInc:=3): 'CXUnaryOperator_PreInc', (CXUnaryOperator_PreDec:=4): 'CXUnaryOperator_PreDec', (CXUnaryOperator_AddrOf:=5): 'CXUnaryOperator_AddrOf', (CXUnaryOperator_Deref:=6): 'CXUnaryOperator_Deref', (CXUnaryOperator_Plus:=7): 'CXUnaryOperator_Plus', (CXUnaryOperator_Minus:=8): 'CXUnaryOperator_Minus', (CXUnaryOperator_Not:=9): 'CXUnaryOperator_Not', (CXUnaryOperator_LNot:=10): 'CXUnaryOperator_LNot', (CXUnaryOperator_Real:=11): 'CXUnaryOperator_Real', (CXUnaryOperator_Imag:=12): 'CXUnaryOperator_Imag', (CXUnaryOperator_Extension:=13): 'CXUnaryOperator_Extension', (CXUnaryOperator_Coawait:=14): 'CXUnaryOperator_Coawait'}
-@dll.bind
+@dll._bind
 def clang_getUnaryOperatorKindSpelling(kind:ctypes.c_uint32) -> CXString: ...
-@dll.bind
+@dll._bind
 def clang_getCursorUnaryOperatorKind(cursor:CXCursor) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_getCString(string:CXString) -> ctypes.POINTER(ctypes.c_char): ...
-@dll.bind
+@dll._bind
 def clang_disposeString(string:CXString) -> None: ...
-@dll.bind
+@dll._bind
 def clang_disposeStringSet(set:ctypes.POINTER(CXStringSet)) -> None: ...
-@dll.bind
+@dll._bind
 def clang_getNullLocation() -> CXSourceLocation: ...
-@dll.bind
+@dll._bind
 def clang_equalLocations(loc1:CXSourceLocation, loc2:CXSourceLocation) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_isBeforeInTranslationUnit(loc1:CXSourceLocation, loc2:CXSourceLocation) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_Location_isInSystemHeader(location:CXSourceLocation) -> ctypes.c_int32: ...
-@dll.bind
+@dll._bind
 def clang_Location_isFromMainFile(location:CXSourceLocation) -> ctypes.c_int32: ...
-@dll.bind
+@dll._bind
 def clang_getNullRange() -> CXSourceRange: ...
-@dll.bind
+@dll._bind
 def clang_getRange(begin:CXSourceLocation, end:CXSourceLocation) -> CXSourceRange: ...
-@dll.bind
+@dll._bind
 def clang_equalRanges(range1:CXSourceRange, range2:CXSourceRange) -> ctypes.c_uint32: ...
-@dll.bind
+@dll._bind
 def clang_Range_isNull(range:CXSourceRange) -> ctypes.c_int32: ...
-@dll.bind
+@dll._bind
 def clang_getExpansionLocation(location:CXSourceLocation, file:ctypes.POINTER(CXFile), line:ctypes.POINTER(ctypes.c_uint32), column:ctypes.POINTER(ctypes.c_uint32), offset:ctypes.POINTER(ctypes.c_uint32)) -> None: ...
-@dll.bind
+@dll._bind
 def clang_getPresumedLocation(location:CXSourceLocation, filename:ctypes.POINTER(CXString), line:ctypes.POINTER(ctypes.c_uint32), column:ctypes.POINTER(ctypes.c_uint32)) -> None: ...
-@dll.bind
+@dll._bind
 def clang_getInstantiationLocation(location:CXSourceLocation, file:ctypes.POINTER(CXFile), line:ctypes.POINTER(ctypes.c_uint32), column:ctypes.POINTER(ctypes.c_uint32), offset:ctypes.POINTER(ctypes.c_uint32)) -> None: ...
-@dll.bind
+@dll._bind
 def clang_getSpellingLocation(location:CXSourceLocation, file:ctypes.POINTER(CXFile), line:ctypes.POINTER(ctypes.c_uint32), column:ctypes.POINTER(ctypes.c_uint32), offset:ctypes.POINTER(ctypes.c_uint32)) -> None: ...
-@dll.bind
+@dll._bind
 def clang_getFileLocation(location:CXSourceLocation, file:ctypes.POINTER(CXFile), line:ctypes.POINTER(ctypes.c_uint32), column:ctypes.POINTER(ctypes.c_uint32), offset:ctypes.POINTER(ctypes.c_uint32)) -> None: ...
-@dll.bind
+@dll._bind
 def clang_getRangeStart(range:CXSourceRange) -> CXSourceLocation: ...
-@dll.bind
+@dll._bind
 def clang_getRangeEnd(range:CXSourceRange) -> CXSourceLocation: ...
-@dll.bind
+@dll._bind
 def clang_disposeSourceRangeList(ranges:ctypes.POINTER(CXSourceRangeList)) -> None: ...
-@dll.bind
+@dll._bind
 def clang_getFileName(SFile:CXFile) -> CXString: ...
 time_t: TypeAlias = ctypes.c_int64
-@dll.bind
+@dll._bind
 def clang_getFileTime(SFile:CXFile) -> time_t: ...
 @c.record
 class CXFileUniqueID(c.Struct):
   SIZE = 24
   data: 'list[int]'
 CXFileUniqueID.register_fields([('data', (ctypes.c_uint64 * 3), 0)])
-@dll.bind
+@dll._bind
 def clang_getFileUniqueID(file:CXFile, outID:ctypes.POINTER(CXFileUniqueID)) -> ctypes.c_int32: ...
-@dll.bind
+@dll._bind
 def clang_File_isEqual(file1:CXFile, file2:CXFile) -> ctypes.c_int32: ...
-@dll.bind
+@dll._bind
 def clang_File_tryGetRealPathName(file:CXFile) -> CXString: ...
 CINDEX_VERSION_MAJOR = 0 # type: ignore
 CINDEX_VERSION_MINOR = 64 # type: ignore

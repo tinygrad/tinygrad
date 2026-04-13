@@ -177,7 +177,7 @@ class DLL(ctypes.CDLL):
         if DEBUG >= 3: print(f"loading {nm} failed: {e}")
     elif DEBUG >= 3: print(f"loading {nm} failed: not found on system")
 
-  def bind(self, fn):
+  def _bind(self, fn):
     restype, argtypes = del_an((hints:=get_type_hints(fn, include_extras=True)).pop('return', None)), tuple(del_an(h) for h in hints.values())
     cfunc = None
     def wrapper(*args):
@@ -185,6 +185,16 @@ class DLL(ctypes.CDLL):
       if cfunc is None: (cfunc:=getattr(self, fn.__name__)).argtypes, cfunc.restype = argtypes, restype
       return cfunc(*args)
     return wrapper
+
+  def bind(self, restype, *argtypes):
+    def wrap(fn):
+      cfunc = None
+      def wrapper(*args):
+        nonlocal cfunc
+        if cfunc is None: (cfunc:=getattr(self, fn.__name__)).argtypes, cfunc.restype = argtypes, restype
+        return cfunc(*args)
+      return wrapper
+    return wrap
 
   def __getattr__(self, nm):
     if self.nm not in self._loaded_:
