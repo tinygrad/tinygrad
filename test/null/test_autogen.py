@@ -97,7 +97,7 @@ class TestC(unittest.TestCase):
     '''
     dll = self.compile(src)
     b = Baz(0xAA000, 0x00BB0, 0, 1)
-    @dll.bind
+    @dll.bind(ctypes.c_int, Baz)
     def test(x:Baz) -> ctypes.c_int: ...
     self.assertEqual(test(b), b.a + b.b + b.c + b.d)
 
@@ -124,7 +124,7 @@ class TestC(unittest.TestCase):
       }
     '''
     dll = self.compile(src)
-    @dll.bind
+    @dll.bind(ctypes.c_int, Baz)
     def test(x:Baz) -> ctypes.c_int: ...
     for i in range(8): self.assertEqual(test(Baz(*(j==i for j in range(8)))), i==2)
 
@@ -150,7 +150,7 @@ class TestC(unittest.TestCase):
       }
     '''
     dll = self.compile(src)
-    @dll.bind
+    @dll.bind(Baz, Baz)
     def test(x:Baz) -> Baz: ...
     self.assertEqual(bytes(test(Baz(*range(8)))), struct.pack("8i", *range(7, -1, -1)))
 
@@ -168,7 +168,7 @@ class TestC(unittest.TestCase):
       }
     """
     dll = self.compile(src)
-    @dll.bind
+    @dll.bind(ctypes.c_int, Item * 3)
     def test(arr:(Item * 3)) -> ctypes.c_int: ...
     self.assertEqual(test((Item * 3)(Item(10), Item(20), Item(30))), 60)
 
@@ -184,7 +184,7 @@ class TestC(unittest.TestCase):
       }
     """
     dll = self.compile(src)
-    @dll.bind
+    @dll.bind(Row, Row)
     def test(x:Row) -> Row: ...
     r = test(Row((ctypes.c_int * 3)(10, 20, 30)))
     self.assertIsInstance(r, Row)
@@ -204,7 +204,7 @@ class TestC(unittest.TestCase):
       }
     """
     dll = self.compile(src)
-    @dll.bind
+    @dll.bind(ctypes.c_int, Row)
     def test(x:Row) -> ctypes.c_int: ...
     assert test(Row((ctypes.c_int * 3)(10, 20, 30))) == 60
 
@@ -226,7 +226,7 @@ class TestC(unittest.TestCase):
       }
     """
     dll = self.compile(src)
-    @dll.bind
+    @dll.bind(Outer, Outer)
     def test(x:Outer) -> Outer: ...
     o = test(Outer(Inner(10), 20))
     self.assertEqual(o.inner.a, 20)
@@ -248,7 +248,7 @@ class TestC(unittest.TestCase):
       }
     """
     dll = self.compile(src)
-    @dll.bind
+    @dll.bind(ctypes.POINTER(Foo), ctypes.POINTER(Foo))
     def test(f:ctypes.POINTER(Foo)) -> ctypes.POINTER(Foo): ...
     inp = ctypes.pointer(Foo(10, 20))
     out = test(inp)
@@ -278,7 +278,7 @@ class TestC(unittest.TestCase):
       }
     """
     dll = self.compile(src)
-    @dll.bind
+    @dll.bind(ctypes.c_int, ctypes.POINTER(Inner))
     def test(p:POINTER[Inner]) -> ctypes.c_int: ...
 
     inner = Inner(value=42, flag=10)
@@ -309,9 +309,9 @@ class TestC(unittest.TestCase):
       int mask_end(struct mask_ctx *m) { return m->value + m->initialized; }
     """
     dll = self.compile(src)
-    @dll.bind
+    @dll.bind(None, ctypes.POINTER(MaskContext), ctypes.c_int)
     def mask_begin(m:POINTER[MaskContext], val:ctypes.c_int) -> None: ...
-    @dll.bind
+    @dll.bind(ctypes.c_int, ctypes.POINTER(MaskContext))
     def mask_end(m:POINTER[MaskContext]) -> ctypes.c_int: ...
 
     # When MaskContext() is created inline, it gets garbage collected after the pointer
