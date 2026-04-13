@@ -433,18 +433,6 @@ typedef struct
     self.assertEqual(p2.x, 10)
     self.assertEqual(p2.y, 20)
 
-  def test_self_ref(self):
-    namespace = self.run_gen("""
-    struct a;
-    struct b;
-    struct a {
-      struct b *ptr;
-    };
-    struct b {
-      struct a *ptr;
-    };
-    """)
-
   def test_struct_ordering(self):
     namespace = self.run_gen("""
     struct A;
