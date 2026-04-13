@@ -1,6 +1,6 @@
 # mixins add syntactic sugar to Tensor and UOp
 from __future__ import annotations
-from typing import TYPE_CHECKING, Self, Sequence, SupportsIndex, cast
+from typing import TYPE_CHECKING, Self, Sequence
 from tinygrad.uop import Ops
 from tinygrad.helpers import prod, argfix, argsort, flatten, dedup, make_tuple, ceildiv, round_up, all_int
 from tinygrad.uop.ops import resolve, smax, _align_left, _broadcast_shape
@@ -56,9 +56,9 @@ class MovementMixin:
       raise IndexError(f"{dim=} out of range {[-max(1, total), max(1, total) - 1]}")
     return dim + total if dim < 0 else dim
 
-  def _parse_view_index(self, index, size) -> dict:
+  def _parse_view_index(self, index, size: sint) -> dict:
     # parses a single slice/int/None/sint index into {boundary, stride, size, collapse_dim}
-    from tinygrad.uop.ops import UOp  # noqa: deferred to avoid circular import
+    from tinygrad.uop.ops import UOp, sint
     match index:
       case None: return {"size":1, "boundary":(0,1), "stride":1, "collapse_dim":False}
       case int() | UOp(): # sint
@@ -67,13 +67,14 @@ class MovementMixin:
         b = index if resolve(index >= 0, False) else index + size
         return {"size":size, "boundary":(b, b+1), "stride":1, "collapse_dim":True}
       case slice():
-        if not all(s is None or isinstance(s, (int, UOp)) for s in (index.start, index.stop, index.step)): raise TypeError(f"slice {index=} is not supported")  # noqa: E501
+        if not all(s is None or isinstance(s, sint) for s in (index.start, index.stop, index.step)):
+          raise TypeError(f"slice {index=} is not supported")
         if resolve(index.step == 0, False): raise ValueError(f"{index=} cannot have 0 as step")
         start, stop = 0 if index.start is None else index.start, size if index.stop is None else index.stop
         step = 1 if index.step is None else index.step
-        if all(isinstance(s, int) for s in (start, stop, step)):
+        if all_int((start, stop, step)):
           # handle int slicing (resolve negative bounds, clamp, stride)
-          *bound, stride = index.indices(cast(SupportsIndex, size.vmax if isinstance(size, UOp) else size))
+          *bound, stride = index.indices(int(size.vmax) if isinstance(size, UOp) else size)
           bound = [0, 0] if stride * (bound[1] - bound[0]) < 0 else ([bound[1]+1, bound[0]+1] if stride < 0 else bound)
           return {"size":ceildiv(bound[1]-bound[0], abs(stride)), "boundary":tuple(bound), "stride":stride, "collapse_dim":False}
         if resolve(step == 1, False) and resolve((stop-start) >= 0, False):
