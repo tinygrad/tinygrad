@@ -4,8 +4,8 @@ from dataclasses import dataclass, replace, field
 from tinygrad.helpers import all_same, colored, DEBUG, GlobalCounters, ansilen, NOOPT, all_int, Metadata, TRACEMETA, TracingKey
 from tinygrad.helpers import DEVECTORIZE, time_to_str, VALIDATE_WITH_CPU, cpu_profile, PROFILE, ProfilePointEvent, cpu_events, prod, unwrap
 from tinygrad.helpers import EMULATED_DTYPES
-from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer
-from tinygrad.device import Device, Buffer
+from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer, buffers, graph_rewrite
+from tinygrad.device import Device, Buffer, MultiBuffer
 from tinygrad.renderer import ProgramSpec, Estimates
 from tinygrad.codegen import get_program
 
@@ -216,3 +216,62 @@ def run_schedule(schedule:list[ExecItem], var_vals:dict[str, int]|None=None, do_
       np.testing.assert_allclose(bufs[0].numpy(), nb[0].numpy(), rtol=1e-3, atol=1e-3)
     else:
       ei.run(var_vals, do_update_stats=do_update_stats)
+
+# **************** run_linear: execute LINEAR UOp directly ****************
+
+def _expand_multibuffer(linear: UOp) -> UOp:
+  """Expand MultiBuffer CALLs into per-device CALLs using MSELECT."""
+  new_src = []
+  for si in linear.src:
+    buf_uops = [b for b in si.src[1:] if b.op is not Ops.BIND]
+    bind_uops = [b for b in si.src[1:] if b.op is Ops.BIND]
+    if not any(isinstance(b.buffer, MultiBuffer) for b in buf_uops):
+      new_src.append(si)
+      continue
+    assert all(isinstance(b.buffer, MultiBuffer) for b in buf_uops), "kernel must all be multibuffer"
+    ast, n_devs = si.src[0], len(buf_uops[0].buffer.bufs)
+    dnums = [x for x in ast.variables() if x.expr == '_device_num']
+    for j in range(n_devs):
+      selected = [UOp(Ops.MSELECT, b.dtype, (b,), j) for b in buf_uops]
+      fixedvars = ((dnums[0].expr, j),) if dnums else ()
+      new_src.append(ast.call(*selected, *bind_uops, metadata=si.arg.metadata, fixedvars=fixedvars))
+  return linear.replace(src=tuple(new_src))
+
+def _exec_view(ctx, si, ast):
+  bufs = [b.buffer for b in si.src[1:] if b.op is not Ops.BIND]
+  buffers[si.src[1]] = bufs[1].view(si.src[1].arg, ast.dtype, ast.arg[1]*bufs[1].dtype.itemsize)
+  assert bufs[0]._base is not None and bufs[0]._base == bufs[1].base
+
+def _exec_copy(ctx, si, ast):
+  var_vals, do_update_stats = ctx
+  bufs = [b.buffer for b in si.src[1:] if b.op is not Ops.BIND]
+  dest, src = bufs[0].ensure_allocated(), bufs[1].ensure_allocated()
+  st = time.perf_counter()
+  if hasattr(alc:=Device[dest.device].allocator, '_transfer') and alc.supports_transfer and dest.device.split(":")[0] == src.device.split(":")[0]:
+    alc._transfer(dest._buf, src._buf, dest.nbytes, src_dev=src.allocator.dev, dest_dev=alc.dev)
+  else:
+    dest.copyin(src.as_memoryview(allow_zero_copy=True))
+  Device[dest.device].synchronize()
+  if do_update_stats:
+    update_stats(f"copy {dest.nbytes:8d}, {dest.device[:7]:>7s} <- {src.device[:7]:7s}", dest.device,
+                 Estimates(lds=dest.nbytes, mem=dest.nbytes), var_vals, time.perf_counter() - st, 2, metadata=si.arg.metadata)
+
+def _exec_kernel(ctx, si, ast):
+  var_vals, do_update_stats = ctx
+  if si.arg.fixedvars: var_vals = {**var_vals, **dict(si.arg.fixedvars)}
+  bufs = [b.buffer for b in si.src[1:] if b.op is not Ops.BIND]
+  prg = get_runner(bufs[0].device, ast)
+  et = prg([bufs[i].ensure_allocated() for i in prg.p.globals], var_vals, wait=DEBUG >= 2)
+  if do_update_stats:
+    update_stats(prg.display_name, prg.device, prg.estimates, var_vals, et, len(prg.p.globals), metadata=si.arg.metadata, first_run=prg.first_run)
+    prg.first_run = False
+
+pm_exec = PatternMatcher([
+  (UPat(Ops.CALL, src=(UPat(Ops.BUFFER_VIEW, name="ast"),), name="si", allow_any_len=True), _exec_view),
+  (UPat(Ops.CALL, src=(UPat(Ops.COPY, name="ast"),), name="si", allow_any_len=True), _exec_copy),
+  (UPat(Ops.CALL, src=(UPat((Ops.SINK, Ops.PROGRAM), name="ast"),), name="si", allow_any_len=True), _exec_kernel),
+])
+
+def run_linear(linear:UOp, var_vals:dict[str, int]|None=None, do_update_stats=True):
+  linear = _expand_multibuffer(linear)
+  graph_rewrite(linear, pm_exec, ctx=(var_vals or {}, do_update_stats), bottom_up=True)

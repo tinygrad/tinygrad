@@ -142,17 +142,14 @@ pm_schedule = PatternMatcher([
   (UPat(Ops.SINK, name="function"), lower_sink_to_linear),
 ])
 
-@track_rewrites(lambda _,ret: f"Schedule {pluralize('Kernel', len(ret[0]))}")
-def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[list[ExecItem], dict[str, int]]:
-  # big_sink srcs are all the Tensors
+@track_rewrites(lambda _,ret: f"Schedule {pluralize('Kernel', len(ret[0].src))}")
+def create_linear_with_vars(big_sink:UOp) -> tuple[UOp, dict[str, int]]:
+  """Create LINEAR UOp and var_vals from a sink."""
   linear_call = graph_rewrite(big_sink, pm_schedule, name="schedule to linear", enter_calls=True)
-
-  # this recursively resolves the linear_call and allocates buffers
   linear = graph_rewrite(linear_call, pm_resolve_linear_call, name="resolve linear call")
 
-  # vars used in the schedule
+  # extract var_vals from BINDs
   used_vars = set().union(*[{v.expr for v in si.src[0].variables()} for si in linear.src])
-  # get var_vals
   var_vals: dict[str, int] = {}
   for b in big_sink.src[1:]:
     if b.op is Ops.BIND:
@@ -162,14 +159,15 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[list[ExecItem], di
       if var_vals.get(nm, val) != val: raise RuntimeError(f"bind mismatch on {nm}, {var_vals[nm]} != {val}")
       var_vals[nm] = val
 
-  # jit captures this schedule, no need to execute.
+  # jit captures this schedule, return empty LINEAR to skip execution
   if len(capturing) and CAPTURING:
     capturing[0].add_linear(linear, var_vals)
-    return [], var_vals
+    return UOp(Ops.LINEAR, src=()), var_vals
 
   held_bufs = ({b for b in linear_call.src[1:] if b.op is Ops.BUFFER} if linear_call.op is Ops.CALL else set())
-  linear = memory_plan_rewrite(linear, held_bufs)
+  return memory_plan_rewrite(linear, held_bufs), var_vals
 
-  # convert LINEAR to ExecItems
-  schedule: list[ExecItem] = linear_to_schedule(linear)
-  return schedule, var_vals
+def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[list[ExecItem], dict[str, int]]:
+  """Create schedule (list[ExecItem]) and var_vals from a sink. Wraps create_linear_with_vars."""
+  linear, var_vals = create_linear_with_vars(big_sink)
+  return linear_to_schedule(linear), var_vals
