@@ -1,8 +1,8 @@
 # mixins add syntactic sugar to Tensor and UOp
 from __future__ import annotations
-from typing import TYPE_CHECKING, Self, Sequence
+from typing import TYPE_CHECKING, Self, Sequence, SupportsIndex, cast
 from tinygrad.uop import Ops
-from tinygrad.helpers import prod, argfix, argsort, flatten, dedup, make_tuple, ceildiv
+from tinygrad.helpers import prod, argfix, argsort, flatten, dedup, make_tuple, ceildiv, round_up, all_int
 from tinygrad.uop.ops import resolve, smax, _align_left, _broadcast_shape
 
 if TYPE_CHECKING:
@@ -55,6 +55,62 @@ class MovementMixin:
     if not -max(1, total) <= dim <= max(1, total) - 1:
       raise IndexError(f"{dim=} out of range {[-max(1, total), max(1, total) - 1]}")
     return dim + total if dim < 0 else dim
+
+  def _parse_view_index(self, index, size) -> dict:
+    # parses a single slice/int/None/sint index into {boundary, stride, size, collapse_dim}
+    from tinygrad.uop.ops import UOp  # noqa: deferred to avoid circular import
+    boundary, stride, collapse_dim = [0, size], 1, False
+    match index:
+      case slice():
+        if not all(s is None or isinstance(s, (int, UOp)) for s in (index.start, index.stop, index.step)):
+          raise TypeError(f"slice {index=} is not supported")
+        if resolve(index.step == 0, False): raise ValueError(f"{index=} cannot have 0 as step")
+        start, stop = 0 if index.start is None else index.start, size if index.stop is None else index.stop
+        step = 1 if index.step is None else index.step
+        boundary, stride = [start, stop], step
+        if all(isinstance(s, int) for s in (start, stop, step)):
+          # handle int slicing (resolve negative bounds, clamp, stride)
+          if isinstance(size, UOp): size = int(size.vmax)
+          *boundary, stride = index.indices(cast(SupportsIndex, size))
+          if stride * (boundary[1] - boundary[0]) < 0: boundary = [0, 0]
+          elif stride < 0: boundary = [boundary[1] + 1, boundary[0] + 1]
+          size = ceildiv(boundary[1] - boundary[0], abs(stride))
+        elif resolve(step == 1, False) and resolve((stop - start) >= 0, False): size = stop - start
+        else: raise TypeError(f"slice {index=} is not supported")
+      case None: pass # do nothing
+      case int() | UOp(): # sint
+        if resolve(index >= size, False) or resolve(index < -size, False): raise IndexError(f"{index=} is out of bounds with {size=}")
+        # TODO: is this right for (negative) symbolic?
+        boundary = [index, index + 1] if resolve(index >= 0, False) else [index + size, index + size + 1]
+        collapse_dim = True
+      case _: raise IndexError(f"{type(index).__name__} indexing is not supported")
+    return {"size":size, "boundary":tuple(boundary), "stride":stride, "collapse_dim":collapse_dim}
+
+  def _apply_view_ops(self, mops:list) -> Self:
+    # applies shrink + flip + stride from a list of parsed view indices
+    # flip negative strides
+    x = self.shrink(tuple(m["boundary"] for m in mops)).flip(tuple(i for i, m in enumerate(mops) if m["stride"] < 0))
+    strides = tuple(abs(m["stride"]) for m in mops)
+    # apply stride
+    if any(st != 1 for st in strides):
+      if not all_int(x.shape): raise RuntimeError("symbolic shape not supported")
+      x = x.pad_to(tuple(round_up(s, st) for s, st in zip(x.shape, strides)))
+      x = x.reshape(tuple(flatten((s // st, st) for s, st in zip(x.shape, strides))))
+      x = x.shrink(tuple(flatten(((0, s), (0, 1)) for s in x.shape[::2]))).reshape(x.shape[::2])
+    return x
+
+  def __getitem__(self, indices) -> Self:
+    # wrap single index into a list
+    if (isinstance(indices, list) and all_int(indices)) or not isinstance(indices, (tuple, list)): indices = [indices]
+    indices = self._normalize_indices(list(indices))
+    indices_parsed, dim = [], 0
+    for index in indices:
+      indices_parsed.append({**self._parse_view_index(index, 1 if index is None else self.shape[dim]), "index":index})
+      if index is not None: dim += 1
+    mops = [p for p in indices_parsed if p["index"] is not None]
+    x = self._apply_view_ops(mops) if mops else self
+    # dim injection from None (size 1) and dim collapse from int indices
+    return x.reshape(tuple(p["size"] for p in indices_parsed if not p["collapse_dim"]))
 
   def _broadcast_to(self, new_shape: tuple[sint, ...]) -> Self:
     if self.shape == new_shape:

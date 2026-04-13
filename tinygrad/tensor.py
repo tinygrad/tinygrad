@@ -2,7 +2,7 @@
 from __future__ import annotations
 import time, math, itertools, functools, struct, sys, inspect, pathlib, string, hashlib, weakref
 from contextlib import ContextDecorator
-from typing import Any, Callable, ClassVar, Sequence, cast, get_args, Literal, SupportsIndex, ParamSpec, TypeVar, Generic, TYPE_CHECKING
+from typing import Any, Callable, ClassVar, Sequence, cast, get_args, Literal, ParamSpec, TypeVar, Generic, TYPE_CHECKING
 if TYPE_CHECKING: import numpy
 from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_float, least_upper_dtype, to_dtype, truncate
 from tinygrad.dtype import _from_np_dtype, _to_np_dtype, PyConst, Invalid, InvalidType
@@ -1128,66 +1128,37 @@ class Tensor(OpMixin):
     raise NotImplementedError(f"{mode=} is not supported")
 
   def _getitem(self, indices, v: Tensor|None = None) -> Tensor:
+    # view-only indexing (no Tensor/list indices, no setitem) is handled by MovementMixin.__getitem__
+    view_types = (type(None), type(Ellipsis), slice, int, UOp)
+    if v is None and all(isinstance(idx, view_types) for idx in (indices if isinstance(indices, tuple) else (indices,))):
+      return super().__getitem__(indices)
     # wrap single index into a list
     if (isinstance(indices, list) and all_int(indices)) or not isinstance(indices, (tuple, list)): indices = [indices]
-    x, indices = self, self._normalize_indices(list(indices))
+    indices = self._normalize_indices(list(indices))
 
+    # parse each index: Tensor/list handled here, view indices delegated to mixin parser
     indices_parsed, dim = [], 0
     for index in indices:
       size = 1 if index is None else self.shape[dim]
-      boundary, stride = [0, size], 1  # defaults
       match index:
         case Tensor():
           if not dtypes.is_int(index.dtype): raise IndexError(f"index dtype {index.dtype} is not supported")
           assert isinstance(size, int), "size must be an int"
           index = (index < 0).where(index+size, index).to(self.device)  # treat negative index values
+          parsed = {"size":size, "boundary":(0, size), "stride":1, "collapse_dim":False}
         case list() | tuple():
           if not dtypes.is_int((ti:=Tensor(index)).dtype): raise IndexError(f"{index=} contains non-int element")
           index = Tensor([i+size if i<0 else i for i in fully_flatten(index)], self.device, requires_grad=False).reshape(ti.shape)
-        case int() | UOp(): # sint
-          if index >= size or index < -size: raise IndexError(f"{index=} is out of bounds with {size=}")
-          # TODO: is this right for (negative) symbolic?
-          boundary = [index, index+1] if index >= 0 else [index+size, index+size+1]
-        case slice():
-          if index.step == 0: raise ValueError(f"{index=} cannot have 0 as step")
-          start, stop = 0 if index.start is None else index.start, size if index.stop is None else index.stop
-          step = 1 if index.step is None else index.step
-          boundary, stride = [start, stop], step
-          if all(isinstance(s, int) for s in (start,stop,step)):
-            # handle int slicing
-            # if we're slicing a symbolic dimension into a int dimension, we can slice until the bind size
-            # TODO: right now this is using vmax instead of the bind size because jit doesnt update the bound value of the returned tensor
-            if isinstance(size, UOp): size = int(size.vmax)
-            *boundary, stride = index.indices(cast(SupportsIndex, size))
-            if stride * (boundary[1] - boundary[0]) < 0: boundary = [0, 0]
-            elif stride < 0: boundary = [boundary[1] + 1, boundary[0] + 1]
-            # update size for slice
-            size = ceildiv((boundary[1] - boundary[0]), abs(stride))
-          elif resolve(step == 1, False) and all(isinstance(s,sint) for s in (start, stop)) and resolve((stop-start) > 0, False):
-            # simple symbolic slice
-            size = cast(sint, cast(UOp, (stop - start)).ssimplify())
-          else: raise TypeError(f"slice {index=} is not supported")
-        case None: pass # do nothing
-        case _: raise IndexError(f"{type(index).__name__} indexing is not supported")
-      indices_parsed.append({"index":index, "size":size, "boundary":tuple(boundary), "stride":stride})
+          parsed = {"size":size, "boundary":(0, size), "stride":1, "collapse_dim":False}
+        case _: parsed = self._parse_view_index(index, size)
+      indices_parsed.append({**parsed, "index":index})
       if index is not None: dim += 1
 
-    # movement op indexing
-    if mops := [i for i in indices_parsed if i['index'] is not None]:
-      # flip negative strides
-      x = x.shrink(tuple(m['boundary'] for m in mops)).flip(tuple(i for i, m in enumerate(mops) if m['stride'] < 0))
-      strides = tuple(abs(m['stride']) for m in mops)
-      # apply stride
-      if any(st != 1 for st in strides):
-        # pad shape to multiple of stride
-        if not all_int(x.shape): raise RuntimeError("symbolic shape not supported")
-        x = x.pad_to(tuple(round_up(s, st) for s, st in zip(x.shape, strides)))
-        x = x.reshape(tuple(flatten((s // st, st) for s, st in zip(x.shape, strides))))
-        x = x.shrink(tuple(flatten(((0, s), (0, 1)) for s in x.shape[::2]))).reshape(x.shape[::2])
-
-    # dim injection from None (size 1) and dim collapse by skipping sint dims
-    x_dims = [p for p in indices_parsed if not isinstance(p['index'], sint)]
-    x = x.reshape(tuple(p['size'] for p in x_dims))
+    # apply view ops then dim injection (None) and collapse (int)
+    mops = [p for p in indices_parsed if p["index"] is not None]
+    x = self._apply_view_ops(mops) if mops else self
+    x_dims = [p for p in indices_parsed if not p["collapse_dim"]]
+    x = x.reshape(tuple(p["size"] for p in x_dims))
 
     # tensor indexing
     if tops := [(d, p) for d, p in enumerate(x_dims) if isinstance(p['index'], Tensor)]:
