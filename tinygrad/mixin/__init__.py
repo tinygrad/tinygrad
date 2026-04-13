@@ -1,15 +1,26 @@
 import functools
 from typing import Self, Sequence, Literal, get_args
 from tinygrad.mixin.elementwise import ElementwiseMixin
+from tinygrad.mixin.movement import MovementMixin
 from tinygrad.mixin.reduce import ReduceMixin
-from tinygrad.uop.ops import _broadcast_shape, resolve
+from tinygrad.uop import Ops
+from tinygrad.uop.ops import _broadcast_shape, resolve, smax, smin, identity_element
 from tinygrad.dtype import DTypeLike, dtypes, least_upper_dtype, sum_acc_dtype, to_dtype
-from tinygrad.helpers import argfix, prod
+from tinygrad.helpers import argfix, flatten, prod, round_up
 
 ReductionStr = Literal["mean", "sum", "none"]
 
 
 class OpMixin(ElementwiseMixin, ReduceMixin):
+  def _pad_constant(self, pX, value:float) -> Self:
+    # shrink first for negative pads, then pad with only non-negative values
+    pX = tuple((0, 0) if p is None else p for p in pX)
+    has_neg = not all(resolve(p >= 0) for p in flatten(pX))
+    X = self.shrink(tuple((-smin(pB,0),smin(pA+s,s)) for (pB,pA),s in zip(pX, self.shape))) if has_neg else self
+    pads = tuple((smax(pB,0), smax(pA,0)) for pB,pA in pX) if has_neg else pX
+    if value == 0: return MovementMixin.pad(X, pads)
+    return MovementMixin.pad(X, pads) + MovementMixin.pad(X.ones_like(), pads).cast(dtypes.bool).where(0, value)
+
   def _broadcasted(self, y, reverse=False) -> tuple[Self, Self]:
     if not isinstance(y, type(self)): y = self.ufix(y)
     x, y = (self, y) if not reverse else (y, self)
@@ -248,6 +259,54 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     """
     m = self.max(axis=axis, keepdim=True)
     return (self - m).exp().sum(axis=axis, keepdim=keepdim).log() + (m if keepdim else m.squeeze(axis))
+
+  def _cumalu(self, axis:int, op:Ops) -> Self:
+    assert self.shape[axis] != 0 and op in (Ops.ADD, Ops.MAX, Ops.MUL)
+    pads = (None,)*(self.ndim-1) + ((self.shape[axis]-1, 0),)
+    pooled = self.transpose(axis,-1)._pad_constant(pads, identity_element(op, self.dtype))._pool((self.shape[axis],))
+    return getattr(pooled, {Ops.ADD: "sum", Ops.MAX: "max", Ops.MUL: "prod"}[op])(-1).transpose(axis, -1)
+
+  def _split_cumalu(self, axis:int, op:Ops) -> Self:
+    axis = self._resolve_dim(axis)
+    if self.ndim == 0 or 0 in self.shape: return self
+    # TODO: someday the optimizer will find this on its own
+    # for now this is a two stage cumsum
+    SPLIT = 256
+    value = identity_element(op, self.dtype)
+    if not isinstance(s:=self.shape[axis], int) or s <= SPLIT*2: return self._cumalu(axis, op)
+    ret = self.transpose(axis,-1)._pad_constant((None,)*(self.ndim-1)+((round_up(s,SPLIT)-s,0),), value).unflatten(-1,(-1,SPLIT))._cumalu(-1, op)
+    base = ret[..., -1]._cumalu(-1, op)._pad_constant((None,)*(ret.ndim-2) + ((1, -1),), value)
+    base = base.unsqueeze(-1).expand(*base.shape, ret.shape[-1])
+    def fix(x: Self) -> Self: return x.flatten(start_dim=-2)[..., -s:].transpose(axis,-1)
+    return getattr(fix(ret), {Ops.ADD: "add", Ops.MAX: "maximum", Ops.MUL: "mul"}[op])(fix(base))
+
+  def cumsum(self, axis:int=0) -> Self:
+    """
+    Computes the cumulative sum of the tensor along the specified `axis`.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.ones(2, 3)
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.cumsum(1).numpy())
+    ```
+    """
+    return self._split_cumalu(axis, Ops.ADD)
+
+  def cumprod(self, axis:int) -> Self:
+    """
+    Computes the cumulative product of the elements of the tensor along the specified `axis`.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.arange(1, 7).reshape(2, 3)
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.cumprod(axis=0).numpy())
+    ```
+    """
+    return self._split_cumalu(axis, Ops.MUL)
 
   # ***** functional nn ops *****
 
