@@ -74,15 +74,19 @@ class VizData:
 def load_rewrites(data:VizData) -> None:
   assert not data.ctxs and not data.ref_map, "load_rewrites called multiple times"
   for i,k in enumerate(data.trace.keys):
-    v = data.trace.rewrites[i]
-    steps = [create_step(s.name, ("/graph-rewrites", i, j), loc=s.loc, match_count=len(s.matches), code_line=printable(s.loc),
-                         trace=k.tb if j==0 else None, depth=s.depth) for j,s in enumerate(v)]
-    if (p:=get_prg_uop(data, i)) is not None:
-      steps.append(create_step("View UOp List", ("/uops", i, len(steps))))
-      steps.append(create_step("View Source", ("/code", i, len(steps)), p.src[3].arg))
-      steps.append(create_step("View Disassembly", ("/asm", i, len(steps)), (k.ret, p.src[4].arg)))
+    steps:list[dict] = []
+    p:UOp|None = None
+    for j,s in enumerate(data.trace.rewrites[i]):
+      steps.append(create_step(s.name, ("/graph-rewrites", i, j), loc=s.loc, match_count=len(s.matches), code_line=printable(s.loc),
+                               trace=k.tb if j==0 else None, depth=s.depth))
+      # get source and binary from Ops.PROGRAM
+      if s.name == "View Program":
+        p = _reconstruct(data, s.sink, depth=1)
+        steps.append(create_step("View UOp List", ("/uops", i, len(steps))))
+        steps.append(create_step("View Source", ("/code", i, len(steps)), p.src[3].arg))
+        steps.append(create_step("View Disassembly", ("/asm", i, len(steps)), (k.ret, p.src[4].arg)))
     for key in k.keys: data.ref_map[key] = i
-    data.ctxs.append({"name":k.display_name, "steps":steps})
+    data.ctxs.append({"name":k.display_name, "steps":steps, "prg":p})
 
 # ** get the complete UOp graphs for one rewrite
 
@@ -174,10 +178,6 @@ def get_full_rewrite(data:VizData, ctx:TrackedGraphRewrite) -> Generator[GraphRe
            "diff":list(difflib.unified_diff(pystr(u0).splitlines(), pystr(u1).splitlines())), "upat":(upat_loc, match_repr)}
     if not ctx.bottom_up: next_sink = new_sink
 
-def get_prg_uop(data:VizData, i:int) -> UOp|None:
-  s = next((s for s in data.trace.rewrites[i] if s.name == "View Program"), None)
-  return _reconstruct(data, s.sink, depth=1) if s is not None else None
-
 # encoder helpers
 
 def enum_str(s, cache:dict[str, int]) -> int:
@@ -217,7 +217,7 @@ def timeline_layout(data:VizData, dev_events:list[tuple[int, int, float, DevEven
     name, fmt, key = e.name, [], None
     if (ref:=data.ref_map.get(name)) is not None and ref < len(data.ctxs):
       name = data.ctxs[ref]["name"]
-      if (p:=get_prg_uop(data, ref)) is not None and (ei:=exec_points.get(p.src[0].arg.name)) is not None:
+      if (p:=data.ctxs[ref].get("prg")) is not None and (ei:=exec_points.get(p.src[0].arg.name)) is not None:
         flops = sym_infer((estimates:=p.src[0].arg.estimates).ops, var_vals:=ei.arg['var_vals'])/(t:=dur*1e-6)
         membw, ldsbw = sym_infer(estimates.mem, var_vals)/t, sym_infer(estimates.lds, var_vals)/t
         fmt = [f"{flops*1e-9:.0f} GFLOPS" if flops < 1e14 else f"{flops*1e-12:.0f} TFLOPS",
@@ -336,7 +336,7 @@ def load_amd_counters(data:VizData, profile:list[ProfileEvent]) -> None:
   run_number = {n:0 for n,_ in counter_events}
   for (k, tag),v in counter_events.items():
     # use the colored name if it exists
-    name = unwrap(get_prg_uop(data, r)).src[0].arg.name if (r:=data.ref_map.get(pname:=prg_events[k].name)) is not None else pname
+    name = data.ctxs[r]["prg"].src[0].arg.name if (r:=data.ref_map.get(pname:=prg_events[k].name)) is not None else pname
     run_number[k] += 1
     steps:list[dict] = []
     if (pmc:=v.get(ProfilePMCEvent)):
