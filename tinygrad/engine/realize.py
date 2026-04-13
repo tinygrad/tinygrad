@@ -238,9 +238,8 @@ def _expand_multibuffer(linear: UOp) -> UOp:
   return linear.replace(src=tuple(new_src))
 
 def _exec_view(ctx, si, ast):
-  bufs = [b.buffer for b in si.src[1:] if b.op is not Ops.BIND]
-  buffers[si.src[1]] = bufs[1].view(si.src[1].arg, ast.dtype, ast.arg[1]*bufs[1].dtype.itemsize)
-  assert bufs[0]._base is not None and bufs[0]._base == bufs[1].base
+  base = si.src[2].buffer
+  buffers[si.src[1]] = base.view(si.src[1].arg, ast.dtype, ast.arg[1]*base.dtype.itemsize)
 
 def _exec_copy(ctx, si, ast):
   var_vals, do_update_stats = ctx
