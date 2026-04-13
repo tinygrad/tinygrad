@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, functools, codecs, io, struct, re
+import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, codecs, io, struct, re
 import pathlib, traceback, itertools, socketserver
 from contextlib import redirect_stdout, redirect_stderr, contextmanager
 from decimal import Decimal
@@ -66,6 +66,7 @@ def create_step(name:str, query:tuple[str, int, int], data=None, depth:int=0, **
 class VizData:
   trace:RewriteTrace
   ref_map:dict[Any, int] = field(default_factory=dict)
+  all_uops:dict[int, UOp] = field(default_factory=dict)
 
 # ** list all saved rewrites
 
@@ -98,8 +99,6 @@ def pystr(u:UOp) -> str:
   try: return pyrender(u)
   except Exception: return str(u)
 
-# all the trace points, initialized after the trace loads
-ctxs:list[dict] = []
 def uop_to_json(x:UOp) -> dict[int, dict]:
   assert isinstance(x, UOp)
   graph: dict[int, dict] = {}
@@ -153,18 +152,20 @@ def uop_to_json(x:UOp) -> dict[int, dict]:
                     "ref":ref, "tag":repr(u.tag) if u.tag is not None else None}
   return graph
 
-@functools.cache
-def _reconstruct(a:int, depth:int|None=None):
-  op, dtype, src, arg, *rest = trace.uop_fields[a]
+def _reconstruct(data:VizData, a:int, depth:int|None=None):
+  if depth is None and a in data.all_uops: return data.all_uops[a]
+  op, dtype, src, arg, *rest = data.trace.uop_fields[a]
   if depth is not None and depth <= 0: return UOp(op, dtype, (), arg, *rest)
-  return UOp(op, dtype, tuple(_reconstruct(s, None if depth is None else depth-1) for s in src), arg, *rest)
+  ret = UOp(op, dtype, tuple(_reconstruct(data, s, None if depth is None else depth-1) for s in src), arg, *rest)
+  if depth is None: data.all_uops[a] = ret
+  return ret
 
-def get_full_rewrite(ctx:TrackedGraphRewrite) -> Generator[GraphRewriteDetails, None, None]:
-  next_sink = _reconstruct(ctx.sink)
+def get_full_rewrite(data:VizData, ctx:TrackedGraphRewrite) -> Generator[GraphRewriteDetails, None, None]:
+  next_sink = _reconstruct(data, ctx.sink)
   yield {"graph":uop_to_json(next_sink), "uop":pystr(next_sink), "change":None, "diff":None, "upat":None}
   replaces: dict[UOp, UOp] = {}
   for u0_num,u1_num,upat_loc,dur in tqdm(ctx.matches):
-    replaces[u0:=_reconstruct(u0_num)] = u1 = _reconstruct(u1_num)
+    replaces[u0:=_reconstruct(data, u0_num)] = u1 = _reconstruct(data, u1_num)
     try: new_sink = next_sink.substitute(replaces)
     except RuntimeError as e: new_sink = UOp(Ops.NOOP, arg=str(e))
     match_repr = f"# {dur*1e6:.2f} us\n"+printable(upat_loc)
@@ -174,7 +175,7 @@ def get_full_rewrite(ctx:TrackedGraphRewrite) -> Generator[GraphRewriteDetails, 
 
 def get_prg_uop(data:VizData, i:int) -> UOp|None:
   s = next((s for s in data.trace.rewrites[i] if s.name == "View Program"), None)
-  return _reconstruct(s.sink, depth=1) if s is not None else None
+  return _reconstruct(data, s.sink, depth=1) if s is not None else None
 
 # encoder helpers
 

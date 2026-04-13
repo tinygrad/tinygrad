@@ -31,7 +31,7 @@ class VizTrace:
   def get_details(self, rewrite_idx:int, step:int) -> Generator[dict, None, None]:
     lst = self.list_items()
     assert len(lst) > rewrite_idx, f"only loaded {len(lst)} traces, expecting at least {rewrite_idx}"
-    return get_full_rewrite(self.trace.rewrites[rewrite_idx][step])
+    return get_full_rewrite(self.trace, self.trace.trace.rewrites[rewrite_idx][step])
 
 @contextlib.contextmanager
 def save_viz():
