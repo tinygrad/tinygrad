@@ -220,26 +220,20 @@ def run_schedule(schedule:list[ExecItem], var_vals:dict[str, int]|None=None, do_
 # **************** run_linear: execute LINEAR UOp directly ****************
 
 def _expand_multibuffer(linear: UOp) -> UOp:
-  """Expand MultiBuffer CALLs into per-device CALLs using MSELECT."""
   new_src = []
   for si in linear.src:
-    buf_uops = [b for b in si.src[1:] if b.op is not Ops.BIND]
     bind_uops = [b for b in si.src[1:] if b.op is Ops.BIND]
-    if not any(isinstance(b.buffer, MultiBuffer) for b in buf_uops):
-      new_src.append(si)
-      continue
-    assert all(isinstance(b.buffer, MultiBuffer) for b in buf_uops), "kernel must all be multibuffer"
-    ast, n_devs = si.src[0], len(buf_uops[0].buffer.bufs)
-    dnums = [x for x in ast.variables() if x.expr == '_device_num']
-    for j in range(n_devs):
-      selected = [UOp(Ops.MSELECT, b.dtype, (b,), j) for b in buf_uops]
-      fixedvars = ((dnums[0].expr, j),) if dnums else ()
-      new_src.append(ast.call(*selected, *bind_uops, metadata=si.arg.metadata, fixedvars=fixedvars))
+    buf_uops = [b for b in si.src[1:] if b.op is not Ops.BIND]
+    if not any(isinstance(b.buffer, MultiBuffer) for b in buf_uops): new_src.append(si)
+    else:
+      ast, n_devs = si.src[0], len(buf_uops[0].buffer.bufs)
+      dnums = [x for x in ast.variables() if x.expr == '_device_num']
+      for j in range(n_devs):
+        selected = [UOp(Ops.MSELECT, b.dtype, (b,), j) for b in buf_uops]
+        new_src.append(ast.call(*selected, *bind_uops, metadata=si.arg.metadata, fixedvars=((dnums[0].expr,j),) if len(dnums) else ()))
   return linear.replace(src=tuple(new_src))
 
-def _exec_view(ctx, si, ast):
-  base = si.src[2].buffer
-  buffers[si.src[1]] = base.view(si.src[1].arg, ast.dtype, ast.arg[1]*base.dtype.itemsize)
+def _exec_view(ctx, si, ast): buffers[si.src[1]] = (base:=si.src[2].buffer).view(si.src[1].arg, ast.dtype, ast.arg[1]*base.dtype.itemsize)
 
 def _exec_copy(ctx, si, ast):
   var_vals, do_update_stats = ctx
@@ -248,8 +242,7 @@ def _exec_copy(ctx, si, ast):
   st = time.perf_counter()
   if hasattr(alc:=Device[dest.device].allocator, '_transfer') and alc.supports_transfer and dest.device.split(":")[0] == src.device.split(":")[0]:
     alc._transfer(dest._buf, src._buf, dest.nbytes, src_dev=src.allocator.dev, dest_dev=alc.dev)
-  else:
-    dest.copyin(src.as_memoryview(allow_zero_copy=True))
+  else: dest.copyin(src.as_memoryview(allow_zero_copy=True))
   Device[dest.device].synchronize()
   if do_update_stats:
     update_stats(f"copy {dest.nbytes:8d}, {dest.device[:7]:>7s} <- {src.device[:7]:7s}", dest.device,
@@ -272,8 +265,6 @@ pm_exec = PatternMatcher([
 ])
 
 def run_linear(linear:UOp, var_vals:dict[str, int]|None=None, do_update_stats=True):
-  """Execute a LINEAR UOp directly."""
   linear = _expand_multibuffer(linear)
   ctx = (var_vals or {}, do_update_stats)
-  for si in linear.src:
-    pm_exec.rewrite(si, ctx)
+  for si in linear.src: pm_exec.rewrite(si, ctx)
