@@ -85,7 +85,7 @@ def run_jit(jis, all_buffers, input_buffers, var_vals):
   with Context(DEBUG=0):
     for rawbuf in all_buffers:
       if rawbuf in input_buffers: continue
-      mv = memoryview(bytearray(rawbuf.size * rawbuf.dtype.itemsize))
+      mv = memoryview(bytearray(rawbuf.nbytes))
       ctypes.memset(from_mv(mv), 0, len(mv))
       rawbuf.copyin(mv)
 

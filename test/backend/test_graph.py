@@ -60,7 +60,7 @@ def helper_make_view(base, offset_elems, size_elems):
 
 def helper_run_jit(jis, bufs, out_buffers):
   for rawbuf in out_buffers:
-    mv = memoryview(bytearray(rawbuf.size * rawbuf.dtype.itemsize))
+    mv = memoryview(bytearray(rawbuf.nbytes))
     ctypes.memset(from_mv(mv), 0, len(mv))
     rawbuf.copyin(mv)
 

@@ -44,9 +44,9 @@ nc = np.random.randn(N, N).astype(np.float32)
 
 ns = nb.reshape(-1, 32).sum(axis=0)
 
-a = MallocAllocator.alloc(na.size * np.dtype(np.float32).itemsize)
-b = MallocAllocator.alloc(nb.size * np.dtype(np.float32).itemsize)
-c = MallocAllocator.alloc(nc.size * np.dtype(np.float32).itemsize)
+a = MallocAllocator.alloc(na.nbytes)
+b = MallocAllocator.alloc(nb.nbytes)
+c = MallocAllocator.alloc(nc.nbytes)
 
 MallocAllocator._copyin(b, flat_mv(nb.data))
 MallocAllocator._copyin(c, flat_mv(nc.data))
