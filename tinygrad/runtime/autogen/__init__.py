@@ -120,7 +120,7 @@ def __getattr__(nm):
                                 args=["-I/opt/rocm/include", "-x", "c++"])
     case "amdgpu_drm": return load("amdgpu_drm", None, [ "/usr/include/drm/drm.h", *[root/f"extra/hip_gpu_driver/{s}.h" for s in ["amdgpu_drm"]]])
     case "kgsl": return load("kgsl", None, [root/"extra/qcom_gpu_driver/msm_kgsl.h"], args=["-D__user="])
-    case "msm_drm": return load("msm_drm", None, ["/usr/include/drm/drm.h", root/"extra/qcom_gpu_driver/msm_drm.h"])
+    case "msm_drm": return load("msm_drm", None, ["/usr/include/drm/drm.h", root/"extra/qcom_gpu_driver/msm_drm.h"], args=["-I/usr/include/drm"])
     case "qcom_dsp":
       return load("qcom_dsp", None, [root/f"extra/dsp/include/{s}.h" for s in ["ion", "msm_ion", "adsprpc_shared", "remote_default", "apps_std"]])
     case "sqtt": return load("sqtt", None, [root/"extra/sqtt/sqtt.h"])

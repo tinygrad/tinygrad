@@ -32,7 +32,7 @@ class struct_drm_tex_region(c.Struct):
 class struct_drm_hw_lock(c.Struct):
   SIZE = 64
   lock: Annotated[Annotated[int, ctypes.c_uint32], 0]
-  padding: Annotated[c.Array[Annotated[bytes, ctypes.c_char], Literal[60]], 4]
+  padding: Annotated[c.Array[Annotated[int, ctypes.c_ubyte], Literal[60]], 4]
 @c.record
 class struct_drm_version(c.Struct):
   SIZE = 64
@@ -40,17 +40,17 @@ class struct_drm_version(c.Struct):
   version_minor: Annotated[Annotated[int, ctypes.c_int32], 4]
   version_patchlevel: Annotated[Annotated[int, ctypes.c_int32], 8]
   name_len: Annotated[Annotated[int, ctypes.c_uint64], 16]
-  name: Annotated[c.POINTER[Annotated[bytes, ctypes.c_char]], 24]
+  name: Annotated[c.POINTER[Annotated[int, ctypes.c_ubyte]], 24]
   date_len: Annotated[Annotated[int, ctypes.c_uint64], 32]
-  date: Annotated[c.POINTER[Annotated[bytes, ctypes.c_char]], 40]
+  date: Annotated[c.POINTER[Annotated[int, ctypes.c_ubyte]], 40]
   desc_len: Annotated[Annotated[int, ctypes.c_uint64], 48]
-  desc: Annotated[c.POINTER[Annotated[bytes, ctypes.c_char]], 56]
+  desc: Annotated[c.POINTER[Annotated[int, ctypes.c_ubyte]], 56]
 __kernel_size_t: TypeAlias = Annotated[int, ctypes.c_uint64]
 @c.record
 class struct_drm_unique(c.Struct):
   SIZE = 16
   unique_len: Annotated[Annotated[int, ctypes.c_uint64], 0]
-  unique: Annotated[c.POINTER[Annotated[bytes, ctypes.c_char]], 8]
+  unique: Annotated[c.POINTER[Annotated[int, ctypes.c_ubyte]], 8]
 @c.record
 class struct_drm_list(c.Struct):
   SIZE = 16
@@ -443,6 +443,11 @@ class struct_drm_crtc_queue_sequence(c.Struct):
   sequence: Annotated[Annotated[int, ctypes.c_uint64], 8]
   user_data: Annotated[Annotated[int, ctypes.c_uint64], 16]
 @c.record
+class struct_drm_set_client_name(c.Struct):
+  SIZE = 16
+  name_len: Annotated[Annotated[int, ctypes.c_uint64], 0]
+  name: Annotated[Annotated[int, ctypes.c_uint64], 8]
+@c.record
 class struct_drm_event(c.Struct):
   SIZE = 8
   type: Annotated[Annotated[int, ctypes.c_uint32], 0]
@@ -503,21 +508,117 @@ drm_agp_binding_t: TypeAlias = struct_drm_agp_binding
 drm_agp_info_t: TypeAlias = struct_drm_agp_info
 drm_scatter_gather_t: TypeAlias = struct_drm_scatter_gather
 drm_set_version_t: TypeAlias = struct_drm_set_version
-class struct_drm_msm_timespec(c.Struct): SIZE = 0
-class struct_drm_msm_param(c.Struct): SIZE = 0
-class struct_drm_msm_gem_new(c.Struct): SIZE = 0
-class struct_drm_msm_gem_info(c.Struct): SIZE = 0
-class struct_drm_msm_gem_cpu_prep(c.Struct): SIZE = 0
-class struct_drm_msm_gem_cpu_fini(c.Struct): SIZE = 0
-class struct_drm_msm_gem_submit_reloc(c.Struct): SIZE = 0
-class struct_drm_msm_gem_submit_cmd(c.Struct): SIZE = 0
-class struct_drm_msm_gem_submit_bo(c.Struct): SIZE = 0
-class struct_drm_msm_gem_submit_syncobj(c.Struct): SIZE = 0
-class struct_drm_msm_gem_submit(c.Struct): SIZE = 0
-class struct_drm_msm_wait_fence(c.Struct): SIZE = 0
-class struct_drm_msm_gem_madvise(c.Struct): SIZE = 0
-class struct_drm_msm_submitqueue(c.Struct): SIZE = 0
-class struct_drm_msm_submitqueue_query(c.Struct): SIZE = 0
+@c.record
+class struct_drm_msm_timespec(c.Struct):
+  SIZE = 16
+  tv_sec: Annotated[Annotated[int, ctypes.c_int64], 0]
+  tv_nsec: Annotated[Annotated[int, ctypes.c_int64], 8]
+@c.record
+class struct_drm_msm_param(c.Struct):
+  SIZE = 24
+  pipe: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  param: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  value: Annotated[Annotated[int, ctypes.c_uint64], 8]
+  len: Annotated[Annotated[int, ctypes.c_uint32], 16]
+  pad: Annotated[Annotated[int, ctypes.c_uint32], 20]
+@c.record
+class struct_drm_msm_gem_new(c.Struct):
+  SIZE = 16
+  size: Annotated[Annotated[int, ctypes.c_uint64], 0]
+  flags: Annotated[Annotated[int, ctypes.c_uint32], 8]
+  handle: Annotated[Annotated[int, ctypes.c_uint32], 12]
+@c.record
+class struct_drm_msm_gem_info(c.Struct):
+  SIZE = 24
+  handle: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  info: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  value: Annotated[Annotated[int, ctypes.c_uint64], 8]
+  len: Annotated[Annotated[int, ctypes.c_uint32], 16]
+  pad: Annotated[Annotated[int, ctypes.c_uint32], 20]
+@c.record
+class struct_drm_msm_gem_cpu_prep(c.Struct):
+  SIZE = 24
+  handle: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  op: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  timeout: Annotated[struct_drm_msm_timespec, 8]
+@c.record
+class struct_drm_msm_gem_cpu_fini(c.Struct):
+  SIZE = 4
+  handle: Annotated[Annotated[int, ctypes.c_uint32], 0]
+@c.record
+class struct_drm_msm_gem_submit_reloc(c.Struct):
+  SIZE = 24
+  submit_offset: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  _or: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  shift: Annotated[Annotated[int, ctypes.c_int32], 8]
+  reloc_idx: Annotated[Annotated[int, ctypes.c_uint32], 12]
+  reloc_offset: Annotated[Annotated[int, ctypes.c_uint64], 16]
+@c.record
+class struct_drm_msm_gem_submit_cmd(c.Struct):
+  SIZE = 32
+  type: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  submit_idx: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  submit_offset: Annotated[Annotated[int, ctypes.c_uint32], 8]
+  size: Annotated[Annotated[int, ctypes.c_uint32], 12]
+  pad: Annotated[Annotated[int, ctypes.c_uint32], 16]
+  nr_relocs: Annotated[Annotated[int, ctypes.c_uint32], 20]
+  relocs: Annotated[Annotated[int, ctypes.c_uint64], 24]
+@c.record
+class struct_drm_msm_gem_submit_bo(c.Struct):
+  SIZE = 16
+  flags: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  handle: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  presumed: Annotated[Annotated[int, ctypes.c_uint64], 8]
+@c.record
+class struct_drm_msm_gem_submit_syncobj(c.Struct):
+  SIZE = 16
+  handle: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  flags: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  point: Annotated[Annotated[int, ctypes.c_uint64], 8]
+@c.record
+class struct_drm_msm_gem_submit(c.Struct):
+  SIZE = 72
+  flags: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  fence: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  nr_bos: Annotated[Annotated[int, ctypes.c_uint32], 8]
+  nr_cmds: Annotated[Annotated[int, ctypes.c_uint32], 12]
+  bos: Annotated[Annotated[int, ctypes.c_uint64], 16]
+  cmds: Annotated[Annotated[int, ctypes.c_uint64], 24]
+  fence_fd: Annotated[Annotated[int, ctypes.c_int32], 32]
+  queueid: Annotated[Annotated[int, ctypes.c_uint32], 36]
+  in_syncobjs: Annotated[Annotated[int, ctypes.c_uint64], 40]
+  out_syncobjs: Annotated[Annotated[int, ctypes.c_uint64], 48]
+  nr_in_syncobjs: Annotated[Annotated[int, ctypes.c_uint32], 56]
+  nr_out_syncobjs: Annotated[Annotated[int, ctypes.c_uint32], 60]
+  syncobj_stride: Annotated[Annotated[int, ctypes.c_uint32], 64]
+  pad: Annotated[Annotated[int, ctypes.c_uint32], 68]
+@c.record
+class struct_drm_msm_wait_fence(c.Struct):
+  SIZE = 32
+  fence: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  flags: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  timeout: Annotated[struct_drm_msm_timespec, 8]
+  queueid: Annotated[Annotated[int, ctypes.c_uint32], 24]
+@c.record
+class struct_drm_msm_gem_madvise(c.Struct):
+  SIZE = 12
+  handle: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  madv: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  retained: Annotated[Annotated[int, ctypes.c_uint32], 8]
+@c.record
+class struct_drm_msm_submitqueue(c.Struct):
+  SIZE = 12
+  flags: Annotated[Annotated[int, ctypes.c_uint32], 0]
+  prio: Annotated[Annotated[int, ctypes.c_uint32], 4]
+  id: Annotated[Annotated[int, ctypes.c_uint32], 8]
+@c.record
+class struct_drm_msm_submitqueue_query(c.Struct):
+  SIZE = 24
+  data: Annotated[Annotated[int, ctypes.c_uint64], 0]
+  id: Annotated[Annotated[int, ctypes.c_uint32], 8]
+  param: Annotated[Annotated[int, ctypes.c_uint32], 12]
+  len: Annotated[Annotated[int, ctypes.c_uint32], 16]
+  pad: Annotated[Annotated[int, ctypes.c_uint32], 20]
 c.init_records()
 DRM_NAME = "drm" # type: ignore
 DRM_MIN_ORDER = 5 # type: ignore
@@ -566,6 +667,7 @@ DRM_SYNCOBJ_WAIT_FLAGS_WAIT_DEADLINE = (1 << 3) # type: ignore
 DRM_SYNCOBJ_QUERY_FLAGS_LAST_SUBMITTED = (1 << 0) # type: ignore
 DRM_CRTC_SEQUENCE_RELATIVE = 0x00000001 # type: ignore
 DRM_CRTC_SEQUENCE_NEXT_ON_MISS = 0x00000002 # type: ignore
+DRM_CLIENT_NAME_MAX_LEN = 64 # type: ignore
 DRM_IOCTL_BASE = 'd' # type: ignore
 DRM_IO = lambda nr: _IO(DRM_IOCTL_BASE,nr) # type: ignore
 DRM_IOR = lambda nr,type: _IOR(DRM_IOCTL_BASE,nr,type) # type: ignore
@@ -642,6 +744,7 @@ DRM_IOCTL_SYNCOBJ_QUERY = DRM_IOWR(0xCB, struct_drm_syncobj_timeline_array) # ty
 DRM_IOCTL_SYNCOBJ_TRANSFER = DRM_IOWR(0xCC, struct_drm_syncobj_transfer) # type: ignore
 DRM_IOCTL_SYNCOBJ_TIMELINE_SIGNAL = DRM_IOWR(0xCD, struct_drm_syncobj_timeline_array) # type: ignore
 DRM_IOCTL_SYNCOBJ_EVENTFD = DRM_IOWR(0xCF, struct_drm_syncobj_eventfd) # type: ignore
+DRM_IOCTL_SET_CLIENT_NAME = DRM_IOWR(0xD1, struct_drm_set_client_name) # type: ignore
 DRM_COMMAND_BASE = 0x40 # type: ignore
 DRM_COMMAND_END = 0xA0 # type: ignore
 DRM_EVENT_VBLANK = 0x01 # type: ignore
