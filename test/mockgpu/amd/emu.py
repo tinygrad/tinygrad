@@ -58,7 +58,7 @@ from tinygrad.runtime.autogen import hsa
 from tinygrad.helpers import Context, DEBUG, PROFILE, colored
 from tinygrad.engine.realize import get_runner
 
-from tinygrad.renderer.amd import decode_dpp16, decode_inst
+from tinygrad.renderer.amd import decode_inst
 from tinygrad.runtime.autogen.amd.rdna3.str_pcode import PCODE as PCODE_RDNA3
 from tinygrad.runtime.autogen.amd.rdna4.str_pcode import PCODE as PCODE_RDNA4
 from tinygrad.runtime.autogen.amd.cdna.str_pcode import PCODE as PCODE_CDNA
@@ -67,6 +67,7 @@ from tinygrad.runtime.autogen.amd.rdna4 import ins as ir4
 from tinygrad.runtime.autogen.amd.cdna import ins as irc
 from tinygrad.renderer.amd.dsl import VCC_LO, EXEC_LO, SCC, ttmp
 from tinygrad.runtime.autogen.amd.common import Fmt, OpType
+from test.amd.helpers import decode_dpp16
 from test.mockgpu.amd.pcode import parse_block, _FUNCS, _set_bits, _val_to_bits
 
 MASK32 = 0xFFFFFFFF
@@ -289,8 +290,13 @@ _pcode_fixes = {
   'V_DIV_FIXUP_F64': ('D0.f64 = sign_out ? -abs(S0.f64) : abs(S0.f64)',
     'D0.f64 = isNAN(S0.f64) ? (sign_out ? -INF : +INF) : (sign_out ? -abs(S0.f64) : abs(S0.f64))'),
   'V_TRIG_PREOP_F64': ("result = 64'F((1201'B(2.0 / PI)[1200 : 0] << shift.u32) & 1201'0x1fffffffffffff)", "result = trig_preop_result(shift)"),
-  'DS_SWIZZLE_B32': ('offset = offset1:offset0;\nif (offset >= 0xe000) {\n// FFT decomposition\nmask = offset[4:0];\nfor (i = 0; i < 64; i++) {\nj = reverse_bits(i & 0x1f);\nj = (j >> count_ones(mask));\nj |= (i & mask);\nj |= i & 0x20;\nthread_out[i] = thread_valid[j] ? thread_in[j] : 0;\n}',
-    'offset = { offset1, offset0 }\nif offset >= 0xe000 then\nmask = offset[4:0]\nfor i in 0 : 63 do\nj = reverse_bits(i & 0x1f)\nj = (j >> count_ones(mask))\nj |= (i & mask)\nj |= i & 0x20\nthread_out[i] = thread_valid[j] ? thread_in[j] : 0\nendfor\nD0.u32 = thread_out[laneId].u32\nendif'),
+  'DS_SWIZZLE_B32': (
+    'offset = offset1:offset0;\nif (offset >= 0xe000) {\n// FFT decomposition\nmask = offset[4:0];\nfor (i = 0; i < 64; i++) {\n'
+    'j = reverse_bits(i & 0x1f);\nj = (j >> count_ones(mask));\nj |= (i & mask);\nj |= i & 0x20;\n'
+    'thread_out[i] = thread_valid[j] ? thread_in[j] : 0;\n}',
+    'offset = { offset1, offset0 }\nif offset >= 0xe000 then\nmask = offset[4:0]\nfor i in 0 : 63 do\n'
+    'j = reverse_bits(i & 0x1f)\nj = (j >> count_ones(mask))\nj |= (i & mask)\nj |= i & 0x20\n'
+    'thread_out[i] = thread_valid[j] ? thread_in[j] : 0\nendfor\nD0.u32 = thread_out[laneId].u32\nendif'),
 }
 
 def _get_pcode_dict(op) -> dict:
@@ -736,6 +742,10 @@ class _Ctx:
         new_vcc = _set_lane_bit(old_vcc, lane, val, exec_mask)
         raw_stores.extend([('vcc', s) for s in self.wmask(_c(VCC_LO.offset), new_vcc)])
       elif dest.startswith('D0'):
+        dest_suffix = re.match(r'D0\.(\w+)', dest)
+        if dest_suffix is not None:
+          target_dt = {'u16': dtypes.uint16, 'i16': dtypes.int16, 'f16': dtypes.half}.get(dest_suffix.group(1))
+          if target_dt is not None and val.dtype != target_dt: val = val.cast(target_dt)
         if (slice_match := re.match(r'D0\[(\d+)\s*:\s*(\d+)\]', dest)):
           d0_hi_bit, d0_lo_bit = int(slice_match.group(1)), int(slice_match.group(2))
           if d0_hi_bit != 31 or d0_lo_bit != 0:
@@ -748,7 +758,8 @@ class _Ctx:
         # For integer ops with clamp, use pre-computed saturated value; for floats, clamp to [0,1]
         if int_saturate is not None: val = int_saturate
         elif clmp and val.dtype in (dtypes.float32, dtypes.half, dtypes.float64):
-          val = val.maximum(UOp.const(val.dtype, 0.0)).minimum(UOp.const(val.dtype, 1.0))
+          clamped = val.maximum(UOp.const(val.dtype, 0.0)).minimum(UOp.const(val.dtype, 1.0))
+          val = _FUNCS['isNAN'](val).where(UOp.const(val.dtype, 0.0), clamped)
         if val.dtype in (dtypes.uint64, dtypes.int64, dtypes.float64):
           lo, hi = _split64(val)
           raw_stores.extend([('vgpr', self.wvgpr_dyn(vdst_reg, lane, lo, exec_mask)),
@@ -2056,7 +2067,8 @@ _INST_HANDLERS: dict[type, Callable[..., UOp]] = {
   ir4.DS: _compile_mem_op, ir4.VFLAT: _compile_mem_op, ir4.VGLOBAL: _compile_mem_op, ir4.VSCRATCH: _compile_mem_op,
   # CDNA instruction classes
   irc.SOPP: _compile_sopp, irc.SMEM: _compile_smem, irc.SOP1: _compile_sop, irc.SOP2: _compile_sop, irc.SOPC: _compile_sop, irc.SOPK: _compile_sop,
-  irc.VOP1: _compile_vop12, irc.VOP1_DPP16: _compile_vop12, irc.VOP2: _compile_vop12, irc.VOP2_DPP16: _compile_vop12, irc.VOPC: _compile_vopc, irc.VOP3: _compile_vop3,
+  irc.VOP1: _compile_vop12, irc.VOP1_DPP16: _compile_vop12, irc.VOP2: _compile_vop12, irc.VOP2_DPP16: _compile_vop12,
+  irc.VOPC: _compile_vopc, irc.VOP3: _compile_vop3,
   irc.VOP3_SDST: _compile_vop3, irc.VOP3SD: _compile_vop3sd, irc.VOP3P: _compile_vop3p,
   irc.VOP1_SDWA: _compile_sdwa, irc.VOP2_SDWA: _compile_sdwa, irc.VOP2_SDWA_SDST: _compile_sdwa, irc.VOPC_SDWA_SDST: _compile_sdwa,
   irc.DS: _compile_mem_op, irc.FLAT: _compile_mem_op, irc.GLOBAL: _compile_mem_op, irc.SCRATCH: _compile_mem_op,

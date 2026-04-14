@@ -5,16 +5,6 @@ from tinygrad.renderer.amd.dsl import Inst, FixedBitField, EnumBitField
 # SDWA/DPP variant detection: src0 field (bits 0-8) encodes the variant
 # 0xf9 (249) = SDWA, 0xfa (250) = DPP16 for CDNA (GFX9)
 _VARIANT_SRC0 = {"_SDWA_SDST": 0xf9, "_SDWA": 0xf9, "_DPP16": 0xfa}
-_DPP16_RANGE_OPS = {0x100: "row_shl", 0x110: "row_shr", 0x120: "row_ror", 0x150: "row_newbcast", 0x160: "row_share", 0x170: "row_xmask"}
-_DPP16_EXACT_OPS = {0x130: ("wave_shl", 1), 0x134: ("wave_rol", 1), 0x138: ("wave_shr", 1), 0x13c: ("wave_ror", 1),
-                    0x140: ("row_mirror", 0), 0x141: ("row_half_mirror", 0), 0x142: ("row_bcast", 15), 0x143: ("row_bcast", 31)}
-
-def decode_dpp16(dpp: int) -> tuple[str, int | tuple[int, int, int, int]]:
-  """Decode a DPP16 control word into a symbolic operation and argument."""
-  if dpp < 0x100: return "quad_perm", tuple((dpp >> shift) & 0x3 for shift in range(0, 8, 2))
-  if dpp in _DPP16_EXACT_OPS: return _DPP16_EXACT_OPS[dpp]
-  if (base := dpp & 0x1f0) in _DPP16_RANGE_OPS: return _DPP16_RANGE_OPS[base], dpp & 0xf
-  return "dpp", dpp
 
 def _matches(data: bytes, cls: type[Inst]) -> bool:
   """Check if data matches all FixedBitFields and op is in allowed."""

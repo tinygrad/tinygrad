@@ -1614,8 +1614,7 @@ class TestModifierInteractions(unittest.TestCase):
     self.assertEqual(st.vgpr[0][2], 0x80000000, "-|(-0.0)| = -0.0")
 
   def test_clamp_with_nan(self):
-    """Clamp with NaN input should still produce NaN."""
-    import math
+    """Clamp with NaN input saturates to 0 on RDNA3 hardware."""
     quiet_nan = 0x7fc00000
     instructions = [
       s_mov_b32(s[0], quiet_nan),
@@ -1623,7 +1622,7 @@ class TestModifierInteractions(unittest.TestCase):
       VOP3(VOP3Op.V_ADD_F32, vdst=v[1], src0=v[0], src1=0.0, clmp=1),
     ]
     st = run_program(instructions, n_lanes=1)
-    self.assertTrue(math.isnan(i2f(st.vgpr[0][1])))
+    self.assertEqual(st.vgpr[0][1], 0)
 
   def test_omod_ignored(self):
     """OMOD field is ignored on RDNA3 hardware."""

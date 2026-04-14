@@ -2,7 +2,7 @@
 from __future__ import annotations
 import re
 from typing import Callable
-from tinygrad.renderer.amd import decode_dpp16
+from test.amd.helpers import decode_dpp16
 from tinygrad.renderer.amd.dsl import Inst, Reg
 
 # Special register mappings for disassembly
