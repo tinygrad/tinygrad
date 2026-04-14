@@ -34,9 +34,8 @@ DEBUG               | [1-7]      | enable debugging output (operations, timings,
 DEV                 | [AMD, NV, ...] | enable a specific backend, see [below](#dev-variable)
 BEAM                | [#]        | number of beams in kernel beam search
 DEFAULT_FLOAT       | [HALF, ...]| specify the default float dtype (FLOAT32, HALF, BFLOAT16, FLOAT64, ...), default to FLOAT32
-IMAGE               | [1-2]      | enable 2d specific optimizations
+IMAGE               | [1]        | enable 2d specific optimizations
 FLOAT16             | [1]        | use float16 for images instead of float32
-HCQ_VISIBLE_DEVICES | [list[int]]| restricts the HCQ devices that are available. The format is a comma-separated list of identifiers (indexing starts with 0).
 JIT                 | [0-2]      | 0=disabled, 1=[jit enabled](quickstart.md#jit) (default), 2=jit enabled, but graphs are disabled
 VIZ                 | [1]        | 0=disabled, 1=[viz enabled](https://github.com/tinygrad/tinygrad/tree/master/tinygrad/viz)
 ALLOW_TF32          | [1]        | enable TensorFloat-32 tensor cores on Ampere or newer GPUs.
@@ -65,8 +64,8 @@ Variable | Value | Description
 ---|---|---
 DEBUG               | >= 1       | Enables debugging and lists devices being used
 DEBUG               | >= 2       | Provides performance metrics for operations, including timing, memory usage, bandwidth for each kernel execution
-DEBUG               | >= 3       | Outputs buffers used for each kernel (shape, dtype and strides) and the applied optimizations at a kernel level
+DEBUG               | >= 3       | Outputs the applied optimizations at a kernel level
 DEBUG               | >= 4       | Outputs the generated kernel code
-DEBUG               | >= 5       | Displays the intermediate representation of the computation UOps (AST)
+DEBUG               | >= 5       | Displays the intermediate representation of the computation UOps
 DEBUG               | >= 6       | Displays the intermediate representation of the computation UOps in a linearized manner, detailing the operation sequence
 DEBUG               | >= 7       | Outputs the assembly code generated for the target hardware
