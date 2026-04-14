@@ -1,8 +1,4 @@
 import os
-
-# TODO: there is a timing bug without this
-os.environ["AMD_AQL"] = "1"
-
 from tinygrad import Tensor, Device
 from tinygrad.helpers import getenv, DEV
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
