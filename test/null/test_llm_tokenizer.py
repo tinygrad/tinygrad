@@ -46,6 +46,18 @@ class TestLLMTokenizer(unittest.TestCase):
   def test_llama_repeat(self): self._test_coding(self.llama_tok, "00000000000000000", [ 931, 931, 931, 931, 931, 410 ])
   def test_llama_pat(self): self._test_coding(self.llama_tok, "today\n  \n", [ 31213, 14211 ])
 
+  def test_tekken_from_gguf_kv(self):
+    kv = {
+      "tokenizer.ggml.tokens": ["<unk>", "<s>", "</s>", "[INST]", "[/INST]", "hello"],
+      "tokenizer.ggml.token_type": [3, 3, 3, 3, 3, 1],
+      "tokenizer.ggml.pre": "tekken",
+    }
+    tok = SimpleTokenizer.from_gguf_kv(kv)
+    self.assertEqual(tok.role("user"), [3])
+    self.assertEqual(tok.encode("hello"), [5])
+    self.assertEqual(tok.end_turn(2), [4])
+    self.assertEqual(tok.role("assistant"), [])
+
   def test_stream_decoder(self):
     """stream_decoder buffers incomplete UTF-8: token 25677 has 3/4 of emoji, token 138 completes it."""
     bs = [*range(33, 127), *range(161, 173), *range(174, 256)]

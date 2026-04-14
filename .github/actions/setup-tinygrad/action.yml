@@ -225,14 +225,12 @@ runs:
       if: inputs.amd == 'true' && runner.os == 'Linux'
       shell: bash
       run: |
-        cargo build --release --manifest-path ./extra/remu/Cargo.toml
-        sudo ln -sf ${{ github.workspace }}/extra/remu/target/release/libremu.so /usr/local/lib/libremu.so
         sudo tee --append /etc/ld.so.conf.d/rocm.conf <<'EOF'
           /opt/rocm/lib
           /opt/rocm/lib64
         EOF
         sudo ldconfig
-    - name: Setup AMD comgr+remu (macOS)
+    - name: Setup AMD comgr (macOS)
       if: inputs.amd == 'true' && runner.os == 'macOS'
       shell: bash
       run: |
@@ -240,7 +238,6 @@ runs:
         curl -s -H "Authorization: token $GH_TOKEN" curl -s https://api.github.com/repos/tinygrad/amdcomgr_dylib/releases/latest | \
           jq -r '.assets[] | select(.name == "libamd_comgr.dylib").browser_download_url' | \
           sudo xargs curl -fL -o /usr/local/lib/libamd_comgr.dylib
-        cargo build --release --manifest-path ./extra/remu/Cargo.toml
 
     # **** gpuocelot ****
 
