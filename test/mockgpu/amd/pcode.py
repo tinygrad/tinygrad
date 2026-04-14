@@ -4,8 +4,12 @@ from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import Ops, UOp
 from tinygrad.uop.decompositions import f2f
 
-# Type alias for vars dict: stores UOps for variables and tuples for lambda definitions
-VarVal = UOp | tuple[str, list[str], str]
+class ArraySource:
+  def __init__(self, loader: Callable[[UOp], UOp]): self.loader = loader
+  def load(self, idx: UOp) -> UOp: return self.loader(idx)
+
+# Type alias for vars dict: stores UOps, array sources, and tuples for lambda definitions
+VarVal = UOp | ArraySource | tuple[str, list[str], str]
 
 def _const(dt, v): return UOp.const(dt, v)
 def _u32(v): return _const(dtypes.uint32, v)
@@ -631,7 +635,7 @@ class Parser:
         if self.at('LBRACKET'):
           return self._handle_bracket(elem, name + idx)
         return elem
-      if self.at('LBRACKET') and name not in self.vars:
+      if self.at('LBRACKET') and (name not in self.vars or isinstance(self.vars.get(name), ArraySource)):
         self.eat('LBRACKET')
         first = self.parse()
         return self._handle_bracket_rest(first, _u32(0), name)
@@ -702,6 +706,11 @@ class Parser:
       dt_suffix = DTYPES.get(self.eat('IDENT').val, dtypes.uint32)
     if var_name is None:
       var_name = self._find_var_name(base)
+    if var_name is not None and isinstance(self.vars.get(var_name), ArraySource):
+      elem = self.vars[var_name].load(_to_u32(first))
+      if dt_suffix is not None: return _cast_to(elem, dt_suffix)
+      if self.at('LBRACKET'): return self._handle_bracket(elem)
+      return elem
     if first.op == Ops.CONST:
       idx = int(first.arg)
       # Check for array element (var@idx)

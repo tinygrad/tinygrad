@@ -5,7 +5,7 @@ from tinygrad.helpers import DEBUG
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp, Ops
 from test.mockgpu.amd.emu import parse_pcode
-from test.mockgpu.amd.pcode import parse_expr
+from test.mockgpu.amd.pcode import ArraySource, parse_expr
 from tinygrad.runtime.autogen.amd.rdna3.str_pcode import PCODE
 from tinygrad.runtime.autogen.amd.rdna3.enum import VOP1Op, VOP2Op, SOP2Op, DSOp, GLOBALOp
 
@@ -112,6 +112,11 @@ class TestParseExpr(unittest.TestCase):
     vrs = {'cond': UOp.const(dtypes.bool, True), 'a': UOp.const(dtypes.uint32, 1), 'b': UOp.const(dtypes.uint32, 0)}
     result = parse_expr('cond ? a : b', vrs)
     self.assertEqual(result.op, Ops.WHERE)
+
+  def test_array_source_index(self):
+    """Test generic indexed ArraySource reads through bracket handling."""
+    result = parse_expr('arr[idx]', {'arr': ArraySource(lambda idx: idx + UOp.const(dtypes.uint32, 10)), 'idx': UOp.const(dtypes.uint32, 5)})
+    self.assertEqual(result.simplify().arg, 15)
 
 class TestForLoopParsing(unittest.TestCase):
   """Test for loop parsing (CLZ/CTZ patterns)."""

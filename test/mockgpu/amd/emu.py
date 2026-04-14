@@ -68,7 +68,7 @@ from tinygrad.runtime.autogen.amd.cdna import ins as irc
 from tinygrad.renderer.amd.dsl import VCC_LO, EXEC_LO, SCC, ttmp
 from tinygrad.runtime.autogen.amd.common import Fmt, OpType
 from test.amd.helpers import decode_dpp16
-from test.mockgpu.amd.pcode import parse_block, _FUNCS, _set_bits, _val_to_bits
+from test.mockgpu.amd.pcode import ArraySource, parse_block, _FUNCS, _set_bits, _val_to_bits
 
 MASK32 = 0xFFFFFFFF
 
@@ -663,22 +663,6 @@ class _Ctx:
       if dest.startswith('D0'): stores.append(self.wsgpr_dyn(vdst_off, val.cast(dtypes.uint32)))
       elif dest.startswith('VGPR['): stores.append(self.vgpr.index(val[0].cast(dtypes.int)).store(val[1].cast(dtypes.uint32)))
     return UOp.sink(*stores, *self.inc_pc())
-
-  def compile_permlane16(self, inst, cross_row: bool) -> UOp:
-    """Compile V_PERMLANE16_B32 and V_PERMLANEX16_B32 directly."""
-    lane, exec_mask = self.range(), self.rexec()
-    src0_off, vdst_off = self.inst_field(type(inst).src0), self.inst_field(type(inst).vdst)
-    src1_off, src2_off = self.inst_field(type(inst).src1), self.inst_field(type(inst).src2)
-    src0_reg = (src0_off >= _c(256)).where(src0_off - _c(256), _c(0))
-    lanesel = _u64(self.rsrc_dyn(src1_off, _c(0, dtypes.int)), self.rsrc_dyn(src2_off, _c(0, dtypes.int)))
-    lane_i = lane.cast(dtypes.int)
-    row, lane_in_row = lane_i // _c(16, dtypes.int), lane_i & _c(15, dtypes.int)
-    sel_shift = (lane_in_row * _c(4, dtypes.int)).cast(dtypes.uint64)
-    sel = ((lanesel >> sel_shift) & UOp.const(dtypes.uint64, 0xF)).cast(dtypes.int)
-    src_row = (row ^ _c(1, dtypes.int)) if cross_row else row
-    src_lane = src_row * _c(16, dtypes.int) + sel
-    val = self.rvgpr_dyn(src0_reg, src_lane)
-    return UOp.sink(self.wvgpr_dyn(vdst_off, lane, val, exec_mask).end(lane), *self.inc_pc())
 
   def compile_vop_pcode(self, op, srcs: dict[str, UOp | int], lane: UOp, vdst_reg: UOp, exec_mask: UOp,
                         opsel_dst_hi: bool | UOp = False, sdst_reg: int | None = None, clmp: int = 0,
@@ -1890,14 +1874,23 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
                 'DATA2': _u64(ctx.rvgpr_dyn(data1_reg, lane), ctx.rvgpr_dyn(data1_reg + _c(1), lane)) if has_data1 else UOp.const(dtypes.uint64, 0)}
       swizzle_env = {}
       if op_name.startswith('DS_SWIZZLE'):
-        for i in range(64):
-          if i < ctx.wave_size:
-            li = _c(i, dtypes.int)
-            swizzle_env[f'thread_in@{i}'] = ctx.rvgpr_dyn(addr_reg, li)
-            swizzle_env[f'thread_valid@{i}'] = _lane_active(exec_mask, li)
-          else:
-            swizzle_env[f'thread_in@{i}'] = _c(0)
-            swizzle_env[f'thread_valid@{i}'] = UOp.const(dtypes.bool, False)
+        def _swizzle_lane(idx: UOp) -> tuple[UOp, UOp]:
+          in_range = _to_u32(idx) < _c(ctx.wave_size)
+          safe_idx = in_range.where(idx.cast(dtypes.int), _c(0, dtypes.int))
+          return in_range, safe_idx
+
+        def _thread_in(idx: UOp) -> UOp:
+          in_range, safe_idx = _swizzle_lane(idx)
+          return in_range.where(ctx.rvgpr_dyn(addr_reg, safe_idx), _c(0))
+
+        def _thread_valid(idx: UOp) -> UOp:
+          in_range, safe_idx = _swizzle_lane(idx)
+          return in_range & _lane_active(exec_mask, safe_idx)
+
+        swizzle_env = {
+          'thread_in': ArraySource(_thread_in),
+          'thread_valid': ArraySource(_thread_valid),
+        }
       # RDNA3 uses ADDR/OFFSET, RDNA4 uses vgpr_a/offset (lowercase) + CalcDsAddr function
       return {'ADDR': addr, 'ADDR_BASE': addr, 'OFFSET': offset, 'OFFSET0': offset0, 'OFFSET1': offset1, '_lds': mem, 'laneId': lane,
               'vgpr_a': ctx.rvgpr_dyn(addr_reg, lane), 'offset': offset, 'offset0': offset0, 'offset1': offset1, **data, **swizzle_env}
