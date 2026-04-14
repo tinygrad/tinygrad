@@ -4,12 +4,8 @@ from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import Ops, UOp
 from tinygrad.uop.decompositions import f2f
 
-class ArraySource:
-  def __init__(self, loader: Callable[[UOp], UOp]): self.loader = loader
-  def load(self, idx: UOp) -> UOp: return self.loader(idx)
-
-# Type alias for vars dict: stores UOps, array sources, and tuples for lambda definitions
-VarVal = UOp | ArraySource | tuple[str, list[str], str]
+# Type alias for vars dict: stores UOps and tuples for lambda definitions
+VarVal = UOp | tuple[str, list[str], str]
 
 def _const(dt, v): return UOp.const(dt, v)
 def _u32(v): return _const(dtypes.uint32, v)
@@ -64,17 +60,10 @@ def _expr_bits(v: UOp) -> int:
     if widths: return max(widths)
   return v.dtype.bitsize
 
-def _count_ones(v: UOp) -> UOp:
+def _countbits(v: UOp) -> UOp:
   dt = dtypes.uint64 if _expr_bits(v) > 32 or v.dtype in (dtypes.uint64, dtypes.int64) else dtypes.uint32
   vv, out = v.cast(dt), _u32(0)
   for i in range(_expr_bits(v)): out = out + ((vv >> _const(dt, i)) & _const(dt, 1)).cast(dtypes.uint32)
-  return out
-
-def _reverse_bits(v: UOp) -> UOp:
-  bits = _expr_bits(v)
-  dt = dtypes.uint64 if bits > 32 or v.dtype in (dtypes.uint64, dtypes.int64) else dtypes.uint32
-  vv, out = v.cast(dt), _const(dt, 0)
-  for i in range(bits): out = out | (((vv >> _const(dt, i)) & _const(dt, 1)) << _const(dt, bits - 1 - i))
   return out
 
 def _set_bit(old, pos, val):
@@ -362,7 +351,7 @@ _FUNCS: dict[str, Callable[..., UOp]] = {
   # System NOPs - these are scheduling hints, no effect on emulation
   'MIN': lambda a, b: (a < b).where(a, b),
   's_nop': lambda a: _u32(0),
-  'count_ones': _count_ones, 'countbits': _count_ones, 'reverse_bits': _reverse_bits,
+  'countbits': _countbits,
   # Address calculation for memory operations
   'CalcDsAddr': lambda a, o, *r: a.cast(dtypes.uint32) + o.cast(dtypes.uint32),
   'CalcGlobalAddr': lambda v, s, *r: v.cast(dtypes.uint64) + s.cast(dtypes.uint64),
@@ -635,7 +624,7 @@ class Parser:
         if self.at('LBRACKET'):
           return self._handle_bracket(elem, name + idx)
         return elem
-      if self.at('LBRACKET') and (name not in self.vars or isinstance(self.vars.get(name), ArraySource)):
+      if self.at('LBRACKET') and name not in self.vars:
         self.eat('LBRACKET')
         first = self.parse()
         return self._handle_bracket_rest(first, _u32(0), name)
@@ -706,11 +695,6 @@ class Parser:
       dt_suffix = DTYPES.get(self.eat('IDENT').val, dtypes.uint32)
     if var_name is None:
       var_name = self._find_var_name(base)
-    if var_name is not None and isinstance(self.vars.get(var_name), ArraySource):
-      elem = self.vars[var_name].load(_to_u32(first))
-      if dt_suffix is not None: return _cast_to(elem, dt_suffix)
-      if self.at('LBRACKET'): return self._handle_bracket(elem)
-      return elem
     if first.op == Ops.CONST:
       idx = int(first.arg)
       # Check for array element (var@idx)

@@ -68,7 +68,7 @@ from tinygrad.runtime.autogen.amd.cdna import ins as irc
 from tinygrad.renderer.amd.dsl import VCC_LO, EXEC_LO, SCC, ttmp
 from tinygrad.runtime.autogen.amd.common import Fmt, OpType
 from test.amd.helpers import decode_dpp16
-from test.mockgpu.amd.pcode import ArraySource, parse_block, _FUNCS, _set_bits, _val_to_bits
+from test.mockgpu.amd.pcode import parse_block, _FUNCS, _set_bits, _val_to_bits
 
 MASK32 = 0xFFFFFFFF
 
@@ -290,13 +290,6 @@ _pcode_fixes = {
   'V_DIV_FIXUP_F64': ('D0.f64 = sign_out ? -abs(S0.f64) : abs(S0.f64)',
     'D0.f64 = isNAN(S0.f64) ? (sign_out ? -INF : +INF) : (sign_out ? -abs(S0.f64) : abs(S0.f64))'),
   'V_TRIG_PREOP_F64': ("result = 64'F((1201'B(2.0 / PI)[1200 : 0] << shift.u32) & 1201'0x1fffffffffffff)", "result = trig_preop_result(shift)"),
-  'DS_SWIZZLE_B32': (
-    'offset = offset1:offset0;\nif (offset >= 0xe000) {\n// FFT decomposition\nmask = offset[4:0];\nfor (i = 0; i < 64; i++) {\n'
-    'j = reverse_bits(i & 0x1f);\nj = (j >> count_ones(mask));\nj |= (i & mask);\nj |= i & 0x20;\n'
-    'thread_out[i] = thread_valid[j] ? thread_in[j] : 0;\n}',
-    'offset = { offset1, offset0 }\nif offset >= 0xe000 then\nmask = offset[4:0]\nfor i in 0 : 63 do\n'
-    'j = reverse_bits(i & 0x1f)\nj = (j >> count_ones(mask))\nj |= (i & mask)\nj |= i & 0x20\n'
-    'thread_out[i] = thread_valid[j] ? thread_in[j] : 0\nendfor\nD0.u32 = thread_out[laneId].u32\nendif'),
 }
 
 def _get_pcode_dict(op) -> dict:
@@ -1872,28 +1865,9 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
       else:
         data = {'DATA': _u64(ctx.rvgpr_dyn(vdata_reg, lane), ctx.rvgpr_dyn(vdata_reg + _c(1), lane)),
                 'DATA2': _u64(ctx.rvgpr_dyn(data1_reg, lane), ctx.rvgpr_dyn(data1_reg + _c(1), lane)) if has_data1 else UOp.const(dtypes.uint64, 0)}
-      swizzle_env = {}
-      if op_name.startswith('DS_SWIZZLE'):
-        def _swizzle_lane(idx: UOp) -> tuple[UOp, UOp]:
-          in_range = _to_u32(idx) < _c(ctx.wave_size)
-          safe_idx = in_range.where(idx.cast(dtypes.int), _c(0, dtypes.int))
-          return in_range, safe_idx
-
-        def _thread_in(idx: UOp) -> UOp:
-          in_range, safe_idx = _swizzle_lane(idx)
-          return in_range.where(ctx.rvgpr_dyn(addr_reg, safe_idx), _c(0))
-
-        def _thread_valid(idx: UOp) -> UOp:
-          in_range, safe_idx = _swizzle_lane(idx)
-          return in_range & _lane_active(exec_mask, safe_idx)
-
-        swizzle_env = {
-          'thread_in': ArraySource(_thread_in),
-          'thread_valid': ArraySource(_thread_valid),
-        }
       # RDNA3 uses ADDR/OFFSET, RDNA4 uses vgpr_a/offset (lowercase) + CalcDsAddr function
       return {'ADDR': addr, 'ADDR_BASE': addr, 'OFFSET': offset, 'OFFSET0': offset0, 'OFFSET1': offset1, '_lds': mem, 'laneId': lane,
-              'vgpr_a': ctx.rvgpr_dyn(addr_reg, lane), 'offset': offset, 'offset0': offset0, 'offset1': offset1, **data, **swizzle_env}
+              'vgpr_a': ctx.rvgpr_dyn(addr_reg, lane), 'offset': offset, 'offset0': offset0, 'offset1': offset1, **data}
     active = _lane_active(exec_mask, lane)
     # saddr < 124 means valid SGPR pair, otherwise use 0 (NULL means no saddr contribution)
     use_saddr = (saddr_reg < _c(124)) if saddr_reg is not None else UOp.const(dtypes.bool, False)
@@ -1932,12 +1906,6 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
         return _write_val(data_bits, val[1], wmem, val[0], active, is_mem=True)
       if is_scratch: return _mem_store_bytes(mem, val[0], val[1], active, data_bits)
       return _mem_store(mem, val[0], val[1], active, 64, data_bits)
-    if dest.startswith('D0'):
-      _wdst = (lambda r, v, l, e: ctx.waccvgpr_dyn(r, l, v, e)) if use_acc else (lambda r, v, l, e: ctx.wvgpr_dyn(r, l, v, e))
-      if (m := re.match(r'D0\[(\d+)\s*:\s*(\d+)\]', dest)):
-        bit_width, dword_idx = int(m.group(1)) - int(m.group(2)) + 1, int(m.group(2)) // 32
-        return _write_val(bit_width, val, _wdst, vdst_reg + _c(dword_idx), lane, exec_mask)
-      return _write_val(data_bits, val, _wdst, vdst_reg, lane, exec_mask)
     if dest.startswith('RETURN_DATA') and writes_return_data:
       _wdata = (lambda r, v, l, e: ctx.waccvgpr_dyn(r, l, v, e)) if use_acc else (lambda r, v, l, e: ctx.wvgpr_dyn(r, l, v, e))
       if (m := re.match(r'RETURN_DATA\[(\d+)\s*:\s*(\d+)\]', dest)):
