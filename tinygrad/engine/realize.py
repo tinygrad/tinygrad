@@ -284,13 +284,15 @@ def exec_kernel(ctx, call, ast):
   bufs, var_vals = _bufs_and_var_vals(ctx, call)
   sink = ast.src[0] if ast.op is Ops.BEAM else ast
 
+  prg = get_runner(call.device, ast)
+  if not prg.p.globals: return
+
   if VALIDATE_WITH_CPU and sink.op is Ops.SINK:
     cpu_bufs = [Buffer("CPU", b.size, b.dtype) for b in bufs]
     for cpu_b, dev_b in zip(cpu_bufs, bufs): cpu_b.ensure_allocated().copyin(dev_b.ensure_allocated().as_memoryview())
     cpu_prg = get_runner("CPU", sink)
-    cpu_prg([cpu_bufs[i].ensure_allocated() for i in prg.p.globals], var_vals, wait=DEBUG >= 2)
+    cpu_prg([cpu_bufs[i].ensure_allocated() for i in cpu_prg.p.globals], var_vals, wait=DEBUG >= 2)
 
-  prg = get_runner(call.device, ast)
   with track_exec(ctx, call, prg.display_name, prg.estimates, [bufs[i] for i in prg.p.globals], var_vals,
                   outputs=tuple(prg.p.outs), inputs=tuple(prg.p.ins), first_run=prg.first_run) as (_, _, timing):
     timing[0] = prg([bufs[i].ensure_allocated() for i in prg.p.globals], var_vals, wait=DEBUG >= 2)
