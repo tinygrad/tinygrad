@@ -96,6 +96,8 @@ pm_manual_bf16_cast = PatternMatcher([
   (UPat(Ops.CAST, dtypes.float, (UPat.var("x", dtypes.bfloat16),)),
    lambda x: (x.bitcast(dtypes.ushort).cast(dtypes.uint)<<16).bitcast(dtypes.float)),
   (UPat(Ops.CAST, dtype=dtypes.bfloat16, src=(UPat.var("x", dtype=dtypes.float),)), cast_float_to_bf16),
+  (UPat(Ops.CONST, dtypes.bfloat16, name="x"),
+   lambda x: (UOp.const(dtypes.float, x.arg).bitcast(dtypes.uint) >> 16).cast(dtypes.ushort).bitcast(dtypes.bfloat16)),
 ])
 
 def uops_to_dtypes(uops:list[UOp]) -> list[DType]: return dedup(u.dtype for u in uops if not isinstance(u.dtype, (ImageDType, PtrDType)))
