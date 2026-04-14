@@ -335,7 +335,7 @@ class TestVizIntegration(unittest.TestCase):
       prg = get_program(ast, Device[Device.DEFAULT].renderer)
     lst = viz.list_items()
     self.assertEqual(len(lst), 3)
-    self.assertEqual(lst[0]["name"], "Process 1 Buffer n1")
+    self.assertEqual(lst[0]["name"], "Callify 1 Buffer n1")
     self.assertEqual(lst[1]["name"], "Schedule 1 Kernel n1")
     self.assertEqual(lst[2]["name"], prg.name)
 
