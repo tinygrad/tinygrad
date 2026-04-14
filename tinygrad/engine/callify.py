@@ -65,7 +65,7 @@ def _make_buffer_view(src:UOp) -> UOp|None:
   if (offset := src.contiguous_view_offset()) is None: return None
   buf = src.base
   if buf.op is Ops.BUFFER_VIEW: offset, buf = offset + buf.arg[1], buf.src[0]
-  return UOp(Ops.BUFFER_VIEW, src.dtype, (buf,), (src.size, offset)).reshape(src.shape)
+  return UOp(Ops.BUFFER_VIEW, src.dtype, (buf,), (src.numel(), offset)).reshape(src.shape)
 
 def contiguous_mops_to_view(c:UOp, src:UOp):
   """CONTIGUOUS(MOPS(BUFFER)) → CONTIGUOUS(BUFFER_VIEW) when movement ops collapse to a contiguous range."""
