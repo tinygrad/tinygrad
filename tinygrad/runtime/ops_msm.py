@@ -156,18 +156,13 @@ class MSMDevice(Compiled):
     msm_drm.DRM_IOCTL_MSM_WAIT_FENCE(self.fd, fence=self.last_fence, flags=0, timeout=timeout, queueid=self.queue_id)
 
 def _find_msm_device() -> str:
-  for i in range(128, 144):
-    path = f"/dev/dri/renderD{i}"
-    if not os.path.exists(path): continue
+  import glob
+  for path in sorted(glob.glob("/dev/dri/renderD*")):
     try:
       fd = os.open(path, os.O_RDWR)
-      try:
-        name_buf = (ctypes.c_char * 256)()
-        # check driver name via DRM version ioctl
-        ver = msm_drm.DRM_IOCTL_VERSION(fd, name=ctypes.addressof(name_buf),
-                                          name_len=256, date_len=0, desc_len=0)
-        name = ctypes.string_at(ver.name, ver.name_len).decode()
-        if name == "msm": return path
+      try: msm_drm.DRM_IOCTL_MSM_GET_PARAM(fd, pipe=msm_drm.MSM_PIPE_3D0, param=msm_drm.MSM_PARAM_GPU_ID)
+      except OSError: continue
       finally: os.close(fd)
+      return path
     except OSError: continue
   raise RuntimeError("No MSM DRM device found")
