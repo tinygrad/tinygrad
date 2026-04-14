@@ -50,6 +50,29 @@ def _extract_bits(val: UOp, hi: int, lo: int) -> UOp:
   if result.dtype != target_dt: result = result.cast(target_dt)
   return result
 
+def _expr_bits(v: UOp) -> int:
+  if v.dtype == dtypes.bool: return 1
+  if v.op in (Ops.AND, Ops.XOR):
+    widths: list[int] = []
+    for src in v.src:
+      if src.op == Ops.CONST and isinstance(src.arg, int) and src.arg > 0 and (src.arg & (src.arg + 1)) == 0:
+        widths.append(src.arg.bit_length())
+    if widths: return max(widths)
+  return v.dtype.bitsize
+
+def _count_ones(v: UOp) -> UOp:
+  dt = dtypes.uint64 if _expr_bits(v) > 32 or v.dtype in (dtypes.uint64, dtypes.int64) else dtypes.uint32
+  vv, out = v.cast(dt), _u32(0)
+  for i in range(_expr_bits(v)): out = out + ((vv >> _const(dt, i)) & _const(dt, 1)).cast(dtypes.uint32)
+  return out
+
+def _reverse_bits(v: UOp) -> UOp:
+  bits = _expr_bits(v)
+  dt = dtypes.uint64 if bits > 32 or v.dtype in (dtypes.uint64, dtypes.int64) else dtypes.uint32
+  vv, out = v.cast(dt), _const(dt, 0)
+  for i in range(bits): out = out | (((vv >> _const(dt, i)) & _const(dt, 1)) << _const(dt, bits - 1 - i))
+  return out
+
 def _set_bit(old, pos, val):
   mask = _u32(1) << pos
   return (old & (mask ^ _u32(0xFFFFFFFF))) | ((val.cast(dtypes.uint32) & _u32(1)) << pos)
@@ -335,6 +358,7 @@ _FUNCS: dict[str, Callable[..., UOp]] = {
   # System NOPs - these are scheduling hints, no effect on emulation
   'MIN': lambda a, b: (a < b).where(a, b),
   's_nop': lambda a: _u32(0),
+  'count_ones': _count_ones, 'countbits': _count_ones, 'reverse_bits': _reverse_bits,
   # Address calculation for memory operations
   'CalcDsAddr': lambda a, o, *r: a.cast(dtypes.uint32) + o.cast(dtypes.uint32),
   'CalcGlobalAddr': lambda v, s, *r: v.cast(dtypes.uint64) + s.cast(dtypes.uint64),
@@ -389,7 +413,7 @@ def tokenize(s: str) -> list[Token]:
     if c.isspace():
       i += 1
       continue
-    if i + 1 < n and s[i:i+2] in ('+=', '-='):
+    if i + 1 < n and s[i:i+2] in ('+=', '-=', '|=', '&=', '^='):
       tokens.append(Token('ASSIGN_OP', s[i:i+2]))
       i += 2
       continue
@@ -503,7 +527,7 @@ class Parser:
   def unary(self) -> UOp:
     if self.try_eat_val('~', 'OP'):
       inner = self.unary()
-      return inner ^ _const(inner.dtype, (1 << (inner.dtype.itemsize * 8)) - 1)
+      return inner ^ _const(inner.dtype, (1 << _expr_bits(inner)) - 1)
     if self.try_eat_val('!', 'OP'):
       inner = self.unary()
       return inner.eq(_const(inner.dtype, 0))
@@ -539,7 +563,10 @@ class Parser:
       self.eat('COMMA')
       lo = self.parse()
       self.eat('RBRACE')
-      return (hi.cast(dt:=_BITS_DT.get((s:=lo.dtype.bitsize) * 2, dtypes.uint64)) << _const(dt, s)) | lo.cast(dt)
+      lo_bits, hi_bits = _expr_bits(lo), _expr_bits(hi)
+      total_bits = lo_bits + hi_bits
+      dt = _BITS_DT.get(total_bits, dtypes.uint32 if total_bits <= 32 else dtypes.uint64)
+      return (hi.cast(dt) << _const(dt, lo_bits)) | lo.cast(dt)
     if self.at('NUM'):
       num = self.eat('NUM').val
       if self.try_eat('QUOTE'):
@@ -576,8 +603,8 @@ class Parser:
       if name == 'OVERFLOW_F32': return _const(dtypes.uint32, 0x7F7FFFFF).bitcast(dtypes.float32)
       if name == 'UNDERFLOW_F64': return _const(dtypes.uint64, 1).bitcast(dtypes.float64)
       if name == 'OVERFLOW_F64': return _const(dtypes.uint64, 0x7FEFFFFFFFFFFFFF).bitcast(dtypes.float64)
-      if name == 'WAVE32': return _const(dtypes.bool, self.vars.get('_wave_size', 32) <= 32)
-      if name == 'WAVE64': return _const(dtypes.bool, self.vars.get('_wave_size', 32) > 32)
+      if name.lower() == 'wave32': return _const(dtypes.bool, self.vars.get('_wave_size', 32) <= 32)
+      if name.lower() == 'wave64': return _const(dtypes.bool, self.vars.get('_wave_size', 32) > 32)
       if name == 'WAVE_MODE' and self.try_eat('DOT') and self.try_eat_val('IEEE', 'IDENT'): return _u32(1)
       if self.try_eat('LBRACE'):
         idx = self.eat('NUM').val
@@ -685,7 +712,7 @@ class Parser:
       dt = dtypes.uint64 if base.dtype in (dtypes.uint64, dtypes.int64) else dtypes.uint32
       base_cast = base.cast(dt) if base.dtype != dt else base
       result = ((base_cast >> _const(dt, idx)) & _const(dt, 1))
-      return _cast_to(result, dt_suffix) if dt_suffix else result
+      return _cast_to(result, dt_suffix) if dt_suffix else result.cast(dtypes.bool)
     if var_name:
       idx_u32 = _to_u32(first)
       elems = [(i, self.vars[f'{var_name}@{i}']) for i in range(256) if f'{var_name}@{i}' in self.vars]
@@ -699,7 +726,7 @@ class Parser:
     dt = dtypes.uint64 if base.dtype in (dtypes.uint64, dtypes.int64) else dtypes.uint32
     base_cast = base.cast(dt) if base.dtype != dt else base
     result = (base_cast >> first.cast(dt)) & _const(dt, 1)
-    return _cast_to(result, dt_suffix) if dt_suffix else result
+    return _cast_to(result, dt_suffix) if dt_suffix else result.cast(dtypes.bool)
 
   def _handle_brace_index(self, base) -> UOp:
     self.eat('LBRACE')
@@ -845,7 +872,7 @@ class Parser:
         hi = mem.index(safe_idx_hi, *gate)
         combined = val.cast(dtypes.uint64) | (hi.cast(dtypes.uint64) << UOp.const(dtypes.uint64, 32))
         val = is_unaligned.where((combined >> (byte_off.cast(dtypes.uint64) * UOp.const(dtypes.uint64, 8))).cast(dtypes.uint32), val)
-    return val
+    return _cast_to(val, dt)
 
   def _coerce_cmp(self, l: UOp, r: UOp) -> tuple[UOp, UOp]:
     if l.dtype != r.dtype:
@@ -1044,14 +1071,12 @@ def parse_block(lines: list[str], start: int, env: dict[str, VarVal], funcs: dic
       elif j < len(toks) and toks[j].type == 'EQUALS': j += 1
       rhs = parse_tokens(toks[j:], env, funcs)
       if compound_op:
-        mem = env.get('_vmem') if '_vmem' in env else env.get('_lds')
-        if isinstance(mem, UOp):
-          adt = dtypes.uint64 if addr.dtype == dtypes.uint64 else dtypes.uint32
-          idx = (addr >> _const(adt, 2)).cast(dtypes.int)
-          old = mem.index(idx)
-          if dt in (dtypes.uint64, dtypes.int64, dtypes.float64):
-            old = old.cast(dtypes.uint64) | (mem.index(((addr + _const(adt, 4)) >> _const(adt, 2)).cast(dtypes.int)).cast(dtypes.uint64) << _u64(32))
-          rhs = (old + rhs) if compound_op == '+=' else (old - rhs)
+        old = Parser([Token('EOF', '')], env, funcs)._handle_mem_load(addr, dt)
+        if compound_op == '+=': rhs = old + rhs
+        elif compound_op == '-=': rhs = old - rhs
+        elif compound_op == '|=': rhs = old | rhs
+        elif compound_op == '&=': rhs = old & rhs
+        elif compound_op == '^=': rhs = old ^ rhs
       if assigns is not None: assigns.append((f'MEM[{_tok_str(addr_toks)}].{dt_name}', (addr, rhs)))
       i += 1
       continue
@@ -1188,7 +1213,11 @@ def parse_block(lines: list[str], start: int, env: dict[str, VarVal], funcs: dic
       old = block_assigns.get(var, env.get(var, _u32(0)))
       rhs = parse_tokens(toks[assign_op+1:], env, funcs)
       if rhs.dtype != old.dtype: rhs = rhs.cast(old.dtype)
-      block_assigns[var] = env[var] = (old + rhs) if toks[assign_op].val == '+=' else (old - rhs)
+      if toks[assign_op].val == '+=': block_assigns[var] = env[var] = old + rhs
+      elif toks[assign_op].val == '-=': block_assigns[var] = env[var] = old - rhs
+      elif toks[assign_op].val == '|=': block_assigns[var] = env[var] = old | rhs
+      elif toks[assign_op].val == '&=': block_assigns[var] = env[var] = old & rhs
+      elif toks[assign_op].val == '^=': block_assigns[var] = env[var] = old ^ rhs
       i += 1
       continue
 
@@ -1335,4 +1364,3 @@ def parse_block(lines: list[str], start: int, env: dict[str, VarVal], funcs: dic
 
 def parse_expr(expr: str, env: dict[str, VarVal], funcs: dict | None = None) -> UOp:
   return parse_tokens(tokenize(expr.strip().rstrip(';')), env, funcs)
-

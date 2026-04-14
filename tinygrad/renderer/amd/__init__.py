@@ -5,6 +5,16 @@ from tinygrad.renderer.amd.dsl import Inst, FixedBitField, EnumBitField
 # SDWA/DPP variant detection: src0 field (bits 0-8) encodes the variant
 # 0xf9 (249) = SDWA, 0xfa (250) = DPP16 for CDNA (GFX9)
 _VARIANT_SRC0 = {"_SDWA_SDST": 0xf9, "_SDWA": 0xf9, "_DPP16": 0xfa}
+_DPP16_RANGE_OPS = {0x100: "row_shl", 0x110: "row_shr", 0x120: "row_ror", 0x150: "row_newbcast", 0x160: "row_share", 0x170: "row_xmask"}
+_DPP16_EXACT_OPS = {0x130: ("wave_shl", 1), 0x134: ("wave_rol", 1), 0x138: ("wave_shr", 1), 0x13c: ("wave_ror", 1),
+                    0x140: ("row_mirror", 0), 0x141: ("row_half_mirror", 0), 0x142: ("row_bcast", 15), 0x143: ("row_bcast", 31)}
+
+def decode_dpp16(dpp: int) -> tuple[str, int | tuple[int, int, int, int]]:
+  """Decode a DPP16 control word into a symbolic operation and argument."""
+  if dpp < 0x100: return "quad_perm", tuple((dpp >> shift) & 0x3 for shift in range(0, 8, 2))
+  if dpp in _DPP16_EXACT_OPS: return _DPP16_EXACT_OPS[dpp]
+  if (base := dpp & 0x1f0) in _DPP16_RANGE_OPS: return _DPP16_RANGE_OPS[base], dpp & 0xf
+  return "dpp", dpp
 
 def _matches(data: bytes, cls: type[Inst]) -> bool:
   """Check if data matches all FixedBitFields and op is in allowed."""
@@ -32,11 +42,13 @@ _FORMATS: dict[str, list[type[Inst]]] | None = None
 def _load_formats() -> dict[str, list[type[Inst]]]:
   global _FORMATS
   if _FORMATS is not None: return _FORMATS
-  from tinygrad.runtime.autogen.amd.rdna3.ins import (VOP1, VOP1_SDST, VOP1_LIT, VOP2, VOP2_LIT, VOP3, VOP3_SDST, VOP3SD, VOP3P, VOPC, VOPD,
-    VINTERP, SOP1, SOP1_LIT, SOP2, SOP2_LIT, SOPC, SOPK, SOPK_LIT, SOPP, SMEM, DS, FLAT, GLOBAL, SCRATCH)
-  from tinygrad.runtime.autogen.amd.rdna4.ins import (VOP1 as R4_VOP1, VOP1_SDST as R4_VOP1_SDST, VOP1_LIT as R4_VOP1_LIT,
-    VOP2 as R4_VOP2, VOP2_LIT as R4_VOP2_LIT, VOP3 as R4_VOP3, VOP3_SDST as R4_VOP3_SDST, VOP3SD as R4_VOP3SD, VOP3P as R4_VOP3P,
-    VOPC as R4_VOPC, VOPD as R4_VOPD, VINTERP as R4_VINTERP, SOP1 as R4_SOP1, SOP1_LIT as R4_SOP1_LIT,
+  from tinygrad.runtime.autogen.amd.rdna3.ins import (VOP1, VOP1_SDST, VOP1_DPP16, VOP1_LIT, VOP2, VOP2_DPP16, VOP2_LIT, VOP3, VOP3_SDST,
+    VOP3SD, VOP3P, VOPC, VOPC_DPP16, VOPD, VINTERP, SOP1, SOP1_LIT, SOP2, SOP2_LIT, SOPC, SOPK, SOPK_LIT, SOPP, SMEM, DS, FLAT, GLOBAL,
+    SCRATCH)
+  from tinygrad.runtime.autogen.amd.rdna4.ins import (VOP1 as R4_VOP1, VOP1_SDST as R4_VOP1_SDST, VOP1_DPP16 as R4_VOP1_DPP16,
+    VOP1_LIT as R4_VOP1_LIT, VOP2 as R4_VOP2, VOP2_DPP16 as R4_VOP2_DPP16, VOP2_LIT as R4_VOP2_LIT, VOP3 as R4_VOP3,
+    VOP3_SDST as R4_VOP3_SDST, VOP3SD as R4_VOP3SD, VOP3P as R4_VOP3P, VOPC as R4_VOPC, VOPC_DPP16 as R4_VOPC_DPP16,
+    VOPD as R4_VOPD, VINTERP as R4_VINTERP, SOP1 as R4_SOP1, SOP1_LIT as R4_SOP1_LIT,
     SOP2 as R4_SOP2, SOP2_LIT as R4_SOP2_LIT, SOPC as R4_SOPC, SOPC_LIT as R4_SOPC_LIT,
     SOPK as R4_SOPK, SOPK_LIT as R4_SOPK_LIT, SOPP as R4_SOPP,
     SMEM as R4_SMEM, DS as R4_DS, VFLAT as R4_FLAT, VGLOBAL as R4_GLOBAL, VSCRATCH as R4_SCRATCH)
@@ -50,10 +62,11 @@ def _load_formats() -> dict[str, list[type[Inst]]]:
   # Order: base before _LIT (base matches regular ops, _LIT catches lit-only ops excluded from base)
   _FORMATS = {
     "rdna3": [VOPD, VOP3P, VINTERP, VOP3SD, VOP3_SDST, VOP3, DS, GLOBAL, SCRATCH, FLAT, SMEM,
-              SOP1, SOP1_LIT, SOP2, SOP2_LIT, SOPC, SOPK, SOPK_LIT, SOPP, VOPC, VOP1_SDST, VOP1, VOP1_LIT, VOP2, VOP2_LIT],
+              SOP1, SOP1_LIT, SOP2, SOP2_LIT, SOPC, SOPK, SOPK_LIT, SOPP, VOPC_DPP16, VOPC, VOP1_SDST, VOP1_DPP16, VOP1, VOP1_LIT,
+              VOP2_DPP16, VOP2, VOP2_LIT],
     "rdna4": [R4_VOPD, R4_VOP3P, R4_VINTERP, R4_VOP3SD, R4_VOP3_SDST, R4_VOP3, R4_DS, R4_GLOBAL, R4_SCRATCH, R4_FLAT, R4_SMEM,
-              R4_SOP1, R4_SOP1_LIT, R4_SOPC, R4_SOPC_LIT, R4_SOPP, R4_SOPK, R4_SOPK_LIT, R4_VOPC, R4_VOP1_SDST, R4_VOP1, R4_VOP1_LIT,
-              R4_SOP2, R4_SOP2_LIT, R4_VOP2, R4_VOP2_LIT],
+              R4_SOP1, R4_SOP1_LIT, R4_SOPC, R4_SOPC_LIT, R4_SOPP, R4_SOPK, R4_SOPK_LIT, R4_VOPC_DPP16, R4_VOPC, R4_VOP1_SDST,
+              R4_VOP1_DPP16, R4_VOP1, R4_VOP1_LIT, R4_SOP2, R4_SOP2_LIT, R4_VOP2_DPP16, R4_VOP2, R4_VOP2_LIT],
     "cdna": [C_VOP3PX2, C_VOP3P_MFMA, C_VOP3P, C_VOP3SD, C_VOP3_SDST, C_VOP3, C_DS, C_GLOBAL, C_SCRATCH, C_FLAT, C_MUBUF, C_SMEM,
               C_SOP1, C_SOPC, C_SOPP, C_SOPK, C_SOPK_LIT, C_VOPC_SDWA_SDST, C_VOPC,
               C_VOP1_DPP16, C_VOP1_SDWA, C_VOP1, C_VOP2_DPP16, C_VOP2_SDWA, C_SOP2, C_VOP2, C_VOP2_LIT],

@@ -7,7 +7,7 @@ from tinygrad.uop.ops import UOp, Ops
 from test.mockgpu.amd.emu import parse_pcode
 from test.mockgpu.amd.pcode import parse_expr
 from tinygrad.runtime.autogen.amd.rdna3.str_pcode import PCODE
-from tinygrad.runtime.autogen.amd.rdna3.enum import VOP1Op, VOP2Op, SOP2Op, DSOp
+from tinygrad.runtime.autogen.amd.rdna3.enum import VOP1Op, VOP2Op, SOP2Op, DSOp, GLOBALOp
 
 def _srcs():
   """Create minimal source variables for pcode parsing."""
@@ -164,6 +164,20 @@ class TestForLoopParsing(unittest.TestCase):
 class TestDSPcodePatterns(unittest.TestCase):
   """Test DS instruction pcode patterns."""
 
+  def test_global_atomic_add_f32_parsing(self):
+    """Test GLOBAL_ATOMIC_ADD_F32 keeps memory values in float dtype."""
+    vmem = UOp(Ops.PARAM, dtypes.uint32.ptr(1024), arg=2)
+    srcs = {
+      'ADDR': UOp.const(dtypes.uint64, 0),
+      'DATA': UOp.const(dtypes.uint32, 0x3f800000),
+      '_vmem': vmem,
+    }
+
+    _, assigns = parse_pcode(PCODE[GLOBALOp.GLOBAL_ATOMIC_ADD_F32], srcs)
+    mem_write = next(val for dest, val in assigns if dest == 'MEM[ADDR].f32')
+    self.assertEqual(mem_write[1].op, Ops.ADD)  # type: ignore[index]
+    self.assertEqual(mem_write[1].dtype, dtypes.float32)  # type: ignore[index]
+
   def test_ds_load_b32_pcode(self):
     """Test DS_LOAD_B32 pcode is parseable."""
     pcode = PCODE.get(DSOp.DS_LOAD_B32)
@@ -284,6 +298,47 @@ class TestConditionalParsing(unittest.TestCase):
     self.assertTrue(dest.startswith('D0'))
     # Result should be a WHERE (ternary becomes WHERE)
     self.assertEqual(val.op, Ops.WHERE)
+
+class TestConcatWidthParsing(unittest.TestCase):
+  """Test that bit extracts keep the right width for concat/unary ops."""
+
+  def test_permlanex16_altrow_concat(self):
+    for row, expected in [(0, 1), (1, 0), (2, 3), (3, 2)]:
+      parsed = parse_expr('{ row[1], ~row[0] }', {'row': UOp.const(dtypes.uint32, row)})
+      self.assertEqual(parsed.simplify().arg, expected)
+
+  def test_permlane64_altlane_concat(self):
+    for lane, expected in [(0, 32), (1, 33), (31, 63), (32, 0), (63, 31)]:
+      parsed = parse_expr('{ ~lane[5], lane[4:0] }', {'lane': UOp.const(dtypes.uint32, lane)})
+      self.assertEqual(parsed.simplify().arg, expected)
+
+  def test_permlane64_wave64_pcode_indices(self):
+    vgpr = UOp(Ops.PARAM, dtypes.uint32.ptr(256), arg=0)
+    srcs = {
+      'SRC0': UOp.const(dtypes.uint32, 0),
+      'VDST': UOp.const(dtypes.uint32, 1),
+      'EXEC_LO': UOp.const(dtypes.uint32, 0xFFFFFFFF),
+      'EXEC': UOp.const(dtypes.uint64, 0xFFFFFFFFFFFFFFFF),
+      '_vgpr': vgpr,
+      '_wave_size': 64,
+      'S0': UOp.const(dtypes.uint32, 0),
+      'S1': UOp.const(dtypes.uint32, 0),
+      'S2': UOp.const(dtypes.uint32, 0),
+    }
+
+    def load_idx(v: UOp) -> int:
+      simp = v.simplify()
+      self.assertEqual(simp.op, Ops.LOAD)
+      self.assertEqual(simp.src[0].op, Ops.INDEX)
+      idx = simp.src[0].src[1].simplify()
+      self.assertEqual(idx.op, Ops.CONST)
+      return idx.arg
+
+    _, assigns = parse_pcode(PCODE[VOP1Op.V_PERMLANE64_B32_E32], srcs)
+    self.assertEqual(len(assigns), 64)
+    for lane, (dst_idx, src_idx) in {0: (64, 32), 31: (95, 63), 32: (96, 0), 63: (127, 31)}.items():
+      self.assertEqual(assigns[lane][1][0].simplify().arg, dst_idx)  # type: ignore[index]
+      self.assertEqual(load_idx(assigns[lane][1][1]), src_idx)  # type: ignore[index]
 
 class TestAllPcode(unittest.TestCase):
   """Test that all pcode from all architectures can be parsed."""

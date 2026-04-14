@@ -835,6 +835,30 @@ class TestDsPermute(unittest.TestCase):
       self.assertEqual(st.vgpr[lane][2], expected, f"lane {lane}: expected v[1] from lane {src_lane} = {expected}, got {st.vgpr[lane][2]}")
 
 
+class TestDsSwizzle(unittest.TestCase):
+  """Tests for DS_SWIZZLE_B32 FFT decomposition mode."""
+
+  def test_ds_swizzle_b32_fft_identity(self):
+    instructions = [
+      v_add_nc_u32_e32(v[0], 100, v[255]),
+      DS(DSOp.DS_SWIZZLE_B32, addr=v[0], vdst=v[1], offset0=0x1f, offset1=0xe0),
+      s_waitcnt_lgkmcnt(sdst=NULL, simm16=0),
+    ]
+    st = run_program(instructions, n_lanes=32)
+    for lane in range(32): self.assertEqual(st.vgpr[lane][1], lane + 100)
+
+  def test_ds_swizzle_b32_fft_bitreverse(self):
+    instructions = [
+      v_add_nc_u32_e32(v[0], 100, v[255]),
+      DS(DSOp.DS_SWIZZLE_B32, addr=v[0], vdst=v[1], offset0=0x00, offset1=0xe0),
+      s_waitcnt_lgkmcnt(sdst=NULL, simm16=0),
+    ]
+    st = run_program(instructions, n_lanes=32)
+    for lane in range(32):
+      src_lane = int(f"{lane:05b}"[::-1], 2)
+      self.assertEqual(st.vgpr[lane][1], src_lane + 100)
+
+
 class TestDSSubDword(unittest.TestCase):
   """Tests for sub-dword DS operations (ds_store_b16, ds_store_b16_d16_hi)."""
 
