@@ -558,6 +558,8 @@ class HCQAllocatorBase(LRUAllocator[HCQDeviceType], Generic[HCQDeviceType]):
   @suppress_finalizing
   def _free(self, buf:HCQBuffer, options:BufferSpec|None=None):
     for dev in buf.mapped_devs: dev.synchronize()
+    for d, mb in buf.mappings.items():
+      if hasattr(d.allocator, '_do_free'): d.allocator._do_free(mb, options)
     if hasattr(self, '_do_free'): self._do_free(buf, options)
 
   def _offset(self, buf, size:int, offset:int) -> HCQBuffer: return buf.offset(offset=offset, size=size)
