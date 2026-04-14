@@ -579,7 +579,7 @@ isel_matcher = PatternMatcher([
 # so we rematerialize. This is different from rematerialization you might want to do in regalloc because it is not optional,
 # regalloc shouldn't rematerialize if a src of the instruction is dead, but here you need to as there's no fallback load from stack
 def flag_rematerialize(ctx:PreRegAllocContext, x:UOp):
-  flag_def = x if x.arg in X86GroupOp.WriteFlags or x.op is Ops.RANGE else x.src[-1] if x.arg in X86GroupOp.ReadFlags else None
+  flag_def = x if x.arg in X86GroupOp.WriteFlags or x.op in (Ops.RANGE, Ops.END) else x.src[-1] if x.arg in X86GroupOp.ReadFlags else None
   if flag_def is None: return None
   if ctx.lock is not None and ctx.lock is not flag_def: ctx.clobbered.add(ctx.lock)
   ctx.lock = flag_def
@@ -588,7 +588,7 @@ def flag_rematerialize(ctx:PreRegAllocContext, x:UOp):
   return (x, [flag_def, x])
 
 pre_regalloc_matcher = PatternMatcher([
-  (UPat((Ops.INS, Ops.RANGE), name="x"), flag_rematerialize),
+  (UPat((Ops.INS, Ops.RANGE, Ops.END), name="x"), flag_rematerialize),
 ])
 
 # ***** post register allocation *****
