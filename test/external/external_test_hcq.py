@@ -1,6 +1,7 @@
 import unittest, ctypes, struct, time, array
 from tinygrad import Device, Tensor, dtypes
-from tinygrad.helpers import to_mv, CI
+from tinygrad.helpers import CI
+from tinygrad.runtime.support.python import to_mv
 from tinygrad.device import Buffer, BufferSpec
 from tinygrad.engine.realize import get_runner
 

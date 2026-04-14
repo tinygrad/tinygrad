@@ -1,7 +1,8 @@
 import random, ctypes
 import numpy as np
 from tinygrad.device import Buffer, Device
-from tinygrad.helpers import Context, getenv, from_mv
+from tinygrad.helpers import Context, getenv
+from tinygrad.runtime.support.python import from_mv
 from tinygrad.dtype import dtypes
 from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.engine.realize import BufferXfer, get_runner

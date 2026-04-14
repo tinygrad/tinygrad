@@ -4,7 +4,7 @@ from tinygrad.runtime.support.am.ip import AM_GMC
 from tinygrad.runtime.support.hcq import MMIOInterface
 from tinygrad.runtime.support.memory import PageTableTraverseContext, AddrSpace
 from tinygrad.runtime.autogen.am import am
-from tinygrad.helpers import mv_address
+from tinygrad.runtime.support.python import mv_address
 
 class FakeGMC(AM_GMC):
   def __init__(self, adev):

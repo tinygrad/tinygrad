@@ -3,7 +3,8 @@ import functools, unittest, ctypes
 
 from tinygrad.device import Device, Buffer
 from tinygrad.tensor import Tensor, _to_np_dtype
-from tinygrad.helpers import Context, dedup, from_mv
+from tinygrad.helpers import Context, dedup
+from tinygrad.runtime.support.python import from_mv
 from tinygrad.dtype import dtypes
 from tinygrad.engine.jit import MultiGraphRunner
 from tinygrad.engine.realize import BufferXfer, get_runner, CompiledRunner

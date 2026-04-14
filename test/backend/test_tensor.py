@@ -2,7 +2,8 @@ import numpy as np
 import torch
 import unittest, copy, mmap, random, math, array
 from tinygrad import Tensor, Device, dtypes, nn
-from tinygrad.helpers import getenv, temp, mv_address
+from tinygrad.helpers import getenv, temp
+from tinygrad.runtime.support.python import mv_address
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
 from hypothesis import given, settings, strategies as strat
 from tinygrad.device import is_dtype_supported
