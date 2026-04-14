@@ -16,7 +16,7 @@ from tinygrad.uop.ops import _broadcast_shape
 from tinygrad.engine.schedule import ExecItem, complete_create_schedule_with_vars
 from tinygrad.device import Buffer, canonicalize_device
 from tinygrad.engine.realize import run_schedule
-from tinygrad.engine.allocations import transform_to_call
+from tinygrad.engine.callify import transform_to_call
 
 # *** all in scope Tensors are here. this gets relevant UOps ***
 
