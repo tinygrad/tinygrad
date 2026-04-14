@@ -1,10 +1,11 @@
 from typing import cast, Callable
+from contextlib import contextmanager
 import time, pprint, random, itertools, math
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import all_same, colored, DEBUG, GlobalCounters, ansilen, NOOPT, all_int, Metadata, TRACEMETA, TracingKey
-from tinygrad.helpers import DEVECTORIZE, time_to_str, VALIDATE_WITH_CPU, cpu_profile, PROFILE, ProfilePointEvent, cpu_events, prod, unwrap
+from tinygrad.helpers import BEAM, DEVECTORIZE, size_to_str, time_to_str, VALIDATE_WITH_CPU, cpu_profile, PROFILE, ProfilePointEvent, cpu_events, prod, unwrap
 from tinygrad.helpers import EMULATED_DTYPES
-from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer, buffers
+from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer, buffers, graph_rewrite
 from tinygrad.device import Device, Buffer, MultiBuffer
 from tinygrad.renderer import ProgramSpec, Estimates
 from tinygrad.codegen import get_program
@@ -115,8 +116,7 @@ class BufferXfer(BufferCopy):
 class EncDec(Runner):
   def __init__(self, cf:UOp, total_sz:int, device:str):
     self.shape, self.pos_var = tuple(s.arg for s in cf.src if s.op is Ops.CONST), cf.variables()[0].expr
-    name = f"enc/dec {total_sz/1e6:7.2f}M, HEVC" if total_sz >= 1e6 else f"enc/dec {total_sz:8d}, HEVC"
-    super().__init__(colored(name, "yellow"), device, Estimates(lds=total_sz, mem=total_sz))
+    super().__init__(colored(f"enc/dec {size_to_str(total_sz)}, HEVC", "yellow"), device, Estimates(lds=total_sz, mem=total_sz))
   def __call__(self, rawbufs:list[Buffer], var_vals:dict[str, int], wait=False):
     st = time.perf_counter()
     rawbufs[0].allocator._encode_decode(rawbufs[0]._buf, rawbufs[1]._buf, rawbufs[2]._buf,
@@ -233,38 +233,90 @@ def _expand_multibuffer(linear: UOp) -> UOp:
         new_src.append(ast.call(*selected, *bind_uops, metadata=si.arg.metadata, fixedvars=((dnums[0].expr,j),) if len(dnums) else ()))
   return linear.replace(src=tuple(new_src))
 
-def _exec_view(ctx, si, ast): buffers[si.src[1]] = (base:=si.src[2].buffer).view(si.src[1].arg, ast.dtype, ast.arg[1]*base.dtype.itemsize)
+pm_add_beam = PatternMatcher([
+  (UPat(Ops.CALL, src=(UPat(Ops.SINK, name="sink"),), name="call", allow_any_len=True),
+   lambda call,sink: UOp(Ops.BEAM, src=(sink,), arg=BEAM.value).call(*call.src[1:], metadata=call.arg.metadata, fixedvars=call.arg.fixedvars)),
+])
 
-def _exec_copy(ctx, si, ast):
-  var_vals, do_update_stats = ctx
-  bufs = [b.buffer for b in si.src[1:] if b.op is not Ops.BIND]
-  dest, src = bufs[0].ensure_allocated(), bufs[1].ensure_allocated()
+def _add_beam(linear:UOp) -> UOp:
+  return graph_rewrite(linear, pm_add_beam, name="add beam", walk=True) if BEAM >= 1 else linear
+
+def _bufs_and_var_vals(ctx, call:UOp) -> tuple[list[Buffer], dict[str, int]]:
+  bufs = [b.buffer.ensure_allocated() for b in call.src[1:] if b.op is not Ops.BIND]
+  return bufs, ctx[0] if not call.arg.fixedvars else {**ctx[0], **dict(call.arg.fixedvars)}
+
+@contextmanager
+def track_exec(ctx, call:UOp, display_name:str, estimates:Estimates, bufs:list[Buffer], var_vals:dict[str, int], *, outputs:tuple[int, ...]=(0,),
+               inputs:tuple[int, ...]=(1,), first_run=False):
+  device = bufs[0].device
+  timing: list[float|None] = [None]
+
+  if PROFILE: cpu_events.append(ProfilePointEvent(device, "exec", len(cpu_events), {"metadata": call.arg.metadata, "var_vals": var_vals,
+    "bufs": [b.trace_num for b in bufs], "name": display_name, "outputs": outputs, "inputs": inputs }))
+
   st = time.perf_counter()
-  if hasattr(alc:=Device[dest.device].allocator, '_transfer') and alc.supports_transfer and dest.device.split(":")[0] == src.device.split(":")[0]:
-    alc._transfer(dest._buf, src._buf, dest.nbytes, src_dev=src.allocator.dev, dest_dev=alc.dev)
-  else: dest.copyin(src.as_memoryview(allow_zero_copy=True))
-  Device[dest.device].synchronize()
-  if do_update_stats:
-    update_stats(f"copy {dest.nbytes:8d}, {dest.device[:7]:>7s} <- {src.device[:7]:7s}", dest.device,
-                 Estimates(lds=dest.nbytes, mem=dest.nbytes), var_vals, time.perf_counter() - st, 2, metadata=si.arg.metadata)
+  try: yield bufs, var_vals, timing
+  except Exception: raise
+  else:
+    if not ctx[1]: return
+    if timing[0] is None and DEBUG >= 2:
+      Device[device].synchronize()
+      timing[0] = time.perf_counter() - st
+    update_stats(display_name, device, estimates, var_vals, timing[0], len(bufs), jit=False, metadata=call.arg.metadata, first_run=first_run)
 
-def _exec_kernel(ctx, si, ast):
-  var_vals, do_update_stats = ctx
-  if si.arg.fixedvars: var_vals = {**var_vals, **dict(si.arg.fixedvars)}
-  bufs = [b.buffer for b in si.src[1:] if b.op is not Ops.BIND]
-  prg = get_runner(bufs[0].device, ast)
-  et = prg([bufs[i].ensure_allocated() for i in prg.p.globals], var_vals, wait=DEBUG >= 2)
-  if do_update_stats:
-    update_stats(prg.display_name, prg.device, prg.estimates, var_vals, et, len(prg.p.globals), metadata=si.arg.metadata, first_run=prg.first_run)
+def exec_view(ctx, call, ast):
+  bufs, var_vals = _bufs_and_var_vals(ctx, call)
+  buf_view = bufs[1].view(call.src[1].arg, ast.dtype, ast.arg[1]*bufs[1].dtype.itemsize)
+  with track_exec(ctx, call, colored(f"view {buf_view.nbytes:8d} @ {buf_view.offset:<10d}", "yellow"), Estimates(), [buf_view, bufs[1]], var_vals):
+    buffers[call.src[1]] = buf_view
+
+def exec_copy(ctx, call, ast):
+  bufs, var_vals = _bufs_and_var_vals(ctx, call)
+  dest, src = bufs[0], bufs[1]
+
+  is_transfer = hasattr(alc:=Device[dest.device].allocator, '_transfer') and alc.supports_transfer and dest.device.split(":")[0] == src.device.split(":")[0]
+  prg = BufferXfer(dest.nbytes, dest.device, src.device) if is_transfer else BufferCopy(dest.nbytes, dest.device, src.device)
+
+  sz = f"{dest.nbytes/1e6:7.2f}M" if dest.nbytes >= 1e6 else f"{dest.nbytes:8d}"
+  name = colored(f"{'xfer' if is_transfer else 'copy'} {sz}, {dest.device[:7]:>7s} <- {src.device[:7]:7s}", "yellow")
+  with track_exec(ctx, call, name, Estimates(lds=dest.nbytes, mem=dest.nbytes), [dest, src], var_vals): prg.copy(dest, src)
+
+def exec_kernel(ctx, call, ast):
+  bufs, var_vals = _bufs_and_var_vals(ctx, call)
+  sink = ast.src[0] if ast.op is Ops.BEAM else ast
+
+  if VALIDATE_WITH_CPU and sink.op is Ops.SINK:
+    cpu_bufs = [Buffer("CPU", b.size, b.dtype) for b in bufs]
+    for cpu_b, dev_b in zip(cpu_bufs, bufs): cpu_b.ensure_allocated().copyin(dev_b.as_memoryview())
+    cpu_prg = get_runner("CPU", sink)
+    cpu_prg([cpu_bufs[i] for i in prg.p.globals], var_vals, wait=DEBUG >= 2)
+
+  prg = get_runner(call.device, ast)
+  with track_exec(ctx, call, prg.display_name, prg.estimates, [bufs[i] for i in prg.p.globals], var_vals,
+                  outputs=tuple(prg.p.outs), inputs=tuple(prg.p.ins), first_run=prg.first_run) as (_, _, timing):
+    timing[0] = prg([bufs[i] for i in prg.p.globals], var_vals, wait=DEBUG >= 2)
     prg.first_run = False
 
+  if VALIDATE_WITH_CPU and sink.op is Ops.SINK:
+    import numpy as np
+    for i in prg.p.outs: np.testing.assert_allclose(call_bufs[i].numpy(), cpu_bufs[i].numpy(), rtol=1e-3, atol=1e-3)
+
+def exec_encdec(ctx, call, ast):
+  bufs, var_vals = _bufs_and_var_vals(ctx, call)
+  shape, pos_var = tuple(s.arg for s in ast.src if s.op is Ops.CONST), ast.variables()[0].expr
+  estimates = Estimates(lds=bufs[0].nbytes, mem=bufs[0].nbytes)
+  with track_exec(ctx, call, colored(f"enc/dec {size_to_str(bufs[0].nbytes)}", "yellow"), estimates, bufs, var_vals):
+    bufs[0].allocator._encode_decode(bufs[0]._buf, bufs[1]._buf, bufs[2]._buf, [x._buf for x in bufs[3:]], shape, var_vals[pos_var])
+
 pm_exec = PatternMatcher([
-  (UPat(Ops.CALL, src=(UPat(Ops.BUFFER_VIEW, name="ast"),), name="si", allow_any_len=True), _exec_view),
-  (UPat(Ops.CALL, src=(UPat(Ops.COPY, name="ast"),), name="si", allow_any_len=True), _exec_copy),
-  (UPat(Ops.CALL, src=(UPat((Ops.SINK, Ops.PROGRAM), name="ast"),), name="si", allow_any_len=True), _exec_kernel),
+  (UPat(Ops.CALL, src=(UPat(Ops.BUFFER_VIEW, name="ast"),), name="call", allow_any_len=True), exec_view),
+  (UPat(Ops.CALL, src=(UPat(Ops.COPY, name="ast"),), name="call", allow_any_len=True), exec_copy),
+  (UPat(Ops.CALL, src=(UPat(Ops.TUPLE, src=(UPat(Ops.BEAM, name="ast"),)),), name="call", allow_any_len=True), exec_kernel),
+  (UPat(Ops.CALL, src=(UPat((Ops.SINK, Ops.PROGRAM, Ops.BEAM), name="ast"),), name="call", allow_any_len=True), exec_kernel),
+  (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="encdec", name="ast"),), name="call", allow_any_len=True), exec_encdec),
 ])
 
 def run_linear(linear:UOp, var_vals:dict[str, int]|None=None, do_update_stats=True):
-  linear = _expand_multibuffer(linear)
+  linear = _add_beam(_expand_multibuffer(linear))
   ctx = (var_vals or {}, do_update_stats)
-  for si in linear.src: pm_exec.rewrite(si, ctx)
+  for call in linear.src: pm_exec.rewrite(call, ctx)
