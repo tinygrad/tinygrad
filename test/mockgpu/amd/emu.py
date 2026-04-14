@@ -958,7 +958,8 @@ def _load_dpp16_src0(ctx: _Ctx, inst, lane: UOp, fallback: UOp) -> UOp:
   """Load a DPP16-swizzled src0 value from vsrc0."""
   src_lane, enabled, valid = _dpp16_ctrl(lane, getattr(inst, 'dpp', 0) or 0, getattr(inst, 'row_mask', 0xf) or 0xf,
                                          getattr(inst, 'bank_mask', 0xf) or 0xf, ctx.wave_size)
-  swizzled = ctx.rvgpr_dyn(ctx.inst_field(type(inst).vsrc0), src_lane)
+  safe_src_lane = (enabled & valid).where(src_lane, _c(0, dtypes.int))
+  swizzled = ctx.rvgpr_dyn(ctx.inst_field(type(inst).vsrc0), safe_src_lane)
   invalid = UOp.const(fallback.dtype, 0) if getattr(inst, 'bc', 0) else fallback
   return enabled.where(valid.where(swizzled, invalid), fallback)
 
