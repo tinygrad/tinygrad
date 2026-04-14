@@ -2,7 +2,7 @@
 from __future__ import annotations
 import time, math, itertools, functools, struct, sys, inspect, pathlib, string, hashlib, weakref
 from contextlib import ContextDecorator
-from typing import Any, Callable, ClassVar, Sequence, cast, get_args, Literal, SupportsIndex, ParamSpec, TypeVar, Generic, TYPE_CHECKING
+from typing import Any, Callable, ClassVar, Sequence, cast, get_args, Literal, ParamSpec, TypeVar, Generic, TYPE_CHECKING
 if TYPE_CHECKING: import numpy
 from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_float, least_upper_dtype, to_dtype, truncate
 from tinygrad.dtype import _from_np_dtype, _to_np_dtype, PyConst, Invalid, InvalidType
@@ -10,8 +10,8 @@ from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_u
 from tinygrad.helpers import IMAGE, FLOAT16, WINO, Metadata, TRACEMETA, ceildiv, fetch, is_numpy_ndarray, TracingKey, cpu_profile
 from tinygrad.helpers import suppress_finalizing, disable_gc
 from tinygrad.gradient import compute_gradient
-from tinygrad.mixin import OpMixin
-from tinygrad.uop.ops import smax, smin, resolve, UOp, Ops, sint, identity_element, all_metadata, _index_to_concrete_int, sint_to_uop, Variable
+from tinygrad.mixin import OpMixin, ReductionStr
+from tinygrad.uop.ops import smax, UOp, Ops, sint, all_metadata, _index_to_concrete_int, sint_to_uop, Variable
 from tinygrad.uop.ops import _broadcast_shape
 from tinygrad.engine.schedule import ExecItem, complete_create_schedule_with_vars
 from tinygrad.device import Buffer, canonicalize_device
@@ -89,8 +89,6 @@ def _masked_setitem(target:Tensor, values:Tensor, mask:Tensor, axes:tuple[int, .
 
 #  `(padding_left, padding_right, padding_top, padding_bottom, ...)` ->  `(..., (padding_top, padding_bottom), (padding_left, padding_right))`
 def _flat_to_grouped(padding:Sequence[sint]) -> tuple[tuple[sint, sint], ...]: return tuple(zip(padding[-2::-2], padding[::-2]))
-
-ReductionStr = Literal["mean", "sum", "none"]
 
 class Tensor(OpMixin):
   """
@@ -1056,14 +1054,6 @@ class Tensor(OpMixin):
   def _mop(self, op:Ops, arg) -> Tensor: return self._apply_uop(UOp._mop, extra_args=(op,), arg=arg)
   def _rop(self, op:Ops, axis:tuple[int, ...]) -> Tensor: return self._apply_uop(UOp._rop, op=op, axis=axis)
 
-  def _pad_constant(self, pX:tuple[tuple[sint, sint], ...], value:float) -> Tensor:
-    # shrink first for negative pads, then pad with only non-negative values
-    has_neg = not all(resolve(p >= 0) for p in flatten(pX))
-    X = self.shrink(tuple((-smin(pB,0),smin(pA+s,s)) for (pB,pA),s in zip(pX, self.shape))) if has_neg else self
-    pads = tuple((smax(pB,0), smax(pA,0)) for pB,pA in pX) if has_neg else pX
-    if value == 0: return X._apply_uop(UOp.pad, arg=pads)
-    return X._apply_uop(UOp.pad, arg=pads) + Tensor.ones_like(X)._apply_uop(UOp.pad, arg=pads).where(0, value)
-
   def _pad_circular(self, pX:tuple[tuple[sint, sint], ...]) -> Tensor:
     if any(pB>sh or pA>sh for (pB,pA),sh in zip(pX, self.shape)): raise ValueError('Padding value causes wrapping around more than once.')
     if any(pB<0 or pA<0 for pB,pA in pX): raise NotImplementedError("Negative pads with circular pads is not supported")
@@ -1130,14 +1120,15 @@ class Tensor(OpMixin):
     raise NotImplementedError(f"{mode=} is not supported")
 
   def _getitem(self, indices, v: Tensor|None = None) -> Tensor:
+    # view-only indexing (no Tensor/list indices, no setitem) is handled by MovementMixin.__getitem__
+    if v is None and not any(isinstance(i, (Tensor, list, tuple)) for i in (indices if isinstance(indices, tuple) else (indices,))):
+      return super().__getitem__(indices)
     # wrap single index into a list
     if (isinstance(indices, list) and all_int(indices)) or not isinstance(indices, (tuple, list)): indices = [indices]
-    x, indices = self, self._normalize_indices(list(indices))
-
     indices_parsed, dim = [], 0
-    for index in indices:
+    for index in self._normalize_indices(list(indices)):
       size = 1 if index is None else self.shape[dim]
-      boundary, stride = [0, size], 1  # defaults
+      parsed = {"size":size, "boundary":(0, size), "stride":1, "collapse_dim":False}
       match index:
         case Tensor():
           if not dtypes.is_int(index.dtype): raise IndexError(f"index dtype {index.dtype} is not supported")
@@ -1146,50 +1137,14 @@ class Tensor(OpMixin):
         case list() | tuple():
           if not dtypes.is_int((ti:=Tensor(index)).dtype): raise IndexError(f"{index=} contains non-int element")
           index = Tensor([i+size if i<0 else i for i in fully_flatten(index)], self.device, requires_grad=False).reshape(ti.shape)
-        case int() | UOp(): # sint
-          if index >= size or index < -size: raise IndexError(f"{index=} is out of bounds with {size=}")
-          # TODO: is this right for (negative) symbolic?
-          boundary = [index, index+1] if index >= 0 else [index+size, index+size+1]
-        case slice():
-          if index.step == 0: raise ValueError(f"{index=} cannot have 0 as step")
-          start, stop = 0 if index.start is None else index.start, size if index.stop is None else index.stop
-          step = 1 if index.step is None else index.step
-          boundary, stride = [start, stop], step
-          if all(isinstance(s, int) for s in (start,stop,step)):
-            # handle int slicing
-            # if we're slicing a symbolic dimension into a int dimension, we can slice until the bind size
-            # TODO: right now this is using vmax instead of the bind size because jit doesnt update the bound value of the returned tensor
-            if isinstance(size, UOp): size = int(size.vmax)
-            *boundary, stride = index.indices(cast(SupportsIndex, size))
-            if stride * (boundary[1] - boundary[0]) < 0: boundary = [0, 0]
-            elif stride < 0: boundary = [boundary[1] + 1, boundary[0] + 1]
-            # update size for slice
-            size = ceildiv((boundary[1] - boundary[0]), abs(stride))
-          elif resolve(step == 1, False) and all(isinstance(s,sint) for s in (start, stop)) and resolve((stop-start) > 0, False):
-            # simple symbolic slice
-            size = cast(sint, cast(UOp, (stop - start)).ssimplify())
-          else: raise TypeError(f"slice {index=} is not supported")
-        case None: pass # do nothing
-        case _: raise IndexError(f"{type(index).__name__} indexing is not supported")
-      indices_parsed.append({"index":index, "size":size, "boundary":tuple(boundary), "stride":stride})
+        case _: parsed = self._parse_view_index(index, size)
+      indices_parsed.append({**parsed, "index":index})
       if index is not None: dim += 1
 
-    # movement op indexing
-    if mops := [i for i in indices_parsed if i['index'] is not None]:
-      # flip negative strides
-      x = x.shrink(tuple(m['boundary'] for m in mops)).flip(tuple(i for i, m in enumerate(mops) if m['stride'] < 0))
-      strides = tuple(abs(m['stride']) for m in mops)
-      # apply stride
-      if any(st != 1 for st in strides):
-        # pad shape to multiple of stride
-        if not all_int(x.shape): raise RuntimeError("symbolic shape not supported")
-        x = x.pad_to(tuple(round_up(s, st) for s, st in zip(x.shape, strides)))
-        x = x.reshape(tuple(flatten((s // st, st) for s, st in zip(x.shape, strides))))
-        x = x.shrink(tuple(flatten(((0, s), (0, 1)) for s in x.shape[::2]))).reshape(x.shape[::2])
-
-    # dim injection from None (size 1) and dim collapse by skipping sint dims
-    x_dims = [p for p in indices_parsed if not isinstance(p['index'], sint)]
-    x = x.reshape(tuple(p['size'] for p in x_dims))
+    # apply view ops then dim injection (None) and collapse (int)
+    x = self._apply_view_ops(mops) if (mops := [p for p in indices_parsed if p["index"] is not None]) else self
+    x_dims = [p for p in indices_parsed if not p["collapse_dim"]]
+    x = x.reshape(tuple(p["size"] for p in x_dims))
 
     # tensor indexing
     if tops := [(d, p) for d, p in enumerate(x_dims) if isinstance(p['index'], Tensor)]:
@@ -1200,9 +1155,9 @@ class Tensor(OpMixin):
       consecutive = dims == list(range(dims[0], dims[0] + len(dims)))
       if v is None and len(dims) > 1 and consecutive and all_int(ishp := tuple(x.shape[d] for d in dims)):
         strides = tuple(prod(ishp[i+1:]) for i in range(len(dims)))
-        try: linear_idx = functools.reduce(Tensor.add, (t._broadcast_to(big_shape) * s for t, s in zip(tensors, strides)))
+        try: linear_idx = Tensor.usum(*[t._broadcast_to(big_shape) * s for t, s in zip(tensors, strides)])
         except ValueError as err: raise IndexError(f"cannot broadcast indices: {err}") from err
-        valid = functools.reduce(Tensor.__and__, ((t >= 0) & (t < s) for t, s in zip(tensors, ishp)))
+        valid = Tensor.uprod(*[(t >= 0) & (t < s) for t, s in zip(tensors, ishp)])
         pre, post = x.shape[:dims[0]], x.shape[dims[-1]+1:]
         x = x.reshape(pre + (prod(ishp),) + post)[tuple([slice(None)] * len(pre)) + (valid.where(linear_idx, 0),)]
         return valid.reshape((1,) * len(pre) + big_shape + (1,) * len(post)).where(x, 0)
@@ -1216,7 +1171,7 @@ class Tensor(OpMixin):
         masks.append(i._one_hot_along_dim(num_classes=x.shape[dim], dim=(dim - x.ndim)))
 
       # reduce masks to 1 mask
-      mask: Tensor = functools.reduce(lambda x,y: x.mul(y), masks)
+      mask: Tensor = Tensor.uprod(*masks)
 
       # inject 1's for the extra dims added in create masks
       reshape_arg = x.shape[:dims[0]] + (1,) * len(big_shape) + x.shape[dims[0]:]
@@ -1250,7 +1205,7 @@ class Tensor(OpMixin):
       per_dim.append((idx >= s) & (idx < e) & (((e-1-idx) if m['stride'] < 0 else (idx-s)) % st == 0))
     vb = vb.flip(tuple(d for d, m in enumerate(mops) if m['stride'] < 0))
     vb = vb.pad(tuple((m['boundary'][0], self.shape[d] - m['boundary'][1]) for d, m in enumerate(mops)))
-    return (functools.reduce(lambda a, b: a & b, per_dim) if per_dim else Tensor(True, dtype=dtypes.bool, device=self.device)).where(vb, self)
+    return (Tensor.uprod(*per_dim) if per_dim else Tensor(True, dtype=dtypes.bool, device=self.device)).where(vb, self)
 
   def __getitem__(self, indices) -> Tensor:
     """
@@ -1343,41 +1298,6 @@ class Tensor(OpMixin):
     x = self.shrink_to(tuple(i if d != dim else None for d,i in enumerate(index.shape))).unsqueeze(-1).transpose(-1, dim)
     return (index.unsqueeze(-1)._one_hot_along_dim(self.shape[dim]).where(x, 0)).sum(-1, dtype=self.dtype)
 
-  def cat(self:Tensor, *args:Tensor, dim:int=0) -> Tensor:
-    """
-    Concatenates self with other `Tensor` in `args` along an axis specified by `dim`.
-    All tensors must have the same shape except in the concatenating dimension.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t0, t1, t2 = Tensor([[1, 2]]), Tensor([[3, 4]]), Tensor([[5, 6]])
-    print(t0.cat(t1, t2, dim=0).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t0.cat(t1, t2, dim=1).numpy())
-    ```
-    """
-    dim = self._resolve_dim(dim)
-    for arg in args: assert arg.ndim==self.ndim and all(ti==ai for i,(ti,ai) in enumerate(zip(self.shape, arg.shape)) if i!=dim)
-    tensors = [self, *args]
-    dim_cumsum = list(itertools.accumulate([t.shape[dim] for t in tensors], initial=0))
-    for i,t in enumerate(tensors): tensors[i] = t.pad([(dim_cumsum[i], dim_cumsum[-1]-dim_cumsum[i+1]) if j==dim else None for j in range(t.ndim)])
-    return functools.reduce(Tensor.add, tensors)
-
-  def stack(self:Tensor, *args:Tensor, dim:int=0) -> Tensor:
-    """
-    Concatenates self with other `Tensor` in `args` along a new dimension specified by `dim`.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t0, t1, t2 = Tensor([1, 2]), Tensor([3, 4]), Tensor([5, 6])
-    print(t0.stack(t1, t2, dim=0).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t0.stack(t1, t2, dim=1).numpy())
-    ```
-    """
-    # checks for shapes and number of dimensions delegated to cat
-    return Tensor.cat(*[t.unsqueeze(dim) for t in argfix(self, *args)], dim=dim)
-
   def masked_select(self, mask):
     """
     Selects elements from `self` based on the boolean `mask`.
@@ -1424,24 +1344,6 @@ class Tensor(OpMixin):
     indices = Tensor.stack(*[Tensor.arange(s, device=self.device).reshape(*[1]*i, s, *[1]*(self.ndim-i-1)).expand(self.shape).flatten()
                              for i, s in enumerate(self.shape)], dim=-1)
     return indices.masked_select(mask.unsqueeze(-1).expand(*mask.shape, self.ndim)).reshape(-1, self.ndim)
-
-  def masked_fill(self:Tensor, mask:Tensor, value:Tensor|PyConst) -> Tensor:
-    """
-    Replaces `self` with `value` wherever the elements of `mask` are True.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([1, 2, 3, 4, 5])
-    mask = Tensor([True, False, True, False, False])
-    print(t.masked_fill(mask, -12).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([1, 2, 3, 4, 5])
-    mask = Tensor([True, False, True, False, False])
-    value = Tensor([-1, -2, -3, -4, -5])
-    print(t.masked_fill(mask, value).numpy())
-    ```
-    """
-    return mask.where(value, self)
 
   # ***** reduce ops *****
 
@@ -1589,54 +1491,6 @@ class Tensor(OpMixin):
     m, _, ss = self._softmax(axis, dtype)
     return m - ss.log()
 
-  def normalize(self, p:float=2.0, dim:int=1, eps:float=1e-12) -> Tensor:
-    """
-    Performs Lp normalization of the tensor along the specified dimension.
-
-    See: https://pytorch.org/docs/stable/generated/torch.nn.functional.normalize.html
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    Tensor.manual_seed(42)
-    t = Tensor.randn(2, 3)
-    print(t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.normalize().numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.normalize(p=1, dim=0).numpy())
-    ```
-    """
-    if p == 0: return self / (self != 0).sum(dim, keepdim=True).maximum(eps)
-    return self / self.abs().pow(p).sum(dim, keepdim=True).pow(1/p).maximum(eps)
-
-  def logsumexp(self, axis=None, keepdim=False) -> Tensor:
-    """
-    Computes the log-sum-exp of the tensor along the specified axis or axes.
-
-    The log-sum-exp function is a numerically stable way to compute the logarithm of the sum of exponentials.
-
-    You can pass in `axis` and `keepdim` keyword arguments to control the axis along
-    which the log-sum-exp is computed and whether the reduced dimensions are retained.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    Tensor.manual_seed(42)
-    t = Tensor.randn(2, 3)
-    print(t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.logsumexp().numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.logsumexp(axis=0).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.logsumexp(axis=1).numpy())
-    ```
-    """
-    m = self.max(axis=axis, keepdim=True)
-    return (self - m).exp().sum(axis=axis, keepdim=keepdim).log() + (m if keepdim else m.squeeze(axis))
-
   def logcumsumexp(self, axis=0) -> Tensor:
     """
     Computes the log-cumsum-exp of the tensor along the specified axis or axes.
@@ -1759,7 +1613,7 @@ class Tensor(OpMixin):
     # align all tensors to alphabet, multiply, sum non-output, permute to output order
     xs = [x.permute(*[s.index(c) for c in sorted(s)]).reshape([sz[c] if c in s else 1 for c in alpha]).expand([sz[c] for c in alpha]) if s else x
           for s, x in zip(inputs, xs)]
-    return functools.reduce(lambda a,b:a*b, xs).sum([i for i,c in enumerate(alpha) if c not in rhs], dtype=dtype).permute(argsort(argsort(list(rhs))))
+    return Tensor.uprod(*xs).sum([i for i,c in enumerate(alpha) if c not in rhs], dtype=dtype).permute(argsort(argsort(list(rhs))))
 
   # ***** processing ops *****
 
@@ -2023,53 +1877,6 @@ class Tensor(OpMixin):
   def dot(self, w:Tensor, dtype:DTypeLike|None=None) -> Tensor:
     if IMAGE: return self.image_dot(w, dtype)
     return super().dot(w, dtype=dtype)
-
-  def _cumalu(self, axis:int, op:Ops) -> Tensor:
-    assert self.shape[axis] != 0 and op in (Ops.ADD, Ops.MAX, Ops.MUL)
-    pooled = self.transpose(axis,-1).pad((self.shape[axis]-1, 0), value=identity_element(op, self.dtype))._pool((self.shape[axis],))
-    return getattr(pooled, {Ops.ADD: "sum", Ops.MAX: "max", Ops.MUL: "prod"}[op])(-1).transpose(axis, -1)
-
-  def _split_cumalu(self, axis:int, op:Ops) -> Tensor:
-    axis = self._resolve_dim(axis)
-    if self.ndim == 0 or 0 in self.shape: return self
-    # TODO: someday the optimizer will find this on its own
-    # for now this is a two stage cumsum
-    SPLIT = 256
-    value = identity_element(op, self.dtype)
-    if not isinstance(s:=self.shape[axis], int) or s <= SPLIT*2: return self._cumalu(axis, op)
-    ret = self.transpose(axis,-1).pad((round_up(s, SPLIT)-s, 0), value=value).unflatten(-1, (-1, SPLIT))._cumalu(-1, op)
-    base = ret[..., -1]._cumalu(-1, op).pad((1, -1), value=value)
-    base = base.unsqueeze(-1).expand(*base.shape, ret.shape[-1])
-    def fix(x: Tensor) -> Tensor: return x.flatten(start_dim=-2)[..., -s:].transpose(axis,-1)
-    return getattr(fix(ret), {Ops.ADD: "add", Ops.MAX: "maximum", Ops.MUL: "mul"}[op])(fix(base))
-
-  def cumsum(self, axis:int=0) -> Tensor:
-    """
-    Computes the cumulative sum of the tensor along the specified `axis`.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor.ones(2, 3)
-    print(t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.cumsum(1).numpy())
-    ```
-    """
-    return self._split_cumalu(axis, Ops.ADD)
-
-  def cumprod(self, axis:int) -> Tensor:
-    """
-    Computes the cumulative product of the elements of the tensor along the specified `axis`.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor.arange(1, 7).reshape(2, 3)
-    print(t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.cumprod(axis=0).numpy())
-    ```
-    """
-    return self._split_cumalu(axis, Ops.MUL)
 
   def cummax(self, axis:int=0) -> tuple[Tensor, Tensor]:
     """
@@ -2366,12 +2173,6 @@ class Tensor(OpMixin):
     """
     return self._apply_uop(UOp.contiguous, extra_args=args, **kwargs)
 
-  def contiguous_backward(self) -> Tensor:
-    """
-    Inserts a contiguous operation in the backward pass.
-    """
-    return self._apply_uop(UOp.contiguous_backward)
-
   # ***** broadcasted elementwise ops *****
 
   def ufix(self, x) -> Tensor:
@@ -2491,23 +2292,6 @@ class Tensor(OpMixin):
 
   # ***** functional nn ops *****
 
-  def linear(self, weight:Tensor, bias:Tensor|None=None, dtype:DTypeLike|None=None) -> Tensor:
-    """
-    Applies a linear transformation to `self` using `weight` and `bias`.
-
-    See: https://pytorch.org/docs/stable/generated/torch.nn.Linear.html
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([[1, 2], [3, 4]])
-    weight = Tensor([[1, 2], [3, 4]])
-    bias = Tensor([1, 2])
-    print(t.linear(weight, bias).numpy())
-    ```
-    """
-    if dtype is not None: return self.cast(dtype).linear(weight.cast(dtype), bias.cast(dtype) if bias is not None else bias)
-    x = self.mul(weight) if len(weight.shape) == 1 else self.dot(weight)
-    return x.add(bias) if bias is not None else x
-
   def sequential(self, ll:list[Callable[[Tensor], Tensor]]) -> Tensor:
     """
     Applies a sequence of functions to `self` chaining the output of each function to the input of the next.
@@ -2518,46 +2302,6 @@ class Tensor(OpMixin):
     ```
     """
     return functools.reduce(lambda x,f: f(x), ll, self)
-
-  def layernorm(self, axis:int|tuple[int,...]=-1, eps:float=1e-5) -> Tensor:
-    """
-    Applies Layer Normalization over a mini-batch of inputs.
-
-    - Paper: https://arxiv.org/abs/1607.06450v1
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor.randn(8, 10, 16) * 2 + 8
-    print(t.mean().item(), t.std().item())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = t.layernorm()
-    print(t.mean().item(), t.std().item())
-    ```
-    """
-    y = (self - self.mean(axis, keepdim=True))
-    return y.mul((y*y).mean(axis, keepdim=True).add(eps).rsqrt())
-
-  def batchnorm(self, weight:Tensor|None, bias:Tensor|None, mean:Tensor, invstd:Tensor, axis:int|tuple[int, ...]=1) -> Tensor:
-    """
-    Applies Batch Normalization over a mini-batch of inputs.
-
-    - Paper: https://arxiv.org/abs/1502.03167
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor.randn(8, 4, 16, 16) * 2 + 8
-    print(t.mean().item(), t.std().item())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = t.batchnorm(None, None, t.mean(axis=(0,2,3)), t.var(axis=(0,2,3)).add(1e-5).rsqrt())
-    print(t.mean().item(), t.std().item())
-    ```
-    """
-    axis_ = argfix(axis)
-    shape = tuple(s if ax in axis_ else 1 for ax, s in enumerate(self.shape))
-    x = self - mean.reshape(shape)
-    if weight is not None: x = x * weight.reshape(shape)
-    ret = x.mul(invstd.reshape(shape) if len(invstd.shape) == len(axis_) else invstd)
-    return (ret + bias.reshape(shape)) if bias is not None else ret
 
   def dropout(self, p=0.5) -> Tensor:
     """
@@ -2631,41 +2375,6 @@ class Tensor(OpMixin):
       if attn_mask.dtype == dtypes.bool: attn_mask = attn_mask.where(0, -float("inf"))
       qk = qk + attn_mask
     return qk.cast(self.dtype).softmax(-1).dropout(dropout_p) @ value
-
-  def _do_reduction(self, reduction:ReductionStr="mean") -> Tensor:
-    if reduction == "none": return self
-    if reduction == "sum": return self.sum()
-    if reduction == "mean": return self.mean()
-    raise ValueError(f"{reduction=} must be one of {get_args(ReductionStr)}")
-
-  def binary_crossentropy(self, Y:Tensor, reduction:ReductionStr="mean") -> Tensor:
-    """
-    Computes the binary cross-entropy loss between `self` and `Y`.
-
-    See: https://pytorch.org/docs/stable/generated/torch.nn.BCELoss.html
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([0.1, 0.9, 0.2])
-    Y = Tensor([0, 1, 0])
-    print(t.binary_crossentropy(Y).item())
-    ```
-    """
-    return (-Y*self.log() - (1-Y)*(1-self).log())._do_reduction(reduction)
-
-  def binary_crossentropy_logits(self, Y:Tensor, reduction:ReductionStr="mean", pos_weight:Tensor|None=None) -> Tensor:
-    """
-    Computes the binary cross-entropy loss between `self` and `Y` where `self` is logits.
-
-    See: https://pytorch.org/docs/stable/generated/torch.nn.BCEWithLogitsLoss.html
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([-1, 2, -3])
-    Y = Tensor([0, 1, 0])
-    print(t.binary_crossentropy_logits(Y).item())
-    ```
-    """
-    log_p, log_1_minus_p = self.logsigmoid(), (-self).logsigmoid()
-    return (-((1 if pos_weight is None else pos_weight) * Y * log_p + (1-Y) * log_1_minus_p))._do_reduction(reduction)
 
   def sparse_categorical_crossentropy(self, Y:Tensor, ignore_index:int=-1, label_smoothing=0.0, reduction:ReductionStr="mean") -> Tensor:
     """
@@ -2741,22 +2450,6 @@ class Tensor(OpMixin):
     nll = -self.gather(1, Y.unsqueeze(1)).squeeze(1) * masked_weight
     return nll.sum() / masked_weight.sum() if reduction == "mean" else nll._do_reduction(reduction)
 
-  def newton_schulz(self, steps:int, params:tuple[int, ...], eps:float=1.0e-7) -> Tensor:
-    """
-    Performs the newton-schulz algorithm for odd polynomials. The degree of the odd polynomial depends on the number of params.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor.randn(4, 4)
-    print(t.newton_schulz(steps=5, params=(2,-1.5,0.5)).numpy())
-    ```
-    """
-    assert self.ndim > 1, "NS only works for two or more dims"
-    if self.shape[-2] > self.shape[-1]: return self.transpose(-2, -1).newton_schulz(steps, params, eps).transpose(-2, -1)
-    G = self / (self.square().sum(axis=(-2, -1), keepdim=True).sqrt() + eps)
-    for _ in range(steps):
-      G = cast(Tensor, sum(p * functools.reduce(lambda x, y: (y @ y.transpose(-2, -1)) @ x, [G]*i, G) for i,p in enumerate(params)))
-    return G
-
   def qr(self) -> tuple[Tensor, Tensor]:
     assert self.ndim > 1, f"expected two or more dimensions, got {self.ndim}"
     b_shape, m, n = self.shape[:-2], int(self.shape[-2]), int(self.shape[-1])
@@ -2830,17 +2523,6 @@ class Tensor(OpMixin):
 
   # ***** Tensor Properties *****
 
-  def nbytes(self) -> int:
-    """
-    Returns the total number of bytes of all elements in the tensor.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([8, 9], dtype=dtypes.float)
-    print(t.nbytes())
-    ```
-    """
-    return int(self.numel()) * self.element_size()
-
   def size(self, dim:int|None=None) -> sint|tuple[sint, ...]:
     """
     Returns the size of the tensor. If `dim` is specified, return the length along dimension `dim`. Otherwise return the shape of the tensor.
@@ -2900,7 +2582,7 @@ class Tensor(OpMixin):
       if ns > os:
         tmp = tmp.reshape(self.shape[:-1] + (self.shape[-1]//(rate := ns//os), rate))
         nones = (None,) * (tmp.ndim - 1)
-        return functools.reduce(Tensor.add, (tmp.shrink(nones + ((i, i+1),)).cast(new_uint)<<8*i*os for i in range(rate))).squeeze(-1).bitcast(dtype)
+        return Tensor.usum(*[tmp.shrink(nones + ((i, i+1),)).cast(new_uint)<<8*i*os for i in range(rate)]).squeeze(-1).bitcast(dtype)
       return Tensor.stack(*(tmp>>8*i*ns for i in range(os//ns)), dim=-1).flatten(-2).cast(new_uint).bitcast(dtype)
     return self._apply_uop(UOp.bitcast, dtype=dt) if self.dtype != dt else self
 

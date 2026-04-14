@@ -1,4 +1,4 @@
-import math, os
+import math, os, functools
 if __name__ == "__main__":
   os.environ["DEFAULT_FLOAT"] = "bfloat16"
   os.environ["OPTIM_DTYPE"] = "bfloat16"
@@ -41,13 +41,28 @@ def matmul(x:Tensor, w:Tensor, fp8=FP8, amax_x:Tensor|None=None, amax_w:Tensor|N
   combined_scale = x_scale * w_scale
   if getenv("ASM_GEMM"):
     from extra.gemm.cdna_asm_gemm import can_use_asm_gemm, asm_gemm
-    if can_use_asm_gemm(x_fp8, w_fp8.T): return asm_gemm(x_fp8, w_fp8.T, combined_scale=combined_scale), x_new_amax, w_new_amax
-  return x_fp8.dot(w_fp8.T, dtype=dtypes.float) * combined_scale, x_new_amax, w_new_amax
+    if can_use_asm_gemm(x_fp8, w_fp8.T): return asm_gemm(x_fp8, w_fp8.T, combined_scale=combined_scale), x_new_amax, w_new_amax, x_fp8, w_fp8
+  return x_fp8.dot(w_fp8.T, dtype=dtypes.float) * combined_scale, x_new_amax, w_new_amax, x_fp8, w_fp8
 
-def rmsnorm(x_in:Tensor, eps:float):
+def _rmsnorm_fwd(x_in:Tensor, eps:float) -> tuple[Tensor, Tensor]:
   x = x_in.float()
-  x = x * (x.square().mean(-1, keepdim=True) + eps).rsqrt()
-  return x.cast(x_in.dtype)
+  rrms = (x.square().mean(-1, keepdim=True) + eps).rsqrt()
+  return (x * rrms).cast(x_in.dtype), rrms
+
+@functools.cache
+def _rmsnorm_fwd_fxn(x_in_p, eps, device):
+  return _rmsnorm_fwd(Tensor(x_in_p, device=device), eps)
+
+def _rmsnorm_bwd(grad:UOp, call:UOp) -> tuple:
+  x_normed = Tensor(call.gettuple(0)).float()
+  do_float = Tensor(grad).float()
+  d_x = Tensor(call.gettuple(1)) * (do_float - x_normed * (do_float * x_normed).mean(-1, keepdim=True))
+  return (d_x.cast(call.src[1].dtype).uop,)
+
+def rmsnorm(x_in:Tensor, eps:float) -> tuple[Tensor, Tensor]:
+  fxn = _rmsnorm_fwd_fxn(x_in.as_param(0).uop, eps, x_in.device)
+  call = UOp.maketuple(fxn[0].uop, fxn[1].uop).call(x_in.uop, grad_fxn=_rmsnorm_bwd)
+  return Tensor(call.gettuple(0)), Tensor(call.gettuple(1))
 
 class FlatTransformer:
   def __init__(self, dim:int, hidden_dim:int, n_heads:int, n_layers:int, norm_eps:float, vocab_size:int, n_kv_heads:int|None=None,
@@ -95,13 +110,16 @@ class FlatTransformer:
 
   def attention(self, x:Tensor, freqs_cis:Tensor, attention_norm:Tensor, wqkv:Tensor, wo:Tensor,
                 amax_xqkv=None, amax_wqkv=None, amax_xo=None, amax_wo=None):
-    x = rmsnorm(x, self.norm_eps) * attention_norm
-
     bsz, seqlen, _ = x.shape
-    new_amaxs = []
+    new_amaxs, saves = [], []
 
-    xqkv, *amaxs = matmul(x, wqkv, amax_x=amax_xqkv, amax_w=amax_wqkv)
-    new_amaxs.extend(amaxs)
+    x, rrms = rmsnorm(x, self.norm_eps)
+    saves.extend([x, rrms])
+    x = x * attention_norm
+
+    xqkv, *ret = matmul(x, wqkv, amax_x=amax_xqkv, amax_w=amax_wqkv)
+    new_amaxs.extend(ret[:2])
+    saves.extend(ret[2:] + [xqkv])
     xqkv = xqkv.reshape(bsz, seqlen, self.n_kv_heads, self.n_rep + 2, self.head_dim)
     xq = xqkv[:, :, :, :self.n_rep].reshape(bsz, seqlen, self.n_heads, self.head_dim)
     xk = xqkv[:, :, :, self.n_rep].reshape(bsz, seqlen, self.n_kv_heads, self.head_dim)
@@ -112,28 +130,35 @@ class FlatTransformer:
     xq, xk, xv = xq.transpose(1, 2), xk.transpose(1, 2), xv.transpose(1, 2)
     if getenv("HK_FLASH_ATTENTION"):
       from extra.thunder.amd.fa import flash_attention
-      attn = flash_attention(xq, xk, xv, is_causal=True).transpose(1, 2)
+      attn, *save = flash_attention(xq, xk, xv, is_causal=True)
+      saves.extend(save)
     else:
-      attn = xq.scaled_dot_product_attention(xk, xv, is_causal=True, enable_gqa=True).transpose(1, 2)
-    attn = attn.reshape(bsz, seqlen, -1)
+      attn = xq.scaled_dot_product_attention(xk, xv, is_causal=True, enable_gqa=True)
+    attn = attn.transpose(1, 2).reshape(bsz, seqlen, -1)
 
-    out, *amaxs = matmul(attn, wo, amax_x=amax_xo, amax_w=amax_wo)
-    new_amaxs.extend(amaxs)
-    return (out, *new_amaxs)
+    out, *ret = matmul(attn, wo, amax_x=amax_xo, amax_w=amax_wo)
+    new_amaxs.extend(ret[:2])
+    saves.extend(ret[2:] + [out])
+    return (out, *new_amaxs, *saves)
 
   def feed_forward(self, x:Tensor, ffn_norm:Tensor, w1:Tensor, w2:Tensor, w3:Tensor,
                    amax_x1=None, amax_w1=None, amax_x2=None, amax_w2=None, amax_x3=None, amax_w3=None):
-    x = rmsnorm(x, self.norm_eps) * ffn_norm
+    new_amaxs, saves = [], []
 
-    new_amaxs = []
+    x, rrms = rmsnorm(x, self.norm_eps)
+    saves.extend([x, rrms])
+    x = x * ffn_norm
 
-    x_w1, *amaxs = matmul(x, w1, amax_x=amax_x1, amax_w=amax_w1)
-    new_amaxs.extend(amaxs)
-    x_w3, *amaxs = matmul(x.contiguous_backward(), w3, amax_x=amax_x3, amax_w=amax_w3)
-    new_amaxs.extend(amaxs)
-    out, *amaxs = matmul(x_w1.silu() * x_w3, w2, amax_x=amax_x2, amax_w=amax_w2)
-    new_amaxs.extend(amaxs)
-    return (out, *new_amaxs)
+    x_w1, *ret = matmul(x, w1, amax_x=amax_x1, amax_w=amax_w1)
+    new_amaxs.extend(ret[:2])
+    saves.extend(ret[2:] + [x_w1])
+    x_w3, *ret = matmul(x.contiguous_backward(), w3, amax_x=amax_x3, amax_w=amax_w3)
+    new_amaxs.extend(ret[:2])
+    saves.extend(ret[2:] + [x_w3])
+    out, *ret = matmul(x_w1.silu() * x_w3, w2, amax_x=amax_x2, amax_w=amax_w2)
+    new_amaxs.extend(ret[:2])
+    saves.extend(ret[2:] + [out])
+    return (out, *new_amaxs, *saves)
 
   @function(precompile=True, precompile_backward=True)
   def run_layer(self, x:Tensor, freqs_cis:Tensor,
@@ -141,13 +166,15 @@ class FlatTransformer:
                 ffn_norm:Tensor, w1:Tensor, w2:Tensor, w3:Tensor,
                 amax_xqkv=None, amax_wqkv=None, amax_xo=None, amax_wo=None,
                 amax_x1=None, amax_w1=None, amax_x2=None, amax_w2=None, amax_x3=None, amax_w3=None):
-    attn, *attn_amaxs = self.attention(x, freqs_cis, attention_norm, wqkv, wo,
-                                       amax_xqkv=amax_xqkv, amax_wqkv=amax_wqkv, amax_xo=amax_xo, amax_wo=amax_wo)
+    attn, *attn_ret = self.attention(x, freqs_cis, attention_norm, wqkv, wo,
+                                     amax_xqkv=amax_xqkv, amax_wqkv=amax_wqkv, amax_xo=amax_xo, amax_wo=amax_wo)
+    attn_amaxs, attn_saves = attn_ret[:4], attn_ret[4:]
     h = x + attn
-    ffn, *ffn_amaxs = self.feed_forward(h, ffn_norm, w1, w2, w3,
-                                        amax_x1=amax_x1, amax_w1=amax_w1, amax_x2=amax_x2, amax_w2=amax_w2, amax_x3=amax_x3, amax_w3=amax_w3)
+    ffn, *ffn_ret = self.feed_forward(h, ffn_norm, w1, w2, w3,
+                                      amax_x1=amax_x1, amax_w1=amax_w1, amax_x2=amax_x2, amax_w2=amax_w2, amax_x3=amax_x3, amax_w3=amax_w3)
+    ffn_amaxs, ffn_saves = ffn_ret[:6], ffn_ret[6:]
     h = h + ffn
-    return (h, *attn_amaxs, *ffn_amaxs)
+    return (h, *attn_amaxs, *ffn_amaxs, *attn_saves, *ffn_saves)
 
   def shard(self, device:tuple[str, ...], mp:bool=False):
     from tinygrad.nn.state import get_parameters
@@ -177,11 +204,12 @@ class FlatTransformer:
                     "amax_x1": a["x1"][i], "amax_w1": a["w1"][i],
                     "amax_x2": a["x2"][i], "amax_w2": a["w2"][i],
                     "amax_x3": a["x3"][i], "amax_w3": a["w3"][i]} if a else {}
-      h, *amaxs = self.run_layer(h, freqs_cis,
-                                 self.attention_norm[i], self.wqkv[i], self.wo[i],
-                                 self.ffn_norm[i], self.w1[i], self.w2[i], self.w3[i],
-                                 **amax_layer)
+      h, *ret = self.run_layer(h, freqs_cis,
+                               self.attention_norm[i], self.wqkv[i], self.wo[i],
+                               self.ffn_norm[i], self.w1[i], self.w2[i], self.w3[i],
+                               **amax_layer)
       if a:
+        amaxs = ret[:10]
         amax_names = ["xqkv", "wqkv", "xo", "wo", "x1", "w1", "x3", "w3", "x2", "w2"]
         for name, new_val in zip(amax_names, amaxs):
           a[name][i].assign(new_val)

@@ -77,8 +77,10 @@ class RDMAAllocator(HCQAllocatorBase):
     bar, paddrs = owner.iface.pci_dev.bar_info(owner.iface.vram_bar)[0], buf.base.meta.mapping.paddrs  # type: ignore[attr-defined]
     page_sz = (2 << 20) if min(sz for _, sz in paddrs) >= (2 << 20) else (4 << 10)
     pages = [bar + p + off for p, sz in paddrs for off in range(0, sz, page_sz)]
-    return HCQBuffer(bar + paddrs[0][0], buf.base.size, owner=self.dev,
+    return HCQBuffer(bar + paddrs[0][0], buf.base.size, owner=owner,
                      meta=self.dev.iface.mlx_dev.register_mem(pages, len(pages) * page_sz, page_sz.bit_length() - 1))
+
+  def _do_free(self, buf:HCQBuffer, options): self.dev.iface.mlx_dev.unregister_mem(buf.meta)
 
   def _transfer(self, dest:HCQBuffer, src:HCQBuffer, sz:int, src_dev:HCQCompiled, dest_dev:HCQCompiled):
     # sync device

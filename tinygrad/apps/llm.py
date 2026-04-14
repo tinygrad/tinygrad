@@ -9,7 +9,7 @@ from tinygrad.viz.serve import TCPServerWithReuse, HTTPRequestHandler
 class SimpleTokenizer:
   def __init__(self, normal_tokens:dict[str, int], special_tokens:dict[str, int], preset:str="llama3"):
     preset = {"qwen35":"qwen2","qwen35moe":"qwen2"}.get(preset, preset)
-    if preset not in ("llama3","llama-v3","llama-bpe","qwen2","olmo","kimi-k2","gemma4"): raise ValueError(f"Invalid tokenizer preset '{preset}'")
+    if preset not in ("llama3","llama-v3","llama-bpe","qwen2","olmo","kimi-k2","gemma4","tekken"): raise ValueError(f"Invalid tokenizer preset '{preset}'")
     # https://github.com/openai/gpt-2/blob/9b63575ef42771a015060c964af2c3da4cf7c8ab/src/encoder.py#L9
     bs = [*range(33, 127), *range(161, 173), *range(174, 256)]  # bytes that map to themselves
     self._byte_decoder = {chr(b): b for b in bs} | {chr(256+i): b for i,b in enumerate(b for b in range(256) if b not in bs)}
@@ -74,12 +74,17 @@ class SimpleTokenizer:
     if self.preset == 'kimi-k2': return self.encode("<|im_" + role + "|>" + role + "<|im_middle|>")
     if self.preset == 'qwen2': return self.encode("<|im_start|>" + role + "\n")
     if self.preset == 'gemma4': return self.encode("<|turn>" + ("model" if role == "assistant" else role) + "\n")
+    if self.preset == 'tekken':
+      if role == 'user': return self.encode("[INST]")
+      if role == 'assistant': return []
+      raise ValueError(f"Unsupported role '{role}' for tokenizer preset '{self.preset}'")
     return self.encode("<|start_header_id|>" + role + "<|end_header_id|>\n\n")
   def end_turn(self, eos_id:int):
     if self.preset == 'olmo': return self.encode("\n")
     if self.preset == 'kimi-k2': return [eos_id]
     if self.preset == 'qwen2': return [eos_id] + self.encode("\n")
     if self.preset == 'gemma4': return self.encode("<turn|>\n")
+    if self.preset == 'tekken': return self.encode("[/INST]")
     return [eos_id]
 
 @functools.cache
@@ -132,6 +137,14 @@ def pairwise_topk(x: Tensor, k: int) -> tuple[Tensor, Tensor]:
   return x.gather(-1, sel), sel
 
 @dataclass(frozen=True)
+class SSMConfig:
+  conv_kernel: int
+  state_size: int
+  group_count: int
+  time_step_rank: int
+  inner_size: int
+
+@dataclass(frozen=True)
 class TransformerConfig:
   num_blocks: int
   dim: int
@@ -151,6 +164,9 @@ class TransformerConfig:
   norm_topk_prob: bool = False
   kv_lora_rank: int = 0
   shared_expert_dim: int = 0
+  full_attention_interval: int = 0
+  attn_output_gate: bool = False
+  ssm: SSMConfig|None = None
   shared_expert_gate: bool = True
   leading_dense_blocks: int = 0
   dense_hidden_dim: int = 0
@@ -235,6 +251,10 @@ class FFNBlock:
     act = self.ffn_gate(h_norm).gelu() if self.config.gemma4 else self.ffn_gate(h_norm).silu()
     return self.ffn_down(act.contiguous() * self.ffn_up(h_norm))
 
+  # given the token-prefix match, return how much cached state this block can still reuse
+  def _reusable_prefix_len(self, prefix_len:int, cached_len:int) -> int: return prefix_len
+  # return writes that reset this block's state after a cache mismatch
+  def _state_reset_ops(self) -> list[Tensor]: return []
   def _init_state(self, x:Tensor): raise NotImplementedError
   def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor: raise NotImplementedError
 
@@ -262,12 +282,20 @@ class TransformerBlock(FFNBlock):
     if not config.gemma4: assert config.v_head_dim == self.head_dim, "TransformerBlock requires v_head_dim == head_dim"
 
     # --- attention projections (all linear, bias-free) ------------------
-    q_proj_out       = self.head_dim * config.n_heads
-    kv_proj_out      = self.head_dim * self.n_kv_heads
-    self.attn_q      = nn.Linear(config.dim, q_proj_out,  bias=False)
-    self.attn_k      = nn.Linear(config.dim, kv_proj_out, bias=False)
-    if not self.use_alternative_attention: self.attn_v = nn.Linear(config.dim, kv_proj_out, bias=False)
-    self.attn_output = nn.Linear(q_proj_out, config.dim,  bias=False)
+    if config.gemma4:
+      q_proj_out       = self.head_dim * config.n_heads
+      kv_proj_out      = self.head_dim * self.n_kv_heads
+      self.attn_q      = nn.Linear(config.dim, q_proj_out,  bias=False)
+      self.attn_k      = nn.Linear(config.dim, kv_proj_out, bias=False)
+      if not self.use_alternative_attention: self.attn_v = nn.Linear(config.dim, kv_proj_out, bias=False)
+      self.attn_output = nn.Linear(q_proj_out, config.dim,  bias=False)
+    else:
+      q_proj_out       = config.head_dim * config.n_heads * (2 if config.attn_output_gate else 1)
+      kv_proj_out      = config.head_dim * config.n_kv_heads
+      self.attn_q      = nn.Linear(config.dim, q_proj_out,  bias=False)
+      self.attn_k      = nn.Linear(config.dim, kv_proj_out, bias=False)
+      self.attn_v      = nn.Linear(config.dim, kv_proj_out, bias=False)
+      self.attn_output = nn.Linear(config.head_dim * config.n_heads, config.dim, bias=False)
     if self.qk_norm: self.attn_q_norm, self.attn_k_norm = nn.RMSNorm(self.qk_norm, config.norm_eps), nn.RMSNorm(self.qk_norm, config.norm_eps)
     if config.gemma4:
       self.post_attention_norm = nn.RMSNorm(config.dim, config.norm_eps)
@@ -312,13 +340,16 @@ class TransformerBlock(FFNBlock):
       return self.attn_output((((q @ k.transpose(-1, -2)) + (mask if mask is not None else 0)).softmax(-1) @ v).transpose(1, 2).reshape(B, T, -1))
 
     q, k, v = self.attn_q(x), self.attn_k(x), self.attn_v(x)
-    if self.qk_norm and self.qk_norm != self.head_dim: q, k = self.attn_q_norm(q), self.attn_k_norm(k)
+    if self.config.qk_norm and self.config.qk_norm != self.config.head_dim: q, k = self.attn_q_norm(q), self.attn_k_norm(k)
 
     B, T, _ = x.shape
-    q = q.reshape(B, T, self.config.n_heads, self.head_dim).transpose(1, 2)  # (B,H,T,Hd)
-    k = k.reshape(B, T, self.n_kv_heads, self.head_dim).transpose(1, 2)  # (B,KvH,T,Hd)
-    v = v.reshape(B, T, self.n_kv_heads, self.head_dim).transpose(1, 2)  # (B,KvH,T,Hd)
-    if self.qk_norm == self.head_dim: q, k = self.attn_q_norm(q), self.attn_k_norm(k)
+    if self.config.attn_output_gate:
+      qg = q.reshape(B, T, self.config.n_heads, 2, self.config.head_dim)
+      q, gate = qg[:, :, :, 0, :], qg[:, :, :, 1, :].reshape(B, T, self.config.n_heads * self.config.head_dim)
+    q = q.reshape(B, T, self.config.n_heads,    self.config.head_dim).transpose(1, 2)  # (B,H,T,Hd)
+    k = k.reshape(B, T, self.config.n_kv_heads, self.config.head_dim).transpose(1, 2)  # (B,KvH,T,Hd)
+    v = v.reshape(B, T, self.config.n_kv_heads, self.config.head_dim).transpose(1, 2)  # (B,KvH,T,Hd)
+    if self.config.qk_norm == self.config.head_dim: q, k = self.attn_q_norm(q), self.attn_k_norm(k)
 
     q = apply_rope(q[..., :self.config.rope_dim], self.freqs_cis[start_pos:start_pos+T]).cat(q[..., self.config.rope_dim:], dim=-1)
     k = apply_rope(k[..., :self.config.rope_dim], self.freqs_cis[start_pos:start_pos+T]).cat(k[..., self.config.rope_dim:], dim=-1)
@@ -337,7 +368,7 @@ class TransformerBlock(FFNBlock):
     mask = Tensor.full((1, 1, T, start_pos+T), float("-inf"), dtype=x.dtype, device=x.device).triu(start_pos+1) if resolve(T != 1) else None
     attn = q.scaled_dot_product_attention(k, v, attn_mask=mask, enable_gqa=True)     # (B,H,T,Hd)
     attn = attn.transpose(1, 2).reshape(B, T, -1)                                    # back to (B,T,D)
-    return self.attn_output(attn)
+    return self.attn_output(attn if not self.config.attn_output_gate else (attn * gate.sigmoid()))
 
   def _init_state(self, x:Tensor):
     if not hasattr(self, "cache_kv"):
@@ -398,6 +429,67 @@ class MLATransformerBlock(FFNBlock):
       self.cache_v = Tensor.empty(x.shape[0], 1, self.config.max_context, self.config.kv_lora_rank, device=x.device)
       self.freqs_cis = precompute_freqs_cis(self.config.rope_dim, self.config.max_context, self.config.rope_theta)
 
+class GatedDeltaNetBlock(FFNBlock):
+  def __init__(self, config:TransformerConfig, ssm:SSMConfig):
+    super().__init__(config)
+    self.head_k_dim, self.num_k_heads, self.num_v_heads = ssm.state_size, ssm.group_count, ssm.time_step_rank
+    assert self.num_v_heads % self.num_k_heads == 0
+    self.head_v_dim, self.ssm_conv_kernel = ssm.inner_size // ssm.time_step_rank, ssm.conv_kernel
+    self.conv_channels, self.q_dim = ssm.inner_size + 2*ssm.group_count*ssm.state_size, ssm.state_size*ssm.group_count
+    self.attn_qkv, self.attn_gate = nn.Linear(config.dim, self.conv_channels, bias=False), nn.Linear(config.dim, ssm.inner_size, bias=False)
+    self.ssm_alpha, self.ssm_beta = nn.Linear(config.dim, self.num_v_heads, bias=False), nn.Linear(config.dim, self.num_v_heads, bias=False)
+    self.ssm_conv1d = {"weight": Tensor.zeros(self.conv_channels, self.ssm_conv_kernel)}
+    self.ssm_dt = {"bias": Tensor.zeros(self.num_v_heads)}
+    self.ssm_a = Tensor.zeros(self.num_v_heads)
+    self.ssm_norm, self.ssm_out = nn.RMSNorm(self.head_v_dim, config.norm_eps), nn.Linear(ssm.inner_size, config.dim, bias=False)
+
+  def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
+    B, T, _ = x.shape
+    assert T == 1, "GatedDeltaNetBlock currently only supports T=1"
+
+    # input processing
+    x = x.half()
+    out_gate = self.attn_gate(x).reshape(B, 1, self.num_v_heads, self.head_v_dim)
+    beta = self.ssm_beta(x).sigmoid().reshape(B, self.num_v_heads, 1, 1)
+    alpha = ((self.ssm_alpha(x).float() + self.ssm_dt["bias"]).softplus() * self.ssm_a).reshape(B, self.num_v_heads, 1, 1).exp()
+
+    # conv
+    conv_flat = (self.ssm_conv_kernel - 1) * self.conv_channels
+    conv_state = self.delta_cache[:, :conv_flat].reshape(B, self.ssm_conv_kernel - 1, self.conv_channels)
+    conv_window = conv_state.cat(self.attn_qkv(x), dim=1)
+    conv_out = (conv_window * self.ssm_conv1d["weight"].T.unsqueeze(0)).sum(1).silu()
+
+    # qkv
+    q, k, v = conv_out.split([self.q_dim, self.q_dim, self.conv_channels - 2*self.q_dim], dim=-1)
+    q = q.reshape(B, self.num_k_heads, self.head_k_dim).normalize(dim=-1).repeat(1, self.num_v_heads//self.num_k_heads, 1)
+    k = k.reshape(B, self.num_k_heads, self.head_k_dim).normalize(dim=-1).repeat(1, self.num_v_heads//self.num_k_heads, 1)
+    v = v.reshape(B, self.num_v_heads, self.head_v_dim)
+    q, k, v = q.mul(self.head_k_dim**-0.5).unsqueeze(-1), k.unsqueeze(-1), v.unsqueeze(-1)
+
+    # recurrent
+    ssm_flat = self.num_v_heads * self.head_v_dim * self.head_v_dim
+    recurrent_state = self.delta_cache[:, conv_flat:conv_flat + ssm_flat].reshape(B, self.num_v_heads, self.head_v_dim, self.head_v_dim)
+    recurrent_state = recurrent_state * alpha
+    recurrent_state = recurrent_state + ((v - recurrent_state@k) * beta)@k.transpose(-1, -2)
+    new_cache = conv_window[:, 1:, :].reshape(B, -1).cat(recurrent_state.reshape(B, -1), dim=-1).contiguous()
+    assigned = self.delta_cache.uop.after(self.delta_cache.uop.store(new_cache.cast(self.delta_cache.dtype).uop))
+    cache_tensor = Tensor(assigned, device=self.delta_cache.device)
+
+    # final
+    final_state = cache_tensor[:, conv_flat:conv_flat + ssm_flat].reshape(B, self.num_v_heads, self.head_v_dim, self.head_v_dim)
+    core_attn_out = self.ssm_norm((final_state@q).squeeze(-1).reshape(B, 1, self.num_v_heads, self.head_v_dim))
+    return self.ssm_out((core_attn_out * out_gate.silu()).reshape(B, 1, -1).cast(x.dtype))
+
+  # recurrent state can't be partially reused after divergence, force a full rebuild
+  def _state_reset_ops(self): return [self.delta_cache.assign(Tensor.zeros_like(self.delta_cache))] if hasattr(self, "delta_cache") else []
+  def _reusable_prefix_len(self, prefix_len:int, cached_len:int) -> int: return 0 if prefix_len != cached_len else prefix_len
+
+  def _init_state(self, x):
+    if not hasattr(self, "delta_cache"):
+      conv_flat = (self.ssm_conv_kernel - 1) * self.conv_channels
+      ssm_flat = self.num_v_heads * self.head_v_dim * self.head_v_dim
+      self.delta_cache = Tensor.zeros(x.shape[0], conv_flat + ssm_flat, device=x.device).clone()
+
 class Transformer:
   def __init__(self, config:TransformerConfig):
     self.config = config
@@ -416,8 +508,10 @@ class Transformer:
       dense_config = replace(
         config, num_experts=0, num_experts_per_tok=0, shared_expert_dim=0,
         hidden_dim=config.dense_hidden_dim or config.hidden_dim)
+      if config.ssm: config = replace(config, qk_norm=config.head_dim)
       block_cls = MLATransformerBlock if config.kv_lora_rank > 0 else TransformerBlock
-      self.blk = [block_cls(dense_config if i < config.leading_dense_blocks else config) for i in range(config.num_blocks)]
+      self.blk:list[FFNBlock] = [GatedDeltaNetBlock(config, config.ssm) if config.ssm and (i+1) % config.full_attention_interval != 0 else
+                                 block_cls(dense_config if i < config.leading_dense_blocks else config) for i in range(config.num_blocks)]
     self.token_embd  = nn.Embedding(config.vocab_size, config.dim)
     self.output_norm = nn.RMSNorm(config.dim, config.norm_eps)
     self.output = nn.Linear(config.dim, config.vocab_size, bias=False)
@@ -440,6 +534,7 @@ class Transformer:
         if bool(config.sliding_window_pattern) and idx == last_of_type[config.sliding_window_pattern[idx]]: block.store_full_length_kv = True
       for idx, block in enumerate(self.blk[first_shared:], start=first_shared):
         block.shared_kv_src_idx = last_of_type[config.sliding_window_pattern[idx]]
+    self.has_recurrent_block = any(isinstance(b, GatedDeltaNetBlock) for b in self.blk)
     self._cached_tokens: list[int] = []
     # we specialize the JIT for prefill and rollout
     self.prefill_jit = TinyJit(self.forward)
@@ -467,7 +562,7 @@ class Transformer:
     return (logits / temperature.maximum(1e-12) - (Tensor.rand_like(logits).maximum(1e-12).log().neg()).log()).argmax(-1, keepdim=True)
 
   def __call__(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor) -> Tensor:
-    return (self.prefill_jit if resolve(tokens.shape[1] != 1) else self.rollout_jit)(tokens, start_pos, temperature)
+    return (self.prefill_jit if resolve(tokens.shape[1] != 1) else self.rollout_jit)(tokens.contiguous(), start_pos, temperature)
 
   @staticmethod
   def from_gguf(gguf:Tensor, max_context:int|None=None, realize=bool(getenv("REALIZE", 0))) -> tuple[Transformer, dict]:
@@ -483,6 +578,11 @@ class Transformer:
     arch = kv['general.architecture']
     max_context = min(max_context, kv[f'{arch}.context_length']) if max_context is not None else kv[f'{arch}.context_length']
     n_heads, n_kv_heads = kv[f'{arch}.attention.head_count'], kv[f'{arch}.attention.head_count_kv']
+
+    ssm = None
+    if arch in ('qwen35', 'qwen35moe'):
+      ssm = SSMConfig(**{k: kv[f'{arch}.ssm.{k}'] for k in ('conv_kernel','state_size','group_count','time_step_rank','inner_size')})
+      state_dict = {k.replace('post_attention_norm', 'ffn_norm'):v for k,v in state_dict.items()}
 
     kv_lora_rank = kv.get(f'{arch}.attention.kv_lora_rank', 0)
     head_dim = kv.get(f'{arch}.attention.key_length_mla', kv.get(f'{arch}.attention.key_length', kv[f'{arch}.embedding_length'] // n_heads))
@@ -539,6 +639,8 @@ class Transformer:
       shared_expert_gate=f"blk.{kv.get(f'{arch}.leading_dense_block_count', 0)}.ffn_gate_inp_shexp.weight" in state_dict,
       dense_hidden_dim=kv.get(f'{arch}.feed_forward_length', 0) if kv.get(f'{arch}.leading_dense_block_count', 0) else 0,
       routed_scaling_factor=kv.get(f'{arch}.expert_weights_scale', 1.0),
+      attn_output_gate=arch in ('qwen35', 'qwen35moe'), ssm=ssm,
+      full_attention_interval=kv.get(f'{arch}.full_attention_interval', 0),
       sliding_window=kv.get(f'{arch}.attention.sliding_window', 0),
       sliding_window_pattern=sliding_window_pattern,
       per_layer_input_dim=kv.get(f'{arch}.embedding_length_per_layer_input', 0),
@@ -554,18 +656,21 @@ class Transformer:
       Tensor.realize(*params)
     return model, kv
 
-  def get_start_pos(self, tokens:list[int]):
-    return sum(1 for _ in itertools.takewhile(lambda ab: ab[0] == ab[1], zip(tokens[:-1], self._cached_tokens)))
+  def get_start_pos(self, tokens:list[int]) -> int:
+    prefix_len = sum(1 for _ in itertools.takewhile(lambda ab: ab[0] == ab[1], zip(tokens[:-1], self._cached_tokens)))
+    return min(block._reusable_prefix_len(prefix_len, len(self._cached_tokens)) for block in self.blk)
 
   def generate(self, tokens:list[int], chunk_size:int=32, temperature:float=0.0):
+    if self.has_recurrent_block: chunk_size = 1
     v_start_pos = UOp.variable("start_pos", 0, self.max_context-1)
     v_toks = UOp.variable("toks", 1, chunk_size)
     # TODO: use UOp.variable for temperature once float variables are supported
     temp = Tensor(temperature).contiguous()
     # assign all input tokens once, then slice from start_pos for the model call
     t = Tensor(tokens + [0] * (self.max_context - len(tokens)), dtype="int32").reshape(1, self.max_context)
-    # recompute start_pos from what's currently valid in the kv cache
+    # recompute start_pos from what's currently valid in the caches
     start_pos = self.get_start_pos(tokens)
+    if start_pos < len(self._cached_tokens) and (resets := [r for b in self.blk for r in b._state_reset_ops()]): Tensor.realize(*resets)
     out, prompt_len = None, len(tokens)
     while len(tokens) < self.max_context:
       sp, nt = v_start_pos.bind(start_pos), v_toks.bind(min(chunk_size, len(tokens) - start_pos))
@@ -587,6 +692,11 @@ models = {
   "qwen3:1.7b": "https://huggingface.co/unsloth/Qwen3-1.7B-GGUF/resolve/main/Qwen3-1.7B-Q4_K_M.gguf",
   "qwen3:8b": "https://huggingface.co/Qwen/Qwen3-8B-GGUF/resolve/main/Qwen3-8B-Q4_K_M.gguf",
   "qwen3:30b-a3b": "https://huggingface.co/Qwen/Qwen3-30B-A3B-GGUF/resolve/main/Qwen3-30B-A3B-Q4_K_M.gguf",
+  "qwen3.5:0.8b": "https://huggingface.co/unsloth/Qwen3.5-0.8B-GGUF/resolve/main/Qwen3.5-0.8B-Q8_0.gguf",
+  "qwen3.5:4b": "https://huggingface.co/unsloth/Qwen3.5-4B-GGUF/resolve/main/Qwen3.5-4B-Q4_K_M.gguf",
+  "qwen3.5:9b": "https://huggingface.co/unsloth/Qwen3.5-9B-GGUF/resolve/main/Qwen3.5-9B-Q4_K_M.gguf",
+  "qwen3.5:27b": "https://huggingface.co/unsloth/Qwen3.5-27B-GGUF/resolve/main/Qwen3.5-27B-Q4_K_M.gguf",
+  "qwen3.5:35b-a3b": "https://huggingface.co/unsloth/Qwen3.5-35B-A3B-GGUF/resolve/main/Qwen3.5-35B-A3B-Q4_K_M.gguf",
   "gemma4:e2b-q4": "https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF/resolve/main/gemma-4-E2B-it-Q4_K_M.gguf",
   "gemma4:26b-a4b-q4": "https://huggingface.co/unsloth/gemma-4-26B-A4B-it-GGUF/resolve/main/gemma-4-26B-A4B-it-UD-Q4_K_M.gguf",
   "olmoe": "https://huggingface.co/allenai/OLMoE-1B-7B-0924-Instruct-GGUF/resolve/main/olmoe-1b-7b-0924-instruct-q4_k_m.gguf",
