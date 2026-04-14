@@ -433,6 +433,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   def index(self, *srcs:UOp|None, ptr=False, **kwargs):
     return UOp(Ops.INDEX, kwargs.pop("dtype", self.dtype if ptr else self.dtype.base), (self,)+tuple([x for x in srcs if x is not None]), **kwargs)
   def __getitem__(self, idx):
+    # pointers index into INDEX UOps (scalar lookup); everything else uses the shared mixin view path
+    if not isinstance(self.dtype, PtrDType): return super(UOp, self).__getitem__(idx)
     idx = self._normalize_indices(list(argfix(idx)))
     if len(slice_idx:=[i for i,x in enumerate(idx) if isinstance(x, slice)]):
       # apply SHRINK for slices that aren't the full range
@@ -525,7 +527,6 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     if self.op is Ops.CONTIGUOUS: return self
     if self.has_buffer_identity(): return self
     return UOp(Ops.CONTIGUOUS, dtype=self.dtype, src=(self,)+args, **kwargs)
-  def contiguous_backward(self): return self.alu(Ops.CONTIGUOUS_BACKWARD)
   def bufferize(self, *args, **kwargs): return UOp(Ops.BUFFERIZE, dtype=self.dtype, src=(self,)+args, **kwargs)
   def allreduce(self, op, device:str|tuple[str, ...]|UOp):
     assert isinstance(self.device, tuple), f"allreduce must be on tuple {self.device} isn't"
@@ -829,8 +830,6 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       new_count.subtract(div_fac.split_uop(Ops.MUL))
       if const%div_const==0 and all(v>=0 for v in new_count.values()): return math.prod(new_count.elements(), start=self.const_like(const//div_const))
     return None # generic None if we aren't sure
-  def usum(self:UOp, *uops:UOp) -> UOp: return functools.reduce(operator.or_ if self.dtype is dtypes.bool else operator.add, uops, self)
-  def uprod(self:UOp, *uops:UOp) -> UOp: return functools.reduce(operator.and_ if self.dtype is dtypes.bool else operator.mul, uops, self)
   @property
   def vmin(self) -> PyConst: return self._min_max[0]
   @property
@@ -1304,7 +1303,9 @@ if TRACK_MATCH_STATS or PROFILE:
       with open(fn:=temp("rewrites.pkl", append_user=True), "wb") as f:
         print(f"rewrote {len(tracked_ctxs)} graphs and matched {sum(len(r.matches) for x in tracked_ctxs for r in x)} times, saved to {fn}")
         pickle.dump(RewriteTrace(tracked_keys, tracked_ctxs, uop_fields), f)
-    if VIZ > 0: return launch_viz("VIZ", temp("rewrites.pkl", append_user=True))
+    if getenv("VIZ") > 0:
+      VIZ.value = 0
+      return launch_viz("VIZ", temp("rewrites.pkl", append_user=True))
     if getenv("PRINT_MATCH_STATS", TRACK_MATCH_STATS.value and VIZ.value>=0):
       ret = [0,0,0.0,0.0]
       for k,v in sorted(list(match_stats.items()), key=lambda x: x[1][2]+x[1][3]):
@@ -1315,11 +1316,11 @@ if TRACK_MATCH_STATS or PROFILE:
       print(f"{len(match_stats)} rules, {sum(v[0] > 0 for v in match_stats.values())} matched once")
 
   def launch_viz(env_str:str, data:str):
-    os.environ[env_str] = "0"
     os.environ[f"{env_str}_DATA"] = data
-    if not int(os.getenv("VIZ", "0")) and not int(os.getenv("PROFILE", "0")):
-      args = ['--rewrites-path', getenv("VIZ_DATA", "")] if getenv("VIZ_DATA", "") else []
-      args += ['--profile-path', getenv("PROFILE_DATA", "")] if getenv("PROFILE_DATA", "") else []
+    if not VIZ and not PROFILE:
+      os.environ["VIZ"], os.environ["PROFILE"] = "0", "0"
+      args = ['--rewrites-path', os.getenv("VIZ_DATA", "")] if os.getenv("VIZ_DATA", "") else []
+      args += ['--profile-path', os.getenv("PROFILE_DATA", "")] if os.getenv("PROFILE_DATA", "") else []
       viz_path = pathlib.Path(__file__).resolve().parent.parent / "viz" / "serve.py"
       os.execv(sys.executable, [sys.executable, viz_path.as_posix()] + args)
 

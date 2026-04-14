@@ -62,7 +62,7 @@ class MLXCmdQueue:
     n = ceildiv(len(data), chunk_sz:=mlx5.MLX5_CMD_DATA_BLOCK_SIZE)
     for i in range(n):
       off, _ = self.mboxes[base + i]
-      blk = mlx5.struct_mlx5_cmd_prot_block(data=list(data[i*chunk_sz:(i+1)*chunk_sz].ljust(chunk_sz, b'\x00')),
+      blk = mlx5.struct_mlx5_cmd_prot_block(data=(ctypes.c_ubyte*chunk_sz).from_buffer_copy(data[i*chunk_sz:(i+1)*chunk_sz].ljust(chunk_sz, b'\x00')),
         next=to_be64(self.mboxes[base+i+1][1]) if i < n-1 else 0, block_num=to_be32(i), token=tok)
       self.queue[off:off + ctypes.sizeof(mlx5.struct_mlx5_cmd_prot_block)] = bytes(blk)
     return (self.mboxes[base][0], self.mboxes[base][1], n)
@@ -81,7 +81,7 @@ class MLXCmdQueue:
     _, in_ptr, n_in = self.create_mbox_chain(0, tok, inp[16:])
     _, out_ptr, n_out = self.create_mbox_chain(n_in, tok, bytes(out_sz))
     cmd = mlx5.struct_mlx5_cmd_layout(type=mlx5.MLX5_PCI_CMD_XPORT, inlen=to_be32(len(inp)), in_ptr=to_be64(in_ptr),
-      _in=[int.from_bytes(inp[i:i+4], 'little') for i in range(0, 16, 4)],
+      _in=(ctypes.c_uint32*4)(*(int.from_bytes(inp[i:i+4], 'little') for i in range(0, 16, 4))),
       out_ptr=to_be64(out_ptr), outlen=to_be32(16 + out_sz), token=tok, status_own=mlx5.CMD_OWNER_HW)
     cmd_bytes = bytearray(bytes(cmd))
     cmd_bytes[mlx5.struct_mlx5_cmd_layout.sig.offset] = (~functools.reduce(lambda a, b: a ^ b, cmd_bytes)) & 0xFF  # type: ignore[attr-defined]
@@ -169,6 +169,8 @@ class MLXDev:
       memory_key_mkey_entry=dict(access_mode_1_0=1, lr=1, lw=1, rr=1, rw=1, pd=self.pd, qpn=0xFFFFFF, mkey_7_0=(key_lo:=0x33),
                                  start_addr=paddrs[0], len=size, log_page_size=log_page_size, translations_octword_size=ceildiv(n, 2)))
     return (res['mkey_index'] << 8) | key_lo
+
+  def unregister_mem(self, mkey:int): self.cmd.exec(mlx5.MLX5_CMD_OP_DESTROY_MKEY, mkey_index=mkey >> 8)
 
   def provide_pages(self, mode):
     if (npages:=self.cmd.exec(mlx5.MLX5_CMD_OP_QUERY_PAGES, op_mod=mode)['num_pages']) <= 0: return

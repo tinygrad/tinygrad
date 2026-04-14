@@ -136,7 +136,8 @@ def print_data(data:dict) -> None:
 
 def main() -> None:
   import tinygrad.viz.serve as viz
-  viz.ctxs = []
+  from tinygrad.uop.ops import RewriteTrace
+  data = viz.VizData()
 
   parser = argparse.ArgumentParser()
   parser.add_argument('--profile', type=pathlib.Path, metavar="PATH", help='Path to profile (optional file, default: latest profile)',
@@ -147,24 +148,24 @@ def main() -> None:
 
   with args.profile.open("rb") as f: profile = pickle.load(f)
 
-  viz.get_profile(profile)
+  viz.get_profile(profile, data=data)
 
   # List all kernels
   if args.kernel is None:
-    for c in viz.ctxs:
+    for c in data.ctxs:
       print(c["name"])
       for s in c["steps"]: print("  "+s["name"])
     return None
 
   # Find kernel trace
-  trace = next((c for c in viz.ctxs if c["name"] == f"Exec {args.kernel}"), None)
+  trace = next((c for c in data.ctxs if c["name"] == f"SQTT {args.kernel}"), None)
   if not trace: raise RuntimeError(f"no matching trace for {args.kernel}")
   n = 0
   for s in trace["steps"]:
     if "PKTS" in s["name"]: continue
     print(s["name"])
-    data = viz.get_render(s["query"])
-    print_data(data)
+    ret = viz.get_render(data, s["query"])
+    print_data(ret)
     n += 1
     if n > args.n: break
 

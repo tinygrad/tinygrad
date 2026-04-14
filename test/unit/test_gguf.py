@@ -162,7 +162,8 @@ class TestGGUFGEMV(unittest.TestCase):
     _, tensors = gguf_load(Tensor(np.frombuffer(buf, dtype=np.uint8)).to(None))
 
     x = rng.standard_normal(cols).astype(np.float32)
-    np.testing.assert_allclose((tensors["weight"] @ Tensor(x)).numpy(), ref @ x, atol=1e-2, rtol=1e-2)
+    with np.errstate(all='ignore'):
+      np.testing.assert_allclose((tensors["weight"] @ Tensor(x)).numpy(), ref @ x, atol=1e-2, rtol=1e-2)
     if qtype == GGMLQuantizationType.BF16 or is_dtype_supported(dtypes.half): np.testing.assert_equal(tensors["weight"].numpy(), ref)
     assert np.isfinite(ref).all() and np.isfinite(tensors["weight"].numpy()).all(), f"{qtype.name} has NaN/Inf"
 
