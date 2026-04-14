@@ -58,7 +58,7 @@ def build_a6xx_tex_descriptor(imgdt, va_addr, ibo=False):
           qreg.a6xx_tex_const_2(type=mesa.A6XX_TEX_2D, pitch=imgdt.pitch, pitchalign=ctz(imgdt.pitch)-6), 0, *data64_le(va_addr),
           qreg.a6xx_tex_const_6(plane_pitch=0x400000), qreg.a6xx_tex_const_7(13), 0, 0, 0, 0, 0, 0, 0, 0]
 
-def build_a6xx_compute_pm4(cmd, reg, prg, args_va, lib_va, stack_va, border_color_va, global_size, local_size, *, nir=True):
+def build_a6xx_compute_pm4(cmd, reg, prg, args_va, lib_va, stack_va, border_color_va, global_size, local_size, *, nir=True, args_cpu=None):
   """Emit a6xx compute dispatch PM4 register sequence.
   cmd(opcode, *vals) and reg(register, *vals) are PM4 append primitives."""
   def cast_int(x, ceil=False): return (math.ceil(x) if ceil else int(x)) if isinstance(x, float) else x
@@ -88,7 +88,7 @@ def build_a6xx_compute_pm4(cmd, reg, prg, args_va, lib_va, stack_va, border_colo
       qreg.a6xx_sp_cs_pvt_mem_param(memsizeperitem=prg.pvtmem_size_per_item), *data64_le(stack_va),
       qreg.a6xx_sp_cs_pvt_mem_size(totalpvtmemsize=prg.pvtmem_size_total))
 
-  if nir and prg.wgsz != 0xfc: to_mv(args_va + prg.wgsz * 4, 12)[:] = struct.pack("III", *local_size)
+  if nir and prg.wgsz != 0xfc: to_mv((args_cpu if args_cpu is not None else args_va) + prg.wgsz * 4, 12)[:] = struct.pack("III", *local_size)
   cmd(mesa.CP_LOAD_STATE6_FRAG, qreg.cp_load_state6_0(state_type=mesa.ST_CONSTANTS, state_src=mesa.SS6_INDIRECT,
                                                        state_block=mesa.SB6_CS_SHADER, num_unit=1024 // 4),
       *data64_le(args_va))

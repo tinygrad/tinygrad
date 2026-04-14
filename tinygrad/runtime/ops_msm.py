@@ -39,7 +39,7 @@ class MSMAllocator(LRUAllocator):
     self.dev.synchronize()
     return to_mv(src.offset, src.size)
 
-def _build_pm4(prg:MSMProgram, args_va:int, global_size, local_size) -> list[int]:
+def _build_pm4(prg:MSMProgram, args_buf:MSMBuffer, global_size, local_size) -> list[int]:
   q: list[int] = []
   def cmd(opcode, *vals): q.extend([pkt7_hdr(opcode, len(vals)), *vals])
   def reg(register, *vals): q.extend([pkt4_hdr(register, len(vals)), *vals])
@@ -47,8 +47,8 @@ def _build_pm4(prg:MSMProgram, args_va:int, global_size, local_size) -> list[int
   cmd(mesa.CP_EVENT_WRITE, mesa.CACHE_INVALIDATE)
   cmd(mesa.CP_WAIT_FOR_IDLE)
   # dispatch
-  build_a6xx_compute_pm4(cmd, reg, prg, args_va, prg.lib_buf.va_addr, prg.dev._stack.va_addr,
-                         prg.dev.border_color_buf.va_addr, global_size, local_size)
+  build_a6xx_compute_pm4(cmd, reg, prg, args_buf.va_addr, prg.lib_buf.va_addr, prg.dev._stack.va_addr,
+                         prg.dev.border_color_buf.va_addr, global_size, local_size, args_cpu=args_buf.offset)
   # post-dispatch: flush cache
   cmd(mesa.CP_EVENT_WRITE, mesa.CACHE_FLUSH_TS, *data64_le(prg.dev.dummy_buf.va_addr), 0)
   cmd(mesa.CP_WAIT_FOR_IDLE)
@@ -93,7 +93,7 @@ class MSMProgram:
     if ibo_data: struct.pack_into(f'{len(ibo_data)}I', args_mv, self.ibo_off, *ibo_data)  # type: ignore[attr-defined]
 
     # build PM4 command stream
-    pm4 = _build_pm4(self, args_buf.va_addr, global_size, local_size)
+    pm4 = _build_pm4(self, args_buf, global_size, local_size)
 
     # copy PM4 to GPU-visible buffer
     cmd_buf: MSMBuffer = self.dev.allocator.alloc(len(pm4) * 4, BufferSpec())
