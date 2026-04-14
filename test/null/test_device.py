@@ -26,8 +26,10 @@ class TestDevice(unittest.TestCase):
 
   @unittest.skipIf(Device.DEFAULT != "CPU", "only run on CPU")
   def test_nonexistent_renderer(self):
-    with self.assertRaisesRegex(AssertionError, "No renderer"):
+    with self.assertRaisesRegex(RuntimeError, "No renderer"):
       with Context(DEV="CPU:TYPO"): Device[Device.DEFAULT].renderer
+    with self.assertRaisesRegex(RuntimeError, "did you mean: 'CLANGJIT'"):
+      with Context(DEV="CPU:CLANG"): Device[Device.DEFAULT].renderer
 
   def test_lowercase_canonicalizes(self):
     device = Device.DEFAULT
