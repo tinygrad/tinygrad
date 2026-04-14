@@ -1,6 +1,7 @@
 import gc, unittest
 from tinygrad import Tensor, GlobalCounters, dtypes
 from tinygrad.engine.jit import TinyJit
+from tinygrad.helpers import Context
 
 class TestMultiRamUsage(unittest.TestCase):
   def setUp(self):
@@ -138,6 +139,19 @@ class TestMultiRamUsage(unittest.TestCase):
     mem_2 = run_layers(2)
     mem_4 = run_layers(4)
     self.assertEqual(mem_2, mem_4, f"graph memory should not grow with layers: 2 layers={mem_2}, 4 layers={mem_4}")
+
+  def test_allreduce_cast_dtype_memory(self):
+    N = 32
+    devices_2 = ("NULL:1", "NULL:2")
+    mem = {}
+    for allreduce_cast in (0, 1):
+      GlobalCounters.reset()
+      with Context(ALLREDUCE_CAST=allreduce_cast, SCACHE=0):
+        x = Tensor.empty((N, N), dtype=dtypes.bfloat16, device="NULL:1").shard(devices_2, axis=0)
+        x.sum(0).realize()
+      mem[allreduce_cast] = GlobalCounters.global_mem
+    # with ALLREDUCE_CAST, allreduce copies happen in bf16 (2 bytes) instead of fp32 (4 bytes)
+    self.assertLess(mem[1], mem[0])
 
 class TestMultiScalarALU(unittest.TestCase):
   """Test that tuple-device scalars work correctly in ALU with MULTI tensors (_shard scalar fix)."""
