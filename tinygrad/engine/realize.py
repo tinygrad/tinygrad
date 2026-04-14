@@ -286,6 +286,7 @@ def exec_kernel(ctx, call, ast):
 
   prg = get_runner(call.device, ast)
   if not prg.p.globals: return
+  prg_bufs = [bufs[i].ensure_allocated() for i in prg.p.globals]
 
   if VALIDATE_WITH_CPU and sink.op is Ops.SINK:
     cpu_bufs = [Buffer("CPU", b.size, b.dtype) for b in bufs]
@@ -293,9 +294,9 @@ def exec_kernel(ctx, call, ast):
     cpu_prg = get_runner("CPU", sink)
     cpu_prg([cpu_bufs[i].ensure_allocated() for i in cpu_prg.p.globals], var_vals, wait=DEBUG >= 2)
 
-  with track_exec(ctx, call, prg.display_name, prg.estimates, [bufs[i] for i in prg.p.globals], var_vals,
+  with track_exec(ctx, call, prg.display_name, prg.estimates, prg_bufs, var_vals,
                   outputs=tuple(prg.p.outs), inputs=tuple(prg.p.ins), first_run=prg.first_run) as (_, _, timing):
-    timing[0] = prg([bufs[i].ensure_allocated() for i in prg.p.globals], var_vals, wait=DEBUG >= 2)
+    timing[0] = prg(prg_bufs, var_vals, wait=DEBUG >= 2)
     prg.first_run = False
 
   if VALIDATE_WITH_CPU and sink.op is Ops.SINK:
