@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, ctypes, mmap, struct, array, functools, sys
+import os, ctypes, mmap, struct, array, functools, sys, time
 assert sys.platform != 'win32'
 from dataclasses import dataclass
 from tinygrad.device import BufferSpec, Compiled, LRUAllocator
@@ -63,13 +63,17 @@ class MSMProgram:
     self.lib_buf: MSMBuffer = dev.allocator.alloc(self.image_size, BufferSpec())  # type: ignore[attr-defined]
     ctypes.memmove(self.lib_buf.offset, self.image, self.image_size)  # type: ignore[attr-defined]
     dev._ensure_stack_size(self.hw_stack_offset * 4)  # type: ignore[attr-defined]
+    # persistent per-program args/cmd buffers: __call__ has no Buffer wrapper so per-call allocs
+    # would leak GEMs, eventually the MSM shrinker evicts pages from live buffers and the GPU faults.
+    self.args_buf: MSMBuffer = dev.allocator.alloc(self.kernargs_alloc_size, BufferSpec())  # type: ignore[attr-defined]
+    self.cmd_buf: MSMBuffer|None = None
+    self.cmd_buf_size: int = 0
 
   def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1),
                vals:tuple[int, ...]=(), wait=False, **kw):
     if self.max_threads < prod(local_size): raise RuntimeError("Too many resources requested for launch")  # type: ignore[attr-defined]
 
-    # fill args buffer
-    args_buf: MSMBuffer = self.dev.allocator.alloc(self.kernargs_alloc_size, BufferSpec())  # type: ignore[attr-defined]
+    args_buf = self.args_buf
     ctypes.memset(args_buf.offset, 0, self.kernargs_alloc_size)  # type: ignore[attr-defined]
     args_mv = to_mv(args_buf.offset, self.kernargs_alloc_size)  # type: ignore[attr-defined]
 
@@ -95,8 +99,11 @@ class MSMProgram:
     # build PM4 command stream
     pm4 = _build_pm4(self, args_buf, global_size, local_size)
 
-    # copy PM4 to GPU-visible buffer
-    cmd_buf: MSMBuffer = self.dev.allocator.alloc(len(pm4) * 4, BufferSpec())
+    # copy PM4 to persistent cmd buffer, growing it if needed
+    if self.cmd_buf is None or self.cmd_buf_size < len(pm4) * 4:
+      self.cmd_buf = self.dev.allocator.alloc(max(len(pm4) * 4, 0x1000), BufferSpec())
+      self.cmd_buf_size = max(len(pm4) * 4, 0x1000)
+    cmd_buf = self.cmd_buf
     to_mv(cmd_buf.offset, len(pm4) * 4).cast('I')[:] = array.array('I', pm4)
 
     # collect all BO handles for submit
@@ -113,11 +120,14 @@ class MSMProgram:
     cmds = (msm_drm.struct_drm_msm_gem_submit_cmd * 1)(
       msm_drm.struct_drm_msm_gem_submit_cmd(type=msm_drm.MSM_SUBMIT_CMD_BUF, submit_idx=cmd_idx, size=len(pm4) * 4))
 
+    st = time.perf_counter_ns() if wait else 0
     submit = msm_drm.DRM_IOCTL_MSM_GEM_SUBMIT(self.dev.fd, flags=msm_drm.MSM_PIPE_3D0, nr_bos=len(bo_list), nr_cmds=1,
                                                 bos=ctypes.addressof(bos), cmds=ctypes.addressof(cmds), queueid=self.dev.queue_id)
     self.dev.last_fence = submit.fence
-
-    if wait: self.dev.synchronize()
+    # sync so the next __call__ (which reuses self.args_buf and self.cmd_buf) does not
+    # overwrite data while the previous dispatch is still reading it.
+    self.dev.synchronize()
+    if wait: return float(time.perf_counter_ns() - st) * 1e-9
 
 class MSMDevice(Compiled):
   def __init__(self, device:str=""):
