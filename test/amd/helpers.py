@@ -20,7 +20,7 @@ def get_target(arch:str) -> str: return ARCH_TO_TARGET[arch][0]
 
 def decode_dpp16(dpp: int) -> tuple[str, int | tuple[int, int, int, int]]:
   """Decode a DPP16 control word into a symbolic operation and argument."""
-  if dpp < 0x100: return "quad_perm", tuple((dpp >> shift) & 0x3 for shift in range(0, 8, 2))
+  if dpp < 0x100: return "quad_perm", ((dpp >> 0) & 0x3, (dpp >> 2) & 0x3, (dpp >> 4) & 0x3, (dpp >> 6) & 0x3)
   if dpp in _DPP16_EXACT_OPS: return _DPP16_EXACT_OPS[dpp]
   if (base := dpp & 0x1f0) in _DPP16_RANGE_OPS: return _DPP16_RANGE_OPS[base], dpp & 0xf
   return "dpp", dpp
