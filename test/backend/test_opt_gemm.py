@@ -4,7 +4,7 @@ from tinygrad import Tensor, Device
 from tinygrad.helpers import get_single_element
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.engine.realize import CompiledRunner, get_program
-from tinygrad.engine.schedule import ExecItem
+from tinygrad.schedule import ExecItem
 
 class TestOptGemm(unittest.TestCase):
   @classmethod
@@ -12,7 +12,8 @@ class TestOptGemm(unittest.TestCase):
     N = 64
     cls.a = Tensor.randn(N, N).contiguous().realize()
     cls.b = Tensor.randn(N, N).contiguous().realize()
-    cls.res = cls.a.T.numpy() @ cls.b.T.numpy()
+    with np.errstate(all='ignore'):
+      cls.res = cls.a.T.numpy() @ cls.b.T.numpy()
 
   def _test_gemm_unrolled_permute_l(self, opts=[]):
     t = self.a.T @ self.b.T

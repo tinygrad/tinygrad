@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 from tinygrad import Tensor, UOp
-from tinygrad.engine.schedule import schedule_cache
+from tinygrad.schedule import schedule_cache
 from tinygrad.apps.llm import Transformer, TransformerConfig
 
 TEST_CONFIG = TransformerConfig(num_blocks=1, dim=64, hidden_dim=128, n_heads=2, n_kv_heads=2,
