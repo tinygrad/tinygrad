@@ -6,7 +6,7 @@ from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.helpers import Context, dedup, from_mv
 from tinygrad.dtype import dtypes
 from tinygrad.engine.jit import MultiGraphRunner
-from tinygrad.engine.schedule import linear_to_schedule
+from tinygrad.schedule import linear_to_schedule
 from tinygrad.uop.ops import UOp, Ops, buffers
 
 from test.helpers import needs_second_gpu
