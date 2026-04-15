@@ -557,7 +557,7 @@ class Handler(HTTPRequestHandler):
   def do_GET(self):
     if self.path == "/v1/models": self.send_data(json.dumps({"object":"list","data":[{"id":model_name,"object":"model"}]}).encode())
     else: self.send_data(CHAT_HTML, content_type="text/html")
-  def run_model(self, ids:list[int], model_name:str, include_usage=False, max_tokens:int|None=None, temperature:float=0.0):
+  def run_model(self, ids:list[int], model_name:str, include_usage=False, max_tokens:int|None=None, temperature:float=0.0, think_start:str=""):
     cache_start_pos = model.get_start_pos(ids)
     stderr_log(f"{self.path}  {colored('--', 'BLACK')}  "
                f"in:{colored(f'{cache_start_pos:5d}', 'green')} +{len(ids)-cache_start_pos:5d}  {colored('--', 'BLACK')}  ")
@@ -588,6 +588,7 @@ class Handler(HTTPRequestHandler):
     body: dict[str, typing.Any] = json.loads(raw_body.decode("utf-8"))
     if DEBUG >= 1: print(json.dumps(body, indent=2))
     if self.path == "/v1/chat/completions":
+      t_str, t_ids = tok.think_tags(body.get("chat_template_kwargs", {}).get("enable_thinking", True))
       # extract tokens, last assistant message is treated as prefill
       ids: list[int] = tok.prefix(bos_id)
       for i, msg in enumerate(body["messages"]):
@@ -601,12 +602,12 @@ class Handler(HTTPRequestHandler):
         else: raise RuntimeError(f"unknown content type: {type(content)}")
         if msg["role"] == "assistant" and i == len(body["messages"]) - 1: break
         ids += tok.end_turn(eos_id)
-      else: ids += tok.role("assistant") + think_start_ids
+      else: ids += tok.role("assistant") + t_ids
 
       # reply
       max_tokens = body.get("max_completion_tokens") or body.get("max_tokens")
       chunks = self.run_model(ids, body["model"], not body.get("stream") or body.get("stream_options",{}).get("include_usage", False),
-                              max_tokens=max_tokens, temperature=float(body.get("temperature", 0.0)))
+                              max_tokens=max_tokens, temperature=float(body.get("temperature", 0.0)), think_start=t_str)
       if body.get("stream"): self.stream_json(chunks)
       else:
         out, finish_reason = [], "stop"
@@ -625,6 +626,7 @@ if __name__ == "__main__":
   parser.add_argument("--serve", nargs='?', type=int, const=8000, metavar="PORT", help="Run OpenAI compatible API (optional port, default 8000)")
   parser.add_argument("--warmup", action="store_true", help="warmup the JIT")
   parser.add_argument("--think", action=argparse.BooleanOptionalAction, default=True, help="Enable thinking for reasoning models (no-op otherwise)")
+  parser.add_argument("--temperature", "--temp", type=float, default=0.0, help="Sampling temperature")
   parser.add_argument("--benchmark", nargs='?', type=int, const=20, metavar="COUNT", help="Benchmark tok/s (optional count, default 20)")
   args = parser.parse_args()
 
@@ -673,7 +675,7 @@ if __name__ == "__main__":
       break
     dec = tok.stream_decoder()
     if think_start: sys.stdout.write(think_start)
-    for next_id in model.generate(ids):
+    for next_id in model.generate(ids, temperature=args.temperature):
       sys.stdout.write(dec(next_id) if next_id not in (eos_id, eot_id) else dec() + "\n\n")
       sys.stdout.flush()
       if next_id in (eos_id, eot_id): break
