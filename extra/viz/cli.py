@@ -142,8 +142,15 @@ def main(args) -> None:
     return None
 
   # ** Graph rewrites printer
-  def print_step(data):
-    if data.get("src") is not None: print(data["src"])
+  rewrites = {c["name"]:{s["name"]:s for s in c["steps"]} for c in data.ctxs if c.get("steps")}
+  if args.src is None:
+    for k in rewrites: print(f"  {format_colored(k)}")
+    return None
+  steps = get(rewrites, args.src)
+  if args.item is None:
+    for k,v in steps.items(): print(" "*v["depth"]+k+(f" - {v['match_count']}" if v.get('match_count', 0) else ''))
+  else:
+    data = viz.get_render(data, get(steps, args.item)["query"])
     if isinstance(data.get("value"), Iterator):
       for m in data["value"]:
         if m.get("uop"): print(f"Input UOp:\n{m['uop']}")
@@ -152,17 +159,7 @@ def main(args) -> None:
           print(f"Rewrite at {loc.parent.name}/{loc.name}:{m['upat'][0][1]}\n{m['upat'][1]}")
           for line in m["diff"]:
             print(line if args.no_color else colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None))
-  rewrites = {c["name"]:{s["name"]:s for s in c["steps"]} for c in data.ctxs if c.get("steps")}
-  if args.src is None:
-    for k in rewrites: print(f"  {format_colored(k)}")
-    return None
-
-  steps = get(rewrites, args.src)
-  if args.item is None:
-    for k,v in steps.items():
-      print(" "*v["depth"]+k+(f" - {v['match_count']}" if v.get('match_count', 0) else ''))
-      if args.all: print_step(v)
-  else: print_step(viz.get_render(data, get(steps, args.item)["query"]))
+    if data.get("src") is not None: print(data["src"])
 
 def get_arg_parser() -> argparse.ArgumentParser:
   parser = argparse.ArgumentParser(add_help=False)
@@ -172,7 +169,6 @@ def get_arg_parser() -> argparse.ArgumentParser:
   g_opts = parser.add_argument_group("optional args")
   g_opts.add_argument("-s", "--src", type=str, default=None, metavar="NAME", help="Select a data source (default: list all sources)")
   g_opts.add_argument("-i", "--item", type=str, default=None, metavar="NAME", help="Select an item within the source (default: list all items)")
-  g_opts.add_argument("-a", "--all", action="store_true", metavar="NAME", help="Print all items in the selected data source")
   g_opts.add_argument("--no-color", action="store_true", help="Turn off colored names")
   g_opts.add_argument("--profile-path", type=pathlib.Path, metavar="PATH", help="Path to profile.pkl (optional file, default: latest profile)",
                       default=pathlib.Path(temp("profile.pkl", append_user=True)))

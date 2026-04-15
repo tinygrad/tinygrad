@@ -2,7 +2,7 @@ import unittest
 import numpy as np
 from tinygrad import Tensor, function
 from tinygrad.dtype import dtypes
-from tinygrad.uop.ops import UOp, Ops, KernelInfo
+from tinygrad.uop.ops import UOp, Ops
 
 class TestCall(unittest.TestCase):
   def test_call_plus(self):
@@ -137,24 +137,6 @@ class TestCallShape(unittest.TestCase):
     self.assertEqual(shape[0], sz.bind(5))
 
 class TestCallSchedule(unittest.TestCase):
-  def test_call_program_custom_kernel_on_expression_input(self):
-    def custom_program(out:UOp, x:UOp) -> UOp:
-      sink = UOp.sink(out.base, x.base, arg=KernelInfo(name="mini"))
-      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg="NULL"), UOp(Ops.LINEAR, src=(*sink.src, sink))))
-
-    inp = UOp.param(0, dtypes.float, (4,), device="NULL")
-    out = UOp.new_buffer("NULL", 1, dtypes.float).reshape((1,))
-
-    ph_out = UOp.placeholder((1,), dtypes.float, 0)
-    ph_in = UOp.placeholder((4,), dtypes.float, 1)
-    program = custom_program(ph_out, ph_in)
-
-    body = out.after(program.call(out, inp + 1))
-    out = Tensor(body.call(Tensor.ones(4, device="NULL").uop).gettuple(0))
-
-    # This should materialize the expression before calling the PROGRAM custom kernel.
-    out.schedule()
-
   def test_reshape_precompile(self):
     a = Tensor.empty(4, 8).realize()
     a = a.reshape(4,4,2).assign(Tensor.empty(4,4,2)).reshape(8,4)

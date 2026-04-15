@@ -1,6 +1,8 @@
 import os, unittest
 
+os.environ["DEV"] = "NULL:HIP:gfx950"
 os.environ["WQKV"] = "1"
+os.environ["AMAX_UOP"] = "1"
 os.environ["FP8"] = "1"
 os.environ["ASM_GEMM"] = "1"
 os.environ["HK_FLASH_ATTENTION"] = "0"
@@ -23,7 +25,6 @@ device_mod.ALLOW_DEVICE_USAGE = True
 
 
 class TestFlatLlamaHKAmax(unittest.TestCase):
-  @unittest.skipUnless(os.getenv("DEV", "").startswith("NULL:HIP:gfx950"), "requires DEV=NULL:HIP:gfx950")
   def test_hk_amax_feedforward_backward_dp_scheduler_regression(self):
     def run_minibatch(hk_amax:int):
       devices = tuple(f"{Device.DEFAULT}:{i}" for i in range(2))
