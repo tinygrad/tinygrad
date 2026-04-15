@@ -26,18 +26,16 @@ exit:
 }
 '''
 
-# With DEBUG=7 you can see the LLVM IR and check for spill instructions: writelane, readlane, buffer_store
-
 @unittest.skipUnless(Device.DEFAULT == "AMD", "Runs only on AMD")
 class TestAMDSpillFlags(unittest.TestCase):
   def test_spill(self):
-    from tinygrad.runtime.support.compiler_amd import AMDLLVMCompiler
-    # SPILL=0 should prevent most spills
-    with Context(SPILL=0, DEBUG=7):
-      AMDLLVMCompiler("gfx1100").compile(KERNEL)
-    # SPILL=1 allows spills
-    with Context(SPILL=1, DEBUG=7):
-      AMDLLVMCompiler("gfx1100").compile(KERNEL)
+    from tinygrad.runtime.support.compiler_amd import HIPCompiler
+    import time
+    for spill in [0, 1]:
+      with Context(SPILL=spill):
+        t = time.perf_counter()
+        HIPCompiler("gfx1100").compile(KERNEL)
+        print(f"\nSPILL={spill}: {time.perf_counter() - t:.3f}s")
 
 if __name__ == "__main__":
   unittest.main()
