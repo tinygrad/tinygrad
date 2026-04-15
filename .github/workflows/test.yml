@@ -667,12 +667,12 @@ jobs:
           sudo apt-get install llvm-21 llvm-21-tools cloc
       - name: Install rocprof-trace-decoder
         run: sudo PYTHONPATH="." ./extra/sqtt/install_rocprof_decoder.py
+      - name: Run AMD spill flags tests
+        run: DEV=AMD:LLVM python -m pytest test/amd/test_spill_flags.py --durations 20
       - name: Run AMD renderer tests
         run: python -m pytest -n=auto test/amd/ --durations 20
       - name: Run AMD renderer tests (AMD:LLVM)
         run: DEV=AMD:LLVM python -m pytest -n=auto test/amd/ --durations 20
-      - name: Run AMD spill flags tests
-        run: DEV=AMD:LLVM python -m pytest test/amd/test_spill_flags.py --durations 20
       - name: Run SQTT profiling tests
         run: PROFILE=1 SQTT=1 python3 -m pytest -n=auto test/amd/test_sqtt_profiler.py
       - name: Run AMD emulated tests on NULL backend
