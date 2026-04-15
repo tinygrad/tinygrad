@@ -33,8 +33,10 @@ class TestDevice(unittest.TestCase):
 
   @unittest.skipIf(Device.DEFAULT != "AMD", "only run on AMD")
   def test_nonexistent_iface(self):
-    with self.assertRaisesRegex(RuntimeError, "did you mean: 'USB'"):
-      with Context(DEV="USA+AMD"): Device[Device.DEFAULT].iface
+    result = subprocess.run(['python3', '-c', 'from tinygrad import Device; Device[Device.DEFAULT].iface'],
+                            env={**os.environ, "DEV":"USA+AMD"}, capture_output=True)
+    self.assertNotEqual(result.returncode, 0)
+    self.assertIn(b"did you mean: 'USB'", result.stderr)
 
   def test_lowercase_canonicalizes(self):
     device = Device.DEFAULT
