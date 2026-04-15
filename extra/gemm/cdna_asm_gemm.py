@@ -2746,8 +2746,8 @@ def custom_hk_amax(amax:UOp, x:UOp, dname:str) -> UOp:
   lib = HIPCCCompiler("gfx950", [f"-I{(kittens_path/'include').as_posix()}", "-std=c++20", "-DKITTENS_CDNA4", "-ffast-math",
                                  "-DHIP_ENABLE_WARP_SYNC_BUILTINS", f"-DPARAM_N={numel}", f"-DPARAM_GRID={grid}"]).compile_cached(src)
   lidx, gidx = UOp.special(64, "lidx0"), UOp.special(grid, "gidx0")
-  sink = UOp.sink(amax.base, x.base, lidx, gidx, arg=KernelInfo(name=f"custom_quantize_fp8_amax_{numel}", estimates=Estimates()))
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dname), UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=lib)))
+  s = UOp.sink(amax.base, x.base, lidx, gidx, arg=KernelInfo(name=f"custom_amax_{numel}", estimates=Estimates()))
+  return UOp(Ops.PROGRAM, src=(s, UOp(Ops.DEVICE, arg=dname), UOp(Ops.LINEAR, src=(*s.src, s)), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=lib)))
 
 def custom_hk_amax_uop(amax:UOp, x:UOp, dname:str) -> UOp:
   _ = dname
@@ -2755,18 +2755,18 @@ def custom_hk_amax_uop(amax:UOp, x:UOp, dname:str) -> UOp:
   absx = x.flatten().index(ridx).cast(amax.dtype.base).abs()
   red = absx.reduce(ridx, arg=Ops.MAX, dtype=dtypes.float32)
   store = amax[0].store(red)
-  return store.sink(arg=KernelInfo(name=f"custom_quantize_fp8_amax_uop_{x.size}", estimates=Estimates()))
+  return store.sink(arg=KernelInfo(name=f"custom_amax_uop_{x.size}", estimates=Estimates()))
 
 def hk_amax(x:Tensor) -> Tensor:
-  amax_f32 = Tensor.invalid(1, dtype=dtypes.float32, device=x.device)
-  amax_f32 = amax_f32.custom_kernel(fxn=_zero_kernel)[0]
   device = x.device[0] if isinstance(x.device, tuple) else x.device
   dname = device.split(":")[0]
   arch = Device[device].renderer.target.arch
   counters["hk_amax"] += 1
-  amax_f32, _ = Tensor.custom_kernel(amax_f32, x, fxn=functools.partial(custom_hk_amax_uop if arch != "gfx950" or getenv("AMAX_UOP") else custom_hk_amax, dname=dname),
-                                     grad_fxn=hk_amax_grad)
-  return amax_f32.cast(x.dtype).reshape(())
+  amax = Tensor.invalid(1, dtype=dtypes.float32, device=x.device)
+  amax = amax.custom_kernel(fxn=_zero_kernel)[0]
+  amax, _ = Tensor.custom_kernel(amax, x, fxn=functools.partial(custom_hk_amax_uop if arch != "gfx950" or getenv("AMAX_UOP") else custom_hk_amax,
+                                                                dname=dname), grad_fxn=hk_amax_grad)
+  return amax.cast(x.dtype).reshape(())
 
 # ** main gemm function
 

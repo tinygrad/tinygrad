@@ -3,7 +3,6 @@ import numpy as np
 from tinygrad import Tensor, Device, dtypes, Context
 from tinygrad.device import is_dtype_supported
 from tinygrad.helpers import getenv, system
-from tinygrad.uop.ops import Ops
 from extra.gemm.cdna_asm_gemm import asm_gemm, hk_amax
 from test.helpers import needs_second_gpu
 from examples.mlperf.models.flat_llama import FP8_DTYPE, _local_abs_max
