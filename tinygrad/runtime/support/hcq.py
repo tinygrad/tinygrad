@@ -61,7 +61,7 @@ if MOCKGPU:=getenv("MOCKGPU"): from test.mockgpu.mockgpu import MockFileIOInterf
 # **************** for HCQ Compatible Devices ****************
 
 def hcq_filter_visible_devices(devs, device):
-  assert (v:=getenv("HCQ_VISIBLE_DEVICES", "")) == "", f"HCQ_VISIBLE_DEVICES={v} is deprecated, use DEV={replace(DEV.value, indices=v)} instead"
+  assert (v:=getenv("HCQ_VISIBLE_DEVICES", "")) == "", f"HCQ_VISIBLE_DEVICES={v} is deprecated, use DEV={DEV.target(device, indices=v)} instead"
   return [devs[x] for x in ids] if (ids:=[int(x) for x in DEV.target(device).indices.split(',') if x.strip()]) else devs
 
 SignalType = TypeVar('SignalType', bound='HCQSignal')
