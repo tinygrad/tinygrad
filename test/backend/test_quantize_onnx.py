@@ -6,7 +6,7 @@ from tinygrad import Tensor, Context, Device, dtypes
 from tinygrad.uop.ops import Ops
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.engine.realize import CompiledRunner, get_program
-from tinygrad.engine.schedule import ExecItem
+from tinygrad.schedule import ExecItem
 
 N = 512
 

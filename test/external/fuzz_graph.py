@@ -5,7 +5,7 @@ from tinygrad.helpers import Context, getenv, from_mv
 from tinygrad.dtype import dtypes
 from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.engine.realize import BufferXfer, get_runner
-from tinygrad.engine.schedule import ExecItem
+from tinygrad.schedule import ExecItem
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.engine.jit import apply_graph_to_jit
 

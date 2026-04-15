@@ -13,7 +13,7 @@ from tinygrad.gradient import compute_gradient
 from tinygrad.mixin import OpMixin, ReductionStr
 from tinygrad.uop.ops import smax, UOp, Ops, sint, all_metadata, _index_to_concrete_int, sint_to_uop, Variable
 from tinygrad.uop.ops import _broadcast_shape
-from tinygrad.engine.schedule import ExecItem, complete_create_schedule_with_vars
+from tinygrad.schedule import ExecItem, complete_create_schedule_with_vars
 from tinygrad.device import Buffer, canonicalize_device
 from tinygrad.engine.realize import run_schedule
 from tinygrad.engine.callify import transform_to_call
