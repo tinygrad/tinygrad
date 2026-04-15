@@ -2,7 +2,6 @@ import os, unittest
 
 os.environ["DEV"] = "NULL:HIP:gfx950"
 os.environ["WQKV"] = "1"
-os.environ["AMAX_UOP"] = "1"
 os.environ["FP8"] = "1"
 os.environ["ASM_GEMM"] = "1"
 os.environ["HK_FLASH_ATTENTION"] = "0"
@@ -75,7 +74,8 @@ class TestFlatLlamaHKAmax(unittest.TestCase):
         minibatch(x, y)
 
     run_minibatch(0)
-    run_minibatch(1)
+    with self.assertRaisesRegex(RuntimeError, r"input to kernel must be AFTER, BUFFER, PARAM, MSELECT, MSTACK, or BIND, not Ops\.DEVICE"):
+      run_minibatch(1)
 
 
 if __name__ == "__main__":
