@@ -1,346 +1,349 @@
 # mypy: disable-error-code="empty-body"
 from __future__ import annotations
 import ctypes
-from typing import Annotated, Literal, TypeAlias
+from typing import Literal, TypeAlias
 from tinygrad.runtime.support.c import _IO, _IOW, _IOR, _IOWR
 from tinygrad.runtime.support import c
 dll = c.DLL('opencl', 'OpenCL')
-class struct__cl_platform_id(ctypes.Structure): pass
+class struct__cl_platform_id(c.Struct): pass
 cl_platform_id: TypeAlias = c.POINTER[struct__cl_platform_id]
-class struct__cl_device_id(ctypes.Structure): pass
+class struct__cl_device_id(c.Struct): pass
 cl_device_id: TypeAlias = c.POINTER[struct__cl_device_id]
-class struct__cl_context(ctypes.Structure): pass
+class struct__cl_context(c.Struct): pass
 cl_context: TypeAlias = c.POINTER[struct__cl_context]
-class struct__cl_command_queue(ctypes.Structure): pass
+class struct__cl_command_queue(c.Struct): pass
 cl_command_queue: TypeAlias = c.POINTER[struct__cl_command_queue]
-class struct__cl_mem(ctypes.Structure): pass
+class struct__cl_mem(c.Struct): pass
 cl_mem: TypeAlias = c.POINTER[struct__cl_mem]
-class struct__cl_program(ctypes.Structure): pass
+class struct__cl_program(c.Struct): pass
 cl_program: TypeAlias = c.POINTER[struct__cl_program]
-class struct__cl_kernel(ctypes.Structure): pass
+class struct__cl_kernel(c.Struct): pass
 cl_kernel: TypeAlias = c.POINTER[struct__cl_kernel]
-class struct__cl_event(ctypes.Structure): pass
+class struct__cl_event(c.Struct): pass
 cl_event: TypeAlias = c.POINTER[struct__cl_event]
-class struct__cl_sampler(ctypes.Structure): pass
+class struct__cl_sampler(c.Struct): pass
 cl_sampler: TypeAlias = c.POINTER[struct__cl_sampler]
-cl_bool: TypeAlias = Annotated[int, ctypes.c_uint32]
-cl_bitfield: TypeAlias = Annotated[int, ctypes.c_uint64]
-cl_properties: TypeAlias = Annotated[int, ctypes.c_uint64]
-cl_device_type: TypeAlias = Annotated[int, ctypes.c_uint64]
-cl_platform_info: TypeAlias = Annotated[int, ctypes.c_uint32]
-cl_device_info: TypeAlias = Annotated[int, ctypes.c_uint32]
-cl_device_fp_config: TypeAlias = Annotated[int, ctypes.c_uint64]
-cl_device_mem_cache_type: TypeAlias = Annotated[int, ctypes.c_uint32]
-cl_device_local_mem_type: TypeAlias = Annotated[int, ctypes.c_uint32]
-cl_device_exec_capabilities: TypeAlias = Annotated[int, ctypes.c_uint64]
-cl_device_svm_capabilities: TypeAlias = Annotated[int, ctypes.c_uint64]
-cl_command_queue_properties: TypeAlias = Annotated[int, ctypes.c_uint64]
-cl_device_partition_property: TypeAlias = Annotated[int, ctypes.c_int64]
-cl_device_affinity_domain: TypeAlias = Annotated[int, ctypes.c_uint64]
-cl_context_properties: TypeAlias = Annotated[int, ctypes.c_int64]
-cl_context_info: TypeAlias = Annotated[int, ctypes.c_uint32]
-cl_queue_properties: TypeAlias = Annotated[int, ctypes.c_uint64]
-cl_command_queue_info: TypeAlias = Annotated[int, ctypes.c_uint32]
-cl_channel_order: TypeAlias = Annotated[int, ctypes.c_uint32]
-cl_channel_type: TypeAlias = Annotated[int, ctypes.c_uint32]
-cl_mem_flags: TypeAlias = Annotated[int, ctypes.c_uint64]
-cl_svm_mem_flags: TypeAlias = Annotated[int, ctypes.c_uint64]
-cl_mem_object_type: TypeAlias = Annotated[int, ctypes.c_uint32]
-cl_mem_info: TypeAlias = Annotated[int, ctypes.c_uint32]
-cl_mem_migration_flags: TypeAlias = Annotated[int, ctypes.c_uint64]
-cl_image_info: TypeAlias = Annotated[int, ctypes.c_uint32]
-cl_buffer_create_type: TypeAlias = Annotated[int, ctypes.c_uint32]
-cl_addressing_mode: TypeAlias = Annotated[int, ctypes.c_uint32]
-cl_filter_mode: TypeAlias = Annotated[int, ctypes.c_uint32]
-cl_sampler_info: TypeAlias = Annotated[int, ctypes.c_uint32]
-cl_map_flags: TypeAlias = Annotated[int, ctypes.c_uint64]
-cl_pipe_properties: TypeAlias = Annotated[int, ctypes.c_int64]
-cl_pipe_info: TypeAlias = Annotated[int, ctypes.c_uint32]
-cl_program_info: TypeAlias = Annotated[int, ctypes.c_uint32]
-cl_program_build_info: TypeAlias = Annotated[int, ctypes.c_uint32]
-cl_program_binary_type: TypeAlias = Annotated[int, ctypes.c_uint32]
-cl_build_status: TypeAlias = Annotated[int, ctypes.c_int32]
-cl_kernel_info: TypeAlias = Annotated[int, ctypes.c_uint32]
-cl_kernel_arg_info: TypeAlias = Annotated[int, ctypes.c_uint32]
-cl_kernel_arg_address_qualifier: TypeAlias = Annotated[int, ctypes.c_uint32]
-cl_kernel_arg_access_qualifier: TypeAlias = Annotated[int, ctypes.c_uint32]
-cl_kernel_arg_type_qualifier: TypeAlias = Annotated[int, ctypes.c_uint64]
-cl_kernel_work_group_info: TypeAlias = Annotated[int, ctypes.c_uint32]
-cl_kernel_sub_group_info: TypeAlias = Annotated[int, ctypes.c_uint32]
-cl_event_info: TypeAlias = Annotated[int, ctypes.c_uint32]
-cl_command_type: TypeAlias = Annotated[int, ctypes.c_uint32]
-cl_profiling_info: TypeAlias = Annotated[int, ctypes.c_uint32]
-cl_sampler_properties: TypeAlias = Annotated[int, ctypes.c_uint64]
-cl_kernel_exec_info: TypeAlias = Annotated[int, ctypes.c_uint32]
-cl_device_atomic_capabilities: TypeAlias = Annotated[int, ctypes.c_uint64]
-cl_device_device_enqueue_capabilities: TypeAlias = Annotated[int, ctypes.c_uint64]
-cl_khronos_vendor_id: TypeAlias = Annotated[int, ctypes.c_uint32]
-cl_mem_properties: TypeAlias = Annotated[int, ctypes.c_uint64]
-cl_version: TypeAlias = Annotated[int, ctypes.c_uint32]
+cl_bool: TypeAlias = ctypes.c_uint32
+cl_bitfield: TypeAlias = ctypes.c_uint64
+cl_properties: TypeAlias = ctypes.c_uint64
+cl_device_type: TypeAlias = ctypes.c_uint64
+cl_platform_info: TypeAlias = ctypes.c_uint32
+cl_device_info: TypeAlias = ctypes.c_uint32
+cl_device_fp_config: TypeAlias = ctypes.c_uint64
+cl_device_mem_cache_type: TypeAlias = ctypes.c_uint32
+cl_device_local_mem_type: TypeAlias = ctypes.c_uint32
+cl_device_exec_capabilities: TypeAlias = ctypes.c_uint64
+cl_device_svm_capabilities: TypeAlias = ctypes.c_uint64
+cl_command_queue_properties: TypeAlias = ctypes.c_uint64
+cl_device_partition_property: TypeAlias = ctypes.c_int64
+cl_device_affinity_domain: TypeAlias = ctypes.c_uint64
+cl_context_properties: TypeAlias = ctypes.c_int64
+cl_context_info: TypeAlias = ctypes.c_uint32
+cl_queue_properties: TypeAlias = ctypes.c_uint64
+cl_command_queue_info: TypeAlias = ctypes.c_uint32
+cl_channel_order: TypeAlias = ctypes.c_uint32
+cl_channel_type: TypeAlias = ctypes.c_uint32
+cl_mem_flags: TypeAlias = ctypes.c_uint64
+cl_svm_mem_flags: TypeAlias = ctypes.c_uint64
+cl_mem_object_type: TypeAlias = ctypes.c_uint32
+cl_mem_info: TypeAlias = ctypes.c_uint32
+cl_mem_migration_flags: TypeAlias = ctypes.c_uint64
+cl_image_info: TypeAlias = ctypes.c_uint32
+cl_buffer_create_type: TypeAlias = ctypes.c_uint32
+cl_addressing_mode: TypeAlias = ctypes.c_uint32
+cl_filter_mode: TypeAlias = ctypes.c_uint32
+cl_sampler_info: TypeAlias = ctypes.c_uint32
+cl_map_flags: TypeAlias = ctypes.c_uint64
+cl_pipe_properties: TypeAlias = ctypes.c_int64
+cl_pipe_info: TypeAlias = ctypes.c_uint32
+cl_program_info: TypeAlias = ctypes.c_uint32
+cl_program_build_info: TypeAlias = ctypes.c_uint32
+cl_program_binary_type: TypeAlias = ctypes.c_uint32
+cl_build_status: TypeAlias = ctypes.c_int32
+cl_kernel_info: TypeAlias = ctypes.c_uint32
+cl_kernel_arg_info: TypeAlias = ctypes.c_uint32
+cl_kernel_arg_address_qualifier: TypeAlias = ctypes.c_uint32
+cl_kernel_arg_access_qualifier: TypeAlias = ctypes.c_uint32
+cl_kernel_arg_type_qualifier: TypeAlias = ctypes.c_uint64
+cl_kernel_work_group_info: TypeAlias = ctypes.c_uint32
+cl_kernel_sub_group_info: TypeAlias = ctypes.c_uint32
+cl_event_info: TypeAlias = ctypes.c_uint32
+cl_command_type: TypeAlias = ctypes.c_uint32
+cl_profiling_info: TypeAlias = ctypes.c_uint32
+cl_sampler_properties: TypeAlias = ctypes.c_uint64
+cl_kernel_exec_info: TypeAlias = ctypes.c_uint32
+cl_device_atomic_capabilities: TypeAlias = ctypes.c_uint64
+cl_device_device_enqueue_capabilities: TypeAlias = ctypes.c_uint64
+cl_khronos_vendor_id: TypeAlias = ctypes.c_uint32
+cl_mem_properties: TypeAlias = ctypes.c_uint64
+cl_version: TypeAlias = ctypes.c_uint32
 @c.record
 class struct__cl_image_format(c.Struct):
   SIZE = 8
-  image_channel_order: Annotated[cl_channel_order, 0]
-  image_channel_data_type: Annotated[cl_channel_type, 4]
+  image_channel_order: int
+  image_channel_data_type: int
+struct__cl_image_format.register_fields([('image_channel_order', cl_channel_order, 0), ('image_channel_data_type', cl_channel_type, 4)])
 cl_image_format: TypeAlias = struct__cl_image_format
 @c.record
 class struct__cl_image_desc(c.Struct):
   SIZE = 72
-  image_type: Annotated[cl_mem_object_type, 0]
-  image_width: Annotated[size_t, 8]
-  image_height: Annotated[size_t, 16]
-  image_depth: Annotated[size_t, 24]
-  image_array_size: Annotated[size_t, 32]
-  image_row_pitch: Annotated[size_t, 40]
-  image_slice_pitch: Annotated[size_t, 48]
-  num_mip_levels: Annotated[cl_uint, 56]
-  num_samples: Annotated[cl_uint, 60]
-  buffer: Annotated[cl_mem, 64]
-  mem_object: Annotated[cl_mem, 64]
-size_t: TypeAlias = Annotated[int, ctypes.c_uint64]
-cl_uint: TypeAlias = Annotated[int, ctypes.c_uint32]
+  image_type: int
+  image_width: int
+  image_height: int
+  image_depth: int
+  image_array_size: int
+  image_row_pitch: int
+  image_slice_pitch: int
+  num_mip_levels: int
+  num_samples: int
+  buffer: c.POINTER[struct__cl_mem]
+  mem_object: c.POINTER[struct__cl_mem]
+size_t: TypeAlias = ctypes.c_uint64
+cl_uint: TypeAlias = ctypes.c_uint32
+struct__cl_image_desc.register_fields([('image_type', cl_mem_object_type, 0), ('image_width', size_t, 8), ('image_height', size_t, 16), ('image_depth', size_t, 24), ('image_array_size', size_t, 32), ('image_row_pitch', size_t, 40), ('image_slice_pitch', size_t, 48), ('num_mip_levels', cl_uint, 56), ('num_samples', cl_uint, 60), ('buffer', cl_mem, 64), ('mem_object', cl_mem, 64)])
 cl_image_desc: TypeAlias = struct__cl_image_desc
 @c.record
 class struct__cl_buffer_region(c.Struct):
   SIZE = 16
-  origin: Annotated[size_t, 0]
-  size: Annotated[size_t, 8]
+  origin: int
+  size: int
+struct__cl_buffer_region.register_fields([('origin', size_t, 0), ('size', size_t, 8)])
 cl_buffer_region: TypeAlias = struct__cl_buffer_region
 @c.record
 class struct__cl_name_version(c.Struct):
   SIZE = 68
-  version: Annotated[cl_version, 0]
-  name: Annotated[c.Array[Annotated[bytes, ctypes.c_char], Literal[64]], 4]
+  version: int
+  name: c.Array[ctypes.c_char, Literal[64]]
+struct__cl_name_version.register_fields([('version', cl_version, 0), ('name', c.Array[ctypes.c_char, Literal[64]], 4)])
 cl_name_version: TypeAlias = struct__cl_name_version
-cl_int: TypeAlias = Annotated[int, ctypes.c_int32]
-@dll.bind
+cl_int: TypeAlias = ctypes.c_int32
+@dll.bind(cl_int, cl_uint, c.POINTER[cl_platform_id], c.POINTER[cl_uint])
 def clGetPlatformIDs(num_entries:cl_uint, platforms:c.POINTER[cl_platform_id], num_platforms:c.POINTER[cl_uint]) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_int, cl_platform_id, cl_platform_info, size_t, ctypes.c_void_p, c.POINTER[size_t])
 def clGetPlatformInfo(platform:cl_platform_id, param_name:cl_platform_info, param_value_size:size_t, param_value:ctypes.c_void_p, param_value_size_ret:c.POINTER[size_t]) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_int, cl_platform_id, cl_device_type, cl_uint, c.POINTER[cl_device_id], c.POINTER[cl_uint])
 def clGetDeviceIDs(platform:cl_platform_id, device_type:cl_device_type, num_entries:cl_uint, devices:c.POINTER[cl_device_id], num_devices:c.POINTER[cl_uint]) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_int, cl_device_id, cl_device_info, size_t, ctypes.c_void_p, c.POINTER[size_t])
 def clGetDeviceInfo(device:cl_device_id, param_name:cl_device_info, param_value_size:size_t, param_value:ctypes.c_void_p, param_value_size_ret:c.POINTER[size_t]) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_int, cl_device_id, c.POINTER[cl_device_partition_property], cl_uint, c.POINTER[cl_device_id], c.POINTER[cl_uint])
 def clCreateSubDevices(in_device:cl_device_id, properties:c.POINTER[cl_device_partition_property], num_devices:cl_uint, out_devices:c.POINTER[cl_device_id], num_devices_ret:c.POINTER[cl_uint]) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_int, cl_device_id)
 def clRetainDevice(device:cl_device_id) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_int, cl_device_id)
 def clReleaseDevice(device:cl_device_id) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_int, cl_context, cl_device_id, cl_command_queue)
 def clSetDefaultDeviceCommandQueue(context:cl_context, device:cl_device_id, command_queue:cl_command_queue) -> cl_int: ...
-cl_ulong: TypeAlias = Annotated[int, ctypes.c_uint64]
-@dll.bind
+cl_ulong: TypeAlias = ctypes.c_uint64
+@dll.bind(cl_int, cl_device_id, c.POINTER[cl_ulong], c.POINTER[cl_ulong])
 def clGetDeviceAndHostTimer(device:cl_device_id, device_timestamp:c.POINTER[cl_ulong], host_timestamp:c.POINTER[cl_ulong]) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_int, cl_device_id, c.POINTER[cl_ulong])
 def clGetHostTimer(device:cl_device_id, host_timestamp:c.POINTER[cl_ulong]) -> cl_int: ...
-@dll.bind
-def clCreateContext(properties:c.POINTER[cl_context_properties], num_devices:cl_uint, devices:c.POINTER[cl_device_id], pfn_notify:c.CFUNCTYPE[None, [c.POINTER[Annotated[bytes, ctypes.c_char]], ctypes.c_void_p, size_t, ctypes.c_void_p]], user_data:ctypes.c_void_p, errcode_ret:c.POINTER[cl_int]) -> cl_context: ...
-@dll.bind
-def clCreateContextFromType(properties:c.POINTER[cl_context_properties], device_type:cl_device_type, pfn_notify:c.CFUNCTYPE[None, [c.POINTER[Annotated[bytes, ctypes.c_char]], ctypes.c_void_p, size_t, ctypes.c_void_p]], user_data:ctypes.c_void_p, errcode_ret:c.POINTER[cl_int]) -> cl_context: ...
-@dll.bind
+@dll.bind(cl_context, c.POINTER[cl_context_properties], cl_uint, c.POINTER[cl_device_id], c.CFUNCTYPE[None, [c.POINTER[ctypes.c_char], ctypes.c_void_p, size_t, ctypes.c_void_p]], ctypes.c_void_p, c.POINTER[cl_int])
+def clCreateContext(properties:c.POINTER[cl_context_properties], num_devices:cl_uint, devices:c.POINTER[cl_device_id], pfn_notify:c.CFUNCTYPE[None, [c.POINTER[ctypes.c_char], ctypes.c_void_p, size_t, ctypes.c_void_p]], user_data:ctypes.c_void_p, errcode_ret:c.POINTER[cl_int]) -> cl_context: ...
+@dll.bind(cl_context, c.POINTER[cl_context_properties], cl_device_type, c.CFUNCTYPE[None, [c.POINTER[ctypes.c_char], ctypes.c_void_p, size_t, ctypes.c_void_p]], ctypes.c_void_p, c.POINTER[cl_int])
+def clCreateContextFromType(properties:c.POINTER[cl_context_properties], device_type:cl_device_type, pfn_notify:c.CFUNCTYPE[None, [c.POINTER[ctypes.c_char], ctypes.c_void_p, size_t, ctypes.c_void_p]], user_data:ctypes.c_void_p, errcode_ret:c.POINTER[cl_int]) -> cl_context: ...
+@dll.bind(cl_int, cl_context)
 def clRetainContext(context:cl_context) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_int, cl_context)
 def clReleaseContext(context:cl_context) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_int, cl_context, cl_context_info, size_t, ctypes.c_void_p, c.POINTER[size_t])
 def clGetContextInfo(context:cl_context, param_name:cl_context_info, param_value_size:size_t, param_value:ctypes.c_void_p, param_value_size_ret:c.POINTER[size_t]) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_int, cl_context, c.CFUNCTYPE[None, [cl_context, ctypes.c_void_p]], ctypes.c_void_p)
 def clSetContextDestructorCallback(context:cl_context, pfn_notify:c.CFUNCTYPE[None, [cl_context, ctypes.c_void_p]], user_data:ctypes.c_void_p) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_command_queue, cl_context, cl_device_id, c.POINTER[cl_queue_properties], c.POINTER[cl_int])
 def clCreateCommandQueueWithProperties(context:cl_context, device:cl_device_id, properties:c.POINTER[cl_queue_properties], errcode_ret:c.POINTER[cl_int]) -> cl_command_queue: ...
-@dll.bind
+@dll.bind(cl_int, cl_command_queue)
 def clRetainCommandQueue(command_queue:cl_command_queue) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_int, cl_command_queue)
 def clReleaseCommandQueue(command_queue:cl_command_queue) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_int, cl_command_queue, cl_command_queue_info, size_t, ctypes.c_void_p, c.POINTER[size_t])
 def clGetCommandQueueInfo(command_queue:cl_command_queue, param_name:cl_command_queue_info, param_value_size:size_t, param_value:ctypes.c_void_p, param_value_size_ret:c.POINTER[size_t]) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_mem, cl_context, cl_mem_flags, size_t, ctypes.c_void_p, c.POINTER[cl_int])
 def clCreateBuffer(context:cl_context, flags:cl_mem_flags, size:size_t, host_ptr:ctypes.c_void_p, errcode_ret:c.POINTER[cl_int]) -> cl_mem: ...
-@dll.bind
+@dll.bind(cl_mem, cl_mem, cl_mem_flags, cl_buffer_create_type, ctypes.c_void_p, c.POINTER[cl_int])
 def clCreateSubBuffer(buffer:cl_mem, flags:cl_mem_flags, buffer_create_type:cl_buffer_create_type, buffer_create_info:ctypes.c_void_p, errcode_ret:c.POINTER[cl_int]) -> cl_mem: ...
-@dll.bind
+@dll.bind(cl_mem, cl_context, cl_mem_flags, c.POINTER[cl_image_format], c.POINTER[cl_image_desc], ctypes.c_void_p, c.POINTER[cl_int])
 def clCreateImage(context:cl_context, flags:cl_mem_flags, image_format:c.POINTER[cl_image_format], image_desc:c.POINTER[cl_image_desc], host_ptr:ctypes.c_void_p, errcode_ret:c.POINTER[cl_int]) -> cl_mem: ...
-@dll.bind
+@dll.bind(cl_mem, cl_context, cl_mem_flags, cl_uint, cl_uint, c.POINTER[cl_pipe_properties], c.POINTER[cl_int])
 def clCreatePipe(context:cl_context, flags:cl_mem_flags, pipe_packet_size:cl_uint, pipe_max_packets:cl_uint, properties:c.POINTER[cl_pipe_properties], errcode_ret:c.POINTER[cl_int]) -> cl_mem: ...
-@dll.bind
+@dll.bind(cl_mem, cl_context, c.POINTER[cl_mem_properties], cl_mem_flags, size_t, ctypes.c_void_p, c.POINTER[cl_int])
 def clCreateBufferWithProperties(context:cl_context, properties:c.POINTER[cl_mem_properties], flags:cl_mem_flags, size:size_t, host_ptr:ctypes.c_void_p, errcode_ret:c.POINTER[cl_int]) -> cl_mem: ...
-@dll.bind
+@dll.bind(cl_mem, cl_context, c.POINTER[cl_mem_properties], cl_mem_flags, c.POINTER[cl_image_format], c.POINTER[cl_image_desc], ctypes.c_void_p, c.POINTER[cl_int])
 def clCreateImageWithProperties(context:cl_context, properties:c.POINTER[cl_mem_properties], flags:cl_mem_flags, image_format:c.POINTER[cl_image_format], image_desc:c.POINTER[cl_image_desc], host_ptr:ctypes.c_void_p, errcode_ret:c.POINTER[cl_int]) -> cl_mem: ...
-@dll.bind
+@dll.bind(cl_int, cl_mem)
 def clRetainMemObject(memobj:cl_mem) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_int, cl_mem)
 def clReleaseMemObject(memobj:cl_mem) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_int, cl_context, cl_mem_flags, cl_mem_object_type, cl_uint, c.POINTER[cl_image_format], c.POINTER[cl_uint])
 def clGetSupportedImageFormats(context:cl_context, flags:cl_mem_flags, image_type:cl_mem_object_type, num_entries:cl_uint, image_formats:c.POINTER[cl_image_format], num_image_formats:c.POINTER[cl_uint]) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_int, cl_mem, cl_mem_info, size_t, ctypes.c_void_p, c.POINTER[size_t])
 def clGetMemObjectInfo(memobj:cl_mem, param_name:cl_mem_info, param_value_size:size_t, param_value:ctypes.c_void_p, param_value_size_ret:c.POINTER[size_t]) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_int, cl_mem, cl_image_info, size_t, ctypes.c_void_p, c.POINTER[size_t])
 def clGetImageInfo(image:cl_mem, param_name:cl_image_info, param_value_size:size_t, param_value:ctypes.c_void_p, param_value_size_ret:c.POINTER[size_t]) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_int, cl_mem, cl_pipe_info, size_t, ctypes.c_void_p, c.POINTER[size_t])
 def clGetPipeInfo(pipe:cl_mem, param_name:cl_pipe_info, param_value_size:size_t, param_value:ctypes.c_void_p, param_value_size_ret:c.POINTER[size_t]) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_int, cl_mem, c.CFUNCTYPE[None, [cl_mem, ctypes.c_void_p]], ctypes.c_void_p)
 def clSetMemObjectDestructorCallback(memobj:cl_mem, pfn_notify:c.CFUNCTYPE[None, [cl_mem, ctypes.c_void_p]], user_data:ctypes.c_void_p) -> cl_int: ...
-@dll.bind
+@dll.bind(ctypes.c_void_p, cl_context, cl_svm_mem_flags, size_t, cl_uint)
 def clSVMAlloc(context:cl_context, flags:cl_svm_mem_flags, size:size_t, alignment:cl_uint) -> ctypes.c_void_p: ...
-@dll.bind
+@dll.bind(None, cl_context, ctypes.c_void_p)
 def clSVMFree(context:cl_context, svm_pointer:ctypes.c_void_p) -> None: ...
-@dll.bind
+@dll.bind(cl_sampler, cl_context, c.POINTER[cl_sampler_properties], c.POINTER[cl_int])
 def clCreateSamplerWithProperties(context:cl_context, sampler_properties:c.POINTER[cl_sampler_properties], errcode_ret:c.POINTER[cl_int]) -> cl_sampler: ...
-@dll.bind
+@dll.bind(cl_int, cl_sampler)
 def clRetainSampler(sampler:cl_sampler) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_int, cl_sampler)
 def clReleaseSampler(sampler:cl_sampler) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_int, cl_sampler, cl_sampler_info, size_t, ctypes.c_void_p, c.POINTER[size_t])
 def clGetSamplerInfo(sampler:cl_sampler, param_name:cl_sampler_info, param_value_size:size_t, param_value:ctypes.c_void_p, param_value_size_ret:c.POINTER[size_t]) -> cl_int: ...
-@dll.bind
-def clCreateProgramWithSource(context:cl_context, count:cl_uint, strings:c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]], lengths:c.POINTER[size_t], errcode_ret:c.POINTER[cl_int]) -> cl_program: ...
-@dll.bind
-def clCreateProgramWithBinary(context:cl_context, num_devices:cl_uint, device_list:c.POINTER[cl_device_id], lengths:c.POINTER[size_t], binaries:c.POINTER[c.POINTER[Annotated[int, ctypes.c_ubyte]]], binary_status:c.POINTER[cl_int], errcode_ret:c.POINTER[cl_int]) -> cl_program: ...
-@dll.bind
-def clCreateProgramWithBuiltInKernels(context:cl_context, num_devices:cl_uint, device_list:c.POINTER[cl_device_id], kernel_names:c.POINTER[Annotated[bytes, ctypes.c_char]], errcode_ret:c.POINTER[cl_int]) -> cl_program: ...
-@dll.bind
+@dll.bind(cl_program, cl_context, cl_uint, c.POINTER[c.POINTER[ctypes.c_char]], c.POINTER[size_t], c.POINTER[cl_int])
+def clCreateProgramWithSource(context:cl_context, count:cl_uint, strings:c.POINTER[c.POINTER[ctypes.c_char]], lengths:c.POINTER[size_t], errcode_ret:c.POINTER[cl_int]) -> cl_program: ...
+@dll.bind(cl_program, cl_context, cl_uint, c.POINTER[cl_device_id], c.POINTER[size_t], c.POINTER[c.POINTER[ctypes.c_ubyte]], c.POINTER[cl_int], c.POINTER[cl_int])
+def clCreateProgramWithBinary(context:cl_context, num_devices:cl_uint, device_list:c.POINTER[cl_device_id], lengths:c.POINTER[size_t], binaries:c.POINTER[c.POINTER[ctypes.c_ubyte]], binary_status:c.POINTER[cl_int], errcode_ret:c.POINTER[cl_int]) -> cl_program: ...
+@dll.bind(cl_program, cl_context, cl_uint, c.POINTER[cl_device_id], c.POINTER[ctypes.c_char], c.POINTER[cl_int])
+def clCreateProgramWithBuiltInKernels(context:cl_context, num_devices:cl_uint, device_list:c.POINTER[cl_device_id], kernel_names:c.POINTER[ctypes.c_char], errcode_ret:c.POINTER[cl_int]) -> cl_program: ...
+@dll.bind(cl_program, cl_context, ctypes.c_void_p, size_t, c.POINTER[cl_int])
 def clCreateProgramWithIL(context:cl_context, il:ctypes.c_void_p, length:size_t, errcode_ret:c.POINTER[cl_int]) -> cl_program: ...
-@dll.bind
+@dll.bind(cl_int, cl_program)
 def clRetainProgram(program:cl_program) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_int, cl_program)
 def clReleaseProgram(program:cl_program) -> cl_int: ...
-@dll.bind
-def clBuildProgram(program:cl_program, num_devices:cl_uint, device_list:c.POINTER[cl_device_id], options:c.POINTER[Annotated[bytes, ctypes.c_char]], pfn_notify:c.CFUNCTYPE[None, [cl_program, ctypes.c_void_p]], user_data:ctypes.c_void_p) -> cl_int: ...
-@dll.bind
-def clCompileProgram(program:cl_program, num_devices:cl_uint, device_list:c.POINTER[cl_device_id], options:c.POINTER[Annotated[bytes, ctypes.c_char]], num_input_headers:cl_uint, input_headers:c.POINTER[cl_program], header_include_names:c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]], pfn_notify:c.CFUNCTYPE[None, [cl_program, ctypes.c_void_p]], user_data:ctypes.c_void_p) -> cl_int: ...
-@dll.bind
-def clLinkProgram(context:cl_context, num_devices:cl_uint, device_list:c.POINTER[cl_device_id], options:c.POINTER[Annotated[bytes, ctypes.c_char]], num_input_programs:cl_uint, input_programs:c.POINTER[cl_program], pfn_notify:c.CFUNCTYPE[None, [cl_program, ctypes.c_void_p]], user_data:ctypes.c_void_p, errcode_ret:c.POINTER[cl_int]) -> cl_program: ...
-@dll.bind
+@dll.bind(cl_int, cl_program, cl_uint, c.POINTER[cl_device_id], c.POINTER[ctypes.c_char], c.CFUNCTYPE[None, [cl_program, ctypes.c_void_p]], ctypes.c_void_p)
+def clBuildProgram(program:cl_program, num_devices:cl_uint, device_list:c.POINTER[cl_device_id], options:c.POINTER[ctypes.c_char], pfn_notify:c.CFUNCTYPE[None, [cl_program, ctypes.c_void_p]], user_data:ctypes.c_void_p) -> cl_int: ...
+@dll.bind(cl_int, cl_program, cl_uint, c.POINTER[cl_device_id], c.POINTER[ctypes.c_char], cl_uint, c.POINTER[cl_program], c.POINTER[c.POINTER[ctypes.c_char]], c.CFUNCTYPE[None, [cl_program, ctypes.c_void_p]], ctypes.c_void_p)
+def clCompileProgram(program:cl_program, num_devices:cl_uint, device_list:c.POINTER[cl_device_id], options:c.POINTER[ctypes.c_char], num_input_headers:cl_uint, input_headers:c.POINTER[cl_program], header_include_names:c.POINTER[c.POINTER[ctypes.c_char]], pfn_notify:c.CFUNCTYPE[None, [cl_program, ctypes.c_void_p]], user_data:ctypes.c_void_p) -> cl_int: ...
+@dll.bind(cl_program, cl_context, cl_uint, c.POINTER[cl_device_id], c.POINTER[ctypes.c_char], cl_uint, c.POINTER[cl_program], c.CFUNCTYPE[None, [cl_program, ctypes.c_void_p]], ctypes.c_void_p, c.POINTER[cl_int])
+def clLinkProgram(context:cl_context, num_devices:cl_uint, device_list:c.POINTER[cl_device_id], options:c.POINTER[ctypes.c_char], num_input_programs:cl_uint, input_programs:c.POINTER[cl_program], pfn_notify:c.CFUNCTYPE[None, [cl_program, ctypes.c_void_p]], user_data:ctypes.c_void_p, errcode_ret:c.POINTER[cl_int]) -> cl_program: ...
+@dll.bind(cl_int, cl_program, c.CFUNCTYPE[None, [cl_program, ctypes.c_void_p]], ctypes.c_void_p)
 def clSetProgramReleaseCallback(program:cl_program, pfn_notify:c.CFUNCTYPE[None, [cl_program, ctypes.c_void_p]], user_data:ctypes.c_void_p) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_int, cl_program, cl_uint, size_t, ctypes.c_void_p)
 def clSetProgramSpecializationConstant(program:cl_program, spec_id:cl_uint, spec_size:size_t, spec_value:ctypes.c_void_p) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_int, cl_platform_id)
 def clUnloadPlatformCompiler(platform:cl_platform_id) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_int, cl_program, cl_program_info, size_t, ctypes.c_void_p, c.POINTER[size_t])
 def clGetProgramInfo(program:cl_program, param_name:cl_program_info, param_value_size:size_t, param_value:ctypes.c_void_p, param_value_size_ret:c.POINTER[size_t]) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_int, cl_program, cl_device_id, cl_program_build_info, size_t, ctypes.c_void_p, c.POINTER[size_t])
 def clGetProgramBuildInfo(program:cl_program, device:cl_device_id, param_name:cl_program_build_info, param_value_size:size_t, param_value:ctypes.c_void_p, param_value_size_ret:c.POINTER[size_t]) -> cl_int: ...
-@dll.bind
-def clCreateKernel(program:cl_program, kernel_name:c.POINTER[Annotated[bytes, ctypes.c_char]], errcode_ret:c.POINTER[cl_int]) -> cl_kernel: ...
-@dll.bind
+@dll.bind(cl_kernel, cl_program, c.POINTER[ctypes.c_char], c.POINTER[cl_int])
+def clCreateKernel(program:cl_program, kernel_name:c.POINTER[ctypes.c_char], errcode_ret:c.POINTER[cl_int]) -> cl_kernel: ...
+@dll.bind(cl_int, cl_program, cl_uint, c.POINTER[cl_kernel], c.POINTER[cl_uint])
 def clCreateKernelsInProgram(program:cl_program, num_kernels:cl_uint, kernels:c.POINTER[cl_kernel], num_kernels_ret:c.POINTER[cl_uint]) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_kernel, cl_kernel, c.POINTER[cl_int])
 def clCloneKernel(source_kernel:cl_kernel, errcode_ret:c.POINTER[cl_int]) -> cl_kernel: ...
-@dll.bind
+@dll.bind(cl_int, cl_kernel)
 def clRetainKernel(kernel:cl_kernel) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_int, cl_kernel)
 def clReleaseKernel(kernel:cl_kernel) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_int, cl_kernel, cl_uint, size_t, ctypes.c_void_p)
 def clSetKernelArg(kernel:cl_kernel, arg_index:cl_uint, arg_size:size_t, arg_value:ctypes.c_void_p) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_int, cl_kernel, cl_uint, ctypes.c_void_p)
 def clSetKernelArgSVMPointer(kernel:cl_kernel, arg_index:cl_uint, arg_value:ctypes.c_void_p) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_int, cl_kernel, cl_kernel_exec_info, size_t, ctypes.c_void_p)
 def clSetKernelExecInfo(kernel:cl_kernel, param_name:cl_kernel_exec_info, param_value_size:size_t, param_value:ctypes.c_void_p) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_int, cl_kernel, cl_kernel_info, size_t, ctypes.c_void_p, c.POINTER[size_t])
 def clGetKernelInfo(kernel:cl_kernel, param_name:cl_kernel_info, param_value_size:size_t, param_value:ctypes.c_void_p, param_value_size_ret:c.POINTER[size_t]) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_int, cl_kernel, cl_uint, cl_kernel_arg_info, size_t, ctypes.c_void_p, c.POINTER[size_t])
 def clGetKernelArgInfo(kernel:cl_kernel, arg_indx:cl_uint, param_name:cl_kernel_arg_info, param_value_size:size_t, param_value:ctypes.c_void_p, param_value_size_ret:c.POINTER[size_t]) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_int, cl_kernel, cl_device_id, cl_kernel_work_group_info, size_t, ctypes.c_void_p, c.POINTER[size_t])
 def clGetKernelWorkGroupInfo(kernel:cl_kernel, device:cl_device_id, param_name:cl_kernel_work_group_info, param_value_size:size_t, param_value:ctypes.c_void_p, param_value_size_ret:c.POINTER[size_t]) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_int, cl_kernel, cl_device_id, cl_kernel_sub_group_info, size_t, ctypes.c_void_p, size_t, ctypes.c_void_p, c.POINTER[size_t])
 def clGetKernelSubGroupInfo(kernel:cl_kernel, device:cl_device_id, param_name:cl_kernel_sub_group_info, input_value_size:size_t, input_value:ctypes.c_void_p, param_value_size:size_t, param_value:ctypes.c_void_p, param_value_size_ret:c.POINTER[size_t]) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_int, cl_uint, c.POINTER[cl_event])
 def clWaitForEvents(num_events:cl_uint, event_list:c.POINTER[cl_event]) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_int, cl_event, cl_event_info, size_t, ctypes.c_void_p, c.POINTER[size_t])
 def clGetEventInfo(event:cl_event, param_name:cl_event_info, param_value_size:size_t, param_value:ctypes.c_void_p, param_value_size_ret:c.POINTER[size_t]) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_event, cl_context, c.POINTER[cl_int])
 def clCreateUserEvent(context:cl_context, errcode_ret:c.POINTER[cl_int]) -> cl_event: ...
-@dll.bind
+@dll.bind(cl_int, cl_event)
 def clRetainEvent(event:cl_event) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_int, cl_event)
 def clReleaseEvent(event:cl_event) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_int, cl_event, cl_int)
 def clSetUserEventStatus(event:cl_event, execution_status:cl_int) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_int, cl_event, cl_int, c.CFUNCTYPE[None, [cl_event, cl_int, ctypes.c_void_p]], ctypes.c_void_p)
 def clSetEventCallback(event:cl_event, command_exec_callback_type:cl_int, pfn_notify:c.CFUNCTYPE[None, [cl_event, cl_int, ctypes.c_void_p]], user_data:ctypes.c_void_p) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_int, cl_event, cl_profiling_info, size_t, ctypes.c_void_p, c.POINTER[size_t])
 def clGetEventProfilingInfo(event:cl_event, param_name:cl_profiling_info, param_value_size:size_t, param_value:ctypes.c_void_p, param_value_size_ret:c.POINTER[size_t]) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_int, cl_command_queue)
 def clFlush(command_queue:cl_command_queue) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_int, cl_command_queue)
 def clFinish(command_queue:cl_command_queue) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_int, cl_command_queue, cl_mem, cl_bool, size_t, size_t, ctypes.c_void_p, cl_uint, c.POINTER[cl_event], c.POINTER[cl_event])
 def clEnqueueReadBuffer(command_queue:cl_command_queue, buffer:cl_mem, blocking_read:cl_bool, offset:size_t, size:size_t, ptr:ctypes.c_void_p, num_events_in_wait_list:cl_uint, event_wait_list:c.POINTER[cl_event], event:c.POINTER[cl_event]) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_int, cl_command_queue, cl_mem, cl_bool, c.POINTER[size_t], c.POINTER[size_t], c.POINTER[size_t], size_t, size_t, size_t, size_t, ctypes.c_void_p, cl_uint, c.POINTER[cl_event], c.POINTER[cl_event])
 def clEnqueueReadBufferRect(command_queue:cl_command_queue, buffer:cl_mem, blocking_read:cl_bool, buffer_origin:c.POINTER[size_t], host_origin:c.POINTER[size_t], region:c.POINTER[size_t], buffer_row_pitch:size_t, buffer_slice_pitch:size_t, host_row_pitch:size_t, host_slice_pitch:size_t, ptr:ctypes.c_void_p, num_events_in_wait_list:cl_uint, event_wait_list:c.POINTER[cl_event], event:c.POINTER[cl_event]) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_int, cl_command_queue, cl_mem, cl_bool, size_t, size_t, ctypes.c_void_p, cl_uint, c.POINTER[cl_event], c.POINTER[cl_event])
 def clEnqueueWriteBuffer(command_queue:cl_command_queue, buffer:cl_mem, blocking_write:cl_bool, offset:size_t, size:size_t, ptr:ctypes.c_void_p, num_events_in_wait_list:cl_uint, event_wait_list:c.POINTER[cl_event], event:c.POINTER[cl_event]) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_int, cl_command_queue, cl_mem, cl_bool, c.POINTER[size_t], c.POINTER[size_t], c.POINTER[size_t], size_t, size_t, size_t, size_t, ctypes.c_void_p, cl_uint, c.POINTER[cl_event], c.POINTER[cl_event])
 def clEnqueueWriteBufferRect(command_queue:cl_command_queue, buffer:cl_mem, blocking_write:cl_bool, buffer_origin:c.POINTER[size_t], host_origin:c.POINTER[size_t], region:c.POINTER[size_t], buffer_row_pitch:size_t, buffer_slice_pitch:size_t, host_row_pitch:size_t, host_slice_pitch:size_t, ptr:ctypes.c_void_p, num_events_in_wait_list:cl_uint, event_wait_list:c.POINTER[cl_event], event:c.POINTER[cl_event]) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_int, cl_command_queue, cl_mem, ctypes.c_void_p, size_t, size_t, size_t, cl_uint, c.POINTER[cl_event], c.POINTER[cl_event])
 def clEnqueueFillBuffer(command_queue:cl_command_queue, buffer:cl_mem, pattern:ctypes.c_void_p, pattern_size:size_t, offset:size_t, size:size_t, num_events_in_wait_list:cl_uint, event_wait_list:c.POINTER[cl_event], event:c.POINTER[cl_event]) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_int, cl_command_queue, cl_mem, cl_mem, size_t, size_t, size_t, cl_uint, c.POINTER[cl_event], c.POINTER[cl_event])
 def clEnqueueCopyBuffer(command_queue:cl_command_queue, src_buffer:cl_mem, dst_buffer:cl_mem, src_offset:size_t, dst_offset:size_t, size:size_t, num_events_in_wait_list:cl_uint, event_wait_list:c.POINTER[cl_event], event:c.POINTER[cl_event]) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_int, cl_command_queue, cl_mem, cl_mem, c.POINTER[size_t], c.POINTER[size_t], c.POINTER[size_t], size_t, size_t, size_t, size_t, cl_uint, c.POINTER[cl_event], c.POINTER[cl_event])
 def clEnqueueCopyBufferRect(command_queue:cl_command_queue, src_buffer:cl_mem, dst_buffer:cl_mem, src_origin:c.POINTER[size_t], dst_origin:c.POINTER[size_t], region:c.POINTER[size_t], src_row_pitch:size_t, src_slice_pitch:size_t, dst_row_pitch:size_t, dst_slice_pitch:size_t, num_events_in_wait_list:cl_uint, event_wait_list:c.POINTER[cl_event], event:c.POINTER[cl_event]) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_int, cl_command_queue, cl_mem, cl_bool, c.POINTER[size_t], c.POINTER[size_t], size_t, size_t, ctypes.c_void_p, cl_uint, c.POINTER[cl_event], c.POINTER[cl_event])
 def clEnqueueReadImage(command_queue:cl_command_queue, image:cl_mem, blocking_read:cl_bool, origin:c.POINTER[size_t], region:c.POINTER[size_t], row_pitch:size_t, slice_pitch:size_t, ptr:ctypes.c_void_p, num_events_in_wait_list:cl_uint, event_wait_list:c.POINTER[cl_event], event:c.POINTER[cl_event]) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_int, cl_command_queue, cl_mem, cl_bool, c.POINTER[size_t], c.POINTER[size_t], size_t, size_t, ctypes.c_void_p, cl_uint, c.POINTER[cl_event], c.POINTER[cl_event])
 def clEnqueueWriteImage(command_queue:cl_command_queue, image:cl_mem, blocking_write:cl_bool, origin:c.POINTER[size_t], region:c.POINTER[size_t], input_row_pitch:size_t, input_slice_pitch:size_t, ptr:ctypes.c_void_p, num_events_in_wait_list:cl_uint, event_wait_list:c.POINTER[cl_event], event:c.POINTER[cl_event]) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_int, cl_command_queue, cl_mem, ctypes.c_void_p, c.POINTER[size_t], c.POINTER[size_t], cl_uint, c.POINTER[cl_event], c.POINTER[cl_event])
 def clEnqueueFillImage(command_queue:cl_command_queue, image:cl_mem, fill_color:ctypes.c_void_p, origin:c.POINTER[size_t], region:c.POINTER[size_t], num_events_in_wait_list:cl_uint, event_wait_list:c.POINTER[cl_event], event:c.POINTER[cl_event]) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_int, cl_command_queue, cl_mem, cl_mem, c.POINTER[size_t], c.POINTER[size_t], c.POINTER[size_t], cl_uint, c.POINTER[cl_event], c.POINTER[cl_event])
 def clEnqueueCopyImage(command_queue:cl_command_queue, src_image:cl_mem, dst_image:cl_mem, src_origin:c.POINTER[size_t], dst_origin:c.POINTER[size_t], region:c.POINTER[size_t], num_events_in_wait_list:cl_uint, event_wait_list:c.POINTER[cl_event], event:c.POINTER[cl_event]) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_int, cl_command_queue, cl_mem, cl_mem, c.POINTER[size_t], c.POINTER[size_t], size_t, cl_uint, c.POINTER[cl_event], c.POINTER[cl_event])
 def clEnqueueCopyImageToBuffer(command_queue:cl_command_queue, src_image:cl_mem, dst_buffer:cl_mem, src_origin:c.POINTER[size_t], region:c.POINTER[size_t], dst_offset:size_t, num_events_in_wait_list:cl_uint, event_wait_list:c.POINTER[cl_event], event:c.POINTER[cl_event]) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_int, cl_command_queue, cl_mem, cl_mem, size_t, c.POINTER[size_t], c.POINTER[size_t], cl_uint, c.POINTER[cl_event], c.POINTER[cl_event])
 def clEnqueueCopyBufferToImage(command_queue:cl_command_queue, src_buffer:cl_mem, dst_image:cl_mem, src_offset:size_t, dst_origin:c.POINTER[size_t], region:c.POINTER[size_t], num_events_in_wait_list:cl_uint, event_wait_list:c.POINTER[cl_event], event:c.POINTER[cl_event]) -> cl_int: ...
-@dll.bind
+@dll.bind(ctypes.c_void_p, cl_command_queue, cl_mem, cl_bool, cl_map_flags, size_t, size_t, cl_uint, c.POINTER[cl_event], c.POINTER[cl_event], c.POINTER[cl_int])
 def clEnqueueMapBuffer(command_queue:cl_command_queue, buffer:cl_mem, blocking_map:cl_bool, map_flags:cl_map_flags, offset:size_t, size:size_t, num_events_in_wait_list:cl_uint, event_wait_list:c.POINTER[cl_event], event:c.POINTER[cl_event], errcode_ret:c.POINTER[cl_int]) -> ctypes.c_void_p: ...
-@dll.bind
+@dll.bind(ctypes.c_void_p, cl_command_queue, cl_mem, cl_bool, cl_map_flags, c.POINTER[size_t], c.POINTER[size_t], c.POINTER[size_t], c.POINTER[size_t], cl_uint, c.POINTER[cl_event], c.POINTER[cl_event], c.POINTER[cl_int])
 def clEnqueueMapImage(command_queue:cl_command_queue, image:cl_mem, blocking_map:cl_bool, map_flags:cl_map_flags, origin:c.POINTER[size_t], region:c.POINTER[size_t], image_row_pitch:c.POINTER[size_t], image_slice_pitch:c.POINTER[size_t], num_events_in_wait_list:cl_uint, event_wait_list:c.POINTER[cl_event], event:c.POINTER[cl_event], errcode_ret:c.POINTER[cl_int]) -> ctypes.c_void_p: ...
-@dll.bind
+@dll.bind(cl_int, cl_command_queue, cl_mem, ctypes.c_void_p, cl_uint, c.POINTER[cl_event], c.POINTER[cl_event])
 def clEnqueueUnmapMemObject(command_queue:cl_command_queue, memobj:cl_mem, mapped_ptr:ctypes.c_void_p, num_events_in_wait_list:cl_uint, event_wait_list:c.POINTER[cl_event], event:c.POINTER[cl_event]) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_int, cl_command_queue, cl_uint, c.POINTER[cl_mem], cl_mem_migration_flags, cl_uint, c.POINTER[cl_event], c.POINTER[cl_event])
 def clEnqueueMigrateMemObjects(command_queue:cl_command_queue, num_mem_objects:cl_uint, mem_objects:c.POINTER[cl_mem], flags:cl_mem_migration_flags, num_events_in_wait_list:cl_uint, event_wait_list:c.POINTER[cl_event], event:c.POINTER[cl_event]) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_int, cl_command_queue, cl_kernel, cl_uint, c.POINTER[size_t], c.POINTER[size_t], c.POINTER[size_t], cl_uint, c.POINTER[cl_event], c.POINTER[cl_event])
 def clEnqueueNDRangeKernel(command_queue:cl_command_queue, kernel:cl_kernel, work_dim:cl_uint, global_work_offset:c.POINTER[size_t], global_work_size:c.POINTER[size_t], local_work_size:c.POINTER[size_t], num_events_in_wait_list:cl_uint, event_wait_list:c.POINTER[cl_event], event:c.POINTER[cl_event]) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_int, cl_command_queue, c.CFUNCTYPE[None, [ctypes.c_void_p]], ctypes.c_void_p, size_t, cl_uint, c.POINTER[cl_mem], c.POINTER[ctypes.c_void_p], cl_uint, c.POINTER[cl_event], c.POINTER[cl_event])
 def clEnqueueNativeKernel(command_queue:cl_command_queue, user_func:c.CFUNCTYPE[None, [ctypes.c_void_p]], args:ctypes.c_void_p, cb_args:size_t, num_mem_objects:cl_uint, mem_list:c.POINTER[cl_mem], args_mem_loc:c.POINTER[ctypes.c_void_p], num_events_in_wait_list:cl_uint, event_wait_list:c.POINTER[cl_event], event:c.POINTER[cl_event]) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_int, cl_command_queue, cl_uint, c.POINTER[cl_event], c.POINTER[cl_event])
 def clEnqueueMarkerWithWaitList(command_queue:cl_command_queue, num_events_in_wait_list:cl_uint, event_wait_list:c.POINTER[cl_event], event:c.POINTER[cl_event]) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_int, cl_command_queue, cl_uint, c.POINTER[cl_event], c.POINTER[cl_event])
 def clEnqueueBarrierWithWaitList(command_queue:cl_command_queue, num_events_in_wait_list:cl_uint, event_wait_list:c.POINTER[cl_event], event:c.POINTER[cl_event]) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_int, cl_command_queue, cl_uint, c.Array[ctypes.c_void_p, Literal[0]], c.CFUNCTYPE[None, [cl_command_queue, cl_uint, c.Array[ctypes.c_void_p, Literal[0]], ctypes.c_void_p]], ctypes.c_void_p, cl_uint, c.POINTER[cl_event], c.POINTER[cl_event])
 def clEnqueueSVMFree(command_queue:cl_command_queue, num_svm_pointers:cl_uint, svm_pointers:c.Array[ctypes.c_void_p, Literal[0]], pfn_free_func:c.CFUNCTYPE[None, [cl_command_queue, cl_uint, c.Array[ctypes.c_void_p, Literal[0]], ctypes.c_void_p]], user_data:ctypes.c_void_p, num_events_in_wait_list:cl_uint, event_wait_list:c.POINTER[cl_event], event:c.POINTER[cl_event]) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_int, cl_command_queue, cl_bool, ctypes.c_void_p, ctypes.c_void_p, size_t, cl_uint, c.POINTER[cl_event], c.POINTER[cl_event])
 def clEnqueueSVMMemcpy(command_queue:cl_command_queue, blocking_copy:cl_bool, dst_ptr:ctypes.c_void_p, src_ptr:ctypes.c_void_p, size:size_t, num_events_in_wait_list:cl_uint, event_wait_list:c.POINTER[cl_event], event:c.POINTER[cl_event]) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_int, cl_command_queue, ctypes.c_void_p, ctypes.c_void_p, size_t, size_t, cl_uint, c.POINTER[cl_event], c.POINTER[cl_event])
 def clEnqueueSVMMemFill(command_queue:cl_command_queue, svm_ptr:ctypes.c_void_p, pattern:ctypes.c_void_p, pattern_size:size_t, size:size_t, num_events_in_wait_list:cl_uint, event_wait_list:c.POINTER[cl_event], event:c.POINTER[cl_event]) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_int, cl_command_queue, cl_bool, cl_map_flags, ctypes.c_void_p, size_t, cl_uint, c.POINTER[cl_event], c.POINTER[cl_event])
 def clEnqueueSVMMap(command_queue:cl_command_queue, blocking_map:cl_bool, flags:cl_map_flags, svm_ptr:ctypes.c_void_p, size:size_t, num_events_in_wait_list:cl_uint, event_wait_list:c.POINTER[cl_event], event:c.POINTER[cl_event]) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_int, cl_command_queue, ctypes.c_void_p, cl_uint, c.POINTER[cl_event], c.POINTER[cl_event])
 def clEnqueueSVMUnmap(command_queue:cl_command_queue, svm_ptr:ctypes.c_void_p, num_events_in_wait_list:cl_uint, event_wait_list:c.POINTER[cl_event], event:c.POINTER[cl_event]) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_int, cl_command_queue, cl_uint, c.POINTER[ctypes.c_void_p], c.POINTER[size_t], cl_mem_migration_flags, cl_uint, c.POINTER[cl_event], c.POINTER[cl_event])
 def clEnqueueSVMMigrateMem(command_queue:cl_command_queue, num_svm_pointers:cl_uint, svm_pointers:c.POINTER[ctypes.c_void_p], sizes:c.POINTER[size_t], flags:cl_mem_migration_flags, num_events_in_wait_list:cl_uint, event_wait_list:c.POINTER[cl_event], event:c.POINTER[cl_event]) -> cl_int: ...
-@dll.bind
-def clGetExtensionFunctionAddressForPlatform(platform:cl_platform_id, func_name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> ctypes.c_void_p: ...
-@dll.bind
+@dll.bind(ctypes.c_void_p, cl_platform_id, c.POINTER[ctypes.c_char])
+def clGetExtensionFunctionAddressForPlatform(platform:cl_platform_id, func_name:c.POINTER[ctypes.c_char]) -> ctypes.c_void_p: ...
+@dll.bind(cl_mem, cl_context, cl_mem_flags, c.POINTER[cl_image_format], size_t, size_t, size_t, ctypes.c_void_p, c.POINTER[cl_int])
 def clCreateImage2D(context:cl_context, flags:cl_mem_flags, image_format:c.POINTER[cl_image_format], image_width:size_t, image_height:size_t, image_row_pitch:size_t, host_ptr:ctypes.c_void_p, errcode_ret:c.POINTER[cl_int]) -> cl_mem: ...
-@dll.bind
+@dll.bind(cl_mem, cl_context, cl_mem_flags, c.POINTER[cl_image_format], size_t, size_t, size_t, size_t, size_t, ctypes.c_void_p, c.POINTER[cl_int])
 def clCreateImage3D(context:cl_context, flags:cl_mem_flags, image_format:c.POINTER[cl_image_format], image_width:size_t, image_height:size_t, image_depth:size_t, image_row_pitch:size_t, image_slice_pitch:size_t, host_ptr:ctypes.c_void_p, errcode_ret:c.POINTER[cl_int]) -> cl_mem: ...
-@dll.bind
+@dll.bind(cl_int, cl_command_queue, c.POINTER[cl_event])
 def clEnqueueMarker(command_queue:cl_command_queue, event:c.POINTER[cl_event]) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_int, cl_command_queue, cl_uint, c.POINTER[cl_event])
 def clEnqueueWaitForEvents(command_queue:cl_command_queue, num_events:cl_uint, event_list:c.POINTER[cl_event]) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_int, cl_command_queue)
 def clEnqueueBarrier(command_queue:cl_command_queue) -> cl_int: ...
-@dll.bind
+@dll.bind(cl_int)
 def clUnloadCompiler() -> cl_int: ...
-@dll.bind
-def clGetExtensionFunctionAddress(func_name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> ctypes.c_void_p: ...
-@dll.bind
+@dll.bind(ctypes.c_void_p, c.POINTER[ctypes.c_char])
+def clGetExtensionFunctionAddress(func_name:c.POINTER[ctypes.c_char]) -> ctypes.c_void_p: ...
+@dll.bind(cl_command_queue, cl_context, cl_device_id, cl_command_queue_properties, c.POINTER[cl_int])
 def clCreateCommandQueue(context:cl_context, device:cl_device_id, properties:cl_command_queue_properties, errcode_ret:c.POINTER[cl_int]) -> cl_command_queue: ...
-@dll.bind
+@dll.bind(cl_sampler, cl_context, cl_bool, cl_addressing_mode, cl_filter_mode, c.POINTER[cl_int])
 def clCreateSampler(context:cl_context, normalized_coords:cl_bool, addressing_mode:cl_addressing_mode, filter_mode:cl_filter_mode, errcode_ret:c.POINTER[cl_int]) -> cl_sampler: ...
-@dll.bind
+@dll.bind(cl_int, cl_command_queue, cl_kernel, cl_uint, c.POINTER[cl_event], c.POINTER[cl_event])
 def clEnqueueTask(command_queue:cl_command_queue, kernel:cl_kernel, num_events_in_wait_list:cl_uint, event_wait_list:c.POINTER[cl_event], event:c.POINTER[cl_event]) -> cl_int: ...
-c.init_records()
 CL_NAME_VERSION_MAX_NAME_SIZE = 64 # type: ignore
 CL_SUCCESS = 0 # type: ignore
 CL_DEVICE_NOT_FOUND = -1 # type: ignore

@@ -10,7 +10,9 @@ class TestLLMServer(unittest.TestCase):
     cls.mock_tok.role = Mock(return_value=[100, 101])
     cls.mock_tok.encode = Mock(return_value=[200, 201, 202])
     cls.mock_tok.decode = Mock(return_value="Hello")
+    cls.mock_tok.stream_decoder = Mock(return_value=lambda tid=None: "Hello" if tid is not None else "")
     cls.mock_tok.end_turn = Mock(return_value=[998])
+    cls.mock_tok.preset = "llama3"
 
     cls.mock_model = Mock()
     cls.mock_model.generate = Mock(side_effect=lambda ids, **kwargs: iter([300, 301, 999]))
@@ -152,6 +154,49 @@ class TestLLMServer(unittest.TestCase):
     )
     self.assertEqual(resp.choices[0].finish_reason, "length")
     self.assertEqual(resp.usage.completion_tokens, 2)
+
+  def test_assistant_prefill(self):
+    """Last assistant message should be treated as prefill (not a completed turn)."""
+    self.mock_model.generate = Mock(side_effect=lambda ids, **kwargs: iter([300, 999]))
+    captured_ids = []
+    orig_generate = self.mock_model.generate.side_effect
+    def capture_generate(ids, **kwargs):
+      captured_ids.extend(ids)
+      return orig_generate(ids, **kwargs)
+    self.mock_model.generate = Mock(side_effect=capture_generate)
+
+    resp = self.client.chat.completions.create(
+      model="test", messages=[
+        {"role": "user", "content": "Hello"},
+        {"role": "assistant", "content": "Sure"}
+      ], stream=False
+    )
+    # prefill tokens should be in ids: role("assistant") + encode("Sure") but NO end_turn after it
+    # and NO extra role("assistant") appended
+    role_tokens = self.mock_tok.role.call_args_list
+    # last role() call should be for "assistant" (the prefill message), not an extra one
+    self.assertEqual(role_tokens[-1], unittest.mock.call("assistant"))
+    # end_turn should be called once less than role() — the prefill assistant msg doesn't get end_turn
+    self.assertEqual(self.mock_tok.end_turn.call_count, self.mock_tok.role.call_count - 1)
+    self.assertIsNotNone(resp.choices[0].message.content)
+
+  def test_assistant_prefill_not_last(self):
+    """Assistant message that's NOT last should be a normal completed turn."""
+    self.mock_model.generate = Mock(side_effect=lambda ids, **kwargs: iter([300, 999]))
+    self.mock_tok.role.reset_mock()
+    self.mock_tok.end_turn.reset_mock()
+    self.client.chat.completions.create(
+      model="test", messages=[
+        {"role": "user", "content": "Hello"},
+        {"role": "assistant", "content": "Sure"},
+        {"role": "user", "content": "Continue"}
+      ], stream=False
+    )
+    # all messages get end_turn, plus an extra role("assistant") at the end
+    # roles: user, assistant, user, assistant(generation prompt) = 4 role calls
+    # end_turns: user, assistant, user = 3 end_turn calls (one per message)
+    self.assertEqual(self.mock_tok.end_turn.call_count, 3)
+    self.assertEqual(self.mock_tok.role.call_count, 4)
 
   def test_models_endpoint(self):
     import requests as req

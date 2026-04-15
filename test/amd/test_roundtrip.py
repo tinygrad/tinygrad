@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Roundtrip tests: generate tinygrad kernels, decode instructions, re-encode, verify match."""
 import unittest, io, sys, re
+from dataclasses import dataclass
 from tinygrad import Device
 from tinygrad.renderer.amd import detect_format
 from test.amd.helpers import llvm_assemble, llvm_disasm, get_target, get_mattr
@@ -44,6 +45,64 @@ def compile_and_disasm_batch(instrs: list[str], arch: str = 'rdna3') -> list[str
   code = b''.join(llvm_assemble(instrs, mcpu, mattr))
   return llvm_disasm(code, mcpu, mattr)[:len(instrs)]
 
+@dataclass
+class KernelSnapshot:
+  code: bytes
+  src: str
+  global_size: tuple[int, int, int]
+  local_size: tuple[int, int, int]
+  buf_idxs: list[int]  # indices into shared buffer pool
+  buf_sizes: list[int]  # sizes for each buffer index
+
+def get_kernels_from_tinygrad(op_fn) -> tuple[list[KernelSnapshot], dict[int, int], dict[int, bytes]]:
+  """Compile a tinygrad operation and extract all kernels with their buffer mappings."""
+  from tinygrad import Tensor
+  from tinygrad.runtime.support.elf import elf_loader
+
+  out = op_fn(Tensor)
+  sched = out.schedule()
+  kernels = []
+  buf_pool: dict[int, int] = {}  # buffer id -> size
+  buf_data: dict[int, bytes] = {}  # buffer id -> initial data from COPY
+
+  for ei in sched:
+    lowered = ei.lower()
+    if ei.ast.op.name == 'COPY':
+      # Handle COPY: extract source data to initialize destination buffer
+      if len(lowered.bufs) >= 2:
+        dst_buf, src_buf = lowered.bufs[0], lowered.bufs[1]
+        dst_id = id(dst_buf)
+        if dst_id not in buf_pool:
+          buf_pool[dst_id] = dst_buf.nbytes
+        # Get source data if it's from numpy/CPU
+        if hasattr(src_buf, 'base') and src_buf.base is not None and hasattr(src_buf.base, '_buf'):
+          src_data = bytes(src_buf.base._buf)
+          buf_data[dst_id] = src_data
+    elif ei.ast.op.name == 'SINK':
+      if lowered.prg and lowered.prg.p.lib:
+        lib = bytes(lowered.prg.p.lib)
+        _, sections, _ = elf_loader(lib)
+        for sec in sections:
+          if sec.name == '.text':
+            buf_idxs = []
+            buf_sizes = []
+            for b in lowered.bufs:
+              buf_id = id(b)
+              if buf_id not in buf_pool:
+                buf_pool[buf_id] = b.nbytes
+              buf_idxs.append(buf_id)
+              buf_sizes.append(b.nbytes)
+            kernels.append(KernelSnapshot(
+              code=bytes(sec.content),
+              src=lowered.prg.p.src,
+              global_size=tuple(lowered.prg.p.global_size),
+              local_size=tuple(lowered.prg.p.local_size),
+              buf_idxs=buf_idxs,
+              buf_sizes=buf_sizes
+            ))
+  if not kernels: raise RuntimeError("No kernel found")
+  return kernels, buf_pool, buf_data
+
 @unittest.skipUnless(Device.DEFAULT == "AMD", "requires AMD device")
 class TestTinygradKernelRoundtrip(unittest.TestCase):
   """Test roundtrip on real tinygrad-generated kernels using get_kernels_from_tinygrad pattern."""
@@ -57,14 +116,13 @@ class TestTinygradKernelRoundtrip(unittest.TestCase):
     """
     arch = self.arch
 
-    from test.amd.test_compare_emulators import get_kernels_from_tinygrad
     from tinygrad.runtime.support.elf import elf_loader
     from tinygrad.runtime.support.compiler_amd import HIPCompiler, AMDLLVMCompiler
-    from tinygrad.helpers import AMD_LLVM
+    from tinygrad.helpers import DEV
 
     kernels, _, _ = get_kernels_from_tinygrad(op_fn)
     # rendered source can be C or llvmir
-    compiler = (AMDLLVMCompiler if AMD_LLVM else HIPCompiler)(get_target(arch))
+    compiler = (AMDLLVMCompiler if DEV.renderer == "LLVM" else HIPCompiler)(get_target(arch))
 
     # First pass: decode all instructions and collect info
     decoded_instrs: list[tuple] = []  # list of (ki, offset, orig_bytes, decoded, our_disasm, decode_ok, decode_err)

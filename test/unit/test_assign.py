@@ -4,7 +4,7 @@ import numpy as np
 from tinygrad import dtypes, Tensor, TinyJit, GlobalCounters, Variable
 from tinygrad.uop.ops import Ops
 from tinygrad.device import is_dtype_supported
-from tinygrad.helpers import temp, CI, CPU_LVP, Context
+from tinygrad.helpers import temp, CI, DEV, Context
 
 N = 200  # has to be bigger than the cache to fail
 
@@ -193,7 +193,7 @@ class TestAssign(unittest.TestCase):
     new = a + times_a
     np.testing.assert_allclose(new.numpy(), 8)
 
-  @unittest.skipIf(CI and CPU_LVP, "flaky in CI")
+  @unittest.skipIf(CI and DEV.renderer == "LVP", "flaky in CI")
   def test_double_assign(self):
     a = Tensor.ones(4).contiguous().realize()
     a += 1
@@ -946,6 +946,39 @@ class TestPartialAssignToSharedBuffer(unittest.TestCase):
     Tensor.realize(*views)
     for v, s in zip(views, shapes):
       np.testing.assert_allclose(v.numpy(), np.ones(s))
+
+
+class TestAfterCachePatterns(unittest.TestCase):
+  def test_double_store_after(self):
+    a = Tensor.zeros(10).contiguous()
+    b = Tensor.zeros(10).contiguous()
+    c = Tensor.ones(10).contiguous()
+    Tensor.realize(a, b, c)
+
+    a_store = a.uop.store(c.uop)
+    b_store = b.uop.store(c.uop)
+
+    with self.assertRaises(AssertionError):
+      a = Tensor(a.uop.after(a_store, b_store))
+      a.realize()
+      np.testing.assert_array_equal(a.numpy(), 1)
+      np.testing.assert_array_equal(b.numpy(), 1)
+
+  def test_double_store_after_different_sizes(self):
+    full = Tensor.zeros(2).contiguous()
+    head = Tensor.zeros(1).contiguous()
+    full_src = Tensor([1, 2], dtype=dtypes.float).contiguous()
+    head_src = Tensor([3], dtype=dtypes.float).contiguous()
+    Tensor.realize(full, head, full_src, head_src)
+
+    full_store = full.uop.store(full_src.uop)
+    head_store = head.uop.store(head_src.uop)
+
+    with self.assertRaises(AssertionError):
+      head = Tensor(head.uop.after(head_store, full_store))
+      head.realize()
+      np.testing.assert_array_equal(head.numpy(), [3])
+      np.testing.assert_array_equal(full.numpy(), [1, 2])
 
 if __name__ == "__main__":
   unittest.main()

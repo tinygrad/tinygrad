@@ -7,7 +7,7 @@ from tinygrad.tensor import _to_np_dtype
 from tinygrad.engine.realize import Runner, get_program
 from tinygrad.dtype import DType
 from tinygrad.nn.state import get_parameters
-from tinygrad.helpers import T, CI
+from tinygrad.helpers import T, CI, Target
 from tinygrad.renderer import Renderer
 from tinygrad.codegen import full_rewrite_to_sink, line_rewrite, pm_linearize_cleanups
 from tinygrad.codegen.late.linearizer import linearize
@@ -18,7 +18,7 @@ from tinygrad.runtime.ops_python import PythonProgram, PythonRenderer, PythonCom
 
 def get_uops(sink:UOp, ren:Renderer|None=None) -> list[UOp]:
   """Extract linearized UOps from a sink. Test helper that only does linearization (no render)."""
-  if ren is None: ren = Renderer()
+  if ren is None: ren = Renderer(Target())
   if sink.arg is None: sink = sink.replace(arg=KernelInfo())
   full_sink = full_rewrite_to_sink(sink, ren, optimize=sink.tag is None)
   return line_rewrite(linearize(full_sink), pm_linearize_cleanups)
@@ -66,7 +66,7 @@ def eval_uop(uop:UOp, inputs:list[tuple[DType, list[Any]]]|None=None):
     bufs.append(buf:=allocator.alloc(len(data) * buf_dt.itemsize))
     allocator._copyin(buf, memoryview(struct.pack(str(len(data)) + (buf_dt.fmt or ""), *data)))
   g = UOp(Ops.PARAM, uop.dtype.ptr(), arg=0, src=())
-  prg = get_program(UOp.store(g.index(UOp.const(dtypes.int, 0)), uop).sink(arg=KernelInfo()), PythonRenderer())
+  prg = get_program(UOp.store(g.index(UOp.const(dtypes.int, 0)), uop).sink(arg=KernelInfo()), PythonRenderer(Target("PYTHON")))
   prog = PythonProgram("run", PythonCompiler().compile(prg.src))
   prog(out_buf:=allocator.alloc(uop.dtype.itemsize), *bufs)
   return out_buf.cast(uop.dtype.fmt or "").tolist()[0]

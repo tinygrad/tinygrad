@@ -1,9 +1,9 @@
 # mixins add syntactic sugar to Tensor and UOp
 from __future__ import annotations
-from typing import TYPE_CHECKING, Self
+from typing import TYPE_CHECKING, Self, Sequence
 from tinygrad.uop import Ops
-from tinygrad.helpers import prod, argfix, argsort, flatten, dedup, make_tuple, ceildiv
-from tinygrad.uop.ops import resolve, smax, _align_left
+from tinygrad.helpers import prod, argfix, argsort, flatten, dedup, make_tuple, ceildiv, round_up, all_int
+from tinygrad.uop.ops import resolve, smax, _align_left, _broadcast_shape
 
 if TYPE_CHECKING:
   from tinygrad.uop.ops import sint
@@ -42,11 +42,69 @@ class MovementMixin:
     """
     return prod(self.shape)
 
+  def _normalize_indices(self, indices:list) -> list:
+    if len(ell := [i for i,x in enumerate(indices) if x is Ellipsis]) > 1: raise IndexError("indices can only have a single ellipsis")
+    num_real = len(indices) - len(ell) - sum(1 for i in indices if i is None)
+    if num_real > self.ndim: raise IndexError(f"too many indices ({num_real}) for {self.ndim}D")
+    fill_idx = ell[0] if ell else len(indices)
+    indices[fill_idx:fill_idx+1] = [slice(None)] * (self.ndim - num_real)
+    return indices
+
   def _resolve_dim(self, dim: int, *, extra: bool = False) -> int:
     total = self.ndim + int(extra)
     if not -max(1, total) <= dim <= max(1, total) - 1:
       raise IndexError(f"{dim=} out of range {[-max(1, total), max(1, total) - 1]}")
     return dim + total if dim < 0 else dim
+
+  def _parse_view_index(self, index, size: sint) -> dict:
+    # parses a single slice/int/None/sint index into {boundary, stride, size, collapse_dim}
+    from tinygrad.uop.ops import UOp, sint
+    match index:
+      case None: return {"size":1, "boundary":(0,1), "stride":1, "collapse_dim":False}
+      case int() | UOp(): # sint
+        if resolve(index >= size, False) or resolve(index < -size, False): raise IndexError(f"{index=} is out of bounds with {size=}")
+        # TODO: is this right for (negative) symbolic?
+        b = index if resolve(index >= 0, False) else index + size
+        return {"size":size, "boundary":(b, b+1), "stride":1, "collapse_dim":True}
+      case slice():
+        if not all(s is None or isinstance(s, sint) for s in (index.start, index.stop, index.step)):
+          raise TypeError(f"slice {index=} is not supported")
+        if resolve(index.step == 0, False): raise ValueError(f"{index=} cannot have 0 as step")
+        start, stop = 0 if index.start is None else index.start, size if index.stop is None else index.stop
+        step = 1 if index.step is None else index.step
+        if all_int((start, stop, step)):
+          # handle int slicing (resolve negative bounds, clamp, stride)
+          *bound, stride = index.indices(int(size.vmax) if isinstance(size, UOp) else size)
+          bound = [0, 0] if stride * (bound[1] - bound[0]) < 0 else ([bound[1]+1, bound[0]+1] if stride < 0 else bound)
+          return {"size":ceildiv(bound[1]-bound[0], abs(stride)), "boundary":tuple(bound), "stride":stride, "collapse_dim":False}
+        if resolve(step == 1, False) and resolve((stop-start) >= 0, False):
+          return {"size":stop-start, "boundary":(start, stop), "stride":step, "collapse_dim":False}
+        raise TypeError(f"slice {index=} is not supported")
+      case _: raise IndexError(f"{type(index).__name__} indexing is not supported")
+
+  def _apply_view_ops(self, mops:list) -> Self:
+    # applies shrink + flip + stride from a list of parsed view indices
+    # flip negative strides
+    x = self.shrink(tuple(m["boundary"] for m in mops)).flip(tuple(i for i, m in enumerate(mops) if m["stride"] < 0))
+    strides = tuple(abs(m["stride"]) for m in mops)
+    # apply stride
+    if any(st != 1 for st in strides):
+      if not all_int(x.shape): raise RuntimeError("symbolic shape not supported")
+      x = x.pad_to(tuple(round_up(s, st) for s, st in zip(x.shape, strides)))
+      x = x.reshape(tuple(flatten((s // st, st) for s, st in zip(x.shape, strides))))
+      x = x.shrink_to(tuple(flatten((s, 1) for s in x.shape[::2]))).reshape(x.shape[::2])
+    return x
+
+  def __getitem__(self, indices) -> Self:
+    # wrap single index into a list
+    if (isinstance(indices, list) and all_int(indices)) or not isinstance(indices, (tuple, list)): indices = [indices]
+    indices_parsed, dim = [], 0
+    for index in self._normalize_indices(list(indices)):
+      indices_parsed.append({**self._parse_view_index(index, 1 if index is None else self.shape[dim]), "index":index})
+      if index is not None: dim += 1
+    x = self._apply_view_ops(mops) if (mops := [p for p in indices_parsed if p["index"] is not None]) else self
+    # dim injection from None (size 1) and dim collapse from int indices
+    return x.reshape(tuple(p["size"] for p in indices_parsed if not p["collapse_dim"]))
 
   def _broadcast_to(self, new_shape: tuple[sint, ...]) -> Self:
     if self.shape == new_shape:
@@ -97,6 +155,12 @@ class MovementMixin:
     if prod(self.shape) != prod(new_shape):
       raise ValueError(f"size mismatch, can't reshape ({self.shape}) -> ({new_shape})")
     ret = self._mop(Ops.RESHAPE, arg=new_shape)
+    return self if ret.shape == self.shape else ret
+
+  def pad(self, arg:tuple[tuple[sint, sint] | None, ...]) -> Self:
+    if self.ndim != len(arg):
+      raise ValueError(f"{self.ndim=} != {len(arg)=}")
+    ret = self._mop(Ops.PAD, tuple(x if x is not None else (0, 0) for x in arg))
     return self if ret.shape == self.shape else ret
 
   def shrink(self, arg: tuple[tuple[sint, sint] | None, ...]) -> Self:
@@ -310,6 +374,139 @@ class MovementMixin:
     t = t.permute([lhs.index(name) for name in rhs])
     for start, end in reversed(flatten_dims): t = t.flatten(start, end - 1) if start < end else t.unsqueeze(start)
     return t
+
+  def split(self, sizes:int|Sequence[int], dim:int=0) -> tuple[Self, ...]:
+    """
+    Splits the tensor into chunks along the dimension specified by `dim`.
+    If `sizes` is an integer, it splits into equally sized chunks if possible, otherwise the last chunk will be smaller.
+    If `sizes` is a list, it splits into `len(sizes)` chunks with size in `dim` according to `size`.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.arange(10).reshape(5, 2)
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    split = t.split(2)
+    print("\\n".join([repr(x.numpy()) for x in split]))
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    split = t.split([1, 4])
+    print("\\n".join([repr(x.numpy()) for x in split]))
+    ```
+    """
+    dim = self._resolve_dim(dim)
+    dim_sz = self.shape[dim]
+    assert isinstance(dim_sz, int), f"does not support symbolic shape in split dimension {dim}: {self.shape}"
+    if isinstance(sizes, int): sizes = [min(sizes, dim_sz-i) for i in range(0, max(1, dim_sz), max(1, sizes))]
+    assert sum(sizes) == dim_sz, f"expect sizes to sum exactly to {dim_sz}, but got {sum(sizes)}"
+    return tuple(self.shrink(tuple((sum(sizes[:i]), sum(sizes[:i+1])) if j == dim else None for j in range(self.ndim))) for i in range(len(sizes)))
+
+  def chunk(self, chunks:int, dim:int=0) -> list[Self]:
+    """
+    Splits the tensor into `chunks` number of chunks along the dimension `dim`.
+    If the tensor size along `dim` is not divisible by `chunks`, all returned chunks will be the same size except the last one.
+    The function may return fewer than the specified number of chunks.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    chunked = Tensor.arange(11).chunk(6)
+    print("\\n".join([repr(x.numpy()) for x in chunked]))
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    chunked = Tensor.arange(12).chunk(6)
+    print("\\n".join([repr(x.numpy()) for x in chunked]))
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    chunked = Tensor.arange(13).chunk(6)
+    print("\\n".join([repr(x.numpy()) for x in chunked]))
+    ```
+    """
+    dim = self._resolve_dim(dim)
+    dim_sz = self.shape[dim]
+    assert isinstance(dim_sz, int), f"does not support symbolic shape in split dimension {dim}: {self.shape}"
+    assert chunks > 0, f"expect chunks to be greater than 0, got: {chunks}"
+    return list(self.split(ceildiv(dim_sz, chunks) if dim_sz else [0]*chunks, dim=dim))
+
+  def meshgrid(self, *args, indexing:str="ij") -> tuple[Self, ...]:
+    """
+    Generates coordinate matrices from coordinate vectors.
+    Input tensors can be scalars or 1D tensors.
+
+    `indexing` determines how the output grids are aligned.
+    `ij` indexing follows matrix-style indexing and `xy` indexing follows Cartesian-style indexing.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    x, y = Tensor([1, 2, 3]), Tensor([4, 5, 6])
+    grid_x, grid_y = x.meshgrid(y)
+    print(grid_x.numpy())
+    print(grid_y.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    grid_x, grid_y = x.meshgrid(y, indexing="xy")
+    print(grid_x.numpy())
+    print(grid_y.numpy())
+    ```
+    """
+    if indexing not in ("ij", "xy"): raise RuntimeError(f'indexing must be in ("ij", "xy"), got {indexing}')
+    if len(tensors:=(self, *args)) == 1: return tensors
+    basis = tuple(range(len(tensors))) if indexing == "ij" else (1, 0) + tuple(range(2, len(tensors)))
+    tensors = tuple(t.reshape((-1,) + (1,)*(len(args) - i)) for i,t in zip(basis, tensors))
+    output_shape = _broadcast_shape(*(t.shape for t in tensors))
+    return tuple(t._broadcast_to(output_shape) for t in tensors)
+
+  def diag(self) -> Self:
+    """
+    Returns a 2-D square tensor with the elements of input as the main diagonal.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([1, 2, 3]).diag().numpy())
+    ```
+    """
+    if self.ndim != 1: raise ValueError(f"expect input to be 1-D, getting {self.ndim}-D")
+    return self.unsqueeze(-1).pad_to((None, 1+(n:=self.shape[0]))).flatten().shrink_to((n*n,)).reshape(n,n)
+
+  def diagonal(self, offset:int=0, dim1:int=0, dim2:int=1) -> Self:
+    """
+    Returns a view of the diagonal elements with respect to `dim1` and `dim2`.
+    `offset` controls which diagonal: 0 is main, positive is above, negative is below.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.arange(9).reshape(3, 3)
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.diagonal().numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.diagonal(offset=1).numpy())
+    ```
+    """
+    if (dim1:=self._resolve_dim(dim1)) == (dim2:=self._resolve_dim(dim2)): raise RuntimeError("dim1 and dim2 cannot be the same dimension")
+    x = self.permute(*[i for i in range(self.ndim) if i != dim1 and i != dim2], dim1, dim2)
+    if offset >= 0: x = x.shrink(tuple(None for _ in x.shape[:-1]) + ((offset, x.shape[-1]),))
+    else: x = x.shrink(tuple(None for _ in x.shape[:-2]) + ((-offset, x.shape[-2]), None))
+    if (d := min(int(x.shape[-2]), int(x.shape[-1]))) <= 0: return x.reshape(*x.shape[:-2], 0)
+    nones, x = tuple(None for _ in x.shape[:-2]), x.shrink_to(tuple(None for _ in x.shape[:-2]) + (d, d))
+    return x.flatten(-2).pad_to(nones+(d*(d+1),)).unflatten(-1, (d, d+1)).shrink_to(nones+(None, 1)).squeeze(-1)
+
+  def roll(self, shifts:int|tuple[int, ...], dims:int|tuple[int, ...]|None=None) -> Self:
+    """
+    Rolls the tensor along specified dimension(s).
+    The rolling operation is circular, meaning that elements that go beyond the edge are wrapped around to the beginning of the dimension.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.arange(4)
+    print(t.roll(shifts=1, dims=0).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.roll(shifts=-1, dims=0).numpy())
+    ```
+    """
+    if dims is None: return self.flatten().roll(shifts, 0).reshape(self.shape)
+    dims, shifts = tuple(self._resolve_dim(d) for d in make_tuple(dims, 1)), make_tuple(shifts, 1)
+    if len(dims) != len(shifts): raise RuntimeError(f"{len(dims)=} != {len(shifts)=}")
+    shrink_arg: list[tuple[sint, sint]|None] = [None] * self.ndim
+    for d, s in zip(dims, shifts): shrink_arg[d] = (delta:=self.shape[d]-s%self.shape[d], delta+self.shape[d])
+    return self.repeat(*tuple(2 if i in dims else 1 for i in range(self.ndim))).shrink(tuple(shrink_arg))
 
   # *** movement ops with expand ***
 

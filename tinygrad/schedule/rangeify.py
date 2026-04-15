@@ -118,7 +118,7 @@ def split_reduceop(reduce:UOp, x:UOp):
   splitted = x.reshape(splitted_shape).permute(tuple([d for d in range(len(splitted_shape)) if d!=dim_to_split]+[dim_to_split]))
   if DEBUG >= 3: print(f"split {divisor}: {x.shape} -> {splitted.shape} -> {reduce.shape}")
   # reduce original axes, then split
-  return splitted.r(*reduce.arg).contiguous().r(reduce.arg[0], (len(reduce.shape),)).reshape(reduce.shape)
+  return splitted._rop(*reduce.arg).contiguous()._rop(reduce.arg[0], (len(reduce.shape),)).reshape(reduce.shape)
 
 mop_cleanup = PatternMatcher([
   # merge adjacent RESHAPES
@@ -391,14 +391,18 @@ def bufferize_to_store(ctx:itertools.count, x:UOp, idx:UOp, allow_locals=True):
   if (after:=x.src[0]).op is Ops.AFTER:
     buf = after.src[0].buf_uop.base
     if not (stores := [s for s in after.src[1:] if s.op is Ops.STORE and s.src[0].op is Ops.INDEX]): return buf
+    # the ranges are created on the AFTER, and the stores might be different sizes
+    # so we block all multi store AFTERs
+    assert len(stores) <= 1, "rangeify doesn't support multiple stores on one after"
     # BUFFERIZE(INDEX(...)); store through the underlying global index instead.
     ended_stores = []
-    store_target = stores[0].src[0]
-    if store_target.src[0].op is Ops.BUFFERIZE and store_target.src[0].src[0].op is Ops.INDEX:
-      store_target = store_target.src[0].src[0]
-    if stores[0].src[1] is not store_target:  # skip self-assign
+    for store in stores:
+      store_target = store.src[0]
+      if store_target.src[0].op is Ops.BUFFERIZE and store_target.src[0].src[0].op is Ops.INDEX:
+        store_target = store_target.src[0].src[0]
+      if store.src[1] is store_target: continue  # skip self-assign
       end_rngs = sorted(dedup(tuple(store_target.ranges) + tuple(rngs)), key=lambda x: x.arg)
-      ended_stores.append(store_target.replace(dtype=sdtype).store(stores[0].src[1]).end(*end_rngs))
+      ended_stores.append(store_target.replace(dtype=sdtype).store(store.src[1]).end(*end_rngs))
     return buf.after(*ended_stores)
 
   # NOTE: the DEFINE_LOCAL needs to be disambiguated here

@@ -1,742 +1,777 @@
 # mypy: disable-error-code="empty-body"
 from __future__ import annotations
 import ctypes
-from typing import Annotated, Literal, TypeAlias
+from typing import Literal, TypeAlias
 from tinygrad.runtime.support.c import _IO, _IOW, _IOR, _IOWR
 from tinygrad.runtime.support import c
 dll = c.DLL('libc', 'c', use_errno=True)
-off_t: TypeAlias = Annotated[int, ctypes.c_int64]
-mode_t: TypeAlias = Annotated[int, ctypes.c_uint32]
-size_t: TypeAlias = Annotated[int, ctypes.c_uint64]
-__off_t: TypeAlias = Annotated[int, ctypes.c_int64]
-@dll.bind
-def mmap(__addr:ctypes.c_void_p, __len:size_t, __prot:Annotated[int, ctypes.c_int32], __flags:Annotated[int, ctypes.c_int32], __fd:Annotated[int, ctypes.c_int32], __offset:Annotated[int, ctypes.c_int64]) -> ctypes.c_void_p: ...
-@dll.bind
-def munmap(__addr:ctypes.c_void_p, __len:size_t) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def mprotect(__addr:ctypes.c_void_p, __len:size_t, __prot:Annotated[int, ctypes.c_int32]) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def msync(__addr:ctypes.c_void_p, __len:size_t, __flags:Annotated[int, ctypes.c_int32]) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def madvise(__addr:ctypes.c_void_p, __len:size_t, __advice:Annotated[int, ctypes.c_int32]) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def posix_madvise(__addr:ctypes.c_void_p, __len:size_t, __advice:Annotated[int, ctypes.c_int32]) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def mlock(__addr:ctypes.c_void_p, __len:size_t) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def munlock(__addr:ctypes.c_void_p, __len:size_t) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def mlockall(__flags:Annotated[int, ctypes.c_int32]) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def munlockall() -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def mincore(__start:ctypes.c_void_p, __len:size_t, __vec:c.POINTER[Annotated[int, ctypes.c_ubyte]]) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def shm_open(__name:c.POINTER[Annotated[bytes, ctypes.c_char]], __oflag:Annotated[int, ctypes.c_int32], __mode:mode_t) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def shm_unlink(__name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
+off_t: TypeAlias = ctypes.c_int64
+mode_t: TypeAlias = ctypes.c_uint32
+size_t: TypeAlias = ctypes.c_uint64
+__off_t: TypeAlias = ctypes.c_int64
+@dll.bind(ctypes.c_void_p, ctypes.c_void_p, size_t, ctypes.c_int32, ctypes.c_int32, ctypes.c_int32, ctypes.c_int64)
+def mmap(__addr:ctypes.c_void_p, __len:size_t, __prot:int, __flags:int, __fd:int, __offset:ctypes.c_int64) -> ctypes.c_void_p: ...
+@dll.bind(ctypes.c_int32, ctypes.c_void_p, size_t)
+def munmap(__addr:ctypes.c_void_p, __len:size_t) -> int: ...
+@dll.bind(ctypes.c_int32, ctypes.c_void_p, size_t, ctypes.c_int32)
+def mprotect(__addr:ctypes.c_void_p, __len:size_t, __prot:int) -> int: ...
+@dll.bind(ctypes.c_int32, ctypes.c_void_p, size_t, ctypes.c_int32)
+def msync(__addr:ctypes.c_void_p, __len:size_t, __flags:int) -> int: ...
+@dll.bind(ctypes.c_int32, ctypes.c_void_p, size_t, ctypes.c_int32)
+def madvise(__addr:ctypes.c_void_p, __len:size_t, __advice:int) -> int: ...
+@dll.bind(ctypes.c_int32, ctypes.c_void_p, size_t, ctypes.c_int32)
+def posix_madvise(__addr:ctypes.c_void_p, __len:size_t, __advice:int) -> int: ...
+@dll.bind(ctypes.c_int32, ctypes.c_void_p, size_t)
+def mlock(__addr:ctypes.c_void_p, __len:size_t) -> int: ...
+@dll.bind(ctypes.c_int32, ctypes.c_void_p, size_t)
+def munlock(__addr:ctypes.c_void_p, __len:size_t) -> int: ...
+@dll.bind(ctypes.c_int32, ctypes.c_int32)
+def mlockall(__flags:int) -> int: ...
+@dll.bind(ctypes.c_int32)
+def munlockall() -> int: ...
+@dll.bind(ctypes.c_int32, ctypes.c_void_p, size_t, c.POINTER[ctypes.c_ubyte])
+def mincore(__start:ctypes.c_void_p, __len:size_t, __vec:c.POINTER[ctypes.c_ubyte]) -> int: ...
+@dll.bind(ctypes.c_int32, c.POINTER[ctypes.c_char], ctypes.c_int32, mode_t)
+def shm_open(__name:c.POINTER[ctypes.c_char], __oflag:int, __mode:mode_t) -> int: ...
+@dll.bind(ctypes.c_int32, c.POINTER[ctypes.c_char])
+def shm_unlink(__name:c.POINTER[ctypes.c_char]) -> int: ...
+@dll.bind(ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, size_t)
 def memcpy(__dest:ctypes.c_void_p, __src:ctypes.c_void_p, __n:size_t) -> ctypes.c_void_p: ...
-@dll.bind
+@dll.bind(ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, size_t)
 def memmove(__dest:ctypes.c_void_p, __src:ctypes.c_void_p, __n:size_t) -> ctypes.c_void_p: ...
-@dll.bind
-def memccpy(__dest:ctypes.c_void_p, __src:ctypes.c_void_p, __c:Annotated[int, ctypes.c_int32], __n:size_t) -> ctypes.c_void_p: ...
-@dll.bind
-def memset(__s:ctypes.c_void_p, __c:Annotated[int, ctypes.c_int32], __n:size_t) -> ctypes.c_void_p: ...
-@dll.bind
-def memcmp(__s1:ctypes.c_void_p, __s2:ctypes.c_void_p, __n:size_t) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def __memcmpeq(__s1:ctypes.c_void_p, __s2:ctypes.c_void_p, __n:size_t) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def memchr(__s:ctypes.c_void_p, __c:Annotated[int, ctypes.c_int32], __n:size_t) -> ctypes.c_void_p: ...
-@dll.bind
-def strcpy(__dest:c.POINTER[Annotated[bytes, ctypes.c_char]], __src:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
-@dll.bind
-def strncpy(__dest:c.POINTER[Annotated[bytes, ctypes.c_char]], __src:c.POINTER[Annotated[bytes, ctypes.c_char]], __n:size_t) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
-@dll.bind
-def strcat(__dest:c.POINTER[Annotated[bytes, ctypes.c_char]], __src:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
-@dll.bind
-def strncat(__dest:c.POINTER[Annotated[bytes, ctypes.c_char]], __src:c.POINTER[Annotated[bytes, ctypes.c_char]], __n:size_t) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
-@dll.bind
-def strcmp(__s1:c.POINTER[Annotated[bytes, ctypes.c_char]], __s2:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def strncmp(__s1:c.POINTER[Annotated[bytes, ctypes.c_char]], __s2:c.POINTER[Annotated[bytes, ctypes.c_char]], __n:size_t) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def strcoll(__s1:c.POINTER[Annotated[bytes, ctypes.c_char]], __s2:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def strxfrm(__dest:c.POINTER[Annotated[bytes, ctypes.c_char]], __src:c.POINTER[Annotated[bytes, ctypes.c_char]], __n:size_t) -> Annotated[int, ctypes.c_uint64]: ...
+@dll.bind(ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int32, size_t)
+def memccpy(__dest:ctypes.c_void_p, __src:ctypes.c_void_p, __c:int, __n:size_t) -> ctypes.c_void_p: ...
+@dll.bind(ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int32, size_t)
+def memset(__s:ctypes.c_void_p, __c:int, __n:size_t) -> ctypes.c_void_p: ...
+@dll.bind(ctypes.c_int32, ctypes.c_void_p, ctypes.c_void_p, size_t)
+def memcmp(__s1:ctypes.c_void_p, __s2:ctypes.c_void_p, __n:size_t) -> int: ...
+@dll.bind(ctypes.c_int32, ctypes.c_void_p, ctypes.c_void_p, size_t)
+def __memcmpeq(__s1:ctypes.c_void_p, __s2:ctypes.c_void_p, __n:size_t) -> int: ...
+@dll.bind(ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int32, size_t)
+def memchr(__s:ctypes.c_void_p, __c:int, __n:size_t) -> ctypes.c_void_p: ...
+@dll.bind(c.POINTER[ctypes.c_char], c.POINTER[ctypes.c_char], c.POINTER[ctypes.c_char])
+def strcpy(__dest:c.POINTER[ctypes.c_char], __src:c.POINTER[ctypes.c_char]) -> c.POINTER[ctypes.c_char]: ...
+@dll.bind(c.POINTER[ctypes.c_char], c.POINTER[ctypes.c_char], c.POINTER[ctypes.c_char], size_t)
+def strncpy(__dest:c.POINTER[ctypes.c_char], __src:c.POINTER[ctypes.c_char], __n:size_t) -> c.POINTER[ctypes.c_char]: ...
+@dll.bind(c.POINTER[ctypes.c_char], c.POINTER[ctypes.c_char], c.POINTER[ctypes.c_char])
+def strcat(__dest:c.POINTER[ctypes.c_char], __src:c.POINTER[ctypes.c_char]) -> c.POINTER[ctypes.c_char]: ...
+@dll.bind(c.POINTER[ctypes.c_char], c.POINTER[ctypes.c_char], c.POINTER[ctypes.c_char], size_t)
+def strncat(__dest:c.POINTER[ctypes.c_char], __src:c.POINTER[ctypes.c_char], __n:size_t) -> c.POINTER[ctypes.c_char]: ...
+@dll.bind(ctypes.c_int32, c.POINTER[ctypes.c_char], c.POINTER[ctypes.c_char])
+def strcmp(__s1:c.POINTER[ctypes.c_char], __s2:c.POINTER[ctypes.c_char]) -> int: ...
+@dll.bind(ctypes.c_int32, c.POINTER[ctypes.c_char], c.POINTER[ctypes.c_char], size_t)
+def strncmp(__s1:c.POINTER[ctypes.c_char], __s2:c.POINTER[ctypes.c_char], __n:size_t) -> int: ...
+@dll.bind(ctypes.c_int32, c.POINTER[ctypes.c_char], c.POINTER[ctypes.c_char])
+def strcoll(__s1:c.POINTER[ctypes.c_char], __s2:c.POINTER[ctypes.c_char]) -> int: ...
+@dll.bind(ctypes.c_uint64, c.POINTER[ctypes.c_char], c.POINTER[ctypes.c_char], size_t)
+def strxfrm(__dest:c.POINTER[ctypes.c_char], __src:c.POINTER[ctypes.c_char], __n:size_t) -> int: ...
 @c.record
 class struct___locale_struct(c.Struct):
   SIZE = 232
-  __locales: Annotated[c.Array[c.POINTER[struct___locale_data], Literal[13]], 0]
-  __ctype_b: Annotated[c.POINTER[Annotated[int, ctypes.c_uint16]], 104]
-  __ctype_tolower: Annotated[c.POINTER[Annotated[int, ctypes.c_int32]], 112]
-  __ctype_toupper: Annotated[c.POINTER[Annotated[int, ctypes.c_int32]], 120]
-  __names: Annotated[c.Array[c.POINTER[Annotated[bytes, ctypes.c_char]], Literal[13]], 128]
-class struct___locale_data(ctypes.Structure): pass
+  __locales: c.Array[c.POINTER[struct___locale_data], Literal[13]]
+  __ctype_b: c.POINTER[ctypes.c_uint16]
+  __ctype_tolower: c.POINTER[ctypes.c_int32]
+  __ctype_toupper: c.POINTER[ctypes.c_int32]
+  __names: c.Array[c.POINTER[ctypes.c_char], Literal[13]]
+class struct___locale_data(c.Struct): pass
+struct___locale_struct.register_fields([('__locales', c.Array[c.POINTER[struct___locale_data], Literal[13]], 0), ('__ctype_b', c.POINTER[ctypes.c_uint16], 104), ('__ctype_tolower', c.POINTER[ctypes.c_int32], 112), ('__ctype_toupper', c.POINTER[ctypes.c_int32], 120), ('__names', c.Array[c.POINTER[ctypes.c_char], Literal[13]], 128)])
 locale_t: TypeAlias = c.POINTER[struct___locale_struct]
-@dll.bind
-def strcoll_l(__s1:c.POINTER[Annotated[bytes, ctypes.c_char]], __s2:c.POINTER[Annotated[bytes, ctypes.c_char]], __l:locale_t) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def strxfrm_l(__dest:c.POINTER[Annotated[bytes, ctypes.c_char]], __src:c.POINTER[Annotated[bytes, ctypes.c_char]], __n:size_t, __l:locale_t) -> size_t: ...
-@dll.bind
-def strdup(__s:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
-@dll.bind
-def strndup(__string:c.POINTER[Annotated[bytes, ctypes.c_char]], __n:size_t) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
-@dll.bind
-def strchr(__s:c.POINTER[Annotated[bytes, ctypes.c_char]], __c:Annotated[int, ctypes.c_int32]) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
-@dll.bind
-def strrchr(__s:c.POINTER[Annotated[bytes, ctypes.c_char]], __c:Annotated[int, ctypes.c_int32]) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
-@dll.bind
-def strchrnul(__s:c.POINTER[Annotated[bytes, ctypes.c_char]], __c:Annotated[int, ctypes.c_int32]) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
-@dll.bind
-def strcspn(__s:c.POINTER[Annotated[bytes, ctypes.c_char]], __reject:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> Annotated[int, ctypes.c_uint64]: ...
-@dll.bind
-def strspn(__s:c.POINTER[Annotated[bytes, ctypes.c_char]], __accept:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> Annotated[int, ctypes.c_uint64]: ...
-@dll.bind
-def strpbrk(__s:c.POINTER[Annotated[bytes, ctypes.c_char]], __accept:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
-@dll.bind
-def strstr(__haystack:c.POINTER[Annotated[bytes, ctypes.c_char]], __needle:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
-@dll.bind
-def strtok(__s:c.POINTER[Annotated[bytes, ctypes.c_char]], __delim:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
-@dll.bind
-def __strtok_r(__s:c.POINTER[Annotated[bytes, ctypes.c_char]], __delim:c.POINTER[Annotated[bytes, ctypes.c_char]], __save_ptr:c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]]) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
-@dll.bind
-def strtok_r(__s:c.POINTER[Annotated[bytes, ctypes.c_char]], __delim:c.POINTER[Annotated[bytes, ctypes.c_char]], __save_ptr:c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]]) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
-@dll.bind
-def strcasestr(__haystack:c.POINTER[Annotated[bytes, ctypes.c_char]], __needle:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
-@dll.bind
+@dll.bind(ctypes.c_int32, c.POINTER[ctypes.c_char], c.POINTER[ctypes.c_char], locale_t)
+def strcoll_l(__s1:c.POINTER[ctypes.c_char], __s2:c.POINTER[ctypes.c_char], __l:locale_t) -> int: ...
+@dll.bind(size_t, c.POINTER[ctypes.c_char], c.POINTER[ctypes.c_char], size_t, locale_t)
+def strxfrm_l(__dest:c.POINTER[ctypes.c_char], __src:c.POINTER[ctypes.c_char], __n:size_t, __l:locale_t) -> size_t: ...
+@dll.bind(c.POINTER[ctypes.c_char], c.POINTER[ctypes.c_char])
+def strdup(__s:c.POINTER[ctypes.c_char]) -> c.POINTER[ctypes.c_char]: ...
+@dll.bind(c.POINTER[ctypes.c_char], c.POINTER[ctypes.c_char], size_t)
+def strndup(__string:c.POINTER[ctypes.c_char], __n:size_t) -> c.POINTER[ctypes.c_char]: ...
+@dll.bind(c.POINTER[ctypes.c_char], c.POINTER[ctypes.c_char], ctypes.c_int32)
+def strchr(__s:c.POINTER[ctypes.c_char], __c:int) -> c.POINTER[ctypes.c_char]: ...
+@dll.bind(c.POINTER[ctypes.c_char], c.POINTER[ctypes.c_char], ctypes.c_int32)
+def strrchr(__s:c.POINTER[ctypes.c_char], __c:int) -> c.POINTER[ctypes.c_char]: ...
+@dll.bind(c.POINTER[ctypes.c_char], c.POINTER[ctypes.c_char], ctypes.c_int32)
+def strchrnul(__s:c.POINTER[ctypes.c_char], __c:int) -> c.POINTER[ctypes.c_char]: ...
+@dll.bind(ctypes.c_uint64, c.POINTER[ctypes.c_char], c.POINTER[ctypes.c_char])
+def strcspn(__s:c.POINTER[ctypes.c_char], __reject:c.POINTER[ctypes.c_char]) -> int: ...
+@dll.bind(ctypes.c_uint64, c.POINTER[ctypes.c_char], c.POINTER[ctypes.c_char])
+def strspn(__s:c.POINTER[ctypes.c_char], __accept:c.POINTER[ctypes.c_char]) -> int: ...
+@dll.bind(c.POINTER[ctypes.c_char], c.POINTER[ctypes.c_char], c.POINTER[ctypes.c_char])
+def strpbrk(__s:c.POINTER[ctypes.c_char], __accept:c.POINTER[ctypes.c_char]) -> c.POINTER[ctypes.c_char]: ...
+@dll.bind(c.POINTER[ctypes.c_char], c.POINTER[ctypes.c_char], c.POINTER[ctypes.c_char])
+def strstr(__haystack:c.POINTER[ctypes.c_char], __needle:c.POINTER[ctypes.c_char]) -> c.POINTER[ctypes.c_char]: ...
+@dll.bind(c.POINTER[ctypes.c_char], c.POINTER[ctypes.c_char], c.POINTER[ctypes.c_char])
+def strtok(__s:c.POINTER[ctypes.c_char], __delim:c.POINTER[ctypes.c_char]) -> c.POINTER[ctypes.c_char]: ...
+@dll.bind(c.POINTER[ctypes.c_char], c.POINTER[ctypes.c_char], c.POINTER[ctypes.c_char], c.POINTER[c.POINTER[ctypes.c_char]])
+def __strtok_r(__s:c.POINTER[ctypes.c_char], __delim:c.POINTER[ctypes.c_char], __save_ptr:c.POINTER[c.POINTER[ctypes.c_char]]) -> c.POINTER[ctypes.c_char]: ...
+@dll.bind(c.POINTER[ctypes.c_char], c.POINTER[ctypes.c_char], c.POINTER[ctypes.c_char], c.POINTER[c.POINTER[ctypes.c_char]])
+def strtok_r(__s:c.POINTER[ctypes.c_char], __delim:c.POINTER[ctypes.c_char], __save_ptr:c.POINTER[c.POINTER[ctypes.c_char]]) -> c.POINTER[ctypes.c_char]: ...
+@dll.bind(c.POINTER[ctypes.c_char], c.POINTER[ctypes.c_char], c.POINTER[ctypes.c_char])
+def strcasestr(__haystack:c.POINTER[ctypes.c_char], __needle:c.POINTER[ctypes.c_char]) -> c.POINTER[ctypes.c_char]: ...
+@dll.bind(ctypes.c_void_p, ctypes.c_void_p, size_t, ctypes.c_void_p, size_t)
 def memmem(__haystack:ctypes.c_void_p, __haystacklen:size_t, __needle:ctypes.c_void_p, __needlelen:size_t) -> ctypes.c_void_p: ...
-@dll.bind
+@dll.bind(ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, size_t)
 def __mempcpy(__dest:ctypes.c_void_p, __src:ctypes.c_void_p, __n:size_t) -> ctypes.c_void_p: ...
-@dll.bind
+@dll.bind(ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, size_t)
 def mempcpy(__dest:ctypes.c_void_p, __src:ctypes.c_void_p, __n:size_t) -> ctypes.c_void_p: ...
-@dll.bind
-def strlen(__s:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> Annotated[int, ctypes.c_uint64]: ...
-@dll.bind
-def strnlen(__string:c.POINTER[Annotated[bytes, ctypes.c_char]], __maxlen:size_t) -> size_t: ...
-@dll.bind
-def strerror(__errnum:Annotated[int, ctypes.c_int32]) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
-@dll.bind
-def strerror_r(__errnum:Annotated[int, ctypes.c_int32], __buf:c.POINTER[Annotated[bytes, ctypes.c_char]], __buflen:size_t) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def strerror_l(__errnum:Annotated[int, ctypes.c_int32], __l:locale_t) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
-@dll.bind
+@dll.bind(ctypes.c_uint64, c.POINTER[ctypes.c_char])
+def strlen(__s:c.POINTER[ctypes.c_char]) -> int: ...
+@dll.bind(size_t, c.POINTER[ctypes.c_char], size_t)
+def strnlen(__string:c.POINTER[ctypes.c_char], __maxlen:size_t) -> size_t: ...
+@dll.bind(c.POINTER[ctypes.c_char], ctypes.c_int32)
+def strerror(__errnum:int) -> c.POINTER[ctypes.c_char]: ...
+@dll.bind(ctypes.c_int32, ctypes.c_int32, c.POINTER[ctypes.c_char], size_t)
+def strerror_r(__errnum:int, __buf:c.POINTER[ctypes.c_char], __buflen:size_t) -> int: ...
+@dll.bind(c.POINTER[ctypes.c_char], ctypes.c_int32, locale_t)
+def strerror_l(__errnum:int, __l:locale_t) -> c.POINTER[ctypes.c_char]: ...
+@dll.bind(None, ctypes.c_void_p, size_t)
 def explicit_bzero(__s:ctypes.c_void_p, __n:size_t) -> None: ...
-@dll.bind
-def strsep(__stringp:c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]], __delim:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
-@dll.bind
-def strsignal(__sig:Annotated[int, ctypes.c_int32]) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
-@dll.bind
-def __stpcpy(__dest:c.POINTER[Annotated[bytes, ctypes.c_char]], __src:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
-@dll.bind
-def stpcpy(__dest:c.POINTER[Annotated[bytes, ctypes.c_char]], __src:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
-@dll.bind
-def __stpncpy(__dest:c.POINTER[Annotated[bytes, ctypes.c_char]], __src:c.POINTER[Annotated[bytes, ctypes.c_char]], __n:size_t) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
-@dll.bind
-def stpncpy(__dest:c.POINTER[Annotated[bytes, ctypes.c_char]], __src:c.POINTER[Annotated[bytes, ctypes.c_char]], __n:size_t) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
-@dll.bind
-def strlcpy(__dest:c.POINTER[Annotated[bytes, ctypes.c_char]], __src:c.POINTER[Annotated[bytes, ctypes.c_char]], __n:size_t) -> size_t: ...
-@dll.bind
-def strlcat(__dest:c.POINTER[Annotated[bytes, ctypes.c_char]], __src:c.POINTER[Annotated[bytes, ctypes.c_char]], __n:size_t) -> size_t: ...
-Elf32_Half: TypeAlias = Annotated[int, ctypes.c_uint16]
-Elf64_Half: TypeAlias = Annotated[int, ctypes.c_uint16]
-Elf32_Word: TypeAlias = Annotated[int, ctypes.c_uint32]
-Elf32_Sword: TypeAlias = Annotated[int, ctypes.c_int32]
-Elf64_Word: TypeAlias = Annotated[int, ctypes.c_uint32]
-Elf64_Sword: TypeAlias = Annotated[int, ctypes.c_int32]
-Elf32_Xword: TypeAlias = Annotated[int, ctypes.c_uint64]
-Elf32_Sxword: TypeAlias = Annotated[int, ctypes.c_int64]
-Elf64_Xword: TypeAlias = Annotated[int, ctypes.c_uint64]
-Elf64_Sxword: TypeAlias = Annotated[int, ctypes.c_int64]
-Elf32_Addr: TypeAlias = Annotated[int, ctypes.c_uint32]
-Elf64_Addr: TypeAlias = Annotated[int, ctypes.c_uint64]
-Elf32_Off: TypeAlias = Annotated[int, ctypes.c_uint32]
-Elf64_Off: TypeAlias = Annotated[int, ctypes.c_uint64]
-Elf32_Section: TypeAlias = Annotated[int, ctypes.c_uint16]
-Elf64_Section: TypeAlias = Annotated[int, ctypes.c_uint16]
-Elf32_Versym: TypeAlias = Annotated[int, ctypes.c_uint16]
-Elf64_Versym: TypeAlias = Annotated[int, ctypes.c_uint16]
+@dll.bind(c.POINTER[ctypes.c_char], c.POINTER[c.POINTER[ctypes.c_char]], c.POINTER[ctypes.c_char])
+def strsep(__stringp:c.POINTER[c.POINTER[ctypes.c_char]], __delim:c.POINTER[ctypes.c_char]) -> c.POINTER[ctypes.c_char]: ...
+@dll.bind(c.POINTER[ctypes.c_char], ctypes.c_int32)
+def strsignal(__sig:int) -> c.POINTER[ctypes.c_char]: ...
+@dll.bind(c.POINTER[ctypes.c_char], c.POINTER[ctypes.c_char], c.POINTER[ctypes.c_char])
+def __stpcpy(__dest:c.POINTER[ctypes.c_char], __src:c.POINTER[ctypes.c_char]) -> c.POINTER[ctypes.c_char]: ...
+@dll.bind(c.POINTER[ctypes.c_char], c.POINTER[ctypes.c_char], c.POINTER[ctypes.c_char])
+def stpcpy(__dest:c.POINTER[ctypes.c_char], __src:c.POINTER[ctypes.c_char]) -> c.POINTER[ctypes.c_char]: ...
+@dll.bind(c.POINTER[ctypes.c_char], c.POINTER[ctypes.c_char], c.POINTER[ctypes.c_char], size_t)
+def __stpncpy(__dest:c.POINTER[ctypes.c_char], __src:c.POINTER[ctypes.c_char], __n:size_t) -> c.POINTER[ctypes.c_char]: ...
+@dll.bind(c.POINTER[ctypes.c_char], c.POINTER[ctypes.c_char], c.POINTER[ctypes.c_char], size_t)
+def stpncpy(__dest:c.POINTER[ctypes.c_char], __src:c.POINTER[ctypes.c_char], __n:size_t) -> c.POINTER[ctypes.c_char]: ...
+@dll.bind(size_t, c.POINTER[ctypes.c_char], c.POINTER[ctypes.c_char], size_t)
+def strlcpy(__dest:c.POINTER[ctypes.c_char], __src:c.POINTER[ctypes.c_char], __n:size_t) -> size_t: ...
+@dll.bind(size_t, c.POINTER[ctypes.c_char], c.POINTER[ctypes.c_char], size_t)
+def strlcat(__dest:c.POINTER[ctypes.c_char], __src:c.POINTER[ctypes.c_char], __n:size_t) -> size_t: ...
+Elf32_Half: TypeAlias = ctypes.c_uint16
+Elf64_Half: TypeAlias = ctypes.c_uint16
+Elf32_Word: TypeAlias = ctypes.c_uint32
+Elf32_Sword: TypeAlias = ctypes.c_int32
+Elf64_Word: TypeAlias = ctypes.c_uint32
+Elf64_Sword: TypeAlias = ctypes.c_int32
+Elf32_Xword: TypeAlias = ctypes.c_uint64
+Elf32_Sxword: TypeAlias = ctypes.c_int64
+Elf64_Xword: TypeAlias = ctypes.c_uint64
+Elf64_Sxword: TypeAlias = ctypes.c_int64
+Elf32_Addr: TypeAlias = ctypes.c_uint32
+Elf64_Addr: TypeAlias = ctypes.c_uint64
+Elf32_Off: TypeAlias = ctypes.c_uint32
+Elf64_Off: TypeAlias = ctypes.c_uint64
+Elf32_Section: TypeAlias = ctypes.c_uint16
+Elf64_Section: TypeAlias = ctypes.c_uint16
+Elf32_Versym: TypeAlias = ctypes.c_uint16
+Elf64_Versym: TypeAlias = ctypes.c_uint16
 @c.record
 class Elf32_Ehdr(c.Struct):
   SIZE = 52
-  e_ident: Annotated[c.Array[Annotated[int, ctypes.c_ubyte], Literal[16]], 0]
-  e_type: Annotated[Elf32_Half, 16]
-  e_machine: Annotated[Elf32_Half, 18]
-  e_version: Annotated[Elf32_Word, 20]
-  e_entry: Annotated[Elf32_Addr, 24]
-  e_phoff: Annotated[Elf32_Off, 28]
-  e_shoff: Annotated[Elf32_Off, 32]
-  e_flags: Annotated[Elf32_Word, 36]
-  e_ehsize: Annotated[Elf32_Half, 40]
-  e_phentsize: Annotated[Elf32_Half, 42]
-  e_phnum: Annotated[Elf32_Half, 44]
-  e_shentsize: Annotated[Elf32_Half, 46]
-  e_shnum: Annotated[Elf32_Half, 48]
-  e_shstrndx: Annotated[Elf32_Half, 50]
+  e_ident: c.Array[ctypes.c_ubyte, Literal[16]]
+  e_type: int
+  e_machine: int
+  e_version: int
+  e_entry: int
+  e_phoff: int
+  e_shoff: int
+  e_flags: int
+  e_ehsize: int
+  e_phentsize: int
+  e_phnum: int
+  e_shentsize: int
+  e_shnum: int
+  e_shstrndx: int
+Elf32_Ehdr.register_fields([('e_ident', c.Array[ctypes.c_ubyte, Literal[16]], 0), ('e_type', Elf32_Half, 16), ('e_machine', Elf32_Half, 18), ('e_version', Elf32_Word, 20), ('e_entry', Elf32_Addr, 24), ('e_phoff', Elf32_Off, 28), ('e_shoff', Elf32_Off, 32), ('e_flags', Elf32_Word, 36), ('e_ehsize', Elf32_Half, 40), ('e_phentsize', Elf32_Half, 42), ('e_phnum', Elf32_Half, 44), ('e_shentsize', Elf32_Half, 46), ('e_shnum', Elf32_Half, 48), ('e_shstrndx', Elf32_Half, 50)])
 @c.record
 class Elf64_Ehdr(c.Struct):
   SIZE = 64
-  e_ident: Annotated[c.Array[Annotated[int, ctypes.c_ubyte], Literal[16]], 0]
-  e_type: Annotated[Elf64_Half, 16]
-  e_machine: Annotated[Elf64_Half, 18]
-  e_version: Annotated[Elf64_Word, 20]
-  e_entry: Annotated[Elf64_Addr, 24]
-  e_phoff: Annotated[Elf64_Off, 32]
-  e_shoff: Annotated[Elf64_Off, 40]
-  e_flags: Annotated[Elf64_Word, 48]
-  e_ehsize: Annotated[Elf64_Half, 52]
-  e_phentsize: Annotated[Elf64_Half, 54]
-  e_phnum: Annotated[Elf64_Half, 56]
-  e_shentsize: Annotated[Elf64_Half, 58]
-  e_shnum: Annotated[Elf64_Half, 60]
-  e_shstrndx: Annotated[Elf64_Half, 62]
+  e_ident: c.Array[ctypes.c_ubyte, Literal[16]]
+  e_type: int
+  e_machine: int
+  e_version: int
+  e_entry: int
+  e_phoff: int
+  e_shoff: int
+  e_flags: int
+  e_ehsize: int
+  e_phentsize: int
+  e_phnum: int
+  e_shentsize: int
+  e_shnum: int
+  e_shstrndx: int
+Elf64_Ehdr.register_fields([('e_ident', c.Array[ctypes.c_ubyte, Literal[16]], 0), ('e_type', Elf64_Half, 16), ('e_machine', Elf64_Half, 18), ('e_version', Elf64_Word, 20), ('e_entry', Elf64_Addr, 24), ('e_phoff', Elf64_Off, 32), ('e_shoff', Elf64_Off, 40), ('e_flags', Elf64_Word, 48), ('e_ehsize', Elf64_Half, 52), ('e_phentsize', Elf64_Half, 54), ('e_phnum', Elf64_Half, 56), ('e_shentsize', Elf64_Half, 58), ('e_shnum', Elf64_Half, 60), ('e_shstrndx', Elf64_Half, 62)])
 @c.record
 class Elf32_Shdr(c.Struct):
   SIZE = 40
-  sh_name: Annotated[Elf32_Word, 0]
-  sh_type: Annotated[Elf32_Word, 4]
-  sh_flags: Annotated[Elf32_Word, 8]
-  sh_addr: Annotated[Elf32_Addr, 12]
-  sh_offset: Annotated[Elf32_Off, 16]
-  sh_size: Annotated[Elf32_Word, 20]
-  sh_link: Annotated[Elf32_Word, 24]
-  sh_info: Annotated[Elf32_Word, 28]
-  sh_addralign: Annotated[Elf32_Word, 32]
-  sh_entsize: Annotated[Elf32_Word, 36]
+  sh_name: int
+  sh_type: int
+  sh_flags: int
+  sh_addr: int
+  sh_offset: int
+  sh_size: int
+  sh_link: int
+  sh_info: int
+  sh_addralign: int
+  sh_entsize: int
+Elf32_Shdr.register_fields([('sh_name', Elf32_Word, 0), ('sh_type', Elf32_Word, 4), ('sh_flags', Elf32_Word, 8), ('sh_addr', Elf32_Addr, 12), ('sh_offset', Elf32_Off, 16), ('sh_size', Elf32_Word, 20), ('sh_link', Elf32_Word, 24), ('sh_info', Elf32_Word, 28), ('sh_addralign', Elf32_Word, 32), ('sh_entsize', Elf32_Word, 36)])
 @c.record
 class Elf64_Shdr(c.Struct):
   SIZE = 64
-  sh_name: Annotated[Elf64_Word, 0]
-  sh_type: Annotated[Elf64_Word, 4]
-  sh_flags: Annotated[Elf64_Xword, 8]
-  sh_addr: Annotated[Elf64_Addr, 16]
-  sh_offset: Annotated[Elf64_Off, 24]
-  sh_size: Annotated[Elf64_Xword, 32]
-  sh_link: Annotated[Elf64_Word, 40]
-  sh_info: Annotated[Elf64_Word, 44]
-  sh_addralign: Annotated[Elf64_Xword, 48]
-  sh_entsize: Annotated[Elf64_Xword, 56]
+  sh_name: int
+  sh_type: int
+  sh_flags: int
+  sh_addr: int
+  sh_offset: int
+  sh_size: int
+  sh_link: int
+  sh_info: int
+  sh_addralign: int
+  sh_entsize: int
+Elf64_Shdr.register_fields([('sh_name', Elf64_Word, 0), ('sh_type', Elf64_Word, 4), ('sh_flags', Elf64_Xword, 8), ('sh_addr', Elf64_Addr, 16), ('sh_offset', Elf64_Off, 24), ('sh_size', Elf64_Xword, 32), ('sh_link', Elf64_Word, 40), ('sh_info', Elf64_Word, 44), ('sh_addralign', Elf64_Xword, 48), ('sh_entsize', Elf64_Xword, 56)])
 @c.record
 class Elf32_Chdr(c.Struct):
   SIZE = 12
-  ch_type: Annotated[Elf32_Word, 0]
-  ch_size: Annotated[Elf32_Word, 4]
-  ch_addralign: Annotated[Elf32_Word, 8]
+  ch_type: int
+  ch_size: int
+  ch_addralign: int
+Elf32_Chdr.register_fields([('ch_type', Elf32_Word, 0), ('ch_size', Elf32_Word, 4), ('ch_addralign', Elf32_Word, 8)])
 @c.record
 class Elf64_Chdr(c.Struct):
   SIZE = 24
-  ch_type: Annotated[Elf64_Word, 0]
-  ch_reserved: Annotated[Elf64_Word, 4]
-  ch_size: Annotated[Elf64_Xword, 8]
-  ch_addralign: Annotated[Elf64_Xword, 16]
+  ch_type: int
+  ch_reserved: int
+  ch_size: int
+  ch_addralign: int
+Elf64_Chdr.register_fields([('ch_type', Elf64_Word, 0), ('ch_reserved', Elf64_Word, 4), ('ch_size', Elf64_Xword, 8), ('ch_addralign', Elf64_Xword, 16)])
 @c.record
 class Elf32_Sym(c.Struct):
   SIZE = 16
-  st_name: Annotated[Elf32_Word, 0]
-  st_value: Annotated[Elf32_Addr, 4]
-  st_size: Annotated[Elf32_Word, 8]
-  st_info: Annotated[Annotated[int, ctypes.c_ubyte], 12]
-  st_other: Annotated[Annotated[int, ctypes.c_ubyte], 13]
-  st_shndx: Annotated[Elf32_Section, 14]
+  st_name: int
+  st_value: int
+  st_size: int
+  st_info: int
+  st_other: int
+  st_shndx: int
+Elf32_Sym.register_fields([('st_name', Elf32_Word, 0), ('st_value', Elf32_Addr, 4), ('st_size', Elf32_Word, 8), ('st_info', ctypes.c_ubyte, 12), ('st_other', ctypes.c_ubyte, 13), ('st_shndx', Elf32_Section, 14)])
 @c.record
 class Elf64_Sym(c.Struct):
   SIZE = 24
-  st_name: Annotated[Elf64_Word, 0]
-  st_info: Annotated[Annotated[int, ctypes.c_ubyte], 4]
-  st_other: Annotated[Annotated[int, ctypes.c_ubyte], 5]
-  st_shndx: Annotated[Elf64_Section, 6]
-  st_value: Annotated[Elf64_Addr, 8]
-  st_size: Annotated[Elf64_Xword, 16]
+  st_name: int
+  st_info: int
+  st_other: int
+  st_shndx: int
+  st_value: int
+  st_size: int
+Elf64_Sym.register_fields([('st_name', Elf64_Word, 0), ('st_info', ctypes.c_ubyte, 4), ('st_other', ctypes.c_ubyte, 5), ('st_shndx', Elf64_Section, 6), ('st_value', Elf64_Addr, 8), ('st_size', Elf64_Xword, 16)])
 @c.record
 class Elf32_Syminfo(c.Struct):
   SIZE = 4
-  si_boundto: Annotated[Elf32_Half, 0]
-  si_flags: Annotated[Elf32_Half, 2]
+  si_boundto: int
+  si_flags: int
+Elf32_Syminfo.register_fields([('si_boundto', Elf32_Half, 0), ('si_flags', Elf32_Half, 2)])
 @c.record
 class Elf64_Syminfo(c.Struct):
   SIZE = 4
-  si_boundto: Annotated[Elf64_Half, 0]
-  si_flags: Annotated[Elf64_Half, 2]
+  si_boundto: int
+  si_flags: int
+Elf64_Syminfo.register_fields([('si_boundto', Elf64_Half, 0), ('si_flags', Elf64_Half, 2)])
 @c.record
 class Elf32_Rel(c.Struct):
   SIZE = 8
-  r_offset: Annotated[Elf32_Addr, 0]
-  r_info: Annotated[Elf32_Word, 4]
+  r_offset: int
+  r_info: int
+Elf32_Rel.register_fields([('r_offset', Elf32_Addr, 0), ('r_info', Elf32_Word, 4)])
 @c.record
 class Elf64_Rel(c.Struct):
   SIZE = 16
-  r_offset: Annotated[Elf64_Addr, 0]
-  r_info: Annotated[Elf64_Xword, 8]
+  r_offset: int
+  r_info: int
+Elf64_Rel.register_fields([('r_offset', Elf64_Addr, 0), ('r_info', Elf64_Xword, 8)])
 @c.record
 class Elf32_Rela(c.Struct):
   SIZE = 12
-  r_offset: Annotated[Elf32_Addr, 0]
-  r_info: Annotated[Elf32_Word, 4]
-  r_addend: Annotated[Elf32_Sword, 8]
+  r_offset: int
+  r_info: int
+  r_addend: int
+Elf32_Rela.register_fields([('r_offset', Elf32_Addr, 0), ('r_info', Elf32_Word, 4), ('r_addend', Elf32_Sword, 8)])
 @c.record
 class Elf64_Rela(c.Struct):
   SIZE = 24
-  r_offset: Annotated[Elf64_Addr, 0]
-  r_info: Annotated[Elf64_Xword, 8]
-  r_addend: Annotated[Elf64_Sxword, 16]
-Elf32_Relr: TypeAlias = Annotated[int, ctypes.c_uint32]
-Elf64_Relr: TypeAlias = Annotated[int, ctypes.c_uint64]
+  r_offset: int
+  r_info: int
+  r_addend: int
+Elf64_Rela.register_fields([('r_offset', Elf64_Addr, 0), ('r_info', Elf64_Xword, 8), ('r_addend', Elf64_Sxword, 16)])
+Elf32_Relr: TypeAlias = ctypes.c_uint32
+Elf64_Relr: TypeAlias = ctypes.c_uint64
 @c.record
 class Elf32_Phdr(c.Struct):
   SIZE = 32
-  p_type: Annotated[Elf32_Word, 0]
-  p_offset: Annotated[Elf32_Off, 4]
-  p_vaddr: Annotated[Elf32_Addr, 8]
-  p_paddr: Annotated[Elf32_Addr, 12]
-  p_filesz: Annotated[Elf32_Word, 16]
-  p_memsz: Annotated[Elf32_Word, 20]
-  p_flags: Annotated[Elf32_Word, 24]
-  p_align: Annotated[Elf32_Word, 28]
+  p_type: int
+  p_offset: int
+  p_vaddr: int
+  p_paddr: int
+  p_filesz: int
+  p_memsz: int
+  p_flags: int
+  p_align: int
+Elf32_Phdr.register_fields([('p_type', Elf32_Word, 0), ('p_offset', Elf32_Off, 4), ('p_vaddr', Elf32_Addr, 8), ('p_paddr', Elf32_Addr, 12), ('p_filesz', Elf32_Word, 16), ('p_memsz', Elf32_Word, 20), ('p_flags', Elf32_Word, 24), ('p_align', Elf32_Word, 28)])
 @c.record
 class Elf64_Phdr(c.Struct):
   SIZE = 56
-  p_type: Annotated[Elf64_Word, 0]
-  p_flags: Annotated[Elf64_Word, 4]
-  p_offset: Annotated[Elf64_Off, 8]
-  p_vaddr: Annotated[Elf64_Addr, 16]
-  p_paddr: Annotated[Elf64_Addr, 24]
-  p_filesz: Annotated[Elf64_Xword, 32]
-  p_memsz: Annotated[Elf64_Xword, 40]
-  p_align: Annotated[Elf64_Xword, 48]
+  p_type: int
+  p_flags: int
+  p_offset: int
+  p_vaddr: int
+  p_paddr: int
+  p_filesz: int
+  p_memsz: int
+  p_align: int
+Elf64_Phdr.register_fields([('p_type', Elf64_Word, 0), ('p_flags', Elf64_Word, 4), ('p_offset', Elf64_Off, 8), ('p_vaddr', Elf64_Addr, 16), ('p_paddr', Elf64_Addr, 24), ('p_filesz', Elf64_Xword, 32), ('p_memsz', Elf64_Xword, 40), ('p_align', Elf64_Xword, 48)])
 @c.record
 class Elf32_Dyn(c.Struct):
   SIZE = 8
-  d_tag: Annotated[Elf32_Sword, 0]
-  d_un: Annotated[Elf32_Dyn_d_un, 4]
+  d_tag: int
+  d_un: Elf32_Dyn_d_un
 @c.record
 class Elf32_Dyn_d_un(c.Struct):
   SIZE = 4
-  d_val: Annotated[Elf32_Word, 0]
-  d_ptr: Annotated[Elf32_Addr, 0]
+  d_val: int
+  d_ptr: int
+Elf32_Dyn_d_un.register_fields([('d_val', Elf32_Word, 0), ('d_ptr', Elf32_Addr, 0)])
+Elf32_Dyn.register_fields([('d_tag', Elf32_Sword, 0), ('d_un', Elf32_Dyn_d_un, 4)])
 @c.record
 class Elf64_Dyn(c.Struct):
   SIZE = 16
-  d_tag: Annotated[Elf64_Sxword, 0]
-  d_un: Annotated[Elf64_Dyn_d_un, 8]
+  d_tag: int
+  d_un: Elf64_Dyn_d_un
 @c.record
 class Elf64_Dyn_d_un(c.Struct):
   SIZE = 8
-  d_val: Annotated[Elf64_Xword, 0]
-  d_ptr: Annotated[Elf64_Addr, 0]
+  d_val: int
+  d_ptr: int
+Elf64_Dyn_d_un.register_fields([('d_val', Elf64_Xword, 0), ('d_ptr', Elf64_Addr, 0)])
+Elf64_Dyn.register_fields([('d_tag', Elf64_Sxword, 0), ('d_un', Elf64_Dyn_d_un, 8)])
 @c.record
 class Elf32_Verdef(c.Struct):
   SIZE = 20
-  vd_version: Annotated[Elf32_Half, 0]
-  vd_flags: Annotated[Elf32_Half, 2]
-  vd_ndx: Annotated[Elf32_Half, 4]
-  vd_cnt: Annotated[Elf32_Half, 6]
-  vd_hash: Annotated[Elf32_Word, 8]
-  vd_aux: Annotated[Elf32_Word, 12]
-  vd_next: Annotated[Elf32_Word, 16]
+  vd_version: int
+  vd_flags: int
+  vd_ndx: int
+  vd_cnt: int
+  vd_hash: int
+  vd_aux: int
+  vd_next: int
+Elf32_Verdef.register_fields([('vd_version', Elf32_Half, 0), ('vd_flags', Elf32_Half, 2), ('vd_ndx', Elf32_Half, 4), ('vd_cnt', Elf32_Half, 6), ('vd_hash', Elf32_Word, 8), ('vd_aux', Elf32_Word, 12), ('vd_next', Elf32_Word, 16)])
 @c.record
 class Elf64_Verdef(c.Struct):
   SIZE = 20
-  vd_version: Annotated[Elf64_Half, 0]
-  vd_flags: Annotated[Elf64_Half, 2]
-  vd_ndx: Annotated[Elf64_Half, 4]
-  vd_cnt: Annotated[Elf64_Half, 6]
-  vd_hash: Annotated[Elf64_Word, 8]
-  vd_aux: Annotated[Elf64_Word, 12]
-  vd_next: Annotated[Elf64_Word, 16]
+  vd_version: int
+  vd_flags: int
+  vd_ndx: int
+  vd_cnt: int
+  vd_hash: int
+  vd_aux: int
+  vd_next: int
+Elf64_Verdef.register_fields([('vd_version', Elf64_Half, 0), ('vd_flags', Elf64_Half, 2), ('vd_ndx', Elf64_Half, 4), ('vd_cnt', Elf64_Half, 6), ('vd_hash', Elf64_Word, 8), ('vd_aux', Elf64_Word, 12), ('vd_next', Elf64_Word, 16)])
 @c.record
 class Elf32_Verdaux(c.Struct):
   SIZE = 8
-  vda_name: Annotated[Elf32_Word, 0]
-  vda_next: Annotated[Elf32_Word, 4]
+  vda_name: int
+  vda_next: int
+Elf32_Verdaux.register_fields([('vda_name', Elf32_Word, 0), ('vda_next', Elf32_Word, 4)])
 @c.record
 class Elf64_Verdaux(c.Struct):
   SIZE = 8
-  vda_name: Annotated[Elf64_Word, 0]
-  vda_next: Annotated[Elf64_Word, 4]
+  vda_name: int
+  vda_next: int
+Elf64_Verdaux.register_fields([('vda_name', Elf64_Word, 0), ('vda_next', Elf64_Word, 4)])
 @c.record
 class Elf32_Verneed(c.Struct):
   SIZE = 16
-  vn_version: Annotated[Elf32_Half, 0]
-  vn_cnt: Annotated[Elf32_Half, 2]
-  vn_file: Annotated[Elf32_Word, 4]
-  vn_aux: Annotated[Elf32_Word, 8]
-  vn_next: Annotated[Elf32_Word, 12]
+  vn_version: int
+  vn_cnt: int
+  vn_file: int
+  vn_aux: int
+  vn_next: int
+Elf32_Verneed.register_fields([('vn_version', Elf32_Half, 0), ('vn_cnt', Elf32_Half, 2), ('vn_file', Elf32_Word, 4), ('vn_aux', Elf32_Word, 8), ('vn_next', Elf32_Word, 12)])
 @c.record
 class Elf64_Verneed(c.Struct):
   SIZE = 16
-  vn_version: Annotated[Elf64_Half, 0]
-  vn_cnt: Annotated[Elf64_Half, 2]
-  vn_file: Annotated[Elf64_Word, 4]
-  vn_aux: Annotated[Elf64_Word, 8]
-  vn_next: Annotated[Elf64_Word, 12]
+  vn_version: int
+  vn_cnt: int
+  vn_file: int
+  vn_aux: int
+  vn_next: int
+Elf64_Verneed.register_fields([('vn_version', Elf64_Half, 0), ('vn_cnt', Elf64_Half, 2), ('vn_file', Elf64_Word, 4), ('vn_aux', Elf64_Word, 8), ('vn_next', Elf64_Word, 12)])
 @c.record
 class Elf32_Vernaux(c.Struct):
   SIZE = 16
-  vna_hash: Annotated[Elf32_Word, 0]
-  vna_flags: Annotated[Elf32_Half, 4]
-  vna_other: Annotated[Elf32_Half, 6]
-  vna_name: Annotated[Elf32_Word, 8]
-  vna_next: Annotated[Elf32_Word, 12]
+  vna_hash: int
+  vna_flags: int
+  vna_other: int
+  vna_name: int
+  vna_next: int
+Elf32_Vernaux.register_fields([('vna_hash', Elf32_Word, 0), ('vna_flags', Elf32_Half, 4), ('vna_other', Elf32_Half, 6), ('vna_name', Elf32_Word, 8), ('vna_next', Elf32_Word, 12)])
 @c.record
 class Elf64_Vernaux(c.Struct):
   SIZE = 16
-  vna_hash: Annotated[Elf64_Word, 0]
-  vna_flags: Annotated[Elf64_Half, 4]
-  vna_other: Annotated[Elf64_Half, 6]
-  vna_name: Annotated[Elf64_Word, 8]
-  vna_next: Annotated[Elf64_Word, 12]
+  vna_hash: int
+  vna_flags: int
+  vna_other: int
+  vna_name: int
+  vna_next: int
+Elf64_Vernaux.register_fields([('vna_hash', Elf64_Word, 0), ('vna_flags', Elf64_Half, 4), ('vna_other', Elf64_Half, 6), ('vna_name', Elf64_Word, 8), ('vna_next', Elf64_Word, 12)])
 @c.record
 class Elf32_auxv_t(c.Struct):
   SIZE = 8
-  a_type: Annotated[uint32_t, 0]
-  a_un: Annotated[Elf32_auxv_t_a_un, 4]
-uint32_t: TypeAlias = Annotated[int, ctypes.c_uint32]
+  a_type: int
+  a_un: Elf32_auxv_t_a_un
+uint32_t: TypeAlias = ctypes.c_uint32
 @c.record
 class Elf32_auxv_t_a_un(c.Struct):
   SIZE = 4
-  a_val: Annotated[uint32_t, 0]
+  a_val: int
+Elf32_auxv_t_a_un.register_fields([('a_val', uint32_t, 0)])
+Elf32_auxv_t.register_fields([('a_type', uint32_t, 0), ('a_un', Elf32_auxv_t_a_un, 4)])
 @c.record
 class Elf64_auxv_t(c.Struct):
   SIZE = 16
-  a_type: Annotated[uint64_t, 0]
-  a_un: Annotated[Elf64_auxv_t_a_un, 8]
-uint64_t: TypeAlias = Annotated[int, ctypes.c_uint64]
+  a_type: int
+  a_un: Elf64_auxv_t_a_un
+uint64_t: TypeAlias = ctypes.c_uint64
 @c.record
 class Elf64_auxv_t_a_un(c.Struct):
   SIZE = 8
-  a_val: Annotated[uint64_t, 0]
+  a_val: int
+Elf64_auxv_t_a_un.register_fields([('a_val', uint64_t, 0)])
+Elf64_auxv_t.register_fields([('a_type', uint64_t, 0), ('a_un', Elf64_auxv_t_a_un, 8)])
 @c.record
 class Elf32_Nhdr(c.Struct):
   SIZE = 12
-  n_namesz: Annotated[Elf32_Word, 0]
-  n_descsz: Annotated[Elf32_Word, 4]
-  n_type: Annotated[Elf32_Word, 8]
+  n_namesz: int
+  n_descsz: int
+  n_type: int
+Elf32_Nhdr.register_fields([('n_namesz', Elf32_Word, 0), ('n_descsz', Elf32_Word, 4), ('n_type', Elf32_Word, 8)])
 @c.record
 class Elf64_Nhdr(c.Struct):
   SIZE = 12
-  n_namesz: Annotated[Elf64_Word, 0]
-  n_descsz: Annotated[Elf64_Word, 4]
-  n_type: Annotated[Elf64_Word, 8]
+  n_namesz: int
+  n_descsz: int
+  n_type: int
+Elf64_Nhdr.register_fields([('n_namesz', Elf64_Word, 0), ('n_descsz', Elf64_Word, 4), ('n_type', Elf64_Word, 8)])
 @c.record
 class Elf32_Move(c.Struct):
   SIZE = 24
-  m_value: Annotated[Elf32_Xword, 0]
-  m_info: Annotated[Elf32_Word, 8]
-  m_poffset: Annotated[Elf32_Word, 12]
-  m_repeat: Annotated[Elf32_Half, 16]
-  m_stride: Annotated[Elf32_Half, 18]
+  m_value: int
+  m_info: int
+  m_poffset: int
+  m_repeat: int
+  m_stride: int
+Elf32_Move.register_fields([('m_value', Elf32_Xword, 0), ('m_info', Elf32_Word, 8), ('m_poffset', Elf32_Word, 12), ('m_repeat', Elf32_Half, 16), ('m_stride', Elf32_Half, 18)])
 @c.record
 class Elf64_Move(c.Struct):
   SIZE = 32
-  m_value: Annotated[Elf64_Xword, 0]
-  m_info: Annotated[Elf64_Xword, 8]
-  m_poffset: Annotated[Elf64_Xword, 16]
-  m_repeat: Annotated[Elf64_Half, 24]
-  m_stride: Annotated[Elf64_Half, 26]
+  m_value: int
+  m_info: int
+  m_poffset: int
+  m_repeat: int
+  m_stride: int
+Elf64_Move.register_fields([('m_value', Elf64_Xword, 0), ('m_info', Elf64_Xword, 8), ('m_poffset', Elf64_Xword, 16), ('m_repeat', Elf64_Half, 24), ('m_stride', Elf64_Half, 26)])
 @c.record
 class Elf32_gptab(c.Struct):
   SIZE = 8
-  gt_header: Annotated[Elf32_gptab_gt_header, 0]
-  gt_entry: Annotated[Elf32_gptab_gt_entry, 0]
+  gt_header: Elf32_gptab_gt_header
+  gt_entry: Elf32_gptab_gt_entry
 @c.record
 class Elf32_gptab_gt_header(c.Struct):
   SIZE = 8
-  gt_current_g_value: Annotated[Elf32_Word, 0]
-  gt_unused: Annotated[Elf32_Word, 4]
+  gt_current_g_value: int
+  gt_unused: int
+Elf32_gptab_gt_header.register_fields([('gt_current_g_value', Elf32_Word, 0), ('gt_unused', Elf32_Word, 4)])
 @c.record
 class Elf32_gptab_gt_entry(c.Struct):
   SIZE = 8
-  gt_g_value: Annotated[Elf32_Word, 0]
-  gt_bytes: Annotated[Elf32_Word, 4]
+  gt_g_value: int
+  gt_bytes: int
+Elf32_gptab_gt_entry.register_fields([('gt_g_value', Elf32_Word, 0), ('gt_bytes', Elf32_Word, 4)])
+Elf32_gptab.register_fields([('gt_header', Elf32_gptab_gt_header, 0), ('gt_entry', Elf32_gptab_gt_entry, 0)])
 @c.record
 class Elf32_RegInfo(c.Struct):
   SIZE = 24
-  ri_gprmask: Annotated[Elf32_Word, 0]
-  ri_cprmask: Annotated[c.Array[Elf32_Word, Literal[4]], 4]
-  ri_gp_value: Annotated[Elf32_Sword, 20]
+  ri_gprmask: int
+  ri_cprmask: c.Array[ctypes.c_uint32, Literal[4]]
+  ri_gp_value: int
+Elf32_RegInfo.register_fields([('ri_gprmask', Elf32_Word, 0), ('ri_cprmask', c.Array[Elf32_Word, Literal[4]], 4), ('ri_gp_value', Elf32_Sword, 20)])
 @c.record
 class Elf_Options(c.Struct):
   SIZE = 8
-  kind: Annotated[Annotated[int, ctypes.c_ubyte], 0]
-  size: Annotated[Annotated[int, ctypes.c_ubyte], 1]
-  section: Annotated[Elf32_Section, 2]
-  info: Annotated[Elf32_Word, 4]
+  kind: int
+  size: int
+  section: int
+  info: int
+Elf_Options.register_fields([('kind', ctypes.c_ubyte, 0), ('size', ctypes.c_ubyte, 1), ('section', Elf32_Section, 2), ('info', Elf32_Word, 4)])
 @c.record
 class Elf_Options_Hw(c.Struct):
   SIZE = 8
-  hwp_flags1: Annotated[Elf32_Word, 0]
-  hwp_flags2: Annotated[Elf32_Word, 4]
+  hwp_flags1: int
+  hwp_flags2: int
+Elf_Options_Hw.register_fields([('hwp_flags1', Elf32_Word, 0), ('hwp_flags2', Elf32_Word, 4)])
 @c.record
 class Elf32_Lib(c.Struct):
   SIZE = 20
-  l_name: Annotated[Elf32_Word, 0]
-  l_time_stamp: Annotated[Elf32_Word, 4]
-  l_checksum: Annotated[Elf32_Word, 8]
-  l_version: Annotated[Elf32_Word, 12]
-  l_flags: Annotated[Elf32_Word, 16]
+  l_name: int
+  l_time_stamp: int
+  l_checksum: int
+  l_version: int
+  l_flags: int
+Elf32_Lib.register_fields([('l_name', Elf32_Word, 0), ('l_time_stamp', Elf32_Word, 4), ('l_checksum', Elf32_Word, 8), ('l_version', Elf32_Word, 12), ('l_flags', Elf32_Word, 16)])
 @c.record
 class Elf64_Lib(c.Struct):
   SIZE = 20
-  l_name: Annotated[Elf64_Word, 0]
-  l_time_stamp: Annotated[Elf64_Word, 4]
-  l_checksum: Annotated[Elf64_Word, 8]
-  l_version: Annotated[Elf64_Word, 12]
-  l_flags: Annotated[Elf64_Word, 16]
-Elf32_Conflict: TypeAlias = Annotated[int, ctypes.c_uint32]
+  l_name: int
+  l_time_stamp: int
+  l_checksum: int
+  l_version: int
+  l_flags: int
+Elf64_Lib.register_fields([('l_name', Elf64_Word, 0), ('l_time_stamp', Elf64_Word, 4), ('l_checksum', Elf64_Word, 8), ('l_version', Elf64_Word, 12), ('l_flags', Elf64_Word, 16)])
+Elf32_Conflict: TypeAlias = ctypes.c_uint32
 @c.record
 class Elf_MIPS_ABIFlags_v0(c.Struct):
   SIZE = 24
-  version: Annotated[Elf32_Half, 0]
-  isa_level: Annotated[Annotated[int, ctypes.c_ubyte], 2]
-  isa_rev: Annotated[Annotated[int, ctypes.c_ubyte], 3]
-  gpr_size: Annotated[Annotated[int, ctypes.c_ubyte], 4]
-  cpr1_size: Annotated[Annotated[int, ctypes.c_ubyte], 5]
-  cpr2_size: Annotated[Annotated[int, ctypes.c_ubyte], 6]
-  fp_abi: Annotated[Annotated[int, ctypes.c_ubyte], 7]
-  isa_ext: Annotated[Elf32_Word, 8]
-  ases: Annotated[Elf32_Word, 12]
-  flags1: Annotated[Elf32_Word, 16]
-  flags2: Annotated[Elf32_Word, 20]
-class _anonenum0(Annotated[int, ctypes.c_uint32], c.Enum): pass
-Val_GNU_MIPS_ABI_FP_ANY = _anonenum0.define('Val_GNU_MIPS_ABI_FP_ANY', 0)
-Val_GNU_MIPS_ABI_FP_DOUBLE = _anonenum0.define('Val_GNU_MIPS_ABI_FP_DOUBLE', 1)
-Val_GNU_MIPS_ABI_FP_SINGLE = _anonenum0.define('Val_GNU_MIPS_ABI_FP_SINGLE', 2)
-Val_GNU_MIPS_ABI_FP_SOFT = _anonenum0.define('Val_GNU_MIPS_ABI_FP_SOFT', 3)
-Val_GNU_MIPS_ABI_FP_OLD_64 = _anonenum0.define('Val_GNU_MIPS_ABI_FP_OLD_64', 4)
-Val_GNU_MIPS_ABI_FP_XX = _anonenum0.define('Val_GNU_MIPS_ABI_FP_XX', 5)
-Val_GNU_MIPS_ABI_FP_64 = _anonenum0.define('Val_GNU_MIPS_ABI_FP_64', 6)
-Val_GNU_MIPS_ABI_FP_64A = _anonenum0.define('Val_GNU_MIPS_ABI_FP_64A', 7)
-Val_GNU_MIPS_ABI_FP_MAX = _anonenum0.define('Val_GNU_MIPS_ABI_FP_MAX', 7)
-
-ssize_t: TypeAlias = Annotated[int, ctypes.c_int64]
-gid_t: TypeAlias = Annotated[int, ctypes.c_uint32]
-uid_t: TypeAlias = Annotated[int, ctypes.c_uint32]
-useconds_t: TypeAlias = Annotated[int, ctypes.c_uint32]
-pid_t: TypeAlias = Annotated[int, ctypes.c_int32]
-intptr_t: TypeAlias = Annotated[int, ctypes.c_int64]
-socklen_t: TypeAlias = Annotated[int, ctypes.c_uint32]
-@dll.bind
-def access(__name:c.POINTER[Annotated[bytes, ctypes.c_char]], __type:Annotated[int, ctypes.c_int32]) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def faccessat(__fd:Annotated[int, ctypes.c_int32], __file:c.POINTER[Annotated[bytes, ctypes.c_char]], __type:Annotated[int, ctypes.c_int32], __flag:Annotated[int, ctypes.c_int32]) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def lseek(__fd:Annotated[int, ctypes.c_int32], __offset:Annotated[int, ctypes.c_int64], __whence:Annotated[int, ctypes.c_int32]) -> Annotated[int, ctypes.c_int64]: ...
-@dll.bind
-def close(__fd:Annotated[int, ctypes.c_int32]) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def closefrom(__lowfd:Annotated[int, ctypes.c_int32]) -> None: ...
-@dll.bind
-def read(__fd:Annotated[int, ctypes.c_int32], __buf:ctypes.c_void_p, __nbytes:size_t) -> ssize_t: ...
-@dll.bind
-def write(__fd:Annotated[int, ctypes.c_int32], __buf:ctypes.c_void_p, __n:size_t) -> ssize_t: ...
-@dll.bind
-def pread(__fd:Annotated[int, ctypes.c_int32], __buf:ctypes.c_void_p, __nbytes:size_t, __offset:Annotated[int, ctypes.c_int64]) -> ssize_t: ...
-@dll.bind
-def pwrite(__fd:Annotated[int, ctypes.c_int32], __buf:ctypes.c_void_p, __n:size_t, __offset:Annotated[int, ctypes.c_int64]) -> ssize_t: ...
-@dll.bind
-def pipe(__pipedes:c.Array[Annotated[int, ctypes.c_int32], Literal[2]]) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def alarm(__seconds:Annotated[int, ctypes.c_uint32]) -> Annotated[int, ctypes.c_uint32]: ...
-@dll.bind
-def sleep(__seconds:Annotated[int, ctypes.c_uint32]) -> Annotated[int, ctypes.c_uint32]: ...
-__useconds_t: TypeAlias = Annotated[int, ctypes.c_uint32]
-@dll.bind
-def ualarm(__value:Annotated[int, ctypes.c_uint32], __interval:Annotated[int, ctypes.c_uint32]) -> Annotated[int, ctypes.c_uint32]: ...
-@dll.bind
-def usleep(__useconds:Annotated[int, ctypes.c_uint32]) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def pause() -> Annotated[int, ctypes.c_int32]: ...
-__uid_t: TypeAlias = Annotated[int, ctypes.c_uint32]
-__gid_t: TypeAlias = Annotated[int, ctypes.c_uint32]
-@dll.bind
-def chown(__file:c.POINTER[Annotated[bytes, ctypes.c_char]], __owner:Annotated[int, ctypes.c_uint32], __group:Annotated[int, ctypes.c_uint32]) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def fchown(__fd:Annotated[int, ctypes.c_int32], __owner:Annotated[int, ctypes.c_uint32], __group:Annotated[int, ctypes.c_uint32]) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def lchown(__file:c.POINTER[Annotated[bytes, ctypes.c_char]], __owner:Annotated[int, ctypes.c_uint32], __group:Annotated[int, ctypes.c_uint32]) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def fchownat(__fd:Annotated[int, ctypes.c_int32], __file:c.POINTER[Annotated[bytes, ctypes.c_char]], __owner:Annotated[int, ctypes.c_uint32], __group:Annotated[int, ctypes.c_uint32], __flag:Annotated[int, ctypes.c_int32]) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def chdir(__path:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def fchdir(__fd:Annotated[int, ctypes.c_int32]) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def getcwd(__buf:c.POINTER[Annotated[bytes, ctypes.c_char]], __size:size_t) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
-@dll.bind
-def getwd(__buf:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
-@dll.bind
-def dup(__fd:Annotated[int, ctypes.c_int32]) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def dup2(__fd:Annotated[int, ctypes.c_int32], __fd2:Annotated[int, ctypes.c_int32]) -> Annotated[int, ctypes.c_int32]: ...
-try: __environ = c.POINTER[c.POINTER[Annotated[bytes, ctypes.c_char]]].in_dll(dll, '__environ') # type: ignore
+  version: int
+  isa_level: int
+  isa_rev: int
+  gpr_size: int
+  cpr1_size: int
+  cpr2_size: int
+  fp_abi: int
+  isa_ext: int
+  ases: int
+  flags1: int
+  flags2: int
+Elf_MIPS_ABIFlags_v0.register_fields([('version', Elf32_Half, 0), ('isa_level', ctypes.c_ubyte, 2), ('isa_rev', ctypes.c_ubyte, 3), ('gpr_size', ctypes.c_ubyte, 4), ('cpr1_size', ctypes.c_ubyte, 5), ('cpr2_size', ctypes.c_ubyte, 6), ('fp_abi', ctypes.c_ubyte, 7), ('isa_ext', Elf32_Word, 8), ('ases', Elf32_Word, 12), ('flags1', Elf32_Word, 16), ('flags2', Elf32_Word, 20)])
+_anonenum0: dict[int, str] = {(Val_GNU_MIPS_ABI_FP_ANY:=0): 'Val_GNU_MIPS_ABI_FP_ANY', (Val_GNU_MIPS_ABI_FP_DOUBLE:=1): 'Val_GNU_MIPS_ABI_FP_DOUBLE', (Val_GNU_MIPS_ABI_FP_SINGLE:=2): 'Val_GNU_MIPS_ABI_FP_SINGLE', (Val_GNU_MIPS_ABI_FP_SOFT:=3): 'Val_GNU_MIPS_ABI_FP_SOFT', (Val_GNU_MIPS_ABI_FP_OLD_64:=4): 'Val_GNU_MIPS_ABI_FP_OLD_64', (Val_GNU_MIPS_ABI_FP_XX:=5): 'Val_GNU_MIPS_ABI_FP_XX', (Val_GNU_MIPS_ABI_FP_64:=6): 'Val_GNU_MIPS_ABI_FP_64', (Val_GNU_MIPS_ABI_FP_64A:=7): 'Val_GNU_MIPS_ABI_FP_64A', (Val_GNU_MIPS_ABI_FP_MAX:=7): 'Val_GNU_MIPS_ABI_FP_MAX'}
+ssize_t: TypeAlias = ctypes.c_int64
+gid_t: TypeAlias = ctypes.c_uint32
+uid_t: TypeAlias = ctypes.c_uint32
+useconds_t: TypeAlias = ctypes.c_uint32
+pid_t: TypeAlias = ctypes.c_int32
+intptr_t: TypeAlias = ctypes.c_int64
+socklen_t: TypeAlias = ctypes.c_uint32
+@dll.bind(ctypes.c_int32, c.POINTER[ctypes.c_char], ctypes.c_int32)
+def access(__name:c.POINTER[ctypes.c_char], __type:int) -> int: ...
+@dll.bind(ctypes.c_int32, ctypes.c_int32, c.POINTER[ctypes.c_char], ctypes.c_int32, ctypes.c_int32)
+def faccessat(__fd:int, __file:c.POINTER[ctypes.c_char], __type:int, __flag:int) -> int: ...
+@dll.bind(ctypes.c_int64, ctypes.c_int32, ctypes.c_int64, ctypes.c_int32)
+def lseek(__fd:int, __offset:ctypes.c_int64, __whence:int) -> ctypes.c_int64: ...
+@dll.bind(ctypes.c_int32, ctypes.c_int32)
+def close(__fd:int) -> int: ...
+@dll.bind(None, ctypes.c_int32)
+def closefrom(__lowfd:int) -> None: ...
+@dll.bind(ssize_t, ctypes.c_int32, ctypes.c_void_p, size_t)
+def read(__fd:int, __buf:ctypes.c_void_p, __nbytes:size_t) -> ssize_t: ...
+@dll.bind(ssize_t, ctypes.c_int32, ctypes.c_void_p, size_t)
+def write(__fd:int, __buf:ctypes.c_void_p, __n:size_t) -> ssize_t: ...
+@dll.bind(ssize_t, ctypes.c_int32, ctypes.c_void_p, size_t, ctypes.c_int64)
+def pread(__fd:int, __buf:ctypes.c_void_p, __nbytes:size_t, __offset:ctypes.c_int64) -> ssize_t: ...
+@dll.bind(ssize_t, ctypes.c_int32, ctypes.c_void_p, size_t, ctypes.c_int64)
+def pwrite(__fd:int, __buf:ctypes.c_void_p, __n:size_t, __offset:ctypes.c_int64) -> ssize_t: ...
+@dll.bind(ctypes.c_int32, c.Array[ctypes.c_int32, Literal[2]])
+def pipe(__pipedes:c.Array[ctypes.c_int32, Literal[2]]) -> int: ...
+@dll.bind(ctypes.c_uint32, ctypes.c_uint32)
+def alarm(__seconds:int) -> int: ...
+@dll.bind(ctypes.c_uint32, ctypes.c_uint32)
+def sleep(__seconds:int) -> int: ...
+__useconds_t: TypeAlias = ctypes.c_uint32
+@dll.bind(ctypes.c_uint32, ctypes.c_uint32, ctypes.c_uint32)
+def ualarm(__value:ctypes.c_uint32, __interval:ctypes.c_uint32) -> ctypes.c_uint32: ...
+@dll.bind(ctypes.c_int32, ctypes.c_uint32)
+def usleep(__useconds:ctypes.c_uint32) -> int: ...
+@dll.bind(ctypes.c_int32)
+def pause() -> int: ...
+__uid_t: TypeAlias = ctypes.c_uint32
+__gid_t: TypeAlias = ctypes.c_uint32
+@dll.bind(ctypes.c_int32, c.POINTER[ctypes.c_char], ctypes.c_uint32, ctypes.c_uint32)
+def chown(__file:c.POINTER[ctypes.c_char], __owner:ctypes.c_uint32, __group:ctypes.c_uint32) -> int: ...
+@dll.bind(ctypes.c_int32, ctypes.c_int32, ctypes.c_uint32, ctypes.c_uint32)
+def fchown(__fd:int, __owner:ctypes.c_uint32, __group:ctypes.c_uint32) -> int: ...
+@dll.bind(ctypes.c_int32, c.POINTER[ctypes.c_char], ctypes.c_uint32, ctypes.c_uint32)
+def lchown(__file:c.POINTER[ctypes.c_char], __owner:ctypes.c_uint32, __group:ctypes.c_uint32) -> int: ...
+@dll.bind(ctypes.c_int32, ctypes.c_int32, c.POINTER[ctypes.c_char], ctypes.c_uint32, ctypes.c_uint32, ctypes.c_int32)
+def fchownat(__fd:int, __file:c.POINTER[ctypes.c_char], __owner:ctypes.c_uint32, __group:ctypes.c_uint32, __flag:int) -> int: ...
+@dll.bind(ctypes.c_int32, c.POINTER[ctypes.c_char])
+def chdir(__path:c.POINTER[ctypes.c_char]) -> int: ...
+@dll.bind(ctypes.c_int32, ctypes.c_int32)
+def fchdir(__fd:int) -> int: ...
+@dll.bind(c.POINTER[ctypes.c_char], c.POINTER[ctypes.c_char], size_t)
+def getcwd(__buf:c.POINTER[ctypes.c_char], __size:size_t) -> c.POINTER[ctypes.c_char]: ...
+@dll.bind(c.POINTER[ctypes.c_char], c.POINTER[ctypes.c_char])
+def getwd(__buf:c.POINTER[ctypes.c_char]) -> c.POINTER[ctypes.c_char]: ...
+@dll.bind(ctypes.c_int32, ctypes.c_int32)
+def dup(__fd:int) -> int: ...
+@dll.bind(ctypes.c_int32, ctypes.c_int32, ctypes.c_int32)
+def dup2(__fd:int, __fd2:int) -> int: ...
+try: __environ = c.POINTER[c.POINTER[ctypes.c_char]].in_dll(dll, '__environ') # type: ignore
 except (ValueError,AttributeError): pass
-@dll.bind
-def execve(__path:c.POINTER[Annotated[bytes, ctypes.c_char]], __argv:c.Array[c.POINTER[Annotated[bytes, ctypes.c_char]], Literal[0]], __envp:c.Array[c.POINTER[Annotated[bytes, ctypes.c_char]], Literal[0]]) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def fexecve(__fd:Annotated[int, ctypes.c_int32], __argv:c.Array[c.POINTER[Annotated[bytes, ctypes.c_char]], Literal[0]], __envp:c.Array[c.POINTER[Annotated[bytes, ctypes.c_char]], Literal[0]]) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def execv(__path:c.POINTER[Annotated[bytes, ctypes.c_char]], __argv:c.Array[c.POINTER[Annotated[bytes, ctypes.c_char]], Literal[0]]) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def execle(__path:c.POINTER[Annotated[bytes, ctypes.c_char]], __arg:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def execl(__path:c.POINTER[Annotated[bytes, ctypes.c_char]], __arg:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def execvp(__file:c.POINTER[Annotated[bytes, ctypes.c_char]], __argv:c.Array[c.POINTER[Annotated[bytes, ctypes.c_char]], Literal[0]]) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def execlp(__file:c.POINTER[Annotated[bytes, ctypes.c_char]], __arg:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def nice(__inc:Annotated[int, ctypes.c_int32]) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def _exit(__status:Annotated[int, ctypes.c_int32]) -> None: ...
-@dll.bind
-def pathconf(__path:c.POINTER[Annotated[bytes, ctypes.c_char]], __name:Annotated[int, ctypes.c_int32]) -> Annotated[int, ctypes.c_int64]: ...
-@dll.bind
-def fpathconf(__fd:Annotated[int, ctypes.c_int32], __name:Annotated[int, ctypes.c_int32]) -> Annotated[int, ctypes.c_int64]: ...
-@dll.bind
-def sysconf(__name:Annotated[int, ctypes.c_int32]) -> Annotated[int, ctypes.c_int64]: ...
-@dll.bind
-def confstr(__name:Annotated[int, ctypes.c_int32], __buf:c.POINTER[Annotated[bytes, ctypes.c_char]], __len:size_t) -> size_t: ...
-__pid_t: TypeAlias = Annotated[int, ctypes.c_int32]
-@dll.bind
-def getpid() -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def getppid() -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def getpgrp() -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def __getpgid(__pid:Annotated[int, ctypes.c_int32]) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def getpgid(__pid:Annotated[int, ctypes.c_int32]) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def setpgid(__pid:Annotated[int, ctypes.c_int32], __pgid:Annotated[int, ctypes.c_int32]) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def setpgrp() -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def setsid() -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def getsid(__pid:Annotated[int, ctypes.c_int32]) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def getuid() -> Annotated[int, ctypes.c_uint32]: ...
-@dll.bind
-def geteuid() -> Annotated[int, ctypes.c_uint32]: ...
-@dll.bind
-def getgid() -> Annotated[int, ctypes.c_uint32]: ...
-@dll.bind
-def getegid() -> Annotated[int, ctypes.c_uint32]: ...
-@dll.bind
-def getgroups(__size:Annotated[int, ctypes.c_int32], __list:c.Array[Annotated[int, ctypes.c_uint32], Literal[0]]) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def setuid(__uid:Annotated[int, ctypes.c_uint32]) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def setreuid(__ruid:Annotated[int, ctypes.c_uint32], __euid:Annotated[int, ctypes.c_uint32]) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def seteuid(__uid:Annotated[int, ctypes.c_uint32]) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def setgid(__gid:Annotated[int, ctypes.c_uint32]) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def setregid(__rgid:Annotated[int, ctypes.c_uint32], __egid:Annotated[int, ctypes.c_uint32]) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def setegid(__gid:Annotated[int, ctypes.c_uint32]) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def fork() -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def vfork() -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def ttyname(__fd:Annotated[int, ctypes.c_int32]) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
-@dll.bind
-def ttyname_r(__fd:Annotated[int, ctypes.c_int32], __buf:c.POINTER[Annotated[bytes, ctypes.c_char]], __buflen:size_t) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def isatty(__fd:Annotated[int, ctypes.c_int32]) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def ttyslot() -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def link(__from:c.POINTER[Annotated[bytes, ctypes.c_char]], __to:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def linkat(__fromfd:Annotated[int, ctypes.c_int32], __from:c.POINTER[Annotated[bytes, ctypes.c_char]], __tofd:Annotated[int, ctypes.c_int32], __to:c.POINTER[Annotated[bytes, ctypes.c_char]], __flags:Annotated[int, ctypes.c_int32]) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def symlink(__from:c.POINTER[Annotated[bytes, ctypes.c_char]], __to:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def readlink(__path:c.POINTER[Annotated[bytes, ctypes.c_char]], __buf:c.POINTER[Annotated[bytes, ctypes.c_char]], __len:size_t) -> ssize_t: ...
-@dll.bind
-def symlinkat(__from:c.POINTER[Annotated[bytes, ctypes.c_char]], __tofd:Annotated[int, ctypes.c_int32], __to:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def readlinkat(__fd:Annotated[int, ctypes.c_int32], __path:c.POINTER[Annotated[bytes, ctypes.c_char]], __buf:c.POINTER[Annotated[bytes, ctypes.c_char]], __len:size_t) -> ssize_t: ...
-@dll.bind
-def unlink(__name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def unlinkat(__fd:Annotated[int, ctypes.c_int32], __name:c.POINTER[Annotated[bytes, ctypes.c_char]], __flag:Annotated[int, ctypes.c_int32]) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def rmdir(__path:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def tcgetpgrp(__fd:Annotated[int, ctypes.c_int32]) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def tcsetpgrp(__fd:Annotated[int, ctypes.c_int32], __pgrp_id:Annotated[int, ctypes.c_int32]) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def getlogin() -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
-@dll.bind
-def getlogin_r(__name:c.POINTER[Annotated[bytes, ctypes.c_char]], __name_len:size_t) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def setlogin(__name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def gethostname(__name:c.POINTER[Annotated[bytes, ctypes.c_char]], __len:size_t) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def sethostname(__name:c.POINTER[Annotated[bytes, ctypes.c_char]], __len:size_t) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def sethostid(__id:Annotated[int, ctypes.c_int64]) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def getdomainname(__name:c.POINTER[Annotated[bytes, ctypes.c_char]], __len:size_t) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def setdomainname(__name:c.POINTER[Annotated[bytes, ctypes.c_char]], __len:size_t) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def vhangup() -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def revoke(__file:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def profil(__sample_buffer:c.POINTER[Annotated[int, ctypes.c_uint16]], __size:size_t, __offset:size_t, __scale:Annotated[int, ctypes.c_uint32]) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def acct(__name:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def getusershell() -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
-@dll.bind
+@dll.bind(ctypes.c_int32, c.POINTER[ctypes.c_char], c.Array[c.POINTER[ctypes.c_char], Literal[0]], c.Array[c.POINTER[ctypes.c_char], Literal[0]])
+def execve(__path:c.POINTER[ctypes.c_char], __argv:c.Array[c.POINTER[ctypes.c_char], Literal[0]], __envp:c.Array[c.POINTER[ctypes.c_char], Literal[0]]) -> int: ...
+@dll.bind(ctypes.c_int32, ctypes.c_int32, c.Array[c.POINTER[ctypes.c_char], Literal[0]], c.Array[c.POINTER[ctypes.c_char], Literal[0]])
+def fexecve(__fd:int, __argv:c.Array[c.POINTER[ctypes.c_char], Literal[0]], __envp:c.Array[c.POINTER[ctypes.c_char], Literal[0]]) -> int: ...
+@dll.bind(ctypes.c_int32, c.POINTER[ctypes.c_char], c.Array[c.POINTER[ctypes.c_char], Literal[0]])
+def execv(__path:c.POINTER[ctypes.c_char], __argv:c.Array[c.POINTER[ctypes.c_char], Literal[0]]) -> int: ...
+@dll.bind(ctypes.c_int32, c.POINTER[ctypes.c_char], c.POINTER[ctypes.c_char])
+def execle(__path:c.POINTER[ctypes.c_char], __arg:c.POINTER[ctypes.c_char]) -> int: ...
+@dll.bind(ctypes.c_int32, c.POINTER[ctypes.c_char], c.POINTER[ctypes.c_char])
+def execl(__path:c.POINTER[ctypes.c_char], __arg:c.POINTER[ctypes.c_char]) -> int: ...
+@dll.bind(ctypes.c_int32, c.POINTER[ctypes.c_char], c.Array[c.POINTER[ctypes.c_char], Literal[0]])
+def execvp(__file:c.POINTER[ctypes.c_char], __argv:c.Array[c.POINTER[ctypes.c_char], Literal[0]]) -> int: ...
+@dll.bind(ctypes.c_int32, c.POINTER[ctypes.c_char], c.POINTER[ctypes.c_char])
+def execlp(__file:c.POINTER[ctypes.c_char], __arg:c.POINTER[ctypes.c_char]) -> int: ...
+@dll.bind(ctypes.c_int32, ctypes.c_int32)
+def nice(__inc:int) -> int: ...
+@dll.bind(None, ctypes.c_int32)
+def _exit(__status:int) -> None: ...
+@dll.bind(ctypes.c_int64, c.POINTER[ctypes.c_char], ctypes.c_int32)
+def pathconf(__path:c.POINTER[ctypes.c_char], __name:int) -> int: ...
+@dll.bind(ctypes.c_int64, ctypes.c_int32, ctypes.c_int32)
+def fpathconf(__fd:int, __name:int) -> int: ...
+@dll.bind(ctypes.c_int64, ctypes.c_int32)
+def sysconf(__name:int) -> int: ...
+@dll.bind(size_t, ctypes.c_int32, c.POINTER[ctypes.c_char], size_t)
+def confstr(__name:int, __buf:c.POINTER[ctypes.c_char], __len:size_t) -> size_t: ...
+__pid_t: TypeAlias = ctypes.c_int32
+@dll.bind(ctypes.c_int32)
+def getpid() -> ctypes.c_int32: ...
+@dll.bind(ctypes.c_int32)
+def getppid() -> ctypes.c_int32: ...
+@dll.bind(ctypes.c_int32)
+def getpgrp() -> ctypes.c_int32: ...
+@dll.bind(ctypes.c_int32, ctypes.c_int32)
+def __getpgid(__pid:ctypes.c_int32) -> ctypes.c_int32: ...
+@dll.bind(ctypes.c_int32, ctypes.c_int32)
+def getpgid(__pid:ctypes.c_int32) -> ctypes.c_int32: ...
+@dll.bind(ctypes.c_int32, ctypes.c_int32, ctypes.c_int32)
+def setpgid(__pid:ctypes.c_int32, __pgid:ctypes.c_int32) -> int: ...
+@dll.bind(ctypes.c_int32)
+def setpgrp() -> int: ...
+@dll.bind(ctypes.c_int32)
+def setsid() -> ctypes.c_int32: ...
+@dll.bind(ctypes.c_int32, ctypes.c_int32)
+def getsid(__pid:ctypes.c_int32) -> ctypes.c_int32: ...
+@dll.bind(ctypes.c_uint32)
+def getuid() -> ctypes.c_uint32: ...
+@dll.bind(ctypes.c_uint32)
+def geteuid() -> ctypes.c_uint32: ...
+@dll.bind(ctypes.c_uint32)
+def getgid() -> ctypes.c_uint32: ...
+@dll.bind(ctypes.c_uint32)
+def getegid() -> ctypes.c_uint32: ...
+@dll.bind(ctypes.c_int32, ctypes.c_int32, c.Array[ctypes.c_uint32, Literal[0]])
+def getgroups(__size:int, __list:c.Array[ctypes.c_uint32, Literal[0]]) -> int: ...
+@dll.bind(ctypes.c_int32, ctypes.c_uint32)
+def setuid(__uid:ctypes.c_uint32) -> int: ...
+@dll.bind(ctypes.c_int32, ctypes.c_uint32, ctypes.c_uint32)
+def setreuid(__ruid:ctypes.c_uint32, __euid:ctypes.c_uint32) -> int: ...
+@dll.bind(ctypes.c_int32, ctypes.c_uint32)
+def seteuid(__uid:ctypes.c_uint32) -> int: ...
+@dll.bind(ctypes.c_int32, ctypes.c_uint32)
+def setgid(__gid:ctypes.c_uint32) -> int: ...
+@dll.bind(ctypes.c_int32, ctypes.c_uint32, ctypes.c_uint32)
+def setregid(__rgid:ctypes.c_uint32, __egid:ctypes.c_uint32) -> int: ...
+@dll.bind(ctypes.c_int32, ctypes.c_uint32)
+def setegid(__gid:ctypes.c_uint32) -> int: ...
+@dll.bind(ctypes.c_int32)
+def fork() -> ctypes.c_int32: ...
+@dll.bind(ctypes.c_int32)
+def vfork() -> int: ...
+@dll.bind(c.POINTER[ctypes.c_char], ctypes.c_int32)
+def ttyname(__fd:int) -> c.POINTER[ctypes.c_char]: ...
+@dll.bind(ctypes.c_int32, ctypes.c_int32, c.POINTER[ctypes.c_char], size_t)
+def ttyname_r(__fd:int, __buf:c.POINTER[ctypes.c_char], __buflen:size_t) -> int: ...
+@dll.bind(ctypes.c_int32, ctypes.c_int32)
+def isatty(__fd:int) -> int: ...
+@dll.bind(ctypes.c_int32)
+def ttyslot() -> int: ...
+@dll.bind(ctypes.c_int32, c.POINTER[ctypes.c_char], c.POINTER[ctypes.c_char])
+def link(__from:c.POINTER[ctypes.c_char], __to:c.POINTER[ctypes.c_char]) -> int: ...
+@dll.bind(ctypes.c_int32, ctypes.c_int32, c.POINTER[ctypes.c_char], ctypes.c_int32, c.POINTER[ctypes.c_char], ctypes.c_int32)
+def linkat(__fromfd:int, __from:c.POINTER[ctypes.c_char], __tofd:int, __to:c.POINTER[ctypes.c_char], __flags:int) -> int: ...
+@dll.bind(ctypes.c_int32, c.POINTER[ctypes.c_char], c.POINTER[ctypes.c_char])
+def symlink(__from:c.POINTER[ctypes.c_char], __to:c.POINTER[ctypes.c_char]) -> int: ...
+@dll.bind(ssize_t, c.POINTER[ctypes.c_char], c.POINTER[ctypes.c_char], size_t)
+def readlink(__path:c.POINTER[ctypes.c_char], __buf:c.POINTER[ctypes.c_char], __len:size_t) -> ssize_t: ...
+@dll.bind(ctypes.c_int32, c.POINTER[ctypes.c_char], ctypes.c_int32, c.POINTER[ctypes.c_char])
+def symlinkat(__from:c.POINTER[ctypes.c_char], __tofd:int, __to:c.POINTER[ctypes.c_char]) -> int: ...
+@dll.bind(ssize_t, ctypes.c_int32, c.POINTER[ctypes.c_char], c.POINTER[ctypes.c_char], size_t)
+def readlinkat(__fd:int, __path:c.POINTER[ctypes.c_char], __buf:c.POINTER[ctypes.c_char], __len:size_t) -> ssize_t: ...
+@dll.bind(ctypes.c_int32, c.POINTER[ctypes.c_char])
+def unlink(__name:c.POINTER[ctypes.c_char]) -> int: ...
+@dll.bind(ctypes.c_int32, ctypes.c_int32, c.POINTER[ctypes.c_char], ctypes.c_int32)
+def unlinkat(__fd:int, __name:c.POINTER[ctypes.c_char], __flag:int) -> int: ...
+@dll.bind(ctypes.c_int32, c.POINTER[ctypes.c_char])
+def rmdir(__path:c.POINTER[ctypes.c_char]) -> int: ...
+@dll.bind(ctypes.c_int32, ctypes.c_int32)
+def tcgetpgrp(__fd:int) -> ctypes.c_int32: ...
+@dll.bind(ctypes.c_int32, ctypes.c_int32, ctypes.c_int32)
+def tcsetpgrp(__fd:int, __pgrp_id:ctypes.c_int32) -> int: ...
+@dll.bind(c.POINTER[ctypes.c_char])
+def getlogin() -> c.POINTER[ctypes.c_char]: ...
+@dll.bind(ctypes.c_int32, c.POINTER[ctypes.c_char], size_t)
+def getlogin_r(__name:c.POINTER[ctypes.c_char], __name_len:size_t) -> int: ...
+@dll.bind(ctypes.c_int32, c.POINTER[ctypes.c_char])
+def setlogin(__name:c.POINTER[ctypes.c_char]) -> int: ...
+@dll.bind(ctypes.c_int32, c.POINTER[ctypes.c_char], size_t)
+def gethostname(__name:c.POINTER[ctypes.c_char], __len:size_t) -> int: ...
+@dll.bind(ctypes.c_int32, c.POINTER[ctypes.c_char], size_t)
+def sethostname(__name:c.POINTER[ctypes.c_char], __len:size_t) -> int: ...
+@dll.bind(ctypes.c_int32, ctypes.c_int64)
+def sethostid(__id:int) -> int: ...
+@dll.bind(ctypes.c_int32, c.POINTER[ctypes.c_char], size_t)
+def getdomainname(__name:c.POINTER[ctypes.c_char], __len:size_t) -> int: ...
+@dll.bind(ctypes.c_int32, c.POINTER[ctypes.c_char], size_t)
+def setdomainname(__name:c.POINTER[ctypes.c_char], __len:size_t) -> int: ...
+@dll.bind(ctypes.c_int32)
+def vhangup() -> int: ...
+@dll.bind(ctypes.c_int32, c.POINTER[ctypes.c_char])
+def revoke(__file:c.POINTER[ctypes.c_char]) -> int: ...
+@dll.bind(ctypes.c_int32, c.POINTER[ctypes.c_uint16], size_t, size_t, ctypes.c_uint32)
+def profil(__sample_buffer:c.POINTER[ctypes.c_uint16], __size:size_t, __offset:size_t, __scale:int) -> int: ...
+@dll.bind(ctypes.c_int32, c.POINTER[ctypes.c_char])
+def acct(__name:c.POINTER[ctypes.c_char]) -> int: ...
+@dll.bind(c.POINTER[ctypes.c_char])
+def getusershell() -> c.POINTER[ctypes.c_char]: ...
+@dll.bind(None)
 def endusershell() -> None: ...
-@dll.bind
+@dll.bind(None)
 def setusershell() -> None: ...
-@dll.bind
-def daemon(__nochdir:Annotated[int, ctypes.c_int32], __noclose:Annotated[int, ctypes.c_int32]) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def chroot(__path:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def getpass(__prompt:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
-@dll.bind
-def fsync(__fd:Annotated[int, ctypes.c_int32]) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def gethostid() -> Annotated[int, ctypes.c_int64]: ...
-@dll.bind
+@dll.bind(ctypes.c_int32, ctypes.c_int32, ctypes.c_int32)
+def daemon(__nochdir:int, __noclose:int) -> int: ...
+@dll.bind(ctypes.c_int32, c.POINTER[ctypes.c_char])
+def chroot(__path:c.POINTER[ctypes.c_char]) -> int: ...
+@dll.bind(c.POINTER[ctypes.c_char], c.POINTER[ctypes.c_char])
+def getpass(__prompt:c.POINTER[ctypes.c_char]) -> c.POINTER[ctypes.c_char]: ...
+@dll.bind(ctypes.c_int32, ctypes.c_int32)
+def fsync(__fd:int) -> int: ...
+@dll.bind(ctypes.c_int64)
+def gethostid() -> int: ...
+@dll.bind(None)
 def sync() -> None: ...
-@dll.bind
-def getpagesize() -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def getdtablesize() -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def truncate(__file:c.POINTER[Annotated[bytes, ctypes.c_char]], __length:Annotated[int, ctypes.c_int64]) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def ftruncate(__fd:Annotated[int, ctypes.c_int32], __length:Annotated[int, ctypes.c_int64]) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def brk(__addr:ctypes.c_void_p) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
+@dll.bind(ctypes.c_int32)
+def getpagesize() -> int: ...
+@dll.bind(ctypes.c_int32)
+def getdtablesize() -> int: ...
+@dll.bind(ctypes.c_int32, c.POINTER[ctypes.c_char], ctypes.c_int64)
+def truncate(__file:c.POINTER[ctypes.c_char], __length:ctypes.c_int64) -> int: ...
+@dll.bind(ctypes.c_int32, ctypes.c_int32, ctypes.c_int64)
+def ftruncate(__fd:int, __length:ctypes.c_int64) -> int: ...
+@dll.bind(ctypes.c_int32, ctypes.c_void_p)
+def brk(__addr:ctypes.c_void_p) -> int: ...
+@dll.bind(ctypes.c_void_p, intptr_t)
 def sbrk(__delta:intptr_t) -> ctypes.c_void_p: ...
-@dll.bind
-def syscall(__sysno:Annotated[int, ctypes.c_int64]) -> Annotated[int, ctypes.c_int64]: ...
-@dll.bind
-def lockf(__fd:Annotated[int, ctypes.c_int32], __cmd:Annotated[int, ctypes.c_int32], __len:Annotated[int, ctypes.c_int64]) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def fdatasync(__fildes:Annotated[int, ctypes.c_int32]) -> Annotated[int, ctypes.c_int32]: ...
-@dll.bind
-def crypt(__key:c.POINTER[Annotated[bytes, ctypes.c_char]], __salt:c.POINTER[Annotated[bytes, ctypes.c_char]]) -> c.POINTER[Annotated[bytes, ctypes.c_char]]: ...
-@dll.bind
-def getentropy(__buffer:ctypes.c_void_p, __length:size_t) -> Annotated[int, ctypes.c_int32]: ...
-c.init_records()
+@dll.bind(ctypes.c_int64, ctypes.c_int64)
+def syscall(__sysno:int) -> int: ...
+@dll.bind(ctypes.c_int32, ctypes.c_int32, ctypes.c_int32, ctypes.c_int64)
+def lockf(__fd:int, __cmd:int, __len:ctypes.c_int64) -> int: ...
+@dll.bind(ctypes.c_int32, ctypes.c_int32)
+def fdatasync(__fildes:int) -> int: ...
+@dll.bind(c.POINTER[ctypes.c_char], c.POINTER[ctypes.c_char], c.POINTER[ctypes.c_char])
+def crypt(__key:c.POINTER[ctypes.c_char], __salt:c.POINTER[ctypes.c_char]) -> c.POINTER[ctypes.c_char]: ...
+@dll.bind(ctypes.c_int32, ctypes.c_void_p, size_t)
+def getentropy(__buffer:ctypes.c_void_p, __length:size_t) -> int: ...
 _SYS_MMAN_H = 1 # type: ignore
 _SYSCALL_H = 1 # type: ignore
 _STRING_H = 1 # type: ignore

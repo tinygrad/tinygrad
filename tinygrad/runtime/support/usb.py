@@ -1,14 +1,19 @@
-import ctypes, struct, dataclasses, array, itertools
+import ctypes, struct, dataclasses, array, itertools, time
 from typing import Sequence
 from tinygrad.runtime.autogen import libusb
-from tinygrad.helpers import DEBUG, to_mv, round_up, OSX, getenv
+from tinygrad.helpers import DEBUG, to_mv, round_up, OSX, getenv, ceildiv
 from tinygrad.runtime.support.hcq import MMIOInterface
+
+def alloc_cbuffer(sz:int) -> tuple[ctypes.Array, memoryview]: return (buf:=(ctypes.c_ubyte * sz)()), to_mv(ctypes.addressof(buf), sz)
 
 class USB3:
   def __init__(self, vendor:int, dev:int, ep_data_in:int, ep_stat_in:int, ep_data_out:int, ep_cmd_out:int, max_streams:int=31, use_bot=False):
     self.vendor, self.dev = vendor, dev
     self.ep_data_in, self.ep_stat_in, self.ep_data_out, self.ep_cmd_out = ep_data_in, ep_stat_in, ep_data_out, ep_cmd_out
     self.max_streams, self.use_bot = max_streams, use_bot
+    self._transferred = ctypes.c_int(0)
+    self._bulk_in_buf, self._bulk_in_mv = alloc_cbuffer(4 << 20)
+    self._bulk_out_buf, self._bulk_out_mv = alloc_cbuffer(4 << 20)
     self.ctx = ctypes.POINTER(libusb.struct_libusb_context)()
 
     if libusb.libusb_init(ctypes.byref(self.ctx)): raise RuntimeError("libusb_init failed")
@@ -16,6 +21,15 @@ class USB3:
 
     self.handle = libusb.libusb_open_device_with_vid_pid(self.ctx, self.vendor, self.dev)
     if not self.handle: raise RuntimeError(f"device {self.vendor:04x}:{self.dev:04x} not found. sudo required?")
+
+    # Read product string descriptor
+    _buf = (ctypes.c_ubyte * 256)()
+    _desc = libusb.struct_libusb_device_descriptor()
+    libusb.libusb_get_device_descriptor(libusb.libusb_get_device(self.handle), ctypes.byref(_desc))
+    _ret = libusb.libusb_get_string_descriptor_ascii(self.handle, _desc.iProduct, _buf, 256)
+    self.product = bytes(_buf[:max(_ret, 0)]).decode("ascii", errors="replace") if _ret > 0 else ""
+    self.is_custom = self.product.startswith("custom")
+    if self.is_custom: self.use_bot = use_bot = True
 
     # Detach kernel driver if needed
     if libusb.libusb_kernel_driver_active(self.handle, 0):
@@ -73,30 +87,17 @@ class USB3:
         elif tr.contents.status != 0xFF: raise RuntimeError(f"EP 0x{tr.contents.endpoint:02X} error: {tr.contents.status}")
 
   def _bulk_out(self, ep: int, payload: bytes, timeout: int = 1000):
-    transferred = ctypes.c_int(0)
-    rc = libusb.libusb_bulk_transfer(
-      self.handle,
-      ep,
-      (ctypes.c_ubyte * len(payload))(*payload),
-      len(payload),
-      ctypes.byref(transferred),
-      timeout,
-    )
+    if len(payload) > len(self._bulk_out_mv): self._bulk_out_buf, self._bulk_out_mv = alloc_cbuffer(len(payload))
+    self._bulk_out_mv[:len(payload)] = payload
+    rc = libusb.libusb_bulk_transfer(self.handle, ep, self._bulk_out_buf, len(payload), ctypes.byref(self._transferred), timeout)
     assert rc == 0, f"bulk OUT 0x{ep:02X} failed: {rc}"
-    assert transferred.value == len(payload), f"bulk OUT short write on 0x{ep:02X}: {transferred.value}/{len(payload)} bytes"
+    assert self._transferred.value == len(payload), f"bulk OUT short write on 0x{ep:02X}: {self._transferred.value}/{len(payload)} bytes"
 
-  def _bulk_in(self, ep: int, length: int, timeout: int = 1000) -> bytes:
-    buf, transferred = (ctypes.c_ubyte * length)(), ctypes.c_int(0)
-    rc = libusb.libusb_bulk_transfer(
-      self.handle,
-      ep,
-      buf,
-      length,
-      ctypes.byref(transferred),
-      timeout,
-    )
+  def _bulk_in(self, ep: int, length: int, timeout: int = 1000) -> memoryview:
+    if length > len(self._bulk_in_mv): self._bulk_in_buf, self._bulk_in_mv = alloc_cbuffer(length)
+    rc = libusb.libusb_bulk_transfer(self.handle, ep, self._bulk_in_buf, length, ctypes.byref(self._transferred), timeout)
     assert rc == 0, f"bulk IN 0x{ep:02X} failed: {rc}"
-    return bytes(buf[:transferred.value])
+    return self._bulk_in_mv[:self._transferred.value]
 
   def send_batch(self, cdbs:list[bytes], idata:list[int]|None=None, odata:list[bytes|None]|None=None) -> list[bytes|None]:
     idata, odata = idata or [0] * len(cdbs), odata or [None] * len(cdbs)
@@ -117,7 +118,7 @@ class USB3:
 
         # DAT
         if dir_in:
-          results.append(self._bulk_in(self.ep_data_in, rlen))
+          results.append(bytes(self._bulk_in(self.ep_data_in, rlen)))
         else:
           if send_data is not None:
             self._bulk_out(self.ep_data_out, send_data)
@@ -168,9 +169,127 @@ class ReadOp: addr:int; size:int # noqa: E702
 @dataclasses.dataclass(frozen=True)
 class ScsiWriteOp: data:bytes; lba:int=0 # noqa: E702
 
+class CustomASM24Controller:
+  def __init__(self, usb:USB3|None=None):
+    self.usb = usb or USB3(0xADD1, 0x0001, 0x81, 0x83, 0x02, 0x04, use_bot=True)
+    self._pci_cacheable: list[tuple[int, int]] = []
+    self._pci_cache: dict[int, int|None] = {}
+
+    self._f0_out_buf, self._f0_out_mv = alloc_cbuffer(0x1000) # for f0 and e4, allocate big enough for e4
+    self._f0_in_buf, _ = alloc_cbuffer(8)
+
+    # Custom firmware now boots with PCIe off. Power it on before probing the link.
+    ltssm = self.read(0xB450, 1)[0]
+    if ltssm != 0x78: self.set_pcie_power(True)
+    ltssm = self.read(0xB450, 1)[0]
+    if ltssm != 0x78: raise RuntimeError(f"PCIe link not up (LTSSM=0x{ltssm:02X}), custom firmware not ready")
+
+  def set_pcie_power(self, enabled:bool, timeout:int=10000):
+    ret = libusb.libusb_control_transfer(self.usb.handle, 0x40, 0xF3, int(enabled), 0, None, 0, timeout)
+    assert ret >= 0, f"F3 PCIe power {'on' if enabled else 'off'} failed: {ret}"
+
+  # === PCIe TLP via 0xF0 vendor command ===
+
+  def _f0_out(self, fmt_type:int, byte_en:int, address:int, value:int, mode:int=0):
+    struct.pack_into('<III', self._f0_out_mv, 0, address & 0xFFFFFFFF, address >> 32, value)
+    ret = libusb.libusb_control_transfer(self.usb.handle, 0x40, 0xF0, fmt_type | (byte_en << 8), mode & 0x03, self._f0_out_buf, 12, 5000)
+    assert ret == 12, f"F0 OUT failed: {ret}"
+
+  def _f0_in(self) -> tuple[int, int, int]:
+    ret = libusb.libusb_control_transfer(self.usb.handle, 0xC0, 0xF0, 0, 0, self._f0_in_buf, 8, 5000)
+    assert ret == 8, f"F0 IN failed: {ret}"
+    return struct.unpack_from('<I', self._f0_in_buf, 0)[0], (self._f0_in_buf[4] >> 5) & 0x7, self._f0_in_buf[7]
+
+  def _is_pci_cacheable(self, addr:int) -> bool: return any(x <= addr <= x + sz for x, sz in self._pci_cacheable)
+
+  def pcie_request(self, fmt_type:int, address:int, value:int|None=None, size:int=4, cnt:int=10):
+    if fmt_type == 0x60 and size == 4 and self._is_pci_cacheable(address) and self._pci_cache.get(address) == value: return
+    assert size > 0 and size <= 4, f"Invalid size {size}"
+    if DEBUG >= 5: print("pcie_request", hex(fmt_type), hex(address), value, size)
+
+    offset = address & 0x3
+    byte_en = ((1 << size) - 1) << offset
+    self._pci_cache[address] = value if size == 4 and fmt_type == 0x60 else None
+
+    self._f0_out(fmt_type, byte_en, address & ~0x3, (value << (8 * offset)) if value is not None else 0)
+
+    # Fast path: memory writes and messages don't return completions (same logic as ASM24Controller).
+    if ((fmt_type & 0b11011111) == 0b01000000) or ((fmt_type & 0b10111000) == 0b00110000): return
+
+    # Read TLPs and config writes: read completion via 0xF0 IN. Retry on error/timeout.
+    data, cpl_status, ret_status = self._f0_in()
+    if ret_status != 0:
+      time.sleep(0.001)  # TODO: this sleep is very picky
+      if cnt > 0:
+        return self.pcie_request(fmt_type, address, value, size, cnt=cnt-1)
+      raise RuntimeError(f"TLP error after retries: ret_status={ret_status}, address={address:#x}")
+
+    if cpl_status:
+      status_map = {0b001: f"Unsupported Request: {address:#x}", 0b100: "Completer Abort", 0b010: "Config Retry"}
+      raise RuntimeError(f"TLP completion status: {status_map.get(cpl_status, f'Reserved (0b{cpl_status:03b})')}")
+
+    if value is None: return (data >> (8 * offset)) & ((1 << (8 * size)) - 1)
+
+  def pcie_cfg_req(self, byte_addr:int, bus:int=1, dev:int=0, fn:int=0, value:int|None=None, size:int=4):
+    assert byte_addr >> 12 == 0 and bus >> 8 == 0 and dev >> 5 == 0 and fn >> 3 == 0
+    fmt_type = (0x44 if value is not None else 0x4) | int(bus > 0)
+    address = (bus << 24) | (dev << 19) | (fn << 16) | (byte_addr & 0xfff)
+    return self.pcie_request(fmt_type, address, value, size)
+
+  def pcie_mem_req(self, address:int, value:int|None=None, size:int=4):
+    return self.pcie_request(0x60 if value is not None else 0x20, address, value, size)
+
+  def pcie_mem_write(self, address:int, values:list[int], size:int):
+    """Streaming PCIe memory write via 0xF0 mode 1 + bulk OUT. Data is little-endian dwords on the wire."""
+    if not values: return
+    self._f0_out(0x60, 0x0F, address, len(values), mode=1)
+    self.usb._bulk_out(0x02, struct.pack(f'<{len(values)}I', *values))
+
+  def pcie_mem_read(self, address:int, nbytes:int) -> bytes:
+    """Streaming PCIe memory read via 0xF0 mode 2 + bulk IN. Returns little-endian bytes."""
+    assert nbytes % 4 == 0, f"pcie_mem_read requires 4-byte aligned size, got {nbytes}"
+    self._f0_out(0x20, 0x0F, address, nbytes // 4, mode=2)
+    return self.usb._bulk_in(0x81, nbytes, timeout=30000)
+
+  # === XDATA read/write (0xE4/0xE5 vendor control transfers) ===
+
+  def read(self, base_addr:int, length:int, **kwargs) -> bytes:
+    """Read from chip XDATA via vendor control IN (bRequest=0xE4). wValue=addr, wLength=size."""
+    result = b''
+    for off in range(0, length, 0xFF):
+      chunk = min(0xFF, length - off)
+      ret = libusb.libusb_control_transfer(self.usb.handle, 0xC0, 0xE4, base_addr + off, 0, self._f0_out_buf, chunk, 1000)
+      assert ret == chunk, f"read(0x{base_addr + off:04X}, {chunk}) failed: {ret}"
+      result += bytes(self._f0_out_buf[:ret])
+    return result[:length]
+
+  def write(self, base_addr:int, data:bytes, **kwargs):
+    """Write to chip XDATA via vendor control OUT (bRequest=0xE5). wValue=addr, wIndex=val."""
+    for off, val in enumerate(data):
+      ret = libusb.libusb_control_transfer(self.usb.handle, 0x40, 0xE5, base_addr + off, val, None, 0, 1000)
+      assert ret >= 0, f"write(0x{base_addr + off:04X}, 0x{val:02X}) failed: {ret}"
+
+  def scsi_write(self, buf:bytes, lba:int=0):
+    """Write to SRAM via 0xF2 vendor command + bulk OUT."""
+    buf_padded = buf + b'\x00' * (round_up(len(buf), 512) - len(buf))
+    sectors = len(buf_padded) // 512
+    num_slots = round_up(len(buf_padded), 0x4000) // 0x4000  # 16KB per slot
+    # 0xF2 OUT: wValue=sectors, wIndex=start_slot|(num_slots<<8)
+    windex = (num_slots & 0xFF) << 8
+    ret = libusb.libusb_control_transfer(self.usb.handle, 0x40, 0xF2, sectors, windex, None, 0, 1000)
+    assert ret >= 0, f"F2 setup failed: {ret}"
+    self.usb._bulk_out(0x02, buf_padded)
+
+  def scsi_read_arm(self, size:int):
+    windex = (ceildiv(size, 0x4000) & 0xFF) << 8
+    ret = libusb.libusb_control_transfer(self.usb.handle, 0x40, 0xF2, (ceildiv(size, 512) & 0x7FFF) | 0x8000, windex, None, 0, 1000)
+    assert ret >= 0, f"F2 read arm failed: {ret}"
+
+  def scsi_read(self, size:int) -> memoryview: return self.usb._bulk_in(0x81, round_up(size, 512), timeout=10000)[:size]
+
 class ASM24Controller:
-  def __init__(self):
-    self.usb = USB3(0xADD1, 0x0001, 0x81, 0x83, 0x02, 0x04)
+  def __init__(self, usb:USB3|None=None):
+    self.usb = usb or USB3(0xADD1, 0x0001, 0x81, 0x83, 0x02, 0x04, use_bot=bool(getenv("USE_BOT", 0)))
     self._cache: dict[int, int|None] = {}
     self._pci_cacheable: list[tuple[int, int]] = []
     self._pci_cache: dict[int, int|None] = {}
@@ -308,7 +427,12 @@ class USBMMIOInterface(MMIOInterface):
   def _acc(self, off, sz, data=None):
     if data is None: # read op
       if not self.pcimem:
+        if self.addr == 0xf000 and hasattr(self.usb, 'scsi_read'): return self.usb.scsi_read(sz)
         return int.from_bytes(self.usb.read(self.addr + off, sz), "little") if sz == self.el_sz else self.usb.read(self.addr + off, sz)
+
+      # Fast path: streaming PCIe read if controller supports it
+      if hasattr(self.usb, 'pcie_mem_read') and sz >= 4 and sz % 4 == 0:
+        return self.usb.pcie_mem_read(self.addr + off, sz)
 
       acc, acc_size = self._acc_size(sz)
       return bytes(array.array(acc, [self._acc_one(off + i * acc_size, acc_size) for i in range(sz // acc_size)]))

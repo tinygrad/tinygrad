@@ -1,8 +1,8 @@
 from __future__ import annotations
 import ctypes, functools
-from tinygrad.helpers import DEBUG, getenv, mv_address, suppress_finalizing, CUDA_CC, CUDA_PTX, CUDA_NVCC
-from tinygrad.device import Compiled, BufferSpec, LRUAllocator, CompilerSet
-from tinygrad.renderer.cstyle import CUDARenderer
+from tinygrad.helpers import DEBUG, getenv, mv_address, suppress_finalizing
+from tinygrad.device import Compiled, BufferSpec, LRUAllocator
+from tinygrad.renderer.cstyle import CUDARenderer, NVCCRenderer
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.runtime.autogen import cuda
 from tinygrad.runtime.support.compiler_cuda import pretty_ptx
@@ -43,7 +43,7 @@ class CUDAProgram:
     status = cuda.cuModuleLoadData(ctypes.byref(self.module), lib)
     if status != 0:
       del self.module
-      raise RuntimeError(f"module load failed with status code {status}: {cuda.CUresult.get(status)}")
+      raise RuntimeError(f"module load failed with status code {status}: {cuda.enum_cudaError_enum.get(status)}")
     check(cuda.cuModuleGetFunction(ctypes.byref(prg := cuda.CUfunction()), self.module, name.encode("utf-8")))
     self.prg = prg
     if self.smem > 0: check(cuda.cuFuncSetAttribute(self.prg, cuda.CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES, self.smem))
@@ -113,15 +113,12 @@ class CUDADevice(Compiled):
       check(cuda.cuCtxEnablePeerAccess(dev.context, 0))
       CUDADevice.peer_access = True
 
-    self.arch = f"sm_{major.value}{minor.value}"
     self.pending_copyin: list[tuple[int, int, BufferSpec|None]] = []
     CUDADevice.devices.append(self)
 
     from tinygrad.runtime.graph.cuda import CUDAGraph
-    compilers = CompilerSet([(functools.partial(CUDARenderer, self.arch, device="CUDA"), None),
-                             (functools.partial(PTXRenderer, self.arch, device="CUDA"), CUDA_PTX),
-                             (functools.partial(CUDARenderer, self.arch, device="CUDA", use_nvcc=True), CUDA_NVCC)], ctrl_var=CUDA_CC)
-    super().__init__(device, CUDAAllocator(self), compilers, functools.partial(CUDAProgram, self), None if MOCKGPU else CUDAGraph)
+    super().__init__(device, CUDAAllocator(self), [CUDARenderer, PTXRenderer, NVCCRenderer], functools.partial(CUDAProgram, self),
+                     None if MOCKGPU else CUDAGraph, arch=f"sm_{major.value}{minor.value}")
 
   def synchronize(self):
     check(cuda.cuCtxSetCurrent(self.context))

@@ -60,7 +60,7 @@ def helper_make_view(base, offset_elems, size_elems):
 
 def helper_run_jit(jis, bufs, out_buffers):
   for rawbuf in out_buffers:
-    mv = memoryview(bytearray(rawbuf.size * rawbuf.dtype.itemsize))
+    mv = memoryview(bytearray(rawbuf.nbytes))
     ctypes.memset(from_mv(mv), 0, len(mv))
     rawbuf.copyin(mv)
 
@@ -82,7 +82,7 @@ def helper_test_graphs(graph_impl, graphs, runs=RUN_CNT):
   ground_truth_np = [np.frombuffer(x, _to_np_dtype(bufs[i].dtype)) for i,x in enumerate(ground_thruth_bufs)]
 
   # Build graphs
-  gr_ji = [ExecItem(UOp(Ops.NOOP), [], prg=graph_impl(graph, [], {})) for graph in graphs]
+  gr_ji = [ExecItem(UOp(Ops.NOOP), [], prg=graph_impl(None, None, graph)) for graph in graphs]
 
   for _ in range(runs):
     test_bufs = helper_run_jit(gr_ji, bufs, out_buffers)
