@@ -32,7 +32,7 @@ class TestAMDSpillFlags(unittest.TestCase):
     from tinygrad.runtime.support.compiler_amd import AMDLLVMCompiler
     import time
     for spill in [0, 1]:
-      with Context(SPILL=spill):
+      with Context(SPILL=spill, DEBUG=7):
         t = time.perf_counter()
         AMDLLVMCompiler("gfx1100").compile(KERNEL)
         print(f"\nSPILL={spill}: {time.perf_counter() - t:.3f}s")
