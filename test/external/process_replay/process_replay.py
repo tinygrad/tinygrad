@@ -43,6 +43,7 @@ class ProcessReplayWarning(Warning): pass
 # *** replay the function and convert return values to string
 
 def replay_get_program(p:ProgramSpec, ast:UOp, renderer:Renderer, opts:list[Opt]|None=None) -> tuple[str, str, tuple[Any, ...]]:
+  if ast.op is Ops.BEAM: ast = ast.src[0]
   # the ast.arg is non None if we are inside of search.py
   sink_arg = ast.arg or KernelInfo()
   if opts is not None: sink_arg = replace(sink_arg, opts_to_apply=tuple(opts))
