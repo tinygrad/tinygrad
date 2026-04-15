@@ -2734,7 +2734,7 @@ def _zero_kernel(out:UOp) -> UOp:
   return out.flatten()[i].store(0).end(i).sink(arg=KernelInfo(name="zero", estimates=Estimates(ops=0, lds=4, mem=4)))
 
 @functools.cache
-def custom_hk_amax(amax:UOp, x:UOp, dname:str, arch:str) -> UOp:
+def custom_hk_amax(amax:UOp, x:UOp, dname:str) -> UOp:
   TILE_ELEMS = 16 * 32
   numel = x.size
   assert numel % TILE_ELEMS == 0, f"unsupported shape {n}"
@@ -2752,8 +2752,8 @@ def hk_amax(x:Tensor) -> Tensor:
   amax_f32 = Tensor.invalid(1, dtype=dtypes.float32, device=x.device)
   amax_f32 = amax_f32.custom_kernel(fxn=_zero_kernel)[0]
   device = x.device[0] if isinstance(x.device, tuple) else x.device
-  dname, arch = device.split(":")[0], Device[device].renderer.target.arch
-  amax_f32, _ = Tensor.custom_kernel(amax_f32, x, fxn=functools.partial(custom_hk_amax, dname=dname, arch=arch), grad_fxn=hk_amax_grad)
+  dname = device.split(":")[0]
+  amax_f32, _ = Tensor.custom_kernel(amax_f32, x, fxn=functools.partial(custom_hk_amax, dname=dname), grad_fxn=hk_amax_grad)
   return amax_f32.cast(x.dtype)
 
 # ** main gemm function
