@@ -2764,7 +2764,7 @@ def hk_amax(x:Tensor) -> Tensor:
   dname = device.split(":")[0]
   arch = Device[device].renderer.target.arch
   counters["hk_amax"] += 1
-  amax_f32, _ = Tensor.custom_kernel(amax_f32, x, fxn=functools.partial(custom_hk_amax_uop if arch != "gfx950" else custom_hk_amax, dname=dname),
+  amax_f32, _ = Tensor.custom_kernel(amax_f32, x, fxn=functools.partial(custom_hk_amax_uop if arch != "gfx950" or getenv("AMAX_UOP") else custom_hk_amax, dname=dname),
                                      grad_fxn=hk_amax_grad)
   return amax_f32.cast(x.dtype).reshape(())
 
