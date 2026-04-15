@@ -23,8 +23,20 @@ FP8_DTYPE = dtypes.fp8e4m3
 FP8_GRAD_DTYPE = dtypes.fp8e5m2
 FP8_MAX = 448.0
 
+# per-device abs max without allreduce (matches TE delayed scaling behavior)
+@functools.cache
+def _local_abs_max_fxn(x_p, device):
+  x = Tensor(x_p, device=device)
+  inner = Tensor(x.uop.src[0]) if x.uop.op is Ops.MULTI else x
+  return (inner.abs().max(),)
+
+def _local_abs_max(x:Tensor) -> Tensor:
+  param = x.as_param(0)
+  fxn = _local_abs_max_fxn(param.uop, x.device)
+  return Tensor(fxn[0].uop.call(x.uop).gettuple(0))
+
 def quantize_fp8(x:Tensor, amax_state:Tensor|None=None):
-  new_amax = x.abs().max().detach()
+  new_amax = (_local_abs_max(x) if isinstance(x.device, tuple) else x.abs().max()).detach()
   scale = FP8_MAX / ((amax_state if amax_state is not None else new_amax) + 1e-8)
   x_scaled = x * scale
   x_clamped = x_scaled + (x_scaled.detach().clamp(-FP8_MAX, FP8_MAX) - x_scaled.detach())  # STE
@@ -193,6 +205,10 @@ class FlatTransformer:
       self.tok_embeddings.weight.shard_(device, axis=0).realize()
       self.output.shard_(device, axis=1).realize()
       self.freqs_cis.shard_(device, axis=None).realize()
+      if FP8:
+        for name in self._fp8_amax:
+          for i in range(len(self._fp8_amax[name])):
+            self._fp8_amax[name][i] = self._fp8_amax[name][i].to(device).contiguous().requires_grad_(False)
 
   def __call__(self, tokens:Tensor):
     h = self.tok_embeddings(tokens)
