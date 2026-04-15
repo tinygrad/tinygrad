@@ -1,8 +1,9 @@
 import unittest
+import numpy as np
 from tinygrad import Tensor, Device, dtypes, Context
 from tinygrad.device import is_dtype_supported
 from tinygrad.helpers import getenv, system
-from extra.gemm.cdna_asm_gemm import asm_gemm
+from extra.gemm.cdna_asm_gemm import asm_gemm, hk_amax
 from test.helpers import needs_second_gpu
 from examples.mlperf.models.flat_llama import FP8_DTYPE
 
@@ -42,7 +43,6 @@ def run_asm_gemm(a_shape, b_shape, dtype=dtypes.float16, a_shard=None, b_shard=N
   with Context(DEBUG=0):
     # enable for debugging, slow for larger gemms
     if getenv("USE_NPY"):
-      import numpy as np
       np.testing.assert_allclose(tst.numpy(), ref.numpy(), atol=atol, rtol=rtol)
       np.testing.assert_allclose(a.grad.numpy(), a_ref.grad.numpy(), atol=grad_atol, rtol=grad_rtol)
       np.testing.assert_allclose(b.grad.numpy(), b_ref.grad.numpy(), atol=grad_atol, rtol=grad_rtol)
@@ -227,6 +227,16 @@ class TestMagicGu(unittest.TestCase):
         magic, shift = _magicgu_mulhi(iters, total * batch)
         old_magic, old_shift = old_iters_args[iters]
         self.assertEqual((magic, shift), (old_magic, old_shift), f"mismatch for ({M},{N},{K}) batch={batch} iters={iters}")
+
+@unittest.skipUnless(has_hipcc(), "amax kernel requires hipcc to compile")
+class TestAmax(unittest.TestCase):
+  def cmp(self, x:Tensor):
+    y = hk_amax(x).numpy()
+    np.testing.assert_allclose(y, x.abs().max().numpy())
+
+  def test_simple(self):
+    x = Tensor.randn((4096, 4096), dtype=dtypes.float).sub(0.5).cast(dtypes.bfloat16)
+    self.cmp(x)
 
 if __name__ == "__main__":
   unittest.main()

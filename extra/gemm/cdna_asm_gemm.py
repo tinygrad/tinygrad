@@ -2723,6 +2723,39 @@ def custom_gemm_bw(gradient:UOp, kernel:UOp):
     else: grad_b = (a_t_flat @ g_t_flat).uop
     return (None, grad_a, grad_b)
 
+# ** FP8 quantize abs().max()
+
+def hk_amax_grad(gradient:UOp, kernel:UOp):
+  return (None, gradient)
+
+# copied from USE_ATOMICS
+def _zero_kernel(out:UOp) -> UOp:
+  i = UOp.range(out.size, 0)
+  return out.flatten()[i].store(0).end(i).sink(arg=KernelInfo(name="zero", estimates=Estimates(ops=0, lds=4, mem=4)))
+
+@functools.cache
+def custom_hk_amax(amax:UOp, x:UOp, dname:str, arch:str) -> UOp:
+  TILE_ELEMS = 16 * 32
+  numel = x.size
+  assert numel % TILE_ELEMS == 0, f"unsupported shape {n}"
+  num_tiles = numel // TILE_ELEMS
+  grid = min(16384, num_tiles)
+  kittens_path = pathlib.Path(__file__).parent.parent/"thunder"/"amd"
+  src = (kittens_path/"hk_amax.cpp").read_text()
+  lib = HIPCCCompiler("gfx950", [f"-I{(kittens_path/'include').as_posix()}", "-std=c++20", "-DKITTENS_CDNA4", "-ffast-math",
+                                 "-DHIP_ENABLE_WARP_SYNC_BUILTINS", f"-DPARAM_N={numel}", f"-DPARAM_GRID={grid}"]).compile_cached(src)
+  lidx, gidx = UOp.special(64, "lidx0"), UOp.special(grid, "gidx0")
+  sink = UOp.sink(amax.base, x.base, lidx, gidx, arg=KernelInfo(name=f"custom_quantize_fp8_amax_{numel}", estimates=Estimates()))
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dname), UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=lib)))
+
+def hk_amax(x:Tensor) -> Tensor:
+  amax_f32 = Tensor.invalid(1, dtype=dtypes.float32, device=x.device)
+  amax_f32 = amax_f32.custom_kernel(fxn=_zero_kernel)[0]
+  device = x.device[0] if isinstance(x.device, tuple) else x.device
+  dname, arch = device.split(":")[0], Device[device].renderer.target.arch
+  amax_f32, _ = Tensor.custom_kernel(amax_f32, x, fxn=functools.partial(custom_hk_amax, dname=dname, arch=arch), grad_fxn=hk_amax_grad)
+  return amax_f32.cast(x.dtype)
+
 # ** main gemm function
 
 def asm_gemm(a:Tensor, b:Tensor, combined_scale:Tensor|None=None) -> Tensor:
