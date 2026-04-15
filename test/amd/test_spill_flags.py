@@ -26,33 +26,15 @@ exit:
 }
 '''
 
-def _time_compile(spill, n=3):
-  from tinygrad.runtime.support.compiler_amd import AMDLLVMCompiler
-  times = []
-  for _ in range(n):
-    with Context(SPILL=spill):
-      t = time.perf_counter()
-      AMDLLVMCompiler("gfx1100").compile(KERNEL)
-      times.append(time.perf_counter() - t)
-  return sum(times) / n
-
 @unittest.skipUnless(Device.DEFAULT == "AMD", "Runs only on AMD")
 class TestAMDSpillFlags(unittest.TestCase):
-  def test_spill_0(self):
-    """Test SPILL=0 compiles."""
-    with Context(SPILL=0):
-      AMDLLVMCompiler("gfx1100").compile(KERNEL)
-
-  def test_spill_1(self):
-    """Test SPILL=1 compiles."""
-    with Context(SPILL=1):
-      AMDLLVMCompiler("gfx1100").compile(KERNEL)
-
-  def test_timing(self):
-    """Compare timing."""
-    t0, t1 = _time_compile(0), _time_compile(1)
-    print(f"\nSPILL=0: {t0:.3f}s, SPILL=1: {t1:.3f}s")
-    self.assertTrue(t0 > 0 and t1 > 0)
+  def test_spill(self):
+    from tinygrad.runtime.support.compiler_amd import AMDLLVMCompiler
+    for spill in [0, 1]:
+      with Context(SPILL=spill):
+        t = time.perf_counter()
+        AMDLLVMCompiler("gfx1100").compile(KERNEL)
+        print(f"\nSPILL={spill}: {time.perf_counter() - t:.3f}s")
 
 if __name__ == "__main__":
   unittest.main()
