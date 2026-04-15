@@ -231,6 +231,7 @@ class TestMagicGu(unittest.TestCase):
 @unittest.skipUnless(has_hipcc(), "amax kernel requires hipcc to compile")
 class TestAmax(unittest.TestCase):
   def cmp(self, x:Tensor):
+    with Context(DEBUG=0): x.realize()
     y = hk_amax(x).numpy()
     np.testing.assert_allclose(y, x.abs().max().numpy())
 
