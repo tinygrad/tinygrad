@@ -4,7 +4,7 @@ from tinygrad import Tensor, Device
 from tinygrad.helpers import get_single_element
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.engine.realize import CompiledRunner, get_program
-from tinygrad.engine.schedule import ExecItem
+from tinygrad.schedule import ExecItem
 
 class TestOptGemm(unittest.TestCase):
   @classmethod
