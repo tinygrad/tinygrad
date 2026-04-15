@@ -122,7 +122,7 @@ def suppress_finalizing(func):
   return wrapper
 
 def select_by_name(candidates:Sequence[T], get_name:Callable[...,str], query:str, err_msg:str) -> list[T]:
-  if len(ret:=[c for c in candidates if get_name(c) == query]) == 0:
+  if len(ret:=[c for c in candidates if not query or get_name(c) == query]) == 0:
     raise RuntimeError(err_msg + (f", did you mean: {m[0]!r}?" if (m:=difflib.get_close_matches(query, map(get_name, candidates))) else ""))
   return ret
 
