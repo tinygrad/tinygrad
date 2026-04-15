@@ -151,9 +151,6 @@ def getenv(key:str, default:T) -> T: ...
 @functools.cache
 def getenv(key:str, default:Any=0): return type(default)(os.getenv(key, default))
 
-# SPILL: Set to 0 to disable register spilling in AMDGPU LLVM (amdgpu-spill-*-to-*-=false flags)
-SPILL = ContextVar("SPILL", 1)
-
 def temp(x:str, append_user:bool=False) -> str:
   return (pathlib.Path(tempfile.gettempdir()) / (f"{x}.{getpass.getuser()}" if append_user else x)).as_posix()
 
@@ -263,6 +260,8 @@ ALLOW_TF32 = ContextVar("ALLOW_TF32", 0)
 SCACHE = ContextVar("SCACHE", 1)
 # allow use of atomics for embedding backward
 USE_ATOMICS = ContextVar("USE_ATOMICS", 0)
+# set to 0 to disable spilling in the register allocator
+SPILL = ContextVar("SPILL", 1)
 
 @dataclass(frozen=True)
 class Metadata:
