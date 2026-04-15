@@ -562,7 +562,7 @@ class Handler(HTTPRequestHandler):
     stderr_log(f"{self.path}  {colored('--', 'BLACK')}  "
                f"in:{colored(f'{cache_start_pos:5d}', 'green')} +{len(ids)-cache_start_pos:5d}  {colored('--', 'BLACK')}  ")
     tmpl = {"id":f"chatcmpl-{uuid.uuid4().hex[:24]}", "object":"chat.completion.chunk", "created":int(time.time()), "model":model_name}
-    yield {"choices": [{"index":0, "delta":{"role":"assistant","content":think_start if args.think else ""}, "finish_reason":None}], **tmpl}
+    yield {"choices": [{"index":0, "delta":{"role":"assistant","content":think_start}, "finish_reason":None}], **tmpl}
     out: list[int] = []
     finish_reason = "stop"
     st = time.perf_counter()
@@ -672,7 +672,7 @@ if __name__ == "__main__":
     except EOFError:
       break
     dec = tok.stream_decoder()
-    if args.think: sys.stdout.write(think_start)
+    if think_start: sys.stdout.write(think_start)
     for next_id in model.generate(ids):
       sys.stdout.write(dec(next_id) if next_id not in (eos_id, eot_id) else dec() + "\n\n")
       sys.stdout.flush()
