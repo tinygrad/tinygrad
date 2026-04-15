@@ -102,7 +102,7 @@ def main(args) -> None:
 
     # ** PMC printer
     if "PMC" in args.src:
-      pmc = viz.unpack_pmc(data[0])
+      pmc = viz.unpack_pmc(data)
       cols = pmc["cols"]
       rows:list = []
       for r in pmc["rows"]:
