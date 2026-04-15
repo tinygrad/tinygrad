@@ -668,7 +668,7 @@ jobs:
       - name: Install rocprof-trace-decoder
         run: sudo PYTHONPATH="." ./extra/sqtt/install_rocprof_decoder.py
       - name: Run AMD spill flags tests
-        run: DEV=AMD:LLVM python -m pytest test/amd/test_spill_flags.py --durations 20
+        run: DEV=AMD:LLVM python -m pytest test/amd/test_spill_flags.py -s --durations 20
       - name: Run AMD renderer tests
         run: python -m pytest -n=auto test/amd/ --durations 20
       - name: Run AMD renderer tests (AMD:LLVM)
