@@ -225,6 +225,71 @@ class TestLocalAccess(unittest.TestCase):
     sres = uop(uops, Ops.LOAD, dtypes.int32, (smem.index(ofs),))
     self.assertEqual(_test_uops_result(dtypes.int32, uops, sres), 42)
 
+  def _get_smem_usage(self, uops, result):
+    c0 = uop(uops, Ops.CONST, dtypes.int32, (), 0)
+    buf_store = uop(uops, Ops.PARAM, dtypes.float32.ptr(), (), 0)
+    out = uop(uops, Ops.STORE, dtypes.void, (buf_store.index(c0), result))
+    prg = get_program(UOp.sink(out, arg=KernelInfo()), Device[Device.DEFAULT].renderer)
+    dls = [u for u in prg.uops if u.op is Ops.DEFINE_LOCAL]
+    return len(dls), sum(u.dtype.size * u.dtype.base.itemsize for u in dls)
+
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared memory")
+  def test_local_memory_plan_merged(self):
+    uops = []
+    c0 = uop(uops, Ops.CONST, dtypes.int32, (), 0)
+    smem1 = uop(uops, Ops.DEFINE_LOCAL, dtypes.float32.ptr(size=16, addrspace=AddrSpace.LOCAL), (), 0)
+    st1 = uop(uops, Ops.STORE, dtypes.void, (smem1.index(c0), uop(uops, Ops.CONST, dtypes.float32, (), 42.0)))
+    barr1 = uop(uops, Ops.BARRIER, dtypes.void, (st1,))
+    val1 = uop(uops, Ops.LOAD, dtypes.float32, (smem1.after(barr1).index(c0, ptr=True),))
+    st_wb = uop(uops, Ops.STORE, dtypes.void, (smem1.index(c0), val1))
+    barr_mid = uop(uops, Ops.BARRIER, dtypes.void, (st_wb,))
+    smem2 = uop(uops, Ops.DEFINE_LOCAL, dtypes.float32.ptr(size=16, addrspace=AddrSpace.LOCAL), (), 1)
+    st2 = uop(uops, Ops.STORE, dtypes.void, (smem2.after(barr_mid).index(c0),
+              uop(uops, Ops.ADD, dtypes.float32, (val1, uop(uops, Ops.CONST, dtypes.float32, (), 1.0)))))
+    barr2 = uop(uops, Ops.BARRIER, dtypes.void, (st2,))
+    val2 = uop(uops, Ops.LOAD, dtypes.float32, (smem2.after(barr2).index(c0, ptr=True),))
+    self.assertEqual(_test_uops_result(dtypes.float32, uops, val2), 43)
+    self.assertEqual(self._get_smem_usage(uops, val2), (1, 64))  # 2×64B merged into 1×64B
+
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared memory")
+  def test_local_memory_plan_no_merge(self):
+    uops = []
+    c0 = uop(uops, Ops.CONST, dtypes.int32, (), 0)
+    smem1 = uop(uops, Ops.DEFINE_LOCAL, dtypes.float32.ptr(size=16, addrspace=AddrSpace.LOCAL), (), 0)
+    st1 = uop(uops, Ops.STORE, dtypes.void, (smem1.index(c0), uop(uops, Ops.CONST, dtypes.float32, (), 42.0)))
+    barr1 = uop(uops, Ops.BARRIER, dtypes.void, (st1,))
+    val1 = uop(uops, Ops.LOAD, dtypes.float32, (smem1.after(barr1).index(c0, ptr=True),))
+    smem2 = uop(uops, Ops.DEFINE_LOCAL, dtypes.float32.ptr(size=16, addrspace=AddrSpace.LOCAL), (), 1)
+    st2 = uop(uops, Ops.STORE, dtypes.void, (smem2.index(c0), uop(uops, Ops.ADD, dtypes.float32,
+              (val1, uop(uops, Ops.CONST, dtypes.float32, (), 1.0)))))
+    barr2 = uop(uops, Ops.BARRIER, dtypes.void, (st2,))
+    val2 = uop(uops, Ops.LOAD, dtypes.float32, (smem2.after(barr2).index(c0, ptr=True),))
+    self.assertEqual(_test_uops_result(dtypes.float32, uops, val2), 43)
+    self.assertEqual(self._get_smem_usage(uops, val2), (2, 128))  # overlapping, no merge
+
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared memory")
+  def test_local_memory_plan_three_bufs(self):
+    uops = []
+    c0 = uop(uops, Ops.CONST, dtypes.int32, (), 0)
+    smem1 = uop(uops, Ops.DEFINE_LOCAL, dtypes.float32.ptr(size=16, addrspace=AddrSpace.LOCAL), (), 0)
+    st1 = uop(uops, Ops.STORE, dtypes.void, (smem1.index(c0), uop(uops, Ops.CONST, dtypes.float32, (), 10.0)))
+    barr1 = uop(uops, Ops.BARRIER, dtypes.void, (st1,))
+    val1 = uop(uops, Ops.LOAD, dtypes.float32, (smem1.after(barr1).index(c0, ptr=True),))
+    st_wb1 = uop(uops, Ops.STORE, dtypes.void, (smem1.index(c0), val1))
+    barr_close1 = uop(uops, Ops.BARRIER, dtypes.void, (st_wb1,))
+    smem2 = uop(uops, Ops.DEFINE_LOCAL, dtypes.float32.ptr(size=16, addrspace=AddrSpace.LOCAL), (), 1)
+    smem3 = uop(uops, Ops.DEFINE_LOCAL, dtypes.float32.ptr(size=16, addrspace=AddrSpace.LOCAL), (), 2)
+    st2 = uop(uops, Ops.STORE, dtypes.void, (smem2.after(barr_close1).index(c0),
+              uop(uops, Ops.ADD, dtypes.float32, (val1, uop(uops, Ops.CONST, dtypes.float32, (), 1.0)))))
+    st3 = uop(uops, Ops.STORE, dtypes.void, (smem3.after(barr_close1).index(c0),
+              uop(uops, Ops.ADD, dtypes.float32, (val1, uop(uops, Ops.CONST, dtypes.float32, (), 100.0)))))
+    barr23 = uop(uops, Ops.BARRIER, dtypes.void, (st2, st3))
+    val2 = uop(uops, Ops.LOAD, dtypes.float32, (smem2.after(barr23).index(c0, ptr=True),))
+    val3 = uop(uops, Ops.LOAD, dtypes.float32, (smem3.after(barr23).index(c0, ptr=True),))
+    result = uop(uops, Ops.ADD, dtypes.float32, (val2, val3))
+    self.assertEqual(_test_uops_result(dtypes.float32, uops, result), 121)  # 11 + 110
+    self.assertEqual(self._get_smem_usage(uops, result), (1, 128))  # 3×64B merged into 1×128B
+
 @unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "This only tests assembly backends")
 class TestAssembly(unittest.TestCase):
   def test_bitshift_left(self):
