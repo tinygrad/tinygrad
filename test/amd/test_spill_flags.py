@@ -2,7 +2,7 @@
 """Test AMDGPU LLVM spill prevention flags."""
 import time, unittest
 from tinygrad import Device
-from tinygrad.helpers import Context, SPILL
+from tinygrad.helpers import Context, Timing
 
 KERNEL = '''
 define amdgpu_kernel void @test(ptr addrspace(1) %out, i32 %n) {
@@ -30,11 +30,12 @@ exit:
 class TestAMDSpillFlags(unittest.TestCase):
   def test_spill(self):
     from tinygrad.runtime.support.compiler_amd import AMDLLVMCompiler
-    for spill in [0, 1]:
-      with Context(SPILL=spill):
-        t = time.perf_counter()
-        AMDLLVMCompiler("gfx1100").compile(KERNEL)
-        print(f"\nSPILL={spill}: {time.perf_counter() - t:.3f}s")
+
+    with Timing("SPILL=0"):
+      with Context(SPILL=0): AMDLLVMCompiler("gfx1100").compile(KERNEL)
+
+    with Timing("SPILL=1"):
+      with Context(SPILL=1): AMDLLVMCompiler("gfx1100").compile(KERNEL)
 
 if __name__ == "__main__":
   unittest.main()
