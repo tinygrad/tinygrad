@@ -691,7 +691,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     from tinygrad.schedule.rangeify import pm_mops
     from tinygrad.uop.symbolic import symbolic
     numel = self.numel()
-    out = graph_rewrite(self._mop(Ops.RESHAPE, (numel,)).index(UOp.range(numel, 0)), pm_mops+symbolic, name="contiguous_view_offset")
+    out = graph_rewrite(self.flatten().index(UOp.range(numel, 0)), pm_mops+symbolic, name="contiguous_view_offset")
     if out.op is not Ops.INDEX: return None
     if out.src[1].op is Ops.CONST and resolve(numel == 1, False):
       if not isinstance(out.src[1].arg, int): return None  # masked/padded regions produce InvalidType
