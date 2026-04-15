@@ -74,8 +74,8 @@ def compile_hip(prg:str, arch="gfx1100", asm=False) -> bytes:
     options = [
       "-O3", "-mcumode", "--hip-version=6.0.32830", "-DHIP_VERSION_MAJOR=6", "-DHIP_VERSION_MINOR=0", "-DHIP_VERSION_PATCH=32830",
       "-D__HIPCC_RTC__", "-std=c++14", "-nogpuinc", "-Wno-gnu-line-marker", "-Wno-missing-prototypes", f"--offload-arch={arch}",
-      "-I/opt/rocm/include", "-Xclang -disable-llvm-passes", "-Xclang -aux-triple", "-Xclang x86_64-unknown-linux-gnu",
-      "-mllvm -amdgpu-spill-sgpr-to-vgpr=false", "-mllvm -amdgpu-spill-vgpr-to-agpr=false", "-fno-plt -fno-stack-protector"]
+      "-I/opt/rocm/include", "-Xclang -disable-llvm-passes", "-Xclang -aux-triple", "-Xclang x86_64-unknown-linux-gnu"]
+    if not SPILL.value: options += ["-mllvm -amdgpu-spill-sgpr-to-vgpr=false", "-mllvm -amdgpu-spill-vgpr-to-agpr=false", "-fno-plt -fno-stack-protector"]
     check(set_options(action_info, ' '.join(options).encode()))
     status = comgr.amd_comgr_do_action(comgr.AMD_COMGR_ACTION_COMPILE_SOURCE_WITH_DEVICE_LIBS_TO_BC, action_info, data_set_src, data_set_bc)
     if status != 0:
@@ -114,7 +114,7 @@ class HIPCCCompiler(Compiler):
         rocm_path = getenv("ROCM_PATH", "/opt/rocm")
         subprocess.run(["hipcc", "-c", "-emit-llvm", "--cuda-device-only", "-O3", "-mcumode",
                         f"--offload-arch={self.arch}", f"-I{rocm_path}/include/hip", "-o", bcf.name, srcf.name] + self.extra_options, check=True)
-        subprocess.run(["hipcc", "-target", "amdgcn-amd-amdhsa", f"-mcpu={self.arch}", "-mllvm -amdgpu-spill-sgpr-to-vgpr=false",
+        subprocess.run(["hipcc", "-target", "amdgcn-amd-amdhsa", f"-mcpu={self.arch}", "-mllvm -amdgpu-spill-sgpr-to-vgpr=false" * (not SPILL.value),
                         "-O3", "-mllvm", "-amdgpu-internalize-symbols", "-c", "-o", libf.name, bcf.name] + self.extra_options, check=True)
 
         return pathlib.Path(libf.name).read_bytes()
