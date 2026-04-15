@@ -31,10 +31,10 @@ class TestAMDSpillFlags(unittest.TestCase):
   def test_spill(self):
     from tinygrad.runtime.support.compiler_amd import AMDLLVMCompiler
 
-    with Timing("SPILL=0"):
+    with Timing("SPILL=0 "):
       with Context(SPILL=0): AMDLLVMCompiler("gfx1100").compile(KERNEL)
 
-    with Timing("SPILL=1"):
+    with Timing("SPILL=1 "):
       with Context(SPILL=1): AMDLLVMCompiler("gfx1100").compile(KERNEL)
 
 if __name__ == "__main__":
