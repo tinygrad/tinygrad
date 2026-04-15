@@ -29,12 +29,12 @@ exit:
 @unittest.skipUnless(Device.DEFAULT == "AMD", "Runs only on AMD")
 class TestAMDSpillFlags(unittest.TestCase):
   def test_spill(self):
-    from tinygrad.runtime.support.compiler_amd import HIPCompiler
+    from tinygrad.runtime.support.compiler_amd import AMDLLVMCompiler
     import time
     for spill in [0, 1]:
       with Context(SPILL=spill):
         t = time.perf_counter()
-        HIPCompiler("gfx1100").compile(KERNEL)
+        AMDLLVMCompiler("gfx1100").compile(KERNEL)
         print(f"\nSPILL={spill}: {time.perf_counter() - t:.3f}s")
 
 if __name__ == "__main__":
