@@ -626,7 +626,6 @@ if __name__ == "__main__":
   parser.add_argument("--serve", nargs='?', type=int, const=8000, metavar="PORT", help="Run OpenAI compatible API (optional port, default 8000)")
   parser.add_argument("--warmup", action="store_true", help="warmup the JIT")
   parser.add_argument("--think", action=argparse.BooleanOptionalAction, default=True, help="Enable thinking for reasoning models (no-op otherwise)")
-  parser.add_argument("--temperature", "--temp", type=float, default=0.0, help="Sampling temperature")
   parser.add_argument("--benchmark", nargs='?', type=int, const=20, metavar="COUNT", help="Benchmark tok/s (optional count, default 20)")
   args = parser.parse_args()
 
@@ -675,7 +674,7 @@ if __name__ == "__main__":
       break
     dec = tok.stream_decoder()
     if think_start: sys.stdout.write(think_start)
-    for next_id in model.generate(ids, temperature=args.temperature):
+    for next_id in model.generate(ids):
       sys.stdout.write(dec(next_id) if next_id not in (eos_id, eot_id) else dec() + "\n\n")
       sys.stdout.flush()
       if next_id in (eos_id, eot_id): break

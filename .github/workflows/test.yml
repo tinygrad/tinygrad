@@ -509,7 +509,7 @@ jobs:
       - name: Test 1B LLM (llama q4)
         run: echo "What's a male chicken called? Answer with only one word." | MAX_BUFFER_SIZE=0 python3 -m tinygrad.apps.llm --model llama3.2:1b-q4 | tee /dev/stderr | grep -i rooster
       - name: Test 1B LLM (qwen3.5)
-        run: echo "What's a male chicken called? Answer with only one word." | MAX_BUFFER_SIZE=0 python3 -m tinygrad.apps.llm --model qwen3.5:0.8b --temperature 0.8 | tee /dev/stderr | grep -i rooster
+        run: echo "What's a male chicken called? Answer with only one word." | MAX_BUFFER_SIZE=0 python3 -m tinygrad.apps.llm --model qwen3.5:0.8b --no-think | tee /dev/stderr | grep -i rooster
       - name: Test 1B LLM (qwen)
         # NOTE: qwen is dumb and only knows about female chickens
         run: echo "What's a female chicken called? Answer with only one word." | MAX_BUFFER_SIZE=0 python3 -m tinygrad.apps.llm --model qwen3:0.6b | tee /dev/stderr | grep -i hen
