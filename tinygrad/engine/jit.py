@@ -220,6 +220,8 @@ class CapturedJit(Generic[ReturnType]):
 
   def __reduce__(self): return self.__class__, (self.ret, self.linear, self.expected_names, self.expected_input_info)
   def __post_init__(self): self._jit_cache = None
+  @property
+  def jit_cache(self) -> list[ExecItem]: return self._jit_cache if self._jit_cache is not None else []
 
   def _init(self, input_uops:list[UOp]):
     self._jit_cache, self._input_replace, self._extra_view_inputs = linear_to_jit_cache(self.linear, input_uops)
@@ -246,6 +248,17 @@ class CapturedJit(Generic[ReturnType]):
     for ei in self._jit_cache: ei.run(var_vals, jit=True)
     for (j,i) in self._input_replace.keys(): self._jit_cache[j].bufs[i] = None
     return self.ret
+
+  def free_intermediates(self):
+    depends: set[Buffer|None] = set([None])
+    update_depends(depends, self.jit_cache)
+    arenas = {b._base for b in depends if b is not None and b._base is not None}
+    to_free = {b for b in depends if b is not None} | {b for b in jit_cache_bufs(self.jit_cache) if b._base in arenas}
+    for b in to_free:
+      if hasattr(b, '_buf'): b.deallocate()
+    for a in arenas:
+      if a.allocated_views == 0 and a.is_allocated(): a.deallocate()
+    self.__post_init__()
 
 def _prepare_jit_inputs(args, kwargs):
   input_tensors: list[tuple[int|str, Tensor]] = [(name,t) for name,t in list(enumerate(args))+sorted(kwargs.items()) if t.__class__ is Tensor]
