@@ -2,7 +2,6 @@
 """Test AMDGPU LLVM spill prevention flags."""
 import unittest
 from tinygrad import Device
-from tinygrad.device import CompileError
 
 @unittest.skipUnless(Device.DEFAULT == "AMD", "Runs only on AMD")
 class TestAMDSpillFlags(unittest.TestCase):

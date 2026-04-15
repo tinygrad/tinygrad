@@ -73,7 +73,7 @@ def compile_hip(prg:str, arch="gfx1100", asm=False) -> bytes:
     options = [
       "-O3", "-mcumode", "--hip-version=6.0.32830", "-DHIP_VERSION_MAJOR=6", "-DHIP_VERSION_MINOR=0", "-DHIP_VERSION_PATCH=32830",
       "-D__HIPCC_RTC__", "-std=c++14", "-nogpuinc", "-Wno-gnu-line-marker", "-Wno-missing-prototypes", f"--offload-arch={arch}",
-      "-I/opt/rocm/include", "-Xclang -disable-llvm-passes", "-Xclang -aux-triple", "-Xclang x86_64-unknown-linux-gnu", 
+      "-I/opt/rocm/include", "-Xclang -disable-llvm-passes", "-Xclang -aux-triple", "-Xclang x86_64-unknown-linux-gnu",
       "-mllvm -amdgpu-spill-sgpr-to-vgpr=false", "-mllvm -amdgpu-spill-vgpr-to-agpr=false", "-fno-plt -fno-stack-protector"]
     check(set_options(action_info, ' '.join(options).encode()))
     status = comgr.amd_comgr_do_action(comgr.AMD_COMGR_ACTION_COMPILE_SOURCE_WITH_DEVICE_LIBS_TO_BC, action_info, data_set_src, data_set_bc)
