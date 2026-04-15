@@ -340,7 +340,7 @@ def load_amd_counters(data:VizData, profile:list[ProfileEvent]) -> None:
     run_number[k] += 1
     steps:list[dict] = []
     if (pmc:=v.get(ProfilePMCEvent)):
-      steps.append(create_step("PMC", ("/prg-pmc", len(data.ctxs), len(steps)), pmc))
+      steps.append(create_step("PMC", ("/prg-pmc", len(data.ctxs), len(steps)), pmc[0]))
       all_counters[(name, run_number[k], pname)] = pmc[0]
     # to decode a SQTT trace, we need the raw stream, program binary and device properties
     if (sqtt:=v.get(ProfileSQTTEvent)):
@@ -647,7 +647,7 @@ def get_render(viz_data:VizData, query:str) -> dict:
       ret["rows"].append((name, durations[k][n-1], *[r[1] for r in pmc_table["rows"]]))
     ret["cols"] = ["Kernel", "Duration", *ret["cols"]]
     return ret
-  if fmt == "prg-pmc": return unpack_pmc(data[0])
+  if fmt == "prg-pmc": return unpack_pmc(data)
   if fmt.startswith("prg-pkts"):
     ret = {}
     with soft_err(lambda err:ret.update(err)):
