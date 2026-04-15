@@ -13,7 +13,7 @@ if __name__ == "__main__":
     if "ASM_GEMM" not in os.environ:
       os.environ["ASM_GEMM"] = "1"
 from tinygrad import Tensor, nn, function, getenv, dtypes, TinyJit
-from tinygrad.helpers import Timing, colored, GlobalCounters, profile_marker
+from tinygrad.helpers import Timing, colored, GlobalCounters, profile_marker, ContextVar
 from tinygrad.uop.ops import Ops, UOp
 from extra.models.llama import apply_rotary_emb, precompute_freqs_cis
 
@@ -22,17 +22,21 @@ FP8 = getenv("FP8", 0)
 FP8_DTYPE = dtypes.fp8e4m3
 FP8_GRAD_DTYPE = dtypes.fp8e5m2
 FP8_MAX = 448.0
+HK_AMAX = ContextVar("HK_AMAX", 0)
 
 # per-device abs max without allreduce (matches TE delayed scaling behavior)
 @functools.cache
-def _local_abs_max_fxn(x_p, device):
+def _local_abs_max_fxn(x_p, device, hk_amax):
   x = Tensor(x_p, device=device)
   inner = Tensor(x.uop.src[0]) if x.uop.op is Ops.MULTI else x
+  if hk_amax:
+    from extra.gemm.cdna_asm_gemm import hk_amax
+    return (hk_amax(inner),)
   return (inner.abs().max(),)
 
 def _local_abs_max(x:Tensor) -> Tensor:
   param = x.as_param(0)
-  fxn = _local_abs_max_fxn(param.uop, x.device)
+  fxn = _local_abs_max_fxn(param.uop, x.device, hk_amax=HK_AMAX.value)
   return Tensor(fxn[0].uop.call(x.uop).gettuple(0))
 
 def quantize_fp8(x:Tensor, amax_state:Tensor|None=None):

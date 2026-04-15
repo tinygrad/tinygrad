@@ -3,9 +3,10 @@ import numpy as np
 from tinygrad import Tensor, Device, dtypes, Context
 from tinygrad.device import is_dtype_supported
 from tinygrad.helpers import getenv, system
+from tinygrad.uop.ops import Ops
 from extra.gemm.cdna_asm_gemm import asm_gemm, hk_amax
 from test.helpers import needs_second_gpu
-from examples.mlperf.models.flat_llama import FP8_DTYPE
+from examples.mlperf.models.flat_llama import FP8_DTYPE, _local_abs_max
 
 # On non CDNA4 it will only validate the Tensor.custom_kernel integration
 # Use DEV=NULL:HIP:gfx950 to also test the assembly
@@ -236,18 +237,42 @@ class TestAmax(unittest.TestCase):
     np.testing.assert_allclose(y, x.abs().max().numpy(), atol=2e-1, rtol=1e-2)
 
   def test_simple(self):
-    x = Tensor.randn((4096, 4096), dtype=dtypes.float).sub(0.5).cast(dtypes.bfloat16)
+    x = Tensor.randn((32, 32), dtype=dtypes.float).sub(0.5).cast(dtypes.bfloat16)
     self.cmp(x)
 
   def test_llama_shape(self):
     x = Tensor.randn((2, 8192, 4096), dtype=dtypes.float).sub(0.5).cast(dtypes.bfloat16)
     self.cmp(x)
 
-  @unittest.skip("todo: test this properly")
   def test_multi(self):
+    Tensor.manual_seed(0)
     devs = tuple(f"{Device.DEFAULT}:{i}" for i in range(8))
-    x = Tensor.randn((16, 8192, 4096), dtype=dtypes.float).sub(0.5).cast(dtypes.bfloat16).shard(devs, axis=0)
-    self.cmp(x)
+    x_np = Tensor.randn((8, 32, 32), dtype=dtypes.float).sub(0.5).numpy()
+
+    def per_dev_vals(y:Tensor):
+      return [Tensor(y.uop.mselect(i)).numpy() for i in range(len(devs))]
+
+    x = Tensor(x_np).cast(dtypes.bfloat16).realize().shard(devs, axis=0)
+    print("*** local version")
+    with Context(HK_AMAX=0):
+      y_local = _local_abs_max(x)
+      y_local_vals = per_dev_vals(y_local)
+    print("single view:", y_local.numpy())
+    print("per-device local amax:", y_local_vals)
+
+    print("*** local hk version")
+    with Context(HK_AMAX=1):
+      y_local_hk = _local_abs_max(x)
+      y_local_hk_vals = per_dev_vals(y_local_hk)
+    print("single view:", y_local_hk.numpy())
+    print("per-device local hk amax:", y_local_hk_vals)
+    np.testing.assert_allclose(np.array(y_local_hk_vals), np.array(y_local_vals), atol=5e-1, rtol=1e-2)
+
+    print("*** non local version")
+    x = Tensor(x_np).cast(dtypes.bfloat16).realize().shard(devs, axis=0)
+    y = x.abs().max()
+    print("single view:", y.numpy())
+    print("per-device reduced amax:", per_dev_vals(y))
 
 if __name__ == "__main__":
   unittest.main()

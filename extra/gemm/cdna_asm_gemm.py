@@ -2645,10 +2645,11 @@ def custom_hk_fp8_gemm(C:UOp, A:UOp, B:UOp, S:UOp, dname:str) -> UOp:
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dname), UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src),
                                UOp(Ops.BINARY, arg=lib)))
 
-counters = {"used":0, "todos":[]}
+counters = {"used":0, "todos":[], "hk_amax":0}
 def todo(msg:str) -> bool: counters["todos"].append(msg); return False
 def _asm_gemm_report():
   print(f'asm_gemm: {counters["used"]} used, {len(counters["todos"])} not used')
+  print(f'hk_amax: {counters["hk_amax"]} used')
   if DEBUG >= 2 and counters["todos"]:
     from collections import Counter
     for msg, cnt in Counter(counters["todos"]).most_common(): print(f'  {cnt:3d}x {msg}')
@@ -2737,7 +2738,7 @@ def _zero_kernel(out:UOp) -> UOp:
 def custom_hk_amax(amax:UOp, x:UOp, dname:str) -> UOp:
   TILE_ELEMS = 16 * 32
   numel = x.size
-  assert numel % TILE_ELEMS == 0, f"unsupported shape {n}"
+  assert numel % TILE_ELEMS == 0, f"unsupported shape {numel}, tile size is {TILE_ELEMS}"
   num_tiles = numel // TILE_ELEMS
   grid = min(16384, num_tiles)
   kittens_path = pathlib.Path(__file__).parent.parent/"thunder"/"amd"
@@ -2748,13 +2749,24 @@ def custom_hk_amax(amax:UOp, x:UOp, dname:str) -> UOp:
   sink = UOp.sink(amax.base, x.base, lidx, gidx, arg=KernelInfo(name=f"custom_quantize_fp8_amax_{numel}", estimates=Estimates()))
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dname), UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=lib)))
 
+def custom_hk_amax_uop(amax:UOp, x:UOp, dname:str) -> UOp:
+  _ = dname
+  ridx = UOp.range(x.size, 0, AxisType.REDUCE)
+  absx = x.flatten().index(ridx).cast(amax.dtype.base).abs()
+  red = absx.reduce(ridx, arg=Ops.MAX, dtype=dtypes.float32)
+  store = amax[0].store(red)
+  return store.sink(arg=KernelInfo(name=f"custom_quantize_fp8_amax_uop_{x.size}", estimates=Estimates()))
+
 def hk_amax(x:Tensor) -> Tensor:
   amax_f32 = Tensor.invalid(1, dtype=dtypes.float32, device=x.device)
   amax_f32 = amax_f32.custom_kernel(fxn=_zero_kernel)[0]
   device = x.device[0] if isinstance(x.device, tuple) else x.device
   dname = device.split(":")[0]
-  amax_f32, _ = Tensor.custom_kernel(amax_f32, x, fxn=functools.partial(custom_hk_amax, dname=dname), grad_fxn=hk_amax_grad)
-  return amax_f32.cast(x.dtype)
+  arch = Device[device].renderer.target.arch
+  counters["hk_amax"] += 1
+  amax_f32, _ = Tensor.custom_kernel(amax_f32, x, fxn=functools.partial(custom_hk_amax_uop if arch != "gfx950" else custom_hk_amax, dname=dname),
+                                     grad_fxn=hk_amax_grad)
+  return amax_f32.cast(x.dtype).reshape(())
 
 # ** main gemm function
 
