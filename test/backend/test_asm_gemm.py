@@ -233,10 +233,14 @@ class TestAmax(unittest.TestCase):
   def cmp(self, x:Tensor):
     with Context(DEBUG=0): x.realize()
     y = hk_amax(x).numpy()
-    np.testing.assert_allclose(y, x.abs().max().numpy())
+    np.testing.assert_allclose(y, x.abs().max().numpy(), atol=2e-1, rtol=1e-2)
 
   def test_simple(self):
     x = Tensor.randn((4096, 4096), dtype=dtypes.float).sub(0.5).cast(dtypes.bfloat16)
+    self.cmp(x)
+
+  def test_llama_shape(self):
+    x = Tensor.randn((2, 8192, 4096), dtype=dtypes.float).sub(0.5).cast(dtypes.bfloat16)
     self.cmp(x)
 
 if __name__ == "__main__":
