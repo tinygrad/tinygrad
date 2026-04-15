@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Test AMDGPU LLVM spill prevention flags."""
-import time, unittest
+import unittest
 from tinygrad import Device
 from tinygrad.helpers import Context, Timing
 
