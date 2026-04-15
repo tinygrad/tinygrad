@@ -3,7 +3,7 @@ import unittest, math, time
 from tinygrad import Tensor, Device, dtypes, Context
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.engine.realize import get_runner
-from tinygrad.engine.schedule import ExecItem
+from tinygrad.schedule import ExecItem
 from tinygrad.engine.jit import TinyJit
 import numpy as np
 

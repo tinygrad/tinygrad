@@ -7,7 +7,7 @@ from tinygrad.helpers import Context, dedup, from_mv
 from tinygrad.dtype import dtypes
 from tinygrad.engine.jit import MultiGraphRunner
 from tinygrad.engine.realize import BufferXfer, get_runner, CompiledRunner
-from tinygrad.engine.schedule import ExecItem
+from tinygrad.schedule import ExecItem
 from tinygrad.uop.ops import UOp, Ops
 
 from test.helpers import needs_second_gpu
@@ -60,7 +60,7 @@ def helper_make_view(base, offset_elems, size_elems):
 
 def helper_run_jit(jis, bufs, out_buffers):
   for rawbuf in out_buffers:
-    mv = memoryview(bytearray(rawbuf.size * rawbuf.dtype.itemsize))
+    mv = memoryview(bytearray(rawbuf.nbytes))
     ctypes.memset(from_mv(mv), 0, len(mv))
     rawbuf.copyin(mv)
 

@@ -587,6 +587,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     return self.pad(tuple((0,0) if a != axis else (bsz*dnum, bsz*(dcount-1) - bsz*dnum) for a in range(len(self.shape))))
 
   def _shard(self, axis:int) -> UOp:
+    if len(self.shape) == 0: return self  # scalars broadcast, no sharding needed
     dcount = len(self.device)
     dnum = UOp.variable("_device_num", 0, dcount-1)
     if self.shape[axis] % dcount != 0: raise RuntimeError(f"multi axis uneven: {self.shape[axis]=} {axis=} {dcount=}")
