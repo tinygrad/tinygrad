@@ -65,13 +65,16 @@ def jit_cache_bufs(jit_cache:list[ExecItem]):
       if b is not None: yield b
     if isinstance(ei.prg, GraphRunner): yield from jit_cache_bufs(ei.prg.jit_cache)
 
-@track_rewrites(lambda linear,held_bufs,input_uops,ret=(): f"JIT {pluralize('call', len(linear.src))}")
-def jit_lower(linear:UOp, held_bufs:set[UOp], input_uops:list[UOp]) -> UOp:
+pm_beam = PatternMatcher([(UPat(Ops.SINK, name="s"), lambda ctx,s: UOp(Ops.BEAM, src=(s,), arg=ctx))])
+
+@track_rewrites(lambda linear,held_bufs,input_uops,jitbeam=0,ret=(): f"JIT {pluralize('call', len(linear.src))}")
+def jit_lower(linear:UOp, held_bufs:set[UOp], input_uops:list[UOp], jitbeam:int=0) -> UOp:
   if VIZ: graph_rewrite(linear, PatternMatcher([]), name="View captured linear")
   # parametrize input buffers: map each input buffer UOp to a PARAM with the correct slot index
-  pm_sub = PatternMatcher([(UPat(tuple(Ops), name="x"), lambda ctx,x: ctx.get(x,None))])
   param_map = {u: UOp(Ops.PARAM, u.dtype, (UOp(Ops.DEVICE, arg=u.device),), i) for i,u in enumerate(input_uops)}
-  linear = graph_rewrite(linear, pm_sub, param_map, bottom_up=True, walk=True, enter_calls=True)
+  linear = linear.substitute(param_map, walk=True)
+  # wrap SINKs with BEAM if jitbeam is set
+  if jitbeam >= 1: linear = graph_rewrite(linear, pm_beam, ctx=jitbeam, walk=True, enter_calls=True)
   linear = memory_plan_rewrite(linear, held_bufs)
   if JIT < 2: linear = graph_split_rewrite(linear, max_batch_size=JIT_BATCH_SIZE.value)
   if VIZ: graph_rewrite(linear, PatternMatcher([]), name="View graphed linear")
@@ -342,8 +345,7 @@ class TinyJit(Generic[ReturnType]):
           ei.run(var_vals, jit=True)
 
       held_bufs = set(buffers) | {t.uop.buf_uop for t in get_parameters(ret) if t.uop.buf_uop.op is Ops.BUFFER}
-      with Context(BEAM=getenv("JITBEAM", BEAM.value)):
-        linear = jit_lower(big_linear, held_bufs, input_buf_uops)
+      linear = jit_lower(big_linear, held_bufs, input_buf_uops, jitbeam=getenv("JITBEAM", BEAM.value))
       self.captured = CapturedJit(ret, linear, names, expected_input_info)
       ret = self.captured(input_buf_uops, var_vals)
     elif self.cnt >= 2:
