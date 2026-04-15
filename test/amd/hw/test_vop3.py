@@ -20,6 +20,28 @@ class TestFMA(unittest.TestCase):
     st = run_program(instructions, n_lanes=1)
     self.assertAlmostEqual(i2f(st.vgpr[0][3]), 9.0, places=5)
 
+  def test_v_mullit_f32_basic(self):
+    """V_MULLIT_F32 multiplies when the guard input is valid."""
+    instructions = [
+      v_mov_b32_e32(v[0], f2i(2.0)),
+      v_mov_b32_e32(v[1], f2i(3.0)),
+      v_mov_b32_e32(v[2], f2i(1.0)),
+      v_mullit_f32(v[3], v[0], v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertAlmostEqual(i2f(st.vgpr[0][3]), 6.0, places=5)
+
+  def test_v_mullit_f32_invalid_guard(self):
+    """V_MULLIT_F32 returns -MAX_FLOAT_F32 when the guard input is non-positive."""
+    instructions = [
+      v_mov_b32_e32(v[0], f2i(2.0)),
+      v_mov_b32_e32(v[1], f2i(3.0)),
+      v_mov_b32_e32(v[2], f2i(0.0)),
+      v_mullit_f32(v[3], v[0], v[1], v[2]),
+    ]
+    st = run_program(instructions, n_lanes=1)
+    self.assertEqual(st.vgpr[0][3], 0xFF7FFFFF)
+
   def test_v_fma_f32_negative(self):
     """V_FMA_F32 with negative multiplier."""
     instructions = [
@@ -1592,8 +1614,7 @@ class TestModifierInteractions(unittest.TestCase):
     self.assertEqual(st.vgpr[0][2], 0x80000000, "-|(-0.0)| = -0.0")
 
   def test_clamp_with_nan(self):
-    """Clamp with NaN input should still produce NaN."""
-    import math
+    """Clamp with NaN input saturates to 0 on RDNA3 hardware."""
     quiet_nan = 0x7fc00000
     instructions = [
       s_mov_b32(s[0], quiet_nan),
@@ -1601,7 +1622,7 @@ class TestModifierInteractions(unittest.TestCase):
       VOP3(VOP3Op.V_ADD_F32, vdst=v[1], src0=v[0], src1=0.0, clmp=1),
     ]
     st = run_program(instructions, n_lanes=1)
-    self.assertTrue(math.isnan(i2f(st.vgpr[0][1])))
+    self.assertEqual(st.vgpr[0][1], 0)
 
   def test_omod_ignored(self):
     """OMOD field is ignored on RDNA3 hardware."""
@@ -3605,32 +3626,30 @@ class TestPermlane(unittest.TestCase):
     """V_PERMLANE16_B32 broadcast lane 0 to all lanes in row."""
     # lanesel = all zeros -> all positions read from lane 0 within row
     instructions = [
-      v_mov_b32_e32(v[0], 0xCAFEBABE),  # source data
+      v_mov_b32_e32(v[0], v[255]),
       s_mov_b32(s[0], 0),                # lanesel low = 0 (all read lane 0)
       s_mov_b32(s[1], 0),                # lanesel high = 0
       v_permlane16_b32(v[1], v[0], s[0], s[1]),
     ]
-    st = run_program(instructions, n_lanes=4)
-    # All lanes read from lane 0 of their row
-    for lane in range(4):
-      self.assertEqual(st.vgpr[lane][1], 0xCAFEBABE)
+    st = run_program(instructions, n_lanes=32)
+    for lane in range(16): self.assertEqual(st.vgpr[lane][1], 0)
+    for lane in range(16, 32): self.assertEqual(st.vgpr[lane][1], 16)
 
   def test_v_permlanex16_b32_identity(self):
     """V_PERMLANEX16_B32 cross-row read with identity selection."""
-    # In wave32: row 0 (lanes 0-15) reads from row 1 (lanes 16-31) and vice versa
-    # With single lane in row 0, it reads from lane 0 of row 1 (lane 16)
-    # But lane 16 doesn't exist in 1-lane test, so use 32 lanes
     instructions = [
-      v_mov_b32_e32(v[0], 0x11111111),  # All lanes have this initially
+      v_mov_b32_e32(v[0], v[255]),
       s_mov_b32(s[0], 0x76543210),       # lanesel low
       s_mov_b32(s[1], 0xFEDCBA98),       # lanesel high
       v_permlanex16_b32(v[1], v[0], s[0], s[1]),
     ]
     st = run_program(instructions, n_lanes=32)
-    # Lane 0 in row 0 reads from lane 0 of row 1 (lane 16)
-    self.assertEqual(st.vgpr[0][1], 0x11111111)
-    # Lane 16 in row 1 reads from lane 0 of row 0 (lane 0)
-    self.assertEqual(st.vgpr[16][1], 0x11111111)
+    self.assertEqual(st.vgpr[0][1], 16)
+    self.assertEqual(st.vgpr[5][1], 21)
+    self.assertEqual(st.vgpr[15][1], 31)
+    self.assertEqual(st.vgpr[16][1], 0)
+    self.assertEqual(st.vgpr[21][1], 5)
+    self.assertEqual(st.vgpr[31][1], 15)
 
 
 if __name__ == '__main__':

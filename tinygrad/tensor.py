@@ -16,7 +16,7 @@ from tinygrad.uop.ops import _broadcast_shape
 from tinygrad.engine.schedule import ExecItem, complete_create_schedule_with_vars
 from tinygrad.device import Buffer, canonicalize_device
 from tinygrad.engine.realize import run_schedule
-from tinygrad.engine.allocations import transform_to_call
+from tinygrad.engine.callify import transform_to_call
 
 # *** all in scope Tensors are here. this gets relevant UOps ***
 
@@ -57,7 +57,7 @@ def _frompy(x:list|tuple|bytes, dtype:DType, device:str|tuple[str,...]) -> UOp:
     ret = UOp.new_buffer("PYTHON", prod(shape:=get_shape(x)), dtype).reshape(shape)
     assert dtype.fmt is not None, f"{dtype=} has None fmt"
     truncate_function = truncate[dtype]
-    data = struct.pack(f"{ret.size}{dtype.fmt}", *[truncate_function(dtype.const(xi)) for xi in fully_flatten(x)])
+    data = struct.pack(f"{prod(shape)}{dtype.fmt}", *[truncate_function(dtype.const(xi)) for xi in fully_flatten(x)])
   # fake realize. if target device is PYTHON it needs bytearray to be writable
   ret.buffer.allocate(memoryview(data if device != "PYTHON" else bytearray(data)))
   return ret

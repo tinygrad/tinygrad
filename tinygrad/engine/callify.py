@@ -65,7 +65,7 @@ def _make_buffer_view(src:UOp) -> UOp|None:
   if (offset := src.contiguous_view_offset()) is None: return None
   buf = src.base
   if buf.op is Ops.BUFFER_VIEW: offset, buf = offset + buf.arg[1], buf.src[0]
-  return UOp(Ops.BUFFER_VIEW, src.dtype, (buf,), (src.size, offset)).reshape(src.shape)
+  return UOp(Ops.BUFFER_VIEW, src.dtype, (buf,), (src.numel(), offset)).reshape(src.shape)
 
 def contiguous_mops_to_view(c:UOp, src:UOp):
   """CONTIGUOUS(MOPS(BUFFER)) → CONTIGUOUS(BUFFER_VIEW) when movement ops collapse to a contiguous range."""
@@ -178,7 +178,7 @@ pm_replace_buf = PatternMatcher([
   (UPat(Ops.BIND, src=(UPat(Ops.DEFINE_VAR), UPat(Ops.CONST)), name="b"), replace_input_buffer),
 ])
 
-@track_rewrites(lambda _,ret: f"Process {pluralize('Buffer', len(ret[1]))}")
+@track_rewrites(lambda _,ret: f"Callify {pluralize('Buffer', len(ret[1]))}")
 def transform_to_call(big_sink:UOp) -> tuple[UOp, dict[UOp, UOp]]:
   if VIZ: graph_rewrite(big_sink, PatternMatcher([]), name="View Tensor Graph")
   # uop list is a list in the original_sink graph and we can map to the tags later
