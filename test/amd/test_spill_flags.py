@@ -2,7 +2,7 @@
 """Test AMDGPU LLVM spill prevention flags."""
 import unittest
 from tinygrad import Device
-from tinygrad.helpers import Context, Timing
+from tinygrad.helpers import Context
 
 KERNEL = '''
 define amdgpu_kernel void @test(ptr addrspace(1) %out, i32 %n) {
@@ -26,16 +26,18 @@ exit:
 }
 '''
 
+# With DEBUG=7 you can see the LLVM IR and check for spill instructions: writelane, readlane, buffer_store
+
 @unittest.skipUnless(Device.DEFAULT == "AMD", "Runs only on AMD")
 class TestAMDSpillFlags(unittest.TestCase):
   def test_spill(self):
     from tinygrad.runtime.support.compiler_amd import AMDLLVMCompiler
-
-    with Timing("SPILL=0 "):
-      with Context(SPILL=0): AMDLLVMCompiler("gfx1100").compile(KERNEL)
-
-    with Timing("SPILL=1 "):
-      with Context(SPILL=1): AMDLLVMCompiler("gfx1100").compile(KERNEL)
+    # SPILL=0 should prevent most spills
+    with Context(SPILL=0, DEBUG=7):
+      AMDLLVMCompiler("gfx1100").compile(KERNEL)
+    # SPILL=1 allows spills
+    with Context(SPILL=1, DEBUG=7):
+      AMDLLVMCompiler("gfx1100").compile(KERNEL)
 
 if __name__ == "__main__":
   unittest.main()
