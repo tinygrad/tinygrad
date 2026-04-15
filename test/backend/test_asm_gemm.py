@@ -243,5 +243,11 @@ class TestAmax(unittest.TestCase):
     x = Tensor.randn((2, 8192, 4096), dtype=dtypes.float).sub(0.5).cast(dtypes.bfloat16)
     self.cmp(x)
 
+  @unittest.skip("todo: test this properly")
+  def test_multi(self):
+    devs = tuple(f"{Device.DEFAULT}:{i}" for i in range(8))
+    x = Tensor.randn((16, 8192, 4096), dtype=dtypes.float).sub(0.5).cast(dtypes.bfloat16).shard(devs, axis=0)
+    self.cmp(x)
+
 if __name__ == "__main__":
   unittest.main()
