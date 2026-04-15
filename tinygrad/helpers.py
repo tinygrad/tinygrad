@@ -151,6 +151,9 @@ def getenv(key:str, default:T) -> T: ...
 @functools.cache
 def getenv(key:str, default:Any=0): return type(default)(os.getenv(key, default))
 
+# SPILL: Set to 0 to disable register spilling in AMDGPU LLVM (amdgpu-spill-*-to-*-=false flags)
+SPILL = getenv("SPILL", 1)
+
 def temp(x:str, append_user:bool=False) -> str:
   return (pathlib.Path(tempfile.gettempdir()) / (f"{x}.{getpass.getuser()}" if append_user else x)).as_posix()
 

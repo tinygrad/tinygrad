@@ -1,5 +1,5 @@
 import ctypes, hashlib, tempfile, subprocess, pathlib, shutil
-from tinygrad.helpers import system, getenv
+from tinygrad.helpers import system, getenv, SPILL
 from tinygrad.runtime.autogen import comgr
 try:
   comgr.amd_comgr_get_version(ctypes.byref(major:=ctypes.c_uint64()), ctypes.byref(minor:=ctypes.c_uint64()))
