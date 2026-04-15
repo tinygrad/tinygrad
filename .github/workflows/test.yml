@@ -671,6 +671,8 @@ jobs:
         run: python -m pytest -n=auto test/amd/ --durations 20
       - name: Run AMD renderer tests (AMD:LLVM)
         run: DEV=AMD:LLVM python -m pytest -n=auto test/amd/ --durations 20
+      - name: Run AMD spill flags tests
+        run: DEV=AMD:LLVM python -m pytest test/amd/test_spill_flags.py --durations 20
       - name: Run SQTT profiling tests
         run: PROFILE=1 SQTT=1 python3 -m pytest -n=auto test/amd/test_sqtt_profiler.py
       - name: Run AMD emulated tests on NULL backend
