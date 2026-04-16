@@ -161,7 +161,7 @@ def main(args) -> None:
   if args.item is None:
     for k,v in steps.items(): print(" "*v["depth"]+k+(f" - {v['match_count']}" if v.get('match_count', 0) else ''))
   else:
-    data = viz.get_render(data, get(steps, args.item)["query"])
+    data = viz.get_render(viz_data, get(steps, args.item)["query"])
     if isinstance(data.get("value"), Iterator):
       for m in data["value"]:
         if m.get("uop"): print(f"Input UOp:\n{m['uop']}")
