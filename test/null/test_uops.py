@@ -239,6 +239,9 @@ class TestUOpMethod(unittest.TestCase):
     self.assertEqual((gidx0*3).const_factor(), 3)
     self.assertEqual((gidx0*3+6).const_factor(), 3)
     self.assertEqual((gidx0*3+1).const_factor(), 1)
+    self.assertEqual(UOp.const(dtypes.int, -6).const_factor(), 6)
+    self.assertEqual((gidx0*-3).const_factor(), 3)
+    self.assertEqual((gidx0*-3+6).const_factor(), 3)
 
   def test_replace(self):
     x = UOp(Ops.PARAM, dtypes.int.ptr(), (), 0)
