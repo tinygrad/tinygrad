@@ -122,7 +122,7 @@ def main(args) -> None:
       for e in data["events"]:
         info = str(e.get("arg", {}))
         if e["event"] == "free":
-          info = ', '.join([f"{format_colored(kernel)} {["read", "write", "write+read"][mode]}@data{num}" for _,kernel,num,mode in e["arg"]["users"]])
+          info = ', '.join([f"{format_colored(kernel)} {['read','write','write+read'][mode]}@data{num}" for _,kernel,num,mode in e["arg"]["users"]])
         print(f"{e['ts']:<10}  {e['event']:<6}  {e.get('key', ''):>8}  {info}")
       return None
 
