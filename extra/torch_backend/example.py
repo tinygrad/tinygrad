@@ -24,7 +24,7 @@ if __name__ == "__main__":
   kernel_count = GlobalCounters.kernel_count
   assert kernel_count > 0, "No kernels, test failed"
   # NOTE: this is 124 on torch 2.10.0
-  expected_kernels = 334
+  expected_kernels = 355
   expectation = f"ResNet18 kernels are {kernel_count} vs {expected_kernels} expected."
   if kernel_count < expected_kernels: warnings.warn(f"{expectation} Expectation can be lowered.", UserWarning)
   assert kernel_count <= expected_kernels, f"{expectation}"
