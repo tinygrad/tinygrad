@@ -30,11 +30,11 @@ class TestProcessReplay(unittest.TestCase):
     good, compare, _ = replay_get_program(p, self.ast, self.renderer, opts=opts)
     self.assertEqual(good, compare)
 
-  @Context(BEAM=1)
   def test_beam(self):
-    si = (Tensor.empty(N, N) @ Tensor.empty(N, N)).schedule()[-1]
+    with Context(BEAM=1):
+      si = (Tensor.empty(N, N) @ Tensor.empty(N, N)).schedule()[-1]
     p = get_program(si.ast, self.renderer)
-    good, compare, _ = replay_get_program(p, self.ast, self.renderer)
+    good, compare, _ = replay_get_program(p, si.ast, self.renderer)
     self.assertEqual(good, compare)
 
 if __name__ == '__main__':

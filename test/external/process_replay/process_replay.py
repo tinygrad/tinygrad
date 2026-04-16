@@ -12,7 +12,7 @@ try:
   from tinygrad.engine.realize import get_program
   from tinygrad.uop.ops import UOp, Ops, KernelInfo
   from tinygrad.codegen.opt import Opt
-  from tinygrad.helpers import VERSION, Context, ContextVar, colored, db_connection, getenv, tqdm, BEAM
+  from tinygrad.helpers import VERSION, Context, ContextVar, colored, db_connection, getenv, tqdm
 except ImportError as e:
   print(repr(e))
   exit(int(ASSERT_DIFF))
@@ -43,12 +43,14 @@ class ProcessReplayWarning(Warning): pass
 # *** replay the function and convert return values to string
 
 def replay_get_program(p:ProgramSpec, ast:UOp, renderer:Renderer, opts:list[Opt]|None=None) -> tuple[str, str, tuple[Any, ...]]:
-  if ast.op is Ops.BEAM: ast = ast.src[0]
-  # the ast.arg is non None if we are inside of search.py
-  sink_arg = ast.arg or KernelInfo()
-  if opts is not None: sink_arg = replace(sink_arg, opts_to_apply=tuple(opts))
-  elif BEAM >= 1 and sink_arg.opts_to_apply is None: sink_arg = replace(sink_arg, opts_to_apply=p.applied_opts)
-  input_ast = ast if ast.op is Ops.PROGRAM else ast.replace(arg=replace(sink_arg, name=p.name))
+  if ast.op is Ops.PROGRAM: input_ast = ast
+  else:
+    sink = ast.src[0] if ast.op is Ops.BEAM else ast
+    sink_arg = sink.arg
+    if opts is not None: sink_arg = replace(sink_arg, opts_to_apply=tuple(opts))
+    elif ast.op is Ops.BEAM and sink_arg.opts_to_apply is None:
+      sink_arg = replace(sink_arg, opts_to_apply=p.applied_opts)
+    input_ast = sink.replace(arg=replace(sink_arg, name=p.name))
   p2 = get_program(input_ast, renderer=renderer)
   def to_str(ret:ProgramSpec) -> str:
     # PYTHON renderer pickles UOps, first unpickle and decode here
