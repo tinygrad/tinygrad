@@ -958,11 +958,10 @@ class TestAfterCachePatterns(unittest.TestCase):
     a_store = a.uop.store(c.uop)
     b_store = b.uop.store(c.uop)
 
-    with self.assertRaises(AssertionError):
-      a = Tensor(a.uop.after(a_store, b_store))
-      a.realize()
-      np.testing.assert_array_equal(a.numpy(), 1)
-      np.testing.assert_array_equal(b.numpy(), 1)
+    a = Tensor(a.uop.after(a_store, b_store))
+    a.realize()
+    np.testing.assert_array_equal(a.numpy(), 1)
+    np.testing.assert_array_equal(b.numpy(), 1)
 
   def test_double_store_after_different_sizes(self):
     full = Tensor.zeros(2).contiguous()
@@ -974,11 +973,10 @@ class TestAfterCachePatterns(unittest.TestCase):
     full_store = full.uop.store(full_src.uop)
     head_store = head.uop.store(head_src.uop)
 
-    with self.assertRaises(AssertionError):
-      head = Tensor(head.uop.after(head_store, full_store))
-      head.realize()
-      np.testing.assert_array_equal(head.numpy(), [3])
-      np.testing.assert_array_equal(full.numpy(), [1, 2])
+    head = Tensor(head.uop.after(head_store, full_store))
+    head.realize()
+    np.testing.assert_array_equal(head.numpy(), [3])
+    np.testing.assert_array_equal(full.numpy(), [1, 2])
 
 if __name__ == "__main__":
   unittest.main()
