@@ -80,15 +80,6 @@ pm_mops = PatternMatcher([
 # *****************
 # 0. do some cleanup rewrites, mostly copied from the old stuff
 
-def fix_store_after_hazard(after:UOp, target:UOp, src:UOp):
-  # PERMUTE and FLIP reorder indices, SHRINK can have overlapping regions when dest is also shrunk
-  unsafe = {Ops.PERMUTE, Ops.FLIP} | ({Ops.SHRINK} if target.op_in_backward_slice_with_self(Ops.SHRINK) else set())
-  base = target.base
-  reaches_base: dict[UOp, bool] = {}
-  for s in src.toposort(gate=lambda s: s.op is not Ops.CONTIGUOUS):
-    reaches_base[s] = s is base or any(reaches_base.get(c) for c in s.src)
-    if reaches_base[s] and s.op in unsafe: return after.replace(src=(after.src[0], target.store(src.contiguous())))
-
 def fix_store_hazard(target:UOp, src:UOp):
   # PERMUTE and FLIP reorder indices, SHRINK can have overlapping regions when dest is also shrunk
   unsafe = {Ops.PERMUTE, Ops.FLIP} | ({Ops.SHRINK} if target.op_in_backward_slice_with_self(Ops.SHRINK) else set())
@@ -97,13 +88,6 @@ def fix_store_hazard(target:UOp, src:UOp):
   for s in src.toposort(gate=lambda s: s.op is not Ops.CONTIGUOUS):
     reaches_base[s] = s is base or any(reaches_base.get(c) for c in s.src)
     if reaches_base[s] and s.op in unsafe: return target.store(src.contiguous())
-
-def normalize_store_after_target_chain(after:UOp, target:UOp, src:UOp):
-  root_target = target
-  while root_target.op is Ops.AFTER: root_target = root_target.src[0]
-  # when RHS depends on the previous assign result, break with contiguous
-  if target in src.toposort(): src = src.contiguous()
-  return after.replace(src=(root_target, root_target.store(src)))
 
 def split_reduceop(reduce:UOp, x:UOp):
   if prod(reduce.shape) == 0: return None
@@ -205,23 +189,6 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   # move bitcast from store dest to source: TestAssign.test_assign_bitcast
   (UPat(Ops.STORE, src=(UPat(Ops.BITCAST, src=(UPat(name="target"),)), UPat(name="src"))),
    lambda target, src: target.store(src.bitcast(target.dtype))),
-
-  # ** assign rules (STORE+AFTER) **
-
-  # move bitcast from store+after target to source
-  #(UPat(Ops.AFTER, src=(UPat(Ops.BITCAST, src=(UPat(name="target"),)), UPat(Ops.STORE, src=(UPat(Ops.BITCAST), UPat(name="src"))))),
-  # lambda target, src: target.after(target.store(src.bitcast(target.dtype)))),
-
-  # wrap STORE in inner AFTER when target is a view — gives the STORE its own ranges from the view shape
-  #(UPat(Ops.AFTER, src=(UPat(name="buf"), UPat(Ops.STORE, src=(UPat(name="target"), UPat()))), name="after"),
-  # lambda after, buf, target: after.replace(src=(buf, target.after(after.src[1]))) if target.shape != buf.shape else None),
-
-  # make source contiguous if it has hazardous movement ops on the dest buffer
-  #(UPat(Ops.AFTER, src=(UPat(), UPat(Ops.STORE, src=(UPat(name="target"), UPat(name="src")))), name="after"), fix_store_after_hazard),
-
-  # normalize target chain: walk through AFTERs to root, insert contiguous if needed
-  #(UPat(Ops.AFTER, src=(UPat(Ops.AFTER, name="target"), UPat(Ops.STORE, src=(UPat(), UPat(name="src")))), name="after"),
-  # lambda after, target, src: normalize_store_after_target_chain(after, target, src)),
 
   # ** size 0 **
 
