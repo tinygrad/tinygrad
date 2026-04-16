@@ -70,11 +70,14 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
     return block._attention(x_norm, start_pos).realize().numpy()
 
   def _cache_views(self, block:GatedDeltaNetBlock) -> tuple[np.ndarray, np.ndarray]:
-    conv_flat = (block.ssm_conv_kernel - 1) * block.conv_channels
-    cache = block.delta_cache.numpy()
-    conv_state = cache[:, :conv_flat].reshape(cache.shape[0], block.ssm_conv_kernel - 1, block.conv_channels)
-    recurrent_state = cache[:, conv_flat:].reshape(cache.shape[0], block.num_v_heads, block.head_v_dim, block.head_v_dim)
-    return conv_state, recurrent_state
+    if hasattr(block, 'conv_state'):
+      return block.conv_state.numpy(), block.recurrent_state.numpy()
+    else:
+      conv_flat = (block.ssm_conv_kernel - 1) * block.conv_channels
+      cache = block.delta_cache.numpy()
+      conv_state = cache[:, :conv_flat].reshape(cache.shape[0], block.ssm_conv_kernel - 1, block.conv_channels)
+      recurrent_state = cache[:, conv_flat:].reshape(cache.shape[0], block.num_v_heads, block.head_v_dim, block.head_v_dim)
+      return conv_state, recurrent_state
 
   def _linear_np(self, x:np.ndarray, weight:np.ndarray) -> np.ndarray:
     return x.astype(np.float32) @ weight.T.astype(np.float32)
