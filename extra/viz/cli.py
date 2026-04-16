@@ -41,7 +41,8 @@ def decode_profile(data:bytes) -> dict:
         else:
           alloc, ts, key = u("<BII")
           if alloc: v["events"].append({"event":"alloc", "ts":ts, "key":key, "arg": {"dtype":strings[u("<I")[0]], "sz":u("<Q")[0]}})
-          else: v["events"].append({"event":"free", "ts":ts, "key":key, "arg": {"users":[u("<IIIB") for _ in range(u("<I")[0])]}})
+          else: v["events"].append({"event":"free", "ts":ts, "key":key, "arg": {"users":[(k, strings[rep], num, mode) \
+              for k,rep,num,mode in [u("<IIIB") for _ in range(u("<I")[0])]]}})
   return {"dur":total_dur, "peak":global_peak, "layout":layout, "markers":markers}
 
 def get(data:dict, key:str):
@@ -117,7 +118,12 @@ def main(args) -> None:
     # ** Memory printer
     if data["event_type"] == 1 and data.get("events", []):
       print(f"Peak: {data['peak']}"+"\n"+f"{'TS':<10}  {'Event':<6}  {'Key':>8}  Info")
-      for e in data["events"]: print(f"{e['ts']:<10}  {e['event']:<6}  {e.get('key', ''):>8}  {e['arg']}")
+      modes = ("read","write","write+read")
+      for e in data["events"]:
+        info = str(e.get("arg", {}))
+        if e["event"] == "free":
+          info = ', '.join([f"{format_colored(kernel)} {["read", "write", "write+read"][mode]}@data{num}" for _,kernel,num,mode in e["arg"]["users"]])
+        print(f"{e['ts']:<10}  {e['event']:<6}  {e.get('key', ''):>8}  {info}")
       return None
 
     # ** Profiler printer
