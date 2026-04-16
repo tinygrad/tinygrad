@@ -6,32 +6,32 @@ from tinygrad.uop.ops import KernelInfo, AxisType
 # **** kernels ****
 
 def custom_arange_kernel(C:UOp) -> UOp:
-  i = UOp.range(C.size, 0)
-  return C[i].store(i.cast(C.dtype.base)).end(i).sink(arg=KernelInfo(name=f"custom_arange_{C.size}"))
+  i = UOp.range(C.shape[0], 0)
+  return C[i].store(i.cast(C.dtype.base)).end(i).sink(arg=KernelInfo(name=f"custom_arange_{C.shape[0]}"))
 
 def custom_eye_kernel(C:UOp) -> UOp:
   i = UOp.range(C.shape[0], 0)
   j = UOp.range(C.shape[1], 1)
-  return C[i, j].store((i.eq(j)).cast(C.dtype.base)).end(i, j).sink(arg=KernelInfo(name=f"custom_eye_{C.size}"))
+  return C[i, j].store((i.eq(j)).cast(C.dtype.base)).end(i, j).sink(arg=KernelInfo(name=f"custom_eye_{C.numel()}"))
 
 def custom_add_one_kernel(B:UOp, A:UOp) -> UOp:
   A,B = A.flatten(), B.flatten()
-  assert B.size == A.size
-  i = UOp.range(A.size, 0)
-  return B[i].store(A[i] + 1).end(i).sink(arg=KernelInfo(name=f"add_one_{A.size}"))
+  assert B.numel() == A.numel()
+  i = UOp.range(A.numel(), 0)
+  return B[i].store(A[i] + 1).end(i).sink(arg=KernelInfo(name=f"add_one_{A.numel()}"))
 
 def custom_elementwise_add_kernel(C:UOp, A:UOp, B:UOp) -> UOp:
   C,A,B = C.flatten(), A.flatten(), B.flatten()
-  i = UOp.range(C.size, 0)
-  return C[i].store(A[i]+B[i]).end(i).sink(arg=KernelInfo(name=f"custom_add_kernel_{C.size}")).simplify()
+  i = UOp.range(C.numel(), 0)
+  return C[i].store(A[i]+B[i]).end(i).sink(arg=KernelInfo(name=f"custom_add_kernel_{C.numel()}")).simplify()
 
 def custom_elementwise_addmul_kernel(C:UOp, D:UOp, A:UOp, B:UOp) -> UOp:
   C,D,A,B = C.flatten(), D.flatten(), A.flatten(), B.flatten()
-  assert C.size == D.size
-  i = UOp.range(C.size, 0)
+  assert C.numel() == D.numel()
+  i = UOp.range(C.numel(), 0)
   store_c = C[i].store(A[i]+B[i])
   store_d = D[i].store(A[i]*B[i])
-  return UOp.group(store_c, store_d).end(i).sink(arg=KernelInfo(name=f"custom_addmul_kernel_{C.size}")).simplify()
+  return UOp.group(store_c, store_d).end(i).sink(arg=KernelInfo(name=f"custom_addmul_kernel_{C.numel()}")).simplify()
 
 def custom_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
   assert A.shape[1] == B.shape[0]
@@ -52,7 +52,7 @@ def flip_contract_kernel(dest:UOp, src:UOp):
   j = UOp.range(dest.shape[1], 1, AxisType.UPCAST)
   vec = src[i, j].contract(j)
   store = UOp.group(*[dest[i, k].store(vec.gep(3-k)) for k in range(4)])
-  return store.end(i, j).sink(arg=KernelInfo(name=f"flip_contract_{dest.size}", opts_to_apply=()))
+  return store.end(i, j).sink(arg=KernelInfo(name=f"flip_contract_{dest.numel()}", opts_to_apply=()))
 
 def slice_sum_kernel(dest:UOp, src:UOp):
   G = UOp.range(src.shape[0], 0)
@@ -291,10 +291,10 @@ class TestCustomKernel(unittest.TestCase):
 
     def custom_add_with_tmp(o1:UOp, o2:UOp, A:UOp, B:UOp) -> UOp:
       o1,o2,A,B = o1.flatten(), o2.flatten(), A.flatten(), B.flatten()
-      i = UOp.range(o1.size, 0)
+      i = UOp.range(o1.numel(), 0)
       store_o1 = o1[i].store(A[i]+B[i])
       store_o2 = o2[i].store(A[i]+B[i]+2)
-      return UOp.group(store_o1, store_o2).end(i).sink(arg=KernelInfo(name=f"add_with_tmp_{o1.size}")).simplify()
+      return UOp.group(store_o1, store_o2).end(i).sink(arg=KernelInfo(name=f"add_with_tmp_{o1.numel()}")).simplify()
 
     from tinygrad import function
     @function(precompile=True)

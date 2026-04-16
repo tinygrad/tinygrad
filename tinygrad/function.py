@@ -70,7 +70,7 @@ class _function(Generic[ReturnType]):
     if not self.allow_implicit:
       implicit_buffers = [x for x in call_uops[num_explicit:] if x.op is Ops.BUFFER]
       if implicit_buffers:
-        buf_strs = '\n  '.join(f"{i}: dtype={b.dtype}, size={b.size}, device={b.device}" for i,b in enumerate(implicit_buffers))
+        buf_strs = '\n  '.join(f"{i}: dtype={b.dtype}, size={b.arg}, device={b.device}" for i,b in enumerate(implicit_buffers))
         raise RuntimeError(f"function {name} has {len(implicit_buffers)} implicit buffer(s), but allow_implicit=False\n  {buf_strs}")
 
     # assign output

@@ -50,7 +50,8 @@ uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", 
                Ops.INDEX: "#cef263", Ops.WMMA: "#efefc0", Ops.MULTI: "#f6ccff", Ops.INS: "#eec4ff",
                **{x:"#D8F9E4" for x in GroupOp.Movement}, **{x:"#ffffc0" for x in GroupOp.ALU}, Ops.THREEFRY:"#ffff80",
                Ops.BUFFER_VIEW: "#E5EAFF", Ops.BUFFER: "#B0BDFF", Ops.COPY: "#a040a0", Ops.CUSTOM_FUNCTION: "#bf71b6",
-               Ops.CALL: "#00B7C8", Ops.PARAM: "#14686F", Ops.SOURCE: "#c0c0c0", Ops.LINEAR: "#7DF4FF", Ops.BINARY: "#404040",
+               Ops.CALL: "#00B7C8", Ops.FUNCTION: "#C07788", Ops.PARAM: "#14686F", Ops.SOURCE: "#c0c0c0", Ops.BINARY: "#404040",
+               Ops.LINEAR: "#7DF4FF",
                Ops.ALLREDUCE: "#ff40a0", Ops.MSELECT: "#d040a0", Ops.MSTACK: "#d040a0", Ops.CONTIGUOUS: "#FFC14D",
                Ops.BUFFERIZE: "#FF991C", Ops.REWRITE_ERROR: "#ff2e2e", Ops.AFTER: "#8A7866", Ops.END: "#524C46"}
 
@@ -74,15 +75,19 @@ class VizData:
 def load_rewrites(data:VizData) -> None:
   assert not data.ctxs and not data.ref_map, "load_rewrites called multiple times"
   for i,k in enumerate(data.trace.keys):
-    v = data.trace.rewrites[i]
-    steps = [create_step(s.name, ("/graph-rewrites", i, j), loc=s.loc, match_count=len(s.matches), code_line=printable(s.loc),
-                         trace=k.tb if j==0 else None, depth=s.depth) for j,s in enumerate(v)]
-    if (p:=get_prg_uop(data, i)) is not None:
-      steps.append(create_step("View UOp List", ("/uops", i, len(steps))))
-      steps.append(create_step("View Source", ("/code", i, len(steps)), p.src[3].arg))
-      steps.append(create_step("View Disassembly", ("/asm", i, len(steps)), (k.ret, p.src[4].arg)))
+    steps:list[dict] = []
+    p:UOp|None = None
+    for j,s in enumerate(data.trace.rewrites[i]):
+      steps.append(create_step(s.name, ("/graph-rewrites", i, j), loc=s.loc, match_count=len(s.matches), code_line=printable(s.loc),
+                               trace=k.tb if j==0 else None, depth=s.depth))
+      # get source and binary from Ops.PROGRAM
+      if s.name == "View Program":
+        p = _reconstruct(data, s.sink, depth=1)
+        steps.append(create_step("View UOp List", ("/uops", i, len(steps))))
+        steps.append(create_step("View Source", ("/code", i, len(steps)), p.src[3].arg))
+        steps.append(create_step("View Disassembly", ("/asm", i, len(steps)), (k.ret, p.src[4].arg)))
     for key in k.keys: data.ref_map[key] = i
-    data.ctxs.append({"name":k.display_name, "steps":steps})
+    data.ctxs.append({"name":k.display_name, "steps":steps, "prg":p})
 
 # ** get the complete UOp graphs for one rewrite
 
@@ -100,7 +105,7 @@ def pystr(u:UOp) -> str:
   try: return pyrender(u)
   except Exception: return str(u)
 
-def uop_to_json(x:UOp, data:VizData) -> dict[int, dict]:
+def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
   assert isinstance(x, UOp)
   graph: dict[int, dict] = {}
   excluded: set[UOp] = set()
@@ -132,7 +137,7 @@ def uop_to_json(x:UOp, data:VizData) -> dict[int, dict]:
         label += f"\n({multirange_str(rngs, color=True)})"
       if u._shape is not None:
         label += f"\n{shape_to_str(u.shape)}"
-      if u.op is Ops.CALL:
+      if u.op in {Ops.CALL, Ops.FUNCTION}:
         label += f"\n{u.src[0].key.hex()[:8]}"
       if u.op in {Ops.INDEX, Ops.BUFFERIZE}:
         if len(u.toposort()) < 30: label += f"\n{u.render()}"
@@ -143,9 +148,9 @@ def uop_to_json(x:UOp, data:VizData) -> dict[int, dict]:
         label += "\n"+' '.join([f"{range_str(s, color=True)}({s.vmax+1})" for s in trngs])
     except Exception:
       label += "\n<ISSUE GETTING LABEL>"
-    if (ref:=data.ref_map.get(u.src[0]) if u.op is Ops.CALL else None) is not None: label += f"\ncodegen@{data.ctxs[ref]['name']}"
+    if (ref:=data.ref_map.get(u.src[0]) if u.op in {Ops.CALL, Ops.FUNCTION} else None) is not None: label += f"\ncodegen@{data.ctxs[ref]['name']}"
     # NOTE: kernel already has metadata in arg
-    if TRACEMETA >= 2 and u.metadata is not None and u.op is not Ops.CALL: label += "\n"+str(u.metadata)
+    if TRACEMETA >= 2 and u.metadata is not None and u.op not in {Ops.CALL, Ops.FUNCTION}: label += "\n"+str(u.metadata)
     # limit SOURCE labels line count
     if u.op is Ops.SOURCE and len(lines:=label.split("\n")) > 40:
       label = "\n".join(lines[:30]) + "\n..."
@@ -163,20 +168,16 @@ def _reconstruct(data:VizData, a:int, depth:int|None=None):
 
 def get_full_rewrite(data:VizData, ctx:TrackedGraphRewrite) -> Generator[GraphRewriteDetails, None, None]:
   next_sink = _reconstruct(data, ctx.sink)
-  yield {"graph":uop_to_json(next_sink, data), "uop":pystr(next_sink), "change":None, "diff":None, "upat":None}
+  yield {"graph":uop_to_json(data, next_sink), "uop":pystr(next_sink), "change":None, "diff":None, "upat":None}
   replaces: dict[UOp, UOp] = {}
   for u0_num,u1_num,upat_loc,dur in tqdm(ctx.matches):
     replaces[u0:=_reconstruct(data, u0_num)] = u1 = _reconstruct(data, u1_num)
     try: new_sink = next_sink.substitute(replaces)
     except RuntimeError as e: new_sink = UOp(Ops.NOOP, arg=str(e))
     match_repr = f"# {dur*1e6:.2f} us\n"+printable(upat_loc)
-    yield {"graph":(sink_json:=uop_to_json(new_sink, data)), "uop":pystr(new_sink), "change":[id(x) for x in u1.toposort() if id(x) in sink_json],
+    yield {"graph":(sink_json:=uop_to_json(data, new_sink)), "uop":pystr(new_sink), "change":[id(x) for x in u1.toposort() if id(x) in sink_json],
            "diff":list(difflib.unified_diff(pystr(u0).splitlines(), pystr(u1).splitlines())), "upat":(upat_loc, match_repr)}
     if not ctx.bottom_up: next_sink = new_sink
-
-def get_prg_uop(data:VizData, i:int) -> UOp|None:
-  s = next((s for s in data.trace.rewrites[i] if s.name == "View Program"), None)
-  return _reconstruct(data, s.sink, depth=1) if s is not None else None
 
 # encoder helpers
 
@@ -217,7 +218,7 @@ def timeline_layout(data:VizData, dev_events:list[tuple[int, int, float, DevEven
     name, fmt, key = e.name, [], None
     if (ref:=data.ref_map.get(name)) is not None and ref < len(data.ctxs):
       name = data.ctxs[ref]["name"]
-      if (p:=get_prg_uop(data, ref)) is not None and (ei:=exec_points.get(p.src[0].arg.name)) is not None:
+      if (p:=data.ctxs[ref].get("prg")) is not None and (ei:=exec_points.get(p.src[0].arg.name)) is not None:
         flops = sym_infer((estimates:=p.src[0].arg.estimates).ops, var_vals:=ei.arg['var_vals'])/(t:=dur*1e-6)
         membw, ldsbw = sym_infer(estimates.mem, var_vals)/t, sym_infer(estimates.lds, var_vals)/t
         fmt = [f"{flops*1e-9:.0f} GFLOPS" if flops < 1e14 else f"{flops*1e-12:.0f} TFLOPS",
@@ -336,11 +337,11 @@ def load_amd_counters(data:VizData, profile:list[ProfileEvent]) -> None:
   run_number = {n:0 for n,_ in counter_events}
   for (k, tag),v in counter_events.items():
     # use the colored name if it exists
-    name = unwrap(get_prg_uop(data, r)).src[0].arg.name if (r:=data.ref_map.get(pname:=prg_events[k].name)) is not None else pname
+    name = data.ctxs[r]["prg"].src[0].arg.name if (r:=data.ref_map.get(pname:=prg_events[k].name)) is not None else pname
     run_number[k] += 1
     steps:list[dict] = []
     if (pmc:=v.get(ProfilePMCEvent)):
-      steps.append(create_step("PMC", ("/prg-pmc", len(data.ctxs), len(steps)), pmc))
+      steps.append(create_step("PMC", ("/prg-pmc", len(data.ctxs), len(steps)), pmc[0]))
       all_counters[(name, run_number[k], pname)] = pmc[0]
     # to decode a SQTT trace, we need the raw stream, program binary and device properties
     if (sqtt:=v.get(ProfileSQTTEvent)):
@@ -464,8 +465,7 @@ def device_sort_fn(k:str) -> tuple:
   dev_base = p[0] if len(p) < 2 or not p[1].isdigit() else f"{p[0]}:{p[1]}"
   return (is_memory, special.get(p[0], special['ALLDEVS']), dev_base, k)
 
-def get_profile(profile:list[ProfileEvent], sort_fn:Callable[[str], Any]=device_sort_fn, data:VizData|None=None) -> bytes|None:
-  if data is None: data = VizData(RewriteTrace([], [], {}))
+def get_profile(data:VizData, profile:list[ProfileEvent], sort_fn:Callable[[str], Any]=device_sort_fn) -> bytes|None:
   # start by getting the time diffs
   device_ts_diffs:dict[str, Decimal] = {}
   device_decoders:dict[str, Callable[[VizData, list[ProfileEvent]], None]] = {}
@@ -648,11 +648,11 @@ def get_render(viz_data:VizData, query:str) -> dict:
       ret["rows"].append((name, durations[k][n-1], *[r[1] for r in pmc_table["rows"]]))
     ret["cols"] = ["Kernel", "Duration", *ret["cols"]]
     return ret
-  if fmt == "prg-pmc": return unpack_pmc(data[0])
+  if fmt == "prg-pmc": return unpack_pmc(data)
   if fmt.startswith("prg-pkts"):
     ret = {}
     with soft_err(lambda err:ret.update(err)):
-      if (events:=get_profile(list(itertools.islice(sqtt_timeline(*data), getenv("MAX_SQTT_PKTS", 50_000))), sort_fn=row_tuple, data=viz_data)):
+      if (events:=get_profile(viz_data, list(itertools.islice(sqtt_timeline(*data), getenv("MAX_SQTT_PKTS", 50_000))), sort_fn=row_tuple)):
         ret = {"value":events, "content_type":"application/octet-stream"}
       else: ret = {"src":"No SQTT trace on this SE."}
     return ret
@@ -667,7 +667,7 @@ def get_render(viz_data:VizData, query:str) -> dict:
           for k in sorted(wave_insts.get(cu, []), key=row_tuple):
             steps.append(create_step(k.replace(cu, ""), ("/sqtt-insts", i, len(steps)), loc=(data:=wave_insts[cu][k])["loc"], depth=2, data=data))
     return {**ret, "steps":[{k:v for k,v in s.items() if k != "data"} for s in steps[j+1:]]}
-  if fmt == "cu-sqtt": return {"value":get_profile(data, sort_fn=row_tuple, data=viz_data), "content_type":"application/octet-stream"}
+  if fmt == "cu-sqtt": return {"value":get_profile(viz_data, data, sort_fn=row_tuple), "content_type":"application/octet-stream"}
   if fmt == "sqtt-insts":
     columns = ["PC", "Instruction", "Hits", "Cycles", "Stall", "Type"]
     inst_columns = ["N", "Clk", "Idle", "Dur", "Stall"]
@@ -698,7 +698,7 @@ def get_render(viz_data:VizData, query:str) -> dict:
   if fmt == "prg-pma-pkts":
     ret = {}
     with soft_err(lambda err:ret.update(err)):
-      if (events:=get_profile(pma_timeline(*data), row_tuple, data=viz_data)): ret = {"value":events, "content_type":"application/octet-stream"}
+      if (events:=get_profile(viz_data, pma_timeline(*data), sort_fn=row_tuple)): ret = {"value":events, "content_type":"application/octet-stream"}
       else: ret = {"src":"No PMA samples found."}
     return ret
   return data
@@ -721,7 +721,7 @@ class Handler(HTTPRequestHandler):
       except FileNotFoundError: status_code = 404
 
     elif url.path == "/ctxs":
-      lst = [{**c, "steps":[{k:v for k, v in s.items() if k != "data"} for s in c["steps"]]} for c in data.ctxs]
+      lst = [{"name":c["name"], "steps":[{k:v for k, v in s.items() if k != "data"} for s in c["steps"]]} for c in data.ctxs]
       ret, content_type = json.dumps(lst).encode(), "application/json"
     elif url.path == "/get_profile" and profile_ret: ret, content_type = profile_ret, "application/octet-stream"
     else:
@@ -765,7 +765,7 @@ if __name__ == "__main__":
 
   data = VizData(load_pickle(args.rewrites_path, default=RewriteTrace([], [], {})))
   load_rewrites(data)
-  profile_ret = get_profile(load_pickle(args.profile_path, default=[]), data=data)
+  profile_ret = get_profile(data, load_pickle(args.profile_path, default=[]))
 
   server = TCPServerWithReuse(('', PORT), Handler)
   reloader_thread = threading.Thread(target=reloader)

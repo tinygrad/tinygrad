@@ -2,6 +2,7 @@
 from __future__ import annotations
 import re
 from typing import Callable
+from test.amd.helpers import decode_dpp16
 from tinygrad.renderer.amd.dsl import Inst, Reg
 
 # Special register mappings for disassembly
@@ -838,22 +839,11 @@ def _disasm_vop1_sdwa(inst) -> str:
 
 def _decode_dpp(dpp: int) -> str:
   """Decode DPP control value to string."""
-  if dpp < 0x100: return f"quad_perm:[{dpp&3},{(dpp>>2)&3},{(dpp>>4)&3},{(dpp>>6)&3}]"
-  if 0x100 <= dpp <= 0x10f: return f"row_shl:{dpp & 0xf}"
-  if 0x110 <= dpp <= 0x11f: return f"row_shr:{dpp & 0xf}"
-  if 0x120 <= dpp <= 0x12f: return f"row_ror:{dpp & 0xf}"
-  if dpp == 0x130: return "wave_shl:1"
-  if dpp == 0x134: return "wave_rol:1"
-  if dpp == 0x138: return "wave_shr:1"
-  if dpp == 0x13c: return "wave_ror:1"
-  if dpp == 0x140: return "row_mirror"
-  if dpp == 0x141: return "row_half_mirror"
-  if dpp == 0x142: return "row_bcast:15"
-  if dpp == 0x143: return "row_bcast:31"
-  if 0x150 <= dpp <= 0x15f: return f"row_newbcast:{dpp & 0xf}"
-  if 0x160 <= dpp <= 0x16f: return f"row_share:{dpp & 0xf}"
-  if 0x170 <= dpp <= 0x17f: return f"row_xmask:{dpp & 0xf}"
-  return f"dpp:{dpp:#x}"
+  op, arg = decode_dpp16(dpp)
+  if op == "quad_perm": return f"quad_perm:[{','.join(str(x) for x in arg)}]"
+  if op in ("row_mirror", "row_half_mirror"): return op
+  if op == "dpp": return f"dpp:{arg:#x}"
+  return f"{op}:{arg}"
 
 def _disasm_vop1_dpp(inst) -> str:
   name = inst.op_name.lower().replace('_e32', '')

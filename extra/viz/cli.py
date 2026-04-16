@@ -52,16 +52,15 @@ def get(data:dict, key:str):
   raise RuntimeError(f'item "{key}" not found in list'+(f", did you mean {match[0]!r}?" if match else ''))
 
 def main(args) -> None:
-  viz.data = viz.VizData(viz.load_pickle(args.rewrites_path, default=RewriteTrace([], [], {})))
-  viz.load_rewrites(viz.data)
+  viz.load_rewrites(viz_data:=viz.VizData(viz.load_pickle(args.rewrites_path, default=RewriteTrace([], [], {}))))
 
   def format_colored(s:str) -> str: return ansistrip(s) if args.no_color else s
 
   if args.profile:
     events:list = viz.load_pickle(args.profile_path, default=[])
-    if (profile_bytes:=viz.get_profile(events, data=viz.data)) is None: raise RuntimeError(f"empty profile in {args.profile_path}")
+    if (profile_bytes:=viz.get_profile(viz_data, events)) is None: raise RuntimeError(f"empty profile in {args.profile_path}")
     profile = decode_profile(profile_bytes)
-    profile["layout"].update([(f'{c["name"][5:]}{" SQTT" if s["name"].endswith("PKTS") else ""} {s["name"]}', s["data"]) for c in viz.data.ctxs
+    profile["layout"].update([(f'{c["name"][5:]}{" SQTT" if s["name"].endswith("PKTS") else ""} {s["name"]}', s["data"]) for c in viz_data.ctxs
                               if c["name"].startswith("SQTT") for s in c["steps"] if s["name"].endswith(("PMC", "PKTS"))])
     if args.src is None:
       for k in profile["layout"]:
@@ -103,10 +102,10 @@ def main(args) -> None:
 
     # ** PMC printer
     if "PMC" in args.src:
-      table = viz.unpack_pmc(data[0])
-      cols = table["cols"]
+      pmc = viz.unpack_pmc(data)
+      cols = pmc["cols"]
       rows:list = []
-      for r in table["rows"]:
+      for r in pmc["rows"]:
         if args.item is None: rows.append(r[:2])
         elif args.item == r[0]:
           rows = r[2]["rows"] if len(r) > 2 else [r[:2]]
@@ -132,17 +131,17 @@ def main(args) -> None:
     if agg and total > 0:
       from tabulate import tabulate
       items = sorted(agg.items(), key=lambda kv:kv[1][0], reverse=True)
-      rows = 20
-      table = [[format_colored(name), time_to_str(t, w=9), c, f"{(t/total*100.0):.2f}%"] for name,(t,c) in items[:rows]]
-      if items[rows:]:
-        other_t = sum(t for _,(t,_) in items[rows:])
-        other_c = sum(c for _,(_,c) in items[rows:])
+      num_rows = 20
+      table = [[format_colored(name), time_to_str(t, w=9), c, f"{(t/total*100.0):.2f}%"] for name,(t,c) in items[:num_rows]]
+      if items[num_rows:]:
+        other_t = sum(t for _,(t,_) in items[num_rows:])
+        other_c = sum(c for _,(_,c) in items[num_rows:])
         table.append(["Other", time_to_str(other_t, w=9), other_c, f"{(other_t/total*100.0):.2f}%"])
       print(tabulate(table, headers=["name", "total", "count", "pct"], tablefmt="github"))
     return None
 
   # ** Graph rewrites printer
-  rewrites = {c["name"]:{s["name"]:s for s in c["steps"]} for c in viz.data.ctxs if c.get("steps")}
+  rewrites = {c["name"]:{s["name"]:s for s in c["steps"]} for c in viz_data.ctxs if c.get("steps")}
   if args.src is None:
     for k in rewrites: print(f"  {format_colored(k)}")
     return None
@@ -150,7 +149,7 @@ def main(args) -> None:
   if args.item is None:
     for k,v in steps.items(): print(" "*v["depth"]+k+(f" - {v['match_count']}" if v.get('match_count', 0) else ''))
   else:
-    data = viz.get_render(viz.data, get(steps, args.item)["query"])
+    data = viz.get_render(data, get(steps, args.item)["query"])
     if isinstance(data.get("value"), Iterator):
       for m in data["value"]:
         if m.get("uop"): print(f"Input UOp:\n{m['uop']}")

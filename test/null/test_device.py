@@ -26,8 +26,17 @@ class TestDevice(unittest.TestCase):
 
   @unittest.skipIf(Device.DEFAULT != "CPU", "only run on CPU")
   def test_nonexistent_renderer(self):
-    with self.assertRaisesRegex(AssertionError, "No renderer"):
+    with self.assertRaisesRegex(RuntimeError, "has no renderer"):
       with Context(DEV="CPU:TYPO"): Device[Device.DEFAULT].renderer
+    with self.assertRaisesRegex(RuntimeError, "did you mean: 'CLANGJIT'"):
+      with Context(DEV="CPU:CLANG"): Device[Device.DEFAULT].renderer
+
+  @unittest.skipIf(Device.DEFAULT != "AMD", "only run on AMD")
+  def test_nonexistent_iface(self):
+    result = subprocess.run(['python3', '-c', 'from tinygrad import Device; Device[Device.DEFAULT].iface'],
+                            env={**os.environ, "DEV":"USA+AMD"}, capture_output=True)
+    self.assertNotEqual(result.returncode, 0)
+    self.assertIn(b"did you mean: 'USB'", result.stderr)
 
   def test_lowercase_canonicalizes(self):
     device = Device.DEFAULT
@@ -118,10 +127,11 @@ class TestDevVar(unittest.TestCase):
                  ("AMD:LLVM:gfx1100", Target(device="AMD", renderer="LLVM", arch="gfx1100")), ("::gfx1100", Target(arch="gfx1100")),
                  ("USB+", Target(interface="USB")), ("USB+AMD", Target(device="AMD", interface="USB")),
                  ("PCI:0+AMD", Target(device="AMD", interface="PCI", indices="0")), (":0+AMD", Target(device="AMD", indices="0")),
-                 ("PCI:0,1+AMD", Target(device="AMD", interface="PCI", indices="0,1"))]:
+                 ("PCI:0,1+AMD", Target(device="AMD", interface="PCI", indices="0,1")),
+                 ("QCOM;USB+AMD", [Target(device="QCOM"), Target(device="AMD", interface="USB")])]:
       with Context(DEV=d):
-        self.assertEqual(DEV.value, t)
-        self.assertEqual(str(DEV.value), d)
+        self.assertEqual(DEV.value, t if isinstance(t, list) else [t])
+        self.assertEqual(str(DEV), d)
 
   def test_target(self):
     with Context(DEV="CPU"): self.assertEqual(DEV.target("CPU"), Target("CPU"))
@@ -129,6 +139,10 @@ class TestDevVar(unittest.TestCase):
     with Context(DEV=":LLVM"): self.assertEqual(DEV.target("CPU"), Target("CPU", "LLVM"))
     with Context(DEV="AMD:LLVM"): self.assertEqual(DEV.target("CPU"), Target("CPU"))
     with Context(DEV=""): self.assertEqual(DEV.target("CPU"), Target("CPU"))
+    with Context(DEV="QCOM:IR3;AMD:LLVM"):
+      self.assertEqual(DEV.target("QCOM"), Target("QCOM", "IR3"))
+      self.assertEqual(DEV.target("AMD"), Target("AMD", "LLVM"))
+      self.assertEqual(DEV.target("CPU"), Target("CPU"))
 
   def test_dev_arch_override(self):
     with Context(DEV="NULL:HIP:gfx1100"):

@@ -2,7 +2,7 @@
 from __future__ import annotations
 import time, math, itertools, functools, struct, sys, inspect, pathlib, string, hashlib, weakref
 from contextlib import ContextDecorator
-from typing import Any, Callable, ClassVar, Sequence, cast, get_args, Literal, SupportsIndex, ParamSpec, TypeVar, Generic, TYPE_CHECKING
+from typing import Any, Callable, ClassVar, Sequence, cast, get_args, Literal, ParamSpec, TypeVar, Generic, TYPE_CHECKING
 if TYPE_CHECKING: import numpy
 from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_float, least_upper_dtype, to_dtype, truncate
 from tinygrad.dtype import _from_np_dtype, _to_np_dtype, PyConst, Invalid, InvalidType
@@ -11,12 +11,12 @@ from tinygrad.helpers import IMAGE, FLOAT16, WINO, Metadata, TRACEMETA, ceildiv,
 from tinygrad.helpers import suppress_finalizing, disable_gc
 from tinygrad.gradient import compute_gradient
 from tinygrad.mixin import OpMixin, ReductionStr
-from tinygrad.uop.ops import smax, smin, resolve, UOp, Ops, sint, identity_element, all_metadata, _index_to_concrete_int, sint_to_uop, Variable
+from tinygrad.uop.ops import smax, UOp, Ops, sint, all_metadata, _index_to_concrete_int, sint_to_uop, Variable
 from tinygrad.uop.ops import _broadcast_shape
-from tinygrad.engine.schedule import ExecItem, complete_create_schedule_with_vars
+from tinygrad.schedule import ExecItem, complete_create_schedule_with_vars
 from tinygrad.device import Buffer, canonicalize_device
 from tinygrad.engine.realize import run_schedule
-from tinygrad.engine.allocations import transform_to_call
+from tinygrad.callify import transform_to_call
 
 # *** all in scope Tensors are here. this gets relevant UOps ***
 
@@ -57,7 +57,7 @@ def _frompy(x:list|tuple|bytes, dtype:DType, device:str|tuple[str,...]) -> UOp:
     ret = UOp.new_buffer("PYTHON", prod(shape:=get_shape(x)), dtype).reshape(shape)
     assert dtype.fmt is not None, f"{dtype=} has None fmt"
     truncate_function = truncate[dtype]
-    data = struct.pack(f"{ret.size}{dtype.fmt}", *[truncate_function(dtype.const(xi)) for xi in fully_flatten(x)])
+    data = struct.pack(f"{prod(shape)}{dtype.fmt}", *[truncate_function(dtype.const(xi)) for xi in fully_flatten(x)])
   # fake realize. if target device is PYTHON it needs bytearray to be writable
   ret.buffer.allocate(memoryview(data if device != "PYTHON" else bytearray(data)))
   return ret
@@ -1054,14 +1054,6 @@ class Tensor(OpMixin):
   def _mop(self, op:Ops, arg) -> Tensor: return self._apply_uop(UOp._mop, extra_args=(op,), arg=arg)
   def _rop(self, op:Ops, axis:tuple[int, ...]) -> Tensor: return self._apply_uop(UOp._rop, op=op, axis=axis)
 
-  def _pad_constant(self, pX:tuple[tuple[sint, sint], ...], value:float) -> Tensor:
-    # shrink first for negative pads, then pad with only non-negative values
-    has_neg = not all(resolve(p >= 0) for p in flatten(pX))
-    X = self.shrink(tuple((-smin(pB,0),smin(pA+s,s)) for (pB,pA),s in zip(pX, self.shape))) if has_neg else self
-    pads = tuple((smax(pB,0), smax(pA,0)) for pB,pA in pX) if has_neg else pX
-    if value == 0: return X._apply_uop(UOp.pad, arg=pads)
-    return X._apply_uop(UOp.pad, arg=pads) + Tensor.ones_like(X)._apply_uop(UOp.pad, arg=pads).where(0, value)
-
   def _pad_circular(self, pX:tuple[tuple[sint, sint], ...]) -> Tensor:
     if any(pB>sh or pA>sh for (pB,pA),sh in zip(pX, self.shape)): raise ValueError('Padding value causes wrapping around more than once.')
     if any(pB<0 or pA<0 for pB,pA in pX): raise NotImplementedError("Negative pads with circular pads is not supported")
@@ -1128,14 +1120,15 @@ class Tensor(OpMixin):
     raise NotImplementedError(f"{mode=} is not supported")
 
   def _getitem(self, indices, v: Tensor|None = None) -> Tensor:
+    # view-only indexing (no Tensor/list indices, no setitem) is handled by MovementMixin.__getitem__
+    if v is None and not any(isinstance(i, (Tensor, list, tuple)) for i in (indices if isinstance(indices, tuple) else (indices,))):
+      return super().__getitem__(indices)
     # wrap single index into a list
     if (isinstance(indices, list) and all_int(indices)) or not isinstance(indices, (tuple, list)): indices = [indices]
-    x, indices = self, self._normalize_indices(list(indices))
-
     indices_parsed, dim = [], 0
-    for index in indices:
+    for index in self._normalize_indices(list(indices)):
       size = 1 if index is None else self.shape[dim]
-      boundary, stride = [0, size], 1  # defaults
+      parsed = {"size":size, "boundary":(0, size), "stride":1, "collapse_dim":False}
       match index:
         case Tensor():
           if not dtypes.is_int(index.dtype): raise IndexError(f"index dtype {index.dtype} is not supported")
@@ -1144,50 +1137,14 @@ class Tensor(OpMixin):
         case list() | tuple():
           if not dtypes.is_int((ti:=Tensor(index)).dtype): raise IndexError(f"{index=} contains non-int element")
           index = Tensor([i+size if i<0 else i for i in fully_flatten(index)], self.device, requires_grad=False).reshape(ti.shape)
-        case int() | UOp(): # sint
-          if index >= size or index < -size: raise IndexError(f"{index=} is out of bounds with {size=}")
-          # TODO: is this right for (negative) symbolic?
-          boundary = [index, index+1] if index >= 0 else [index+size, index+size+1]
-        case slice():
-          if index.step == 0: raise ValueError(f"{index=} cannot have 0 as step")
-          start, stop = 0 if index.start is None else index.start, size if index.stop is None else index.stop
-          step = 1 if index.step is None else index.step
-          boundary, stride = [start, stop], step
-          if all(isinstance(s, int) for s in (start,stop,step)):
-            # handle int slicing
-            # if we're slicing a symbolic dimension into a int dimension, we can slice until the bind size
-            # TODO: right now this is using vmax instead of the bind size because jit doesnt update the bound value of the returned tensor
-            if isinstance(size, UOp): size = int(size.vmax)
-            *boundary, stride = index.indices(cast(SupportsIndex, size))
-            if stride * (boundary[1] - boundary[0]) < 0: boundary = [0, 0]
-            elif stride < 0: boundary = [boundary[1] + 1, boundary[0] + 1]
-            # update size for slice
-            size = ceildiv((boundary[1] - boundary[0]), abs(stride))
-          elif resolve(step == 1, False) and all(isinstance(s,sint) for s in (start, stop)) and resolve((stop-start) > 0, False):
-            # simple symbolic slice
-            size = cast(sint, cast(UOp, (stop - start)).ssimplify())
-          else: raise TypeError(f"slice {index=} is not supported")
-        case None: pass # do nothing
-        case _: raise IndexError(f"{type(index).__name__} indexing is not supported")
-      indices_parsed.append({"index":index, "size":size, "boundary":tuple(boundary), "stride":stride})
+        case _: parsed = self._parse_view_index(index, size)
+      indices_parsed.append({**parsed, "index":index})
       if index is not None: dim += 1
 
-    # movement op indexing
-    if mops := [i for i in indices_parsed if i['index'] is not None]:
-      # flip negative strides
-      x = x.shrink(tuple(m['boundary'] for m in mops)).flip(tuple(i for i, m in enumerate(mops) if m['stride'] < 0))
-      strides = tuple(abs(m['stride']) for m in mops)
-      # apply stride
-      if any(st != 1 for st in strides):
-        # pad shape to multiple of stride
-        if not all_int(x.shape): raise RuntimeError("symbolic shape not supported")
-        x = x.pad_to(tuple(round_up(s, st) for s, st in zip(x.shape, strides)))
-        x = x.reshape(tuple(flatten((s // st, st) for s, st in zip(x.shape, strides))))
-        x = x.shrink(tuple(flatten(((0, s), (0, 1)) for s in x.shape[::2]))).reshape(x.shape[::2])
-
-    # dim injection from None (size 1) and dim collapse by skipping sint dims
-    x_dims = [p for p in indices_parsed if not isinstance(p['index'], sint)]
-    x = x.reshape(tuple(p['size'] for p in x_dims))
+    # apply view ops then dim injection (None) and collapse (int)
+    x = self._apply_view_ops(mops) if (mops := [p for p in indices_parsed if p["index"] is not None]) else self
+    x_dims = [p for p in indices_parsed if not p["collapse_dim"]]
+    x = x.reshape(tuple(p["size"] for p in x_dims))
 
     # tensor indexing
     if tops := [(d, p) for d, p in enumerate(x_dims) if isinstance(p['index'], Tensor)]:
@@ -1340,41 +1297,6 @@ class Tensor(OpMixin):
     index = index.to(self.device)
     x = self.shrink_to(tuple(i if d != dim else None for d,i in enumerate(index.shape))).unsqueeze(-1).transpose(-1, dim)
     return (index.unsqueeze(-1)._one_hot_along_dim(self.shape[dim]).where(x, 0)).sum(-1, dtype=self.dtype)
-
-  def cat(self:Tensor, *args:Tensor, dim:int=0) -> Tensor:
-    """
-    Concatenates self with other `Tensor` in `args` along an axis specified by `dim`.
-    All tensors must have the same shape except in the concatenating dimension.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t0, t1, t2 = Tensor([[1, 2]]), Tensor([[3, 4]]), Tensor([[5, 6]])
-    print(t0.cat(t1, t2, dim=0).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t0.cat(t1, t2, dim=1).numpy())
-    ```
-    """
-    dim = self._resolve_dim(dim)
-    for arg in args: assert arg.ndim==self.ndim and all(ti==ai for i,(ti,ai) in enumerate(zip(self.shape, arg.shape)) if i!=dim)
-    tensors = [self, *args]
-    dim_cumsum = list(itertools.accumulate([t.shape[dim] for t in tensors], initial=0))
-    for i,t in enumerate(tensors): tensors[i] = t.pad([(dim_cumsum[i], dim_cumsum[-1]-dim_cumsum[i+1]) if j==dim else None for j in range(t.ndim)])
-    return Tensor.usum(*tensors)
-
-  def stack(self:Tensor, *args:Tensor, dim:int=0) -> Tensor:
-    """
-    Concatenates self with other `Tensor` in `args` along a new dimension specified by `dim`.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t0, t1, t2 = Tensor([1, 2]), Tensor([3, 4]), Tensor([5, 6])
-    print(t0.stack(t1, t2, dim=0).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t0.stack(t1, t2, dim=1).numpy())
-    ```
-    """
-    # checks for shapes and number of dimensions delegated to cat
-    return Tensor.cat(*[t.unsqueeze(dim) for t in argfix(self, *args)], dim=dim)
 
   def masked_select(self, mask):
     """
@@ -1955,53 +1877,6 @@ class Tensor(OpMixin):
   def dot(self, w:Tensor, dtype:DTypeLike|None=None) -> Tensor:
     if IMAGE: return self.image_dot(w, dtype)
     return super().dot(w, dtype=dtype)
-
-  def _cumalu(self, axis:int, op:Ops) -> Tensor:
-    assert self.shape[axis] != 0 and op in (Ops.ADD, Ops.MAX, Ops.MUL)
-    pooled = self.transpose(axis,-1).pad((self.shape[axis]-1, 0), value=identity_element(op, self.dtype))._pool((self.shape[axis],))
-    return getattr(pooled, {Ops.ADD: "sum", Ops.MAX: "max", Ops.MUL: "prod"}[op])(-1).transpose(axis, -1)
-
-  def _split_cumalu(self, axis:int, op:Ops) -> Tensor:
-    axis = self._resolve_dim(axis)
-    if self.ndim == 0 or 0 in self.shape: return self
-    # TODO: someday the optimizer will find this on its own
-    # for now this is a two stage cumsum
-    SPLIT = 256
-    value = identity_element(op, self.dtype)
-    if not isinstance(s:=self.shape[axis], int) or s <= SPLIT*2: return self._cumalu(axis, op)
-    ret = self.transpose(axis,-1).pad((round_up(s, SPLIT)-s, 0), value=value).unflatten(-1, (-1, SPLIT))._cumalu(-1, op)
-    base = ret[..., -1]._cumalu(-1, op).pad((1, -1), value=value)
-    base = base.unsqueeze(-1).expand(*base.shape, ret.shape[-1])
-    def fix(x: Tensor) -> Tensor: return x.flatten(start_dim=-2)[..., -s:].transpose(axis,-1)
-    return getattr(fix(ret), {Ops.ADD: "add", Ops.MAX: "maximum", Ops.MUL: "mul"}[op])(fix(base))
-
-  def cumsum(self, axis:int=0) -> Tensor:
-    """
-    Computes the cumulative sum of the tensor along the specified `axis`.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor.ones(2, 3)
-    print(t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.cumsum(1).numpy())
-    ```
-    """
-    return self._split_cumalu(axis, Ops.ADD)
-
-  def cumprod(self, axis:int) -> Tensor:
-    """
-    Computes the cumulative product of the elements of the tensor along the specified `axis`.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor.arange(1, 7).reshape(2, 3)
-    print(t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.cumprod(axis=0).numpy())
-    ```
-    """
-    return self._split_cumalu(axis, Ops.MUL)
 
   def cummax(self, axis:int=0) -> tuple[Tensor, Tensor]:
     """
@@ -2870,5 +2745,5 @@ def _metadata_wrapper(fn: Callable[P, T]) -> Callable[P, T]:
 
 if TRACEMETA >= 1:
   for name, fn in inspect.getmembers(Tensor, inspect.isfunction):
-    if name in ["__class__", "__init__", "__new__", "__repr__", "backward", "sequential", "gradient"]: continue
+    if name in ["__class__", "__del__", "__init__", "__new__", "__repr__", "backward", "sequential", "gradient"]: continue
     setattr(Tensor, name, functools.wraps(fn)(_metadata_wrapper(fn)))
