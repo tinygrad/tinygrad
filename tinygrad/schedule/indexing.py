@@ -25,17 +25,9 @@ def realize_store_after_src(ctx:dict[UOp, None], dest:UOp, src:UOp):
   # you don't usually have to do this for assign unless there's a WAR hazard like TestAssign.test_assign_double_diamond_reduce
   if dest.base in src.backward_slice_with_self: ctx[src] = None
 
-def realize_afters(ctx:dict[UOp, None], tr:UOp) -> None:
-  for s in tr.src[2:]:
-    # realize anything else on the AFTEr
-    ctx[s] = None
-  ctx[tr] = None
-
 pm_generate_realize_map = PatternMatcher([
   # always realize
   (UPat({Ops.COPY, Ops.CONTIGUOUS, Ops.STORE}, name="tr"), realize),
-  # realize AFTER of STORE+AFTER
-  #(UPat(Ops.AFTER, src=(UPat(), UPat(Ops.STORE)), allow_any_len=True, name="tr"), realize_afters),
   # realize srcs of these
   (UPat((Ops.COPY, Ops.MSELECT, Ops.MSTACK), name="rb"), realize_srcs),
   # sometimes realize/unrealize src of store+after

@@ -71,8 +71,7 @@ pm_mops = PatternMatcher([
      if r.src[0]._shape is not None and len(idx.src[1:]) == len(r.shape) else None),
   # move movement ops and INDEX after AFTER (but not when AFTER has a raw STORE with shaped children — from replace_contig_with_store_after)
   (UPat(GroupOp.Movement|{Ops.INDEX}, name="r").after(name="a", allow_any_len=True),
-   lambda r,a: UOp(r.op, r.dtype, (a.replace(src=(r.src[0],)+a.src[1:]),)+r.src[1:], r.arg)
-     if a.src[0]._shape is not None and not any(s.op is Ops.STORE and s.src[0]._shape is not None for s in a.src[1:]) else None),
+   lambda r,a: UOp(r.op, r.dtype, (a.replace(src=(r.src[0],)+a.src[1:]),)+r.src[1:], r.arg)),
   (UPat(GroupOp.Movement, name="r").end(name="a", allow_any_len=True), lambda r,a: a.replace(src=(r.src[0],)+a.src[1:])),
   # lower SHAPED_WMMA to WMMA with CONTRACT/UNROLL
   (UPat(Ops.SHAPED_WMMA, name="x"), lower_shaped_wmma),
@@ -189,8 +188,8 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
    lambda target, src: target.after(target.store(src.bitcast(target.dtype)))),
 
   # wrap STORE in inner AFTER when target is a view — gives the STORE its own ranges from the view shape
-  (UPat(Ops.AFTER, src=(UPat(name="buf"), UPat(Ops.STORE, src=(UPat(name="target"), UPat()))), name="after"),
-   lambda after, buf, target: after.replace(src=(buf, target.after(after.src[1]))) if target.shape != buf.shape else None),
+  #(UPat(Ops.AFTER, src=(UPat(name="buf"), UPat(Ops.STORE, src=(UPat(name="target"), UPat()))), name="after"),
+  # lambda after, buf, target: after.replace(src=(buf, target.after(after.src[1]))) if target.shape != buf.shape else None),
 
   # make source contiguous if it has hazardous movement ops on the dest buffer
   (UPat(Ops.AFTER, src=(UPat(), UPat(Ops.STORE, src=(UPat(name="target"), UPat(name="src")))), name="after"), fix_store_after_hazard),
