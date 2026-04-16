@@ -27,13 +27,11 @@ def realize_store_after_src(ctx:dict[UOp, None], dest:UOp, src:UOp):
 
 pm_generate_realize_map = PatternMatcher([
   # always realize
-  (UPat({Ops.COPY, Ops.CONTIGUOUS}, name="tr"), realize),
-  # realize AFTER of STORE+AFTER
-  (UPat(Ops.AFTER, src=(UPat(), UPat(Ops.STORE)), allow_any_len=True, name="tr"), realize),
+  (UPat({Ops.COPY, Ops.CONTIGUOUS, Ops.STORE}, name="tr"), realize),
   # realize srcs of these
   (UPat((Ops.COPY, Ops.MSELECT, Ops.MSTACK), name="rb"), realize_srcs),
-  # sometimes realize/unrealize src of store+after
-  (UPat(Ops.AFTER, src=(UPat(), UPat(Ops.STORE, src=(UPat.var("dest"), UPat.var("src"))))), realize_store_after_src),
+  # sometimes we need to realize the src of STORE if there's a self-access
+  (UPat(Ops.STORE, src=(UPat.var("dest"), UPat.var("src"))), realize_store_after_src),
 ])
 
 @dataclass(frozen=True)
@@ -60,8 +58,7 @@ def create_bufferize_and_index_based_on_ranges(ctx:IndexingContext, x:UOp):
   new_srcs = []
   for s in x.src:
     new_src = s
-    if s.op in {Ops.PARAM, Ops.BUFFER_VIEW, Ops.MSTACK, Ops.MSELECT} or \
-       (s.op is Ops.AFTER and not any(c.op in {Ops.STORE, Ops.END} for c in s.src[1:])):
+    if s.op in {Ops.PARAM, Ops.BUFFER_VIEW, Ops.MSTACK, Ops.MSELECT, Ops.AFTER}:
       if x in ctx.range_map: new_src = new_src.index(*ctx.range_map[x][0])
     elif s in ctx.realize_map:
       realized_ranges = ctx.realize_map[s]
@@ -166,8 +163,8 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
     # no ranges on kernels, they are internal
     if x.op in {Ops.CALL, Ops.FUNCTION, Ops.LINEAR}: continue
 
-    # only STORE+AFTER has range
-    if x.op is Ops.AFTER and all(s.op is not Ops.STORE for s in x.src[1:]): continue
+    # AFTER doesn't have range
+    if x.op is Ops.AFTER: continue
 
     # treat MSTACK/MSELECT like SINK
     if x.op in {Ops.MSTACK, Ops.MSELECT}: continue
@@ -180,15 +177,21 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
     #  2. from the single consumer if this op only has one consumer
     #  3. potentially new if this op has 2+ consumers
 
+    shape = x._shape
+    if x.op is Ops.STORE:
+      # TODO: TestTensorVariable.test_symbolic_var_sum_alt_name fails with this, fix canonicalize on variables.
+      #assert x.src[0].shape == x.src[1].shape, f"STORE must have matching input shapes, {x.src[0].shape} != {x.src[1].shape}"
+      shape = x.src[0].shape
+
     consumer_rngs = [rctx.range_map[c][0] for c in consumer_map[x] if c in rctx.range_map]
     if x in rctx.realize_map:
       # if this is in the realize_map, we create new ranges (at the output)
-      out_rngs = tuple(rctx.new_range(s) for s in x.shape)
+      out_rngs = tuple(rctx.new_range(s) for s in shape)
       # all ranges are ended now
       ending_ranges[x] = []
       # mark all ranges as ended
       assert rctx.realize_map[x] is None
-      rctx.realize_map[x] = list(range(len(x.shape)))
+      rctx.realize_map[x] = list(range(len(shape)))
     elif len(consumer_rngs) == 0:
       # if no consumers have ranges and this isn't realized, this doesn't have ranges either.
       continue
@@ -214,7 +217,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
           minimum_valid = UOp.const(dtypes.bool, False).usum(valids)
           _out_rngs.append(graph_rewrite(minimum_valid.where(local_rngs[0], UOp.invalid()), symbolic, name="minimum_valid"))
         else:
-          _out_rngs.append(rctx.new_range(x.shape[i]))
+          _out_rngs.append(rctx.new_range(shape[i]))
           _realize_axis.append(i)
       out_rngs = tuple(_out_rngs)
 
@@ -231,7 +234,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
       ending_ranges[x] = []
       if len(_realize_axis):
         rctx.realize_map[x] = _realize_axis
-        out_rngs = tuple([(rctx.new_range(x.shape[i]) if i in _realize_axis else r) for i,r in enumerate(out_rngs)])
+        out_rngs = tuple([(rctx.new_range(shape[i]) if i in _realize_axis else r) for i,r in enumerate(out_rngs)])
 
     # TODO: some ops don't have shape, enable this after the `.st` property is removed
     #assert len(out_rngs) == len(x.shape), \
