@@ -1,3 +1,6 @@
+import os, sys
+if "--fakeweights" in sys.argv:
+  os.environ["NOOPT"] = "1"
 # https://arxiv.org/pdf/2112.10752.pdf
 # https://github.com/ekagra-ranjan/huggingface-blog/blob/main/stable_diffusion.md
 import tempfile
@@ -270,6 +273,8 @@ if __name__ == "__main__":
 
   profile_marker("load in weights")
   with WallTimeEvent(BenchEvent.LOAD_WEIGHTS):
+    if args.fakeweights:
+      for k,v in get_state_dict(model).items(): v.replace(Tensor.empty(*v.shape, dtype=v.dtype))
     if not args.fakeweights:
       model_bin = fetch('https://huggingface.co/CompVis/stable-diffusion-v-1-4-original/resolve/main/sd-v1-4.ckpt', 'sd-v1-4.ckpt')
       state_dict = torch_load(model_bin)['state_dict']
@@ -301,6 +306,9 @@ if __name__ == "__main__":
   print(f"running for {timesteps} timesteps")
   alphas = model.alphas_cumprod[Tensor(timesteps)]
   alphas_prev = Tensor([1.0]).cat(alphas[:-1])
+  Tensor.realize(alphas, alphas_prev)
+  alphas_np = alphas.numpy().tolist()
+  alphas_prev_np = alphas_prev.numpy().tolist()
 
   # start with random noise
   if args.seed is not None: Tensor.manual_seed(args.seed)
@@ -319,8 +327,7 @@ if __name__ == "__main__":
       t.set_description("%3d %3d" % (index, timestep))
       with Timing("step in ", enabled=args.timing, on_exit=lambda _: f", using {GlobalCounters.mem_used/1e9:.2f} GB"):
         with WallTimeEvent(BenchEvent.STEP):
-          tid = Tensor([index])
-          latent = run(model, unconditional_context, context, latent, Tensor([timestep]), alphas[tid], alphas_prev[tid], Tensor([args.guidance]))
+          latent = run(model, unconditional_context, context, latent, Tensor([timestep]), Tensor([alphas_np[index]]), Tensor([alphas_prev_np[index]]), Tensor([args.guidance]))
           if args.timing: Device[Device.DEFAULT].synchronize()
       step_times.append((time.perf_counter_ns() - st)*1e-6)
     # done with diffusion model
