@@ -26,7 +26,8 @@ axis_colors = {AxisType.GLOBAL: "blue", AxisType.THREAD: "BLUE", AxisType.LOCAL:
 axis_to_pos = {AxisType.LOOP: -1, AxisType.THREAD: 0, AxisType.GLOBAL: 0, AxisType.WARP: 1, AxisType.LOCAL: 2, AxisType.UPCAST: 3,
                AxisType.GROUP_REDUCE: 2, AxisType.REDUCE: 4, AxisType.UNROLL: 5}
 
-range_start = {Ops.BUFFERIZE: 1, Ops.REDUCE: 1, Ops.STORE: 2, Ops.WMMA: 3, Ops.END: 1, Ops.CALL: 1, Ops.COPY: 2, Ops.BUFFER_VIEW: 1}
+range_start = {Ops.BUFFERIZE: 1, Ops.REDUCE: 1, Ops.STORE: 2, Ops.WMMA: 3, Ops.END: 1, Ops.CALL: 1, Ops.FUNCTION: 1,
+               Ops.COPY: 2, Ops.BUFFER_VIEW: 1}
 
 # https://en.wikipedia.org/wiki/Identity_element
 def identity_element(op:Ops, dt:DType) -> PyConst: return dt.const({Ops.ADD:0, Ops.MUL:1, Ops.MAX:dt.min}[op])
@@ -178,7 +179,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       if not visited:
         if gate is None or gate(node):
           stack.append((node, True))  # push node back on stack to process after its srcs
-          for s in reversed(node.src if enter_calls or node.op is not Ops.CALL else node.src[1:]):
+          for s in reversed(node.src if enter_calls or node.op not in {Ops.CALL, Ops.FUNCTION} else node.src[1:]):
             stack.append((s, False)) # push srcs on the stack
       else: cache[node] = None # second time i'm seeing this node, add it to returned toposort
     return cache
@@ -215,17 +216,17 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       # late ops don't have shape
       case Ops.UNIQUE | Ops.LUNIQUE | Ops.DEVICE | Ops.RANGE | Ops.LOAD | Ops.STORE | Ops.IF | Ops.BARRIER | Ops.CUSTOM | Ops.CUSTOMI | \
            Ops.VECTORIZE | Ops.GEP | Ops.SPECIAL | Ops.UNROLL | Ops.CONTRACT | Ops.SINK | \
-           Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE | Ops.BINARY | Ops.INS | Ops.TUPLE:
+           Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE | Ops.BINARY | Ops.INS | Ops.TUPLE | Ops.CALL | Ops.FUNCTION:
         return None
 
       case Ops.GETTUPLE:
-        # GETTUPLE extracts from a TUPLE (possibly through a CALL)
-        in_tuple = self.src[0].src[0] if self.src[0].op is Ops.CALL else self.src[0]
+        # GETTUPLE extracts from a TUPLE (possibly through a FUNCTION)
+        in_tuple = self.src[0].src[0] if self.src[0].op is Ops.FUNCTION else self.src[0]
         assert in_tuple.op is Ops.TUPLE
         inner_shape = in_tuple.src[self.arg]._shape
         if inner_shape is None: return None
-        # if through a CALL, substitute internal PARAMs in the shape with corresponding args
-        if self.src[0].op is Ops.CALL:
+        # if through a FUNCTION, substitute internal PARAMs in the shape with corresponding args
+        if self.src[0].op is Ops.FUNCTION:
           return tuple(graph_rewrite(s, _pm_resolve_params, self.src[0].src[1:], walk=True) if isinstance(s, UOp) else s for s in inner_shape)
         return inner_shape
 
@@ -261,8 +262,6 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       # passthrough ops
       case Ops.REDUCE | Ops.MSTACK | Ops.MSELECT | Ops.DETACH | Ops.CONTIGUOUS | Ops.CONTIGUOUS_BACKWARD | Ops.AFTER | Ops.END:
         return self.src[0]._shape
-
-      case Ops.CALL: return None
 
       # TODO: disallow shape changing bitcast
       case Ops.BITCAST:
@@ -418,8 +417,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   def maketuple(*srcs:UOp):  # pylint: disable=no-self-argument
     return UOp(Ops.TUPLE, dtypes.void, srcs)
   def gettuple(self, idx:int) -> UOp:
-    in_tuple = self.src[0] if self.op is Ops.CALL else self
-    assert in_tuple.op is Ops.TUPLE, f"gettuple requires CALL or TUPLE source, got {self.op}"
+    in_tuple = self.src[0] if self.op is Ops.FUNCTION else self
+    assert in_tuple.op is Ops.TUPLE, f"gettuple requires FUNCTION or TUPLE source, got {self.op}"
     return UOp(Ops.GETTUPLE, in_tuple.src[idx].dtype, (self,), idx)
   def group(*srcs:UOp|None):  # pylint: disable=no-self-argument
     if len(srcs) == 1 and isinstance(srcs[0], UOp): return srcs[0]
@@ -554,7 +553,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     if self.op is Ops.MULTI: return self.arg
     # GETTUPLE: axis comes from the specific TUPLE element, not src[0]
     if self.op is Ops.GETTUPLE:
-      in_tuple = self.src[0].src[0] if self.src[0].op is Ops.CALL else self.src[0]
+      in_tuple = self.src[0].src[0] if self.src[0].op is Ops.FUNCTION else self.src[0]
       return in_tuple.src[self.arg].axis if in_tuple.op is Ops.TUPLE else None
     # PARAM: axis is stored as a MULTI source
     if self.op is Ops.PARAM:
@@ -931,13 +930,16 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     if self.axis is not None: p = p.replace(src=p.src + (UOp(Ops.MULTI, arg=self.axis),))
     return p
 
-  _NO_TUPLE_WRAP = {Ops.SINK, Ops.PROGRAM, Ops.LINEAR, Ops.COPY, Ops.BUFFER_VIEW, Ops.CUSTOM_FUNCTION, Ops.TUPLE}
+  # opaque bodies stay as Ops.CALL; value-producing bodies become Ops.FUNCTION (wrapped in TUPLE)
+  _OPAQUE_CALL_BODIES = {Ops.SINK, Ops.PROGRAM, Ops.LINEAR, Ops.COPY, Ops.BUFFER_VIEW, Ops.CUSTOM_FUNCTION}
   def call(self, *srcs:UOp, grad_fxn:Callable|None=None, metadata:tuple[Metadata, ...]=(),
            name:str|None=None, precompile:bool=False, precompile_backward:bool=False) -> UOp:
     assert len(self.ranges) == 0, f"ranges {self.ranges} are leaking out of the call in {self.pyrender()}"
-    # value-producing bodies are always wrapped in TUPLE so CALL dtype is always void
-    body = self if self.op in UOp._NO_TUPLE_WRAP else UOp.maketuple(self)
-    return UOp(Ops.CALL, dtypes.void, (body,)+srcs, CallInfo(grad_fxn, metadata, name, precompile, precompile_backward))
+    if self.op in UOp._OPAQUE_CALL_BODIES:
+      return UOp(Ops.CALL, dtypes.void, (self,)+srcs, CallInfo(grad_fxn, metadata, name, precompile, precompile_backward))
+    # value-producing bodies are always wrapped in TUPLE so FUNCTION dtype is always void
+    body = self if self.op is Ops.TUPLE else UOp.maketuple(self)
+    return UOp(Ops.FUNCTION, dtypes.void, (body,)+srcs, CallInfo(grad_fxn, metadata, name, precompile, precompile_backward))
   def custom_kernel(*srcs:UOp, fxn:Callable, grad_fxn:Callable|None=None) -> list[UOp]:
     contig_srcs = tuple(x.contiguous() if x.op is not Ops.AFTER else x for x in srcs)
     placeholders = [UOp.placeholder_like(s, slot=i) for i,s in enumerate(contig_srcs)]
@@ -967,13 +969,6 @@ class CallInfo:
   def __repr__(self):
     gf = id(self.grad_fxn) if self.grad_fxn else None
     return f"CallInfo({gf}, {self.metadata}, {repr(self.name)}, {self.precompile}, {self.precompile_backward})"
-
-def should_resolve_call(c:UOp) -> bool:
-  # don't resolve real kernel calls, sink or program
-  if c.src[0].op is Ops.SINK and isinstance(c.src[0].arg, KernelInfo): return False
-  if c.src[0].op in {Ops.PROGRAM, Ops.LINEAR, Ops.COPY, Ops.CUSTOM_FUNCTION}: return False
-  if c.arg.precompile: return False
-  return True
 
 # ******** ops in python ********
 
@@ -1357,7 +1352,7 @@ class RewriteContext:
           continue
         # no rewrite, process children then come back to rebuild
         stack.append((n, True))
-        if not self.enter_calls and n.op is Ops.CALL: self.replace[n.src[0]] = n.src[0]
+        if not self.enter_calls and n.op in {Ops.CALL, Ops.FUNCTION}: self.replace[n.src[0]] = n.src[0]
         for x in reversed(n.src):
           if x not in self.replace: stack.append((x, False))
       else:
@@ -1394,10 +1389,10 @@ class RewriteContext:
             if n in waitlist: stack.extend(waitlist.pop(n))
             continue
         stack.append((n, 1, new_n))
-        # NOTE: CALL is handled as a special case.
+        # NOTE: CALL/FUNCTION are handled as a special case.
         # The function that is called is not included in the graph_rewrite.
         # If you want to graph_rewrite a call, you can
-        if not self.enter_calls and new_n.op is Ops.CALL: self.replace[new_n.src[0]] = new_n.src[0]
+        if not self.enter_calls and new_n.op in {Ops.CALL, Ops.FUNCTION}: self.replace[new_n.src[0]] = new_n.src[0]
         for x in reversed(new_n.src):
           if x in on_stack: continue
           stack.append((x, 0, x))
@@ -1618,7 +1613,7 @@ def pyrender(ast:UOp) -> str:
   cmap = consumer_map_from_toposort(lst)
   not_rendered = {Ops.CONST, Ops.VCONST, Ops.DEVICE}
   always_rendered = {Ops.PARAM, Ops.LOAD, Ops.SPECIAL, Ops.RANGE, Ops.CONTIGUOUS, Ops.VECTORIZE,
-                     Ops.BUFFER, Ops.COPY, Ops.CALL, Ops.WHERE, Ops.END}
+                     Ops.BUFFER, Ops.COPY, Ops.CALL, Ops.FUNCTION, Ops.WHERE, Ops.END}
 
   to_render: set[UOp] = {ast}
   for u in lst:
@@ -1626,7 +1621,7 @@ def pyrender(ast:UOp) -> str:
       for s in u.src: to_render.add(s)
     if u.op is Ops.STORE: to_render.add(u.src[1])
     if u.op in {Ops.REDUCE, Ops.REDUCE_AXIS}: to_render.add(u.src[0])
-    if u.op is Ops.CALL: raise NotImplementedError("call can't be pyrendered")
+    if u.op in {Ops.CALL, Ops.FUNCTION}: raise NotImplementedError("call can't be pyrendered")
     if u.op in not_rendered: continue
     # checking the consumers is not enough, you have to make sure it's not used twice by the one consumer
     if len(cmap[u]) == 1 and len([x for x in list(cmap[u].keys())[0].src if x is u]) == 1 and u.op not in always_rendered: continue

@@ -220,9 +220,9 @@ class TestCallSchedule(unittest.TestCase):
     a = Tensor.empty(4, 8)
     b = Tensor.empty(4, 8)
     r0, r1 = f(a), f(b)
-    # find the CALL nodes
-    c0 = next(u for u in r0.uop.toposort() if u.op is Ops.CALL)
-    c1 = next(u for u in r1.uop.toposort() if u.op is Ops.CALL)
+    # find the FUNCTION nodes
+    c0 = next(u for u in r0.uop.toposort() if u.op is Ops.FUNCTION)
+    c1 = next(u for u in r1.uop.toposort() if u.op is Ops.FUNCTION)
     # the function bodies (src[0]) should have identical keys — unique consts must not leak through
     self.assertEqual(c0.src[0].key, c1.src[0].key)
 

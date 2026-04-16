@@ -95,7 +95,7 @@ _tensor_spec = PatternMatcher([
   (UPat(Ops.BUFFER_VIEW, src=(UPat(Ops.BUFFER),)), lambda: True),
 
   # KERNEL can attach to an AFTER to describe the compute required to realize a BUFFER
-  (UPat(Ops.CALL, src=UPat((Ops.BUFFER, Ops.AFTER, Ops.MSELECT, Ops.MSTACK, Ops.BIND))), lambda: True),
+  (UPat((Ops.CALL, Ops.FUNCTION), src=UPat((Ops.BUFFER, Ops.AFTER, Ops.MSELECT, Ops.MSTACK, Ops.BIND))), lambda: True),
 
   # MSELECT chooses one of the multi buffers
   (UPat(Ops.MSELECT, name="x"), lambda x: isinstance(x.src[0].device, tuple) and x.arg < len(x.src[0].device)),
@@ -132,14 +132,16 @@ _tensor_spec = PatternMatcher([
   # AFTER if things were kernelized
   (UPat(Ops.AFTER, src=(UPat((Ops.BUFFER, Ops.AFTER)),), allow_any_len=True), lambda: True),
 
-  # allow CALL/PARAM/CUSTOM_FUNCTION — CALL dtype is always void
+  # allow CALL/FUNCTION/PARAM/CUSTOM_FUNCTION — both CALL and FUNCTION dtype is always void
+  # FUNCTION must have a TUPLE body in src[0] (invariant enforced by UOp.call); CALL bodies are opaque
   (UPat(Ops.CALL, dtypes.void), lambda: True),
+  (UPat(Ops.FUNCTION, dtypes.void, src=(UPat(Ops.TUPLE),), allow_any_len=True), lambda: True),
   (UPat(Ops.PARAM), lambda: True),
   (UPat(Ops.CUSTOM_FUNCTION, name="x"), lambda x: isinstance(x.arg, str)),
 
-  # TUPLE must have void dtype, GETTUPLE can only appear on CALL or TUPLE
+  # TUPLE must have void dtype, GETTUPLE can only appear on FUNCTION or TUPLE
   (UPat(Ops.TUPLE, dtypes.void), lambda: True),
-  (UPat(Ops.GETTUPLE, src=(UPat((Ops.CALL, Ops.TUPLE)),), name="g"), lambda g: isinstance(g.arg, int)),
+  (UPat(Ops.GETTUPLE, src=(UPat((Ops.FUNCTION, Ops.TUPLE)),), name="g"), lambda g: isinstance(g.arg, int)),
 
   # ** for custom kernels **
 
@@ -274,7 +276,7 @@ full_spec = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat((Ops.VECTORIZE, Ops.CAST)), UPat())), lambda: True),
 
   # linearizer: outputs + intermediate KERNELs
-  (UPat(Ops.CALL, dtype=dtypes.void), lambda: True),
+  (UPat((Ops.CALL, Ops.FUNCTION), dtype=dtypes.void), lambda: True),
 
   # where on index in rhs position is fine
   (UPat(Ops.WHERE, dtype=dtypes.weakint, src=(UPat(dtype=dtypes.bool), UPat(), UPat(dtype=dtypes.weakint))), lambda: True),
