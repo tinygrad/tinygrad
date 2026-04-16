@@ -174,7 +174,7 @@ class TestMultiScalarALU(unittest.TestCase):
   def test_multi_times_call_scalar(self):
     """Per-device scalar from a CALL (like FP8 local amax) used in ALU with MULTI."""
     import functools
-    from tinygrad.uop.ops import UOp, Ops
+    from tinygrad.uop.ops import Ops
     devices = ("NULL:0", "NULL:1")
     x = Tensor.ones(4, 4).contiguous().shard(devices, axis=0)
     # simulate per-device scalar via CALL (strips MULTI from param body → no allreduce)
