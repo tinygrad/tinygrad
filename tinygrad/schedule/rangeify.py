@@ -190,6 +190,15 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   # copy only to different device
   (UPat(Ops.COPY, src=(UPat.var("x"), UPat()), name="copy"), lambda x,copy: x.f(Ops.NOOP) if x.device == copy.device else None),
 
+  # ** store rules **
+
+  # fix store hazard (dest is in used in src) by adding contiguous
+  (UPat(Ops.STORE, src=(UPat(name="target"), UPat(name="src"))), fix_store_hazard),
+
+  # remove two STOREs that store the same thing: TestSchedule.test_dedup_assign
+  (UPat(Ops.STORE, src=(UPat(Ops.AFTER, src=(UPat.var("dest"),
+   UPat(Ops.STORE, src=(UPat.var("dest"), UPat.var("src"))))), UPat.var("src"))), lambda dest, src: dest.store(src)),
+
   # ** assign rules (STORE+AFTER) **
 
   # move bitcast from store+after target to source
@@ -199,9 +208,6 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   # wrap STORE in inner AFTER when target is a view — gives the STORE its own ranges from the view shape
   #(UPat(Ops.AFTER, src=(UPat(name="buf"), UPat(Ops.STORE, src=(UPat(name="target"), UPat()))), name="after"),
   # lambda after, buf, target: after.replace(src=(buf, target.after(after.src[1]))) if target.shape != buf.shape else None),
-
-  # fix store hazard by adding contiguous
-  (UPat(Ops.STORE, src=(UPat(name="target"), UPat(name="src"))), fix_store_hazard),
 
   # make source contiguous if it has hazardous movement ops on the dest buffer
   #(UPat(Ops.AFTER, src=(UPat(), UPat(Ops.STORE, src=(UPat(name="target"), UPat(name="src")))), name="after"), fix_store_after_hazard),
