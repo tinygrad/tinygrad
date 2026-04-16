@@ -1,4 +1,4 @@
-import os, struct, unittest
+import os, struct, unittest, tempfile, pathlib
 from tinygrad import dtypes, Tensor, fetch, Device
 from tinygrad.nn.state import ggml_data_to_tensor, gguf_load
 from tinygrad.device import is_dtype_supported
@@ -91,6 +91,43 @@ class TestGGUF(unittest.TestCase):
   def test_expected_failure_unknown_type(self):
     with self.assertRaises(ValueError):
       ggml_data_to_tensor(Tensor.empty(512, dtype=dtypes.uint8), 256, 1337)
+
+  def test_multi_part_load(self):
+    def build(n_total, part_no, tensors):
+      # [header] [kv_data] [tensor_infos] [padding] [tensor_data_blob]
+      buf = bytearray()
+      # Header: magic "GGUF" + version=3 + n_tensors + n_kv=2
+      buf += struct.pack("<4siqq", b"GGUF", 3, len(tensors), 2)
+      # KV entries: [key_len: uint64][key bytes][type: int32][value]
+      for k, v in [("split.count", n_total), ("split.no", part_no)]:
+        kb = k.encode()
+        buf += struct.pack("<Q", len(kb)) + kb + struct.pack("<i", 4) + struct.pack("<I", v)
+      data_off = 0
+      # Tensor infos: [name_len][name][ndims][dims reversed][qtype][offset_into_data_blob]
+      for name, dims, qtype, data in tensors:
+        nb = name.encode()
+        buf += struct.pack("<Q", len(nb)) + nb + struct.pack("<I", len(dims))
+        for d in reversed(dims): buf += struct.pack("<Q", d)
+        buf += struct.pack("<i", qtype) + struct.pack("<Q", data_off)
+        data_off += len(data)
+      buf += b"\x00" * ((32 - len(buf) % 32) % 32)
+      for _, _, _, data in tensors: buf += data
+      return bytes(buf)
+
+    with tempfile.TemporaryDirectory() as d:
+      d = pathlib.Path(d)
+      a, b = np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32), np.array([5.0, 6.0], dtype=np.float32)
+      (d / "test-00001-of-00002.gguf").write_bytes(build(2, 0, [("a", (4,), 0, a.tobytes())]))
+      (d / "test-00002-of-00002.gguf").write_bytes(build(2, 1, [("b", (2,), 0, b.tobytes())]))
+      kv, ts = gguf_load(d / "test-00001-of-00002.gguf")
+      self.assertEqual(kv["split.count"], 2)
+      np.testing.assert_equal(ts["a"].numpy(), a)
+      np.testing.assert_equal(ts["b"].numpy(), b)
+
+      # missing part 2
+      (d / "test-00002-of-00002.gguf").unlink()
+      with self.assertRaisesRegex(AssertionError, "missing GGUF split"):
+        gguf_load(d / "test-00001-of-00002.gguf")
 
   def _test_dequantization(self, qtype: GGMLQuantizationType):
     block_size, type_size = GGML_QUANT_SIZES[qtype]

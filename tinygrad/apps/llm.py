@@ -144,6 +144,8 @@ class TransformerConfig:
   leading_dense_blocks: int = 0
   dense_hidden_dim: int = 0
   routed_scaling_factor: float = 1.0
+  qkv_bias: bool = False
+  expert_bias: bool = False
 
 class FFNBlock:
   def __init__(self, config:TransformerConfig):
@@ -156,7 +158,7 @@ class FFNBlock:
     # --- feed-forward (MoE or dense) -------------------------------------
     if config.num_experts > 0:
       self.ffn_gate_inp = nn.Linear(config.dim, config.num_experts, bias=False)  # router
-      if config.kv_lora_rank > 0: self.exp_probs_b = {"bias": Tensor.zeros(config.num_experts)}
+      if config.expert_bias: self.exp_probs_b = {"bias": Tensor.zeros(config.num_experts)}
       self.ffn_gate_exps = ExpertWeights(config.num_experts, config.dim, config.hidden_dim)
       self.ffn_up_exps = ExpertWeights(config.num_experts, config.dim, config.hidden_dim)
       self.ffn_down_exps = ExpertWeights(config.num_experts, config.hidden_dim, config.dim)
@@ -217,9 +219,9 @@ class TransformerBlock(FFNBlock):
     # --- attention projections (all linear, bias-free) ------------------
     q_proj_out       = config.head_dim * config.n_heads * (2 if config.attn_output_gate else 1)
     kv_proj_out      = config.head_dim * config.n_kv_heads
-    self.attn_q      = nn.Linear(config.dim, q_proj_out,  bias=False)
-    self.attn_k      = nn.Linear(config.dim, kv_proj_out, bias=False)
-    self.attn_v      = nn.Linear(config.dim, kv_proj_out, bias=False)
+    self.attn_q      = nn.Linear(config.dim, q_proj_out,  bias=config.qkv_bias)
+    self.attn_k      = nn.Linear(config.dim, kv_proj_out, bias=config.qkv_bias)
+    self.attn_v      = nn.Linear(config.dim, kv_proj_out, bias=config.qkv_bias)
     self.attn_output = nn.Linear(config.head_dim * config.n_heads, config.dim, bias=False)
     if config.qk_norm: self.attn_q_norm, self.attn_k_norm = nn.RMSNorm(config.qk_norm, config.norm_eps), nn.RMSNorm(config.qk_norm, config.norm_eps)
 
@@ -395,8 +397,7 @@ class Transformer:
 
   @staticmethod
   def from_gguf(gguf:Tensor, max_context:int|None=None, realize=bool(getenv("REALIZE", 0))) -> tuple[Transformer, dict]:
-    # TODO: remove the need for copy to default device
-    kv, state_dict = nn.state.gguf_load(gguf.to(None).realize())
+    kv, state_dict = nn.state.gguf_load(gguf)
 
     # all state items should be float16, not float32
     state_dict = {k:v.cast('float16') if getenv("HALF", 1) else v for k,v in state_dict.items()}
@@ -411,6 +412,7 @@ class Transformer:
     ssm = None
     if arch in ('qwen35', 'qwen35moe'):
       ssm = SSMConfig(**{k: kv[f'{arch}.ssm.{k}'] for k in ('conv_kernel','state_size','group_count','time_step_rank','inner_size')})
+    if arch in ('qwen35', 'qwen35moe', 'glm4moe'):
       state_dict = {k.replace('post_attention_norm', 'ffn_norm'):v for k,v in state_dict.items()}
 
     kv_lora_rank = kv.get(f'{arch}.attention.kv_lora_rank', 0)
@@ -429,7 +431,7 @@ class Transformer:
       elif kv_lora_rank and 'attn_kv_a_mqa.weight' in name:
         state_dict[name] = state_dict[name][:kv_lora_rank].cat(state_dict[name][kv_lora_rank:].rearrange("(h two) d -> (two h) d", two=2), dim=0)
     config = TransformerConfig(
-      num_blocks=kv[f'{arch}.block_count'], dim=kv[f'{arch}.embedding_length'],
+      num_blocks=kv[f'{arch}.block_count'] - kv.get(f'{arch}.nextn_predict_layers', 0), dim=kv[f'{arch}.embedding_length'],
       hidden_dim=kv.get(f'{arch}.expert_feed_forward_length', kv.get(f'{arch}.feed_forward_length', 0)),
       n_heads=n_heads, n_kv_heads=n_kv_heads, norm_eps=kv[f'{arch}.attention.layer_norm_rms_epsilon'],
       vocab_size=len(kv['tokenizer.ggml.tokens']),
@@ -449,7 +451,9 @@ class Transformer:
       shared_expert_gate=f"blk.{kv.get(f'{arch}.leading_dense_block_count', 0)}.ffn_gate_inp_shexp.weight" in state_dict,
       dense_hidden_dim=kv.get(f'{arch}.feed_forward_length', 0) if kv.get(f'{arch}.leading_dense_block_count', 0) else 0,
       routed_scaling_factor=kv.get(f'{arch}.expert_weights_scale', 1.0), attn_output_gate=arch in ('qwen35', 'qwen35moe'), ssm=ssm,
-      full_attention_interval=kv.get(f'{arch}.full_attention_interval', 0))
+      full_attention_interval=kv.get(f'{arch}.full_attention_interval', 0),
+      qkv_bias='blk.0.attn_q.bias' in state_dict,
+      expert_bias=f"blk.{kv.get(f'{arch}.leading_dense_block_count', 0)}.exp_probs_b.bias" in state_dict)
     model = Transformer(config)
     nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused
     # NOTE: without this contiguous, it unpacks the weights from the model every time. we shouldn't need this, but for now it's faster

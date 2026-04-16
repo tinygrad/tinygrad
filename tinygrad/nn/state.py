@@ -1,4 +1,4 @@
-import json, pathlib, zipfile, pickle, tarfile, struct, functools, io, zlib
+import json, pathlib, zipfile, pickle, tarfile, struct, functools, io, zlib, re
 from collections import OrderedDict
 from typing import Any, Callable, BinaryIO, Iterable, cast
 from tinygrad.tensor import Tensor
@@ -367,18 +367,7 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
       return d * (bits * 2 - 1)
   raise ValueError(f"GGML type '{ggml_type}' is not supported!")
 
-@accept_filename
-def gguf_load(tensor: Tensor) -> tuple[dict, dict[str, Tensor]]:
-  """
-  Loads a .gguf file, returning the `kv_data` and `state_dict`.
-
-  ```python
-  gguf_tensor = Tensor(pathlib.Path("Meta-Llama-3-8B-Instruct.Q4_0.gguf")).to(Device.DEFAULT)
-  kv_data, state_dict = nn.state.gguf_load(gguf_tensor)
-  ```
-
-  NOTE: The provided tensor must be on a device that supports execution.
-  """
+def _gguf_parse(tensor: Tensor) -> tuple[dict, dict[str, Tensor]]:
   reader, kv_data, state_dict = io.BufferedReader(TensorIO(tensor), 1_000_000), {}, {}
   def read_unpack(fmt: str, n: int): return struct.unpack(fmt, reader.read(n))[0]
   def read_str(): return str(reader.read(read_uint64()), "utf-8")
@@ -401,5 +390,34 @@ def gguf_load(tensor: Tensor) -> tuple[dict, dict[str, Tensor]]:
   data_start = round_up(pos, alignment)
 
   for name, dims, typ, off in t_infos: state_dict[name] = ggml_data_to_tensor(tensor[data_start + off:], prod(dims), typ).reshape(*reversed(dims))
+  return kv_data, state_dict
 
+@accept_filename
+def gguf_load(tensor: Tensor) -> tuple[dict, dict[str, Tensor]]:
+  """
+  Loads a .gguf file, returning the `kv_data` and `state_dict`.
+
+  ```python
+  gguf_tensor = Tensor(pathlib.Path("Meta-Llama-3-8B-Instruct.Q4_0.gguf")).to(Device.DEFAULT)
+  kv_data, state_dict = nn.state.gguf_load(gguf_tensor)
+  ```
+
+  NOTE: The provided tensor must be on a device that supports execution.
+  NOTE: Multi-part GGUFs (`split.count > 1`) are merged when loaded from a disk-backed path, all parts must be in the same folder.
+  """
+  src = tensor.device.removeprefix("DISK:") if isinstance(tensor.device, str) and tensor.device.startswith("DISK:") else None
+  # TODO: remove the need for copy to default device
+  tensor = tensor.to(None).realize()
+  kv_data, state_dict = _gguf_parse(tensor)
+  if kv_data.get('split.count', 1) > 1:
+    assert kv_data.get('split.no', 0) == 0, f"multi-part GGUF must be loaded from the first split (got split.no={kv_data.get('split.no', 0)})"
+    assert src is not None, "multi-part GGUF requires a disk-backed tensor (pathlib.Path or DISK device)"
+    m = re.match(r"^(.*)-00001-of-(\d{5})\.gguf$", src)
+    assert m, f"first split path must end with -00001-of-NNNNN.gguf to locate sibling splits: {src}"
+    base, total = m.group(1), int(m.group(2))
+    for i in range(2, total+1):
+      pp = pathlib.Path(f"{base}-{i:05d}-of-{total:05d}.gguf")
+      assert pp.exists(), f"missing GGUF split: {pp}"
+      _, sd = _gguf_parse(Tensor(pp).to(None).realize())
+      state_dict.update(sd)
   return kv_data, state_dict
