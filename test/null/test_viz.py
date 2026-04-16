@@ -37,25 +37,13 @@ class VizTrace:
 
 @contextlib.contextmanager
 def save_viz():
-  # clear previous traces
   for lst in [tracked_keys, tracked_ctxs, active_rewrites, active_group, _name_cnt]: lst.clear()
   Buffer.profile_events.clear()
   cpu_events.clear()
-  # set the context vars to enable VIZ
-  prev_viz = VIZ.value
-  VIZ.value = -1
-  prev_tms = TRACK_MATCH_STATS.value
-  TRACK_MATCH_STATS.value = 2
-  prev_profile = PROFILE.value
-  PROFILE.value = 1
   viz = VizTrace()
-  try:
+  with Context(VIZ=-1, TRACK_MATCH_STATS=2, PROFILE=1):
     yield viz
-  finally:
-    viz.set_data()
-    TRACK_MATCH_STATS.value = prev_tms
-    PROFILE.value = prev_profile
-    VIZ.value = prev_viz
+  viz.set_data()
 
 class TestViz(unittest.TestCase):
   def test_simple(self):

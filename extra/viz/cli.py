@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-import argparse, pathlib, signal, sys, struct, json, itertools
+import argparse, pathlib, signal, sys, struct, json, itertools, os
+os.environ["VIZ"] = "0"
 if hasattr(signal, "SIGPIPE"): signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 from typing import Iterator
 from tinygrad.viz import serve as viz
