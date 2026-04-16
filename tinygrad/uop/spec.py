@@ -133,7 +133,9 @@ _tensor_spec = PatternMatcher([
   (UPat(Ops.AFTER, src=(UPat((Ops.BUFFER, Ops.AFTER)),), allow_any_len=True), lambda: True),
 
   # allow CALL/FUNCTION/PARAM/CUSTOM_FUNCTION — both CALL and FUNCTION dtype is always void
-  (UPat((Ops.CALL, Ops.FUNCTION), dtypes.void), lambda: True),
+  # FUNCTION must have a TUPLE body in src[0] (invariant enforced by UOp.call); CALL bodies are opaque
+  (UPat(Ops.CALL, dtypes.void), lambda: True),
+  (UPat(Ops.FUNCTION, dtypes.void, src=(UPat(Ops.TUPLE),), allow_any_len=True), lambda: True),
   (UPat(Ops.PARAM), lambda: True),
   (UPat(Ops.CUSTOM_FUNCTION, name="x"), lambda x: isinstance(x.arg, str)),
 

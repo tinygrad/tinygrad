@@ -216,7 +216,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       # late ops don't have shape
       case Ops.UNIQUE | Ops.LUNIQUE | Ops.DEVICE | Ops.RANGE | Ops.LOAD | Ops.STORE | Ops.IF | Ops.BARRIER | Ops.CUSTOM | Ops.CUSTOMI | \
            Ops.VECTORIZE | Ops.GEP | Ops.SPECIAL | Ops.UNROLL | Ops.CONTRACT | Ops.SINK | \
-           Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE | Ops.BINARY | Ops.INS | Ops.TUPLE:
+           Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE | Ops.BINARY | Ops.INS | Ops.TUPLE | Ops.CALL | Ops.FUNCTION:
         return None
 
       case Ops.GETTUPLE:
@@ -262,8 +262,6 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       # passthrough ops
       case Ops.REDUCE | Ops.MSTACK | Ops.MSELECT | Ops.DETACH | Ops.CONTIGUOUS | Ops.CONTIGUOUS_BACKWARD | Ops.AFTER | Ops.END:
         return self.src[0]._shape
-
-      case Ops.CALL | Ops.FUNCTION: return None
 
       # TODO: disallow shape changing bitcast
       case Ops.BITCAST:
@@ -971,12 +969,6 @@ class CallInfo:
   def __repr__(self):
     gf = id(self.grad_fxn) if self.grad_fxn else None
     return f"CallInfo({gf}, {self.metadata}, {repr(self.name)}, {self.precompile}, {self.precompile_backward})"
-
-def should_resolve_call(c:UOp) -> bool:
-  # only FUNCTION (value-producing call with TUPLE body) can be resolved; precompile FUNCTIONs aren't inlined
-  if c.op is not Ops.FUNCTION: return False
-  if c.arg.precompile: return False
-  return True
 
 # ******** ops in python ********
 
