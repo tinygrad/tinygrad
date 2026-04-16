@@ -115,5 +115,14 @@ class TestTensorMetadata(unittest.TestCase):
     c[:4].assign(shared)
     self.assertTrue(self._has_metadata((c[:4] + shared).relu(), "relu"))
 
+class TestTraceMetaShutdown(unittest.TestCase):
+  def test_tracemeta_del_no_shutdown_error(self):
+    import subprocess, os
+    result = subprocess.run(['python3', '-c', 'from tinygrad import Tensor\n'
+                             'x=Tensor.eye(3,requires_grad=True); (x@x).sum().backward()'],
+                            env={**os.environ, "TRACEMETA": "2"}, capture_output=True)
+    self.assertEqual(result.returncode, 0)
+    self.assertNotIn(b"Exception", result.stderr)
+
 if __name__ == '__main__':
   unittest.main()
