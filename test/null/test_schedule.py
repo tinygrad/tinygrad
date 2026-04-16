@@ -1041,7 +1041,7 @@ class TestUOpBecome(unittest.TestCase):
     assert UPat(Ops.BUFFER).match(add.uop.base, {})
     # the Tensor UOp can optionally stack a VIEW on top of the BUFFER, in this case to preserve the (4, 4) shape of the tensor
     assert add.uop is not add.uop.base
-    self.assertEqual(add.uop.size, 16)
+    self.assertEqual(add.uop.numel(), 16)
     self.assertEqual(add.uop.shape, (4, 4))
 
   def test_new_buffer_view(self):
