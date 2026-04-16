@@ -182,7 +182,7 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   # fix store hazard (dest is in used in src) by adding contiguous: TestAssign.test_post_flipped_assignment
   (UPat(Ops.STORE, src=(UPat(name="target"), UPat(name="src"))), fix_store_hazard),
 
-  # remove two STOREs that store the same thing: TestSchedule.test_dedup_assign
+  # remove two STOREs that store the same thing to the same place: TestSchedule.test_dedup_assign
   (UPat.var("buf").after(UPat.var("buf").store(UPat.var("src")), name="a1").after(UPat.var("a1").store(UPat.var("src"))), lambda buf,src,a1:a1),
 
   # move bitcast from store dest to source: TestAssign.test_assign_bitcast
@@ -476,8 +476,8 @@ def handle_after(ctx:LocalAddBufferContext, after:UOp):
   buf = after.buf_uop
   # HACK to put the buffer in the MAP instead of MSTACK/MSELECT
   if buf.op in {Ops.MSTACK, Ops.MSELECT}: buf = buf.src[0]
-  assert buf not in ctx.map
-  ctx.map[buf] = after
+  # NOTE: this is bottom up, so we only add it once
+  if buf not in ctx.map: ctx.map[buf] = after
   return buf
 
 def renumber_range(ctx:LocalAddBufferContext, r:UOp):

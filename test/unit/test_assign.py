@@ -630,6 +630,15 @@ class TestAssign(unittest.TestCase):
     self.assertEqual(GlobalCounters.kernel_count, 1)
     self.assertEqual(a.tolist(), [1.,1.])
 
+  def test_nested_after_contiguous_store(self):
+    # Mirrors the nested contiguous-write-then-assign-back shape from torch backend view updates.
+    base = Tensor.empty(3, dtype=dtypes.int64)
+    base.assign(Tensor([1, 2, 3], dtype=dtypes.int64))
+    contig = base.contiguous()
+    contig.assign(Tensor([1, 4, 3], dtype=dtypes.int64))
+    base.assign(contig).realize()
+    self.assertEqual(base.tolist(), [1,4,3])
+
 class TestAssignOrdering(unittest.TestCase):
   """Tests for complex assign orderings that could differ between lazy and eager execution.
 
