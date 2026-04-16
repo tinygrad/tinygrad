@@ -8,7 +8,8 @@ from tinygrad.viz.serve import TCPServerWithReuse, HTTPRequestHandler
 
 class SimpleTokenizer:
   def __init__(self, normal_tokens:dict[str, int], special_tokens:dict[str, int], preset:str="llama3"):
-    if preset not in ("llama3","llama-v3","llama-bpe","qwen2","qwen35","olmo","kimi-k2","tekken","glm4"):
+    preset = {"qwen35":"qwen2","qwen35moe":"qwen2"}.get(preset, preset)
+    if preset not in ("llama3","llama-v3","llama-bpe","qwen2","olmo","kimi-k2","tekken","glm4"):
       raise ValueError(f"Invalid tokenizer preset '{preset}'")
     # https://github.com/openai/gpt-2/blob/9b63575ef42771a015060c964af2c3da4cf7c8ab/src/encoder.py#L9
     bs = [*range(33, 127), *range(161, 173), *range(174, 256)]  # bytes that map to themselves
@@ -62,7 +63,7 @@ class SimpleTokenizer:
   def role(self, role:str):
     if self.preset == 'olmo': return self.encode("<|" + role + "|>\n")  # OLMoE Instruct format
     if self.preset == 'kimi-k2': return self.encode("<|im_" + role + "|>" + role + "<|im_middle|>")
-    if self.preset in ('qwen2','qwen35'): return self.encode("<|im_start|>" + role + "\n")
+    if self.preset == 'qwen2': return self.encode("<|im_start|>" + role + "\n")
     if self.preset == 'glm4': return self.encode("<|" + role + "|>")
     if self.preset == 'tekken':
       if role == 'user': return self.encode("[INST]")
@@ -72,16 +73,12 @@ class SimpleTokenizer:
   def end_turn(self, eos_id:int):
     if self.preset == 'olmo': return self.encode("\n")
     if self.preset == 'kimi-k2': return [eos_id]
-    if self.preset in ('qwen2','qwen35'): return [eos_id] + self.encode("\n")
+    if self.preset == 'qwen2': return [eos_id] + self.encode("\n")
     if self.preset == 'glm4': return []
     if self.preset == 'tekken': return self.encode("[/INST]")
     return [eos_id]
   def prefix(self, bos_id:int|None) -> list[int]:
     return ([] if bos_id is None else [bos_id]) + (self.encode("<sop>") if self.preset == 'glm4' else [])
-  def think_tags(self, think:bool) -> tuple[str, list[int]]:
-    tags = {'glm4':("<think>","</think>"), 'qwen2':("","<think>\n\n</think>\n\n"), 'qwen35':("<think>\n","<think>\n\n</think>\n\n")}
-    s = tags.get(self.preset, ("",""))[0 if think else 1]
-    return s, self.encode(s) if s else []
 
 @functools.cache
 def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0) -> Tensor:
@@ -557,12 +554,12 @@ class Handler(HTTPRequestHandler):
   def do_GET(self):
     if self.path == "/v1/models": self.send_data(json.dumps({"object":"list","data":[{"id":model_name,"object":"model"}]}).encode())
     else: self.send_data(CHAT_HTML, content_type="text/html")
-  def run_model(self, ids:list[int], model_name:str, include_usage=False, max_tokens:int|None=None, temperature:float=0.0, think_start:str=""):
+  def run_model(self, ids:list[int], model_name:str, include_usage=False, max_tokens:int|None=None, temperature:float=0.0):
     cache_start_pos = model.get_start_pos(ids)
     stderr_log(f"{self.path}  {colored('--', 'BLACK')}  "
                f"in:{colored(f'{cache_start_pos:5d}', 'green')} +{len(ids)-cache_start_pos:5d}  {colored('--', 'BLACK')}  ")
     tmpl = {"id":f"chatcmpl-{uuid.uuid4().hex[:24]}", "object":"chat.completion.chunk", "created":int(time.time()), "model":model_name}
-    yield {"choices": [{"index":0, "delta":{"role":"assistant","content":think_start}, "finish_reason":None}], **tmpl}
+    yield {"choices": [{"index":0, "delta":{"role":"assistant","content":""}, "finish_reason":None}], **tmpl}
     out: list[int] = []
     finish_reason = "stop"
     st = time.perf_counter()
@@ -588,7 +585,6 @@ class Handler(HTTPRequestHandler):
     body: dict[str, typing.Any] = json.loads(raw_body.decode("utf-8"))
     if DEBUG >= 1: print(json.dumps(body, indent=2))
     if self.path == "/v1/chat/completions":
-      t_str, t_ids = tok.think_tags(body.get("chat_template_kwargs", {}).get("enable_thinking", True))
       # extract tokens, last assistant message is treated as prefill
       ids: list[int] = tok.prefix(bos_id)
       for i, msg in enumerate(body["messages"]):
@@ -602,12 +598,12 @@ class Handler(HTTPRequestHandler):
         else: raise RuntimeError(f"unknown content type: {type(content)}")
         if msg["role"] == "assistant" and i == len(body["messages"]) - 1: break
         ids += tok.end_turn(eos_id)
-      else: ids += tok.role("assistant") + t_ids
+      else: ids += tok.role("assistant")
 
       # reply
       max_tokens = body.get("max_completion_tokens") or body.get("max_tokens")
       chunks = self.run_model(ids, body["model"], not body.get("stream") or body.get("stream_options",{}).get("include_usage", False),
-                              max_tokens=max_tokens, temperature=float(body.get("temperature", 0.0)), think_start=t_str)
+                              max_tokens=max_tokens, temperature=float(body.get("temperature", 0.0)))
       if body.get("stream"): self.stream_json(chunks)
       else:
         out, finish_reason = [], "stop"
@@ -625,7 +621,6 @@ if __name__ == "__main__":
   parser.add_argument("--max_context", type=int, default=4096, help="Max Context Length")
   parser.add_argument("--serve", nargs='?', type=int, const=8000, metavar="PORT", help="Run OpenAI compatible API (optional port, default 8000)")
   parser.add_argument("--warmup", action="store_true", help="warmup the JIT")
-  parser.add_argument("--think", action=argparse.BooleanOptionalAction, default=True, help="Enable thinking for reasoning models (no-op otherwise)")
   parser.add_argument("--benchmark", nargs='?', type=int, const=20, metavar="COUNT", help="Benchmark tok/s (optional count, default 20)")
   args = parser.parse_args()
 
@@ -644,7 +639,6 @@ if __name__ == "__main__":
   bos_id: int|None = kv.get('tokenizer.ggml.bos_token_id') if kv.get('tokenizer.ggml.add_bos_token', True) else None
   eos_id: int = kv['tokenizer.ggml.eos_token_id']
   eot_id: int|None = kv.get('tokenizer.ggml.eot_token_id')
-  think_start, think_start_ids = tok.think_tags(args.think)
 
   # warmup the JIT
   if args.warmup or args.serve:
@@ -669,11 +663,10 @@ if __name__ == "__main__":
   ids: list[int] = tok.prefix(bos_id)
   while 1:
     try:
-      ids += tok.role("user") + tok.encode(input('>>> ')) + tok.end_turn(eos_id) + tok.role("assistant") + think_start_ids
+      ids += tok.role("user") + tok.encode(input('>>> ')) + tok.end_turn(eos_id) + tok.role("assistant")
     except EOFError:
       break
     dec = tok.stream_decoder()
-    if think_start: sys.stdout.write(think_start)
     for next_id in model.generate(ids):
       sys.stdout.write(dec(next_id) if next_id not in (eos_id, eot_id) else dec() + "\n\n")
       sys.stdout.flush()

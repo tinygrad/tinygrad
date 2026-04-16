@@ -13,7 +13,6 @@ class TestLLMServer(unittest.TestCase):
     cls.mock_tok.stream_decoder = Mock(return_value=lambda tid=None: "Hello" if tid is not None else "")
     cls.mock_tok.end_turn = Mock(return_value=[998])
     cls.mock_tok.prefix = Mock(return_value=[1])
-    cls.mock_tok.think_tags = Mock(return_value=("", []))
     cls.mock_tok.preset = "llama3"
 
     cls.mock_model = Mock()
@@ -22,7 +21,6 @@ class TestLLMServer(unittest.TestCase):
 
     cls.bos_id = 1
     cls.eos_id = 999
-    cls.eot_id = None
 
     import tinygrad.apps.llm as llm_module
     llm_module.model = cls.mock_model
@@ -30,7 +28,7 @@ class TestLLMServer(unittest.TestCase):
     llm_module.tok = cls.mock_tok
     llm_module.bos_id = cls.bos_id
     llm_module.eos_id = cls.eos_id
-    llm_module.eot_id = cls.eot_id
+    llm_module.eot_id = None
 
     from tinygrad.apps.llm import Handler
     from tinygrad.viz.serve import TCPServerWithReuse
