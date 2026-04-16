@@ -157,7 +157,7 @@ def main(args) -> None:
           loc = pathlib.Path(m["upat"][0][0])
           print(f"Rewrite at {loc.parent.name}/{loc.name}:{m['upat'][0][1]}\n{m['upat'][1]}")
           for line in m["diff"]:
-            print(line if args.no_color else colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None))
+            print(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None))
     if data.get("src") is not None: print(data["src"])
 
 def get_arg_parser() -> argparse.ArgumentParser:
