@@ -343,9 +343,6 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     return tuple(x//len(self.device) if i == self.axis else x for i,x in enumerate(self.max_shape))
 
   @property
-  def size(self) -> int: return prod(self.max_shape)
-
-  @property
   def shard_size(self) -> int: return prod(self.max_shard_shape)
 
   @functools.cached_property

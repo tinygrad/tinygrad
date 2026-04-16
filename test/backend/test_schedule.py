@@ -1374,7 +1374,7 @@ class TestCopyFolding(unittest.TestCase):
     b = view.clone()
     run_schedule(check_schedule(b, 1, filter_sink=False))
     self.assertEqual(b.uop.base.buffer.size, 2)
-    self.assertEqual(b.uop.size, 2)
+    self.assertEqual(b.uop.numel(), 2)
     self.assertListEqual(b.tolist(), [0, 1])
 
   def test_expanded_copy(self):
@@ -1383,7 +1383,7 @@ class TestCopyFolding(unittest.TestCase):
     b = view.clone()
     run_schedule(check_schedule(b, 1, filter_sink=False))
     self.assertEqual(b.uop.base.buffer.size, 4)
-    self.assertEqual(b.uop.size, 4)
+    self.assertEqual(b.uop.numel(), 4)
     self.assertListEqual(b.tolist(), [[0, 0], [1, 1]])
 
   def test_permuted_copy(self):
