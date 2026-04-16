@@ -1,4 +1,5 @@
 import os, time, struct, functools, unittest
+from dataclasses import replace
 from typing import Any, Callable
 import numpy as np
 from tinygrad import Tensor, dtypes, Device
@@ -22,6 +23,8 @@ def get_uops(sink:UOp, ren:Renderer|None=None) -> list[UOp]:
   if sink.arg is None: sink = sink.replace(arg=KernelInfo())
   full_sink = full_rewrite_to_sink(sink, ren, optimize=sink.tag is None)
   return line_rewrite(linearize(full_sink), pm_linearize_cleanups)
+
+def replace_opts(ast:UOp, opts:list) -> UOp: return ast.replace(arg=replace(ast.arg, opts_to_apply=tuple(opts)))
 
 def derandomize_model(model):
   for p in get_parameters(model):

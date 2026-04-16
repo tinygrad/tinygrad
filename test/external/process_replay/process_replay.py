@@ -10,8 +10,7 @@ if not int(os.getenv("ASSERT_PROCESS_REPLAY", "1")): ASSERT_DIFF = 0
 try:
   from tinygrad.renderer import Renderer, ProgramSpec
   from tinygrad.engine.realize import get_program
-  from tinygrad.uop.ops import UOp, Ops, KernelInfo
-  from tinygrad.codegen.opt import Opt
+  from tinygrad.uop.ops import UOp, Ops
   from tinygrad.helpers import VERSION, Context, ContextVar, colored, db_connection, getenv, tqdm
 except ImportError as e:
   print(repr(e))
@@ -42,13 +41,12 @@ class ProcessReplayWarning(Warning): pass
 
 # *** replay the function and convert return values to string
 
-def replay_get_program(p:ProgramSpec, ast:UOp, renderer:Renderer, opts:list[Opt]|None=None) -> tuple[str, str, tuple[Any, ...]]:
+def replay_get_program(p:ProgramSpec, ast:UOp, renderer:Renderer) -> tuple[str, str, tuple[Any, ...]]:
   if ast.op is Ops.PROGRAM: input_ast = ast
   else:
     sink = ast.src[0] if ast.op is Ops.BEAM else ast
     sink_arg = sink.arg
-    if opts is not None: sink_arg = replace(sink_arg, opts_to_apply=tuple(opts))
-    elif ast.op is Ops.BEAM and sink_arg.opts_to_apply is None:
+    if ast.op is Ops.BEAM and sink_arg.opts_to_apply is None:
       sink_arg = replace(sink_arg, opts_to_apply=p.applied_opts)
     input_ast = sink.replace(arg=replace(sink_arg, name=p.name))
   p2 = get_program(input_ast, renderer=renderer)
