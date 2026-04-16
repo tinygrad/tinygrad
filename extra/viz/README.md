@@ -7,7 +7,7 @@ Supported on all backends.
 Flags: VIZ=-1 to only save the trace to a file, VIZ=1 also launches a web server.
 
 1. Set VIZ to -1 to save the trace.
-2. Use `extra/viz/cli.py` to inspect the trace files.
+2. Use `extra/viz/cli.py` to inspect the trace files. Set NO_COLOR=1 to disable colored output.
 
 ## Inspect runtime profiling
 
