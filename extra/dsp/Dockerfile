@@ -5,6 +5,7 @@ FROM ubuntu:22.04
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     python3 \
+    python3-venv \
     python3-tomli \
     pkg-config \
     libglib2.0-dev \
