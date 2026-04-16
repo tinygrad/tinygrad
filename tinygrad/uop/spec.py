@@ -92,7 +92,7 @@ _tensor_spec = PatternMatcher([
    lambda buf: isinstance(buf.arg, int) and isinstance(buf.dtype, DType)),
 
   # BUFFER_VIEW on BUFFER is allowed if BUFFER is
-  (UPat(Ops.BUFFER_VIEW, src=(UPat(Ops.BUFFER, Ops.PARAM),)), lambda: True),
+  (UPat(Ops.BUFFER_VIEW, src=(UPat((Ops.BUFFER, Ops.PARAM)),)), lambda: True),
 
   # KERNEL can attach to an AFTER to describe the compute required to realize a BUFFER
   (UPat((Ops.CALL, Ops.FUNCTION), src=UPat((Ops.BUFFER, Ops.AFTER, Ops.MSELECT, Ops.MSTACK, Ops.BIND))), lambda: True),
