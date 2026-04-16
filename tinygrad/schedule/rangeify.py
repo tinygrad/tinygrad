@@ -350,6 +350,10 @@ pm_const_buffer_folding = pm_mops+PatternMatcher([
 pm_remove_bufferize = PatternMatcher([
   # remove reindexing with cost function
   (UPat.var("src").f(Ops.BUFFERIZE, allow_any_len=True, name="buf").f(Ops.INDEX, allow_any_len=True, name="idx"), remove_bufferize),
+  # STORE to self is NOOP
+  (UPat.var("x").store(UPat.var("x")), lambda x: UOp(Ops.NOOP)),
+  # END on NOOP is NOOP
+  (UPat(Ops.END, src=(UPat(Ops.NOOP, name="x"),), allow_any_len=True), lambda x: x),
 ])
 
 def late_buffer_view(t:UOp, b:UOp):
