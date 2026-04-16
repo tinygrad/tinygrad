@@ -25,9 +25,8 @@ def decode_profile(data:bytes) -> dict:
     klen = u("<B")[0]
     k = ret[off:off+klen].decode()
     off += klen
-    v:dict = {"events":[]}
-    layout[k] = v
     event_type, event_count = u("<BI")
+    layout[k] = v = {"event_type":event_type, "events":[]}
     if event_type == 0:
       for _ in range(event_count):
         name, ref, key, st, dur, fmt = u("<IIIIfI")
@@ -118,6 +117,7 @@ def main(args) -> None:
     # ** Profiler printer
     agg:dict[str, tuple[float, int]] = {}
     total = 0
+    print(data)
     for e in data.get("events", []):
       et = e["dur"] * 1e-6
       if args.item is not None:
