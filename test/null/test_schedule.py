@@ -146,7 +146,7 @@ class TestSchedule(unittest.TestCase):
   def test_create_schedule_handles_multi_kernel_after_and_after_deps(self):
     def named_copy(name:str):
       def fxn(out:UOp, src:UOp) -> UOp:
-        i = UOp.range(src.size, 0)
+        i = UOp.range(src.shape[0], 0)
         return out[i].store(src[i]).end(i).sink(arg=KernelInfo(name=name))
       return fxn
 
