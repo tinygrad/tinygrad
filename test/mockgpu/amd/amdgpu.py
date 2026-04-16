@@ -7,7 +7,7 @@ from tinygrad.runtime.support import c
 
 MOCKGPU_ARCH = "cdna4" if DEV.arch == "gfx950" else "rdna4" if DEV.arch.startswith("gfx12") else "rdna3"
 assert (ma:=getenv("MOCKGPU_ARCH", "")) == "", "MOCKGPU_ARCH is deprecated, use DEV=" + \
-  str(replace(DEV.value, arch={"cdna4":"gfx950", "rdna4":"gfx1201"}.get(ma, "gfx1100")))
+  str(replace(DEV.value, arch={"cdna4":"gfx950", "rdna4":"gfx1201"}.get(ma, "gfx1100"))) # type: ignore
 GFX_TARGET_VERSION = {"rdna3": 110000, "rdna4": 120000, "cdna4": 90500}[MOCKGPU_ARCH]
 import tinygrad.runtime.autogen.amd_gpu as amd_gpu, tinygrad.runtime.autogen.am.pm4_nv as pm4
 
