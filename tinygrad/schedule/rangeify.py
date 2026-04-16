@@ -181,6 +181,9 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
    lambda x,copy: x.replace(src=(copy.replace(src=(x.src[0],)+copy.src[1:]),)+x.src[1:]) \
       if isinstance(x.device, str) and x.device.startswith("DISK") else None),
 
+  # SINK only ever references the base
+  (UPat(Ops.SINK, name="x"), lambda x: x.replace(src=tuple(y.base for y in x.src))),
+
   # ** copy rules **
 
   # COPY and source size need to match
