@@ -134,12 +134,13 @@ _tensor_spec = PatternMatcher([
 
   # allow CALL/PARAM/CUSTOM_FUNCTION — CALL dtype is always void
   (UPat(Ops.CALL, dtypes.void), lambda: True),
+  (UPat(Ops.FUNCTION, dtypes.void), lambda: True),
   (UPat(Ops.PARAM), lambda: True),
   (UPat(Ops.CUSTOM_FUNCTION, name="x"), lambda x: isinstance(x.arg, str)),
 
   # TUPLE must have void dtype, GETTUPLE can only appear on CALL or TUPLE
   (UPat(Ops.TUPLE, dtypes.void), lambda: True),
-  (UPat(Ops.GETTUPLE, src=(UPat((Ops.CALL, Ops.TUPLE)),), name="g"), lambda g: isinstance(g.arg, int)),
+  (UPat(Ops.GETTUPLE, src=(UPat((Ops.FUNCTION, Ops.TUPLE)),), name="g"), lambda g: isinstance(g.arg, int)),
 
   # ** for custom kernels **
 

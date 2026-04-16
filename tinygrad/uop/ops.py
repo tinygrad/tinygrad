@@ -215,17 +215,17 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       # late ops don't have shape
       case Ops.UNIQUE | Ops.LUNIQUE | Ops.DEVICE | Ops.RANGE | Ops.LOAD | Ops.STORE | Ops.IF | Ops.BARRIER | Ops.CUSTOM | Ops.CUSTOMI | \
            Ops.VECTORIZE | Ops.GEP | Ops.SPECIAL | Ops.UNROLL | Ops.CONTRACT | Ops.SINK | \
-           Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE | Ops.BINARY | Ops.INS | Ops.TUPLE:
+           Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE | Ops.BINARY | Ops.INS | Ops.TUPLE | Ops.CALL | Ops.FUNCTION:
         return None
 
       case Ops.GETTUPLE:
-        # GETTUPLE extracts from a TUPLE (possibly through a CALL)
-        in_tuple = self.src[0].src[0] if self.src[0].op is Ops.CALL else self.src[0]
+        # GETTUPLE extracts from a TUPLE (possibly through a FUNCTION)
+        in_tuple = self.src[0].src[0] if self.src[0].op is Ops.FUNCTION else self.src[0]
         assert in_tuple.op is Ops.TUPLE
         inner_shape = in_tuple.src[self.arg]._shape
         if inner_shape is None: return None
-        # if through a CALL, substitute internal PARAMs in the shape with corresponding args
-        if self.src[0].op is Ops.CALL:
+        # if through a FUNCTION, substitute internal PARAMs in the shape with corresponding args
+        if self.src[0].op is Ops.FUNCTION:
           return tuple(graph_rewrite(s, _pm_resolve_params, self.src[0].src[1:], walk=True) if isinstance(s, UOp) else s for s in inner_shape)
         return inner_shape
 
@@ -261,8 +261,6 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       # passthrough ops
       case Ops.REDUCE | Ops.MSTACK | Ops.MSELECT | Ops.DETACH | Ops.CONTIGUOUS | Ops.CONTIGUOUS_BACKWARD | Ops.AFTER | Ops.END:
         return self.src[0]._shape
-
-      case Ops.CALL: return None
 
       # TODO: disallow shape changing bitcast
       case Ops.BITCAST:
@@ -421,8 +419,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   def maketuple(*srcs:UOp):  # pylint: disable=no-self-argument
     return UOp(Ops.TUPLE, dtypes.void, srcs)
   def gettuple(self, idx:int) -> UOp:
-    in_tuple = self.src[0] if self.op is Ops.CALL else self
-    assert in_tuple.op is Ops.TUPLE, f"gettuple requires CALL or TUPLE source, got {self.op}"
+    in_tuple = self.src[0] if self.op is Ops.FUNCTION else self
+    assert in_tuple.op is Ops.TUPLE, f"gettuple requires FUNCTION or TUPLE source, got {self.op}"
     return UOp(Ops.GETTUPLE, in_tuple.src[idx].dtype, (self,), idx)
   def group(*srcs:UOp|None):  # pylint: disable=no-self-argument
     if len(srcs) == 1 and isinstance(srcs[0], UOp): return srcs[0]
@@ -941,6 +939,10 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     # value-producing bodies are always wrapped in TUPLE so CALL dtype is always void
     body = self if self.op in UOp._NO_TUPLE_WRAP else UOp.maketuple(self)
     return UOp(Ops.CALL, dtypes.void, (body,)+srcs, CallInfo(grad_fxn, metadata, name, precompile, precompile_backward))
+  def function(self, *srcs:UOp, grad_fxn:Callable|None=None, metadata:tuple[Metadata, ...]=(),
+               name:str|None=None, precompile:bool=False, precompile_backward:bool=False) -> UOp:
+    assert len(self.ranges) == 0, f"ranges {self.ranges} are leaking out of the call in {self.pyrender()}"
+    return UOp(Ops.FUNCTION, dtypes.void, (UOp.maketuple(self),)+srcs, CallInfo(grad_fxn, metadata, name, precompile, precompile_backward))
   def custom_kernel(*srcs:UOp, fxn:Callable, grad_fxn:Callable|None=None) -> list[UOp]:
     contig_srcs = tuple(x.contiguous() if x.op is not Ops.AFTER else x for x in srcs)
     placeholders = [UOp.placeholder_like(s, slot=i) for i,s in enumerate(contig_srcs)]

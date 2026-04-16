@@ -94,13 +94,13 @@ def contiguous_mops_to_view(c:UOp, src:UOp):
   if (view := _make_buffer_view(src)) is None: return None
   return view.contiguous(tag=c.tag)
 
-def transform_precompiled_call(c:UOp) -> UOp|None:
+def transform_precompiled_function(c:UOp) -> UOp|None:
   if not c.arg.precompile: return None
   if c.src[0].op is Ops.SINK: return None
-  assert c.src[0].op is Ops.TUPLE, f"expected TUPLE body for precompiled call, got {c.src[0].op}"
+  assert c.src[0].op is Ops.TUPLE, f"expected TUPLE body for precompiled function, got {c.src[0].op}"
   input_buffers = tuple(x.contiguous() if x.op not in {Ops.AFTER, Ops.BIND} else x for x in c.src[1:])
 
-  # add the outputs to the call
+  # add the outputs to the function
   srcs = c.src[0].src
   resolved = [c.gettuple(i) for i in range(len(srcs))]
   outs = tuple(_buffer_like(r) for r in resolved)
@@ -108,7 +108,7 @@ def transform_precompiled_call(c:UOp) -> UOp|None:
   fxn = UOp.sink(*[t.after(t.store(s)) for t,s in zip(targets, srcs)])
 
   # create the new thing for the big graph
-  new_call = c.replace(src=(fxn, *input_buffers, *outs), tag=None)
+  new_call = c.replace(op=Ops.CALL, src=(fxn, *input_buffers, *outs), tag=None)
   rets = tuple(o.after(new_call) for o in outs)
 
   # if the CALL has symbolic shapes, shrink the max-sized output to the actual symbolic shape
@@ -119,8 +119,8 @@ def transform_precompiled_call(c:UOp) -> UOp|None:
 
 # NOTE: adding rules to here is bad. these all need to run before the schedule cache
 pm_early_transform_tensor_graph = PatternMatcher([
-  # transform precompiled CALLs
-  (UPat(Ops.CALL, name="c"), transform_precompiled_call),
+  # transform precompiled FUNCTIONs -> CALLs
+  (UPat(Ops.FUNCTION, name="c"), transform_precompiled_function),
 
   # resolve TUPLE+GETTUPLE (for precompiled calls)
   (UPat(Ops.GETTUPLE, src=(UPat(Ops.TUPLE, name="t"),), name="g"), lambda g,t: t.src[g.arg]),

@@ -26,7 +26,7 @@ class Ops(FastEnum):
 
   # uops that aren't rendered
   NOOP = auto(); REWRITE_ERROR = auto()
-  PARAM = auto(); CALL = auto()
+  PARAM = auto(); CALL = auto(); FUNCTION = auto()
 
   # renderer
   # LINEAR is a list of UOps, SOURCE has a str arg that's human readable, BINARY has bytes arg that's compiled

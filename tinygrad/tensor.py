@@ -222,7 +222,7 @@ class Tensor(OpMixin):
       param = UOp.param(slot, self.dtype, self.shape, self.device)
     return Tensor(param)
   def call(self, *lst:Tensor, fxn:Tensor|UOp, grad_fxn:Callable|None=None) -> Tensor:
-    fret = (fxn.uop if isinstance(fxn, Tensor) else fxn).call(*[t.uop for t in (self,)+lst], grad_fxn=grad_fxn)
+    fret = (fxn.uop if isinstance(fxn, Tensor) else fxn).function(*[t.uop for t in (self,)+lst], grad_fxn=grad_fxn)
     return Tensor(fret.gettuple(0))
 
   def custom_kernel(self, *lst:Tensor, fxn:Callable, grad_fxn:Callable|None=None) -> list[Tensor]:

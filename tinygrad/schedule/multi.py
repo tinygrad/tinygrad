@@ -1,5 +1,5 @@
 from tinygrad.helpers import all_same, prod, getenv, ALLREDUCE_CAST
-from tinygrad.uop.ops import Ops, UOp, PatternMatcher, UPat, GroupOp, graph_rewrite, should_resolve_call
+from tinygrad.uop.ops import Ops, UOp, PatternMatcher, UPat, GroupOp, graph_rewrite, KernelInfo
 from tinygrad.dtype import dtypes
 from tinygrad.schedule.allreduce import handle_allreduce
 
@@ -115,6 +115,15 @@ def store_after_multi(dest:UOp, src:UOp): return dest.after(dest.store(src.src[0
 
 def passthrough_multi(root:UOp, multi:UOp):
   return UOp(root.op, root.dtype, (multi.src[0],)+tuple(x.src[0] if x.op is Ops.MULTI else x for x in root.src[1:]), root.arg).multi(multi.axis)
+
+# TODO: this is all junk
+
+def should_resolve_call(c:UOp) -> bool:
+  # don't resolve real kernel calls, sink or program
+  if c.src[0].op is Ops.SINK and isinstance(c.src[0].arg, KernelInfo): return False
+  if c.src[0].op in {Ops.PROGRAM, Ops.LINEAR, Ops.COPY, Ops.CUSTOM_FUNCTION}: return False
+  if c.arg.precompile: return False
+  return True
 
 def rewrite_into_call(call:UOp):
   if not should_resolve_call(call): return None
