@@ -114,6 +114,14 @@ def main(args) -> None:
       print(tabulate(rows, headers=cols, tablefmt="github"))
       return None
 
+    # ** Memory printer
+    if data["event_type"] == 1 and data.get("events", []):
+      def fmt_bytes(x:int) -> str:
+        return next(f"{x/v:.2f} {u}" for v, u in {1e12:"TB", 1e9:"GB", 1e6:"MB", 1e3:"kB", 1:"B"}.items() if x >= v) if x else "0 B"
+      print(f"Peak: {fmt_bytes(data['peak'])}"+"\n"+f"{'TS':<10}  {'Event':<6}  {'Key':>8}  Info")
+      for e in data["events"]: print(f"{e['ts']:<10}  {e['event']:<6}  {e.get('key', ''):>8}  {e['arg']}")
+      return None
+
     # ** Profiler printer
     agg:dict[str, tuple[float, int]] = {}
     total = 0
