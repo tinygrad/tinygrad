@@ -10,6 +10,7 @@ from tinygrad.schedule import ExecItem
 from test.helpers import replace_opts
 
 N = 512
+
 def create_gemm_model(model_path:str, batch_size=N, in_size=N, out_size=N, bias=False):
   import onnx
   from onnx import helper, numpy_helper, TensorProto
