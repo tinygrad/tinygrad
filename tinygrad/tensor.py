@@ -2521,22 +2521,6 @@ class Tensor(OpMixin):
     if not full_matrices: U, V = U[..., 0:num], V[..., 0:num]
     return (U, S, V.transpose(-2,-1)) if m >= n else (V, S, U.transpose(-2, -1))
 
-  # ***** Tensor Properties *****
-
-  def size(self, dim:int|None=None) -> sint|tuple[sint, ...]:
-    """
-    Returns the size of the tensor. If `dim` is specified, return the length along dimension `dim`. Otherwise return the shape of the tensor.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([[4, 5, 6], [7, 8, 9]])
-    print(t.size())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.size(dim=1))
-    ```
-    """
-    return self.shape if dim is None else self.shape[dim]
-
   # ***** cast ops *****
 
   def cast(self, dtype:DTypeLike) -> Tensor:
