@@ -4,9 +4,9 @@ import ctypes
 from typing import Literal, TypeAlias
 from tinygrad.runtime.support.c import _IO, _IOW, _IOR, _IOWR
 from tinygrad.runtime.support import c
-from tinygrad.helpers import CPU_CC, DEV
+from tinygrad.helpers import DEV
 import gzip, base64
-dll = c.DLL('mesa', ([] if CPU_CC.value == 'LVP' or DEV.renderer == 'LVP' else ['tinymesa']) + ['tinymesa_cpu'])
+dll = c.DLL('mesa', ([] if DEV.renderer == 'LVP' else ['tinymesa']) + ['tinymesa_cpu'])
 class struct_u_printf_info(c.Struct): pass
 u_printf_info: TypeAlias = struct_u_printf_info
 uint32_t: TypeAlias = ctypes.c_uint32
