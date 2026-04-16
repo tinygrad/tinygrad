@@ -1,5 +1,5 @@
 import unittest
-from tinygrad import Tensor, Device
+from tinygrad import Tensor, Device, Context
 from tinygrad.engine.realize import get_program
 from tinygrad.codegen.opt import Opt, OptOps
 from test.external.process_replay.process_replay import replay_get_program
@@ -28,6 +28,13 @@ class TestProcessReplay(unittest.TestCase):
     opts = [Opt(OptOps.UPCAST, 0, 4)]
     p = get_program(self.ast, self.renderer, opts=opts)
     good, compare, _ = replay_get_program(p, self.ast, self.renderer, opts=opts)
+    self.assertEqual(good, compare)
+
+  @Context(BEAM=1)
+  def test_beam(self):
+    si = (Tensor.empty(N, N) @ Tensor.empty(N, N)).schedule()[-1]
+    p = get_program(si.ast, self.renderer)
+    good, compare, _ = replay_get_program(p, self.ast, self.renderer)
     self.assertEqual(good, compare)
 
 if __name__ == '__main__':
