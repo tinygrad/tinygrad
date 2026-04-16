@@ -49,7 +49,7 @@ def replace_contig_with_store_after(u:UOp):
   # can't allocate a buffer without a device (e.g., inside a CALL function body with only PARAMs)
   if u._device is None: return None
   # if size is 0, remove the contig
-  if u.size == 0: return u.src[0]
+  if 0 in u.shape: return u.src[0]
   # no real contig for DISK/TINYFS tensors, they are left alone
   if isinstance(u._device, str) and u._device.startswith(("DISK", "TINYFS")): return u.rtag(None)
   buf = _buffer_like(u)
