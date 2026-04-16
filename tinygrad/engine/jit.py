@@ -23,7 +23,7 @@ def prune_linear(linear:UOp, needed:set[UOp]) -> tuple[UOp, UOp]:
   return linear.replace(src=tuple(kept)), linear.replace(src=tuple(onetime))
 
 def create_graph_call(batch:list[UOp]) -> UOp:
-  # all external inputs are PARAMs after parametrization
+  # all external inputs are PARAMs
   input_list = dedup(b for si in batch for b in si.src[1:] if b.op is Ops.PARAM)
   cf = UOp(Ops.CUSTOM_FUNCTION, dtypes.void, src=(UOp(Ops.LINEAR, src=tuple(batch)), *input_list), arg="graph")
   return cf.call(*input_list, metadata=tuple(m for si in batch for m in si.arg.metadata))
@@ -65,16 +65,22 @@ def jit_cache_bufs(jit_cache:list[ExecItem]):
       if b is not None: yield b
     if isinstance(ei.prg, GraphRunner): yield from jit_cache_bufs(ei.prg.jit_cache)
 
-pm_beam = PatternMatcher([(UPat(Ops.SINK, name="s"), lambda ctx,s: UOp(Ops.BEAM, src=(s,), arg=ctx))])
+def _unwrap_beam(ast:UOp) -> UOp: return ast.src[0] if ast.op is Ops.BEAM else ast
 
-@track_rewrites(lambda linear,held_bufs,input_uops,jitbeam=0,ret=(): f"JIT {pluralize('call', len(linear.src))}")
-def jit_lower(linear:UOp, held_bufs:set[UOp], input_uops:list[UOp], jitbeam:int=0) -> UOp:
+pm_beam = PatternMatcher([
+  (UPat(Ops.CALL, src=(UPat(Ops.SINK, name="sink"),), name="call", allow_any_len=True),
+   lambda ctx,call,sink: call.replace(src=(UOp(Ops.BEAM, src=(sink,), arg=ctx), *call.src[1:])))])
+
+@track_rewrites(lambda linear,held_bufs,input_uops,ret=(): f"JIT {pluralize('call', len(linear.src))}")
+def jit_lower(linear:UOp, held_bufs:set[UOp], input_uops:list[UOp]) -> UOp:
   if VIZ: graph_rewrite(linear, PatternMatcher([]), name="View captured linear")
+
   # parametrize input buffers: map each input buffer UOp to a PARAM with the correct slot index
-  param_map = {u: UOp(Ops.PARAM, u.dtype, (UOp(Ops.DEVICE, arg=u.device),), i) for i,u in enumerate(input_uops)}
-  linear = linear.substitute(param_map, walk=True)
+  linear = linear.substitute({u: UOp.param(i, u.dtype, u.shape, u.device) for i,u in enumerate(input_uops)}, walk=True)
+
   # wrap SINKs with BEAM if jitbeam is set
-  if jitbeam >= 1: linear = graph_rewrite(linear, pm_beam, ctx=jitbeam, walk=True, enter_calls=True)
+  if (jitbeam:=getenv("JITBEAM", BEAM.value)) >= 1: linear = graph_rewrite(linear, pm_beam, ctx=jitbeam, walk=True)
+
   linear = memory_plan_rewrite(linear, held_bufs)
   if JIT < 2: linear = graph_split_rewrite(linear, max_batch_size=JIT_BATCH_SIZE.value)
   if VIZ: graph_rewrite(linear, PatternMatcher([]), name="View graphed linear")
@@ -99,15 +105,15 @@ def get_input_replace(jit_cache: list[ExecItem], input_buffers:list[Buffer]) -> 
       if a in input_buffers: input_replace[(j,i)] = input_buffers.index(a)
   return input_replace
 
-pm_params = PatternMatcher([(UPat(Ops.PARAM, src=(UPat(Ops.DEVICE),), name="p"), lambda ctx,p: ctx[p.arg])])
+pm_params = PatternMatcher([(UPat(Ops.PARAM, src=(UPat(), UPat(Ops.DEVICE)), name="p"), lambda ctx,p: ctx[p.arg])])
 
 def linear_to_jit_cache(linear:UOp, input_uops:list[UOp]) -> tuple[list[ExecItem], dict[tuple[int,int],int], list[tuple[int,int,str,int,DType]]]:
-  # substitute PARAMs (only those with DEVICE src, not kernel params) with input buffer UOps
+  # substitute PARAMs with input buffer UOps before lowering
   linear = graph_rewrite(linear, pm_params, ctx=input_uops, walk=True, enter_calls=True)
   # convert to jit_cache
   jit_cache = [ei.lower() for ei in linear_to_schedule(linear)]
   for b in jit_cache_bufs(jit_cache): b.ensure_allocated()
-  # derive input_buffers from input_uops (flatten MultiBuffer)
+  # derive input_buffers from input_uops
   input_buffers: list[Buffer] = flatten([b.bufs if isinstance(b, MultiBuffer) else [b] for u in input_uops if (b:=buffers[u]) is not None])
   # track view buffers whose base is an input buffer
   extra_view_inputs: list[tuple[int, int, str, int, DType]] = []
@@ -194,14 +200,15 @@ class GraphRunner(Runner):
 
   @staticmethod
   def supports_exec_item(batch_devs:list[Compiled], new_call:UOp) -> bool:
-    return new_call.src[0].op in (Ops.SINK, Ops.PROGRAM) and len(GraphRunner._all_devs(batch_devs, new_call)) == 1
+    return _unwrap_beam(new_call.src[0]).op in (Ops.SINK, Ops.PROGRAM) and len(GraphRunner._all_devs(batch_devs, new_call)) == 1
 
 # a marker for your graph supporting multiple devices of the same type
 class MultiGraphRunner(GraphRunner):
   @staticmethod
   def supports_exec_item(batch_devs:list[Compiled], new_call:UOp) -> bool:
     # Devices must be the same type
-    return new_call.src[0].op in (Ops.SINK, Ops.PROGRAM, Ops.COPY) and len(dedup([type(d) for d in GraphRunner._all_devs(batch_devs, new_call)])) == 1
+    return _unwrap_beam(new_call.src[0]).op in (Ops.SINK, Ops.PROGRAM, Ops.COPY) \
+      and len(dedup([type(d) for d in GraphRunner._all_devs(batch_devs, new_call)])) == 1
 
 def get_out_buffers_for_ei(ei:ExecItem) -> list[Buffer]:
   if isinstance(ei.prg, CompiledRunner): return [cast(Buffer, ei.bufs[out]) for out in ei.prg.p.outs if out not in ei.prg.p.ins]
@@ -345,7 +352,7 @@ class TinyJit(Generic[ReturnType]):
           ei.run(var_vals, jit=True)
 
       held_bufs = set(buffers) | {t.uop.buf_uop for t in get_parameters(ret) if t.uop.buf_uop.op is Ops.BUFFER}
-      linear = jit_lower(big_linear, held_bufs, input_buf_uops, jitbeam=getenv("JITBEAM", BEAM.value))
+      linear = jit_lower(big_linear, held_bufs, input_buf_uops)
       self.captured = CapturedJit(ret, linear, names, expected_input_info)
       ret = self.captured(input_buf_uops, var_vals)
     elif self.cnt >= 2:
