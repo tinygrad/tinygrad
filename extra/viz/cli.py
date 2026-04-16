@@ -4,7 +4,7 @@ if hasattr(signal, "SIGPIPE"): signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 from typing import Iterator
 from tinygrad.viz import serve as viz
 from tinygrad.uop.ops import RewriteTrace
-from tinygrad.helpers import temp, ansistrip, colored, time_to_str, ansilen, ProfilePointEvent, ProfileRangeEvent, TracingKey, unwrap
+from tinygrad.helpers import temp, ansistrip, colored, time_to_str, ansilen, ProfilePointEvent, ProfileRangeEvent, TracingKey, unwrap, getenv
 
 # profile decoder used in CLI and tests
 def decode_profile(data:bytes) -> dict:
@@ -168,7 +168,7 @@ def get_arg_parser() -> argparse.ArgumentParser:
   g_opts = parser.add_argument_group("optional args")
   g_opts.add_argument("-s", "--src", type=str, default=None, metavar="NAME", help="Select a data source (default: list all sources)")
   g_opts.add_argument("-i", "--item", type=str, default=None, metavar="NAME", help="Select an item within the source (default: list all items)")
-  g_opts.add_argument("--no-color", action="store_true", help="Turn off colored names")
+  g_opts.add_argument("--no-color", action="store_true", help="Turn off colored names", default=bool(getenv("NO_COLOR")))
   g_opts.add_argument("--profile-path", type=pathlib.Path, metavar="PATH", help="Path to profile.pkl (optional file, default: latest profile)",
                       default=pathlib.Path(temp("profile.pkl", append_user=True)))
   g_opts.add_argument("--rewrites-path", type=pathlib.Path, metavar="PATH", help="Path to rewrites.pkl (optional file, default: latest rewrites)",
