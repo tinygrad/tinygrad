@@ -150,8 +150,8 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   (UPat(Ops.COPY, src=(UPat.var("s"), UPat.var("d"))),
    lambda s,d: s.substitute({UOp(Ops.DEVICE, arg=s.device):d}) if s.base.op is Ops.CONST else None),
 
-  # resolve calls
-  (UPat(Ops.CALL, name="c"), resolve_call),
+  # resolve FUNCTION calls (inline the body)
+  (UPat(Ops.FUNCTION, name="c"), resolve_call),
 
   # resolve TUPLE+GETTUPLE
   (UPat(Ops.GETTUPLE, src=(UPat(Ops.TUPLE, name="t"),), name="g"), lambda g,t: t.src[g.arg]),
