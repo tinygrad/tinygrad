@@ -183,8 +183,7 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   (UPat(Ops.STORE, src=(UPat(name="target"), UPat(name="src"))), fix_store_hazard),
 
   # remove two STOREs that store the same thing: TestSchedule.test_dedup_assign
-  (UPat(Ops.STORE, src=(UPat(Ops.AFTER, src=(UPat.var("dest"),
-   UPat(Ops.STORE, src=(UPat.var("dest"), UPat.var("src"))))), UPat.var("src"))), lambda dest, src: dest.store(src)),
+  (UPat.var("buf").after(UPat.var("buf").store(UPat.var("src")), name="a1").after(UPat.var("a1").store(UPat.var("src"))), lambda buf,src,a1:a1),
 
   # move bitcast from store dest to source: TestAssign.test_assign_bitcast
   (UPat(Ops.STORE, src=(UPat(Ops.BITCAST, src=(UPat(name="target"),)), UPat(name="src"))),

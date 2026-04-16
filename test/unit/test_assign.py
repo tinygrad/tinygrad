@@ -621,6 +621,11 @@ class TestAssign(unittest.TestCase):
     # N matmuls + N assigns + 1 final read = 2*N+1 (AFTER embedding allows full graph scheduling with shared contiguous reuse)
     self.assertEqual(GlobalCounters.kernel_count, 2*N+1)
 
+  def test_double_assign_add_repro(self):
+    a = Tensor.empty(2)
+    a.assign(Tensor.ones(2))
+    a.assign(Tensor.ones(2))
+    a.numpy()
 
 class TestAssignOrdering(unittest.TestCase):
   """Tests for complex assign orderings that could differ between lazy and eager execution.
