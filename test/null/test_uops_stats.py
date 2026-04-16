@@ -181,7 +181,8 @@ class TestStatsOptimized(unittest.TestCase):
 
   def test_gemm_tc_unroll(self):
     try:
-      p = get_program(replace_opts(self.ast_gemm, [Opt(OptOps.TC, 0, (-1, 0, 1)), Opt(OptOps.UNROLL, 0, 2)]), renderer=Device[Device.DEFAULT].renderer)
+      p = get_program(replace_opts(self.ast_gemm, [Opt(OptOps.TC, 0, (-1, 0, 1)), Opt(OptOps.UNROLL, 0, 2)]),
+                      renderer=Device[Device.DEFAULT].renderer)
     except KernelOptError:
       raise unittest.SkipTest("no tensor cores")
     print(p.src)
@@ -202,8 +203,8 @@ class TestStatsOptimized(unittest.TestCase):
 
   def test_gemm_upcasted_locals(self):
     try:
-      p = get_program(replace_opts(self.ast_gemm, [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.LOCAL, 0, 4), Opt(OptOps.LOCAL, 1, 4)]),
-                      renderer=Device[Device.DEFAULT].renderer)
+      p = get_program(replace_opts(self.ast_gemm, [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.LOCAL, 0, 4),
+                                                   Opt(OptOps.LOCAL, 1, 4)]), renderer=Device[Device.DEFAULT].renderer)
     except KernelOptError:
       raise unittest.SkipTest("no locals")
     self.check_gemm(p)
