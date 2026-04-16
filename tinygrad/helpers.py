@@ -119,7 +119,7 @@ def suppress_finalizing(func):
   def wrapper(*args, **kwargs):
     try: return func(*args, **kwargs)
     except (RuntimeError, AttributeError, TypeError, ImportError, OSError):
-      if not getattr(sys, 'is_finalizing', lambda: True)(): raise # re-raise if not finalizing
+      if not sys.is_finalizing(): raise # re-raise if not finalizing
   return wrapper
 
 def select_by_name(candidates:Sequence[T], get_name:Callable[...,str], query:str, err_msg:str) -> list[T]:
