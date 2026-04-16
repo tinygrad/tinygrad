@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-import argparse, pathlib, signal, sys, struct, json, itertools
+import argparse, pathlib, signal, sys, struct, json, itertools, os
+os.environ["VIZ"] = "0"
 if hasattr(signal, "SIGPIPE"): signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 from typing import Iterator
 from tinygrad.viz import serve as viz
 from tinygrad.uop.ops import RewriteTrace
-from tinygrad.helpers import temp, ansistrip, colored, time_to_str, ansilen, ProfilePointEvent, ProfileRangeEvent, TracingKey, unwrap
+from tinygrad.helpers import temp, ansistrip, colored, time_to_str, ansilen, ProfilePointEvent, ProfileRangeEvent, TracingKey, unwrap, NO_COLOR
 
 # profile decoder used in CLI and tests
 def decode_profile(data:bytes) -> dict:
@@ -24,9 +25,8 @@ def decode_profile(data:bytes) -> dict:
     klen = u("<B")[0]
     k = ret[off:off+klen].decode()
     off += klen
-    v:dict = {"events":[]}
-    layout[k] = v
     event_type, event_count = u("<BI")
+    layout[k] = v = {"event_type":event_type, "events":[]}
     if event_type == 0:
       for _ in range(event_count):
         name, ref, key, st, dur, fmt = u("<IIIIfI")
@@ -41,7 +41,8 @@ def decode_profile(data:bytes) -> dict:
         else:
           alloc, ts, key = u("<BII")
           if alloc: v["events"].append({"event":"alloc", "ts":ts, "key":key, "arg": {"dtype":strings[u("<I")[0]], "sz":u("<Q")[0]}})
-          else: v["events"].append({"event":"free", "ts":ts, "key":key, "arg": {"users":[u("<IIIB") for _ in range(u("<I")[0])]}})
+          else: v["events"].append({"event":"free", "ts":ts, "key":key, "arg": {"users":[(k, strings[rep], num, mode) \
+              for k,rep,num,mode in [u("<IIIB") for _ in range(u("<I")[0])]]}})
   return {"dur":total_dur, "peak":global_peak, "layout":layout, "markers":markers}
 
 def get(data:dict, key:str):
@@ -54,7 +55,7 @@ def get(data:dict, key:str):
 def main(args) -> None:
   viz.load_rewrites(viz_data:=viz.VizData(viz.load_pickle(args.rewrites_path, default=RewriteTrace([], [], {}))))
 
-  def format_colored(s:str) -> str: return ansistrip(s) if args.no_color else s
+  def format_colored(s:str) -> str: return ansistrip(s) if NO_COLOR else s
 
   if args.profile:
     events:list = viz.load_pickle(args.profile_path, default=[])
@@ -85,7 +86,7 @@ def main(args) -> None:
         assert isinstance(e.name, TracingKey)
         op_name, info = e.name.display_name, e.name.ret or ""
         color = next((v for k,v in viz.wave_colors.items() if k in op_name), None)
-        op_str = hex_colored(op_name, color) if color and not args.no_color else op_name
+        op_str = hex_colored(op_name, color) if color and not NO_COLOR else op_name
         phase, delay = None, 0
         idx = next(pkt_idxs.setdefault(e.device, itertools.count()))
         if e.device.startswith("WAVE"):
@@ -112,6 +113,17 @@ def main(args) -> None:
           cols = r[2]["cols"] if len(r) > 2 else cols
       from tabulate import tabulate
       print(tabulate(rows, headers=cols, tablefmt="github"))
+      return None
+
+    # ** Memory printer
+    if data["event_type"] == 1 and data.get("events", []):
+      print(f"Peak: {data['peak']}"+"\n"+f"{'TS':<10}  {'Event':<6}  {'Key':>8}  Info")
+      modes = ("read","write","write+read")
+      for e in data["events"]:
+        info = str(e.get("arg", {}))
+        if e["event"] == "free":
+          info = ', '.join([f"{format_colored(kernel)} {['read','write','write+read'][mode]}@data{num}" for _,kernel,num,mode in e["arg"]["users"]])
+        print(f"{e['ts']:<10}  {e['event']:<6}  {e.get('key', ''):>8}  {info}")
       return None
 
     # ** Profiler printer
@@ -149,7 +161,7 @@ def main(args) -> None:
   if args.item is None:
     for k,v in steps.items(): print(" "*v["depth"]+k+(f" - {v['match_count']}" if v.get('match_count', 0) else ''))
   else:
-    data = viz.get_render(data, get(steps, args.item)["query"])
+    data = viz.get_render(viz_data, get(steps, args.item)["query"])
     if isinstance(data.get("value"), Iterator):
       for m in data["value"]:
         if m.get("uop"): print(f"Input UOp:\n{m['uop']}")
@@ -157,7 +169,7 @@ def main(args) -> None:
           loc = pathlib.Path(m["upat"][0][0])
           print(f"Rewrite at {loc.parent.name}/{loc.name}:{m['upat'][0][1]}\n{m['upat'][1]}")
           for line in m["diff"]:
-            print(line if args.no_color else colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None))
+            print(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None))
     if data.get("src") is not None: print(data["src"])
 
 def get_arg_parser() -> argparse.ArgumentParser:
@@ -168,7 +180,6 @@ def get_arg_parser() -> argparse.ArgumentParser:
   g_opts = parser.add_argument_group("optional args")
   g_opts.add_argument("-s", "--src", type=str, default=None, metavar="NAME", help="Select a data source (default: list all sources)")
   g_opts.add_argument("-i", "--item", type=str, default=None, metavar="NAME", help="Select an item within the source (default: list all items)")
-  g_opts.add_argument("--no-color", action="store_true", help="Turn off colored names")
   g_opts.add_argument("--profile-path", type=pathlib.Path, metavar="PATH", help="Path to profile.pkl (optional file, default: latest profile)",
                       default=pathlib.Path(temp("profile.pkl", append_user=True)))
   g_opts.add_argument("--rewrites-path", type=pathlib.Path, metavar="PATH", help="Path to rewrites.pkl (optional file, default: latest rewrites)",

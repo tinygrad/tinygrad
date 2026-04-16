@@ -54,7 +54,7 @@ const layoutUOp = (g, { graph, change }, opts) => {
       width = Math.max(width, ctx.measureText(line).width);
       height += lineHeight;
     }
-    const callNode = label.startsWith("CALL\n");
+    const callNode = label.startsWith("CALL\n") || label.startsWith("FUNCTION\n");
     if (callNode) callCount++;
     g.setNode(k, {...rectDims(width, height), label, ref, id:k, color, tag, callNode});
     // add edges

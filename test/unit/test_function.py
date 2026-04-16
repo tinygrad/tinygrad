@@ -418,8 +418,8 @@ class TestFunctionTuple(unittest.TestCase):
 
   def test_custom_kernel_save_unused_output(self):
     def my_kernel(C:UOp, D:UOp, A:UOp) -> UOp:
-      i = UOp.range(A.size, 0)
-      j = UOp.range(D.size, 1)
+      i = UOp.range(A.shape[0], 0)
+      j = UOp.range(D.shape[0], 1)
       store_c = C[i].store(A[i] * 2.0).end(i)
       store_d = D[j].store(A[j]).end(j)
       return UOp.group(store_c, store_d).sink(arg=KernelInfo(name="my_kernel"))
@@ -444,7 +444,7 @@ class TestFunctionTuple(unittest.TestCase):
 
   def test_custom_kernel_both_outputs_used(self):
     def my_kernel(C:UOp, D:UOp, A:UOp) -> UOp:
-      i = UOp.range(A.size, 0)
+      i = UOp.range(A.shape[0], 0)
       store_c = C[i].store(A[i] * 2.0)
       store_d = D[i].store(A[i] * 3.0)
       return UOp.group(store_c, store_d).end(i).sink(arg=KernelInfo(name="my_kernel"))

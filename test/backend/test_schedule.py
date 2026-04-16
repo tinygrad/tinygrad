@@ -754,7 +754,7 @@ class TestSchedule(unittest.TestCase):
     p = P[0]
     p = p.pad(((1, 0), ))
     p = p.repeat([2])
-    run_schedule(check_schedule(p, 4))  # TODO: this is high
+    run_schedule(check_schedule(p, 3))
     tiny_ret = p.numpy()
 
     P = np.ones((3, 3), dtype=np.float32)
@@ -1075,7 +1075,7 @@ class TestSchedule(unittest.TestCase):
     idx = Tensor([1,2,5,6], dtype=dtypes.int32)
     flat_base[idx] = Tensor([99,99,99,99])
     base.assign(flat_base.reshape(4, 4))
-    sched = check_schedule(base, 6)  # TODO: this is high
+    sched = check_schedule(base, 4)
     run_schedule(sched)
     expected = list(range(16))
     for i, v in zip([1,2,5,6], [99,99,99,99]): expected[i] = v
@@ -1374,7 +1374,7 @@ class TestCopyFolding(unittest.TestCase):
     b = view.clone()
     run_schedule(check_schedule(b, 1, filter_sink=False))
     self.assertEqual(b.uop.base.buffer.size, 2)
-    self.assertEqual(b.uop.size, 2)
+    self.assertEqual(b.uop.numel(), 2)
     self.assertListEqual(b.tolist(), [0, 1])
 
   def test_expanded_copy(self):
@@ -1383,7 +1383,7 @@ class TestCopyFolding(unittest.TestCase):
     b = view.clone()
     run_schedule(check_schedule(b, 1, filter_sink=False))
     self.assertEqual(b.uop.base.buffer.size, 4)
-    self.assertEqual(b.uop.size, 4)
+    self.assertEqual(b.uop.numel(), 4)
     self.assertListEqual(b.tolist(), [[0, 0], [1, 1]])
 
   def test_permuted_copy(self):
