@@ -31,7 +31,7 @@ pm_generate_realize_map = PatternMatcher([
   # realize srcs of these
   (UPat((Ops.COPY, Ops.MSELECT, Ops.MSTACK), name="rb"), realize_srcs),
   # sometimes realize/unrealize src of store+after
-  (UPat(Ops.AFTER, src=(UPat(), UPat(Ops.STORE, src=(UPat.var("dest"), UPat.var("src"))))), realize_store_after_src),
+  #(UPat(Ops.AFTER, src=(UPat(), UPat(Ops.STORE, src=(UPat.var("dest"), UPat.var("src"))))), realize_store_after_src),
 ])
 
 @dataclass(frozen=True)
