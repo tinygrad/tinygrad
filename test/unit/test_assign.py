@@ -633,10 +633,12 @@ class TestAssign(unittest.TestCase):
   def test_nested_after_contiguous_store(self):
     # Mirrors the nested contiguous-write-then-assign-back shape from torch backend view updates.
     base = Tensor.empty(3, dtype=dtypes.int64)
-    base.assign(Tensor([1, 2, 3], dtype=dtypes.int64))
+    base.assign(Tensor([1, 2, 3], dtype=dtypes.int64))  # TODO: cycle error if commented this line out
     contig = base.contiguous()
     contig.assign(Tensor([1, 4, 3], dtype=dtypes.int64))
+    GlobalCounters.reset()
     base.assign(contig).realize()
+    self.assertEqual(GlobalCounters.kernel_count, 3)  # TODO: first copy is not required
     self.assertEqual(base.tolist(), [1,4,3])
 
 class TestAssignOrdering(unittest.TestCase):
