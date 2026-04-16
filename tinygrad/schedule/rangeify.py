@@ -89,6 +89,15 @@ def fix_store_after_hazard(after:UOp, target:UOp, src:UOp):
     reaches_base[s] = s is base or any(reaches_base.get(c) for c in s.src)
     if reaches_base[s] and s.op in unsafe: return after.replace(src=(after.src[0], target.store(src.contiguous())))
 
+def fix_store_hazard(target:UOp, src:UOp):
+  # PERMUTE and FLIP reorder indices, SHRINK can have overlapping regions when dest is also shrunk
+  unsafe = {Ops.PERMUTE, Ops.FLIP} | ({Ops.SHRINK} if target.op_in_backward_slice_with_self(Ops.SHRINK) else set())
+  base = target.base
+  reaches_base: dict[UOp, bool] = {}
+  for s in src.toposort(gate=lambda s: s.op is not Ops.CONTIGUOUS):
+    reaches_base[s] = s is base or any(reaches_base.get(c) for c in s.src)
+    if reaches_base[s] and s.op in unsafe: return target.store(src.contiguous())
+
 def normalize_store_after_target_chain(after:UOp, target:UOp, src:UOp):
   root_target = target
   while root_target.op is Ops.AFTER: root_target = root_target.src[0]
@@ -180,6 +189,9 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
 
   # copy only to different device
   (UPat(Ops.COPY, src=(UPat.var("x"), UPat()), name="copy"), lambda x,copy: x.f(Ops.NOOP) if x.device == copy.device else None),
+
+  # fix store hazard by adding contiguous
+  (UPat(Ops.STORE, src=(UPat(name="target"), UPat(name="src"))), fix_store_hazard),
 
   # ** assign rules (STORE+AFTER) **
 
