@@ -144,6 +144,7 @@ def main(args) -> None:
 
   # ** Profiler printer
   elif data["event_type"] == 0:
+    kernels:list[dict] = []
     if args.agg:
       agg:dict[str, tuple[float, int, int|None]] = {} # map kernel name to (total time, count and ref)
       total = 0
@@ -153,7 +154,6 @@ def main(args) -> None:
           t, c, ref = agg.get(e["name"], (0.0, 0, None))
           agg[e["name"]] = (t+et, c+1, e["ref"])
           total += et
-      kernels:list[dict] = []
       items = sorted(agg.items(), key=lambda kv:kv[1][0], reverse=True)
       num_rows = args.top
       for name,(t,c,ref) in items[:num_rows]:
@@ -163,14 +163,13 @@ def main(args) -> None:
         other_c = sum(c for _,(_,c,_) in items[num_rows:])
         kernels.append({"name":"Other", "fmt":f"{time_to_str(other_t, w=9)} {other_c:7d} {other_t/total*100.0:6.2f}%", "ref":None})
     else:
-      parts = [e["fmt"].split("\n") for e in data["events"]]
-      widths = [max((ansilen(p[i]) for p in parts if i < len(p)), default=0) for i in range(max(map(len, parts), default=0))]
-      kernels, cum_t = [], 0.0
-      for e,ps in zip(data["events"], parts):
-        cum_t += (et:=e["dur"] * 1e-6)
+      st0 = data["events"][0]["st"] if data["events"] else 0
+      for k,e in enumerate(data["events"]):
+        et, timestamp = e["dur"] * 1e-6, (e["st"] - st0 + e["dur"]) * 1e-6
         ptm = colored(time_to_str(et, w=9), "yellow" if et > 0.01 else None)
-        padded = "  ".join(p+" "*(widths[i]-ansilen(p)) for i,p in enumerate(ps))
-        kernels.append({"name":e["name"], "fmt":f"tm {ptm}/{cum_t*1e3:9.2f}ms  "+padded, "ref":e["ref"]})
+        fmt = "  ".join(p+" "*max(0, 14-ansilen(p)) for p in e["fmt"].split("\n"))
+        name = f"*** {args.src[:7]:7s} {k+1:4d} "+e["name"]+" "*(46-ansilen(e["name"]))
+        kernels.append({"name":name, "fmt":f"tm {ptm}@{timestamp*1e3:9.2f}ms ({fmt})", "ref":e["ref"]})
     for k in kernels:
       print(f"{fmt_colored(k['name'])}{' ' * max(0, 36 - ansilen(k['name']))} {k['fmt']}")
       if k["ref"] is not None:
