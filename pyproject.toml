@@ -19,11 +19,11 @@ build-backend = "setuptools.build_meta"
 include-package-data = true
 packages = [
   'tinygrad',
-  'tinygrad.apps',
   'tinygrad.codegen',
   'tinygrad.codegen.opt',
   'tinygrad.codegen.late',
   'tinygrad.engine',
+  'tinygrad.llm',
   'tinygrad.mixin',
   'tinygrad.nn',
   'tinygrad.renderer',
@@ -112,9 +112,9 @@ docs = [
 [tool.mutmut]
 paths_to_mutate = ["tinygrad/"]
 do_not_mutate = [
-  "tinygrad/apps/*",
   "tinygrad/codegen/*",
   "tinygrad/engine/*",
+  "tinygrad/llm/*",
   "tinygrad/nn/*",
   "tinygrad/renderer/*",
   "tinygrad/runtime/*",

@@ -260,6 +260,58 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     m = self.max(axis=axis, keepdim=True)
     return (self - m).exp().sum(axis=axis, keepdim=keepdim).log() + (m if keepdim else m.squeeze(axis))
 
+  def _softmax(self, axis, dtype:DTypeLike|None=None) -> tuple[Self, Self, Self]:
+    m = self - self.max(axis=axis, keepdim=True).detach()
+    if dtype is not None: m = m.cast(to_dtype(dtype))
+    e = m.exp()
+    return m, e, e.sum(axis=axis, keepdim=True)
+
+  def softmax(self, axis=-1, dtype:DTypeLike|None=None) -> Self:
+    """
+    Applies the softmax function to the tensor along the specified axis.
+
+    Rescales the elements of the tensor such that they lie in the range [0, 1] and sum to 1.
+
+    You can pass in the `axis` keyword argument to control the axis along which the softmax is computed.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    t = Tensor.randn(2, 3)
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.softmax().numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.softmax(axis=0).numpy())
+    ```
+    """
+    _, e, ss = self._softmax(axis, dtype)
+    return e * ss.reciprocal()
+
+  def log_softmax(self, axis=-1, dtype:DTypeLike|None=None) -> Self:
+    """
+    Applies the log-softmax function to the tensor along the specified axis.
+
+    The log-softmax function is a numerically stable alternative to the softmax function in log space.
+
+    You can pass in the `axis` keyword argument to control the axis along which the log-softmax is computed.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    t = Tensor.randn(2, 3)
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.log_softmax().numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.log_softmax(axis=0).numpy())
+    ```
+    """
+    m, _, ss = self._softmax(axis, dtype)
+    return m - ss.log()
+
   def cat(self, *args:Self, dim:int=0) -> Self:
     """
     Concatenates self with other tensors in `args` along an axis specified by `dim`.
