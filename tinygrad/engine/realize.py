@@ -219,7 +219,7 @@ def run_schedule(schedule:list[ExecItem], var_vals:dict[str, int]|None=None, do_
 
 # **************** run linear ****************
 
-def iter_device_bufs(call:UOp) -> Iterator[tuple[list[Buffer], dict[str, int]]]:
+def unwrap_multi(call:UOp) -> Iterator[tuple[list[Buffer], dict[str, int]]]:
   bufs = [b.buffer for b in call.src[1:] if b.op is not Ops.BIND]
   if not any(isinstance(b, MultiBuffer) for b in bufs): yield bufs, {}
   else:
@@ -232,44 +232,46 @@ pm_add_beam = PatternMatcher([
 ])
 
 @contextlib.contextmanager
-def track_exec(ctx, call:UOp, display_name:str, estimates:Estimates, bufs:list[Buffer], var_vals:dict[str, int], *, outputs=(0,), inputs=(1,),
-               first_run=False):
-  device, timing = bufs[0].device, [None]
+def track_exec(ctx, call:UOp, device:str, display_name:str, estimates:Estimates, bufs:list[Buffer], var_vals:dict[str, int], *, outputs=(0,),
+               inputs=(1,), first_run=False):
+  timing: list[float|None] = [None]
   if PROFILE: cpu_events.append(ProfilePointEvent(device, "exec", len(cpu_events), {"metadata": call.arg.metadata, "var_vals": var_vals,
-    "bufs": [b.trace_num for b in bufs], "name": display_name, "outputs": outputs, "inputs": inputs}))
+                                                  "bufs": [b.trace_num for b in bufs], "name": display_name, "outputs": outputs, "inputs": inputs}))
   st = time.perf_counter()
-  yield bufs, var_vals, timing
+  yield timing
   if not ctx[1]: return
-  if timing[0] is None and DEBUG >= 2: Device[device].synchronize(); timing[0] = time.perf_counter() - st
+  if timing[0] is None and DEBUG >= 2:
+    Device[device].synchronize()
+    timing[0] = time.perf_counter() - st
   update_stats(display_name, device, estimates, var_vals, timing[0], len(bufs), jit=False, metadata=call.arg.metadata, first_run=first_run)
 
 def exec_view(ctx, call, ast):
   bufs = [b.buffer for b in call.src[1:] if b.op is not Ops.BIND]
   bv = bufs[1].view(call.src[1].arg, ast.dtype, ast.arg[1]*bufs[1].dtype.itemsize)
-  with track_exec(ctx, call, colored(f"view {bv.nbytes:8d} @ {bv.offset:<10d}", "yellow"), Estimates(), [bv, bufs[1]], ctx[0]):
+  with track_exec(ctx, call, bv.device, colored(f"view {bv.nbytes:8d} @ {bv.offset:<10d}", "yellow"), Estimates(), [bv, bufs[1]], ctx[0]):
     buffers[call.src[1]] = bv
 
 def exec_copy(ctx, call, ast):
-  for bufs, device_vars in iter_device_bufs(call):
+  for bufs, device_vars in unwrap_multi(call):
     dest, src = bufs[0].ensure_allocated(), bufs[1].ensure_allocated()
     xfer = hasattr(alc:=Device[dest.device].allocator,'_transfer') and alc.supports_transfer and dest.device.split(":")[0]==src.device.split(":")[0]
     prg = (BufferXfer if xfer else BufferCopy)(dest.nbytes, dest.device, src.device)
     name = colored(f"{'xfer' if xfer else 'copy'} {size_to_str(dest.nbytes):>8s}, {dest.device[:7]:>7s} <- {src.device[:7]:7s}", "yellow")
-    with track_exec(ctx, call, name, Estimates(lds=dest.nbytes, mem=dest.nbytes), [dest, src], {**ctx[0], **device_vars}): prg.copy(dest, src)
+    with track_exec(ctx, call, dest.device, name, Estimates(lds=dest.nbytes, mem=dest.nbytes), [dest, src], {**ctx[0], **device_vars}):
+      prg.copy(dest, src)
 
 def exec_kernel(ctx, call, ast):
   sink = ast.src[0] if ast.op is Ops.BEAM else ast
-  for bufs, device_vars in iter_device_bufs(call):
+  for bufs, device_vars in unwrap_multi(call):
     var_vals = {**ctx[0], **device_vars}
     prg = get_runner(bufs[0].device, ast)
-    if not prg.p.globals: continue
     prg_bufs = [bufs[i].ensure_allocated() for i in prg.p.globals]
     if VALIDATE_WITH_CPU and sink.op is Ops.SINK:
       cpu_bufs = [Buffer("CPU", b.size, b.dtype).ensure_allocated().copyin(b.ensure_allocated().as_memoryview()) for b in bufs]
       cpu_prg = get_runner("CPU", sink)
       cpu_prg([cpu_bufs[i] for i in cpu_prg.p.globals], var_vals, wait=DEBUG >= 2)
-    with track_exec(ctx, call, prg.display_name, prg.estimates, prg_bufs, var_vals,
-                    outputs=tuple(prg.p.outs), inputs=tuple(prg.p.ins), first_run=prg.first_run) as (_, _, timing):
+    with track_exec(ctx, call, prg.device, prg.display_name, prg.estimates, prg_bufs, var_vals,
+                    outputs=tuple(prg.p.outs), inputs=tuple(prg.p.ins), first_run=prg.first_run) as timing:
       timing[0] = prg(prg_bufs, var_vals, wait=DEBUG >= 2)
       prg.first_run = False
     if VALIDATE_WITH_CPU and sink.op is Ops.SINK:
@@ -279,7 +281,7 @@ def exec_kernel(ctx, call, ast):
 def exec_encdec(ctx, call, ast):
   bufs = [b.buffer.ensure_allocated() for b in call.src[1:] if b.op is not Ops.BIND]
   shape, pos_var = tuple(s.arg for s in ast.src if s.op is Ops.CONST), ast.variables()[0].expr
-  with track_exec(ctx, call, colored(f"enc/dec {size_to_str(bufs[0].nbytes)}", "yellow"),
+  with track_exec(ctx, call, bufs[0].device, colored(f"enc/dec {size_to_str(bufs[0].nbytes)}", "yellow"),
                   Estimates(lds=bufs[0].nbytes, mem=bufs[0].nbytes), bufs, ctx[0]):
     bufs[0].allocator._encode_decode(bufs[0]._buf, bufs[1]._buf, bufs[2]._buf, [x._buf for x in bufs[3:]], shape, ctx[0][pos_var])
 
