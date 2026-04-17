@@ -119,7 +119,7 @@ class TestGGUF(unittest.TestCase):
       a, b = np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32), np.array([5.0, 6.0], dtype=np.float32)
       (d / "test-00001-of-00002.gguf").write_bytes(build(2, 0, [("a", (4,), 0, a.tobytes())]))
       (d / "test-00002-of-00002.gguf").write_bytes(build(2, 1, [("b", (2,), 0, b.tobytes())]))
-      kv, ts = gguf_load(d / "test-00001-of-00002.gguf")
+      kv, ts, _ = gguf_load(d / "test-00001-of-00002.gguf")
       self.assertEqual(kv["split.count"], 2)
       np.testing.assert_equal(ts["a"].numpy(), a)
       np.testing.assert_equal(ts["b"].numpy(), b)
@@ -148,7 +148,7 @@ class TestGGUF(unittest.TestCase):
     fp = fetch(url)
     model_size = os.stat(fp).st_size
     gguf_tensor = Tensor.empty(model_size, dtype=dtypes.uint8, device=f"disk:{fp}").to(Device.DEFAULT)
-    kv_data, tensors = gguf_load(gguf_tensor)
+    kv_data, tensors, _ = gguf_load(gguf_tensor)
 
     reader = GGUFReader(fp)
 
@@ -196,7 +196,7 @@ class TestGGUFGEMV(unittest.TestCase):
     buf += b"\x00" * ((32 - len(buf) % 32) % 32)                # pad to alignment=32
     buf += q_data.tobytes()
 
-    _, tensors = gguf_load(Tensor(np.frombuffer(buf, dtype=np.uint8)).to(None))
+    _, tensors, _ = gguf_load(Tensor(np.frombuffer(buf, dtype=np.uint8)).to(None))
 
     x = rng.standard_normal(cols).astype(np.float32)
     with np.errstate(all='ignore'):

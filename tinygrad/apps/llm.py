@@ -1,9 +1,9 @@
 from __future__ import annotations
-import sys, argparse, codecs, typing, re, unicodedata, json, uuid, time, functools, itertools
+import sys, argparse, codecs, typing, re, unicodedata, json, uuid, time, functools, itertools, pathlib
 from dataclasses import dataclass, replace
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function
 from tinygrad.uop.ops import resolve
-from tinygrad.helpers import partition, DEBUG, Timing, GlobalCounters, stderr_log, colored, Context
+from tinygrad.helpers import partition, DEBUG, Timing, GlobalCounters, stderr_log, colored, Context, fetch
 from tinygrad.viz.serve import TCPServerWithReuse, HTTPRequestHandler
 
 class SimpleTokenizer:
@@ -396,8 +396,9 @@ class Transformer:
     return (self.prefill_jit if resolve(tokens.shape[1] != 1) else self.rollout_jit)(tokens.contiguous(), start_pos, temperature)
 
   @staticmethod
-  def from_gguf(gguf:Tensor, max_context:int|None=None, realize=bool(getenv("REALIZE", 0))) -> tuple[Transformer, dict]:
-    kv, state_dict = nn.state.gguf_load(gguf)
+  def from_gguf(gguf:Tensor|str|pathlib.Path, max_context:int|None=None,
+                realize=bool(getenv("REALIZE", 0))) -> tuple[Transformer, dict, int]:
+    kv, state_dict, nbytes = nn.state.gguf_load(gguf)
 
     # all state items should be float16, not float32
     state_dict = {k:v.cast('float16') if getenv("HALF", 1) else v for k,v in state_dict.items()}
@@ -460,7 +461,7 @@ class Transformer:
     if realize:
       for s in (params:=nn.state.get_parameters(model)): s.replace(s.contiguous())
       Tensor.realize(*params)
-    return model, kv
+    return model, kv, nbytes
 
   def get_start_pos(self, tokens:list[int]) -> int:
     prefix_len = sum(1 for _ in itertools.takewhile(lambda ab: ab[0] == ab[1], zip(tokens[:-1], self._cached_tokens)))
@@ -625,11 +626,9 @@ if __name__ == "__main__":
   args = parser.parse_args()
 
   # load the model
-  raw_model = Tensor.from_url(models.get(args.model, args.model))
-  model, kv = Transformer.from_gguf(raw_model, args.max_context)
+  model, kv, nbytes = Transformer.from_gguf(fetch(models.get(args.model, args.model)), args.max_context)
   model_name = kv.get('general.name') or kv.get('general.basename') or args.model
-  print(f"using model \"{model_name}\" with {raw_model.nbytes():,} bytes and {sum(x.numel() for x in nn.state.get_parameters(model)):,} params")
-  del raw_model
+  print(f"using model \"{model_name}\" with {nbytes:,} bytes and {sum(x.numel() for x in nn.state.get_parameters(model)):,} params")
 
   # TODO: why this is required to free the RAM of the GGUF copy?
   import gc
