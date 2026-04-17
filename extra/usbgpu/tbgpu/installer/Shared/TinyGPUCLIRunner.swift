@@ -2,7 +2,7 @@ import Foundation
 import SystemExtensions
 
 enum TinyGPUCLIExit: Int32 { case ok = 0, usage = 2, failed = 3, needsApproval = 4 }
-enum DextState { case unloaded, activating, needsApproval, activated }
+enum DextState { case unloaded, activating, needsApproval, recoveryNeeded, activated }
 
 final class TinyGPUCLIRunner: NSObject, OSSystemExtensionRequestDelegate {
   private let dextID: String
@@ -21,11 +21,15 @@ final class TinyGPUCLIRunner: NSObject, OSSystemExtensionRequestDelegate {
     guard (try? p.run()) != nil else { return .unloaded }
     p.waitUntilExit()
 
-    guard let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8),
-          let line = output.split(separator: "\n").first(where: { $0.contains(bundleID) }) else { return .unloaded }
-    if line.contains("[activated enabled]") { return .activated }
-    if line.contains("[activated waiting for user]") { return .needsApproval }
-    return line.contains("terminated waiting to uninstall") ? .unloaded : .activating
+    guard let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) else { return .unloaded }
+    let lines = output.split(separator: "\n").filter { $0.contains(bundleID) }
+    if lines.isEmpty { return .unloaded }
+    if lines.contains(where: { $0.contains("[activated enabled]") }) { return .activated }
+    if lines.contains(where: { $0.contains("terminating for uninstall but still running") || $0.contains("terminated waiting to uninstall") }) {
+      return lines.contains(where: { $0.contains("[activated waiting for user]") }) ? .recoveryNeeded : .activating
+    }
+    if lines.contains(where: { $0.contains("[activated waiting for user]") }) { return .needsApproval }
+    return .activating
   }
 
   private static let approvalHelp = """
@@ -35,11 +39,21 @@ final class TinyGPUCLIRunner: NSObject, OSSystemExtensionRequestDelegate {
 
     """
 
+  private static let recoveryHelp = """
+    TinyGPU is stuck between uninstall and reinstall.
+
+    Reboot macOS, then reopen TinyGPU and approve the extension if prompted.
+
+    If approval is still pending after reboot: System Settings > Privacy & Security, or System Settings > General > Login Items & Extensions > Driver Extensions
+
+    """
+
   static func statusText(_ state: DextState) -> String {
     switch state {
     case .unloaded: return "Driver extension not installed.\n\n"
     case .activating: return "Extension is activating...\n\n"
     case .needsApproval: return "Extension awaiting approval.\n\n" + approvalHelp
+    case .recoveryNeeded: return "Extension needs recovery.\n\n" + recoveryHelp
     case .activated: return "Extension is ready! Run tinygrad to use your eGPU.\n\n"
     }
   }
@@ -53,7 +67,11 @@ final class TinyGPUCLIRunner: NSObject, OSSystemExtensionRequestDelegate {
       print(Self.statusText(Self.queryDextState(dextID)))
       done(.ok)
     case "install":
-      if Self.queryDextState(dextID) == .needsApproval { print(Self.statusText(.needsApproval)); return done(.needsApproval) }
+      switch Self.queryDextState(dextID) {
+      case .needsApproval: print(Self.statusText(.needsApproval)); return done(.needsApproval)
+      case .recoveryNeeded: print(Self.statusText(.recoveryNeeded)); return done(.failed)
+      default: break
+      }
       print("Installing TinyGPU driver extension...\nYou may need to approve in System Settings.\n")
       submitRequest(activate: true)
     case "uninstall":
