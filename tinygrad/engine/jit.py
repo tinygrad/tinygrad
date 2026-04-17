@@ -5,7 +5,7 @@ from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv,
 from tinygrad.device import Buffer, Compiled, Device, MultiBuffer
 from tinygrad.dtype import DType, dtypes
 from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Variable, sym_infer, Ops, buffers, track_rewrites, graph_rewrite
-from tinygrad.engine.realize import ExecItem, capturing, BufferCopy, BufferXfer, EncDec, CompiledRunner, Runner, Estimates
+from tinygrad.engine.realize import ExecItem, capturing, BufferCopy, BufferXfer, EncDec, CompiledRunner, Runner, Estimates, pm_add_beam
 from tinygrad.schedule.memory import memory_plan_rewrite, _collect_bufs
 from tinygrad.schedule import linear_to_schedule
 from tinygrad.nn.state import get_parameters
@@ -67,10 +67,6 @@ def jit_cache_bufs(jit_cache:list[ExecItem]):
 
 def _unwrap_beam(ast:UOp) -> UOp: return ast.src[0] if ast.op is Ops.BEAM else ast
 
-pm_beam = PatternMatcher([
-  (UPat(Ops.CALL, src=(UPat(Ops.SINK, name="sink"),), name="call", allow_any_len=True),
-   lambda ctx,call,sink: call.replace(src=(UOp(Ops.BEAM, src=(sink,), arg=ctx), *call.src[1:])))])
-
 @track_rewrites(lambda linear,held_bufs,input_uops,ret=(): f"JIT {pluralize('call', len(linear.src))}")
 def jit_lower(linear:UOp, held_bufs:set[UOp], input_uops:list[UOp]) -> UOp:
   if VIZ: graph_rewrite(linear, PatternMatcher([]), name="View captured linear")
@@ -79,7 +75,7 @@ def jit_lower(linear:UOp, held_bufs:set[UOp], input_uops:list[UOp]) -> UOp:
   linear = linear.substitute({u: UOp.param(i, u.dtype, u.shape, u.device) for i,u in enumerate(input_uops)}, walk=True)
 
   # wrap SINKs with BEAM if jitbeam is set
-  if (jitbeam:=getenv("JITBEAM", BEAM.value)) >= 1: linear = graph_rewrite(linear, pm_beam, ctx=jitbeam, walk=True)
+  if (jitbeam:=getenv("JITBEAM", BEAM.value)) >= 1: linear = graph_rewrite(linear, pm_add_beam, ctx=jitbeam, walk=True)
 
   linear = memory_plan_rewrite(linear, held_bufs)
   if JIT < 2: linear = graph_split_rewrite(linear, max_batch_size=JIT_BATCH_SIZE.value)

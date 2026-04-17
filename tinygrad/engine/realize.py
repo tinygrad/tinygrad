@@ -217,7 +217,7 @@ def run_schedule(schedule:list[ExecItem], var_vals:dict[str, int]|None=None, do_
     else:
       ei.run(var_vals, do_update_stats=do_update_stats)
 
-# **************** run_linear ****************
+# **************** run linear ****************
 
 def iter_device_bufs(call:UOp) -> Iterator[tuple[list[Buffer], dict[str, int]]]:
   bufs = [b.buffer for b in call.src[1:] if b.op is not Ops.BIND]
@@ -228,7 +228,7 @@ def iter_device_bufs(call:UOp) -> Iterator[tuple[list[Buffer], dict[str, int]]]:
 
 pm_add_beam = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.SINK, name="sink"),), name="call", allow_any_len=True),
-   lambda call,sink: call.replace(src=(UOp(Ops.BEAM, src=(sink,), arg=BEAM.value),)+call.src[1:])),
+   lambda ctx,call,sink: call.replace(src=(UOp(Ops.BEAM, src=(sink,), arg=ctx), *call.src[1:]))),
 ])
 
 @contextlib.contextmanager
@@ -286,12 +286,11 @@ def exec_encdec(ctx, call, ast):
 pm_exec = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.BUFFER_VIEW, name="ast"),), name="call", allow_any_len=True), exec_view),
   (UPat(Ops.CALL, src=(UPat(Ops.COPY, name="ast"),), name="call", allow_any_len=True), exec_copy),
-  (UPat(Ops.CALL, src=(UPat(Ops.TUPLE, src=(UPat(Ops.BEAM, name="ast"),)),), name="call", allow_any_len=True), exec_kernel),
   (UPat(Ops.CALL, src=(UPat((Ops.SINK, Ops.PROGRAM, Ops.BEAM), name="ast"),), name="call", allow_any_len=True), exec_kernel),
   (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="encdec", name="ast"),), name="call", allow_any_len=True), exec_encdec),
 ])
 
 def run_linear(linear:UOp, var_vals:dict[str, int]|None=None, do_update_stats=True):
-  if BEAM >= 1: linear = graph_rewrite(linear, pm_add_beam, name="add beam", walk=True)
+  if BEAM >= 1: linear = graph_rewrite(linear, pm_add_beam, ctx=BEAM.value, name="add beam", walk=True)
   ctx = (var_vals or {}, do_update_stats)
   for call in linear.src: pm_exec.rewrite(call, ctx)
