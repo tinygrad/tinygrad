@@ -169,7 +169,7 @@ def main(args) -> None:
         ptm = colored(time_to_str(et, w=9), "yellow" if et > 0.01 else None)
         fmt = "  ".join(p+" "*max(0, 14-ansilen(p)) for p in e["fmt"].split("\n"))
         name = f"*** {args.src[:7]:7s} {k+1:4d} "+e["name"]+" "*(46-ansilen(e["name"]))
-        kernels.append({"name":name, "fmt":f"tm {ptm}@{timestamp*1e3:9.2f}ms ({fmt})", "ref":e["ref"]})
+        kernels.append({"name":name, "fmt":f"tm {ptm}@{timestamp*1e3:9.2f}ms"+(f" ({fmt})" if e["fmt"] else ""), "ref":e["ref"]})
     for k in kernels:
       print(f"{fmt_colored(k['name'])}{' ' * max(0, 36 - ansilen(k['name']))} {k['fmt']}")
       if k["ref"] is not None:
