@@ -1284,7 +1284,7 @@ def train_bert():
 def _train_flat_llama(model_name:str):
   from examples.mlperf.models.flat_llama import FlatTransformer, apply_grad, FP8
   from examples.mlperf.dataloader import batch_load_llama3, count_llama2_70b_lora_sequences, get_llama3_dataset, iterate_llama2_70b_lora_dataset, iterate_llama3_dataset
-  from examples.mlperf.llama import llama_benchmark_config, load_llama_sentencepiece_tokenizer
+  from examples.mlperf.llama import llama_benchmark_config, llama_masked_crossentropy, load_llama_sentencepiece_tokenizer
   from examples.mlperf.lr_schedulers import CosineAnnealingLRWithWarmup
   from examples.mlperf.optim import GradAccClipAdamW
 
@@ -1519,10 +1519,11 @@ def _train_flat_llama(model_name:str):
     return tokens, labels
 
   @TinyJit
+  @Tensor.train()
   def minibatch(tokens:Tensor, labels:Tensor):
     tokens, labels = _llama_batch(tokens, labels)
     logits:Tensor = model(tokens[:, :-1])
-    loss = vocab_mask.where(-1e9, logits).sparse_categorical_crossentropy(labels[:, 1:], ignore_index=-1)
+    loss, _ = llama_masked_crossentropy(vocab_mask.where(-1e9, logits), labels[:, 1:])
 
     for g, new_g in zip(grads, loss.gradient(*optim.params)):
       apply_grad(g, new_g.uop)
@@ -1548,8 +1549,8 @@ def _train_flat_llama(model_name:str):
   def eval_step(tokens:Tensor, labels:Tensor):
     tokens, labels = _llama_batch(tokens, labels)
     logits:Tensor = model(tokens[:, :-1])
-    loss = vocab_mask.where(-1e9, logits).sparse_categorical_crossentropy(labels[:, 1:], ignore_index=-1)
-    return loss.flatten().float().to("CPU")
+    loss, valid_tokens = llama_masked_crossentropy(vocab_mask.where(-1e9, logits), labels[:, 1:])
+    return loss.flatten().float().to("CPU"), valid_tokens.flatten().to("CPU")
 
   # ** data iters **
   def fake_data(bs, samples):
@@ -1583,6 +1584,13 @@ def _train_flat_llama(model_name:str):
 
   num_params = sum(p.numel() for p in params) - model_params["vocab_size"]*model_params["dim"]
   train_iter = get_train_iter()
+  if start_step:
+    skipped_microbatches = _llama_train_microbatches_seen(start_step, grad_acc)
+    tqdm.write(f"fast-forwarding training iterator by {skipped_microbatches} microbatches")
+    try:
+      for _ in range(skipped_microbatches): next(train_iter)
+    except StopIteration as e:
+      raise RuntimeError(f"resume checkpoint at step {start_step} exceeds available training data") from e
   i, sequences_seen = start_step, _llama_sequences_seen(start_step, BS, grad_acc)
   step_times = []
 
@@ -1678,20 +1686,24 @@ def _train_flat_llama(model_name:str):
         MLLOGGER.start(key=mllog_constants.EVAL_START, metadata={mllog_constants.SAMPLES_COUNT: sequences_seen})
 
       # run eval
-      eval_losses = []
+      eval_loss_sum, total_valid_tokens = 0.0, 0
       eval_iter = get_eval_iter()
       eval_batches = math.ceil(EVAL_SAMPLES / EVAL_BS)
       tqdm.write(f"evaluating {eval_batches} batches of {EVAL_BS} sequences")
 
       for j,(tokens, labels) in tqdm(enumerate(eval_iter), total=eval_batches):
-        eval_losses += eval_step(tokens, labels).tolist()
+        loss, valid_tokens = eval_step(tokens, labels)
+        if (valid_token_count:=int(valid_tokens.item())) == 0: continue
+        eval_loss_sum += loss.item() * valid_token_count
+        total_valid_tokens += valid_token_count
 
         if BENCHMARK and (j+1) == min(BENCHMARK, eval_batches):
           if MLLOGGER and INITMLPERF:
             MLLOGGER.end(key=mllog_constants.INIT_STOP, value=None)
           return
 
-      log_perplexity = sum(eval_losses) / len(eval_losses)
+      if total_valid_tokens == 0: raise RuntimeError("llama eval loaded no valid target tokens")
+      log_perplexity = eval_loss_sum / total_valid_tokens
 
       tqdm.write(f"eval log perplexity: {log_perplexity:.4f}")
 
@@ -1763,11 +1775,32 @@ def _llama_load_model_checkpoint(model, ckpt_ref:str, checkpoint_prefix:str="lla
 def _llama_checkpoint_state(model, adapter_only:bool=False) -> dict[str, Tensor]:
   return model.adapter_state_dict() if adapter_only else get_state_dict(model)
 
+def _llama_rng_checkpoint_state() -> dict[str, Tensor]:
+  rng_state = {"rng.seed": Tensor([Tensor._seed], device="CPU", dtype=dtypes.int64, requires_grad=False)}
+  for device, seed in Tensor._device_seeds.items():
+    device_key = device.encode().hex()
+    rng_state[f"rng.device.{device_key}.seed"] = seed.to("CPU").contiguous().requires_grad_(False)
+    if (counter:=Tensor._device_rng_counters.get(device)) is not None:
+      rng_state[f"rng.device.{device_key}.counter"] = counter.to("CPU").contiguous().requires_grad_(False)
+  return rng_state
+
+def _llama_load_rng_checkpoint(state_dict:dict[str, Tensor]) -> None:
+  if (seed:=state_dict.get("rng.seed")) is None: return
+  Tensor.manual_seed(int(seed.item()))
+  for key, value in state_dict.items():
+    if not key.startswith("rng.device.") or not key.endswith(".seed"): continue
+    device_key = key.removeprefix("rng.device.").removesuffix(".seed")
+    device = bytes.fromhex(device_key).decode()
+    Tensor._device_seeds[device] = value.to(device).contiguous().requires_grad_(False)
+    if (counter:=state_dict.get(f"rng.device.{device_key}.counter")) is not None:
+      Tensor._device_rng_counters[device] = counter.to(device).contiguous().requires_grad_(False)
+
 def _llama_training_checkpoint_state(model, optim, scheduler, adapter_only:bool=False) -> dict[str, Tensor]:
   if not adapter_only:
     return get_training_state(model, optim, scheduler)
   state_dict = {f"model.{name}": tensor for name, tensor in model.adapter_state_dict().items()}
   state_dict.update(dedup_dict(get_state_dict({"optimizer": optim, "scheduler": scheduler})))
+  state_dict.update(_llama_rng_checkpoint_state())
   return state_dict
 
 def _llama_load_training_checkpoint(model, optim, scheduler, state_dict:dict[str, Tensor], adapter_only:bool=False) -> None:
@@ -1779,9 +1812,13 @@ def _llama_load_training_checkpoint(model, optim, scheduler, state_dict:dict[str
   load_state_dict({"optimizer": optim, "scheduler": scheduler},
                   {k:v for k,v in state_dict.items() if k.startswith("optimizer.") or k.startswith("scheduler.")},
                   strict=False, verbose=False, realize=False)
+  _llama_load_rng_checkpoint(state_dict)
 
 def _llama_sequences_seen(step:int, bs:int, grad_acc:int, unaccumulated_steps:int=2) -> int:
   return min(step, unaccumulated_steps) * bs + max(step - unaccumulated_steps, 0) * bs * grad_acc
+
+def _llama_train_microbatches_seen(step:int, grad_acc:int, unaccumulated_steps:int=2) -> int:
+  return min(step, unaccumulated_steps) + max(step - unaccumulated_steps, 0) * grad_acc
 
 def train_stable_diffusion():
   from extra.models.unet import UNetModel

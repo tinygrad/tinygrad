@@ -33,10 +33,87 @@ export GBS=$((BS * GRADIENT_ACC_STEPS))
 export MODEL="llama2_70b_lora"
 export DATASET_PATH="${DATASET_PATH:-/raid/datasets/scrolls_gov_report_8k}"
 if [[ ! ${MODEL_PATH+x} ]]; then export MODEL_PATH="/raid/weights/llama2-70b-fused-qkv-mlperf"; fi
-if [[ -z "${FAKEDATA:-}" && -z "${MODEL_PATH}" ]]; then
-  echo "MODEL_PATH must point to converted Llama2 70B weights for a real benchmark run" >&2
-  exit 1
+
+require_dataset_split() {
+  local dataset_dir="$1"
+  local prefix="$2"
+  local matches=()
+  if [[ -f "${dataset_dir}/${prefix}.parquet" || -f "${dataset_dir}/${prefix}.jsonl" || -f "${dataset_dir}/${prefix}.json" ]]; then
+    return
+  fi
+  shopt -s nullglob
+  matches=(
+    "${dataset_dir}/${prefix}"-*.parquet
+    "${dataset_dir}/${prefix}"-*.jsonl
+    "${dataset_dir}/${prefix}"-*.json
+  )
+  shopt -u nullglob
+  if [[ ${#matches[@]} -eq 0 ]]; then
+    echo "DATASET_PATH=${dataset_dir} is missing ${prefix} split files" >&2
+    exit 1
+  fi
+}
+
+if [[ -z "${FAKEDATA:-}" ]]; then
+  if [[ -z "${MODEL_PATH}" ]]; then
+    echo "MODEL_PATH must point to converted Llama2 70B weights for a real benchmark run" >&2
+    exit 1
+  fi
+  if [[ ! -e "${MODEL_PATH}" ]]; then
+    echo "MODEL_PATH=${MODEL_PATH} does not exist" >&2
+    exit 1
+  fi
+
+  if [[ -n "${TOKENIZER_PATH:-}" ]]; then
+    if [[ ! -f "${TOKENIZER_PATH}" ]]; then
+      echo "TOKENIZER_PATH=${TOKENIZER_PATH} does not exist" >&2
+      exit 1
+    fi
+  else
+    model_root="${MODEL_PATH}"
+    if [[ ! -d "${model_root}" ]]; then model_root="$(dirname -- "${model_root}")"; fi
+    if [[ ! -f "${model_root}/tokenizer.model" ]]; then
+      echo "tokenizer.model not found alongside MODEL_PATH; set TOKENIZER_PATH explicitly" >&2
+      exit 1
+    fi
+  fi
+
+  if [[ -z "${DATASET_PATH}" ]]; then
+    echo "DATASET_PATH must point to the GovReport train/validation data" >&2
+    exit 1
+  fi
+  if [[ -n "${RUNMLPERF:-}" ]]; then
+    if [[ ! -d "${DATASET_PATH}" ]]; then
+      echo "RUNMLPERF requires DATASET_PATH to be a dataset directory with train/validation splits" >&2
+      exit 1
+    fi
+    require_dataset_split "${DATASET_PATH}" train
+    require_dataset_split "${DATASET_PATH}" validation
+  elif [[ "${DATASET_PATH}" == *"*"* ]]; then
+    shopt -s nullglob
+    dataset_matches=( ${DATASET_PATH} )
+    shopt -u nullglob
+    if [[ ${#dataset_matches[@]} -eq 0 ]]; then
+      echo "DATASET_PATH=${DATASET_PATH} does not match any dataset files" >&2
+      exit 1
+    fi
+  elif [[ -d "${DATASET_PATH}" ]]; then
+    require_dataset_split "${DATASET_PATH}" train
+    require_dataset_split "${DATASET_PATH}" validation
+  elif [[ -f "${DATASET_PATH}" ]]; then
+    case "${DATASET_PATH}" in
+      *.json|*.jsonl|*.parquet) ;;
+      *)
+        echo "DATASET_PATH=${DATASET_PATH} must be a dataset directory or json/jsonl/parquet file" >&2
+        exit 1
+        ;;
+    esac
+  else
+    echo "DATASET_PATH=${DATASET_PATH} does not exist" >&2
+    exit 1
+  fi
 fi
+
 export SEQLEN="${SEQLEN:-8192}"
 
 export EVAL_TARGET="${EVAL_TARGET:-0.925}"

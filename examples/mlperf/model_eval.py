@@ -4,7 +4,7 @@ from pathlib import Path
 import numpy as np
 from tinygrad import Tensor, Device, dtypes, GlobalCounters, TinyJit
 from tinygrad.nn.state import get_parameters, load_state_dict, safe_load
-from tinygrad.helpers import getenv, Context, prod
+from tinygrad.helpers import getenv, Context, prod, round_up
 from extra.bench_log import BenchEvent, WallTimeEvent
 def tlog(x): print(f"{x:25s}  @ {time.perf_counter()-start:5.2f}s")
 
@@ -250,10 +250,11 @@ def eval_llama3():
 def eval_llama2_70b_lora():
   from tinygrad.helpers import tqdm
   from examples.mlperf.dataloader import iterate_llama2_70b_lora_dataset
-  from examples.mlperf.llama import llama_benchmark_config, llama_model_state_dict, load_llama_sentencepiece_tokenizer
+  from examples.mlperf.llama import llama_benchmark_config, llama_masked_crossentropy, llama_model_state_dict, load_llama_sentencepiece_tokenizer
   from examples.mlperf.models.flat_llama import FlatTransformer
 
   BS = getenv("BS", 1)
+  MP = getenv("MP", 1)
   SEQLEN = getenv("SEQLEN", 8192)
   DATASET_PATH = Path(getenv("DATASET_PATH", "./dataset"))
   MODEL_PATH = getenv("MODEL_PATH", "")
@@ -263,8 +264,12 @@ def eval_llama2_70b_lora():
   lora_rank = getenv("LLAMA_LORA_RANK", benchmark["lora_rank"])
   lora_alpha = getenv("LLAMA_LORA_ALPHA", benchmark["lora_alpha"])
   lora_dropout = getenv("LLAMA_LORA_DROPOUT", benchmark["lora_dropout"])
+  model_params = dict(benchmark["model_params"])
+  if MP > 1: model_params["vocab_size"] = round_up(model_params["vocab_size"], 256 * MP)
 
-  model = FlatTransformer(**benchmark["model_params"], max_context=SEQLEN, lora_rank=lora_rank, lora_alpha=lora_alpha, lora_dropout=lora_dropout)
+  model = FlatTransformer(**model_params, max_context=SEQLEN, lora_rank=lora_rank, lora_alpha=lora_alpha, lora_dropout=lora_dropout)
+  device = tuple(f"{Device.DEFAULT}:{i}" for i in range(MP))
+  if MP > 1: model.shard(device, mp=True)
   if MODEL_PATH:
     model.load_from_pretrained(MODEL_PATH)
   if ADAPTER_CKPT:
@@ -273,28 +278,36 @@ def eval_llama2_70b_lora():
   tokenizer = load_llama_sentencepiece_tokenizer(MODEL_PATH)
 
   vocab_mask = Tensor.arange(model.vocab_size).reshape(1, 1, -1) >= benchmark["real_vocab_size"]
+  if MP > 1: vocab_mask.shard_(device, axis=2).realize()
 
   def move_batch(tokens:Tensor, labels:Tensor) -> tuple[Tensor, Tensor]:
-    tokens = tokens.to(Device.DEFAULT).contiguous().realize()
-    labels = labels.to(Device.DEFAULT).contiguous().realize()
+    if MP > 1:
+      tokens = tokens.shard(device)
+      labels = labels.shard(device)
+    else:
+      tokens = tokens.to(Device.DEFAULT).contiguous().realize()
+      labels = labels.to(Device.DEFAULT).contiguous().realize()
     return tokens, labels
 
   @TinyJit
   @Tensor.train(False)
   def eval_step(tokens:Tensor, labels:Tensor):
     logits:Tensor = model(tokens[:, :-1])
-    loss = vocab_mask.where(-1e9, logits).sparse_categorical_crossentropy(labels[:, 1:], ignore_index=-1)
-    return loss.flatten().float().to("CPU")
+    loss, valid_tokens = llama_masked_crossentropy(vocab_mask.where(-1e9, logits), labels[:, 1:])
+    return loss.flatten().float().to("CPU"), valid_tokens.flatten().to("CPU")
 
-  losses = []
+  loss_sum, total_valid_tokens = 0.0, 0
   for tokens, labels in tqdm(iterate_llama2_70b_lora_dataset(DATASET_PATH, BS, SEQLEN, tokenizer=tokenizer, val=True)):
     GlobalCounters.reset()
     tokens, labels = move_batch(tokens, labels)
-    losses += eval_step(tokens, labels).tolist()
-    tqdm.write(f"loss: {np.mean(losses)}")
+    loss, valid_tokens = eval_step(tokens, labels)
+    if (valid_token_count:=int(valid_tokens.item())) == 0: continue
+    loss_sum += loss.item() * valid_token_count
+    total_valid_tokens += valid_token_count
+    tqdm.write(f"loss: {loss_sum / total_valid_tokens}")
 
-  assert losses, f"no llama2_70b_lora eval samples were loaded from {DATASET_PATH}"
-  eval_loss = np.mean(losses)
+  assert total_valid_tokens, f"no llama2_70b_lora eval samples were loaded from {DATASET_PATH}"
+  eval_loss = loss_sum / total_valid_tokens
   print(f"Eval Loss: {eval_loss}")
   return float(eval_loss)
 

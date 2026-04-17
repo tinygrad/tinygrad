@@ -52,10 +52,10 @@ COMMON_ENV=(
 )
 
 # init / beam search warmup on a reduced layer count. Keep benchmark identity and sequence length intact.
-env -u RUNMLPERF -u LOAD_CKPT -u RESUME_CKPT -u TRAIN_ON_VAL -u SMALL -u SAMPLES -u EVAL_SAMPLES \
-  "${COMMON_ENV[@]}" MODEL_PATH="" TOKENIZER_PATH="" FAKEDATA=1 BENCHMARK=10 INITMLPERF=1 LLAMA_LAYERS=2 \
-  "${SCRIPT_DIR}/dev_run.sh" | tee "${LOGFILE}"
+env -u RUNMLPERF -u LOAD_CKPT -u RESUME_CKPT -u TRAIN -u CKPT -u FP8 -u TRAIN_ON_VAL -u SMALL -u SAMPLES -u EVAL_SAMPLES \
+  "${COMMON_ENV[@]}" DATASET_PATH="" MODEL_PATH="" TOKENIZER_PATH="" FAKEDATA=1 BENCHMARK=10 INITMLPERF=1 LLAMA_LAYERS=2 \
+  "${SCRIPT_DIR}/dev_run.sh" 2>&1 | tee "${LOGFILE}"
 
-env -u INITMLPERF -u FAKEDATA -u BENCHMARK -u LLAMA_LAYERS -u FULL_LAYERS -u TRAIN_ON_VAL -u SMALL -u LOAD_CKPT -u RESUME_CKPT -u SAMPLES -u EVAL_SAMPLES \
+env -u INITMLPERF -u FAKEDATA -u BENCHMARK -u LLAMA_LAYERS -u FULL_LAYERS -u TRAIN -u CKPT -u FP8 -u TRAIN_ON_VAL -u SMALL -u LOAD_CKPT -u RESUME_CKPT -u SAMPLES -u EVAL_SAMPLES \
   "${COMMON_ENV[@]}" RUNMLPERF=1 DATASET_PATH="${DATASET_PATH:-/raid/datasets/scrolls_gov_report_8k}" MODEL_PATH="${MODEL_PATH:-/raid/weights/llama2-70b-fused-qkv-mlperf}" \
-  "${SCRIPT_DIR}/dev_run.sh" | tee -a "${LOGFILE}"
+  "${SCRIPT_DIR}/dev_run.sh" 2>&1 | tee -a "${LOGFILE}"

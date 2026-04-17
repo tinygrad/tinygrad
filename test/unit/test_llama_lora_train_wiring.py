@@ -6,6 +6,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import numpy as np
+
 from tinygrad import Tensor, nn
 from tinygrad.helpers import getenv as cached_getenv
 from tinygrad.nn.state import get_state_dict, safe_load, safe_save
@@ -22,7 +24,10 @@ from examples.mlperf.model_train import (
   _llama_checkpoint_path,
   _llama_configure_trainable_params,
   _llama_load_model_checkpoint,
+  _llama_load_training_checkpoint,
   _llama_sequences_seen,
+  _llama_train_microbatches_seen,
+  _llama_training_checkpoint_state,
   train_llama2_70b_lora,
 )
 from examples.mlperf.models.flat_llama import FlatTransformer
@@ -89,6 +94,10 @@ class TestLlamaLoRATrainWiring(unittest.TestCase):
     self.assertEqual(_llama_sequences_seen(1, bs=3, grad_acc=4), 3)
     self.assertEqual(_llama_sequences_seen(2, bs=3, grad_acc=4), 6)
     self.assertEqual(_llama_sequences_seen(5, bs=3, grad_acc=4), 42)
+    self.assertEqual(_llama_train_microbatches_seen(0, grad_acc=4), 0)
+    self.assertEqual(_llama_train_microbatches_seen(1, grad_acc=4), 1)
+    self.assertEqual(_llama_train_microbatches_seen(2, grad_acc=4), 2)
+    self.assertEqual(_llama_train_microbatches_seen(5, grad_acc=4), 14)
 
   def test_llama3_benchmark_config_uses_llama31_identity(self):
     with patch.dict(os.environ, {"LLAMA3_SIZE": "8B"}, clear=False):
@@ -166,10 +175,120 @@ class TestLlamaLoRATrainWiring(unittest.TestCase):
       trainer_ckpt = safe_load(tmpdir / "ckpts" / "llama2_70b_lora_1_state.safe")
       self.assertSetEqual(set(model_ckpt.keys()), {"wqkv_lora_a", "wqkv_lora_b", "wo_lora_a", "wo_lora_b"})
       self.assertNotIn("model.wqkv", trainer_ckpt)
+      self.assertIn("rng.seed", trainer_ckpt)
       self.assertTrue(any(k.startswith("optimizer.") for k in trainer_ckpt))
+      self.assertTrue(any(k.startswith("rng.device.") for k in trainer_ckpt))
       self.assertTrue(any(k.startswith("scheduler.") for k in trainer_ckpt))
       self.assertSetEqual({k for k in trainer_ckpt if k.startswith("model.")},
                           {"model.wqkv_lora_a", "model.wqkv_lora_b", "model.wo_lora_a", "model.wo_lora_b"})
+
+  def test_adapter_only_training_checkpoint_restores_rng_state(self):
+    from examples.mlperf.lr_schedulers import CosineAnnealingLRWithWarmup
+    from examples.mlperf.optim import GradAccClipAdamW
+
+    model = FlatTransformer(**self.params, lora_rank=8, lora_alpha=16, lora_dropout=0.1)
+    optim_params, _ = _llama_configure_trainable_params(model, adapter_only=True)
+    optim = GradAccClipAdamW(optim_params, lr=1e-3, grad_acc=1, clip_norm=0.3)
+    for p in optim.params:
+      p.grad = Tensor.zeros(p.shape, dtype=p.dtype, device=p.device).contiguous()
+    scheduler = CosineAnnealingLRWithWarmup(optim, 1e-3, 0.0, 0, 4)
+
+    Tensor.manual_seed(1234)
+    state_dict = _llama_training_checkpoint_state(model, optim, scheduler, adapter_only=True)
+    expected = Tensor.rand(4).numpy().tolist()
+    Tensor.rand(32).realize()
+
+    _llama_load_training_checkpoint(model, optim, scheduler, state_dict, adapter_only=True)
+    restored = Tensor.rand(4).numpy().tolist()
+    self.assertListEqual(restored, expected)
+
+  def test_llama2_70b_lora_resume_matches_uninterrupted_training(self):
+    tiny_params = dict(dim=128, hidden_dim=256, n_heads=4, n_kv_heads=2, n_layers=2, norm_eps=1e-5, vocab_size=1024, rope_theta=10000)
+    spec = llama_benchmark_config("llama2_70b_lora")
+    spec = {**spec, "model_params": tiny_params, "real_vocab_size": tiny_params["vocab_size"], "lora_rank": 4, "lora_alpha": 8, "lora_dropout": 0.1}
+
+    with tempfile.TemporaryDirectory(prefix="llama2-lora-resume-") as tmpdir:
+      tmpdir = Path(tmpdir)
+      dataset_dir = tmpdir / "dataset"
+      dataset_dir.mkdir()
+      rows = [
+        {"input_ids": [1, 2, 3, 4, 5], "labels": [1, 2, 3, 4, 5]},
+        {"input_ids": [6, 7, 8, 9, 10], "labels": [6, 7, 8, 9, 10]},
+        {"input_ids": [11, 12, 13, 14, 15], "labels": [11, 12, 13, 14, 15]},
+      ]
+      (dataset_dir / "train.jsonl").write_text("".join(json.dumps(row) + "\n" for row in rows))
+      (dataset_dir / "validation.jsonl").write_text(json.dumps({"input_ids": [1, 2, 3, 4, 5], "labels": [-1, -1, 3, 4, -1]}) + "\n")
+
+      base_model = Transformer(**tiny_params, disable_kv_cache=True)
+      base_path = tmpdir / "base.safetensors"
+      safe_save(split_attention_state(base_model), base_path.as_posix())
+
+      base_env = {
+        "BS": "1",
+        "CKPT": "1",
+        "DATASET_PATH": dataset_dir.as_posix(),
+        "END_LR": "0.0",
+        "EVAL_FREQ": "999",
+        "EVAL_TARGET": "-1.0",
+        "GRADIENT_ACC_STEPS": "1",
+        "LLAMA_LORA_ALPHA": "8",
+        "LLAMA_LORA_DROPOUT": "0.1",
+        "LLAMA_LORA_RANK": "4",
+        "LR": "1e-3",
+        "MODEL_PATH": base_path.as_posix(),
+        "SEQLEN": "5",
+        "WARMUP_STEPS": "0",
+      }
+
+      original_config = llama_benchmark_config
+
+      baseline_dir = tmpdir / "baseline"
+      baseline_dir.mkdir()
+      with (
+        patch.dict(os.environ, base_env | {"MAX_STEPS": "2"}, clear=False),
+        patch("examples.mlperf.llama.llama_benchmark_config",
+              side_effect=lambda model_name, small=False: spec if model_name == "llama2_70b_lora" else original_config(model_name, small=small)),
+      ):
+        cwd = os.getcwd()
+        os.chdir(baseline_dir)
+        try:
+          train_llama2_70b_lora()
+        finally:
+          os.chdir(cwd)
+
+      resume_dir = tmpdir / "resume"
+      resume_dir.mkdir()
+      with (
+        patch.dict(os.environ, base_env | {"MAX_STEPS": "1"}, clear=False),
+        patch("examples.mlperf.llama.llama_benchmark_config",
+              side_effect=lambda model_name, small=False: spec if model_name == "llama2_70b_lora" else original_config(model_name, small=small)),
+      ):
+        cwd = os.getcwd()
+        os.chdir(resume_dir)
+        try:
+          train_llama2_70b_lora()
+        finally:
+          os.chdir(cwd)
+
+      resume_ckpt = resume_dir / "ckpts" / "llama2_70b_lora_1_state.safe"
+      with (
+        patch.dict(os.environ, base_env | {"MAX_STEPS": "2", "RESUME_CKPT": resume_ckpt.as_posix()}, clear=False),
+        patch("examples.mlperf.llama.llama_benchmark_config",
+              side_effect=lambda model_name, small=False: spec if model_name == "llama2_70b_lora" else original_config(model_name, small=small)),
+      ):
+        cwd = os.getcwd()
+        os.chdir(resume_dir)
+        try:
+          train_llama2_70b_lora()
+        finally:
+          os.chdir(cwd)
+
+      baseline_ckpt = safe_load(baseline_dir / "ckpts" / "llama2_70b_lora_2.safe")
+      resumed_ckpt = safe_load(resume_dir / "ckpts" / "llama2_70b_lora_2.safe")
+      self.assertSetEqual(set(baseline_ckpt.keys()), set(resumed_ckpt.keys()))
+      for key in baseline_ckpt:
+        diff = np.abs(baseline_ckpt[key].numpy() - resumed_ckpt[key].numpy()).max()
+        self.assertLess(float(diff), 1e-8, key)
 
 
 if __name__ == "__main__":

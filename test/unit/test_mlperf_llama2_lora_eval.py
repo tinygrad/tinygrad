@@ -2,9 +2,11 @@ import json, math, os, tempfile, unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import numpy as np
+
 os.environ["WQKV"] = "1"
 
-from tinygrad import Tensor, nn
+from tinygrad import Device, Tensor, nn
 from tinygrad.helpers import getenv as cached_getenv
 from tinygrad.nn.state import safe_save
 
@@ -147,6 +149,55 @@ class TestMLPerfLlama2LoRAEval(unittest.TestCase):
         eval_loss = eval_llama2_70b_lora()
 
     self.assertTrue(math.isfinite(eval_loss))
+
+  def test_eval_llama2_70b_lora_weights_loss_by_valid_tokens(self):
+    class FakeFlatTransformer:
+      def __init__(self, *args, **kwargs):
+        self.vocab_size = 4
+
+      def load_from_pretrained(self, *_args, **_kwargs): pass
+      def shard(self, *_args, **_kwargs): pass
+
+      def __call__(self, tokens:Tensor):
+        logits = np.zeros((tokens.shape[0], tokens.shape[1], self.vocab_size), dtype=np.float32)
+        if tokens.shape[0] == 2:
+          logits[..., 2] = 3.0
+        else:
+          logits[..., 1] = 4.0
+        return Tensor(logits)
+
+    batches = iter([
+      (
+        Tensor([[10, 11, 12, 13], [14, 15, 16, 17]], device=Device.DEFAULT),
+        Tensor([[0, 1, -1, -1], [0, 1, -1, -1]], device=Device.DEFAULT),
+      ),
+      (Tensor([[20, 21, 22, 23]], device=Device.DEFAULT), Tensor([[0, 1, 1, 1]], device=Device.DEFAULT)),
+    ])
+    spec = {"model_params": {}, "real_vocab_size": 4, "lora_rank": 0, "lora_alpha": 1, "lora_dropout": 0.0}
+    bad_logits = np.zeros((2, 3, 4), dtype=np.float32)
+    bad_logits[..., 2] = 3.0
+    good_logits = np.zeros((1, 3, 4), dtype=np.float32)
+    good_logits[..., 1] = 4.0
+    bad_loss = llama_helpers.llama_masked_crossentropy(
+      Tensor(bad_logits, device=Device.DEFAULT),
+      Tensor([[1, -1, -1], [1, -1, -1]], device=Device.DEFAULT),
+    )[0].item()
+    good_loss = llama_helpers.llama_masked_crossentropy(
+      Tensor(good_logits, device=Device.DEFAULT),
+      Tensor([[1, 1, 1]], device=Device.DEFAULT),
+    )[0].item()
+
+    with (
+      patch.dict(os.environ, {"BS": "1", "SEQLEN": "4"}, clear=False),
+      patch("examples.mlperf.llama.llama_benchmark_config", return_value=spec),
+      patch("examples.mlperf.llama.load_llama_sentencepiece_tokenizer", return_value=None),
+      patch("examples.mlperf.model_eval.TinyJit", lambda fn: fn),
+      patch("examples.mlperf.models.flat_llama.FlatTransformer", FakeFlatTransformer),
+      patch("examples.mlperf.dataloader.iterate_llama2_70b_lora_dataset", return_value=batches),
+    ):
+      eval_loss = eval_llama2_70b_lora()
+
+    self.assertAlmostEqual(eval_loss, (bad_loss * 2 + good_loss * 3) / 5, places=6)
 
 
 if __name__ == "__main__":

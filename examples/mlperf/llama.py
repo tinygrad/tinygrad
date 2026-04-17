@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import Any
 
+from tinygrad import Tensor, dtypes
 from tinygrad.helpers import getenv
 
 LLAMA2_70B_LORA_PROMPT_PREFIX = "### Summarize the following text:\n "
@@ -80,3 +81,11 @@ def load_llama_sentencepiece_tokenizer(model_path:str|Path=""):
     return None
   from sentencepiece import SentencePieceProcessor
   return SentencePieceProcessor(model_file=str(tokenizer_path))
+
+def llama_masked_crossentropy(logits:Tensor, labels:Tensor, ignore_index:int|None=-1) -> tuple[Tensor, Tensor]:
+  loss_mask = (labels != ignore_index) if ignore_index is not None else labels.ones_like(dtype=dtypes.bool)
+  safe_labels = loss_mask.where(labels, 0) if ignore_index is not None else labels
+  targets = safe_labels.to(logits.device).unsqueeze(-1)._one_hot_along_dim(logits.shape[-1], dim=-1) * loss_mask.unsqueeze(-1)
+  unreduced = -(logits.log_softmax() * targets).sum(-1)
+  valid_tokens = loss_mask.sum().cast(dtypes.int64)
+  return unreduced.sum() / valid_tokens, valid_tokens
