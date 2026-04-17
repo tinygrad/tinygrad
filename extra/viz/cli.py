@@ -145,15 +145,22 @@ def main(args) -> None:
   # ** Profiler printer
   elif data["event_type"] == 0:
     kernels:list[dict] = []
-    if args.agg:
+    if args.raw:
+      st0 = data["events"][0]["st"] if data["events"] else 0
+      for k,e in enumerate(data["events"]):
+        et, timestamp = e["dur"] * 1e-6, (e["st"] - st0 + e["dur"]) * 1e-6
+        ptm = colored(time_to_str(et, w=9), "yellow" if et > 0.01 else None)
+        fmt = "  ".join(p+" "*max(0, 14-ansilen(p)) for p in e["fmt"].split("\n"))
+        name = f"*** {args.src[:7]:7s} {k+1:4d} "+e["name"]+" "*(46-ansilen(e["name"]))
+        kernels.append({"name":name, "fmt":f"tm {ptm}@{timestamp*1e3:9.2f}ms"+(f" ({fmt})" if e["fmt"] else ""), "ref":e["ref"]})
+    else:
       agg:dict[str, tuple[float, int, int|None]] = {} # map kernel name to (total time, count and ref)
       total = 0
       for e in data["events"]:
         et = e["dur"] * 1e-6
-        if args.agg:
-          t, c, ref = agg.get(e["name"], (0.0, 0, None))
-          agg[e["name"]] = (t+et, c+1, e["ref"])
-          total += et
+        t, c, ref = agg.get(e["name"], (0.0, 0, None))
+        agg[e["name"]] = (t+et, c+1, e["ref"])
+        total += et
       items = sorted(agg.items(), key=lambda kv:kv[1][0], reverse=True)
       num_rows = args.top
       for name,(t,c,ref) in items[:num_rows]:
@@ -162,14 +169,6 @@ def main(args) -> None:
         other_t = sum(t for _,(t,_,_) in items[num_rows:])
         other_c = sum(c for _,(_,c,_) in items[num_rows:])
         kernels.append({"name":"Other", "fmt":f"{time_to_str(other_t, w=9)} {other_c:7d} {other_t/total*100.0:6.2f}%", "ref":None})
-    else:
-      st0 = data["events"][0]["st"] if data["events"] else 0
-      for k,e in enumerate(data["events"]):
-        et, timestamp = e["dur"] * 1e-6, (e["st"] - st0 + e["dur"]) * 1e-6
-        ptm = colored(time_to_str(et, w=9), "yellow" if et > 0.01 else None)
-        fmt = "  ".join(p+" "*max(0, 14-ansilen(p)) for p in e["fmt"].split("\n"))
-        name = f"*** {args.src[:7]:7s} {k+1:4d} "+e["name"]+" "*(46-ansilen(e["name"]))
-        kernels.append({"name":name, "fmt":f"tm {ptm}@{timestamp*1e3:9.2f}ms"+(f" ({fmt})" if e["fmt"] else ""), "ref":e["ref"]})
     for k in kernels:
       print(f"{fmt_colored(k['name'])}{' ' * max(0, 36 - ansilen(k['name']))} {k['fmt']}")
       if k["ref"] is not None:
@@ -186,7 +185,7 @@ def get_arg_parser() -> argparse.ArgumentParser:
   g_opts.add_argument("-s", "--src", type=str, default=None, metavar="NAME", help="Select a data source (default: list all sources)")
   g_opts.add_argument("-i", "--item", type=str, default=None, metavar="NAME", help="Select an item within the source (default: list all items)")
   g_opts.add_argument("--top", type=int, default=20, metavar="COUNT", help="Number of top rows to print (default: 20, set -1 to print all)")
-  g_mode.add_argument("-a", "--agg", action="store_true", help="Aggregate output")
+  g_mode.add_argument("--raw", action="store_true", help="Get the raw list of kernels that ran (default: aggregate by kernel name)")
   g_opts.add_argument("--profile-path", type=pathlib.Path, metavar="PATH", help="Path to profile.pkl (optional file, default: latest profile)",
                       default=pathlib.Path(temp("profile.pkl", append_user=True)))
   g_opts.add_argument("--rewrites-path", type=pathlib.Path, metavar="PATH", help="Path to rewrites.pkl (optional file, default: latest rewrites)",
