@@ -2,8 +2,8 @@ from typing import cast, Callable, Iterator
 import time, pprint, random, itertools, math, contextlib
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import all_same, colored, DEBUG, GlobalCounters, ansilen, NOOPT, all_int, Metadata, TRACEMETA, TracingKey
-from tinygrad.helpers import BEAM, DEVECTORIZE, size_to_str, time_to_str, VALIDATE_WITH_CPU, cpu_profile, PROFILE, ProfilePointEvent, cpu_events, prod, unwrap
-from tinygrad.helpers import EMULATED_DTYPES
+from tinygrad.helpers import BEAM, DEVECTORIZE, size_to_str, time_to_str, VALIDATE_WITH_CPU, cpu_profile, PROFILE, ProfilePointEvent, cpu_events
+from tinygrad.helpers import prod, unwrap, EMULATED_DTYPES
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer, buffers, graph_rewrite
 from tinygrad.device import Device, Buffer, MultiBuffer
 from tinygrad.renderer import ProgramSpec, Estimates
@@ -221,10 +221,10 @@ def run_schedule(schedule:list[ExecItem], var_vals:dict[str, int]|None=None, do_
 
 def unwrap_multi(call:UOp) -> Iterator[tuple[list[Buffer], dict[str, int]]]:
   bufs = [b.buffer for b in call.src[1:] if b.op is not Ops.BIND]
-  if not any(isinstance(b, MultiBuffer) for b in bufs): yield bufs, {}
+  if not any(isinstance(b, MultiBuffer) for b in bufs): yield cast(list[Buffer], bufs), {}
   else:
     dnum = next((x.expr for x in call.src[0].variables() if x.expr == '_device_num'), None)
-    for j, per_dev in enumerate(zip(*[b.bufs for b in bufs])): yield list(per_dev), {dnum: j} if dnum else {}
+    for j, per_dev in enumerate(zip(*[cast(MultiBuffer, b).bufs for b in bufs])): yield list(per_dev), {dnum: j} if dnum else {}
 
 pm_add_beam = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.SINK, name="sink"),), name="call", allow_any_len=True),

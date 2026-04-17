@@ -3,18 +3,20 @@ import gc, unittest, time
 from tinygrad import nn, dtypes, Device, Tensor
 from tinygrad.uop.ops import UOp, Ops, GroupOp, UPat, KernelInfo
 from tinygrad.helpers import DEBUG, GlobalCounters, Context
-from tinygrad.engine.realize import CompiledRunner, run_schedule
+from tinygrad.engine.realize import CompiledRunner, run_schedule, run_linear
+from tinygrad.schedule import linear_to_schedule
 
 class KernelCountException(Exception): pass
 def check_schedule(t:Tensor|list[Tensor]|UOp, allowed:int, to_prerealize:list[Tensor]|None=None, filter_sink=True):
   if to_prerealize:
     with Context(DEBUG=0, TRACK_MATCH_STATS=0): Tensor.realize(*to_prerealize)
-  if isinstance(t, Tensor): sched = t.schedule()
-  elif isinstance(t, list) and isinstance(t[0], Tensor): sched = Tensor.schedule(*t)
+  if isinstance(t, Tensor): linear, var_vals = t.linear_with_vars()
+  elif isinstance(t, list) and isinstance(t[0], Tensor): linear, var_vals = Tensor.linear_with_vars(*t)
   else:
     assert isinstance(t, UOp), f"can't schedule {t}"
-    sched = Tensor(t).schedule()
+    linear, var_vals = Tensor(t).linear_with_vars()
   # test lowering all the ExecItems
+  sched = linear_to_schedule(linear)
   for si in sched: si.lower()
   kernel_cnt = len([si for si in sched if isinstance(si.prg, CompiledRunner) or not filter_sink])
   if kernel_cnt != allowed:
@@ -24,7 +26,7 @@ def check_schedule(t:Tensor|list[Tensor]|UOp, allowed:int, to_prerealize:list[Te
         print("kernel", i+1)
         print(s.ast)
     raise KernelCountException(f"{kernel_cnt} != {allowed}")
-  return sched
+  return linear, var_vals
 
 def _realize_weights(m):
   for p in nn.state.get_parameters(m): p.realize()
@@ -74,12 +76,12 @@ class TestBufferUOp(unittest.TestCase):
 
   def test_const_does_not_realize(self):
     a = Tensor(1)
-    run_schedule(check_schedule(a, 0))
+    run_linear(*check_schedule(a, 0))
     self.assertIsNone(a.uop.base.realized)
 
   def test_var_does_not_realize(self):
     a = Tensor(UOp.variable("a", 0, 10).bind(1))
-    run_schedule(check_schedule(a, 0))
+    run_linear(*check_schedule(a, 0))
     self.assertIsNone(a.uop.base.realized)
 
   def test_unused_var_not_in_var_vals(self):
@@ -377,8 +379,8 @@ class TestSchedule(unittest.TestCase):
     r0 = x.mean(axis=0, keepdim=True)
     r1 = (x - r0).sum(axis=0).div(2)
     out = r0 + r1
-    schedule = check_schedule(out, 2)
-    reduceops = [x for si in schedule for x in si.ast.toposort() if x.op in {Ops.REDUCE_AXIS, Ops.REDUCE}]
+    linear, _ = check_schedule(out, 2)
+    reduceops = [x for si in linear.src for x in si.src[0].toposort() if x.op in {Ops.REDUCE_AXIS, Ops.REDUCE}]
     assert len(reduceops) == 2
 
   def test_cache_reduce_multiple_children(self):
@@ -388,8 +390,8 @@ class TestSchedule(unittest.TestCase):
     r1 = (x - r0).sum(axis=0).div(2)
     out0 = r0 + y
     out1 = r1 + y
-    schedule = check_schedule([out0, out1], 3)
-    reduceops = [x for si in schedule for x in si.ast.toposort() if x.op in {Ops.REDUCE_AXIS, Ops.REDUCE}]
+    linear, _ = check_schedule([out0, out1], 3)
+    reduceops = [x for si in linear.src for x in si.src[0].toposort() if x.op in {Ops.REDUCE_AXIS, Ops.REDUCE}]
     self.assertEqual(len(reduceops), 2) # why is RANGEIFY different?
 
   def test_dedup_assign(self):
@@ -808,7 +810,7 @@ class TestSchedule(unittest.TestCase):
     Tensor.manual_seed(0)
     x = Tensor.randn(4, 12, 64, 64, requires_grad=True).realize()
     x.softmax().sum().backward()
-    run_schedule(check_schedule(x.grad, 4))
+    run_linear(*check_schedule(x.grad, 4))
 
   def test_scaled_dot_product_attention_fusion(self):
     x, y, z, m = (Tensor.empty(32, 8, 16, 16) for _ in range(4))
@@ -946,7 +948,7 @@ class TestSchedule(unittest.TestCase):
     Tensor.manual_seed(0)
     x = Tensor.randn(10, 20).realize()
     out = x.argmax(1)
-    run_schedule(check_schedule(out, 2))
+    run_linear(*check_schedule(out, 2))
 
   def test_resnet_conv2d(self):
     x = Tensor.empty(1, 8, 32, 32)
@@ -986,15 +988,15 @@ class TestSchedule(unittest.TestCase):
 
   def test_fuse_arange_avg_pool2d_ceil_mode(self):
     x = Tensor.avg_pool2d(Tensor.empty(1,1,6,6), kernel_size=(3,3), padding=1, stride=3, ceil_mode=True)
-    sched = check_schedule(x, 1)
-    self.assertEqual(len([x for x in sched[0].ast.backward_slice_with_self if x.op is Ops.REDUCE]), 1)
+    linear, _ = check_schedule(x, 1)
+    self.assertEqual(len([x for x in linear.src[0].src[0].backward_slice_with_self if x.op is Ops.REDUCE]), 1)
 
   def test_fuse_arange_pad_circular_mode_bw(self):
     x = Tensor.empty(1,1,5,5,5)
     out = x.pad((1,2,3,5,1,2), mode="circular")
     g = out.sum().gradient(x)[0]
-    sched = check_schedule(g, 1)
-    self.assertEqual(len([x for x in sched[0].ast.backward_slice_with_self if x.op is Ops.REDUCE]), 0)
+    linear, _ = check_schedule(g, 1)
+    self.assertEqual(len([x for x in linear.src[0].src[0].backward_slice_with_self if x.op is Ops.REDUCE]), 0)
 
   def test_resnet_block(self):
     with Tensor.train(False):
@@ -1007,7 +1009,7 @@ class TestSchedule(unittest.TestCase):
       out = bn1(conv1(x)).relu()
       out = bn2(conv2(out))
       out = (out + x).relu()
-      run_schedule(check_schedule(out, 2, [conv1.weight, conv2.weight]))
+      run_linear(*check_schedule(out, 2, [conv1.weight, conv2.weight]))
 
 class TestSwizzle(unittest.TestCase):
   def test_softmax_one_kernel(self):
@@ -1217,72 +1219,72 @@ class TestBufferView(unittest.TestCase):
     # simple 1D shrink of a realized buffer should be BUFFER_VIEW, not a copy kernel
     a = Tensor.arange(100).contiguous().realize()
     b = a.shrink(((10, 50),)).contiguous()
-    run_schedule(check_schedule(b, 0))
+    run_linear(*check_schedule(b, 0))
 
   def test_shrink_2d_contiguous_is_buffer_view(self):
     a = Tensor.arange(100).reshape(10,10).contiguous().realize()
     b = a.shrink(((1, 5),None)).contiguous()
-    run_schedule(check_schedule(b, 0))
+    run_linear(*check_schedule(b, 0))
 
   def test_chained_shrink_is_buffer_view(self):
     a = Tensor.arange(1000).contiguous().realize()
     b = a.shrink(((200, 800),)).shrink(((0, 300),)).reshape((30, 10)).shrink(((20, 25), (0, 10))).contiguous()
-    run_schedule(check_schedule(b, 0))
+    run_linear(*check_schedule(b, 0))
 
   def test_shrink_non_shard_axis_is_buffer_view_multi(self):
     # indexing a non-shard axis of a realized sharded tensor should be BUFFER_VIEW on each device, not copy kernels
     # this is the flat_llama pattern: weight[layer_idx] where weight is (n_layers, out, dim) sharded on axis=1
     devices = ("NULL:1", "NULL:2")
     a = Tensor.arange(8*4*10).reshape(8, 4, 10).contiguous().shard(devices, axis=1).realize()
-    run_schedule(check_schedule(a[3].contiguous(), 0))
+    run_linear(*check_schedule(a[3].contiguous(), 0))
 
   def test_shrink_2d_non_shard_axis_multi(self):
     devices = ("NULL:1", "NULL:2")
     a = Tensor.arange(6*4).reshape(6, 4).contiguous().shard(devices, axis=1).realize()
-    run_schedule(check_schedule(a.shrink(((1, 4), None)).contiguous(), 0))
+    run_linear(*check_schedule(a.shrink(((1, 4), None)).contiguous(), 0))
 
   def test_shrink_shard_axis_0_multi(self):
     # shrinking a middle dim is not contiguous per shard, so this needs copy kernels
     devices = ("NULL:1", "NULL:2")
     a = Tensor.arange(4*6*2).reshape(4, 6, 2).contiguous().shard(devices, axis=0).realize()
-    run_schedule(check_schedule(a.shrink((None, (2, 5), None)).contiguous(), 2))
+    run_linear(*check_schedule(a.shrink((None, (2, 5), None)).contiguous(), 2))
 
   def test_reshape_then_shrink_multi(self):
     devices = ("NULL:1", "NULL:2")
     a = Tensor.arange(8*6).reshape(8, 6).contiguous().shard(devices, axis=1).realize()
-    run_schedule(check_schedule(a.reshape(4, 2, 6)[1].contiguous(), 0))
+    run_linear(*check_schedule(a.reshape(4, 2, 6)[1].contiguous(), 0))
 
   def test_permute_then_shrink_multi(self):
     # permute makes per-shard view non-contiguous, needs copy kernels
     devices = ("NULL:1", "NULL:2")
     a = Tensor.arange(4*6*2).reshape(4, 6, 2).contiguous().shard(devices, axis=1).realize()
-    run_schedule(check_schedule(a.permute(1, 0, 2).shrink(((0, 6), (1, 3), None)).contiguous(), 2))
+    run_linear(*check_schedule(a.permute(1, 0, 2).shrink(((0, 6), (1, 3), None)).contiguous(), 2))
 
   def test_multi_buffer_view_4_devices(self):
     devices = tuple(f"NULL:{i}" for i in range(4))
     a = Tensor.arange(8*12).reshape(8, 12).contiguous().shard(devices, axis=1).realize()
-    run_schedule(check_schedule(a[5].contiguous(), 0))
+    run_linear(*check_schedule(a[5].contiguous(), 0))
 
   def test_chained_shrink_multi(self):
     devices = ("NULL:1", "NULL:2")
     a = Tensor.arange(10*8).reshape(10, 8).contiguous().shard(devices, axis=1).realize()
-    run_schedule(check_schedule(a.shrink(((2, 8), None)).shrink(((1, 4), None)).contiguous(), 0))
+    run_linear(*check_schedule(a.shrink(((2, 8), None)).shrink(((1, 4), None)).contiguous(), 0))
 
   # negative tests: these should NOT become BUFFER_VIEW (non-contiguous per shard)
   def test_expand_multi_not_buffer_view(self):
     devices = ("NULL:1", "NULL:2")
     a = Tensor.arange(4*2).reshape(4, 1, 2).contiguous().shard(devices, axis=2).realize()
-    run_schedule(check_schedule(a.expand(4, 3, 2).contiguous(), 2))
+    run_linear(*check_schedule(a.expand(4, 3, 2).contiguous(), 2))
 
   def test_pad_multi_not_buffer_view(self):
     devices = ("NULL:1", "NULL:2")
     a = Tensor.arange(4*2).reshape(4, 2).contiguous().shard(devices, axis=1).realize()
-    run_schedule(check_schedule(a.pad(((1, 1), (0, 0))).contiguous(), 2))
+    run_linear(*check_schedule(a.pad(((1, 1), (0, 0))).contiguous(), 2))
 
   def test_flip_multi_not_buffer_view(self):
     devices = ("NULL:1", "NULL:2")
     a = Tensor.arange(4*2).reshape(4, 2).contiguous().shard(devices, axis=1).realize()
-    run_schedule(check_schedule(a.flip(0).contiguous(), 2))
+    run_linear(*check_schedule(a.flip(0).contiguous(), 2))
 
 class TestInvalidTensor(unittest.TestCase):
   def test_full_invalid_is_zero_kernels(self):
