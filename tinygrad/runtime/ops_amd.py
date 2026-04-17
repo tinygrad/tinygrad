@@ -941,12 +941,7 @@ class USBIface(PCIIface):
 
   def sleep(self, timeout): pass
 
-def mock_iface(iface):
-  def __init__(self, dev, dev_id):
-    from test.mockgpu.mockgpu import register_driver
-    register_driver(f"{iface.__name__[:-5]}+AMD")
-    iface.__init__(self, dev, dev_id)
-  return type(f"MOCK{iface.__name__}", (iface,), {"__init__": __init__})
+def mock_iface(iface): return type(f"MOCK{iface.__name__}", (iface,), {})
 
 class AMDDevice(HCQCompiled):
   def is_am(self) -> bool: return isinstance(self.iface, (PCIIface, USBIface))

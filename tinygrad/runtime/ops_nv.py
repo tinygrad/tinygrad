@@ -576,11 +576,7 @@ class PCIIface(PCIIfaceBase):
     for _ in self.dev_impl.gsp.stat_q.read_resp(): pass
     if self.dev_impl.is_err_state: raise RuntimeError("Device fault detected")
 
-class MOCKNVKIface(NVKIface):
-  def __init__(self, dev, dev_id):
-    from test.mockgpu.mockgpu import register_driver
-    register_driver("NVK+NV")
-    super().__init__(dev, dev_id)
+class MOCKNVKIface(NVKIface): pass
 
 class NVDevice(HCQCompiled[NVSignal]):
   def is_nvd(self) -> bool: return isinstance(self.iface, PCIIface)

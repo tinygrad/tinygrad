@@ -1,4 +1,5 @@
 import ctypes, ctypes.util, time, os, builtins, fcntl
+from tinygrad.helpers import DEV
 from tinygrad.runtime.support.hcq import FileIOInterface
 from test.mockgpu.nv.nvdriver import NVDriver
 from test.mockgpu.amd.amddriver import AMDDriver
@@ -10,10 +11,8 @@ libc = ctypes.CDLL(ctypes.util.find_library("c"))
 libc.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long]
 libc.mmap.restype = ctypes.c_void_p
 
-drivers = []
-def register_driver(name):
-  drv_cls = {"PCI+AMD": AMDriver, "KFD+AMD": AMDDriver, "USB+AMD": AMUSBDriver, "NVK+NV": NVDriver}.get(name)
-  if not any(isinstance(drv, drv_cls) for drv in drivers): drivers.append(drv_cls())
+drivers = [cls() for t in DEV.value if (cls:={"MOCKPCI+AMD": AMDriver, "MOCKKFD+AMD": AMDDriver, "MOCKUSB+AMD": AMUSBDriver,
+                                              "MOCKNVK+NV": NVDriver}.get(f"{t.interface}+{t.device}"))]
 tracked_fds = {}
 
 original_memoryview = builtins.memoryview
