@@ -144,8 +144,7 @@ def main(args) -> None:
 
   # ** Profiler printer
   elif data["event_type"] == 0:
-    kernels:list[dict] = []
-    if args.top:
+    def produce_top_kernelss() -> Iterator[dict]:
       agg:dict[str, tuple[float, int, int|None]] = {} # map kernel name to (total time, count and ref)
       total = 0
       for e in data["events"]:
@@ -156,20 +155,20 @@ def main(args) -> None:
       items = sorted(agg.items(), key=lambda kv:kv[1][0], reverse=True)
       num_rows = len(items) if args.top < 0 else args.top
       for name,(t,c,ref) in items[:num_rows]:
-        kernels.append({"name":name, "fmt":f"{time_to_str(t, w=9)} {c:7d} {t/total*100.0:6.2f}%", "ref":ref})
+        yield {"name":name, "fmt":f"{time_to_str(t, w=9)} {c:7d} {t/total*100.0:6.2f}%", "ref":ref}
       if num_rows > 0 and items[num_rows:]:
         other_t = sum(t for _,(t,_,_) in items[num_rows:])
         other_c = sum(c for _,(_,c,_) in items[num_rows:])
-        kernels.append({"name":"Other", "fmt":f"{time_to_str(other_t, w=9)} {other_c:7d} {other_t/total*100.0:6.2f}%", "ref":None})
-    else:
+        yield {"name":"Other", "fmt":f"{time_to_str(other_t, w=9)} {other_c:7d} {other_t/total*100.0:6.2f}%", "ref":None}
+    def produce_all_kernels() -> Iterator[dict]:
       st0 = data["events"][0]["st"] if data["events"] else 0
       for k,e in enumerate(data["events"]):
         et, timestamp = e["dur"] * 1e-6, (e["st"] - st0 + e["dur"]) * 1e-6
         ptm = colored(time_to_str(et, w=9), "yellow" if et > 0.01 else None)
         fmt_str = "  ".join(p+" "*max(0, 14-ansilen(p)) for p in e["fmt"].split("\n"))
         name = f"*** {args.src[:7]:7s} {k+1:4d} "+e["name"]+" "*(46-ansilen(e["name"]))
-        kernels.append({"name":name, "fmt":f"tm {ptm}/{timestamp*1e3:9.2f}ms"+(f" ({fmt_str})" if e["fmt"] else ""), "ref":e["ref"]})
-    for k in kernels:
+        yield {"name":name, "fmt":f"tm {ptm}/{timestamp*1e3:9.2f}ms"+(f" ({fmt_str})" if e["fmt"] else ""), "ref":e["ref"]}
+    for k in (produce_top_kernelss if args.top else produce_all_kernels)():
       print(f"{fmt_colored(k['name'])}{' ' * max(0, 36 - ansilen(k['name']))} {k['fmt']}")
       if k["ref"] is not None:
         steps = rewrites[viz_data.ctxs[k["ref"]]["name"]]
