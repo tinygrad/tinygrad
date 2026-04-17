@@ -110,11 +110,8 @@ class FlatTransformer:
 
     if FP8:
       def _amax(): return Tensor.full((), FP8_MAX).contiguous().requires_grad_(False)
-      def _inv_scale(): return Tensor.full((), 1.0).contiguous().requires_grad_(False)
       names = ["xqkv", "xo", "x1", "x2", "x3"]
       self._fp8_amax = {name: [_amax() for _ in range(n_layers)] for name in names}
-      self._fp8_amax["xout"] = [_amax()]
-      self._fp8_amax["wout"] = [_amax()]
       # per-weight inv_scale: single (n_layers,) float32 tensor per weight (kernel reads float* pointers)
       w_names = ["wqkv", "wo", "w1", "w2", "w3"]
       self._fp8_inv_scale = {}

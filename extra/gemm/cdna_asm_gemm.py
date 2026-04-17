@@ -6,7 +6,7 @@ from tinygrad.renderer import Estimates
 from tinygrad.helpers import getenv, all_same, DEBUG
 from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
 from tinygrad.runtime.autogen.amd.cdna.ins import *
-from examples.mlperf.models.flat_llama import FP8_DTYPE, FP8_GRAD_DTYPE, matmul, quantize_fp8
+from examples.mlperf.models.flat_llama import FP8_DTYPE, FP8_GRAD_DTYPE, quantize_fp8
 
 # ** CDNA4 assembly gemm
 
@@ -2698,7 +2698,7 @@ def custom_uop_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
 
 def custom_gemm_bw(gradient:UOp, kernel:UOp):
   inputs = kernel.src[1:]
-  # fp8 scaled gemm has 4 inputs (out, a, b, scale), others have 3 (out, a, b)
+  # fp8 scaled gemm has 5 inputs (out, a, b, x_scale, w_scale), others have 3 (out, a, b)
   if len(inputs) == 5:
     out, a, b, s_x, s_w = inputs
     a_t, b_t, g_t = Tensor(a, device=a.device), Tensor(b, device=a.device), Tensor(gradient, device=a.device)
@@ -2725,7 +2725,7 @@ def custom_gemm_bw(gradient:UOp, kernel:UOp):
 
 # ** main gemm function
 
-def asm_gemm(a:Tensor, b:Tensor, combined_scale:Tensor|None=None, x_scale:Tensor|None=None, w_scale:Tensor|None=None) -> Tensor:
+def asm_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, w_scale:Tensor|None=None) -> Tensor:
   assert can_use_asm_gemm(a, b), f"{counters['todos'][-1]}"
   counters["used"] += 1
   unfold_batch = a.ndim == 3 and isinstance(a.device, tuple) and a.uop.axis == 2 and b.uop.axis == 0
@@ -2757,15 +2757,11 @@ def asm_gemm(a:Tensor, b:Tensor, combined_scale:Tensor|None=None, x_scale:Tensor
   renderer = Device[dname:=(a.device[0] if is_multi else a.device)].renderer
   dname, arch = dname.split(":")[0], renderer.target.arch
   if arch.startswith("gfx950") and getenv("USE_ASM", 1):
-    # fp8 gemm computes a@b.T, with optional combined scale applied inside kernel before bf16 store
+    # fp8 gemm computes a@b.T, kernel multiplies output by x_scale * w_scale before bf16 store
     if a.dtype == FP8_DTYPE:
       _one = lambda: Tensor(1.0, dtype=dtypes.float, device=a.device)
-      if x_scale is not None and w_scale is not None:
-        xs, ws = x_scale, w_scale
-      elif combined_scale is not None:
-        xs, ws = combined_scale, _one()
-      else:
-        xs, ws = _one(), _one()
+      xs = x_scale if x_scale is not None else _one()
+      ws = w_scale if w_scale is not None else _one()
       out = Tensor.custom_kernel(out, a, b.T, xs, ws, fxn=functools.partial(custom_hk_fp8_gemm, dname=dname), grad_fxn=custom_gemm_bw)[0]
     else:
       out = Tensor.custom_kernel(out, a, b, fxn=functools.partial(custom_asm_gemm, dname=dname), grad_fxn=custom_gemm_bw)[0]
