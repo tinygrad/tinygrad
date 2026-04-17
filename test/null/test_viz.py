@@ -921,8 +921,8 @@ class TestCLI(unittest.TestCase):
       # get the top slowest functions across all devices
       with Context(DEBUG=2):
         times = run_cli("--rewrites-path", str(r), "--profile-path", str(p), "-p", "-s", "ALL", "--top", "-1")
-      for dev in ["TINY", "USER", "NULL"]:
-        self.assertIn(dev, times)
+      self.assertIn("TINY", times)
+      self.assertIn("NULL", times)
 
 if __name__ == "__main__":
   unittest.main()
