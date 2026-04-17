@@ -1,4 +1,4 @@
-import os
+import json, os
 os.environ["WQKV"] = "1"
 
 import sys, tempfile, types
@@ -6,8 +6,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from tinygrad import Tensor
-from tinygrad.nn.state import get_state_dict, safe_save
+from tinygrad import Tensor, nn
+from tinygrad.helpers import getenv as cached_getenv
+from tinygrad.nn.state import get_state_dict, safe_load, safe_save
 
 if "tqdm" not in sys.modules:
   class _TqdmStub:
@@ -17,14 +18,43 @@ if "tqdm" not in sys.modules:
   sys.modules["tqdm"] = types.SimpleNamespace(tqdm=_TqdmStub())
 
 from examples.mlperf.llama import llama_benchmark_config
-from examples.mlperf.model_train import _llama_checkpoint_path, _llama_configure_trainable_params, _llama_load_model_checkpoint, _llama_sequences_seen
+from examples.mlperf.model_train import _llama_checkpoint_path, _llama_configure_trainable_params, _llama_load_model_checkpoint, _llama_sequences_seen, train_llama2_70b_lora
 from examples.mlperf.models.flat_llama import FlatTransformer
+from extra.models.llama import Transformer
+
+
+def split_attention_state(ref:Transformer):
+  state = nn.state.get_state_dict(ref)
+  split_state = {
+    "tok_embeddings.weight": state["tok_embeddings.weight"],
+    "norm.weight": state["norm.weight"],
+    "output.weight": state["output.weight"],
+  }
+  for i, layer in enumerate(ref.layers):
+    attn = layer.attention
+    q_dim = attn.n_heads * attn.head_dim
+    kv_dim = attn.n_kv_heads * attn.head_dim
+    wq, wk, wv = state[f"layers.{i}.attention.wqkv.weight"].split([q_dim, kv_dim, kv_dim], dim=0)
+    split_state[f"layers.{i}.attention.wq.weight"] = wq
+    split_state[f"layers.{i}.attention.wk.weight"] = wk
+    split_state[f"layers.{i}.attention.wv.weight"] = wv
+    split_state[f"layers.{i}.attention.wo.weight"] = state[f"layers.{i}.attention.wo.weight"]
+    split_state[f"layers.{i}.feed_forward.w1.weight"] = state[f"layers.{i}.feed_forward.w1.weight"]
+    split_state[f"layers.{i}.feed_forward.w2.weight"] = state[f"layers.{i}.feed_forward.w2.weight"]
+    split_state[f"layers.{i}.feed_forward.w3.weight"] = state[f"layers.{i}.feed_forward.w3.weight"]
+    split_state[f"layers.{i}.attention_norm.weight"] = state[f"layers.{i}.attention_norm.weight"]
+    split_state[f"layers.{i}.ffn_norm.weight"] = state[f"layers.{i}.ffn_norm.weight"]
+  return split_state
 
 
 class TestLlamaLoRATrainWiring(unittest.TestCase):
   def setUp(self):
+    cached_getenv.cache_clear()
     Tensor.manual_seed(42)
     self.params = dict(dim=128, hidden_dim=256, n_heads=4, n_kv_heads=2, n_layers=2, norm_eps=1e-5, vocab_size=1024, rope_theta=10000, max_context=64)
+
+  def tearDown(self):
+    cached_getenv.cache_clear()
 
   def test_adapter_only_trainables(self):
     model = FlatTransformer(**self.params, lora_rank=8, lora_alpha=16, lora_dropout=0.0)
@@ -78,6 +108,62 @@ class TestLlamaLoRATrainWiring(unittest.TestCase):
   def test_checkpoint_path_uses_benchmark_prefix(self):
     self.assertEqual(_llama_checkpoint_path("17", "llama3"), Path("./ckpts/llama3_17.safe"))
     self.assertEqual(_llama_checkpoint_path("17", "llama2_70b_lora", "_state.safe"), Path("./ckpts/llama2_70b_lora_17_state.safe"))
+
+  def test_llama2_70b_lora_training_writes_adapter_only_checkpoints(self):
+    tiny_params = dict(dim=128, hidden_dim=256, n_heads=4, n_kv_heads=2, n_layers=2, norm_eps=1e-5, vocab_size=1024, rope_theta=10000)
+    spec = llama_benchmark_config("llama2_70b_lora")
+    spec = {**spec, "model_params": tiny_params, "real_vocab_size": tiny_params["vocab_size"], "lora_rank": 4, "lora_alpha": 8, "lora_dropout": 0.0}
+
+    with tempfile.TemporaryDirectory(prefix="llama2-lora-train-") as tmpdir:
+      tmpdir = Path(tmpdir)
+      dataset_dir = tmpdir / "dataset"
+      dataset_dir.mkdir()
+      (dataset_dir / "train.jsonl").write_text("".join(json.dumps(row) + "\n" for row in [
+        {"input_ids": [1, 2, 3, 4, 5], "labels": [1, 2, 3, 4, 5]},
+        {"input_ids": [6, 7, 8, 9, 10], "labels": [6, 7, 8, 9, 10]},
+      ]))
+      (dataset_dir / "validation.jsonl").write_text(json.dumps({"input_ids": [1, 2, 3, 4, 5], "labels": [-1, -1, 3, 4, -1]}) + "\n")
+
+      base_model = Transformer(**tiny_params, disable_kv_cache=True)
+      base_path = tmpdir / "base.safetensors"
+      safe_save(split_attention_state(base_model), base_path.as_posix())
+
+      env = {
+        "BS": "1",
+        "CKPT": "1",
+        "DATASET_PATH": dataset_dir.as_posix(),
+        "END_LR": "0.0",
+        "EVAL_BS": "1",
+        "EVAL_FREQ": "1",
+        "EVAL_TARGET": "0.0",
+        "GRADIENT_ACC_STEPS": "1",
+        "LLAMA_LORA_ALPHA": "8",
+        "LLAMA_LORA_DROPOUT": "0",
+        "LLAMA_LORA_RANK": "4",
+        "LR": "1e-3",
+        "MAX_STEPS": "1",
+        "MODEL_PATH": base_path.as_posix(),
+        "SEQLEN": "5",
+        "WARMUP_STEPS": "0",
+      }
+      original_config = llama_benchmark_config
+      with patch.dict(os.environ, env, clear=False), patch("examples.mlperf.llama.llama_benchmark_config",
+           side_effect=lambda model_name, small=False: spec if model_name == "llama2_70b_lora" else original_config(model_name, small=small)):
+        cwd = os.getcwd()
+        os.chdir(tmpdir)
+        try:
+          train_llama2_70b_lora()
+        finally:
+          os.chdir(cwd)
+
+      model_ckpt = safe_load(tmpdir / "ckpts" / "llama2_70b_lora_1.safe")
+      trainer_ckpt = safe_load(tmpdir / "ckpts" / "llama2_70b_lora_1_state.safe")
+      self.assertSetEqual(set(model_ckpt.keys()), {"wqkv_lora_a", "wqkv_lora_b", "wo_lora_a", "wo_lora_b"})
+      self.assertNotIn("model.wqkv", trainer_ckpt)
+      self.assertTrue(any(k.startswith("optimizer.") for k in trainer_ckpt))
+      self.assertTrue(any(k.startswith("scheduler.") for k in trainer_ckpt))
+      self.assertSetEqual({k for k in trainer_ckpt if k.startswith("model.")},
+                          {"model.wqkv_lora_a", "model.wqkv_lora_b", "model.wo_lora_a", "model.wo_lora_b"})
 
 
 if __name__ == "__main__":

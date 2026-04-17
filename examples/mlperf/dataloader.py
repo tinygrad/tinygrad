@@ -783,8 +783,16 @@ def _llama2_70b_lora_files(dataset_ref:str|Path, val:bool=True) -> list[Path]:
   if "*" in str(dataset_ref):
     return sorted(dataset_path.parent.glob(dataset_path.name))
   if dataset_path.is_dir():
-    pattern = "validation-*.parquet" if val else "train-*.parquet"
-    return sorted(dataset_path.glob(pattern))
+    prefix = "validation" if val else "train"
+    files = sorted([
+      *dataset_path.glob(f"{prefix}-*.parquet"),
+      *dataset_path.glob(f"{prefix}-*.jsonl"),
+      *dataset_path.glob(f"{prefix}-*.json"),
+      *dataset_path.glob(f"{prefix}.parquet"),
+      *dataset_path.glob(f"{prefix}.jsonl"),
+      *dataset_path.glob(f"{prefix}.json"),
+    ])
+    if files: return files
   return [dataset_path]
 
 
@@ -813,7 +821,7 @@ def _llama2_70b_lora_records(dataset_ref:str|Path, val:bool=True) -> Iterator[di
       raise ValueError(f"unsupported llama2_70b_lora dataset file {fn}")
 
 
-def _llama2_70b_lora_tokens(record:dict, tokenizer=None) -> tuple[list[int], list[int]]:
+def _llama2_70b_lora_tokens(record:dict, tokenizer=None, *, val:bool=True) -> tuple[list[int], list[int]]:
   if "input_ids" in record:
     input_ids = list(record["input_ids"])
     labels = list(record.get("labels", input_ids))
@@ -821,17 +829,26 @@ def _llama2_70b_lora_tokens(record:dict, tokenizer=None) -> tuple[list[int], lis
   if tokenizer is None:
     raise ValueError("llama2_70b_lora raw input/output records require a tokenizer")
   from examples.mlperf.llama import llama2_70b_lora_encode_sample
-  return llama2_70b_lora_encode_sample(tokenizer, record["input"], record["output"])
+  return llama2_70b_lora_encode_sample(tokenizer, record["input"], record["output"], mask_prompt_labels=val)
 
+def count_llama2_70b_lora_sequences(dataset_ref:str|Path, seqlen:int, tokenizer=None, val:bool=True) -> int:
+  buffered_tokens, packed_sequences = 0, 0
+  for record in _llama2_70b_lora_records(dataset_ref, val=val):
+    input_ids, _ = _llama2_70b_lora_tokens(record, tokenizer, val=val)
+    if len(input_ids) > seqlen: continue
+    buffered_tokens += len(input_ids)
+    packed_sequences += buffered_tokens // seqlen
+    buffered_tokens %= seqlen
+  return packed_sequences
 
-def iterate_llama2_70b_lora_dataset(dataset_ref:str|Path, bs:int, seqlen:int, tokenizer=None, val:bool=True):
+def iterate_llama2_70b_lora_dataset(dataset_ref:str|Path, bs:int, seqlen:int, tokenizer=None, val:bool=True, drop_last:bool=False):
   input_buffer:list[int] = []
   label_buffer:list[int] = []
   batch_inputs:list[list[int]] = []
   batch_labels:list[list[int]] = []
 
   for record in _llama2_70b_lora_records(dataset_ref, val=val):
-    input_ids, labels = _llama2_70b_lora_tokens(record, tokenizer)
+    input_ids, labels = _llama2_70b_lora_tokens(record, tokenizer, val=val)
     if len(input_ids) != len(labels): raise ValueError("input_ids and labels must have the same length")
     if len(input_ids) > seqlen: continue
     input_buffer.extend(input_ids)
@@ -845,7 +862,7 @@ def iterate_llama2_70b_lora_dataset(dataset_ref:str|Path, bs:int, seqlen:int, to
         yield Tensor(np.array(batch_inputs, dtype=np.int32), device="NPY"), Tensor(np.array(batch_labels, dtype=np.int32), device="NPY")
         batch_inputs, batch_labels = [], []
 
-  if batch_inputs:
+  if batch_inputs and not drop_last:
     yield Tensor(np.array(batch_inputs, dtype=np.int32), device="NPY"), Tensor(np.array(batch_labels, dtype=np.int32), device="NPY")
 
 if __name__ == "__main__":

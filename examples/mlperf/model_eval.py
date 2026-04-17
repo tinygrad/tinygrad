@@ -250,7 +250,7 @@ def eval_llama3():
 def eval_llama2_70b_lora():
   from tinygrad.helpers import tqdm
   from examples.mlperf.dataloader import iterate_llama2_70b_lora_dataset
-  from examples.mlperf.llama import llama_benchmark_config, llama_model_state_dict
+  from examples.mlperf.llama import llama_benchmark_config, llama_model_state_dict, load_llama_sentencepiece_tokenizer
   from examples.mlperf.models.flat_llama import FlatTransformer
 
   BS = getenv("BS", 1)
@@ -270,15 +270,7 @@ def eval_llama2_70b_lora():
   if ADAPTER_CKPT:
     load_state_dict(model, llama_model_state_dict(safe_load(ADAPTER_CKPT)), strict=False, consume=True)
 
-  tokenizer = None
-  tokenizer_path = Path(getenv("TOKENIZER_PATH", "")) if getenv("TOKENIZER_PATH", "") else None
-  if tokenizer_path is None and MODEL_PATH:
-    model_root = Path(MODEL_PATH) if Path(MODEL_PATH).is_dir() else Path(MODEL_PATH).parent
-    candidate = model_root / "tokenizer.model"
-    if candidate.exists(): tokenizer_path = candidate
-  if tokenizer_path is not None:
-    from sentencepiece import SentencePieceProcessor
-    tokenizer = SentencePieceProcessor(model_file=str(tokenizer_path))
+  tokenizer = load_llama_sentencepiece_tokenizer(MODEL_PATH)
 
   vocab_mask = Tensor.arange(model.vocab_size).reshape(1, 1, -1) >= benchmark["real_vocab_size"]
 

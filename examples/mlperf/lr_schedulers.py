@@ -25,7 +25,7 @@ class PolynomialDecayWithWarmup(LR_Scheduler):
 
 class CosineAnnealingLRWithWarmup(LR_Scheduler):
   def __init__(self, optimizer:Optimizer, base_lr, end_lr, warmup_steps:int, decay_steps:int):
-    assert warmup_steps > 0 and decay_steps > 0
+    assert warmup_steps >= 0 and decay_steps > 0
     super().__init__(optimizer)
     self.base_lr = base_lr
     self.end_lr = end_lr
@@ -35,8 +35,9 @@ class CosineAnnealingLRWithWarmup(LR_Scheduler):
     self.optimizer.lr.assign(self.get_lr()).realize()
 
   def get_lr(self):
-    warmup_lr = ((self.epoch_counter+1) / self.warmup_steps) * self.base_lr
     decay_lr = self.end_lr + 0.5 * (self.base_lr-self.end_lr) * (1 + (((self.epoch_counter+1-self.warmup_steps)/self.decay_steps) * math.pi).cos())
+    if self.warmup_steps == 0: return decay_lr.cast(self.optimizer.lr.dtype)
+    warmup_lr = ((self.epoch_counter+1) / self.warmup_steps) * self.base_lr
     return (self.epoch_counter < self.warmup_steps).where(warmup_lr, decay_lr).cast(self.optimizer.lr.dtype)
 
 # Reference: https://github.com/mlcommons/training/blob/64b14a9abc74e08779a175abca7d291f8c957632/stable_diffusion/ldm/lr_scheduler.py, Lines 36-97

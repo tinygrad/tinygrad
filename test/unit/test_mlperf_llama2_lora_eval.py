@@ -5,6 +5,7 @@ from unittest.mock import patch
 os.environ["WQKV"] = "1"
 
 from tinygrad import Tensor, nn
+from tinygrad.helpers import getenv as cached_getenv
 from tinygrad.nn.state import safe_save
 
 import examples.mlperf.llama as llama_helpers
@@ -45,6 +46,12 @@ def split_attention_state(ref:Transformer):
 
 
 class TestMLPerfLlama2LoRAEval(unittest.TestCase):
+  def setUp(self):
+    cached_getenv.cache_clear()
+
+  def tearDown(self):
+    cached_getenv.cache_clear()
+
   def test_llama2_70b_lora_encode_masks_prompt_tokens(self):
     tokenizer = FakeTokenizer()
     input_ids, labels = llama_helpers.llama2_70b_lora_encode_sample(tokenizer, "source text", "target summary")

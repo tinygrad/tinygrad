@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Any
 
 from tinygrad.helpers import getenv
@@ -50,11 +51,32 @@ def llama2_70b_lora_prompt(source:str) -> str:
   return f"{LLAMA2_70B_LORA_PROMPT_PREFIX}{source}{LLAMA2_70B_LORA_PROMPT_SUFFIX}"
 
 
-def llama2_70b_lora_encode_sample(tokenizer, source:str, target:str) -> tuple[list[int], list[int]]:
+def llama2_70b_lora_encode_sample(tokenizer, source:str, target:str, *, mask_prompt_labels:bool=True) -> tuple[list[int], list[int]]:
   prompt_tokens = [tokenizer.bos_id(), *tokenizer.encode(llama2_70b_lora_prompt(source))]
   target_tokens = tokenizer.encode(target)
   input_ids = [*prompt_tokens, *target_tokens, tokenizer.eos_id()]
   labels = input_ids.copy()
-  labels[:len(prompt_tokens)] = [-1] * len(prompt_tokens)
-  labels[-1] = -1
+  if mask_prompt_labels:
+    labels[:len(prompt_tokens)] = [-1] * len(prompt_tokens)
+    labels[-1] = -1
   return input_ids, labels
+
+
+def llama_tokenizer_path(model_path:str|Path="") -> Path|None:
+  tokenizer_ref = getenv("TOKENIZER_PATH", "")
+  if tokenizer_ref:
+    return Path(tokenizer_ref)
+  if not model_path:
+    return None
+  model_root = Path(model_path)
+  if not model_root.is_dir():
+    model_root = model_root.parent
+  candidate = model_root / "tokenizer.model"
+  return candidate if candidate.exists() else None
+
+
+def load_llama_sentencepiece_tokenizer(model_path:str|Path=""):
+  if (tokenizer_path := llama_tokenizer_path(model_path)) is None:
+    return None
+  from sentencepiece import SentencePieceProcessor
+  return SentencePieceProcessor(model_file=str(tokenizer_path))
