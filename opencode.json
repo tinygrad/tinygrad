@@ -1,1 +1,27 @@
-{"$schema": "https://opencode.ai/config.json", "formatter": false, "lsp": false}
+{
+  "$schema": "https://opencode.ai/config.json",
+  "formatter": false,
+  "lsp": false,
+  "logLevel": "DEBUG",
+  "provider": {
+    "tinygrad": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Tinygrad (local)",
+      "options": {
+        "baseURL": "http://localhost:8000/v1",
+        "timeout": 900000,
+        "chunkTimeout": 600000
+      },
+      "models": {
+        "qwen3:8b": {
+          "name": "Qwen3 8B (local)",
+          "limit": {
+            "context": 32768,
+            "output": 8192
+          }
+        }
+      }
+    }
+  },
+  "model": "tinygrad/qwen3:8b"
+}
