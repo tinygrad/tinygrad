@@ -1439,58 +1439,6 @@ class Tensor(OpMixin):
 
     return data[:16]
 
-  def _softmax(self, axis, dtype:DTypeLike|None=None) -> tuple[Tensor, Tensor, Tensor]:
-    m = self - self.max(axis=axis, keepdim=True).detach()
-    if dtype is not None: m = m.cast(dtype)
-    e = m.exp()
-    return m, e, e.sum(axis=axis, keepdim=True)
-
-  def softmax(self, axis=-1, dtype:DTypeLike|None=None) -> Tensor:
-    """
-    Applies the softmax function to the tensor along the specified axis.
-
-    Rescales the elements of the tensor such that they lie in the range [0, 1] and sum to 1.
-
-    You can pass in the `axis` keyword argument to control the axis along which the softmax is computed.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    Tensor.manual_seed(42)
-    t = Tensor.randn(2, 3)
-    print(t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.softmax().numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.softmax(axis=0).numpy())
-    ```
-    """
-    _, e, ss = self._softmax(axis, dtype)
-    return e.div(ss)
-
-  def log_softmax(self, axis=-1, dtype:DTypeLike|None=None) -> Tensor:
-    """
-    Applies the log-softmax function to the tensor along the specified axis.
-
-    The log-softmax function is a numerically stable alternative to the softmax function in log space.
-
-    You can pass in the `axis` keyword argument to control the axis along which the log-softmax is computed.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    Tensor.manual_seed(42)
-    t = Tensor.randn(2, 3)
-    print(t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.log_softmax().numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.log_softmax(axis=0).numpy())
-    ```
-    """
-    m, _, ss = self._softmax(axis, dtype)
-    return m - ss.log()
-
   def logcumsumexp(self, axis=0) -> Tensor:
     """
     Computes the log-cumsum-exp of the tensor along the specified axis or axes.
