@@ -11,9 +11,8 @@ libc.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_i
 libc.mmap.restype = ctypes.c_void_p
 
 drivers = []
-def register_driver(iface):
-  drv_cls = {"PCI+AMD": AMDriver, "KFD+AMD": AMDDriver, "USB+AMD": AMUSBDriver,
-             "PCI+NV": NVDriver}.get(f"{type(iface).__name__[4:-5]}+{type(iface.dev).__name__[:-6]}")
+def register_driver(name):
+  drv_cls = {"PCI+AMD": AMDriver, "KFD+AMD": AMDDriver, "USB+AMD": AMUSBDriver, "PCI+NV": NVDriver}.get(name)
   if not any(isinstance(drv, drv_cls) for drv in drivers): drivers.append(drv_cls())
 tracked_fds = {}
 
