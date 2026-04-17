@@ -128,10 +128,10 @@ def main(args) -> None:
       elif args.item == r[0]:
         rows = r[2]["rows"] if len(r) > 2 else [r[:2]]
         cols = r[2]["cols"] if len(r) > 2 else cols
-    data = [[x for x in cols], *[[str(x) for x in r] for r in rows]]
-    widths = [max(len(r[i]) for r in data) for i in range(len(cols))]
+    pmc_data = [[x for x in cols], *[[str(x) for x in r] for r in rows]]
+    widths = [max(len(r[i]) for r in pmc_data) for i in range(len(cols))]
     def fmt(r): return "| "+" | ".join(x+" "*(w-len(x)) for x,w in zip(r, widths))+" |"
-    print(fmt(data[0])+"\n"+fmt(["-"*w for w in widths])+"\n"+("\n".join([fmt(row) for row in data[1:]])))
+    print(fmt(pmc_data[0])+"\n"+fmt(["-"*w for w in widths])+"\n"+("\n".join([fmt(row) for row in pmc_data[1:]])))
 
   # ** Memory printer
   elif data["event_type"] == 1:
@@ -143,34 +143,38 @@ def main(args) -> None:
       print(f"{e['ts']:<10}  {e['event']:<6}  {e.get('key', ''):>8}  {info}")
 
   # ** Profiler printer
-  else:
-    agg:dict[str, tuple[float, int, int|None]] = {}
-    total = 0
-    for e in data.get("events", []):
-      et = e["dur"] * 1e-6
-      # TODO: this shouldn't exist, replace with the DEBUG reconstructor
-      if args.item is not None:
-        if ansistrip(e["name"]) == args.item:
-          ptm = colored(time_to_str(et, w=9), "yellow" if et > 0.01 else None)
-          name = e["name"] + (" " * (46 - ansilen(e["name"])))
-          print(f"{fmt_colored(name)} {ptm}/{et*1e3:9.2f}ms  " + e.get("fmt", "").replace("\n", " | ") + "  ")
-      else:
+  elif data["event_type"] == 0:
+    kernels:list[dict] = []
+    if args.top:
+      agg:dict[str, tuple[float, int, int|None]] = {} # map kernel name to (total time, count and ref)
+      total = 0
+      for e in data["events"]:
+        et = e["dur"] * 1e-6
         t, c, ref = agg.get(e["name"], (0.0, 0, None))
         agg[e["name"]] = (t+et, c+1, e["ref"])
         total += et
-    if agg and total > 0:
       items = sorted(agg.items(), key=lambda kv:kv[1][0], reverse=True)
-      num_rows = args.top
+      num_rows = len(items) if args.top < 0 else args.top
       for name,(t,c,ref) in items[:num_rows]:
-        print(f"{fmt_colored(name)}{' ' * max(0, 36 - ansilen(name))} {time_to_str(t, w=9)} {c:7d} {t/total*100.0:6.2f}%")
-        if ref is not None:
-          steps = rewrites[viz_data.ctxs[ref]["name"]]
-          if DEBUG >= 3 and (ast_step:=steps.get("View Base AST")) is not None: print_step(ast_step)
-          if DEBUG >= 4: print_step(steps["View Source"])
+        kernels.append({"name":name, "fmt":f"{time_to_str(t, w=9)} {c:7d} {t/total*100.0:6.2f}%", "ref":ref})
       if num_rows > 0 and items[num_rows:]:
         other_t = sum(t for _,(t,_,_) in items[num_rows:])
         other_c = sum(c for _,(_,c,_) in items[num_rows:])
-        print(f"{'Other':<36} {time_to_str(other_t, w=9)} {other_c:7d} {other_t/total*100.0:6.2f}%")
+        kernels.append({"name":"Other", "fmt":f"{time_to_str(other_t, w=9)} {other_c:7d} {other_t/total*100.0:6.2f}%", "ref":None})
+    else:
+      st0 = data["events"][0]["st"] if data["events"] else 0
+      for k,e in enumerate(data["events"]):
+        et, timestamp = e["dur"] * 1e-6, (e["st"] - st0 + e["dur"]) * 1e-6
+        ptm = colored(time_to_str(et, w=9), "yellow" if et > 0.01 else None)
+        fmt_str = "  ".join(p+" "*max(0, 14-ansilen(p)) for p in e["fmt"].split("\n"))
+        name = f"*** {args.src[:7]:7s} {k+1:4d} "+e["name"]+" "*(46-ansilen(e["name"]))
+        kernels.append({"name":name, "fmt":f"tm {ptm}/{timestamp*1e3:9.2f}ms"+(f" ({fmt_str})" if e["fmt"] else ""), "ref":e["ref"]})
+    for k in kernels:
+      print(f"{fmt_colored(k['name'])}{' ' * max(0, 36 - ansilen(k['name']))} {k['fmt']}")
+      if k["ref"] is not None:
+        steps = rewrites[viz_data.ctxs[k["ref"]]["name"]]
+        if DEBUG >= 3 and (ast_step:=steps.get("View Base AST")) is not None: print_step(ast_step)
+        if DEBUG >= 4: print_step(steps["View Source"])
 
 def get_arg_parser() -> argparse.ArgumentParser:
   parser = argparse.ArgumentParser(add_help=False)
@@ -180,7 +184,8 @@ def get_arg_parser() -> argparse.ArgumentParser:
   g_opts = parser.add_argument_group("optional args")
   g_opts.add_argument("-s", "--src", type=str, default=None, metavar="NAME", help="Select a data source (default: list all sources)")
   g_opts.add_argument("-i", "--item", type=str, default=None, metavar="NAME", help="Select an item within the source (default: list all items)")
-  g_opts.add_argument("--top", type=int, default=20, metavar="COUNT", help="Number of top rows to print (default: 20, set -1 to print all)")
+  g_opts.add_argument("-t", "--top", type=int, default=None, metavar="COUNT",
+                      help="Number of top kernels to aggregate (default: do not aggregate, set -1 to aggregate all)")
   g_opts.add_argument("--profile-path", type=pathlib.Path, metavar="PATH", help="Path to profile.pkl (optional file, default: latest profile)",
                       default=pathlib.Path(temp("profile.pkl", append_user=True)))
   g_opts.add_argument("--rewrites-path", type=pathlib.Path, metavar="PATH", help="Path to rewrites.pkl (optional file, default: latest rewrites)",

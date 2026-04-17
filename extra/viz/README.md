@@ -17,8 +17,8 @@ Use `extra/viz/cli.py --profile` to list all sources.
 # View top 40 slowest kernels and their AST (DEBUG=4 to see source code)
 DEBUG=3 extra/viz/cli.py --profile -s AMD --top 40
 
-# View all runs of a kernel
-extra/viz/cli.py --profile -s AMD -i E_3 | head 4`
+# Reconstruct DEBUG=3 output exactly as the runtime.
+DEBUG=3 extra/viz/cli.py --profile -s AMD
 ```
 
 ## Inspect codegen and PatternMatcher
