@@ -166,7 +166,7 @@ class TestMultiConstFolding(unittest.TestCase):
 class TestThreefryConstFolding(unittest.TestCase):
   def test_threefry(self):
     x = UOp.const(dtypes.uint64, 5, Device.DEFAULT, ()).threefry(UOp.const(dtypes.uint64, 10, Device.DEFAULT, ()))
-    np.testing.assert_equal(Tensor(x).numpy(), 18148657672717807409)
+    self.assertIs(x.simplify().op, Ops.CONST)
 
 class TestTautologicalCompare(unittest.TestCase):
   # without const folding, these would have triggered -Wtautological-compare in clang
