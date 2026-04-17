@@ -904,8 +904,8 @@ class TestCLI(unittest.TestCase):
       b.realize()
     # save trace to disk for CLI to consume it
     with tempfile.TemporaryDirectory() as tmpdir:
-      (r := Path(tmpdir)/"rewrites.pkl").write_bytes(pickle.dumps(viz.data.trace))
-      (p := Path(tmpdir)/"profile.pkl").write_bytes(pickle.dumps(cpu_events))
+      (r:=Path(tmpdir)/"rewrites.pkl").write_bytes(pickle.dumps(viz.data.trace))
+      (p:=Path(tmpdir)/"profile.pkl").write_bytes(pickle.dumps(cpu_events))
       with Context(DEBUG=4):
         kernels = run_cli("--rewrites-path", str(r), "--profile-path", str(p), "-p", "-s", "NULL")
       self.assertIn("void custom_empty", kernels)

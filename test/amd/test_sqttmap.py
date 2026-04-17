@@ -1,5 +1,5 @@
 # test to compare every packet with the rocprof decoder
-import unittest, pickle, contextlib, io
+import unittest, pickle
 from typing import Iterator
 from pathlib import Path
 from tinygrad.helpers import DEBUG, getenv, temp, ansistrip
