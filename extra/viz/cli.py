@@ -165,8 +165,8 @@ def main(args) -> None:
         print(f"{fmt_colored(name)}{' ' * max(0, 36 - ansilen(name))} {time_to_str(t, w=9)} {c:7d} {t/total*100.0:6.2f}%")
         if ref is not None:
           steps = rewrites[viz_data.ctxs[ref]["name"]]
-          if DEBUG >= 3: print_step(get(steps, "View Base AST"))
-          if DEBUG >= 4: print_step(get(steps, "View Source"))
+          if DEBUG >= 3 and (ast_step:=steps.get("View Base AST")) is not None: print_step(ast_step)
+          if DEBUG >= 4: print_step(steps["View Source"])
       if num_rows > 0 and items[num_rows:]:
         other_t = sum(t for _,(t,_,_) in items[num_rows:])
         other_c = sum(c for _,(_,c,_) in items[num_rows:])
