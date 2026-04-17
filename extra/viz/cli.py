@@ -57,6 +57,17 @@ def get(data:dict, key:str):
 
 def main(args) -> None:
   viz.load_rewrites(viz_data:=viz.VizData(viz.load_pickle(args.rewrites_path, default=RewriteTrace([], [], {}))))
+  rewrites = {c["name"]:{s["name"]:s for s in c["steps"]} for c in viz_data.ctxs if c.get("steps")}
+  def print_render(step:dict) -> None:
+    data = viz.get_render(viz_data, step["query"])
+    if isinstance(data.get("value"), Iterator):
+      for m in data["value"]:
+        if m.get("uop"): print(m["uop"])
+        if m.get("diff"):
+          loc = pathlib.Path(m["upat"][0][0])
+          print(f"Rewrite at {loc.parent.name}/{loc.name}:{m['upat'][0][1]}\n{m['upat'][1]}")
+          for line in m["diff"]: print(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None))
+    if data.get("src") is not None: print(data["src"])
 
   if args.profile:
     events:list = viz.load_pickle(args.profile_path, default=[])
@@ -112,10 +123,9 @@ def main(args) -> None:
       widths = [max(len(r[i]) for r in data) for i in range(len(cols))]
       def fmt(r): return "| "+" | ".join(x+" "*(w-len(x)) for x,w in zip(r, widths))+" |"
       print(fmt(data[0])+"\n"+fmt(["-"*w for w in widths])+"\n"+("\n".join([fmt(row) for row in data[1:]])))
-      return None
 
     # ** Memory printer
-    elif data["event_type"] == 1 and data.get("events", []):
+    elif data["event_type"] == 1:
       print(f"Peak: {data['peak']}"+"\n"+f"{'TS':<10}  {'Event':<6}  {'Key':>8}  Info")
       for e in data["events"]:
         info = str(e.get("arg", {}))
@@ -125,21 +135,16 @@ def main(args) -> None:
 
     # ** Profiler printer
     else:
-      def print_kernel(ref:int) -> None:
-        if DEBUG >= 3: print(viz._reconstruct(viz_data, viz_data.trace.rewrites[ref][0].sink).pyrender())
-        if DEBUG >= 4: print(viz_data.ctxs[ref]["prg"].src[3].arg)
       agg:dict[str, tuple[float, int, int|None]] = {}
-      total, first = 0, True
+      total = 0
       for e in data.get("events", []):
         et = e["dur"] * 1e-6
+        # TODO: this shouldn't exist, merge with the DEBUG reconstructor
         if args.item is not None:
           if ansistrip(e["name"]) == args.item:
             ptm = colored(time_to_str(et, w=9), "yellow" if et > 0.01 else None)
             name = e["name"] + (" " * (46 - ansilen(e["name"])))
             print(f"{fmt_colored(name)} {ptm}/{et*1e3:9.2f}ms  " + e.get("fmt", "").replace("\n", " | ") + "  ")
-            if first:
-              if e["ref"] is not None: print_kernel(e["ref"])
-              first = False
         else:
           t, c, ref = agg.get(e["name"], (0.0, 0, None))
           agg[e["name"]] = (t+et, c+1, e["ref"])
@@ -149,7 +154,10 @@ def main(args) -> None:
         num_rows = args.top
         for name,(t,c,ref) in items[:num_rows]:
           print(f"{fmt_colored(name)}{' ' * max(0, 36 - ansilen(name))} {time_to_str(t, w=9)} {c:7d} {t/total*100.0:6.2f}%")
-          if ref is not None: print_kernel(ref)
+          if ref is not None:
+            steps = rewrites[viz_data.ctxs[ref]["name"]]
+            if DEBUG >= 3: print_render(get(steps, "View Base AST"))
+            if DEBUG >= 4: print_render(get(steps, "View Source"))
         if num_rows > 0 and items[num_rows:]:
           other_t = sum(t for _,(t,_,_) in items[num_rows:])
           other_c = sum(c for _,(_,c,_) in items[num_rows:])
@@ -157,21 +165,11 @@ def main(args) -> None:
     return None
 
   # ** Graph rewrites printer
-  rewrites = {c["name"]:{s["name"]:s for s in c["steps"]} for c in viz_data.ctxs if c.get("steps")}
   if args.src is None: return print("\n".join([f"  {fmt_colored(k)}" for k in rewrites]))
   steps = get(rewrites, args.src)
   if args.item is None:
     for k,v in steps.items(): print(" "*v["depth"]+k+(f" - {v['match_count']}" if v.get('match_count', 0) else ''))
-  else:
-    data = viz.get_render(viz_data, get(steps, args.item)["query"])
-    if isinstance(data.get("value"), Iterator):
-      for m in data["value"]:
-        if m.get("uop"): print(f"Input UOp:\n{m['uop']}")
-        if m.get("diff"):
-          loc = pathlib.Path(m["upat"][0][0])
-          print(f"Rewrite at {loc.parent.name}/{loc.name}:{m['upat'][0][1]}\n{m['upat'][1]}")
-          for line in m["diff"]: print(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None))
-    if data.get("src") is not None: print(data["src"])
+  else: print_render(get(steps, args.item))
 
 def get_arg_parser() -> argparse.ArgumentParser:
   parser = argparse.ArgumentParser(add_help=False)
