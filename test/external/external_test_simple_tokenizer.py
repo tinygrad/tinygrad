@@ -1,7 +1,7 @@
 import functools, multiprocessing
 from transformers import AutoTokenizer
 from datasets import load_dataset
-from tinygrad.apps.llm import SimpleTokenizer
+from tinygrad.llm.cli import SimpleTokenizer
 from tinygrad.helpers import tqdm, getenv, partition
 
 @functools.cache

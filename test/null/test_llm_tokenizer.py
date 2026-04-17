@@ -1,5 +1,5 @@
 import unittest, base64, functools, sys
-from tinygrad.apps.llm import SimpleTokenizer
+from tinygrad.llm.cli import SimpleTokenizer
 from tinygrad.helpers import fetch
 
 @unittest.skipIf(sys.platform == 'win32', "fetch race condition on Windows")

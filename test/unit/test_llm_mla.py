@@ -1,7 +1,7 @@
 import unittest
 import numpy as np
 from tinygrad import Tensor
-from tinygrad.apps.llm import Transformer, TransformerConfig, apply_rope
+from tinygrad.llm.cli import Transformer, TransformerConfig, apply_rope
 
 class TestMLA(unittest.TestCase):
   def _make_config(self, **kwargs):
@@ -13,7 +13,7 @@ class TestMLA(unittest.TestCase):
 
   def test_mla_attention_matches_naive(self):
     config = self._make_config(max_context=16)
-    from tinygrad.apps.llm import MLATransformerBlock, precompute_freqs_cis
+    from tinygrad.llm.cli import MLATransformerBlock, precompute_freqs_cis
 
     block = MLATransformerBlock(config)
     c = config

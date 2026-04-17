@@ -22,7 +22,7 @@ class TestLLMServer(unittest.TestCase):
     cls.bos_id = 1
     cls.eos_id = 999
 
-    import tinygrad.apps.llm as llm_module
+    import tinygrad.llm.cli as llm_module
     llm_module.model = cls.mock_model
     llm_module.model_name = "test-model"
     llm_module.tok = cls.mock_tok
@@ -30,7 +30,7 @@ class TestLLMServer(unittest.TestCase):
     llm_module.eos_id = cls.eos_id
     llm_module.eot_id = None
 
-    from tinygrad.apps.llm import Handler
+    from tinygrad.llm.cli import Handler
     from tinygrad.viz.serve import TCPServerWithReuse
 
     cls.server = TCPServerWithReuse(('127.0.0.1', 0), Handler)
