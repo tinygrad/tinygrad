@@ -130,12 +130,11 @@ def main(args) -> None:
       return None
 
     # ** Profiler printer
-    agg:dict[str, tuple[float, int]] = {}
+    agg:dict[str, tuple[float, int, int|None]] = {}
     total, first = 0, True
-    def print_kernel(name:str) -> None:
-      if (ref:=viz_data.ref_map.get(ansistrip(name))) is not None:
-        if DEBUG >= 3: print(viz._reconstruct(viz_data, viz_data.trace.rewrites[ref][0].sink).pyrender())
-        if DEBUG >= 4: print(viz_data.ctxs[ref]["prg"].src[3].arg)
+    def print_kernel(ref:int) -> None:
+      if DEBUG >= 3: print(viz._reconstruct(viz_data, viz_data.trace.rewrites[ref][0].sink).pyrender())
+      if DEBUG >= 4: print(viz_data.ctxs[ref]["prg"].src[3].arg)
     for e in data.get("events", []):
       et = e["dur"] * 1e-6
       if args.item is not None:
@@ -144,21 +143,21 @@ def main(args) -> None:
           name = e["name"] + (" " * (46 - ansilen(e["name"])))
           print(f"{format_colored(name)} {ptm}/{et*1e3:9.2f}ms  " + e.get("fmt", "").replace("\n", " | ") + "  ")
           if first:
-            print_kernel(e["name"])
+            if e["ref"] is not None: print_kernel(e["ref"])
             first = False
       else:
-        t, c = agg.get(e["name"], (0.0, 0))
-        agg[e["name"]] = (t+et, c+1)
+        t, c, ref = agg.get(e["name"], (0.0, 0, None))
+        agg[e["name"]] = (t+et, c+1, e["ref"])
         total += et
     if agg and total > 0:
       items = sorted(agg.items(), key=lambda kv:kv[1][0], reverse=True)
       num_rows = args.top
-      for name,(t,c) in items[:num_rows]:
+      for name,(t,c,ref) in items[:num_rows]:
         print(f"{format_colored(name)}{' ' * max(0, 36 - ansilen(name))} {time_to_str(t, w=9)} {c:7d} {t/total*100.0:6.2f}%")
-        print_kernel(name)
+        if ref is not None: print_kernel(ref)
       if num_rows > 0 and items[num_rows:]:
-        other_t = sum(t for _,(t,_) in items[num_rows:])
-        other_c = sum(c for _,(_,c) in items[num_rows:])
+        other_t = sum(t for _,(t,_,_) in items[num_rows:])
+        other_c = sum(c for _,(_,c,_) in items[num_rows:])
         print(f"{'Other':<36} {time_to_str(other_t, w=9)} {other_c:7d} {other_t/total*100.0:6.2f}%")
     return None
 
