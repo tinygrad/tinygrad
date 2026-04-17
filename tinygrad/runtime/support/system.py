@@ -64,7 +64,9 @@ class _System:
         return int.from_bytes(bytes(buf), "little")
 
       iokit.IOServiceGetMatchingServices(0, iokit.IOServiceMatching(b"IOPCIDevice"), ctypes.byref(iterator:=ctypes.c_uint()))
-      while svc:=iokit.IOIteratorNext(iterator): all_devs.append((v:=read_prop(svc, "vendor-id"), d:=read_prop(svc, "device-id"), f"{v:x}:{d:x}"))
+      while svc:=iokit.IOIteratorNext(iterator):
+        if base_class is not None and read_prop(svc, "class-code") >> 16 != base_class: continue
+        all_devs.append((v:=read_prop(svc, "vendor-id"), d:=read_prop(svc, "device-id"), f"{v:x}:{d:x}"))
     else:
       try: devs = FileIOInterface("/sys/bus/pci/devices")
       except FileNotFoundError: raise RuntimeError("no pcie")
