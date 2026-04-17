@@ -34,11 +34,9 @@ class SimpleTokenizer:
     # https://github.com/ggml-org/llama.cpp/blob/94933c8c2eeaa9a7983e3f6c08af76bd86724094/src/llama-vocab.cpp#L1818-L1820
     vocab: typing.Iterable[tuple[str, int]] = ((tok, idx) for idx, tok in enumerate(kv["tokenizer.ggml.tokens"]))
     normal_tokens, special_tokens = partition(vocab, lambda e: kv["tokenizer.ggml.token_type"][e[1]] == 1)
-    bos_id = kv.get('tokenizer.ggml.bos_token_id') if kv.get('tokenizer.ggml.add_bos_token', True) else None
-    eos_id = kv['tokenizer.ggml.eos_token_id']
-    eot_id = kv.get('tokenizer.ggml.eot_token_id')
     return SimpleTokenizer(dict(normal_tokens), dict(special_tokens), kv["tokenizer.ggml.pre"],
-                           bos_id=bos_id, eos_id=eos_id, eot_id=eot_id)
+      bos_id=kv.get('tokenizer.ggml.bos_token_id') if kv.get('tokenizer.ggml.add_bos_token', True) else None,
+      eos_id=kv['tokenizer.ggml.eos_token_id'], eot_id=kv.get('tokenizer.ggml.eot_token_id'))
 
   def _encode_word(self, word:bytes) -> list[int]:
     if (early_token:=self._normal_tokens.get(word)) is not None: return [early_token]
@@ -107,11 +105,6 @@ models = {
 }
 
 # *** simple OpenAI API compatible server with web interface on http://localhost:8000/ ***
-
-class LLMServer(TCPServerWithReuse):
-  model: Transformer
-  model_name: str
-  tok: SimpleTokenizer
 
 class Handler(HTTPRequestHandler):
   server: LLMServer
@@ -182,6 +175,11 @@ class Handler(HTTPRequestHandler):
     else:
       raise RuntimeError(f"unhandled path {self.path}")
 
+class LLMServer(TCPServerWithReuse):
+  def __init__(self, server_address:tuple, model:Transformer, model_name:str, tok:SimpleTokenizer):
+    self.model, self.model_name, self.tok = model, model_name, tok
+    super().__init__(server_address, Handler)
+
 def main():
   parser = argparse.ArgumentParser()
   parser.add_argument("--model", "-m", default=list(models.keys())[0], help=f"Model choice ({', '.join(models.keys())}) or path to a local GGUF file")
@@ -211,10 +209,7 @@ def main():
       for _ in range(2): list(zip(range(2), model.generate([0])))
 
   # start server
-  if args.serve:
-    server = LLMServer(('', args.serve), Handler)
-    server.model, server.model_name, server.tok = model, model_name, tok
-    server.serve_forever()
+  if args.serve: LLMServer(('', args.serve), model, model_name, tok).serve_forever()
 
   # do benchmark
   if args.benchmark is not None:

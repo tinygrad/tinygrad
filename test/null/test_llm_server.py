@@ -23,12 +23,9 @@ class TestLLMServer(unittest.TestCase):
     cls.mock_model.generate = Mock(side_effect=lambda ids, **kwargs: iter([300, 301, 999]))
     cls.mock_model.get_start_pos = Mock(return_value=0)
 
-    from tinygrad.llm.cli import Handler, LLMServer
+    from tinygrad.llm.cli import LLMServer
 
-    cls.server = LLMServer(('127.0.0.1', 0), Handler)
-    cls.server.model = cls.mock_model
-    cls.server.model_name = "test-model"
-    cls.server.tok = cls.mock_tok
+    cls.server = LLMServer(('127.0.0.1', 0), cls.mock_model, "test-model", cls.mock_tok)
     cls.port = cls.server.server_address[1]
     cls.server_thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
     cls.server_thread.start()
