@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import argparse, pathlib, signal, sys, struct, json, itertools, heapq, os
+import argparse, pathlib, signal, sys, struct, json, os, itertools, heapq,
 os.environ["VIZ"] = "0"
 if hasattr(signal, "SIGPIPE"): signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 from typing import Iterator
@@ -145,19 +145,20 @@ def main(args) -> None:
   # ** Profiler printer
   else:
     timelines = [(n,l) for n,l in profile["layout"].items() if l.get("event_type") == 0]
-    def produce_top_kernelss() -> Iterator[dict]:
-      events_flat = itertools.chain.from_iterable(l["events"] for _,l in timelines) if args.src == "ALL" else iter(data["events"])
-      agg:dict[str, tuple[float, int, int|None]] = {} # map kernel name to (total time, count and ref)
+    def produce_top_kernels() -> Iterator[dict]:
+      tagged = ((n,e) for n,l in timelines for e in l["events"]) if args.src == "ALL" else ((args.src,e) for e in data["events"])
+      agg:dict[tuple[str,str], tuple[float, int, int|None]] = {} # map (device, kernel name) to (total time, count and ref)
       total = 0
-      for e in events_flat:
+      for dev,e in tagged:
         et = e["dur"] * 1e-6
-        t, c, ref = agg.get(e["name"], (0.0, 0, None))
-        agg[e["name"]] = (t+et, c+1, e["ref"])
+        t, c, ref = agg.get((dev,e["name"]), (0.0, 0, None))
+        agg[(dev,e["name"])] = (t+et, c+1, e["ref"])
         total += et
       items = sorted(agg.items(), key=lambda kv:kv[1][0], reverse=True)
       num_rows = len(items) if args.top < 0 else args.top
-      for name,(t,c,ref) in items[:num_rows]:
-        yield {"name":name, "fmt":f"{time_to_str(t, w=9)} {c:7d} {t/total*100.0:6.2f}%", "ref":ref}
+      for (dev,name),(t,c,ref) in items[:num_rows]:
+        display = f"{dev[:7]:7s} {name}" if args.src == "ALL" else name
+        yield {"name":display, "fmt":f"{time_to_str(t, w=9)} {c:7d} {t/total*100.0:6.2f}%", "ref":ref}
       if num_rows > 0 and items[num_rows:]:
         other_t = sum(t for _,(t,_,_) in items[num_rows:])
         other_c = sum(c for _,(_,c,_) in items[num_rows:])
@@ -174,7 +175,7 @@ def main(args) -> None:
         fmt_str = "  ".join(p+" "*max(0, 14-ansilen(p)) for p in e["fmt"].split("\n"))
         name = f"*** {dev[:7]:7s} {k+1:4d} "+e["name"]+" "*(46-ansilen(e["name"]))
         yield {"name":name, "fmt":f"tm {ptm}/{timestamp*1e3:9.2f}ms"+(f" ({fmt_str})" if e["fmt"] else ""), "ref":e["ref"]}
-    for k in (produce_top_kernelss if args.top else produce_all_kernels)():
+    for k in (produce_top_kernels if args.top else produce_all_kernels)():
       print(f"{fmt_colored(k['name'])}{' ' * max(0, 36 - ansilen(k['name']))} {k['fmt']}")
       if k["ref"] is not None:
         steps = rewrites[viz_data.ctxs[k["ref"]]["name"]]
