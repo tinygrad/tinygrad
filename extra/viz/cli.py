@@ -154,7 +154,7 @@ def main(args) -> None:
         agg[e["name"]] = (t+et, c+1, e["ref"])
         total += et
       items = sorted(agg.items(), key=lambda kv:kv[1][0], reverse=True)
-      num_rows = args.top
+      num_rows = len(items) if args.top < 0 else args.top
       for name,(t,c,ref) in items[:num_rows]:
         kernels.append({"name":name, "fmt":f"{time_to_str(t, w=9)} {c:7d} {t/total*100.0:6.2f}%", "ref":ref})
       if num_rows > 0 and items[num_rows:]:
@@ -166,9 +166,9 @@ def main(args) -> None:
       for k,e in enumerate(data["events"]):
         et, timestamp = e["dur"] * 1e-6, (e["st"] - st0 + e["dur"]) * 1e-6
         ptm = colored(time_to_str(et, w=9), "yellow" if et > 0.01 else None)
-        fmt = "  ".join(p+" "*max(0, 14-ansilen(p)) for p in e["fmt"].split("\n"))
+        fmt_str = "  ".join(p+" "*max(0, 14-ansilen(p)) for p in e["fmt"].split("\n"))
         name = f"*** {args.src[:7]:7s} {k+1:4d} "+e["name"]+" "*(46-ansilen(e["name"]))
-        kernels.append({"name":name, "fmt":f"tm {ptm}@{timestamp*1e3:9.2f}ms"+(f" ({fmt})" if e["fmt"] else ""), "ref":e["ref"]})
+        kernels.append({"name":name, "fmt":f"tm {ptm}@{timestamp*1e3:9.2f}ms"+(f" ({fmt_str})" if e["fmt"] else ""), "ref":e["ref"]})
     for k in kernels:
       print(f"{fmt_colored(k['name'])}{' ' * max(0, 36 - ansilen(k['name']))} {k['fmt']}")
       if k["ref"] is not None:
