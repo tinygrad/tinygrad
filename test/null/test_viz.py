@@ -906,11 +906,17 @@ class TestCLI(unittest.TestCase):
     with tempfile.TemporaryDirectory() as tmpdir:
       (r:=Path(tmpdir)/"rewrites.pkl").write_bytes(pickle.dumps(viz.data.trace))
       (p:=Path(tmpdir)/"profile.pkl").write_bytes(pickle.dumps(cpu_events))
+      # reconstruct DEBUG=4 output
       with Context(DEBUG=4):
         kernels = run_cli("--rewrites-path", str(r), "--profile-path", str(p), "-p", "-s", "NULL")
       self.assertIn("void custom_empty", kernels)
       self.assertIn("E", kernels)
       self.assertIn("UOp.const", kernels)
+      # get the top slowest functions across all devices
+      with Context(DEBUG=2):
+        times = run_cli("--rewrites-path", str(r), "--profile-path", str(p), "-p", "-s", "ALL", "--top", "-1")
+      for dev in ["TINY", "USER", "NULL"]:
+        self.assertIn(dev, times)
 
 if __name__ == "__main__":
   unittest.main()

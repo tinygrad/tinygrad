@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import argparse, pathlib, signal, sys, struct, json, os, itertools, heapq,
+import argparse, pathlib, signal, sys, struct, json, os, itertools, heapq
 os.environ["VIZ"] = "0"
 if hasattr(signal, "SIGPIPE"): signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 from typing import Iterator
