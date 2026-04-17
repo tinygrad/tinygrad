@@ -131,7 +131,11 @@ def main(args) -> None:
 
     # ** Profiler printer
     agg:dict[str, tuple[float, int]] = {}
-    total = 0
+    total, first = 0, True
+    def print_kernel(name:str) -> None:
+      if (ref:=viz_data.ref_map.get(ansistrip(name))) is not None:
+        if DEBUG >= 3: print(viz._reconstruct(viz_data, viz_data.trace.rewrites[ref][0].sink).pyrender())
+        if DEBUG >= 4: print(viz_data.ctxs[ref]["prg"].src[3].arg)
     for e in data.get("events", []):
       et = e["dur"] * 1e-6
       if args.item is not None:
@@ -139,6 +143,9 @@ def main(args) -> None:
           ptm = colored(time_to_str(et, w=9), "yellow" if et > 0.01 else None)
           name = e["name"] + (" " * (46 - ansilen(e["name"])))
           print(f"{format_colored(name)} {ptm}/{et*1e3:9.2f}ms  " + e.get("fmt", "").replace("\n", " | ") + "  ")
+          if first:
+            print_kernel(e["name"])
+            first = False
       else:
         t, c = agg.get(e["name"], (0.0, 0))
         agg[e["name"]] = (t+et, c+1)
@@ -148,9 +155,7 @@ def main(args) -> None:
       num_rows = args.top
       for name,(t,c) in items[:num_rows]:
         print(f"{format_colored(name)}{' ' * max(0, 36 - ansilen(name))} {time_to_str(t, w=9)} {c:7d} {t/total*100.0:6.2f}%")
-        if (ref:=viz_data.ref_map.get(ansistrip(name))) is not None:
-          if DEBUG >= 3: print(viz._reconstruct(viz_data, viz_data.trace.rewrites[ref][0].sink).pyrender())
-          if DEBUG >= 4: print(viz_data.ctxs[ref]["prg"].src[3].arg)
+        print_kernel(name)
       if num_rows > 0 and items[num_rows:]:
         other_t = sum(t for _,(t,_) in items[num_rows:])
         other_c = sum(c for _,(_,c) in items[num_rows:])
