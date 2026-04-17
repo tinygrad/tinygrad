@@ -12,6 +12,7 @@ class TestLLMServer(unittest.TestCase):
     cls.mock_tok.decode = Mock(return_value="Hello")
     cls.mock_tok.stream_decoder = Mock(return_value=lambda tid=None: "Hello" if tid is not None else "")
     cls.mock_tok.end_turn = Mock(return_value=[998])
+    cls.mock_tok.prefix = Mock(return_value=[1])
     cls.mock_tok.preset = "llama3"
 
     cls.mock_model = Mock()
@@ -21,17 +22,15 @@ class TestLLMServer(unittest.TestCase):
     cls.bos_id = 1
     cls.eos_id = 999
 
-    import tinygrad.apps.llm as llm_module
-    llm_module.model = cls.mock_model
-    llm_module.model_name = "test-model"
-    llm_module.tok = cls.mock_tok
-    llm_module.bos_id = cls.bos_id
-    llm_module.eos_id = cls.eos_id
+    from tinygrad.llm.cli import Handler, LLMServer
 
-    from tinygrad.apps.llm import Handler
-    from tinygrad.viz.serve import TCPServerWithReuse
-
-    cls.server = TCPServerWithReuse(('127.0.0.1', 0), Handler)
+    cls.server = LLMServer(('127.0.0.1', 0), Handler)
+    cls.server.model = cls.mock_model
+    cls.server.model_name = "test-model"
+    cls.server.tok = cls.mock_tok
+    cls.server.bos_id = cls.bos_id
+    cls.server.eos_id = cls.eos_id
+    cls.server.eot_id = None
     cls.port = cls.server.server_address[1]
     cls.server_thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
     cls.server_thread.start()

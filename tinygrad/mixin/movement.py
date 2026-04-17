@@ -42,6 +42,20 @@ class MovementMixin:
     """
     return prod(self.shape)
 
+  def size(self, dim:int|None=None) -> sint|tuple[sint, ...]:
+    """
+    Returns the size of the tensor. If `dim` is specified, return the length along dimension `dim`. Otherwise return the shape of the tensor.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([[4, 5, 6], [7, 8, 9]])
+    print(t.size())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.size(dim=1))
+    ```
+    """
+    return self.shape if dim is None else self.shape[dim]
+
   def _normalize_indices(self, indices:list) -> list:
     if len(ell := [i for i,x in enumerate(indices) if x is Ellipsis]) > 1: raise IndexError("indices can only have a single ellipsis")
     num_real = len(indices) - len(ell) - sum(1 for i in indices if i is None)

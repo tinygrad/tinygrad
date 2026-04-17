@@ -1,4 +1,4 @@
-# eval for tinygrad.apps.llm -- hits the server via OpenAI API
+# eval for OpenAI API server
 # uses Meta's exact ARC-Challenge prompt template from lm-evaluation-harness llama3 tasks
 import argparse, re, pyarrow.parquet as pq
 from openai import OpenAI
