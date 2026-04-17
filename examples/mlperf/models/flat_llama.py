@@ -78,19 +78,27 @@ def rmsnorm(x_in:Tensor, eps:float) -> tuple[Tensor, Tensor]:
 
 class FlatTransformer:
   def __init__(self, dim:int, hidden_dim:int, n_heads:int, n_layers:int, norm_eps:float, vocab_size:int, n_kv_heads:int|None=None,
-               rope_theta:int=10000, max_context:int=1024):
+               rope_theta:int=10000, max_context:int=1024, lora_rank:int=0, lora_alpha:float=1.0, lora_dropout:float=0.0):
     self.vocab_size = vocab_size
     self.n_layers = n_layers
     self.n_heads = n_heads
     self.n_kv_heads = n_kv_heads if n_kv_heads is not None else n_heads # n_kv_heads != n_heads implies MQA [arxiv/2307.09288, A.2.1]
     self.head_dim = dim // n_heads
     self.n_rep = self.n_heads // self.n_kv_heads
+    self.lora_rank = lora_rank
+    self.lora_alpha = lora_alpha
+    self.lora_dropout = lora_dropout
 
     scaled_std = 0.02 / math.sqrt(2 * n_layers)
 
     # Attention
     self.wqkv = self.lin_per_layer(dim, self.n_heads * self.head_dim + self.n_kv_heads * self.head_dim * 2)
     self.wo = self.lin_per_layer(self.n_heads * self.head_dim, dim, std=scaled_std)
+    if self.lora_rank:
+      self.wqkv_lora_a = Tensor.kaiming_uniform(self.n_layers, self.lora_rank, dim, a=math.sqrt(5))
+      self.wqkv_lora_b = Tensor.zeros(self.n_layers, self.n_heads * self.head_dim + self.n_kv_heads * self.head_dim * 2, self.lora_rank)
+      self.wo_lora_a = Tensor.kaiming_uniform(self.n_layers, self.lora_rank, self.n_heads * self.head_dim, a=math.sqrt(5))
+      self.wo_lora_b = Tensor.zeros(self.n_layers, dim, self.lora_rank)
 
     # FeedForward
     self.w1 = self.lin_per_layer(dim, hidden_dim)
@@ -120,8 +128,15 @@ class FlatTransformer:
     if getenv("ZEROS"): return Tensor.zeros(self.n_layers, out_features, in_features)
     return Tensor.normal(self.n_layers, out_features, in_features, mean=0.0, std=std)
 
+  def lora(self, x:Tensor, lora_a:Tensor|None, lora_b:Tensor|None) -> Tensor|None:
+    if lora_a is None or lora_b is None: return None
+    lora_x = x.dropout(self.lora_dropout) if self.lora_dropout else x
+    lora_hidden = matmul(lora_x, lora_a, fp8=False)[0]
+    return matmul(lora_hidden, lora_b, fp8=False)[0] * (self.lora_alpha / self.lora_rank)
+
   def attention(self, x:Tensor, freqs_cis:Tensor, attention_norm:Tensor, wqkv:Tensor, wo:Tensor,
-                amax_xqkv=None, amax_wqkv=None, amax_xo=None, amax_wo=None):
+                amax_xqkv=None, amax_wqkv=None, amax_xo=None, amax_wo=None,
+                wqkv_lora_a:Tensor|None=None, wqkv_lora_b:Tensor|None=None, wo_lora_a:Tensor|None=None, wo_lora_b:Tensor|None=None):
     bsz, seqlen, _ = x.shape
     new_amaxs, saves = [], []
 
@@ -130,6 +145,7 @@ class FlatTransformer:
     x = x * attention_norm
 
     xqkv, *ret = matmul(x, wqkv, amax_x=amax_xqkv, amax_w=amax_wqkv)
+    if (qkv_lora:=self.lora(x, wqkv_lora_a, wqkv_lora_b)) is not None: xqkv = xqkv + qkv_lora
     new_amaxs.extend(ret[:2])
     saves.extend(ret[2:] + [xqkv])
     xqkv = xqkv.reshape(bsz, seqlen, self.n_kv_heads, self.n_rep + 2, self.head_dim)
@@ -149,6 +165,7 @@ class FlatTransformer:
     attn = attn.transpose(1, 2).reshape(bsz, seqlen, -1)
 
     out, *ret = matmul(attn, wo, amax_x=amax_xo, amax_w=amax_wo)
+    if (o_lora:=self.lora(attn, wo_lora_a, wo_lora_b)) is not None: out = out + o_lora
     new_amaxs.extend(ret[:2])
     saves.extend(ret[2:] + [out])
     return (out, *new_amaxs, *saves)
@@ -177,9 +194,11 @@ class FlatTransformer:
                 attention_norm:Tensor, wqkv:Tensor, wo:Tensor,
                 ffn_norm:Tensor, w1:Tensor, w2:Tensor, w3:Tensor,
                 amax_xqkv=None, amax_wqkv=None, amax_xo=None, amax_wo=None,
-                amax_x1=None, amax_w1=None, amax_x2=None, amax_w2=None, amax_x3=None, amax_w3=None):
+                amax_x1=None, amax_w1=None, amax_x2=None, amax_w2=None, amax_x3=None, amax_w3=None,
+                wqkv_lora_a:Tensor|None=None, wqkv_lora_b:Tensor|None=None, wo_lora_a:Tensor|None=None, wo_lora_b:Tensor|None=None):
     attn, *attn_ret = self.attention(x, freqs_cis, attention_norm, wqkv, wo,
-                                     amax_xqkv=amax_xqkv, amax_wqkv=amax_wqkv, amax_xo=amax_xo, amax_wo=amax_wo)
+                                     amax_xqkv=amax_xqkv, amax_wqkv=amax_wqkv, amax_xo=amax_xo, amax_wo=amax_wo,
+                                     wqkv_lora_a=wqkv_lora_a, wqkv_lora_b=wqkv_lora_b, wo_lora_a=wo_lora_a, wo_lora_b=wo_lora_b)
     attn_amaxs, attn_saves = attn_ret[:4], attn_ret[4:]
     h = x + attn
     ffn, *ffn_ret = self.feed_forward(h, ffn_norm, w1, w2, w3,
@@ -196,6 +215,11 @@ class FlatTransformer:
       # flat per-layer weights: axis 0 is n_layers, so shard axes are +1 vs per-layer Transformer
       self.wqkv.shard_(device, axis=1).realize()          # (n_layers, out, dim) shard out
       self.wo.shard_(device, axis=2).realize()             # (n_layers, dim, in) shard in
+      if self.lora_rank:
+        self.wqkv_lora_a.shard_(device, axis=None).realize()
+        self.wqkv_lora_b.shard_(device, axis=1).realize()
+        self.wo_lora_a.shard_(device, axis=2).realize()
+        self.wo_lora_b.shard_(device, axis=None).realize()
       self.w1.shard_(device, axis=1).realize()             # (n_layers, hidden, dim) shard out
       self.w2.shard_(device, axis=2).realize()             # (n_layers, dim, hidden) shard in
       self.w3.shard_(device, axis=1).realize()             # (n_layers, hidden, dim) shard out
@@ -220,10 +244,12 @@ class FlatTransformer:
                     "amax_x1": a["x1"][i], "amax_w1": a["w1"][i],
                     "amax_x2": a["x2"][i], "amax_w2": a["w2"][i],
                     "amax_x3": a["x3"][i], "amax_w3": a["w3"][i]} if a else {}
+      lora_layer = {"wqkv_lora_a": self.wqkv_lora_a[i], "wqkv_lora_b": self.wqkv_lora_b[i],
+                    "wo_lora_a": self.wo_lora_a[i], "wo_lora_b": self.wo_lora_b[i]} if self.lora_rank else {}
       h, *ret = self.run_layer(h, freqs_cis,
                                self.attention_norm[i], self.wqkv[i], self.wo[i],
                                self.ffn_norm[i], self.w1[i], self.w2[i], self.w3[i],
-                               **amax_layer)
+                               **amax_layer, **lora_layer)
       if a:
         amaxs = ret[:10]
         amax_names = ["xqkv", "wqkv", "xo", "wo", "x1", "w1", "x3", "w3", "x2", "w2"]
