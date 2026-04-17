@@ -334,7 +334,7 @@ class TestVizIntegration(unittest.TestCase):
       c1 = Tensor.empty(4).add(1)
       c2 = Tensor.empty(8).add(1)
       sched = Tensor.schedule(c1, c2)
-      prgs = [si.lower().prg.p.name for si in sched]
+      prgs = [get_program(si.ast, Device[Device.DEFAULT].renderer).name for si in sched]
     lst = viz.list_items()
     sched_idx = next(i for i,l in enumerate(lst) if l["name"].startswith("Schedule"))
     viz_kernel = next(i for i,s in enumerate(lst[sched_idx]["steps"]) if s["name"] == "View Kernel Graph")
