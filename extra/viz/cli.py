@@ -144,13 +144,13 @@ def main(args) -> None:
         total += et
     if agg and total > 0:
       items = sorted(agg.items(), key=lambda kv:kv[1][0], reverse=True)
-      num_rows = 20
+      num_rows = args.top
       for name,(t,c) in items[:num_rows]:
         print(f"{format_colored(name)}{' ' * max(0, 36 - ansilen(name))} {time_to_str(t, w=9)} {c:7d} {t/total*100.0:6.2f}%")
         if (ref:=viz_data.ref_map.get(ansistrip(name))) is not None:
           if DEBUG >= 3: print(viz._reconstruct(viz_data, viz_data.trace.rewrites[ref][0].sink).pyrender())
           if DEBUG >= 4: print(viz_data.ctxs[ref]["prg"].src[3].arg)
-      if items[num_rows:]:
+      if num_rows > 0 and items[num_rows:]:
         other_t = sum(t for _,(t,_) in items[num_rows:])
         other_c = sum(c for _,(_,c) in items[num_rows:])
         print(f"{'Other':<36} {time_to_str(other_t, w=9)} {other_c:7d} {other_t/total*100.0:6.2f}%")
@@ -184,7 +184,7 @@ def get_arg_parser() -> argparse.ArgumentParser:
   g_opts = parser.add_argument_group("optional args")
   g_opts.add_argument("-s", "--src", type=str, default=None, metavar="NAME", help="Select a data source (default: list all sources)")
   g_opts.add_argument("-i", "--item", type=str, default=None, metavar="NAME", help="Select an item within the source (default: list all items)")
-  g_opts.add_argument("--top", type=int, default=20, metavar="COUNT", help="Number of top rows to print (default: top 20)")
+  g_opts.add_argument("--top", type=int, default=20, metavar="COUNT", help="Number of top rows to print (default: 20, set -1 to print all)")
   g_opts.add_argument("--profile-path", type=pathlib.Path, metavar="PATH", help="Path to profile.pkl (optional file, default: latest profile)",
                       default=pathlib.Path(temp("profile.pkl", append_user=True)))
   g_opts.add_argument("--rewrites-path", type=pathlib.Path, metavar="PATH", help="Path to rewrites.pkl (optional file, default: latest rewrites)",
