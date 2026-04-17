@@ -1,6 +1,7 @@
 from typing_extensions import Callable
 import hashlib, random, unittest
-from tinygrad import Tensor, Device, dtypes, DEV
+from tinygrad import Tensor, Device, dtypes
+from tinygrad.helpers import DEV
 from test.helpers import slow
 from tinygrad.device import is_dtype_supported
 from tinygrad.uop.ops import UOp
