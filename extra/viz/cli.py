@@ -143,28 +143,33 @@ def main(args) -> None:
       print(f"{e['ts']:<10}  {e['event']:<6}  {e.get('key', ''):>8}  {info}")
 
   # ** Profiler printer
-  else:
-    agg:dict[str, tuple[float, int, int|None]] = {}
-    total = 0
-    for e in data.get("events", []):
-      et = e["dur"] * 1e-6
-      if args.agg:
-        t, c, ref = agg.get(e["name"], (0.0, 0, None))
-        agg[e["name"]] = (t+et, c+1, e["ref"])
-        total += et
-    if agg and total > 0:
+  elif data["event_type"] == 0:
+    if args.agg:
+      agg:dict[str, tuple[float, int, int|None]] = {} # map kernel name to (total time, count and ref)
+      total = 0
+      for e in data["events"]:
+        et = e["dur"] * 1e-6
+        if args.agg:
+          t, c, ref = agg.get(e["name"], (0.0, 0, None))
+          agg[e["name"]] = (t+et, c+1, e["ref"])
+          total += et
+      kernels:list[dict] = []
       items = sorted(agg.items(), key=lambda kv:kv[1][0], reverse=True)
       num_rows = args.top
       for name,(t,c,ref) in items[:num_rows]:
-        print(f"{fmt_colored(name)}{' ' * max(0, 36 - ansilen(name))} {time_to_str(t, w=9)} {c:7d} {t/total*100.0:6.2f}%")
-        if ref is not None:
-          steps = rewrites[viz_data.ctxs[ref]["name"]]
-          if DEBUG >= 3 and (ast_step:=steps.get("View Base AST")) is not None: print_step(ast_step)
-          if DEBUG >= 4: print_step(steps["View Source"])
+        kernels.append({"name":name, "fmt":f"{time_to_str(t, w=9)} {c:7d} {t/total*100.0:6.2f}%", "ref":ref})
       if num_rows > 0 and items[num_rows:]:
         other_t = sum(t for _,(t,_,_) in items[num_rows:])
         other_c = sum(c for _,(_,c,_) in items[num_rows:])
-        print(f"{'Other':<36} {time_to_str(other_t, w=9)} {other_c:7d} {other_t/total*100.0:6.2f}%")
+        kernels.append({"name":"Other", "fmt":f"{time_to_str(other_t, w=9)} {other_c:7d} {other_t/total*100.0:6.2f}%", "ref":None})
+    else:
+      kernels = # iterator for all the events
+    for k in kernels:
+      print(f"{fmt_colored(k['name'])}{' ' * max(0, 36 - ansilen(k['name']))} {k['fmt']}")
+      if k["ref"] is not None:
+        steps = rewrites[viz_data.ctxs[k["ref"]]["name"]]
+        if DEBUG >= 3 and (ast_step:=steps.get("View Base AST")) is not None: print_step(ast_step)
+        if DEBUG >= 4: print_step(steps["View Source"])
 
 def get_arg_parser() -> argparse.ArgumentParser:
   parser = argparse.ArgumentParser(add_help=False)
