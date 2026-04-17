@@ -2,6 +2,7 @@ from __future__ import annotations
 import functools, itertools
 from dataclasses import dataclass, replace
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function
+from tinygrad.llm.gguf import gguf_load
 from tinygrad.uop.ops import resolve
 
 @functools.cache
@@ -320,7 +321,7 @@ class Transformer:
   @staticmethod
   def from_gguf(gguf:Tensor, max_context:int|None=None, realize=bool(getenv("REALIZE", 0))) -> tuple[Transformer, dict]:
     # TODO: remove the need for copy to default device
-    kv, state_dict = nn.state.gguf_load(gguf.to(None).realize())
+    kv, state_dict = gguf_load(gguf.to(None).realize())
 
     # all state items should be float16, not float32
     state_dict = {k:v.cast('float16') if getenv("HALF", 1) else v for k,v in state_dict.items()}

@@ -1,6 +1,6 @@
 import os, struct, unittest
 from tinygrad import dtypes, Tensor, fetch, Device
-from tinygrad.nn.state import _ggml_iq_grid, ggml_data_to_tensor, gguf_load
+from tinygrad.llm.gguf import _ggml_iq_grid, ggml_data_to_tensor, gguf_load
 from tinygrad.runtime.autogen import ggml_common as _ggml
 from tinygrad.device import is_dtype_supported
 import numpy as np
