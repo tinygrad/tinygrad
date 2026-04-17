@@ -219,18 +219,6 @@ def run_schedule(schedule:list[ExecItem], var_vals:dict[str, int]|None=None, do_
 
 # **************** run linear ****************
 
-def unwrap_multi(call:UOp) -> Iterator[tuple[list[Buffer], dict[str, int]]]:
-  bufs = [b.buffer for b in call.src[1:] if b.op is not Ops.BIND]
-  if not any(isinstance(b, MultiBuffer) for b in bufs): yield cast(list[Buffer], bufs), {}
-  else:
-    dnum = next((x.expr for x in call.src[0].variables() if x.expr == '_device_num'), None)
-    for j, per_dev in enumerate(zip(*[cast(MultiBuffer, b).bufs for b in bufs])): yield list(per_dev), {dnum: j} if dnum else {}
-
-pm_add_beam = PatternMatcher([
-  (UPat(Ops.CALL, src=(UPat(Ops.SINK, name="sink"),), name="call", allow_any_len=True),
-   lambda ctx,call,sink: call.replace(src=(UOp(Ops.BEAM, src=(sink,), arg=ctx), *call.src[1:]))),
-])
-
 @dataclass
 class ExecContext:
   var_vals: dict[str, int] = field(default_factory=dict)
@@ -249,6 +237,13 @@ def track_stats(ctx:ExecContext, call:UOp, device:str, display_name:str, estimat
     Device[device].synchronize()
     timing[0] = time.perf_counter() - st
   update_stats(display_name, device, estimates, var_vals, timing[0], len(bufs), jit=False, metadata=call.arg.metadata, first_run=first_run)
+
+def unwrap_multi(call:UOp) -> Iterator[tuple[list[Buffer], dict[str, int]]]:
+  bufs = [b.buffer for b in call.src[1:] if b.op is not Ops.BIND]
+  if not any(isinstance(b, MultiBuffer) for b in bufs): yield cast(list[Buffer], bufs), {}
+  else:
+    dnum = next((x.expr for x in call.src[0].variables() if x.expr == '_device_num'), None)
+    for j, per_dev in enumerate(zip(*[cast(MultiBuffer, b).bufs for b in bufs])): yield list(per_dev), {dnum: j} if dnum else {}
 
 def exec_view(ctx:ExecContext, call, ast):
   bufs = [b.buffer for b in call.src[1:] if b.op is not Ops.BIND]
@@ -294,6 +289,11 @@ def exec_encdec(ctx:ExecContext, call, ast):
                    Estimates(lds=bufs[0].nbytes, mem=bufs[0].nbytes), bufs, ctx.var_vals):
     bufs[0].allocator._encode_decode(bufs[0]._buf, bufs[1]._buf, bufs[2]._buf, [x._buf for x in bufs[3:]], shape, ctx.var_vals[pos_var])
 
+pm_beam = PatternMatcher([
+  (UPat(Ops.CALL, src=(UPat(Ops.SINK, name="sink"),), name="call", allow_any_len=True),
+   lambda ctx,call,sink: call.replace(src=(UOp(Ops.BEAM, src=(sink,), arg=ctx), *call.src[1:]))),
+])
+
 pm_exec = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.BUFFER_VIEW, name="ast"),), name="call", allow_any_len=True), exec_view),
   (UPat(Ops.CALL, src=(UPat(Ops.COPY, name="ast"),), name="call", allow_any_len=True), exec_copy),
@@ -302,6 +302,6 @@ pm_exec = PatternMatcher([
 ])
 
 def run_linear(linear:UOp, var_vals:dict[str, int]|None=None, do_update_stats=True):
-  if BEAM >= 1: linear = graph_rewrite(linear, pm_add_beam, ctx=BEAM.value, name="add beam", walk=True)
+  if BEAM >= 1: linear = graph_rewrite(linear, pm_beam, ctx=BEAM.value, name="add beam")
   ctx = ExecContext(var_vals or {}, do_update_stats)
   for call in linear.src: pm_exec.rewrite(call, ctx)
