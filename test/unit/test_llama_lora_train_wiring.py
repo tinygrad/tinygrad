@@ -18,7 +18,13 @@ if "tqdm" not in sys.modules:
   sys.modules["tqdm"] = types.SimpleNamespace(tqdm=_TqdmStub())
 
 from examples.mlperf.llama import llama_benchmark_config
-from examples.mlperf.model_train import _llama_checkpoint_path, _llama_configure_trainable_params, _llama_load_model_checkpoint, _llama_sequences_seen, train_llama2_70b_lora
+from examples.mlperf.model_train import (
+  _llama_checkpoint_path,
+  _llama_configure_trainable_params,
+  _llama_load_model_checkpoint,
+  _llama_sequences_seen,
+  train_llama2_70b_lora,
+)
 from examples.mlperf.models.flat_llama import FlatTransformer
 from extra.models.llama import Transformer
 

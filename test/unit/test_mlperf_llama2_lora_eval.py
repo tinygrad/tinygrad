@@ -81,13 +81,21 @@ class TestMLPerfLlama2LoRAEval(unittest.TestCase):
     with tempfile.TemporaryDirectory(prefix="llama2-lora-dataset-") as tmpdir:
       train_path = Path(tmpdir) / "train.jsonl"
       train_path.write_text(json.dumps({"input": "source text", "output": "target summary"}) + "\n")
-      seqlen = len(llama_helpers.llama2_70b_lora_encode_sample(FakeTokenizer(), "source text", "target summary", mask_prompt_labels=False)[0])
+      seqlen = len(
+        llama_helpers.llama2_70b_lora_encode_sample(
+          FakeTokenizer(), "source text", "target summary", mask_prompt_labels=False,
+        )[0],
+      )
 
-      train_tokens, train_labels = next(iter(iterate_llama2_70b_lora_dataset(train_path, bs=1, seqlen=seqlen, tokenizer=FakeTokenizer(), val=False, samples=1)))
+      train_tokens, train_labels = next(iter(iterate_llama2_70b_lora_dataset(
+        train_path, bs=1, seqlen=seqlen, tokenizer=FakeTokenizer(), val=False, samples=1,
+      )))
       self.assertNotIn(-1, train_labels.numpy().tolist()[0])
       self.assertEqual(train_tokens.shape[0], 1)
 
-      val_tokens, val_labels = next(iter(iterate_llama2_70b_lora_dataset(train_path, bs=1, seqlen=seqlen, tokenizer=FakeTokenizer(), val=True, samples=1)))
+      val_tokens, val_labels = next(iter(iterate_llama2_70b_lora_dataset(
+        train_path, bs=1, seqlen=seqlen, tokenizer=FakeTokenizer(), val=True, samples=1,
+      )))
       self.assertIn(-1, val_labels.numpy().tolist()[0])
       self.assertEqual(val_tokens.shape[0], 1)
 
@@ -130,7 +138,12 @@ class TestMLPerfLlama2LoRAEval(unittest.TestCase):
         "LLAMA_LORA_ALPHA": "8",
         "LLAMA_LORA_DROPOUT": "0",
       }
-      with patch.dict(os.environ, env, clear=False), patch.object(llama_helpers, "llama_benchmark_config", side_effect=lambda model_name, small=False: spec):
+      with (
+        patch.dict(os.environ, env, clear=False),
+        patch.object(
+          llama_helpers, "llama_benchmark_config", side_effect=lambda model_name, small=False: spec,
+        ),
+      ):
         eval_loss = eval_llama2_70b_lora()
 
     self.assertTrue(math.isfinite(eval_loss))
