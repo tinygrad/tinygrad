@@ -18,7 +18,7 @@ Use `extra/viz/cli.py --profile` to list all sources.
 DEBUG=3 extra/viz/cli.py --profile -s AMD --top 40
 
 # Reconstruct DEBUG=3 output exactly as the runtime.
-DEBUG=3 extra/viz/cli.py --profile -s AMD --runtime
+DEBUG=3 extra/viz/cli.py --profile -s AMD
 ```
 
 ## Inspect codegen and PatternMatcher
