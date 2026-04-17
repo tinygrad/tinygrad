@@ -163,7 +163,11 @@ def main(args) -> None:
         other_c = sum(c for _,(_,c,_) in items[num_rows:])
         kernels.append({"name":"Other", "fmt":f"{time_to_str(other_t, w=9)} {other_c:7d} {other_t/total*100.0:6.2f}%", "ref":None})
     else:
-      kernels = # iterator for all the events
+      kernels, cum_t = [], 0.0
+      for e in data["events"]:
+        cum_t += (et:=e["dur"] * 1e-6)
+        ptm = colored(time_to_str(et, w=9), "yellow" if et > 0.01 else None)
+        kernels.append({"name":e["name"], "fmt":f"tm {ptm}/{cum_t*1e3:9.2f}ms  "+e["fmt"].replace("\n", "    "), "ref":e["ref"]})
     for k in kernels:
       print(f"{fmt_colored(k['name'])}{' ' * max(0, 36 - ansilen(k['name']))} {k['fmt']}")
       if k["ref"] is not None:
