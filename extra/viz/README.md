@@ -14,11 +14,11 @@ Flags: VIZ=-1 to only save the trace to a file, VIZ=1 also launches a web server
 Use `extra/viz/cli.py --profile` to list all sources.
 
 ```bash
-# View top 40 slowest kernels and their AST (DEBUG=4 to see source code)
+# View top 40 slowest kernels on the AMD device and their AST (DEBUG=4 to see source code)
 DEBUG=3 extra/viz/cli.py --profile -s AMD --top 40
 
-# Reconstruct DEBUG=3 output exactly as the runtime.
-DEBUG=3 extra/viz/cli.py --profile -s AMD
+# Reconstruct DEBUG=3 output exactly as the runtime. (all devices)
+DEBUG=3 extra/viz/cli.py --profile -s ALL
 ```
 
 ## Inspect codegen and PatternMatcher

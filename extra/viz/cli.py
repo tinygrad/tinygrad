@@ -84,7 +84,7 @@ def main(args) -> None:
   profile = decode_profile(profile_bytes)
   profile["layout"].update([(f'{c["name"][5:]}{" SQTT" if s["name"].endswith("PKTS") else ""} {s["name"]}', s["data"]) for c in viz_data.ctxs
                             if c["name"].startswith("SQTT") for s in c["steps"] if s["name"].endswith(("PMC", "PKTS"))])
-  if args.src is None: return print("Select a source with -s"+"\n"+"\n".join([f"  {fmt_colored(k)}" for k in profile["layout"]])+"\n  ALL")
+  if args.src is None: return print("Select a source with -s"+"\n  ALL\n"+"\n".join([f"  {fmt_colored(k)}" for k in profile["layout"]]))
 
   # ** SQTT printer
   data = None if args.src == "ALL" else get(profile["layout"], args.src)
