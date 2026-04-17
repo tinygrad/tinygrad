@@ -253,7 +253,8 @@ def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False,
                 (init:=children(c)[-1]).kind == clang.CXCursor_InitListExpr):
               cs = children(init)
               if all(re.match(r"\[.*\].*=", readext(f, extent(ch))) for ch in cs):
-                macros += [f"{nm(c)} = {{{','.join(f'{readext(f, extent(next(it:=iter(children(ch)))))}:{readext(f, extent(next(it)))}' for ch in cs)}}}"]
+                items = ','.join(f'{readext(f, extent(next(it:=iter(children(ch)))))}:{readext(f, extent(next(it)))}' for ch in cs)
+                macros += [f"{nm(c)} = {{{items}}}"]
               else: macros += [f"{nm(c)} = ({','.join(readext(f, extent(ch)) for ch in cs)},)"]
             elif clang.clang_getCanonicalType(ty).kind in ints: macros += [f"{nm(c)} = {readext(f, extent(children(c)[-1]))}"]
             else: macros += [f"{nm(c)} = {tname(ty)}({readext(f, extent(children(c)[-1]))})"]
