@@ -116,6 +116,21 @@ class TestFlatLlama(unittest.TestCase):
     self.assertGreater(state["wqkv_lora_b"].grad.abs().max().item(), 0.0)
     self.assertGreater(state["wo_lora_b"].grad.abs().max().item(), 0.0)
 
+  def test_lora_adapter_state_dict(self):
+    params = dict(dim=128, hidden_dim=256, n_heads=4, n_kv_heads=2, n_layers=2, norm_eps=1e-5, vocab_size=1024, rope_theta=10000, max_context=64)
+    flat = FlatTransformer(**params, lora_rank=8, lora_alpha=16, lora_dropout=0.0)
+    adapter_state = flat.adapter_state_dict()
+    self.assertSetEqual(set(adapter_state), {"wqkv_lora_a", "wqkv_lora_b", "wo_lora_a", "wo_lora_b"})
+    self.assertListEqual(flat.adapter_parameters(), [
+      adapter_state["wqkv_lora_a"], adapter_state["wqkv_lora_b"], adapter_state["wo_lora_a"], adapter_state["wo_lora_b"],
+    ])
+
+  def test_adapter_state_dict_empty_without_lora(self):
+    params = dict(dim=128, hidden_dim=256, n_heads=4, n_kv_heads=2, n_layers=2, norm_eps=1e-5, vocab_size=1024, rope_theta=10000, max_context=64)
+    flat = FlatTransformer(**params)
+    self.assertEqual(flat.adapter_state_dict(), {})
+    self.assertEqual(flat.adapter_parameters(), [])
+
   @unittest.skipUnless(Device.DEFAULT == "CPU", "multi-device CPU test")
   def test_forward_match_mp(self):
     Tensor.manual_seed(42)

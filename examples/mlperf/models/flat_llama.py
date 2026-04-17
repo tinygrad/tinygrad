@@ -234,6 +234,13 @@ class FlatTransformer:
           for i in range(len(self._fp8_amax[name])):
             self._fp8_amax[name][i] = self._fp8_amax[name][i].to(device).contiguous().requires_grad_(False)
 
+  def adapter_state_dict(self) -> dict[str, Tensor]:
+    if not self.lora_rank: return {}
+    return {name: tensor for name, tensor in nn.state.get_state_dict(self).items() if "lora" in name}
+
+  def adapter_parameters(self) -> list[Tensor]:
+    return list(self.adapter_state_dict().values())
+
   def __call__(self, tokens:Tensor):
     h = self.tok_embeddings(tokens)
     freqs_cis = self.freqs_cis.cast(h.dtype)[:, :tokens.shape[1], :, :, :]
