@@ -4,6 +4,7 @@ os.environ["WQKV"] = "1"
 import sys, tempfile, types
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from tinygrad import Tensor
 from tinygrad.nn.state import get_state_dict, safe_save
@@ -15,7 +16,8 @@ if "tqdm" not in sys.modules:
     def write(*args, **kwargs): pass
   sys.modules["tqdm"] = types.SimpleNamespace(tqdm=_TqdmStub())
 
-from examples.mlperf.model_train import _llama_configure_trainable_params, _llama_load_model_checkpoint, _llama_sequences_seen
+from examples.mlperf.llama import llama_benchmark_config
+from examples.mlperf.model_train import _llama_checkpoint_path, _llama_configure_trainable_params, _llama_load_model_checkpoint, _llama_sequences_seen
 from examples.mlperf.models.flat_llama import FlatTransformer
 
 
@@ -51,6 +53,31 @@ class TestLlamaLoRATrainWiring(unittest.TestCase):
     self.assertEqual(_llama_sequences_seen(1, bs=3, grad_acc=4), 3)
     self.assertEqual(_llama_sequences_seen(2, bs=3, grad_acc=4), 6)
     self.assertEqual(_llama_sequences_seen(5, bs=3, grad_acc=4), 42)
+
+  def test_llama3_benchmark_config_uses_llama31_identity(self):
+    with patch.dict(os.environ, {"LLAMA3_SIZE": "8B"}, clear=False):
+      spec = llama_benchmark_config("llama3", small=False)
+    self.assertEqual(spec["submission_benchmark"], "llama3.1_8b")
+    self.assertEqual(spec["checkpoint_prefix"], "llama3")
+    self.assertEqual(spec["result_prefix"], "llama31")
+    self.assertEqual(spec["real_vocab_size"], 32000)
+    self.assertEqual(spec["model_params"]["vocab_size"], 32000)
+
+  def test_llama2_benchmark_config_uses_lora_identity(self):
+    spec = llama_benchmark_config("llama2_70b_lora", small=False)
+    self.assertEqual(spec["submission_benchmark"], "llama2_70b_lora")
+    self.assertEqual(spec["checkpoint_prefix"], "llama2_70b_lora")
+    self.assertEqual(spec["result_prefix"], "llama2_70b_lora")
+    self.assertEqual(spec["real_vocab_size"], 32000)
+    self.assertEqual(spec["model_params"]["dim"], 8192)
+    self.assertEqual(spec["model_params"]["n_kv_heads"], 8)
+    self.assertEqual(spec["model_params"]["n_layers"], 80)
+    self.assertEqual(spec["model_params"]["hidden_dim"], 28672)
+    self.assertEqual(spec["model_params"]["rope_theta"], 10000)
+
+  def test_checkpoint_path_uses_benchmark_prefix(self):
+    self.assertEqual(_llama_checkpoint_path("17", "llama3"), Path("./ckpts/llama3_17.safe"))
+    self.assertEqual(_llama_checkpoint_path("17", "llama2_70b_lora", "_state.safe"), Path("./ckpts/llama2_70b_lora_17_state.safe"))
 
 
 if __name__ == "__main__":

@@ -1283,7 +1283,7 @@ def train_bert():
 
 def train_llama3():
   from examples.mlperf.models.flat_llama import FlatTransformer, apply_grad, FP8
-  from examples.llama3 import MODEL_PARAMS
+  from examples.mlperf.llama import llama_benchmark_config
   from examples.mlperf.lr_schedulers import CosineAnnealingLRWithWarmup
   from examples.mlperf.optim import GradAccClipAdamW
 
@@ -1302,6 +1302,7 @@ def train_llama3():
   SEQLEN             = config["SEQLEN"]                 = getenv("SEQLEN", 8192)
   TRAIN_ON_VAL       = config["TRAIN_ON_VAL"]           = getenv("TRAIN_ON_VAL", 0)
   SMALL              = config["SMALL"]                  = getenv("SMALL", 0)
+  llama_spec = llama_benchmark_config("llama3", small=bool(SMALL))
   SAMPLES            = config["SAMPLES"]                = getenv("SAMPLES", 5_760 if TRAIN_ON_VAL else 1_200_000 * 1152)
   EVAL_SAMPLES       = config["EVAL_SAMPLES"]           = getenv("EVAL_SAMPLES", 5760 if not SMALL else 1024)
   MAX_STEPS          = config["MAX_STEPS"]              = getenv("MAX_STEPS", math.ceil(1_200_000 * 1152 / GBS))
@@ -1322,12 +1323,10 @@ def train_llama3():
     from mlperf_logging import mllog
     import mlperf_logging.mllog.constants as mllog_constants
 
-    mllog.config(filename=f"result_llama31_{SEED}.log")
+    mllog.config(filename=f"result_{llama_spec['result_prefix']}_{SEED}.log")
     mllog.config(root_dir=Path(__file__).parents[3].as_posix())
     MLLOGGER = mllog.get_mllogger()
     MLLOGGER.logger.propagate = False
-
-    LLAMA_BENCHMARK = mllog_constants.LLAMA31_405B if getenv("LLAMA3_SIZE", "8B") == "405B" else mllog_constants.LLAMA31_8B
 
     if INITMLPERF:
       assert BENCHMARK, "BENCHMARK must be set for INITMLPERF"
@@ -1336,7 +1335,7 @@ def train_llama3():
       MLLOGGER.event(key=mllog_constants.SUBMISSION_DIVISION, value=mllog_constants.CLOSED)
       MLLOGGER.event(key=mllog_constants.SUBMISSION_STATUS, value=mllog_constants.ONPREM)
 
-      MLLOGGER.event(key=mllog_constants.SUBMISSION_BENCHMARK, value=LLAMA_BENCHMARK)
+      MLLOGGER.event(key=mllog_constants.SUBMISSION_BENCHMARK, value=llama_spec["submission_benchmark"])
 
       diskcache_clear()
       MLLOGGER.event(key=mllog_constants.CACHE_CLEAR, value=True)
@@ -1384,12 +1383,10 @@ def train_llama3():
   if WANDB:
     import wandb
     wandb_args = {"id": wandb_id, "resume": "must"} if (wandb_id := getenv("WANDB_RESUME", "")) else {}
-    wandb.init(config=config, **wandb_args, project="MLPerf-LLaMA3")
+    wandb.init(config=config, **wandb_args, project=llama_spec["wandb_project"])
 
-  model_params = MODEL_PARAMS[getenv("LLAMA3_SIZE", "8B")]["args"]
-  # vocab_size from the mixtral tokenizer
-  if not SMALL: model_params |= {"vocab_size": 32000}
-  real_vocab_size = model_params['vocab_size']
+  model_params = dict(llama_spec["model_params"])
+  real_vocab_size = llama_spec["real_vocab_size"]
   if (llama_layers:=getenv("LLAMA_LAYERS")) != 0: model_params['n_layers'] = llama_layers
   print(f"model parameters: {model_params | lora_params}")
 
@@ -1416,7 +1413,7 @@ def train_llama3():
   if is_mp: vocab_mask.shard_(device, axis=2).realize()
 
   if LOAD_CKPT:
-    fn = _llama_load_model_checkpoint(model, LOAD_CKPT, strict=not adapter_only)
+    fn = _llama_load_model_checkpoint(model, LOAD_CKPT, checkpoint_prefix=llama_spec["checkpoint_prefix"], strict=not adapter_only)
     print(f"loading model checkpoint from {fn}")
 
   optim_params, trainable_names = _llama_configure_trainable_params(model, adapter_only=adapter_only)
@@ -1439,7 +1436,7 @@ def train_llama3():
 
   start_step = 0
   if RESUME_CKPT:
-    resume_state = _llama_checkpoint_path(RESUME_CKPT, "_state.safe")
+    resume_state = _llama_checkpoint_path(RESUME_CKPT, llama_spec["checkpoint_prefix"], "_state.safe")
     if resume_state.exists():
       state_dict = safe_load(resume_state)
       if _llama_is_training_state(state_dict):
@@ -1448,11 +1445,12 @@ def train_llama3():
         start_step = int(scheduler.epoch_counter.item())
       else:
         print(f"{resume_state} is not a trainer checkpoint, loading model weights only")
-        load_state_dict(model, _llama_model_state_dict(state_dict), strict=not adapter_only, realize=False)
+        from examples.mlperf.llama import llama_model_state_dict
+        load_state_dict(model, llama_model_state_dict(state_dict), strict=not adapter_only, realize=False)
     else:
-      fn = _llama_load_model_checkpoint(model, RESUME_CKPT, strict=not adapter_only)
+      fn = _llama_load_model_checkpoint(model, RESUME_CKPT, checkpoint_prefix=llama_spec["checkpoint_prefix"], strict=not adapter_only)
       print(f"loading model checkpoint from {fn}")
-      optim_fn = _llama_checkpoint_path(RESUME_CKPT, "_optim.safe")
+      optim_fn = _llama_checkpoint_path(RESUME_CKPT, llama_spec["checkpoint_prefix"], "_optim.safe")
       if adapter_only:
         print("skipping legacy optimizer checkpoint load for adapter-only training")
       elif optim_fn.exists():
@@ -1600,16 +1598,16 @@ def train_llama3():
       if (ckpt_freq := getenv("CKPT")) and (i % ckpt_freq == 0 and (i != 1 or ckpt_freq == 1)):
         tqdm.write("saving checkpoint")
         if not os.path.exists(ckpt_dir := "./ckpts"): os.mkdir(ckpt_dir)
-        fn = f"{ckpt_dir}/llama3_{i}.safe"
+        fn = f"{ckpt_dir}/{llama_spec['checkpoint_prefix']}_{i}.safe"
         safe_save(get_state_dict(model), fn)
 
         tqdm.write("saving trainer checkpoint")
-        fn = f"{ckpt_dir}/llama3_{i}_state.safe"
+        fn = f"{ckpt_dir}/{llama_spec['checkpoint_prefix']}_{i}_state.safe"
         safe_save(get_training_state(model, optim, scheduler), fn)
 
       if i == BENCHMARK:
         median_step_time = sorted(step_times)[BENCHMARK // 2]
-        estimated_steps = 200_000 // GBS if getenv("LLAMA3_SIZE", "8B") == "8B" else MAX_STEPS
+        estimated_steps = llama_spec["benchmark_steps"](GBS, MAX_STEPS)
         estimated_total_minutes = int(median_step_time * estimated_steps / 60)
         print(f"Estimated training time: {estimated_total_minutes // 60}h{estimated_total_minutes % 60}m")
         print(f"epoch global_ops: {GlobalCounters.global_ops:_}, "
@@ -1656,7 +1654,7 @@ def train_llama3():
           MLLOGGER.end(key=mllog_constants.RUN_STOP, metadata={mllog_constants.STATUS: mllog_constants.SUCCESS})
         if getenv("CKPT"):
           if not os.path.exists(ckpt_dir := "./ckpts"): os.mkdir(ckpt_dir)
-          fn = f"{ckpt_dir}/llama3.safe"
+          fn = f"{ckpt_dir}/{llama_spec['checkpoint_prefix']}.safe"
           safe_save(get_state_dict(model), fn)
         break
       if MLLOGGER and RUNMLPERF:
@@ -1682,22 +1680,20 @@ def _llama_configure_trainable_params(model, adapter_only:bool=False) -> tuple[l
   if adapter_only and not params: raise RuntimeError("adapter-only optimization requested, but no LoRA parameters were found")
   return params, trainable_names
 
-def _llama_checkpoint_path(ckpt_ref:str, suffix:str=".safe") -> Path:
+def _llama_checkpoint_path(ckpt_ref:str, checkpoint_prefix:str, suffix:str=".safe") -> Path:
   ckpt_path = Path(ckpt_ref)
   if ckpt_path.is_absolute() or ckpt_path.parent != Path(".") or ckpt_path.suffix:
     return ckpt_path
-  return Path("./ckpts") / f"llama3_{ckpt_ref}{suffix}"
-
-def _llama_model_state_dict(state_dict:dict[str, Tensor]) -> dict[str, Tensor]:
-  return {k.removeprefix("model."): v for k, v in state_dict.items() if k.startswith("model.")} or state_dict
+  return Path("./ckpts") / f"{checkpoint_prefix}_{ckpt_ref}{suffix}"
 
 def _llama_is_training_state(state_dict:dict[str, Tensor]) -> bool:
   return any(k.startswith("optimizer.") or k.startswith("scheduler.") for k in state_dict)
 
-def _llama_load_model_checkpoint(model, ckpt_ref:str, strict:bool=True) -> Path:
-  ckpt_path = _llama_checkpoint_path(ckpt_ref)
+def _llama_load_model_checkpoint(model, ckpt_ref:str, checkpoint_prefix:str="llama3", strict:bool=True) -> Path:
+  from examples.mlperf.llama import llama_model_state_dict
+  ckpt_path = _llama_checkpoint_path(ckpt_ref, checkpoint_prefix)
   state_dict = safe_load(ckpt_path)
-  load_state_dict(model, _llama_model_state_dict(state_dict), strict=strict, realize=False)
+  load_state_dict(model, llama_model_state_dict(state_dict), strict=strict, realize=False)
   return ckpt_path
 
 def _llama_sequences_seen(step:int, bs:int, grad_acc:int, unaccumulated_steps:int=2) -> int:

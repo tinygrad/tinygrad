@@ -1,5 +1,5 @@
-import os, random, pickle, queue, struct, math, functools, hashlib, time
-from typing import List
+import json, os, random, pickle, queue, struct, math, functools, hashlib, time
+from typing import Iterator, List
 from pathlib import Path
 from multiprocessing import Queue, Process, shared_memory, connection, Lock, cpu_count
 
@@ -776,6 +776,77 @@ def iterate_llama3_dataset(dataset:BlendedGPTDataset, bs:int):
 
 def batch_load_llama3(bs:int, samples:int, seqlen:int, base_dir:Path, seed:int=0, val:bool=True, small:bool=False):
   return iterate_llama3_dataset(get_llama3_dataset(samples, seqlen, base_dir, seed, val, small), bs)
+
+
+def _llama2_70b_lora_files(dataset_ref:str|Path, val:bool=True) -> list[Path]:
+  dataset_path = Path(dataset_ref)
+  if "*" in str(dataset_ref):
+    return sorted(dataset_path.parent.glob(dataset_path.name))
+  if dataset_path.is_dir():
+    pattern = "validation-*.parquet" if val else "train-*.parquet"
+    return sorted(dataset_path.glob(pattern))
+  return [dataset_path]
+
+
+def _llama2_70b_lora_records(dataset_ref:str|Path, val:bool=True) -> Iterator[dict]:
+  for fn in _llama2_70b_lora_files(dataset_ref, val=val):
+    if fn.suffix == ".jsonl":
+      with open(fn) as f:
+        for line in f:
+          line = line.strip()
+          if line: yield json.loads(line)
+    elif fn.suffix == ".json":
+      with open(fn) as f:
+        dat = json.load(f)
+      if isinstance(dat, dict) and ("validation" if val else "train") in dat:
+        yield from dat["validation" if val else "train"]
+      else:
+        yield from dat
+    elif fn.suffix == ".parquet":
+      try:
+        import pyarrow.parquet as pq
+      except ImportError as e:
+        raise ImportError("reading llama2_70b_lora parquet data requires pyarrow") from e
+      for batch in pq.ParquetFile(fn).iter_batches():
+        yield from batch.to_pylist()
+    else:
+      raise ValueError(f"unsupported llama2_70b_lora dataset file {fn}")
+
+
+def _llama2_70b_lora_tokens(record:dict, tokenizer=None) -> tuple[list[int], list[int]]:
+  if "input_ids" in record:
+    input_ids = list(record["input_ids"])
+    labels = list(record.get("labels", input_ids))
+    return input_ids, labels
+  if tokenizer is None:
+    raise ValueError("llama2_70b_lora raw input/output records require a tokenizer")
+  from examples.mlperf.llama import llama2_70b_lora_encode_sample
+  return llama2_70b_lora_encode_sample(tokenizer, record["input"], record["output"])
+
+
+def iterate_llama2_70b_lora_dataset(dataset_ref:str|Path, bs:int, seqlen:int, tokenizer=None, val:bool=True):
+  input_buffer:list[int] = []
+  label_buffer:list[int] = []
+  batch_inputs:list[list[int]] = []
+  batch_labels:list[list[int]] = []
+
+  for record in _llama2_70b_lora_records(dataset_ref, val=val):
+    input_ids, labels = _llama2_70b_lora_tokens(record, tokenizer)
+    if len(input_ids) != len(labels): raise ValueError("input_ids and labels must have the same length")
+    if len(input_ids) > seqlen: continue
+    input_buffer.extend(input_ids)
+    label_buffer.extend(labels)
+    while len(input_buffer) >= seqlen:
+      batch_inputs.append(input_buffer[:seqlen])
+      batch_labels.append(label_buffer[:seqlen])
+      del input_buffer[:seqlen]
+      del label_buffer[:seqlen]
+      if len(batch_inputs) == bs:
+        yield Tensor(np.array(batch_inputs, dtype=np.int32), device="NPY"), Tensor(np.array(batch_labels, dtype=np.int32), device="NPY")
+        batch_inputs, batch_labels = [], []
+
+  if batch_inputs:
+    yield Tensor(np.array(batch_inputs, dtype=np.int32), device="NPY"), Tensor(np.array(batch_labels, dtype=np.int32), device="NPY")
 
 if __name__ == "__main__":
   def load_unet3d(val):
