@@ -67,7 +67,7 @@ def main(args) -> None:
     if args.src is None:
       print("Select a source with -s")
       for k in profile["layout"]: print(f"  {format_colored(k)}")
-      exit(1)
+      return None
 
     # ** SQTT printer
     data = get(profile["layout"], args.src)
