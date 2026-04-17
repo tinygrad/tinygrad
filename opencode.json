@@ -13,8 +13,8 @@
         "chunkTimeout": 600000
       },
       "models": {
-        "qwen3:8b": {
-          "name": "Qwen3 8B (local)",
+        "qwen3.5:4b": {
+          "name": "Qwen3.5 4B (local)",
           "limit": {
             "context": 32768,
             "output": 8192
@@ -23,5 +23,5 @@
       }
     }
   },
-  "model": "tinygrad/qwen3:8b"
+  "model": "tinygrad/qwen3.5:4b"
 }
