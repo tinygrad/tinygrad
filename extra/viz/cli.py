@@ -6,6 +6,7 @@ from typing import Iterator
 from tinygrad.viz import serve as viz
 from tinygrad.uop.ops import RewriteTrace
 from tinygrad.helpers import temp, ansistrip, colored, time_to_str, ansilen, ProfilePointEvent, ProfileRangeEvent, TracingKey, unwrap, NO_COLOR
+from tinygrad.helpers import DEBUG
 
 # profile decoder used in CLI and tests
 def decode_profile(data:bytes) -> dict:
@@ -64,8 +65,7 @@ def main(args) -> None:
     profile["layout"].update([(f'{c["name"][5:]}{" SQTT" if s["name"].endswith("PKTS") else ""} {s["name"]}', s["data"]) for c in viz_data.ctxs
                               if c["name"].startswith("SQTT") for s in c["steps"] if s["name"].endswith(("PMC", "PKTS"))])
     if args.src is None:
-      for k in profile["layout"]:
-        print(f"  {format_colored(k)}")
+      for k in profile["layout"]: print(f"  {format_colored(k)}")
       return None
 
     # ** SQTT printer
@@ -111,8 +111,10 @@ def main(args) -> None:
         elif args.item == r[0]:
           rows = r[2]["rows"] if len(r) > 2 else [r[:2]]
           cols = r[2]["cols"] if len(r) > 2 else cols
-      from tabulate import tabulate
-      print(tabulate(rows, headers=cols, tablefmt="github"))
+      data = [[x for x in cols], *[[str(x) for x in r] for r in rows]]
+      widths = [max(len(r[i]) for r in data) for i in range(len(cols))]
+      def fmt(r): return "| "+" | ".join(x+" "*(w-len(x)) for x,w in zip(r, widths))+" |"
+      print(fmt(data[0])+"\n"+fmt(["-"*w for w in widths])+"\n"+("\n".join([fmt(row) for row in data[1:]])))
       return None
 
     # ** Memory printer
@@ -141,15 +143,14 @@ def main(args) -> None:
         agg[e["name"]] = (t+et, c+1)
         total += et
     if agg and total > 0:
-      from tabulate import tabulate
       items = sorted(agg.items(), key=lambda kv:kv[1][0], reverse=True)
       num_rows = 20
-      table = [[format_colored(name), time_to_str(t, w=9), c, f"{(t/total*100.0):.2f}%"] for name,(t,c) in items[:num_rows]]
+      for name,(t,c) in items[:num_rows]:
+        print(f"{format_colored(name)}{' ' * max(0, 36 - ansilen(name))} {time_to_str(t, w=9)} {c:7d} {t/total*100.0:6.2f}%")
       if items[num_rows:]:
         other_t = sum(t for _,(t,_) in items[num_rows:])
         other_c = sum(c for _,(_,c) in items[num_rows:])
-        table.append(["Other", time_to_str(other_t, w=9), other_c, f"{(other_t/total*100.0):.2f}%"])
-      print(tabulate(table, headers=["name", "total", "count", "pct"], tablefmt="github"))
+        print(f"{'Other':<36} {time_to_str(other_t, w=9)} {other_c:7d} {other_t/total*100.0:6.2f}%")
     return None
 
   # ** Graph rewrites printer
