@@ -78,7 +78,9 @@ class _System:
   @functools.cache
   def list_devices(self, vendor:int, devices:tuple[tuple[int, tuple[int, ...]], ...], base_class:int|None=None):
     if getenv("REMOTE", ""): return [(functools.partial(RemotePCIDevice,sock=s), x) for s,x in RemotePCIDevice.remote_list(vendor,devices,base_class)]
-    return [(APLRemotePCIDevice if OSX else PCIDevice, x) for x in System.pci_scan_bus(vendor, devices, base_class)]
+    scanned = System.pci_scan_bus(vendor, devices, base_class)
+    if OSX: return [(APLRemotePCIDevice, f"usb4:{i}") for i, _ in enumerate(scanned)]
+    return [(PCIDevice, x) for x in scanned]
 
   def pci_probe_device(self, device:str, dev_id:int, vendor:int, devices:tuple[tuple[int, tuple[int, ...]], ...], base_class:int|None=None):
     cl, pcibus = hcq_filter_visible_devices(self.list_devices(vendor, devices, base_class), device)[dev_id]
@@ -422,7 +424,7 @@ class APLRemotePCIDevice(RemotePCIDevice):
       if i == 0: subprocess.Popen([self.APP_PATH, "server", sock_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
       time.sleep(0.05)
     else: raise RuntimeError(f"Failed to connect to TinyGPU server at {sock_path}.")
-    super().__init__(devpref, "usb4", sock=sock)
+    super().__init__(devpref, pcibus, sock=sock)
 
   def alloc_sysmem(self, size:int, vaddr:int=0, contiguous:bool=False) -> tuple[MMIOInterface, list[int]]:
     mapped_size, _, _, fd = self._rpc(self.sock, self.dev_id, RemoteCmd.MAP_SYSMEM_FD, size, int(contiguous), has_fd=True)
