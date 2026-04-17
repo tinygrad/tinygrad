@@ -65,8 +65,9 @@ def main(args) -> None:
     profile["layout"].update([(f'{c["name"][5:]}{" SQTT" if s["name"].endswith("PKTS") else ""} {s["name"]}', s["data"]) for c in viz_data.ctxs
                               if c["name"].startswith("SQTT") for s in c["steps"] if s["name"].endswith(("PMC", "PKTS"))])
     if args.src is None:
+      print("Select a source with -s")
       for k in profile["layout"]: print(f"  {format_colored(k)}")
-      return None
+      exit(1)
 
     # ** SQTT printer
     data = get(profile["layout"], args.src)
