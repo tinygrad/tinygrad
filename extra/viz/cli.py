@@ -88,7 +88,7 @@ def main(args) -> None:
 
   # ** SQTT printer
   data = None if args.src == "ALL" else get(profile["layout"], args.src)
-  if data is not None and "SQTT" in args.src:
+  if "SQTT" in args.src:
     # modern terminals support 24-bit color
     def hex_colored(st:str, color:str) -> str: return f"\x1b[38;2;{int(color[1:3],16)};{int(color[3:5],16)};{int(color[5:7],16)}m{st}\x1b[0m"
     print(f"{'Clk':<12} {'Unit':<20} {'Op':<22} {'Dur':<4} {'Delay':<4} {'Info'}")
@@ -119,7 +119,7 @@ def main(args) -> None:
       print(f"{int(e.st)-inst_st:<12} {unit:<20} {op_str}{' '*(22-ansilen(op_str))} {int(unwrap(e.en)-e.st):<4} {str(delay or ''):<4} {info}")
 
   # ** PMC printer
-  elif data is not None and "PMC" in args.src:
+  elif "PMC" in args.src:
     pmc = viz.unpack_pmc(data)
     cols = pmc["cols"]
     rows:list = []
@@ -175,7 +175,7 @@ def main(args) -> None:
           continue
         et, timestamp, ext = e["dur"] * 1e-6, (e["st"] - st0 + e["dur"]) * 1e-6, None
         ptm = colored(time_to_str(et, w=9), "yellow" if et > 0.01 else None)
-        if e["fmt"].startswith("TB:"): ext, e["fmt"] = e["fmt"].replace("TB:\n", ""), ""
+        if e["fmt"].startswith("TB:"): e["fmt"] = "" # TODO: print python backtrace at a reasonable DEBUG level
         fmt_str = "  ".join(p+" "*max(0, 14-ansilen(p)) for p in e["fmt"].split("\n"))
         name = f"*** {dev[:7]:7s} "+e["name"]+" "*(46-ansilen(e["name"]))
         yield {"name":name, "fmt":f"tm {ptm}/{timestamp*1e3:9.2f}ms"+(f" ({fmt_str})" if e["fmt"] else ""), "ref":e["ref"], "ext":ext}
@@ -184,8 +184,7 @@ def main(args) -> None:
       if k["ref"] is not None:
         steps = rewrites[viz_data.ctxs[k["ref"]]["name"]]
         if DEBUG >= 3 and (ast_step:=steps.get("View Base AST")) is not None: print_step(ast_step)
-        if DEBUG >= 4: print_step(steps["View Source"])
-      elif DEBUG >= 4 and k.get("ext") is not None: print(k["ext"])
+        if DEBUG >= 4 and (src_step:=steps.get("View Source")) is not None: print_step(src_step)
 
 def get_arg_parser() -> argparse.ArgumentParser:
   parser = argparse.ArgumentParser(add_help=False)

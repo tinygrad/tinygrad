@@ -918,8 +918,6 @@ class TestCLI(unittest.TestCase):
       self.assertIn("void custom_empty_n1", kernels)
       self.assertIn("E", kernels)
       self.assertIn("UOp.const", kernels)
-      # TODO: assert line numbers
-
       # get the top slowest functions across all devices
       with Context(DEBUG=2):
         times = run_cli("--rewrites-path", str(r), "--profile-path", str(p), "-p", "-s", "ALL", "--top", "-1")
