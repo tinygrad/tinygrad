@@ -128,10 +128,10 @@ def main(args) -> None:
       elif args.item == r[0]:
         rows = r[2]["rows"] if len(r) > 2 else [r[:2]]
         cols = r[2]["cols"] if len(r) > 2 else cols
-    data = [[x for x in cols], *[[str(x) for x in r] for r in rows]]
-    widths = [max(len(r[i]) for r in data) for i in range(len(cols))]
+    pmc_data = [[x for x in cols], *[[str(x) for x in r] for r in rows]]
+    widths = [max(len(r[i]) for r in pmc_data) for i in range(len(cols))]
     def fmt(r): return "| "+" | ".join(x+" "*(w-len(x)) for x,w in zip(r, widths))+" |"
-    print(fmt(data[0])+"\n"+fmt(["-"*w for w in widths])+"\n"+("\n".join([fmt(row) for row in data[1:]])))
+    print(fmt(pmc_data[0])+"\n"+fmt(["-"*w for w in widths])+"\n"+("\n".join([fmt(row) for row in pmc_data[1:]])))
 
   # ** Memory printer
   elif data["event_type"] == 1:
