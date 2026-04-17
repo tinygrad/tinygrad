@@ -1,6 +1,6 @@
 import unittest, ctypes, struct, os, random, numpy as np, time
 from tinygrad import Device, Tensor, dtypes
-from tinygrad.helpers import getenv, mv_address, DEBUG, DEV
+from tinygrad.helpers import mv_address, DEBUG, DEV
 from test.helpers import slow, replace_opts
 from tinygrad.device import Buffer, BufferSpec
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQBuffer
@@ -10,7 +10,7 @@ from tinygrad.engine.realize import get_runner, CompiledRunner, get_program
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad import Variable
 
-MOCKGPU = getenv("MOCKGPU")
+MOCKGPU = DEV.interface.startswith("MOCK")
 
 @unittest.skipUnless(issubclass(type(Device[Device.DEFAULT]), HCQCompiled), "HCQ device required to run")
 class TestHCQ(unittest.TestCase):
