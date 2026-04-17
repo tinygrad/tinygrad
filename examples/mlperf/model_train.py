@@ -1311,6 +1311,12 @@ def train_llama3():
   EVAL_FREQ          = config["EVAL_FREQ"]              = getenv("EVAL_FREQ", 46080)
   EVAL_BS            = config["EVAL_BS"]                = getenv("EVAL_BS", 16)
   EVAL_TARGET        = config["EVAL_TARGET"]            = getenv("EVAL_TARGET", 5.6)
+  LOAD_CKPT          = config["LOAD_CKPT"]              = getenv("LOAD_CKPT", "")
+  RESUME_CKPT        = config["RESUME_CKPT"]            = getenv("RESUME_CKPT", "")
+  assert not (LOAD_CKPT and RESUME_CKPT), "LOAD_CKPT and RESUME_CKPT are mutually exclusive"
+  lora_params = _llama_lora_config(config)
+  adapter_only = bool(lora_params)
+  config["LLAMA_LORA_ADAPTER_ONLY"] = adapter_only
 
   if LOGMLPERF:
     from mlperf_logging import mllog
@@ -1385,18 +1391,17 @@ def train_llama3():
   if not SMALL: model_params |= {"vocab_size": 32000}
   real_vocab_size = model_params['vocab_size']
   if (llama_layers:=getenv("LLAMA_LAYERS")) != 0: model_params['n_layers'] = llama_layers
-  print(f"model parameters: {model_params}")
+  print(f"model parameters: {model_params | lora_params}")
 
   # pad vocab
   if (MP := getenv("MP", 1)) > 1: model_params['vocab_size'] = round_up(model_params['vocab_size'], 256 * MP)
   vocab_mask:Tensor = Tensor.arange(model_params['vocab_size']).reshape(1, 1, -1) >= real_vocab_size
 
-  model = FlatTransformer(**model_params, max_context=SEQLEN)
-
+  model = FlatTransformer(**model_params, max_context=SEQLEN, **lora_params)
   params = get_parameters(model)
 
   if getenv("FAKEDATA"):
-    for v in get_parameters(model):
+    for v in params:
       v = v.assign(Tensor.empty(v.shape, dtype=v.dtype))
 
   is_dp = (DP := getenv("DP", 1)) > 1
@@ -1410,10 +1415,19 @@ def train_llama3():
   if is_dp: vocab_mask.shard_(device, axis=None).realize()
   if is_mp: vocab_mask.shard_(device, axis=2).realize()
 
+  if LOAD_CKPT:
+    fn = _llama_load_model_checkpoint(model, LOAD_CKPT, strict=not adapter_only)
+    print(f"loading model checkpoint from {fn}")
+
+  optim_params, trainable_names = _llama_configure_trainable_params(model, adapter_only=adapter_only)
+  config["TRAINABLE_PARAM_COUNT"] = sum(p.numel() for p in optim_params)
+  config["TRAINABLE_PARAM_NAMES"] = sorted(trainable_names) if adapter_only else "all"
+  print(f"optimizing {config['TRAINABLE_PARAM_COUNT']:_} parameters{' (LoRA adapters only)' if adapter_only else ''}")
+
   is_offload_optim = bool(getenv("OFFLOAD_OPTIM"))
   is_fake_offload = Device.DEFAULT == "NULL"
   optim_device = ("CPU" if not is_fake_offload else "NULL:99") if is_offload_optim else None
-  optim = GradAccClipAdamW(params, lr=0.0, b1=opt_adamw_beta_1, b2=opt_adamw_beta_2,
+  optim = GradAccClipAdamW(optim_params, lr=0.0, b1=opt_adamw_beta_1, b2=opt_adamw_beta_2,
                            eps=opt_adamw_epsilon, weight_decay=opt_adamw_weight_decay, grad_acc=grad_acc, device=optim_device)
 
   # init grads
@@ -1423,14 +1437,31 @@ def train_llama3():
 
   scheduler = CosineAnnealingLRWithWarmup(optim, opt_base_learning_rate, opt_end_learning_rate, opt_learning_rate_warmup_steps, opt_learning_rate_decay_steps)
 
-  if resume_ckpt := getenv("RESUME_CKPT"):
-    fn = f"./ckpts/llama3_{resume_ckpt}.safe"
-    print(f"loading initial checkpoint from {fn}")
-    load_state_dict(model, safe_load(fn), realize=False)
-
-    fn = f"./ckpts/llama3_{resume_ckpt}_optim.safe"
-    print(f"loading optim checkpoint from {fn}")
-    load_state_dict(scheduler, safe_load(fn), realize=False)
+  start_step = 0
+  if RESUME_CKPT:
+    resume_state = _llama_checkpoint_path(RESUME_CKPT, "_state.safe")
+    if resume_state.exists():
+      state_dict = safe_load(resume_state)
+      if _llama_is_training_state(state_dict):
+        print(f"loading trainer checkpoint from {resume_state}")
+        load_training_state(model, optim, scheduler, state_dict)
+        start_step = int(scheduler.epoch_counter.item())
+      else:
+        print(f"{resume_state} is not a trainer checkpoint, loading model weights only")
+        load_state_dict(model, _llama_model_state_dict(state_dict), strict=not adapter_only, realize=False)
+    else:
+      fn = _llama_load_model_checkpoint(model, RESUME_CKPT, strict=not adapter_only)
+      print(f"loading model checkpoint from {fn}")
+      optim_fn = _llama_checkpoint_path(RESUME_CKPT, "_optim.safe")
+      if adapter_only:
+        print("skipping legacy optimizer checkpoint load for adapter-only training")
+      elif optim_fn.exists():
+        print(f"loading legacy optim checkpoint from {optim_fn}")
+        load_state_dict(scheduler, safe_load(optim_fn), realize=False)
+        start_step = int(scheduler.epoch_counter.item())
+      else:
+        print(f"no optimizer checkpoint found at {optim_fn}, starting optimizer and scheduler fresh")
+    print(f"loaded checkpoint {RESUME_CKPT} at step {start_step}, {_llama_sequences_seen(start_step, BS, grad_acc)} sequences")
 
   fp8_amax = [t for ts in model._fp8_amax.values() for t in ts] if FP8 else []
 
@@ -1499,7 +1530,7 @@ def train_llama3():
 
   num_params = sum(p.numel() for p in params) - model_params["vocab_size"]*model_params["dim"]
   train_iter = get_train_iter()
-  i, sequences_seen = resume_ckpt, 0
+  i, sequences_seen = start_step, _llama_sequences_seen(start_step, BS, grad_acc)
   step_times = []
 
   if MLLOGGER and RUNMLPERF:
@@ -1572,9 +1603,9 @@ def train_llama3():
         fn = f"{ckpt_dir}/llama3_{i}.safe"
         safe_save(get_state_dict(model), fn)
 
-        tqdm.write("saving optim checkpoint")
-        fn = f"{ckpt_dir}/llama3_{i}_optim.safe"
-        safe_save(get_state_dict(scheduler), fn)
+        tqdm.write("saving trainer checkpoint")
+        fn = f"{ckpt_dir}/llama3_{i}_state.safe"
+        safe_save(get_training_state(model, optim, scheduler), fn)
 
       if i == BENCHMARK:
         median_step_time = sorted(step_times)[BENCHMARK // 2]
@@ -1630,6 +1661,47 @@ def train_llama3():
         break
       if MLLOGGER and RUNMLPERF:
         MLLOGGER.start(key=mllog_constants.BLOCK_START, metadata={mllog_constants.SAMPLES_COUNT: sequences_seen})
+
+def _llama_lora_config(config:dict) -> dict[str, int|float]:
+  lora_rank = config["LLAMA_LORA_RANK"] = getenv("LLAMA_LORA_RANK", 0)
+  lora_alpha = config["LLAMA_LORA_ALPHA"] = getenv("LLAMA_LORA_ALPHA", float(lora_rank) if lora_rank else 1.0)
+  lora_dropout = config["LLAMA_LORA_DROPOUT"] = getenv("LLAMA_LORA_DROPOUT", 0.0)
+  if lora_rank < 0: raise ValueError(f"invalid {lora_rank=}")
+  if lora_alpha <= 0: raise ValueError(f"invalid {lora_alpha=}")
+  if not 0.0 <= lora_dropout < 1.0: raise ValueError(f"invalid {lora_dropout=}")
+  return {"lora_rank": lora_rank, "lora_alpha": lora_alpha, "lora_dropout": lora_dropout} if lora_rank else {}
+
+def _llama_configure_trainable_params(model, adapter_only:bool=False) -> tuple[list[Tensor], set[str]]:
+  params, trainable_names = [], set()
+  for name, tensor in get_state_dict(model).items():
+    trainable = not adapter_only or "_lora_" in name
+    tensor.requires_grad_(trainable)
+    if trainable:
+      params.append(tensor)
+      trainable_names.add(name)
+  if adapter_only and not params: raise RuntimeError("adapter-only optimization requested, but no LoRA parameters were found")
+  return params, trainable_names
+
+def _llama_checkpoint_path(ckpt_ref:str, suffix:str=".safe") -> Path:
+  ckpt_path = Path(ckpt_ref)
+  if ckpt_path.is_absolute() or ckpt_path.parent != Path(".") or ckpt_path.suffix:
+    return ckpt_path
+  return Path("./ckpts") / f"llama3_{ckpt_ref}{suffix}"
+
+def _llama_model_state_dict(state_dict:dict[str, Tensor]) -> dict[str, Tensor]:
+  return {k.removeprefix("model."): v for k, v in state_dict.items() if k.startswith("model.")} or state_dict
+
+def _llama_is_training_state(state_dict:dict[str, Tensor]) -> bool:
+  return any(k.startswith("optimizer.") or k.startswith("scheduler.") for k in state_dict)
+
+def _llama_load_model_checkpoint(model, ckpt_ref:str, strict:bool=True) -> Path:
+  ckpt_path = _llama_checkpoint_path(ckpt_ref)
+  state_dict = safe_load(ckpt_path)
+  load_state_dict(model, _llama_model_state_dict(state_dict), strict=strict, realize=False)
+  return ckpt_path
+
+def _llama_sequences_seen(step:int, bs:int, grad_acc:int, unaccumulated_steps:int=2) -> int:
+  return min(step, unaccumulated_steps) * bs + max(step - unaccumulated_steps, 0) * bs * grad_acc
 
 def train_stable_diffusion():
   from extra.models.unet import UNetModel
