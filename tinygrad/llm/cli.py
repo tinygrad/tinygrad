@@ -56,7 +56,7 @@ class SimpleTokenizer:
     return tokens + self._encode_sentence(text[pos:])
 
   def decode(self, ids:list[int]) -> str: return b''.join(self._tok2bytes[tid] for tid in ids).decode(errors='replace')
-  def stream_decoder(self) -> typing.Callable[[int|None], str]:
+  def stream_decoder(self) -> typing.Callable[..., str]:
     dec = codecs.getincrementaldecoder('utf-8')('replace')
     def _decode(tid:int|None=None) -> str: return dec.decode(self._tok2bytes[tid]) if tid is not None else dec.decode(b'', final=True)
     return _decode
@@ -545,12 +545,23 @@ CHAT_HTML = b'''<!DOCTYPE html><html><head><title>tinygrad chat</title><style>
   }
 </script></body></html>'''
 
+class LLMServer(TCPServerWithReuse):
+  model: Transformer
+  model_name: str
+  tok: SimpleTokenizer
+  # TODO: tastefully move these into tokenizer
+  bos_id: int|None
+  eos_id: int
+  eot_id: int|None
+
 class Handler(HTTPRequestHandler):
+  server: LLMServer
   def log_request(self, code='-', size='-'): pass
   def do_GET(self):
-    if self.path == "/v1/models": self.send_data(json.dumps({"object":"list","data":[{"id":model_name,"object":"model"}]}).encode())
+    if self.path == "/v1/models": self.send_data(json.dumps({"object":"list","data":[{"id":self.server.model_name,"object":"model"}]}).encode())
     else: self.send_data(CHAT_HTML, content_type="text/html")
   def run_model(self, ids:list[int], model_name:str, include_usage=False, max_tokens:int|None=None, temperature:float=0.0):
+    model, tok, eos_id, eot_id = self.server.model, self.server.tok, self.server.eos_id, self.server.eot_id
     cache_start_pos = model.get_start_pos(ids)
     stderr_log(f"{self.path}  {colored('--', 'BLACK')}  "
                f"in:{colored(f'{cache_start_pos:5d}', 'green')} +{len(ids)-cache_start_pos:5d}  {colored('--', 'BLACK')}  ")
@@ -577,6 +588,7 @@ class Handler(HTTPRequestHandler):
                f"out:{len(out):5d}  {colored('--', 'BLACK')}  total:{et-st:6.2f}s\n")
 
   def do_POST(self):
+    tok, bos_id, eos_id = self.server.tok, self.server.bos_id, self.server.eos_id
     raw_body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
     body: dict[str, typing.Any] = json.loads(raw_body.decode("utf-8"))
     if DEBUG >= 1: print(json.dumps(body, indent=2))
@@ -611,7 +623,7 @@ class Handler(HTTPRequestHandler):
     else:
       raise RuntimeError(f"unhandled path {self.path}")
 
-if __name__ == "__main__":
+def main():
   parser = argparse.ArgumentParser()
   parser.add_argument("--model", "-m", default=list(models.keys())[0], help=f"Model choice ({', '.join(models.keys())}) or path to a local GGUF file")
   parser.add_argument("--max_context", type=int, default=4096, help="Max Context Length")
@@ -643,7 +655,11 @@ if __name__ == "__main__":
       for _ in range(2): list(zip(range(2), model.generate([0])))
 
   # start server
-  if args.serve: TCPServerWithReuse(('', args.serve), Handler).serve_forever()
+  if args.serve:
+    server = LLMServer(('', args.serve), Handler)
+    server.model, server.model_name, server.tok = model, model_name, tok
+    server.bos_id, server.eos_id, server.eot_id = bos_id, eos_id, eot_id
+    server.serve_forever()
 
   # do benchmark
   if args.benchmark is not None:
@@ -667,3 +683,5 @@ if __name__ == "__main__":
       sys.stdout.write(dec(next_id) if next_id not in (eos_id, eot_id) else dec() + "\n\n")
       sys.stdout.flush()
       if next_id in (eos_id, eot_id): break
+
+if __name__ == "__main__": main()
