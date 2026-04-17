@@ -149,8 +149,8 @@ pm_schedule = PatternMatcher([
   (UPat(Ops.SINK, name="function"), lower_sink_to_linear),
 ])
 
-@track_rewrites(lambda _,ret: f"Schedule {pluralize('Kernel', len(ret[0]))}")
-def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[list[ExecItem], dict[str, int]]:
+@track_rewrites(lambda _,ret: f"Schedule {pluralize('Kernel', len(ret[0].src))}")
+def create_linear_with_vars(big_sink:UOp) -> tuple[UOp, dict[str, int]]:
   # big_sink srcs are all the Tensors
   linear_call = graph_rewrite(big_sink, pm_schedule, name="schedule to linear", enter_calls=True)
 
@@ -172,11 +172,7 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[list[ExecItem], di
   # jit captures this schedule, no need to execute.
   if len(capturing) and CAPTURING:
     capturing[0].add_linear(linear, var_vals)
-    return [], var_vals
+    return UOp(Ops.LINEAR, src=()), var_vals
 
   held_bufs = ({b for b in linear_call.src[1:] if b.op is Ops.BUFFER} if linear_call.op is Ops.CALL else set())
-  linear = memory_plan_rewrite(linear, held_bufs)
-
-  # convert LINEAR to ExecItems
-  schedule: list[ExecItem] = linear_to_schedule(linear)
-  return schedule, var_vals
+  return memory_plan_rewrite(linear, held_bufs), var_vals
