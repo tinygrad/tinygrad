@@ -1,4 +1,5 @@
-import unittest, decimal, sys, json, contextlib
+import unittest, decimal, sys, json, contextlib, tempfile, pickle, io
+from pathlib import Path
 from dataclasses import dataclass
 from typing import Generator
 
@@ -883,6 +884,33 @@ class TestCfg(unittest.TestCase):
     k.emit(s_branch(), target="end")
     k.emit(s_code_end())
     self.get_cfg("jump_back_to_end", k)
+
+# launch viz cli without subprocess
+def run_cli(*cli_args) -> str:
+  from extra.viz.cli import main, get_arg_parser
+  args = get_arg_parser().parse_args(cli_args)
+  with contextlib.redirect_stdout(buf:=io.StringIO()):
+    main(args)
+  return buf.getvalue().strip()
+
+class TestCLI(unittest.TestCase):
+  def test_simple(self):
+    a = Tensor.empty(1, device="NULL")+2.0
+    def custom_empty_prg(B:UOp, A:UOp) -> UOp:
+      sink = UOp(Ops.SINK, arg=KernelInfo(name="custom_empty"))
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=a.device), UOp(Ops.LINEAR, src=(sink,))))
+    b = Tensor.custom_kernel(Tensor.empty_like(a), a, fxn=custom_empty_prg)[0]
+    with save_viz() as viz:
+      b.realize()
+    # save trace to disk for CLI to consume it
+    with tempfile.TemporaryDirectory() as tmpdir:
+      (r:=Path(tmpdir)/"rewrites.pkl").write_bytes(pickle.dumps(viz.data.trace))
+      (p:=Path(tmpdir)/"profile.pkl").write_bytes(pickle.dumps(cpu_events))
+      with Context(DEBUG=4):
+        kernels = run_cli("--rewrites-path", str(r), "--profile-path", str(p), "-p", "-s", "NULL")
+      self.assertIn("void custom_empty", kernels)
+      self.assertIn("E", kernels)
+      self.assertIn("UOp.const", kernels)
 
 if __name__ == "__main__":
   unittest.main()
