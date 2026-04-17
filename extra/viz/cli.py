@@ -121,7 +121,6 @@ def main(args) -> None:
     # ** Memory printer
     if data["event_type"] == 1 and data.get("events", []):
       print(f"Peak: {data['peak']}"+"\n"+f"{'TS':<10}  {'Event':<6}  {'Key':>8}  Info")
-      modes = ("read","write","write+read")
       for e in data["events"]:
         info = str(e.get("arg", {}))
         if e["event"] == "free":
