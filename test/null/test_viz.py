@@ -1,12 +1,13 @@
-import unittest, decimal, sys, json, contextlib
+import unittest, decimal, sys, json, contextlib, tempfile, pickle, io
+from pathlib import Path
 from dataclasses import dataclass
 from typing import Generator
 
-from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, TrackedPatternMatcher, graph_rewrite, track_rewrites, TRACK_MATCH_STATS, profile_matches
+from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, TrackedPatternMatcher, graph_rewrite, track_rewrites, profile_matches
 from tinygrad.uop.symbolic import sym
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import PROFILE, colored, ansistrip, flatten, TracingKey, ProfileRangeEvent, ProfileEvent, Context, cpu_events, profile_marker
-from tinygrad.helpers import VIZ, cpu_profile, ProfilePointEvent, unwrap
+from tinygrad.helpers import colored, ansistrip, flatten, TracingKey, ProfileRangeEvent, ProfileEvent, Context, cpu_events, profile_marker
+from tinygrad.helpers import cpu_profile, ProfilePointEvent, unwrap
 from tinygrad.device import Buffer
 
 from tinygrad.uop.ops import tracked_keys, tracked_ctxs, uop_fields, active_rewrites, active_group, _name_cnt, RewriteTrace
@@ -37,25 +38,13 @@ class VizTrace:
 
 @contextlib.contextmanager
 def save_viz():
-  # clear previous traces
   for lst in [tracked_keys, tracked_ctxs, active_rewrites, active_group, _name_cnt]: lst.clear()
   Buffer.profile_events.clear()
   cpu_events.clear()
-  # set the context vars to enable VIZ
-  prev_viz = VIZ.value
-  VIZ.value = -1
-  prev_tms = TRACK_MATCH_STATS.value
-  TRACK_MATCH_STATS.value = 2
-  prev_profile = PROFILE.value
-  PROFILE.value = 1
   viz = VizTrace()
-  try:
+  with Context(VIZ=-1, TRACK_MATCH_STATS=2, PROFILE=1):
     yield viz
-  finally:
-    viz.set_data()
-    TRACK_MATCH_STATS.value = prev_tms
-    PROFILE.value = prev_profile
-    VIZ.value = prev_viz
+  viz.set_data()
 
 class TestViz(unittest.TestCase):
   def test_simple(self):
@@ -895,6 +884,33 @@ class TestCfg(unittest.TestCase):
     k.emit(s_branch(), target="end")
     k.emit(s_code_end())
     self.get_cfg("jump_back_to_end", k)
+
+# launch viz cli without subprocess
+def run_cli(*cli_args) -> str:
+  from extra.viz.cli import main, get_arg_parser
+  args = get_arg_parser().parse_args(cli_args)
+  with contextlib.redirect_stdout(buf:=io.StringIO()):
+    main(args)
+  return buf.getvalue().strip()
+
+class TestCLI(unittest.TestCase):
+  def test_simple(self):
+    a = Tensor.empty(1, device="NULL")+2.0
+    def custom_empty_prg(B:UOp, A:UOp) -> UOp:
+      sink = UOp(Ops.SINK, arg=KernelInfo(name="custom_empty"))
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=a.device), UOp(Ops.LINEAR, src=(sink,))))
+    b = Tensor.custom_kernel(Tensor.empty_like(a), a, fxn=custom_empty_prg)[0]
+    with save_viz() as viz:
+      b.realize()
+    # save trace to disk for CLI to consume it
+    with tempfile.TemporaryDirectory() as tmpdir:
+      (r:=Path(tmpdir)/"rewrites.pkl").write_bytes(pickle.dumps(viz.data.trace))
+      (p:=Path(tmpdir)/"profile.pkl").write_bytes(pickle.dumps(cpu_events))
+      with Context(DEBUG=4):
+        kernels = run_cli("--rewrites-path", str(r), "--profile-path", str(p), "-p", "-s", "NULL")
+      self.assertIn("void custom_empty", kernels)
+      self.assertIn("E", kernels)
+      self.assertIn("UOp.const", kernels)
 
 if __name__ == "__main__":
   unittest.main()

@@ -1,6 +1,6 @@
 import unittest
 from tinygrad import Tensor, dtypes, TinyJit, UOp
-from tinygrad.apps.llm import apply_rope as apply_rope_new, precompute_freqs_cis
+from tinygrad.llm.model import apply_rope as apply_rope_new, precompute_freqs_cis
 from test.helpers import assert_jit_cache_len
 
 def apply_rope(x:Tensor, start_pos:int):

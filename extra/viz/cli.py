@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-import argparse, pathlib, signal, sys, struct, json, itertools
+import argparse, pathlib, signal, sys, struct, json, itertools, os
+os.environ["VIZ"] = "0"
 if hasattr(signal, "SIGPIPE"): signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 from typing import Iterator
 from tinygrad.viz import serve as viz
 from tinygrad.uop.ops import RewriteTrace
-from tinygrad.helpers import temp, ansistrip, colored, time_to_str, ansilen, ProfilePointEvent, ProfileRangeEvent, TracingKey, unwrap
+from tinygrad.helpers import temp, ansistrip, colored, time_to_str, ansilen, ProfilePointEvent, ProfileRangeEvent, TracingKey, unwrap, NO_COLOR
+from tinygrad.helpers import DEBUG
 
 # profile decoder used in CLI and tests
 def decode_profile(data:bytes) -> dict:
@@ -24,9 +26,8 @@ def decode_profile(data:bytes) -> dict:
     klen = u("<B")[0]
     k = ret[off:off+klen].decode()
     off += klen
-    v:dict = {"events":[]}
-    layout[k] = v
     event_type, event_count = u("<BI")
+    layout[k] = v = {"event_type":event_type, "events":[]}
     if event_type == 0:
       for _ in range(event_count):
         name, ref, key, st, dur, fmt = u("<IIIIfI")
@@ -41,8 +42,11 @@ def decode_profile(data:bytes) -> dict:
         else:
           alloc, ts, key = u("<BII")
           if alloc: v["events"].append({"event":"alloc", "ts":ts, "key":key, "arg": {"dtype":strings[u("<I")[0]], "sz":u("<Q")[0]}})
-          else: v["events"].append({"event":"free", "ts":ts, "key":key, "arg": {"users":[u("<IIIB") for _ in range(u("<I")[0])]}})
+          else: v["events"].append({"event":"free", "ts":ts, "key":key, "arg": {"users":[(k, strings[rep], num, mode) \
+              for k,rep,num,mode in [u("<IIIB") for _ in range(u("<I")[0])]]}})
   return {"dur":total_dur, "peak":global_peak, "layout":layout, "markers":markers}
+
+def fmt_colored(s:str) -> str: return ansistrip(s) if NO_COLOR else s
 
 def get(data:dict, key:str):
   for k,v in data.items():
@@ -54,111 +58,123 @@ def get(data:dict, key:str):
 def main(args) -> None:
   viz.load_rewrites(viz_data:=viz.VizData(viz.load_pickle(args.rewrites_path, default=RewriteTrace([], [], {}))))
 
-  def format_colored(s:str) -> str: return ansistrip(s) if args.no_color else s
-
-  if args.profile:
-    events:list = viz.load_pickle(args.profile_path, default=[])
-    if (profile_bytes:=viz.get_profile(viz_data, events)) is None: raise RuntimeError(f"empty profile in {args.profile_path}")
-    profile = decode_profile(profile_bytes)
-    profile["layout"].update([(f'{c["name"][5:]}{" SQTT" if s["name"].endswith("PKTS") else ""} {s["name"]}', s["data"]) for c in viz_data.ctxs
-                              if c["name"].startswith("SQTT") for s in c["steps"] if s["name"].endswith(("PMC", "PKTS"))])
-    if args.src is None:
-      for k in profile["layout"]:
-        print(f"  {format_colored(k)}")
-      return None
-
-    # ** SQTT printer
-    data = get(profile["layout"], args.src)
-    if "SQTT" in args.src:
-      # modern terminals support 24-bit color
-      def hex_colored(st:str, color:str) -> str: return f"\x1b[38;2;{int(color[1:3],16)};{int(color[3:5],16)};{int(color[5:7],16)}m{st}\x1b[0m"
-      print(f"{'Clk':<12} {'Unit':<20} {'Op':<22} {'Dur':<4} {'Delay':<4} {'Info'}")
-      print("-" * 100)
-      pc_map:dict[int, str] = {}
-      pkt_idxs:dict[str, itertools.count] = {}
-      dispatch_to_inst:dict[str, tuple[str, int]] = {}
-      inst_st:int|None = None
-      for e in viz.sqtt_timeline(*data):
-        if isinstance(e, ProfilePointEvent) and e.key == 'pcMap': pc_map = e.arg
-        if not isinstance(e, ProfileRangeEvent): continue
-        if inst_st is None: inst_st = int(e.st)
-        assert isinstance(e.name, TracingKey)
-        op_name, info = e.name.display_name, e.name.ret or ""
-        color = next((v for k,v in viz.wave_colors.items() if k in op_name), None)
-        op_str = hex_colored(op_name, color) if color and not args.no_color else op_name
-        phase, delay = None, 0
-        idx = next(pkt_idxs.setdefault(e.device, itertools.count()))
-        if e.device.startswith("WAVE"):
-          inst = f"0x{(pc:=int(info.replace('PC:', ''))):05x} {pc_map[pc]}" if info else f"{'':7} {op_name}"
-          dispatch_to_inst[f"{e.device}-{idx}"] = (inst, int(e.st))
-          phase = "DISPATCH"
-        if info.startswith("LINK:"):
-          inst, dispatch_st = dispatch_to_inst[info.replace("LINK:", "")]
-          phase, delay = "EXEC", int(e.st) - dispatch_st
-        if inst and phase: info = f"{phase:<8} {inst}"
-        unit = e.device.replace(" ", "-")
-        print(f"{int(e.st)-inst_st:<12} {unit:<20} {op_str}{' '*(22-ansilen(op_str))} {int(unwrap(e.en)-e.st):<4} {str(delay or ''):<4} {info}")
-      return None
-
-    # ** PMC printer
-    if "PMC" in args.src:
-      pmc = viz.unpack_pmc(data)
-      cols = pmc["cols"]
-      rows:list = []
-      for r in pmc["rows"]:
-        if args.item is None: rows.append(r[:2])
-        elif args.item == r[0]:
-          rows = r[2]["rows"] if len(r) > 2 else [r[:2]]
-          cols = r[2]["cols"] if len(r) > 2 else cols
-      from tabulate import tabulate
-      print(tabulate(rows, headers=cols, tablefmt="github"))
-      return None
-
-    # ** Profiler printer
-    agg:dict[str, tuple[float, int]] = {}
-    total = 0
-    for e in data.get("events", []):
-      et = e["dur"] * 1e-6
-      if args.item is not None:
-        if ansistrip(e["name"]) == args.item:
-          ptm = colored(time_to_str(et, w=9), "yellow" if et > 0.01 else None)
-          name = e["name"] + (" " * (46 - ansilen(e["name"])))
-          print(f"{format_colored(name)} {ptm}/{et*1e3:9.2f}ms  " + e.get("fmt", "").replace("\n", " | ") + "  ")
-      else:
-        t, c = agg.get(e["name"], (0.0, 0))
-        agg[e["name"]] = (t+et, c+1)
-        total += et
-    if agg and total > 0:
-      from tabulate import tabulate
-      items = sorted(agg.items(), key=lambda kv:kv[1][0], reverse=True)
-      num_rows = 20
-      table = [[format_colored(name), time_to_str(t, w=9), c, f"{(t/total*100.0):.2f}%"] for name,(t,c) in items[:num_rows]]
-      if items[num_rows:]:
-        other_t = sum(t for _,(t,_) in items[num_rows:])
-        other_c = sum(c for _,(_,c) in items[num_rows:])
-        table.append(["Other", time_to_str(other_t, w=9), other_c, f"{(other_t/total*100.0):.2f}%"])
-      print(tabulate(table, headers=["name", "total", "count", "pct"], tablefmt="github"))
-    return None
-
-  # ** Graph rewrites printer
   rewrites = {c["name"]:{s["name"]:s for s in c["steps"]} for c in viz_data.ctxs if c.get("steps")}
-  if args.src is None:
-    for k in rewrites: print(f"  {format_colored(k)}")
-    return None
-  steps = get(rewrites, args.src)
-  if args.item is None:
-    for k,v in steps.items(): print(" "*v["depth"]+k+(f" - {v['match_count']}" if v.get('match_count', 0) else ''))
-  else:
-    data = viz.get_render(data, get(steps, args.item)["query"])
+  def print_step(step:dict) -> None:
+    data = viz.get_render(viz_data, step["query"])
     if isinstance(data.get("value"), Iterator):
       for m in data["value"]:
-        if m.get("uop"): print(f"Input UOp:\n{m['uop']}")
+        if m.get("uop"): print(m["uop"])
         if m.get("diff"):
           loc = pathlib.Path(m["upat"][0][0])
           print(f"Rewrite at {loc.parent.name}/{loc.name}:{m['upat'][0][1]}\n{m['upat'][1]}")
-          for line in m["diff"]:
-            print(line if args.no_color else colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None))
+          for line in m["diff"]: print(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None))
     if data.get("src") is not None: print(data["src"])
+
+  # ** Graph rewrites printer
+  if args.rewrites:
+    if args.src is None: return print("Select a source with -s"+"\n"+"\n".join([f"  {fmt_colored(k)}" for k in rewrites]))
+    steps = get(rewrites, args.src)
+    if args.item is None:
+      for k,v in steps.items(): print(" "*v["depth"]+k+(f" - {v['match_count']}" if v.get('match_count', 0) else ''))
+    else: print_step(get(steps, args.item))
+    return None
+
+  events:list = viz.load_pickle(args.profile_path, default=[])
+  if (profile_bytes:=viz.get_profile(viz_data, events)) is None: raise RuntimeError(f"empty profile in {args.profile_path}")
+  profile = decode_profile(profile_bytes)
+  profile["layout"].update([(f'{c["name"][5:]}{" SQTT" if s["name"].endswith("PKTS") else ""} {s["name"]}', s["data"]) for c in viz_data.ctxs
+                            if c["name"].startswith("SQTT") for s in c["steps"] if s["name"].endswith(("PMC", "PKTS"))])
+  if args.src is None: return print("Select a source with -s"+"\n"+"\n".join([f"  {fmt_colored(k)}" for k in profile["layout"]]))
+
+  # ** SQTT printer
+  data = get(profile["layout"], args.src)
+  if "SQTT" in args.src:
+    # modern terminals support 24-bit color
+    def hex_colored(st:str, color:str) -> str: return f"\x1b[38;2;{int(color[1:3],16)};{int(color[3:5],16)};{int(color[5:7],16)}m{st}\x1b[0m"
+    print(f"{'Clk':<12} {'Unit':<20} {'Op':<22} {'Dur':<4} {'Delay':<4} {'Info'}")
+    print("-" * 100)
+    pc_map:dict[int, str] = {}
+    pkt_idxs:dict[str, itertools.count] = {}
+    dispatch_to_inst:dict[str, tuple[str, int]] = {}
+    inst_st:int|None = None
+    for e in viz.sqtt_timeline(*data):
+      if isinstance(e, ProfilePointEvent) and e.key == 'pcMap': pc_map = e.arg
+      if not isinstance(e, ProfileRangeEvent): continue
+      if inst_st is None: inst_st = int(e.st)
+      assert isinstance(e.name, TracingKey)
+      op_name, info = e.name.display_name, e.name.ret or ""
+      color = next((v for k,v in viz.wave_colors.items() if k in op_name), None)
+      op_str = hex_colored(op_name, color) if color and not NO_COLOR else op_name
+      phase, delay = None, 0
+      idx = next(pkt_idxs.setdefault(e.device, itertools.count()))
+      if e.device.startswith("WAVE"):
+        inst = f"0x{(pc:=int(info.replace('PC:', ''))):05x} {pc_map[pc]}" if info else f"{'':7} {op_name}"
+        dispatch_to_inst[f"{e.device}-{idx}"] = (inst, int(e.st))
+        phase = "DISPATCH"
+      if info.startswith("LINK:"):
+        inst, dispatch_st = dispatch_to_inst[info.replace("LINK:", "")]
+        phase, delay = "EXEC", int(e.st) - dispatch_st
+      if inst and phase: info = f"{phase:<8} {inst}"
+      unit = e.device.replace(" ", "-")
+      print(f"{int(e.st)-inst_st:<12} {unit:<20} {op_str}{' '*(22-ansilen(op_str))} {int(unwrap(e.en)-e.st):<4} {str(delay or ''):<4} {info}")
+
+  # ** PMC printer
+  elif "PMC" in args.src:
+    pmc = viz.unpack_pmc(data)
+    cols = pmc["cols"]
+    rows:list = []
+    for r in pmc["rows"]:
+      if args.item is None: rows.append(r[:2])
+      elif args.item == r[0]:
+        rows = r[2]["rows"] if len(r) > 2 else [r[:2]]
+        cols = r[2]["cols"] if len(r) > 2 else cols
+    pmc_data = [[x for x in cols], *[[str(x) for x in r] for r in rows]]
+    widths = [max(len(r[i]) for r in pmc_data) for i in range(len(cols))]
+    def fmt(r): return "| "+" | ".join(x+" "*(w-len(x)) for x,w in zip(r, widths))+" |"
+    print(fmt(pmc_data[0])+"\n"+fmt(["-"*w for w in widths])+"\n"+("\n".join([fmt(row) for row in pmc_data[1:]])))
+
+  # ** Memory printer
+  elif data["event_type"] == 1:
+    print(f"Peak: {data['peak']}"+"\n"+f"{'TS':<10}  {'Event':<6}  {'Key':>8}  Info")
+    for e in data["events"]:
+      info = str(e.get("arg", {}))
+      if e["event"] == "free":
+        info = ', '.join([f"{fmt_colored(kernel)} {['read','write','write+read'][mode]}@data{num}" for _,kernel,num,mode in e["arg"]["users"]])
+      print(f"{e['ts']:<10}  {e['event']:<6}  {e.get('key', ''):>8}  {info}")
+
+  # ** Profiler printer
+  elif data["event_type"] == 0:
+    kernels:list[dict] = []
+    if args.top:
+      agg:dict[str, tuple[float, int, int|None]] = {} # map kernel name to (total time, count and ref)
+      total = 0
+      for e in data["events"]:
+        et = e["dur"] * 1e-6
+        t, c, ref = agg.get(e["name"], (0.0, 0, None))
+        agg[e["name"]] = (t+et, c+1, e["ref"])
+        total += et
+      items = sorted(agg.items(), key=lambda kv:kv[1][0], reverse=True)
+      num_rows = len(items) if args.top < 0 else args.top
+      for name,(t,c,ref) in items[:num_rows]:
+        kernels.append({"name":name, "fmt":f"{time_to_str(t, w=9)} {c:7d} {t/total*100.0:6.2f}%", "ref":ref})
+      if num_rows > 0 and items[num_rows:]:
+        other_t = sum(t for _,(t,_,_) in items[num_rows:])
+        other_c = sum(c for _,(_,c,_) in items[num_rows:])
+        kernels.append({"name":"Other", "fmt":f"{time_to_str(other_t, w=9)} {other_c:7d} {other_t/total*100.0:6.2f}%", "ref":None})
+    else:
+      st0 = data["events"][0]["st"] if data["events"] else 0
+      for k,e in enumerate(data["events"]):
+        et, timestamp = e["dur"] * 1e-6, (e["st"] - st0 + e["dur"]) * 1e-6
+        ptm = colored(time_to_str(et, w=9), "yellow" if et > 0.01 else None)
+        fmt_str = "  ".join(p+" "*max(0, 14-ansilen(p)) for p in e["fmt"].split("\n"))
+        name = f"*** {args.src[:7]:7s} {k+1:4d} "+e["name"]+" "*(46-ansilen(e["name"]))
+        kernels.append({"name":name, "fmt":f"tm {ptm}/{timestamp*1e3:9.2f}ms"+(f" ({fmt_str})" if e["fmt"] else ""), "ref":e["ref"]})
+    for k in kernels:
+      print(f"{fmt_colored(k['name'])}{' ' * max(0, 36 - ansilen(k['name']))} {k['fmt']}")
+      if k["ref"] is not None:
+        steps = rewrites[viz_data.ctxs[k["ref"]]["name"]]
+        if DEBUG >= 3 and (ast_step:=steps.get("View Base AST")) is not None: print_step(ast_step)
+        if DEBUG >= 4: print_step(steps["View Source"])
 
 def get_arg_parser() -> argparse.ArgumentParser:
   parser = argparse.ArgumentParser(add_help=False)
@@ -168,7 +184,8 @@ def get_arg_parser() -> argparse.ArgumentParser:
   g_opts = parser.add_argument_group("optional args")
   g_opts.add_argument("-s", "--src", type=str, default=None, metavar="NAME", help="Select a data source (default: list all sources)")
   g_opts.add_argument("-i", "--item", type=str, default=None, metavar="NAME", help="Select an item within the source (default: list all items)")
-  g_opts.add_argument("--no-color", action="store_true", help="Turn off colored names")
+  g_opts.add_argument("-t", "--top", type=int, default=None, metavar="COUNT",
+                      help="Number of top kernels to aggregate (default: do not aggregate, set -1 to aggregate all)")
   g_opts.add_argument("--profile-path", type=pathlib.Path, metavar="PATH", help="Path to profile.pkl (optional file, default: latest profile)",
                       default=pathlib.Path(temp("profile.pkl", append_user=True)))
   g_opts.add_argument("--rewrites-path", type=pathlib.Path, metavar="PATH", help="Path to rewrites.pkl (optional file, default: latest rewrites)",
