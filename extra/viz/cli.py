@@ -147,6 +147,9 @@ def main(args) -> None:
       num_rows = 20
       for name,(t,c) in items[:num_rows]:
         print(f"{format_colored(name)}{' ' * max(0, 36 - ansilen(name))} {time_to_str(t, w=9)} {c:7d} {t/total*100.0:6.2f}%")
+        if (ref:=viz_data.ref_map.get(ansistrip(name))) is not None:
+          if DEBUG >= 3: print(viz._reconstruct(viz_data, viz_data.trace.rewrites[ref][0].sink).pyrender())
+          if DEBUG >= 4: print(viz_data.ctxs[ref]["prg"].src[3].arg)
       if items[num_rows:]:
         other_t = sum(t for _,(t,_) in items[num_rows:])
         other_c = sum(c for _,(_,c) in items[num_rows:])
