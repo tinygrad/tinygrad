@@ -1,4 +1,5 @@
 import socket
+import pytest
 import tinygrad.runtime.support.system as system
 
 def test_list_devices_osx_uses_usb4_indices(monkeypatch):
@@ -24,3 +25,19 @@ def test_apl_remote_pcidevice_preserves_pcibus(monkeypatch):
   system.APLRemotePCIDevice("NV", "usb4:3")
   assert called["devpref"] == "NV"
   assert called["pcibus"] == "usb4:3"
+
+def test_apl_remote_pcidevice_fails_fast_on_all_ones_config(monkeypatch):
+  monkeypatch.setattr(system.APLRemotePCIDevice, "ensure_app", classmethod(lambda cls: None))
+  monkeypatch.setattr(system, "temp", lambda name: f"/tmp/{name}")
+
+  class FakeSocket:
+    def connect(self, path): pass
+    def setsockopt(self, *args, **kwargs): pass
+    def getpeername(self): return ("peer",)
+
+  monkeypatch.setattr(socket, "socket", lambda *args, **kwargs: FakeSocket())
+  monkeypatch.setattr(system.RemotePCIDevice, "__init__", lambda self, devpref, pcibus, sock: setattr(self, "dev_id", 0))
+  monkeypatch.setattr(system.APLRemotePCIDevice, "read_config", lambda self, offset, size: 0xffffffff)
+
+  with pytest.raises(RuntimeError, match="TinyGPU returned 0xffffffff for PCI config"):
+    system.APLRemotePCIDevice("NV", "usb4:0")

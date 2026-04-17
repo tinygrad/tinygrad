@@ -425,6 +425,12 @@ class APLRemotePCIDevice(RemotePCIDevice):
       time.sleep(0.05)
     else: raise RuntimeError(f"Failed to connect to TinyGPU server at {sock_path}.")
     super().__init__(devpref, pcibus, sock=sock)
+    if self.read_config(0, 4) == 0xffffffff:
+      raise RuntimeError(
+        f"TinyGPU returned 0xffffffff for PCI config on {pcibus}. "
+        "This usually means the macOS TinyGPU transport is not exposing a live PCI function yet "
+        "(driver extension approval/state, enclosure reset state, or USB4/TB bridge enumeration)."
+      )
 
   def alloc_sysmem(self, size:int, vaddr:int=0, contiguous:bool=False) -> tuple[MMIOInterface, list[int]]:
     mapped_size, _, _, fd = self._rpc(self.sock, self.dev_id, RemoteCmd.MAP_SYSMEM_FD, size, int(contiguous), has_fd=True)
