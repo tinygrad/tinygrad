@@ -12,26 +12,29 @@ ReductionStr = Literal["mean", "sum", "none"]
 
 
 class OpMixin(ElementwiseMixin, ReduceMixin):
-  def _pad_constant(self, pX, value:float) -> Self:
+  def _pad_constant(self, pX, value: float) -> Self:
     # shrink first for negative pads, then pad with only non-negative values
     pX = tuple((0, 0) if p is None else p for p in pX)
     has_neg = not all(resolve(p >= 0) for p in flatten(pX))
-    X = self.shrink(tuple((-smin(pB,0),smin(pA+s,s)) for (pB,pA),s in zip(pX, self.shape))) if has_neg else self
-    pads = tuple((smax(pB,0), smax(pA,0)) for pB,pA in pX) if has_neg else pX
-    if value == 0: return MovementMixin.pad(X, pads)
+    X = self.shrink(tuple((-smin(pB, 0), smin(pA + s, s)) for (pB, pA), s in zip(pX, self.shape))) if has_neg else self
+    pads = tuple((smax(pB, 0), smax(pA, 0)) for pB, pA in pX) if has_neg else pX
+    if value == 0:
+      return MovementMixin.pad(X, pads)
     return MovementMixin.pad(X, pads) + MovementMixin.pad(X.ones_like(), pads).cast(dtypes.bool).where(0, value)
 
   def _broadcasted(self, y, reverse=False) -> tuple[Self, Self]:
-    if not isinstance(y, type(self)): y = self.ufix(y)
+    if not isinstance(y, type(self)):
+      y = self.ufix(y)
     x, y = (self, y) if not reverse else (y, self)
     try:
       out_shape = _broadcast_shape(x.shape, y.shape)
       x, y = x._broadcast_to(out_shape), y._broadcast_to(out_shape)
-    except RuntimeError: pass
+    except RuntimeError:
+      pass
     out_dtype = least_upper_dtype(x.dtype, y.dtype)
     return x.cast(out_dtype), y.cast(out_dtype)
 
-  def dot(self, w:Self, dtype:DTypeLike|None=None) -> Self:
+  def dot(self, w: Self, dtype: DTypeLike | None = None) -> Self:
     """
     Performs dot product between two tensors.
     If `w` is 1-D, it's a sum product over the last axis of `self` and `w`.
@@ -51,13 +54,15 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     ```
     """
     x, dx, dw = self, self.ndim, w.ndim
-    if not (dx > 0 and dw > 0): raise RuntimeError(f"both tensors need to be at least 1D, got {dx}D and {dw}D")
-    if x.shape[-1] != w.shape[axis_w:=-min(w.ndim,2)]: raise RuntimeError(f"cannot dot {x.shape} and {w.shape}")
-    x = x.reshape(*x.shape[0:-1], *[1]*min(dx-1, dw-1, 1), x.shape[-1])
-    w = w.reshape(*w.shape[0:-2], *[1]*min(dx-1, dw-1, 1), *w.shape[axis_w:]).transpose(-1, axis_w)
-    return (x*w).sum(-1, dtype=dtype).cast(least_upper_dtype(x.dtype, w.dtype) if dtype is None else to_dtype(dtype))
+    if not (dx > 0 and dw > 0):
+      raise RuntimeError(f"both tensors need to be at least 1D, got {dx}D and {dw}D")
+    if x.shape[-1] != w.shape[axis_w := -min(w.ndim, 2)]:
+      raise RuntimeError(f"cannot dot {x.shape} and {w.shape}")
+    x = x.reshape(*x.shape[0:-1], *[1] * min(dx - 1, dw - 1, 1), x.shape[-1])
+    w = w.reshape(*w.shape[0:-2], *[1] * min(dx - 1, dw - 1, 1), *w.shape[axis_w:]).transpose(-1, axis_w)
+    return (x * w).sum(-1, dtype=dtype).cast(least_upper_dtype(x.dtype, w.dtype) if dtype is None else to_dtype(dtype))
 
-  def matmul(self, x:Self, reverse=False, dtype:DTypeLike|None=None) -> Self:
+  def matmul(self, x: Self, reverse=False, dtype: DTypeLike | None = None) -> Self:
     """
     Performs matrix multiplication between two tensors.
 
@@ -72,10 +77,13 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     """
     return x.dot(self, dtype=dtype) if reverse else self.dot(x, dtype=dtype)
 
-  def __matmul__(self, x:Self) -> Self: return self.matmul(x)
-  def __rmatmul__(self, x:Self) -> Self: return self.matmul(x, True)
+  def __matmul__(self, x: Self) -> Self:
+    return self.matmul(x)
 
-  def min(self, axis:int|Sequence[int]|None=None, keepdim=False) -> Self:
+  def __rmatmul__(self, x: Self) -> Self:
+    return self.matmul(x, True)
+
+  def min(self, axis: int | Sequence[int] | None = None, keepdim=False) -> Self:
     """
     Returns the minimum value of the tensor along the specified axis or axes.
 
@@ -98,7 +106,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     """
     return self._inverse().max(axis=axis, keepdim=keepdim)._inverse()
 
-  def mean(self, axis:int|Sequence[int]|None=None, keepdim=False) -> Self:
+  def mean(self, axis: int | Sequence[int] | None = None, keepdim=False) -> Self:
     """
     Returns the mean value of the tensor along the specified axis or axes.
 
@@ -125,7 +133,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     denominator = prod([si for si, so in zip(self.shape, self.sum(axis=axis, keepdim=True).shape) if resolve(si != so)])
     return numerator.div(denominator).cast(output_dtype)  # type: ignore[arg-type]
 
-  def var(self, axis:int|Sequence[int]|None=None, keepdim=False, correction=1) -> Self:
+  def var(self, axis: int | Sequence[int] | None = None, keepdim=False, correction=1) -> Self:
     """
     Returns the variance of the tensor along the specified axis or axes.
 
@@ -154,7 +162,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     # TODO: remove relu?
     return reduced.div(denominator.relu())
 
-  def var_mean(self, axis:int|Sequence[int]|None=None, keepdim=False, correction=1) -> tuple[Self, Self]:
+  def var_mean(self, axis: int | Sequence[int] | None = None, keepdim=False, correction=1) -> tuple[Self, Self]:
     """
     Calculates the variance and mean over the dimensions specified by dim.
     Syntactic sugar around `Tensor.var` and `Tensor.mean` to match `torch.var_mean`.
@@ -171,7 +179,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     """
     return self.var(axis, keepdim, correction), self.mean(axis, keepdim)
 
-  def std(self, axis:int|Sequence[int]|None=None, keepdim=False, correction=1) -> Self:
+  def std(self, axis: int | Sequence[int] | None = None, keepdim=False, correction=1) -> Self:
     """
     Returns the standard deviation of the tensor along the specified axis or axes.
 
@@ -195,7 +203,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     """
     return self.var(axis, keepdim, correction).sqrt()
 
-  def std_mean(self, axis:int|Sequence[int]|None=None, keepdim=False, correction=1) -> tuple[Self, Self]:
+  def std_mean(self, axis: int | Sequence[int] | None = None, keepdim=False, correction=1) -> tuple[Self, Self]:
     """
     Calculates the standard deviation and mean over the dimensions specified by dim.
     Syntactic sugar around `Tensor.std` and `Tensor.mean` to match `torch.std_mean`.
@@ -212,7 +220,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     """
     return self.std(axis, keepdim, correction), self.mean(axis, keepdim)
 
-  def normalize(self, p:float=2.0, dim:int=1, eps:float=1e-12) -> Self:
+  def normalize(self, p: float = 2.0, dim: int = 1, eps: float = 1e-12) -> Self:
     """
     Performs Lp normalization of the tensor along the specified dimension.
 
@@ -230,8 +238,9 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     print(t.normalize(p=1, dim=0).numpy())
     ```
     """
-    if p == 0: return self / (self != 0).sum(dim, keepdim=True).maximum(eps)  # type: ignore[comparison-overlap]
-    return self / self.abs().pow(p).sum(dim, keepdim=True).pow(1/p).maximum(eps)
+    if p == 0:
+      return self / (self != 0).sum(dim, keepdim=True).maximum(eps)  # type: ignore[comparison-overlap]
+    return self / self.abs().pow(p).sum(dim, keepdim=True).pow(1 / p).maximum(eps)
 
   def logsumexp(self, axis=None, keepdim=False) -> Self:
     """
@@ -260,13 +269,14 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     m = self.max(axis=axis, keepdim=True)
     return (self - m).exp().sum(axis=axis, keepdim=keepdim).log() + (m if keepdim else m.squeeze(axis))
 
-  def _softmax(self, axis, dtype:DTypeLike|None=None) -> tuple[Self, Self, Self]:
+  def _softmax(self, axis, dtype: DTypeLike | None = None) -> tuple[Self, Self, Self]:
     m = self - self.max(axis=axis, keepdim=True).detach()
-    if dtype is not None: m = m.cast(to_dtype(dtype))
+    if dtype is not None:
+      m = m.cast(to_dtype(dtype))
     e = m.exp()
     return m, e, e.sum(axis=axis, keepdim=True)
 
-  def softmax(self, axis=-1, dtype:DTypeLike|None=None) -> Self:
+  def softmax(self, axis=-1, dtype: DTypeLike | None = None) -> Self:
     """
     Applies the softmax function to the tensor along the specified axis.
 
@@ -289,7 +299,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     _, e, ss = self._softmax(axis, dtype)
     return e * ss.reciprocal()
 
-  def log_softmax(self, axis=-1, dtype:DTypeLike|None=None) -> Self:
+  def log_softmax(self, axis=-1, dtype: DTypeLike | None = None) -> Self:
     """
     Applies the log-softmax function to the tensor along the specified axis.
 
@@ -312,7 +322,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     m, _, ss = self._softmax(axis, dtype)
     return m - ss.log()
 
-  def cat(self, *args:Self, dim:int=0) -> Self:
+  def cat(self, *args: Self, dim: int = 0) -> Self:
     """
     Concatenates self with other tensors in `args` along an axis specified by `dim`.
     All tensors must have the same shape except in the concatenating dimension.
@@ -326,13 +336,16 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     ```
     """
     dim = self._resolve_dim(dim)
-    for arg in args: assert arg.ndim==self.ndim and all(ti==ai for i,(ti,ai) in enumerate(zip(self.shape, arg.shape)) if i!=dim)
+    for arg in args:
+      assert arg.ndim == self.ndim and all(ti == ai for i, (ti, ai) in enumerate(zip(self.shape, arg.shape)) if i != dim)
     tensors = [self, *args]
     dim_cumsum = list(itertools.accumulate([t.shape[dim] for t in tensors], initial=0))
-    padded = [t.pad(tuple((dim_cumsum[i], dim_cumsum[-1]-dim_cumsum[i+1]) if j==dim else None for j in range(t.ndim))) for i,t in enumerate(tensors)]
+    padded = [
+      t.pad(tuple((dim_cumsum[i], dim_cumsum[-1] - dim_cumsum[i + 1]) if j == dim else None for j in range(t.ndim))) for i, t in enumerate(tensors)
+    ]
     return padded[0].usum(*padded[1:])
 
-  def stack(self, *args:Self, dim:int=0) -> Self:
+  def stack(self, *args: Self, dim: int = 0) -> Self:
     """
     Concatenates self with other tensors in `args` along a new dimension specified by `dim`.
 
@@ -348,27 +361,38 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     unsqueezed = [t.unsqueeze(dim) for t in argfix(self, *args)]
     return unsqueezed[0].cat(*unsqueezed[1:], dim=dim)
 
-  def _cumalu(self, axis:int, op:Ops) -> Self:
+  def _cumalu(self, axis: int, op: Ops) -> Self:
     assert self.shape[axis] != 0 and op in (Ops.ADD, Ops.MAX, Ops.MUL)
-    pads = (None,)*(self.ndim-1) + ((self.shape[axis]-1, 0),)
-    pooled = self.transpose(axis,-1)._pad_constant(pads, identity_element(op, self.dtype))._pool((self.shape[axis],))
+    pads = (None,) * (self.ndim - 1) + ((self.shape[axis] - 1, 0),)
+    pooled = self.transpose(axis, -1)._pad_constant(pads, identity_element(op, self.dtype))._pool((self.shape[axis],))
     return getattr(pooled, {Ops.ADD: "sum", Ops.MAX: "max", Ops.MUL: "prod"}[op])(-1).transpose(axis, -1)
 
-  def _split_cumalu(self, axis:int, op:Ops) -> Self:
+  def _split_cumalu(self, axis: int, op: Ops) -> Self:
     axis = self._resolve_dim(axis)
-    if self.ndim == 0 or 0 in self.shape: return self
+    if self.ndim == 0 or 0 in self.shape:
+      return self
     # TODO: someday the optimizer will find this on its own
     # for now this is a two stage cumsum
     SPLIT = 256
     value = identity_element(op, self.dtype)
-    if not isinstance(s:=self.shape[axis], int) or s <= SPLIT*2: return self._cumalu(axis, op)
-    ret = self.transpose(axis,-1)._pad_constant((None,)*(self.ndim-1)+((round_up(s,SPLIT)-s,0),), value).unflatten(-1,(-1,SPLIT))._cumalu(-1, op)
-    base = ret[..., -1]._cumalu(-1, op)._pad_constant((None,)*(ret.ndim-2) + ((1, -1),), value)
+    if not isinstance(s := self.shape[axis], int) or s <= SPLIT * 2:
+      return self._cumalu(axis, op)
+    ret = (
+      self
+      .transpose(axis, -1)
+      ._pad_constant((None,) * (self.ndim - 1) + ((round_up(s, SPLIT) - s, 0),), value)
+      .unflatten(-1, (-1, SPLIT))
+      ._cumalu(-1, op)
+    )
+    base = ret[..., -1]._cumalu(-1, op)._pad_constant((None,) * (ret.ndim - 2) + ((1, -1),), value)
     base = base.unsqueeze(-1).expand(*base.shape, ret.shape[-1])
-    def fix(x: Self) -> Self: return x.flatten(start_dim=-2)[..., -s:].transpose(axis,-1)
+
+    def fix(x: Self) -> Self:
+      return x.flatten(start_dim=-2)[..., -s:].transpose(axis, -1)
+
     return getattr(fix(ret), {Ops.ADD: "add", Ops.MAX: "maximum", Ops.MUL: "mul"}[op])(fix(base))
 
-  def cumsum(self, axis:int=0) -> Self:
+  def cumsum(self, axis: int = 0) -> Self:
     """
     Computes the cumulative sum of the tensor along the specified `axis`.
 
@@ -382,7 +406,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     """
     return self._split_cumalu(axis, Ops.ADD)
 
-  def cumprod(self, axis:int) -> Self:
+  def cumprod(self, axis: int) -> Self:
     """
     Computes the cumulative product of the elements of the tensor along the specified `axis`.
 
@@ -396,9 +420,62 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     """
     return self._split_cumalu(axis, Ops.MUL)
 
+  def associative_scan(self, fn: Callable[[Self, Self], Self], axis: int = 0, reverse: bool = False) -> Self:
+    """
+    Performs a parallel prefix scan with an associative binary operation.
+
+    Given `fn` and a tensor `x` with elements `[x0, x1, x2, ...]` along `axis`, computes:
+    `[x0, fn(x0,x1), fn(fn(x0,x1),x2), ...]` in O(log N) parallel depth.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.arange(1, 9)
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.associative_scan(lambda a, b: a + b).numpy())
+    ```
+    """
+    if reverse:
+      return self.flip(axis).associative_scan(fn, axis).flip(axis)
+    axis = self._resolve_dim(axis)
+    n = self.shape[axis]
+    if n < 2:
+      return self
+
+    def _interleave(a: Self, b: Self) -> Self:
+      # interleave a and b along axis. a may be 1 element longer than b.
+      assert a.shape[axis] == b.shape[axis] or a.shape[axis] == b.shape[axis] + 1
+      if a.shape[axis] == b.shape[axis] + 1:
+        # pad b with a zero at the end to match a's length
+        pads = [(0, 0)] * b.ndim
+        pads[axis] = (0, 1)
+        b = b.pad(pads)
+      return (
+        a
+        .unsqueeze(axis + 1)
+        .cat(b.unsqueeze(axis + 1), dim=axis + 1)
+        .flatten(start_dim=axis, end_dim=axis + 1)
+        .shrink(tuple((0, n if i == axis else a.shape[i]) for i in range(self.ndim)))
+      )
+
+    def _slice(t: Self, start, end=None, stride=1) -> Self:
+      sl = [slice(None)] * t.ndim
+      sl[axis] = slice(start, end, stride)
+      return t[tuple(sl)]
+
+    even, odd = _slice(self, 0, None, 2), _slice(self, 1, None, 2)
+    reduced = fn(even[: odd.shape[axis]] if even.shape[axis] > odd.shape[axis] else even, odd)
+    odd_scan = reduced.associative_scan(fn, axis)
+    if n % 2 == 0:
+      even_scan = fn(_slice(odd_scan, 0, -1), _slice(self, 2, None, 2))
+    else:
+      even_scan = fn(odd_scan, _slice(self, 2, None, 2))
+    even_scan = _slice(self, 0, 1).cat(even_scan, dim=axis)
+    return _interleave(even_scan, odd_scan)
+
   # ***** functional nn ops *****
 
-  def linear(self, weight:Self, bias:Self|None=None, dtype:DTypeLike|None=None) -> Self:
+  def linear(self, weight: Self, bias: Self | None = None, dtype: DTypeLike | None = None) -> Self:
     """
     Applies a linear transformation to `self` using `weight` and `bias`.
 
@@ -417,7 +494,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     x = self.mul(weight) if len(weight.shape) == 1 else self.dot(weight)
     return x.add(bias) if bias is not None else x
 
-  def layernorm(self, axis:int|tuple[int,...]=-1, eps:float=1e-5) -> Self:
+  def layernorm(self, axis: int | tuple[int, ...] = -1, eps: float = 1e-5) -> Self:
     """
     Applies Layer Normalization over a mini-batch of inputs.
 
@@ -432,10 +509,10 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     print(t.mean().item(), t.std().item())
     ```
     """
-    y = (self - self.mean(axis, keepdim=True))
-    return y.mul((y*y).mean(axis, keepdim=True).add(eps).rsqrt())
+    y = self - self.mean(axis, keepdim=True)
+    return y.mul((y * y).mean(axis, keepdim=True).add(eps).rsqrt())
 
-  def batchnorm(self, weight:Self|None, bias:Self|None, mean:Self, invstd:Self, axis:int|tuple[int, ...]=1) -> Self:
+  def batchnorm(self, weight: Self | None, bias: Self | None, mean: Self, invstd: Self, axis: int | tuple[int, ...] = 1) -> Self:
     """
     Applies Batch Normalization over a mini-batch of inputs.
 
@@ -453,19 +530,23 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     axis_ = argfix(axis)
     shape = tuple(s if ax in axis_ else 1 for ax, s in enumerate(self.shape))
     x = self - mean.reshape(shape)
-    if weight is not None: x = x * weight.reshape(shape)
+    if weight is not None:
+      x = x * weight.reshape(shape)
     ret = x.mul(invstd.reshape(shape) if len(invstd.shape) == len(axis_) else invstd)
     return (ret + bias.reshape(shape)) if bias is not None else ret
 
   # ***** loss ops *****
 
-  def _do_reduction(self, reduction:ReductionStr="mean") -> Self:
-    if reduction == "none": return self
-    if reduction == "sum": return self.sum()
-    if reduction == "mean": return self.mean()
+  def _do_reduction(self, reduction: ReductionStr = "mean") -> Self:
+    if reduction == "none":
+      return self
+    if reduction == "sum":
+      return self.sum()
+    if reduction == "mean":
+      return self.mean()
     raise ValueError(f"{reduction=} must be one of {get_args(ReductionStr)}")
 
-  def binary_crossentropy(self, Y:Self, reduction:ReductionStr="mean") -> Self:
+  def binary_crossentropy(self, Y: Self, reduction: ReductionStr = "mean") -> Self:
     """
     Computes the binary cross-entropy loss between `self` and `Y`.
 
@@ -477,9 +558,9 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     print(t.binary_crossentropy(Y).item())
     ```
     """
-    return (-Y*self.log() - (1-Y)*(1-self).log())._do_reduction(reduction)
+    return (-Y * self.log() - (1 - Y) * (1 - self).log())._do_reduction(reduction)
 
-  def binary_crossentropy_logits(self, Y:Self, reduction:ReductionStr="mean", pos_weight:Self|None=None) -> Self:
+  def binary_crossentropy_logits(self, Y: Self, reduction: ReductionStr = "mean", pos_weight: Self | None = None) -> Self:
     """
     Computes the binary cross-entropy loss between `self` and `Y` where `self` is logits.
 
@@ -492,11 +573,11 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     ```
     """
     log_p, log_1_minus_p = self.logsigmoid(), (-self).logsigmoid()
-    return (-((1 if pos_weight is None else pos_weight) * Y * log_p + (1-Y) * log_1_minus_p))._do_reduction(reduction)
+    return (-((1 if pos_weight is None else pos_weight) * Y * log_p + (1 - Y) * log_1_minus_p))._do_reduction(reduction)
 
   # ***** matrix ops *****
 
-  def newton_schulz(self, steps:int, params:tuple[int, ...], eps:float=1.0e-7) -> Self:
+  def newton_schulz(self, steps: int, params: tuple[int, ...], eps: float = 1.0e-7) -> Self:
     """
     Performs the newton-schulz algorithm for odd polynomials. The degree of the odd polynomial depends on the number of params.
 
@@ -506,11 +587,17 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     ```
     """
     assert self.ndim > 1, "NS only works for two or more dims"
-    if self.shape[-2] > self.shape[-1]: return self.transpose(-2, -1).newton_schulz(steps, params, eps).transpose(-2, -1)
+    if self.shape[-2] > self.shape[-1]:
+      return self.transpose(-2, -1).newton_schulz(steps, params, eps).transpose(-2, -1)
     G = self / (self.square().sum(axis=(-2, -1), keepdim=True).sqrt() + eps)
     for _ in range(steps):
-      G = functools.reduce(lambda a, b: a + b, (p * functools.reduce(lambda x, y: (y @ y.transpose(-2, -1)) @ x, [G]*i, G)  # type: ignore[operator]
-                                                 for i,p in enumerate(params)))
+      G = functools.reduce(
+        lambda a, b: a + b,
+        (
+          p * functools.reduce(lambda x, y: (y @ y.transpose(-2, -1)) @ x, [G] * i, G)  # type: ignore[operator]
+          for i, p in enumerate(params)
+        ),
+      )
     return G
 
   # ***** tensor properties *****
