@@ -147,6 +147,9 @@ class TransformerBlock(FFNBlock):
     self.attn_output = nn.Linear(config.head_dim * config.n_heads, config.dim, bias=False)
     if config.qk_norm: self.attn_q_norm, self.attn_k_norm = nn.RMSNorm(config.qk_norm, config.norm_eps), nn.RMSNorm(config.qk_norm, config.norm_eps)
 
+  def _state_reset_ops(self):
+    return [self.cache_kv.assign(Tensor.zeros_like(self.cache_kv))] if hasattr(self, "cache_kv") else []
+
   def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
     q, k, v = self.attn_q(x), self.attn_k(x), self.attn_v(x)
     if self.config.qk_norm and self.config.qk_norm != self.config.head_dim: q, k = self.attn_q_norm(q), self.attn_k_norm(k)
@@ -200,6 +203,10 @@ class MLATransformerBlock(FFNBlock):
     self.attn_k_b = {"weight": Tensor.zeros(config.n_heads, config.kv_lora_rank, qk_nope_head_dim)}
     self.attn_v_b = {"weight": Tensor.zeros(config.n_heads, config.v_head_dim, config.kv_lora_rank)}
     self.attn_output = nn.Linear(config.n_heads * config.v_head_dim, config.dim, bias=False)
+
+  def _state_reset_ops(self):
+    if not hasattr(self, "cache_k"): return []
+    return [self.cache_k.assign(Tensor.zeros_like(self.cache_k)), self.cache_v.assign(Tensor.zeros_like(self.cache_v))]
 
   def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
     B, T, _ = x.shape
@@ -307,15 +314,22 @@ class Transformer:
     self.prefill_jit = TinyJit(self.forward)
     self.rollout_jit = TinyJit(self.forward)
 
-  def forward(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor) -> Tensor:
+  def forward(self, tokens:Tensor, start_pos:int|UOp) -> Tensor:
     x = self.token_embd(tokens).float()                   # (B, T, D)
     for block in self.blk: x = block(x, start_pos)
-    logits = self.output(self.output_norm(x))[:, -1, :]
+    return self.output(self.output_norm(x))[:, -1, :]
+
+  def get_next_logits(self, tokens:Tensor, start_pos:int|UOp) -> Tensor:
+    return (self.prefill_jit if resolve(tokens.shape[1] != 1) else self.rollout_jit)(tokens.contiguous(), start_pos)
+
+  @staticmethod
+  def _sample_token(logits:Tensor, temperature:Tensor) -> Tensor:
+    if float(temperature.item()) < 1e-6: return logits.argmax(-1, keepdim=True)
     # Gumbel-max trick: argmax(logits/temp - log(-log(uniform))) is equivalent to sampling from softmax(logits/temp)
     return (logits / temperature.maximum(1e-12) - (Tensor.rand_like(logits).maximum(1e-12).log().neg()).log()).argmax(-1, keepdim=True)
 
   def __call__(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor) -> Tensor:
-    return (self.prefill_jit if resolve(tokens.shape[1] != 1) else self.rollout_jit)(tokens.contiguous(), start_pos, temperature)
+    return self._sample_token(self.get_next_logits(tokens, start_pos), temperature)
 
   @staticmethod
   def from_gguf(gguf:Tensor, max_context:int|None=None, realize=bool(getenv("REALIZE", 0))) -> tuple[Transformer, dict]:
@@ -382,28 +396,38 @@ class Transformer:
       Tensor.realize(*params)
     return model, kv
 
+  def clear_cache(self):
+    self._cached_tokens = []
+    if resets := [r for b in self.blk for r in b._state_reset_ops()]: Tensor.realize(*resets)
+
   def get_start_pos(self, tokens:list[int]) -> int:
-    prefix_len = sum(1 for _ in itertools.takewhile(lambda ab: ab[0] == ab[1], zip(tokens[:-1], self._cached_tokens)))
+    prefix_len = sum(1 for _ in itertools.takewhile(lambda ab: ab[0] == ab[1], zip(tokens, self._cached_tokens)))
+    if prefix_len == len(tokens) and prefix_len > 0: prefix_len -= 1
     return min(block._reusable_prefix_len(prefix_len, len(self._cached_tokens)) for block in self.blk)
 
-  def generate(self, tokens:list[int], chunk_size:int=32, temperature:float=0.0):
+  def generate(self, tokens:list[int], chunk_size:int=32, temperature:float=0.0, token_selector=None, constraint=None):
     if self.has_recurrent_block: chunk_size = 1
     v_start_pos = UOp.variable("start_pos", 0, self.max_context-1)
     v_toks = UOp.variable("toks", 1, chunk_size)
-    # TODO: use UOp.variable for temperature once float variables are supported
     temp = Tensor(temperature).contiguous()
-    # assign all input tokens once, then slice from start_pos for the model call
     t = Tensor(tokens + [0] * (self.max_context - len(tokens)), dtype="int32").reshape(1, self.max_context)
-    # recompute start_pos from what's currently valid in the caches
     start_pos = self.get_start_pos(tokens)
-    if start_pos < len(self._cached_tokens) and (resets := [r for b in self.blk for r in b._state_reset_ops()]): Tensor.realize(*resets)
-    out, prompt_len = None, len(tokens)
+    needs_reset = start_pos < len(self._cached_tokens) or (start_pos == 0 and len(self._cached_tokens) == 0)
+    if needs_reset and (resets := [r for b in self.blk for r in b._state_reset_ops()]): Tensor.realize(*resets)
+    next_input, prompt_len = None, len(tokens)
     while len(tokens) < self.max_context:
       sp, nt = v_start_pos.bind(start_pos), v_toks.bind(min(chunk_size, len(tokens) - start_pos))
-      out = self(t[:, sp:sp+nt] if start_pos < prompt_len or out is None else out, sp, temp).realize()
+      model_input = t[:, sp:sp+nt] if start_pos < prompt_len or next_input is None else next_input
+      logits = None
+      if token_selector is None:
+        next_input = self(model_input, sp, temp).realize()
+      else:
+        logits = self.get_next_logits(model_input, sp).realize()
       start_pos += nt.val
-      # chunked prefill: keep processing until all prompt tokens are consumed
       if start_pos < len(tokens): continue
-      tokens.append(int(out.item()))
+      if token_selector is not None:
+        next_tok = int(token_selector(logits, list(tokens)))
+        next_input = Tensor([[next_tok]], dtype="int32").realize()
+      tokens.append(int(next_input.item()))
       self._cached_tokens = tokens[:-1]
       yield tokens[-1]
