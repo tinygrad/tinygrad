@@ -165,23 +165,27 @@ def main(args) -> None:
         yield {"name":"Other", "fmt":f"{time_to_str(other_t, w=9)} {other_c:7d} {other_t/total*100.0:6.2f}%", "ref":None}
     def produce_all_kernels() -> Iterator[dict]:
       st0:int|None = None
-      stream = ((n,e) for _,n,e in heapq.merge(*[[(e["st"], n, e) for e in l["events"]] for n,l in timelines], key=lambda t:t[0])) \
-          if args.src == "ALL" else ((args.src, e) for e in data["events"])
-      for k,(dev,e) in enumerate(stream):
-        if st0 is None: st0 = e["st"]
-        et, timestamp = e["dur"] * 1e-6, (e["st"] - st0 + e["dur"]) * 1e-6
+      event_streams = [[(e["st"], n, e) for e in l["events"]] for n,l in timelines] if args.src == "ALL" \
+                      else [[(e["st"], args.src, e) for e in data["events"]]]
+      marker_stream = sorted([(m["ts"], "MARKER", m) for m in profile.get("markers", [])], key=lambda t:t[0])
+      for ts,dev,e in heapq.merge(*event_streams, marker_stream, key=lambda t:t[0]):
+        if st0 is None: st0 = ts
+        if dev == "MARKER":
+          yield {"name":f"--- MARKER {e['name']}", "fmt":f"@ {(ts-st0)*1e-3:9.2f}ms", "ref":None, "ext":None}
+          continue
+        et, timestamp, ext = e["dur"] * 1e-6, (e["st"] - st0 + e["dur"]) * 1e-6, None
         ptm = colored(time_to_str(et, w=9), "yellow" if et > 0.01 else None)
-        if e["fmt"].startswith("TB:"): e["ext"], e["fmt"] = e["fmt"].replace("TB:\n", ""), ""
+        if e["fmt"].startswith("TB:"): ext, e["fmt"] = e["fmt"].replace("TB:\n", ""), ""
         fmt_str = "  ".join(p+" "*max(0, 14-ansilen(p)) for p in e["fmt"].split("\n"))
-        name = f"*** {dev[:7]:7s} {k+1:4d} "+e["name"]+" "*(46-ansilen(e["name"]))
-        yield {"name":name, "fmt":f"tm {ptm}/{timestamp*1e3:9.2f}ms"+(f" ({fmt_str})" if e["fmt"] else ""), "ref":e["ref"]}
+        name = f"*** {dev[:7]:7s} "+e["name"]+" "*(46-ansilen(e["name"]))
+        yield {"name":name, "fmt":f"tm {ptm}/{timestamp*1e3:9.2f}ms"+(f" ({fmt_str})" if e["fmt"] else ""), "ref":e["ref"], "ext":ext}
     for k in (produce_top_kernels if args.top else produce_all_kernels)():
       print(f"{fmt_colored(k['name'])}{' ' * max(0, 36 - ansilen(k['name']))} {k['fmt']}")
       if k["ref"] is not None:
         steps = rewrites[viz_data.ctxs[k["ref"]]["name"]]
         if DEBUG >= 3 and (ast_step:=steps.get("View Base AST")) is not None: print_step(ast_step)
         if DEBUG >= 4: print_step(steps["View Source"])
-      elif DEBUG >= 4 and e.get("ext") is not None: print(e["ext"])
+      elif DEBUG >= 4 and k.get("ext") is not None: print(k["ext"])
 
 def get_arg_parser() -> argparse.ArgumentParser:
   parser = argparse.ArgumentParser(add_help=False)
