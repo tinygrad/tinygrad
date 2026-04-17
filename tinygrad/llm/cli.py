@@ -56,7 +56,7 @@ class SimpleTokenizer:
     return tokens + self._encode_sentence(text[pos:])
 
   def decode(self, ids:list[int]) -> str: return b''.join(self._tok2bytes[tid] for tid in ids).decode(errors='replace')
-  def stream_decoder(self) -> typing.Callable[[int|None], str]:
+  def stream_decoder(self) -> typing.Callable[..., str]:
     dec = codecs.getincrementaldecoder('utf-8')('replace')
     def _decode(tid:int|None=None) -> str: return dec.decode(self._tok2bytes[tid]) if tid is not None else dec.decode(b'', final=True)
     return _decode
@@ -545,73 +545,85 @@ CHAT_HTML = b'''<!DOCTYPE html><html><head><title>tinygrad chat</title><style>
   }
 </script></body></html>'''
 
-def main():
-  class Handler(HTTPRequestHandler):
-    def log_request(self, code='-', size='-'): pass
-    def do_GET(self):
-      if self.path == "/v1/models": self.send_data(json.dumps({"object":"list","data":[{"id":model_name,"object":"model"}]}).encode())
-      else: self.send_data(CHAT_HTML, content_type="text/html")
-    def run_model(self, ids:list[int], model_name:str, include_usage=False, max_tokens:int|None=None, temperature:float=0.0):
-      cache_start_pos = model.get_start_pos(ids)
-      stderr_log(f"{self.path}  {colored('--', 'BLACK')}  "
-                f"in:{colored(f'{cache_start_pos:5d}', 'green')} +{len(ids)-cache_start_pos:5d}  {colored('--', 'BLACK')}  ")
-      tmpl = {"id":f"chatcmpl-{uuid.uuid4().hex[:24]}", "object":"chat.completion.chunk", "created":int(time.time()), "model":model_name}
-      yield {"choices": [{"index":0, "delta":{"role":"assistant","content":""}, "finish_reason":None}], **tmpl}
-      out: list[int] = []
-      finish_reason = "stop"
-      st = time.perf_counter()
-      dec = tok.stream_decoder()
-      for next_id in model.generate(ids, temperature=temperature):
-        if len(out) == 0: stderr_log(f"prefill:{(len(ids)-cache_start_pos)/((pt:=time.perf_counter())-st):4.0f} tok/s  {colored('--', 'BLACK')}  ")
-        if next_id in (eos_id, eot_id): break
-        out.append(next_id)
-        yield {"choices": [{"index":0, "delta":{"content":dec(next_id)}, "finish_reason":None}], **tmpl}
-        if max_tokens is not None and len(out) >= max_tokens:
-          finish_reason = "length"
-          break
-      if (tail := dec()): yield {"choices": [{"index":0, "delta":{"content":tail}, "finish_reason":None}], **tmpl}
-      yield {"choices": [{"index":0, "delta":{},"finish_reason":finish_reason}], **tmpl}
-      if include_usage:
-        yield {"choices": [], "usage": {"prompt_tokens": len(ids), "completion_tokens": len(out), "total_tokens": len(ids) + len(out)}, **tmpl}
-      et = time.perf_counter()
-      stderr_log(f"gen:{len(out)/(et-pt) if len(out) > 1 else 0:4.0f} tok/s  {colored('--', 'BLACK')}  "
-                f"out:{len(out):5d}  {colored('--', 'BLACK')}  total:{et-st:6.2f}s\n")
+class LLMServer(TCPServerWithReuse):
+  model: Transformer
+  model_name: str
+  tok: SimpleTokenizer
+  # TODO: tastefully move these into tokenizer
+  bos_id: int|None
+  eos_id: int
+  eot_id: int|None
 
-    def do_POST(self):
-      raw_body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
-      body: dict[str, typing.Any] = json.loads(raw_body.decode("utf-8"))
-      if DEBUG >= 1: print(json.dumps(body, indent=2))
-      if self.path == "/v1/chat/completions":
-        # extract tokens, last assistant message is treated as prefill
-        ids: list[int] = tok.prefix(bos_id)
-        for i, msg in enumerate(body["messages"]):
-          ids += tok.role(msg["role"])
-          content = msg["content"]
-          if isinstance(content, str): ids += tok.encode(content)
-          elif isinstance(content, list):
-            for c in content:
-              if c["type"] == "text": ids += tok.encode(c["text"])
-              else: raise RuntimeError(f"unhandled type: {c['type']}")
-          else: raise RuntimeError(f"unknown content type: {type(content)}")
-          if msg["role"] == "assistant" and i == len(body["messages"]) - 1: break
-          ids += tok.end_turn(eos_id)
-        else: ids += tok.role("assistant")
+class Handler(HTTPRequestHandler):
+  server: LLMServer
+  def log_request(self, code='-', size='-'): pass
+  def do_GET(self):
+    if self.path == "/v1/models": self.send_data(json.dumps({"object":"list","data":[{"id":self.server.model_name,"object":"model"}]}).encode())
+    else: self.send_data(CHAT_HTML, content_type="text/html")
+  def run_model(self, ids:list[int], model_name:str, include_usage=False, max_tokens:int|None=None, temperature:float=0.0):
+    model, tok, eos_id, eot_id = self.server.model, self.server.tok, self.server.eos_id, self.server.eot_id
+    cache_start_pos = model.get_start_pos(ids)
+    stderr_log(f"{self.path}  {colored('--', 'BLACK')}  "
+              f"in:{colored(f'{cache_start_pos:5d}', 'green')} +{len(ids)-cache_start_pos:5d}  {colored('--', 'BLACK')}  ")
+    tmpl = {"id":f"chatcmpl-{uuid.uuid4().hex[:24]}", "object":"chat.completion.chunk", "created":int(time.time()), "model":model_name}
+    yield {"choices": [{"index":0, "delta":{"role":"assistant","content":""}, "finish_reason":None}], **tmpl}
+    out: list[int] = []
+    finish_reason = "stop"
+    st = time.perf_counter()
+    dec = tok.stream_decoder()
+    for next_id in model.generate(ids, temperature=temperature):
+      if len(out) == 0: stderr_log(f"prefill:{(len(ids)-cache_start_pos)/((pt:=time.perf_counter())-st):4.0f} tok/s  {colored('--', 'BLACK')}  ")
+      if next_id in (eos_id, eot_id): break
+      out.append(next_id)
+      yield {"choices": [{"index":0, "delta":{"content":dec(next_id)}, "finish_reason":None}], **tmpl}
+      if max_tokens is not None and len(out) >= max_tokens:
+        finish_reason = "length"
+        break
+    if (tail := dec()): yield {"choices": [{"index":0, "delta":{"content":tail}, "finish_reason":None}], **tmpl}
+    yield {"choices": [{"index":0, "delta":{},"finish_reason":finish_reason}], **tmpl}
+    if include_usage:
+      yield {"choices": [], "usage": {"prompt_tokens": len(ids), "completion_tokens": len(out), "total_tokens": len(ids) + len(out)}, **tmpl}
+    et = time.perf_counter()
+    stderr_log(f"gen:{len(out)/(et-pt) if len(out) > 1 else 0:4.0f} tok/s  {colored('--', 'BLACK')}  "
+              f"out:{len(out):5d}  {colored('--', 'BLACK')}  total:{et-st:6.2f}s\n")
 
-        # reply
-        max_tokens = body.get("max_completion_tokens") or body.get("max_tokens")
-        chunks = self.run_model(ids, body["model"], not body.get("stream") or body.get("stream_options",{}).get("include_usage", False),
-                                max_tokens=max_tokens, temperature=float(body.get("temperature", 0.0)))
-        if body.get("stream"): self.stream_json(chunks)
-        else:
-          out, finish_reason = [], "stop"
-          for c in chunks:
-            if c["choices"] and c["choices"][0].get("delta", {}).get("content"): out.append(c["choices"][0]["delta"]["content"])
-            if c["choices"] and c["choices"][0].get("finish_reason"): finish_reason = c["choices"][0]["finish_reason"]
-          self.send_data(json.dumps({**c, "object":"chat.completion",
-            "choices":[{"index":0, "message":{"role":"assistant","content":"".join(out)}, "finish_reason":finish_reason}]}).encode())
+  def do_POST(self):
+    tok, bos_id, eos_id = self.server.tok, self.server.bos_id, self.server.eos_id
+    raw_body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
+    body: dict[str, typing.Any] = json.loads(raw_body.decode("utf-8"))
+    if DEBUG >= 1: print(json.dumps(body, indent=2))
+    if self.path == "/v1/chat/completions":
+      # extract tokens, last assistant message is treated as prefill
+      ids: list[int] = tok.prefix(bos_id)
+      for i, msg in enumerate(body["messages"]):
+        ids += tok.role(msg["role"])
+        content = msg["content"]
+        if isinstance(content, str): ids += tok.encode(content)
+        elif isinstance(content, list):
+          for c in content:
+            if c["type"] == "text": ids += tok.encode(c["text"])
+            else: raise RuntimeError(f"unhandled type: {c['type']}")
+        else: raise RuntimeError(f"unknown content type: {type(content)}")
+        if msg["role"] == "assistant" and i == len(body["messages"]) - 1: break
+        ids += tok.end_turn(eos_id)
+      else: ids += tok.role("assistant")
+
+      # reply
+      max_tokens = body.get("max_completion_tokens") or body.get("max_tokens")
+      chunks = self.run_model(ids, body["model"], not body.get("stream") or body.get("stream_options",{}).get("include_usage", False),
+                              max_tokens=max_tokens, temperature=float(body.get("temperature", 0.0)))
+      if body.get("stream"): self.stream_json(chunks)
       else:
-        raise RuntimeError(f"unhandled path {self.path}")
+        out, finish_reason = [], "stop"
+        for c in chunks:
+          if c["choices"] and c["choices"][0].get("delta", {}).get("content"): out.append(c["choices"][0]["delta"]["content"])
+          if c["choices"] and c["choices"][0].get("finish_reason"): finish_reason = c["choices"][0]["finish_reason"]
+        self.send_data(json.dumps({**c, "object":"chat.completion",
+          "choices":[{"index":0, "message":{"role":"assistant","content":"".join(out)}, "finish_reason":finish_reason}]}).encode())
+    else:
+      raise RuntimeError(f"unhandled path {self.path}")
 
+def main():
   parser = argparse.ArgumentParser()
   parser.add_argument("--model", "-m", default=list(models.keys())[0], help=f"Model choice ({', '.join(models.keys())}) or path to a local GGUF file")
   parser.add_argument("--max_context", type=int, default=4096, help="Max Context Length")
@@ -643,7 +655,11 @@ def main():
       for _ in range(2): list(zip(range(2), model.generate([0])))
 
   # start server
-  if args.serve: TCPServerWithReuse(('', args.serve), Handler).serve_forever()
+  if args.serve:
+    server = LLMServer(('', args.serve), Handler)
+    server.model, server.model_name, server.tok = model, model_name, tok
+    server.bos_id, server.eos_id, server.eot_id = bos_id, eos_id, eot_id
+    server.serve_forever()
 
   # do benchmark
   if args.benchmark is not None:
