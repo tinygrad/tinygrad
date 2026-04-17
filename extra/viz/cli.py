@@ -46,6 +46,8 @@ def decode_profile(data:bytes) -> dict:
               for k,rep,num,mode in [u("<IIIB") for _ in range(u("<I")[0])]]}})
   return {"dur":total_dur, "peak":global_peak, "layout":layout, "markers":markers}
 
+def fmt_colored(s:str) -> str: return ansistrip(s) if NO_COLOR else s
+
 def get(data:dict, key:str):
   for k,v in data.items():
     if ansistrip(k) == key: return v
@@ -56,18 +58,13 @@ def get(data:dict, key:str):
 def main(args) -> None:
   viz.load_rewrites(viz_data:=viz.VizData(viz.load_pickle(args.rewrites_path, default=RewriteTrace([], [], {}))))
 
-  def format_colored(s:str) -> str: return ansistrip(s) if NO_COLOR else s
-
   if args.profile:
     events:list = viz.load_pickle(args.profile_path, default=[])
     if (profile_bytes:=viz.get_profile(viz_data, events)) is None: raise RuntimeError(f"empty profile in {args.profile_path}")
     profile = decode_profile(profile_bytes)
     profile["layout"].update([(f'{c["name"][5:]}{" SQTT" if s["name"].endswith("PKTS") else ""} {s["name"]}', s["data"]) for c in viz_data.ctxs
                               if c["name"].startswith("SQTT") for s in c["steps"] if s["name"].endswith(("PMC", "PKTS"))])
-    if args.src is None:
-      print("Select a source with -s")
-      for k in profile["layout"]: print(f"  {format_colored(k)}")
-      return None
+    if args.src is None: return print("Select a source with -s"+"\n".join([f"  {fmt_colored(k)}" for k in profile["layout"]]))
 
     # ** SQTT printer
     data = get(profile["layout"], args.src)
@@ -100,10 +97,9 @@ def main(args) -> None:
         if inst and phase: info = f"{phase:<8} {inst}"
         unit = e.device.replace(" ", "-")
         print(f"{int(e.st)-inst_st:<12} {unit:<20} {op_str}{' '*(22-ansilen(op_str))} {int(unwrap(e.en)-e.st):<4} {str(delay or ''):<4} {info}")
-      return None
 
     # ** PMC printer
-    if "PMC" in args.src:
+    elif "PMC" in args.src:
       pmc = viz.unpack_pmc(data)
       cols = pmc["cols"]
       rows:list = []
@@ -119,52 +115,50 @@ def main(args) -> None:
       return None
 
     # ** Memory printer
-    if data["event_type"] == 1 and data.get("events", []):
+    elif data["event_type"] == 1 and data.get("events", []):
       print(f"Peak: {data['peak']}"+"\n"+f"{'TS':<10}  {'Event':<6}  {'Key':>8}  Info")
       for e in data["events"]:
         info = str(e.get("arg", {}))
         if e["event"] == "free":
-          info = ', '.join([f"{format_colored(kernel)} {['read','write','write+read'][mode]}@data{num}" for _,kernel,num,mode in e["arg"]["users"]])
+          info = ', '.join([f"{fmt_colored(kernel)} {['read','write','write+read'][mode]}@data{num}" for _,kernel,num,mode in e["arg"]["users"]])
         print(f"{e['ts']:<10}  {e['event']:<6}  {e.get('key', ''):>8}  {info}")
-      return None
 
     # ** Profiler printer
-    agg:dict[str, tuple[float, int, int|None]] = {}
-    total, first = 0, True
-    def print_kernel(ref:int) -> None:
-      if DEBUG >= 3: print(viz._reconstruct(viz_data, viz_data.trace.rewrites[ref][0].sink).pyrender())
-      if DEBUG >= 4: print(viz_data.ctxs[ref]["prg"].src[3].arg)
-    for e in data.get("events", []):
-      et = e["dur"] * 1e-6
-      if args.item is not None:
-        if ansistrip(e["name"]) == args.item:
-          ptm = colored(time_to_str(et, w=9), "yellow" if et > 0.01 else None)
-          name = e["name"] + (" " * (46 - ansilen(e["name"])))
-          print(f"{format_colored(name)} {ptm}/{et*1e3:9.2f}ms  " + e.get("fmt", "").replace("\n", " | ") + "  ")
-          if first:
-            if e["ref"] is not None: print_kernel(e["ref"])
-            first = False
-      else:
-        t, c, ref = agg.get(e["name"], (0.0, 0, None))
-        agg[e["name"]] = (t+et, c+1, e["ref"])
-        total += et
-    if agg and total > 0:
-      items = sorted(agg.items(), key=lambda kv:kv[1][0], reverse=True)
-      num_rows = args.top
-      for name,(t,c,ref) in items[:num_rows]:
-        print(f"{format_colored(name)}{' ' * max(0, 36 - ansilen(name))} {time_to_str(t, w=9)} {c:7d} {t/total*100.0:6.2f}%")
-        if ref is not None: print_kernel(ref)
-      if num_rows > 0 and items[num_rows:]:
-        other_t = sum(t for _,(t,_,_) in items[num_rows:])
-        other_c = sum(c for _,(_,c,_) in items[num_rows:])
-        print(f"{'Other':<36} {time_to_str(other_t, w=9)} {other_c:7d} {other_t/total*100.0:6.2f}%")
+    else:
+      def print_kernel(ref:int) -> None:
+        if DEBUG >= 3: print(viz._reconstruct(viz_data, viz_data.trace.rewrites[ref][0].sink).pyrender())
+        if DEBUG >= 4: print(viz_data.ctxs[ref]["prg"].src[3].arg)
+      agg:dict[str, tuple[float, int, int|None]] = {}
+      total, first = 0, True
+      for e in data.get("events", []):
+        et = e["dur"] * 1e-6
+        if args.item is not None:
+          if ansistrip(e["name"]) == args.item:
+            ptm = colored(time_to_str(et, w=9), "yellow" if et > 0.01 else None)
+            name = e["name"] + (" " * (46 - ansilen(e["name"])))
+            print(f"{fmt_colored(name)} {ptm}/{et*1e3:9.2f}ms  " + e.get("fmt", "").replace("\n", " | ") + "  ")
+            if first:
+              if e["ref"] is not None: print_kernel(e["ref"])
+              first = False
+        else:
+          t, c, ref = agg.get(e["name"], (0.0, 0, None))
+          agg[e["name"]] = (t+et, c+1, e["ref"])
+          total += et
+      if agg and total > 0:
+        items = sorted(agg.items(), key=lambda kv:kv[1][0], reverse=True)
+        num_rows = args.top
+        for name,(t,c,ref) in items[:num_rows]:
+          print(f"{fmt_colored(name)}{' ' * max(0, 36 - ansilen(name))} {time_to_str(t, w=9)} {c:7d} {t/total*100.0:6.2f}%")
+          if ref is not None: print_kernel(ref)
+        if num_rows > 0 and items[num_rows:]:
+          other_t = sum(t for _,(t,_,_) in items[num_rows:])
+          other_c = sum(c for _,(_,c,_) in items[num_rows:])
+          print(f"{'Other':<36} {time_to_str(other_t, w=9)} {other_c:7d} {other_t/total*100.0:6.2f}%")
     return None
 
   # ** Graph rewrites printer
   rewrites = {c["name"]:{s["name"]:s for s in c["steps"]} for c in viz_data.ctxs if c.get("steps")}
-  if args.src is None:
-    for k in rewrites: print(f"  {format_colored(k)}")
-    return None
+  if args.src is None: return print("\n".join([f"  {fmt_colored(k)}" for k in rewrites]))
   steps = get(rewrites, args.src)
   if args.item is None:
     for k,v in steps.items(): print(" "*v["depth"]+k+(f" - {v['match_count']}" if v.get('match_count', 0) else ''))
@@ -176,8 +170,7 @@ def main(args) -> None:
         if m.get("diff"):
           loc = pathlib.Path(m["upat"][0][0])
           print(f"Rewrite at {loc.parent.name}/{loc.name}:{m['upat'][0][1]}\n{m['upat'][1]}")
-          for line in m["diff"]:
-            print(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None))
+          for line in m["diff"]: print(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None))
     if data.get("src") is not None: print(data["src"])
 
 def get_arg_parser() -> argparse.ArgumentParser:
