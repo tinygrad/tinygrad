@@ -57,6 +57,7 @@ LLAMA_LORA_ALPHA=32
 LLAMA_LORA_DROPOUT=0.1
 ```
 `run_and_time.sh` also forces `LOGMLPERF=1`, `SUBMISSION_PLATFORM=tinybox_8xMI350X`, `DATA_SEED=SEED`, and ignores ambient checkpoint/debug split modifiers such as `TRAIN_ON_VAL`, `SMALL`, `LOAD_CKPT`, `RESUME_CKPT`, and `LLAMA_LAYERS`.
+It also pins the runtime/kernel knobs carried in `dev_run.sh`, including `DEBUG=0`, `HK_FLASH_ATTENTION=1`, `ASM_GEMM=1`, `OFFLOAD_OPTIM=1`, `JITBEAM=3`, and the `BEAM_*` limits, so the submission wrapper does not inherit them from the caller shell.
 
 ## Running
 
