@@ -77,6 +77,20 @@ class TestMLPerfLlama2LoRAEval(unittest.TestCase):
     self.assertListEqual(tokens.numpy().tolist(), [[1, 2, 3, 4]])
     self.assertListEqual(labels.numpy().tolist(), [[-1, 2, -1, 4]])
 
+  def test_iterate_llama2_70b_lora_dataset_respects_split_semantics_and_sample_caps(self):
+    with tempfile.TemporaryDirectory(prefix="llama2-lora-dataset-") as tmpdir:
+      train_path = Path(tmpdir) / "train.jsonl"
+      train_path.write_text(json.dumps({"input": "source text", "output": "target summary"}) + "\n")
+      seqlen = len(llama_helpers.llama2_70b_lora_encode_sample(FakeTokenizer(), "source text", "target summary", mask_prompt_labels=False)[0])
+
+      train_tokens, train_labels = next(iter(iterate_llama2_70b_lora_dataset(train_path, bs=1, seqlen=seqlen, tokenizer=FakeTokenizer(), val=False, samples=1)))
+      self.assertNotIn(-1, train_labels.numpy().tolist()[0])
+      self.assertEqual(train_tokens.shape[0], 1)
+
+      val_tokens, val_labels = next(iter(iterate_llama2_70b_lora_dataset(train_path, bs=1, seqlen=seqlen, tokenizer=FakeTokenizer(), val=True, samples=1)))
+      self.assertIn(-1, val_labels.numpy().tolist()[0])
+      self.assertEqual(val_tokens.shape[0], 1)
+
   def test_eval_llama2_70b_lora_loads_base_and_adapter(self):
     Tensor.manual_seed(42)
     tiny_params = dict(dim=128, hidden_dim=256, n_heads=4, n_kv_heads=2, n_layers=2, norm_eps=1e-5, vocab_size=1024, rope_theta=10000)

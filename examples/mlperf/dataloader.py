@@ -824,7 +824,7 @@ def _llama2_70b_lora_records(dataset_ref:str|Path, val:bool=True) -> Iterator[di
 def _llama2_70b_lora_tokens(record:dict, tokenizer=None, *, val:bool=True) -> tuple[list[int], list[int]]:
   if "input_ids" in record:
     input_ids = list(record["input_ids"])
-    labels = list(record.get("labels", input_ids))
+    labels = list(record.get("labels", input_ids)) if val else input_ids.copy()
     return input_ids, labels
   if tokenizer is None:
     raise ValueError("llama2_70b_lora raw input/output records require a tokenizer")
@@ -841,11 +841,13 @@ def count_llama2_70b_lora_sequences(dataset_ref:str|Path, seqlen:int, tokenizer=
     buffered_tokens %= seqlen
   return packed_sequences
 
-def iterate_llama2_70b_lora_dataset(dataset_ref:str|Path, bs:int, seqlen:int, tokenizer=None, val:bool=True, drop_last:bool=False):
+def iterate_llama2_70b_lora_dataset(dataset_ref:str|Path, bs:int, seqlen:int, tokenizer=None, val:bool=True, drop_last:bool=False,
+                                    samples:int|None=None):
   input_buffer:list[int] = []
   label_buffer:list[int] = []
   batch_inputs:list[list[int]] = []
   batch_labels:list[list[int]] = []
+  packed_sequences, stop = 0, False
 
   for record in _llama2_70b_lora_records(dataset_ref, val=val):
     input_ids, labels = _llama2_70b_lora_tokens(record, tokenizer, val=val)
@@ -854,13 +856,19 @@ def iterate_llama2_70b_lora_dataset(dataset_ref:str|Path, bs:int, seqlen:int, to
     input_buffer.extend(input_ids)
     label_buffer.extend(labels)
     while len(input_buffer) >= seqlen:
+      if samples is not None and packed_sequences >= samples:
+        stop = True
+        break
       batch_inputs.append(input_buffer[:seqlen])
       batch_labels.append(label_buffer[:seqlen])
       del input_buffer[:seqlen]
       del label_buffer[:seqlen]
+      packed_sequences += 1
       if len(batch_inputs) == bs:
         yield Tensor(np.array(batch_inputs, dtype=np.int32), device="NPY"), Tensor(np.array(batch_labels, dtype=np.int32), device="NPY")
         batch_inputs, batch_labels = [], []
+    if stop:
+      break
 
   if batch_inputs and not drop_last:
     yield Tensor(np.array(batch_inputs, dtype=np.int32), device="NPY"), Tensor(np.array(batch_labels, dtype=np.int32), device="NPY")

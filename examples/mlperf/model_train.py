@@ -1565,7 +1565,7 @@ def _train_flat_llama(model_name:str):
       return fake_data(BS, SAMPLES)
     if model_name == "llama3":
       return ((tokens, tokens) for tokens in batch_load_llama3(BS, SAMPLES, SEQLEN, BASEDIR, seed=DATA_SEED, val=bool(TRAIN_ON_VAL), small=bool(SMALL)))
-    return iterate_llama2_70b_lora_dataset(DATASET_PATH, BS, SEQLEN, tokenizer=tokenizer, val=bool(TRAIN_ON_VAL), drop_last=True)
+    return iterate_llama2_70b_lora_dataset(DATASET_PATH, BS, SEQLEN, tokenizer=tokenizer, val=bool(TRAIN_ON_VAL), drop_last=True, samples=SAMPLES or None)
 
   if FAKEDATA:
     eval_dataset = None
@@ -1579,7 +1579,7 @@ def _train_flat_llama(model_name:str):
       return fake_data(EVAL_BS, EVAL_SAMPLES)
     if model_name == "llama3":
       return ((tokens, tokens) for tokens in iterate_llama3_dataset(eval_dataset, EVAL_BS))
-    return iterate_llama2_70b_lora_dataset(eval_dataset, EVAL_BS, SEQLEN, tokenizer=tokenizer, val=True)
+    return iterate_llama2_70b_lora_dataset(eval_dataset, EVAL_BS, SEQLEN, tokenizer=tokenizer, val=True, samples=EVAL_SAMPLES or None)
 
   num_params = sum(p.numel() for p in params) - model_params["vocab_size"]*model_params["dim"]
   train_iter = get_train_iter()
