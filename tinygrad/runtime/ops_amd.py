@@ -945,7 +945,7 @@ def mock_iface(iface):
   def __init__(self, dev, dev_id):
     from test.mockgpu.mockgpu import register_driver
     register_driver(f"{iface.__name__[:-5]}+AMD")
-    super().__init__(dev, dev_id)
+    iface.__init__(self, dev, dev_id)
   return type(f"MOCK{iface.__name__}", (iface,), {"__init__": __init__})
 
 class AMDDevice(HCQCompiled):
