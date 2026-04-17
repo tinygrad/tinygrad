@@ -120,6 +120,11 @@ def __getattr__(nm):
                                                                                                "sienna_cichlid_ip_offset"]],
                                 args=["-I/opt/rocm/include", "-x", "c++"])
     case "amdgpu_drm": return load("amdgpu_drm", None, [ "/usr/include/drm/drm.h", *[root/f"extra/hip_gpu_driver/{s}.h" for s in ["amdgpu_drm"]]])
+    case "tegra_36":
+      return load("tegra_36", None, [root/f"extra/tegra_gpu_driver/{s}.h" for s in ["nvgpu", "nvgpu-ctrl", "nvgpu-as", "nvmap", "nvmap_extras"]],
+        args=["-D__user=", "-D__u8=unsigned char", "-D__u16=unsigned short", "-D__u32=unsigned int", "-D__u64=unsigned long long",
+              "-D__s8=signed char", "-D__s16=short", "-D__s32=int", "-D__s64=long long", "-D_IOC_TYPECHECK(t)=sizeof(t)",
+              f"-I{root/'extra/tegra_gpu_driver'}"])
     case "kgsl": return load("kgsl", None, [root/"extra/qcom_gpu_driver/msm_kgsl.h"], args=["-D__user="])
     case "qcom_dsp":
       return load("qcom_dsp", None, [root/f"extra/dsp/include/{s}.h" for s in ["ion", "msm_ion", "adsprpc_shared", "remote_default", "apps_std"]])

@@ -13,6 +13,7 @@ from tinygrad.renderer.cstyle import CUDARenderer, NVCCRenderer
 from tinygrad.runtime.autogen import nv_570, nv_580, mesa
 from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.support.nv.nvdev import NVDev, NVMemoryManager
+from tinygrad.runtime.support.nv.tegradev import TegraIface
 from tinygrad.runtime.support.system import System, PCIIfaceBase, MAP_FIXED
 from tinygrad.renderer.nir import NAKRenderer
 if getenv("IOCTL"): import extra.nv_gpu_driver.nv_ioctl # noqa: F401 # pylint: disable=unused-import
@@ -126,6 +127,9 @@ class NVCommandQueue(HWQueue[HCQSignal, 'NVDevice', 'NVProgram', 'NVArgsState'])
     gpfifo.put_value += 1
 
 class NVComputeQueue(NVCommandQueue):
+  # NOTE: Tegra SoC race: MMIO doorbell races CWD release payload patching (hidden by PCIe latency on desktop).
+  _tegra_signal = False
+
   def memory_barrier(self):
     self.nvm(1, nv_gpu.NVC6C0_INVALIDATE_SHADER_CACHES_NO_WFI,
              nv_flags("NVC6C0_INVALIDATE_SHADER_CACHES_NO_WFI", instruction="true", global_data="true", constant="true"))
@@ -157,7 +161,7 @@ class NVComputeQueue(NVCommandQueue):
     return self
 
   def signal(self, signal:HCQSignal, value:sint=0):
-    if self.active_qmd is not None:
+    if self.active_qmd is not None and not NVComputeQueue._tegra_signal:
       for i in range(2):
         if self.active_qmd.read(f'release{i}_enable') == 0:
           self.active_qmd.write(**{f'release{i}_enable': 1})
@@ -338,7 +342,7 @@ class NVProgram(HCQProgram):
 
 class NVAllocator(HCQAllocator['NVDevice']):
   def _alloc(self, size:int, options:BufferSpec) -> HCQBuffer:
-    return self.dev.iface.alloc(size, cpu_access=options.cpu_access, host=options.host)
+    return self.dev.iface.alloc(size, cpu_access=options.cpu_access, host=options.host, uncached=options.uncached)
 
   def _do_free(self, opaque:HCQBuffer, options:BufferSpec): self.dev.iface.free(opaque)
 
@@ -577,10 +581,11 @@ class PCIIface(PCIIfaceBase):
 
 class NVDevice(HCQCompiled[NVSignal]):
   def is_nvd(self) -> bool: return isinstance(self.iface, PCIIface)
+  def is_tegra(self) -> bool: return isinstance(self.iface, TegraIface)
 
   def __init__(self, device:str=""):
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
-    self.iface = self._select_iface(NVKIface, PCIIface)
+    self.iface = self._select_iface(TegraIface, NVKIface, PCIIface)
 
     device_params = nv_gpu.NV0080_ALLOC_PARAMETERS(deviceId=self.iface.gpu_instance, hClientShare=self.iface.root,
                                                    vaMode=nv_gpu.NV_DEVICE_ALLOCATION_VAMODE_OPTIONAL_MULTIPLE_VASPACES)
@@ -602,14 +607,16 @@ class NVDevice(HCQCompiled[NVSignal]):
     channel_params = nv_gpu.NV_CHANNEL_GROUP_ALLOCATION_PARAMETERS(engineType=nv_gpu.NV2080_ENGINE_TYPE_GRAPHICS)
     self.channel_group = self.iface.rm_alloc(self.nvdevice, nv_gpu.KEPLER_CHANNEL_GROUP_A, channel_params)
 
-    self.gpfifo_area = self.iface.alloc(0x300000, contiguous=True, cpu_access=True, force_devmem=True,
+    self.gpfifo_area = self.iface.alloc(0x10000 if self.is_tegra() else 0x300000, contiguous=True, cpu_access=True, force_devmem=True,
       map_flags=(nv_gpu.NVOS33_FLAGS_CACHING_TYPE_WRITECOMBINED<<23))
 
     ctxshare_params = nv_gpu.NV_CTXSHARE_ALLOCATION_PARAMETERS(hVASpace=vaspace, flags=nv_gpu.NV_CTXSHARE_ALLOCATION_FLAGS_SUBCONTEXT_ASYNC)
     ctxshare = self.iface.rm_alloc(self.channel_group, nv_gpu.FERMI_CONTEXT_SHARE_A, ctxshare_params)
 
-    self.compute_gpfifo = self._new_gpu_fifo(self.gpfifo_area, ctxshare, self.channel_group, offset=0, entries=0x10000, compute=True)
-    self.dma_gpfifo = self._new_gpu_fifo(self.gpfifo_area, ctxshare, self.channel_group, offset=0x100000, entries=0x10000, compute=False)
+    _gfe, _doff = (0x400, 0x3000) if self.is_tegra() else (0x10000, 0x100000)
+    assert _doff >= _gfe * 8 + 0x1000, f"gpfifo layout overflow: _doff={_doff:#x} needs >= {_gfe*8+0x1000:#x} (ring+USERD page)"
+    self.compute_gpfifo = self._new_gpu_fifo(self.gpfifo_area, ctxshare, self.channel_group, offset=0, entries=_gfe, compute=True)
+    self.dma_gpfifo = self._new_gpu_fifo(self.gpfifo_area, ctxshare, self.channel_group, offset=_doff, entries=_gfe, compute=False)
     self.iface.rm_control(self.channel_group, nv_gpu.NVA06C_CTRL_CMD_GPFIFO_SCHEDULE, nv_gpu.NVA06C_CTRL_GPFIFO_SCHEDULE_PARAMS(bEnable=1))
 
     self.cmdq_page:HCQBuffer = self.iface.alloc(0x200000, cpu_access=True)
@@ -626,9 +633,10 @@ class NVDevice(HCQCompiled[NVSignal]):
     super().__init__(device, NVAllocator(self), [CUDARenderer, PTXRenderer, NVCCRenderer, NAKRenderer], functools.partial(NVProgram, self), NVSignal,
                      NVComputeQueue, NVCopyQueue, arch=self.arch)
 
-    self.pma_enabled = PMA.value > 0 and PROFILE >= 1
+    self.pma_enabled = PMA.value > 0 and PROFILE >= 1 and not self.is_tegra()
     if self.pma_enabled: self._prof_init()
 
+    if self.is_tegra(): NVComputeQueue._tegra_signal = True  # force GPFIFO signal path
     self._setup_gpfifos()
 
   def _new_gpu_fifo(self, gpfifo_area, ctxshare, channel_group, offset=0, entries=0x400, compute=False, video=False) -> GPFifo:
@@ -673,7 +681,7 @@ class NVDevice(HCQCompiled[NVSignal]):
     self.slm_per_thread, self.shader_local_mem = 0, None
 
     # Set windows addresses to not collide with other allocated buffers.
-    self.shared_mem_window, self.local_mem_window = 0x729400000000, 0x729300000000
+    self.shared_mem_window, self.local_mem_window = (0xFE00000000, 0xFD00000000) if self.is_tegra() else (0x729400000000, 0x729300000000)
 
     NVComputeQueue().setup(compute_class=self.iface.compute_class, local_mem_window=self.local_mem_window, shared_mem_window=self.shared_mem_window) \
                     .signal(self.timeline_signal, self.next_timeline()).submit(self)
@@ -728,6 +736,7 @@ class NVDevice(HCQCompiled[NVSignal]):
               (nv_gpu.NV2080_CTRL_FB_FLUSH_GPU_CACHE_FLAGS_FLUSH_MODE_FULL_CACHE << 4))))
 
   def on_device_hang(self):
+    if self.is_tegra(): raise RuntimeError("Tegra device hang, nvgpu driver resets GPU channel on fd close")
     # Prepare fault report.
     # TODO: Restore the GPU using NV83DE_CTRL_CMD_CLEAR_ALL_SM_ERROR_STATES if needed.
 
