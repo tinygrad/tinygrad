@@ -12,7 +12,7 @@ libc.mmap.restype = ctypes.c_void_p
 
 drivers = []
 def register_driver(name):
-  drv_cls = {"PCI+AMD": AMDriver, "KFD+AMD": AMDDriver, "USB+AMD": AMUSBDriver, "PCI+NV": NVDriver}.get(name)
+  drv_cls = {"PCI+AMD": AMDriver, "KFD+AMD": AMDDriver, "USB+AMD": AMUSBDriver, "NVK+NV": NVDriver}.get(name)
   if not any(isinstance(drv, drv_cls) for drv in drivers): drivers.append(drv_cls())
 tracked_fds = {}
 
