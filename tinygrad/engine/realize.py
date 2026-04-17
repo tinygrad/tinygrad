@@ -237,8 +237,8 @@ class ExecContext:
   do_update_stats: bool = True
 
 @contextlib.contextmanager
-def track_stat(ctx:ExecContext, call:UOp, device:str, display_name:str, estimates:Estimates, bufs:list[Buffer], var_vals:dict[str, int], *,
-               outputs=(0,), inputs=(1,), first_run=False):
+def track_stats(ctx:ExecContext, call:UOp, device:str, display_name:str, estimates:Estimates, bufs:list[Buffer], var_vals:dict[str, int], *,
+                outputs=(0,), inputs=(1,), first_run=False):
   if PROFILE: cpu_events.append(ProfilePointEvent(device, "exec", len(cpu_events), {"metadata": call.arg.metadata, "var_vals": var_vals,
                                                   "bufs": [b.trace_num for b in bufs], "name": display_name, "outputs": outputs, "inputs": inputs}))
   timing: list[float|None] = [None]
@@ -253,7 +253,7 @@ def track_stat(ctx:ExecContext, call:UOp, device:str, display_name:str, estimate
 def exec_view(ctx:ExecContext, call, ast):
   bufs = [b.buffer for b in call.src[1:] if b.op is not Ops.BIND]
   bv = bufs[1].view(call.src[1].arg, ast.dtype, ast.arg[1]*bufs[1].dtype.itemsize)
-  with track_stat(ctx, call, bv.device, colored(f"view {bv.nbytes:8d} @ {bv.offset:<10d}", "yellow"), Estimates(), [bv, bufs[1]], ctx.var_vals):
+  with track_stats(ctx, call, bv.device, colored(f"view {bv.nbytes:8d} @ {bv.offset:<10d}", "yellow"), Estimates(), [bv, bufs[1]], ctx.var_vals):
     buffers[call.src[1]] = bv
 
 def exec_copy(ctx:ExecContext, call, ast):
@@ -262,7 +262,7 @@ def exec_copy(ctx:ExecContext, call, ast):
     xfer = hasattr(alc:=Device[dest.device].allocator,'_transfer') and alc.supports_transfer and dest.device.split(":")[0]==src.device.split(":")[0]
     prg = (BufferXfer if xfer else BufferCopy)(dest.nbytes, dest.device, src.device)
     name = colored(f"{'xfer' if xfer else 'copy'} {size_to_str(dest.nbytes):>8s}, {dest.device[:7]:>7s} <- {src.device[:7]:7s}", "yellow")
-    with track_stat(ctx, call, dest.device, name, Estimates(lds=dest.nbytes, mem=dest.nbytes), [dest, src], {**ctx.var_vals, **device_vars}):
+    with track_stats(ctx, call, dest.device, name, Estimates(lds=dest.nbytes, mem=dest.nbytes), [dest, src], {**ctx.var_vals, **device_vars}):
       prg.copy(dest, src)
 
 def exec_kernel(ctx:ExecContext, call, ast):
@@ -276,8 +276,8 @@ def exec_kernel(ctx:ExecContext, call, ast):
     if VALIDATE_WITH_CPU and sink.op is Ops.SINK:
       cpu_bufs = [Buffer("CPU", b.size, b.dtype).ensure_allocated().copyin(b.ensure_allocated().as_memoryview()) for b in bufs]
 
-    with track_stat(ctx, call, prg.device, prg.display_name, prg.estimates, prg_bufs, var_vals,
-                    outputs=tuple(prg.p.outs), inputs=tuple(prg.p.ins), first_run=prg.first_run) as timing:
+    with track_stats(ctx, call, prg.device, prg.display_name, prg.estimates, prg_bufs, var_vals,
+                     outputs=tuple(prg.p.outs), inputs=tuple(prg.p.ins), first_run=prg.first_run) as timing:
       timing[0] = prg(prg_bufs, var_vals, wait=DEBUG >= 2)
       prg.first_run = False
 
@@ -290,8 +290,8 @@ def exec_kernel(ctx:ExecContext, call, ast):
 def exec_encdec(ctx:ExecContext, call, ast):
   bufs = [b.buffer.ensure_allocated() for b in call.src[1:] if b.op is not Ops.BIND]
   shape, pos_var = tuple(s.arg for s in ast.src if s.op is Ops.CONST), ast.variables()[0].expr
-  with track_stat(ctx, call, bufs[0].device, colored(f"enc/dec {size_to_str(bufs[0].nbytes)}", "yellow"),
-                  Estimates(lds=bufs[0].nbytes, mem=bufs[0].nbytes), bufs, ctx.var_vals):
+  with track_stats(ctx, call, bufs[0].device, colored(f"enc/dec {size_to_str(bufs[0].nbytes)}", "yellow"),
+                   Estimates(lds=bufs[0].nbytes, mem=bufs[0].nbytes), bufs, ctx.var_vals):
     bufs[0].allocator._encode_decode(bufs[0]._buf, bufs[1]._buf, bufs[2]._buf, [x._buf for x in bufs[3:]], shape, ctx.var_vals[pos_var])
 
 pm_exec = PatternMatcher([
