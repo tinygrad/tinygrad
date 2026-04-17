@@ -16,7 +16,8 @@ class TestMLPerfLRSchedulers(unittest.TestCase):
       lr.append(optim.lr.item())
       sched.step()
 
-    expected = [4e-4 * (1 + math.cos((i + 1) * math.pi / 8)) / 2 for i in range(8)]
+    expected = [4e-4]
+    expected += [4e-4 * (1 + math.cos(i * math.pi / 8)) / 2 for i in range(1, 8)]
     self.assertEqual(len(lr), len(expected))
     for got, want in zip(lr, expected):
       self.assertAlmostEqual(got, want, places=10)

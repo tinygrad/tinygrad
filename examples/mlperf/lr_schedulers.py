@@ -32,11 +32,13 @@ class CosineAnnealingLRWithWarmup(LR_Scheduler):
     self.warmup_steps = warmup_steps
     self.decay_steps = decay_steps
     # set lr for first warmup step
-    self.optimizer.lr.assign(self.get_lr()).realize()
+    self.optimizer.lr.assign(self.base_lr if self.warmup_steps == 0 else self.get_lr()).realize()
 
   def get_lr(self):
+    if self.warmup_steps == 0:
+      decay_lr = self.end_lr + 0.5 * (self.base_lr-self.end_lr) * (1 + ((self.epoch_counter/self.decay_steps) * math.pi).cos())
+      return decay_lr.cast(self.optimizer.lr.dtype)
     decay_lr = self.end_lr + 0.5 * (self.base_lr-self.end_lr) * (1 + (((self.epoch_counter+1-self.warmup_steps)/self.decay_steps) * math.pi).cos())
-    if self.warmup_steps == 0: return decay_lr.cast(self.optimizer.lr.dtype)
     warmup_lr = ((self.epoch_counter+1) / self.warmup_steps) * self.base_lr
     return (self.epoch_counter < self.warmup_steps).where(warmup_lr, decay_lr).cast(self.optimizer.lr.dtype)
 

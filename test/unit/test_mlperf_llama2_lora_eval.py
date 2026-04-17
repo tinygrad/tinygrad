@@ -91,6 +91,14 @@ class TestMLPerfLlama2LoRAEval(unittest.TestCase):
       self.assertIn(-1, val_labels.numpy().tolist()[0])
       self.assertEqual(val_tokens.shape[0], 1)
 
+  def test_iterate_llama2_70b_lora_dataset_preserves_explicit_train_labels(self):
+    with tempfile.TemporaryDirectory(prefix="llama2-lora-dataset-") as tmpdir:
+      train_path = Path(tmpdir) / "train.jsonl"
+      train_path.write_text(json.dumps({"input_ids": [11, 12, 13, 14], "labels": [-1, -1, 13, -1]}) + "\n")
+
+      _, labels = next(iter(iterate_llama2_70b_lora_dataset(train_path, bs=1, seqlen=4, val=False, samples=1)))
+      self.assertListEqual(labels.numpy().tolist(), [[-1, -1, 13, -1]])
+
   def test_eval_llama2_70b_lora_loads_base_and_adapter(self):
     Tensor.manual_seed(42)
     tiny_params = dict(dim=128, hidden_dim=256, n_heads=4, n_kv_heads=2, n_layers=2, norm_eps=1e-5, vocab_size=1024, rope_theta=10000)

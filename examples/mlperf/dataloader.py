@@ -824,7 +824,7 @@ def _llama2_70b_lora_records(dataset_ref:str|Path, val:bool=True) -> Iterator[di
 def _llama2_70b_lora_tokens(record:dict, tokenizer=None, *, val:bool=True) -> tuple[list[int], list[int]]:
   if "input_ids" in record:
     input_ids = list(record["input_ids"])
-    labels = list(record.get("labels", input_ids)) if val else input_ids.copy()
+    labels = list(record["labels"]) if "labels" in record else input_ids.copy()
     return input_ids, labels
   if tokenizer is None:
     raise ValueError("llama2_70b_lora raw input/output records require a tokenizer")
