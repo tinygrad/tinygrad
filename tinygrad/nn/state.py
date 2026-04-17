@@ -503,14 +503,14 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
       scales = (1 + 2 * q_to_uint8(blocks[:, 106:110].reshape((-1, 4, 1)), 4).reshape((-1, 8))).cast(dtypes.float32).reshape((-1, 8, 1, 1))
       qh = q_to_uint8(blocks[:, 66:74].reshape((-1, 8, 1)), 1).reshape((-1, 64)).cast(dtypes.uint16)
       signs = (q_to_uint8(blocks[:, 74:106].reshape((-1, 32, 1)), 1).reshape((-1, 256)) == 0).where(1.0, -1.0).reshape((-1, 8, 4, 8))
-      q = blocks[:, 2:66].cast(dtypes.uint16).bitwise_or(qh.lshift(8))
+      q = blocks[:, 2:66].cast(dtypes.uint16) + qh.lshift(8)
       return (d * scales * _ggml_iq_grid(t.device, _IQ3_S_GRID_MAP, (512, 4), _IQ3_S_GRID_ROWS)[q].reshape((-1, 8, 4, 8)) * signs).flatten(-3)
     if ggml_type == 22:
       d = blocks[:, :2].bitcast(dtypes.float16).cast(dtypes.float32).reshape((-1, 1, 1, 1))
       db = d * (q_to_uint8(blocks[:, 74:82].reshape((-1, 8, 1)), 4).reshape((-1, 16)).cast(dtypes.float32) + 0.5).reshape((-1, 16, 1, 1)) * 0.25
       signs = (q_to_uint8(blocks[:, 34:66].reshape((-1, 32, 1)), 1) == 0).where(1.0, -1.0).reshape((-1, 16, 2, 8))
       qh = q_to_uint8(blocks[:, 66:74].reshape((-1, 8, 1)), 2).reshape((-1, 32)).cast(dtypes.uint16)
-      q = blocks[:, 2:34].cast(dtypes.uint16).bitwise_or(qh.lshift(8))
+      q = blocks[:, 2:34].cast(dtypes.uint16) + qh.lshift(8)
       return (db * _ggml_iq_grid(t.device, _IQ2_S_GRID_MAP, (1024, 8), _IQ2_S_GRID_ROWS)[q].reshape((-1, 16, 2, 8)) * signs).flatten(-3)
     if ggml_type == 23:
       d = blocks[:, :2].bitcast(dtypes.float16).cast(dtypes.float32).reshape((-1, 1, 1))
