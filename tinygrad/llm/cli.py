@@ -6,7 +6,8 @@ from tinygrad.viz.serve import TCPServerWithReuse, HTTPRequestHandler
 from tinygrad.llm.model import Transformer
 
 class SimpleTokenizer:
-  def __init__(self, normal_tokens:dict[str, int], special_tokens:dict[str, int], preset:str="llama3"):
+  def __init__(self, normal_tokens:dict[str, int], special_tokens:dict[str, int], preset:str="llama3",
+               bos_id:int|None=None, eos_id:int=0, eot_id:int|None=None):
     preset = {"qwen35":"qwen2","qwen35moe":"qwen2"}.get(preset, preset)
     if preset not in ("llama3","llama-v3","llama-bpe","qwen2","olmo","kimi-k2","tekken","glm4"):
       raise ValueError(f"Invalid tokenizer preset '{preset}'")
@@ -26,13 +27,18 @@ class SimpleTokenizer:
     self._special_tokens = special_tokens
     self._tok2bytes = {tid: tok for tok, tid in self._normal_tokens.items()} | {tid: tok.encode() for tok, tid in self._special_tokens.items()}
     self.preset = preset
+    self.bos_id, self.eos_id, self.eot_id = bos_id, eos_id, eot_id
 
   @staticmethod
   def from_gguf_kv(kv:dict):
     # https://github.com/ggml-org/llama.cpp/blob/94933c8c2eeaa9a7983e3f6c08af76bd86724094/src/llama-vocab.cpp#L1818-L1820
     vocab: typing.Iterable[tuple[str, int]] = ((tok, idx) for idx, tok in enumerate(kv["tokenizer.ggml.tokens"]))
     normal_tokens, special_tokens = partition(vocab, lambda e: kv["tokenizer.ggml.token_type"][e[1]] == 1)
-    return SimpleTokenizer(dict(normal_tokens), dict(special_tokens), kv["tokenizer.ggml.pre"])
+    bos_id = kv.get('tokenizer.ggml.bos_token_id') if kv.get('tokenizer.ggml.add_bos_token', True) else None
+    eos_id = kv['tokenizer.ggml.eos_token_id']
+    eot_id = kv.get('tokenizer.ggml.eot_token_id')
+    return SimpleTokenizer(dict(normal_tokens), dict(special_tokens), kv["tokenizer.ggml.pre"],
+                           bos_id=bos_id, eos_id=eos_id, eot_id=eot_id)
 
   def _encode_word(self, word:bytes) -> list[int]:
     if (early_token:=self._normal_tokens.get(word)) is not None: return [early_token]
@@ -69,15 +75,16 @@ class SimpleTokenizer:
       if role == 'assistant': return []
       raise ValueError(f"Unsupported role '{role}' for tokenizer preset '{self.preset}'")
     return self.encode("<|start_header_id|>" + role + "<|end_header_id|>\n\n")
-  def end_turn(self, eos_id:int):
+  def end_turn(self):
     if self.preset == 'olmo': return self.encode("\n")
-    if self.preset == 'kimi-k2': return [eos_id]
-    if self.preset == 'qwen2': return [eos_id] + self.encode("\n")
+    if self.preset == 'kimi-k2': return [self.eos_id]
+    if self.preset == 'qwen2': return [self.eos_id] + self.encode("\n")
     if self.preset == 'glm4': return []
     if self.preset == 'tekken': return self.encode("[/INST]")
-    return [eos_id]
-  def prefix(self, bos_id:int|None) -> list[int]:
-    return ([] if bos_id is None else [bos_id]) + (self.encode("<sop>") if self.preset == 'glm4' else [])
+    return [self.eos_id]
+  def prefix(self) -> list[int]:
+    return ([] if self.bos_id is None else [self.bos_id]) + (self.encode("<sop>") if self.preset == 'glm4' else [])
+  def is_end(self, token_id:int) -> bool: return token_id in (self.eos_id, self.eot_id)
 
 models = {
   "llama3.2:1b": "https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q6_K.gguf",
@@ -105,10 +112,6 @@ class LLMServer(TCPServerWithReuse):
   model: Transformer
   model_name: str
   tok: SimpleTokenizer
-  # TODO: tastefully move these into tokenizer
-  bos_id: int|None
-  eos_id: int
-  eot_id: int|None
 
 class Handler(HTTPRequestHandler):
   server: LLMServer
@@ -117,7 +120,7 @@ class Handler(HTTPRequestHandler):
     if self.path == "/v1/models": self.send_data(json.dumps({"object":"list","data":[{"id":self.server.model_name,"object":"model"}]}).encode())
     else: self.send_data((pathlib.Path(__file__).parent / "chat.html").read_bytes(), content_type="text/html")
   def run_model(self, ids:list[int], model_name:str, include_usage=False, max_tokens:int|None=None, temperature:float=0.0):
-    model, tok, eos_id, eot_id = self.server.model, self.server.tok, self.server.eos_id, self.server.eot_id
+    model, tok = self.server.model, self.server.tok
     cache_start_pos = model.get_start_pos(ids)
     stderr_log(f"{self.path}  {colored('--', 'BLACK')}  "
                f"in:{colored(f'{cache_start_pos:5d}', 'green')} +{len(ids)-cache_start_pos:5d}  {colored('--', 'BLACK')}  ")
@@ -129,7 +132,7 @@ class Handler(HTTPRequestHandler):
     dec = tok.stream_decoder()
     for next_id in model.generate(ids, temperature=temperature):
       if len(out) == 0: stderr_log(f"prefill:{(len(ids)-cache_start_pos)/((pt:=time.perf_counter())-st):4.0f} tok/s  {colored('--', 'BLACK')}  ")
-      if next_id in (eos_id, eot_id): break
+      if tok.is_end(next_id): break
       out.append(next_id)
       yield {"choices": [{"index":0, "delta":{"content":dec(next_id)}, "finish_reason":None}], **tmpl}
       if max_tokens is not None and len(out) >= max_tokens:
@@ -144,13 +147,13 @@ class Handler(HTTPRequestHandler):
                f"out:{len(out):5d}  {colored('--', 'BLACK')}  total:{et-st:6.2f}s\n")
 
   def do_POST(self):
-    tok, bos_id, eos_id = self.server.tok, self.server.bos_id, self.server.eos_id
+    tok = self.server.tok
     raw_body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
     body: dict[str, typing.Any] = json.loads(raw_body.decode("utf-8"))
     if DEBUG >= 1: print(json.dumps(body, indent=2))
     if self.path == "/v1/chat/completions":
       # extract tokens, last assistant message is treated as prefill
-      ids: list[int] = tok.prefix(bos_id)
+      ids: list[int] = tok.prefix()
       for i, msg in enumerate(body["messages"]):
         ids += tok.role(msg["role"])
         content = msg["content"]
@@ -161,7 +164,7 @@ class Handler(HTTPRequestHandler):
             else: raise RuntimeError(f"unhandled type: {c['type']}")
         else: raise RuntimeError(f"unknown content type: {type(content)}")
         if msg["role"] == "assistant" and i == len(body["messages"]) - 1: break
-        ids += tok.end_turn(eos_id)
+        ids += tok.end_turn()
       else: ids += tok.role("assistant")
 
       # reply
@@ -200,9 +203,6 @@ def main():
   gc.collect()
 
   tok = SimpleTokenizer.from_gguf_kv(kv)
-  bos_id: int|None = kv.get('tokenizer.ggml.bos_token_id') if kv.get('tokenizer.ggml.add_bos_token', True) else None
-  eos_id: int = kv['tokenizer.ggml.eos_token_id']
-  eot_id: int|None = kv.get('tokenizer.ggml.eot_token_id')
 
   # warmup the JIT
   if args.warmup or args.serve:
@@ -214,12 +214,11 @@ def main():
   if args.serve:
     server = LLMServer(('', args.serve), Handler)
     server.model, server.model_name, server.tok = model, model_name, tok
-    server.bos_id, server.eos_id, server.eot_id = bos_id, eos_id, eot_id
     server.serve_forever()
 
   # do benchmark
   if args.benchmark is not None:
-    gen = model.generate(toks:=[bos_id or 0])
+    gen = model.generate(toks:=[tok.bos_id or 0])
     for _ in range(args.benchmark):
       GlobalCounters.reset()
       with Timing(on_exit=lambda x: f", {1e9/x:6.2f} tok/s, {GlobalCounters.global_mem/x:7.2f} GB/s,"
@@ -228,16 +227,16 @@ def main():
     exit(0)
 
   # interactive chat
-  ids: list[int] = tok.prefix(bos_id)
+  ids: list[int] = tok.prefix()
   while 1:
     try:
-      ids += tok.role("user") + tok.encode(input('>>> ')) + tok.end_turn(eos_id) + tok.role("assistant")
+      ids += tok.role("user") + tok.encode(input('>>> ')) + tok.end_turn() + tok.role("assistant")
     except EOFError:
       break
     dec = tok.stream_decoder()
     for next_id in model.generate(ids):
-      sys.stdout.write(dec(next_id) if next_id not in (eos_id, eot_id) else dec() + "\n\n")
+      sys.stdout.write(dec(next_id) if not tok.is_end(next_id) else dec() + "\n\n")
       sys.stdout.flush()
-      if next_id in (eos_id, eot_id): break
+      if tok.is_end(next_id): break
 
 if __name__ == "__main__": main()

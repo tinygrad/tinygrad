@@ -14,13 +14,14 @@ class TestLLMServer(unittest.TestCase):
     cls.mock_tok.end_turn = Mock(return_value=[998])
     cls.mock_tok.prefix = Mock(return_value=[1])
     cls.mock_tok.preset = "llama3"
+    cls.mock_tok.bos_id = 1
+    cls.mock_tok.eos_id = 999
+    cls.mock_tok.eot_id = None
+    cls.mock_tok.is_end = Mock(side_effect=lambda tid: tid in (999,))
 
     cls.mock_model = Mock()
     cls.mock_model.generate = Mock(side_effect=lambda ids, **kwargs: iter([300, 301, 999]))
     cls.mock_model.get_start_pos = Mock(return_value=0)
-
-    cls.bos_id = 1
-    cls.eos_id = 999
 
     from tinygrad.llm.cli import Handler, LLMServer
 
@@ -28,9 +29,6 @@ class TestLLMServer(unittest.TestCase):
     cls.server.model = cls.mock_model
     cls.server.model_name = "test-model"
     cls.server.tok = cls.mock_tok
-    cls.server.bos_id = cls.bos_id
-    cls.server.eos_id = cls.eos_id
-    cls.server.eot_id = None
     cls.port = cls.server.server_address[1]
     cls.server_thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
     cls.server_thread.start()
