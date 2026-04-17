@@ -1,9 +1,9 @@
 import os
 os.environ["WQKV"] = "1"
-import unittest
+import tempfile, unittest
 import numpy as np
 from tinygrad import Tensor, nn, dtypes
-from tinygrad.nn.state import get_parameters
+from tinygrad.nn.state import get_parameters, safe_save
 from tinygrad.device import is_dtype_supported, Device
 from extra.models.llama import Transformer
 from examples.mlperf.models.flat_llama import FlatTransformer
@@ -21,6 +21,29 @@ def copy_weights(flat:FlatTransformer, ref:Transformer):
   flat.norm.weight.assign(Tensor(ref.norm.weight.numpy()))
   flat.tok_embeddings.weight.assign(Tensor(ref.tok_embeddings.weight.numpy()).cast(flat.tok_embeddings.weight.dtype))
   flat.output.assign(Tensor(ref.output.weight.numpy()[None]).cast(flat.output.dtype))
+
+def split_attention_state(ref:Transformer):
+  state = nn.state.get_state_dict(ref)
+  split_state = {
+    "tok_embeddings.weight": state["tok_embeddings.weight"],
+    "norm.weight": state["norm.weight"],
+    "output.weight": state["output.weight"],
+  }
+  for i, layer in enumerate(ref.layers):
+    attn = layer.attention
+    q_dim = attn.n_heads * attn.head_dim
+    kv_dim = attn.n_kv_heads * attn.head_dim
+    wq, wk, wv = state[f"layers.{i}.attention.wqkv.weight"].split([q_dim, kv_dim, kv_dim], dim=0)
+    split_state[f"layers.{i}.attention.wq.weight"] = wq
+    split_state[f"layers.{i}.attention.wk.weight"] = wk
+    split_state[f"layers.{i}.attention.wv.weight"] = wv
+    split_state[f"layers.{i}.attention.wo.weight"] = state[f"layers.{i}.attention.wo.weight"]
+    split_state[f"layers.{i}.feed_forward.w1.weight"] = state[f"layers.{i}.feed_forward.w1.weight"]
+    split_state[f"layers.{i}.feed_forward.w2.weight"] = state[f"layers.{i}.feed_forward.w2.weight"]
+    split_state[f"layers.{i}.feed_forward.w3.weight"] = state[f"layers.{i}.feed_forward.w3.weight"]
+    split_state[f"layers.{i}.attention_norm.weight"] = state[f"layers.{i}.attention_norm.weight"]
+    split_state[f"layers.{i}.ffn_norm.weight"] = state[f"layers.{i}.ffn_norm.weight"]
+  return split_state
 
 class TestFlatLlama(unittest.TestCase):
   def test_forward_match(self):
@@ -130,6 +153,35 @@ class TestFlatLlama(unittest.TestCase):
     flat = FlatTransformer(**params)
     self.assertEqual(flat.adapter_state_dict(), {})
     self.assertEqual(flat.adapter_parameters(), [])
+
+  def test_load_from_state_dict(self):
+    Tensor.manual_seed(42)
+    params = dict(dim=128, hidden_dim=256, n_heads=4, n_kv_heads=2, n_layers=2, norm_eps=1e-5, vocab_size=1024, rope_theta=10000, max_context=64)
+    ref = Transformer(**params, disable_kv_cache=True)
+    flat = FlatTransformer(**params)
+    flat.load_from_state_dict(split_attention_state(ref))
+    Tensor.realize(*nn.state.get_state_dict(flat).values())
+
+    tokens = Tensor([[1, 50, 100, 999, 2]])
+    ref_logits = ref(tokens, 0, temperature=float("nan")).realize()
+    flat_logits = flat(tokens).realize()
+    np.testing.assert_allclose(flat_logits.numpy(), ref_logits.numpy(), atol=1e-2, rtol=1e-2)
+
+  def test_load_from_pretrained_safetensors(self):
+    Tensor.manual_seed(42)
+    params = dict(dim=128, hidden_dim=256, n_heads=4, n_kv_heads=2, n_layers=2, norm_eps=1e-5, vocab_size=1024, rope_theta=10000, max_context=64)
+    ref = Transformer(**params, disable_kv_cache=True)
+    flat = FlatTransformer(**params)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+      fn = os.path.join(tmpdir, "model.safetensors")
+      safe_save(split_attention_state(ref), fn)
+      flat.load_from_pretrained(fn)
+
+    tokens = Tensor([[1, 50, 100, 999, 2]])
+    ref_logits = ref(tokens, 0, temperature=float("nan")).realize()
+    flat_logits = flat(tokens).realize()
+    np.testing.assert_allclose(flat_logits.numpy(), ref_logits.numpy(), atol=1e-2, rtol=1e-2)
 
   @unittest.skipUnless(Device.DEFAULT == "CPU", "multi-device CPU test")
   def test_forward_match_mp(self):

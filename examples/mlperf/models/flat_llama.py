@@ -1,4 +1,5 @@
-import math, os, functools
+import json, math, os, functools
+from pathlib import Path
 if __name__ == "__main__":
   os.environ["DEFAULT_FLOAT"] = "bfloat16"
   os.environ["OPTIM_DTYPE"] = "bfloat16"
@@ -12,10 +13,11 @@ if __name__ == "__main__":
     os.environ["HK_FLASH_ATTENTION"] = "1"
     if "ASM_GEMM" not in os.environ:
       os.environ["ASM_GEMM"] = "1"
-from tinygrad import Tensor, nn, function, getenv, dtypes, TinyJit
+from tinygrad import Tensor, nn, function, getenv, dtypes, TinyJit, Device
 from tinygrad.helpers import Timing, colored, GlobalCounters, profile_marker
+from tinygrad.nn.state import safe_load, torch_load
 from tinygrad.uop.ops import Ops, UOp
-from extra.models.llama import apply_rotary_emb, precompute_freqs_cis
+from extra.models.llama import apply_rotary_emb, precompute_freqs_cis, convert_from_huggingface
 
 FP8 = getenv("FP8", 0)
 
@@ -240,6 +242,72 @@ class FlatTransformer:
 
   def adapter_parameters(self) -> list[Tensor]:
     return list(self.adapter_state_dict().values())
+
+  @staticmethod
+  def _load_weights(fn:str):
+    if fn.endswith('.index.json'):
+      with open(fn) as fp: weight_map = json.load(fp)['weight_map']
+      parts = {name: FlatTransformer._load_weights(str(Path(fn).parent / Path(name).name)) for name in set(weight_map.values())}
+      return {key: parts[name][key] for key, name in weight_map.items()}
+    if fn.endswith(".safetensors"): return safe_load(fn)
+    return torch_load(fn)
+
+  @staticmethod
+  def _concat_weights(models:list[dict[str, Tensor]], device=None) -> dict[str, Tensor]:
+    def convert(name:str) -> Tensor:
+      disk_tensors = [model[name] for model in models]
+      if len(disk_tensors) == 1 or len(disk_tensors[0].shape) == 1:
+        return disk_tensors[0].to(device=device)
+      axis = 1 if name.startswith("tok_embeddings.") or name.endswith(".attention.wo.weight") or name.endswith(".feed_forward.w2.weight") else 0
+      lazy_tensors = [data.to(device=device) for data in disk_tensors]
+      return lazy_tensors[0].cat(*lazy_tensors[1:], dim=axis)
+    return {name: convert(name) for name in {name: None for model in models for name in model}}
+
+  def load_from_state_dict(self, weights:dict[str, Tensor]) -> None:
+    if "model.embed_tokens.weight" in weights:
+      weights = convert_from_huggingface(weights, self.n_layers, self.n_heads, self.n_kv_heads)
+
+    def get_tensor(name:str) -> Tensor:
+      if name not in weights: raise KeyError(f"missing weight {name}")
+      return weights[name].to(Device.DEFAULT)
+
+    def get_qkv(layer:int) -> Tensor:
+      fused_name = f"layers.{layer}.attention.wqkv.weight"
+      if fused_name in weights: return get_tensor(fused_name)
+      return get_tensor(f"layers.{layer}.attention.wq.weight").cat(
+        get_tensor(f"layers.{layer}.attention.wk.weight"),
+        get_tensor(f"layers.{layer}.attention.wv.weight"),
+        dim=0,
+      )
+
+    self.wqkv.assign(Tensor.stack(*[get_qkv(i) for i in range(self.n_layers)], dim=0).cast(self.wqkv.dtype))
+    self.wo.assign(Tensor.stack(*[get_tensor(f"layers.{i}.attention.wo.weight") for i in range(self.n_layers)], dim=0).cast(self.wo.dtype))
+    self.w1.assign(Tensor.stack(*[get_tensor(f"layers.{i}.feed_forward.w1.weight") for i in range(self.n_layers)], dim=0).cast(self.w1.dtype))
+    self.w2.assign(Tensor.stack(*[get_tensor(f"layers.{i}.feed_forward.w2.weight") for i in range(self.n_layers)], dim=0).cast(self.w2.dtype))
+    self.w3.assign(Tensor.stack(*[get_tensor(f"layers.{i}.feed_forward.w3.weight") for i in range(self.n_layers)], dim=0).cast(self.w3.dtype))
+    self.attention_norm.assign(Tensor.stack(
+      *[get_tensor(f"layers.{i}.attention_norm.weight") for i in range(self.n_layers)], dim=0,
+    ).cast(self.attention_norm.dtype))
+    self.ffn_norm.assign(Tensor.stack(
+      *[get_tensor(f"layers.{i}.ffn_norm.weight") for i in range(self.n_layers)], dim=0,
+    ).cast(self.ffn_norm.dtype))
+    self.norm.weight.assign(get_tensor("norm.weight").cast(self.norm.weight.dtype))
+    self.tok_embeddings.weight.assign(get_tensor("tok_embeddings.weight").cast(self.tok_embeddings.weight.dtype))
+    self.output.assign(get_tensor("output.weight").cast(self.output.dtype).reshape(1, *self.output.shape[1:]))
+
+  def load_from_pretrained(self, model_path:str|Path, n_files:int=1) -> None:
+    model_path = Path(model_path)
+    if model_path.is_dir():
+      if (model_path / "model.safetensors.index.json").exists(): weights = self._load_weights(str(model_path / "model.safetensors.index.json"))
+      elif (model_path / "model.safetensors").exists(): weights = self._load_weights(str(model_path / "model.safetensors"))
+      else:
+        weights = self._concat_weights(
+          [self._load_weights(str(model_path / f"consolidated.{i:02d}.pth")) for i in range(n_files)],
+          device=Device.DEFAULT,
+        )
+    else:
+      weights = self._load_weights(str(model_path))
+    self.load_from_state_dict(weights)
 
   def __call__(self, tokens:Tensor):
     h = self.tok_embeddings(tokens)
