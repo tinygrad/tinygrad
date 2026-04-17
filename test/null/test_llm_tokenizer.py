@@ -51,11 +51,12 @@ class TestLLMTokenizer(unittest.TestCase):
       "tokenizer.ggml.tokens": ["<unk>", "<s>", "</s>", "[INST]", "[/INST]", "hello"],
       "tokenizer.ggml.token_type": [3, 3, 3, 3, 3, 1],
       "tokenizer.ggml.pre": "tekken",
+      "tokenizer.ggml.eos_token_id": 2,
     }
     tok = SimpleTokenizer.from_gguf_kv(kv)
     self.assertEqual(tok.role("user"), [3])
     self.assertEqual(tok.encode("hello"), [5])
-    self.assertEqual(tok.end_turn(2), [4])
+    self.assertEqual(tok.end_turn(), [4])
     self.assertEqual(tok.role("assistant"), [])
 
   def test_stream_decoder(self):
