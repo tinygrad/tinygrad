@@ -1,4 +1,4 @@
-import unittest, decimal, sys, json, contextlib, tempfile, pickle, io
+import unittest, decimal, sys, json, contextlib, tempfile, pickle, io, itertools
 from pathlib import Path
 from dataclasses import dataclass
 from typing import Generator
@@ -896,21 +896,33 @@ def run_cli(*cli_args) -> str:
 class TestCLI(unittest.TestCase):
   def test_simple(self):
     a = Tensor.empty(1, device="NULL")+2.0
+    empty_counter = itertools.count(0)
     def custom_empty_prg(B:UOp, A:UOp) -> UOp:
-      sink = UOp(Ops.SINK, arg=KernelInfo(name="custom_empty"))
+      sink = UOp(Ops.SINK, arg=KernelInfo(name=f"custom_empty_n{next(empty_counter)}"))
       return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=a.device), UOp(Ops.LINEAR, src=(sink,))))
     b = Tensor.custom_kernel(Tensor.empty_like(a), a, fxn=custom_empty_prg)[0]
+    c = Tensor.custom_kernel(Tensor.empty_like(a), a, fxn=custom_empty_prg)[0]
     with save_viz() as viz:
       b.realize()
+      profile_marker("marker @ 1")
+      c.realize()
     # save trace to disk for CLI to consume it
     with tempfile.TemporaryDirectory() as tmpdir:
       (r:=Path(tmpdir)/"rewrites.pkl").write_bytes(pickle.dumps(viz.data.trace))
       (p:=Path(tmpdir)/"profile.pkl").write_bytes(pickle.dumps(cpu_events))
+      # reconstruct DEBUG=4 output and see all markers.
       with Context(DEBUG=4):
         kernels = run_cli("--rewrites-path", str(r), "--profile-path", str(p), "-p", "-s", "NULL")
-      self.assertIn("void custom_empty", kernels)
+      self.assertIn("void custom_empty_n0", kernels)
+      self.assertIn("marker @ 1", kernels)
+      self.assertIn("void custom_empty_n1", kernels)
       self.assertIn("E", kernels)
       self.assertIn("UOp.const", kernels)
+      # get the top slowest functions across all devices
+      with Context(DEBUG=2):
+        times = run_cli("--rewrites-path", str(r), "--profile-path", str(p), "-p", "-s", "ALL", "--top", "-1")
+      self.assertIn("TINY", times)
+      self.assertIn("NULL", times)
 
 if __name__ == "__main__":
   unittest.main()
