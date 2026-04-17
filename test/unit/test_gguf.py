@@ -1,7 +1,7 @@
 import os, struct, unittest
 from tinygrad import dtypes, Tensor, fetch, Device
-from tinygrad.nn.state import _IQ2_S_GRID_MAP, _IQ2_S_GRID_ROWS, _IQ3_XXS_GRID_MAP, _IQ3_XXS_GRID_ROWS
-from tinygrad.nn.state import _IQ3_S_GRID_MAP, _IQ3_S_GRID_ROWS, _ggml_iq_grid, ggml_data_to_tensor, gguf_load
+from tinygrad.nn.state import _ggml_iq_grid, ggml_data_to_tensor, gguf_load
+from tinygrad.runtime.autogen import ggml_common as _ggml
 from tinygrad.device import is_dtype_supported
 import numpy as np
 from gguf import GGUFReader, GGUFValueType, GGMLQuantizationType, GGML_QUANT_SIZES, dequantize, quantize
@@ -12,17 +12,17 @@ ggml_test_block_count = 4
 class TestGGUFTables(unittest.TestCase):
   def test_iq2_s_grid_matches_gguf_py(self):
     IQ2_S.init_grid()
-    grid = _ggml_iq_grid(Device.DEFAULT, _IQ2_S_GRID_MAP, (1024, 8), _IQ2_S_GRID_ROWS).numpy()
+    grid = _ggml_iq_grid(Device.DEFAULT, _ggml.iq2s_grid, (1024, 8)).numpy()
     np.testing.assert_equal(grid, IQ2_S.grid.reshape(1024, 8))
 
   def test_iq3_xxs_grid_matches_gguf_py(self):
     IQ3_XXS.init_grid()
-    grid = _ggml_iq_grid(Device.DEFAULT, _IQ3_XXS_GRID_MAP, (256, 4), _IQ3_XXS_GRID_ROWS).numpy()
+    grid = _ggml_iq_grid(Device.DEFAULT, _ggml.iq3xxs_grid, (256, 4)).numpy()
     np.testing.assert_equal(grid, IQ3_XXS.grid.reshape(256, 4))
 
   def test_iq3_s_grid_matches_gguf_py(self):
     IQ3_S.init_grid()
-    grid = _ggml_iq_grid(Device.DEFAULT, _IQ3_S_GRID_MAP, (512, 4), _IQ3_S_GRID_ROWS).numpy()
+    grid = _ggml_iq_grid(Device.DEFAULT, _ggml.iq3s_grid, (512, 4)).numpy()
     np.testing.assert_equal(grid, IQ3_S.grid.reshape(512, 4))
 
 @unittest.skipIf(any(not is_dtype_supported(t) for t in [ dtypes.uint8, dtypes.half ]), "Backend must support uint8 and half")
