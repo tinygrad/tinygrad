@@ -130,16 +130,13 @@ class TestAssign(unittest.TestCase):
     new = a + old_a
     np.testing.assert_allclose(new.numpy(), 4)
 
-  @unittest.skip("TODO: this is broken")
   def test_assign_changes_alt(self, realize=False):
     a = Tensor(1).contiguous()
     if realize: a.realize()
-    b = a.contiguous()    # b returns a new Tensor
+    b = a.clone()
     b.assign(2)
     b.realize()
     self.assertNotEqual(a.item(), b.item())
-  # on a realized Tensor contiguous child changes the source
-  @unittest.expectedFailure
   def test_assign_changes_realized_alt(self): return self.test_assign_changes_alt(realize=True)
 
   @unittest.skip("assign to contiguous shouldn't change the base buffer")
