@@ -163,11 +163,14 @@ def main(args) -> None:
         other_c = sum(c for _,(_,c,_) in items[num_rows:])
         kernels.append({"name":"Other", "fmt":f"{time_to_str(other_t, w=9)} {other_c:7d} {other_t/total*100.0:6.2f}%", "ref":None})
     else:
+      parts = [e["fmt"].split("\n") for e in data["events"]]
+      widths = [max((ansilen(p[i]) for p in parts if i < len(p)), default=0) for i in range(max(map(len, parts), default=0))]
       kernels, cum_t = [], 0.0
-      for e in data["events"]:
+      for e,ps in zip(data["events"], parts):
         cum_t += (et:=e["dur"] * 1e-6)
         ptm = colored(time_to_str(et, w=9), "yellow" if et > 0.01 else None)
-        kernels.append({"name":e["name"], "fmt":f"tm {ptm}/{cum_t*1e3:9.2f}ms  "+e["fmt"].replace("\n", "    "), "ref":e["ref"]})
+        padded = "  ".join(p+" "*(widths[i]-ansilen(p)) for i,p in enumerate(ps))
+        kernels.append({"name":e["name"], "fmt":f"tm {ptm}/{cum_t*1e3:9.2f}ms  "+padded, "ref":e["ref"]})
     for k in kernels:
       print(f"{fmt_colored(k['name'])}{' ' * max(0, 36 - ansilen(k['name']))} {k['fmt']}")
       if k["ref"] is not None:
