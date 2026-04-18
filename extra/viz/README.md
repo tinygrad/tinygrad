@@ -11,8 +11,6 @@ Flags: VIZ=-1 to only save the trace to a file, VIZ=1 also launches a web server
 
 ## Inspect runtime profiling
 
-Use `extra/viz/cli.py --profile` to list all sources.
-
 ```bash
 # List top 10 slowest kernels across all devices
 extra/viz/cli.py --profile --top 40
