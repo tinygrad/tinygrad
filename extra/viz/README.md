@@ -17,8 +17,11 @@ Use `extra/viz/cli.py --profile -s ALL` to inspect the complete timing data of k
 - Add --jsonl to see JSON output
 
 ```bash
-# Reconstruct DEBUG=3 output exactly as the runtime in JSONL format.
-DEBUG=3 extra/viz/cli.py --profile -s ALL --jsonl
+# Extract the AST of all kernels
+DEBUG=3 extra/viz/cli.py --profile -s ALL > asts.txt
+
+# Get kernel timing information in JSONL format
+extra/viz/cli.py --profile -s ALL --jsonl
 
 # View top 40 slowest kernels on the AMD device and their AST (DEBUG=4 to see source code)
 DEBUG=3 extra/viz/cli.py --profile -s AMD --top 40
