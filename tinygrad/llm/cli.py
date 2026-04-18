@@ -4,7 +4,7 @@ from tinygrad import Tensor, nn
 from tinygrad.helpers import partition, DEBUG, Timing, GlobalCounters, stderr_log, colored, Context
 from tinygrad.viz.serve import TCPServerWithReuse, HTTPRequestHandler
 from tinygrad.llm.model import Transformer
-from tinygrad.llm.agent import StreamingToolParser, parse_tool_calls, format_tools
+from tinygrad.llm.agent import StreamingToolParser, format_tools
 
 class SimpleTokenizer:
   def __init__(self, normal_tokens:dict[str, int], special_tokens:dict[str, int], preset:str="llama3",
@@ -144,7 +144,6 @@ class Handler(HTTPRequestHandler):
     # Parse tool calls from output
     if tools:
       calls = parser.tool_calls
-      if not calls: calls = parse_tool_calls(tok.decode(out))
       if calls:
         yield {"choices": [{"index":0, "delta":{"tool_calls":calls}, "finish_reason":None}], **tmpl}
         finish_reason = "tool_calls"

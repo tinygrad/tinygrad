@@ -1,4 +1,4 @@
-import json, re, uuid
+import json, uuid
 
 TOOL_CALL_OPEN, TOOL_CALL_CLOSE = "<tool_call>", "</tool_call>"
 
@@ -17,8 +17,7 @@ def _tool_call(obj: str|dict) -> dict|None:
       args = obj.get('arguments', {})
       if isinstance(args, str): args = json.loads(args)
       return {'id': f'call_{uuid.uuid4().hex[:24]}', 'type': 'function', 'function': {'name': obj['name'], 'arguments': json.dumps(args)}}
-  except (json.JSONDecodeError, TypeError):
-    pass
+  except (json.JSONDecodeError, TypeError): pass
   return None
 
 def format_tools(tools: list|None) -> str:
@@ -49,11 +48,3 @@ class StreamingToolParser:
     out = "" if self.in_tag else self.hold
     self.hold, self.buf, self.in_tag = "", "", False
     return out
-
-# parse tagged tool calls, then fall back to bare JSON
-def parse_tool_calls(text: str) -> list[dict]:
-  out = [tc for m in re.finditer(rf'{re.escape(TOOL_CALL_OPEN)}\s*(.*?)\s*{re.escape(TOOL_CALL_CLOSE)}', text, re.DOTALL) if (tc:=_tool_call(m.group(1))) is not None]
-  if out: return out
-  try: raw = json.loads(text.strip())
-  except json.JSONDecodeError: return []
-  return [tc for obj in (raw if isinstance(raw, list) else [raw]) if (tc:=_tool_call(obj)) is not None]
