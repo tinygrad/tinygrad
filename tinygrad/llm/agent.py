@@ -1,6 +1,7 @@
 import json, re, uuid
 
 TOOL_CALL_OPEN, TOOL_CALL_CLOSE = "<tool_call>", "</tool_call>"
+TOOL_CALL_EXAMPLE = '{"name":"...","arguments":{...}}'
 
 def _tool_call(obj: str|dict) -> dict|None:
   try:
@@ -18,7 +19,7 @@ def format_tools(tools: list|None) -> str:
   return ("# Tools\nYou may call one or more functions to assist with the user query.\n"
           "You are provided with function signatures in <tools></tools> XML tags:\n<tools>\n" +
           "\n".join(json.dumps(t.get('function', t), ensure_ascii=False) for t in tools) +
-          f"\n</tools>\nIf you call a tool, respond only with {TOOL_CALL_OPEN}{'{"name":"...","arguments":{...}}'}{TOOL_CALL_CLOSE}")
+          "\n</tools>\nIf you call a tool, respond only with " + TOOL_CALL_OPEN + TOOL_CALL_EXAMPLE + TOOL_CALL_CLOSE)
 
 class StreamingToolParser:
   def __init__(self): self.hold, self.buf, self.in_tag, self.tool_calls = "", "", False, []
