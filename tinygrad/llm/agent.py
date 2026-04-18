@@ -15,28 +15,55 @@ def format_tool_response(content: str, preset: str) -> str:
   if preset in ('llama3', 'llama-v3', 'llama-bpe'): return f"  \n\n{content}<|eot_id|>"
   return content
 
+THINK_TAGS = ("think", "thinking")
+THINK_OPENS = [f'<{tag}>' for tag in THINK_TAGS]
+THINK_CLOSES = [f'</{tag}>' for tag in THINK_TAGS]
+
 class StreamingToolParser:
-  def __init__(self): self.hold, self.in_tag = "", False
+  def __init__(self): self.hold, self.in_tag, self.in_think = "", False, False
   def process(self, chunk: str) -> str:
     self.hold += chunk
-    for tag in ("think", "thinking"): self.hold = re.sub(r'<' + tag + r'>\s*.*?\s*</' + tag + r'>', '', self.hold, flags=re.DOTALL)
     content = ""
     while True:
-      if self.in_tag:
+      for tag in THINK_TAGS: self.hold = re.sub(r'<' + tag + r'>\s*.*?\s*</' + tag + r'>', '', self.hold, flags=re.DOTALL)
+      if self.in_think:
+        close_idx, close_tag = -1, None
+        for ct in THINK_CLOSES:
+          i = self.hold.find(ct)
+          if i != -1 and (close_idx == -1 or i < close_idx): close_idx, close_tag = i, ct
+        if close_idx != -1:
+          self.hold = self.hold[close_idx + len(close_tag):]
+          self.in_think = False
+          continue
+        hold_back = max(len(ct) for ct in THINK_CLOSES) - 1
+        self.hold = self.hold[-hold_back:] if len(self.hold) > hold_back else self.hold
+        break
+      elif self.in_tag:
         i = self.hold.find(TOOL_CALL_CLOSE)
         if i == -1: self.hold = self.hold[-(len(TOOL_CALL_CLOSE)-1):] if len(self.hold) >= len(TOOL_CALL_CLOSE) else self.hold; break
         self.hold, self.in_tag = self.hold[i+len(TOOL_CALL_CLOSE):], False
       else:
-        i = self.hold.find(TOOL_CALL_OPEN)
-        if i == -1: content += self.hold[:-(len(TOOL_CALL_OPEN)-1)] if len(self.hold) >= len(TOOL_CALL_OPEN) else ""; self.hold = self.hold[-(len(TOOL_CALL_OPEN)-1):] if len(self.hold) >= len(TOOL_CALL_OPEN) else self.hold; break
-        content += self.hold[:i]; self.hold, self.in_tag = self.hold[i+len(TOOL_CALL_OPEN):], True
-    for tag in ("think", "thinking"): content = re.sub(r'<' + tag + r'>\s*.*?\s*</' + tag + r'>', '', content, flags=re.DOTALL)
+        best_idx, best_tag, best_type = -1, None, None
+        for ot in THINK_OPENS:
+          i = self.hold.find(ot)
+          if i != -1 and (best_idx == -1 or i < best_idx): best_idx, best_tag, best_type = i, ot, 'think'
+        i_tool = self.hold.find(TOOL_CALL_OPEN)
+        if i_tool != -1 and (best_idx == -1 or i_tool < best_idx): best_idx, best_tag, best_type = i_tool, TOOL_CALL_OPEN, 'tool'
+        if best_idx != -1:
+          content += self.hold[:best_idx]
+          self.hold = self.hold[best_idx + len(best_tag):]
+          if best_type == 'think': self.in_think = True
+          else: self.in_tag = True
+        else:
+          hold_back = max(max(len(ot) for ot in THINK_OPENS), len(TOOL_CALL_OPEN)) - 1
+          if len(self.hold) > hold_back: content += self.hold[:-hold_back]; self.hold = self.hold[-hold_back:]
+          break
+    for tag in THINK_TAGS: content = re.sub(r'<' + tag + r'>\s*.*?\s*</' + tag + r'>', '', content, flags=re.DOTALL)
     return content
   def finalize(self) -> str:
-    for tag in ("think", "thinking"):
-      self.hold = re.sub(r'<' + tag + r'>\s*.*?\s*</' + tag + r'>', '', self.hold, flags=re.DOTALL)
-    result = self.hold if not self.in_tag else ""
-    self.hold, self.in_tag = "", False
+    for tag in THINK_TAGS: self.hold = re.sub(r'<' + tag + r'>\s*.*?\s*</' + tag + r'>', '', self.hold, flags=re.DOTALL)
+    result = self.hold if not self.in_tag and not self.in_think else ""
+    self.hold, self.in_tag, self.in_think = "", False, False
     return result
 
 def parse_tool_calls(text: str) -> tuple[list[dict], list[str], str]:
