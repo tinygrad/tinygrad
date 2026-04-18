@@ -4,7 +4,7 @@ from tinygrad import Tensor, nn
 from tinygrad.helpers import partition, DEBUG, Timing, GlobalCounters, stderr_log, colored, Context
 from tinygrad.viz.serve import TCPServerWithReuse, HTTPRequestHandler
 from tinygrad.llm.model import Transformer
-from tinygrad.llm.agent import StreamingToolParser, parse_tool_calls, format_tools, format_tool_response
+from tinygrad.llm.agent import StreamingToolParser, parse_tool_calls, format_tools, format_tool_call, format_tool_result
 
 class SimpleTokenizer:
   def __init__(self, normal_tokens:dict[str, int], special_tokens:dict[str, int], preset:str="llama3",
@@ -110,10 +110,6 @@ models = {
 class Handler(HTTPRequestHandler):
   server: LLMServer
   def log_request(self, code='-', size='-'): pass
-  def handle_one_request(self):
-    # opencode closes keepalive sockets between requests; suppress the expected peer-disconnect noise
-    try: super().handle_one_request()
-    except (ConnectionResetError, BrokenPipeError): self.close_connection = True
   def do_GET(self):
     if self.path == "/v1/models": self.send_data(json.dumps({"object":"list","data":[{"id":self.server.model_name,"object":"model"}]}).encode())
     else: self.send_data((pathlib.Path(__file__).parent / "chat.html").read_bytes(), content_type="text/html")
@@ -147,7 +143,8 @@ class Handler(HTTPRequestHandler):
       if final: yield {"choices": [{"index":0, "delta":{"content":final}, "finish_reason":None}], **tmpl}
     # Parse tool calls from output
     if tools:
-      calls, thinking, _ = parse_tool_calls(tok.decode(out))
+      calls = parser.tool_calls
+      if not calls: calls = parse_tool_calls(tok.decode(out))
       if calls:
         yield {"choices": [{"index":0, "delta":{"tool_calls":calls}, "finish_reason":None}], **tmpl}
         finish_reason = "tool_calls"
@@ -165,29 +162,39 @@ class Handler(HTTPRequestHandler):
     if DEBUG >= 1: print(json.dumps(body, indent=2))
     if self.path == "/v1/chat/completions":
       # extract tokens, last assistant message is treated as prefill
-      ids: list[int] = tok.prefix()
-      # Add tools to system prompt if provided and enabled
       tools = body.get("tools") if self.server.enable_tools else None
+      ids: list[int] = tok.prefix()
+      # inject tools into system turn for qwen-style models
       if tools:
         tool_text = format_tools(tools, tok.preset)
-        if tool_text: ids = tok.prefix() + tok.encode(tool_text)
-      for i, msg in enumerate(body["messages"]):
+        if tool_text:
+          ids += tok.role("system") + tok.encode(tool_text) + tok.end_turn()
+      i = 0
+      while i < len(body["messages"]):
+        msg = body["messages"][i]
+        # group consecutive tool results into a single user turn
+        if msg["role"] == "tool":
+          tool_texts = []
+          while i < len(body["messages"]) and body["messages"][i]["role"] == "tool":
+            tool_texts.append(format_tool_result(body["messages"][i].get("content", ""), tok.preset))
+            i += 1
+          ids += tok.role("user")
+          for t in tool_texts: ids += tok.encode(t)
+          ids += tok.end_turn()
+          continue
         ids += tok.role(msg["role"])
-        content = msg["content"]
+        content = msg.get("content") or ""
         if isinstance(content, str): ids += tok.encode(content)
         elif isinstance(content, list):
           for c in content:
             if c["type"] == "text": ids += tok.encode(c["text"])
-            else: raise RuntimeError(f"unhandled type: {c['type']}")
-        else: raise RuntimeError(f"unknown content type: {type(content)}")
-        # Handle tool messages
+        # replay assistant tool calls as  tags
         if msg.get("tool_calls"):
           for tc in msg["tool_calls"]:
-            if tc.get("type") == "function":
-              response_text = format_tool_response(tc["function"].get("arguments", ""), tok.preset)
-              ids += tok.encode(response_text)
+            if tc.get("type") == "function": ids += tok.encode(format_tool_call(tc, tok.preset))
         if msg["role"] == "assistant" and i == len(body["messages"]) - 1: break
         ids += tok.end_turn()
+        i += 1
       else: ids += tok.role("assistant")
 
       # reply
@@ -201,7 +208,7 @@ class Handler(HTTPRequestHandler):
           if c["choices"] and c["choices"][0].get("delta", {}).get("content"): out.append(c["choices"][0]["delta"]["content"])
           if c["choices"] and c["choices"][0].get("delta", {}).get("tool_calls"): tool_calls.extend(c["choices"][0]["delta"]["tool_calls"])
           if c["choices"] and c["choices"][0].get("finish_reason"): finish_reason = c["choices"][0]["finish_reason"]
-        msg = {"role":"assistant","content":"".join(out)}
+        msg = {"role":"assistant","content":"".join(out) or None}
         if tool_calls: msg["tool_calls"] = tool_calls
         self.send_data(json.dumps({**c, "object":"chat.completion",
           "choices":[{"index":0, "message":msg, "finish_reason":finish_reason}]}).encode())
@@ -239,9 +246,9 @@ def main():
 
   # warmup the JIT
   if args.warmup or args.serve:
-    # vary the prompt so cache doesn't short-circuit prefill; captures both prefill (T>1) and rollout (T=1) paths
+    # run 2 tokens through the model twice to capture the JIT before serving
     with Context(DEBUG=max(DEBUG.value, 1)):
-      for i in range(3): list(zip(range(2), model.generate([i+1] * 32)))
+      for _ in range(2): list(zip(range(2), model.generate([0])))
 
   # start server
   if args.serve: LLMServer(('', args.serve), model, model_name, tok, enable_tools=args.agent).serve_forever()
