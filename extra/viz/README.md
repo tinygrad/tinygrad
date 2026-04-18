@@ -13,7 +13,7 @@ Flags: VIZ=-1 to only save the trace to a file, VIZ=1 also launches a web server
 
 Use the --profile flag to get runtime profiling data of kernels, JIT and codegen / scheduling.
 
-Use DEBUG flags like main tinygrad to see AST and source code.
+Set DEBUG=3 to print AST. DEBUG=4 also prints the source code.
 
 ```bash
 # Reconstruct DEBUG=3 output exactly as the runtime.
