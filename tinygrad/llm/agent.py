@@ -11,6 +11,7 @@ def _tool_sig(t):
     if e:=v.get("enum"): typ = "|".join(map(json.dumps, e))
     elif isinstance((t:=v.get("type")), list): typ = "|".join(t)
     else: typ = v.get("type") or "any"
+    if fn["name"] == "bash" and k == "description": typ += "[brief summary]"
     return f"{k}{'' if k in req else '?'}:{typ}"
   args = ", ".join(arg_sig(k, v) for k,v in props.items())
   return f"{fn['name']}({args})"
