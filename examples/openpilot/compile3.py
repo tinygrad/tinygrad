@@ -5,7 +5,7 @@ if "JIT_BATCH_SIZE" not in os.environ: os.environ["JIT_BATCH_SIZE"] = "0"
 from tinygrad import fetch, Tensor, TinyJit, Context, GlobalCounters, Device, dtypes
 from tinygrad.helpers import DEBUG, getenv
 from tinygrad.uop.ops import Ops
-from tinygrad.codegen import get_program
+from tinygrad.engine.realize import get_runner
 from tinygrad.nn.onnx import OnnxRunner
 
 OPENPILOT_MODEL = sys.argv[1] if len(sys.argv) > 1 else "https://github.com/commaai/openpilot/raw/v0.9.7/selfdrive/modeld/models/supercombo.onnx"
@@ -50,7 +50,7 @@ def compile(onnx_file):
   gated_read_image_count = 0
   for call in kernel_calls:
     device = next(b.device for b in call.src[1:] if b.op is not Ops.BIND)
-    src = get_program(call.src[0], Device[device].renderer).src
+    src = get_runner(device, call.src[0]).p.src
     kernel_count += 1
     read_image_count += src.count("read_image")
     gated_read_image_count += src.count("?read_image")
