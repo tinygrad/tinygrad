@@ -150,7 +150,8 @@ class Handler(HTTPRequestHandler):
     def stringify_content(content):
       if content is None: return ""
       if isinstance(content, str): return content
-      if isinstance(content, list): return "".join(c["text"] for c in content if c["type"] == "text")
+      if isinstance(content, list):
+        return "".join(c["text"] for c in content if c["type"] == "text")
       raise RuntimeError(f"unknown content type: {type(content)}")
     raw_body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
     body: dict[str, typing.Any] = json.loads(raw_body.decode("utf-8"))
@@ -159,7 +160,9 @@ class Handler(HTTPRequestHandler):
       messages, last = body["messages"], len(body["messages"]) - 1
       tools = body.get("tools") if self.server.enable_tools else None
       ids: list[int] = tok.prefix()
-      if tools and (tool_text:=format_tools(tools)): ids += tok.role("system" if tok.preset != 'tekken' else "user") + tok.encode(tool_text) + tok.end_turn()
+      if tools and (tool_text:=format_tools(tools)):
+        role = "system" if tok.preset != 'tekken' else "user"
+        ids += tok.role(role) + tok.encode(tool_text) + tok.end_turn()
       for i, msg in enumerate(messages):
         if msg["role"] == "tool": continue
         ids += tok.role(msg["role"]) + tok.encode(stringify_content(msg.get("content")))
