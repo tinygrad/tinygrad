@@ -1,7 +1,7 @@
 import unittest, ctypes, struct, os, random, numpy as np, time
 from tinygrad import Device, Tensor, dtypes
-from tinygrad.helpers import getenv, mv_address, DEBUG, DEV
-from test.helpers import slow
+from tinygrad.helpers import mv_address, DEBUG, DEV
+from test.helpers import slow, replace_opts
 from tinygrad.device import Buffer, BufferSpec
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQBuffer
 from tinygrad.runtime.autogen import libc
@@ -10,7 +10,7 @@ from tinygrad.engine.realize import get_runner, CompiledRunner, get_program
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad import Variable
 
-MOCKGPU = getenv("MOCKGPU")
+MOCKGPU = DEV.interface.startswith("MOCK")
 
 @unittest.skipUnless(issubclass(type(Device[Device.DEFAULT]), HCQCompiled), "HCQ device required to run")
 class TestHCQ(unittest.TestCase):
@@ -76,7 +76,7 @@ class TestHCQ(unittest.TestCase):
         TestHCQ.d0.timeline_signal.wait(TestHCQ.d0.timeline_value)
         TestHCQ.d0.timeline_value += 1
 
-  @unittest.skipIf(Device.DEFAULT in {"CPU"} or (DEV.interface == "PCI" and DEV.device == "AMD"), "Can't handle async update on CPU/MOCKAM device")
+  @unittest.skipIf(Device.DEFAULT == "CPU" or (DEV.interface == "MOCKPCI" and DEV.device == "AMD"), "Can't handle async update on CPU/MOCKPCI device")
   def test_wait_late_set(self):
     for queue_type in [TestHCQ.d0.hw_compute_queue_t, TestHCQ.d0.hw_copy_queue_t]:
       if queue_type is None: continue
@@ -165,7 +165,7 @@ class TestHCQ(unittest.TestCase):
     b = a + 1
     si = b.schedule()[-1]
 
-    runner = CompiledRunner(get_program(si.ast, TestHCQ.d0.renderer, opts=[Opt(op=OptOps.LOCAL, axis=0, arg=3) for _ in range(3)]))
+    runner = CompiledRunner(get_program(replace_opts(si.ast, [Opt(op=OptOps.LOCAL, axis=0, arg=3) for _ in range(3)]), TestHCQ.d0.renderer))
 
     zb = Buffer(Device.DEFAULT, 3 * 3 * 3, dtypes.int, options=BufferSpec(cpu_access=True, nolru=True)).ensure_allocated()
     zt = Buffer(Device.DEFAULT, 3 * 3 * 3, dtypes.int, options=BufferSpec(cpu_access=True, nolru=True)).ensure_allocated()
@@ -575,7 +575,7 @@ class TestHCQ(unittest.TestCase):
 
       np.testing.assert_equal(cpu_buffer.numpy(), local_buf.numpy(), "failed")
 
-  @unittest.skipUnless(MOCKGPU and not (DEV.device == "AMD" and DEV.interface == "PCI"), "Emulate this on MOCKGPU to check the path in CI")
+  @unittest.skipUnless(MOCKGPU and not (DEV.device == "AMD" and DEV.interface == "MOCKPCI"), "Emulate this on MOCKGPU to check the path in CI")
   def test_on_device_hang(self):
     if not hasattr(self.d0, 'on_device_hang'): self.skipTest("device does not have on_device_hang")
 

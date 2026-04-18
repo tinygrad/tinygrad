@@ -15,9 +15,10 @@ export ASM_GEMM=1
 export WQKV=1
 export MASTER_WEIGHTS=1
 export FP8=1
+export ALLREDUCE_CAST=1
 
 export DEFAULT_FLOAT="bfloat16" OPTIM_DTYPE="bfloat16"
-export DP=8 MP=1 BS=8 EVAL_BS=8 GRADIENT_ACC_STEPS=4
+export DP=8 MP=1 BS=16 EVAL_BS=16 GRADIENT_ACC_STEPS=2
 export GBS=$((BS * GRADIENT_ACC_STEPS))
 
 export MODEL="llama3"

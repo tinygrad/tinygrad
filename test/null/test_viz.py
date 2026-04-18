@@ -1,12 +1,13 @@
-import unittest, decimal, sys, json, contextlib
+import unittest, decimal, sys, json, contextlib, tempfile, pickle, io, itertools
+from pathlib import Path
 from dataclasses import dataclass
 from typing import Generator
 
-from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, TrackedPatternMatcher, graph_rewrite, track_rewrites, TRACK_MATCH_STATS, profile_matches
+from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, TrackedPatternMatcher, graph_rewrite, track_rewrites, profile_matches
 from tinygrad.uop.symbolic import sym
 from tinygrad.dtype import dtypes
-from tinygrad.helpers import PROFILE, colored, ansistrip, flatten, TracingKey, ProfileRangeEvent, ProfileEvent, Context, cpu_events, profile_marker
-from tinygrad.helpers import VIZ, cpu_profile, ProfilePointEvent, unwrap
+from tinygrad.helpers import colored, ansistrip, flatten, TracingKey, ProfileRangeEvent, ProfileEvent, Context, cpu_events, profile_marker
+from tinygrad.helpers import cpu_profile, ProfilePointEvent, unwrap
 from tinygrad.device import Buffer
 
 from tinygrad.uop.ops import tracked_keys, tracked_ctxs, uop_fields, active_rewrites, active_group, _name_cnt, RewriteTrace
@@ -37,25 +38,13 @@ class VizTrace:
 
 @contextlib.contextmanager
 def save_viz():
-  # clear previous traces
   for lst in [tracked_keys, tracked_ctxs, active_rewrites, active_group, _name_cnt]: lst.clear()
   Buffer.profile_events.clear()
   cpu_events.clear()
-  # set the context vars to enable VIZ
-  prev_viz = VIZ.value
-  VIZ.value = -1
-  prev_tms = TRACK_MATCH_STATS.value
-  TRACK_MATCH_STATS.value = 2
-  prev_profile = PROFILE.value
-  PROFILE.value = 1
   viz = VizTrace()
-  try:
+  with Context(VIZ=-1, TRACK_MATCH_STATS=2, PROFILE=1):
     yield viz
-  finally:
-    viz.set_data()
-    TRACK_MATCH_STATS.value = prev_tms
-    PROFILE.value = prev_profile
-    VIZ.value = prev_viz
+  viz.set_data()
 
 class TestViz(unittest.TestCase):
   def test_simple(self):
@@ -194,7 +183,7 @@ class TestViz(unittest.TestCase):
     class TestStruct:
       colored_field: str
     a = UOp(Ops.CUSTOM, arg=TestStruct(colored("xyz", "magenta")+colored("12345", "blue")))
-    a2 = uop_to_json(a, VizData())[id(a)]
+    a2 = uop_to_json(VizData(), a)[id(a)]
     self.assertEqual(ansistrip(a2["label"]), f"CUSTOM\n{TestStruct.__qualname__}(colored_field='xyz12345')")
 
   def test_colored_label_multiline(self):
@@ -217,11 +206,11 @@ class TestViz(unittest.TestCase):
       # use smaller stack limit for faster test (default is 250000)
       with Context(REWRITE_STACK_LIMIT=100): self.assertRaises(RuntimeError, exec_rewrite, a, [pm])
     graphs = flatten(x["graph"].values() for x in viz.get_details(0, 0))
-    self.assertEqual(graphs[0], uop_to_json(a, VizData())[id(a)])
-    self.assertEqual(graphs[1], uop_to_json(b, VizData())[id(b)])
+    self.assertEqual(graphs[0], uop_to_json(VizData(), a)[id(a)])
+    self.assertEqual(graphs[1], uop_to_json(VizData(), b)[id(b)])
     # fallback to NOOP with the error message
     nop = UOp(Ops.NOOP, arg="infinite loop in fixed_point_rewrite")
-    self.assertEqual(graphs[2], uop_to_json(nop, VizData())[id(nop)])
+    self.assertEqual(graphs[2], uop_to_json(VizData(), nop)[id(nop)])
 
   def test_const_node_visibility(self):
     with save_viz() as viz:
@@ -241,7 +230,7 @@ class TestViz(unittest.TestCase):
     c = UOp.const(dtypes.float, 1.0, device="CPU", shape=(3,4))  # creates CONST->RESHAPE->EXPAND chain
     a = UOp(Ops.DEFINE_VAR, dtypes.float, arg=("a", 0.0, 10.0))
     alu = a + c
-    graph = uop_to_json(alu, VizData())
+    graph = uop_to_json(VizData(), alu)
     # the RESHAPE and EXPAND nodes from the const should not appear in the graph
     labels = {v["label"].split("\n")[0] for v in graph.values()}
     self.assertNotIn("RESHAPE", labels)
@@ -335,7 +324,7 @@ class TestVizIntegration(unittest.TestCase):
       prg = get_program(ast, Device[Device.DEFAULT].renderer)
     lst = viz.list_items()
     self.assertEqual(len(lst), 3)
-    self.assertEqual(lst[0]["name"], "Process 1 Buffer n1")
+    self.assertEqual(lst[0]["name"], "Callify 1 Buffer n1")
     self.assertEqual(lst[1]["name"], "Schedule 1 Kernel n1")
     self.assertEqual(lst[2]["name"], prg.name)
 
@@ -345,7 +334,7 @@ class TestVizIntegration(unittest.TestCase):
       c1 = Tensor.empty(4).add(1)
       c2 = Tensor.empty(8).add(1)
       sched = Tensor.schedule(c1, c2)
-      prgs = [si.lower().prg.p.name for si in sched]
+      prgs = [get_program(si.ast, Device[Device.DEFAULT].renderer).name for si in sched]
     lst = viz.list_items()
     sched_idx = next(i for i,l in enumerate(lst) if l["name"].startswith("Schedule"))
     viz_kernel = next(i for i,s in enumerate(lst[sched_idx]["steps"]) if s["name"] == "View Kernel Graph")
@@ -417,7 +406,7 @@ from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphE
 from tinygrad.viz.serve import get_profile
 from extra.viz.cli import decode_profile
 
-def load_profile(lst:list[ProfileEvent]) -> dict: return decode_profile(get_profile(lst))
+def load_profile(lst:list[ProfileEvent]) -> dict: return decode_profile(get_profile(VizData(), lst))
 
 class TestVizProfiler(unittest.TestCase):
   def test_transfer_uses_copy_device(self):
@@ -563,7 +552,7 @@ class TestVizProfiler(unittest.TestCase):
     step = 10
     n_events = 1_000
     prof = [ProfileRangeEvent("CPU", name="k_test", st=decimal.Decimal(ts:=i*step), en=decimal.Decimal(ts)+step) for i in range(n_events)]
-    sz = len(get_profile(prof))
+    sz = len(get_profile(VizData(), prof))
     self.assertLessEqual(sz/n_events, 26)
 
   def test_calltrace(self):
@@ -586,7 +575,7 @@ class TestVizProfiler(unittest.TestCase):
     step = decimal.Decimal(dur_mins*60*1e6//n_events)
     prof = [ProfileRangeEvent("CPU", name="k_test", st=decimal.Decimal(ts:=i*step), en=decimal.Decimal(ts)+step) for i in range(n_events)]
     with self.assertRaisesRegex(ValueError, "timestamp out of range"):
-      get_profile(prof)
+      get_profile(VizData(), prof)
 
   def test_python_marker(self):
     with save_viz():
@@ -895,6 +884,45 @@ class TestCfg(unittest.TestCase):
     k.emit(s_branch(), target="end")
     k.emit(s_code_end())
     self.get_cfg("jump_back_to_end", k)
+
+# launch viz cli without subprocess
+def run_cli(*cli_args) -> str:
+  from extra.viz.cli import main, get_arg_parser
+  args = get_arg_parser().parse_args(cli_args)
+  with contextlib.redirect_stdout(buf:=io.StringIO()):
+    main(args)
+  return buf.getvalue().strip()
+
+class TestCLI(unittest.TestCase):
+  def test_simple(self):
+    a = Tensor.empty(1, device="NULL")+2.0
+    empty_counter = itertools.count(0)
+    def custom_empty_prg(B:UOp, A:UOp) -> UOp:
+      sink = UOp(Ops.SINK, arg=KernelInfo(name=f"custom_empty_n{next(empty_counter)}"))
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=a.device), UOp(Ops.LINEAR, src=(sink,))))
+    b = Tensor.custom_kernel(Tensor.empty_like(a), a, fxn=custom_empty_prg)[0]
+    c = Tensor.custom_kernel(Tensor.empty_like(a), a, fxn=custom_empty_prg)[0]
+    with save_viz() as viz:
+      b.realize()
+      profile_marker("marker @ 1")
+      c.realize()
+    # save trace to disk for CLI to consume it
+    with tempfile.TemporaryDirectory() as tmpdir:
+      (r:=Path(tmpdir)/"rewrites.pkl").write_bytes(pickle.dumps(viz.data.trace))
+      (p:=Path(tmpdir)/"profile.pkl").write_bytes(pickle.dumps(cpu_events))
+      # reconstruct DEBUG=4 output and see all markers.
+      with Context(DEBUG=4):
+        kernels = run_cli("--rewrites-path", str(r), "--profile-path", str(p), "-p", "-s", "NULL")
+      self.assertIn("void custom_empty_n0", kernels)
+      self.assertIn("marker @ 1", kernels)
+      self.assertIn("void custom_empty_n1", kernels)
+      self.assertIn("E", kernels)
+      self.assertIn("UOp.const", kernels)
+      # get the top slowest functions across all devices
+      with Context(DEBUG=2):
+        times = run_cli("--rewrites-path", str(r), "--profile-path", str(p), "-p", "-s", "ALL", "--top", "-1")
+      self.assertIn("TINY", times)
+      self.assertIn("NULL", times)
 
 if __name__ == "__main__":
   unittest.main()

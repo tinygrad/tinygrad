@@ -1282,7 +1282,7 @@ def train_bert():
         previous_step = i
 
 def train_llama3():
-  from examples.mlperf.models.flat_llama import FlatTransformer, apply_grad, FP8
+  from examples.mlperf.models.flat_llama import FlatTransformer, apply_grad, FP8, FP8_DTYPE
   from examples.llama3 import MODEL_PARAMS
   from examples.mlperf.lr_schedulers import CosineAnnealingLRWithWarmup
   from examples.mlperf.optim import GradAccClipAdamW
@@ -1416,9 +1416,9 @@ def train_llama3():
   optim = GradAccClipAdamW(params, lr=0.0, b1=opt_adamw_beta_1, b2=opt_adamw_beta_2,
                            eps=opt_adamw_epsilon, weight_decay=opt_adamw_weight_decay, grad_acc=grad_acc, device=optim_device)
 
-  # init grads
   for p in optim.params:
-    p.grad = Tensor.zeros(p.shape, dtype=p.dtype, device=p.device).contiguous()
+    grad_dtype = dtypes.bfloat16 if p.dtype == FP8_DTYPE else p.dtype
+    p.grad = Tensor.zeros(p.shape, dtype=grad_dtype, device=p.device).contiguous()
   grads = [p.grad for p in optim.params]
 
   scheduler = CosineAnnealingLRWithWarmup(optim, opt_base_learning_rate, opt_end_learning_rate, opt_learning_rate_warmup_steps, opt_learning_rate_decay_steps)
@@ -1433,6 +1433,17 @@ def train_llama3():
     load_state_dict(scheduler, safe_load(fn), realize=False)
 
   fp8_amax = [t for ts in model._fp8_amax.values() for t in ts] if FP8 else []
+  fp8_inv_scales = list(model._fp8_inv_scale.values()) if FP8 else []
+
+  if FP8:
+    from tinygrad.nn.state import get_state_dict
+    model_state = get_state_dict(model)
+    for wname in ["wqkv", "wo", "w13", "w2"]:
+      w = model_state[wname]
+      w._inv_scale = model._fp8_inv_scale[wname]
+      if optim.master_params:
+        idx = next(j for j, p in enumerate(optim.params) if p is w)
+        optim.master_params[idx].assign((optim.master_params[idx] * w._inv_scale.reshape(-1, *([1]*(w.ndim-1)))).contiguous())
 
   @TinyJit
   def minibatch(tokens:Tensor):
@@ -1457,7 +1468,7 @@ def train_llama3():
 
     lr_cpu = optim.lr.float().to("CPU")
     grad_norm_cpu = grad_norm.float().to("CPU")
-    Tensor.realize(lr_cpu, grad_norm_cpu, *grads)
+    Tensor.realize(lr_cpu, grad_norm_cpu, *grads, *fp8_inv_scales)
 
     return lr_cpu, grad_norm_cpu
 

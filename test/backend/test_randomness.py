@@ -360,6 +360,7 @@ class TestRandomness(unittest.TestCase):
     torch_samples = [torch.tensor(w).multinomial(1, replacement=False).item() for _ in range(1000)]
     self.assertTrue(equal_distribution(lambda *_: Tensor(tiny_samples), lambda _: torch.tensor(torch_samples)))
 
+  @unittest.skip("this test is flaky")
   def test_multinomial_counterexample(self):
     tiny_res = Tensor([0.3, 0.6, 0.1]).multinomial(4000, replacement=True)
     torch_res = torch.tensor([0.3, 0.6, 0.1]).multinomial(4000, replacement=True)

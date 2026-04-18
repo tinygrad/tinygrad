@@ -1,6 +1,6 @@
 from __future__ import annotations
 import ctypes, functools
-from tinygrad.helpers import DEBUG, getenv, mv_address, suppress_finalizing
+from tinygrad.helpers import DEBUG, DEV, getenv, mv_address, suppress_finalizing
 from tinygrad.device import Compiled, BufferSpec, LRUAllocator
 from tinygrad.renderer.cstyle import CUDARenderer, NVCCRenderer
 from tinygrad.renderer.ptx import PTXRenderer
@@ -8,7 +8,7 @@ from tinygrad.runtime.autogen import cuda
 from tinygrad.runtime.support.compiler_cuda import pretty_ptx
 from tinygrad.runtime.support.c import init_c_struct_t, init_c_var
 if getenv("IOCTL"): import extra.nv_gpu_driver.nv_ioctl  # noqa: F401  # pylint: disable=unused-import
-if MOCKGPU:=getenv("MOCKGPU"): from test.mockgpu.cuda import cuda # type: ignore # pylint: disable=reimported
+if (MOCKGPU:=DEV.target("CUDA").interface == "MOCK"): from test.mockgpu.cuda import cuda # type: ignore # pylint: disable=reimported
 
 def check(status):
   if status != 0:
@@ -43,7 +43,7 @@ class CUDAProgram:
     status = cuda.cuModuleLoadData(ctypes.byref(self.module), lib)
     if status != 0:
       del self.module
-      raise RuntimeError(f"module load failed with status code {status}: {cuda.CUresult.get(status)}")
+      raise RuntimeError(f"module load failed with status code {status}: {cuda.enum_cudaError_enum.get(status)}")
     check(cuda.cuModuleGetFunction(ctypes.byref(prg := cuda.CUfunction()), self.module, name.encode("utf-8")))
     self.prg = prg
     if self.smem > 0: check(cuda.cuFuncSetAttribute(self.prg, cuda.CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES, self.smem))

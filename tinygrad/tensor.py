@@ -13,10 +13,10 @@ from tinygrad.gradient import compute_gradient
 from tinygrad.mixin import OpMixin, ReductionStr
 from tinygrad.uop.ops import smax, UOp, Ops, sint, all_metadata, _index_to_concrete_int, sint_to_uop, Variable
 from tinygrad.uop.ops import _broadcast_shape
-from tinygrad.engine.schedule import ExecItem, complete_create_schedule_with_vars
+from tinygrad.schedule import ExecItem, create_linear_with_vars, linear_to_schedule
 from tinygrad.device import Buffer, canonicalize_device
-from tinygrad.engine.realize import run_schedule
-from tinygrad.engine.allocations import transform_to_call
+from tinygrad.engine.realize import run_linear
+from tinygrad.callify import transform_to_call
 
 # *** all in scope Tensors are here. this gets relevant UOps ***
 
@@ -57,7 +57,7 @@ def _frompy(x:list|tuple|bytes, dtype:DType, device:str|tuple[str,...]) -> UOp:
     ret = UOp.new_buffer("PYTHON", prod(shape:=get_shape(x)), dtype).reshape(shape)
     assert dtype.fmt is not None, f"{dtype=} has None fmt"
     truncate_function = truncate[dtype]
-    data = struct.pack(f"{ret.size}{dtype.fmt}", *[truncate_function(dtype.const(xi)) for xi in fully_flatten(x)])
+    data = struct.pack(f"{prod(shape)}{dtype.fmt}", *[truncate_function(dtype.const(xi)) for xi in fully_flatten(x)])
   # fake realize. if target device is PYTHON it needs bytearray to be writable
   ret.buffer.allocate(memoryview(data if device != "PYTHON" else bytearray(data)))
   return ret
@@ -239,18 +239,20 @@ class Tensor(OpMixin):
     _apply_map_to_tensors({x:y.after(big_sink) for x,y in buffer_map.items()}, name="callify")
     return self
 
+  def linear_with_vars(self, *lst:Tensor) -> tuple[UOp, dict[str, int]]:
+    """Creates the LINEAR UOp needed to realize these Tensor(s), with Variables."""
+    big_sink, becomes_map = transform_to_call(UOp.sink(*[x.uop for x in (self,)+lst]))
+    _apply_map_to_tensors(becomes_map, name="buffers")
+    return create_linear_with_vars(big_sink)
+
   def schedule_with_vars(self, *lst:Tensor) -> tuple[list[ExecItem], dict[str, int]]:
     """
     Creates the schedule needed to realize these Tensor(s), with Variables.
 
     NOTE: A Tensor can only be scheduled once.
     """
-    big_sink, becomes_map = transform_to_call(UOp.sink(*[x.uop for x in (self,)+lst]))
-    _apply_map_to_tensors(becomes_map, name="buffers")
-
-    # this is where the schedule cache should go
-    schedule, var_vals = complete_create_schedule_with_vars(big_sink)
-    return schedule, var_vals
+    linear, var_vals = self.linear_with_vars(*lst)
+    return linear_to_schedule(linear), var_vals
 
   def schedule(self, *lst:Tensor) -> list[ExecItem]:
     """Creates the schedule needed to realize these Tensor(s)."""
@@ -262,7 +264,7 @@ class Tensor(OpMixin):
   def realize(self, *lst:Tensor, do_update_stats=True) -> Tensor:
     """Triggers the computation needed to create these Tensor(s)."""
     if len(to_realize:=[x for x in (self,)+lst if not x.uop.has_buffer_identity()]):
-      run_schedule(*Tensor.schedule_with_vars(*to_realize), do_update_stats=do_update_stats)
+      run_linear(*Tensor.linear_with_vars(*to_realize), do_update_stats=do_update_stats)
     return self
 
   def replace(self, x:Tensor) -> Tensor:
@@ -738,7 +740,8 @@ class Tensor(OpMixin):
     """
     if stop is None: stop, start = start, 0
     dtype = kwargs.pop("dtype", dtypes.default_float if any(isinstance(x, float) for x in (start, stop, step)) else dtypes.default_int)
-    if start < (dt:=to_dtype(dtype)).min or dt.max < (stop-step): raise ValueError(f"arange [{start}, {stop}) is not representable in dtype {dtype}")
+    lo, hi = (start, stop-step) if step > 0 else (stop-step, start)
+    if lo < (dt:=to_dtype(dtype)).min or dt.max < hi: raise OverflowError(f"arange [{start}, {stop}) is not representable in dtype {dtype}")
     # NOTE: this matches numpy, torch raises RuntimeError if stop-start and step have different signs
     if (output_len:=ceildiv(stop-start, step)) <= 0: return Tensor([], dtype=dtype, **kwargs)
     return (Tensor.full((output_len,), step, dtype=dtype, **kwargs)._cumalu(0, Ops.ADD) + (start - step)).cast(dtype)
@@ -1298,41 +1301,6 @@ class Tensor(OpMixin):
     x = self.shrink_to(tuple(i if d != dim else None for d,i in enumerate(index.shape))).unsqueeze(-1).transpose(-1, dim)
     return (index.unsqueeze(-1)._one_hot_along_dim(self.shape[dim]).where(x, 0)).sum(-1, dtype=self.dtype)
 
-  def cat(self:Tensor, *args:Tensor, dim:int=0) -> Tensor:
-    """
-    Concatenates self with other `Tensor` in `args` along an axis specified by `dim`.
-    All tensors must have the same shape except in the concatenating dimension.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t0, t1, t2 = Tensor([[1, 2]]), Tensor([[3, 4]]), Tensor([[5, 6]])
-    print(t0.cat(t1, t2, dim=0).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t0.cat(t1, t2, dim=1).numpy())
-    ```
-    """
-    dim = self._resolve_dim(dim)
-    for arg in args: assert arg.ndim==self.ndim and all(ti==ai for i,(ti,ai) in enumerate(zip(self.shape, arg.shape)) if i!=dim)
-    tensors = [self, *args]
-    dim_cumsum = list(itertools.accumulate([t.shape[dim] for t in tensors], initial=0))
-    for i,t in enumerate(tensors): tensors[i] = t.pad([(dim_cumsum[i], dim_cumsum[-1]-dim_cumsum[i+1]) if j==dim else None for j in range(t.ndim)])
-    return Tensor.usum(*tensors)
-
-  def stack(self:Tensor, *args:Tensor, dim:int=0) -> Tensor:
-    """
-    Concatenates self with other `Tensor` in `args` along a new dimension specified by `dim`.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t0, t1, t2 = Tensor([1, 2]), Tensor([3, 4]), Tensor([5, 6])
-    print(t0.stack(t1, t2, dim=0).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t0.stack(t1, t2, dim=1).numpy())
-    ```
-    """
-    # checks for shapes and number of dimensions delegated to cat
-    return Tensor.cat(*[t.unsqueeze(dim) for t in argfix(self, *args)], dim=dim)
-
   def masked_select(self, mask):
     """
     Selects elements from `self` based on the boolean `mask`.
@@ -1473,58 +1441,6 @@ class Tensor(OpMixin):
       level_chunks = ceildiv(data.shape[0], 2**20)
 
     return data[:16]
-
-  def _softmax(self, axis, dtype:DTypeLike|None=None) -> tuple[Tensor, Tensor, Tensor]:
-    m = self - self.max(axis=axis, keepdim=True).detach()
-    if dtype is not None: m = m.cast(dtype)
-    e = m.exp()
-    return m, e, e.sum(axis=axis, keepdim=True)
-
-  def softmax(self, axis=-1, dtype:DTypeLike|None=None) -> Tensor:
-    """
-    Applies the softmax function to the tensor along the specified axis.
-
-    Rescales the elements of the tensor such that they lie in the range [0, 1] and sum to 1.
-
-    You can pass in the `axis` keyword argument to control the axis along which the softmax is computed.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    Tensor.manual_seed(42)
-    t = Tensor.randn(2, 3)
-    print(t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.softmax().numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.softmax(axis=0).numpy())
-    ```
-    """
-    _, e, ss = self._softmax(axis, dtype)
-    return e.div(ss)
-
-  def log_softmax(self, axis=-1, dtype:DTypeLike|None=None) -> Tensor:
-    """
-    Applies the log-softmax function to the tensor along the specified axis.
-
-    The log-softmax function is a numerically stable alternative to the softmax function in log space.
-
-    You can pass in the `axis` keyword argument to control the axis along which the log-softmax is computed.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    Tensor.manual_seed(42)
-    t = Tensor.randn(2, 3)
-    print(t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.log_softmax().numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.log_softmax(axis=0).numpy())
-    ```
-    """
-    m, _, ss = self._softmax(axis, dtype)
-    return m - ss.log()
 
   def logcumsumexp(self, axis=0) -> Tensor:
     """
@@ -2556,22 +2472,6 @@ class Tensor(OpMixin):
     if not full_matrices: U, V = U[..., 0:num], V[..., 0:num]
     return (U, S, V.transpose(-2,-1)) if m >= n else (V, S, U.transpose(-2, -1))
 
-  # ***** Tensor Properties *****
-
-  def size(self, dim:int|None=None) -> sint|tuple[sint, ...]:
-    """
-    Returns the size of the tensor. If `dim` is specified, return the length along dimension `dim`. Otherwise return the shape of the tensor.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([[4, 5, 6], [7, 8, 9]])
-    print(t.size())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.size(dim=1))
-    ```
-    """
-    return self.shape if dim is None else self.shape[dim]
-
   # ***** cast ops *****
 
   def cast(self, dtype:DTypeLike) -> Tensor:
@@ -2780,5 +2680,5 @@ def _metadata_wrapper(fn: Callable[P, T]) -> Callable[P, T]:
 
 if TRACEMETA >= 1:
   for name, fn in inspect.getmembers(Tensor, inspect.isfunction):
-    if name in ["__class__", "__init__", "__new__", "__repr__", "backward", "sequential", "gradient"]: continue
+    if name in ["__class__", "__del__", "__init__", "__new__", "__repr__", "backward", "sequential", "gradient"]: continue
     setattr(Tensor, name, functools.wraps(fn)(_metadata_wrapper(fn)))

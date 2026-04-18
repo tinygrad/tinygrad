@@ -4,7 +4,7 @@ from tinygrad import Tensor, GlobalCounters, dtypes, nn, Device, Variable
 from tinygrad.helpers import Context, getenv, DEV
 from tinygrad.engine.realize import run_schedule
 from tinygrad.engine.realize import CompiledRunner, get_program
-from tinygrad.engine.schedule import ExecItem
+from tinygrad.schedule import ExecItem
 from tinygrad.renderer import Estimates
 from tinygrad.renderer.ptx import PTXRenderer
 from test.helpers import needs_second_gpu

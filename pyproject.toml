@@ -19,11 +19,11 @@ build-backend = "setuptools.build_meta"
 include-package-data = true
 packages = [
   'tinygrad',
-  'tinygrad.apps',
   'tinygrad.codegen',
   'tinygrad.codegen.opt',
   'tinygrad.codegen.late',
   'tinygrad.engine',
+  'tinygrad.llm',
   'tinygrad.mixin',
   'tinygrad.nn',
   'tinygrad.renderer',
@@ -38,6 +38,7 @@ packages = [
   'tinygrad.runtime.graph',
   'tinygrad.runtime.support',
   'tinygrad.runtime.support.am',
+  'tinygrad.runtime.support.mlx',
   'tinygrad.runtime.support.nv',
   'tinygrad.schedule',
   'tinygrad.uop',
@@ -50,8 +51,8 @@ tinygrad = ["py.typed"]
 
 
 [project.optional-dependencies]
-arm = ["unicorn"]
-triton = ["triton-nightly>=2.1.0.dev20231014192330"]
+# arm = ["unicorn"]
+# triton = ["triton-nightly>=2.1.0.dev20231014192330"]
 linting = [
   "pylint",
   "mypy==1.19.1",
@@ -112,9 +113,9 @@ docs = [
 [tool.mutmut]
 paths_to_mutate = ["tinygrad/"]
 do_not_mutate = [
-  "tinygrad/apps/*",
   "tinygrad/codegen/*",
   "tinygrad/engine/*",
+  "tinygrad/llm/*",
   "tinygrad/nn/*",
   "tinygrad/renderer/*",
   "tinygrad/runtime/*",

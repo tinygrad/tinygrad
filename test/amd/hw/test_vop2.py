@@ -30,6 +30,17 @@ class TestBasicArithmetic(unittest.TestCase):
     st = run_program(instructions, n_lanes=1)
     self.assertAlmostEqual(i2f(st.vgpr[0][2]), 8.0, places=5)
 
+  def test_v_add_f32_dpp_row_shl(self):
+    """V_ADD_F32 DPP row_shl swizzles src0 before the add."""
+    instructions = [
+      v_cvt_f32_u32_e32(v[0], v[255]),
+      v_add_f32_e32(v[1], DPP, v[0], vsrc0=v[0], dpp=0x101, row_mask=0xf, bank_mask=0xf, bc=1),
+    ]
+    st = run_program(instructions, n_lanes=16)
+    self.assertAlmostEqual(i2f(st.vgpr[0][1]), 1.0, places=5)
+    self.assertAlmostEqual(i2f(st.vgpr[1][1]), 3.0, places=5)
+    self.assertAlmostEqual(i2f(st.vgpr[14][1]), 29.0, places=5)
+
   def test_v_fmac_f32(self):
     """V_FMAC_F32: d = d + a*b using inline constants."""
     instructions = [

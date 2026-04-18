@@ -833,8 +833,6 @@ class TestDsPermute(unittest.TestCase):
       src_lane = lane ^ 1
       expected = src_lane + 100
       self.assertEqual(st.vgpr[lane][2], expected, f"lane {lane}: expected v[1] from lane {src_lane} = {expected}, got {st.vgpr[lane][2]}")
-
-
 class TestDSSubDword(unittest.TestCase):
   """Tests for sub-dword DS operations (ds_store_b16, ds_store_b16_d16_hi)."""
 

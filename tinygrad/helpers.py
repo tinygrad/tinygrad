@@ -3,7 +3,7 @@ import time
 START_TIME = time.perf_counter()
 import os, functools, platform, re, contextlib, operator, hashlib, pickle, sqlite3, tempfile, pathlib, string, ctypes, sys, gzip, getpass, gc
 from collections import defaultdict
-import subprocess, shutil, math, types, copyreg, inspect, importlib, decimal, itertools
+import subprocess, shutil, math, types, copyreg, inspect, importlib, decimal, itertools, difflib
 from dataclasses import dataclass, field, replace
 from typing import ClassVar, Iterable, Any, TypeVar, Callable, Sequence, TypeGuard, Iterator, Generic, Generator, cast, overload
 
@@ -32,6 +32,7 @@ def argsort(x): return type(x)(sorted(range(len(x)), key=x.__getitem__))
 def all_same(items:Sequence): return all(x == items[0] for x in items)  # works for empty input
 def all_int(t: Sequence[Any]) -> TypeGuard[tuple[int, ...]]: return all(isinstance(s, int) for s in t)
 def colored(st, color:str|None, background=False): # replace the termcolor library
+  if NO_COLOR: return st
   colors = ['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white']
   return f"\u001b[{10*background+60*(color.upper() == color)+30+colors.index(color.lower())}m{st}\u001b[0m" if color is not None else st
 def colorize_float(x: float): return colored(f"{x:7.2f}x", 'green' if x < 0.75 else 'red' if x > 1.15 else 'yellow')
@@ -121,6 +122,11 @@ def suppress_finalizing(func):
       if not getattr(sys, 'is_finalizing', lambda: True)(): raise # re-raise if not finalizing
   return wrapper
 
+def select_by_name(candidates:Sequence[T], get_name:Callable[...,str], query:str, err_msg:str) -> list[T]:
+  if len(ret:=[c for c in candidates if not query or get_name(c) == query]) == 0:
+    raise RuntimeError(err_msg + (f", did you mean: {m[0]!r}?" if (m:=difflib.get_close_matches(query, map(get_name, candidates))) else ""))
+  return ret
+
 def select_first_inited(candidates:Sequence[Callable[...,T]], err_msg:str, cache:dict|None=None, **kwargs):
   excs = []
   for typ in candidates:
@@ -130,7 +136,7 @@ def select_first_inited(candidates:Sequence[Callable[...,T]], err_msg:str, cache
       if cache is not None: cache[typ] = x
       return x
     except Exception as e: excs.append(e)
-  raise excs[0] if len(excs) == 1 else ExceptionGroup(err_msg, excs)
+  raise excs[0] if len(excs) == 1 else ExceptionGroup(err_msg + " is available", excs)
 
 def pluralize(st:str, cnt:int): return f"{cnt} {st}"+('' if cnt == 1 else 's')
 
@@ -202,29 +208,28 @@ class Target:
   def replacedefault(self, **kwargs) -> Target: return replace(self, **{k:v for k,v in kwargs.items() if not getattr(self, k)})
 
 class _DEV(ContextVar):
-  _value = Target()
+  _value: list[Target] = [Target()]
   @property
-  def value(self) -> Target: return self._value
+  def value(self) -> list[Target]: return self._value
   @value.setter
-  def value(self, v:str|Target): self._value = v if isinstance(v, Target) else Target.parse(v)
-  def __getattr__(self, k): return getattr(self.value, k)
+  def value(self, v:str|Target|list[Target]):
+    self._value = v if isinstance(v, list) else [v] if isinstance(v, Target) else [Target.parse(t) for t in v.split(';')]
+  def __repr__(self) -> str: return ";".join([repr(t) for t in self._value])
+  def __getattr__(self, k): return getattr(self._value[0], k)
   # get target for device string, kwargs are passed if not already specified
   def target(self, dev:str, **kwargs) -> Target:
-    t = self.value.replacedefault(**kwargs) if self.device == dev or not self.device else Target(device=dev, **kwargs)
-    # TODO: remove this once DEV supports secondary targets
-    if (cv:=ContextVar._cache.get(f"{dev}_CC", None)) is not None and cv.value:
-      assert not t.renderer, f"renderer set in DEV and {dev}_CC"
-      return replace(t, renderer=cv.value.upper())
-    return replace(t, device=dev)
+    assert (v:=getenv(k:=f"{dev}_CC", "")) == "", \
+      f"{k}={v} is deprecated, use DEV='{';'.join([repr(t) for t in self._value if t.device != dev] + [f'{dev}:{v}'])}' instead"
+    return replace(next((t for t in self._value if not t.device or t.device == dev), Target(device=dev)).replacedefault(**kwargs), device=dev)
 
 DEV, DEBUG, BEAM, NOOPT = _DEV("DEV", ""), ContextVar("DEBUG", 0), ContextVar("BEAM", 0), ContextVar("NOOPT", 0)
 IMAGE, FLOAT16, OPENPILOT_HACKS = ContextVar("IMAGE", 0), ContextVar("FLOAT16", 0), ContextVar("OPENPILOT_HACKS", 0)
 JIT, JIT_BATCH_SIZE = ContextVar("JIT", 2 if OSX and ARCH_X86 else 1), ContextVar("JIT_BATCH_SIZE", 32)
-WINO, CAPTURING, TRACEMETA = ContextVar("WINO", 0), ContextVar("CAPTURING", 1), ContextVar("TRACEMETA", 1)
+WINO, CAPTURING, TRACEMETA, NO_COLOR = ContextVar("WINO", 0), ContextVar("CAPTURING", 1), ContextVar("TRACEMETA", 1), ContextVar("NO_COLOR", 0)
 USE_TC, TC_SELECT, TC_OPT, AMX = ContextVar("TC", 1), ContextVar("TC_SELECT", -1), ContextVar("TC_OPT", 0), ContextVar("AMX", 0)
 TRANSCENDENTAL, NOLOCALS = ContextVar("TRANSCENDENTAL", 1), ContextVar("NOLOCALS", 0)
 SPLIT_REDUCEOP, NO_MEMORY_PLANNER, LRU = ContextVar("SPLIT_REDUCEOP", 1), ContextVar("NO_MEMORY_PLANNER", 0), ContextVar("LRU", 1)
-RING, ALL2ALL = ContextVar("RING", 1), ContextVar("ALL2ALL", 0)
+RING, ALL2ALL, ALLREDUCE_CAST = ContextVar("RING", 1), ContextVar("ALL2ALL", 0), ContextVar("ALLREDUCE_CAST", 1)
 CACHELEVEL, IGNORE_BEAM_CACHE, DEVECTORIZE = ContextVar("CACHELEVEL", 2), ContextVar("IGNORE_BEAM_CACHE", 0), ContextVar("DEVECTORIZE", 1)
 VALIDATE_WITH_CPU, DISABLE_FAST_IDIV = ContextVar("VALIDATE_WITH_CPU", 0), ContextVar("DISABLE_FAST_IDIV", 0)
 CORRECT_DIVMOD_FOLDING, FUSE_OPTIM = ContextVar("CORRECT_DIVMOD_FOLDING", 0), ContextVar("FUSE_OPTIM", 0)
@@ -233,10 +238,7 @@ MAX_KERNEL_BUFFERS = ContextVar("MAX_KERNEL_BUFFERS", 0)
 EMULATED_DTYPES = ContextVar("EMULATED_DTYPES", "")
 CAPTURE_PROCESS_REPLAY = ContextVar("CAPTURE_PROCESS_REPLAY", 0)
 CPU_COUNT = ContextVar("CPU_COUNT", max(1, len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else (os.cpu_count() or 1)))
-# Compilers
-CPU_CC, NV_CC, CUDA_CC, NULL_CC = ContextVar("CPU_CC", ""), ContextVar("NV_CC", ""), ContextVar("CUDA_CC", ""), ContextVar("NULL_CC", "")
 NULL_ALLOW_COPYOUT = ContextVar("NULL_ALLOW_COPYOUT", 0)
-AMD_CC, QCOM_CC = ContextVar("AMD_CC", ""), ContextVar("QCOM_CC", "")
 # VIZ implies PROFILE, but you can run PROFILE without VIZ
 VIZ = ContextVar("VIZ", 0)
 PROFILE = ContextVar("PROFILE", abs(VIZ.value))

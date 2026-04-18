@@ -12,7 +12,18 @@ ARCH_TO_TARGET:dict[str, list[str]] = {
 
 TARGET_TO_ARCH:dict[str, str] = {t:arch for arch,targets in ARCH_TO_TARGET.items() for t in targets}
 
+_DPP16_RANGE_OPS = {0x100: "row_shl", 0x110: "row_shr", 0x120: "row_ror", 0x150: "row_newbcast", 0x160: "row_share", 0x170: "row_xmask"}
+_DPP16_EXACT_OPS = {0x130: ("wave_shl", 1), 0x134: ("wave_rol", 1), 0x138: ("wave_shr", 1), 0x13c: ("wave_ror", 1),
+                    0x140: ("row_mirror", 0), 0x141: ("row_half_mirror", 0), 0x142: ("row_bcast", 15), 0x143: ("row_bcast", 31)}
+
 def get_target(arch:str) -> str: return ARCH_TO_TARGET[arch][0]
+
+def decode_dpp16(dpp: int) -> tuple[str, int | tuple[int, int, int, int]]:
+  """Decode a DPP16 control word into a symbolic operation and argument."""
+  if dpp < 0x100: return "quad_perm", ((dpp >> 0) & 0x3, (dpp >> 2) & 0x3, (dpp >> 4) & 0x3, (dpp >> 6) & 0x3)
+  if dpp in _DPP16_EXACT_OPS: return _DPP16_EXACT_OPS[dpp]
+  if (base := dpp & 0x1f0) in _DPP16_RANGE_OPS: return _DPP16_RANGE_OPS[base], dpp & 0xf
+  return "dpp", dpp
 
 def get_mattr(arch:str) -> str:
   return {"rdna3":"+real-true16,+wavefrontsize32", "rdna4":"+real-true16,+wavefrontsize32", "cdna":"+wavefrontsize64"}[arch]

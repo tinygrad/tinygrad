@@ -1,74 +1,8 @@
 from __future__ import annotations
-import sys, argparse, codecs, typing, re, unicodedata, json, uuid, time, functools, itertools
+import functools, itertools
 from dataclasses import dataclass, replace
 from tinygrad import Tensor, nn, UOp, TinyJit, getenv, function
 from tinygrad.uop.ops import resolve
-from tinygrad.helpers import partition, DEBUG, Timing, GlobalCounters, stderr_log, colored, Context
-from tinygrad.viz.serve import TCPServerWithReuse, HTTPRequestHandler
-
-class SimpleTokenizer:
-  def __init__(self, normal_tokens:dict[str, int], special_tokens:dict[str, int], preset:str="llama3"):
-    preset = {"qwen35":"qwen2","qwen35moe":"qwen2"}.get(preset, preset)
-    if preset not in ("llama3","llama-v3","llama-bpe","qwen2","olmo","kimi-k2"): raise ValueError(f"Invalid tokenizer preset '{preset}'")
-    # https://github.com/openai/gpt-2/blob/9b63575ef42771a015060c964af2c3da4cf7c8ab/src/encoder.py#L9
-    bs = [*range(33, 127), *range(161, 173), *range(174, 256)]  # bytes that map to themselves
-    self._byte_decoder = {chr(b): b for b in bs} | {chr(256+i): b for i,b in enumerate(b for b in range(256) if b not in bs)}
-
-    # https://github.com/ggml-org/llama.cpp/blob/94933c8c2eeaa9a7983e3f6c08af76bd86724094/src/llama-vocab.cpp#L286
-    # 0x323b0 is one past the max codepoint in unicode categories L/N/Z (0x323af is max L)
-    def ucat_range(pre: str): return "".join(re.escape(chr(cp)) for cp in range(0x323b0) if unicodedata.category(chr(cp)).startswith(pre))
-    r_ws, r_p_N, r_p_L = r"\t\n\x0b\x0c\r\x85" + ucat_range("Z"), ucat_range("N"), ucat_range("L")
-    self._split_to_word = re.compile("(?i:'s|'t|'re|'ve|'m|'ll|'d)|" + \
-      f"[^\\r\\n{r_p_N}{r_p_L}]?[{r_p_L}]+|[{r_p_N}]{{1,3}}| ?[^{r_ws}{r_p_N}{r_p_L}]+[\\r\\n]*|[{r_ws}]*[\\r\\n]+|[{r_ws}]+(?![^{r_ws}])|[{r_ws}]+")
-    self._split_to_sentence = re.compile("|".join(re.escape(tok) for tok in special_tokens.keys()) if special_tokens else r"(?!)")
-
-    self._normal_tokens = {bytes(self._byte_decoder[c] for c in tok): tid for tok, tid in normal_tokens.items()}
-    self._special_tokens = special_tokens
-    self._tok2bytes = {tid: tok for tok, tid in self._normal_tokens.items()} | {tid: tok.encode() for tok, tid in self._special_tokens.items()}
-    self.preset = preset
-
-  @staticmethod
-  def from_gguf_kv(kv:dict):
-    # https://github.com/ggml-org/llama.cpp/blob/94933c8c2eeaa9a7983e3f6c08af76bd86724094/src/llama-vocab.cpp#L1818-L1820
-    vocab: typing.Iterable[tuple[str, int]] = ((tok, idx) for idx, tok in enumerate(kv["tokenizer.ggml.tokens"]))
-    normal_tokens, special_tokens = partition(vocab, lambda e: kv["tokenizer.ggml.token_type"][e[1]] == 1)
-    return SimpleTokenizer(dict(normal_tokens), dict(special_tokens), kv["tokenizer.ggml.pre"])
-
-  def _encode_word(self, word:bytes) -> list[int]:
-    if (early_token:=self._normal_tokens.get(word)) is not None: return [early_token]
-    parts = [bytes([b]) for b in word]
-    # greedily merge any parts that we can
-    while True:
-      i = min([(sys.maxsize, -1)] + [(self._normal_tokens.get(parts[j]+parts[j+1], sys.maxsize), j) for j in range(len(parts)-1)])[1]
-      if i == -1: break
-      parts[i:i+2] = [parts[i] + parts[i+1]]
-    try: return [self._normal_tokens[p] for p in parts]
-    except KeyError: raise RuntimeError("token not found")
-  def _encode_sentence(self, chunk:str) -> list[int]:
-    return [tok for word in self._split_to_word.findall(chunk) for tok in self._encode_word(word.encode())]
-  def encode(self, text:str) -> list[int]:
-    tokens: list[int] = []
-    pos = 0
-    for match in self._split_to_sentence.finditer(text):
-      tokens.extend(self._encode_sentence(text[pos:match.start(0)]) + [self._special_tokens[text[match.start(0):match.end(0)]]])
-      pos = match.end(0)
-    return tokens + self._encode_sentence(text[pos:])
-
-  def decode(self, ids:list[int]) -> str: return b''.join(self._tok2bytes[tid] for tid in ids).decode(errors='replace')
-  def stream_decoder(self) -> typing.Callable[[int|None], str]:
-    dec = codecs.getincrementaldecoder('utf-8')('replace')
-    def _decode(tid:int|None=None) -> str: return dec.decode(self._tok2bytes[tid]) if tid is not None else dec.decode(b'', final=True)
-    return _decode
-  def role(self, role:str):
-    if self.preset == 'olmo': return self.encode("<|" + role + "|>\n")  # OLMoE Instruct format
-    if self.preset == 'kimi-k2': return self.encode("<|im_" + role + "|>" + role + "<|im_middle|>")
-    if self.preset == 'qwen2': return self.encode("<|im_start|>" + role + "\n")
-    return self.encode("<|start_header_id|>" + role + "<|end_header_id|>\n\n")
-  def end_turn(self, eos_id:int):
-    if self.preset == 'olmo': return self.encode("\n")
-    if self.preset == 'kimi-k2': return [eos_id]
-    if self.preset == 'qwen2': return [eos_id] + self.encode("\n")
-    return [eos_id]
 
 @functools.cache
 def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0) -> Tensor:
@@ -124,6 +58,7 @@ class TransformerConfig:
   num_experts: int = 0
   num_experts_per_tok: int = 0
   norm_topk_prob: bool = False
+  q_lora_rank: int = 0
   kv_lora_rank: int = 0
   shared_expert_dim: int = 0
   full_attention_interval: int = 0
@@ -254,7 +189,12 @@ class MLATransformerBlock(FFNBlock):
   def __init__(self, config:TransformerConfig):
     super().__init__(config)
     qk_nope_head_dim = config.head_dim - config.rope_dim
-    self.attn_q = nn.Linear(config.dim, config.n_heads * config.head_dim, bias=False)
+    if config.q_lora_rank > 0:
+      self.attn_q_a = nn.Linear(config.dim, config.q_lora_rank, bias=False)
+      self.attn_q_a_norm = nn.RMSNorm(config.q_lora_rank, config.norm_eps)
+      self.attn_q_b = nn.Linear(config.q_lora_rank, config.n_heads * config.head_dim, bias=False)
+    else:
+      self.attn_q = nn.Linear(config.dim, config.n_heads * config.head_dim, bias=False)
     self.attn_kv_a_mqa = nn.Linear(config.dim, config.kv_lora_rank + config.rope_dim, bias=False)
     self.attn_kv_a_norm = nn.RMSNorm(config.kv_lora_rank, config.norm_eps)
     self.attn_k_b = {"weight": Tensor.zeros(config.n_heads, config.kv_lora_rank, qk_nope_head_dim)}
@@ -264,7 +204,8 @@ class MLATransformerBlock(FFNBlock):
   def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
     B, T, _ = x.shape
     q_nope_head_dim = self.config.head_dim - self.config.rope_dim
-    q = self.attn_q(x).reshape(B, T, self.config.n_heads, self.config.head_dim).transpose(1, 2)
+    q_proj = self.attn_q_b(self.attn_q_a_norm(self.attn_q_a(x))) if self.config.q_lora_rank > 0 else self.attn_q(x)
+    q = q_proj.reshape(B, T, self.config.n_heads, self.config.head_dim).transpose(1, 2)
     q_nope, q_rope = q[..., :q_nope_head_dim], q[..., q_nope_head_dim:]
     q = (q_nope @ self.attn_k_b["weight"].transpose(-1, -2)).cat(apply_rope(q_rope, self.freqs_cis[start_pos:start_pos+T]), dim=-1)
 
@@ -316,13 +257,9 @@ class GatedDeltaNetBlock(FFNBlock):
     beta = self.ssm_beta(x).sigmoid().reshape(B, self.num_v_heads, 1, 1)
     alpha = ((self.ssm_alpha(x).float() + self.ssm_dt["bias"]).softplus() * self.ssm_a).reshape(B, self.num_v_heads, 1, 1).exp()
 
-    # conv
-    conv_flat = (self.ssm_conv_kernel - 1) * self.conv_channels
-    conv_state = self.delta_cache[:, :conv_flat].reshape(B, self.ssm_conv_kernel - 1, self.conv_channels)
-    conv_window = conv_state.cat(self.attn_qkv(x), dim=1)
+    # qkv conv
+    conv_window = self.conv_state.cat(self.attn_qkv(x), dim=1)
     conv_out = (conv_window * self.ssm_conv1d["weight"].T.unsqueeze(0)).sum(1).silu()
-
-    # qkv
     q, k, v = conv_out.split([self.q_dim, self.q_dim, self.conv_channels - 2*self.q_dim], dim=-1)
     q = q.reshape(B, self.num_k_heads, self.head_k_dim).normalize(dim=-1).repeat(1, self.num_v_heads//self.num_k_heads, 1)
     k = k.reshape(B, self.num_k_heads, self.head_k_dim).normalize(dim=-1).repeat(1, self.num_v_heads//self.num_k_heads, 1)
@@ -330,28 +267,28 @@ class GatedDeltaNetBlock(FFNBlock):
     q, k, v = q.mul(self.head_k_dim**-0.5).unsqueeze(-1), k.unsqueeze(-1), v.unsqueeze(-1)
 
     # recurrent
-    ssm_flat = self.num_v_heads * self.head_v_dim * self.head_v_dim
-    recurrent_state = self.delta_cache[:, conv_flat:conv_flat + ssm_flat].reshape(B, self.num_v_heads, self.head_v_dim, self.head_v_dim)
-    recurrent_state = recurrent_state * alpha
+    recurrent_state = self.recurrent_state * alpha
     recurrent_state = recurrent_state + ((v - recurrent_state@k) * beta)@k.transpose(-1, -2)
-    new_cache = conv_window[:, 1:, :].reshape(B, -1).cat(recurrent_state.reshape(B, -1), dim=-1).contiguous()
-    assigned = self.delta_cache.uop.after(self.delta_cache.uop.store(new_cache.cast(self.delta_cache.dtype).uop))
-    cache_tensor = Tensor(assigned, device=self.delta_cache.device)
 
-    # final
-    final_state = cache_tensor[:, conv_flat:conv_flat + ssm_flat].reshape(B, self.num_v_heads, self.head_v_dim, self.head_v_dim)
-    core_attn_out = self.ssm_norm((final_state@q).squeeze(-1).reshape(B, 1, self.num_v_heads, self.head_v_dim))
+    # store the updated state
+    conv_state_store = self.conv_state.uop.store(conv_window[:, 1:, :].cast(self.conv_state.dtype).uop)
+    recurrent_state_store = self.recurrent_state.uop.store(recurrent_state.cast(self.recurrent_state.dtype).uop)
+    recurrent_state = Tensor(self.recurrent_state.uop.after(recurrent_state_store, conv_state_store))
+
+    # output
+    core_attn_out = self.ssm_norm((recurrent_state@q).squeeze(-1).reshape(B, 1, self.num_v_heads, self.head_v_dim))
     return self.ssm_out((core_attn_out * out_gate.silu()).reshape(B, 1, -1).cast(x.dtype))
 
   # recurrent state can't be partially reused after divergence, force a full rebuild
-  def _state_reset_ops(self): return [self.delta_cache.assign(Tensor.zeros_like(self.delta_cache))] if hasattr(self, "delta_cache") else []
+  def _state_reset_ops(self):
+    return [self.conv_state.assign(Tensor.zeros_like(self.conv_state)),
+            self.recurrent_state.assign(Tensor.zeros_like(self.recurrent_state))] if hasattr(self, "conv_state") else []
   def _reusable_prefix_len(self, prefix_len:int, cached_len:int) -> int: return 0 if prefix_len != cached_len else prefix_len
 
   def _init_state(self, x):
-    if not hasattr(self, "delta_cache"):
-      conv_flat = (self.ssm_conv_kernel - 1) * self.conv_channels
-      ssm_flat = self.num_v_heads * self.head_v_dim * self.head_v_dim
-      self.delta_cache = Tensor.zeros(x.shape[0], conv_flat + ssm_flat, device=x.device).clone()
+    if not hasattr(self, "conv_state"):
+      self.conv_state = Tensor.zeros(x.shape[0], self.ssm_conv_kernel-1, self.conv_channels, device=x.device).clone()
+      self.recurrent_state = Tensor.zeros(x.shape[0], self.num_v_heads, self.head_v_dim, self.head_v_dim, device=x.device).clone()
 
 class Transformer:
   def __init__(self, config:TransformerConfig):
@@ -406,7 +343,7 @@ class Transformer:
 
     # Permute RoPE weights from interleaved to half-split layout.
     for name in state_dict:
-      if 'attn_q.weight' in name and (arch == 'llama' or kv_lora_rank):
+      if ('attn_q.weight' in name or 'attn_q_b.weight' in name) and (arch == 'llama' or kv_lora_rank):
         w = state_dict[name].reshape(n_heads, state_dict[name].shape[0]//n_heads, -1)
         prefix = head_dim-rope_dim
         state_dict[name] = w[:, :prefix].cat(w[:, prefix:].rearrange("n (h two) d -> n (two h) d", two=2), dim=1).reshape(-1, w.shape[-1])
@@ -428,7 +365,7 @@ class Transformer:
       qk_norm=int(state_dict['blk.0.attn_q_norm.weight'].shape[0]) if 'blk.0.attn_q_norm.weight' in state_dict else 0,
       num_experts=kv.get(f'{arch}.expert_count', 0), num_experts_per_tok=kv.get(f'{arch}.expert_used_count', 0),
       norm_topk_prob=kv.get(f'{arch}.expert_weights_norm', arch in ('qwen3moe', 'qwen35moe')),
-      kv_lora_rank=kv_lora_rank,
+      kv_lora_rank=kv_lora_rank, q_lora_rank=kv.get(f'{arch}.attention.q_lora_rank', 0),
       leading_dense_blocks=kv.get(f'{arch}.leading_dense_block_count', 0),
       shared_expert_dim=kv.get(
         f'{arch}.expert_shared_feed_forward_length',
@@ -470,185 +407,3 @@ class Transformer:
       tokens.append(int(out.item()))
       self._cached_tokens = tokens[:-1]
       yield tokens[-1]
-
-models = {
-  "llama3.2:1b": "https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q6_K.gguf",
-  "llama3.2:1b-q4": "https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q4_K_M.gguf",
-  "llama3.2:3b": "https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-Q6_K.gguf",
-  "llama3.2:3b-f16": "https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/resolve/main/Llama-3.2-3B-Instruct-f16.gguf",
-  "llama3.1:8b": "https://huggingface.co/bartowski/Meta-Llama-3.1-8B-Instruct-GGUF/resolve/main/Meta-Llama-3.1-8B-Instruct-Q8_0.gguf",
-  "qwen3:0.6b": "https://huggingface.co/Qwen/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q8_0.gguf",
-  "qwen3:1.7b": "https://huggingface.co/unsloth/Qwen3-1.7B-GGUF/resolve/main/Qwen3-1.7B-Q4_K_M.gguf",
-  "qwen3:8b": "https://huggingface.co/Qwen/Qwen3-8B-GGUF/resolve/main/Qwen3-8B-Q4_K_M.gguf",
-  "qwen3:30b-a3b": "https://huggingface.co/Qwen/Qwen3-30B-A3B-GGUF/resolve/main/Qwen3-30B-A3B-Q4_K_M.gguf",
-  "qwen3.5:0.8b": "https://huggingface.co/unsloth/Qwen3.5-0.8B-GGUF/resolve/main/Qwen3.5-0.8B-Q8_0.gguf",
-  "qwen3.5:4b": "https://huggingface.co/unsloth/Qwen3.5-4B-GGUF/resolve/main/Qwen3.5-4B-Q4_K_M.gguf",
-  "qwen3.5:9b": "https://huggingface.co/unsloth/Qwen3.5-9B-GGUF/resolve/main/Qwen3.5-9B-Q4_K_M.gguf",
-  "qwen3.5:27b": "https://huggingface.co/unsloth/Qwen3.5-27B-GGUF/resolve/main/Qwen3.5-27B-Q4_K_M.gguf",
-  "qwen3.5:35b-a3b": "https://huggingface.co/unsloth/Qwen3.5-35B-A3B-GGUF/resolve/main/Qwen3.5-35B-A3B-Q4_K_M.gguf",
-  "olmoe": "https://huggingface.co/allenai/OLMoE-1B-7B-0924-Instruct-GGUF/resolve/main/olmoe-1b-7b-0924-instruct-q4_k_m.gguf",
-  "moonlight": "https://huggingface.co/gabriellarson/Moonlight-16B-A3B-Instruct-GGUF/resolve/main/Moonlight-16B-A3B-Instruct-Q4_K_M.gguf",
-}
-
-# *** simple OpenAI API compatible server with web interface on http://localhost:8000/ ***
-
-CHAT_HTML = b'''<!DOCTYPE html><html><head><title>tinygrad chat</title><style>
-  * { margin: 0 }
-  body { background: #212121; color: #e3e3e3; font-family: system-ui;
-         height: 100vh; display: flex; flex-direction: column }
-  #chat { flex: 1; overflow-y: auto; padding: 20px }
-  .msg { padding: 10px 16px; margin: 8px 0; white-space: pre-wrap; border-radius: 18px }
-  .user { background: #2f2f2f; margin-left: auto; width: fit-content; max-width: 70% }
-  #input { max-width: 768px; width: 100%; margin: 20px auto; padding: 14px 20px;
-           background: #2f2f2f; color: inherit; font: inherit;
-           border: none; outline: none; resize: none; border-radius: 24px; field-sizing: content }
-</style></head><body><div id="chat"></div>
-<textarea id="input" rows="1" placeholder="Ask anything" autofocus></textarea>
-<script>
-  input.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); send() } }
-  const msgs = [];
-  async function send() {
-    if (!input.value.trim()) return;
-    msgs.push({role: 'user', content: input.value.trim()});
-    chat.innerHTML += '<div class="msg user">' + input.value.trim().replace(/</g, '&lt;') + '</div>';
-    input.value = '';
-    const d = document.createElement('div'); d.className = 'msg'; chat.appendChild(d);
-    const r = await fetch('/v1/chat/completions', {method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({model: 'llama', messages: msgs, stream: true, temperature: 0.7})});
-    let buf = '';
-    for (const rd = r.body.getReader(), dec = new TextDecoder();;) {
-      const {done, value} = await rd.read();
-      if (done) break;
-      buf += dec.decode(value, {stream: true});
-      const lines = buf.split('\\n');
-      buf = lines.pop();
-      for (const ln of lines)
-        if (ln.startsWith('data: ') && !ln.includes('[DONE]'))
-          try { d.textContent += JSON.parse(ln.slice(6)).choices[0]?.delta?.content || '' } catch {}
-      chat.scrollTop = chat.scrollHeight;
-    }
-    msgs.push({role: 'assistant', content: d.textContent});
-  }
-</script></body></html>'''
-
-class Handler(HTTPRequestHandler):
-  def log_request(self, code='-', size='-'): pass
-  def do_GET(self):
-    if self.path == "/v1/models": self.send_data(json.dumps({"object":"list","data":[{"id":model_name,"object":"model"}]}).encode())
-    else: self.send_data(CHAT_HTML, content_type="text/html")
-  def run_model(self, ids:list[int], model_name:str, include_usage=False, max_tokens:int|None=None, temperature:float=0.0):
-    cache_start_pos = model.get_start_pos(ids)
-    stderr_log(f"{self.path}  {colored('--', 'BLACK')}  "
-               f"in:{colored(f'{cache_start_pos:5d}', 'green')} +{len(ids)-cache_start_pos:5d}  {colored('--', 'BLACK')}  ")
-    tmpl = {"id":f"chatcmpl-{uuid.uuid4().hex[:24]}", "object":"chat.completion.chunk", "created":int(time.time()), "model":model_name}
-    yield {"choices": [{"index":0, "delta":{"role":"assistant","content":""}, "finish_reason":None}], **tmpl}
-    out: list[int] = []
-    finish_reason = "stop"
-    st = time.perf_counter()
-    dec = tok.stream_decoder()
-    for next_id in model.generate(ids, temperature=temperature):
-      if len(out) == 0: stderr_log(f"prefill:{(len(ids)-cache_start_pos)/((pt:=time.perf_counter())-st):4.0f} tok/s  {colored('--', 'BLACK')}  ")
-      if next_id == eos_id: break
-      out.append(next_id)
-      yield {"choices": [{"index":0, "delta":{"content":dec(next_id)}, "finish_reason":None}], **tmpl}
-      if max_tokens is not None and len(out) >= max_tokens:
-        finish_reason = "length"
-        break
-    if (tail := dec()): yield {"choices": [{"index":0, "delta":{"content":tail}, "finish_reason":None}], **tmpl}
-    yield {"choices": [{"index":0, "delta":{},"finish_reason":finish_reason}], **tmpl}
-    if include_usage:
-      yield {"choices": [], "usage": {"prompt_tokens": len(ids), "completion_tokens": len(out), "total_tokens": len(ids) + len(out)}, **tmpl}
-    et = time.perf_counter()
-    stderr_log(f"gen:{len(out)/(et-pt) if len(out) > 1 else 0:4.0f} tok/s  {colored('--', 'BLACK')}  "
-               f"out:{len(out):5d}  {colored('--', 'BLACK')}  total:{et-st:6.2f}s\n")
-
-  def do_POST(self):
-    raw_body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
-    body: dict[str, typing.Any] = json.loads(raw_body.decode("utf-8"))
-    if DEBUG >= 1: print(json.dumps(body, indent=2))
-    if self.path == "/v1/chat/completions":
-      # extract tokens, last assistant message is treated as prefill
-      ids: list[int] = [bos_id] if bos_id is not None else []
-      for i, msg in enumerate(body["messages"]):
-        ids += tok.role(msg["role"])
-        content = msg["content"]
-        if isinstance(content, str): ids += tok.encode(content)
-        elif isinstance(content, list):
-          for c in content:
-            if c["type"] == "text": ids += tok.encode(c["text"])
-            else: raise RuntimeError(f"unhandled type: {c['type']}")
-        else: raise RuntimeError(f"unknown content type: {type(content)}")
-        if msg["role"] == "assistant" and i == len(body["messages"]) - 1: break
-        ids += tok.end_turn(eos_id)
-      else: ids += tok.role("assistant")
-
-      # reply
-      max_tokens = body.get("max_completion_tokens") or body.get("max_tokens")
-      chunks = self.run_model(ids, body["model"], not body.get("stream") or body.get("stream_options",{}).get("include_usage", False),
-                              max_tokens=max_tokens, temperature=float(body.get("temperature", 0.0)))
-      if body.get("stream"): self.stream_json(chunks)
-      else:
-        out, finish_reason = [], "stop"
-        for c in chunks:
-          if c["choices"] and c["choices"][0].get("delta", {}).get("content"): out.append(c["choices"][0]["delta"]["content"])
-          if c["choices"] and c["choices"][0].get("finish_reason"): finish_reason = c["choices"][0]["finish_reason"]
-        self.send_data(json.dumps({**c, "object":"chat.completion",
-          "choices":[{"index":0, "message":{"role":"assistant","content":"".join(out)}, "finish_reason":finish_reason}]}).encode())
-    else:
-      raise RuntimeError(f"unhandled path {self.path}")
-
-if __name__ == "__main__":
-  parser = argparse.ArgumentParser()
-  parser.add_argument("--model", "-m", default=list(models.keys())[0], help=f"Model choice ({', '.join(models.keys())}) or path to a local GGUF file")
-  parser.add_argument("--max_context", type=int, default=4096, help="Max Context Length")
-  parser.add_argument("--serve", nargs='?', type=int, const=8000, metavar="PORT", help="Run OpenAI compatible API (optional port, default 8000)")
-  parser.add_argument("--warmup", action="store_true", help="warmup the JIT")
-  parser.add_argument("--benchmark", nargs='?', type=int, const=20, metavar="COUNT", help="Benchmark tok/s (optional count, default 20)")
-  args = parser.parse_args()
-
-  # load the model
-  raw_model = Tensor.from_url(models.get(args.model, args.model))
-  model, kv = Transformer.from_gguf(raw_model, args.max_context)
-  model_name = kv.get('general.name') or kv.get('general.basename') or args.model
-  print(f"using model \"{model_name}\" with {raw_model.nbytes():,} bytes and {sum(x.numel() for x in nn.state.get_parameters(model)):,} params")
-  del raw_model
-
-  # TODO: why this is required to free the RAM of the GGUF copy?
-  import gc
-  gc.collect()
-
-  tok = SimpleTokenizer.from_gguf_kv(kv)
-  bos_id: int|None = kv.get('tokenizer.ggml.bos_token_id') if kv.get('tokenizer.ggml.add_bos_token', True) else None
-  eos_id: int = kv['tokenizer.ggml.eos_token_id']
-
-  # warmup the JIT
-  if args.warmup or args.serve:
-    # run 2 tokens through the model twice to capture the JIT before serving
-    with Context(DEBUG=max(DEBUG.value, 1)):
-      for _ in range(2): list(zip(range(2), model.generate([0])))
-
-  # start server
-  if args.serve: TCPServerWithReuse(('', args.serve), Handler).serve_forever()
-
-  # do benchmark
-  if args.benchmark is not None:
-    gen = model.generate(toks:=[bos_id or 0])
-    for _ in range(args.benchmark):
-      GlobalCounters.reset()
-      with Timing(on_exit=lambda x: f", {1e9/x:6.2f} tok/s, {GlobalCounters.global_mem/x:7.2f} GB/s,"
-                  f" {GlobalCounters.global_mem//1000000}/{GlobalCounters.mem_used//1000000} MB  --  "+\
-                  tok.decode(toks).replace("\n", "\\n")): next(gen)
-    exit(0)
-
-  # interactive chat
-  ids: list[int] = [bos_id] if bos_id is not None else []
-  while 1:
-    try:
-      ids += tok.role("user") + tok.encode(input('>>> ')) + tok.end_turn(eos_id) + tok.role("assistant")
-    except EOFError:
-      break
-    dec = tok.stream_decoder()
-    for next_id in model.generate(ids):
-      sys.stdout.write(dec(next_id) if next_id != eos_id else dec() + "\n\n")
-      sys.stdout.flush()
-      if next_id == eos_id: break

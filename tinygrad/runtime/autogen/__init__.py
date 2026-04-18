@@ -9,6 +9,7 @@ rocr_src = "https://github.com/ROCm/rocm-systems/archive/refs/tags/rocm-7.1.1.ta
 linux_headers_deb = "https://snapshot.debian.org/archive/debian/20260207T145350Z/pool/main/l/linux/linux-libc-dev_6.18.9-1_all.deb"
 linux_headers_kern_deb = "https://snapshot.debian.org/archive/debian/20260207T145350Z/pool/main/l/linux/linux-headers-6.18.9+deb14-common_6.18.9-1_all.deb"
 liburing_src = "https://raw.githubusercontent.com/axboe/liburing/refs/tags/liburing-2.14/src/include/liburing.h"
+ggml_common_src = "https://raw.githubusercontent.com/ggml-org/ggml/d4fcfe88a8bcf5c9840be14be6c2fbf1f5b3b2db/src/ggml-common.h"
 macossdk = "/var/db/xcode_select_link/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk"
 
 llvm_lib = (r"'C:\\Program Files\\LLVM\\bin\\LLVM-C.dll' if WIN else '/opt/homebrew/opt/llvm@20/lib/libLLVM.dylib' if OSX else " +
@@ -127,7 +128,7 @@ def __getattr__(nm):
       return load("rocprof", "['rocprof-trace-decoder', p:='/usr/local/lib/rocprof-trace-decoder.so', p.replace('so','dylib')]",
                   [f"{{}}/include/{s}.h" for s in ["rocprof_trace_decoder", "trace_decoder_instrument", "trace_decoder_types"]],
                   srcs="https://github.com/ROCm/rocprof-trace-decoder/archive/dd0485100971522cc4cd8ae136bdda431061a04d.tar.gz")
-    case "mesa": return load("mesa", "([] if CPU_CC.value == 'LVP' or DEV.renderer == 'LVP' else ['tinymesa']) + ['tinymesa_cpu']", [
+    case "mesa": return load("mesa", "([] if DEV.renderer == 'LVP' else ['tinymesa']) + ['tinymesa_cpu']", [
         *[f"{{}}/src/compiler/nir/{s}.h" for s in ["nir", "nir_builder", "nir_shader_compiler_options", "nir_serialize"]], "{}/gen/nir_intrinsics.h",
         *[f"{{}}/src/nouveau/{s}.h" for s in ["headers/nv_device_info", "compiler/nak"]],
         *[f"{{}}/src/gallium/auxiliary/gallivm/lp_bld{s}.h" for s in ["", "_passmgr", "_misc", "_type", "_init", "_nir", "_struct", "_jit_types",
@@ -146,7 +147,7 @@ def __getattr__(nm):
           *[f"python3 src/compiler/{s}_h.py > gen/{s.split('/')[-1]}.h" for s in ["nir/nir_opcodes", "nir/nir_builder_opcodes"]],
           *[f"python3 src/compiler/nir/nir_{s}_h.py --outdir gen" for s in ["intrinsics", "intrinsics_indices"]]]), cwd=path, shell=True, check=True),
   srcs="https://gitlab.freedesktop.org/mesa/mesa/-/archive/mesa-25.2.7/mesa-25.2.7.tar.gz",
-  prolog=["from tinygrad.helpers import CPU_CC, DEV", "import gzip, base64"],
+  prolog=["from tinygrad.helpers import DEV", "import gzip, base64"],
   epilog=lambda path: [system(f"{root}/extra/mesa/lvp_nir_options.sh {path}")])
     case "libclang":
       return load("libclang", clang_lib,
@@ -162,6 +163,9 @@ def __getattr__(nm):
                                        [f"{macossdk}/System/Library/Frameworks/CoreFoundation.framework/Headers/CF{s}.h" for s in ["String", "Data"]],
                                        args=["-isysroot", macossdk])
     case "llvm_qcom": return load("llvm_qcom", "'llvm-qcom'", [root/"extra/tinydreno.h"])
+    case "ggml_common":
+      return load("ggml_common", None, ["{}/ggml-common.h"], srcs=ggml_common_src,
+                  args=["-DGGML_COMMON_DECL_C", "-DGGML_COMMON_IMPL_C"], parse_macros=False)
     case "mlx5":
       kh = "{}/usr/src/linux-headers-6.18.9+deb14-common/include/linux/mlx5"
       return load("mlx5", None, [root/"extra/mlx_driver/mlx5.h", f"{kh}/mlx5_ifc.h"], srcs=linux_headers_kern_deb,

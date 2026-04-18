@@ -15,7 +15,7 @@ from extra.gemm.amd_asm_matmul import Kernel
 def custom_add_one(A:UOp) -> UOp:
   A = A.flatten()
   assert dtypes.is_float(A.dtype.base), f"buffer dtype must be float32, got {A.dtype}"
-  threads = UOp.special(A.size, "lidx0")
+  threads = UOp.special(A.numel(), "lidx0")
   insts = [
     s_load_b64(s[0:1], s[0:1], soffset=NULL),
     s_waitcnt_lgkmcnt(sdst=NULL, simm16=0),
@@ -27,13 +27,13 @@ def custom_add_one(A:UOp) -> UOp:
     global_store_b32(addr=v[0], data=v[1], saddr=s[0:1]),
     s_endpgm(),
   ]
-  sink = UOp.sink(A.base, threads, arg=KernelInfo(f"custom_add_one_{A.size}", estimates=Estimates(ops=A.size, mem=A.size*4*2)))
+  sink = UOp.sink(A.base, threads, arg=KernelInfo(f"custom_add_one_{A.numel()}", estimates=Estimates(ops=A.numel(), mem=A.numel()*4*2)))
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg="AMD"), UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=x) for x in insts]))))
 
 def custom_add_var(A:UOp, B:UOp) -> UOp:
   A,B = A.flatten(), B.flatten()
   assert A.dtype.base == dtypes.uint32, f"buffer dtype must be uint32, got {A.dtype}"
-  threads = UOp.special(A.size, "lidx0")
+  threads = UOp.special(A.numel(), "lidx0")
   var = UOp.variable("var", 0, 10)
   insts = [
     s_load_b128(s[4:7], s[0:1]),
@@ -46,7 +46,7 @@ def custom_add_var(A:UOp, B:UOp) -> UOp:
     global_store_b32(addr=v[0], data=v[1], saddr=s[4:5]),
     s_endpgm(),
   ]
-  sink = UOp.sink(A.base, B.base, var, threads, arg=KernelInfo(f"custom_add_var_{A.size}"))
+  sink = UOp.sink(A.base, B.base, var, threads, arg=KernelInfo(f"custom_add_var_{A.numel()}"))
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg="AMD"), UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=x) for x in insts]))))
 
 def custom_wave_sync(A:UOp, arch:str) -> UOp:
@@ -132,7 +132,7 @@ def custom_handwritten(A:UOp, arch:str) -> UOp:
 
 def custom_data_deps(A:UOp, arch:str) -> UOp:
   A = A.flatten()
-  threads = UOp.special(A.size, "lidx0")
+  threads = UOp.special(A.numel(), "lidx0")
   k = Kernel(arch)
   k.emit(s_load_b64(s[0:1], s[0:1], soffset=NULL))
   k.emit(s_waitcnt_lgkmcnt(sdst=NULL, simm16=0))

@@ -60,7 +60,6 @@ class TestCall(unittest.TestCase):
     c = Tensor.call(a, b, fxn=a.as_param(0) @ b.as_param(1))
     np.testing.assert_allclose(c.numpy(), a.numpy() @ b.numpy(), rtol=1e-5, atol=1e-6)
 
-  @unittest.skip("needs GEMM on mixins")
   def test_call_gemm_uop(self):
     M, K, N = 4, 8, 4
     a = Tensor.randn(M, K)
@@ -220,9 +219,9 @@ class TestCallSchedule(unittest.TestCase):
     a = Tensor.empty(4, 8)
     b = Tensor.empty(4, 8)
     r0, r1 = f(a), f(b)
-    # find the CALL nodes
-    c0 = next(u for u in r0.uop.toposort() if u.op is Ops.CALL)
-    c1 = next(u for u in r1.uop.toposort() if u.op is Ops.CALL)
+    # find the FUNCTION nodes
+    c0 = next(u for u in r0.uop.toposort() if u.op is Ops.FUNCTION)
+    c1 = next(u for u in r1.uop.toposort() if u.op is Ops.FUNCTION)
     # the function bodies (src[0]) should have identical keys — unique consts must not leak through
     self.assertEqual(c0.src[0].key, c1.src[0].key)
 

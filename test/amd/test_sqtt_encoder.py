@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Tests for SQTT encoder: verifies the emulator produces correct SQTT traces for known kernels.
 
-Run with: DEV=AMD MOCKGPU=1 python -m pytest test/amd/test_sqtt_encoder.py -v
+Run with: DEV=MOCKKFD+AMD python -m pytest test/amd/test_sqtt_encoder.py -v
 """
 import ctypes, unittest
 from tinygrad.helpers import Context

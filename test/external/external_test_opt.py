@@ -7,7 +7,7 @@ from tinygrad import GlobalCounters, Tensor, Device
 from tinygrad.helpers import getenv
 from tinygrad.nn.state import get_parameters
 from tinygrad.engine.realize import capturing, run_schedule
-from tinygrad.engine.schedule import linear_to_schedule
+from tinygrad.schedule import linear_to_schedule
 from tinygrad.tensor import _to_np_dtype
 
 class CLCache:

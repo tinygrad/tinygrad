@@ -1,4 +1,4 @@
-import functools
+import functools, itertools
 from typing import Self, Sequence, Literal, get_args
 from tinygrad.mixin.elementwise import ElementwiseMixin
 from tinygrad.mixin.movement import MovementMixin
@@ -259,6 +259,94 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     """
     m = self.max(axis=axis, keepdim=True)
     return (self - m).exp().sum(axis=axis, keepdim=keepdim).log() + (m if keepdim else m.squeeze(axis))
+
+  def _softmax(self, axis, dtype:DTypeLike|None=None) -> tuple[Self, Self, Self]:
+    m = self - self.max(axis=axis, keepdim=True).detach()
+    if dtype is not None: m = m.cast(to_dtype(dtype))
+    e = m.exp()
+    return m, e, e.sum(axis=axis, keepdim=True)
+
+  def softmax(self, axis=-1, dtype:DTypeLike|None=None) -> Self:
+    """
+    Applies the softmax function to the tensor along the specified axis.
+
+    Rescales the elements of the tensor such that they lie in the range [0, 1] and sum to 1.
+
+    You can pass in the `axis` keyword argument to control the axis along which the softmax is computed.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    t = Tensor.randn(2, 3)
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.softmax().numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.softmax(axis=0).numpy())
+    ```
+    """
+    _, e, ss = self._softmax(axis, dtype)
+    return e * ss.reciprocal()
+
+  def log_softmax(self, axis=-1, dtype:DTypeLike|None=None) -> Self:
+    """
+    Applies the log-softmax function to the tensor along the specified axis.
+
+    The log-softmax function is a numerically stable alternative to the softmax function in log space.
+
+    You can pass in the `axis` keyword argument to control the axis along which the log-softmax is computed.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    t = Tensor.randn(2, 3)
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.log_softmax().numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.log_softmax(axis=0).numpy())
+    ```
+    """
+    m, _, ss = self._softmax(axis, dtype)
+    return m - ss.log()
+
+  def cat(self, *args:Self, dim:int=0) -> Self:
+    """
+    Concatenates self with other tensors in `args` along an axis specified by `dim`.
+    All tensors must have the same shape except in the concatenating dimension.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t0, t1, t2 = Tensor([[1, 2]]), Tensor([[3, 4]]), Tensor([[5, 6]])
+    print(t0.cat(t1, t2, dim=0).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t0.cat(t1, t2, dim=1).numpy())
+    ```
+    """
+    dim = self._resolve_dim(dim)
+    for arg in args: assert arg.ndim==self.ndim and all(ti==ai for i,(ti,ai) in enumerate(zip(self.shape, arg.shape)) if i!=dim)
+    tensors = [self, *args]
+    dim_cumsum = list(itertools.accumulate([t.shape[dim] for t in tensors], initial=0))
+    padded = [t.pad(tuple((dim_cumsum[i], dim_cumsum[-1]-dim_cumsum[i+1]) if j==dim else None for j in range(t.ndim))) for i,t in enumerate(tensors)]
+    return padded[0].usum(*padded[1:])
+
+  def stack(self, *args:Self, dim:int=0) -> Self:
+    """
+    Concatenates self with other tensors in `args` along a new dimension specified by `dim`.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t0, t1, t2 = Tensor([1, 2]), Tensor([3, 4]), Tensor([5, 6])
+    print(t0.stack(t1, t2, dim=0).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t0.stack(t1, t2, dim=1).numpy())
+    ```
+    """
+    # checks for shapes and number of dimensions delegated to cat
+    unsqueezed = [t.unsqueeze(dim) for t in argfix(self, *args)]
+    return unsqueezed[0].cat(*unsqueezed[1:], dim=dim)
 
   def _cumalu(self, axis:int, op:Ops) -> Self:
     assert self.shape[axis] != 0 and op in (Ops.ADD, Ops.MAX, Ops.MUL)

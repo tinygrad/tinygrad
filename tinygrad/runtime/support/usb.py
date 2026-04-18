@@ -1,7 +1,7 @@
 import ctypes, struct, dataclasses, array, itertools, time
 from typing import Sequence
 from tinygrad.runtime.autogen import libusb
-from tinygrad.helpers import DEBUG, to_mv, round_up, OSX, getenv, ceildiv
+from tinygrad.helpers import DEBUG, DEV, to_mv, round_up, OSX, getenv, ceildiv
 from tinygrad.runtime.support.hcq import MMIOInterface
 
 def alloc_cbuffer(sz:int) -> tuple[ctypes.Array, memoryview]: return (buf:=(ctypes.c_ubyte * sz)()), to_mv(ctypes.addressof(buf), sz)
@@ -41,6 +41,7 @@ class USB3:
     if libusb.libusb_claim_interface(self.handle, 0): raise RuntimeError("claim_interface failed. sudo required?")
 
     if use_bot:
+      libusb.libusb_set_interface_alt_setting(self.handle, 0, 0)
       self._tag = 0
     else:
       if libusb.libusb_set_interface_alt_setting(self.handle, 0, 1): raise RuntimeError("alt_setting failed")
@@ -448,4 +449,4 @@ class USBMMIOInterface(MMIOInterface):
     _, acc_sz = self._acc_size(len(data) * struct.calcsize(self.fmt))
     self.usb.pcie_mem_write(self.addr+off, [int.from_bytes(data[i:i+acc_sz], "little") for i in range(0, len(data), acc_sz)], acc_sz)
 
-if getenv("MOCKGPU"): from test.mockgpu.usb import MockUSB3 as USB3  # type: ignore  # noqa: F811
+if DEV.interface.startswith("MOCK"): from test.mockgpu.usb import MockUSB3 as USB3  # type: ignore  # noqa: F811

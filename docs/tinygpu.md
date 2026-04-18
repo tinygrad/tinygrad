@@ -55,7 +55,7 @@ export PATH="$HOME/.local/bin:$PATH"
 ### 5. Use it!
 
 ```bash
-DEV={AMD|NV} python3 tinygrad/apps/llm.py
+DEV={AMD|NV} python3 -m tinygrad.llm
 ```
 
 **Note:** Use `JITBEAM=2` to search for faster kernels (one-time search cost, results cached).

@@ -2,13 +2,12 @@ import numpy as np
 import functools, unittest, ctypes
 
 from tinygrad.device import Device, Buffer
-from tinygrad.tensor import Tensor, _to_np_dtype
-from tinygrad.helpers import Context, dedup, from_mv
+from tinygrad.tensor import Tensor
+from tinygrad.helpers import Context, from_mv
 from tinygrad.dtype import dtypes
 from tinygrad.engine.jit import MultiGraphRunner
-from tinygrad.engine.realize import BufferXfer, get_runner, CompiledRunner
-from tinygrad.engine.schedule import ExecItem
-from tinygrad.uop.ops import UOp, Ops
+from tinygrad.schedule import linear_to_schedule
+from tinygrad.uop.ops import UOp, Ops, buffers
 
 from test.helpers import needs_second_gpu
 
@@ -17,77 +16,46 @@ Tensor.manual_seed(1337)
 BUF_SIZE = 4096
 RUN_CNT = 5
 
-cached_prgs = {}
-def helper_exec_op(device, outbuf, inbufs):
-  if (device, len(inbufs)) not in cached_prgs:
+# cache AST by (device, num_inputs)
+cached_asts: dict[tuple[str, int], UOp] = {}
+def get_ast(device:str, num_inputs:int) -> UOp:
+  if (device, num_inputs) not in cached_asts:
     with Context(DEBUG=0):
-      fst = [Tensor.randn(BUF_SIZE, dtype=dtypes.int).realize() for i in range(len(inbufs))]
+      fst = [Tensor.randn(BUF_SIZE, dtype=dtypes.int).realize() for _ in range(num_inputs)]
       s = fst[0]
-      for i in range(1, len(inbufs)): s = s.bitwise_xor(fst[i])
+      for i in range(1, num_inputs): s = s.bitwise_xor(fst[i])
+      cached_asts[(device, num_inputs)] = s.schedule()[-1].ast
+  return cached_asts[(device, num_inputs)]
 
-      si = s.schedule()[-1]
-      prg = get_runner(device, si.ast)
-    cached_prgs[(device, len(inbufs))] = prg
-
-  return ExecItem(UOp(Ops.NOOP), [outbuf] + inbufs, prg=cached_prgs[(device, len(inbufs))])
-
-def helper_copy_op(device, dest, src):
-  prg = BufferXfer(dest.nbytes, device, src.device)
-  return ExecItem(UOp(Ops.NOOP), [dest, src], prg=prg)
-
-def helper_alloc_rawbuffer(device, fill=False):
-  rawbuf = Buffer(device, BUF_SIZE, dtypes.int).ensure_allocated()
+def make_buffer(device, size=BUF_SIZE, fill=False):
+  buf = Buffer(device, size, dtypes.int).ensure_allocated()
   if fill:
     with Context(DEBUG=0):
-      data = np.random.randint(-10000, 10000, size=rawbuf.size, dtype=_to_np_dtype(rawbuf.dtype))
-      rawbuf.copyin(Tensor(data).realize().uop.base.realized.as_memoryview())
-  return rawbuf
+      buf.copyin(Tensor(np.random.randint(-10000, 10000, size=size, dtype=np.int32)).realize().uop.base.realized.as_memoryview())
+  return buf
 
-def helper_create_offset_rawbuffer(base, offset=0):
-  x = Buffer(base.device, base.size-offset, base.dtype, base=base, offset=offset)
-  return x.ensure_allocated()
-
-def helper_alloc_rawbuffer_sized(device, size, fill=False):
-  rawbuf = Buffer(device, size, dtypes.int).ensure_allocated()
-  if fill:
-    with Context(DEBUG=0):
-      data = np.random.randint(-10000, 10000, size=rawbuf.size, dtype=_to_np_dtype(rawbuf.dtype))
-      rawbuf.copyin(Tensor(data).realize().uop.base.realized.as_memoryview())
-  return rawbuf
-
-def helper_make_view(base, offset_elems, size_elems):
+def make_view(base, offset_elems, size_elems):
   return Buffer(base.device, size_elems, base.dtype, base=base, offset=offset_elems * base.dtype.itemsize).ensure_allocated()
 
-def helper_run_jit(jis, bufs, out_buffers):
-  for rawbuf in out_buffers:
-    mv = memoryview(bytearray(rawbuf.size * rawbuf.dtype.itemsize))
+def get_buf_uop(buf:Buffer, cache:dict[Buffer,UOp]) -> UOp:
+  if buf not in cache:
+    cache[buf] = u = UOp.new_buffer(buf.device, buf.size, buf.dtype)
+    buffers[u] = buf
+  return cache[buf]
+
+def make_graph(graph_cls, calls:list[UOp]):
+  linear = UOp(Ops.LINEAR, src=tuple(calls))
+  cf = UOp(Ops.CUSTOM_FUNCTION, dtypes.void, src=(linear,), arg="graph")
+  return graph_cls(cf, [])
+
+def run_schedule(calls:list[UOp]):
+  for ei in linear_to_schedule(UOp(Ops.LINEAR, src=tuple(calls))): ei.lower().run({})
+
+def zero_bufs(bufs):
+  for b in bufs:
+    mv = memoryview(bytearray(b.nbytes))
     ctypes.memset(from_mv(mv), 0, len(mv))
-    rawbuf.copyin(mv)
-
-  for ei in jis: ei.run({}, jit=True)
-  return [rawbuf.as_memoryview() for rawbuf in bufs]
-
-def helper_test_graphs(graph_impl, graphs, runs=RUN_CNT):
-  reg_ji = []
-  bufs = []
-  out_buffers = set()
-  for graph in graphs:
-    for ji in graph:
-      out_buffers.update([ji.bufs[i] for i in (ji.prg.p.outs if isinstance(ji.prg, CompiledRunner) else [0])])
-      bufs += ji.bufs
-      reg_ji.append(ji)
-  bufs = dedup(bufs)
-
-  ground_thruth_bufs = helper_run_jit(reg_ji, bufs, out_buffers)
-  ground_truth_np = [np.frombuffer(x, _to_np_dtype(bufs[i].dtype)) for i,x in enumerate(ground_thruth_bufs)]
-
-  # Build graphs
-  gr_ji = [ExecItem(UOp(Ops.NOOP), [], prg=graph_impl(None, None, graph)) for graph in graphs]
-
-  for _ in range(runs):
-    test_bufs = helper_run_jit(gr_ji, bufs, out_buffers)
-    test_bufs_np = [np.frombuffer(x, _to_np_dtype(bufs[i].dtype)) for i,x in enumerate(test_bufs)]
-    for i in range(len(ground_thruth_bufs)): np.testing.assert_equal(ground_truth_np[i], test_bufs_np[i])
+    b.copyin(mv)
 
 @unittest.skipUnless(Device[Device.DEFAULT].graph is not None, "graph support required")
 class TestGraph(unittest.TestCase):
@@ -101,236 +69,251 @@ class TestGraph(unittest.TestCase):
 
   def test_order_2_writes_to_same_buf(self):
     d0 = Device.DEFAULT
-    b0 = [helper_alloc_rawbuffer(d0, fill=True) for _ in range(5)]
+    b = [make_buffer(d0, fill=True) for _ in range(5)]
+    c: dict[Buffer,UOp] = {}
 
-    graphs = [
-      [helper_exec_op(d0, b0[0], [b0[1], b0[2]]), helper_exec_op(d0, b0[0], [b0[3], b0[4]])]
+    calls = [
+      get_ast(d0, 2).call(get_buf_uop(b[0],c), get_buf_uop(b[1],c), get_buf_uop(b[2],c), metadata=()),
+      get_ast(d0, 2).call(get_buf_uop(b[0],c), get_buf_uop(b[3],c), get_buf_uop(b[4],c), metadata=()),
     ]
 
-    helper_test_graphs(Device[d0].graph, graphs)
+    zero_bufs([b[0]])
+    run_schedule(calls)
+    expected = [np.frombuffer(x.as_memoryview(), np.int32).copy() for x in b]
+
+    for _ in range(RUN_CNT):
+      zero_bufs([b[0]])
+      make_graph(Device[d0].graph, calls)([], {})
+      for i, buf in enumerate(b): np.testing.assert_equal(expected[i], np.frombuffer(buf.as_memoryview(), np.int32))
 
   def test_order_read_write_same_buf(self):
     d0 = Device.DEFAULT
-    b0 = [helper_alloc_rawbuffer(d0, fill=True) for _ in range(5)]
+    b = [make_buffer(d0, fill=True) for _ in range(5)]
+    c: dict[Buffer,UOp] = {}
 
-    graphs = [
-      [helper_exec_op(d0, b0[0], [b0[1], b0[2]]), helper_exec_op(d0, b0[1], [b0[3], b0[4]])]
+    calls = [
+      get_ast(d0, 2).call(get_buf_uop(b[0],c), get_buf_uop(b[1],c), get_buf_uop(b[2],c), metadata=()),
+      get_ast(d0, 2).call(get_buf_uop(b[1],c), get_buf_uop(b[3],c), get_buf_uop(b[4],c), metadata=()),
     ]
 
-    helper_test_graphs(Device[d0].graph, graphs)
+    zero_bufs([b[0], b[1]])
+    run_schedule(calls)
+    expected = [np.frombuffer(x.as_memoryview(), np.int32).copy() for x in b]
+
+    for _ in range(RUN_CNT):
+      zero_bufs([b[0], b[1]])
+      make_graph(Device[d0].graph, calls)([], {})
+      for i, buf in enumerate(b): np.testing.assert_equal(expected[i], np.frombuffer(buf.as_memoryview(), np.int32))
 
   def test_order_write_read_same_buf(self):
     d0 = Device.DEFAULT
-    b0 = [helper_alloc_rawbuffer(d0, fill=True) for _ in range(5)]
+    b = [make_buffer(d0, fill=True) for _ in range(5)]
+    c: dict[Buffer,UOp] = {}
 
-    graphs = [
-      [helper_exec_op(d0, b0[0], [b0[1], b0[2]]), helper_exec_op(d0, b0[1], [b0[0], b0[4]])]
+    calls = [
+      get_ast(d0, 2).call(get_buf_uop(b[0],c), get_buf_uop(b[1],c), get_buf_uop(b[2],c), metadata=()),
+      get_ast(d0, 2).call(get_buf_uop(b[1],c), get_buf_uop(b[0],c), get_buf_uop(b[4],c), metadata=()),
     ]
 
-    helper_test_graphs(Device[d0].graph, graphs)
+    zero_bufs([b[0], b[1]])
+    run_schedule(calls)
+    expected = [np.frombuffer(x.as_memoryview(), np.int32).copy() for x in b]
+
+    for _ in range(RUN_CNT):
+      zero_bufs([b[0], b[1]])
+      make_graph(Device[d0].graph, calls)([], {})
+      for i, buf in enumerate(b): np.testing.assert_equal(expected[i], np.frombuffer(buf.as_memoryview(), np.int32))
 
   def test_order_copy_writed(self):
     self.skip_if_not_multigraph()
-
     d0 = Device.DEFAULT
-    b0 = [helper_alloc_rawbuffer(d0, fill=True) for _ in range(4)]
+    b = [make_buffer(d0, fill=True) for _ in range(4)]
+    c: dict[Buffer,UOp] = {}
 
-    graphs = [
-      [helper_exec_op(d0, b0[0], [b0[1], b0[2]]), helper_copy_op(d0, b0[3], b0[0])]
+    calls = [
+      get_ast(d0, 2).call(get_buf_uop(b[0],c), get_buf_uop(b[1],c), get_buf_uop(b[2],c), metadata=()),
+      UOp(Ops.COPY).call(get_buf_uop(b[3],c), get_buf_uop(b[0],c), metadata=()),
     ]
 
-    helper_test_graphs(Device[d0].graph, graphs)
+    zero_bufs([b[0], b[3]])
+    run_schedule(calls)
+    expected = [np.frombuffer(x.as_memoryview(), np.int32).copy() for x in b]
+
+    for _ in range(RUN_CNT):
+      zero_bufs([b[0], b[3]])
+      make_graph(Device[d0].graph, calls)([], {})
+      for i, buf in enumerate(b): np.testing.assert_equal(expected[i], np.frombuffer(buf.as_memoryview(), np.int32))
 
   def test_order_copy_then_read(self):
     self.skip_if_not_multigraph()
-
     d0 = Device.DEFAULT
-    b0 = [helper_alloc_rawbuffer(d0, fill=True) for _ in range(4)]
+    b = [make_buffer(d0, fill=True) for _ in range(4)]
+    c: dict[Buffer,UOp] = {}
 
-    graphs = [
-      [helper_copy_op(d0, b0[1], b0[0]), helper_exec_op(d0, b0[3], [b0[1], b0[2]])]
+    calls = [
+      UOp(Ops.COPY).call(get_buf_uop(b[1],c), get_buf_uop(b[0],c), metadata=()),
+      get_ast(d0, 2).call(get_buf_uop(b[3],c), get_buf_uop(b[1],c), get_buf_uop(b[2],c), metadata=()),
     ]
 
-    helper_test_graphs(Device[d0].graph, graphs)
+    zero_bufs([b[1], b[3]])
+    run_schedule(calls)
+    expected = [np.frombuffer(x.as_memoryview(), np.int32).copy() for x in b]
+
+    for _ in range(RUN_CNT):
+      zero_bufs([b[1], b[3]])
+      make_graph(Device[d0].graph, calls)([], {})
+      for i, buf in enumerate(b): np.testing.assert_equal(expected[i], np.frombuffer(buf.as_memoryview(), np.int32))
 
   def test_read_write_several_graphs(self):
     d0 = Device.DEFAULT
-    b0 = [helper_alloc_rawbuffer(d0, fill=True) for _ in range(8)]
+    b = [make_buffer(d0, fill=True) for _ in range(8)]
+    c: dict[Buffer,UOp] = {}
 
-    graphs = [
-      [helper_exec_op(d0, b0[3], [b0[1], b0[2]])],
-      [helper_exec_op(d0, b0[4], [b0[1], b0[3]])],
-      [helper_exec_op(d0, b0[5], [b0[4], b0[2]])]
-    ]
+    calls1 = [get_ast(d0, 2).call(get_buf_uop(b[3],c), get_buf_uop(b[1],c), get_buf_uop(b[2],c), metadata=())]
+    calls2 = [get_ast(d0, 2).call(get_buf_uop(b[4],c), get_buf_uop(b[1],c), get_buf_uop(b[3],c), metadata=())]
+    calls3 = [get_ast(d0, 2).call(get_buf_uop(b[5],c), get_buf_uop(b[4],c), get_buf_uop(b[2],c), metadata=())]
 
-    helper_test_graphs(Device[d0].graph, graphs)
+    out = [b[3], b[4], b[5]]
+    zero_bufs(out)
+    run_schedule(calls1 + calls2 + calls3)
+    expected = [np.frombuffer(x.as_memoryview(), np.int32).copy() for x in b]
 
-    graphs = [
-      [helper_exec_op(d0, b0[3], [b0[1], b0[2]]), helper_exec_op(d0, b0[4], [b0[1], b0[2]]), helper_exec_op(d0, b0[5], [b0[1], b0[2]])],
-      [helper_exec_op(d0, b0[2], [b0[6], b0[7]])]
-    ]
-
-    helper_test_graphs(Device[d0].graph, graphs)
+    for _ in range(RUN_CNT):
+      zero_bufs(out)
+      make_graph(Device[d0].graph, calls1)([], {})
+      make_graph(Device[d0].graph, calls2)([], {})
+      make_graph(Device[d0].graph, calls3)([], {})
+      for i, buf in enumerate(b): np.testing.assert_equal(expected[i], np.frombuffer(buf.as_memoryview(), np.int32))
 
   @needs_second_gpu
   def test_copies_2_devs(self):
     self.skip_if_not_multigraph()
-
     d0, d1 = Device.DEFAULT, f"{Device.DEFAULT}:1"
-    b0 = [helper_alloc_rawbuffer(d0, fill=True) for _ in range(3)]
-    b1 = [helper_alloc_rawbuffer(d1, fill=True) for _ in range(1)]
+    b0 = [make_buffer(d0, fill=True) for _ in range(3)]
+    b1 = [make_buffer(d1, fill=True)]
+    c: dict[Buffer,UOp] = {}
 
-    graphs = [
-      [helper_copy_op(d0, b1[0], b0[0]), helper_exec_op(d0, b0[2], [b0[0], b0[1]])]
+    calls = [
+      UOp(Ops.COPY).call(get_buf_uop(b1[0],c), get_buf_uop(b0[0],c), metadata=()),
+      get_ast(d0, 2).call(get_buf_uop(b0[2],c), get_buf_uop(b0[0],c), get_buf_uop(b0[1],c), metadata=()),
     ]
 
-    helper_test_graphs(Device[d0].graph, graphs)
+    out = [b1[0], b0[2]]
+    zero_bufs(out)
+    run_schedule(calls)
+    expected = {buf: np.frombuffer(buf.as_memoryview(), np.int32).copy() for buf in b0 + b1}
 
-  @needs_second_gpu
-  def test_copies_after_graph_global(self):
-    self.skip_if_not_multigraph()
-
-    d0, d1, d2, d3 = Device.DEFAULT, f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2", f"{Device.DEFAULT}:3"
-    b0 = [helper_alloc_rawbuffer(d0, fill=True) for _ in range(8)]
-    b1 = [helper_alloc_rawbuffer(d1, fill=True) for _ in range(6)]
-    b2 = [helper_alloc_rawbuffer(d2, fill=True) for _ in range(6)]
-    b3 = [helper_alloc_rawbuffer(d3, fill=True) for _ in range(6)]
-
-    graphs = [
-      [helper_exec_op(d0, b0[2], [b0[0], b0[1]]), helper_exec_op(d0, b0[3], [b0[0], b0[2]]), helper_exec_op(d0, b0[4], [b0[3], b0[2]]),
-       helper_exec_op(d0, b0[5], [b0[0], b0[2]]), helper_exec_op(d0, b0[6], [b0[1], b0[2]]), helper_exec_op(d0, b0[7], [b0[0], b0[2]])],
-      [helper_copy_op(d1, b0[2], b1[0])],
-      [helper_exec_op(d0, b0[2], [b0[0], b0[1]]), helper_exec_op(d0, b0[3], [b0[0], b0[2]]), helper_exec_op(d0, b0[4], [b0[3], b0[2]]),
-       helper_exec_op(d0, b0[5], [b0[0], b0[2]]), helper_exec_op(d0, b0[6], [b0[1], b0[2]]), helper_exec_op(d0, b0[7], [b0[0], b0[2]])],
-      [helper_copy_op(d3, b0[2], b3[0])],
-    ]
-
-    helper_test_graphs(Device[d0].graph, graphs)
-
-    graphs = [
-      [helper_exec_op(d0, b0[2], [b0[0], b0[1]]), helper_exec_op(d0, b0[3], [b0[0], b0[2]]), helper_exec_op(d0, b0[4], [b0[3], b0[2]]),
-       helper_exec_op(d0, b0[5], [b0[0], b0[2]]), helper_copy_op(d0, b2[0], b0[2]), helper_copy_op(d0, b2[1], b0[5]),
-       helper_exec_op(d0, b0[7], [b0[0], b0[2]])],
-      [helper_copy_op(d1, b0[2], b1[0])],
-      [helper_exec_op(d0, b0[2], [b0[0], b0[1]])],
-      [helper_copy_op(d3, b0[2], b3[0])],
-    ]
-
-    helper_test_graphs(Device[d0].graph, graphs)
-
-    graphs = [
-      [helper_exec_op(d0, b0[2], [b0[0], b0[1]]), helper_exec_op(d0, b0[3], [b0[0], b0[2]]), helper_exec_op(d0, b0[4], [b0[3], b0[2]]),
-       helper_exec_op(d0, b0[5], [b0[0], b0[2]]), helper_copy_op(d0, b2[0], b0[2]), helper_copy_op(d0, b2[1], b0[5]),
-       helper_exec_op(d0, b0[7], [b0[0], b0[2]])],
-      [helper_copy_op(d1, b0[5], b1[0])],
-      [helper_copy_op(d3, b0[5], b3[0])],
-    ]
-
-    helper_test_graphs(Device[d0].graph, graphs)
-
-    graphs = [
-      [helper_copy_op(d1, b0[5], b1[0])],
-      [helper_copy_op(d3, b0[5], b3[0])],
-    ]
-
-    helper_test_graphs(Device[d0].graph, graphs)
-
-  @needs_second_gpu
-  def test_graph_after_copies_devs(self):
-    self.skip_if_not_multigraph()
-
-    d0, d1, d2, d3 = Device.DEFAULT, f"{Device.DEFAULT}:1", f"{Device.DEFAULT}:2", f"{Device.DEFAULT}:3"
-    b0 = [helper_alloc_rawbuffer(d0, fill=True) for _ in range(8)]
-    b1 = [helper_alloc_rawbuffer(d1, fill=True) for _ in range(1)]
-    b2 = [helper_alloc_rawbuffer(d2, fill=True) for _ in range(2)]
-    b3 = [helper_alloc_rawbuffer(d3, fill=True) for _ in range(2)]
-
-    graphs = [
-      [helper_copy_op(d1, b0[0], b1[0])],
-      [helper_copy_op(d2, b0[1], b2[0]), helper_copy_op(d3, b0[2], b3[0])],
-      [helper_exec_op(d0, b0[3], [b0[0], b0[2]]), helper_exec_op(d0, b0[4], [b0[3], b0[2]]),
-       helper_exec_op(d0, b0[5], [b0[0], b0[2]])],
-    ]
-
-    helper_test_graphs(Device[d0].graph, graphs)
-
-    graphs = [
-      [helper_copy_op(d1, b0[0], b1[0])],
-      [helper_exec_op(d0, b0[2], [b0[0], b0[1]])],
-      [helper_copy_op(d2, b0[1], b2[0]), helper_copy_op(d3, b0[2], b3[0])],
-      [helper_exec_op(d0, b0[3], [b0[0], b0[2]]), helper_exec_op(d0, b0[4], [b0[3], b0[2]]),
-       helper_exec_op(d0, b0[5], [b0[0], b0[2]])],
-    ]
-
-    helper_test_graphs(Device[d0].graph, graphs)
+    for _ in range(RUN_CNT):
+      zero_bufs(out)
+      make_graph(Device[d0].graph, calls)([], {})
+      for buf in b0 + b1: np.testing.assert_equal(expected[buf], np.frombuffer(buf.as_memoryview(), np.int32))
 
   def test_graph_offset_bufs(self):
     self.skip_if_not_multigraph()
-
     d0 = Device.DEFAULT
     if not hasattr(Device[d0].allocator, "_offset"): self.skipTest("device does not support _offset")
 
-    b0 = [helper_alloc_rawbuffer(d0, fill=True) for _ in range(1)]
-    b0 += [helper_create_offset_rawbuffer(b0[0]), helper_create_offset_rawbuffer(b0[0])]
+    b0 = make_buffer(d0, fill=True)
+    b1 = make_view(b0, 0, b0.size)
+    b2 = make_view(b0, 0, b0.size)
+    c: dict[Buffer,UOp] = {}
 
-    graphs = [
-      [helper_copy_op(d0, b0[0], b0[2]), helper_exec_op(d0, b0[1], [b0[0], b0[2]])],
+    calls = [
+      UOp(Ops.COPY).call(get_buf_uop(b0,c), get_buf_uop(b2,c), metadata=()),
+      get_ast(d0, 2).call(get_buf_uop(b1,c), get_buf_uop(b0,c), get_buf_uop(b2,c), metadata=()),
     ]
 
-    helper_test_graphs(Device[d0].graph, graphs)
+    zero_bufs([b0])
+    run_schedule(calls)
+    expected = np.frombuffer(b0.as_memoryview(), np.int32).copy()
+
+    for _ in range(RUN_CNT):
+      zero_bufs([b0])
+      make_graph(Device[d0].graph, calls)([], {})
+      np.testing.assert_equal(expected, np.frombuffer(b0.as_memoryview(), np.int32))
 
   def test_partial_write_preserves_write_dep(self):
     self.skip_if_not_multigraph()
     self.skip_if_no_offset()
     d0 = Device.DEFAULT
 
-    base = helper_alloc_rawbuffer_sized(d0, BUF_SIZE * 2, fill=True)
-    copy_src_full = helper_alloc_rawbuffer_sized(d0, BUF_SIZE * 2, fill=True)
-    copy_src_lo = helper_alloc_rawbuffer(d0, fill=True)
-    v_lo = helper_make_view(base, 0, BUF_SIZE)
-    v_hi = helper_make_view(base, BUF_SIZE, BUF_SIZE)
-    a, c = [helper_alloc_rawbuffer(d0, fill=True) for _ in range(2)]
+    base = make_buffer(d0, BUF_SIZE * 2, fill=True)
+    copy_src_full = make_buffer(d0, BUF_SIZE * 2, fill=True)
+    copy_src_lo = make_buffer(d0, fill=True)
+    v_lo, v_hi = make_view(base, 0, BUF_SIZE), make_view(base, BUF_SIZE, BUF_SIZE)
+    a, out = make_buffer(d0, fill=True), make_buffer(d0, fill=True)
+    c: dict[Buffer,UOp] = {}
 
-    graphs = [
-      [helper_copy_op(d0, base, copy_src_full), helper_copy_op(d0, v_lo, copy_src_lo), helper_exec_op(d0, c, [v_hi, a])]
+    calls = [
+      UOp(Ops.COPY).call(get_buf_uop(base,c), get_buf_uop(copy_src_full,c), metadata=()),
+      UOp(Ops.COPY).call(get_buf_uop(v_lo,c), get_buf_uop(copy_src_lo,c), metadata=()),
+      get_ast(d0, 2).call(get_buf_uop(out,c), get_buf_uop(v_hi,c), get_buf_uop(a,c), metadata=()),
     ]
-    helper_test_graphs(Device[d0].graph, graphs)
+
+    zero_bufs([base, out])
+    run_schedule(calls)
+    expected = {base: np.frombuffer(base.as_memoryview(), np.int32).copy(), out: np.frombuffer(out.as_memoryview(), np.int32).copy()}
+
+    for _ in range(RUN_CNT):
+      zero_bufs([base, out])
+      make_graph(Device[d0].graph, calls)([], {})
+      for buf in [base, out]: np.testing.assert_equal(expected[buf], np.frombuffer(buf.as_memoryview(), np.int32))
 
   def test_partial_write_preserves_read_dep(self):
     self.skip_if_not_multigraph()
     self.skip_if_no_offset()
     d0 = Device.DEFAULT
 
-    base = helper_alloc_rawbuffer_sized(d0, BUF_SIZE * 2, fill=True)
-    copy_dst = helper_alloc_rawbuffer_sized(d0, BUF_SIZE * 2, fill=True)
-    copy_src_lo = helper_alloc_rawbuffer(d0, fill=True)
-    v_lo = helper_make_view(base, 0, BUF_SIZE)
-    v_hi = helper_make_view(base, BUF_SIZE, BUF_SIZE)
-    a, b = [helper_alloc_rawbuffer(d0, fill=True) for _ in range(2)]
+    base = make_buffer(d0, BUF_SIZE * 2, fill=True)
+    copy_dst = make_buffer(d0, BUF_SIZE * 2, fill=True)
+    copy_src_lo = make_buffer(d0, fill=True)
+    v_lo, v_hi = make_view(base, 0, BUF_SIZE), make_view(base, BUF_SIZE, BUF_SIZE)
+    a, b = make_buffer(d0, fill=True), make_buffer(d0, fill=True)
+    c: dict[Buffer,UOp] = {}
 
-    graphs = [
-      [helper_copy_op(d0, copy_dst, base), helper_copy_op(d0, v_lo, copy_src_lo), helper_exec_op(d0, v_hi, [a, b])]
+    calls = [
+      UOp(Ops.COPY).call(get_buf_uop(copy_dst,c), get_buf_uop(base,c), metadata=()),
+      UOp(Ops.COPY).call(get_buf_uop(v_lo,c), get_buf_uop(copy_src_lo,c), metadata=()),
+      get_ast(d0, 2).call(get_buf_uop(v_hi,c), get_buf_uop(a,c), get_buf_uop(b,c), metadata=()),
     ]
-    helper_test_graphs(Device[d0].graph, graphs)
+
+    zero_bufs([copy_dst, base])
+    run_schedule(calls)
+    expected = {copy_dst: np.frombuffer(copy_dst.as_memoryview(), np.int32).copy(), base: np.frombuffer(base.as_memoryview(), np.int32).copy()}
+
+    for _ in range(RUN_CNT):
+      zero_bufs([copy_dst, base])
+      make_graph(Device[d0].graph, calls)([], {})
+      for buf in [copy_dst, base]: np.testing.assert_equal(expected[buf], np.frombuffer(buf.as_memoryview(), np.int32))
 
   def test_middle_write_splits_write_dep(self):
     self.skip_if_not_multigraph()
     self.skip_if_no_offset()
     d0 = Device.DEFAULT
 
-    base = helper_alloc_rawbuffer_sized(d0, BUF_SIZE * 3, fill=True)
-    copy_src_full = helper_alloc_rawbuffer_sized(d0, BUF_SIZE * 3, fill=True)
-    copy_src_mid = helper_alloc_rawbuffer(d0, fill=True)
-    v_lo = helper_make_view(base, 0, BUF_SIZE)
-    v_mid = helper_make_view(base, BUF_SIZE, BUF_SIZE)
-    v_hi = helper_make_view(base, BUF_SIZE * 2, BUF_SIZE)
-    a, c, e = [helper_alloc_rawbuffer(d0, fill=True) for _ in range(3)]
+    base = make_buffer(d0, BUF_SIZE * 3, fill=True)
+    copy_src_full = make_buffer(d0, BUF_SIZE * 3, fill=True)
+    copy_src_mid = make_buffer(d0, fill=True)
+    v_lo, v_mid, v_hi = make_view(base, 0, BUF_SIZE), make_view(base, BUF_SIZE, BUF_SIZE), make_view(base, BUF_SIZE * 2, BUF_SIZE)
+    a, out1, out2 = make_buffer(d0, fill=True), make_buffer(d0, fill=True), make_buffer(d0, fill=True)
+    c: dict[Buffer,UOp] = {}
 
-    graphs = [
-      [helper_copy_op(d0, base, copy_src_full), helper_copy_op(d0, v_mid, copy_src_mid),
-       helper_exec_op(d0, c, [v_lo, a]), helper_exec_op(d0, e, [v_hi, a])]
+    calls = [
+      UOp(Ops.COPY).call(get_buf_uop(base,c), get_buf_uop(copy_src_full,c), metadata=()),
+      UOp(Ops.COPY).call(get_buf_uop(v_mid,c), get_buf_uop(copy_src_mid,c), metadata=()),
+      get_ast(d0, 2).call(get_buf_uop(out1,c), get_buf_uop(v_lo,c), get_buf_uop(a,c), metadata=()),
+      get_ast(d0, 2).call(get_buf_uop(out2,c), get_buf_uop(v_hi,c), get_buf_uop(a,c), metadata=()),
     ]
-    helper_test_graphs(Device[d0].graph, graphs)
+
+    outs = [base, out1, out2]
+    zero_bufs(outs)
+    run_schedule(calls)
+    expected = {buf: np.frombuffer(buf.as_memoryview(), np.int32).copy() for buf in outs}
+
+    for _ in range(RUN_CNT):
+      zero_bufs(outs)
+      make_graph(Device[d0].graph, calls)([], {})
+      for buf in outs: np.testing.assert_equal(expected[buf], np.frombuffer(buf.as_memoryview(), np.int32))
 
 if __name__ == '__main__':
   unittest.main()

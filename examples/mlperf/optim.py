@@ -34,7 +34,9 @@ class GradAccClipAdamW(Optimizer):
     else:
       updates, extra = self._step([], grads)
     for i, tt in enumerate(self.params): tt.assign(self._apply_update(tt, updates[i], self.master_params[i] if self.master_params else None))
-    to_realize = extra+self.params+self.buffers+(self.master_params or [])
+    # collect inv_scale tensors attached to fp8 params (set by _apply_update)
+    fp8_inv_scales = [tt._inv_scale for tt in self.params if hasattr(tt, '_inv_scale')]
+    to_realize = extra+self.params+self.buffers+(self.master_params or [])+fp8_inv_scales
 
     Tensor.realize(*to_realize)
     return extra[-1]
@@ -77,4 +79,12 @@ class GradAccClipAdamW(Optimizer):
     new_w = w.detach() - up
     if master is not None: master.assign(new_w)
     if STOCHASTIC_ROUND and t.dtype == dtypes.bfloat16: return stochastic_round_bf16(new_w)
+    if t.dtype in dtypes.fp8s:
+      from examples.mlperf.models.flat_llama import FP8_MAX
+      amax = new_w.float().abs().flatten(1).max(1).detach()  # per-layer amax for (n_layers, out, in)
+      scale = FP8_MAX / (amax + 1e-8)
+      fp8_w = (new_w * scale.reshape(-1, *([1]*(new_w.ndim-1)))).clamp(-FP8_MAX, FP8_MAX).cast(t.dtype)
+      if hasattr(t, '_inv_scale'):
+        t._inv_scale.assign(((amax + 1e-8) / FP8_MAX).cast(t._inv_scale.dtype))
+      return fp8_w
     return new_w.cast(t.dtype)
