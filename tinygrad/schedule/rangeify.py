@@ -180,7 +180,7 @@ earliest_rewrites = mop_cleanup+PatternMatcher([
   # ** store rules **
 
   # fix store hazard (dest is in used in src) by adding contiguous: TestAssign.test_post_flipped_assignment
-  (UPat(Ops.STORE, src=(UPat(name="target"), UPat(name="src"))), fix_store_hazard),
+  #(UPat(Ops.STORE, src=(UPat(name="target"), UPat(name="src"))), fix_store_hazard),
 
   # remove two STOREs that store the same thing to the same place: TestSchedule.test_dedup_assign
   (UPat.var("buf").after(UPat.var("buf").store(UPat.var("src")), name="a1").after(UPat.var("a1").store(UPat.var("src"))), lambda buf,src,a1:a1),

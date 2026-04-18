@@ -72,7 +72,7 @@ def main(args) -> None:
 
   # ** Graph rewrites printer
   if args.rewrites:
-    if args.src is None: return print("Select a source with -s"+"\n"+"\n".join([f"  {fmt_colored(k)}" for k in rewrites]))
+    if args.src == "ALL": return print("Select a source with -s"+"\n"+"\n".join([f"  {fmt_colored(k)}" for k in rewrites]))
     steps = get(rewrites, args.src)
     if args.item is None:
       for k,v in steps.items(): print(" "*v["depth"]+k+(f" - {v['match_count']}" if v.get('match_count', 0) else ''))
@@ -84,7 +84,6 @@ def main(args) -> None:
   profile = decode_profile(profile_bytes)
   profile["layout"].update([(f'{c["name"][5:]}{" SQTT" if s["name"].endswith("PKTS") else ""} {s["name"]}', s["data"]) for c in viz_data.ctxs
                             if c["name"].startswith("SQTT") for s in c["steps"] if s["name"].endswith(("PMC", "PKTS"))])
-  if args.src is None: return print("Select a source with -s"+"\n  ALL\n"+"\n".join([f"  {fmt_colored(k)}" for k in profile["layout"]]))
 
   # ** SQTT printer
   data = None if args.src == "ALL" else get(profile["layout"], args.src)
@@ -165,8 +164,7 @@ def main(args) -> None:
         yield {"name":"Other", "fmt":f"{time_to_str(other_t, w=9)} {other_c:7d} {other_t/total*100.0:6.2f}%", "ref":None}
     def produce_all_kernels() -> Iterator[dict]:
       st0:int|None = None
-      event_streams = [[(e["st"], n, e) for e in l["events"]] for n,l in timelines] if args.src == "ALL" \
-                      else [[(e["st"], args.src, e) for e in data["events"]]]
+      event_streams = [[(e["st"], n, e) for e in l["events"]] for n,l in timelines]
       marker_stream = sorted([(m["ts"], "MARKER", m) for m in profile.get("markers", [])], key=lambda t:t[0])
       for ts,dev,e in heapq.merge(*event_streams, marker_stream, key=lambda t:t[0]):
         if st0 is None: st0 = ts
@@ -192,7 +190,7 @@ def get_arg_parser() -> argparse.ArgumentParser:
   g_mode.add_argument("-p", "--profile", action="store_true", help="View profile")
   g_mode.add_argument("-r", "--rewrites", action="store_true", help="View graph rewrites")
   g_opts = parser.add_argument_group("optional args")
-  g_opts.add_argument("-s", "--src", type=str, default=None, metavar="NAME", help="Select a data source (default: list all sources)")
+  g_opts.add_argument("-s", "--src", type=str, default="ALL", metavar="NAME", help="Select a data source (default: all)")
   g_opts.add_argument("-i", "--item", type=str, default=None, metavar="NAME", help="Select an item within the source (default: list all items)")
   g_opts.add_argument("-t", "--top", type=int, default=None, metavar="COUNT",
                       help="Number of top kernels to aggregate (default: do not aggregate, set -1 to aggregate all)")
