@@ -4,7 +4,7 @@ from tinygrad import Tensor, nn
 from tinygrad.helpers import partition, DEBUG, Timing, GlobalCounters, stderr_log, colored, Context
 from tinygrad.viz.serve import TCPServerWithReuse, HTTPRequestHandler
 from tinygrad.llm.model import Transformer
-from tinygrad.llm.agent import StreamingToolParser, format_tools
+from tinygrad.llm.agent import format_tools, parse_tool_calls, strip_tool_calls
 
 class SimpleTokenizer:
   def __init__(self, normal_tokens:dict[str, int], special_tokens:dict[str, int], preset:str="llama3",
@@ -124,29 +124,20 @@ class Handler(HTTPRequestHandler):
     finish_reason = "stop"
     st = time.perf_counter()
     dec = tok.stream_decoder()
-    # Tool call parser for streaming
-    parser = StreamingToolParser() if tools else None
     for next_id in model.generate(ids, temperature=temperature):
       if len(out) == 0: stderr_log(f"prefill:{(len(ids)-cache_start_pos)/((pt:=time.perf_counter())-st):4.0f} tok/s  {colored('--', 'BLACK')}  ")
       if tok.is_end(next_id): break
       out.append(next_id)
-      # Stream content, stripping tool calls if present
-      content = dec(next_id)
-      if parser: content = parser.process(content)
-      if content: yield {"choices": [{"index":0, "delta":{"content":content}, "finish_reason":None}], **tmpl}
+      # tool-enabled replies are buffered and parsed once at the end
+      if not tools and (content:=dec(next_id)): yield {"choices": [{"index":0, "delta":{"content":content}, "finish_reason":None}], **tmpl}
       if max_tokens is not None and len(out) >= max_tokens:
         finish_reason = "length"
         break
-    # Finalize any remaining content
-    if parser:
-      final = parser.finalize()
-      if final: yield {"choices": [{"index":0, "delta":{"content":final}, "finish_reason":None}], **tmpl}
-    # Parse tool calls from output
-    if tools:
-      calls = parser.tool_calls
-      if calls:
-        yield {"choices": [{"index":0, "delta":{"tool_calls":calls}, "finish_reason":None}], **tmpl}
-        finish_reason = "tool_calls"
+    text = tok.decode(out) if tools else dec()
+    if tools and (calls:=parse_tool_calls(text)):
+      yield {"choices": [{"index":0, "delta":{"tool_calls":calls}, "finish_reason":None}], **tmpl}
+      finish_reason = "tool_calls"
+    elif text: yield {"choices": [{"index":0, "delta":{"content":strip_tool_calls(text) if tools else text}, "finish_reason":None}], **tmpl}
     yield {"choices": [{"index":0, "delta":{},"finish_reason":finish_reason}], **tmpl}
     if include_usage:
       yield {"choices": [], "usage": {"prompt_tokens": len(ids), "completion_tokens": len(out), "total_tokens": len(ids) + len(out)}, **tmpl}

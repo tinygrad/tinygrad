@@ -1,4 +1,4 @@
-import json, uuid
+import json, re, uuid
 
 TOOL_CALL_OPEN, TOOL_CALL_CLOSE = "<tool_call>", "</tool_call>"
 
@@ -20,31 +20,15 @@ def _tool_call(obj: str|dict) -> dict|None:
   except (json.JSONDecodeError, TypeError): pass
   return None
 
+# prompt the model with compact signatures, but keep the response format explicit
 def format_tools(tools: list|None) -> str:
   if not tools: return ""
   return "<tools>\n" + "\n".join(_tool_sig(t) for t in tools) + "\n</tools>\nReply only: " + TOOL_CALL_OPEN + '{"name":"...","arguments":{...}}' + TOOL_CALL_CLOSE
 
-# strip streamed tool_call blocks while collecting them
-class StreamingToolParser:
-  def __init__(self): self.hold, self.buf, self.in_tag, self.tool_calls = "", "", False, []
-  def process(self, chunk: str) -> str:
-    self.hold += chunk
-    out = ""
-    while True:
-      if self.in_tag:
-        if (i:=self.hold.find(TOOL_CALL_CLOSE)) == -1:
-          if len(self.hold) >= len(TOOL_CALL_CLOSE): self.buf, self.hold = self.buf + self.hold[:1-len(TOOL_CALL_CLOSE)], self.hold[1-len(TOOL_CALL_CLOSE):]
-          break
-        if (tc:=_tool_call(self.buf + self.hold[:i])) is not None: self.tool_calls.append(tc)
-        self.buf, self.hold, self.in_tag = "", self.hold[i+len(TOOL_CALL_CLOSE):], False
-      else:
-        if (i:=self.hold.find(TOOL_CALL_OPEN)) == -1:
-          if len(self.hold) >= len(TOOL_CALL_OPEN): out, self.hold = out + self.hold[:1-len(TOOL_CALL_OPEN)], self.hold[1-len(TOOL_CALL_OPEN):]
-          break
-        out, self.hold, self.in_tag = out + self.hold[:i], self.hold[i+len(TOOL_CALL_OPEN):], True
-    return out
-  def finalize(self) -> str:
-    if self.in_tag and (tc:=_tool_call(self.buf + self.hold)) is not None: self.tool_calls.append(tc)
-    out = "" if self.in_tag else self.hold
-    self.hold, self.buf, self.in_tag = "", "", False
-    return out
+# parse any tagged tool calls from the final decoded text
+def parse_tool_calls(text: str) -> list[dict]:
+  return [tc for m in re.finditer(rf'{re.escape(TOOL_CALL_OPEN)}\s*(.*?)\s*{re.escape(TOOL_CALL_CLOSE)}', text, re.DOTALL) if (tc:=_tool_call(m.group(1))) is not None]
+
+# strip tool_call blocks before returning visible assistant text
+def strip_tool_calls(text: str) -> str:
+  return re.sub(rf'{re.escape(TOOL_CALL_OPEN)}\s*.*?\s*{re.escape(TOOL_CALL_CLOSE)}', '', text, flags=re.DOTALL).strip()
