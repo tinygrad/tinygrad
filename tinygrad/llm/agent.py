@@ -33,17 +33,14 @@ def format_tools(tools: list|None) -> str:
           "\n".join(_tool_sig(t) for t in tools) +
           "\n</tools>\nReply only: " + TOOL_CALL_OPEN + '{"name":"...","arguments":{...}}' + TOOL_CALL_CLOSE)
 
-# parse any tagged tool calls from the final decoded text
-def parse_tool_calls(text: str) -> list[dict]:
+# parse tagged tool calls and fill missing string descriptions when needed
+def parse_tool_calls(text: str, tools: list|None=None) -> list[dict]:
   out = [tc for m in re.finditer(rf'{re.escape(TOOL_CALL_OPEN)}\s*(.*?)\s*{re.escape(TOOL_CALL_CLOSE)}', text, re.DOTALL)
          if (tc:=_tool_call(m.group(1))) is not None]
-  if out or (i:=text.rfind(TOOL_CALL_OPEN)) == -1: return out
-  return [tc] if (tc:=_tool_call(text[i+len(TOOL_CALL_OPEN):])) is not None else []
-
-# fill in missing string descriptions only for tools that define them
-def normalize_tool_calls(calls: list[dict], tools: list|None):
+  if not out and (i:=text.rfind(TOOL_CALL_OPEN)) != -1:
+    out = [tc] if (tc:=_tool_call(text[i+len(TOOL_CALL_OPEN):])) is not None else []
   tool_map = {t.get("function", t).get("name"): t.get("function", t) for t in tools or []}
-  for tc in calls:
+  for tc in out:
     fn = tc.get("function", {})
     params = tool_map.get(fn.get("name"), {}).get("parameters", {})
     if "description" not in params.get("properties", {}): continue
@@ -51,7 +48,4 @@ def normalize_tool_calls(calls: list[dict], tools: list|None):
     except (json.JSONDecodeError, KeyError, TypeError): continue
     if not isinstance(args.get("description"), str): args["description"] = ""
     fn["arguments"] = json.dumps(args)
-
-# strip tool_call blocks before returning visible assistant text
-def strip_tool_calls(text: str) -> str:
-  return re.sub(rf'{re.escape(TOOL_CALL_OPEN)}\s*.*?\s*{re.escape(TOOL_CALL_CLOSE)}', '', text, flags=re.DOTALL).strip()
+  return out

@@ -4,7 +4,7 @@ from tinygrad import Tensor, nn
 from tinygrad.helpers import partition, DEBUG, Timing, GlobalCounters, stderr_log, colored, Context
 from tinygrad.viz.serve import TCPServerWithReuse, HTTPRequestHandler
 from tinygrad.llm.model import Transformer
-from tinygrad.llm.agent import format_tools, parse_tool_calls, normalize_tool_calls, strip_tool_calls
+from tinygrad.llm.agent import TOOL_CALL_OPEN, TOOL_CALL_CLOSE, format_tools, parse_tool_calls
 
 class SimpleTokenizer:
   def __init__(self, normal_tokens:dict[str, int], special_tokens:dict[str, int], preset:str="llama3",
@@ -134,11 +134,12 @@ class Handler(HTTPRequestHandler):
         finish_reason = "length"
         break
     text = tok.decode(out) if tools else dec()
-    if tools and (calls:=parse_tool_calls(text)):
-      normalize_tool_calls(calls, tools)
+    if tools and (calls:=parse_tool_calls(text, tools)):
       yield {"choices": [{"index":0, "delta":{"tool_calls":calls}, "finish_reason":None}], **tmpl}
       finish_reason = "tool_calls"
-    elif text: yield {"choices": [{"index":0, "delta":{"content":strip_tool_calls(text) if tools else text}, "finish_reason":None}], **tmpl}
+    elif text:
+      if tools: text = re.sub(rf'{re.escape(TOOL_CALL_OPEN)}\s*.*?\s*{re.escape(TOOL_CALL_CLOSE)}', '', text, flags=re.DOTALL).strip()
+      yield {"choices": [{"index":0, "delta":{"content":text}, "finish_reason":None}], **tmpl}
     yield {"choices": [{"index":0, "delta":{},"finish_reason":finish_reason}], **tmpl}
     if include_usage:
       yield {"choices": [], "usage": {"prompt_tokens": len(ids), "completion_tokens": len(out), "total_tokens": len(ids) + len(out)}, **tmpl}
