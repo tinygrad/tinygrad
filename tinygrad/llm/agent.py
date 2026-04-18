@@ -2,12 +2,14 @@ import json, re, uuid
 
 TOOL_CALL_OPEN, TOOL_CALL_CLOSE = "<tool_call>", "</tool_call>"
 
+# compact tool signatures keep the prompt small
 def _tool_sig(t):
   fn = t.get("function", t)
   ps, req = fn.get("parameters", {}).get("properties", {}), set(fn.get("parameters", {}).get("required", []))
   args = ", ".join(f"{k}{'' if k in req else '?'}:{'|'.join(map(json.dumps, e)) if (e:=v.get('enum')) else '|'.join(t) if isinstance((t:=v.get('type')), list) else t or 'any'}" for k,v in ps.items())
   return f"{fn['name']}({args})"
 
+# normalize model output into OpenAI-style tool_calls
 def _tool_call(obj: str|dict) -> dict|None:
   try:
     if isinstance(obj, str): obj = json.loads(obj.strip())
@@ -23,6 +25,7 @@ def format_tools(tools: list|None) -> str:
   if not tools: return ""
   return "<tools>\n" + "\n".join(_tool_sig(t) for t in tools) + "\n</tools>\nReply only: " + TOOL_CALL_OPEN + '{"name":"...","arguments":{...}}' + TOOL_CALL_CLOSE
 
+# strip streamed tool_call blocks while collecting them
 class StreamingToolParser:
   def __init__(self): self.hold, self.buf, self.in_tag, self.tool_calls = "", "", False, []
   def process(self, chunk: str) -> str:
@@ -47,6 +50,7 @@ class StreamingToolParser:
     self.hold, self.buf, self.in_tag = "", "", False
     return out
 
+# parse tagged tool calls, then fall back to bare JSON
 def parse_tool_calls(text: str) -> list[dict]:
   out = [tc for m in re.finditer(rf'{re.escape(TOOL_CALL_OPEN)}\s*(.*?)\s*{re.escape(TOOL_CALL_CLOSE)}', text, re.DOTALL) if (tc:=_tool_call(m.group(1))) is not None]
   if out: return out
