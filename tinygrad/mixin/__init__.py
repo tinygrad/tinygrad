@@ -1,5 +1,5 @@
 import functools, itertools
-from typing import Self, Sequence, Literal, get_args
+from typing import Callable, Self, Sequence, Literal, get_args
 from tinygrad.mixin.elementwise import ElementwiseMixin
 from tinygrad.mixin.movement import MovementMixin
 from tinygrad.mixin.reduce import ReduceMixin
@@ -395,6 +395,35 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     ```
     """
     return self._split_cumalu(axis, Ops.MUL)
+
+  def associative_scan(self, combine_fn:Callable, axis:int=0, reverse:bool=False) -> Self:
+    """
+    Performs a parallel prefix scan (associative scan) along the given axis using the Hillis-Steele algorithm.
+
+    Given an associative binary function `combine_fn` and a tensor `[x0, x1, x2, ...]`,
+    computes `[x0, combine(x0,x1), combine(combine(x0,x1),x2), ...]` in O(log n) parallel steps.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([1, 2, 3, 4, 5])
+    print(t.associative_scan(lambda a, b: a + b).numpy())
+    ```
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([2, 3, 4, 5])
+    print(t.associative_scan(lambda a, b: a * b, reverse=True).numpy())
+    ```
+    """
+    axis = self._resolve_dim(axis)
+    n = self.shape[axis]
+    if n <= 1: return self
+    x = self.flip(axis) if reverse else self
+    prefix = (None,) * axis
+    suffix = (None,) * (self.ndim - axis - 1)
+    for d in [1 << i for i in range(max(1, (n-1).bit_length())) if (1 << i) < n]:
+      left = x.shrink(prefix + ((0, n - d),) + suffix)
+      right = x.shrink(prefix + ((d, n),) + suffix)
+      x = x.shrink(prefix + ((0, d),) + suffix).cat(combine_fn(left, right), dim=axis)
+    return x.flip(axis) if reverse else x
 
   # ***** functional nn ops *****
 
