@@ -35,8 +35,10 @@ def format_tools(tools: list|None) -> str:
 
 # parse any tagged tool calls from the final decoded text
 def parse_tool_calls(text: str) -> list[dict]:
-  return [tc for m in re.finditer(rf'{re.escape(TOOL_CALL_OPEN)}\s*(.*?)\s*{re.escape(TOOL_CALL_CLOSE)}', text, re.DOTALL)
-          if (tc:=_tool_call(m.group(1))) is not None]
+  out = [tc for m in re.finditer(rf'{re.escape(TOOL_CALL_OPEN)}\s*(.*?)\s*{re.escape(TOOL_CALL_CLOSE)}', text, re.DOTALL)
+         if (tc:=_tool_call(m.group(1))) is not None]
+  if out or (i:=text.rfind(TOOL_CALL_OPEN)) == -1: return out
+  return [tc] if (tc:=_tool_call(text[i+len(TOOL_CALL_OPEN):])) is not None else []
 
 # strip tool_call blocks before returning visible assistant text
 def strip_tool_calls(text: str) -> str:
