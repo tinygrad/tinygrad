@@ -150,7 +150,7 @@ def main(args) -> None:
       agg:dict[tuple[str,str], tuple[float, int, int|None]] = {} # map (device, kernel name) to (total time, count and ref)
       total = 0
       for dev,e in tagged:
-        et = e["dur"] * 1e-6
+        et = e["dur"] * 1e-3
         t, c, ref = agg.get((dev,e["name"]), (0.0, 0, None))
         agg[(dev,e["name"])] = (t+et, c+1, e["ref"])
         total += et
@@ -158,11 +158,11 @@ def main(args) -> None:
       num_rows = len(items) if args.top < 0 else args.top
       for (dev,name),(t,c,ref) in items[:num_rows]:
         display = f"{dev[:7]:7s} {name}" if args.src == "ALL" else name
-        yield {"name":display, "dur_sceonds":t, "count":c, "pct":t/total*100.0, "ref":ref}
+        yield {"name":display, "dur_ms":t, "count":c, "pct":t/total*100.0, "ref":ref}
       if num_rows > 0 and items[num_rows:]:
         other_t = sum(t for _,(t,_,_) in items[num_rows:])
         other_c = sum(c for _,(_,c,_) in items[num_rows:])
-        yield {"name":"Other", "dur_sceonds":other_t, "count":other_c, "pct":other_t/total*100.0, "ref":None}
+        yield {"name":"Other", "dur_ms":other_t, "count":other_c, "pct":other_t/total*100.0, "ref":None}
     def produce_all_kernels() -> Iterator[dict]:
       st0:int|None = None
       event_streams = [[(e["st"], n, e) for e in l["events"]] for n,l in timelines] if args.src == "ALL" \
@@ -171,19 +171,19 @@ def main(args) -> None:
       for ts,dev,e in heapq.merge(*event_streams, marker_stream, key=lambda t:t[0]):
         if st0 is None: st0 = ts
         if dev == "MARKER":
-          yield {"device":dev, "name":fmt_colored(e["name"]), "ts_seconds":(ts-st0)*1e-3, "ref":None, "ext":None}
+          yield {"device":dev, "name":fmt_colored(e["name"]), "ts_ms":(ts-st0)*1e-3, "ref":None, "ext":None}
           continue
         if e["fmt"].startswith("TB:"): e["fmt"] = "" # TODO: print python backtrace at a reasonable DEBUG level
-        yield {"device":dev, "name":fmt_colored(e["name"]), "dur_sceonds":e["dur"]*1e-6,
-               "ts_seconds":(e["st"]-st0+e["dur"])*1e-6, "fmt":e["fmt"], "ref":e["ref"], "ext":None}
+        yield {"device":dev, "name":fmt_colored(e["name"]), "dur_ms":e["dur"]*1e-3,
+               "ts_ms":(e["st"]-st0+e["dur"])*1e-3, "fmt":e["fmt"], "ref":e["ref"], "ext":None}
     def fmt_top(k:dict) -> str:
-      return f"{fmt_colored(k['name'])}{' ' * max(0, 36-ansilen(k['name']))} {time_to_str(k['dur_sceonds'], w=9)} {k['count']:7d} {k['pct']:6.2f}%"
+      return f"{fmt_colored(k['name'])}{' ' * max(0, 36-ansilen(k['name']))} {time_to_str(k['dur_ms']*1e-3, w=9)} {k['count']:7d} {k['pct']:6.2f}%"
     def fmt_all(k:dict) -> str:
-      if k["device"] == "MARKER": return f"--- MARKER {k['name']} /{k['ts_seconds']:9.2f}ms"
-      ptm = colored(time_to_str(k["dur_sceonds"], w=9), "yellow" if k["dur_sceonds"] > 0.01 else None)
+      if k["device"] == "MARKER": return f"--- MARKER {k['name']} /{k['ts_ms']:9.2f}ms"
+      ptm = colored(time_to_str(k["dur_ms"]*1e-3, w=9), "yellow" if k["dur_ms"] > 10 else None)
       fmt_str = "  ".join(p+" "*max(0, 14-ansilen(p)) for p in k["fmt"].split("\n"))
       name = f"*** {k['device'][:7]:7s} "+k["name"]+" "*(46-ansilen(k["name"]))
-      return f"{name} tm {ptm}/{k['ts_seconds']*1e3:9.2f}ms"+(f" ({fmt_str})" if k["fmt"] else "")
+      return f"{name} tm {ptm}/{k['ts_ms']:9.2f}ms"+(f" ({fmt_str})" if k["fmt"] else "")
     fmt_row = fmt_top if args.top else fmt_all
     for k in (produce_top_kernels if args.top else produce_all_kernels)():
       if args.jsonl: print(json.dumps(k))
