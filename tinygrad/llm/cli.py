@@ -133,11 +133,14 @@ class Handler(HTTPRequestHandler):
       if max_tokens is not None and len(out) >= max_tokens:
         finish_reason = "length"
         break
+    # tool-enabled replies are parsed from the final decoded text
     text = tok.decode(out) if tools else dec()
+    # emit tool_calls instead of assistant text when the model chose a tool
     if tools and (calls:=parse_tool_calls(text, tools)):
       yield {"choices": [{"index":0, "delta":{"tool_calls":calls}, "finish_reason":None}], **tmpl}
       finish_reason = "tool_calls"
     elif text:
+      # drop tool_call blocks before returning visible assistant text
       if tools: text = re.sub(rf'{re.escape(TOOL_CALL_OPEN)}\s*.*?\s*{re.escape(TOOL_CALL_CLOSE)}', '', text, flags=re.DOTALL).strip()
       yield {"choices": [{"index":0, "delta":{"content":text}, "finish_reason":None}], **tmpl}
     yield {"choices": [{"index":0, "delta":{},"finish_reason":finish_reason}], **tmpl}
