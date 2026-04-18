@@ -3,6 +3,11 @@ import json, re, uuid
 TOOL_CALL_OPEN, TOOL_CALL_CLOSE = "<tool_call>", "</tool_call>"
 TOOL_CALL_EXAMPLE = '{"name":"...","arguments":{...}}'
 
+def _strip_desc(x):
+  if isinstance(x, dict): return {k:_strip_desc(v) for k,v in x.items() if k != "description"}
+  if isinstance(x, list): return [_strip_desc(v) for v in x]
+  return x
+
 def _tool_call(obj: str|dict) -> dict|None:
   try:
     if isinstance(obj, str): obj = json.loads(obj.strip())
@@ -18,7 +23,7 @@ def format_tools(tools: list|None) -> str:
   if not tools: return ""
   return ("# Tools\nYou may call one or more functions to assist with the user query.\n"
           "You are provided with function signatures in <tools></tools> XML tags:\n<tools>\n" +
-          "\n".join(json.dumps(t.get('function', t), ensure_ascii=False) for t in tools) +
+          "\n".join(json.dumps(_strip_desc(t.get('function', t)), ensure_ascii=False) for t in tools) +
           "\n</tools>\nIf you call a tool, respond only with " + TOOL_CALL_OPEN + TOOL_CALL_EXAMPLE + TOOL_CALL_CLOSE)
 
 class StreamingToolParser:
