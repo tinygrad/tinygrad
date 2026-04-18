@@ -7,9 +7,9 @@ from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
 FP8_MAX = 448.0
 NUM_WG, THREADS_PER_WG = 1024, 256
 
-def _compile(cpp_name:str, n_elems:int):
+def _compile(cpp_name:str, n_elems:int, hidden:int):
   src = (pathlib.Path(__file__).parent/cpp_name).read_text()
-  defines = [f"-DN_ELEMS={n_elems}", f"-DNUM_WG={NUM_WG}", f"-DTHREADS_PER_WG={THREADS_PER_WG}"]
+  defines = [f"-DN_ELEMS={n_elems}", f"-DHIDDEN={hidden}", f"-DNUM_WG={NUM_WG}", f"-DTHREADS_PER_WG={THREADS_PER_WG}"]
   return src, HIPCCCompiler("gfx950", ["-std=c++20", "-ffast-math", *defines]).compile_cached(src)
 
 def _shard_shape(shape:tuple, axis:int, ndev:int) -> list:
@@ -17,25 +17,27 @@ def _shard_shape(shape:tuple, axis:int, ndev:int) -> list:
 
 @functools.cache
 def _custom_fused_bwd_w13(grad_xw13:UOp, xw13:UOp, grad_x2:UOp, amax_state:UOp, dname:str) -> UOp:
-  n_elems = xw13.shape[0] * xw13.shape[1] * (xw13.shape[2] // 2)
+  hidden = xw13.shape[2] // 2
+  n_elems = xw13.shape[0] * xw13.shape[1] * hidden
   threads, workgroups = UOp.special(THREADS_PER_WG, "lidx0"), UOp.special(NUM_WG, "gidx0")
   # read 2*N bf16 (xw13) + N bf16 (grad_x2) + 1 scalar; write 2*N bf16 (grad_xw13)
   mem = n_elems * 2 * 5
   sink = UOp.sink(grad_xw13.base, xw13.base, grad_x2.base, amax_state.base, threads, workgroups,
                   arg=KernelInfo(f"fused_silu_mul_bwd_w13_{n_elems}", estimates=Estimates(ops=8*n_elems, mem=mem)))
-  src, lib = _compile("cast_amax_bwd_w13.cpp", n_elems)
+  src, lib = _compile("cast_amax_bwd_w13.cpp", n_elems, hidden)
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dname), UOp(Ops.LINEAR, src=(*sink.src, sink)),
                                UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=lib)))
 
 @functools.cache
 def _custom_fused_cast_amax_w13(fp8_out:UOp, amax_buf:UOp, xw13:UOp, amax_state:UOp, dname:str) -> UOp:
-  n_elems = xw13.shape[0] * xw13.shape[1] * (xw13.shape[2] // 2)
+  hidden = xw13.shape[2] // 2
+  n_elems = xw13.shape[0] * xw13.shape[1] * hidden
   threads, workgroups = UOp.special(THREADS_PER_WG, "lidx0"), UOp.special(NUM_WG, "gidx0")
   # read 2*N bf16 + 1 scalar, write N fp8 + NUM_WG bf16
   mem = n_elems * 2 * 2 + n_elems + NUM_WG * 2
   sink = UOp.sink(fp8_out.base, amax_buf.base, xw13.base, amax_state.base, threads, workgroups,
                   arg=KernelInfo(f"fused_silu_mul_cast_amax_w13_{n_elems}", estimates=Estimates(ops=5*n_elems, mem=mem)))
-  src, lib = _compile("cast_amax_fwd_w13.cpp", n_elems)
+  src, lib = _compile("cast_amax_fwd_w13.cpp", n_elems, hidden)
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dname), UOp(Ops.LINEAR, src=(*sink.src, sink)),
                                UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=lib)))
 

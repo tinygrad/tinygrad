@@ -5,6 +5,9 @@
 #ifndef N_ELEMS
 #define N_ELEMS 234881024
 #endif
+#ifndef HIDDEN
+#define HIDDEN 14336
+#endif
 #ifndef NUM_WG
 #define NUM_WG 1024
 #endif
@@ -16,6 +19,7 @@ constexpr int VEC = 8;
 constexpr float FP8_MAX = 448.0f;
 
 static_assert(N_ELEMS % VEC == 0, "N_ELEMS must be divisible by VEC");
+static_assert(HIDDEN % VEC == 0, "HIDDEN must be divisible by VEC (so VEC loads don't straddle block boundary)");
 
 extern "C" __global__ __launch_bounds__(THREADS_PER_WG) void
 fused_silu_mul_cast_amax_w13(
@@ -36,8 +40,14 @@ fused_silu_mul_cast_amax_w13(
 
   // grid-stride over 8-element groups
   for (int base = gid * VEC; base < N_ELEMS; base += stride_elems) {
-    float4 x1_raw = *reinterpret_cast<const float4*>(&xw13[base]);
-    float4 x3_raw = *reinterpret_cast<const float4*>(&xw13[base + N_ELEMS]);
+    // interleaved xw13 layout: xw1 and xw3 are not contiguous halves
+    const int outer = base / HIDDEN;
+    const int inner = base % HIDDEN;
+    const int xw1_off = outer * 2 * HIDDEN + inner;
+    const int xw3_off = xw1_off + HIDDEN;
+
+    float4 x1_raw = *reinterpret_cast<const float4*>(&xw13[xw1_off]);
+    float4 x3_raw = *reinterpret_cast<const float4*>(&xw13[xw3_off]);
 
     const __hip_bfloat16 *x1 = reinterpret_cast<const __hip_bfloat16*>(&x1_raw);
     const __hip_bfloat16 *x3 = reinterpret_cast<const __hip_bfloat16*>(&x3_raw);
