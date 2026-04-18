@@ -11,8 +11,8 @@ libc = ctypes.CDLL(ctypes.util.find_library("c"))
 libc.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long]
 libc.mmap.restype = ctypes.c_void_p
 
-_amd_iface = DEV.target("AMD").interface
-drivers = [NVDriver(), AMDriver() if _amd_iface == "PCI" else (AMUSBDriver() if _amd_iface == "USB" else AMDDriver())]
+drivers = [cls() for t in DEV.value if (cls:={"MOCKPCI+AMD": AMDriver, "MOCKKFD+AMD": AMDDriver, "MOCKUSB+AMD": AMUSBDriver,
+                                              "MOCKNVK+NV": NVDriver}.get(f"{t.interface}+{t.device}"))]
 tracked_fds = {}
 
 original_memoryview = builtins.memoryview

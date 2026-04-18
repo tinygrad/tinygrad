@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import argparse, pathlib, signal, sys, struct, json, itertools, os
+import argparse, pathlib, signal, sys, struct, json, os, itertools, heapq
 os.environ["VIZ"] = "0"
 if hasattr(signal, "SIGPIPE"): signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 from typing import Iterator
@@ -84,10 +84,10 @@ def main(args) -> None:
   profile = decode_profile(profile_bytes)
   profile["layout"].update([(f'{c["name"][5:]}{" SQTT" if s["name"].endswith("PKTS") else ""} {s["name"]}', s["data"]) for c in viz_data.ctxs
                             if c["name"].startswith("SQTT") for s in c["steps"] if s["name"].endswith(("PMC", "PKTS"))])
-  if args.src is None: return print("Select a source with -s"+"\n"+"\n".join([f"  {fmt_colored(k)}" for k in profile["layout"]]))
+  if args.src is None: return print("Select a source with -s"+"\n  ALL\n"+"\n".join([f"  {fmt_colored(k)}" for k in profile["layout"]]))
 
   # ** SQTT printer
-  data = get(profile["layout"], args.src)
+  data = None if args.src == "ALL" else get(profile["layout"], args.src)
   if "SQTT" in args.src:
     # modern terminals support 24-bit color
     def hex_colored(st:str, color:str) -> str: return f"\x1b[38;2;{int(color[1:3],16)};{int(color[3:5],16)};{int(color[5:7],16)}m{st}\x1b[0m"
@@ -128,13 +128,13 @@ def main(args) -> None:
       elif args.item == r[0]:
         rows = r[2]["rows"] if len(r) > 2 else [r[:2]]
         cols = r[2]["cols"] if len(r) > 2 else cols
-    data = [[x for x in cols], *[[str(x) for x in r] for r in rows]]
-    widths = [max(len(r[i]) for r in data) for i in range(len(cols))]
+    pmc_data = [[x for x in cols], *[[str(x) for x in r] for r in rows]]
+    widths = [max(len(r[i]) for r in pmc_data) for i in range(len(cols))]
     def fmt(r): return "| "+" | ".join(x+" "*(w-len(x)) for x,w in zip(r, widths))+" |"
-    print(fmt(data[0])+"\n"+fmt(["-"*w for w in widths])+"\n"+("\n".join([fmt(row) for row in data[1:]])))
+    print(fmt(pmc_data[0])+"\n"+fmt(["-"*w for w in widths])+"\n"+("\n".join([fmt(row) for row in pmc_data[1:]])))
 
   # ** Memory printer
-  elif data["event_type"] == 1:
+  elif data is not None and data["event_type"] == 1:
     print(f"Peak: {data['peak']}"+"\n"+f"{'TS':<10}  {'Event':<6}  {'Key':>8}  Info")
     for e in data["events"]:
       info = str(e.get("arg", {}))
@@ -144,33 +144,47 @@ def main(args) -> None:
 
   # ** Profiler printer
   else:
-    agg:dict[str, tuple[float, int, int|None]] = {}
-    total = 0
-    for e in data.get("events", []):
-      et = e["dur"] * 1e-6
-      # TODO: this shouldn't exist, replace with the DEBUG reconstructor
-      if args.item is not None:
-        if ansistrip(e["name"]) == args.item:
-          ptm = colored(time_to_str(et, w=9), "yellow" if et > 0.01 else None)
-          name = e["name"] + (" " * (46 - ansilen(e["name"])))
-          print(f"{fmt_colored(name)} {ptm}/{et*1e3:9.2f}ms  " + e.get("fmt", "").replace("\n", " | ") + "  ")
-      else:
-        t, c, ref = agg.get(e["name"], (0.0, 0, None))
-        agg[e["name"]] = (t+et, c+1, e["ref"])
+    timelines = [(n,l) for n,l in profile["layout"].items() if l.get("event_type") == 0]
+    def produce_top_kernels() -> Iterator[dict]:
+      tagged = ((n,e) for n,l in timelines for e in l["events"]) if args.src == "ALL" else ((args.src,e) for e in data["events"])
+      agg:dict[tuple[str,str], tuple[float, int, int|None]] = {} # map (device, kernel name) to (total time, count and ref)
+      total = 0
+      for dev,e in tagged:
+        et = e["dur"] * 1e-6
+        t, c, ref = agg.get((dev,e["name"]), (0.0, 0, None))
+        agg[(dev,e["name"])] = (t+et, c+1, e["ref"])
         total += et
-    if agg and total > 0:
       items = sorted(agg.items(), key=lambda kv:kv[1][0], reverse=True)
-      num_rows = args.top
-      for name,(t,c,ref) in items[:num_rows]:
-        print(f"{fmt_colored(name)}{' ' * max(0, 36 - ansilen(name))} {time_to_str(t, w=9)} {c:7d} {t/total*100.0:6.2f}%")
-        if ref is not None:
-          steps = rewrites[viz_data.ctxs[ref]["name"]]
-          if DEBUG >= 3 and (ast_step:=steps.get("View Base AST")) is not None: print_step(ast_step)
-          if DEBUG >= 4: print_step(steps["View Source"])
+      num_rows = len(items) if args.top < 0 else args.top
+      for (dev,name),(t,c,ref) in items[:num_rows]:
+        display = f"{dev[:7]:7s} {name}" if args.src == "ALL" else name
+        yield {"name":display, "fmt":f"{time_to_str(t, w=9)} {c:7d} {t/total*100.0:6.2f}%", "ref":ref}
       if num_rows > 0 and items[num_rows:]:
         other_t = sum(t for _,(t,_,_) in items[num_rows:])
         other_c = sum(c for _,(_,c,_) in items[num_rows:])
-        print(f"{'Other':<36} {time_to_str(other_t, w=9)} {other_c:7d} {other_t/total*100.0:6.2f}%")
+        yield {"name":"Other", "fmt":f"{time_to_str(other_t, w=9)} {other_c:7d} {other_t/total*100.0:6.2f}%", "ref":None}
+    def produce_all_kernels() -> Iterator[dict]:
+      st0:int|None = None
+      event_streams = [[(e["st"], n, e) for e in l["events"]] for n,l in timelines] if args.src == "ALL" \
+                      else [[(e["st"], args.src, e) for e in data["events"]]]
+      marker_stream = sorted([(m["ts"], "MARKER", m) for m in profile.get("markers", [])], key=lambda t:t[0])
+      for ts,dev,e in heapq.merge(*event_streams, marker_stream, key=lambda t:t[0]):
+        if st0 is None: st0 = ts
+        if dev == "MARKER":
+          yield {"name":f"--- MARKER {e['name']}", "fmt":f"@ {(ts-st0)*1e-3:9.2f}ms", "ref":None, "ext":None}
+          continue
+        et, timestamp, ext = e["dur"] * 1e-6, (e["st"] - st0 + e["dur"]) * 1e-6, None
+        ptm = colored(time_to_str(et, w=9), "yellow" if et > 0.01 else None)
+        if e["fmt"].startswith("TB:"): e["fmt"] = "" # TODO: print python backtrace at a reasonable DEBUG level
+        fmt_str = "  ".join(p+" "*max(0, 14-ansilen(p)) for p in e["fmt"].split("\n"))
+        name = f"*** {dev[:7]:7s} "+e["name"]+" "*(46-ansilen(e["name"]))
+        yield {"name":name, "fmt":f"tm {ptm}/{timestamp*1e3:9.2f}ms"+(f" ({fmt_str})" if e["fmt"] else ""), "ref":e["ref"], "ext":ext}
+    for k in (produce_top_kernels if args.top else produce_all_kernels)():
+      print(f"{fmt_colored(k['name'])}{' ' * max(0, 36 - ansilen(k['name']))} {k['fmt']}")
+      if k["ref"] is not None:
+        steps = rewrites[viz_data.ctxs[k["ref"]]["name"]]
+        if DEBUG >= 3 and (ast_step:=steps.get("View Base AST")) is not None: print_step(ast_step)
+        if DEBUG >= 4 and (src_step:=steps.get("View Source")) is not None: print_step(src_step)
 
 def get_arg_parser() -> argparse.ArgumentParser:
   parser = argparse.ArgumentParser(add_help=False)
@@ -180,7 +194,8 @@ def get_arg_parser() -> argparse.ArgumentParser:
   g_opts = parser.add_argument_group("optional args")
   g_opts.add_argument("-s", "--src", type=str, default=None, metavar="NAME", help="Select a data source (default: list all sources)")
   g_opts.add_argument("-i", "--item", type=str, default=None, metavar="NAME", help="Select an item within the source (default: list all items)")
-  g_opts.add_argument("--top", type=int, default=20, metavar="COUNT", help="Number of top rows to print (default: 20, set -1 to print all)")
+  g_opts.add_argument("-t", "--top", type=int, default=None, metavar="COUNT",
+                      help="Number of top kernels to aggregate (default: do not aggregate, set -1 to aggregate all)")
   g_opts.add_argument("--profile-path", type=pathlib.Path, metavar="PATH", help="Path to profile.pkl (optional file, default: latest profile)",
                       default=pathlib.Path(temp("profile.pkl", append_user=True)))
   g_opts.add_argument("--rewrites-path", type=pathlib.Path, metavar="PATH", help="Path to rewrites.pkl (optional file, default: latest rewrites)",
