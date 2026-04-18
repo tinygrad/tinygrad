@@ -3,7 +3,7 @@ import time, pprint, random, itertools, math, contextlib
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import all_same, colored, DEBUG, GlobalCounters, ansilen, NOOPT, all_int, Metadata, TRACEMETA, TracingKey
 from tinygrad.helpers import BEAM, DEVECTORIZE, size_to_str, time_to_str, VALIDATE_WITH_CPU, cpu_profile, PROFILE, ProfilePointEvent, cpu_events
-from tinygrad.helpers import prod, unwrap, EMULATED_DTYPES
+from tinygrad.helpers import prod, unwrap, EMULATED_DTYPES, flatten
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer, buffers, graph_rewrite
 from tinygrad.device import Device, Buffer, MultiBuffer
 from tinygrad.renderer import ProgramSpec, Estimates
@@ -289,6 +289,22 @@ def exec_encdec(ctx:ExecContext, call, ast):
                    Estimates(lds=bufs[0].nbytes, mem=bufs[0].nbytes), bufs, ctx.var_vals):
     bufs[0].allocator._encode_decode(bufs[0]._buf, bufs[1]._buf, bufs[2]._buf, [x._buf for x in bufs[3:]], shape, ctx.var_vals[pos_var])
 
+graph_cache: dict[bytes, Runner] = {}
+def get_graph(cf:UOp, input_uops:tuple[UOp, ...], input_buffers:list[Buffer]) -> Runner:
+  if (ret:=graph_cache.get(cf.key)) is not None: return ret
+  sub_cf = cf.substitute(dict(zip(cf.src[1:], input_uops)))
+  dev = Device[cf.device if isinstance(cf.device, str) else cf.device[0]]
+  graph_cache[cf.key] = ret = dev.graph(sub_cf, input_buffers)
+  return ret
+
+def exec_graph(ctx:ExecContext, call, cf):
+  input_uops = tuple(u for u in call.src[1:] if u.op is not Ops.BIND)
+  input_buffers = flatten([b.bufs if isinstance(b, MultiBuffer) else [b] for b in (u.buffer for u in input_uops)])
+  graph = get_graph(cf, input_uops, input_buffers)
+  with track_stats(ctx, call, graph.device, graph.display_name, graph.estimates, input_buffers, ctx.var_vals,
+                   first_run=graph.first_run) as timing:
+    timing[0] = graph(input_buffers, ctx.var_vals, wait=DEBUG >= 2)
+
 pm_beam = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.SINK, name="sink"),), name="call", allow_any_len=True),
    lambda ctx,call,sink: call.replace(src=(UOp(Ops.BEAM, src=(sink,), arg=ctx), *call.src[1:]))),
@@ -299,6 +315,7 @@ pm_exec = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.COPY, name="ast"),), name="call", allow_any_len=True), exec_copy),
   (UPat(Ops.CALL, src=(UPat((Ops.SINK, Ops.PROGRAM, Ops.BEAM), name="ast"),), name="call", allow_any_len=True), exec_kernel),
   (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="encdec", name="ast"),), name="call", allow_any_len=True), exec_encdec),
+  (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="graph", name="cf"),), name="call", allow_any_len=True), exec_graph),
 ])
 
 def run_linear(linear:UOp, var_vals:dict[str, int]|None=None, do_update_stats=True):

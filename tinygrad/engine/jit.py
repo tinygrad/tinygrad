@@ -1,11 +1,12 @@
 from typing import TypeVar, Generic, Callable, cast, Any
 import functools, collections
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, colored, JIT, JIT_BATCH_SIZE, dedup, pluralize, VIZ
+from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, colored, JIT, JIT_BATCH_SIZE, dedup, pluralize, VIZ, prod
 from tinygrad.device import Buffer, Compiled, Device, MultiBuffer
 from tinygrad.dtype import DType, dtypes
 from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Variable, sym_infer, Ops, buffers, track_rewrites, graph_rewrite
 from tinygrad.engine.realize import ExecItem, capturing, BufferCopy, BufferXfer, EncDec, CompiledRunner, Runner, Estimates, pm_beam
+from tinygrad.engine.realize import graph_cache, run_linear
 from tinygrad.schedule.memory import memory_plan_rewrite, _collect_bufs
 from tinygrad.schedule import linear_to_schedule
 from tinygrad.nn.state import get_parameters
@@ -102,6 +103,35 @@ def get_input_replace(jit_cache: list[ExecItem], input_buffers:list[Buffer]) -> 
   return input_replace
 
 pm_params = PatternMatcher([(UPat(Ops.PARAM, src=(UPat(), UPat(Ops.DEVICE)), name="p"), lambda ctx,p: ctx[p.arg])])
+
+def _call_outs_ins(call:UOp) -> tuple[set[UOp], set[UOp]]:
+  """Return (outs, ins) as UOp sets for a CALL. Graph CALLs contribute nothing; toposort visits their inner CALLs."""
+  non_bind = [s for s in call.src[1:] if s.op is not Ops.BIND]
+  sink = _unwrap_beam(call.src[0])
+  if sink.op in (Ops.COPY, Ops.BUFFER_VIEW) or (sink.op is Ops.CUSTOM_FUNCTION and sink.arg == "encdec"):
+    return {non_bind[0]}, set(non_bind[1:])
+  if sink.op in (Ops.SINK, Ops.PROGRAM):
+    nodes = (sink.src[0] if sink.op is Ops.PROGRAM else sink).toposort()
+    outs, ins = set(), set()
+    def _param_arg(s:UOp) -> int|None:
+      idx = s.src[0] if s.op is Ops.CAST else s
+      return idx.src[0].arg if idx.op is Ops.INDEX and idx.src[0].op is Ops.PARAM else None
+    for u in nodes:
+      if u.op is Ops.STORE and (a:=_param_arg(u.src[0])) is not None: outs.add(a)
+      for i,s in enumerate(u.src):
+        if u.op is Ops.STORE and i == 0: continue
+        if (a:=_param_arg(s)) is not None: ins.add(a)
+    return {non_bind[k] for k in outs}, {non_bind[k] for k in ins}
+  return set(), set()
+
+def _copy_input(u:UOp) -> UOp:
+  """Create a fresh BUFFER uop with data copied from u's buffer."""
+  src = buffers[u]
+  assert isinstance(src, Buffer)
+  new_buf = Buffer(src.device, src.size, src.dtype).ensure_allocated().copyin(src.as_memoryview())
+  new_uop = UOp.new_buffer(u.device, src.size, u.dtype)
+  buffers[new_uop] = new_buf
+  return new_uop
 
 def linear_to_jit_cache(linear:UOp, input_uops:list[UOp]) -> tuple[list[ExecItem], dict[tuple[int,int],int], list[tuple[int,int,str,int,DType]]]:
   # substitute PARAMs with input buffer UOps before lowering
@@ -206,16 +236,6 @@ class MultiGraphRunner(GraphRunner):
     return _unwrap_beam(new_call.src[0]).op in (Ops.SINK, Ops.PROGRAM, Ops.COPY) \
       and len(dedup([type(d) for d in GraphRunner._all_devs(batch_devs, new_call)])) == 1
 
-def get_out_buffers_for_ei(ei:ExecItem) -> list[Buffer]:
-  if isinstance(ei.prg, CompiledRunner): return [cast(Buffer, ei.bufs[out]) for out in ei.prg.p.outs if out not in ei.prg.p.ins]
-  if isinstance(ei.prg, (BufferCopy, BufferXfer, EncDec)): return [cast(Buffer, ei.bufs[0])]
-  if isinstance(ei.prg, GraphRunner): return dedup([b for inner in ei.prg.jit_cache for b in get_out_buffers_for_ei(inner)])
-  return []
-
-def update_depends(depends:set[Buffer|None], jit_cache:list[ExecItem]):
-  for ei in jit_cache:
-    if any(b in depends for b in ei.bufs): depends.update(get_out_buffers_for_ei(ei))
-
 ReturnType = TypeVar('ReturnType')
 @dataclass
 class CapturedJit(Generic[ReturnType]):
@@ -225,47 +245,54 @@ class CapturedJit(Generic[ReturnType]):
   expected_input_info: list[tuple[UOp, tuple[Variable, ...], DType, str]]  # (view, variables, dtype, device) per input
 
   def __reduce__(self): return self.__class__, (self.ret, self.linear, self.expected_names, self.expected_input_info)
-  def __post_init__(self): self._jit_cache = None
-  @property
-  def jit_cache(self) -> list[ExecItem]: return self._jit_cache if self._jit_cache is not None else []
 
-  def _init(self, input_uops:list[UOp]):
-    self._jit_cache, self._input_replace, self._extra_view_inputs = linear_to_jit_cache(self.linear, input_uops)
-    self._output_to_writer = {b: j for j, ei in enumerate(self._jit_cache) for b in get_out_buffers_for_ei(ei)}
-    self._input_to_max_reader: dict[int, int] = {}
-    for (j, i), idx in self._input_replace.items():
-      if self._jit_cache[j].bufs[i] not in get_out_buffers_for_ei(self._jit_cache[j]):
-        self._input_to_max_reader[idx] = max(self._input_to_max_reader.get(idx, -1), j)
-    for (j,i) in self._input_replace.keys(): self._jit_cache[j].bufs[i] = None
+  @functools.cached_property
+  def _written_uops(self) -> set[UOp]:
+    """BUFFER/BUFFER_VIEW UOps written as non-in-place outputs anywhere in linear (toposort descends into graphs)."""
+    out: set[UOp] = set()
+    for call in self.linear.toposort():
+      if call.op is not Ops.CALL: continue
+      outs, ins = _call_outs_ins(call)
+      out |= {u for u in outs - ins if u.op in (Ops.BUFFER, Ops.BUFFER_VIEW)}
+    return out
+
+  @functools.cached_property
+  def _legacy(self) -> tuple[list[ExecItem], dict[tuple[int,int], int]]:
+    # match pm_params: PARAMs that substitute JIT inputs have (shape_arg, DEVICE, ...) srcs
+    # legacy: built lazily from linear via placeholder inputs reconstructed from PARAMs; not used by the hot path
+    by_slot: dict[int, UOp] = {}
+    for p in self.linear.toposort():
+      if p.op is Ops.PARAM and len(p.src) >= 2 and p.src[1].op is Ops.DEVICE: by_slot[p.arg] = p
+    params = [by_slot[i] for i in sorted(by_slot)]
+    placeholders = [UOp.new_buffer(p.src[1].arg, prod(p._shape), p.dtype) for p in params]
+    jc, ir, _ = linear_to_jit_cache(self.linear, placeholders)
+    return jc, ir
+
+  @property
+  def jit_cache(self) -> list[ExecItem]: return self._legacy[0]
+
+  @property
+  def input_replace(self) -> dict[tuple[int,int], int]: return self._legacy[1]
 
   def __call__(self, input_uops:list[UOp], var_vals:dict[str, int]) -> ReturnType:
-    if self._jit_cache is None: self._init(input_uops)
-    assert self._jit_cache is not None
-    # derive input_buffers from input_uops (flatten MultiBuffer)
-    input_buffers: list[Buffer] = flatten([b.bufs if isinstance(b, MultiBuffer) else [b] for u in input_uops if (b:=buffers[u]) is not None])
-    # recreate view buffers from input bases
-    for idx, offset, device, size, dtype in self._extra_view_inputs:
-      input_buffers.append(Buffer(device, size, dtype, base=input_buffers[idx], offset=offset).ensure_allocated())
-    # copy aliased inputs to prevent read-after-write hazard
-    for i, ib in enumerate(input_buffers):
-      if (writer := self._output_to_writer.get(ib)) is not None and self._input_to_max_reader.get(i, -1) >= writer:
-        input_buffers[i] = Buffer(ib.device, ib.size, ib.dtype).ensure_allocated().copyin(ib.as_memoryview())
-    for (j,i),input_idx in self._input_replace.items(): self._jit_cache[j].bufs[i] = input_buffers[input_idx]
-    if DEBUG >= 1 and len(self._jit_cache) >= 10: print(f"jit execs {len(self._jit_cache)} kernels")
-    for ei in self._jit_cache: ei.run(var_vals, jit=True)
-    for (j,i) in self._input_replace.keys(): self._jit_cache[j].bufs[i] = None
+    concrete: list[UOp] = [_copy_input(u) if u in self._written_uops else u for u in input_uops]
+    if DEBUG >= 1 and len(self.linear.src) >= 10: print(f"jit execs {len(self.linear.src)} calls")
+    run_linear(graph_rewrite(self.linear, pm_params, ctx=concrete, walk=True, enter_calls=False), var_vals)
     return self.ret
 
   def free_intermediates(self):
-    depends: set[Buffer|None] = set([None])
-    update_depends(depends, self.jit_cache)
-    arenas = {b._base for b in depends if b is not None and b._base is not None}
-    to_free = {b for b in depends if b is not None} | {b for b in jit_cache_bufs(self.jit_cache) if b._base in arenas}
-    for b in to_free:
-      if hasattr(b, '_buf'): b.deallocate()
-    for a in arenas:
-      if a.allocated_views == 0 and a.is_allocated(): a.deallocate()
-    self.__post_init__()
+    # drop graph runners + legacy jit_cache so their buffer-view refs release before we free arenas
+    for u in self.linear.toposort():
+      if u.op is Ops.CUSTOM_FUNCTION and u.arg == "graph": graph_cache.pop(u.key, None)
+    self.__dict__.pop('_legacy', None)
+    # every non-in-place output is an intermediate or a return buf; deallocating the unique bases handles both views and arenas
+    bases: set[Buffer] = set()
+    for u in self._written_uops:
+      try: buf = u.buffer
+      except Exception: continue
+      bases.update(b.base for b in (buf.bufs if isinstance(buf, MultiBuffer) else [buf]))
+    for a in bases:
+      if a.is_allocated() and a.allocated_views == 0: a.deallocate()
 
 def _prepare_jit_inputs(args, kwargs):
   input_tensors: list[tuple[int|str, Tensor]] = [(name,t) for name,t in list(enumerate(args))+sorted(kwargs.items()) if t.__class__ is Tensor]
@@ -308,10 +335,9 @@ class TinyJit(Generic[ReturnType]):
 
   # keep legacy code working
   @property
-  def jit_cache(self) -> list[ExecItem]: return self.captured._jit_cache if self.captured is not None and self.captured._jit_cache is not None else []
+  def jit_cache(self) -> list[ExecItem]: return self.captured.jit_cache if self.captured is not None else []
   @property
-  def input_replace(self) -> dict[tuple[int, int], int]:
-    return self.captured._input_replace if self.captured is not None and self.captured._jit_cache is not None else {}
+  def input_replace(self) -> dict[tuple[int, int], int]: return self.captured.input_replace if self.captured is not None else {}
 
   def __get__(self, obj, objtype): return functools.partial(self.__call__, obj) # add support for instance methods
 
@@ -344,9 +370,7 @@ class TinyJit(Generic[ReturnType]):
       if self.prune:
         big_linear, onetime_linear = prune_linear(big_linear, set(input_buf_uops))
         if DEBUG >= 1: print(f"pruned from {len(big_linear.src) + len(onetime_linear.src)} -> {len(big_linear.src)} kernels")
-        for ei in (si.lower() for si in linear_to_schedule(onetime_linear)):
-          for b in ei.bufs: cast(Buffer, b).ensure_allocated()
-          ei.run(var_vals, jit=True)
+        run_linear(onetime_linear, var_vals)
 
       held_bufs = set(buffers) | {t.uop.buf_uop for t in get_parameters(ret) if t.uop.buf_uop.op is Ops.BUFFER}
       linear = jit_lower(big_linear, held_bufs, input_buf_uops)
