@@ -180,10 +180,14 @@ class FlatTransformer:
     new_amaxs.extend(ret[:1])
     saves.extend(ret[1:] + [x_w13])
 
-    x_w1 = x_w13[..., :self.hidden_dim]
-    x_w3 = x_w13[..., self.hidden_dim:]
-
-    out, *ret = matmul(x_w1.silu() * x_w3, w2, amax_x=amax_x2, w_inv_scale=s_2)
+    if FP8 and getenv("FUSED_SILU_W13", 1):
+      from extra.amax.cast_amax import fused_quantize_fp8_w13
+      amax_s = amax_x2 if amax_x2 is not None else Tensor.full((), 1.0, dtype=dtypes.bfloat16, device=x_w13.device)
+      x2_fp8, x2_inv_scale, new_amax_x2 = fused_quantize_fp8_w13(x_w13, amax_s, FP8_DTYPE)
+      out, *ret = matmul_fp8_precomputed(x2_fp8, x2_inv_scale, new_amax_x2, w2, w_inv_scale=s_2)
+    else:
+      x_w1, x_w3 = x_w13[..., :self.hidden_dim], x_w13[..., self.hidden_dim:]
+      out, *ret = matmul(x_w1.silu() * x_w3, w2, amax_x=amax_x2, w_inv_scale=s_2)
     new_amaxs.extend(ret[:1])
     saves.extend(ret[1:] + [out])
     return (out, *new_amaxs, *saves)
