@@ -6,6 +6,10 @@ from tinygrad.device import Compiler, CompileError
 
 CUDA_PATH = getenv("CUDA_PATH", "")
 
+def _cuda_toolchain_cache_tag(parts:dict[str, str]) -> str:
+  payload = "|".join(f"{k}={parts[k]}" for k in sorted(parts))
+  return hashlib.sha256(payload.encode()).hexdigest()[:8]
+
 def _get_bytes(arg, get_str, get_sz, check) -> bytes:
   x = ctypes.create_string_buffer(init_c_var(ctypes.c_size_t, lambda x: check(get_sz(arg, ctypes.byref(x)))).value)
   check(get_str(arg, x))
@@ -47,7 +51,14 @@ class NVRTCCompiler(Compiler):
     self.compile_options += [f"-I{CUDA_PATH}/include"] if CUDA_PATH else ["-I/usr/local/cuda/include", "-I/usr/include", "-I/opt/cuda/include"]
     nvrtc_check(nvrtc.nvrtcVersion((nvrtcMajor := ctypes.c_int()), (nvrtcMinor := ctypes.c_int())))
     if (nvrtcMajor.value, nvrtcMinor.value) >= (12, 4): self.compile_options.append("--minimal")
-    super().__init__(f"compile_{cache_key}_{self.arch}")
+    toolchain_tag = _cuda_toolchain_cache_tag({
+      "cuda_path": CUDA_PATH,
+      "nvrtc_path": getenv("NVRTC_PATH", ""),
+      "nvjitlink_path": getenv("NVJITLINK_PATH", ""),
+      "nvrtc_version": f"{nvrtcMajor.value}.{nvrtcMinor.value}",
+      "ptx_mode": str(int(self.ptx)),
+    })
+    super().__init__(f"compile_{cache_key}_{self.arch}_{toolchain_tag}")
   def compile(self, src:str) -> bytes:
     nvrtc_check(nvrtc.nvrtcCreateProgram(ctypes.byref(prog := nvrtc.nvrtcProgram()), src.encode(), "<null>".encode(), 0, None, None))
     nvrtc_check(nvrtc.nvrtcCompileProgram(prog, len(self.compile_options), to_char_p_p([o.encode() for o in self.compile_options])), prog)
@@ -80,8 +91,14 @@ class PTXCompiler(Compiler):
 
 class NVPTXCompiler(PTXCompiler):
   def __init__(self, arch:str):
-    nvrtc_check(jitlink.nvJitLinkVersion(ctypes.byref(ctypes.c_uint()), ctypes.byref(ctypes.c_uint())))
-    super().__init__(arch, cache_key="nv_ptx")
+    nvrtc_check(jitlink.nvJitLinkVersion(ctypes.byref(jitlinkMajor := ctypes.c_uint()), ctypes.byref(jitlinkMinor := ctypes.c_uint())))
+    toolchain_tag = _cuda_toolchain_cache_tag({
+      "cuda_path": CUDA_PATH,
+      "nvrtc_path": getenv("NVRTC_PATH", ""),
+      "nvjitlink_path": getenv("NVJITLINK_PATH", ""),
+      "jitlink_version": f"{jitlinkMajor.value}.{jitlinkMinor.value}",
+    })
+    super().__init__(arch, cache_key=f"nv_ptx_{toolchain_tag}")
   def compile(self, src:str) -> bytes:
     jitlink_check(jitlink.nvJitLinkCreate(handle := jitlink.nvJitLinkHandle(), 1, to_char_p_p([f'-arch={self.arch}'.encode()])), handle)
     jitlink_check(jitlink.nvJitLinkAddData(handle, jitlink.NVJITLINK_INPUT_PTX, ptxsrc:=super().compile(src), len(ptxsrc), "<null>".encode()), handle)
