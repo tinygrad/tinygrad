@@ -11,23 +11,26 @@ Flags: VIZ=-1 to only save the trace to a file, VIZ=1 also launches a web server
 
 ## Inspect runtime profiling
 
+Use the --profile flag to get runtime profiling data of kernels, JIT and codegen / scheduling.
+
+Use DEBUG flags like main tinygrad to see AST and source code.
+
 ```bash
-# List top 10 slowest kernels across all devices
+# Reconstruct DEBUG=3 output exactly as the runtime.
+DEBUG=3 extra/viz/cli.py --profile
+
+# List top 10 slowest operations across all devices
 extra/viz/cli.py --profile --top 40
 
-# View top 40 slowest kernels on the AMD device and their AST (DEBUG=4 to see source code)
-DEBUG=3 extra/viz/cli.py --profile -s AMD --top 40
-
-# Reconstruct DEBUG=3 output exactly as the runtime. (default: all devices)
-DEBUG=3 extra/viz/cli.py --profile
+# View top 40 slowest kernels on the AMD device and their AST and source code
+DEBUG=4 extra/viz/cli.py --profile -s AMD --top 40
 ```
 
 ## Inspect codegen and PatternMatcher
 
-Use `extra/viz/cli.py --rewrites` to list all sources.
+Use `extra/viz/cli.py --rewrites` to inspect graph rewrites.
 
 List all codegen steps for a kernel: `--rewrites -s E_3`
-Get source code: `--rewrites -s E_3 -i "View Source"`
 Inspect a graph rewrite: `--rewrites -s E_3 -i "initial symbolic"`
 
 ## SQTT tracing
