@@ -1,18 +1,11 @@
 import json, re, uuid
 
 TOOL_CALL_OPEN, TOOL_CALL_CLOSE = "<tool_call>", "</tool_call>"
-TOOL_CALL_EXAMPLE = '{"name":"...","arguments":{...}}'
-
-def _schema_type(x):
-  if not isinstance(x, dict): return "any"
-  if (enum:=x.get("enum")): return "|".join(map(json.dumps, enum))
-  if isinstance(typ:=x.get("type"), list): return "|".join(typ)
-  return typ or "any"
 
 def _tool_sig(t):
   fn = t.get("function", t)
   ps, req = fn.get("parameters", {}).get("properties", {}), set(fn.get("parameters", {}).get("required", []))
-  args = ", ".join(f"{k}{'' if k in req else '?'}:{_schema_type(v)}" for k,v in ps.items())
+  args = ", ".join(f"{k}{'' if k in req else '?'}:{'|'.join(map(json.dumps, e)) if (e:=v.get('enum')) else '|'.join(t) if isinstance((t:=v.get('type')), list) else t or 'any'}" for k,v in ps.items())
   return f"{fn['name']}({args})"
 
 def _tool_call(obj: str|dict) -> dict|None:
@@ -28,7 +21,7 @@ def _tool_call(obj: str|dict) -> dict|None:
 
 def format_tools(tools: list|None) -> str:
   if not tools: return ""
-  return "<tools>\n" + "\n".join(_tool_sig(t) for t in tools) + "\n</tools>\nReply only: " + TOOL_CALL_OPEN + TOOL_CALL_EXAMPLE + TOOL_CALL_CLOSE
+  return "<tools>\n" + "\n".join(_tool_sig(t) for t in tools) + "\n</tools>\nReply only: " + TOOL_CALL_OPEN + '{"name":"...","arguments":{...}}' + TOOL_CALL_CLOSE
 
 class StreamingToolParser:
   def __init__(self): self.hold, self.buf, self.in_tag, self.tool_calls = "", "", False, []
