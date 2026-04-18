@@ -76,6 +76,13 @@ class TestTensorGradient(unittest.TestCase):
     x = Tensor.randn(4, 4)
     np.testing.assert_allclose(x.pad(((1,0),(0,0))).gradient(x, gradient=g2)[0].numpy(), np.zeros((4, 4)))
 
+  def test_where_inactive_nan_branch_gradient(self):
+    x = Tensor([0.0], requires_grad=True)
+    y = Tensor.where(x == 0, 0, x * x.sqrt())
+    y.sum().backward()
+    self.assertFalse(np.isnan(x.grad.numpy()).any())
+    np.testing.assert_allclose(x.grad.numpy(), [0.0])
+
 class TestViewGradient(unittest.TestCase):
   def test_expand(self):
     x = Tensor.randn(5,2)
