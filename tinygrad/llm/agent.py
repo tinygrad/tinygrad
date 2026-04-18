@@ -11,7 +11,6 @@ def _tool_sig(t):
     if e:=v.get("enum"): typ = "|".join(map(json.dumps, e))
     elif isinstance((t:=v.get("type")), list): typ = "|".join(t)
     else: typ = v.get("type") or "any"
-    if fn["name"] == "bash" and k == "description": typ += "[brief summary]"
     return f"{k}{'' if k in req else '?'}:{typ}"
   args = ", ".join(arg_sig(k, v) for k,v in props.items())
   return f"{fn['name']}({args})"
@@ -40,6 +39,18 @@ def parse_tool_calls(text: str) -> list[dict]:
          if (tc:=_tool_call(m.group(1))) is not None]
   if out or (i:=text.rfind(TOOL_CALL_OPEN)) == -1: return out
   return [tc] if (tc:=_tool_call(text[i+len(TOOL_CALL_OPEN):])) is not None else []
+
+# fill in missing string descriptions only for tools that define them
+def normalize_tool_calls(calls: list[dict], tools: list|None):
+  tool_map = {t.get("function", t).get("name"): t.get("function", t) for t in tools or []}
+  for tc in calls:
+    fn = tc.get("function", {})
+    params = tool_map.get(fn.get("name"), {}).get("parameters", {})
+    if "description" not in params.get("properties", {}): continue
+    try: args = json.loads(fn["arguments"])
+    except (json.JSONDecodeError, KeyError, TypeError): continue
+    if not isinstance(args.get("description"), str): args["description"] = ""
+    fn["arguments"] = json.dumps(args)
 
 # strip tool_call blocks before returning visible assistant text
 def strip_tool_calls(text: str) -> str:
