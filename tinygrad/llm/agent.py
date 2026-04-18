@@ -3,10 +3,17 @@ import json, re, uuid
 TOOL_CALL_OPEN, TOOL_CALL_CLOSE = "<tool_call>", "</tool_call>"
 TOOL_CALL_EXAMPLE = '{"name":"...","arguments":{...}}'
 
-def _strip_desc(x):
-  if isinstance(x, dict): return {k:_strip_desc(v) for k,v in x.items() if k != "description"}
-  if isinstance(x, list): return [_strip_desc(v) for v in x]
-  return x
+def _schema_type(x):
+  if not isinstance(x, dict): return "any"
+  if (enum:=x.get("enum")): return "|".join(map(json.dumps, enum))
+  if isinstance(typ:=x.get("type"), list): return "|".join(typ)
+  return typ or "any"
+
+def _tool_sig(t):
+  fn = t.get("function", t)
+  ps, req = fn.get("parameters", {}).get("properties", {}), set(fn.get("parameters", {}).get("required", []))
+  args = ", ".join(f"{k}{'' if k in req else '?'}:{_schema_type(v)}" for k,v in ps.items())
+  return f"{fn['name']}({args})"
 
 def _tool_call(obj: str|dict) -> dict|None:
   try:
@@ -21,10 +28,7 @@ def _tool_call(obj: str|dict) -> dict|None:
 
 def format_tools(tools: list|None) -> str:
   if not tools: return ""
-  return ("# Tools\nYou may call one or more functions to assist with the user query.\n"
-          "You are provided with function signatures in <tools></tools> XML tags:\n<tools>\n" +
-          "\n".join(json.dumps(_strip_desc(t.get('function', t)), ensure_ascii=False) for t in tools) +
-          "\n</tools>\nIf you call a tool, respond only with " + TOOL_CALL_OPEN + TOOL_CALL_EXAMPLE + TOOL_CALL_CLOSE)
+  return "<tools>\n" + "\n".join(_tool_sig(t) for t in tools) + "\n</tools>\nReply only: " + TOOL_CALL_OPEN + TOOL_CALL_EXAMPLE + TOOL_CALL_CLOSE
 
 class StreamingToolParser:
   def __init__(self): self.hold, self.buf, self.in_tag, self.tool_calls = "", "", False, []
