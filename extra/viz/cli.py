@@ -164,18 +164,16 @@ def main(args) -> None:
         other_c = sum(c for _,(_,c,_) in items[num_rows:])
         yield {"name":"Other", "dur_ms":other_t, "count":other_c, "pct":other_t/total*100.0, "ref":None}
     def produce_all_kernels() -> Iterator[dict]:
-      st0:int|None = None
       event_streams = [[(e["st"], n, e) for e in l["events"]] for n,l in timelines] if args.src == "ALL" \
                       else [[(e["st"], args.src, e) for e in data["events"]]]
       marker_stream = sorted([(m["ts"], "MARKER", m) for m in profile.get("markers", [])], key=lambda t:t[0])
       for ts,dev,e in heapq.merge(*event_streams, marker_stream, key=lambda t:t[0]):
-        if st0 is None: st0 = ts
         if dev == "MARKER":
-          yield {"device":dev, "name":fmt_colored(e["name"]), "et_ms":(ts-st0)*1e-3, "ref":None, "ext":None}
+          yield {"device":dev, "name":fmt_colored(e["name"]), "et_ms":ts*1e-3, "ref":None, "ext":None}
           continue
         if e["fmt"].startswith("TB:"): e["fmt"] = "" # TODO: print python backtrace at a reasonable DEBUG level
         yield {"device":dev, "name":fmt_colored(e["name"]), "dur_ms":e["dur"]*1e-3,
-               "et_ms":(e["st"]-st0+e["dur"])*1e-3, "fmt":e["fmt"], "ref":e["ref"], "ext":None}
+               "et_ms":(e["st"]+e["dur"])*1e-3, "fmt":e["fmt"], "ref":e["ref"], "ext":None}
     def fmt_top(k:dict) -> str:
       return f"{fmt_colored(k['name'])}{' ' * max(0, 36-ansilen(k['name']))} {time_to_str(k['dur_ms']*1e-3, w=9)} {k['count']:7d} {k['pct']:6.2f}%"
     def fmt_all(k:dict) -> str:
