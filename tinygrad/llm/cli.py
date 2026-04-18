@@ -110,6 +110,10 @@ models = {
 class Handler(HTTPRequestHandler):
   server: LLMServer
   def log_request(self, code='-', size='-'): pass
+  def handle_one_request(self):
+    # opencode closes keepalive sockets between requests; suppress the expected peer-disconnect noise
+    try: super().handle_one_request()
+    except (ConnectionResetError, BrokenPipeError): self.close_connection = True
   def do_GET(self):
     if self.path == "/v1/models": self.send_data(json.dumps({"object":"list","data":[{"id":self.server.model_name,"object":"model"}]}).encode())
     else: self.send_data((pathlib.Path(__file__).parent / "chat.html").read_bytes(), content_type="text/html")
