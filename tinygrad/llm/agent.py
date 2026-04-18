@@ -18,7 +18,9 @@ def format_tool_response(content: str, preset: str) -> str:
 class StreamingToolParser:
   def __init__(self): self.hold, self.in_tag = "", False
   def process(self, chunk: str) -> str:
-    self.hold += chunk; content = ""
+    self.hold += chunk
+    for tag in ("think", "thinking"): self.hold = re.sub(r'<' + tag + r'>\s*.*?\s*</' + tag + r'>', '', self.hold, flags=re.DOTALL)
+    content = ""
     while True:
       if self.in_tag:
         i = self.hold.find(TOOL_CALL_CLOSE)
@@ -28,14 +30,17 @@ class StreamingToolParser:
         i = self.hold.find(TOOL_CALL_OPEN)
         if i == -1: content += self.hold[:-(len(TOOL_CALL_OPEN)-1)] if len(self.hold) >= len(TOOL_CALL_OPEN) else ""; self.hold = self.hold[-(len(TOOL_CALL_OPEN)-1):] if len(self.hold) >= len(TOOL_CALL_OPEN) else self.hold; break
         content += self.hold[:i]; self.hold, self.in_tag = self.hold[i+len(TOOL_CALL_OPEN):], True
+    for tag in ("think", "thinking"): content = re.sub(r'<' + tag + r'>\s*.*?\s*</' + tag + r'>', '', content, flags=re.DOTALL)
     return content
   def finalize(self) -> str:
+    for tag in ("think", "thinking"):
+      self.hold = re.sub(r'<' + tag + r'>\s*.*?\s*</' + tag + r'>', '', self.hold, flags=re.DOTALL)
     result = self.hold if not self.in_tag else ""
     self.hold, self.in_tag = "", False
     return result
 
 def parse_tool_calls(text: str) -> tuple[list[dict], list[str], str]:
-  thinking = [m.group(1) for m in re.finditer(r'<thinking>\s*(.*?)\s*</thinking>', text, re.DOTALL)]
+  thinking = [m.group(1) for m in re.finditer(r'<(?:think|thinking)>\s*(.*?)\s*</(?:think|thinking)>', text, re.DOTALL)]
   tool_calls = []
   for m in re.finditer(rf'{TOOL_CALL_OPEN}\s*(.*?)\s*{TOOL_CALL_CLOSE}', text, re.DOTALL):
     try:
@@ -51,5 +56,5 @@ def parse_tool_calls(text: str) -> tuple[list[dict], list[str], str]:
         args = json.loads(m.group(2)) if m.group(2) != '{}' else {}
         tool_calls.append({'id': f'call_{uuid.uuid4().hex[:24]}', 'type': 'function', 'function': {'name': m.group(1), 'arguments': json.dumps(args)}})
       except json.JSONDecodeError: pass
-  clean = re.sub(r'<thinking>\s*(.*?)\s*</thinking>', '', re.sub(rf'{TOOL_CALL_OPEN}\s*(.*?)\s*{TOOL_CALL_CLOSE}', '', text, flags=re.DOTALL), flags=re.DOTALL)
+  clean = re.sub(r'<(?:think|thinking)>\s*(.*?)\s*</(?:think|thinking)>', '', re.sub(rf'{TOOL_CALL_OPEN}\s*(.*?)\s*{TOOL_CALL_CLOSE}', '', text, flags=re.DOTALL), flags=re.DOTALL)
   return tool_calls, thinking, clean.strip()
