@@ -4,31 +4,29 @@ A command line tool for exploring the VIZ trace.
 
 Supported on all backends.
 
-Flags: VIZ=-1 to only save the trace to a file, VIZ=1 also launches a web server.
-
-1. Set VIZ to -1 to save the trace.
-2. Use `extra/viz/cli.py` to inspect the trace files. Set NO_COLOR=1 to disable colored output.
+Flags: VIZ=-1 to only save the trace to a file.
 
 ## Inspect runtime profiling
 
-Use the --profile flag to get runtime profiling data of kernels, JIT and codegen / scheduling.
+Use the --profile flag to get profiling data of kernels, JIT and codegen / scheduling.
 
-Set DEBUG=3 to print AST. DEBUG=4 also prints the source code.
+Add DEBUG=3 to see AST, DEGUG=4 to also see source code.
 
 ```bash
 # Reconstruct DEBUG=3 output exactly as the runtime.
-DEBUG=3 extra/viz/cli.py --profile
+DEBUG=3 extra/viz/cli.py --profile -s ALL
+
+# View top 40 slowest kernels on the AMD device and their AST (DEBUG=4 to see source code)
+DEBUG=3 extra/viz/cli.py --profile -s AMD --top 40
+
 
 # List top 10 slowest operations across all devices
-extra/viz/cli.py --profile --top 40
-
-# View top 40 slowest kernels on the AMD device and their AST and source code
-DEBUG=4 extra/viz/cli.py --profile -s AMD --top 40
+extra/viz/cli.py --profile --top 10 -s ALL
 ```
 
 ## Inspect codegen and PatternMatcher
 
-Use `extra/viz/cli.py --rewrites` to inspect graph rewrites.
+Use `extra/viz/cli.py --rewrites` to list all sources.
 
 List all codegen steps for a kernel: `--rewrites -s E_3`
 Inspect a graph rewrite: `--rewrites -s E_3 -i "initial symbolic"`
@@ -37,7 +35,7 @@ Inspect a graph rewrite: `--rewrites -s E_3 -i "initial symbolic"`
 
 Supported on AMD for RDNA3 and RDNA4 (best) and CDNA (developing).
 
-Flags: VIZ=-2 to save SQTT trace to a file. VIZ=2 also launches a web server. View other flags in tinygrad/runtime/ops_amd.py to configure SQTT as needed.
+Flags: VIZ=-2 to save SQTT trace to a file. View other flags in tinygrad/runtime/ops_amd.py to configure SQTT as needed.
 
 Use `extra/viz/cli.py --profile | grep SQTT` to view all available SQTT traces.
 You can select a specific trace with --source, Example workflow:
