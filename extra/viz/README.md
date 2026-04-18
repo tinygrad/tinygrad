@@ -6,6 +6,8 @@ Supported on all backends.
 
 Flags: VIZ=-1 to only save the trace to a file.
 
+By default, VIZ CLI automatically loads the latest trace files.
+
 ## Inspect runtime profiling
 
 Use the --profile flag to get profiling data of kernels, JIT and codegen / scheduling.
