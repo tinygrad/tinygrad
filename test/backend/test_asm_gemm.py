@@ -1,7 +1,7 @@
 import unittest
 from tinygrad import Tensor, Device, dtypes, Context
 from tinygrad.device import is_dtype_supported
-from tinygrad.helpers import getenv, system
+from tinygrad.helpers import getenv, system, DEV
 from extra.gemm.cdna_asm_gemm import asm_gemm
 from test.helpers import needs_second_gpu
 from examples.mlperf.models.flat_llama import FP8_DTYPE
@@ -131,7 +131,7 @@ class TestGemmLlama(unittest.TestCase):
   dtype = dtypes.bfloat16
 
   def setUp(self):
-    if not is_cdna4() or getenv("MOCKGPU"):
+    if not is_cdna4() or DEV.interface.startswith("MOCK"):
       self.skipTest("very slow on non mi350x")
 
   def test_empty(self): asm_gemm(Tensor.empty(N:=getenv("N", 4096), N, dtype=self.dtype), Tensor.empty(N, N, dtype=self.dtype)).realize()

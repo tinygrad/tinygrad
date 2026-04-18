@@ -8,7 +8,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.engine.jit import TinyJit, JitError, GraphRunner, MultiGraphRunner, graph_class
 from tinygrad.engine.realize import CompiledRunner, BufferCopy, BufferXfer
 from tinygrad.device import Device
-from tinygrad.helpers import Context, JIT, GlobalCounters, getenv
+from tinygrad.helpers import Context, JIT, DEV, GlobalCounters
 from tinygrad.dtype import dtypes
 from extra.models.unet import ResBlock
 
@@ -812,7 +812,7 @@ class TestJitGraphSplit(unittest.TestCase):
       hcqgraph=[self.ji_graph(6)])
 
   @unittest.skip("this fails if you don't have SDMA or are using AMD_DISABLE_SDMA=1")
-  @unittest.skipIf(getenv("MOCKGPU"), "MockGPU does not support parallel copies")
+  @unittest.skipIf(DEV.interface.startswith("MOCK"), "MockGPU does not support parallel copies")
   def test_jit_multidev_copy(self):
     if Device.DEFAULT in {"CPU"}: raise unittest.SkipTest("CPU/LLVM is not a valid default device for this test (zero-copies)")
 
