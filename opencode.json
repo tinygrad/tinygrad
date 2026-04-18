@@ -13,8 +13,8 @@
         "chunkTimeout": 600000
       },
       "models": {
-        "qwen3:0.6b": {
-          "name": "Qwen3 0.6B (local)",
+        "qwen3.5:4b": {
+          "name": "Qwen3.5 4B (local)",
           "limit": {
             "context": 32768,
             "output": 8192
