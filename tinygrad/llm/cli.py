@@ -4,7 +4,7 @@ from tinygrad import Tensor, nn
 from tinygrad.helpers import partition, DEBUG, Timing, GlobalCounters, stderr_log, colored, Context
 from tinygrad.viz.serve import TCPServerWithReuse, HTTPRequestHandler
 from tinygrad.llm.model import Transformer
-from tinygrad.llm.agent import StreamingToolParser, parse_tool_calls, format_tools, format_tool_call, format_tool_result
+from tinygrad.llm.agent import StreamingToolParser, parse_tool_calls, format_tools
 
 class SimpleTokenizer:
   def __init__(self, normal_tokens:dict[str, int], special_tokens:dict[str, int], preset:str="llama3",
@@ -157,44 +157,24 @@ class Handler(HTTPRequestHandler):
 
   def do_POST(self):
     tok = self.server.tok
+    def stringify_content(content):
+      if content is None: return ""
+      if isinstance(content, str): return content
+      if isinstance(content, list): return "".join(c["text"] for c in content if c["type"] == "text")
+      raise RuntimeError(f"unknown content type: {type(content)}")
     raw_body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
     body: dict[str, typing.Any] = json.loads(raw_body.decode("utf-8"))
     if DEBUG >= 1: print(json.dumps(body, indent=2))
     if self.path == "/v1/chat/completions":
-      # extract tokens, last assistant message is treated as prefill
+      messages, last = body["messages"], len(body["messages"]) - 1
       tools = body.get("tools") if self.server.enable_tools else None
       ids: list[int] = tok.prefix()
-      # inject tools into system turn for qwen-style models
-      if tools:
-        tool_text = format_tools(tools, tok.preset)
-        if tool_text:
-          ids += tok.role("system") + tok.encode(tool_text) + tok.end_turn()
-      i = 0
-      while i < len(body["messages"]):
-        msg = body["messages"][i]
-        # group consecutive tool results into a single user turn
-        if msg["role"] == "tool":
-          tool_texts = []
-          while i < len(body["messages"]) and body["messages"][i]["role"] == "tool":
-            tool_texts.append(format_tool_result(body["messages"][i].get("content", ""), tok.preset))
-            i += 1
-          ids += tok.role("user")
-          for t in tool_texts: ids += tok.encode(t)
-          ids += tok.end_turn()
-          continue
-        ids += tok.role(msg["role"])
-        content = msg.get("content") or ""
-        if isinstance(content, str): ids += tok.encode(content)
-        elif isinstance(content, list):
-          for c in content:
-            if c["type"] == "text": ids += tok.encode(c["text"])
-        # replay assistant tool calls as  tags
-        if msg.get("tool_calls"):
-          for tc in msg["tool_calls"]:
-            if tc.get("type") == "function": ids += tok.encode(format_tool_call(tc, tok.preset))
-        if msg["role"] == "assistant" and i == len(body["messages"]) - 1: break
+      if tools and (tool_text:=format_tools(tools)): ids += tok.role("system" if tok.preset != 'tekken' else "user") + tok.encode(tool_text) + tok.end_turn()
+      for i, msg in enumerate(messages):
+        if msg["role"] == "tool": continue
+        ids += tok.role(msg["role"]) + tok.encode(stringify_content(msg.get("content")))
+        if msg["role"] == "assistant" and i == last: break
         ids += tok.end_turn()
-        i += 1
       else: ids += tok.role("assistant")
 
       # reply
