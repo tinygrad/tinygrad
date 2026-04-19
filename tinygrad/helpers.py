@@ -436,9 +436,10 @@ def _ensure_downloads_dir() -> pathlib.Path:
   return pathlib.Path(cache_dir) / "downloads"
 
 def fetch(url:str, name:pathlib.Path|str|None=None, subdir:str|None=None, gunzip:bool=False,
-          allow_caching=not getenv("DISABLE_HTTP_CACHE"), headers:dict[str, str]={}) -> pathlib.Path:
+          allow_caching=not getenv("DISABLE_HTTP_CACHE"), headers:dict[str, str]|None=None) -> pathlib.Path:
   import urllib.request
   if url.startswith(("/", ".")): return pathlib.Path(url)
+  if headers is None: headers = {}
   if name is not None and (isinstance(name, pathlib.Path) or '/' in name): fp = pathlib.Path(name)
   else:
     hh = "_"+hashlib.md5(("\n".join(f"{k.strip()}:{v.strip()}" for k,v in sorted(headers.items()))).encode("utf-8")).hexdigest() if headers else ""
