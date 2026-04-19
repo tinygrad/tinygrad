@@ -7,12 +7,12 @@ from tinygrad.uop.ops import UOp, Ops, GroupOp, AxisType
 from tinygrad.device import Device, Buffer, is_dtype_supported
 from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.engine.realize import run_schedule, CompiledRunner, get_program
-from tinygrad.helpers import Context, flatten, dedup, TC_SELECT, TC_OPT, getenv
+from tinygrad.helpers import Context, flatten, dedup, TC_SELECT, TC_OPT, DEV
 from tinygrad.dtype import DType, dtypes, PtrDType, AddrSpace
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.cstyle import CUDARenderer
 from test.helpers import replace_opts
-MOCKGPU = getenv("MOCKGPU")
+MOCKGPU = DEV.interface.startswith("MOCK")
 
 from tinygrad.uop.ops import print_uops # noqa: F401 # pylint: disable=unused-import
 

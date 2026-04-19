@@ -325,5 +325,5 @@ class HCQGraph(MultiGraphRunner):
     if new_call.src[0].op is Ops.COPY:
       # MOCKGPU is not supported, since it can't execute commands in parallel
       is_xfer = len(set(type(d) for d in all_devs)) == 1 and hasattr(alc:=all_devs[0].allocator, '_transfer') and alc.supports_transfer
-      return is_xfer or (all_devs[0].hw_copy_queue_t is not None and not getenv("MOCKGPU"))
+      return is_xfer or (all_devs[0].hw_copy_queue_t is not None and not getattr(all_devs[0], 'iface', None).__class__.__name__.startswith("MOCK"))
     return _unwrap_beam(new_call.src[0]).op in (Ops.SINK, Ops.PROGRAM)
