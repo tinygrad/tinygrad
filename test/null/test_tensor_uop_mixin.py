@@ -1,5 +1,6 @@
 import math, unittest
-from tinygrad import Tensor
+from tinygrad import Tensor, dtypes
+from tinygrad.uop.ops import UOp
 
 def _t(*shape):
   return Tensor.arange(math.prod(shape)).reshape(*shape)
@@ -75,6 +76,29 @@ class TestTensorUOpSoftmax(unittest.TestCase):
   def test_softmax_axis0(self):       _check(self, _t(2, 3).float(), lambda x: x.softmax(axis=0))
   def test_log_softmax_default(self): _check(self, _t(2, 3).float(), lambda x: x.log_softmax())
   def test_log_softmax_axis0(self):   _check(self, _t(2, 3).float(), lambda x: x.log_softmax(axis=0))
+
+# UOp.empty / UOp.empty_like are the canonical buffer allocators; Tensor.empty / Tensor.empty_like just forward.
+class TestUOpEmpty(unittest.TestCase):
+  def test_empty_dtype_string(self):
+    self.assertEqual(UOp.empty((3, 4), dtype="float32").dtype, dtypes.float32)
+
+  def test_empty_like_dtype_override(self):
+    u = Tensor.ones(3, 4).uop.empty_like(dtype=dtypes.int8)
+    self.assertEqual((u.shape, u.dtype), ((3, 4), dtypes.int8))
+    self.assertTrue(u.has_buffer_identity())
+
+  def test_empty_like_sharded_to_single_device(self):
+    # regression: sharded source, override to single device must yield full logical shape with no axis
+    t = Tensor.ones(8, 4).shard(("NULL:0", "NULL:1"), axis=0)
+    for dev in ("NULL:2", ("NULL:2",)):  # singleton tuple also canonicalizes to single device
+      u = t.uop.empty_like(device=dev, dtype=dtypes.int32)
+      self.assertEqual((u.shape, u.device, u.dtype, u.axis), ((8, 4), "NULL:2", dtypes.int32, None))
+      self.assertTrue(u.has_buffer_identity())
+
+  def test_empty_direct_singleton_tuple_device(self):
+    # regression: direct UOp.empty with a singleton-tuple device + axis must not trip .multi()'s tuple assert
+    u = UOp.empty((4,), dtype=dtypes.float32, device=("NULL:0",), axis=0)
+    self.assertEqual((u.shape, u.device, u.axis), ((4,), "NULL", None))
 
 if __name__ == "__main__":
   unittest.main()
