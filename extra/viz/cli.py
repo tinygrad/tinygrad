@@ -177,9 +177,9 @@ def main(args) -> None:
         if (fmt:=e["fmt"]).startswith("TB:"):
           tb, fmt = json.loads(e["fmt"].replace("TB:", "")), ""
           while tb:
-            file, lineno, fxn, _ = tb.pop()
+            file, lineno, fxn, code = tb.pop()
             line = f"{file.split('/')[-1]}:{lineno} {fxn}"
-            if fmt: ext.append(f"{line}")
+            if fmt: ext.append(f"{line} {code}")
             elif not file.startswith("<") and not fxn.startswith("<"): fmt = line
         yield {"device":dev, "name":fmt_colored(e["name"]), "dur_ms":e["dur"]*1e-3,
                "et_ms":(e["st"]+e["dur"])*1e-3, "fmt":fmt, "ref":e["ref"], "ext":"\n".join(ext)}
