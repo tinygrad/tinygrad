@@ -8,9 +8,6 @@ from tinygrad.nn import optim, BatchNorm2d
 from extra.training import train, evaluate
 from extra.datasets import fetch_mnist
 
-# load the mnist dataset
-X_train, Y_train, X_test, Y_test = fetch_mnist()
-
 # create a model
 class TinyBobNet:
   def __init__(self):
@@ -51,65 +48,72 @@ class TinyConvNet:
 
 @slow
 class TestMNIST(unittest.TestCase):
+  @classmethod
+  def setUpClass(cls):
+    try:
+      cls.X_train, cls.Y_train, cls.X_test, cls.Y_test = fetch_mnist()
+    except Exception as e:
+      raise unittest.SkipTest(f"MNIST dataset download unavailable: {e}")
+
   def test_sgd_onestep(self):
     np.random.seed(1337)
     model = TinyBobNet()
     optimizer = optim.SGD(model.parameters(), lr=0.001)
-    train(model, X_train, Y_train, optimizer, BS=69, steps=1)
+    train(model, self.X_train, self.Y_train, optimizer, BS=69, steps=1)
     for p in model.parameters(): p.realize()
 
   def test_sgd_threestep(self):
     np.random.seed(1337)
     model = TinyBobNet()
     optimizer = optim.SGD(model.parameters(), lr=0.001)
-    train(model, X_train, Y_train, optimizer, BS=69, steps=3)
+    train(model, self.X_train, self.Y_train, optimizer, BS=69, steps=3)
 
   def test_sgd_sixstep(self):
     np.random.seed(1337)
     model = TinyBobNet()
     optimizer = optim.SGD(model.parameters(), lr=0.001)
-    train(model, X_train, Y_train, optimizer, BS=69, steps=6, noloss=True)
+    train(model, self.X_train, self.Y_train, optimizer, BS=69, steps=6, noloss=True)
 
   def test_adam_onestep(self):
     np.random.seed(1337)
     model = TinyBobNet()
     optimizer = optim.Adam(model.parameters(), lr=0.001)
-    train(model, X_train, Y_train, optimizer, BS=69, steps=1)
+    train(model, self.X_train, self.Y_train, optimizer, BS=69, steps=1)
     for p in model.parameters(): p.realize()
 
   def test_adam_threestep(self):
     np.random.seed(1337)
     model = TinyBobNet()
     optimizer = optim.Adam(model.parameters(), lr=0.001)
-    train(model, X_train, Y_train, optimizer, BS=69, steps=3)
+    train(model, self.X_train, self.Y_train, optimizer, BS=69, steps=3)
 
   def test_conv_onestep(self):
     np.random.seed(1337)
     model = TinyConvNet()
     optimizer = optim.SGD(model.parameters(), lr=0.001)
-    train(model, X_train, Y_train, optimizer, BS=69, steps=1, noloss=True)
+    train(model, self.X_train, self.Y_train, optimizer, BS=69, steps=1, noloss=True)
     for p in model.parameters(): p.realize()
 
   def test_conv(self):
     np.random.seed(1337)
     model = TinyConvNet()
     optimizer = optim.Adam(model.parameters(), lr=0.001)
-    train(model, X_train, Y_train, optimizer, steps=100)
-    assert evaluate(model, X_test, Y_test) > 0.93   # torch gets 0.9415 sometimes
+    train(model, self.X_train, self.Y_train, optimizer, steps=100)
+    assert evaluate(model, self.X_test, self.Y_test) > 0.93   # torch gets 0.9415 sometimes
 
   def test_conv_with_bn(self):
     np.random.seed(1337)
     model = TinyConvNet(has_batchnorm=True)
     optimizer = optim.AdamW(model.parameters(), lr=0.003)
-    train(model, X_train, Y_train, optimizer, steps=200)
-    assert evaluate(model, X_test, Y_test) > 0.94
+    train(model, self.X_train, self.Y_train, optimizer, steps=200)
+    assert evaluate(model, self.X_test, self.Y_test) > 0.94
 
   def test_sgd(self):
     np.random.seed(1337)
     model = TinyBobNet()
     optimizer = optim.SGD(model.parameters(), lr=0.001)
-    train(model, X_train, Y_train, optimizer, steps=600)
-    assert evaluate(model, X_test, Y_test) > 0.94   # CPU gets 0.9494 sometimes
+    train(model, self.X_train, self.Y_train, optimizer, steps=600)
+    assert evaluate(model, self.X_test, self.Y_test) > 0.94   # CPU gets 0.9494 sometimes
 
 if __name__ == '__main__':
   unittest.main()
