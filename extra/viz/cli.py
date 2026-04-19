@@ -171,9 +171,16 @@ def main(args) -> None:
         if dev == "MARKER":
           yield {"device":dev, "name":fmt_colored(e["name"]), "et_ms":ts*1e-3, "ref":None, "ext":None}
           continue
-        if e["fmt"].startswith("TB:"): e["fmt"] = "" # TODO: print python backtrace at a reasonable DEBUG level
+        ext:list[str] = []
+        if (fmt:=e["fmt"]).startswith("TB:"):
+          tb, fmt = json.loads(e["fmt"].replace("TB:", "")), ""
+          while tb:
+            file, lineno, fxn, _ = tb.pop()
+            line = f"{file.split('/')[-1]}:{lineno} {fxn}"
+            if fmt: ext.append(f"{line}")
+            elif not file.startswith("<") and not fxn.startswith("<"): fmt = line
         yield {"device":dev, "name":fmt_colored(e["name"]), "dur_ms":e["dur"]*1e-3,
-               "et_ms":(e["st"]+e["dur"])*1e-3, "fmt":e["fmt"], "ref":e["ref"], "ext":None}
+               "et_ms":(e["st"]+e["dur"])*1e-3, "fmt":fmt, "ref":e["ref"], "ext":"\n".join(ext)}
     def fmt_top(k:dict) -> str:
       return f"{fmt_colored(k['name'])}{' ' * max(0, 36-ansilen(k['name']))} {time_to_str(k['dur_ms']*1e-3, w=9)} {k['count']:7d} {k['pct']:6.2f}%"
     def fmt_all(k:dict) -> str:
@@ -190,6 +197,7 @@ def main(args) -> None:
         steps = rewrites[viz_data.ctxs[k["ref"]]["name"]]
         if DEBUG >= 3 and (ast_step:=steps.get("View Base AST")) is not None: print_step(ast_step)
         if DEBUG >= 4 and (src_step:=steps.get("View Source")) is not None: print_step(src_step)
+      elif DEBUG >= 3 and k.get("ext"): print(k["ext"])
 
 def get_arg_parser() -> argparse.ArgumentParser:
   parser = argparse.ArgumentParser(add_help=False)
