@@ -58,17 +58,19 @@ def get(data:dict, key:str):
 def main(args) -> None:
   viz.load_rewrites(viz_data:=viz.VizData(viz.load_pickle(args.rewrites_path, default=RewriteTrace([], [], {}))))
 
+  def fmt(val, to_str=str): return json.dumps(val if isinstance(val, dict) else {"value":val}) if args.jsonl else to_str(val)
+
   rewrites = {c["name"]:{s["name"]:s for s in c["steps"]} for c in viz_data.ctxs if c.get("steps")}
   def print_step(step:dict) -> None:
     data = viz.get_render(viz_data, step["query"])
     if isinstance(data.get("value"), Iterator):
       for m in data["value"]:
-        if m.get("uop"): print(json.dumps({"ast":m["uop"]}) if args.jsonl else m["uop"])
+        if m.get("uop"): print(fmt(m["uop"]))
         if m.get("diff"):
           loc = pathlib.Path(m["upat"][0][0])
           print(f"Rewrite at {loc.parent.name}/{loc.name}:{m['upat'][0][1]}\n{m['upat'][1]}")
           for line in m["diff"]: print(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None))
-    if data.get("src") is not None: print(json.dumps({"src":data["src"]}) if args.jsonl else data["src"])
+    if data.get("src") is not None: print(fmt(data["src"]))
 
   # ** Graph rewrites printer
   if args.rewrites:
@@ -130,8 +132,8 @@ def main(args) -> None:
         cols = r[2]["cols"] if len(r) > 2 else cols
     pmc_data = [[x for x in cols], *[[str(x) for x in r] for r in rows]]
     widths = [max(len(r[i]) for r in pmc_data) for i in range(len(cols))]
-    def fmt(r): return "| "+" | ".join(x+" "*(w-len(x)) for x,w in zip(r, widths))+" |"
-    print(fmt(pmc_data[0])+"\n"+fmt(["-"*w for w in widths])+"\n"+("\n".join([fmt(row) for row in pmc_data[1:]])))
+    def pad(r): return "| "+" | ".join(x+" "*(w-len(x)) for x,w in zip(r, widths))+" |"
+    print(pad(pmc_data[0])+"\n"+pad(["-"*w for w in widths])+"\n"+("\n".join([pad(row) for row in pmc_data[1:]])))
 
   # ** Memory printer
   elif data is not None and data["event_type"] == 1:
@@ -191,13 +193,12 @@ def main(args) -> None:
       return f"{name} tm {ptm}/{k['et_ms']:9.2f}ms"+(f" ({fmt_str})" if k["fmt"] else "")
     fmt_row = fmt_top if args.top else fmt_all
     for k in (produce_top_kernels if args.top else produce_all_kernels)():
-      if args.jsonl: print(json.dumps(k))
-      else: print(fmt_row(k))
+      print(fmt(k, to_str=fmt_row))
       if k["ref"] is not None:
         steps = rewrites[viz_data.ctxs[k["ref"]]["name"]]
         if DEBUG >= 3 and (ast_step:=steps.get("View Base AST")) is not None: print_step(ast_step)
         if DEBUG >= 4 and (src_step:=steps.get("View Source")) is not None: print_step(src_step)
-      elif DEBUG >= 3 and k.get("ext"): print(json.dumps({"ext":k["ext"]}) if args.jsonl else k["ext"])
+      elif DEBUG >= 3 and k.get("ext"): print(fmt(k["ext"]))
 
 def get_arg_parser() -> argparse.ArgumentParser:
   parser = argparse.ArgumentParser(add_help=False)
