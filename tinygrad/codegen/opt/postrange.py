@@ -334,6 +334,11 @@ def bufs_from_ast(ast:UOp, dname:str) -> list[Buffer]:
   glbls = sorted([x for x in ast.backward_slice if x.op is Ops.PARAM], key=lambda x: x.arg)
   return [Buffer(dname, x.ptrdtype.size, x.dtype.base) for x in glbls]
 
+def should_skip_hand_coded_optimizations(ren:Renderer) -> bool:
+  # Temporary mitigation for NAK on Blackwell until the underlying optimization bug is isolated.
+  # Set NAK_SM120_HAND_CODED_OPTS=1 to force-enable the old behavior for debugging.
+  return ren.target.renderer == "NAK" and ren.target.arch == "sm_120" and not getenv("NAK_SM120_HAND_CODED_OPTS", 0)
+
 def apply_opts(ast:UOp, ren:Renderer, beam:int=0) -> UOp:
   if ast.tag is not None: return ast
   k = Scheduler(ast, ren)
@@ -349,6 +354,6 @@ def apply_opts(ast:UOp, ren:Renderer, beam:int=0) -> UOp:
   elif not NOOPT and (ast.arg is None or ast.arg.applied_opts == ()):
     from tinygrad.codegen.opt.heuristic import hand_coded_optimizations
     # NOTE: hand_coded_optimizations doesn't support multiblock opts yet
-    if not any(u.op is Ops.BUFFERIZE for u in ast.backward_slice):
+    if not should_skip_hand_coded_optimizations(ren) and not any(u.op is Ops.BUFFERIZE for u in ast.backward_slice):
       k = hand_coded_optimizations(k)
   return k.get_optimized_ast(name_override=ast.arg.name if ast.arg is not None and ast.arg.name != "test" else None)
