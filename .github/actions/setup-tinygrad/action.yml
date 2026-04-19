@@ -161,7 +161,7 @@ runs:
       if: inputs.amd == 'true' && runner.os == 'Linux'
       shell: bash
       run: |
-        wget https://repo.radeon.com/rocm/rocm.gpg.key -O - | gpg --dearmor | sudo tee /etc/apt/keyrings/rocm.gpg > /dev/null
+        curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors https://repo.radeon.com/rocm/rocm.gpg.key | gpg --dearmor | sudo tee /etc/apt/keyrings/rocm.gpg > /dev/null
         sudo tee /etc/apt/sources.list.d/rocm.list <<EOF
         deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/7.1 $(lsb_release -cs) main
         EOF
@@ -171,7 +171,7 @@ runs:
       if: inputs.llvm == 'true' && runner.os == 'Linux'
       shell: bash
       run: |
-        wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
+        curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors https://apt.llvm.org/llvm-snapshot.gpg.key | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
         echo "deb http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-20 main" | sudo tee /etc/apt/sources.list.d/llvm.list
 
     - name: Compute Package List + Hash
@@ -227,11 +227,30 @@ runs:
       if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.cuda == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true')
       shell: bash
       run: |
-        sudo apt -qq update || true
+        for i in {1..3}; do
+          if sudo apt -qq update; then
+            break
+          fi
+          if [[ $i -eq 3 ]]; then
+            echo "apt update failed after $i attempts"
+            exit 1
+          fi
+          sleep $((i*3))
+        done
 
         # ******** do install ********
         if [[ -n "${{ steps.apt-pkgs.outputs.pkgs }}" ]]; then
-          sudo apt-get -y --allow-unauthenticated --no-install-recommends install ${{ steps.apt-pkgs.outputs.pkgs }}
+          for i in {1..3}; do
+            if sudo apt-get -y --allow-unauthenticated --no-install-recommends install ${{ steps.apt-pkgs.outputs.pkgs }}; then
+              break
+            fi
+            if [[ $i -eq 3 ]]; then
+              echo "apt install failed after $i attempts"
+              exit 1
+            fi
+            sleep $((i*3))
+            sudo apt -qq update || true
+          done
         fi
 
         sudo chown -R $USER:$USER /var/cache/apt/archives/
