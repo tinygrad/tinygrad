@@ -58,18 +58,30 @@ runs:
       with:
         python-version: ${{ inputs.python-version }}
 
+    - name: Ensure cache directories exist
+      shell: bash
+      run: |
+        mkdir -p "${{ github.workspace }}/.venv"
+        if [[ "$RUNNER_OS" == "Linux" ]]; then
+          mkdir -p ~/.cache/tinygrad/downloads
+        elif [[ "$RUNNER_OS" == "macOS" ]]; then
+          mkdir -p ~/Library/Caches/tinygrad/downloads
+        fi
+
     # **** Caching packages ****
 
     - name: Cache Python packages (PR)
       if: github.event_name == 'pull_request'
       id: restore-venv-pr
-      uses: actions/cache/restore@v4
+      continue-on-error: true
+      uses: actions/cache/restore@v5
       with:
         path: ${{ github.workspace }}/.venv
         key: venv-${{ runner.os }}-${{ runner.arch }}-python-${{ steps.setup-python.outputs.python-version }}-${{ inputs.deps }}-${{ inputs.pydeps }}-${{ env.CACHE_VERSION }}
     - name: Cache Python packages
       if: github.event_name != 'pull_request'
       id: restore-venv
+      continue-on-error: true
       uses: actions/cache@v5
       with:
         path: ${{ github.workspace }}/.venv
@@ -79,12 +91,14 @@ runs:
 
     - name: Cache downloads (PR)
       if: inputs.key != '' && github.event_name == 'pull_request'
-      uses: actions/cache/restore@v4
+      continue-on-error: true
+      uses: actions/cache/restore@v5
       with:
         path: ${{ runner.os == 'Linux' && '~/.cache/tinygrad/downloads/' || '~/Library/Caches/tinygrad/downloads/' }}
         key: downloads-${{ github.job }}-${{ inputs.key }}-${{ env.CACHE_VERSION }}
     - name: Cache downloads
       if: inputs.key != '' && github.event_name != 'pull_request'
+      continue-on-error: true
       uses: actions/cache@v5
       with:
         path: ${{ runner.os == 'Linux' && '~/.cache/tinygrad/downloads/' || '~/Library/Caches/tinygrad/downloads/' }}
@@ -196,12 +210,14 @@ runs:
 
     - name: Cache apt (PR)
       if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.cuda == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true') && github.event_name == 'pull_request'
-      uses: actions/cache/restore@v4
+      continue-on-error: true
+      uses: actions/cache/restore@v5
       with:
         path: /var/cache/apt/archives/
         key: ${{ runner.os }}-${{ runner.arch }}-apt-${{ steps.apt-pkgs.outputs.hash }}-${{ env.CACHE_VERSION }}
     - name: Cache apt
       if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.cuda == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true') && github.event_name != 'pull_request'
+      continue-on-error: true
       uses: actions/cache@v5
       with:
         path: /var/cache/apt/archives/
@@ -257,7 +273,8 @@ runs:
     - name: Cache gpuocelot (PR)
       if: inputs.ocelot == 'true' && github.event_name == 'pull_request'
       id: cache-build-pr
-      uses: actions/cache/restore@v4
+      continue-on-error: true
+      uses: actions/cache/restore@v5
       env:
         cache-name: cache-gpuocelot-build-1
       with:
@@ -266,6 +283,7 @@ runs:
     - name: Cache gpuocelot
       if: inputs.ocelot == 'true' && github.event_name != 'pull_request'
       id: cache-build
+      continue-on-error: true
       uses: actions/cache@v5
       env:
         cache-name: cache-gpuocelot-build-1
