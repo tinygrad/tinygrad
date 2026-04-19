@@ -12,7 +12,7 @@ By default, VIZ CLI automatically loads the latest trace files.
 
 Use `extra/viz/cli.py --profile -s ALL` to inspect the complete timing data of kernels, JIT, codegen and scheduling.
 
-- Add DEBUG=3 to see AST, DEGUG=4 to also see source code.
+- Add DEBUG=3 to see AST, DEBUG=4 to also see source code.
 - Make sure to add NO_COLOR=1 to disable colored output.
 - Add --jsonl to see JSON output
 

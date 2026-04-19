@@ -157,7 +157,7 @@ def main(args) -> None:
       items = sorted(agg.items(), key=lambda kv:kv[1][0], reverse=True)
       num_rows = len(items) if args.top < 0 else args.top
       for (dev,name),(t,c,ref) in items[:num_rows]:
-        display = f"{dev[:7]:7s} {fmt_colored(name)}" if args.src == "ALL" else name
+        display = f"{dev[:7]:7s} {fmt_colored(name)}" if args.src == "ALL" else fmt_colored(name)
         yield {"name":display, "dur_ms":t, "count":c, "pct":t/total*100.0, "ref":ref}
       if num_rows > 0 and items[num_rows:]:
         other_t = sum(t for _,(t,_,_) in items[num_rows:])
