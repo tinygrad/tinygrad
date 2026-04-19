@@ -197,7 +197,7 @@ def main(args) -> None:
         steps = rewrites[viz_data.ctxs[k["ref"]]["name"]]
         if DEBUG >= 3 and (ast_step:=steps.get("View Base AST")) is not None: print_step(ast_step)
         if DEBUG >= 4 and (src_step:=steps.get("View Source")) is not None: print_step(src_step)
-      elif DEBUG >= 3 and k.get("ext"): print(k["ext"])
+      elif DEBUG >= 3 and k.get("ext"): print(json.dumps({"ext":k["ext"]}) if args.jsonl else k["ext"])
 
 def get_arg_parser() -> argparse.ArgumentParser:
   parser = argparse.ArgumentParser(add_help=False)
