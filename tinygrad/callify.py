@@ -18,7 +18,7 @@ def tag_uop(ctx:AllocCtx, x:UOp):
 def disk_copy_is_buffer(ctx:AllocCtx, u:UOp):
   # copies to disk are replaced with the disk buffer
   to_disk = isinstance(u._device, str) and u._device.startswith(("DISK", "TINYFS"))
-  if to_disk: ctx.buffer_map[u] = UOp.new_buffer(u.device, u.shard_size, u.dtype).reshape(u.max_shard_shape)
+  if to_disk: ctx.buffer_map[u] = u.empty_like()
   # all copies from disk/numpy are realized into a real buffer
   from_creation = isinstance(u.src[0]._device, str) and any(u.src[0]._device.startswith(x) for x in ["NPY", "DISK", "PYTHON", "TINYFS"])
   if from_creation: return tag_uop(ctx, u)
