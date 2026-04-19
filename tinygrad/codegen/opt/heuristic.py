@@ -61,6 +61,12 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
           elif axis in k.unrollable_dims:
             k.apply_opt(Opt(OptOps.UNROLL, k.unrollable_dims.index(axis), 4))
 
+  for rng in k.ranges_of(AxisType.LOOP):
+    if rng.src[0].op is not Ops.CONST: continue
+    if not (cuts := [c.src[1].arg for c in k.ast.get_consumer_map()[rng] if c.op is Ops.CMPLT and rng is c.src[0] and c.src[1].op is Ops.CONST]):
+      continue
+    k.apply_opt(Opt(OptOps.SPLIT, k.rngs.index(rng), tuple(sorted(cuts))))
+
   # should use matvec - TODO: adjust/tune based on the wide vs tall/large vs small mat
   MV_BLOCKSIZE, MV_THREADS_PER_ROW, MV_ROWS_PER_THREAD = getenv("MV_BLOCKSIZE", 4), getenv("MV_THREADS_PER_ROW", 8), getenv("MV_ROWS_PER_THREAD", 4)
   if k.ren.has_local and getenv("MV",1) != 0 and (MV_BLOCKSIZE > 1 or MV_THREADS_PER_ROW > 1 or MV_ROWS_PER_THREAD > 1) and  \

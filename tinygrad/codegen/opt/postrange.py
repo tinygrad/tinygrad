@@ -2,7 +2,7 @@ from __future__ import annotations
 import math, itertools
 from collections import defaultdict
 from typing import cast, Final
-from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, KernelInfo, graph_rewrite, AxisType, ssimplify, GroupOp
+from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, KernelInfo, graph_rewrite, AxisType, ssimplify, GroupOp, range_start
 from tinygrad.uop.ops import axis_letters, axis_colors, axis_to_pos
 from tinygrad.device import Buffer
 from tinygrad.dtype import dtypes
@@ -101,6 +101,27 @@ class Scheduler:
     sub_axis = (new_rng * old_sz + replaced_rng) if top else (replaced_rng * amount + new_rng)
     self.ast = self.ast.substitute({rng:sub_axis}, name=f"shift {rng.arg[:-1]} {amount} {str(new_type).split('.')[1].lower()}")
     return replaced_rng, new_rng
+
+  def split_to(self, rng:UOp, cuts:tuple[int, ...]):
+    offsets = (0, *cuts)
+    new_rngs = [UOp.range(e - s, *(rng.arg[:-1] + (i, rng.arg[-1]))) for i, (s, e) in enumerate(itertools.pairwise((*offsets, rng.src[0].arg)))]
+    end = get_single_element([u for u in self.ast.toposort() if u.op is Ops.END and rng in u.src])
+    rng_idx = end.src.index(rng)
+    inner_rngs, outer_rngs = list(end.src[1:rng_idx]), list(end.src[rng_idx+1:])
+
+    # find all the ranges who's END depends on any of the RANGES in dup_rngs, i.e. if we duplicate any of the dup_rngs, we have to duplicate this too
+    new_end = end.src[0].end(*inner_rngs)
+    dup_rngs: dict[UOp, None] = {rng: None}
+    while (new := [er for v in new_end.backward_slice_with_self if v.op in range_start
+                   for er in v.ended_ranges if er.op is Ops.RANGE and er not in dup_rngs and any(r in v.src[0].ranges for r in dup_rngs)]):
+      dup_rngs.update({r: None for r in new})
+    dup_rngs.pop(rng)
+
+    ends = [end.src[0].end(*inner_rngs, new_rngs[i]).substitute({rng: new_rngs[i] + offsets[i]}) for i in range(len(new_rngs))]
+    # give each split segment its own copy of dependent inner ranges so no range has multiple ENDs
+    ends = [e.substitute({r: r.replace(arg=r.arg[:-1]+(i,r.arg[-1])) for r in dup_rngs}) for i,e in enumerate(ends)]
+    self.ast = self.ast.substitute({end: UOp.group(*ends).end(*outer_rngs)}, name=f"split {rng.arg[:-1]} at {cuts}")
+    return tuple(new_rngs)
 
   def ranges_of(self, *axis_type:AxisType) -> list[UOp]: return [r for r in self.rngs if r.arg[-1] in axis_type]
   def axes_of(self, *axis_type:AxisType) -> list[int]: return [i for i,t in enumerate(self.axis_types) if t in axis_type]
@@ -202,6 +223,12 @@ class Scheduler:
         if rng in (i:=b.src[1].get_idx()).backward_slice_with_self:
           replaces[b] = b.replace(src=(b.src[0],(valid&b.src[1].get_valid()).where(i, UOp.invalid())))
       self.ast = self.ast.substitute(replaces, f"padto {rng.arg[:-1]} {opt.arg}")
+    elif opt.op is OptOps.SPLIT:
+      check(rng.arg[-1] == AxisType.LOOP, "split is only for LOOP ranges")
+      check(rng.src[0].op is Ops.CONST, "can only split const-sized ranges")
+      assert isinstance(opt.arg, tuple)
+      for s in opt.arg: check(0 < s < int(rng.src[0].arg), f"split point {s} must be between 0 and {int(rng.src[0].arg)}")
+      ret = self.split_to(rng, opt.arg)
     elif opt.op is OptOps.SWAP:
       try:
         altrng:UOp = self.rngs[opt.arg]
