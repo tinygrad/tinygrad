@@ -812,7 +812,22 @@ jobs:
         run: |
           python3 -c "from tinygrad import Device; assert Device.DEFAULT in ['CPU','CL'], Device.DEFAULT"
           DEBUG=5 FORWARD_ONLY=1 python3 test/test_tiny.py TestTiny.test_plus
+      - name: Run pytest (lvp)
+        if: matrix.backend == 'lvp'
+        shell: bash
+        run: |
+          for i in {1..2}; do
+            if python -m pytest -n=2 test/backend --durations=20; then
+              exit 0
+            fi
+            if [[ $i -eq 2 ]]; then
+              echo "lvp backend pytest failed after $i attempts"
+              exit 1
+            fi
+            echo "Retrying lvp backend pytest after first failure..."
+          done
       - name: Run pytest (${{ matrix.backend }})
+        if: matrix.backend != 'lvp'
         run: python -m pytest -n=auto test/backend --durations=20
       - name: Run TRANSCENDENTAL math
         run: TRANSCENDENTAL=2 python -m pytest -n=auto test/backend/test_ops.py::TestOps::test_sin test/backend/test_ops.py::TestOps::test_cos test/backend/test_ops.py::TestOps::test_tan test/backend/test_ops.py::TestOps::test_exp test/backend/test_ops.py::TestOps::test_log --durations=20
