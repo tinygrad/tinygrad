@@ -141,8 +141,12 @@ pm_early_transform_tensor_graph = PatternMatcher([
   (UPat((Ops.DETACH, Ops.CONTIGUOUS_BACKWARD), name="x"), lambda x: x.src[0]),
 ])
 
-def untag_and_append(ctx:AllocCtx, x:UOp):
-  if x.tag is None: return None
+def finalize_after(ctx:AllocCtx, x:UOp):
+  # untagged: record as an assign for the call body
+  if x.tag is None:
+    ctx.assigns.append(x)
+    return None
+  # tagged: untag and map each original pre-rewrite UOp to the stripped buffer; the untagged result is reprocessed as untagged
   ret = x.replace(tag=None)
   replace_uop = ret
   while replace_uop.op is Ops.AFTER: replace_uop = replace_uop.src[0]
@@ -151,18 +155,14 @@ def untag_and_append(ctx:AllocCtx, x:UOp):
     ctx.buffer_map[original_uop] = replace_uop.shrink_to(original_uop.shape)
   return ret
 
-def append_after(ctx:AllocCtx, x:UOp):
-  ctx.assigns.append(x)
-
 def replace_input_buffer(ctx:AllocCtx, b:UOp):
   ctx.replacements.append(b)
   return UOp.param(len(ctx.replacements)-1, b.dtype, b.shape, b._device,
                    b._min_max if b.op is Ops.BIND else None, b.src[0].arg[0] if b.op is Ops.BIND else None)
 
 pm_finalize_call = PatternMatcher([
-  (UPat(Ops.AFTER, name="x"), untag_and_append),
-  (UPat(Ops.AFTER, name="x"), append_after),
-  (UPat(Ops.COPY, name="x"), lambda ctx,x: append_after(ctx,x) if isinstance(x.device, str) and x.device.startswith(("DISK", "TINYFS")) else None),
+  (UPat(Ops.AFTER, name="x"), finalize_after),
+  (UPat(Ops.COPY, name="x"), lambda ctx,x: ctx.assigns.append(x) if isinstance(x.device, str) and x.device.startswith(("DISK", "TINYFS")) else None),
   # remove unique from const. TODO: this is copied in function.py
   (UPat(Ops.CONST, src=(UPat(Ops.UNIQUE), UPat(Ops.DEVICE, name="d")), name="b"), lambda b,d: b.replace(src=(d,))),
 ])
