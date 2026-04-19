@@ -63,12 +63,12 @@ def main(args) -> None:
     data = viz.get_render(viz_data, step["query"])
     if isinstance(data.get("value"), Iterator):
       for m in data["value"]:
-        if m.get("uop"): print(m["uop"])
+        if m.get("uop"): print(json.dumps({"ast":m["uop"]}) if args.jsonl else m["uop"])
         if m.get("diff"):
           loc = pathlib.Path(m["upat"][0][0])
           print(f"Rewrite at {loc.parent.name}/{loc.name}:{m['upat'][0][1]}\n{m['upat'][1]}")
           for line in m["diff"]: print(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None))
-    if data.get("src") is not None: print(data["src"])
+    if data.get("src") is not None: print(json.dumps({"src":data["src"]}) if args.jsonl else data["src"])
 
   # ** Graph rewrites printer
   if args.rewrites:

@@ -923,6 +923,9 @@ class TestCLI(unittest.TestCase):
         times = run_cli("--rewrites-path", str(r), "--profile-path", str(p), "-p", "-s", "ALL", "--top", "-1")
       self.assertIn("TINY", times)
       self.assertIn("NULL", times)
+      with Context(DEBUG=3):
+        json_lines = run_cli("--rewrites-path", str(r), "--profile-path", str(p), "-p", "-s", "ALL", "--jsonl")
+      for line in json_lines.split("\n"): _ = json.loads(line)
 
 if __name__ == "__main__":
   unittest.main()
