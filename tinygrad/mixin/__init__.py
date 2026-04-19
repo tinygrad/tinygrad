@@ -419,7 +419,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     x = self.flip(axis) if reverse else self
     prefix = (None,) * axis
     suffix = (None,) * (self.ndim - axis - 1)
-    for d in [1 << i for i in range(max(1, (n-1).bit_length())) if (1 << i) < n]:
+    for d in [1 << i for i in range(max(1, (int(n)-1).bit_length())) if (1 << i) < n]:
       left = x.shrink(prefix + ((0, n - d),) + suffix)
       right = x.shrink(prefix + ((d, n),) + suffix)
       x = x.shrink(prefix + ((0, d),) + suffix).cat(combine_fn(left, right), dim=axis)
