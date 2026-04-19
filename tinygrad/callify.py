@@ -40,11 +40,6 @@ add_tags = PatternMatcher([
   (UPat(GroupOp.All, name="x"), lambda ctx,x: tag_uop(ctx,x) if x in ctx.bases else None),
 ])
 
-def _buffer_like(u:UOp) -> UOp:
-  buffer = UOp.new_buffer(u.device, u.shard_size, u.dtype).reshape(u.max_shard_shape).shrink_to(u.shard_shape)
-  if isinstance(u.device, tuple) and u.axis is not None: buffer = buffer.multi(u.axis)
-  return buffer
-
 def replace_contig_with_store_after(u:UOp):
   # can't allocate a buffer without a device (e.g., inside a CALL function body with only PARAMs)
   if u._device is None: return None
@@ -52,7 +47,7 @@ def replace_contig_with_store_after(u:UOp):
   if 0 in u.shape: return u.src[0]
   # no real contig for DISK/TINYFS tensors, they are left alone
   if isinstance(u._device, str) and u._device.startswith(("DISK", "TINYFS")): return u.rtag(None)
-  buf = _buffer_like(u)
+  buf = u.empty_like()
   return buf.after(buf.store(u.src[0])).rtag(u.tag)
 
 def replace_store_after_with_contig(u:UOp, src:UOp):
@@ -102,7 +97,7 @@ def transform_precompiled_call(c:UOp) -> UOp|None:
   # add the outputs to the call
   srcs = c.src[0].src
   resolved = [c.gettuple(i) for i in range(len(srcs))]
-  outs = tuple(_buffer_like(r) for r in resolved)
+  outs = tuple(r.empty_like() for r in resolved)
   targets = [o.param_like(len(c.src)-1+i).shrink_to(s.shape) for i,(o,s) in enumerate(zip(outs, srcs))]
   fxn = UOp.sink(*[t.after(t.store(s)) for t,s in zip(targets, srcs)])
 

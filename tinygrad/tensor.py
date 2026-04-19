@@ -516,21 +516,14 @@ class Tensor(OpMixin):
     print(t.shape)
     ```
     """
-    dtype, shape = to_dtype(dtype) if dtype is not None else dtypes.default_float, argfix(*shape)
-    if not isinstance(size:=prod([x.vmax if isinstance(x, UOp) else x for x in shape]), int): raise ValueError(f"size must be int {size}")
-    # TODO: add test for multidevice tensor
-    device = canonicalize_device(device)
-    return Tensor(UOp.new_buffer(device, size, dtype), **kwargs).shrink(((0,prod(shape)),)).reshape(shape)
+    return Tensor(UOp.empty(argfix(*shape), dtype, device), **kwargs)
 
   def empty_like(self, dtype:DTypeLike|None=None, device:str|tuple[str, ...]|None=None, **kwargs) -> Tensor:
     """
     Creates an empty tensor with the same shape as `self`.
     If `dtype` is not specified, the dtype of `self` is used.
     """
-    dtype, device = self.dtype if dtype is None else dtype, self.device if device is None else device
-    if isinstance(device, tuple) and (axis := self.uop.axis) is not None:
-      return Tensor(Tensor.empty(self.uop.max_shard_shape, dtype=dtype, device=device, **kwargs).uop.multi(axis))
-    return Tensor.empty(self.shape, dtype=dtype, device=device, **kwargs)
+    return Tensor(self.uop.empty_like(dtype, device), **kwargs)
 
   @staticmethod
   def from_blob(ptr:int, shape:tuple[int, ...], **kwargs) -> Tensor:
