@@ -1,13 +1,13 @@
-import unittest, functools, random
+import unittest, random
 from tinygrad import Tensor, Device, nn, GlobalCounters, TinyJit, dtypes, Variable
 from tinygrad.device import is_dtype_supported
 from tinygrad.uop.ops import Ops, UOp
 from tinygrad.helpers import getenv, prod, Context
 from tinygrad.nn.state import get_parameters, get_state_dict
-from tinygrad.engine.realize import BufferCopy, CompiledRunner, run_schedule
+from tinygrad.engine.realize import CompiledRunner, run_schedule
 import numpy as np
 from hypothesis import given, strategies as strat, settings
-from test.helpers import not_support_multi_device, needs_second_gpu, slow
+from test.helpers import not_support_multi_device, needs_second_gpu, slow, call_is_graph
 
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 settings.load_profile("my_profile")
@@ -544,7 +544,7 @@ class TestMultiTensor(unittest.TestCase):
       b.shard_(devices_2)
       c = jf(a, b)
       np.testing.assert_allclose(c.numpy(), a.numpy()+b.numpy(), atol=1e-4, rtol=1e-5)
-    assert len(jf.jit_cache) > 0
+    assert jf.captured is not None
 
   def test_multi_tensor_jit_body(self):
     @TinyJit
@@ -558,7 +558,7 @@ class TestMultiTensor(unittest.TestCase):
     for _ in range(5):
       r = jf()
       np.testing.assert_allclose(r.numpy(), np.ones(256)+np.ones(256), atol=1e-4, rtol=1e-5)
-    assert len(jf.jit_cache) > 0
+    assert jf.captured is not None
 
   def test_multitensor_jit_in_list(self):
     # test MULTI tensor inside a list container - exercises the container unpacking + MULTI unpacking
@@ -618,15 +618,12 @@ class TestMultiTensor(unittest.TestCase):
       o = jf(a, b, c, d).numpy()
       np.testing.assert_allclose(ref, o, atol=1e-4, rtol=1e-5)
 
-    graph_d0 = Device[d0].graph.func if isinstance(Device[d0].graph, functools.partial) else Device[d0].graph
-    graph_d1 = Device[d1].graph.func if isinstance(Device[d1].graph, functools.partial) else Device[d1].graph
     # Checking that 2 graphs per device, 1 copy and 1 last graph on device 1 are created.
-    assert isinstance(jf.jit_cache[0].prg, graph_d0)
-    assert isinstance(jf.jit_cache[1].prg, graph_d0)
-    assert isinstance(jf.jit_cache[2].prg, graph_d1)
-    assert isinstance(jf.jit_cache[3].prg, graph_d1)
-    assert isinstance(jf.jit_cache[4].prg, BufferCopy)
-    assert isinstance(jf.jit_cache[5].prg, graph_d1)
+    sis = jf.captured.linear.src
+    assert len(sis) == 6
+    for si in (sis[0], sis[1], sis[2], sis[3], sis[5]):
+      assert call_is_graph(si)
+    assert sis[4].src[0].op is Ops.COPY
 
   def test_bn_ast_on_devices(self):
     t = Tensor.empty((16, 64, 112, 112)).shard(devices_4, axis=0)
