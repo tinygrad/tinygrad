@@ -1,15 +1,15 @@
 #!/usr/bin/env python
-import unittest, functools
+import unittest
 import numpy as np
 
 from hypothesis import given, settings, strategies as strat
-from test.helpers import assert_jit_cache_len, not_support_multi_device, needs_second_gpu
+from test.helpers import assert_jit_cache_len, call_is_graph, not_support_multi_device, needs_second_gpu
 from tinygrad.tensor import Tensor
-from tinygrad.engine.jit import TinyJit, JitError, GraphRunner, MultiGraphRunner, graph_class
-from tinygrad.engine.realize import CompiledRunner, BufferCopy, BufferXfer
+from tinygrad.engine.jit import TinyJit, JitError, graph_class
 from tinygrad.device import Device
-from tinygrad.helpers import Context, JIT, GlobalCounters, getenv
+from tinygrad.helpers import Context, JIT, DEV, GlobalCounters
 from tinygrad.dtype import dtypes
+from tinygrad.uop.ops import Ops
 from extra.models.unet import ResBlock
 
 def _simple_test(add, extract=lambda x: x, N=10):
@@ -419,10 +419,10 @@ class TestJit(unittest.TestCase):
       if prev is not None: np.testing.assert_allclose(o, prev, atol=1e-4, rtol=1e-5)
       prev = o
 
-    graph_t = Device[Device.DEFAULT].graph.func if isinstance(Device[Device.DEFAULT].graph, functools.partial) else Device[Device.DEFAULT].graph
     # Checking that 2 graphs are inited.
-    assert isinstance(jf.jit_cache[0].prg, graph_t)
-    assert isinstance(jf.jit_cache[1].prg, graph_t)
+    assert len(jf.captured.linear.src) == 2
+    for si in jf.captured.linear.src:
+      assert call_is_graph(si)
 
   def test_jitted_clone(self):
     def f(a): return a.clone().realize()
@@ -583,7 +583,7 @@ class TestJitPrune(unittest.TestCase):
       a = Tensor.rand(16).realize()
       out = w2_prune(a)
       np.testing.assert_allclose(out.tolist(), [x*2+y for x,y in zip(weights.tolist(), a.tolist())])
-    assert len(w2_prune.captured.jit_cache) == 1
+    assert_jit_cache_len(w2_prune, 1)
 
   def test_prune_w_copy_correct(self):
     weights = Tensor.rand(16).realize()
@@ -617,7 +617,7 @@ class TestJitPrune(unittest.TestCase):
       out = w2_prune(a)
       np.testing.assert_allclose(out.tolist(), [x*2+y for x,y in zip(weights.tolist(), a.tolist())])
 
-    assert len(w2_prune.captured.jit_cache) == 1, "prune should have removed the copy"
+    assert_jit_cache_len(w2_prune, 1)
 
 class TestJitFree(unittest.TestCase):
   def test_free_intermediates(self):
@@ -688,8 +688,9 @@ class TestJitGraphSplit(unittest.TestCase):
     graph_t = graph_class(dev)
     if graph_t is None: return
 
-    got = f.jit_cache
+    got = f.captured.linear.src
     from tinygrad.runtime.graph.hcq import HCQGraph
+    from tinygrad.engine.jit import MultiGraphRunner
     if graph_t is HCQGraph:
       validate = hcqgraph
     elif issubclass(graph_t, MultiGraphRunner):
@@ -698,16 +699,16 @@ class TestJitGraphSplit(unittest.TestCase):
       validate = graph
 
     assert len(got) == len(validate), f"Expected {len(validate)} operations, got {len(got)}"
-    for expected, got in zip(validate, got):
+    for expected, si in zip(validate, got):
+      ast = si.src[0]
       if expected["type"] == "graph":
-        assert isinstance(got.prg, GraphRunner), f"Expected GraphRunner, got {type(got.prg)}"
-        assert len(got.prg.jit_cache) == expected["cnt"], f"Expected {expected['cnt']} operations in graph, got {len(got.prg.jit_cache)}"
+        assert call_is_graph(si), f"Expected graph, got {ast.op}"
+        inner_cnt = len(ast.src[0].src)
+        assert inner_cnt == expected["cnt"], f"Expected {expected['cnt']} operations in graph, got {inner_cnt}"
       elif expected["type"] == "comp":
-        assert isinstance(got.prg, CompiledRunner), f"Expected CompiledRunner, got {type(got.prg)}"
-      elif expected["type"] == "copy":
-        assert isinstance(got.prg, BufferCopy), f"Expected BufferCopy, got {type(got.prg)}"
-      elif expected["type"] == "xfer":
-        assert isinstance(got.prg, BufferXfer), f"Expected BufferXfer, got {type(got.prg)}"
+        assert ast.op in (Ops.SINK, Ops.PROGRAM, Ops.BEAM), f"Expected kernel, got {ast.op}"
+      elif expected["type"] in ("copy", "xfer"):
+        assert ast.op is Ops.COPY, f"Expected COPY, got {ast.op}"
 
   def ji_graph(self, cnt): return {"type": "graph", "cnt": cnt}
   def ji_comp(self): return {"type": "comp"}
@@ -812,7 +813,7 @@ class TestJitGraphSplit(unittest.TestCase):
       hcqgraph=[self.ji_graph(6)])
 
   @unittest.skip("this fails if you don't have SDMA or are using AMD_DISABLE_SDMA=1")
-  @unittest.skipIf(getenv("MOCKGPU"), "MockGPU does not support parallel copies")
+  @unittest.skipIf(DEV.interface.startswith("MOCK"), "MockGPU does not support parallel copies")
   def test_jit_multidev_copy(self):
     if Device.DEFAULT in {"CPU"}: raise unittest.SkipTest("CPU/LLVM is not a valid default device for this test (zero-copies)")
 

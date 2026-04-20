@@ -5,8 +5,9 @@ with contextlib.suppress(ImportError): import tiktoken
 from tinygrad import Tensor, TinyJit, Device, GlobalCounters, Variable, dtypes
 from tinygrad.uop.ops import UOp
 from tinygrad.helpers import Timing, DEBUG, JIT, getenv, fetch, colored, trange
+from tinygrad.llm.gguf import gguf_load
 from tinygrad.nn import Embedding, Linear, LayerNorm
-from tinygrad.nn.state import gguf_load, torch_load, load_state_dict, get_state_dict
+from tinygrad.nn.state import torch_load, load_state_dict, get_state_dict
 from extra.bench_log import BenchEvent, WallTimeEvent
 
 MAX_CONTEXT = getenv("MAX_CONTEXT", 128)

@@ -4,9 +4,9 @@ import sys, time, functools, itertools, math, operator, hashlib, os, types, pick
 from dataclasses import dataclass
 from enum import Enum, auto
 from tinygrad.uop import Ops, GroupOp
-from tinygrad.dtype import ConstType, ImageDType, dtypes, DType, truncate, PtrDType, least_upper_dtype, Invalid, AddrSpace, ConstFloat, PyConst
-from tinygrad.dtype import storage_fmt_for_dtype, to_storage_scalar, from_storage_scalar
-from tinygrad.device import Buffer, MultiBuffer
+from tinygrad.dtype import ConstType, ImageDType, dtypes, DType, DTypeLike, to_dtype, truncate, PtrDType, least_upper_dtype, Invalid, AddrSpace
+from tinygrad.dtype import ConstFloat, PyConst, storage_fmt_for_dtype, to_storage_scalar, from_storage_scalar
+from tinygrad.device import Buffer, MultiBuffer, canonicalize_device
 from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, flatten, TRACEMETA
 from tinygrad.helpers import PROFILE, dedup, cdiv, cmod, diskcache_put, to_function_name, cpu_profile, TracingKey, VIZ, SPEC, CAPTURE_PROCESS_REPLAY
 from tinygrad.helpers import strip_parens, colored, ansilen, printable
@@ -328,8 +328,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     return ret
 
   @property
-  def max_shape(self) -> tuple[int, ...]:
-    return tuple([int(x.vmax) if isinstance(x, UOp) else x for x in self.shape])
+  def max_shape(self) -> tuple[int, ...]: return to_max_shape(self.shape)
 
   @property
   def shard_shape(self) -> tuple[sint, ...]:
@@ -656,6 +655,16 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   @staticmethod
   def new_buffer(device:str|tuple[str, ...], size:int, dtype:DType, num=None):
     return UOp(Ops.BUFFER, dtype, (UOp.unique(num), UOp(Ops.DEVICE, arg=device)), size)
+  @staticmethod
+  def empty(shape:tuple[sint, ...], dtype:DTypeLike|None=None, device:str|tuple[str, ...]|None=None, axis:int|None=None, num=None) -> UOp:
+    dtype, device = to_dtype(dtype) if dtype is not None else dtypes.default_float, canonicalize_device(device)
+    max_shape = to_max_shape(shape)
+    ret = UOp.new_buffer(device, prod(max_shape), dtype, num).reshape(max_shape).shrink_to(shape)
+    return ret.multi(axis) if isinstance(device, tuple) and axis is not None else ret
+  def empty_like(self, dtype:DTypeLike|None=None, device:str|tuple[str, ...]|None=None) -> UOp:
+    device = canonicalize_device(self.device if device is None else device)
+    axis = self.axis if isinstance(device, tuple) else None
+    return UOp.empty(self.shard_shape if axis is not None else self.shape, self.dtype if dtype is None else dtype, device, axis)
   @property
   def device(self) -> str|tuple[str, ...]: return unwrap(self._device)
   @recursive_property
@@ -1295,9 +1304,9 @@ if TRACK_MATCH_STATS or PROFILE:
       with open(fn:=temp("rewrites.pkl", append_user=True), "wb") as f:
         print(f"rewrote {len(tracked_ctxs)} graphs and matched {sum(len(r.matches) for x in tracked_ctxs for r in x)} times, saved to {fn}")
         pickle.dump(RewriteTrace(tracked_keys, tracked_ctxs, uop_fields), f)
-    if getenv("VIZ") > 0:
-      VIZ.value = 0
-      return launch_viz("VIZ", temp("rewrites.pkl", append_user=True))
+    if VIZ > 0:
+      TRACK_MATCH_STATS.value = 0
+      return launch_viz("REWRITE_DATA", temp("rewrites.pkl", append_user=True))
     if getenv("PRINT_MATCH_STATS", TRACK_MATCH_STATS.value and VIZ.value>=0):
       ret = [0,0,0.0,0.0]
       for k,v in sorted(list(match_stats.items()), key=lambda x: x[1][2]+x[1][3]):
@@ -1309,9 +1318,9 @@ if TRACK_MATCH_STATS or PROFILE:
 
   def launch_viz(env_str:str, data:str):
     os.environ[f"{env_str}_DATA"] = data
-    if not VIZ and not PROFILE:
-      os.environ["VIZ"], os.environ["PROFILE"] = "0", "0"
-      args = ['--rewrites-path', os.getenv("VIZ_DATA", "")] if os.getenv("VIZ_DATA", "") else []
+    if not TRACK_MATCH_STATS and not PROFILE:
+      os.environ["VIZ"], os.environ["PROFILE"], os.environ["TRACK_MATCH_STATS"] = "0", "0", "0"
+      args = ['--rewrites-path', os.getenv("REWRITE_DATA", "")] if os.getenv("REWRITE_DATA", "") else []
       args += ['--profile-path', os.getenv("PROFILE_DATA", "")] if os.getenv("PROFILE_DATA", "") else []
       viz_path = pathlib.Path(__file__).resolve().parent.parent / "viz" / "serve.py"
       os.execv(sys.executable, [sys.executable, viz_path.as_posix()] + args)
@@ -1435,6 +1444,7 @@ def graph_rewrite(sink:UOp, pm:PatternMatcher, ctx=None, bottom_up=False, name=N
   return rewrite_ctx.walk_rewrite(sink) if walk else rewrite_ctx.unified_rewrite(sink)
 
 def sint_to_uop(x:sint, dtype=dtypes.weakint) -> UOp: return UOp.const(dtype, x) if isinstance(x, int) else x.cast(dtype)
+def to_max_shape(shape:tuple[sint, ...]) -> tuple[int, ...]: return tuple(int(x.vmax) if isinstance(x, UOp) else x for x in shape)
 
 def select_dtype(u): return (dtypes.long if u.overflows(dtypes.int32) else dtypes.int).vec(u.dtype.count)
 pm_lower_index_dtype = PatternMatcher([
@@ -1470,7 +1480,7 @@ def _index_to_concrete_int(u:UOp) -> UOp: return graph_rewrite(u.sink(), pm_lowe
 
 _substitute = PatternMatcher([(UPat(tuple(Ops), name="x"), lambda ctx,x: ctx.get(x,None))])
 _pm_resolve_params = PatternMatcher([(UPat(Ops.PARAM, name="p"), lambda ctx,p: ctx[p.arg])])
-_remove_all_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
+remove_all_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
 
 def gate_kernel_sink(x:UOp) -> bool:
   if x.op is Ops.LINEAR: return False

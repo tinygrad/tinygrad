@@ -1,6 +1,7 @@
-import os, struct, unittest, tempfile, pathlib
+import os, struct, unittest, tempfile, pathlib, sys
 from tinygrad import dtypes, Tensor, fetch, Device
-from tinygrad.nn.state import _ggml_iq_grid, ggml_data_to_tensor, gguf_load
+from tinygrad.helpers import disable_gc
+from tinygrad.llm.gguf import _ggml_iq_grid, ggml_data_to_tensor, gguf_load
 from tinygrad.runtime.autogen import ggml_common as _ggml
 from tinygrad.device import is_dtype_supported
 import numpy as np
@@ -242,6 +243,16 @@ class TestGGUFGEMV(unittest.TestCase):
   def test_gguf_gemv_mxfp4(self): self._test_gguf_gemv(GGMLQuantizationType.MXFP4)
   @unittest.skipUnless(is_dtype_supported(dtypes.bfloat16), "Backend must support bfloat16")
   def test_gguf_gemv_bf16(self): self._test_gguf_gemv(GGMLQuantizationType.BF16)
+
+class TestGGUFGC(unittest.TestCase):
+  def test_gguf_load_no_tensor_leak(self):
+    """gguf_load must not retain references to the input tensor after returning."""
+    fp = fetch("https://huggingface.co/ggml-org/models/resolve/main/tinyllamas/stories15M-q8_0.gguf?download=true")
+    t = Tensor.empty(os.stat(fp).st_size, dtype=dtypes.uint8, device=f"disk:{fp}").to(Device.DEFAULT).realize()
+    with disable_gc():
+      ref_before = sys.getrefcount(t)
+      kv_data, tensors, _ = gguf_load(t)
+      self.assertEqual(sys.getrefcount(t), ref_before, "gguf_load leaked a reference to the input tensor")
 
 if __name__ == '__main__':
   unittest.main()

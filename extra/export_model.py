@@ -1,47 +1,49 @@
 from typing import Tuple, Dict, List, Optional
 from tinygrad.dtype import DType, dtypes
-from tinygrad.renderer import ProgramSpec
 from tinygrad.tensor import Tensor
-from tinygrad.device import Device
+from tinygrad.device import Device, Buffer
 from tinygrad.engine.jit import TinyJit
 from tinygrad.nn.state import get_state_dict
-from tinygrad.helpers import Context, to_mv
-from tinygrad.uop.ops import Ops
+from tinygrad.helpers import Context, to_mv, prod
+from tinygrad.uop.ops import Ops, UOp
+from tinygrad.codegen import get_program
 import json
 from collections import OrderedDict
 
 EXPORT_SUPPORTED_DEVICE = ["WEBGPU", "CPU", "CUDA", "CL"]
 
-def compile_net(run:TinyJit, special_names:Dict[int,str]) -> Tuple[Dict[str,str],List[Tuple[str,List[str],List[int]]],Dict[str,Tuple[int,DType,int]],Dict[str,Tensor]]:
-  # memory-planned subbuffers can have multiple Buffer objects for the same memory region
-  canon, _seen = {}, {}
-  for ji in run.jit_cache:
-    for b in ji.bufs:
-      if b is not None: canon[id(b)] = _seen.setdefault((id(b.base._buf), b.offset, b.size, b.dtype), b)
-  special_names = {id(canon[k]): v for k, v in special_names.items() if k in canon}
+_KERNEL_ASTS = {Ops.SINK, Ops.PROGRAM, Ops.BEAM}
+def iter_kernel_calls(linear:UOp):
+  """Yield kernel CALLs from a LINEAR UOp. Toposort descends naturally into CUSTOM_FUNCTION graph batches; gate stops at kernel ASTs."""
+  return (u for u in linear.toposort(gate=lambda x: x.op not in _KERNEL_ASTS) if u.op is Ops.CALL and u.src[0].op in _KERNEL_ASTS)
 
-  functions, bufs, bufs_to_save, statements, bufnum = {}, {}, {}, [], 0
-  for ji in run.jit_cache:
-    fxn: ProgramSpec = ji.prg.p
-    functions[fxn.function_name] = fxn.src   # NOTE: this assumes all with the same name are the same
-    cargs = []
-    for i,arg in enumerate(ji.bufs):
-      arg = canon[id(arg)]
-      key = id(arg)
-      if key not in bufs:
-        if key in special_names:
-          bufs[key] = (special_names[key], arg.size*arg.dtype.itemsize, arg.dtype, key)
-        else:
-          bufs[key] = (f"buf_{bufnum}", arg.size*arg.dtype.itemsize, arg.dtype, key)
-          bufnum += 1
-          if i > 0: bufs_to_save[bufs[key][0]] = arg   # if first usage of a buffer is not an output, and it's not a special name
-      cargs.append(bufs[key][0])
-    cargs += [var for var in fxn.vars if getattr(var, "op", None) is Ops.DEFINE_VAR] # symbolic vars; is it necessary or sufficient to check for DEFINE_VAR?
-    statements.append((fxn.function_name, cargs, fxn.global_size, fxn.local_size))
+def compile_net(linear:UOp, output_bufs:List[Buffer]) -> Tuple[Dict[str,str], List, Dict[str,Tuple[int,DType,int]], Dict[str,Buffer]]:
+  output_name = {id(b): f"output{i}" for i, b in enumerate(output_bufs)}
+  functions, bufs, bufs_to_save, statements, n = {}, {}, {}, [], 0
 
-  return functions, statements, {name:(size, dtype, key) for (name,size,dtype,key) in bufs.values()}, bufs_to_save
+  def name_of(bu:UOp, is_out:bool) -> str:
+    nonlocal n
+    if bu.op is Ops.PARAM: key, name, size = ("in", bu.arg), f"input{bu.arg}", prod(bu.shape)*bu.dtype.itemsize
+    else:
+      b = bu.buffer
+      key, size = (id(b.base), b.offset, b.size, b.dtype), b.size*b.dtype.itemsize
+      if key in bufs: return bufs[key][0]
+      if (name:=output_name.get(id(b))) is None:
+        name, n = f"buf_{n}", n+1
+        if not is_out: bufs_to_save[name] = b
+    bufs[key] = (name, size, bu.dtype, key)
+    return name
 
-def jit_model(model, *args) -> Tuple[TinyJit,Dict[int,str]]:
+  for call in iter_kernel_calls(linear):
+    arg_uops = [b for b in call.src[1:] if b.op is not Ops.BIND]
+    prg = get_program(call.src[0], Device[arg_uops[0].device].renderer)
+    functions[prg.function_name] = prg.src
+    cargs = [name_of(bu, i == 0) for i, bu in enumerate(arg_uops)] + [v for v in prg.vars if v.op is Ops.DEFINE_VAR]
+    statements.append((prg.function_name, cargs, prg.global_size, prg.local_size))
+
+  return functions, statements, {name:(size, dtype, key) for name, size, dtype, key in bufs.values()}, bufs_to_save
+
+def jit_model(model, *args) -> Tuple[UOp, List[Buffer]]:
   assert hasattr(model, "forward") or callable(model), "model needs a forward function"
   @TinyJit
   def run(*x):
@@ -50,20 +52,10 @@ def jit_model(model, *args) -> Tuple[TinyJit,Dict[int,str]]:
     out = [out] if isinstance(out, Tensor) else out
     return [o.realize() for o in out]
 
-  # twice to run the JIT
+  # run twice to trigger JIT capture
   for _ in range(2): the_output = run(*args)
-  special_names = {}
-
-  # hack to put the inputs back
-  for (j,i),idx in run.input_replace.items():
-    realized_input = args[idx].uop.base.realized
-    run.jit_cache[j].bufs[i] = realized_input
-    special_names[id(realized_input)] = f'input{idx}'
-
-  # TODO: fetch this from the jit in self.input_replace and self.ret (hint: use get_parameters on self.ret)
-  for i, output in enumerate(the_output):
-    special_names[id(output.uop.base.realized)] = f'output{i}'
-  return run, special_names
+  assert run.captured is not None
+  return run.captured.linear, [o.uop.base.realized for o in the_output]
 
 def export_model_clang(functions:Dict[str,str], statements:Dict[str,Tuple[str,int,int]], bufs:Dict[str,Tuple[str,int,int]],
   bufs_to_save:Dict[str,Tensor], input_names:List[str], output_names:List[str], weight_names={}, model_name="model", symbolic_vars={}, wasm=False) -> str:
@@ -249,12 +241,12 @@ def export_model(model, target:str, *inputs, model_name: Optional[str] = "model"
   assert Device.DEFAULT in EXPORT_SUPPORTED_DEVICE, f"only {', '.join(EXPORT_SUPPORTED_DEVICE)} are supported"
 
   # NOTE: CPU_COUNT=1, since export does not support threading
-  with Context(JIT=2, CPU_COUNT=1): run,special_names = jit_model(model, *inputs)
-  functions, statements, bufs, bufs_to_save = compile_net(run, special_names)
+  with Context(JIT=2, CPU_COUNT=1): linear, output_bufs = jit_model(model, *inputs)
+  functions, statements, bufs, bufs_to_save = compile_net(linear, output_bufs)
   state = get_state_dict(model)
   weight_names = {id(x.uop.base.realized): name for name, x in state.items()}
-  input_names = [name for _,name in special_names.items() if "input" in name]
-  output_names = [name for _,name in special_names.items() if "output" in name]
+  input_names = [f"input{i}" for i in range(len(inputs))]
+  output_names = [f"output{i}" for i in range(len(output_bufs))]
 
   # handle symbolic variables; TODO: refactor to fix some of this stuff upstream in tinygrad
   symbolic_vars = OrderedDict()

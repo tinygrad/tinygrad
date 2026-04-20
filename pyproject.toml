@@ -38,6 +38,7 @@ packages = [
   'tinygrad.runtime.graph',
   'tinygrad.runtime.support',
   'tinygrad.runtime.support.am',
+  'tinygrad.runtime.support.mlx',
   'tinygrad.runtime.support.nv',
   'tinygrad.schedule',
   'tinygrad.uop',

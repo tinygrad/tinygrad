@@ -194,10 +194,7 @@ def main():
   model_name = kv.get('general.name') or kv.get('general.basename') or args.model
   print(f"using model \"{model_name}\" with {nbytes:,} bytes and {sum(x.numel() for x in nn.state.get_parameters(model)):,} params")
 
-  # TODO: why this is required to free the RAM of the GGUF copy?
-  import gc
-  gc.collect()
-
+  # get tokenizer
   tok = SimpleTokenizer.from_gguf_kv(kv)
 
   # warmup the JIT

@@ -1,11 +1,11 @@
 import unittest, struct, contextlib, statistics, gc
 from tinygrad import Device, Tensor, dtypes, TinyJit
-from tinygrad.helpers import CI, getenv, Context, ProfileRangeEvent, cpu_profile, cpu_events, ProfilePointEvent, dedup
+from tinygrad.helpers import CI, DEV, Context, ProfileRangeEvent, cpu_profile, cpu_events, ProfilePointEvent, dedup
 from tinygrad.device import Buffer, BufferSpec, Compiled, ProfileDeviceEvent, ProfileGraphEvent
 from tinygrad.runtime.support.hcq import HCQCompiled
 from tinygrad.engine.realize import get_runner
 
-MOCKGPU = getenv("MOCKGPU")
+MOCKGPU = DEV.interface.startswith("MOCK")
 def _dev_base(d):
   p = d.split(":")
   return p[0] if len(p) < 2 or not p[1].isdigit() else f"{p[0]}:{p[1]}"
