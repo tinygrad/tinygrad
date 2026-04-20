@@ -4,6 +4,7 @@ from tinygrad import nn
 from tinygrad.helpers import partition, DEBUG, Timing, GlobalCounters, stderr_log, colored, Context, fetch
 from tinygrad.viz.serve import TCPServerWithReuse, HTTPRequestHandler
 from tinygrad.llm.model import Transformer
+from tinygrad.llm.gguf import gguf_size
 
 class SimpleTokenizer:
   def __init__(self, normal_tokens:dict[str, int], special_tokens:dict[str, int], preset:str="llama3",
@@ -190,9 +191,10 @@ def main():
   args = parser.parse_args()
 
   # load the model
-  model, kv, nbytes = Transformer.from_gguf(fetch(models.get(args.model, args.model)), args.max_context)
+  path = pathlib.Path(fetch(models.get(args.model, args.model)))
+  model, kv = Transformer.from_gguf(path, args.max_context)
   model_name = kv.get('general.name') or kv.get('general.basename') or args.model
-  print(f"using model \"{model_name}\" with {nbytes:,} bytes and {sum(x.numel() for x in nn.state.get_parameters(model)):,} params")
+  print(f"using model \"{model_name}\" with {gguf_size(path, kv):,} bytes and {sum(x.numel() for x in nn.state.get_parameters(model)):,} params")
 
   # get tokenizer
   tok = SimpleTokenizer.from_gguf_kv(kv)

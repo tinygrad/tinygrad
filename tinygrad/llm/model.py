@@ -322,8 +322,9 @@ class Transformer:
 
   @staticmethod
   def from_gguf(gguf:Tensor|str|pathlib.Path, max_context:int|None=None,
-                realize=bool(getenv("REALIZE", 0))) -> tuple[Transformer, dict, int]:
-    kv, state_dict, nbytes = gguf_load(gguf)
+                realize=bool(getenv("REALIZE", 0))) -> tuple[Transformer, dict]:
+    # TODO: remove the need for copy to default device
+    kv, state_dict = gguf_load(gguf.to(None).realize() if isinstance(gguf, Tensor) else gguf)
 
     # all state items should be float16, not float32
     state_dict = {k:v.cast('float16') if getenv("HALF", 1) else v for k,v in state_dict.items()}
@@ -386,7 +387,7 @@ class Transformer:
     if realize:
       for s in (params:=nn.state.get_parameters(model)): s.replace(s.contiguous())
       Tensor.realize(*params)
-    return model, kv, nbytes
+    return model, kv
 
   def get_start_pos(self, tokens:list[int]) -> int:
     prefix_len = sum(1 for _ in itertools.takewhile(lambda ab: ab[0] == ab[1], zip(tokens[:-1], self._cached_tokens)))

@@ -148,36 +148,34 @@ def _gguf_parse(tensor: Tensor) -> tuple[dict, dict[str, Tensor]]:
   state_dict = {name: ggml_data_to_tensor(tensor[data_start + off:], prod(dims), typ).reshape(*reversed(dims)) for name, dims, typ, off in t_infos}
   return kv_data, state_dict
 
-def gguf_load(fn: Tensor|str|pathlib.Path) -> tuple[dict, dict[str, Tensor], int]:
+def _gguf_split_paths(path: pathlib.Path, kv: dict) -> list[pathlib.Path]:
+  if (total := kv.get('split.count', 1)) <= 1: return [path]
+  if kv.get('split.no', 0) != 0: raise ValueError(f"multi-part GGUF must be loaded from the first split, got split.no={kv['split.no']}")
+  if not (m := re.match(r"^(.*)-00001-of-\d{5}\.gguf$", str(path))): raise ValueError(f"first split path must end with -00001-of-NNNNN.gguf: {path}")
+  return [pathlib.Path(f"{m.group(1)}-{i:05d}-of-{total:05d}.gguf") for i in range(1, total+1)]
+
+def gguf_load(fn: Tensor|str|pathlib.Path) -> tuple[dict, dict[str, Tensor]]:
   """
-  Loads a .gguf file, returning the `kv_data`, `state_dict`, and total bytes across all parts.
+  Loads a .gguf file, returning the `kv_data` and `state_dict`. Multi-part splits are auto-merged when loaded by path.
 
   ```python
   import pathlib
   from tinygrad import Device, Tensor
   from tinygrad.llm.gguf import gguf_load
 
-  kv_data, state_dict, nbytes = gguf_load(pathlib.Path("Meta-Llama-3-8B-Instruct.Q4_0.gguf"))
+  gguf_tensor = Tensor(pathlib.Path("Meta-Llama-3-8B-Instruct.Q4_0.gguf")).to(Device.DEFAULT)
+  kv_data, state_dict = gguf_load(gguf_tensor)
   ```
 
-  NOTE: Multi-part GGUFs (`split.count > 1`) are merged when called with a path; all parts must be in the same folder.
+  NOTE: The provided tensor must be on a device that supports execution.
   """
-  if isinstance(fn, Tensor): path, tensor = None, fn
-  else: path, tensor = (p := pathlib.Path(fn)), Tensor(p)
   # TODO: remove the need for copy to default device
-  tensor = tensor.to(None).realize()
-  kv_data, state_dict = _gguf_parse(tensor)
-  nbytes = os.path.getsize(path) if path is not None else tensor.nbytes()
-  if kv_data.get('split.count', 1) > 1:
-    assert kv_data.get('split.no', 0) == 0, f"multi-part GGUF must be loaded from the first split (got split.no={kv_data.get('split.no', 0)})"
-    assert path is not None, "multi-part GGUF requires a path argument"
-    m = re.match(r"^(.*)-00001-of-(\d{5})\.gguf$", str(path))
-    assert m, f"first split path must end with -00001-of-NNNNN.gguf to locate sibling splits: {path}"
-    base, total = m.group(1), int(m.group(2))
-    for i in range(2, total+1):
-      pp = pathlib.Path(f"{base}-{i:05d}-of-{total:05d}.gguf")
-      assert pp.exists(), f"missing GGUF split: {pp}"
-      _, sd = _gguf_parse(Tensor(pp).to(None).realize())
-      state_dict.update(sd)
-      nbytes += os.path.getsize(pp)
-  return kv_data, state_dict, nbytes
+  def load(p): return _gguf_parse(p if isinstance(p, Tensor) else Tensor(p).to(None).realize())
+  kv, sd = load(fn)
+  if kv.get('split.count', 1) <= 1: return kv, sd
+  if isinstance(fn, Tensor): raise ValueError("multi-part GGUF requires a path argument (got Tensor)")
+  for pp in _gguf_split_paths(pathlib.Path(fn), kv)[1:]: sd.update(load(pp)[1])
+  return kv, sd
+
+def gguf_size(path: str|pathlib.Path, kv: dict) -> int:
+  return sum(os.path.getsize(p) for p in _gguf_split_paths(pathlib.Path(path), kv))
