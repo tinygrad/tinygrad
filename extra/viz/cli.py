@@ -195,9 +195,11 @@ def main(args) -> None:
       name = f"*** {k['device'][:7]:7s} "+k["name"]+" "*(46-ansilen(k["name"]))
       return f"{name} tm {ptm}/{k['et_ms']:9.2f}ms"+(f" ({fmt_str})" if k["fmt"] else "")
     fmt_row = fmt_top if args.top else fmt_all
+    seen_refs:set[int] = set()
     for k in (produce_top_kernels if args.top else produce_all_kernels)():
       print(fmt(k, to_str=fmt_row))
-      if k["ref"] is not None:
+      if k["ref"] is not None and k["ref"] not in seen_refs:
+        seen_refs.add(k["ref"])
         steps = rewrites[viz_data.ctxs[k["ref"]]["name"]]
         if DEBUG >= 3 and (ast_step:=steps.get("View Base AST")) is not None: print_step(ast_step)
         if DEBUG >= 4 and (src_step:=steps.get("View Source")) is not None: print_step(src_step)
