@@ -196,9 +196,6 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       else: cache[node] = visitor(node)
     return cache[self]
 
-  # returns map of UOps to their consumers in the graph rooted by self
-  def get_consumer_map(self) -> dict[UOp, dict[UOp, None]]: return consumer_map_from_toposort(self.toposort())
-
   @functools.cached_property
   def tuplize(self:UOp) -> tuple:
     return (self.op.value, self.arg, self.dtype,)+tuple([x.tuplize for x in self.src])
