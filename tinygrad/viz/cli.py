@@ -124,27 +124,17 @@ def main(args) -> None:
   # ** PMC printer
   elif "PMC" in args.src:
     pmc = viz.unpack_pmc(unwrap(data))
-    cols = pmc["cols"]
-    rows:list = []
-    for r in pmc["rows"]:
-      if args.item is None: rows.append(r[:2])
-      elif args.item == r[0]:
-        rows = r[2]["rows"] if len(r) > 2 else [r[:2]]
-        cols = r[2]["cols"] if len(r) > 2 else cols
-    pmc_data = [cols, *[[str(x) for x in r] for r in rows]]
-    widths = [max(len(r[i]) for r in pmc_data) for i in range(len(cols))]
-    def pad(r): return "| "+" | ".join(x+" "*(w-len(x)) for x,w in zip(r, widths))+" |"
-    table_str = pad(pmc_data[0])+"\n"+pad(["-"*w for w in widths])+"\n"+("\n".join([pad(row) for row in pmc_data[1:]]))
-    print(fmt({"cols":cols, "rows":rows}, lambda _: table_str))
+    pmc_fmt:list[str] = []
+    for name,val,*detail in pmc["rows"]:
+      pmc_fmt += [f"{name} {val}"]+([" ".join(f"{k}={v}" for k,v in zip(detail[0]["cols"], r)) for r in detail[0]["rows"]] if detail else [])
+    print(fmt(pmc, lambda _: "\n".join(pmc_fmt)))
 
   # ** Memory printer
   elif data is not None and data["event_type"] == 1:
-    print(fmt({"peak":data["peak"], "cols":["ts", "event", "key", "info"]},
-              lambda _: f"Peak: {data['peak']}"+"\n"+f"{'TS':<10}  {'Event':<6}  {'Key':>8}  Info"))
+    print(fmt({"peak":data["peak"]}, lambda _: f"Peak: {data['peak']}"+"\n"+f"{'TS':<10}  {'Event':<6}  {'Key':>8}  Info"))
     for e in data["events"]:
       info = str(arg:=e.pop("arg", {}))
-      if e["event"] == "free":
-        info = ', '.join([f"{fmt_colored(kernel)} {['read','write','write+read'][mode]}@data{num}" for _,kernel,num,mode in arg["users"]])
+      if e["event"] == "free": info = ', '.join([f"{fmt_colored(k)} {['read','write','write+read'][m]}@data{n}" for _,k,n,m in arg["users"]])
       print(fmt({**e, "info":info}, lambda _: f"{e['ts']:<10}  {e['event']:<6}  {e.get('key', ''):>8}  {info}"))
 
   # ** Profiler printer
