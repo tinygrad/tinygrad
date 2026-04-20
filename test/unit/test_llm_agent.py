@@ -13,7 +13,6 @@ class TestLLMAgent(unittest.TestCase):
     self.assertIn("bash(command:string, description:string[brief summary]", out)
     self.assertIn("read(filePath:string)", out)
     self.assertIn(TOOL_CALL_OPEN, out)
-    self.assertIn("Include all required arguments.", out)
     self.assertNotIn('"properties"', out)
 
   def test_parse_tool_calls_open_tag(self):

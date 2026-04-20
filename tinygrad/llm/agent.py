@@ -34,8 +34,7 @@ def format_tools(tools: list|None) -> str:
   if not tools: return ""
   return ("<tools>\n" +
           "\n".join(_tool_sig(t) for t in tools) +
-          "\n</tools>\nReply only: " + TOOL_CALL_OPEN + '{"name":"...","arguments":{...}}' +
-          "\nInclude all required arguments.")
+          "\n</tools>\nReply only: " + TOOL_CALL_OPEN + '{"name":"...","arguments":{...}}')
 
 # parse the last tool_call block
 def parse_tool_calls(text: str) -> list[dict]:
