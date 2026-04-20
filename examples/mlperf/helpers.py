@@ -219,17 +219,28 @@ def get_mlperf_bert_model():
   config = get_mlperf_bert_config()
   if getenv("DISABLE_DROPOUT", 0):
     config["hidden_dropout_prob"] = config["attention_probs_dropout_prob"] = 0.0
-  return BertForPretraining(**config)
+  model = BertForPretraining(**config)
+  if getenv("FP8_TRAIN"):
+    from extra.fp8.fp8_linear import convert_to_float8_training
+    def module_filter_fn(mod, fqn):
+      if isinstance(mod, LinearBert):
+        skip_layers = [] if (ln:=config["num_hidden_layers"]) <= 2 else ["bert.encoder.layer.0.", f"bert.encoder.layer.{ln-1}"]
+        if mod.weight.shape[-1] >= 1024 and "encoder" in fqn and not any(name in fqn for name in skip_layers):
+          print(f"replacing linear with fp8: {fqn} {mod.weight.shape}")
+          return True
+      return False
+    convert_to_float8_training(model, module_filter_fn)
+  return model
 
 def get_fake_data_bert(BS:int):
   return {
-    "input_ids": Tensor.empty((BS, 512), dtype=dtypes.int32, device="CPU"),
-    "input_mask": Tensor.empty((BS, 512), dtype=dtypes.int32, device="CPU"),
-    "segment_ids": Tensor.empty((BS, 512), dtype=dtypes.int32, device="CPU"),
-    "masked_lm_positions": Tensor.empty((BS, 76), dtype=dtypes.int32, device="CPU"),
-    "masked_lm_ids": Tensor.empty((BS, 76), dtype=dtypes.int32, device="CPU"),
-    "masked_lm_weights": Tensor.empty((BS, 76), dtype=dtypes.float32, device="CPU"),
-    "next_sentence_labels": Tensor.empty((BS, 1), dtype=dtypes.int32, device="CPU"),
+    "input_ids": Tensor.zeros((BS, 512), dtype=dtypes.int32, device="CPU").contiguous(),
+    "input_mask": Tensor.zeros((BS, 512), dtype=dtypes.int32, device="CPU").contiguous(),
+    "segment_ids": Tensor.zeros((BS, 512), dtype=dtypes.int32, device="CPU").contiguous(),
+    "masked_lm_positions": Tensor.zeros((BS, 76), dtype=dtypes.int32, device="CPU").contiguous(),
+    "masked_lm_ids": Tensor.zeros((BS, 76), dtype=dtypes.int32, device="CPU").contiguous(),
+    "masked_lm_weights": Tensor.zeros((BS, 76), dtype=dtypes.float32, device="CPU").contiguous(),
+    "next_sentence_labels": Tensor.zeros((BS, 1), dtype=dtypes.int32, device="CPU").contiguous(),
   }
 
 def find_matches(match_quality_matrix:np.ndarray, high_threshold:float=0.5, low_threshold:float=0.4, allow_low_quality_matches:bool=False) -> np.ndarray:

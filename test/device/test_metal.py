@@ -1,5 +1,5 @@
 import unittest
-from tinygrad.device import CompileError, Device, Compiler
+from tinygrad.device import CompileError, Device, BufferSpec
 if Device.DEFAULT=="METAL":
   from tinygrad.runtime.ops_metal import MetalDevice, MetalCompiler, MetalProgram
 @unittest.skipIf(Device.DEFAULT!="METAL", "Metal support required")
@@ -50,26 +50,17 @@ kernel void r_5(device int* data0, const device int* data1, uint3 gid [[threadgr
       compiled = compiled[:40] # corrupt the compiled program
       MetalProgram(device, "r_5", compiled)
 
-  def test_program_w_empty_compiler(self):
-    device = MetalDevice("metal")
-    compiler = Compiler(device)
-    compiled = compiler.compile("""
-#include <metal_stdlib>
-kernel void r_5(device int* data0, const device int* data1, uint3 gid [[threadgroup_position_in_grid]], uint3 lid [[thread_position_in_threadgroup]]){
-  data0[0] = 0;
-}
-""")
-    MetalProgram(device, "r_5", compiled)
+  def test_free(self):
+    size = 2**16
+    device = Device['METAL']
+    before = device.sysdevice.currentAllocatedSize()
 
-  def test_bad_program_w_empty_compiler(self):
-    device = MetalDevice("metal")
-    compiler = Compiler(device)
-    # this does not raise
-    compiled = compiler.compile("""
-#include <metal_stdlib>
-kernel void r_5(device int* data0, const device int* data1, uint3 gid [[threadgroup_position_in_grid]], uint3 lid [[thread_position_in_threadgroup]]){
-  invalid codes;
-}
-""")
-    with self.assertRaises(RuntimeError):
-      MetalProgram(device, "r_5", compiled)
+    buf = device.allocator.alloc(size, BufferSpec(nolru=True))
+    self.assertEqual(curr:=device.sysdevice.currentAllocatedSize(), before+size, msg=f"{curr=} - {before=}")
+    device.allocator.free(buf, buf.size, BufferSpec(nolru=True))
+    self.assertEqual(curr:=device.sysdevice.currentAllocatedSize(), before, msg=f"{curr=} - {before=}")
+
+  def test_gpu_family(self):
+    device = Device['METAL']
+    self.assertGreater(device.gpu_family, 0)
+    self.assertLessEqual(device.gpu_family, 15)

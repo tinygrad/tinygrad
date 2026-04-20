@@ -129,6 +129,36 @@ kern_return_t TinyGPUDriverUserClient::ExternalMethod(uint64_t selector, IOUserC
 	} else if (selector == TinyGPURPC::Reset) {
 		os_log(OS_LOG_DEFAULT, "tinygpu: reset");
 		return ivars->provider->ResetDevice();
+	} else if (selector == TinyGPURPC::PrepareDMA) {
+		// both input and output buffers must be >= 4097 bytes for IOMemoryDescriptor
+		if (!args->structureInputDescriptor || !args->structureOutputDescriptor) {
+			os_log(OS_LOG_DEFAULT, "tinygpu: PrepareDMA requires buffers >= 4097 bytes");
+			return kIOReturnBadArgument;
+		}
+		if (ivars->ensureDMACap(ivars->dmaCount + 1)) return kIOReturnNoMemory;
+
+		uint64_t size = 0;
+		args->structureInputDescriptor->GetLength(&size);
+
+		IODMACommand* dmaCmd = nullptr;
+		IOAddressSegment segments[32];
+		uint32_t segCount = 32;
+		err = ivars->provider->SetupDMA(args->structureInputDescriptor, size, &dmaCmd, segments, &segCount);
+		if (err) return err;
+
+		// write physical addresses to output: [addr0, len0, addr1, len1, ..., 0, 0]
+		IOMemoryMap* outMap = nullptr;
+		err = args->structureOutputDescriptor->CreateMapping(0, 0, 0, 0, 0, &outMap);
+		if (err || !outMap) { os_log(OS_LOG_DEFAULT, "tinygpu: output map failed err=%d", err); dmaCmd->release(); return err; }
+
+		uint64_t* out = (uint64_t*)outMap->GetAddress();
+		for (uint32_t i = 0; i < segCount; i++) { out[i * 2] = segments[i].address; out[i * 2 + 1] = segments[i].length; }
+		out[segCount * 2] = 0; out[segCount * 2 + 1] = 0;
+		outMap->release();
+
+		os_log(OS_LOG_DEFAULT, "tinygpu: PrepareDMA size=%llu segs=%u", size, segCount);
+		ivars->dmas[ivars->dmaCount++] = {nullptr, dmaCmd};
+		return kIOReturnSuccess;
 	}
 
 	return kIOReturnUnsupported;

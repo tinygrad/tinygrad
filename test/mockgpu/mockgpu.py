@@ -1,7 +1,9 @@
 import ctypes, ctypes.util, time, os, builtins, fcntl
+from tinygrad.helpers import DEV
 from tinygrad.runtime.support.hcq import FileIOInterface
 from test.mockgpu.nv.nvdriver import NVDriver
 from test.mockgpu.amd.amddriver import AMDDriver
+from test.mockgpu.am.amdriver import AMDriver, AMUSBDriver
 start = time.perf_counter()
 
 # *** ioctl lib ***
@@ -9,13 +11,14 @@ libc = ctypes.CDLL(ctypes.util.find_library("c"))
 libc.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long]
 libc.mmap.restype = ctypes.c_void_p
 
-drivers = [AMDDriver(), NVDriver()]
+drivers = [cls() for t in DEV.value if (cls:={"MOCKPCI+AMD": AMDriver, "MOCKKFD+AMD": AMDDriver, "MOCKUSB+AMD": AMUSBDriver,
+                                              "MOCKNVK+NV": NVDriver}.get(f"{t.interface}+{t.device}"))]
 tracked_fds = {}
 
-orignal_memoryview = builtins.memoryview
+original_memoryview = builtins.memoryview
 class TrackedMemoryView:
   def __init__(self, data, rcb, wcb):
-    self.mv = orignal_memoryview(data)
+    self.mv = original_memoryview(data)
     self.rcb, self.wcb = rcb, wcb
 
   def __getitem__(self, index):
@@ -41,8 +44,10 @@ def _memoryview(cls, mem):
     for d in drivers:
       for st,en,rcb,wcb in d.tracked_addresses:
         if st <= addr <= en: return TrackedMemoryView(mem, rcb, wcb)
-  return orignal_memoryview(mem)
-builtins.memoryview = type("memoryview", (), {'__new__': _memoryview}) # type: ignore
+  return original_memoryview(mem)
+class _MockMemoryviewMeta(type):
+  def __instancecheck__(cls, instance): return isinstance(instance, (original_memoryview, TrackedMemoryView))
+builtins.memoryview = _MockMemoryviewMeta("memoryview", (), {'__new__': _memoryview}) # type: ignore
 
 def _open(path, flags):
   for d in drivers:
@@ -75,9 +80,10 @@ class MockFileIOInterface(FileIOInterface):
     return libc.mmap(start, sz, prot, flags, self.fd, offset)
 
   def read(self, size=None, binary=False, offset=None):
-    if binary: raise NotImplementedError()
     if self.fd in tracked_fds:
+      if offset is not None: tracked_fds[self.fd].seek(offset)
       return tracked_fds[self.fd].read_contents(size)
+    if binary: raise NotImplementedError()
     with open(self.fd, "rb" if binary else "r", closefd=False) as file:
       if file.tell() >= os.fstat(self.fd).st_size: file.seek(0)
       return file.read(size)
@@ -87,12 +93,19 @@ class MockFileIOInterface(FileIOInterface):
       return tracked_fds[self.fd].list_contents()
     return os.listdir(self.path)
 
-  def write(self, content, binary=False, offset=None): raise NotImplementedError()
+  def write(self, content, binary=False, offset=None):
+    if self.fd in tracked_fds:
+      if offset is not None: tracked_fds[self.fd].seek(offset)
+      return tracked_fds[self.fd].write_contents(content)
+    raise NotImplementedError()
   def seek(self, offset):
     if self.fd in tracked_fds:
       tracked_fds[self.fd].seek(offset)
     else:
       os.lseek(self.fd, offset, os.SEEK_CUR)
+  @staticmethod
+  def anon_mmap(start, sz, prot, flags, offset):
+    return FileIOInterface._mmap(start, sz, prot, flags & ~0x4a000, -1, offset)  # strip MAP_LOCKED|MAP_POPULATE|MAP_HUGETLB
   @staticmethod
   def exists(path): return _open(path, os.O_RDONLY) is not None
   @staticmethod

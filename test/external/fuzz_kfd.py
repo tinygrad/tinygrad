@@ -19,7 +19,7 @@ if __name__ == "__main__":
     q.signal(sig:=AMDDevice._alloc_signal(10))
     qc = HWQueue()
     qc.wait(sig)
-    qc.copy(b1.va_addr, b2.va_addr, min(b1.size, b2.size))
+    qc.copy(b1, b2, min(b1.size, b2.size))
     d1.completion_signal.value = 1
     qc.signal(d1.completion_signal)
     qc.submit(d1)

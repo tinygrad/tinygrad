@@ -2,7 +2,7 @@
 import unittest, math
 import numpy as np
 import tensorflow as tf
-import tensorflow_addons as tfa
+from tensorflow.keras.optimizers import Lamb
 from tensorflow.python.ops import math_ops
 from extra.lr_scheduler import LRSchedulerGroup
 
@@ -88,6 +88,8 @@ def create_tiny_lars(params, lr, skip_list=False):
   if skip_list: return OptimizerGroup(LARS([params[0]], lr), SGD([params[1]], lr, classic=True, weight_decay=0., momentum=.9))
   return LARS(params, lr)
 def create_tf_lars(lr, skip_list=False): return LARSOptimizer(lr, skip_list=["W"] if skip_list else None)
+def create_tf_lamb(lr=0.001, b1=0.9, b2=0.999, eps=1e-7, weight_decay=0.0):
+  return Lamb(learning_rate=float(lr), beta_1=b1, beta_2=b2, epsilon=eps, weight_decay=weight_decay)
 
 def create_tiny_polylr(optim, initial_lr, end_lr, train_steps, warmup, power=2, skip_list=False):
   assert power == 2
@@ -112,7 +114,7 @@ class ExternalTestOptim(unittest.TestCase):
                    step_tf(tensorflow_optim, steps=steps, kwargs=opts, scheduler=tf_sched, schedopts=schedopts, do_optim=do_optim)):
       np.testing.assert_allclose(x, y, atol=atol, rtol=rtol)
 
-  def _test_lamb(self, steps, opts, atol, rtol): self._test_optim(LAMB, tfa.optimizers.LAMB, steps, opts, atol, rtol)
+  def _test_lamb(self, steps, opts, atol, rtol): self._test_optim(LAMB, create_tf_lamb, steps, opts, atol, rtol)
   def _test_lars(self, steps, opts, atol, rtol): self._test_optim(create_tiny_lars, create_tf_lars, steps, opts, atol, rtol)
   def _test_lars_polylr(self, steps, opts, schedopts, atol, rtol, do_optim=True):
     self._test_optim(create_tiny_lars, create_tf_lars, steps, opts, atol, rtol,

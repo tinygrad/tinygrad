@@ -131,7 +131,7 @@ timeit.repeat(jit_step, repeat=5, number=1)
 
 1.0 ms is 75x faster! Note that we aren't syncing the GPU, so GPU time may be slower.
 
-The slowness the first two times is the JIT capturing the kernels. And this JIT will not run any Python in the function, it will just replay the tinygrad kernels that were run, so be aware that non tinygrad Python operations won't work. Randomness functions work as expected.
+The first two runs of the function execute normally, with the JIT capturing the kernels. Starting from the third run, only the tinygrad operations are replayed, removing the overhead by skipping Python code execution. So be aware that any non-tinygrad Python values affecting the kernels will be "frozen" from the second run. Note that `Tensor` randomness functions work as expected.
 
 Unlike other JITs, we JIT everything, including the optimizer. Think of it as a dumb replay on different data.
 

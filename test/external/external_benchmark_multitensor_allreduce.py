@@ -1,7 +1,7 @@
 from tinygrad import Tensor, Device, GlobalCounters, TinyJit, dtypes
-from tinygrad.helpers import getenv, Context, RING, DEBUG
+from tinygrad.helpers import getenv, Context, DEBUG
 
-def test(devs: list[str], N: int, iters:int = 10):
+def test(devs: list[str], N: int, iters:int = 10, name:str = "allreduce"):
   @TinyJit
   def f(t: Tensor) -> Tensor: t.sum(0).realize()
 
@@ -17,39 +17,33 @@ def test(devs: list[str], N: int, iters:int = 10):
     i_secs = GlobalCounters.time_sum_s
     i_gflops = GlobalCounters.global_ops/i_secs/10**9
     i_gbs = (N*4)/i_secs/10**9
-    print(f"{'ring_allreduce' if RING >= 2 else 'naive_allreduce'} iter {i+1}/{iters}: {i_secs:.6f} sec {i_gflops:.2f} GFLOP/s {i_gbs:.2f} GB/s")
+    print(f"{name} iter {i+1}/{iters}: {i_secs:.6f} sec {i_gflops:.2f} GFLOP/s {i_gbs:.2f} GB/s")
     secs += i_secs
     gflops += i_gflops
     gbs += i_gbs
 
   return (gflops/iters, gbs/iters, secs/iters)
 
-def run(sz, n_gpus=6, iters=10, use_ring=False):
+def run(sz, n_gpus=6, iters=10, ring=0, all2all=0):
   devs = tuple([f"{Device.DEFAULT}:{x}" for x in range(n_gpus)])
   N = sz // dtypes.float32.itemsize
-  with Context(RING=(2 if use_ring else 0), DEBUG=max(DEBUG.value, 2)): return test(devs, N, iters=iters)
+  name = "all2all" if all2all else ("ring" if ring else "naive")
+  with Context(RING=(2 if ring else 0), ALL2ALL=(2 if all2all else 0), JIT_BATCH_SIZE=0, DEBUG=max(DEBUG.value, 2)):
+    return test(devs, N, iters=iters, name=name)
 
 def main():
-  ONLY_RING = getenv("ONLY_RING", 0)
   n_gpus = getenv("GPUS", 6)
   iters = getenv("ITERS", 10)
+  sz = getenv("SZ", 1000) * 10**6 # size of data on each gpu
+  print(f"Using {sz/10**9:.2f} GB of numbers on each of {n_gpus} GPUs, {n_gpus*sz/10**9:.2f} GB total.")
 
-  if getenv("BENCHMARK_SPLIT"):
-    l, r = 0, 512
-    while r - l > 1:
-      m = (l + r) // 2
-      (ring_gflops, ring_gbs, ring_secs) = run(m * 1024 * 4, n_gpus=n_gpus, iters=100, use_ring=True)
-      (naive_gflops, naive_gbs, naive_secs) = run(m * 1024 * 4, n_gpus=n_gpus, iters=100, use_ring=False)
-      if ring_secs > naive_secs: l = m
-      else: r = m
-    print("Better split", r * 1024, "elements")
-  else:
-    sz = getenv("SZ", 1000) * 10**6 # size of data on each gpu
-    print(f"Using {sz/10**9:.2f} GB of numbers on each of {n_gpus} GPUs, {n_gpus*sz/10**9:.2f} GB total.")
-    (ring_gflops, ring_gbs, ring_secs) = run(sz, use_ring=True, n_gpus=n_gpus, iters=iters)
-    if not ONLY_RING: (naive_gflops, naive_gbs, naive_secs) = run(sz, use_ring=False, n_gpus=n_gpus, iters=iters)
-    print(f"Ring:\n  {ring_secs:.6f} seconds/iter\n  {ring_gflops:.2f} GFLOP/s\n  {ring_gbs:.2f} GB/s")
-    if not ONLY_RING: print(f"Naive:\n  {naive_secs:.6f} seconds/iter\n  {naive_gflops:.2f} GFLOP/s\n  {naive_gbs:.2f} GB/s")
+  results = {}
+  for name, kwargs in [("naive", {}), ("ring", {"ring": 2}), ("all2all", {"all2all": 2})]:
+    results[name] = run(sz, n_gpus=n_gpus, iters=iters, **kwargs)
+
+  print("\n=== RESULTS ===")
+  for name, (gflops, gbs, secs) in results.items():
+    print(f"{name.upper()}:\n  {secs:.6f} seconds/iter\n  {gflops:.2f} GFLOP/s\n  {gbs:.2f} GB/s")
 
 if __name__ == "__main__":
   main()

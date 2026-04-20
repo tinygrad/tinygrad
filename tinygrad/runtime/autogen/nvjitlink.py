@@ -1,75 +1,42 @@
-# mypy: ignore-errors
+# mypy: disable-error-code="empty-body"
+from __future__ import annotations
 import ctypes
-from tinygrad.helpers import unwrap
-from tinygrad.runtime.support.c import Struct, CEnum, _IO, _IOW, _IOR, _IOWR
-from ctypes.util import find_library
-def dll():
-  try: return ctypes.CDLL(unwrap(find_library('nvJitLink')))
-  except: pass
-  return None
-dll = dll()
-
-nvJitLinkResult = CEnum(ctypes.c_uint32)
-NVJITLINK_SUCCESS = nvJitLinkResult.define('NVJITLINK_SUCCESS', 0)
-NVJITLINK_ERROR_UNRECOGNIZED_OPTION = nvJitLinkResult.define('NVJITLINK_ERROR_UNRECOGNIZED_OPTION', 1)
-NVJITLINK_ERROR_MISSING_ARCH = nvJitLinkResult.define('NVJITLINK_ERROR_MISSING_ARCH', 2)
-NVJITLINK_ERROR_INVALID_INPUT = nvJitLinkResult.define('NVJITLINK_ERROR_INVALID_INPUT', 3)
-NVJITLINK_ERROR_PTX_COMPILE = nvJitLinkResult.define('NVJITLINK_ERROR_PTX_COMPILE', 4)
-NVJITLINK_ERROR_NVVM_COMPILE = nvJitLinkResult.define('NVJITLINK_ERROR_NVVM_COMPILE', 5)
-NVJITLINK_ERROR_INTERNAL = nvJitLinkResult.define('NVJITLINK_ERROR_INTERNAL', 6)
-
-nvJitLinkInputType = CEnum(ctypes.c_uint32)
-NVJITLINK_INPUT_NONE = nvJitLinkInputType.define('NVJITLINK_INPUT_NONE', 0)
-NVJITLINK_INPUT_CUBIN = nvJitLinkInputType.define('NVJITLINK_INPUT_CUBIN', 1)
-NVJITLINK_INPUT_PTX = nvJitLinkInputType.define('NVJITLINK_INPUT_PTX', 2)
-NVJITLINK_INPUT_LTOIR = nvJitLinkInputType.define('NVJITLINK_INPUT_LTOIR', 3)
-NVJITLINK_INPUT_FATBIN = nvJitLinkInputType.define('NVJITLINK_INPUT_FATBIN', 4)
-NVJITLINK_INPUT_OBJECT = nvJitLinkInputType.define('NVJITLINK_INPUT_OBJECT', 5)
-NVJITLINK_INPUT_LIBRARY = nvJitLinkInputType.define('NVJITLINK_INPUT_LIBRARY', 6)
-
-class struct_nvJitLink(Struct): pass
-nvJitLinkHandle = ctypes.POINTER(struct_nvJitLink)
-uint32_t = ctypes.c_uint32
-try: (nvJitLinkCreate:=dll.nvJitLinkCreate).restype, nvJitLinkCreate.argtypes = nvJitLinkResult, [ctypes.POINTER(nvJitLinkHandle), uint32_t, ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
-except AttributeError: pass
-
-try: (nvJitLinkDestroy:=dll.nvJitLinkDestroy).restype, nvJitLinkDestroy.argtypes = nvJitLinkResult, [ctypes.POINTER(nvJitLinkHandle)]
-except AttributeError: pass
-
-size_t = ctypes.c_uint64
-try: (nvJitLinkAddData:=dll.nvJitLinkAddData).restype, nvJitLinkAddData.argtypes = nvJitLinkResult, [nvJitLinkHandle, nvJitLinkInputType, ctypes.c_void_p, size_t, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (nvJitLinkAddFile:=dll.nvJitLinkAddFile).restype, nvJitLinkAddFile.argtypes = nvJitLinkResult, [nvJitLinkHandle, nvJitLinkInputType, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (nvJitLinkComplete:=dll.nvJitLinkComplete).restype, nvJitLinkComplete.argtypes = nvJitLinkResult, [nvJitLinkHandle]
-except AttributeError: pass
-
-try: (nvJitLinkGetLinkedCubinSize:=dll.nvJitLinkGetLinkedCubinSize).restype, nvJitLinkGetLinkedCubinSize.argtypes = nvJitLinkResult, [nvJitLinkHandle, ctypes.POINTER(size_t)]
-except AttributeError: pass
-
-try: (nvJitLinkGetLinkedCubin:=dll.nvJitLinkGetLinkedCubin).restype, nvJitLinkGetLinkedCubin.argtypes = nvJitLinkResult, [nvJitLinkHandle, ctypes.c_void_p]
-except AttributeError: pass
-
-try: (nvJitLinkGetLinkedPtxSize:=dll.nvJitLinkGetLinkedPtxSize).restype, nvJitLinkGetLinkedPtxSize.argtypes = nvJitLinkResult, [nvJitLinkHandle, ctypes.POINTER(size_t)]
-except AttributeError: pass
-
-try: (nvJitLinkGetLinkedPtx:=dll.nvJitLinkGetLinkedPtx).restype, nvJitLinkGetLinkedPtx.argtypes = nvJitLinkResult, [nvJitLinkHandle, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (nvJitLinkGetErrorLogSize:=dll.nvJitLinkGetErrorLogSize).restype, nvJitLinkGetErrorLogSize.argtypes = nvJitLinkResult, [nvJitLinkHandle, ctypes.POINTER(size_t)]
-except AttributeError: pass
-
-try: (nvJitLinkGetErrorLog:=dll.nvJitLinkGetErrorLog).restype, nvJitLinkGetErrorLog.argtypes = nvJitLinkResult, [nvJitLinkHandle, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (nvJitLinkGetInfoLogSize:=dll.nvJitLinkGetInfoLogSize).restype, nvJitLinkGetInfoLogSize.argtypes = nvJitLinkResult, [nvJitLinkHandle, ctypes.POINTER(size_t)]
-except AttributeError: pass
-
-try: (nvJitLinkGetInfoLog:=dll.nvJitLinkGetInfoLog).restype, nvJitLinkGetInfoLog.argtypes = nvJitLinkResult, [nvJitLinkHandle, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (nvJitLinkVersion:=dll.nvJitLinkVersion).restype, nvJitLinkVersion.argtypes = nvJitLinkResult, [ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
-except AttributeError: pass
-
+from typing import Literal, TypeAlias
+from tinygrad.runtime.support.c import _IO, _IOW, _IOR, _IOWR
+from tinygrad.runtime.support import c
+import sysconfig
+dll = c.DLL('nvjitlink', 'nvJitLink', [f'/{pre}/cuda/targets/{sysconfig.get_config_vars().get("MULTIARCH", "").rsplit("-", 1)[0]}/lib' for pre in ['opt', 'usr/local']])
+nvJitLinkResult: dict[int, str] = {(NVJITLINK_SUCCESS:=0): 'NVJITLINK_SUCCESS', (NVJITLINK_ERROR_UNRECOGNIZED_OPTION:=1): 'NVJITLINK_ERROR_UNRECOGNIZED_OPTION', (NVJITLINK_ERROR_MISSING_ARCH:=2): 'NVJITLINK_ERROR_MISSING_ARCH', (NVJITLINK_ERROR_INVALID_INPUT:=3): 'NVJITLINK_ERROR_INVALID_INPUT', (NVJITLINK_ERROR_PTX_COMPILE:=4): 'NVJITLINK_ERROR_PTX_COMPILE', (NVJITLINK_ERROR_NVVM_COMPILE:=5): 'NVJITLINK_ERROR_NVVM_COMPILE', (NVJITLINK_ERROR_INTERNAL:=6): 'NVJITLINK_ERROR_INTERNAL'}
+nvJitLinkInputType: dict[int, str] = {(NVJITLINK_INPUT_NONE:=0): 'NVJITLINK_INPUT_NONE', (NVJITLINK_INPUT_CUBIN:=1): 'NVJITLINK_INPUT_CUBIN', (NVJITLINK_INPUT_PTX:=2): 'NVJITLINK_INPUT_PTX', (NVJITLINK_INPUT_LTOIR:=3): 'NVJITLINK_INPUT_LTOIR', (NVJITLINK_INPUT_FATBIN:=4): 'NVJITLINK_INPUT_FATBIN', (NVJITLINK_INPUT_OBJECT:=5): 'NVJITLINK_INPUT_OBJECT', (NVJITLINK_INPUT_LIBRARY:=6): 'NVJITLINK_INPUT_LIBRARY'}
+class struct_nvJitLink(c.Struct): pass
+nvJitLinkHandle: TypeAlias = c.POINTER[struct_nvJitLink]
+uint32_t: TypeAlias = ctypes.c_uint32
+@dll.bind(ctypes.c_uint32, c.POINTER[nvJitLinkHandle], uint32_t, c.POINTER[c.POINTER[ctypes.c_char]])
+def nvJitLinkCreate(handle:c.POINTER[nvJitLinkHandle], numOptions:uint32_t, options:c.POINTER[c.POINTER[ctypes.c_char]]) -> ctypes.c_uint32: ...
+@dll.bind(ctypes.c_uint32, c.POINTER[nvJitLinkHandle])
+def nvJitLinkDestroy(handle:c.POINTER[nvJitLinkHandle]) -> ctypes.c_uint32: ...
+size_t: TypeAlias = ctypes.c_uint64
+@dll.bind(ctypes.c_uint32, nvJitLinkHandle, ctypes.c_uint32, ctypes.c_void_p, size_t, c.POINTER[ctypes.c_char])
+def nvJitLinkAddData(handle:nvJitLinkHandle, inputType:ctypes.c_uint32, data:ctypes.c_void_p, size:size_t, name:c.POINTER[ctypes.c_char]) -> ctypes.c_uint32: ...
+@dll.bind(ctypes.c_uint32, nvJitLinkHandle, ctypes.c_uint32, c.POINTER[ctypes.c_char])
+def nvJitLinkAddFile(handle:nvJitLinkHandle, inputType:ctypes.c_uint32, fileName:c.POINTER[ctypes.c_char]) -> ctypes.c_uint32: ...
+@dll.bind(ctypes.c_uint32, nvJitLinkHandle)
+def nvJitLinkComplete(handle:nvJitLinkHandle) -> ctypes.c_uint32: ...
+@dll.bind(ctypes.c_uint32, nvJitLinkHandle, c.POINTER[size_t])
+def nvJitLinkGetLinkedCubinSize(handle:nvJitLinkHandle, size:c.POINTER[size_t]) -> ctypes.c_uint32: ...
+@dll.bind(ctypes.c_uint32, nvJitLinkHandle, ctypes.c_void_p)
+def nvJitLinkGetLinkedCubin(handle:nvJitLinkHandle, cubin:ctypes.c_void_p) -> ctypes.c_uint32: ...
+@dll.bind(ctypes.c_uint32, nvJitLinkHandle, c.POINTER[size_t])
+def nvJitLinkGetLinkedPtxSize(handle:nvJitLinkHandle, size:c.POINTER[size_t]) -> ctypes.c_uint32: ...
+@dll.bind(ctypes.c_uint32, nvJitLinkHandle, c.POINTER[ctypes.c_char])
+def nvJitLinkGetLinkedPtx(handle:nvJitLinkHandle, ptx:c.POINTER[ctypes.c_char]) -> ctypes.c_uint32: ...
+@dll.bind(ctypes.c_uint32, nvJitLinkHandle, c.POINTER[size_t])
+def nvJitLinkGetErrorLogSize(handle:nvJitLinkHandle, size:c.POINTER[size_t]) -> ctypes.c_uint32: ...
+@dll.bind(ctypes.c_uint32, nvJitLinkHandle, c.POINTER[ctypes.c_char])
+def nvJitLinkGetErrorLog(handle:nvJitLinkHandle, log:c.POINTER[ctypes.c_char]) -> ctypes.c_uint32: ...
+@dll.bind(ctypes.c_uint32, nvJitLinkHandle, c.POINTER[size_t])
+def nvJitLinkGetInfoLogSize(handle:nvJitLinkHandle, size:c.POINTER[size_t]) -> ctypes.c_uint32: ...
+@dll.bind(ctypes.c_uint32, nvJitLinkHandle, c.POINTER[ctypes.c_char])
+def nvJitLinkGetInfoLog(handle:nvJitLinkHandle, log:c.POINTER[ctypes.c_char]) -> ctypes.c_uint32: ...
+@dll.bind(ctypes.c_uint32, c.POINTER[ctypes.c_uint32], c.POINTER[ctypes.c_uint32])
+def nvJitLinkVersion(major:c.POINTER[ctypes.c_uint32], minor:c.POINTER[ctypes.c_uint32]) -> ctypes.c_uint32: ...

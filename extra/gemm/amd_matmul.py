@@ -36,7 +36,7 @@ if __name__ == "__main__":
     for _ in range(run_count): tc = (a@b).realize()
 
   GlobalCounters.reset()
-  ei = ExecItem(runner, [a.uop.buffer, b.uop.buffer, c.uop.buffer])
+  ei = ExecItem(ast, [a.uop.buffer, b.uop.buffer, c.uop.buffer], prg=runner)
   with Context(DEBUG=2):
     for _ in range(run_count): ei.run(wait=True)
   print(f"custom  {(c-tc).square().mean().item()}")

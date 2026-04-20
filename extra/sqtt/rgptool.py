@@ -145,7 +145,8 @@ class RGP:
   @staticmethod
   def from_profile(profile_pickled, device:str|None=None):
     profile: list[ProfileEvent] = pickle.loads(profile_pickled)
-    device_events = {x.device:x for x in profile if isinstance(x, ProfileDeviceEvent) and x.device.startswith('AMD')}
+    def _is_base_dev(d): return all(p.isdigit() for p in d.split(":")[1:])
+    device_events = {x.device:x for x in profile if isinstance(x, ProfileDeviceEvent) and x.device.startswith('AMD') and _is_base_dev(x.device)}
     if device is None:
       if len(device_events) == 0: raise RuntimeError('No supported devices found in profile')
       if len(device_events) > 1: raise RuntimeError(f"More than one supported device found, select which one to export: {', '.join(device_events.keys())}")
@@ -166,6 +167,7 @@ class RGP:
           se=ev.se,
           itrace=merged_sqtt_events[ev.se].itrace or ev.itrace,
           blob=merged_sqtt_events[ev.se].blob + ev.blob,
+          exec_tag=0,
         )
     sqtt_events = list(merged_sqtt_events.values())
 
@@ -274,7 +276,7 @@ class RGP:
           ),
           shader_engine_index=sqtt_event.se,
           sqtt_version={11: sqtt.SQTT_VERSION_3_2, 12: sqtt.SQTT_VERSION_3_3}.get(gfx_ver),
-          v1=sqtt.struct_sqtt_file_chunk_sqtt_desc_0_v1(
+          v1=sqtt.struct_sqtt_file_chunk_sqtt_desc_v1(
             instrumentation_spec_version=1,
             instrumentation_api_version=0,
             compute_unit_index=0,

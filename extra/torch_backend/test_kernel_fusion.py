@@ -1,7 +1,6 @@
 # simple tests
 import unittest
 import torch
-import warnings
 from tinygrad.helpers import getenv, GlobalCounters
 if getenv("TINY_BACKEND2"):
   import extra.torch_backend.backend2
@@ -18,9 +17,7 @@ class TestKernelFusionRegression(unittest.TestCase):
     torch.manual_seed(42)
     GlobalCounters.reset()
     fn().detach().cpu().numpy()
-    expectation = f"{GlobalCounters.kernel_count} vs {expected_kernels} expected."
-    if GlobalCounters.kernel_count < expected_kernels: warnings.warn(f"{expectation} Expectation can be lowered.", UserWarning)
-    self.assertLessEqual(GlobalCounters.kernel_count, expected_kernels, f"{expectation}")
+    self.assertEqual(GlobalCounters.kernel_count, expected_kernels)
 
   def test_elementwise_fusion(self):
     def fn():
@@ -34,7 +31,7 @@ class TestKernelFusionRegression(unittest.TestCase):
       conv = torch.nn.Conv2d(3, 16, 3, padding=1).to(device)
       with torch.no_grad():
         return torch.nn.functional.relu(conv(x))
-    self._check_kernel_count(fn, 8)
+    self._check_kernel_count(fn, 7)
 
   def test_batchnorm_fusion(self):
     def fn():
@@ -44,26 +41,26 @@ class TestKernelFusionRegression(unittest.TestCase):
       bn.eval()
       with torch.no_grad():
         return torch.nn.functional.relu(bn(conv(x)))
-    self._check_kernel_count(fn, 16)
+    self._check_kernel_count(fn, 11)
 
   def test_reduce_fusion(self):
     def fn():
       x = torch.randn(64, 64, device=device)
       return (x * 2.0).sum()
-    self._check_kernel_count(fn, 7)
+    self._check_kernel_count(fn, 6)
 
   def test_matmul_elementwise_fusion(self):
     def fn():
       x = torch.randn(32, 32, device=device)
       w = torch.randn(32, 32, device=device)
       return torch.nn.functional.relu(x @ w + 1.0)
-    self._check_kernel_count(fn, 6)
+    self._check_kernel_count(fn, 8)
 
   def test_pooling_fusion(self):
     def fn():
       x = torch.randn(1, 8, 16, 16, device=device)
       return torch.nn.functional.max_pool2d(x * 2.0, 2)
-    self._check_kernel_count(fn, 5)
+    self._check_kernel_count(fn, 6)
 
   def test_residual_add_relu_fusion(self):
     def fn():
@@ -71,7 +68,7 @@ class TestKernelFusionRegression(unittest.TestCase):
       identity = torch.randn(1, 8, 16, 16, device=device)
       out = x + identity
       return torch.nn.functional.relu(out)
-    self._check_kernel_count(fn, 6)
+    self._check_kernel_count(fn, 8)
 
   def test_inplace_add_relu_fusion(self):
     def fn():
@@ -79,7 +76,7 @@ class TestKernelFusionRegression(unittest.TestCase):
       y = torch.randn(1, 16, 32, 32, device=device)
       x += y
       return torch.nn.functional.relu(x)
-    self._check_kernel_count(fn, 6)
+    self._check_kernel_count(fn, 8)
 
   def test_conv_bn_add_relu_fusion(self):
     def fn():
@@ -92,7 +89,7 @@ class TestKernelFusionRegression(unittest.TestCase):
         out = bn(conv(x))
         out += identity
         return torch.nn.functional.relu(out)
-    self._check_kernel_count(fn, 16)
+    self._check_kernel_count(fn, 13)
 
   def test_multiple_inplace_ops_fusion(self):
     def fn():
@@ -100,7 +97,7 @@ class TestKernelFusionRegression(unittest.TestCase):
       x += 1.0
       x *= 2.0
       return torch.nn.functional.relu(x)
-    self._check_kernel_count(fn, 4)
+    self._check_kernel_count(fn, 5)
 
   def test_view_inplace_no_fusion_break(self):
     def fn():
@@ -117,7 +114,7 @@ class TestKernelFusionRegression(unittest.TestCase):
       bn.train()
       with torch.no_grad():
         return bn(x)
-    self._check_kernel_count(fn, 10)
+    self._check_kernel_count(fn, 9)
 
   # this is a minimal extra/other_mnist/beautiful_mnist_torch.py to cover fusion for training with optimizer
   def test_mnist_training_fusion(self):
@@ -138,7 +135,7 @@ class TestKernelFusionRegression(unittest.TestCase):
       loss.backward()
       optimizer.step()
       return loss
-    self._check_kernel_count(fn, 33)
+    self._check_kernel_count(fn, 25)
 
 if __name__ == "__main__":
   unittest.main()

@@ -15,24 +15,24 @@ class DiskDevice(Compiled):
     self.size: int|None = None
     self.fd: int|None = None
     self.count = 0
-    super().__init__(device, DiskAllocator(self), None, None)
+    super().__init__(device, DiskAllocator(self), [], None)
   def _might_open(self, size:int):
     assert self.size is None or size <= self.size, f"can't reopen Disk tensor with larger size, opened with {self.size}, tried to open with {size}"
-    if self.size is not None and hasattr(self.device, "mem"):
+    if self.size is not None and hasattr(self, "mem"):
       self.count += 1
       return
     filename = self.device[len("disk:"):]
-    self.size = size
 
     if sys.platform != "win32" and filename.startswith("shm:"):
       fd = _posixshmem.shm_open("/"+filename[4:].lstrip("/"), os.O_RDWR, 0o600)
-      self.mem = mmap.mmap(fd, self.size, mmap.MAP_SHARED | MAP_POPULATE | MAP_LOCKED)
+      self.mem = mmap.mmap(fd, size, mmap.MAP_SHARED | MAP_POPULATE | MAP_LOCKED)
       os.close(fd)
     else:
       try: self.fd = os.open(filename, os.O_RDWR|os.O_CREAT|getattr(os, "O_DIRECT", 0))
       except OSError: self.fd = os.open(filename, os.O_RDWR|os.O_CREAT)
-      if not pathlib.Path(filename).is_block_device() and os.fstat(self.fd).st_size < self.size: os.ftruncate(self.fd, self.size)
-      self.mem = mmap.mmap(self.fd, self.size)
+      if not pathlib.Path(filename).is_block_device() and os.fstat(self.fd).st_size < size: os.ftruncate(self.fd, size)
+      self.mem = mmap.mmap(self.fd, size)
+    self.size = size
     if hasattr(self.mem, 'madvise') and (hp := getattr(mmap, "MADV_HUGEPAGE", None)) is not None:
       with contextlib.suppress(OSError): self.mem.madvise(hp) # some systems have transparent_hugepage disabled
     self.count += 1
@@ -95,20 +95,31 @@ class DiskAllocator(Allocator):
     else:
       dest[:] = src._buf()
 
-  def _copyout_sharded(self, src:DiskBuffer, size:int, _get_free_buf:Callable, seg_len:int) -> Generator[tuple[int, int, int, int], None, None]:
-    assert hasattr(DiskDevice, 'io_uring'), "function requires io uring support"
-
+  def _copyout_sharded(self, src:DiskBuffer, size:int, _get_free_buf:Callable, seg_len:int,
+                       use_ioring:bool=True) -> Generator[tuple[int, int, int, int], None, None]:
     fd_offset = src.offset - (minor_offset := src.offset % mmap.PAGESIZE)
     processed_reqs_cnt, copied_in, next_read_offset, total_copy_size = 0, 0, 0, round_up(size + minor_offset, mmap.PAGESIZE)
-    reqs: list[tuple[int, int, int, int]] = []
 
+    if not hasattr(DiskDevice, 'io_uring') or not use_ioring:
+      local_buf = memoryview(bytearray(seg_len))
+      for off in range(0, total_copy_size, seg_len):
+        while (copy_batch := _get_free_buf()) is None: pass
+        read_size = min(seg_len, total_copy_size - off, src.device.size - fd_offset - off)
+        self._copyout(local_buf[:read_size], DiskBuffer(src.device, read_size, fd_offset + off))
+        copy_batch[0].view(size=read_size)[:] = local_buf[:read_size]
+        real_copy_size = min(read_size - minor_offset, size - copied_in)
+        yield (copy_batch, copied_in, minor_offset, real_copy_size)
+        copied_in, minor_offset = copied_in + real_copy_size, 0
+      return
+
+    reqs: list[tuple[int, int, int, int]] = []
     while next_read_offset < total_copy_size or len(reqs) != processed_reqs_cnt:
       if next_read_offset < total_copy_size and (copy_batch := _get_free_buf()) is not None:
         # Prepare sqe
         sqe_index = (tail:=DiskDevice.io_uring.sq.ktail[0]) & DiskDevice.io_uring.sq.kring_mask[0]
         sqe = DiskDevice.io_uring.sq.sqes[sqe_index]
         sqe.opcode, sqe.fd, sqe.off = io_uring.IORING_OP_READ, self.dev.fd, fd_offset + next_read_offset
-        sqe.addr, sqe.len, sqe.user_data = copy_batch[0], min(seg_len, total_copy_size - next_read_offset), len(reqs)
+        sqe.addr, sqe.len, sqe.user_data = copy_batch[0].addr, min(seg_len, total_copy_size - next_read_offset), len(reqs)
 
         # Send sqe
         DiskDevice.io_uring.sq.array[sqe_index] = sqe_index

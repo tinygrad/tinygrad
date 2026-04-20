@@ -2,26 +2,15 @@
 # a python uops emulator
 # works to test the tensor cores, and all the uops in general
 # this is the (living) definition of uops
-from typing import Any, TYPE_CHECKING, cast
-import pickle, base64, itertools, time, struct, sys, functools
-from tinygrad.dtype import DType, dtypes, ImageDType, PtrDType, truncate, float_to_bf16, float_to_fp8, fp8_to_float
-from tinygrad.helpers import all_same, getenv, flatten, get_single_element, EMULATE
+from typing import Any, TYPE_CHECKING
+import pickle, base64, itertools, time, sys, functools
+from dataclasses import replace
+from tinygrad.dtype import DType, dtypes, ImageDType, PtrDType, truncate, storage_fmt_for_dtype, to_storage_scalar, from_storage_scalar
+from tinygrad.helpers import all_same, getenv, flatten, get_single_element, Target
 from tinygrad.device import Compiled, Compiler, Allocator
 from tinygrad.codegen.opt import tc
-from tinygrad.uop.ops import exec_alu, python_alu, Ops, UOp, GroupOp
+from tinygrad.uop.ops import exec_alu, python_alu, Ops, UOp, GroupOp, bitcast
 from tinygrad.renderer import Renderer
-
-def storage_fmt_for_dtype(dtype: DType): return 'H' if dtype == dtypes.bfloat16 else 'B' if dtype in dtypes.fp8s else dtype.fmt
-
-def to_storage_scalar(x, dtype: DType):
-  if dtype == dtypes.bfloat16: return (struct.unpack('I', struct.pack('f', float_to_bf16(x)))[0] >> 16) & 0xFFFF
-  if dtype in dtypes.fp8s: return float_to_fp8(float(x), dtype)
-  return x
-
-def from_storage_scalar(x, dtype: DType):
-  if dtype == dtypes.bfloat16: return struct.unpack('f', struct.pack('I', (x & 0xFFFF) << 16))[0]
-  if dtype in dtypes.fp8s: return fp8_to_float(int(x), dtype)
-  return x
 
 def _load(m, i, dtype: DType):
   if i is None: return 0.0
@@ -51,9 +40,9 @@ def generic_wmma_helper(inp, warp_size, WARP_THREADS, K, NUM_A, NUM_B, NUM_C, a_
   return out
 
 class PythonProgram:
-  def __init__(self, name:str, lib:bytes):
+  def __init__(self, name:str, lib:bytes, **kwargs):
     self.uops: list[tuple[Ops, DType, list[int], Any]] = pickle.loads(lib)
-  def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False):
+  def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False, **kw):
     st = time.perf_counter()
     warp = list(itertools.product(*[range(x) for x in local_size[::-1]]))
     warp_size = len(warp)
@@ -84,7 +73,7 @@ class PythonProgram:
           i += 1
           continue
         if uop is Ops.AFTER: values[i] = src_values[0]
-        elif uop in {Ops.DEFINE_GLOBAL, Ops.DEFINE_LOCAL, Ops.DEFINE_REG}:
+        elif uop in {Ops.PARAM, Ops.DEFINE_LOCAL, Ops.DEFINE_REG}:
           assert isinstance(dtype, PtrDType), dtype
           storage_fmt = storage_fmt_for_dtype(dtype.base.scalar())
           if storage_fmt is None: raise RuntimeError(f"{dtype=} is not supported")
@@ -93,7 +82,7 @@ class PythonProgram:
             # REGs are per thread
             values[i] = [memoryview(bytearray(dtype.size*dtype.itemsize)).cast(storage_fmt) for _ in range(warp_size)]
           else:
-            buf = memoryview(bytearray(dtype.size*dtype.itemsize)) if uop is not Ops.DEFINE_GLOBAL else pbufs.pop(0)
+            buf = memoryview(bytearray(dtype.size*dtype.itemsize)) if uop is not Ops.PARAM else pbufs.pop(0)
             values[i] = [buf.cast(storage_fmt)] * warp_size
         elif uop is Ops.DEFINE_VAR:
           values[i] = [pvals.pop(0)] * warp_size
@@ -122,13 +111,9 @@ class PythonProgram:
             i = loop_ends[i] + 1
             continue
         elif uop is Ops.VECTORIZE: values[i] = src_values
-        elif uop is Ops.BITCAST:
-          packed = struct.pack(str(warp_size) + storage_fmt_for_dtype(src_dtypes[0].scalar()),
-                               *[to_storage_scalar(x, src_dtypes[0].scalar()) for x in src_values[0]])
-          values[i] = list(struct.unpack(str(warp_size) +  storage_fmt_for_dtype(dtype.scalar()), packed))
-          values[i] = [from_storage_scalar(x, dtype.scalar()) for x in values[i]]
+        elif uop is Ops.BITCAST: values[i] = [bitcast(x, src_dtypes[0], dtype) for x in src_values[0]]
         elif uop is Ops.CAST:
-          values[i] = [truncate.get(dtype, lambda dt: dt)(dtypes.as_const(x, dtype)) for x in src_values[0]]
+          values[i] = [truncate.get(dtype, lambda dt: dt)(dtype.const(x)) for x in src_values[0]]
         elif uop is Ops.LOAD:
           if dtype.count > 1:
             values[i] = [load([src_values[i][j] if i != 0 and src_dtypes[i].count > 1 else src_values[i] \
@@ -141,7 +126,7 @@ class PythonProgram:
           assert isinstance(first_src_dtype, DType) # mypy
           dims, dtype_in, device, threads = arg[1], first_src_dtype.scalar(), arg[4], arg[5]
           wmma_helper = functools.partial(generic_wmma_helper, src_values, warp_size)
-          # TODO: refactor these to a shared TensorCoreLayout in kernel.py
+          # TODO: refactor these to a shared TensorCoreLayout
           if device == "METAL":
             # A (2 elements on 32 threads): row major
             def a_b_elem(x, i, j, goff): return x[(i%2)][goff+(i//2)%2+(j%4)*2+(i//4)*8+(j//4)*16]
@@ -213,30 +198,33 @@ class PythonProgram:
         i += 1
     return time.perf_counter() - st
 
+class PythonCompiler(Compiler):
+  def compile(self, src:str) -> bytes: return base64.b64decode(src)
+
 class PythonRenderer(Renderer):
-  device = "PYTHON"
   code_for_op = python_alu
-  def __init__(self):
-    match cast(str, EMULATE.value):
-      case "METAL": self.device, self.tensor_cores = "METAL", tc.metal
-      case "AMD": self.device, self.tensor_cores = "AMD", tc.amd_rdna3
-      case "AMD_MFMA": self.device, self.tensor_cores = "AMD", tc.amd_cdna4
-      case "AMD_RDNA4": self.device, self.tensor_cores = "AMD", tc.amd_rdna4
-      case "CUDA": self.device, self.tensor_cores = "CUDA", tc.cuda_sm80
-      case "CUDA_SM75": self.device, self.tensor_cores = "CUDA", tc.cuda_sm75
-      case "CUDA_SM89": self.device, self.tensor_cores = "CUDA", tc.cuda_sm89
-      case "INTEL": self.device, self.suffix, self.tensor_cores = "INTEL", "INTEL", tc.intel
-      case "AMX": self.device, self.tensor_cores = "CPU", tc.amx
-      case "": pass
-      case _: raise RuntimeError(f"can't EMULATE device: {EMULATE.value}")
+  compiler = PythonCompiler()
+
+  def __init__(self, target:Target):
+    assert (emu:=getenv("EMULATE", "")) == "", ("EMULATE is deprecated, use DEV=PYTHON::" +
+      {"AMD":"gfx1100", "AMD_RDNA4":"gfx1201", "AMD_MFMA":"gfx950", "CUDA":"sm_80", "CUDA_SM75":"sm_75", "CUDA_SM89":"sm_89"}.get(emu, emu))
+    target = replace(target, renderer="PYTHON")
+    if target.arch == "METAL": self.target, self.tensor_cores = replace(target, device="METAL"), tc.metal
+    elif target.arch == "INTEL": self.target, self.suffix, self.tensor_cores = replace(target, device="INTEL"), "INTEL", tc.intel
+    elif target.arch == "AMX": self.target, self.tensor_cores = replace(target, device="CPU"), tc.amx
+    elif target.arch.startswith("gfx"):
+      self.target = replace(target, device="AMD")
+      self.tensor_cores = tc.get_amd(target.arch)
+    elif target.arch.startswith("sm"):
+      self.target = replace(target, device="CUDA")
+      self.tensor_cores = tc.get_cuda(target.arch)
+    elif target.arch == "": self.target = target
+    else: raise RuntimeError(f"unsupported arch: {target.arch}")
 
   def render(self, uops:list[UOp]) -> str:
     # the value of SPECIAL comes from local/global_size, not form its source
     lops = [(u.op, u.dtype, [uops.index(v) for v in u.src if u.op is not Ops.SPECIAL], u.arg) for u in uops]
     return base64.b64encode(pickle.dumps(lops)).decode()
-
-class PythonCompiler(Compiler):
-  def compile(self, src:str) -> bytes: return base64.b64decode(src)
 
 class PythonAllocator(Allocator['PythonDevice']):
   def _alloc(self, size, options): return memoryview(bytearray(size))
@@ -244,4 +232,5 @@ class PythonAllocator(Allocator['PythonDevice']):
   def _copyout(self, dest:memoryview, src): dest[:] = src
 
 class PythonDevice(Compiled):
-  def __init__(self, device:str): super().__init__(device, PythonAllocator(self), [(PythonRenderer, PythonCompiler)], PythonProgram)
+  def __init__(self, device:str):
+    super().__init__(device, PythonAllocator(self), [PythonRenderer], PythonProgram)

@@ -3,7 +3,7 @@
 AM driver is a userspace driver targeting AMD's RDNA3/RDNA4. You only need tinygrad to send compute tasks to your GPU!
 
 ## How to run?
-Make sure that amdgpu module is unloaded and just run tinygrad with `AMD=1`!
+Make sure that amdgpu module is unloaded and just run tinygrad with `DEV=AMD`!
 
 Optional requirements:
 

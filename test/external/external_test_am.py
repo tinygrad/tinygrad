@@ -2,7 +2,7 @@ import unittest
 from tinygrad.runtime.support.am.amdev import AMMemoryManager, AMPageTableEntry
 from tinygrad.runtime.support.am.ip import AM_GMC
 from tinygrad.runtime.support.hcq import MMIOInterface
-from tinygrad.runtime.support.memory import PageTableTraverseContext
+from tinygrad.runtime.support.memory import PageTableTraverseContext, AddrSpace
 from tinygrad.runtime.autogen.am import am
 from tinygrad.helpers import mv_address
 
@@ -27,11 +27,13 @@ class FakeAM:
     self.gmc = FakeGMC(self)
     self.mm = AMMemoryManager(self, self.vram_size, boot_size=(32 << 20), pt_t=AMPageTableEntry, va_shifts=[12, 21, 30, 39], va_bits=48,
       first_lv=am.AMDGPU_VM_PDB2, va_base=AMMemoryManager.va_allocator.base,
-      palloc_ranges=[(1 << (i + 12), 0x1000) for i in range(9 * (3 - am.AMDGPU_VM_PDB2), -1, -1)])
+      palloc_ranges=[(1 << (i + 12), (2 << 20) if i >= 9 else 0x1000) for i in range(9 * (3 - am.AMDGPU_VM_PDB2), -1, -1)])
     self.is_booting = False
     self.ip_ver = {am.GC_HWIP: (11, 0, 0)}
   def paddr2cpu(self, paddr:int) -> int: return paddr + mv_address(self.vram)
   def paddr2mc(self, paddr:int) -> int: return paddr
+  def paddr2xgmi(self, paddr:int) -> int: return paddr
+  def xgmi2paddr(self, xgmi_paddr:int) -> int: return xgmi_paddr
 
 #  * PTE format:
 #  * 63:59 reserved
@@ -68,7 +70,7 @@ class TestAMPageTable(unittest.TestCase):
 
     for va,sz in [(0x10000, 0x3000), (0x11000, 0x300000), (0x10000, 0x2000), (0x11000, 0x5000),
                   (0x2000000, 0x2000), (0x4000000, 0x4000000), (0x38000, 0x303000), (0x8000, 0x1000)]:
-      mm.map_range(vaddr=helper_va(va), size=sz, paddrs=[(va, sz)])
+      mm.map_range(vaddr=helper_va(va), size=sz, paddrs=[(va, sz)], aspace=AddrSpace.PHYS)
 
       ctx = PageTableTraverseContext(self.d[0], mm.root_page_table, helper_va(va))
       results = list(ctx.next(sz))
@@ -100,8 +102,8 @@ class TestAMPageTable(unittest.TestCase):
     mm0 = self.d[0].mm
 
     for (va1,sz1),(va2,sz2) in [((0x10000, (0x1000)), (0x11000, (2 << 20)))]:
-      mm0.map_range(vaddr=helper_va(va1), size=sz1, paddrs=[(va1, sz1)])
-      mm0.map_range(vaddr=helper_va(va2), size=sz2, paddrs=[(va2, sz2)])
+      mm0.map_range(vaddr=helper_va(va1), size=sz1, paddrs=[(va1, sz1)], aspace=AddrSpace.PHYS)
+      mm0.map_range(vaddr=helper_va(va2), size=sz2, paddrs=[(va2, sz2)], aspace=AddrSpace.PHYS)
       mm0.unmap_range(helper_va(va2), sz2)
       mm0.unmap_range(helper_va(va1), sz1)
 
@@ -110,24 +112,24 @@ class TestAMPageTable(unittest.TestCase):
 
     for va,sz in [(0x10000, 0x3000), (0x1000000, 0x1000000), (0x12000, 0x4000)]:
       exteranl_va = helper_va(va)
-      mm0.map_range(vaddr=exteranl_va, size=sz, paddrs=[(va, sz)])
+      mm0.map_range(vaddr=exteranl_va, size=sz, paddrs=[(va, sz)], aspace=AddrSpace.PHYS)
 
       with self.assertRaises(AssertionError):
-        mm0.map_range(vaddr=exteranl_va, size=0x1000, paddrs=[(va, sz)])
+        mm0.map_range(vaddr=exteranl_va, size=0x1000, paddrs=[(va, sz)], aspace=AddrSpace.PHYS)
 
       with self.assertRaises(AssertionError):
-        mm0.map_range(vaddr=exteranl_va, size=0x100000, paddrs=[(va, sz)])
+        mm0.map_range(vaddr=exteranl_va, size=0x100000, paddrs=[(va, sz)], aspace=AddrSpace.PHYS)
 
       with self.assertRaises(AssertionError):
-        mm0.map_range(vaddr=exteranl_va + 0x1000, size=0x1000, paddrs=[(va, sz)])
+        mm0.map_range(vaddr=exteranl_va + 0x1000, size=0x1000, paddrs=[(va, sz)], aspace=AddrSpace.PHYS)
 
       with self.assertRaises(AssertionError):
-        mm0.map_range(vaddr=exteranl_va + 0x2000, size=0x100000, paddrs=[(va, sz)])
+        mm0.map_range(vaddr=exteranl_va + 0x2000, size=0x100000, paddrs=[(va, sz)], aspace=AddrSpace.PHYS)
 
       mm0.unmap_range(vaddr=exteranl_va, size=sz)
 
       # Finally can map and check paddrs
-      mm0.map_range(vaddr=exteranl_va + 0x2000, size=0x100000, paddrs=[(0xdead0000, 0x1000), (0xdead1000, 0xff000)])
+      mm0.map_range(vaddr=exteranl_va + 0x2000, size=0x100000, paddrs=[(0xdead0000, 0x1000), (0xdead1000, 0xff000)], aspace=AddrSpace.PHYS)
 
       ctx = PageTableTraverseContext(self.d[0], mm0.root_page_table, exteranl_va + 0x2000)
       for tup in ctx.next(0x100000):
@@ -145,13 +147,13 @@ class TestAMPageTable(unittest.TestCase):
     with self.assertRaises(AssertionError):
       mm0.unmap_range(helper_va(0x10000), 0x3000)
 
-    mm0.map_range(helper_va(0x10000), 0x3000, paddrs=[(0x10000, 0x3000)])
+    mm0.map_range(helper_va(0x10000), 0x3000, paddrs=[(0x10000, 0x3000)], aspace=AddrSpace.PHYS)
     mm0.unmap_range(helper_va(0x10000), 0x3000)
 
     with self.assertRaises(AssertionError):
       mm0.unmap_range(helper_va(0x10000), 0x3000)
 
-    mm0.map_range(helper_va(0x10000), 0x3000, paddrs=[(0x10000, 0x3000)])
+    mm0.map_range(helper_va(0x10000), 0x3000, paddrs=[(0x10000, 0x3000)], aspace=AddrSpace.PHYS)
     mm0.unmap_range(helper_va(0x10000), 0x3000)
 
     with self.assertRaises(AssertionError):
@@ -162,17 +164,45 @@ class TestAMPageTable(unittest.TestCase):
 
     # offset from start
     for off in [0, 0x3000, 0x10000]:
-      mm0.map_range(helper_va(0x1000000) + off, (2 << 20)  - off, paddrs=[(0x10000, 0x1000)] * (512 - off // 0x1000))
+      mm0.map_range(helper_va(0x1000000) + off, (2 << 20)  - off, paddrs=[(0x10000, 0x1000)] * (512 - off // 0x1000), aspace=AddrSpace.PHYS)
       mm0.unmap_range(helper_va(0x1000000) + off, (2 << 20) - off)
-      mm0.map_range(helper_va(0x1000000), 2 << 20, paddrs=[(0x10000, 2 << 20)])
+      mm0.map_range(helper_va(0x1000000), 2 << 20, paddrs=[(0x10000, 2 << 20)], aspace=AddrSpace.PHYS)
       mm0.unmap_range(helper_va(0x1000000), 2 << 20)
 
     # offset from end
     for off in [0x1000, 0x20000]:
-      mm0.map_range(helper_va(0x1000000), (2 << 20) - off, paddrs=[(0x10000, 0x1000)] * (512 - off // 0x1000))
+      mm0.map_range(helper_va(0x1000000), (2 << 20) - off, paddrs=[(0x10000, 0x1000)] * (512 - off // 0x1000), aspace=AddrSpace.PHYS)
       mm0.unmap_range(helper_va(0x1000000), (2 << 20) - off)
-      mm0.map_range(helper_va(0x1000000), 2 << 20, paddrs=[(0x10000, 2 << 20)])
+      mm0.map_range(helper_va(0x1000000), 2 << 20, paddrs=[(0x10000, 2 << 20)], aspace=AddrSpace.PHYS)
       mm0.unmap_range(helper_va(0x1000000), 2 << 20)
+
+  def test_inspect_mode(self):
+    mm0 = self.d[0].mm
+
+    # Map a few disjoint ranges inside a larger region.
+    mappings = [(0x10000, 0x3000), (0x20000, 0x2000), (0x1000000, 2 << 20)]
+    for va, sz in mappings:
+      mm0.map_range(helper_va(va), sz, paddrs=[(va, sz)], aspace=AddrSpace.PHYS)
+
+    # Inspect over the whole region: should visit all mapped pages.
+    ctx = PageTableTraverseContext(self.d[0], mm0.root_page_table, helper_va(0x0), inspect=True)
+    visited = set()
+    for _off, pt, pte_idx, n_ptes, pte_covers in ctx.next(0x4000000):
+      for i in range(n_ptes):
+        pte = helper_read_entry_components(pt.entries[pte_idx + i])
+        if pte['valid']:
+          for p in range(0, pte_covers, 0x1000): visited.add(pte['paddr'] + p)
+
+    expected_pages = {va + off for va, sz in mappings for off in range(0, sz, 0x1000)}
+    assert visited == expected_pages
+
+    for va, sz in mappings:
+      mm0.unmap_range(helper_va(va), sz)
+
+    # Inspect after unmap: should find no valid entries.
+    ctx = PageTableTraverseContext(self.d[0], mm0.root_page_table, helper_va(0x0), inspect=True)
+    for _off, pt, pte_idx, n_ptes, pte_covers in ctx.next(0x4000000):
+      for i in range(n_ptes): assert not pt.valid(pte_idx + i)
 
   def test_frag_size(self):
     mm0 = self.d[0].mm

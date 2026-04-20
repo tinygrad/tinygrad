@@ -1,10 +1,8 @@
 import unittest
-import numpy as np
 from tinygrad import Device
 from tinygrad.device import CompileError
-from tinygrad.helpers import flat_mv
-if Device.DEFAULT=="AMD":
-  from tinygrad.runtime.ops_amd import AMDAllocator, AMDDevice, AMDProgram
+if Device.DEFAULT == "AMD":
+  # NOTE: if you don't gate this, LVP fails on Mac
   from tinygrad.runtime.support.compiler_amd import AMDLLVMCompiler
 
 @unittest.skipUnless(Device.DEFAULT == "AMD", "Runs only on AMD")
@@ -18,16 +16,8 @@ entry:
   ret void
 }
     '''
-    device = AMDDevice()
     compiler = AMDLLVMCompiler("gfx1100")
-    obj = compiler.compile(src)
-    allocator = AMDAllocator(device)
-    a = allocator.alloc(1*8)
-    prog = AMDProgram(device, "test", obj)
-    prog(a, wait=True)
-    na = np.empty(1, np.uint64)
-    allocator._copyout(flat_mv(na.data), a)
-    assert na == [0x1234567800000005]
+    compiler.compile(src)
 
   def test_compiler_diag_error(self):
     src = """

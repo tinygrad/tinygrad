@@ -1,92 +1,55 @@
-# mypy: ignore-errors
+# mypy: disable-error-code="empty-body"
+from __future__ import annotations
 import ctypes
-from tinygrad.helpers import unwrap
-from tinygrad.runtime.support.c import Struct, CEnum, _IO, _IOW, _IOR, _IOWR
-from ctypes.util import find_library
-def dll():
-  try: return ctypes.CDLL(unwrap(find_library('nvrtc')))
-  except: pass
-  return None
-dll = dll()
-
-nvrtcResult = CEnum(ctypes.c_uint32)
-NVRTC_SUCCESS = nvrtcResult.define('NVRTC_SUCCESS', 0)
-NVRTC_ERROR_OUT_OF_MEMORY = nvrtcResult.define('NVRTC_ERROR_OUT_OF_MEMORY', 1)
-NVRTC_ERROR_PROGRAM_CREATION_FAILURE = nvrtcResult.define('NVRTC_ERROR_PROGRAM_CREATION_FAILURE', 2)
-NVRTC_ERROR_INVALID_INPUT = nvrtcResult.define('NVRTC_ERROR_INVALID_INPUT', 3)
-NVRTC_ERROR_INVALID_PROGRAM = nvrtcResult.define('NVRTC_ERROR_INVALID_PROGRAM', 4)
-NVRTC_ERROR_INVALID_OPTION = nvrtcResult.define('NVRTC_ERROR_INVALID_OPTION', 5)
-NVRTC_ERROR_COMPILATION = nvrtcResult.define('NVRTC_ERROR_COMPILATION', 6)
-NVRTC_ERROR_BUILTIN_OPERATION_FAILURE = nvrtcResult.define('NVRTC_ERROR_BUILTIN_OPERATION_FAILURE', 7)
-NVRTC_ERROR_NO_NAME_EXPRESSIONS_AFTER_COMPILATION = nvrtcResult.define('NVRTC_ERROR_NO_NAME_EXPRESSIONS_AFTER_COMPILATION', 8)
-NVRTC_ERROR_NO_LOWERED_NAMES_BEFORE_COMPILATION = nvrtcResult.define('NVRTC_ERROR_NO_LOWERED_NAMES_BEFORE_COMPILATION', 9)
-NVRTC_ERROR_NAME_EXPRESSION_NOT_VALID = nvrtcResult.define('NVRTC_ERROR_NAME_EXPRESSION_NOT_VALID', 10)
-NVRTC_ERROR_INTERNAL_ERROR = nvrtcResult.define('NVRTC_ERROR_INTERNAL_ERROR', 11)
-
-try: (nvrtcGetErrorString:=dll.nvrtcGetErrorString).restype, nvrtcGetErrorString.argtypes = ctypes.POINTER(ctypes.c_char), [nvrtcResult]
-except AttributeError: pass
-
-try: (nvrtcVersion:=dll.nvrtcVersion).restype, nvrtcVersion.argtypes = nvrtcResult, [ctypes.POINTER(ctypes.c_int32), ctypes.POINTER(ctypes.c_int32)]
-except AttributeError: pass
-
-try: (nvrtcGetNumSupportedArchs:=dll.nvrtcGetNumSupportedArchs).restype, nvrtcGetNumSupportedArchs.argtypes = nvrtcResult, [ctypes.POINTER(ctypes.c_int32)]
-except AttributeError: pass
-
-try: (nvrtcGetSupportedArchs:=dll.nvrtcGetSupportedArchs).restype, nvrtcGetSupportedArchs.argtypes = nvrtcResult, [ctypes.POINTER(ctypes.c_int32)]
-except AttributeError: pass
-
-class struct__nvrtcProgram(Struct): pass
-nvrtcProgram = ctypes.POINTER(struct__nvrtcProgram)
-try: (nvrtcCreateProgram:=dll.nvrtcCreateProgram).restype, nvrtcCreateProgram.argtypes = nvrtcResult, [ctypes.POINTER(nvrtcProgram), ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.c_char), ctypes.c_int32, ctypes.POINTER(ctypes.POINTER(ctypes.c_char)), ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
-except AttributeError: pass
-
-try: (nvrtcDestroyProgram:=dll.nvrtcDestroyProgram).restype, nvrtcDestroyProgram.argtypes = nvrtcResult, [ctypes.POINTER(nvrtcProgram)]
-except AttributeError: pass
-
-try: (nvrtcCompileProgram:=dll.nvrtcCompileProgram).restype, nvrtcCompileProgram.argtypes = nvrtcResult, [nvrtcProgram, ctypes.c_int32, ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
-except AttributeError: pass
-
-size_t = ctypes.c_uint64
-try: (nvrtcGetPTXSize:=dll.nvrtcGetPTXSize).restype, nvrtcGetPTXSize.argtypes = nvrtcResult, [nvrtcProgram, ctypes.POINTER(size_t)]
-except AttributeError: pass
-
-try: (nvrtcGetPTX:=dll.nvrtcGetPTX).restype, nvrtcGetPTX.argtypes = nvrtcResult, [nvrtcProgram, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (nvrtcGetCUBINSize:=dll.nvrtcGetCUBINSize).restype, nvrtcGetCUBINSize.argtypes = nvrtcResult, [nvrtcProgram, ctypes.POINTER(size_t)]
-except AttributeError: pass
-
-try: (nvrtcGetCUBIN:=dll.nvrtcGetCUBIN).restype, nvrtcGetCUBIN.argtypes = nvrtcResult, [nvrtcProgram, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (nvrtcGetNVVMSize:=dll.nvrtcGetNVVMSize).restype, nvrtcGetNVVMSize.argtypes = nvrtcResult, [nvrtcProgram, ctypes.POINTER(size_t)]
-except AttributeError: pass
-
-try: (nvrtcGetNVVM:=dll.nvrtcGetNVVM).restype, nvrtcGetNVVM.argtypes = nvrtcResult, [nvrtcProgram, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (nvrtcGetLTOIRSize:=dll.nvrtcGetLTOIRSize).restype, nvrtcGetLTOIRSize.argtypes = nvrtcResult, [nvrtcProgram, ctypes.POINTER(size_t)]
-except AttributeError: pass
-
-try: (nvrtcGetLTOIR:=dll.nvrtcGetLTOIR).restype, nvrtcGetLTOIR.argtypes = nvrtcResult, [nvrtcProgram, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (nvrtcGetOptiXIRSize:=dll.nvrtcGetOptiXIRSize).restype, nvrtcGetOptiXIRSize.argtypes = nvrtcResult, [nvrtcProgram, ctypes.POINTER(size_t)]
-except AttributeError: pass
-
-try: (nvrtcGetOptiXIR:=dll.nvrtcGetOptiXIR).restype, nvrtcGetOptiXIR.argtypes = nvrtcResult, [nvrtcProgram, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (nvrtcGetProgramLogSize:=dll.nvrtcGetProgramLogSize).restype, nvrtcGetProgramLogSize.argtypes = nvrtcResult, [nvrtcProgram, ctypes.POINTER(size_t)]
-except AttributeError: pass
-
-try: (nvrtcGetProgramLog:=dll.nvrtcGetProgramLog).restype, nvrtcGetProgramLog.argtypes = nvrtcResult, [nvrtcProgram, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (nvrtcAddNameExpression:=dll.nvrtcAddNameExpression).restype, nvrtcAddNameExpression.argtypes = nvrtcResult, [nvrtcProgram, ctypes.POINTER(ctypes.c_char)]
-except AttributeError: pass
-
-try: (nvrtcGetLoweredName:=dll.nvrtcGetLoweredName).restype, nvrtcGetLoweredName.argtypes = nvrtcResult, [nvrtcProgram, ctypes.POINTER(ctypes.c_char), ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
-except AttributeError: pass
-
-__DEPRECATED__ = lambda msg: __attribute__((deprecated(msg)))
+from typing import Literal, TypeAlias
+from tinygrad.runtime.support.c import _IO, _IOW, _IOR, _IOWR
+from tinygrad.runtime.support import c
+import sysconfig
+dll = c.DLL('nvrtc', 'nvrtc', [f'/{pre}/cuda/targets/{sysconfig.get_config_vars().get("MULTIARCH", "").rsplit("-", 1)[0]}/lib' for pre in ['opt', 'usr/local']])
+nvrtcResult: dict[int, str] = {(NVRTC_SUCCESS:=0): 'NVRTC_SUCCESS', (NVRTC_ERROR_OUT_OF_MEMORY:=1): 'NVRTC_ERROR_OUT_OF_MEMORY', (NVRTC_ERROR_PROGRAM_CREATION_FAILURE:=2): 'NVRTC_ERROR_PROGRAM_CREATION_FAILURE', (NVRTC_ERROR_INVALID_INPUT:=3): 'NVRTC_ERROR_INVALID_INPUT', (NVRTC_ERROR_INVALID_PROGRAM:=4): 'NVRTC_ERROR_INVALID_PROGRAM', (NVRTC_ERROR_INVALID_OPTION:=5): 'NVRTC_ERROR_INVALID_OPTION', (NVRTC_ERROR_COMPILATION:=6): 'NVRTC_ERROR_COMPILATION', (NVRTC_ERROR_BUILTIN_OPERATION_FAILURE:=7): 'NVRTC_ERROR_BUILTIN_OPERATION_FAILURE', (NVRTC_ERROR_NO_NAME_EXPRESSIONS_AFTER_COMPILATION:=8): 'NVRTC_ERROR_NO_NAME_EXPRESSIONS_AFTER_COMPILATION', (NVRTC_ERROR_NO_LOWERED_NAMES_BEFORE_COMPILATION:=9): 'NVRTC_ERROR_NO_LOWERED_NAMES_BEFORE_COMPILATION', (NVRTC_ERROR_NAME_EXPRESSION_NOT_VALID:=10): 'NVRTC_ERROR_NAME_EXPRESSION_NOT_VALID', (NVRTC_ERROR_INTERNAL_ERROR:=11): 'NVRTC_ERROR_INTERNAL_ERROR'}
+@dll.bind(c.POINTER[ctypes.c_char], ctypes.c_uint32)
+def nvrtcGetErrorString(result:ctypes.c_uint32) -> c.POINTER[ctypes.c_char]: ...
+@dll.bind(ctypes.c_uint32, c.POINTER[ctypes.c_int32], c.POINTER[ctypes.c_int32])
+def nvrtcVersion(major:c.POINTER[ctypes.c_int32], minor:c.POINTER[ctypes.c_int32]) -> ctypes.c_uint32: ...
+@dll.bind(ctypes.c_uint32, c.POINTER[ctypes.c_int32])
+def nvrtcGetNumSupportedArchs(numArchs:c.POINTER[ctypes.c_int32]) -> ctypes.c_uint32: ...
+@dll.bind(ctypes.c_uint32, c.POINTER[ctypes.c_int32])
+def nvrtcGetSupportedArchs(supportedArchs:c.POINTER[ctypes.c_int32]) -> ctypes.c_uint32: ...
+class struct__nvrtcProgram(c.Struct): pass
+nvrtcProgram: TypeAlias = c.POINTER[struct__nvrtcProgram]
+@dll.bind(ctypes.c_uint32, c.POINTER[nvrtcProgram], c.POINTER[ctypes.c_char], c.POINTER[ctypes.c_char], ctypes.c_int32, c.POINTER[c.POINTER[ctypes.c_char]], c.POINTER[c.POINTER[ctypes.c_char]])
+def nvrtcCreateProgram(prog:c.POINTER[nvrtcProgram], src:c.POINTER[ctypes.c_char], name:c.POINTER[ctypes.c_char], numHeaders:int, headers:c.POINTER[c.POINTER[ctypes.c_char]], includeNames:c.POINTER[c.POINTER[ctypes.c_char]]) -> ctypes.c_uint32: ...
+@dll.bind(ctypes.c_uint32, c.POINTER[nvrtcProgram])
+def nvrtcDestroyProgram(prog:c.POINTER[nvrtcProgram]) -> ctypes.c_uint32: ...
+@dll.bind(ctypes.c_uint32, nvrtcProgram, ctypes.c_int32, c.POINTER[c.POINTER[ctypes.c_char]])
+def nvrtcCompileProgram(prog:nvrtcProgram, numOptions:int, options:c.POINTER[c.POINTER[ctypes.c_char]]) -> ctypes.c_uint32: ...
+size_t: TypeAlias = ctypes.c_uint64
+@dll.bind(ctypes.c_uint32, nvrtcProgram, c.POINTER[size_t])
+def nvrtcGetPTXSize(prog:nvrtcProgram, ptxSizeRet:c.POINTER[size_t]) -> ctypes.c_uint32: ...
+@dll.bind(ctypes.c_uint32, nvrtcProgram, c.POINTER[ctypes.c_char])
+def nvrtcGetPTX(prog:nvrtcProgram, ptx:c.POINTER[ctypes.c_char]) -> ctypes.c_uint32: ...
+@dll.bind(ctypes.c_uint32, nvrtcProgram, c.POINTER[size_t])
+def nvrtcGetCUBINSize(prog:nvrtcProgram, cubinSizeRet:c.POINTER[size_t]) -> ctypes.c_uint32: ...
+@dll.bind(ctypes.c_uint32, nvrtcProgram, c.POINTER[ctypes.c_char])
+def nvrtcGetCUBIN(prog:nvrtcProgram, cubin:c.POINTER[ctypes.c_char]) -> ctypes.c_uint32: ...
+@dll.bind(ctypes.c_uint32, nvrtcProgram, c.POINTER[size_t])
+def nvrtcGetNVVMSize(prog:nvrtcProgram, nvvmSizeRet:c.POINTER[size_t]) -> ctypes.c_uint32: ...
+@dll.bind(ctypes.c_uint32, nvrtcProgram, c.POINTER[ctypes.c_char])
+def nvrtcGetNVVM(prog:nvrtcProgram, nvvm:c.POINTER[ctypes.c_char]) -> ctypes.c_uint32: ...
+@dll.bind(ctypes.c_uint32, nvrtcProgram, c.POINTER[size_t])
+def nvrtcGetLTOIRSize(prog:nvrtcProgram, LTOIRSizeRet:c.POINTER[size_t]) -> ctypes.c_uint32: ...
+@dll.bind(ctypes.c_uint32, nvrtcProgram, c.POINTER[ctypes.c_char])
+def nvrtcGetLTOIR(prog:nvrtcProgram, LTOIR:c.POINTER[ctypes.c_char]) -> ctypes.c_uint32: ...
+@dll.bind(ctypes.c_uint32, nvrtcProgram, c.POINTER[size_t])
+def nvrtcGetOptiXIRSize(prog:nvrtcProgram, optixirSizeRet:c.POINTER[size_t]) -> ctypes.c_uint32: ...
+@dll.bind(ctypes.c_uint32, nvrtcProgram, c.POINTER[ctypes.c_char])
+def nvrtcGetOptiXIR(prog:nvrtcProgram, optixir:c.POINTER[ctypes.c_char]) -> ctypes.c_uint32: ...
+@dll.bind(ctypes.c_uint32, nvrtcProgram, c.POINTER[size_t])
+def nvrtcGetProgramLogSize(prog:nvrtcProgram, logSizeRet:c.POINTER[size_t]) -> ctypes.c_uint32: ...
+@dll.bind(ctypes.c_uint32, nvrtcProgram, c.POINTER[ctypes.c_char])
+def nvrtcGetProgramLog(prog:nvrtcProgram, log:c.POINTER[ctypes.c_char]) -> ctypes.c_uint32: ...
+@dll.bind(ctypes.c_uint32, nvrtcProgram, c.POINTER[ctypes.c_char])
+def nvrtcAddNameExpression(prog:nvrtcProgram, name_expression:c.POINTER[ctypes.c_char]) -> ctypes.c_uint32: ...
+@dll.bind(ctypes.c_uint32, nvrtcProgram, c.POINTER[ctypes.c_char], c.POINTER[c.POINTER[ctypes.c_char]])
+def nvrtcGetLoweredName(prog:nvrtcProgram, name_expression:c.POINTER[ctypes.c_char], lowered_name:c.POINTER[c.POINTER[ctypes.c_char]]) -> ctypes.c_uint32: ...
+__DEPRECATED__ = lambda msg: __attribute__((deprecated(msg))) # type: ignore

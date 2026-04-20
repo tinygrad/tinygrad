@@ -1,24 +1,22 @@
-import subprocess, pathlib, struct, ctypes, tempfile, functools, contextlib, decimal, platform, sys
-from tinygrad.helpers import prod, to_mv, getenv, round_up, cache_dir, init_c_struct_t, PROFILE, ProfileRangeEvent, cpu_profile, unwrap
+import subprocess, pathlib, struct, ctypes, tempfile, functools, decimal, platform
+from tinygrad.helpers import prod, to_mv, round_up, cache_dir, PROFILE, ProfileRangeEvent, cpu_profile, unwrap, suppress_finalizing
 import tinygrad.runtime.support.objc as objc
 from tinygrad.device import Compiled, Compiler, CompileError, LRUAllocator, ProfileDeviceEvent
 from tinygrad.renderer.cstyle import MetalRenderer
 from tinygrad.runtime.autogen import metal
+from tinygrad.runtime.support.c import DLL
 
 # 13 is requestType that metal uses to compile source code into MTLB, there aren't any docs or symbols.
 REQUEST_TYPE_COMPILE = 13
 
 # Must be loaded for default Metal Device: https://developer.apple.com/documentation/metal/1433401-mtlcreatesystemdefaultdevice?language=objc
-ctypes.CDLL("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics")
+DLL("CoreGraphics", "CoreGraphics")
 
 # FIXME: these need autogen to support objc categories
 # https://developer.apple.com/library/archive/documentation/Cocoa/Conceptual/ObjectiveC/Chapters/ocCategories.html
 @functools.cache
 def to_ns_str(s: str): return ctypes.cast(objc.msg("stringWithUTF8String:")(metal.NSString._objc_class_, s.encode()), metal.NSString)
 def from_ns_str(s): return bytes(objc.msg("UTF8String", ctypes.c_char_p)(s)).decode()
-
-def to_struct(*t: int, _type: type[ctypes._SimpleCData] = ctypes.c_ulong):
-  return init_c_struct_t(tuple([(f"field{i}", _type) for i in range(len(t))]))(*t)
 
 def wait_check(cbuf:metal.MTLCommandBuffer):
   cbuf.waitUntilCompleted()
@@ -39,13 +37,21 @@ class MetalDevice(Compiled):
     self.timeline_signal = self.sysdevice.newSharedEvent()
     self.timeline_value = 0
 
+    # probe GPU family: Apple9=M3/M4, Apple8=M2, Apple7=M1, etc. values are 1000+N.
+    self.gpu_family = 0
+    for i in range(15, 0, -1):
+      if self.sysdevice.supportsFamily(1000 + i):
+        self.gpu_family = i
+        break
+
     Compiled.profile_events += [ProfileDeviceEvent(device)]
 
     from tinygrad.runtime.graph.metal import MetalGraph
     # NOTE: GitHub CI macOS runners use paravirtualized metal which is broken with graph.
     # This can be reproduced locally with any virtualization software (like utm) that can create macOS VMs with apple's own virtualization framework.
-    super().__init__(device, MetalAllocator(self), [(MetalRenderer, MetalCompiler), (MetalRenderer, Compiler)], functools.partial(MetalProgram, self),
-                     MetalGraph if 'virtual' not in from_ns_str(self.sysdevice.name()).lower() else None)
+    super().__init__(device, MetalAllocator(self), [MetalRenderer],
+      functools.partial(MetalProgram, self), MetalGraph if 'virtual' not in from_ns_str(self.sysdevice.name()).lower() else None,
+      arch=platform.machine())
 
   def synchronize(self):
     for cbuf in self.mtl_buffers_in_flight:
@@ -53,24 +59,16 @@ class MetalDevice(Compiled):
       st, en = decimal.Decimal(cbuf.GPUStartTime()) * 1000000, decimal.Decimal(cbuf.GPUEndTime()) * 1000000
       # NOTE: command buffers from MetalGraph are not profiled here
       if PROFILE and (lb:=cmdbuf_label(cbuf)) is not None and not lb.startswith("batched"):
-        Compiled.profile_events += [ProfileRangeEvent(self.device, lb, st, en, is_copy=lb.startswith("COPY"))]
+        Compiled.profile_events += [ProfileRangeEvent(self.device, lb, st, en)]
     self.mtl_buffers_in_flight.clear()
-
-def metal_src_to_library(device:MetalDevice, src:str) -> metal.MTLLibrary:
-  options = metal.MTLCompileOptions.new()
-  options.setFastMathEnabled(getenv("METAL_FAST_MATH"))
-  library = device.sysdevice.newLibraryWithSource_options_error(to_ns_str(src), options, ctypes.byref(compileError:=metal.NSError().retained()))
-  error_check(compileError, CompileError)
-  return library
 
 class MetalCompiler(Compiler):
   # Opening METAL after LLVM doesn't fail because ctypes.CDLL opens with RTLD_LOCAL but MTLCompiler opens it's own llvm with RTLD_GLOBAL
   # This means that MTLCompiler's llvm will create it's own instances of global state because RTLD_LOCAL doesn't export symbols, but if RTLD_GLOBAL
   # library is loaded first then RTLD_LOCAL library will just use it's symbols. On linux there is RTLD_DEEPBIND to prevent that, but on macos there
   # doesn't seem to be anything we can do.
-  with contextlib.suppress(FileNotFoundError, ModuleNotFoundError):
-    import tinygrad.runtime.autogen.llvm # noqa: F401
-  support = ctypes.CDLL("/System/Library/PrivateFrameworks/MTLCompiler.framework/MTLCompiler")
+  import tinygrad.runtime.autogen.llvm as _
+  support = DLL("MTLCompiler", "MTLCompiler")
   support.MTLCodeGenServiceCreate.restype = ctypes.c_void_p
 
   def __init__(self):
@@ -91,7 +89,7 @@ class MetalCompiler(Compiler):
 
     # no changes for compute in 2.0 - 2.4 specs, use 2.0 as default for old versions.
     macos_major = int(platform.mac_ver()[0].split('.')[0])
-    metal_version = "metal3.1" if macos_major >= 14 else "metal3.0" if macos_major >= 13 else "macos-metal2.0"
+    metal_version = "metal4.0" if macos_major >= 26 else "metal3.1" if macos_major >= 14 else "metal3.0" if macos_major >= 13 else "macos-metal2.0"
 
     # llvm will create modules.timestamp in cache path and cache compilation of metal stdlib (250ms => 8ms compilation time)
     # note that llvm won't necessarily create anything else here as apple has prebuilt versions of many standard libraries
@@ -118,17 +116,11 @@ class MetalCompiler(Compiler):
       if ret: print("Disassembler Error: Make sure you have https://github.com/dougallj/applegpu cloned to tinygrad/extra/disassemblers/applegpu")
 
 class MetalProgram:
-  def __init__(self, dev:MetalDevice, name:str, lib:bytes):
+  def __init__(self, dev:MetalDevice, name:str, lib:bytes, **kwargs):
     self.dev, self.name, self.lib = dev, name, lib
-    if lib[:4] == b"MTLB":
-      # binary metal library
-      data = objc.dispatch_data_create(lib, len(lib), None, None)
-      self.library = self.dev.sysdevice.newLibraryWithData_error(data, ctypes.byref(error_lib:=metal.NSError().retained())).retained()
-      error_check(error_lib)
-    else:
-      # metal source. rely on OS caching
-      try: self.library = metal_src_to_library(self.dev, lib.decode())
-      except CompileError as e: raise RuntimeError from e
+    data = objc.dispatch_data_create(lib, len(lib), None, None)
+    self.library = self.dev.sysdevice.newLibraryWithData_error(data, ctypes.byref(error_lib:=metal.NSError().retained())).retained()
+    error_check(error_lib)
     self.fxn = self.library.newFunctionWithName(to_ns_str(name)).retained()
     descriptor = metal.MTLComputePipelineDescriptor.new()
     descriptor.setComputeFunction(self.fxn)
@@ -139,7 +131,7 @@ class MetalProgram:
     # cache these msg calls
     self.max_total_threads: int = self.pipeline_state.maxTotalThreadsPerThreadgroup()
 
-  def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False):
+  def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False, **kw):
     if prod(local_size) > self.max_total_threads:
       exec_width = self.pipeline_state.threadExecutionWidth()
       memory_length = self.pipeline_state.staticThreadgroupMemoryLength()
@@ -170,8 +162,9 @@ class MetalAllocator(LRUAllocator[MetalDevice]):
     ret.retain = False
     if ret.value is None: raise MemoryError(f"Metal OOM while allocating {size=}")
     return MetalBuffer(ret, size)
+  @suppress_finalizing
   def _free(self, opaque:MetalBuffer, options):
-    if not sys.is_finalizing(): opaque.buf.release
+    if not options.external_ptr: opaque.buf.release()
   def _transfer(self, dest:MetalBuffer, src:MetalBuffer, sz:int, src_dev:MetalDevice, dest_dev:MetalDevice):
     dest_dev.synchronize()
     src_command_buffer = src_dev.mtl_queue.commandBuffer().retained()
@@ -192,7 +185,7 @@ class MetalAllocator(LRUAllocator[MetalDevice]):
     # There is no real metal multidevice support for now, so transfer is used only for tests.
     src_dev.synchronize()
   def _cp_mv(self, dst, src, prof_desc):
-    with cpu_profile(prof_desc, self.dev.device, is_copy=True): dst[:] = src
+    with cpu_profile(prof_desc, f"{self.dev.device}:COPY"): dst[:] = src
   def _as_buffer(self, src:MetalBuffer) -> memoryview:
     self.dev.synchronize()
     return to_mv(src.buf.contents(), src.size + src.offset)[src.offset:]

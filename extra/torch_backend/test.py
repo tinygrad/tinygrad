@@ -191,6 +191,20 @@ class TestTorchBackend(unittest.TestCase):
     assert torch.equal(tensor_a, tensor_b)
     assert not torch.equal(tensor_a, tensor_c)
 
+  @unittest.skip("# TODO: this test is slow")
+  def test_linalg_svd(self):
+    A = torch.randn(5, 5, device=device)
+    U, S, Vh = torch.linalg.svd(A)
+    np.testing.assert_equal(U.shape, (5,5))
+    np.testing.assert_equal(Vh.shape, (5,5))
+    np.testing.assert_allclose(torch.dist(A, U @ torch.diag(S) @ Vh).cpu().numpy(), 0, atol=1e-5)
+
+    A = torch.randn(5, 3, device=device)
+    U, S, Vh = torch.linalg.svd(A, full_matrices=False)
+    np.testing.assert_equal(U.shape, (5,3))
+    np.testing.assert_equal(Vh.shape, (3,3))
+    np.testing.assert_allclose(torch.dist(A, U @ torch.diag(S) @ Vh).cpu().numpy(), 0, atol=1e-5)
+
   def test_linalg_eigh(self):
     a = torch.tensor([[1, 2], [2, 1]], dtype=torch.float32, device=device)
     w, v = torch.linalg.eigh(a)
@@ -685,6 +699,15 @@ class TestTorchBackend(unittest.TestCase):
     loss.backward()
     expected = np.array([4.0, 3.0, 2.0, 1.0])
     np.testing.assert_allclose(a.grad.cpu().numpy(), expected, rtol=1e-5)
+
+  def test_cumsum_arange_large(self):
+    # Tests cumsum with an unrealized arange input with size > 512 (the split threshold)
+    # This exercises the _split_cumalu path which uses a two-stage algorithm
+    for size in [513, 1022]:
+      a = torch.arange(size, dtype=torch.float32, device=device)
+      result = torch.cumsum(a, dim=0)
+      expected = torch.arange(size, dtype=torch.float32).cumsum(dim=0)
+      np.testing.assert_allclose(result.cpu().numpy(), expected.numpy(), rtol=1e-5)
 
   def test_diag_1d_to_2d(self):
     a = torch.tensor([1.0, 2.0, 3.0], dtype=torch.float32, device=device, requires_grad=True)

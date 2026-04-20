@@ -6,6 +6,8 @@ from tinygrad.helpers import Context, CI
 from tinygrad.tensor import Tensor
 from tinygrad.device import Device
 
+_SKIP_KERNEL_TIMING = Device.DEFAULT == "WEBGPU"  # WEBGPU kernel timing not supported
+
 class TestBenchLog(unittest.TestCase):
   def setUp(self):
     clear_events()
@@ -35,7 +37,7 @@ class TestBenchLog(unittest.TestCase):
       self.assertGreater(_events[event]["wall"][0], 0)
       self.assertGreater(_events[event]["wall"][1], 0)
 
-  @skipIf(CI, "ci timing is not accurate")
+  @skipIf(CI or _SKIP_KERNEL_TIMING, "ci timing is not accurate")
   def test_log_single_kernel_time(self):
     wall_times = []
 
@@ -52,7 +54,7 @@ class TestBenchLog(unittest.TestCase):
       self.assertLess(_events[event]["kernel"][0], wall_times[0])
       self.assertGreater(_events[event]["kernel"][0], 0)
 
-  @skipIf(CI and Device.DEFAULT == "CUDA", "ci cuda timing is not accurate")
+  @skipIf((CI and Device.DEFAULT == "CUDA") or _SKIP_KERNEL_TIMING, "ci cuda timing is not accurate")
   def test_interleaved_wall_kernel_time(self):
     wall_times = []
     with Context(DEBUG=2):
@@ -74,7 +76,7 @@ class TestBenchLog(unittest.TestCase):
       self.assertLess(_events[event]["kernel"][0], wall_times[0])
       self.assertGreater(_events[event]["kernel"][0], 0)
 
-  @skipIf(CI and Device.DEFAULT == "CUDA", "ci cuda timing is not accurate")
+  @skipIf((CI and Device.DEFAULT == "CUDA") or _SKIP_KERNEL_TIMING, "ci cuda timing is not accurate")
   def test_stacked_wall_kernel_time(self):
     with Context(DEBUG=2):
       for event in BenchEvent:

@@ -1,5 +1,6 @@
 import unittest, struct
 from tinygrad import Tensor, dtypes
+from tinygrad.uop.ops import UOp
 
 # format types: https://docs.python.org/3/library/struct.html
 
@@ -77,6 +78,10 @@ class TestTensorData(unittest.TestCase):
     assert dat.format == "e"
     assert dat.shape == (2,2)
     # NOTE: python can't deref float16
+
+  def test_data_uop_device(self):
+    uop = UOp.const(dtypes.float, 1.0, "DEVICE")
+    self.assertEqual(Tensor(uop).device, "DEVICE")
 
 if __name__ == '__main__':
   unittest.main()

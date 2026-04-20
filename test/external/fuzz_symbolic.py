@@ -1,12 +1,16 @@
-import random, operator
+# NOTE: z3-solver 4.15.4 segfaults (exit code 139) when creating many z3.Context() with complex expressions.
+# Reproduces consistently with seed=74 around iteration 1767. Versions <=4.15.3 are fine.
+# Workaround: reuse a single z3.Context, or pin z3-solver<4.15.4 (see pyproject.toml).
+# To repro: pip install z3-solver==4.15.4.0 && python test/external/fuzz_symbolic.py 74
+import random, operator, sys
 import z3
 from tinygrad import Variable, dtypes
 from tinygrad.uop.ops import UOp
 from tinygrad.uop.validate import uops_to_z3
 from tinygrad.helpers import DEBUG, Context
 
-seed = random.randint(0, 100)
-print(f"Seed: {seed}")
+seed = int(sys.argv[1]) if len(sys.argv) > 1 else random.randint(0, 100)
+print(f"Seed: {seed}", flush=True)
 random.seed(seed)
 
 unary_ops = [lambda a:a+random.randint(-4, 4), lambda a: a*random.randint(-4, 4),
@@ -55,7 +59,7 @@ if __name__ == "__main__":
     with Context(CORRECT_DIVMOD_FOLDING=1):
       simplified_expr = expr.simplify()
 
-    solver = z3.Solver()
+    solver = z3.Solver(ctx=z3.Context())
     solver.set(timeout=5000)  # some expressions take very long verify, but its very unlikely they actually return sat
     z3_expr, z3_simplified_expr, v1, v2, v3 = uops_to_z3(solver, expr, simplified_expr, u1, u2, u3)
     check = solver.check(z3_simplified_expr != z3_expr)

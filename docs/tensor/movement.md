@@ -27,5 +27,6 @@
 ::: tinygrad.Tensor.flatten
 ::: tinygrad.Tensor.unflatten
 ::: tinygrad.Tensor.diag
+::: tinygrad.Tensor.diagonal
 ::: tinygrad.Tensor.roll
 ::: tinygrad.Tensor.rearrange

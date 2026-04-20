@@ -1,7 +1,7 @@
 # basic self-contained tests of the external functionality of tinygrad
 import unittest, random
 from tinygrad import Tensor, Context, Variable, TinyJit, dtypes, Device, nn
-from tinygrad.helpers import IMAGE, CI, getenv
+from tinygrad.helpers import CI, getenv
 
 class TestTiny(unittest.TestCase):
 
@@ -35,18 +35,18 @@ class TestTiny(unittest.TestCase):
     out = Tensor.cat(Tensor.ones(8).contiguous(), Tensor.zeros(8).contiguous())
     self.assertListEqual(out.tolist(), [1]*8+[0]*8)
 
-  def test_sum(self):
-    out = Tensor.ones(256).contiguous().sum()
-    self.assertEqual(out.item(), 256)
+  def test_sum(self, N=getenv("SUM_N", 256)):
+    out = Tensor.ones(N).contiguous().sum()
+    self.assertEqual(out.item(), N)
 
-  def test_gemm(self, N=getenv("GEMM_N", 64), out_dtype=dtypes.float):
+  def test_gemm(self, N=getenv("GEMM_N", 64)):
     a = Tensor.ones(N,N).contiguous()
     b = Tensor.eye(N).contiguous()
     lst = (out:=a@b).tolist()
     for y in range(N):
       for x in range(N):
         self.assertEqual(lst[y][x], 1.0, msg=f"mismatch at ({y},{x})")
-    if IMAGE < 2: self.assertEqual(out.dtype, out_dtype)
+    self.assertEqual(out.dtype, dtypes.float)
 
   def test_gemv(self, N=getenv("GEMV_N", 64), out_dtype=dtypes.float):
     a = Tensor.ones(1,N).contiguous()
@@ -54,7 +54,7 @@ class TestTiny(unittest.TestCase):
     lst = (out:=a@b).tolist()
     for x in range(N):
       self.assertEqual(lst[0][x], 1.0, msg=f"mismatch at {x}")
-    if IMAGE < 2: self.assertEqual(out.dtype, out_dtype)
+    self.assertEqual(out.dtype, out_dtype)
 
   # *** randomness ***
 
@@ -149,7 +149,7 @@ class TestTiny(unittest.TestCase):
 
   @unittest.skipIf(Device.DEFAULT != "CL", "image only supported on CL")
   def test_image(self):
-    with Context(IMAGE=2): self.test_gemm(N=4, out_dtype=dtypes.imagef((4, 1, 4)))
+    with Context(IMAGE=1): self.test_gemm(N=64)
 
   def test_beam_image(self):
     with Context(BEAM=1, IGNORE_BEAM_CACHE=1): self.test_image()

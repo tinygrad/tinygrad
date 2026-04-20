@@ -204,43 +204,6 @@ def eval_bert():
 
     st = time.perf_counter()
 
-def eval_mrcnn():
-  from tqdm import tqdm
-  from extra.models.mask_rcnn import MaskRCNN
-  from extra.models.resnet import ResNet
-  from extra.datasets.coco import BASEDIR, images, convert_prediction_to_coco_bbox, convert_prediction_to_coco_mask, accumulate_predictions_for_coco, evaluate_predictions_on_coco, iterate
-  from examples.mask_rcnn import compute_prediction_batched, Image
-  mdl = MaskRCNN(ResNet(50, num_classes=None, stride_in_1x1=True))
-  mdl.load_from_pretrained()
-
-  bbox_output = '/tmp/results_bbox.json'
-  mask_output = '/tmp/results_mask.json'
-
-  accumulate_predictions_for_coco([], bbox_output, rm=True)
-  accumulate_predictions_for_coco([], mask_output, rm=True)
-
-  #TODO: bs > 1 not as accurate
-  bs = 1
-
-  for batch in tqdm(iterate(images, bs=bs), total=len(images)//bs):
-    batch_imgs = []
-    for image_row in batch:
-      image_name = image_row['file_name']
-      img = Image.open(BASEDIR/f'val2017/{image_name}').convert("RGB")
-      batch_imgs.append(img)
-    batch_result = compute_prediction_batched(batch_imgs, mdl)
-    for image_row, result in zip(batch, batch_result):
-      image_name = image_row['file_name']
-      box_pred = convert_prediction_to_coco_bbox(image_name, result)
-      mask_pred = convert_prediction_to_coco_mask(image_name, result)
-      accumulate_predictions_for_coco(box_pred, bbox_output)
-      accumulate_predictions_for_coco(mask_pred, mask_output)
-    del batch_imgs
-    del batch_result
-
-  evaluate_predictions_on_coco(bbox_output, iou_type='bbox')
-  evaluate_predictions_on_coco(mask_output, iou_type='segm')
-
 def eval_llama3():
   from extra.models.llama import Transformer
   from examples.llama3 import MODEL_PARAMS, load, convert_from_huggingface
@@ -271,12 +234,9 @@ def eval_llama3():
     loss = logits.sparse_categorical_crossentropy(tokens[:, 1:])
     return loss.flatten().float()
 
-  if SMALL:
-    from examples.mlperf.dataloader import batch_load_llama3_small
-    iter = batch_load_llama3_small(BS, 5760, SEQLEN, BASEDIR, val=True)
-  else:
-    from examples.mlperf.dataloader import batch_load_llama3
-    iter = batch_load_llama3(BS, 5760, SEQLEN, BASEDIR, val=True)
+  from examples.mlperf.dataloader import get_llama3_dataset, iterate_llama3_dataset
+  eval_dataset = get_llama3_dataset(5760, SEQLEN, BASEDIR, val=True, small=bool(SMALL))
+  iter = iterate_llama3_dataset(eval_dataset, BS)
 
   losses = []
   for tokens in tqdm(iter, total=5760//BS):
@@ -365,19 +325,18 @@ def eval_stable_diffusion():
   # NOTE: the clip weights are the same between model.cond_stage_model and clip_encoder
   eval_timesteps = list(reversed(range(1, 1000, 20)))
 
-  original_device, Device.DEFAULT = Device.DEFAULT, "CPU"
-  # The choice of alphas_prev[0] = alphas_cumprod[0] seems arbitrary, but it's how the mlperf ref does it:
-  #   alphas_prev = np.asarray([alphacums[0]] + alphacums[ddim_timesteps[:-1]].tolist())
-  eval_alphas_prev = model.alphas_cumprod[0:1].cat(model.alphas_cumprod[list(range(1, 1000, 20))[:-1]]).to(GPUS).realize()
-  inception = FidInceptionV3().load_from_pretrained(CKPTDIR / "inception" / "pt_inception-2015-12-05-6726825d.pth")
-  vision_cfg = {'width': 1280, 'layers': 32, 'd_head': 80, 'image_size': 224, 'patch_size': 14}
-  text_cfg = {'width': 1024, 'n_heads': 16, 'layers': 24, 'vocab_size': 49408, 'ctx_length': 77}
-  clip.gelu = gelu_erf
-  clip_encoder = OpenClipEncoder(1024, text_cfg, vision_cfg)
-  loaded = torch_load(CKPTDIR / "clip" / "open_clip_pytorch_model.bin")
-  loaded.update({"attn_mask": clip_encoder.attn_mask, "mean": clip_encoder.mean, "std": clip_encoder.std})
-  load_state_dict(clip_encoder, loaded)
-  Device.DEFAULT=original_device
+  with Context(DEV="CPU"):
+    # The choice of alphas_prev[0] = alphas_cumprod[0] seems arbitrary, but it's how the mlperf ref does it:
+    #   alphas_prev = np.asarray([alphacums[0]] + alphacums[ddim_timesteps[:-1]].tolist())
+    eval_alphas_prev = model.alphas_cumprod[0:1].cat(model.alphas_cumprod[list(range(1, 1000, 20))[:-1]]).to(GPUS).realize()
+    inception = FidInceptionV3().load_from_pretrained(CKPTDIR / "inception" / "pt_inception-2015-12-05-6726825d.pth")
+    vision_cfg = {'width': 1280, 'layers': 32, 'd_head': 80, 'image_size': 224, 'patch_size': 14}
+    text_cfg = {'width': 1024, 'n_heads': 16, 'layers': 24, 'vocab_size': 49408, 'ctx_length': 77}
+    clip.gelu = gelu_erf
+    clip_encoder = OpenClipEncoder(1024, text_cfg, vision_cfg)
+    loaded = torch_load(CKPTDIR / "clip" / "open_clip_pytorch_model.bin")
+    loaded.update({"attn_mask": clip_encoder.attn_mask, "mean": clip_encoder.mean, "std": clip_encoder.std})
+    load_state_dict(clip_encoder, loaded)
 
   @TinyJit
   def denoise_step(x:Tensor, x_x:Tensor, t_t:Tensor, uc_c:Tensor, sqrt_alphas_cumprod_t:Tensor, sqrt_one_minus_alphas_cumprod_t:Tensor,
@@ -541,7 +500,7 @@ if __name__ == "__main__":
   # inference only
   Tensor.training = False
 
-  models = getenv("MODEL", "resnet,retinanet,unet3d,rnnt,bert,mrcnn").split(",")
+  models = getenv("MODEL", "resnet,retinanet,unet3d,rnnt,bert").split(",")
   for m in models:
     nm = f"eval_{m}"
     if nm in globals():

@@ -1,7 +1,6 @@
 import math, functools
 from dataclasses import dataclass
 from tinygrad.dtype import DType, dtypes
-from tinygrad.helpers import getenv
 
 @dataclass(frozen=True)
 class TensorCore: # D = A * B + C, A is (M x K), B is (K x N), C and D are (M x N)
@@ -92,9 +91,10 @@ cuda_8168_tf32 = [TensorCore(dims=(8,16,8), threads=32, elements_per_thread=(4,2
   swizzle=((('r0', 'r1', 'l2', 'l3', 'l4'), ('u1', 'r2'), ('l0', 'l1', 'u0')),
            (('r0', 'r1', 'u0', 'l0', 'l1'), ('u1', 'r2'), ('l2', 'l3', 'l4'))))]
 cuda_sm75: list[TensorCore] = cuda_8168_f16
-cuda_sm80: list[TensorCore] = cuda_81616 + cuda_8168_f16
-if getenv("ALLOW_TF32", 0): cuda_sm80 += cuda_8168_tf32
+cuda_sm80: list[TensorCore] = cuda_81616 + cuda_8168_f16 + cuda_8168_tf32
 cuda_sm89: list[TensorCore] = cuda_sm80 + cuda_81632_f8
+
+def get_cuda(arch): return cuda_sm89 if (ver:=int(arch[3:])) >= 89 else cuda_sm80 if ver >= 80 else cuda_sm75 if ver >= 75 else []
 
 # ***** AMD *****
 
@@ -123,9 +123,17 @@ amd_cdna_161632 = [TensorCore(dims=(16,16,32), threads=64, elements_per_thread=(
            (('l0', 'l1', 'l2', 'l3', 'r3', 'r4'), ('r0', 'r1'), ('l4', 'l5', 'u0', 'u1', 'r2'))))
   for di,do in [(dtypes.fp8e5m2,dtypes.float),(dtypes.fp8e4m3,dtypes.float),(dtypes.half,dtypes.float),(dtypes.bfloat16,dtypes.float)]]
 
+amd_cdna_1616128 = [TensorCore(dims=(16,16,128), threads=64, elements_per_thread=(32,32,4), dtype_in=di, dtype_out=do,
+  opts=("l0","l0","l0","l0","u1","u1","l1","l1"),
+  swizzle=((('u0', 'u1', 'l4', 'l5', 'r5', 'r6'), ('r0', 'r1'), ('l0', 'l1', 'l2', 'l3', 'r2', 'r3', 'r4')),
+           (('l0', 'l1', 'l2', 'l3', 'r5', 'r6'), ('r0', 'r1'), ('l4', 'l5', 'u0', 'u1', 'r2', 'r3', 'r4'))))
+  for di,do in [(dtypes.fp8e5m2,dtypes.float),(dtypes.fp8e4m3,dtypes.float)]]
+
 amd_cdna3 = amd_cdna_161632[:2] + amd_cdna_161616
 
-amd_cdna4 = amd_cdna_161632 + amd_cdna_161616
+amd_cdna4 = amd_cdna_1616128 + amd_cdna_161632 + amd_cdna_161616
+
+def get_amd(arch): return {"gfx942": amd_cdna3, "gfx950": amd_cdna4, "gfx1200": amd_rdna4, "gfx1201": amd_rdna4}.get(arch, amd_rdna3)
 
 # ***** Apple Metal *****
 

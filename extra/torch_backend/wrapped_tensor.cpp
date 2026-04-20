@@ -131,7 +131,15 @@ py::object unwrap_tensor(const at::Tensor &tensor) {
   return py::reinterpret_borrow<py::object>(tiny->ptr(getPyInterpreter()));
 }
 
+void update_metadata(const at::Tensor &tensor, const std::vector<int64_t> &sizes,
+                     const std::vector<int64_t> &strides, int64_t storage_offset) {
+  auto* impl = tensor.unsafeGetTensorImpl();
+  impl->set_allow_tensor_metadata_change(true);
+  impl->set_sizes_and_strides(sizes, strides, storage_offset);
+}
+
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("wrap", &wrap_tensor);
   m.def("unwrap", &unwrap_tensor);
+  m.def("update_metadata", &update_metadata);
 }
