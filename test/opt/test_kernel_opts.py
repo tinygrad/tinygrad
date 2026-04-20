@@ -3,7 +3,7 @@ from tinygrad import Device, Tensor, dtypes
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 
 # TODO: write a clean version of this
-from test.test_linearizer import helper_linearizer_opt
+from test.backend.test_linearizer import helper_linearizer_opt
 
 class TestKernelOpts(unittest.TestCase):
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
@@ -92,7 +92,7 @@ class TestKernelOpts(unittest.TestCase):
     a = Tensor.rand(8, N, 8, N)
     r = a.sum(axis=(1,3))
     helper_linearizer_opt(r, [
-      # openCL / CL=1 is 256 max threads
+      # openCL / DEV=CL is 256 max threads
       [Opt(OptOps.GROUPTOP, 0, 2)], [Opt(OptOps.GROUPTOP, 0, 32)],
       [Opt(OptOps.GROUPTOP, 1, 2)], [Opt(OptOps.GROUPTOP, 1, 32)], # Checking how it works with 1 grouped_reduce.
       [Opt(OptOps.GROUPTOP, 0, 2), Opt(OptOps.GROUPTOP, 1, 2)],

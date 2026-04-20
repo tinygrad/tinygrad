@@ -325,19 +325,18 @@ def eval_stable_diffusion():
   # NOTE: the clip weights are the same between model.cond_stage_model and clip_encoder
   eval_timesteps = list(reversed(range(1, 1000, 20)))
 
-  original_device, Device.DEFAULT = Device.DEFAULT, "CPU"
-  # The choice of alphas_prev[0] = alphas_cumprod[0] seems arbitrary, but it's how the mlperf ref does it:
-  #   alphas_prev = np.asarray([alphacums[0]] + alphacums[ddim_timesteps[:-1]].tolist())
-  eval_alphas_prev = model.alphas_cumprod[0:1].cat(model.alphas_cumprod[list(range(1, 1000, 20))[:-1]]).to(GPUS).realize()
-  inception = FidInceptionV3().load_from_pretrained(CKPTDIR / "inception" / "pt_inception-2015-12-05-6726825d.pth")
-  vision_cfg = {'width': 1280, 'layers': 32, 'd_head': 80, 'image_size': 224, 'patch_size': 14}
-  text_cfg = {'width': 1024, 'n_heads': 16, 'layers': 24, 'vocab_size': 49408, 'ctx_length': 77}
-  clip.gelu = gelu_erf
-  clip_encoder = OpenClipEncoder(1024, text_cfg, vision_cfg)
-  loaded = torch_load(CKPTDIR / "clip" / "open_clip_pytorch_model.bin")
-  loaded.update({"attn_mask": clip_encoder.attn_mask, "mean": clip_encoder.mean, "std": clip_encoder.std})
-  load_state_dict(clip_encoder, loaded)
-  Device.DEFAULT=original_device
+  with Context(DEV="CPU"):
+    # The choice of alphas_prev[0] = alphas_cumprod[0] seems arbitrary, but it's how the mlperf ref does it:
+    #   alphas_prev = np.asarray([alphacums[0]] + alphacums[ddim_timesteps[:-1]].tolist())
+    eval_alphas_prev = model.alphas_cumprod[0:1].cat(model.alphas_cumprod[list(range(1, 1000, 20))[:-1]]).to(GPUS).realize()
+    inception = FidInceptionV3().load_from_pretrained(CKPTDIR / "inception" / "pt_inception-2015-12-05-6726825d.pth")
+    vision_cfg = {'width': 1280, 'layers': 32, 'd_head': 80, 'image_size': 224, 'patch_size': 14}
+    text_cfg = {'width': 1024, 'n_heads': 16, 'layers': 24, 'vocab_size': 49408, 'ctx_length': 77}
+    clip.gelu = gelu_erf
+    clip_encoder = OpenClipEncoder(1024, text_cfg, vision_cfg)
+    loaded = torch_load(CKPTDIR / "clip" / "open_clip_pytorch_model.bin")
+    loaded.update({"attn_mask": clip_encoder.attn_mask, "mean": clip_encoder.mean, "std": clip_encoder.std})
+    load_state_dict(clip_encoder, loaded)
 
   @TinyJit
   def denoise_step(x:Tensor, x_x:Tensor, t_t:Tensor, uc_c:Tensor, sqrt_alphas_cumprod_t:Tensor, sqrt_one_minus_alphas_cumprod_t:Tensor,

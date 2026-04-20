@@ -4,6 +4,8 @@ from typing import Generator
 from tinygrad.helpers import temp, unwrap, DEBUG
 from tinygrad.runtime.ops_amd import ProfileSQTTEvent
 from tinygrad.runtime.autogen import rocprof
+from tinygrad.renderer.amd.dsl import Inst
+from test.amd.disasm import disasm
 
 @dataclasses.dataclass(frozen=True)
 class InstExec:
@@ -44,8 +46,8 @@ class OccEvent(WaveSlot):
 RunKey = tuple[str, int]
 
 class _ROCParseCtx:
-  def __init__(self, sqtt_evs:list[ProfileSQTTEvent], disasms:dict[str, dict[int, tuple[str, int]]]):
-    self.sqtt_evs, self.disasms = iter(sqtt_evs), disasms
+  def __init__(self, sqtt_evs:list[ProfileSQTTEvent], disasms:dict[str, dict[int, Inst]]):
+    self.sqtt_evs, self.disasms = iter(sqtt_evs), {k:{k2:(disasm(v2), v2.size()) for k2,v2 in v.items()} for k,v in disasms.items()}
     self.inst_execs:dict[RunKey, list[WaveExec]] = {}
     self.occ_events:dict[RunKey, list[OccEvent]] = {}
 
@@ -71,7 +73,7 @@ class _ROCParseCtx:
     self.inst_execs.setdefault(unwrap(self.active_run), []).append(WaveExec(ev.wave_id, ev.cu, ev.simd, unwrap(self.active_se), ev.begin_time,
                                                                              ev.end_time, insts_blob))
 
-def decode(sqtt_evs:list[ProfileSQTTEvent], disasms:dict[str, dict[int, tuple[str, int]]]) -> _ROCParseCtx:
+def decode(sqtt_evs:list[ProfileSQTTEvent], disasms:dict[str, dict[int, Inst]]) -> _ROCParseCtx:
   ROCParseCtx = _ROCParseCtx(sqtt_evs, disasms)
 
   @rocprof.rocprof_trace_decoder_se_data_callback_t
@@ -116,7 +118,7 @@ def decode(sqtt_evs:list[ProfileSQTTEvent], disasms:dict[str, dict[int, tuple[st
     nonlocal exc
     try: rocprof.rocprof_trace_decoder_parse_data(copy_cb, trace_cb, isa_cb, None)
     except AttributeError as e:
-      exc = RuntimeError("Failed to find rocprof-trace-decoder. Run sudo ./extra/sqtt/install_sqtt_decoder.py to install")
+      exc = RuntimeError("Failed to find rocprof-trace-decoder. Run sudo ./extra/sqtt/install_rocprof_decoder.py to install")
       exc.__cause__ = e
   (t:=threading.Thread(target=worker, daemon=True)).start()
   t.join()
@@ -134,7 +136,8 @@ def print_data(data:dict) -> None:
 
 def main() -> None:
   import tinygrad.viz.serve as viz
-  viz.ctxs = []
+  from tinygrad.uop.ops import RewriteTrace
+  data = viz.VizData()
 
   parser = argparse.ArgumentParser()
   parser.add_argument('--profile', type=pathlib.Path, metavar="PATH", help='Path to profile (optional file, default: latest profile)',
@@ -145,23 +148,24 @@ def main() -> None:
 
   with args.profile.open("rb") as f: profile = pickle.load(f)
 
-  viz.get_profile(profile)
+  viz.get_profile(profile, data=data)
 
   # List all kernels
   if args.kernel is None:
-    for c in viz.ctxs:
+    for c in data.ctxs:
       print(c["name"])
       for s in c["steps"]: print("  "+s["name"])
     return None
 
   # Find kernel trace
-  trace = next((c for c in viz.ctxs if c["name"] == f"Exec {args.kernel}"), None)
+  trace = next((c for c in data.ctxs if c["name"] == f"SQTT {args.kernel}"), None)
   if not trace: raise RuntimeError(f"no matching trace for {args.kernel}")
   n = 0
   for s in trace["steps"]:
+    if "PKTS" in s["name"]: continue
     print(s["name"])
-    data = viz.get_render(s["query"])
-    print_data(data)
+    ret = viz.get_render(data, s["query"])
+    print_data(ret)
     n += 1
     if n > args.n: break
 

@@ -1,11 +1,13 @@
 import unittest
 import pathlib
 from examples.whisper import init_whisper, load_file_waveform, transcribe_file, transcribe_waveform
+from examples.audio_helpers import mel
 import examples.mlperf.metrics as metrics
 from tinygrad.helpers import fetch
 from test.helpers import slow
-from tinygrad import Device, dtypes
+from tinygrad import Tensor, Device, dtypes
 from tinygrad.device import is_dtype_supported
+import numpy as np
 
 # Audio generated with the command on MacOS:
 # say "Could you please let me out of the box?" --file-format=WAVE  --data-format=LEUI8@16000 -o test
@@ -129,6 +131,26 @@ class TestWhisper(unittest.TestCase):
   def test_wer_different_3(self):
     reference = TRANSCRIPTION_3
     self.assertWER(reference[:len(reference)//2], reference, 0.524)
+
+  def test_mel_filters(self):
+    # reference = librosa.filters.mel(sr=16000, n_fft=16, n_mels=16)
+    reference = Tensor([[-0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                        [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                        [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                        [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                        [0.0, 0.0021111054811626673, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                        [0.0, 0.003133024089038372, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                        [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                        [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                        [0.0, 0.0, 0.0017568661132827401, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                        [0.0, 0.0, 0.0009823603322729468, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                        [0.0, 0.0, 0.0, 0.0007768510840833187, 0.0, 0.0, 0.0, 0.0, 0.0],
+                        [0.0, 0.0, 0.0, 0.0010490329004824162, 0.0, 0.0, 0.0, 0.0, 0.0],
+                        [0.0, 0.0, 0.0, 0.0, 0.0011341988574713469, 0.0, 0.0, 0.0, 0.0],
+                        [0.0, 0.0, 0.0, 0.0, 0.000231665835599415, 0.0006950111710466444, 0.0, 0.0, 0.0],
+                        [0.0, 0.0, 0.0, 0.0, 0.0, 0.00040073052514344454, 0.0005822855746373534, 0.0, 0.0],
+                        [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.00033081238507293165, 0.0006097797304391861, 0.0]])
+    np.testing.assert_allclose(mel(sr=16000, n_fft=16, n_mels=16, dtype=dtypes.float32).numpy(), reference.numpy(), atol=1e-6)
 
 if __name__ == '__main__':
   unittest.main()

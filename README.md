@@ -192,7 +192,7 @@ For more examples on how to run the full test suite please refer to the [CI work
 Some examples of running tests locally:
 ```sh
 python3 -m pip install -e '.[testing]'  # install extra deps for testing
-python3 test/test_ops.py                # just the ops tests
+python3 test/backend/test_ops.py        # just the ops tests
 python3 -m pytest test/                 # whole test suite
 ```
 

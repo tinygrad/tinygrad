@@ -1,9 +1,11 @@
 from __future__ import annotations
-import os, functools, platform, time, re, contextlib, operator, hashlib, pickle, sqlite3, tempfile, pathlib, string, ctypes, sys, gzip, getpass, gc
-import urllib.request, subprocess, shutil, math, types, copyreg, inspect, importlib, decimal, itertools, socketserver, json
-from dataclasses import dataclass, field
+import time
+START_TIME = time.perf_counter()
+import os, functools, platform, re, contextlib, operator, hashlib, pickle, sqlite3, tempfile, pathlib, string, ctypes, sys, gzip, getpass, gc
+from collections import defaultdict
+import subprocess, shutil, math, types, copyreg, inspect, importlib, decimal, itertools, difflib
+from dataclasses import dataclass, field, replace
 from typing import ClassVar, Iterable, Any, TypeVar, Callable, Sequence, TypeGuard, Iterator, Generic, Generator, cast, overload
-from http.server import BaseHTTPRequestHandler
 
 T = TypeVar("T")
 U = TypeVar("U")
@@ -12,8 +14,9 @@ def prod(x:Iterable[T]) -> T|int: return functools.reduce(operator.mul, x, 1)
 
 # NOTE: helpers is not allowed to import from anything else in tinygrad
 OSX, WIN = platform.system() == "Darwin", sys.platform == "win32"
-CI = os.getenv("CI", "") != ""
+CI, BENCHMARKS = os.getenv("CI", "") != "", os.getenv("RUNNER_ENVIRONMENT", "") == "self-hosted"
 ARCH_X86 = any(x in platform.processor() for x in ("Intel", "i386", "x86_64"))
+BASEDIR = pathlib.Path(__file__).parent
 
 # fix colors on Windows, https://stackoverflow.com/questions/12492810/python-how-can-i-make-the-ansi-escape-codes-to-work-also-in-windows
 if WIN: os.system("")
@@ -26,13 +29,15 @@ def argfix(*x):
   return x
 # https://stackoverflow.com/questions/3382352/equivalent-of-numpy-argsort-in-basic-python
 def argsort(x): return type(x)(sorted(range(len(x)), key=x.__getitem__))
-def all_same(items:tuple[T, ...]|list[T]): return all(x == items[0] for x in items)
+def all_same(items:Sequence): return all(x == items[0] for x in items)  # works for empty input
 def all_int(t: Sequence[Any]) -> TypeGuard[tuple[int, ...]]: return all(isinstance(s, int) for s in t)
 def colored(st, color:str|None, background=False): # replace the termcolor library
+  if NO_COLOR: return st
   colors = ['black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white']
   return f"\u001b[{10*background+60*(color.upper() == color)+30+colors.index(color.lower())}m{st}\u001b[0m" if color is not None else st
 def colorize_float(x: float): return colored(f"{x:7.2f}x", 'green' if x < 0.75 else 'red' if x > 1.15 else 'yellow')
 def time_to_str(t:float, w=8) -> str: return next((f"{t * d:{w}.2f}{pr}" for d,pr in [(1, "s "),(1e3, "ms")] if t > 10/d), f"{t * 1e6:{w}.2f}us")
+def size_to_str(s:int) -> str: return next((f"{s / d:.2f} {pr}" for d,pr in [(1<<30, "GB"),(1<<20, "MB"),(1<<10, "KB")] if s >= d), f"{s} B")
 def ansistrip(s:str): return re.sub('\x1b\\[(K|.*?m)', '', s)
 def ansilen(s:str): return len(ansistrip(s))
 def make_tuple(x:int|Sequence[int], cnt:int) -> tuple[int, ...]: return (x,)*cnt if isinstance(x, int) else tuple(x)
@@ -57,6 +62,8 @@ def lo32(x:Any) -> Any: return x & 0xFFFFFFFF # Any is sint
 def hi32(x:Any) -> Any: return x >> 32 # Any is sint
 def data64(data:Any) -> tuple[Any, Any]: return (data >> 32, data & 0xFFFFFFFF) # Any is sint
 def data64_le(data:Any) -> tuple[Any, Any]: return (data & 0xFFFFFFFF, data >> 32) # Any is sint
+def to_be32(val:Any) -> Any: return ((val & 0xFF) << 24) | (((val >> 8) & 0xFF) << 16) | (((val >> 16) & 0xFF) << 8) | ((val >> 24) & 0xFF)
+def to_be64(val:Any) -> Any: return to_be32(val >> 32) | (to_be32(val & 0xFFFFFFFF) << 32)
 def getbits(value: int, start: int, end: int): return (value >> start) & ((1 << (end - start + 1)) - 1)
 def i2u(bits: int, value: int): return value if value >= 0 else (1<<bits)+value
 def is_numpy_ndarray(x) -> bool: return str(type(x)) == "<class 'numpy.ndarray'>"
@@ -87,7 +94,9 @@ def word_wrap(x, wrap=80):
   while len(ansistrip(x[:i])) < wrap and i < len(x): i += 1
   return x[:i] + "\n" + word_wrap(x[i:], wrap)
 def pad_bytes(b:bytes, align:int) -> bytes: return b + b'\x00' * ((align - (len(b) % align)) % align)
-def panic(e:Exception|None=None): raise e if e is not None else RuntimeError("PANIC!")
+
+# NOTE: you must create the exception inside the function where it's raised or you will get a GC cycle!
+def panic(e:type[Exception]|None=None, *arg): raise e(*arg) if e is not None else RuntimeError("PANIC!")
 
 @functools.cache
 def canonicalize_strides(shape:tuple[T, ...], strides:tuple[T, ...]) -> tuple[T, ...]:
@@ -109,22 +118,25 @@ def get_contraction(old_shape:tuple[T, ...], new_shape:tuple[T, ...]) -> list[li
 def suppress_finalizing(func):
   def wrapper(*args, **kwargs):
     try: return func(*args, **kwargs)
-    except (RuntimeError, AttributeError, TypeError, ImportError):
+    except (RuntimeError, AttributeError, TypeError, ImportError, OSError):
       if not getattr(sys, 'is_finalizing', lambda: True)(): raise # re-raise if not finalizing
   return wrapper
 
-def select_first_inited(candidates:Sequence[Callable[...,T]|Sequence[Callable[...,T]|None]], err_msg:str, cache:dict|None=None):
+def select_by_name(candidates:Sequence[T], get_name:Callable[...,str], query:str, err_msg:str) -> list[T]:
+  if len(ret:=[c for c in candidates if not query or get_name(c) == query]) == 0:
+    raise RuntimeError(err_msg + (f", did you mean: {m[0]!r}?" if (m:=difflib.get_close_matches(query, map(get_name, candidates))) else ""))
+  return ret
+
+def select_first_inited(candidates:Sequence[Callable[...,T]], err_msg:str, cache:dict|None=None, **kwargs):
   excs = []
   for typ in candidates:
     if cache is not None and typ in cache: return cache[typ]
     try:
-      x = tuple([cast(Callable, t)() if t is not None else None for t in typ]) if isinstance(typ, Sequence) else cast(Callable, typ)()
+      x = typ(**kwargs)
       if cache is not None: cache[typ] = x
       return x
     except Exception as e: excs.append(e)
-  raise ExceptionGroup(err_msg, excs)
-
-def unwrap_class_type(cls_t): return cls_t.func if isinstance(cls_t, functools.partial) else cls_t
+  raise excs[0] if len(excs) == 1 else ExceptionGroup(err_msg + " is available", excs)
 
 def pluralize(st:str, cnt:int): return f"{cnt} {st}"+('' if cnt == 1 else 's')
 
@@ -166,32 +178,73 @@ class ContextVar(Generic[T]):
   def __ge__(self, x): return self.value >= x
   def __gt__(self, x): return self.value > x
   def __lt__(self, x): return self.value < x
+  def tolist(self, obj=None):
+    assert isinstance(self.value, str)
+    return [getattr(obj, x) if obj else x for x in self.value.split(',') if x]
 
-DEBUG, IMAGE, BEAM, NOOPT = ContextVar("DEBUG", 0), ContextVar("IMAGE", 0), ContextVar("BEAM", 0), ContextVar("NOOPT", 0)
+@dataclass(frozen=True)
+class Target:
+  device: str = ""
+  renderer: str = ""
+  arch: str = ""
+  interface: str = ""
+  indices: str = ""
+
+  @staticmethod
+  def parse(s:str) -> Target:
+    if len(split:=s.split('+')) == 2:
+      (iface, indices), s = ((iface_split[0], iface_split[1]) if len(iface_split:=split[0].rsplit(":", 1)) == 2 else (split[0], ""), split[1])
+    elif len(split) > 2: raise RuntimeError(f"too many '+' in target string: {s!r}")
+    else: iface, indices = "", ""
+    match [x.upper() if i < 2 else x for i,x in enumerate(s.split(':'))]:
+      case [dev, ren, arch]: return Target(dev, ren, arch, iface, indices)
+      case [dev, ren]: return Target(dev, ren, interface=iface, indices=indices)
+      case [dev]: return Target(dev, interface=iface, indices=indices)
+      case _: raise RuntimeError(f"too many ':' in target string: {s!r}")
+  def __repr__(self):
+    fst, snd = re.sub(":*$", "", ":".join([self.interface, self.indices])), re.sub(":*$", "", ":".join([self.device, self.renderer, self.arch]))
+    return (fst + "+" if fst else "") + snd
+  # replaces if not already set
+  def replacedefault(self, **kwargs) -> Target: return replace(self, **{k:v for k,v in kwargs.items() if not getattr(self, k)})
+
+class _DEV(ContextVar):
+  _value: list[Target] = [Target()]
+  @property
+  def value(self) -> list[Target]: return self._value
+  @value.setter
+  def value(self, v:str|Target|list[Target]):
+    self._value = v if isinstance(v, list) else [v] if isinstance(v, Target) else [Target.parse(t) for t in v.split(';')]
+  def __repr__(self) -> str: return ";".join([repr(t) for t in self._value])
+  def __getattr__(self, k): return getattr(self._value[0], k)
+  # get target for device string, kwargs are passed if not already specified
+  def target(self, dev:str, **kwargs) -> Target:
+    assert (v:=getenv(k:=f"{dev}_CC", "")) == "", \
+      f"{k}={v} is deprecated, use DEV='{';'.join([repr(t) for t in self._value if t.device != dev] + [f'{dev}:{v}'])}' instead"
+    return replace(next((t for t in self._value if not t.device or t.device == dev), Target(device=dev)).replacedefault(**kwargs), device=dev)
+
+DEV, DEBUG, BEAM, NOOPT = _DEV("DEV", ""), ContextVar("DEBUG", 0), ContextVar("BEAM", 0), ContextVar("NOOPT", 0)
+IMAGE, FLOAT16, OPENPILOT_HACKS = ContextVar("IMAGE", 0), ContextVar("FLOAT16", 0), ContextVar("OPENPILOT_HACKS", 0)
 JIT, JIT_BATCH_SIZE = ContextVar("JIT", 2 if OSX and ARCH_X86 else 1), ContextVar("JIT_BATCH_SIZE", 32)
-WINO, CAPTURING, TRACEMETA = ContextVar("WINO", 0), ContextVar("CAPTURING", 1), ContextVar("TRACEMETA", 1)
+WINO, CAPTURING, TRACEMETA, NO_COLOR = ContextVar("WINO", 0), ContextVar("CAPTURING", 1), ContextVar("TRACEMETA", 1), ContextVar("NO_COLOR", 0)
 USE_TC, TC_SELECT, TC_OPT, AMX = ContextVar("TC", 1), ContextVar("TC_SELECT", -1), ContextVar("TC_OPT", 0), ContextVar("AMX", 0)
 TRANSCENDENTAL, NOLOCALS = ContextVar("TRANSCENDENTAL", 1), ContextVar("NOLOCALS", 0)
 SPLIT_REDUCEOP, NO_MEMORY_PLANNER, LRU = ContextVar("SPLIT_REDUCEOP", 1), ContextVar("NO_MEMORY_PLANNER", 0), ContextVar("LRU", 1)
-RING, ALL2ALL = ContextVar("RING", 1), ContextVar("ALL2ALL", 0)
+RING, ALL2ALL, ALLREDUCE_CAST = ContextVar("RING", 1), ContextVar("ALL2ALL", 0), ContextVar("ALLREDUCE_CAST", 1)
 CACHELEVEL, IGNORE_BEAM_CACHE, DEVECTORIZE = ContextVar("CACHELEVEL", 2), ContextVar("IGNORE_BEAM_CACHE", 0), ContextVar("DEVECTORIZE", 1)
 VALIDATE_WITH_CPU, DISABLE_FAST_IDIV = ContextVar("VALIDATE_WITH_CPU", 0), ContextVar("DISABLE_FAST_IDIV", 0)
 CORRECT_DIVMOD_FOLDING, FUSE_OPTIM = ContextVar("CORRECT_DIVMOD_FOLDING", 0), ContextVar("FUSE_OPTIM", 0)
 ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE = ContextVar("ALLOW_DEVICE_USAGE", 1), ContextVar("MAX_BUFFER_SIZE", 0)
-EMULATE = ContextVar("EMULATE", "")
+MAX_KERNEL_BUFFERS = ContextVar("MAX_KERNEL_BUFFERS", 0)
+EMULATED_DTYPES = ContextVar("EMULATED_DTYPES", "")
+CAPTURE_PROCESS_REPLAY = ContextVar("CAPTURE_PROCESS_REPLAY", 0)
 CPU_COUNT = ContextVar("CPU_COUNT", max(1, len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else (os.cpu_count() or 1)))
-# Compilers
-CPU_LLVM, CPU_LVP, AMD_LLVM = ContextVar("CPU_LLVM", 0), ContextVar("CPU_LVP", 0), ContextVar("AMD_LLVM", 0)
-NV_PTX, CUDA_PTX, NV_NAK, QCOM_IR3 = ContextVar("NV_PTX", 0), ContextVar("CUDA_PTX", 0), ContextVar("NV_NAK", 0), ContextVar("QCOM_IR3", 0)
-NULL_IR3, NULL_NAK = ContextVar("NULL_IR3", 0), ContextVar("NULL_NAK", 0)
-AMD_CC, CPU_CC, NV_CC, CUDA_CC = ContextVar("AMD_CC", ""), ContextVar("CPU_CC", ""), ContextVar("NV_CC", ""), ContextVar("CUDA_CC", "")
-QCOM_CC = ContextVar("QCOM_CC", "")
+NULL_ALLOW_COPYOUT = ContextVar("NULL_ALLOW_COPYOUT", 0)
 # VIZ implies PROFILE, but you can run PROFILE without VIZ
 VIZ = ContextVar("VIZ", 0)
 PROFILE = ContextVar("PROFILE", abs(VIZ.value))
 SPEC = ContextVar("SPEC", 1)
 # TODO: disable by default due to speed
-IGNORE_OOB = ContextVar("IGNORE_OOB", 1)
+CHECK_OOB = ContextVar("CHECK_OOB", 0)
 PCONTIG = ContextVar("PCONTIG", 0)  # partial contiguous in rangeify
 DEBUG_RANGEIFY = ContextVar("DEBUG_RANGEIFY", 0)
 # set to 1, this uses tuplize in the linearizer sort order
@@ -200,6 +253,10 @@ TUPLE_ORDER = ContextVar("TUPLE_ORDER", 1)
 CCACHE = ContextVar("CCACHE", 1)
 # allow tf32 to be used on NVIDIA GPUs
 ALLOW_TF32 = ContextVar("ALLOW_TF32", 0)
+# set to 0 to disable the scheduler cache
+SCACHE = ContextVar("SCACHE", 1)
+# allow use of atomics for embedding backward
+USE_ATOMICS = ContextVar("USE_ATOMICS", 0)
 
 @dataclass(frozen=True)
 class Metadata:
@@ -217,6 +274,7 @@ class GlobalCounters:
   time_sum_s: ClassVar[float] = 0.0
   kernel_count: ClassVar[int] = 0
   mem_used: ClassVar[int] = 0   # NOTE: this is not reset
+  mem_used_per_device: ClassVar[defaultdict] = defaultdict(int)   # NOTE: this is not reset
   @staticmethod
   def reset(): GlobalCounters.global_ops, GlobalCounters.global_mem, GlobalCounters.time_sum_s, GlobalCounters.kernel_count = 0,0,0.0,0
 
@@ -279,17 +337,16 @@ class TracingKey:
 class ProfileEvent: pass
 
 @dataclass
-class ProfileRangeEvent(ProfileEvent):
-  device:str; name:str|TracingKey; st:decimal.Decimal; en:decimal.Decimal|None=None; is_copy:bool=False # noqa: E702
+class ProfileRangeEvent(ProfileEvent): device:str; name:str|TracingKey; st:decimal.Decimal; en:decimal.Decimal|None=None # noqa: E702
 
 @dataclass(frozen=True)
 class ProfilePointEvent(ProfileEvent):
-  device:str; name:str; key:Any; arg:dict=field(default_factory=dict); ts:decimal.Decimal=field(default_factory=perf_counter_us) # noqa: E702
+  device:str; name:str; key:Any; arg:Any=field(default_factory=dict); ts:decimal.Decimal=field(default_factory=perf_counter_us) # noqa: E702
 
 cpu_events:list[ProfileEvent] = []
 @contextlib.contextmanager
-def cpu_profile(name:str|TracingKey, device="TINY", is_copy=False, display=True) -> Generator[ProfileRangeEvent, None, None]:
-  res = ProfileRangeEvent(device, name, perf_counter_us(), is_copy=is_copy)
+def cpu_profile(name:str|TracingKey, device="TINY", display=True) -> Generator[ProfileRangeEvent, None, None]:
+  res = ProfileRangeEvent(device, name, perf_counter_us())
   try: yield res
   finally:
     res.en = perf_counter_us()
@@ -380,6 +437,7 @@ def _ensure_downloads_dir() -> pathlib.Path:
 
 def fetch(url:str, name:pathlib.Path|str|None=None, subdir:str|None=None, gunzip:bool=False,
           allow_caching=not getenv("DISABLE_HTTP_CACHE"), headers:dict[str, str]={}) -> pathlib.Path:
+  import urllib.request
   if url.startswith(("/", ".")): return pathlib.Path(url)
   if name is not None and (isinstance(name, pathlib.Path) or '/' in name): fp = pathlib.Path(name)
   else:
@@ -400,38 +458,13 @@ def fetch(url:str, name:pathlib.Path|str|None=None, subdir:str|None=None, gunzip
       if length and (file_size:=os.stat(fp).st_size) < length: raise RuntimeError(f"fetch size incomplete, {file_size} < {length}")
   return fp
 
-# NOTE: using HTTPServer forces a potentially slow socket.getfqdn
-class TCPServerWithReuse(socketserver.TCPServer):
-  allow_reuse_address = True
-  def __init__(self, server_address, RequestHandlerClass):
-    print(f"*** started server on http://127.0.0.1:{server_address[1]}")
-    super().__init__(server_address, RequestHandlerClass)
-
-class HTTPRequestHandler(BaseHTTPRequestHandler):
-  def send_data(self, data:bytes, content_type:str="application/json", status_code:int=200):
-    self.send_response(status_code)
-    self.send_header("Content-Type", content_type)
-    self.send_header("Content-Length", str(len(data)))
-    self.end_headers()
-    return self.wfile.write(data)
-  def stream_json(self, source:Generator):
-    try:
-      self.send_response(200)
-      self.send_header("Content-Type", "text/event-stream")
-      self.send_header("Cache-Control", "no-cache")
-      self.end_headers()
-      for r in source:
-        self.wfile.write(f"data: {json.dumps(r)}\n\n".encode("utf-8"))
-        self.wfile.flush()
-      self.wfile.write("data: [DONE]\n\n".encode("utf-8"))
-    # pass if client closed connection
-    except (BrokenPipeError, ConnectionResetError): return
-
 # *** Exec helpers
 
 def system(cmd:str, **kwargs) -> str:
   st = time.perf_counter()
-  ret = subprocess.check_output(cmd.split(), **kwargs).decode().strip()
+  try: ret = subprocess.check_output(cmd.split(), stderr=subprocess.STDOUT, **kwargs).decode().strip()
+  except subprocess.CalledProcessError as e:
+    raise RuntimeError(f"system: '{cmd}' failed with exit code {e.returncode}\n{(e.output or b'').decode().strip()}") from e
   if DEBUG >= 1: print(f"system: '{cmd}' returned {len(ret)} bytes in {(time.perf_counter() - st)*1e3:.2f} ms")
   return ret
 

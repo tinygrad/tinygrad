@@ -1,5 +1,4 @@
 import ctypes, ctypes.util, functools, sys
-from tinygrad.runtime.support.c import del_an
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING: id_ = ctypes.c_void_p
@@ -30,7 +29,7 @@ dispatch_data_create = returns_retained(dispatch_data_create)
 
 def msg(sel:str, restype=id_, argtypes=[], retain=False, clsmeth=False):
   # Using attribute access returns a new reference so setting restype is safe
-  (sender:=lib["objc_msgSend"]).restype, sender.argtypes = del_an(restype), [id_, id_]+[del_an(a) for a in argtypes] if argtypes else []
+  (sender:=lib["objc_msgSend"]).restype, sender.argtypes = restype, [id_, id_]+list(argtypes) if argtypes else []
   def f(ptr, *args): return sender(ptr._objc_class_ if clsmeth else ptr, getsel(sel.encode()), *args)
   return returns_retained(f) if retain else f
 
@@ -50,7 +49,7 @@ else:
     def __setattr__(cls, k, v):
       super().__setattr__(k, v)
       if k in ("_methods_", "_classmethods_"):
-        for m in v: cls._addmeth(m, clsmeth=(v=="_classmethods_"))
+        for m in v: cls._addmeth(m, clsmeth=(k=="_classmethods_"))
         for c in cls._children_: c._inherit(cls)
       if k == "_bases_":
         for b in v:

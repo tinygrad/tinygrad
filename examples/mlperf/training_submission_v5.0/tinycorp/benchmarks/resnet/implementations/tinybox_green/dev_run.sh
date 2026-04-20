@@ -1,6 +1,6 @@
 #!/bin/bash
 
-export PYTHONPATH="." NV=1
+export PYTHONPATH="." DEV=NV
 export MODEL="resnet"
 export DEFAULT_FLOAT="HALF" GPUS=6 BS=1536 EVAL_BS=192
 

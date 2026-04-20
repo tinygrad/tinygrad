@@ -2,12 +2,12 @@
 set -e  # Exit on any error
 set -o pipefail  # Make pipeline fail if any command fails
 
-export PYTHONPATH="." AMD=1
+export PYTHONPATH="." DEV=AMD
 export MODEL="bert"
 export SUBMISSION_PLATFORM="tinybox_red"
 export DEFAULT_FLOAT="HALF" SUM_DTYPE="HALF" GPUS=6 BS=96 EVAL_BS=96
 
-export IGNORE_OOB=1
+export CHECK_OOB=0
 export REWRITE_STACK_LIMIT=500000
 
 export BEAM=5 BEAM_UOPS_MAX=8000 BEAM_UPCAST_MAX=256 BEAM_LOCAL_MAX=1024 BEAM_MIN_PROGRESS=5

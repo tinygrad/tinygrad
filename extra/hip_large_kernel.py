@@ -18,7 +18,7 @@ prg = dev.runtime("write_ones", mbin)
 prg(buf0._buf, global_size=(1,65537,1), local_size=(1,1,1), wait=True)
 
 import numpy as np
-def to_np(buf): return np.frombuffer(buf.as_buffer().cast(buf.dtype.base.fmt), dtype=_to_np_dtype(buf.dtype.base))
+def to_np(buf): return np.frombuffer(buf.as_memoryview().cast(buf.dtype.base.fmt), dtype=_to_np_dtype(buf.dtype.base))
 
 big = to_np(buf0)
 print(big)

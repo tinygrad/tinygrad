@@ -1,4 +1,4 @@
-import glob, importlib, pathlib, subprocess, tarfile
+import glob, importlib, os, pathlib, shutil, subprocess, tarfile, tempfile
 from tinygrad.helpers import fetch, flatten, system, getenv
 
 root = (here:=pathlib.Path(__file__).parent).parents[2]
@@ -6,10 +6,15 @@ nv_src = {"nv_570": "https://github.com/NVIDIA/open-gpu-kernel-modules/archive/8
           "nv_580": "https://github.com/NVIDIA/open-gpu-kernel-modules/archive/2af9f1f0f7de4988432d4ae875b5858ffdb09cc2.tar.gz"}
 ffmpeg_src = "https://ffmpeg.org/releases/ffmpeg-8.0.1.tar.gz"
 rocr_src = "https://github.com/ROCm/rocm-systems/archive/refs/tags/rocm-7.1.1.tar.gz"
+linux_headers_deb = "https://snapshot.debian.org/archive/debian/20260207T145350Z/pool/main/l/linux/linux-libc-dev_6.18.9-1_all.deb"
+linux_headers_kern_deb = "https://snapshot.debian.org/archive/debian/20260207T145350Z/pool/main/l/linux/linux-headers-6.18.9+deb14-common_6.18.9-1_all.deb"
+liburing_src = "https://raw.githubusercontent.com/axboe/liburing/refs/tags/liburing-2.14/src/include/liburing.h"
+ggml_common_src = "https://raw.githubusercontent.com/ggml-org/ggml/d4fcfe88a8bcf5c9840be14be6c2fbf1f5b3b2db/src/ggml-common.h"
 macossdk = "/var/db/xcode_select_link/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk"
 
 llvm_lib = (r"'C:\\Program Files\\LLVM\\bin\\LLVM-C.dll' if WIN else '/opt/homebrew/opt/llvm@20/lib/libLLVM.dylib' if OSX else " +
             repr(['LLVM'] + [f'LLVM-{i}' for i in reversed(range(14, 21+1))]))
+clang_lib = "'/opt/homebrew/opt/llvm@20/lib/libclang.dylib' if OSX else ['clang-20', 'clang']"
 
 webgpu_lib = "os.path.join(sysconfig.get_paths()['purelib'], 'pydawn', 'lib', 'libwebgpu_dawn.dll') if WIN else 'webgpu_dawn'"
 nv_lib_path = "[f'/{pre}/cuda/targets/{sysconfig.get_config_vars().get(\"MULTIARCH\", \"\").rsplit(\"-\", 1)[0]}/lib' for pre in ['opt', 'usr/local']]"
@@ -17,17 +22,22 @@ nv_lib_path = "[f'/{pre}/cuda/targets/{sysconfig.get_config_vars().get(\"MULTIAR
 def load(name, dll, files, **kwargs):
   if not (f:=(root/(path:=kwargs.pop("path", __name__)).replace('.','/')/f"{name}.py")).exists() or getenv('REGEN'):
     files, kwargs['args'] = files() if callable(files) else files, args() if callable(args:=kwargs.get('args', [])) else args
-    if (tarball:=kwargs.pop('tarball', None)):
-      # dangerous for arbitrary urls!
-      with tarfile.open(fetch(tarball, gunzip=tarball.endswith("gz"))) as tf:
-        tf.extractall("/tmp")
-        base = f"/tmp/{tf.getnames()[0]}"
-        files, kwargs['args'] = [str(f).format(base) for f in files], [a.format(base) for a in kwargs.get('args', [])]
-        kwargs['anon_names'] = {k.format(base):v for k,v in kwargs.get('anon_names', {}).items()}
-      if (preprocess:=kwargs.pop('preprocess', None)): preprocess(base)
+    if (srcs:=kwargs.pop('srcs', None)):
+      srcpath = (td:=tempfile.TemporaryDirectory(f"autogen-src-{name.replace('/','-')}")).name + "/"
+      for src in (srcs if isinstance(srcs, list) else [srcs]):
+        if 'tar' in src:
+          # dangerous for arbitrary urls!
+          with tarfile.open(fetch(src, gunzip=src.endswith("gz"))) as tf:
+            tf.extractall(srcpath)
+            if not isinstance(srcs, list): srcpath += tf.getnames()[0] # if we just have a single tarball, make this the root
+        else: fetch(src, name=srcpath + src.split('/')[-1])
+      files, kwargs['args'] = [str(f).format(srcpath) for f in files], [a.format(srcpath) for a in kwargs.get('args', [])]
+      kwargs['anon_names'] = {k.format(srcpath):v for k,v in kwargs.get('anon_names', {}).items()}
+      if (preprocess:=kwargs.pop('preprocess', None)): preprocess(srcpath)
     files = flatten(sorted(glob.glob(p, recursive=True)) if isinstance(p, str) and '*' in p else [p] for p in files)
-    kwargs['epilog'] = (epi(base) if tarball else epi()) if callable(epi:=kwargs.get('epilog', [])) else epi
+    kwargs['epilog'] = (epi(srcpath) if srcs else epi()) if callable(epi:=kwargs.get('epilog', [])) else epi
     f.write_text(importlib.import_module("tinygrad.runtime.support.autogen").gen(name, dll, files, **kwargs))
+    if srcs: td.cleanup()
   return importlib.import_module(f"{path}.{name.replace('/', '.')}")
 
 def __getattr__(nm):
@@ -35,7 +45,7 @@ def __getattr__(nm):
     case "libc": return load("libc", "'c'", lambda: (
       [i for i in system("dpkg -L libc6-dev").split() if 'sys/mman.h' in i or 'sys/syscall.h' in i] +
       ["/usr/include/string.h", "/usr/include/elf.h", "/usr/include/unistd.h", "/usr/include/asm-generic/mman-common.h"]), errno=True)
-    case "avcodec": return load("avcodec", None, ["{}/libavcodec/hevc/hevc.h", "{}/libavcodec/cbs_h265.h"], tarball=ffmpeg_src)
+    case "avcodec": return load("avcodec", None, ["{}/libavcodec/hevc/hevc.h", "{}/libavcodec/cbs_h265.h"], srcs=ffmpeg_src)
     case "opencl": return load("opencl", "'OpenCL'", ["/usr/include/CL/cl.h"])
     case "cuda": return load("cuda", "'cuda'", ["/usr/include/cuda.h"], args=["-D__CUDA_API_VERSION_INTERNAL"], parse_macros=False)
     case "nvrtc": return load("nvrtc", "'nvrtc'", ["/usr/include/nvrtc.h"], paths=nv_lib_path, prolog=["import sysconfig"])
@@ -45,18 +55,18 @@ def __getattr__(nm):
       return load(nm, None, [
         *[root/"extra/nv_gpu_driver"/s for s in ["clc9b0.h", "clc6c0qmd.h","clcec0qmd.h", "nvdec_drv.h"]], "{}/kernel-open/common/inc/nvmisc.h",
         *[f"{{}}/src/common/sdk/nvidia/inc/class/cl{s}.h" for s in ["0000", "0070", "0080", "2080", "2080_notification", "c56f", "c86f", "c96f", "c761",
-                                                                    "83de", "c6c0", "cdc0"]],
+                                                                    "83de", "b2cc", "c6c0", "cdc0"]],
         *[f"{{}}/kernel-open/nvidia-uvm/{s}.h" for s in ["clc6b5", "clc9b5", "clcfb0", "uvm_ioctl", "uvm_linux_ioctl", "hwref/ampere/ga100/dev_fault"]],
         *[f"{{}}/src/nvidia/arch/nvalloc/unix/include/nv{s}.h" for s in ["_escape", "-ioctl", "-ioctl-numbers",
                                                                          "-ioctl-numa", "-unix-nvos-params-wrappers"]],
         *[f"{{}}/src/common/sdk/nvidia/inc/{s}.h" for s in ["alloc/alloc_channel", "nvos", "ctrl/ctrlc36f", "ctrl/ctrlcb33",
                                                             "ctrl/ctrla06c", "ctrl/ctrl90f1", "ctrl/ctrla06f/ctrla06fgpfifo"]],
-        *[f"{{}}/src/common/sdk/nvidia/inc/ctrl/ctrl{s}/*.h" for s in ["0000", "0080", "2080", "83de"]],
+        *[f"{{}}/src/common/sdk/nvidia/inc/ctrl/ctrl{s}/*.h" for s in ["0000", "0080", "2080", "83de", "b0cc"]],
         "{}/kernel-open/common/inc/nvstatus.h", "{}/src/nvidia/generated/g_allclasses.h"
       ], args=[
         "-include", "{}/src/common/sdk/nvidia/inc/nvtypes.h", "-I{}/src/common/inc", "-I{}/kernel-open/nvidia-uvm", "-I{}/kernel-open/common/inc",
         "-I{}/src/common/sdk/nvidia/inc", "-I{}/src/nvidia/arch/nvalloc/unix/include", "-I{}/src/common/sdk/nvidia/inc/ctrl"
-      ], rules=[(r'MW\(([^:]+):(.+)\)',r'(\1, \2)')], tarball=nv_src[nm], anon_names={"{}/kernel-open/common/inc/nvstatus.h:37":"nv_status_codes"})
+      ], rules=[(r'MW\(([^:]+):(.+)\)',r'(\1, \2)'), (r'(\d+):(\d+)', r'(\1, \2)')], srcs=nv_src[nm], anon_names={"{}/kernel-open/common/inc/nvstatus.h:37":"nv_status_codes"})
     case "nv": return load("nv", None, [
       *[f"{{}}/src/nvidia/inc/kernel/gpu/{s}.h" for s in ["fsp/kern_fsp_cot_payload", "gsp/gsp_init_args"]],
       *[f"{{}}/src/nvidia/arch/nvalloc/common/inc/{s}.h" for s in ["gsp/gspifpub", "gsp/gsp_fw_wpr_meta", "gsp/gsp_fw_sr_meta", "rmRiscvUcode",
@@ -70,19 +80,23 @@ def __getattr__(nm):
       "-I{}/src/common/inc", "-I{}/src/nvidia/inc", "-I{}/src/nvidia/interface/", "-I{}/src/nvidia/inc/kernel", "-I{}/src/nvidia/inc/libraries",
       "-I{}/src/nvidia/arch/nvalloc/common/inc", "-I{}/kernel-open/nvidia-uvm", "-I{}/kernel-open/common/inc", "-I{}/src/common/sdk/nvidia/inc",
       "-I{}/src/nvidia/arch/nvalloc/unix/include", "-I{}/src/common/sdk/nvidia/inc/ctrl"
-    ], tarball=nv_src["nv_570"], anon_names={
+    ], srcs=nv_src["nv_570"], anon_names={
       "{}/src/nvidia/inc/kernel/vgpu/rpc_global_enums.h:8": "rpc_fns",
       "{}/src/nvidia/inc/kernel/vgpu/rpc_global_enums.h:244": "rpc_events"
     })
     # this defines all syscall numbers. should probably unify linux autogen?
-    case "io_uring": return load("io_uring", None, ["/usr/include/liburing.h", "/usr/include/linux/io_uring.h", "/usr/include/asm-generic/unistd.h"],
-                                 rules=[('__NR', 'NR')])
+    case "io_uring":
+      return load("io_uring", None, ["{}/liburing.h", "{}/usr/include/linux/io_uring.h", "{}/usr/include/asm-generic/unistd.h"],
+                  args=["-I{}/usr/include"], srcs=[linux_headers_deb, liburing_src], rules=[('__NR', 'NR')],
+                  preprocess=lambda path: subprocess.run(f"ar x {linux_headers_deb.split('/')[-1]} && tar xf data.tar.xz", cwd=path, shell=True, check=True))
     case "ib": return load("ib", "'ibverbs'", ["/usr/include/infiniband/verbs.h", "/usr/include/infiniband/verbs_api.h",
                                                "/usr/include/infiniband/ib_user_ioctl_verbs.h","/usr/include/rdma/ib_user_verbs.h"], errno=True)
     case "llvm": return load("llvm", llvm_lib, lambda: [system("llvm-config-20 --includedir")+"/llvm-c/**/*.h"],
                              args=lambda: system("llvm-config-20 --cflags").split(), recsym=True, prolog=["from tinygrad.helpers import WIN, OSX"])
-    case "pci": return load("pci", None, ["/usr/include/linux/pci_regs.h"])
-    case "vfio": return load("vfio", None, ["/usr/include/linux/vfio.h"])
+    case "pci": return load("pci", None, ["{}/usr/include/linux/pci_regs.h"], srcs=linux_headers_deb,
+                             preprocess=lambda path: subprocess.run(f"ar x {linux_headers_deb.split('/')[-1]} && tar xf data.tar.xz", cwd=path, shell=True, check=True))
+    case "vfio": return load("vfio", None, ["{}/usr/include/linux/vfio.h"], args=["-I{}/usr/include"], srcs=linux_headers_deb,
+                             preprocess=lambda path: subprocess.run(f"ar x {linux_headers_deb.split('/')[-1]} && tar xf data.tar.xz", cwd=path, shell=True, check=True))
     # could add rule: WGPU_COMMA -> ','
     case "webgpu": return load("webgpu", webgpu_lib, [root/"extra/webgpu/webgpu.h"],
                                prolog=["from tinygrad.helpers import WIN, OSX", "import sysconfig, os"])
@@ -99,12 +113,13 @@ def __getattr__(nm):
       *[f"{{}}/projects/rocr-runtime/runtime/hsa-runtime/inc/{s}.h" for s in ["hsa", "hsa_ext_amd", "amd_hsa_signal", "amd_hsa_queue",
                                                                               "amd_hsa_kernel_code", "hsa_ext_finalize",
                                                                               "hsa_ext_image", "hsa_ven_amd_aqlprofile"]]],
-      tarball=rocr_src, args=["-DLITTLEENDIAN_CPU"], prolog=["import os"])
+      srcs=rocr_src, args=["-DLITTLEENDIAN_CPU"], prolog=["import os"])
     case "amdgpu_kd": return load("amdgpu_kd", None, lambda: [f"{system('llvm-config-20 --includedir')}/llvm/Support/AMDHSAKernelDescriptor.h"],
                                   args=lambda: system("llvm-config-20 --cflags").split() + ["-x", "c++"], recsym=True, parse_macros=False)
     case "amd_gpu": return load("amd_gpu", None, [root/f"extra/hip_gpu_driver/{s}.h" for s in ["sdma_registers", "nvd", "gc_11_0_0_offset",
                                                                                                "sienna_cichlid_ip_offset"]],
                                 args=["-I/opt/rocm/include", "-x", "c++"])
+    case "amdgpu_drm": return load("amdgpu_drm", None, [ "/usr/include/drm/drm.h", *[root/f"extra/hip_gpu_driver/{s}.h" for s in ["amdgpu_drm"]]])
     case "kgsl": return load("kgsl", None, [root/"extra/qcom_gpu_driver/msm_kgsl.h"], args=["-D__user="])
     case "qcom_dsp":
       return load("qcom_dsp", None, [root/f"extra/dsp/include/{s}.h" for s in ["ion", "msm_ion", "adsprpc_shared", "remote_default", "apps_std"]])
@@ -112,8 +127,8 @@ def __getattr__(nm):
     case "rocprof":
       return load("rocprof", "['rocprof-trace-decoder', p:='/usr/local/lib/rocprof-trace-decoder.so', p.replace('so','dylib')]",
                   [f"{{}}/include/{s}.h" for s in ["rocprof_trace_decoder", "trace_decoder_instrument", "trace_decoder_types"]],
-                  tarball="https://github.com/ROCm/rocprof-trace-decoder/archive/dd0485100971522cc4cd8ae136bdda431061a04d.tar.gz")
-    case "mesa": return load("mesa", "['tinymesa_cpu', 'tinymesa']", [
+                  srcs="https://github.com/ROCm/rocprof-trace-decoder/archive/dd0485100971522cc4cd8ae136bdda431061a04d.tar.gz")
+    case "mesa": return load("mesa", "([] if DEV.renderer == 'LVP' else ['tinymesa']) + ['tinymesa_cpu']", [
         *[f"{{}}/src/compiler/nir/{s}.h" for s in ["nir", "nir_builder", "nir_shader_compiler_options", "nir_serialize"]], "{}/gen/nir_intrinsics.h",
         *[f"{{}}/src/nouveau/{s}.h" for s in ["headers/nv_device_info", "compiler/nak"]],
         *[f"{{}}/src/gallium/auxiliary/gallivm/lp_bld{s}.h" for s in ["", "_passmgr", "_misc", "_type", "_init", "_nir", "_struct", "_jit_types",
@@ -131,14 +146,31 @@ def __getattr__(nm):
             f"src/freedreno/registers/adreno/{s}.xml c-defines > gen/{s}.xml.h" for s in ["a6xx", "adreno_pm4", "a6xx_enums", "a6xx_descriptors"]],
           *[f"python3 src/compiler/{s}_h.py > gen/{s.split('/')[-1]}.h" for s in ["nir/nir_opcodes", "nir/nir_builder_opcodes"]],
           *[f"python3 src/compiler/nir/nir_{s}_h.py --outdir gen" for s in ["intrinsics", "intrinsics_indices"]]]), cwd=path, shell=True, check=True),
-  tarball="https://gitlab.freedesktop.org/mesa/mesa/-/archive/mesa-25.2.7/mesa-25.2.7.tar.gz",
-  prolog=["import gzip, base64"], epilog=lambda path: [system(f"{root}/extra/mesa/lvp_nir_options.sh {path}")])
+  srcs="https://gitlab.freedesktop.org/mesa/mesa/-/archive/mesa-25.2.7/mesa-25.2.7.tar.gz",
+  prolog=["from tinygrad.helpers import DEV", "import gzip, base64"],
+  epilog=lambda path: [system(f"{root}/extra/mesa/lvp_nir_options.sh {path}")])
     case "libclang":
-      return load("libclang", "['clang-20', 'clang']",
+      return load("libclang", clang_lib,
                   lambda: [f"{system('llvm-config-20 --includedir')}/clang-c/{s}.h" for s in ["Index", "CXString", "CXSourceLocation", "CXFile"]],
-                  args=lambda: system("llvm-config-20 --cflags").split())
+                  prolog=["from tinygrad.helpers import OSX"], args=lambda: system("llvm-config-20 --cflags").split())
     case "metal":
       return load("metal", "'Metal'", [f"{macossdk}/System/Library/Frameworks/Metal.framework/Headers/MTL{s}.h" for s in
                   ["ComputeCommandEncoder", "ComputePipeline", "CommandQueue", "Device", "IndirectCommandBuffer", "Resource", "CommandEncoder"]],
                   args=["-xobjective-c","-isysroot",macossdk], types={"dispatch_data_t":"objc.id_"})
+    case "iokit": return load("iokit", "'IOKit'", [f"{macossdk}/System/Library/Frameworks/IOKit.framework/Headers/IOKitLib.h"],
+                              args=["-isysroot", macossdk])
+    case "corefoundation": return load("corefoundation", "'CoreFoundation'",
+                                       [f"{macossdk}/System/Library/Frameworks/CoreFoundation.framework/Headers/CF{s}.h" for s in ["String", "Data"]],
+                                       args=["-isysroot", macossdk])
+    case "llvm_qcom": return load("llvm_qcom", "'llvm-qcom'", [root/"extra/tinydreno.h"])
+    case "ggml_common":
+      return load("ggml_common", None, ["{}/ggml-common.h"], srcs=ggml_common_src,
+                  args=["-DGGML_COMMON_DECL_C", "-DGGML_COMMON_IMPL_C"], parse_macros=False)
+    case "mlx5":
+      kh = "{}/usr/src/linux-headers-6.18.9+deb14-common/include/linux/mlx5"
+      return load("mlx5", None, [root/"extra/mlx_driver/mlx5.h", f"{kh}/mlx5_ifc.h"], srcs=linux_headers_kern_deb,
+                  args=["-Du8=unsigned char", "-Du16=unsigned short", "-Du32=unsigned int", "-Du64=unsigned long long",
+                        "-D__be16=unsigned short", "-D__be32=unsigned int", "-D__be64=unsigned long long", f"-I{kh}"],
+                  preprocess=lambda path: subprocess.run(f"ar x {linux_headers_kern_deb.split('/')[-1]} && tar xf data.tar.xz",
+                                                         cwd=path, shell=True, check=True))
     case _: raise AttributeError(f"no such autogen: {nm}")

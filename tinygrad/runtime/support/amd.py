@@ -38,7 +38,7 @@ def fixup_ip_version(ip:str, version:tuple[int, ...]) -> list[tuple[int, ...]]:
     return version
 
   if ip in ['nbio', 'nbif']: version = _apply_ovrd({(3,3): (2,3,0), (7,3): (7,2,0)})
-  elif ip in ['mp', 'smu']: version = _apply_ovrd({(14,0,3): (14,0,2), (13,0,12): (13,0,6)})
+  elif ip in ['mp', 'smu']: version = _apply_ovrd({(14,0,3): (14,0,2)})
   elif ip in ['gc']: version = _apply_ovrd({(9,5,0): (9,4,3)})
   elif ip in ['sdma']: version = _apply_ovrd({(4,4,4): (4,4,2)})
 
@@ -88,8 +88,8 @@ def import_asic_regs(prefix:str, version:tuple[int, ...], cls=AMDReg) -> dict[st
     return x
   def _download_file(ver, suff) -> str:
     dir_prefix = {"osssys": "oss"}.get(prefix, prefix)
-    fetch_name, file_name = f"{prefix}_{'_'.join(map(str, ver))}_{suff}.h", f"{prefix}_{'_'.join(map(str, version))}_{suff}.h"
-    return header_download(f"include/asic_reg/{dir_prefix}/{fetch_name}", name=file_name, subdir="asic_regs")
+    fetch_name = f"{prefix}_{'_'.join(map(str, ver))}_{suff}.h"
+    return header_download(f"include/asic_reg/{dir_prefix}/{fetch_name}", name=fetch_name, subdir="asic_regs")
 
   for ver in fixup_ip_version(prefix, version):
     try: offs, sh_masks = _extract_regs(_download_file(ver, "offset")), _extract_regs(_download_file(ver, "sh_mask"))

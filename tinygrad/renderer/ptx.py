@@ -6,7 +6,7 @@ from tinygrad.uop.ops import Ops, UOp, PatternMatcher, UPat, GroupOp
 from tinygrad.dtype import dtypes, DType, PtrDType, AddrSpace
 from tinygrad.renderer import Renderer
 from tinygrad.renderer.cstyle import CUDARenderer
-from tinygrad.helpers import flatten, get_single_element, prod, unwrap, CI
+from tinygrad.helpers import flatten, get_single_element, prod, unwrap, Target
 
 def render_val(x, dtype):
   if dtypes.is_float(dtype):
@@ -28,7 +28,8 @@ asm_for_op: dict[Ops, Callable] = {
   Ops.OR: lambda d,a,b,dt, name: f"or.pred {d}, {a}, {b};" if dt == dtypes.bool else f"or.b{name[1:]} {d}, {a}, {b};",
   Ops.IDIV: lambda d,a,b,dt,name: f"div.{name} {d}, {a}, {b};", Ops.MOD: lambda d,a,b,dt,name: f"rem.{name} {d}, {a}, {b};",
   Ops.MAX: lambda d,a,b,dt,name: f"max.{name} {d}, {a}, {b};", Ops.CMPEQ: lambda d,a,b,dt,name: f"setp.eq.{name} {d}, {a}, {b};",
-  Ops.CMPLT: lambda d,a,b,dt,name: f"setp.lt.{name} {d}, {a}, {b};", Ops.CMPNE: lambda d,a,b,dt,name: f"setp.ne.{name} {d}, {a}, {b};",
+  Ops.CMPLT: lambda d,a,b,dt,name: f"setp.lt.{name} {d}, {a}, {b};",
+  Ops.CMPNE: lambda d,a,b,dt,name: f"setp.{'neu' if dtypes.is_float(dt) else 'ne'}.{name} {d}, {a}, {b};",
   Ops.MULACC: lambda d,a,b,c,dt,name: f"{'fma.rn' if dtypes.is_float(dt) else 'mad.lo'}.{name} {d}, {a}, {b}, {c};",
   Ops.WHERE: lambda d,a,b,c,dt,name: [f"@{a} mov.{name} {d}, {b};", f"@!{a} mov.{name} {d}, {c};"] if dt == dtypes.bool else \
     f"selp.{'b16' if name == 'f16' else name} {d}, {b}, {c}, {a};"
@@ -64,7 +65,7 @@ def mem_type(x:UOp) -> str:
   match x.op:
     case Ops.AFTER: return mem_type(x.src[0])
     case Ops.DEFINE_LOCAL: return 'shared'
-    case Ops.DEFINE_GLOBAL: return 'global'
+    case Ops.PARAM: return 'global'
     case _: raise RuntimeError(f"{x.op} needs to be memory")
 
 def render_wmma(ctx: "PTXRenderer", wmma: UOp):
@@ -91,15 +92,13 @@ string_rewrite = PatternMatcher([
   (UPat.cvar("x", dtypes.bool), lambda ctx, x: f"setp.ne.s16 {ctx.r[x]}, {render_val(x.arg, x.dtype)}, 0;"),
   (UPat.cvar("x"), lambda ctx, x: f"mov.b{ctx.types[x.dtype][1:]} {ctx.r[x]}, {render_val(x.arg, x.dtype)};"),
   (UPat(Ops.SPECIAL, name="x"), lambda ctx,x: f"mov.u32 %{x.arg}, %{'ctaid' if x.arg[0] == 'g' else 'tid'}.{chr(120+int(x.arg[-1]))};"),
-  (UPat(Ops.DEFINE_GLOBAL, name="x"), lambda ctx, x: f"ld.param.{ctx.types[dtypes.ulong]} {ctx.r[x]}, [data{x.arg}+0];"),
+  (UPat(Ops.PARAM, name="x"), lambda ctx, x: f"ld.param.{ctx.types[dtypes.ulong]} {ctx.r[x]}, [data{x.arg}+0];"),
   (UPat((Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ), name="x", allow_any_len=True, src=(UPat.var("src0"),)),
     lambda ctx, x, src0: ctx.code_for_op[x.op](ctx.r[x], *[ctx.r[v] for v in x.src], src0.dtype, ctx.types[src0.dtype])),
   (UPat(GroupOp.ALU, name="x"), lambda ctx, x: ctx.code_for_op[x.op](ctx.r[x], *[ctx.r[v] for v in x.src], x.dtype, ctx.types[x.dtype])),
   (UPat(Ops.BITCAST, name="x", src=(UPat.var("a"),), allow_any_len=True), lambda ctx, x, a: f"mov.b{ctx.types[x.dtype][1:]} {ctx.r[x]}, {ctx.r[a]};"),
   (UPat(Ops.CAST, name="x", src=(UPat(dtype=dtypes.bool, name="a"),)),
    lambda ctx, x, a: f"selp.b{ctx.types[x.dtype][1:]} {ctx.r[x]}, {render_val(1, x.dtype)}, {render_val(0, x.dtype)}, {ctx.r[a]};"),
-  (UPat(Ops.CAST, name="x", dtype=dtypes.bool, src=(UPat.var("a"),)),
-   lambda ctx, x, a: f"setp.ne.b{ctx.types[a.dtype][1:]} {ctx.r[x]}, {ctx.r[a]}, {render_val(0, a.dtype)};"),
   (UPat(Ops.CAST, name="x", src=(UPat.var("a"),)),
    lambda ctx, x, a: f"cvt{modifier(x.dtype, a.dtype)}.{ctx.cast_types[x.dtype]}.{ctx.cast_types[a.dtype]} {ctx.r[x]}, {ctx.r[a]};"),
   # store / gated load / load
@@ -134,23 +133,20 @@ string_rewrite = PatternMatcher([
   (UPat(Ops.ENDIF, name="x"), lambda ctx, x: f"IF_{ctx.r[x.src[0].src[0]][1:]}_{ctx.uops.index(x.src[0])}:"),
   (UPat(Ops.WMMA, name="x"), lambda ctx, x: list(render_wmma(ctx, x))),
   (UPat(Ops.BARRIER), lambda ctx: ctx.barrier),
-  (UPat(Ops.DEFINE_VAR, name="x"), lambda ctx, x: f"ld.param.{ctx.mem_types[x.dtype]} {ctx.r[x]}, [{x.arg[0]}+0];"),
+  (UPat(Ops.DEFINE_VAR, name="x"), lambda ctx, x: f"ld.param.{ctx.mem_types[x.dtype]} {ctx.r[x]}, [{x.expr}+0];"),
 ])
 
 class PTXRenderer(Renderer):
-  device = "CUDA"
   suffix = "PTX"
   global_max, local_max, shared_max = CUDARenderer.global_max, CUDARenderer.local_max, CUDARenderer.shared_max
   tc_sm80 = [x for x in tc.cuda_sm80 if x.dtype_in in [dtypes.half, dtypes.float]]
   code_for_op = asm_for_op
   extra_matcher = ptx_matcher
-  def __init__(self, arch:str, device="CUDA"):
-    self.device, self.arch, arch_ver = device, arch, int(arch[3:])
-    self.tensor_cores = PTXRenderer.tc_sm80 if arch_ver >= 80 else tc.cuda_sm75 if arch_ver >= 75 else []
-  def __reduce__(self): return self.__class__, (self.arch, self.device)
-
-  # CI CUDA is sm_35, so no fp16 ALUs
-  def is_dtype_supported(self, dtype:DType) -> bool: return dtype not in ((dtypes.half,) if CI else ()) + (dtypes.bfloat16,) + dtypes.fp8s
+  def __init__(self, target:Target):
+    super().__init__(target)
+    from tinygrad.runtime.support.compiler_cuda import NVPTXCompiler, PTXCompiler
+    self.compiler = (PTXCompiler if target.interface.startswith("MOCK") or target.device == "CUDA" else NVPTXCompiler)(target.arch)
+    self.tensor_cores = PTXRenderer.tc_sm80 if (ver:=int(target.arch[3:])) >= 80 else tc.cuda_sm75 if ver >= 75 else []
 
   # language options
   kernel_prefix = """.version VERSION
@@ -221,11 +217,11 @@ class PTXRenderer(Renderer):
         continue
       if u.op is Ops.INDEX: continue  # other index we can skip
       if u.op is Ops.SPECIAL: r[u] = "%" + u.arg
-      elif u.op is Ops.DEFINE_VAR: bufs.append((u.arg[0], u.dtype))
+      elif u.op is Ops.DEFINE_VAR: bufs.append((u.expr, u.dtype))
       elif u.op is Ops.LOAD:
         assert u.src[0].dtype == dtypes.int64, "load isn't int64"
         r[u] = [ssa('val', dtype=self.types[u.dtype.scalar()]) for _ in range(u.dtype.count)] if u.dtype.count > 1 else ssa('val', u)
-      elif u.op is Ops.DEFINE_GLOBAL: bufs.append((f"data{u.arg}", u.dtype))
+      elif u.op is Ops.PARAM: bufs.append((f"data{u.arg}", u.dtype))
       elif u.op is Ops.WMMA:
         # registers for packing/unpacking input and acc
         self.wmma_r = [[ssa("wmma_in", dtype="b32") for _ in range(0, len(r[u.src[0]]), 4 // u.src[0].dtype.scalar().itemsize)],
@@ -234,7 +230,7 @@ class PTXRenderer(Renderer):
         r[u] = [ssa("wmma", dtype=self.types[u.dtype.scalar()]) for _ in range(u.dtype.count)]
       prefix, dtype = {Ops.CAST: ("cast", None), Ops.BITCAST: ("cast", None), Ops.END: ("pred", "pred"), Ops.RANGE: ("ridx", None),
         Ops.DEFINE_VAR: ("dat", None), Ops.CONST: ("const", None), Ops.DEFINE_LOCAL: ("local", self.types[dtypes.ulong]),
-        Ops.DEFINE_GLOBAL: ("dat", self.types[dtypes.ulong]), **{op: ("alu", None) for op in GroupOp.ALU}}.get(u.op, (None, None))
+        Ops.PARAM: ("dat", self.types[dtypes.ulong]), **{op: ("alu", None) for op in GroupOp.ALU}}.get(u.op, (None, None))
       if prefix: r[u] = ssa(prefix, u, dtype)
 
       if (l:=cast(str|list[str], string_rewrite.rewrite(u, ctx=self))) is None:

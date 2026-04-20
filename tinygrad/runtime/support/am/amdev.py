@@ -1,11 +1,11 @@
 from __future__ import annotations
 import ctypes, collections, dataclasses, functools, hashlib, array
 from tinygrad.helpers import mv_address, getenv, DEBUG, fetch, lo32, hi32
+from tinygrad.runtime.autogen import pci
 from tinygrad.runtime.autogen.am import am
-from tinygrad.runtime.support.hcq import MMIOInterface
 from tinygrad.runtime.support.amd import AMDReg, import_module, import_asic_regs
 from tinygrad.runtime.support.memory import TLSFAllocator, MemoryManager, AddrSpace
-from tinygrad.runtime.support.system import PCIDevice, PCIDevImplBase
+from tinygrad.runtime.support.system import PCIDevice
 from tinygrad.runtime.support.am.ip import AM_IP, AM_SOC, AM_GMC, AM_IH, AM_PSP, AM_SMU, AM_GFX, AM_SDMA
 
 AM_DEBUG = getenv("AM_DEBUG", 0)
@@ -108,7 +108,7 @@ class AMFirmware:
     self.descs += [self.desc(blob, hdr0.header.ucode_array_offset_bytes, hdr0.header.ucode_size_bytes, am.GFX_FW_TYPE_RLC_G)]
 
   def load_fw(self, fname:str, *headers, versioned_header:str|None=None):
-    fpath = fetch(f"https://gitlab.com/kernel-firmware/linux-firmware/-/raw/a9f26799247aa60fbaa3b64267a18f20b72b5235/amdgpu/{fname}", subdir="fw")
+    fpath = fetch(f"https://gitlab.com/kernel-firmware/linux-firmware/-/raw/1e2c15348485939baf1b6d1f5a7a3b799d80703d/amdgpu/{fname}", subdir="fw")
     blob = memoryview(bytearray(fpath.read_bytes()))
     if AM_DEBUG >= 1: print(f"am {self.adev.devfmt}: loading firmware {fname}: {hashlib.sha256(blob).hexdigest()}")
     if versioned_header:
@@ -143,11 +143,11 @@ class AMMemoryManager(MemoryManager):
     self.dev.gmc.flush_tlb(ip='GC', vmid=0)
     self.dev.gmc.flush_tlb(ip='MM', vmid=0)
 
-class AMDev(PCIDevImplBase):
-  Version = 0xA0000007
+class AMDev:
+  Version = 0xA0000008
 
-  def __init__(self, pci_dev:PCIDevice, dma_regions:list[tuple[int, MMIOInterface]]|None=None, reset_mode=False):
-    self.pci_dev, self.devfmt, self.dma_regions = pci_dev, pci_dev.pcibus, dma_regions
+  def __init__(self, pci_dev:PCIDevice, reset_mode=False):
+    self.pci_dev, self.devfmt = pci_dev, pci_dev.pcibus
     self.vram, self.doorbell64, self.mmio = self.pci_dev.map_bar(0), self.pci_dev.map_bar(2, fmt='Q'), self.pci_dev.map_bar(5, fmt='I')
 
     self._run_discovery()
@@ -185,20 +185,24 @@ class AMDev(PCIDevImplBase):
 
     # Re-initialize main blocks
     self.init_hw(self.gfx, self.sdma)
+    self.pci_dev.write_config(pci.PCI_COMMAND, self.pci_dev.read_config(pci.PCI_COMMAND, 2) | pci.PCI_COMMAND_MASTER, 2)
 
-    self.smu.set_clocks(level=-1) # last level, max perf.
+    if (max_power:=getenv("AM_POWER_LIMIT", 0.0)) > 0:
+      self.smu.set_power_limit(max_power)
+      self.smu.set_clocks(level=None)
+    else: self.smu.set_clocks(level=-1) # last level, max perf.
     for ip in [self.soc, self.gfx]: ip.set_clockgating_state()
     self.reg("regSCRATCH_REG7").write(AMDev.Version)
     self.reg("regSCRATCH_REG6").write(1) # set initialized state.
     if DEBUG >= 2: print(f"am {self.devfmt}: boot done")
 
   def init_sw(self, smi_dev=False):
-    self.smi_dev = smi_dev
+    self.smi_dev, self.is_err_state = smi_dev, False
 
     # Memory manager & firmware
-    self.mm = AMMemoryManager(self, self.vram_size, boot_size=(32 << 20), pt_t=AMPageTableEntry, va_shifts=[12, 21, 30, 39], va_bits=48,
-      first_lv=am.AMDGPU_VM_PDB2, va_base=AMMemoryManager.va_allocator.base,
-      palloc_ranges=[(1 << (i + 12), 0x1000) for i in range(9 * (3 - am.AMDGPU_VM_PDB2), -1, -1)], reserve_ptable=not self.large_bar)
+    self.mm = AMMemoryManager(self, self.vram_size - self.reserved_vram_size, boot_size=(32 << 20), pt_t=AMPageTableEntry, va_shifts=[12, 21, 30, 39],
+      va_bits=48, first_lv=am.AMDGPU_VM_PDB2, va_base=AMMemoryManager.va_allocator.base, reserve_ptable=not self.large_bar,
+      palloc_ranges=[(1 << (i + 12), (2 << 20) if i >= 9 else 0x1000) for i in range(9 * (3 - am.AMDGPU_VM_PDB2), -1, -1)])
     self.fw = AMFirmware(self)
 
     # Initialize IP blocks
@@ -223,7 +227,16 @@ class AMDev(PCIDevImplBase):
     for ip in [self.sdma, self.gfx]: ip.fini_hw()
     self.smu.set_clocks(level=0)
     self.ih.interrupt_handler()
-    self.reg("regSCRATCH_REG6").write(0) # set finalized state.
+    self.reg("regSCRATCH_REG6").write(self.is_err_state) # set finalized state.
+
+  def recover(self, force=False) -> bool:
+    if not force and not self.is_err_state: return False
+    if DEBUG >= 3: print(f"am {self.devfmt}: Start recovery")
+    self.ih.interrupt_handler()
+    self.gfx.reset_mec()
+    self.is_err_state = False
+    if DEBUG >= 3: print(f"am {self.devfmt}: Recovery complete")
+    return True
 
   def is_hive(self) -> bool: return self.gmc.xgmi_seg_sz > 0
 
@@ -234,19 +247,19 @@ class AMDev(PCIDevImplBase):
   def reg(self, reg:str) -> AMRegister: return self.__dict__[reg]
 
   def rreg(self, reg:int) -> int:
-    val = self.indirect_rreg(reg) if reg > len(self.mmio) else self.mmio[reg]
+    val = self.indirect_rreg(reg) if reg >= len(self.mmio) else self.mmio[reg]
     if AM_DEBUG >= 4 and getattr(self, '_prev_rreg', None) != (reg, val): print(f"am {self.devfmt}: Reading register {reg:#x} with value {val:#x}")
     self._prev_rreg = (reg, val)
     return val
 
   def wreg(self, reg:int, val:int):
     if AM_DEBUG >= 4: print(f"am {self.devfmt}: Writing register {reg:#x} with value {val:#x}")
-    if reg > len(self.mmio): self.indirect_wreg(reg, val)
+    if reg >= len(self.mmio): self.indirect_wreg(reg, val)
     else: self.mmio[reg] = val
 
   def wreg_pair(self, reg_base:str, lo_suffix:str, hi_suffix:str, val:int, inst:int=0):
-    self.reg(f"{reg_base}{lo_suffix}").write(val & 0xffffffff, inst=inst)
-    self.reg(f"{reg_base}{hi_suffix}").write(val >> 32, inst=inst)
+    self.reg(f"{reg_base}{lo_suffix}").write(lo32(val), inst=inst)
+    self.reg(f"{reg_base}{hi_suffix}").write(hi32(val), inst=inst)
 
   def indirect_rreg(self, reg:int) -> int:
     self.reg("regBIF_BX_PF0_RSMU_INDEX").write(reg * 4)
@@ -259,9 +272,9 @@ class AMDev(PCIDevImplBase):
   def indirect_wreg_pcie(self, reg:int, val:int, aid:int=0):
     reg_addr = reg * 4 + ((((aid & 0b11) << 32) | (1 << 34)) if aid > 0 else 0)
     self.reg("regBIF_BX0_PCIE_INDEX2").write(lo32(reg_addr))
-    if reg_addr >> 32: self.reg("regBIF_BX0_PCIE_INDEX2_HI").write(hi32(reg_addr) & 0xff)
+    if hi32(reg_addr) > 0: self.reg("regBIF_BX0_PCIE_INDEX2_HI").write(hi32(reg_addr) & 0xff)
     self.reg("regBIF_BX0_PCIE_DATA2").write(val)
-    if reg_addr >> 32: self.reg("regBIF_BX0_PCIE_INDEX2_HI").write(0)
+    if hi32(reg_addr) > 0: self.reg("regBIF_BX0_PCIE_INDEX2_HI").write(0)
 
   def _read_vram(self, addr, size) -> bytes:
     assert addr % 4 == 0 and size % 4 == 0, f"Invalid address {addr:#x} or size {size:#x}"
@@ -304,6 +317,10 @@ class AMDev(PCIDevImplBase):
 
     gc_info = am.struct_gc_info_v1_0.from_address(gc_addr:=ctypes.addressof(self.bhdr) + self.bhdr.table_list[am.GC].offset)
     self.gc_info = getattr(am, f"struct_gc_info_v{gc_info.header.version_major}_{gc_info.header.version_minor}").from_address(gc_addr)
+    self.reserved_vram_size = (384 << 20) if self.ip_ver[am.GC_HWIP][:2] in {(9,4), (9,5)} else (64 << 20)
+
+  @functools.cached_property
+  def hwid_names(self) -> dict[int, str]: return {v:k.removesuffix('_HWID') for k,v in vars(am).items() if k.endswith('_HWID') and isinstance(v, int)}
 
   def _ip_module(self, prefix:str, hwip, prever_prefix:str=""): return import_module(prefix, self.ip_ver[hwip], prever_prefix)
 

@@ -98,10 +98,10 @@ if __name__ == "__main__":
   # check correctness
   if getenv("VERIFY"):
     from tinygrad.engine.realize import run_schedule
-    triton_buf = np.frombuffer(si.bufs[0].as_buffer(), np.float16).reshape(M,N)
+    triton_buf = np.frombuffer(si.bufs[0].as_memoryview(), np.float16).reshape(M,N)
     print(triton_buf)
     run_schedule(sched)
-    tinygrad_buf = np.frombuffer(si.bufs[0].as_buffer(), np.float16).reshape(M,N)
+    tinygrad_buf = np.frombuffer(si.bufs[0].as_memoryview(), np.float16).reshape(M,N)
     print(tinygrad_buf)
     np.testing.assert_allclose(triton_buf, tinygrad_buf)
     print("correct!")

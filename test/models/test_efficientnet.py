@@ -72,6 +72,7 @@ class TestEfficientNet(unittest.TestCase):
     self.assertEqual(_LABELS[labels[0]], "hen")
     self.assertEqual(_LABELS[labels[1]], "sports car, sport car")
 
+@unittest.skip("these pretrained models are no longer available")
 class TestViT(unittest.TestCase):
   @classmethod
   def setUpClass(cls):

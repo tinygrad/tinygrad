@@ -1,14 +1,14 @@
 from __future__ import annotations
 import ctypes, functools
-from tinygrad.helpers import DEBUG, getenv, mv_address, suppress_finalizing, CUDA_CC, CUDA_PTX
-from tinygrad.device import Compiled, BufferSpec, LRUAllocator, CompilerPair, CompilerSet
-from tinygrad.renderer.cstyle import CUDARenderer
+from tinygrad.helpers import DEBUG, DEV, getenv, mv_address, suppress_finalizing
+from tinygrad.device import Compiled, BufferSpec, LRUAllocator
+from tinygrad.renderer.cstyle import CUDARenderer, NVCCRenderer
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.runtime.autogen import cuda
-from tinygrad.runtime.support.compiler_cuda import pretty_ptx, CUDACompiler, PTXCompiler, NVCCCompiler
+from tinygrad.runtime.support.compiler_cuda import pretty_ptx
 from tinygrad.runtime.support.c import init_c_struct_t, init_c_var
 if getenv("IOCTL"): import extra.nv_gpu_driver.nv_ioctl  # noqa: F401  # pylint: disable=unused-import
-if MOCKGPU:=getenv("MOCKGPU"): from test.mockgpu.cuda import cuda # type: ignore # pylint: disable=reimported
+if (MOCKGPU:=DEV.target("CUDA").interface == "MOCK"): from test.mockgpu.cuda import cuda # type: ignore # pylint: disable=reimported
 
 def check(status):
   if status != 0:
@@ -34,7 +34,7 @@ def cu_time_execution(cb, enable=False) -> float|None:
   return ret.value * 1e-3
 
 class CUDAProgram:
-  def __init__(self, dev:CUDADevice, name:str, lib:bytes, smem:int=0):
+  def __init__(self, dev:CUDADevice, name:str, lib:bytes, smem:int=0, **kwargs):
     self.dev, self.name, self.lib, self.smem = dev, name, lib, smem
     if DEBUG >= 5: print("\n".join([f"{i+1:>3} {line}" for i, line in enumerate(pretty_ptx(lib.decode('utf-8')).split("\n"))]))
 
@@ -43,7 +43,7 @@ class CUDAProgram:
     status = cuda.cuModuleLoadData(ctypes.byref(self.module), lib)
     if status != 0:
       del self.module
-      raise RuntimeError(f"module load failed with status code {status}: {cuda.CUresult.get(status)}")
+      raise RuntimeError(f"module load failed with status code {status}: {cuda.enum_cudaError_enum.get(status)}")
     check(cuda.cuModuleGetFunction(ctypes.byref(prg := cuda.CUfunction()), self.module, name.encode("utf-8")))
     self.prg = prg
     if self.smem > 0: check(cuda.cuFuncSetAttribute(self.prg, cuda.CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES, self.smem))
@@ -51,7 +51,7 @@ class CUDAProgram:
   @suppress_finalizing
   def __del__(self): check(cuda.cuModuleUnload(self.module))
 
-  def __call__(self, *args, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False):
+  def __call__(self, *args, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False, **kw):
     check(cuda.cuCtxSetCurrent(self.dev.context))
     if not hasattr(self, "vargs"):
       self.c_args, self.vargs = encode_args(args, vals)
@@ -69,11 +69,11 @@ class CUDAAllocator(LRUAllocator['CUDADevice']):
     if options.external_ptr: return cuda.CUdeviceptr_v2(options.external_ptr)
     if options.host: return init_c_var(ctypes.c_void_p, lambda x: check(cuda.cuMemHostAlloc(ctypes.byref(x), size, 0x01)))
     return init_c_var(cuda.CUdeviceptr, lambda x: check(cuda.cuMemAlloc_v2(ctypes.byref(x), size)))
+  @suppress_finalizing
   def _free(self, opaque, options:BufferSpec):
-    try:
-      if options.host: check(cuda.cuMemFreeHost(opaque))
-      else: check(cuda.cuMemFree_v2(opaque))
-    except (TypeError, AttributeError): pass
+    if options.external_ptr: return
+    if options.host: check(cuda.cuMemFreeHost(opaque))
+    else: check(cuda.cuMemFree_v2(opaque))
   def _copyin(self, dest, src:memoryview):
     check(cuda.cuCtxSetCurrent(self.dev.context))
     host_mem = self.alloc(len(src), BufferSpec(host=True))
@@ -113,15 +113,12 @@ class CUDADevice(Compiled):
       check(cuda.cuCtxEnablePeerAccess(dev.context, 0))
       CUDADevice.peer_access = True
 
-    self.arch = f"sm_{major.value}{minor.value}"
     self.pending_copyin: list[tuple[int, int, BufferSpec|None]] = []
     CUDADevice.devices.append(self)
 
     from tinygrad.runtime.graph.cuda import CUDAGraph
-    compilers = CompilerSet([CompilerPair(functools.partial(CUDARenderer, self.arch), functools.partial(CUDACompiler, self.arch)),
-                             CompilerPair(functools.partial(PTXRenderer, self.arch), functools.partial(PTXCompiler, self.arch), CUDA_PTX),
-                             CompilerPair(functools.partial(CUDARenderer, self.arch), functools.partial(NVCCCompiler, self.arch))], ctrl_var=CUDA_CC)
-    super().__init__(device, CUDAAllocator(self), compilers, functools.partial(CUDAProgram, self), None if MOCKGPU else CUDAGraph)
+    super().__init__(device, CUDAAllocator(self), [CUDARenderer, PTXRenderer, NVCCRenderer], functools.partial(CUDAProgram, self),
+                     None if MOCKGPU else CUDAGraph, arch=f"sm_{major.value}{minor.value}")
 
   def synchronize(self):
     check(cuda.cuCtxSetCurrent(self.context))

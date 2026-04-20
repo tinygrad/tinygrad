@@ -7,17 +7,13 @@ from tinygrad.helpers import prod, getenv, TUPLE_ORDER
 def linearize(sink:UOp) -> list[UOp]:
   # this is a toposort with priority
   lst = list(sink.toposort())
-  consumers: defaultdict[UOp, list[UOp]] = defaultdict(list)
-  in_degree:dict[UOp, int] = {}
-  out_degree:dict[UOp, int] = {}
+  out_degree:defaultdict[UOp, int] = defaultdict(int)
   priorities:dict[UOp, tuple[int, int, Any]] = {}
 
   # get consumers and assign priorities
   # NOTE: this requires the lst be locally toposorted
   for u in reversed(lst):
-    for s in u.src: consumers[s].append(u)
-    in_degree[u] = len(u.src)
-    out_degree[u] = len(consumers[u])
+    for s in u.src: out_degree[s] += 1
 
     # we place UOps with higher run_counts later
     run_count = prod([int(r.vmax)+1 for r in u.ranges])
@@ -26,11 +22,10 @@ def linearize(sink:UOp) -> list[UOp]:
     extra = None
     match u.op:
       # the order and placement of these defines is important
-      case Ops.DEFINE_GLOBAL: priority, extra = -20, u.arg
+      case Ops.PARAM: priority, extra = -20, u.arg
       case Ops.DEFINE_VAR: priority, extra = -19, u.arg
       case Ops.DEFINE_LOCAL: priority = -18
       case Ops.DEFINE_REG: priority = -17
-      case Ops.CONST: priority = -10  # early consts
       case Ops.LOAD: priority = -1    # place loads early
       case Ops.STORE: priority = 1    # place stores late
       case Ops.RANGE: priority = 5    # placing RANGE is good

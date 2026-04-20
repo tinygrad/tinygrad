@@ -56,7 +56,7 @@ def gen_diff(table_old, table_new):
 
 def display_diff(diff): return "+"+str(diff) if diff > 0 else str(diff)
 
-NONCORE_DIRS = {"tinygrad/apps", "tinygrad/nn", "tinygrad/renderer", "tinygrad/runtime", "tinygrad/viz"}
+NONCORE_DIRS = {"tinygrad/llm", "tinygrad/nn", "tinygrad/renderer", "tinygrad/runtime", "tinygrad/viz"}
 
 if __name__ == "__main__":
   if len(sys.argv) == 3:

@@ -15,7 +15,7 @@ class DiskDevice(Compiled):
     self.size: int|None = None
     self.fd: int|None = None
     self.count = 0
-    super().__init__(device, DiskAllocator(self), None, None)
+    super().__init__(device, DiskAllocator(self), [], None)
   def _might_open(self, size:int):
     assert self.size is None or size <= self.size, f"can't reopen Disk tensor with larger size, opened with {self.size}, tried to open with {size}"
     if self.size is not None and hasattr(self, "mem"):
@@ -95,20 +95,31 @@ class DiskAllocator(Allocator):
     else:
       dest[:] = src._buf()
 
-  def _copyout_sharded(self, src:DiskBuffer, size:int, _get_free_buf:Callable, seg_len:int) -> Generator[tuple[int, int, int, int], None, None]:
-    assert hasattr(DiskDevice, 'io_uring'), "function requires io uring support"
-
+  def _copyout_sharded(self, src:DiskBuffer, size:int, _get_free_buf:Callable, seg_len:int,
+                       use_ioring:bool=True) -> Generator[tuple[int, int, int, int], None, None]:
     fd_offset = src.offset - (minor_offset := src.offset % mmap.PAGESIZE)
     processed_reqs_cnt, copied_in, next_read_offset, total_copy_size = 0, 0, 0, round_up(size + minor_offset, mmap.PAGESIZE)
-    reqs: list[tuple[int, int, int, int]] = []
 
+    if not hasattr(DiskDevice, 'io_uring') or not use_ioring:
+      local_buf = memoryview(bytearray(seg_len))
+      for off in range(0, total_copy_size, seg_len):
+        while (copy_batch := _get_free_buf()) is None: pass
+        read_size = min(seg_len, total_copy_size - off, src.device.size - fd_offset - off)
+        self._copyout(local_buf[:read_size], DiskBuffer(src.device, read_size, fd_offset + off))
+        copy_batch[0].view(size=read_size)[:] = local_buf[:read_size]
+        real_copy_size = min(read_size - minor_offset, size - copied_in)
+        yield (copy_batch, copied_in, minor_offset, real_copy_size)
+        copied_in, minor_offset = copied_in + real_copy_size, 0
+      return
+
+    reqs: list[tuple[int, int, int, int]] = []
     while next_read_offset < total_copy_size or len(reqs) != processed_reqs_cnt:
       if next_read_offset < total_copy_size and (copy_batch := _get_free_buf()) is not None:
         # Prepare sqe
         sqe_index = (tail:=DiskDevice.io_uring.sq.ktail[0]) & DiskDevice.io_uring.sq.kring_mask[0]
         sqe = DiskDevice.io_uring.sq.sqes[sqe_index]
         sqe.opcode, sqe.fd, sqe.off = io_uring.IORING_OP_READ, self.dev.fd, fd_offset + next_read_offset
-        sqe.addr, sqe.len, sqe.user_data = copy_batch[0], min(seg_len, total_copy_size - next_read_offset), len(reqs)
+        sqe.addr, sqe.len, sqe.user_data = copy_batch[0].addr, min(seg_len, total_copy_size - next_read_offset), len(reqs)
 
         # Send sqe
         DiskDevice.io_uring.sq.array[sqe_index] = sqe_index

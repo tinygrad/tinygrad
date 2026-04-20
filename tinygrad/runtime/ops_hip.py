@@ -1,6 +1,6 @@
 import ctypes, functools
 from tinygrad.helpers import mv_address, getenv, suppress_finalizing
-from tinygrad.device import Compiled, LRUAllocator, BufferSpec, CompilerSet, CompilerPair
+from tinygrad.device import Compiled, LRUAllocator, BufferSpec
 from tinygrad.runtime.autogen import hip
 from tinygrad.renderer.cstyle import HIPRenderer
 from tinygrad.runtime.support.c import init_c_var, init_c_struct_t
@@ -15,14 +15,13 @@ class HIPDevice(Compiled):
     self.arch = init_c_var(hip.hipDeviceProp_t, lambda x: check(hip.hipGetDeviceProperties(x, self.device_id))).gcnArchName.decode()
     self.time_event_st, self.time_event_en = [init_c_var(hip.hipEvent_t, lambda x: hip.hipEventCreate(ctypes.byref(x), 0)) for _ in range(2)]
 
-    compilers = CompilerSet([CompilerPair(functools.partial(HIPRenderer, self.arch), None)])
-    super().__init__(device, HIPAllocator(self), compilers, functools.partial(HIPProgram, self))
+    super().__init__(device, HIPAllocator(self), [HIPRenderer], functools.partial(HIPProgram, self), arch=self.arch)
   def synchronize(self):
     check(hip.hipSetDevice(self.device_id))
     check(hip.hipDeviceSynchronize())
 
 class HIPProgram:
-  def __init__(self, dev:HIPDevice, name:str, lib:bytes):
+  def __init__(self, dev:HIPDevice, name:str, lib:bytes, **kwargs):
     self.dev, self.name, self.lib = dev, name, lib
     check(hip.hipSetDevice(self.dev.device_id))
     self.module = init_c_var(hip.hipModule_t, lambda x: check(hip.hipModuleLoadData(ctypes.byref(x), lib)))
@@ -32,7 +31,7 @@ class HIPProgram:
   def __del__(self):
     if hasattr(self, 'module'): check(hip.hipModuleUnload(self.module))
 
-  def __call__(self, *args, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False):
+  def __call__(self, *args, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False, **kw):
     check(hip.hipSetDevice(self.dev.device_id))
     if not hasattr(self, "vargs"):
       fields = [(f'f{i}', hip.hipDeviceptr_t, i*8) for i in range(len(args))] + [(f'v{i}', ctypes.c_int, len(args)*8+i*4) for i in range(len(vals))]

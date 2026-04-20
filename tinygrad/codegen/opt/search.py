@@ -36,7 +36,8 @@ def get_test_global_size(global_size, max_global_size, var_vals):
   return test_global_size, input_size / prod(test_global_size)
 
 def _time_program(p:ProgramSpec, lib:bytes, var_vals:dict[str, int], rawbufs:list[Buffer], early_stop:float|None=None,
-                  allow_test_size:int=True, max_global_size:int|None=65536, clear_l2=False, cnt=3, name="test") -> list[float]:
+                  allow_test_size:int=True, max_global_size:int|None=65536, clear_l2=False, cnt=3, name="test", dev_timeout=False) -> list[float]:
+  timeout = int(early_stop * 1e3) if dev_timeout and early_stop is not None and early_stop < math.inf else None
   factor = 1
   if allow_test_size and max_global_size is not None:
     global_size, factor = get_test_global_size(p.global_size, max_global_size, var_vals)
@@ -50,7 +51,7 @@ def _time_program(p:ProgramSpec, lib:bytes, var_vals:dict[str, int], rawbufs:lis
       if hasattr(dev:=Device[p.device], 'invalidate_caches'): dev.invalidate_caches()
       else:
         with Context(DEBUG=0, BEAM=0, CAPTURING=0, TRACK_MATCH_STATS=0): Tensor.ones(1024,1024).contiguous().realize(do_update_stats=False)
-    tms.append(unwrap(car(input_bufs, var_vals, wait=True))*factor)
+    tms.append(unwrap(car(input_bufs, var_vals, wait=True, timeout=timeout))*factor)
     if early_stop is not None and early_stop < min(tms): break
   return tms
 
@@ -119,7 +120,7 @@ def get_kernel_actions(s:Scheduler, include_0=True, max_up:int|None=None) -> dic
 beam_pool, BEAM_DEBUG = None, getenv("BEAM_DEBUG")
 def beam_search(s:Scheduler, rawbufs:list[Buffer], amt:int, allow_test_size=True, disable_cache=IGNORE_BEAM_CACHE.value):
   global beam_pool
-  key = {"ast": s.ast.key, "amt": amt, "allow_test_size": allow_test_size, "device": s.ren.device, "suffix": s.ren.suffix}
+  key = {"ast": s.ast.key, "amt": amt, "allow_test_size": allow_test_size, "device": s.ren.target.device, "suffix": s.ren.suffix}
   if not disable_cache and CACHELEVEL >= 1 and (val:=diskcache_get("beam_search", key)) is not None:
     ret = s.copy()
     for o in val[len(s.applied_opts):]: ret.apply_opt(o)
@@ -128,7 +129,7 @@ def beam_search(s:Scheduler, rawbufs:list[Buffer], amt:int, allow_test_size=True
   beam: list[tuple[Scheduler, float]] = [(s, float("inf"))]
   seen_libs = set()
 
-  default_parallel = multiprocessing.cpu_count() if s.ren.device in {"CUDA", "AMD", "NV", "METAL", "HIP"} else 0
+  default_parallel = multiprocessing.cpu_count() if s.ren.target.device in {"CUDA", "AMD", "NV", "METAL", "HIP"} else 0
   if beam_pool is None and (workers := getenv("PARALLEL", default_parallel)):
     beam_pool = multiprocessing.get_context("spawn").Pool(workers, _init_worker, (), getenv("BEAM_MAX_TASKS_PER_CHILD", 16))
     @atexit.register
@@ -144,7 +145,7 @@ def beam_search(s:Scheduler, rawbufs:list[Buffer], amt:int, allow_test_size=True
     rawbufs = _ensure_buffer_alloc(rawbufs)
     var_vals: dict[str, int] = {k.expr:int(k.vmax+k.vmin)//2 for k in s.ast.variables()}
     exiting, st = False, time.perf_counter()
-    dev = Device[s.ren.device]
+    dev = Device[s.ren.target.device]
     while not exiting:
       candidates: list[Scheduler] = flatten([get_kernel_actions(si, include_0=False).values() for si,_ in beam])
       timed: list[tuple[Scheduler, float]] = []
@@ -161,7 +162,8 @@ def beam_search(s:Scheduler, rawbufs:list[Buffer], amt:int, allow_test_size=True
           continue
         seen_libs.add(lib)
         try: tms = _time_program(p, lib, var_vals, rawbufs, early_stop=beam[0][1]*3 if len(beam) else 1.0,
-                                 allow_test_size=allow_test_size, clear_l2=hasattr(dev, 'invalidate_caches'))
+                                 allow_test_size=allow_test_size, clear_l2=hasattr(dev, 'invalidate_caches'),
+                                 dev_timeout=getenv("BEAM_DEV_TIMEOUT", 1))
         except Exception as e:
           if BEAM_DEBUG: print(f"BEAM failed for opts: {candidates[i].applied_opts}\n{e}")
           if isinstance(e, RuntimeError): continue

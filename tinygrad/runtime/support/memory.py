@@ -81,7 +81,7 @@ class TLSFAllocator:
     # Round up the allocation size to the next bucket, so any entry there can fit the requested size.
     size = round_up(size, (1 << size.bit_length() - self.l2_cnt))
 
-    # Search for the smallest block that can fit the requested size. Start with the it's bucket and go up until any block is found.
+    # Search for the smallest block that can fit the requested size. Start with its bucket and go up until any block is found.
     for l1 in range(self.lv1(size), len(self.storage)):
       if self.lv1_entries[l1] == 0: continue
       for l2 in range(self.lv2(size) if l1 == size.bit_length() else 0, (1 << self.l2_cnt)):
@@ -105,7 +105,7 @@ class TLSFAllocator:
   def free(self, start:int):
     self._insert_block(start - self.base, self.blocks[start - self.base][0])._merge_block(start - self.base)
 
-# Memory Managment
+# Memory Management
 
 class AddrSpace(enum.Enum): PHYS = enum.auto(); SYS = enum.auto(); PEER = enum.auto() # noqa: E702
 
@@ -113,8 +113,8 @@ class AddrSpace(enum.Enum): PHYS = enum.auto(); SYS = enum.auto(); PEER = enum.a
 class VirtMapping: va_addr:int; size:int; paddrs:list[tuple[int, int]]; aspace:AddrSpace; uncached:bool=False; snooped:bool=False # noqa: E702
 
 class PageTableTraverseContext:
-  def __init__(self, dev, pt, vaddr, create_pts=False, free_pts=False, boot=False):
-    self.dev, self.vaddr, self.create_pts, self.free_pts, self.boot = dev, vaddr - dev.mm.va_base, create_pts, free_pts, boot
+  def __init__(self, dev, pt, vaddr, create_pts=False, free_pts=False, inspect=False, boot=False):
+    self.dev, self.vaddr, self.create_pts, self.free_pts, self.inspect, self.boot = dev, vaddr - dev.mm.va_base, create_pts, free_pts, inspect, boot
     self.pt_stack:list[tuple[Any, int, int]] = [(pt, self._pt_pte_idx(pt, self.vaddr), self._pt_pte_size(pt))]
 
   def _pt_pte_cnt(self, lv): return self.dev.mm.pte_cnt[lv]
@@ -128,7 +128,7 @@ class PageTableTraverseContext:
       assert self.create_pts, "Not allowed to create new page table"
       pt.set_entry(pte_idx, self.dev.mm.palloc(0x1000, zero=True, boot=self.boot, ptable=True), table=True, valid=True)
 
-    assert not pt.is_page(pte_idx), f"Must be table pt={pt.paddr:#x}, {pt.lv=} {pte_idx=} {pt.read_fields(pte_idx)}"
+    assert not pt.is_page(pte_idx), f"Must be table pt={pt.paddr:#x}, {pt.lv=} {pte_idx=} {pt.entry(pte_idx)=:#x}"
     child_page_table = self.dev.mm.pt_t(self.dev, pt.address(pte_idx), lv=pt.lv+1)
 
     self.pt_stack.append((child_page_table, self._pt_pte_idx(child_page_table, self.vaddr), self._pt_pte_size(child_page_table)))
@@ -151,13 +151,17 @@ class PageTableTraverseContext:
   def next(self, size:int, paddr:int|None=None, off:int=0):
     while size > 0:
       pt, pte_idx, pte_covers = self.pt_stack[-1]
+
+      # create_pts goes down until the page covers the request.
+      # free_pts goes down to the table, it assumses all entries are valid on the range (and validates that)
+      # inspect just visits any valid ranges and yields them.
       if self.create_pts:
         assert paddr is not None, "paddr must be provided when allocating new page tables"
         while pte_covers > size or not pt.supports_huge_page(paddr+off) or self.vaddr&(pte_covers-1) != 0: pt, pte_idx, pte_covers = self.level_down()
       else:
-        while not pt.is_page(pte_idx): pt, pte_idx, pte_covers = self.level_down()
+        while not pt.is_page(pte_idx) and (self.free_pts or pt.valid(pte_idx)): pt, pte_idx, pte_covers = self.level_down()
 
-      entries = min(size // pte_covers, self._pt_pte_cnt(pt.lv) - pte_idx)
+      entries = max(min(size // pte_covers, self._pt_pte_cnt(pt.lv) - pte_idx), 1 if self.inspect else 0)
       assert entries > 0, f"Invalid entries {size=:#x}, {pte_covers=:#x}"
       yield off, pt, pte_idx, entries, pte_covers
 
@@ -176,7 +180,7 @@ class MemoryManager:
 
     self.boot_allocator = TLSFAllocator(boot_size, base=0)
     self.ptable_allocator = TLSFAllocator(round_up(vram_size // 512, 1 << 20) if self.reserve_ptable else 0, base=self.boot_allocator.size)
-    self.pa_allocator = TLSFAllocator(vram_size - (off_sz:=self.boot_allocator.size + self.ptable_allocator.size) - (64 << 20), base=off_sz)
+    self.pa_allocator = TLSFAllocator(vram_size - (off_sz:=self.boot_allocator.size + self.ptable_allocator.size), base=off_sz)
     self.root_page_table = pt_t(self.dev, self.palloc(0x1000, zero=not self.dev.smi_dev, boot=True), lv=first_lv)
 
   def _frag_size(self, va, sz, must_cover=True):
@@ -197,11 +201,14 @@ class MemoryManager:
 
     assert size == sum(p[1] for p in paddrs), f"Size mismatch {size=} {sum(p[1] for p in paddrs)=}"
 
+    ctx = PageTableTraverseContext(self.dev, self.root_page_table, vaddr, boot=boot, inspect=True)
+    for _, pt, pte_idx, pte_cnt, _ in ctx.next(size):
+      for pte_off in range(pte_cnt): assert not pt.valid(pte_idx + pte_off), f"PTE already mapped: {pt.entry(pte_idx + pte_off):#x}"
+
     ctx = PageTableTraverseContext(self.dev, self.root_page_table, vaddr, create_pts=True, boot=boot)
     for paddr, psize in paddrs:
       for off, pt, pte_idx, pte_cnt, pte_covers in ctx.next(psize, paddr=paddr):
         for pte_off in range(pte_cnt):
-          assert not pt.valid(pte_idx + pte_off), f"PTE already mapped: {pt.entry(pte_idx + pte_off):#x}"
           pt.set_entry(pte_idx + pte_off, paddr + off + pte_off * pte_covers, uncached=uncached, aspace=aspace, snooped=snooped,
                        frag=self._frag_size(ctx.vaddr+off, pte_cnt * pte_covers), valid=True)
 
@@ -221,10 +228,19 @@ class MemoryManager:
 
   @classmethod
   def alloc_vaddr(cls, size:int, align=0x1000) -> int:
-    assert cls.va_allocator is not None, "must be set it"
+    assert cls.va_allocator is not None, "must be set"
     return cls.va_allocator.alloc(size, max((1 << (size.bit_length() - 1)), align))
 
+  @functools.cache  # pylint: disable=method-cache-max-size-none
+  def identity_va(self, uncached:bool) -> int:
+    self.map_range(va:=self.alloc_vaddr(self.vram_size, self.vram_size), self.vram_size, [(0, self.vram_size)], AddrSpace.PHYS, uncached=uncached)
+    return va
+
   def valloc(self, size:int, align=0x1000, uncached=False, contiguous=False) -> VirtMapping:
+    if not getenv("GMMU", 1):
+      paddr = self.palloc(size:=round_up(size, 0x1000), align, zero=False)
+      return VirtMapping(self.identity_va(uncached) + paddr, size, [(paddr, size)], aspace=AddrSpace.PHYS, uncached=uncached)
+
     # Alloc physical memory and map it to the virtual address
     va = self.alloc_vaddr(size:=round_up(size, 0x1000), align)
 
@@ -240,18 +256,20 @@ class MemoryManager:
           # Move to a smaller size and try again.
           nxt_range += 1
           if nxt_range == len(self.palloc_ranges):
-            for paddr, _ in paddrs: self.pa_allocator.free(paddr)
-            raise MemoryError(f"Failed to allocate memory. (total allocation size={size:#x}, current try={self.palloc_ranges[nxt_range-1]})")
+            for paddr, _ in paddrs: self.pfree(paddr)
+            raise MemoryError(f"Failed to allocate memory (OOM). Request size={size:#x} ({self.palloc_ranges[nxt_range-1]})")
           continue
         rem_size -= self.palloc_ranges[nxt_range][0]
 
     return self.map_range(va, size, paddrs, aspace=AddrSpace.PHYS, uncached=uncached)
 
   def vfree(self, vm:VirtMapping):
-    assert self.va_allocator is not None, "must be set it"
+    if not getenv("GMMU", 1): return self.pfree(vm.paddrs[0][0])
+
+    assert self.va_allocator is not None, "must be set"
     self.unmap_range(vm.va_addr, vm.size)
     self.va_allocator.free(vm.va_addr)
-    for paddr, _ in vm.paddrs: self.pa_allocator.free(paddr)
+    for paddr, _ in vm.paddrs: self.pfree(paddr)
 
   def palloc(self, size:int, align:int=0x1000, zero=True, boot=False, ptable=False) -> int:
     assert self.dev.is_booting == boot, "During booting, only boot memory can be allocated"

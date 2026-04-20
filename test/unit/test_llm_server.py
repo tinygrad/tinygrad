@@ -1,137 +1,163 @@
-import unittest, threading, time
-from unittest.mock import Mock
+import unittest
+from unittest.mock import patch
+from tinygrad import Tensor, UOp
+from tinygrad.schedule import schedule_cache
+from tinygrad.llm.model import Transformer, TransformerConfig
 
-class TestLLMServer(unittest.TestCase):
-  """Integration tests using the real OpenAI client."""
+TEST_CONFIG = TransformerConfig(num_blocks=1, dim=64, hidden_dim=128, n_heads=2, n_kv_heads=2,
+                           norm_eps=1e-5, vocab_size=100, head_dim=32, rope_theta=10000.0, rope_dim=32, v_head_dim=32, max_context=32)
 
-  @classmethod
-  def setUpClass(cls):
-    cls.mock_tok = Mock()
-    cls.mock_tok.role = Mock(return_value=[100, 101])
-    cls.mock_tok.encode = Mock(return_value=[200, 201, 202])
-    cls.mock_tok.decode = Mock(return_value="Hello")
-    cls.mock_tok.end_turn = Mock(return_value=[998])
+class TestTransformerGenerate(unittest.TestCase):
+  def test_kv_cache_reuse(self):
+    """Test that generate reuses the KV cache when tokens extend the cached prefix."""
+    model = Transformer(TEST_CONFIG)
 
-    cls.mock_model = Mock()
-    cls.mock_model.generate = Mock(side_effect=lambda ids, **kwargs: iter([300, 301, 999]))
+    captured_inputs = []
+    def mock_call(self, tokens, start_pos, temperature):
+      captured_inputs.append((tokens.shape, start_pos if isinstance(start_pos, int) else start_pos.val))
+      return Tensor([[42]])
 
-    cls.bos_id = 1
-    cls.eos_id = 999
+    with patch.object(Transformer, '__call__', mock_call):
+      # first conversation: prefill 5 tokens + 1 decode
+      tokens = [1, 2, 3, 4, 5]
+      gen = model.generate(tokens)
+      next(gen)  # prefill
+      next(gen)  # decode
 
-    import tinygrad.apps.llm as llm_module
-    llm_module.model = cls.mock_model
-    llm_module.tok = cls.mock_tok
-    llm_module.bos_id = cls.bos_id
-    llm_module.eos_id = cls.eos_id
+      # second call extends the conversation — cached prefix should be reused
+      captured_inputs.clear()
+      tokens = [1, 2, 3, 4, 5, 42, 42, 10, 11, 12]
+      gen = model.generate(tokens)
+      next(gen)
 
-    from tinygrad.apps.llm import Handler
-    from tinygrad.helpers import TCPServerWithReuse
+    # should process tokens[6:] = [42, 10, 11, 12] since first 6 have cached k/v
+    toks_shape = captured_inputs[0][0][-1]
+    self.assertEqual(toks_shape.val if isinstance(toks_shape, UOp) else toks_shape, 4)
+    self.assertEqual(captured_inputs[0][1], 6)
 
-    cls.server = TCPServerWithReuse(('127.0.0.1', 0), Handler)
-    cls.port = cls.server.server_address[1]
-    cls.server_thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
-    cls.server_thread.start()
-    time.sleep(0.1)
+  def test_kv_cache_invalidation(self):
+    """Test that generate invalidates the KV cache when tokens diverge from the cached prefix."""
+    model = Transformer(TEST_CONFIG)
 
-    from openai import OpenAI
-    cls.client = OpenAI(base_url=f"http://127.0.0.1:{cls.port}/v1", api_key="test")
+    captured_inputs = []
+    def mock_call(self, tokens, start_pos, temperature):
+      captured_inputs.append((tokens.shape, start_pos if isinstance(start_pos, int) else start_pos.val))
+      return Tensor([[42]])
 
-  @classmethod
-  def tearDownClass(cls):
-    cls.server.shutdown()
-    cls.server.server_close()
+    with patch.object(Transformer, '__call__', mock_call):
+      # first conversation
+      gen = model.generate([1, 2, 3, 4, 5])
+      next(gen)
 
-  def test_chat_completion_stream(self):
-    stream = self.client.chat.completions.create(
-      model="test",
-      messages=[{"role": "user", "content": "Hello"}],
-      stream=True
-    )
+      # completely different prompt — KV cache should be invalidated
+      captured_inputs.clear()
+      gen = model.generate([10, 20, 30])
+      next(gen)
 
-    chunks = list(stream)
-    self.assertGreater(len(chunks), 0)
-    self.assertEqual(chunks[0].choices[0].delta.role, "assistant")
-    self.assertEqual(chunks[-1].choices[0].finish_reason, "stop")
+    # should process all 3 tokens from start
+    toks_shape = captured_inputs[0][0][-1]
+    self.assertEqual(toks_shape.val if isinstance(toks_shape, UOp) else toks_shape, 3)
+    self.assertEqual(captured_inputs[0][1], 0)
 
-  def test_openai_response_structure(self):
-    stream = self.client.chat.completions.create(
-      model="test-model",
-      messages=[{"role": "user", "content": "Test"}],
-      stream=True
-    )
+  def test_two_prompts_schedule_cache(self):
+    """Third prompt should hit the schedule cache, not miss (first two warm up both jits: prefill + decode)."""
+    from dataclasses import replace
+    model = Transformer(replace(TEST_CONFIG, max_context=64))
 
-    for chunk in stream:
-      self.assertTrue(chunk.id.startswith("chatcmpl-"))
-      self.assertEqual(chunk.object, "chat.completion.chunk")
-      self.assertIsNotNone(chunk.choices)
-      self.assertIsNotNone(chunk.created)
-      self.assertIsInstance(chunk.created, int)
-      self.assertEqual(chunk.model, "test-model")
+    # first two prompts warm up both jits (prefill + decode)
+    ids = list(range(1, 6))
+    gen = model.generate(ids)
+    for _ in range(3): next(gen)
 
-  def test_stream_with_usage(self):
-    stream = self.client.chat.completions.create(
-      model="test",
-      messages=[{"role": "user", "content": "Hello"}],
-      stream=True,
-      stream_options={"include_usage": True}
-    )
+    ids += list(range(10, 15))
+    gen = model.generate(ids)
+    for _ in range(3): next(gen)
+    cache_size_after_warmup = len(schedule_cache)
 
-    chunks = list(stream)
-    last_chunk = chunks[-1]
+    # third prompt should reuse the same schedule cache entries, not create new ones
+    ids += list(range(20, 25))
+    gen = model.generate(ids)
+    for _ in range(3): next(gen)
 
-    self.assertIsNotNone(last_chunk.usage)
-    self.assertIsNotNone(last_chunk.usage.prompt_tokens)
-    self.assertIsNotNone(last_chunk.usage.completion_tokens)
-    self.assertIsNotNone(last_chunk.usage.total_tokens)
+    self.assertEqual(cache_size_after_warmup, len(schedule_cache),
+      f"third prompt added {len(schedule_cache) - cache_size_after_warmup} new schedule cache entries (expected 0)")
 
-  def test_multi_turn_conversation(self):
-    stream = self.client.chat.completions.create(
-      model="test",
-      messages=[
-        {"role": "system", "content": "You are helpful."},
-        {"role": "user", "content": "Hello"},
-        {"role": "assistant", "content": "Hi!"},
-        {"role": "user", "content": "How are you?"}
-      ],
-      stream=True
-    )
+  def test_chunked_prefill(self):
+    """When prompt > chunk_size, all chunks should be prefill"""
+    from tinygrad.uop.ops import resolve
+    from dataclasses import replace
+    model = Transformer(replace(TEST_CONFIG, max_context=64))
 
-    chunks = list(stream)
-    self.assertGreater(len(chunks), 0)
-    self.assertEqual(chunks[-1].choices[0].finish_reason, "stop")
+    def get_prefill_flags(tokens, chunk_size):
+      is_prefill = []
+      def mock_call(self, tokens, start_pos, temperature):
+        is_prefill.append(resolve(tokens.shape[1] != 1))
+        return Tensor([[42]])
+      with patch.object(Transformer, '__call__', mock_call):
+        gen = model.generate(tokens, chunk_size=chunk_size)
+        for _ in range(3): next(gen)
+      model._cached_tokens = []
+      return is_prefill
 
-  def test_content_is_streamed(self):
-    stream = self.client.chat.completions.create(
-      model="test",
-      messages=[{"role": "user", "content": "Hello"}],
-      stream=True
-    )
+    # 8 tokens, chunk_size=4 -> 2 prefill chunks
+    self.assertEqual(get_prefill_flags(list(range(8)), 4), [True, True, False, False])
+    # 9 tokens, chunk_size=4 -> 3 prefill chunks (4+4+1)
+    self.assertEqual(get_prefill_flags(list(range(9)), 4), [True, True, True, False, False])
+    # 4 tokens, chunk_size=4 -> 1 prefill chunk
+    self.assertEqual(get_prefill_flags(list(range(4)), 4), [True, False, False])
 
-    contents = []
-    for chunk in stream:
-      if chunk.choices and chunk.choices[0].delta.content:
-        contents.append(chunk.choices[0].delta.content)
+  def test_kv_cache_resume_matches_fresh(self):
+    model = Transformer(TEST_CONFIG)
 
-    self.assertGreater(len(contents), 0)
+    # generate 2 tokens, then abandon
+    prompt = list(range(1, 6))
+    gen = model.generate(list(prompt))
+    out1, out2 = next(gen), next(gen)
 
-  def test_non_streaming(self):
-    resp = self.client.chat.completions.create(
-      model="test-model",
-      messages=[{"role": "user", "content": "Hello"}],
-      stream=False
-    )
+    # resume with conversation history + new user tokens appended
+    extended = prompt + [out1, out2, 10, 11, 12]
+    gen = model.generate(list(extended))
+    resumed_out = [next(gen) for _ in range(3)]
 
-    self.assertTrue(resp.id.startswith("chatcmpl-"))
-    self.assertEqual(resp.object, "chat.completion")
-    self.assertEqual(resp.model, "test-model")
-    self.assertIsNotNone(resp.created)
-    self.assertEqual(len(resp.choices), 1)
-    self.assertEqual(resp.choices[0].message.role, "assistant")
-    self.assertIsNotNone(resp.choices[0].message.content)
-    self.assertEqual(resp.choices[0].finish_reason, "stop")
-    self.assertIsNotNone(resp.usage)
-    self.assertIsNotNone(resp.usage.prompt_tokens)
-    self.assertIsNotNone(resp.usage.completion_tokens)
+    # compare against fresh generation (no cache) of the same prompt
+    model._cached_tokens = []
+    gen = model.generate(list(extended))
+    fresh_out = [next(gen) for _ in range(3)]
+
+    self.assertEqual(fresh_out, resumed_out)
+
+  def test_temperature_zero_is_greedy(self):
+    """Temperature 0 (or near 0) should produce deterministic output."""
+    model = Transformer(TEST_CONFIG)
+    tokens = list(range(1, 6))
+    results = [list(zip(range(5), model.generate(list(tokens)))) for _ in range(3)]
+    # all runs should produce the same tokens
+    self.assertEqual(results[0], results[1])
+    self.assertEqual(results[1], results[2])
+
+  def test_temperature_high_produces_variety(self):
+    """High temperature should produce different outputs across runs."""
+    model = Transformer(TEST_CONFIG)
+    tokens = list(range(1, 6))
+    runs = set()
+    for _ in range(5):
+      gen = model.generate(list(tokens), temperature=2.0)
+      out = tuple(next(gen) for _ in range(10))
+      runs.add(out)
+    # with temperature=2.0, we should see at least 2 distinct outputs across 5 runs
+    self.assertGreater(len(runs), 1, "high temperature should produce varied outputs")
+
+  def test_temperature_passed_to_forward(self):
+    """Temperature from generate should be passed through to __call__."""
+    model = Transformer(TEST_CONFIG)
+    captured_temps = []
+    def mock_call(self, tokens, start_pos, temperature):
+      captured_temps.append(float(temperature.item()))
+      return Tensor([[42]])
+    with patch.object(Transformer, '__call__', mock_call):
+      gen = model.generate([1, 2, 3], temperature=0.6)
+      next(gen)
+    self.assertAlmostEqual(captured_temps[-1], 0.6, places=5)
 
 if __name__ == '__main__':
   unittest.main()

@@ -5,7 +5,6 @@ from tinygrad.nn import Linear, LayerNorm, Embedding, Conv2d
 from typing import List, Optional, Union, Tuple, Dict
 from abc import ABC, abstractmethod
 from functools import lru_cache
-from PIL import Image
 import numpy as np
 import re, gzip
 
@@ -444,7 +443,8 @@ class OpenClipEncoder:
   # TODO:
   # Should be doable in pure tinygrad, would just require some work and verification.
   # This is very desirable since it would allow for full generation->evaluation in a single JIT call.
-  def prepare_image(self, image:Image.Image) -> Tensor:
+  def prepare_image(self, image) -> Tensor:
+    from PIL import Image
     SIZE = 224
     w, h = image.size
     scale = min(SIZE / h, SIZE / w)

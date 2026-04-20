@@ -1,21 +1,21 @@
 from __future__ import annotations
 import platform, sys, ctypes, functools, time, mmap, threading, queue
-from tinygrad.helpers import to_mv, OSX, WIN, mv_address, wait_cond, suppress_finalizing, unwrap, data64_le
-from tinygrad.helpers import CPU_CC, CPU_LVP, CPU_LLVM
-from tinygrad.device import BufferSpec, DMACPURef, CompilerSet, CompilerPair
+from tinygrad.helpers import to_mv, OSX, WIN, mv_address, suppress_finalizing, unwrap, data64_le
+from tinygrad.device import BufferSpec
+from tinygrad.renderer import Renderer
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, HCQArgsState, HCQSignal, HCQProgram, MMIOInterface
 from tinygrad.runtime.support.hcq import CLikeArgsState
 from tinygrad.renderer.cstyle import ClangJITRenderer
-from tinygrad.renderer.llvmir import LLVMRenderer
+from tinygrad.renderer.llvmir import CPULLVMRenderer
 from tinygrad.renderer.nir import LVPRenderer
-from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler
 from tinygrad.runtime.support.elf import jit_loader
 from tinygrad.uop.ops import sint
 
 class CPUSignal(HCQSignal):
-  def _sleep(self, time_spent_waiting_ms:int) -> bool:
-    if self.is_timeline and self.owner is not None: self.owner.tasks.join()
-    return False
+  def _sleep(self, time_spent_since_last_sleep_ms:int):
+    if self.is_timeline and self.owner is not None:
+      self.owner.tasks.join()
+      if self.owner.error_state is not None: raise self.owner.error_state
 
 class CPUWorker(threading.Thread):
   def __init__(self, dev, tasks, thread_id):
@@ -31,19 +31,25 @@ class CPUWorker(threading.Thread):
   def run(self):
     while True:
       cmd_iter = iter(self.tasks.get())
-      for cmd in cmd_iter:
-        threads, args_cnt = next(cmd_iter), next(cmd_iter)
-        args = [next(cmd_iter) for _ in range(args_cnt)]
-        for th in range(threads - 1): self.push_task(th, cmd, args)
-        cmd(self.thread_id, *args)
-        for th in range(threads - 1): self.pool[th].join()
-      self.tasks.task_done()
+      try:
+        for cmd in cmd_iter:
+          threads, args_cnt = next(cmd_iter), next(cmd_iter)
+          args = [next(cmd_iter) for _ in range(args_cnt)]
+          for th in range(threads - 1): self.push_task(th, cmd, args)
+          cmd(self.thread_id, *args)
+          for th in range(threads - 1): self.pool[th].join()
+      except Exception as e: self.dev.error_state = e
+      finally: self.tasks.task_done()
 
 class CPUComputeQueue(HWQueue):
   def _exec(self, tid, prg, bufs, *args):
-    prg.fxn(*map(ctypes.c_uint64, args[:bufs]), *map(ctypes.c_int64 if platform.machine() == "arm64" else ctypes.c_int32, args[bufs:]), tid)
+    vals = list(args[bufs:])
+    if 'core_id' in prg.runtimevars: vals[prg.runtimevars['core_id']] = tid
+    prg.fxn(*map(ctypes.c_uint64, args[:bufs]), *map(ctypes.c_int64 if platform.machine() == "arm64" else ctypes.c_int32, vals))
   def _signal(self, tid, signal_addr, value): to_mv(signal_addr, 4).cast('I')[0] = value
-  def _wait(self, tid, signal_addr, value): wait_cond(lambda: to_mv(signal_addr, 4).cast('I')[0] >= value, timeout_ms=60000)
+  def _wait(self, tid, tmpl_sig, signal_addr, value):
+    tmpl_sig.base_buf = HCQBuffer(signal_addr, 16, view=MMIOInterface(signal_addr, 16))
+    tmpl_sig.wait(value)
   def _timestamp(self, tid, timestamp_addr): to_mv(timestamp_addr, 8).cast('Q')[0] = time.perf_counter_ns()
   def cmd(self, cmd, *args, threads=1):
     self.q(cmd, threads, len(args), *args)
@@ -55,7 +61,7 @@ class CPUComputeQueue(HWQueue):
       self.bind_args_state(args_state)
       return self.cmd(self._exec, prg, 1, args_state.buf.va_addr)
     return self.cmd(self._exec, prg, len(args_state.bufs), *[x.va_addr for x in args_state.bufs], *args_state.vals, threads=(global_size or (1,))[0])
-  def wait(self, signal, value=0): return self.cmd(self._wait, signal.value_addr, value)
+  def wait(self, signal, value=0): return self.cmd(self._wait, type(signal)(signal.base_buf, owner=signal.owner, virt=True), signal.value_addr, value)
   def timestamp(self, signal): return self.cmd(self._timestamp, signal.timestamp_addr)
   def signal(self, signal, value:sint=0): return self.cmd(self._signal, signal.value_addr, value)
   def _submit(self, dev): dev.tasks.put(self._q[:])
@@ -71,7 +77,9 @@ class CPUProgram(HCQProgram):
   try: rt_lib = ctypes.CDLL(ctypes.util.find_library('System' if OSX else 'kernel32') if OSX or WIN else 'libgcc_s.so.1')
   except OSError: pass
 
-  def __init__(self, dev, name:str, lib:bytes):
+  def __init__(self, dev, name:str, lib:bytes, runtimevars:dict[str, int]|None=None, **kwargs):
+    self.runtimevars = runtimevars or {}
+
     LVP = isinstance(dev.renderer, LVPRenderer)
     if sys.platform == "win32": # mypy doesn't understand when WIN is used here
       PAGE_EXECUTE_READWRITE, MEM_COMMIT, MEM_RESERVE = 0x40, 0x1000, 0x2000
@@ -114,16 +122,13 @@ class CPUProgram(HCQProgram):
 class CPUAllocator(HCQAllocator):
   def __init__(self, dev:CPUDevice): super().__init__(dev, supports_copy_from_disk=False, supports_transfer=False)
   def _alloc(self, size:int, options:BufferSpec) -> HCQBuffer:
-    if options.external_ptr: addr, buf = options.external_ptr, None
+    if options.external_ptr is not None: addr, buf = options.external_ptr, None
     elif WIN: addr = mv_address(buf:=mmap.mmap(-1, size, access=mmap.ACCESS_WRITE))
     else: addr = mv_address(buf:=mmap.mmap(-1, size, mmap.MAP_ANON | mmap.MAP_SHARED, mmap.PROT_READ | mmap.PROT_WRITE))
     return HCQBuffer(va:=addr, sz:=size, meta=buf, view=MMIOInterface(va, sz, fmt='B'), owner=self.dev)
   def _as_buffer(self, src) -> memoryview:
     self.dev.synchronize()
     return to_mv(src.va_addr, src.size)
-  def _as_dmaref(self, buf):
-    self.dev.synchronize()
-    return DMACPURef(buf.va_addr, buf.size)
   def _map(self, buf:HCQBuffer):
     if buf.view is None or not isinstance(buf.view, MMIOInterface): raise RuntimeError("Cannot map buffer without view to cpu")
 
@@ -131,6 +136,5 @@ class CPUDevice(HCQCompiled):
   def __init__(self, device:str=""):
     self.tasks:queue.Queue = queue.Queue()
     CPUWorker(self, self.tasks, thread_id=0).start()
-    compilers = CompilerSet([CompilerPair(ClangJITRenderer, None), CompilerPair(LLVMRenderer, CPULLVMCompiler, ctrl_var=CPU_LLVM),
-                             CompilerPair(LVPRenderer, None, ctrl_var=CPU_LVP)], ctrl_var=CPU_CC)
-    super().__init__(device, CPUAllocator(self), compilers, functools.partial(CPUProgram, self), CPUSignal, CPUComputeQueue)
+    renderers:list[type[Renderer]] = [ClangJITRenderer, CPULLVMRenderer, LVPRenderer]
+    super().__init__(device, CPUAllocator(self), renderers, functools.partial(CPUProgram, self), CPUSignal, CPUComputeQueue)

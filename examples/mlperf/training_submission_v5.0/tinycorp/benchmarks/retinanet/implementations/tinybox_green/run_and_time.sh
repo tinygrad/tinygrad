@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e  # Exit on any error
 
-export PYTHONPATH="." NV=1
+export PYTHONPATH="." DEV=NV
 export MODEL="retinanet"
 export SUBMISSION_PLATFORM="tinybox_green"
 export DEFAULT_FLOAT="HALF" GPUS=6 BS=96 EVAL_BS=96

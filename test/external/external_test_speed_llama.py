@@ -9,8 +9,8 @@ from tinygrad.engine.realize import method_cache
 from tinygrad.helpers import Profiling
 
 class FakeProgram:
-  def __init__(self, name:str, prg:bytes): pass
-  def __call__(self, *bufs, global_size, local_size, vals=(), wait=False): pass
+  def __init__(self, name:str, prg:bytes, **kwargs): pass
+  def __call__(self, *bufs, global_size, local_size, vals=(), wait=False, **kw): pass
 
 class FakeAllocator(Allocator[Compiled]):
   def _alloc(self, sz, options): return None

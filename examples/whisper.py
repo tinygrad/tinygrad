@@ -7,6 +7,7 @@ from tinygrad import Tensor, TinyJit, Variable, nn, dtypes
 from tinygrad.nn.state import torch_load, load_state_dict
 from tinygrad.helpers import getenv, fetch
 
+from examples.audio_helpers import mel
 import numpy as np
 import librosa
 
@@ -159,7 +160,7 @@ def prep_audio(waveforms: List[np.ndarray], batch_size: int, truncate=False) -> 
 
   stft = librosa.stft(waveforms, n_fft=N_FFT, hop_length=HOP_LENGTH, window='hann', dtype=np.csingle)
   magnitudes = np.absolute(stft[..., :-1]) ** 2
-  mel_spec = librosa.filters.mel(sr=RATE, n_fft=N_FFT, n_mels=N_MELS) @ magnitudes
+  mel_spec = mel(sr=RATE, n_fft=N_FFT, n_mels=N_MELS).numpy() @ magnitudes
 
   log_spec = np.log10(np.clip(mel_spec, 1e-10, None))
   log_spec = np.maximum(log_spec, log_spec.max((1,2), keepdims=True) - 8.0)

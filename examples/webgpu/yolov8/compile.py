@@ -4,10 +4,11 @@ from tinygrad.tensor import Tensor
 from tinygrad.nn.state import safe_save
 from extra.export_model import export_model
 from tinygrad.device import Device
+from tinygrad.helpers import DEV
 from tinygrad.nn.state import safe_load, load_state_dict
 
 if __name__ == "__main__":
-    Device.DEFAULT = "WEBGPU"
+    DEV.value = "WEBGPU"
     yolo_variant = 'n'
     yolo_infer = YOLOv8(w=0.25, r=2.0, d=0.33, num_classes=80)
     state_dict = safe_load(get_weights_location(yolo_variant))

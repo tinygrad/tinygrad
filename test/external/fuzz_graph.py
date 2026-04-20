@@ -5,7 +5,7 @@ from tinygrad.helpers import Context, getenv, from_mv
 from tinygrad.dtype import dtypes
 from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.engine.realize import BufferXfer, get_runner
-from tinygrad.engine.schedule import ExecItem
+from tinygrad.schedule import ExecItem
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.engine.jit import apply_graph_to_jit
 
@@ -30,7 +30,7 @@ def alloc_rawbuffer(device, fill=False):
   if fill:
     with Context(DEBUG=0):
       data = np.random.randint(-10000, 10000, size=rawbuf.size, dtype=_to_np_dtype(rawbuf.dtype))
-      rawbuf.copyin(Tensor(data).realize().uop.base.realized.as_buffer())
+      rawbuf.copyin(Tensor(data).realize().uop.base.realized.as_memoryview())
   return rawbuf
 
 def gen_kernel_ji(device, deps):
@@ -85,7 +85,7 @@ def run_jit(jis, all_buffers, input_buffers, var_vals):
   with Context(DEBUG=0):
     for rawbuf in all_buffers:
       if rawbuf in input_buffers: continue
-      mv = memoryview(bytearray(rawbuf.size * rawbuf.dtype.itemsize))
+      mv = memoryview(bytearray(rawbuf.nbytes))
       ctypes.memset(from_mv(mv), 0, len(mv))
       rawbuf.copyin(mv)
 
@@ -93,7 +93,7 @@ def run_jit(jis, all_buffers, input_buffers, var_vals):
 
   with Context(DEBUG=0):
     res_buffers = []
-    for rawbuf in all_buffers: res_buffers.append(rawbuf.as_buffer())
+    for rawbuf in all_buffers: res_buffers.append(rawbuf.as_memoryview())
     return res_buffers
 
 def fuzz_graph(jis, all_buffers, input_buffers):

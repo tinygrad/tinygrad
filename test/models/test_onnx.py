@@ -73,7 +73,7 @@ class TestHuggingFaceOnnxModels(unittest.TestCase):
     onnx_model_path = snapshot_download_with_retry(
       repo_id=repo_id,
       allow_patterns=["*.onnx", "*.onnx_data"],
-      cache_dir=str(DOWNLOADS_DIR)
+      local_dir=DOWNLOADS_DIR / repo_id
     )
     onnx_model_path = onnx_model_path / model_file
     file_size = onnx_model_path.stat().st_size
@@ -87,7 +87,7 @@ class TestHuggingFaceOnnxModels(unittest.TestCase):
       "input_ids": np.random.randint(0, 250002, (1, 11), dtype=np.int64),
       "attention_mask": np.ones((1, 11), dtype=np.int64),
     }
-    self._validate(repo_id, model_file, custom_inputs)
+    self._validate(repo_id, model_file, custom_inputs, atol=1e-3)
 
 if __name__ == "__main__":
   unittest.main()

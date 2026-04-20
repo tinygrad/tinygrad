@@ -23,7 +23,7 @@ def elf_loader(blob:bytes, force_section_align:int=1, link_libs:list[str]|None=N
   def _to_carray(sh, ctype): return (ctype * (sh.header.sh_size // sh.header.sh_entsize)).from_buffer_copy(sh.content)
   rel = [(sh, sh.name[4:], _to_carray(sh, libc.Elf64_Rel)) for sh in sections if sh.header.sh_type == libc.SHT_REL]
   rela = [(sh, sh.name[5:], _to_carray(sh, libc.Elf64_Rela)) for sh in sections if sh.header.sh_type == libc.SHT_RELA]
-  symtab = [_to_carray(sh, libc.Elf64_Sym) for sh in sections if sh.header.sh_type == libc.SHT_SYMTAB][0]
+  symtab = next((_to_carray(sh, libc.Elf64_Sym) for sh in sections if sh.header.sh_type == libc.SHT_SYMTAB), None)
   progbits = [sh for sh in sections if sh.header.sh_type == libc.SHT_PROGBITS]
 
   # Prealloc image for all fixed addresses.
@@ -39,7 +39,7 @@ def elf_loader(blob:bytes, force_section_align:int=1, link_libs:list[str]|None=N
   for sh, trgt_sh_name, c_rels in rel + rela:
     if trgt_sh_name == ".eh_frame": continue
     target_image_off = next(tsh for tsh in sections if tsh.name == trgt_sh_name).header.sh_addr
-    rels = [(r.r_offset, symtab[libc.ELF64_R_SYM(r.r_info)], libc.ELF64_R_TYPE(r.r_info), getattr(r, "r_addend", 0)) for r in c_rels]
+    rels = [(r.r_offset, unwrap(symtab)[libc.ELF64_R_SYM(r.r_info)], libc.ELF64_R_TYPE(r.r_info), getattr(r, "r_addend", 0)) for r in c_rels]
     relocs += [(target_image_off + roff, link_sym(_strtab(sh_strtab, sym.st_name), link_libs or []) if sym.st_shndx == 0 else
                 sections[sym.st_shndx].header.sh_addr + sym.st_value, rtype, raddend) for roff, sym, rtype, raddend in rels]
 

@@ -1,10 +1,10 @@
 from __future__ import annotations
 import ctypes, os, mmap, tempfile, pathlib, array, functools, threading, contextlib, sys, subprocess, struct
 assert sys.platform != 'win32'
-from tinygrad.device import BufferSpec, Compiled, Allocator, Compiler, CompilerSet, CompilerPair
+from tinygrad.device import BufferSpec, Compiled, Allocator, Compiler
 from tinygrad.dtype import dtypes, DType, PtrDType
 from tinygrad.uop.ops import Ops, UOp
-from tinygrad.helpers import getenv, round_up, mv_address, to_mv, cpu_objdump, system, DEBUG, suppress_finalizing
+from tinygrad.helpers import getenv, round_up, mv_address, to_mv, cpu_objdump, system, DEBUG, suppress_finalizing, Target
 from tinygrad.renderer.cstyle import ClangRenderer
 from tinygrad.runtime.autogen import libc, qcom_dsp
 if getenv("IOCTL"): import extra.dsp.run # noqa: F401 # pylint: disable=unused-import
@@ -33,12 +33,8 @@ dsp_string = PatternMatcher([
 ])
 
 class DSPRenderer(ClangRenderer):
-  device = "DSP"
   supports_float4 = True
   has_threads = False
-
-  def is_dtype_supported(self, dtype:DType) -> bool: return dtype not in (dtypes.bfloat16,) + dtypes.fp8s
-
   buffer_suffix = " restrict __attribute__((align_value(128)))"
   kernel_typedef = "__attribute__((noinline)) void"
   extra_args = []
@@ -47,6 +43,8 @@ class DSPRenderer(ClangRenderer):
   string_rewrite = dsp_string+ClangRenderer.string_rewrite
   type_map = { **ClangRenderer.type_map, dtypes.uint64: "unsigned long long", dtypes.int64: "long long" }
   code_for_op = {k:v for k,v in ClangRenderer.code_for_op.items() if k != Ops.SQRT}
+
+  def __init__(self, target:Target): self.target, self.compiler = target, DSPCompiler()
 
   def _render_defines(self, uops) -> list[str]:
     return ['''/* DSP boilerplate */ struct dcvs_v2_req { int type; int _pad; _Bool dcvs_enable; char dcvs_option; _Bool set_latency; int latency;
@@ -82,10 +80,10 @@ def rpc_prep_args(ins=None, outs=None, in_fds=None):
   return pra, fds, attrs, (ins, outs)
 
 class DSPProgram:
-  def __init__(self, dev:DSPDevice, name:str, lib:bytes):
+  def __init__(self, dev:DSPDevice, name:str, lib:bytes, **kwargs):
     self.dev, self.lib = dev, lib
 
-  def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False):
+  def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False, **kw):
     if len(bufs) >= 16: raise RuntimeError(f"Too many buffers to execute: {len(bufs)}")
 
     pra, fds, attrs, _ = rpc_prep_args(ins=[var_vals_mv:=memoryview(bytearray((len(bufs)+len(vals))*4)), off_mv:=memoryview(bytearray(len(bufs)*4))],
@@ -119,28 +117,11 @@ class DSPAllocator(Allocator['DSPDevice']):
   def _copyout(self, dest:memoryview, src:DSPBuffer): ctypes.memmove(mv_address(dest), src.va_addr, dest.nbytes)
   def _offset(self, buf, size:int, offset:int): return DSPBuffer(buf.va_addr+offset, size, buf.share_info, buf.offset+offset)
 
-class ClangCompiler(Compiler):
-  def __init__(self, cachekey="compile_clang", args:list[str]|None=None, objdump_tool='objdump'):
-    self.args = ['-shared', '-march=native'] if args is None else args
-    self.objdump_tool = objdump_tool
-    super().__init__(cachekey)
-
-  def compile(self, src:str) -> bytes:
-    # TODO: remove file write. sadly clang doesn't like the use of /dev/stdout here
-    with tempfile.NamedTemporaryFile(delete=True) as f:
-      system(f"{getenv('CC','clang')} {' '.join(self.args)} -O2 -Wall -Werror -x c -fPIC -ffreestanding -nostdlib - -o {f.name}", input=src.encode())
-      return pathlib.Path(f.name).read_bytes()
-
-  def disassemble(self, lib:bytes): return cpu_objdump(lib, self.objdump_tool)
-
-class DSPDevice(Compiled):
-  def __init__(self, device:str=""):
-    compiler_args = ["--target=hexagon", "-mcpu=hexagonv65", "-fuse-ld=lld", "-nostdlib",  "-mhvx=v65", "-mhvx-length=128b"]
-    if getenv("MOCKDSP"):
-      mock_compilers = CompilerSet([CompilerPair(MockDSPRenderer, functools.partial(ClangCompiler, None, ["-static"]+compiler_args, 'llvm-objdump'))])
-      super().__init__(device, DSPAllocator(self), mock_compilers, MockDSPProgram)
+class DSPCompiler(Compiler):
+  def __init__(self, mock:bool=False):
+    compiler_args = "--target=hexagon -mcpu=hexagonv65 -fuse-ld=lld -nostdlib -mhvx=v65 -mhvx-length=128b"
+    if mock: self.args = f"-static {compiler_args}"
     else:
-      self.ion_fd = os.open('/dev/ion', os.O_RDONLY)
       # Generate link script to pass into clang. Aligning all used sections to 4k fixes invoke problem.
       sections = ['text', 'rela.plt', 'rela.dyn', 'plt', 'data', 'bss', 'hash', 'dynamic',
                   'got', 'got.plt', 'dynsym', 'dynstr', 'symtab', 'shstrtab', 'strtab']
@@ -149,8 +130,25 @@ class DSPDevice(Compiled):
         self.link_ld.write(f"SECTIONS {{ . = 0x0; {sections_link}\n /DISCARD/ : {{ *(.note .note.* .gnu.hash .comment) }} }}".encode())
         self.link_ld.flush()
 
-      compiler = functools.partial(ClangCompiler, "compile_dsp", ["-shared"] + compiler_args + [f"-T{self.link_ld.name}"], 'llvm-objdump')
-      super().__init__(device, DSPAllocator(self), CompilerSet([CompilerPair(DSPRenderer, compiler)]), functools.partial(DSPProgram, self))
+      self.args = f"-shared {compiler_args} -T{self.link_ld.name}"
+
+    super().__init__(None if mock else "compile_dsp")
+
+  def compile(self, src:str) -> bytes:
+    # TODO: remove file write. sadly clang doesn't like the use of /dev/stdout here
+    with tempfile.NamedTemporaryFile(delete=True) as f:
+      system(f"{getenv('CC','clang')} {self.args} -O2 -Wall -Werror -x c -fPIC -ffreestanding -nostdlib - -o {f.name}", input=src.encode())
+      return pathlib.Path(f.name).read_bytes()
+
+  def disassemble(self, lib:bytes): return cpu_objdump(lib, "llvm-objdump")
+
+
+class DSPDevice(Compiled):
+  def __init__(self, device:str=""):
+    if getenv("MOCKDSP"): super().__init__(device, DSPAllocator(self), [MockDSPRenderer], MockDSPProgram)
+    else:
+      self.ion_fd = os.open('/dev/ion', os.O_RDONLY)
+      super().__init__(device, DSPAllocator(self), [DSPRenderer], functools.partial(DSPProgram, self))
       fastrpc_shell = memoryview(bytearray(pathlib.Path('/dsp/cdsp/fastrpc_shell_3').read_bytes()))
       self.shell_buf = self.allocator.alloc(round_up(fastrpc_shell.nbytes, 0x1000), BufferSpec(nolru=True))
       ctypes.memmove(self.shell_buf.va_addr, mv_address(fastrpc_shell), fastrpc_shell.nbytes)
@@ -271,6 +269,7 @@ static void *mmap2(void *addr, unsigned int length, int prot, int flags, int fd,
 return (void*)syscall((long)addr, length, prot, flags, fd, offset, 222); }}'''
 
 class MockDSPRenderer(DSPRenderer):
+  def __init__(self, target:Target): self.target, self.compiler = target, DSPCompiler(mock=True)
   def _render_defines(self, uops) -> list[str]: return ClangRenderer._render_defines(self, uops)
   def _render_entry(self, function_name:str, bufs:list[tuple[str,tuple[DType,bool]]]) -> str:
     # https://gpages.juszkiewicz.com.pl/syscalls-table/syscalls.html
@@ -292,8 +291,8 @@ class MockDSPRenderer(DSPRenderer):
     return '\n'.join(msrc)
 
 class MockDSPProgram:
-  def __init__(self, name:str, lib:bytes): self.lib = lib
-  def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False):
+  def __init__(self, name:str, lib:bytes, **kwargs): self.lib = lib
+  def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False, **kw):
     with tempfile.NamedTemporaryFile(suffix=".out") as dsp_lib:
       dsp_lib.write(self.lib)
       dsp_lib.flush()
