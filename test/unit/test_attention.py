@@ -2,7 +2,7 @@ import unittest
 import numpy as np
 from tinygrad import Tensor, dtypes
 from tinygrad.llm.model import (
-  GatedDeltaNetBlock, SSMConfig, TransformerBlock, TransformerConfig,
+  GatedDeltaNetBlock, SSMConfig, ShortConvBlock, Transformer, TransformerBlock, TransformerConfig,
   apply_rope as apply_rope_new, precompute_freqs_cis, pairwise_topk,
 )
 
@@ -175,6 +175,63 @@ class TestGatedDeltaNetBlock(unittest.TestCase):
                                  err_msg=f"GatedDeltaNet reset conv cache mismatch at step {step}")
       np.testing.assert_allclose(recurrent_state, expected_recurrent[step], rtol=1e-3, atol=1e-3,
                                  err_msg=f"GatedDeltaNet reset recurrent cache mismatch at step {step}")
+
+class TestShortConvBlock(unittest.TestCase):
+  def _tensor_linspace(self, start:float, stop:float, shape:tuple[int, ...]) -> Tensor:
+    return Tensor.linspace(start, stop, int(np.prod(shape)), dtype=dtypes.float32).reshape(*shape)
+
+  def _make_config(self, **kwargs):
+    return TransformerConfig(**({"num_blocks":1, "dim":4, "hidden_dim":8, "n_heads":1, "n_kv_heads":1,
+                                 "norm_eps":1e-5, "vocab_size":32, "head_dim":4, "rope_theta":10000.0,
+                                 "rope_dim":4, "v_head_dim":4, "max_context":8, "shortconv_kernel_size":3} | kwargs))
+
+  def _make_block(self, config:TransformerConfig) -> ShortConvBlock:
+    block = ShortConvBlock(config)
+    block.shortconv.in_proj.weight = self._tensor_linspace(-0.2, 0.25, (3 * config.dim, config.dim))
+    block.shortconv.out_proj.weight = self._tensor_linspace(-0.15, 0.2, (config.dim, config.dim))
+    block.shortconv.conv["weight"] = self._tensor_linspace(-0.1, 0.12, (config.dim, config.shortconv_kernel_size))
+    return block
+
+  def _linear_np(self, x:np.ndarray, weight:np.ndarray) -> np.ndarray:
+    return x.astype(np.float32) @ weight.T.astype(np.float32)
+
+  def _naive_attention(self, block:ShortConvBlock, x:Tensor) -> np.ndarray:
+    x_np = x.numpy().astype(np.float32)
+    proj = self._linear_np(x_np, block.shortconv.in_proj.weight.numpy())
+    conv_in, gate, value = np.split(proj, 3, axis=-1)
+    conv_input = conv_in * value
+    conv_out = np.zeros_like(conv_input)
+    kernel = block.shortconv.conv["weight"].numpy().astype(np.float32)
+
+    for t in range(x_np.shape[1]):
+      for offset in range(block.kernel_size):
+        src = t + offset - (block.kernel_size - 1)
+        if src >= 0: conv_out[:, t, :] += conv_input[:, src, :] * kernel[:, offset]
+
+    return self._linear_np(conv_out * gate, block.shortconv.out_proj.weight.numpy())
+
+  def _run_attention(self, block:ShortConvBlock, x:Tensor, start_pos:int) -> np.ndarray:
+    block._init_state(x)
+    return block._attention(x, start_pos).realize().numpy()
+
+  def test_shortconv_reference_and_cache(self):
+    config = self._make_config(max_context=5)
+    x = Tensor.linspace(-1.0, 1.0, 5 * config.dim, dtype=dtypes.float32).reshape(1, 5, config.dim)
+
+    block = self._make_block(config)
+    expected = self._naive_attention(block, x)
+    np.testing.assert_allclose(self._run_attention(block, x, 0), expected, rtol=1e-5, atol=1e-5)
+
+    block = self._make_block(config)
+    for step in range(x.shape[1]):
+      np.testing.assert_allclose(self._run_attention(block, x[:, step:step+1], step), expected[:, step:step+1],
+                                 rtol=1e-5, atol=1e-5, err_msg=f"ShortConv mismatch at step {step}")
+
+  def test_transformer_routes_shortconv_layers(self):
+    model = Transformer(self._make_config(num_blocks=3, shortconv_layers=(1,)))
+    self.assertIsInstance(model.blk[0], TransformerBlock)
+    self.assertIsInstance(model.blk[1], ShortConvBlock)
+    self.assertIsInstance(model.blk[2], TransformerBlock)
 
 class TestPairwiseTopk(unittest.TestCase):
   def test_basic_topk(self):
