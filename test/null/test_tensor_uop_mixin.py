@@ -71,6 +71,35 @@ class TestTensorUOpStack(unittest.TestCase):
   def test_stack_3tensors(self): _check(self, _t(2, 3), lambda x: x.stack(x, x, dim=0))
   def test_stack_new_last(self): _check(self, _t(2, 3), lambda x: x.stack(x, dim=-1))
 
+class TestTensorUOpConv2d(unittest.TestCase):
+  def test_conv2d_basic(self):
+    w = _t(1, 1, 2, 2).float()
+    _check(self, _t(1, 1, 3, 3).float(), lambda x: x.conv2d(w if isinstance(x, Tensor) else w.uop))
+  def test_conv2d_padded(self):
+    w = _t(1, 1, 2, 2).float()
+    _check(self, _t(1, 1, 3, 3).float(), lambda x: x.conv2d(w if isinstance(x, Tensor) else w.uop, padding=1))
+  def test_conv2d_negative_padding(self):
+    w = _t(1, 1, 3, 3).float()
+    _check(self, _t(1, 1, 5, 5).float(), lambda x: x.conv2d(w if isinstance(x, Tensor) else w.uop, padding=(-1,-1,-1,-1)))
+  def test_conv2d_multichannel_bias(self):
+    w, b = _t(4, 2, 3, 3).float(), _t(4).float()
+    _check(self, _t(2, 2, 5, 5).float(), lambda x: x.conv2d(*(y if isinstance(x, Tensor) else y.uop for y in (w, b))))
+  def test_conv2d_stride_dilation(self):
+    w = _t(2, 2, 2, 2).float()
+    _check(self, _t(1, 2, 6, 6).float(), lambda x: x.conv2d(w if isinstance(x, Tensor) else w.uop, stride=2, dilation=2))
+  def test_conv2d_groups(self):
+    w = _t(4, 1, 2, 2).float()
+    _check(self, _t(1, 4, 4, 4).float(), lambda x: x.conv2d(w if isinstance(x, Tensor) else w.uop, groups=4))
+  def test_conv2d_3d(self):
+    w = _t(1, 1, 2, 2, 2).float()
+    _check(self, _t(1, 1, 3, 3, 3).float(), lambda x: x.conv2d(w if isinstance(x, Tensor) else w.uop))
+  def test_conv_transpose2d_basic(self):
+    w = _t(1, 1, 2, 2).float()
+    _check(self, _t(1, 1, 3, 3).float(), lambda x: x.conv_transpose2d(w if isinstance(x, Tensor) else w.uop))
+  def test_conv_transpose2d_stride(self):
+    w = _t(1, 1, 2, 2).float()
+    _check(self, _t(1, 1, 3, 3).float(), lambda x: x.conv_transpose2d(w if isinstance(x, Tensor) else w.uop, stride=2))
+
 class TestTensorUOpEinsum(unittest.TestCase):
   def test_einsum_dot(self):       _check(self, _t(2, 3), lambda x: type(x).einsum("ij,ij->", x, x))
   def test_einsum_transpose(self): _check(self, _t(2, 3), lambda x: type(x).einsum("ij->ji", x))
