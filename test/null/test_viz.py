@@ -1,4 +1,5 @@
-import unittest, decimal, sys, json, contextlib
+import unittest, decimal, sys, json, contextlib, tempfile, pickle, io, itertools
+from pathlib import Path
 from dataclasses import dataclass
 from typing import Generator
 
@@ -333,7 +334,7 @@ class TestVizIntegration(unittest.TestCase):
       c1 = Tensor.empty(4).add(1)
       c2 = Tensor.empty(8).add(1)
       sched = Tensor.schedule(c1, c2)
-      prgs = [si.lower().prg.p.name for si in sched]
+      prgs = [get_program(si.ast, Device[Device.DEFAULT].renderer).name for si in sched]
     lst = viz.list_items()
     sched_idx = next(i for i,l in enumerate(lst) if l["name"].startswith("Schedule"))
     viz_kernel = next(i for i,s in enumerate(lst[sched_idx]["steps"]) if s["name"] == "View Kernel Graph")
@@ -883,6 +884,48 @@ class TestCfg(unittest.TestCase):
     k.emit(s_branch(), target="end")
     k.emit(s_code_end())
     self.get_cfg("jump_back_to_end", k)
+
+# launch viz cli without subprocess
+def run_cli(*cli_args) -> str:
+  from extra.viz.cli import main, get_arg_parser
+  args = get_arg_parser().parse_args(cli_args)
+  with contextlib.redirect_stdout(buf:=io.StringIO()):
+    main(args)
+  return buf.getvalue().strip()
+
+class TestCLI(unittest.TestCase):
+  def test_simple(self):
+    a = Tensor.empty(1, device="NULL")+2.0
+    empty_counter = itertools.count(0)
+    def custom_empty_prg(B:UOp, A:UOp) -> UOp:
+      sink = UOp(Ops.SINK, arg=KernelInfo(name=f"custom_empty_n{next(empty_counter)}"))
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=a.device), UOp(Ops.LINEAR, src=(sink,))))
+    b = Tensor.custom_kernel(Tensor.empty_like(a), a, fxn=custom_empty_prg)[0]
+    c = Tensor.custom_kernel(Tensor.empty_like(a), a, fxn=custom_empty_prg)[0]
+    with save_viz() as viz:
+      b.realize()
+      profile_marker("marker @ 1")
+      c.realize()
+    # save trace to disk for CLI to consume it
+    with tempfile.TemporaryDirectory() as tmpdir:
+      (r:=Path(tmpdir)/"rewrites.pkl").write_bytes(pickle.dumps(viz.data.trace))
+      (p:=Path(tmpdir)/"profile.pkl").write_bytes(pickle.dumps(cpu_events))
+      # reconstruct DEBUG=4 output and see all markers.
+      with Context(DEBUG=4):
+        kernels = run_cli("--rewrites-path", str(r), "--profile-path", str(p), "-p", "-s", "NULL")
+      self.assertIn("void custom_empty_n0", kernels)
+      self.assertIn("marker @ 1", kernels)
+      self.assertIn("void custom_empty_n1", kernels)
+      self.assertIn("E", kernels)
+      self.assertIn("UOp.const", kernels)
+      # get the top slowest functions across all devices
+      with Context(DEBUG=2):
+        times = run_cli("--rewrites-path", str(r), "--profile-path", str(p), "-p", "-s", "ALL", "--top", "-1")
+      self.assertIn("TINY", times)
+      self.assertIn("NULL", times)
+      with Context(DEBUG=3):
+        json_lines = run_cli("--rewrites-path", str(r), "--profile-path", str(p), "-p", "-s", "ALL", "--jsonl")
+      for line in json_lines.split("\n"): _ = json.loads(line)
 
 if __name__ == "__main__":
   unittest.main()

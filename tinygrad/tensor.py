@@ -13,9 +13,9 @@ from tinygrad.gradient import compute_gradient
 from tinygrad.mixin import OpMixin, ReductionStr
 from tinygrad.uop.ops import smax, UOp, Ops, sint, all_metadata, _index_to_concrete_int, sint_to_uop, Variable
 from tinygrad.uop.ops import _broadcast_shape
-from tinygrad.schedule import ExecItem, complete_create_schedule_with_vars
+from tinygrad.schedule import ExecItem, create_linear_with_vars, linear_to_schedule
 from tinygrad.device import Buffer, canonicalize_device
-from tinygrad.engine.realize import run_schedule
+from tinygrad.engine.realize import run_linear
 from tinygrad.callify import transform_to_call
 
 # *** all in scope Tensors are here. this gets relevant UOps ***
@@ -54,7 +54,7 @@ def get_shape(x) -> tuple[int, ...]:
 def _frompy(x:list|tuple|bytes, dtype:DType, device:str|tuple[str,...]) -> UOp:
   if isinstance(x, bytes): ret, data = UOp.new_buffer("PYTHON", len(x)//dtype.itemsize, dtype), x
   else:
-    ret = UOp.new_buffer("PYTHON", prod(shape:=get_shape(x)), dtype).reshape(shape)
+    ret = UOp.empty(shape:=get_shape(x), dtype, "PYTHON")
     assert dtype.fmt is not None, f"{dtype=} has None fmt"
     truncate_function = truncate[dtype]
     data = struct.pack(f"{prod(shape)}{dtype.fmt}", *[truncate_function(dtype.const(xi)) for xi in fully_flatten(x)])
@@ -239,18 +239,20 @@ class Tensor(OpMixin):
     _apply_map_to_tensors({x:y.after(big_sink) for x,y in buffer_map.items()}, name="callify")
     return self
 
+  def linear_with_vars(self, *lst:Tensor) -> tuple[UOp, dict[str, int]]:
+    """Creates the LINEAR UOp needed to realize these Tensor(s), with Variables."""
+    big_sink, becomes_map = transform_to_call(UOp.sink(*[x.uop for x in (self,)+lst]))
+    _apply_map_to_tensors(becomes_map, name="buffers")
+    return create_linear_with_vars(big_sink)
+
   def schedule_with_vars(self, *lst:Tensor) -> tuple[list[ExecItem], dict[str, int]]:
     """
     Creates the schedule needed to realize these Tensor(s), with Variables.
 
     NOTE: A Tensor can only be scheduled once.
     """
-    big_sink, becomes_map = transform_to_call(UOp.sink(*[x.uop for x in (self,)+lst]))
-    _apply_map_to_tensors(becomes_map, name="buffers")
-
-    # this is where the schedule cache should go
-    schedule, var_vals = complete_create_schedule_with_vars(big_sink)
-    return schedule, var_vals
+    linear, var_vals = self.linear_with_vars(*lst)
+    return linear_to_schedule(linear), var_vals
 
   def schedule(self, *lst:Tensor) -> list[ExecItem]:
     """Creates the schedule needed to realize these Tensor(s)."""
@@ -262,7 +264,7 @@ class Tensor(OpMixin):
   def realize(self, *lst:Tensor, do_update_stats=True) -> Tensor:
     """Triggers the computation needed to create these Tensor(s)."""
     if len(to_realize:=[x for x in (self,)+lst if not x.uop.has_buffer_identity()]):
-      run_schedule(*Tensor.schedule_with_vars(*to_realize), do_update_stats=do_update_stats)
+      run_linear(*Tensor.linear_with_vars(*to_realize), do_update_stats=do_update_stats)
     return self
 
   def replace(self, x:Tensor) -> Tensor:
@@ -514,21 +516,14 @@ class Tensor(OpMixin):
     print(t.shape)
     ```
     """
-    dtype, shape = to_dtype(dtype) if dtype is not None else dtypes.default_float, argfix(*shape)
-    if not isinstance(size:=prod([x.vmax if isinstance(x, UOp) else x for x in shape]), int): raise ValueError(f"size must be int {size}")
-    # TODO: add test for multidevice tensor
-    device = canonicalize_device(device)
-    return Tensor(UOp.new_buffer(device, size, dtype), **kwargs).shrink(((0,prod(shape)),)).reshape(shape)
+    return Tensor(UOp.empty(argfix(*shape), dtype, device), **kwargs)
 
   def empty_like(self, dtype:DTypeLike|None=None, device:str|tuple[str, ...]|None=None, **kwargs) -> Tensor:
     """
     Creates an empty tensor with the same shape as `self`.
     If `dtype` is not specified, the dtype of `self` is used.
     """
-    dtype, device = self.dtype if dtype is None else dtype, self.device if device is None else device
-    if isinstance(device, tuple) and (axis := self.uop.axis) is not None:
-      return Tensor(Tensor.empty(self.uop.max_shard_shape, dtype=dtype, device=device, **kwargs).uop.multi(axis))
-    return Tensor.empty(self.shape, dtype=dtype, device=device, **kwargs)
+    return Tensor(self.uop.empty_like(dtype, device), **kwargs)
 
   @staticmethod
   def from_blob(ptr:int, shape:tuple[int, ...], **kwargs) -> Tensor:
@@ -738,7 +733,8 @@ class Tensor(OpMixin):
     """
     if stop is None: stop, start = start, 0
     dtype = kwargs.pop("dtype", dtypes.default_float if any(isinstance(x, float) for x in (start, stop, step)) else dtypes.default_int)
-    if start < (dt:=to_dtype(dtype)).min or dt.max < (stop-step): raise ValueError(f"arange [{start}, {stop}) is not representable in dtype {dtype}")
+    lo, hi = (start, stop-step) if step > 0 else (stop-step, start)
+    if lo < (dt:=to_dtype(dtype)).min or dt.max < hi: raise OverflowError(f"arange [{start}, {stop}) is not representable in dtype {dtype}")
     # NOTE: this matches numpy, torch raises RuntimeError if stop-start and step have different signs
     if (output_len:=ceildiv(stop-start, step)) <= 0: return Tensor([], dtype=dtype, **kwargs)
     return (Tensor.full((output_len,), step, dtype=dtype, **kwargs)._cumalu(0, Ops.ADD) + (start - step)).cast(dtype)
