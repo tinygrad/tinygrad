@@ -72,7 +72,7 @@ def _call_outs_ins(call:UOp) -> tuple[set[int], set[int]]:
   return set(), set()
 
 def _copy_input(u:UOp) -> UOp:
-  run_linear(UOp(Ops.LINEAR, src=(UOp(Ops.COPY).call(new:=UOp.new_buffer(u.device, u.arg, u.dtype), u, metadata=()),)))
+  run_linear(UOp(Ops.LINEAR, src=(u.copy_to_device(u.device).call(new:=UOp.new_buffer(u.device, u.arg, u.dtype), u, metadata=()),)))
   return new
 
 @track_rewrites(lambda linear,held_bufs,input_uops,ret=(): f"JIT {pluralize('call', len(linear.src))}")
