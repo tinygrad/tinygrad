@@ -12,7 +12,7 @@ By default, VIZ CLI automatically loads the latest trace files.
 
 Use `extra/viz/cli.py --profile -s ALL` to inspect the complete timing data of kernels, JIT, codegen and scheduling.
 
-- Add DEBUG=3 to see AST, DEGUG=4 to also see source code.
+- Add DEBUG=3 to see AST, DEBUG=4 to also see source code.
 - Make sure to add NO_COLOR=1 to disable colored output.
 - Add --jsonl to see JSON output
 
@@ -22,12 +22,6 @@ DEBUG=3 extra/viz/cli.py --profile -s ALL > asts.txt
 
 # Get kernel timing information in JSONL format
 extra/viz/cli.py --profile -s ALL --jsonl
-
-# View top 40 slowest kernels on the AMD device and their AST (DEBUG=4 to see source code)
-DEBUG=3 extra/viz/cli.py --profile -s AMD --top 40
-
-# List top 10 slowest operations across all devices
-extra/viz/cli.py --profile --top 10 -s ALL
 ```
 
 ## Inspect codegen and PatternMatcher
