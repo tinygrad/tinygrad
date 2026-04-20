@@ -469,6 +469,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   def end(self, *src:UOp): return UOp(Ops.END, src=(self,)+src) if len(src) else self
   def after(self, *src:UOp, **kwargs): return UOp(Ops.AFTER, self.dtype, (self,)+src, **kwargs) if len(src) else self
   def barrier(self, *src:UOp): return UOp(Ops.BARRIER, src=(self,)+src)
+  def ins(self, arg, **kwargs): return UOp(Ops.INS, kwargs.pop("dtype", self.dtype), kwargs.pop("src", self.src), arg, kwargs.pop("tag", self.tag))
   def contract(self, *rngs:UOp):
     assert all(x.arg[-1] == AxisType.UPCAST for x in rngs), "all contract ranges must be upcast"
     return UOp(Ops.CONTRACT, dtype=self.dtype.vec(prod([x.vmax+1 for x in rngs])), src=(self,), arg=tuple((x.arg[0], x.vmax+1) for x in rngs))
@@ -531,6 +532,13 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     if self.op is sep:
       for s in self.src: yield from s.split_uop(sep)
     else: yield self
+
+  @property
+  def reg(self:UOp):
+    # TODO: add a way to access the nth element in src, sea of nodes call this a projection
+    if self.op in (Ops.NOOP, Ops.AFTER) and self.src: return self.src[0].reg
+    if isinstance(self.tag, tuple): return self.tag[0]
+    return self.tag
 
   # *** multi-device helpers ***
 
