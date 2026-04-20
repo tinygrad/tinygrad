@@ -1,6 +1,6 @@
-import json, re, uuid
+import json, uuid
 
-TOOL_CALL_OPEN, TOOL_CALL_CLOSE = "<tool_call>", "</tool_call>"
+TOOL_CALL_OPEN = "<tool_call>"
 
 # compact tool signatures keep the prompt small
 def _tool_sig(t):
@@ -31,14 +31,11 @@ def format_tools(tools: list|None) -> str:
   if not tools: return ""
   return ("<tools>\n" +
           "\n".join(_tool_sig(t) for t in tools) +
-          "\n</tools>\nReply only: " + TOOL_CALL_OPEN + '{"name":"...","arguments":{...}}' + TOOL_CALL_CLOSE)
+          "\n</tools>\nReply only: " + TOOL_CALL_OPEN + '{"name":"...","arguments":{...}}')
 
-# parse tagged tool calls and fill missing string descriptions when needed
+# parse the last tool_call block and fill missing string descriptions when needed
 def parse_tool_calls(text: str, tools: list|None=None) -> list[dict]:
-  out = [tc for m in re.finditer(rf'{re.escape(TOOL_CALL_OPEN)}\s*(.*?)\s*{re.escape(TOOL_CALL_CLOSE)}', text, re.DOTALL)
-         if (tc:=_tool_call(m.group(1))) is not None]
-  if not out and (i:=text.rfind(TOOL_CALL_OPEN)) != -1:
-    out = [tc] if (tc:=_tool_call(text[i+len(TOOL_CALL_OPEN):])) is not None else []
+  out = [tc] if (i:=text.rfind(TOOL_CALL_OPEN)) != -1 and (tc:=_tool_call(text[i+len(TOOL_CALL_OPEN):])) is not None else []
   tool_map = {t.get("function", t).get("name"): t.get("function", t) for t in tools or []}
   for tc in out:
     fn = tc.get("function", {})

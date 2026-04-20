@@ -210,7 +210,7 @@ class TestLLMServer(unittest.TestCase):
 
   def test_tool_call_response_non_streaming(self):
     old_decode = self.mock_tok.decode
-    self.mock_tok.decode = Mock(return_value='<tool_call>{"name":"bash","arguments":{"command":"ls -la"}}</tool_call>')
+    self.mock_tok.decode = Mock(return_value='<tool_call>{"name":"bash","arguments":{"command":"ls -la"}}')
     try:
       resp = self.client.chat.completions.create(
         model="test-model",
