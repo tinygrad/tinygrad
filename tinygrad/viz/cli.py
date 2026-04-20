@@ -99,7 +99,7 @@ def main(args) -> None:
     pkt_idxs:dict[str, itertools.count] = {}
     dispatch_to_inst:dict[str, tuple[str, int]] = {}
     inst_st:int|None = None
-    for e in viz.sqtt_timeline(*data):
+    for e in viz.sqtt_timeline(*unwrap(data)):
       if isinstance(e, ProfilePointEvent) and e.key == 'pcMap': pc_map = e.arg
       if not isinstance(e, ProfileRangeEvent): continue
       if inst_st is None: inst_st = int(e.st)
@@ -123,7 +123,7 @@ def main(args) -> None:
 
   # ** PMC printer
   elif "PMC" in args.src:
-    pmc = viz.unpack_pmc(data)
+    pmc = viz.unpack_pmc(unwrap(data))
     cols = pmc["cols"]
     rows:list = []
     for r in pmc["rows"]:
@@ -131,7 +131,7 @@ def main(args) -> None:
       elif args.item == r[0]:
         rows = r[2]["rows"] if len(r) > 2 else [r[:2]]
         cols = r[2]["cols"] if len(r) > 2 else cols
-    pmc_data = [[x for x in cols], *[[str(x) for x in r] for r in rows]]
+    pmc_data = [cols, *[[str(x) for x in r] for r in rows]]
     widths = [max(len(r[i]) for r in pmc_data) for i in range(len(cols))]
     def pad(r): return "| "+" | ".join(x+" "*(w-len(x)) for x,w in zip(r, widths))+" |"
     table_str = pad(pmc_data[0])+"\n"+pad(["-"*w for w in widths])+"\n"+("\n".join([pad(row) for row in pmc_data[1:]]))
@@ -151,7 +151,7 @@ def main(args) -> None:
   else:
     timelines = [(n,l) for n,l in profile["layout"].items() if l.get("event_type") == 0]
     def produce_top_kernels() -> Iterator[dict]:
-      tagged = ((n,e) for n,l in timelines for e in l["events"]) if args.src == "ALL" else ((args.src,e) for e in data["events"])
+      tagged = ((n,e) for n,l in timelines for e in l["events"]) if args.src == "ALL" else ((args.src,e) for e in unwrap(data)["events"])
       agg:dict[tuple[str,str], tuple[float, int, int|None]] = {} # map (device, kernel name) to (total time, count and ref)
       total = 0
       for dev,e in tagged:
@@ -170,7 +170,7 @@ def main(args) -> None:
         yield {"name":"Other", "dur_ms":other_t, "count":other_c, "pct":other_t/total*100.0, "ref":None}
     def produce_all_kernels() -> Iterator[dict]:
       event_streams = [[(e["st"], n, e) for e in l["events"]] for n,l in timelines] if args.src == "ALL" \
-                      else [[(e["st"], args.src, e) for e in data["events"]]]
+                      else [[(e["st"], args.src, e) for e in unwrap(data)["events"]]]
       marker_stream = sorted([(m["ts"], "MARKER", m) for m in profile.get("markers", [])], key=lambda t:t[0])
       for ts,dev,e in heapq.merge(*event_streams, marker_stream, key=lambda t:t[0]):
         if dev == "MARKER":

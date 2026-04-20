@@ -887,7 +887,7 @@ class TestCfg(unittest.TestCase):
 
 # launch viz cli without subprocess
 def run_cli(*cli_args) -> str:
-  from extra.viz.cli import main, get_arg_parser
+  from tinygrad.viz.cli import main, get_arg_parser
   args = get_arg_parser().parse_args(cli_args)
   with contextlib.redirect_stdout(buf:=io.StringIO()):
     main(args)

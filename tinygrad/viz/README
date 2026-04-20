@@ -1,7 +1,7 @@
-VIZ is a tool for inspecting tinygrad's compilation process and performance profiling .
+VIZ is a tool for inspecting tinygrad's compilation process and performance profiling.
 
 to use:
-1. Run tinygrad with VIZ=1 (this saves the pkls and launches the server in interactive terminals)
+1. Run tinygrad with VIZ=1 (this saves the pkls and launches the server in interactive shells)
 2. That's it!
 
 This can:
@@ -16,7 +16,7 @@ VIZ pkls can be viewed in two ways:
 1. Web browser: python -m tinygrad.viz.serve
 2. Command line: python -m tinygrad.viz.cli
 
-By default, VIZ UIs automatically load the latest trace files.
+By default, VIZ UIs automatically load the latest files.
 
 user story: viewing profiling data
 * tinygrad ran 32 LLM decode steps:
@@ -48,10 +48,12 @@ user story: debugging scheduler
   * see how things are broken into kernels
   * see why two kernels didn't fuse
 
-user story: SQTT / PMC tracing
+user story: SQTT / PMC profiling
 
-* tinygrad ran custom assembly GEMM kernel with VIZ=2 to enable SQTT.
-* web: click "Exec gemm SE:1 SQTT PKTS", see wave and CU exec unit occupancy at every clock cycle.
+note: SQTT has additional overhead, to enable it, set VIZ=2.
+
+* tinygrad ran custom assembly GEMM kernel.
+* web: click "SQTT gemm SE:1 PKTS", see wave instruction scheduling and CU execution unit occupancy at every clock cycle.
 * cli: python -m tinygrad.viz.cli --profile -s "kernel SQTT SE:0 PKTS"
 
 * get bank conflicts:
