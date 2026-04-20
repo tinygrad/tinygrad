@@ -206,7 +206,7 @@ def main(args) -> None:
       elif DEBUG >= 3 and k.get("ext"): print(fmt(k["ext"]))
 
 def get_arg_parser() -> argparse.ArgumentParser:
-  parser = argparse.ArgumentParser(add_help=False)
+  parser = argparse.ArgumentParser(add_help=False, prog="python -m tinygrad.viz.cli")
   g_mode = parser.add_argument_group("mode")
   g_mode.add_argument("-p", "--profile", action="store_true", help="View profile")
   g_mode.add_argument("-r", "--rewrites", action="store_true", help="View graph rewrites")
