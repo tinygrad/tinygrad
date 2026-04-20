@@ -35,6 +35,14 @@ def call_is_graph(call:UOp) -> bool:
   ast = call.src[0]
   return ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "graph"
 
+def jit_cache_count(linear:UOp) -> int:
+  n = 0
+  for call in linear.src:
+    ast = call.src[0]
+    if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "graph": n += jit_cache_count(ast.src[0])
+    else: n += 1
+  return n
+
 def assert_jit_cache_len(fxn, expected_len):
   linear = fxn.captured.linear if fxn.captured is not None else None
   if linear is None or not linear.src:
