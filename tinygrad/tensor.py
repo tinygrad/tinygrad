@@ -46,8 +46,8 @@ def _fromnp(x: 'numpy.ndarray') -> UOp:
   return ret.reshape(x.shape)
 
 def get_shape(x) -> tuple[int, ...]:
-  # NOTE: str is special because __getitem__ on a str is still a str
-  if not hasattr(x, "__len__") or not hasattr(x, "__getitem__") or isinstance(x, str) or (hasattr(x, "shape") and x.shape == ()): return ()
+  # NOTE: str is special because iterating it still yields strs
+  if not hasattr(x, "__len__") or isinstance(x, str) or getattr(x, "shape", None) == (): return ()
   if not all_same(subs:=[get_shape(xi) for xi in x]): raise ValueError(f"inhomogeneous shape from {x}")
   return (len(subs),) + (subs[0] if subs else ())
 
