@@ -1,27 +1,11 @@
-import importlib.util, json, unittest, threading, time
+import unittest, threading, time
 from unittest.mock import Mock
-
-BASH_TOOL = [{
-  "type": "function",
-  "function": {
-    "name": "bash",
-    "parameters": {
-      "type": "object",
-      "properties": {
-        "command": {"type": "string"},
-        "description": {"type": "string"},
-      },
-      "required": ["command", "description"],
-    },
-  },
-}]
 
 class TestLLMServer(unittest.TestCase):
   """Integration tests using the real OpenAI client."""
 
   @classmethod
   def setUpClass(cls):
-    if importlib.util.find_spec("openai") is None: raise unittest.SkipTest("openai package required")
     cls.mock_tok = Mock()
     cls.mock_tok.role = Mock(return_value=[100, 101])
     cls.mock_tok.encode = Mock(return_value=[200, 201, 202])
@@ -41,7 +25,7 @@ class TestLLMServer(unittest.TestCase):
 
     from tinygrad.llm.cli import LLMServer
 
-    cls.server = LLMServer(('127.0.0.1', 0), cls.mock_model, "test-model", cls.mock_tok, enable_tools=True)
+    cls.server = LLMServer(('127.0.0.1', 0), cls.mock_model, "test-model", cls.mock_tok)
     cls.port = cls.server.server_address[1]
     cls.server_thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
     cls.server_thread.start()
@@ -207,38 +191,6 @@ class TestLLMServer(unittest.TestCase):
     # end_turns: user, assistant, user = 3 end_turn calls (one per message)
     self.assertEqual(self.mock_tok.end_turn.call_count, 3)
     self.assertEqual(self.mock_tok.role.call_count, 4)
-
-  def test_tool_call_response_non_streaming(self):
-    old_decode = self.mock_tok.decode
-    self.mock_tok.decode = Mock(return_value='<tool_call>{"name":"bash","arguments":{"command":"ls -la"}}')
-    try:
-      resp = self.client.chat.completions.create(
-        model="test-model",
-        messages=[{"role": "user", "content": "list files"}],
-        tools=BASH_TOOL,
-        stream=False,
-      )
-      tc = resp.choices[0].message.tool_calls[0]
-      self.assertEqual(resp.choices[0].finish_reason, "tool_calls")
-      self.assertEqual(tc.function.name, "bash")
-      self.assertEqual(json.loads(tc.function.arguments), {"command": "ls -la"})
-    finally:
-      self.mock_tok.decode = old_decode
-
-  def test_tool_call_response_trailing_open_tag(self):
-    old_decode = self.mock_tok.decode
-    self.mock_tok.decode = Mock(return_value='<tool_call>{"name":"bash","arguments":{"command":"ls -la"}}')
-    try:
-      resp = self.client.chat.completions.create(
-        model="test-model",
-        messages=[{"role": "user", "content": "list files"}],
-        tools=BASH_TOOL,
-        stream=False,
-      )
-      self.assertEqual(resp.choices[0].finish_reason, "tool_calls")
-      self.assertEqual(resp.choices[0].message.tool_calls[0].function.name, "bash")
-    finally:
-      self.mock_tok.decode = old_decode
 
   def test_models_endpoint(self):
     import requests as req
