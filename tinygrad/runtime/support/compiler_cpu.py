@@ -6,18 +6,22 @@ from tinygrad.runtime.autogen import llvm
 
 class ClangJITCompiler(Compiler):
   def __init__(self, arch, cachekey="compile_clang_jit"):
-    self.arch = arch
+    self.arch, cpu, feats = (sp:=arch.split(',', 2)) + [""] * (3 - len(sp))
+    assert self.arch and cpu, f"invalid arch string: {arch!r}, expected '<arch>,<cpu>,[<feats>]' (eg. 'x86_64,znver2')"
+    match self.arch:
+      case "x86_64": self.args = [f"-march={cpu}"] + [f"-mno{f}" if f.startswith("-") else f"-m{f}" for f in feats.split(',') if f]
+      # on arm march means "runs on this arch and superset" instead of "optimize for this arch". x86 march == arm mcpu
+      # x18 is a reserved platform register. It is clobbered on context switch in macos and is used to store TEB pointer in windows on arm
+      case "arm64": self.args = ["-ffixed-x18", "-mcpu=" + "+".join([cpu] + ["no"+f[1:] if f.startswith("-") else f for f in feats.split(',') if f])]
+      case "riscv64": self.args = ["-march=" + "_".join(["rv64g" if cpu == "native" else cpu] + [f for f in feats.split(',') if f])]
+      case _: raise RuntimeError(f"unsupported arch: {self.arch!r}")
     super().__init__(cachekey)
 
   def compile_to_obj(self, src:str) -> bytes:
     """Compile C source to ELF object file (before linking)."""
     # -fno-math-errno is required for __builtin_sqrt to become an instruction instead of a function call
-    # x18 is a reserved platform register. It is clobbered on context switch in macos and is used to store TEB pointer in windows on arm, don't use it
-    # on arm march means "runs on this arch and superset" instead of "optimize for this arch". x86 march == arm mcpu
-    arch = {'x86_64': '-march=native', 'riscv64': '-march=rv64g'}.get(self.arch, "-mcpu=native")
-    args = [arch, f'--target={self.arch}-none-unknown-elf', '-O2', '-fPIC', '-ffreestanding', '-fno-math-errno', '-nostdlib', '-fno-ident']
-    arch_args = ['-ffixed-x18'] if self.arch == 'arm64' else []
-    return subprocess.check_output([getenv("CC", 'clang'), '-c', '-x', 'c', *args, *arch_args, '-', '-o', '-'], input=src.encode('utf-8'))
+    return subprocess.check_output([getenv("CC", 'clang'), '-c', '-x', 'c', '-O2', '-fPIC', '-ffreestanding', '-fno-math-errno', '-nostdlib',
+                                    '-fno-ident', f'--target={self.arch}-none-unknown-elf', *self.args, '-', '-o', '-'], input=src.encode('utf-8'))
 
   def compile(self, src:str) -> bytes: return jit_loader(self.compile_to_obj(src))
 
@@ -88,10 +92,12 @@ class LLVMCompiler(Compiler):
 
 class CPULLVMCompiler(LLVMCompiler):
   def __init__(self, arch, cache_key=None):
-    self.arch, cpu, feats = (sp:=arch.split(',', 3)) + [""] * (3 - len(sp))
-    # +reserve-x18 here does the same thing as -ffixed-x18 in ClangJITCompiler, see comments there for why it's needed on arm osx
+    self.arch, cpu, feats = (sp:=arch.split(',', 2)) + [""] * (3 - len(sp))
+    assert self.arch and cpu, f"invalid arch string: {arch!r}, expected '<arch>,<cpu>,[<feats>]' (eg. 'x86_64,znver2')"
     if cpu == "native":
-      cpu, feats = ctypes.string_at(llvm.LLVMGetHostCPUName()).decode(), feats + ctypes.string_at(llvm.LLVMGetHostCPUFeatures()).decode()
+      cpu = ctypes.string_at(llvm.LLVMGetHostCPUName()).decode()
+      feats = (feats + "," if feats else "") + ctypes.string_at(llvm.LLVMGetHostCPUFeatures()).decode()
+    # +reserve-x18 here does the same thing as -ffixed-x18 in ClangJITCompiler, see comments there for why it's needed on arm osx
     super().__init__(self.arch, cpu, ('+reserve-x18,' if OSX else '') + feats, cache_key)
 
   def disassemble(self, lib:bytes): capstone_flatdump(lib, self.arch)
