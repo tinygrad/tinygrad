@@ -63,7 +63,8 @@ class TestTensorCores(unittest.TestCase):
     for tc in Device[Device.DEFAULT].renderer.tensor_cores:
       if not is_dtype_supported(tc.dtype_in) or not is_dtype_supported(tc.dtype_out): continue
       # for AMX, tc.dims[2] == 1 so reduceop is None thus tensor_cores are not triggered
-      helper_tc_allclose(tc.dims[0], tc.dims[1], 2 if Device[Device.DEFAULT].renderer.target.device == "CPU" else tc.dims[2], tc.dtype_in, tc.dtype_out, axis=0, tc_opt=0)
+      helper_tc_allclose(tc.dims[0], tc.dims[1], 2 if Device[Device.DEFAULT].renderer.target.device == "CPU" else tc.dims[2], tc.dtype_in,
+                         tc.dtype_out, axis=0, tc_opt=0)
 
   @Context(ALLOW_TF32=1, AMX=1)
   @unittest.skipIf(Device.DEFAULT == "PYTHON", "not generated on EMULATED device")
