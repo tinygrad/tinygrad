@@ -232,15 +232,15 @@ def _resolve(b:UOp, inputs:tuple[UOp, ...]) -> UOp:
 def resolve_params(ctx:ExecContext, call:UOp) -> list[UOp]: return [_resolve(b, ctx.input_uops) for b in call.src[1:] if b.op is not Ops.BIND]
 
 @contextlib.contextmanager
-def track_stats(ctx:ExecContext, call:UOp, device:str, display_name:str, estimates:Estimates, bufs:list[Buffer], var_vals:dict[str, int], *,
+def track_stats(ctx:ExecContext, call:UOp, device:str, display_name:str, estimates:Estimates, bufs:list[Buffer], var_vals:dict[str, int],
                 outputs=(0,), inputs=(1,), first_run=False):
   if PROFILE: cpu_events.append(ProfilePointEvent(device, "exec", len(cpu_events), {"metadata": call.arg.metadata, "var_vals": var_vals,
                                                   "bufs": [b.trace_num for b in bufs], "name": display_name, "outputs": outputs, "inputs": inputs}))
   timing: list[float|None] = [None]
-  st = time.perf_counter()
+  if DEBUG >= 2: st = time.perf_counter()
   yield timing
   if not ctx.do_update_stats: return
-  if timing[0] is None and DEBUG >= 2:
+  if DEBUG >= 2 and timing[0] is None:
     Device[device].synchronize()
     timing[0] = time.perf_counter() - st
   update_stats(display_name, device, estimates, var_vals, timing[0], len(bufs), jit=ctx.jit, metadata=call.arg.metadata, first_run=first_run)
@@ -264,8 +264,7 @@ def exec_copy(ctx:ExecContext, call, ast):
     dest, src = bufs[0].ensure_allocated(), bufs[1].ensure_allocated()
     xfer = hasattr(alc:=Device[dest.device].allocator,'_transfer') and alc.supports_transfer and dest.device.split(":")[0]==src.device.split(":")[0]
     prg = (BufferXfer if xfer else BufferCopy)(dest.nbytes, dest.device, src.device)
-    name = colored(f"{'xfer' if xfer else 'copy'} {size_to_str(dest.nbytes):>8s}, {dest.device[:7]:>7s} <- {src.device[:7]:7s}", "yellow")
-    with track_stats(ctx, call, dest.device, name, Estimates(lds=dest.nbytes, mem=dest.nbytes), [dest, src], {**ctx.var_vals, **device_vars}):
+    with track_stats(ctx, call, dest.device, prg.display_name, Estimates(lds=dest.nbytes, mem=dest.nbytes), [dest, src], {**ctx.var_vals, **device_vars}):
       prg.copy(dest, src)
 
 def exec_kernel(ctx:ExecContext, call, ast):
