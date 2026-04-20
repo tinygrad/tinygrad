@@ -31,18 +31,9 @@ def format_tools(tools: list|None) -> str:
   if not tools: return ""
   return ("<tools>\n" +
           "\n".join(_tool_sig(t) for t in tools) +
-          "\n</tools>\nReply only: " + TOOL_CALL_OPEN + '{"name":"...","arguments":{...}}')
+          "\n</tools>\nReply only: " + TOOL_CALL_OPEN + '{"name":"...","arguments":{...}}' +
+          "\nInclude all required arguments.")
 
-# parse the last tool_call block and fill missing string descriptions when needed
+# parse the last tool_call block
 def parse_tool_calls(text: str, tools: list|None=None) -> list[dict]:
-  out = [tc] if (i:=text.rfind(TOOL_CALL_OPEN)) != -1 and (tc:=_tool_call(text[i+len(TOOL_CALL_OPEN):])) is not None else []
-  tool_map = {t.get("function", t).get("name"): t.get("function", t) for t in tools or []}
-  for tc in out:
-    fn = tc.get("function", {})
-    params = tool_map.get(fn.get("name"), {}).get("parameters", {})
-    if "description" not in params.get("properties", {}): continue
-    try: args = json.loads(fn["arguments"])
-    except (json.JSONDecodeError, KeyError, TypeError): continue
-    if not isinstance(args.get("description"), str): args["description"] = ""
-    fn["arguments"] = json.dumps(args)
-  return out
+  return [tc] if (i:=text.rfind(TOOL_CALL_OPEN)) != -1 and (tc:=_tool_call(text[i+len(TOOL_CALL_OPEN):])) is not None else []

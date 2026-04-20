@@ -221,7 +221,7 @@ class TestLLMServer(unittest.TestCase):
       tc = resp.choices[0].message.tool_calls[0]
       self.assertEqual(resp.choices[0].finish_reason, "tool_calls")
       self.assertEqual(tc.function.name, "bash")
-      self.assertEqual(json.loads(tc.function.arguments)["description"], "")
+      self.assertEqual(json.loads(tc.function.arguments), {"command": "ls -la"})
     finally:
       self.mock_tok.decode = old_decode
 
