@@ -71,6 +71,10 @@ class TestTensorUOpStack(unittest.TestCase):
   def test_stack_3tensors(self): _check(self, _t(2, 3), lambda x: x.stack(x, x, dim=0))
   def test_stack_new_last(self): _check(self, _t(2, 3), lambda x: x.stack(x, dim=-1))
 
+class TestTensorUOpEinsum(unittest.TestCase):
+  def test_einsum_dot(self):       _check(self, _t(2, 3), lambda x: type(x).einsum("ij,ij->", x, x))
+  def test_einsum_transpose(self): _check(self, _t(2, 3), lambda x: type(x).einsum("ij->ji", x))
+
 class TestTensorUOpSoftmax(unittest.TestCase):
   def test_softmax_default(self):     _check(self, _t(2, 3).float(), lambda x: x.softmax())
   def test_softmax_axis0(self):       _check(self, _t(2, 3).float(), lambda x: x.softmax(axis=0))
