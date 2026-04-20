@@ -120,6 +120,17 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
       return d * (bits * 2 - 1)
   raise ValueError(f"GGML type '{ggml_type}' is not supported!")
 
+def _read_unpack(fmt: str, n: int, r:io.BufferedIOBase): return struct.unpack(fmt, r.read(n))[0]
+def read_str(r:io.BufferedIOBase): return str(r.read(read_uint64(r)), "utf-8")
+def read_arr(r:io.BufferedIOBase):
+  item_reader, n = readers[read_int32(r)], read_uint64(r)
+  return [item_reader(r) for _ in range(n)]
+
+readers: dict[int, Callable[[io.BufferedIOBase], Any]] = { 8: read_str, 9: read_arr,
+  **{ t: functools.partial(_read_unpack, "<"+f, nb) for t,f,nb in \
+    [ (0,"c",1), (1,"b",1), (2,"H",2), (3,"h",2), (4,"I",4), (5,"i",4), (6,"f",4), (7,"?",1), (10,"Q",8), (11,"q",8), (12,"d",8) ] } }
+read_uint32, read_int32, read_uint64, read_int64 = readers[4], readers[5], readers[10], readers[11]
+
 @accept_filename
 def gguf_load(tensor: Tensor) -> tuple[dict, dict[str, Tensor]]:
   """
@@ -136,27 +147,18 @@ def gguf_load(tensor: Tensor) -> tuple[dict, dict[str, Tensor]]:
 
   NOTE: The provided tensor must be on a device that supports execution.
   """
-  reader, kv_data, state_dict = io.BufferedReader(TensorIO(tensor), 1_000_000), {}, {}
-  def read_unpack(fmt: str, n: int): return struct.unpack(fmt, reader.read(n))[0]
-  def read_str(): return str(reader.read(read_uint64()), "utf-8")
-  def read_arr():
-    reader, n = readers[read_int32()], read_uint64()
-    return [ reader() for _ in range(n) ]
-
-  readers: dict[int, Callable[[], Any]] = { 8: read_str, 9: read_arr, **{ t: functools.partial(read_unpack, "<"+f, nb) for t,f,nb in \
-    [ (0,"c",1), (1,"b",1), (2,"H",2), (3,"h",2), (4,"I",4), (5,"i",4), (6,"f",4), (7,"?",1), (10,"Q",8), (11,"q",8), (12,"d",8) ] } }
-  read_uint32, read_int32, read_uint64, read_int64 = readers[4], readers[5], readers[10], readers[11]
-
-  magic, version, n_tensors, n_kv = reader.read(4), read_int32(), read_int64(), read_int64()
+  r = io.BufferedReader(TensorIO(tensor), 1_000_000)
+  magic, version, n_tensors, n_kv = r.read(4), read_int32(r), read_int64(r), read_int64(r)
   if magic != b"GGUF" or version not in [2, 3]: raise ValueError("Invalid GGUF format!")
-  for _ in range(n_kv):
-    k, typ = read_str(), read_int32()
-    kv_data[k] = readers[typ]()
 
-  t_infos = [ (read_str(), tuple(read_uint64() for _ in range(read_uint32())), read_int32(), read_uint64()) for _ in range(n_tensors) ]
-  alignment, pos = kv_data.get("general.alignment", 32), reader.tell()
+  kv_data = {}
+  for _ in range(n_kv):
+    k, typ = read_str(r), read_int32(r)
+    kv_data[k] = readers[typ](r)
+
+  t_infos = [ (read_str(r), tuple(read_uint64(r) for _ in range(read_uint32(r))), read_int32(r), read_uint64(r)) for _ in range(n_tensors) ]
+  alignment, pos = kv_data.get("general.alignment", 32), r.tell()
   data_start = round_up(pos, alignment)
 
-  for name, dims, typ, off in t_infos: state_dict[name] = ggml_data_to_tensor(tensor[data_start + off:], prod(dims), typ).reshape(*reversed(dims))
-
+  state_dict = {name: ggml_data_to_tensor(tensor[data_start + off:], prod(dims), typ).reshape(*reversed(dims)) for name, dims, typ, off in t_infos}
   return kv_data, state_dict
