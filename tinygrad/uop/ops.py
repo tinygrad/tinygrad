@@ -215,7 +215,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     match self.op:
       # late ops don't have shape
       case Ops.UNIQUE | Ops.LUNIQUE | Ops.DEVICE | Ops.LOAD | Ops.STORE | Ops.IF | Ops.BARRIER | Ops.CUSTOM | Ops.CUSTOMI | \
-           Ops.VECTORIZE | Ops.GEP | Ops.SPECIAL | Ops.UNROLL | Ops.CONTRACT | Ops.SINK | \
+           Ops.VECTORIZE | Ops.GEP | Ops.UNROLL | Ops.CONTRACT | Ops.SINK | \
            Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE | Ops.BINARY | Ops.INS | Ops.TUPLE | Ops.CALL | Ops.FUNCTION:
         return None
 
@@ -236,15 +236,19 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
           return None
 
       case Ops.INDEX:
+        shp = []
+        for s in self.src[1:]: shp.extend(list(s.shape))
+        return tuple(shp)
+
         # non pointer index doesn't have a shape
-        if not isinstance(self.dtype, PtrDType): return None
+        #if not isinstance(self.dtype, PtrDType): return None
         # fully indexed doesn't have a shape. TODO: remove this
-        if self.src[0]._shape is None or len(self.src[1:]) == len(self.src[0].shape): return None
+        #if self.src[0]._shape is None or len(self.src[1:]) == len(self.src[0].shape): return None
         # pointer index
-        return self.src[0].shape[len(self.src[1:]):]
+        #return self.src[0].shape[len(self.src[1:]):]
 
       # some ops init the shape
-      case Ops.CONST | Ops.DEFINE_VAR | Ops.BIND | Ops.RANGE: return ()
+      case Ops.CONST | Ops.DEFINE_VAR | Ops.BIND | Ops.RANGE | Ops.SPECIAL: return ()
       case Ops.VCONST: return (len(self.arg),)
       case Ops.BUFFER: return (self.arg,)
       case Ops.BUFFER_VIEW: return (self.arg[0],)
@@ -312,6 +316,10 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
           if not isinstance(axis_arg, tuple) or not all(isinstance(x, int) and x>=0 and x<len(ps) for x in axis_arg):
             raise ValueError(f"invalid type for axis: {axis_arg}")
           return tuple(1 if i in axis_arg else s for i,s in enumerate(ps))
+
+    # broadcasting here
+    if self.op in GroupOp.Binary|GroupOp.Ternary:
+      return _broadcast_shape(*[u.shape for u in self.src])
 
     # elementwise ops keep the shape the same. all inputs with shape must match
     if self.op in GroupOp.ALU.union({Ops.CAST, Ops.COPY, Ops.NOOP, Ops.GROUP, Ops.SINK, Ops.ALLREDUCE}):

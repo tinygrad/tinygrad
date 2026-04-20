@@ -54,7 +54,7 @@ def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True, b
   # expand
   #sink = graph_rewrite(sink, sym+pm_pre_expander+pm_group_for_reduce+expander, name="expander")
   sink = graph_rewrite(sink, expander2, name="expander2", ctx={}, bottom_up=True)
-  sink = graph_rewrite(sink, expander_broadcast, name="fix broadcast")
+  #sink = graph_rewrite(sink, expander_broadcast, name="fix broadcast")
 
   # add locals
   sink = graph_rewrite(sink, pm_add_buffers_local+rangeify_codegen, ctx=itertools.count(0), name="add local buffers")

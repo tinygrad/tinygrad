@@ -1,5 +1,6 @@
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, AxisType, UOp, GroupOp, _align_left, _broadcast_shape
 from tinygrad.helpers import all_same
+from tinygrad.codegen.simplify import pm_flatten_range
 
 def build_range_map(ctx, sink:UOp):
   for x in sink.toposort():
@@ -9,9 +10,11 @@ def build_range_map(ctx, sink:UOp):
 expander2 = PatternMatcher([
   (UPat(Ops.SINK, name="sink"), build_range_map),
   (UPat(Ops.RANGE, name="r"),
-   lambda ctx, r: UOp.const(r.dtype.vec(s:=r.vmax+1), tuple(range(s))) \
+   lambda ctx, r: UOp(Ops.VCONST, r.dtype, arg=tuple(range(r.vmax+1))) \
     .reshape(tuple([r.vmax+1 if i == ctx[r.arg[0]] else 1 for i in range(len(ctx))])) if r.arg[0] in ctx else None),
-])
+])+pm_flatten_range
+
+# *** unused broadcasting, it's just in shape now ***
 
 def broadcast_binary(x:UOp):
   shapes = [u.shape for u in x.src]
