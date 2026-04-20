@@ -24,7 +24,7 @@ def prune_linear(linear:UOp, needed:set[UOp]) -> tuple[UOp, UOp]:
 
 def create_graph_call(batch:list[UOp]) -> UOp:
   # all external inputs are PARAMs
-  input_list = dedup(b for si in batch for b in si.src[1:] if b.op is Ops.PARAM)
+  input_list = dedup(u for si in batch for b in si.src[1:] for u in b.toposort() if u.op is Ops.PARAM)
   cf = UOp(Ops.CUSTOM_FUNCTION, dtypes.void, src=(UOp(Ops.LINEAR, src=tuple(batch)), *input_list), arg="graph")
   return cf.call(*input_list, metadata=tuple(m for si in batch for m in si.arg.metadata))
 
