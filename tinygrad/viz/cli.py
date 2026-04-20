@@ -215,9 +215,9 @@ def get_arg_parser() -> argparse.ArgumentParser:
   g_opts.add_argument("-i", "--item", type=str, default=None, metavar="NAME", help="Select an item within the source (default: list all items)")
   g_opts.add_argument("-t", "--top", type=int, default=None, metavar="COUNT",
                       help="Number of top kernels to aggregate (default: do not aggregate, set -1 to aggregate all)")
-  g_opts.add_argument("--profile-path", type=pathlib.Path, metavar="PATH", help="Path to profile.pkl (optional file, default: latest profile)",
+  g_opts.add_argument("--profile-path", type=pathlib.Path, metavar="PATH", help="Optional path to profile.pkl (default: latest profile)",
                       default=pathlib.Path(temp("profile.pkl", append_user=True)))
-  g_opts.add_argument("--rewrites-path", type=pathlib.Path, metavar="PATH", help="Path to rewrites.pkl (optional file, default: latest rewrites)",
+  g_opts.add_argument("--rewrites-path", type=pathlib.Path, metavar="PATH", help="Optional path to rewrites.pkl (default: latest rewrites)",
                       default=pathlib.Path(temp("rewrites.pkl", append_user=True)))
   g_opts.add_argument("--jsonl", action="store_true", help="Emit profiler output as JSONL")
   g_opts.add_argument("-h", "--help", action="help", help="show this help message and exit")
