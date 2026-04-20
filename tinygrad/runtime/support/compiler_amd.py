@@ -122,7 +122,7 @@ class AMDLLVMCompiler(LLVMCompiler):
   jit = False
   def __init__(self, arch: str):
     self.arch = arch
-    super().__init__(self.arch, "AMDGPU", "+cumode")
+    super().__init__("AMDGPU", self.arch, "+cumode")
   def __reduce__(self): return (AMDLLVMCompiler, (self.arch,))
   def compile(self, src:str) -> bytes:
     try: return super().compile(src)

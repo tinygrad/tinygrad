@@ -32,9 +32,8 @@ def expect(x, err, ret=None):
 class LLVMCompiler(Compiler):
   jit = True
   def __init__(self, arch:str, processor:str, feats:str, cache_key=None):
-    self.arch = arch
     for component in ['Target', 'TargetInfo', 'TargetMC', 'AsmParser', 'AsmPrinter']:
-      getattr(llvm, f"LLVMInitialize{ {'arm64': 'AArch64', 'x86_64': 'X86', 'riscv64': 'riscv64'}[arch]}{component}")()
+      getattr(llvm, "LLVMInitialize" + {'arm64': 'AArch64', 'x86_64': 'X86', 'riscv64': 'riscv64'}.get(arch, "AMDGPU") + component)()
 
     triple = {'arm64': b'aarch64-none-unknown-elf', 'x86_64': b'x86_64-none-unknown-elf', 'AMDGPU': b'amdgcn-amd-amdhsa'}[arch]
     target = expect(llvm.LLVMGetTargetFromTriple(triple, ctypes.pointer(tgt:=llvm.LLVMTargetRef()), err:=cerr()), err, tgt)
@@ -86,12 +85,12 @@ class LLVMCompiler(Compiler):
 
   def compile(self, src:str) -> bytes: return jit_loader(self.compile_to_obj(src)) if self.jit else self.compile_to_obj(src)
 
-  def disassemble(self, lib:bytes): capstone_flatdump(lib, self.arch)
 
 class CPULLVMCompiler(LLVMCompiler):
   def __init__(self, arch, cache_key=None):
-    try: arch, cpu = arch.split(',')
+    try: self.arch, cpu = arch.split(',')
     except Exception: raise RuntimeError(f"invalid arch {arch!r}, expected '<arch>,<cpu>' (ie. 'x86_64,znver2')")
     # +reserve-x18 here does the same thing as -ffixed-x18 in ClangJITCompiler, see comments there for why it's needed on arm osx
     cpu, feats = ctypes.string_at(llvm.LLVMGetHostCPUName()), (b'+reserve-x18,' if OSX else b'') + ctypes.string_at(llvm.LLVMGetHostCPUFeatures())
-    super().__init__(arch, cpu.decode(), feats.decode(), cache_key)
+    super().__init__(self.arch, cpu.decode(), feats.decode(), cache_key)
+  def disassemble(self, lib:bytes): capstone_flatdump(lib, self.arch)
