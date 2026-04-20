@@ -264,7 +264,7 @@ def exec_copy(ctx:ExecContext, call, ast):
     dest, src = bufs[0].ensure_allocated(), bufs[1].ensure_allocated()
     xfer = hasattr(alc:=Device[dest.device].allocator,'_transfer') and alc.supports_transfer and dest.device.split(":")[0]==src.device.split(":")[0]
     prg = (BufferXfer if xfer else BufferCopy)(dest.nbytes, dest.device, src.device)
-    with track_stats(ctx, call, dest.device, prg.display_name, Estimates(lds=dest.nbytes, mem=dest.nbytes), [dest, src], {**ctx.var_vals, **device_vars}):
+    with track_stats(ctx, call, dest.device, prg.display_name, Estimates(lds=dest.nbytes, mem=dest.nbytes), [dest, src], ctx.var_vals):
       prg.copy(dest, src)
 
 def exec_kernel(ctx:ExecContext, call, ast):
@@ -299,7 +299,7 @@ def exec_encdec(ctx:ExecContext, call, ast):
 graph_cache:weakref.WeakKeyDictionary[UOp, Runner] = weakref.WeakKeyDictionary()
 def exec_graph(ctx:ExecContext, call, cf):
   inputs = resolve_params(ctx, call)
-  bufs = flatten([b.bufs if b.__class__ is MultiBuffer else [cast(Buffer, b)] for b in (u.buffer for u in inputs)])
+  bufs = flatten([b.bufs if isinstance(b, MultiBuffer) else [b] for b in (u.buffer for u in inputs)])
   if (runner:=graph_cache.get(cf)) is None:
     sub = cf.substitute(dict(zip(cf.src[1:], inputs)))
     graph_cache[cf] = runner = Device[cf.device if isinstance(cf.device, str) else cf.device[0]].graph(sub, bufs)
