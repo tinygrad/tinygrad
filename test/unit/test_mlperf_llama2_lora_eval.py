@@ -150,6 +150,48 @@ class TestMLPerfLlama2LoRAEval(unittest.TestCase):
 
     self.assertTrue(math.isfinite(eval_loss))
 
+  def test_eval_llama2_70b_lora_loads_int8_base_and_adapter(self):
+    Tensor.manual_seed(42)
+    tiny_params = dict(dim=128, hidden_dim=256, n_heads=4, n_kv_heads=2, n_layers=2, norm_eps=1e-5, vocab_size=1024, rope_theta=10000)
+    spec = llama_helpers.llama_benchmark_config("llama2_70b_lora")
+    spec = {**spec, "model_params": tiny_params, "real_vocab_size": tiny_params["vocab_size"], "lora_rank": 4, "lora_alpha": 8, "lora_dropout": 0.0}
+
+    with tempfile.TemporaryDirectory(prefix="llama2-lora-eval-int8-") as tmpdir:
+      tmpdir = Path(tmpdir)
+      base_model = Transformer(**tiny_params, disable_kv_cache=True)
+      base_path = tmpdir / "base.safetensors"
+      safe_save(split_attention_state(base_model), base_path.as_posix())
+
+      adapter_model = FlatTransformer(**tiny_params, max_context=8, lora_rank=4, lora_alpha=8, lora_dropout=0.0)
+      adapter_model.wqkv_lora_b.assign(Tensor.ones(*adapter_model.wqkv_lora_b.shape, dtype=adapter_model.wqkv_lora_b.dtype))
+      adapter_model.wo_lora_b.assign(Tensor.ones(*adapter_model.wo_lora_b.shape, dtype=adapter_model.wo_lora_b.dtype))
+      adapter_path = tmpdir / "adapter.safetensors"
+      safe_save(adapter_model.adapter_state_dict(), adapter_path.as_posix())
+
+      dataset_path = tmpdir / "validation.jsonl"
+      dataset_path.write_text(json.dumps({"input_ids": [1, 2, 3, 4, 5], "labels": [-1, -1, 3, 4, -1]}) + "\n")
+
+      env = {
+        "BS": "1",
+        "SEQLEN": "5",
+        "DATASET_PATH": dataset_path.as_posix(),
+        "MODEL_PATH": base_path.as_posix(),
+        "ADAPTER_CKPT": adapter_path.as_posix(),
+        "LLAMA_BASE_QUANTIZE": "int8",
+        "LLAMA_LORA_RANK": "4",
+        "LLAMA_LORA_ALPHA": "8",
+        "LLAMA_LORA_DROPOUT": "0",
+      }
+      with (
+        patch.dict(os.environ, env, clear=False),
+        patch.object(
+          llama_helpers, "llama_benchmark_config", side_effect=lambda model_name, small=False: spec,
+        ),
+      ):
+        eval_loss = eval_llama2_70b_lora()
+
+    self.assertTrue(math.isfinite(eval_loss))
+
   def test_eval_llama2_70b_lora_weights_loss_by_valid_tokens(self):
     class FakeFlatTransformer:
       def __init__(self, *args, **kwargs):

@@ -1339,8 +1339,11 @@ def _train_flat_llama(model_name:str):
   RESUME_CKPT        = config["RESUME_CKPT"]            = getenv("RESUME_CKPT", "")
   assert not (LOAD_CKPT and RESUME_CKPT), "LOAD_CKPT and RESUME_CKPT are mutually exclusive"
   lora_params = _llama_lora_config(config, llama_spec if "lora_rank" in llama_spec else None)
+  base_quantize = config["LLAMA_BASE_QUANTIZE"] = getenv("LLAMA_BASE_QUANTIZE", "") or None
   adapter_only = bool(lora_params)
   config["LLAMA_LORA_ADAPTER_ONLY"] = adapter_only
+  if base_quantize and not adapter_only:
+    raise ValueError("LLAMA_BASE_QUANTIZE requires adapter-only LoRA training")
 
   if model_name == "llama2_70b_lora" and not FAKEDATA:
     train_sequences = count_llama2_70b_lora_sequences(DATASET_PATH, SEQLEN, tokenizer=tokenizer, val=bool(TRAIN_ON_VAL))
@@ -1433,7 +1436,7 @@ def _train_flat_llama(model_name:str):
   if (MP := getenv("MP", 1)) > 1: model_params['vocab_size'] = round_up(model_params['vocab_size'], 256 * MP)
   vocab_mask:Tensor = Tensor.arange(model_params['vocab_size']).reshape(1, 1, -1) >= real_vocab_size
 
-  model = FlatTransformer(**model_params, max_context=SEQLEN, **lora_params)
+  model = FlatTransformer(**model_params, max_context=SEQLEN, base_quantize=base_quantize, **lora_params)
   params = get_parameters(model)
 
   if FAKEDATA:

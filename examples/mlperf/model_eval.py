@@ -259,6 +259,7 @@ def eval_llama2_70b_lora():
   DATASET_PATH = Path(getenv("DATASET_PATH", "./dataset"))
   MODEL_PATH = getenv("MODEL_PATH", "")
   ADAPTER_CKPT = getenv("ADAPTER_CKPT", getenv("LORA_CKPT", ""))
+  BASE_QUANTIZE = getenv("LLAMA_BASE_QUANTIZE", "") or None
 
   benchmark = llama_benchmark_config("llama2_70b_lora")
   lora_rank = getenv("LLAMA_LORA_RANK", benchmark["lora_rank"])
@@ -267,7 +268,8 @@ def eval_llama2_70b_lora():
   model_params = dict(benchmark["model_params"])
   if MP > 1: model_params["vocab_size"] = round_up(model_params["vocab_size"], 256 * MP)
 
-  model = FlatTransformer(**model_params, max_context=SEQLEN, lora_rank=lora_rank, lora_alpha=lora_alpha, lora_dropout=lora_dropout)
+  model = FlatTransformer(**model_params, max_context=SEQLEN, lora_rank=lora_rank, lora_alpha=lora_alpha,
+                          lora_dropout=lora_dropout, base_quantize=BASE_QUANTIZE)
   device = tuple(f"{Device.DEFAULT}:{i}" for i in range(MP))
   if MP > 1: model.shard(device, mp=True)
   if MODEL_PATH:

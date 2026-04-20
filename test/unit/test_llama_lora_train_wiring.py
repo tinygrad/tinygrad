@@ -75,6 +75,14 @@ class TestLlamaLoRATrainWiring(unittest.TestCase):
     self.assertSetEqual(trainable_names, {"wqkv_lora_a", "wqkv_lora_b", "wo_lora_a", "wo_lora_b"})
     self.assertSetEqual({name for name, tensor in get_state_dict(model).items() if tensor.requires_grad}, trainable_names)
 
+  def test_adapter_only_trainables_with_int8_base(self):
+    model = FlatTransformer(**self.params, lora_rank=8, lora_alpha=16, lora_dropout=0.0, base_quantize="int8")
+    trainable_params, trainable_names = _llama_configure_trainable_params(model, adapter_only=True)
+
+    self.assertEqual(len(trainable_params), 4)
+    self.assertSetEqual(trainable_names, {"wqkv_lora_a", "wqkv_lora_b", "wo_lora_a", "wo_lora_b"})
+    self.assertSetEqual({name for name, tensor in get_state_dict(model).items() if tensor.requires_grad}, trainable_names)
+
   def test_load_model_checkpoint_with_model_prefix(self):
     base = FlatTransformer(**self.params)
     lora = FlatTransformer(**self.params, lora_rank=8, lora_alpha=16, lora_dropout=0.0)
@@ -181,6 +189,60 @@ class TestLlamaLoRATrainWiring(unittest.TestCase):
       self.assertTrue(any(k.startswith("scheduler.") for k in trainer_ckpt))
       self.assertSetEqual({k for k in trainer_ckpt if k.startswith("model.")},
                           {"model.wqkv_lora_a", "model.wqkv_lora_b", "model.wo_lora_a", "model.wo_lora_b"})
+
+  def test_llama2_70b_lora_training_writes_adapter_only_checkpoints_with_int8_base(self):
+    tiny_params = dict(dim=128, hidden_dim=256, n_heads=4, n_kv_heads=2, n_layers=2, norm_eps=1e-5, vocab_size=1024, rope_theta=10000)
+    spec = llama_benchmark_config("llama2_70b_lora")
+    spec = {**spec, "model_params": tiny_params, "real_vocab_size": tiny_params["vocab_size"], "lora_rank": 4, "lora_alpha": 8, "lora_dropout": 0.0}
+
+    with tempfile.TemporaryDirectory(prefix="llama2-lora-train-int8-") as tmpdir:
+      tmpdir = Path(tmpdir)
+      dataset_dir = tmpdir / "dataset"
+      dataset_dir.mkdir()
+      (dataset_dir / "train.jsonl").write_text("".join(json.dumps(row) + "\n" for row in [
+        {"input_ids": [1, 2, 3, 4, 5], "labels": [1, 2, 3, 4, 5]},
+        {"input_ids": [6, 7, 8, 9, 10], "labels": [6, 7, 8, 9, 10]},
+      ]))
+      (dataset_dir / "validation.jsonl").write_text(json.dumps({"input_ids": [1, 2, 3, 4, 5], "labels": [-1, -1, 3, 4, -1]}) + "\n")
+
+      base_model = Transformer(**tiny_params, disable_kv_cache=True)
+      base_path = tmpdir / "base.safetensors"
+      safe_save(split_attention_state(base_model), base_path.as_posix())
+
+      env = {
+        "BS": "1",
+        "CKPT": "1",
+        "DATASET_PATH": dataset_dir.as_posix(),
+        "END_LR": "0.0",
+        "EVAL_BS": "1",
+        "EVAL_FREQ": "1",
+        "EVAL_TARGET": "0.0",
+        "GRADIENT_ACC_STEPS": "1",
+        "LLAMA_BASE_QUANTIZE": "int8",
+        "LLAMA_LORA_ALPHA": "8",
+        "LLAMA_LORA_DROPOUT": "0",
+        "LLAMA_LORA_RANK": "4",
+        "LR": "1e-3",
+        "MAX_STEPS": "1",
+        "MODEL_PATH": base_path.as_posix(),
+        "SEQLEN": "5",
+        "WARMUP_STEPS": "0",
+      }
+      original_config = llama_benchmark_config
+      with patch.dict(os.environ, env, clear=False), patch("examples.mlperf.llama.llama_benchmark_config",
+           side_effect=lambda model_name, small=False: spec if model_name == "llama2_70b_lora" else original_config(model_name, small=small)):
+        cwd = os.getcwd()
+        os.chdir(tmpdir)
+        try:
+          train_llama2_70b_lora()
+        finally:
+          os.chdir(cwd)
+
+      model_ckpt = safe_load(tmpdir / "ckpts" / "llama2_70b_lora_1.safe")
+      trainer_ckpt = safe_load(tmpdir / "ckpts" / "llama2_70b_lora_1_state.safe")
+      self.assertSetEqual(set(model_ckpt.keys()), {"wqkv_lora_a", "wqkv_lora_b", "wo_lora_a", "wo_lora_b"})
+      self.assertNotIn("model.wqkv", trainer_ckpt)
+      self.assertIn("rng.seed", trainer_ckpt)
 
   def test_adapter_only_training_checkpoint_restores_rng_state(self):
     from examples.mlperf.lr_schedulers import CosineAnnealingLRWithWarmup

@@ -24,6 +24,7 @@ FP8 = getenv("FP8", 0)
 FP8_DTYPE = dtypes.fp8e4m3
 FP8_GRAD_DTYPE = dtypes.fp8e5m2
 FP8_MAX = 448.0
+LLAMA_BASE_QUANT_CHOICES = {None, "int8"}
 
 # per-device abs max without allreduce (matches TE delayed scaling behavior)
 @functools.cache
@@ -58,6 +59,18 @@ def matmul(x:Tensor, w:Tensor, fp8=FP8, amax_x:Tensor|None=None, amax_w:Tensor|N
     if can_use_asm_gemm(x_fp8, w_fp8.T): return asm_gemm(x_fp8, w_fp8.T, combined_scale=combined_scale), x_new_amax, w_new_amax, x_fp8, w_fp8
   return x_fp8.dot(w_fp8.T, dtype=dtypes.float) * combined_scale, x_new_amax, w_new_amax, x_fp8, w_fp8
 
+def _int8_rowwise_quantize(w:Tensor, scale_dtype=dtypes.float16) -> tuple[Tensor, Tensor]:
+  w = w.cast(scale_dtype)
+  scale = w.abs().max(axis=-1) / 127.0 + 1e-8
+  return (w / scale.unsqueeze(-1)).round().cast(dtypes.int8), scale
+
+def _base_matmul(x:Tensor, w:Tensor, fp8=FP8, amax_x:Tensor|None=None, amax_w:Tensor|None=None,
+                 w_scale:Tensor|None=None) -> tuple[Tensor, ...]:
+  if w_scale is not None:
+    if fp8: raise NotImplementedError("fp8 kernels with quantized llama base weights are not supported")
+    return (x.dot(w.cast(w_scale.dtype).T * w_scale),)
+  return matmul(x, w, fp8=fp8, amax_x=amax_x, amax_w=amax_w)
+
 def _rmsnorm_fwd(x_in:Tensor, eps:float) -> tuple[Tensor, Tensor]:
   x = x_in.float()
   rrms = (x.square().mean(-1, keepdim=True) + eps).rsqrt()
@@ -80,7 +93,8 @@ def rmsnorm(x_in:Tensor, eps:float) -> tuple[Tensor, Tensor]:
 
 class FlatTransformer:
   def __init__(self, dim:int, hidden_dim:int, n_heads:int, n_layers:int, norm_eps:float, vocab_size:int, n_kv_heads:int|None=None,
-               rope_theta:int=10000, max_context:int=1024, lora_rank:int=0, lora_alpha:float=1.0, lora_dropout:float=0.0):
+               rope_theta:int=10000, max_context:int=1024, lora_rank:int=0, lora_alpha:float=1.0, lora_dropout:float=0.0,
+               base_quantize:str|None=None):
     self.vocab_size = vocab_size
     self.n_layers = n_layers
     self.n_heads = n_heads
@@ -90,12 +104,20 @@ class FlatTransformer:
     self.lora_rank = lora_rank
     self.lora_alpha = lora_alpha
     self.lora_dropout = lora_dropout
+    self.base_quantize = base_quantize.lower() if base_quantize else None
+    if self.base_quantize not in LLAMA_BASE_QUANT_CHOICES:
+      raise ValueError(f"unsupported llama base quantization {base_quantize!r}")
+    if FP8 and self.base_quantize is not None:
+      raise ValueError("fp8 kernels with quantized llama base weights are not supported")
 
     scaled_std = 0.02 / math.sqrt(2 * n_layers)
 
     # Attention
     self.wqkv = self.lin_per_layer(dim, self.n_heads * self.head_dim + self.n_kv_heads * self.head_dim * 2)
     self.wo = self.lin_per_layer(self.n_heads * self.head_dim, dim, std=scaled_std)
+    if self.base_quantize == "int8":
+      self.wqkv_scale = Tensor.ones(self.n_layers, self.wqkv.shape[1], dtype=dtypes.float16)
+      self.wo_scale = Tensor.ones(self.n_layers, self.wo.shape[1], dtype=dtypes.float16)
     if self.lora_rank:
       self.wqkv_lora_a = Tensor.kaiming_uniform(self.n_layers, self.lora_rank, dim, a=math.sqrt(5))
       self.wqkv_lora_b = Tensor.zeros(self.n_layers, self.n_heads * self.head_dim + self.n_kv_heads * self.head_dim * 2, self.lora_rank)
@@ -106,6 +128,10 @@ class FlatTransformer:
     self.w1 = self.lin_per_layer(dim, hidden_dim)
     self.w2 = self.lin_per_layer(hidden_dim, dim, std=scaled_std)
     self.w3 = self.lin_per_layer(dim, hidden_dim)
+    if self.base_quantize == "int8":
+      self.w1_scale = Tensor.ones(self.n_layers, self.w1.shape[1], dtype=dtypes.float16)
+      self.w2_scale = Tensor.ones(self.n_layers, self.w2.shape[1], dtype=dtypes.float16)
+      self.w3_scale = Tensor.ones(self.n_layers, self.w3.shape[1], dtype=dtypes.float16)
 
     self.norm_eps = norm_eps
     self.attention_norm = Tensor.ones(n_layers, dim).contiguous()
@@ -127,6 +153,7 @@ class FlatTransformer:
       self._fp8_amax["wout"] = [_amax()]
 
   def lin_per_layer(self, in_features:int, out_features:int, std:float=0.02):
+    if self.base_quantize == "int8": return Tensor.zeros(self.n_layers, out_features, in_features, dtype=dtypes.int8)
     if getenv("ZEROS"): return Tensor.zeros(self.n_layers, out_features, in_features)
     return Tensor.normal(self.n_layers, out_features, in_features, mean=0.0, std=std)
 
@@ -138,6 +165,7 @@ class FlatTransformer:
 
   def attention(self, x:Tensor, freqs_cis:Tensor, attention_norm:Tensor, wqkv:Tensor, wo:Tensor,
                 amax_xqkv=None, amax_wqkv=None, amax_xo=None, amax_wo=None,
+                wqkv_scale:Tensor|None=None, wo_scale:Tensor|None=None,
                 wqkv_lora_a:Tensor|None=None, wqkv_lora_b:Tensor|None=None, wo_lora_a:Tensor|None=None, wo_lora_b:Tensor|None=None):
     bsz, seqlen, _ = x.shape
     new_amaxs, saves = [], []
@@ -146,7 +174,7 @@ class FlatTransformer:
     saves.extend([x, rrms])
     x = x * attention_norm
 
-    xqkv, *ret = matmul(x, wqkv, amax_x=amax_xqkv, amax_w=amax_wqkv)
+    xqkv, *ret = _base_matmul(x, wqkv, amax_x=amax_xqkv, amax_w=amax_wqkv, w_scale=wqkv_scale)
     if (qkv_lora:=self.lora(x, wqkv_lora_a, wqkv_lora_b)) is not None: xqkv = xqkv + qkv_lora
     new_amaxs.extend(ret[:2])
     saves.extend(ret[2:] + [xqkv])
@@ -166,27 +194,28 @@ class FlatTransformer:
       attn = xq.scaled_dot_product_attention(xk, xv, is_causal=True, enable_gqa=True)
     attn = attn.transpose(1, 2).reshape(bsz, seqlen, -1)
 
-    out, *ret = matmul(attn, wo, amax_x=amax_xo, amax_w=amax_wo)
+    out, *ret = _base_matmul(attn, wo, amax_x=amax_xo, amax_w=amax_wo, w_scale=wo_scale)
     if (o_lora:=self.lora(attn, wo_lora_a, wo_lora_b)) is not None: out = out + o_lora
     new_amaxs.extend(ret[:2])
     saves.extend(ret[2:] + [out])
     return (out, *new_amaxs, *saves)
 
   def feed_forward(self, x:Tensor, ffn_norm:Tensor, w1:Tensor, w2:Tensor, w3:Tensor,
-                   amax_x1=None, amax_w1=None, amax_x2=None, amax_w2=None, amax_x3=None, amax_w3=None):
+                   amax_x1=None, amax_w1=None, amax_x2=None, amax_w2=None, amax_x3=None, amax_w3=None,
+                   w1_scale:Tensor|None=None, w2_scale:Tensor|None=None, w3_scale:Tensor|None=None):
     new_amaxs, saves = [], []
 
     x, rrms = rmsnorm(x, self.norm_eps)
     saves.extend([x, rrms])
     x = x * ffn_norm
 
-    x_w1, *ret = matmul(x, w1, amax_x=amax_x1, amax_w=amax_w1)
+    x_w1, *ret = _base_matmul(x, w1, amax_x=amax_x1, amax_w=amax_w1, w_scale=w1_scale)
     new_amaxs.extend(ret[:2])
     saves.extend(ret[2:] + [x_w1])
-    x_w3, *ret = matmul(x.contiguous_backward(), w3, amax_x=amax_x3, amax_w=amax_w3)
+    x_w3, *ret = _base_matmul(x.contiguous_backward(), w3, amax_x=amax_x3, amax_w=amax_w3, w_scale=w3_scale)
     new_amaxs.extend(ret[:2])
     saves.extend(ret[2:] + [x_w3])
-    out, *ret = matmul(x_w1.silu() * x_w3, w2, amax_x=amax_x2, amax_w=amax_w2)
+    out, *ret = _base_matmul(x_w1.silu() * x_w3, w2, amax_x=amax_x2, amax_w=amax_w2, w_scale=w2_scale)
     new_amaxs.extend(ret[:2])
     saves.extend(ret[2:] + [out])
     return (out, *new_amaxs, *saves)
@@ -197,14 +226,17 @@ class FlatTransformer:
                 ffn_norm:Tensor, w1:Tensor, w2:Tensor, w3:Tensor,
                 amax_xqkv=None, amax_wqkv=None, amax_xo=None, amax_wo=None,
                 amax_x1=None, amax_w1=None, amax_x2=None, amax_w2=None, amax_x3=None, amax_w3=None,
+                wqkv_scale:Tensor|None=None, wo_scale:Tensor|None=None, w1_scale:Tensor|None=None, w2_scale:Tensor|None=None, w3_scale:Tensor|None=None,
                 wqkv_lora_a:Tensor|None=None, wqkv_lora_b:Tensor|None=None, wo_lora_a:Tensor|None=None, wo_lora_b:Tensor|None=None):
     attn, *attn_ret = self.attention(x, freqs_cis, attention_norm, wqkv, wo,
                                      amax_xqkv=amax_xqkv, amax_wqkv=amax_wqkv, amax_xo=amax_xo, amax_wo=amax_wo,
+                                     wqkv_scale=wqkv_scale, wo_scale=wo_scale,
                                      wqkv_lora_a=wqkv_lora_a, wqkv_lora_b=wqkv_lora_b, wo_lora_a=wo_lora_a, wo_lora_b=wo_lora_b)
     attn_amaxs, attn_saves = attn_ret[:4], attn_ret[4:]
     h = x + attn
     ffn, *ffn_ret = self.feed_forward(h, ffn_norm, w1, w2, w3,
-                                      amax_x1=amax_x1, amax_w1=amax_w1, amax_x2=amax_x2, amax_w2=amax_w2, amax_x3=amax_x3, amax_w3=amax_w3)
+                                      amax_x1=amax_x1, amax_w1=amax_w1, amax_x2=amax_x2, amax_w2=amax_w2, amax_x3=amax_x3, amax_w3=amax_w3,
+                                      w1_scale=w1_scale, w2_scale=w2_scale, w3_scale=w3_scale)
     ffn_amaxs, ffn_saves = ffn_ret[:6], ffn_ret[6:]
     h = h + ffn
     return (h, *attn_amaxs, *ffn_amaxs, *attn_saves, *ffn_saves)
@@ -217,6 +249,9 @@ class FlatTransformer:
       # flat per-layer weights: axis 0 is n_layers, so shard axes are +1 vs per-layer Transformer
       self.wqkv.shard_(device, axis=1).realize()          # (n_layers, out, dim) shard out
       self.wo.shard_(device, axis=2).realize()             # (n_layers, dim, in) shard in
+      if self.base_quantize == "int8":
+        self.wqkv_scale.shard_(device, axis=1).realize()
+        self.wo_scale.shard_(device, axis=None).realize()
       if self.lora_rank:
         self.wqkv_lora_a.shard_(device, axis=None).realize()
         self.wqkv_lora_b.shard_(device, axis=1).realize()
@@ -225,6 +260,10 @@ class FlatTransformer:
       self.w1.shard_(device, axis=1).realize()             # (n_layers, hidden, dim) shard out
       self.w2.shard_(device, axis=2).realize()             # (n_layers, dim, hidden) shard in
       self.w3.shard_(device, axis=1).realize()             # (n_layers, hidden, dim) shard out
+      if self.base_quantize == "int8":
+        self.w1_scale.shard_(device, axis=1).realize()
+        self.w2_scale.shard_(device, axis=None).realize()
+        self.w3_scale.shard_(device, axis=1).realize()
       self.attention_norm.shard_(device, axis=None).realize()
       self.ffn_norm.shard_(device, axis=None).realize()
       self.norm.weight.shard_(device, axis=None).realize()
@@ -280,11 +319,19 @@ class FlatTransformer:
         dim=0,
       )
 
-    self.wqkv.assign(Tensor.stack(*[get_qkv(i) for i in range(self.n_layers)], dim=0).cast(self.wqkv.dtype))
-    self.wo.assign(Tensor.stack(*[get_tensor(f"layers.{i}.attention.wo.weight") for i in range(self.n_layers)], dim=0).cast(self.wo.dtype))
-    self.w1.assign(Tensor.stack(*[get_tensor(f"layers.{i}.feed_forward.w1.weight") for i in range(self.n_layers)], dim=0).cast(self.w1.dtype))
-    self.w2.assign(Tensor.stack(*[get_tensor(f"layers.{i}.feed_forward.w2.weight") for i in range(self.n_layers)], dim=0).cast(self.w2.dtype))
-    self.w3.assign(Tensor.stack(*[get_tensor(f"layers.{i}.feed_forward.w3.weight") for i in range(self.n_layers)], dim=0).cast(self.w3.dtype))
+    def assign_linear(dst:Tensor, src:Tensor, scale:Tensor|None=None) -> None:
+      if scale is None:
+        dst.assign(src.cast(dst.dtype))
+      else:
+        quantized, scales = _int8_rowwise_quantize(src)
+        dst.assign(quantized)
+        scale.assign(scales.cast(scale.dtype))
+
+    assign_linear(self.wqkv, Tensor.stack(*[get_qkv(i) for i in range(self.n_layers)], dim=0), getattr(self, "wqkv_scale", None))
+    assign_linear(self.wo, Tensor.stack(*[get_tensor(f"layers.{i}.attention.wo.weight") for i in range(self.n_layers)], dim=0), getattr(self, "wo_scale", None))
+    assign_linear(self.w1, Tensor.stack(*[get_tensor(f"layers.{i}.feed_forward.w1.weight") for i in range(self.n_layers)], dim=0), getattr(self, "w1_scale", None))
+    assign_linear(self.w2, Tensor.stack(*[get_tensor(f"layers.{i}.feed_forward.w2.weight") for i in range(self.n_layers)], dim=0), getattr(self, "w2_scale", None))
+    assign_linear(self.w3, Tensor.stack(*[get_tensor(f"layers.{i}.feed_forward.w3.weight") for i in range(self.n_layers)], dim=0), getattr(self, "w3_scale", None))
     self.attention_norm.assign(Tensor.stack(
       *[get_tensor(f"layers.{i}.attention_norm.weight") for i in range(self.n_layers)], dim=0,
     ).cast(self.attention_norm.dtype))
@@ -319,12 +366,14 @@ class FlatTransformer:
                     "amax_x1": a["x1"][i], "amax_w1": a["w1"][i],
                     "amax_x2": a["x2"][i], "amax_w2": a["w2"][i],
                     "amax_x3": a["x3"][i], "amax_w3": a["w3"][i]} if a else {}
+      quant_layer = {"wqkv_scale": self.wqkv_scale[i], "wo_scale": self.wo_scale[i],
+                     "w1_scale": self.w1_scale[i], "w2_scale": self.w2_scale[i], "w3_scale": self.w3_scale[i]} if self.base_quantize == "int8" else {}
       lora_layer = {"wqkv_lora_a": self.wqkv_lora_a[i], "wqkv_lora_b": self.wqkv_lora_b[i],
                     "wo_lora_a": self.wo_lora_a[i], "wo_lora_b": self.wo_lora_b[i]} if self.lora_rank else {}
       h, *ret = self.run_layer(h, freqs_cis,
                                self.attention_norm[i], self.wqkv[i], self.wo[i],
                                self.ffn_norm[i], self.w1[i], self.w2[i], self.w3[i],
-                               **amax_layer, **lora_layer)
+                               **amax_layer, **quant_layer, **lora_layer)
       if a:
         amaxs = ret[:10]
         amax_names = ["xqkv", "wqkv", "xo", "wo", "x1", "w1", "x3", "w3", "x2", "w2"]

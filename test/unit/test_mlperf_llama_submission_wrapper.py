@@ -194,6 +194,7 @@ class TestMLPerfLlamaSubmissionWrapper(unittest.TestCase):
         (
           '    "phase MODEL_PATH=${MODEL_PATH-} FAKEDATA=${FAKEDATA-} '
           'INITMLPERF=${INITMLPERF-} RUNMLPERF=${RUNMLPERF-} '
+          'LLAMA_BASE_QUANTIZE=${LLAMA_BASE_QUANTIZE-} '
           'LLAMA_LAYERS=${LLAMA_LAYERS-} DATASET_PATH=${DATASET_PATH-}" \\'
         ),
         '    "controls TRAIN=${TRAIN-} CKPT=${CKPT-} FP8=${FP8-}" \\',
@@ -228,6 +229,7 @@ class TestMLPerfLlamaSubmissionWrapper(unittest.TestCase):
         "HK_FLASH_ATTENTION": "0",
         "JITBEAM": "1",
         "CKPT": "1",
+        "LLAMA_BASE_QUANTIZE": "int8",
         "LOGMLPERF": "0",
         "MODEL_PATH": "/tmp/llama2",
         "OFFLOAD_OPTIM": "0",
@@ -242,7 +244,7 @@ class TestMLPerfLlamaSubmissionWrapper(unittest.TestCase):
       self.assertEqual(len(phases), 8)
       self.assertEqual(
         phases[0],
-        "phase MODEL_PATH= FAKEDATA=1 INITMLPERF=1 RUNMLPERF= LLAMA_LAYERS=2 DATASET_PATH=",
+        "phase MODEL_PATH= FAKEDATA=1 INITMLPERF=1 RUNMLPERF= LLAMA_BASE_QUANTIZE= LLAMA_LAYERS=2 DATASET_PATH=",
       )
       self.assertEqual(
         phases[1],
@@ -260,7 +262,7 @@ class TestMLPerfLlamaSubmissionWrapper(unittest.TestCase):
       )
       self.assertEqual(
         phases[4],
-        "phase MODEL_PATH=/tmp/llama2 FAKEDATA= INITMLPERF= RUNMLPERF=1 LLAMA_LAYERS= DATASET_PATH=/tmp/govreport",
+        "phase MODEL_PATH=/tmp/llama2 FAKEDATA= INITMLPERF= RUNMLPERF=1 LLAMA_BASE_QUANTIZE= LLAMA_LAYERS= DATASET_PATH=/tmp/govreport",
       )
       self.assertEqual(
         phases[5],

@@ -183,6 +183,28 @@ class TestFlatLlama(unittest.TestCase):
     flat_logits = flat(tokens).realize()
     np.testing.assert_allclose(flat_logits.numpy(), ref_logits.numpy(), atol=1e-2, rtol=1e-2)
 
+  def test_load_from_pretrained_safetensors_int8_base(self):
+    Tensor.manual_seed(42)
+    params = dict(dim=128, hidden_dim=256, n_heads=4, n_kv_heads=2, n_layers=2, norm_eps=1e-5, vocab_size=1024, rope_theta=10000, max_context=64)
+    ref = Transformer(**params, disable_kv_cache=True)
+    flat = FlatTransformer(**params, base_quantize="int8")
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+      fn = os.path.join(tmpdir, "model.safetensors")
+      safe_save(split_attention_state(ref), fn)
+      flat.load_from_pretrained(fn)
+
+    self.assertEqual(flat.wqkv.dtype, dtypes.int8)
+    self.assertEqual(flat.wo.dtype, dtypes.int8)
+    self.assertEqual(flat.w1.dtype, dtypes.int8)
+    self.assertEqual(flat.w2.dtype, dtypes.int8)
+    self.assertEqual(flat.w3.dtype, dtypes.int8)
+
+    tokens = Tensor([[1, 50, 100, 999, 2]])
+    ref_logits = ref(tokens, 0, temperature=float("nan")).realize()
+    flat_logits = flat(tokens).realize()
+    np.testing.assert_allclose(flat_logits.numpy(), ref_logits.numpy(), atol=3e-1, rtol=2e-1)
+
   @unittest.skipUnless(Device.DEFAULT == "CPU", "multi-device CPU test")
   def test_forward_match_mp(self):
     Tensor.manual_seed(42)
