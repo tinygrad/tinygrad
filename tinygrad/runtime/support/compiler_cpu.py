@@ -94,10 +94,11 @@ class CPULLVMCompiler(LLVMCompiler):
   def __init__(self, arch, cache_key=None):
     self.arch, cpu, feats = (sp:=arch.split(',', 2)) + [""] * (3 - len(sp))
     assert self.arch and cpu, f"invalid arch string: {arch!r}, expected '<arch>,<cpu>,[<feats>]' (eg. 'x86_64,znver2')"
+    feats = ','.join(f if f.startswith('-') else '+'+f for f in feats.split(',') if f)
     if cpu == "native":
       cpu = ctypes.string_at(llvm.LLVMGetHostCPUName()).decode()
       feats = (feats + "," if feats else "") + ctypes.string_at(llvm.LLVMGetHostCPUFeatures()).decode()
     # +reserve-x18 here does the same thing as -ffixed-x18 in ClangJITCompiler, see comments there for why it's needed on arm osx
-    super().__init__(self.arch, cpu, ('+reserve-x18,' if OSX else '') + feats, cache_key)
+    super().__init__(self.arch, cpu, ('+reserve-x18,' if self.arch == "arm64" else '') + feats, cache_key)
 
   def disassemble(self, lib:bytes): capstone_flatdump(lib, self.arch)
