@@ -58,4 +58,4 @@ note: SQTT has additional overhead, to enable it, set VIZ=2.
 
 * get bank conflicts:
 * web: click "gemm PMC"
-* cli: python -m tinygrad.viz.cli -p -s "kernel PMC" | rg -A 16 SQC_LDS_BANK_CONFLICT
+* cli: python -m tinygrad.viz.cli -p -s "gemm PMC" | rg -A 16 SQC_LDS_BANK_CONFLICT
