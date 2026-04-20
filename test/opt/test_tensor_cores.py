@@ -202,7 +202,7 @@ class TestTensorCores(unittest.TestCase):
         assert u.src[-1].src[0].op != Ops.STORE
 
   @Context(AMX=1)
-  @unittest.skipUnless(Device.DEFAULT == "CPU", "AMX is only on CPU")
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.tensor_cores and Device.DEFAULT == "CPU", "AMX is only on CPU")
   def test_amax(self):
     helper_tc_ensure_uops_and_opts_count(16, 16, 2, dtypes.float, dtypes.float, ensure_triggered=True)
 
