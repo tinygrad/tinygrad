@@ -68,8 +68,8 @@ def main(args) -> None:
         if m.get("uop"): print(fmt(m["uop"]))
         if m.get("diff"):
           loc = pathlib.Path(m["upat"][0][0])
-          print(f"Rewrite at {loc.parent.name}/{loc.name}:{m['upat'][0][1]}\n{m['upat'][1]}")
-          for line in m["diff"]: print(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None))
+          print(fmt(f"Rewrite at {loc.parent.name}/{loc.name}:{m['upat'][0][1]}\n{m['upat'][1]}"))
+          for line in m["diff"]: print(fmt(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None)))
     if data.get("src") is not None: print(fmt(data["src"]))
 
   # ** Graph rewrites printer
@@ -118,7 +118,8 @@ def main(args) -> None:
         phase, delay = "EXEC", int(e.st) - dispatch_st
       if inst and phase: info = f"{phase:<8} {inst}"
       unit = e.device.replace(" ", "-")
-      print(f"{int(e.st)-inst_st:<12} {unit:<20} {op_str}{' '*(22-ansilen(op_str))} {int(unwrap(e.en)-e.st):<4} {str(delay or ''):<4} {info}")
+      row = {"clk":int(e.st)-inst_st, "unit":unit, "op":op_name, "dur":int(unwrap(e.en)-e.st), "delay":delay or "", "info":info}
+      print(fmt(row, lambda _: f"{row['clk']:<12} {unit:<20} {op_str}{' '*(22-ansilen(op_str))} {row['dur']:<4} {str(row['delay']):<4} {info}"))
 
   # ** PMC printer
   elif "PMC" in args.src:
@@ -133,16 +134,17 @@ def main(args) -> None:
     pmc_data = [[x for x in cols], *[[str(x) for x in r] for r in rows]]
     widths = [max(len(r[i]) for r in pmc_data) for i in range(len(cols))]
     def pad(r): return "| "+" | ".join(x+" "*(w-len(x)) for x,w in zip(r, widths))+" |"
-    print(pad(pmc_data[0])+"\n"+pad(["-"*w for w in widths])+"\n"+("\n".join([pad(row) for row in pmc_data[1:]])))
+    print(fmt({"cols":cols, "rows":rows}, lambda _: pad(pmc_data[0])+"\n"+pad(["-"*w for w in widths])+"\n"+("\n".join([pad(row) for row in pmc_data[1:]]))))
 
   # ** Memory printer
   elif data is not None and data["event_type"] == 1:
-    print(f"Peak: {data['peak']}"+"\n"+f"{'TS':<10}  {'Event':<6}  {'Key':>8}  Info")
+    print(fmt({"peak":data["peak"], "cols":["ts", "event", "key", "info"]},
+              lambda _: f"Peak: {data['peak']}"+"\n"+f"{'TS':<10}  {'Event':<6}  {'Key':>8}  Info"))
     for e in data["events"]:
-      info = str(e.get("arg", {}))
+      info = str(arg:=e.pop("arg", {}))
       if e["event"] == "free":
-        info = ', '.join([f"{fmt_colored(kernel)} {['read','write','write+read'][mode]}@data{num}" for _,kernel,num,mode in e["arg"]["users"]])
-      print(f"{e['ts']:<10}  {e['event']:<6}  {e.get('key', ''):>8}  {info}")
+        info = ', '.join([f"{fmt_colored(kernel)} {['read','write','write+read'][mode]}@data{num}" for _,kernel,num,mode in arg["users"]])
+      print(fmt({**e, "info":info}, lambda _: f"{e['ts']:<10}  {e['event']:<6}  {e.get('key', ''):>8}  {info}"))
 
   # ** Profiler printer
   else:
