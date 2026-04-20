@@ -4,7 +4,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, colored, JIT, JIT_BATCH_SIZE, dedup, pluralize, VIZ
 from tinygrad.device import Buffer, Compiled, Device, MultiBuffer
 from tinygrad.dtype import DType, dtypes
-from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Variable, sym_infer, Ops, buffers, track_rewrites, graph_rewrite
+from tinygrad.uop.ops import UOp, PatternMatcher, Variable, sym_infer, Ops, buffers, track_rewrites, graph_rewrite
 from tinygrad.engine.realize import ExecItem, capturing, CompiledRunner, Runner, Estimates, pm_beam, run_linear, get_runner, graph_cache
 from tinygrad.schedule.memory import memory_plan_rewrite, _collect_bufs
 from tinygrad.schedule import linear_to_schedule
@@ -108,8 +108,6 @@ def _check_no_non_tensor_return(ret):
   raise JitError(f"JIT return contains non-Tensor value of type {type(ret).__name__}")
 
 def graph_class(dev): return dev.graph.func if isinstance(dev.graph, functools.partial) else dev.graph
-
-pm_params = PatternMatcher([(UPat(Ops.PARAM, src=(UPat(), UPat(Ops.DEVICE)), name="p"), lambda ctx,p: ctx[p.arg])])
 
 def get_input_replace(jit_cache: list[ExecItem], input_buffers:list[Buffer]) -> dict[tuple[int, int], int]:
   input_replace: dict[tuple[int, int], int] = {}
@@ -231,9 +229,9 @@ class CapturedJit(Generic[ReturnType]):
     return out
 
   def __call__(self, input_uops:list[UOp], var_vals:dict[str, int]) -> ReturnType:
-    concrete = [_copy_input(u) if u in self._written_uops else u for u in input_uops]
+    concrete = tuple(_copy_input(u) if u in self._written_uops else u for u in input_uops)
     if DEBUG >= 1 and len(self.linear.src) >= 10: print(f"jit execs {len(self.linear.src)} calls")
-    run_linear(graph_rewrite(self.linear, pm_params, ctx=concrete, walk=True, enter_calls=False), var_vals)
+    run_linear(self.linear, var_vals, input_uops=concrete)
     return self.ret
 
   def free_intermediates(self):
