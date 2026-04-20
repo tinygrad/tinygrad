@@ -35,12 +35,21 @@ MOCKGPU = DEV.interface.startswith("MOCK")
 class TestNaNEdgeCases(unittest.TestCase):
   # we don't need more of these. it's unclear if torch's behavior is desired here
 
-  @unittest.expectedFailure
   def test_max_nan(self):
     # Reductions with NaN should propagate NaN like PyTorch.
     arr = [1.0, float('nan'), 3.0]
     torch_out = torch.tensor(arr).max().item()
     out = Tensor(arr).max().numpy()
+    if np.isnan(torch_out):
+      self.assertTrue(np.isnan(out))
+    else:
+      np.testing.assert_equal(out, torch_out)
+
+  def test_min_nan(self):
+    # Reductions with NaN should propagate NaN like PyTorch.
+    arr = [1.0, float('nan'), 3.0]
+    torch_out = torch.tensor(arr).min().item()
+    out = Tensor(arr).min().numpy()
     if np.isnan(torch_out):
       self.assertTrue(np.isnan(out))
     else:

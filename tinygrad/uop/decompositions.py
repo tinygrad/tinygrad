@@ -444,8 +444,16 @@ def get_late_rewrite_patterns(ops:tuple[Ops, ...], disable_fast_idiv:bool) -> Pa
   pat: list[tuple[UPat, Callable]] = []
   # no real hardware supports THREEFRY, but NullRenderer does
   if Ops.THREEFRY not in ops: pat.append((UPat(Ops.THREEFRY, dtype=dtypes.uint64, src=(UPat.var("x"), UPat.var("key"))), threefry2x32))
-  # MAX can be rewritten as CMPLT + WHERE (max function is annoying on many cstyle backends)
-  if Ops.MAX not in ops and Ops.CMPLT in ops: pat.append((UPat(Ops.MAX, name="m"), lambda m: (m.src[0] < m.src[1]).where(m.src[1], m.src[0])))
+  # MAX can be rewritten as CMPLT + WHERE (max function is annoying on many cstyle backends).
+  # For floats we *always* rewrite to a NaN-propagating form: bare CMPLT (and IEEE fmax / PTX max.f*)
+  # are NaN-suppressing, so reductions like Tensor([1, nan]).max() would silently drop the NaN.
+  def _max_to_cmplt(m: UOp) -> UOp:
+    a, b = m.src
+    base = (a < b).where(b, a)
+    if dtypes.is_float(m.dtype): return a.ne(a).where(a, b.ne(b).where(b, base))
+    return base
+  if Ops.CMPLT in ops and Ops.CMPNE in ops: pat.append((UPat(Ops.MAX, dtype=dtypes.floats, name="m"), _max_to_cmplt))
+  if Ops.MAX not in ops and Ops.CMPLT in ops: pat.append((UPat(Ops.MAX, name="m"), _max_to_cmplt))
   # rewrite MOD to AND (which should always be supported, but not for generic in tests): x % (2**y) -> x & (2**y-1)
   if Ops.AND in ops: pat += [(UPat.var("x", dtypes.ints)%UPat.cvar("c"), lambda x,c: x & (c.arg-1) if c.arg in powers_of_two else None)]
   if Ops.OR in ops: pat += [(UPat.var("x", dtypes.bool).logical_not()&UPat.var("y", dtypes.bool).logical_not(),

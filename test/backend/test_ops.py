@@ -489,6 +489,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(), ()], torch.maximum, Tensor.maximum)
     helper_test_op(None, torch.maximum, Tensor.maximum, vals=[[1., 0., 3., -4.], 3.])
     helper_test_op(None, torch.maximum, Tensor.maximum, vals=[[1., 0., 3., -4.], [-1., -2., 3., 0.]])
+    helper_test_op(None, torch.maximum, Tensor.maximum, vals=[[1., float("nan"), -4.], [float("nan"), 2., 0.]])
     helper_test_op(None, torch.maximum, Tensor.maximum,
                    vals=[[-1234, 0, 1234, dtypes.int.max, dtypes.int.min], dtypes.int.max], forward_only=True)
     helper_test_op(None, torch.maximum, Tensor.maximum,
@@ -506,6 +507,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(), ()], torch.minimum, Tensor.minimum)
     helper_test_op(None, torch.minimum, Tensor.minimum, vals=[[1., 0., 3., -4.], 3.])
     helper_test_op(None, torch.minimum, Tensor.minimum, vals=[[1., 0., 3., -4.], [-1., -2., 3., 0.]])
+    helper_test_op(None, torch.minimum, Tensor.minimum, vals=[[1., float("nan"), -4.], [float("nan"), 2., 0.]])
     helper_test_op(None, torch.minimum, Tensor.minimum,
                    vals=[[-1234, 0, 1234, dtypes.int.max, dtypes.int.min], dtypes.int.max], forward_only=True)
     helper_test_op(None, torch.minimum, Tensor.minimum,
