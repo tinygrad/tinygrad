@@ -32,9 +32,7 @@ def _tool_call(obj: str|dict) -> dict|None:
 # prompt the model with compact signatures, but keep the response format explicit
 def format_tools(tools: list|None) -> str:
   if not tools: return ""
-  return ("<tools>\n" +
-          "\n".join(_tool_sig(t) for t in tools) +
-          "\n</tools>\nReply only: " + TOOL_CALL_OPEN + '{"name":"...","arguments":{...}}')
+  return "<tools>\n" + "\n".join(_tool_sig(t) for t in tools) + "\n</tools>\nReply only: " + TOOL_CALL_OPEN + '{"name":"...","arguments":{...}}'
 
 # parse the last tool_call block
 def parse_tool_calls(text: str) -> list[dict]:
