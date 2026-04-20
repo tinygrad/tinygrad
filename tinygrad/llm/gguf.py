@@ -120,14 +120,15 @@ def ggml_data_to_tensor(t: Tensor, n: int, ggml_type: int) -> Tensor:
       return d * (bits * 2 - 1)
   raise ValueError(f"GGML type '{ggml_type}' is not supported!")
 
-def _read_unpack(fmt: str, n: int, r:io.BufferedReader): return struct.unpack(fmt, r.read(n))[0]
-def read_str(r:io.BufferedReader): return str(r.read(read_uint64(r)), "utf-8")
-def read_arr(r:io.BufferedReader):
+def _read_unpack(fmt: str, n: int, r:io.BufferedIOBase): return struct.unpack(fmt, r.read(n))[0]
+def read_str(r:io.BufferedIOBase): return str(r.read(read_uint64(r)), "utf-8")
+def read_arr(r:io.BufferedIOBase):
   item_reader, n = readers[read_int32(r)], read_uint64(r)
   return [item_reader(r) for _ in range(n)]
 
-readers: dict[int, Callable[[], Any]] = { 8: read_str, 9: read_arr, **{ t: functools.partial(_read_unpack, "<"+f, nb) for t,f,nb in \
-  [ (0,"c",1), (1,"b",1), (2,"H",2), (3,"h",2), (4,"I",4), (5,"i",4), (6,"f",4), (7,"?",1), (10,"Q",8), (11,"q",8), (12,"d",8) ] } }
+readers: dict[int, Callable[[io.BufferedIOBase], Any]] = { 8: read_str, 9: read_arr,
+  **{ t: functools.partial(_read_unpack, "<"+f, nb) for t,f,nb in \
+    [ (0,"c",1), (1,"b",1), (2,"H",2), (3,"h",2), (4,"I",4), (5,"i",4), (6,"f",4), (7,"?",1), (10,"Q",8), (11,"q",8), (12,"d",8) ] } }
 read_uint32, read_int32, read_uint64, read_int64 = readers[4], readers[5], readers[10], readers[11]
 
 @accept_filename
