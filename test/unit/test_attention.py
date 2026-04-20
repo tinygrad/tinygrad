@@ -187,9 +187,9 @@ class TestShortConvBlock(unittest.TestCase):
 
   def _make_block(self, config:TransformerConfig) -> ShortConvBlock:
     block = ShortConvBlock(config)
-    block.shortconv["in_proj"].weight = self._tensor_linspace(-0.2, 0.25, (3 * config.dim, config.dim))
-    block.shortconv["out_proj"].weight = self._tensor_linspace(-0.15, 0.2, (config.dim, config.dim))
-    block.shortconv["conv"]["weight"] = self._tensor_linspace(-0.1, 0.12, (config.dim, config.shortconv_kernel_size))
+    block.shortconv_in_proj.weight = self._tensor_linspace(-0.2, 0.25, (3 * config.dim, config.dim))
+    block.shortconv_out_proj.weight = self._tensor_linspace(-0.15, 0.2, (config.dim, config.dim))
+    block.shortconv_conv["weight"] = self._tensor_linspace(-0.1, 0.12, (config.dim, config.shortconv_kernel_size))
     return block
 
   def _linear_np(self, x:np.ndarray, weight:np.ndarray) -> np.ndarray:
@@ -198,18 +198,18 @@ class TestShortConvBlock(unittest.TestCase):
   def _naive_attention(self, block:ShortConvBlock, x:Tensor) -> np.ndarray:
     K = block.config.shortconv_kernel_size
     x_np = x.numpy().astype(np.float32)
-    proj = self._linear_np(x_np, block.shortconv["in_proj"].weight.numpy())
+    proj = self._linear_np(x_np, block.shortconv_in_proj.weight.numpy())
     conv_in, gate, value = np.split(proj, 3, axis=-1)
     conv_input = conv_in * value
     conv_out = np.zeros_like(conv_input)
-    kernel = block.shortconv["conv"]["weight"].numpy().astype(np.float32)
+    kernel = block.shortconv_conv["weight"].numpy().astype(np.float32)
 
     for t in range(x_np.shape[1]):
       for offset in range(K):
         src = t + offset - (K - 1)
         if src >= 0: conv_out[:, t, :] += conv_input[:, src, :] * kernel[:, offset]
 
-    return self._linear_np(conv_out * gate, block.shortconv["out_proj"].weight.numpy())
+    return self._linear_np(conv_out * gate, block.shortconv_out_proj.weight.numpy())
 
   def _run_attention(self, block:ShortConvBlock, x:Tensor, start_pos:int) -> np.ndarray:
     block._init_state(x)
