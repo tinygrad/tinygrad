@@ -319,7 +319,7 @@ pm_exec = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="graph", name="cf"),), name="call", allow_any_len=True), exec_graph),
 ])
 
-def run_linear(linear:UOp, var_vals:dict[str, int]|None=None, do_update_stats=True, input_uops:tuple[UOp, ...]=()):
+def run_linear(linear:UOp, var_vals:dict[str, int]|None=None, input_uops:tuple[UOp, ...]=(), do_update_stats=True, jit=False):
   if BEAM >= 1: linear = graph_rewrite(linear, pm_beam, ctx=BEAM.value, name="add beam")
-  ctx = ExecContext(var_vals or {}, input_uops, do_update_stats)
+  ctx = ExecContext(var_vals or {}, input_uops, do_update_stats, jit)
   for call in linear.src: pm_exec.rewrite(call, ctx)

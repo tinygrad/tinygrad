@@ -72,14 +72,7 @@ def _call_outs_ins(call:UOp) -> tuple[set[int], set[int]]:
   return set(), set()
 
 def _copy_input(u:UOp) -> UOp:
-  src = buffers[u]
-  size = src.bufs[0].size if isinstance(src, MultiBuffer) else src.size
-  new = UOp.new_buffer(u.device, size, u.dtype)
-  if isinstance(src, MultiBuffer):
-    mb = MultiBuffer.__new__(MultiBuffer)
-    mb.bufs = [Buffer(b.device, b.size, b.dtype).ensure_allocated().copyin(b.as_memoryview()) for b in src.bufs]
-    buffers[new] = mb
-  else: buffers[new] = Buffer(src.device, src.size, src.dtype).ensure_allocated().copyin(src.as_memoryview())
+  run_linear(UOp(Ops.LINEAR, src=(UOp(Ops.COPY).call(new:=UOp.new_buffer(u.device, u.arg, u.dtype), u, metadata=()),)))
   return new
 
 @track_rewrites(lambda linear,held_bufs,input_uops,ret=(): f"JIT {pluralize('call', len(linear.src))}")
@@ -231,13 +224,13 @@ class CapturedJit(Generic[ReturnType]):
   def __call__(self, input_uops:list[UOp], var_vals:dict[str, int]) -> ReturnType:
     concrete = tuple(_copy_input(u) if u in self._written_uops else u for u in input_uops)
     if DEBUG >= 1 and len(self.linear.src) >= 10: print(f"jit execs {len(self.linear.src)} calls")
-    run_linear(self.linear, var_vals, input_uops=concrete)
+    run_linear(self.linear, var_vals, input_uops=concrete, jit=True)
     return self.ret
 
   def free_intermediates(self):
-    # drop graph runners so their live view Buffers can be GC'd and their bases released
-    for u in self.linear.toposort():
-      if u.op is Ops.CUSTOM_FUNCTION and u.arg == "graph": graph_cache.pop(u, None)
+    # drop graph runners
+    for call in self.linear.src:
+      if call.src[0].op is Ops.CUSTOM_FUNCTION and call.src[0].arg == "graph": graph_cache.pop(call.src[0], None)
     bases: set[Buffer] = set()
     for u in self._written_uops:
       try: buf = u.buffer
