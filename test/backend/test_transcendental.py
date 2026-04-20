@@ -14,7 +14,7 @@ settings.load_profile("my_profile")
 
 class TestTranscendentalMath(unittest.TestCase):
   @unittest.skipUnless(is_dtype_supported(dtypes.float64), f"no float64 on {Device.DEFAULT}")
-  @unittest.skipIf(getenv("MOCKGPU") and Device.DEFAULT in {"NV", "CUDA"}, "crashed")
+  @unittest.skipIf(DEV.interface.startswith("MOCK") and Device.DEFAULT in {"NV", "CUDA"}, "crashed")
   @given(ht.float64, strat.sampled_from([(Tensor.exp, np.exp), (Tensor.log, np.log), (Tensor.sin, np.sin)]))
   def test_float64(self, x, op):
     if op[0] == Tensor.sin:
@@ -25,7 +25,7 @@ class TestTranscendentalMath(unittest.TestCase):
                                  op[1](np.array([x], dtype=_to_np_dtype(dtypes.float64))),
                                  atol=3e-2, rtol=1e-5)  # sin can have bigger atol for very big x
 
-  @unittest.skipIf(getenv("MOCKGPU") and Device.DEFAULT in {"NV", "CUDA"}, "crashed")
+  @unittest.skipIf(DEV.interface.startswith("MOCK") and Device.DEFAULT in {"NV", "CUDA"}, "crashed")
   @given(ht.float32, strat.sampled_from([(Tensor.exp, np.exp),(Tensor.log, np.log)] +
     ([(Tensor.sin, np.sin)] if is_dtype_supported(dtypes.ulong) else [])))
   def test_float32(self, x, op):
@@ -66,7 +66,7 @@ class TestFromFuzzer(unittest.TestCase):
     if not is_dtype_supported(dtype): return
     if dtype == dtypes.float64:
       # crashes in CI CUDA
-      if getenv("MOCKGPU") and Device.DEFAULT in {"NV", "CUDA"}: return
+      if DEV.interface.startswith("MOCK") and Device.DEFAULT in {"NV", "CUDA"}: return
     def _test_value(n: float, unit: float=1.0):
       next_float = np.nextafter(1.0, 2.0, dtype=_to_np_dtype(dtype))
       ulp = next_float - 1.0
@@ -88,7 +88,7 @@ class TestFromFuzzer(unittest.TestCase):
     if not is_dtype_supported(dtype): return
     if dtype == dtypes.float64:
       # crashes in CI CUDA
-      if getenv("MOCKGPU") and Device.DEFAULT in {"NV", "CUDA"}: return
+      if DEV.interface.startswith("MOCK") and Device.DEFAULT in {"NV", "CUDA"}: return
     def _test_value(n: float, unit: float=1.0):
       next_float = np.nextafter(1.0, 2.0, dtype=_to_np_dtype(dtype))
       ulp = next_float - 1.0

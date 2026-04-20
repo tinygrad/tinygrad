@@ -643,8 +643,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
-      DEV: AMD
-      MOCKGPU: 1
+      DEV: MOCKKFD+AMD
     steps:
       - name: Checkout Code
         uses: actions/checkout@v6
@@ -670,7 +669,7 @@ jobs:
       - name: Run AMD renderer tests
         run: python -m pytest -n=auto test/amd/ --durations 20
       - name: Run AMD renderer tests (AMD:LLVM)
-        run: DEV=AMD:LLVM python -m pytest -n=auto test/amd/ --durations 20
+        run: DEV=MOCKKFD+AMD:LLVM python -m pytest -n=auto test/amd/ --durations 20
       - name: Run SQTT profiling tests
         run: PROFILE=1 SQTT=1 python3 -m pytest -n=auto test/amd/test_sqtt_profiler.py
       - name: Run AMD emulated tests on NULL backend
@@ -679,20 +678,19 @@ jobs:
         run: |
           PYTHONPATH=. DEV=NULL::gfx1100 python extra/mmapeak/mmapeak.py
           PYTHONPATH=. DEV=NULL::gfx1201 python3 -m pytest -n=auto test/testextra/test_tk.py test/backend/test_asm_gemm.py
-      - name: Run matmul on MOCKGPU
+      - name: Run matmul on MOCKKFD
         run: |
-          PYTHONPATH="." DEV=AMD MOCKGPU=1 N=256 python3 extra/gemm/amd_asm_matmul.py
-          PYTHONPATH="." DEV=AMD MOCKGPU=1 N=256 python3 extra/gemm/amd_copy_matmul.py
+          PYTHONPATH="." DEV=MOCKKFD+AMD N=256 python3 extra/gemm/amd_asm_matmul.py
+          PYTHONPATH="." DEV=MOCKKFD+AMD N=256 python3 extra/gemm/amd_copy_matmul.py
       - name: Run LLVM test
-        run: DEV=AMD:LLVM python test/device/test_amd_llvm.py
+        run: DEV=MOCKKFD+AMD:LLVM python test/device/test_amd_llvm.py
 
   testmockam:
     name: Linux (am)
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
-      DEV: PCI+AMD
-      MOCKGPU: 1
+      DEV: MOCKPCI+AMD
     steps:
       - name: Checkout Code
         uses: actions/checkout@v6
@@ -704,13 +702,13 @@ jobs:
           amd: 'true'
       - name: Run test_tiny on MOCKAM
         run: python test/test_tiny.py
-      - name: Run test_tiny on MOCKAM USB
-        run: GMMU=0 DEV=USB+AMD python test/test_tiny.py
-      - name: Run test_hcq on MOCKAM
+      - name: Run test_tiny on MOCKUSB
+        run: GMMU=0 DEV=MOCKUSB+AMD python test/test_tiny.py
+      - name: Run test_hcq on MOCKPCI
         run: python -m pytest test/device/test_hcq.py
-      - name: Run disk copy tests on MOCKAM
+      - name: Run disk copy tests on MOCKPCI
         run: python -m pytest test/unit/test_disk_tensor.py -k test_copy_from_disk
-      - name: Run test_tiny on MOCKAM Remote
+      - name: Run test_tiny on MOCKPCI Remote
         run: |
           python extra/remote/serve.py 6667 &
           sleep 2
@@ -728,8 +726,7 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 15
     env:
-      DEV: AMD:${{ matrix.backend == 'amdllvm' && 'LLVM' || '' }}:${{ matrix.arch }}
-      MOCKGPU: 1
+      DEV: MOCKKFD+AMD:${{ matrix.backend == 'amdllvm' && 'LLVM' || '' }}:${{ matrix.arch }}
       SKIP_SLOW_TEST: 1
     steps:
       - name: Checkout Code
@@ -764,7 +761,6 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 20
     env:
-      MOCKGPU: 1
       FORWARD_ONLY: 1
     steps:
       - name: Checkout Code
@@ -777,7 +773,7 @@ jobs:
           cuda: 'true'
           ocelot: 'true'
       - name: Set env
-        run: printf "${{ matrix.backend == 'ptx' && 'DEV=CUDA:PTX' || matrix.backend == 'nv' && 'DEV=NV\nSKIP_SLOW_TEST=1' }}" >> $GITHUB_ENV
+        run: printf "${{ matrix.backend == 'ptx' && 'DEV=MOCK+CUDA:PTX' || matrix.backend == 'nv' && 'DEV=MOCKNVK+NV\nSKIP_SLOW_TEST=1' }}" >> $GITHUB_ENV
       - name: Check Device.DEFAULT and print some source
         run: |
           python3 -c "from tinygrad import Device; assert Device.DEFAULT in ['CUDA','NV'], Device.DEFAULT"
@@ -862,22 +858,19 @@ jobs:
       run: DEV=METAL TRANSCENDENTAL=2 python -m pytest -n=auto test/backend/test_ops.py::TestOps::test_sin test/backend/test_ops.py::TestOps::test_cos test/backend/test_ops.py::TestOps::test_tan test/backend/test_ops.py::TestOps::test_exp test/backend/test_ops.py::TestOps::test_log --durations=20
     - name: Run pytest (amd)
       env:
-        MOCKGPU: 1
-        DEV: AMD
+        DEV: MOCKKFD+AMD
         FORWARD_ONLY: 1
       run: |
         python3 -m pytest -n=auto test/device/test_hcq.py test/test_tiny.py --durations=20
     - name: Run pytest (amd with llvm backend)
       env:
-        MOCKGPU: 1
-        DEV: "AMD:LLVM"
+        DEV: "MOCKKFD+AMD:LLVM"
         FORWARD_ONLY: 1
       run: |
         python -m pytest -n=auto test/device/test_hcq.py test/test_tiny.py test/device/test_amd_llvm.py --durations=20
     - name: Run pytest (ptx)
       env:
-        MOCKGPU: 1
-        DEV: "NV:PTX"
+        DEV: "MOCKNVK+NV:PTX"
         FORWARD_ONLY: 1
         # TODO: failing due to library loading error
         CAPTURE_PROCESS_REPLAY: 0

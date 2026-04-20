@@ -2,7 +2,8 @@ from pathlib import Path
 from typing import List
 import json, argparse, random, time, os
 from extra.models.llama import Transformer, convert_from_huggingface, convert_from_gguf, fix_bf16
-from tinygrad.nn.state import safe_load, torch_load, load_state_dict, get_parameters, gguf_load
+from tinygrad.llm.gguf import gguf_load
+from tinygrad.nn.state import safe_load, torch_load, load_state_dict, get_parameters
 from tinygrad import Tensor, dtypes, nn, Context, Device, GlobalCounters
 from tinygrad.helpers import Profiling, Timing, DEBUG, colored, fetch, tqdm
 from extra.bench_log import BenchEvent, WallTimeEvent

@@ -394,9 +394,8 @@ class CUDARenderer(CStyleLanguage):
   def __init__(self, target:Target, use_nvcc=False):
     super().__init__(target)
     from tinygrad.runtime.support.compiler_cuda import NVRTCCompiler, NVCCCompiler
-    from tinygrad.runtime.support.hcq import MOCKGPU
-    dev, arch = target.device, target.arch
-    self.compiler = (NVCCCompiler if use_nvcc else NVRTCCompiler)(arch, ptx=bool(MOCKGPU) or dev == "CUDA", cache_key=dev.lower())
+    iface, dev, arch = target.interface, target.device, target.arch
+    self.compiler = (NVCCCompiler if use_nvcc else NVRTCCompiler)(arch, ptx=iface.startswith("MOCK") or dev == "CUDA", cache_key=dev.lower())
     self.tensor_cores = tc.get_cuda(arch)
 
   # language options
