@@ -1,17 +1,16 @@
 import json, unittest
 from tinygrad.llm.agent import TOOL_CALL_OPEN, format_tools, parse_tool_calls
 
-def tool(name, properties, required):
-  return {"function": {"name": name, "parameters": {"properties": properties, "required": required}}}
-
-BASH_TOOL = tool("bash", {"command": {"type": "string"}, "description": {"type": "string"}}, ["command", "description"])
-READ_TOOL = tool("read", {"filePath": {"type": "string"}}, ["filePath"])
+BASH_TOOL = {"function": {"name": "bash", "parameters": {
+  "properties": {"command": {"type": "string"}, "description": {"type": "string"}}, "required": ["command", "description"]}}}
+READ_TOOL = {"function": {"name": "read", "parameters": {
+  "properties": {"filePath": {"type": "string"}}, "required": ["filePath"]}}}
 
 class TestLLMAgent(unittest.TestCase):
   def test_format_tools_uses_compact_signatures(self):
     out = format_tools([BASH_TOOL, READ_TOOL])
     self.assertIn("<tools>", out)
-    self.assertIn("bash(command:string, description:string", out)
+    self.assertIn("bash(command:string, description:string[brief summary]", out)
     self.assertIn("read(filePath:string)", out)
     self.assertIn(TOOL_CALL_OPEN, out)
     self.assertIn("Include all required arguments.", out)
