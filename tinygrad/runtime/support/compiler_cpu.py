@@ -37,9 +37,9 @@ class LLVMCompiler(Compiler):
 
     triple = {'arm64': b'aarch64-none-unknown-elf', 'x86_64': b'x86_64-none-unknown-elf', 'AMDGPU': b'amdgcn-amd-amdhsa'}[arch]
     target = expect(llvm.LLVMGetTargetFromTriple(triple, ctypes.pointer(tgt:=llvm.LLVMTargetRef()), err:=cerr()), err, tgt)
+    if DEBUG >= 3: print(f"LLVM init for {processor!r} with {feats!r}")
     self.target_machine = llvm.LLVMCreateTargetMachine(target, triple, processor.encode(), feats.encode(),
                                                        llvm.LLVMCodeGenLevelDefault, llvm.LLVMRelocPIC, llvm.LLVMCodeModelDefault)
-    if DEBUG >= 3: print(f"LLVM init for {processor!r} with {ctypes.string_at(llvm.LLVMGetTargetMachineFeatureString(self.target_machine))!r}")
 
     self.pbo = llvm.LLVMCreatePassBuilderOptions()
     if (opt:=bool(getenv("LLVMOPT", "1"))):
@@ -88,9 +88,10 @@ class LLVMCompiler(Compiler):
 
 class CPULLVMCompiler(LLVMCompiler):
   def __init__(self, arch, cache_key=None):
-    try: self.arch, cpu = arch.split(',')
-    except Exception: raise RuntimeError(f"invalid arch {arch!r}, expected '<arch>,<cpu>' (ie. 'x86_64,znver2')")
+    self.arch, cpu, feats = (sp:=arch.split(',', 3)) + [""] * (3 - len(sp))
     # +reserve-x18 here does the same thing as -ffixed-x18 in ClangJITCompiler, see comments there for why it's needed on arm osx
-    cpu, feats = ctypes.string_at(llvm.LLVMGetHostCPUName()), (b'+reserve-x18,' if OSX else b'') + ctypes.string_at(llvm.LLVMGetHostCPUFeatures())
-    super().__init__(self.arch, cpu.decode(), feats.decode(), cache_key)
+    if cpu == "native":
+      cpu, feats = ctypes.string_at(llvm.LLVMGetHostCPUName()).decode(), feats + ctypes.string_at(llvm.LLVMGetHostCPUFeatures()).decode()
+    super().__init__(self.arch, cpu, ('+reserve-x18,' if OSX else '') + feats, cache_key)
+
   def disassemble(self, lib:bytes): capstone_flatdump(lib, self.arch)
