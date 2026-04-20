@@ -122,7 +122,7 @@ class NIRRenderer(Renderer):
 
   extra_matcher = PatternMatcher([
     # handle negative unsigned CONST
-    (UPat.cvar("x", dtypes.uints), lambda x: UOp(Ops.CONST, dtype=x.dtype, arg=x.dtype.max+x.arg+1) if x.arg < 0 else None),
+    (UPat.cvar("x", dtypes.uints), lambda x: UOp.const(x.dtype, x.dtype.max+x.arg+1) if x.arg < 0 else None),
     # from ptx
     (UPat.var('x', dtype=dtypes.bool)<UPat.var('y'), lambda x,y: (x^True)&y),
     # load/store bool -> uint8
