@@ -3,7 +3,7 @@ import time, pprint, random, itertools, math, contextlib, weakref
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import all_same, colored, DEBUG, GlobalCounters, ansilen, NOOPT, all_int, Metadata, TRACEMETA, TracingKey
 from tinygrad.helpers import BEAM, DEVECTORIZE, size_to_str, time_to_str, VALIDATE_WITH_CPU, cpu_profile, PROFILE, ProfilePointEvent, cpu_events
-from tinygrad.helpers import prod, unwrap, EMULATED_DTYPES, flatten, Timing
+from tinygrad.helpers import prod, unwrap, EMULATED_DTYPES, flatten
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer, buffers, graph_rewrite
 from tinygrad.device import Device, Buffer, MultiBuffer
 from tinygrad.renderer import ProgramSpec, Estimates
@@ -254,7 +254,7 @@ def unwrap_multi(call:UOp, resolved:list[UOp]) -> Iterator[tuple[list[Buffer], d
 
 def exec_view(ctx:ExecContext, call, ast):
   resolved = resolve_params(ctx, call)
-  bufs = [b.buffer for b in resolved]
+  bufs = [cast(Buffer, b.buffer) for b in resolved]
   bv = bufs[1].view(resolved[0].arg, ast.dtype, ast.arg[1]*bufs[1].dtype.itemsize)
   with track_stats(ctx, call, bv.device, colored(f"view {bv.nbytes:8d} @ {bv.offset:<10d}", "yellow"), Estimates(), [bv, bufs[1]], ctx.var_vals):
     buffers[resolved[0]] = bv
@@ -291,7 +291,7 @@ def exec_kernel(ctx:ExecContext, call, ast):
       for i in prg.p.outs: np.testing.assert_allclose(prg_bufs[i].numpy(), cpu_bufs[i].numpy(), rtol=1e-3, atol=1e-3)
 
 def exec_encdec(ctx:ExecContext, call, ast):
-  bufs = [b.buffer.ensure_allocated() for b in resolve_params(ctx, call)]
+  bufs = [cast(Buffer, b.buffer).ensure_allocated() for b in resolve_params(ctx, call)]
   shape, pos_var = tuple(s.arg for s in ast.src if s.op is Ops.CONST), ast.variables()[0].expr
   with track_stats(ctx, call, bufs[0].device, colored(f"enc/dec {size_to_str(bufs[0].nbytes)}", "yellow"),
                    Estimates(lds=bufs[0].nbytes, mem=bufs[0].nbytes), bufs, ctx.var_vals):
@@ -300,7 +300,7 @@ def exec_encdec(ctx:ExecContext, call, ast):
 graph_cache:weakref.WeakKeyDictionary[UOp, Runner] = weakref.WeakKeyDictionary()
 def exec_graph(ctx:ExecContext, call, cf):
   inputs = resolve_params(ctx, call)
-  bufs = flatten([b.bufs if b.__class__ is MultiBuffer else [b] for b in (u.buffer for u in inputs)])
+  bufs = flatten([b.bufs if b.__class__ is MultiBuffer else [cast(Buffer, b)] for b in (u.buffer for u in inputs)])
   if (runner:=graph_cache.get(cf)) is None:
     sub = cf.substitute(dict(zip(cf.src[1:], inputs)))
     graph_cache[cf] = runner = Device[cf.device if isinstance(cf.device, str) else cf.device[0]].graph(sub, bufs)
