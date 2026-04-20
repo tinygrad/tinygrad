@@ -1,6 +1,6 @@
 import ctypes, subprocess
 from tinygrad.device import Compiler
-from tinygrad.helpers import OSX, getenv, capstone_flatdump, DEBUG, unwrap
+from tinygrad.helpers import getenv, capstone_flatdump, DEBUG, unwrap
 from tinygrad.runtime.support.elf import jit_loader
 from tinygrad.runtime.autogen import llvm
 
