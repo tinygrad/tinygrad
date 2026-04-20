@@ -22,6 +22,8 @@ def _tool_call(obj: str|dict) -> dict|None:
     if isinstance(obj, dict) and 'name' in obj:
       args = obj.get('arguments', {})
       if isinstance(args, str): args = json.loads(args)
+      # bash tools need description to validate
+      if "description" not in args: args["description"] = ""
       return {'id': f'call_{uuid.uuid4().hex[:24]}', 'type': 'function', 'function': {'name': obj['name'], 'arguments': json.dumps(args)}}
   except (json.JSONDecodeError, TypeError): pass
   return None

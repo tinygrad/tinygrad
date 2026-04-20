@@ -22,7 +22,7 @@ class TestLLMAgent(unittest.TestCase):
     calls = parse_tool_calls(text)
     self.assertEqual(len(calls), 1)
     self.assertEqual(calls[0]["function"]["name"], "read")
-    self.assertEqual(json.loads(calls[0]["function"]["arguments"]), {"filePath": "x.py"})
+    self.assertEqual(json.loads(calls[0]["function"]["arguments"]), {"filePath": "x.py", "description": ""})
 
   def test_parse_tool_calls_recovers_trailing_open_tag(self):
     text = TOOL_CALL_OPEN + '{"name":"bash","arguments":{"command":"ls -la"}}'
@@ -30,12 +30,12 @@ class TestLLMAgent(unittest.TestCase):
     self.assertEqual(len(calls), 1)
     self.assertEqual(calls[0]["function"]["name"], "bash")
 
-  def test_parse_tool_calls_leaves_missing_description_unchanged(self):
+  def test_parse_tool_calls_fills_missing_description(self):
     text = TOOL_CALL_OPEN + '{"name":"bash","arguments":{"command":"ls -la"}}'
     calls = parse_tool_calls(text)
     args = json.loads(calls[0]["function"]["arguments"])
     self.assertEqual(args["command"], "ls -la")
-    self.assertNotIn("description", args)
+    self.assertEqual(args["description"], "")
 
   def test_parse_tool_calls_returns_empty_on_bad_json(self):
     text = TOOL_CALL_OPEN + '{"name":"bash","arguments":'
