@@ -404,7 +404,7 @@ class TestVizIntegration(unittest.TestCase):
 
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry
 from tinygrad.viz.serve import get_profile
-from extra.viz.cli import decode_profile
+from tinygrad.viz.cli import decode_profile
 
 def load_profile(lst:list[ProfileEvent]) -> dict: return decode_profile(get_profile(VizData(), lst))
 
