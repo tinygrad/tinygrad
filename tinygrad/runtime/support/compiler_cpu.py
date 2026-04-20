@@ -1,26 +1,27 @@
-import ctypes, platform, sys, subprocess
+import ctypes, subprocess
 from tinygrad.device import Compiler
 from tinygrad.helpers import OSX, getenv, capstone_flatdump, DEBUG, unwrap
 from tinygrad.runtime.support.elf import jit_loader
 from tinygrad.runtime.autogen import llvm
 
 class ClangJITCompiler(Compiler):
-  def __init__(self, cachekey="compile_clang_jit"): super().__init__(cachekey)
+  def __init__(self, arch, cachekey="compile_clang_jit"):
+    self.arch = arch
+    super().__init__(cachekey)
 
   def compile_to_obj(self, src:str) -> bytes:
     """Compile C source to ELF object file (before linking)."""
     # -fno-math-errno is required for __builtin_sqrt to become an instruction instead of a function call
     # x18 is a reserved platform register. It is clobbered on context switch in macos and is used to store TEB pointer in windows on arm, don't use it
-    target = 'x86_64' if sys.platform == 'win32' else platform.machine()
     # on arm march means "runs on this arch and superset" instead of "optimize for this arch". x86 march == arm mcpu
-    arch = {'x86_64': '-march=native', 'AMD64': '-march=native', 'riscv64': '-march=rv64g'}.get(platform.machine(), "-mcpu=native")
-    args = [arch, f'--target={target}-none-unknown-elf', '-O2', '-fPIC', '-ffreestanding', '-fno-math-errno', '-nostdlib', '-fno-ident']
-    arch_args = ['-ffixed-x18'] if target == 'arm64' else []
+    arch = {'x86_64': '-march=native', 'riscv64': '-march=rv64g'}.get(self.arch, "-mcpu=native")
+    args = [arch, f'--target={self.arch}-none-unknown-elf', '-O2', '-fPIC', '-ffreestanding', '-fno-math-errno', '-nostdlib', '-fno-ident']
+    arch_args = ['-ffixed-x18'] if self.arch == 'arm64' else []
     return subprocess.check_output([getenv("CC", 'clang'), '-c', '-x', 'c', *args, *arch_args, '-', '-o', '-'], input=src.encode('utf-8'))
 
   def compile(self, src:str) -> bytes: return jit_loader(self.compile_to_obj(src))
 
-  def disassemble(self, lib:bytes): return capstone_flatdump(lib)
+  def disassemble(self, lib:bytes): return capstone_flatdump(lib, self.arch)
 
 def cerr(): return ctypes.pointer(ctypes.pointer(ctypes.c_char()))
 
@@ -30,15 +31,16 @@ def expect(x, err, ret=None):
 
 class LLVMCompiler(Compiler):
   jit = True
-  target_arch = {'arm64': 'AArch64', 'aarch64': 'AArch64', 'x86_64': 'X86', 'AMD64': 'X86', 'riscv64': 'riscv64'}[platform.machine()]
-  def __init__(self, processor:str, feats:str, cache_key=None):
-    for component in ['Target', 'TargetInfo', 'TargetMC', 'AsmParser', 'AsmPrinter']: getattr(llvm, f'LLVMInitialize{self.target_arch}{component}')()
+  def __init__(self, arch:str, processor:str, feats:str, cache_key=None):
+    self.arch = arch
+    for component in ['Target', 'TargetInfo', 'TargetMC', 'AsmParser', 'AsmPrinter']:
+      getattr(llvm, f"LLVMInitialize{ {'arm64': 'AArch64', 'x86_64': 'X86', 'riscv64': 'riscv64'}[arch]}{component}")()
 
-    triple = {'AArch64': b'aarch64-none-unknown-elf', 'X86': b'x86_64-none-unknown-elf', 'AMDGPU': b'amdgcn-amd-amdhsa'}[self.target_arch]
+    triple = {'arm64': b'aarch64-none-unknown-elf', 'x86_64': b'x86_64-none-unknown-elf', 'AMDGPU': b'amdgcn-amd-amdhsa'}[arch]
     target = expect(llvm.LLVMGetTargetFromTriple(triple, ctypes.pointer(tgt:=llvm.LLVMTargetRef()), err:=cerr()), err, tgt)
-    if DEBUG >= 3: print(f"LLVM init for {processor!r} with {feats!r}")
     self.target_machine = llvm.LLVMCreateTargetMachine(target, triple, processor.encode(), feats.encode(),
                                                        llvm.LLVMCodeGenLevelDefault, llvm.LLVMRelocPIC, llvm.LLVMCodeModelDefault)
+    if DEBUG >= 3: print(f"LLVM init for {processor!r} with {ctypes.string_at(llvm.LLVMGetTargetMachineFeatureString(self.target_machine))!r}")
 
     self.pbo = llvm.LLVMCreatePassBuilderOptions()
     if (opt:=bool(getenv("LLVMOPT", "1"))):
@@ -84,10 +86,12 @@ class LLVMCompiler(Compiler):
 
   def compile(self, src:str) -> bytes: return jit_loader(self.compile_to_obj(src)) if self.jit else self.compile_to_obj(src)
 
-  def disassemble(self, lib:bytes): capstone_flatdump(lib)
+  def disassemble(self, lib:bytes): capstone_flatdump(lib, self.arch)
 
 class CPULLVMCompiler(LLVMCompiler):
-  def __init__(self, cache_key=None):
-    # +reserve-x18 here does the same thing as -ffixed-x18 in ops_cpu.py, see comments there for why it's needed on arm osx
+  def __init__(self, arch, cache_key=None):
+    try: arch, cpu = arch.split(',')
+    except Exception: raise RuntimeError(f"invalid arch {arch!r}, expected '<arch>,<cpu>' (ie. 'x86_64,znver2')")
+    # +reserve-x18 here does the same thing as -ffixed-x18 in ClangJITCompiler, see comments there for why it's needed on arm osx
     cpu, feats = ctypes.string_at(llvm.LLVMGetHostCPUName()), (b'+reserve-x18,' if OSX else b'') + ctypes.string_at(llvm.LLVMGetHostCPUFeatures())
-    super().__init__(cpu.decode(), feats.decode(), cache_key)
+    super().__init__(arch, cpu.decode(), feats.decode(), cache_key)

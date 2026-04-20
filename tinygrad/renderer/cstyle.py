@@ -280,7 +280,7 @@ class ClangJITRenderer(ClangRenderer):
   def __init__(self, target:Target):
     super().__init__(target)
     from tinygrad.runtime.support.compiler_cpu import ClangJITCompiler
-    self.compiler = ClangJITCompiler()
+    self.compiler = ClangJITCompiler(target.arch)
 
 class OpenCLRenderer(CStyleLanguage):
   has_aux = True
