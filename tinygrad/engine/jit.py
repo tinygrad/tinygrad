@@ -109,16 +109,12 @@ def get_input_replace(jit_cache: list[ExecItem], input_buffers:list[Buffer]) -> 
       if a in input_buffers: input_replace[(j,i)] = input_buffers.index(a)
   return input_replace
 
-def _jit_cache_bufs(jit_cache:list[ExecItem]):
-  for ei in jit_cache:
-    for b in ei.bufs:
-      if b is not None: yield b
-    if isinstance(ei.prg, GraphRunner): yield from _jit_cache_bufs(ei.prg.jit_cache)
-
 class GraphRunner(Runner):
   def __init__(self, linear:UOp, input_buffers:list[Buffer]):
     self.jit_cache = [ei.lower() for ei in linear_to_schedule(linear.src[0])]
-    for b in _jit_cache_bufs(self.jit_cache): b.ensure_allocated()
+    for ei in self.jit_cache:
+      for b in ei.bufs:
+        if b is not None: b.ensure_allocated()
     self.input_replace = get_input_replace(self.jit_cache, input_buffers) if input_buffers else {}
 
     self.var_vals_replace:dict[int, list[tuple[int, int]]] = {}
