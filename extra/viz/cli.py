@@ -134,7 +134,8 @@ def main(args) -> None:
     pmc_data = [[x for x in cols], *[[str(x) for x in r] for r in rows]]
     widths = [max(len(r[i]) for r in pmc_data) for i in range(len(cols))]
     def pad(r): return "| "+" | ".join(x+" "*(w-len(x)) for x,w in zip(r, widths))+" |"
-    print(fmt({"cols":cols, "rows":rows}, lambda _: pad(pmc_data[0])+"\n"+pad(["-"*w for w in widths])+"\n"+("\n".join([pad(row) for row in pmc_data[1:]]))))
+    table_str = pad(pmc_data[0])+"\n"+pad(["-"*w for w in widths])+"\n"+("\n".join([pad(row) for row in pmc_data[1:]]))
+    print(fmt({"cols":cols, "rows":rows}, lambda _: table_str))
 
   # ** Memory printer
   elif data is not None and data["event_type"] == 1:
