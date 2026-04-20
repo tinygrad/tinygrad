@@ -226,8 +226,10 @@ class ExecContext:
   do_update_stats: bool = True
   jit: bool = False
 
-def resolve_params(ctx:ExecContext, call:UOp) -> list[UOp]:
-  return [ctx.input_uops[b.arg] if b.op is Ops.PARAM else b for b in call.src[1:] if b.op is not Ops.BIND]
+def _resolve(b:UOp, inputs:tuple[UOp, ...]) -> UOp:
+  if b.op is Ops.BUFFER_VIEW and b.src[0].op is Ops.PARAM: return b.replace(src=(inputs[b.src[0].arg], *b.src[1:]))
+  return inputs[b.arg] if b.op is Ops.PARAM else b
+def resolve_params(ctx:ExecContext, call:UOp) -> list[UOp]: return [_resolve(b, ctx.input_uops) for b in call.src[1:] if b.op is not Ops.BIND]
 
 @contextlib.contextmanager
 def track_stats(ctx:ExecContext, call:UOp, device:str, display_name:str, estimates:Estimates, bufs:list[Buffer], var_vals:dict[str, int], *,
@@ -241,7 +243,7 @@ def track_stats(ctx:ExecContext, call:UOp, device:str, display_name:str, estimat
   if timing[0] is None and DEBUG >= 2:
     Device[device].synchronize()
     timing[0] = time.perf_counter() - st
-  update_stats(display_name, device, estimates, var_vals, timing[0], len(bufs), jit=False, metadata=call.arg.metadata, first_run=first_run)
+  update_stats(display_name, device, estimates, var_vals, timing[0], len(bufs), jit=ctx.jit, metadata=call.arg.metadata, first_run=first_run)
 
 def unwrap_multi(call:UOp, resolved:list[UOp]) -> Iterator[tuple[list[Buffer], dict[str, int]]]:
   bufs = [b.buffer for b in resolved]
@@ -253,9 +255,9 @@ def unwrap_multi(call:UOp, resolved:list[UOp]) -> Iterator[tuple[list[Buffer], d
 def exec_view(ctx:ExecContext, call, ast):
   resolved = resolve_params(ctx, call)
   bufs = [b.buffer for b in resolved]
-  bv = bufs[1].view(resolved[1].arg, ast.dtype, ast.arg[1]*bufs[1].dtype.itemsize)
+  bv = bufs[1].view(resolved[0].arg, ast.dtype, ast.arg[1]*bufs[1].dtype.itemsize)
   with track_stats(ctx, call, bv.device, colored(f"view {bv.nbytes:8d} @ {bv.offset:<10d}", "yellow"), Estimates(), [bv, bufs[1]], ctx.var_vals):
-    buffers[resolved[1]] = bv
+    buffers[resolved[0]] = bv
 
 def exec_copy(ctx:ExecContext, call, ast):
   for bufs, device_vars in unwrap_multi(call, resolve_params(ctx, call)):
@@ -266,7 +268,6 @@ def exec_copy(ctx:ExecContext, call, ast):
     with track_stats(ctx, call, dest.device, name, Estimates(lds=dest.nbytes, mem=dest.nbytes), [dest, src], {**ctx.var_vals, **device_vars}):
       prg.copy(dest, src)
 
-runner_cache:weakref.WeakKeyDictionary[UOp, Runner] = weakref.WeakKeyDictionary()
 def exec_kernel(ctx:ExecContext, call, ast):
   sink = ast.src[0] if ast.op is Ops.BEAM else ast
 
@@ -299,7 +300,7 @@ def exec_encdec(ctx:ExecContext, call, ast):
 graph_cache:weakref.WeakKeyDictionary[UOp, Runner] = weakref.WeakKeyDictionary()
 def exec_graph(ctx:ExecContext, call, cf):
   inputs = resolve_params(ctx, call)
-  bufs = flatten([b.bufs if isinstance(b, MultiBuffer) else [b] for b in (u.buffer for u in inputs)])
+  bufs = flatten([b.bufs if b.__class__ is MultiBuffer else [b] for b in (u.buffer for u in inputs)])
   if (runner:=graph_cache.get(cf)) is None:
     sub = cf.substitute(dict(zip(cf.src[1:], inputs)))
     graph_cache[cf] = runner = Device[cf.device if isinstance(cf.device, str) else cf.device[0]].graph(sub, bufs)
