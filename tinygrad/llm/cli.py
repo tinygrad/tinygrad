@@ -137,7 +137,7 @@ class Handler(HTTPRequestHandler):
     text = tok.decode(out) if tools else dec()
     # emit tool_calls instead of assistant text when the model chose a tool
     if tools and (calls:=parse_tool_calls(text)):
-      yield {"choices": [{"index":0, "delta":{"tool_calls":calls}, "finish_reason":None}], **tmpl}
+      yield {"choices": [{"index":0, "delta":{"tool_calls":[{"index":i, **tc} for i,tc in enumerate(calls)]}, "finish_reason":None}], **tmpl}
       finish_reason = "tool_calls"
     elif text:
       # drop the tool_call block before returning visible assistant text
