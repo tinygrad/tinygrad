@@ -35,5 +35,5 @@ def format_tools(tools: list|None) -> str:
           "\nInclude all required arguments.")
 
 # parse the last tool_call block
-def parse_tool_calls(text: str, tools: list|None=None) -> list[dict]:
+def parse_tool_calls(text: str) -> list[dict]:
   return [tc] if (i:=text.rfind(TOOL_CALL_OPEN)) != -1 and (tc:=_tool_call(text[i+len(TOOL_CALL_OPEN):])) is not None else []
