@@ -1719,13 +1719,12 @@ class Tensor(OpMixin):
     ```
     """
     if IMAGE: return self.image_conv2d(weight, bias, groups, stride, dilation, padding, dtype)
-    HW = weight.shape[2:]
-    if WINO and all(x == 3 for x in HW) and stride == 1 and dilation == 1: return self._conv2d_winograd(weight, bias, groups, padding, dtype)
+    if WINO and all(x == 3 for x in weight.shape[2:]) and stride == dilation == 1: return self._conv2d_winograd(weight, bias, groups, padding, dtype)
     return super().conv2d(weight, bias, groups, stride, dilation, padding, dtype)
 
   def dot(self, w:Tensor, dtype:DTypeLike|None=None) -> Tensor:
     if IMAGE: return self.image_dot(w, dtype)
-    return super().dot(w, dtype=dtype)
+    return super().dot(w, dtype)
 
   def cummax(self, axis:int=0) -> tuple[Tensor, Tensor]:
     """
