@@ -804,7 +804,7 @@ class Tensor(OpMixin):
       return Tensor.full(self.shape, fill_value, dtype=dtype or self.dtype, device=device).requires_grad_(requires_grad)
     if requires_grad:
       return Tensor.full(self.shape, fill_value, dtype=dtype or self.dtype, device=self.device).requires_grad_(requires_grad)
-    return self.const_like(fill_value) if dtype is None else self.const_like(fill_value).cast(dtype)
+    return super().full_like(fill_value, dtype)
 
   def rand_like(self, **kwargs) -> Tensor:
     """
