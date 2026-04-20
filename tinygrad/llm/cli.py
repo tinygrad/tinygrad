@@ -196,10 +196,7 @@ def main():
   print(f"using model \"{model_name}\" with {raw_model.nbytes():,} bytes and {sum(x.numel() for x in nn.state.get_parameters(model)):,} params")
   del raw_model
 
-  # TODO: why this is required to free the RAM of the GGUF copy?
-  import gc
-  gc.collect()
-
+  # get tokenizer
   tok = SimpleTokenizer.from_gguf_kv(kv)
 
   # warmup the JIT
