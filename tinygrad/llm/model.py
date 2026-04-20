@@ -292,40 +292,35 @@ class GatedDeltaNetBlock(FFNBlock):
       self.conv_state = Tensor.zeros(x.shape[0], self.ssm_conv_kernel-1, self.conv_channels, device=x.device).clone()
       self.recurrent_state = Tensor.zeros(x.shape[0], self.num_v_heads, self.head_v_dim, self.head_v_dim, device=x.device).clone()
 
-class ShortConvWeights:
-  def __init__(self, dim:int, kernel_size:int):
-    self.in_proj = nn.Linear(dim, 3 * dim, bias=False)
-    self.out_proj = nn.Linear(dim, dim, bias=False)
-    self.conv = {"weight": Tensor.zeros(dim, kernel_size)}
-
 class ShortConvBlock(FFNBlock):
   def __init__(self, config:TransformerConfig):
     super().__init__(config)
-    self.kernel_size = K = config.shortconv_kernel_size
-    assert K > 0
-    self.shortconv = ShortConvWeights(config.dim, K)
+    assert config.shortconv_kernel_size > 0
+    self.shortconv = {"in_proj":  nn.Linear(config.dim, 3 * config.dim, bias=False),
+                      "out_proj": nn.Linear(config.dim, config.dim, bias=False),
+                      "conv":     {"weight": Tensor.zeros(config.dim, config.shortconv_kernel_size)}}
 
   def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
-    T, K = x.shape[1], self.kernel_size
-    conv_in, gate, value = self.shortconv.in_proj(x).chunk(3, dim=-1)
-    # store new tokens past the K-1 leading pad, then depthwise-conv over the (history | new) window. GGUF taps are oldest->newest.
+    T, K = x.shape[1], self.config.shortconv_kernel_size
+    conv_in, gate, value = self.shortconv["in_proj"](x).chunk(3, dim=-1)
+    # GGUF taps are oldest->newest; cache has K-1 leading zeros so early tokens see zero history.
     stored = Tensor(self.cache_x.uop.after(self.cache_x[:, start_pos+K-1:start_pos+K-1+T, :].uop.store((conv_in*value).uop)))
-    w = self.shortconv.conv["weight"].unsqueeze(1)  # (D, 1, K)
+    w = self.shortconv["conv"]["weight"].unsqueeze(1)
     out = stored[:, start_pos:start_pos+K-1+T, :].transpose(1, 2).conv2d(w, groups=w.shape[0]).transpose(1, 2)
-    return self.shortconv.out_proj(out * gate)
+    return self.shortconv["out_proj"](out * gate)
 
   def _init_state(self, x:Tensor):
     if not hasattr(self, "cache_x"):
-      self.cache_x = Tensor.zeros(x.shape[0], self.config.max_context + self.kernel_size - 1, self.config.dim, device=x.device).clone()
+      K = self.config.shortconv_kernel_size
+      self.cache_x = Tensor.zeros(x.shape[0], self.config.max_context + K - 1, self.config.dim, device=x.device).clone()
 
 class Transformer:
   def __init__(self, config:TransformerConfig):
     dense_config = replace(config, num_experts=0, num_experts_per_tok=0, shared_expert_dim=0, hidden_dim=config.dense_hidden_dim or config.hidden_dim)
     if config.ssm: config = replace(config, qk_norm=config.head_dim)
     block_cls = MLATransformerBlock if config.kv_lora_rank > 0 else TransformerBlock
-    sc = set(config.shortconv_layers)
     self.blk:list[FFNBlock] = [GatedDeltaNetBlock(config, config.ssm) if config.ssm and (i+1) % config.full_attention_interval != 0 else
-                               (ShortConvBlock if i in sc else block_cls)(dense_config if i < config.leading_dense_blocks else config)
+                               (ShortConvBlock if i in config.shortconv_layers else block_cls)(dense_config if i < config.leading_dense_blocks else config)
                                for i in range(config.num_blocks)]
     self.token_embd  = nn.Embedding(config.vocab_size, config.dim)
     self.output_norm = nn.RMSNorm(config.dim, config.norm_eps)
