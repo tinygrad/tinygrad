@@ -2013,11 +2013,9 @@ class Tensor(OpMixin):
     dt = dtypes.int64 if sint_to_uop(num_classes).overflows(dtypes.int32) else dtypes.int32
     return self == Tensor.arange(num_classes, dtype=dt, device=self.device, requires_grad=False).reshape((num_classes,) + (1,) * offset)
 
-  def one_hot(self, num_classes:int=-1) -> Tensor:
+  def one_hot(self, num_classes:int) -> Tensor:
     """
     Converts `self` to a one-hot tensor.
-
-    `num_classes` defaults to -1, which means num_classes will be inferred as max(self) + 1.
 
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor([0, 1, 3, 3, 4])
@@ -2025,7 +2023,7 @@ class Tensor(OpMixin):
     ```
     """
     if not dtypes.is_int(self.dtype): raise RuntimeError(f"expect integer dtype, getting {self.dtype=}")
-    if num_classes == -1: num_classes = int(self.max().item())+1
+    if num_classes < 0: raise ValueError(f"num_classes must be non-negative, got {num_classes}")
     return self[..., None]._one_hot_along_dim(num_classes).where(1, 0)
 
   def scaled_dot_product_attention(self, key:Tensor, value:Tensor, attn_mask:Tensor|None=None, dropout_p:float=0.0,
