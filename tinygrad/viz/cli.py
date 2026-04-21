@@ -99,7 +99,7 @@ def main(args) -> None:
     pkt_idxs:dict[str, itertools.count] = {}
     dispatch_to_inst:dict[str, tuple[str, int]] = {}
     inst_st:int|None = None
-    for e in viz.sqtt_timeline(*data):
+    for e in viz.sqtt_timeline(*unwrap(data)):
       if isinstance(e, ProfilePointEvent) and e.key == 'pcMap': pc_map = e.arg
       if not isinstance(e, ProfileRangeEvent): continue
       if inst_st is None: inst_st = int(e.st)
@@ -123,35 +123,25 @@ def main(args) -> None:
 
   # ** PMC printer
   elif "PMC" in args.src:
-    pmc = viz.unpack_pmc(data)
-    cols = pmc["cols"]
-    rows:list = []
-    for r in pmc["rows"]:
-      if args.item is None: rows.append(r[:2])
-      elif args.item == r[0]:
-        rows = r[2]["rows"] if len(r) > 2 else [r[:2]]
-        cols = r[2]["cols"] if len(r) > 2 else cols
-    pmc_data = [[x for x in cols], *[[str(x) for x in r] for r in rows]]
-    widths = [max(len(r[i]) for r in pmc_data) for i in range(len(cols))]
-    def pad(r): return "| "+" | ".join(x+" "*(w-len(x)) for x,w in zip(r, widths))+" |"
-    table_str = pad(pmc_data[0])+"\n"+pad(["-"*w for w in widths])+"\n"+("\n".join([pad(row) for row in pmc_data[1:]]))
-    print(fmt({"cols":cols, "rows":rows}, lambda _: table_str))
+    pmc = viz.unpack_pmc(unwrap(data))
+    pmc_fmt:list[str] = []
+    for name,val,*detail in pmc["rows"]:
+      pmc_fmt += [f"{name} {val}"]+([" ".join(f"{k}={v}" for k,v in zip(detail[0]["cols"], r)) for r in detail[0]["rows"]] if detail else [])
+    print(fmt(pmc, lambda _: "\n".join(pmc_fmt)))
 
   # ** Memory printer
   elif data is not None and data["event_type"] == 1:
-    print(fmt({"peak":data["peak"], "cols":["ts", "event", "key", "info"]},
-              lambda _: f"Peak: {data['peak']}"+"\n"+f"{'TS':<10}  {'Event':<6}  {'Key':>8}  Info"))
+    print(fmt({"peak":data["peak"]}, lambda _: f"Peak: {data['peak']}"+"\n"+f"{'TS':<10}  {'Event':<6}  {'Key':>8}  Info"))
     for e in data["events"]:
       info = str(arg:=e.pop("arg", {}))
-      if e["event"] == "free":
-        info = ', '.join([f"{fmt_colored(kernel)} {['read','write','write+read'][mode]}@data{num}" for _,kernel,num,mode in arg["users"]])
+      if e["event"] == "free": info = ', '.join([f"{fmt_colored(k)} {['read','write','write+read'][m]}@data{n}" for _,k,n,m in arg["users"]])
       print(fmt({**e, "info":info}, lambda _: f"{e['ts']:<10}  {e['event']:<6}  {e.get('key', ''):>8}  {info}"))
 
   # ** Profiler printer
   else:
     timelines = [(n,l) for n,l in profile["layout"].items() if l.get("event_type") == 0]
     def produce_top_kernels() -> Iterator[dict]:
-      tagged = ((n,e) for n,l in timelines for e in l["events"]) if args.src == "ALL" else ((args.src,e) for e in data["events"])
+      tagged = ((n,e) for n,l in timelines for e in l["events"]) if args.src == "ALL" else ((args.src,e) for e in unwrap(data)["events"])
       agg:dict[tuple[str,str], tuple[float, int, int|None]] = {} # map (device, kernel name) to (total time, count and ref)
       total = 0
       for dev,e in tagged:
@@ -170,7 +160,7 @@ def main(args) -> None:
         yield {"name":"Other", "dur_ms":other_t, "count":other_c, "pct":other_t/total*100.0, "ref":None}
     def produce_all_kernels() -> Iterator[dict]:
       event_streams = [[(e["st"], n, e) for e in l["events"]] for n,l in timelines] if args.src == "ALL" \
-                      else [[(e["st"], args.src, e) for e in data["events"]]]
+                      else [[(e["st"], args.src, e) for e in unwrap(data)["events"]]]
       marker_stream = sorted([(m["ts"], "MARKER", m) for m in profile.get("markers", [])], key=lambda t:t[0])
       for ts,dev,e in heapq.merge(*event_streams, marker_stream, key=lambda t:t[0]):
         if dev == "MARKER":
@@ -206,7 +196,7 @@ def main(args) -> None:
       elif DEBUG >= 3 and k.get("ext"): print(fmt(k["ext"]))
 
 def get_arg_parser() -> argparse.ArgumentParser:
-  parser = argparse.ArgumentParser(add_help=False)
+  parser = argparse.ArgumentParser(add_help=False, prog="python -m tinygrad.viz.cli")
   g_mode = parser.add_argument_group("mode")
   g_mode.add_argument("-p", "--profile", action="store_true", help="View profile")
   g_mode.add_argument("-r", "--rewrites", action="store_true", help="View graph rewrites")
@@ -215,9 +205,9 @@ def get_arg_parser() -> argparse.ArgumentParser:
   g_opts.add_argument("-i", "--item", type=str, default=None, metavar="NAME", help="Select an item within the source (default: list all items)")
   g_opts.add_argument("-t", "--top", type=int, default=None, metavar="COUNT",
                       help="Number of top kernels to aggregate (default: do not aggregate, set -1 to aggregate all)")
-  g_opts.add_argument("--profile-path", type=pathlib.Path, metavar="PATH", help="Path to profile.pkl (optional file, default: latest profile)",
+  g_opts.add_argument("--profile-path", type=pathlib.Path, metavar="PATH", help="Optional path to profile.pkl (default: latest profile)",
                       default=pathlib.Path(temp("profile.pkl", append_user=True)))
-  g_opts.add_argument("--rewrites-path", type=pathlib.Path, metavar="PATH", help="Path to rewrites.pkl (optional file, default: latest rewrites)",
+  g_opts.add_argument("--rewrites-path", type=pathlib.Path, metavar="PATH", help="Optional path to rewrites.pkl (default: latest rewrites)",
                       default=pathlib.Path(temp("rewrites.pkl", append_user=True)))
   g_opts.add_argument("--jsonl", action="store_true", help="Emit profiler output as JSONL")
   g_opts.add_argument("-h", "--help", action="help", help="show this help message and exit")

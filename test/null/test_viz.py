@@ -404,7 +404,7 @@ class TestVizIntegration(unittest.TestCase):
 
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry
 from tinygrad.viz.serve import get_profile
-from extra.viz.cli import decode_profile
+from tinygrad.viz.cli import decode_profile
 
 def load_profile(lst:list[ProfileEvent]) -> dict: return decode_profile(get_profile(VizData(), lst))
 
@@ -887,7 +887,7 @@ class TestCfg(unittest.TestCase):
 
 # launch viz cli without subprocess
 def run_cli(*cli_args) -> str:
-  from extra.viz.cli import main, get_arg_parser
+  from tinygrad.viz.cli import main, get_arg_parser
   args = get_arg_parser().parse_args(cli_args)
   with contextlib.redirect_stdout(buf:=io.StringIO()):
     main(args)
