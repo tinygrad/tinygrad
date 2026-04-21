@@ -204,7 +204,7 @@ class CPULLVMRenderer(LLVMRenderer):
   def __init__(self, target:Target):
     super().__init__(target)
     from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler
-    self.compiler = CPULLVMCompiler()
+    self.compiler = CPULLVMCompiler(target.arch)
 
 barrier = 'fence syncscope("workgroup") release\ntail call void @llvm.amdgcn.s.barrier()\nfence syncscope("workgroup") acquire\n'
 code_for_workitem = {"g": lambda x: f"tail call i32 @llvm.amdgcn.workgroup.id.{chr(120+int(x))}()",

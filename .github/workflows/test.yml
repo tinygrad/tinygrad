@@ -1,7 +1,7 @@
 name: Unit Tests
 env:
   # increment this when downloads substantially change to avoid the internet
-  CACHE_VERSION: '18'
+  CACHE_VERSION: '19'
   CAPTURE_PROCESS_REPLAY: 1
   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   PYTHONPATH: ${{ github.workspace }}
@@ -945,8 +945,8 @@ jobs:
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
       - name: Run macOS-specific unit test
-        if: matrix.backend == 'cpu'
-        run: python3 -m pytest test/unit/test_disk_tensor.py::TestDiskTensor::test_copy_to_cpu_not_truncated
+        if: matrix.backend == 'llvm'
+        run: python3 -m pytest test/unit/test_disk_tensor.py::TestDiskTensor::test_copy_to_cpu_not_truncated test/unit/test_cpu.py
 
 # ****** Windows Tests ******
 
