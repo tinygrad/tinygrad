@@ -912,7 +912,7 @@ class PCIIface(PCIIfaceBase):
   def device_fini(self): self.dev_impl.fini()
 
 class USBIface(PCIIface):
-  count: 1 # TODO: support multiple usbgpus, see usb.py
+  count = 1 # TODO: support multiple usbgpus, see usb.py
 
   def __init__(self, dev, dev_id): # pylint: disable=super-init-not-called
     self.dev, self.pci_dev, self.vram_bar = dev, USBPCIDevice(dev.__class__.__name__[:2], f"usb:{dev_id}"), 0
