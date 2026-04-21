@@ -447,13 +447,13 @@ class TestDiskTensor(TempDirTestCase):
     # get the DiskDevice and check internal state
     disk_device = Device[f"DISK:{fn}"]
     assert isinstance(disk_device, DiskDevice)
-    assert disk_device.count == 1
+    assert disk_device.refcount == 1
     assert hasattr(disk_device, "mem")
     first_fd = disk_device.fd
     # create second tensor on same file - should reuse the device, not re-open
     t2 = Tensor.empty(64, device=f"disk:{fn}", dtype=dtypes.uint8)
     t2.to("CPU").realize()
-    assert disk_device.count == 2
+    assert disk_device.refcount == 2
     assert disk_device.fd == first_fd, "file descriptor changed - file was unnecessarily re-opened"
     # verify data is correct
     np.testing.assert_equal(t1.numpy(), np.arange(128, dtype=np.uint8))

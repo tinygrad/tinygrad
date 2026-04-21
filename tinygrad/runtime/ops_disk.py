@@ -14,12 +14,12 @@ class DiskDevice(Compiled):
 
     self.size: int|None = None
     self.fd: int|None = None
-    self.count = 0
+    self.refcount = 0
     super().__init__(device, DiskAllocator(self), [], None)
   def _might_open(self, size:int):
     assert self.size is None or size <= self.size, f"can't reopen Disk tensor with larger size, opened with {self.size}, tried to open with {size}"
     if self.size is not None and hasattr(self, "mem"):
-      self.count += 1
+      self.refcount += 1
       return
     filename = self.device[len("disk:"):]
 
@@ -35,10 +35,10 @@ class DiskDevice(Compiled):
     self.size = size
     if hasattr(self.mem, 'madvise') and (hp := getattr(mmap, "MADV_HUGEPAGE", None)) is not None:
       with contextlib.suppress(OSError): self.mem.madvise(hp) # some systems have transparent_hugepage disabled
-    self.count += 1
+    self.refcount += 1
   def _might_close(self):
-    self.count -= 1
-    if self.count == 0:
+    self.refcount -= 1
+    if self.refcount == 0:
       if self.fd is not None:
         os.close(self.fd)
       if hasattr(self, "mem"):
