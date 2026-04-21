@@ -299,8 +299,8 @@ class TestCustomKernel(unittest.TestCase):
     from tinygrad import function
     @function(precompile=True)
     def run(x:Tensor, w:Tensor) -> Tensor:
-      out = Tensor.invalid(*x.shape, dtype=x.dtype)
-      tmp = Tensor.invalid(*x.shape, dtype=x.dtype)
+      out = Tensor.invalids(*x.shape, dtype=x.dtype)
+      tmp = Tensor.invalids(*x.shape, dtype=x.dtype)
       out, tmp = Tensor.custom_kernel(out, tmp, x, w, fxn=custom_add_with_tmp)[:2]
       return out+tmp
 
