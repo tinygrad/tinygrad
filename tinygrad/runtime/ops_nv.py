@@ -369,6 +369,7 @@ class NVKIface:
   root = None
   fd_ctl: FileIOInterface
   fd_uvm: FileIOInterface
+  count: int
   gpus_info: list|ctypes.Array = []
 
   # TODO: Need a proper allocator for va addresses
@@ -396,7 +397,8 @@ class NVKIface:
       with contextlib.suppress(RuntimeError): self.uvm(nv_gpu.UVM_MM_INITIALIZE, nv_gpu.UVM_MM_INITIALIZE_PARAMS(uvmFd=self.fd_uvm.fd), self.fd_uvm_2)
 
       nv_iowr(NVKIface.fd_ctl, nv_gpu.NV_ESC_CARD_INFO, gpus_info:=(nv_gpu.nv_ioctl_card_info_t*64)())
-      NVKIface.gpus_info = hcq_filter_visible_devices(gpus_info, "NV")
+      NVKIface.gpus_info = hcq_filter_visible_devices([gi for gi in gpus_info if gi.valid], "NV")
+      NVKIface.count = len(NVKIface.gpus_info)
 
     self.dev, self.device_id = dev, device_id
     if self.device_id >= len(NVKIface.gpus_info) or not NVKIface.gpus_info[self.device_id].valid:
@@ -576,7 +578,7 @@ class PCIIface(PCIIfaceBase):
     for _ in self.dev_impl.gsp.stat_q.read_resp(): pass
     if self.dev_impl.is_err_state: raise RuntimeError("Device fault detected")
 
-class MOCKNVKIface(NVKIface): pass
+class MOCKNVKIface(NVKIface): count = 1
 
 class NVDevice(HCQCompiled[NVSignal]):
   def is_nvd(self) -> bool: return isinstance(self.iface, PCIIface)

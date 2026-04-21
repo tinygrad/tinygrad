@@ -676,8 +676,8 @@ jobs:
         env:
           AMD: 0
         run: |
-          PYTHONPATH=. DEV=NULL::gfx1100 python extra/mmapeak/mmapeak.py
-          PYTHONPATH=. DEV=NULL::gfx1201 python3 -m pytest -n=auto test/testextra/test_tk.py test/backend/test_asm_gemm.py
+          PYTHONPATH=. DEV=NULL:HIP:gfx1100 python extra/mmapeak/mmapeak.py
+          PYTHONPATH=. DEV=NULL:HIP:gfx950 python3 -m pytest -n=auto test/testextra/test_tk.py test/backend/test_asm_gemm.py
       - name: Run matmul on MOCKKFD
         run: |
           PYTHONPATH="." DEV=MOCKKFD+AMD N=256 python3 extra/gemm/amd_asm_matmul.py
