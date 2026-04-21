@@ -695,6 +695,7 @@ class KFDIface:
   kfd:FileIOInterface|None = None
   event_page:HCQBuffer|None = None
   gpus:list[FileIOInterface] = []
+  count:int = 0
 
   def _is_usable_gpu(self, gpu_id):
     with contextlib.suppress(OSError): return int(gpu_id.read()) != 0
@@ -710,6 +711,7 @@ class KFDIface:
       KFDIface.kfd = FileIOInterface("/dev/kfd", os.O_RDWR)
       gpus = [g for g in FileIOInterface(kfd_topo_path).listdir() if self._is_usable_gpu(FileIOInterface(f"{kfd_topo_path}/{g}/gpu_id"))]
       KFDIface.gpus = hcq_filter_visible_devices(sorted(gpus, key=lambda x: int(x.split('/')[-1])), "AMD")
+      KFDIface.count = len(KFDIface.gpus)
 
     if device_id >= len(KFDIface.gpus): raise RuntimeError(f"No device found for {device_id}. Requesting more devices than the system has?")
 
@@ -910,6 +912,8 @@ class PCIIface(PCIIfaceBase):
   def device_fini(self): self.dev_impl.fini()
 
 class USBIface(PCIIface):
+  count: 1 # TODO: support multiple usbgpus, see usb.py
+
   def __init__(self, dev, dev_id): # pylint: disable=super-init-not-called
     self.dev, self.pci_dev, self.vram_bar = dev, USBPCIDevice(dev.__class__.__name__[:2], f"usb:{dev_id}"), 0
     self.dev_impl = AMDev(self.pci_dev)

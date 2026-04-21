@@ -295,6 +295,12 @@ class Compiled:
     return select_first_inited(select_by_name(self.renderers, self._renderer_name, t.renderer, f"{self.device} has no renderer {t.renderer!r}"),
                                f"No renderer for {self.device} is available", self.cached_renderer, target=t)
 
+  def count(self) -> int:
+    """
+    Returns the number of physical accelerators available to the runtime.
+    """
+    return 1
+
   def synchronize(self):
     """
     Synchronize all pending operations on the device.
