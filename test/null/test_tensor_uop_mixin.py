@@ -153,6 +153,12 @@ class TestTensorUOpFull(unittest.TestCase):
     self.assertIs(_strip_unique(Tensor.ones(2, 3).uop), _strip_unique(UOp.ones(2, 3)))
   def test_invalids(self):
     self.assertIs(_strip_unique(Tensor.invalids(2, 3, dtype=dtypes.int8).uop), _strip_unique(UOp.invalids(2, 3, dtype=dtypes.int8)))
+  def test_arange(self):
+    self.assertIs(_strip_unique(Tensor.arange(5).uop), _strip_unique(UOp.arange(5)))
+  def test_arange_empty(self):
+    self.assertIs(_strip_unique(Tensor.arange(5, 5).uop), _strip_unique(UOp.arange(5, 5)))
+  def test_arange_step(self):
+    self.assertIs(_strip_unique(Tensor.arange(5, 10, 2).uop), _strip_unique(UOp.arange(5, 10, 2)))
 
 if __name__ == "__main__":
   unittest.main()
