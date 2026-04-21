@@ -1,6 +1,9 @@
 import math, unittest
 from tinygrad import Tensor, dtypes
-from tinygrad.uop.ops import UOp
+from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, graph_rewrite
+
+_strip_unique_pm = PatternMatcher([(UPat(Ops.CONST, src=(UPat(Ops.UNIQUE), UPat(Ops.DEVICE, name="d")), name="b"), lambda b,d: b.replace(src=(d,))),])
+def _strip_unique(u: UOp) -> UOp: return graph_rewrite(u, _strip_unique_pm)
 
 def _t(*shape):
   return Tensor.arange(math.prod(shape)).reshape(*shape)
@@ -132,6 +135,18 @@ class TestUOpEmpty(unittest.TestCase):
     # regression: direct UOp.empty with a singleton-tuple device + axis must not trip .multi()'s tuple assert
     u = UOp.empty((4,), dtype=dtypes.float32, device=("NULL:0",), axis=0)
     self.assertEqual((u.shape, u.device, u.axis), ((4,), "NULL", None))
+
+class TestTensorUOpFull(unittest.TestCase):
+  def test_full(self):
+    self.assertIs(_strip_unique(Tensor.full((2, 3), 42).uop), _strip_unique(UOp.full((2, 3), 42)))
+  def test_full_kwargs(self):
+    self.assertIs(_strip_unique(Tensor.full((2, 3), 42, dtype=dtypes.int8, device="NULL").uop),
+                  _strip_unique(UOp.full((2, 3), 42, dtype=dtypes.int8, device="NULL")))
+  def test_full_symbolic_fill(self):
+    # bound symbolic variable — flows through Tensor.__init__'s UOp branch, no UNIQUE added
+    t = Tensor.full((2, 3), UOp.variable("x", 1, 10).bind(5))
+    self.assertEqual(t.shape, (2, 3))
+    self.assertFalse(t.uop.op_in_backward_slice_with_self(Ops.UNIQUE))
 
 if __name__ == "__main__":
   unittest.main()
