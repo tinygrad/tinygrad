@@ -7,7 +7,7 @@ from tinygrad.helpers import prod, unwrap, EMULATED_DTYPES, flatten
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer, buffers, graph_rewrite
 from tinygrad.device import Device, Buffer, MultiBuffer
 from tinygrad.renderer import ProgramSpec, Estimates
-from tinygrad.codegen import get_program
+from tinygrad.codegen import get_program, to_program
 
 # **************** Stat ****************
 
@@ -308,6 +308,12 @@ def exec_graph(ctx:ExecContext, call, cf):
 pm_beam = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.SINK, name="sink"),), name="call", allow_any_len=True),
    lambda ctx,call,sink: call.replace(src=(sink.replace(arg=replace(sink.arg, beam=ctx)), *call.src[1:])) if sink.arg.beam == 0 else None),
+])
+
+pm_compile = PatternMatcher([
+  (UPat(Ops.CALL, src=(UPat((Ops.SINK, Ops.PROGRAM), name="ast"),), name="call", allow_any_len=True),
+   lambda call,ast: call.replace(src=(to_program(ast,
+     Device[call.device if isinstance(call.device, str) else call.device[0]].renderer), *call.src[1:]))),
 ])
 
 pm_exec = PatternMatcher([
