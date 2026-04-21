@@ -945,7 +945,7 @@ jobs:
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
       - name: Run macOS-specific unit test
-        if: matrix.backend == 'cpu'
+        if: matrix.backend == 'llvm'
         run: python3 -m pytest test/unit/test_disk_tensor.py::TestDiskTensor::test_copy_to_cpu_not_truncated test/unit/test_cpu.py
 
 # ****** Windows Tests ******
