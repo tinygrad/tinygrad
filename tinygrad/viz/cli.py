@@ -58,7 +58,7 @@ def get(data:dict, key:str):
 def main(args) -> None:
   viz.load_rewrites(viz_data:=viz.VizData(viz.load_pickle(args.rewrites_path, default=RewriteTrace([], [], {}))))
 
-  def fmt(val, to_str=str) -> str: return json.dumps(val if isinstance(val, dict) else {"value":val}) if args.jsonl else to_str(val)
+  def fmt(val, to_str=str) -> str: return json.dumps(val if isinstance(val, dict) else {"value":val}) if args.json else to_str(val)
 
   rewrites = {c["name"]:{s["name"]:s for s in c["steps"]} for c in viz_data.ctxs if c.get("steps")}
   def print_step(step:dict) -> None:
@@ -209,7 +209,7 @@ def get_arg_parser() -> argparse.ArgumentParser:
                       default=pathlib.Path(temp("profile.pkl", append_user=True)))
   g_opts.add_argument("--rewrites-path", type=pathlib.Path, metavar="PATH", help="Optional path to rewrites.pkl (default: latest rewrites)",
                       default=pathlib.Path(temp("rewrites.pkl", append_user=True)))
-  g_opts.add_argument("--jsonl", action="store_true", help="Emit profiler output as JSONL")
+  g_opts.add_argument("--json", action="store_true", help="Emit profiler output as JSON")
   g_opts.add_argument("-h", "--help", action="help", help="show this help message and exit")
   return parser
 
