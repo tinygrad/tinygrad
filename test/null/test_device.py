@@ -38,6 +38,14 @@ class TestDevice(unittest.TestCase):
     self.assertNotEqual(result.returncode, 0)
     self.assertIn(b"did you mean: 'USB'", result.stderr)
 
+  @unittest.skipIf(Device.DEFAULT != "AMD", "only run on AMD")
+  def test_dev_id_out_of_range(self):
+    result = subprocess.run(['python3', '-c', 'from tinygrad import Device; Device[Device.DEFAULT]'],
+                            env={**os.environ, "DEV":":99+AMD"}, capture_output=True)
+    self.assertNotEqual(result.returncode, 0)
+    self.assertIn(b"invalid visibility filter", result.stderr)
+    with self.assertRaisesRegex(RuntimeError, "AMD:99 does not exist"): Device["AMD:99"]
+
   def test_lowercase_canonicalizes(self):
     device = Device.DEFAULT
     with Context(DEV=device.lower()):
