@@ -1,7 +1,8 @@
 from typing import cast
 from dataclasses import replace
 import itertools, weakref
-from tinygrad.helpers import DISABLE_FAST_IDIV, DEVECTORIZE, TRANSCENDENTAL, SPEC, DEBUG, VIZ, IMAGE, NOOPT, EMULATED_DTYPES, TracingKey, Context, Target, panic
+from tinygrad.helpers import DISABLE_FAST_IDIV, DEVECTORIZE, TRANSCENDENTAL, SPEC, DEBUG, VIZ, IMAGE, NOOPT, EMULATED_DTYPES,
+from tinygrad.helpers import TracingKey, Context, Target, panic
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, pm_lower_index_dtype, Ops, UPat, track_rewrites, KernelInfo, pyrender
 from tinygrad.uop.spec import type_verify, program_spec, kernel_spec
 from tinygrad.renderer import Renderer, ProgramSpec, Estimates
@@ -149,7 +150,7 @@ pm_to_program = PatternMatcher([
 ])
 
 to_program_cache: weakref.WeakValueDictionary[tuple, UOp] = weakref.WeakValueDictionary()
-@track_rewrites(name=lambda ast,renderer,ret,**kwargs: TracingKey(ret.src[0].arg.name, (ret.src[0].arg.function_name, ast), ret=renderer), replay=True)
+@track_rewrites(name=lambda ast,renderer,ret,**kwargs: TracingKey(ret.src[0].arg.name,(ret.src[0].arg.function_name, ast), ret=renderer), replay=True)
 @Context(ALLOW_DEVICE_USAGE=0)
 def to_program(ast:UOp, renderer:Renderer) -> UOp:
   """Transform an AST (SINK or partial PROGRAM) into a fully compiled PROGRAM UOp. May trigger BEAM search."""
