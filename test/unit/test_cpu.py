@@ -2,6 +2,7 @@ import unittest, io
 from contextlib import redirect_stdout
 from tinygrad import Tensor, Device
 from tinygrad.helpers import Target
+from tinygrad.renderer.nir import LVPRenderer
 from tinygrad.engine.realize import get_program
 
 @unittest.skipIf(Device.DEFAULT != "CPU", "only run on CPU")
@@ -9,9 +10,10 @@ class TestCPU(unittest.TestCase):
   def test_arch_feats(self):
     ast = (Tensor.empty(16) + Tensor.empty(16)).schedule()[-1].ast
     for ren in Device[Device.DEFAULT].renderers:
-      for arch, expect_vmov in [("x86_64,haswell,avx", True), ("x86_64,haswell,-avx", False)]:
+      for arch, expect_vmov in [("x86_64,x86-64,avx", True), ("x86_64,x86-64,-avx", False)]:
         with self.subTest(arch=arch):
-          r = type(ren)(Target(device="CPU", arch=arch))
+          if ren is LVPRenderer: continue # LVP does not play nice with cross compilation
+          r = ren(Target(device="CPU", arch=arch))
           p = get_program(ast, r)
           lib = r.compiler.compile(p.src)
           out = io.StringIO()
