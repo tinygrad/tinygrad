@@ -744,6 +744,7 @@ def reloader():
     time.sleep(0.1)
 
 T = TypeVar("T")
+@Context(DEBUG=0)
 def load_pickle(path:pathlib.Path, default:T) -> T:
   if not path.exists(): return default
   with path.open("rb") as f: return pickle.load(f)
