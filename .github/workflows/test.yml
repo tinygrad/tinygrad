@@ -816,7 +816,7 @@ jobs:
         run: python -m pytest -n=auto test/backend --durations=20
       - name: Run CPU device tests
         if: matrix.backend != 'opencl'
-        run: python -m pytest test/device/test_cpu.py --durations=20
+        run: python -X faulthandler test/device/test_cpu.py --durations=20
       - name: Run TRANSCENDENTAL math
         run: TRANSCENDENTAL=2 python -m pytest -n=auto test/backend/test_ops.py::TestOps::test_sin test/backend/test_ops.py::TestOps::test_cos test/backend/test_ops.py::TestOps::test_tan test/backend/test_ops.py::TestOps::test_exp test/backend/test_ops.py::TestOps::test_log --durations=20
       - name: Run process replay tests
