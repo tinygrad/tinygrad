@@ -6,6 +6,7 @@ from tinygrad.device import Buffer, Compiled, Device, MultiBuffer
 from tinygrad.dtype import DType, dtypes
 from tinygrad.uop.ops import UOp, PatternMatcher, Variable, sym_infer, Ops, buffers, track_rewrites, graph_rewrite
 from tinygrad.engine.realize import ExecItem, capturing, CompiledRunner, Runner, Estimates, pm_beam, run_linear, get_runner, graph_cache
+from tinygrad.codegen import pm_compile_kernels
 from tinygrad.schedule.memory import memory_plan_rewrite, _collect_bufs
 from tinygrad.schedule import linear_to_schedule
 from tinygrad.nn.state import get_parameters
@@ -84,6 +85,7 @@ def jit_lower(linear:UOp, held_bufs:set[UOp], input_uops:list[UOp]) -> UOp:
   if (jitbeam:=getenv("JITBEAM", BEAM.value)) >= 1: linear = graph_rewrite(linear, pm_beam, ctx=jitbeam, walk=True)
 
   linear = memory_plan_rewrite(linear, held_bufs)
+  linear = graph_rewrite(linear, pm_compile_kernels, name="precompile kernels")
   if JIT < 2: linear = graph_split_rewrite(linear, max_batch_size=JIT_BATCH_SIZE.value)
   if VIZ: graph_rewrite(linear, PatternMatcher([]), name="View graphed linear")
   return linear
