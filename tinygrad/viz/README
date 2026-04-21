@@ -21,7 +21,7 @@ By default, VIZ UIs automatically load the latest files.
 user story: viewing profiling data
 * tinygrad ran 32 LLM decode steps:
 web: click "profiler", view the timeline of all python codegen and GPU kernels.
-cli: Run `DEBUG=3 python -m tinygrad.viz.cli --profile -s ALL --jsonl` to extract kernel timing info and ASTs in JSONL format.
+cli: Run `DEBUG=3 python -m tinygrad.viz.cli --profile -s ALL --json` to extract kernel timing info and ASTs in JSON format.
   - note: Make sure to add NO_COLOR=1 to disable colored output.
 
 user story: viewing code

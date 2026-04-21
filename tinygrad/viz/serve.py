@@ -744,9 +744,11 @@ def reloader():
     time.sleep(0.1)
 
 T = TypeVar("T")
+# unpickling may load libraries, turn off DEBUG=3 output
+@Context(DEBUG=0)
 def load_pickle(path:pathlib.Path, default:T) -> T:
   if not path.exists(): return default
-  with path.open("rb") as f: return pickle.load(f)
+  with path.open("rb") as f:return pickle.load(f)
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser()
