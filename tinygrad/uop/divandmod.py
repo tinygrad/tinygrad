@@ -65,7 +65,7 @@ def fold_divmod_general(d: UOp, correct_divmod_folding: bool) -> UOp|None:
     # nest_by_factor: x//c -> (x//f)//(c//f), x%c -> (x//f%(c//f))*f + b where b=x%f
     if x.vmin >= 0:
       results = []
-      for div in {abs(f) for u, f in zip(uops_no_const, factors) if u.op not in (Ops.CONST, Ops.VCONST) and 1 < abs(f) < c and (c%f)==0}:
+      for div in {f for u, f in zip(uops_no_const, factors) if u.op not in (Ops.CONST, Ops.VCONST) and 1 < f < c and (c%f)==0}:
         if (newxs := fold_divmod_general(x//div, correct_divmod_folding)) is not None and newxs.vmin >= 0:
           if d.op is Ops.IDIV:
             results.append((len(newxs.backward_slice), newxs // (c // div)))

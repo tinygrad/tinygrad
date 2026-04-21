@@ -802,11 +802,10 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     return False  # False if not sure
   def const_factor(self) -> int:
     """largest known int that divides self"""
-    # TODO: for negatives it's not the largest
-    if self.op is Ops.CONST: return self.arg
-    if self.op is Ops.VCONST: return math.gcd(*self.arg)
+    if self.op is Ops.CONST: return abs(self.arg)
+    if self.op is Ops.VCONST: return abs(math.gcd(*self.arg))
     if self.op is Ops.ADD: return math.gcd(self.src[0].const_factor(), self.src[1].const_factor())
-    if self.op is Ops.MUL: return self.src[0].arg if self.src[0].op is Ops.CONST else self.src[1].arg if self.src[1].op is Ops.CONST else 1
+    if self.op is Ops.MUL: return abs(self.src[0].arg) if self.src[0].op is Ops.CONST else abs(self.src[1].arg) if self.src[1].op is Ops.CONST else 1
     return 1
   def divides(self, v:int) -> UOp|None:
     if v==1: return self
@@ -823,7 +822,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   def gcd(*uops: UOp) -> UOp:
     terms, factors = zip(*[(u.divides(f:=u.const_factor()),f) for u in uops])
     count = functools.reduce(operator.and_, [collections.Counter(term.split_uop(Ops.MUL)) for term in terms])
-    return math.prod([*count.elements(), terms[0].const_like(math.gcd(*factors))])  # put the const at the top
+    elements = [e.const_like(abs(e.arg)) if e.op is Ops.CONST else e for e in count.elements()]
+    return math.prod([*elements, terms[0].const_like(math.gcd(*factors))])  # put the const at the top
   def divide_exact(self, v:UOp) -> UOp|None:
     if self is v: return self.const_like(1)
     if v.op is Ops.CONST: return self.divides(v.arg)

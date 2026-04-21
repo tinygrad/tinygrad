@@ -106,6 +106,10 @@ class TestSymbolic(unittest.TestCase):
     self.assertEqual(UOp.gcd(a*a*10, b*a*5, a*a*5).simplify(), a*5)
     self.assertEqual(UOp.gcd(a*10, b*5, a*5).simplify(), a.const_like(5))
     self.assertEqual(UOp.gcd(a, b*5, a*5).simplify(), a.const_like(1))
+    c = Variable("c", -8, 0)
+    d = Variable("d", -8, 0)
+    self.assertEqual(UOp.gcd(c*-6, c*-3).simplify(), c*3)
+    self.assertEqual(UOp.gcd(c*-10, d*-5, c*-5).simplify(), c.const_like(5))
 
   def test_divides_exact(self):
     a = Variable("a", 1, 8)
