@@ -120,7 +120,7 @@ class CUDADevice(Compiled):
     super().__init__(device, CUDAAllocator(self), [CUDARenderer, PTXRenderer, NVCCRenderer], functools.partial(CUDAProgram, self),
                      None if MOCKGPU else CUDAGraph, arch=f"sm_{major.value}{minor.value}")
 
-  def count(self) -> int: return init_c_var(ctypes.c_int, lambda x: check(cuda.cuDeviceGetCount(x))).value
+  def count(self) -> int: return init_c_var(ctypes.c_int, lambda x: check(cuda.cuDeviceGetCount(ctypes.byref(x)))).value
 
   def synchronize(self):
     check(cuda.cuCtxSetCurrent(self.context))
