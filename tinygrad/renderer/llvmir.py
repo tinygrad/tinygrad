@@ -238,6 +238,7 @@ class AMDLLVMRenderer(LLVMRenderer):
     (UPat(Ops.LOG2, dtype=dtypes.double, src=(UPat.var("d"),)), xlog2),
     (UPat(Ops.EXP2, dtype=dtypes.double, src=(UPat.var("d"),)), xexp2),
   ])
+  def asm(self, prg: UOp, lin: UOp) -> bytes: return HIPRenderer(self.target).asm(prg, lin)
   def render(self, uops: list[UOp]) -> str:
     prefix = ["""define i8 @f32_to_fp8(float %val, i1 %is_bf8) {
 entry: %ival = bitcast float %val to i32\n  %exp = and i32 %ival, 2139095040\n  %is_special = icmp eq i32 %exp, 2139095040
