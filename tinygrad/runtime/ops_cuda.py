@@ -12,7 +12,7 @@ if (MOCKGPU:=DEV.target("CUDA").interface == "MOCK"): from test.mockgpu.cuda imp
 
 def check(status):
   if status != 0:
-    error = ctypes.string_at(init_c_var(ctypes.POINTER(ctypes.c_char), lambda x: cuda.cuGetErrorString(status, x))).decode()
+    error = ctypes.string_at(init_c_var(ctypes.POINTER(ctypes.c_char), lambda x: cuda.cuGetErrorString(status, ctypes.pointer(x)))).decode()
     raise RuntimeError(f"CUDA Error {status}, {error}")
 
 def encode_args(args, vals) -> tuple[ctypes.Structure, ctypes.Array]:
