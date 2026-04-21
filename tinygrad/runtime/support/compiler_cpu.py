@@ -15,7 +15,7 @@ class ClangJITCompiler(Compiler):
       case "arm64": self.args = ["-ffixed-x18", "-mcpu=" + "+".join([cpu] + ["no"+f[1:] if f.startswith("-") else f for f in feats.split(',') if f])]
       case "riscv64": self.args = ["-march=" + "_".join(["rv64g" if cpu == "native" else cpu] + [f for f in feats.split(',') if f])]
       case _: raise RuntimeError(f"unsupported arch: {self.arch!r}")
-    super().__init__(cachekey)
+    super().__init__(f"{cachekey}_{arch}")
 
   def compile_to_obj(self, src:str) -> bytes:
     """Compile C source to ELF object file (before linking)."""
