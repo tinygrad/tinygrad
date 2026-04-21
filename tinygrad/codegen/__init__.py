@@ -58,7 +58,8 @@ def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True, b
 
   # ** devectorizer (full_graph_rewrite) **
   # remove reduce
-  sink = graph_rewrite(sink, pm_reduce+gep_pushing, ctx=ReduceContext(), name="remove_reduce")
+  scan_ranges = tuple(sorted({x.src[1] for x in sink.toposort() if x.op is Ops.SCAN and x.src[1].op is Ops.RANGE}, key=lambda r: r.arg))
+  sink = graph_rewrite(sink, pm_reduce+gep_pushing, ctx=ReduceContext(scan_ranges=scan_ranges), name="remove_reduce")
 
   # add gpu dims (late). this works after devectorize, but it's faster here
   sink = graph_rewrite(sink, pm_add_gpudims, ctx=ren, name="add gpudims")

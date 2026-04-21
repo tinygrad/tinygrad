@@ -128,6 +128,7 @@ _tensor_spec = PatternMatcher([
 
   # REDUCE_AXIS is the reduce in the tensor graph
   (UPat(Ops.REDUCE_AXIS, name="x"), lambda x: isinstance(x.arg, tuple) and len(x.arg) >= 2 and x.arg[0] in {Ops.ADD, Ops.MUL, Ops.MAX}),
+  (UPat(Ops.SCAN_AXIS, name="x"), lambda x: isinstance(x.arg, tuple) and len(x.arg) >= 2 and x.arg[0] in {Ops.ADD, Ops.MUL, Ops.MAX}),
 
   # AFTER if things were kernelized
   (UPat(Ops.AFTER, src=(UPat((Ops.BUFFER, Ops.AFTER)),), allow_any_len=True), lambda: True),
@@ -219,6 +220,7 @@ kernel_spec = PatternMatcher([
 
   # reduce must be on ranges
   (UPat(Ops.REDUCE, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(y.dtype in (dtypes.weakint, dtypes.int) for y in x.src[1:])),
+  (UPat(Ops.SCAN, src=(UPat(), UPat()), name="x"), lambda x: x.src[1].dtype in (dtypes.weakint, dtypes.int)),
 
   # COPY/BUFFER_VIEW can have ranges appended
   (UPat(Ops.COPY, name="x", src=(UPat.var("s"), UPat(Ops.DEVICE)), allow_any_len=True, arg=None),

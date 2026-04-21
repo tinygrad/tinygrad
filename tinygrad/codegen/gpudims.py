@@ -100,7 +100,7 @@ def add_gpudims(ctx:Renderer, s:UOp):
     if r.op is not Ops.RANGE: continue
     try:
       ii = (global_dims+local_dims).index(r.arg[0:-1])
-      if r.arg[1] == AxisType.REDUCE: continue
+      if r.arg[1] in (AxisType.REDUCE, AxisType.SCAN): continue
       subs[r] = idxs[ii]
     except ValueError: continue
   return s.substitute(subs)

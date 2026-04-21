@@ -3,7 +3,7 @@ import functools, itertools
 from collections import defaultdict
 from dataclasses import dataclass
 from tinygrad.dtype import dtypes, ImageDType, DType, AddrSpace, Invalid, PtrDType
-from tinygrad.uop.ops import UOp, Ops, UPat, PatternMatcher, GroupOp, identity_element
+from tinygrad.uop.ops import UOp, Ops, UPat, PatternMatcher, GroupOp, identity_element, AxisType
 from tinygrad.uop.symbolic import uop_given_valid, parse_valid, invalid_gate
 from tinygrad.helpers import getenv, flatten, AMX, prod
 from tinygrad.renderer import Renderer
@@ -299,6 +299,7 @@ pm_render = PatternMatcher([
 @dataclass
 class ReduceContext:
   acc_num: int = 0
+  scan_ranges: tuple[UOp, ...] = tuple()
 
 def horizontal_reduce(inp:UOp, out_dtype:DType) -> list[UOp]:
   # if this has a horizontal reduction component, do that first
@@ -345,11 +346,33 @@ def merge_reduce_ends(ctx:ReduceContext, sink:UOp):
       mapped = [e.substitute(dict(zip(r, tr))) if i > 0 else e for e in group]
       merged = mapped[0] if len(mapped) == 1 else UOp.group(*(e.src[0] for e in mapped)).end(*tr)
       for e in group: subs[e] = merged
-  return sink.substitute(subs) if subs else None
+  ret = sink.substitute(subs) if subs else sink
+  closed_scan_ranges = {r for u in ret.backward_slice if u.op is Ops.END for r in u.src[1:] if r.op is Ops.RANGE and r.arg[-1] is AxisType.SCAN}
+  open_scan_ranges = [r for r in ret.ranges if r.arg[-1] is AxisType.SCAN and r not in closed_scan_ranges]
+  if not open_scan_ranges: return ret if ret is not sink else None
+  body = ret.src[0] if len(ret.src) == 1 else UOp.group(*ret.src)
+  for r in sorted(open_scan_ranges, key=lambda x: x.arg, reverse=True): body = body.end(r)
+  return ret.replace(src=(body,))
+
+def scan_to_acc(ctx:ReduceContext, scan:UOp):
+  inp, scan_range = scan.src[0], scan.src[1]
+  identity = scan.const(scan.dtype, identity_element(scan.arg, scan.dtype.scalar()))
+  topo = inp.toposort()
+  ended_ranges = flatten([x.ended_ranges for x in topo if x.op is Ops.END])
+  input_ranges = tuple(dict.fromkeys([x for x in topo if x.op is Ops.RANGE and x is not scan_range and x not in ended_ranges] +
+                                     [r for r in ctx.scan_ranges if r.arg[0] < scan_range.arg[0]]))
+  acc = UOp.placeholder((1,), scan.dtype, ctx.acc_num, AddrSpace.REG)
+  acc_init = acc.after(*input_ranges).index(UOp.const(dtypes.int, 0)).store(identity)
+  acc_load = acc.after(acc_init, scan_range).index(UOp.const(dtypes.int, 0))
+  ctx.acc_num += 1
+  ret = acc_load.alu(scan.arg, inp)
+  acc_store = acc.index(UOp.const(dtypes.int, 0)).store(ret)
+  return acc.after(acc_store).index(UOp.const(dtypes.int, 0))
 
 pm_reduce = PatternMatcher([
   # REDUCE -> DEFINE_ACC+ASSIGN, then merge ENDs with same range
   (UPat(Ops.REDUCE, name="red"), reduce_to_acc),
+  (UPat(Ops.SCAN, name="scan"), scan_to_acc),
   (UPat(Ops.SINK, name="sink"), merge_reduce_ends),
   # tensor core built in accumulate
   (UPat(Ops.WMMA, name="wmma") + UPat.var("add"),

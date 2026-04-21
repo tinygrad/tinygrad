@@ -1032,6 +1032,7 @@ class Tensor(OpMixin):
 
   def _mop(self, op:Ops, arg) -> Tensor: return self._apply_uop(UOp._mop, extra_args=(op,), arg=arg)
   def _rop(self, op:Ops, axis:tuple[int, ...]) -> Tensor: return self._apply_uop(UOp._rop, op=op, axis=axis)
+  def _scanop(self, op:Ops, axis:tuple[int, ...]) -> Tensor: return self._apply_uop(UOp._scanop, op=op, axis=axis)
 
   def _pad_circular(self, pX:tuple[tuple[sint, sint], ...]) -> Tensor:
     if any(pB>sh or pA>sh for (pB,pA),sh in zip(pX, self.shape)): raise ValueError('Padding value causes wrapping around more than once.')
@@ -1723,8 +1724,8 @@ class Tensor(OpMixin):
     print(indices.numpy())
     ```
     """
-    if self.ndim == 0: return self._split_cumalu(axis, Ops.MAX), Tensor.zeros(self.shape, dtype=dtypes.int32, device=self.device)
-    values, n = self._split_cumalu(axis, Ops.MAX), int(self.shape[axis])
+    if self.ndim == 0: return self._scan(axis, Ops.MAX), Tensor.zeros(self.shape, dtype=dtypes.int32, device=self.device)
+    values, n = self._scan(axis, Ops.MAX), int(self.shape[axis])
     x, values_t = self.transpose(axis, -1), values.transpose(axis, -1)
     match = (x.unsqueeze(-1) == values_t.unsqueeze(-2)) * Tensor.ones(n, n, requires_grad=False, device=self.device).triu()
     idx = (-(match * Tensor.arange(n, 0, -1, requires_grad=False, device=self.device).reshape(n, 1)).max(-2) + n).cast(dtypes.int32)

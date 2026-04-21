@@ -59,7 +59,7 @@ class TestTensorUOpCumalu(unittest.TestCase):
   def test_cumsum_1d(self):       _check(self, _t(5), lambda x: x.cumsum())
   def test_cumsum_2d(self):       _check(self, _t(3, 4), lambda x: x.cumsum(1))
   def test_cumsum_non_last(self): _check(self, _t(3, 4), lambda x: x.cumsum(0))
-  def test_cumsum_large(self):    _check(self, _t(600), lambda x: x.cumsum())  # exercises _split_cumalu
+  def test_cumsum_large(self):    _check(self, _t(600), lambda x: x.cumsum())
   def test_cumprod(self):         _check(self, _t(4), lambda x: x.cumprod(0))
 
 class TestTensorUOpCat(unittest.TestCase):

@@ -104,6 +104,9 @@ class Ops(FastEnum):
   # reduce
   REDUCE_AXIS = auto(); REDUCE = auto(); ALLREDUCE = auto()
 
+  # scan
+  SCAN_AXIS = auto(); SCAN = auto()
+
   # expander ops
   UNROLL = auto(); CONTRACT = auto(); VCAT = auto(); PTRCAT = auto()
 

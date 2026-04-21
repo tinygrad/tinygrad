@@ -4,6 +4,14 @@ from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, all_metadata, graph
 from tinygrad.helpers import argsort
 from tinygrad.dtype import sum_acc_dtype
 
+def scan_gradient(ctx:UOp, ret:UOp):
+  op, axis, x = ret.arg[0], ret.arg[1], ret.src[0]
+  if op == Ops.ADD: return (ctx.flip(axis)._scanop(Ops.ADD, axis).flip(axis),)
+  if op == Ops.MUL:
+    safe_x = x.eq(0).where(x.const_like(1), x)
+    return ((ctx * ret).flip(axis)._scanop(Ops.ADD, axis).flip(axis) / safe_x,)
+  if op == Ops.MAX: return (None,)
+
 def reduce_gradient(ctx:UOp, ret:UOp, op:Ops):
   def broadcast_to_input(x): return x.reshape(x.shape+(1,)*(len(ret.src[0].shape)-len(x.shape))).expand(ret.src[0].shape)
   if op == Ops.ADD: return (broadcast_to_input(ctx),)
@@ -62,6 +70,7 @@ pm_gradient = PatternMatcher([
   (UPat(Ops.MUL, name="ret"), lambda ctx, ret: (ret.src[1]*ctx, ret.src[0]*ctx)),
   (UPat(Ops.WHERE, name="ret"), lambda ctx, ret: (None, ret.src[0].where(ctx, ctx.const_like(0)), ret.src[0].where(ctx.const_like(0), ctx))),
   (UPat(Ops.REDUCE_AXIS, name="ret"), lambda ctx, ret: reduce_gradient(ctx, ret, ret.arg[0])),
+  (UPat(Ops.SCAN_AXIS, name="ret"), lambda ctx, ret: scan_gradient(ctx, ret)),
   (UPat(Ops.CONTIGUOUS), lambda ctx: (ctx,)),
   (UPat(Ops.CONTIGUOUS_BACKWARD), lambda ctx: (ctx.contiguous(),)),
   (UPat(Ops.RESHAPE, name="ret"), lambda ctx, ret: (ctx.reshape(ret.src[0].shape), None)),

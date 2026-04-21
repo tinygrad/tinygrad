@@ -72,6 +72,11 @@ class Scheduler:
     return ret
 
   def convert_loop_to_global(self) -> None:
+    scan_ranges = {x.src[1] for x in self.ast.toposort() if x.op is Ops.SCAN and x.src[1].op is Ops.RANGE}
+    if scan_ranges:
+      scan_subs = {r: r.replace(arg=r.arg[0:-1]+(AxisType.SCAN,)) for r in scan_ranges if r.arg[-1] == AxisType.LOOP}
+      if scan_subs: self.ast = self.ast.substitute(scan_subs)
+
     if not self.ren.has_local: return
 
     globalizible_rngs = self._globalizable_rngs()
@@ -107,8 +112,10 @@ class Scheduler:
 
   # copied from kernel.py
   @property
-  def upcastable_dims(self) -> list[int]: return [i for i in self.axes_of(AxisType.GLOBAL, AxisType.LOCAL, AxisType.LOOP) \
-                                                  if isinstance(s:=self.full_shape[i], int) and s > 1]
+  def upcastable_dims(self) -> list[int]:
+    if any(x.arg[-1] is AxisType.SCAN for x in self.rngs): return []
+    return [i for i in self.axes_of(AxisType.GLOBAL, AxisType.LOCAL, AxisType.LOOP) \
+            if isinstance(s:=self.full_shape[i], int) and s > 1]
   @property
   def unrollable_dims(self) -> list[int]: return [i for i in self.axes_of(AxisType.GROUP_REDUCE, AxisType.REDUCE) \
                                                   if isinstance(s:=self.full_shape[i], int) and s > 1]

@@ -76,6 +76,11 @@ class TestTensorGradient(unittest.TestCase):
     x = Tensor.randn(4, 4)
     np.testing.assert_allclose(x.pad(((1,0),(0,0))).gradient(x, gradient=g2)[0].numpy(), np.zeros((4, 4)))
 
+  def test_cumsum_backward(self):
+    x = Tensor([1.0, 2.0, 3.0, 4.0], requires_grad=True)
+    x.cumsum(0).sum().backward()
+    np.testing.assert_allclose(x.grad.numpy(), [4.0, 3.0, 2.0, 1.0])
+
 class TestViewGradient(unittest.TestCase):
   def test_expand(self):
     x = Tensor.randn(5,2)

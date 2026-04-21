@@ -27,7 +27,7 @@ def realize_store_after_src(ctx:dict[UOp, None], dest:UOp, src:UOp):
 
 pm_generate_realize_map = PatternMatcher([
   # always realize
-  (UPat({Ops.COPY, Ops.CONTIGUOUS, Ops.STORE}, name="tr"), realize),
+  (UPat({Ops.COPY, Ops.CONTIGUOUS, Ops.STORE, Ops.SCAN_AXIS}, name="tr"), realize),
   # realize srcs of these
   (UPat((Ops.COPY, Ops.MSELECT, Ops.MSTACK), name="rb"), realize_srcs),
   # sometimes we need to realize the src of STORE if there's a self-access
@@ -94,12 +94,22 @@ def convert_reduce_axis_to_reduce_with_ranges(ctx:IndexingContext, x:UOp):
   ctx.range_map[ret] = ctx.range_map[x]
   return ret
 
+def convert_scan_axis_to_scan_with_ranges(ctx:IndexingContext, x:UOp):
+  assert len(x.arg[1]) == 1, "SCAN only supports single axis"
+  scan_range = [r for r in ctx.range_map[x][0][x.arg[1][0]].ranges if r.op is Ops.RANGE]
+  assert len(scan_range) == 1, f"SCAN axis must have a live range"
+  ret = UOp(Ops.SCAN, x.dtype, src=(x.src[0], scan_range[0]), arg=x.arg[0])
+  ctx.range_map[ret] = ctx.range_map[x]
+  return ret
+
 def remove_movement_op_after_rangeify(ctx:IndexingContext, x:UOp):
   if x in ctx.range_map or x.src[0].op is Ops.INDEX: return x.src[0]
 
 pm_apply_rangeify = PatternMatcher([
   # REDUCE_AXIS -> REDUCE
   (UPat(Ops.REDUCE_AXIS, name="x"), convert_reduce_axis_to_reduce_with_ranges),
+  # SCAN_AXIS -> SCAN
+  (UPat(Ops.SCAN_AXIS, name="x"), convert_scan_axis_to_scan_with_ranges),
   # PAD -> WHERE
   (UPat(Ops.PAD, name="x"), convert_pad_to_where_to_keep_behavior_local),
   # finally, apply_rangeify
@@ -225,7 +235,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
       if len(_realize_axis): rctx.realize_map[x] = _realize_axis
 
     # if this element is a reduce and there's ended ranges, we might have to end some other ranges
-    if len(ending_ranges[x]) and x.op in GroupOp.Elementwise.union({Ops.REDUCE_AXIS}):
+    if len(ending_ranges[x]) and x.op in GroupOp.Elementwise.union({Ops.REDUCE_AXIS, Ops.SCAN_AXIS}):
       _realize_axis = rctx.realize_map.get(x) or []
       for i,r in enumerate(out_rngs):
         if i in _realize_axis: continue

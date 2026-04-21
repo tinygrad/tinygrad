@@ -1,5 +1,5 @@
 from __future__ import annotations
-import functools, itertools
+import functools, itertools, math
 from typing import TYPE_CHECKING, Self, Sequence, Literal, get_args
 from tinygrad.mixin.elementwise import ElementwiseMixin
 from tinygrad.mixin.movement import MovementMixin
@@ -378,20 +378,6 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     pooled = self.transpose(axis,-1)._pad_constant(pads, identity_element(op, self.dtype))._pool((self.shape[axis],))
     return getattr(pooled, {Ops.ADD: "sum", Ops.MAX: "max", Ops.MUL: "prod"}[op])(-1).transpose(axis, -1)
 
-  def _split_cumalu(self, axis:int, op:Ops) -> Self:
-    axis = self._resolve_dim(axis)
-    if self.ndim == 0 or 0 in self.shape: return self
-    # TODO: someday the optimizer will find this on its own
-    # for now this is a two stage cumsum
-    SPLIT = 256
-    value = identity_element(op, self.dtype)
-    if not isinstance(s:=self.shape[axis], int) or s <= SPLIT*2: return self._cumalu(axis, op)
-    ret = self.transpose(axis,-1)._pad_constant((None,)*(self.ndim-1)+((round_up(s,SPLIT)-s,0),), value).unflatten(-1,(-1,SPLIT))._cumalu(-1, op)
-    base = ret[..., -1]._cumalu(-1, op)._pad_constant((None,)*(ret.ndim-2) + ((1, -1),), value)
-    base = base.unsqueeze(-1).expand(*base.shape, ret.shape[-1])
-    def fix(x: Self) -> Self: return x.flatten(start_dim=-2)[..., -s:].transpose(axis,-1)
-    return getattr(fix(ret), {Ops.ADD: "add", Ops.MAX: "maximum", Ops.MUL: "mul"}[op])(fix(base))
-
   def cumsum(self, axis:int=0) -> Self:
     """
     Computes the cumulative sum of the tensor along the specified `axis`.
@@ -404,7 +390,8 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     print(t.cumsum(1).numpy())
     ```
     """
-    return self._split_cumalu(axis, Ops.ADD)
+    ret = self.cast(sum_acc_dtype(self.dtype))._scan(axis, Ops.ADD)
+    return ret.cast(self.dtype) if self.dtype in (dtypes.float16, dtypes.bfloat16, *dtypes.fp8s) else ret
 
   def cumprod(self, axis:int) -> Self:
     """
@@ -418,7 +405,48 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     print(t.cumprod(axis=0).numpy())
     ```
     """
-    return self._split_cumalu(axis, Ops.MUL)
+    return self._scan(axis, Ops.MUL)
+
+  def _scan(self, axis:int, op:Ops, TILE=1024) -> Self:
+    axis = self._resolve_dim(axis)
+    if self.ndim == 0 or 0 in self.shape: return self
+    n = self.shape[axis]
+    assert n != 0 and op in (Ops.ADD, Ops.MAX, Ops.MUL)
+    if not isinstance(n, int) or n <= TILE: return self._scanop(op, (axis,))
+    # two-level parallel scan: tile along scan axis, scan each tile, propagate tile totals
+    combine = {Ops.ADD: "add", Ops.MAX: "maximum", Ops.MUL: "mul"}[op]
+    pad_to = round_up(n, TILE)
+    x = self.transpose(axis, -1)
+    if pad_to != n: x = x._pad_constant((None,)*(self.ndim-1)+((0, pad_to-n),), identity_element(op, self.dtype))
+    x = x.unflatten(-1, (-1, TILE))
+    tiled = x._scanop(op, (x.ndim-1,))                                         # scan within each tile
+    totals = tiled[..., -1]._scanop(op, (tiled.ndim-2,))                       # scan tile totals
+    prefix = totals._pad_constant((None,)*(tiled.ndim-2)+((1,-1),), identity_element(op, self.dtype))
+    result = getattr(tiled, combine)(prefix.unsqueeze(-1).expand(tiled.shape))  # add prefix to each tile
+    return result.flatten(start_dim=-2)[..., :n].transpose(axis, -1)
+
+  def associative_scan(self, fn, axis:int=0, reverse:bool=False) -> Self:
+    """
+    Inclusive scan along `axis` with an associative binary function `fn`.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([1, 2, 3, 4, 5])
+    print(t.associative_scan(lambda a, b: a + b).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.associative_scan(lambda a, b: a * b).numpy())
+    ```
+    """
+    axis = self._resolve_dim(axis)
+    n = self.shape[axis]
+    if n <= 1: return self
+    x = self.flip(axis) if reverse else self
+    for d in range(math.ceil(math.log2(n))):
+      stride = 1 << d
+      left = x.shrink(tuple((0, s - stride) if i == axis else None for i, s in enumerate(x.shape)))
+      right = x.shrink(tuple((stride, s) if i == axis else None for i, s in enumerate(x.shape)))
+      x = x.shrink(tuple((0, stride) if i == axis else None for i, s in enumerate(x.shape))).cat(fn(left, right), dim=axis).contiguous()
+    return x.flip(axis) if reverse else x
 
   # ***** functional nn ops *****
 
