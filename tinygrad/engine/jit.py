@@ -59,11 +59,9 @@ def graph_split_rewrite(linear:UOp, max_batch_size:int=0) -> UOp:
   if current_batch: flush_batch()
   return linear.replace(src=tuple(new_src))
 
-def _unwrap_beam(ast:UOp) -> UOp: return ast.src[0] if ast.op is Ops.BEAM else ast
-
 def _call_outs_ins(call:UOp) -> tuple[set[int], set[int]]:
   non_bind = [s for s in call.src[1:] if s.op is not Ops.BIND]
-  ast = _unwrap_beam(call.src[0])
+  ast = call.src[0]
   if ast.op in (Ops.SINK, Ops.PROGRAM):
     prg = get_runner(non_bind[0].device if isinstance(non_bind[0].device, str) else non_bind[0].device[0], call.src[0])
     return set(prg.p.outs), set(prg.p.ins)
@@ -82,7 +80,7 @@ def jit_lower(linear:UOp, held_bufs:set[UOp], input_uops:list[UOp]) -> UOp:
   # parametrize input buffers: map each input buffer UOp to a PARAM with the correct slot index
   linear = linear.substitute({u: UOp.param(i, u.dtype, u.shape, u.device) for i,u in enumerate(input_uops)}, walk=True)
 
-  # wrap SINKs with BEAM if jitbeam is set
+  # set KernelInfo.beam on SINKs if jitbeam is set
   if (jitbeam:=getenv("JITBEAM", BEAM.value)) >= 1: linear = graph_rewrite(linear, pm_beam, ctx=jitbeam, walk=True)
 
   linear = memory_plan_rewrite(linear, held_bufs)
@@ -187,15 +185,14 @@ class GraphRunner(Runner):
 
   @staticmethod
   def supports_exec_item(batch_devs:list[Compiled], new_call:UOp) -> bool:
-    return _unwrap_beam(new_call.src[0]).op in (Ops.SINK, Ops.PROGRAM) and len(GraphRunner._all_devs(batch_devs, new_call)) == 1
+    return new_call.src[0].op in (Ops.SINK, Ops.PROGRAM) and len(GraphRunner._all_devs(batch_devs, new_call)) == 1
 
 # a marker for your graph supporting multiple devices of the same type
 class MultiGraphRunner(GraphRunner):
   @staticmethod
   def supports_exec_item(batch_devs:list[Compiled], new_call:UOp) -> bool:
     # Devices must be the same type
-    return _unwrap_beam(new_call.src[0]).op in (Ops.SINK, Ops.PROGRAM, Ops.COPY) \
-      and len(dedup([type(d) for d in GraphRunner._all_devs(batch_devs, new_call)])) == 1
+    return new_call.src[0].op in (Ops.SINK, Ops.PROGRAM, Ops.COPY) and len(dedup([type(d) for d in GraphRunner._all_devs(batch_devs, new_call)])) == 1
 
 ReturnType = TypeVar('ReturnType')
 @dataclass
