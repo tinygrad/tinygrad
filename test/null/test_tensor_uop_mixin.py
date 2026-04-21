@@ -167,6 +167,18 @@ class TestTensorUOpCreation(unittest.TestCase):
     self.assertIs(_strip_unique(Tensor.eye(3).uop), _strip_unique(UOp.eye(3)))
   def test_eye_rect(self):
     self.assertIs(_strip_unique(Tensor.eye(2, 4).uop), _strip_unique(UOp.eye(2, 4)))
+  def test_triu(self):
+    t = _t(3, 4)
+    self.assertIs(_strip_unique(t.triu().uop), _strip_unique(t.uop.triu()))
+  def test_triu_diagonal(self):
+    t = _t(3, 4)
+    self.assertIs(_strip_unique(t.triu(diagonal=1).uop), _strip_unique(t.uop.triu(diagonal=1)))
+  def test_tril(self):
+    t = _t(3, 4)
+    self.assertIs(_strip_unique(t.tril().uop), _strip_unique(t.uop.tril()))
+  def test_tril_diagonal(self):
+    t = _t(3, 4)
+    self.assertIs(_strip_unique(t.tril(diagonal=-1).uop), _strip_unique(t.uop.tril(diagonal=-1)))
 
 if __name__ == "__main__":
   unittest.main()

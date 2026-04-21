@@ -1643,56 +1643,6 @@ class Tensor(OpMixin):
     values, indices = self._inverse().cummax(axis)
     return values._inverse(), indices
 
-  @staticmethod
-  def _tri(r:sint, c:sint, diagonal=0, device=None, requires_grad:bool|None=None) -> Tensor:
-    return (Tensor.arange(r, device=device).unsqueeze(-1) + diagonal <= Tensor.arange(c, device=device)).requires_grad_(requires_grad)
-
-  def triu(self, diagonal:sint=0) -> Tensor:
-    """
-    Returns the upper triangular part of the tensor, the other elements are set to 0.
-
-    The argument `diagonal` determines which diagonal is on the boundary. `diagonal = 0` means the main diagonal.
-    Positive `diagonal` means above the main diagonal, and negative `diagonal` means below the main diagonal.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([[1, 2, 3, 4], [5, 6, 7, 8], [9, 10, 11, 12]])
-    print(t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.triu(diagonal=0).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.triu(diagonal=1).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.triu(diagonal=-1).numpy())
-    ```
-    """
-    return Tensor._tri(self.shape[-2], self.shape[-1], diagonal=diagonal, device=self.device).where(self, self.zeros_like())
-
-  def tril(self, diagonal:sint=0) -> Tensor:
-    """
-    Returns the lower triangular part of the tensor, the other elements are set to 0.
-
-    The argument `diagonal` determines which diagonal is on the boundary. `diagonal = 0` means the main diagonal.
-    Positive `diagonal` means above the main diagonal, and negative `diagonal` means below the main diagonal.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([[1, 2, 3, 4], [5, 6, 7, 8], [9, 10, 11, 12]])
-    print(t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.tril(diagonal=0).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.tril(diagonal=1).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.tril(diagonal=-1).numpy())
-    ```
-    """
-    return Tensor._tri(self.shape[-2], self.shape[-1], diagonal=diagonal+1, device=self.device).where(self.zeros_like(), self)
-
   def interpolate(self, size:tuple[int, ...], mode:str="linear", align_corners:bool=False) -> Tensor:
     """
     Downsamples or Upsamples to the input `size`, accepts 0 to N batch dimensions.
