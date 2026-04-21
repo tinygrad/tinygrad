@@ -34,9 +34,13 @@ class SimpleTokenizer:
     # https://github.com/ggml-org/llama.cpp/blob/94933c8c2eeaa9a7983e3f6c08af76bd86724094/src/llama-vocab.cpp#L1818-L1820
     vocab: typing.Iterable[tuple[str, int]] = ((tok, idx) for idx, tok in enumerate(kv["tokenizer.ggml.tokens"]))
     normal_tokens, special_tokens = partition(vocab, lambda e: kv["tokenizer.ggml.token_type"][e[1]] == 1)
-    return SimpleTokenizer(dict(normal_tokens), dict(special_tokens), kv["tokenizer.ggml.pre"],
+    preset, eos_id, eot_id = kv["tokenizer.ggml.pre"], kv.get('tokenizer.ggml.eos_token_id', 0), kv.get('tokenizer.ggml.eot_token_id')
+    # OLMo 2 uses a qwen2-style chat template with <|im_end|>, but its GGUF marks <|endoftext|> as EOS.
+    if kv.get('general.architecture') == 'olmo2' and (im_end := dict(special_tokens).get('<|im_end|>')) is not None:
+      preset, eos_id, eot_id = 'qwen2', im_end, eos_id
+    return SimpleTokenizer(dict(normal_tokens), dict(special_tokens), preset,
       bos_id=kv.get('tokenizer.ggml.bos_token_id') if kv.get('tokenizer.ggml.add_bos_token', True) else None,
-      eos_id=kv.get('tokenizer.ggml.eos_token_id', 0), eot_id=kv.get('tokenizer.ggml.eot_token_id'))
+      eos_id=eos_id, eot_id=eot_id)
 
   def _encode_word(self, word:bytes) -> list[int]:
     if (early_token:=self._normal_tokens.get(word)) is not None: return [early_token]
