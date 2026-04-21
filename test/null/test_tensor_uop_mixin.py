@@ -147,6 +147,12 @@ class TestTensorUOpFull(unittest.TestCase):
     t = Tensor.full((2, 3), UOp.variable("x", 1, 10).bind(5))
     self.assertEqual(t.shape, (2, 3))
     self.assertFalse(t.uop.op_in_backward_slice_with_self(Ops.UNIQUE))
+  def test_zeros(self):
+    self.assertIs(_strip_unique(Tensor.zeros(2, 3).uop), _strip_unique(UOp.zeros(2, 3)))
+  def test_ones(self):
+    self.assertIs(_strip_unique(Tensor.ones(2, 3).uop), _strip_unique(UOp.ones(2, 3)))
+  def test_invalids(self):
+    self.assertIs(_strip_unique(Tensor.invalids(2, 3, dtype=dtypes.int8).uop), _strip_unique(UOp.invalids(2, 3, dtype=dtypes.int8)))
 
 if __name__ == "__main__":
   unittest.main()

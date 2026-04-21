@@ -6,7 +6,7 @@ from tinygrad.mixin.movement import MovementMixin
 from tinygrad.mixin.reduce import ReduceMixin
 from tinygrad.uop import Ops
 from tinygrad.uop.ops import _broadcast_shape, resolve, smax, smin, identity_element
-from tinygrad.dtype import ConstType, DTypeLike, dtypes, least_upper_dtype, sum_acc_dtype, to_dtype
+from tinygrad.dtype import ConstType, DTypeLike, Invalid, dtypes, least_upper_dtype, sum_acc_dtype, to_dtype
 from tinygrad.helpers import argfix, flatten, flat_to_grouped, make_tuple, prod, resolve_pool_pads, round_up
 
 if TYPE_CHECKING:
@@ -17,7 +17,7 @@ ReductionStr = Literal["mean", "sum", "none"]
 
 class OpMixin(ElementwiseMixin, ReduceMixin):
   @staticmethod
-  def unique_const(fill_value:ConstType, **kwargs): raise NotImplementedError
+  def unique_const(fill_value:ConstType, **kwargs): raise NotImplementedError("creation helpers are only supported on Tensor and UOp")
 
   @classmethod
   def full(cls, shape:tuple[sint, ...], fill_value:ConstType, **kwargs) -> Self:
@@ -35,6 +35,51 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     ```
     """
     return cls.unique_const(fill_value, **kwargs).reshape((1,)*len(new_shape := argfix(shape))).expand(new_shape)
+
+  @classmethod
+  def invalids(cls, *shape, **kwargs) -> Self:
+    """
+    Creates a tensor with the given shape, filled with Invalid.
+
+    This is an alternative to Tensor.empty when you want an "anonymous" buffer.
+
+    Eventually Tensor.empty will be replaced by this.
+    """
+    return cls.full(argfix(*shape), Invalid, **kwargs)
+
+  @classmethod
+  def zeros(cls, *shape, **kwargs) -> Self:
+    """
+    Creates a tensor with the given shape, filled with zeros.
+
+    You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
+    Additionally, all other keyword arguments are passed to the constructor of the tensor.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor.zeros(2, 3).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor.zeros(2, 3, dtype=dtypes.int32).numpy())
+    ```
+    """
+    return cls.full(argfix(*shape), 0.0, **kwargs)
+
+  @classmethod
+  def ones(cls, *shape, **kwargs) -> Self:
+    """
+    Creates a tensor with the given shape, filled with ones.
+
+    You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
+    Additionally, all other keyword arguments are passed to the constructor of the tensor.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor.ones(2, 3).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor.ones(2, 3, dtype=dtypes.int32).numpy())
+    ```
+    """
+    return cls.full(argfix(*shape), 1.0, **kwargs)
 
   def _pad_constant(self, pX, value:float) -> Self:
     # shrink first for negative pads, then pad with only non-negative values
