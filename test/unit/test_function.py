@@ -430,8 +430,8 @@ class TestFunctionTuple(unittest.TestCase):
 
     @function(precompile=True, precompile_backward=True)
     def f(a:Tensor):
-      c = Tensor.invalid(*a.shape, dtype=a.dtype, device=a.device)
-      d = Tensor.invalid(3, dtype=a.dtype, device=a.device)
+      c = Tensor.invalids(*a.shape, dtype=a.dtype, device=a.device)
+      d = Tensor.invalids(3, dtype=a.dtype, device=a.device)
       c, d = Tensor.custom_kernel(c, d, a, fxn=my_kernel, grad_fxn=my_grad)[:2]
       return c, d
 
@@ -454,8 +454,8 @@ class TestFunctionTuple(unittest.TestCase):
 
     @function(precompile=True, precompile_backward=True)
     def f(a:Tensor):
-      c = Tensor.invalid(*a.shape, dtype=a.dtype, device=a.device)
-      d = Tensor.invalid(*a.shape, dtype=a.dtype, device=a.device)
+      c = Tensor.invalids(*a.shape, dtype=a.dtype, device=a.device)
+      d = Tensor.invalids(*a.shape, dtype=a.dtype, device=a.device)
       c, d = Tensor.custom_kernel(c, d, a, fxn=my_kernel, grad_fxn=my_grad)[:2]
       return (c, d)
 

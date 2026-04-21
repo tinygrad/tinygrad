@@ -645,7 +645,7 @@ class Tensor(OpMixin):
   # ***** creation helper functions *****
 
   @staticmethod
-  def invalid(*shape, **kwargs) -> Tensor:
+  def invalids(*shape, **kwargs) -> Tensor:
     """
     Creates a tensor with the given shape, filled with Invalid.
 
