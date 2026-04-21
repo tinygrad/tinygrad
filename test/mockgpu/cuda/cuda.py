@@ -167,5 +167,5 @@ def cuGetErrorString(error: int, pStr) -> int:
   error_str = orig_cuda.enum_cudaError_enum.get(error, "Unknown CUDA error").encode()
   buf = ctypes.create_string_buffer(error_str)
   # Set the pointer to point to our error string buffer
-  pStr.value = ctypes.cast(buf, ctypes.POINTER(ctypes.c_char))
+  pStr.value, pStr._obj = ctypes.cast(buf, ctypes.POINTER(ctypes.c_char)), buf
   return orig_cuda.CUDA_SUCCESS
