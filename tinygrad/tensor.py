@@ -644,28 +644,8 @@ class Tensor(OpMixin):
 
   # ***** creation helper functions *****
 
-  @staticmethod
-  def linspace(start:int|float, stop:int|float, steps:int, **kwargs) -> Tensor:
-    """
-    Returns a 1-D tensor of `steps` evenly spaced values from `start` to `stop`, inclusive.
-
-    You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
-    Additionally, all other keyword arguments are passed to the constructor of the tensor.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor.linspace(0, 10, 5).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor.linspace(-1, 1, 5).numpy())
-    ```
-    """
-    if steps < 0: raise ValueError("number of steps must be non-negative")
-    if (dtype := to_dtype(kwargs.pop("dtype", dtypes.default_float))) == dtypes.bool: raise ValueError("linspace with bool dtype is not supported")
-    if steps == 1: return Tensor([start], dtype=dtype, **kwargs)
-    return (start + Tensor.arange(steps, **kwargs) * ((stop - start) / (steps - 1))).cast(dtype)
-
-  @staticmethod
-  def eye(n:int, m:int|None=None, dtype=None, device=None, requires_grad:bool|None=None) -> Tensor:
+  @classmethod
+  def eye(cls, n:int, m:int|None=None, dtype=None, device=None, requires_grad:bool|None=None) -> Tensor:
     """
     Returns a 2-D tensor with `n` rows and `m` columns, with ones on the diagonal and zeros elsewhere.
 
@@ -680,10 +660,7 @@ class Tensor(OpMixin):
     print(Tensor.eye(2, 4).numpy())
     ```
     """
-    m_ = n if m is None else m
-    if n < 0 or m_ < 0: raise ValueError(f"cannot have negative {n=}, {m_=}")
-    t = (Tensor.arange(n, device=device).unsqueeze(-1) == Tensor.arange(m_, device=device))
-    return t.cast(dtype or dtypes.default_float).requires_grad_(requires_grad)
+    return super().eye(n, m, dtype, device).requires_grad_(requires_grad)
 
   def _multi_like(self, fxn, *args, **kwargs) -> Tensor:
     dtype = kwargs.pop("dtype", self.dtype)
