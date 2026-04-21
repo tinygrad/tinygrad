@@ -154,7 +154,7 @@ to_program_cache: dict[tuple, UOp] = {}
 @Context(ALLOW_DEVICE_USAGE=0)
 def to_program(ast:UOp, renderer:Renderer) -> UOp:
   """Transform an AST (SINK or partial PROGRAM) into a fully compiled PROGRAM UOp. May trigger BEAM search."""
-  key = (ast.key, renderer.target, NOOPT.value, DEVECTORIZE.value, EMULATED_DTYPES.value)
+  key = (ast.key, type(renderer), renderer.target, NOOPT.value, DEVECTORIZE.value, EMULATED_DTYPES.value)
   if (prg:=to_program_cache.get(key)) is None:
     if ast.op is Ops.PROGRAM: prg = ast
     elif ast.op is Ops.SINK:
