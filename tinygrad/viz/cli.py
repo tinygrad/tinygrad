@@ -6,7 +6,7 @@ from typing import Iterator
 from tinygrad.viz import serve as viz
 from tinygrad.uop.ops import RewriteTrace
 from tinygrad.helpers import temp, ansistrip, colored, time_to_str, ansilen, ProfilePointEvent, ProfileRangeEvent, TracingKey, unwrap, NO_COLOR
-from tinygrad.helpers import DEBUG
+from tinygrad.helpers import DEBUG, Context
 
 # profile decoder used in CLI and tests
 def decode_profile(data:bytes) -> dict:
@@ -56,7 +56,8 @@ def get(data:dict, key:str):
   raise RuntimeError(f'item "{key}" not found in list'+(f", did you mean {match[0]!r}?" if match else ''))
 
 def main(args) -> None:
-  viz.load_rewrites(viz_data:=viz.VizData(viz.load_pickle(args.rewrites_path, default=RewriteTrace([], [], {}))))
+  with Context(DEBUG=0):
+    viz.load_rewrites(viz_data:=viz.VizData(viz.load_pickle(args.rewrites_path, default=RewriteTrace([], [], {}))))
 
   def fmt(val, to_str=str) -> str: return json.dumps(val if isinstance(val, dict) else {"value":val}) if args.json else to_str(val)
 
@@ -81,7 +82,7 @@ def main(args) -> None:
     else: print_step(get(steps, args.item))
     return None
 
-  events:list = viz.load_pickle(args.profile_path, default=[])
+  with Context(DEBUG=0): events:list = viz.load_pickle(args.profile_path, default=[])
   if (profile_bytes:=viz.get_profile(viz_data, events)) is None: raise RuntimeError(f"empty profile in {args.profile_path}")
   profile = decode_profile(profile_bytes)
   profile["layout"].update([(f'{c["name"][5:]}{" SQTT" if s["name"].endswith("PKTS") else ""} {s["name"]}', s["data"]) for c in viz_data.ctxs
