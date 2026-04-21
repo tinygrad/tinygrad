@@ -163,11 +163,10 @@ def get_program(ast:UOp, renderer:Renderer) -> ProgramSpec:
   """
 
   if ast.op is Ops.PROGRAM: prg = ast
-  elif ast.op is Ops.SINK or ast.op is Ops.BEAM:
-    beam, ast = (ast.arg, ast.src[0]) if ast.op is Ops.BEAM else (0, ast)
+  elif ast.op is Ops.SINK:
     # rewrite to prg
     assert isinstance(ast.arg, KernelInfo), "requires KernelInfo on arg to get_program"
-    full_sink = full_rewrite_to_sink(ast, renderer, optimize=ast.tag is None, beam=beam)
+    full_sink = full_rewrite_to_sink(ast, renderer, optimize=ast.tag is None, beam=ast.arg.beam)
     prg = UOp(Ops.PROGRAM, src=(full_sink, UOp(Ops.DEVICE, arg=renderer.target.device)))
   else:
     raise RuntimeError(f"can't call get_program on {ast.op}")

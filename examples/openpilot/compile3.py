@@ -37,7 +37,7 @@ def compile(onnx_file):
     # copy i == 1 so use of JITBEAM is okay
     if i == 1: test_val = np.copy(ret)
   # iterate kernel CALLs in the captured LINEAR UOp; toposort descends into batched graph CUSTOM_FUNCTIONs
-  kernel_asts = {Ops.SINK, Ops.PROGRAM, Ops.BEAM}
+  kernel_asts = {Ops.SINK, Ops.PROGRAM}
   kernel_calls = [u for u in run_onnx_jit.captured.linear.toposort(gate=lambda x: x.op not in kernel_asts)
                   if u.op is Ops.CALL and u.src[0].op in kernel_asts]
   print(f"captured {len(kernel_calls)} kernels")
