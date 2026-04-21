@@ -145,7 +145,7 @@ def get_runner(device:str, ast:UOp) -> CompiledRunner:
 
 # NOTE: ctx is the buffers
 si_lowerer = PatternMatcher([
-  (UPat((Ops.SINK, Ops.PROGRAM, Ops.BEAM), name="sink"), lambda ctx,sink: get_runner(ctx[0].device, sink)),
+  (UPat((Ops.SINK, Ops.PROGRAM), name="sink"), lambda ctx,sink: get_runner(ctx[0].device, sink)),
   (UPat(Ops.BUFFER_VIEW), lambda ctx: ViewOp(ctx[0])),
   (UPat(Ops.COPY), lambda ctx: (BufferXfer(ctx[0].nbytes, ctx[0].device, ctx[1].device) \
       if hasattr(alc:=Device[ctx[0].device].allocator, '_transfer') and alc.supports_transfer and all_same([x.device.split(":")[0] for x in ctx]) \
@@ -198,7 +198,7 @@ capturing: list = []  # put classes with an add_linear method in here
 def run_schedule(schedule:list[ExecItem], var_vals:dict[str, int]|None=None, do_update_stats=True):
   while len(schedule):
     ei = schedule.pop(0).lower()
-    sink = ei.ast.src[0] if ei.ast.op is Ops.BEAM else ei.ast
+    sink = ei.ast
     if VALIDATE_WITH_CPU and sink.op is Ops.SINK:
       # copy in allocated buffers from the GPU
       bufs = [b for b in ei.bufs if b is not None]
@@ -268,14 +268,12 @@ def exec_copy(ctx:ExecContext, call, ast):
       prg.copy(dest, src)
 
 def exec_kernel(ctx:ExecContext, call, ast):
-  sink = ast.src[0] if ast.op is Ops.BEAM else ast
-
   for bufs, device_vars in unwrap_multi(call, resolve_params(ctx, call)):
     var_vals = {**ctx.var_vals, **device_vars}
     prg = get_runner(bufs[0].device, ast)
     prg_bufs = [bufs[i].ensure_allocated() for i in prg.p.globals]
 
-    if VALIDATE_WITH_CPU and sink.op is Ops.SINK:
+    if VALIDATE_WITH_CPU and ast.op is Ops.SINK:
       cpu_bufs = [Buffer("CPU", b.size, b.dtype).ensure_allocated().copyin(b.ensure_allocated().as_memoryview()) for b in bufs]
 
     with track_stats(ctx, call, prg.device, prg.display_name, prg.estimates, prg_bufs, var_vals,
@@ -283,9 +281,9 @@ def exec_kernel(ctx:ExecContext, call, ast):
       timing[0] = prg(prg_bufs, var_vals, wait=DEBUG >= 2)
       prg.first_run = False
 
-    if VALIDATE_WITH_CPU and sink.op is Ops.SINK:
+    if VALIDATE_WITH_CPU and ast.op is Ops.SINK:
       import numpy as np
-      cpu_prg = get_runner("CPU", sink)
+      cpu_prg = get_runner("CPU", ast)
       cpu_prg([cpu_bufs[i] for i in cpu_prg.p.globals], var_vals, wait=False)
       for i in prg.p.outs: np.testing.assert_allclose(prg_bufs[i].numpy(), cpu_bufs[i].numpy(), rtol=1e-3, atol=1e-3)
 
@@ -306,15 +304,16 @@ def exec_graph(ctx:ExecContext, call, cf):
   with track_stats(ctx, call, runner.device, runner.display_name, runner.estimates, bufs, ctx.var_vals) as t:
     t[0] = runner(bufs, ctx.var_vals, wait=DEBUG >= 2)
 
+# ctx is beam value
 pm_beam = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.SINK, name="sink"),), name="call", allow_any_len=True),
-   lambda ctx,call,sink: call.replace(src=(UOp(Ops.BEAM, src=(sink,), arg=ctx), *call.src[1:]))),
+   lambda ctx,call,sink: call.replace(src=(sink.replace(arg=replace(sink.arg, beam=ctx)), *call.src[1:])) if sink.arg.beam == 0 else None),
 ])
 
 pm_exec = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.BUFFER_VIEW, name="ast"),), name="call", allow_any_len=True), exec_view),
   (UPat(Ops.CALL, src=(UPat(Ops.COPY, name="ast"),), name="call", allow_any_len=True), exec_copy),
-  (UPat(Ops.CALL, src=(UPat((Ops.SINK, Ops.PROGRAM, Ops.BEAM), name="ast"),), name="call", allow_any_len=True), exec_kernel),
+  (UPat(Ops.CALL, src=(UPat((Ops.SINK, Ops.PROGRAM), name="ast"),), name="call", allow_any_len=True), exec_kernel),
   (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="encdec", name="ast"),), name="call", allow_any_len=True), exec_encdec),
   (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="graph", name="cf"),), name="call", allow_any_len=True), exec_graph),
 ])
