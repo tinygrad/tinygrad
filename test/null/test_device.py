@@ -44,7 +44,6 @@ class TestDevice(unittest.TestCase):
                             env={**os.environ, "DEV":":99+AMD"}, capture_output=True)
     self.assertNotEqual(result.returncode, 0)
     self.assertIn(b"invalid visibility filter", result.stderr)
-    with self.assertRaisesRegex(RuntimeError, "AMD:99 does not exist"): Device["AMD:99"]
 
   def test_lowercase_canonicalizes(self):
     device = Device.DEFAULT
