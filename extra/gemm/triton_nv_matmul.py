@@ -73,8 +73,9 @@ if __name__ == "__main__":
 
   A, B = Tensor.normal(M, K, std=1e-1, dtype=dtypes.float16).realize(), Tensor.normal(K, N, std=1e-1, dtype=dtypes.float16).realize()
   C = A.matmul(B)
-  sched = C.schedule()
-  si = sched[-1]
+  from tinygrad.schedule import linear_to_schedule
+  linear, var_vals = C.linear_with_vars()
+  si = linear_to_schedule(linear)[-1]
 
   src = compiled.asm["ptx"]
   # specify the shared memory here so we don't need to do it dynamically
@@ -97,10 +98,10 @@ if __name__ == "__main__":
 
   # check correctness
   if getenv("VERIFY"):
-    from tinygrad.engine.realize import run_schedule
+    from tinygrad.engine.realize import run_linear
     triton_buf = np.frombuffer(si.bufs[0].as_memoryview(), np.float16).reshape(M,N)
     print(triton_buf)
-    run_schedule(sched)
+    run_linear(linear, var_vals)
     tinygrad_buf = np.frombuffer(si.bufs[0].as_memoryview(), np.float16).reshape(M,N)
     print(tinygrad_buf)
     np.testing.assert_allclose(triton_buf, tinygrad_buf)

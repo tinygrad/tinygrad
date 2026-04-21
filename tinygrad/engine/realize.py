@@ -191,33 +191,9 @@ class ExecItem:
       self.prg.first_run = False
     return et
 
-# **************** main run function ****************
+# **************** run linear ****************
 
 capturing: list = []  # put classes with an add_linear method in here
-
-def run_schedule(schedule:list[ExecItem], var_vals:dict[str, int]|None=None, do_update_stats=True):
-  while len(schedule):
-    ei = schedule.pop(0).lower()
-    sink = ei.ast
-    if VALIDATE_WITH_CPU and sink.op is Ops.SINK:
-      # copy in allocated buffers from the GPU
-      bufs = [b for b in ei.bufs if b is not None]
-      nb: list[Buffer|None] = [Buffer("CPU", b.size, b.dtype) for b in bufs]
-      for cpu_b, gpu_b in zip(nb, bufs):
-        if cpu_b is not None and gpu_b.is_allocated(): cpu_b.ensure_allocated().copyin(gpu_b.as_memoryview())
-
-      # run on GPU
-      ei.run(var_vals, do_update_stats=do_update_stats)
-
-      # validate the output buffers match (NOTE: this is assuming the output is buffer 0)
-      ExecItem(sink, nb, ei.metadata, ei.fixedvars).run(var_vals, do_update_stats=do_update_stats)
-      import numpy as np
-      assert nb[0] is not None
-      np.testing.assert_allclose(bufs[0].numpy(), nb[0].numpy(), rtol=1e-3, atol=1e-3)
-    else:
-      ei.run(var_vals, do_update_stats=do_update_stats)
-
-# **************** run linear ****************
 
 @dataclass
 class ExecContext:
