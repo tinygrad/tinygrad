@@ -114,6 +114,33 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     if (output_len:=ceildiv(stop-start, step)) <= 0: return cls.full((0,), 0, dtype=dtype, **kwargs)
     return (cls.full((output_len,), step, dtype=dtype, **kwargs)._cumalu(0, Ops.ADD) + (start - step)).cast(dtype)
 
+  @classmethod
+  def linspace(cls, start:int|float, stop:int|float, steps:int, **kwargs) -> Self:
+    """
+    Returns a 1-D tensor of `steps` evenly spaced values from `start` to `stop`, inclusive.
+
+    You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
+    Additionally, all other keyword arguments are passed to the constructor of the tensor.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor.linspace(0, 10, 5).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor.linspace(-1, 1, 5).numpy())
+    ```
+    """
+    if steps < 0: raise ValueError("number of steps must be non-negative")
+    if (dtype := to_dtype(kwargs.pop("dtype", dtypes.default_float))) == dtypes.bool: raise ValueError("linspace with bool dtype is not supported")
+    if steps == 1: return cls.full((1,), start, dtype=dtype, **kwargs)
+    return (start + cls.arange(steps, dtype=dtypes.default_float, **kwargs) * ((stop - start) / (steps - 1))).cast(dtype)
+
+  @classmethod
+  def eye(cls, n:int, m:int|None=None, dtype:DTypeLike|None=None, device:str|tuple[str, ...]|None=None) -> Self:
+    m_ = n if m is None else m
+    if n < 0 or m_ < 0: raise ValueError(f"cannot have negative {n=}, {m_=}")
+    out_dtype = to_dtype(dtype) if dtype is not None else dtypes.default_float
+    return cls.arange(n, device=device).unsqueeze(-1).eq(cls.arange(m_, device=device)).cast(out_dtype)
+
   def _pad_constant(self, pX, value:float) -> Self:
     # shrink first for negative pads, then pad with only non-negative values
     pX = tuple((0, 0) if p is None else p for p in pX)
