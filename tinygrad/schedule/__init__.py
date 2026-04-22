@@ -149,8 +149,8 @@ pm_schedule = PatternMatcher([
   (UPat(Ops.SINK, name="function"), lower_sink_to_linear),
 ])
 
-@track_rewrites(lambda _,ret: f"Schedule {pluralize('Kernel', len(ret[0].src))}")
-def create_linear_with_vars(big_sink:UOp) -> tuple[UOp, dict[str, int]]:
+@track_rewrites(lambda _,output_bufs,ret: f"Schedule {pluralize('Kernel', len(ret[0].src))}")
+def create_linear_with_vars(big_sink:UOp, output_bufs:set[UOp]|None=None) -> tuple[UOp, dict[str, int]]:
   # big_sink srcs are all the Tensors
   linear_call = graph_rewrite(big_sink, pm_schedule, name="schedule to linear", enter_calls=True)
 
@@ -174,5 +174,5 @@ def create_linear_with_vars(big_sink:UOp) -> tuple[UOp, dict[str, int]]:
     capturing[0].add_linear(linear, var_vals)
     return UOp(Ops.LINEAR, src=()), var_vals
 
-  held_bufs = ({b for b in linear_call.src[1:] if b.op is Ops.BUFFER} if linear_call.op is Ops.CALL else set())
+  held_bufs = {b for b in linear_call.src[1:] if b.op is Ops.BUFFER and b in buffers} | (output_bufs or set())
   return memory_plan_rewrite(linear, held_bufs), var_vals
