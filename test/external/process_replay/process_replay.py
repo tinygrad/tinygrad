@@ -44,10 +44,9 @@ class ProcessReplayWarning(Warning): pass
 def replay_get_program(p:ProgramSpec, ast:UOp, renderer:Renderer) -> tuple[str, str, tuple[Any, ...]]:
   if ast.op is Ops.PROGRAM: input_ast = ast
   else:
-    sink = ast.src[0] if ast.op is Ops.BEAM else ast
-    sink_arg = sink.arg
-    if ast.op is Ops.BEAM: sink_arg = replace(sink_arg, opts_to_apply=p.applied_opts)
-    input_ast = sink.replace(arg=replace(sink_arg, name=p.name))
+    sink_arg = ast.arg
+    if sink_arg.beam: sink_arg = replace(sink_arg, opts_to_apply=p.applied_opts)
+    input_ast = ast.replace(arg=replace(sink_arg, name=p.name))
   p2 = get_program(input_ast, renderer=renderer)
   def to_str(ret:ProgramSpec) -> str:
     # PYTHON renderer pickles UOps, first unpickle and decode here

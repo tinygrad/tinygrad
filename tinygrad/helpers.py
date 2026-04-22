@@ -45,6 +45,12 @@ def flatten(l:Iterable[Iterable[T]]): return [item for sublist in l for item in 
 def fully_flatten(l):
   if not (hasattr(l, "__len__") and hasattr(l, "__getitem__")) or isinstance(l, str): return [l]
   return [l[()]] if hasattr(l, "shape") and l.shape == () else [x for li in l for x in fully_flatten(li)]
+#  `(padding_left, padding_right, padding_top, padding_bottom, ...)` ->  `(..., (padding_top, padding_bottom), (padding_left, padding_right))`
+def flat_to_grouped(padding:Sequence[T]) -> tuple[tuple[T, T], ...]: return tuple(zip(padding[-2::-2], padding[::-2]))
+def resolve_pool_pads(padding:int|Sequence[int], dims:int) -> Sequence[int]:
+  if not isinstance(padding, int) and not (len(padding) == 2*dims or len(padding) == dims):
+    raise ValueError(f"Padding must be an int or a sequence of length {dims} or {2*dims}, but got {padding=} with {dims=}.")
+  return [padding]*2*dims if isinstance(padding, int) else (padding if len(padding) == 2*dims else [p for p in padding for _ in range(2)][::-1])
 def fromimport(mod, frm): return getattr(__import__(mod, fromlist=[frm]), frm)
 def _is_balanced(s:str) -> bool: return (d := 0, all((d := d + (c == '(') - (c == ')')) >= 0 for c in s))[1] and d == 0
 def strip_parens(fst:str) -> str: return fst[1:-1] if fst[:1]=='(' and fst[-1:]==')' and _is_balanced(fst[1:-1]) else fst
@@ -473,14 +479,14 @@ def cpu_objdump(lib, objdump_tool='objdump'):
     pathlib.Path(f.name).write_bytes(lib)
     print(system(f"{objdump_tool} -d {f.name}"))
 
-def capstone_flatdump(lib: bytes):
+def capstone_flatdump(lib: bytes, arch:str):
   try: import capstone
   except ImportError:
     print("Disassembler Error: Capstone not installed.")
     return
-  match platform.machine():
-    case 'x86_64' | 'AMD64': cs = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_64)
-    case 'aarch64' | 'arm64': cs = capstone.Cs(capstone.CS_ARCH_ARM64, capstone.CS_MODE_ARM)
+  match arch:
+    case 'x86_64': cs = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_64)
+    case 'arm64': cs = capstone.Cs(capstone.CS_ARCH_ARM64, capstone.CS_MODE_ARM)
     case machine: raise NotImplementedError(f"Capstone disassembly isn't supported for {machine}")
   cs.skipdata = True
   for instr in cs.disasm(lib, 0):

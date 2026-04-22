@@ -48,10 +48,10 @@ def _fused_quantize_bwd_w13(gradient:UOp, kernel:UOp):
   if isinstance(device, tuple):
     axis, ndev = xw13.axis, len(device)
     assert axis in (0, 1), f"unsupported sharding axis={axis}"
-    grad_xw13 = Tensor(Tensor.invalid(*_shard_shape(xw13.shape, axis, ndev), dtype=dtypes.bfloat16, device=device).uop.multi(axis), device=device)
+    grad_xw13 = Tensor(Tensor.invalids(*_shard_shape(xw13.shape, axis, ndev), dtype=dtypes.bfloat16, device=device).uop.multi(axis), device=device)
     dname = device[0].split(":")[0]
   else:
-    grad_xw13 = Tensor.invalid(*xw13.shape, dtype=dtypes.bfloat16, device=device)
+    grad_xw13 = Tensor.invalids(*xw13.shape, dtype=dtypes.bfloat16, device=device)
     dname = device.split(":")[0] if isinstance(device, str) else device
   grad_x2_t = Tensor(gradient, device=device).cast(dtypes.bfloat16)
   fxn = functools.partial(_custom_fused_bwd_w13, dname=dname)
@@ -67,12 +67,12 @@ def fused_quantize_fp8_w13(xw13:Tensor, amax_state:Tensor, fp8_dtype) -> tuple[T
   if isinstance(xw13.device, tuple):
     axis, ndev = xw13.uop.axis, len(xw13.device)
     assert axis in (0, 1), f"unsupported sharding axis={axis}"
-    fp8_out = Tensor(Tensor.invalid(*_shard_shape((MBS, SEQ, HIDDEN), axis, ndev), dtype=fp8_dtype, device=xw13.device).uop.multi(axis), device=xw13.device)
-    amax_buf = Tensor(Tensor.invalid(NUM_WG, dtype=dtypes.bfloat16, device=xw13.device).uop.multi(0), device=xw13.device)
+    fp8_out = Tensor(Tensor.invalids(*_shard_shape((MBS, SEQ, HIDDEN), axis, ndev), dtype=fp8_dtype, device=xw13.device).uop.multi(axis), device=xw13.device)
+    amax_buf = Tensor(Tensor.invalids(NUM_WG, dtype=dtypes.bfloat16, device=xw13.device).uop.multi(0), device=xw13.device)
     dname = xw13.device[0].split(":")[0]
   else:
-    fp8_out = Tensor.invalid(MBS, SEQ, HIDDEN, dtype=fp8_dtype, device=xw13.device)
-    amax_buf = Tensor.invalid(NUM_WG, dtype=dtypes.bfloat16, device=xw13.device)
+    fp8_out = Tensor.invalids(MBS, SEQ, HIDDEN, dtype=fp8_dtype, device=xw13.device)
+    amax_buf = Tensor.invalids(NUM_WG, dtype=dtypes.bfloat16, device=xw13.device)
     dname = xw13.device.split(":")[0] if isinstance(xw13.device, str) else xw13.device
   fxn = functools.partial(_custom_fused_cast_amax_w13, dname=dname)
   fp8_out, amax_buf, *_ = Tensor.custom_kernel(fp8_out, amax_buf, xw13, amax_state, fxn=fxn, grad_fxn=_fused_quantize_bwd_w13)

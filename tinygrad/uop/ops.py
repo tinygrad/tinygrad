@@ -196,9 +196,6 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       else: cache[node] = visitor(node)
     return cache[self]
 
-  # returns map of UOps to their consumers in the graph rooted by self
-  def get_consumer_map(self) -> dict[UOp, dict[UOp, None]]: return consumer_map_from_toposort(self.toposort())
-
   @functools.cached_property
   def tuplize(self:UOp) -> tuple:
     return (self.op.value, self.arg, self.dtype,)+tuple([x.tuplize for x in self.src])
@@ -501,10 +498,11 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
               src=(UOp(Ops.DEVICE, arg=device),) if device is not None else ())
     return ret.reshape((1,)*len(shape)).expand(shape) if shape is not None else ret
   @staticmethod
-  def unique_const(dtype:DType, b:ConstType, device:str|tuple[str, ...], shape:tuple[sint, ...]|None=None, unique=True):
-    # NOTE: b is ConstType, not ConstLike, so UOps and tuples aren't allowed
-    assert not isinstance(b, (UOp, tuple)), "unique const only works on numbers"
-    ret = UOp.const(dtype, b, device)
+  def unique_const(fill_value:ConstType, dtype:DTypeLike|None=None, device:str|tuple[str, ...]|None=None,  # type: ignore[override]
+                   shape:tuple[sint, ...]|None=None, unique=True):
+    # NOTE: fill_value is ConstType, not ConstLike, so UOps and tuples aren't allowed
+    assert not isinstance(fill_value, (UOp, tuple)), "unique const only works on numbers"
+    ret = UOp.const(to_dtype(dtype) if dtype is not None else dtypes.from_py(fill_value), fill_value, canonicalize_device(device))
     ret = ret.replace(src=(UOp.unique(None if unique is True else unique),) + ret.src)
     return ret.reshape((1,)*len(shape)).expand(shape) if shape is not None else ret
   @staticmethod
@@ -971,6 +969,7 @@ class KernelInfo:
   applied_opts: tuple = tuple()
   opts_to_apply: tuple|None = None
   estimates: Estimates|None = None
+  beam: int = 0
   @property
   def function_name(self): return to_function_name(self.name)
 
@@ -1332,7 +1331,8 @@ if TRACK_MATCH_STATS or PROFILE:
       args = ['--rewrites-path', os.getenv("REWRITE_DATA", "")] if os.getenv("REWRITE_DATA", "") else []
       args += ['--profile-path', os.getenv("PROFILE_DATA", "")] if os.getenv("PROFILE_DATA", "") else []
       viz_path = pathlib.Path(__file__).resolve().parent.parent / "viz" / "serve.py"
-      os.execv(sys.executable, [sys.executable, viz_path.as_posix()] + args)
+      if sys.stdout.isatty(): os.execv(sys.executable, [sys.executable, viz_path.as_posix()] + args)
+      else: print("Successfully saved VIZ files, view using: python -m tinygrad.viz.cli")
 
 # *** simple graph rewrite engine ***
 
@@ -1566,7 +1566,7 @@ sugar = {Ops.SINK, Ops.END, Ops.STORE, Ops.LOAD, Ops.UNIQUE, Ops.SQRT, Ops.INDEX
          Ops.WHERE, Ops.RECIPROCAL, Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.CONTIGUOUS, Ops.BARRIER, Ops.DETACH}
 pm_pyrender_extra = PatternMatcher([
   (UPat(Ops.CONST, src=(UPat(Ops.UNIQUE, name="u"), UPat(Ops.DEVICE, name="d")), name="x"),
-   lambda x,u,d: f"UOp.unique_const({x.dtype}, {x.arg}, device={repr(d.arg)}, unique={u.arg})"),
+   lambda x,u,d: f"UOp.unique_const({x.arg}, dtype={x.dtype}, device={repr(d.arg)}, unique={u.arg})"),
   (UPat(Ops.CONST, src=(UPat(Ops.DEVICE, name="d"),), name="x"), lambda x,d: f"UOp.const({x.dtype}, {x.arg}, device={repr(d.arg)})"),
   (UPat(Ops.CONST, src=(), name="x"), lambda x: f"UOp.const({x.dtype}, {x.arg})"),
   (UPat(Ops.DEFINE_VAR, src=(), name="x"), lambda x:
