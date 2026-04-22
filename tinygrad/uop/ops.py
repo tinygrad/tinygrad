@@ -211,7 +211,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   def _shape(self) -> tuple[sint, ...]|None:
     match self.op:
       # late ops don't have shape
-      case Ops.UNIQUE | Ops.LUNIQUE | Ops.DEVICE | Ops.LOAD | Ops.STORE | Ops.IF | Ops.BARRIER | Ops.CUSTOM | Ops.CUSTOMI | \
+      case Ops.UNIQUE | Ops.LUNIQUE | Ops.DEVICE | Ops.LOAD | Ops.IF | Ops.BARRIER | Ops.CUSTOM | Ops.CUSTOMI | \
            Ops.VECTORIZE | Ops.GEP | Ops.UNROLL | Ops.CONTRACT | Ops.SINK | \
            Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE | Ops.BINARY | Ops.INS | Ops.TUPLE | Ops.CALL | Ops.FUNCTION:
         return None
@@ -243,6 +243,12 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
         #if self.src[0]._shape is None or len(self.src[1:]) == len(self.src[0].shape): return None
         # pointer index
         #return self.src[0].shape[len(self.src[1:]):]
+
+      case Ops.CAT:
+        if self.arg == -1:
+          assert all_same([x.shape for x in self.src])
+          return (len(self.src),)+self.src[0].shape
+        # TODO: write the non arg=-1 path
 
       # some ops init the shape
       case Ops.CONST | Ops.DEFINE_VAR | Ops.BIND | Ops.RANGE | Ops.SPECIAL: return ()
@@ -315,7 +321,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
           return tuple(1 if i in axis_arg else s for i,s in enumerate(ps))
 
     # broadcasting here
-    if self.op in GroupOp.Binary|GroupOp.Ternary:
+    # TODO: STORE can only broadcast a smaller src[1] into a larger src[0]
+    if self.op in GroupOp.Binary|GroupOp.Ternary|{Ops.STORE}:
       return _broadcast_shape(*[u.shape for u in self.src])
 
     # elementwise ops keep the shape the same. all inputs with shape must match
@@ -417,6 +424,9 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
   # *** uop syntactic sugar ***
 
+  def cat(*srcs:UOp, axis=-1):  # pylint: disable=no-self-argument
+    assert len(srcs) >= 1 and all_same([x.dtype for x in srcs])
+    return UOp(Ops.CAT, srcs[0].dtype, src=tuple(srcs), arg=axis)
   def sink(*srcs:UOp|None, **kwargs):  # pylint: disable=no-self-argument
     return UOp(Ops.SINK, dtypes.void, tuple([x for x in srcs if x is not None]), **kwargs)
   def maketuple(*srcs:UOp):  # pylint: disable=no-self-argument
