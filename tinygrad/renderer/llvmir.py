@@ -203,8 +203,8 @@ class CPULLVMRenderer(LLVMRenderer):
   def __init__(self, target:Target):
     super().__init__(target)
     from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler
-    if "AMX" in target.arch_extras: self.tensor_cores = tc.amx
-    self.compiler = CPULLVMCompiler(target.arch, [ex for ex in target.arch_extras if ex != "AMX"])
+    if "AMX" in target.arch: self.tensor_cores = tc.amx
+    self.compiler = CPULLVMCompiler([x for x in target.arch.split(",") if x != "AMX"])
 
 barrier = 'fence syncscope("workgroup") release\ntail call void @llvm.amdgcn.s.barrier()\nfence syncscope("workgroup") acquire\n'
 code_for_workitem = {"g": lambda x: f"tail call i32 @llvm.amdgcn.workgroup.id.{chr(120+int(x))}()",

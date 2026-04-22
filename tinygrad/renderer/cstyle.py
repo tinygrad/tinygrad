@@ -279,8 +279,8 @@ class ClangJITRenderer(ClangRenderer):
   def __init__(self, target:Target):
     super().__init__(target)
     from tinygrad.runtime.support.compiler_cpu import ClangJITCompiler
-    if "AMX" in target.arch_extras: self.tensor_cores = tc.amx
-    self.compiler = ClangJITCompiler(target.arch, [ex for ex in target.arch_extras if ex != "AMX"])
+    if "AMX" in target.arch: self.tensor_cores = tc.amx
+    self.compiler = ClangJITCompiler([x for x in target.arch.split(",") if x != "AMX"])
 
 class OpenCLRenderer(CStyleLanguage):
   has_aux = True

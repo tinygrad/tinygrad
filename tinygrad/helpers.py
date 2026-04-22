@@ -193,7 +193,6 @@ class Target:
   device: str = ""
   renderer: str = ""
   arch: str = ""
-  arch_extras: list[str] = field(default_factory=list)
   interface: str = ""
   indices: str = ""
 
@@ -204,13 +203,13 @@ class Target:
     elif len(split) > 2: raise RuntimeError(f"too many '+' in target string: {s!r}")
     else: iface, indices = "", ""
     match [x.upper() if i < 2 else x for i,x in enumerate(s.split(':'))]:
-      case [dev, ren, arch]: return Target(dev, ren, (sp:=arch.split(","))[0], sp[1:], iface, indices)
+      case [dev, ren, arch]: return Target(dev, ren, arch, iface, indices)
       case [dev, ren]: return Target(dev, ren, interface=iface, indices=indices)
       case [dev]: return Target(dev, interface=iface, indices=indices)
       case _: raise RuntimeError(f"too many ':' in target string: {s!r}")
   def __repr__(self):
-    fst = re.sub(":*$", "", ":".join([self.interface, self.indices]))
-    return (fst + "+" if fst else "") + re.sub(":*$", "", ":".join([self.device, self.renderer, ",".join([self.arch] + self.arch_extras)]))
+    fst, snd = re.sub(":*$", "", ":".join([self.interface, self.indices])), re.sub(":*$", "", ":".join([self.device, self.renderer, self.arch]))
+    return (fst + "+" if fst else "") + snd
   # replaces if not already set
   def replacedefault(self, **kwargs) -> Target: return replace(self, **{k:v for k,v in kwargs.items() if not getattr(self, k)})
 

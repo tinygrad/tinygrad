@@ -34,7 +34,7 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
     except KernelOptError:
       pass
     # skip hand-coded TC opts if AMX, upcasting will make kernel slower
-    if good_tc_opt and "AMX" not in k.ren.target.arch_extras:
+    if good_tc_opt and "AMX" not in k.ren.target.arch:
       if rngs is not None:
         for tc_dim in [1,0]: # attempt to upcast M and N
           szs = [sz for sz in [5,4,3,2] if rngs[tc_dim].src[0].divides(sz) is not None]

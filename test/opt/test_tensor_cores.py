@@ -18,7 +18,7 @@ from test.backend.test_linearizer import helper_realized_ast, helper_linearizer_
 
 # NOTE: get_program always passes in Device[Device.DEFAULT].renderer explicitly for process_replay!!!
 
-AMX = "AMX" in DEV.arch_extras
+AMX = "AMX" in DEV.arch
 
 def helper_tc_ensure_uops_and_opts_count(N: int, M:int, K:int, dtype_in:DType, dtype_out:DType, axis:int=0, tc_select:int=-1, tc_opt:int=0,
                                          ensure_triggered:bool=True):
