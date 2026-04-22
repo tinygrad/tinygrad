@@ -280,7 +280,7 @@ class ClangJITRenderer(ClangRenderer):
   def __init__(self, target:Target):
     super().__init__(target)
     from tinygrad.runtime.support.compiler_cpu import ClangJITCompiler
-    self.compiler = ClangJITCompiler()
+    self.compiler = ClangJITCompiler(target.arch)
 
 class OpenCLRenderer(CStyleLanguage):
   has_aux = True
@@ -510,6 +510,10 @@ class HIPRenderer(CStyleLanguage):
     # bfloat16 constant casting
     (UPat.cvar('x', dtypes.bfloat16), lambda x: cast_float_to_bf16(UOp.const(dtypes.float, x.arg))),
   ])
+
+  def asm(self, prg:UOp, lin:UOp) -> bytes:
+    from tinygrad.renderer.amd.elf import assemble_linear
+    return assemble_linear(self, prg, lin)
 
   def render_vector_prefix(self, dtype:DType) -> str:
     vec, scal = self.render_dtype(dtype), self.render_dtype(dtype.scalar())

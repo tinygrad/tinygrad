@@ -1,6 +1,6 @@
 from __future__ import annotations
 import os, mmap, array, functools, ctypes, select, contextlib, dataclasses, sys, itertools, struct, socket, subprocess, time, enum, atexit
-from tinygrad.helpers import round_up, getenv, OSX, temp, ceildiv, unwrap, fetch, system, _ensure_downloads_dir, DEBUG, flatten
+from tinygrad.helpers import round_up, getenv, OSX, temp, ceildiv, unwrap, fetch, system, _ensure_downloads_dir, DEBUG, flatten, pluralize
 from tinygrad.runtime.autogen import libc, pci, vfio, iokit, corefoundation
 from tinygrad.runtime.support.hcq import FileIOInterface, MMIOInterface, HCQBuffer, hcq_filter_visible_devices
 from tinygrad.runtime.support.memory import VirtMapping, AddrSpace, BumpAllocator
@@ -81,7 +81,8 @@ class _System:
     return [(APLRemotePCIDevice if OSX else PCIDevice, x) for x in System.pci_scan_bus(vendor, devices, base_class)]
 
   def pci_probe_device(self, device:str, dev_id:int, vendor:int, devices:tuple[tuple[int, tuple[int, ...]], ...], base_class:int|None=None):
-    cl, pcibus = hcq_filter_visible_devices(self.list_devices(vendor, devices, base_class), device)[dev_id]
+    try: cl, pcibus = (ds:=hcq_filter_visible_devices(self.list_devices(vendor, devices, base_class), device))[dev_id]
+    except IndexError: raise RuntimeError(f"{device}:{dev_id} does not exist ({pluralize('device', len(ds))} available)")
     return cl(device[:2], pcibus)
 
   def pci_setup_usb_bars(self, usb:CustomASM24Controller|ASM24Controller, gpu_bus:int, mem_base:int, pref_mem_base:int) -> dict[int, tuple[int, int]]:
@@ -244,11 +245,11 @@ class PCIIfaceBase:
 
   def __init__(self, dev, dev_id, vendor, devices:tuple[tuple[int, tuple[int, ...]], ...], vram_bar, va_start, va_size,
                dev_impl_t, base_class:int|None=None):
-    self.pci_dev = System.pci_probe_device(dev.__class__.__name__[:-6], dev_id, vendor, devices, base_class=base_class)
+    self.pci_dev = System.pci_probe_device(dn:=dev.__class__.__name__[:-6], dev_id, vendor, devices, base_class=base_class)
     if self.is_local(): System.reserve_va(va_start, va_size)
     with contextlib.suppress(Exception): self.pci_dev.resize_bar(vram_bar)
     self.dev_impl = dev_impl_t(self.pci_dev)
-    self.dev, self.vram_bar = dev, vram_bar
+    self.dev, self.vram_bar, self.count = dev, vram_bar, len(hcq_filter_visible_devices(System.list_devices(vendor, devices, base_class), dn))
 
   def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, force_devmem=False, **kwargs) -> HCQBuffer:
     should_use_sysmem = host or ((cpu_access if self.is_bar_small() else (uncached and cpu_access)) and not force_devmem)

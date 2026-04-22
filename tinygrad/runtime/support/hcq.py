@@ -5,7 +5,7 @@ from dataclasses import replace
 try: import fcntl # windows misses that
 except ImportError: fcntl = None #type:ignore[assignment]
 from tinygrad.helpers import DEV, PROFILE, getenv, to_mv, from_mv, cpu_profile, ProfileRangeEvent, select_first_inited, select_by_name, unwrap
-from tinygrad.helpers import suppress_finalizing, TracingKey
+from tinygrad.helpers import suppress_finalizing, pluralize, TracingKey
 from tinygrad.device import Device, BufferSpec, Compiled, LRUAllocator, ProfileDeviceEvent, ProfileProgramEvent
 from tinygrad.uop.ops import sym_infer, sint, UOp
 from tinygrad.runtime.autogen import libc
@@ -62,6 +62,8 @@ if DEV.interface.startswith("MOCK"): from test.mockgpu.mockgpu import MockFileIO
 
 def hcq_filter_visible_devices(devs, device):
   assert (v:=getenv("HCQ_VISIBLE_DEVICES", "")) == "", f"HCQ_VISIBLE_DEVICES={v} is deprecated, use DEV={DEV.target(device, indices=v)} instead"
+  ids = [int(x) for x in DEV.target(device).indices.split(',') if x.strip()]
+  assert all(x < len(devs) for x in ids), f"invalid visibility filter: {ids} ({pluralize('device', len(devs))} available)"
   return [devs[x] for x in ids] if (ids:=[int(x) for x in DEV.target(device).indices.split(',') if x.strip()]) else devs
 
 SignalType = TypeVar('SignalType', bound='HCQSignal')
@@ -420,6 +422,8 @@ class HCQCompiled(Compiled, Generic[SignalType]):
     self.error_state:Exception|None = None # Exception if error is unrecoverable and sync will always fail
 
     if self._is_cpu(): HCQCompiled.cpu_devices.append(self)
+
+  def count(self) -> int: return self.iface.count if hasattr(self, 'iface') else 1
 
   def synchronize(self, timeout:int|None=None):
     if self.error_state is not None: raise self.error_state

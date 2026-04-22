@@ -169,3 +169,7 @@ def cuGetErrorString(error: int, pStr) -> int:
   # Set the pointer to point to our error string buffer
   pStr._obj.value = ctypes.cast(buf, ctypes.POINTER(ctypes.c_char))
   return orig_cuda.CUDA_SUCCESS
+
+def cuDeviceGetCount(count) -> int:
+  count._obj.value = 1
+  return orig_cuda.CUDA_SUCCESS
