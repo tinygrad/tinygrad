@@ -136,4 +136,4 @@ class CPUDevice(HCQCompiled):
     self.tasks:queue.Queue = queue.Queue()
     CPUWorker(self, self.tasks, thread_id=0).start()
     super().__init__(device, CPUAllocator(self), [ClangJITRenderer, CPULLVMRenderer, LVPRenderer], functools.partial(CPUProgram, self), CPUSignal,
-                     CPUComputeQueue, arch={'AMD64':'x86_64', 'aarch64':'arm64'}.get(m:=platform.machine(), m))
+                     CPUComputeQueue, arch={'AMD64':'x86_64', 'aarch64':'arm64'}.get(m:=platform.machine(), m)+",native")
