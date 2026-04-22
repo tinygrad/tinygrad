@@ -115,11 +115,15 @@ class FFNBlock:
         if hasattr(self, 'ffn_gate_inp_shexp'): shexp = shexp * (x * self.ffn_gate_inp_shexp["weight"]).sum(axis=-1, keepdim=True).sigmoid()
         out = out + shexp
       return out
-    if getenv("CUSTOM_MLP") and x.device == "METAL":
-      from tinygrad.llm.metal_kernels import fused_mlp
-      return fused_mlp(x, self.ffn_gate.weight, self.ffn_up.weight, self.ffn_down.weight)
     # TODO: remove the need for this contiguous
     return self.ffn_down(self.ffn_gate(x).silu().contiguous() * self.ffn_up(x))
+
+  # CUSTOM_MLP=1 fast path: fuse ffn_norm + _feed_forward + residual into one kernel.
+  # Only defined on dense FFNBlocks (no MoE, no shared experts). Caller must check.
+  def _ffn_with_residual_fused(self, h:Tensor) -> Tensor:
+    from tinygrad.llm.metal_kernels import fused_ffn_with_residual
+    return fused_ffn_with_residual(h, self.ffn_norm.weight,
+                                   self.ffn_gate.weight, self.ffn_up.weight, self.ffn_down.weight)
 
   # given the token-prefix match, return how much cached state this block can still reuse
   def _reusable_prefix_len(self, prefix_len:int, cached_len:int) -> int: return prefix_len
