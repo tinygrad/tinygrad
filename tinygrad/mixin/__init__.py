@@ -6,7 +6,7 @@ from tinygrad.mixin.movement import MovementMixin
 from tinygrad.mixin.reduce import ReduceMixin
 from tinygrad.uop import Ops
 from tinygrad.uop.ops import _broadcast_shape, resolve, smax, smin, identity_element
-from tinygrad.dtype import ConstType, DTypeLike, Invalid, dtypes, least_upper_dtype, sum_acc_dtype, to_dtype
+from tinygrad.dtype import ConstType, DTypeLike, Invalid, InvalidType, dtypes, least_upper_dtype, sum_acc_dtype, to_dtype
 from tinygrad.helpers import argfix, ceildiv, flatten, flat_to_grouped, make_tuple, prod, resolve_pool_pads, round_up
 
 if TYPE_CHECKING:
@@ -200,15 +200,24 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     if value == 0: return MovementMixin.pad(X, pads)
     return MovementMixin.pad(X, pads) + MovementMixin.pad(X.ones_like(), pads).cast(dtypes.bool).where(0, value)
 
+  def _ufix_keep_dtype(self, x) -> bool:
+    # matches Tensor scalar-wrapping behavior: keep self.dtype for float self, or for int self with int/Invalid scalar
+    return dtypes.is_float(self.dtype) or (dtypes.is_int(self.dtype) and isinstance(x, (int, InvalidType)))
+
   def _broadcasted(self, y, reverse=False) -> tuple[Self, Self]:
     if not isinstance(y, type(self)): y = self.ufix(y)
     x, y = (self, y) if not reverse else (y, self)
+    # ValueError: unsized ptr has shape (-1,) which can't broadcast; RuntimeError: shape mismatch
     try:
       out_shape = _broadcast_shape(x.shape, y.shape)
       x, y = x._broadcast_to(out_shape), y._broadcast_to(out_shape)
-    except RuntimeError: pass
+    except (RuntimeError, ValueError): pass
     out_dtype = least_upper_dtype(x.dtype, y.dtype)
     return x.cast(out_dtype), y.cast(out_dtype)
+
+  def _binop(self, op:Ops, x, reverse:bool) -> Self:
+    lhs, rhs = self._broadcasted(x, reverse)
+    return lhs.alu(op, rhs)
 
   def dot(self, w:Self, dtype:DTypeLike|None=None) -> Self:
     """
