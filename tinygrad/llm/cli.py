@@ -6,11 +6,8 @@ from tinygrad.viz.serve import TCPServerWithReuse, HTTPRequestHandler
 from tinygrad.llm.model import Transformer
 
 class SimpleTokenizer:
-  def __init__(self, normal_tokens:dict[str, int], special_tokens:dict[str, int], preset:str="llama3",
+  def __init__(self, normal_tokens:dict[str, int], special_tokens:dict[str, int],
                bos_id:int|None=None, eos_id:int=0, eot_id:int|None=None):
-    preset = {"qwen35":"qwen2","qwen35moe":"qwen2"}.get(preset, preset)
-    if preset not in ("llama3","llama-v3","llama-bpe","qwen2","olmo","kimi-k2","tekken","glm4"):
-      raise ValueError(f"Invalid tokenizer preset '{preset}'")
     # https://github.com/openai/gpt-2/blob/9b63575ef42771a015060c964af2c3da4cf7c8ab/src/encoder.py#L9
     bs = [*range(33, 127), *range(161, 173), *range(174, 256)]  # bytes that map to themselves
     self._byte_decoder = {chr(b): b for b in bs} | {chr(256+i): b for i,b in enumerate(b for b in range(256) if b not in bs)}
@@ -26,7 +23,6 @@ class SimpleTokenizer:
     self._normal_tokens = {bytes(self._byte_decoder[c] for c in tok): tid for tok, tid in normal_tokens.items()}
     self._special_tokens = special_tokens
     self._tok2bytes = {tid: tok for tok, tid in self._normal_tokens.items()} | {tid: tok.encode() for tok, tid in self._special_tokens.items()}
-    self.preset = preset
     self.bos_id, self.eos_id, self.eot_id = bos_id, eos_id, eot_id
 
   @staticmethod
@@ -34,13 +30,9 @@ class SimpleTokenizer:
     # https://github.com/ggml-org/llama.cpp/blob/94933c8c2eeaa9a7983e3f6c08af76bd86724094/src/llama-vocab.cpp#L1818-L1820
     vocab: typing.Iterable[tuple[str, int]] = ((tok, idx) for idx, tok in enumerate(kv["tokenizer.ggml.tokens"]))
     normal_tokens, special_tokens = partition(vocab, lambda e: kv["tokenizer.ggml.token_type"][e[1]] == 1)
-    preset, eos_id, eot_id = kv["tokenizer.ggml.pre"], kv.get('tokenizer.ggml.eos_token_id', 0), kv.get('tokenizer.ggml.eot_token_id')
-    # OLMo 2 uses a qwen2-style chat template with <|im_end|>, but its GGUF marks <|endoftext|> as EOS.
-    if kv.get('general.architecture') == 'olmo2' and (im_end := dict(special_tokens).get('<|im_end|>')) is not None:
-      preset, eos_id, eot_id = 'qwen2', im_end, eos_id
-    return SimpleTokenizer(dict(normal_tokens), dict(special_tokens), preset,
+    return SimpleTokenizer(dict(normal_tokens), dict(special_tokens),
       bos_id=kv.get('tokenizer.ggml.bos_token_id') if kv.get('tokenizer.ggml.add_bos_token', True) else None,
-      eos_id=eos_id, eot_id=eot_id)
+      eos_id=kv.get('tokenizer.ggml.eos_token_id', 0), eot_id=kv.get('tokenizer.ggml.eot_token_id'))
 
   def _encode_word(self, word:bytes) -> list[int]:
     if (early_token:=self._normal_tokens.get(word)) is not None: return [early_token]
@@ -67,26 +59,83 @@ class SimpleTokenizer:
     dec = codecs.getincrementaldecoder('utf-8')('replace')
     def _decode(tid:int|None=None) -> str: return dec.decode(self._tok2bytes[tid]) if tid is not None else dec.decode(b'', final=True)
     return _decode
-  def role(self, role:str):
-    if self.preset == 'olmo': return self.encode("<|" + role + "|>\n")  # OLMoE Instruct format
-    if self.preset == 'kimi-k2': return self.encode("<|im_" + role + "|>" + role + "<|im_middle|>")
-    if self.preset == 'qwen2': return self.encode("<|im_start|>" + role + "\n")
-    if self.preset == 'glm4': return self.encode("<|" + role + "|>")
-    if self.preset == 'tekken':
-      if role == 'user': return self.encode("[INST]")
-      if role == 'assistant': return []
-      raise ValueError(f"Unsupported role '{role}' for tokenizer preset '{self.preset}'")
-    return self.encode("<|start_header_id|>" + role + "<|end_header_id|>\n\n")
-  def end_turn(self):
-    if self.preset == 'olmo': return self.encode("\n")
-    if self.preset == 'kimi-k2': return [self.eos_id]
-    if self.preset == 'qwen2': return [self.eos_id] + self.encode("\n")
-    if self.preset == 'glm4': return []
-    if self.preset == 'tekken': return self.encode("[/INST]")
-    return [self.eos_id]
-  def prefix(self) -> list[int]:
-    return ([] if self.bos_id is None else [self.bos_id]) + (self.encode("<sop>") if self.preset == 'glm4' else [])
-  def is_end(self, token_id:int) -> bool: return token_id in (self.eos_id, self.eot_id)
+
+def _flatten_content(c) -> str:
+  return c if isinstance(c, str) else "".join(p["text"] for p in c if p.get("type") == "text")
+
+class Chat:
+  """Formats messages into tokens for a given model.
+
+  Two modes:
+    - default (simple): uses a small hard-coded preset dispatch keyed on `tokenizer.ggml.pre` for the formatting.
+      Covers llama3/qwen2/olmo/kimi-k2/tekken/glm4 chat formats.
+    - `use_jinja=True`: renders the GGUF's `tokenizer.chat_template` with the real `jinja2` package.
+      Needed for templates using features outside the simple preset set (e.g. Qwen 3.5's macros).
+  """
+  _PRESETS = ("llama3", "llama-v3", "llama-bpe", "qwen2", "olmo", "kimi-k2", "tekken", "glm4")
+
+  def __init__(self, tok:SimpleTokenizer, template:str|None=None, preset:str="llama3",
+               use_jinja:bool=False, extra_stop_ids:typing.Iterable[int]=(), turn_end_id:int|None=None):
+    self.tok, self.template, self.use_jinja = tok, template, use_jinja
+    self.preset = {"qwen35":"qwen2", "qwen35moe":"qwen2"}.get(preset, preset)
+    self.turn_end_id = turn_end_id if turn_end_id is not None else tok.eos_id
+    self.stop_ids: set[int] = {x for x in (tok.eos_id, tok.eot_id, self.turn_end_id, *extra_stop_ids) if x is not None}
+    if use_jinja:
+      if template is None: raise ValueError("use_jinja=True requires tokenizer.chat_template in the GGUF")
+    elif self.preset not in self._PRESETS:
+      raise ValueError(f"unsupported tokenizer preset {self.preset!r}; pass use_jinja=True to use the GGUF chat_template instead")
+
+  @staticmethod
+  def from_gguf_kv(kv:dict, tok:SimpleTokenizer, use_jinja:bool=False) -> 'Chat':
+    preset = kv.get('tokenizer.ggml.pre', 'llama3')
+    extra: list[int] = []
+    turn_end_id: int|None = None
+    # OLMo 2: tokenizer.ggml.pre is "dbrx" but the chat format is qwen2-style (<|im_start|>.../<|im_end|>).
+    # <|im_end|> terminates turns (not <|endoftext|>) but both should stop generation.
+    if kv.get('general.architecture') == 'olmo2':
+      preset = 'qwen2'
+      im_end = next((i for i,t in enumerate(kv['tokenizer.ggml.tokens']) if t == '<|im_end|>'), None)
+      if im_end is not None: extra.append(im_end); turn_end_id = im_end
+    return Chat(tok, kv.get('tokenizer.chat_template'), preset, use_jinja, extra, turn_end_id)
+
+  def is_end(self, token_id:int) -> bool: return token_id in self.stop_ids
+
+  def apply(self, messages:list[dict], add_generation_prompt:bool=False, continue_final_message:bool=False) -> list[int]:
+    return (self._apply_jinja if self.use_jinja else self._apply_simple)(messages, add_generation_prompt, continue_final_message)
+
+  def _apply_jinja(self, messages, add_generation_prompt, continue_final_message):
+    try: import jinja2
+    except ImportError as e: raise RuntimeError("use_jinja=True requires the jinja2 package: pip install jinja2") from e
+    def tok_str(tid): return self.tok._tok2bytes[tid].decode(errors='replace') if tid is not None and tid in self.tok._tok2bytes else ''
+    bos, eos, t = tok_str(self.tok.bos_id), tok_str(self.tok.eos_id), jinja2.Template(self.template)
+    if continue_final_message:
+      assert messages and messages[-1]["role"] == "assistant", "continue_final_message requires trailing assistant message"
+      head = t.render(messages=messages[:-1], add_generation_prompt=True, bos_token=bos, eos_token=eos)
+      return self.tok.encode(head + _flatten_content(messages[-1]["content"]))
+    return self.tok.encode(t.render(messages=messages, add_generation_prompt=add_generation_prompt, bos_token=bos, eos_token=eos))
+
+  def _apply_simple(self, messages, add_generation_prompt, continue_final_message):
+    p, tok = self.preset, self.tok
+    def role(r):
+      if p == 'olmo': return tok.encode("<|" + r + "|>\n")  # OLMoE Instruct
+      if p == 'kimi-k2': return tok.encode("<|im_" + r + "|>" + r + "<|im_middle|>")
+      if p == 'qwen2': return tok.encode("<|im_start|>" + r + "\n")
+      if p == 'glm4': return tok.encode("<|" + r + "|>")
+      if p == 'tekken':
+        if r == 'user': return tok.encode("[INST]")
+        if r == 'assistant': return []
+        raise ValueError(f"unsupported role {r!r} for tekken preset")
+      return tok.encode("<|start_header_id|>" + r + "<|end_header_id|>\n\n")  # llama3
+    end_turn = (tok.encode("\n") if p == 'olmo' else [self.turn_end_id] + tok.encode("\n") if p == 'qwen2'
+                else [] if p == 'glm4' else tok.encode("[/INST]") if p == 'tekken' else [self.turn_end_id])
+    ids = ([] if tok.bos_id is None else [tok.bos_id]) + (tok.encode("<sop>") if p == 'glm4' else [])
+    for i, m in enumerate(messages):
+      ids += role(m["role"]) + tok.encode(_flatten_content(m["content"]))
+      if continue_final_message and i == len(messages)-1 and m["role"] == "assistant": continue  # prefill: no end_turn
+      ids += end_turn
+    if add_generation_prompt and not (continue_final_message and messages and messages[-1]["role"] == "assistant"):
+      ids += role("assistant")
+    return ids
 
 models = {
   "llama3.2:1b": "https://huggingface.co/bartowski/Llama-3.2-1B-Instruct-GGUF/resolve/main/Llama-3.2-1B-Instruct-Q6_K.gguf",
@@ -117,7 +166,7 @@ class Handler(HTTPRequestHandler):
     if self.path == "/v1/models": self.send_data(json.dumps({"object":"list","data":[{"id":self.server.model_name,"object":"model"}]}).encode())
     else: self.send_data((pathlib.Path(__file__).parent / "chat.html").read_bytes(), content_type="text/html")
   def run_model(self, ids:list[int], model_name:str, include_usage=False, max_tokens:int|None=None, temperature:float=0.0):
-    model, tok = self.server.model, self.server.tok
+    model, tok, chat = self.server.model, self.server.tok, self.server.chat
     cache_start_pos = model.get_start_pos(ids)
     stderr_log(f"{self.path}  {colored('--', 'BLACK')}  "
                f"in:{colored(f'{cache_start_pos:5d}', 'green')} +{len(ids)-cache_start_pos:5d}  {colored('--', 'BLACK')}  ")
@@ -129,7 +178,7 @@ class Handler(HTTPRequestHandler):
     dec = tok.stream_decoder()
     for next_id in model.generate(ids, temperature=temperature):
       if len(out) == 0: stderr_log(f"prefill:{(len(ids)-cache_start_pos)/((pt:=time.perf_counter())-st):4.0f} tok/s  {colored('--', 'BLACK')}  ")
-      if tok.is_end(next_id): break
+      if chat.is_end(next_id): break
       out.append(next_id)
       yield {"choices": [{"index":0, "delta":{"content":dec(next_id)}, "finish_reason":None}], **tmpl}
       if max_tokens is not None and len(out) >= max_tokens:
@@ -144,25 +193,15 @@ class Handler(HTTPRequestHandler):
                f"out:{len(out):5d}  {colored('--', 'BLACK')}  total:{et-st:6.2f}s\n")
 
   def do_POST(self):
-    tok = self.server.tok
+    chat = self.server.chat
     raw_body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
     body: dict[str, typing.Any] = json.loads(raw_body.decode("utf-8"))
     if DEBUG >= 1: print(json.dumps(body, indent=2))
     if self.path == "/v1/chat/completions":
       # extract tokens, last assistant message is treated as prefill
-      ids: list[int] = tok.prefix()
-      for i, msg in enumerate(body["messages"]):
-        ids += tok.role(msg["role"])
-        content = msg["content"]
-        if isinstance(content, str): ids += tok.encode(content)
-        elif isinstance(content, list):
-          for c in content:
-            if c["type"] == "text": ids += tok.encode(c["text"])
-            else: raise RuntimeError(f"unhandled type: {c['type']}")
-        else: raise RuntimeError(f"unknown content type: {type(content)}")
-        if msg["role"] == "assistant" and i == len(body["messages"]) - 1: break
-        ids += tok.end_turn()
-      else: ids += tok.role("assistant")
+      messages = [{"role": m["role"], "content": _flatten_content(m["content"])} for m in body["messages"]]
+      prefill = bool(messages) and messages[-1]["role"] == "assistant"
+      ids = chat.apply(messages, add_generation_prompt=not prefill, continue_final_message=prefill)
 
       # reply
       max_tokens = body.get("max_completion_tokens") or body.get("max_tokens")
@@ -180,8 +219,8 @@ class Handler(HTTPRequestHandler):
       raise RuntimeError(f"unhandled path {self.path}")
 
 class LLMServer(TCPServerWithReuse):
-  def __init__(self, server_address:tuple, model:Transformer, model_name:str, tok:SimpleTokenizer):
-    self.model, self.model_name, self.tok = model, model_name, tok
+  def __init__(self, server_address:tuple, model:Transformer, model_name:str, tok:SimpleTokenizer, chat:Chat):
+    self.model, self.model_name, self.tok, self.chat = model, model_name, tok, chat
     super().__init__(server_address, Handler)
 
 def main():
@@ -191,6 +230,7 @@ def main():
   parser.add_argument("--serve", nargs='?', type=int, const=8000, metavar="PORT", help="Run OpenAI compatible API (optional port, default 8000)")
   parser.add_argument("--warmup", action="store_true", help="warmup the JIT")
   parser.add_argument("--benchmark", nargs='?', type=int, const=20, metavar="COUNT", help="Benchmark tok/s (optional count, default 20)")
+  parser.add_argument("--jinja", action="store_true", help="Render the GGUF chat_template with the real jinja2 package (needs `pip install jinja2`)")
   args = parser.parse_args()
 
   # load the model
@@ -200,8 +240,9 @@ def main():
   print(f"using model \"{model_name}\" with {raw_model.nbytes():,} bytes and {sum(x.numel() for x in nn.state.get_parameters(model)):,} params")
   del raw_model
 
-  # get tokenizer
+  # get tokenizer and chat formatter
   tok = SimpleTokenizer.from_gguf_kv(kv)
+  chat = Chat.from_gguf_kv(kv, tok, use_jinja=args.jinja)
 
   # warmup the JIT
   if args.warmup or args.serve:
@@ -210,7 +251,7 @@ def main():
       for _ in range(2): list(zip(range(2), model.generate([0])))
 
   # start server
-  if args.serve: LLMServer(('', args.serve), model, model_name, tok).serve_forever()
+  if args.serve: LLMServer(('', args.serve), model, model_name, tok, chat).serve_forever()
 
   # do benchmark
   if args.benchmark is not None:
@@ -222,17 +263,19 @@ def main():
                   tok.decode(toks).replace("\n", "\\n")): next(gen)
     exit(0)
 
-  # interactive chat
-  ids: list[int] = tok.prefix()
+  # interactive chat (falls back to pure completion when the GGUF has no chat template)
+  messages: list[dict] = []
   while 1:
-    try:
-      ids += tok.role("user") + tok.encode(input('>>> ')) + tok.end_turn() + tok.role("assistant")
-    except EOFError:
-      break
-    dec = tok.stream_decoder()
-    for next_id in model.generate(ids):
-      sys.stdout.write(dec(next_id) if not tok.is_end(next_id) else dec() + "\n\n")
+    try: user = input('>>> ')
+    except EOFError: break
+    messages.append({"role": "user", "content": user})
+    ids = chat.apply(messages, add_generation_prompt=True)
+    dec, assistant = tok.stream_decoder(), []
+    for next_id in model.generate(list(ids)):
+      sys.stdout.write(dec(next_id) if not chat.is_end(next_id) else dec() + "\n\n")
       sys.stdout.flush()
-      if tok.is_end(next_id): break
+      if chat.is_end(next_id): break
+      assistant.append(next_id)
+    messages.append({"role": "assistant", "content": tok.decode(assistant)})
 
 if __name__ == "__main__": main()

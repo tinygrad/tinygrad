@@ -7,17 +7,16 @@ class TestLLMServer(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
     cls.mock_tok = Mock()
-    cls.mock_tok.role = Mock(return_value=[100, 101])
     cls.mock_tok.encode = Mock(return_value=[200, 201, 202])
     cls.mock_tok.decode = Mock(return_value="Hello")
     cls.mock_tok.stream_decoder = Mock(return_value=lambda tid=None: "Hello" if tid is not None else "")
-    cls.mock_tok.end_turn = Mock(return_value=[998])
-    cls.mock_tok.prefix = Mock(return_value=[1])
-    cls.mock_tok.preset = "llama3"
     cls.mock_tok.bos_id = 1
     cls.mock_tok.eos_id = 999
     cls.mock_tok.eot_id = None
-    cls.mock_tok.is_end = Mock(side_effect=lambda tid: tid in (999,))
+
+    cls.mock_chat = Mock()
+    cls.mock_chat.apply = Mock(return_value=[1, 100, 101, 200, 201, 202, 998, 100, 101])
+    cls.mock_chat.is_end = Mock(side_effect=lambda tid: tid in (999,))
 
     cls.mock_model = Mock()
     cls.mock_model.generate = Mock(side_effect=lambda ids, **kwargs: iter([300, 301, 999]))
@@ -25,7 +24,7 @@ class TestLLMServer(unittest.TestCase):
 
     from tinygrad.llm.cli import LLMServer
 
-    cls.server = LLMServer(('127.0.0.1', 0), cls.mock_model, "test-model", cls.mock_tok)
+    cls.server = LLMServer(('127.0.0.1', 0), cls.mock_model, "test-model", cls.mock_tok, cls.mock_chat)
     cls.port = cls.server.server_address[1]
     cls.server_thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
     cls.server_thread.start()
@@ -150,35 +149,24 @@ class TestLLMServer(unittest.TestCase):
     self.assertEqual(resp.usage.completion_tokens, 2)
 
   def test_assistant_prefill(self):
-    """Last assistant message should be treated as prefill (not a completed turn)."""
+    """Last assistant message should be treated as prefill (continue_final_message=True)."""
     self.mock_model.generate = Mock(side_effect=lambda ids, **kwargs: iter([300, 999]))
-    captured_ids = []
-    orig_generate = self.mock_model.generate.side_effect
-    def capture_generate(ids, **kwargs):
-      captured_ids.extend(ids)
-      return orig_generate(ids, **kwargs)
-    self.mock_model.generate = Mock(side_effect=capture_generate)
-
+    self.mock_chat.apply.reset_mock()
     resp = self.client.chat.completions.create(
       model="test", messages=[
         {"role": "user", "content": "Hello"},
         {"role": "assistant", "content": "Sure"}
       ], stream=False
     )
-    # prefill tokens should be in ids: role("assistant") + encode("Sure") but NO end_turn after it
-    # and NO extra role("assistant") appended
-    role_tokens = self.mock_tok.role.call_args_list
-    # last role() call should be for "assistant" (the prefill message), not an extra one
-    self.assertEqual(role_tokens[-1], unittest.mock.call("assistant"))
-    # end_turn should be called once less than role() — the prefill assistant msg doesn't get end_turn
-    self.assertEqual(self.mock_tok.end_turn.call_count, self.mock_tok.role.call_count - 1)
+    call = self.mock_chat.apply.call_args
+    self.assertTrue(call.kwargs["continue_final_message"])
+    self.assertFalse(call.kwargs["add_generation_prompt"])
     self.assertIsNotNone(resp.choices[0].message.content)
 
   def test_assistant_prefill_not_last(self):
-    """Assistant message that's NOT last should be a normal completed turn."""
+    """Assistant message that's NOT last should be a normal completed turn (add_generation_prompt=True)."""
     self.mock_model.generate = Mock(side_effect=lambda ids, **kwargs: iter([300, 999]))
-    self.mock_tok.role.reset_mock()
-    self.mock_tok.end_turn.reset_mock()
+    self.mock_chat.apply.reset_mock()
     self.client.chat.completions.create(
       model="test", messages=[
         {"role": "user", "content": "Hello"},
@@ -186,11 +174,9 @@ class TestLLMServer(unittest.TestCase):
         {"role": "user", "content": "Continue"}
       ], stream=False
     )
-    # all messages get end_turn, plus an extra role("assistant") at the end
-    # roles: user, assistant, user, assistant(generation prompt) = 4 role calls
-    # end_turns: user, assistant, user = 3 end_turn calls (one per message)
-    self.assertEqual(self.mock_tok.end_turn.call_count, 3)
-    self.assertEqual(self.mock_tok.role.call_count, 4)
+    call = self.mock_chat.apply.call_args
+    self.assertFalse(call.kwargs["continue_final_message"])
+    self.assertTrue(call.kwargs["add_generation_prompt"])
 
   def test_models_endpoint(self):
     import requests as req
