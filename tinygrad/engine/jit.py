@@ -5,8 +5,7 @@ from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv,
 from tinygrad.device import Buffer, Compiled, Device, MultiBuffer
 from tinygrad.dtype import DType, dtypes
 from tinygrad.uop.ops import UOp, PatternMatcher, Variable, sym_infer, Ops, buffers, track_rewrites, graph_rewrite
-from tinygrad.engine.realize import ExecItem, capturing, CompiledRunner, Runner, Estimates, pm_beam, pm_compile
-from tinygrad.engine.realize import compile_linear, run_linear, get_runner, graph_cache
+from tinygrad.engine.realize import ExecItem, capturing, CompiledRunner, Runner, Estimates, compile_linear, run_linear, get_runner, graph_cache
 from tinygrad.schedule.memory import memory_plan_rewrite, _collect_bufs
 from tinygrad.schedule import linear_to_schedule
 from tinygrad.nn.state import get_parameters
@@ -46,7 +45,7 @@ def graph_split_rewrite(linear:UOp, max_batch_size:int=0) -> UOp:
   for si in linear.src:
     if si.src[0].op is Ops.BUFFER_VIEW: continue
 
-    devs = [Device[x] for x in (si.device if isinstance(si.device, tuple) else (si.device,))]
+    devs = dedup([Device[x] for b in si.src[1:] if b.op is not Ops.BIND for x in (b.device if isinstance(b.device, tuple) else (b.device,))])
     graph_t = graph_class(devs[0]) if devs[0].graph is not None else None
 
     can_graph = graph_t is not None and graph_t.supports_exec_item(devs, si)
