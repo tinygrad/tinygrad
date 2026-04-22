@@ -504,6 +504,168 @@ def _attn_qkv_kernel(q_out: UOp, k_out: UOp, v_out: UOp, x: UOp, norm_w: UOp, q_
     )
 
 
+# ---------------- SSM alpha/beta fusion ----------------
+# GatedDeltaNetBlock's alpha/beta linears both read the same attn_norm(x) input and
+# produce tiny 16-element outputs, each with simple post-matvec activations:
+#   beta  = sigmoid(ssm_beta(normed_x))
+#   alpha = exp(softplus(ssm_alpha(normed_x) + ssm_dt.bias) * ssm_a)
+# Baseline emits 2 kernels (r_16_32_4_8: 143us, r_16_32_4_8n1: 124us = 267us/decode * 18 blocks).
+# Fusing them into one kernel eliminates one full x_norm pass.
+#
+# Shapes (Qwen3.5-0.8B SSM):
+_SSM_DIM = 1024
+_SSM_N_V_HEADS = 16  # time_step_rank
+
+_SSM_ALPHABETA_METAL_SRC = r"""
+#include <metal_stdlib>
+using namespace metal;
+
+constant constexpr uint DIM = 1024u;
+constant constexpr uint N_HEADS = 16u;
+constant constexpr float RMS_EPS = 1e-6f;
+constant constexpr uint WARPS = 4u;
+constant constexpr uint SIMD = 32u;
+constant constexpr uint THREADS = WARPS * SIMD;  // 128
+constant constexpr uint BLOCKS_PER_ROW = DIM / 32u;  // 32 Q8 blocks per weight row
+
+// Grid: N_HEADS=16 threadgroups * 128 threads. Each TG produces 1 alpha + 1 beta output.
+// Work layout: 32 lanes cooperate on one row's 1024-wide reduce (= 32 Q8 blocks), with
+// lane-per-block split. 4 warps x 2 = 8 rows done but we only need 2 (alpha_r, beta_r)
+// so warp 0/1 -> alpha, warp 2/3 -> beta, each doing their row's full reduction.
+//
+// Simpler: each warp handles one output (4 warps => 4 rows: alpha_head0, beta_head0, alpha_head1, beta_head1)
+// But we need row = gid (0..15), alpha AND beta for that head. Total 32 outputs.
+// 2 outputs per TG, using 2 warps each -> 4 warps total, easy.
+kernel void fused_ssm_alpha_beta_q8(
+    device float* data0,                      // alpha_out[16] (float - will be exp'd)
+    device half*  data1,                      // beta_out[16]  (half - matches baseline)
+    device const float* data2,                // x[1024] (pre-norm input)
+    device const float* data3,                // attn_norm.weight[1024]
+    device const uchar* data4,                // ssm_alpha Q8 weights
+    device const uchar* data5,                // ssm_beta Q8 weights
+    device const half* data6,                 // ssm_dt.bias[16] (half!)
+    device const half* data7,                 // ssm_a[16]       (half!)
+    uint gid [[threadgroup_position_in_grid]],
+    uint lidx0 [[thread_index_in_simdgroup]],
+    uint lidx1 [[simdgroup_index_in_threadgroup]]) {
+  threadgroup float x_norm[DIM];
+  threadgroup float rms_scratch[WARPS];
+  threadgroup float red[WARPS];       // for cross-warp sums per row (just 4 floats)
+
+  uint tid = lidx1 * SIMD + lidx0;
+
+  // ---- RMSNorm (shared across alpha/beta) ----
+  float sq = 0.0f;
+  #pragma unroll
+  for (uint i = 0; i < DIM; i += THREADS) {
+    float v = data2[i + tid];
+    sq += v * v;
+  }
+  float warp_sq = simd_sum(sq);
+  if (lidx0 == 0) rms_scratch[lidx1] = warp_sq;
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  float total_sq = rms_scratch[0] + rms_scratch[1] + rms_scratch[2] + rms_scratch[3];
+  float inv_rms = rsqrt(total_sq / float(DIM) + RMS_EPS);
+
+  #pragma unroll
+  for (uint i = 0; i < DIM; i += THREADS) {
+    x_norm[i + tid] = data2[i + tid] * inv_rms * data3[i + tid];
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  // ---- alpha matvec (row = gid) + beta matvec (row = gid) ----
+  // Each thread processes 1 column-block of 32 cols. 32 lanes/warp * 4 warps = 128 threads,
+  // but the reduction axis is 1024 = 32 cols * 32 Q8 blocks. So 32 lanes in warp 0 handle
+  // all 32 blocks for alpha, 32 lanes in warp 1 handle all 32 blocks for beta. Warps 2/3 idle.
+  // Actually simpler: use warp 0 for alpha, warp 1 for beta; warps 2/3 idle this kernel.
+  // Cost: kernel runs with only 2 warps active but finishes in 1/2 the time of 1-warp baseline.
+  uint row = gid;
+
+  if (lidx1 < 2) {
+    device const uchar* w = (lidx1 == 0) ? data4 : data5;
+    uint cb = lidx0;  // col-block 0..31, 1 per lane
+    device const uchar* wblk = w + (row * BLOCKS_PER_ROW + cb) * 34u;
+    float scale = float(*((device const half*)wblk));
+    // Load 32 x_norm floats for this block.
+    uint xbase = cb * 32u;
+    float acc = 0.0f;
+    #pragma unroll
+    for (uint j = 0; j < 32u; j++) {
+      acc += float(as_type<int8_t>(wblk[2u + j])) * x_norm[xbase + j];
+    }
+    float full = simd_sum(scale * acc);
+    if (lidx0 == 0) {
+      if (lidx1 == 0) {
+        // alpha = exp(softplus(full + ssm_dt.bias[row]) * ssm_a[row])
+        float z = full + float(data6[row]);
+        // softplus(z): stable form max(z, 0) + log(1 + exp(-|z|))
+        float sp = max(z, 0.0f) + log(1.0f + exp(-fabs(z)));
+        data0[row] = exp(sp * float(data7[row]));
+      } else {
+        // beta = sigmoid(full)
+        data1[row] = (half)(1.0f / (1.0f + exp(-full)));
+      }
+    }
+  }
+}
+"""
+
+
+@functools.cache
+def _compiled_ssm_alpha_beta() -> bytes:
+    from tinygrad.runtime.ops_metal import MetalCompiler
+    return MetalCompiler().compile(_SSM_ALPHABETA_METAL_SRC)
+
+
+def _ssm_alpha_beta_kernel(alpha_out: UOp, beta_out: UOp, x: UOp, norm_w: UOp,
+                           alpha_w: UOp, beta_w: UOp, dt_bias: UOp, ssm_a: UOp) -> UOp:
+    lib = _compiled_ssm_alpha_beta()
+    ops = 2 * 2 * _SSM_N_V_HEADS * _SSM_DIM + 5 * _SSM_DIM + 20 * _SSM_N_V_HEADS
+    mem = (_SSM_DIM + _SSM_DIM + 2 * _SSM_N_V_HEADS + _SSM_N_V_HEADS + _SSM_N_V_HEADS) * 4 + \
+          2 * _q8_bytes(_SSM_N_V_HEADS * _SSM_DIM)
+    sink = UOp.sink(
+        UOp.special(_SSM_N_V_HEADS, "gidx0"),
+        UOp.special(32, "lidx0"),
+        UOp.special(4, "lidx1"),
+        alpha_out, beta_out, x, norm_w, alpha_w, beta_w, dt_bias, ssm_a,
+        arg=KernelInfo(name="fused_ssm_alpha_beta_q8", estimates=Estimates(ops=ops, mem=mem)),
+    )
+    return UOp(
+        Ops.PROGRAM,
+        src=(
+            sink,
+            UOp(Ops.DEVICE, arg=Device.DEFAULT),
+            UOp(Ops.LINEAR, src=(*sink.src, sink)),
+            UOp(Ops.SOURCE, arg=_SSM_ALPHABETA_METAL_SRC),
+            UOp(Ops.BINARY, arg=lib),
+        ),
+    )
+
+
+def fused_ssm_alpha_beta(x: Tensor, norm_w: Tensor, alpha_w: Tensor, beta_w: Tensor,
+                         dt_bias: Tensor, ssm_a: Tensor,
+                         alpha_shape: tuple[int,...], beta_shape: tuple[int,...]
+                         ) -> tuple[Tensor, Tensor]:
+    """Replacement for
+        alpha = exp(softplus(ssm_alpha(attn_norm(x)) + ssm_dt.bias) * ssm_a)
+        beta  = sigmoid(ssm_beta(attn_norm(x)))
+    fused into one kernel. Returns (alpha, beta).
+    """
+    assert x.numel() == _SSM_DIM, f"fused_ssm_alpha_beta: expected dim={_SSM_DIM}"
+
+    norm_raw = _find_raw_q8_blocks(norm_w)
+    alpha_raw = _find_raw_q8_blocks(alpha_w)
+    beta_raw = _find_raw_q8_blocks(beta_w)
+    if any(t is None for t in (norm_raw, alpha_raw, beta_raw)):
+        raise NotImplementedError("fused_ssm_alpha_beta: all weights must trace to raw uchar")
+
+    alpha = Tensor.empty(alpha_shape, dtype=dtypes.float, device=x.device)
+    beta = Tensor.empty(beta_shape, dtype=dtypes.half, device=x.device)
+    alpha, beta, *_ = Tensor.custom_kernel(alpha, beta, x, norm_raw, alpha_raw, beta_raw,
+                                            dt_bias, ssm_a, fxn=_ssm_alpha_beta_kernel)
+    return alpha, beta
+
+
 def fused_attn_qkv(x: Tensor, norm_w: Tensor, q_w: Tensor, k_w: Tensor, v_w: Tensor,
                    q_shape: tuple[int,...], kv_shape: tuple[int,...]) -> tuple[Tensor, Tensor, Tensor]:
     """Replacement for `attn_q(attn_norm(x)), attn_k(attn_norm(x)), attn_v(attn_norm(x))`.
