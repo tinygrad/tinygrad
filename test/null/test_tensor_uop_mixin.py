@@ -62,6 +62,11 @@ class TestTensorUOpCumalu(unittest.TestCase):
   def test_cumsum_large(self):    _check(self, _t(600), lambda x: x.cumsum())  # exercises _split_cumalu
   def test_cumprod(self):         _check(self, _t(4), lambda x: x.cumprod(0))
 
+class TestTensorUOpOneHot(unittest.TestCase):
+  def test_one_hot(self):
+    t = _t(5)
+    self.assertIs(_strip_unique(t.one_hot(5).uop), _strip_unique(t.uop.one_hot(5)))
+
 class TestTensorUOpCat(unittest.TestCase):
   def test_cat_dim0(self):     _check(self, _t(2, 3), lambda x: x.cat(x, dim=0))
   def test_cat_dim1(self):     _check(self, _t(2, 3), lambda x: x.cat(x, dim=1))

@@ -575,6 +575,27 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     """
     return self._split_cumalu(axis, Ops.MUL)
 
+  # helper function commonly used for indexing
+  def _one_hot_along_dim(self, num_classes:sint, dim:int=-1) -> Self:
+    from tinygrad.uop.ops import sint_to_uop
+    if not dtypes.is_int(self.dtype): raise RuntimeError(f"_one_hot_along_dim expects int index tensor, getting {self.dtype}")
+    offset = self.ndim - self._resolve_dim(dim) - 1
+    dt = dtypes.int64 if sint_to_uop(num_classes).overflows(dtypes.int32) else dtypes.int32
+    return self.eq(type(self).arange(num_classes, dtype=dt, device=self.device).reshape((num_classes,) + (1,) * offset))
+
+  def one_hot(self, num_classes:int) -> Self:
+    """
+    Converts `self` to a one-hot tensor.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([0, 1, 3, 3, 4])
+    print(t.one_hot(5).numpy())
+    ```
+    """
+    if not dtypes.is_int(self.dtype): raise RuntimeError(f"expect integer dtype, getting {self.dtype=}")
+    if num_classes < 0: raise ValueError(f"num_classes must be non-negative, got {num_classes}")
+    return self[..., None]._one_hot_along_dim(num_classes).where(1, 0)
+
   # ***** functional nn ops *****
 
   def linear(self, weight:Self, bias:Self|None=None, dtype:DTypeLike|None=None) -> Self:
