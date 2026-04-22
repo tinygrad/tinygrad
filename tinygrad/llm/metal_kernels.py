@@ -346,7 +346,7 @@ def fused_ffn_with_residual(h: Tensor, norm_w: Tensor,
     gate_raw = _find_raw_q8_blocks(gate_w)
     up_raw = _find_raw_q8_blocks(up_w)
     down_raw = _find_raw_q8_blocks(down_w)
-    if any(t is None for t in (norm_raw, gate_raw, up_raw, down_raw)):
+    if norm_raw is None or gate_raw is None or up_raw is None or down_raw is None:
         raise NotImplementedError("fused_ffn_with_residual: all weights must trace to a raw uchar buffer")
 
     z = Tensor.empty(3584, dtype=dtypes.float, device=h.device)
@@ -656,7 +656,7 @@ def fused_ssm_alpha_beta(x: Tensor, norm_w: Tensor, alpha_w: Tensor, beta_w: Ten
     norm_raw = _find_raw_q8_blocks(norm_w)
     alpha_raw = _find_raw_q8_blocks(alpha_w)
     beta_raw = _find_raw_q8_blocks(beta_w)
-    if any(t is None for t in (norm_raw, alpha_raw, beta_raw)):
+    if norm_raw is None or alpha_raw is None or beta_raw is None:
         raise NotImplementedError("fused_ssm_alpha_beta: all weights must trace to raw uchar")
 
     alpha = Tensor.empty(alpha_shape, dtype=dtypes.float, device=x.device)
@@ -680,7 +680,7 @@ def fused_attn_qkv(x: Tensor, norm_w: Tensor, q_w: Tensor, k_w: Tensor, v_w: Ten
     q_raw = _find_raw_q8_blocks(q_w)
     k_raw = _find_raw_q8_blocks(k_w)
     v_raw = _find_raw_q8_blocks(v_w)
-    if any(t is None for t in (norm_raw, q_raw, k_raw, v_raw)):
+    if norm_raw is None or q_raw is None or k_raw is None or v_raw is None:
         raise NotImplementedError("fused_attn_qkv: all weights must trace to a raw uchar buffer")
 
     q = Tensor.empty(q_shape,  dtype=dtypes.float, device=x.device)
