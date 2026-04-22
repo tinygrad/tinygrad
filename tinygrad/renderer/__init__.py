@@ -67,7 +67,7 @@ class ProgramSpec:
   src:str
   device:str
   ast:UOp  # save the base ast (this is method cache key)
-  prg:UOp|None=None  # save the PROGRAM uop to prevent cache GC
+  prg:UOp|None=None
   uops:list[UOp]|None=None
   lib:bytes|None=None
   aux:list=field(default_factory=list)
