@@ -273,7 +273,7 @@ def exec_kernel(ctx:ExecContext, call, ast):
     prg = get_runner(bufs[0].device, ast)
     prg_bufs = [bufs[i].ensure_allocated() for i in prg.p.globals]
 
-    if VALIDATE_WITH_CPU and ast.op is Ops.SINK:
+    if VALIDATE_WITH_CPU:
       cpu_bufs = [Buffer("CPU", b.size, b.dtype).ensure_allocated().copyin(b.ensure_allocated().as_memoryview()) for b in bufs]
 
     with track_stats(ctx, call, prg.device, prg.display_name, prg.estimates, prg_bufs, var_vals,
@@ -281,9 +281,9 @@ def exec_kernel(ctx:ExecContext, call, ast):
       timing[0] = prg(prg_bufs, var_vals, wait=DEBUG >= 2)
       prg.first_run = False
 
-    if VALIDATE_WITH_CPU and ast.op is Ops.SINK:
+    if VALIDATE_WITH_CPU:
       import numpy as np
-      cpu_prg = get_runner("CPU", ast)
+      cpu_prg = get_runner("CPU", ast.src[0])
       cpu_prg([cpu_bufs[i] for i in cpu_prg.p.globals], var_vals, wait=False)
       for i in prg.p.outs: np.testing.assert_allclose(prg_bufs[i].numpy(), cpu_bufs[i].numpy(), rtol=1e-3, atol=1e-3)
 
@@ -319,7 +319,7 @@ pm_compile = PatternMatcher([
 pm_exec = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.BUFFER_VIEW, name="ast"),), name="call", allow_any_len=True), exec_view),
   (UPat(Ops.CALL, src=(UPat(Ops.COPY, name="ast"),), name="call", allow_any_len=True), exec_copy),
-  (UPat(Ops.CALL, src=(UPat((Ops.SINK, Ops.PROGRAM), name="ast"),), name="call", allow_any_len=True), exec_kernel),
+  (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, name="ast"),), name="call", allow_any_len=True), exec_kernel),
   (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="encdec", name="ast"),), name="call", allow_any_len=True), exec_encdec),
   (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="graph", name="cf"),), name="call", allow_any_len=True), exec_graph),
 ])
