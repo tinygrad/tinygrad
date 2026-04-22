@@ -287,9 +287,8 @@ pm_beam = PatternMatcher([
 ])
 
 pm_compile = PatternMatcher([
-  (UPat(Ops.CALL, src=(UPat((Ops.SINK, Ops.PROGRAM), name="ast"),), name="call", allow_any_len=True),
-   lambda call,ast: call.replace(src=(to_program(ast,
-     Device[call.device if isinstance(call.device, str) else call.device[0]].renderer), *call.src[1:]))),
+  (UPat(Ops.CALL, src=(UPat((Ops.SINK, Ops.PROGRAM), name="ast"),), name="call", allow_any_len=True), lambda call,ast:
+    call.replace(src=(to_program(ast, Device[call.device if isinstance(call.device, str) else call.device[0]].renderer), *call.src[1:]))),
 ])
 
 pm_exec = PatternMatcher([
