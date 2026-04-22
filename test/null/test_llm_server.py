@@ -15,6 +15,7 @@ class TestLLMServer(unittest.TestCase):
     cls.mock_tok.eot_id = None
 
     cls.mock_chat = Mock()
+    cls.mock_chat.tok = cls.mock_tok
     cls.mock_chat.apply = Mock(return_value=[1, 100, 101, 200, 201, 202, 998, 100, 101])
     cls.mock_chat.is_end = Mock(side_effect=lambda tid: tid in (999,))
 
@@ -24,7 +25,7 @@ class TestLLMServer(unittest.TestCase):
 
     from tinygrad.llm.cli import LLMServer
 
-    cls.server = LLMServer(('127.0.0.1', 0), cls.mock_model, "test-model", cls.mock_tok, cls.mock_chat)
+    cls.server = LLMServer(('127.0.0.1', 0), cls.mock_model, "test-model", cls.mock_chat)
     cls.port = cls.server.server_address[1]
     cls.server_thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
     cls.server_thread.start()

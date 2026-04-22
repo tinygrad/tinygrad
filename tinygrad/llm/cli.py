@@ -115,26 +115,30 @@ class Chat:
     return self.tok.encode(t.render(messages=messages, add_generation_prompt=add_generation_prompt, bos_token=bos, eos_token=eos))
 
   def _apply_simple(self, messages, add_generation_prompt, continue_final_message):
-    p, tok = self.preset, self.tok
-    def role(r):
-      if p == 'olmo': return tok.encode("<|" + r + "|>\n")  # OLMoE Instruct
-      if p == 'kimi-k2': return tok.encode("<|im_" + r + "|>" + r + "<|im_middle|>")
-      if p == 'qwen2': return tok.encode("<|im_start|>" + r + "\n")
-      if p == 'glm4': return tok.encode("<|" + r + "|>")
-      if p == 'tekken':
-        if r == 'user': return tok.encode("[INST]")
-        if r == 'assistant': return []
-        raise ValueError(f"unsupported role {r!r} for tekken preset")
-      return tok.encode("<|start_header_id|>" + r + "<|end_header_id|>\n\n")  # llama3
-    end_turn = (tok.encode("\n") if p == 'olmo' else [self.turn_end_id] + tok.encode("\n") if p == 'qwen2'
-                else [] if p == 'glm4' else tok.encode("[/INST]") if p == 'tekken' else [self.turn_end_id])
-    ids = ([] if tok.bos_id is None else [tok.bos_id]) + (tok.encode("<sop>") if p == 'glm4' else [])
+    tok, p, e = self.tok, self.preset, self.turn_end_id
+
+    # role header template (role name interpolated as {0}); llama3 is the default
+    role_tmpl = {'qwen2':   "<|im_start|>{0}\n",
+                 'olmo':    "<|{0}|>\n",
+                 'kimi-k2': "<|im_{0}|>{0}<|im_middle|>",
+                 'glm4':    "<|{0}|>"}.get(p, "<|start_header_id|>{0}<|end_header_id|>\n\n")
+    def role(r):  # tekken is asymmetric: empty header for assistant
+      if p == 'tekken': return tok.encode("[INST]") if r == "user" else []
+      return tok.encode(role_tmpl.format(r))
+
+    # end-of-turn token ids; llama3 is the default
+    if   p == 'qwen2':   end_turn = [e, *tok.encode("\n")]
+    elif p == 'olmo':    end_turn = tok.encode("\n")
+    elif p == 'glm4':    end_turn = []
+    elif p == 'tekken':  end_turn = tok.encode("[/INST]")
+    else:                end_turn = [e]   # llama3, kimi-k2
+
+    prefill = continue_final_message and messages and messages[-1]["role"] == "assistant"
+    ids = ([tok.bos_id] if tok.bos_id is not None else []) + (tok.encode("<sop>") if p == 'glm4' else [])
     for i, m in enumerate(messages):
       ids += role(m["role"]) + tok.encode(_flatten_content(m["content"]))
-      if continue_final_message and i == len(messages)-1 and m["role"] == "assistant": continue  # prefill: no end_turn
-      ids += end_turn
-    if add_generation_prompt and not (continue_final_message and messages and messages[-1]["role"] == "assistant"):
-      ids += role("assistant")
+      if not prefill or i < len(messages) - 1: ids += end_turn
+    if add_generation_prompt and not prefill: ids += role("assistant")
     return ids
 
 models = {
@@ -166,7 +170,7 @@ class Handler(HTTPRequestHandler):
     if self.path == "/v1/models": self.send_data(json.dumps({"object":"list","data":[{"id":self.server.model_name,"object":"model"}]}).encode())
     else: self.send_data((pathlib.Path(__file__).parent / "chat.html").read_bytes(), content_type="text/html")
   def run_model(self, ids:list[int], model_name:str, include_usage=False, max_tokens:int|None=None, temperature:float=0.0):
-    model, tok, chat = self.server.model, self.server.tok, self.server.chat
+    model, chat = self.server.model, self.server.chat
     cache_start_pos = model.get_start_pos(ids)
     stderr_log(f"{self.path}  {colored('--', 'BLACK')}  "
                f"in:{colored(f'{cache_start_pos:5d}', 'green')} +{len(ids)-cache_start_pos:5d}  {colored('--', 'BLACK')}  ")
@@ -175,7 +179,7 @@ class Handler(HTTPRequestHandler):
     out: list[int] = []
     finish_reason = "stop"
     st = time.perf_counter()
-    dec = tok.stream_decoder()
+    dec = chat.tok.stream_decoder()
     for next_id in model.generate(ids, temperature=temperature):
       if len(out) == 0: stderr_log(f"prefill:{(len(ids)-cache_start_pos)/((pt:=time.perf_counter())-st):4.0f} tok/s  {colored('--', 'BLACK')}  ")
       if chat.is_end(next_id): break
@@ -219,8 +223,8 @@ class Handler(HTTPRequestHandler):
       raise RuntimeError(f"unhandled path {self.path}")
 
 class LLMServer(TCPServerWithReuse):
-  def __init__(self, server_address:tuple, model:Transformer, model_name:str, tok:SimpleTokenizer, chat:Chat):
-    self.model, self.model_name, self.tok, self.chat = model, model_name, tok, chat
+  def __init__(self, server_address:tuple, model:Transformer, model_name:str, chat:Chat):
+    self.model, self.model_name, self.chat = model, model_name, chat
     super().__init__(server_address, Handler)
 
 def main():
@@ -251,7 +255,7 @@ def main():
       for _ in range(2): list(zip(range(2), model.generate([0])))
 
   # start server
-  if args.serve: LLMServer(('', args.serve), model, model_name, tok, chat).serve_forever()
+  if args.serve: LLMServer(('', args.serve), model, model_name, chat).serve_forever()
 
   # do benchmark
   if args.benchmark is not None:
