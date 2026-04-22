@@ -900,12 +900,18 @@ class TestCLI(unittest.TestCase):
     def custom_empty_prg(B:UOp, A:UOp) -> UOp:
       sink = UOp(Ops.SINK, arg=KernelInfo(name=f"custom_empty_n{next(empty_counter)}"))
       return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=a.device), UOp(Ops.LINEAR, src=(sink,))))
+    def custom_empty_src(B:UOp, A:UOp) -> UOp:
+      sink = UOp(Ops.SINK, arg=KernelInfo(name=f"custom_empty_n{next(empty_counter)}"))
+      src = "void custom_empty_src() { 0; }"
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=a.device), UOp(Ops.LINEAR, src=(sink,)), UOp(Ops.SOURCE, arg=src)))
     b = Tensor.custom_kernel(Tensor.empty_like(a), a, fxn=custom_empty_prg)[0]
     c = Tensor.custom_kernel(Tensor.empty_like(a), a, fxn=custom_empty_prg)[0]
+    d = Tensor.custom_kernel(Tensor.empty_like(a), a, fxn=custom_empty_src)[0]
     with save_viz() as viz:
       b.realize()
       profile_marker("marker @ 1")
       c.realize()
+      d.realize()
     # save trace to disk for CLI to consume it
     with tempfile.TemporaryDirectory() as tmpdir:
       (r:=Path(tmpdir)/"rewrites.pkl").write_bytes(pickle.dumps(viz.data.trace))
@@ -916,6 +922,7 @@ class TestCLI(unittest.TestCase):
       self.assertIn("void custom_empty_n0", kernels)
       self.assertIn("marker @ 1", kernels)
       self.assertIn("void custom_empty_n1", kernels)
+      self.assertIn("void custom_empty_src", kernels)
       self.assertIn("E", kernels)
       self.assertIn("UOp.const", kernels)
       # get the top slowest functions across all devices
