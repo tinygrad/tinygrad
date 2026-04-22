@@ -59,7 +59,7 @@ def replay_to_program(p:UOp, ast:UOp, renderer:Renderer) -> tuple[str, str, tupl
   return to_str(p2), to_str(p), (ast_repr, renderer)
 
 replayers: dict[str, Callable[..., tuple[str, str, tuple[Any, ...]]]] = {}
-replayers["to_program"] = replay_to_program
+replayers["to_program"] = replayers["do_to_program"] = replay_to_program
 
 # *** run replayers on captured rows and print diffs
 
