@@ -10,7 +10,7 @@ tinygrad supports various runtimes, enabling your code to scale across a wide ra
 | [METAL](https://github.com/tinygrad/tinygrad/tree/master/tinygrad/runtime/ops_metal.py) | Utilizes Metal for acceleration on Apple devices | - | M1+ Macs; Metal 3.0+ for `bfloat` support |
 | [CUDA](https://github.com/tinygrad/tinygrad/tree/master/tinygrad/runtime/ops_cuda.py) | Utilizes CUDA for acceleration on NVIDIA GPUs | nvrtc (default)<br> PTX (`DEV=CUDA:PTX`) | NVIDIA GPU with CUDA support |
 | [CL](https://github.com/tinygrad/tinygrad/tree/master/tinygrad/runtime/ops_cl.py) | Accelerates computations using OpenCL on GPUs | - | OpenCL 2.0 compatible device |
-| [CPU](https://github.com/tinygrad/tinygrad/tree/master/tinygrad/runtime/ops_cpu.py) | Runs on CPU using the clang or llvm compiler | Clang JIT (default)<br>LLVM IR (`DEV=CPU:LLVM`) | `clang` compiler in system `PATH` |
+| [CPU](https://github.com/tinygrad/tinygrad/tree/master/tinygrad/runtime/ops_cpu.py) | Runs on CPU using the clang or llvm compiler | Clang JIT (default)<br>LLVM IR (`DEV=CPU:LLVM`) | `clang` compiler in system `PATH`<br>You can specify additional arch parameters via [the `DEV` variable](env_vars.md#dev-variable). See [CPU arch](#cpu-arch) for details. |
 | [WEBGPU](https://github.com/tinygrad/tinygrad/tree/master/tinygrad/runtime/ops_webgpu.py) | Runs on GPU using the Dawn WebGPU engine (used in Google Chrome) | - | Dawn library installed and discoverable. Binaries: [pydawn v0.3.0](https://github.com/wpmed92/pydawn/releases/tag/v0.3.0) |
 
 
@@ -79,3 +79,13 @@ NV backend supports several interfaces for communicating with devices:
 
 * `NVK`: uses the nvidia driver
 * `PCI`: uses the [NV driver](https://github.com/tinygrad/tinygrad/tree/master/tinygrad/runtime/support/nv/nvdev.py)
+
+## CPU Arch
+The CPU renderers may be additionally configured using the arch component of [the `DEV` environment variable](env_vars.md#dev-variable).
+CPU arch should be specified as a comma-separated list of parameters, and must contain at least two values: the architecture family (ie. x86_64, arm64, or riscv64) and the cpu type (as accepted by `clang`'s `-march`).
+If native is specified as the cpu type, tinygrad (or delegate compiler) will query the host cpu type. Additional comma-separated values may be specified as follows:
+
+* `AMX`: emit Apple silicon AMX instructions
+
+All other additional values are interpreted as cpu feature flags. When a value is preceded by a `-` character, the corresponding feature flag will be disabled, otherwise the flag will be enabled.
+Note that enabled feature flags should not be preceded by a `+`.

@@ -132,6 +132,7 @@ class TestDevVar(unittest.TestCase):
     for d, t in [("AMD", Target(device="AMD", renderer="")), ("AMD:LLVM", Target(device="AMD", renderer="LLVM")),
                  (":LLVM", Target(device="", renderer="LLVM")), ("AMD::gfx1100", Target(device="AMD", arch="gfx1100")),
                  ("AMD:LLVM:gfx1100", Target(device="AMD", renderer="LLVM", arch="gfx1100")), ("::gfx1100", Target(arch="gfx1100")),
+                 ("CPU:LLVM:arm64,native,AMX", Target(device="CPU", renderer="LLVM", arch="arm64,native,AMX")),
                  ("USB+", Target(interface="USB")), ("USB+AMD", Target(device="AMD", interface="USB")),
                  ("PCI:0+AMD", Target(device="AMD", interface="PCI", indices="0")), (":0+AMD", Target(device="AMD", indices="0")),
                  ("PCI:0,1+AMD", Target(device="AMD", interface="PCI", indices="0,1")),
