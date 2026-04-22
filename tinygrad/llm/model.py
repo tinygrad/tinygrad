@@ -134,6 +134,8 @@ class FFNBlock:
   def _state_reset_ops(self) -> list[Tensor]: return []
   def _init_state(self, x:Tensor): raise NotImplementedError
   def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor: raise NotImplementedError
+  # Overridden by TransformerBlock for the CUSTOM_MLP fused attn_qkv+norm fast path.
+  def _attention_with_norm_fused(self, x:Tensor, start_pos:int|UOp) -> Tensor: raise NotImplementedError
 
   def __call__(self, x: Tensor, start_pos: int|UOp):
     self._init_state(x)
@@ -141,11 +143,11 @@ class FFNBlock:
     use_fused = (getenv("CUSTOM_MLP") and x.device == "METAL"
                  and not hasattr(self, 'ffn_gate_exps'))
     # Fused attn_qkv+norm: TransformerBlock only, dense-attention path.
-    use_fused_qkv = use_fused and hasattr(self, '_attention_with_norm_fused')
+    use_fused_qkv = use_fused and isinstance(self, TransformerBlock)
     @function(precompile=True, allow_implicit=True)
     def _run(x:Tensor, start_pos:int|UOp):
       if use_fused_qkv:
-        h = x + self._attention_with_norm_fused(x, start_pos)  # type: ignore[attr-defined]
+        h = x + self._attention_with_norm_fused(x, start_pos)
       else:
         h = x + self._attention(self.attn_norm(x), start_pos)
       # CUSTOM_MLP: fused kernel writes directly to a new buffer, already contiguous.
