@@ -11,8 +11,7 @@ from tinygrad.helpers import resolve_pool_pads, IMAGE, FLOAT16, WINO, Metadata, 
 from tinygrad.helpers import suppress_finalizing, disable_gc
 from tinygrad.gradient import compute_gradient
 from tinygrad.mixin import OpMixin, ReductionStr
-from tinygrad.uop.ops import smax, UOp, Ops, sint, all_metadata, _index_to_concrete_int, sint_to_uop, Variable
-from tinygrad.uop.ops import _broadcast_shape
+from tinygrad.uop.ops import smax, UOp, Ops, sint, all_metadata, _index_to_concrete_int, Variable, _broadcast_shape
 from tinygrad.schedule import ExecItem, create_linear_with_vars, linear_to_schedule
 from tinygrad.device import Buffer, canonicalize_device
 from tinygrad.engine.realize import run_linear
@@ -1643,56 +1642,6 @@ class Tensor(OpMixin):
     values, indices = self._inverse().cummax(axis)
     return values._inverse(), indices
 
-  @staticmethod
-  def _tri(r:sint, c:sint, diagonal=0, device=None, requires_grad:bool|None=None) -> Tensor:
-    return (Tensor.arange(r, device=device).unsqueeze(-1) + diagonal <= Tensor.arange(c, device=device)).requires_grad_(requires_grad)
-
-  def triu(self, diagonal:sint=0) -> Tensor:
-    """
-    Returns the upper triangular part of the tensor, the other elements are set to 0.
-
-    The argument `diagonal` determines which diagonal is on the boundary. `diagonal = 0` means the main diagonal.
-    Positive `diagonal` means above the main diagonal, and negative `diagonal` means below the main diagonal.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([[1, 2, 3, 4], [5, 6, 7, 8], [9, 10, 11, 12]])
-    print(t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.triu(diagonal=0).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.triu(diagonal=1).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.triu(diagonal=-1).numpy())
-    ```
-    """
-    return Tensor._tri(self.shape[-2], self.shape[-1], diagonal=diagonal, device=self.device).where(self, self.zeros_like())
-
-  def tril(self, diagonal:sint=0) -> Tensor:
-    """
-    Returns the lower triangular part of the tensor, the other elements are set to 0.
-
-    The argument `diagonal` determines which diagonal is on the boundary. `diagonal = 0` means the main diagonal.
-    Positive `diagonal` means above the main diagonal, and negative `diagonal` means below the main diagonal.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([[1, 2, 3, 4], [5, 6, 7, 8], [9, 10, 11, 12]])
-    print(t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.tril(diagonal=0).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.tril(diagonal=1).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.tril(diagonal=-1).numpy())
-    ```
-    """
-    return Tensor._tri(self.shape[-2], self.shape[-1], diagonal=diagonal+1, device=self.device).where(self.zeros_like(), self)
-
   def interpolate(self, size:tuple[int, ...], mode:str="linear", align_corners:bool=False) -> Tensor:
     """
     Downsamples or Upsamples to the input `size`, accepts 0 to N batch dimensions.
@@ -2055,28 +2004,6 @@ class Tensor(OpMixin):
     if not Tensor.training or p == 0: return self
     if p == 1: return self.zeros_like()
     return (Tensor.rand_like(self, requires_grad=False, dtype=dtypes.default_float, contiguous=False) >= p).contiguous().where(self, 0) / (1.0 - p)
-
-  # helper function commonly used for indexing
-  def _one_hot_along_dim(self:Tensor, num_classes:sint, dim:int=-1) -> Tensor:
-    if not dtypes.is_int(self.dtype): raise RuntimeError(f"_one_hot_along_dim expects int index tensor, getting {self.dtype}")
-    offset = self.ndim - self._resolve_dim(dim) - 1
-    dt = dtypes.int64 if sint_to_uop(num_classes).overflows(dtypes.int32) else dtypes.int32
-    return self == Tensor.arange(num_classes, dtype=dt, device=self.device, requires_grad=False).reshape((num_classes,) + (1,) * offset)
-
-  def one_hot(self, num_classes:int=-1) -> Tensor:
-    """
-    Converts `self` to a one-hot tensor.
-
-    `num_classes` defaults to -1, which means num_classes will be inferred as max(self) + 1.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([0, 1, 3, 3, 4])
-    print(t.one_hot(5).numpy())
-    ```
-    """
-    if not dtypes.is_int(self.dtype): raise RuntimeError(f"expect integer dtype, getting {self.dtype=}")
-    if num_classes == -1: num_classes = int(self.max().item())+1
-    return self[..., None]._one_hot_along_dim(num_classes).where(1, 0)
 
   def scaled_dot_product_attention(self, key:Tensor, value:Tensor, attn_mask:Tensor|None=None, dropout_p:float=0.0,
                                    is_causal:bool=False, enable_gqa:bool=False) -> Tensor:

@@ -141,6 +141,56 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     out_dtype = to_dtype(dtype) if dtype is not None else dtypes.default_float
     return cls.arange(n, device=device).unsqueeze(-1).eq(cls.arange(m_, device=device)).cast(out_dtype)
 
+  @classmethod
+  def _tri(cls, r:sint, c:sint, diagonal=0, device:str|tuple[str, ...]|None=None) -> Self:
+    return cls.arange(r, device=device).unsqueeze(-1) + diagonal <= cls.arange(c, device=device)
+
+  def triu(self, diagonal:sint=0) -> Self:
+    """
+    Returns the upper triangular part of the tensor, the other elements are set to 0.
+
+    The argument `diagonal` determines which diagonal is on the boundary. `diagonal = 0` means the main diagonal.
+    Positive `diagonal` means above the main diagonal, and negative `diagonal` means below the main diagonal.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([[1, 2, 3, 4], [5, 6, 7, 8], [9, 10, 11, 12]])
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.triu(diagonal=0).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.triu(diagonal=1).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.triu(diagonal=-1).numpy())
+    ```
+    """
+    return self._tri(self.shape[-2], self.shape[-1], diagonal, self.device).where(self, self.zeros_like())
+
+  def tril(self, diagonal:sint=0) -> Self:
+    """
+    Returns the lower triangular part of the tensor, the other elements are set to 0.
+
+    The argument `diagonal` determines which diagonal is on the boundary. `diagonal = 0` means the main diagonal.
+    Positive `diagonal` means above the main diagonal, and negative `diagonal` means below the main diagonal.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([[1, 2, 3, 4], [5, 6, 7, 8], [9, 10, 11, 12]])
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.tril(diagonal=0).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.tril(diagonal=1).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.tril(diagonal=-1).numpy())
+    ```
+    """
+    return self._tri(self.shape[-2], self.shape[-1], diagonal+1, self.device).where(self.zeros_like(), self)
+
   def _pad_constant(self, pX, value:float) -> Self:
     # shrink first for negative pads, then pad with only non-negative values
     pX = tuple((0, 0) if p is None else p for p in pX)
@@ -524,6 +574,27 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     ```
     """
     return self._split_cumalu(axis, Ops.MUL)
+
+  # helper function commonly used for indexing
+  def _one_hot_along_dim(self, num_classes:sint, dim:int=-1) -> Self:
+    from tinygrad.uop.ops import sint_to_uop
+    if not dtypes.is_int(self.dtype): raise RuntimeError(f"_one_hot_along_dim expects int index tensor, getting {self.dtype}")
+    offset = self.ndim - self._resolve_dim(dim) - 1
+    dt = dtypes.int64 if sint_to_uop(num_classes).overflows(dtypes.int32) else dtypes.int32
+    return self.eq(type(self).arange(num_classes, dtype=dt, device=self.device).reshape((num_classes,) + (1,) * offset))
+
+  def one_hot(self, num_classes:int) -> Self:
+    """
+    Converts `self` to a one-hot tensor.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([0, 1, 3, 3, 4])
+    print(t.one_hot(5).numpy())
+    ```
+    """
+    if not dtypes.is_int(self.dtype): raise RuntimeError(f"expect integer dtype, getting {self.dtype=}")
+    if num_classes < 0: raise ValueError(f"num_classes must be non-negative, got {num_classes}")
+    return self[..., None]._one_hot_along_dim(num_classes).where(1, 0)
 
   # ***** functional nn ops *****
 
