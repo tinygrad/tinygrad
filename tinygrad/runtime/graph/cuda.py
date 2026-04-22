@@ -53,11 +53,9 @@ class CUDAGraph(MultiGraphRunner):
     for j in self.updatable:
       _, params, c_args, is_copy, replace, dev_idx = self.nodes[j]
       for pos, iidx in replace:
-        b = input_uops[iidx].buffer
-        buf = b.bufs[dev_idx] if isinstance(b, MultiBuffer) else b
+        buf = b.bufs[dev_idx] if isinstance(b:=input_uops[iidx].buffer, MultiBuffer) else b
         if not is_copy: setattr(c_args, f'f{pos}', buf._buf)
-        elif pos == 0: params.destDevice = buf._buf
-        elif pos == 1: params.srcDevice = buf._buf
+        else: setattr(params, f'srcDevice' if pos == 1 else 'dstDevice', buf._buf)
 
     # Update var_vals in the c_args struct.
     for j, i, v in self.updated_vars(var_vals): setattr(self.nodes[j][2], f'v{i}', v)
