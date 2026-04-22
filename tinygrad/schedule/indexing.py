@@ -177,21 +177,15 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
     #  2. from the single consumer if this op only has one consumer
     #  3. potentially new if this op has 2+ consumers
 
-    shape = x._shape
-    if x.op is Ops.STORE:
-      # TODO: TestTensorVariable.test_symbolic_var_sum_alt_name fails with this, fix canonicalize on variables.
-      #assert x.src[0].shape == x.src[1].shape, f"STORE must have matching input shapes, {x.src[0].shape} != {x.src[1].shape}"
-      shape = x.src[0].shape
-
     consumer_rngs = [rctx.range_map[c][0] for c in consumer_map[x] if c in rctx.range_map]
     if x in rctx.realize_map:
       # if this is in the realize_map, we create new ranges (at the output)
-      out_rngs = tuple(rctx.new_range(s) for s in shape)
+      out_rngs = tuple(rctx.new_range(s) for s in x.shape)
       # all ranges are ended now
       ending_ranges[x] = []
       # mark all ranges as ended
       assert rctx.realize_map[x] is None
-      rctx.realize_map[x] = list(range(len(shape)))
+      rctx.realize_map[x] = list(range(len(x.shape)))
     elif len(consumer_rngs) == 0:
       # if no consumers have ranges and this isn't realized, this doesn't have ranges either.
       continue
@@ -217,7 +211,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
           minimum_valid = UOp.const(dtypes.bool, False).usum(valids)
           _out_rngs.append(graph_rewrite(minimum_valid.where(local_rngs[0], UOp.invalid()), symbolic, name="minimum_valid"))
         else:
-          _out_rngs.append(rctx.new_range(shape[i]))
+          _out_rngs.append(rctx.new_range(x.shape[i]))
           _realize_axis.append(i)
       out_rngs = tuple(_out_rngs)
 
@@ -234,7 +228,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
       ending_ranges[x] = []
       if len(_realize_axis):
         rctx.realize_map[x] = _realize_axis
-        out_rngs = tuple([(rctx.new_range(shape[i]) if i in _realize_axis else r) for i,r in enumerate(out_rngs)])
+        out_rngs = tuple([(rctx.new_range(x.shape[i]) if i in _realize_axis else r) for i,r in enumerate(out_rngs)])
 
     # TODO: some ops don't have shape, enable this after the `.st` property is removed
     #assert len(out_rngs) == len(x.shape), \
