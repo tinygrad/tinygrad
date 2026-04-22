@@ -6,7 +6,7 @@ from tinygrad.renderer.cstyle import HIPRenderer, create_non_native_float_pats, 
 from tinygrad.uop.decompositions import xexp2, xlog2
 from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, GroupOp, range_str
 from tinygrad.dtype import dtypes, float_to_fp8, DType, PtrDType, truncate
-from tinygrad.helpers import prod, Target, AMX, CPU_COUNT, getenv
+from tinygrad.helpers import prod, Target, CPU_COUNT, getenv
 
 def ldt(dt:DType):
   if dt.vcount > 1: return f"<{dt.vcount} x {ldt(dt.scalar())}>"
@@ -134,7 +134,6 @@ class LLVMRenderer(Renderer):
   abi: str | None
   string_rewrite: PatternMatcher
   code_for_op = {k:lambda:None for v in lop.values() for k in v.keys()}
-  if AMX: tensor_cores = tc.amx
 
   extra_matcher = create_non_native_float_pats((dtypes.bfloat16,)) + pm_manual_bf16_cast
   def _render_fn(self, name:str, args:list[tuple[str,DType]], kernel:list[str], prefix:list[str]|None=None) -> str:
@@ -149,7 +148,7 @@ class LLVMRenderer(Renderer):
 
     local_args: list[str] = []
     for u in uops:
-      if AMX and u.op is Ops.WMMA: # prealloc aux buffers as AMX can only load from memory
+      if self.tensor_cores == tc.amx and u.op is Ops.WMMA: # prealloc aux buffers as AMX can only load from memory
         vc += 1
         r[u] = f"%wmma{vc}"
         for i, dtype in enumerate(u.arg[2].vec(sz) for sz in [prod(size for _, size in upcast) for upcast in u.arg[6]]):
@@ -204,7 +203,8 @@ class CPULLVMRenderer(LLVMRenderer):
   def __init__(self, target:Target):
     super().__init__(target)
     from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler
-    self.compiler = CPULLVMCompiler(target.arch)
+    if "AMX" in target.arch_extras: self.tensor_cores = tc.amx
+    self.compiler = CPULLVMCompiler(target.arch, [ex for ex in target.arch_extras if ex != "AMX"])
 
 barrier = 'fence syncscope("workgroup") release\ntail call void @llvm.amdgcn.s.barrier()\nfence syncscope("workgroup") acquire\n'
 code_for_workitem = {"g": lambda x: f"tail call i32 @llvm.amdgcn.workgroup.id.{chr(120+int(x))}()",

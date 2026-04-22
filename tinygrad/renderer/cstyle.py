@@ -3,7 +3,7 @@ import math, sys, struct
 from collections import defaultdict, Counter
 from tinygrad.codegen.opt import tc
 from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat, range_str, axis_letters
-from tinygrad.helpers import strip_parens, getenv, prod, dedup, Target, AMX, CPU_COUNT
+from tinygrad.helpers import strip_parens, getenv, prod, dedup, Target, CPU_COUNT
 from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType, AddrSpace, truncate, float_to_bf16
 from tinygrad.renderer import Renderer
 from tinygrad.codegen.late.devectorizer import no_vectorized_alu
@@ -226,7 +226,6 @@ class ClangRenderer(CStyleLanguage):
   global_max = (CPU_COUNT.value, 0, 0)
   infinity = "__builtin_inff()"
   nan = '__builtin_nanf("")'
-  if AMX: tensor_cores = tc.amx
 
   # language options
   buffer_suffix = " restrict"
@@ -280,7 +279,8 @@ class ClangJITRenderer(ClangRenderer):
   def __init__(self, target:Target):
     super().__init__(target)
     from tinygrad.runtime.support.compiler_cpu import ClangJITCompiler
-    self.compiler = ClangJITCompiler(target.arch)
+    if "AMX" in target.arch_extras: self.tensor_cores = tc.amx
+    self.compiler = ClangJITCompiler(target.arch, [ex for ex in target.arch_extras if ex != "AMX"])
 
 class OpenCLRenderer(CStyleLanguage):
   has_aux = True

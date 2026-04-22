@@ -193,6 +193,7 @@ class Target:
   device: str = ""
   renderer: str = ""
   arch: str = ""
+  arch_extras: list[str] = field(default_factory=list)
   interface: str = ""
   indices: str = ""
 
@@ -203,13 +204,13 @@ class Target:
     elif len(split) > 2: raise RuntimeError(f"too many '+' in target string: {s!r}")
     else: iface, indices = "", ""
     match [x.upper() if i < 2 else x for i,x in enumerate(s.split(':'))]:
-      case [dev, ren, arch]: return Target(dev, ren, arch, iface, indices)
+      case [dev, ren, arch]: return Target(dev, ren, (sp:=arch.split(","))[0], sp[1:], iface, indices)
       case [dev, ren]: return Target(dev, ren, interface=iface, indices=indices)
       case [dev]: return Target(dev, interface=iface, indices=indices)
       case _: raise RuntimeError(f"too many ':' in target string: {s!r}")
   def __repr__(self):
-    fst, snd = re.sub(":*$", "", ":".join([self.interface, self.indices])), re.sub(":*$", "", ":".join([self.device, self.renderer, self.arch]))
-    return (fst + "+" if fst else "") + snd
+    fst = re.sub(":*$", "", ":".join([self.interface, self.indices]))
+    return (fst + "+" if fst else "") + re.sub(":*$", "", ":".join([self.device, self.renderer, ",".join([self.arch] + self.arch_extras)]))
   # replaces if not already set
   def replacedefault(self, **kwargs) -> Target: return replace(self, **{k:v for k,v in kwargs.items() if not getattr(self, k)})
 
@@ -232,7 +233,7 @@ DEV, DEBUG, BEAM, NOOPT = _DEV("DEV", ""), ContextVar("DEBUG", 0), ContextVar("B
 IMAGE, FLOAT16, OPENPILOT_HACKS = ContextVar("IMAGE", 0), ContextVar("FLOAT16", 0), ContextVar("OPENPILOT_HACKS", 0)
 JIT, JIT_BATCH_SIZE = ContextVar("JIT", 2 if OSX and ARCH_X86 else 1), ContextVar("JIT_BATCH_SIZE", 32)
 WINO, CAPTURING, TRACEMETA, NO_COLOR = ContextVar("WINO", 0), ContextVar("CAPTURING", 1), ContextVar("TRACEMETA", 1), ContextVar("NO_COLOR", 0)
-USE_TC, TC_SELECT, TC_OPT, AMX = ContextVar("TC", 1), ContextVar("TC_SELECT", -1), ContextVar("TC_OPT", 0), ContextVar("AMX", 0)
+USE_TC, TC_SELECT, TC_OPT = ContextVar("TC", 1), ContextVar("TC_SELECT", -1), ContextVar("TC_OPT", 0)
 TRANSCENDENTAL, NOLOCALS = ContextVar("TRANSCENDENTAL", 1), ContextVar("NOLOCALS", 0)
 SPLIT_REDUCEOP, NO_MEMORY_PLANNER, LRU = ContextVar("SPLIT_REDUCEOP", 1), ContextVar("NO_MEMORY_PLANNER", 0), ContextVar("LRU", 1)
 RING, ALL2ALL, ALLREDUCE_CAST = ContextVar("RING", 1), ContextVar("ALL2ALL", 0), ContextVar("ALLREDUCE_CAST", 1)
