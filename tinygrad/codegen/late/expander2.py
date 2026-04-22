@@ -1,3 +1,4 @@
+import itertools
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, AxisType, UOp, GroupOp, _align_left, _broadcast_shape
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import all_same
@@ -16,7 +17,6 @@ expander2 = PatternMatcher([
     .reshape(tuple([r.vmax+1 if i == ctx[r.arg[0]] else 1 for i in range(len(ctx))])) if r.arg[0] in ctx else None),
 ])+pm_flatten_range
 
-
 def broadcast_binary(x:UOp):
   shapes = [u.shape for u in x.src]
   print(x.op, shapes)
@@ -26,14 +26,18 @@ def broadcast_binary(x:UOp):
   src_reshaped = [u.reshape(shp).expand(broadcasted) for u,shp in zip(x.src, shaped_aligned)]
   return x.replace(src=tuple(src_reshaped))
 
-def do_binary_devectorize(b:UOp):
+unbroadcast = PatternMatcher([
+  (UPat(GroupOp.Binary|GroupOp.Ternary|{Ops.STORE}, name="x"), broadcast_binary),
+])
+
+def do_devectorize(b:UOp):
   if b.shape == (): return None
   # broadcasting needs to be already unpacked
   if not all_same([x.shape for x in b.src]): return None
-  assert len(b.shape) == 1
   src = []
-  for i in range(b.shape[0]):
-    src.append(b.replace(src=tuple([x.index(UOp.const(dtypes.weakint, i)) for x in b.src])))
+  for idx in itertools.product(*[range(x) for x in b.shape]):
+    idx_c = [UOp.const(dtypes.weakint, i) for i in idx]
+    src.append(b.replace(src=tuple([x.index(*idx_c) for x in b.src])))
   return UOp.cat(*src)
 
 devectorizer2 = pm_index_mops+PatternMatcher([
@@ -54,6 +58,5 @@ devectorizer2 = pm_index_mops+PatternMatcher([
   (UPat(Ops.CAT, src=UPat(Ops.STORE), name="x"), lambda x: UOp.group(*x.src)),
 
   # unpack broadcasting
-  (UPat(GroupOp.Binary|GroupOp.Ternary|{Ops.STORE}, name="x"), broadcast_binary),
-  (UPat(GroupOp.Binary|{Ops.STORE}, name="b"), do_binary_devectorize),
+  (UPat(GroupOp.Elementwise|{Ops.STORE}, name="b"), do_devectorize),
 ])
