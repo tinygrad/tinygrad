@@ -12,6 +12,7 @@ from tinygrad.device import Buffer
 
 from tinygrad.uop.ops import tracked_keys, tracked_ctxs, uop_fields, active_rewrites, active_group, _name_cnt, RewriteTrace
 from tinygrad.viz.serve import load_rewrites, get_full_rewrite, uop_to_json, VizData
+from tinygrad.codegen import to_program_cache
 
 @track_rewrites(name=True)
 def exec_rewrite(sink:UOp, pm_lst:list[PatternMatcher], names:None|list[str]=None) -> UOp:
@@ -39,6 +40,7 @@ class VizTrace:
 @contextlib.contextmanager
 def save_viz():
   for lst in [tracked_keys, tracked_ctxs, active_rewrites, active_group, _name_cnt]: lst.clear()
+  to_program_cache.clear()
   Buffer.profile_events.clear()
   cpu_events.clear()
   viz = VizTrace()
@@ -404,7 +406,7 @@ class TestVizIntegration(unittest.TestCase):
 
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry
 from tinygrad.viz.serve import get_profile
-from extra.viz.cli import decode_profile
+from tinygrad.viz.cli import decode_profile
 
 def load_profile(lst:list[ProfileEvent]) -> dict: return decode_profile(get_profile(VizData(), lst))
 
@@ -887,7 +889,7 @@ class TestCfg(unittest.TestCase):
 
 # launch viz cli without subprocess
 def run_cli(*cli_args) -> str:
-  from extra.viz.cli import main, get_arg_parser
+  from tinygrad.viz.cli import main, get_arg_parser
   args = get_arg_parser().parse_args(cli_args)
   with contextlib.redirect_stdout(buf:=io.StringIO()):
     main(args)
@@ -900,12 +902,18 @@ class TestCLI(unittest.TestCase):
     def custom_empty_prg(B:UOp, A:UOp) -> UOp:
       sink = UOp(Ops.SINK, arg=KernelInfo(name=f"custom_empty_n{next(empty_counter)}"))
       return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=a.device), UOp(Ops.LINEAR, src=(sink,))))
+    def custom_empty_src(B:UOp, A:UOp) -> UOp:
+      sink = UOp(Ops.SINK, arg=KernelInfo(name=f"custom_empty_n{next(empty_counter)}"))
+      src = "void custom_empty_src() { 0; }"
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=a.device), UOp(Ops.LINEAR, src=(sink,)), UOp(Ops.SOURCE, arg=src)))
     b = Tensor.custom_kernel(Tensor.empty_like(a), a, fxn=custom_empty_prg)[0]
     c = Tensor.custom_kernel(Tensor.empty_like(a), a, fxn=custom_empty_prg)[0]
+    d = Tensor.custom_kernel(Tensor.empty_like(a), a, fxn=custom_empty_src)[0]
     with save_viz() as viz:
       b.realize()
       profile_marker("marker @ 1")
       c.realize()
+      d.realize()
     # save trace to disk for CLI to consume it
     with tempfile.TemporaryDirectory() as tmpdir:
       (r:=Path(tmpdir)/"rewrites.pkl").write_bytes(pickle.dumps(viz.data.trace))
@@ -916,6 +924,7 @@ class TestCLI(unittest.TestCase):
       self.assertIn("void custom_empty_n0", kernels)
       self.assertIn("marker @ 1", kernels)
       self.assertIn("void custom_empty_n1", kernels)
+      self.assertIn("void custom_empty_src", kernels)
       self.assertIn("E", kernels)
       self.assertIn("UOp.const", kernels)
       # get the top slowest functions across all devices
@@ -924,7 +933,7 @@ class TestCLI(unittest.TestCase):
       self.assertIn("TINY", times)
       self.assertIn("NULL", times)
       with Context(DEBUG=3):
-        json_lines = run_cli("--rewrites-path", str(r), "--profile-path", str(p), "-p", "-s", "ALL", "--jsonl")
+        json_lines = run_cli("--rewrites-path", str(r), "--profile-path", str(p), "-p", "-s", "ALL", "--json")
       for line in json_lines.split("\n"): _ = json.loads(line)
 
 if __name__ == "__main__":

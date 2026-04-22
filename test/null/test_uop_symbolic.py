@@ -851,9 +851,22 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((a+b+c*2<1).ne(True), 0, 1, "((((a+b)+c)<1)!=True)")
     self.helper_test_variable((a+b*2+c*4<1).ne(True), 0, 1, "((((a+b)+c)<1)!=True)")
 
+  def test_cast_bool_to_int_ne_const(self):
+    cond = Variable("a", 0, 3) < 2
+    # CAST(bool -> int) != 0  ->  cond
+    self.helper_test_variable(cond.cast(dtypes.int).ne(0), 0, 1, "(a<2)")
+    # CAST(bool -> int) != 1  ->  !cond
+    self.helper_test_variable(cond.cast(dtypes.int).ne(1), 0, 1, "((a<2)!=True)")
+    # CAST(bool -> int) != c (c not in {0,1})  ->  always True (CAST is 0 or 1)
+    self.helper_test_variable(cond.cast(dtypes.int).ne(2), 1, 1, "True")
+    self.helper_test_variable(cond.cast(dtypes.int).ne(-1), 1, 1, "True")
+    # CAST(bool -> weakint) folds too
+    self.helper_test_variable(cond.cast(dtypes.weakint).ne(0), 0, 1, "(a<2)")
+    self.helper_test_variable(cond.cast(dtypes.weakint).ne(1), 0, 1, "((a<2)!=True)")
+
   def test_where_removal(self):
     cond = Variable("a", 0, 3) < 2
-    u1, u0 = cond.ufix(1), cond.ufix(0)
+    u1, u0 = cond.const_like(True), cond.const_like(False)
     self.helper_test_variable(cond, 0, 1, "(a<2)")
     self.helper_test_variable(cond.where(u1, u0), 0, 1, "(a<2)")
     self.helper_test_variable(cond.where(u1, u0).where(u1, u0), 0, 1, "(a<2)")

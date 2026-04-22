@@ -3,8 +3,10 @@ from tinygrad import Device, Tensor, dtypes
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.engine.realize import get_program
-from tinygrad.helpers import AMX
+from tinygrad.helpers import DEV
 from test.helpers import replace_opts
+
+AMX = "AMX" in DEV.arch
 
 @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "need backends that support float4")
 class TestFloat4(unittest.TestCase):

@@ -12,7 +12,7 @@ from tinygrad.device import is_dtype_supported
 from tinygrad.dtype import DType
 from tinygrad.uop.ops import UOp, Ops, UPat
 from tinygrad.helpers import CI, DEBUG, OSX, GlobalCounters, Context, getenv, all_same, temp
-from tinygrad.engine.realize import CompiledRunner, run_schedule, run_linear
+from tinygrad.engine.realize import CompiledRunner, run_linear
 from tinygrad.schedule import linear_to_schedule
 
 class KernelCountException(Exception): pass
@@ -49,8 +49,9 @@ def _test_conv2d(allowed:int, dtype:DType=dtypes.float):
   w = Tensor.uniform(16, CIN, 3, 3, requires_grad=True).realize()
   ret = Tensor.conv2d(img, w).relu().mean().backward()
   dtypes.default_float = old_default_float
-  s = Tensor.schedule(ret, img.grad, w.grad)
-  run_schedule(s.copy())
+  linear, var_vals = Tensor.linear_with_vars(ret, img.grad, w.grad)
+  s = linear_to_schedule(linear)
+  run_linear(linear, var_vals)
   cnt = len([si for si in s if si.ast.op is Ops.SINK])
   assert cnt == allowed, f"expected {allowed} kernels, got {cnt}"
   if getenv("CHECK", 1):
@@ -72,9 +73,9 @@ class TestSchedule(unittest.TestCase):
   def test_arange_avgpool2d(self, kcount=1):
     x = Tensor.arange(25).reshape(1,1,5,5).cast(dtypes.float32)
     t = x.avg_pool2d(padding=1)
-    sched = t.schedule()
-    self.assertEqual(len(sched), kcount)
-    run_schedule(sched)
+    linear, var_vals = t.linear_with_vars()
+    self.assertEqual(len(linear_to_schedule(linear)), kcount)
+    run_linear(linear, var_vals)
     import torch
     torch_out = torch.nn.functional.avg_pool2d(torch.arange(25).reshape(1,1,5,5).float(), kernel_size=(2,2), padding=1).numpy()
     np.testing.assert_allclose(t.numpy(), torch_out)
@@ -1053,8 +1054,9 @@ class TestSchedule(unittest.TestCase):
     a2 = mop(a)
     expected = (a+a2).tolist()
     a.assign(a+a2)
-    kcount = len(sched:=a.schedule())
-    run_schedule(sched)
+    linear, var_vals = a.linear_with_vars()
+    kcount = len(linear_to_schedule(linear))
+    run_linear(linear, var_vals)
     self.assertListEqual(a.tolist(), expected)
     self.assertEqual(kcount, expected_kcount)
   def test_setitem_permuted_sched(self): self.test_setitem_sched(lambda x: x.T, 2)
@@ -1353,9 +1355,9 @@ class TestCopyFolding(unittest.TestCase):
   def test_copy_to_same_device_sched(self):
     a = Tensor.ones(4).contiguous().realize().uop.buf_uop
     t = Tensor(a.copy_to_device(a.device))
-    sched = t.schedule()
-    assert len([s for s in sched if s.ast.op is Ops.COPY]) == 0
-    run_schedule(sched)
+    linear, var_vals = t.linear_with_vars()
+    assert len([s for s in linear_to_schedule(linear) if s.ast.op is Ops.COPY]) == 0
+    run_linear(linear, var_vals)
     assert t.uop.is_realized, f"didn't realize Tensor {t}"
     self.assertListEqual(t.tolist(), [1.,1.,1.,1.])
 
@@ -1442,8 +1444,7 @@ class TestFusionOp(unittest.TestCase):
   def test_expand_fuse(self):
     bt = Tensor(np.ones((10, 1)), dtype=dtypes.float32)
     out = (bt*2).expand(10,10).sum(1)
-    sched = out.schedule()
-    run_schedule(sched)
+    run_linear(*out.linear_with_vars())
     outd = out.tolist()
     assert all(x == 20.0 for x in outd)
 

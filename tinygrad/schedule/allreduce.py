@@ -56,7 +56,7 @@ def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
 
 def create_allreduce_function(buf:UOp, red:UOp, output:UOp|None=None) -> UOp|None:
   # BUFFER without unique have unique added later
-  if output is None: output = UOp.unique_const(red.dtype, Invalid, red.device, red.shape).contiguous()
+  if output is None: output = UOp.unique_const(Invalid, red.dtype, red.device, red.shape).contiguous()
   to = red.param_like(0)
   src = buf.param_like(1)
   red = src.allreduce(red.arg, red.src[1])

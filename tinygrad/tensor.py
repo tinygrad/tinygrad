@@ -1,18 +1,17 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from __future__ import annotations
-import time, math, itertools, functools, struct, sys, inspect, pathlib, string, hashlib, weakref
+import time, math, itertools, functools, struct, sys, inspect, pathlib, hashlib, weakref
 from contextlib import ContextDecorator
 from typing import Any, Callable, ClassVar, Sequence, cast, get_args, Literal, ParamSpec, TypeVar, Generic, TYPE_CHECKING
 if TYPE_CHECKING: import numpy
 from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_float, least_upper_dtype, to_dtype, truncate
 from tinygrad.dtype import _from_np_dtype, _to_np_dtype, PyConst, Invalid, InvalidType
-from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, merge_dicts, argsort, getenv, all_same, fully_flatten
-from tinygrad.helpers import IMAGE, FLOAT16, WINO, Metadata, TRACEMETA, ceildiv, fetch, is_numpy_ndarray, TracingKey, cpu_profile
+from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, getenv, all_same, fully_flatten, ceildiv, fetch, flat_to_grouped
+from tinygrad.helpers import resolve_pool_pads, IMAGE, FLOAT16, WINO, Metadata, TRACEMETA, is_numpy_ndarray, TracingKey, cpu_profile
 from tinygrad.helpers import suppress_finalizing, disable_gc
 from tinygrad.gradient import compute_gradient
 from tinygrad.mixin import OpMixin, ReductionStr
-from tinygrad.uop.ops import smax, UOp, Ops, sint, all_metadata, _index_to_concrete_int, sint_to_uop, Variable
-from tinygrad.uop.ops import _broadcast_shape
+from tinygrad.uop.ops import smax, UOp, Ops, sint, all_metadata, _index_to_concrete_int, Variable, _broadcast_shape
 from tinygrad.schedule import ExecItem, create_linear_with_vars, linear_to_schedule
 from tinygrad.device import Buffer, canonicalize_device
 from tinygrad.engine.realize import run_linear
@@ -46,8 +45,8 @@ def _fromnp(x: 'numpy.ndarray') -> UOp:
   return ret.reshape(x.shape)
 
 def get_shape(x) -> tuple[int, ...]:
-  # NOTE: str is special because __getitem__ on a str is still a str
-  if not hasattr(x, "__len__") or not hasattr(x, "__getitem__") or isinstance(x, str) or (hasattr(x, "shape") and x.shape == ()): return ()
+  # NOTE: str is special because iterating it still yields strs
+  if not hasattr(x, "__len__") or isinstance(x, str) or getattr(x, "shape", None) == (): return ()
   if not all_same(subs:=[get_shape(xi) for xi in x]): raise ValueError(f"inhomogeneous shape from {x}")
   return (len(subs),) + (subs[0] if subs else ())
 
@@ -87,9 +86,6 @@ def _masked_setitem(target:Tensor, values:Tensor, mask:Tensor, axes:tuple[int, .
   # select from values for each True element in mask else select from target
   return mask.where(values, target)
 
-#  `(padding_left, padding_right, padding_top, padding_bottom, ...)` ->  `(..., (padding_top, padding_bottom), (padding_left, padding_right))`
-def _flat_to_grouped(padding:Sequence[sint]) -> tuple[tuple[sint, sint], ...]: return tuple(zip(padding[-2::-2], padding[::-2]))
-
 class Tensor(OpMixin):
   """
   A `Tensor` is a multi-dimensional matrix containing elements of a single data type.
@@ -128,7 +124,8 @@ class Tensor(OpMixin):
     elif data is None:
       data = UOp.const(_dtype or dtypes.default_float, 0, _device)
     elif isinstance(data, get_args(ConstType)):
-      data = (UOp.unique_const if _force_unique or requires_grad else UOp.const)(_dtype or dtypes.from_py(data), data, _device)
+      if _force_unique or requires_grad: data = UOp.unique_const(data, _dtype, _device)
+      else: data = UOp.const(_dtype or dtypes.from_py(data), data, _device)
     elif isinstance(data, bytes): data = _frompy(data, _dtype or dtypes.uint8, _device)
     elif isinstance(data, (list, tuple)):
       if _dtype is None:
@@ -178,6 +175,8 @@ class Tensor(OpMixin):
     return lhs._apply_uop(lambda *u: u[0].alu(op, *u[1:]), rhs)
   def alu(self, op: Ops, *src: Tensor) -> Tensor: return self._apply_uop(lambda *u: u[0].alu(op, *u[1:]), *src)
   def const_like(self, b:ConstType) -> Tensor: return Tensor(self.uop.const_like(b), requires_grad=False)
+  @staticmethod
+  def unique_const(fill_value:ConstType|UOp, **kwargs) -> Tensor: return Tensor(fill_value, _force_unique=True, **kwargs)
 
   def requires_grad_(self, requires_grad=True) -> Tensor:
     # make the UOp unique if it's a CONST to prevent gradient accumulation bugs with cached const UOps
@@ -644,123 +643,8 @@ class Tensor(OpMixin):
 
   # ***** creation helper functions *****
 
-  @staticmethod
-  def full(shape:tuple[sint, ...], fill_value:ConstType, **kwargs) -> Tensor:
-    """
-    Creates a tensor with the given shape, filled with the given value.
-
-    You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
-    Additionally, all other keyword arguments are passed to the constructor of the tensor.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor.full((2, 3), 42).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor.full((2, 3), False).numpy())
-    ```
-    """
-    return Tensor(fill_value, _force_unique=True, **kwargs).reshape((1, )*len(new_shape := argfix(shape))).expand(new_shape)
-
-  @staticmethod
-  def invalid(*shape, **kwargs) -> Tensor:
-    """
-    Creates a tensor with the given shape, filled with Invalid.
-
-    This is an alternative to Tensor.empty when you want an "anonymous" buffer.
-
-    Eventually Tensor.empty will be replaced by this.
-    """
-    return Tensor.full(argfix(*shape), Invalid, **kwargs)
-
-  @staticmethod
-  def zeros(*shape, **kwargs) -> Tensor:
-    """
-    Creates a tensor with the given shape, filled with zeros.
-
-    You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
-    Additionally, all other keyword arguments are passed to the constructor of the tensor.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor.zeros(2, 3).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor.zeros(2, 3, dtype=dtypes.int32).numpy())
-    ```
-    """
-    return Tensor.full(argfix(*shape), 0.0, **kwargs)
-
-  @staticmethod
-  def ones(*shape, **kwargs) -> Tensor:
-    """
-    Creates a tensor with the given shape, filled with ones.
-
-    You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
-    Additionally, all other keyword arguments are passed to the constructor of the tensor.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor.ones(2, 3).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor.ones(2, 3, dtype=dtypes.int32).numpy())
-    ```
-    """
-    return Tensor.full(argfix(*shape), 1.0, **kwargs)
-
-  @staticmethod
-  def arange(start, stop=None, step=1, **kwargs) -> Tensor:
-    """
-    Returns a 1-D tensor of size `ceil((stop - start) / step)` with values from `[start, stop)`, with spacing between values given by `step`.
-
-    If `stop` is not specified, values are generated from `[0, start)` with the given `step`.
-
-    If `stop` is specified, values are generated from `[start, stop)` with the given `step`.
-
-    You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
-    Additionally, all other keyword arguments are passed to the constructor of the tensor.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor.arange(5).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor.arange(5, 10).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor.arange(5, 10, 2).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor.arange(5.5, 10, 2).numpy())
-    ```
-    """
-    if stop is None: stop, start = start, 0
-    dtype = kwargs.pop("dtype", dtypes.default_float if any(isinstance(x, float) for x in (start, stop, step)) else dtypes.default_int)
-    lo, hi = (start, stop-step) if step > 0 else (stop-step, start)
-    if lo < (dt:=to_dtype(dtype)).min or dt.max < hi: raise OverflowError(f"arange [{start}, {stop}) is not representable in dtype {dtype}")
-    # NOTE: this matches numpy, torch raises RuntimeError if stop-start and step have different signs
-    if (output_len:=ceildiv(stop-start, step)) <= 0: return Tensor([], dtype=dtype, **kwargs)
-    return (Tensor.full((output_len,), step, dtype=dtype, **kwargs)._cumalu(0, Ops.ADD) + (start - step)).cast(dtype)
-
-  @staticmethod
-  def linspace(start:int|float, stop:int|float, steps:int, **kwargs) -> Tensor:
-    """
-    Returns a 1-D tensor of `steps` evenly spaced values from `start` to `stop`, inclusive.
-
-    You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
-    Additionally, all other keyword arguments are passed to the constructor of the tensor.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor.linspace(0, 10, 5).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor.linspace(-1, 1, 5).numpy())
-    ```
-    """
-    if steps < 0: raise ValueError("number of steps must be non-negative")
-    if (dtype := to_dtype(kwargs.pop("dtype", dtypes.default_float))) == dtypes.bool: raise ValueError("linspace with bool dtype is not supported")
-    if steps == 1: return Tensor([start], dtype=dtype, **kwargs)
-    return (start + Tensor.arange(steps, **kwargs) * ((stop - start) / (steps - 1))).cast(dtype)
-
-  @staticmethod
-  def eye(n:int, m:int|None=None, dtype=None, device=None, requires_grad:bool|None=None) -> Tensor:
+  @classmethod
+  def eye(cls, n:int, m:int|None=None, dtype=None, device=None, requires_grad:bool|None=None) -> Tensor:
     """
     Returns a 2-D tensor with `n` rows and `m` columns, with ones on the diagonal and zeros elsewhere.
 
@@ -775,10 +659,7 @@ class Tensor(OpMixin):
     print(Tensor.eye(2, 4).numpy())
     ```
     """
-    m_ = n if m is None else m
-    if n < 0 or m_ < 0: raise ValueError(f"cannot have negative {n=}, {m_=}")
-    t = (Tensor.arange(n, device=device).unsqueeze(-1) == Tensor.arange(m_, device=device))
-    return t.cast(dtype or dtypes.default_float).requires_grad_(requires_grad)
+    return super().eye(n, m, dtype, device).requires_grad_(requires_grad)
 
   def _multi_like(self, fxn, *args, **kwargs) -> Tensor:
     dtype = kwargs.pop("dtype", self.dtype)
@@ -1105,7 +986,7 @@ class Tensor(OpMixin):
     # normalize to grouped format
     if all(isinstance(p, (int,UOp)) for p in padding):
       if len(padding)%2 != 0: raise ValueError("Flat padding must have even number of pads")
-      pX = _flat_to_grouped(tuple(cast(Sequence[sint], padding)) + (0,0)*(self.ndim - len(padding)//2))
+      pX = ((0,0),)*(self.ndim - len(padding)//2) + flat_to_grouped(cast(Sequence[sint], padding))
     else: pX = tuple((0,0) if p is None else p for p in cast(Sequence[tuple[sint, sint]|None], padding))
     if len(pX) != self.ndim: raise ValueError(f"padding length is improper, {padding=} {self.ndim=}")
     # dispatch
@@ -1518,57 +1399,11 @@ class Tensor(OpMixin):
     """
     return self._inverse().argmax(axis=axis, keepdim=keepdim)
 
-  @staticmethod
-  def einsum(formula:str, *operands:Tensor|Sequence[Tensor], dtype:DTypeLike|None=None) -> Tensor:
-    """
-    Sums the product of the elements of the input tensors according to a formula based on the Einstein summation convention.
-
-    See: https://pytorch.org/docs/stable/generated/torch.einsum.html
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    x = Tensor([[1, 2], [3, 4]])
-    y = Tensor([[5, 6], [7, 8]])
-    print(Tensor.einsum("ij,ij->", x, y).numpy())
-    ```
-    """
-    xs, formula = list(argfix(*operands)), formula.replace(" ", "")
-    # expand ellipsis to letters, determine output
-    if "..." in formula:
-      ell, lhs = "".join(c for c in string.ascii_letters if c not in formula), (formula.split("->") + [""])[0]
-      ell_n = [max(0, x.ndim - len(s) + 3) if "..." in s else 0 for s, x in zip(lhs.split(","), xs)]
-      for i, (s, x) in enumerate(zip(inputs := lhs.split(","), xs)): inputs[i] = s.replace("...", ell[max(ell_n)-ell_n[i]:max(ell_n)])
-      lhs, auto = ",".join(inputs), "".join(sorted(c for c in lhs if lhs.count(c) == 1 and c.isalpha() and c not in ell))
-      formula = f"{lhs}->{formula.split('->')[1].replace('...', ell[:max(ell_n)]) if '->' in formula else ell[:max(ell_n)] + auto}"
-    lhs, rhs = formula.split("->") if "->" in formula else (formula, "".join(sorted(c for c in formula if formula.count(c)==1 and c.isalpha())))
-    inputs = lhs.split(",")
-    if len(xs) != len(inputs): raise ValueError(f"number of operands doesn't match, expected {len(inputs)}, got {len(xs)}")
-    # trace: take diagonal when letter repeats in single input
-    for i, (s, x) in enumerate(zip(inputs, xs)):
-      for c in set(s):
-        while s.count(c) > 1:
-          j, k, n = s.index(c), s.index(c, s.index(c)+1), cast(int, x.shape[s.index(c)])
-          perm = [d for d in range(x.ndim) if d not in (j,k)]+[j,k]
-          x = x.permute(perm).flatten(-2).pad(((0,0),)*(x.ndim-2)+((0,n),)).unflatten(-1,(n,n+1))[...,0] if x.ndim > 2 else x.diagonal()
-          s = s[:k] + s[k+1:]
-      inputs[i], xs[i] = s, x
-    # check sizes and build sorted alphabet
-    sz = merge_dicts([dict(zip(s, x.shape)) for s, x in zip(inputs, xs)])
-    alpha = sorted(sz)
-    # align all tensors to alphabet, multiply, sum non-output, permute to output order
-    xs = [x.permute(*[s.index(c) for c in sorted(s)]).reshape([sz[c] if c in s else 1 for c in alpha]).expand([sz[c] for c in alpha]) if s else x
-          for s, x in zip(inputs, xs)]
-    return Tensor.uprod(*xs).sum([i for i,c in enumerate(alpha) if c not in rhs], dtype=dtype).permute(argsort(argsort(list(rhs))))
-
   # ***** processing ops *****
-
-  def _resolve_pool_pads(self, padding:int|Sequence[int], dims:int) -> Sequence[int]:
-    if not isinstance(padding, int) and not (len(padding) == 2*dims or len(padding) == dims):
-      raise ValueError(f"Padding must be an int or a sequence of length {dims} or {2*dims}, but got {padding=} for {self.shape=} with {dims=}.")
-    return [padding]*2*dims if isinstance(padding, int) else (padding if len(padding) == 2*dims else [p for p in padding for _ in range(2)][::-1])
 
   def _apply_ceil_mode(self, pads:Sequence[int], k_:tuple[sint, ...], s_:int|tuple[int, ...], d_:int|tuple[int, ...]) -> list[int]:
     (d_,s_), i_ = (make_tuple(x, len(k_)) for x in (d_,s_)), self.shape[-len(k_):]
-    pads, grouped_pads = list(pads), _flat_to_grouped(pads)
+    grouped_pads = list(flat_to_grouped(pads))
     # https://arxiv.org/pdf/1603.07285 section 5.1, relationship 15.
     o_ = [ceildiv(i+pB+pA - (d*(k-1)+1), s) + 1 for i,d,k,s,(pB,pA) in zip(i_,d_,k_,s_,grouped_pads)]
     for dim,(o,i,s,k,d,(pB,pA)) in enumerate(zip(o_,i_,s_,k_,d_,grouped_pads)):
@@ -1576,8 +1411,8 @@ class Tensor(OpMixin):
       # `s*(o-1) + (d*(k-1)+1) - (i+pB+pA)` -> last_sliding_window_start + full_kernel_size - padded_input_shape
       # we decrease padding in the case that a sliding window starts in the end padded region, thereby decreasing `o_` in `_pool`
       # `smax(s*(o-1) - (pB+i-1), 0)` -> last_sliding_window_start - (pad_before + input_size - zero_offset)
-      pads[-1-dim*2] += s*(o-1) + (d*(k-1)+1) - (i+pB+pA) - smax(s*(o-1) - (pB+i-1), 0)
-    return pads
+      grouped_pads[dim] = (pB, pA + s*(o-1) + (d*(k-1)+1) - (i+pB+pA) - smax(s*(o-1) - (pB+i-1), 0))
+    return flatten(reversed(grouped_pads))
 
   # NOTE: these work for more than 2D
   def avg_pool2d(self, kernel_size:tuple[int, ...]=(2,2), stride=None, dilation=1, padding:int|tuple[int, ...]=0,
@@ -1618,7 +1453,7 @@ class Tensor(OpMixin):
     """
     axis = tuple(range(-len(k_ := make_tuple(kernel_size, 2)), 0))
     def pool(x:Tensor, padding_:Sequence[int]) -> Tensor: return x.pad(padding_)._pool(k_, stride if stride is not None else k_, dilation)
-    reg_pads = self._resolve_pool_pads(padding, len(k_))
+    reg_pads = resolve_pool_pads(padding, len(k_))
     ceil_pads = self._apply_ceil_mode(reg_pads, k_, stride if stride is not None else k_, dilation)
     if not count_include_pad:
       pads = ceil_pads if ceil_mode else reg_pads
@@ -1660,7 +1495,7 @@ class Tensor(OpMixin):
     ```
     """
     axis = tuple(range(-len(k_ := make_tuple(kernel_size, 2)), 0))
-    pads = self._resolve_pool_pads(padding, len(k_))
+    pads = resolve_pool_pads(padding, len(k_))
     if ceil_mode: pads = self._apply_ceil_mode(pads, k_, stride if stride is not None else k_, dilation)
     pooled = self.pad(pads, value=self.dtype.min)._pool(k_, stride if stride is not None else k_, dilation)
     if not return_indices: return pooled.max(axis)
@@ -1694,14 +1529,53 @@ class Tensor(OpMixin):
     bs,c,*spatial_shape = self.shape
     if output_size is None:
       k_,d_,s_ = (make_tuple(x, len(spatial_shape)) for x in (kernel_size, dilation, stride if stride is not None else kernel_size))
-      p_ = _flat_to_grouped(self._resolve_pool_pads(padding, len(spatial_shape)))
+      p_ = flat_to_grouped(resolve_pool_pads(padding, len(spatial_shape)))
       # https://arxiv.org/pdf/1603.07285 inverse of relationship 15 in section 5.1.
       output_size = tuple((i-1)*s - (pB+pA) + (d*(k-1)+1) for i,k,d,s,(pA,pB) in zip(spatial_shape,k_,d_,s_,p_))
     else: output_size = output_size[-len(spatial_shape):]
     ret = (indices.reshape(bs,c,1,-1)._one_hot_along_dim(prod(output_size), 2).where(self.reshape(bs,c,1,-1), 0)).sum(3)
     return ret.reshape(bs,c,*output_size)
 
-  def conv2d(self, weight:Tensor, bias:Tensor|None=None, groups=1, stride=1, dilation=1, padding:int|tuple[int, ...]=0,
+  # TODO: winograd can be a rewrite rule like split_reduceop
+  def _conv2d_winograd(self, weight:Tensor, bias:Tensor|None, groups:int, padding:int|Sequence[int], dtype:DTypeLike|None) -> Tensor:
+    (bs,cin_), (cout,cin), HW = self.shape[:2], weight.shape[:2], weight.shape[2:]
+    padding_ = resolve_pool_pads(padding, len(HW))
+    assert groups*cin == cin_ and len(self.shape) == len(weight.shape),\
+        f"Input Tensor shape {self.shape} does not match the shape of the weights {weight.shape}. ({groups*cin} vs. {cin_})"
+    rcout, oyx = cout//groups, self.pad(padding_)._pool(HW, 1, 1).shape[2:-len(HW)]
+    HWI, HWO = (6,) * len(HW), (4,) * len(HW)  # F(4x4,3x3) winograd tiles
+    winograd_G = [[1/4, 0, 0], [-1/6, -1/6, -1/6], [-1/6, 1/6, -1/6], [1/24, 1/12, 1/6], [1/24, -1/12, 1/6], [0, 0, 1]]
+    winograd_Bt = [[4, 0, -5, 0, 1, 0], [0, -4, -4, 1, 1, 0], [0, 4, -4, -1, 1, 0], [0, -2, -1, 2, 1, 0], [0, 2, -1, -2, 1, 0], [0, 4, 0, -5, 0, 1]]
+    winograd_At = [[1, 1, 1, 1, 1, 0], [0, 1, -1, 2, -2, 0], [0, 1, 1, 4, 4, 0], [0, 1, -1, 8, -8, 1]] # applying At in pre-order doubles compile time
+
+    # TODO: stride == dilation
+    # use padding to round up to 4x4 output tiles
+    # (bs, cin_, tyx, HWI)
+    pads = [(pB, pA + (-(s + pB + pA - 2) % 4)) for (pB, pA), s in zip(flat_to_grouped(padding_), self.shape[-len(HW):])]
+    d = self.pad(flatten(reversed(pads)))._pool(HWI, HWO)
+    # move HW to the front: # (HWI, bs, cin_, tyx)
+    d = d.permute(*range(len(d.shape)-len(HW),len(d.shape)), *range(len(d.shape)-len(HW)))
+    tyx = d.shape[-len(HWI):]  # dim of tiling
+
+    g = weight.permute(*range(len(weight.shape)-len(HW),len(weight.shape)), *range(len(weight.shape)-len(HW)))  # move HW to the front
+
+    # compute 6x6 winograd tiles: GgGt, BtdB
+    # (HWI, groups * rcout, cin) -> (HWI, bs=1, groups, rcout, cin, tyx=(1,1))
+    gfactors = _apply_winograd_matrix(winograd_G, g, len(HW)).reshape(*HWI, 1, groups, rcout, cin, *([1]*len(tyx)))
+    # (HWI, bs, cin_, tyx) -> (HWI, bs, groups, 1 ,cin, *tyx)
+    dfactors = _apply_winograd_matrix(winograd_Bt, d, len(HW)).reshape(*HWI, bs, groups, 1, cin, *tyx)
+
+    # matmul; sum across cin: (HWI, bs, groups, rcout, *tyx); then HWI -> HWO: (HWO, bs, groups, rcout, *tyx)
+    ret = _apply_winograd_matrix(winograd_At, (gfactors * dfactors).sum(axis=-1-len(HW), dtype=dtype), len(HW))
+
+    # interleave tyx and HWO: (bs, groups, rcout, oy, HO, ox, WO)
+    ret = ret.permute([*range(len(HW), len(ret.shape)-len(HW)), *[i+o for i in range(len(HW)) for o in [len(ret.shape)-len(HW),0]]])
+    # merge groups and rcout, tyx and HWO: (bs, groups, cout, *yx), shrink to final
+    ret = ret.reshape(bs, cout, *[c * HWO[i] for i, c in enumerate(tyx)]).shrink_to(bs, cout, *oyx)
+
+    return (ret if bias is None else ret.add(bias.reshape(1, -1, *[1 for _ in range(len(HW))]))).contiguous().contiguous_backward()
+
+  def conv2d(self, weight:Tensor, bias:Tensor|None=None, groups=1, stride=1, dilation=1, padding:int|Sequence[int]=0,
              dtype:DTypeLike|None=None) -> Tensor:
     """
     Applies a convolution over a tensor with a given `weight` and optional `bias`.
@@ -1729,98 +1603,12 @@ class Tensor(OpMixin):
     ```
     """
     if IMAGE: return self.image_conv2d(weight, bias, groups, stride, dilation, padding, dtype)
-    (bs,cin_), (cout,cin), HW = self.shape[:2], weight.shape[:2], weight.shape[2:]
-    padding_ = self._resolve_pool_pads(padding, len(HW))
-    assert groups*cin == cin_ and len(self.shape) == len(weight.shape),\
-        f"Input Tensor shape {self.shape} does not match the shape of the weights {weight.shape}. ({groups*cin} vs. {cin_})"
-
-    # conv2d is a pooling op (with padding)
-    x = self.pad(padding_)._pool(HW, stride, dilation)   # (bs, groups*cin, oy, ox, H, W)
-    rcout, oyx = cout//groups, x.shape[2:-len(HW)]
-    if not all(x == 3 for x in HW) or stride != 1 or dilation != 1 or not WINO:
-      # normal conv
-      x = x.reshape(bs, groups, cin, 1, *oyx, *HW).expand(bs, groups, cin, rcout, *oyx, *HW)\
-        .permute(0,1,3,*[4+i for i in range(len(oyx))],2,*[4+len(oyx)+i for i in range(len(HW))])
-
-      # conv! broadcasted to (bs, groups, rcout, *oyx, cin, *HW)
-      ret = (x * weight.reshape(1, groups, rcout, *[1] * len(oyx), cin, *HW))\
-        .sum([-1-i for i in range(1+len(oyx))], keepdim=True, dtype=dtype).reshape(bs, cout, *oyx)
-      return ret if bias is None else ret.add(bias.reshape(1, -1, *[1] * len(HW)))
-
-    HWI, HWO = (6,) * len(HW), (4,) * len(HW)  # F(4x4,3x3) winograd tiles
-    winograd_G = [[1/4, 0, 0], [-1/6, -1/6, -1/6], [-1/6, 1/6, -1/6], [1/24, 1/12, 1/6], [1/24, -1/12, 1/6], [0, 0, 1]]
-    winograd_Bt = [[4, 0, -5, 0, 1, 0], [0, -4, -4, 1, 1, 0], [0, 4, -4, -1, 1, 0], [0, -2, -1, 2, 1, 0], [0, 2, -1, -2, 1, 0], [0, 4, 0, -5, 0, 1]]
-    winograd_At = [[1, 1, 1, 1, 1, 0], [0, 1, -1, 2, -2, 0], [0, 1, 1, 4, 4, 0], [0, 1, -1, 8, -8, 1]] # applying At in pre-order doubles compile time
-
-    # TODO: stride == dilation
-    # use padding to round up to 4x4 output tiles
-    # (bs, cin_, tyx, HWI)
-    pads = [[padding_[i*2], padding_[i*2+1] + (-(dim+sum(padding_[i*2:(i+1)*2])-2) % 4)] for i, dim in enumerate(reversed(self.shape[-len(HW):]))]
-    d = self.pad(sum(pads, []))._pool(HWI, HWO)
-    # move HW to the front: # (HWI, bs, cin_, tyx)
-    d = d.permute(*range(len(d.shape)-len(HW),len(d.shape)), *range(len(d.shape)-len(HW)))
-    tyx = d.shape[-len(HWI):]  # dim of tiling
-
-    g = weight.permute(*range(len(weight.shape)-len(HW),len(weight.shape)), *range(len(weight.shape)-len(HW)))  # move HW to the front
-
-    # compute 6x6 winograd tiles: GgGt, BtdB
-    # (HWI, groups * rcout, cin) -> (HWI, bs=1, groups, rcout, cin, tyx=(1,1))
-    gfactors = _apply_winograd_matrix(winograd_G, g, len(HW)).reshape(*HWI, 1, groups, rcout, cin, *([1]*len(tyx)))
-    # (HWI, bs, cin_, tyx) -> (HWI, bs, groups, 1 ,cin, *tyx)
-    dfactors = _apply_winograd_matrix(winograd_Bt, d, len(HW)).reshape(*HWI, bs, groups, 1, cin, *tyx)
-
-    # matmul; sum across cin: (HWI, bs, groups, rcout, *tyx); then HWI -> HWO: (HWO, bs, groups, rcout, *tyx)
-    ret = _apply_winograd_matrix(winograd_At, (gfactors * dfactors).sum(axis=-1-len(HW), dtype=dtype), len(HW))
-
-    # interleave tyx and HWO: (bs, groups, rcout, oy, HO, ox, WO)
-    ret = ret.permute([*range(len(HW), len(ret.shape)-len(HW)), *[i+o for i in range(len(HW)) for o in [len(ret.shape)-len(HW),0]]])
-    # merge groups and rcout, tyx and HWO: (bs, groups, cout, *yx), shrink to final
-    ret = ret.reshape(bs, cout, *[c * HWO[i] for i, c in enumerate(tyx)]).shrink_to(bs, cout, *oyx)
-
-    return (ret if bias is None else ret.add(bias.reshape(1, -1, *[1 for _ in range(len(HW))]))).contiguous().contiguous_backward()
-
-  def conv_transpose2d(self, weight:Tensor, bias:Tensor|None=None, groups=1, stride=1, dilation=1, padding=0, output_padding=0) -> Tensor:
-    """
-    Applies a transposed convolution over a tensor with a given `weight` and optional `bias`.
-
-    This function supports three different types of `padding`
-
-    1. `int` (single value):
-      Applies the same padding value uniformly to all spatial dimensions.
-
-    2. `tuple[int, ...]` (length = number of spatial dimensions):
-      Specifies a distinct padding value for each spatial dimension in the form `(padding_height, padding_width, ...)`.
-
-    3. `tuple[int, ...]` (length = 2 * number of spatial dimensions):
-      Specifies explicit padding for each side of each spatial dimension in the form
-      `(padding_left, padding_right, padding_top, padding_bottom, ...)`.
-
-    NOTE: unlike PyTorch, this implementation is not limited to only 2d transposed convolutions and instead works for any number of dimensions.
-
-    See: https://pytorch.org/docs/stable/generated/torch.nn.ConvTranspose2d.html
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor.arange(9).reshape(1, 1, 3, 3)
-    w = Tensor.ones(1, 1, 2, 2)
-    print(t.conv_transpose2d(w).numpy())
-    ```
-    """
-    x, w = self, weight.unflatten(0, (groups, -1)).transpose(1, 2).flip(*range(3, len(weight.shape)+1))
-    HW = weight.shape[2:]
-    padding = _flat_to_grouped(self._resolve_pool_pads(padding, len(HW)))
-    stride, dilation, output_padding = [make_tuple(x, len(HW)) for x in (stride, dilation, output_padding)]
-    if any(s>1 for s in stride):
-      # handle strides: (k) -> reshape -> (k,1) -> pad -> (k,s) -> reshape -> (k*s) -> shrink (k-(s-1))
-      x = x.reshape(None, None, *flatten((k,1) for k in x.shape[2:]))
-      x = x.pad((None, None, *flatten((None,(0,s-1)) for s in stride)))
-      x = x.reshape(None, None, *[k*s for k,s in zip(x.shape[2::2], stride)])
-      x = x.shrink_to(None, None, *[k-(s-1) for k,s in zip(x.shape[2:], stride)])
-    padding = flatten((((k-1)*d-pB,(k-1)*d-pA+op) for k,d,(pB,pA),op in reversed(list(zip(HW, dilation, padding, output_padding)))))
-    return x.conv2d(w.flatten(end_dim=1), groups=groups, bias=bias, dilation=dilation, padding=padding)
+    if WINO and all(x == 3 for x in weight.shape[2:]) and stride == dilation == 1: return self._conv2d_winograd(weight, bias, groups, padding, dtype)
+    return super().conv2d(weight, bias, groups, stride, dilation, padding, dtype)
 
   def dot(self, w:Tensor, dtype:DTypeLike|None=None) -> Tensor:
     if IMAGE: return self.image_dot(w, dtype)
-    return super().dot(w, dtype=dtype)
+    return super().dot(w, dtype)
 
   def cummax(self, axis:int=0) -> tuple[Tensor, Tensor]:
     """
@@ -1853,56 +1641,6 @@ class Tensor(OpMixin):
     """
     values, indices = self._inverse().cummax(axis)
     return values._inverse(), indices
-
-  @staticmethod
-  def _tri(r:sint, c:sint, diagonal=0, device=None, requires_grad:bool|None=None) -> Tensor:
-    return (Tensor.arange(r, device=device).unsqueeze(-1) + diagonal <= Tensor.arange(c, device=device)).requires_grad_(requires_grad)
-
-  def triu(self, diagonal:sint=0) -> Tensor:
-    """
-    Returns the upper triangular part of the tensor, the other elements are set to 0.
-
-    The argument `diagonal` determines which diagonal is on the boundary. `diagonal = 0` means the main diagonal.
-    Positive `diagonal` means above the main diagonal, and negative `diagonal` means below the main diagonal.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([[1, 2, 3, 4], [5, 6, 7, 8], [9, 10, 11, 12]])
-    print(t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.triu(diagonal=0).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.triu(diagonal=1).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.triu(diagonal=-1).numpy())
-    ```
-    """
-    return Tensor._tri(self.shape[-2], self.shape[-1], diagonal=diagonal, device=self.device).where(self, self.zeros_like())
-
-  def tril(self, diagonal:sint=0) -> Tensor:
-    """
-    Returns the lower triangular part of the tensor, the other elements are set to 0.
-
-    The argument `diagonal` determines which diagonal is on the boundary. `diagonal = 0` means the main diagonal.
-    Positive `diagonal` means above the main diagonal, and negative `diagonal` means below the main diagonal.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([[1, 2, 3, 4], [5, 6, 7, 8], [9, 10, 11, 12]])
-    print(t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.tril(diagonal=0).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.tril(diagonal=1).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.tril(diagonal=-1).numpy())
-    ```
-    """
-    return Tensor._tri(self.shape[-2], self.shape[-1], diagonal=diagonal+1, device=self.device).where(self.zeros_like(), self)
 
   def interpolate(self, size:tuple[int, ...], mode:str="linear", align_corners:bool=False) -> Tensor:
     """
@@ -2267,28 +2005,6 @@ class Tensor(OpMixin):
     if p == 1: return self.zeros_like()
     return (Tensor.rand_like(self, requires_grad=False, dtype=dtypes.default_float, contiguous=False) >= p).contiguous().where(self, 0) / (1.0 - p)
 
-  # helper function commonly used for indexing
-  def _one_hot_along_dim(self:Tensor, num_classes:sint, dim:int=-1) -> Tensor:
-    if not dtypes.is_int(self.dtype): raise RuntimeError(f"_one_hot_along_dim expects int index tensor, getting {self.dtype}")
-    offset = self.ndim - self._resolve_dim(dim) - 1
-    dt = dtypes.int64 if sint_to_uop(num_classes).overflows(dtypes.int32) else dtypes.int32
-    return self == Tensor.arange(num_classes, dtype=dt, device=self.device, requires_grad=False).reshape((num_classes,) + (1,) * offset)
-
-  def one_hot(self, num_classes:int=-1) -> Tensor:
-    """
-    Converts `self` to a one-hot tensor.
-
-    `num_classes` defaults to -1, which means num_classes will be inferred as max(self) + 1.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([0, 1, 3, 3, 4])
-    print(t.one_hot(5).numpy())
-    ```
-    """
-    if not dtypes.is_int(self.dtype): raise RuntimeError(f"expect integer dtype, getting {self.dtype=}")
-    if num_classes == -1: num_classes = int(self.max().item())+1
-    return self[..., None]._one_hot_along_dim(num_classes).where(1, 0)
-
   def scaled_dot_product_attention(self, key:Tensor, value:Tensor, attn_mask:Tensor|None=None, dropout_p:float=0.0,
                                    is_causal:bool=False, enable_gqa:bool=False) -> Tensor:
     """
@@ -2537,7 +2253,7 @@ class Tensor(OpMixin):
     (bs,_,iy,ix), (cout,cin,H,W) = self.shape, weight.shape
     x, w = self, weight.reshape(groups, (rcout := cout//groups), cin, H, W)
 
-    padding_neg, padding_pos = [min(0, p) for p in self._resolve_pool_pads(padding, 2)], [max(0, p) for p in self._resolve_pool_pads(padding, 2)]
+    padding_neg, padding_pos = [min(0, p) for p in resolve_pool_pads(padding, 2)], [max(0, p) for p in resolve_pool_pads(padding, 2)]
     x = x.pad(padding_neg)
     iy, ix = x.shape[2:]
 

@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from tinygrad.dtype import dtypes, ImageDType, DType, AddrSpace, Invalid, PtrDType
 from tinygrad.uop.ops import UOp, Ops, UPat, PatternMatcher, GroupOp, identity_element
 from tinygrad.uop.symbolic import uop_given_valid, parse_valid, invalid_gate
-from tinygrad.helpers import getenv, flatten, AMX, prod
+from tinygrad.helpers import getenv, flatten, prod
 from tinygrad.renderer import Renderer
 
 # ***** image load valid simplification *****
@@ -171,7 +171,7 @@ def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
     lengths = [4]
   elif ctx is not None and ctx.supports_float4:
     # TODO: a better way to get this than ctx
-    lengths = [8,4,2] if buf.dtype.base == dtypes.half and getenv("ALLOW_HALF8") else ([16,8,4,2] if AMX else [4,2])
+    lengths = [8,4,2] if buf.dtype.base == dtypes.half and getenv("ALLOW_HALF8") else ([16,8,4,2] if "AMX" in ctx.target.arch else [4,2])
   lengths.append(1)  # worst case, it's not folded
 
   # filter fold lengths that don't divide
@@ -318,14 +318,14 @@ def reduce_to_acc(ctx:ReduceContext, red:UOp):
     ended_ranges = flatten([x.ended_ranges for x in topo if x.op is Ops.END])
     input_ranges = tuple([x for x in topo if x.op is Ops.RANGE and x not in reduce_range and x not in ended_ranges])
     identity = red.const(red.dtype, identity_element(red.arg, red.dtype.scalar()))
-    acc = UOp(Ops.DEFINE_REG, red.dtype.ptr(size=1, addrspace=AddrSpace.REG), arg=ctx.acc_num)
-    acc_init = acc.after(*input_ranges).index(UOp.const(dtypes.int, 0)).store(identity)
-    lst = [acc.after(acc_init, *reduce_range).index(UOp.const(dtypes.int, 0))] + lst  # put acc as the first element
+    acc = UOp.placeholder((1,), red.dtype, ctx.acc_num, AddrSpace.REG)
+    acc_init = acc.after(*input_ranges).index(UOp.const(dtypes.weakint, 0)).store(identity)
+    lst = [acc.after(acc_init, *reduce_range).index(UOp.const(dtypes.weakint, 0))] + lst  # put acc as the first element
     ctx.acc_num += 1
   ret = functools.reduce(lambda x,y: x.alu(red.arg, y), lst)
   if len(reduce_range) == 0: return ret
-  end = acc.index(UOp.const(dtypes.int, 0)).store(ret).end(*reduce_range).rtag("mergeable")
-  return acc.after(end).index(UOp.const(dtypes.int, 0))
+  end = acc.index(UOp.const(dtypes.weakint, 0)).store(ret).end(*reduce_range).rtag("mergeable")
+  return acc.after(end).index(UOp.const(dtypes.weakint, 0))
 
 def merge_reduce_ends(ctx:ReduceContext, sink:UOp):
   # merge ENDs that share the same range and nesting context (only those created by reduce_to_acc)
