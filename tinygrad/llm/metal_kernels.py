@@ -73,13 +73,19 @@ using namespace metal;
 
 constant constexpr uint DIM = 1024u;
 constant constexpr uint HIDDEN = 3584u;
-constant constexpr uint THREADS = 32u;
 constant constexpr float RMS_EPS = 1e-6f;
-constant constexpr uint ROWS_PER_GROUP = 7u;
-constant constexpr uint GATE_BLOCKS_PER_ROW = DIM / 32u;  // 32
+constant constexpr uint WARPS = 4u;                             // 4 warps/threadgroup
+constant constexpr uint SIMD = 32u;                             // Apple SIMD width
+constant constexpr uint THREADS = WARPS * SIMD;                 // 128 threads/TG
+constant constexpr uint ROWS_PER_GROUP = 8u;                    // emit 8 output rows per TG (matches baseline acc0[8])
+constant constexpr uint BLOCKS_PER_ROW = DIM / 32u;             // 32 (Q8 blocks per dim)
+constant constexpr uint BLOCKS_PER_WARP = BLOCKS_PER_ROW / WARPS; // 8 (cols per warp)
 
-// Use threadgroup reduction via shared memory (Apple GPUs are fast on this).
-// Grid: HIDDEN/ROWS_PER_GROUP = 512 threadgroups * 32 threads.
+// Grid: HIDDEN/ROWS_PER_GROUP = 3584/8 = 448 threadgroups * 128 threads.
+// Each TG emits 8 output rows. The 1024-wide reduction splits as
+//   4 warps (lidx1) each owning a stripe of 8 Q8 blocks (256 cols),
+//   32 SIMD lanes (lidx0) within each warp each do dot products across all 8 rows.
+// Final reduce: threadgroup memory combines 4 warps' partials.
 kernel void fused_gate_up_q8(
     device float* data0,                      // z[HIDDEN]
     device const float* data1,                // h[DIM]
@@ -87,20 +93,31 @@ kernel void fused_gate_up_q8(
     device const uchar* data3,                // gate Q8 blocks
     device const uchar* data4,                // up Q8 blocks
     uint gid [[threadgroup_position_in_grid]],
-    uint tid [[thread_position_in_threadgroup]]) {
+    uint lidx0 [[thread_index_in_simdgroup]],
+    uint lidx1 [[simdgroup_index_in_threadgroup]]) {
   threadgroup float x_norm[DIM];
-  threadgroup float redg[THREADS * ROWS_PER_GROUP];  // 7*32 = 224 (baseline uses this exact size)
-  threadgroup float redu[THREADS * ROWS_PER_GROUP];
+  // Cross-warp reduction buffer: 4 warps x 8 rows x 2 (gate+up).
+  threadgroup float redg[WARPS * ROWS_PER_GROUP];
+  threadgroup float redu[WARPS * ROWS_PER_GROUP];
+
+  uint tid = lidx1 * SIMD + lidx0;
 
   // ---- RMSNorm ----
+  // Each thread handles DIM/THREADS = 8 floats.
   float sq = 0.0f;
   #pragma unroll
   for (uint i = 0; i < DIM; i += THREADS) {
     float v = data1[i + tid];
     sq += v * v;
   }
-  float inv_rms = rsqrt(simd_sum(sq) / float(DIM) + RMS_EPS);
+  // simd_sum reduces within warp; then we need cross-warp reduction.
+  float warp_sq = simd_sum(sq);
+  if (lidx0 == 0) redg[lidx1] = warp_sq;  // reuse redg for this, 4 floats
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  float total_sq = redg[0] + redg[1] + redg[2] + redg[3];
+  float inv_rms = rsqrt(total_sq / float(DIM) + RMS_EPS);
 
+  // Write x_norm = h * inv_rms * norm_w.
   #pragma unroll
   for (uint i = 0; i < DIM; i += THREADS) {
     x_norm[i + tid] = data1[i + tid] * inv_rms * data2[i + tid];
@@ -108,52 +125,77 @@ kernel void fused_gate_up_q8(
   threadgroup_barrier(mem_flags::mem_threadgroup);
 
   // ---- Gate/Up matvec ----
-  // Each thread processes column-block `tid` of its threadgroup's 7 output rows.
-  // Preload 32 x_norm floats for this thread's column-block (reused across all 7 rows).
-  float xchunk[32];
-  uint x_base = tid * 32u;
-  #pragma unroll
-  for (uint j = 0; j < 32u; j++) xchunk[j] = x_norm[x_base + j];
+  // Thread (lidx0, lidx1) owns column-block `lidx1 * BLOCKS_PER_WARP + something`.
+  // Actually: 32 lanes x 8 blocks per warp = 256 cols per warp. Each lane does 1 block across 8 iters.
+  // Simpler: the warp covers 8 blocks (256 cols), 32 lanes split by row within the block.
+  // Let's pick: each thread handles 1 Q8 block at index (lidx1 * SIMD + lidx0) / some mapping.
+  // Actually the cleanest: thread owns BLOCK (lidx1*8 + inner_block) for some inner_block from 0..7.
+  // With 32 lanes and 8 blocks/warp, 4 lanes per block => 4-way split within a block.
+  //
+  // Simpler/better decomposition: lidx1 picks one of 4 stripes of 8 blocks each; lidx0 picks
+  // one of 32 "rows" for the 8 output rows... no wait, output rows = 8 per TG.
+  //
+  // Let me just do: each thread owns ONE Q8 block (col-block lidx1*8 + lidx0/4 = 4-16..32 range).
+  // Hmm, 32 lanes across 8 blocks/warp means 4 lanes per block. 4 lanes do partial dot on 8-column slice each.
+  //
+  // Rather than get fancy: each thread handles column-block (lidx1*SIMD + lidx0) / ??? of 32 total blocks.
+  // 128 threads, 32 total col-blocks -> 4 threads per col-block -> each thread does 8 cols of a block.
+  // Let: col_block = tid / 4, col_within = tid % 4  (8 cols per thread).
+  //
+  // For ROWS_PER_GROUP=8, each thread computes 8 partial dots (one per output row).
+  uint cb = tid / 4u;             // 0..31 (col block index within the 1024-wide input)
+  uint cw = (tid & 3u) * 8u;      // 0, 8, 16, or 24 (col offset within the 32-col block)
 
+  // Preload 8 floats of x_norm for this thread's sub-block.
+  float xchunk[8];
+  #pragma unroll
+  for (uint j = 0; j < 8u; j++) xchunk[j] = x_norm[cb * 32u + cw + j];
+
+  // Compute 8 partial dots, one per output row.
   float gp[ROWS_PER_GROUP];
   float up[ROWS_PER_GROUP];
   uint row0 = gid * ROWS_PER_GROUP;
   #pragma unroll
   for (uint r = 0; r < ROWS_PER_GROUP; r++) {
-    uint blk_idx = (row0 + r) * GATE_BLOCKS_PER_ROW + tid;
+    uint blk_idx = (row0 + r) * BLOCKS_PER_ROW + cb;
     device const uchar* gblk = data3 + blk_idx * 34u;
     device const uchar* ublk = data4 + blk_idx * 34u;
     float gscale = float(*((device const half*)gblk));
     float uscale = float(*((device const half*)ublk));
     float gacc = 0.0f, uacc = 0.0f;
     #pragma unroll
-    for (uint j = 0; j < 32u; j++) {
+    for (uint j = 0; j < 8u; j++) {
       float x = xchunk[j];
-      gacc += float(as_type<int8_t>(gblk[2u + j])) * x;
-      uacc += float(as_type<int8_t>(ublk[2u + j])) * x;
+      gacc += float(as_type<int8_t>(gblk[2u + cw + j])) * x;
+      uacc += float(as_type<int8_t>(ublk[2u + cw + j])) * x;
     }
     gp[r] = gscale * gacc;
     up[r] = uscale * uacc;
   }
 
-  // Cross-thread reduction via threadgroup memory (baseline pattern).
-  // Each thread writes its 7 partials; lane 0..6 each reduce one row.
+  // Reduce: 128 threads -> 8 output rows. Each row sums 128 partials.
+  // Use threadgroup memory: each thread writes its 8 partials, then lanes 0..7 reduce 128-way each.
+  // redg/redu need 128 * 8 = 1024 each -> too big for small threadgroup mem. Let's do it differently:
+  // simd_sum across each warp (reduces 32 partials -> 4 warp-level partials), then cross-warp sum via TG mem.
   #pragma unroll
   for (uint r = 0; r < ROWS_PER_GROUP; r++) {
-    redg[tid * ROWS_PER_GROUP + r] = gp[r];
-    redu[tid * ROWS_PER_GROUP + r] = up[r];
+    float gw = simd_sum(gp[r]);
+    float uw = simd_sum(up[r]);
+    if (lidx0 == 0) {
+      redg[lidx1 * ROWS_PER_GROUP + r] = gw;
+      redu[lidx1 * ROWS_PER_GROUP + r] = uw;
+    }
   }
   threadgroup_barrier(mem_flags::mem_threadgroup);
 
-  if (tid < ROWS_PER_GROUP) {
-    float g_full = 0.0f, u_full = 0.0f;
-    #pragma unroll
-    for (uint i = 0; i < THREADS; i++) {
-      g_full += redg[i * ROWS_PER_GROUP + tid];
-      u_full += redu[i * ROWS_PER_GROUP + tid];
-    }
+  // Final cross-warp reduce: 8 lanes (one per row) sum 4 warp partials.
+  if (lidx1 == 0 && lidx0 < ROWS_PER_GROUP) {
+    float g_full = redg[0 * ROWS_PER_GROUP + lidx0] + redg[1 * ROWS_PER_GROUP + lidx0]
+                 + redg[2 * ROWS_PER_GROUP + lidx0] + redg[3 * ROWS_PER_GROUP + lidx0];
+    float u_full = redu[0 * ROWS_PER_GROUP + lidx0] + redu[1 * ROWS_PER_GROUP + lidx0]
+                 + redu[2 * ROWS_PER_GROUP + lidx0] + redu[3 * ROWS_PER_GROUP + lidx0];
     float silu_g = g_full / (1.0f + exp(-g_full));
-    data0[row0 + tid] = silu_g * u_full;
+    data0[row0 + lidx0] = silu_g * u_full;
   }
 }
 """
@@ -172,72 +214,81 @@ using namespace metal;
 
 constant constexpr uint DIM = 1024u;
 constant constexpr uint HIDDEN = 3584u;
-constant constexpr uint THREADS = 32u;
-constant constexpr uint DOWN_BLOCKS_PER_ROW = HIDDEN / 32u;  // 112
+constant constexpr uint WARPS = 4u;
+constant constexpr uint SIMD = 32u;
+constant constexpr uint THREADS = WARPS * SIMD;          // 128
+constant constexpr uint BLOCKS_PER_ROW = HIDDEN / 32u;   // 112
 constant constexpr uint ROWS_PER_GROUP = 8u;
-constant constexpr uint BLOCKS_PER_THREAD = 4u;              // 32 * 4 = 128 >= 112; last 16 masked
+// 128 threads cooperate on the 3584-wide reduction. 112 Q8 blocks / 128 threads
+// doesn't divide evenly; instead: each WARP handles 28 blocks (28*4=112), and
+// each of 32 lanes in a warp covers 28/32 * 32 cols = interleaved...
+// Simpler: 4 warps, each warp owns 28 blocks. Within a warp, 32 lanes cooperate
+// on those 28 blocks. 28 blocks = 896 cols, split as 32 lanes x 28 cols each.
+// That's awkward. Let me do: 4 warps x 32 blocks = 128 blocks total, mask last 16 off.
+// Each thread (lane in warp) handles BLOCKS_PER_THREAD = 1 block (32 cols).
+// 4 warps * 32 lanes = 128 threads, each with 1 block -> covers 128 blocks (16 OOB).
+constant constexpr uint BLOCKS_PER_THREAD = 1u;
 
-// Grid: DIM/ROWS_PER_GROUP = 128 threadgroups * 32 threads.
 kernel void fused_down_q8(
     device float* data0,                      // out[DIM]
-    device const float* data1,                // h[DIM]
+    device const float* data1,                // h[DIM] (residual)
     device const float* data2,                // z[HIDDEN]
     device const uchar* data3,                // down Q8 blocks
     uint gid [[threadgroup_position_in_grid]],
-    uint tid [[thread_position_in_threadgroup]]) {
-  threadgroup float red[THREADS * ROWS_PER_GROUP];  // 8 * 32 = 256
+    uint lidx0 [[thread_index_in_simdgroup]],
+    uint lidx1 [[simdgroup_index_in_threadgroup]]) {
+  // Cross-warp reduction buffer: 4 warps * 8 rows = 32.
+  threadgroup float red[WARPS * ROWS_PER_GROUP];
 
-  // Preload this thread's z chunk (128 floats = 4 Q8 blocks worth).
-  uint blk_start = tid * BLOCKS_PER_THREAD;
-  float zchunk[BLOCKS_PER_THREAD * 32u];  // 128
-  #pragma unroll
-  for (uint b = 0; b < BLOCKS_PER_THREAD; b++) {
-    uint cb = blk_start + b;
+  uint tid = lidx1 * SIMD + lidx0;
+  uint cb = tid;  // block-column index (0..127, valid if < 112)
+  bool valid = cb < BLOCKS_PER_ROW;
+
+  // Preload 32 floats of z for this thread's block.
+  float zchunk[32];
+  if (valid) {
     uint base = cb * 32u;
     #pragma unroll
-    for (uint j = 0; j < 32u; j++) {
-      uint c = base + j;
-      zchunk[b*32u + j] = (c < HIDDEN) ? data2[c] : 0.0f;
-    }
+    for (uint j = 0; j < 32u; j++) zchunk[j] = data2[base + j];
+  } else {
+    #pragma unroll
+    for (uint j = 0; j < 32u; j++) zchunk[j] = 0.0f;
   }
 
-  // Accumulate 8 partial dot products in register.
+  // Compute 8 partial dots (one per output row).
   float partial[ROWS_PER_GROUP];
   uint row0 = gid * ROWS_PER_GROUP;
-  #pragma unroll
-  for (uint r = 0; r < ROWS_PER_GROUP; r++) {
-    float p = 0.0f;
+  if (valid) {
     #pragma unroll
-    for (uint b = 0; b < BLOCKS_PER_THREAD; b++) {
-      uint cb = blk_start + b;
-      if (cb >= DOWN_BLOCKS_PER_ROW) break;
-      uint blk_idx = (row0 + r) * DOWN_BLOCKS_PER_ROW + cb;
+    for (uint r = 0; r < ROWS_PER_GROUP; r++) {
+      uint blk_idx = (row0 + r) * BLOCKS_PER_ROW + cb;
       device const uchar* blk = data3 + blk_idx * 34u;
       float scale = float(*((device const half*)blk));
       float acc = 0.0f;
       #pragma unroll
       for (uint j = 0; j < 32u; j++) {
-        acc += float(as_type<int8_t>(blk[2u + j])) * zchunk[b*32u + j];
+        acc += float(as_type<int8_t>(blk[2u + j])) * zchunk[j];
       }
-      p += scale * acc;
+      partial[r] = scale * acc;
     }
-    partial[r] = p;
+  } else {
+    #pragma unroll
+    for (uint r = 0; r < ROWS_PER_GROUP; r++) partial[r] = 0.0f;
   }
 
-  // Threadgroup-memory reduction, 8 rows per group, 32-thread lane-sum per row.
+  // Warp-level reduce (32 partials -> 1 per warp per row), then cross-warp via TG mem.
   #pragma unroll
   for (uint r = 0; r < ROWS_PER_GROUP; r++) {
-    red[tid * ROWS_PER_GROUP + r] = partial[r];
+    float warp_partial = simd_sum(partial[r]);
+    if (lidx0 == 0) red[lidx1 * ROWS_PER_GROUP + r] = warp_partial;
   }
   threadgroup_barrier(mem_flags::mem_threadgroup);
 
-  if (tid < ROWS_PER_GROUP) {
-    float full = 0.0f;
-    #pragma unroll
-    for (uint i = 0; i < THREADS; i++) {
-      full += red[i * ROWS_PER_GROUP + tid];
-    }
-    data0[row0 + tid] = data1[row0 + tid] + full;
+  // Final cross-warp reduce: 8 lanes (one per row) in warp 0 sum 4 warp partials.
+  if (lidx1 == 0 && lidx0 < ROWS_PER_GROUP) {
+    float full = red[0 * ROWS_PER_GROUP + lidx0] + red[1 * ROWS_PER_GROUP + lidx0]
+               + red[2 * ROWS_PER_GROUP + lidx0] + red[3 * ROWS_PER_GROUP + lidx0];
+    data0[row0 + lidx0] = data1[row0 + lidx0] + full;
   }
 }
 """
@@ -258,10 +309,11 @@ def _compiled_down() -> bytes:
 def _gate_up_kernel(z: UOp, h: UOp, norm_w: UOp, gate_w: UOp, up_w: UOp) -> UOp:
     lib = _compiled_gate_up()
     assert z.numel() == 3584, f"fused_gate_up_q8 expects hidden=3584, got {z.numel()}"
-    # Grid: HIDDEN/ROWS_PER_GROUP = 3584/7 = 512 threadgroups, 32 threads each.
+    # Grid: HIDDEN/ROWS_PER_GROUP = 3584/8 = 448 threadgroups * 128 threads (4 warps).
     sink = UOp.sink(
-        UOp.special(512, "gidx0"),
+        UOp.special(448, "gidx0"),
         UOp.special(32, "lidx0"),
+        UOp.special(4, "lidx1"),
         z, h, norm_w, gate_w, up_w,
         arg=KernelInfo(name="fused_gate_up_q8"),
     )
@@ -280,10 +332,11 @@ def _gate_up_kernel(z: UOp, h: UOp, norm_w: UOp, gate_w: UOp, up_w: UOp) -> UOp:
 def _down_kernel(out: UOp, h: UOp, z: UOp, down_w: UOp) -> UOp:
     lib = _compiled_down()
     assert out.numel() == 1024, f"fused_down_q8 expects dim=1024, got {out.numel()}"
-    # Grid: DIM/ROWS_PER_GROUP = 1024/8 = 128 threadgroups, 32 threads each.
+    # Grid: DIM/ROWS_PER_GROUP = 1024/8 = 128 threadgroups * 128 threads (4 warps).
     sink = UOp.sink(
         UOp.special(128, "gidx0"),
         UOp.special(32, "lidx0"),
+        UOp.special(4, "lidx1"),
         out, h, z, down_w,
         arg=KernelInfo(name="fused_down_q8"),
     )
