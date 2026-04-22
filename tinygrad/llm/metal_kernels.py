@@ -10,8 +10,29 @@
 
 from __future__ import annotations
 import functools
-from tinygrad import Device, Tensor
+from tinygrad import Device, Tensor, dtypes
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
+
+
+def _find_raw_q8_blocks(weight: Tensor) -> Tensor | None:
+    """Walk the weight tensor's uop chain looking for the CONTIGUOUS uchar node
+    that holds raw Q8_0 blocks (2-byte fp16 scale + 32 int8 qs per 34-byte block).
+
+    gguf.py:57 builds every Q8_0 weight as `blocks[:,:2].bitcast(half).cast(float) * blocks[:,2:].bitcast(int8)`
+    where `blocks` is the one `contiguous()` uchar tensor. Finding that node lets us
+    hand the raw bytes to a custom kernel without triggering the fp32 dequant.
+    Returns None for non-Q8_0 weights.
+    """
+    seen: set[int] = set()
+    stack = [weight.uop]
+    while stack:
+        u = stack.pop()
+        if id(u) in seen: continue
+        seen.add(id(u))
+        if u.op is Ops.CONTIGUOUS and u.dtype.scalar() == dtypes.uchar:
+            return Tensor(u)
+        stack.extend(u.src)
+    return None
 
 
 # ---------------- Metal source (stub: fills output with zeros) ----------------
@@ -86,6 +107,22 @@ def fused_mlp(x: Tensor, gate_w: Tensor, up_w: Tensor, down_w: Tensor) -> Tensor
     """High-level wrapper mirroring model.py:119 signature.
 
     Equivalent to `down_w @ (silu(gate_w @ x) * (up_w @ x))` but emits a single kernel.
+
+    The `*.weight` tensors are lazy CAST(half) nodes over a MUL-of-dequant chain.
+    Passing them to custom_kernel calls .contiguous() on them, which realizes the
+    full fp32 weight into a fresh Metal buffer before our kernel runs (measured:
+    48 kernels x ~40us + 528 MB extra resident mem). We instead reach into the
+    weight's uop to grab the CONTIGUOUS(uchar) node that holds the raw Q8_0 bytes
+    and pass that -- matching what the auto-generated matvecs already do.
+
+    Falls back to the dequantized-float path if the weight is not Q8_0 (e.g. a
+    future non-quantized test). Callers can detect this by checking output dtype.
     """
     out = Tensor.empty_like(x)
-    return Tensor.custom_kernel(out, x, gate_w, up_w, down_w, fxn=fused_mlp_kernel)[0]
+    gate_q8 = _find_raw_q8_blocks(gate_w)
+    up_q8 = _find_raw_q8_blocks(up_w)
+    down_q8 = _find_raw_q8_blocks(down_w)
+    if gate_q8 is None or up_q8 is None or down_q8 is None:
+        # not all Q8_0 -- fall back to float weights (pays the dequant cost)
+        return Tensor.custom_kernel(out, x, gate_w, up_w, down_w, fxn=fused_mlp_kernel)[0]
+    return Tensor.custom_kernel(out, x, gate_q8, up_q8, down_q8, fxn=fused_mlp_kernel)[0]
