@@ -25,7 +25,7 @@ The [scheduler](https://github.com/tinygrad/tinygrad/tree/master/tinygrad/schedu
 
 The code in [realize](https://github.com/tinygrad/tinygrad/tree/master/tinygrad/engine/realize.py) lowers `ExecItem` by populating its `prg` field with
 
-::: tinygrad.engine.realize.run_schedule
+::: tinygrad.engine.realize.run_linear
 
 There's a ton of complexity hidden behind this, see the `codegen/` directory.
 

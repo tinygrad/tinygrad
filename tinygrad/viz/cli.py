@@ -58,7 +58,7 @@ def get(data:dict, key:str):
 def main(args) -> None:
   viz.load_rewrites(viz_data:=viz.VizData(viz.load_pickle(args.rewrites_path, default=RewriteTrace([], [], {}))))
 
-  def fmt(val, to_str=str) -> str: return json.dumps(val if isinstance(val, dict) else {"value":val}) if args.jsonl else to_str(val)
+  def fmt(val, to_str=str) -> str: return json.dumps(val if isinstance(val, dict) else {"value":val}) if args.json else to_str(val)
 
   rewrites = {c["name"]:{s["name"]:s for s in c["steps"]} for c in viz_data.ctxs if c.get("steps")}
   def print_step(step:dict) -> None:
@@ -164,7 +164,7 @@ def main(args) -> None:
       marker_stream = sorted([(m["ts"], "MARKER", m) for m in profile.get("markers", [])], key=lambda t:t[0])
       for ts,dev,e in heapq.merge(*event_streams, marker_stream, key=lambda t:t[0]):
         if dev == "MARKER":
-          yield {"device":dev, "name":fmt_colored(e["name"]), "et_ms":ts*1e-3, "ref":None, "ext":None}
+          yield {"device":dev, "name":fmt_colored(e["name"]), "st_ms":ts*1e-3, "ref":None, "ext":None}
           continue
         ext:list[str] = []
         if (fmt:=e["fmt"]).startswith("TB:"):
@@ -175,15 +175,15 @@ def main(args) -> None:
             if fmt: ext.append(f"{line} {code}")
             elif not file.startswith("<") and not fxn.startswith("<"): fmt = line
         yield {"device":dev, "name":fmt_colored(e["name"]), "dur_ms":e["dur"]*1e-3,
-               "et_ms":(e["st"]+e["dur"])*1e-3, "fmt":fmt, "ref":e["ref"], "ext":"\n".join(ext)}
+               "st_ms":e["st"]*1e-3, "fmt":fmt, "ref":e["ref"], "ext":"\n".join(ext)}
     def fmt_top(k:dict) -> str:
       return f"{fmt_colored(k['name'])}{' ' * max(0, 36-ansilen(k['name']))} {time_to_str(k['dur_ms']*1e-3, w=9)} {k['count']:7d} {k['pct']:6.2f}%"
     def fmt_all(k:dict) -> str:
-      if k["device"] == "MARKER": return f"--- MARKER {k['name']} /{k['et_ms']:9.2f}ms"
+      if k["device"] == "MARKER": return f"--- MARKER {k['name']} /{k['st_ms']:9.2f}ms"
       ptm = colored(time_to_str(k["dur_ms"]*1e-3, w=9), "yellow" if k["dur_ms"] > 10 else None)
       fmt_str = "  ".join(p+" "*max(0, 14-ansilen(p)) for p in k["fmt"].split("\n"))
       name = f"*** {k['device'][:7]:7s} "+k["name"]+" "*(46-ansilen(k["name"]))
-      return f"{name} tm {ptm}/{k['et_ms']:9.2f}ms"+(f" ({fmt_str})" if k["fmt"] else "")
+      return f"{name} tm {ptm}/{k['st_ms']:9.2f}ms"+(f" ({fmt_str})" if k["fmt"] else "")
     fmt_row = fmt_top if args.top else fmt_all
     seen_refs:set[int] = set()
     for k in (produce_top_kernels if args.top else produce_all_kernels)():
@@ -209,7 +209,7 @@ def get_arg_parser() -> argparse.ArgumentParser:
                       default=pathlib.Path(temp("profile.pkl", append_user=True)))
   g_opts.add_argument("--rewrites-path", type=pathlib.Path, metavar="PATH", help="Optional path to rewrites.pkl (default: latest rewrites)",
                       default=pathlib.Path(temp("rewrites.pkl", append_user=True)))
-  g_opts.add_argument("--jsonl", action="store_true", help="Emit profiler output as JSONL")
+  g_opts.add_argument("--json", action="store_true", help="Emit profiler output as JSON")
   g_opts.add_argument("-h", "--help", action="help", help="show this help message and exit")
   return parser
 

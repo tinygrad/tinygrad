@@ -3298,13 +3298,11 @@ class TestOps(unittest.TestCase):
     data = [1, 2, 4]
     helper_test_op([], lambda: torch.nn.functional.one_hot(torch.tensor(data), 6).type(torch.int32),
                        lambda: Tensor(data).one_hot(6), forward_only=True)
-    helper_test_op([], lambda: torch.nn.functional.one_hot(torch.tensor(data)).type(torch.int32),
-                       lambda: Tensor(data).one_hot(), forward_only=True)
+    # like jax.nn.one_hot, num_classes must be non-negative (torch accepts -1 for auto-inference, we don't)
+    with self.assertRaises(ValueError): Tensor(data).one_hot(-1)
     data = [[[1, 2, 3], [0, 3, 5]], [[1, 2, 3], [0, 3, 5]]]
     helper_test_op([], lambda: torch.nn.functional.one_hot(torch.tensor(data), 8).type(torch.int32),
                        lambda: Tensor(data).one_hot(8), forward_only=True)
-    helper_test_op([], lambda: torch.nn.functional.one_hot(torch.tensor(data)).type(torch.int32),
-                       lambda: Tensor(data).one_hot(), forward_only=True)
 
   def test_masked_fill(self):
     helper_test_op([(32,10)], lambda x: x.masked_fill((x>0.1).detach(), -math.inf))

@@ -1,17 +1,196 @@
+from __future__ import annotations
 import functools, itertools
-from typing import Self, Sequence, Literal, get_args
+from typing import TYPE_CHECKING, Self, Sequence, Literal, get_args
 from tinygrad.mixin.elementwise import ElementwiseMixin
 from tinygrad.mixin.movement import MovementMixin
 from tinygrad.mixin.reduce import ReduceMixin
 from tinygrad.uop import Ops
 from tinygrad.uop.ops import _broadcast_shape, resolve, smax, smin, identity_element
-from tinygrad.dtype import DTypeLike, dtypes, least_upper_dtype, sum_acc_dtype, to_dtype
-from tinygrad.helpers import argfix, flatten, flat_to_grouped, make_tuple, prod, resolve_pool_pads, round_up
+from tinygrad.dtype import ConstType, DTypeLike, Invalid, dtypes, least_upper_dtype, sum_acc_dtype, to_dtype
+from tinygrad.helpers import argfix, ceildiv, flatten, flat_to_grouped, make_tuple, prod, resolve_pool_pads, round_up
+
+if TYPE_CHECKING:
+  from tinygrad.uop.ops import sint
 
 ReductionStr = Literal["mean", "sum", "none"]
 
 
 class OpMixin(ElementwiseMixin, ReduceMixin):
+  @staticmethod
+  def unique_const(fill_value:ConstType, **kwargs): raise NotImplementedError("creation helpers are only supported on Tensor and UOp")
+
+  @classmethod
+  def full(cls, shape:tuple[sint, ...], fill_value:ConstType, **kwargs) -> Self:
+    """
+    Creates a tensor with the given shape, filled with the given value.
+
+    You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
+    Additionally, all other keyword arguments are passed to the constructor of the tensor.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor.full((2, 3), 42).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor.full((2, 3), False).numpy())
+    ```
+    """
+    return cls.unique_const(fill_value, **kwargs).reshape((1,)*len(new_shape := argfix(shape))).expand(new_shape)
+
+  @classmethod
+  def invalids(cls, *shape, **kwargs) -> Self:
+    """
+    Creates a tensor with the given shape, filled with Invalid.
+
+    This is an alternative to Tensor.empty when you want an "anonymous" buffer.
+
+    Eventually Tensor.empty will be replaced by this.
+    """
+    return cls.full(argfix(*shape), Invalid, **kwargs)
+
+  @classmethod
+  def zeros(cls, *shape, **kwargs) -> Self:
+    """
+    Creates a tensor with the given shape, filled with zeros.
+
+    You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
+    Additionally, all other keyword arguments are passed to the constructor of the tensor.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor.zeros(2, 3).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor.zeros(2, 3, dtype=dtypes.int32).numpy())
+    ```
+    """
+    return cls.full(argfix(*shape), 0.0, **kwargs)
+
+  @classmethod
+  def ones(cls, *shape, **kwargs) -> Self:
+    """
+    Creates a tensor with the given shape, filled with ones.
+
+    You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
+    Additionally, all other keyword arguments are passed to the constructor of the tensor.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor.ones(2, 3).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor.ones(2, 3, dtype=dtypes.int32).numpy())
+    ```
+    """
+    return cls.full(argfix(*shape), 1.0, **kwargs)
+
+  @classmethod
+  def arange(cls, start, stop=None, step=1, **kwargs) -> Self:
+    """
+    Returns a 1-D tensor of size `ceil((stop - start) / step)` with values from `[start, stop)`, with spacing between values given by `step`.
+
+    If `stop` is not specified, values are generated from `[0, start)` with the given `step`.
+
+    If `stop` is specified, values are generated from `[start, stop)` with the given `step`.
+
+    You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
+    Additionally, all other keyword arguments are passed to the constructor of the tensor.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor.arange(5).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor.arange(5, 10).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor.arange(5, 10, 2).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor.arange(5.5, 10, 2).numpy())
+    ```
+    """
+    if stop is None: stop, start = start, 0
+    dtype = kwargs.pop("dtype", dtypes.default_float if any(isinstance(x, float) for x in (start, stop, step)) else dtypes.default_int)
+    lo, hi = (start, stop-step) if step > 0 else (stop-step, start)
+    if lo < (dt:=to_dtype(dtype)).min or dt.max < hi: raise OverflowError(f"arange [{start}, {stop}) is not representable in dtype {dtype}")
+    # NOTE: this matches numpy, torch raises RuntimeError if stop-start and step have different signs
+    if (output_len:=ceildiv(stop-start, step)) <= 0: return cls.full((0,), 0, dtype=dtype, **kwargs)
+    return (cls.full((output_len,), step, dtype=dtype, **kwargs)._cumalu(0, Ops.ADD) + (start - step)).cast(dtype)
+
+  @classmethod
+  def linspace(cls, start:int|float, stop:int|float, steps:int, **kwargs) -> Self:
+    """
+    Returns a 1-D tensor of `steps` evenly spaced values from `start` to `stop`, inclusive.
+
+    You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
+    Additionally, all other keyword arguments are passed to the constructor of the tensor.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor.linspace(0, 10, 5).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor.linspace(-1, 1, 5).numpy())
+    ```
+    """
+    if steps < 0: raise ValueError("number of steps must be non-negative")
+    if (dtype := to_dtype(kwargs.pop("dtype", dtypes.default_float))) == dtypes.bool: raise ValueError("linspace with bool dtype is not supported")
+    if steps == 1: return cls.full((1,), start, dtype=dtype, **kwargs)
+    return (start + cls.arange(steps, dtype=dtypes.default_float, **kwargs) * ((stop - start) / (steps - 1))).cast(dtype)
+
+  @classmethod
+  def eye(cls, n:int, m:int|None=None, dtype:DTypeLike|None=None, device:str|tuple[str, ...]|None=None) -> Self:
+    m_ = n if m is None else m
+    if n < 0 or m_ < 0: raise ValueError(f"cannot have negative {n=}, {m_=}")
+    out_dtype = to_dtype(dtype) if dtype is not None else dtypes.default_float
+    return cls.arange(n, device=device).unsqueeze(-1).eq(cls.arange(m_, device=device)).cast(out_dtype)
+
+  @classmethod
+  def _tri(cls, r:sint, c:sint, diagonal=0, device:str|tuple[str, ...]|None=None) -> Self:
+    return cls.arange(r, device=device).unsqueeze(-1) + diagonal <= cls.arange(c, device=device)
+
+  def triu(self, diagonal:sint=0) -> Self:
+    """
+    Returns the upper triangular part of the tensor, the other elements are set to 0.
+
+    The argument `diagonal` determines which diagonal is on the boundary. `diagonal = 0` means the main diagonal.
+    Positive `diagonal` means above the main diagonal, and negative `diagonal` means below the main diagonal.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([[1, 2, 3, 4], [5, 6, 7, 8], [9, 10, 11, 12]])
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.triu(diagonal=0).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.triu(diagonal=1).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.triu(diagonal=-1).numpy())
+    ```
+    """
+    return self._tri(self.shape[-2], self.shape[-1], diagonal, self.device).where(self, self.zeros_like())
+
+  def tril(self, diagonal:sint=0) -> Self:
+    """
+    Returns the lower triangular part of the tensor, the other elements are set to 0.
+
+    The argument `diagonal` determines which diagonal is on the boundary. `diagonal = 0` means the main diagonal.
+    Positive `diagonal` means above the main diagonal, and negative `diagonal` means below the main diagonal.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([[1, 2, 3, 4], [5, 6, 7, 8], [9, 10, 11, 12]])
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.tril(diagonal=0).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.tril(diagonal=1).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.tril(diagonal=-1).numpy())
+    ```
+    """
+    return self._tri(self.shape[-2], self.shape[-1], diagonal+1, self.device).where(self.zeros_like(), self)
+
   def _pad_constant(self, pX, value:float) -> Self:
     # shrink first for negative pads, then pad with only non-negative values
     pX = tuple((0, 0) if p is None else p for p in pX)
@@ -395,6 +574,27 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     ```
     """
     return self._split_cumalu(axis, Ops.MUL)
+
+  # helper function commonly used for indexing
+  def _one_hot_along_dim(self, num_classes:sint, dim:int=-1) -> Self:
+    from tinygrad.uop.ops import sint_to_uop
+    if not dtypes.is_int(self.dtype): raise RuntimeError(f"_one_hot_along_dim expects int index tensor, getting {self.dtype}")
+    offset = self.ndim - self._resolve_dim(dim) - 1
+    dt = dtypes.int64 if sint_to_uop(num_classes).overflows(dtypes.int32) else dtypes.int32
+    return self.eq(type(self).arange(num_classes, dtype=dt, device=self.device).reshape((num_classes,) + (1,) * offset))
+
+  def one_hot(self, num_classes:int) -> Self:
+    """
+    Converts `self` to a one-hot tensor.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([0, 1, 3, 3, 4])
+    print(t.one_hot(5).numpy())
+    ```
+    """
+    if not dtypes.is_int(self.dtype): raise RuntimeError(f"expect integer dtype, getting {self.dtype=}")
+    if num_classes < 0: raise ValueError(f"num_classes must be non-negative, got {num_classes}")
+    return self[..., None]._one_hot_along_dim(num_classes).where(1, 0)
 
   # ***** functional nn ops *****
 

@@ -1,6 +1,9 @@
 import math, unittest
 from tinygrad import Tensor, dtypes
-from tinygrad.uop.ops import UOp
+from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, graph_rewrite
+
+_strip_unique_pm = PatternMatcher([(UPat(Ops.CONST, src=(UPat(Ops.UNIQUE), UPat(Ops.DEVICE, name="d")), name="b"), lambda b,d: b.replace(src=(d,))),])
+def _strip_unique(u: UOp) -> UOp: return graph_rewrite(u, _strip_unique_pm)
 
 def _t(*shape):
   return Tensor.arange(math.prod(shape)).reshape(*shape)
@@ -58,6 +61,11 @@ class TestTensorUOpCumalu(unittest.TestCase):
   def test_cumsum_non_last(self): _check(self, _t(3, 4), lambda x: x.cumsum(0))
   def test_cumsum_large(self):    _check(self, _t(600), lambda x: x.cumsum())  # exercises _split_cumalu
   def test_cumprod(self):         _check(self, _t(4), lambda x: x.cumprod(0))
+
+class TestTensorUOpOneHot(unittest.TestCase):
+  def test_one_hot(self):
+    t = _t(5)
+    self.assertIs(_strip_unique(t.one_hot(5).uop), _strip_unique(t.uop.one_hot(5)))
 
 class TestTensorUOpCat(unittest.TestCase):
   def test_cat_dim0(self):     _check(self, _t(2, 3), lambda x: x.cat(x, dim=0))
@@ -132,6 +140,50 @@ class TestUOpEmpty(unittest.TestCase):
     # regression: direct UOp.empty with a singleton-tuple device + axis must not trip .multi()'s tuple assert
     u = UOp.empty((4,), dtype=dtypes.float32, device=("NULL:0",), axis=0)
     self.assertEqual((u.shape, u.device, u.axis), ((4,), "NULL", None))
+
+class TestTensorUOpCreation(unittest.TestCase):
+  def test_full(self):
+    self.assertIs(_strip_unique(Tensor.full((2, 3), 42).uop), _strip_unique(UOp.full((2, 3), 42)))
+  def test_full_kwargs(self):
+    self.assertIs(_strip_unique(Tensor.full((2, 3), 42, dtype=dtypes.int8, device="NULL").uop),
+                  _strip_unique(UOp.full((2, 3), 42, dtype=dtypes.int8, device="NULL")))
+  def test_full_symbolic_fill(self):
+    # bound symbolic variable — flows through Tensor.__init__'s UOp branch, no UNIQUE added
+    t = Tensor.full((2, 3), UOp.variable("x", 1, 10).bind(5))
+    self.assertEqual(t.shape, (2, 3))
+    self.assertFalse(t.uop.op_in_backward_slice_with_self(Ops.UNIQUE))
+  def test_zeros(self):
+    self.assertIs(_strip_unique(Tensor.zeros(2, 3).uop), _strip_unique(UOp.zeros(2, 3)))
+  def test_ones(self):
+    self.assertIs(_strip_unique(Tensor.ones(2, 3).uop), _strip_unique(UOp.ones(2, 3)))
+  def test_invalids(self):
+    self.assertIs(_strip_unique(Tensor.invalids(2, 3, dtype=dtypes.int8).uop), _strip_unique(UOp.invalids(2, 3, dtype=dtypes.int8)))
+  def test_arange(self):
+    self.assertIs(_strip_unique(Tensor.arange(5).uop), _strip_unique(UOp.arange(5)))
+  def test_arange_empty(self):
+    self.assertIs(_strip_unique(Tensor.arange(5, 5).uop), _strip_unique(UOp.arange(5, 5)))
+  def test_arange_step(self):
+    self.assertIs(_strip_unique(Tensor.arange(5, 10, 2).uop), _strip_unique(UOp.arange(5, 10, 2)))
+  def test_linspace(self):
+    self.assertIs(_strip_unique(Tensor.linspace(0, 10, 5).uop), _strip_unique(UOp.linspace(0, 10, 5)))
+  def test_linspace_one_step(self):
+    self.assertIs(_strip_unique(Tensor.linspace(5, 10, 1).uop), _strip_unique(UOp.linspace(5, 10, 1)))
+  def test_eye(self):
+    self.assertIs(_strip_unique(Tensor.eye(3).uop), _strip_unique(UOp.eye(3)))
+  def test_eye_rect(self):
+    self.assertIs(_strip_unique(Tensor.eye(2, 4).uop), _strip_unique(UOp.eye(2, 4)))
+  def test_triu(self):
+    t = _t(3, 4)
+    self.assertIs(_strip_unique(t.triu().uop), _strip_unique(t.uop.triu()))
+  def test_triu_diagonal(self):
+    t = _t(3, 4)
+    self.assertIs(_strip_unique(t.triu(diagonal=1).uop), _strip_unique(t.uop.triu(diagonal=1)))
+  def test_tril(self):
+    t = _t(3, 4)
+    self.assertIs(_strip_unique(t.tril().uop), _strip_unique(t.uop.tril()))
+  def test_tril_diagonal(self):
+    t = _t(3, 4)
+    self.assertIs(_strip_unique(t.tril(diagonal=-1).uop), _strip_unique(t.uop.tril(diagonal=-1)))
 
 if __name__ == "__main__":
   unittest.main()
