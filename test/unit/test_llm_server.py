@@ -159,5 +159,18 @@ class TestTransformerGenerate(unittest.TestCase):
       next(gen)
     self.assertAlmostEqual(captured_temps[-1], 0.6, places=5)
 
+  def test_generate_raises_when_tokens_exceed_max_context(self):
+    """When the input prompt is longer than max_context, generate should raise a clear error
+    instead of crashing with a cryptic reshape size mismatch.
+
+    Regression test for the bug where a long chat history (4105 tokens vs max_context=4096)
+    hits `Tensor(tokens + [0] * (max_context - len(tokens))).reshape(1, max_context)` with
+    a negative pad count, producing: `size mismatch, can't reshape ((4105,)) -> ((1, 4096))`.
+    """
+    model = Transformer(TEST_CONFIG)
+    tokens = [1] * (TEST_CONFIG.max_context + 9)  # mirrors 4105 > 4096
+    with self.assertRaises(ValueError):
+      next(model.generate(tokens))
+
 if __name__ == '__main__':
   unittest.main()
