@@ -156,6 +156,16 @@ pm_to_program = PatternMatcher([
 @track_rewrites(name=lambda ast,renderer,ret,**kwargs: TracingKey(ret.src[0].arg.name,(ret.src[0].arg.function_name, ast), ret=renderer), replay=True)
 @Context(ALLOW_DEVICE_USAGE=0)
 def do_to_program(ast:UOp, renderer:Renderer) -> UOp:
+  """
+  Transform an AST into a compiled PROGRAM. May trigger BEAM search.
+
+  Args:
+    ast: The Ops.SINK/Ops.PROGRAM rooted AST
+    renderer: The renderer used to generate the code
+
+  Returns:
+    The Ops.PROGRAM with SINK/DEVICE/LINEAR/SOURCE/BINARY.
+  """
   if ast.op is Ops.PROGRAM: prg = ast
   elif ast.op is Ops.SINK:
     assert isinstance(ast.arg, KernelInfo), "requires KernelInfo on arg to to_program"
@@ -168,7 +178,6 @@ def do_to_program(ast:UOp, renderer:Renderer) -> UOp:
 
 to_program_cache: weakref.WeakValueDictionary[tuple, UOp] = weakref.WeakValueDictionary()
 def to_program(ast:UOp, renderer:Renderer) -> UOp:
-  """Transform an AST (SINK or partial PROGRAM) into a fully compiled PROGRAM UOp. May trigger BEAM search."""
   if ast.op is Ops.PROGRAM and len(ast.src) >= 5 and ast.src[4].op is Ops.BINARY: return ast
   key = (ast.key, type(renderer), renderer.target, NOOPT.value, DEVECTORIZE.value, EMULATED_DTYPES.value)
   if (prg:=to_program_cache.get(key)) is None: to_program_cache[key] = prg = do_to_program(ast, renderer)
