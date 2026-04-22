@@ -22,6 +22,19 @@ from __future__ import annotations
 import functools
 from tinygrad import Device, Tensor, dtypes
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
+from tinygrad.renderer import Estimates
+
+# Shape constants (Qwen3.5-0.8B dense FFN).
+_DIM, _HIDDEN = 1024, 3584
+# Q8_0: 34 bytes per 32 weights (2B fp16 scale + 32B int8 qs).
+_Q8_BYTES_PER_WEIGHT_NUMERATOR = 34
+_Q8_BYTES_PER_WEIGHT_DENOMINATOR = 32
+
+
+def _q8_bytes(numel: int) -> int:
+    """Byte count for a Q8_0-encoded weight tensor with `numel` scalar weights."""
+    assert numel % _Q8_BYTES_PER_WEIGHT_DENOMINATOR == 0
+    return (numel // _Q8_BYTES_PER_WEIGHT_DENOMINATOR) * _Q8_BYTES_PER_WEIGHT_NUMERATOR
 
 
 def _find_raw_q8_blocks(weight: Tensor) -> Tensor | None:
@@ -264,13 +277,19 @@ def _compiled_down() -> bytes:
 def _gate_up_kernel(z: UOp, h: UOp, norm_w: UOp, gate_w: UOp, up_w: UOp) -> UOp:
     lib = _compiled_gate_up()
     assert z.numel() == 3584, f"fused_gate_up_q8 expects hidden=3584, got {z.numel()}"
+    # Estimates (Qwen3.5-0.8B dense FFN):
+    #   ops: gate matvec (2*H*D FMAs) + up matvec (2*H*D) + RMSNorm (~5*D) + silu*mul (~2*H)
+    #        dominated by matvecs -> 4*H*D = 14.68M ops
+    #   mem: h (D*4B) + norm_w (D*4B) + gate Q8 (_q8_bytes(H*D)) + up Q8 + z out (H*4B)
+    ops = 4 * _HIDDEN * _DIM + 5 * _DIM + 2 * _HIDDEN
+    mem = (_DIM + _DIM + _HIDDEN) * 4 + 2 * _q8_bytes(_HIDDEN * _DIM)
     # Grid: HIDDEN/ROWS_PER_GROUP = 3584/8 = 448 threadgroups * 128 threads (4 warps).
     sink = UOp.sink(
         UOp.special(448, "gidx0"),
         UOp.special(32, "lidx0"),
         UOp.special(4, "lidx1"),
         z, h, norm_w, gate_w, up_w,
-        arg=KernelInfo(name="fused_gate_up_q8"),
+        arg=KernelInfo(name="fused_gate_up_q8", estimates=Estimates(ops=ops, mem=mem)),
     )
     return UOp(
         Ops.PROGRAM,
@@ -287,13 +306,18 @@ def _gate_up_kernel(z: UOp, h: UOp, norm_w: UOp, gate_w: UOp, up_w: UOp) -> UOp:
 def _down_kernel(out: UOp, h: UOp, z: UOp, down_w: UOp) -> UOp:
     lib = _compiled_down()
     assert out.numel() == 1024, f"fused_down_q8 expects dim=1024, got {out.numel()}"
+    # Estimates:
+    #   ops: down matvec (2*D*H) + residual add (D) = 2*D*H + D = 7.34M
+    #   mem: h (D*4B) + z (H*4B) + down Q8 (_q8_bytes(D*H)) + out (D*4B)
+    ops = 2 * _DIM * _HIDDEN + _DIM
+    mem = (_DIM + _HIDDEN + _DIM) * 4 + _q8_bytes(_DIM * _HIDDEN)
     # Grid: DIM/ROWS_PER_GROUP = 1024/8 = 128 threadgroups * 128 threads (4 warps).
     sink = UOp.sink(
         UOp.special(128, "gidx0"),
         UOp.special(32, "lidx0"),
         UOp.special(4, "lidx1"),
         out, h, z, down_w,
-        arg=KernelInfo(name="fused_down_q8"),
+        arg=KernelInfo(name="fused_down_q8", estimates=Estimates(ops=ops, mem=mem)),
     )
     return UOp(
         Ops.PROGRAM,
