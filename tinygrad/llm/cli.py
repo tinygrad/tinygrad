@@ -1,7 +1,7 @@
 from __future__ import annotations
 import sys, argparse, codecs, typing, re, unicodedata, json, uuid, time, pathlib
-from tinygrad import Tensor, nn
-from tinygrad.helpers import partition, DEBUG, Timing, GlobalCounters, stderr_log, colored, Context, profile_marker
+from tinygrad import nn
+from tinygrad.helpers import partition, DEBUG, Timing, GlobalCounters, stderr_log, colored, Context, fetch
 from tinygrad.viz.serve import TCPServerWithReuse, HTTPRequestHandler
 from tinygrad.llm.model import Transformer
 
@@ -190,11 +190,9 @@ def main():
   args = parser.parse_args()
 
   # load the model
-  raw_model = Tensor.from_url(models.get(args.model, args.model))
-  model, kv = Transformer.from_gguf(raw_model, args.max_context)
+  model, kv = Transformer.from_gguf(fetch(models.get(args.model, args.model)), args.max_context)
   model_name = kv.get('general.name') or kv.get('general.basename') or args.model
-  print(f"using model \"{model_name}\" with {raw_model.nbytes():,} bytes and {sum(x.numel() for x in nn.state.get_parameters(model)):,} params")
-  del raw_model
+  print(f"using model \"{model_name}\" with {sum(x.numel() for x in nn.state.get_parameters(model)):,} params")
 
   # get tokenizer
   tok = SimpleTokenizer.from_gguf_kv(kv)
@@ -211,8 +209,7 @@ def main():
   # do benchmark
   if args.benchmark is not None:
     gen = model.generate(toks:=[tok.bos_id or 0])
-    for i in range(args.benchmark):
-      profile_marker(f"decode @ {i}")
+    for _ in range(args.benchmark):
       GlobalCounters.reset()
       with Timing(on_exit=lambda x: f", {1e9/x:6.2f} tok/s, {GlobalCounters.global_mem/x:7.2f} GB/s,"
                   f" {GlobalCounters.global_mem//1000000}/{GlobalCounters.mem_used//1000000} MB  --  "+\
