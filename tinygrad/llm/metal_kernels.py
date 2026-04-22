@@ -75,66 +75,86 @@ constant constexpr uint DIM = 1024u;
 constant constexpr uint HIDDEN = 3584u;
 constant constexpr uint THREADS = 32u;
 constant constexpr float RMS_EPS = 1e-6f;
-constant constexpr uint GATE_BLOCKS_PER_ROW = DIM / 32u;      // 32 blocks per row
-constant constexpr uint N_GROUPS = HIDDEN / THREADS;          // 112
+constant constexpr uint ROWS_PER_GROUP = 7u;
+constant constexpr uint GATE_BLOCKS_PER_ROW = DIM / 32u;  // 32
 
-// Dequant-and-dot one Q8_0 block (34 bytes) against 32 floats of x.
-static inline float q8_block_dot(device const uchar* blk, thread const float* xchunk) {
-    half scale = as_type<half>((ushort)(uint(blk[0]) | (uint(blk[1]) << 8)));
-    float acc = 0.0f;
-    #pragma unroll
-    for (uint j = 0; j < 32u; j++) {
-        int8_t qs = as_type<int8_t>(blk[2u + j]);
-        acc += float(qs) * xchunk[j];
-    }
-    return float(scale) * acc;
-}
-
+// Use threadgroup reduction via shared memory (Apple GPUs are fast on this).
+// Grid: HIDDEN/ROWS_PER_GROUP = 512 threadgroups * 32 threads.
 kernel void fused_gate_up_q8(
-    device float* data0,            // z[HIDDEN]
-    device const float* data1,      // h[DIM]
-    device const float* data2,      // norm_w[DIM]
-    device const uchar* data3,      // gate Q8 blocks
-    device const uchar* data4,      // up Q8 blocks
+    device float* data0,                      // z[HIDDEN]
+    device const float* data1,                // h[DIM]
+    device const float* data2,                // norm_w[DIM]
+    device const uchar* data3,                // gate Q8 blocks
+    device const uchar* data4,                // up Q8 blocks
     uint gid [[threadgroup_position_in_grid]],
-    uint tid [[thread_position_in_threadgroup]],
-    uint simd_lane [[thread_index_in_simdgroup]]) {
-  // Threadgroup-shared x_norm (reused across all THREADS output rows in this group).
+    uint tid [[thread_position_in_threadgroup]]) {
   threadgroup float x_norm[DIM];
+  threadgroup float redg[THREADS * ROWS_PER_GROUP];  // 7*32 = 224 (baseline uses this exact size)
+  threadgroup float redu[THREADS * ROWS_PER_GROUP];
 
-  // ---- Phase 1: RMSNorm (computed once per threadgroup) ----
-  // Each thread accumulates partial sum(h^2) over a strided slice.
+  // ---- RMSNorm ----
   float sq = 0.0f;
-  for (uint i = tid; i < DIM; i += THREADS) {
-    float v = data1[i];
+  #pragma unroll
+  for (uint i = 0; i < DIM; i += THREADS) {
+    float v = data1[i + tid];
     sq += v * v;
   }
-  // Reduce across the 32 threads (= 1 SIMD group). simd_sum is a warp reduction.
-  float total_sq = simd_sum(sq);
-  float inv_rms = rsqrt(total_sq / float(DIM) + RMS_EPS);
+  float inv_rms = rsqrt(simd_sum(sq) / float(DIM) + RMS_EPS);
 
-  // Write x_norm = h * inv_rms * norm_w (parallel, strided).
-  for (uint i = tid; i < DIM; i += THREADS) {
-    x_norm[i] = data1[i] * inv_rms * data2[i];
+  #pragma unroll
+  for (uint i = 0; i < DIM; i += THREADS) {
+    x_norm[i + tid] = data1[i + tid] * inv_rms * data2[i + tid];
   }
   threadgroup_barrier(mem_flags::mem_threadgroup);
 
-  // ---- Phase 2: gate/up matvec + silu*mul ----
-  // This threadgroup owns rows [gid*THREADS .. gid*THREADS+31] of the output.
-  // Each thread owns exactly one output row r = gid*THREADS + tid.
-  uint row = gid * THREADS + tid;
-  float g = 0.0f, u = 0.0f;
-  for (uint b = 0; b < GATE_BLOCKS_PER_ROW; b++) {
-    uint blk_idx = row * GATE_BLOCKS_PER_ROW + b;
-    // Load 32 floats of x_norm corresponding to this block's input cols.
-    float xchunk[32];
+  // ---- Gate/Up matvec ----
+  // Each thread processes column-block `tid` of its threadgroup's 7 output rows.
+  // Preload 32 x_norm floats for this thread's column-block (reused across all 7 rows).
+  float xchunk[32];
+  uint x_base = tid * 32u;
+  #pragma unroll
+  for (uint j = 0; j < 32u; j++) xchunk[j] = x_norm[x_base + j];
+
+  float gp[ROWS_PER_GROUP];
+  float up[ROWS_PER_GROUP];
+  uint row0 = gid * ROWS_PER_GROUP;
+  #pragma unroll
+  for (uint r = 0; r < ROWS_PER_GROUP; r++) {
+    uint blk_idx = (row0 + r) * GATE_BLOCKS_PER_ROW + tid;
+    device const uchar* gblk = data3 + blk_idx * 34u;
+    device const uchar* ublk = data4 + blk_idx * 34u;
+    float gscale = float(*((device const half*)gblk));
+    float uscale = float(*((device const half*)ublk));
+    float gacc = 0.0f, uacc = 0.0f;
     #pragma unroll
-    for (uint j = 0; j < 32u; j++) xchunk[j] = x_norm[b * 32u + j];
-    g += q8_block_dot(data3 + blk_idx * 34u, xchunk);
-    u += q8_block_dot(data4 + blk_idx * 34u, xchunk);
+    for (uint j = 0; j < 32u; j++) {
+      float x = xchunk[j];
+      gacc += float(as_type<int8_t>(gblk[2u + j])) * x;
+      uacc += float(as_type<int8_t>(ublk[2u + j])) * x;
+    }
+    gp[r] = gscale * gacc;
+    up[r] = uscale * uacc;
   }
-  float silu_g = g / (1.0f + exp(-g));
-  data0[row] = silu_g * u;
+
+  // Cross-thread reduction via threadgroup memory (baseline pattern).
+  // Each thread writes its 7 partials; lane 0..6 each reduce one row.
+  #pragma unroll
+  for (uint r = 0; r < ROWS_PER_GROUP; r++) {
+    redg[tid * ROWS_PER_GROUP + r] = gp[r];
+    redu[tid * ROWS_PER_GROUP + r] = up[r];
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  if (tid < ROWS_PER_GROUP) {
+    float g_full = 0.0f, u_full = 0.0f;
+    #pragma unroll
+    for (uint i = 0; i < THREADS; i++) {
+      g_full += redg[i * ROWS_PER_GROUP + tid];
+      u_full += redu[i * ROWS_PER_GROUP + tid];
+    }
+    float silu_g = g_full / (1.0f + exp(-g_full));
+    data0[row0 + tid] = silu_g * u_full;
+  }
 }
 """
 
@@ -153,36 +173,72 @@ using namespace metal;
 constant constexpr uint DIM = 1024u;
 constant constexpr uint HIDDEN = 3584u;
 constant constexpr uint THREADS = 32u;
-constant constexpr uint DOWN_BLOCKS_PER_ROW = HIDDEN / 32u;  // 112 blocks per row
+constant constexpr uint DOWN_BLOCKS_PER_ROW = HIDDEN / 32u;  // 112
+constant constexpr uint ROWS_PER_GROUP = 8u;
+constant constexpr uint BLOCKS_PER_THREAD = 4u;              // 32 * 4 = 128 >= 112; last 16 masked
 
-static inline float q8_block_dot(device const uchar* blk, thread const float* xchunk) {
-    half scale = as_type<half>((ushort)(uint(blk[0]) | (uint(blk[1]) << 8)));
-    float acc = 0.0f;
-    #pragma unroll
-    for (uint j = 0; j < 32u; j++) {
-        int8_t qs = as_type<int8_t>(blk[2u + j]);
-        acc += float(qs) * xchunk[j];
-    }
-    return float(scale) * acc;
-}
-
+// Grid: DIM/ROWS_PER_GROUP = 128 threadgroups * 32 threads.
 kernel void fused_down_q8(
-    device float* data0,            // out[DIM]
-    device const float* data1,      // h[DIM]  (residual)
-    device const float* data2,      // z[HIDDEN]
-    device const uchar* data3,      // down Q8 blocks
+    device float* data0,                      // out[DIM]
+    device const float* data1,                // h[DIM]
+    device const float* data2,                // z[HIDDEN]
+    device const uchar* data3,                // down Q8 blocks
     uint gid [[threadgroup_position_in_grid]],
     uint tid [[thread_position_in_threadgroup]]) {
-  uint row = gid * THREADS + tid;  // row index in [0, DIM)
-  float y = 0.0f;
-  for (uint b = 0; b < DOWN_BLOCKS_PER_ROW; b++) {
-    uint blk_idx = row * DOWN_BLOCKS_PER_ROW + b;
-    float xchunk[32];
+  threadgroup float red[THREADS * ROWS_PER_GROUP];  // 8 * 32 = 256
+
+  // Preload this thread's z chunk (128 floats = 4 Q8 blocks worth).
+  uint blk_start = tid * BLOCKS_PER_THREAD;
+  float zchunk[BLOCKS_PER_THREAD * 32u];  // 128
+  #pragma unroll
+  for (uint b = 0; b < BLOCKS_PER_THREAD; b++) {
+    uint cb = blk_start + b;
+    uint base = cb * 32u;
     #pragma unroll
-    for (uint j = 0; j < 32u; j++) xchunk[j] = data2[b * 32u + j];
-    y += q8_block_dot(data3 + blk_idx * 34u, xchunk);
+    for (uint j = 0; j < 32u; j++) {
+      uint c = base + j;
+      zchunk[b*32u + j] = (c < HIDDEN) ? data2[c] : 0.0f;
+    }
   }
-  data0[row] = data1[row] + y;
+
+  // Accumulate 8 partial dot products in register.
+  float partial[ROWS_PER_GROUP];
+  uint row0 = gid * ROWS_PER_GROUP;
+  #pragma unroll
+  for (uint r = 0; r < ROWS_PER_GROUP; r++) {
+    float p = 0.0f;
+    #pragma unroll
+    for (uint b = 0; b < BLOCKS_PER_THREAD; b++) {
+      uint cb = blk_start + b;
+      if (cb >= DOWN_BLOCKS_PER_ROW) break;
+      uint blk_idx = (row0 + r) * DOWN_BLOCKS_PER_ROW + cb;
+      device const uchar* blk = data3 + blk_idx * 34u;
+      float scale = float(*((device const half*)blk));
+      float acc = 0.0f;
+      #pragma unroll
+      for (uint j = 0; j < 32u; j++) {
+        acc += float(as_type<int8_t>(blk[2u + j])) * zchunk[b*32u + j];
+      }
+      p += scale * acc;
+    }
+    partial[r] = p;
+  }
+
+  // Threadgroup-memory reduction, 8 rows per group, 32-thread lane-sum per row.
+  #pragma unroll
+  for (uint r = 0; r < ROWS_PER_GROUP; r++) {
+    red[tid * ROWS_PER_GROUP + r] = partial[r];
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  if (tid < ROWS_PER_GROUP) {
+    float full = 0.0f;
+    #pragma unroll
+    for (uint i = 0; i < THREADS; i++) {
+      full += red[i * ROWS_PER_GROUP + tid];
+    }
+    data0[row0 + tid] = data1[row0 + tid] + full;
+  }
 }
 """
 
@@ -202,9 +258,9 @@ def _compiled_down() -> bytes:
 def _gate_up_kernel(z: UOp, h: UOp, norm_w: UOp, gate_w: UOp, up_w: UOp) -> UOp:
     lib = _compiled_gate_up()
     assert z.numel() == 3584, f"fused_gate_up_q8 expects hidden=3584, got {z.numel()}"
-    # Grid: HIDDEN/THREADS = 112 threadgroups, 32 threads each.
+    # Grid: HIDDEN/ROWS_PER_GROUP = 3584/7 = 512 threadgroups, 32 threads each.
     sink = UOp.sink(
-        UOp.special(112, "gidx0"),
+        UOp.special(512, "gidx0"),
         UOp.special(32, "lidx0"),
         z, h, norm_w, gate_w, up_w,
         arg=KernelInfo(name="fused_gate_up_q8"),
@@ -224,9 +280,9 @@ def _gate_up_kernel(z: UOp, h: UOp, norm_w: UOp, gate_w: UOp, up_w: UOp) -> UOp:
 def _down_kernel(out: UOp, h: UOp, z: UOp, down_w: UOp) -> UOp:
     lib = _compiled_down()
     assert out.numel() == 1024, f"fused_down_q8 expects dim=1024, got {out.numel()}"
-    # Grid: DIM/THREADS = 32 threadgroups, 32 threads each.
+    # Grid: DIM/ROWS_PER_GROUP = 1024/8 = 128 threadgroups, 32 threads each.
     sink = UOp.sink(
-        UOp.special(32, "gidx0"),
+        UOp.special(128, "gidx0"),
         UOp.special(32, "lidx0"),
         out, h, z, down_w,
         arg=KernelInfo(name="fused_down_q8"),
@@ -251,9 +307,7 @@ def fused_ffn_with_residual(h: Tensor, norm_w: Tensor,
       1. fused_gate_up_q8: z = silu(gate @ rmsnorm(h, norm_w)) * (up @ rmsnorm(h, norm_w))
       2. fused_down_q8:    out = h + down @ z
     """
-    # Flatten (B, T, D) -> (D,) since benchmark runs B=T=1.
-    h_flat = h.reshape(-1)
-    assert h_flat.numel() == 1024, f"fused_ffn only supports dim=1024, got {h_flat.numel()}"
+    assert h.numel() == 1024, f"fused_ffn only supports dim=1024, got {h.numel()}"
 
     norm_raw = _find_raw_q8_blocks(norm_w)
     gate_raw = _find_raw_q8_blocks(gate_w)
@@ -262,13 +316,14 @@ def fused_ffn_with_residual(h: Tensor, norm_w: Tensor,
     if any(t is None for t in (norm_raw, gate_raw, up_raw, down_raw)):
         raise NotImplementedError("fused_ffn_with_residual: all weights must trace to a raw uchar buffer")
 
+    # Force h to be materialized ONCE (attention's output), then thread it through
+    # both custom_kernels via AFTER to avoid a second contiguous copy.
+    # The first custom_kernel call contiguous-copies h internally, but that copy
+    # IS the materialization we want -- we then reuse h_after for kernel 2.
     z = Tensor.empty(3584, dtype=dtypes.float, device=h.device)
-    # Multi-output: indices returned are [out, *inputs_after_kernel]. We keep the
-    # returned `h_after` so the second kernel reuses the already-realized buffer
-    # instead of forcing another `.contiguous()` copy (which costs ~13us x 24 blocks).
-    z, h_after, *_ = Tensor.custom_kernel(z, h_flat, norm_raw, gate_raw, up_raw, fxn=_gate_up_kernel)
+    z, h_after, *_ = Tensor.custom_kernel(z, h, norm_raw, gate_raw, up_raw, fxn=_gate_up_kernel)
 
-    out_flat = Tensor.empty(1024, dtype=dtypes.float, device=h.device)
-    out_flat, *_ = Tensor.custom_kernel(out_flat, h_after, z, down_raw, fxn=_down_kernel)
+    out_empty = Tensor.empty(h.shape, dtype=dtypes.float, device=h.device)
+    out, *_ = Tensor.custom_kernel(out_empty, h_after, z, down_raw, fxn=_down_kernel)
 
-    return out_flat.reshape(h.shape)
+    return out

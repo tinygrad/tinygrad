@@ -140,7 +140,9 @@ class FFNBlock:
     @function(precompile=True, allow_implicit=True)
     def _run(x:Tensor, start_pos:int|UOp):
       h =     x + self._attention(self.attn_norm(x), start_pos)
-      if use_fused: return self._ffn_with_residual_fused(h).contiguous()
+      # CUSTOM_MLP: fused kernel writes directly to a new buffer, already contiguous.
+      # Skip the outer .contiguous() that would add a redundant 1024-float copy.
+      if use_fused: return self._ffn_with_residual_fused(h)
       return (h + self._feed_forward(self.ffn_norm(h))).contiguous()
     return _run(x, start_pos)
 
