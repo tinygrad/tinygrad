@@ -69,14 +69,19 @@ class TransformerConfig:
   leading_dense_blocks: int = 0
   dense_hidden_dim: int = 0
   routed_scaling_factor: float = 1.0
+  post_norm: bool = False  # norms applied to sublayer outputs rather than inputs (OLMo 2)
 
 class FFNBlock:
   def __init__(self, config:TransformerConfig):
     self.config = config
 
     # --- RMSNorms --------------------------------------------------------
-    self.attn_norm   = nn.RMSNorm(config.dim, config.norm_eps)
-    self.ffn_norm    = nn.RMSNorm(config.dim, config.norm_eps)
+    # pre-norm slots (no-op when the model uses post-norm, e.g. OLMo 2)
+    self.attn_norm   = (lambda x: x) if config.post_norm else nn.RMSNorm(config.dim, config.norm_eps)
+    self.ffn_norm    = (lambda x: x) if config.post_norm else nn.RMSNorm(config.dim, config.norm_eps)
+    # post-norm slots (no-op for standard pre-norm models)
+    self.post_attention_norm = nn.RMSNorm(config.dim, config.norm_eps) if config.post_norm else (lambda x: x)
+    self.post_ffw_norm       = nn.RMSNorm(config.dim, config.norm_eps) if config.post_norm else (lambda x: x)
 
     # --- feed-forward (MoE or dense) -------------------------------------
     if config.num_experts > 0:
@@ -130,8 +135,8 @@ class FFNBlock:
     # we pass in the weights implicitly so we unpack the GGUF on the fly
     @function(precompile=True, allow_implicit=True)
     def _run(x:Tensor, start_pos:int|UOp):
-      h =     x + self._attention(self.attn_norm(x), start_pos)
-      return (h + self._feed_forward(self.ffn_norm(h))).contiguous()
+      h =     x + self.post_attention_norm(self._attention(self.attn_norm(x), start_pos))
+      return (h + self.post_ffw_norm(self._feed_forward(self.ffn_norm(h)))).contiguous()
     return _run(x, start_pos)
 
 class TransformerBlock(FFNBlock):
@@ -374,7 +379,7 @@ class Transformer:
       shared_expert_gate=f"blk.{kv.get(f'{arch}.leading_dense_block_count', 0)}.ffn_gate_inp_shexp.weight" in state_dict,
       dense_hidden_dim=kv.get(f'{arch}.feed_forward_length', 0) if kv.get(f'{arch}.leading_dense_block_count', 0) else 0,
       routed_scaling_factor=kv.get(f'{arch}.expert_weights_scale', 1.0), attn_output_gate=arch in ('qwen35', 'qwen35moe'), ssm=ssm,
-      full_attention_interval=kv.get(f'{arch}.full_attention_interval', 0))
+      full_attention_interval=kv.get(f'{arch}.full_attention_interval', 0), post_norm=(arch == 'olmo2'))
     model = Transformer(config)
     nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused
     # NOTE: without this contiguous, it unpacks the weights from the model every time. we shouldn't need this, but for now it's faster
