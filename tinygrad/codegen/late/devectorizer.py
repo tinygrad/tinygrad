@@ -319,13 +319,13 @@ def reduce_to_acc(ctx:ReduceContext, red:UOp):
     input_ranges = tuple([x for x in topo if x.op is Ops.RANGE and x not in reduce_range and x not in ended_ranges])
     identity = red.const(red.dtype, identity_element(red.arg, red.dtype.scalar()))
     acc = UOp.placeholder((1,), red.dtype, ctx.acc_num, AddrSpace.REG)
-    acc_init = acc.after(*input_ranges).index(UOp.const(dtypes.int, 0)).store(identity)
-    lst = [acc.after(acc_init, *reduce_range).index(UOp.const(dtypes.int, 0))] + lst  # put acc as the first element
+    acc_init = acc.after(*input_ranges).index(UOp.const(dtypes.weakint, 0)).store(identity)
+    lst = [acc.after(acc_init, *reduce_range).index(UOp.const(dtypes.weakint, 0))] + lst  # put acc as the first element
     ctx.acc_num += 1
   ret = functools.reduce(lambda x,y: x.alu(red.arg, y), lst)
   if len(reduce_range) == 0: return ret
-  end = acc.index(UOp.const(dtypes.int, 0)).store(ret).end(*reduce_range).rtag("mergeable")
-  return acc.after(end).index(UOp.const(dtypes.int, 0))
+  end = acc.index(UOp.const(dtypes.weakint, 0)).store(ret).end(*reduce_range).rtag("mergeable")
+  return acc.after(end).index(UOp.const(dtypes.weakint, 0))
 
 def merge_reduce_ends(ctx:ReduceContext, sink:UOp):
   # merge ENDs that share the same range and nesting context (only those created by reduce_to_acc)
