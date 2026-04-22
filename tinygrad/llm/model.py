@@ -115,6 +115,9 @@ class FFNBlock:
         if hasattr(self, 'ffn_gate_inp_shexp'): shexp = shexp * (x * self.ffn_gate_inp_shexp["weight"]).sum(axis=-1, keepdim=True).sigmoid()
         out = out + shexp
       return out
+    if getenv("CUSTOM_MLP") and x.device == "METAL":
+      from tinygrad.llm.metal_kernels import fused_mlp
+      return fused_mlp(x, self.ffn_gate.weight, self.ffn_up.weight, self.ffn_down.weight)
     # TODO: remove the need for this contiguous
     return self.ffn_down(self.ffn_gate(x).silu().contiguous() * self.ffn_up(x))
 
