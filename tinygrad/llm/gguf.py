@@ -1,4 +1,4 @@
-import functools, io, os, pathlib, re, struct
+import functools, io, pathlib, re, struct
 from typing import Any, Callable
 
 from tinygrad.tensor import Tensor
@@ -176,6 +176,3 @@ def gguf_load(fn: Tensor|str|pathlib.Path) -> tuple[dict, dict[str, Tensor]]:
   if isinstance(fn, Tensor): raise ValueError("multi-part GGUF requires a path argument (got Tensor)")
   for pp in _gguf_split_paths(pathlib.Path(fn), kv)[1:]: sd.update(load(pp)[1])
   return kv, sd
-
-def gguf_size(path: str|pathlib.Path, kv: dict) -> int:
-  return sum(os.path.getsize(p) for p in _gguf_split_paths(pathlib.Path(path), kv))
