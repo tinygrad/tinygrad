@@ -6,7 +6,7 @@ from tinygrad.runtime.autogen import llvm
 
 class ClangJITCompiler(Compiler):
   def __init__(self, arch, arch_extras, cachekey="compile_clang_jit"):
-    self.arch, (cpu, *feats) = arch, arch_extras
+    self.arch, (cpu, *feats) = arch, arch_extras or ["native"]
     assert self.arch and cpu, f"invalid arch string: {arch!r}, expected '<arch>,<cpu>,[<feats>]' (eg. 'x86_64,znver2')"
     match self.arch:
       case "x86_64": self.args = [f"-march={cpu}"] + [f"-mno{f}" if f.startswith("-") else f"-m{f}" for f in feats]
@@ -92,7 +92,7 @@ class LLVMCompiler(Compiler):
 
 class CPULLVMCompiler(LLVMCompiler):
   def __init__(self, arch, arch_extras, cache_key=None):
-    self.arch, (cpu, *feats) = arch, arch_extras
+    self.arch, (cpu, *feats) = arch, arch_extras or ["native"]
     assert self.arch and cpu, f"invalid arch string: {arch!r}, expected '<arch>,<cpu>,[<feats>]' (eg. 'x86_64,znver2')"
     feats = ','.join(f if f.startswith('-') else '+'+f for f in feats)
     if cpu == "native":
