@@ -241,13 +241,13 @@ kernel void fused_down_q8(
 @functools.cache
 def _compiled_gate_up() -> bytes:
   from tinygrad.runtime.ops_metal import MetalCompiler
-  return MetalCompiler().compile(_GATE_UP_METAL_SRC)
+  return MetalCompiler().compile_cached(_GATE_UP_METAL_SRC)
 
 
 @functools.cache
 def _compiled_down() -> bytes:
   from tinygrad.runtime.ops_metal import MetalCompiler
-  return MetalCompiler().compile(_DOWN_RESIDUAL_METAL_SRC)
+  return MetalCompiler().compile_cached(_DOWN_RESIDUAL_METAL_SRC)
 
 
 def _gate_up_kernel(z: UOp, h: UOp, norm_w: UOp, gate_w: UOp, up_w: UOp) -> UOp:
@@ -448,7 +448,7 @@ kernel void fused_attn_qkv_q8(
 @functools.cache
 def _compiled_attn_qkv() -> bytes:
   from tinygrad.runtime.ops_metal import MetalCompiler
-  return MetalCompiler().compile(_ATTN_QKV_METAL_SRC)
+  return MetalCompiler().compile_cached(_ATTN_QKV_METAL_SRC)
 
 
 def _attn_qkv_kernel(q_out: UOp, k_out: UOp, v_out: UOp, x: UOp, norm_w: UOp, q_w: UOp, k_w: UOp, v_w: UOp) -> UOp:
