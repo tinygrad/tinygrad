@@ -6,7 +6,7 @@ from tinygrad.mixin.movement import MovementMixin
 from tinygrad.mixin.reduce import ReduceMixin
 from tinygrad.uop import Ops
 from tinygrad.uop.ops import _broadcast_shape, resolve, smax, smin, identity_element
-from tinygrad.dtype import ConstType, DTypeLike, Invalid, InvalidType, dtypes, least_upper_dtype, sum_acc_dtype, to_dtype
+from tinygrad.dtype import ConstType, DTypeLike, Invalid, InvalidType, PtrDType, dtypes, least_upper_dtype, sum_acc_dtype, to_dtype
 from tinygrad.helpers import argfix, ceildiv, flatten, flat_to_grouped, make_tuple, prod, resolve_pool_pads, round_up
 
 if TYPE_CHECKING:
@@ -212,8 +212,9 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
       out_shape = _broadcast_shape(x.shape, y.shape)
       x, y = x._broadcast_to(out_shape), y._broadcast_to(out_shape)
     except (RuntimeError, ValueError): pass
-    out_dtype = least_upper_dtype(x.dtype, y.dtype)
-    return x.cast(out_dtype), y.cast(out_dtype)
+    # ptr dtypes aren't in the promo lattice
+    if x.dtype == y.dtype or any(isinstance(d, PtrDType) for d in (x.dtype, y.dtype)): return x, y
+    return x.cast(out_dtype := least_upper_dtype(x.dtype, y.dtype)), y.cast(out_dtype)
 
   def _binop(self, op:Ops, x, reverse:bool) -> Self:
     lhs, rhs = self._broadcasted(x, reverse)
