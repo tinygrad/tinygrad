@@ -36,7 +36,7 @@ pm_encode = PatternMatcher([
 ])
 
 class CUDAGraph(MultiGraphRunner):
-  def __init__(self, linear, input_buffers, input_uops):
+  def __init__(self, linear, input_buffers, input_uops=()):
     super().__init__(linear, input_buffers, input_uops)
     self.graph = init_c_var(cuda.CUgraph, lambda x: check(cuda.cuGraphCreate(ctypes.byref(x), 0)))
     self.nodes: list = []
@@ -66,7 +66,7 @@ class CUDAGraph(MultiGraphRunner):
     for j, i, v in self.updated_vars(var_vals): setattr(self.nodes[j][2], f'v{i}', v)
     for j, gl, lc in self.updated_launch_dims(var_vals):
       p = self.nodes[j][1]
-      p.blockDimX, p.blockDimY, p.blockDimZ, p.gridDimX, p.gridDimY, p.gridDimZ = *lc, *gl
+      p.blockDimX, p.blockDimY, p.blockDimZ, p.gridDimX, p.gridDimY, p.gridDimZ = *lc, *gl # type: ignore[misc]
     for j in self.updatable:
       node, params, extra, is_copy, _, _ = self.nodes[j]
       if is_copy: check(cuda.cuGraphExecMemcpyNodeSetParams(self.instance, node, ctypes.byref(params), extra))
