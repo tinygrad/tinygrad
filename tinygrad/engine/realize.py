@@ -205,7 +205,7 @@ class ExecContext:
 def _resolve(b:UOp, inputs:tuple[UOp, ...]) -> UOp:
   if b.op is Ops.BUFFER_VIEW and b.src[0].op is Ops.PARAM: return b.replace(src=(inputs[b.src[0].arg], *b.src[1:]))
   return inputs[b.arg] if b.op is Ops.PARAM else b
-def resolve_params(ctx:ExecContext, call:UOp) -> list[UOp]: return [_resolve(b, ctx.input_uops) for b in call.src[1:] if b.op is not Ops.BIND]
+def resolve_params(call:UOp, inputs:tuple[UOp, ...]) -> list[UOp]: return [_resolve(b, inputs) for b in call.src[1:] if b.op is not Ops.BIND]
 
 @contextlib.contextmanager
 def track_stats(ctx:ExecContext, call:UOp, device:str, display_name:str, estimates:Estimates, bufs:list[Buffer], var_vals:dict[str, int],
@@ -229,14 +229,14 @@ def unwrap_multi(call:UOp, resolved:list[UOp]) -> Iterator[tuple[list[Buffer], d
     for j, per_dev in enumerate(zip(*[cast(MultiBuffer, b).bufs for b in bufs])): yield list(per_dev), {dnum: j} if dnum else {}
 
 def exec_view(ctx:ExecContext, call, ast):
-  resolved = resolve_params(ctx, call)
+  resolved = resolve_params(call, ctx.input_uops)
   bufs = [cast(Buffer, b.buffer) for b in resolved]
   bv = bufs[1].view(resolved[0].arg, ast.dtype, ast.arg[1]*bufs[1].dtype.itemsize)
   with track_stats(ctx, call, bv.device, colored(f"view {bv.nbytes:8d} @ {bv.offset:<10d}", "yellow"), Estimates(), [bv, bufs[1]], ctx.var_vals):
     buffers[resolved[0]] = bv
 
 def exec_copy(ctx:ExecContext, call, ast):
-  for bufs, device_vars in unwrap_multi(call, resolve_params(ctx, call)):
+  for bufs, device_vars in unwrap_multi(call, resolve_params(call, ctx.input_uops)):
     dest, src = bufs[0].ensure_allocated(), bufs[1].ensure_allocated()
     xfer = hasattr(alc:=Device[dest.device].allocator,'_transfer') and alc.supports_transfer and dest.device.split(":")[0]==src.device.split(":")[0]
     prg = (BufferXfer if xfer else BufferCopy)(dest.nbytes, dest.device, src.device)
@@ -244,7 +244,7 @@ def exec_copy(ctx:ExecContext, call, ast):
       prg.copy(dest, src)
 
 def exec_kernel(ctx:ExecContext, call, ast):
-  for bufs, device_vars in unwrap_multi(call, resolve_params(ctx, call)):
+  for bufs, device_vars in unwrap_multi(call, resolve_params(call, ctx.input_uops)):
     var_vals = {**ctx.var_vals, **device_vars}
     prg = get_runner(bufs[0].device, ast)
     prg_bufs = [bufs[i].ensure_allocated() for i in prg.p.globals]
@@ -264,7 +264,7 @@ def exec_kernel(ctx:ExecContext, call, ast):
       for i in prg.p.outs: np.testing.assert_allclose(prg_bufs[i].numpy(), cpu_bufs[i].numpy(), rtol=1e-3, atol=1e-3)
 
 def exec_encdec(ctx:ExecContext, call, ast):
-  bufs = [cast(Buffer, b.buffer).ensure_allocated() for b in resolve_params(ctx, call)]
+  bufs = [cast(Buffer, b.buffer).ensure_allocated() for b in resolve_params(call, ctx.input_uops)]
   shape, pos_var = tuple(s.arg for s in ast.src if s.op is Ops.CONST), ast.variables()[0].expr
   with track_stats(ctx, call, bufs[0].device, colored(f"enc/dec {size_to_str(bufs[0].nbytes)}", "yellow"),
                    Estimates(lds=bufs[0].nbytes, mem=bufs[0].nbytes), bufs, ctx.var_vals):
@@ -272,13 +272,11 @@ def exec_encdec(ctx:ExecContext, call, ast):
 
 graph_cache:weakref.WeakKeyDictionary[UOp, Runner] = weakref.WeakKeyDictionary()
 def exec_graph(ctx:ExecContext, call, cf):
-  inputs = resolve_params(ctx, call)
-  bufs = flatten([b.bufs if isinstance(b, MultiBuffer) else [b] for b in (u.buffer for u in inputs)])
+  bufs = flatten([b.bufs if isinstance(b, MultiBuffer) else [b] for b in (u.buffer for u in resolve_params(call, ctx.input_uops))])
   if (runner:=graph_cache.get(cf)) is None:
-    sub = cf.substitute(dict(zip(cf.src[1:], inputs)))
-    graph_cache[cf] = runner = Device[cf.device if isinstance(cf.device, str) else cf.device[0]].graph(sub, bufs)
+    graph_cache[cf] = runner = Device[cf.device if isinstance(cf.device, str) else cf.device[0]].graph(cf, bufs, input_uops=ctx.input_uops)
   with track_stats(ctx, call, runner.device, runner.display_name, runner.estimates, bufs, ctx.var_vals) as t:
-    t[0] = runner(bufs, ctx.var_vals, wait=DEBUG >= 2)
+    t[0] = runner(bufs, ctx.var_vals, wait=DEBUG >= 2, input_uops=ctx.input_uops)
 
 # ctx is beam value
 pm_beam = PatternMatcher([
