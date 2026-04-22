@@ -200,8 +200,11 @@ constant constexpr uint WARPS = 4u;
 constant constexpr uint SIMD = 32u;
 constant constexpr uint THREADS = WARPS * SIMD;          // 128
 constant constexpr uint BLOCKS_PER_ROW = HIDDEN / 32u;   // 112
-constant constexpr uint ROWS_PER_GROUP = 8u;             // emit 8 output rows per TG
+constant constexpr uint ROWS_PER_GROUP = 8u;
 
+// 128 threads, each owns 1 Q8 col-block (tid < 112 valid; 16 idle). Each thread
+// accumulates 8 partial dot products (one per output row). Within each warp,
+// simd_sum reduces 32 lanes -> 1 partial per row; cross-warp via tg-mem.
 kernel void fused_down_q8(
     device float* data0,                      // out[DIM]
     device const float* data1,                // h[DIM] (residual)
@@ -213,7 +216,7 @@ kernel void fused_down_q8(
   threadgroup float red[WARPS * ROWS_PER_GROUP];
 
   uint tid = lidx1 * SIMD + lidx0;
-  uint cb = tid;  // col-block index 0..127 (valid if < 112)
+  uint cb = tid;
   bool valid = cb < BLOCKS_PER_ROW;
 
   float zchunk[32];
@@ -353,3 +356,173 @@ def fused_ffn_with_residual(h: Tensor, norm_w: Tensor,
     out, *_ = Tensor.custom_kernel(out_empty, h_after, z, down_raw, fxn=_down_kernel)
 
     return out
+
+
+# ---------------- Attention QKV fusion ----------------
+# Qwen3.5-0.8B TransformerBlock:
+#   q = attn_q(attn_norm(x))  # shape (4096,) = n_heads(8) * 2 * head_dim(256), the 2 is (q, gate)
+#   k = attn_k(attn_norm(x))  # shape (512,)  = n_kv_heads(2) * head_dim(256)
+#   v = attn_v(attn_norm(x))  # shape (512,)  = n_kv_heads(2) * head_dim(256)
+# Baseline emits 3 matvec kernels (r_4096_32_32 @ 288us, r_512_32_32 x2 @ 73us) + norm reduce.
+# This fuses all three matvecs + RMSNorm into one dispatch emitting a single (5120,) qkv buffer.
+#
+# Shapes (Qwen3.5-0.8B):
+_ATTN_DIM = 1024
+_ATTN_Q_OUT = 4096   # n_heads * 2 * head_dim (includes output gate interleave)
+_ATTN_KV_OUT = 512   # n_kv_heads * head_dim
+_ATTN_QKV_OUT = _ATTN_Q_OUT + 2 * _ATTN_KV_OUT  # 5120
+
+
+_ATTN_QKV_METAL_SRC = r"""
+#include <metal_stdlib>
+using namespace metal;
+
+constant constexpr uint DIM = 1024u;
+constant constexpr uint Q_OUT = 4096u;
+constant constexpr uint KV_OUT = 512u;
+constant constexpr uint QKV_OUT = 5120u;
+constant constexpr float RMS_EPS = 1e-6f;
+constant constexpr uint WARPS = 4u;
+constant constexpr uint SIMD = 32u;
+constant constexpr uint THREADS = WARPS * SIMD;                 // 128
+constant constexpr uint ROWS_PER_WARP = 2u;
+constant constexpr uint ROWS_PER_GROUP = WARPS * ROWS_PER_WARP; // 8
+constant constexpr uint BLOCKS_PER_ROW = DIM / 32u;             // 32
+
+// Grid: QKV_OUT/ROWS_PER_GROUP = 5120/8 = 640 threadgroups * 128 threads.
+// Writes to THREE separate output buffers (q/k/v) so downstream reshape+slice
+// doesn't trigger a copy. Logical output layout:
+//   rows [0    .. 4096) -> data0 (q_out)     weights data4 (attn_q Q8)
+//   rows [4096 .. 4608) -> data1 (k_out)     weights data5 (attn_k Q8)
+//   rows [4608 .. 5120) -> data2 (v_out)     weights data6 (attn_v Q8)
+kernel void fused_attn_qkv_q8(
+    device float* data0,                      // q_out[4096]
+    device float* data1,                      // k_out[512]
+    device float* data2,                      // v_out[512]
+    device const float* data3,                // x[DIM] (pre-norm input)
+    device const float* data4_norm,           // attn_norm.weight[DIM]   -- renamed to avoid data4 reuse
+    device const uchar* data5,                // attn_q Q8 weights
+    device const uchar* data6,                // attn_k Q8 weights
+    device const uchar* data7,                // attn_v Q8 weights
+    uint gid [[threadgroup_position_in_grid]],
+    uint lidx0 [[thread_index_in_simdgroup]],
+    uint lidx1 [[simdgroup_index_in_threadgroup]]) {
+  threadgroup float x_norm[DIM];
+  threadgroup float rms_scratch[WARPS];
+
+  uint tid = lidx1 * SIMD + lidx0;
+
+  // ---- RMSNorm (shared across q/k/v) ----
+  float sq = 0.0f;
+  #pragma unroll
+  for (uint i = 0; i < DIM; i += THREADS) {
+    float v = data3[i + tid];
+    sq += v * v;
+  }
+  float warp_sq = simd_sum(sq);
+  if (lidx0 == 0) rms_scratch[lidx1] = warp_sq;
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  float total_sq = rms_scratch[0] + rms_scratch[1] + rms_scratch[2] + rms_scratch[3];
+  float inv_rms = rsqrt(total_sq / float(DIM) + RMS_EPS);
+
+  #pragma unroll
+  for (uint i = 0; i < DIM; i += THREADS) {
+    x_norm[i + tid] = data3[i + tid] * inv_rms * data4_norm[i + tid];
+  }
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+
+  // ---- matvec phase ----
+  uint cb = lidx0;
+  float xchunk[32];
+  uint xbase = cb * 32u;
+  #pragma unroll
+  for (uint j = 0; j < 32u; j++) xchunk[j] = x_norm[xbase + j];
+
+  uint row0 = gid * ROWS_PER_GROUP + lidx1 * ROWS_PER_WARP;
+  #pragma unroll
+  for (uint r = 0; r < ROWS_PER_WARP; r++) {
+    uint row = row0 + r;
+
+    // Pick weights + destination based on which segment this row falls in.
+    device const uchar* wblk;
+    device float* dst;
+    uint dst_idx;
+    if (row < Q_OUT) {
+      wblk = data5 + (row * BLOCKS_PER_ROW + cb) * 34u;
+      dst = data0; dst_idx = row;
+    } else if (row < Q_OUT + KV_OUT) {
+      uint kr = row - Q_OUT;
+      wblk = data6 + (kr * BLOCKS_PER_ROW + cb) * 34u;
+      dst = data1; dst_idx = kr;
+    } else {
+      uint vr = row - Q_OUT - KV_OUT;
+      wblk = data7 + (vr * BLOCKS_PER_ROW + cb) * 34u;
+      dst = data2; dst_idx = vr;
+    }
+    float scale = float(*((device const half*)wblk));
+    float acc = 0.0f;
+    #pragma unroll
+    for (uint j = 0; j < 32u; j++) {
+      acc += float(as_type<int8_t>(wblk[2u + j])) * xchunk[j];
+    }
+    float full = simd_sum(scale * acc);
+    if (lidx0 == 0) dst[dst_idx] = full;
+  }
+}
+"""
+
+
+@functools.cache
+def _compiled_attn_qkv() -> bytes:
+    from tinygrad.runtime.ops_metal import MetalCompiler
+    return MetalCompiler().compile(_ATTN_QKV_METAL_SRC)
+
+
+def _attn_qkv_kernel(q_out: UOp, k_out: UOp, v_out: UOp, x: UOp, norm_w: UOp, q_w: UOp, k_w: UOp, v_w: UOp) -> UOp:
+    lib = _compiled_attn_qkv()
+    assert q_out.numel() == _ATTN_Q_OUT, f"q_out must be {_ATTN_Q_OUT}"
+    assert k_out.numel() == _ATTN_KV_OUT and v_out.numel() == _ATTN_KV_OUT
+    ops = 2 * _ATTN_QKV_OUT * _ATTN_DIM + 5 * _ATTN_DIM
+    mem = (_ATTN_DIM + _ATTN_DIM + _ATTN_QKV_OUT) * 4 + _q8_bytes(_ATTN_Q_OUT * _ATTN_DIM) + 2 * _q8_bytes(_ATTN_KV_OUT * _ATTN_DIM)
+    # Grid: QKV_OUT/ROWS_PER_GROUP = 5120/8 = 640 threadgroups * 128 threads.
+    sink = UOp.sink(
+        UOp.special(640, "gidx0"),
+        UOp.special(32, "lidx0"),
+        UOp.special(4, "lidx1"),
+        q_out, k_out, v_out, x, norm_w, q_w, k_w, v_w,
+        arg=KernelInfo(name="fused_attn_qkv_q8", estimates=Estimates(ops=ops, mem=mem)),
+    )
+    return UOp(
+        Ops.PROGRAM,
+        src=(
+            sink,
+            UOp(Ops.DEVICE, arg=Device.DEFAULT),
+            UOp(Ops.LINEAR, src=(*sink.src, sink)),
+            UOp(Ops.SOURCE, arg=_ATTN_QKV_METAL_SRC),
+            UOp(Ops.BINARY, arg=lib),
+        ),
+    )
+
+
+def fused_attn_qkv(x: Tensor, norm_w: Tensor, q_w: Tensor, k_w: Tensor, v_w: Tensor,
+                   q_shape: tuple[int,...], kv_shape: tuple[int,...]) -> tuple[Tensor, Tensor, Tensor]:
+    """Replacement for `attn_q(attn_norm(x)), attn_k(attn_norm(x)), attn_v(attn_norm(x))`.
+
+    Fuses the RMSNorm + 3 matvecs into one kernel with THREE separate output
+    buffers (q, k, v) allocated with the caller's desired shape so downstream
+    reshape() calls fold away without materializing.
+    """
+    assert x.numel() == _ATTN_DIM, f"fused_attn_qkv: x must have {_ATTN_DIM} elements, got {x.numel()}"
+
+    norm_raw = _find_raw_q8_blocks(norm_w)
+    q_raw = _find_raw_q8_blocks(q_w)
+    k_raw = _find_raw_q8_blocks(k_w)
+    v_raw = _find_raw_q8_blocks(v_w)
+    if any(t is None for t in (norm_raw, q_raw, k_raw, v_raw)):
+        raise NotImplementedError("fused_attn_qkv: all weights must trace to a raw uchar buffer")
+
+    q = Tensor.empty(q_shape,  dtype=dtypes.float, device=x.device)
+    k = Tensor.empty(kv_shape, dtype=dtypes.float, device=x.device)
+    v = Tensor.empty(kv_shape, dtype=dtypes.float, device=x.device)
+    q, k, v, *_ = Tensor.custom_kernel(q, k, v, x, norm_raw, q_raw, k_raw, v_raw, fxn=_attn_qkv_kernel)
+    return q, k, v

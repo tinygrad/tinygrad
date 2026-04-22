@@ -137,9 +137,14 @@ class FFNBlock:
     # we pass in the weights implicitly so we unpack the GGUF on the fly
     use_fused = (getenv("CUSTOM_MLP") and x.device == "METAL"
                  and not hasattr(self, 'ffn_gate_exps'))
+    # Fused attn_qkv+norm: TransformerBlock only, dense-attention path.
+    use_fused_qkv = use_fused and hasattr(self, '_attention_with_norm_fused')
     @function(precompile=True, allow_implicit=True)
     def _run(x:Tensor, start_pos:int|UOp):
-      h =     x + self._attention(self.attn_norm(x), start_pos)
+      if use_fused_qkv:
+        h = x + self._attention_with_norm_fused(x, start_pos)
+      else:
+        h = x + self._attention(self.attn_norm(x), start_pos)
       # CUSTOM_MLP: fused kernel writes directly to a new buffer, already contiguous.
       # Skip the outer .contiguous() that would add a redundant 1024-float copy.
       if use_fused: return self._ffn_with_residual_fused(h)
@@ -161,10 +166,31 @@ class TransformerBlock(FFNBlock):
     if config.qk_norm: self.attn_q_norm, self.attn_k_norm = nn.RMSNorm(config.qk_norm, config.norm_eps), nn.RMSNorm(config.qk_norm, config.norm_eps)
 
   def _attention(self, x:Tensor, start_pos:int|UOp) -> Tensor:
-    q, k, v = self.attn_q(x), self.attn_k(x), self.attn_v(x)
+    return self._attention_core(self.attn_q(x), self.attn_k(x), self.attn_v(x), x.shape, start_pos)
+
+  # CUSTOM_MLP=1 fast path: fuse attn_norm + attn_q + attn_k + attn_v into one kernel.
+  # Called from __call__ in place of `_attention(attn_norm(x))`.
+  def _attention_with_norm_fused(self, x_raw:Tensor, start_pos:int|UOp) -> Tensor:
+    # Only supports the Qwen3.5 shape: dim=1024, q_out=4096, kv_out=512.
+    if not (self.config.dim == 1024 and self.config.attn_output_gate
+            and self.config.head_dim * self.config.n_heads * 2 == 4096
+            and self.config.head_dim * self.config.n_kv_heads == 512):
+      return self._attention(self.attn_norm(x_raw), start_pos)
+    from tinygrad.llm.metal_kernels import fused_attn_qkv
+    # Allocate q/k/v with the exact (B, T, proj_out) shape the downstream code uses,
+    # so the kernel's write + caller's reshape fold without materializing.
+    B, T, _ = x_raw.shape
+    q_shape = (B, T, self.config.head_dim * self.config.n_heads * 2)  # (1,1,4096)
+    kv_shape = (B, T, self.config.head_dim * self.config.n_kv_heads)   # (1,1,512)
+    q, k, v = fused_attn_qkv(x_raw.reshape(-1), self.attn_norm.weight,
+                             self.attn_q.weight, self.attn_k.weight, self.attn_v.weight,
+                             q_shape, kv_shape)
+    return self._attention_core(q, k, v, x_raw.shape, start_pos)
+
+  def _attention_core(self, q:Tensor, k:Tensor, v:Tensor, x_shape, start_pos:int|UOp) -> Tensor:
     if self.config.qk_norm and self.config.qk_norm != self.config.head_dim: q, k = self.attn_q_norm(q), self.attn_k_norm(k)
 
-    B, T, _ = x.shape
+    B, T, _ = x_shape
     if self.config.attn_output_gate:
       qg = q.reshape(B, T, self.config.n_heads, 2, self.config.head_dim)
       q, gate = qg[:, :, :, 0, :], qg[:, :, :, 1, :].reshape(B, T, self.config.n_heads * self.config.head_dim)
