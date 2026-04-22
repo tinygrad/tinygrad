@@ -32,26 +32,26 @@ _Q8_BYTES_PER_WEIGHT_DENOMINATOR = 32
 
 
 def _q8_bytes(numel: int) -> int:
-    """Byte count for a Q8_0-encoded weight tensor with `numel` scalar weights."""
-    assert numel % _Q8_BYTES_PER_WEIGHT_DENOMINATOR == 0
-    return (numel // _Q8_BYTES_PER_WEIGHT_DENOMINATOR) * _Q8_BYTES_PER_WEIGHT_NUMERATOR
+  """Byte count for a Q8_0-encoded weight tensor with `numel` scalar weights."""
+  assert numel % _Q8_BYTES_PER_WEIGHT_DENOMINATOR == 0
+  return (numel // _Q8_BYTES_PER_WEIGHT_DENOMINATOR) * _Q8_BYTES_PER_WEIGHT_NUMERATOR
 
 
 def _find_raw_q8_blocks(weight: Tensor) -> Tensor | None:
-    """Walk the weight tensor's uop chain looking for the CONTIGUOUS uchar node
+  """Walk the weight tensor's uop chain looking for the CONTIGUOUS uchar node
     that holds raw Q8_0 blocks (2-byte fp16 scale + 32 int8 qs per 34-byte block)
     or the raw F32 bytes for norm weights.
     """
-    seen: set[int] = set()
-    stack = [weight.uop]
-    while stack:
-        u = stack.pop()
-        if id(u) in seen: continue
-        seen.add(id(u))
-        if u.op is Ops.CONTIGUOUS and u.dtype.scalar() == dtypes.uchar:
-            return Tensor(u)
-        stack.extend(u.src)
-    return None
+  seen: set[int] = set()
+  stack = [weight.uop]
+  while stack:
+    u = stack.pop()
+    if id(u) in seen: continue
+    seen.add(id(u))
+    if u.op is Ops.CONTIGUOUS and u.dtype.scalar() == dtypes.uchar:
+      return Tensor(u)
+    stack.extend(u.src)
+  return None
 
 
 # ---- Pre-dequantized fp16 weight cache (Kimi v12 "fp16 weight buffers") --------------
@@ -62,22 +62,22 @@ def _find_raw_q8_blocks(weight: Tensor) -> Tensor | None:
 _FP16_WEIGHT_CACHE: dict[int, Tensor] = {}
 
 def _q8_to_fp16(weight: Tensor) -> Tensor:
-    """Return a pre-realized fp16 Tensor equivalent to `weight`. Caches across calls."""
-    key = id(weight.uop.base if hasattr(weight.uop, 'base') else weight.uop)
-    if key in _FP16_WEIGHT_CACHE:
-        return _FP16_WEIGHT_CACHE[key]
-    # weight.dtype is already half; .contiguous() materializes the dequant chain.
-    fp16 = weight.contiguous().realize()
-    _FP16_WEIGHT_CACHE[key] = fp16
-    return fp16
+  """Return a pre-realized fp16 Tensor equivalent to `weight`. Caches across calls."""
+  key = id(weight.uop.base if hasattr(weight.uop, 'base') else weight.uop)
+  if key in _FP16_WEIGHT_CACHE:
+    return _FP16_WEIGHT_CACHE[key]
+  # weight.dtype is already half; .contiguous() materializes the dequant chain.
+  fp16 = weight.contiguous().realize()
+  _FP16_WEIGHT_CACHE[key] = fp16
+  return fp16
 
 
 def _prepare_ffn_fp16_weights(norm_w: Tensor, gate_w: Tensor, up_w: Tensor, down_w: Tensor):
-    """Eagerly realize fp16 versions of FFN weights. Call once per block during
+  """Eagerly realize fp16 versions of FFN weights. Call once per block during
     model setup, outside any JIT context."""
-    _q8_to_fp16(gate_w)
-    _q8_to_fp16(up_w)
-    _q8_to_fp16(down_w)
+  _q8_to_fp16(gate_w)
+  _q8_to_fp16(up_w)
+  _q8_to_fp16(down_w)
 
 
 # ---------------- Kernel 1: fused RMSNorm + gate + up + silu*mul ----------------
@@ -267,95 +267,95 @@ kernel void fused_down_q8(
 
 @functools.cache
 def _compiled_gate_up() -> bytes:
-    from tinygrad.runtime.ops_metal import MetalCompiler
-    return MetalCompiler().compile(_GATE_UP_METAL_SRC)
+  from tinygrad.runtime.ops_metal import MetalCompiler
+  return MetalCompiler().compile(_GATE_UP_METAL_SRC)
 
 
 @functools.cache
 def _compiled_down() -> bytes:
-    from tinygrad.runtime.ops_metal import MetalCompiler
-    return MetalCompiler().compile(_DOWN_RESIDUAL_METAL_SRC)
+  from tinygrad.runtime.ops_metal import MetalCompiler
+  return MetalCompiler().compile(_DOWN_RESIDUAL_METAL_SRC)
 
 
 def _gate_up_kernel(z: UOp, h: UOp, norm_w: UOp, gate_w: UOp, up_w: UOp) -> UOp:
-    lib = _compiled_gate_up()
-    assert z.numel() == 3584, f"fused_gate_up_q8 expects hidden=3584, got {z.numel()}"
-    # Estimates (Qwen3.5-0.8B dense FFN):
-    #   ops: gate matvec (2*H*D FMAs) + up matvec (2*H*D) + RMSNorm (~5*D) + silu*mul (~2*H)
-    #        dominated by matvecs -> 4*H*D = 14.68M ops
-    #   mem: h (D*4B) + norm_w (D*4B) + gate Q8 (_q8_bytes(H*D)) + up Q8 + z out (H*4B)
-    ops = 4 * _HIDDEN * _DIM + 5 * _DIM + 2 * _HIDDEN
-    mem = (_DIM + _DIM + _HIDDEN) * 4 + 2 * _q8_bytes(_HIDDEN * _DIM)
-    # Grid: HIDDEN/ROWS_PER_GROUP = 3584/8 = 448 threadgroups * 128 threads (4 warps).
-    sink = UOp.sink(
-        UOp.special(448, "gidx0"),
-        UOp.special(32, "lidx0"),
-        UOp.special(4, "lidx1"),
-        z, h, norm_w, gate_w, up_w,
-        arg=KernelInfo(name="fused_gate_up_q8", estimates=Estimates(ops=ops, mem=mem)),
-    )
-    return UOp(
-        Ops.PROGRAM,
-        src=(
-            sink,
-            UOp(Ops.DEVICE, arg=Device.DEFAULT),
-            UOp(Ops.LINEAR, src=(*sink.src, sink)),
-            UOp(Ops.SOURCE, arg=_GATE_UP_METAL_SRC),
-            UOp(Ops.BINARY, arg=lib),
-        ),
-    )
+  lib = _compiled_gate_up()
+  assert z.numel() == 3584, f"fused_gate_up_q8 expects hidden=3584, got {z.numel()}"
+  # Estimates (Qwen3.5-0.8B dense FFN):
+  #   ops: gate matvec (2*H*D FMAs) + up matvec (2*H*D) + RMSNorm (~5*D) + silu*mul (~2*H)
+  #        dominated by matvecs -> 4*H*D = 14.68M ops
+  #   mem: h (D*4B) + norm_w (D*4B) + gate Q8 (_q8_bytes(H*D)) + up Q8 + z out (H*4B)
+  ops = 4 * _HIDDEN * _DIM + 5 * _DIM + 2 * _HIDDEN
+  mem = (_DIM + _DIM + _HIDDEN) * 4 + 2 * _q8_bytes(_HIDDEN * _DIM)
+  # Grid: HIDDEN/ROWS_PER_GROUP = 3584/8 = 448 threadgroups * 128 threads (4 warps).
+  sink = UOp.sink(
+    UOp.special(448, "gidx0"),
+    UOp.special(32, "lidx0"),
+    UOp.special(4, "lidx1"),
+    z, h, norm_w, gate_w, up_w,
+    arg=KernelInfo(name="fused_gate_up_q8", estimates=Estimates(ops=ops, mem=mem)),
+  )
+  return UOp(
+    Ops.PROGRAM,
+    src=(
+      sink,
+      UOp(Ops.DEVICE, arg=Device.DEFAULT),
+      UOp(Ops.LINEAR, src=(*sink.src, sink)),
+      UOp(Ops.SOURCE, arg=_GATE_UP_METAL_SRC),
+      UOp(Ops.BINARY, arg=lib),
+    ),
+  )
 
 
 def _down_kernel(out: UOp, h: UOp, z: UOp, down_w: UOp) -> UOp:
-    lib = _compiled_down()
-    assert out.numel() == 1024, f"fused_down_q8 expects dim=1024, got {out.numel()}"
-    # Estimates:
-    #   ops: down matvec (2*D*H) + residual add (D) = 2*D*H + D = 7.34M
-    #   mem: h (D*4B) + z (H*4B) + down Q8 (_q8_bytes(D*H)) + out (D*4B)
-    ops = 2 * _DIM * _HIDDEN + _DIM
-    mem = (_DIM + _HIDDEN + _DIM) * 4 + _q8_bytes(_DIM * _HIDDEN)
-    # Grid: DIM/ROWS_PER_GROUP = 1024/8 = 128 threadgroups * 128 threads (4 warps).
-    sink = UOp.sink(
-        UOp.special(128, "gidx0"),
-        UOp.special(32, "lidx0"),
-        UOp.special(4, "lidx1"),
-        out, h, z, down_w,
-        arg=KernelInfo(name="fused_down_q8", estimates=Estimates(ops=ops, mem=mem)),
-    )
-    return UOp(
-        Ops.PROGRAM,
-        src=(
-            sink,
-            UOp(Ops.DEVICE, arg=Device.DEFAULT),
-            UOp(Ops.LINEAR, src=(*sink.src, sink)),
-            UOp(Ops.SOURCE, arg=_DOWN_RESIDUAL_METAL_SRC),
-            UOp(Ops.BINARY, arg=lib),
-        ),
-    )
+  lib = _compiled_down()
+  assert out.numel() == 1024, f"fused_down_q8 expects dim=1024, got {out.numel()}"
+  # Estimates:
+  #   ops: down matvec (2*D*H) + residual add (D) = 2*D*H + D = 7.34M
+  #   mem: h (D*4B) + z (H*4B) + down Q8 (_q8_bytes(D*H)) + out (D*4B)
+  ops = 2 * _DIM * _HIDDEN + _DIM
+  mem = (_DIM + _HIDDEN + _DIM) * 4 + _q8_bytes(_DIM * _HIDDEN)
+  # Grid: DIM/ROWS_PER_GROUP = 1024/8 = 128 threadgroups * 128 threads (4 warps).
+  sink = UOp.sink(
+    UOp.special(128, "gidx0"),
+    UOp.special(32, "lidx0"),
+    UOp.special(4, "lidx1"),
+    out, h, z, down_w,
+    arg=KernelInfo(name="fused_down_q8", estimates=Estimates(ops=ops, mem=mem)),
+  )
+  return UOp(
+    Ops.PROGRAM,
+    src=(
+      sink,
+      UOp(Ops.DEVICE, arg=Device.DEFAULT),
+      UOp(Ops.LINEAR, src=(*sink.src, sink)),
+      UOp(Ops.SOURCE, arg=_DOWN_RESIDUAL_METAL_SRC),
+      UOp(Ops.BINARY, arg=lib),
+    ),
+  )
 
 
 def fused_ffn_with_residual(h: Tensor, norm_w: Tensor,
-                            gate_w: Tensor, up_w: Tensor, down_w: Tensor) -> Tensor:
-    """Replacement for `h + ffn_down(silu(ffn_gate(ffn_norm(h))) * ffn_up(ffn_norm(h)))`.
+              gate_w: Tensor, up_w: Tensor, down_w: Tensor) -> Tensor:
+  """Replacement for `h + ffn_down(silu(ffn_gate(ffn_norm(h))) * ffn_up(ffn_norm(h)))`.
 
     Uses raw Q8_0 weight bytes (cheaper than fp16 on bandwidth-bound M-series).
     """
-    assert h.numel() == 1024, f"fused_ffn only supports dim=1024, got {h.numel()}"
+  assert h.numel() == 1024, f"fused_ffn only supports dim=1024, got {h.numel()}"
 
-    norm_raw = _find_raw_q8_blocks(norm_w)
-    gate_raw = _find_raw_q8_blocks(gate_w)
-    up_raw = _find_raw_q8_blocks(up_w)
-    down_raw = _find_raw_q8_blocks(down_w)
-    if norm_raw is None or gate_raw is None or up_raw is None or down_raw is None:
-        raise NotImplementedError("fused_ffn_with_residual: all weights must trace to a raw uchar buffer")
+  norm_raw = _find_raw_q8_blocks(norm_w)
+  gate_raw = _find_raw_q8_blocks(gate_w)
+  up_raw = _find_raw_q8_blocks(up_w)
+  down_raw = _find_raw_q8_blocks(down_w)
+  if norm_raw is None or gate_raw is None or up_raw is None or down_raw is None:
+    raise NotImplementedError("fused_ffn_with_residual: all weights must trace to a raw uchar buffer")
 
-    z = Tensor.empty(3584, dtype=dtypes.float, device=h.device)
-    z, h_after, *_ = Tensor.custom_kernel(z, h, norm_raw, gate_raw, up_raw, fxn=_gate_up_kernel)
+  z = Tensor.empty(3584, dtype=dtypes.float, device=h.device)
+  z, h_after, *_ = Tensor.custom_kernel(z, h, norm_raw, gate_raw, up_raw, fxn=_gate_up_kernel)
 
-    out_empty = Tensor.empty(h.shape, dtype=dtypes.float, device=h.device)
-    out, *_ = Tensor.custom_kernel(out_empty, h_after, z, down_raw, fxn=_down_kernel)
+  out_empty = Tensor.empty(h.shape, dtype=dtypes.float, device=h.device)
+  out, *_ = Tensor.custom_kernel(out_empty, h_after, z, down_raw, fxn=_down_kernel)
 
-    return out
+  return out
 
 
 # ---------------- Attention QKV fusion ----------------
@@ -474,34 +474,34 @@ kernel void fused_attn_qkv_q8(
 
 @functools.cache
 def _compiled_attn_qkv() -> bytes:
-    from tinygrad.runtime.ops_metal import MetalCompiler
-    return MetalCompiler().compile(_ATTN_QKV_METAL_SRC)
+  from tinygrad.runtime.ops_metal import MetalCompiler
+  return MetalCompiler().compile(_ATTN_QKV_METAL_SRC)
 
 
 def _attn_qkv_kernel(q_out: UOp, k_out: UOp, v_out: UOp, x: UOp, norm_w: UOp, q_w: UOp, k_w: UOp, v_w: UOp) -> UOp:
-    lib = _compiled_attn_qkv()
-    assert q_out.numel() == _ATTN_Q_OUT, f"q_out must be {_ATTN_Q_OUT}"
-    assert k_out.numel() == _ATTN_KV_OUT and v_out.numel() == _ATTN_KV_OUT
-    ops = 2 * _ATTN_QKV_OUT * _ATTN_DIM + 5 * _ATTN_DIM
-    mem = (_ATTN_DIM + _ATTN_DIM + _ATTN_QKV_OUT) * 4 + _q8_bytes(_ATTN_Q_OUT * _ATTN_DIM) + 2 * _q8_bytes(_ATTN_KV_OUT * _ATTN_DIM)
-    # Grid: QKV_OUT/ROWS_PER_GROUP = 5120/8 = 640 threadgroups * 128 threads.
-    sink = UOp.sink(
-        UOp.special(640, "gidx0"),
-        UOp.special(32, "lidx0"),
-        UOp.special(4, "lidx1"),
-        q_out, k_out, v_out, x, norm_w, q_w, k_w, v_w,
-        arg=KernelInfo(name="fused_attn_qkv_q8", estimates=Estimates(ops=ops, mem=mem)),
-    )
-    return UOp(
-        Ops.PROGRAM,
-        src=(
-            sink,
-            UOp(Ops.DEVICE, arg=Device.DEFAULT),
-            UOp(Ops.LINEAR, src=(*sink.src, sink)),
-            UOp(Ops.SOURCE, arg=_ATTN_QKV_METAL_SRC),
-            UOp(Ops.BINARY, arg=lib),
-        ),
-    )
+  lib = _compiled_attn_qkv()
+  assert q_out.numel() == _ATTN_Q_OUT, f"q_out must be {_ATTN_Q_OUT}"
+  assert k_out.numel() == _ATTN_KV_OUT and v_out.numel() == _ATTN_KV_OUT
+  ops = 2 * _ATTN_QKV_OUT * _ATTN_DIM + 5 * _ATTN_DIM
+  mem = (_ATTN_DIM + _ATTN_DIM + _ATTN_QKV_OUT) * 4 + _q8_bytes(_ATTN_Q_OUT * _ATTN_DIM) + 2 * _q8_bytes(_ATTN_KV_OUT * _ATTN_DIM)
+  # Grid: QKV_OUT/ROWS_PER_GROUP = 5120/8 = 640 threadgroups * 128 threads.
+  sink = UOp.sink(
+    UOp.special(640, "gidx0"),
+    UOp.special(32, "lidx0"),
+    UOp.special(4, "lidx1"),
+    q_out, k_out, v_out, x, norm_w, q_w, k_w, v_w,
+    arg=KernelInfo(name="fused_attn_qkv_q8", estimates=Estimates(ops=ops, mem=mem)),
+  )
+  return UOp(
+    Ops.PROGRAM,
+    src=(
+      sink,
+      UOp(Ops.DEVICE, arg=Device.DEFAULT),
+      UOp(Ops.LINEAR, src=(*sink.src, sink)),
+      UOp(Ops.SOURCE, arg=_ATTN_QKV_METAL_SRC),
+      UOp(Ops.BINARY, arg=lib),
+    ),
+  )
 
 
 # ---------------- SSM alpha/beta fusion ----------------
@@ -613,78 +613,78 @@ kernel void fused_ssm_alpha_beta_q8(
 
 @functools.cache
 def _compiled_ssm_alpha_beta() -> bytes:
-    from tinygrad.runtime.ops_metal import MetalCompiler
-    return MetalCompiler().compile(_SSM_ALPHABETA_METAL_SRC)
+  from tinygrad.runtime.ops_metal import MetalCompiler
+  return MetalCompiler().compile(_SSM_ALPHABETA_METAL_SRC)
 
 
 def _ssm_alpha_beta_kernel(alpha_out: UOp, beta_out: UOp, x: UOp, norm_w: UOp,
                            alpha_w: UOp, beta_w: UOp, dt_bias: UOp, ssm_a: UOp) -> UOp:
-    lib = _compiled_ssm_alpha_beta()
-    ops = 2 * 2 * _SSM_N_V_HEADS * _SSM_DIM + 5 * _SSM_DIM + 20 * _SSM_N_V_HEADS
-    mem = (_SSM_DIM + _SSM_DIM + 2 * _SSM_N_V_HEADS + _SSM_N_V_HEADS + _SSM_N_V_HEADS) * 4 + \
+  lib = _compiled_ssm_alpha_beta()
+  ops = 2 * 2 * _SSM_N_V_HEADS * _SSM_DIM + 5 * _SSM_DIM + 20 * _SSM_N_V_HEADS
+  mem = (_SSM_DIM + _SSM_DIM + 2 * _SSM_N_V_HEADS + _SSM_N_V_HEADS + _SSM_N_V_HEADS) * 4 + \
           2 * _q8_bytes(_SSM_N_V_HEADS * _SSM_DIM)
-    sink = UOp.sink(
-        UOp.special(_SSM_N_V_HEADS, "gidx0"),
-        UOp.special(32, "lidx0"),
-        UOp.special(4, "lidx1"),
-        alpha_out, beta_out, x, norm_w, alpha_w, beta_w, dt_bias, ssm_a,
-        arg=KernelInfo(name="fused_ssm_alpha_beta_q8", estimates=Estimates(ops=ops, mem=mem)),
-    )
-    return UOp(
-        Ops.PROGRAM,
-        src=(
-            sink,
-            UOp(Ops.DEVICE, arg=Device.DEFAULT),
-            UOp(Ops.LINEAR, src=(*sink.src, sink)),
-            UOp(Ops.SOURCE, arg=_SSM_ALPHABETA_METAL_SRC),
-            UOp(Ops.BINARY, arg=lib),
-        ),
-    )
+  sink = UOp.sink(
+    UOp.special(_SSM_N_V_HEADS, "gidx0"),
+    UOp.special(32, "lidx0"),
+    UOp.special(4, "lidx1"),
+    alpha_out, beta_out, x, norm_w, alpha_w, beta_w, dt_bias, ssm_a,
+    arg=KernelInfo(name="fused_ssm_alpha_beta_q8", estimates=Estimates(ops=ops, mem=mem)),
+  )
+  return UOp(
+    Ops.PROGRAM,
+    src=(
+      sink,
+      UOp(Ops.DEVICE, arg=Device.DEFAULT),
+      UOp(Ops.LINEAR, src=(*sink.src, sink)),
+      UOp(Ops.SOURCE, arg=_SSM_ALPHABETA_METAL_SRC),
+      UOp(Ops.BINARY, arg=lib),
+    ),
+  )
 
 
 def fused_ssm_alpha_beta(x: Tensor, norm_w: Tensor, alpha_w: Tensor, beta_w: Tensor,
                          dt_bias: Tensor, ssm_a: Tensor,
                          alpha_shape: tuple[int,...], beta_shape: tuple[int,...]
                          ) -> tuple[Tensor, Tensor]:
-    """Replacement for
+  """Replacement for
         alpha = exp(softplus(ssm_alpha(attn_norm(x)) + ssm_dt.bias) * ssm_a)
         beta  = sigmoid(ssm_beta(attn_norm(x)))
     fused into one kernel. Returns (alpha, beta).
     """
-    assert x.numel() == _SSM_DIM, f"fused_ssm_alpha_beta: expected dim={_SSM_DIM}"
+  assert x.numel() == _SSM_DIM, f"fused_ssm_alpha_beta: expected dim={_SSM_DIM}"
 
-    norm_raw = _find_raw_q8_blocks(norm_w)
-    alpha_raw = _find_raw_q8_blocks(alpha_w)
-    beta_raw = _find_raw_q8_blocks(beta_w)
-    if norm_raw is None or alpha_raw is None or beta_raw is None:
-        raise NotImplementedError("fused_ssm_alpha_beta: all weights must trace to raw uchar")
+  norm_raw = _find_raw_q8_blocks(norm_w)
+  alpha_raw = _find_raw_q8_blocks(alpha_w)
+  beta_raw = _find_raw_q8_blocks(beta_w)
+  if norm_raw is None or alpha_raw is None or beta_raw is None:
+    raise NotImplementedError("fused_ssm_alpha_beta: all weights must trace to raw uchar")
 
-    alpha = Tensor.empty(alpha_shape, dtype=dtypes.float, device=x.device)
-    beta = Tensor.empty(beta_shape, dtype=dtypes.half, device=x.device)
-    alpha, beta, *_ = Tensor.custom_kernel(alpha, beta, x, norm_raw, alpha_raw, beta_raw,
-                                            dt_bias, ssm_a, fxn=_ssm_alpha_beta_kernel)
-    return alpha, beta
+  alpha = Tensor.empty(alpha_shape, dtype=dtypes.float, device=x.device)
+  beta = Tensor.empty(beta_shape, dtype=dtypes.half, device=x.device)
+  alpha, beta, *_ = Tensor.custom_kernel(alpha, beta, x, norm_raw, alpha_raw, beta_raw,
+                      dt_bias, ssm_a, fxn=_ssm_alpha_beta_kernel)
+  return alpha, beta
 
 
 def fused_attn_qkv(x: Tensor, norm_w: Tensor, q_w: Tensor, k_w: Tensor, v_w: Tensor,
                    q_shape: tuple[int,...], kv_shape: tuple[int,...]) -> tuple[Tensor, Tensor, Tensor]:
-    """Replacement for `attn_q(attn_norm(x)), attn_k(attn_norm(x)), attn_v(attn_norm(x))`.
+  """Replacement for `attn_q(attn_norm(x)), attn_k(attn_norm(x)), attn_v(attn_norm(x))`.
 
     Fuses the RMSNorm + 3 matvecs into one kernel with THREE separate output
     buffers (q, k, v) allocated with the caller's desired shape so downstream
     reshape() calls fold away without materializing.
     """
-    assert x.numel() == _ATTN_DIM, f"fused_attn_qkv: x must have {_ATTN_DIM} elements, got {x.numel()}"
+  assert x.numel() == _ATTN_DIM, f"fused_attn_qkv: x must have {_ATTN_DIM} elements, got {x.numel()}"
 
-    norm_raw = _find_raw_q8_blocks(norm_w)
-    q_raw = _find_raw_q8_blocks(q_w)
-    k_raw = _find_raw_q8_blocks(k_w)
-    v_raw = _find_raw_q8_blocks(v_w)
-    if norm_raw is None or q_raw is None or k_raw is None or v_raw is None:
-        raise NotImplementedError("fused_attn_qkv: all weights must trace to a raw uchar buffer")
+  norm_raw = _find_raw_q8_blocks(norm_w)
+  q_raw = _find_raw_q8_blocks(q_w)
+  k_raw = _find_raw_q8_blocks(k_w)
+  v_raw = _find_raw_q8_blocks(v_w)
+  if norm_raw is None or q_raw is None or k_raw is None or v_raw is None:
+    raise NotImplementedError("fused_attn_qkv: all weights must trace to a raw uchar buffer")
 
-    q = Tensor.empty(q_shape,  dtype=dtypes.float, device=x.device)
-    k = Tensor.empty(kv_shape, dtype=dtypes.float, device=x.device)
-    v = Tensor.empty(kv_shape, dtype=dtypes.float, device=x.device)
-    q, k, v, *_ = Tensor.custom_kernel(q, k, v, x, norm_raw, q_raw, k_raw, v_raw, fxn=_attn_qkv_kernel)
-    return q, k, v
+  q = Tensor.empty(q_shape,  dtype=dtypes.float, device=x.device)
+  k = Tensor.empty(kv_shape, dtype=dtypes.float, device=x.device)
+  v = Tensor.empty(kv_shape, dtype=dtypes.float, device=x.device)
+  q, k, v, *_ = Tensor.custom_kernel(q, k, v, x, norm_raw, q_raw, k_raw, v_raw, fxn=_attn_qkv_kernel)
+  return q, k, v
