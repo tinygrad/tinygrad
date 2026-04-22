@@ -51,7 +51,7 @@ class MetalGraph(GraphRunner):
     for var in self.fixedvars: self.int_buf_view[self.varlist.index(var)] = self.fixedvars[var]
     self.range = metal.NSRange(0, len(self.jit_cache))
 
-  def __call__(self, input_buffers: list[Buffer], var_vals: dict[str, int], wait=False) -> float|None:
+  def __call__(self, input_buffers: list[Buffer], var_vals: dict[str, int], wait=False, input_uops=None) -> float|None:
     if self.command_buffer is not None and self.command_buffer in self.dev.mtl_buffers_in_flight: wait_check(self.command_buffer)
     # NOTE: old command buffer may not be inflight anymore
     if self.command_buffer is not None and PROFILE: self.collect_timestamps()
