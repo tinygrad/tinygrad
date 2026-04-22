@@ -135,9 +135,12 @@ class FFNBlock:
   def __call__(self, x: Tensor, start_pos: int|UOp):
     self._init_state(x)
     # we pass in the weights implicitly so we unpack the GGUF on the fly
+    use_fused = (getenv("CUSTOM_MLP") and x.device == "METAL"
+                 and not hasattr(self, 'ffn_gate_exps'))
     @function(precompile=True, allow_implicit=True)
     def _run(x:Tensor, start_pos:int|UOp):
       h =     x + self._attention(self.attn_norm(x), start_pos)
+      if use_fused: return self._ffn_with_residual_fused(h).contiguous()
       return (h + self._feed_forward(self.ffn_norm(h))).contiguous()
     return _run(x, start_pos)
 
