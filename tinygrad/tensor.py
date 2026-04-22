@@ -238,11 +238,9 @@ class Tensor(OpMixin):
 
   def linear_with_vars(self, *lst:Tensor) -> tuple[UOp, dict[str, int]]:
     """Creates the LINEAR UOp needed to realize these Tensor(s), with Variables."""
-    big_sink, becomes_map = transform_to_call(UOp.sink(*(tensor_uops:=[x.uop for x in (self,)+lst])))
-    # becomes_map keys are base ops, not views (e.g. REDUCE_AXIS not RESHAPE)
-    output_bufs = {v.buf_uop for u in tensor_uops if (v:=becomes_map.get(u.base)) is not None and v.buf_uop.op is Ops.BUFFER}
+    big_sink, becomes_map = transform_to_call(UOp.sink(*[x.uop for x in (self,)+lst]))
     _apply_map_to_tensors(becomes_map, name="buffers")
-    return create_linear_with_vars(big_sink, output_bufs)
+    return create_linear_with_vars(big_sink, {v.buf_uop for v in becomes_map.values() if v.buf_uop.op is Ops.BUFFER})
 
   def schedule_with_vars(self, *lst:Tensor) -> tuple[list[ExecItem], dict[str, int]]:
     """
