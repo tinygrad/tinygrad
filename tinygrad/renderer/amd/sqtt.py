@@ -288,34 +288,34 @@ class WAVERDY(PacketType):  # exclude: 1 << 3
 class WAVEEND(PacketType):  # exclude: 1 << 4
   encoding = bits[4:0] == 0b10101
   delta = bits[7:5]
-  flag7 = bits[8:8]
+  sa = bits[8:8]
   simd = bits[10:9]
-  cu_lo = bits[13:11]
+  wgp = bits[13:11]
   wave = bits[19:15]
   @property
-  def cu(self) -> int: return self.cu_lo | (self.flag7 << 3)
+  def cu(self) -> int: return self.wgp | (self.sa << 3)
 
 class WAVESTART(PacketType):  # exclude: 1 << 4
   encoding = bits[4:0] == 0b01100
   delta = bits[6:5]
-  flag7 = bits[7:7]
+  sa = bits[7:7]
   simd = bits[9:8]
-  cu_lo = bits[12:10]
+  wgp = bits[12:10]
   wave = bits[17:13]
   id7 = bits[31:18]
   @property
-  def cu(self) -> int: return self.cu_lo | (self.flag7 << 3)
+  def cu(self) -> int: return self.wgp | (self.sa << 3)
 
 class WAVESTART_RDNA4(PacketType):  # Layout 4 has wave field at different position
   encoding = bits[4:0] == 0b01100
   delta = bits[6:5]
-  flag7 = bits[7:7]
+  sa = bits[7:7]
   simd = bits[9:8]
-  cu_lo = bits[12:10]
+  wgp = bits[12:10]
   wave = bits[19:15]
   id7 = bits[31:20]
   @property
-  def cu(self) -> int: return self.cu_lo | (self.flag7 << 3)
+  def cu(self) -> int: return self.wgp | (self.sa << 3)
 
 class WAVEALLOC(PacketType):  # exclude: 1 << 10
   encoding = bits[4:0] == 0b00101
