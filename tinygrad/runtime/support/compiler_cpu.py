@@ -5,17 +5,17 @@ from tinygrad.runtime.support.elf import jit_loader
 from tinygrad.runtime.autogen import llvm
 
 class ClangJITCompiler(Compiler):
-  def __init__(self, arch, cachekey="compile_clang_jit"):
-    self.arch, cpu, feats = (sp:=arch.split(',', 2)) + [""] * (3 - len(sp))
+  def __init__(self, arch:list[str], cachekey="compile_clang_jit"):
+    self.arch, cpu, *feats = arch
     assert self.arch and cpu, f"invalid arch string: {arch!r}, expected '<arch>,<cpu>,[<feats>]' (eg. 'x86_64,znver2')"
     match self.arch:
-      case "x86_64": self.args = [f"-march={cpu}"] + [f"-mno{f}" if f.startswith("-") else f"-m{f}" for f in feats.split(',') if f]
+      case "x86_64": self.args = [f"-march={cpu}"] + [f"-mno{f}" if f.startswith("-") else f"-m{f}" for f in feats]
       # on arm march means "runs on this arch and superset" instead of "optimize for this arch". x86 march == arm mcpu
       # x18 is a reserved platform register. It is clobbered on context switch in macos and is used to store TEB pointer in windows on arm
-      case "arm64": self.args = ["-ffixed-x18", "-mcpu=" + "+".join([cpu] + ["no"+f[1:] if f.startswith("-") else f for f in feats.split(',') if f])]
-      case "riscv64": self.args = ["-march=" + "_".join(["rv64g" if cpu == "native" else cpu] + [f for f in feats.split(',') if f])]
+      case "arm64": self.args = ["-ffixed-x18", "-mcpu=" + "+".join([cpu] + ["no"+f[1:] if f.startswith("-") else f for f in feats])]
+      case "riscv64": self.args = ["-march=" + "_".join(["rv64g" if cpu == "native" else cpu] + feats)]
       case _: raise RuntimeError(f"unsupported arch: {self.arch!r}")
-    super().__init__(f"{cachekey}_{arch}")
+    super().__init__(f"{cachekey}_{'_'.join(arch)}")
 
   def compile_to_obj(self, src:str) -> bytes:
     """Compile C source to ELF object file (before linking)."""
@@ -91,14 +91,14 @@ class LLVMCompiler(Compiler):
 
 
 class CPULLVMCompiler(LLVMCompiler):
-  def __init__(self, arch, cache_key=None):
-    self.arch, cpu, feats = (sp:=arch.split(',', 2)) + [""] * (3 - len(sp))
+  def __init__(self, arch:list[str], cache_key=None):
+    self.arch, cpu, *feats = arch
     assert self.arch and cpu, f"invalid arch string: {arch!r}, expected '<arch>,<cpu>,[<feats>]' (eg. 'x86_64,znver2')"
-    feats = ','.join(f if f.startswith('-') else '+'+f for f in feats.split(',') if f)
+    featstr = ','.join(f if f.startswith('-') else '+'+f for f in feats)
     if cpu == "native":
       cpu = ctypes.string_at(llvm.LLVMGetHostCPUName()).decode()
-      feats = (feats + "," if feats else "") + ctypes.string_at(llvm.LLVMGetHostCPUFeatures()).decode()
+      featstr = (featstr + "," if featstr else "") + ctypes.string_at(llvm.LLVMGetHostCPUFeatures()).decode()
     # +reserve-x18 here does the same thing as -ffixed-x18 in ClangJITCompiler, see comments there for why it's needed on arm osx
-    super().__init__(self.arch, cpu, ('+reserve-x18,' if self.arch == "arm64" else '') + feats, cache_key)
+    super().__init__(self.arch, cpu, ('+reserve-x18,' if self.arch == "arm64" else '') + featstr, cache_key)
 
   def disassemble(self, lib:bytes): capstone_flatdump(lib, self.arch)

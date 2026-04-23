@@ -137,9 +137,7 @@ class FlatTransformer:
 
     x, rrms = rmsnorm(x, self.norm_eps)
     saves.extend([x, rrms])
-    x = x * attention_norm
 
-    xqkv, *ret = matmul(x, wqkv, amax_x=amax_xqkv, w_inv_scale=s_qkv)
     if FP8 and getenv("FUSED_NORM_MUL_QUANTIZE", 1):
       from extra.amax.cast_amax import fused_mul_quantize_fp8
       amax_s = amax_xqkv if amax_xqkv is not None else Tensor.full((), 1.0, dtype=dtypes.bfloat16, device=x.device)
@@ -178,9 +176,15 @@ class FlatTransformer:
 
     x, rrms = rmsnorm(x, self.norm_eps)
     saves.extend([x, rrms])
-    x = x * ffn_norm
 
-    x_w13, *ret = matmul(x, w13, amax_x=amax_x13, w_inv_scale=s_13)
+    if FP8 and getenv("FUSED_NORM_MUL_QUANTIZE", 1):
+      from extra.amax.cast_amax import fused_mul_quantize_fp8
+      amax_s13 = amax_x13 if amax_x13 is not None else Tensor.full((), 1.0, dtype=dtypes.bfloat16, device=x.device)
+      x_fp8_13, x_inv_scale_13, new_amax_x13 = fused_mul_quantize_fp8(x, ffn_norm, amax_s13, FP8_DTYPE)
+      x_w13, *ret = matmul(None, w13, w_inv_scale=s_13, x_fp8=x_fp8_13, x_scale=x_inv_scale_13, x_new_amax=new_amax_x13)
+    else:
+      x = x * ffn_norm
+      x_w13, *ret = matmul(x, w13, amax_x=amax_x13, w_inv_scale=s_13)
     new_amaxs.extend(ret[:1])
     saves.extend(ret[1:] + [x_w13])
 

@@ -12,6 +12,17 @@ def _t(*shape):
 def _check(tc: unittest.TestCase, t: Tensor, fn):
   tc.assertIs(fn(t).uop, fn(t.uop), f"\ntensor.uop = {fn(t).uop}\nuop = {fn(t.uop)}")
 
+class TestTensorUOpBinop(unittest.TestCase):
+  # Tensor's binop upcasts mixed dtypes via least_upper_dtype + explicit CAST; UOp should match.
+  def test_mul_float_int(self):
+    t = _t(3).float()
+    self.assertIs(_strip_unique((t * Tensor.arange(3)).uop), _strip_unique(t.uop * UOp.arange(3)))
+  def test_mul_bool_int(self):
+    t = _t(3)
+    self.assertIs(_strip_unique((t.eq(1) * Tensor.arange(3)).uop), _strip_unique(t.uop.eq(1) * UOp.arange(3)))
+  # Tensor's ufix picks float dtype when scalar is float and self is int; UOp should match.
+  def test_add_scalar_float_on_int(self): _check(self, _t(3), lambda x: x + 1.5)
+
 class TestTensorUOpGetitem(unittest.TestCase):
   # ---- pure slice patterns ----
   def test_slice_full(self):           _check(self, _t(4), lambda x: x[slice(None)])
@@ -61,6 +72,18 @@ class TestTensorUOpCumalu(unittest.TestCase):
   def test_cumsum_non_last(self): _check(self, _t(3, 4), lambda x: x.cumsum(0))
   def test_cumsum_large(self):    _check(self, _t(600), lambda x: x.cumsum())  # exercises _split_cumalu
   def test_cumprod(self):         _check(self, _t(4), lambda x: x.cumprod(0))
+
+class TestTensorUOpCumMinMax(unittest.TestCase):
+  def _check_pair(self, t, fn):
+    vt, it = fn(t)
+    vu, iu = fn(t.uop)
+    self.assertIs(_strip_unique(vt.uop), _strip_unique(vu))
+    self.assertIs(_strip_unique(it.uop), _strip_unique(iu))
+  def test_cummax_1d(self):    self._check_pair(_t(5), lambda x: x.cummax(0))
+  def test_cummax_2d(self):    self._check_pair(_t(3, 4), lambda x: x.cummax(1))
+  def test_cummax_0d(self):    self._check_pair(_t(1).reshape(()), lambda x: x.cummax(0))
+  def test_cummin_1d(self):    self._check_pair(_t(5), lambda x: x.cummin(0))
+  def test_cummin_2d(self):    self._check_pair(_t(3, 4), lambda x: x.cummin(1))
 
 class TestTensorUOpOneHot(unittest.TestCase):
   def test_one_hot(self):

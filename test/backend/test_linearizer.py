@@ -342,7 +342,7 @@ class TestLinearizer(unittest.TestCase):
     out = x.flip((0,1)).contiguous()
     ast = helper_linearizer_opt(out)
     store_val = [u.src[1] for u in get_program(ast, renderer=Device[Device.DEFAULT].renderer).uops if u.op is Ops.STORE][0]
-    assert store_val.dtype == dtypes.float.vec(4) and store_val.op is not Ops.VECTORIZE
+    assert store_val.dtype == dtypes.float.vec(4) and store_val.op is not Ops.STACK
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")

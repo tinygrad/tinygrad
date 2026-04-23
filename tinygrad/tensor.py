@@ -5,7 +5,7 @@ from contextlib import ContextDecorator
 from typing import Any, Callable, ClassVar, Sequence, cast, get_args, Literal, ParamSpec, TypeVar, Generic, TYPE_CHECKING
 if TYPE_CHECKING: import numpy
 from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_float, least_upper_dtype, to_dtype, truncate
-from tinygrad.dtype import _from_np_dtype, _to_np_dtype, PyConst, Invalid, InvalidType
+from tinygrad.dtype import _from_np_dtype, _to_np_dtype, PyConst, Invalid
 from tinygrad.helpers import argfix, make_tuple, flatten, prod, all_int, round_up, getenv, all_same, fully_flatten, ceildiv, fetch, flat_to_grouped
 from tinygrad.helpers import resolve_pool_pads, IMAGE, FLOAT16, WINO, Metadata, TRACEMETA, is_numpy_ndarray, TracingKey, cpu_profile
 from tinygrad.helpers import suppress_finalizing, disable_gc
@@ -169,10 +169,7 @@ class Tensor(OpMixin):
     all_tensors[weakref.ref(ret)] = None
     return ret
 
-  # _binop, alu, and const_like are used by the mixins
-  def _binop(self, op, x, reverse):
-    lhs,rhs = self._broadcasted(x, reverse)
-    return lhs._apply_uop(lambda *u: u[0].alu(op, *u[1:]), rhs)
+  # alu and const_like are used by the mixins
   def alu(self, op: Ops, *src: Tensor) -> Tensor: return self._apply_uop(lambda *u: u[0].alu(op, *u[1:]), *src)
   def const_like(self, b:ConstType) -> Tensor: return Tensor(self.uop.const_like(b), requires_grad=False)
   @staticmethod
@@ -1009,8 +1006,9 @@ class Tensor(OpMixin):
       match index:
         case Tensor():
           if not dtypes.is_int(index.dtype): raise IndexError(f"index dtype {index.dtype} is not supported")
+          if index.device != self.device: raise RuntimeError(f"expected index and self on the same device, {index.device=}, {self.device=}")
           assert isinstance(size, int), "size must be an int"
-          index = (index < 0).where(index+size, index).to(self.device)  # treat negative index values
+          index = (index < 0).where(index+size, index)  # treat negative index values
         case list() | tuple():
           if not dtypes.is_int((ti:=Tensor(index)).dtype): raise IndexError(f"{index=} contains non-int element")
           index = Tensor([i+size if i<0 else i for i in fully_flatten(index)], self.device, requires_grad=False).reshape(ti.shape)
@@ -1168,10 +1166,10 @@ class Tensor(OpMixin):
     print(t.gather(1, Tensor([[0, 0], [1, 0]])).numpy())
     ```
     """
+    if index.device != self.device: raise RuntimeError(f"expected index and self on the same device, {index.device=}, {self.device=}")
     assert index.ndim == self.ndim, f"self.ndim must equal index.ndim, {self.ndim=}, {index.ndim=}"
     dim = self._resolve_dim(dim)
     assert all(s >= i for d,(s,i) in enumerate(zip(self.shape, index.shape)) if d != dim), "requires self.shape[d] >= index.shape[d] for all d != dim"
-    index = index.to(self.device)
     x = self.shrink_to(tuple(i if d != dim else None for d,i in enumerate(index.shape))).unsqueeze(-1).transpose(-1, dim)
     return (index.unsqueeze(-1)._one_hot_along_dim(self.shape[dim]).where(x, 0)).sum(-1, dtype=self.dtype)
 
@@ -1610,38 +1608,6 @@ class Tensor(OpMixin):
     if IMAGE: return self.image_dot(w, dtype)
     return super().dot(w, dtype)
 
-  def cummax(self, axis:int=0) -> tuple[Tensor, Tensor]:
-    """
-    Computes the cumulative max of the tensor along `axis`, returning (values, indices).
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([0, 1, -1, 2, -2, 3, -3])
-    values, indices = t.cummax(0)
-    print(values.numpy())
-    print(indices.numpy())
-    ```
-    """
-    if self.ndim == 0: return self._split_cumalu(axis, Ops.MAX), Tensor.zeros(self.shape, dtype=dtypes.int32, device=self.device)
-    values, n = self._split_cumalu(axis, Ops.MAX), int(self.shape[axis])
-    x, values_t = self.transpose(axis, -1), values.transpose(axis, -1)
-    match = (x.unsqueeze(-1) == values_t.unsqueeze(-2)) * Tensor.ones(n, n, requires_grad=False, device=self.device).triu()
-    idx = (-(match * Tensor.arange(n, 0, -1, requires_grad=False, device=self.device).reshape(n, 1)).max(-2) + n).cast(dtypes.int32)
-    return values, idx.transpose(-1, axis)
-
-  def cummin(self, axis:int=0) -> tuple[Tensor, Tensor]:
-    """
-    Computes the cumulative min of the tensor along `axis`, returning (values, indices).
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([0, 1, -1, 2, -2, 3, -3])
-    values, indices = t.cummin(0)
-    print(values.numpy())
-    print(indices.numpy())
-    ```
-    """
-    values, indices = self._inverse().cummax(axis)
-    return values._inverse(), indices
-
   def interpolate(self, size:tuple[int, ...], mode:str="linear", align_corners:bool=False) -> Tensor:
     """
     Downsamples or Upsamples to the input `size`, accepts 0 to N batch dimensions.
@@ -1675,7 +1641,9 @@ class Tensor(OpMixin):
     return x.cast(self.dtype)
 
   def _pre_scatter(self, dim:int, index:Tensor, src:Tensor) -> tuple[Tensor, Tensor]:
-    index, dim = index.to(self.device), self._resolve_dim(dim)
+    if index.device != self.device: raise RuntimeError(f"expected index and self on the same device, {index.device=}, {self.device=}")
+    if src.device != self.device: raise RuntimeError(f"expected src and self on the same device, {src.device=}, {self.device=}")
+    dim = self._resolve_dim(dim)
     assert index.ndim == self.ndim == src.ndim, f"self.ndim, index.ndim and src.ndim must all equal, {self.ndim=} {index.ndim=} {src.ndim=}"
     assert all((d == dim or self_ >= index_) and src_ >= index_ for d,(self_,index_,src_) in enumerate(zip(self.shape, index.shape, src.shape))), \
       f"All dimensions of {index.shape=} should be <= to all dimensions of {src.shape=} and all dimensions except dimension {dim} of {self.shape=}"
@@ -1860,8 +1828,7 @@ class Tensor(OpMixin):
   def ufix(self, x) -> Tensor:
     # TODO: x:ConstType|UOp does not work because mixin only accepts Self | ConstType
     assert isinstance(x, (*get_args(ConstType), UOp)), f"{type(x)=}, {x=}"
-    dtype = self.dtype if dtypes.is_float(self.dtype) or (dtypes.is_int(self.dtype) and isinstance(x, (int, InvalidType))) else None
-    return Tensor(x, self.device, dtype, requires_grad=False)
+    return Tensor(x, self.device, self.dtype if self._ufix_keep_dtype(x) else None, requires_grad=False)
 
   def div(self, x:Tensor|ConstType|UOp, reverse=False, rounding_mode:Literal["trunc", "floor"]|None=None) -> Tensor:
     """
@@ -2052,9 +2019,10 @@ class Tensor(OpMixin):
     ```
     """
     assert 0.0 <= label_smoothing <= 1.0, "label_smoothing must be in [0.0, 1.0]"
+    if Y.device != self.device: raise RuntimeError(f"expected Y and self on the same device, {Y.device=}, {self.device=}")
     log_probs = self.log_softmax()
     loss_mask = (Y != ignore_index) if ignore_index != -1 else Y.ones_like(dtype=dtypes.bool)
-    y = Y.to(self.device).unsqueeze(-1)._one_hot_along_dim(self.shape[-1], dim=-1) * loss_mask.unsqueeze(-1)
+    y = Y.unsqueeze(-1)._one_hot_along_dim(self.shape[-1], dim=-1) * loss_mask.unsqueeze(-1)
     smoothing = label_smoothing * (log_probs.mean(-1) * loss_mask)
     unreduced = ((1 - label_smoothing) * (log_probs * y).sum(-1) + smoothing)
     return -unreduced.sum() / loss_mask.sum() if reduction == "mean" else -unreduced._do_reduction(reduction)

@@ -5,7 +5,7 @@ from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv,
 from tinygrad.device import Buffer, Compiled, Device, MultiBuffer
 from tinygrad.dtype import DType, dtypes
 from tinygrad.uop.ops import UOp, PatternMatcher, Variable, sym_infer, Ops, buffers, track_rewrites, graph_rewrite
-from tinygrad.engine.realize import ExecItem, capturing, CompiledRunner, Runner, Estimates, pm_beam, run_linear, get_runner, graph_cache
+from tinygrad.engine.realize import ExecItem, capturing, CompiledRunner, Runner, Estimates, compile_linear, run_linear, get_runner, graph_cache
 from tinygrad.schedule.memory import memory_plan_rewrite, _collect_bufs
 from tinygrad.schedule import linear_to_schedule
 from tinygrad.nn.state import get_parameters
@@ -45,7 +45,7 @@ def graph_split_rewrite(linear:UOp, max_batch_size:int=0) -> UOp:
   for si in linear.src:
     if si.src[0].op is Ops.BUFFER_VIEW: continue
 
-    devs = [Device[x] for x in (si.device if isinstance(si.device, tuple) else (si.device,))]
+    devs = dedup([Device[x] for b in si.src[1:] if b.op is not Ops.BIND for x in (b.device if isinstance(b.device, tuple) else (b.device,))])
     graph_t = graph_class(devs[0]) if devs[0].graph is not None else None
 
     can_graph = graph_t is not None and graph_t.supports_exec_item(devs, si)
@@ -79,10 +79,7 @@ def jit_lower(linear:UOp, held_bufs:set[UOp], input_uops:list[UOp]) -> UOp:
 
   # parametrize input buffers: map each input buffer UOp to a PARAM with the correct slot index
   linear = linear.substitute({u: UOp.param(i, u.dtype, u.shape, u.device) for i,u in enumerate(input_uops)}, walk=True)
-
-  # set KernelInfo.beam on SINKs if jitbeam is set
-  if (jitbeam:=getenv("JITBEAM", BEAM.value)) >= 1: linear = graph_rewrite(linear, pm_beam, ctx=jitbeam, walk=True)
-
+  linear = compile_linear(linear, beam=getenv("JITBEAM", BEAM.value))
   linear = memory_plan_rewrite(linear, held_bufs)
   if JIT < 2: linear = graph_split_rewrite(linear, max_batch_size=JIT_BATCH_SIZE.value)
   if VIZ: graph_rewrite(linear, PatternMatcher([]), name="View graphed linear")
@@ -108,8 +105,9 @@ def get_input_replace(jit_cache: list[ExecItem], input_buffers:list[Buffer]) -> 
   return input_replace
 
 class GraphRunner(Runner):
-  def __init__(self, linear:UOp, input_buffers:list[Buffer]):
-    self.jit_cache = [ei.lower() for ei in linear_to_schedule(linear.src[0])]
+  def __init__(self, linear:UOp, input_buffers:list[Buffer], input_uops:tuple[UOp, ...]=()):
+    self.linear = linear.src[0]
+    self.jit_cache = [ei.lower() for ei in linear_to_schedule(self.linear.substitute({p: input_uops[p.arg] for p in linear.src[1:]}))]
     for ei in self.jit_cache:
       for b in ei.bufs:
         if b is not None: b.ensure_allocated()

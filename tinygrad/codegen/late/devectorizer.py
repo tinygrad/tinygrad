@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from tinygrad.dtype import dtypes, ImageDType, DType, AddrSpace, Invalid, PtrDType
 from tinygrad.uop.ops import UOp, Ops, UPat, PatternMatcher, GroupOp, identity_element
 from tinygrad.uop.symbolic import uop_given_valid, parse_valid, invalid_gate
-from tinygrad.helpers import getenv, flatten, AMX, prod
+from tinygrad.helpers import getenv, flatten, prod
 from tinygrad.renderer import Renderer
 
 # ***** image load valid simplification *****
@@ -76,7 +76,7 @@ def expand_index(buf:UOp, vec:UOp):
     buf = buf.replace(dtype=(dtypes.imageh if dt.itemsize == 2 else dtypes.imagef)((h, w, 4)))
   if getenv("UNSAFE_DISABLE_MASK", 0): vec = vec.get_idx()
   # generate the individual indexes
-  return UOp(Ops.VECTORIZE, buf.dtype, tuple(buf.index(vec.gep(i), ptr=True) for i in range(vec.dtype.count)))
+  return UOp(Ops.STACK, buf.dtype, tuple(buf.index(vec.gep(i), ptr=True) for i in range(vec.dtype.count)))
 
 def fold_expanded_index(midx:UOp):
   buf = midx.src[0].src[0]
@@ -134,8 +134,8 @@ def gep_on_store(gep:UOp, st:UOp, sto:UOp):
   return gep.src[0].store(st.gep(new_arg), *sto.src[2:])
 
 load_store_folding = PatternMatcher([
-  (UPat(Ops.INDEX, src=(UPat(Ops.VECTORIZE, src=UPat(GroupOp.Defines).or_after(name="buf")), UPat.var("vec"))), expand_index),
-  (UPat(Ops.VECTORIZE, src=UPat(Ops.INDEX), name="midx"), fold_expanded_index),
+  (UPat(Ops.INDEX, src=(UPat(Ops.STACK, src=UPat(GroupOp.Defines).or_after(name="buf")), UPat.var("vec"))), expand_index),
+  (UPat(Ops.STACK, src=UPat(Ops.INDEX), name="midx"), fold_expanded_index),
   # GEP after LOAD
   (UPat(Ops.LOAD, src=(UPat(Ops.GEP, name="gep"),), name="ld", allow_any_len=True),
    lambda gep, ld: ld.replace(dtype=ld.dtype.scalar().vec(gep.dtype.count), src=(gep.src[0],)+ld.src[1:]).gep(gep.arg)),
@@ -171,7 +171,7 @@ def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
     lengths = [4]
   elif ctx is not None and ctx.supports_float4:
     # TODO: a better way to get this than ctx
-    lengths = [8,4,2] if buf.dtype.base == dtypes.half and getenv("ALLOW_HALF8") else ([16,8,4,2] if AMX else [4,2])
+    lengths = [8,4,2] if buf.dtype.base == dtypes.half and getenv("ALLOW_HALF8") else ([16,8,4,2] if "AMX" in ctx.target.arch else [4,2])
   lengths.append(1)  # worst case, it's not folded
 
   # filter fold lengths that don't divide
@@ -197,7 +197,7 @@ def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
   return UOp(Ops.VCAT, ls.dtype, tuple(ret)) if ls.op is Ops.LOAD else UOp.group(*ret)
 
 def get_image_idx(idx:UOp, width:int):
-  oidx = UOp(Ops.VECTORIZE, dtypes.weakint.vec(2), (((x:=idx.src[1].get_idx()) // 4) % width, (x // (4*width))))
+  oidx = UOp(Ops.STACK, dtypes.weakint.vec(2), (((x:=idx.src[1].get_idx()) // 4) % width, (x // (4*width))))
   return idx.replace(src=(idx.src[0], oidx.valid(idx.src[1].get_valid())))
 
 def image_fixup(ls:UOp):
@@ -230,13 +230,13 @@ def no_vectorized_wmma(wmma:UOp):
     tsrcs.append([s.gep(tuple(range(grp, grp+ssz))) for grp in range(0, s.dtype.count, ssz)])
   wmmas = [UOp(Ops.WMMA, wmma.dtype.scalar().vec(out_sz), tsrc, wmma.arg) for tsrc in zip(*tsrcs)]
   wmma_ex = flatten([[e.gep(i) for i in range(out_sz)] for e in wmmas])
-  return UOp(Ops.VECTORIZE, wmma.dtype, tuple(wmma_ex))
+  return UOp(Ops.STACK, wmma.dtype, tuple(wmma_ex))
 
 def no_vectorized_alu(alu:UOp):
   if alu.dtype.vcount == 1: return None
   if alu.op is Ops.WHERE and alu.src[2].arg is Invalid: return None  # image load/store has cond.where(idx.vec(2), Invalid) as the index
   alus = tuple(UOp(alu.op, alu.dtype.scalar(), tuple(s.gep(i) for s in alu.src), alu.arg) for i in range(alu.dtype.vcount))
-  return UOp(Ops.VECTORIZE, alu.dtype, alus)
+  return UOp(Ops.STACK, alu.dtype, alus)
 
 def no_vectorized_buf(buf:UOp):
   return buf.replace(dtype=buf.ptrdtype.base.scalar().ptr(buf.ptrdtype.size*buf.ptrdtype.count, buf.ptrdtype.addrspace)).cast(buf.dtype)
@@ -275,11 +275,11 @@ devectorize = PatternMatcher([
 pm_render = PatternMatcher([
   # for rendering, we use explicit VECTORIZE
   (UPat(Ops.CONST, name='c'),
-   lambda c: UOp(Ops.VECTORIZE, c.dtype, (UOp.const(c.dtype.scalar(), c.arg),)*c.dtype.vcount) if c.dtype.vcount > 1 else None),
-  (UPat(Ops.VCONST, name='c'), lambda c: UOp(Ops.VECTORIZE, c.dtype, tuple(UOp.const(c.dtype.scalar(), x) for x in c.arg))),
-  (UPat(Ops.GEP, name='gep'), lambda gep: UOp(Ops.VECTORIZE, gep.dtype, tuple(gep.src[0].gep(x) for x in gep.arg)) if len(gep.arg) > 1 else None),
+   lambda c: UOp(Ops.STACK, c.dtype, (UOp.const(c.dtype.scalar(), c.arg),)*c.dtype.vcount) if c.dtype.vcount > 1 else None),
+  (UPat(Ops.VCONST, name='c'), lambda c: UOp(Ops.STACK, c.dtype, tuple(UOp.const(c.dtype.scalar(), x) for x in c.arg))),
+  (UPat(Ops.GEP, name='gep'), lambda gep: UOp(Ops.STACK, gep.dtype, tuple(gep.src[0].gep(x) for x in gep.arg)) if len(gep.arg) > 1 else None),
   (UPat(Ops.GEP, name='gep'), lambda gep: gep.src[0] if gep.src[0].dtype.vcount == 1 and gep.arg == (0,) else None),
-  (UPat(Ops.VECTORIZE, src=(UPat(name='x'),)), lambda x: x),
+  (UPat(Ops.STACK, src=(UPat(name='x'),)), lambda x: x),
   # give any loads that are masked an alt value
   (UPat(Ops.LOAD, src=(UPat(Ops.INDEX, src=(UPat(), UPat(), UPat())).or_casted(),), allow_any_len=True, name="x"),
     lambda x: x.replace(src=(x.src[0], x.const_like(0))+x.src[1:])
@@ -319,13 +319,13 @@ def reduce_to_acc(ctx:ReduceContext, red:UOp):
     input_ranges = tuple([x for x in topo if x.op is Ops.RANGE and x not in reduce_range and x not in ended_ranges])
     identity = red.const(red.dtype, identity_element(red.arg, red.dtype.scalar()))
     acc = UOp.placeholder((1,), red.dtype, ctx.acc_num, AddrSpace.REG)
-    acc_init = acc.after(*input_ranges).index(UOp.const(dtypes.int, 0)).store(identity)
-    lst = [acc.after(acc_init, *reduce_range).index(UOp.const(dtypes.int, 0))] + lst  # put acc as the first element
+    acc_init = acc.after(*input_ranges).index(UOp.const(dtypes.weakint, 0)).store(identity)
+    lst = [acc.after(acc_init, *reduce_range).index(UOp.const(dtypes.weakint, 0))] + lst  # put acc as the first element
     ctx.acc_num += 1
   ret = functools.reduce(lambda x,y: x.alu(red.arg, y), lst)
   if len(reduce_range) == 0: return ret
-  end = acc.index(UOp.const(dtypes.int, 0)).store(ret).end(*reduce_range).rtag("mergeable")
-  return acc.after(end).index(UOp.const(dtypes.int, 0))
+  end = acc.index(UOp.const(dtypes.weakint, 0)).store(ret).end(*reduce_range).rtag("mergeable")
+  return acc.after(end).index(UOp.const(dtypes.weakint, 0))
 
 def merge_reduce_ends(ctx:ReduceContext, sink:UOp):
   # merge ENDs that share the same range and nesting context (only those created by reduce_to_acc)

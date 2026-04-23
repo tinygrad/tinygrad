@@ -91,6 +91,9 @@ symbolic_simple = propagate_invalid + PatternMatcher([
   (UPat.var("x", dtype=dtypes.bool).logical_not().logical_not(), lambda x: x),
   (UPat.var("x", dtype=dtypes.bool).where(UPat.const(dtypes.bool, True), UPat.const(dtypes.bool, False)), lambda x: x),
   (UPat.var("x", dtype=dtypes.bool).where(UPat.const(dtypes.bool, False), UPat.const(dtypes.bool, True)), lambda x: x.logical_not()),
+  # CAST(bool -> int) != const — CAST(True)=1, CAST(False)=0, so fold based on const value
+  (UPat.var("x", dtype=dtypes.bool).cast(dtypes.ints+(dtypes.weakint,)) != UPat.cvar("c", vec=False),
+   lambda x,c: x if c.arg == 0 else x.logical_not() if c.arg == 1 else x.const_like(True)),
   (UPat.var("x", dtype=dtypes.ints+(dtypes.bool, dtypes.weakint)).trunc(), lambda x: x),
   # ** zero folding **
   (UPat.var("x") < UPat.var("x"), lambda x: x.const_like(False).cast(dtypes.bool.vec(x.dtype.count))), # x < x -> False
@@ -189,8 +192,8 @@ gep_pushing = PatternMatcher([
   # GEP/VECTORIZE, GEP/GEP, GEP/CONST, GEP/VCONST
   (UPat(Ops.GEP, name='g2').f(Ops.GEP, name='g1'),
    lambda g1, g2: g2.src[0].gep(tuple(g2.arg[g1.arg[i]] for i in range(len(g1.arg))))),
-  (UPat(Ops.VECTORIZE, name='vec').f(Ops.GEP, name='gep'),
-   lambda gep, vec: UOp(Ops.VECTORIZE, gep.dtype, tuple(vec.src[i] for i in gep.arg)) if len(gep.arg) > 1 else vec.src[gep.arg[0]]),
+  (UPat(Ops.STACK, name='vec').f(Ops.GEP, name='gep'),
+   lambda gep, vec: UOp(Ops.STACK, gep.dtype, tuple(vec.src[i] for i in gep.arg)) if len(gep.arg) > 1 else vec.src[gep.arg[0]]),
   (UPat.cvar("c", vec=False).f(Ops.GEP, name="gep"), lambda gep, c: gep.const_like(c.arg)),
   (UPat(Ops.VCONST, name="c").f(Ops.GEP, name="gep"), lambda gep, c: gep.const_like(tuple(c.arg[x] for x in gep.arg))),
   # GEP on void is skipped
@@ -202,10 +205,10 @@ gep_pushing = PatternMatcher([
    lambda gep,alu: UOp(alu.op, alu.dtype.scalar().vec(gep.dtype.count), tuple(x.gep(gep.arg) for x in alu.src), alu.arg) \
      if not isinstance(gep.dtype, PtrDType) and not isinstance(alu.dtype, PtrDType) else None),
   # CAT can't be rendered. it's a VECTORIZE on vectors, we expand to a single VECTORIZEs with GEPs (TODO: move this later)
-  (UPat(Ops.VCAT, name="x"), lambda x: UOp(Ops.VECTORIZE, x.dtype, tuple(y.gep(i) for y in x.src for i in range(y.dtype.count))) \
+  (UPat(Ops.VCAT, name="x"), lambda x: UOp(Ops.STACK, x.dtype, tuple(y.gep(i) for y in x.src for i in range(y.dtype.count))) \
     if not isinstance(x.dtype, PtrDType) else None),
   # VECTORIZE on same GEP
-  (UPat(Ops.VECTORIZE, name="v", src=UPat(Ops.GEP, src=(UPat.var("x"),))), lambda v,x: x.gep(tuple(get_single_element(i.arg) for i in v.src))),
+  (UPat(Ops.STACK, name="v", src=UPat(Ops.GEP, src=(UPat.var("x"),))), lambda v,x: x.gep(tuple(get_single_element(i.arg) for i in v.src))),
   # push some GEPs through WMMAs
   (UPat(Ops.WMMA, name="wmma").f(Ops.GEP, name="gep"), gep_through_wmma),
 ])
@@ -291,7 +294,7 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   # after with 1 src is just src[0]
   (UPat(Ops.AFTER, src=(UPat.var("s"),)), lambda s: s),
   # VECTORIZE/CONST
-  (UPat(Ops.VECTORIZE, src=UPat(Ops.CONST), name="vec"),
+  (UPat(Ops.STACK, src=UPat(Ops.CONST), name="vec"),
     lambda vec: UOp.const(vec.dtype, tuple(x.arg for x in vec.src)) if len(vec.src) > 0 else None),
 ])+div_and_mod_symbolic+gep_pushing
 
@@ -340,7 +343,7 @@ def uop_given_valid(valid:UOp, uop:UOp, try_simplex=True) -> UOp:
         if any(u is uop for u in newuops): continue  # if any branch doesnt appear in uop, skip
         newuops = [u.simplify().substitute({newX:X}).simplify() for (X,newX),u in zip(candidate,newuops)]
         if all_same(newuops): uop = newuops[0]
-        elif uop.op is Ops.VECTORIZE and len(uop.src) == 2:
+        elif uop.op is Ops.STACK and len(uop.src) == 2:
           if all_same([uops.src[0] for uops in newuops]): uop = uop.replace(src=(newuops[0].src[0], uop.src[1]))
           if all_same([uops.src[1] for uops in newuops]): uop = uop.replace(src=(uop.src[0], newuops[0].src[1]))
 
@@ -392,7 +395,8 @@ def where_on_load(cond:UOp, buf:UOp, idx:UOp, or_cast:UOp) -> UOp|None:
   moved, keep = partition([c for c in where_clauses if c not in in_load], can_move)
   if len(keep) == len(where_clauses): return None
   idx = buf.index(idx.get_idx().valid(load_valid.uprod(*moved)))
-  return UOp.const(dtypes.bool, True).uprod(*keep).where(idx.cast(or_cast.dtype) if or_cast.op is Ops.CAST else idx, 0)
+  ret_idx = idx.cast(or_cast.dtype) if or_cast.op is Ops.CAST else idx
+  return UOp.const(dtypes.bool, True).uprod(*keep).where(ret_idx, ret_idx.const_like(0))
 
 # where after gated load becomes alt value, TODO: this is sort of duplicated with rules in devectorizer
 pm_move_where_on_load = PatternMatcher([
@@ -423,11 +427,11 @@ pm_simplify_valid = PatternMatcher([
 ])
 
 # this is symbolic 2.0
-REMOVE_FROM_SINK_LIKE = {Ops.UNROLL, Ops.NOOP, Ops.VECTORIZE, Ops.SINK}
+REMOVE_FROM_SINK_LIKE = {Ops.UNROLL, Ops.NOOP, Ops.STACK, Ops.SINK}
 sym = symbolic+pm_simplify_valid+PatternMatcher([
   # reorder ALU/VECTORIZE
-  (UPat(GroupOp.ALU, src=(UPat(Ops.VECTORIZE, src=UPat(name='x')), UPat(Ops.VECTORIZE, src=UPat(name='y'))), name='alu'),
-   lambda x,y,alu: UOp(Ops.VECTORIZE, alu.dtype, (UOp(alu.op, alu.dtype.scalar(), (x,y)),)*alu.dtype.count)),
+  (UPat(GroupOp.ALU, src=(UPat(Ops.STACK, src=UPat(name='x')), UPat(Ops.STACK, src=UPat(name='y'))), name='alu'),
+   lambda x,y,alu: UOp(Ops.STACK, alu.dtype, (UOp(alu.op, alu.dtype.scalar(), (x,y)),)*alu.dtype.count)),
   # ** where **
   # # fold nested where with same condition: in cond.where(t,f), cond.where(a,b)->a in t, ->b in f
   # (UPat.var("cond").where(UPat.var("t"), UPat.var("f")), fold_where_closure),

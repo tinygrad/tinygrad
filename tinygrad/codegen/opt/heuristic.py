@@ -1,6 +1,6 @@
 import itertools
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
-from tinygrad.helpers import getenv, DEBUG, prod, NOLOCALS, TC_OPT, TC_SELECT, USE_TC, AMX, IMAGE
+from tinygrad.helpers import getenv, DEBUG, prod, NOLOCALS, TC_OPT, TC_SELECT, USE_TC, IMAGE
 from tinygrad.dtype import PtrDType, ImageDType
 from tinygrad.uop.ops import Ops, resolve, AxisType
 from tinygrad.codegen.opt.postrange import Scheduler
@@ -34,7 +34,7 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
     except KernelOptError:
       pass
     # skip hand-coded TC opts if AMX, upcasting will make kernel slower
-    if good_tc_opt and not AMX:
+    if good_tc_opt and "AMX" not in k.ren.target.arch:
       if rngs is not None:
         for tc_dim in [1,0]: # attempt to upcast M and N
           szs = [sz for sz in [5,4,3,2] if rngs[tc_dim].src[0].divides(sz) is not None]
