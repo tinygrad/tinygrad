@@ -6,7 +6,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.helpers import Context, from_mv
 from tinygrad.dtype import dtypes
 from tinygrad.engine.jit import MultiGraphRunner
-from tinygrad.schedule import linear_to_schedule
+from tinygrad.engine.realize import run_linear
 from tinygrad.uop.ops import UOp, Ops, buffers
 
 from test.helpers import needs_second_gpu
@@ -49,7 +49,7 @@ def make_graph(graph_cls, calls:list[UOp]):
   return graph_cls(cf, [])
 
 def run_schedule(calls:list[UOp]):
-  for ei in linear_to_schedule(UOp(Ops.LINEAR, src=tuple(calls))): ei.lower().run({})
+  run_linear(UOp(Ops.LINEAR, src=tuple(calls)))
 
 def zero_bufs(bufs):
   for b in bufs:

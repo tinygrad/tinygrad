@@ -1,7 +1,8 @@
 from typing import cast
 from dataclasses import replace
-import itertools
-from tinygrad.helpers import DISABLE_FAST_IDIV, DEVECTORIZE, TRANSCENDENTAL, SPEC, DEBUG, VIZ, IMAGE, TracingKey, Context, Target, panic
+import itertools, weakref
+from tinygrad.helpers import DISABLE_FAST_IDIV, DEVECTORIZE, TRANSCENDENTAL, SPEC, DEBUG, VIZ, IMAGE, NOOPT, EMULATED_DTYPES
+from tinygrad.helpers import TracingKey, Context, Target, panic
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, pm_lower_index_dtype, Ops, UPat, track_rewrites, KernelInfo, pyrender
 from tinygrad.uop.spec import type_verify, program_spec, kernel_spec
 from tinygrad.renderer import Renderer, ProgramSpec, Estimates
@@ -18,7 +19,6 @@ from tinygrad.codegen.opt.postrange import apply_opts
 from tinygrad.codegen.simplify import pm_simplify_ranges, pm_flatten_range, pm_split_ranges, pm_load_collapse
 from tinygrad.schedule.rangeify import pm_add_buffers_local, rangeify_codegen, pm_mops, pm_syntactic_sugar, pm_store_ranges
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
-from tinygrad.renderer.amd.elf import do_assemble_amd
 
 def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True, beam:int=0) -> UOp:
   if ren is None: ren = Renderer(Target())
@@ -132,6 +132,11 @@ def do_estimates(prg:UOp, sink:UOp, lin:UOp) -> UOp|None:
   if sink.arg.estimates is not None: return None
   return prg.replace(src=(sink.replace(arg=replace(sink.arg, estimates=Estimates.from_uops(lin.src, ignore_indexing=True))),)+prg.src[1:])
 
+def do_assemble(ctx:Renderer, prg:UOp, lin:UOp) -> UOp:
+  binary = ctx.asm(prg, lin)
+  src = "\n".join(str(u.arg) for u in lin.src)
+  return prg.replace(src=prg.src[:3]+(UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=binary)))
+
 def do_render(ctx:Renderer, prg:UOp, lin:UOp) -> UOp:
   src = ctx.render(list(lin.src))
   return prg.replace(src=prg.src + (UOp(Ops.SOURCE, arg=src),), arg=ctx.aux(list(lin.src)) if ctx.has_aux else prg.arg)
@@ -143,37 +148,39 @@ def do_compile(ctx:Renderer, prg:UOp, source:UOp) -> UOp|None:
 pm_to_program = PatternMatcher([
   (UPat(Ops.PROGRAM, src=(UPat(Ops.SINK, name="sink"), UPat(Ops.DEVICE)), name="prg"), do_linearize),
   (UPat(Ops.PROGRAM, src=(UPat(Ops.SINK, name="sink"), UPat(Ops.DEVICE), UPat(Ops.LINEAR, name="lin")), name="prg"), do_estimates),
-  (UPat(Ops.PROGRAM, src=(UPat(), UPat(Ops.DEVICE), UPat(Ops.LINEAR, src=UPat(Ops.INS), name="lin")), name="prg"), do_assemble_amd),
+  (UPat(Ops.PROGRAM, src=(UPat(), UPat(Ops.DEVICE), UPat(Ops.LINEAR, src=UPat(Ops.INS), name="lin")), name="prg"), do_assemble),
   (UPat(Ops.PROGRAM, src=(UPat(), UPat(Ops.DEVICE), UPat(Ops.LINEAR, name="lin")), name="prg"), do_render),
   (UPat(Ops.PROGRAM, src=(UPat(), UPat(Ops.DEVICE), UPat(Ops.LINEAR), UPat(Ops.SOURCE, name="source")), name="prg"), do_compile),
 ])
 
+@track_rewrites(name=lambda ast,renderer,ret,**kwargs: TracingKey(ret.src[0].arg.name,(ret.src[0].arg.function_name, ast), ret=renderer), replay=True)
 @Context(ALLOW_DEVICE_USAGE=0)
-@track_rewrites(name=lambda ast,renderer,ret,**kwargs: TracingKey(ret.name, (ret.function_name, ast), ret=renderer), replay=True)
-def get_program(ast:UOp, renderer:Renderer) -> ProgramSpec:
+def do_to_program(ast:UOp, renderer:Renderer) -> UOp:
   """
-  Transform an AST into a ProgramSpec. May trigger BEAM search.
+  Transform an AST into a compiled PROGRAM. May trigger BEAM search.
 
   Args:
-    ast: The Ops.SINK rooted AST
+    ast: The Ops.SINK/Ops.PROGRAM rooted AST
     renderer: The renderer used to generate the code
 
   Returns:
-    The ProgramSpec of the program.
+    The Ops.PROGRAM with SINK/DEVICE/LINEAR/SOURCE/BINARY.
   """
-
   if ast.op is Ops.PROGRAM: prg = ast
-  elif ast.op is Ops.SINK or ast.op is Ops.BEAM:
-    beam, ast = (ast.arg, ast.src[0]) if ast.op is Ops.BEAM else (0, ast)
-    # rewrite to prg
-    assert isinstance(ast.arg, KernelInfo), "requires KernelInfo on arg to get_program"
-    full_sink = full_rewrite_to_sink(ast, renderer, optimize=ast.tag is None, beam=beam)
+  elif ast.op is Ops.SINK:
+    assert isinstance(ast.arg, KernelInfo), "requires KernelInfo on arg to to_program"
+    full_sink = full_rewrite_to_sink(ast, renderer, optimize=ast.tag is None, beam=ast.arg.beam)
     prg = UOp(Ops.PROGRAM, src=(full_sink, UOp(Ops.DEVICE, arg=renderer.target.device)))
-  else:
-    raise RuntimeError(f"can't call get_program on {ast.op}")
-
+  else: raise RuntimeError(f"can't call to_program on {ast.op}")
   prg = graph_rewrite(prg, pm_to_program, ctx=renderer, name="linearize/render")
   if VIZ: graph_rewrite(prg, PatternMatcher([]), name="View Program")
+  return prg
 
-  # create the ProgramSpec
-  return ProgramSpec.from_uop(prg)
+to_program_cache: weakref.WeakValueDictionary[tuple, UOp] = weakref.WeakValueDictionary()
+def to_program(ast:UOp, renderer:Renderer) -> UOp:
+  if ast.op is Ops.PROGRAM and len(ast.src) >= 5 and ast.src[4].op is Ops.BINARY: return ast
+  key = (ast.key, type(renderer), renderer.target, NOOPT.value, DEVECTORIZE.value, EMULATED_DTYPES.value)
+  if (prg:=to_program_cache.get(key)) is None: to_program_cache[key] = prg = do_to_program(ast, renderer)
+  return prg
+
+def get_program(ast:UOp, renderer:Renderer) -> ProgramSpec: return ProgramSpec.from_uop(to_program(ast, renderer))

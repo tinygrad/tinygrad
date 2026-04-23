@@ -3,7 +3,7 @@ import gc, unittest, time
 from tinygrad import nn, dtypes, Device, Tensor
 from tinygrad.uop.ops import UOp, Ops, GroupOp, UPat, KernelInfo
 from tinygrad.helpers import DEBUG, GlobalCounters, Context
-from tinygrad.engine.realize import CompiledRunner, run_schedule, run_linear
+from tinygrad.engine.realize import CompiledRunner, run_linear
 from tinygrad.schedule import linear_to_schedule
 
 class KernelCountException(Exception): pass
@@ -40,9 +40,9 @@ class TestBufferUOp(unittest.TestCase):
     # the device Buffer remains unallocated until it's we run the schedule
     self.assertFalse(buf.uop.buffer.is_allocated())
     add = buf+1
-    sched = add.schedule()
+    linear, var_vals = add.linear_with_vars()
     self.assertFalse(buf.uop.buffer.is_allocated())
-    run_schedule(sched)
+    run_linear(linear, var_vals)
     self.assertTrue(buf.uop.buffer.is_allocated())
 
   def test_buffer_has_unique_buffer(self):

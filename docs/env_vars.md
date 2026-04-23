@@ -57,6 +57,8 @@ AMD:LLVM      | use the AMD device with the LLVM renderer
 NV:CUDA:sm_70 | use the NV device with the CUDA renderer targetting sm_70
 AMD::gfx950   | use the AMD device targetting gfx950
 USB+AMD       | use the AMD device over the USB interface
+CPU:LLVM      | use the CPU device with the LLVM renderer
+CPU:LLVM:x86_64,znver2,avx2,-avx512f | use the CPU device with the LLVM renderer, with [additional arch flags](runtime.md#cpu-arch)
 
 ### Debug breakdown
 

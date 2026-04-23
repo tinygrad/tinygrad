@@ -4,7 +4,8 @@ from tinygrad.device import is_dtype_supported
 from tinygrad.uop.ops import Ops, UOp
 from tinygrad.helpers import getenv, prod, Context
 from tinygrad.nn.state import get_parameters, get_state_dict
-from tinygrad.engine.realize import CompiledRunner, run_schedule
+from tinygrad.engine.realize import CompiledRunner, run_linear
+from tinygrad.schedule import linear_to_schedule
 import numpy as np
 from hypothesis import given, strategies as strat, settings
 from test.helpers import not_support_multi_device, needs_second_gpu, slow, call_is_graph
@@ -192,11 +193,11 @@ class TestMultiTensor(unittest.TestCase):
     # only shrink on the device that owns the shard, this is enabled by the mselect simplifier
     for i in range(2):
       xt = X[i*2:i*2+2].contiguous()
-      sched = xt.schedule()
-      #kernels = [s for s in sched if s.ast.op is Ops.SINK]
+      linear, var_vals = xt.linear_with_vars()
+      #kernels = [s for s in linear_to_schedule(linear) if s.ast.op is Ops.SINK]
       #self.assertEqual(len(kernels), 1)
       #self.assertEqual(kernels[0].bufs[0].device, devices_2[i])
-      run_schedule(sched)
+      run_linear(linear, var_vals)
       np.testing.assert_equal(xt.numpy(), X_np[i*2:i*2+2])
 
   @given(strat.sampled_from((devices_2, devices_3)),
@@ -784,9 +785,9 @@ class TestMultiTensor(unittest.TestCase):
   def test_full_like_shrink_on_shard_axis(self):
     t = Tensor.ones(16, 16, dtype=dtypes.int).shard(devices_2, axis=0)
     out = Tensor.full_like(t, 2)[:, :8]
-    sched = out.schedule()
-    self.assertEqual(len(sched), 0)
-    run_schedule(sched)
+    linear, var_vals = out.linear_with_vars()
+    self.assertEqual(len(linear_to_schedule(linear)), 0)
+    run_linear(linear, var_vals)
     self.assertEqual(out.tolist(), [[2]*8]*16)
 
   def test_dropout_on_shard(self):
@@ -1138,10 +1139,10 @@ class TestMultiBufferView(unittest.TestCase):
     """Apply view_fn to both, verify zero compiled kernels and matching values."""
     b_ref = view_fn(a_ref)
     b_multi = view_fn(a_multi).contiguous()
-    sched = b_multi.schedule()
-    compiled = [si for si in sched if isinstance(si.prg, CompiledRunner)]
+    linear, var_vals = b_multi.linear_with_vars()
+    compiled = [si for si in linear_to_schedule(linear) if isinstance(si.prg, CompiledRunner)]
     self.assertEqual(len(compiled), 0, f"expected zero compiled kernels, got {len(compiled)}")
-    run_schedule(sched)
+    run_linear(linear, var_vals)
     np.testing.assert_equal(b_multi.numpy(), b_ref.numpy())
 
   @unittest.skip("flaky on LLVM")
@@ -1168,10 +1169,10 @@ class TestMultiBufferView(unittest.TestCase):
   def test_4_devices(self):
     ref = Tensor.arange(8*12).reshape(8, 12).contiguous().realize()
     a = Tensor.arange(8*12).reshape(8, 12).contiguous().shard(devices_4, axis=1).realize()
-    sched = a[5].contiguous().schedule()
-    compiled = [si for si in sched if isinstance(si.prg, CompiledRunner)]
+    linear, var_vals = a[5].contiguous().linear_with_vars()
+    compiled = [si for si in linear_to_schedule(linear) if isinstance(si.prg, CompiledRunner)]
     self.assertEqual(len(compiled), 0)
-    run_schedule(sched)
+    run_linear(linear, var_vals)
     np.testing.assert_equal(a[5].contiguous().numpy(), ref[5].numpy())
 
 @unittest.skipIf(not_support_multi_device(), "need multi")

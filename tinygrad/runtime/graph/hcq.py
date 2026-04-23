@@ -6,7 +6,7 @@ from tinygrad.device import Buffer, BufferSpec, Compiled, Device, ProfileGraphEn
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp, Ops, Variable
 from tinygrad.engine.realize import BufferXfer, CompiledRunner, BufferCopy
-from tinygrad.engine.jit import GraphRunner, MultiGraphRunner, _unwrap_beam
+from tinygrad.engine.jit import GraphRunner, MultiGraphRunner
 from tinygrad.runtime.ops_rdma import RDMACopyQueue
 
 class HCQGraph(MultiGraphRunner):
@@ -258,7 +258,7 @@ class HCQGraph(MultiGraphRunner):
 
   def _dev_copy_queues(self, dev): return [q for (d, _), q in self.copy_queues.items() if d == dev]
 
-  def __call__(self, input_buffers: list[Buffer], var_vals: dict[str, int], wait=False) -> float|None:
+  def __call__(self, input_buffers: list[Buffer], var_vals: dict[str, int], wait=False, input_uops=None) -> float|None:
     # Map input buffers
     for dev in self.devices:
       for idx_to_map in self.input_replace_map[dev]: cast(HCQAllocator, dev.allocator).map(input_buffers[idx_to_map]._buf)
@@ -326,4 +326,4 @@ class HCQGraph(MultiGraphRunner):
       # MOCKGPU is not supported, since it can't execute commands in parallel
       is_xfer = len(set(type(d) for d in all_devs)) == 1 and hasattr(alc:=all_devs[0].allocator, '_transfer') and alc.supports_transfer
       return is_xfer or (all_devs[0].hw_copy_queue_t is not None and not getattr(all_devs[0], 'iface', None).__class__.__name__.startswith("MOCK"))
-    return _unwrap_beam(new_call.src[0]).op in (Ops.SINK, Ops.PROGRAM)
+    return new_call.src[0].op in (Ops.SINK, Ops.PROGRAM)

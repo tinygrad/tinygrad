@@ -1,6 +1,9 @@
 import math, unittest
 from tinygrad import Tensor, dtypes
-from tinygrad.uop.ops import UOp
+from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, graph_rewrite
+
+_strip_unique_pm = PatternMatcher([(UPat(Ops.CONST, src=(UPat(Ops.UNIQUE), UPat(Ops.DEVICE, name="d")), name="b"), lambda b,d: b.replace(src=(d,))),])
+def _strip_unique(u: UOp) -> UOp: return graph_rewrite(u, _strip_unique_pm)
 
 def _t(*shape):
   return Tensor.arange(math.prod(shape)).reshape(*shape)
@@ -8,6 +11,17 @@ def _t(*shape):
 # Tensor().func().uop should be the same as UOp.func()
 def _check(tc: unittest.TestCase, t: Tensor, fn):
   tc.assertIs(fn(t).uop, fn(t.uop), f"\ntensor.uop = {fn(t).uop}\nuop = {fn(t.uop)}")
+
+class TestTensorUOpBinop(unittest.TestCase):
+  # Tensor's binop upcasts mixed dtypes via least_upper_dtype + explicit CAST; UOp should match.
+  def test_mul_float_int(self):
+    t = _t(3).float()
+    self.assertIs(_strip_unique((t * Tensor.arange(3)).uop), _strip_unique(t.uop * UOp.arange(3)))
+  def test_mul_bool_int(self):
+    t = _t(3)
+    self.assertIs(_strip_unique((t.eq(1) * Tensor.arange(3)).uop), _strip_unique(t.uop.eq(1) * UOp.arange(3)))
+  # Tensor's ufix picks float dtype when scalar is float and self is int; UOp should match.
+  def test_add_scalar_float_on_int(self): _check(self, _t(3), lambda x: x + 1.5)
 
 class TestTensorUOpGetitem(unittest.TestCase):
   # ---- pure slice patterns ----
@@ -59,6 +73,23 @@ class TestTensorUOpCumalu(unittest.TestCase):
   def test_cumsum_large(self):    _check(self, _t(600), lambda x: x.cumsum())  # exercises _split_cumalu
   def test_cumprod(self):         _check(self, _t(4), lambda x: x.cumprod(0))
 
+class TestTensorUOpCumMinMax(unittest.TestCase):
+  def _check_pair(self, t, fn):
+    vt, it = fn(t)
+    vu, iu = fn(t.uop)
+    self.assertIs(_strip_unique(vt.uop), _strip_unique(vu))
+    self.assertIs(_strip_unique(it.uop), _strip_unique(iu))
+  def test_cummax_1d(self):    self._check_pair(_t(5), lambda x: x.cummax(0))
+  def test_cummax_2d(self):    self._check_pair(_t(3, 4), lambda x: x.cummax(1))
+  def test_cummax_0d(self):    self._check_pair(_t(1).reshape(()), lambda x: x.cummax(0))
+  def test_cummin_1d(self):    self._check_pair(_t(5), lambda x: x.cummin(0))
+  def test_cummin_2d(self):    self._check_pair(_t(3, 4), lambda x: x.cummin(1))
+
+class TestTensorUOpOneHot(unittest.TestCase):
+  def test_one_hot(self):
+    t = _t(5)
+    self.assertIs(_strip_unique(t.one_hot(5).uop), _strip_unique(t.uop.one_hot(5)))
+
 class TestTensorUOpCat(unittest.TestCase):
   def test_cat_dim0(self):     _check(self, _t(2, 3), lambda x: x.cat(x, dim=0))
   def test_cat_dim1(self):     _check(self, _t(2, 3), lambda x: x.cat(x, dim=1))
@@ -70,6 +101,39 @@ class TestTensorUOpStack(unittest.TestCase):
   def test_stack_dim1(self):     _check(self, _t(2, 3), lambda x: x.stack(x, dim=1))
   def test_stack_3tensors(self): _check(self, _t(2, 3), lambda x: x.stack(x, x, dim=0))
   def test_stack_new_last(self): _check(self, _t(2, 3), lambda x: x.stack(x, dim=-1))
+
+class TestTensorUOpConv2d(unittest.TestCase):
+  def test_conv2d_basic(self):
+    w = _t(1, 1, 2, 2).float()
+    _check(self, _t(1, 1, 3, 3).float(), lambda x: x.conv2d(w if isinstance(x, Tensor) else w.uop))
+  def test_conv2d_padded(self):
+    w = _t(1, 1, 2, 2).float()
+    _check(self, _t(1, 1, 3, 3).float(), lambda x: x.conv2d(w if isinstance(x, Tensor) else w.uop, padding=1))
+  def test_conv2d_negative_padding(self):
+    w = _t(1, 1, 3, 3).float()
+    _check(self, _t(1, 1, 5, 5).float(), lambda x: x.conv2d(w if isinstance(x, Tensor) else w.uop, padding=(-1,-1,-1,-1)))
+  def test_conv2d_multichannel_bias(self):
+    w, b = _t(4, 2, 3, 3).float(), _t(4).float()
+    _check(self, _t(2, 2, 5, 5).float(), lambda x: x.conv2d(*(y if isinstance(x, Tensor) else y.uop for y in (w, b))))
+  def test_conv2d_stride_dilation(self):
+    w = _t(2, 2, 2, 2).float()
+    _check(self, _t(1, 2, 6, 6).float(), lambda x: x.conv2d(w if isinstance(x, Tensor) else w.uop, stride=2, dilation=2))
+  def test_conv2d_groups(self):
+    w = _t(4, 1, 2, 2).float()
+    _check(self, _t(1, 4, 4, 4).float(), lambda x: x.conv2d(w if isinstance(x, Tensor) else w.uop, groups=4))
+  def test_conv2d_3d(self):
+    w = _t(1, 1, 2, 2, 2).float()
+    _check(self, _t(1, 1, 3, 3, 3).float(), lambda x: x.conv2d(w if isinstance(x, Tensor) else w.uop))
+  def test_conv_transpose2d_basic(self):
+    w = _t(1, 1, 2, 2).float()
+    _check(self, _t(1, 1, 3, 3).float(), lambda x: x.conv_transpose2d(w if isinstance(x, Tensor) else w.uop))
+  def test_conv_transpose2d_stride(self):
+    w = _t(1, 1, 2, 2).float()
+    _check(self, _t(1, 1, 3, 3).float(), lambda x: x.conv_transpose2d(w if isinstance(x, Tensor) else w.uop, stride=2))
+
+class TestTensorUOpEinsum(unittest.TestCase):
+  def test_einsum_dot(self):       _check(self, _t(2, 3), lambda x: type(x).einsum("ij,ij->", x, x))
+  def test_einsum_transpose(self): _check(self, _t(2, 3), lambda x: type(x).einsum("ij->ji", x))
 
 class TestTensorUOpSoftmax(unittest.TestCase):
   def test_softmax_default(self):     _check(self, _t(2, 3).float(), lambda x: x.softmax())
@@ -99,6 +163,50 @@ class TestUOpEmpty(unittest.TestCase):
     # regression: direct UOp.empty with a singleton-tuple device + axis must not trip .multi()'s tuple assert
     u = UOp.empty((4,), dtype=dtypes.float32, device=("NULL:0",), axis=0)
     self.assertEqual((u.shape, u.device, u.axis), ((4,), "NULL", None))
+
+class TestTensorUOpCreation(unittest.TestCase):
+  def test_full(self):
+    self.assertIs(_strip_unique(Tensor.full((2, 3), 42).uop), _strip_unique(UOp.full((2, 3), 42)))
+  def test_full_kwargs(self):
+    self.assertIs(_strip_unique(Tensor.full((2, 3), 42, dtype=dtypes.int8, device="NULL").uop),
+                  _strip_unique(UOp.full((2, 3), 42, dtype=dtypes.int8, device="NULL")))
+  def test_full_symbolic_fill(self):
+    # bound symbolic variable — flows through Tensor.__init__'s UOp branch, no UNIQUE added
+    t = Tensor.full((2, 3), UOp.variable("x", 1, 10).bind(5))
+    self.assertEqual(t.shape, (2, 3))
+    self.assertFalse(t.uop.op_in_backward_slice_with_self(Ops.UNIQUE))
+  def test_zeros(self):
+    self.assertIs(_strip_unique(Tensor.zeros(2, 3).uop), _strip_unique(UOp.zeros(2, 3)))
+  def test_ones(self):
+    self.assertIs(_strip_unique(Tensor.ones(2, 3).uop), _strip_unique(UOp.ones(2, 3)))
+  def test_invalids(self):
+    self.assertIs(_strip_unique(Tensor.invalids(2, 3, dtype=dtypes.int8).uop), _strip_unique(UOp.invalids(2, 3, dtype=dtypes.int8)))
+  def test_arange(self):
+    self.assertIs(_strip_unique(Tensor.arange(5).uop), _strip_unique(UOp.arange(5)))
+  def test_arange_empty(self):
+    self.assertIs(_strip_unique(Tensor.arange(5, 5).uop), _strip_unique(UOp.arange(5, 5)))
+  def test_arange_step(self):
+    self.assertIs(_strip_unique(Tensor.arange(5, 10, 2).uop), _strip_unique(UOp.arange(5, 10, 2)))
+  def test_linspace(self):
+    self.assertIs(_strip_unique(Tensor.linspace(0, 10, 5).uop), _strip_unique(UOp.linspace(0, 10, 5)))
+  def test_linspace_one_step(self):
+    self.assertIs(_strip_unique(Tensor.linspace(5, 10, 1).uop), _strip_unique(UOp.linspace(5, 10, 1)))
+  def test_eye(self):
+    self.assertIs(_strip_unique(Tensor.eye(3).uop), _strip_unique(UOp.eye(3)))
+  def test_eye_rect(self):
+    self.assertIs(_strip_unique(Tensor.eye(2, 4).uop), _strip_unique(UOp.eye(2, 4)))
+  def test_triu(self):
+    t = _t(3, 4)
+    self.assertIs(_strip_unique(t.triu().uop), _strip_unique(t.uop.triu()))
+  def test_triu_diagonal(self):
+    t = _t(3, 4)
+    self.assertIs(_strip_unique(t.triu(diagonal=1).uop), _strip_unique(t.uop.triu(diagonal=1)))
+  def test_tril(self):
+    t = _t(3, 4)
+    self.assertIs(_strip_unique(t.tril().uop), _strip_unique(t.uop.tril()))
+  def test_tril_diagonal(self):
+    t = _t(3, 4)
+    self.assertIs(_strip_unique(t.tril(diagonal=-1).uop), _strip_unique(t.uop.tril(diagonal=-1)))
 
 if __name__ == "__main__":
   unittest.main()

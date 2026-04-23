@@ -110,7 +110,7 @@ class PythonProgram:
             del values[i]
             i = loop_ends[i] + 1
             continue
-        elif uop is Ops.VECTORIZE: values[i] = src_values
+        elif uop is Ops.STACK: values[i] = src_values
         elif uop is Ops.BITCAST: values[i] = [bitcast(x, src_dtypes[0], dtype) for x in src_values[0]]
         elif uop is Ops.CAST:
           values[i] = [truncate.get(dtype, lambda dt: dt)(dtype.const(x)) for x in src_values[0]]

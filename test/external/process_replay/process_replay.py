@@ -8,8 +8,8 @@ ASSERT_DIFF = int((flag:="[pr]") in os.getenv("COMMIT_MESSAGE", flag) or flag in
 if not int(os.getenv("ASSERT_PROCESS_REPLAY", "1")): ASSERT_DIFF = 0
 
 try:
-  from tinygrad.renderer import Renderer, ProgramSpec
-  from tinygrad.engine.realize import get_program
+  from tinygrad.renderer import Renderer
+  from tinygrad.codegen import to_program
   from tinygrad.uop.ops import UOp, Ops
   from tinygrad.helpers import VERSION, Context, ContextVar, colored, db_connection, getenv, tqdm
 except ImportError as e:
@@ -41,24 +41,25 @@ class ProcessReplayWarning(Warning): pass
 
 # *** replay the function and convert return values to string
 
-def replay_get_program(p:ProgramSpec, ast:UOp, renderer:Renderer) -> tuple[str, str, tuple[Any, ...]]:
+def replay_to_program(p:UOp, ast:UOp, renderer:Renderer) -> tuple[str, str, tuple[Any, ...]]:
   if ast.op is Ops.PROGRAM: input_ast = ast
   else:
-    sink = ast.src[0] if ast.op is Ops.BEAM else ast
-    sink_arg = sink.arg
-    if ast.op is Ops.BEAM: sink_arg = replace(sink_arg, opts_to_apply=p.applied_opts)
-    input_ast = sink.replace(arg=replace(sink_arg, name=p.name))
-  p2 = get_program(input_ast, renderer=renderer)
-  def to_str(ret:ProgramSpec) -> str:
+    sink_arg = ast.arg
+    if sink_arg.beam: sink_arg = replace(sink_arg, opts_to_apply=p.src[0].arg.applied_opts)
+    input_ast = ast.replace(arg=replace(sink_arg, name=p.src[0].arg.name))
+  p2 = to_program(input_ast, renderer=renderer)
+  device = p.src[1].arg
+  def to_str(ret:UOp) -> str:
+    src = ret.src[3].arg
     # PYTHON renderer pickles UOps, first unpickle and decode here
-    if p.device.startswith("PYTHON"): return "\n".join([str(x) for x in pickle.loads(base64.b64decode(ret.src))])
-    return ret.src
+    if device.startswith("PYTHON"): return "\n".join([str(x) for x in pickle.loads(base64.b64decode(src))])
+    return src
   # properly color the name arg
   ast_repr = codecs.decode(str(input_ast), "unicode_escape")
   return to_str(p2), to_str(p), (ast_repr, renderer)
 
 replayers: dict[str, Callable[..., tuple[str, str, tuple[Any, ...]]]] = {}
-replayers["get_program"] = replay_get_program
+replayers["do_to_program"] = replay_to_program
 
 # *** run replayers on captured rows and print diffs
 

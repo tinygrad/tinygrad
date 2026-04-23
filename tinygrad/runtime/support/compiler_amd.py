@@ -120,10 +120,9 @@ class HIPCCCompiler(Compiler):
 
 class AMDLLVMCompiler(LLVMCompiler):
   jit = False
-  target_arch = "AMDGPU"
   def __init__(self, arch: str):
     self.arch = arch
-    super().__init__(self.arch, "+cumode")
+    super().__init__("AMDGPU", self.arch, "+cumode")
   def __reduce__(self): return (AMDLLVMCompiler, (self.arch,))
   def compile(self, src:str) -> bytes:
     try: return super().compile(src)
