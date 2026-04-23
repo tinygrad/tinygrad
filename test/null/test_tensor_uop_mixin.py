@@ -106,6 +106,19 @@ class TestTensorUOpGather(unittest.TestCase):
   def test_gather_dim0(self): self._check(_t(3, 4), 0, Tensor([[0, 1, 2, 0], [1, 2, 0, 1], [2, 0, 1, 2]], dtype=dtypes.int32))
   def test_gather_dim1(self): self._check(_t(3, 4), 1, Tensor([[0, 1, 2, 3], [1, 2, 3, 0], [2, 3, 0, 1]], dtype=dtypes.int32))
 
+class TestTensorUOpInterpolate(unittest.TestCase):
+  def _check(self, t, mode):
+    self.assertIs(_strip_unique(t.interpolate(size=(2, 2), mode=mode).uop),
+                  _strip_unique(t.uop.interpolate(size=(2, 2), mode=mode)))
+  def test_interpolate_nearest(self):       self._check(_t(1, 1, 4, 4).float(), "nearest")
+  def test_interpolate_nearest_exact(self): self._check(_t(1, 1, 4, 4).float(), "nearest-exact")
+  def test_interpolate_linear(self):        self._check(_t(1, 1, 4, 4).float(), "linear")
+
+class TestTensorUOpLoss(unittest.TestCase):
+  def test_cross_entropy(self):
+    t, Y = _t(2, 3).float(), Tensor([1, 2], dtype=dtypes.int32)
+    self.assertIs(_strip_unique(t.cross_entropy(Y).uop), _strip_unique(t.uop.cross_entropy(Y.uop)))
+
 class TestTensorUOpCat(unittest.TestCase):
   def test_cat_dim0(self):     _check(self, _t(2, 3), lambda x: x.cat(x, dim=0))
   def test_cat_dim1(self):     _check(self, _t(2, 3), lambda x: x.cat(x, dim=1))
