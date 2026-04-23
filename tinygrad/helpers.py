@@ -39,7 +39,8 @@ def colorize_float(x: float): return colored(f"{x:7.2f}x", 'green' if x < 0.75 e
 def time_to_str(t:float, w=8) -> str: return next((f"{t * d:{w}.2f}{pr}" for d,pr in [(1, "s "),(1e3, "ms")] if t > 10/d), f"{t * 1e6:{w}.2f}us")
 def size_to_str(s:int) -> str: return next((f"{s / d:.2f} {pr}" for d,pr in [(1<<30, "GB"),(1<<20, "MB"),(1<<10, "KB")] if s >= d), f"{s} B")
 def mem_to_str(bw:int|float, w:int|str=0, units=True) -> str:
-  return next((f"{bw*d:{w}.0f}{pr*units}" for d,pr in [(1e-12, " TB/s"), (1e-9, " GB/s"), (1e-6, " MB/s"), (1e-3, " KB/s")] if bw>=1/d), f"{bw*1e-6:{w}.0f}{(' B/s')*units}")
+  bw_units = [(1e-12, " TB/s"), (1e-9, " GB/s"), (1e-6, " MB/s"), (1e-3, " KB/s")]
+  return next((f"{bw*d:{w}.0f}{pr*units}" for d,pr in bw_units if bw>=1/d), f"{bw*1e-6:{w}.0f}{(' B/s')*units}")
 def ansistrip(s:str): return re.sub('\x1b\\[(K|.*?m)', '', s)
 def ansilen(s:str): return len(ansistrip(s))
 def make_tuple(x:int|Sequence[int], cnt:int) -> tuple[int, ...]: return (x,)*cnt if isinstance(x, int) else tuple(x)
