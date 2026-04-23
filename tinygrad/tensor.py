@@ -1314,89 +1314,6 @@ class Tensor(OpMixin):
 
     return data[:16]
 
-  def logcumsumexp(self, axis=0) -> Tensor:
-    """
-    Computes the log-cumsum-exp of the tensor along the specified axis or axes.
-
-    The log-cumsum-exp function is a numerically stable way to compute the logarithm of the cumulative sum of exponentials.
-
-    You can pass in the `axis` keyword argument to control the axis along which
-    the log-cumsum-exp is computed.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    Tensor.manual_seed(42)
-    t = Tensor.randn(2, 3)
-    print(t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.logcumsumexp().numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.logcumsumexp(axis=0).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.logcumsumexp(axis=1).numpy())
-    ```
-    """
-    if self.ndim == 0: return self
-    x = self.transpose(axis, -1)
-    last_dim_size = x.shape[-1]
-    x_unsqueezed = x.unsqueeze(-2).expand((None,)*(self.ndim-1)+(last_dim_size, None))
-    x_cummax, _ = x.cummax(-1)
-    mask = Tensor.ones(last_dim_size, last_dim_size, requires_grad=False, device=self.device).tril()
-    ret = mask.where(x_unsqueezed - x_cummax.unsqueeze(-1), self.dtype.min).exp().sum(-1).log() + x_cummax
-    return ret.transpose(-1, axis)
-
-  def argmax(self, axis=None, keepdim=False) -> Tensor:
-    """
-    Returns the indices of the maximum value of the tensor along the specified axis.
-
-    You can pass in `axis` and `keepdim` keyword arguments to control the axis along
-    which the maximum is computed and whether the reduced dimensions are retained.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([[1, 0, 2], [5, 4, 3]])
-    print(t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.argmax().numpy()) # Returns the index of the maximum value in the flattened tensor.
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.argmax(axis=0).numpy()) # Returns the indices of the maximum values along axis 0.
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.argmax(axis=1).numpy()) # Returns the indices of the maximum values along axis 1.
-    ```
-    """
-    if axis is None: return self.flatten().argmax(0)
-    axis = self._resolve_dim(axis)
-    m = self == self.max(axis=axis, keepdim=True)
-    idx = m * Tensor.arange(self.shape[axis],0,-1, requires_grad=False, device=self.device).reshape(self.shape[axis], *[1]*(self.ndim-axis-1))
-    return (self.shape[axis]-idx.max(axis=axis, keepdim=keepdim)).cast(dtypes.int32)
-
-  def argmin(self, axis=None, keepdim=False) -> Tensor:
-    """
-    Returns the indices of the minimum value of the tensor along the specified axis.
-
-    You can pass in `axis` and `keepdim` keyword arguments to control the axis along
-    which the minimum is computed and whether the reduced dimensions are retained.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([[1, 0, 2], [5, 4, 3]])
-    print(t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.argmin().numpy()) # Returns the index of the minimum value in the flattened tensor.
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.argmin(axis=0).numpy()) # Returns the indices of the minimum values along axis 0.
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.argmin(axis=1).numpy()) # Returns the indices of the minimum values along axis 1.
-    ```
-    """
-    return self._inverse().argmax(axis=axis, keepdim=keepdim)
-
   # ***** processing ops *****
 
   def _apply_ceil_mode(self, pads:Sequence[int], k_:tuple[sint, ...], s_:int|tuple[int, ...], d_:int|tuple[int, ...]) -> list[int]:
@@ -1940,17 +1857,6 @@ class Tensor(OpMixin):
     return Tensor(out.uop.after(fn.call(*[s.uop for s in srcs], frame_pos)))
 
   # ***** functional nn ops *****
-
-  def sequential(self, ll:list[Callable[[Tensor], Tensor]]) -> Tensor:
-    """
-    Applies a sequence of functions to `self` chaining the output of each function to the input of the next.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([1, 2, 3])
-    print(t.sequential([lambda x: x * 2, lambda x: x + 1]).numpy())
-    ```
-    """
-    return functools.reduce(lambda x,f: f(x), ll, self)
 
   def dropout(self, p=0.5) -> Tensor:
     """
