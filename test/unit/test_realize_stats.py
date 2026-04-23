@@ -7,6 +7,7 @@ def test_bandwidth_units():
   for mem, lds, expected in [
     (0, 0, "0|0      GB/s"),
     (200_000_000, 0, "200|0      MB/s"),
+    (600_000_000, 200_000_000, "600|200    MB/s"),
     (10_000_000_000_000, 0, "TB/s"),
   ]:
     GlobalCounters.reset()
