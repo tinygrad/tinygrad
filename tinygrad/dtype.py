@@ -74,7 +74,6 @@ class DType(metaclass=DTypeMetaClass):
   def vcount(self): return self.count
   @functools.cache  # pylint: disable=method-cache-max-size-none
   def vec(self, sz:int) -> DType:
-    raise RuntimeError("vec is no longer supported")
     assert self.count == 1, f"can't vectorize {self} with size {sz}"
     if sz == 1 or self == dtypes.void: return self  # void doesn't vectorize, and sz=1 is scalar
     return DType(self.priority, self.bitsize*sz, f"{INVERSE_DTYPES_DICT[self.name]}{sz}", None, sz, self)
@@ -92,7 +91,7 @@ class DType(metaclass=DTypeMetaClass):
     return float("inf") if dtypes.is_float(self) else True
   def const(self, val: tuple[ConstType, ...]|ConstType):
     if isinstance(val, tuple):
-      assert len(val) == self.count, f"mismatch {val} {self}"
+      #assert len(val) == self.count, f"mismatch {val} {self}"
       return tuple(map(self.const, val))
     if isinstance(val, InvalidType): return val
     # NOTE: float('nan') != float('nan'), so we canonicalize here

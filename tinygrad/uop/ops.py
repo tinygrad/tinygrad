@@ -91,6 +91,7 @@ class UOpMetaClass(type):
   ucache:dict[tuple, weakref.ReferenceType[UOp]] = {}
   def __call__(cls, op:Ops, dtype:DType=dtypes.void, src:tuple[UOp,...]=tuple(), arg:Any=None, tag:Any=None,
                metadata:tuple[Metadata,...]|None=None, _buffer:Buffer|None=None):
+    assert dtype.count == 1, "dtype with count is not supported"
     if (wret:=UOpMetaClass.ucache.get(key:=(op, dtype, src, arg, tag), None)) is not None and (ret:=wret()) is not None: return ret
     UOpMetaClass.ucache[key] = weakref.ref(created:=super().__call__(*key))
     if metadata is not None: all_metadata[created] = metadata
@@ -212,7 +213,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     match self.op:
       # late ops don't have shape
       case Ops.UNIQUE | Ops.LUNIQUE | Ops.DEVICE | Ops.IF | Ops.BARRIER | Ops.CUSTOM | Ops.CUSTOMI | \
-           Ops.STACK | Ops.GEP | Ops.CONTRACT | Ops.SINK | Ops.END | \
+           Ops.CONTRACT | Ops.SINK | Ops.END | \
            Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE | Ops.BINARY | Ops.INS | Ops.TUPLE | Ops.CALL | Ops.FUNCTION:
         return None
 
@@ -232,6 +233,10 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
         if isinstance(self.src[0].dtype, PtrDType) and not isinstance(self.src[0].dtype, ImageDType) and not isinstance(self.dtype, PtrDType):
           return None
 
+      case Ops.STACK: return (len(self.src),)
+      case Ops.GEP:
+        assert len(self.arg) == 1
+        return ()
       case Ops.INDEX:
         shp = []
         for s in self.src[1:]: shp.extend(list(s.shape))
@@ -248,7 +253,6 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       # some ops init the shape
       case Ops.CONST | Ops.DEFINE_VAR | Ops.BIND | Ops.RANGE | Ops.SPECIAL | Ops.UNROLL: return ()
       case Ops.VCONST: return (len(self.arg),)
-      case Ops.STACK: return (len(self.src),)
       case Ops.BUFFER: return (self.arg,)
       case Ops.BUFFER_VIEW: return (self.arg[0],)
       case Ops.CUSTOM_FUNCTION: return None
@@ -454,7 +458,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   def broadcast(self, count:int):
     assert self.dtype.vcount == 1
     if count == 1: return self
-    return UOp(Ops.STACK, self.dtype.vec(count), (self,)*count)
+    return UOp(Ops.STACK, self.dtype, (self,)*count)
   def cast(self, dtype:DType):
     # TODO: we shouldn't have to check for dtype.count == 1 here, but CAST is misused in AMD LLVM
     if dtype.count == 1 and dtype.count != self.dtype.count: dtype = dtype.vec(self.dtype.count)

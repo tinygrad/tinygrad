@@ -71,7 +71,8 @@ def do_expand(root:UOp):
     assert root.dtype.count == 1
     # is this right?
     new_arg = tuple(range(root.arg[0], new_srcs[0].dtype.count, new_srcs[0].dtype.count // expand_sz))
-  nsrc = UOp(root.op, root.dtype.scalar().vec(root.dtype.count*expand_sz), tuple(new_srcs), new_arg)
+  #nsrc = UOp(root.op, root.dtype.scalar().vec(root.dtype.count*expand_sz), tuple(new_srcs), new_arg)
+  nsrc = UOp(root.op, root.dtype, tuple(new_srcs), new_arg)
   return UOp(Ops.UNROLL, root.dtype, (nsrc,), expand_args)
 
 def do_contract(con:UOp):
@@ -147,7 +148,7 @@ def fix_group_for_reduce(x:UOp):
 pm_pre_expander = PatternMatcher([
   # rewrite UPCAST/UNROLL range to something to be expanded
   (UPat(Ops.RANGE, name="r"),
-   lambda r: UOp(Ops.UNROLL, r.dtype, (UOp.const(r.dtype.vec(s:=r.vmax+1), tuple(range(s))),), ((r.arg[0],s),)) \
+   lambda r: UOp(Ops.UNROLL, r.dtype, (UOp.const(r.dtype, tuple(range(s:=r.vmax+1))),), ((r.arg[0],s),)) \
     if r.arg[1] in {AxisType.UNROLL, AxisType.UPCAST} else None),
   # fix REDUCEs with UNROLLs
   (UPat(Ops.REDUCE, name="x"), fix_reduce_unroll),
