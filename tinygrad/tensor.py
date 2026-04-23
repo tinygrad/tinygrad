@@ -1006,8 +1006,9 @@ class Tensor(OpMixin):
       match index:
         case Tensor():
           if not dtypes.is_int(index.dtype): raise IndexError(f"index dtype {index.dtype} is not supported")
+          if index.device != self.device: raise RuntimeError(f"expected index and self on the same device, {index.device=}, {self.device=}")
           assert isinstance(size, int), "size must be an int"
-          index = (index < 0).where(index+size, index).to(self.device)  # treat negative index values
+          index = (index < 0).where(index+size, index)  # treat negative index values
         case list() | tuple():
           if not dtypes.is_int((ti:=Tensor(index)).dtype): raise IndexError(f"{index=} contains non-int element")
           index = Tensor([i+size if i<0 else i for i in fully_flatten(index)], self.device, requires_grad=False).reshape(ti.shape)
@@ -1165,10 +1166,10 @@ class Tensor(OpMixin):
     print(t.gather(1, Tensor([[0, 0], [1, 0]])).numpy())
     ```
     """
+    if index.device != self.device: raise RuntimeError(f"expected index and self on the same device, {index.device=}, {self.device=}")
     assert index.ndim == self.ndim, f"self.ndim must equal index.ndim, {self.ndim=}, {index.ndim=}"
     dim = self._resolve_dim(dim)
     assert all(s >= i for d,(s,i) in enumerate(zip(self.shape, index.shape)) if d != dim), "requires self.shape[d] >= index.shape[d] for all d != dim"
-    index = index.to(self.device)
     x = self.shrink_to(tuple(i if d != dim else None for d,i in enumerate(index.shape))).unsqueeze(-1).transpose(-1, dim)
     return (index.unsqueeze(-1)._one_hot_along_dim(self.shape[dim]).where(x, 0)).sum(-1, dtype=self.dtype)
 
@@ -1640,7 +1641,9 @@ class Tensor(OpMixin):
     return x.cast(self.dtype)
 
   def _pre_scatter(self, dim:int, index:Tensor, src:Tensor) -> tuple[Tensor, Tensor]:
-    index, dim = index.to(self.device), self._resolve_dim(dim)
+    if index.device != self.device: raise RuntimeError(f"expected index and self on the same device, {index.device=}, {self.device=}")
+    if src.device != self.device: raise RuntimeError(f"expected src and self on the same device, {src.device=}, {self.device=}")
+    dim = self._resolve_dim(dim)
     assert index.ndim == self.ndim == src.ndim, f"self.ndim, index.ndim and src.ndim must all equal, {self.ndim=} {index.ndim=} {src.ndim=}"
     assert all((d == dim or self_ >= index_) and src_ >= index_ for d,(self_,index_,src_) in enumerate(zip(self.shape, index.shape, src.shape))), \
       f"All dimensions of {index.shape=} should be <= to all dimensions of {src.shape=} and all dimensions except dimension {dim} of {self.shape=}"
@@ -2016,9 +2019,10 @@ class Tensor(OpMixin):
     ```
     """
     assert 0.0 <= label_smoothing <= 1.0, "label_smoothing must be in [0.0, 1.0]"
+    if Y.device != self.device: raise RuntimeError(f"expected Y and self on the same device, {Y.device=}, {self.device=}")
     log_probs = self.log_softmax()
     loss_mask = (Y != ignore_index) if ignore_index != -1 else Y.ones_like(dtype=dtypes.bool)
-    y = Y.to(self.device).unsqueeze(-1)._one_hot_along_dim(self.shape[-1], dim=-1) * loss_mask.unsqueeze(-1)
+    y = Y.unsqueeze(-1)._one_hot_along_dim(self.shape[-1], dim=-1) * loss_mask.unsqueeze(-1)
     smoothing = label_smoothing * (log_probs.mean(-1) * loss_mask)
     unreduced = ((1 - label_smoothing) * (log_probs * y).sum(-1) + smoothing)
     return -unreduced.sum() / loss_mask.sum() if reduction == "mean" else -unreduced._do_reduction(reduction)
