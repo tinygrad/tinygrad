@@ -288,12 +288,12 @@ class WAVERDY(PacketType):  # exclude: 1 << 3
 class WAVEEND(PacketType):  # exclude: 1 << 4
   encoding = bits[4:0] == 0b10101
   delta = bits[7:5]
-  flag7 = bits[8:8]
+  sa = bits[8:8]
   simd = bits[10:9]
-  cu_lo = bits[13:11]
+  wgp = bits[13:11]
   wave = bits[19:15]
   @property
-  def cu(self) -> int: return self.cu_lo | (self.flag7 << 3)
+  def cu(self) -> int: return self.wgp | (self.sa << 3)
 
 class WAVESTART(PacketType):  # exclude: 1 << 4
   encoding = bits[4:0] == 0b01100
