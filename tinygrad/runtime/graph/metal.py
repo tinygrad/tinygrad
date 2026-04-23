@@ -4,7 +4,6 @@ from tinygrad.dtype import dtypes
 from tinygrad.helpers import dedup, getenv, PROFILE
 from tinygrad.device import ProfileGraphEntry, ProfileGraphEvent
 from tinygrad.uop.ops import UOp, Ops
-from tinygrad.engine.realize import CompiledRunner, get_runner, unwrap_multi, resolve_params
 from tinygrad.engine.jit import GraphRunner, GraphException
 from tinygrad.runtime.ops_metal import wait_check, to_ns_str
 from tinygrad.runtime.autogen import metal
@@ -20,60 +19,52 @@ class MetalGraph(GraphRunner):
     icb_descriptor.setInheritPipelineState(False)
     icb_descriptor.setMaxKernelBufferBindCount(31)
 
-    self.icb = self.dev.sysdevice.newIndirectCommandBufferWithDescriptor_maxCommandCount_options(icb_descriptor, len(self.linear.src),
+    self.icb = self.dev.sysdevice.newIndirectCommandBufferWithDescriptor_maxCommandCount_options(icb_descriptor, len(self.calls),
                                                                                                  metal.MTLResourceCPUCacheModeDefaultCache)
     if self.icb.value is None: raise GraphException("create indirect command buffer failed, does your system support this?")
     self.needs_icb_fix = int(self.dev.gpu_family < 9)  # ICB fix not required on M3+ (Apple9+)
 
     if len(self.vars): self.int_buf = self.dev.allocator.alloc(len(self.vars)*dtypes.int32.itemsize)
 
-    self.commands: list[tuple[CompiledRunner, list[tuple[int, int]]]] = []  # list of (prg, replace) where replace is [(position, input_uop_idx), ...]
     all_pipelines, all_resources = [], [self.int_buf.buf] if len(self.vars) else []
-    for j, call in enumerate(self.linear.src):
-      replace = [(p, b.arg) for p, b in enumerate(b for b in call.src[1:] if b.op is not Ops.BIND) if b.op is Ops.PARAM]
-      for bufs, _ in unwrap_multi(call, resolve_params(call, input_uops)):
-        for b in bufs: b.ensure_allocated()
-        prg = get_runner(bufs[0].device, call.src[0])
-        icb_command = self.icb.indirectComputeCommandAtIndex(j).retained()
-        icb_command.setComputePipelineState(prg._prg.pipeline_state)
-        all_pipelines.append(prg._prg.pipeline_state)
-        for i, b in enumerate(bufs):
-          if not any(pos == i for pos, _ in replace):
-            icb_command.setKernelBuffer_offset_atIndex(b._buf.buf, b._buf.offset, i)
-            all_resources.append(b._buf.buf)
-        for i, v in enumerate(prg.p.vars): icb_command.setKernelBuffer_offset_atIndex(self.int_buf.buf, self.vars.index(v.expr)*4, len(bufs)+i)
-
-        global_size, local_size = prg.p.launch_dims({v: 0 for v in self.vars})
-        icb_command.concurrentDispatchThreadgroups_threadsPerThreadgroup(metal.MTLSize(*global_size), metal.MTLSize(*local_size))
-        icb_command.setBarrier()
-        self.commands.append((prg, replace))
+    for j, ((_, _, bufs, _), prg, replace) in enumerate(zip(self.calls, self.progs, self.uop_replace)):
+      assert prg is not None
+      icb_command = self.icb.indirectComputeCommandAtIndex(j).retained()
+      icb_command.setComputePipelineState(prg._prg.pipeline_state)
+      all_pipelines.append(prg._prg.pipeline_state)
+      for i, b in enumerate(bufs):
+        if not any(pos == i for pos, _ in replace):
+          icb_command.setKernelBuffer_offset_atIndex(b._buf.buf, b._buf.offset, i)
+          all_resources.append(b._buf.buf)
+      for i, v in enumerate(prg.p.vars): icb_command.setKernelBuffer_offset_atIndex(self.int_buf.buf, self.vars.index(v.expr)*4, len(bufs)+i)
+      global_size, local_size = prg.p.launch_dims({v: 0 for v in self.vars})
+      icb_command.concurrentDispatchThreadgroups_threadsPerThreadgroup(metal.MTLSize(*global_size), metal.MTLSize(*local_size))
+      icb_command.setBarrier()
 
     self.all_resources = dedup(all_resources)
     self.all_pipelines = dedup(all_pipelines)
     self.command_buffer: Any = None
     if len(self.vars): self.int_buf_view = self.dev.allocator._as_buffer(self.int_buf).cast('i')
-    self.range = metal.NSRange(0, len(self.linear.src))
-    self.updatable = sorted(set(j for j, (_, replace) in enumerate(self.commands) if replace) | self.var_vals_replace.keys() |
-                            self.launch_dims_replace.keys())
+    self.range = metal.NSRange(0, len(self.calls))
+    self.updatable = sorted({j for j,r in enumerate(self.uop_replace) if r} | self.var_vals_replace.keys() | self.launch_dims_replace.keys())
 
   def __call__(self, input_buffers, var_vals, wait=False, input_uops=None):
     if self.command_buffer is not None and self.command_buffer in self.dev.mtl_buffers_in_flight: wait_check(self.command_buffer)
     # NOTE: old command buffer may not be inflight anymore
     if self.command_buffer is not None and PROFILE: self.collect_timestamps()
 
-    # Update buffers from input_uops
     updated_bufs = []
     for j in self.updatable:
       computeCommand = self.icb.indirectComputeCommandAtIndex(j)
-      for pos, iidx in self.commands[j][1]:
+      for pos, iidx in self.uop_replace[j]:
         buf = input_uops[iidx].buffer
         computeCommand.setKernelBuffer_offset_atIndex(buf._buf.buf, buf._buf.offset, pos)
         updated_bufs.append(buf._buf.buf)
 
     all_resources = dedup(self.all_resources + updated_bufs)
     for j, global_dims, local_dims in self.updated_launch_dims(var_vals):
-      computeCommand = self.icb.indirectComputeCommandAtIndex(j)
-      computeCommand.concurrentDispatchThreadgroups_threadsPerThreadgroup(metal.MTLSize(*global_dims), metal.MTLSize(*local_dims))
+      self.icb.indirectComputeCommandAtIndex(j).concurrentDispatchThreadgroups_threadsPerThreadgroup(metal.MTLSize(*global_dims),
+                                                                                                     metal.MTLSize(*local_dims))
     for i, var in enumerate(self.vars): self.int_buf_view[i] = var_vals[var]
 
     command_buffer = self.dev.mtl_queue.commandBuffer().retained()
@@ -93,7 +84,7 @@ class MetalGraph(GraphRunner):
 
     encoder.executeCommandsInBuffer_withRange(self.icb, self.range)
     encoder.endEncoding()
-    command_buffer.setLabel(to_ns_str(f"batched {len(self.commands)}"))
+    command_buffer.setLabel(to_ns_str(f"batched {len(self.calls)}"))
     command_buffer.commit()
     self.command_buffer = command_buffer
 
@@ -106,9 +97,8 @@ class MetalGraph(GraphRunner):
   def collect_timestamps(self):
     # create a graph event and evenly space each program
     st, en = decimal.Decimal(self.command_buffer.GPUStartTime()) * 1000000, decimal.Decimal(self.command_buffer.GPUEndTime()) * 1000000
-    ents = [ProfileGraphEntry(self.device, prg._prg.name, i, i+1) for i, (prg, _) in enumerate(self.commands)]
-    step = (en-st)/len(ents)
-    self.dev.profile_events += [ProfileGraphEvent(ents, [], [st+step*i for i in range(len(ents)+1)])]
+    ents = [ProfileGraphEntry(self.device, prg._prg.name, i, i+1) for i, prg in enumerate(self.progs)]
+    self.dev.profile_events += [ProfileGraphEvent(ents, [], [st + (en-st)/len(ents)*i for i in range(len(ents)+1)])]
 
   def __del__(self):
     if PROFILE and self.command_buffer is not None:
