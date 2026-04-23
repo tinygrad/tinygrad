@@ -1,26 +1,46 @@
-import ctypes, struct, dataclasses, array, itertools, time
+import ctypes, struct, dataclasses, array, itertools, time, functools
 from typing import Sequence
 from tinygrad.runtime.autogen import libusb
 from tinygrad.helpers import DEBUG, DEV, to_mv, round_up, OSX, getenv, ceildiv
 from tinygrad.runtime.support.hcq import MMIOInterface
+from tinygrad.runtime.support import c
 
 def alloc_cbuffer(sz:int) -> tuple[ctypes.Array, memoryview]: return (buf:=(ctypes.c_ubyte * sz)()), to_mv(ctypes.addressof(buf), sz)
+def checked(fn):
+  @functools.wraps(fn)
+  def wrapper(*args):
+    if (rc:=fn(*args)) < 0: raise RuntimeError(f"{fn.__name__}: {libusb.libusb_strerror(rc).decode()}")
+    return rc
+  return wrapper
 
 class USB3:
-  def __init__(self, vendor:int, dev:int, ep_data_in:int, ep_stat_in:int, ep_data_out:int, ep_cmd_out:int, max_streams:int=31, use_bot=False):
-    self.vendor, self.dev = vendor, dev
+  @staticmethod
+  @functools.cache
+  def ctx():
+    ctx = c.init_c_var(ctypes.POINTER(libusb.struct_libusb_context), checked(libusb.libusb_init))
+    if DEBUG >= 6: libusb.libusb_set_option(ctx, libusb.LIBUSB_OPTION_LOG_LEVEL, 4)
+    return ctx
+
+  @classmethod
+  @functools.cache
+  def list_devices(cls, vendor:int, dev:int) -> list[tuple[c.POINTER[libusb.struct_libusb_device], str]]:
+    ret = []
+    for i in range(checked(libusb.libusb_get_device_list)(cls.ctx(), devs:=ctypes.POINTER(ctypes.POINTER(libusb.struct_libusb_device))())):
+      desc = c.init_c_var(libusb.struct_libusb_device_descriptor, lambda x: checked(libusb.libusb_get_device_descriptor)(devs[i], x))
+      if (desc.idVendor, desc.idProduct) == (vendor, dev):
+        ret.append((libusb.libusb_ref_device(devs[i]), f"{libusb.libusb_get_bus_number(devs[i])}-{libusb.libusb_get_device_address(devs[i])}"))
+    libusb.libusb_free_device_list(devs, 1)
+    return ret
+
+  def __init__(self, dev:c.POINTER[libusb.struct_libusb_device], ep_data_in:int, ep_stat_in:int, ep_data_out:int, ep_cmd_out:int,
+               max_streams:int=31, use_bot=False):
     self.ep_data_in, self.ep_stat_in, self.ep_data_out, self.ep_cmd_out = ep_data_in, ep_stat_in, ep_data_out, ep_cmd_out
     self.max_streams, self.use_bot = max_streams, use_bot
     self._transferred = ctypes.c_int(0)
     self._bulk_in_buf, self._bulk_in_mv = alloc_cbuffer(4 << 20)
     self._bulk_out_buf, self._bulk_out_mv = alloc_cbuffer(4 << 20)
-    self.ctx = ctypes.POINTER(libusb.struct_libusb_context)()
 
-    if libusb.libusb_init(ctypes.byref(self.ctx)): raise RuntimeError("libusb_init failed")
-    if DEBUG >= 6: libusb.libusb_set_option(self.ctx, libusb.LIBUSB_OPTION_LOG_LEVEL, 4)
-
-    self.handle = libusb.libusb_open_device_with_vid_pid(self.ctx, self.vendor, self.dev)
-    if not self.handle: raise RuntimeError(f"device {self.vendor:04x}:{self.dev:04x} not found. sudo required?")
+    self.handle = c.init_c_var(c.POINTER[libusb.struct_libusb_device_handle], lambda x: checked(libusb.libusb_open)(dev, x))
 
     # Read product string descriptor
     _buf = (ctypes.c_ubyte * 256)()
@@ -81,7 +101,7 @@ class USB3:
 
     running = len(cmds)
     while running:
-      libusb.libusb_handle_events(self.ctx)
+      libusb.libusb_handle_events(USB3.ctx())
       running = len(cmds)
       for tr in cmds:
         if tr.contents.status == libusb.LIBUSB_TRANSFER_COMPLETED: running -= 1
@@ -172,7 +192,11 @@ class ScsiWriteOp: data:bytes; lba:int=0 # noqa: E702
 
 class CustomASM24Controller:
   def __init__(self, usb:USB3|None=None):
-    self.usb = usb or USB3(0xADD1, 0x0001, 0x81, 0x83, 0x02, 0x04, use_bot=True)
+    if not usb:
+      devs = USB3.list_devices(0xADD1, 0x0001)
+      assert len(devs), "no ASM24 controller found"
+      self.usb = USB3(devs[0][0], 0x81, 0x83, 0x02, 0x04, use_bot=True)
+    else: self.usb = usb
     self._pci_cacheable: list[tuple[int, int]] = []
     self._pci_cache: dict[int, int|None] = {}
 
@@ -290,7 +314,11 @@ class CustomASM24Controller:
 
 class ASM24Controller:
   def __init__(self, usb:USB3|None=None):
-    self.usb = usb or USB3(0xADD1, 0x0001, 0x81, 0x83, 0x02, 0x04, use_bot=bool(getenv("USE_BOT", 0)))
+    if not usb:
+      devs = USB3.list_devices(0xADD1, 0x0001)
+      assert len(devs), "no ASM24 controller found"
+      self.usb = USB3(devs[0][0], 0x81, 0x83, 0x02, 0x04, use_bot=bool(getenv("USE_BOT", 0)))
+    else: self.usb = usb
     self._cache: dict[int, int|None] = {}
     self._pci_cacheable: list[tuple[int, int]] = []
     self._pci_cache: dict[int, int|None] = {}
