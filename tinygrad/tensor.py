@@ -1715,20 +1715,20 @@ class Tensor(OpMixin):
     print(Tensor([1, 4, 10]).div(Tensor([2, 3, 4])).numpy())
     ```
     """
+    if rounding_mode is None: return super().div(x, reverse)  # type: ignore[arg-type]
     numerator, denominator = self._broadcasted(x, reverse)
-    d = numerator.cast(least_upper_float(numerator.dtype)) * denominator.cast(least_upper_float(denominator.dtype)).reciprocal()
-    output_dtype = numerator.dtype if dtypes.is_int(numerator.dtype) else d.dtype
-    if dtypes.is_int(dt:=least_upper_dtype(numerator.dtype, denominator.dtype)) and rounding_mode is not None:
+    if dtypes.is_int(dt:=least_upper_dtype(numerator.dtype, denominator.dtype)):
       numerator, denominator = numerator.cast(dt), denominator.cast(dt)
       if rounding_mode == "trunc": return numerator.idiv(denominator)
       if rounding_mode == "floor":
         truncate_div, truncate_mod = numerator.idiv(denominator), numerator._binop(Ops.MOD, denominator, False)
         opposite_sign = ((numerator>0)&(denominator<0)) | ((numerator<0)&(denominator>0))
         return (opposite_sign&(truncate_mod!=0)).where(truncate_div-1, truncate_div)
+    d = numerator.cast(least_upper_float(numerator.dtype)) * denominator.cast(least_upper_float(denominator.dtype)).reciprocal()
+    output_dtype = numerator.dtype if dtypes.is_int(numerator.dtype) else d.dtype
     if rounding_mode == "trunc": return d.trunc().cast(output_dtype)
     if rounding_mode == "floor": return d.floor().cast(output_dtype)
-    if rounding_mode is not None: raise RuntimeError(f"{rounding_mode=} is not supported")
-    return d
+    raise RuntimeError(f"{rounding_mode=} is not supported")
 
   def mod(self, x:Tensor|ConstType, reverse=False) -> Tensor:
     """

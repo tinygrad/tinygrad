@@ -22,6 +22,15 @@ class TestTensorUOpBinop(unittest.TestCase):
     self.assertIs(_strip_unique((t.eq(1) * Tensor.arange(3)).uop), _strip_unique(t.uop.eq(1) * UOp.arange(3)))
   # Tensor's ufix picks float dtype when scalar is float and self is int; UOp should match.
   def test_add_scalar_float_on_int(self): _check(self, _t(3), lambda x: x + 1.5)
+  # div: Tensor.div (default case) delegates to ElementwiseMixin.div; trees must match for Tensor and UOp.
+  def test_div_tensor_by_tensor(self):
+    a, b = _t(4).float(), _t(4).float() + 1
+    self.assertIs(_strip_unique((a/b).uop), _strip_unique(a.uop/b.uop))
+  def test_div_int_by_int(self):                 _check(self, _t(4), lambda x: x / 3)
+  def test_div_sum_by_sum(self):                 _check(self, _t(4).float(), lambda x: x.sum() / (x + 1).sum())
+  def test_div_broadcast_tensor_by_tensor(self):
+    a, b = _t(3, 4).float(), _t(4).float() + 1
+    self.assertIs(_strip_unique((a/b).uop), _strip_unique(a.uop/b.uop))
 
 class TestTensorUOpGetitem(unittest.TestCase):
   # ---- pure slice patterns ----

@@ -182,7 +182,8 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
     return self._binop(Ops.MOD, x, reverse)
 
   def div(self, x: Self | ConstType, reverse: bool = False) -> Self:
-    return (self.ufix(x) * self.alu(Ops.RECIPROCAL)) if reverse else (self * self.ufix(x).alu(Ops.RECIPROCAL))
+    lhs, rhs = self._broadcasted(x, reverse)
+    return lhs * rhs.reciprocal()
 
   def __neg__(self) -> Self:
     return self.neg()
