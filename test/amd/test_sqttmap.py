@@ -1,5 +1,6 @@
 # test to compare every packet with the rocprof decoder
 import unittest, pickle
+from decimal import Decimal
 from typing import Iterator
 from pathlib import Path
 from tinygrad.helpers import DEBUG, getenv, temp, ansistrip
@@ -135,6 +136,27 @@ class TestSQTTMapRDNA4(TestSQTTMapBase):
       if (et:=row_ends.get(e.device)) is not None and e.st < et:
         raise RuntimeError(f"WMMA exec overlaps in {e.device}: {e.st} {et}.")
       row_ends[e.device] = e.en
+
+  @unittest.expectedFailure
+  def test_handwritten_sqtt(self):
+    events, kernels, target = self.examples["profile_handwritten_run_0"]
+    lib = list(kernels.values())[0].lib
+    dispatch_st:dict[str, int] = {}
+    row_counts:dict[str, int] = {}
+    row_ends:dict[str, Decimal] = {}
+    for e in sqtt_timeline(events[0].blob, lib, target):
+      if type(e).__name__ != "ProfileRangeEvent": continue
+      info = e.name.ret or ""
+      if e.device.startswith("WAVE"):
+        idx = row_counts.get(e.device, 0)
+        dispatch_st[f"{e.device}-{idx}"] = int(e.st)
+        row_counts[e.device] = idx + 1
+      elif info.startswith("LINK:"):
+        delay = int(e.st) - dispatch_st[info[len("LINK:"):]]
+        self.assertGreaterEqual(delay, 1, f"EXEC {e.device} starts before DISPATCH {link_key}: delay={delay}")
+        if (prev_en:=row_ends.get(e.device)) is not None:
+          self.assertGreaterEqual(e.st, prev_en, f"EXEC overlap in {e.device}: {e.st} < prev end {prev_en}")
+        row_ends[e.device] = e.en
 
 class TestSQTTMapCDNA(TestSQTTMapBase):
   target = "gfx950"
