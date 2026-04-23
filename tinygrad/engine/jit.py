@@ -6,6 +6,7 @@ from tinygrad.device import Buffer, Compiled, Device, MultiBuffer
 from tinygrad.dtype import DType, dtypes
 from tinygrad.uop.ops import UOp, PatternMatcher, Variable, sym_infer, Ops, buffers, track_rewrites, graph_rewrite
 from tinygrad.engine.realize import ExecItem, capturing, CompiledRunner, Runner, Estimates, compile_linear, run_linear, get_runner, graph_cache
+from tinygrad.engine.realize import unwrap_multi, resolve_params
 from tinygrad.schedule.memory import memory_plan_rewrite, _collect_bufs
 from tinygrad.schedule import linear_to_schedule
 from tinygrad.nn.state import get_parameters
@@ -112,6 +113,16 @@ class GraphRunner(Runner):
       for b in ei.bufs:
         if b is not None: b.ensure_allocated()
     self.input_replace = get_input_replace(self.jit_cache, input_buffers) if input_buffers else {}
+
+    self.calls: list[tuple[int, UOp, list[Buffer], dict[str, int]]] = []
+    self.progs: list[CompiledRunner|None] = []
+    self.uop_replace: list[list[tuple[int, int]]] = []
+    for call in self.linear.src:
+      replace = [(p, b.arg) for p, b in enumerate(b for b in call.src[1:] if b.op is not Ops.BIND) if b.op is Ops.PARAM]
+      for dev_idx, (bufs, device_vars) in enumerate(unwrap_multi(call, resolve_params(call, input_uops))):
+        self.calls.append((dev_idx, call.src[0], [b.ensure_allocated() for b in bufs], device_vars))
+        self.progs.append(get_runner(bufs[0].device, call.src[0]) if call.src[0].op in (Ops.SINK, Ops.PROGRAM) else None)
+        self.uop_replace.append(replace)
 
     self.var_vals_replace:dict[int, list[tuple[int, int]]] = {}
     self.launch_dims_replace:dict[int, tuple[int|None, int|None]] = {}
