@@ -8,7 +8,7 @@ from tinygrad.dtype import AddrSpace
 from tinygrad.runtime.autogen.amd.rdna3.ins import *
 import tinygrad.runtime.autogen.amd.rdna3.ins as r3
 import tinygrad.runtime.autogen.amd.rdna4.ins as r4
-from tinygrad.renderer.amd.dsl import s, v
+from tinygrad.renderer.amd.dsl import s, v, NULL
 from test.amd.helpers import TARGET_TO_ARCH
 from extra.gemm.amd_asm_matmul import Kernel
 
@@ -103,7 +103,16 @@ def custom_handwritten(A:UOp, arch:str) -> UOp:
   wg = UOp.special(256, "gidx0")
   lds = UOp(Ops.DEFINE_LOCAL, dtypes.uint8.ptr(size=512, addrspace=AddrSpace.LOCAL), (), 'lds')  # 128 * 4 bytes
   k = Kernel(arch)
-  k.emit(r4.s_nop(0))
+  # * VMEM exec overlaps: multiple b64 stores queue on the VMEM pipe.
+  k.emit(r4.s_load_b64(s[0:1], s[0:1], soffset=NULL))
+  k.emit(r4.s_wait_kmcnt(simm16=0))
+  k.emit(r4.v_lshlrev_b32_e32(v[0], 3, v[0]))  # elem offset (*8 for b64)
+  k.emit(r4.v_mov_b32_e32(v[2], 0))
+  k.emit(r4.v_mov_b32_e32(v[3], 0))
+  for _ in range(16):
+    k.emit(r4.global_store_b64(vaddr=v[0:1], saddr=s[0:1], vsrc=v[2:3]))
+  # * VALU exec overlaps: interleave valu, salu and wmma back to back
+  k.emit(r4.s_nop(0x1))
   k.emit(r4.v_mov_b32_e32(v[1], 4))
   def emit_alt():
     for i in range(2):
@@ -116,8 +125,8 @@ def custom_handwritten(A:UOp, arch:str) -> UOp:
       k.emit(r4.v_wmma_f32_16x16x16_f16(v[0:7], v[8:11], v[8:11], 1))
   k.label("start")
   k.emit(s_mov_b32(s[1], 10))
+  # loop to also test the icache
   k.label("loop")
-  # wmma should've overlapped here if it was a different unit?
   for _ in range(2):
     emit_wmma()
     emit_alt()
