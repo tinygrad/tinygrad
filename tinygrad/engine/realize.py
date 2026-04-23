@@ -23,8 +23,9 @@ def update_stats(display_name:str, device:str, estimates:Estimates, var_vals:dic
     ptm = colored(time_to_str(et, w=9), "yellow" if et > 0.01 else None) if et is not None else ""
     flops, membw, ldsbw = op_est/(et or 1e-20), mem_est/(et or 1e-20), lds_est/(et or 1e-20)
     flops_str = f"{flops*1e-9:7.0f} GFLOPS" if flops < 1e14 else colored(f"{flops*1e-12:7.0f} TFLOPS", 'green')
-    mem_str = f"{membw*1e-9:4.0f}|{ldsbw*1e-9:<6.0f} GB/s" if membw < 1e13 and ldsbw < 1e15 else \
-      colored(f"{membw*1e-12:4.0f}|{ldsbw*1e-12:<6.0f} TB/s", 'green')
+    bw_scale, bw_unit, bw_color = (1e-12, "TB/s", 'green') if membw >= 1e13 or ldsbw >= 1e15 else \
+      (1e-6, "MB/s", 'yellow') if any(0 < bw <= 5e8 for bw in (membw, ldsbw)) else (1e-9, "GB/s", None)
+    mem_str = colored(f"{membw*bw_scale:4.0f}|{ldsbw*bw_scale:<6.0f} {bw_unit}", bw_color)
     print(f"{colored(f'*** {device[:7]:7s} {GlobalCounters.kernel_count:4d}', header_color)}"+
       f" {display_name+' '*(46-ansilen(display_name))} arg {buf_count:2d} mem {GlobalCounters.mem_used/1e9:6.2f} GB"+
       ("" if et is None else f" tm {ptm}/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({flops_str} {mem_str})")+
