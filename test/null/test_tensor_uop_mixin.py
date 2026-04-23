@@ -99,6 +99,13 @@ class TestTensorUOpOneHot(unittest.TestCase):
     t = _t(5)
     self.assertIs(_strip_unique(t.one_hot(5).uop), _strip_unique(t.uop.one_hot(5)))
 
+class TestTensorUOpGather(unittest.TestCase):
+  def _check(self, t, dim, idx):
+    self.assertIs(_strip_unique(t.gather(dim, idx).uop), _strip_unique(t.uop.gather(dim, idx.uop)))
+  def test_gather_1d(self):  self._check(_t(5), 0, Tensor([2, 1, 0, 1, 2], dtype=dtypes.int32))
+  def test_gather_dim0(self): self._check(_t(3, 4), 0, Tensor([[0, 1, 2, 0], [1, 2, 0, 1], [2, 0, 1, 2]], dtype=dtypes.int32))
+  def test_gather_dim1(self): self._check(_t(3, 4), 1, Tensor([[0, 1, 2, 3], [1, 2, 3, 0], [2, 3, 0, 1]], dtype=dtypes.int32))
+
 class TestTensorUOpCat(unittest.TestCase):
   def test_cat_dim0(self):     _check(self, _t(2, 3), lambda x: x.cat(x, dim=0))
   def test_cat_dim1(self):     _check(self, _t(2, 3), lambda x: x.cat(x, dim=1))
