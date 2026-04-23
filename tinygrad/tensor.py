@@ -1154,25 +1154,6 @@ class Tensor(OpMixin):
   def __delitem__(self, indices) -> None:
     raise TypeError("Tensor does not support deleting items")
 
-  def gather(self:Tensor, dim:int, index:Tensor) -> Tensor:
-    """
-    Gathers values along an axis specified by `dim`.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([[1, 2], [3, 4]])
-    print(t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.gather(1, Tensor([[0, 0], [1, 0]])).numpy())
-    ```
-    """
-    if index.device != self.device: raise RuntimeError(f"expected index and self on the same device, {index.device=}, {self.device=}")
-    assert index.ndim == self.ndim, f"self.ndim must equal index.ndim, {self.ndim=}, {index.ndim=}"
-    dim = self._resolve_dim(dim)
-    assert all(s >= i for d,(s,i) in enumerate(zip(self.shape, index.shape)) if d != dim), "requires self.shape[d] >= index.shape[d] for all d != dim"
-    x = self.shrink_to(tuple(i if d != dim else None for d,i in enumerate(index.shape))).unsqueeze(-1).transpose(-1, dim)
-    return (index.unsqueeze(-1)._one_hot_along_dim(self.shape[dim]).where(x, 0)).sum(-1, dtype=self.dtype)
-
   def masked_select(self, mask):
     """
     Selects elements from `self` based on the boolean `mask`.
@@ -1313,89 +1294,6 @@ class Tensor(OpMixin):
       level_chunks = ceildiv(data.shape[0], 2**20)
 
     return data[:16]
-
-  def logcumsumexp(self, axis=0) -> Tensor:
-    """
-    Computes the log-cumsum-exp of the tensor along the specified axis or axes.
-
-    The log-cumsum-exp function is a numerically stable way to compute the logarithm of the cumulative sum of exponentials.
-
-    You can pass in the `axis` keyword argument to control the axis along which
-    the log-cumsum-exp is computed.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    Tensor.manual_seed(42)
-    t = Tensor.randn(2, 3)
-    print(t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.logcumsumexp().numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.logcumsumexp(axis=0).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.logcumsumexp(axis=1).numpy())
-    ```
-    """
-    if self.ndim == 0: return self
-    x = self.transpose(axis, -1)
-    last_dim_size = x.shape[-1]
-    x_unsqueezed = x.unsqueeze(-2).expand((None,)*(self.ndim-1)+(last_dim_size, None))
-    x_cummax, _ = x.cummax(-1)
-    mask = Tensor.ones(last_dim_size, last_dim_size, requires_grad=False, device=self.device).tril()
-    ret = mask.where(x_unsqueezed - x_cummax.unsqueeze(-1), self.dtype.min).exp().sum(-1).log() + x_cummax
-    return ret.transpose(-1, axis)
-
-  def argmax(self, axis=None, keepdim=False) -> Tensor:
-    """
-    Returns the indices of the maximum value of the tensor along the specified axis.
-
-    You can pass in `axis` and `keepdim` keyword arguments to control the axis along
-    which the maximum is computed and whether the reduced dimensions are retained.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([[1, 0, 2], [5, 4, 3]])
-    print(t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.argmax().numpy()) # Returns the index of the maximum value in the flattened tensor.
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.argmax(axis=0).numpy()) # Returns the indices of the maximum values along axis 0.
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.argmax(axis=1).numpy()) # Returns the indices of the maximum values along axis 1.
-    ```
-    """
-    if axis is None: return self.flatten().argmax(0)
-    axis = self._resolve_dim(axis)
-    m = self == self.max(axis=axis, keepdim=True)
-    idx = m * Tensor.arange(self.shape[axis],0,-1, requires_grad=False, device=self.device).reshape(self.shape[axis], *[1]*(self.ndim-axis-1))
-    return (self.shape[axis]-idx.max(axis=axis, keepdim=keepdim)).cast(dtypes.int32)
-
-  def argmin(self, axis=None, keepdim=False) -> Tensor:
-    """
-    Returns the indices of the minimum value of the tensor along the specified axis.
-
-    You can pass in `axis` and `keepdim` keyword arguments to control the axis along
-    which the minimum is computed and whether the reduced dimensions are retained.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([[1, 0, 2], [5, 4, 3]])
-    print(t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.argmin().numpy()) # Returns the index of the minimum value in the flattened tensor.
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.argmin(axis=0).numpy()) # Returns the indices of the minimum values along axis 0.
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.argmin(axis=1).numpy()) # Returns the indices of the minimum values along axis 1.
-    ```
-    """
-    return self._inverse().argmax(axis=axis, keepdim=keepdim)
 
   # ***** processing ops *****
 
@@ -1607,38 +1505,6 @@ class Tensor(OpMixin):
   def dot(self, w:Tensor, dtype:DTypeLike|None=None) -> Tensor:
     if IMAGE: return self.image_dot(w, dtype)
     return super().dot(w, dtype)
-
-  def interpolate(self, size:tuple[int, ...], mode:str="linear", align_corners:bool=False) -> Tensor:
-    """
-    Downsamples or Upsamples to the input `size`, accepts 0 to N batch dimensions.
-
-    The interpolation algorithm is selected with `mode` which currently only supports `linear`, `nearest` and `nearest-exact`.
-    To run `bilinear` or `trilinear`, pass in a 2D or 3D size.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([[1, 2, 3, 4], [21, 22, 23, 24], [41, 42, 43, 44]])
-    print(t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.interpolate(size=(2,3), mode="linear").numpy())
-    ```
-    """
-    assert isinstance(size, (tuple,list)) and all_int(size) and 0 < len(size) <= self.ndim, f"invalid {size=}"
-    assert mode in ("linear", "nearest", "nearest-exact"), "only supports linear, nearest or nearest-exact interpolate"
-    assert not (align_corners and mode != "linear"), "align_corners option can only be set with the interpolating mode linear"
-    x, expand = self, list(self.shape)
-    for i in range(-1,-len(size)-1,-1):
-      scale = (int(self.shape[i]) - int(align_corners)) / (size[i] - int(align_corners))
-      arr, reshape = Tensor.arange(size[i], dtype=dtypes.float32, device=self.device), [1] * self.ndim
-      reshape[i] = expand[i] = size[i]
-      if mode == "linear":
-        index = (scale*arr if align_corners else (scale*(arr+0.5))-0.5).clip(0, self.shape[i]-1)
-        low, high, perc = [y.reshape(reshape).expand(expand) for y in (index.floor().int(), index.ceil().int(), index - index.floor())]
-        x = x.gather(i, low).lerp(x.gather(i, high), perc)
-      else:
-        index = (scale*(arr+0.5) if mode=="nearest-exact" else scale*arr).cast(dtypes.int32).reshape(reshape).expand(expand)
-        x = x.gather(i, index)
-    return x.cast(self.dtype)
 
   def _pre_scatter(self, dim:int, index:Tensor, src:Tensor) -> tuple[Tensor, Tensor]:
     if index.device != self.device: raise RuntimeError(f"expected index and self on the same device, {index.device=}, {self.device=}")
@@ -1941,17 +1807,6 @@ class Tensor(OpMixin):
 
   # ***** functional nn ops *****
 
-  def sequential(self, ll:list[Callable[[Tensor], Tensor]]) -> Tensor:
-    """
-    Applies a sequence of functions to `self` chaining the output of each function to the input of the next.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([1, 2, 3])
-    print(t.sequential([lambda x: x * 2, lambda x: x + 1]).numpy())
-    ```
-    """
-    return functools.reduce(lambda x,f: f(x), ll, self)
-
   def dropout(self, p=0.5) -> Tensor:
     """
     Applies dropout to `self`.
@@ -2026,33 +1881,6 @@ class Tensor(OpMixin):
     smoothing = label_smoothing * (log_probs.mean(-1) * loss_mask)
     unreduced = ((1 - label_smoothing) * (log_probs * y).sum(-1) + smoothing)
     return -unreduced.sum() / loss_mask.sum() if reduction == "mean" else -unreduced._do_reduction(reduction)
-
-  def cross_entropy(self, Y:Tensor, reduction:ReductionStr="mean", label_smoothing:float=0.0) -> Tensor:
-    """
-    Computes the cross entropy loss between input logits and target.
-
-    NOTE: `self` are logits and `Y` are the target labels or class probabilities.
-
-    See: https://pytorch.org/docs/stable/generated/torch.nn.functional.cross_entropy.html
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([[-1, 2, -3], [1, -2, 3]])
-    Y = Tensor([1, 2])
-    print(t.cross_entropy(Y).item())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([[-1, 2, -3], [1, -2, 3]])
-    Y = Tensor([1, 2])
-    print(t.cross_entropy(Y, reduction='none').numpy())
-    ```
-    """
-    assert 0.0 <= label_smoothing <= 1.0, "label_smoothing must be in [0.0, 1.0]"
-    classes_dim = 0 if self.ndim == 1 else 1
-    if self.shape != Y.shape:
-      if self.max(classes_dim).shape != Y.shape: raise RuntimeError(f"shape mismatch: {self.shape=}, {Y.shape=}")
-      Y = Y.unsqueeze(classes_dim)._one_hot_along_dim(num_classes=self.shape[classes_dim], dim=classes_dim)
-    Y = (1 - label_smoothing)*Y + label_smoothing / int(Y.shape[classes_dim])
-    return -self.log_softmax(classes_dim).mul(Y).sum(classes_dim)._do_reduction(reduction)
 
   def nll_loss(self, Y:Tensor, weight:Tensor|None=None, ignore_index:int|None=None, reduction:ReductionStr="mean") -> Tensor:
     """

@@ -276,6 +276,14 @@ class TestMultiTensor(unittest.TestCase):
       out = f(tt)
       assert out.item() == 1+2+3+4
 
+  def test_multitensor_jit_input_reduce_shard_axis(self):
+    @TinyJit
+    def f(x): return x.sum(0).realize()
+    for _ in range(5):
+      tt = Tensor.ones(2, 64).contiguous().realize().shard((d1,d2), 0).realize()
+      out = f(tt)
+      np.testing.assert_allclose(out.numpy(), np.full(64, 2.0))
+
   def test_multitensor_inside_jit(self):
     @TinyJit
     def f(x): return (x.shard((d1,d2), 0)+1).contiguous().sum()
