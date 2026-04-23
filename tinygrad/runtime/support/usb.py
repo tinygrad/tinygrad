@@ -28,7 +28,7 @@ class USB3:
     for i in range(checked(libusb.libusb_get_device_list)(cls.ctx(), devs:=ctypes.POINTER(ctypes.POINTER(libusb.struct_libusb_device))())):
       desc = c.init_c_var(libusb.struct_libusb_device_descriptor, lambda x: checked(libusb.libusb_get_device_descriptor)(devs[i], x))
       if (desc.idVendor, desc.idProduct) == (vendor, dev):
-        ret.append((libusb.libusb_ref_device(devs[i]), f"{libusb.libusb_get_bus_number(devs[i])}-{libusb.libusb_get_device_address(devs[i])}"))
+        ret.append((libusb.libusb_ref_device(devs[i]), f"usb:{libusb.libusb_get_bus_number(devs[i])}-{libusb.libusb_get_device_address(devs[i])}"))
     libusb.libusb_free_device_list(devs, 1)
     return ret
 

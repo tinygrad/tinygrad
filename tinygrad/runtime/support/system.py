@@ -215,7 +215,7 @@ class PCIDevice:
 
 class USBPCIDevice(PCIDevice):
   def __init__(self, devpref:str, dev, pcibus):
-    self.pcibus, self.peer_group = pcibus, f"USBPCIDevice_{self.pcibus}"
+    self.pcibus, self.peer_group = pcibus, f"USBPCIDevice_{pcibus}"
     self.lock_fd = System.flock_acquire(f"{devpref.lower()}_{pcibus.lower()}.lock")
     usb = USB3(dev, 0x81, 0x83, 0x02, 0x04)
     if DEBUG >= 1: print(f"am {self.pcibus}: product string: {usb.product!r}")

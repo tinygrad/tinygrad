@@ -203,7 +203,7 @@ class MockASM24State:
 
 class MockUSB3:
   @classmethod
-  def list_devices(cls, vendor, dev): return [0, ""]
+  def list_devices(cls, vendor, dev): return [(0, "usb:mock")]
   def __init__(self, *args, **kwargs):
     self.product, self.is_custom = "", False
   def send_batch(self, cdbs:list[bytes], idata:list[int]|None=None, odata:list[bytes|None]|None=None) -> list[bytes|None]:
