@@ -23,7 +23,7 @@ def update_stats(display_name:str, device:str, estimates:Estimates, var_vals:dic
     ptm = colored(time_to_str(et, w=9), "yellow" if et > 0.01 else None) if et is not None else ""
     flops, membw, ldsbw = op_est/(et or 1e-20), mem_est/(et or 1e-20), lds_est/(et or 1e-20)
     flops_str = f"{flops*1e-9:7.0f} GFLOPS" if flops < 1e14 else colored(f"{flops*1e-12:7.0f} TFLOPS", 'green')
-    mem_str = colored(f"{mem_to_str(membw, 4, False)}|{mem_to_str(ldsbw, 6)}", 'green' if membw > 1e13 else 'yellow' if membw >= 1e6 else None)
+    mem_str = colored(f"{mem_to_str(membw, 4, False)}|{mem_to_str(ldsbw, '<6')}", 'green' if membw > 1e13 else 'yellow' if membw >= 1e6 else None)
     print(f"{colored(f'*** {device[:7]:7s} {GlobalCounters.kernel_count:4d}', header_color)}"+
       f" {display_name+' '*(46-ansilen(display_name))} arg {buf_count:2d} mem {GlobalCounters.mem_used/1e9:6.2f} GB"+
       ("" if et is None else f" tm {ptm}/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({flops_str} {mem_str})")+
