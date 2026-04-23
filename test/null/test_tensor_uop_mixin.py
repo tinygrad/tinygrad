@@ -12,6 +12,17 @@ def _t(*shape):
 def _check(tc: unittest.TestCase, t: Tensor, fn):
   tc.assertIs(fn(t).uop, fn(t.uop), f"\ntensor.uop = {fn(t).uop}\nuop = {fn(t.uop)}")
 
+class TestTensorUOpBinop(unittest.TestCase):
+  # Tensor's binop upcasts mixed dtypes via least_upper_dtype + explicit CAST; UOp should match.
+  def test_mul_float_int(self):
+    t = _t(3).float()
+    self.assertIs(_strip_unique((t * Tensor.arange(3)).uop), _strip_unique(t.uop * UOp.arange(3)))
+  def test_mul_bool_int(self):
+    t = _t(3)
+    self.assertIs(_strip_unique((t.eq(1) * Tensor.arange(3)).uop), _strip_unique(t.uop.eq(1) * UOp.arange(3)))
+  # Tensor's ufix picks float dtype when scalar is float and self is int; UOp should match.
+  def test_add_scalar_float_on_int(self): _check(self, _t(3), lambda x: x + 1.5)
+
 class TestTensorUOpGetitem(unittest.TestCase):
   # ---- pure slice patterns ----
   def test_slice_full(self):           _check(self, _t(4), lambda x: x[slice(None)])

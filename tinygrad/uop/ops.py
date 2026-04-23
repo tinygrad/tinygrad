@@ -439,10 +439,13 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       perm = src.permute(tuple([i for i in range(src.ndim) if i not in slice_idx] + slice_idx))
       return perm.index(*non_slice_args, ptr=True)
     return self.index(*[UOp.const(dtypes.weakint, x) if isinstance(x, int) else x for x in idx])
-  def const_like(self, b:ConstLike):
+  def const_like(self, b:ConstLike, dtype:DType|None=None):
     # constants can optionally have a DEVICE source
-    ret = UOp.const(self.dtype.base, b, device=self._device, shape=self.shard_shape if self.axis is not None else self._shape)
+    ret = UOp.const(dtype or self.dtype.base, b, device=self._device, shape=self.shard_shape if self.axis is not None else self._shape)
     return ret.multi(self.axis) if self.axis is not None else ret
+  def ufix(self, x):
+    if isinstance(x, UOp): return x
+    return self.const_like(x, None if self._ufix_keep_dtype(x) else dtypes.from_py(x).vec(self.dtype.vcount))
   def broadcast(self, count:int):
     assert self.dtype.vcount == 1
     if count == 1: return self
@@ -1101,6 +1104,9 @@ class UPat(OpMixin):
   def end(self, *src:UPat, **kwargs): return UPat(Ops.END, self.match_dtype, (self,)+src, **kwargs)
 
   def const_like(self, b:ConstLike): return UPat.const(self.match_dtype, cast(ConstType, b))
+  # UPat patterns are built with `upat + 1`-style operators; don't insert CAST nodes like _broadcasted does
+  def _binop(self, op:Ops, x, reverse:bool) -> UPat:
+    return self.ufix(x).alu(op, self) if reverse else self.alu(op, self.ufix(x))
   def alu(self, op:Ops, *src:UPat):
     asrc = (self,)+src
     return UPat(op, dtypes.bool if op in {Ops.CMPLT, Ops.CMPNE} else asrc[-1].match_dtype, list(asrc) if op in GroupOp.Commutative else asrc)
