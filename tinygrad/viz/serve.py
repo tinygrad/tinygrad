@@ -386,8 +386,9 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
     if isinstance(p, (VALUINST, INST, INST_RDNA4)) and (exec_type:=dispatch_to_exec.get(name.replace("OTHER_", "").split("_")[0])) is not None:
       if name.startswith("OTHER_"): exec_type = f"{exec_type}_ALT"
       # detect rdna3 wmma from the asm, only rdna4 has an op type for it
+      # note: it's normal VALU and has a known width
       if isinstance(p, VALUINST) and (asm:=getattr(unwrap(info).inst, "op_name", "")).startswith("V_WMMA"):
-        name = f"WMMA_{16 if 'IU4' in asm else 32}"
+        name = f"WMMA_VALU_{16 if 'IU4' in asm else 32}"
       exec_pending.setdefault(exec_type, []).append((f"{row}-{idx}", name))
     # construct and yield the event for this packet
     if row not in row_ends: yield ProfilePointEvent(row, "JSON", "pcMap", pc_map, ts=Decimal(0))
