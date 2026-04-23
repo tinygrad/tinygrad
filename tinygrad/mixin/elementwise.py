@@ -567,7 +567,7 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
     ```
     """
     is_finite_close = self.isfinite() & other.isfinite() & ((self - other).abs() <= atol + rtol * other.abs())
-    is_infinite_close = (self.isinf() | other.isinf()) & (self == other)
+    is_infinite_close = (self.isinf() | other.isinf()) & self.eq(other)
     is_nan_close = (self.isnan() & other.isnan()) & equal_nan
     return is_finite_close | is_infinite_close | is_nan_close
 
