@@ -3,7 +3,7 @@ import time, pprint, random, itertools, math, contextlib, weakref
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import all_same, colored, DEBUG, GlobalCounters, ansilen, NOOPT, all_int, Metadata, TRACEMETA, TracingKey
 from tinygrad.helpers import BEAM, DEVECTORIZE, size_to_str, time_to_str, VALIDATE_WITH_CPU, cpu_profile, PROFILE, ProfilePointEvent, cpu_events
-from tinygrad.helpers import prod, unwrap, EMULATED_DTYPES, flatten
+from tinygrad.helpers import prod, unwrap, EMULATED_DTYPES, flatten, mem_to_str
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer, buffers, graph_rewrite
 from tinygrad.device import Device, Buffer, MultiBuffer
 from tinygrad.renderer import ProgramSpec, Estimates
@@ -23,8 +23,7 @@ def update_stats(display_name:str, device:str, estimates:Estimates, var_vals:dic
     ptm = colored(time_to_str(et, w=9), "yellow" if et > 0.01 else None) if et is not None else ""
     flops, membw, ldsbw = op_est/(et or 1e-20), mem_est/(et or 1e-20), lds_est/(et or 1e-20)
     flops_str = f"{flops*1e-9:7.0f} GFLOPS" if flops < 1e14 else colored(f"{flops*1e-12:7.0f} TFLOPS", 'green')
-    mem_str = f"{membw*1e-9:4.0f}|{ldsbw*1e-9:<6.0f} GB/s" if membw < 1e13 and ldsbw < 1e15 else \
-      colored(f"{membw*1e-12:4.0f}|{ldsbw*1e-12:<6.0f} TB/s", 'green')
+    mem_str = colored(f"{mem_to_str(membw, 4, False)}|{mem_to_str(ldsbw, 6)}", 'green' if membw > 1e13 else 'yellow' if membw >= 1e6 else None)
     print(f"{colored(f'*** {device[:7]:7s} {GlobalCounters.kernel_count:4d}', header_color)}"+
       f" {display_name+' '*(46-ansilen(display_name))} arg {buf_count:2d} mem {GlobalCounters.mem_used/1e9:6.2f} GB"+
       ("" if et is None else f" tm {ptm}/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({flops_str} {mem_str})")+
