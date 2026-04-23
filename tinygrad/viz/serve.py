@@ -376,8 +376,8 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
       dispatch_id, op_type = exec_pending[name].pop(0)
       # get the number of cycles from the op type
       duration = int(dur_match.group(1)) if (dur_match:=re.match(r".*_(\d+)$", op_type)) else 1
-      # for execs, extend end time by the duration
-      start_time, end_time = p._time, p._time+duration
+      # for execs, offset start time by the duration
+      start_time, end_time = p._time-duration, p._time
       link = f"LINK:{dispatch_id}"
       # wmma exec gets its own color and its own row on rdna4+
       if op_type.startswith("WMMA"):
