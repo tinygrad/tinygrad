@@ -17,7 +17,7 @@ def validate_index(buf:UOp, idx:UOp, gate:UOp|None=None):
   # WEBGPU has a BITCAST in the index, PTX casts pointer to long
   # VECTORIZE/GEP can't be properly modeled in z3 since it doesn't support vectors
   for x in idx.toposort() | gate.toposort():
-    if x.op in {Ops.BITCAST, Ops.VECTORIZE, Ops.GEP} or (x.op is Ops.CAST and isinstance(x.src[0].dtype, PtrDType)): return True
+    if x.op in {Ops.BITCAST, Ops.STACK, Ops.GEP} or (x.op is Ops.CAST and isinstance(x.src[0].dtype, PtrDType)): return True
 
   # if all is good and CHECK_OOB=1, validate with z3
   from tinygrad.uop.validate import validate_index_with_z3
@@ -74,7 +74,7 @@ movement_ops = PatternMatcher([
   (UPat((Ops.PERMUTE, Ops.FLIP), name="mv", src=(UPat(),)), lambda mv: isinstance(mv.arg, tuple)),
 
   # inputs to movement ops
-  (UPat((Ops.VECTORIZE, Ops.VCONST), dtype=dtypes.weakint), lambda: True),
+  (UPat((Ops.STACK, Ops.VCONST), dtype=dtypes.weakint), lambda: True),
   (UPat({Ops.ADD, Ops.MUL, Ops.IDIV}, dtype=dtypes.weakint), lambda: True),
 
   # AFTER on Movement Op, INDEX, BUFFER, COPY, or BITCAST
@@ -172,7 +172,7 @@ shared_codegen_spec = PatternMatcher([
   (UPat(Ops.WMMA, src=(UPat(), UPat(), UPat()), name="x"), lambda x: isinstance(x.arg, tuple) and len(x.arg) == 8),
 
   # VECTORIZE/GEP
-  (UPat(Ops.VECTORIZE, name="x"), lambda x: len(x.src)>1 and len(x.src) == x.dtype.vcount and all(x.dtype == y.dtype.vec(len(x.src)) for y in x.src)),
+  (UPat(Ops.STACK, name="x"), lambda x: len(x.src)>1 and len(x.src) == x.dtype.vcount and all(x.dtype == y.dtype.vec(len(x.src)) for y in x.src)),
   (UPat(Ops.GEP, src=(UPat.var("src"),), name="gep"), lambda gep,src: gep.dtype == src.dtype.scalar()),
 
   # LOAD(idx) / STORE(idx, val)
@@ -242,7 +242,7 @@ program_spec = PatternMatcher([
   (UPat(Ops.END, src=(UPat(), UPat(Ops.RANGE)), dtype=dtypes.void), lambda: True),
 
   # make sure all index dtypes have been lowered (except CONST/RANGE/DEFINE_VAR which are valid index-typed)
-  (UPat(GroupOp.All-{Ops.CONST, Ops.RANGE, Ops.DEFINE_VAR, Ops.VCONST, Ops.VECTORIZE}, dtype=dtypes.weakint), lambda: False),
+  (UPat(GroupOp.All-{Ops.CONST, Ops.RANGE, Ops.DEFINE_VAR, Ops.VCONST, Ops.STACK}, dtype=dtypes.weakint), lambda: False),
   (UPat(Ops.CONST, arg=Invalid), lambda: False),
   (UPat(Ops.VCONST, name="x"), lambda x: all(v is not Invalid for v in x.arg) and len(x.arg)==x.dtype.vcount>1 and
     type(x.arg) is type(x.dtype.const(x.arg))),
@@ -273,7 +273,7 @@ full_spec = PatternMatcher([
   # CAT is like VECTORIZE, but the srcs can be vectors
   (UPat(Ops.VCAT, name="x"), lambda x: x.dtype.vcount == sum([y.dtype.vcount for y in x.src])),
   # vectorized index
-  (UPat(Ops.INDEX, src=(UPat((Ops.VECTORIZE, Ops.CAST)), UPat())), lambda: True),
+  (UPat(Ops.INDEX, src=(UPat((Ops.STACK, Ops.CAST)), UPat())), lambda: True),
 
   # linearizer: outputs + intermediate KERNELs
   (UPat((Ops.CALL, Ops.FUNCTION), dtype=dtypes.void), lambda: True),
@@ -282,7 +282,7 @@ full_spec = PatternMatcher([
   (UPat(Ops.WHERE, dtype=dtypes.weakint, src=(UPat(dtype=dtypes.bool), UPat(), UPat(dtype=dtypes.weakint))), lambda: True),
   # allow index dtype on a restricted set of UOps
   (UPat((Ops.ADD, Ops.MUL, Ops.MOD, Ops.IDIV, Ops.MAX,
-         Ops.SPECIAL, Ops.CAST, Ops.RANGE, Ops.VCONST, Ops.VECTORIZE), dtype=dtypes.weakint), lambda: True),
+         Ops.SPECIAL, Ops.CAST, Ops.RANGE, Ops.VCONST, Ops.STACK), dtype=dtypes.weakint), lambda: True),
 
   # while BIND is being casted
   (UPat(Ops.BIND, (dtypes.int, dtypes.weakint), (UPat(), UPat()), arg=None), lambda: True),
@@ -291,7 +291,7 @@ full_spec = PatternMatcher([
   (UPat((Ops.MSELECT, Ops.MSTACK)), lambda: True),
 
   # temp VECTORIZE/INDEX during rewrite have the wrong dtype
-  (UPat(Ops.VECTORIZE), lambda: True),
+  (UPat(Ops.STACK), lambda: True),
   (UPat(Ops.INDEX), lambda: True),
 
   # all loads/stores

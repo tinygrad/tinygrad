@@ -193,7 +193,7 @@ class PTXRenderer(Renderer):
       if u.op is Ops.SINK:
         if u.arg is not None: name = u.arg.function_name
         continue
-      if u.op is Ops.VECTORIZE:
+      if u.op is Ops.STACK:
         r[u] = [cast(str,r[x]) for x in u.src]
         continue
       if u.op is Ops.GEP:
