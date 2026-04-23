@@ -379,8 +379,10 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
       # for execs, extend end time by the duration
       start_time, end_time = p._time, p._time+duration
       link = f"LINK:{dispatch_id}"
-      # wmma exec gets its own row and color
-      if op_type.startswith("WMMA"): name, row = name+"_WMMA", "ALUEXEC:0 WMMA"
+      # wmma exec gets its own color and its own row on rdna4+
+      if op_type.startswith("WMMA"):
+        name = name+"_WMMA"
+        if op_type.startswith("WMMA_VALU"): row = "ALUEXEC:0 WMMA"
     # queue inst dispatches
     idx = next(row_counts.setdefault(row, itertools.count(0)))
     if isinstance(p, (VALUINST, INST, INST_RDNA4)) and (exec_type:=dispatch_to_exec.get(name.replace("OTHER_", "").split("_")[0])) is not None:
