@@ -56,7 +56,7 @@ def get(data:dict, key:str):
   raise RuntimeError(f'item "{key}" not found in list'+(f", did you mean {match[0]!r}?" if match else ''))
 
 def main(args) -> None:
-  viz.load_rewrites(viz_data:=viz.VizData(viz.load_pickle(args.rewrites_path, default=RewriteTrace([], [], {}))))
+  viz.load_rewrites(viz_data:=viz.VizData(viz.load_pickle(args.path, default=RewriteTrace([], [], {}))))
 
   def fmt(val, to_str=str) -> str: return json.dumps(val if isinstance(val, dict) else {"value":val}) if args.json else to_str(val)
 
@@ -81,8 +81,8 @@ def main(args) -> None:
     else: print_step(get(steps, args.item))
     return None
 
-  events:list = viz.load_pickle(args.profile_path, default=[])
-  if (profile_bytes:=viz.get_profile(viz_data, events)) is None: raise RuntimeError(f"empty profile in {args.profile_path}")
+  events:list = viz.load_pickle(profile_path:=args.path.with_name("profile"+"".join(args.path.suffixes)), default=[])
+  if (profile_bytes:=viz.get_profile(viz_data, events)) is None: raise RuntimeError(f"empty profile in {profile_path.expanduser().resolve()}")
   profile = decode_profile(profile_bytes)
   profile["layout"].update([(f'{c["name"][5:]}{" SQTT" if s["name"].endswith("PKTS") else ""} {s["name"]}', s["data"]) for c in viz_data.ctxs
                             if c["name"].startswith("SQTT") for s in c["steps"] if s["name"].endswith(("PMC", "PKTS"))])
@@ -205,9 +205,7 @@ def get_arg_parser() -> argparse.ArgumentParser:
   g_opts.add_argument("-i", "--item", type=str, default=None, metavar="NAME", help="Select an item within the source (default: list all items)")
   g_opts.add_argument("-t", "--top", type=int, default=None, metavar="COUNT",
                       help="Number of top kernels to aggregate (default: do not aggregate, set -1 to aggregate all)")
-  g_opts.add_argument("--profile-path", type=pathlib.Path, metavar="PATH", help="Optional path to profile.pkl (default: latest profile)",
-                      default=pathlib.Path(temp("profile.pkl", append_user=True)))
-  g_opts.add_argument("--rewrites-path", type=pathlib.Path, metavar="PATH", help="Optional path to rewrites.pkl (default: latest rewrites)",
+  g_opts.add_argument("--path", type=pathlib.Path, metavar="PATH", help="Optional path to saved pickle (default: latest pkl)",
                       default=pathlib.Path(temp("rewrites.pkl", append_user=True)))
   g_opts.add_argument("--json", action="store_true", help="Emit profiler output as JSON")
   g_opts.add_argument("-h", "--help", action="help", help="show this help message and exit")
