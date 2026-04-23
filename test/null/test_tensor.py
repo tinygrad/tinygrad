@@ -189,5 +189,29 @@ class TestTensorDevice(unittest.TestCase):
   def test_create_from_single_device_tuple(self):
     (Tensor([1.0], device=(Device.DEFAULT,)) + Tensor([2.0])).realize()
 
+class TestTensorDeviceMismatch(unittest.TestCase):
+  def test_gather(self):
+    x = Tensor.empty(3, 4, device="NULL")
+    idx = Tensor.zeros(3, 4, dtype=dtypes.int32, device="NULL:1")
+    with self.assertRaises(RuntimeError): x.gather(0, idx)
+  def test_scatter_index(self):
+    x = Tensor.zeros(3, 4, device="NULL")
+    idx = Tensor.zeros(3, 4, dtype=dtypes.int32, device="NULL:1")
+    src = Tensor.ones(3, 4, device="NULL")
+    with self.assertRaises(RuntimeError): x.scatter(0, idx, src)
+  def test_scatter_src(self):
+    x = Tensor.zeros(3, 4, device="NULL")
+    idx = Tensor.zeros(3, 4, dtype=dtypes.int32, device="NULL")
+    src = Tensor.ones(3, 4, device="NULL:1")
+    with self.assertRaises(RuntimeError): x.scatter(0, idx, src)
+  def test_getitem_tensor_index(self):
+    x = Tensor.empty(4, 5, device="NULL")
+    idx = Tensor([0, 1], dtype=dtypes.int32, device="NULL:1")
+    with self.assertRaises(RuntimeError): x[idx]
+  def test_sparse_categorical_crossentropy(self):
+    x = Tensor.zeros(2, 3, device="NULL")
+    Y = Tensor([0, 1], dtype=dtypes.int32, device="NULL:1")
+    with self.assertRaises(RuntimeError): x.sparse_categorical_crossentropy(Y)
+
 if __name__ == '__main__':
   unittest.main()
