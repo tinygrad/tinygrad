@@ -1607,38 +1607,6 @@ class Tensor(OpMixin):
     if IMAGE: return self.image_dot(w, dtype)
     return super().dot(w, dtype)
 
-  def cummax(self, axis:int=0) -> tuple[Tensor, Tensor]:
-    """
-    Computes the cumulative max of the tensor along `axis`, returning (values, indices).
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([0, 1, -1, 2, -2, 3, -3])
-    values, indices = t.cummax(0)
-    print(values.numpy())
-    print(indices.numpy())
-    ```
-    """
-    if self.ndim == 0: return self._split_cumalu(axis, Ops.MAX), Tensor.zeros(self.shape, dtype=dtypes.int32, device=self.device)
-    values, n = self._split_cumalu(axis, Ops.MAX), int(self.shape[axis])
-    x, values_t = self.transpose(axis, -1), values.transpose(axis, -1)
-    match = (x.unsqueeze(-1) == values_t.unsqueeze(-2)) * Tensor.ones(n, n, requires_grad=False, device=self.device).triu()
-    idx = (-(match * Tensor.arange(n, 0, -1, requires_grad=False, device=self.device).reshape(n, 1)).max(-2) + n).cast(dtypes.int32)
-    return values, idx.transpose(-1, axis)
-
-  def cummin(self, axis:int=0) -> tuple[Tensor, Tensor]:
-    """
-    Computes the cumulative min of the tensor along `axis`, returning (values, indices).
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([0, 1, -1, 2, -2, 3, -3])
-    values, indices = t.cummin(0)
-    print(values.numpy())
-    print(indices.numpy())
-    ```
-    """
-    values, indices = self._inverse().cummax(axis)
-    return values._inverse(), indices
-
   def interpolate(self, size:tuple[int, ...], mode:str="linear", align_corners:bool=False) -> Tensor:
     """
     Downsamples or Upsamples to the input `size`, accepts 0 to N batch dimensions.

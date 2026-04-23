@@ -585,6 +585,38 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     """
     return self._split_cumalu(axis, Ops.MUL)
 
+  def cummax(self, axis:int=0) -> tuple[Self, Self]:
+    """
+    Computes the cumulative max of the tensor along `axis`, returning (values, indices).
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([0, 1, -1, 2, -2, 3, -3])
+    values, indices = t.cummax(0)
+    print(values.numpy())
+    print(indices.numpy())
+    ```
+    """
+    if self.ndim == 0: return self._split_cumalu(axis, Ops.MAX), type(self).zeros(self.shape, dtype=dtypes.int32, device=self.device)
+    values, n = self._split_cumalu(axis, Ops.MAX), int(self.shape[axis])
+    x, values_t = self.transpose(axis, -1), values.transpose(axis, -1)
+    match = x.unsqueeze(-1).eq(values_t.unsqueeze(-2)) * type(self).ones(n, n, device=self.device).triu()
+    idx = (-(match * type(self).arange(n, 0, -1, device=self.device).reshape(n, 1)).max(-2) + n).cast(dtypes.int32)
+    return values, idx.transpose(-1, axis)
+
+  def cummin(self, axis:int=0) -> tuple[Self, Self]:
+    """
+    Computes the cumulative min of the tensor along `axis`, returning (values, indices).
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([0, 1, -1, 2, -2, 3, -3])
+    values, indices = t.cummin(0)
+    print(values.numpy())
+    print(indices.numpy())
+    ```
+    """
+    values, indices = self._inverse().cummax(axis)
+    return values._inverse(), indices
+
   # helper function commonly used for indexing
   def _one_hot_along_dim(self, num_classes:sint, dim:int=-1) -> Self:
     from tinygrad.uop.ops import sint_to_uop
