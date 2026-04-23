@@ -81,7 +81,7 @@ def fused_quantize_fp8_w13(xw13:Tensor, amax_state:Tensor, fp8_dtype) -> tuple[T
     dname = xw13.device.split(":")[0] if isinstance(xw13.device, str) else xw13.device
   fxn = functools.partial(_custom_fused_cast_amax_w13, dname=dname)
   fp8_out, amax_buf, *_ = Tensor.custom_kernel(fp8_out, amax_buf, xw13, amax_state, fxn=fxn, grad_fxn=_fused_quantize_bwd_w13)
-  inv_scale = (FP8_MAX / (amax_state + 1e-8)).float().reciprocal()
+  inv_scale = (amax_state.float() + 1e-8) / FP8_MAX
   return fp8_out, inv_scale, _scalar_amax(amax_buf)
 
 # ** fused (x * weight) -> fp8 cast + amax (norm-mul-quantize)
@@ -129,5 +129,5 @@ def fused_mul_quantize_fp8(x:Tensor, weight:Tensor, amax_state:Tensor, fp8_dtype
   fxn = functools.partial(_custom_mul_quantize_fp8, dname=dname)
   fp8_out, amax_buf, *_ = Tensor.custom_kernel(fp8_out, amax_buf, x, weight, amax_state, fxn=fxn, grad_fxn=_fused_mul_quantize_fp8_bwd)
   new_amax = _scalar_amax(amax_buf)
-  inv_scale = (new_amax.float() + 1e-8) / FP8_MAX
+  inv_scale = (amax_state.float() + 1e-8) / FP8_MAX
   return fp8_out, inv_scale, new_amax
