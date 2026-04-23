@@ -53,7 +53,8 @@ class MetalGraph(GraphRunner):
     self.command_buffer: Any = None
     if len(self.vars): self.int_buf_view = self.dev.allocator._as_buffer(self.int_buf).cast('i')
     self.range = metal.NSRange(0, len(self.linear.src))
-    self.updatable = sorted(set(j for j, (_, replace) in enumerate(self.commands) if replace) | self.launch_dims_replace.keys())
+    self.updatable = sorted(set(j for j, (_, replace) in enumerate(self.commands) if replace) | self.var_vals_replace.keys() |
+                            self.launch_dims_replace.keys())
 
   def __call__(self, input_buffers, var_vals, wait=False, input_uops=None):
     if self.command_buffer is not None and self.command_buffer in self.dev.mtl_buffers_in_flight: wait_check(self.command_buffer)
