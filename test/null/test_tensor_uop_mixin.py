@@ -85,6 +85,15 @@ class TestTensorUOpCumMinMax(unittest.TestCase):
   def test_cummin_1d(self):    self._check_pair(_t(5), lambda x: x.cummin(0))
   def test_cummin_2d(self):    self._check_pair(_t(3, 4), lambda x: x.cummin(1))
 
+class TestTensorUOpArgMinMax(unittest.TestCase):
+  def _check_stripped(self, t, fn): self.assertIs(_strip_unique(fn(t).uop), _strip_unique(fn(t.uop)))
+  def test_argmax(self):       self._check_stripped(_t(3, 4), lambda x: x.argmax(axis=1))
+  def test_argmax_flat(self):  self._check_stripped(_t(3, 4), lambda x: x.argmax())
+  def test_argmin(self):       self._check_stripped(_t(3, 4), lambda x: x.argmin(axis=0))
+
+class TestTensorUOpSequential(unittest.TestCase):
+  def test_sequential(self): _check(self, _t(4), lambda x: x.sequential([lambda y: y * 2, lambda y: y + 1]))
+
 class TestTensorUOpOneHot(unittest.TestCase):
   def test_one_hot(self):
     t = _t(5)
