@@ -1,11 +1,11 @@
 from typing import TypeVar, Generic, Callable, Any
 import functools, collections
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, colored, JIT, JIT_BATCH_SIZE, dedup, pluralize, VIZ, unwrap
+from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, colored, JIT, JIT_BATCH_SIZE, dedup, pluralize, VIZ
 from tinygrad.device import Buffer, Compiled, Device, MultiBuffer
 from tinygrad.dtype import DType, dtypes
 from tinygrad.uop.ops import UOp, PatternMatcher, Variable, sym_infer, Ops, buffers, track_rewrites, graph_rewrite
-from tinygrad.engine.realize import capturing, CompiledRunner, Runner, Estimates, compile_linear, run_linear, get_runner, graph_cache
+from tinygrad.engine.realize import capturing, CompiledRunner, Runner, Estimates, compile_linear, run_linear, get_runner, graph_cache, estimate_uop
 from tinygrad.engine.realize import unwrap_multi, resolve_params
 from tinygrad.schedule.memory import memory_plan_rewrite, _collect_bufs
 from tinygrad.nn.state import get_parameters
@@ -131,11 +131,7 @@ class GraphRunner(Runner):
         assert p.p.local_size is not None
         self.launch_dims_base[j] = (tuple(p.p.global_size), tuple(p.p.local_size))
 
-    estimates = Estimates()
-    for (_, ast, bufs, _), pr in zip(self.calls, self.progs):
-      if ast.op in (Ops.SINK, Ops.PROGRAM): estimates += unwrap(pr).estimates
-      elif ast.op is Ops.COPY or (ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "encdec"):
-        estimates += Estimates(lds=bufs[0].nbytes, mem=bufs[0].nbytes)
+    estimates = sum((estimate_uop(call) for call in self.linear.src), Estimates())
 
     # used in MultiGraphRunner. tracks (offset, end, dep) ranges per base buffer id to handle suballocated buffers correctly.
     self.w_dependency_map: dict[int, list[tuple[int, int, Any]]] = collections.defaultdict(list)
