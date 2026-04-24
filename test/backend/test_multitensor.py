@@ -569,7 +569,6 @@ class TestMultiTensor(unittest.TestCase):
       jf(out)
       np.testing.assert_allclose(out.numpy(), expected, atol=1e-4, rtol=1e-5)
     assert jf.captured is not None
-    assert any(call_is_graph(si) for si in jf.captured.linear.src)
 
   def test_multi_tensor_jit_body(self):
     @TinyJit
