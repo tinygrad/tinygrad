@@ -88,7 +88,7 @@ class TestBufferUOp(unittest.TestCase):
     # unused variable should not appear in var_vals even when there's other work
     a = Tensor(UOp.variable("unused", 0, 10).bind(1))
     b = Tensor.empty(3) + 1
-    _, var_vals = Tensor.schedule_with_vars(a, b)
+    _, var_vals = Tensor.linear_with_vars(a, b)
     self.assertEqual(var_vals, {})
     self.assertIsNone(a.uop.base.realized)
 
@@ -209,8 +209,8 @@ class TestSchedule(unittest.TestCase):
     t = Tensor.zeros((3, 3)).contiguous().realize()
     v = t[1]  # view - is_realized but not has_buffer_identity
     assert v.uop.is_realized
-    sched, _ = Tensor.schedule_with_vars(v)
-    self.assertEqual(len(sched), 0)
+    linear, _ = Tensor.linear_with_vars(v)
+    self.assertEqual(len(linear.src), 0)
 
   # NOTE: because empty does not have a lowered ExecItem if realize is called on a childless empty, it never gets allocated.
   def test_childless_empty_never_allocates(self):

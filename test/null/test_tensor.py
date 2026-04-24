@@ -62,11 +62,12 @@ class TestIdxUpcast(unittest.TestCase):
     for src in ast.src:
       if (ret:=self._find_op(src, op)) is not None: return ret
   def _schedule_render(self, a: Tensor):
-    schedule, _ = a.schedule_with_vars()
-    for s in schedule:
-      if s.ast.op is Ops.SINK:
-        renderer = Device[s.bufs[0].device].renderer
-        prg = get_program(s.ast, renderer)
+    linear, _ = a.linear_with_vars()
+    for si in linear.src:
+      ast = si.src[0]
+      if ast.op is Ops.SINK:
+        renderer = Device[si.src[1].buffer.device].renderer
+        prg = get_program(ast, renderer)
         return prg.uops
 
   def _assert(self, dtype: DType, a: Tensor):
