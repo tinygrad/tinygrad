@@ -1203,11 +1203,11 @@ class Tensor(OpMixin):
 
   # ***** reduce ops *****
 
-  def allclose(self, other:Tensor, rtol:float=1e-05, atol:float=1e-08, equal_nan=False) -> bool:
+  def allclose(self, other:Tensor, rtol:float=1e-05, atol:float=1e-08, equal_nan=False) -> Tensor:
     """
-    Check if all self and other are close. Return True or False.
+    Check if all self and other are close.
     """
-    return bool(self.isclose(other, rtol=rtol, atol=atol, equal_nan=equal_nan).all().item())
+    return self.isclose(other, rtol=rtol, atol=atol, equal_nan=equal_nan).all()
 
   def keccak(self, cfg:str|tuple[int, int]="sha3_256"):
     """
