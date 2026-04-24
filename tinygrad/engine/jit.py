@@ -1,7 +1,7 @@
 from typing import TypeVar, Generic, Callable, Any
 import functools, collections
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, colored, JIT, JIT_BATCH_SIZE, dedup, pluralize, VIZ
+from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, colored, JIT, JIT_BATCH_SIZE, dedup, pluralize, VIZ, unwrap
 from tinygrad.device import Buffer, Compiled, Device, MultiBuffer
 from tinygrad.dtype import DType, dtypes
 from tinygrad.uop.ops import UOp, PatternMatcher, Variable, sym_infer, Ops, buffers, track_rewrites, graph_rewrite
@@ -130,26 +130,26 @@ class GraphRunner(Runner):
 
     def is_sym_dim(dim) -> bool: return not all(isinstance(d, (int, float)) for d in dim)
 
-    crs = [(ji, ji.prg) for ji in self.jit_cache if isinstance(ji.prg, CompiledRunner)]
-    self.vars = sorted({v.expr for ji,p in crs for v in p.p.vars if v.expr not in ji.fixedvars | p.p.runtimevars})
-    self.symbolic_dims = dedup([tuple(d) for _,p in crs if (d:=p.p.local_size) and is_sym_dim(d)] +
-                               [tuple(d) for _,p in crs if (d:=p.p.global_size) and is_sym_dim(d)])
+    crs = [(j, p, self.calls[j][3]) for j,p in enumerate(self.progs) if isinstance(p, CompiledRunner)]
+    self.vars = sorted({v.expr for _,p,dv in crs for v in p.p.vars if v.expr not in dv | p.p.runtimevars})
+    self.symbolic_dims = dedup(tuple(d) for _,p,_ in crs for d in (p.p.local_size, p.p.global_size) if d and is_sym_dim(d))
 
     def find_symbolic_dim(dim): return self.symbolic_dims.index(tuple(dim)) if dim is not None and tuple(dim) in self.symbolic_dims else None
 
-    estimates = Estimates()
-    for j,ji in enumerate(self.jit_cache):
-      assert ji.prg is not None
-      estimates += ji.prg.estimates
-      if isinstance(ji.prg, CompiledRunner):
-        if (replace:=[(i, self.vars.index(v.expr)) for i, v in enumerate(ji.prg.p.vars) if v.expr not in ji.fixedvars | ji.prg.p.runtimevars]):
-          self.var_vals_replace[j] = replace
+    for j,p,dv in crs:
+      if (replace:=[(i, self.vars.index(v.expr)) for i, v in enumerate(p.p.vars) if v.expr not in dv | p.p.runtimevars]):
+        self.var_vals_replace[j] = replace
+      global_dim_idx, local_dim_idx = find_symbolic_dim(p.p.global_size), find_symbolic_dim(p.p.local_size)
+      if global_dim_idx is not None or local_dim_idx is not None:
+        self.launch_dims_replace[j] = (global_dim_idx, local_dim_idx)
+        assert p.p.local_size is not None
+        self.launch_dims_base[j] = (tuple(p.p.global_size), tuple(p.p.local_size))
 
-        global_dim_idx, local_dim_idx = find_symbolic_dim(ji.prg.p.global_size), find_symbolic_dim(ji.prg.p.local_size)
-        if global_dim_idx is not None or local_dim_idx is not None:
-          self.launch_dims_replace[j] = (global_dim_idx, local_dim_idx)
-          assert ji.prg.p.local_size is not None
-          self.launch_dims_base[j] = (tuple(ji.prg.p.global_size), tuple(ji.prg.p.local_size))
+    estimates = Estimates()
+    for (_, ast, bufs, _), pr in zip(self.calls, self.progs):
+      if ast.op in (Ops.SINK, Ops.PROGRAM): estimates += unwrap(pr).estimates
+      elif ast.op is Ops.COPY or (ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "encdec"):
+        estimates += Estimates(lds=bufs[0].nbytes, mem=bufs[0].nbytes)
 
     # used in MultiGraphRunner. tracks (offset, end, dep) ranges per base buffer id to handle suballocated buffers correctly.
     self.w_dependency_map: dict[int, list[tuple[int, int, Any]]] = collections.defaultdict(list)
