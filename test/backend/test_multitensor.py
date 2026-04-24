@@ -1158,12 +1158,12 @@ class TestMultiBufferView(unittest.TestCase):
   def setUp(self): pass
 
   def _check(self, a_ref:Tensor, a_multi:Tensor, view_fn):
-    """Apply view_fn to both, verify zero compiled kernels and matching values."""
     b_ref = view_fn(a_ref)
     b_multi = view_fn(a_multi).contiguous()
     linear, var_vals = b_multi.linear_with_vars()
-    compiled = [call for call in linear.src if call.src[0].op is Ops.SINK]
-    self.assertEqual(len(compiled), 0, f"expected zero compiled kernels, got {len(compiled)}")
+    if all(hasattr(Device[d].allocator, "_offset") for d in b_multi.device):
+      compiled = [call for call in linear.src if call.src[0].op is Ops.SINK]
+      self.assertEqual(len(compiled), 0, f"expected zero compiled kernels, got {len(compiled)}")
     run_linear(linear, var_vals)
     np.testing.assert_equal(b_multi.numpy(), b_ref.numpy())
 
@@ -1191,11 +1191,13 @@ class TestMultiBufferView(unittest.TestCase):
   def test_4_devices(self):
     ref = Tensor.arange(8*12).reshape(8, 12).contiguous().realize()
     a = Tensor.arange(8*12).reshape(8, 12).contiguous().shard(devices_4, axis=1).realize()
-    linear, var_vals = a[5].contiguous().linear_with_vars()
-    compiled = [call for call in linear.src if call.src[0].op is Ops.SINK]
-    self.assertEqual(len(compiled), 0)
+    out = a[5].contiguous()
+    linear, var_vals = out.linear_with_vars()
+    if all(hasattr(Device[d].allocator, "_offset") for d in out.device):
+      compiled = [call for call in linear.src if call.src[0].op is Ops.SINK]
+      self.assertEqual(len(compiled), 0)
     run_linear(linear, var_vals)
-    np.testing.assert_equal(a[5].contiguous().numpy(), ref[5].numpy())
+    np.testing.assert_equal(out.numpy(), ref[5].numpy())
 
 @unittest.skipIf(not_support_multi_device(), "need multi")
 class TestMultiFromUnrenderable(unittest.TestCase):

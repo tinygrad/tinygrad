@@ -12,7 +12,7 @@ from tinygrad.device import is_dtype_supported
 from tinygrad.dtype import DType
 from tinygrad.uop.ops import UOp, Ops, UPat
 from tinygrad.helpers import CI, DEBUG, OSX, GlobalCounters, Context, getenv, all_same, temp
-from tinygrad.engine.realize import compile_linear, run_linear
+from tinygrad.engine.realize import CompiledRunner, compile_linear, run_linear
 
 class KernelCountException(Exception): pass
 def check_schedule(t:Tensor|list[Tensor]|UOp, allowed:int, to_prerealize:list[Tensor]|None=None, filter_sink=True):
@@ -23,7 +23,8 @@ def check_schedule(t:Tensor|list[Tensor]|UOp, allowed:int, to_prerealize:list[Te
   else:
     assert isinstance(t, UOp), f"can't schedule {t}"
     linear, var_vals = Tensor(t).linear_with_vars()
-  kernel_cnt = sum((len(call.device) if isinstance(call.device, tuple) else 1) for call in linear.src if call.src[0].op is Ops.SINK or not filter_sink)
+  kernel_cnt = sum((len(call.device) if isinstance(call.device, tuple) else 1)
+                   for call in linear.src if call.src[0].op is Ops.SINK or not filter_sink)
   if kernel_cnt != allowed:
     print(f"SCHEDULE ISSUE, expecting {allowed} got {kernel_cnt}")
     if DEBUG >= 3:
