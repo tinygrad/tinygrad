@@ -629,7 +629,7 @@ class NVDevice(HCQCompiled[NVSignal]):
     self.sass_version = ((self.sm_version & 0xf00) >> 4) | (self.sm_version & 0xf)
 
     renderers = [CUDARenderer, PTXRenderer, NVCCRenderer, NAKRenderer]
-    if self.arch  == "sm_120": renderers.remove(NAKRenderer]  # blackwell is blacklisted by NAK
+    if self.arch  == "sm_120": renderers.remove(NAKRenderer)  # blackwell is blacklisted by NAK
     super().__init__(device, NVAllocator(self), renderers, functools.partial(NVProgram, self), NVSignal, NVComputeQueue, NVCopyQueue, arch=self.arch)
 
     self.pma_enabled = PMA.value > 0 and PROFILE >= 1
