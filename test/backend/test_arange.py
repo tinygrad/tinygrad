@@ -3,7 +3,6 @@ import numpy as np
 from tinygrad import Tensor, GlobalCounters, dtypes, nn, Device, Variable
 from tinygrad.helpers import Context, getenv, DEV
 from tinygrad.engine.realize import run_linear
-from tinygrad.schedule import linear_to_schedule
 from tinygrad.engine.realize import CompiledRunner, get_program
 from tinygrad.schedule import ExecItem
 from tinygrad.renderer import Estimates
@@ -56,7 +55,7 @@ class TestIndexing(unittest.TestCase):
       GlobalCounters.reset()
       out = ((Tensor.arange(1,16385)-1)*needle).sum()
       linear, var_vals = out.linear_with_vars()
-      self.assertEqual(len(linear_to_schedule(linear)), 1)
+      self.assertEqual(len(linear.src), 1)
       run_linear(linear, var_vals)
     self.assertEqual(out.item(), 1337)
 
@@ -73,7 +72,7 @@ class TestIndexing(unittest.TestCase):
       full = (rng==idxs).where(reshape_dataset, Tensor.zeros(4, DDIM, DSET, 1))
       X = full.sum(axis=(2,3))
       linear, var_vals = X.linear_with_vars()
-      self.assertEqual(len(linear_to_schedule(linear)), 1)
+      self.assertEqual(len(linear.src), 1)
       run_linear(linear, var_vals)
       assert GlobalCounters.global_ops < 4*DSET, f"too many ops {GlobalCounters.global_ops}"
     np.testing.assert_allclose(real_index, X.numpy())
@@ -99,7 +98,7 @@ class TestIndexing(unittest.TestCase):
       X = dataset[idxs]
       assert X.shape == (4,DDIM)
       linear, var_vals = X.linear_with_vars()
-      self.assertEqual(len(linear_to_schedule(linear)), 1)
+      self.assertEqual(len(linear.src), 1)
       run_linear(linear, var_vals)
       assert GlobalCounters.global_ops < 4*DSET, f"too many ops {GlobalCounters.global_ops}"
     np.testing.assert_allclose(real_index, X.numpy())
@@ -114,7 +113,7 @@ class TestIndexing(unittest.TestCase):
       X = dataset[idxs]
       assert X.shape == (4,DDIM)
       linear, var_vals = X.linear_with_vars()
-      self.assertEqual(len(linear_to_schedule(linear)), 1)
+      self.assertEqual(len(linear.src), 1)
       run_linear(linear, var_vals)
       assert GlobalCounters.global_ops < 4*DSET, f"too many ops {GlobalCounters.global_ops} != {4*DSET}"
     np.testing.assert_allclose(real_index, X.numpy())

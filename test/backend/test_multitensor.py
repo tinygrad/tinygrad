@@ -5,7 +5,6 @@ from tinygrad.uop.ops import Ops, UOp
 from tinygrad.helpers import getenv, prod, Context
 from tinygrad.nn.state import get_parameters, get_state_dict
 from tinygrad.engine.realize import CompiledRunner, run_linear
-from tinygrad.schedule import linear_to_schedule
 import numpy as np
 from hypothesis import given, strategies as strat, settings
 from test.helpers import not_support_multi_device, needs_second_gpu, slow, call_is_graph
@@ -194,9 +193,9 @@ class TestMultiTensor(unittest.TestCase):
     for i in range(2):
       xt = X[i*2:i*2+2].contiguous()
       linear, var_vals = xt.linear_with_vars()
-      #kernels = [s for s in linear_to_schedule(linear) if s.ast.op is Ops.SINK]
+      #kernels = [call for call in linear.src if call.src[0].op is Ops.SINK]
       #self.assertEqual(len(kernels), 1)
-      #self.assertEqual(kernels[0].bufs[0].device, devices_2[i])
+      #self.assertEqual(kernels[0].src[1].buffer.device, devices_2[i])
       run_linear(linear, var_vals)
       np.testing.assert_equal(xt.numpy(), X_np[i*2:i*2+2])
 
@@ -809,7 +808,7 @@ class TestMultiTensor(unittest.TestCase):
     t = Tensor.ones(16, 16, dtype=dtypes.int).shard(devices_2, axis=0)
     out = Tensor.full_like(t, 2)[:, :8]
     linear, var_vals = out.linear_with_vars()
-    self.assertEqual(len(linear_to_schedule(linear)), 0)
+    self.assertEqual(len(linear.src), 0)
     run_linear(linear, var_vals)
     self.assertEqual(out.tolist(), [[2]*8]*16)
 
@@ -1163,7 +1162,7 @@ class TestMultiBufferView(unittest.TestCase):
     b_ref = view_fn(a_ref)
     b_multi = view_fn(a_multi).contiguous()
     linear, var_vals = b_multi.linear_with_vars()
-    compiled = [si for si in linear_to_schedule(linear) if isinstance(si.prg, CompiledRunner)]
+    compiled = [call for call in linear.src if call.src[0].op is Ops.SINK]
     self.assertEqual(len(compiled), 0, f"expected zero compiled kernels, got {len(compiled)}")
     run_linear(linear, var_vals)
     np.testing.assert_equal(b_multi.numpy(), b_ref.numpy())
@@ -1193,7 +1192,7 @@ class TestMultiBufferView(unittest.TestCase):
     ref = Tensor.arange(8*12).reshape(8, 12).contiguous().realize()
     a = Tensor.arange(8*12).reshape(8, 12).contiguous().shard(devices_4, axis=1).realize()
     linear, var_vals = a[5].contiguous().linear_with_vars()
-    compiled = [si for si in linear_to_schedule(linear) if isinstance(si.prg, CompiledRunner)]
+    compiled = [call for call in linear.src if call.src[0].op is Ops.SINK]
     self.assertEqual(len(compiled), 0)
     run_linear(linear, var_vals)
     np.testing.assert_equal(a[5].contiguous().numpy(), ref[5].numpy())
