@@ -921,6 +921,49 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
       return mask.where(src, 0).sum(-1).add(self if include_self else _inv_mask(self, 0)).div(count)
     raise RuntimeError(f"{reduce=} must be one of 'sum', 'prod', 'mean', 'amax', 'amin'")
 
+  def scatter(self, dim:int, index:Self, src:Self|PyConst, reduce:Literal['multiply', 'add']|None=None) -> Self:
+    """
+    Scatters `src` values along an axis specified by `dim`.
+    Apply `add` or `multiply` reduction operation with `reduce`.
+
+    NOTE: To use the `reduce` argument with a Tensor `src`, see `Tensor.scatter_reduce`.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    src = Tensor.arange(1, 11).reshape(2, 5)
+    print(src.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    index = Tensor([[0, 1, 2, 0]])
+    print(Tensor.zeros(3, 5, dtype=src.dtype).scatter(0, index, src).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    index = Tensor([[0, 1, 2], [0, 1, 4]])
+    print(Tensor.zeros(3, 5, dtype=src.dtype).scatter(1, index, src).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor.full((2, 4), 2.0).scatter(1, Tensor([[2], [3]]), 1.23, reduce='multiply').numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor.full((2, 4), 2.0).scatter(1, Tensor([[2], [3]]), 1.23, reduce='add').numpy())
+    ```
+    """
+    if reduce not in {None, "add", "multiply"}: raise TypeError(f"{reduce=} must be one of None, 'multiply', or 'add'")
+    if isinstance(src, (int, float, bool)): src = type(self).full(index.shape, src, dtype=self.dtype, device=self.device)
+    elif reduce: raise TypeError("non-scalar src is not supported with reduce arg. use scatter_reduce")
+    if reduce == "add": return self.scatter_reduce(dim, index, src, "sum", include_self=True)
+    if reduce == "multiply": return self.scatter_reduce(dim, index, src, "prod", include_self=True)
+    src, mask = self._pre_scatter(dim, index, src)
+    return self._masked_merge(src, mask, (-1,))
+
+  def _masked_merge(self, values:Self, mask:Self, axes:tuple[int, ...]) -> Self:
+    # reduce such that if mask contains repeated indices the last one remains
+    for dim in reversed(axes):
+      mask, values = functools.reduce(lambda x,y: (x[0]|y[0], y[0].where(y[1], x[1])), zip(mask.split(1, dim), values.split(1, dim)))
+    # remove extra dims from reduce
+    for dim in reversed(axes): mask, values = mask.squeeze(dim), values.squeeze(dim)
+    # select from values for each True element in mask else select from self
+    return mask.where(values, self)
+
   # ***** functional nn ops *****
 
   def sequential(self, ll:list[Callable[[Self], Self]]) -> Self:
