@@ -139,7 +139,7 @@ def main(args) -> None:
 
   # ** Profiler printer
   else:
-    timelines = [(n,l) for n,l in profile["layout"].items() if l.get("event_type") == 0]
+    timelines = [(n,l) for n,l in profile["layout"].items() if isinstance(l, dict) and l.get("event_type") == 0]
     def produce_top_kernels() -> Iterator[dict]:
       tagged = ((n,e) for n,l in timelines for e in l["events"]) if args.src == "ALL" else ((args.src,e) for e in unwrap(data)["events"])
       agg:dict[tuple[str,str], tuple[float, int, int|None]] = {} # map (device, kernel name) to (total time, count and ref)
