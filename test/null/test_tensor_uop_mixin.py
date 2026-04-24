@@ -31,6 +31,10 @@ class TestTensorUOpBinop(unittest.TestCase):
   def test_div_broadcast_tensor_by_tensor(self):
     a, b = _t(3, 4).float(), _t(4).float() + 1
     self.assertIs(_strip_unique((a/b).uop), _strip_unique(a.uop/b.uop))
+  # isclose used `self == other` which is Python identity on UOp (not elementwise); now uses .eq().
+  def test_isclose(self):
+    t = _t(4).float()
+    self.assertIs(_strip_unique(t.isclose(t).uop), _strip_unique(t.uop.isclose(t.uop)))
 
 class TestTensorUOpGetitem(unittest.TestCase):
   # ---- pure slice patterns ----
