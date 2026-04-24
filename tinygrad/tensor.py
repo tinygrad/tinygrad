@@ -10,7 +10,7 @@ from tinygrad.helpers import argfix, flatten, prod, all_int, round_up, getenv, a
 from tinygrad.helpers import resolve_pool_pads, IMAGE, FLOAT16, WINO, Metadata, TRACEMETA, is_numpy_ndarray, TracingKey, cpu_profile
 from tinygrad.helpers import suppress_finalizing, disable_gc
 from tinygrad.gradient import compute_gradient
-from tinygrad.mixin import OpMixin, ReductionStr
+from tinygrad.mixin import OpMixin
 from tinygrad.uop.ops import smax, UOp, Ops, sint, all_metadata, _index_to_concrete_int, Variable, _broadcast_shape
 from tinygrad.schedule import ExecItem, create_linear_with_vars, linear_to_schedule
 from tinygrad.device import Buffer, canonicalize_device
@@ -1532,30 +1532,6 @@ class Tensor(OpMixin):
       if attn_mask.dtype == dtypes.bool: attn_mask = attn_mask.where(0, -float("inf"))
       qk = qk + attn_mask
     return qk.cast(self.dtype).softmax(-1).dropout(dropout_p) @ value
-
-  def nll_loss(self, Y:Tensor, weight:Tensor|None=None, ignore_index:int|None=None, reduction:ReductionStr="mean") -> Tensor:
-    """
-    Computes the negative log likelihood loss between log-probabilities and target labels.
-
-    NOTE: `self` is log-probabilities and `Y` is the Y labels or class probabilities.
-
-    See: https://pytorch.org/docs/stable/generated/torch.nn.functional.nll_loss.html
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([[-1, 2, -3], [1, -2, 3]])
-    Y = Tensor([1, 2])
-    print(t.log_softmax().nll_loss(Y).item())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([[-1, 2, -3], [1, -2, 3]])
-    Y = Tensor([1, 2])
-    print(t.log_softmax().nll_loss(Y, reduction='none').numpy())
-    ```
-    """
-    weight = Y.ones_like(requires_grad=False) if weight is None else weight[Y]
-    masked_weight = weight if ignore_index is None else weight * (Y != ignore_index)
-    nll = -self.gather(1, Y.unsqueeze(1)).squeeze(1) * masked_weight
-    return nll.sum() / masked_weight.sum() if reduction == "mean" else nll._do_reduction(reduction)
 
   def qr(self) -> tuple[Tensor, Tensor]:
     assert self.ndim > 1, f"expected two or more dimensions, got {self.ndim}"
