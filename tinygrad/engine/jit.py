@@ -146,8 +146,8 @@ class GraphRunner(Runner):
         self.launch_dims_base[j] = (tuple(p.p.global_size), tuple(p.p.local_size))
 
     estimates = Estimates()
-    for (_, ast, bufs, _), p in zip(self.calls, self.progs):
-      if ast.op in (Ops.SINK, Ops.PROGRAM): estimates += unwrap(p).estimates
+    for (_, ast, bufs, _), pr in zip(self.calls, self.progs):
+      if ast.op in (Ops.SINK, Ops.PROGRAM): estimates += unwrap(pr).estimates
       elif ast.op is Ops.COPY or (ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "encdec"):
         estimates += Estimates(lds=bufs[0].nbytes, mem=bufs[0].nbytes)
 
