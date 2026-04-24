@@ -126,6 +126,7 @@ class DLL(ctypes.CDLL):
   def bind(self, restype, *argtypes):
     def wrap(fn):
       cfunc = None
+      @functools.wraps(fn)
       def wrapper(*args):
         nonlocal cfunc
         if cfunc is None: (cfunc:=getattr(self, fn.__name__)).argtypes, cfunc.restype = argtypes, restype

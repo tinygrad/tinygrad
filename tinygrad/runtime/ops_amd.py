@@ -8,7 +8,7 @@ from tinygrad.runtime.support.hcq import MMIOInterface, BumpAllocator, hcq_filte
 from tinygrad.uop.ops import sint
 from tinygrad.device import Compiled, BufferSpec
 from tinygrad.helpers import getenv, round_up, data64_le, DEBUG, PROFILE, ProfileEvent, lo32, hi32, colored, prod, ContextVar, TracingKey
-from tinygrad.helpers import VIZ, ceildiv, unwrap
+from tinygrad.helpers import VIZ, ceildiv, unwrap, pluralize
 from tinygrad.renderer.cstyle import HIPRenderer, HIPCCRenderer
 from tinygrad.renderer.llvmir import AMDLLVMRenderer
 from tinygrad.runtime.autogen import kfd, hsa, sqtt, amdgpu_kd, amdgpu_drm
@@ -17,6 +17,7 @@ from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.support.am.amdev import AMDev, AMMemoryManager
 from tinygrad.runtime.support.amd import AMDReg, AMDIP, import_module, import_soc, import_ip_offsets, import_pmc
 from tinygrad.runtime.support.system import System, PCIIfaceBase, PCIAllocationMeta, USBPCIDevice, MAP_FIXED, MAP_NORESERVE
+from tinygrad.runtime.support.usb import USB3
 from tinygrad.runtime.support.memory import AddrSpace
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint: disable=unused-import
 
@@ -644,7 +645,7 @@ class AMDProgram(HCQProgram):
 class AMDAllocator(HCQAllocator['AMDDevice']):
   def __init__(self, dev:AMDDevice):
     super().__init__(dev, copy_bufs=getattr(dev.iface, 'copy_bufs', None), max_copyout_size=0x1000 if dev.is_usb() else None,
-                     supports_copy_from_disk=dev.has_sdma_queue, supports_transfer=dev.has_sdma_queue)
+                     supports_copy_from_disk=dev.has_sdma_queue, supports_transfer=dev.has_sdma_queue and not dev.is_usb())
 
   def _alloc(self, size:int, options:BufferSpec) -> HCQBuffer:
     return self.dev.iface.alloc(size, host=options.host, uncached=options.uncached, cpu_access=options.cpu_access or not self.dev.has_sdma_queue)
@@ -912,10 +913,10 @@ class PCIIface(PCIIfaceBase):
   def device_fini(self): self.dev_impl.fini()
 
 class USBIface(PCIIface):
-  count = 1 # TODO: support multiple usbgpus, see usb.py
-
   def __init__(self, dev, dev_id): # pylint: disable=super-init-not-called
-    self.dev, self.pci_dev, self.vram_bar = dev, USBPCIDevice(dev.__class__.__name__[:2], f"usb:{dev_id}"), 0
+    if dev_id >= len(visible:=hcq_filter_visible_devices(USB3.list_devices(0xADD1, 0x0001), "AMD")):
+      raise RuntimeError(f"AMD:{dev_id} does not exist ({pluralize('device', len(visible))} available)")
+    self.dev, self.pci_dev, self.vram_bar, self.count = dev, USBPCIDevice("AM", *visible[dev_id]), 0, len(visible)
     self.dev_impl = AMDev(self.pci_dev)
     self._compute_props()
     self.pci_dev.usb._pci_cacheable += [self.pci_dev.bar_info(2)] # doorbell region is cacheable
