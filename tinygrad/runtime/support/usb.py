@@ -9,7 +9,7 @@ def alloc_cbuffer(sz:int) -> tuple[ctypes.Array, memoryview]: return (buf:=(ctyp
 def checked(fn, msg=None):
   @functools.wraps(fn)
   def wrapper(*args):
-    if (rc:=fn(*args)) < 0: raise RuntimeError(f"{msg or fn.__name__}: {libusb.libusb_strerror(rc).decode()}")
+    if (rc:=fn(*args)) < 0: raise RuntimeError(f"{msg or fn.__name__}: {ctypes.string_at(libusb.libusb_strerror(rc)).decode()}")
     return rc
   return wrapper
 
