@@ -9,7 +9,7 @@ N = 16
 class TestProcessReplay(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
-    cls.ast = (Tensor.empty(N, N) @ Tensor.empty(N, N)).schedule()[-1].ast
+    cls.ast = (Tensor.empty(N, N) @ Tensor.empty(N, N)).schedule_linear().src[-1].src[0]
     cls.renderer = Device[Device.DEFAULT].renderer
 
   def test_replay_no_opts(self):
@@ -35,9 +35,9 @@ class TestProcessReplay(unittest.TestCase):
 
   def test_beam(self):
     with Context(BEAM=1):
-      si = (Tensor.empty(N, N) @ Tensor.empty(N, N)).schedule()[-1]
-    p = do_to_program(si.ast, self.renderer)
-    good, compare, _ = replay_to_program(p, si.ast, self.renderer)
+      ast = (Tensor.empty(N, N) @ Tensor.empty(N, N)).schedule_linear().src[-1].src[0]
+    p = do_to_program(ast, self.renderer)
+    good, compare, _ = replay_to_program(p, ast, self.renderer)
     self.assertEqual(good, compare)
 
 if __name__ == '__main__':
