@@ -1,6 +1,6 @@
 # tensor tests that pass on NULL backend (no copyout needed)
 import numpy as np
-import unittest, math
+import unittest
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.device import is_dtype_supported
 from tinygrad.uop.ops import Ops, UOp
