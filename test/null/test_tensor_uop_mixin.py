@@ -151,6 +151,25 @@ class TestTensorUOpScatterReduce(unittest.TestCase):
   def test_mean_exclude_self(self):
     self._check(_t(3, 4).float(), Tensor([[0, 1, 0, 1]]*3, dtype=dtypes.int32), Tensor.ones(3, 4).float(), reduce="mean", include_self=False)
 
+class TestTensorUOpPool(unittest.TestCase):
+  def test_avg_pool2d(self):                _check(self, _t(1, 1, 5, 5).float(), lambda x: x.avg_pool2d())
+  def test_avg_pool2d_padding(self):        _check(self, _t(1, 1, 5, 5).float(), lambda x: x.avg_pool2d(padding=1))
+  def test_avg_pool2d_ceil(self):           _check(self, _t(1, 1, 5, 5).float(), lambda x: x.avg_pool2d(ceil_mode=True))
+  def test_avg_pool2d_no_count_pad(self):   _check(self, _t(1, 1, 5, 5).float(), lambda x: x.avg_pool2d(padding=1, count_include_pad=False))
+  def test_max_pool2d(self):                _check(self, _t(1, 1, 5, 5).float(), lambda x: x.max_pool2d())
+  def test_max_pool2d_padding(self):        _check(self, _t(1, 1, 5, 5).float(), lambda x: x.max_pool2d(padding=1))
+  def test_max_pool2d_ceil(self):           _check(self, _t(1, 1, 5, 5).float(), lambda x: x.max_pool2d(ceil_mode=True))
+  def test_max_pool2d_return_indices(self):
+    t = _t(1, 1, 5, 5).float()
+    vt, it = t.max_pool2d(return_indices=True)
+    vu, iu = t.uop.max_pool2d(return_indices=True)
+    self.assertIs(_strip_unique(vt.uop), _strip_unique(vu))
+    self.assertIs(_strip_unique(it.uop), _strip_unique(iu))
+  def test_max_unpool2d(self):
+    t = _t(1, 1, 4, 4).float()
+    out, idx = t.max_pool2d(return_indices=True)
+    self.assertIs(_strip_unique(out.max_unpool2d(idx).uop), _strip_unique(out.uop.max_unpool2d(idx.uop)))
+
 class TestTensorUOpCat(unittest.TestCase):
   def test_cat_dim0(self):     _check(self, _t(2, 3), lambda x: x.cat(x, dim=0))
   def test_cat_dim1(self):     _check(self, _t(2, 3), lambda x: x.cat(x, dim=1))
