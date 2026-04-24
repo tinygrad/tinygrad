@@ -1506,22 +1506,6 @@ class Tensor(OpMixin):
     if IMAGE: return self.image_dot(w, dtype)
     return super().dot(w, dtype)
 
-  def _pre_scatter(self, dim:int, index:Tensor, src:Tensor) -> tuple[Tensor, Tensor]:
-    if index.device != self.device: raise RuntimeError(f"expected index and self on the same device, {index.device=}, {self.device=}")
-    if src.device != self.device: raise RuntimeError(f"expected src and self on the same device, {src.device=}, {self.device=}")
-    dim = self._resolve_dim(dim)
-    assert index.ndim == self.ndim == src.ndim, f"self.ndim, index.ndim and src.ndim must all equal, {self.ndim=} {index.ndim=} {src.ndim=}"
-    assert all((d == dim or self_ >= index_) and src_ >= index_ for d,(self_,index_,src_) in enumerate(zip(self.shape, index.shape, src.shape))), \
-      f"All dimensions of {index.shape=} should be <= to all dimensions of {src.shape=} and all dimensions except dimension {dim} of {self.shape=}"
-    if self.dtype != src.dtype: raise RuntimeError(f"expect {self.dtype=} to be equal to {src.dtype=}")
-    # shrink src to index shape to shrink away the unused values
-    src = src.shrink_to(index.shape)
-    # prepare src and mask for reduce with respect to dim
-    src = src.unsqueeze(-1).expand(*src.shape, self.shape[dim]).transpose(-1, dim)
-    mask = index.unsqueeze(-1)._one_hot_along_dim(self.shape[dim]).transpose(-1, dim)
-    # pad src and mask to self.shape so that reduce can be done with padded values as no-ops
-    return src.pad_to(*self.shape, None), mask.pad_to(*self.shape, None)
-
   def scatter(self, dim:int, index:Tensor, src:Tensor|PyConst, reduce:Literal['multiply', 'add']|None=None) -> Tensor:
     """
     Scatters `src` values along an axis specified by `dim`.
@@ -1555,47 +1539,6 @@ class Tensor(OpMixin):
     if reduce == "multiply": return self.scatter_reduce(dim, index, src, "prod", include_self=True)
     src, mask = self._pre_scatter(dim, index, src)
     return _masked_setitem(self, src, mask, (-1,))
-
-  def scatter_reduce(self, dim:int, index:Tensor, src:Tensor, reduce:Literal["sum", "prod", "mean", "amax", "amin"],
-                     include_self:bool=True) -> Tensor:
-    """
-    Scatters `src` values along an axis specified by `dim`.
-    Apply `"sum"`, `"prod"`, `"mean"`, `"amax"`, or `"amin"` reduction operations with `reduce`.
-
-    Set `include_self=False` to exclude values in the `self` Tensor from the reduction.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    src = Tensor.arange(1, 11).cast(dtypes.float).reshape(2, 5)
-    print(src.numpy())
-    index = Tensor([[0, 0, 0, 0, 0], [0, 0, 0, 0, 0]])
-    print(index.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor.ones(1, 5, dtype=src.dtype).scatter_reduce(0, index, src, reduce='sum').numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor.ones(1, 5, dtype=src.dtype).scatter_reduce(0, index, src, reduce='prod').numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor.ones(1, 5, dtype=src.dtype).scatter_reduce(0, index, src, reduce='mean', include_self=False).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([[-10, 20, 0, 5, 10]], dtype=src.dtype).scatter_reduce(0, index, src, reduce='amax').numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([[-10, 20, 0, 5, 10]], dtype=src.dtype).scatter_reduce(0, index, src, reduce='amin').numpy())
-    ```
-    """
-    src, mask = self._pre_scatter(dim, index, src)
-    def _inv_mask(a:Tensor|PyConst, b:Tensor|PyConst) -> Tensor: return mask.any(-1).logical_not().where(a, b)
-    if reduce == "sum": return mask.where(src, 0).sum(-1).add(self if include_self else _inv_mask(self, 0))
-    if reduce == "prod": return mask.where(src, 1).prod(-1).mul(self if include_self else _inv_mask(self, 1))
-    if reduce == "amax": return mask.where(src, m := src.dtype.min).max(-1).maximum(self if include_self else _inv_mask(self, m))
-    if reduce == "amin": return mask.where(src, m := src.dtype.max).min(-1).minimum(self if include_self else _inv_mask(self, m))
-    if reduce == "mean":
-      count = mask.where(1, 0).sum(-1).add(1 if include_self else _inv_mask(1, 0))
-      return mask.where(src, 0).sum(-1).add(self if include_self else _inv_mask(self, 0)).div(count)
-    raise RuntimeError(f"{reduce=} must be one of 'sum', 'prod', 'mean', 'amax', 'amin'")
 
   def sort(self, dim:int=-1, descending:bool=False) -> tuple[Tensor, Tensor]:
     """
@@ -1857,30 +1800,6 @@ class Tensor(OpMixin):
       if attn_mask.dtype == dtypes.bool: attn_mask = attn_mask.where(0, -float("inf"))
       qk = qk + attn_mask
     return qk.cast(self.dtype).softmax(-1).dropout(dropout_p) @ value
-
-  def sparse_categorical_crossentropy(self, Y:Tensor, ignore_index:int=-1, label_smoothing=0.0, reduction:ReductionStr="mean") -> Tensor:
-    """
-    Computes the sparse categorical cross-entropy loss between `self` and `Y`.
-
-    NOTE: `self` is logits and `Y` is the target labels.
-    NOTE: unlike PyTorch, this function expects the class axis to be -1
-
-    See: https://pytorch.org/docs/stable/generated/torch.nn.CrossEntropyLoss.html
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([[-1, 2, -3], [1, -2, 3]])
-    Y = Tensor([1, 2])
-    print(t.sparse_categorical_crossentropy(Y).item())
-    ```
-    """
-    assert 0.0 <= label_smoothing <= 1.0, "label_smoothing must be in [0.0, 1.0]"
-    if Y.device != self.device: raise RuntimeError(f"expected Y and self on the same device, {Y.device=}, {self.device=}")
-    log_probs = self.log_softmax()
-    loss_mask = (Y != ignore_index) if ignore_index != -1 else Y.ones_like(dtype=dtypes.bool)
-    y = Y.unsqueeze(-1)._one_hot_along_dim(self.shape[-1], dim=-1) * loss_mask.unsqueeze(-1)
-    smoothing = label_smoothing * (log_probs.mean(-1) * loss_mask)
-    unreduced = ((1 - label_smoothing) * (log_probs * y).sum(-1) + smoothing)
-    return -unreduced.sum() / loss_mask.sum() if reduction == "mean" else -unreduced._do_reduction(reduction)
 
   def nll_loss(self, Y:Tensor, weight:Tensor|None=None, ignore_index:int|None=None, reduction:ReductionStr="mean") -> Tensor:
     """

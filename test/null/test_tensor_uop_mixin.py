@@ -131,6 +131,25 @@ class TestTensorUOpLoss(unittest.TestCase):
   def test_cross_entropy(self):
     t, Y = _t(2, 3).float(), Tensor([1, 2], dtype=dtypes.int32)
     self.assertIs(_strip_unique(t.cross_entropy(Y).uop), _strip_unique(t.uop.cross_entropy(Y.uop)))
+  def test_sparse_categorical_crossentropy(self):
+    t, Y = _t(2, 3).float(), Tensor([1, 2], dtype=dtypes.int32)
+    self.assertIs(_strip_unique(t.sparse_categorical_crossentropy(Y).uop), _strip_unique(t.uop.sparse_categorical_crossentropy(Y.uop)))
+  def test_sparse_categorical_crossentropy_ignore_index(self):
+    t, Y = _t(2, 3).float(), Tensor([1, 2], dtype=dtypes.int32)
+    self.assertIs(_strip_unique(t.sparse_categorical_crossentropy(Y, ignore_index=0).uop),
+                  _strip_unique(t.uop.sparse_categorical_crossentropy(Y.uop, ignore_index=0)))
+
+class TestTensorUOpScatterReduce(unittest.TestCase):
+  def _check(self, x, idx, src, **kw):
+    self.assertIs(_strip_unique(x.scatter_reduce(0, idx, src, **kw).uop),
+                  _strip_unique(x.uop.scatter_reduce(0, idx.uop, src.uop, **kw)))
+  def test_sum(self):  self._check(_t(3, 4).float(), Tensor([[0, 1, 0, 1]]*3, dtype=dtypes.int32), Tensor.ones(3, 4).float(), reduce="sum")
+  def test_prod(self): self._check(_t(3, 4).float(), Tensor([[0, 1, 0, 1]]*3, dtype=dtypes.int32), Tensor.ones(3, 4).float(), reduce="prod")
+  def test_mean(self): self._check(_t(3, 4).float(), Tensor([[0, 1, 0, 1]]*3, dtype=dtypes.int32), Tensor.ones(3, 4).float(), reduce="mean")
+  def test_amax(self): self._check(_t(3, 4).float(), Tensor([[0, 1, 0, 1]]*3, dtype=dtypes.int32), Tensor.ones(3, 4).float(), reduce="amax")
+  def test_amin(self): self._check(_t(3, 4).float(), Tensor([[0, 1, 0, 1]]*3, dtype=dtypes.int32), Tensor.ones(3, 4).float(), reduce="amin")
+  def test_mean_exclude_self(self):
+    self._check(_t(3, 4).float(), Tensor([[0, 1, 0, 1]]*3, dtype=dtypes.int32), Tensor.ones(3, 4).float(), reduce="mean", include_self=False)
 
 class TestTensorUOpCat(unittest.TestCase):
   def test_cat_dim0(self):     _check(self, _t(2, 3), lambda x: x.cat(x, dim=0))
