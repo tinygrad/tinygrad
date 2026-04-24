@@ -164,6 +164,32 @@ class TestTensorUOpLoss(unittest.TestCase):
     self.assertIs(_strip_unique(t.sparse_categorical_crossentropy(Y, ignore_index=0).uop),
                   _strip_unique(t.uop.sparse_categorical_crossentropy(Y.uop, ignore_index=0)))
 
+class TestTensorUOpScatter(unittest.TestCase):
+  def test_scatter(self):
+    x, idx, src = _t(3, 4).float(), Tensor([[0, 1, 2, 0]], dtype=dtypes.int32), _t(1, 4).float()
+    self.assertIs(_strip_unique(x.scatter(0, idx, src).uop), _strip_unique(x.uop.scatter(0, idx.uop, src.uop)))
+  def test_scatter_scalar_src(self):
+    x, idx = _t(3, 4).float(), Tensor([[0, 1]], dtype=dtypes.int32)
+    self.assertIs(_strip_unique(x.scatter(1, idx, 3.14).uop), _strip_unique(x.uop.scatter(1, idx.uop, 3.14)))
+  # inf cannot be cast to int — this regresses if scalar src is routed through index.dtype first
+  def test_scatter_inf_src(self):
+    x, idx = _t(3, 4).float(), Tensor([[0, 1]], dtype=dtypes.int32)
+    self.assertIs(_strip_unique(x.scatter(1, idx, float("inf")).uop),
+                  _strip_unique(x.uop.scatter(1, idx.uop, float("inf"))))
+  def test_scatter_add(self):
+    x, idx = _t(3, 4).float(), Tensor([[0, 1]], dtype=dtypes.int32)
+    self.assertIs(_strip_unique(x.scatter(1, idx, 3.14, reduce="add").uop),
+                  _strip_unique(x.uop.scatter(1, idx.uop, 3.14, reduce="add")))
+  def test_scatter_multiply(self):
+    x, idx = _t(3, 4).float(), Tensor([[0, 1]], dtype=dtypes.int32)
+    self.assertIs(_strip_unique(x.scatter(1, idx, 3.14, reduce="multiply").uop),
+                  _strip_unique(x.uop.scatter(1, idx.uop, 3.14, reduce="multiply")))
+  # tensor src with reduce hits the "elif reduce: raise" branch in both Tensor and UOp paths
+  def test_scatter_tensor_src_with_reduce_raises(self):
+    x, idx, src = _t(3, 4).float(), Tensor([[0, 1]], dtype=dtypes.int32), _t(1, 2).float()
+    with self.assertRaises(TypeError): x.scatter(1, idx, src, reduce="add")
+    with self.assertRaises(TypeError): x.uop.scatter(1, idx.uop, src.uop, reduce="add")
+
 class TestTensorUOpScatterReduce(unittest.TestCase):
   def _check(self, x, idx, src, **kw):
     self.assertIs(_strip_unique(x.scatter_reduce(0, idx, src, **kw).uop),
