@@ -16,9 +16,9 @@ class TestAttention(unittest.TestCase):
     k = Tensor.ones(BS, seqlen, dim, dtype=dtypes.half).contiguous().realize()
     v = Tensor.ones(BS, seqlen, dim, dtype=dtypes.half).contiguous().realize()
     attn = q.scaled_dot_product_attention(k, v)
-    sched = attn.schedule()
+    sched = attn.schedule_linear()
     # attention has 4 kernels now
-    self.assertEqual(len(sched), 4)
+    self.assertEqual(len(sched.src), 4)
 
   def test_apply_rope_jit_prune(self):
     def rope_fn(x_in, pos): return apply_rope(x_in, pos)

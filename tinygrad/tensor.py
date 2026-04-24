@@ -247,6 +247,12 @@ class Tensor(OpMixin):
     assert len(var_vals) == 0
     return schedule
 
+  def schedule_linear(self, *lst:Tensor) -> UOp:
+    """Creates the schedule needed to realize these Tensor(s)."""
+    linear, var_vals = self.linear_with_vars(*lst)
+    assert len(var_vals) == 0
+    return linear
+
   @disable_gc()
   def realize(self, *lst:Tensor, do_update_stats=True) -> Tensor:
     """Triggers the computation needed to create these Tensor(s)."""

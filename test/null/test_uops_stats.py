@@ -1,7 +1,7 @@
 import unittest
 from tinygrad import Tensor
 from tinygrad.helpers import GlobalCounters, DEV
-from tinygrad.engine.realize import get_program
+from tinygrad.engine.realize import get_program, compile_linear, estimate_uop
 from tinygrad.renderer import ProgramSpec
 from tinygrad.renderer import Estimates
 from tinygrad.uop.ops import Ops, UOp
@@ -18,8 +18,8 @@ def flops_mem(uops, ignore_indexing=False):
 # **************** new FlopCounter ****************
 
 def get_stats(x:Tensor):
-  si = x.schedule()[-1].lower()
-  return si.prg.estimates.ops, si.prg.estimates.mem
+  est = estimate_uop(compile_linear(x.schedule_linear()).src[-1])
+  return est.ops, est.mem
 
 @unittest.skipIf(Device.DEFAULT == "WEBGPU", "webgpu does extra load/store for packed types")
 class TestMemoryCount(unittest.TestCase):
@@ -165,8 +165,8 @@ N = 64
 class TestStatsOptimized(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
-    cls.ast_gemm = (Tensor.empty(N, N) @ Tensor.empty(N, N)).schedule()[-1].ast
-    cls.ast_reduce = (Tensor.empty(N*N).sum()).schedule()[-1].ast
+    cls.ast_gemm = (Tensor.empty(N, N) @ Tensor.empty(N, N)).schedule_linear().src[-1].src[0]
+    cls.ast_reduce = (Tensor.empty(N*N).sum()).schedule_linear().src[-1].src[0]
 
   def check_gemm(self, p:ProgramSpec, extra_flops=0):
     #p.uops.print()
