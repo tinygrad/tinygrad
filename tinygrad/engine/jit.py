@@ -131,8 +131,7 @@ class GraphRunner(Runner):
         assert p.p.local_size is not None
         self.launch_dims_base[j] = (tuple(p.p.global_size), tuple(p.p.local_size))
 
-    estimates = Estimates()
-    for call in self.linear.src: estimates += estimate_uop(call)
+    estimates = sum((estimate_uop(call) for call in self.linear.src), Estimates())
 
     # used in MultiGraphRunner. tracks (offset, end, dep) ranges per base buffer id to handle suballocated buffers correctly.
     self.w_dependency_map: dict[int, list[tuple[int, int, Any]]] = collections.defaultdict(list)
