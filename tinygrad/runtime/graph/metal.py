@@ -9,8 +9,8 @@ from tinygrad.runtime.ops_metal import wait_check, to_ns_str
 from tinygrad.runtime.autogen import metal
 
 class MetalGraph(GraphRunner):
-  def __init__(self, linear, input_buffers, input_uops=()):
-    super().__init__(linear, input_buffers, input_uops)
+  def __init__(self, linear, input_uops=()):
+    super().__init__(linear, input_uops)
 
     # create metal batch exec
     icb_descriptor = metal.MTLIndirectCommandBufferDescriptor.new()
