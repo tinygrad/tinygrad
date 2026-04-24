@@ -666,7 +666,7 @@ class TestMultiTensor(unittest.TestCase):
     rng = Tensor.rand((10, 10, 10))
     t0 = rng.shard(devices_2, axis=1)
     out = t0.flip(0) + 1
-    self.assertTrue((rng.flip(0)+1).allclose(out.to(rng.device)))
+    self.assertTrue((rng.flip(0)+1).allclose(out.to(rng.device)).item())
 
   @unittest.skip("flaky")
   def test_reshape_on_axis(self):
