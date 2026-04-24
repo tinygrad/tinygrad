@@ -3,8 +3,7 @@ import gc, unittest, time
 from tinygrad import nn, dtypes, Device, Tensor
 from tinygrad.uop.ops import UOp, Ops, GroupOp, UPat, KernelInfo
 from tinygrad.helpers import DEBUG, GlobalCounters, Context
-from tinygrad.engine.realize import CompiledRunner, run_linear
-from tinygrad.schedule import linear_to_schedule
+from tinygrad.engine.realize import compile_linear, run_linear
 
 class KernelCountException(Exception): pass
 def check_schedule(t:Tensor|list[Tensor]|UOp, allowed:int, to_prerealize:list[Tensor]|None=None, filter_sink=True):
@@ -15,17 +14,17 @@ def check_schedule(t:Tensor|list[Tensor]|UOp, allowed:int, to_prerealize:list[Te
   else:
     assert isinstance(t, UOp), f"can't schedule {t}"
     linear, var_vals = Tensor(t).linear_with_vars()
-  # test lowering all the ExecItems
-  sched = linear_to_schedule(linear)
-  for si in sched: si.lower()
-  kernel_cnt = len([si for si in sched if isinstance(si.prg, CompiledRunner) or not filter_sink])
+  kernel_cnt = sum((len(call.device) if isinstance(call.device, tuple) else 1)
+                   for call in linear.src if call.src[0].op is Ops.SINK or not filter_sink)
   if kernel_cnt != allowed:
     print(f"SCHEDULE ISSUE, expecting {allowed} got {kernel_cnt}")
     if DEBUG >= 3:
-      for i,s in enumerate(sched):
+      for i,call in enumerate(linear.src):
         print("kernel", i+1)
-        print(s.ast)
+        print(call.src[0])
     raise KernelCountException(f"{kernel_cnt} != {allowed}")
+  # test compiling the linear
+  compile_linear(linear)
   return linear, var_vals
 
 def _realize_weights(m):

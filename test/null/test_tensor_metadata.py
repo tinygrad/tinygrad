@@ -2,7 +2,6 @@ import unittest
 from tinygrad import Tensor, dtypes
 from tinygrad.tensor import _METADATA
 from tinygrad.engine.realize import capturing
-from tinygrad.schedule import linear_to_schedule
 from tinygrad.helpers import Context
 
 @unittest.skip("tensor metadata is no longer supported")
@@ -99,8 +98,8 @@ class TestTensorMetadata(unittest.TestCase):
     capturing.append(type("", (), {"add_linear": lambda _, linear, var_vals: linears.append(linear)})())
     try: h.realize()
     finally: capturing.clear()
-    items = [ei for linear in linears for ei in linear_to_schedule(linear)]
-    return any(m.name == name for ei in items for m in ei.metadata)
+    calls = [call for linear in linears for call in linear.src]
+    return any(m.name == name for call in calls for m in call.arg.metadata)
 
   def test_metadata_survives_realize_pending_assign(self):
     shared = Tensor.rand(4)
