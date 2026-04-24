@@ -1,7 +1,7 @@
 import unittest
 from tinygrad import Tensor
 from tinygrad.helpers import GlobalCounters, DEV
-from tinygrad.engine.realize import get_program
+from tinygrad.engine.realize import get_program, compile_linear, estimate_uop
 from tinygrad.renderer import ProgramSpec
 from tinygrad.renderer import Estimates
 from tinygrad.uop.ops import Ops, UOp
@@ -18,8 +18,8 @@ def flops_mem(uops, ignore_indexing=False):
 # **************** new FlopCounter ****************
 
 def get_stats(x:Tensor):
-  prg = get_program(x.schedule_linear().src[-1].src[0], Device[Device.DEFAULT].renderer)
-  return prg.estimates.ops, prg.estimates.mem
+  est = estimate_uop(compile_linear(x.schedule_linear()).src[-1])
+  return est.ops, est.mem
 
 @unittest.skipIf(Device.DEFAULT == "WEBGPU", "webgpu does extra load/store for packed types")
 class TestMemoryCount(unittest.TestCase):
