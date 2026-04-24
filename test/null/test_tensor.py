@@ -1,6 +1,6 @@
 # tensor tests that pass on NULL backend (no copyout needed)
 import numpy as np
-import unittest
+import unittest, math
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.device import is_dtype_supported
 from tinygrad.uop.ops import Ops, UOp
@@ -188,6 +188,17 @@ class TestTensorConstLike(unittest.TestCase):
 class TestTensorDevice(unittest.TestCase):
   def test_create_from_single_device_tuple(self):
     (Tensor([1.0], device=(Device.DEFAULT,)) + Tensor([2.0])).realize()
+
+class TestTensorPad(unittest.TestCase):
+  # padding int tensor with float-only value (like -inf) must promote dtype to fit value
+  def test_pad_int_with_neg_inf(self):
+    t = Tensor.arange(9).reshape(1, 1, 3, 3)
+    self.assertEqual(t.dtype, dtypes.int)
+    r = t.pad((1, 2, 0, -1), value=-float('inf'))
+    self.assertEqual(r.dtype, dtypes.float)
+    self.assertEqual(r.shape, (1, 1, 2, 6))
+    self.assertTrue(math.isinf(r[0, 0, 0, 0].item()))
+    self.assertEqual(r[0, 0, 0, 1].item(), 0.0)
 
 class TestTensorDeviceMismatch(unittest.TestCase):
   def test_gather(self):

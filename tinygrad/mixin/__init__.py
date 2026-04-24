@@ -199,6 +199,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     pads = tuple((smax(pB,0), smax(pA,0)) for pB,pA in pX) if has_neg else pX
     base = MovementMixin.pad(X, pads)
     if value == 0: return base
+    base = base.cast(least_upper_dtype(base.dtype, dtypes.from_py(value)))
     return base + MovementMixin.pad(X.ones_like(), pads).cast(dtypes.bool).where(base.zeros_like(), base.full_like(value))
 
   def _ufix_keep_dtype(self, x) -> bool:
