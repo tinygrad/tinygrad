@@ -112,6 +112,31 @@ class TestTensorUOpOneHot(unittest.TestCase):
     t = _t(5)
     self.assertIs(_strip_unique(t.one_hot(5).uop), _strip_unique(t.uop.one_hot(5)))
 
+class TestTensorUOpSort(unittest.TestCase):
+  def _check(self, t, **kw):
+    tv, ti = t.sort(**kw)
+    uv, ui = t.uop.sort(**kw)
+    self.assertIs(_strip_unique(tv.uop), _strip_unique(uv))
+    self.assertIs(_strip_unique(ti.uop), _strip_unique(ui))
+  def test_sort_1d(self):         self._check(Tensor([0.5, 0.1, 0.3]).float())
+  def test_sort_descending(self): self._check(Tensor([0.5, 0.1, 0.3]).float(), descending=True)
+  def test_sort_2d(self):         self._check(_t(2, 4).float())
+  def test_sort_single(self):     self._check(Tensor([1.0]).float())
+  def test_argsort(self):
+    t = Tensor([0.5, 0.1, 0.3]).float()
+    self.assertIs(_strip_unique(t.argsort().uop), _strip_unique(t.uop.argsort()))
+  def test_topk(self):
+    t = _t(2, 4).float()
+    tv, ti = t.topk(2)
+    uv, ui = t.uop.topk(2)
+    self.assertIs(_strip_unique(tv.uop), _strip_unique(uv))
+    self.assertIs(_strip_unique(ti.uop), _strip_unique(ui))
+
+class TestTensorUOpAllclose(unittest.TestCase):
+  def test_allclose(self):
+    a, b = _t(4).float(), _t(4).float()
+    self.assertIs(_strip_unique(a.allclose(b).uop), _strip_unique(a.uop.allclose(b.uop)))
+
 class TestTensorUOpGather(unittest.TestCase):
   def _check(self, t, dim, idx):
     self.assertIs(_strip_unique(t.gather(dim, idx).uop), _strip_unique(t.uop.gather(dim, idx.uop)))
