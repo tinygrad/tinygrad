@@ -55,7 +55,6 @@ class NAKCompiler(Compiler):
   @staticmethod
   def warps_per_sm(arch): return 48 if arch in ("sm_86", "sm_87", "sm_89", "sm_120") else 64
   def __init__(self, arch):
-    if arch == "sm_120": raise RuntimeError("NAK does not support Blackwell (sm_120) GPUs")
     self.arch = arch
     self.cc = mesa.nak_compiler_create(mesa.struct_nv_device_info(sm=int(arch[3:]), max_warps_per_mp=self.warps_per_sm(arch)))
     self.nir_options = bytes(mesa.nak_nir_options(self.cc).contents)
