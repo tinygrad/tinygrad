@@ -1318,6 +1318,30 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     Y = (1 - label_smoothing)*Y + label_smoothing / int(Y.shape[classes_dim])
     return -self.log_softmax(classes_dim).mul(Y).sum(classes_dim)._do_reduction(reduction)
 
+  def nll_loss(self, Y:Self, weight:Self|None=None, ignore_index:int|None=None, reduction:ReductionStr="mean") -> Self:
+    """
+    Computes the negative log likelihood loss between log-probabilities and target labels.
+
+    NOTE: `self` is log-probabilities and `Y` is the Y labels or class probabilities.
+
+    See: https://pytorch.org/docs/stable/generated/torch.nn.functional.nll_loss.html
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([[-1, 2, -3], [1, -2, 3]])
+    Y = Tensor([1, 2])
+    print(t.log_softmax().nll_loss(Y).item())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([[-1, 2, -3], [1, -2, 3]])
+    Y = Tensor([1, 2])
+    print(t.log_softmax().nll_loss(Y, reduction='none').numpy())
+    ```
+    """
+    weight = Y.ones_like() if weight is None else weight.gather(0, Y.flatten()).reshape(Y.shape)
+    masked_weight = weight if ignore_index is None else weight * Y.ne(ignore_index)
+    nll = -self.gather(1, Y.unsqueeze(1)).squeeze(1) * masked_weight
+    return nll.sum() / masked_weight.sum() if reduction == "mean" else nll._do_reduction(reduction)
+
   # ***** matrix ops *****
 
   def newton_schulz(self, steps:int, params:tuple[int, ...], eps:float=1.0e-7) -> Self:

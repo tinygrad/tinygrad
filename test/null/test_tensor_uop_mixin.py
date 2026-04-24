@@ -163,6 +163,22 @@ class TestTensorUOpLoss(unittest.TestCase):
     t, Y = _t(2, 3).float(), Tensor([1, 2], dtype=dtypes.int32)
     self.assertIs(_strip_unique(t.sparse_categorical_crossentropy(Y, ignore_index=0).uop),
                   _strip_unique(t.uop.sparse_categorical_crossentropy(Y.uop, ignore_index=0)))
+  def test_nll_loss(self):
+    t, Y = _t(2, 3).float().log_softmax(), Tensor([1, 2], dtype=dtypes.int32)
+    self.assertIs(_strip_unique(t.nll_loss(Y).uop), _strip_unique(t.uop.nll_loss(Y.uop)))
+  def test_nll_loss_weight(self):
+    t, Y, w = _t(2, 3).float().log_softmax(), Tensor([1, 2], dtype=dtypes.int32), _t(3).float()
+    self.assertIs(_strip_unique(t.nll_loss(Y, weight=w).uop), _strip_unique(t.uop.nll_loss(Y.uop, weight=w.uop)))
+  def test_nll_loss_ignore_index(self):
+    t, Y = _t(2, 3).float().log_softmax(), Tensor([1, 2], dtype=dtypes.int32)
+    self.assertIs(_strip_unique(t.nll_loss(Y, ignore_index=1).uop), _strip_unique(t.uop.nll_loss(Y.uop, ignore_index=1)))
+  def test_nll_loss_none_reduction(self):
+    t, Y = _t(2, 3).float().log_softmax(), Tensor([1, 2], dtype=dtypes.int32)
+    self.assertIs(_strip_unique(t.nll_loss(Y, reduction="none").uop), _strip_unique(t.uop.nll_loss(Y.uop, reduction="none")))
+  def test_nll_loss_weight_ignore_index(self):
+    t, Y, w = _t(2, 3).float().log_softmax(), Tensor([1, 2], dtype=dtypes.int32), _t(3).float()
+    self.assertIs(_strip_unique(t.nll_loss(Y, weight=w, ignore_index=1).uop),
+                  _strip_unique(t.uop.nll_loss(Y.uop, weight=w.uop, ignore_index=1)))
 
 class TestTensorUOpScatter(unittest.TestCase):
   def test_scatter(self):
