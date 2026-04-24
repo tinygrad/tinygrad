@@ -163,9 +163,9 @@ class TestRand(unittest.TestCase):
   def test_rand_large_tensor(self):
     # large tensor rand (num > uint32.max) should not crash in frontend
     Tensor.manual_seed(0)
-    Tensor.rand(2**17, 2**17).schedule()
-    Tensor.rand(2**17, 2**17).schedule()
-    Tensor.rand(2**17, 2**17).schedule()
+    Tensor.rand(2**17, 2**17).schedule_linear()
+    Tensor.rand(2**17, 2**17).schedule_linear()
+    Tensor.rand(2**17, 2**17).schedule_linear()
 
 class TestTensorConstLike(unittest.TestCase):
   def test_const_like_shape(self):
