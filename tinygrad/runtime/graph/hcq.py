@@ -22,7 +22,7 @@ class HCQGraph(MultiGraphRunner):
 
     for j, replace in enumerate(self.uop_replace):
       for pos, iidx in replace:
-        x = self.input_replace_to_var.setdefault((j,pos), UOp.variable(f"input_{iidx}", 0, 0xffffffffffffffff, dtype=dtypes.uint64))
+        x = self.input_replace_to_var.setdefault((j,pos), UOp.variable(f"inp_{iidx}_{self.calls[j][0]}", 0, 0xffffffffffffffff, dtype=dtypes.uint64))
         self.hcq_bufs[j][pos] = HCQBuffer(x, self.hcq_bufs[j][pos].size) # Create fake buffer with variable
 
     # Allocate kernel args.
