@@ -161,7 +161,7 @@ def _init_sqtt_encoder():
     """Emit an SQTT packet for one executed instruction."""
     w = wave_id & 0x1F
     if wave_id not in started:
-      _emit_nibbles(nibbles, WAVESTART, delta=1, simd=0, cu_lo=0, wave=w, id7=wave_id)
+      _emit_nibbles(nibbles, WAVESTART, delta=1, simd=0, wgp=0, wave=w, id7=wave_id)
       started.add(wave_id)
     inst_type, inst_op, op_name = type(inst), inst.op.value if hasattr(inst, 'op') else 0, inst.op.name if hasattr(inst, 'op') else ""
     if issubclass(inst_type, _SOPP):
@@ -180,7 +180,7 @@ def _init_sqtt_encoder():
 
   def finish(wave_id: int):
     """Emit WAVEEND for a completed wave."""
-    if wave_id in started: _emit_nibbles(nibbles, WAVEEND, delta=1, simd=0, cu_lo=0, wave=wave_id & 0x1F)
+    if wave_id in started: _emit_nibbles(nibbles, WAVEEND, delta=1, simd=0, wgp=0, wave=wave_id & 0x1F)
 
   def finalize() -> bytes:
     """Pad and return the encoded SQTT blob."""

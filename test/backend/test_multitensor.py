@@ -276,6 +276,14 @@ class TestMultiTensor(unittest.TestCase):
       out = f(tt)
       assert out.item() == 1+2+3+4
 
+  def test_multitensor_jit_input_reduce_shard_axis(self):
+    @TinyJit
+    def f(x): return x.sum(0).realize()
+    for _ in range(5):
+      tt = Tensor.ones(2, 64).contiguous().realize().shard((d1,d2), 0).realize()
+      out = f(tt)
+      np.testing.assert_allclose(out.numpy(), np.full(64, 2.0))
+
   def test_multitensor_inside_jit(self):
     @TinyJit
     def f(x): return (x.shard((d1,d2), 0)+1).contiguous().sum()
@@ -545,6 +553,21 @@ class TestMultiTensor(unittest.TestCase):
       b.shard_(devices_2)
       c = jf(a, b)
       np.testing.assert_allclose(c.numpy(), a.numpy()+b.numpy(), atol=1e-4, rtol=1e-5)
+    assert jf.captured is not None
+
+  def test_multi_tensor_jit_graph_assign_updates_each_shard(self):
+    @TinyJit
+    def jf(out: Tensor) -> Tensor:
+      tmp = (Tensor.arange(4, dtype=dtypes.float).shard(devices_2, 0) + 1).contiguous().realize()
+      out.assign((tmp + 1).contiguous()).realize()
+      return out
+
+    out = Tensor.full((4,), -1.0).shard(devices_2, 0).contiguous().realize()
+    expected = np.arange(4, dtype=np.float32) + 2
+    for _ in range(5):
+      out.assign(Tensor.full((4,), -1.0).shard(devices_2, 0).contiguous()).realize()
+      jf(out)
+      np.testing.assert_allclose(out.numpy(), expected, atol=1e-4, rtol=1e-5)
     assert jf.captured is not None
 
   def test_multi_tensor_jit_body(self):

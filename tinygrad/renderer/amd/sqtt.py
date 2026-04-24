@@ -288,34 +288,34 @@ class WAVERDY(PacketType):  # exclude: 1 << 3
 class WAVEEND(PacketType):  # exclude: 1 << 4
   encoding = bits[4:0] == 0b10101
   delta = bits[7:5]
-  flag7 = bits[8:8]
+  sa = bits[8:8]
   simd = bits[10:9]
-  cu_lo = bits[13:11]
+  wgp = bits[13:11]
   wave = bits[19:15]
   @property
-  def cu(self) -> int: return self.cu_lo | (self.flag7 << 3)
+  def cu(self) -> int: return self.wgp | (self.sa << 3)
 
 class WAVESTART(PacketType):  # exclude: 1 << 4
   encoding = bits[4:0] == 0b01100
   delta = bits[6:5]
-  flag7 = bits[7:7]
+  sa = bits[7:7]
   simd = bits[9:8]
-  cu_lo = bits[12:10]
+  wgp = bits[12:10]
   wave = bits[17:13]
   id7 = bits[31:18]
   @property
-  def cu(self) -> int: return self.cu_lo | (self.flag7 << 3)
+  def cu(self) -> int: return self.wgp | (self.sa << 3)
 
 class WAVESTART_RDNA4(PacketType):  # Layout 4 has wave field at different position
   encoding = bits[4:0] == 0b01100
   delta = bits[6:5]
-  flag7 = bits[7:7]
+  sa = bits[7:7]
   simd = bits[9:8]
-  cu_lo = bits[12:10]
+  wgp = bits[12:10]
   wave = bits[19:15]
   id7 = bits[31:20]
   @property
-  def cu(self) -> int: return self.cu_lo | (self.flag7 << 3)
+  def cu(self) -> int: return self.wgp | (self.sa << 3)
 
 class WAVEALLOC(PacketType):  # exclude: 1 << 10
   encoding = bits[4:0] == 0b00101
@@ -573,7 +573,7 @@ def _build_decode_tables(packet_types: dict[int, type[PacketType]]) -> tuple[dic
   sorted_types = sorted(packet_types.items(), key=lambda x: (-bin(x[1].encoding.mask).count('1'), x[0] == 16))
   state_table = bytes(next((op for op, cls in sorted_types if (b & cls.encoding.mask) == cls.encoding.default), 16) for b in range(256))
   # Build decode info: opcode -> (pkt_cls, nib_count, delta_lo, delta_mask, special_case)
-  # special_case: 0=none, 1=TS_DELTA_OR_MARK (check is_marker), 2=TS_DELTA_SHORT (add 8), 3=CDNA_MISC (*4), 4=CDNA_TIMESTAMP (absolute)
+  # special_case: 0=none, 1=TS_DELTA_OR_MARK (check is_marker), 2=TS_DELTA_SHORT (add 4), 3=CDNA_MISC (*4), 4=CDNA_TIMESTAMP (absolute)
   _special = {TS_DELTA_OR_MARK: 1, TS_DELTA_OR_MARK_RDNA4: 1, TS_DELTA_SHORT: 2, CDNA_MISC: 3, CDNA_TIMESTAMP: 4}
   decode_info = {}
   for opcode, pkt_cls in packet_types.items():
@@ -609,7 +609,7 @@ def decode(data: bytes) -> Iterator[PacketType]:
     if special == 1:  # TS_DELTA_OR_MARK
       pkt = pkt_cls.from_raw(reg, 0)  # create packet to check is_marker
       if pkt.is_marker: delta = 0
-    elif special == 2: delta += 8  # TS_DELTA_SHORT
+    elif special == 2: delta += 4  # TS_DELTA_SHORT
     elif special == 3: delta *= 4  # CDNA_DELTA
     elif special == 4:  # CDNA_TIMESTAMP (absolute timestamp anchoring)
       if (reg >> 4) & 0xfff == 0:  # unk_0 == 0 means absolute timestamp
