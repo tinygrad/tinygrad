@@ -182,7 +182,8 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
     return self._binop(Ops.MOD, x, reverse)
 
   def div(self, x: Self | ConstType, reverse: bool = False) -> Self:
-    return (self.ufix(x) * self.alu(Ops.RECIPROCAL)) if reverse else (self * self.ufix(x).alu(Ops.RECIPROCAL))
+    lhs, rhs = self._broadcasted(x, reverse)
+    return lhs * rhs.reciprocal()
 
   def __neg__(self) -> Self:
     return self.neg()
@@ -566,7 +567,7 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
     ```
     """
     is_finite_close = self.isfinite() & other.isfinite() & ((self - other).abs() <= atol + rtol * other.abs())
-    is_infinite_close = (self.isinf() | other.isinf()) & (self == other)
+    is_infinite_close = (self.isinf() | other.isinf()) & self.eq(other)
     is_nan_close = (self.isnan() & other.isnan()) & equal_nan
     return is_finite_close | is_infinite_close | is_nan_close
 
