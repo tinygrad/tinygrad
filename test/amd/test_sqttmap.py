@@ -120,6 +120,7 @@ class TestSQTTMapBase(unittest.TestCase):
         for r in lines[2:]:
           parts = r.split()
           self.assertTrue(parts[0].isdigit(), f"expected clock timestamp, got {parts[0]}")
+      kernels = run_cli("--profile", "--profile-path", str(pkl_path), "-s", "AMD")
 
 class TestSQTTMapRDNA3(TestSQTTMapBase): target = "gfx1100"
 
