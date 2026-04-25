@@ -4,7 +4,7 @@ import pathlib
 from dataclasses import replace
 from tinygrad import Tensor, Device, Context, GlobalCounters
 from tinygrad.helpers import getenv
-from tinygrad.engine.realize import CompiledRunner, ExecItem, get_program
+from tinygrad.engine.realize import CompiledRunner, get_program
 
 N = 4096
 run_count = 5
@@ -36,7 +36,8 @@ if __name__ == "__main__":
     for _ in range(run_count): tc = (a@b).realize()
 
   GlobalCounters.reset()
-  ei = ExecItem(ast, [a.uop.buffer, b.uop.buffer, c.uop.buffer], prg=runner)
+  bufs = [a.uop.buffer, b.uop.buffer, c.uop.buffer]
+  prg_bufs = [bufs[i] for i in runner.p.globals]
   with Context(DEBUG=2):
-    for _ in range(run_count): ei.run(wait=True)
+    for _ in range(run_count): runner(prg_bufs, {}, wait=True)
   print(f"custom  {(c-tc).square().mean().item()}")
