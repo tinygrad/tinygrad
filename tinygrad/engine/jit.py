@@ -1,5 +1,5 @@
 from typing import TypeVar, Generic, Callable, Any
-import functools, collections
+import functools, collections, weakref
 from tinygrad.tensor import Tensor
 from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, colored, JIT, JIT_BATCH_SIZE, dedup, pluralize, VIZ
 from tinygrad.device import Buffer, Compiled, Device, MultiBuffer
@@ -251,6 +251,7 @@ class TinyJit(Generic[ReturnType]):
     self.captured: CapturedJit|None = captured
     self.cnt: int = 2 if self.fxn is None else 0
     self.prune = prune
+    self._bound_jits: weakref.WeakKeyDictionary[Any, TinyJit[ReturnType]] = weakref.WeakKeyDictionary()
 
   def add_linear(self, linear:UOp, var_vals:dict[str, int]): self._linears.append(linear)
 
@@ -263,7 +264,12 @@ class TinyJit(Generic[ReturnType]):
     assert self.captured is not None, "can't pickle an uncaptured JIT"
     return self.__class__, (None, self.captured)
 
-  def __get__(self, obj, objtype): return functools.partial(self.__call__, obj) # add support for instance methods
+  def __get__(self, obj, objtype):
+    if obj is None or self.fxn is None: return self
+    if (bound:=self._bound_jits.get(obj)) is None:
+      bound = type(self)(self.fxn.__get__(obj, objtype), prune=self.prune)
+      self._bound_jits[obj] = bound
+    return bound
 
   def __call__(self, *args, **kwargs) -> ReturnType:
     input_buf_uops, var_vals, names, expected_input_info = _prepare_jit_inputs(args, kwargs)
