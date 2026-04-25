@@ -273,12 +273,12 @@ class TestCustomKernel(unittest.TestCase):
     C, D, _, _ = Tensor.custom_kernel(C, D, A2, B2, fxn=custom_elementwise_addmul_kernel)  # depends on A2 AND B2
     E = (A2 * 3).contiguous()                      # kernel 2: depends only on A2
     result = (C + D + E).sum()                     # kernel 3: custom_addmul, then kernel 4: sum
-    schedule = result.schedule()
+    schedule = result.schedule_linear().src
 
     # Find the custom_addmul kernel position
     custom_idx = next((i for i, item in enumerate(schedule)
-                       if hasattr(item.ast, "arg") and hasattr(item.ast.arg, "name")
-                       and "custom_addmul" in item.ast.arg.name), None)
+                       if hasattr(item.src[0], "arg") and hasattr(item.src[0].arg, "name")
+                       and "custom_addmul" in item.src[0].arg.name), None)
 
     self.assertIsNotNone(custom_idx, "custom_addmul kernel not found in schedule")
     self.assertEqual(custom_idx, 3, f"custom_addmul should be at index 3, got {custom_idx}")
