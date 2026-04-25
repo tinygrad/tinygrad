@@ -57,7 +57,7 @@ class InstOp(Enum):
   JUMP_NO = 0x4           # branch not taken
   CALL = 0x5              # s_call_b64
   MESSAGE = 0x9
-  VALUT_4 = 0xb           # transcendental: exp, log, rcp, sqrt, sin, cos
+  VALU_TRANS_4 = 0xb      # transcendental: exp, log, rcp, sqrt, sin, cos
   VALUB_2 = 0xd           # 64-bit shifts: lshl, lshr, ashr
   VALUB_4 = 0xe           # 64-bit multiply-add
   VALUB_16 = 0xf          # 64-bit: add, mul, fma, rcp, sqrt, rounding, frexp, div helpers
@@ -105,7 +105,7 @@ class InstOpRDNA4(Enum):
   SALU_NO_EXEC = 0x7
   MESSAGE = 0x9
   VALU_1 = 0xa
-  VALUT_4 = 0xb
+  VALU_TRANS_4 = 0xb
   VALUB_1 = 0xc
   VALUB_2 = 0xd
   VALUB_4 = 0xe

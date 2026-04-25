@@ -386,6 +386,8 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
       if op_type.startswith("WMMA"):
         name = name+"_WMMA"
         if not op_type.startswith("WMMA_VALU"): row = "ALUEXEC:0 WMMA"
+      # transcendental valu gets its own row
+      if "TRANS" in op_type: row = "ALUEXEC:0 TFU"
     # queue inst dispatches
     idx = next(row_counts.setdefault(row, itertools.count(0)))
     if isinstance(p, (VALUINST, INST, INST_RDNA4)) and (exec_type:=dispatch_to_exec.get(name.replace("OTHER_", "").split("_")[0])) is not None:
