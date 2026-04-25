@@ -177,14 +177,14 @@ def main(args) -> None:
       return f"{name} tm {ptm}/{k['st_ms']:9.2f}ms"+(f" ({fmt_str})" if k["fmt"] else "")
     fmt_row = fmt_top if args.top else fmt_all
     seen_refs:set[int] = set()
-    def render_event(k:dict) -> None:
+    def render_event(k:dict, ls=args.list) -> None:
       print(fmt(k, to_str=fmt_row))
       if k["ref"] is not None and k["ref"] not in seen_refs:
         seen_refs.add(k["ref"])
         for s in viz_data.ctxs[k["ref"]]["steps"]:
           if DEBUG >= 3 and s["name"] == "View Base AST": print_step(s)
           if DEBUG >= 4 and s["name"] == "View Source": print_step(s)
-          if DEBUG >= 5 or args.list: print(fmt(" "*s["depth"]+s["name"]+(f" - {s['match_count']}" if s.get('match_count', 0) else '')))
+          if DEBUG >= 5 or ls: print(fmt(" "*s["depth"]+s["name"]+(f" - {s['match_count']}" if s.get('match_count', 0) else '')))
           if DEBUG >= 6: print_step(s)
       elif DEBUG >= 3 and k.get("ext"): print(fmt(k["ext"]))
     produce = produce_top_kernels if args.top else produce_all_kernels
@@ -192,7 +192,7 @@ def main(args) -> None:
       if len(args.item) > 2: raise RuntimeError(f"-i takes at most 2 names (got {args.item})")
       k = get({r["name"]:r for r in produce()}, args.item[0])
       if len(args.item) == 1:
-        with Context(DEBUG=max(DEBUG.value, 2)): render_event(k)
+        with Context(DEBUG=max(DEBUG.value, 3)): render_event(k, ls=True)
       else: print_step(get(rewrites[viz_data.ctxs[k["ref"]]["name"]], args.item[1]))
     else:
       for k in produce(): render_event(k)
