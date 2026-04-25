@@ -14,8 +14,8 @@ from tinygrad.runtime.ops_amd import AMDProgram
 dev = Device["AMD"]
 a = Tensor([1.0]).realize()
 b = a + 1
-si = b.schedule()[-1]
-runner = get_runner(dev.device, si.ast)
+si = b.schedule_linear().src[-1]
+runner = get_runner(dev.device, si.src[0])
 
 prg = runner._prg
 lib = bytearray(prg.lib)

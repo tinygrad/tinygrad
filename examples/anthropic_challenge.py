@@ -176,7 +176,7 @@ if __name__ == "__main__":
   from tinygrad.codegen import get_program
   with Context(PCONTIG=2, DEVECTORIZE=2, SPEC=0):
     out = tree_traversal(forest_t, val_t, height, rounds)
-    sink = out.schedule()[-1].ast
+    sink = out.schedule_linear().src[-1].src[0]
     prg = get_program(sink, VLIWRenderer())
 
   # *** run on Machine and compare ***

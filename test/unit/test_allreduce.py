@@ -9,9 +9,9 @@ class TestRingAllReduce(unittest.TestCase):
       N = 4
       ds = tuple(f"CPU:{i}" for i in range(N))
       t = Tensor.empty(N, N*100).shard(ds, axis=0).realize()
-      schedules = t.sum(0).schedule_with_vars()[0]
-      copies = [si for si in schedules if si.ast.op is Ops.COPY]
-      pairs = [(c.bufs[0].device, c.bufs[1].device) for c in copies]
+      linear = t.sum(0).linear_with_vars()[0]
+      copies = [si for si in linear.src if si.src[0].op is Ops.COPY]
+      pairs = [(c.src[1].buffer.device, c.src[2].buffer.device) for c in copies]
       # N*(N-1) scatter reduce, and N*(N-1) allgather
       self.assertEqual(len(pairs), N*(N-1)*2)
       # copy topology forms a ring
@@ -30,8 +30,8 @@ class TestAllreduceCast(unittest.TestCase):
     ds = tuple(f"CPU:{i}" for i in range(2))
     with Context(ALLREDUCE_CAST=allreduce_cast, RING=0, SCACHE=0):
       t = Tensor.empty(4, 4, dtype=dtype).shard(ds, axis=0)
-      schedules = t.sum(0).schedule_with_vars()[0]
-      return {si.bufs[0].dtype.scalar() for si in schedules if si.ast.op is Ops.COPY}
+      linear = t.sum(0).linear_with_vars()[0]
+      return {si.src[1].buffer.dtype.scalar() for si in linear.src if si.src[0].op is Ops.COPY}
 
   def test_allreduce_cast_bf16(self):
     # with ALLREDUCE_CAST, allreduce copies stay in bfloat16 instead of promoting to float32

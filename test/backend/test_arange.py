@@ -2,23 +2,18 @@ import unittest
 import numpy as np
 from tinygrad import Tensor, GlobalCounters, dtypes, nn, Device, Variable
 from tinygrad.helpers import Context, getenv, DEV
-from tinygrad.engine.realize import run_linear
-from tinygrad.schedule import linear_to_schedule
-from tinygrad.engine.realize import CompiledRunner, get_program
-from tinygrad.schedule import ExecItem
-from tinygrad.renderer import Estimates
+from tinygrad.engine.realize import run_linear, estimate_uop
 from tinygrad.renderer.ptx import PTXRenderer
 from test.helpers import needs_second_gpu
 
 class TestArange(unittest.TestCase):
   def _get_flops(self, tensor, desired):
     GlobalCounters.reset()
-    sched = tensor.schedule()
-    self.assertEqual(len(sched), 1)
-    p = get_program(sched[-1].ast, renderer=Device[Device.DEFAULT].renderer)
-    ExecItem(sched[-1].ast, [tensor.uop.buffer], prg=CompiledRunner(p)).run()
+    linear = tensor.schedule_linear()
+    self.assertEqual(len(linear.src), 1)
+    run_linear(linear)
     np.testing.assert_equal(tensor.numpy(), desired)
-    return p.estimates.ops
+    return estimate_uop(linear.src[-1]).ops
 
   def test_arange_complexity(self):
     self.assertEqual(self._get_flops(Tensor.arange(256), np.arange(256)), 0)
@@ -41,9 +36,8 @@ class TestArange(unittest.TestCase):
   def test_tri_complexity(self):
     with Context(NOOPT=1):
       t = Tensor.ones(256, 256).contiguous().realize()
-      sched = t.triu().schedule()
-      p = get_program(sched[-1].ast, renderer=Device[Device.DEFAULT].renderer)
-      self.assertLessEqual(Estimates.from_uops(p.uops).ops, 4 * 256 * 256)
+      linear = t.triu().schedule_linear()
+      self.assertLessEqual(estimate_uop(linear.src[-1]).ops, 4 * 256 * 256)
 
 DSET, DDIM = 2048, 32
 
@@ -56,7 +50,7 @@ class TestIndexing(unittest.TestCase):
       GlobalCounters.reset()
       out = ((Tensor.arange(1,16385)-1)*needle).sum()
       linear, var_vals = out.linear_with_vars()
-      self.assertEqual(len(linear_to_schedule(linear)), 1)
+      self.assertEqual(len(linear.src), 1)
       run_linear(linear, var_vals)
     self.assertEqual(out.item(), 1337)
 
@@ -73,7 +67,7 @@ class TestIndexing(unittest.TestCase):
       full = (rng==idxs).where(reshape_dataset, Tensor.zeros(4, DDIM, DSET, 1))
       X = full.sum(axis=(2,3))
       linear, var_vals = X.linear_with_vars()
-      self.assertEqual(len(linear_to_schedule(linear)), 1)
+      self.assertEqual(len(linear.src), 1)
       run_linear(linear, var_vals)
       assert GlobalCounters.global_ops < 4*DSET, f"too many ops {GlobalCounters.global_ops}"
     np.testing.assert_allclose(real_index, X.numpy())
@@ -99,7 +93,7 @@ class TestIndexing(unittest.TestCase):
       X = dataset[idxs]
       assert X.shape == (4,DDIM)
       linear, var_vals = X.linear_with_vars()
-      self.assertEqual(len(linear_to_schedule(linear)), 1)
+      self.assertEqual(len(linear.src), 1)
       run_linear(linear, var_vals)
       assert GlobalCounters.global_ops < 4*DSET, f"too many ops {GlobalCounters.global_ops}"
     np.testing.assert_allclose(real_index, X.numpy())
@@ -114,7 +108,7 @@ class TestIndexing(unittest.TestCase):
       X = dataset[idxs]
       assert X.shape == (4,DDIM)
       linear, var_vals = X.linear_with_vars()
-      self.assertEqual(len(linear_to_schedule(linear)), 1)
+      self.assertEqual(len(linear.src), 1)
       run_linear(linear, var_vals)
       assert GlobalCounters.global_ops < 4*DSET, f"too many ops {GlobalCounters.global_ops} != {4*DSET}"
     np.testing.assert_allclose(real_index, X.numpy())
@@ -235,10 +229,9 @@ class TestIndexing(unittest.TestCase):
     xq = xq.reshape(bs, seqlen, n_heads, head_dim)
     xq_rope, _ = apply_rotary_emb(xq, xq, freqs_cis)
     xq_rope.sum().backward()
-    sched = wq.grad.schedule()
-    assert len(sched) == 1, f"expected one kernel for backward, got: {len(sched)}"
-    prg = sched[0].lower().prg.p
-    bwd_ops = prg.estimates.ops
+    linear = wq.grad.schedule_linear()
+    assert len(linear.src) == 1, f"expected one kernel for backward, got: {len(linear.src)}"
+    bwd_ops = estimate_uop(linear.src[0]).ops
     # bfloat16 on non CDNA4 has ~10x ops overhead because of the software emulation
     if dtype == dtypes.bfloat16 and not Device[Device.DEFAULT].renderer.target.arch.startswith("gfx950"): ops_scale = 10
     else: ops_scale = 1

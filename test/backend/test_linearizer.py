@@ -7,7 +7,6 @@ from tinygrad.uop.ops import UOp, Ops, GroupOp, AxisType
 from tinygrad.device import Device, Buffer, is_dtype_supported
 from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.engine.realize import run_linear, CompiledRunner, get_program
-from tinygrad.schedule import linear_to_schedule
 from tinygrad.helpers import Context, flatten, dedup, TC_SELECT, TC_OPT, DEV
 from tinygrad.dtype import DType, dtypes, PtrDType, AddrSpace
 from tinygrad.renderer.ptx import PTXRenderer
@@ -26,9 +25,9 @@ class TestLinearizer(unittest.TestCase):
     a, b = Tensor.randn(4).realize(), Tensor.randn(4).realize()
     np_a, np_b = a.numpy(), b.numpy()
     c = ((a.shrink(((0, 2),)) - a.shrink(((2, 4),))) - (b.shrink(((0, 2),)) - b.shrink(((2, 4),))))
-    sched = c.schedule()
-    for si in sched: si.run()
-    rawbufs = sched[-1].bufs
+    linear = c.schedule_linear()
+    run_linear(linear)
+    rawbufs = [s.buffer for s in linear.src[-1].src[1:] if s.op is not Ops.BIND]
     assert len(rawbufs) == 3 and set(rawbufs[1:]) == {a.uop.base.realized, b.uop.base.realized}
     np_c = (np_a[:2] - np_a[2:]) - (np_b[:2] - np_b[2:])
     np.testing.assert_allclose(np_c, c.numpy(), atol=1e-4, rtol=1e-4)
@@ -135,7 +134,8 @@ class TestLinearizer(unittest.TestCase):
     # these are of size 3 to avoid float4 coalesce
     r = a[:-1] + a[1:]
 
-    uops = get_program(replace_opts(r.schedule()[-1].ast, [Opt(op=OptOps.UPCAST, axis=0, arg=0)]), renderer=Device[Device.DEFAULT].renderer).uops
+    uops = get_program(replace_opts(r.schedule_linear().src[-1].src[0], [Opt(op=OptOps.UPCAST, axis=0, arg=0)]),
+                       renderer=Device[Device.DEFAULT].renderer).uops
     num_loads = len([uop for uop in uops if uop.op is Ops.LOAD])
     assert num_loads <= 4, "more load uops than needed"
     assert num_loads >= 4, "unexpected number of uops, maybe this test needs updating?"
@@ -147,7 +147,8 @@ class TestLinearizer(unittest.TestCase):
     a, b = Tensor.randn(1).realize(), Tensor.randn(1).realize()
     r = a.expand([2]) + b.expand([2])
 
-    uops = get_program(replace_opts(r.schedule()[-1].ast, [Opt(op=OptOps.UPCAST, axis=0, arg=0)]), renderer=Device[Device.DEFAULT].renderer).uops
+    uops = get_program(replace_opts(r.schedule_linear().src[-1].src[0], [Opt(op=OptOps.UPCAST, axis=0, arg=0)]),
+                       renderer=Device[Device.DEFAULT].renderer).uops
     num_ops = len([uop for uop in uops if uop.op in GroupOp.ALU])
     assert num_ops <= 1, "more alu uops than needed"
 
@@ -156,7 +157,7 @@ class TestLinearizer(unittest.TestCase):
     x, w = Tensor.randn((1,1,3)).realize(), Tensor.randn((1,1,2)).realize()
     r = Tensor.conv2d(x,w,padding=1).relu()
 
-    uops = get_program(replace_opts(r.schedule()[-1].ast, [Opt(op=OptOps.UPCAST, axis=0, arg=0), Opt(op=OptOps.UNROLL, axis=0, arg=0)]),
+    uops = get_program(replace_opts(r.schedule_linear().src[-1].src[0], [Opt(op=OptOps.UPCAST, axis=0, arg=0), Opt(op=OptOps.UNROLL, axis=0, arg=0)]),
                        renderer=Device[Device.DEFAULT].renderer).uops
     accs = [u for u in uops if u.op is Ops.DEFINE_REG]
     stores = [u for u in uops if u.op is Ops.STORE]
@@ -169,7 +170,8 @@ class TestLinearizer(unittest.TestCase):
   @unittest.skipUnless(Device.DEFAULT == "CPU", "test only for CPU")
   def test_upcast_with_locals_cpu(self):
     out = Tensor.ones(64,64).contiguous() @ Tensor.ones(64,64).contiguous()
-    prg = get_program(replace_opts(out.schedule()[-1].ast, [Opt(OptOps.LOCAL, axis=0, arg=4)]), renderer=Device[Device.DEFAULT].renderer).uops
+    prg = get_program(replace_opts(out.schedule_linear().src[-1].src[0], [Opt(OptOps.LOCAL, axis=0, arg=4)]),
+                      renderer=Device[Device.DEFAULT].renderer).uops
     self.assertEqual(len(prg.src.split("for")), 5)
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
@@ -180,7 +182,7 @@ class TestLinearizer(unittest.TestCase):
     x, y = Tensor.rand(1,128), Tensor.rand(128, 128)
     r = (x@y).relu()
     opts_to_apply = [Opt(op=OptOps.GROUP, axis=0, arg=8), Opt(op=OptOps.LOCAL, axis=0, arg=4), Opt(op=OptOps.UPCAST, axis=0, arg=4)]
-    program = get_program(replace_opts(r.schedule()[-1].ast, opts_to_apply), renderer=Device[Device.DEFAULT].renderer)
+    program = get_program(replace_opts(r.schedule_linear().src[-1].src[0], opts_to_apply), renderer=Device[Device.DEFAULT].renderer)
 
     stores = [u for u in program.uops if u.op is Ops.STORE and u.src[0].dtype.addrspace != AddrSpace.REG]
 
@@ -194,7 +196,8 @@ class TestLinearizer(unittest.TestCase):
   def test_zero_fold(self):
     a, b = Tensor.randn(1).realize(), Tensor.randn(1).realize()
     r = Tensor.stack(a, b)
-    uops = get_program(replace_opts(r.schedule()[-1].ast, [Opt(op=OptOps.UPCAST, axis=0, arg=0)]), renderer=Device[Device.DEFAULT].renderer).uops
+    uops = get_program(replace_opts(r.schedule_linear().src[-1].src[0], [Opt(op=OptOps.UPCAST, axis=0, arg=0)]),
+                       renderer=Device[Device.DEFAULT].renderer).uops
     num_ops = len([uop for uop in uops if uop.op in GroupOp.ALU])
     assert num_ops == 0, "more alu uops than needed"
 
@@ -203,14 +206,14 @@ class TestLinearizer(unittest.TestCase):
       (dtypes.bool, dtypes.int), (dtypes.int16, dtypes.int), (dtypes.float16, dtypes.float), (dtypes.bfloat16, dtypes.float)):
       if is_dtype_supported(tensor_dtype) and is_dtype_supported(acc_dtype):
         a = Tensor([1, 2, 3], dtype=tensor_dtype).sum()
-        realized_ast = a.schedule()[-1].ast
+        realized_ast = a.schedule_linear().src[-1].src[0]
         program = get_program(replace_opts(realized_ast, []), renderer=Device[Device.DEFAULT].renderer)
         local = [uop for uop in program.uops if uop.op is Ops.DEFINE_REG]
         assert local[0].dtype.base == acc_dtype
 
   def test_arg_acc_dtype(self):
     def helper_arg_acc_dtype(c: Tensor, expected_dtype:DType):
-      realized_ast = c.schedule()[-1].ast
+      realized_ast = c.schedule_linear().src[-1].src[0]
       program = get_program(replace_opts(realized_ast, []), renderer=Device[Device.DEFAULT].renderer)
       local = [uop for uop in program.uops if uop.op is Ops.DEFINE_REG]
       self.assertEqual(local[0].dtype.base, expected_dtype)
@@ -268,10 +271,10 @@ class TestLinearizer(unittest.TestCase):
 
   def test_sum_collapse(self):
     t = Tensor([2]).reshape(1, 1).expand(256, 256).sum()
-    sched = [si for si in t.schedule() if si.ast.op is Ops.SINK]
+    sched = [si for si in t.schedule_linear().src if si.src[0].op is Ops.SINK]
     # sum_collapse is a full collapse now
     assert len(sched) == 1
-    assert not any(u.op is Ops.REDUCE_AXIS for u in sched[0].ast.toposort()), "found reduce in sum collapse"
+    assert not any(u.op is Ops.REDUCE_AXIS for u in sched[0].src[0].toposort()), "found reduce in sum collapse"
     #lin = Kernel(sched[0].ast)
     #assert not any(u.op is Ops.RANGE for u in lin.linearize().uops), "found loop in sum collapse"
 
@@ -288,11 +291,10 @@ class TestLinearizer(unittest.TestCase):
     b = a.shrink(((1, 2), None)).pad(((1, 2), None))
     a.assign(b.where(2, a))
     linear, var_vals = a.linear_with_vars()
-    sched_copy = linear_to_schedule(linear)
-    assert len(sched_copy) == 1
+    assert len(linear.src) == 1
     run_linear(linear, var_vals)
     np.testing.assert_equal(a.flatten().numpy(), [1.,1.,1.,1.,2.,2.,2.,2.,1.,1.,1.,1.,1.,1.,1.,1.])
-    program = get_program(replace_opts(sched_copy[-1].ast, []), renderer=Device[Device.DEFAULT].renderer)
+    program = get_program(replace_opts(linear.src[-1].src[0], []), renderer=Device[Device.DEFAULT].renderer)
     assert not any(u.op == Ops.WHERE for u in program.uops), "found where where where should be folded"
 
   def test_phi_simplification(self):
@@ -390,15 +392,17 @@ class TestLinearizer(unittest.TestCase):
 def helper_realized_ast(r:Tensor|list[Tensor]) -> tuple[UOp, list[Buffer]]:
   if isinstance(r, Tensor): r = [r]
   linear, var_vals = Tensor.linear_with_vars(*r)
-  s = linear_to_schedule(linear)
   run_linear(UOp(Ops.LINEAR, src=linear.src[:-1]), var_vals)  # run all kernels except the last one
-  assert s[-1].ast.op is Ops.SINK, f"helper_realized_ast expects a SINK {s[-1]}"
-  # now all input buffers in s[-1] should be realized
+  last_call = linear.src[-1]
+  ast = last_call.src[0]
+  assert ast.op is Ops.SINK, f"helper_realized_ast expects a SINK {last_call}"
+  last_bufs = [s.buffer for s in last_call.src[1:] if s.op is not Ops.BIND]
+  # now all input buffers in last_call should be realized
   # create fresh buffers for the outputs
-  bufs = [Buffer(x.device, x.size, x.dtype).allocate() if i < len(s[-1].ast.src) else x for i,x in enumerate(s[-1].bufs)]
+  bufs = [Buffer(x.device, x.size, x.dtype).allocate() if i < len(ast.src) else x for i,x in enumerate(last_bufs)]
   # ensure buffers are allocated
   for b in bufs: b.ensure_allocated()
-  return s[-1].ast, bufs
+  return ast, bufs
 
 def helper_linearizer_ast(ast:UOp, inputs:list[Tensor], *args, **kwargs):
   assert isinstance(ast, UOp), "ast must be UOp"

@@ -10,9 +10,9 @@ from tinygrad.helpers import argfix, flatten, prod, all_int, round_up, getenv, a
 from tinygrad.helpers import resolve_pool_pads, IMAGE, FLOAT16, WINO, Metadata, TRACEMETA, is_numpy_ndarray, TracingKey, cpu_profile
 from tinygrad.helpers import suppress_finalizing, disable_gc
 from tinygrad.gradient import compute_gradient
-from tinygrad.mixin import OpMixin, ReductionStr
+from tinygrad.mixin import OpMixin
 from tinygrad.uop.ops import smax, UOp, Ops, sint, all_metadata, _index_to_concrete_int, Variable, _broadcast_shape
-from tinygrad.schedule import ExecItem, create_linear_with_vars, linear_to_schedule
+from tinygrad.schedule import create_linear_with_vars
 from tinygrad.device import Buffer, canonicalize_device
 from tinygrad.engine.realize import run_linear
 from tinygrad.callify import transform_to_call
@@ -76,15 +76,6 @@ def _apply_winograd_matrix(mat, t:Tensor, dims:int) -> Tensor:
   ret = sum(prod(col[idx] for col, idx in zip(matcols, mat_is)) * t_[mat_is] for mat_is in itertools.product(range(len(mat[0])), repeat=dims))
   assert isinstance(ret, Tensor), "sum didn't return a Tensor"
   return ret
-
-def _masked_setitem(target:Tensor, values:Tensor, mask:Tensor, axes:tuple[int, ...]) -> Tensor:
-  # reduce such that if mask contains repeated indices the last one remains
-  for dim in reversed(axes):
-    mask, values = functools.reduce(lambda x,y: (x[0]|y[0], y[0].where(y[1], x[1])), zip(mask.split(1, dim), values.split(1, dim)))
-  # remove extra dims from reduce
-  for dim in reversed(axes): mask, values = mask.squeeze(dim), values.squeeze(dim)
-  # select from values for each True element in mask else select from target
-  return mask.where(values, target)
 
 class Tensor(OpMixin):
   """
@@ -241,20 +232,11 @@ class Tensor(OpMixin):
     _apply_map_to_tensors(becomes_map, name="buffers")
     return create_linear_with_vars(big_sink)
 
-  def schedule_with_vars(self, *lst:Tensor) -> tuple[list[ExecItem], dict[str, int]]:
-    """
-    Creates the schedule needed to realize these Tensor(s), with Variables.
-
-    NOTE: A Tensor can only be scheduled once.
-    """
-    linear, var_vals = self.linear_with_vars(*lst)
-    return linear_to_schedule(linear), var_vals
-
-  def schedule(self, *lst:Tensor) -> list[ExecItem]:
+  def schedule_linear(self, *lst:Tensor) -> UOp:
     """Creates the schedule needed to realize these Tensor(s)."""
-    schedule, var_vals = self.schedule_with_vars(*lst)
+    linear, var_vals = self.linear_with_vars(*lst)
     assert len(var_vals) == 0
-    return schedule
+    return linear
 
   @disable_gc()
   def realize(self, *lst:Tensor, do_update_stats=True) -> Tensor:
@@ -1063,7 +1045,7 @@ class Tensor(OpMixin):
       vb = v.cast(self.dtype)._broadcast_to(_broadcast_shape(x.shape, v.shape))
       for dim in sum_axis: vb = vb.unsqueeze(dim)  # add back reduced dims from sum
       start = dims[0] if not permuted else 0
-      vb = _masked_setitem(x_pre, vb, mask, tuple(range(start, start + len(big_shape))))
+      vb = x_pre._masked_merge(vb, mask, tuple(range(start, start + len(big_shape))))
     elif v is None: return x  # basic getitem
     # basic setitem: broadcast v, reshape to self.ndim (unsqueeze int dims, squeeze None dims)
     else: vb = v.cast(self.dtype)._broadcast_to(x.shape)
@@ -1202,12 +1184,6 @@ class Tensor(OpMixin):
     return indices.masked_select(mask.unsqueeze(-1).expand(*mask.shape, self.ndim)).reshape(-1, self.ndim)
 
   # ***** reduce ops *****
-
-  def allclose(self, other:Tensor, rtol:float=1e-05, atol:float=1e-08, equal_nan=False) -> Tensor:
-    """
-    Check if all self and other are close.
-    """
-    return self.isclose(other, rtol=rtol, atol=atol, equal_nan=equal_nan).all()
 
   def keccak(self, cfg:str|tuple[int, int]="sha3_256"):
     """
@@ -1370,124 +1346,6 @@ class Tensor(OpMixin):
   def dot(self, w:Tensor, dtype:DTypeLike|None=None) -> Tensor:
     if IMAGE: return self.image_dot(w, dtype)
     return super().dot(w, dtype)
-
-  def scatter(self, dim:int, index:Tensor, src:Tensor|PyConst, reduce:Literal['multiply', 'add']|None=None) -> Tensor:
-    """
-    Scatters `src` values along an axis specified by `dim`.
-    Apply `add` or `multiply` reduction operation with `reduce`.
-
-    NOTE: To use the `reduce` argument with a Tensor `src`, see `Tensor.scatter_reduce`.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    src = Tensor.arange(1, 11).reshape(2, 5)
-    print(src.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    index = Tensor([[0, 1, 2, 0]])
-    print(Tensor.zeros(3, 5, dtype=src.dtype).scatter(0, index, src).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    index = Tensor([[0, 1, 2], [0, 1, 4]])
-    print(Tensor.zeros(3, 5, dtype=src.dtype).scatter(1, index, src).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor.full((2, 4), 2.0).scatter(1, Tensor([[2], [3]]), 1.23, reduce='multiply').numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor.full((2, 4), 2.0).scatter(1, Tensor([[2], [3]]), 1.23, reduce='add').numpy())
-    ```
-    """
-    if reduce not in {None, "add", "multiply"}: raise TypeError(f"{reduce=} must be one of None, 'multiply', or 'add'")
-    if reduce and isinstance(src, Tensor): raise TypeError("Tensor src is not supported with reduce arg. see scatter_reduce")
-    if not isinstance(src, Tensor): src = index.full_like(src, device=self.device, dtype=self.dtype)
-    if reduce == "add": return self.scatter_reduce(dim, index, src, "sum", include_self=True)
-    if reduce == "multiply": return self.scatter_reduce(dim, index, src, "prod", include_self=True)
-    src, mask = self._pre_scatter(dim, index, src)
-    return _masked_setitem(self, src, mask, (-1,))
-
-  def sort(self, dim:int=-1, descending:bool=False) -> tuple[Tensor, Tensor]:
-    """
-    Performs a bitonic sort on the tensor along the specified dimension.
-
-    Order of indices for equivalent elements is always preserved.
-
-    See: https://en.wikipedia.org/wiki/Bitonic_sorter
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([[0.1, 0.5, 1.2, 3.4, 2.1], [2.2, 1.9, 0.3, 4.5, 0.8]])
-    print(t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    sorted_values, indices = t.sort(dim=1, descending=True)
-    print(sorted_values.numpy())
-    print(indices.numpy())
-    ```
-    """
-    x, dim = self, self._resolve_dim(dim)
-    if (orig_len := int(x.shape[dim])) <= 1: return x, x.zeros_like(dtype=dtypes.default_int)
-    # pad to power of 2
-    n_stages = (orig_len-1).bit_length()
-    pads = tuple((0, 2**n_stages - orig_len) if i == dim else None for i in range(x.ndim))
-    x = x.pad(pads, value=x.dtype.min if descending else x.dtype.max).unflatten(dim, (2,)*n_stages)
-    # https://en.wikipedia.org/wiki/Bitonic_sorter#/media/File:BitonicSort1.svg
-    for stage in range(1, n_stages+1):
-      if stage != n_stages:
-        # flip so arrows of green boxes point the same way as blue boxes
-        crossover_dim = dim + n_stages - stage - 1
-        blue_box, green_box = x.split(1, crossover_dim)
-        flip_dims = tuple(-i for i in range(1, stage+1+(self.ndim-dim)))
-        x = (blue_box.cat(green_box.flip(flip_dims), dim=crossover_dim)).contiguous()
-      for substage in range(stage-1, -1, -1):
-        partner_dim = dim + n_stages - substage - 1
-        x_top, x_bottom = x.split(1, partner_dim)
-        x_larger, x_smaller = x_top.maximum(x_bottom), x_top.minimum(x_bottom)
-        x = (x_larger.cat(x_smaller, dim=partner_dim) if descending else x_smaller.cat(x_larger, dim=partner_dim)).contiguous()
-      if stage != n_stages:
-        # flip wires back to undo the crossover
-        blue_box, flipped_green_box = x.split(1, crossover_dim)
-        x = blue_box.cat(flipped_green_box.flip(flip_dims), dim=crossover_dim)
-    x = x.flatten(dim, dim+n_stages-1).shrink_to(self.shape)
-    # compute indices for sorted values
-    mask = Tensor.ones(orig_len, orig_len, dtype=dtypes.bool, device=self.device).tril().reshape((None, None) + (1,)*(self.ndim-dim-1))
-    def compute_counts(t:Tensor): return (mask & (t.unsqueeze(dim) == t.unsqueeze(dim+1))).sum(dim+1)
-    count_orig, count_sorted = compute_counts(self), compute_counts(x)
-    cond = (self.unsqueeze(dim+1) == x.unsqueeze(dim)) & (count_orig.unsqueeze(dim+1) == count_sorted.unsqueeze(dim))
-    idx = Tensor.arange(orig_len, device=self.device).reshape(tuple(orig_len if i == dim else 1 for i in range(x.ndim)))
-    idx = (cond * idx.unsqueeze(dim+1)).sum(dim)
-    return x, idx
-
-  def argsort(self, dim:int=-1, descending:bool=False) -> Tensor:
-    """
-    Returns the indices that sort input tensor along given `dimension` in given `descending` order by value.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([[2, 3, 4, 1], [1, 4, 3, 2]])
-    print(t.argsort().numpy())
-    ```
-    """
-    return self.sort(dim, descending)[1]
-
-  def topk(self, k:int, dim:int=-1, largest:bool=True, sorted_:bool=True) -> tuple[Tensor, Tensor]:
-    """
-    Computes the top-k elements of the tensor along the specified `dim`.
-
-    Order of indices for equivalent elements is always preserved.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([[0.1, 0.5, 1.2, 3.4, 2.1], [2.2, 1.9, 0.3, 4.5, 0.8]])
-    print(t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    topk_values, topk_indices = t.topk(2, dim=1)
-    print(topk_values.numpy())
-    print(topk_indices.numpy())
-    ```
-    """
-    if not sorted_: raise NotImplementedError("topk with sorted_=False is not supported")
-    if k > self.shape[dim:=self._resolve_dim(dim)]: raise ValueError(f"selected index {k=} is out of range")
-    x, idx = self.sort(dim, descending=largest)
-    topk_shape = tuple(k if i == dim else None for i in range(self.ndim))
-    return x.shrink_to(topk_shape), idx.shrink_to(topk_shape)
 
   # ***** unary ops *****
 
@@ -1665,30 +1523,6 @@ class Tensor(OpMixin):
       if attn_mask.dtype == dtypes.bool: attn_mask = attn_mask.where(0, -float("inf"))
       qk = qk + attn_mask
     return qk.cast(self.dtype).softmax(-1).dropout(dropout_p) @ value
-
-  def nll_loss(self, Y:Tensor, weight:Tensor|None=None, ignore_index:int|None=None, reduction:ReductionStr="mean") -> Tensor:
-    """
-    Computes the negative log likelihood loss between log-probabilities and target labels.
-
-    NOTE: `self` is log-probabilities and `Y` is the Y labels or class probabilities.
-
-    See: https://pytorch.org/docs/stable/generated/torch.nn.functional.nll_loss.html
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([[-1, 2, -3], [1, -2, 3]])
-    Y = Tensor([1, 2])
-    print(t.log_softmax().nll_loss(Y).item())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([[-1, 2, -3], [1, -2, 3]])
-    Y = Tensor([1, 2])
-    print(t.log_softmax().nll_loss(Y, reduction='none').numpy())
-    ```
-    """
-    weight = Y.ones_like(requires_grad=False) if weight is None else weight[Y]
-    masked_weight = weight if ignore_index is None else weight * (Y != ignore_index)
-    nll = -self.gather(1, Y.unsqueeze(1)).squeeze(1) * masked_weight
-    return nll.sum() / masked_weight.sum() if reduction == "mean" else nll._do_reduction(reduction)
 
   def qr(self) -> tuple[Tensor, Tensor]:
     assert self.ndim > 1, f"expected two or more dimensions, got {self.ndim}"

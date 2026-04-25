@@ -320,13 +320,13 @@ class TestVizGC(unittest.TestCase):
 # VIZ integrates with other parts of tinygrad
 
 from tinygrad import Tensor, Device
-from tinygrad.engine.realize import get_program
+from tinygrad.engine.realize import get_program, get_runner
 
 class TestVizIntegration(unittest.TestCase):
   # codegen supports rendering of code blocks
   def test_codegen_tracing(self):
     with save_viz() as viz:
-      ast = Tensor.schedule(Tensor.empty(4)+Tensor.empty(4))[0].ast
+      ast = (Tensor.empty(4)+Tensor.empty(4)).schedule_linear().src[0].src[0]
       prg = get_program(ast, Device[Device.DEFAULT].renderer)
     lst = viz.list_items()
     self.assertEqual(len(lst), 3)
@@ -339,8 +339,8 @@ class TestVizIntegration(unittest.TestCase):
     with save_viz() as viz:
       c1 = Tensor.empty(4).add(1)
       c2 = Tensor.empty(8).add(1)
-      sched = Tensor.schedule(c1, c2)
-      prgs = [get_program(si.ast, Device[Device.DEFAULT].renderer).name for si in sched]
+      sched = c1.schedule_linear(c2)
+      prgs = [get_program(si.src[0], Device[Device.DEFAULT].renderer).name for si in sched.src]
     lst = viz.list_items()
     sched_idx = next(i for i,l in enumerate(lst) if l["name"].startswith("Schedule"))
     viz_kernel = next(i for i,s in enumerate(lst[sched_idx]["steps"]) if s["name"] == "View Kernel Graph")
@@ -356,7 +356,7 @@ class TestVizIntegration(unittest.TestCase):
       a = Tensor.empty(1)
       b = Tensor.empty(1)
       metadata = (alu:=a+b).uop.metadata
-      alu.schedule()
+      alu.schedule_linear()
     graph = next(viz.get_details(0, 0))["graph"]
     self.assertEqual(len([n for n in graph.values() if repr(metadata) in n["label"]]), 1)
 
@@ -722,9 +722,9 @@ class TestCfg(unittest.TestCase):
       gidx = UOp.special(1, "gidx0")
       sink = UOp.sink(out.base, lidx, gidx, arg=KernelInfo(name=name))
       return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg="NULL"), UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=x) for x in insts]))))
-    with Context(DEV=f"NULL:HIP:{self.arch}"):
+    with Context(DEV=f"NULL::{self.arch}"):
       out = Tensor.custom_kernel(Tensor.empty(1), fxn=fxn)[0]
-      prg = out.schedule()[-1].lower().prg.p
+      prg = get_runner(out.device, out.schedule_linear().src[-1].src[0]).p
       return amdgpu_cfg(prg.lib, self.arch)
 
   def test_simple(self):
@@ -924,7 +924,7 @@ class TestCLI(unittest.TestCase):
       (p:=Path(tmpdir)/"profile.pkl").write_bytes(pickle.dumps(cpu_events))
       # reconstruct DEBUG=4 output and see all markers.
       with Context(DEBUG=4):
-        kernels = run_cli("--rewrites-path", str(r), "--profile-path", str(p), "-p", "-s", "NULL")
+        kernels = run_cli("--rewrites-path", str(r), "--profile-path", str(p), "-s", "NULL")
       self.assertIn("void custom_empty_n0", kernels)
       self.assertIn("marker @ 1", kernels)
       self.assertIn("void custom_empty_n1", kernels)
@@ -933,11 +933,11 @@ class TestCLI(unittest.TestCase):
       self.assertIn("UOp.const", kernels)
       # get the top slowest functions across all devices
       with Context(DEBUG=2):
-        times = run_cli("--rewrites-path", str(r), "--profile-path", str(p), "-p", "-s", "ALL", "--top", "-1")
+        times = run_cli("--rewrites-path", str(r), "--profile-path", str(p), "-s", "ALL", "--top", "-1")
       self.assertIn("TINY", times)
       self.assertIn("NULL", times)
       with Context(DEBUG=3):
-        json_lines = run_cli("--rewrites-path", str(r), "--profile-path", str(p), "-p", "-s", "ALL", "--json")
+        json_lines = run_cli("--rewrites-path", str(r), "--profile-path", str(p), "-s", "ALL", "--json")
       for line in json_lines.split("\n"): _ = json.loads(line)
 
 if __name__ == "__main__":

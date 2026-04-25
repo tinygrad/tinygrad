@@ -19,7 +19,7 @@ The `UOp` graph specifies the compute in terms of low level tinygrad ops. Not al
 
 The [scheduler](https://github.com/tinygrad/tinygrad/tree/master/tinygrad/schedule/__init__.py) converts the graph of UOps into a list of `ExecItem`. One `ExecItem` is one kernel on the GPU, and the scheduler is responsible for breaking the large compute graph into subgraphs that can fit in a kernel. `ast` specifies what compute to run, and `bufs` specifies what buffers to run it on.
 
-::: tinygrad.schedule.ExecItem
+::: tinygrad.engine.realize.ExecItem
 
 ## Lowering
 

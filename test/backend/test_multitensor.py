@@ -4,8 +4,7 @@ from tinygrad.device import is_dtype_supported
 from tinygrad.uop.ops import Ops, UOp
 from tinygrad.helpers import getenv, prod, Context
 from tinygrad.nn.state import get_parameters, get_state_dict
-from tinygrad.engine.realize import CompiledRunner, run_linear
-from tinygrad.schedule import linear_to_schedule
+from tinygrad.engine.realize import run_linear, compile_linear
 import numpy as np
 from hypothesis import given, strategies as strat, settings
 from test.helpers import not_support_multi_device, needs_second_gpu, slow, call_is_graph
@@ -128,12 +127,9 @@ class TestMultiTensor(unittest.TestCase):
     X = Tensor.ones(256).contiguous().realize()
     X.shard_(devices_2, 0)
     out = (X + X)
-    sched = out.schedule()
-    names = []
-    for si in sched:
-      si.lower()
-      if isinstance(si.prg, CompiledRunner): names.append(si.prg.p.name)
-      si.run()
+    linear = compile_linear(out.schedule_linear())
+    names = [call.src[0].src[0].arg.name for call in linear.src if call.src[0].op is Ops.PROGRAM]
+    run_linear(linear)
     self.assertEqual(len(set(names)), 1, "function was relinearized")
 
   def test_shard_same_device(self):
@@ -194,9 +190,9 @@ class TestMultiTensor(unittest.TestCase):
     for i in range(2):
       xt = X[i*2:i*2+2].contiguous()
       linear, var_vals = xt.linear_with_vars()
-      #kernels = [s for s in linear_to_schedule(linear) if s.ast.op is Ops.SINK]
+      #kernels = [call for call in linear.src if call.src[0].op is Ops.SINK]
       #self.assertEqual(len(kernels), 1)
-      #self.assertEqual(kernels[0].bufs[0].device, devices_2[i])
+      #self.assertEqual(kernels[0].src[1].buffer.device, devices_2[i])
       run_linear(linear, var_vals)
       np.testing.assert_equal(xt.numpy(), X_np[i*2:i*2+2])
 
@@ -655,12 +651,9 @@ class TestMultiTensor(unittest.TestCase):
     for p in get_parameters(bn): p.shard_(devices_4).realize()
 
     out = bn(t)
-    scheds = [sched for sched in out.schedule() if sched.bufs[0].device in devices_4 and sched.ast.op is not Ops.COPY]
-    assert set(sched.bufs[0].device for sched in scheds) == set(devices_4), "should have ast on each shard device"
-    asts = [sched.ast for sched in scheds]
-    self.assertEqual(len(asts), 4)
-    # ast are the same on devices
-    self.assertEqual(len(set(asts)), 1)
+    scheds = [call for call in out.schedule_linear().src if call.src[0].op is not Ops.COPY and set(call.device) <= set(devices_4)]
+    self.assertEqual(set(scheds[0].device), set(devices_4), "should have ast on each shard device")
+    self.assertEqual(len(set(s.src[0] for s in scheds)), 1)
 
   def test_flip(self):
     rng = Tensor.rand((10, 10, 10))
@@ -700,7 +693,7 @@ class TestMultiTensor(unittest.TestCase):
 
     # test no left join
     with self.assertRaises((AssertionError, ValueError)):
-      t0.reshape((26*15,7)).contiguous().schedule()
+      t0.reshape((26*15,7)).contiguous().schedule_linear()
 
   # it doesn't work like this anymore
   # NOTE: this never failed in assign_multi, it failed tensor spec because MULTI was never pushed in the graph
@@ -711,7 +704,7 @@ class TestMultiTensor(unittest.TestCase):
     with self.assertRaises(RuntimeError):
       # don't allow assigns that change axes
       t_none.assign(t_zero)
-      t_none.schedule()
+      t_none.schedule_linear()
 
   def test_init_rand_with_multiple_devices_fail(self):
     # init rand with multi device is not allowed
@@ -809,7 +802,7 @@ class TestMultiTensor(unittest.TestCase):
     t = Tensor.ones(16, 16, dtype=dtypes.int).shard(devices_2, axis=0)
     out = Tensor.full_like(t, 2)[:, :8]
     linear, var_vals = out.linear_with_vars()
-    self.assertEqual(len(linear_to_schedule(linear)), 0)
+    self.assertEqual(len(linear.src), 0)
     run_linear(linear, var_vals)
     self.assertEqual(out.tolist(), [[2]*8]*16)
 
@@ -852,7 +845,7 @@ class TestMultiTensor(unittest.TestCase):
       a = Tensor.arange(3).realize()
       zeros = Tensor.zeros(3).realize()
     b = a.to(devices_2)*zeros.to(devices_2)
-    sched = b.schedule()
+    sched = b.schedule_linear().src
     self.assertEqual(len(sched), 0)
     self.assertListEqual(b.tolist(), [0, 0, 0])
 
@@ -863,7 +856,7 @@ class TestHandleData(unittest.TestCase):
     device = (d0, d1, d2, d3)
     t = Tensor([1, 2, 3, 4]).shard(device).realize()
     not_covered = t.to(d5)
-    sched = not_covered.schedule()
+    sched = not_covered.schedule_linear().src
     assert len(sched) == 1
     # setup again because create_schedule has side effect
     t = Tensor([1, 2, 3, 4]).shard(device).realize()
@@ -873,7 +866,7 @@ class TestHandleData(unittest.TestCase):
     for d in device:
       t = Tensor([1, 2, 3, 4]).shard(device).realize()
       covered = t.to(d)
-      sched = covered.schedule()
+      sched = covered.schedule_linear().src
       # TODO: this isn't optimized out anymore
       #assert len(sched) == 0
       # setup again because create_schedule has side effect
@@ -894,18 +887,18 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
     with self.assertRaises(AssertionError):
       # sharded axis shrink on non-device boundry is not allowed
       a = t.shrink(((0, 3), (0, 8))).contiguous()
-      a.schedule()
+      a.schedule_linear()
     a = t.shrink(((0, 2), (2, 4)))
     assert a.shape == (2, 2)
     ref = Tensor.arange(64).reshape(8, 8).shrink(((0, 2), (2, 4)))
     np.testing.assert_equal(a.numpy(), ref.numpy())
 
     a = t.shrink(((0, 2), (0, 8))).contiguous()
-    a.schedule()
+    a.schedule_linear()
     assert a.shape == (2, 8)
 
     p = a.pad(((0, 6), (0, 0))).contiguous()
-    p.schedule()
+    p.schedule_linear()
     assert p.shape == (8, 8)
 
   @given(strat.sampled_from([dtypes.float, dtypes.int, dtypes.int64, dtypes.int16]))
@@ -1120,9 +1113,9 @@ class TestBatchNorm(unittest.TestCase):
           p.to_(devices)
 
       synced_out = synced_bn(x)
-      synced_si = list(synced_out.schedule())
+      synced_si = list(synced_out.schedule_linear().src)
       unsynced_out = unsynced_bn(x)
-      unsynced_si = list(unsynced_out.schedule())
+      unsynced_si = list(unsynced_out.schedule_linear().src)
 
     # TODO: test synced / unsynced batchnorm cross device kernel and copies
     assert synced_si
@@ -1159,12 +1152,12 @@ class TestMultiBufferView(unittest.TestCase):
   def setUp(self): pass
 
   def _check(self, a_ref:Tensor, a_multi:Tensor, view_fn):
-    """Apply view_fn to both, verify zero compiled kernels and matching values."""
     b_ref = view_fn(a_ref)
     b_multi = view_fn(a_multi).contiguous()
     linear, var_vals = b_multi.linear_with_vars()
-    compiled = [si for si in linear_to_schedule(linear) if isinstance(si.prg, CompiledRunner)]
-    self.assertEqual(len(compiled), 0, f"expected zero compiled kernels, got {len(compiled)}")
+    if all(hasattr(Device[d].allocator, "_offset") for d in b_multi.device):
+      compiled = [call for call in linear.src if call.src[0].op is Ops.SINK]
+      self.assertEqual(len(compiled), 0, f"expected zero compiled kernels, got {len(compiled)}")
     run_linear(linear, var_vals)
     np.testing.assert_equal(b_multi.numpy(), b_ref.numpy())
 
@@ -1192,11 +1185,13 @@ class TestMultiBufferView(unittest.TestCase):
   def test_4_devices(self):
     ref = Tensor.arange(8*12).reshape(8, 12).contiguous().realize()
     a = Tensor.arange(8*12).reshape(8, 12).contiguous().shard(devices_4, axis=1).realize()
-    linear, var_vals = a[5].contiguous().linear_with_vars()
-    compiled = [si for si in linear_to_schedule(linear) if isinstance(si.prg, CompiledRunner)]
-    self.assertEqual(len(compiled), 0)
+    out = a[5].contiguous()
+    linear, var_vals = out.linear_with_vars()
+    if all(hasattr(Device[d].allocator, "_offset") for d in out.device):
+      compiled = [call for call in linear.src if call.src[0].op is Ops.SINK]
+      self.assertEqual(len(compiled), 0)
     run_linear(linear, var_vals)
-    np.testing.assert_equal(a[5].contiguous().numpy(), ref[5].numpy())
+    np.testing.assert_equal(out.numpy(), ref[5].numpy())
 
 @unittest.skipIf(not_support_multi_device(), "need multi")
 class TestMultiFromUnrenderable(unittest.TestCase):

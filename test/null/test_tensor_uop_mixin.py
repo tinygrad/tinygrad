@@ -112,6 +112,31 @@ class TestTensorUOpOneHot(unittest.TestCase):
     t = _t(5)
     self.assertIs(_strip_unique(t.one_hot(5).uop), _strip_unique(t.uop.one_hot(5)))
 
+class TestTensorUOpSort(unittest.TestCase):
+  def _check(self, t, **kw):
+    tv, ti = t.sort(**kw)
+    uv, ui = t.uop.sort(**kw)
+    self.assertIs(_strip_unique(tv.uop), _strip_unique(uv))
+    self.assertIs(_strip_unique(ti.uop), _strip_unique(ui))
+  def test_sort_1d(self):         self._check(Tensor([0.5, 0.1, 0.3]).float())
+  def test_sort_descending(self): self._check(Tensor([0.5, 0.1, 0.3]).float(), descending=True)
+  def test_sort_2d(self):         self._check(_t(2, 4).float())
+  def test_sort_single(self):     self._check(Tensor([1.0]).float())
+  def test_argsort(self):
+    t = Tensor([0.5, 0.1, 0.3]).float()
+    self.assertIs(_strip_unique(t.argsort().uop), _strip_unique(t.uop.argsort()))
+  def test_topk(self):
+    t = _t(2, 4).float()
+    tv, ti = t.topk(2)
+    uv, ui = t.uop.topk(2)
+    self.assertIs(_strip_unique(tv.uop), _strip_unique(uv))
+    self.assertIs(_strip_unique(ti.uop), _strip_unique(ui))
+
+class TestTensorUOpAllclose(unittest.TestCase):
+  def test_allclose(self):
+    a, b = _t(4).float(), _t(4).float()
+    self.assertIs(_strip_unique(a.allclose(b).uop), _strip_unique(a.uop.allclose(b.uop)))
+
 class TestTensorUOpGather(unittest.TestCase):
   def _check(self, t, dim, idx):
     self.assertIs(_strip_unique(t.gather(dim, idx).uop), _strip_unique(t.uop.gather(dim, idx.uop)))
@@ -138,6 +163,48 @@ class TestTensorUOpLoss(unittest.TestCase):
     t, Y = _t(2, 3).float(), Tensor([1, 2], dtype=dtypes.int32)
     self.assertIs(_strip_unique(t.sparse_categorical_crossentropy(Y, ignore_index=0).uop),
                   _strip_unique(t.uop.sparse_categorical_crossentropy(Y.uop, ignore_index=0)))
+  def test_nll_loss(self):
+    t, Y = _t(2, 3).float().log_softmax(), Tensor([1, 2], dtype=dtypes.int32)
+    self.assertIs(_strip_unique(t.nll_loss(Y).uop), _strip_unique(t.uop.nll_loss(Y.uop)))
+  def test_nll_loss_weight(self):
+    t, Y, w = _t(2, 3).float().log_softmax(), Tensor([1, 2], dtype=dtypes.int32), _t(3).float()
+    self.assertIs(_strip_unique(t.nll_loss(Y, weight=w).uop), _strip_unique(t.uop.nll_loss(Y.uop, weight=w.uop)))
+  def test_nll_loss_ignore_index(self):
+    t, Y = _t(2, 3).float().log_softmax(), Tensor([1, 2], dtype=dtypes.int32)
+    self.assertIs(_strip_unique(t.nll_loss(Y, ignore_index=1).uop), _strip_unique(t.uop.nll_loss(Y.uop, ignore_index=1)))
+  def test_nll_loss_none_reduction(self):
+    t, Y = _t(2, 3).float().log_softmax(), Tensor([1, 2], dtype=dtypes.int32)
+    self.assertIs(_strip_unique(t.nll_loss(Y, reduction="none").uop), _strip_unique(t.uop.nll_loss(Y.uop, reduction="none")))
+  def test_nll_loss_weight_ignore_index(self):
+    t, Y, w = _t(2, 3).float().log_softmax(), Tensor([1, 2], dtype=dtypes.int32), _t(3).float()
+    self.assertIs(_strip_unique(t.nll_loss(Y, weight=w, ignore_index=1).uop),
+                  _strip_unique(t.uop.nll_loss(Y.uop, weight=w.uop, ignore_index=1)))
+
+class TestTensorUOpScatter(unittest.TestCase):
+  def test_scatter(self):
+    x, idx, src = _t(3, 4).float(), Tensor([[0, 1, 2, 0]], dtype=dtypes.int32), _t(1, 4).float()
+    self.assertIs(_strip_unique(x.scatter(0, idx, src).uop), _strip_unique(x.uop.scatter(0, idx.uop, src.uop)))
+  def test_scatter_scalar_src(self):
+    x, idx = _t(3, 4).float(), Tensor([[0, 1]], dtype=dtypes.int32)
+    self.assertIs(_strip_unique(x.scatter(1, idx, 3.14).uop), _strip_unique(x.uop.scatter(1, idx.uop, 3.14)))
+  # inf cannot be cast to int — this regresses if scalar src is routed through index.dtype first
+  def test_scatter_inf_src(self):
+    x, idx = _t(3, 4).float(), Tensor([[0, 1]], dtype=dtypes.int32)
+    self.assertIs(_strip_unique(x.scatter(1, idx, float("inf")).uop),
+                  _strip_unique(x.uop.scatter(1, idx.uop, float("inf"))))
+  def test_scatter_add(self):
+    x, idx = _t(3, 4).float(), Tensor([[0, 1]], dtype=dtypes.int32)
+    self.assertIs(_strip_unique(x.scatter(1, idx, 3.14, reduce="add").uop),
+                  _strip_unique(x.uop.scatter(1, idx.uop, 3.14, reduce="add")))
+  def test_scatter_multiply(self):
+    x, idx = _t(3, 4).float(), Tensor([[0, 1]], dtype=dtypes.int32)
+    self.assertIs(_strip_unique(x.scatter(1, idx, 3.14, reduce="multiply").uop),
+                  _strip_unique(x.uop.scatter(1, idx.uop, 3.14, reduce="multiply")))
+  # tensor src with reduce hits the "elif reduce: raise" branch in both Tensor and UOp paths
+  def test_scatter_tensor_src_with_reduce_raises(self):
+    x, idx, src = _t(3, 4).float(), Tensor([[0, 1]], dtype=dtypes.int32), _t(1, 2).float()
+    with self.assertRaises(TypeError): x.scatter(1, idx, src, reduce="add")
+    with self.assertRaises(TypeError): x.uop.scatter(1, idx.uop, src.uop, reduce="add")
 
 class TestTensorUOpScatterReduce(unittest.TestCase):
   def _check(self, x, idx, src, **kw):
