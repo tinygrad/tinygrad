@@ -128,25 +128,22 @@ def custom_handwritten(A:UOp, arch:str) -> UOp:
   # (codes 1-4 = previous VALU, codes 5-7 = previous transcendental VALU)
   # rdna4 manual 7.10: V_S_* are "VALU ops that operate on a single lane of data,
   #   src and dst are SGPRs ... these use the VALU pipeline like any other VALU op"
+  # interleave 2 regular + 2 pseudo-scalar to mix VALUT_4 (4c) and VALU_SCL_TRANS (1c) on the trans pipe
   if "TRANSCENDENTAL" in pipes:
     for i in range(UNROLL_N):
       k.emit(r4.v_mov_b32_e32(v[20+i], i))
-      # regular trans (VALUT_4, op 0xb)
-      k.emit(r4.v_rcp_f32_e32(v[60+i], v[12+i]))
-      k.emit(r4.v_rsq_f32_e32(v[61+i], v[12+i]))
-      k.emit(r4.v_sqrt_f32_e32(v[62+i], v[12+i]))
-      k.emit(r4.v_exp_f32_e32(v[63+i], v[12+i]))
-      k.emit(r4.v_log_f32_e32(v[64+i], v[12+i]))
-      k.emit(r4.v_sin_f32_e32(v[65+i], v[12+i]))
-      k.emit(r4.v_cos_f32_e32(v[66+i], v[12+i]))
-      # pseudo-scalar trans (VALU_SCL_TRANS, op 0x99): rdna4 manual 7.10
-      # "VALU ops that operate on a single lane of data where both src and dst are SGPRs"
-      # they take a VALU issue slot but ignore EXEC and don't touch VGPRs
-      k.emit(r4.v_s_rcp_f32(s[60+i], s[12+i]))
-      k.emit(r4.v_s_rsq_f32(s[61+i], s[12+i]))
-      k.emit(r4.v_s_sqrt_f32(s[62+i], s[12+i]))
-      k.emit(r4.v_s_exp_f32(s[63+i], s[12+i]))
-      k.emit(r4.v_s_log_f32(s[64+i], s[12+i]))
+      k.emit(r4.v_rcp_f32_e32(v[60+i], v[12+i]))   # regular trans (VALUT_4, 4c)
+      k.emit(r4.v_rsq_f32_e32(v[61+i], v[12+i]))   # regular trans (VALUT_4, 4c)
+      k.emit(r4.v_s_rcp_f32(s[60+i], s[12+i]))     # pseudo-scalar trans (VALU_SCL_TRANS, 1c)
+      k.emit(r4.v_s_rsq_f32(s[61+i], s[12+i]))     # pseudo-scalar trans (VALU_SCL_TRANS, 1c)
+      k.emit(r4.v_sqrt_f32_e32(v[62+i], v[12+i]))  # regular trans
+      k.emit(r4.v_exp_f32_e32(v[63+i], v[12+i]))   # regular trans
+      k.emit(r4.v_s_sqrt_f32(s[62+i], s[12+i]))    # pseudo-scalar trans
+      k.emit(r4.v_s_exp_f32(s[63+i], s[12+i]))     # pseudo-scalar trans
+      k.emit(r4.v_log_f32_e32(v[64+i], v[12+i]))   # regular trans
+      k.emit(r4.v_sin_f32_e32(v[65+i], v[12+i]))   # regular trans
+      k.emit(r4.v_s_log_f32(s[64+i], s[12+i]))     # pseudo-scalar trans
+      k.emit(r4.v_cos_f32_e32(v[66+i], v[12+i]))   # regular trans (no V_S_COS variant)
   k.emit(r4.s_add_co_i32(s[1], s[1], -1))
   k.emit(r4.s_cmp_eq_i32(s[1], 0))
   k.emit(r4.s_cbranch_scc0(), target="loop")
