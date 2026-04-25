@@ -17,7 +17,7 @@ base_rewrite = PatternMatcher([
   # r method accesses
   (UPat(Ops.RANGE, name="x"),
    lambda ctx,x: f"for ({ctx.render_dtype(x.dtype)} {ctx[x]} = 0; {ctx[x]} < {ctx[x.src[0]]}; {ctx[x]}++) {{"),
-  (UPat(Ops.VECTORIZE, name="x"),
+  (UPat(Ops.STACK, name="x"),
    lambda ctx,x: f"{ctx.float4.replace('float4', ctx.render_dtype(x.dtype))}" + \
     f"{ctx.float4_style[0]}{','.join([ctx[y] for y in x.src])}{ctx.float4_style[1]}"),
   (UPat(Ops.CAST, name="x"), lambda ctx,x:
@@ -87,8 +87,7 @@ def create_non_native_float_pats(dts:tuple[DType, ...], casting:bool=True):
 def cast_float_to_bf16(x: UOp) -> UOp:
   assert x.dtype == dtypes.float, "cast float -> bf16 must start with float"
   x = x.bitcast(dtypes.uint)
-  # NOTE: != returns UOp, not bool, issue with mypy
-  x = ((-x & 0x7f800000) != 0).where(x + ((x >> 16) & 1) + 0x7fff, ((x & 0xffff) != 0).where((x | 0x10000), x))  # type: ignore[comparison-overlap]
+  x = (-x & 0x7f800000).ne(0).where(x + ((x >> 16) & 1) + 0x7fff, (x & 0xffff).ne(0).where((x | 0x10000), x))
   return (x >> 16).cast(dtypes.ushort).bitcast(dtypes.bfloat16)
 
 # manual bfloat16 casting patterns (shared between LLVM, Clang, and AMD renderers to avoid compiler intrinsics)
@@ -192,7 +191,7 @@ class CStyleLanguage(Renderer):
       elif u.op is Ops.RANGE: r[u] = f"{axis_letters[u.arg[-1]]}idx"+range_str(u)
       else:
         prefix = {Ops.WMMA: "wmma", Ops.DEFINE_LOCAL: "temp", Ops.CONST: "const",
-                  Ops.CAST: "cast", Ops.BITCAST: "cast", Ops.GEP: "gep", Ops.VECTORIZE: "cast",
+                  Ops.CAST: "cast", Ops.BITCAST: "cast", Ops.GEP: "gep", Ops.STACK: "cast",
                   Ops.INDEX: "bidx", Ops.DEFINE_REG: "acc", Ops.LOAD: "val"}.get(u.op, "alu")
         r[u] = f"{prefix}{c[prefix]}"
 
@@ -203,7 +202,7 @@ class CStyleLanguage(Renderer):
       if (u.op is not Ops.CAST or u.dtype.vcount == 1) and (u.op in {Ops.CONST, Ops.GEP, Ops.INDEX, Ops.CUSTOMI} or \
         (u.op is Ops.LOAD and u.src[0].ptrdtype.addrspace == AddrSpace.REG) or \
         (u.op is Ops.CAST and isinstance(u.dtype, PtrDType)) or \
-        (u.op in {Ops.VECTORIZE, *(GroupOp.ALU-{Ops.WHERE}), Ops.CAST, Ops.BITCAST} and child_count[u] == 1 and not getenv("EXPAND_SSA"))):
+        (u.op in {Ops.STACK, *(GroupOp.ALU-{Ops.WHERE}), Ops.CAST, Ops.BITCAST} and child_count[u] == 1 and not getenv("EXPAND_SSA"))):
         r[u] = l
       else:
         if u.op not in {Ops.RANGE, Ops.DEFINE_LOCAL, Ops.STORE, Ops.DEFINE_REG} and u.dtype != dtypes.void:
@@ -474,10 +473,10 @@ class HIPRenderer(CStyleLanguage):
   def is_cdna(arch): return arch.split(":")[0] in {"gfx942", "gfx950"}
   @staticmethod
   def is_cdna4(arch): return arch.split(":")[0] == "gfx950"
-  def __init__(self, target:Target): # gfx942 => MI300, gfx1100 => RX 7900, gfx1201 => RX 9700
+  def __init__(self, target:Target, use_hipcc=False): # gfx942 => MI300, gfx1100 => RX 7900, gfx1201 => RX 9700
     super().__init__(target)
-    from tinygrad.runtime.support.compiler_amd import HIPCompiler
-    self.compiler, self.tensor_cores = HIPCompiler(target.arch), tc.get_amd(target.arch)
+    from tinygrad.runtime.support.compiler_amd import HIPCompiler, HIPCCCompiler
+    self.compiler, self.tensor_cores = (HIPCCCompiler if use_hipcc else HIPCompiler)(target.arch), tc.get_amd(target.arch)
     if not self.is_cdna4(target.arch): self.extra_matcher += pm_manual_bf16_cast + extra_pm
     if self.is_cdna(target.arch):
       self.string_rewrite = PatternMatcher([
@@ -513,7 +512,7 @@ class HIPRenderer(CStyleLanguage):
 
   def asm(self, prg:UOp, lin:UOp) -> bytes:
     from tinygrad.renderer.amd.elf import assemble_linear
-    return assemble_linear(self, prg, lin)
+    return assemble_linear(prg, lin, self.target.arch)
 
   def render_vector_prefix(self, dtype:DType) -> str:
     vec, scal = self.render_dtype(dtype), self.render_dtype(dtype.scalar())
@@ -561,10 +560,7 @@ class HIPRenderer(CStyleLanguage):
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 
 class HIPCCRenderer(HIPRenderer):
-  def __init__(self, target:Target):
-    super().__init__(target)
-    from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
-    self.compiler = HIPCCCompiler(target.arch)
+  def __init__(self, target:Target): super().__init__(target, use_hipcc=True)
 
 class QCOMCLRenderer(OpenCLRenderer):
   def __init__(self, target:Target):

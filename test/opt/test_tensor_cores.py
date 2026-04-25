@@ -24,8 +24,8 @@ def helper_tc_ensure_uops_and_opts_count(N: int, M:int, K:int, dtype_in:DType, d
                                          ensure_triggered:bool=True):
   a, b = Tensor.rand(M, K, dtype=dtype_in), Tensor.rand(K, N, dtype=dtype_in)
   r = a.matmul(b, dtype=dtype_out)
-  sched = r.schedule()
-  realized_ast = sched[-1].ast
+  sched = r.schedule_linear()
+  realized_ast = sched.src[-1].src[0]
   opts_to_apply = [Opt(OptOps.TC, axis, (tc_select, tc_opt, 1))]
 
   if ensure_triggered:
@@ -76,7 +76,8 @@ class TestTensorCores(unittest.TestCase):
       n, m, k = tc.dims[0], tc.dims[1], 2 if AMX else tc.dims[2]
       a, b = Tensor.rand(m, k, dtype=tc.dtype_in), Tensor.rand(k, n, dtype=tc.dtype_in)
       r = a.matmul(b, dtype=tc.dtype_out)
-      prg = get_program(replace_opts(r.schedule()[-1].ast, [Opt(op=OptOps.TC, axis=0, arg=(-1, 2, 1))]), Device[Device.DEFAULT].renderer)
+      prg = get_program(replace_opts(r.schedule_linear().src[-1].src[0],
+                        [Opt(op=OptOps.TC, axis=0, arg=(-1, 2, 1))]), Device[Device.DEFAULT].renderer)
       if Device.DEFAULT == "CPU" and DEV.renderer == "LLVM":
         assert "0x201000" in prg.src
       elif Device.DEFAULT == "AMD" and DEV.renderer == "LLVM":

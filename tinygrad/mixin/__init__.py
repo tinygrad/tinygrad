@@ -1,13 +1,13 @@
 from __future__ import annotations
 import functools, itertools
-from typing import TYPE_CHECKING, Self, Sequence, Literal, get_args
+from typing import TYPE_CHECKING, Callable, Self, Sequence, Literal, get_args
 from tinygrad.mixin.elementwise import ElementwiseMixin
 from tinygrad.mixin.movement import MovementMixin
 from tinygrad.mixin.reduce import ReduceMixin
 from tinygrad.uop import Ops
 from tinygrad.uop.ops import _broadcast_shape, resolve, smax, smin, identity_element
-from tinygrad.dtype import ConstType, DTypeLike, Invalid, dtypes, least_upper_dtype, sum_acc_dtype, to_dtype
-from tinygrad.helpers import argfix, ceildiv, flatten, flat_to_grouped, make_tuple, prod, resolve_pool_pads, round_up
+from tinygrad.dtype import ConstType, DTypeLike, Invalid, InvalidType, PtrDType, PyConst, dtypes, least_upper_dtype, sum_acc_dtype, to_dtype
+from tinygrad.helpers import all_int, argfix, ceildiv, flatten, flat_to_grouped, make_tuple, prod, resolve_pool_pads, round_up
 
 if TYPE_CHECKING:
   from tinygrad.uop.ops import sint
@@ -197,18 +197,30 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     has_neg = not all(resolve(p >= 0) for p in flatten(pX))
     X = self.shrink(tuple((-smin(pB,0),smin(pA+s,s)) for (pB,pA),s in zip(pX, self.shape))) if has_neg else self
     pads = tuple((smax(pB,0), smax(pA,0)) for pB,pA in pX) if has_neg else pX
-    if value == 0: return MovementMixin.pad(X, pads)
-    return MovementMixin.pad(X, pads) + MovementMixin.pad(X.ones_like(), pads).cast(dtypes.bool).where(0, value)
+    base = MovementMixin.pad(X, pads)
+    if value == 0: return base
+    base = base.cast(least_upper_dtype(base.dtype, dtypes.from_py(value)))
+    return base + MovementMixin.pad(X.ones_like(), pads).cast(dtypes.bool).where(base.zeros_like(), base.full_like(value))
+
+  def _ufix_keep_dtype(self, x) -> bool:
+    # matches Tensor scalar-wrapping behavior: keep self.dtype for float self, or for int self with int/Invalid scalar
+    return dtypes.is_float(self.dtype) or (dtypes.is_int(self.dtype) and isinstance(x, (int, InvalidType)))
 
   def _broadcasted(self, y, reverse=False) -> tuple[Self, Self]:
     if not isinstance(y, type(self)): y = self.ufix(y)
     x, y = (self, y) if not reverse else (y, self)
+    # ValueError: unsized ptr has shape (-1,) which can't broadcast; RuntimeError: shape mismatch
     try:
       out_shape = _broadcast_shape(x.shape, y.shape)
       x, y = x._broadcast_to(out_shape), y._broadcast_to(out_shape)
-    except RuntimeError: pass
-    out_dtype = least_upper_dtype(x.dtype, y.dtype)
-    return x.cast(out_dtype), y.cast(out_dtype)
+    except (RuntimeError, ValueError): pass
+    # ptr dtypes aren't in the promo lattice
+    if x.dtype == y.dtype or any(isinstance(d, PtrDType) for d in (x.dtype, y.dtype)): return x, y
+    return x.cast(out_dtype := least_upper_dtype(x.dtype, y.dtype)), y.cast(out_dtype)
+
+  def _binop(self, op:Ops, x, reverse:bool) -> Self:
+    lhs, rhs = self._broadcasted(x, reverse)
+    return lhs.alu(op, rhs)
 
   def dot(self, w:Self, dtype:DTypeLike|None=None) -> Self:
     """
@@ -409,7 +421,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     print(t.normalize(p=1, dim=0).numpy())
     ```
     """
-    if p == 0: return self / (self != 0).sum(dim, keepdim=True).maximum(eps)  # type: ignore[comparison-overlap]
+    if p == 0: return self / self.ne(0).sum(dim, keepdim=True).maximum(eps)
     return self / self.abs().pow(p).sum(dim, keepdim=True).pow(1/p).maximum(eps)
 
   def logsumexp(self, axis=None, keepdim=False) -> Self:
@@ -575,6 +587,211 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     """
     return self._split_cumalu(axis, Ops.MUL)
 
+  def cummax(self, axis:int=0) -> tuple[Self, Self]:
+    """
+    Computes the cumulative max of the tensor along `axis`, returning (values, indices).
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([0, 1, -1, 2, -2, 3, -3])
+    values, indices = t.cummax(0)
+    print(values.numpy())
+    print(indices.numpy())
+    ```
+    """
+    if self.ndim == 0: return self._split_cumalu(axis, Ops.MAX), type(self).zeros(self.shape, dtype=dtypes.int32, device=self.device)
+    values, n = self._split_cumalu(axis, Ops.MAX), int(self.shape[axis])
+    x, values_t = self.transpose(axis, -1), values.transpose(axis, -1)
+    match = x.unsqueeze(-1).eq(values_t.unsqueeze(-2)) * type(self).ones(n, n, device=self.device).triu()
+    idx = (-(match * type(self).arange(n, 0, -1, device=self.device).reshape(n, 1)).max(-2) + n).cast(dtypes.int32)
+    return values, idx.transpose(-1, axis)
+
+  def cummin(self, axis:int=0) -> tuple[Self, Self]:
+    """
+    Computes the cumulative min of the tensor along `axis`, returning (values, indices).
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([0, 1, -1, 2, -2, 3, -3])
+    values, indices = t.cummin(0)
+    print(values.numpy())
+    print(indices.numpy())
+    ```
+    """
+    values, indices = self._inverse().cummax(axis)
+    return values._inverse(), indices
+
+  def logcumsumexp(self, axis=0) -> Self:
+    """
+    Computes the log-cumsum-exp of the tensor along the specified axis or axes.
+
+    The log-cumsum-exp function is a numerically stable way to compute the logarithm of the cumulative sum of exponentials.
+
+    You can pass in the `axis` keyword argument to control the axis along which
+    the log-cumsum-exp is computed.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    t = Tensor.randn(2, 3)
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.logcumsumexp().numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.logcumsumexp(axis=0).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.logcumsumexp(axis=1).numpy())
+    ```
+    """
+    if self.ndim == 0: return self
+    x = self.transpose(axis, -1)
+    last_dim_size = x.shape[-1]
+    x_unsqueezed = x.unsqueeze(-2).expand((None,)*(self.ndim-1)+(last_dim_size, None))
+    x_cummax, _ = x.cummax(-1)
+    mask = type(self).ones(last_dim_size, last_dim_size, device=self.device).tril()
+    ret = mask.where(x_unsqueezed - x_cummax.unsqueeze(-1), self.dtype.min).exp().sum(-1).log() + x_cummax
+    return ret.transpose(-1, axis)
+
+  def argmax(self, axis=None, keepdim=False) -> Self:
+    """
+    Returns the indices of the maximum value of the tensor along the specified axis.
+
+    You can pass in `axis` and `keepdim` keyword arguments to control the axis along
+    which the maximum is computed and whether the reduced dimensions are retained.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([[1, 0, 2], [5, 4, 3]])
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.argmax().numpy()) # Returns the index of the maximum value in the flattened tensor.
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.argmax(axis=0).numpy()) # Returns the indices of the maximum values along axis 0.
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.argmax(axis=1).numpy()) # Returns the indices of the maximum values along axis 1.
+    ```
+    """
+    if axis is None: return self.flatten().argmax(0)
+    axis = self._resolve_dim(axis)
+    m = self.eq(self.max(axis=axis, keepdim=True))
+    idx = m * type(self).arange(self.shape[axis], 0, -1, device=self.device).reshape(self.shape[axis], *[1]*(self.ndim-axis-1))
+    return (self.shape[axis] - idx.max(axis=axis, keepdim=keepdim)).cast(dtypes.int32)
+
+  def argmin(self, axis=None, keepdim=False) -> Self:
+    """
+    Returns the indices of the minimum value of the tensor along the specified axis.
+
+    You can pass in `axis` and `keepdim` keyword arguments to control the axis along
+    which the minimum is computed and whether the reduced dimensions are retained.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([[1, 0, 2], [5, 4, 3]])
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.argmin().numpy()) # Returns the index of the minimum value in the flattened tensor.
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.argmin(axis=0).numpy()) # Returns the indices of the minimum values along axis 0.
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.argmin(axis=1).numpy()) # Returns the indices of the minimum values along axis 1.
+    ```
+    """
+    return self._inverse().argmax(axis=axis, keepdim=keepdim)
+
+  def sort(self, dim:int=-1, descending:bool=False) -> tuple[Self, Self]:
+    """
+    Performs a bitonic sort on the tensor along the specified dimension.
+
+    Order of indices for equivalent elements is always preserved.
+
+    See: https://en.wikipedia.org/wiki/Bitonic_sorter
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([[0.1, 0.5, 1.2, 3.4, 2.1], [2.2, 1.9, 0.3, 4.5, 0.8]])
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    sorted_values, indices = t.sort(dim=1, descending=True)
+    print(sorted_values.numpy())
+    print(indices.numpy())
+    ```
+    """
+    x, dim = self, self._resolve_dim(dim)
+    if (orig_len := int(x.shape[dim])) <= 1: return x, x.zeros_like(dtype=dtypes.default_int)
+    # pad to power of 2
+    n_stages = (orig_len-1).bit_length()
+    pads = tuple((0, 2**n_stages - orig_len) if i == dim else None for i in range(x.ndim))
+    x = x._pad_constant(pads, x.dtype.min if descending else x.dtype.max).unflatten(dim, (2,)*n_stages)
+    # https://en.wikipedia.org/wiki/Bitonic_sorter#/media/File:BitonicSort1.svg
+    for stage in range(1, n_stages+1):
+      if stage != n_stages:
+        # flip so arrows of green boxes point the same way as blue boxes
+        crossover_dim = dim + n_stages - stage - 1
+        blue_box, green_box = x.split(1, crossover_dim)
+        flip_dims = tuple(-i for i in range(1, stage+1+(self.ndim-dim)))
+        x = (blue_box.cat(green_box.flip(flip_dims), dim=crossover_dim)).contiguous()
+      for substage in range(stage-1, -1, -1):
+        partner_dim = dim + n_stages - substage - 1
+        x_top, x_bottom = x.split(1, partner_dim)
+        x_larger, x_smaller = x_top.maximum(x_bottom), x_top.minimum(x_bottom)
+        x = (x_larger.cat(x_smaller, dim=partner_dim) if descending else x_smaller.cat(x_larger, dim=partner_dim)).contiguous()
+      if stage != n_stages:
+        # flip wires back to undo the crossover
+        blue_box, flipped_green_box = x.split(1, crossover_dim)
+        x = blue_box.cat(flipped_green_box.flip(flip_dims), dim=crossover_dim)
+    x = x.flatten(dim, dim+n_stages-1).shrink_to(self.shape)
+    # compute indices for sorted values
+    mask = type(self).ones(orig_len, orig_len, dtype=dtypes.bool, device=self.device).tril().reshape((None, None) + (1,)*(self.ndim-dim-1))
+    def compute_counts(t:Self): return (mask & t.unsqueeze(dim).eq(t.unsqueeze(dim+1))).sum(dim+1)
+    count_orig, count_sorted = compute_counts(self), compute_counts(x)
+    cond = self.unsqueeze(dim+1).eq(x.unsqueeze(dim)) & count_orig.unsqueeze(dim+1).eq(count_sorted.unsqueeze(dim))
+    idx = type(self).arange(orig_len, device=self.device).reshape(tuple(orig_len if i == dim else 1 for i in range(x.ndim)))
+    idx = (cond * idx.unsqueeze(dim+1)).sum(dim)
+    return x, idx
+
+  def argsort(self, dim:int=-1, descending:bool=False) -> Self:
+    """
+    Returns the indices that sort input tensor along given `dimension` in given `descending` order by value.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([[2, 3, 4, 1], [1, 4, 3, 2]])
+    print(t.argsort().numpy())
+    ```
+    """
+    return self.sort(dim, descending)[1]
+
+  def topk(self, k:int, dim:int=-1, largest:bool=True, sorted_:bool=True) -> tuple[Self, Self]:
+    """
+    Computes the top-k elements of the tensor along the specified `dim`.
+
+    Order of indices for equivalent elements is always preserved.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([[0.1, 0.5, 1.2, 3.4, 2.1], [2.2, 1.9, 0.3, 4.5, 0.8]])
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    topk_values, topk_indices = t.topk(2, dim=1)
+    print(topk_values.numpy())
+    print(topk_indices.numpy())
+    ```
+    """
+    if not sorted_: raise NotImplementedError("topk with sorted_=False is not supported")
+    if k > self.shape[dim:=self._resolve_dim(dim)]: raise ValueError(f"selected index {k=} is out of range")
+    x, idx = self.sort(dim, descending=largest)
+    topk_shape = tuple(k if i == dim else None for i in range(self.ndim))
+    return x.shrink_to(topk_shape), idx.shrink_to(topk_shape)
+
+  def allclose(self, other:Self, rtol:float=1e-05, atol:float=1e-08, equal_nan=False) -> Self:
+    """
+    Check if all self and other are close.
+    """
+    return self.isclose(other, rtol=rtol, atol=atol, equal_nan=equal_nan).all()
+
   # helper function commonly used for indexing
   def _one_hot_along_dim(self, num_classes:sint, dim:int=-1) -> Self:
     from tinygrad.uop.ops import sint_to_uop
@@ -596,7 +813,169 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     if num_classes < 0: raise ValueError(f"num_classes must be non-negative, got {num_classes}")
     return self[..., None]._one_hot_along_dim(num_classes).where(1, 0)
 
+  def gather(self, dim:int, index:Self) -> Self:
+    """
+    Gathers values along an axis specified by `dim`.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([[1, 2], [3, 4]])
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.gather(1, Tensor([[0, 0], [1, 0]])).numpy())
+    ```
+    """
+    if index.device != self.device: raise RuntimeError(f"expected index and self on the same device, {index.device=}, {self.device=}")
+    assert index.ndim == self.ndim, f"self.ndim must equal index.ndim, {self.ndim=}, {index.ndim=}"
+    dim = self._resolve_dim(dim)
+    assert all(s >= i for d,(s,i) in enumerate(zip(self.shape, index.shape)) if d != dim), "requires self.shape[d] >= index.shape[d] for all d != dim"
+    x = self.shrink_to(tuple(i if d != dim else None for d,i in enumerate(index.shape))).unsqueeze(-1).transpose(-1, dim)
+    return (index.unsqueeze(-1)._one_hot_along_dim(self.shape[dim]).where(x, 0)).sum(-1, dtype=self.dtype)
+
+  def interpolate(self, size:tuple[int, ...], mode:str="linear", align_corners:bool=False) -> Self:
+    """
+    Downsamples or Upsamples to the input `size`, accepts 0 to N batch dimensions.
+
+    The interpolation algorithm is selected with `mode` which currently only supports `linear`, `nearest` and `nearest-exact`.
+    To run `bilinear` or `trilinear`, pass in a 2D or 3D size.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([[1, 2, 3, 4], [21, 22, 23, 24], [41, 42, 43, 44]])
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.interpolate(size=(2,3), mode="linear").numpy())
+    ```
+    """
+    assert isinstance(size, (tuple,list)) and all_int(size) and 0 < len(size) <= self.ndim, f"invalid {size=}"
+    assert mode in ("linear", "nearest", "nearest-exact"), "only supports linear, nearest or nearest-exact interpolate"
+    assert not (align_corners and mode != "linear"), "align_corners option can only be set with the interpolating mode linear"
+    x, expand = self, list(self.shape)
+    for i in range(-1,-len(size)-1,-1):
+      scale = (int(self.shape[i]) - int(align_corners)) / (size[i] - int(align_corners))
+      arr, reshape = type(self).arange(size[i], dtype=dtypes.float32, device=self.device), [1] * self.ndim
+      reshape[i] = expand[i] = size[i]
+      if mode == "linear":
+        index = (scale*arr if align_corners else (scale*(arr+0.5))-0.5).clip(0, self.shape[i]-1)
+        low, high, perc = [y.reshape(reshape).expand(expand) for y in (index.floor().int(), index.ceil().int(), index - index.floor())]
+        x = x.gather(i, low).lerp(x.gather(i, high), perc)
+      else:
+        index = (scale*(arr+0.5) if mode=="nearest-exact" else scale*arr).cast(dtypes.int32).reshape(reshape).expand(expand)
+        x = x.gather(i, index)
+    return x.cast(self.dtype)
+
+  def _pre_scatter(self, dim:int, index:Self, src:Self) -> tuple[Self, Self]:
+    if index.device != self.device: raise RuntimeError(f"expected index and self on the same device, {index.device=}, {self.device=}")
+    if src.device != self.device: raise RuntimeError(f"expected src and self on the same device, {src.device=}, {self.device=}")
+    dim = self._resolve_dim(dim)
+    assert index.ndim == self.ndim == src.ndim, f"self.ndim, index.ndim and src.ndim must all equal, {self.ndim=} {index.ndim=} {src.ndim=}"
+    assert all((d == dim or self_ >= index_) and src_ >= index_ for d,(self_,index_,src_) in enumerate(zip(self.shape, index.shape, src.shape))), \
+      f"All dimensions of {index.shape=} should be <= to all dimensions of {src.shape=} and all dimensions except dimension {dim} of {self.shape=}"
+    if self.dtype != src.dtype: raise RuntimeError(f"expect {self.dtype=} to be equal to {src.dtype=}")
+    # shrink src to index shape to shrink away the unused values
+    src = src.shrink_to(index.shape)
+    # prepare src and mask for reduce with respect to dim
+    src = src.unsqueeze(-1).expand(*src.shape, self.shape[dim]).transpose(-1, dim)
+    mask = index.unsqueeze(-1)._one_hot_along_dim(self.shape[dim]).transpose(-1, dim)
+    # pad src and mask to self.shape so that reduce can be done with padded values as no-ops
+    return src.pad_to(*self.shape, None), mask.pad_to(*self.shape, None)
+
+  def scatter_reduce(self, dim:int, index:Self, src:Self, reduce:Literal["sum", "prod", "mean", "amax", "amin"],
+                     include_self:bool=True) -> Self:
+    """
+    Scatters `src` values along an axis specified by `dim`.
+    Apply `"sum"`, `"prod"`, `"mean"`, `"amax"`, or `"amin"` reduction operations with `reduce`.
+
+    Set `include_self=False` to exclude values in the `self` Tensor from the reduction.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    src = Tensor.arange(1, 11).cast(dtypes.float).reshape(2, 5)
+    print(src.numpy())
+    index = Tensor([[0, 0, 0, 0, 0], [0, 0, 0, 0, 0]])
+    print(index.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor.ones(1, 5, dtype=src.dtype).scatter_reduce(0, index, src, reduce='sum').numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor.ones(1, 5, dtype=src.dtype).scatter_reduce(0, index, src, reduce='prod').numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor.ones(1, 5, dtype=src.dtype).scatter_reduce(0, index, src, reduce='mean', include_self=False).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([[-10, 20, 0, 5, 10]], dtype=src.dtype).scatter_reduce(0, index, src, reduce='amax').numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([[-10, 20, 0, 5, 10]], dtype=src.dtype).scatter_reduce(0, index, src, reduce='amin').numpy())
+    ```
+    """
+    src, mask = self._pre_scatter(dim, index, src)
+    def _inv_mask(a:Self|PyConst, b:Self|PyConst) -> Self: return mask.any(-1).logical_not().where(a, b)
+    if reduce == "sum": return mask.where(src, 0).sum(-1).add(self if include_self else _inv_mask(self, 0))
+    if reduce == "prod": return mask.where(src, 1).prod(-1).mul(self if include_self else _inv_mask(self, 1))
+    if reduce == "amax": return mask.where(src, m := src.dtype.min).max(-1).maximum(self if include_self else _inv_mask(self, m))
+    if reduce == "amin": return mask.where(src, m := src.dtype.max).min(-1).minimum(self if include_self else _inv_mask(self, m))
+    if reduce == "mean":
+      count = mask.where(1, 0).sum(-1).add(1 if include_self else _inv_mask(1, 0))
+      return mask.where(src, 0).sum(-1).add(self if include_self else _inv_mask(self, 0)).div(count)
+    raise RuntimeError(f"{reduce=} must be one of 'sum', 'prod', 'mean', 'amax', 'amin'")
+
+  def scatter(self, dim:int, index:Self, src:Self|PyConst, reduce:Literal['multiply', 'add']|None=None) -> Self:
+    """
+    Scatters `src` values along an axis specified by `dim`.
+    Apply `add` or `multiply` reduction operation with `reduce`.
+
+    NOTE: To use the `reduce` argument with a Tensor `src`, see `Tensor.scatter_reduce`.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    src = Tensor.arange(1, 11).reshape(2, 5)
+    print(src.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    index = Tensor([[0, 1, 2, 0]])
+    print(Tensor.zeros(3, 5, dtype=src.dtype).scatter(0, index, src).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    index = Tensor([[0, 1, 2], [0, 1, 4]])
+    print(Tensor.zeros(3, 5, dtype=src.dtype).scatter(1, index, src).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor.full((2, 4), 2.0).scatter(1, Tensor([[2], [3]]), 1.23, reduce='multiply').numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor.full((2, 4), 2.0).scatter(1, Tensor([[2], [3]]), 1.23, reduce='add').numpy())
+    ```
+    """
+    if reduce not in {None, "add", "multiply"}: raise TypeError(f"{reduce=} must be one of None, 'multiply', or 'add'")
+    if isinstance(src, (int, float, bool)): src = type(self).full(index.shape, src, dtype=self.dtype, device=self.device)
+    elif reduce: raise TypeError("non-scalar src is not supported with reduce arg. use scatter_reduce")
+    if reduce == "add": return self.scatter_reduce(dim, index, src, "sum", include_self=True)
+    if reduce == "multiply": return self.scatter_reduce(dim, index, src, "prod", include_self=True)
+    src, mask = self._pre_scatter(dim, index, src)
+    return self._masked_merge(src, mask, (-1,))
+
+  def _masked_merge(self, values:Self, mask:Self, axes:tuple[int, ...]) -> Self:
+    # reduce such that if mask contains repeated indices the last one remains
+    for dim in reversed(axes):
+      mask, values = functools.reduce(lambda x,y: (x[0]|y[0], y[0].where(y[1], x[1])), zip(mask.split(1, dim), values.split(1, dim)))
+    # remove extra dims from reduce
+    for dim in reversed(axes): mask, values = mask.squeeze(dim), values.squeeze(dim)
+    # select from values for each True element in mask else select from self
+    return mask.where(values, self)
+
   # ***** functional nn ops *****
+
+  def sequential(self, ll:list[Callable[[Self], Self]]) -> Self:
+    """
+    Applies a sequence of functions to `self` chaining the output of each function to the input of the next.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([1, 2, 3])
+    print(t.sequential([lambda x: x * 2, lambda x: x + 1]).numpy())
+    ```
+    """
+    return functools.reduce(lambda x,f: f(x), ll, self)
 
   def linear(self, weight:Self, bias:Self|None=None, dtype:DTypeLike|None=None) -> Self:
     """
@@ -616,6 +995,145 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
       return self.cast(dt).linear(weight.cast(dt), bias.cast(dt) if bias is not None else bias)
     x = self.mul(weight) if len(weight.shape) == 1 else self.dot(weight)
     return x.add(bias) if bias is not None else x
+
+  def _apply_ceil_mode(self, pads:Sequence[int], k_:tuple[sint, ...], s_:int|tuple[int, ...], d_:int|tuple[int, ...]) -> list[int]:
+    (d_,s_), i_ = (make_tuple(x, len(k_)) for x in (d_,s_)), self.shape[-len(k_):]
+    grouped_pads = list(flat_to_grouped(pads))
+    # https://arxiv.org/pdf/1603.07285 section 5.1, relationship 15.
+    o_ = [ceildiv(i+pB+pA - (d*(k-1)+1), s) + 1 for i,d,k,s,(pB,pA) in zip(i_,d_,k_,s_,grouped_pads)]
+    for dim,(o,i,s,k,d,(pB,pA)) in enumerate(zip(o_,i_,s_,k_,d_,grouped_pads)):
+      # we have to do additional padding before `_pool` so that `o_` in `_pool` is calculated correctly
+      # `s*(o-1) + (d*(k-1)+1) - (i+pB+pA)` -> last_sliding_window_start + full_kernel_size - padded_input_shape
+      # we decrease padding in the case that a sliding window starts in the end padded region, thereby decreasing `o_` in `_pool`
+      # `smax(s*(o-1) - (pB+i-1), 0)` -> last_sliding_window_start - (pad_before + input_size - zero_offset)
+      grouped_pads[dim] = (pB, pA + s*(o-1) + (d*(k-1)+1) - (i+pB+pA) - smax(s*(o-1) - (pB+i-1), 0))
+    return flatten(reversed(grouped_pads))
+
+  # NOTE: these work for more than 2D
+  def avg_pool2d(self, kernel_size:tuple[int, ...]=(2,2), stride=None, dilation=1, padding:int|tuple[int, ...]=0,
+                 ceil_mode=False, count_include_pad=True) -> Self:
+    """
+    Applies average pooling over a tensor.
+
+    This function supports three different types of `padding`
+
+    1. `int` (single value):
+      Applies the same padding value uniformly to all spatial dimensions.
+
+    2. `tuple[int, ...]` (length = number of spatial dimensions):
+      Specifies a distinct padding value for each spatial dimension in the form `(padding_height, padding_width, ...)`.
+
+    3. `tuple[int, ...]` (length = 2 * number of spatial dimensions):
+      Specifies explicit padding for each side of each spatial dimension in the form
+      `(padding_left, padding_right, padding_top, padding_bottom, ...)`.
+
+    When `ceil_mode` is set to `True`, output shape will be determined using ceil division.
+    When `count_include_pad` is set to `False`, zero padding will not be included in the averaging calculation.
+
+    NOTE: unlike PyTorch, this implementation is not limited to only 2d pooling and instead works for any number of dimensions.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.arange(25).reshape(1, 1, 5, 5)
+    print(t.avg_pool2d().numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.avg_pool2d(ceil_mode=True).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.avg_pool2d(padding=1).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.avg_pool2d(padding=1, count_include_pad=False).numpy())
+    ```
+    """
+    axis = tuple(range(-len(k_ := make_tuple(kernel_size, 2)), 0))
+    def pool(x:Self, padding_:Sequence[int]) -> Self:
+      return x._pad_constant(((0,0),)*(x.ndim-len(k_)) + flat_to_grouped(padding_), 0.0)._pool(k_, stride if stride is not None else k_, dilation)
+    reg_pads = resolve_pool_pads(padding, len(k_))
+    ceil_pads = self._apply_ceil_mode(reg_pads, k_, stride if stride is not None else k_, dilation)
+    if not count_include_pad:
+      pads = ceil_pads if ceil_mode else reg_pads
+      return pool(self, pads).sum(axis) / pool(self.ones_like(), pads).sum(axis)
+    if not ceil_mode: return pool(self, reg_pads).mean(axis)
+    return pool(self, ceil_pads).sum(axis) / pool(self._pad_constant(((0,0),)*(self.ndim-len(k_)) + flat_to_grouped(reg_pads), 0.0).ones_like(),
+                                                  tuple(cp-rp for cp,rp in zip(ceil_pads, reg_pads))).sum(axis)
+
+  def max_pool2d(self, kernel_size:tuple[int, ...]=(2,2), stride=None, dilation=1, padding:int|tuple[int, ...]=0,
+                 ceil_mode=False, return_indices=False) -> Self | tuple[Self, Self]:
+    """
+    Applies max pooling over a tensor.
+
+    This function supports three different types of `padding`
+
+    1. `int` (single value):
+      Applies the same padding value uniformly to all spatial dimensions.
+
+    2. `tuple[int, ...]` (length = number of spatial dimensions):
+      Specifies a distinct padding value for each spatial dimension in the form `(padding_height, padding_width, ...)`.
+
+    3. `tuple[int, ...]` (length = 2 * number of spatial dimensions):
+      Specifies explicit padding for each side of each spatial dimension in the form
+      `(padding_left, padding_right, padding_top, padding_bottom, ...)`.
+
+    When `ceil_mode` is set to `True`, output shape will be determined using ceil division.
+    When `return_indices` is set to `True`, the argmax will be returned along with the max values.
+
+    NOTE: unlike PyTorch, this implementation is not limited to only 2d pooling and instead works for any number of dimensions.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.arange(25).reshape(1, 1, 5, 5)
+    print(t.max_pool2d().numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.max_pool2d(ceil_mode=True).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.max_pool2d(padding=1).numpy())
+    ```
+    """
+    axis = tuple(range(-len(k_ := make_tuple(kernel_size, 2)), 0))
+    pads = resolve_pool_pads(padding, len(k_))
+    if ceil_mode: pads = self._apply_ceil_mode(pads, k_, stride if stride is not None else k_, dilation)
+    s_ = stride if stride is not None else k_
+    pooled = self._pad_constant(((0,0),)*(self.ndim-len(k_)) + flat_to_grouped(pads), self.dtype.min)._pool(k_, s_, dilation)
+    if not return_indices: return pooled.max(axis)
+    spatial_sz = int(prod(spatial_shape := self.shape[-len(k_):]))
+    idx = type(self).arange(spatial_sz, 0, -1, device=self.device).reshape(spatial_shape)
+    m = pooled.eq(pooled.max(axis, keepdim=True))
+    idx = m * idx._pad_constant(((0,0),)*(idx.ndim-len(k_)) + flat_to_grouped(pads), idx.dtype.min)._pool(k_, s_, dilation)
+    return pooled.max(axis), spatial_sz - idx.max(axis)
+
+  def max_unpool2d(self, indices:Self, kernel_size:tuple[int, ...]=(2,2), stride=None, dilation=1, padding:int|tuple[int, ...]=0,
+                   output_size=None) -> Self:
+    """
+    Performs a partial inverse of `max_pool2d` using the indices from the argmax.
+
+    When `output_size` is provided, the output shape disambiguates to the provided shape.
+
+    NOTE: unlike PyTorch, this implementation is not limited to only 2d pooling and instead works for any number of dimensions.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.arange(1, 17).reshape(1, 1, 4, 4)
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    output, indices = Tensor.max_pool2d(t, return_indices=True)
+    print(output.numpy())
+    print(indices.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor.max_unpool2d(output, indices).numpy())
+    ```
+    """
+    bs,c,*spatial_shape = self.shape
+    if output_size is None:
+      k_,d_,s_ = (make_tuple(x, len(spatial_shape)) for x in (kernel_size, dilation, stride if stride is not None else kernel_size))
+      p_ = flat_to_grouped(resolve_pool_pads(padding, len(spatial_shape)))
+      # https://arxiv.org/pdf/1603.07285 inverse of relationship 15 in section 5.1.
+      output_size = tuple((i-1)*s - (pB+pA) + (d*(k-1)+1) for i,k,d,s,(pA,pB) in zip(spatial_shape,k_,d_,s_,p_))
+    else: output_size = output_size[-len(spatial_shape):]
+    ret = (indices.reshape(bs,c,1,-1)._one_hot_along_dim(prod(output_size), 2).where(self.reshape(bs,c,1,-1), 0)).sum(3)
+    return ret.reshape(bs,c,*output_size)
 
   def conv2d(self, weight:Self, bias:Self|None=None, groups=1, stride=1, dilation=1, padding:int|Sequence[int]=0,
              dtype:DTypeLike|None=None) -> Self:
@@ -748,6 +1266,81 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     """
     log_p, log_1_minus_p = self.logsigmoid(), (-self).logsigmoid()
     return (-((1 if pos_weight is None else pos_weight) * Y * log_p + (1-Y) * log_1_minus_p))._do_reduction(reduction)
+
+  def sparse_categorical_crossentropy(self, Y:Self, ignore_index:int=-1, label_smoothing=0.0, reduction:ReductionStr="mean") -> Self:
+    """
+    Computes the sparse categorical cross-entropy loss between `self` and `Y`.
+
+    NOTE: `self` is logits and `Y` is the target labels.
+    NOTE: unlike PyTorch, this function expects the class axis to be -1
+
+    See: https://pytorch.org/docs/stable/generated/torch.nn.CrossEntropyLoss.html
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([[-1, 2, -3], [1, -2, 3]])
+    Y = Tensor([1, 2])
+    print(t.sparse_categorical_crossentropy(Y).item())
+    ```
+    """
+    assert 0.0 <= label_smoothing <= 1.0, "label_smoothing must be in [0.0, 1.0]"
+    if Y.device != self.device: raise RuntimeError(f"expected Y and self on the same device, {Y.device=}, {self.device=}")
+    log_probs = self.log_softmax()
+    loss_mask = Y.ne(ignore_index) if ignore_index != -1 else Y.ones_like(dtype=dtypes.bool)
+    y = Y.unsqueeze(-1)._one_hot_along_dim(self.shape[-1], dim=-1) * loss_mask.unsqueeze(-1)
+    smoothing = label_smoothing * (log_probs.mean(-1) * loss_mask)
+    unreduced = ((1 - label_smoothing) * (log_probs * y).sum(-1) + smoothing)
+    return -unreduced.sum() / loss_mask.sum() if reduction == "mean" else -unreduced._do_reduction(reduction)
+
+  def cross_entropy(self, Y:Self, reduction:ReductionStr="mean", label_smoothing:float=0.0) -> Self:
+    """
+    Computes the cross entropy loss between input logits and target.
+
+    NOTE: `self` are logits and `Y` are the target labels or class probabilities.
+
+    See: https://pytorch.org/docs/stable/generated/torch.nn.functional.cross_entropy.html
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([[-1, 2, -3], [1, -2, 3]])
+    Y = Tensor([1, 2])
+    print(t.cross_entropy(Y).item())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([[-1, 2, -3], [1, -2, 3]])
+    Y = Tensor([1, 2])
+    print(t.cross_entropy(Y, reduction='none').numpy())
+    ```
+    """
+    assert 0.0 <= label_smoothing <= 1.0, "label_smoothing must be in [0.0, 1.0]"
+    classes_dim = 0 if self.ndim == 1 else 1
+    if self.shape != Y.shape:
+      if self.max(classes_dim).shape != Y.shape: raise RuntimeError(f"shape mismatch: {self.shape=}, {Y.shape=}")
+      Y = Y.unsqueeze(classes_dim)._one_hot_along_dim(num_classes=self.shape[classes_dim], dim=classes_dim)
+    Y = (1 - label_smoothing)*Y + label_smoothing / int(Y.shape[classes_dim])
+    return -self.log_softmax(classes_dim).mul(Y).sum(classes_dim)._do_reduction(reduction)
+
+  def nll_loss(self, Y:Self, weight:Self|None=None, ignore_index:int|None=None, reduction:ReductionStr="mean") -> Self:
+    """
+    Computes the negative log likelihood loss between log-probabilities and target labels.
+
+    NOTE: `self` is log-probabilities and `Y` is the Y labels or class probabilities.
+
+    See: https://pytorch.org/docs/stable/generated/torch.nn.functional.nll_loss.html
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([[-1, 2, -3], [1, -2, 3]])
+    Y = Tensor([1, 2])
+    print(t.log_softmax().nll_loss(Y).item())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([[-1, 2, -3], [1, -2, 3]])
+    Y = Tensor([1, 2])
+    print(t.log_softmax().nll_loss(Y, reduction='none').numpy())
+    ```
+    """
+    weight = Y.ones_like() if weight is None else weight.gather(0, Y.flatten()).reshape(Y.shape)
+    masked_weight = weight if ignore_index is None else weight * Y.ne(ignore_index)
+    nll = -self.gather(1, Y.unsqueeze(1)).squeeze(1) * masked_weight
+    return nll.sum() / masked_weight.sum() if reduction == "mean" else nll._do_reduction(reduction)
 
   # ***** matrix ops *****
 

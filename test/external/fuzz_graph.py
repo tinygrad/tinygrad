@@ -20,8 +20,8 @@ def gen_prg(device, inputs_cnt):
     s = fst[0]
     for i in range(1, inputs_cnt): s = s.bitwise_xor(fst[i])
 
-    si = s.schedule()[-1]
-    prg = get_runner(device, si.ast)
+    linear = s.schedule_linear()
+    prg = get_runner(device, linear.src[-1].src[0])
   cached_prgs[(device, inputs_cnt)] = prg
   return prg
 

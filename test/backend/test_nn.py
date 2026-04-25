@@ -9,7 +9,6 @@ from tinygrad.nn import Conv1d, ConvTranspose1d, Conv2d, ConvTranspose2d, Linear
 from tinygrad.nn import BatchNorm, LayerNorm, LayerNorm2d, GroupNorm, InstanceNorm, RMSNorm, LSTMCell
 from tinygrad.nn.state import load_state_dict
 from tinygrad.engine.realize import run_linear
-from tinygrad.schedule import linear_to_schedule
 from test.helpers import not_support_multi_device, needs_second_gpu, slow
 
 @slow
@@ -433,7 +432,7 @@ class TestNN(unittest.TestCase):
                 [12, 19, 8, 1]])
     result = layer(a)
     linear, var_vals = result.linear_with_vars()
-    self.assertEqual(len([item for item in linear_to_schedule(linear) if item.ast.op is Ops.SINK]), kcount,
+    self.assertEqual(len([call for call in linear.src if call.src[0].op is Ops.SINK]), kcount,
                      "first run realizes weight and embedding")
     run_linear(linear, var_vals)
 
@@ -442,7 +441,7 @@ class TestNN(unittest.TestCase):
                 [7, 8, 9]])
     result = layer(b)
     linear, var_vals = result.linear_with_vars()
-    self.assertEqual(1, len([item for item in linear_to_schedule(linear) if item.ast.op is Ops.SINK]),
+    self.assertEqual(1, len([call for call in linear.src if call.src[0].op is Ops.SINK]),
                      "second run realizes embedding only")
     run_linear(linear, var_vals)
     print(f"Embedding used {GlobalCounters.global_ops} ops")

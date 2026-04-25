@@ -4,7 +4,7 @@ from tinygrad.helpers import cpu_events
 from tinygrad.schedule import schedule_cache
 
 def schedule_one():
-  Tensor([1]).schedule()
+  Tensor([1]).schedule_linear()
 
 class TestScheduleCache(unittest.TestCase):
   def test_bound_variable_var_vals(self):
@@ -12,7 +12,7 @@ class TestScheduleCache(unittest.TestCase):
     x = Tensor.ones(10).contiguous().realize()
 
     t = x + Tensor(v.bind(42))
-    _, var_vals = t.schedule_with_vars()
+    _, var_vals = t.linear_with_vars()
     self.assertEqual(var_vals, {'pos': 42})
 
   def test_disable_schedule_cache(self):
