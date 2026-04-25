@@ -76,6 +76,12 @@ class TestTensorGradient(unittest.TestCase):
     x = Tensor.randn(4, 4)
     np.testing.assert_allclose(x.pad(((1,0),(0,0))).gradient(x, gradient=g2)[0].numpy(), np.zeros((4, 4)))
 
+  def test_round_quantization_gradient(self):
+    x = Tensor([-1.2, -0.7, -0.2, 0.2, 0.7, 1.2], requires_grad=True)
+    q = 0.125
+    (x + q * (x.round() - x)).sum().backward()
+    np.testing.assert_allclose(x.grad.numpy(), np.full((6,), 1.0-q, dtype=np.float32))
+
 class TestViewGradient(unittest.TestCase):
   def test_expand(self):
     x = Tensor.randn(5,2)
