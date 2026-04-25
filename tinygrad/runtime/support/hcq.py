@@ -70,7 +70,6 @@ SignalType = TypeVar('SignalType', bound='HCQSignal')
 HCQDeviceType = TypeVar('HCQDeviceType', bound='HCQCompiled')
 ProgramType = TypeVar('ProgramType', bound='HCQProgram')
 ArgsStateType = TypeVar('ArgsStateType', bound='HCQArgsState')
-QueueType = TypeVar('QueueType', bound='HWQueue')
 
 class HWQueue(Generic[SignalType, HCQDeviceType, ProgramType, ArgsStateType]):
   """
