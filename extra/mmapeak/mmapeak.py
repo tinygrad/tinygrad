@@ -37,7 +37,7 @@ def launchBenchmark(instruction, vgprIndices, dense=True, accum=False, **kwargs)
     gidx = UOp.special(NUM_WORKGROUPS, "gidx0")
     FLOPs = FLOPS_PER_MATMUL * NUM_WAVES * NUM_WORKGROUPS * INTERNAL_LOOP * INSTRUCTIONS_PER_LOOP
     sink = UOp.sink(A.base, threads, gidx, arg=KernelInfo(inst.op.name.lower(), estimates=Estimates(ops=FLOPs, mem=0)))
-    return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg="AMD"), UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=x) for x in insts]))))
+    return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=Device.DEFAULT), UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=x) for x in insts]))))
   dummy = Tensor.zeros(1).contiguous().realize()
   out = Tensor.custom_kernel(dummy, fxn=fxn)[0]
   linear = out.schedule_linear()
