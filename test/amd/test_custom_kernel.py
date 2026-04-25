@@ -104,7 +104,7 @@ def custom_handwritten(A:UOp, arch:str) -> UOp:
   threads = UOp.special(128, "lidx0")
   wg = UOp.special(256, "gidx0")
   lds = UOp(Ops.DEFINE_LOCAL, dtypes.uint8.ptr(size=512, addrspace=AddrSpace.LOCAL), (), 'lds')  # 128 * 4 bytes
-  pipes = {getenv("PIPE", "")} if getenv("PIPE", "") else {"SALU", "VALU"}
+  pipes = {getenv("PIPE", "")} if getenv("PIPE", "") else {"SALU", "VALU", "TRANSCENDENTAL"}
   k = Kernel(arch)
   # wrap in loop to filter out icache misses
   LOOP_N, UNROLL_N = 8, 4
@@ -123,6 +123,30 @@ def custom_handwritten(A:UOp, arch:str) -> UOp:
       k.emit(r4.v_mov_b32_e32(v[20+i], i))
       k.emit(r4.v_lshlrev_b64_e32(v[30+2*i:31+2*i], 2, v[12+i:13+i])) # 2c
       k.emit(r4.v_mad_co_u64_u32(v[40+2*i:41+2*i], NULL, v[12+i], v[13+i], v[14+i:15+i])) # 4c
+  # saturate transcendental VALU; cover VALUT_4 (regular) and VALU_SCL_TRANS (pseudo-scalar)
+  # rdna4 manual 5.8: trans ops are tracked separately from regular VALU by S_DELAY_ALU
+  # (codes 1-4 = previous VALU, codes 5-7 = previous transcendental VALU)
+  # rdna4 manual 7.10: V_S_* are "VALU ops that operate on a single lane of data,
+  #   src and dst are SGPRs ... these use the VALU pipeline like any other VALU op"
+  if "TRANSCENDENTAL" in pipes:
+    for i in range(UNROLL_N):
+      k.emit(r4.v_mov_b32_e32(v[20+i], i))
+      # regular trans (VALUT_4, op 0xb)
+      k.emit(r4.v_rcp_f32_e32(v[60+i], v[12+i]))
+      k.emit(r4.v_rsq_f32_e32(v[61+i], v[12+i]))
+      k.emit(r4.v_sqrt_f32_e32(v[62+i], v[12+i]))
+      k.emit(r4.v_exp_f32_e32(v[63+i], v[12+i]))
+      k.emit(r4.v_log_f32_e32(v[64+i], v[12+i]))
+      k.emit(r4.v_sin_f32_e32(v[65+i], v[12+i]))
+      k.emit(r4.v_cos_f32_e32(v[66+i], v[12+i]))
+      # pseudo-scalar trans (VALU_SCL_TRANS, op 0x99): rdna4 manual 7.10
+      # "VALU ops that operate on a single lane of data where both src and dst are SGPRs"
+      # they take a VALU issue slot but ignore EXEC and don't touch VGPRs
+      k.emit(r4.v_s_rcp_f32(s[60+i], s[12+i]))
+      k.emit(r4.v_s_rsq_f32(s[61+i], s[12+i]))
+      k.emit(r4.v_s_sqrt_f32(s[62+i], s[12+i]))
+      k.emit(r4.v_s_exp_f32(s[63+i], s[12+i]))
+      k.emit(r4.v_s_log_f32(s[64+i], s[12+i]))
   k.emit(r4.s_add_co_i32(s[1], s[1], -1))
   k.emit(r4.s_cmp_eq_i32(s[1], 0))
   k.emit(r4.s_cbranch_scc0(), target="loop")
