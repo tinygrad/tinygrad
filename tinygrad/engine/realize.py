@@ -1,9 +1,9 @@
 from typing import cast, Callable, Iterator
-import time, pprint, random, itertools, math, contextlib, weakref
+import time, random, itertools, math, contextlib, weakref
 from dataclasses import dataclass, replace, field
-from tinygrad.helpers import all_same, colored, DEBUG, GlobalCounters, ansilen, NOOPT, all_int, Metadata, TRACEMETA, TracingKey
+from tinygrad.helpers import colored, DEBUG, GlobalCounters, ansilen, NOOPT, all_int, Metadata, TRACEMETA, TracingKey
 from tinygrad.helpers import BEAM, DEVECTORIZE, size_to_str, time_to_str, VALIDATE_WITH_CPU, cpu_profile, PROFILE, ProfilePointEvent, cpu_events
-from tinygrad.helpers import prod, unwrap, EMULATED_DTYPES, flatten
+from tinygrad.helpers import prod, EMULATED_DTYPES, flatten
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer, buffers, graph_rewrite
 from tinygrad.device import Device, Buffer, MultiBuffer
 from tinygrad.renderer import ProgramSpec, Estimates
@@ -150,56 +150,6 @@ def get_runner(device:str, ast:UOp) -> CompiledRunner:
     prg: ProgramSpec = get_program(ast, Device[device].renderer)
     method_cache[ckey] = method_cache[bkey] = ret = CompiledRunner(replace(prg, device=device))
   return ret
-
-# **************** lowering functions ****************
-
-# NOTE: ctx is the buffers
-si_lowerer = PatternMatcher([
-  (UPat((Ops.SINK, Ops.PROGRAM), name="sink"), lambda ctx,sink: get_runner(ctx[0].device, sink)),
-  (UPat(Ops.BUFFER_VIEW), lambda ctx: ViewOp(ctx[0])),
-  (UPat(Ops.COPY), lambda ctx: (BufferXfer(ctx[0].nbytes, ctx[0].device, ctx[1].device) \
-      if hasattr(alc:=Device[ctx[0].device].allocator, '_transfer') and alc.supports_transfer and all_same([x.device.split(":")[0] for x in ctx]) \
-      else BufferCopy(ctx[0].nbytes, ctx[0].device, ctx[1].device))),
-  (UPat(Ops.CUSTOM_FUNCTION, arg="encdec", name="cf"), lambda ctx,cf: EncDec(cf, ctx[0].nbytes, ctx[0].device)),
-  (UPat(Ops.CUSTOM_FUNCTION, arg="graph", name="cf"), lambda ctx,cf: Device[cf.device if isinstance(cf.device,str) else cf.device[0]].graph(cf, ctx))
-])
-
-@dataclass
-class ExecItem:
-  ast: UOp
-  bufs: list[Buffer|None] = field(default_factory=list)
-  metadata: tuple[Metadata, ...] = ()
-  fixedvars: dict[str, int] = field(default_factory=dict)
-  prg: Runner|None = None
-
-  def lower(self):
-    """Populate self.prg by lowering the AST."""
-    if self.prg is not None: return self
-    try: self.prg = cast(Runner, si_lowerer.rewrite(self.ast, self.bufs))
-    except Exception as e:
-      if DEBUG >= 2:
-        print(f"error lowering {self.ast.op}")
-        print("tensor operations:")
-        pprint.pprint(self.metadata, indent=2)
-      raise e
-    return self
-
-  def run(self, _var_vals:dict[str, int]|None=None, wait=False, jit=False, do_update_stats=True) -> float|None:
-    if self.prg is None: self.lower()
-    assert self.prg is not None
-    var_vals = self.fixedvars if _var_vals is None else (_var_vals|self.fixedvars)
-    # reorder bufs to match program globals if needed
-    _bufs = [self.bufs[i] for i in self.prg.p.globals] if isinstance(self.prg, CompiledRunner) else self.bufs
-    bufs = [unwrap(x) for x in _bufs] if jit else [unwrap(x).ensure_allocated() for x in _bufs]
-    if PROFILE:
-      payload = {"metadata":self.metadata, "var_vals":var_vals, "bufs":[b.trace_num for b in bufs], "name":self.prg.display_name}
-      payload["outputs"], payload["inputs"] = (self.prg.p.outs, self.prg.p.ins) if isinstance(self.prg, CompiledRunner) else ([0], [1])
-      cpu_events.append(ProfilePointEvent(self.prg.device, "exec", len(cpu_events), payload))
-    et = self.prg(bufs, var_vals, wait=wait or DEBUG >= 2)
-    if do_update_stats:
-      update_stats(self.prg.display_name, self.prg.device, self.prg.estimates, var_vals, et, len(bufs), jit, self.metadata, self.prg.first_run)
-      self.prg.first_run = False
-    return et
 
 # **************** run linear ****************
 
