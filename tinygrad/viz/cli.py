@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import argparse, pathlib, signal, sys, struct, json, os, itertools, heapq
+import argparse, pathlib, signal, struct, json, os, itertools, heapq
 os.environ["VIZ"] = "0"
 if hasattr(signal, "SIGPIPE"): signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 from typing import Iterator
@@ -78,7 +78,7 @@ def main(args) -> None:
   profile["layout"].update([(f'{c["name"][5:]}{" SQTT" if s["name"].endswith("PKTS") else ""} {s["name"]}', s["data"]) for c in viz_data.ctxs
                             if c["name"].startswith("SQTT") for s in c["steps"] if s["name"].endswith(("PMC", "PKTS"))])
   if args.list:
-    assert args.src is None, "can only specify a source or list all sources"
+    assert args.src == "ALL", "can only specify a source or list all sources"
     return print("ALL\n"+"\n".join(fmt_colored(k) for k in profile["layout"]))
 
   # ** SQTT printer
@@ -182,7 +182,7 @@ def main(args) -> None:
       print(fmt(k, to_str=fmt_row))
       if k["ref"] is not None:
         for s in viz_data.ctxs[k["ref"]]["steps"]:
-          if DEBUG >= 2: print(fmt("** graph_rewrite: "+" "*s["depth"]+s["name"]+(f" - {s['match_count']}" if s.get('match_count', 0) else '')))
+          if DEBUG >= 2: print(fmt(" "*s["depth"]+s["name"]+(f" - {s['match_count']}" if s.get('match_count', 0) else '')))
           if DEBUG >= 3 and s["name"] == "View Base AST": print_step(s)
           if DEBUG >= 4 and s["name"] == "View Source": print_step(s)
           if DEBUG >= 5: print_step(s)
@@ -192,7 +192,7 @@ def main(args) -> None:
       if len(args.item) > 2: raise RuntimeError(f"-i takes at most 2 names (got {args.item})")
       k = get({r["name"]:r for r in produce()}, args.item[0])
       if len(args.item) == 1:
-        with Context(DEBUG=5): render_event(k)
+        with Context(DEBUG=max(DEBUG.value, 2)): render_event(k)
       else: print_step(get(rewrites[viz_data.ctxs[k["ref"]]["name"]], args.item[1]))
     else:
       for k in produce(): render_event(k)
