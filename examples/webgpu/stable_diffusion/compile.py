@@ -114,7 +114,7 @@ if __name__ == "__main__":
     linear, output_bufs = jit_model(step, *step.input)
     functions, statements, bufs, _ = compile_net(linear, output_bufs)
     state = get_state_dict(model)
-    weights = {id(x.uop.base.realized): name for name, x in state.items()}
+    weights = {(id(b), b.offset, b.size, b.dtype): name for name, x in state.items() if (b:=x.uop.base.realized) is not None}
     kernel_code = '\n\n'.join([f"const {key} = `{fixup_code(code, key)}`;" for key, code in functions.items()])
     kernel_names = ', '.join([name for (name, _, _, _) in statements])
     input_names = [f"input{i}" for i in range(len(step.input))]

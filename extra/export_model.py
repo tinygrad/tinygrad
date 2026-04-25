@@ -244,7 +244,7 @@ def export_model(model, target:str, *inputs, model_name: Optional[str] = "model"
   with Context(JIT=2, CPU_COUNT=1): linear, output_bufs = jit_model(model, *inputs)
   functions, statements, bufs, bufs_to_save = compile_net(linear, output_bufs)
   state = get_state_dict(model)
-  weight_names = {id(x.uop.base.realized): name for name, x in state.items()}
+  weight_names = {(id(b), b.offset, b.size, b.dtype): name for name, x in state.items() if (b:=x.uop.base.realized) is not None}
   input_names = [f"input{i}" for i in range(len(inputs))]
   output_names = [f"output{i}" for i in range(len(output_bufs))]
 
