@@ -2,7 +2,7 @@
 import unittest, pickle
 from typing import Iterator
 from pathlib import Path
-from tinygrad.helpers import DEBUG, getenv, temp, ansistrip
+from tinygrad.helpers import DEBUG, getenv, temp, ansistrip, Context
 from tinygrad.renderer.amd.sqtt import print_packets, map_insts
 from tinygrad.runtime.autogen.amd.rdna3.ins import s_endpgm
 from tinygrad.viz.serve import sqtt_timeline
@@ -120,6 +120,9 @@ class TestSQTTMapBase(unittest.TestCase):
         for r in lines[2:]:
           parts = r.split()
           self.assertTrue(parts[0].isdigit(), f"expected clock timestamp, got {parts[0]}")
+      with Context(DEBUG=2):
+        kernels = run_cli("--profile", "--profile-path", str(pkl_path), "-s", "AMD").split("\n")
+      self.assertEqual(len(kernels), len(self.examples[pkl_path.stem][1]))
 
 class TestSQTTMapRDNA3(TestSQTTMapBase): target = "gfx1100"
 

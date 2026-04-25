@@ -189,7 +189,7 @@ class TestCustomKernel(unittest.TestCase):
     A = Tensor.randn(16, 16).contiguous()
     B = Tensor.empty(16)
     B = Tensor.custom_kernel(B, A, fxn=slice_sum_kernel)[0]
-    self.assertTrue(B.allclose(A.sum(1)))
+    self.assertTrue(B.allclose(A.sum(1)).item())
 
   def test_gemm(self):
     N = 16
