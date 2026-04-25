@@ -77,8 +77,9 @@ def main(args) -> None:
   profile = decode_profile(profile_bytes)
   profile["layout"].update([(f'{c["name"][5:]}{" SQTT" if s["name"].endswith("PKTS") else ""} {s["name"]}', s["data"]) for c in viz_data.ctxs
                             if c["name"].startswith("SQTT") for s in c["steps"] if s["name"].endswith(("PMC", "PKTS"))])
-  # --ls lists top-level sources
-  if args.list: return print("ALL\n"+"\n".join(fmt_colored(k) for k in profile["layout"]))
+  if args.list:
+    assert args.src is None, "can only specify a source or list all sources"
+    return print("ALL\n"+"\n".join(fmt_colored(k) for k in profile["layout"]))
 
   # ** SQTT printer
   data = None if args.src == "ALL" else get(profile["layout"], args.src)
@@ -153,10 +154,13 @@ def main(args) -> None:
       event_streams = [[(e["st"], n, e) for e in l["events"]] for n,l in timelines] if args.src == "ALL" \
                       else [[(e["st"], args.src, e) for e in unwrap(data)["events"]]]
       marker_stream = sorted([(m["ts"], "MARKER", m) for m in profile.get("markers", [])], key=lambda t:t[0])
+      seen:dict[tuple[str,str], int] = {}  # (device, name) -> count, for disambiguating repeats with " nN" suffix
       for ts,dev,e in heapq.merge(*event_streams, marker_stream, key=lambda t:t[0]):
         if dev == "MARKER":
           yield {"device":dev, "name":fmt_colored(e["name"]), "st_ms":ts*1e-3, "ref":None, "ext":None}
           continue
+        key = (dev, e["name"])
+        seen[key] = n = seen.get(key, 0)+1
         ext:list[str] = []
         if (fmt:=e["fmt"]).startswith("TB:"):
           tb, fmt = json.loads(e["fmt"].replace("TB:", "")), ""
@@ -165,7 +169,7 @@ def main(args) -> None:
             line = f"{file.split('/')[-1]}:{lineno} {fxn}"
             if fmt: ext.append(f"{line} {code}")
             elif not file.startswith("<") and not fxn.startswith("<"): fmt = line
-        yield {"device":dev, "name":fmt_colored(e["name"]), "dur_ms":e["dur"]*1e-3,
+        yield {"device":dev, "name":fmt_colored(e["name"])+(f" n{n}" if n > 1 else ""), "dur_ms":e["dur"]*1e-3,
                "st_ms":e["st"]*1e-3, "fmt":fmt, "ref":e["ref"], "ext":"\n".join(ext)}
     def fmt_top(k:dict) -> str:
       display = f"{k['device'][:7]:7s} {k['name']}" if args.src == "ALL" and k["device"] else k["name"]
@@ -188,21 +192,15 @@ def main(args) -> None:
         else:
           if DEBUG >= 3 and (ast:=steps.get("View Base AST")) is not None: print_step(ast)
           if DEBUG >= 4 and (src:=steps.get("View Source")) is not None: print_step(src)
-    rows = list((produce_top_kernels if args.top else produce_all_kernels)())
-    # -i: drill into event(s) by name; optional second name picks an exact step in the ctx
+    produce = produce_top_kernels if args.top else produce_all_kernels
     if args.item:
       if len(args.item) > 2: raise RuntimeError(f"-i takes at most 2 names (got {args.item})")
-      by_name:dict[str, list[dict]] = {}
-      for k in rows: by_name.setdefault(k["name"], []).append(k)
-      matches = get(by_name, args.item[0])
+      k = get({r["name"]:r for r in produce()}, args.item[0])
       if len(args.item) == 1:
-        with Context(DEBUG=max(DEBUG, 5)):
-          for k in matches: render_event(k)
-      else:  # exact step lookup
-        for ref in {k.get("ref") for k in matches} - {None}:
-          print_step(get(rewrites[viz_data.ctxs[ref]["name"]], args.item[1]))
+        with Context(DEBUG=5): render_event(k)
+      else: print_step(get(rewrites[viz_data.ctxs[k["ref"]]["name"]], args.item[1]))
     else:
-      for k in rows: render_event(k)
+      for k in produce(): render_event(k)
 
 def get_arg_parser() -> argparse.ArgumentParser:
   parser = argparse.ArgumentParser(add_help=False, prog="python -m tinygrad.viz.cli")
