@@ -1,7 +1,7 @@
-from tinygrad import Tensor, dtypes, Device
-from tinygrad.helpers import getenv, DEBUG
-from tinygrad.codegen.opt.kernel import Kernel, Opt, OptOps
-from tinygrad.engine.realize import CompiledRunner, ExecItem, get_program
+from tinygrad import Tensor, dtypes, Context
+from tinygrad.helpers import getenv
+from tinygrad.codegen.opt import Opt, OptOps
+from tinygrad.engine.realize import run_linear
 from dataclasses import replace
 
 N = 4096
@@ -11,9 +11,6 @@ if __name__ == "__main__":
   else:
     A, B = Tensor.empty(N, N, dtype=dtypes.float16), Tensor.empty(N, N, dtype=dtypes.float16)
   C = A.matmul(B)
-  si = C.schedule()[-1]
-  ast = si.ast
-  k = Kernel(ast, opts=Device[Device.DEFAULT].renderer)
   if getenv("GEMV"):
     opts = [
       Opt(op=OptOps.UNROLL, axis=0, amt=8),
@@ -28,10 +25,10 @@ if __name__ == "__main__":
       Opt(op=OptOps.LOCAL, axis=1, amt=2),
       Opt(op=OptOps.LOCAL, axis=0, amt=2),
     ]
-  k.apply_opts(opts)
-  prg = get_program(k.ast.replace(arg=replace(k.ast.arg, opts_to_apply=tuple(k.applied_opts))), k.opts)
-  new_src = prg.src
-  # can mod source here
-  prg = replace(prg, src=new_src)
-  ei = ExecItem(si.ast, [x.ensure_allocated() for x in si.bufs], si.metadata, prg=CompiledRunner(prg))
-  for i in range(5): ei.run(wait=True)
+  linear = C.schedule_linear()
+  call = linear.src[-1]
+  new_ast = call.src[0].replace(arg=replace(call.src[0].arg, opts_to_apply=tuple(opts)))
+  new_call = call.replace(src=(new_ast, *call.src[1:]))
+  linear = linear.replace(src=tuple(new_call if c is call else c for c in linear.src))
+  with Context(DEBUG=2):
+    for i in range(5): run_linear(linear)

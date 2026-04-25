@@ -10,7 +10,7 @@ N = 4096
 run_count = 5
 
 if __name__ == "__main__":
-  ast = (Tensor.empty(N, N)@Tensor.empty(N, N)).schedule()[-1].ast
+  ast = (Tensor.empty(N, N)@Tensor.empty(N, N)).schedule_linear().src[-1].src[0]
   prg = get_program(ast, Device.default.renderer)
 
   if getenv("ASM") == 1:
