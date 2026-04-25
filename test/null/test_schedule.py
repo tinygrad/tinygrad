@@ -4,6 +4,7 @@ from tinygrad import nn, dtypes, Device, Tensor
 from tinygrad.uop.ops import UOp, Ops, GroupOp, UPat, KernelInfo
 from tinygrad.helpers import DEBUG, GlobalCounters, Context
 from tinygrad.engine.realize import compile_linear, run_linear
+from tinygrad.codegen import get_program
 
 class KernelCountException(Exception): pass
 def check_schedule(t:Tensor|list[Tensor]|UOp, allowed:int, to_prerealize:list[Tensor]|None=None, filter_sink=True):
@@ -141,7 +142,7 @@ class TestSimpleSchedule(unittest.TestCase):
     a = Tensor.empty(16,16).sum(axis=1)
     a1 = a.reshape(4,4)
     a2 = a.reshape(16,1,1)
-    self.assertEqual(len(Tensor.schedule(a1, a2)), 1)
+    self.assertEqual(len(Tensor.schedule_linear(a1, a2).src), 1)
 
 class TestSchedule(unittest.TestCase):
   def test_create_schedule_handles_multi_kernel_after_and_after_deps(self):
@@ -166,8 +167,8 @@ class TestSchedule(unittest.TestCase):
     kc = Tensor.custom_kernel(out, src_after, fxn=named_copy("kc"))[0]
     out_after = Tensor(kc.uop.src[0].after(*kc.uop.src[1:], kd.uop))
 
-    schedule = out_after.schedule()
-    names = [si.ast.arg.name for si in schedule]
+    linear = out_after.schedule_linear()
+    names = [call.src[0].arg.name for call in linear.src]
     self.assertEqual(set(names), {"ka", "kb", "kc", "kd"})
     self.assertEqual(names[-1], "kc")
     self.assertLess(names.index("ka"), names.index("kc"))
@@ -667,9 +668,9 @@ class TestSchedule(unittest.TestCase):
     check_schedule(c, 2)
 
   def _alu_from_tensor(self, t:Tensor):
-    s = [s for s in t.schedule() if s.ast.op is Ops.SINK]
+    s = [s for s in t.schedule_linear().src if s.src[0].op is Ops.SINK]
     self.assertEqual(len(s), 1)
-    return [u.op for u in s[0].ast.toposort() if u.op in GroupOp.ALU]
+    return [u.op for u in s[0].src[0].toposort() if u.op in GroupOp.ALU]
 
   def test_2_pow_is_exp2(self):
     t = 2.0 ** Tensor([1.0, 2.0, 3.0])
@@ -798,12 +799,12 @@ class TestSchedule(unittest.TestCase):
     Tensor.manual_seed(0)
     x = Tensor.randn(4, 12, 64, 64, dtype=dtypes.half).realize()
     out = x.softmax(dtype=dtypes.float)
-    sched = out.schedule()
-    self.assertEqual(len(sched), 3)
+    linear = out.schedule_linear()
+    self.assertEqual(len(linear.src), 3)
     # max reduction stays in input dtype (no numerical loss), upcast happens after subtracting max
-    self.assertEqual(sched[0].bufs[0].dtype, dtypes.half)
-    self.assertEqual(sched[1].bufs[0].dtype, dtypes.float)
-    self.assertEqual(sched[2].bufs[0].dtype, dtypes.float)
+    self.assertEqual(linear.src[0].src[1].dtype, dtypes.half)
+    self.assertEqual(linear.src[1].src[1].dtype, dtypes.float)
+    self.assertEqual(linear.src[2].src[1].dtype, dtypes.float)
 
   def test_softmax_backward(self):
     Tensor.manual_seed(0)
@@ -960,7 +961,7 @@ class TestSchedule(unittest.TestCase):
     gc.collect()
     base = GlobalCounters.mem_used
     Tensor.ones(256).contiguous().realize()
-    Tensor.ones(5, 5).contiguous().schedule()
+    Tensor.ones(5, 5).contiguous().schedule_linear()
     gc.collect()
     self.assertEqual(GlobalCounters.mem_used-base, 0)
 
@@ -1173,24 +1174,24 @@ class TestFusionOp(unittest.TestCase):
     st = time.perf_counter()
     a = Tensor([1,2,3,4])
     for _ in range(24): a = a + a
-    sched = a.schedule()
-    sched[-1].lower()
+    linear = a.schedule_linear()
+    prg = get_program(linear.src[-1].src[0], renderer=Device[Device.DEFAULT].renderer)
     self.assertLess(time.perf_counter()-st, 2.0)
-    assert len(sched[-1].prg.p.src.splitlines()) < 250
+    assert len(prg.src.splitlines()) < 250
 
   def test_recursive_add_cmp(self):
     st = time.perf_counter()
     a = Tensor([1,2,3,4])
     for _ in range(24): a = a + a
-    sched1 = a.schedule()
+    linear1 = a.schedule_linear()
     b = Tensor([1,2,3,4])
     for _ in range(24): b = b + b
-    sched2 = b.schedule()
+    linear2 = b.schedule_linear()
     c = Tensor([1,2,3,4])
     for _ in range(23): c = c + c
-    sched3 = c.schedule()
-    self.assertEqual(sched1[-1].ast, sched2[-1].ast)
-    with self.assertRaises(AssertionError): self.assertEqual(sched1[-1].ast, sched3[-1].ast)
+    linear3 = c.schedule_linear()
+    self.assertEqual(linear1.src[-1].src[0], linear2.src[-1].src[0])
+    with self.assertRaises(AssertionError): self.assertEqual(linear1.src[-1].src[0], linear3.src[-1].src[0])
     self.assertLess(time.perf_counter()-st, 2.0)
 
   def test_recursive_pad(self):
@@ -1198,8 +1199,8 @@ class TestFusionOp(unittest.TestCase):
     val = 1.0
     a = Tensor(val)
     for _ in range(24): a = Tensor.stack(a, a)[0]
-    sched = a.schedule()
-    self.assertLessEqual(len(sched), 1)
+    linear = a.schedule_linear()
+    self.assertLessEqual(len(linear.src), 1)
     self.assertLess(time.perf_counter()-st, 2.0)
 
   def test_recursive_reshape(self):
@@ -1208,8 +1209,8 @@ class TestFusionOp(unittest.TestCase):
     b = Tensor.empty(16, 2).realize()
     r = a.sum(1)
     for _ in range(24): r = r.reshape(16, 2) + b
-    sched = r.schedule()
-    self.assertEqual(len(sched), 1)
+    linear = r.schedule_linear()
+    self.assertEqual(len(linear.src), 1)
     self.assertLess(time.perf_counter()-st, 2.0)
 
 # NOTE: the NULL backend supports BUFFER_VIEW
