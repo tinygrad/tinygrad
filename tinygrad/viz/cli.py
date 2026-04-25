@@ -191,15 +191,16 @@ def main(args) -> None:
     rows = list((produce_top_kernels if args.top else produce_all_kernels)())
     # -i: drill into event(s) by name; optional second name picks an exact step in the ctx
     if args.item:
+      if len(args.item) > 2: raise RuntimeError(f"-i takes at most 2 names (got {args.item})")
       by_name:dict[str, list[dict]] = {}
       for k in rows: by_name.setdefault(k["name"], []).append(k)
       matches = get(by_name, args.item[0])
-      if len(args.item) >= 2:  # exact step lookup
-        for ref in {k.get("ref") for k in matches} - {None}:
-          print_step(get(rewrites[viz_data.ctxs[ref]["name"]], args.item[1]))
-      else:
+      if len(args.item) == 1:
         with Context(DEBUG=max(DEBUG, 5)):
           for k in matches: render_event(k)
+      else:  # exact step lookup
+        for ref in {k.get("ref") for k in matches} - {None}:
+          print_step(get(rewrites[viz_data.ctxs[ref]["name"]], args.item[1]))
     else:
       for k in rows: render_event(k)
 
