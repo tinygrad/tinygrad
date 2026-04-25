@@ -104,6 +104,8 @@ def custom_handwritten(A:UOp, arch:str) -> UOp:
   wg = UOp.special(256, "gidx0")
   lds = UOp(Ops.DEFINE_LOCAL, dtypes.uint8.ptr(size=512, addrspace=AddrSpace.LOCAL), (), 'lds')  # 128 * 4 bytes
   k = Kernel(arch)
+
+  """
   # * VMEM exec overlaps: multiple b64 stores queue on the VMEM pipe.
   k.emit(r4.s_load_b64(s[0:1], s[0:1], soffset=NULL))
   k.emit(r4.s_wait_kmcnt(simm16=0))
@@ -135,6 +137,7 @@ def custom_handwritten(A:UOp, arch:str) -> UOp:
   k.emit(s_add_u32(s[1], s[1], -1))
   k.emit(s_cmp_eq_i32(s[1], 0))
   k.emit(s_cbranch_scc0(), target="loop")
+  """
   k.emit(r4.s_endpgm())
   insts = k.finalize()
   sink = UOp.sink(A.base, threads, wg, lds, arg=KernelInfo("custom_handwritten"))
