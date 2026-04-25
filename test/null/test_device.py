@@ -66,6 +66,11 @@ class TestDevice(unittest.TestCase):
     self.assertNotEqual(result.returncode, 0)
     self.assertIn(b"deprecated", result.stderr)
 
+  def test_cpu_device_normalizes_arm64_machine_name(self):
+    from tinygrad.runtime.ops_cpu import CPUDevice
+    with patch("platform.machine", return_value="ARM64"):
+      self.assertEqual(CPUDevice().arch, "arm64,native")
+
   @unittest.skipIf(WIN and CI, "skipping windows test") # TODO: subprocess causes memory violation?
   def test_env_overwrite_default_compiler(self):
     if Device.DEFAULT == "CPU":
