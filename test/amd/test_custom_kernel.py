@@ -3,6 +3,7 @@ import functools
 import numpy as np
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
+from tinygrad.engine.realize import run_linear, estimate_uop
 from tinygrad.renderer import Estimates
 from tinygrad.dtype import AddrSpace
 from tinygrad.runtime.autogen.amd.rdna3.ins import *
@@ -154,10 +155,11 @@ class TestCustomKernel(unittest.TestCase):
     if self.arch != "rdna3": self.skipTest("only rdna3")
     a = Tensor.full((16, 16), 1.).contiguous().realize()
     a = Tensor.custom_kernel(a, fxn=custom_add_one)[0]
-    ei = a.schedule()[-1].lower()
-    self.assertEqual(ei.prg.estimates.ops, a.numel())
-    self.assertEqual(ei.prg.estimates.mem, a.nbytes()*2)
-    ei.run()
+    linear = a.schedule_linear()
+    est = estimate_uop(linear.src[-1])
+    self.assertEqual(est.ops, a.numel())
+    self.assertEqual(est.mem, a.nbytes()*2)
+    run_linear(linear)
     self.assertTrue((a.numpy() == 2.).all())
 
   def test_variable(self):
@@ -165,9 +167,9 @@ class TestCustomKernel(unittest.TestCase):
     b = Tensor.full((16, 16), 1, dtype=dtypes.uint32).contiguous().realize()
     a = Tensor.zeros_like(b).contiguous().realize()
     a = Tensor.custom_kernel(a, b, fxn=custom_add_var)[0]
-    ei = a.schedule()[-1].lower()
+    linear = a.schedule_linear()
     for i in range(4):
-      ei.run({"var":i})
+      run_linear(linear, var_vals={"var":i})
       self.assertTrue((a.numpy() == 1+i).all())
 
   def test_lds_sync(self):
