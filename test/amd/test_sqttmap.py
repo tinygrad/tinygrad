@@ -156,7 +156,7 @@ class TestSQTTMapRDNA4(TestSQTTMapBase):
         row_counts[e.device] = idx + 1
       elif info.startswith("LINK:"):
         delay = int(e.st) - dispatch_st[info[len("LINK:"):]]
-        self.assertGreaterEqual(delay, 1, f"EXEC {e.device} starts before DISPATCH {link_key}: delay={delay}")
+        self.assertGreaterEqual(delay, 1, f"EXEC {e.device} starts before DISPATCH: delay={delay}")
         if (prev_en:=row_ends.get(e.device)) is not None:
           self.assertGreaterEqual(e.st, prev_en, f"EXEC overlap in {e.device}: {e.st} < prev end {prev_en}")
         row_ends[e.device] = e.en

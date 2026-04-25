@@ -114,7 +114,16 @@ def custom_handwritten(A:UOp, arch:str) -> UOp:
   if "SALU" in pipes:
     for i in range(UNROLL_N):
       k.emit(r4.s_mov_b32(s[20+i], i))
+      k.emit(r4.s_mov_b32(s[30+i], i))
+      k.emit(r4.s_mov_b32(s[40+i], i))
       k.emit(r4.s_mul_i32(s[14+i], s[12+i], 32))
+  # saturate vector ALU pipe
+  if "VALU" in pipes:
+    for i in range(UNROLL_N):
+      k.emit(r4.v_mov_b32_e32(v[20+i], i))
+      k.emit(r4.v_mov_b32_e32(v[30+i], i))
+      k.emit(r4.v_mov_b32_e32(v[40+i], i))
+      k.emit(r4.v_rcp_f32_e32(v[14+i], v[12+i]))
   k.emit(r4.s_add_co_i32(s[1], s[1], -1))
   k.emit(r4.s_cmp_eq_i32(s[1], 0))
   k.emit(r4.s_cbranch_scc0(), target="loop")
