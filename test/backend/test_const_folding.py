@@ -8,8 +8,8 @@ from test.helpers import not_support_multi_device
 
 def _check_ast_count(desired_count:int, t:Tensor):
   # NOTE: this has side effect because everything can be scheduled only once
-  schedule = t.schedule()
-  asts = [s for s in schedule if s.ast.op is Ops.SINK]
+  schedule = t.schedule_linear()
+  asts = [s for s in schedule.src if s.src[0].op is Ops.SINK]
   len(asts)
   # NOT SUPPORTED ANYMORE
   #assert len(asts) == desired_count, f"{len(asts)} != {desired_count}"
@@ -28,8 +28,8 @@ class TestMovedConstFolding(unittest.TestCase):
     _check_ast_count(1, Tensor([1.0, 2, 3, 4]) * Tensor.ones(2).pad(((1, 1),)))
 
   def test_copy_padded_const(self):
-    schedule = Tensor.ones(4, device="CPU:0").pad(((1, 1),)).to("CPU:1").schedule()
-    assert not any(si.ast.op is Ops.COPY for si in schedule), "const copy should be folded"
+    schedule = Tensor.ones(4, device="CPU:0").pad(((1, 1),)).to("CPU:1").schedule_linear()
+    assert not any(si.src[0].op is Ops.COPY for si in schedule.src), "const copy should be folded"
     np.testing.assert_equal(Tensor.ones(4, device="CPU:0").pad(((1, 1),)).to("CPU:1").numpy(), [0, 1, 1, 1, 1, 0])
 
   def test_cast_padded(self):
