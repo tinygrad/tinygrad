@@ -473,10 +473,10 @@ class HIPRenderer(CStyleLanguage):
   def is_cdna(arch): return arch.split(":")[0] in {"gfx942", "gfx950"}
   @staticmethod
   def is_cdna4(arch): return arch.split(":")[0] == "gfx950"
-  def __init__(self, target:Target): # gfx942 => MI300, gfx1100 => RX 7900, gfx1201 => RX 9700
+  def __init__(self, target:Target, use_hipcc=False): # gfx942 => MI300, gfx1100 => RX 7900, gfx1201 => RX 9700
     super().__init__(target)
-    from tinygrad.runtime.support.compiler_amd import HIPCompiler
-    self.compiler, self.tensor_cores = HIPCompiler(target.arch), tc.get_amd(target.arch)
+    from tinygrad.runtime.support.compiler_amd import HIPCompiler, HIPCCCompiler
+    self.compiler, self.tensor_cores = (HIPCCCompiler if use_hipcc else HIPCompiler)(target.arch), tc.get_amd(target.arch)
     if not self.is_cdna4(target.arch): self.extra_matcher += pm_manual_bf16_cast + extra_pm
     if self.is_cdna(target.arch):
       self.string_rewrite = PatternMatcher([
@@ -512,7 +512,7 @@ class HIPRenderer(CStyleLanguage):
 
   def asm(self, prg:UOp, lin:UOp) -> bytes:
     from tinygrad.renderer.amd.elf import assemble_linear
-    return assemble_linear(self, prg, lin)
+    return assemble_linear(prg, lin, self.target.arch)
 
   def render_vector_prefix(self, dtype:DType) -> str:
     vec, scal = self.render_dtype(dtype), self.render_dtype(dtype.scalar())
@@ -560,10 +560,7 @@ class HIPRenderer(CStyleLanguage):
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 
 class HIPCCRenderer(HIPRenderer):
-  def __init__(self, target:Target):
-    super().__init__(target)
-    from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
-    self.compiler = HIPCCCompiler(target.arch)
+  def __init__(self, target:Target): super().__init__(target, use_hipcc=True)
 
 class QCOMCLRenderer(OpenCLRenderer):
   def __init__(self, target:Target):

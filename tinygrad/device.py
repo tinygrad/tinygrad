@@ -293,7 +293,7 @@ class Compiled:
       f"{self.device}_{rn}=1 is deprecated, use DEV={self.device}:{rn} or {self.device}_CC={rn} instead"
     t = DEV.target(self.device.split(':')[0], **({"arch":self.arch} if self.arch else {}))
     return select_first_inited(select_by_name(self.renderers, self._renderer_name, t.renderer, f"{self.device} has no renderer {t.renderer!r}"),
-                               f"No renderer for {self.device} is available", self.cached_renderer, target=t)
+                               f"No renderer for {self.device} is available", self.cached_renderer, t)
 
   def count(self) -> int:
     """
