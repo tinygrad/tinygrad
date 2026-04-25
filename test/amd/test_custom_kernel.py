@@ -6,6 +6,7 @@ from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.engine.realize import run_linear, estimate_uop
 from tinygrad.renderer import Estimates
 from tinygrad.dtype import AddrSpace
+from tinygrad.helpers import getenv
 from tinygrad.runtime.autogen.amd.rdna3.ins import *
 import tinygrad.runtime.autogen.amd.rdna3.ins as r3
 import tinygrad.runtime.autogen.amd.rdna4.ins as r4
@@ -103,8 +104,20 @@ def custom_handwritten(A:UOp, arch:str) -> UOp:
   threads = UOp.special(128, "lidx0")
   wg = UOp.special(256, "gidx0")
   lds = UOp(Ops.DEFINE_LOCAL, dtypes.uint8.ptr(size=512, addrspace=AddrSpace.LOCAL), (), 'lds')  # 128 * 4 bytes
+  pipes = {getenv("PIPE", "")} if getenv("PIPE", "") else {"SALU", "VALU"}
   k = Kernel(arch)
-
+  # wrap in loop to filter out icache misses
+  LOOP_N, UNROLL_N = 8, 4
+  k.emit(r4.s_mov_b32(s[1], LOOP_N))
+  k.label("loop")
+  # saturate scalar ALU pipe
+  if "SALU" in pipes:
+    for i in range(UNROLL_N):
+      k.emit(r4.s_mov_b32(s[20+i], i))
+      k.emit(r4.s_mul_i32(s[14+i], s[12+i], 32))
+  k.emit(r4.s_add_co_i32(s[1], s[1], -1))
+  k.emit(r4.s_cmp_eq_i32(s[1], 0))
+  k.emit(r4.s_cbranch_scc0(), target="loop")
   """
   # * VMEM exec overlaps: multiple b64 stores queue on the VMEM pipe.
   k.emit(r4.s_load_b64(s[0:1], s[0:1], soffset=NULL))
