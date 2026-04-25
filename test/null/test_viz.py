@@ -924,7 +924,7 @@ class TestCLI(unittest.TestCase):
       (p:=Path(tmpdir)/"profile.pkl").write_bytes(pickle.dumps(cpu_events))
       # reconstruct DEBUG=4 output and see all markers.
       with Context(DEBUG=4):
-        kernels = run_cli("--rewrites-path", str(r), "--profile-path", str(p), "-p", "-s", "NULL")
+        kernels = run_cli("--rewrites-path", str(r), "--profile-path", str(p), "-s", "NULL")
       self.assertIn("void custom_empty_n0", kernels)
       self.assertIn("marker @ 1", kernels)
       self.assertIn("void custom_empty_n1", kernels)
@@ -933,11 +933,11 @@ class TestCLI(unittest.TestCase):
       self.assertIn("UOp.const", kernels)
       # get the top slowest functions across all devices
       with Context(DEBUG=2):
-        times = run_cli("--rewrites-path", str(r), "--profile-path", str(p), "-p", "-s", "ALL", "--top", "-1")
+        times = run_cli("--rewrites-path", str(r), "--profile-path", str(p), "-s", "ALL", "--top", "-1")
       self.assertIn("TINY", times)
       self.assertIn("NULL", times)
       with Context(DEBUG=3):
-        json_lines = run_cli("--rewrites-path", str(r), "--profile-path", str(p), "-p", "-s", "ALL", "--json")
+        json_lines = run_cli("--rewrites-path", str(r), "--profile-path", str(p), "-s", "ALL", "--json")
       for line in json_lines.split("\n"): _ = json.loads(line)
 
 if __name__ == "__main__":

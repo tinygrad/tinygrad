@@ -6,7 +6,7 @@ from typing import Iterator
 from tinygrad.viz import serve as viz
 from tinygrad.uop.ops import RewriteTrace
 from tinygrad.helpers import temp, ansistrip, colored, time_to_str, ansilen, ProfilePointEvent, ProfileRangeEvent, TracingKey, unwrap, NO_COLOR
-from tinygrad.helpers import DEBUG
+from tinygrad.helpers import DEBUG, Context
 
 # profile decoder used in CLI and tests
 def decode_profile(data:bytes) -> dict:
@@ -72,21 +72,13 @@ def main(args) -> None:
           for line in m["diff"]: print(fmt(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None)))
     if data.get("src") is not None: print(fmt(data["src"]))
 
-  # ** Graph rewrites printer
-  if args.rewrites:
-    if args.src is None: return print("Select a source with -s"+"\n"+"\n".join([f"  {fmt_colored(k)}" for k in rewrites]))
-    steps = get(rewrites, args.src)
-    if args.item is None:
-      for k,v in steps.items(): print(" "*v["depth"]+k+(f" - {v['match_count']}" if v.get('match_count', 0) else ''))
-    else: print_step(get(steps, args.item))
-    return None
-
   events:list = viz.load_pickle(args.profile_path, default=[])
   if (profile_bytes:=viz.get_profile(viz_data, events)) is None: raise RuntimeError(f"empty profile in {args.profile_path}")
   profile = decode_profile(profile_bytes)
   profile["layout"].update([(f'{c["name"][5:]}{" SQTT" if s["name"].endswith("PKTS") else ""} {s["name"]}', s["data"]) for c in viz_data.ctxs
                             if c["name"].startswith("SQTT") for s in c["steps"] if s["name"].endswith(("PMC", "PKTS"))])
-  if args.src is None: return print("Select a source with -s"+"\n  ALL\n"+"\n".join([f"  {fmt_colored(k)}" for k in profile["layout"]]))
+  # --ls lists top-level sources
+  if args.list: return print("ALL\n"+"\n".join(fmt_colored(k) for k in profile["layout"]))
 
   # ** SQTT printer
   data = None if args.src == "ALL" else get(profile["layout"], args.src)
@@ -152,12 +144,11 @@ def main(args) -> None:
       items = sorted(agg.items(), key=lambda kv:kv[1][0], reverse=True)
       num_rows = len(items) if args.top < 0 else args.top
       for (dev,name),(t,c,ref) in items[:num_rows]:
-        display = f"{dev[:7]:7s} {fmt_colored(name)}" if args.src == "ALL" else fmt_colored(name)
-        yield {"name":display, "dur_ms":t, "count":c, "pct":t/total*100.0, "ref":ref}
+        yield {"device":dev, "name":fmt_colored(name), "dur_ms":t, "count":c, "pct":t/total*100.0, "ref":ref}
       if num_rows > 0 and items[num_rows:]:
         other_t = sum(t for _,(t,_,_) in items[num_rows:])
         other_c = sum(c for _,(_,c,_) in items[num_rows:])
-        yield {"name":"Other", "dur_ms":other_t, "count":other_c, "pct":other_t/total*100.0, "ref":None}
+        yield {"device":"", "name":"Other", "dur_ms":other_t, "count":other_c, "pct":other_t/total*100.0, "ref":None}
     def produce_all_kernels() -> Iterator[dict]:
       event_streams = [[(e["st"], n, e) for e in l["events"]] for n,l in timelines] if args.src == "ALL" \
                       else [[(e["st"], args.src, e) for e in unwrap(data)["events"]]]
@@ -177,7 +168,8 @@ def main(args) -> None:
         yield {"device":dev, "name":fmt_colored(e["name"]), "dur_ms":e["dur"]*1e-3,
                "st_ms":e["st"]*1e-3, "fmt":fmt, "ref":e["ref"], "ext":"\n".join(ext)}
     def fmt_top(k:dict) -> str:
-      return f"{fmt_colored(k['name'])}{' ' * max(0, 36-ansilen(k['name']))} {time_to_str(k['dur_ms']*1e-3, w=9)} {k['count']:7d} {k['pct']:6.2f}%"
+      display = f"{k['device'][:7]:7s} {k['name']}" if args.src == "ALL" and k["device"] else k["name"]
+      return f"{display}{' ' * max(0, 36-ansilen(display))} {time_to_str(k['dur_ms']*1e-3, w=9)} {k['count']:7d} {k['pct']:6.2f}%"
     def fmt_all(k:dict) -> str:
       if k["device"] == "MARKER": return f"--- MARKER {k['name']} /{k['st_ms']:9.2f}ms"
       ptm = colored(time_to_str(k["dur_ms"]*1e-3, w=9), "yellow" if k["dur_ms"] > 10 else None)
@@ -185,24 +177,39 @@ def main(args) -> None:
       name = f"*** {k['device'][:7]:7s} "+k["name"]+" "*(46-ansilen(k["name"]))
       return f"{name} tm {ptm}/{k['st_ms']:9.2f}ms"+(f" ({fmt_str})" if k["fmt"] else "")
     fmt_row = fmt_top if args.top else fmt_all
-    seen_refs:set[int] = set()
-    for k in (produce_top_kernels if args.top else produce_all_kernels)():
+    def render_event(k:dict) -> None:
       print(fmt(k, to_str=fmt_row))
-      if k["ref"] is not None and k["ref"] not in seen_refs:
-        seen_refs.add(k["ref"])
-        steps = rewrites[viz_data.ctxs[k["ref"]]["name"]]
-        if DEBUG >= 3 and (ast_step:=steps.get("View Base AST")) is not None: print_step(ast_step)
-        if DEBUG >= 4 and (src_step:=steps.get("View Source")) is not None: print_step(src_step)
-      elif DEBUG >= 3 and k.get("ext"): print(fmt(k["ext"]))
+      if (ref:=k.get("ref")) is None:
+        if DEBUG >= 3 and k.get("ext"): print(fmt(k["ext"]))
+      else:
+        steps = {s["name"]:s for s in viz_data.ctxs[ref]["steps"]}
+        if DEBUG >= 5:
+          for s in steps.values(): print_step(s)
+        else:
+          if DEBUG >= 3 and (ast:=steps.get("View Base AST")) is not None: print_step(ast)
+          if DEBUG >= 4 and (src:=steps.get("View Source")) is not None: print_step(src)
+    rows = list((produce_top_kernels if args.top else produce_all_kernels)())
+    # -i: drill into event(s) by name; optional second name picks an exact step in the ctx
+    if args.item:
+      by_name:dict[str, list[dict]] = {}
+      for k in rows: by_name.setdefault(k["name"], []).append(k)
+      matches = get(by_name, args.item[0])
+      if len(args.item) >= 2:  # exact step lookup
+        for ref in {k.get("ref") for k in matches} - {None}:
+          print_step(get(rewrites[viz_data.ctxs[ref]["name"]], args.item[1]))
+      else:
+        with Context(DEBUG=max(DEBUG, 5)):
+          for k in matches: render_event(k)
+    else:
+      for k in rows: render_event(k)
 
 def get_arg_parser() -> argparse.ArgumentParser:
   parser = argparse.ArgumentParser(add_help=False, prog="python -m tinygrad.viz.cli")
-  g_mode = parser.add_argument_group("mode")
-  g_mode.add_argument("-p", "--profile", action="store_true", help="View profile")
-  g_mode.add_argument("-r", "--rewrites", action="store_true", help="View graph rewrites")
   g_opts = parser.add_argument_group("optional args")
-  g_opts.add_argument("-s", "--src", type=str, default=None, metavar="NAME", help="Select a data source (default: list all sources)")
-  g_opts.add_argument("-i", "--item", type=str, default=None, metavar="NAME", help="Select an item within the source (default: list all items)")
+  g_opts.add_argument("-s", "--src", type=str, default="ALL", metavar="NAME", help="Select a source (default: ALL). Use --ls to list sources.")
+  g_opts.add_argument("-i", "--item", nargs="+", default=None, metavar="NAME",
+                      help="Drill into named child(ren); first picks an event, second picks a step. Place last (greedy).")
+  g_opts.add_argument("--list", "--ls", dest="list", action="store_true", help="List sources")
   g_opts.add_argument("-t", "--top", nargs="?", type=int, const=20, metavar="COUNT", help="Aggregate top kernels (optional count, default 20)")
   g_opts.add_argument("--profile-path", type=pathlib.Path, metavar="PATH", help="Optional path to profile.pkl (default: latest profile)",
                       default=pathlib.Path(temp("profile.pkl", append_user=True)))
@@ -213,10 +220,5 @@ def get_arg_parser() -> argparse.ArgumentParser:
   return parser
 
 if __name__ == "__main__":
-  args = get_arg_parser().parse_args()
-  if not args.profile and not args.rewrites:
-    get_arg_parser().print_help()
-    sys.exit(0)
-
-  try: main(args)
+  try: main(get_arg_parser().parse_args())
   except KeyboardInterrupt: pass
