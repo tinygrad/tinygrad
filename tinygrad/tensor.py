@@ -12,7 +12,7 @@ from tinygrad.helpers import suppress_finalizing, disable_gc
 from tinygrad.gradient import compute_gradient
 from tinygrad.mixin import OpMixin
 from tinygrad.uop.ops import smax, UOp, Ops, sint, all_metadata, _index_to_concrete_int, Variable, _broadcast_shape
-from tinygrad.schedule import ExecItem, create_linear_with_vars, linear_to_schedule
+from tinygrad.schedule import create_linear_with_vars
 from tinygrad.device import Buffer, canonicalize_device
 from tinygrad.engine.realize import run_linear
 from tinygrad.callify import transform_to_call
@@ -231,21 +231,6 @@ class Tensor(OpMixin):
     big_sink, becomes_map = transform_to_call(UOp.sink(*[x.uop for x in (self,)+lst]))
     _apply_map_to_tensors(becomes_map, name="buffers")
     return create_linear_with_vars(big_sink)
-
-  def schedule_with_vars(self, *lst:Tensor) -> tuple[list[ExecItem], dict[str, int]]:
-    """
-    Creates the schedule needed to realize these Tensor(s), with Variables.
-
-    NOTE: A Tensor can only be scheduled once.
-    """
-    linear, var_vals = self.linear_with_vars(*lst)
-    return linear_to_schedule(linear), var_vals
-
-  def schedule(self, *lst:Tensor) -> list[ExecItem]:
-    """Creates the schedule needed to realize these Tensor(s)."""
-    schedule, var_vals = self.schedule_with_vars(*lst)
-    assert len(var_vals) == 0
-    return schedule
 
   def schedule_linear(self, *lst:Tensor) -> UOp:
     """Creates the schedule needed to realize these Tensor(s)."""
