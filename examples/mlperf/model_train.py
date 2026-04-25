@@ -1451,7 +1451,7 @@ def train_llama3():
     if is_mp: tokens = tokens.shard(device)
     if not is_sharding: tokens = tokens.to(None)
     logits:Tensor = model(tokens[:, :-1])
-    if getenv("FAST_CE", 1):
+    if getenv("FAST_CE", 0):
       from extra.amax.cast_amax import fused_ce_loss
       loss = fused_ce_loss(logits.cast(dtypes.bfloat16), tokens[:, 1:], label_smoothing=0.0)
     else:
