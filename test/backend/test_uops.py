@@ -7,8 +7,7 @@ from tinygrad.dtype import dtypes, DType, AddrSpace, ConstFloat  # noqa: F401
 from tinygrad.device import Buffer, Device
 from tinygrad.uop.ops import Ops, UOp, KernelInfo, AxisType
 from tinygrad.renderer.cstyle import CStyleLanguage
-from tinygrad.engine.realize import CompiledRunner, get_program, get_runner
-from tinygrad.schedule import ExecItem
+from tinygrad.engine.realize import CompiledRunner, get_program, run_linear
 from tinygrad.device import is_dtype_supported
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.renderer.ptx import PTXRenderer
@@ -281,7 +280,7 @@ class TestZeroRange(unittest.TestCase):
 
 class TestUOpPrograms(unittest.TestCase):
   def _run(self, prog:UOp, *tensors:Tensor):
-    ExecItem(prog, [t.uop.buffer for t in tensors], prg=get_runner(Device.DEFAULT, prog)).run(wait=True)
+    run_linear(UOp(Ops.LINEAR, src=(prog.call(*[t.uop.buf_uop for t in tensors]),)), do_update_stats=False)
 
   def test_simple(self):
     out = Tensor.empty(10,10,dtype=dtypes.int)
