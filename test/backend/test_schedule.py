@@ -12,7 +12,7 @@ from tinygrad.device import is_dtype_supported
 from tinygrad.dtype import DType
 from tinygrad.uop.ops import UOp, Ops, UPat
 from tinygrad.helpers import CI, DEBUG, OSX, GlobalCounters, Context, getenv, all_same, temp
-from tinygrad.engine.realize import CompiledRunner, compile_linear, run_linear
+from tinygrad.engine.realize import compile_linear, run_linear
 
 class KernelCountException(Exception): pass
 def check_schedule(t:Tensor|list[Tensor]|UOp, allowed:int, to_prerealize:list[Tensor]|None=None, filter_sink=True):
@@ -787,7 +787,7 @@ class TestSchedule(unittest.TestCase):
     gc.collect()
     base = GlobalCounters.mem_used
     x = Tensor.ones(256).contiguous().realize()
-    (x+Tensor.ones(256).contiguous()).schedule()
+    (x+Tensor.ones(256).contiguous()).schedule_linear()
     gc.collect()
     self.assertEqual(GlobalCounters.mem_used-base, 1024)
 
@@ -797,9 +797,8 @@ class TestSchedule(unittest.TestCase):
       def cnt():
         x, y, z = Tensor.empty((64, 64), dtype='float'), Tensor.empty((64, 64), dtype='float'), Tensor.empty((64, 64), dtype='float')
         a = (x @ y).relu()
-        sched = ((a @ z).relu() + a).schedule()
-        for si in sched: si.lower()
-        return len([si for si in sched if isinstance(si.prg, CompiledRunner)])
+        linear = compile_linear(((a @ z).relu() + a).schedule_linear())
+        return len([call for call in linear.src if call.src[0].op is Ops.PROGRAM])
 
       with Context(IMAGE=1):
         self.assertEqual(cnt(), 5)
@@ -814,9 +813,8 @@ class TestSchedule(unittest.TestCase):
         rb = (((((inp @ b1) + c1).relu() @ b2) + c2).relu() + inp).relu()
         b16, c16 = Tensor.empty((512, 16), dtype='float'), Tensor.empty((16,), dtype='float')
         b32, c32 = Tensor.empty((512, 32), dtype='float'), Tensor.empty((32,), dtype='float')
-        sched = Tensor.schedule((rb @ b16 + c16).relu(), (rb @ b32 + c32).relu())
-        for si in sched: si.lower()
-        return len([si for si in sched if isinstance(si.prg, CompiledRunner)])
+        linear = compile_linear(Tensor.schedule_linear((rb @ b16 + c16).relu(), (rb @ b32 + c32).relu()))
+        return len([call for call in linear.src if call.src[0].op is Ops.PROGRAM])
 
       with Context(IMAGE=1):
         self.assertEqual(cnt(), 9)
@@ -828,9 +826,8 @@ class TestSchedule(unittest.TestCase):
         x, y, z = Tensor.empty((1, 4, 3, 3)), Tensor.empty((4, 1, 3, 3)), Tensor.empty((4, 1, 7, 7))
         a = x.conv2d(y, Tensor.empty(4), groups=4, padding=1)
         b = a.conv2d(z, groups=4, padding=3)
-        sched = (a + b).schedule()
-        for si in sched: si.lower()
-        return len([si for si in sched if isinstance(si.prg, CompiledRunner)])
+        linear = compile_linear((a + b).schedule_linear())
+        return len([call for call in linear.src if call.src[0].op is Ops.PROGRAM])
 
       with Context(IMAGE=1):
         self.assertEqual(cnt(), 5)
@@ -1332,7 +1329,7 @@ class TestCopyFolding(unittest.TestCase):
     b = Tensor.empty(4, device="CPU")
     add = a+b
     assert all_same([x.device for x in add.uop.src]), f"ALU has different devices! {[x.device for x in add.src]}"
-    add.schedule()
+    add.schedule_linear()
 
   def test_alu_before_copy(self):
     buf = Tensor.ones(1).contiguous().realize()
