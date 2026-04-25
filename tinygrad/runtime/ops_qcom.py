@@ -320,10 +320,6 @@ class QCOMProgram(HCQProgram):
     reg_desc_off = _read_lib(lib, 0x34)
     self.fregs, self.hregs = _read_lib(lib, reg_desc_off + 0x14), _read_lib(lib, reg_desc_off + 0x18)
 
-class QCOMTextureInfo:
-  def __init__(self, pitch:int, real_stride:int, desc:list[int], ibo:list[int]):
-    self.pitch, self.real_stride, self.desc, self.ibo = pitch, real_stride, desc, ibo
-
 class QCOMAllocator(HCQAllocatorBase):
   def _alloc(self, size:int, opts:BufferSpec) -> HCQBuffer:
     return self.dev._gpu_map(opts.external_ptr, size) if opts.external_ptr else self.dev._gpu_alloc(size)
