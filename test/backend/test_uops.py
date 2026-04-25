@@ -246,7 +246,7 @@ class TestAssembly(unittest.TestCase):
     a = Tensor.empty(1024)
     b = Tensor.empty(1024)
     c = (a*b).sum()
-    ast = c.schedule()[-1].ast
+    ast = c.schedule_linear().src[-1].src[0]
     opts_to_apply = [Opt(OptOps.UNROLL, 0, 4)]
     ast = ast.replace(arg=KernelInfo(opts_to_apply=tuple(opts_to_apply)))
     program = get_program(ast, Device[Device.DEFAULT].renderer)

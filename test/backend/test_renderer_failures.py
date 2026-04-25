@@ -69,10 +69,9 @@ class TestCStyleFailures(unittest.TestCase):
     dtype = "bool" if op in (Ops.OR, Ops.XOR, Ops.AND) else None
     ret = Tensor.empty(1, dtype=dtype)
     for _ in range(5): ret = python_alu[op](ret, Tensor.empty(1, dtype=dtype))
-    schedule = ret.schedule()
-    assert len(schedule) == 1
-    schedule[0].lower()
-    src = schedule[0].prg.p.src
+    linear = ret.schedule_linear()
+    assert len(linear.src) == 1
+    src = get_program(linear.src[0].src[0], Device[Device.DEFAULT].renderer).src
     self.assertEqual("("*5 not in src, should_strip_paren)
 
   def test_repeat_add(self): self._test_src_strip_paren(Ops.ADD)
