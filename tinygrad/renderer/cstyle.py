@@ -512,7 +512,7 @@ class HIPRenderer(CStyleLanguage):
 
   def asm(self, prg:UOp, lin:UOp) -> bytes:
     from tinygrad.renderer.amd.elf import assemble_linear
-    return assemble_linear(self, prg, lin)
+    return assemble_linear(prg, lin, self.target.arch)
 
   def render_vector_prefix(self, dtype:DType) -> str:
     vec, scal = self.render_dtype(dtype), self.render_dtype(dtype.scalar())

@@ -6,7 +6,7 @@ from tinygrad.renderer.cstyle import CUDARenderer, OpenCLRenderer
 from tinygrad.uop.ops import GroupOp, Ops, UOp, PatternMatcher, UPat, range_str
 from tinygrad.runtime.autogen import mesa
 from tinygrad.runtime.support.c import POINTER
-import base64, ctypes, ctypes.util, struct, functools, inspect, contextlib, itertools
+import base64, ctypes, ctypes.util, struct, functools, inspect, itertools
 
 def g(s:str): return getattr(mesa, s)
 def nsrc(d:mesa.nir_def) -> mesa.nir_src: return mesa.nir_src(ssa=ctypes.pointer(d))
@@ -169,9 +169,10 @@ class NIRRenderer(Renderer):
     self.compiler = fromimport("tinygrad.runtime.support.compiler_mesa", self.__class__.__name__.replace("Renderer", "Compiler"))(target.arch)
     if hasattr(self.compiler, "nir_options"): self.nir_options = self.compiler.nir_options
     mesa.glsl_type_singleton_init_or_ref()
+    self._deinit_types = True
 
   def __del__(self):
-    with contextlib.suppress(AttributeError): mesa.glsl_type_singleton_decref()
+    if getattr(self, "_deinit_types", False): mesa.glsl_type_singleton_decref()
 
   def param(self, b:mesa.nir_builder, x, sz:int) -> mesa.nir_def: raise NotImplementedError("needs param")
   def prerender(self, uops:list[UOp]):

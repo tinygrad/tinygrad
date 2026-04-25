@@ -133,13 +133,13 @@ def select_by_name(candidates:Sequence[T], get_name:Callable[...,str], query:str
     raise RuntimeError(err_msg + (f", did you mean: {m[0]!r}?" if (m:=difflib.get_close_matches(query, map(get_name, candidates))) else ""))
   return ret
 
-def select_first_inited(candidates:Sequence[Callable[...,T]], err_msg:str, cache:dict|None=None, **kwargs):
+def select_first_inited(candidates:Sequence[Callable[...,T]], err_msg:str, cache:dict|None=None, *args):
   excs = []
   for typ in candidates:
-    if cache is not None and typ in cache: return cache[typ]
+    if cache is not None and (typ,) + args in cache: return cache[(typ,) + args]
     try:
-      x = typ(**kwargs)
-      if cache is not None: cache[typ] = x
+      x = typ(*args)
+      if cache is not None: cache[(typ,) + args] = x
       return x
     except Exception as e: excs.append(e)
   raise excs[0] if len(excs) == 1 else ExceptionGroup(err_msg + " is available", excs)
