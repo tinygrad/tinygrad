@@ -24,7 +24,7 @@ def get_ast(device:str, num_inputs:int) -> UOp:
       fst = [Tensor.randn(BUF_SIZE, dtype=dtypes.int).realize() for _ in range(num_inputs)]
       s = fst[0]
       for i in range(1, num_inputs): s = s.bitwise_xor(fst[i])
-      cached_asts[(device, num_inputs)] = s.schedule()[-1].ast
+      cached_asts[(device, num_inputs)] = s.schedule_linear().src[-1].src[0]
   return cached_asts[(device, num_inputs)]
 
 def make_buffer(device, size=BUF_SIZE, fill=False):

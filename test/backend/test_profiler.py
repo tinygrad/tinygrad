@@ -44,9 +44,9 @@ class TestProfiler(unittest.TestCase):
 
     TestProfiler.a = Tensor([0.,1.], device=Device.DEFAULT).realize()
     TestProfiler.b = self.a + 1
-    si = self.b.schedule()[-1]
+    si = self.b.schedule_linear().src[-1]
 
-    TestProfiler.runner = get_runner(TestProfiler.d0.device, si.ast)
+    TestProfiler.runner = get_runner(TestProfiler.d0.device, si.src[0])
     TestProfiler.b.uop.buffer.allocate()
 
   def test_profile_kernel_run(self):
