@@ -77,9 +77,7 @@ def main(args) -> None:
   profile = decode_profile(profile_bytes)
   profile["layout"].update([(f'{c["name"][5:]}{" SQTT" if s["name"].endswith("PKTS") else ""} {s["name"]}', s["data"]) for c in viz_data.ctxs
                             if c["name"].startswith("SQTT") for s in c["steps"] if s["name"].endswith(("PMC", "PKTS"))])
-  if args.list:
-    assert args.src == "ALL", "can only specify a source or list all sources"
-    return print("ALL\n"+"\n".join(fmt_colored(k) for k in profile["layout"]))
+  if args.list and args.src == "ALL": return print("ALL\n"+"\n".join(fmt_colored(k) for k in profile["layout"]))
 
   # ** SQTT printer
   data = None if args.src == "ALL" else get(profile["layout"], args.src)
@@ -178,14 +176,16 @@ def main(args) -> None:
       name = f"*** {k['device'][:7]:7s} "+k["name"]+" "*(46-ansilen(k["name"]))
       return f"{name} tm {ptm}/{k['st_ms']:9.2f}ms"+(f" ({fmt_str})" if k["fmt"] else "")
     fmt_row = fmt_top if args.top else fmt_all
+    seen_refs:set[int] = set()
     def render_event(k:dict) -> None:
       print(fmt(k, to_str=fmt_row))
-      if k["ref"] is not None:
+      if k["ref"] is not None and k["ref"] not in seen_refs:
+        seen_refs.add(k["ref"])
         for s in viz_data.ctxs[k["ref"]]["steps"]:
-          if DEBUG >= 2: print(fmt(" "*s["depth"]+s["name"]+(f" - {s['match_count']}" if s.get('match_count', 0) else '')))
           if DEBUG >= 3 and s["name"] == "View Base AST": print_step(s)
           if DEBUG >= 4 and s["name"] == "View Source": print_step(s)
-          if DEBUG >= 5: print_step(s)
+          if DEBUG >= 5 or args.list: print(fmt(" "*s["depth"]+s["name"]+(f" - {s['match_count']}" if s.get('match_count', 0) else '')))
+          if DEBUG >= 6: print_step(s)
       elif DEBUG >= 3 and k.get("ext"): print(fmt(k["ext"]))
     produce = produce_top_kernels if args.top else produce_all_kernels
     if args.item:
