@@ -34,7 +34,7 @@ user story: viewing code
   * kernel 1 "E_34_34" -- 'sin'
   * kernel 2 "R_4545"
 * web: click "E_34_34"
-* cli: `python -m tinygrad.viz.cli -s TINY -i "E_34_34" "initial symbolic"`
+* cli: `python -m tinygrad.viz.cli -s TINY -i "do_to_program for E_34_34" "initial symbolic"`
   * pre-rewritten UOp graph (step through rewrite here)
   * post-rewritten UOp graph
   * UOp list
