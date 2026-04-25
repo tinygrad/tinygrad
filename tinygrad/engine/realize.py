@@ -91,50 +91,6 @@ class CompiledRunner(Runner):
     return self._prg(*[x._buf for x in rawbufs], global_size=tuple(global_size), local_size=tuple(local_size) if local_size else None,
                      vals=tuple(var_vals[k.expr] if k.expr not in self.p.runtimevars else None for k in self.p.vars), wait=wait, timeout=timeout)
 
-class ViewOp(Runner):
-  def __init__(self, buf:Buffer): super().__init__(colored(f"view {buf.nbytes:8d} @ {buf.offset:<10d}", "yellow"), buf.device)
-  def __call__(self, rawbufs:list[Buffer], var_vals:dict[str, int], wait=False):
-    assert rawbufs[0]._base is not None and rawbufs[0]._base == rawbufs[1].base, f"must be base {rawbufs}"
-
-class BufferCopy(Runner):
-  def __init__(self, total_sz, dest_device, src_device):
-    sz = f"{total_sz/1e6:7.2f}M" if total_sz >= 1e6 else f"{total_sz:8d}"
-    name = f"{type(self).__name__[6:].lower()} {sz}, {dest_device[:7]:>7s} <- {src_device[:7]:7s}"
-    super().__init__(colored(name, "yellow"), dest_device, Estimates(lds=total_sz, mem=total_sz))
-  def copy(self, dest, src):
-    disk_supports_fast_copyout = src.device.startswith("DISK") and getattr(src.allocator.dev, 'fd', None) is not None
-    if disk_supports_fast_copyout and hasattr(dest.allocator, 'copy_from_disk') and src.nbytes >= 4096 and dest.allocator.supports_copy_from_disk:
-      dest.allocator.copy_from_disk(dest._buf, src._buf, src.nbytes)
-    elif isinstance(src.device, str) and src.device.startswith(("DISK", "TINYFS")) and hasattr(dest.allocator, '_as_buffer'):
-      # fast(ish) path, uses readinto in diskbuffers
-      src.allocator._copyout(dest.allocator._as_buffer(dest._buf), src._buf)
-    else:
-      dest.copyin(src.as_memoryview(allow_zero_copy=True))  # may allocate a CPU buffer depending on allow_zero_copy
-  def __call__(self, rawbufs:list[Buffer], var_vals:dict[str, int], wait=False):
-    dest, src = rawbufs[0:2]
-    assert dest.size == src.size and dest.dtype == src.dtype, f"buffer copy mismatch, {dest.size} != {src.size}, {dest.dtype} != {src.dtype}"
-    st = time.perf_counter()
-    self.copy(dest, src)
-    if wait:
-      Device[dest.device].synchronize()
-      return time.perf_counter() - st
-
-class BufferXfer(BufferCopy):
-  def copy(self, dest, src): dest.allocator._transfer(dest._buf, src._buf, dest.nbytes, src_dev=src.allocator.dev, dest_dev=dest.allocator.dev)
-
-class EncDec(Runner):
-  def __init__(self, cf:UOp, total_sz:int, device:str):
-    self.shape, self.pos_var = tuple(s.arg for s in cf.src if s.op is Ops.CONST), cf.variables()[0].expr
-    name = f"enc/dec {total_sz/1e6:7.2f}M, HEVC" if total_sz >= 1e6 else f"enc/dec {total_sz:8d}, HEVC"
-    super().__init__(colored(name, "yellow"), device, Estimates(lds=total_sz, mem=total_sz))
-  def __call__(self, rawbufs:list[Buffer], var_vals:dict[str, int], wait=False):
-    st = time.perf_counter()
-    rawbufs[0].allocator._encode_decode(rawbufs[0]._buf, rawbufs[1]._buf, rawbufs[2]._buf,
-                                        [x._buf for x in rawbufs[3:]], self.shape, var_vals[self.pos_var])
-    if wait:
-      Device[rawbufs[0].device].synchronize()
-      return time.perf_counter() - st
-
 # **************** method cache ****************
 
 method_cache: dict[tuple[str, type, bytes, tuple, bool], CompiledRunner] = {}
@@ -198,10 +154,17 @@ def exec_view(ctx:ExecContext, call, ast):
 def exec_copy(ctx:ExecContext, call, ast):
   for bufs, device_vars in unwrap_multi(call, resolve_params(call, ctx.input_uops)):
     dest, src = bufs[0].ensure_allocated(), bufs[1].ensure_allocated()
-    xfer = hasattr(alc:=Device[dest.device].allocator,'_transfer') and alc.supports_transfer and dest.device.split(":")[0]==src.device.split(":")[0]
-    prg = (BufferXfer if xfer else BufferCopy)(dest.nbytes, dest.device, src.device)
-    with track_stats(ctx, call, dest.device, prg.display_name, [dest, src], ctx.var_vals):
-      prg.copy(dest, src)
+    xfer = hasattr(dest.allocator,'_transfer') and dest.allocator.supports_transfer and dest.device.split(":")[0] == src.device.split(":")[0]
+    name = colored(f"{'xfer' if xfer else 'copy'} {size_to_str(bufs[0].nbytes):>10}, {dest.device[:7]:>7s} <- {src.device[:7]:7s}", "yellow")
+    with track_stats(ctx, call, dest.device, name, [dest, src], ctx.var_vals):
+      if xfer:
+        dest.allocator._transfer(dest._buf, src._buf, dest.nbytes, src_dev=src.allocator.dev, dest_dev=dest.allocator.dev) # type:ignore[attr-defined]
+      elif src.device.startswith("DISK") and getattr(src.allocator.dev, 'fd', None) is not None \
+           and hasattr(dest.allocator, 'copy_from_disk') and src.nbytes >= 4096 and dest.allocator.supports_copy_from_disk:
+        dest.allocator.copy_from_disk(dest._buf, src._buf, src.nbytes)
+      elif src.device.startswith(("DISK", "TINYFS")) and hasattr(dest.allocator, '_as_buffer'):
+        src.allocator._copyout(dest.allocator._as_buffer(dest._buf), src._buf)
+      else: dest.copyin(src.as_memoryview(allow_zero_copy=True))
 
 def exec_kernel(ctx:ExecContext, call, ast):
   for bufs, device_vars in unwrap_multi(call, resolve_params(call, ctx.input_uops)):
