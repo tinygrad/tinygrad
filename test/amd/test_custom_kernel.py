@@ -104,10 +104,10 @@ def custom_handwritten(A:UOp, arch:str) -> UOp:
   threads = UOp.special(128, "lidx0")
   wg = UOp.special(256, "gidx0")
   lds = UOp(Ops.DEFINE_LOCAL, dtypes.uint8.ptr(size=512, addrspace=AddrSpace.LOCAL), (), 'lds')  # 128 * 4 bytes
-  pipes = {getenv("PIPE", "")} if getenv("PIPE", "") else {"SALU", "VALU", "TRANSCENDENTAL"}
+  pipes = {getenv("PIPE", "")} if getenv("PIPE", "") else {"SALU", "VALU", "TRANSCENDENTAL", "WMMA"}
   k = Kernel(arch)
   # wrap in loop to filter out icache misses
-  LOOP_N, UNROLL_N = 8, 4
+  LOOP_N, UNROLL_N = 8, 5
   k.emit(r4.s_mov_b32(s[1], LOOP_N))
   k.label("loop")
   # saturate scalar ALU pipe
@@ -144,6 +144,29 @@ def custom_handwritten(A:UOp, arch:str) -> UOp:
       k.emit(r4.v_sin_f32_e32(v[65+i], v[12+i]))   # regular trans
       k.emit(r4.v_s_log_f32(s[64+i], s[12+i]))     # pseudo-scalar trans
       k.emit(r4.v_cos_f32_e32(v[66+i], v[12+i]))   # regular trans (no V_S_COS variant)
+  # saturate WMMA pipe; cover WMMA_8 (8c), WMMA_16 (16c) categories
+  # rdna4 manual 7.12.1 lists 5 WMMA hazard cases; we avoid all by giving every WMMA
+  # disjoint register blocks. C=D within one WMMA is fine (the accumulator pattern), but no
+  # WMMA's regs overlap any other WMMA's regs.
+  # NOTE: WMMA_32 (op 0x8e) and WMMA_64 (op 0x8f) rocprof categories appear unreachable on gfx1201;
+  # F16/BF16 → WMMA_16, all int/FP8/sparse → WMMA_8 (cycle count tracks element bit-width).
+  # The ISA does NOT specify these cycle counts; they come from rocprof's gfx12wave.cpp table.
+  # Layout per iter: f16(A=4+B=4+CD=8=16) + iu8(A=2+B=2+CD=8=12) + fp8(2+2+8=12) = 40 VGPRs
+  if "WMMA" in pipes:
+    base = 30
+    for i in range(UNROLL_N):
+      # WMMA_16 f16
+      a = base + i*40
+      b, cd = a + 4, a + 8
+      k.emit(r4.v_wmma_f32_16x16x16_f16(v[cd:cd+7], v[a:a+3], v[b:b+3], v[cd:cd+7]))    # WMMA_16
+      # WMMA_8 iu8
+      a = base + i*40 + 16
+      b, cd = a + 2, a + 4
+      k.emit(r4.v_wmma_i32_16x16x16_iu8(v[cd:cd+7], v[a:a+1], v[b:b+1], v[cd:cd+7]))    # WMMA_8
+      # WMMA_8 fp8
+      a = base + i*40 + 28
+      b, cd = a + 2, a + 4
+      k.emit(r4.v_wmma_f32_16x16x16_fp8_fp8(v[cd:cd+7], v[a:a+1], v[b:b+1], v[cd:cd+7]))# WMMA_8
   k.emit(r4.s_add_co_i32(s[1], s[1], -1))
   k.emit(r4.s_cmp_eq_i32(s[1], 0))
   k.emit(r4.s_cbranch_scc0(), target="loop")
