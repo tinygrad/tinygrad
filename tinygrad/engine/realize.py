@@ -178,6 +178,14 @@ def exec_kernel(ctx:ExecContext, call, ast):
       timing[0] = prg(prg_bufs, var_vals, wait=DEBUG >= 2)
       prg.first_run = False
 
+def exec_validate(ctx:ExecContext, call, ast):
+  import numpy as np
+  for bufs, device_vars in unwrap_multi(call, resolve_params(call, ctx.input_uops)):
+    cpu_bufs, dev_bufs = bufs[:len(bufs)//2], bufs[len(bufs)//2:]
+    cpu_prg = get_runner("CPU", ast.src[0])
+    cpu_prg([cpu_bufs[i].ensure_allocated() for i in cpu_prg.p.globals], {**ctx.var_vals, **device_vars}, wait=False)
+    for i in cpu_prg.p.outs: np.testing.assert_allclose(dev_bufs[i].ensure_allocated().numpy(), cpu_bufs[i].numpy(), rtol=1e-3, atol=1e-3)
+
 def exec_encdec(ctx:ExecContext, call, ast):
   bufs = [cast(Buffer, b.buffer).ensure_allocated() for b in resolve_params(call, ctx.input_uops)]
   shape, pos_var = tuple(s.arg for s in ast.src if s.op is Ops.CONST), ast.variables()[0].expr
@@ -204,14 +212,6 @@ def _validate(call:UOp, sink:UOp) -> UOp:
   copies = tuple(p.copy_to_device(s.device).call(s, p) for s, p in zip(shadows, params))
   return UOp(Ops.LINEAR, src=copies + (call, UOp(Ops.CUSTOM_FUNCTION, dtypes.void, src=(sink,), arg="validate").call(*shadows, *params)))
 pm_validate = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.SINK, name="sink"),), name="call", allow_any_len=True), _validate)]) + pm_flatten_linear
-
-def exec_validate(ctx:ExecContext, call, ast):
-  import numpy as np
-  for bufs, device_vars in unwrap_multi(call, resolve_params(call, ctx.input_uops)):
-    cpu_bufs, dev_bufs = bufs[:len(bufs)//2], bufs[len(bufs)//2:]
-    cpu_prg = get_runner("CPU", ast.src[0])
-    cpu_prg([cpu_bufs[i].ensure_allocated() for i in cpu_prg.p.globals], {**ctx.var_vals, **device_vars}, wait=False)
-    for i in cpu_prg.p.outs: np.testing.assert_allclose(dev_bufs[i].ensure_allocated().numpy(), cpu_bufs[i].numpy(), rtol=1e-3, atol=1e-3)
 
 # ctx is beam value
 pm_beam = PatternMatcher([
