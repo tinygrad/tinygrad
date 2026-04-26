@@ -2,7 +2,7 @@ import time, inspect
 from collections import deque
 from tinygrad.uop.ops import UOp, Ops, UOpMetaClass, track_rewrites, graph_rewrite, gate_kernel_sink, KernelInfo
 from tinygrad.uop.spec import type_verify, tensor_spec
-from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, pluralize, SCACHE, BASEDIR, flatten, partition
+from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, pluralize, SCACHE, BASEDIR, partition
 
 # **** schedule linearizer
 
@@ -67,7 +67,7 @@ def create_schedule(sched_sink:UOp) -> UOp:
   return UOp(Ops.LINEAR, src=tuple(linearized))
 
 from tinygrad.schedule.memory import memory_plan_rewrite
-from tinygrad.engine.realize import capturing
+from tinygrad.engine.realize import capturing, pm_flatten_linear
 from tinygrad.schedule.rangeify import get_kernel_graph
 from tinygrad.helpers import CAPTURING
 from tinygrad.uop.ops import PatternMatcher, UPat
@@ -86,10 +86,7 @@ pm_resolve_linear_call = PatternMatcher([
   # call LINEAR is resolved here
   (UPat(Ops.CALL, src=(UPat(Ops.LINEAR),), name="linear_call", allow_any_len=True), lambda linear_call:
    graph_rewrite(linear_call.src[0], pm_post_sched_cache, ctx=({}, linear_call.src[1:]), walk=True, name="params to buffers")),
-  # LINEAR on LINEAR
-  (UPat(Ops.LINEAR, custom_early_reject={Ops.LINEAR}, name="x"),
-   lambda x: x.replace(src=tuple(flatten(x.src if x.op is Ops.LINEAR else (x,) for x in x.src)))),
-])
+])+pm_flatten_linear
 
 schedule_cache: dict[bytes, UOp] = {}
 # ctx is just for DEBUG on inner

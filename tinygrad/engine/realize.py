@@ -4,6 +4,7 @@ from dataclasses import dataclass, replace, field
 from tinygrad.helpers import colored, DEBUG, GlobalCounters, ansilen, NOOPT, all_int, Metadata, TRACEMETA, TracingKey
 from tinygrad.helpers import BEAM, DEVECTORIZE, size_to_str, time_to_str, VALIDATE_WITH_CPU, cpu_profile, PROFILE, ProfilePointEvent, cpu_events
 from tinygrad.helpers import prod, EMULATED_DTYPES, flatten
+from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer, buffers, graph_rewrite
 from tinygrad.device import Device, Buffer, MultiBuffer
 from tinygrad.renderer import ProgramSpec, Estimates
@@ -174,19 +175,18 @@ def exec_kernel(ctx:ExecContext, call, ast):
     prg = get_runner(bufs[0].device, ast)
     prg_bufs = [bufs[i].ensure_allocated() for i in prg.p.globals]
 
-    if VALIDATE_WITH_CPU and ast.op is Ops.SINK:
-      cpu_bufs = [Buffer("CPU", b.size, b.dtype).ensure_allocated().copyin(b.ensure_allocated().as_memoryview()) for b in bufs]
-
     with track_stats(ctx, call, prg.device, prg.display_name, prg_bufs, var_vals,
                      outputs=tuple(prg.p.outs), inputs=tuple(prg.p.ins), first_run=prg.first_run) as timing:
       timing[0] = prg(prg_bufs, var_vals, wait=DEBUG >= 2)
       prg.first_run = False
 
-    if VALIDATE_WITH_CPU and ast.op is Ops.SINK:
-      import numpy as np
-      cpu_prg = get_runner("CPU", ast)
-      cpu_prg([cpu_bufs[i] for i in cpu_prg.p.globals], var_vals, wait=False)
-      for i in prg.p.outs: np.testing.assert_allclose(prg_bufs[i].numpy(), cpu_bufs[i].numpy(), rtol=1e-3, atol=1e-3)
+def exec_validate(ctx:ExecContext, call, ast):
+  import numpy as np
+  for bufs, device_vars in unwrap_multi(call, resolve_params(call, ctx.input_uops)):
+    cpu_bufs, dev_bufs = bufs[:len(bufs)//2], bufs[len(bufs)//2:]
+    cpu_prg = get_runner("CPU", ast.src[0])
+    cpu_prg([cpu_bufs[i].ensure_allocated() for i in cpu_prg.p.globals], {**ctx.var_vals, **device_vars}, wait=False)
+    for i in cpu_prg.p.outs: np.testing.assert_allclose(dev_bufs[i].ensure_allocated().numpy(), cpu_bufs[i].numpy(), rtol=1e-3, atol=1e-3)
 
 def exec_encdec(ctx:ExecContext, call, ast):
   bufs = [cast(Buffer, b.buffer).ensure_allocated() for b in resolve_params(call, ctx.input_uops)]
@@ -202,6 +202,19 @@ def exec_graph(ctx:ExecContext, call, cf):
   with track_stats(ctx, call, runner.device, runner.display_name, bufs, ctx.var_vals) as t:
     t[0] = runner(bufs, ctx.var_vals, wait=DEBUG >= 2, input_uops=ctx.input_uops) # type: ignore[call-arg]
 
+# flatten LINEAR-in-LINEAR: any nested LINEAR child gets inlined into its parent's src
+pm_flatten_linear = PatternMatcher([
+  (UPat(Ops.LINEAR, custom_early_reject={Ops.LINEAR}, name="lin"),
+   lambda lin: lin.replace(src=tuple(flatten(c.src if c.op is Ops.LINEAR else (c,) for c in lin.src)))),
+])
+
+def _validate(call:UOp, sink:UOp) -> UOp:
+  params = tuple(p for p in call.src[1:] if p.op is not Ops.BIND)
+  shadows = tuple(UOp.new_buffer(("CPU",)*len(p.device) if isinstance(p.device, tuple) else "CPU", prod(p.max_shape), p.dtype.base) for p in params)
+  copies = tuple(p.copy_to_device(s.device).call(s, p) for s, p in zip(shadows, params))
+  return UOp(Ops.LINEAR, src=copies + (call, UOp(Ops.CUSTOM_FUNCTION, dtypes.void, src=(sink,), arg="validate").call(*shadows, *params)))
+pm_validate = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.SINK, name="sink"),), name="call", allow_any_len=True), _validate)]) + pm_flatten_linear
+
 # ctx is beam value
 pm_beam = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.SINK, name="sink"),), name="call", allow_any_len=True),
@@ -216,16 +229,18 @@ pm_compile = PatternMatcher([
 pm_exec = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.BUFFER_VIEW, name="ast"),), name="call", allow_any_len=True), exec_view),
   (UPat(Ops.CALL, src=(UPat(Ops.COPY, name="ast"),), name="call", allow_any_len=True), exec_copy),
-  (UPat(Ops.CALL, src=(UPat((Ops.PROGRAM, Ops.SINK), name="ast"),), name="call", allow_any_len=True), exec_kernel),
+  (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, name="ast"),), name="call", allow_any_len=True), exec_kernel),
   (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="encdec", name="ast"),), name="call", allow_any_len=True), exec_encdec),
   (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="graph", name="cf"),), name="call", allow_any_len=True), exec_graph),
+  (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="validate", name="ast"),), name="call", allow_any_len=True), exec_validate),
 ])
 
-def compile_linear(linear:UOp, beam=0) -> UOp:
+def compile_linear(linear:UOp, beam=0, validate=False) -> UOp:
+  if validate: linear = graph_rewrite(linear, pm_validate, name="validate", walk=True)
   if (beam_val:=(beam or BEAM.value)) >= 1: linear = graph_rewrite(linear, pm_beam, ctx=beam_val, walk=True)
-  return graph_rewrite(linear, pm_compile, name="precompile kernels", walk=True) if not VALIDATE_WITH_CPU else linear
+  return graph_rewrite(linear, pm_compile, name="precompile kernels", walk=True)
 
 def run_linear(linear:UOp, var_vals:dict[str, int]|None=None, input_uops:tuple[UOp, ...]=(), do_update_stats=True, jit=False):
-  if not jit: linear = compile_linear(linear)
+  if not jit: linear = compile_linear(linear, validate=VALIDATE_WITH_CPU)
   ctx = ExecContext(var_vals or {}, input_uops, do_update_stats, jit)
   for call in linear.src: pm_exec.rewrite(call, ctx)
