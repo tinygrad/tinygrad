@@ -15,7 +15,7 @@ class CUDAGraph(MultiGraphRunner):
     self.graph = init_c_var(cuda.CUgraph, lambda x: check(cuda.cuGraphCreate(ctypes.byref(x), 0)))
 
     for (dev_idx, ast, bufs, device_vars), prg in zip(self.calls, self.progs):
-      if ast.op in (Ops.SINK, Ops.PROGRAM):
+      if ast.op is Ops.PROGRAM:
         assert prg is not None
         global_size, local_size = prg.p.launch_dims({v: 0 for v in self.vars})
 

@@ -62,7 +62,7 @@ def graph_split_rewrite(linear:UOp, max_batch_size:int=0) -> UOp:
 def _call_outs_ins(call:UOp) -> tuple[set[int], set[int]]:
   non_bind = [s for s in call.src[1:] if s.op is not Ops.BIND]
   ast = call.src[0]
-  if ast.op in (Ops.SINK, Ops.PROGRAM):
+  if ast.op is Ops.PROGRAM:
     prg = get_runner(non_bind[0].device if isinstance(non_bind[0].device, str) else non_bind[0].device[0], call.src[0])
     return set(prg.p.outs), set(prg.p.ins)
   if ast.op in (Ops.COPY, Ops.BUFFER_VIEW): return {0}, {1}
@@ -107,7 +107,7 @@ class GraphRunner(Runner):
       replace = [(p, b.arg) for p, b in enumerate(b for b in call.src[1:] if b.op is not Ops.BIND) if b.op is Ops.PARAM]
       for dev_idx, (bufs, device_vars) in enumerate(unwrap_multi(call, resolve_params(call, input_uops))):
         self.calls.append((dev_idx, call.src[0], [b.ensure_allocated() for b in bufs], device_vars))
-        self.progs.append(get_runner(bufs[0].device, call.src[0]) if call.src[0].op in (Ops.SINK, Ops.PROGRAM) else None)
+        self.progs.append(get_runner(bufs[0].device, call.src[0]) if call.src[0].op is Ops.PROGRAM else None)
         self.uop_replace.append(replace)
 
     self.var_vals_replace:dict[int, list[tuple[int, int]]] = {}
@@ -175,14 +175,14 @@ class GraphRunner(Runner):
 
   @staticmethod
   def supports_exec_item(batch_devs:list[Compiled], new_call:UOp) -> bool:
-    return new_call.src[0].op in (Ops.SINK, Ops.PROGRAM) and len(GraphRunner._all_devs(batch_devs, new_call)) == 1
+    return new_call.src[0].op is Ops.PROGRAM and len(GraphRunner._all_devs(batch_devs, new_call)) == 1
 
 # a marker for your graph supporting multiple devices of the same type
 class MultiGraphRunner(GraphRunner):
   @staticmethod
   def supports_exec_item(batch_devs:list[Compiled], new_call:UOp) -> bool:
     # Devices must be the same type
-    return new_call.src[0].op in (Ops.SINK, Ops.PROGRAM, Ops.COPY) and len(dedup([type(d) for d in GraphRunner._all_devs(batch_devs, new_call)])) == 1
+    return new_call.src[0].op in (Ops.PROGRAM, Ops.COPY) and len(dedup([type(d) for d in GraphRunner._all_devs(batch_devs, new_call)])) == 1
 
 ReturnType = TypeVar('ReturnType')
 @dataclass
