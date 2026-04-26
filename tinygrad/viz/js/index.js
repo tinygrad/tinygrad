@@ -1180,7 +1180,7 @@ document.addEventListener("keydown", (event) => {
   // r key toggles indexing
   if (event.key === "r") showIndexing.toggle.click();
   // c key toggles CALL src
-  if (event.key === "c") showCallSrc.toggle.click();
+  if (event.key === "c" && !event.ctrlKey && !event.metaKey && !event.altKey) showCallSrc.toggle.click();
   // s key toggles SINK
   if (event.key === "s") showSink.toggle.click();
   // g key toggles graph
