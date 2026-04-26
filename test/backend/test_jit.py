@@ -103,8 +103,8 @@ class TestJit(unittest.TestCase):
       GlobalCounters.reset()
       f(a, b)
       Device[a.device].synchronize()
-      self.assertGreater(GlobalCounters.global_mem, 0)
-      self.assertGreater(GlobalCounters.global_ops, 0)
+      self.assertEqual(GlobalCounters.global_mem, 64*64*4 * 8) # 3+2+3 buf accesses * 64*64*4 bytes
+      self.assertEqual(GlobalCounters.global_ops, 64*64 * 3)
 
   def test_nothing_jitted(self):
     @TinyJit
