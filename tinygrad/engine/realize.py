@@ -211,8 +211,7 @@ def exec_validate(ctx:ExecContext, call, ast):
     cpu_bufs, dev_bufs = bufs[:len(bufs)//2], bufs[len(bufs)//2:]
     cpu_prg = get_runner("CPU", ast.src[0])
     cpu_prg([cpu_bufs[i].ensure_allocated() for i in cpu_prg.p.globals], {**ctx.var_vals, **device_vars}, wait=False)
-    for i in cpu_prg.p.outs:
-      np.testing.assert_allclose(dev_bufs[i].ensure_allocated().numpy(), cpu_bufs[i].numpy(), rtol=1e-3, atol=1e-3)
+    for i in cpu_prg.p.outs: np.testing.assert_allclose(dev_bufs[i].ensure_allocated().numpy(), cpu_bufs[i].numpy(), rtol=1e-3, atol=1e-3)
 
 # ctx is beam value
 pm_beam = PatternMatcher([
