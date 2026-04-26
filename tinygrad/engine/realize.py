@@ -19,6 +19,8 @@ def estimate_uop(call:UOp) -> Estimates:
   if ast.op is Ops.COPY or (ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "encdec"):
     nbytes = prod(call.src[1].shape) * call.src[1].dtype.itemsize
     return Estimates(lds=nbytes, mem=nbytes)
+  if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "graph":
+    return runner.estimates if (runner:=graph_cache.get(ast)) is not None else Estimates()
   return Estimates()
 
 def update_stats(display_name:str, device:str, estimates:Estimates, var_vals:dict[str, int], et:float|None, buf_count:int,
