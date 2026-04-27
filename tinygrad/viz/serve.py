@@ -374,18 +374,15 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
     link = f"PC:{info.pc}" if info else None
     if isinstance(p, (ALUEXEC, VMEMEXEC)):
       dispatch_id, op_type = exec_pending[name].pop(0)
-      # wmma exec gets its own color and its own row on rdna4+
+      # wmma exec gets its own color and its own row on rdna4
       if op_type.startswith("WMMA"):
         name = name+"_WMMA"
         if not op_type.startswith("WMMA_VALU"): row = "ALUEXEC:0 WMMA"
       # transcendental valu gets its own row
       if "TRANS" in op_type: row = "ALUEXEC:0 TFU"
-      # get the number of cycles from the op type
+      # extend execs by the op type's known duration, p._time marks the first or last cycle based on the op type
       duration = int(dur_match.group(1)) if (dur_match:=re.match(r".*_(\d+)$", op_type)) else 1
-      # extend execs by the known width of the instruction
-      # purely based on empirical evidence, p._time is the first cycle in these units
-      if any(ss in row for ss in ("SALU", "TFU")): start_time, end_time = p._time, p._time+duration
-      # otherwise it's the last cycle
+      if any(ss in row for ss in ("SALU", "TFU", "VMEM", "LDS")): start_time, end_time = p._time, p._time+duration
       else: start_time, end_time = p._time-duration, p._time
       link = f"LINK:{dispatch_id}"
     # queue inst dispatches
