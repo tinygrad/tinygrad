@@ -13,6 +13,7 @@ from tinygrad.device import Buffer
 from tinygrad.uop.ops import tracked_keys, tracked_ctxs, uop_fields, active_rewrites, active_group, _name_cnt, RewriteTrace
 from tinygrad.viz.serve import load_rewrites, get_full_rewrite, uop_to_json, VizData
 from tinygrad.codegen import to_program_cache
+from tinygrad.codegen import to_program
 
 @track_rewrites(name=True)
 def exec_rewrite(sink:UOp, pm_lst:list[PatternMatcher], names:None|list[str]=None) -> UOp:
@@ -320,19 +321,19 @@ class TestVizGC(unittest.TestCase):
 # VIZ integrates with other parts of tinygrad
 
 from tinygrad import Tensor, Device
-from tinygrad.engine.realize import get_program, get_runner
+from tinygrad.engine.realize import get_runner
 
 class TestVizIntegration(unittest.TestCase):
   # codegen supports rendering of code blocks
   def test_codegen_tracing(self):
     with save_viz() as viz:
       ast = (Tensor.empty(4)+Tensor.empty(4)).schedule_linear().src[0].src[0]
-      prg = get_program(ast, Device[Device.DEFAULT].renderer)
+      prg = to_program(ast, Device[Device.DEFAULT].renderer)
     lst = viz.list_items()
     self.assertEqual(len(lst), 3)
     self.assertEqual(lst[0]["name"], "Callify 1 Buffer n1")
     self.assertEqual(lst[1]["name"], "Schedule 1 Kernel n1")
-    self.assertEqual(lst[2]["name"], prg.name)
+    self.assertEqual(lst[2]["name"], prg.arg.name)
 
   # schedule graph CALL nodes have a link to jump to codegen
   def test_link_sched_codegen(self):
@@ -340,7 +341,7 @@ class TestVizIntegration(unittest.TestCase):
       c1 = Tensor.empty(4).add(1)
       c2 = Tensor.empty(8).add(1)
       sched = c1.schedule_linear(c2)
-      prgs = [get_program(si.src[0], Device[Device.DEFAULT].renderer).name for si in sched.src]
+      prgs = [to_program(si.src[0], Device[Device.DEFAULT].renderer).arg.name for si in sched.src]
     lst = viz.list_items()
     sched_idx = next(i for i,l in enumerate(lst) if l["name"].startswith("Schedule"))
     viz_kernel = next(i for i,s in enumerate(lst[sched_idx]["steps"]) if s["name"] == "View Kernel Graph")
@@ -724,8 +725,8 @@ class TestCfg(unittest.TestCase):
       return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg="NULL"), UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=x) for x in insts]))))
     with Context(DEV=f"NULL::{self.arch}"):
       out = Tensor.custom_kernel(Tensor.empty(1), fxn=fxn)[0]
-      prg = get_runner(out.device, out.schedule_linear().src[-1].src[0]).p
-      return amdgpu_cfg(prg.lib, self.arch)
+      runner = get_runner(out.device, out.schedule_linear().src[-1].src[0])
+      return amdgpu_cfg(runner.prg.src[4].arg, self.arch)
 
   def test_simple(self):
     k = Kernel(arch=self.arch)

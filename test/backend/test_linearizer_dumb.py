@@ -6,7 +6,7 @@ import unittest
 from tinygrad import Device, dtypes
 from tinygrad.uop.ops import UOp, Ops, AxisType, KernelInfo
 from tinygrad.codegen.opt.search import Opt, OptOps
-from tinygrad.engine.realize import get_program
+from tinygrad.codegen import to_program
 
 class TestLinearizerFailure(unittest.TestCase):
   @unittest.skipUnless(Device.DEFAULT == "METAL", "only tested on METAL")
@@ -25,7 +25,7 @@ class TestLinearizerFailure(unittest.TestCase):
     c11 = c5.alu(Ops.CMPNE, ((((c3*UOp.const(dtypes.weakint, 6000))+c6)+((c7*UOp.const(dtypes.weakint, 16))+c8)).alu(Ops.CMPLT, UOp.const(dtypes.weakint, 59999)).where(UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 1)).reduce(c7, c8, arg=Ops.ADD)+UOp.const(dtypes.int, -1))).where(UOp.const(dtypes.uchar, 0), c10).reduce(c6, arg=Ops.ADD)
     c12 = c0.index((((c1*UOp.const(dtypes.weakint, 7840))+(c2*UOp.const(dtypes.weakint, 10)))+c3).valid(UOp.const(dtypes.bool, True))).store(c11).end(c1, c2, c3)
     ast = c12.sink(arg=KernelInfo(name='test', axis_types=(), dont_use_locals=False, applied_opts=(Opt(op=OptOps.GROUP, axis=1, arg=16),), opts_to_apply=None))
-    _ = get_program(ast, Device["METAL"].renderer)
+    _ = to_program(ast, Device["METAL"].renderer)
 
 if __name__ == '__main__':
   unittest.main()

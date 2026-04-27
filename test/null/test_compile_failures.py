@@ -3,7 +3,8 @@ from contextlib import redirect_stdout
 from tinygrad import Tensor, dtypes, Device
 from tinygrad.helpers import OSX, DEV
 from tinygrad.device import is_dtype_supported
-from tinygrad.engine.realize import get_program, compile_linear
+from tinygrad.engine.realize import compile_linear
+from tinygrad.codegen import to_program
 
 class TestCompileFailures(unittest.TestCase):
   def compile(self, out:Tensor):
@@ -22,8 +23,8 @@ class TestDisassembly(unittest.TestCase):
   def test_float16_alu(self):
     c = Tensor([1], dtype=dtypes.float16) + Tensor([1], dtype=dtypes.float16)
     s = c.schedule_linear().src[-1]
-    p = get_program(s.src[0], Device[Device.DEFAULT].renderer)
-    lib = Device[Device.DEFAULT].compiler.compile(p.src)
+    p = to_program(s.src[0], Device[Device.DEFAULT].renderer)
+    lib = Device[Device.DEFAULT].compiler.compile(p.src[3].arg)
     out = io.StringIO()
     with redirect_stdout(out): Device[Device.DEFAULT].compiler.disassemble(lib)
     assert "fcvt" not in out.getvalue()

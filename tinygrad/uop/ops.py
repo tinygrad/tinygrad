@@ -967,6 +967,52 @@ class KernelInfo:
   def function_name(self): return to_function_name(self.name)
 
 @dataclass(frozen=True)
+class ProgramInfo:
+  name: str = "test"
+  device: str = ""
+  global_size: tuple[int, ...] = (1, 1, 1)
+  local_size: tuple[int, ...]|None = None
+  vars: tuple[UOp, ...] = ()
+  globals: tuple[int, ...] = ()
+  outs: tuple[int, ...] = ()
+  ins: tuple[int, ...] = ()
+  aux: tuple = ()
+
+  @property
+  def function_name(self): return to_function_name(self.name)
+
+  @property
+  def runtimevars(self) -> dict[str, int]: return {v.expr: i for i, v in enumerate(self.vars) if v.expr == 'core_id'}
+
+  def launch_dims(self, var_vals:dict[str, int]):
+    global_size = [sym_infer(sz, var_vals) for sz in self.global_size]
+    local_size = [sym_infer(sz, var_vals) for sz in self.local_size] if self.local_size is not None else None
+    return global_size, local_size
+
+  @staticmethod
+  def from_sink(sink:UOp, device:str, aux:tuple=()) -> ProgramInfo:
+    _vars: list[UOp] = []
+    _globals: list[int] = []
+    outs: list[int] = []
+    ins: list[int] = []
+    global_size: list[int] = [1, 1, 1]
+    local_size: list[int]|None = [1, 1, 1]
+    for u in sink.toposort():
+      if u.op is Ops.DEFINE_VAR: _vars.append(u)
+      if u.op is Ops.PARAM: _globals.append(u.arg)
+      if u.op in (Ops.STORE, Ops.LOAD):
+        if (idx:=u.src[0]).op is Ops.INDEX or (u.src[0].op is Ops.CAST and (idx:=u.src[0].src[0]).op is Ops.INDEX):
+          if (buf:=idx.src[0]).op is Ops.PARAM: (outs if u.op is Ops.STORE else ins).append(buf.arg)
+      if u.op is Ops.SPECIAL:
+        if u.arg[0] == 'i': local_size = None
+        special_size = local_size if u.arg[0] == 'l' else global_size
+        if special_size is not None: special_size[int(u.arg[-1])] = cast(int, u.src[0].ssimplify())
+      if u.op is Ops.DEFINE_VAR and u.arg[0] == 'core_id': global_size[0] = u.arg[2] + 1
+    return ProgramInfo(sink.arg.name if isinstance(sink.arg, KernelInfo) else "test", device, tuple(global_size),
+                       tuple(local_size) if local_size is not None else None, tuple(sorted(_vars, key=lambda v: v.arg)),
+                       tuple(sorted(dedup(_globals))), tuple(sorted(dedup(outs))), tuple(sorted(dedup(ins))), aux)
+
+@dataclass(frozen=True)
 class CallInfo:
   grad_fxn: Callable|None = None
   metadata: tuple[Metadata, ...] = ()

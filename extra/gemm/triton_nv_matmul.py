@@ -4,7 +4,8 @@ import triton.language as tl
 from triton.compiler import AttrsDescriptor, ASTSource, compile as triton_compile
 import numpy as np
 from tinygrad import Tensor, dtypes, Device
-from tinygrad.engine.realize import CompiledRunner, ProgramSpec
+from tinygrad.engine.realize import CompiledRunner
+from tinygrad.uop.ops import Ops, UOp, KernelInfo, ProgramInfo
 from tinygrad.helpers import getenv
 np.set_printoptions(suppress=True)
 
@@ -88,10 +89,11 @@ if __name__ == "__main__":
   # remove debug sections
   src = src.split("\t.file")[0]
   assert '.extern .shared' not in src
-  prg = ProgramSpec("matmul_kernel", src, device=Device.DEFAULT,
-                global_size=[M//BLOCK_SIZE_M, N//BLOCK_SIZE_N, 1], local_size=[32*compiled.metadata.num_warps, 1, 1],
-                mem_estimate=A.nbytes() + B.nbytes() + C.nbytes())
-  runner = CompiledRunner(prg)
+  info = ProgramInfo(name="matmul_kernel", device=Device.DEFAULT,
+                     global_size=(M//BLOCK_SIZE_M, N//BLOCK_SIZE_N, 1), local_size=(32*compiled.metadata.num_warps, 1, 1))
+  sink = UOp.sink(arg=KernelInfo(name="matmul_kernel"))
+  prg_uop = UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=Device.DEFAULT), UOp(Ops.LINEAR), UOp(Ops.SOURCE, arg=src)), arg=info)
+  runner = CompiledRunner(prg_uop)
   all_bufs = [x.ensure_allocated() for x in bufs]
   prg_bufs = [all_bufs[i] for i in runner.p.globals]
   tflops = []

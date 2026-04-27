@@ -4,7 +4,8 @@ from functools import partial
 from tinygrad import nn, dtypes, Tensor, Device, TinyJit, Variable
 from tinygrad.helpers import getenv, CI, OSX
 from tinygrad.device import is_dtype_supported
-from tinygrad.engine.realize import get_program
+from tinygrad.codegen import to_program
+
 from tinygrad.uop.ops import Ops
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.nir import NIRRenderer
@@ -122,9 +123,9 @@ class TestRandomness(unittest.TestCase):
     for call in linear.src:
       ast = call.src[0]
       if ast.op is Ops.SINK:
-        prg = get_program(ast, renderer=Device[Device.DEFAULT].renderer)
-        for u in prg.uops:
-          self.assertNotIn(u.dtype, {dtypes.long, dtypes.ulong}, msg=f"long found in {prg.name}")
+        prg = to_program(ast, renderer=Device[Device.DEFAULT].renderer)
+        for u in tuple(prg.src[2].src):
+          self.assertNotIn(u.dtype, {dtypes.long, dtypes.ulong}, msg=f"long found in {prg.arg.name}")
 
   def test_threefry_against_reference_full(self):
     Tensor.manual_seed(1337)

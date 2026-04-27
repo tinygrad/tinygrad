@@ -5,10 +5,10 @@ from tinygrad.helpers import colored, DEBUG, GlobalCounters, ansilen, NOOPT, all
 from tinygrad.helpers import BEAM, DEVECTORIZE, size_to_str, time_to_str, VALIDATE_WITH_CPU, cpu_profile, PROFILE, ProfilePointEvent, cpu_events
 from tinygrad.helpers import prod, EMULATED_DTYPES, flatten
 from tinygrad.dtype import dtypes
-from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer, buffers, graph_rewrite
+from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer, buffers, graph_rewrite, ProgramInfo
 from tinygrad.device import Device, Buffer, MultiBuffer
-from tinygrad.renderer import ProgramSpec, Estimates
-from tinygrad.codegen import get_program, to_program
+from tinygrad.renderer import Estimates
+from tinygrad.codegen import to_program
 
 # **************** Stat ****************
 
@@ -70,19 +70,22 @@ def optimize_local_size(_prg:Callable, global_size:list[int], rawbufs:list[Buffe
   return ret[1]
 
 class CompiledRunner(Runner):
-  def __init__(self, p:ProgramSpec, prg=None):
-    if DEBUG >= 3 and p.applied_opts: print(p.applied_opts)
-    if DEBUG >= 4: print(p.src)
-    if p.lib is None:
-      with cpu_profile(TracingKey(f"compile {p.name}", (p.function_name,)), "TINY"):
-        p = replace(p, lib=Device[p.device].compiler.compile_cached(p.src))
-    self.p:ProgramSpec = p
-    assert self.p.lib is not None
-    if DEBUG >= 7: Device[p.device].compiler.disassemble(self.p.lib)
-    self._prg = Device[p.device].runtime(p.function_name, self.p.lib, *p.aux, runtimevars=p.runtimevars) if prg is None else prg
-    super().__init__(p.name, p.device, p.estimates)
+  def __init__(self, prg:UOp, _prg=None):
+    info: ProgramInfo = prg.arg
+    sink = prg.src[0]
+    if DEBUG >= 3 and sink.arg.applied_opts: print(sink.arg.applied_opts)
+    if DEBUG >= 4: print(prg.src[3].arg)
+    if len(prg.src) <= 4 or prg.src[4].op is not Ops.BINARY:
+      with cpu_profile(TracingKey(f"compile {info.name}", (info.function_name,)), "TINY"):
+        lib = Device[info.device].compiler.compile_cached(prg.src[3].arg)
+      prg = prg.replace(src=prg.src + (UOp(Ops.BINARY, arg=lib),))
+    self.prg:UOp = prg
+    self.p:ProgramInfo = info
+    if DEBUG >= 7: Device[info.device].compiler.disassemble(prg.src[4].arg)
+    self._prg = Device[info.device].runtime(info.function_name, prg.src[4].arg, *info.aux, runtimevars=info.runtimevars) if _prg is None else _prg
+    super().__init__(info.name, info.device, sink.arg.estimates or Estimates())
 
-  def __reduce__(self): return self.__class__, (self.p,)
+  def __reduce__(self): return self.__class__, (self.prg,)
 
   def __call__(self, rawbufs:list[Buffer], var_vals:dict[str, int]|None=None, wait=False, timeout:int|None=None) -> float|None:
     if var_vals is None: var_vals = {}
@@ -90,7 +93,7 @@ class CompiledRunner(Runner):
     if Device[self.p.device].renderer.has_local and local_size is None and all_int(self.p.global_size):
       local_size = optimize_local_size(self._prg, global_size, rawbufs)
       global_size = [g//l if g%l == 0 else g/l for g,l in zip(global_size, local_size)]
-      self.p = replace(self.p, global_size=global_size, local_size=local_size)
+      self.p = replace(self.p, global_size=tuple(global_size), local_size=tuple(local_size))
     return self._prg(*[x._buf for x in rawbufs], global_size=tuple(global_size), local_size=tuple(local_size) if local_size else None,
                      vals=tuple(var_vals[k.expr] if k.expr not in self.p.runtimevars else None for k in self.p.vars), wait=wait, timeout=timeout)
 
@@ -104,10 +107,10 @@ def get_runner(device:str, ast:UOp) -> CompiledRunner:
   if cret:=method_cache.get(ckey): return cret
   bkey = (device.split(":")[0], type(Device[device].compiler), ast.key, context, True)
   if bret:=method_cache.get(bkey):
-    method_cache[ckey] = ret = CompiledRunner(replace(bret.p, device=device))
+    method_cache[ckey] = ret = CompiledRunner(bret.prg.replace(arg=replace(bret.p, device=device)))
   else:
-    prg: ProgramSpec = get_program(ast, Device[device].renderer)
-    method_cache[ckey] = method_cache[bkey] = ret = CompiledRunner(replace(prg, device=device))
+    prg = to_program(ast, Device[device].renderer)
+    method_cache[ckey] = method_cache[bkey] = ret = CompiledRunner(prg.replace(arg=replace(prg.arg, device=device)))
   return ret
 
 # **************** run linear ****************

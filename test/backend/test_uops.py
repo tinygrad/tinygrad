@@ -7,7 +7,8 @@ from tinygrad.dtype import dtypes, DType, AddrSpace, ConstFloat  # noqa: F401
 from tinygrad.device import Buffer, Device
 from tinygrad.uop.ops import Ops, UOp, KernelInfo, AxisType
 from tinygrad.renderer.cstyle import CStyleLanguage
-from tinygrad.engine.realize import CompiledRunner, get_program, run_linear
+from tinygrad.engine.realize import CompiledRunner, run_linear
+from tinygrad.codegen import to_program
 from tinygrad.device import is_dtype_supported
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.renderer.ptx import PTXRenderer
@@ -15,8 +16,8 @@ from test.helpers import to_uops_list
 from dataclasses import replace
 
 def _uops_to_prg(uops_list):
-  prg = get_program(UOp.sink(*uops_list, arg=KernelInfo()), Device[Device.DEFAULT].renderer)
-  return CompiledRunner(replace(prg, device=Device.DEFAULT))
+  prg = to_program(UOp.sink(*uops_list, arg=KernelInfo()), Device[Device.DEFAULT].renderer)
+  return CompiledRunner(prg.replace(arg=replace(prg.arg, device=Device.DEFAULT)))
 
 def uop(uops:list[UOp], op:Ops, dtype:Optional[DType], src:tuple[UOp, ...], arg:Any=None) -> UOp:
   if op is Ops.CONST: uops.append(UOp.const(dtype, arg))
@@ -248,8 +249,8 @@ class TestAssembly(unittest.TestCase):
     ast = c.schedule_linear().src[-1].src[0]
     opts_to_apply = [Opt(OptOps.UNROLL, 0, 4)]
     ast = ast.replace(arg=KernelInfo(opts_to_apply=tuple(opts_to_apply)))
-    program = get_program(ast, Device[Device.DEFAULT].renderer)
-    uops = program.uops
+    program = to_program(ast, Device[Device.DEFAULT].renderer)
+    uops = tuple(program.src[2].src)
     self.assertGreaterEqual(len([x.op for x in uops if x.op is Ops.MULACC]), 4)
 
   def test_mulacc_shl(self):

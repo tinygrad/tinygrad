@@ -3,7 +3,7 @@ from contextlib import redirect_stdout
 from tinygrad import Tensor, Device
 from tinygrad.helpers import Target
 from tinygrad.renderer.nir import LVPRenderer
-from tinygrad.engine.realize import get_program
+from tinygrad.codegen import to_program
 
 @unittest.skipIf(Device.DEFAULT != "CPU", "only run on CPU")
 class TestCPU(unittest.TestCase):
@@ -14,8 +14,8 @@ class TestCPU(unittest.TestCase):
         with self.subTest(arch=arch):
           if ren is LVPRenderer: continue # LVP does not play nice with cross compilation
           r = ren(Target(device="CPU", arch=arch))
-          p = get_program(ast, r)
-          lib = r.compiler.compile(p.src)
+          p = to_program(ast, r)
+          lib = r.compiler.compile(p.src[3].arg)
           out = io.StringIO()
           with redirect_stdout(out): r.compiler.disassemble(lib)
           self.assertEqual("vmov" in out.getvalue(), expect_vmov, out.getvalue())

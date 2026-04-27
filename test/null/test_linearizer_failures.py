@@ -2,8 +2,8 @@
 import unittest
 from tinygrad.uop.ops import UOp, Ops, AxisType, KernelInfo
 from tinygrad.dtype import dtypes
-from tinygrad.engine.realize import get_program
 from tinygrad.device import Device
+from tinygrad.codegen import to_program
 
 class TestLinearizerFailures(unittest.TestCase):
   def test_fail_1(self):
@@ -19,7 +19,7 @@ class TestLinearizerFailures(unittest.TestCase):
     c9 = ((((c6+(c8*UOp.const(dtypes.float, -1.0)))*(c6+(c8*UOp.const(dtypes.float, -1.0)))).reduce(c5, arg=Ops.ADD)*UOp.const(dtypes.float, 0.000390625))+UOp.const(dtypes.float, 1e-05)).sqrt().reciprocal()
     c10 = c0.index(c3).store(c9).end(c1, c2)
     ast = c10.sink(arg=KernelInfo())
-    get_program(ast, renderer=Device[Device.DEFAULT].renderer)
+    to_program(ast, renderer=Device[Device.DEFAULT].renderer)
 
 if __name__ == '__main__':
   unittest.main()
