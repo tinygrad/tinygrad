@@ -379,7 +379,7 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
         name = name+"_WMMA"
         if not op_type.startswith("WMMA_VALU"): row = "ALUEXEC:0 WMMA"
       # transcendental valu gets its own row
-      if "TRANS" in op_type: row = "ALUEXEC:0 TFU"
+      if op_type.startswith("VALUT"): row = "ALUEXEC:0 TFU"
       # extend execs by the op type's known duration, p._time marks the first or last cycle based on the op type
       duration = int(dur_match.group(1)) if (dur_match:=re.match(r".*_(\d+)$", op_type)) else 1
       if any(ss in row for ss in ("SALU", "TFU", "VMEM", "LDS")): start_time, end_time = p._time, p._time+duration
@@ -390,7 +390,6 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
     if isinstance(p, (VALUINST, INST, INST_RDNA4)) and (exec_type:=dispatch_to_exec.get(name.replace("OTHER_", "").split("_")[0])) is not None:
       if name.startswith("OTHER_"): exec_type = f"{exec_type}_ALT"
       # detect rdna3 wmma from the asm, only rdna4 has an op type for it
-      # note: it's normal VALU and has a known width
       if isinstance(p, VALUINST) and (asm:=getattr(unwrap(info).inst, "op_name", "")).startswith("V_WMMA"):
         name = f"WMMA_VALU_{16 if 'IU4' in asm else 32}"
       exec_pending.setdefault(exec_type, []).append((f"{row}-{idx}", name))
