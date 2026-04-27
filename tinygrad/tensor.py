@@ -910,51 +910,6 @@ class Tensor(OpMixin):
   def _mop(self, op:Ops, arg) -> Tensor: return self._apply_uop(UOp._mop, extra_args=(op,), arg=arg)
   def _rop(self, op:Ops, axis:tuple[int, ...]) -> Tensor: return self._apply_uop(UOp._rop, op=op, axis=axis)
 
-  def pad(self, padding:Sequence[sint]|Sequence[tuple[sint, sint]|None], mode:str="constant", value:float=0.0) -> Tensor:
-    """
-    Returns a tensor with padding applied based on the input `padding`.
-
-    `padding` supports two padding structures:
-
-    1. Flat padding: `(padding_left, padding_right, padding_top, padding_bottom, ...)`
-        - This structure matches PyTorch's pad.
-        - `padding` length must be even.
-
-    2. Group padding: `(..., (padding_top, padding_bottom), (padding_left, padding_right))`
-        - This structure matches pad for JAX, NumPy, TensorFlow, and others.
-        - For each axis, padding can be `None`, meaning no padding, or a tuple `(start, end)`.
-        - `padding` must have the same length as `self.ndim`.
-
-    Padding values can be negative, resulting in dimension shrinks that work similarly to Python negative slices.
-    Padding modes is selected with `mode` which supports `constant`, `reflect` and `replicate`.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor.arange(9).reshape(1, 1, 3, 3)
-    print(t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.pad((1, 2, 0, -1)).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.pad(((None, None, (0, -1), (1, 2)))).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.pad((1, 2, 0, -1), value=-float('inf')).numpy())
-    ```
-    """
-    # normalize to grouped format
-    if all(isinstance(p, (int,UOp)) for p in padding):
-      if len(padding)%2 != 0: raise ValueError("Flat padding must have even number of pads")
-      pX = ((0,0),)*(self.ndim - len(padding)//2) + flat_to_grouped(cast(Sequence[sint], padding))
-    else: pX = tuple((0,0) if p is None else p for p in cast(Sequence[tuple[sint, sint]|None], padding))
-    if len(pX) != self.ndim: raise ValueError(f"padding length is improper, {padding=} {self.ndim=}")
-    # dispatch
-    if mode == "constant": return self._pad_constant(pX, value)
-    assert all_int(self.shape), f"does not support symbolic shape {self.shape}"
-    if mode == "circular": return self._pad_circular(pX)
-    if mode in {"reflect", "replicate"}: return self._pad_reflect_replicate(pX, mode)
-    raise NotImplementedError(f"{mode=} is not supported")
-
   def _getitem(self, indices, v: Tensor|None = None) -> Tensor:
     # view-only indexing (no Tensor/list indices, no setitem) is handled by MovementMixin.__getitem__
     if v is None and not any(isinstance(i, (Tensor, list, tuple)) for i in (indices if isinstance(indices, tuple) else (indices,))):
