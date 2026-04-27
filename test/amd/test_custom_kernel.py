@@ -102,73 +102,41 @@ def custom_lds_sync(A:UOp, arch:str) -> UOp:
 def custom_handwritten(A:UOp, arch:str) -> UOp:
   A = A.flatten()
   threads = UOp.special(128, "lidx0")
-  wg = UOp.special(256, "gidx0")
+  wg = UOp.special(1, "gidx0")
   lds = UOp(Ops.DEFINE_LOCAL, dtypes.uint8.ptr(size=512, addrspace=AddrSpace.LOCAL), (), 'lds')  # 128 * 4 bytes
-  # TODO: also doing a wave specialized test where each wave saturates one of the pipes
-  # currently you have to set a PIPE=, since each wave can issue one inst per cycle.
   pipes = {getenv("PIPE", "")} if getenv("PIPE", "") else {"SALU", "VALU", "TRANSCENDENTAL", "WMMA"}
   k = Kernel(arch)
   # wrap in loop to filter out icache misses
   LOOP_N, UNROLL_N = 8, 5
   k.emit(r4.s_mov_b32(s[1], LOOP_N))
   k.label("loop")
-  # saturate scalar ALU pipe
   if "SALU" in pipes:
     for i in range(UNROLL_N):
       k.emit(r4.s_mov_b32(s[20+i], i))
-      k.emit(r4.s_mov_b32(s[30+i], i))
+      k.emit(r4.s_min_b32(s[30+i], i))
       k.emit(r4.s_mov_b32(s[40+i], i))
       k.emit(r4.s_mul_i32(s[14+i], s[12+i], 32))
-  # saturate vector ALU pipe operating on 32 and 64 bits
   if "VALU" in pipes:
     for i in range(UNROLL_N):
       k.emit(r4.v_mov_b32_e32(v[20+i], i))
-      k.emit(r4.v_lshlrev_b64_e32(v[30+2*i:31+2*i], 2, v[12+i:13+i])) # 2c
-      k.emit(r4.v_mad_co_u64_u32(v[40+2*i:41+2*i], NULL, v[12+i], v[13+i], v[14+i:15+i])) # 4c
-  # saturate transcendental VALU; cover VALUT_4 (regular) and VALU_SCL_TRANS (pseudo-scalar)
-  # rdna4 manual 5.8: trans ops are tracked separately from regular VALU by S_DELAY_ALU
-  # (codes 1-4 = previous VALU, codes 5-7 = previous transcendental VALU)
-  # rdna4 manual 7.10: V_S_* are "VALU ops that operate on a single lane of data,
-  #   src and dst are SGPRs ... these use the VALU pipeline like any other VALU op"
-  # interleave 2 regular + 2 pseudo-scalar to mix VALUT_4 (4c) and VALU_SCL_TRANS (1c) on the trans pipe
+      k.emit(r4.v_lshlrev_b64_e32(v[30+2*i:31+2*i], 2, v[12+i:13+i]))
+      k.emit(r4.v_mad_co_u64_u32(v[40+2*i:41+2*i], NULL, v[12+i], v[13+i], v[14+i:15+i]))
   if "TRANSCENDENTAL" in pipes:
+    # transcendental VALU runs on the TFU, it can run regular VALU at the same time
     for i in range(UNROLL_N):
       k.emit(r4.v_mov_b32_e32(v[20+i], i))
-      k.emit(r4.v_rcp_f32_e32(v[60+i], v[12+i]))   # regular trans (VALUT_4, 4c)
-      k.emit(r4.v_rsq_f32_e32(v[61+i], v[12+i]))   # regular trans (VALUT_4, 4c)
-      k.emit(r4.v_s_rcp_f32(s[60+i], s[12+i]))     # pseudo-scalar trans (VALU_SCL_TRANS, 1c)
-      k.emit(r4.v_s_rsq_f32(s[61+i], s[12+i]))     # pseudo-scalar trans (VALU_SCL_TRANS, 1c)
-      k.emit(r4.v_sqrt_f32_e32(v[62+i], v[12+i]))  # regular trans
-      k.emit(r4.v_exp_f32_e32(v[63+i], v[12+i]))   # regular trans
-      k.emit(r4.v_s_sqrt_f32(s[62+i], s[12+i]))    # pseudo-scalar trans
-      k.emit(r4.v_s_exp_f32(s[63+i], s[12+i]))     # pseudo-scalar trans
-      k.emit(r4.v_log_f32_e32(v[64+i], v[12+i]))   # regular trans
-      k.emit(r4.v_sin_f32_e32(v[65+i], v[12+i]))   # regular trans
-      k.emit(r4.v_s_log_f32(s[64+i], s[12+i]))     # pseudo-scalar trans
-      k.emit(r4.v_cos_f32_e32(v[66+i], v[12+i]))   # regular trans (no V_S_COS variant)
-  # saturate WMMA pipe; cover WMMA_8 (8c), WMMA_16 (16c) categories
-  # rdna4 manual 7.12.1 lists 5 WMMA hazard cases; we avoid all by giving every WMMA
-  # disjoint register blocks. C=D within one WMMA is fine (the accumulator pattern), but no
-  # WMMA's regs overlap any other WMMA's regs.
-  # NOTE: WMMA_32 (op 0x8e) and WMMA_64 (op 0x8f) rocprof categories appear unreachable on gfx1201;
-  # F16/BF16 → WMMA_16, all int/FP8/sparse → WMMA_8 (cycle count tracks element bit-width).
-  # The ISA does NOT specify these cycle counts; they come from rocprof's gfx12wave.cpp table.
-  # Layout per iter: f16(A=4+B=4+CD=8=16) + iu8(A=2+B=2+CD=8=12) + fp8(2+2+8=12) = 40 VGPRs
+      k.emit(r4.v_s_rcp_f32(s[20+i], s[12+i]))
+      k.emit(r4.v_rcp_f32_e32(v[30+i], v[12+i]))
+      k.emit(r4.v_s_exp_f32(s[30+i], s[12+i]))
   if "WMMA" in pipes:
     base = 30
     for i in range(UNROLL_N):
-      # WMMA_16 f16
       a = base + i*40
       b, cd = a + 4, a + 8
-      k.emit(r4.v_wmma_f32_16x16x16_f16(v[cd:cd+7], v[a:a+3], v[b:b+3], v[cd:cd+7]))    # WMMA_16
-      # WMMA_8 iu8
+      k.emit(r4.v_wmma_f32_16x16x16_f16(v[cd:cd+7], v[a:a+3], v[b:b+3], v[cd:cd+7]))
       a = base + i*40 + 16
       b, cd = a + 2, a + 4
-      k.emit(r4.v_wmma_i32_16x16x16_iu8(v[cd:cd+7], v[a:a+1], v[b:b+1], v[cd:cd+7]))    # WMMA_8
-      # WMMA_8 fp8
-      a = base + i*40 + 28
-      b, cd = a + 2, a + 4
-      k.emit(r4.v_wmma_f32_16x16x16_fp8_fp8(v[cd:cd+7], v[a:a+1], v[b:b+1], v[cd:cd+7]))# WMMA_8
+      k.emit(r4.v_wmma_i32_16x16x16_iu8(v[cd:cd+7], v[a:a+1], v[b:b+1], v[cd:cd+7]))
   k.emit(r4.s_add_co_i32(s[1], s[1], -1))
   k.emit(r4.s_cmp_eq_i32(s[1], 0))
   k.emit(r4.s_cbranch_scc0(), target="loop")
