@@ -8,7 +8,7 @@ from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.renderer.amd import decode_inst
 from tinygrad.runtime.autogen.amd.rdna3.ins import SOPP
 from tinygrad.runtime.autogen.amd.rdna3.enum import SOPPOp
-from tinygrad.renderer.amd.sqtt import (decode, LAYOUT_HEADER, WAVESTART, WAVESTART_RDNA4, WAVEEND, INST, INST_RDNA4, VALUINST,
+from tinygrad.renderer.amd.sqtt import (decode, LAYOUT_HEADER, WAVESTART, WAVESTART_RDNA4, WAVEEND, WAVEEND_RDNA4, INST, INST_RDNA4, VALUINST,
                                      IMMEDIATE, IMMEDIATE_MASK, PACKET_TYPES_RDNA3, PACKET_TYPES_RDNA4, PACKET_TYPES_CDNA, CDNA_WAVESTART,
                                      print_packets, CDNA_WAVEEND, CDNA_INST)
 from test.amd.helpers import TARGET_TO_ARCH
@@ -132,7 +132,7 @@ class SQTTExamplesTestBase(unittest.TestCase):
       with self.subTest(example=name):
         all_packets = [p for e in events for p in decode(e.blob)]
         self.assertGreater(len([p for p in all_packets if isinstance(p, (WAVESTART, WAVESTART_RDNA4, CDNA_WAVESTART))]), 0, f"no WAVESTART in {name}")
-        self.assertGreater(len([p for p in all_packets if isinstance(p, (WAVEEND, CDNA_WAVEEND))]), 0, f"no WAVEEND in {name}")
+        self.assertGreater(len([p for p in all_packets if isinstance(p, (WAVEEND, WAVEEND_RDNA4, CDNA_WAVEEND))]), 0, f"no WAVEEND in {name}")
 
   def test_time_monotonic(self):
     for name, (events, *_) in self.examples.items():
@@ -180,7 +180,7 @@ class SQTTExamplesTestBase(unittest.TestCase):
           for p in decode(event.blob):
             if first_timestamp is None: first_timestamp = p._time
             if isinstance(p, (WAVESTART, CDNA_WAVESTART, WAVESTART_RDNA4)): wave_starts[(p.wave, p.simd, p.cu)] = p._time
-            elif isinstance(p, (WAVEEND, CDNA_WAVEEND)) and (key := (p.wave, p.simd, p.cu)) in wave_starts:
+            elif isinstance(p, (WAVEEND, WAVEEND_RDNA4, CDNA_WAVEEND)) and (key := (p.wave, p.simd, p.cu)) in wave_starts:
               our_waves.append((wave_starts[key], p._time))
           for st in wave_starts.values():
             self.assertGreater(st, first_timestamp, "wave start must be after the first packet")

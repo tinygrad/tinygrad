@@ -94,7 +94,7 @@ class TestSQTTMapBase(unittest.TestCase):
             elif "WAVE" in e.device:
               # sopk/immediates don't get ALU/MEM EXEC
               if e.name.display_name not in {"IMMEDIATE", "IMMEDIATE_MASK", "JUMP", "JUMP_NO", "MESSAGE", "BARRIER", "BARRIER_SIGNAL",
-                                             "WAVEEND", "WAVERDY"} and not e.name.display_name.startswith("OTHER_"): insts += 1
+                                             "WAVEEND", "WAVEEND_RDNA4", "WAVERDY"} and not e.name.display_name.startswith("OTHER_"): insts += 1
             else: raise Exception(f"timeline row must be INST or EXEC, got {e.device}")
           self.assertEqual(execs, insts)
 
