@@ -374,20 +374,24 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
     link = f"PC:{info.pc}" if info else None
     if isinstance(p, (ALUEXEC, VMEMEXEC)):
       dispatch_id, op_type = exec_pending[name].pop(0)
-      # get the number of cycles from the op type
+      # wmma exec gets its own color and its own row on rdna4
+      if op_type.startswith("WMMA"):
+        name = name+"_WMMA"
+        if not op_type.startswith("WMMA_VALU"): row = "ALUEXEC:0 WMMA"
+      # transcendental valu gets its own row
+      if op_type.startswith("VALUT"): row = "ALUEXEC:0 TFU"
+      # extend execs by the op type's known duration, p._time marks the first or last cycle based on the op type
       duration = int(dur_match.group(1)) if (dur_match:=re.match(r".*_(\d+)$", op_type)) else 1
-      # for execs, extend end time by the duration
-      start_time, end_time = p._time, p._time+duration
+      if any(ss in row for ss in ("SALU", "TFU", "VMEM", "LDS")): start_time, end_time = p._time, p._time+duration
+      else: start_time, end_time = p._time-duration, p._time
       link = f"LINK:{dispatch_id}"
-      # wmma exec gets its own row and color
-      if op_type.startswith("WMMA"): name, row = name+"_WMMA", "ALUEXEC:0 WMMA"
     # queue inst dispatches
     idx = next(row_counts.setdefault(row, itertools.count(0)))
     if isinstance(p, (VALUINST, INST, INST_RDNA4)) and (exec_type:=dispatch_to_exec.get(name.replace("OTHER_", "").split("_")[0])) is not None:
       if name.startswith("OTHER_"): exec_type = f"{exec_type}_ALT"
       # detect rdna3 wmma from the asm, only rdna4 has an op type for it
       if isinstance(p, VALUINST) and (asm:=getattr(unwrap(info).inst, "op_name", "")).startswith("V_WMMA"):
-        name = f"WMMA_{16 if 'IU4' in asm else 32}"
+        name = f"WMMA_VALU_{16 if 'IU4' in asm else 32}"
       exec_pending.setdefault(exec_type, []).append((f"{row}-{idx}", name))
     # construct and yield the event for this packet
     if row not in row_ends: yield ProfilePointEvent(row, "JSON", "pcMap", pc_map, ts=Decimal(0))

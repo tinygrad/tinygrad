@@ -105,11 +105,11 @@ class InstOpRDNA4(Enum):
   SALU_NO_EXEC = 0x7
   MESSAGE = 0x9
   VALU_1 = 0xa
-  VALU_TRANS = 0xb
-  VALU_B1 = 0xc
-  VALU_B2 = 0xd
-  VALU_B4 = 0xe
-  VALU_B16 = 0xf
+  VALUT_4 = 0xb
+  VALUB_1 = 0xc
+  VALUB_2 = 0xd
+  VALUB_4 = 0xe
+  VALUB_16 = 0xf
   VINTERP = 0x12
   BARRIER_WAIT = 0x13
   FLAT_RD_2 = 0x1c
@@ -143,7 +143,7 @@ class InstOpRDNA4(Enum):
   LDS_PARAM_LOAD = 0x6f
   SALU_WR_EXEC = 0x72
   VALU1_WR_EXEC = 0x73
-  VALU_B2_WR_EXEC = 0x74
+  VALU_WR_EXEC_2 = 0x74
   OTHER_LDS_6 = 0x77
   OTHER_LDS_10 = 0x78
   BARRIER_SIGNAL = 0x7a
@@ -154,7 +154,7 @@ class InstOpRDNA4(Enum):
   WMMA_32 = 0x8e
   WMMA_64 = 0x8f
   VALU_DPFP = 0x92
-  SALU_FLOAT3 = 0x98
+  SALU_FLOAT_3 = 0x98
   VALU_SCL_TRANS = 0x99
   SALU_2 = 0x9b
   SALU_5 = 0x9c

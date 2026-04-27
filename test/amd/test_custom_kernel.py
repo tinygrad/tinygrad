@@ -6,10 +6,11 @@ from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.engine.realize import run_linear, estimate_uop
 from tinygrad.renderer import Estimates
 from tinygrad.dtype import AddrSpace
+from tinygrad.helpers import getenv
 from tinygrad.runtime.autogen.amd.rdna3.ins import *
 import tinygrad.runtime.autogen.amd.rdna3.ins as r3
 import tinygrad.runtime.autogen.amd.rdna4.ins as r4
-from tinygrad.renderer.amd.dsl import s, v
+from tinygrad.renderer.amd.dsl import s, v, NULL
 from test.amd.helpers import TARGET_TO_ARCH
 from extra.gemm.amd_asm_matmul import Kernel
 
@@ -101,31 +102,44 @@ def custom_lds_sync(A:UOp, arch:str) -> UOp:
 def custom_handwritten(A:UOp, arch:str) -> UOp:
   A = A.flatten()
   threads = UOp.special(128, "lidx0")
-  wg = UOp.special(256, "gidx0")
+  wg = UOp.special(1, "gidx0")
   lds = UOp(Ops.DEFINE_LOCAL, dtypes.uint8.ptr(size=512, addrspace=AddrSpace.LOCAL), (), 'lds')  # 128 * 4 bytes
+  pipes = {getenv("PIPE", "")} if getenv("PIPE", "") else {"SALU", "VALU", "TRANSCENDENTAL", "WMMA"}
   k = Kernel(arch)
-  k.emit(r4.s_nop(0))
-  k.emit(r4.v_mov_b32_e32(v[1], 4))
-  def emit_alt():
-    for i in range(2):
-      k.emit(r4.v_mov_b32_e32(v[20+i], 4.0))
-      k.emit(r4.v_rcp_f32_e32(v[22+i], v[20+i]))
-      k.emit(r4.s_mov_b32(s[20+i], i))
-      k.emit(r4.s_mul_i32(s[14+i], s[12+i], 32))
-  def emit_wmma():
-    for _ in range(2):
-      k.emit(r4.v_wmma_f32_16x16x16_f16(v[0:7], v[8:11], v[8:11], 1))
-  k.label("start")
-  k.emit(s_mov_b32(s[1], 10))
+  # wrap in loop to filter out icache misses
+  LOOP_N, UNROLL_N = 8, 5
+  k.emit(r4.s_mov_b32(s[1], LOOP_N))
   k.label("loop")
-  # wmma should've overlapped here if it was a different unit?
-  for _ in range(2):
-    emit_wmma()
-    emit_alt()
-  for _ in range(8): k.emit(s_nop(1))
-  k.emit(s_add_u32(s[1], s[1], -1))
-  k.emit(s_cmp_eq_i32(s[1], 0))
-  k.emit(s_cbranch_scc0(), target="loop")
+  if "SALU" in pipes:
+    for i in range(UNROLL_N):
+      k.emit(r4.s_mov_b32(s[20+i], i))
+      k.emit(r4.s_min_i32(s[30+i], i))
+      k.emit(r4.s_mov_b32(s[40+i], i))
+      k.emit(r4.s_mul_i32(s[14+i], s[12+i], 32))
+  if "VALU" in pipes:
+    for i in range(UNROLL_N):
+      k.emit(r4.v_mov_b32_e32(v[20+i], i))
+      k.emit(r4.v_lshlrev_b64_e32(v[30+2*i:31+2*i], 2, v[12+i:13+i]))
+      k.emit(r4.v_mad_co_u64_u32(v[40+2*i:41+2*i], NULL, v[12+i], v[13+i], v[14+i:15+i]))
+  if "TRANSCENDENTAL" in pipes:
+    # transcendental VALU runs on the TFU, it can run regular VALU at the same time
+    for i in range(UNROLL_N):
+      k.emit(r4.v_mov_b32_e32(v[20+i], i))
+      k.emit(r4.v_s_rcp_f32(s[20+i], s[12+i]))
+      k.emit(r4.v_rcp_f32_e32(v[30+i], v[12+i]))
+      k.emit(r4.v_s_exp_f32(s[30+i], s[12+i]))
+  if "WMMA" in pipes:
+    base = 30
+    for i in range(UNROLL_N):
+      a = base + i*40
+      b, cd = a + 4, a + 8
+      k.emit(r4.v_wmma_f32_16x16x16_f16(v[cd:cd+7], v[a:a+3], v[b:b+3], v[cd:cd+7]))
+      a = base + i*40 + 16
+      b, cd = a + 2, a + 4
+      k.emit(r4.v_wmma_i32_16x16x16_iu8(v[cd:cd+7], v[a:a+1], v[b:b+1], v[cd:cd+7]))
+  k.emit(r4.s_add_co_i32(s[1], s[1], -1))
+  k.emit(r4.s_cmp_eq_i32(s[1], 0))
+  k.emit(r4.s_cbranch_scc0(), target="loop")
   k.emit(r4.s_endpgm())
   insts = k.finalize()
   sink = UOp.sink(A.base, threads, wg, lds, arg=KernelInfo("custom_handwritten"))

@@ -109,7 +109,7 @@ def main(args) -> None:
         phase, delay = "EXEC", int(e.st) - dispatch_st
       if inst and phase: info = f"{phase:<8} {inst}"
       unit = e.device.replace(" ", "-")
-      row = {"clk":int(e.st)-inst_st, "unit":unit, "op":op_name, "dur":int(unwrap(e.en)-e.st), "delay":delay or "", "info":info}
+      row = {"clk":int(e.st)-inst_st, "cycle":int(e.st), "unit":unit, "op":op_name, "dur":int(unwrap(e.en)-e.st), "delay":delay or "", "info":info}
       print(fmt(row, lambda _: f"{row['clk']:<12} {unit:<20} {op_str}{' '*(22-ansilen(op_str))} {row['dur']:<4} {str(row['delay']):<4} {info}"))
 
   # ** PMC printer

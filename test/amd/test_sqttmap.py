@@ -130,14 +130,25 @@ class TestSQTTMapRDNA4(TestSQTTMapBase):
   target = "gfx1200"
 
   @unittest.expectedFailure
-  def test_rdna4_wmma(self):
+  def test_pipes(self):
     events, kernels, target = self.examples["profile_handwritten_run_0"]
-    row_ends = {}
-    for e in sqtt_timeline(events[0].blob, list(kernels.values())[0].lib, target):
-      if type(e).__name__ != "ProfileRangeEvent" or e.device != "ALUEXEC:0 WMMA": continue
-      if (et:=row_ends.get(e.device)) is not None and e.st < et:
-        raise RuntimeError(f"WMMA exec overlaps in {e.device}: {e.st} {et}.")
-      row_ends[e.device] = e.en
+    lib = list(kernels.values())[0].lib
+    dispatch_st:dict[str, int] = {}
+    row_ends:dict[str, int] = {}
+    row_counts:dict[str, int] = {}
+    for e in sqtt_timeline(events[1].blob, lib, target):
+      if type(e).__name__ != "ProfileRangeEvent": continue
+      info = e.name.ret or ""
+      if e.device.startswith("WAVE"):
+        idx = row_counts.get(e.device, 0)
+        dispatch_st[f"{e.device}-{idx}"] = int(e.st)
+        row_counts[e.device] = idx + 1
+      elif info.startswith("LINK:"):
+        delay = int(e.st) - dispatch_st[info[len("LINK:"):]]
+        self.assertGreaterEqual(delay, 1, f"EXEC {e.device} starts before DISPATCH: delay={delay}")
+        if (prev_en:=row_ends.get(e.device)) is not None:
+          self.assertGreaterEqual(e.st, prev_en, f"EXEC overlap in {e.device}: {e.st} < prev end {prev_en}")
+        row_ends[e.device] = int(e.en)
 
 class TestSQTTMapCDNA(TestSQTTMapBase):
   target = "gfx950"
