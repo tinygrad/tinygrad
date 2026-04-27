@@ -233,17 +233,26 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
           return None
 
       case Ops.INDEX:
+        shp = []
+        for s in self.src[1:]: shp.extend(list(s.shape))
+        return tuple(shp)
+
         # non pointer index doesn't have a shape
-        if not isinstance(self.dtype, PtrDType): return None
+        #if not isinstance(self.dtype, PtrDType): return None
         # fully indexed doesn't have a shape. TODO: remove this
-        if self.src[0]._shape is None or len(self.src[1:]) == len(self.src[0].shape): return None
+        #if self.src[0]._shape is None or len(self.src[1:]) == len(self.src[0].shape): return None
         # pointer index
-        return self.src[0].shape[len(self.src[1:]):]
+        #return self.src[0].shape[len(self.src[1:]):]
+
+      case Ops.CAT:
+        if self.arg == -1:
+          assert all_same([x.shape for x in self.src])
+          return (len(self.src),)+self.src[0].shape
+        # TODO: write the non arg=-1 path
 
       # some ops init the shape
       case Ops.CONST | Ops.DEFINE_VAR | Ops.BIND | Ops.RANGE | Ops.SPECIAL: return ()
-      # TODO: VCONST should have the shape of the arg
-      case Ops.VCONST: return ()
+      case Ops.VCONST: return (len(self.arg),)
       case Ops.BUFFER: return (self.arg,)
       case Ops.BUFFER_VIEW: return (self.arg[0],)
       case Ops.CUSTOM_FUNCTION: return None
@@ -310,6 +319,11 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
           if not isinstance(axis_arg, tuple) or not all(isinstance(x, int) and x>=0 and x<len(ps) for x in axis_arg):
             raise ValueError(f"invalid type for axis: {axis_arg}")
           return tuple(1 if i in axis_arg else s for i,s in enumerate(ps))
+
+    # broadcasting here
+    # TODO: STORE can only broadcast a smaller src[1] into a larger src[0]
+    if self.op in GroupOp.Binary|GroupOp.Ternary|{Ops.STORE}:
+      return _broadcast_shape(*[u.shape for u in self.src])
 
     # elementwise ops keep the shape the same. all inputs with shape must match
     if self.op in GroupOp.ALU.union({Ops.CAST, Ops.COPY, Ops.NOOP, Ops.GROUP, Ops.SINK, Ops.ALLREDUCE, Ops.STORE}):
@@ -407,6 +421,9 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
   # *** uop syntactic sugar ***
 
+  def cat(*srcs:UOp, axis=-1):  # pylint: disable=no-self-argument
+    assert len(srcs) >= 1 and all_same([x.dtype for x in srcs])
+    return UOp(Ops.CAT, srcs[0].dtype, src=tuple(srcs), arg=axis)
   def sink(*srcs:UOp|None, **kwargs):  # pylint: disable=no-self-argument
     return UOp(Ops.SINK, dtypes.void, tuple([x for x in srcs if x is not None]), **kwargs)
   def maketuple(*srcs:UOp):  # pylint: disable=no-self-argument

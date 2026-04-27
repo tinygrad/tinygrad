@@ -100,6 +100,7 @@ class Ops(FastEnum):
   # the core 6 movement ops! these only exist in the tensor graph
   RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PAD = auto(); SHRINK = auto(); FLIP = auto()
   MULTI = auto()  # MULTI is really a movement op
+  CAT = auto()  # see CAT in spec
 
   # reduce
   REDUCE_AXIS = auto(); REDUCE = auto(); ALLREDUCE = auto()
