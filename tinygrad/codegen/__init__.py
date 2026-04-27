@@ -181,7 +181,8 @@ def do_to_program(ast:UOp, renderer:Renderer) -> UOp:
 
 to_program_cache: weakref.WeakValueDictionary[tuple, UOp] = weakref.WeakValueDictionary()
 def to_program(ast:UOp, renderer:Renderer) -> UOp:
-  if ast.op is Ops.PROGRAM and len(ast.src) >= 5 and ast.src[4].op is Ops.BINARY: return ast
+  if ast.op is Ops.PROGRAM and len(ast.src) >= 5 and ast.src[4].op is Ops.BINARY:
+    return ast if isinstance(ast.arg, ProgramInfo) else ast.replace(arg=ProgramInfo.from_sink(ast.src[0], ast.src[1].arg))
   key = (ast.key, type(renderer), renderer.target, NOOPT.value, DEVECTORIZE.value, EMULATED_DTYPES.value)
   if (prg:=to_program_cache.get(key)) is None: to_program_cache[key] = prg = do_to_program(ast, renderer)
   return prg
