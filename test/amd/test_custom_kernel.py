@@ -113,7 +113,7 @@ def custom_handwritten(A:UOp, arch:str) -> UOp:
   if "SALU" in pipes:
     for i in range(UNROLL_N):
       k.emit(r4.s_mov_b32(s[20+i], i))
-      k.emit(r4.s_min_b32(s[30+i], i))
+      k.emit(r4.s_min_i32(s[30+i], i))
       k.emit(r4.s_mov_b32(s[40+i], i))
       k.emit(r4.s_mul_i32(s[14+i], s[12+i], 32))
   if "VALU" in pipes:
