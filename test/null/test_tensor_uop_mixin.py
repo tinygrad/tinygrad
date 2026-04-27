@@ -243,6 +243,14 @@ class TestTensorUOpCat(unittest.TestCase):
   def test_cat_3tensors(self): _check(self, _t(2, 3), lambda x: x.cat(x, x, dim=0))
   def test_cat_neg_dim(self):  _check(self, _t(2, 3, 4), lambda x: x.cat(x, dim=-1))
 
+class TestTensorUOpPad(unittest.TestCase):
+  def test_pad_circular(self):           _check(self, _t(4, 5), lambda x: x._pad_circular(((1, 2), (0, 3))))
+  def test_pad_circular_zero_after(self):_check(self, _t(4, 5), lambda x: x._pad_circular(((1, 0), (2, 0))))
+  def test_pad_reflect(self):            _check(self, _t(4, 5), lambda x: x._pad_reflect_replicate(((1, 2), (0, 3)), "reflect"))
+  def test_pad_reflect_negative(self):   _check(self, _t(4, 5), lambda x: x._pad_reflect_replicate(((1, -1), (0, 2)), "reflect"))
+  def test_pad_replicate(self):          _check(self, _t(4, 5), lambda x: x._pad_reflect_replicate(((1, 2), (0, 3)), "replicate"))
+  def test_pad_replicate_negative(self): _check(self, _t(4, 5), lambda x: x._pad_reflect_replicate(((1, -1), (0, 2)), "replicate"))
+
 class TestTensorUOpStack(unittest.TestCase):
   def test_stack_dim0(self):     _check(self, _t(2, 3), lambda x: x.stack(x, dim=0))
   def test_stack_dim1(self):     _check(self, _t(2, 3), lambda x: x.stack(x, dim=1))
