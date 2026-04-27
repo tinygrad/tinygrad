@@ -246,4 +246,6 @@ def compile_linear(linear:UOp, beam=0, validate=False) -> UOp:
 def run_linear(linear:UOp, var_vals:dict[str, int]|None=None, input_uops:tuple[UOp, ...]=(), do_update_stats=True, jit=False):
   if not jit: linear = compile_linear(linear, validate=VALIDATE_WITH_CPU)
   ctx = ExecContext(var_vals or {}, input_uops, do_update_stats, jit)
-  for call in linear.src: pm_exec.rewrite(call, ctx)
+  calls = list(linear.src)
+  del linear
+  while calls: pm_exec.rewrite(calls.pop(0), ctx)
