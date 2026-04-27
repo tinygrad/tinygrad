@@ -1,10 +1,10 @@
-from tinygrad.codegen import to_program
 import unittest, math
 from functools import partial
 
 from tinygrad import nn, dtypes, Tensor, Device, TinyJit, Variable
 from tinygrad.helpers import getenv, CI, OSX
 from tinygrad.device import is_dtype_supported
+from tinygrad.codegen import to_program
 
 from tinygrad.uop.ops import Ops
 from tinygrad.renderer.ptx import PTXRenderer

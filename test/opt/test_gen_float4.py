@@ -1,7 +1,7 @@
-from tinygrad.codegen import to_program
 import unittest
 from tinygrad import Device, Tensor, dtypes
 from tinygrad.uop.ops import UOp, Ops
+from tinygrad.codegen import to_program
 from tinygrad.codegen.opt import Opt, OptOps
 
 from tinygrad.helpers import DEV
