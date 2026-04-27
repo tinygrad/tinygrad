@@ -3,7 +3,8 @@ from dataclasses import replace
 from tinygrad import dtypes, Device
 from tinygrad.uop.ops import UOp, AxisType, Ops, KernelInfo
 from tinygrad.codegen.opt import Opt, OptOps # pylint: disable=unused-import
-from tinygrad.engine.realize import CompiledRunner, get_program
+from tinygrad.engine.realize import CompiledRunner
+from tinygrad.codegen import to_program
 from tinygrad.helpers import dedup, getenv
 from tinygrad.device import Buffer
 from tinygrad.dtype import ImageDType, Invalid
@@ -88,7 +89,7 @@ ast = {143: vision_conv_143, 153: vision_conv_153, 172: dm_conv_172}[getenv("NUM
 renderer = Device.default.renderer
 allocator = Device.default.allocator
 
-ps = get_program(ast, renderer)
+ps = to_program(ast, renderer)
 cr = CompiledRunner(replace(ps, device=Device.DEFAULT))
 
 gs = sorted(dedup([u for u in ast.toposort() if u.op is Ops.PARAM]), key=lambda u: u.arg)

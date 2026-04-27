@@ -173,16 +173,16 @@ if __name__ == "__main__":
 
   # *** render to device ***
 
-  from tinygrad.codegen import get_program
+  from tinygrad.codegen import to_program
   with Context(PCONTIG=2, DEVECTORIZE=2, SPEC=0):
     out = tree_traversal(forest_t, val_t, height, rounds)
     sink = out.schedule_linear().src[-1].src[0]
-    prg = get_program(sink, VLIWRenderer())
+    prg = to_program(sink, VLIWRenderer())
 
   # *** run on Machine and compare ***
 
   # NOTE: the scratch size needs to be reduced to 1536 when you have a register allocator
-  src = eval(prg.src)
+  src = eval(prg.src[3].arg)
   max_regs = max(t[1] for instr in src for v in instr.values() for t in v if len(t) > 1) + 8
   print(f"{max_regs:5d} regs used" + ("" if max_regs <= 1536 else "       <-- WARNING: TOO MANY REGISTERS, MUST BE <= 1536"))
   machine = problem.Machine(mem, src, problem.DebugInfo(scratch_map={}), n_cores=1, trace=False, scratch_size=max_regs)

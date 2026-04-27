@@ -5,7 +5,6 @@ if "JIT_BATCH_SIZE" not in os.environ: os.environ["JIT_BATCH_SIZE"] = "0"
 from tinygrad import fetch, Tensor, TinyJit, Context, GlobalCounters, Device, dtypes
 from tinygrad.helpers import DEBUG, getenv
 from tinygrad.uop.ops import Ops
-from tinygrad.engine.realize import get_runner
 from tinygrad.nn.onnx import OnnxRunner
 
 OPENPILOT_MODEL = sys.argv[1] if len(sys.argv) > 1 else "https://github.com/commaai/openpilot/raw/v0.9.7/selfdrive/modeld/models/supercombo.onnx"
@@ -37,7 +36,7 @@ def compile(onnx_file):
     # copy i == 1 so use of JITBEAM is okay
     if i == 1: test_val = np.copy(ret)
   # iterate kernel CALLs in the captured LINEAR UOp; toposort descends into batched graph CUSTOM_FUNCTIONs
-  kernel_asts = {Ops.SINK, Ops.PROGRAM}
+  kernel_asts = {Ops.PROGRAM}
   kernel_calls = [u for u in run_onnx_jit.captured.linear.toposort(gate=lambda x: x.op not in kernel_asts)
                   if u.op is Ops.CALL and u.src[0].op in kernel_asts]
   print(f"captured {len(kernel_calls)} kernels")
@@ -49,8 +48,8 @@ def compile(onnx_file):
   read_image_count = 0
   gated_read_image_count = 0
   for call in kernel_calls:
-    device = next(b.device for b in call.src[1:] if b.op is not Ops.BIND)
-    src = get_runner(device, call.src[0]).p.src
+    _, _, _, source, _ = call.src[0].src
+    src = source.arg
     kernel_count += 1
     read_image_count += src.count("read_image")
     gated_read_image_count += src.count("?read_image")

@@ -1,7 +1,8 @@
 import unittest, contextlib
 from tinygrad import Device, Tensor, Context, TinyJit
 from tinygrad.device import Compiled, ProfileProgramEvent, ProfileDeviceEvent
-from tinygrad.engine.realize import run_linear, get_program
+from tinygrad.engine.realize import run_linear
+from tinygrad.codegen import to_program
 from tinygrad.viz.serve import load_amd_counters, VizData
 
 @contextlib.contextmanager
@@ -29,7 +30,7 @@ class TestSQTTProfiler(unittest.TestCase):
     with save_sqtt() as sqtt:
       linear = t.schedule_linear()
       run_linear(linear)
-    fn_name = get_program(linear.src[0].src[0], renderer=Device[Device.DEFAULT].renderer).function_name
+    fn_name = to_program(linear.src[0].src[0], renderer=Device[Device.DEFAULT].renderer).arg.function_name
     self.assertEqual(len(sqtt), 1)
     self.assertEqual(sqtt[0]["name"], f"SQTT {fn_name}")
 
@@ -38,7 +39,7 @@ class TestSQTTProfiler(unittest.TestCase):
     with save_sqtt() as sqtt:
       linear = t.schedule_linear()
       for _ in range(N:=3): run_linear(linear)
-    fn_name = get_program(linear.src[0].src[0], renderer=Device[Device.DEFAULT].renderer).function_name
+    fn_name = to_program(linear.src[0].src[0], renderer=Device[Device.DEFAULT].renderer).arg.function_name
     self.assertEqual(len(sqtt), N)
     for i in range(1, N):
       self.assertEqual(sqtt[i]["name"], f"SQTT {fn_name} n{i+1}")
@@ -50,7 +51,7 @@ class TestSQTTProfiler(unittest.TestCase):
       run_linear(linear)
     self.assertEqual(len(sqtt), len(linear.src))
     for i,call in enumerate(linear.src):
-      fn_name = get_program(call.src[0], renderer=Device[Device.DEFAULT].renderer).function_name
+      fn_name = to_program(call.src[0], renderer=Device[Device.DEFAULT].renderer).arg.function_name
       self.assertEqual(sqtt[i]["name"], f"SQTT {fn_name}")
 
   def test_multiple_kernels_lower(self):
@@ -60,7 +61,7 @@ class TestSQTTProfiler(unittest.TestCase):
       run_linear(linear)
     self.assertEqual(len(sqtt), len(linear.src))
     for i,call in enumerate(linear.src):
-      fn_name = get_program(call.src[0], renderer=Device[Device.DEFAULT].renderer).function_name
+      fn_name = to_program(call.src[0], renderer=Device[Device.DEFAULT].renderer).arg.function_name
       self.assertEqual(sqtt[i]["name"], f"SQTT {fn_name}")
 
   def test_jit(self):
