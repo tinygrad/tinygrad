@@ -1,6 +1,5 @@
 # test to compare every packet with the rocprof decoder
 import unittest, pickle
-from decimal import Decimal
 from typing import Iterator
 from pathlib import Path
 from tinygrad.helpers import DEBUG, getenv, temp, ansistrip, Context
@@ -131,11 +130,11 @@ class TestSQTTMapRDNA4(TestSQTTMapBase):
   target = "gfx1200"
 
   @unittest.expectedFailure
-  def test_exec_pipes(self):
+  def test_pipes(self):
     events, kernels, target = self.examples["profile_handwritten_run_0"]
     lib = list(kernels.values())[0].lib
     dispatch_st:dict[str, int] = {}
-    row_ends:dict[str, Decimal] = {}
+    row_ends:dict[str, int] = {}
     row_counts:dict[str, int] = {}
     for e in sqtt_timeline(events[1].blob, lib, target):
       if type(e).__name__ != "ProfileRangeEvent": continue
@@ -149,7 +148,7 @@ class TestSQTTMapRDNA4(TestSQTTMapBase):
         self.assertGreaterEqual(delay, 1, f"EXEC {e.device} starts before DISPATCH: delay={delay}")
         if (prev_en:=row_ends.get(e.device)) is not None:
           self.assertGreaterEqual(e.st, prev_en, f"EXEC overlap in {e.device}: {e.st} < prev end {prev_en}")
-        row_ends[e.device] = e.en
+        row_ends[e.device] = int(e.en)
 
 class TestSQTTMapCDNA(TestSQTTMapBase):
   target = "gfx950"
