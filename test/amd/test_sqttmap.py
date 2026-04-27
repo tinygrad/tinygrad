@@ -16,6 +16,7 @@ def needs_rocprof(fn):
   @functools.wraps(fn)
   def wrapper(self, *args, **kwargs):
     # check if latest rocprof is available, if not, skip rocprof comparison tests
+    # rocprof doesn't have a version string, decode a known pickle to validate it's the latest
     try:
       from extra.sqtt.roc import decode as roc_decode
       with open(EXAMPLES_DIR/"gfx1200"/"profile_plus_run_0.pkl", "rb") as f:
