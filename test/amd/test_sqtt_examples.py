@@ -12,6 +12,7 @@ from tinygrad.renderer.amd.sqtt import (decode, LAYOUT_HEADER, WAVESTART, WAVEST
                                      IMMEDIATE, IMMEDIATE_MASK, PACKET_TYPES_RDNA3, PACKET_TYPES_RDNA4, PACKET_TYPES_CDNA, CDNA_WAVESTART,
                                      print_packets, CDNA_WAVEEND, CDNA_INST)
 from test.amd.helpers import TARGET_TO_ARCH
+from test.amd.test_sqttmap import needs_rocprof
 
 import tinygrad
 EXAMPLES_DIR = Path(tinygrad.__file__).parent.parent / "extra/sqtt/examples"
@@ -160,6 +161,7 @@ class SQTTExamplesTestBase(unittest.TestCase):
         counts = [len(list(decode(e.blob))) for e in events]
         self.assertEqual(counts, self.expected[name], f"packet count mismatch in {name}")
 
+  @needs_rocprof
   def test_rocprof_wave_times_match(self):
     """Wave start/end times must match rocprof exactly."""
     for name, (events, lib, base) in self.examples.items():
@@ -189,6 +191,7 @@ class SQTTExamplesTestBase(unittest.TestCase):
         for st, et in our_waves:
           self.assertGreater(et, st, "wave end must be after start")
 
+  @needs_rocprof
   def test_rocprof_inst_times_match(self):
     """Instruction times must match rocprof exactly (excluding s_endpgm)."""
     for name, (events, lib, base) in self.examples.items():

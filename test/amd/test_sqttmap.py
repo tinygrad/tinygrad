@@ -1,19 +1,35 @@
 # test to compare every packet with the rocprof decoder
-import unittest, pickle
+import unittest, pickle, functools
 from typing import Iterator
 from pathlib import Path
 from tinygrad.helpers import DEBUG, getenv, temp, ansistrip, Context
 from tinygrad.renderer.amd.sqtt import print_packets, map_insts
 from tinygrad.runtime.autogen.amd.rdna3.ins import s_endpgm
-from tinygrad.viz.serve import sqtt_timeline
+from tinygrad.viz.serve import sqtt_timeline, amd_decode
 from test.amd.disasm import disasm
 from test.null.test_viz import run_cli
 
 import tinygrad
 EXAMPLES_DIR = Path(tinygrad.__file__).parent.parent / "extra/sqtt/examples"
 
+def needs_rocprof(fn):
+  @functools.wraps(fn)
+  def wrapper(self, *args, **kwargs):
+    # check if latest rocprof is available, if not, skip rocprof comparison tests
+    try:
+      from extra.sqtt.roc import decode as roc_decode
+      with open(EXAMPLES_DIR/"gfx1200"/"profile_plus_run_0.pkl", "rb") as f:
+        data = pickle.load(f)
+      sqtt = [e for e in data if type(e).__name__ == "ProfileSQTTEvent"][1]
+      kern = {e.tag:e for e in data if type(e).__name__ == "ProfileProgramEvent"}[sqtt.kern]
+      rctx = roc_decode([sqtt], {kern.tag:{addr+kern.base:inst for addr,inst in amd_decode(kern.lib, "gfx1200").items()}})
+      insts = [e.time for e in list(rctx.inst_execs.values())[0][0].unpack_insts()]
+      self.assertListEqual(insts, [28178, 28179, 28180, 28181, 28182, 29882, 29883, 29884, 29885, 30966, 30983, 30985, 30992, 30993])
+    except Exception as e: self.skipTest(f"latest rocprof not available, install with extra/sqtt/install_rocprof_decoder.py: {e}")
+    return fn(self, *args, **kwargs)
+  return wrapper
+
 def rocprof_inst_traces_match(sqtt, prg, target):
-  from tinygrad.viz.serve import amd_decode
   from extra.sqtt.roc import decode as roc_decode, InstExec
   addr_table = amd_decode(prg.lib, target)
   disasm_map = {addr+prg.base:inst for addr,inst in addr_table.items()}
@@ -63,6 +79,7 @@ class TestSQTTMapBase(unittest.TestCase):
       if sqtt_events and kern_events:
         cls.examples[pkl_path.stem] = (sqtt_events, kern_events, cls.target)
 
+  @needs_rocprof
   def test_rocprof_inst_traces_match(self):
     for name, (events, kern_events, target) in self.examples.items():
       if "sync" in name and self.target.startswith("gfx12"):
