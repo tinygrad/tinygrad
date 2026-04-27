@@ -44,7 +44,7 @@ class CPUComputeQueue(HWQueue):
   def _exec(self, tid, prg, bufs, *args):
     vals = list(args[bufs:])
     if 'core_id' in prg.runtimevars: vals[prg.runtimevars['core_id']] = tid
-    prg.fxn(*map(ctypes.c_uint64, args[:bufs]), *map(ctypes.c_int64 if platform.machine() == "arm64" else ctypes.c_int32, vals))
+    prg.fxn(*map(ctypes.c_uint64, args[:bufs]), *map(ctypes.c_int64 if platform.machine().lower() == "arm64" else ctypes.c_int32, vals))
   def _signal(self, tid, signal_addr, value): to_mv(signal_addr, 4).cast('I')[0] = value
   def _wait(self, tid, tmpl_sig, signal_addr, value):
     tmpl_sig.base_buf = HCQBuffer(signal_addr, 16, view=MMIOInterface(signal_addr, 16))
@@ -136,4 +136,4 @@ class CPUDevice(HCQCompiled):
     self.tasks:queue.Queue = queue.Queue()
     CPUWorker(self, self.tasks, thread_id=0).start()
     super().__init__(device, CPUAllocator(self), [ClangJITRenderer, CPULLVMRenderer, LVPRenderer], functools.partial(CPUProgram, self), CPUSignal,
-                     CPUComputeQueue, arch={'AMD64':'x86_64', 'aarch64':'arm64'}.get(m:=platform.machine(), m)+",native")
+                     CPUComputeQueue, arch={'amd64':'x86_64', 'aarch64':'arm64'}.get(m:=platform.machine().lower(), m)+",native")
