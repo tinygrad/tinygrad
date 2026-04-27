@@ -5,7 +5,7 @@ from typing import Literal, TypeAlias
 from tinygrad.runtime.support.c import _IO, _IOW, _IOR, _IOWR
 from tinygrad.runtime.support import c
 import sysconfig
-dll = c.DLL('nvjitlink', 'nvJitLink', [f'/{pre}/cuda/targets/{sysconfig.get_config_vars().get("MULTIARCH", "").rsplit("-", 1)[0]}/lib' for pre in ['opt', 'usr/local']])
+dll = c.DLL('nvjitlink', 'nvJitLink', [f'/{pre}/cuda/targets/{tgt}/lib' for pre in ['opt', 'usr/local'] for tgt in [sysconfig.get_config_vars().get("MULTIARCH", "").rsplit("-", 1)[0], 'sbsa-linux']])
 nvJitLinkResult: dict[int, str] = {(NVJITLINK_SUCCESS:=0): 'NVJITLINK_SUCCESS', (NVJITLINK_ERROR_UNRECOGNIZED_OPTION:=1): 'NVJITLINK_ERROR_UNRECOGNIZED_OPTION', (NVJITLINK_ERROR_MISSING_ARCH:=2): 'NVJITLINK_ERROR_MISSING_ARCH', (NVJITLINK_ERROR_INVALID_INPUT:=3): 'NVJITLINK_ERROR_INVALID_INPUT', (NVJITLINK_ERROR_PTX_COMPILE:=4): 'NVJITLINK_ERROR_PTX_COMPILE', (NVJITLINK_ERROR_NVVM_COMPILE:=5): 'NVJITLINK_ERROR_NVVM_COMPILE', (NVJITLINK_ERROR_INTERNAL:=6): 'NVJITLINK_ERROR_INTERNAL'}
 nvJitLinkInputType: dict[int, str] = {(NVJITLINK_INPUT_NONE:=0): 'NVJITLINK_INPUT_NONE', (NVJITLINK_INPUT_CUBIN:=1): 'NVJITLINK_INPUT_CUBIN', (NVJITLINK_INPUT_PTX:=2): 'NVJITLINK_INPUT_PTX', (NVJITLINK_INPUT_LTOIR:=3): 'NVJITLINK_INPUT_LTOIR', (NVJITLINK_INPUT_FATBIN:=4): 'NVJITLINK_INPUT_FATBIN', (NVJITLINK_INPUT_OBJECT:=5): 'NVJITLINK_INPUT_OBJECT', (NVJITLINK_INPUT_LIBRARY:=6): 'NVJITLINK_INPUT_LIBRARY'}
 class struct_nvJitLink(c.Struct): pass
