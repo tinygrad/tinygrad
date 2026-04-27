@@ -1,4 +1,3 @@
-from tinygrad.codegen import to_program
 # tensor tests that pass on NULL backend (no copyout needed)
 import numpy as np
 import unittest
@@ -7,7 +6,7 @@ from tinygrad.device import is_dtype_supported
 from tinygrad.uop.ops import Ops, UOp
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.nir import NIRRenderer
-
+from tinygrad.codegen import to_program
 from tinygrad.dtype import DType
 
 x_init = np.random.randn(1,3).astype(np.float32)

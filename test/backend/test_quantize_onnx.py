@@ -41,13 +41,12 @@ def sexec(out:Tensor, opts:list[Opt], replace_src=None, run_count=3):
   linear = out.schedule_linear()
   call = linear.src[-1]
   prg = to_program(replace_opts(call.src[0], opts), renderer=Device[Device.DEFAULT].renderer)
-  prg_uop = prg.prg
   if replace_src is not None:
     old_name = prg.src[3].arg.split("__attribute__((noinline)) void ")[1].split("(")[0]
     new_src = replace_src + "/* DSP boilerplate */" + prg.src[3].arg.split("/* DSP boilerplate */")[1].replace(old_name, "fxn")
     # drop BINARY and replace SOURCE so run_linear recompiles
-    prg_uop = prg_uop.replace(src=prg_uop.src[:3] + (UOp(Ops.SOURCE, arg=new_src),))
-  linear = linear.replace(src=linear.src[:-1] + (call.replace(src=(prg_uop, *call.src[1:])),))
+    prg = prg.replace(src=prg.src[:3] + (UOp(Ops.SOURCE, arg=new_src),))
+  linear = linear.replace(src=linear.src[:-1] + (call.replace(src=(prg, *call.src[1:])),))
   for _ in range(run_count): run_linear(linear)
 
 def get_quantized_model(sz):

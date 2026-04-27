@@ -49,9 +49,9 @@ def helper_tc_allclose(N:int, M:int, K:int, dtype_in:DType, dtype_out:DType, axi
   realized_ast, bufs = helper_realized_ast(r)
   opts = [Opt(op=OptOps.TC, axis=axis, arg=(tc_select, tc_opt, use_tensor_cores))]
   pu = to_program(replace_opts(realized_ast, opts), Device[Device.DEFAULT].renderer)
+  if use_tensor_cores == 1: assert len([uop for uop in pu.src[2].src if uop.op is Ops.WMMA]) > 0, "wmma not triggered"
+  assert len([x for x in pu.src[0].arg.applied_opts if x.op is OptOps.TC]) == 1, "tensor core opt not included"
   prg = CompiledRunner(pu.replace(arg=replace(pu.arg, device=Device.DEFAULT)))
-  if use_tensor_cores == 1: assert len([uop for uop in prg.prg.src[2].src if uop.op is Ops.WMMA]) > 0, "wmma not triggered"
-  assert len([x for x in prg.prg.src[0].arg.applied_opts if x.op is OptOps.TC]) == 1, "tensor core opt not included"
   prg.exec(bufs)
   if dtype_in == dtypes.half: tc_atol, tc_rtol = 1e-2, 1e-3
   elif dtype_in == dtypes.bfloat16: tc_atol, tc_rtol = (1e-1, 2e-2) if dtype_out == dtypes.bfloat16 else (1e-2, 1e-2)

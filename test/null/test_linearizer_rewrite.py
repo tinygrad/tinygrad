@@ -1,7 +1,6 @@
-from tinygrad.codegen import to_program
 import unittest
 from tinygrad import Tensor, Context, Device
-
+from tinygrad.codegen import to_program
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.uop.ops import KernelInfo
 

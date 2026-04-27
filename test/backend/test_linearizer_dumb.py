@@ -1,4 +1,3 @@
-from tinygrad.codegen import to_program
 # ruff: noqa: E501
 # tests where the Linearizer is doing something dumb
 # like test_linearizer_failures, but they don't have to fail
@@ -7,7 +6,7 @@ import unittest
 from tinygrad import Device, dtypes
 from tinygrad.uop.ops import UOp, Ops, AxisType, KernelInfo
 from tinygrad.codegen.opt.search import Opt, OptOps
-
+from tinygrad.codegen import to_program
 
 class TestLinearizerFailure(unittest.TestCase):
   @unittest.skipUnless(Device.DEFAULT == "METAL", "only tested on METAL")

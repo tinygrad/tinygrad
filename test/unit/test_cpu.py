@@ -1,10 +1,9 @@
-from tinygrad.codegen import to_program
 import unittest, io
 from contextlib import redirect_stdout
 from tinygrad import Tensor, Device
 from tinygrad.helpers import Target
 from tinygrad.renderer.nir import LVPRenderer
-
+from tinygrad.codegen import to_program
 
 @unittest.skipIf(Device.DEFAULT != "CPU", "only run on CPU")
 class TestCPU(unittest.TestCase):

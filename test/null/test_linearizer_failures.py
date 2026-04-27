@@ -1,10 +1,9 @@
-from tinygrad.codegen import to_program
 # ruff: noqa: E501
 import unittest
 from tinygrad.uop.ops import UOp, Ops, AxisType, KernelInfo
 from tinygrad.dtype import dtypes
-
 from tinygrad.device import Device
+from tinygrad.codegen import to_program
 
 class TestLinearizerFailures(unittest.TestCase):
   def test_fail_1(self):
