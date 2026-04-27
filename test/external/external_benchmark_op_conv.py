@@ -90,12 +90,12 @@ renderer = Device.default.renderer
 allocator = Device.default.allocator
 
 ps = to_program(ast, renderer)
-cr = CompiledRunner(replace(ps, device=Device.DEFAULT))
+cr = CompiledRunner(ps.replace(arg=replace(ps.arg, device=Device.DEFAULT)))
 
 gs = sorted(dedup([u for u in ast.toposort() if u.op is Ops.PARAM]), key=lambda u: u.arg)
 # print(len(gs))
 # print([g.dtype for g in gs])
-bufs = [Buffer(ps.device, g.size, g.dtype if isinstance(g.dtype, ImageDType) else g.dtype._base).ensure_allocated() for g in gs]
+bufs = [Buffer(ps.arg.device, g.size, g.dtype if isinstance(g.dtype, ImageDType) else g.dtype._base).ensure_allocated() for g in gs]
 
 t = cr(bufs, wait=True)
 print(f"{t*1e6:.2f} us")
