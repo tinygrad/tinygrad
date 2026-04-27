@@ -489,11 +489,12 @@ class HCQCompiled(Compiled, Generic[SignalType]):
       buf, realloced = self.allocator.alloc(oldbuf.size if oldbuf is not None else new_size, options=options), False
     return buf, realloced
 
-  def _select_iface(self, *ifaces:Type):
+  def _select_iface(self):
     assert (v:=getenv(k:=f'{type(self).__name__[:-6].upper()}_IFACE', "")) == "",  \
       f"{k}={v} is deprecated, use DEV={replace(DEV.target(type(self).__name__[:-6]), interface=v)} instead"
+    assert hasattr(self, "ifaces"), "must have ifaces to select an iface"
     t = DEV.target(dev:=type(self).__name__[:-6])
-    filtered = select_by_name(ifaces, lambda i: i.__name__[:-5], t.interface, f"{dev} has no interface {t.interface!r}")
+    filtered = select_by_name(self.ifaces, lambda i: i.__name__[:-5], t.interface, f"{dev} has no interface {t.interface!r}")
     filtered = [i for i in filtered if t.interface.startswith("MOCK") or not i.__name__[:-5].startswith("MOCK")] # never fallback to mock ifaces
     return select_first_inited([functools.partial(cast(Callable, iface), self, self.device_id) for iface in filtered],
                                f"No interface for {dev}:{self.device_id} is available")

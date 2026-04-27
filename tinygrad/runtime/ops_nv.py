@@ -581,11 +581,13 @@ class PCIIface(PCIIfaceBase):
 class MOCKIface(NVKIface): count = 1
 
 class NVDevice(HCQCompiled[NVSignal]):
+  ifaces = [NVKIface, PCIIface, MOCKIface]
+
   def is_nvd(self) -> bool: return isinstance(self.iface, PCIIface)
 
   def __init__(self, device:str=""):
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
-    self.iface = self._select_iface(NVKIface, PCIIface, MOCKIface)
+    self.iface = self._select_iface()
 
     device_params = nv_gpu.NV0080_ALLOC_PARAMETERS(deviceId=self.iface.gpu_instance, hClientShare=self.iface.root,
                                                    vaMode=nv_gpu.NV_DEVICE_ALLOCATION_VAMODE_OPTIONAL_MULTIPLE_VASPACES)

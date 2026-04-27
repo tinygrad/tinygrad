@@ -6,6 +6,7 @@ import importlib, inspect, functools, pathlib, os, platform, contextlib, sys, re
 from tinygrad.helpers import BENCHMARKS, CI, OSX, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, PROFILE, temp, colored
 from tinygrad.helpers import Context, CCACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, suppress_finalizing
 from tinygrad.helpers import select_by_name, select_first_inited, DEV, EMULATED_DTYPES, IMAGE, FLOAT16, TracingKey, size_to_str, Target, VIZ
+from tinygrad.helpers import pluralize
 from tinygrad.dtype import DType, PtrDType, dtypes, _to_np_dtype
 if TYPE_CHECKING: from tinygrad.renderer import Renderer
 
@@ -378,23 +379,26 @@ def enumerate_devices_str() -> Generator[str, None, None]:
   from tinygrad import Tensor, Device
 
   for device in ALL_DEVICES:
-    compilers_results, any_works = [], False
+    ren_results, iface_results = [], []
     try:
       d = Device[device]
-      default_renderer = d.renderer
+      for iface in [i for i in getattr(d, 'ifaces', []) if not i.__name__.startswith("MOCK")]:
+        try:
+          name = iface.__name__[:-5]
+          default_text, count = ("(default)", d.count()) if type(d.iface) is iface else (f"(DEV={name}+{device} to make default)", iface(d, 0).count) # type: ignore
+          iface_results.append(f"{colored('+', 'green')} {name}: {pluralize('device', count)} {default_text}")
+        except Exception as e: iface_results.append(f"{colored('-', 'red')} {iface.__name__[:-5]}: {e}")
       for r in d.renderers:
         try:
-          # d.renderer, d.compiler = r(), c()
           with Context(CACHELEVEL=0, DEV=f"{device}:{d._renderer_name(r)}"): test = (Tensor([1,2,3], device=device) * 2).tolist()
           if test != [2,4,6]: raise ValueError(f"got {test} instead of [2, 4, 6]")
-          default_text = '(default)' if type(default_renderer) is type(d.renderer) else f'(DEV={device}:{d._renderer_name(r)} to make default)'
-          compilers_results.append(f"{colored('+', 'green')} {d._renderer_name(r)} {default_text}")
-          any_works = True
-        except Exception as e: compilers_results.append(f"{colored('-', 'yellow')} {d._renderer_name(r)}: {e}")
-      result = (colored('PASS', 'green') if any_works else f"{colored('FAIL', 'yellow')}") + ''.join([f'\n{" "*16} {x}' for x in compilers_results])
-    except Exception as e:
-      result = f"{colored('FAIL', 'red')} {e}"
-    yield f"{'*' if device == Device.DEFAULT else ' '} {device:10s}: {result}"
+          default_text = '(default)' if type(d.renderer) is r else f'(DEV={device}:{d._renderer_name(r)} to make default)'
+          ren_results.append(f"{colored('+', 'green')} {d._renderer_name(r)} {default_text}")
+        except Exception as e: ren_results.append(f"{colored('-', 'red')} {d._renderer_name(r)}: {e}")
+      result = (colored('PASS', 'green') + ("\n"+" "*12+"interfaces:\n" if iface_results else "") + '\n'.join([" "*13+x for x in iface_results]) +
+                (("\n"+" "*12+"renderers:\n") + '\n'.join([" "*13+x for x in ren_results]) if len(ren_results) > 1 else ""))
+    except Exception as e: result = f"{colored('FAIL', 'red')} {e}"
+    yield f"{'*' if device == Device.DEFAULT else ' '} {device:8s}: {result}"
 
 if __name__ == "__main__":
   for s in enumerate_devices_str(): print(s)

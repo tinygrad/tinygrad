@@ -946,15 +946,18 @@ class USBIface(PCIIface):
 
   def sleep(self, timeout): pass
 
+def _mock(iface, name=None): return type(name or f"MOCK{iface.__name__}", (iface,), {})
+
 class AMDDevice(HCQCompiled):
+  ifaces = [KFDIface, PCIIface, USBIface, _mock(KFDIface, "MOCKIface"), _mock(KFDIface), _mock(PCIIface), _mock(USBIface)]
+
   def is_am(self) -> bool: return isinstance(self.iface, (PCIIface, USBIface))
   def is_usb(self) -> bool: return isinstance(self.iface, USBIface)
 
   def __init__(self, device:str=""):
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
 
-    def mock(iface, name=None): return type(name or f"MOCK{iface.__name__}", (iface,), {})
-    self.iface = self._select_iface(KFDIface, PCIIface, USBIface, mock(KFDIface, "MOCKIface"), mock(KFDIface), mock(PCIIface), mock(USBIface))
+    self.iface = self._select_iface()
 
     self.target:tuple[int, ...] = ((trgt:=self.iface.props['gfx_target_version']) // 10000, (trgt // 100) % 100, trgt % 100)
     self.arch = "gfx%d%x%x" % self.target
