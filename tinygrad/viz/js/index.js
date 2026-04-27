@@ -204,7 +204,7 @@ const waveColor = (op) => {
   if (op.includes("LDS_")) { ret = darkenHex(ret, 25) }
   return ret
 };
-const colorScheme = {TINY:new Map([["Schedule","#1b5745"],["get_program","#1d2e62"],["compile","#63b0cd"],["DEFAULT","#354f52"]]),
+const colorScheme = {TINY:new Map([["Schedule","#1b5745"],["precompile","#1d2e62"],["compile","#63b0cd"],["DEFAULT","#354f52"]]),
   DEFAULT:["#2b2e39", "#2c2f3a", "#31343f", "#323544", "#2d303a", "#2e313c", "#343746", "#353847", "#3c4050", "#404459", "#444862", "#4a4e65"],
   BUFFER:["#342483", "#3E2E94", "#4938A4", "#5442B4", "#5E4CC2", "#674FCA"], SIMD:new Map([["OCC", "#101725"], ["INST", "#0A2042"]]),
   GPC:new Map([["NONE","#1a7a2e"],["MEMORY_DEPENDENCY","#8b1a00"],["EXEC_DEPENDENCY","#006b6b"],["INST_FETCH","#7a7a00"],["SYNC","#6b006b"],
@@ -1180,7 +1180,7 @@ document.addEventListener("keydown", (event) => {
   // r key toggles indexing
   if (event.key === "r") showIndexing.toggle.click();
   // c key toggles CALL src
-  if (event.key === "c") showCallSrc.toggle.click();
+  if (event.key === "c" && !event.ctrlKey && !event.metaKey && !event.altKey) showCallSrc.toggle.click();
   // s key toggles SINK
   if (event.key === "s") showSink.toggle.click();
   // g key toggles graph

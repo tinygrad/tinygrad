@@ -212,7 +212,7 @@ class TestSchedule(unittest.TestCase):
     linear, _ = Tensor.linear_with_vars(v)
     self.assertEqual(len(linear.src), 0)
 
-  # NOTE: because empty does not have a lowered ExecItem if realize is called on a childless empty, it never gets allocated.
+  # NOTE: because empty does not have a lowered kernel if realize is called on a childless empty, it never gets allocated.
   def test_childless_empty_never_allocates(self):
     a = Tensor.empty(10)
     a.realize()

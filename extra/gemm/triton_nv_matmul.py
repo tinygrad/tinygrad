@@ -4,7 +4,7 @@ import triton.language as tl
 from triton.compiler import AttrsDescriptor, ASTSource, compile as triton_compile
 import numpy as np
 from tinygrad import Tensor, dtypes, Device
-from tinygrad.engine.realize import CompiledRunner, ExecItem, ProgramSpec
+from tinygrad.engine.realize import CompiledRunner, ProgramSpec
 from tinygrad.helpers import getenv
 np.set_printoptions(suppress=True)
 
@@ -91,10 +91,12 @@ if __name__ == "__main__":
   prg = ProgramSpec("matmul_kernel", src, device=Device.DEFAULT,
                 global_size=[M//BLOCK_SIZE_M, N//BLOCK_SIZE_N, 1], local_size=[32*compiled.metadata.num_warps, 1, 1],
                 mem_estimate=A.nbytes() + B.nbytes() + C.nbytes())
-  ei = ExecItem(ast, [x.ensure_allocated() for x in bufs], last_call.arg.metadata, prg=CompiledRunner(prg))
+  runner = CompiledRunner(prg)
+  all_bufs = [x.ensure_allocated() for x in bufs]
+  prg_bufs = [all_bufs[i] for i in runner.p.globals]
   tflops = []
   for i in range(5):
-    tm = ei.run(wait=True)
+    tm = runner(prg_bufs, {}, wait=True)
     tflops.append((2*M*K*N/tm)*1e-12)
   print(f"TFLOPS: {max(tflops):.2f}")
 

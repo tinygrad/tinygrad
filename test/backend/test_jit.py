@@ -92,6 +92,20 @@ class TestJit(unittest.TestCase):
       np.testing.assert_allclose(e.numpy(), a.numpy()*b.numpy(), atol=1e-4, rtol=1e-5)
     assert_jit_cache_len(f, 3)
 
+  def test_global_counters_jit(self):
+    @TinyJit
+    def f(a, b):
+      c = (a + b).realize()
+      d = (c * 2).realize()
+      return (d - a).realize()
+    a, b = Tensor.randn(64, 64).realize(), Tensor.randn(64, 64).realize()
+    for _ in range(4):
+      GlobalCounters.reset()
+      f(a, b)
+      Device[a.device].synchronize()
+      self.assertGreater(GlobalCounters.global_mem, 0)
+      self.assertGreater(GlobalCounters.global_ops, 0)
+
   def test_nothing_jitted(self):
     @TinyJit
     def add(a, b): return None
