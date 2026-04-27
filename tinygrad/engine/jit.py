@@ -62,9 +62,7 @@ def graph_split_rewrite(linear:UOp, max_batch_size:int=0) -> UOp:
 def _call_outs_ins(call:UOp) -> tuple[set[int], set[int]]:
   non_bind = [s for s in call.src[1:] if s.op is not Ops.BIND]
   ast = call.src[0]
-  if ast.op is Ops.PROGRAM:
-    prg = get_runner(non_bind[0].device if isinstance(non_bind[0].device, str) else non_bind[0].device[0], call.src[0])
-    return set(prg.p.outs), set(prg.p.ins)
+  if ast.op is Ops.PROGRAM: return set(ast.arg.outs), set(ast.arg.ins)
   if ast.op in (Ops.COPY, Ops.BUFFER_VIEW): return {0}, {1}
   if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "encdec": return {0}, set(range(1, len(non_bind)))
   return set(), set()

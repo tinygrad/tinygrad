@@ -106,9 +106,11 @@ def get_runner(device:str, ast:UOp) -> CompiledRunner:
   ckey = (device, type(Device[device].compiler), ast.key, context, False)
   if cret:=method_cache.get(ckey): return cret
   bkey = (device.split(":")[0], type(Device[device].compiler), ast.key, context, True)
-  prg = bret.prg if (bret:=method_cache.get(bkey)) is not None else to_program(ast, Device[device].renderer)
-  method_cache[ckey] = ret = CompiledRunner(prg.replace(arg=replace(prg.arg, device=device)))
-  if bret is None: method_cache[bkey] = ret
+  if bret:=method_cache.get(bkey):
+    method_cache[ckey] = ret = CompiledRunner(bret.prg.replace(arg=replace(bret.prg.arg, device=device)))
+  else:
+    prg = to_program(ast, Device[device].renderer)
+    method_cache[ckey] = method_cache[bkey] = ret = CompiledRunner(prg.replace(arg=replace(prg.arg, device=device)))
   return ret
 
 # **************** run linear ****************
