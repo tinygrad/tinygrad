@@ -197,7 +197,8 @@ class NVDriver(VirtDriver):
       params = nv_gpu.NVC36F_CTRL_CMD_GPFIFO_GET_WORK_SUBMIT_TOKEN_PARAMS.from_address(params_ptr)
       gpu_fifo = self.object_by_handle[struct.hObject]
       params.workSubmitToken = gpu_fifo.token
-    elif struct.cmd in (nv_gpu.NVA06C_CTRL_CMD_GPFIFO_SCHEDULE, nv_gpu.NVA06F_CTRL_CMD_BIND, nv_gpu.NVA06F_CTRL_CMD_GPFIFO_SCHEDULE): pass
+    elif struct.cmd in (nv_gpu.NVA06C_CTRL_CMD_GPFIFO_SCHEDULE, nv_gpu.NVA06F_CTRL_CMD_BIND, nv_gpu.NVA06F_CTRL_CMD_GPFIFO_SCHEDULE,
+                        nv_gpu.NVA06C_CTRL_CMD_SET_INTERLEAVE_LEVEL): pass
     elif struct.cmd == nv_gpu.NV2080_CTRL_CMD_PERF_BOOST: pass
     elif struct.cmd == nv_gpu.NV2080_CTRL_CMD_FB_FLUSH_GPU_CACHE: pass
     elif struct.cmd == nv_gpu.NV83DE_CTRL_CMD_DEBUG_READ_ALL_SM_ERROR_STATES:
