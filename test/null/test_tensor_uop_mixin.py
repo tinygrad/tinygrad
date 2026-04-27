@@ -244,12 +244,15 @@ class TestTensorUOpCat(unittest.TestCase):
   def test_cat_neg_dim(self):  _check(self, _t(2, 3, 4), lambda x: x.cat(x, dim=-1))
 
 class TestTensorUOpPad(unittest.TestCase):
-  def test_pad_circular(self):           _check(self, _t(4, 5), lambda x: x._pad_circular(((1, 2), (0, 3))))
-  def test_pad_circular_zero_after(self):_check(self, _t(4, 5), lambda x: x._pad_circular(((1, 0), (2, 0))))
-  def test_pad_reflect(self):            _check(self, _t(4, 5), lambda x: x._pad_reflect_replicate(((1, 2), (0, 3)), "reflect"))
-  def test_pad_reflect_negative(self):   _check(self, _t(4, 5), lambda x: x._pad_reflect_replicate(((1, -1), (0, 2)), "reflect"))
-  def test_pad_replicate(self):          _check(self, _t(4, 5), lambda x: x._pad_reflect_replicate(((1, 2), (0, 3)), "replicate"))
-  def test_pad_replicate_negative(self): _check(self, _t(4, 5), lambda x: x._pad_reflect_replicate(((1, -1), (0, 2)), "replicate"))
+  def test_pad_flat(self):               _check(self, _t(4, 5), lambda x: x.pad((1, 2, 0, 3)))
+  def test_pad_flat_negative(self):      _check(self, _t(4, 5), lambda x: x.pad((1, -1, 0, 2), value=-1.0))
+  def test_pad_grouped_none(self):       _check(self, _t(4, 5), lambda x: x.pad((None, (0, 3))))
+  def test_pad_circular(self):           _check(self, _t(4, 5), lambda x: x.pad(((1, 2), (0, 3)), mode="circular"))
+  def test_pad_circular_zero_after(self):_check(self, _t(4, 5), lambda x: x.pad(((1, 0), (2, 0)), mode="circular"))
+  def test_pad_reflect(self):            _check(self, _t(4, 5), lambda x: x.pad(((1, 2), (0, 3)), mode="reflect"))
+  def test_pad_reflect_negative(self):   _check(self, _t(4, 5), lambda x: x.pad(((1, -1), (0, 2)), mode="reflect"))
+  def test_pad_replicate(self):          _check(self, _t(4, 5), lambda x: x.pad(((1, 2), (0, 3)), mode="replicate"))
+  def test_pad_replicate_negative(self): _check(self, _t(4, 5), lambda x: x.pad(((1, -1), (0, 2)), mode="replicate"))
 
 class TestTensorUOpStack(unittest.TestCase):
   def test_stack_dim0(self):     _check(self, _t(2, 3), lambda x: x.stack(x, dim=0))
