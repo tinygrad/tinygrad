@@ -168,6 +168,24 @@ class TestSQTTMapRDNA4(TestSQTTMapBase):
           self.assertGreaterEqual(e.st, prev_en, f"EXEC overlap in {e.device}: {e.st} < prev end {prev_en}")
         row_ends[e.device] = int(e.en)
 
+  def test_wmma(self):
+    from tinygrad.renderer.amd.sqtt import decode, INST_RDNA4, ALUEXEC, format_packet
+    LO_CY, HI_CY = 108, 140
+    for name in ("profile_wmma_run_0", "profile_wmma_run_1"):
+      ev = next(e for e in self.examples[name][0] if e.se == 1)
+      pkts = list(decode(ev.blob))
+      inst_st = next(p._time for p in pkts if isinstance(p, INST_RDNA4) and p.op.name.startswith("WMMA"))
+      print(f"=== {name} ===")
+      prev = inst_st + LO_CY
+      aluexec_cys: list[int] = []
+      for p in pkts:
+        if (cy := p._time - inst_st) < LO_CY: continue
+        if cy > HI_CY: break
+        print(f"  cy={cy:>4}  +{p._time - prev:<2}  {format_packet(p)}")
+        prev = p._time
+        if isinstance(p, ALUEXEC): aluexec_cys.append(cy)
+      for i in range(1, len(aluexec_cys)): print(f"  ALUEXEC: {aluexec_cys[i] - aluexec_cys[i-1]}c")
+
 class TestSQTTMapCDNA(TestSQTTMapBase):
   target = "gfx950"
   def test_rocprof_inst_traces_match(self): self.skipTest("requires timestamp patching to match rocprof, currently it's off by a few cycles")
