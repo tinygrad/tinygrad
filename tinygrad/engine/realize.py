@@ -1,4 +1,4 @@
-from typing import cast, Callable, Iterator
+from typing import cast, Iterator
 import time, random, itertools, math, contextlib, weakref
 from dataclasses import dataclass, replace, field
 from tinygrad.helpers import colored, DEBUG, GlobalCounters, ansilen, NOOPT, all_int, Metadata, TRACEMETA, TracingKey
@@ -9,6 +9,7 @@ from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer, buffers,
 from tinygrad.device import Device, Buffer, MultiBuffer
 from tinygrad.renderer import Estimates
 from tinygrad.codegen import to_program
+from tinygrad.codegen.opt.postrange import bufs_from_ast
 
 # **************** Stat ****************
 
@@ -55,19 +56,21 @@ class Runner:
   def __call__(self, rawbufs:list[Buffer], var_vals:dict[str, int], wait=False) -> float|None:
     raise NotImplementedError("override this")
 
-def optimize_local_size(_prg:Callable, global_size:list[int], rawbufs:list[Buffer]) -> list[int]:
-  test_rawbuffers = [Buffer(rawbufs[0].device, rawbufs[0].size, rawbufs[0].dtype).allocate(), *rawbufs[1:]] if rawbufs[0] in rawbufs[1:] else rawbufs
+def optimize_local_size(call:UOp, prg:UOp) -> UOp|None:
+  info: ProgramInfo = prg.arg
+  if info.local_size is not None or not Device[info.device].renderer.has_local or not all_int(info.global_size): return None
+  bufs = [b._buf for b in (b.allocate() for b in bufs_from_ast(prg.src[0], info.device))]
+  _prg = Device[info.device].runtime(info.function_name, prg.src[4].arg, *info.aux, runtimevars=info.runtimevars)
   MAX_WORKGROUP = 1024
-  local_dims = [[x for x in set([sz, 1, 2, 4, 8, 16, 32, 64, 128, 256, MAX_WORKGROUP]) if x<=sz] for sz in global_size]
+  local_dims = [[x for x in set([sz, 1, 2, 4, 8, 16, 32, 64, 128, 256, MAX_WORKGROUP]) if x<=sz] for sz in info.global_size]
   local_sizes = [list(x) for x in itertools.product(*local_dims) if prod(x) <= MAX_WORKGROUP] * 2  # try each valid size twice
   def try_exec(local_size):
-    try:
-      return _prg(*[x._buf for x in test_rawbuffers],global_size=[g//l if g%l == 0 else g/l for g,l in zip(global_size, local_size)],
-                  local_size=local_size, wait=True)
+    try: return _prg(*bufs, global_size=[g//l if g%l == 0 else g/l for g,l in zip(info.global_size, local_size)], local_size=local_size, wait=True)
     except Exception: return float('inf')
-  ret = min([(try_exec(local_size), local_size) for local_size in random.sample(local_sizes, len(local_sizes))])
-  assert not math.isinf(ret[0]), "all optimize_local_size exec failed"
-  return ret[1]
+  best_time, local_size = min([(try_exec(ls), ls) for ls in random.sample(local_sizes, len(local_sizes))])
+  assert not math.isinf(best_time), "all optimize_local_size exec failed"
+  new_global = tuple(g//l if g%l == 0 else g/l for g,l in zip(info.global_size, local_size))
+  return call.replace(src=(prg.replace(arg=replace(info, global_size=new_global, local_size=tuple(local_size))), *call.src[1:]))
 
 class CompiledRunner(Runner):
   def __init__(self, prg:UOp, _prg=None):
@@ -90,10 +93,6 @@ class CompiledRunner(Runner):
   def __call__(self, rawbufs:list[Buffer], var_vals:dict[str, int]|None=None, wait=False, timeout:int|None=None) -> float|None:
     if var_vals is None: var_vals = {}
     global_size, local_size = self.p.launch_dims(var_vals)
-    if Device[self.p.device].renderer.has_local and local_size is None and all_int(self.p.global_size):
-      local_size = optimize_local_size(self._prg, global_size, rawbufs)
-      global_size = [g//l if g%l == 0 else g/l for g,l in zip(global_size, local_size)]
-      self.p = replace(self.p, global_size=tuple(global_size), local_size=tuple(local_size))
     return self._prg(*[x._buf for x in rawbufs], global_size=tuple(global_size), local_size=tuple(local_size) if local_size else None,
                      vals=tuple(var_vals[k.expr] if k.expr not in self.p.runtimevars else None for k in self.p.vars), wait=wait, timeout=timeout)
 
@@ -229,6 +228,10 @@ pm_compile = PatternMatcher([
     call.replace(src=(to_program(ast, Device[call.device if isinstance(call.device, str) else call.device[0]].renderer), *call.src[1:]))),
 ])
 
+pm_optimize_local_size = PatternMatcher([
+  (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, name="prg"),), name="call", allow_any_len=True), optimize_local_size),
+])
+
 pm_exec = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.BUFFER_VIEW, name="ast"),), name="call", allow_any_len=True), exec_view),
   (UPat(Ops.CALL, src=(UPat(Ops.COPY, name="ast"),), name="call", allow_any_len=True), exec_copy),
@@ -241,7 +244,8 @@ pm_exec = PatternMatcher([
 def compile_linear(linear:UOp, beam=0, validate=False) -> UOp:
   if validate: linear = graph_rewrite(linear, pm_validate, name="validate", walk=True)
   if (beam_val:=(beam or BEAM.value)) >= 1: linear = graph_rewrite(linear, pm_beam, ctx=beam_val, walk=True)
-  return graph_rewrite(linear, pm_compile, name="precompile kernels", walk=True)
+  linear = graph_rewrite(linear, pm_compile, name="precompile kernels", walk=True)
+  return graph_rewrite(linear, pm_optimize_local_size, name="optimize local size", walk=True)
 
 def run_linear(linear:UOp, var_vals:dict[str, int]|None=None, input_uops:tuple[UOp, ...]=(), do_update_stats=True, jit=False):
   if not jit: linear = compile_linear(linear, validate=VALIDATE_WITH_CPU)
