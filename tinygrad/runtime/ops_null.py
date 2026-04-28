@@ -3,14 +3,18 @@ from tinygrad.device import Compiled, Allocator
 from tinygrad.engine.jit import MultiGraphRunner
 from tinygrad.renderer import Renderer, cstyle, nir, ptx, llvmir, wgsl
 from tinygrad.renderer.cstyle import CStyleLanguage
-from tinygrad.uop.ops import Ops
-from tinygrad.helpers import cpu_profile, getenv, NULL_ALLOW_COPYOUT
+from tinygrad.uop.ops import UOp, Ops
+from tinygrad.helpers import cpu_profile, getenv, dedup, NULL_ALLOW_COPYOUT
 
 class NullRenderer(CStyleLanguage):
   has_local = False
   float4 = "float4"
   barrier = "// BARRIER"
   code_for_op = {**CStyleLanguage.code_for_op, Ops.THREEFRY: lambda a,b,dtype: f"threefry({a},{b})", Ops.MAX: lambda a,b,dtype: f"max({a},{b})"}
+  def asm(self, prg: UOp, lin: UOp) -> bytes:
+    assert self.target.arch.startswith("gfx"), "only amd supports assembly"
+    from tinygrad.renderer.amd.elf import assemble_linear
+    return assemble_linear(prg, lin, self.target.arch)
 
 class NullProgram:
   def __init__(self, device:str, name:str, lib:bytes, *args, **kwargs): self.device, self.name = device, name
@@ -35,4 +39,4 @@ class NullDevice(Compiled):
       "EMULATE is deprecated, use DEV=NULL:HIP:"+{"AMD":"gfx1100", "AMD_RDNA4":"gfx1201", "AMD_CDNA4":"gfx950"}.get(emu, "<arch>")
     renderers = [NullRenderer] + [r for m in [cstyle, nir, ptx, llvmir, wgsl] for r in m.__dict__.values()
                                   if inspect.isclass(r) and issubclass(r, Renderer)]
-    super().__init__(device, NullAllocator(self), renderers, functools.partial(NullProgram, device), NullGraph)
+    super().__init__(device, NullAllocator(self), dedup(renderers), functools.partial(NullProgram, device), NullGraph)

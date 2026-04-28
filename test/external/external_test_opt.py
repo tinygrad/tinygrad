@@ -7,7 +7,6 @@ from tinygrad import GlobalCounters, Tensor, Device
 from tinygrad.helpers import getenv
 from tinygrad.nn.state import get_parameters
 from tinygrad.engine.realize import capturing, run_linear
-from tinygrad.schedule import linear_to_schedule
 from tinygrad.tensor import _to_np_dtype
 
 class CLCache:
@@ -15,7 +14,7 @@ class CLCache:
     self.allowed, self.strict, self.preclear, self.var_vals = allowed, strict, preclear, var_vals if var_vals is not None else {}
     self.count = 0
   def add_linear(self, linear, var_vals):
-    self.count += len(linear_to_schedule(linear))
+    self.count += len(linear.src)
     run_linear(linear, var_vals)
   def __enter__(self):
     if self.preclear:

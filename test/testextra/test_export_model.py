@@ -2,6 +2,8 @@ import unittest
 from extra.export_model import export_model, EXPORT_SUPPORTED_DEVICE
 from tinygrad.tensor import Tensor
 from tinygrad.device import Device
+from tinygrad.nn import Linear
+from tinygrad.nn.state import get_state_dict
 from tinygrad import dtypes
 import json
 
@@ -65,6 +67,16 @@ class TextModelExportWebGPU(unittest.TestCase):
       # test output buffers
       self.assertIn(f"const resultBuffer{i} = new {expected_arr_prefix}Array(gpuReadBuffer{i}.size/{dt.itemsize});", prg)
       self.assertIn(f"resultBuffer{i}.set(new {expected_arr_prefix}Array(gpuReadBuffer{i}.getMappedRange()));", prg)
+
+  def test_weights_bound_to_safetensor(self):
+    # regression test: every weight ended up as createEmptyBuf (zero-init) instead of createWeightBuf
+    class MyModel:
+      def __init__(self): self.fc1, self.fc2 = Linear(4, 8), Linear(8, 2)
+      def forward(self, x): return self.fc2(self.fc1(x).relu())
+    model = MyModel()
+    for t in get_state_dict(model).values(): t.realize()
+    prg, _, _, _ = export_model(model, "webgpu", Tensor.randn(1, 4))
+    self.assertEqual(prg.count("createWeightBuf("), len(get_state_dict(model)))
 
 if __name__ == '__main__':
   unittest.main()

@@ -3,11 +3,12 @@ from contextlib import redirect_stdout
 from tinygrad import Tensor, dtypes, Device
 from tinygrad.helpers import OSX, DEV
 from tinygrad.device import is_dtype_supported
-from tinygrad.engine.realize import get_program
+from tinygrad.engine.realize import compile_linear
+from tinygrad.codegen import to_program
 
 class TestCompileFailures(unittest.TestCase):
   def compile(self, out:Tensor):
-    for si in out.schedule(): si.lower()
+    compile_linear(out.schedule_linear())
 
   @unittest.skipUnless(is_dtype_supported(dtypes.uchar), f"no uint8 on {Device.DEFAULT}")
   def test_interpolate_atari(self):
@@ -21,9 +22,9 @@ class TestDisassembly(unittest.TestCase):
   @unittest.skipUnless(Device.DEFAULT in ("CPU",) and DEV.renderer not in ("LLVM", "LVP") and OSX, "m series cpus support fp16 arithmetic")
   def test_float16_alu(self):
     c = Tensor([1], dtype=dtypes.float16) + Tensor([1], dtype=dtypes.float16)
-    s = c.schedule()[-1]
-    p = get_program(s.ast, Device[Device.DEFAULT].renderer)
-    lib = Device[Device.DEFAULT].compiler.compile(p.src)
+    s = c.schedule_linear().src[-1]
+    p = to_program(s.src[0], Device[Device.DEFAULT].renderer)
+    lib = Device[Device.DEFAULT].compiler.compile(p.src[3].arg)
     out = io.StringIO()
     with redirect_stdout(out): Device[Device.DEFAULT].compiler.disassemble(lib)
     assert "fcvt" not in out.getvalue()

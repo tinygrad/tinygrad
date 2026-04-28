@@ -105,11 +105,11 @@ class InstOpRDNA4(Enum):
   SALU_NO_EXEC = 0x7
   MESSAGE = 0x9
   VALU_1 = 0xa
-  VALU_TRANS = 0xb
-  VALU_B1 = 0xc
-  VALU_B2 = 0xd
-  VALU_B4 = 0xe
-  VALU_B16 = 0xf
+  VALUT_4 = 0xb
+  VALUB_1 = 0xc
+  VALUB_2 = 0xd
+  VALUB_4 = 0xe
+  VALUB_16 = 0xf
   VINTERP = 0x12
   BARRIER_WAIT = 0x13
   FLAT_RD_2 = 0x1c
@@ -143,7 +143,7 @@ class InstOpRDNA4(Enum):
   LDS_PARAM_LOAD = 0x6f
   SALU_WR_EXEC = 0x72
   VALU1_WR_EXEC = 0x73
-  VALU_B2_WR_EXEC = 0x74
+  VALU_WR_EXEC_2 = 0x74
   OTHER_LDS_6 = 0x77
   OTHER_LDS_10 = 0x78
   BARRIER_SIGNAL = 0x7a
@@ -154,7 +154,7 @@ class InstOpRDNA4(Enum):
   WMMA_32 = 0x8e
   WMMA_64 = 0x8f
   VALU_DPFP = 0x92
-  SALU_FLOAT3 = 0x98
+  SALU_FLOAT_3 = 0x98
   VALU_SCL_TRANS = 0x99
   SALU_2 = 0x9b
   SALU_5 = 0x9c
@@ -210,7 +210,7 @@ class PacketType:
 class TS_DELTA_S8_W3(PacketType):
   encoding = bits[6:0] == 0b0100001
   delta = bits[10:8]
-  _padding = bits[63:11]
+  _padding = bits[71:11]
 
 class TS_DELTA_S5_W3(PacketType):
   encoding = bits[4:0] == 0b00110
@@ -295,6 +295,16 @@ class WAVEEND(PacketType):  # exclude: 1 << 4
   @property
   def cu(self) -> int: return self.wgp | (self.sa << 3)
 
+class WAVEEND_RDNA4(PacketType):
+  encoding = bits[4:0] == 0b10101
+  delta = bits[7:5]
+  sa = bits[8:8]
+  simd = bits[10:9]
+  wgp = bits[14:11]
+  wave = bits[19:15]
+  @property
+  def cu(self) -> int: return self.wgp | (self.sa << 4)
+
 class WAVESTART(PacketType):  # exclude: 1 << 4
   encoding = bits[4:0] == 0b01100
   delta = bits[6:5]
@@ -306,16 +316,16 @@ class WAVESTART(PacketType):  # exclude: 1 << 4
   @property
   def cu(self) -> int: return self.wgp | (self.sa << 3)
 
-class WAVESTART_RDNA4(PacketType):  # Layout 4 has wave field at different position
+class WAVESTART_RDNA4(PacketType):  # Layout 4: wgp is 4 bits, wave shifted to bits 15-19
   encoding = bits[4:0] == 0b01100
   delta = bits[6:5]
   sa = bits[7:7]
   simd = bits[9:8]
-  wgp = bits[12:10]
+  wgp = bits[13:10]
   wave = bits[19:15]
   id7 = bits[31:20]
   @property
-  def cu(self) -> int: return self.wgp | (self.sa << 3)
+  def cu(self) -> int: return self.wgp | (self.sa << 4)
 
 class WAVEALLOC(PacketType):  # exclude: 1 << 10
   encoding = bits[4:0] == 0b00101
@@ -415,7 +425,7 @@ PACKET_TYPES_RDNA3: dict[int, type[PacketType]] = {
 }
 PACKET_TYPES_RDNA4: dict[int, type[PacketType]] = {
   **PACKET_TYPES_RDNA3,
-  9: WAVESTART_RDNA4, 10: TS_DELTA_S5_W2_RDNA4, 11: WAVEALLOC_RDNA4,
+  8: WAVEEND_RDNA4, 9: WAVESTART_RDNA4, 10: TS_DELTA_S5_W2_RDNA4, 11: WAVEALLOC_RDNA4,
   12: TS_DELTA_S5_W3_RDNA4, 13: PERF_RDNA4, 22: TS_DELTA_OR_MARK_RDNA4, 24: INST_RDNA4,
 }
 
@@ -654,7 +664,7 @@ def map_insts(data:bytes, lib:bytes, target:str) -> Iterator[tuple[PacketType, I
     if isinstance(p, (WAVESTART, WAVESTART_RDNA4, CDNA_WAVESTART)):
       assert p.wave not in wave_pc, "only one inflight wave per unit"
       wave_pc[p.wave] = next(iter(pc_map))
-    elif isinstance(p, WAVEEND):
+    elif isinstance(p, (WAVEEND, WAVEEND_RDNA4)):
       pc = wave_pc.pop(p.wave)
       yield (p, InstructionInfo(pc, p.wave, s_endpgm()))
     elif isinstance(p, IMMEDIATE_MASK):
@@ -703,7 +713,7 @@ def format_packet(p) -> str:
   elif isinstance(p, VALUINST): fields = f"wave={p.wave}" + (" flag" if p.flag else "")
   elif isinstance(p, ALUEXEC): fields = f"src={p.src.name if isinstance(p.src, AluSrc) else p.src}"
   elif isinstance(p, VMEMEXEC): fields = f"src={p.src.name if isinstance(p.src, MemSrc) else p.src}"
-  elif isinstance(p, (WAVESTART, WAVESTART_RDNA4, WAVEEND)): fields = f"wave={p.wave} simd={p.simd} cu={p.cu}"
+  elif isinstance(p, (WAVESTART, WAVESTART_RDNA4, WAVEEND, WAVEEND_RDNA4)): fields = f"wave={p.wave} simd={p.simd} cu={p.cu}"
   elif hasattr(p, '_fields'):
     filt = {'delta', 'encoding'} if not isinstance(p, (TS_DELTA_OR_MARK, TS_DELTA_OR_MARK_RDNA4)) else {'encoding'}
     fields = " ".join(f"{k}=0x{getattr(p, k):x}" if k in {'snap', 'val32'} else f"{k}={getattr(p, k)}"

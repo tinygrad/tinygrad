@@ -78,18 +78,18 @@ class TestTinygradIntegration(unittest.TestCase):
   def _get_kernel_code(self, op_fn) -> bytes:
     from tinygrad import Tensor
     from tinygrad.helpers import Target
-    from tinygrad.codegen import get_program
+    from tinygrad.codegen import to_program
     from tinygrad.renderer.llvmir import AMDLLVMRenderer
     from tinygrad.runtime.support.elf import elf_loader
     from tinygrad.uop.ops import Ops
 
     result = op_fn(Tensor)
-    schedule = result.schedule()
-    sink_items = [si for si in schedule if si.ast.op == Ops.SINK]
+    linear = result.schedule_linear()
+    sink_items = [call for call in linear.src if call.src[0].op == Ops.SINK]
     assert len(sink_items) > 0, "No SINK in schedule"
     renderer = AMDLLVMRenderer(Target("AMD", arch='gfx1100'))
-    prg = get_program(sink_items[0].ast, renderer)
-    lib = renderer.compiler.compile(prg.src)
+    prg = to_program(sink_items[0].src[0], renderer)
+    lib = renderer.compiler.compile(prg.src[3].arg)
     return next(s.content for s in elf_loader(lib)[1] if s.name == ".text")
 
   def test_simple_add_kernel(self):

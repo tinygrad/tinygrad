@@ -4,7 +4,9 @@ from functools import partial
 from tinygrad import nn, dtypes, Tensor, Device, TinyJit, Variable
 from tinygrad.helpers import getenv, CI, OSX
 from tinygrad.device import is_dtype_supported
-from tinygrad.engine.realize import CompiledRunner
+from tinygrad.codegen import to_program
+
+from tinygrad.uop.ops import Ops
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.nir import NIRRenderer
 from test.helpers import not_support_multi_device, needs_second_gpu
@@ -117,12 +119,13 @@ class TestRandomness(unittest.TestCase):
 
   @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, (NIRRenderer, PTXRenderer)), "PTX and NIR use pointer arithmetic")
   def test_threefry_doesnt_use_long(self):
-    sched = Tensor.rand(20).schedule()
-    for si in sched:
-      si.lower()
-      if isinstance(si.prg, CompiledRunner):
-        for u in si.prg.p.uops:
-          self.assertNotIn(u.dtype, {dtypes.long, dtypes.ulong}, msg=f"long found in {si.prg.p.name}")
+    linear = Tensor.rand(20).schedule_linear()
+    for call in linear.src:
+      ast = call.src[0]
+      if ast.op is Ops.SINK:
+        prg = to_program(ast, renderer=Device[Device.DEFAULT].renderer)
+        for u in tuple(prg.src[2].src):
+          self.assertNotIn(u.dtype, {dtypes.long, dtypes.ulong}, msg=f"long found in {prg.arg.name}")
 
   def test_threefry_against_reference_full(self):
     Tensor.manual_seed(1337)
@@ -187,24 +190,24 @@ class TestRandomness(unittest.TestCase):
 
     Tensor.rand(1).realize()
 
-    s = Tensor.rand(20).schedule()
-    s2 = Tensor.rand(20).schedule()
+    s = Tensor.rand(20).schedule_linear().src
+    s2 = Tensor.rand(20).schedule_linear().src
 
     assert len(s) == len(s2), f"{len(s)} != {len(s2)}"
     for x,y in zip(s, s2):
-      if not (x.ast == y.ast):
-        print(f"{x.ast} != {y.ast}")
+      if not (x.src[0] == y.src[0]):
+        print(f"{x.src[0]} != {y.src[0]}")
 
     Tensor.rand(1, device=f"{Device.DEFAULT}:1").realize()
 
-    s3 = Tensor.rand(20, device=f"{Device.DEFAULT}:1").schedule()
-    s4 = Tensor.rand(20, device=f"{Device.DEFAULT}:1").schedule()
+    s3 = Tensor.rand(20, device=f"{Device.DEFAULT}:1").schedule_linear().src
+    s4 = Tensor.rand(20, device=f"{Device.DEFAULT}:1").schedule_linear().src
 
     assert len(s3) == len(s4), f"{len(s3)} != {len(s4)}"
     assert len(s2) == len(s4), f"{len(s)} != {len(s3)}"
     for x,y in zip(s3, s4):
-      if not (x.ast == y.ast):
-        print(f"{x.ast} != {y.ast}")
+      if not (x.src[0] == y.src[0]):
+        print(f"{x.src[0]} != {y.src[0]}")
 
   @unittest.skipUnless(is_dtype_supported(dtypes.bfloat16), "need bfloat16 support")
   def test_rand_bfloat16(self):

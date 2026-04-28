@@ -39,6 +39,8 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
     """
     return self.cast(dtypes.bool).ne(True)
 
+  def contiguous(self, *args, **kwargs) -> Self: raise NotImplementedError
+
   def contiguous_backward(self) -> Self:
     """
     Inserts a contiguous operation in the backward pass.

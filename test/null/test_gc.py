@@ -60,7 +60,7 @@ class TestGC(unittest.TestCase):
     init = bufs_allocated()
     x = Tensor.ones(256).contiguous().realize()
     y = Tensor.ones(5, 5).contiguous()
-    y.schedule()
+    y.schedule_linear()
     del x
     del y
     self.assertEqual(bufs_allocated()-init, 0)

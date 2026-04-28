@@ -6,7 +6,7 @@ from tinygrad.device import is_dtype_supported
 from tinygrad.uop.ops import Ops, UOp
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.nir import NIRRenderer
-from tinygrad.engine.realize import get_program
+from tinygrad.codegen import to_program
 from tinygrad.dtype import DType
 
 x_init = np.random.randn(1,3).astype(np.float32)
@@ -62,12 +62,13 @@ class TestIdxUpcast(unittest.TestCase):
     for src in ast.src:
       if (ret:=self._find_op(src, op)) is not None: return ret
   def _schedule_render(self, a: Tensor):
-    schedule, _ = a.schedule_with_vars()
-    for s in schedule:
-      if s.ast.op is Ops.SINK:
-        renderer = Device[s.bufs[0].device].renderer
-        prg = get_program(s.ast, renderer)
-        return prg.uops
+    linear, _ = a.linear_with_vars()
+    for si in linear.src:
+      ast = si.src[0]
+      if ast.op is Ops.SINK:
+        renderer = Device[si.src[1].buffer.device].renderer
+        prg = to_program(ast, renderer)
+        return tuple(prg.src[2].src)
 
   def _assert(self, dtype: DType, a: Tensor):
     uops = self._schedule_render(a)
@@ -162,9 +163,9 @@ class TestRand(unittest.TestCase):
   def test_rand_large_tensor(self):
     # large tensor rand (num > uint32.max) should not crash in frontend
     Tensor.manual_seed(0)
-    Tensor.rand(2**17, 2**17).schedule()
-    Tensor.rand(2**17, 2**17).schedule()
-    Tensor.rand(2**17, 2**17).schedule()
+    Tensor.rand(2**17, 2**17).schedule_linear()
+    Tensor.rand(2**17, 2**17).schedule_linear()
+    Tensor.rand(2**17, 2**17).schedule_linear()
 
 class TestTensorConstLike(unittest.TestCase):
   def test_const_like_shape(self):
