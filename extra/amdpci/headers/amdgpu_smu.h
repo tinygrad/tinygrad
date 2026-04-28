@@ -22,15 +22,7 @@
 #ifndef __AMDGPU_SMU_H__
 #define __AMDGPU_SMU_H__
 
-#define int32_t int
-#define uint32_t unsigned int
-#define int8_t signed char
-#define uint8_t unsigned char
-#define uint16_t unsigned short
-#define int16_t short
-#define uint64_t unsigned long long
 #define bool _Bool
-#define u32 unsigned int
 
 #define SMU_THERMAL_MINIMUM_ALERT_TEMP		0
 #define SMU_THERMAL_MAXIMUM_ALERT_TEMP		255

@@ -199,37 +199,37 @@ def CFStringNormalize(theString:CFMutableStringRef, theForm:CFStringNormalizatio
 def CFStringFold(theString:CFMutableStringRef, theFlags:CFStringCompareFlags, theLocale:CFLocaleRef) -> None: ...
 @dll.bind(Boolean, CFMutableStringRef, c.POINTER[CFRange], CFStringRef, Boolean)
 def CFStringTransform(string:CFMutableStringRef, range:c.POINTER[CFRange], transform:CFStringRef, reverse:Boolean) -> Boolean: ...
-try: kCFStringTransformStripCombiningMarks = CFStringRef.in_dll(dll, 'kCFStringTransformStripCombiningMarks')
+try: kCFStringTransformStripCombiningMarks = CFStringRef.in_dll(dll, 'kCFStringTransformStripCombiningMarks') # type: ignore
 except (ValueError,AttributeError): pass
-try: kCFStringTransformToLatin = CFStringRef.in_dll(dll, 'kCFStringTransformToLatin')
+try: kCFStringTransformToLatin = CFStringRef.in_dll(dll, 'kCFStringTransformToLatin') # type: ignore
 except (ValueError,AttributeError): pass
-try: kCFStringTransformFullwidthHalfwidth = CFStringRef.in_dll(dll, 'kCFStringTransformFullwidthHalfwidth')
+try: kCFStringTransformFullwidthHalfwidth = CFStringRef.in_dll(dll, 'kCFStringTransformFullwidthHalfwidth') # type: ignore
 except (ValueError,AttributeError): pass
-try: kCFStringTransformLatinKatakana = CFStringRef.in_dll(dll, 'kCFStringTransformLatinKatakana')
+try: kCFStringTransformLatinKatakana = CFStringRef.in_dll(dll, 'kCFStringTransformLatinKatakana') # type: ignore
 except (ValueError,AttributeError): pass
-try: kCFStringTransformLatinHiragana = CFStringRef.in_dll(dll, 'kCFStringTransformLatinHiragana')
+try: kCFStringTransformLatinHiragana = CFStringRef.in_dll(dll, 'kCFStringTransformLatinHiragana') # type: ignore
 except (ValueError,AttributeError): pass
-try: kCFStringTransformHiraganaKatakana = CFStringRef.in_dll(dll, 'kCFStringTransformHiraganaKatakana')
+try: kCFStringTransformHiraganaKatakana = CFStringRef.in_dll(dll, 'kCFStringTransformHiraganaKatakana') # type: ignore
 except (ValueError,AttributeError): pass
-try: kCFStringTransformMandarinLatin = CFStringRef.in_dll(dll, 'kCFStringTransformMandarinLatin')
+try: kCFStringTransformMandarinLatin = CFStringRef.in_dll(dll, 'kCFStringTransformMandarinLatin') # type: ignore
 except (ValueError,AttributeError): pass
-try: kCFStringTransformLatinHangul = CFStringRef.in_dll(dll, 'kCFStringTransformLatinHangul')
+try: kCFStringTransformLatinHangul = CFStringRef.in_dll(dll, 'kCFStringTransformLatinHangul') # type: ignore
 except (ValueError,AttributeError): pass
-try: kCFStringTransformLatinArabic = CFStringRef.in_dll(dll, 'kCFStringTransformLatinArabic')
+try: kCFStringTransformLatinArabic = CFStringRef.in_dll(dll, 'kCFStringTransformLatinArabic') # type: ignore
 except (ValueError,AttributeError): pass
-try: kCFStringTransformLatinHebrew = CFStringRef.in_dll(dll, 'kCFStringTransformLatinHebrew')
+try: kCFStringTransformLatinHebrew = CFStringRef.in_dll(dll, 'kCFStringTransformLatinHebrew') # type: ignore
 except (ValueError,AttributeError): pass
-try: kCFStringTransformLatinThai = CFStringRef.in_dll(dll, 'kCFStringTransformLatinThai')
+try: kCFStringTransformLatinThai = CFStringRef.in_dll(dll, 'kCFStringTransformLatinThai') # type: ignore
 except (ValueError,AttributeError): pass
-try: kCFStringTransformLatinCyrillic = CFStringRef.in_dll(dll, 'kCFStringTransformLatinCyrillic')
+try: kCFStringTransformLatinCyrillic = CFStringRef.in_dll(dll, 'kCFStringTransformLatinCyrillic') # type: ignore
 except (ValueError,AttributeError): pass
-try: kCFStringTransformLatinGreek = CFStringRef.in_dll(dll, 'kCFStringTransformLatinGreek')
+try: kCFStringTransformLatinGreek = CFStringRef.in_dll(dll, 'kCFStringTransformLatinGreek') # type: ignore
 except (ValueError,AttributeError): pass
-try: kCFStringTransformToXMLHex = CFStringRef.in_dll(dll, 'kCFStringTransformToXMLHex')
+try: kCFStringTransformToXMLHex = CFStringRef.in_dll(dll, 'kCFStringTransformToXMLHex') # type: ignore
 except (ValueError,AttributeError): pass
-try: kCFStringTransformToUnicodeName = CFStringRef.in_dll(dll, 'kCFStringTransformToUnicodeName')
+try: kCFStringTransformToUnicodeName = CFStringRef.in_dll(dll, 'kCFStringTransformToUnicodeName') # type: ignore
 except (ValueError,AttributeError): pass
-try: kCFStringTransformStripDiacritics = CFStringRef.in_dll(dll, 'kCFStringTransformStripDiacritics')
+try: kCFStringTransformStripDiacritics = CFStringRef.in_dll(dll, 'kCFStringTransformStripDiacritics') # type: ignore
 except (ValueError,AttributeError): pass
 @dll.bind(Boolean, CFStringEncoding)
 def CFStringIsEncodingAvailable(encoding:CFStringEncoding) -> Boolean: ...
