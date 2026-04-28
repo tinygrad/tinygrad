@@ -34,17 +34,12 @@ def dname_of(device) -> str:
   return device.split(":")[0] if isinstance(device, str) else device
 
 def alloc_like(shape, dtype, device, axis=None) -> Tensor:
-  # NOTE: global-shape allocator. shape is the GLOBAL shape; on a tuple device, axis is the shard axis
-  # (per-device shape = shard_shape(shape, axis)). axis=None replicates the full shape via multi(0).
   if isinstance(device, tuple):
     if axis is None: return Tensor(Tensor.invalids(*shape, dtype=dtype, device=device).uop.multi(0), device=device)
     return Tensor(Tensor.invalids(*shard_shape(shape, axis, len(device)), dtype=dtype, device=device).uop.multi(axis), device=device)
   return Tensor.invalids(*shape, dtype=dtype, device=device)
 
 def alloc_local(shape, dtype, device) -> Tensor:
-  # NOTE: per-device-local allocator. shape is the PER-DEVICE shape — each device gets a full `shape`
-  # buffer (e.g. NUM_WG amax partials) and we wrap as multi(0) so the global tensor concatenates
-  # them. Used for kernel-output buffers indexed by blockIdx in [0, shape[0]).
   if isinstance(device, tuple):
     return Tensor(Tensor.invalids(*shape, dtype=dtype, device=device).uop.multi(0), device=device)
   return Tensor.invalids(*shape, dtype=dtype, device=device)
