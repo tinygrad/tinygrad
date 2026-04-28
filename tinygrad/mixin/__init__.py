@@ -3,7 +3,6 @@ import functools, itertools
 from typing import TYPE_CHECKING, Callable, Self, Sequence, Literal, get_args
 from tinygrad.mixin.elementwise import ElementwiseMixin
 from tinygrad.mixin.movement import MovementMixin
-from tinygrad.mixin.rand import RandMixin
 from tinygrad.mixin.reduce import ReduceMixin
 from tinygrad.uop import Ops
 from tinygrad.uop.ops import _broadcast_shape, resolve, smax, smin, identity_element
@@ -16,7 +15,7 @@ if TYPE_CHECKING:
 ReductionStr = Literal["mean", "sum", "none"]
 
 
-class OpMixin(ElementwiseMixin, ReduceMixin, RandMixin):
+class OpMixin(ElementwiseMixin, ReduceMixin):
   @staticmethod
   def unique_const(fill_value:ConstType, **kwargs): raise NotImplementedError("creation helpers are only supported on Tensor and UOp")
 
@@ -191,6 +190,28 @@ class OpMixin(ElementwiseMixin, ReduceMixin, RandMixin):
     ```
     """
     return self._tri(self.shape[-2], self.shape[-1], diagonal+1, self.device).where(self.zeros_like(), self)
+
+  # ***** random *****
+
+  @staticmethod
+  def _threefry_random_bits(key, counts0, counts1):
+    x = (counts1.cast(dtypes.uint64) << 32) | counts0.cast(dtypes.uint64)
+    x = x.threefry((key[1]._broadcast_to(x.shape).cast(dtypes.uint64) << 32) | key[0]._broadcast_to(x.shape).cast(dtypes.uint64))
+    return (x & 0xffffffff).cast(dtypes.uint32).cat(((x >> 32) & 0xffffffff).cast(dtypes.uint32))
+
+  @classmethod
+  def random_bits(cls, key:Self, counter:Self, num:int) -> Self:
+    low, high = counter[0:1], counter[1:2]
+    bits = []
+    for i in range(0, num, dtypes.uint32.max):
+      chunk_num = min(num - i, dtypes.uint32.max)
+      c_low = low + (i & 0xffffffff)
+      c_high = high + (i >> 32) + (c_low < low).cast(dtypes.uint32)
+      new_key = cls._threefry_random_bits(key, c_low, c_high)
+      counts0 = cls.arange(ceildiv(chunk_num, 2), device=key.device, dtype=dtypes.uint32)
+      counts1 = counts0 + ceildiv(chunk_num, 2)
+      bits.append(cls._threefry_random_bits(new_key, counts0, counts1)[:chunk_num])
+    return bits[0].cat(*bits[1:])
 
   def _pad_constant(self, pX, value:float) -> Self:
     # shrink first for negative pads, then pad with only non-negative values
