@@ -212,7 +212,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     match self.op:
       # late ops don't have shape
       case Ops.UNIQUE | Ops.LUNIQUE | Ops.DEVICE | Ops.IF | Ops.BARRIER | Ops.CUSTOM | Ops.CUSTOMI | \
-           Ops.STACK | Ops.GEP | Ops.UNROLL | Ops.CONTRACT | Ops.SINK | \
+           Ops.STACK | Ops.GEP | Ops.UNROLL | Ops.CONTRACT | Ops.SINK | Ops.END | \
            Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE | Ops.BINARY | Ops.INS | Ops.TUPLE | Ops.CALL | Ops.FUNCTION:
         return None
 
@@ -259,7 +259,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       case Ops.SHAPED_WMMA: return self.src[2]._shape
 
       # passthrough ops
-      case Ops.REDUCE | Ops.MSTACK | Ops.MSELECT | Ops.DETACH | Ops.CONTIGUOUS | Ops.CONTIGUOUS_BACKWARD | Ops.AFTER | Ops.END | Ops.LOAD:
+      case Ops.REDUCE | Ops.MSTACK | Ops.MSELECT | Ops.DETACH | Ops.CONTIGUOUS | Ops.CONTIGUOUS_BACKWARD | Ops.AFTER | Ops.LOAD:
         return self.src[0]._shape
 
       # TODO: disallow shape changing bitcast
