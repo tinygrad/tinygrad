@@ -58,15 +58,13 @@ def _fused_quantize_bwd_w13(gradient:UOp, kernel:UOp):
   _grad_fp8_mailbox[grad_xw13.uop] = (grad_xw13_fp8.uop, inv_scale.uop, new_grad_amax.uop, store_effect)
   return (None, None, grad_xw13.uop, None, None)
 
-def fused_quantize_fp8_w13(xw13:Tensor, amax_state:Tensor, fp8_dtype, grad_amax_state:Tensor|None=None) -> tuple[Tensor, Tensor, Tensor]:
+def fused_quantize_fp8_w13(xw13:Tensor, amax_state:Tensor, fp8_dtype, grad_amax_state:Tensor) -> tuple[Tensor, Tensor, Tensor]:
   # NOTE: silu(xw1)*xw3 -> fp8 + amax over fused xw13 layout. Returns (fp8, inv_scale, new_amax)
   # grad_amax_state: delayed amax for grad_xw13 fp8 quantization in the backward.
   assert xw13.dtype == dtypes.bfloat16, f"expected bf16, got {xw13.dtype}"
   MBS, SEQ, H2 = xw13.shape
   assert H2 % 2 == 0, f"w13 last-axis must be even, got {H2}"
   HIDDEN = H2 // 2
-  if grad_amax_state is None:
-    grad_amax_state = Tensor.full((), FP8_MAX, dtype=dtypes.float32, device=xw13.device).contiguous()
   axis = xw13.uop.axis if isinstance(xw13.device, tuple) else None
   if isinstance(xw13.device, tuple): assert axis in (0, 1), f"unsupported sharding axis={axis}"
   fp8_out  = alloc_like((MBS, SEQ, HIDDEN), fp8_dtype,      xw13.device, axis)
