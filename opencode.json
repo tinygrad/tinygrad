@@ -8,7 +8,7 @@
       "name": "Tinygrad (local)",
       "options": {
         "baseURL": "http://localhost:8000/v1",
-        "timeout": 900000
+        "timeout": 1800000
       },
       "models": {
         "tinygrad-local": {

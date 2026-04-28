@@ -7,15 +7,17 @@ READ_TOOL = {"function": {"name": "read", "parameters": {
   "properties": {"filePath": {"type": "string"}}, "required": ["filePath"]}}}
 
 class TestLLMAgent(unittest.TestCase):
-  def test_format_tools_uses_full_schemas(self):
+  def test_format_tools_uses_compact_signatures(self):
     out = format_tools([BASH_TOOL, READ_TOOL])
     self.assertIn("<tools>", out)
-    self.assertIn('"name": "bash"', out)
-    self.assertIn('"name": "read"', out)
-    self.assertIn('"properties"', out)
-    self.assertIn('The "name" field must exactly match one tool name listed in <tools>.', out)
+    self.assertIn("bash(command:string, description:string", out)
+    self.assertIn("read(filePath:string)", out)
+    self.assertIn("Tool names: bash, read", out)
+    self.assertIn('Use exactly one listed tool name in "name".', out)
+    self.assertIn("Reply only with a complete tool call:", out)
     self.assertIn(TOOL_CALL_OPEN, out)
     self.assertIn(TOOL_CALL_CLOSE, out)
+    self.assertNotIn('"properties"', out)
 
   def test_parse_tool_calls_complete_tag(self):
     text = TOOL_CALL_OPEN + '{"name":"read","arguments":{"filePath":"x.py"}}' + TOOL_CALL_CLOSE
