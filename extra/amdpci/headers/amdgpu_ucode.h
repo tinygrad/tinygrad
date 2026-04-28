@@ -24,15 +24,7 @@
 #define __AMDGPU_UCODE_H__
 
 // #include "amdgpu_socbb.h"
-#define int32_t int
-#define uint32_t unsigned int
-#define int8_t signed char
-#define uint8_t unsigned char
-#define uint16_t unsigned short
-#define int16_t short
-#define uint64_t unsigned long long
 #define bool _Bool
-#define u32 unsigned int
 
 struct common_firmware_header {
 	uint32_t size_bytes; /* size of the entire header+image(s) in bytes */

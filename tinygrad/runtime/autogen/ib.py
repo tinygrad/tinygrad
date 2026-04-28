@@ -2688,7 +2688,7 @@ vext_field_avail = lambda type,fld,sz: (offsetof(type, fld) < (sz)) # type: igno
 IBV_DEVICE_RAW_SCATTER_FCS = (1 << 34)
 IBV_DEVICE_PCI_WRITE_END_PADDING = (1 << 36)
 ibv_query_port = lambda context,port_num,port_attr: ___ibv_query_port(context, port_num, port_attr) # type: ignore
-ibv_reg_mr = lambda pd,addr,length,access: __ibv_reg_mr(pd, addr, length, access, __builtin_constant_p( ((access) & IBV_ACCESS_OPTIONAL_RANGE) == 0)) # type: ignore
+ibv_reg_mr = lambda pd,addr,length,access: __ibv_reg_mr(pd, addr, length, access, __builtin_constant_p( ((int)(access) & IBV_ACCESS_OPTIONAL_RANGE) == 0)) # type: ignore
 ibv_reg_mr_iova = lambda pd,addr,length,iova,access: __ibv_reg_mr_iova(pd, addr, length, iova, access, __builtin_constant_p( ((access) & IBV_ACCESS_OPTIONAL_RANGE) == 0)) # type: ignore
 ETHERNET_LL_SIZE = 6
 IB_ROCE_UDP_ENCAP_VALID_PORT_MIN = (0xC000)
