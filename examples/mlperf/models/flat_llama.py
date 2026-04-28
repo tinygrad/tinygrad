@@ -23,7 +23,6 @@ ASM_GEMM = getenv("ASM_GEMM", 0)
 FUSED_INPUT_QUANTIZE = getenv("FUSED_INPUT_QUANTIZE", 0)
 FUSED_ADD_NORM_MUL_QUANTIZE = getenv("FUSED_ADD_NORM_MUL_QUANTIZE", 0)
 FUSED_SILU_W13 = getenv("FUSED_SILU_W13", 0)
-GRAD_AMAX_STATE = getenv("GRAD_AMAX_STATE", 0)
 
 FP8_DTYPE = dtypes.fp8e4m3
 FP8_GRAD_DTYPE = dtypes.fp8e5m2
@@ -241,9 +240,8 @@ class FlatTransformer:
   def __call__(self, tokens:Tensor):
     h = self.tok_embeddings(tokens)
     freqs_cis = self.freqs_cis.cast(h.dtype)[:, :tokens.shape[1], :, :, :]
-    a, ga, s = self._fp8_amax, (self._fp8_grad_amax if GRAD_AMAX_STATE else None), self._fp8_inv_scale
+    a, ga, s = self._fp8_amax, self._fp8_grad_amax, self._fp8_inv_scale
     for i in range(self.n_layers):
-      grad_amax = {f"grad_amax_{k}": ga[k][i] for k in ga} if ga else {}
       h, *ret = self.run_layer(h, freqs_cis,
                                self.attention_norm[i], self.wqkv[i], self.wo[i],
                                self.ffn_norm[i], self.w13[i], self.w2[i],
@@ -251,7 +249,8 @@ class FlatTransformer:
                                amax_x13=a["x13"][i], amax_x2=a["x2"][i],
                                s_qkv=s["wqkv"][i], s_o=s["wo"][i],
                                s_13=s["w13"][i], s_2=s["w2"][i],
-                               **grad_amax)
+                               grad_amax_xqkv=ga["xqkv"][i], grad_amax_xo=ga["xo"][i],
+                               grad_amax_xw13=ga["xw13"][i], grad_amax_xout=ga["xout"][i])
       for name, new_val in zip(["xqkv", "xo", "x13", "x2"], ret[:5]):
         a[name][i].assign(new_val)
 
