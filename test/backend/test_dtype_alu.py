@@ -1,7 +1,7 @@
 import unittest, operator, math
 from tinygrad import Context, Tensor, dtypes, Device
 from tinygrad.dtype import DType, truncate, fp8_to_float
-from tinygrad.helpers import CI, EMULATED_DTYPES, getenv
+from tinygrad.helpers import CI, EMULATED_DTYPES, DEV, getenv
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.device import is_dtype_supported
 from tinygrad.runtime.ops_python import from_storage_scalar
@@ -32,7 +32,8 @@ unary_operations = [(Tensor.exp, np.exp), (Tensor.log, np.log), (Tensor.sin, np.
 #binary_operations.append(operator.truediv)
 
 # TODO: CI CUDA segfaults on sin, WEBGPU and NIR sines are not precise enough for large numbers
-if (getenv("MOCKGPU") and Device.DEFAULT in {"NV", "CUDA"}) or Device.DEFAULT == "WEBGPU" or isinstance(Device[Device.DEFAULT].renderer, NIRRenderer):
+if ((DEV.interface.startswith("MOCK") and Device.DEFAULT in {"NV", "CUDA"})
+    or Device.DEFAULT == "WEBGPU" or isinstance(Device[Device.DEFAULT].renderer, NIRRenderer)):
   unary_operations.remove((Tensor.sin, np.sin))
   unary_operations.remove((Tensor.cos, np.cos))
 

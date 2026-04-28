@@ -114,7 +114,7 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
     if u.op in {Ops.DEVICE, Ops.CONST, Ops.UNIQUE, Ops.LUNIQUE} and u is not x: excluded.add(u)
     if u.op is Ops.CONST and len(u.src) and u.src[0].op in {Ops.UNIQUE, Ops.LUNIQUE}: excluded.remove(u)
     if u.op is Ops.VCONST and u.dtype.scalar() == dtypes.weakint and u is not x: excluded.add(u)
-    if u.op is Ops.VECTORIZE and len(u.src) == 0: excluded.add(u)
+    if u.op is Ops.STACK and len(u.src) == 0: excluded.add(u)
     # exclude RESHAPE/EXPAND that only serve to broadcast a CONST
     if u.op in {Ops.RESHAPE, Ops.EXPAND} and len(u.src) >= 1 and u.src[0] in excluded and u is not x: excluded.add(u)
   for u in toposort:
@@ -170,7 +170,7 @@ def get_full_rewrite(data:VizData, ctx:TrackedGraphRewrite) -> Generator[GraphRe
   next_sink = _reconstruct(data, ctx.sink)
   yield {"graph":uop_to_json(data, next_sink), "uop":pystr(next_sink), "change":None, "diff":None, "upat":None}
   replaces: dict[UOp, UOp] = {}
-  for u0_num,u1_num,upat_loc,dur in tqdm(ctx.matches):
+  for u0_num,u1_num,upat_loc,dur in tqdm(ctx.matches, disable=not ctx.matches):
     replaces[u0:=_reconstruct(data, u0_num)] = u1 = _reconstruct(data, u1_num)
     try: new_sink = next_sink.substitute(replaces)
     except RuntimeError as e: new_sink = UOp(Ops.NOOP, arg=str(e))
@@ -218,9 +218,9 @@ def timeline_layout(data:VizData, dev_events:list[tuple[int, int, float, DevEven
     name, fmt, key = e.name, [], None
     if (ref:=data.ref_map.get(name)) is not None and ref < len(data.ctxs):
       name = data.ctxs[ref]["name"]
-      if (p:=data.ctxs[ref].get("prg")) is not None and (ei:=exec_points.get(p.src[0].arg.name)) is not None:
-        flops = sym_infer((estimates:=p.src[0].arg.estimates).ops, var_vals:=ei.arg['var_vals'])/(t:=dur*1e-6)
-        membw, ldsbw = sym_infer(estimates.mem, var_vals)/t, sym_infer(estimates.lds, var_vals)/t
+      if (p:=data.ctxs[ref].get("prg")) is not None and (ki:=p.src[0].arg).estimates is not None and (ei:=exec_points.get(ki.name)) is not None:
+        flops = sym_infer(ki.estimates.ops, var_vals:=ei.arg['var_vals'])/(t:=dur*1e-6)
+        membw, ldsbw = sym_infer(ki.estimates.mem, var_vals)/t, sym_infer(ki.estimates.lds, var_vals)/t
         fmt = [f"{flops*1e-9:.0f} GFLOPS" if flops < 1e14 else f"{flops*1e-12:.0f} TFLOPS",
               (f"{membw*1e-9:.0f} GB/s" if membw < 1e13 else f"{membw*1e-12:.0f} TB/s")+" mem",
               (f"{ldsbw*1e-9:.0f} GB/s" if ldsbw < 1e15 else f"{ldsbw*1e-12:.0f} TB/s")+" lds"]
@@ -744,9 +744,11 @@ def reloader():
     time.sleep(0.1)
 
 T = TypeVar("T")
+# unpickling may load libraries, turn off DEBUG=3 output
+@Context(DEBUG=0)
 def load_pickle(path:pathlib.Path, default:T) -> T:
   if not path.exists(): return default
-  with path.open("rb") as f: return pickle.load(f)
+  with path.open("rb") as f:return pickle.load(f)
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser()

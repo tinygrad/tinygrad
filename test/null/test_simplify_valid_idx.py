@@ -15,8 +15,8 @@ def get_gated_load_uop(valid:UOp, idx:UOp):
 
 def get_load_image_uop(image_shape:tuple[int, ...], valid:UOp, idx:tuple[UOp, UOp]):
   return UOp(Ops.LOAD, dtypes.float.vec(4), (
-    UOp(Ops.PARAM, dtypes.imagef(image_shape), arg=0).index(UOp(Ops.VECTORIZE, dtypes.weakint.vec(2), idx).valid(valid), ptr=True),
-    UOp(Ops.VECTORIZE, dtypes.float.vec(4), src=(UOp.const(dtypes.float, 0.0),) * 4)
+    UOp(Ops.PARAM, dtypes.imagef(image_shape), arg=0).index(UOp(Ops.STACK, dtypes.weakint.vec(2), idx).valid(valid), ptr=True),
+    UOp(Ops.STACK, dtypes.float.vec(4), src=(UOp.const(dtypes.float, 0.0),) * 4)
   ))
 
 def Special(expr, nmax): return UOp(Ops.SPECIAL, dtypes.weakint, (UOp.const(dtypes.weakint, nmax),), expr)
@@ -219,7 +219,7 @@ class TestImageSimplification(unittest.TestCase):
     with Context(NOOPT=1, SPEC=0):
       load = full_rewrite_to_sink(load.sink()).src[0]
     idx = load.src[0].src[1]
-    self.assertEqual(idx.op, Ops.VECTORIZE)
+    self.assertEqual(idx.op, Ops.STACK)
     self.assertEqual(len(idx.src), 2)
     idx0, idx1 = idx.src[0], idx.src[1]
     check_uop_against_string(self, idx0, sidx0)
@@ -288,7 +288,7 @@ class TestImageSimplification(unittest.TestCase):
     load = get_load_image_uop(shape, (gidx0<8) & (gidx0<8).ne(True), idx)
     with Context(NOOPT=1, SPEC=0):
       load = full_rewrite_to_sink(load.sink()).src[0]
-    self.assertEqual(load.op, Ops.VECTORIZE)
+    self.assertEqual(load.op, Ops.STACK)
     self.assertEqual(load.dtype.count, 4)
 
   def test_openpilot_conv1(self):

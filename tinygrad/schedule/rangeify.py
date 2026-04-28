@@ -410,7 +410,7 @@ def bufferize_to_store(ctx:itertools.count, x:UOp, idx:UOp, allow_locals=True):
 
   if allow_locals:
     # handle locals
-    buf = UOp(Ops.DEFINE_LOCAL, sdtype, arg=next(ctx))
+    buf = UOp.placeholder((size,), x.dtype, next(ctx), AddrSpace.LOCAL)
     do_store = buf.broadcast(x.src[1].dtype.count).index(idx, dtype=sdtype).store(x.src[0]).end(*rngs)
     return buf.after(do_store.barrier())
 

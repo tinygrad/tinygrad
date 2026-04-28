@@ -6,7 +6,7 @@ from tinygrad.dtype import dtypes, ConstType, DType, Invalid
 from tinygrad.helpers import Context
 from test.helpers import get_uops
 from tinygrad.uop.ops import UOp, Ops, graph_rewrite, sym_infer
-from tinygrad.uop.symbolic import sym, commutative, pm_simplify_valid
+from tinygrad.uop.symbolic import sym, commutative, pm_simplify_valid, pm_move_where_on_load
 from tinygrad.uop.validate import uops_to_z3
 
 def check_uop_against_string(self, v:UOp, s:str):
@@ -851,9 +851,22 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((a+b+c*2<1).ne(True), 0, 1, "((((a+b)+c)<1)!=True)")
     self.helper_test_variable((a+b*2+c*4<1).ne(True), 0, 1, "((((a+b)+c)<1)!=True)")
 
+  def test_cast_bool_to_int_ne_const(self):
+    cond = Variable("a", 0, 3) < 2
+    # CAST(bool -> int) != 0  ->  cond
+    self.helper_test_variable(cond.cast(dtypes.int).ne(0), 0, 1, "(a<2)")
+    # CAST(bool -> int) != 1  ->  !cond
+    self.helper_test_variable(cond.cast(dtypes.int).ne(1), 0, 1, "((a<2)!=True)")
+    # CAST(bool -> int) != c (c not in {0,1})  ->  always True (CAST is 0 or 1)
+    self.helper_test_variable(cond.cast(dtypes.int).ne(2), 1, 1, "True")
+    self.helper_test_variable(cond.cast(dtypes.int).ne(-1), 1, 1, "True")
+    # CAST(bool -> weakint) folds too
+    self.helper_test_variable(cond.cast(dtypes.weakint).ne(0), 0, 1, "(a<2)")
+    self.helper_test_variable(cond.cast(dtypes.weakint).ne(1), 0, 1, "((a<2)!=True)")
+
   def test_where_removal(self):
     cond = Variable("a", 0, 3) < 2
-    u1, u0 = cond.ufix(1), cond.ufix(0)
+    u1, u0 = cond.const_like(True), cond.const_like(False)
     self.helper_test_variable(cond, 0, 1, "(a<2)")
     self.helper_test_variable(cond.where(u1, u0), 0, 1, "(a<2)")
     self.helper_test_variable(cond.where(u1, u0).where(u1, u0), 0, 1, "(a<2)")
@@ -1234,6 +1247,23 @@ class TestStoreLoadFolding(unittest.TestCase):
     # Negative: store(idx, load(idx) + 1) should NOT fold
     self.assertEqual(graph_rewrite(index.store(index.load() + UOp.const(dtypes.int, 1)), sym).op, Ops.STORE)
 
+class TestMoveWhereOnLoad(unittest.TestCase):
+  def test_bool_index_preserves_dtype(self):
+    buf = UOp.param(0, dtypes.bool.ptr(8))
+    a = Variable("a", 0, 7)
+    r = UOp.range(8, 0)
+    # cond has a range that the rewrite can move into the valid: gate (a<4) goes into load valid
+    cond = (a < 4) & (r < 2)
+    valid = (a < 2)  # pre-existing valid on the load (to pass can_move check for the r-only clause)
+    idx = buf.index(a.valid(valid), ptr=True)
+    expr = cond.where(idx, 0)
+    out = graph_rewrite(expr, pm_move_where_on_load)
+    # any WHERE in the rewritten graph must have matched-dtype branches
+    for u in out.toposort():
+      if u.op is Ops.WHERE:
+        self.assertEqual(u.dtype, u.src[1].dtype, f"WHERE branch 1 dtype mismatch: {u}")
+        self.assertEqual(u.dtype, u.src[2].dtype, f"WHERE branch 2 dtype mismatch: {u}")
+
 class TestSymbolicRealWorld(unittest.TestCase):
   def test_resnet_half(self):
     gidx0 = Variable("gidx0", 0, 3)
@@ -1263,10 +1293,10 @@ class TestGatedUopGivenValid(unittest.TestCase):
 
     idx0 = (r0 + uconst(-1)) // uconst(3)
     idx1 = r0 % uconst(3)
-    idx:UOp = (r0 < 3).where(UOp(Ops.VECTORIZE, dtypes.weakint.vec(2), (idx0, idx1)), UOp.invalid())
+    idx:UOp = (r0 < 3).where(UOp(Ops.STACK, dtypes.weakint.vec(2), (idx0, idx1)), UOp.invalid())
     idx = graph_rewrite(idx, pm_simplify_valid)
     # NOTE: independent simplification: (r0-1)//3 -> 0, r0%3 -> r0 when r0 in [0,2]
-    expected_vec = UOp(Ops.VECTORIZE, dtypes.weakint.vec(2), (uconst(0), r0))
+    expected_vec = UOp(Ops.STACK, dtypes.weakint.vec(2), (uconst(0), r0))
     self.assertEqual(idx, (r0 < 3).where(expected_vec, UOp.invalid()))
 
 class TestRangeSplitting(unittest.TestCase):

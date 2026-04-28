@@ -2,7 +2,6 @@ from __future__ import annotations
 import platform, sys, ctypes, functools, time, mmap, threading, queue
 from tinygrad.helpers import to_mv, OSX, WIN, mv_address, suppress_finalizing, unwrap, data64_le
 from tinygrad.device import BufferSpec
-from tinygrad.renderer import Renderer
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQAllocator, HCQBuffer, HWQueue, HCQArgsState, HCQSignal, HCQProgram, MMIOInterface
 from tinygrad.runtime.support.hcq import CLikeArgsState
 from tinygrad.renderer.cstyle import ClangJITRenderer
@@ -136,5 +135,5 @@ class CPUDevice(HCQCompiled):
   def __init__(self, device:str=""):
     self.tasks:queue.Queue = queue.Queue()
     CPUWorker(self, self.tasks, thread_id=0).start()
-    renderers:list[type[Renderer]] = [ClangJITRenderer, CPULLVMRenderer, LVPRenderer]
-    super().__init__(device, CPUAllocator(self), renderers, functools.partial(CPUProgram, self), CPUSignal, CPUComputeQueue)
+    super().__init__(device, CPUAllocator(self), [ClangJITRenderer, CPULLVMRenderer, LVPRenderer], functools.partial(CPUProgram, self), CPUSignal,
+                     CPUComputeQueue, arch={'AMD64':'x86_64', 'aarch64':'arm64'}.get(m:=platform.machine(), m)+",native")

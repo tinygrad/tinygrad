@@ -111,19 +111,19 @@ if __name__ == "__main__":
     return code
 
   def compile_step(model, step: Step):
-    run, special_names = jit_model(step, *step.input)
-    functions, statements, bufs, _ = compile_net(run, special_names)
+    linear, output_bufs = jit_model(step, *step.input)
+    functions, statements, bufs, _ = compile_net(linear, output_bufs)
     state = get_state_dict(model)
     weights = {id(x.uop.base.realized): name for name, x in state.items()}
     kernel_code = '\n\n'.join([f"const {key} = `{fixup_code(code, key)}`;" for key, code in functions.items()])
     kernel_names = ', '.join([name for (name, _, _, _) in statements])
-    input_names = [name for _,name in special_names.items() if "input" in name]
-    output_names = [name for _,name in special_names.items() if "output" in name]
+    input_names = [f"input{i}" for i in range(len(step.input))]
+    output_names = [f"output{i}" for i in range(len(output_bufs))]
     input_buf_types = [dtype_to_js_type(bufs[inp_name][1]) for inp_name in input_names]
     output_buf_types = [dtype_to_js_type(bufs[out_name][1]) for out_name in output_names]
     kernel_calls = '\n        '.join([f"addComputePass(device, commandEncoder, piplines[{i}], [{', '.join(args)}], {global_size});" for i, (_name, args, global_size, _local_size) in enumerate(statements) ])
     exported_bufs =  '\n    '.join([f"const {name} = " + (f"createEmptyBuf(device, {size});" if _key not in weights else f"createWeightBuf(device, {size}, getTensorBuffer(safetensor, metadata['{weights[_key]}'], '{weights[_key]}'))") + ";"  for name,(size,dtype,_key) in bufs.items()])
-    gpu_write_bufs =  '\n    '.join([f"const gpuWriteBuffer{i} = device.createBuffer({{size:input{i}.size, usage: GPUBufferUsage.COPY_SRC | GPUBufferUsage.MAP_WRITE }});" for i,(_,value) in enumerate(special_names.items()) if "output" not in value])
+    gpu_write_bufs =  '\n    '.join([f"const gpuWriteBuffer{i} = device.createBuffer({{size:input{i}.size, usage: GPUBufferUsage.COPY_SRC | GPUBufferUsage.MAP_WRITE }});" for i in range(len(input_names))])
     input_writer = '\n    '.join([f"await gpuWriteBuffer{i}.mapAsync(GPUMapMode.WRITE);\n    new {input_buf_types[i]}(gpuWriteBuffer{i}.getMappedRange()).set(" + f'data{i});' + f"\n    gpuWriteBuffer{i}.unmap();\ncommandEncoder.copyBufferToBuffer(gpuWriteBuffer{i}, 0, input{i}, 0, gpuWriteBuffer{i}.size);"  for i,_ in enumerate(input_names)])
     return f"""\n    var {step.name} = function() {{
 
@@ -141,7 +141,7 @@ if __name__ == "__main__":
         const kernels = [{kernel_names}];
         const piplines = await Promise.all(kernels.map(name => device.createComputePipelineAsync({{layout: "auto", compute: {{ module: device.createShaderModule({{ code: name }}), entryPoint: "main" }}}})));
 
-        return async ({",".join([f'data{i}' for i,(k,v) in enumerate(special_names.items()) if v != "output0"])}) => {{
+        return async ({",".join([f'data{i}' for i in range(len(input_names))])}) => {{
             const commandEncoder = device.createCommandEncoder();
 
             {input_writer}

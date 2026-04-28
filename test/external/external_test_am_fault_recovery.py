@@ -1,5 +1,6 @@
 # ruff: noqa: F405
 import unittest, subprocess, os
+from tinygrad.helpers import DEV
 from tinygrad.runtime.autogen.amd.rdna3.ins import *  # noqa: F403
 from tinygrad.renderer.amd.dsl import s, v, Inst, NULL
 
@@ -27,7 +28,7 @@ _ILLEGAL_INST_ASM = ".text\n.globl test\n.p2align 8\n.type test,@function\ntest:
   ".rodata\n.p2align 6\n.amdhsa_kernel test\n.amdhsa_next_free_vgpr 8\n.amdhsa_next_free_sgpr 8\n" \
   ".amdhsa_wavefront_size32 1\n.amdhsa_user_sgpr_kernarg_segment_ptr 1\n.amdhsa_kernarg_size 8\n.end_amdhsa_kernel"
 
-@unittest.skipIf(os.environ.get("AMD") != "1" or os.environ.get("MOCKGPU") == "1", "AMD with AM driver required")
+@unittest.skipIf(DEV.device != "AMD" or not DEV.interface.startswith("MOCK"), "AMD with AM driver required")
 class TestAMFaultRecovery(unittest.TestCase):
   def _run_kernel(self, insts: list[Inst]) -> subprocess.CompletedProcess: return _run_asm(assemble_kernel(insts))
 

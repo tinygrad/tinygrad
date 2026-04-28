@@ -60,7 +60,6 @@ class TestCall(unittest.TestCase):
     c = Tensor.call(a, b, fxn=a.as_param(0) @ b.as_param(1))
     np.testing.assert_allclose(c.numpy(), a.numpy() @ b.numpy(), rtol=1e-5, atol=1e-6)
 
-  @unittest.skip("needs GEMM on mixins")
   def test_call_gemm_uop(self):
     M, K, N = 4, 8, 4
     a = Tensor.randn(M, K)

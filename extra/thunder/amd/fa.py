@@ -10,11 +10,11 @@ from tinygrad.uop.ops import UOp, Ops, KernelInfo
 
 def _sharded_empty(shape:Tensor, ref:Tensor, axis:int|None, dtype:DTypeLike|None=None) -> Tensor:
   dtype = dtype or ref.dtype
-  if not isinstance(ref.device, tuple): return Tensor.invalid(*shape, dtype=dtype, device=ref.device)
+  if not isinstance(ref.device, tuple): return Tensor.invalids(*shape, dtype=dtype, device=ref.device)
   shard_axis = ref.uop.axis if axis is None else axis
   shape = tuple(s // len(ref.device) if i == shard_axis else s for i, s in enumerate(shape))
   axis = ref.uop.axis if axis is None else axis
-  return Tensor(Tensor.invalid(*shape, dtype=dtype, device=ref.device).uop.multi(axis), dtype=dtype, device=ref.device)
+  return Tensor(Tensor.invalids(*shape, dtype=dtype, device=ref.device).uop.multi(axis), dtype=dtype, device=ref.device)
 
 def _sharded_empty_like(ref:Tensor, axis:int|None=None) -> Tensor:
   return _sharded_empty(ref.shape, ref, axis)

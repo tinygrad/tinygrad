@@ -1,7 +1,7 @@
-from tinygrad.helpers import getenv
+from tinygrad.helpers import DEV
 import unittest, importlib
 
-@unittest.skipUnless(getenv("MOCKGPU"), 'Testing mockgpu')
+@unittest.skipUnless(DEV.interface.startswith("MOCK"), 'Testing mockgpu')
 class TestMockGPU(unittest.TestCase):
   # https://github.com/tinygrad/tinygrad/pull/7627
   def test_import_typing_extensions(self):

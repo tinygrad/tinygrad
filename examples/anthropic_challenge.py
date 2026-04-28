@@ -113,7 +113,7 @@ class VLIWRenderer(Renderer):
         case Ops.GEP:
           # a GEP is just an alias to a special register in the vector
           r[u] = r[u.src[0]] + u.arg[0]
-        case Ops.VECTORIZE:
+        case Ops.STACK:
           if all(s == u.src[0] for s in u.src):
             # if all sources are the same, we can broadcast
             inst.append({"valu": [("vbroadcast", r[u], r[u.src[0]])]})

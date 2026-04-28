@@ -64,7 +64,7 @@ def do_expand(root:UOp):
     for j in range(expand_sz):
       idx_srcs = tuple(s.gep(j) if isinstance(s.dtype, PtrDType) or s.dtype.count > 1 else s for s in new_srcs)
       idxs.append(UOp(Ops.INDEX, root.dtype, idx_srcs, root.arg))
-    return UOp(Ops.UNROLL, root.dtype, (UOp(Ops.VECTORIZE, root.dtype.vec(expand_sz), tuple(idxs)),), expand_args)
+    return UOp(Ops.UNROLL, root.dtype, (UOp(Ops.STACK, root.dtype.vec(expand_sz), tuple(idxs)),), expand_args)
 
   new_arg = root.arg
   if root.op is Ops.GEP:
@@ -77,7 +77,7 @@ def do_expand(root:UOp):
 def do_contract(con:UOp):
   ex = con.src[0]
   # CONTRACT without UNROLL repeats the element VECTORIZED
-  if ex.op is not Ops.UNROLL: return UOp(Ops.VECTORIZE, con.dtype, con.src*con.dtype.count)
+  if ex.op is not Ops.UNROLL: return UOp(Ops.STACK, con.dtype, con.src*con.dtype.count)
   # CONTRACT may remove several axes from UNROLL
   assert con.dtype == dtypes.void or con.dtype.count == prod([x[1] for x in con.arg]), "dtype is wrong"
   idxs = []
@@ -105,7 +105,7 @@ expander = PatternMatcher([
    lambda outer, inner: UOp(Ops.UNROLL, outer.dtype, (inner.src[0],), inner.arg+outer.arg)),
   # do expansion
   (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.GEP, Ops.WMMA, Ops.LOAD, Ops.STORE, Ops.INDEX, Ops.BUFFERIZE,
-         Ops.VECTORIZE, Ops.REDUCE, Ops.END, Ops.AFTER), name="root", custom_early_reject=set([Ops.UNROLL])), do_expand),
+         Ops.STACK, Ops.REDUCE, Ops.END, Ops.AFTER), name="root", custom_early_reject=set([Ops.UNROLL])), do_expand),
   (UPat(Ops.CONTRACT, name="con"), do_contract),
   # empty UNROLL is NOOP
   (UPat(Ops.UNROLL, src=(UPat.var('x'),), arg=()), lambda x: x),

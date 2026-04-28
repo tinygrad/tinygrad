@@ -1,7 +1,7 @@
 import unittest, math
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.dtype import DTYPES_DICT
-from tinygrad.uop.ops import Ops
+from tinygrad.uop.ops import Ops, UOp
 from tinygrad.device import is_dtype_supported
 import numpy as np
 from test.helpers import not_support_multi_device
@@ -162,6 +162,11 @@ class TestMultiConstFolding(unittest.TestCase):
     np.testing.assert_equal((t ** zero).numpy(), [1] * 16)
     np.testing.assert_equal((t ** one).numpy(), np.arange(16))
     np.testing.assert_equal((one ** t).numpy(), [1] * 16)
+
+class TestThreefryConstFolding(unittest.TestCase):
+  def test_threefry(self):
+    x = UOp.const(dtypes.uint64, 5, Device.DEFAULT, ()).threefry(UOp.const(dtypes.uint64, 10, Device.DEFAULT, ()))
+    self.assertIs(x.simplify().op, Ops.CONST)
 
 class TestTautologicalCompare(unittest.TestCase):
   # without const folding, these would have triggered -Wtautological-compare in clang

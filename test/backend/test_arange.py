@@ -2,7 +2,8 @@ import unittest
 import numpy as np
 from tinygrad import Tensor, GlobalCounters, dtypes, nn, Device, Variable
 from tinygrad.helpers import Context, getenv, DEV
-from tinygrad.engine.realize import run_schedule
+from tinygrad.engine.realize import run_linear
+from tinygrad.schedule import linear_to_schedule
 from tinygrad.engine.realize import CompiledRunner, get_program
 from tinygrad.schedule import ExecItem
 from tinygrad.renderer import Estimates
@@ -54,9 +55,9 @@ class TestIndexing(unittest.TestCase):
     with Context(NOOPT=1):
       GlobalCounters.reset()
       out = ((Tensor.arange(1,16385)-1)*needle).sum()
-      sched = out.schedule()
-      self.assertEqual(len(sched), 1)
-      run_schedule(sched)
+      linear, var_vals = out.linear_with_vars()
+      self.assertEqual(len(linear_to_schedule(linear)), 1)
+      run_linear(linear, var_vals)
     self.assertEqual(out.item(), 1337)
 
   def test_manual_index(self):
@@ -71,9 +72,9 @@ class TestIndexing(unittest.TestCase):
       reshape_dataset = dataset.T.reshape(1, DDIM, DSET, 1).expand(4, DDIM, DSET, 1)
       full = (rng==idxs).where(reshape_dataset, Tensor.zeros(4, DDIM, DSET, 1))
       X = full.sum(axis=(2,3))
-      sched = X.schedule()
-      self.assertEqual(len(sched), 1)
-      run_schedule(sched)
+      linear, var_vals = X.linear_with_vars()
+      self.assertEqual(len(linear_to_schedule(linear)), 1)
+      run_linear(linear, var_vals)
       assert GlobalCounters.global_ops < 4*DSET, f"too many ops {GlobalCounters.global_ops}"
     np.testing.assert_allclose(real_index, X.numpy())
 
@@ -97,9 +98,9 @@ class TestIndexing(unittest.TestCase):
       GlobalCounters.reset()
       X = dataset[idxs]
       assert X.shape == (4,DDIM)
-      sched = X.schedule()
-      self.assertEqual(len(sched), 1)
-      run_schedule(sched)
+      linear, var_vals = X.linear_with_vars()
+      self.assertEqual(len(linear_to_schedule(linear)), 1)
+      run_linear(linear, var_vals)
       assert GlobalCounters.global_ops < 4*DSET, f"too many ops {GlobalCounters.global_ops}"
     np.testing.assert_allclose(real_index, X.numpy())
 
@@ -112,9 +113,9 @@ class TestIndexing(unittest.TestCase):
       GlobalCounters.reset()
       X = dataset[idxs]
       assert X.shape == (4,DDIM)
-      sched = X.schedule()
-      self.assertEqual(len(sched), 1)
-      run_schedule(sched)
+      linear, var_vals = X.linear_with_vars()
+      self.assertEqual(len(linear_to_schedule(linear)), 1)
+      run_linear(linear, var_vals)
       assert GlobalCounters.global_ops < 4*DSET, f"too many ops {GlobalCounters.global_ops} != {4*DSET}"
     np.testing.assert_allclose(real_index, X.numpy())
   @unittest.skip("not ready")

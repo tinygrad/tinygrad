@@ -1,5 +1,5 @@
 # test to compare every packet with the rocprof decoder
-import unittest, pickle, contextlib, io
+import unittest, pickle
 from typing import Iterator
 from pathlib import Path
 from tinygrad.helpers import DEBUG, getenv, temp, ansistrip
@@ -7,16 +7,10 @@ from tinygrad.renderer.amd.sqtt import print_packets, map_insts
 from tinygrad.runtime.autogen.amd.rdna3.ins import s_endpgm
 from tinygrad.viz.serve import sqtt_timeline
 from test.amd.disasm import disasm
+from test.null.test_viz import run_cli
 
 import tinygrad
 EXAMPLES_DIR = Path(tinygrad.__file__).parent.parent / "extra/sqtt/examples"
-
-def run_cli(*cli_args) -> str:
-  from extra.viz.cli import main, get_arg_parser
-  args = get_arg_parser().parse_args(cli_args)
-  with contextlib.redirect_stdout(buf:=io.StringIO()):
-    main(args)
-  return buf.getvalue().strip()
 
 def rocprof_inst_traces_match(sqtt, prg, target):
   from tinygrad.viz.serve import amd_decode

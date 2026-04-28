@@ -1,6 +1,7 @@
 import time, inspect
 from typing import cast
 from collections import deque
+from dataclasses import replace
 from tinygrad.uop.ops import UOp, Ops, buffers, UOpMetaClass, track_rewrites, graph_rewrite, gate_kernel_sink, KernelInfo
 from tinygrad.uop.spec import type_verify, tensor_spec
 from tinygrad.device import Buffer, MultiBuffer
@@ -79,8 +80,8 @@ def linear_to_schedule(linear:UOp) -> list[ExecItem]:
       base = buf_uops[1].buffer
       assert isinstance(base, Buffer), "base can't be MultiBuffer"
       buffers[buf_uops[0]] = base.view(buf_uops[0].arg, ast.dtype, ast.arg[1]*base.dtype.itemsize)
-    # wrap SINK with BEAM UOp when beam search is enabled
-    if ast.op is Ops.SINK and BEAM >= 1: ast = UOp(Ops.BEAM, src=(ast,), arg=BEAM.value)
+    # set beam on KernelInfo when beam search is enabled
+    if ast.op is Ops.SINK and BEAM >= 1 and ast.arg.beam == 0: ast = ast.replace(arg=replace(ast.arg, beam=BEAM.value))
     ubufs = [b.buffer for b in buf_uops if b.op is not Ops.BIND]
     metadata = si.arg.metadata
     if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "graph":
@@ -149,8 +150,8 @@ pm_schedule = PatternMatcher([
   (UPat(Ops.SINK, name="function"), lower_sink_to_linear),
 ])
 
-@track_rewrites(lambda _,ret: f"Schedule {pluralize('Kernel', len(ret[0]))}")
-def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[list[ExecItem], dict[str, int]]:
+@track_rewrites(lambda _,ret: f"Schedule {pluralize('Kernel', len(ret[0].src))}")
+def create_linear_with_vars(big_sink:UOp) -> tuple[UOp, dict[str, int]]:
   # big_sink srcs are all the Tensors
   linear_call = graph_rewrite(big_sink, pm_schedule, name="schedule to linear", enter_calls=True)
 
@@ -172,11 +173,7 @@ def complete_create_schedule_with_vars(big_sink:UOp) -> tuple[list[ExecItem], di
   # jit captures this schedule, no need to execute.
   if len(capturing) and CAPTURING:
     capturing[0].add_linear(linear, var_vals)
-    return [], var_vals
+    return UOp(Ops.LINEAR, src=()), var_vals
 
   held_bufs = ({b for b in linear_call.src[1:] if b.op is Ops.BUFFER} if linear_call.op is Ops.CALL else set())
-  linear = memory_plan_rewrite(linear, held_bufs)
-
-  # convert LINEAR to ExecItems
-  schedule: list[ExecItem] = linear_to_schedule(linear)
-  return schedule, var_vals
+  return memory_plan_rewrite(linear, held_bufs), var_vals

@@ -2745,14 +2745,14 @@ def asm_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, w_scale:Tensor|None=N
 
   if is_multi:
     if n_sharded:
-      out = Tensor(Tensor.invalid(batch, M, N//len(a.device), dtype=out_dtype, device=a.device).uop.multi(2), device=a.device)
+      out = Tensor(Tensor.invalids(batch, M, N//len(a.device), dtype=out_dtype, device=a.device).uop.multi(2), device=a.device)
     elif m_sharded:
-      out = Tensor(Tensor.invalid(batch, M, N, dtype=out_dtype, device=a.device).uop.multi(1), device=a.device)
+      out = Tensor(Tensor.invalids(batch, M, N, dtype=out_dtype, device=a.device).uop.multi(1), device=a.device)
     else:
-      out = Tensor(Tensor.invalid(batch//len(a.device) if a.uop.axis==0 else batch, M, N, dtype=out_dtype, device=a.device).uop.multi(0),
+      out = Tensor(Tensor.invalids(batch//len(a.device) if a.uop.axis==0 else batch, M, N, dtype=out_dtype, device=a.device).uop.multi(0),
                    device=a.device)
   else:
-    out = Tensor.invalid(batch, M, N, dtype=out_dtype, device=a.device)
+    out = Tensor.invalids(batch, M, N, dtype=out_dtype, device=a.device)
 
   renderer = Device[dname:=(a.device[0] if is_multi else a.device)].renderer
   dname, arch = dname.split(":")[0], renderer.target.arch

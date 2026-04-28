@@ -17,7 +17,7 @@ def deserialize(enc_src, opts):
   return mesa.nir_deserialize(None, ctypes.cast(opts, ctypes.POINTER(mesa.nir_shader_compiler_options)), blobreader)
 
 class LVPCompiler(CPULLVMCompiler):
-  def __init__(self, arch): CPULLVMCompiler.__init__(self, cache_key="compile_lvp")
+  def __init__(self, arch): CPULLVMCompiler.__init__(self, arch.split(","), cache_key="compile_lvp")
 
   def compile(self, src) -> bytes:
     shader, ctx = deserialize(src, mesa.lvp_nir_options), llvm.LLVMGetGlobalContext()

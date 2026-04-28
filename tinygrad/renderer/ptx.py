@@ -145,8 +145,7 @@ class PTXRenderer(Renderer):
   def __init__(self, target:Target):
     super().__init__(target)
     from tinygrad.runtime.support.compiler_cuda import NVPTXCompiler, PTXCompiler
-    from tinygrad.runtime.support.hcq import MOCKGPU
-    self.compiler = (PTXCompiler if bool(MOCKGPU) or target.device == "CUDA" else NVPTXCompiler)(target.arch)
+    self.compiler = (PTXCompiler if target.interface.startswith("MOCK") or target.device == "CUDA" else NVPTXCompiler)(target.arch)
     self.tensor_cores = PTXRenderer.tc_sm80 if (ver:=int(target.arch[3:])) >= 80 else tc.cuda_sm75 if ver >= 75 else []
 
   # language options
@@ -194,7 +193,7 @@ class PTXRenderer(Renderer):
       if u.op is Ops.SINK:
         if u.arg is not None: name = u.arg.function_name
         continue
-      if u.op is Ops.VECTORIZE:
+      if u.op is Ops.STACK:
         r[u] = [cast(str,r[x]) for x in u.src]
         continue
       if u.op is Ops.GEP:

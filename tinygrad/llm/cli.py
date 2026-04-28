@@ -1,10 +1,11 @@
 from __future__ import annotations
 import sys, argparse, codecs, typing, re, unicodedata, json, uuid, time, pathlib
-from tinygrad import Tensor, nn
-from tinygrad.helpers import partition, DEBUG, Timing, GlobalCounters, stderr_log, colored, Context
+from tinygrad import nn
+from tinygrad.uop.ops import UOp, Ops
+from tinygrad.helpers import partition, DEBUG, Timing, GlobalCounters, stderr_log, colored, Context, fetch
 from tinygrad.viz.serve import TCPServerWithReuse, HTTPRequestHandler
 from tinygrad.llm.model import Transformer
-from tinygrad.llm.agent import StreamingToolParser, parse_tool_calls, format_tools
+from tinygrad.llm.agent import format_tools, parse_tool_calls
 
 class SimpleTokenizer:
   def __init__(self, normal_tokens:dict[str, int], special_tokens:dict[str, int], preset:str="llama3",
@@ -124,30 +125,23 @@ class Handler(HTTPRequestHandler):
     finish_reason = "stop"
     st = time.perf_counter()
     dec = tok.stream_decoder()
-    # Tool call parser for streaming
-    parser = StreamingToolParser() if tools else None
     for next_id in model.generate(ids, temperature=temperature):
       if len(out) == 0: stderr_log(f"prefill:{(len(ids)-cache_start_pos)/((pt:=time.perf_counter())-st):4.0f} tok/s  {colored('--', 'BLACK')}  ")
       if tok.is_end(next_id): break
       out.append(next_id)
-      # Stream content, stripping tool calls if present
-      content = dec(next_id)
-      if parser: content = parser.process(content)
-      if content: yield {"choices": [{"index":0, "delta":{"content":content}, "finish_reason":None}], **tmpl}
+      # tool-enabled replies are buffered and parsed once at the end
+      if not tools and (content:=dec(next_id)): yield {"choices": [{"index":0, "delta":{"content":content}, "finish_reason":None}], **tmpl}
       if max_tokens is not None and len(out) >= max_tokens:
         finish_reason = "length"
         break
-    # Finalize any remaining content
-    if parser:
-      final = parser.finalize()
-      if final: yield {"choices": [{"index":0, "delta":{"content":final}, "finish_reason":None}], **tmpl}
-    # Parse tool calls from output
-    if tools:
-      calls = parser.tool_calls
-      if not calls: calls = parse_tool_calls(tok.decode(out))
-      if calls:
-        yield {"choices": [{"index":0, "delta":{"tool_calls":calls}, "finish_reason":None}], **tmpl}
-        finish_reason = "tool_calls"
+    # tool-enabled replies are parsed from the final decoded text
+    text = tok.decode(out) if tools else dec()
+    # emit tool_calls instead of assistant text when the model chose a tool
+    if tools and (calls:=parse_tool_calls(text)):
+      yield {"choices": [{"index":0, "delta":{"tool_calls":[{"index":i, **tc} for i,tc in enumerate(calls)]}, "finish_reason":None}], **tmpl}
+      finish_reason = "tool_calls"
+    elif text:
+      yield {"choices": [{"index":0, "delta":{"content":text}, "finish_reason":None}], **tmpl}
     yield {"choices": [{"index":0, "delta":{},"finish_reason":finish_reason}], **tmpl}
     if include_usage:
       yield {"choices": [], "usage": {"prompt_tokens": len(ids), "completion_tokens": len(out), "total_tokens": len(ids) + len(out)}, **tmpl}
@@ -160,7 +154,8 @@ class Handler(HTTPRequestHandler):
     def stringify_content(content):
       if content is None: return ""
       if isinstance(content, str): return content
-      if isinstance(content, list): return "".join(c["text"] for c in content if c["type"] == "text")
+      if isinstance(content, list):
+        return "".join(c["text"] for c in content if c["type"] == "text")
       raise RuntimeError(f"unknown content type: {type(content)}")
     raw_body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
     body: dict[str, typing.Any] = json.loads(raw_body.decode("utf-8"))
@@ -169,7 +164,9 @@ class Handler(HTTPRequestHandler):
       messages, last = body["messages"], len(body["messages"]) - 1
       tools = body.get("tools")
       ids: list[int] = tok.prefix()
-      if tools and (tool_text:=format_tools(tools)): ids += tok.role("system" if tok.preset != 'tekken' else "user") + tok.encode(tool_text) + tok.end_turn()
+      if tools and (tool_text:=format_tools(tools)):
+        role = "system" if tok.preset != 'tekken' else "user"
+        ids += tok.role(role) + tok.encode(tool_text) + tok.end_turn()
       for i, msg in enumerate(messages):
         if msg["role"] == "tool": continue
         ids += tok.role(msg["role"]) + tok.encode(stringify_content(msg.get("content")))
@@ -210,16 +207,12 @@ def main():
   args = parser.parse_args()
 
   # load the model
-  raw_model = Tensor.from_url(models.get(args.model, args.model))
-  model, kv = Transformer.from_gguf(raw_model, args.max_context)
+  model, kv = Transformer.from_gguf(fetch(models.get(args.model, args.model)), args.max_context)
   model_name = kv.get('general.name') or kv.get('general.basename') or args.model
-  print(f"using model \"{model_name}\" with {raw_model.nbytes():,} bytes and {sum(x.numel() for x in nn.state.get_parameters(model)):,} params")
-  del raw_model
+  file_sizes = [y.nbytes() for y in UOp.sink(*[x.uop for x in nn.state.get_parameters(model)]).toposort() if y.op is Ops.BUFFER]
+  print(f"using model \"{model_name}\" with {sum(file_sizes):,} bytes and {sum(x.numel() for x in nn.state.get_parameters(model)):,} params")
 
-  # TODO: why this is required to free the RAM of the GGUF copy?
-  import gc
-  gc.collect()
-
+  # get tokenizer
   tok = SimpleTokenizer.from_gguf_kv(kv)
 
   # warmup the JIT

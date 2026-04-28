@@ -7,7 +7,7 @@ from tinygrad.tensor import _to_np_dtype
 from tinygrad.uop.ops import Ops
 from tinygrad.dtype import DType
 from tinygrad.device import is_dtype_supported
-from tinygrad.helpers import AMX, DEV, Context
+from tinygrad.helpers import DEV, Context
 from test.helpers import slow, replace_opts
 from tinygrad.engine.realize import CompiledRunner, get_program
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
@@ -17,6 +17,8 @@ from tinygrad.codegen.opt.tc import amd_cdna_1616128
 from test.backend.test_linearizer import helper_realized_ast, helper_linearizer_opt
 
 # NOTE: get_program always passes in Device[Device.DEFAULT].renderer explicitly for process_replay!!!
+
+AMX = "AMX" in DEV.arch
 
 def helper_tc_ensure_uops_and_opts_count(N: int, M:int, K:int, dtype_in:DType, dtype_out:DType, axis:int=0, tc_select:int=-1, tc_opt:int=0,
                                          ensure_triggered:bool=True):
