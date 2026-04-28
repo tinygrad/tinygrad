@@ -51,7 +51,7 @@ def helper_tc_allclose(N:int, M:int, K:int, dtype_in:DType, dtype_out:DType, axi
   pu = to_program(replace_opts(realized_ast, opts), Device[Device.DEFAULT].renderer)
   if use_tensor_cores == 1: assert len([uop for uop in pu.src[2].src if uop.op is Ops.WMMA]) > 0, "wmma not triggered"
   assert len([x for x in pu.src[0].arg.applied_opts if x.op is OptOps.TC]) == 1, "tensor core opt not included"
-  prg = CompiledRunner(pu.replace(arg=replace(pu.arg, device=Device.DEFAULT)))
+  prg = CompiledRunner(pu, Device.DEFAULT)
   prg.exec(bufs)
   if dtype_in == dtypes.half: tc_atol, tc_rtol = 1e-2, 1e-3
   elif dtype_in == dtypes.bfloat16: tc_atol, tc_rtol = (1e-1, 2e-2) if dtype_out == dtypes.bfloat16 else (1e-2, 1e-2)
@@ -150,7 +150,7 @@ class TestTensorCores(unittest.TestCase):
         assert len([uop for uop in tuple(program.src[2].src) if uop.op is Ops.WMMA]) > 0, "tensor core not triggered"
         assert len([x for x in program.src[0].arg.applied_opts if x.op is OptOps.TC]) == 1, "tensor core opt not included"
 
-        prg = CompiledRunner(program)
+        prg = CompiledRunner(program, Device.DEFAULT)
         # TODO: support this even if numpy doesn't
         if _to_np_dtype(real_bufs[0].dtype) is None: continue
         real_bufs[0].copyin(np.zeros((real_bufs[0].size, ), dtype=_to_np_dtype(real_bufs[0].dtype)).data) # Zero to check that all values are filled

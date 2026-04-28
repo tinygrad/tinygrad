@@ -430,7 +430,7 @@ def _helper_linearizer_opt_ast(realized_ast:UOp, real_bufs:list[Buffer], opts=[]
 
   def get_prg(opts):
     ast = realized_ast if opts is None else replace_opts(realized_ast, list(opts))
-    return CompiledRunner((pu:=to_program(ast, renderer=Device[Device.DEFAULT].renderer)).replace(arg=replace(pu.arg, device=device)))
+    return CompiledRunner(to_program(ast, renderer=Device[Device.DEFAULT].renderer), device)
 
   def check_opt(opts):
     prg = get_prg(opts=opts)

@@ -90,7 +90,7 @@ renderer = Device.default.renderer
 allocator = Device.default.allocator
 
 ps = to_program(ast, renderer)
-cr = CompiledRunner(ps.replace(arg=replace(ps.arg, device=Device.DEFAULT)))
+cr = CompiledRunner(ps, Device.DEFAULT)
 
 gs = sorted(dedup([u for u in ast.toposort() if u.op is Ops.PARAM]), key=lambda u: u.arg)
 # print(len(gs))
