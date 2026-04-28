@@ -13,7 +13,6 @@ from tinygrad.device import is_dtype_supported
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.renderer.ptx import PTXRenderer
 from test.helpers import to_uops_list
-from dataclasses import replace
 
 def _uops_to_prg(uops_list):
   prg = to_program(UOp.sink(*uops_list, arg=KernelInfo()), Device[Device.DEFAULT].renderer)

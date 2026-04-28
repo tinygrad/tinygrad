@@ -1,6 +1,5 @@
 import numpy as np
 import unittest
-from dataclasses import replace
 
 from tinygrad import Device, Tensor, dtypes
 from tinygrad.tensor import _to_np_dtype

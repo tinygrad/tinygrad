@@ -1,6 +1,5 @@
 import numpy as np
 import unittest
-from dataclasses import replace
 
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.uop.ops import UOp, Ops, GroupOp, AxisType
