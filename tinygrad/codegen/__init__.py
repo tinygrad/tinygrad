@@ -1,8 +1,8 @@
 from typing import cast
 from dataclasses import replace
-import itertools, weakref
-from tinygrad.helpers import DISABLE_FAST_IDIV, DEVECTORIZE, TRANSCENDENTAL, SPEC, DEBUG, VIZ, IMAGE, NOOPT, EMULATED_DTYPES
-from tinygrad.helpers import TracingKey, Context, Target, panic
+import itertools
+from tinygrad.helpers import DISABLE_FAST_IDIV, DEVECTORIZE, TRANSCENDENTAL, SPEC, DEBUG, VIZ, IMAGE, NOOPT, EMULATED_DTYPES, NOLOCALS, USE_TC
+from tinygrad.helpers import ALLOW_TF32, TracingKey, Context, Target, panic
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, pm_lower_index_dtype, Ops, UPat, track_rewrites, KernelInfo, ProgramInfo, pyrender
 from tinygrad.uop.spec import type_verify, program_spec, kernel_spec
 from tinygrad.renderer import Renderer, Estimates
@@ -178,10 +178,11 @@ def do_to_program(ast:UOp, renderer:Renderer) -> UOp:
   if VIZ: graph_rewrite(prg, PatternMatcher([]), name="View Program")
   return prg
 
-to_program_cache: weakref.WeakValueDictionary[tuple, UOp] = weakref.WeakValueDictionary()
+to_program_cache: dict[tuple, UOp] = {}
 def to_program(ast:UOp, renderer:Renderer) -> UOp:
   if ast.op is Ops.PROGRAM and len(ast.src) >= 5 and ast.src[4].op is Ops.BINARY:
     return ast if isinstance(ast.arg, ProgramInfo) else ast.replace(arg=ProgramInfo.from_sink(ast.src[0]))
-  key = (ast.key, type(renderer), renderer.target, NOOPT.value, DEVECTORIZE.value, EMULATED_DTYPES.value)
+  config = (NOOPT, DEVECTORIZE, EMULATED_DTYPES, NOLOCALS, USE_TC, IMAGE, DISABLE_FAST_IDIV, TRANSCENDENTAL, ALLOW_TF32)
+  key = (ast.key, type(renderer), renderer.target, *[x.value for x in config])
   if (prg:=to_program_cache.get(key)) is None: to_program_cache[key] = prg = do_to_program(ast, renderer)
   return prg

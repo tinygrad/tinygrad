@@ -2,7 +2,7 @@ import gc
 from tinygrad import Tensor, UOp, Device, nn
 from tinygrad.schedule import schedule_cache
 from tinygrad.engine.realize import method_cache
-from tinygrad.codegen import to_program
+from tinygrad.codegen import to_program, to_program_cache
 from tinygrad.schedule.indexing import apply_movement_op, _apply_reshape
 from tinygrad.uop.divandmod import fold_divmod_general
 from test.test_tiny import TestTiny
@@ -72,6 +72,7 @@ if __name__ == "__main__":
     # these caches will keep uops alive
     schedule_cache.clear()
     method_cache.clear()
+    to_program_cache.clear()
     apply_movement_op.cache_clear()
     _apply_reshape.cache_clear()
     fold_divmod_general.cache_clear()
