@@ -161,6 +161,27 @@ def custom_data_deps(A:UOp, arch:str) -> UOp:
   sink = UOp.sink(A.base, threads, arg=KernelInfo("custom_data_deps"))
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg="AMD"), UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=x) for x in insts]))))
 
+def custom_wmma_simple(A:UOp) -> UOp:
+  A = A.flatten()
+  threads = UOp.special(32, "lidx0")
+  wg = UOp.special(1, "gidx0")
+  k = Kernel(arch)
+  LOOP_N, UNROLL_N = 20, 10
+  k.emit(r4.s_mov_b32(s[1], LOOP_N))
+  k.label("loop")
+  base_vgpr = 60
+  for i in range(UNROLL_N):
+    a = base_vgpr + i*16
+    b, cd = a + 4, a + 8
+    k.emit(r4.v_wmma_f32_16x16x16_f16(v[cd:cd+7], v[a:a+3], v[b:b+3], v[cd:cd+7]))
+  k.emit(r4.s_add_co_i32(s[1], s[1], -1))
+  k.emit(r4.s_cmp_eq_i32(s[1], 0))
+  k.emit(r4.s_cbranch_scc0(), target="loop")
+  k.emit(r4.s_endpgm())
+  insts = k.finalize()
+  sink = UOp.sink(A.base, threads, wg, arg=KernelInfo("custom_wmma_simple"))
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg="AMD"), UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=x) for x in insts]))))
+
 @unittest.skipUnless(Device.DEFAULT == "AMD", "requires AMD device")
 class TestCustomKernel(unittest.TestCase):
   def setUp(self): self.arch = TARGET_TO_ARCH[Device["AMD"].arch]
@@ -207,6 +228,12 @@ class TestCustomKernel(unittest.TestCase):
     a = Tensor.custom_kernel(a, fxn=functools.partial(custom_data_deps, arch=self.arch))[0]
     a.realize()
     self.assertTrue((a.numpy() == 6.0).all())
+
+  def test_wmma_simple(self):
+    if self.arch != "rdna4": self.skipTest("only tested on rdna4")
+    a = Tensor.empty(64, dtype=dtypes.int32)
+    a = Tensor.custom_kernel(a, fxn=functools.partial(custom_wmma_simple, arch=self.arch))[0]
+    a.realize()
 
 if __name__ == "__main__":
   unittest.main()
