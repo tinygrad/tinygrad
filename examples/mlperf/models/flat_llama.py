@@ -20,11 +20,10 @@ from extra.llama_kernels.rmsnorm import rmsnorm
 from extra.llama_kernels import FP8_MAX, local_abs_max
 
 ASM_GEMM = getenv("ASM_GEMM", 0)
-# Per-kernel gates. Each fused HIP kernel can be independently disabled.
-FUSED_INPUT_QUANTIZE        = getenv("FUSED_INPUT_QUANTIZE", 1)        # quantize_fp8_delayed for matmul input
-FUSED_ADD_NORM_MUL_QUANTIZE = getenv("FUSED_ADD_NORM_MUL_QUANTIZE", 1) # fused_(add_)rmsnorm_mul_quantize_fp8 (residual add fused when present)
-FUSED_SILU_W13              = getenv("FUSED_SILU_W13", 1)              # fused_quantize_fp8_w13
-GRAD_AMAX_STATE             = getenv("GRAD_AMAX_STATE", 1)             # delayed amax plumbing for matmul bwd
+FUSED_INPUT_QUANTIZE = getenv("FUSED_INPUT_QUANTIZE", 0)
+FUSED_ADD_NORM_MUL_QUANTIZE = getenv("FUSED_ADD_NORM_MUL_QUANTIZE", 0)
+FUSED_SILU_W13 = getenv("FUSED_SILU_W13", 0)
+GRAD_AMAX_STATE = getenv("GRAD_AMAX_STATE", 0)
 
 FP8_DTYPE = dtypes.fp8e4m3
 FP8_GRAD_DTYPE = dtypes.fp8e5m2
@@ -132,12 +131,8 @@ class FlatTransformer:
     def _amax(): return Tensor.full((), FP8_MAX, dtype=dtypes.float32).contiguous().requires_grad_(False)
     names = ["xqkv", "xo", "x13", "x2"]
     self._fp8_amax = {name: [_amax() for _ in range(n_layers)] for name in names}
-    # Delayed amax state for backward fp8 quantization. Init to FP8_MAX so step 0 uses scale=1.0
-    # (matches AMD/TE "zero amax -> scale=1.0" fallback). Init of 1.0 made step 0 scale = 448,
-    # clamping initial grads to 1/448 of range and diverging training.
     grad_names = ["xqkv", "xo", "xw13", "xout"]
     self._fp8_grad_amax = {name: [_amax() for _ in range(n_layers)] for name in grad_names}
-    # per-weight inv_scale: single (n_layers,) float32 tensor per weight (kernel reads float* pointers)
     w_names = ["wqkv", "wo", "w13", "w2"]
     self._fp8_inv_scale = {wname: inv_scales.float().contiguous().requires_grad_(False)
                            for wname, inv_scales in zip(w_names, self._init_inv_scales)}
@@ -146,7 +141,6 @@ class FlatTransformer:
   def lin_per_layer(self, in_features:int, out_features:int, std:float=0.02):
     if getenv("ZEROS"): w = Tensor.zeros(self.n_layers, out_features, in_features)
     else: w = Tensor.normal(self.n_layers, out_features, in_features, mean=0.0, std=std)
-    # per-layer scaled fp8 cast: fill the fp8 range for best precision
     amax = w.abs().flatten(1).max(1).detach()
     scale = FP8_MAX / (amax + 1e-8)
     self._init_inv_scales.append((amax + 1e-8) / FP8_MAX)
