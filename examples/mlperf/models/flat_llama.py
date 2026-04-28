@@ -59,9 +59,6 @@ def matmul(x:Tensor, w:Tensor, fp8:bool=True, amax_x:Tensor|None=None, w_inv_sca
 def norm_quantize_matmul(x:Tensor, norm:Tensor, w:Tensor, w_inv_scale:Tensor, eps:float,
                          amax_x:Tensor|None=None, grad_amax_state:Tensor|None=None,
                          residual:Tensor|None=None):
-  # NOTE: rmsnorm(x[+residual]) * norm -> fp8 -> matmul. When the gate is on, the residual-add is
-  # fused into the kernel if a residual is given (h_after_add returned for free), else the no-add
-  # variant fuses rmsnorm+mul+quantize. When off, falls back to fully unfused tinygrad ops.
   if FUSED_ADD_NORM_MUL_QUANTIZE:
     amax_s = amax_x if amax_x is not None else Tensor.full((), 1.0, dtype=dtypes.float32, device=x.device)
     if residual is not None:
