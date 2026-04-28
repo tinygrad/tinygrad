@@ -969,7 +969,6 @@ class KernelInfo:
 @dataclass(frozen=True)
 class ProgramInfo:
   name: str = "test"
-  device: str = ""
   global_size: tuple[int|float, ...] = (1, 1, 1)
   local_size: tuple[int, ...]|None = None
   vars: tuple[UOp, ...] = ()
@@ -990,7 +989,7 @@ class ProgramInfo:
     return global_size, local_size
 
   @staticmethod
-  def from_sink(sink:UOp, device:str, aux:tuple=()) -> ProgramInfo:
+  def from_sink(sink:UOp, aux:tuple=()) -> ProgramInfo:
     _vars: list[UOp] = []
     _globals: list[int] = []
     outs: list[int] = []
@@ -1008,7 +1007,7 @@ class ProgramInfo:
         special_size = local_size if u.arg[0] == 'l' else global_size
         if special_size is not None: special_size[int(u.arg[-1])] = cast(int, u.src[0].ssimplify())
       if u.op is Ops.DEFINE_VAR and u.arg[0] == 'core_id': global_size[0] = u.arg[2] + 1
-    return ProgramInfo(sink.arg.name if isinstance(sink.arg, KernelInfo) else "test", device, tuple(global_size),
+    return ProgramInfo(sink.arg.name if isinstance(sink.arg, KernelInfo) else "test", tuple(global_size),
                        tuple(local_size) if local_size is not None else None, tuple(sorted(_vars, key=lambda v: v.arg)),
                        tuple(sorted(dedup(_globals))), tuple(sorted(dedup(outs))), tuple(sorted(dedup(ins))), aux)
 

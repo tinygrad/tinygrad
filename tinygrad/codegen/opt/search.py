@@ -43,13 +43,13 @@ def _time_program(prg:UOp, lib:bytes, var_vals:dict[str, int], rawbufs:list[Buff
     global_size, factor = get_test_global_size(info.global_size, max_global_size, var_vals)
     prg = prg.replace(arg=replace(info, global_size=tuple(global_size)))
   if len(prg.src) <= 4 or prg.src[4].op is not Ops.BINARY: prg = prg.replace(src=prg.src + (UOp(Ops.BINARY, arg=lib),))
-  try: car = CompiledRunner(prg)
+  try: car = CompiledRunner(prg, prg.src[1].arg)
   except AssertionError: return [math.inf] * cnt
   tms = []
   input_bufs = [rawbufs[i] for i in car.p.globals]
   for _ in range(cnt):
     if clear_l2:
-      if hasattr(dev:=Device[info.device], 'invalidate_caches'): dev.invalidate_caches()
+      if hasattr(dev:=Device[prg.src[1].arg], 'invalidate_caches'): dev.invalidate_caches()
       else:
         with Context(DEBUG=0, BEAM=0, CAPTURING=0, TRACK_MATCH_STATS=0): Tensor.ones(1024,1024).contiguous().realize(do_update_stats=False)
     tms.append(unwrap(car(input_bufs, var_vals, wait=True, timeout=timeout))*factor)

@@ -1,8 +1,8 @@
 from typing import cast
 from dataclasses import replace
-import itertools
-from tinygrad.helpers import DISABLE_FAST_IDIV, DEVECTORIZE, TRANSCENDENTAL, SPEC, DEBUG, VIZ, IMAGE, NOOPT, EMULATED_DTYPES, NOLOCALS, USE_TC
-from tinygrad.helpers import ALLOW_TF32, TracingKey, Context, Target, panic
+import itertools, weakref
+from tinygrad.helpers import DISABLE_FAST_IDIV, DEVECTORIZE, TRANSCENDENTAL, SPEC, DEBUG, VIZ, IMAGE, NOOPT, EMULATED_DTYPES
+from tinygrad.helpers import TracingKey, Context, Target, panic
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, pm_lower_index_dtype, Ops, UPat, track_rewrites, KernelInfo, ProgramInfo, pyrender
 from tinygrad.uop.spec import type_verify, program_spec, kernel_spec
 from tinygrad.renderer import Renderer, Estimates
@@ -171,19 +171,17 @@ def do_to_program(ast:UOp, renderer:Renderer) -> UOp:
   elif ast.op is Ops.SINK:
     assert isinstance(ast.arg, KernelInfo), "requires KernelInfo on arg to to_program"
     full_sink = full_rewrite_to_sink(ast, renderer, optimize=ast.tag is None, beam=ast.arg.beam)
-    prg = UOp(Ops.PROGRAM, src=(full_sink, UOp(Ops.DEVICE, arg=renderer.target.device)),
-              arg=ProgramInfo.from_sink(full_sink, renderer.target.device))
+    prg = UOp(Ops.PROGRAM, src=(full_sink, UOp(Ops.DEVICE, arg=renderer.target.device)), arg=ProgramInfo.from_sink(full_sink))
   else: raise RuntimeError(f"can't call to_program on {ast.op}")
-  if not isinstance(prg.arg, ProgramInfo): prg = prg.replace(arg=ProgramInfo.from_sink(prg.src[0], prg.src[1].arg))
+  if not isinstance(prg.arg, ProgramInfo): prg = prg.replace(arg=ProgramInfo.from_sink(prg.src[0]))
   prg = graph_rewrite(prg, pm_to_program, ctx=renderer, name="linearize/render")
   if VIZ: graph_rewrite(prg, PatternMatcher([]), name="View Program")
   return prg
 
-to_program_cache: dict[tuple, UOp] = {}
+to_program_cache: weakref.WeakValueDictionary[tuple, UOp] = weakref.WeakValueDictionary()
 def to_program(ast:UOp, renderer:Renderer) -> UOp:
   if ast.op is Ops.PROGRAM and len(ast.src) >= 5 and ast.src[4].op is Ops.BINARY:
-    return ast if isinstance(ast.arg, ProgramInfo) else ast.replace(arg=ProgramInfo.from_sink(ast.src[0], ast.src[1].arg))
-  config = (NOOPT, DEVECTORIZE, EMULATED_DTYPES, NOLOCALS, USE_TC, IMAGE, DISABLE_FAST_IDIV, TRANSCENDENTAL, ALLOW_TF32)
-  key = (ast.key, type(renderer), renderer.target, *[x.value for x in config])
+    return ast if isinstance(ast.arg, ProgramInfo) else ast.replace(arg=ProgramInfo.from_sink(ast.src[0]))
+  key = (ast.key, type(renderer), renderer.target, NOOPT.value, DEVECTORIZE.value, EMULATED_DTYPES.value)
   if (prg:=to_program_cache.get(key)) is None: to_program_cache[key] = prg = do_to_program(ast, renderer)
   return prg
