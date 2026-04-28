@@ -985,7 +985,7 @@ class ProgramInfo:
   def runtimevars(self) -> dict[str, int]: return {v.expr: i for i, v in enumerate(self.vars) if v.expr == 'core_id'}
 
   def launch_dims(self, var_vals:dict[str, int]):
-    global_size = [sym_infer(sz, var_vals) for sz in self.global_size]
+    global_size = [sym_infer(sz, var_vals) for sz in self.global_size]  # type: ignore[arg-type]
     local_size = [sym_infer(sz, var_vals) for sz in self.local_size] if self.local_size is not None else None
     return global_size, local_size
 
