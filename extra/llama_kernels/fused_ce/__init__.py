@@ -37,7 +37,7 @@ def _custom_fused_ce_loss_bwd(d_logits:UOp, logits:UOp, lse:UOp, targets:UOp, sc
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dname), UOp(Ops.LINEAR, src=(*sink.src, sink)),
                                UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=lib)))
 
-def _fused_ce_loss_bwd(gradient:UOp, kernel:UOp):
+def _fused_ce_loss_bwd(gradient:UOp, kernel:UOp, label_smoothing:float):
   # NOTE: forward inputs are (loss_out, max_out, lse_out, logits, targets)
   # gradient is the upstream grad w.r.t. per-row loss (shape: (rows,) fp32)
   _, _, lse_u, logits_u, targets_u = kernel.src[1:]
@@ -94,5 +94,5 @@ def fused_ce_loss(logits:Tensor, targets:Tensor, label_smoothing:float=0.1) -> T
                           label_smoothing=label_smoothing)
   loss_out, max_out, lse_out, *_ = Tensor.custom_kernel(
     loss_out, max_out, lse_out, logits_flat, targets_flat,
-    fxn=fxn, grad_fxn=_fused_ce_loss_bwd)
+    fxn=fxn, grad_fxn=functools.partial(_fused_ce_loss_bwd, label_smoothing=label_smoothing))
   return loss_out.mean()
