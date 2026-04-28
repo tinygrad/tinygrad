@@ -902,11 +902,11 @@ MTLIOCompressionMethod: TypeAlias = NSInteger
 def MTLCreateSystemDefaultDevice() -> MTLDevice: ...
 MTLCreateSystemDefaultDevice = objc.returns_retained(MTLCreateSystemDefaultDevice)
 MTLDeviceNotificationName: TypeAlias = NSString
-try: MTLDeviceWasAddedNotification = MTLDeviceNotificationName.in_dll(dll, 'MTLDeviceWasAddedNotification') # type: ignore
+try: MTLDeviceWasAddedNotification = MTLDeviceNotificationName.in_dll(dll, 'MTLDeviceWasAddedNotification')
 except (ValueError,AttributeError): pass
-try: MTLDeviceRemovalRequestedNotification = MTLDeviceNotificationName.in_dll(dll, 'MTLDeviceRemovalRequestedNotification') # type: ignore
+try: MTLDeviceRemovalRequestedNotification = MTLDeviceNotificationName.in_dll(dll, 'MTLDeviceRemovalRequestedNotification')
 except (ValueError,AttributeError): pass
-try: MTLDeviceWasRemovedNotification = MTLDeviceNotificationName.in_dll(dll, 'MTLDeviceWasRemovedNotification') # type: ignore
+try: MTLDeviceWasRemovedNotification = MTLDeviceNotificationName.in_dll(dll, 'MTLDeviceWasRemovedNotification')
 except (ValueError,AttributeError): pass
 @dll.bind(None, NSObject)
 def MTLRemoveDeviceObserver(observer:NSObject) -> None: ...
@@ -1457,9 +1457,9 @@ MTLCommandEncoder._methods_ = [
   ('label', NSString, []),
   ('setLabel:', None, [NSString]),
 ]
-MTLResourceCPUCacheModeShift = 0 # type: ignore
-MTLResourceCPUCacheModeMask = (0xf << MTLResourceCPUCacheModeShift) # type: ignore
-MTLResourceStorageModeShift = 4 # type: ignore
-MTLResourceStorageModeMask = (0xf << MTLResourceStorageModeShift) # type: ignore
-MTLResourceHazardTrackingModeShift = 8 # type: ignore
-MTLResourceHazardTrackingModeMask = (0x3 << MTLResourceHazardTrackingModeShift) # type: ignore
+MTLResourceCPUCacheModeShift = 0
+MTLResourceCPUCacheModeMask = (0xf << MTLResourceCPUCacheModeShift)
+MTLResourceStorageModeShift = 4
+MTLResourceStorageModeMask = (0xf << MTLResourceStorageModeShift)
+MTLResourceHazardTrackingModeShift = 8
+MTLResourceHazardTrackingModeMask = (0x3 << MTLResourceHazardTrackingModeShift)

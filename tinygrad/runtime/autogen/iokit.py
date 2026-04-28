@@ -10,12 +10,12 @@ IONotificationPortRef: TypeAlias = c.POINTER[struct_IONotificationPort]
 IOServiceMatchingCallback: TypeAlias = c.CFUNCTYPE[None, [ctypes.c_void_p, ctypes.c_uint32]]
 IOServiceInterestCallback: TypeAlias = c.CFUNCTYPE[None, [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p]]
 mach_port_t: TypeAlias = ctypes.c_uint32
-try: kIOMainPortDefault = mach_port_t.in_dll(dll, 'kIOMainPortDefault') # type: ignore
+try: kIOMainPortDefault = mach_port_t.in_dll(dll, 'kIOMainPortDefault')
 except (ValueError,AttributeError): pass
 kern_return_t: TypeAlias = ctypes.c_int32
 @dll.bind(kern_return_t, mach_port_t, c.POINTER[mach_port_t])
 def IOMainPort(bootstrapPort:mach_port_t, mainPort:c.POINTER[mach_port_t]) -> kern_return_t: ...
-try: kIOMasterPortDefault = mach_port_t.in_dll(dll, 'kIOMasterPortDefault') # type: ignore
+try: kIOMasterPortDefault = mach_port_t.in_dll(dll, 'kIOMasterPortDefault')
 except (ValueError,AttributeError): pass
 @dll.bind(kern_return_t, mach_port_t, c.POINTER[mach_port_t])
 def IOMasterPort(bootstrapPort:mach_port_t, mainPort:c.POINTER[mach_port_t]) -> kern_return_t: ...
