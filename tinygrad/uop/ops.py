@@ -970,7 +970,7 @@ class KernelInfo:
 class ProgramInfo:
   name: str = "test"
   device: str = ""
-  global_size: tuple[int, ...] = (1, 1, 1)
+  global_size: tuple[int|float, ...] = (1, 1, 1)
   local_size: tuple[int, ...]|None = None
   vars: tuple[UOp, ...] = ()
   globals: tuple[int, ...] = ()

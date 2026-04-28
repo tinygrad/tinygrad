@@ -110,7 +110,7 @@ class GraphRunner(Runner):
 
     self.var_vals_replace:dict[int, list[tuple[int, int]]] = {}
     self.launch_dims_replace:dict[int, tuple[int|None, int|None]] = {}
-    self.launch_dims_base:dict[int, tuple[tuple[int, ...], tuple[int, ...]]] = {}
+    self.launch_dims_base:dict[int, tuple[tuple[int|float, ...], tuple[int, ...]]] = {}
 
     def is_sym_dim(dim) -> bool: return not all(isinstance(d, (int, float)) for d in dim)
 

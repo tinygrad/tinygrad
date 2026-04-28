@@ -56,21 +56,26 @@ class Runner:
   def __call__(self, rawbufs:list[Buffer], var_vals:dict[str, int], wait=False) -> float|None:
     raise NotImplementedError("override this")
 
+local_size_cache: dict[bytes, tuple[int, ...]] = {}
 def optimize_local_size(call:UOp, prg:UOp) -> UOp|None:
-  info: ProgramInfo = prg.arg
-  if info.local_size is not None or not Device[info.device].renderer.has_local or not all_int(info.global_size): return None
-  bufs = [b._buf for b in (b.allocate() for b in bufs_from_ast(prg.src[0], info.device))]
-  _prg = Device[info.device].runtime(info.function_name, prg.src[4].arg, *info.aux, runtimevars=info.runtimevars)
-  MAX_WORKGROUP = 1024
-  local_dims = [[x for x in set([sz, 1, 2, 4, 8, 16, 32, 64, 128, 256, MAX_WORKGROUP]) if x<=sz] for sz in info.global_size]
-  local_sizes = [list(x) for x in itertools.product(*local_dims) if prod(x) <= MAX_WORKGROUP] * 2  # try each valid size twice
-  def try_exec(local_size):
-    try: return _prg(*bufs, global_size=[g//l if g%l == 0 else g/l for g,l in zip(info.global_size, local_size)], local_size=local_size, wait=True)
-    except Exception: return float('inf')
-  best_time, local_size = min([(try_exec(ls), ls) for ls in random.sample(local_sizes, len(local_sizes))])
-  assert not math.isinf(best_time), "all optimize_local_size exec failed"
-  new_global = tuple(g//l if g%l == 0 else g/l for g,l in zip(info.global_size, local_size))
-  return call.replace(src=(prg.replace(arg=replace(info, global_size=new_global, local_size=tuple(local_size))), *call.src[1:]))
+  if prg.arg.local_size is not None or not Device[prg.arg.device].renderer.has_local or not all_int(prg.arg.global_size): return None
+
+  if (local_size:=local_size_cache.get(prg.key)) is None:
+    bufs = [b._buf for b in (b.allocate() for b in bufs_from_ast(prg.src[0], prg.arg.device))]
+    rt = Device[prg.arg.device].runtime(prg.arg.function_name, prg.src[4].arg, *prg.arg.aux, runtimevars=prg.arg.runtimevars)
+    def try_exec(local_size):
+      try: return rt(*bufs, global_size=[g//l if g%l == 0 else g/l for g,l in zip(prg.arg.global_size, local_size)], local_size=local_size, wait=True)
+      except Exception: return float('inf')
+
+    MAX_WORKGROUP = 1024
+    local_dims = [[x for x in set([sz, 1, 2, 4, 8, 16, 32, 64, 128, 256, MAX_WORKGROUP]) if x<=sz] for sz in prg.arg.global_size]
+    local_sizes = [list(x) for x in itertools.product(*local_dims) if prod(x) <= MAX_WORKGROUP] * 2  # try each valid size twice
+    best_time, best = min([(try_exec(ls), ls) for ls in random.sample(local_sizes, len(local_sizes))])
+    assert not math.isinf(best_time), "all optimize_local_size exec failed"
+    local_size = local_size_cache[prg.key] = tuple(best)
+
+  new_global = tuple(g//l if g%l == 0 else g/l for g,l in zip(prg.arg.global_size, local_size))
+  return call.replace(src=(prg.replace(arg=replace(prg.arg, global_size=new_global, local_size=local_size)), *call.src[1:]))
 
 class CompiledRunner(Runner):
   def __init__(self, prg:UOp, _prg=None):
