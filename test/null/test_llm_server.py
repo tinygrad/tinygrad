@@ -192,6 +192,20 @@ class TestLLMServer(unittest.TestCase):
     self.assertEqual(self.mock_tok.end_turn.call_count, 3)
     self.assertEqual(self.mock_tok.role.call_count, 4)
 
+  def test_tools_supported_by_default(self):
+    self.mock_model.generate = Mock(side_effect=lambda ids, **kwargs: iter([300, 999]))
+    self.mock_tok.role.reset_mock()
+    self.mock_tok.encode.reset_mock()
+
+    self.client.chat.completions.create(
+      model="test", messages=[{"role": "user", "content": "What's the weather?"}], stream=False,
+      tools=[{"type":"function", "function":{"name":"get_weather", "description":"Get weather", "parameters":{"type":"object", "properties":{}}}}]
+    )
+
+    encoded = [call.args[0] for call in self.mock_tok.encode.call_args_list]
+    self.assertTrue(any("# Tools" in text and "get_weather" in text for text in encoded))
+    self.assertEqual(self.mock_tok.role.call_args_list[0], unittest.mock.call("system"))
+
   def test_models_endpoint(self):
     import requests as req
     resp = req.get(f"http://127.0.0.1:{self.port}/v1/models")

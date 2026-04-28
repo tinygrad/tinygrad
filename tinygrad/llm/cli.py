@@ -167,7 +167,7 @@ class Handler(HTTPRequestHandler):
     if DEBUG >= 1: print(json.dumps(body, indent=2))
     if self.path == "/v1/chat/completions":
       messages, last = body["messages"], len(body["messages"]) - 1
-      tools = body.get("tools") if self.server.enable_tools else None
+      tools = body.get("tools")
       ids: list[int] = tok.prefix()
       if tools and (tool_text:=format_tools(tools)): ids += tok.role("system" if tok.preset != 'tekken' else "user") + tok.encode(tool_text) + tok.end_turn()
       for i, msg in enumerate(messages):
@@ -196,9 +196,8 @@ class Handler(HTTPRequestHandler):
       raise RuntimeError(f"unhandled path {self.path}")
 
 class LLMServer(TCPServerWithReuse):
-  def __init__(self, server_address:tuple, model:Transformer, model_name:str, tok:SimpleTokenizer, enable_tools=False):
+  def __init__(self, server_address:tuple, model:Transformer, model_name:str, tok:SimpleTokenizer):
     self.model, self.model_name, self.tok = model, model_name, tok
-    self.enable_tools = enable_tools
     super().__init__(server_address, Handler)
 
 def main():
@@ -208,7 +207,6 @@ def main():
   parser.add_argument("--serve", nargs='?', type=int, const=8000, metavar="PORT", help="Run OpenAI compatible API (optional port, default 8000)")
   parser.add_argument("--warmup", action="store_true", help="warmup the JIT")
   parser.add_argument("--benchmark", nargs='?', type=int, const=20, metavar="COUNT", help="Benchmark tok/s (optional count, default 20)")
-  parser.add_argument("--agent", action="store_true", help="Enable agent mode with tool calling support (default: disabled)")
   args = parser.parse_args()
 
   # load the model
@@ -231,7 +229,7 @@ def main():
       for _ in range(2): list(zip(range(2), model.generate([0])))
 
   # start server
-  if args.serve: LLMServer(('', args.serve), model, model_name, tok, enable_tools=args.agent).serve_forever()
+  if args.serve: LLMServer(('', args.serve), model, model_name, tok).serve_forever()
 
   # do benchmark
   if args.benchmark is not None:
