@@ -11,6 +11,7 @@ EXAMPLES = {
   "gemm":"-c \"from tinygrad import Tensor; (Tensor.empty(N:=32, N)@Tensor.empty(N, N)).realize()\"",
   "sync":"test/amd/test_custom_kernel.py TestCustomKernel.test_lds_sync",
   "handwritten":"test/amd/test_custom_kernel.py TestCustomKernel.test_handwritten",
+  "wmma":"test/amd/test_custom_kernel.py TestCustomKernel.test_wmma_simple",
 }
 
 if __name__ == "__main__":
