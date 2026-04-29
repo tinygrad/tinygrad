@@ -6,7 +6,7 @@ from tinygrad.mixin.movement import MovementMixin
 from tinygrad.mixin.reduce import ReduceMixin
 from tinygrad.uop import Ops
 from tinygrad.uop.ops import _broadcast_shape, resolve, smax, smin, identity_element
-from tinygrad.dtype import ConstType, DTypeLike, Invalid, InvalidType, PtrDType, PyConst, dtypes, least_upper_dtype, sum_acc_dtype, to_dtype
+from tinygrad.dtype import ConstType, DType, DTypeLike, Invalid, InvalidType, PtrDType, PyConst, dtypes, least_upper_dtype, sum_acc_dtype, to_dtype
 from tinygrad.helpers import all_int, argfix, ceildiv, flatten, flat_to_grouped, make_tuple, prod, resolve_pool_pads, round_up
 
 if TYPE_CHECKING:
@@ -212,6 +212,14 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
       counts1 = counts0 + ceildiv(chunk_num, 2)
       bits.append(cls._threefry_random_bits(new_key, counts0, counts1)[:chunk_num])
     return bits[0].cat(*bits[1:])
+
+  @staticmethod
+  def _bits_to_rand(bits, shape:tuple[int, ...], dtype:DType):
+    _, nmant = dtypes.finfo(dtype)
+    uint_dtype = {1: dtypes.uint8, 2: dtypes.uint16, 4: dtypes.uint32, 8: dtypes.uint64}[dtype.itemsize]
+    uint_bits = bits.bitcast(uint_dtype)
+    float_one_bits = uint_bits.ones_like(dtype=dtype).bitcast(uint_dtype)
+    return uint_bits.rshift(dtype.bitsize - nmant).bitwise_or(float_one_bits).bitcast(dtype)[:prod(shape)].sub(1).reshape(shape)
 
   def _pad_constant(self, pX, value:float) -> Self:
     # shrink first for negative pads, then pad with only non-negative values
