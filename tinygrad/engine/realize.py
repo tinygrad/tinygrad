@@ -118,20 +118,6 @@ class CompiledRunner(Runner):
 
 # **************** method cache ****************
 
-method_cache: dict[tuple[str, type, bytes, tuple, bool], CompiledRunner] = {}
-def get_runner(device:str, ast:UOp) -> CompiledRunner:
-  # TODO: this should be all context relevant to rendering
-  context = (NOOPT.value, DEVECTORIZE.value, EMULATED_DTYPES.value)
-  ckey = (device, type(Device[device].compiler), ast.key, context, False)
-  if cret:=method_cache.get(ckey): return cret
-  bkey = (device.split(":")[0], type(Device[device].compiler), ast.key, context, True)
-  if bret:=method_cache.get(bkey):
-    method_cache[ckey] = ret = CompiledRunner(bret.prg, device)
-  else:
-    prg = to_program(ast, Device[device].renderer)
-    method_cache[ckey] = method_cache[bkey] = ret = CompiledRunner(prg, device)
-  return ret
-
 runtime_cache: dict[tuple[bytes, str], Any] = {}
 def get_runtime(device:str, ast:UOp):
   assert ast.op is Ops.PROGRAM and isinstance(ast.arg, ProgramInfo), "get_runtime should only be called with a PROGRAM ast"
