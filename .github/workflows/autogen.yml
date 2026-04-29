@@ -52,7 +52,7 @@ jobs:
         python3 -c "from tinygrad.runtime.autogen import libc, kfd, io_uring, ib, pci, vfio"
         python3 -c "from tinygrad.runtime.autogen import llvm"
         python3 -c "from tinygrad.runtime.autogen import webgpu"
-        python3 -c "from tinygrad.runtime.autogen import kgsl, qcom_dsp"
+        python3 -c "from tinygrad.runtime.autogen import kgsl, qcom_dsp, msm_drm"
         python3 -c "from tinygrad.runtime.autogen import libusb"
         python3 -c "from tinygrad.runtime.autogen import mesa"
         python3 -c "from tinygrad.runtime.autogen import avcodec"
