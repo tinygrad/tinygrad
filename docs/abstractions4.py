@@ -105,7 +105,7 @@ def example_3_custom_uop(a:Tensor, correct):
 def example_5_custom_assembly(a:Tensor, correct):
   # Kernel class copied from amd_asm_matmul
   class Kernel:
-    def __init__(self, arch='gfx1100'): self.instructions, self.labels, self.pos, self.arch = [], {}, 0, arch
+    def __init__(self): self.instructions, self.labels, self.pos = [], {}, 0
     def label(self, name): self.labels[name] = self.pos
     def emit(self, inst, target=None):
       self.instructions.append(inst)

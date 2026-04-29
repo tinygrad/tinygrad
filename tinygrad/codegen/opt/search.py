@@ -1,12 +1,12 @@
-import functools, math, time, multiprocessing, traceback, signal, atexit
+import math, time, multiprocessing, traceback, signal, atexit
 from dataclasses import replace
-from tinygrad.uop.ops import sym_infer, AxisType, pyrender, UOp, Ops
-from tinygrad.device import Device, Buffer, Compiler
+from tinygrad.uop.ops import sym_infer, AxisType, pyrender, UOp
+from tinygrad.device import Device, Buffer
 from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, colored, time_to_str, unwrap
 from tinygrad.helpers import IGNORE_BEAM_CACHE
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 from tinygrad.tensor import Tensor
-from tinygrad.engine.realize import CompiledRunner
+from tinygrad.engine.realize import get_runtime
 from tinygrad.codegen import to_program
 from tinygrad.codegen.opt.postrange import Scheduler
 
@@ -34,25 +34,24 @@ def get_test_global_size(global_size, max_global_size, var_vals):
         break
   return test_global_size, input_size / prod(test_global_size)
 
-def _time_program(prg:UOp, lib:bytes, var_vals:dict[str, int], rawbufs:list[Buffer], early_stop:float|None=None,
+def _time_program(prg:UOp, var_vals:dict[str, int], rawbufs:list[Buffer], early_stop:float|None=None,
                   allow_test_size:int=True, max_global_size:int|None=65536, clear_l2=False, cnt=3, name="test", dev_timeout=False) -> list[float]:
   timeout = int(early_stop * 1e3) if dev_timeout and early_stop is not None and early_stop < math.inf else None
   factor = 1
-  info = prg.arg
   if allow_test_size and max_global_size is not None:
-    global_size, factor = get_test_global_size(info.global_size, max_global_size, var_vals)
-    prg = prg.replace(arg=replace(info, global_size=tuple(global_size)))
-  if len(prg.src) <= 4 or prg.src[4].op is not Ops.BINARY: prg = prg.replace(src=prg.src + (UOp(Ops.BINARY, arg=lib),))
-  try: car = CompiledRunner(prg, prg.src[1].arg)
+    global_size, factor = get_test_global_size(prg.arg.global_size, max_global_size, var_vals)
+    prg = prg.replace(arg=replace(prg.arg, global_size=tuple(global_size)))
+  try: rt = get_runtime(prg.src[1].arg, prg)
   except AssertionError: return [math.inf] * cnt
+  global_size, local_size = prg.arg.launch_dims(var_vals)
+  bufs = [rawbufs[i]._buf for i in prg.arg.globals]
   tms = []
-  input_bufs = [rawbufs[i] for i in car.p.globals]
   for _ in range(cnt):
     if clear_l2:
       if hasattr(dev:=Device[prg.src[1].arg], 'invalidate_caches'): dev.invalidate_caches()
       else:
         with Context(DEBUG=0, BEAM=0, CAPTURING=0, TRACK_MATCH_STATS=0): Tensor.ones(1024,1024).contiguous().realize(do_update_stats=False)
-    tms.append(unwrap(car(input_bufs, var_vals, wait=True, timeout=timeout))*factor)
+    tms.append(unwrap(rt(*bufs, global_size=global_size, local_size=local_size, vals=prg.arg.vals(var_vals), wait=True, timeout=timeout))*factor)
     if early_stop is not None and early_stop < min(tms): break
   return tms
 
@@ -61,22 +60,21 @@ def timeout_handler(signum, frame):
   if DEBUG >= 2: print("*** BEAM COMPILE TIMEOUT")
   raise TimeoutException()
 
-def _try_compile(x:tuple[int,Scheduler], compiler:Compiler) -> tuple[int, tuple[UOp, bytes, float]|None]:
+def _try_compile(x:tuple[int,Scheduler]) -> tuple[int, tuple[UOp, float]|None]:
   if hasattr(signal, "alarm"):
     signal.signal(getattr(signal, 'SIGALRM'), timeout_handler)
     # set timeout
     signal.alarm(getenv("BEAM_TIMEOUT_SEC", 10))
   ret = None
   try:
+    st = time.perf_counter()
     prg = to_program(x[1].copy().get_optimized_ast(name_override="test"), x[1].ren)
+    et = time.perf_counter() - st
     uops = prg.src[2].src
     if len(uops) >= (uops_max:=getenv("BEAM_UOPS_MAX", 3000)) > 0:
       if getenv("BEAM_LOG_SURPASS_MAX"): print(f"too many uops. {len(uops)=}, {uops_max=}")
       raise RuntimeError("too many uops")
-    st = time.perf_counter()
-    prog = prg.src[4].arg if len(prg.src) > 4 and prg.src[4].op is Ops.BINARY else compiler.compile(prg.src[3].arg)
-    et = time.perf_counter() - st
-    ret = (prg, prog, et)
+    ret = (prg, et)
   except RuntimeError:
     if DEBUG >= 4: traceback.print_exc()
   except Exception as e:
@@ -150,12 +148,11 @@ def beam_search(s:Scheduler, rawbufs:list[Buffer], amt:int, allow_test_size=True
     while not exiting:
       candidates: list[Scheduler] = flatten([get_kernel_actions(si, include_0=False).values() for si,_ in beam])
       timed: list[tuple[Scheduler, float]] = []
-      _compile_fn = functools.partial(_try_compile, compiler=dev.compiler)
       least_compute_ops = math.inf
-      for i,proc in (map(_compile_fn, enumerate(candidates)) if beam_pool is None else beam_pool.imap_unordered(_compile_fn, enumerate(candidates))):
+      for i, proc in ((map if beam_pool is None else beam_pool.imap_unordered)(_try_compile, enumerate(candidates))):
         if proc is None: continue
-        prg, lib, compile_et = proc
-        if lib in seen_libs: continue
+        prg, compile_et = proc
+        if (lib:=prg.src[4].arg) in seen_libs: continue
         # filter out kernels that use 1000x more compute than the smallest
         estimates = prg.src[0].arg.estimates
         least_compute_ops = min(this_compute_ops:=sym_infer(estimates.ops if estimates is not None else 0, var_vals), least_compute_ops)
@@ -163,7 +160,7 @@ def beam_search(s:Scheduler, rawbufs:list[Buffer], amt:int, allow_test_size=True
           if getenv("BEAM_LOG_SURPASS_MAX"): print(f"too much compute. {this_compute_ops} when least is {least_compute_ops}")
           continue
         seen_libs.add(lib)
-        try: tms = _time_program(prg, lib, var_vals, rawbufs, early_stop=beam[0][1]*3 if len(beam) else 1.0,
+        try: tms = _time_program(prg, var_vals, rawbufs, early_stop=beam[0][1]*3 if len(beam) else 1.0,
                                  allow_test_size=allow_test_size, clear_l2=hasattr(dev, 'invalidate_caches'),
                                  dev_timeout=getenv("BEAM_DEV_TIMEOUT", 1))
         except Exception as e:

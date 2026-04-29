@@ -167,7 +167,7 @@ PREFETCH_LOADS = [(V_LDS_A_DATA[4+2*i], V_LDS_A_DATA[4+2*i+1], V_GLOBAL_B_ADDR, 
 # =============================================================================
 
 class Kernel:
-  def __init__(self, arch='gfx1100'): self.instructions, self.labels, self.pos, self.arch = [], {}, 0, arch
+  def __init__(self): self.instructions, self.labels, self.pos = [], {}, 0
   def label(self, name): self.labels[name] = self.pos
 
   def emit(self, inst, target=None):
@@ -196,10 +196,10 @@ class Kernel:
 # Kernel builder
 # =============================================================================
 
-def build_kernel(N, arch='gfx1100'):
+def build_kernel(N):
   assert N % 128 == 0, f"N must be a multiple of 128 (tile size), got {N}"
   assert N >= 256, f"N must be >= 256 (prefetch pipeline requires at least 2 K-blocks), got {N}"
-  k = Kernel(arch)
+  k = Kernel()
 
   # ===========================================================================
   # PROLOGUE: Load kernel arguments, compute tile coordinates and addresses
@@ -443,7 +443,7 @@ def test_matmul():
   dev = Device[Device.DEFAULT]
   print(f"Device arch: {dev.renderer.target.arch}")
 
-  insts = build_kernel(N, dev.renderer.target.arch)
+  insts = build_kernel(N)
 
   rng = np.random.default_rng(42)
   a = Tensor(rng.random((N, N), dtype=np.float32) - 0.5)
