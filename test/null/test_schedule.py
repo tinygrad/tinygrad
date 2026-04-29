@@ -380,7 +380,7 @@ class TestSchedule(unittest.TestCase):
     r1 = (x - r0).sum(axis=0).div(2)
     out = r0 + r1
     linear, _ = check_schedule(out, 2)
-    reduceops = [x for si in linear.src for x in si.src[0].toposort() if x.op in {Ops.REDUCE_AXIS, Ops.REDUCE}]
+    reduceops = [x for si in linear.src for x in si.src[0].toposort() if x.op is Ops.REDUCE]
     assert len(reduceops) == 2
 
   def test_cache_reduce_multiple_children(self):
@@ -391,7 +391,7 @@ class TestSchedule(unittest.TestCase):
     out0 = r0 + y
     out1 = r1 + y
     linear, _ = check_schedule([out0, out1], 3)
-    reduceops = [x for si in linear.src for x in si.src[0].toposort() if x.op in {Ops.REDUCE_AXIS, Ops.REDUCE}]
+    reduceops = [x for si in linear.src for x in si.src[0].toposort() if x.op is Ops.REDUCE]
     self.assertEqual(len(reduceops), 2) # why is RANGEIFY different?
 
   def test_dedup_assign(self):
