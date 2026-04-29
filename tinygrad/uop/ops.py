@@ -209,10 +209,11 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
   @recursive_property
   def _shape(self) -> tuple[sint, ...]|None:
+    if self.dtype.count > 1 and self.op not in GroupOp.Movement and self.op is not Ops.GEP: return (self.dtype.count,)
     match self.op:
       # late ops don't have shape
       case Ops.UNIQUE | Ops.LUNIQUE | Ops.DEVICE | Ops.IF | Ops.BARRIER | Ops.CUSTOM | Ops.CUSTOMI | \
-           Ops.STACK | Ops.GEP | Ops.UNROLL | Ops.CONTRACT | Ops.SINK | Ops.END | \
+           Ops.STACK | Ops.UNROLL | Ops.CONTRACT | Ops.SINK | Ops.END | \
            Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE | Ops.BINARY | Ops.INS | Ops.TUPLE | Ops.CALL | Ops.FUNCTION:
         return None
 
@@ -233,12 +234,12 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
           return None
 
       case Ops.INDEX:
-        # non pointer index doesn't have a shape
-        if not isinstance(self.dtype, PtrDType): return None
-        # fully indexed doesn't have a shape. TODO: remove this
-        if self.src[0]._shape is None or len(self.src[1:]) == len(self.src[0].shape): return None
-        # pointer index
-        return self.src[0].shape[len(self.src[1:]):]
+        if self.src[0]._shape is None: return None
+        idx_srcs = self.src[1:-1] if len(self.src) > 1 and self.src[-1].dtype is dtypes.bool else self.src[1:]
+        return self.src[0].shape[len(idx_srcs):]
+
+      case Ops.GEP:
+        return None if self.src[0]._shape is None else self.src[0].shape[:-1] + ((len(self.arg),) if len(self.arg) > 1 else ())
 
       # some ops init the shape
       case Ops.CONST | Ops.DEFINE_VAR | Ops.BIND | Ops.RANGE | Ops.SPECIAL: return ()
@@ -492,7 +493,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     ret = UOp(Ops.VCONST if isinstance(b, tuple) else Ops.CONST, dtype,
               arg=dtype.const(b),
               src=(UOp(Ops.DEVICE, arg=device),) if device is not None else ())
-    return ret.reshape((1,)*len(shape)).expand(shape) if shape is not None else ret
+    return ret if shape is None or ret.shape == shape else ret.reshape((1,)*(len(shape)-len(ret.shape)) + ret.shape).expand(shape)
   @staticmethod
   def unique_const(fill_value:ConstType, dtype:DTypeLike|None=None, device:str|tuple[str, ...]|None=None,  # type: ignore[override]
                    shape:tuple[sint, ...]|None=None, unique=True):
@@ -500,7 +501,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     assert not isinstance(fill_value, (UOp, tuple)), "unique const only works on numbers"
     ret = UOp.const(to_dtype(dtype) if dtype is not None else dtypes.from_py(fill_value), fill_value, canonicalize_device(device))
     ret = ret.replace(src=(UOp.unique(None if unique is True else unique),) + ret.src)
-    return ret.reshape((1,)*len(shape)).expand(shape) if shape is not None else ret
+    return ret if shape is None or ret.shape == shape else ret.reshape((1,)*(len(shape)-len(ret.shape)) + ret.shape).expand(shape)
   @staticmethod
   def range(end:sint, axis_id, axis_type=AxisType.LOOP, *arg, dtype=dtypes.weakint, src=(), **kwargs):
     return UOp(Ops.RANGE, dtype=dtype, src=(sint_to_uop(end, dtype),)+src, arg=(axis_id, axis_type)+arg, **kwargs)
