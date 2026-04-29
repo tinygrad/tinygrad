@@ -234,7 +234,6 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
         if isinstance(self.src[0].dtype, PtrDType) and not isinstance(self.src[0].dtype, ImageDType) and not isinstance(self.dtype, PtrDType):
           return None
 
-      case Ops.STACK: return (len(self.src),)
       case Ops.INDEX:
         # if it has a vec dtype, set the shape
         if self.dtype.count > 1: return (self.dtype.count,)
@@ -246,11 +245,11 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
         return self.src[0].shape[len(self.src[1:]):]
 
       # some ops init the shape
-      case Ops.DEFINE_VAR | Ops.BIND | Ops.RANGE | Ops.SPECIAL: return ()
-      case Ops.CONST:
-        # CONST can have shape if it has a vec dtype
+      case Ops.CONST | Ops.DEFINE_VAR:
+        # these can have shape if it has a vec dtype
         if self.dtype.count > 1: return (self.dtype.count,)
         return ()
+      case Ops.BIND | Ops.RANGE | Ops.SPECIAL: return ()
       case Ops.VCONST: return (len(self.arg),)
       case Ops.BUFFER: return (self.arg,)
       case Ops.BUFFER_VIEW: return (self.arg[0],)
