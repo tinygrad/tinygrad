@@ -67,7 +67,7 @@ def main(args) -> None:
         if m.get("uop"): print(fmt(m["uop"]))
         if m.get("diff"):
           loc = pathlib.Path(m["upat"][0][0])
-          print(fmt(f"Rewrite at {loc.parent.name}/{loc.name}:{m['upat'][0][1]}\n{m['upat'][1]}"))
+          print(fmt(f"{loc.parent.name}/{loc.name}:{m['upat'][0][1]}\n{m['upat'][1]}"))
           for line in m["diff"]: print(fmt(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None)))
     if data.get("src") is not None: print(fmt(data["src"]))
 
@@ -184,11 +184,10 @@ def main(args) -> None:
       if k["ref"] is not None and k["ref"] not in seen_refs:
         seen_refs.add(k["ref"])
         for s in viz_data.ctxs[k["ref"]]["steps"]:
-          if len(args.item) > 1 and s["name"] == args.item[1]: print_step(s)
           if DEBUG >= 3 and s["name"] == "View Base AST": print_step(s)
           if DEBUG >= 4 and s["name"] == "View Source": print_step(s)
           if DEBUG >= 5 or ls: print(fmt(" "*s["depth"]+s["name"]+(f" - {s['match_count']}" if s.get('match_count', 0) else '')))
-          if DEBUG >= 6: print_step(s)
+          if DEBUG >= 6 or args.item and len(args.item) > 1 and s["name"] == args.item[1]: print_step(s)
       elif DEBUG >= 3 and k.get("ext"): print(fmt(k["ext"]))
     produce = produce_top_kernels if args.top else produce_all_kernels
     if args.item:
