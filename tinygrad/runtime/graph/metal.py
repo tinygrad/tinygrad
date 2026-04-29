@@ -27,17 +27,17 @@ class MetalGraph(GraphRunner):
     if len(self.vars): self.int_buf = self.dev.allocator.alloc(len(self.vars)*dtypes.int32.itemsize)
 
     all_pipelines, all_resources = [], [self.int_buf.buf] if len(self.vars) else []
-    for j, ((_, _, bufs, _), prg, replace) in enumerate(zip(self.calls, self.progs, self.uop_replace)):
-      assert prg is not None
+    for j, ((_, ast, bufs, _), runtime, replace) in enumerate(zip(self.calls, self.runtimes, self.uop_replace)):
+      assert runtime is not None
       icb_command = self.icb.indirectComputeCommandAtIndex(j).retained()
-      icb_command.setComputePipelineState(prg._prg.pipeline_state)
-      all_pipelines.append(prg._prg.pipeline_state)
+      icb_command.setComputePipelineState(runtime.pipeline_state)
+      all_pipelines.append(runtime.pipeline_state)
       for i, b in enumerate(bufs):
         if not any(pos == i for pos, _ in replace):
           icb_command.setKernelBuffer_offset_atIndex(b._buf.buf, b._buf.offset, i)
           all_resources.append(b._buf.buf)
-      for i, v in enumerate(prg.p.vars): icb_command.setKernelBuffer_offset_atIndex(self.int_buf.buf, self.vars.index(v.expr)*4, len(bufs)+i)
-      global_size, local_size = prg.p.launch_dims({v: 0 for v in self.vars})
+      for i, v in enumerate(ast.arg.vars): icb_command.setKernelBuffer_offset_atIndex(self.int_buf.buf, self.vars.index(v.expr)*4, len(bufs)+i)
+      global_size, local_size = ast.arg.launch_dims({v: 0 for v in self.vars})
       icb_command.concurrentDispatchThreadgroups_threadsPerThreadgroup(metal.MTLSize(*global_size), metal.MTLSize(*local_size))
       icb_command.setBarrier()
 
@@ -97,7 +97,7 @@ class MetalGraph(GraphRunner):
   def collect_timestamps(self):
     # create a graph event and evenly space each program
     st, en = decimal.Decimal(self.command_buffer.GPUStartTime()) * 1000000, decimal.Decimal(self.command_buffer.GPUEndTime()) * 1000000
-    ents = [ProfileGraphEntry(self.device, prg._prg.name, i, i+1) for i, prg in enumerate(self.progs) if prg is not None]
+    ents = [ProfileGraphEntry(self.device, rt.name, i, i+1) for i, rt in enumerate(self.runtimes) if rt is not None]
     self.dev.profile_events += [ProfileGraphEvent(ents, [], [st + (en-st)/len(ents)*i for i in range(len(ents)+1)])]
 
   def __del__(self):

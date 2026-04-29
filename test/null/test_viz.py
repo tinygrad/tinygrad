@@ -321,7 +321,6 @@ class TestVizGC(unittest.TestCase):
 # VIZ integrates with other parts of tinygrad
 
 from tinygrad import Tensor, Device
-from tinygrad.engine.realize import get_runner
 
 class TestVizIntegration(unittest.TestCase):
   # codegen supports rendering of code blocks
@@ -725,8 +724,8 @@ class TestCfg(unittest.TestCase):
       return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg="NULL"), UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=x) for x in insts]))))
     with Context(DEV=f"NULL::{self.arch}"):
       out = Tensor.custom_kernel(Tensor.empty(1), fxn=fxn)[0]
-      runner = get_runner(out.device, out.schedule_linear().src[-1].src[0])
-      return amdgpu_cfg(runner.prg.src[4].arg, self.arch)
+      prg = to_program(out.schedule_linear().src[-1].src[0], Device[out.device].renderer)
+      return amdgpu_cfg(prg.src[4].arg, self.arch)
 
   def test_simple(self):
     k = Kernel(arch=self.arch)

@@ -137,6 +137,9 @@ class TestTensorUOpAllclose(unittest.TestCase):
     a, b = _t(4).float(), _t(4).float()
     self.assertIs(_strip_unique(a.allclose(b).uop), _strip_unique(a.uop.allclose(b.uop)))
 
+class TestTensorUOpBitcast(unittest.TestCase):
+  def test_bitcast_same_dtype(self): _check(self, _t(4).float(), lambda x: x.bitcast(dtypes.float32))
+
 class TestTensorUOpRand(unittest.TestCase):
   def test_random_bits(self):
     k = UOp.empty((2,), dtype=dtypes.uint32)

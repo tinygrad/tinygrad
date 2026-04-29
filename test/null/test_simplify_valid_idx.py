@@ -157,7 +157,7 @@ class TestValidIdxSimplification(unittest.TestCase):
     valid = (ridx2<1)&(ridx1<6)
     load = get_gated_load_uop(valid, idx)
     # prevent ridx1 and ridx2 from being shrunk
-    red = UOp(Ops.REDUCE, dtypes.float, (load, ridx1, ridx2), Ops.ADD)
+    red = load.reduce(ridx1, ridx2, arg=Ops.ADD)
     self.check(load,
       "(r0*1568)",
       "((r2<1)&(r1<6))",
@@ -569,7 +569,7 @@ class TestRangeShrink(unittest.TestCase):
     # range used in both a gated load AND directly in the reduce expression -> no shrink
     r = Range(0, 204)
     gated_load = get_gated_load_uop(r < UOp.const(dtypes.weakint, 4), r)
-    red = UOp(Ops.REDUCE, dtypes.float, (r.cast(dtypes.float) + gated_load, r), Ops.ADD)
+    red = (r.cast(dtypes.float) + gated_load).reduce(r, arg=Ops.ADD)
     ranges = self.get_ranges(red.sink())
     self.assertEqual(len(ranges), 1)
     self.assertEqual(ranges[0].src[0].arg, 204)

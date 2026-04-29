@@ -424,7 +424,7 @@ class TestUOpGraph(unittest.TestCase):
     ld = d0.index(ridx0.valid(ridx0<50))
     w = (ridx0<50).where(ld, 5)
     # prevent ridx0 from being shrunk
-    red = UOp(Ops.REDUCE, dtypes.long, (ridx0.cast(dtypes.long), ridx0), Ops.ADD)
+    red = ridx0.cast(dtypes.long).reduce(ridx0, arg=Ops.ADD)
     uops = to_uops_list([w, red])
     for u in uops:
       assert u.op is not Ops.WHERE
@@ -447,7 +447,7 @@ class TestUOpGraph(unittest.TestCase):
     ld = d0.index(gate_idx).cast(dtypes.float)
     w = (ridx0<50).where(ld, 5.0)
     # prevent ridx0 from being shrunk
-    red = UOp(Ops.REDUCE, dtypes.long, (ridx0.cast(dtypes.long), ridx0), Ops.ADD)
+    red = ridx0.cast(dtypes.long).reduce(ridx0, arg=Ops.ADD)
     uops = to_uops_list([w, red])
     for u in uops:
       assert u.op is not Ops.WHERE
@@ -459,7 +459,7 @@ class TestUOpGraph(unittest.TestCase):
     ld = d0.index(ridx0.valid(ridx0<50))
     w = ((ridx0<50) & (ridx0>30)).where(ld, UOp.const(dtypes.float, 0)).cast(dtypes.half)
     # prevent ridx0 from being shrunk
-    red = UOp(Ops.REDUCE, dtypes.long, (ridx0.cast(dtypes.long), ridx0), Ops.ADD)
+    red = ridx0.cast(dtypes.long).reduce(ridx0, arg=Ops.ADD)
     uops = to_uops_list([w, red])
     for u in uops:
       assert u.op is not Ops.WHERE
@@ -470,7 +470,7 @@ class TestUOpGraph(unittest.TestCase):
     ld = d0.index(ridx0.valid(ridx0<50))
     w = ((ridx0<50) & (ridx0>30)).where(UOp.const(dtypes.float, 0), ld).cast(dtypes.half)
     # prevent ridx0 from being shrunk
-    red = UOp(Ops.REDUCE, dtypes.long, (ridx0.cast(dtypes.long), ridx0), Ops.ADD)
+    red = ridx0.cast(dtypes.long).reduce(ridx0, arg=Ops.ADD)
     uops = to_uops_list([w, red])
     for u in uops:
       assert u.op is not Ops.WHERE
@@ -679,7 +679,7 @@ class TestExpander(unittest.TestCase):
   @unittest.skip("no longer supported")
   def test_reduce_known_axis(self):
     e1 = UOp(Ops.UNROLL, dtypes.int, tuple(UOp.const(dtypes.int, x) for x in range(4)), ((1,4),))
-    sink = UOp(Ops.REDUCE, dtypes.int, (3*e1,e1), Ops.ADD)
+    sink = (3*e1).reduce(e1, arg=Ops.ADD)
     sink = expander_rewrite(sink)
     assert sink.op is Ops.CONST
     self.assertEqual(sink.arg, 3*(0+1+2+3))
@@ -687,7 +687,7 @@ class TestExpander(unittest.TestCase):
   @unittest.skip("no longer supported")
   def test_reduce_const(self):
     e1 = UOp(Ops.UNROLL, dtypes.int, tuple(UOp.const(dtypes.int, x) for x in range(4)), ((1,4),))
-    sink = UOp(Ops.REDUCE, dtypes.int, (UOp.const(dtypes.int, 3), e1), Ops.ADD)
+    sink = UOp.const(dtypes.int, 3).reduce(e1, arg=Ops.ADD)
     sink = expander_rewrite(sink)
     assert sink.op is Ops.CONST
     self.assertEqual(sink.arg, 3*4)
@@ -728,7 +728,7 @@ class TestExpander(unittest.TestCase):
   def test_reduce_different_axis(self):
     e1 = UOp(Ops.UNROLL, dtypes.int, tuple(UOp.const(dtypes.int, x) for x in range(4)), ((1,4),))
     e2 = UOp(Ops.UNROLL, dtypes.int, tuple(UOp.const(dtypes.int, x) for x in range(4)), ((2,4),))
-    sink = UOp(Ops.REDUCE, dtypes.int, (e1,e2), Ops.ADD)
+    sink = e1.reduce(e2, arg=Ops.ADD)
     sink = expander_rewrite(sink)
     print(sink)
 

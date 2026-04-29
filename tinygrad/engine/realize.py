@@ -1,9 +1,8 @@
-from typing import cast, Iterator
+from typing import cast, Iterator, Any
 import time, random, itertools, math, contextlib, weakref
 from dataclasses import dataclass, replace, field
-from tinygrad.helpers import colored, DEBUG, GlobalCounters, ansilen, NOOPT, all_int, Metadata, TRACEMETA, TracingKey
-from tinygrad.helpers import BEAM, DEVECTORIZE, size_to_str, time_to_str, VALIDATE_WITH_CPU, cpu_profile, PROFILE, ProfilePointEvent, cpu_events
-from tinygrad.helpers import prod, EMULATED_DTYPES, flatten
+from tinygrad.helpers import colored, DEBUG, GlobalCounters, ansilen, all_int, Metadata, TRACEMETA, TracingKey, prod, flatten
+from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, cpu_profile, PROFILE, ProfilePointEvent, cpu_events
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer, buffers, graph_rewrite, ProgramInfo
 from tinygrad.device import Device, Buffer, MultiBuffer
@@ -43,6 +42,22 @@ def update_stats(display_name:str, device:str, estimates:Estimates, var_vals:dic
       f" {display_name+' '*(46-ansilen(display_name))} arg {buf_count:2d} mem {GlobalCounters.mem_used/1e9:6.2f} GB"+
       ("" if et is None else f" tm {ptm}/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({flops_str} {mem_str})")+
       f" {[repr(m) if TRACEMETA >= 2 else str(m) for m in metadata] if metadata else ''}")
+
+first_run_cache:set[bytes] = set()
+@contextlib.contextmanager
+def track_stats(ctx:"ExecContext", call:UOp, device:str, display_name:str, bufs:list[Buffer], var_vals:dict[str, int], outputs=(0,), inputs=(1,)):
+  if PROFILE: cpu_events.append(ProfilePointEvent(device, "exec", len(cpu_events), {"metadata": call.arg.metadata, "var_vals": var_vals,
+                                                  "bufs": [b.trace_num for b in bufs], "name": display_name, "outputs": outputs, "inputs": inputs}))
+  timing: list[float|None] = [None]
+  if DEBUG >= 2: st = time.perf_counter()
+  yield timing
+  if not ctx.do_update_stats: return
+  if DEBUG >= 2 and timing[0] is None:
+    Device[device].synchronize()
+    timing[0] = time.perf_counter() - st
+  update_stats(display_name, device, estimate_uop(call), var_vals, timing[0], len(bufs), jit=ctx.jit, metadata=call.arg.metadata,
+               first_run=call.src[0].key not in first_run_cache)
+  first_run_cache.add(call.src[0].key)
 
 # **************** Runners ****************
 
@@ -102,19 +117,15 @@ class CompiledRunner(Runner):
 
 # **************** method cache ****************
 
-method_cache: dict[tuple[str, type, bytes, tuple, bool], CompiledRunner] = {}
-def get_runner(device:str, ast:UOp) -> CompiledRunner:
-  # TODO: this should be all context relevant to rendering
-  context = (NOOPT.value, DEVECTORIZE.value, EMULATED_DTYPES.value)
-  ckey = (device, type(Device[device].compiler), ast.key, context, False)
-  if cret:=method_cache.get(ckey): return cret
-  bkey = (device.split(":")[0], type(Device[device].compiler), ast.key, context, True)
-  if bret:=method_cache.get(bkey):
-    method_cache[ckey] = ret = CompiledRunner(bret.prg, device)
-  else:
-    prg = to_program(ast, Device[device].renderer)
-    method_cache[ckey] = method_cache[bkey] = ret = CompiledRunner(prg, device)
-  return ret
+runtime_cache: dict[tuple[bytes, str], Any] = {}
+def get_runtime(device:str, ast:UOp):
+  assert ast.op is Ops.PROGRAM and isinstance(ast.arg, ProgramInfo), "get_runtime should only be called with a PROGRAM ast"
+  if (runtime:=runtime_cache.get(key:=(ast.key, device))) is None:
+    if DEBUG >= 3 and ast.src[0].arg.applied_opts: print(ast.src[0].arg.applied_opts)
+    if DEBUG >= 4: print(ast.src[3].arg)
+    if DEBUG >= 7: Device[device].compiler.disassemble(ast.src[4].arg)
+    runtime = runtime_cache[key] = Device[device].runtime(ast.arg.function_name, ast.src[4].arg, *ast.arg.aux, runtimevars=ast.arg.runtimevars)
+  return runtime
 
 # **************** run linear ****************
 
@@ -131,20 +142,6 @@ def _resolve(b:UOp, inputs:tuple[UOp, ...]) -> UOp:
   if b.op in (Ops.BUFFER_VIEW, Ops.MSELECT) and b.src[0].op is Ops.PARAM: return b.replace(src=(inputs[b.src[0].arg], *b.src[1:]))
   return inputs[b.arg] if b.op is Ops.PARAM else b
 def resolve_params(call:UOp, inputs:tuple[UOp, ...]) -> list[UOp]: return [_resolve(b, inputs) for b in call.src[1:] if b.op is not Ops.BIND]
-
-@contextlib.contextmanager
-def track_stats(ctx:ExecContext, call:UOp, device:str, display_name:str, bufs:list[Buffer], var_vals:dict[str, int],
-                outputs=(0,), inputs=(1,), first_run=False):
-  if PROFILE: cpu_events.append(ProfilePointEvent(device, "exec", len(cpu_events), {"metadata": call.arg.metadata, "var_vals": var_vals,
-                                                  "bufs": [b.trace_num for b in bufs], "name": display_name, "outputs": outputs, "inputs": inputs}))
-  timing: list[float|None] = [None]
-  if DEBUG >= 2: st = time.perf_counter()
-  yield timing
-  if not ctx.do_update_stats: return
-  if DEBUG >= 2 and timing[0] is None:
-    Device[device].synchronize()
-    timing[0] = time.perf_counter() - st
-  update_stats(display_name, device, estimate_uop(call), var_vals, timing[0], len(bufs), jit=ctx.jit, metadata=call.arg.metadata, first_run=first_run)
 
 def unwrap_multi(call:UOp, resolved:list[UOp]) -> Iterator[tuple[list[Buffer], dict[str, int]]]:
   bufs = [b.buffer for b in resolved]
@@ -178,21 +175,21 @@ def exec_copy(ctx:ExecContext, call, ast):
 def exec_kernel(ctx:ExecContext, call, ast):
   for bufs, device_vars in unwrap_multi(call, resolve_params(call, ctx.input_uops)):
     var_vals = {**ctx.var_vals, **device_vars}
-    prg = get_runner(bufs[0].device, ast)
-    prg_bufs = [bufs[i].ensure_allocated() for i in prg.p.globals]
-
-    with track_stats(ctx, call, prg.device, prg.display_name, prg_bufs, var_vals,
-                     outputs=tuple(prg.p.outs), inputs=tuple(prg.p.ins), first_run=prg.first_run) as timing:
-      timing[0] = prg(prg_bufs, var_vals, wait=DEBUG >= 2)
-      prg.first_run = False
+    prg_bufs = [bufs[i].ensure_allocated() for i in ast.arg.globals]
+    rt = get_runtime(device:=bufs[0].device, ast)
+    global_size, local_size = ast.arg.launch_dims(var_vals)
+    with track_stats(ctx, call, device, ast.arg.name, prg_bufs, var_vals, outputs=ast.arg.outs, inputs=ast.arg.ins) as tm:
+      tm[0] = rt(*[b._buf for b in prg_bufs], global_size=global_size, local_size=local_size, vals=ast.arg.vals(var_vals), wait=DEBUG>=2)
 
 def exec_validate(ctx:ExecContext, call, ast):
   import numpy as np
   for bufs, device_vars in unwrap_multi(call, resolve_params(call, ctx.input_uops)):
-    cpu_bufs, dev_bufs = bufs[:len(bufs)//2], bufs[len(bufs)//2:]
-    cpu_prg = get_runner("CPU", ast.src[0])
-    cpu_prg([cpu_bufs[i].ensure_allocated() for i in cpu_prg.p.globals], {**ctx.var_vals, **device_vars}, wait=False)
-    for i in cpu_prg.p.outs: np.testing.assert_allclose(dev_bufs[i].ensure_allocated().numpy(), cpu_bufs[i].numpy(), rtol=1e-3, atol=1e-3)
+    bufs, dev_bufs = bufs[:len(bufs)//2], bufs[len(bufs)//2:]
+    var_vals = {**ctx.var_vals, **device_vars}
+    cpu_rt = get_runtime("CPU", prg:=to_program(ast.src[0], Device["CPU"].renderer))
+    global_size, local_size = prg.arg.launch_dims(var_vals)
+    cpu_rt(*[bufs[i].ensure_allocated()._buf for i in prg.arg.globals], global_size=global_size, local_size=local_size, vals=prg.arg.vals(var_vals))
+    for i in prg.arg.outs: np.testing.assert_allclose(dev_bufs[i].ensure_allocated().numpy(), bufs[i].numpy(), rtol=1e-3, atol=1e-3)
 
 def exec_encdec(ctx:ExecContext, call, ast):
   bufs = [cast(Buffer, b.buffer).ensure_allocated() for b in resolve_params(call, ctx.input_uops)]
