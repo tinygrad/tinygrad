@@ -983,10 +983,12 @@ class ProgramInfo:
   @property
   def runtimevars(self) -> dict[str, int]: return {v.expr: i for i, v in enumerate(self.vars) if v.expr == 'core_id'}
 
-  def launch_dims(self, var_vals:dict[str, int]):
-    global_size = [sym_infer(sz, var_vals) for sz in self.global_size]  # type: ignore[arg-type]
-    local_size = [sym_infer(sz, var_vals) for sz in self.local_size] if self.local_size is not None else None
+  def launch_dims(self, var_vals:dict[str, int]) -> tuple[tuple[int, ...], tuple[int, ...]|None]:
+    global_size = tuple([sym_infer(sz, var_vals) for sz in self.global_size])  # type: ignore[arg-type]
+    local_size = tuple([sym_infer(sz, var_vals) for sz in self.local_size]) if self.local_size is not None else None
     return global_size, local_size
+
+  def vals(self, var_vals:dict[str, int]): return tuple(var_vals[k.expr] if k.expr not in self.runtimevars else None for k in self.vars)
 
   @staticmethod
   def from_sink(sink:UOp, aux:tuple=()) -> ProgramInfo:

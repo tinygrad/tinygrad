@@ -14,14 +14,14 @@ class CUDAGraph(MultiGraphRunner):
     self.nodes: list[tuple[Any, ...]] = [] # list of tuple(graph node, node params, c_args/context, is memcpy)
     self.graph = init_c_var(cuda.CUgraph, lambda x: check(cuda.cuGraphCreate(ctypes.byref(x), 0)))
 
-    for (dev_idx, ast, bufs, device_vars), prg in zip(self.calls, self.progs):
+    for (dev_idx, ast, bufs, device_vars), runtime in zip(self.calls, self.runtimes):
       if ast.op is Ops.PROGRAM:
-        assert prg is not None
-        global_size, local_size = prg.p.launch_dims({v: 0 for v in self.vars})
+        assert runtime is not None
+        global_size, local_size = ast.arg.launch_dims({v: 0 for v in self.vars})
 
-        c_deps, new_node = self.new_node([b.base for b in bufs], prg.p.outs)
-        c_args, vargs = encode_args([b._buf for b in bufs], [device_vars.get(x.expr, 0) for x in prg.p.vars])
-        kern_params = cuda.CUDA_KERNEL_NODE_PARAMS_v1(prg._prg.prg, *global_size, *local_size, 0,
+        c_deps, new_node = self.new_node([b.base for b in bufs], ast.arg.outs)
+        c_args, vargs = encode_args([b._buf for b in bufs], [device_vars.get(x.expr, 0) for x in ast.arg.vars])
+        kern_params = cuda.CUDA_KERNEL_NODE_PARAMS_v1(runtime.prg, *global_size, *local_size, 0,
                                                       ctypes.cast(0, ctypes.POINTER(ctypes.c_void_p)), vargs)
         check(cuda.cuGraphAddKernelNode(ctypes.byref(new_node), self.graph, c_deps, len(c_deps or []), ctypes.byref(kern_params)))
 
