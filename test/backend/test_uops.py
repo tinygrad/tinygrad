@@ -15,10 +15,9 @@ from tinygrad.renderer.ptx import PTXRenderer
 from test.helpers import to_uops_list
 
 def run_uops(uops_list:list[UOp], bufs:list[Buffer]):
-  prg = to_program(UOp.sink(*uops_list, arg=KernelInfo()), Device[Device.DEFAULT].renderer)
   buf_uops = [UOp.new_buffer(b.device, b.size, b.dtype) for b in bufs]
   for u,b in zip(buf_uops, bufs): buffers[u] = b
-  run_linear(UOp(Ops.LINEAR, src=(prg.call(*buf_uops),)))
+  run_linear(UOp(Ops.LINEAR, src=(UOp.sink(*uops_list, arg=KernelInfo()).call(*buf_uops),)))
 
 def uop(uops:list[UOp], op:Ops, dtype:Optional[DType], src:tuple[UOp, ...], arg:Any=None) -> UOp:
   if op is Ops.CONST: uops.append(UOp.const(dtype, arg))

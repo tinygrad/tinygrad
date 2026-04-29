@@ -430,7 +430,7 @@ def _helper_linearizer_opt_ast(realized_ast:UOp, real_bufs:list[Buffer], opts=[]
 
   def run_prg(opts):
     ast = realized_ast if opts is None else replace_opts(realized_ast, list(opts))
-    run_linear(UOp(Ops.LINEAR, src=(to_program(ast, Device[Device.DEFAULT].renderer).call(*buf_uops),)))
+    run_linear(UOp(Ops.LINEAR, src=(ast.call(*buf_uops),)))
 
   def check_opt(opts):
     reset_bufs(outbufs)
