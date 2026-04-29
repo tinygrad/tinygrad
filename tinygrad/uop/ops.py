@@ -212,7 +212,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     match self.op:
       # late ops don't have shape
       case Ops.UNIQUE | Ops.LUNIQUE | Ops.DEVICE | Ops.IF | Ops.BARRIER | Ops.CUSTOM | Ops.CUSTOMI | \
-           Ops.STACK | Ops.GEP | Ops.UNROLL | Ops.CONTRACT | Ops.SINK | Ops.END | \
+           Ops.UNROLL | Ops.CONTRACT | Ops.SINK | Ops.END | \
            Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE | Ops.BINARY | Ops.INS | Ops.TUPLE | Ops.CALL | Ops.FUNCTION:
         return None
 
@@ -228,22 +228,39 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
         return inner_shape
 
       case Ops.CAST:
+        if self.dtype.count > 1:
+          return (self.dtype.count,)
+
         # when PTX casts from ptr to non ptr, remove the shape
         if isinstance(self.src[0].dtype, PtrDType) and not isinstance(self.src[0].dtype, ImageDType) and not isinstance(self.dtype, PtrDType):
           return None
 
+      case Ops.STACK: return (len(self.src),)
+      case Ops.GEP:
+        if len(self.arg) > 1: return (len(self.arg),)
+        #assert len(self.arg) == 1
+        return ()
       case Ops.INDEX:
+        shp = []
+        for s in self.src[1:]: shp.extend(list(s.shape))
+        return tuple(shp)
+        """
         # non pointer index doesn't have a shape
         if not isinstance(self.dtype, PtrDType): return None
         # fully indexed doesn't have a shape. TODO: remove this
         if self.src[0]._shape is None or len(self.src[1:]) == len(self.src[0].shape): return None
         # pointer index
         return self.src[0].shape[len(self.src[1:]):]
+        """
 
       # some ops init the shape
-      case Ops.CONST | Ops.DEFINE_VAR | Ops.BIND | Ops.RANGE | Ops.SPECIAL: return ()
+      case Ops.DEFINE_VAR | Ops.BIND | Ops.RANGE | Ops.SPECIAL: return ()
+      case Ops.CONST:
+        if self.dtype.count > 1: return (self.dtype.count,)
+        return ()
+      case Ops.VCONST: return (len(self.arg),)
       # TODO: VCONST should have the shape of the arg
-      case Ops.VCONST: return ()
+      #case Ops.VCONST: return ()
       case Ops.BUFFER: return (self.arg,)
       case Ops.BUFFER_VIEW: return (self.arg[0],)
       case Ops.CUSTOM_FUNCTION: return None
@@ -489,7 +506,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     ret = UOp(Ops.VCONST if isinstance(b, tuple) else Ops.CONST, dtype,
               arg=dtype.const(b),
               src=(UOp(Ops.DEVICE, arg=device),) if device is not None else ())
-    return ret.reshape((1,)*len(shape)).expand(shape) if shape is not None else ret
+    return ret.reshape((1,)*len(shape)).expand(shape) if shape is not None and shape != ret.shape else ret
   @staticmethod
   def unique_const(fill_value:ConstType, dtype:DTypeLike|None=None, device:str|tuple[str, ...]|None=None,  # type: ignore[override]
                    shape:tuple[sint, ...]|None=None, unique=True):
