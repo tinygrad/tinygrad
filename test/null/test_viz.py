@@ -728,7 +728,7 @@ class TestCfg(unittest.TestCase):
       return amdgpu_cfg(prg.src[4].arg, self.arch)
 
   def test_simple(self):
-    k = Kernel(arch=self.arch)
+    k = Kernel()
     k.label("entry")
     k.emit(s_branch(), target="bb1")
     k.label("bb1")
@@ -738,7 +738,7 @@ class TestCfg(unittest.TestCase):
     self.assertEqual(len(cfg["blocks"]), 2)
 
   def test_diamond(self):
-    k = Kernel(arch=self.arch)
+    k = Kernel()
     k.label("entry")
     k.emit(s_mov_b32(s[0], 0))
     k.emit(s_mov_b32(s[1], 0))
@@ -772,7 +772,7 @@ class TestCfg(unittest.TestCase):
       assert st.startswith("s_code_end") and st.endswith("x)"), st
 
   def test_loop(self):
-    k = Kernel(arch=self.arch)
+    k = Kernel()
     k.label("entry")
     k.emit(s_mov_b32(s[1], 4))
     k.label("loop")
@@ -784,7 +784,7 @@ class TestCfg(unittest.TestCase):
     self.get_cfg("simple_loop", k)
 
   def test_loop_branch(self):
-    k = Kernel(arch=self.arch)
+    k = Kernel()
     k.label("entry")
     k.emit(s_mov_b32(s[1], 4))
     k.label("loop")
@@ -802,7 +802,7 @@ class TestCfg(unittest.TestCase):
     self.get_cfg("loop_if", k)
 
   def test_loop_break(self):
-    k = Kernel(arch=self.arch)
+    k = Kernel()
     k.label("entry")
     k.emit(s_mov_b32(s[1], 8))
     k.label("loop")
@@ -817,7 +817,7 @@ class TestCfg(unittest.TestCase):
     self.get_cfg("loop_break", k)
 
   def test_switch(self):
-    k = Kernel(arch=self.arch)
+    k = Kernel()
     k.label("entry")
     k.emit(s_cmp_eq_i32(s[0], 0))
     k.emit(s_cbranch_scc1(), target="case0")
@@ -839,7 +839,7 @@ class TestCfg(unittest.TestCase):
     self.get_cfg("switch_case", k)
 
   def test_ping_pong(self):
-    k = Kernel(arch=self.arch)
+    k = Kernel()
     k.label("entry")
     k.emit(s_cmp_eq_i32(s[0], 0))
     k.emit(s_cbranch_scc1(), target="ping")
@@ -858,7 +858,7 @@ class TestCfg(unittest.TestCase):
 
   def test_colored_blocks(self):
     N = 10
-    k = Kernel(arch=self.arch)
+    k = Kernel()
     k.label("entry")
     k.emit(s_branch(), target="init0")
     for i in range(N):
@@ -878,7 +878,7 @@ class TestCfg(unittest.TestCase):
     self.get_cfg("test_colored_blocks", k)
 
   def test_jump_back_to_end(self):
-    k = Kernel(arch=self.arch)
+    k = Kernel()
     k.label("entry")
     k.emit(s_mov_b32(s[1], 2))
     k.emit(s_cbranch_execz(), target="loop")
