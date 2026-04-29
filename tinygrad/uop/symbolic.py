@@ -48,7 +48,7 @@ def fold_add_divmod_recombine(x:UOp) -> UOp|None:
           return (base % (div*d)).usum(*[t for k,t in enumerate(terms) if k not in (i,j)])
   return None
 
-def fold_masked(root:UOp, x:UOp, mask:UOp) -> UOp|None:
+def fold_redundant_mask(root:UOp, x:UOp, mask:UOp) -> UOp|None:
   if root.op is Ops.CAST:
     return x.cast(root.dtype) if x.dtype.scalar() == dtypes.uint64 and root.dtype.scalar() == dtypes.uint32 and mask.arg == 0xFFFFFFFF else None
   if root.op is Ops.SHR and root.src[1].op is Ops.CONST:
@@ -144,7 +144,7 @@ symbolic_simple = propagate_invalid + PatternMatcher([
   # positive const ** x
   (UPat.cvar("c", vec=False).alu(Ops.POW, UPat.var("x")), lambda c,x: c if c.arg == 1 else (x*math.log2(c.arg)).exp2() if c.arg > 0 else None),
   # rules for threefry
-  (UPat((Ops.CAST, Ops.SHR), name="root", src=(UPat.var("x") & UPat.cvar("mask", vec=False),), allow_any_len=True), fold_masked),
+  (UPat((Ops.CAST, Ops.SHR), name="root", src=(UPat.var("x") & UPat.cvar("mask", vec=False),), allow_any_len=True), fold_redundant_mask),
   (((UPat.var(None, dtypes.uint64)*(1<<32)) | UPat.var('y',  dtypes.uint32).cast(dtypes.uint64)).cast(dtypes.uint32), lambda y: y),
   (((UPat.var('x',  dtypes.uint64)*(1<<32)) | UPat.var(None, dtypes.uint32).cast(dtypes.uint64))//(1<<32), lambda x: x),
   (((UPat.var(None, dtypes.uint64)<<32) | UPat.var('y',  dtypes.uint32).cast(dtypes.uint64)).cast(dtypes.uint32), lambda y: y),
