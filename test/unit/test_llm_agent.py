@@ -1,5 +1,5 @@
 import json, unittest
-from tinygrad.llm.agent import TOOL_CALL_OPEN, TOOL_CALL_CLOSE, format_tools, parse_tool_calls
+from tinygrad.llm.agent import TOOL_CALL_OPEN, format_tools, parse_tool_calls
 
 BASH_TOOL = {"function": {"name": "bash", "parameters": {
   "properties": {"command": {"type": "string"}, "description": {"type": "string"}}, "required": ["command", "description"]}}}
@@ -12,22 +12,18 @@ class TestLLMAgent(unittest.TestCase):
     self.assertIn("<tools>", out)
     self.assertIn("bash(command:string, description:string", out)
     self.assertIn("read(filePath:string)", out)
-    self.assertIn("Tool names: bash, read", out)
-    self.assertIn('Use exactly one listed tool name in "name".', out)
-    self.assertIn("Reply only with a complete tool call:", out)
     self.assertIn(TOOL_CALL_OPEN, out)
-    self.assertIn(TOOL_CALL_CLOSE, out)
     self.assertNotIn('"properties"', out)
 
-  def test_parse_tool_calls_complete_tag(self):
-    text = TOOL_CALL_OPEN + '{"name":"read","arguments":{"filePath":"x.py"}}' + TOOL_CALL_CLOSE
+  def test_parse_tool_calls_open_tag(self):
+    text = TOOL_CALL_OPEN + '{"name":"read","arguments":{"filePath":"x.py"}}'
     calls = parse_tool_calls(text)
     self.assertEqual(len(calls), 1)
     self.assertEqual(calls[0]["function"]["name"], "read")
     self.assertEqual(json.loads(calls[0]["function"]["arguments"]), {"filePath": "x.py"})
 
   def test_parse_tool_calls_returns_empty_on_bad_json(self):
-    text = TOOL_CALL_OPEN + '{"name":"bash","arguments":' + TOOL_CALL_CLOSE
+    text = TOOL_CALL_OPEN + '{"name":"bash","arguments":'
     self.assertEqual(parse_tool_calls(text), [])
 
 if __name__ == "__main__":
