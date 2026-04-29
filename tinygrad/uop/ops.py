@@ -209,7 +209,6 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
   @recursive_property
   def _shape(self) -> tuple[sint, ...]|None:
-    if self.dtype.count > 1: return (self.dtype.count,)
     match self.op:
       # late ops don't have shape
       case Ops.UNIQUE | Ops.LUNIQUE | Ops.DEVICE | Ops.IF | Ops.BARRIER | Ops.CUSTOM | Ops.CUSTOMI | \
@@ -229,11 +228,16 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
         return inner_shape
 
       case Ops.CAST:
+        # if it has a vec dtype, set the shape
+        if self.dtype.count > 1: return (self.dtype.count,)
         # when PTX casts from ptr to non ptr, remove the shape
         if isinstance(self.src[0].dtype, PtrDType) and not isinstance(self.src[0].dtype, ImageDType) and not isinstance(self.dtype, PtrDType):
           return None
 
+      case Ops.STACK: return (len(self.src),)
       case Ops.INDEX:
+        # if it has a vec dtype, set the shape
+        if self.dtype.count > 1: return (self.dtype.count,)
         # non pointer index doesn't have a shape
         if not isinstance(self.dtype, PtrDType): return None
         # fully indexed doesn't have a shape. TODO: remove this
@@ -242,9 +246,12 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
         return self.src[0].shape[len(self.src[1:]):]
 
       # some ops init the shape
-      case Ops.CONST | Ops.DEFINE_VAR | Ops.BIND | Ops.RANGE | Ops.SPECIAL: return ()
-      # TODO: VCONST should have the shape of the arg
-      case Ops.VCONST: return ()
+      case Ops.DEFINE_VAR | Ops.BIND | Ops.RANGE | Ops.SPECIAL: return ()
+      case Ops.CONST:
+        # CONST can have shape if it has a vec dtype
+        if self.dtype.count > 1: return (self.dtype.count,)
+        return ()
+      case Ops.VCONST: return (len(self.arg),)
       case Ops.BUFFER: return (self.arg,)
       case Ops.BUFFER_VIEW: return (self.arg[0],)
       case Ops.CUSTOM_FUNCTION: return None
