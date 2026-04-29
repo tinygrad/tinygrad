@@ -2628,8 +2628,9 @@ def custom_asm_gemm(C:UOp, A:UOp, B:UOp, dname:str) -> UOp:
 # ** FP8 GEMM custom kernel
 
 @functools.cache
-def custom_hk_fp8_gemm(C:UOp, A:UOp, B:UOp, X_s:UOp, W_s:UOp, dname:str) -> UOp:
-  # A is (batch, M, K), B is (N, K) transposed, X_s is x_scale, W_s is w_scale — kernel multiplies by both
+def custom_hk_fp8_gemm(C:UOp, A:UOp, B:UOp, X_s:UOp, W_s:UOp, *extra:UOp, dname:str) -> UOp:
+  # A is (batch, M, K), B is (N, K) transposed, X_s is x_scale, W_s is w_scale — kernel multiplies by both.
+  # extra is unused fwd inputs (e.g. grad_amax_state) plumbed through so the bwd can read them via kernel.src.
   M, K = A.shape[0]*A.shape[1], A.shape[2]
   N, K2 = B.shape[(1 if B.ndim == 3 else 0):]
   assert K == K2, f"{A.shape} {B.shape}"
@@ -2698,19 +2699,33 @@ def custom_uop_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
 
 def custom_gemm_bw(gradient:UOp, kernel:UOp):
   inputs = kernel.src[1:]
-  # fp8 scaled gemm has 5 inputs (out, a, b, x_scale, w_scale), others have 3 (out, a, b)
-  if len(inputs) == 5:
-    out, a, b, s_x, s_w = inputs
+  # fp8 scaled gemm has 5 inputs (out, a, b, x_scale, w_scale) optionally plus grad_amax_state (6 total); plain gemm has 3
+  if len(inputs) >= 5:
+    grad_amax_state = inputs[5] if len(inputs) == 6 else None
+    out, a, b, s_x, s_w = inputs[:5]
     a_t, b_t, g_t = Tensor(a, device=a.device), Tensor(b, device=a.device), Tensor(gradient, device=a.device)
     s_x_t, s_w_t = Tensor(s_x, device=a.device), Tensor(s_w, device=a.device)
     g_t = g_t[:a.shape[0]]
-    g_fp8, g_scale, _ = quantize_fp8(g_t)
+    from extra.llama_kernels.cast_amax import _grad_fp8_mailbox
+    from extra.llama_kernels.quantize_fp8_delayed import quantize_fp8_delayed
+    gbase = gradient.base if hasattr(gradient, "base") else gradient
+    mailbox_entry = _grad_fp8_mailbox.pop(gbase, None) or _grad_fp8_mailbox.pop(gradient, None)
+    if mailbox_entry is not None:
+      g_fp8_u, inv_scale_u, _new_amax_u, store_effect = mailbox_entry
+      g_fp8 = Tensor(g_fp8_u, device=a.device)[:a.shape[0]]
+      g_scale = Tensor(inv_scale_u, device=a.device)
+    else:
+      assert grad_amax_state is not None, "fp8 matmul bwd needs either a mailbox entry or a grad_amax_state"
+      g_fp8, g_scale, _, store_effect = quantize_fp8_delayed(g_t, Tensor(grad_amax_state, device=a.device))
     # dgrad: uses g_scale * x_scale * w_scale
     grad_a = asm_gemm(g_fp8, b_t, x_scale=g_scale * s_x_t, w_scale=s_w_t)
     # wgrad: no w_scale
     _one = Tensor(1.0, dtype=dtypes.float, device=a.device)
     grad_b = asm_gemm(g_fp8.permute(2, 0, 1).reshape(g_t.shape[-1], -1), a_t.reshape(-1, a_t.shape[-1]), x_scale=g_scale * s_x_t, w_scale=_one)
-    return (None, grad_a.uop, grad_b.uop, None, None)
+    # Attach the delayed-amax store effect (if any) to grad_a so realizing grads commits the amax update.
+    ret = (None, grad_a.uop.after(store_effect), grad_b.uop, None, None)
+    if len(inputs) == 6: ret = ret + (None,)
+    return ret
   else:
     out, a, b = inputs
     assert all_same([gradient.device, a.device, b.device, out.device])
@@ -2725,7 +2740,7 @@ def custom_gemm_bw(gradient:UOp, kernel:UOp):
 
 # ** main gemm function
 
-def asm_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, w_scale:Tensor|None=None) -> Tensor:
+def asm_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, w_scale:Tensor|None=None, grad_amax_state:Tensor|None=None) -> Tensor:
   assert can_use_asm_gemm(a, b), f"{counters['todos'][-1]}"
   counters["used"] += 1
   unfold_batch = a.ndim == 3 and isinstance(a.device, tuple) and a.uop.axis == 2 and b.uop.axis == 0
@@ -2762,7 +2777,8 @@ def asm_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, w_scale:Tensor|None=N
       _one = lambda: Tensor(1.0, dtype=dtypes.float, device=a.device)
       xs = x_scale if x_scale is not None else _one()
       ws = w_scale if w_scale is not None else _one()
-      out = Tensor.custom_kernel(out, a, b.T, xs, ws, fxn=functools.partial(custom_hk_fp8_gemm, dname=dname), grad_fxn=custom_gemm_bw)[0]
+      extra = [grad_amax_state] if grad_amax_state is not None else []
+      out = Tensor.custom_kernel(out, a, b.T, xs, ws, *extra, fxn=functools.partial(custom_hk_fp8_gemm, dname=dname), grad_fxn=custom_gemm_bw)[0]
     else:
       out = Tensor.custom_kernel(out, a, b, fxn=functools.partial(custom_asm_gemm, dname=dname), grad_fxn=custom_gemm_bw)[0]
   else:

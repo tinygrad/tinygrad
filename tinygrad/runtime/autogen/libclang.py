@@ -1012,8 +1012,8 @@ def clang_getFileUniqueID(file:CXFile, outID:c.POINTER[CXFileUniqueID]) -> int: 
 def clang_File_isEqual(file1:CXFile, file2:CXFile) -> int: ...
 @dll.bind(CXString, CXFile)
 def clang_File_tryGetRealPathName(file:CXFile) -> CXString: ...
-CINDEX_VERSION_MAJOR = 0 # type: ignore
-CINDEX_VERSION_MINOR = 64 # type: ignore
+CINDEX_VERSION_MAJOR = 0
+CINDEX_VERSION_MINOR = 64
 CINDEX_VERSION_ENCODE = lambda major,minor: (((major)*10000) + ((minor)*1)) # type: ignore
-CINDEX_VERSION = CINDEX_VERSION_ENCODE(CINDEX_VERSION_MAJOR, CINDEX_VERSION_MINOR) # type: ignore
+CINDEX_VERSION = CINDEX_VERSION_ENCODE(CINDEX_VERSION_MAJOR, CINDEX_VERSION_MINOR)
 CINDEX_VERSION_STRINGIZE = lambda major,minor: CINDEX_VERSION_STRINGIZE_(major, minor) # type: ignore
