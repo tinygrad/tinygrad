@@ -320,7 +320,7 @@ def unpack_pmc(e) -> dict:
 
 # ** on startup, list all the performance counter traces
 
-def load_amd_counters(data:VizData, profile:list[ProfileEvent]) -> None:
+def load_amd_counters(data:VizData, profile:list) -> None:
   counter_events:dict[tuple[int, int], dict] = {}
   durations:dict[str, list[float]] = {}
   prg_events:dict[int, ProfileProgramEvent] = {}
@@ -346,11 +346,10 @@ def load_amd_counters(data:VizData, profile:list[ProfileEvent]) -> None:
     # to decode a SQTT trace, we need the raw stream, program binary and device properties
     if (sqtt:=v.get("ProfileSQTTEvent")):
       for e in sqtt:
-        if e.itrace: steps.append(create_step(f"SE:{e.se} PKTS", (f"/prg-pkts-{e.se}", len(data.ctxs), len(steps)),
-                                              data=(e.blob, prg_events[k].lib, arch)))
+        if e.itrace: steps.append(create_step(f"SE:{e.se} PKTS", (f"/sqtt-{e.se}",len(data.ctxs),len(steps)), data=(e.blob,prg_events[k].lib,arch)))
       try:
         from extra.sqtt.roc import unpack_occ
-        steps.append(create_step("OCC", ("/amd-occ-sqtt", len(data.ctxs), len(steps)),
+        steps.append(create_step("OCC", ("/amd-sqtt-occ", len(data.ctxs), len(steps)),
                                  data={"fxn":unpack_occ, "args":((k, tag), sqtt, prg_events[k], arch)}))
       except Exception: pass
     data.ctxs.append({"name":f"SQTT {name}"+(f" n{run_number[k]}" if run_number[k] > 1 else ""), "steps":steps})
@@ -625,7 +624,7 @@ def get_render(viz_data:VizData, query:str) -> dict:
     ret["cols"] = ["Kernel", "Duration", *ret["cols"]]
     return ret
   if fmt == "prg-pmc": return unpack_pmc(data)
-  if fmt.startswith("prg-pkts"):
+  if fmt.startswith("sqtt"):
     ret = {}
     with soft_err(lambda err:ret.update(err)):
       if (events:=get_profile(viz_data, list(itertools.islice(sqtt_timeline(*data), getenv("MAX_SQTT_PKTS", 50_000))), sort_fn=row_tuple)):
@@ -633,7 +632,7 @@ def get_render(viz_data:VizData, query:str) -> dict:
       else: ret = {"src":"No SQTT trace on this SE."}
     return ret
   # viewers for the amd decoder in extra
-  if fmt in {"amd-occ-sqtt", "amd-sqtt-insts"}: return data["fxn"](viz_data, i, j, *data["args"])
+  if fmt.startswith("amd-sqtt"): return data["fxn"](viz_data, i, j, *data["args"])
   if fmt == "cu-sqtt": return {"value":get_profile(viz_data, data, sort_fn=row_tuple), "content_type":"application/octet-stream"}
   if fmt == "prg-pma-pkts":
     ret = {}

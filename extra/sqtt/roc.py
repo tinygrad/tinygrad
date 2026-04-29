@@ -129,12 +129,12 @@ def decode(sqtt_evs:list[ProfileSQTTEvent], disasms:dict[str, dict[int, Inst]]) 
     raise exc
   return ROCParseCtx
 
-def unpack_sqtt(key:tuple[str, int], data:list, p:ProfileProgramEvent,
-                target:str) -> tuple[dict[str, list[ProfileEvent]], list[str], dict[str, dict[str, dict]]]:
-  from tinygrad.viz.serve import amd_decode
+def unpack_occ(viz_data, i:int, j:int, key:tuple[str, int], data:list, p:ProfileProgramEvent, target:str) -> dict:
+  from tinygrad.viz.serve import amd_decode, create_step, row_tuple
+  steps = viz_data.ctxs[i]["steps"]
+  if len(steps[j+1:]) > 0: return {"steps":[{k:v for k,v in s.items() if k != "data"} for s in steps[j+1:]]}
   base = unwrap(p.base)
-  addr_table = amd_decode(unwrap(p.lib), target)
-  disasm:dict[int, Inst] = {addr+base:inst for addr, inst in addr_table.items()}
+  disasm:dict[int, Inst] = {addr+base:inst for addr,inst in amd_decode(unwrap(p.lib), target).items()}
   rctx = decode(data, {p.tag:disasm})
   cu_events:dict[str, list[ProfileEvent]] = {}
   # ** inst traces
@@ -156,21 +156,15 @@ def unpack_sqtt(key:tuple[str, int], data:list, p:ProfileProgramEvent,
     else:
       if (events:=cu_events.get(occ.cu_loc)) is None: cu_events[occ.cu_loc] = events = []
       events.append(ProfileRangeEvent(f"SIMD:{occ.simd}", f"OCC WAVE:{occ.wave_id} N:{next(units[u])}", Decimal(wave_start.pop(u)),Decimal(occ.time)))
-  return cu_events, list(units), wave_insts
-
-def unpack_occ(viz_data, i:int, j:int, key:tuple[str, int], data:list, p:ProfileProgramEvent, target:str) -> dict:
-  from tinygrad.viz.serve import create_step, row_tuple
-  ret:dict = {}
-  if len((steps:=viz_data.ctxs[i]["steps"])[j+1:]) == 0:
-    cu_events, units, wave_insts = unpack_sqtt(key, data, p, target)
-    for cu in sorted(cu_events, key=row_tuple):
-      steps.append(create_step(f"{cu} {len(cu_events[cu])}", ("/cu-sqtt", i, len(steps)), depth=1,
-                               data=[ProfilePointEvent(unit, "start", unit, ts=Decimal(0)) for unit in units]+cu_events[cu]))
-      for k in sorted(wave_insts.get(cu, []), key=row_tuple):
-        wd = wave_insts[cu][k]
-        steps.append(create_step(k.replace(cu, ""), ("/amd-sqtt-insts", i, len(steps)), loc=wd["loc"], depth=2,
-                                 data={"fxn":unpack_insts, "args":(wd,)}))
-  return {**ret, "steps":[{k:v for k,v in s.items() if k != "data"} for s in steps[j+1:]]}
+  # ** split graph by CU
+  for cu in sorted(cu_events, key=row_tuple):
+    steps.append(create_step(f"{cu} {len(cu_events[cu])}", ("/cu-sqtt", i, len(steps)), depth=1,
+                             data=[ProfilePointEvent(unit, "start", unit, ts=Decimal(0)) for unit in units]+cu_events[cu]))
+    for k in sorted(wave_insts.get(cu, []), key=row_tuple):
+      wd = wave_insts[cu][k]
+      steps.append(create_step(k.replace(cu, ""), ("/amd-sqtt-insts", i, len(steps)), loc=wd["loc"], depth=2,
+                               data={"fxn":unpack_insts, "args":(wd,)}))
+  return {"steps":[{k:v for k,v in s.items() if k != "data"} for s in steps[j+1:]]}
 
 def unpack_insts(viz_data, i:int, j:int, data:dict) -> dict:
   columns = ["PC", "Instruction", "Hits", "Cycles", "Stall", "Type"]
