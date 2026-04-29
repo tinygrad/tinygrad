@@ -1,9 +1,9 @@
 import unittest
 import numpy as np
 from dataclasses import replace
-from tinygrad.device import Buffer, Device, is_dtype_supported
+from tinygrad.device import Device, is_dtype_supported
 from tinygrad.dtype import dtypes, ConstType
-from tinygrad.engine.realize import CompiledRunner
+from tinygrad.engine.realize import run_linear
 from tinygrad.codegen import to_program
 from tinygrad.helpers import prod
 from tinygrad.renderer.cstyle import CStyleLanguage
@@ -15,15 +15,12 @@ from tinygrad.tensor import Tensor, _to_np_dtype
 
 def _test_uop_result(inputs:list[Tensor], prg:UOp, local_size=None):
   for x in inputs: x.realize()
-  uops = prg.src[2].src
-  outbufs = [Buffer(Device.DEFAULT, sz:=(1 if local_size is None else prod(local_size)), (dtype:=u.src[1].dtype), \
-      initial_value=np.zeros(sz, dtype=_to_np_dtype(dtype)).data) for u in uops if u.op is Ops.STORE]
-  inbufs = [x.uop.base.buffer for x in inputs]
-  info = prg.arg
-  if local_size is not None: info = replace(info, local_size=tuple(local_size))
-  ei = CompiledRunner(prg.replace(arg=info), Device.DEFAULT)
-  ei.exec(outbufs+inbufs)
-  return [np.frombuffer(x.as_memoryview(), _to_np_dtype(x.dtype)) for x in outbufs]
+  if local_size is not None: prg = prg.replace(arg=replace(prg.arg, local_size=tuple(local_size)))
+  sz = 1 if local_size is None else prod(local_size)
+  outs = [UOp.new_buffer(Device.DEFAULT, sz, u.src[1].dtype) for u in prg.src[2].src if u.op is Ops.STORE]
+  for u in outs: u.buffer.allocate().copyin(np.zeros(sz, dtype=_to_np_dtype(u.dtype)).data)
+  run_linear(UOp(Ops.LINEAR, src=(prg.call(*outs, *(x.uop.base for x in inputs)),)))
+  return [u.buffer.numpy() for u in outs]
 
 def _setup_and_test_alu(alu_op:Ops, input_val:ConstType, *alu_src_uops:UOp):
   dtype = alu_src_uops[0].dtype
