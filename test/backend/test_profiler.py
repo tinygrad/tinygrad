@@ -3,7 +3,8 @@ from tinygrad import Device, Tensor, dtypes, TinyJit
 from tinygrad.helpers import CI, DEV, Context, ProfileRangeEvent, cpu_profile, cpu_events, ProfilePointEvent, dedup
 from tinygrad.device import Buffer, BufferSpec, Compiled, ProfileDeviceEvent, ProfileGraphEvent
 from tinygrad.runtime.support.hcq import HCQCompiled
-from tinygrad.engine.realize import get_runner
+from tinygrad.engine.realize import get_runtime
+from tinygrad.codegen import to_program
 
 MOCKGPU = DEV.interface.startswith("MOCK")
 def _dev_base(d):
@@ -46,13 +47,15 @@ class TestProfiler(unittest.TestCase):
     TestProfiler.b = self.a + 1
     si = self.b.schedule_linear().src[-1]
 
-    TestProfiler.runner = get_runner(TestProfiler.d0.device, si.src[0])
+    TestProfiler.prg = to_program(si.src[0], TestProfiler.d0.renderer)
+    TestProfiler.runtime = get_runtime(TestProfiler.d0.device, TestProfiler.prg)
     TestProfiler.b.uop.buffer.allocate()
 
   def test_profile_kernel_run(self):
-    runner_name = TestProfiler.runner._prg.name
+    runner_name = TestProfiler.runtime.name
     with helper_collect_profile(TestProfiler.d0) as profile:
-      TestProfiler.runner([TestProfiler.b.uop.buffer, TestProfiler.a.uop.buffer], var_vals={})
+      gs, ls = TestProfiler.prg.arg.launch_dims({})
+      TestProfiler.runtime(TestProfiler.b.uop.buffer._buf, TestProfiler.a.uop.buffer._buf, global_size=gs, local_size=ls)
 
     profile, _ = helper_profile_filter_device(profile, TestProfiler.d0.device)
     kernel_runs = [x for x in profile if isinstance(x, ProfileRangeEvent)]
@@ -70,12 +73,13 @@ class TestProfiler(unittest.TestCase):
     assert len(kernel_runs) == 1, "one kernel run is expected"
 
   def test_profile_multiops(self):
-    runner_name = TestProfiler.runner._prg.name
+    runner_name = TestProfiler.runtime.name
     buf1 = Buffer(Device.DEFAULT, 2, dtypes.float, options=BufferSpec(nolru=True)).ensure_allocated()
 
     with helper_collect_profile(TestProfiler.d0) as profile:
       buf1.copyin(memoryview(bytearray(struct.pack("ff", 0, 1))))
-      TestProfiler.runner([buf1, TestProfiler.a.uop.buffer], var_vals={})
+      gs, ls = TestProfiler.prg.arg.launch_dims({})
+      TestProfiler.runtime(buf1._buf, TestProfiler.a.uop.buffer._buf, global_size=gs, local_size=ls)
       buf1.copyout(memoryview(bytearray(buf1.nbytes)))
 
     evs = [x for x in profile if isinstance(x, ProfileRangeEvent) and x.device.startswith(TestProfiler.d0.device)]
