@@ -722,7 +722,7 @@ class TestCfg(unittest.TestCase):
       sink = UOp.sink(out.base, lidx, gidx, arg=KernelInfo(name=name))
       return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg="NULL"), UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=x) for x in insts]))))
     with save_viz() as viz:
-      with Context(DEV=f"NULL:HIP:{self.arch}"):
+      with Context(DEV=f"NULL::{self.arch}"):
         out = Tensor.custom_kernel(Tensor.empty(1), fxn=fxn)[0]
         _ = to_program(out.schedule_linear().src[-1].src[0], Device[out.device].renderer)
     codegen_rewrites = next(s for s in viz.list_items() if s["name"] == name)
