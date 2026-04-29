@@ -203,7 +203,7 @@ class TestLLMServer(unittest.TestCase):
     )
 
     encoded = [call.args[0] for call in self.mock_tok.encode.call_args_list]
-    self.assertTrue(any("# Tools" in text and "get_weather" in text for text in encoded))
+    self.assertTrue(any("<tools>" in text and "get_weather" in text for text in encoded))
     self.assertEqual(self.mock_tok.role.call_args_list[0], unittest.mock.call("system"))
 
   def test_models_endpoint(self):
