@@ -274,7 +274,7 @@ class TestLinearizer(unittest.TestCase):
     sched = [si for si in t.schedule_linear().src if si.src[0].op is Ops.SINK]
     # sum_collapse is a full collapse now
     assert len(sched) == 1
-    assert not any(u.op is Ops.REDUCE_AXIS for u in sched[0].src[0].toposort()), "found reduce in sum collapse"
+    assert not any(u.op is Ops.REDUCE and len(u.arg[1]) > 0 for u in sched[0].src[0].toposort()), "found reduce in sum collapse"
     #lin = Kernel(sched[0].ast)
     #assert not any(u.op is Ops.RANGE for u in lin.linearize().uops), "found loop in sum collapse"
 

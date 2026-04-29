@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-import ctypes, pathlib, argparse, pickle, dataclasses, threading
+import ctypes, pathlib, argparse, pickle, dataclasses, threading, itertools
+from decimal import Decimal
 from typing import Generator
 from tinygrad.helpers import temp, unwrap, DEBUG
 from tinygrad.runtime.ops_amd import ProfileSQTTEvent
 from tinygrad.runtime.autogen import rocprof
 from tinygrad.renderer.amd.dsl import Inst
+from tinygrad.helpers import ProfileEvent, ProfileRangeEvent, ProfilePointEvent
+from tinygrad.device import ProfileProgramEvent
 from test.amd.disasm import disasm
 
 @dataclasses.dataclass(frozen=True)
@@ -125,6 +128,71 @@ def decode(sqtt_evs:list[ProfileSQTTEvent], disasms:dict[str, dict[int, Inst]]) 
   if exc is not None:
     raise exc
   return ROCParseCtx
+
+def unpack_occ(viz_data, i:int, j:int, key:tuple[str, int], data:list, p:ProfileProgramEvent, target:str) -> dict:
+  from tinygrad.viz.serve import amd_decode, create_step, row_tuple
+  steps = viz_data.ctxs[i]["steps"]
+  if len(steps[j+1:]) > 0: return {"steps":[{k:v for k,v in s.items() if k != "data"} for s in steps[j+1:]]}
+  base = unwrap(p.base)
+  disasm:dict[int, Inst] = {addr+base:inst for addr,inst in amd_decode(unwrap(p.lib), target).items()}
+  rctx = decode(data, {p.tag:disasm})
+  cu_events:dict[str, list[ProfileEvent]] = {}
+  # ** inst traces
+  wave_insts:dict[str, dict[str, dict]] = {}
+  inst_units:dict[str, itertools.count] = {}
+  for w in rctx.inst_execs.get(key, []):
+    if (u:=w.wave_loc) not in inst_units: inst_units[u] = itertools.count(0)
+    n = next(inst_units[u])
+    if (events:=cu_events.get(w.cu_loc)) is None: cu_events[w.cu_loc] = events = []
+    events.append(ProfileRangeEvent(f"SIMD:{w.simd}", loc:=f"INST WAVE:{w.wave_id} N:{n}", Decimal(w.begin_time), Decimal(w.end_time)))
+    wave_insts.setdefault(w.cu_loc, {})[f"{u} N:{n}"] = {"wave":w, "disasm":disasm, "prg":p, "run_number":n, "loc":loc}
+  # ** occ traces (only WAVESTART/WAVEEND)
+  units:dict[str, itertools.count] = {}
+  wave_start:dict[str, int] = {}
+  for occ in rctx.occ_events.get(key, []):
+    if (u:=occ.wave_loc) not in units: units[u] = itertools.count(0)
+    if u in inst_units: continue
+    if occ.start: wave_start[u] = occ.time
+    else:
+      if (events:=cu_events.get(occ.cu_loc)) is None: cu_events[occ.cu_loc] = events = []
+      events.append(ProfileRangeEvent(f"SIMD:{occ.simd}", f"OCC WAVE:{occ.wave_id} N:{next(units[u])}", Decimal(wave_start.pop(u)),Decimal(occ.time)))
+  # ** split graph by CU
+  for cu in sorted(cu_events, key=row_tuple):
+    steps.append(create_step(f"{cu} {len(cu_events[cu])}", ("/cu-sqtt", i, len(steps)), depth=1,
+                             data=[ProfilePointEvent(unit, "start", unit, ts=Decimal(0)) for unit in units]+cu_events[cu]))
+    for k in sorted(wave_insts.get(cu, []), key=row_tuple):
+      wd = wave_insts[cu][k]
+      steps.append(create_step(k.replace(cu, ""), ("/amd-sqtt-insts", i, len(steps)), loc=wd["loc"], depth=2,
+                               data={"fxn":unpack_insts, "args":(wd,)}))
+  return {"steps":[{k:v for k,v in s.items() if k != "data"} for s in steps[j+1:]]}
+
+def unpack_insts(viz_data, i:int, j:int, data:dict) -> dict:
+  columns = ["PC", "Instruction", "Hits", "Cycles", "Stall", "Type"]
+  inst_columns = ["N", "Clk", "Idle", "Dur", "Stall"]
+  # Idle:     The total time gap between the completion of previous instruction and the beginning of the current instruction.
+  #           The idle time can be caused by:
+  #             * Arbiter loss
+  #             * Source or destination register dependency
+  #             * Instruction cache miss
+  # Stall:    The total number of cycles the hardware pipe couldn't issue an instruction.
+  # Duration: Total latency in cycles, defined as "Stall time + Issue time" for gfx9 or "Stall time + Execute time" for gfx10+.
+  prev_instr = (w:=data["wave"]).begin_time
+  pc_to_inst = data["disasm"]
+  start_pc = None
+  rows:dict[int, dict] = {}
+  for pc, inst in pc_to_inst.items():
+    if start_pc is None: start_pc = pc
+    rows[pc] = {"pc":pc-start_pc, "inst":str(inst), "hit_count":0, "dur":0, "stall":0, "type":"", "hits":{"cols":inst_columns, "rows":[]}}
+  for e in w.unpack_insts():
+    if not (inst:=rows[e.pc]).get("type"): inst["type"] = str(e.typ).split("_")[-1]
+    inst["hit_count"] += 1
+    inst["dur"] += e.dur
+    inst["stall"] += e.stall
+    inst["hits"]["rows"].append((inst["hit_count"]-1, e.time, max(0, e.time-prev_instr), e.dur, e.stall))
+    prev_instr = max(prev_instr, e.time + e.dur)
+  summary = [{"label":"Total Cycles", "value":w.end_time-w.begin_time}, {"label":"SE", "value":w.se}, {"label":"CU", "value":w.cu},
+             {"label":"SIMD", "value":w.simd}, {"label":"Wave ID", "value":w.wave_id}, {"label":"Run number", "value":data["run_number"]}]
+  return {"rows":[tuple(v.values()) for v in rows.values()], "cols":columns, "metadata":[summary], "ref":viz_data.ref_map.get(data["prg"].name)}
 
 def print_data(data:dict) -> None:
   from tabulate import tabulate
