@@ -153,12 +153,6 @@ class Handler(HTTPRequestHandler):
 
   def do_POST(self):
     tok = self.server.tok
-    def stringify_content(content):
-      if content is None: return ""
-      if isinstance(content, str): return content
-      if isinstance(content, list):
-        return "".join(c["text"] for c in content if c["type"] == "text")
-      raise RuntimeError(f"unknown content type: {type(content)}")
     raw_body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
     body: dict[str, typing.Any] = json.loads(raw_body.decode("utf-8"))
     if DEBUG >= 1: print(json.dumps(body, indent=2))
@@ -170,8 +164,16 @@ class Handler(HTTPRequestHandler):
         role = "system" if tok.preset != 'tekken' else "user"
         ids += tok.role(role) + tok.encode(tool_text) + tok.end_turn()
       for i, msg in enumerate(messages):
-        if msg["role"] == "tool": continue
-        ids += tok.role(msg["role"]) + tok.encode(stringify_content(msg.get("content")))
+        if msg["role"] == "tool": continue  # tool results aren't fed back into this minimal prompt
+        ids += tok.role(msg["role"])
+        content = msg.get("content")  # assistant tool calls can have null content
+        if content is None: pass
+        elif isinstance(content, str): ids += tok.encode(content)
+        elif isinstance(content, list):
+          for c in content:
+            if c["type"] == "text": ids += tok.encode(c["text"])
+            else: raise RuntimeError(f"unhandled type: {c['type']}")
+        else: raise RuntimeError(f"unknown content type: {type(content)}")
         if msg["role"] == "assistant" and i == last: break
         ids += tok.end_turn()
       else: ids += tok.role("assistant")
