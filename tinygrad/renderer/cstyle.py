@@ -21,7 +21,8 @@ base_rewrite = PatternMatcher([
    lambda ctx,x: f"{ctx.float4.replace('float4', ctx.render_dtype(x.dtype))}" + \
     f"{ctx.float4_style[0]}{','.join([ctx[y] for y in x.src])}{ctx.float4_style[1]}"),
   (UPat(Ops.CAST, name="x"), lambda ctx,x:
-    f"__builtin_convertvector({ctx[x.src[0]]}, {ctx.render_dtype(x.dtype)})" if not isinstance(x.dtype, PtrDType) and x._shape is not None and x.numel() > 1 else None),
+    f"__builtin_convertvector({ctx[x.src[0]]}, {ctx.render_dtype(x.dtype)})"
+    if not isinstance(x.dtype, PtrDType) and x._shape is not None and x.numel() > 1 else None),
   (UPat(Ops.CAST, name="x"), lambda ctx,x: f"({ctx.render_cast(x.dtype, ctx[x.src[0]])})"),
   (UPat(Ops.BITCAST, name="x"), lambda ctx,x:
     f"__builtin_bit_cast({ctx.render_dtype(x.dtype)}, ({ctx.render_dtype(x.src[0].dtype)})({ctx[x.src[0]]}))"),

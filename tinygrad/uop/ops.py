@@ -319,8 +319,10 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     if self.op in GroupOp.ALU.union({Ops.CAST, Ops.COPY, Ops.NOOP, Ops.GROUP, Ops.SINK, Ops.ALLREDUCE, Ops.STORE}):
       input_shapes = [x._shape for x in self.src if x._shape is not None]
       if len(input_shapes) == 0: return None
-      if not all_same(input_shapes): raise RuntimeError(f"shape mismatch at {self.op}: {input_shapes}")
-      return input_shapes[0]
+      non_scalar_shapes = [s for s in input_shapes if s != ()]
+      if len(non_scalar_shapes) == 0: return ()
+      if not all_same(non_scalar_shapes): raise RuntimeError(f"shape mismatch at {self.op}: {input_shapes}")
+      return non_scalar_shapes[0]
 
     # all Ops must be explicitly handled
     raise NotImplementedError(f"no shape handling for {self.op} with {self.dtype}")
@@ -493,7 +495,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     ret = UOp(Ops.VCONST if isinstance(b, tuple) else Ops.CONST, dtype,
               arg=dtype.const(b),
               src=(UOp(Ops.DEVICE, arg=device),) if device is not None else ())
-    return ret if shape is None or ret.shape == shape else ret.reshape((1,)*(len(shape)-len(ret.shape)) + ret.shape).expand(shape)
+    return ret.reshape((1,)*len(shape)).expand(shape) if shape is not None and ret.shape != shape else ret
   @staticmethod
   def unique_const(fill_value:ConstType, dtype:DTypeLike|None=None, device:str|tuple[str, ...]|None=None,  # type: ignore[override]
                    shape:tuple[sint, ...]|None=None, unique=True):
@@ -501,7 +503,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     assert not isinstance(fill_value, (UOp, tuple)), "unique const only works on numbers"
     ret = UOp.const(to_dtype(dtype) if dtype is not None else dtypes.from_py(fill_value), fill_value, canonicalize_device(device))
     ret = ret.replace(src=(UOp.unique(None if unique is True else unique),) + ret.src)
-    return ret if shape is None or ret.shape == shape else ret.reshape((1,)*(len(shape)-len(ret.shape)) + ret.shape).expand(shape)
+    return ret.reshape((1,)*len(shape)).expand(shape) if shape is not None and ret.shape != shape else ret
   @staticmethod
   def range(end:sint, axis_id, axis_type=AxisType.LOOP, *arg, dtype=dtypes.weakint, src=(), **kwargs):
     return UOp(Ops.RANGE, dtype=dtype, src=(sint_to_uop(end, dtype),)+src, arg=(axis_id, axis_type)+arg, **kwargs)

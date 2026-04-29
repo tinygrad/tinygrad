@@ -546,7 +546,7 @@ def split_store(x:UOp) -> UOp|None:
   # if we have any open ranges here, we don't split
   if x.ranges: return None
   # raw STORE (not from bufferize_to_store) should be processed through its END wrapper, not independently
-  if x.op is Ops.STORE and x.src[0]._shape is not None: return None
+  if x.op is Ops.STORE and x.src[0]._shape is not None and x.src[0].shape != (): return None
 
   # local kernel rewrite
   lctx = LocalAddBufferContext()
