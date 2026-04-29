@@ -11,18 +11,24 @@ def _tool_sig(t):
     if e:=v.get("enum"): typ = "|".join(map(json.dumps, e))
     elif isinstance((t:=v.get("type")), list): typ = "|".join(t)
     else: typ = v.get("type") or "any"
-    if k == "description" and k in req: typ += "[brief summary]"
     return f"{k}{'' if k in req else '?'}:{typ}"
   args = ", ".join(arg_sig(k, v) for k,v in props.items())
   return f"{fn['name']}({args})"
 
+def _tool_requires_description(name: str, tools: list|None) -> bool:
+  for t in tools or []:
+    fn = t.get("function", t)
+    if fn.get("name") == name and "description" in fn.get("parameters", {}).get("required", []): return True
+  return False
+
 # normalize model output into OpenAI-style tool_calls
-def _tool_call(obj: str|dict) -> dict|None:
+def _tool_call(obj: str|dict, tools: list|None=None) -> dict|None:
   try:
     if isinstance(obj, str): obj = json.loads(obj.strip())
     if isinstance(obj, dict) and 'name' in obj:
       args = obj.get('arguments', {})
       if isinstance(args, str): args = json.loads(args)
+      if "description" not in args and _tool_requires_description(obj['name'], tools): args["description"] = ""
       return {'id': f'call_{uuid.uuid4().hex[:24]}', 'type': 'function', 'function': {'name': obj['name'], 'arguments': json.dumps(args)}}
   except (json.JSONDecodeError, TypeError): pass
   return None
@@ -33,5 +39,5 @@ def format_tools(tools: list|None) -> str:
   return "<tools>\n" + "\n".join(_tool_sig(t) for t in tools) + "\n</tools>\nReply only: " + TOOL_CALL_OPEN + '{"name":"...","arguments":{...}}'
 
 # parse the last tool_call block
-def parse_tool_calls(text: str) -> list[dict]:
-  return [tc] if (i:=text.rfind(TOOL_CALL_OPEN)) != -1 and (tc:=_tool_call(text[i+len(TOOL_CALL_OPEN):])) is not None else []
+def parse_tool_calls(text: str, tools: list|None=None) -> list[dict]:
+  return [tc] if (i:=text.rfind(TOOL_CALL_OPEN)) != -1 and (tc:=_tool_call(text[i+len(TOOL_CALL_OPEN):], tools)) is not None else []
