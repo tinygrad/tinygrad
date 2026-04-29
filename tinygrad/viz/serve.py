@@ -321,13 +321,13 @@ def unpack_pmc(e) -> dict:
 # ** on startup, list all the performance counter traces
 
 def load_amd_counters(data:VizData, profile:list[ProfileEvent]) -> None:
-  from tinygrad.runtime.ops_amd import ProfileSQTTEvent, ProfilePMCEvent
   counter_events:dict[tuple[int, int], dict] = {}
   durations:dict[str, list[float]] = {}
   prg_events:dict[int, ProfileProgramEvent] = {}
   arch = ""
   for e in profile:
-    if isinstance(e, (ProfilePMCEvent, ProfileSQTTEvent)): counter_events.setdefault((e.kern, e.exec_tag), {}).setdefault(type(e), []).append(e)
+    if type(e).__name__ in {"ProfilePMCEvent", "ProfileSQTTEvent"}:
+      counter_events.setdefault((e.kern, e.exec_tag), {}).setdefault(type(e).__name__, []).append(e)
     if isinstance(e, ProfileRangeEvent) and e.device.startswith("AMD") and e.en is not None:
       durations.setdefault(str(e.name), []).append(float(e.en-e.st))
     if isinstance(e, ProfileProgramEvent) and e.tag is not None: prg_events[e.tag] = e
