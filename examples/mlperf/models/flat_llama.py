@@ -264,7 +264,7 @@ def apply_grad(grad_buf:Tensor, new_grad:UOp):
     return
   sorted_pads = sorted(pads, key=lambda p: p.marg[0][0] if p.op == Ops.PAD else 0)
   inners = [Tensor(p.src[0] if p.op == Ops.PAD else p, device=grad_buf.device).cast(grad_buf.dtype) for p in sorted_pads]
-  if getenv("FUSED_PAD_GRAD_ACCUM", 1):
+  if getenv("FUSED_PAD_GRAD_ACCUM", 0):
     from extra.llama_kernels.fused_pad_grad_accum import fused_pad_grad_accum, can_fused_pad_grad_accum
     if can_fused_pad_grad_accum(grad_buf, inners):
       grad_buf.uop = fused_pad_grad_accum(grad_buf, inners).uop
