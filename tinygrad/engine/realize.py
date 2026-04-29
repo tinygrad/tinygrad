@@ -93,28 +93,6 @@ def optimize_local_size(call:UOp, prg:UOp) -> UOp|None:
   new_global = tuple(g//l if g%l == 0 else g/l for g,l in zip(prg.arg.global_size, local_size))
   return call.replace(src=(prg.replace(arg=replace(prg.arg, global_size=new_global, local_size=local_size)), *call.src[1:]))
 
-class CompiledRunner(Runner):
-  def __init__(self, prg:UOp, device:str):
-    info: ProgramInfo = prg.arg
-    sink = prg.src[0]
-    if DEBUG >= 3 and sink.arg.applied_opts: print(sink.arg.applied_opts)
-    if DEBUG >= 4: print(prg.src[3].arg)
-    if len(prg.src) <= 4 or prg.src[4].op is not Ops.BINARY:
-      with cpu_profile(TracingKey(f"compile {info.name}", (info.function_name,)), "TINY"):
-        lib = Device[device].compiler.compile_cached(prg.src[3].arg)
-      prg = prg.replace(src=prg.src + (UOp(Ops.BINARY, arg=lib),))
-    self.prg:UOp = prg
-    self.p:ProgramInfo = info
-    if DEBUG >= 7: Device[device].compiler.disassemble(prg.src[4].arg)
-    self._prg = Device[device].runtime(info.function_name, prg.src[4].arg, *info.aux, runtimevars=info.runtimevars)
-    super().__init__(info.name, device, sink.arg.estimates or Estimates())
-
-  def __call__(self, rawbufs:list[Buffer], var_vals:dict[str, int]|None=None, wait=False, timeout:int|None=None) -> float|None:
-    if var_vals is None: var_vals = {}
-    global_size, local_size = self.p.launch_dims(var_vals)
-    return self._prg(*[x._buf for x in rawbufs], global_size=tuple(global_size), local_size=tuple(local_size) if local_size else None,
-                     vals=tuple(var_vals[k.expr] if k.expr not in self.p.runtimevars else None for k in self.p.vars), wait=wait, timeout=timeout)
-
 # **************** method cache ****************
 
 runtime_cache: dict[tuple[bytes, str], Any] = {}
