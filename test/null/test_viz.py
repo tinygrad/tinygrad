@@ -321,7 +321,6 @@ class TestVizGC(unittest.TestCase):
 # VIZ integrates with other parts of tinygrad
 
 from tinygrad import Tensor, Device
-from tinygrad.codegen import to_program
 
 class TestVizIntegration(unittest.TestCase):
   # codegen supports rendering of code blocks
