@@ -60,7 +60,6 @@ def main(args) -> None:
 
   def fmt(val, to_str=str) -> str: return json.dumps(val if isinstance(val, dict) else {"value":val}) if args.json else to_str(val)
 
-  rewrites = {c["name"]:{s["name"]:s for s in c["steps"]} for c in viz_data.ctxs if c.get("steps")}
   def print_step(step:dict) -> None:
     data = viz.get_render(viz_data, step["query"])
     if isinstance(data.get("value"), Iterator):
@@ -185,6 +184,7 @@ def main(args) -> None:
       if k["ref"] is not None and k["ref"] not in seen_refs:
         seen_refs.add(k["ref"])
         for s in viz_data.ctxs[k["ref"]]["steps"]:
+          if len(args.item) > 1 and s["name"] == args.item[1]: print_step(s)
           if DEBUG >= 3 and s["name"] == "View Base AST": print_step(s)
           if DEBUG >= 4 and s["name"] == "View Source": print_step(s)
           if DEBUG >= 5 or ls: print(fmt(" "*s["depth"]+s["name"]+(f" - {s['match_count']}" if s.get('match_count', 0) else '')))
@@ -194,9 +194,7 @@ def main(args) -> None:
     if args.item:
       if len(args.item) > 2: raise RuntimeError(f"-i takes at most 2 names (got {args.item})")
       k = get({r["name"]:r for r in produce()}, args.item[0])
-      if len(args.item) == 1:
-        with Context(DEBUG=max(DEBUG.value, 3)): render_event(k, ls=True)
-      else: print_step(get(rewrites[viz_data.ctxs[k["ref"]]["name"]], args.item[1]))
+      with Context(DEBUG=max(DEBUG.value, 3)): render_event(k, ls=True)
     else:
       for k in produce(): render_event(k)
 
