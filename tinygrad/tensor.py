@@ -590,16 +590,7 @@ class Tensor(OpMixin):
     low = Tensor._device_rng_counters[device][0:1] - (num & 0xffffffff)
     high = Tensor._device_rng_counters[device][1:2] - (num >> 32) - (Tensor._device_rng_counters[device][0] < (num & 0xffffffff)).cast(dtypes.uint32)
     bits = Tensor.random_bits(Tensor._device_seeds[device], low.cat(high), num)
-
-    # bitcast to uint with same number of bits
-    _, nmant = dtypes.finfo(dt)
-    uint_dtype = {1: dtypes.uint8, 2: dtypes.uint16, 4: dtypes.uint32, 8: dtypes.uint64}[dt.itemsize]
-    bits = bits.bitcast(uint_dtype)
-    # only randomize the mantissa bits and set the exponent to 1
-    one = Tensor.ones_like(bits, device=bits.device, dtype=dt).bitcast(uint_dtype)
-    bits = bits.rshift(dt.bitsize - nmant).bitwise_or(one)
-    # bitcast back to the original dtype and reshape
-    out = bits.bitcast(dt)[:numel].sub(1).reshape(shape).requires_grad_(kwargs.get("requires_grad"))
+    out = Tensor._bits_to_rand(bits, shape, dt).requires_grad_(kwargs.get("requires_grad"))
     return out.contiguous() if contiguous else out
 
   # ***** creation helper functions *****

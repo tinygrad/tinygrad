@@ -610,7 +610,7 @@ def get_render(viz_data:VizData, query:str) -> dict:
   if fmt == "asm":
     ret:dict = {}
     renderer, lib = data
-    if renderer.target.device.startswith("AMD"):
+    if renderer.target.arch.startswith("gfx"):
       with soft_err(lambda err: ret.update(err)): ret.update(amdgpu_cfg(lib, renderer.target.arch))
     else: ret["src"] = get_stdout(lambda: renderer.compiler.disassemble(lib))
     return ret

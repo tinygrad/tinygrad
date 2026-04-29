@@ -4,8 +4,8 @@ import ctypes
 from typing import Literal, TypeAlias
 from tinygrad.runtime.support.c import _IO, _IOW, _IOR, _IOWR
 from tinygrad.runtime.support import c
-from tinygrad.helpers import OSX
-dll = c.DLL('libclang', '/opt/homebrew/opt/llvm@20/lib/libclang.dylib' if OSX else ['clang-20', 'clang'])
+from tinygrad.helpers import WIN, OSX
+dll = c.DLL('libclang', 'C:\\Program Files\\LLVM\\bin\\libclang.dll' if WIN else ['/opt/homebrew/opt/llvm@21/lib/libclang.dylib', '/opt/homebrew/opt/llvm@20/lib/libclang.dylib', '/opt/homebrew/opt/llvm@19/lib/libclang.dylib', '/opt/homebrew/opt/llvm@18/lib/libclang.dylib', '/opt/homebrew/opt/llvm@17/lib/libclang.dylib', '/opt/homebrew/opt/llvm@16/lib/libclang.dylib', '/opt/homebrew/opt/llvm@15/lib/libclang.dylib', '/opt/homebrew/opt/llvm@14/lib/libclang.dylib'] if OSX else ['clang', 'clang-21', 'clang-20', 'clang-19', 'clang-18', 'clang-17', 'clang-16', 'clang-15', 'clang-14'])
 CXIndex: TypeAlias = ctypes.c_void_p
 class struct_CXTargetInfoImpl(c.Struct): pass
 CXTargetInfo: TypeAlias = c.POINTER[struct_CXTargetInfoImpl]

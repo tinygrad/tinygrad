@@ -2,10 +2,10 @@ import numpy as np
 import unittest
 
 from tinygrad.codegen.opt import Opt, OptOps
-from tinygrad.uop.ops import UOp, Ops, GroupOp, AxisType
+from tinygrad.uop.ops import UOp, Ops, GroupOp, AxisType, buffers
 from tinygrad.device import Device, Buffer, is_dtype_supported
 from tinygrad.tensor import Tensor, _to_np_dtype
-from tinygrad.engine.realize import run_linear, CompiledRunner
+from tinygrad.engine.realize import run_linear
 from tinygrad.codegen import to_program
 from tinygrad.helpers import Context, flatten, dedup, TC_SELECT, TC_OPT, DEV
 from tinygrad.dtype import DType, dtypes, PtrDType, AddrSpace
@@ -424,30 +424,28 @@ def reset_bufs(bufs:list[Buffer]):
 def _helper_linearizer_opt_ast(realized_ast:UOp, real_bufs:list[Buffer], opts=[],
                                apply_tc=False, atol=1e-4, rtol=1e-4, color_sizes=[], wanna_output=[]):
   outbufs = real_bufs[:len(realized_ast.src)]
-  device = real_bufs[0].device
   wanna_output = [np.array(x).flatten() for x in wanna_output]
+  buf_uops = [UOp.new_buffer(b.device, b.size, b.dtype) for b in real_bufs]
+  for u,b in zip(buf_uops, real_bufs): buffers[u] = b
 
-  def get_prg(opts):
+  def run_prg(opts):
     ast = realized_ast if opts is None else replace_opts(realized_ast, list(opts))
-    return CompiledRunner(to_program(ast, renderer=Device[Device.DEFAULT].renderer), device)
+    run_linear(UOp(Ops.LINEAR, src=(ast.call(*buf_uops),)))
 
   def check_opt(opts):
-    prg = get_prg(opts=opts)
     reset_bufs(outbufs)
-    prg.exec(real_bufs)
+    run_prg(opts)
     for x,want in zip(copyout_outputs(outbufs), wanna_output): np.testing.assert_allclose(x, want, atol=atol, rtol=rtol)
 
   # Get baseline if it is not provided, which is not optimized at all.
-  prg = get_prg(opts=())
-  prg.exec(real_bufs)
+  run_prg(opts=())
   if len(wanna_output) == 0: wanna_output = copyout_outputs(outbufs)
   else:
     for buf,want in zip(copyout_outputs(outbufs), wanna_output): np.testing.assert_allclose(buf, want, atol=atol, rtol=rtol)
 
   # Check correctness of handcoded optimiztions.
-  prg = get_prg(opts=None)
   reset_bufs(outbufs)
-  prg.exec(real_bufs)
+  run_prg(opts=None)
   for buf,want in zip(copyout_outputs(outbufs), wanna_output): np.testing.assert_allclose(buf, want, atol=atol, rtol=rtol)
   for x in opts: # Check custom transformations if any.
     check_opt(([Opt(OptOps.TC, 0, (TC_SELECT.value, TC_OPT.value, 1))] if apply_tc else [])+x)
