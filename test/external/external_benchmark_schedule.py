@@ -23,10 +23,10 @@ if __name__ == "__main__":
     if not FORWARD_ONLY:
       with Timing("***** model schedule in  "):
         with Profiling(PROFILE >= 3):
-          sched = out.schedule()
+          linear = out.schedule_linear()
 
       if not SCHEDULE_ONLY:
-        asts = list({x.ast.key:x.ast for x in sched if x.ast.op is Ops.SINK}.values())
+        asts = list({call.src[0].key:call.src[0] for call in linear.src if call.src[0].op is Ops.SINK}.values())
         if (restrict_kernel := getenv("RESTRICT_KERNEL", -1)) != -1: asts = asts[restrict_kernel:restrict_kernel+1]
 
         with Profiling(PROFILE, fn="/tmp/rewrite.prof"):

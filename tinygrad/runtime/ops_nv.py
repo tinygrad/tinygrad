@@ -291,12 +291,12 @@ class NVProgram(HCQProgram):
       if not NAK: self.cbuf_0[188:192], self.cbuf_0[223] = [*data64_le(self.dev.shared_mem_window), *data64_le(self.dev.local_mem_window)], 0xfffdc0
       qmd = {'qmd_major_version':5, 'qmd_type':nv_gpu.NVCEC0_QMDV05_00_QMD_TYPE_GRID_CTA, 'program_address_upper_shifted4':hi32(prog_addr>>4),
         'program_address_lower_shifted4':lo32(prog_addr>>4), 'register_count':self.regs_usage, 'shared_memory_size_shifted7':self.shmem_usage>>7,
-        'shader_local_memory_high_size_shifted4':self.lcmem_usage>>4 if NAK else self.dev.slm_per_thread>>4}
+        f'shader_local_memory_{"low" if NAK else "high"}_size_shifted4': self.dev.slm_per_thread>>4}
     else:
       if not NAK: self.cbuf_0[6:12] = [*data64_le(self.dev.shared_mem_window), *data64_le(self.dev.local_mem_window), *data64_le(0xfffdc0)]
       qmd = {'qmd_major_version':3, 'sm_global_caching_enable':1, 'program_address_upper':hi32(prog_addr), 'program_address_lower':lo32(prog_addr),
         'shared_memory_size':self.shmem_usage, 'register_count_v':self.regs_usage,
-        **({'shader_local_memory_low_size':self.lcmem_usage} if NAK else {'shader_local_memory_high_size':self.dev.slm_per_thread})}
+        f'shader_local_memory_{"low" if NAK else "high"}_size':self.dev.slm_per_thread}
 
     smem_cfg = min(shmem_conf * 1024 for shmem_conf in [32, 64, 100] if shmem_conf * 1024 >= self.shmem_usage) // 4096 + 1
 
@@ -581,11 +581,13 @@ class PCIIface(PCIIfaceBase):
 class MOCKIface(NVKIface): count = 1
 
 class NVDevice(HCQCompiled[NVSignal]):
+  ifaces = [NVKIface, PCIIface, MOCKIface]
+
   def is_nvd(self) -> bool: return isinstance(self.iface, PCIIface)
 
   def __init__(self, device:str=""):
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
-    self.iface = self._select_iface(NVKIface, PCIIface, MOCKIface)
+    self.iface = self._select_iface()
 
     device_params = nv_gpu.NV0080_ALLOC_PARAMETERS(deviceId=self.iface.gpu_instance, hClientShare=self.iface.root,
                                                    vaMode=nv_gpu.NV_DEVICE_ALLOCATION_VAMODE_OPTIONAL_MULTIPLE_VASPACES)

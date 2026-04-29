@@ -1,6 +1,4 @@
 # abstractions2 goes from back to front, here we will go from front to back
-from typing import List
-from tinygrad.helpers import tqdm
 
 # *****
 # 0. Load mnist on the device
@@ -33,21 +31,21 @@ model(X).sparse_categorical_crossentropy(Y).backward()
 optim.schedule_step()   # this will step the optimizer without running realize
 
 # *****
-# 3. Create a schedule.
+# 3. Create a schedule (linear uop).
 
 # The weight Tensors have been assigned to, but not yet realized. Everything is still lazy at this point
 # l1.uop and l2.uop define a computation graph
 
-from tinygrad.schedule import ExecItem
-schedule: List[ExecItem] = Tensor.schedule(l1, l2)
+from tinygrad.engine.realize import run_linear
+linear = Tensor.schedule_linear(l1, l2)
 
-print(f"The schedule contains {len(schedule)} items.")
-for si in schedule: print(str(si)[:80])
+print(f"The schedule contains {len(linear.src)} items.")
+for call in linear.src: print(str(call)[:80])
 
 # *****
-# 4. Lower and run the schedule.
+# 4. Lower and run the schedule (linear uop).
 
-for si in tqdm(schedule): si.run()
+run_linear(linear)
 
 # *****
 # 5. Print the weight change

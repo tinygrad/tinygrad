@@ -6,7 +6,7 @@ from tinygrad.engine.jit import TinyJit
 from tinygrad.nn.state import get_state_dict
 from tinygrad.helpers import Context, to_mv, prod
 from tinygrad.uop.ops import Ops, UOp
-from tinygrad.codegen import get_program
+from tinygrad.codegen import to_program
 import json
 from collections import OrderedDict
 
@@ -36,10 +36,11 @@ def compile_net(linear:UOp, output_bufs:List[Buffer]) -> Tuple[Dict[str,str], Li
 
   for call in iter_kernel_calls(linear):
     arg_uops = [b for b in call.src[1:] if b.op is not Ops.BIND]
-    prg = get_program(call.src[0], Device[arg_uops[0].device].renderer)
-    functions[prg.function_name] = prg.src
-    cargs = [name_of(bu, i == 0) for i, bu in enumerate(arg_uops)] + [v for v in prg.vars if v.op is Ops.DEFINE_VAR]
-    statements.append((prg.function_name, cargs, prg.global_size, prg.local_size))
+    prg = to_program(call.src[0], Device[arg_uops[0].device].renderer)
+    info = prg.arg
+    functions[info.function_name] = prg.src[3].arg
+    cargs = [name_of(bu, i == 0) for i, bu in enumerate(arg_uops)] + [v for v in info.vars if v.op is Ops.DEFINE_VAR]
+    statements.append((info.function_name, cargs, info.global_size, info.local_size))
 
   return functions, statements, {name:(size, dtype, key) for name, size, dtype, key in bufs.values()}, bufs_to_save
 
@@ -244,7 +245,7 @@ def export_model(model, target:str, *inputs, model_name: Optional[str] = "model"
   with Context(JIT=2, CPU_COUNT=1): linear, output_bufs = jit_model(model, *inputs)
   functions, statements, bufs, bufs_to_save = compile_net(linear, output_bufs)
   state = get_state_dict(model)
-  weight_names = {id(x.uop.base.realized): name for name, x in state.items()}
+  weight_names = {(id(b), b.offset, b.size, b.dtype): name for name, x in state.items() if (b:=x.uop.base.realized) is not None}
   input_names = [f"input{i}" for i in range(len(inputs))]
   output_names = [f"output{i}" for i in range(len(output_bufs))]
 

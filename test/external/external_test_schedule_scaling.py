@@ -6,7 +6,7 @@ class TestScheduleScaling(unittest.TestCase):
 
   def _assert_linear(self, fn, n_small=200, n_large=1000):
     """Assert schedule time scales at most ~linearly: time(n_large)/time(n_small) should be close to n_large/n_small."""
-    fn(n_small).schedule()  # warmup
+    fn(n_small).schedule_linear()  # warmup
     t_small = min(self._time_schedule(fn, n) for n in [n_small]*3)
     t_large = min(self._time_schedule(fn, n) for n in [n_large]*3)
     size_ratio = n_large / n_small  # 5.0
@@ -19,7 +19,7 @@ class TestScheduleScaling(unittest.TestCase):
   @staticmethod
   def _time_schedule(fn, n) -> float:
     st = time.perf_counter()
-    fn(n).schedule()
+    fn(n).schedule_linear()
     return time.perf_counter() - st
 
   # *** rangeify: ending_ranges accumulation and consumer merge ***

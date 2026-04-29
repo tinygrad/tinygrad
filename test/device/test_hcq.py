@@ -6,7 +6,8 @@ from tinygrad.device import Buffer, BufferSpec
 from tinygrad.runtime.support.hcq import HCQCompiled, HCQBuffer
 from tinygrad.runtime.autogen import libc
 from tinygrad.runtime.support.system import PCIIfaceBase
-from tinygrad.engine.realize import get_runner, CompiledRunner, get_program
+from tinygrad.engine.realize import get_runner, CompiledRunner
+from tinygrad.codegen import to_program
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad import Variable
 
@@ -19,9 +20,9 @@ class TestHCQ(unittest.TestCase):
     TestHCQ.d0 = Device[Device.DEFAULT]
     TestHCQ.a = Tensor([0.,1.], device=Device.DEFAULT).realize()
     TestHCQ.b = self.a + 1
-    si = self.b.schedule()[-1]
+    si = self.b.schedule_linear().src[-1]
 
-    TestHCQ.runner = get_runner(TestHCQ.d0.device, si.ast)
+    TestHCQ.runner = get_runner(TestHCQ.d0.device, si.src[0])
     TestHCQ.b.uop.buffer.allocate()
 
     TestHCQ.kernargs_ba_ptr = TestHCQ.runner._prg.fill_kernargs([TestHCQ.b.uop.buffer._buf, TestHCQ.a.uop.buffer._buf])
@@ -163,9 +164,10 @@ class TestHCQ(unittest.TestCase):
 
     a = Tensor.randint((3, 3, 3), dtype=dtypes.int, device=Device.DEFAULT).realize()
     b = a + 1
-    si = b.schedule()[-1]
+    si = b.schedule_linear().src[-1]
 
-    runner = CompiledRunner(get_program(replace_opts(si.ast, [Opt(op=OptOps.LOCAL, axis=0, arg=3) for _ in range(3)]), TestHCQ.d0.renderer))
+    runner = CompiledRunner(to_program(replace_opts(si.src[0], [Opt(op=OptOps.LOCAL, axis=0, arg=3) for _ in range(3)]), TestHCQ.d0.renderer),
+                            Device.DEFAULT)
 
     zb = Buffer(Device.DEFAULT, 3 * 3 * 3, dtypes.int, options=BufferSpec(cpu_access=True, nolru=True)).ensure_allocated()
     zt = Buffer(Device.DEFAULT, 3 * 3 * 3, dtypes.int, options=BufferSpec(cpu_access=True, nolru=True)).ensure_allocated()
@@ -468,7 +470,7 @@ class TestHCQ(unittest.TestCase):
   def test_memory_barrier(self):
     a = Tensor([0, 1], device=Device.DEFAULT, dtype=dtypes.int8).realize()
     b = a + 1
-    runner = get_runner(TestHCQ.d0.device, b.schedule()[-1].ast)
+    runner = get_runner(TestHCQ.d0.device, b.schedule_linear().src[-1].src[0])
 
     buf1 = Buffer(Device.DEFAULT, 2, dtypes.int8, options=BufferSpec(nolru=True)).ensure_allocated()
     buf2 = Buffer(Device.DEFAULT, 2, dtypes.int8, options=BufferSpec(cpu_access=True, nolru=True)).ensure_allocated()

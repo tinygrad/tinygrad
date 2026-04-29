@@ -5,9 +5,9 @@ from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv,
 from tinygrad.device import Buffer, Compiled, Device, MultiBuffer
 from tinygrad.dtype import DType, dtypes
 from tinygrad.uop.ops import UOp, PatternMatcher, Variable, sym_infer, Ops, buffers, track_rewrites, graph_rewrite
-from tinygrad.engine.realize import ExecItem, capturing, CompiledRunner, Runner, Estimates, compile_linear, run_linear, get_runner, graph_cache
+from tinygrad.engine.realize import capturing, CompiledRunner, Runner, Estimates, compile_linear, run_linear, get_runner, graph_cache, estimate_uop
+from tinygrad.engine.realize import unwrap_multi, resolve_params
 from tinygrad.schedule.memory import memory_plan_rewrite, _collect_bufs
-from tinygrad.schedule import linear_to_schedule
 from tinygrad.nn.state import get_parameters
 from tinygrad.schedule.rangeify import mop_cleanup
 from dataclasses import dataclass
@@ -62,9 +62,7 @@ def graph_split_rewrite(linear:UOp, max_batch_size:int=0) -> UOp:
 def _call_outs_ins(call:UOp) -> tuple[set[int], set[int]]:
   non_bind = [s for s in call.src[1:] if s.op is not Ops.BIND]
   ast = call.src[0]
-  if ast.op in (Ops.SINK, Ops.PROGRAM):
-    prg = get_runner(non_bind[0].device if isinstance(non_bind[0].device, str) else non_bind[0].device[0], call.src[0])
-    return set(prg.p.outs), set(prg.p.ins)
+  if ast.op is Ops.PROGRAM: return set(ast.arg.outs), set(ast.arg.ins)
   if ast.op in (Ops.COPY, Ops.BUFFER_VIEW): return {0}, {1}
   if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "encdec": return {0}, set(range(1, len(non_bind)))
   return set(), set()
@@ -97,55 +95,47 @@ def _check_no_non_tensor_return(ret):
 
 def graph_class(dev): return dev.graph.func if isinstance(dev.graph, functools.partial) else dev.graph
 
-def get_input_replace(jit_cache: list[ExecItem], input_buffers:list[Buffer]) -> dict[tuple[int, int], int]:
-  input_replace: dict[tuple[int, int], int] = {}
-  for j,ji in enumerate(jit_cache):
-    for i,a in enumerate(ji.bufs):
-      if a in input_buffers: input_replace[(j,i)] = input_buffers.index(a)
-  return input_replace
-
 class GraphRunner(Runner):
-  def __init__(self, linear:UOp, input_buffers:list[Buffer], input_uops:tuple[UOp, ...]=()):
+  def __init__(self, linear:UOp, input_uops:tuple[UOp, ...]=()):
     self.linear = linear.src[0]
-    self.jit_cache = [ei.lower() for ei in linear_to_schedule(self.linear.substitute({p: input_uops[p.arg] for p in linear.src[1:]}))]
-    for ei in self.jit_cache:
-      for b in ei.bufs:
-        if b is not None: b.ensure_allocated()
-    self.input_replace = get_input_replace(self.jit_cache, input_buffers) if input_buffers else {}
+    self.calls: list[tuple[int, UOp, list[Buffer], dict[str, int]]] = []
+    self.progs: list[CompiledRunner|None] = []
+    self.uop_replace: list[list[tuple[int, int]]] = []
+    for call in self.linear.src:
+      replace = [(p, b.arg) for p, b in enumerate(b for b in call.src[1:] if b.op is not Ops.BIND) if b.op is Ops.PARAM]
+      for dev_idx, (bufs, device_vars) in enumerate(unwrap_multi(call, resolve_params(call, input_uops))):
+        self.calls.append((dev_idx, call.src[0], [b.ensure_allocated() for b in bufs], device_vars))
+        self.progs.append(get_runner(bufs[0].device, call.src[0]) if call.src[0].op is Ops.PROGRAM else None)
+        self.uop_replace.append(replace)
 
     self.var_vals_replace:dict[int, list[tuple[int, int]]] = {}
     self.launch_dims_replace:dict[int, tuple[int|None, int|None]] = {}
-    self.launch_dims_base:dict[int, tuple[tuple[int, ...], tuple[int, ...]]] = {}
+    self.launch_dims_base:dict[int, tuple[tuple[int|float, ...], tuple[int, ...]]] = {}
 
     def is_sym_dim(dim) -> bool: return not all(isinstance(d, (int, float)) for d in dim)
 
-    crs = [(ji, ji.prg) for ji in self.jit_cache if isinstance(ji.prg, CompiledRunner)]
-    self.vars = sorted({v.expr for ji,p in crs for v in p.p.vars if v.expr not in ji.fixedvars | p.p.runtimevars})
-    self.symbolic_dims = dedup([tuple(d) for _,p in crs if (d:=p.p.local_size) and is_sym_dim(d)] +
-                               [tuple(d) for _,p in crs if (d:=p.p.global_size) and is_sym_dim(d)])
+    crs = [(j, p, self.calls[j][3]) for j,p in enumerate(self.progs) if isinstance(p, CompiledRunner)]
+    self.vars = sorted({v.expr for _,p,dv in crs for v in p.p.vars if v.expr not in dv | p.p.runtimevars})
+    self.symbolic_dims = dedup(tuple(d) for _,p,_ in crs for d in (p.p.local_size, p.p.global_size) if d and is_sym_dim(d))
 
     def find_symbolic_dim(dim): return self.symbolic_dims.index(tuple(dim)) if dim is not None and tuple(dim) in self.symbolic_dims else None
 
-    estimates = Estimates()
-    for j,ji in enumerate(self.jit_cache):
-      assert ji.prg is not None
-      estimates += ji.prg.estimates
-      if isinstance(ji.prg, CompiledRunner):
-        if (replace:=[(i, self.vars.index(v.expr)) for i, v in enumerate(ji.prg.p.vars) if v.expr not in ji.fixedvars | ji.prg.p.runtimevars]):
-          self.var_vals_replace[j] = replace
+    for j,p,dv in crs:
+      if (replace:=[(i, self.vars.index(v.expr)) for i, v in enumerate(p.p.vars) if v.expr not in dv | p.p.runtimevars]):
+        self.var_vals_replace[j] = replace
+      global_dim_idx, local_dim_idx = find_symbolic_dim(p.p.global_size), find_symbolic_dim(p.p.local_size)
+      if global_dim_idx is not None or local_dim_idx is not None:
+        self.launch_dims_replace[j] = (global_dim_idx, local_dim_idx)
+        assert p.p.local_size is not None
+        self.launch_dims_base[j] = (tuple(p.p.global_size), tuple(p.p.local_size))
 
-        global_dim_idx, local_dim_idx = find_symbolic_dim(ji.prg.p.global_size), find_symbolic_dim(ji.prg.p.local_size)
-        if global_dim_idx is not None or local_dim_idx is not None:
-          self.launch_dims_replace[j] = (global_dim_idx, local_dim_idx)
-          assert ji.prg.p.local_size is not None
-          self.launch_dims_base[j] = (tuple(ji.prg.p.global_size), tuple(ji.prg.p.local_size))
+    estimates = sum((estimate_uop(call) for call in self.linear.src), Estimates())
 
     # used in MultiGraphRunner. tracks (offset, end, dep) ranges per base buffer id to handle suballocated buffers correctly.
     self.w_dependency_map: dict[int, list[tuple[int, int, Any]]] = collections.defaultdict(list)
     self.r_dependency_map: dict[int, list[tuple[int, int, Any]]] = collections.defaultdict(list)
 
-    assert self.jit_cache[0].prg is not None
-    super().__init__(colored(f"<batched {len(self.jit_cache)}>", "cyan"), self.jit_cache[0].prg.device.split(":")[0], estimates.simplify())
+    super().__init__(colored(f"<batched {len(self.calls)}>", "cyan"), self.calls[0][2][0].device.split(":")[0], estimates.simplify())
 
   def updated_vars(self, var_vals: dict[str, int]):
     vals = [var_vals[v] for v in self.vars]
@@ -183,14 +173,14 @@ class GraphRunner(Runner):
 
   @staticmethod
   def supports_exec_item(batch_devs:list[Compiled], new_call:UOp) -> bool:
-    return new_call.src[0].op in (Ops.SINK, Ops.PROGRAM) and len(GraphRunner._all_devs(batch_devs, new_call)) == 1
+    return new_call.src[0].op is Ops.PROGRAM and len(GraphRunner._all_devs(batch_devs, new_call)) == 1
 
 # a marker for your graph supporting multiple devices of the same type
 class MultiGraphRunner(GraphRunner):
   @staticmethod
   def supports_exec_item(batch_devs:list[Compiled], new_call:UOp) -> bool:
     # Devices must be the same type
-    return new_call.src[0].op in (Ops.SINK, Ops.PROGRAM, Ops.COPY) and len(dedup([type(d) for d in GraphRunner._all_devs(batch_devs, new_call)])) == 1
+    return new_call.src[0].op in (Ops.PROGRAM, Ops.COPY) and len(dedup([type(d) for d in GraphRunner._all_devs(batch_devs, new_call)])) == 1
 
 ReturnType = TypeVar('ReturnType')
 @dataclass

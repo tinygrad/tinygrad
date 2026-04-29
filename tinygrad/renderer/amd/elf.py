@@ -11,7 +11,7 @@ from tinygrad.runtime.autogen.amd.rdna3.ins import s_code_end # same encoding as
 from tinygrad.runtime.autogen.amd.cdna.ins import s_nop as s_nop_cdna
 
 _arch_map = {"gfx9": "cdna", "gfx10": "rdna3", "gfx11": "rdna3", "gfx12": "rdna4"}
-def assemble_linear(ctx, prg:UOp, lin:UOp) -> bytes:
+def assemble_linear(prg:UOp, lin:UOp, arch:str) -> bytes:
   insts = [u.arg for u in lin.src]
 
   # ** scan for max vgpr/sgpr/accvgpr
@@ -41,7 +41,7 @@ def assemble_linear(ctx, prg:UOp, lin:UOp) -> bytes:
     elif u.op is Ops.DEFINE_LOCAL: lds_size += u.ptrdtype.size * u.ptrdtype.base.itemsize
     elif u.op is Ops.SPECIAL and u.arg.startswith("gidx"): gids.add(int(u.arg[-1]))
   code_bytes = b"".join(inst.to_bytes() for inst in insts)
-  arch = next(v for k, v in _arch_map.items() if ctx.target.arch.startswith(k))
+  arch = next(v for k, v in _arch_map.items() if arch.startswith(k))
   is_cdna, is_rdna4 = arch == "cdna", arch == "rdna4"
 
   # ** pad text to ISA alignment

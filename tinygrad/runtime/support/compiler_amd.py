@@ -92,6 +92,7 @@ def compile_hip(prg:str, arch="gfx1100", asm=False) -> bytes:
 
 class HIPCompiler(Compiler):
   def __init__(self, arch:str):
+    assert comgr.dll.nm in c.DLL._loaded_, f"comgr not available: {comgr.dll.emsg}"
     self.arch = arch
     super().__init__(f"compile_hip_{self.arch}")
   def compile(self, src:str) -> bytes:

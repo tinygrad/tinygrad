@@ -5,7 +5,7 @@ import numpy as np
 from tinygrad import Tensor, dtypes, Device
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.tensor import _to_np_dtype
-from tinygrad.engine.realize import get_program
+from tinygrad.codegen import to_program
 from tinygrad.dtype import DType
 from tinygrad.nn.state import get_parameters
 from tinygrad.helpers import T, CI, Target
@@ -80,8 +80,8 @@ def eval_uop(uop:UOp, inputs:list[tuple[DType, list[Any]]]|None=None):
     bufs.append(buf:=allocator.alloc(len(data) * buf_dt.itemsize))
     allocator._copyin(buf, memoryview(struct.pack(str(len(data)) + (buf_dt.fmt or ""), *data)))
   g = UOp(Ops.PARAM, uop.dtype.ptr(), arg=0, src=())
-  prg = get_program(UOp.store(g.index(UOp.const(dtypes.int, 0)), uop).sink(arg=KernelInfo()), PythonRenderer(Target("PYTHON")))
-  prog = PythonProgram("run", PythonCompiler().compile(prg.src))
+  prg = to_program(UOp.store(g.index(UOp.const(dtypes.int, 0)), uop).sink(arg=KernelInfo()), PythonRenderer(Target("PYTHON")))
+  prog = PythonProgram("run", PythonCompiler().compile(prg.src[3].arg))
   prog(out_buf:=allocator.alloc(uop.dtype.itemsize), *bufs)
   return out_buf.cast(uop.dtype.fmt or "").tolist()[0]
 

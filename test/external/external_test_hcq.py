@@ -20,8 +20,8 @@ class TestHCQ(unittest.TestCase):
     #TestHCQ.d1: AMDDevice = Device["AMD:1"]
     TestHCQ.a = Tensor([0.,1.], device=Device.DEFAULT).realize()
     TestHCQ.b = self.a + 1
-    si = self.b.schedule()[-1]
-    TestHCQ.runner = get_runner(TestHCQ.d0.device, si.ast)
+    linear = self.b.schedule_linear()
+    TestHCQ.runner = get_runner(TestHCQ.d0.device, linear.src[-1].src[0])
     TestHCQ.b.uop.buffer.allocate()
     # wow that's a lot of abstraction layers
     TestHCQ.addr = struct.pack("QQ", TestHCQ.b.uop.buffer._buf, TestHCQ.a.uop.buffer._buf)

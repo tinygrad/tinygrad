@@ -1,8 +1,8 @@
 import unittest
 from tinygrad import Tensor
 from tinygrad.helpers import GlobalCounters, DEV
-from tinygrad.engine.realize import get_program
-from tinygrad.renderer import ProgramSpec
+from tinygrad.engine.realize import compile_linear, estimate_uop
+from tinygrad.codegen import to_program
 from tinygrad.renderer import Estimates
 from tinygrad.uop.ops import Ops, UOp
 from tinygrad.dtype import dtypes
@@ -18,8 +18,8 @@ def flops_mem(uops, ignore_indexing=False):
 # **************** new FlopCounter ****************
 
 def get_stats(x:Tensor):
-  si = x.schedule()[-1].lower()
-  return si.prg.estimates.ops, si.prg.estimates.mem
+  est = estimate_uop(compile_linear(x.schedule_linear()).src[-1])
+  return est.ops, est.mem
 
 @unittest.skipIf(Device.DEFAULT == "WEBGPU", "webgpu does extra load/store for packed types")
 class TestMemoryCount(unittest.TestCase):
@@ -165,75 +165,75 @@ N = 64
 class TestStatsOptimized(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
-    cls.ast_gemm = (Tensor.empty(N, N) @ Tensor.empty(N, N)).schedule()[-1].ast
-    cls.ast_reduce = (Tensor.empty(N*N).sum()).schedule()[-1].ast
+    cls.ast_gemm = (Tensor.empty(N, N) @ Tensor.empty(N, N)).schedule_linear().src[-1].src[0]
+    cls.ast_reduce = (Tensor.empty(N*N).sum()).schedule_linear().src[-1].src[0]
 
-  def check_gemm(self, p:ProgramSpec, extra_flops=0):
-    #p.uops.print()
-    #print(p.src)
-    print(p.name, p.estimates.ops, p.estimates.mem, p.estimates.lds)
-    self.assertEqual(p.estimates.ops, 2*N*N*N + extra_flops)  # N**3 mulaccs
-    self.assertEqual(p.estimates.mem, 3*N*N*4) # 3 NxN mats with floats
+  def check_gemm(self, p:UOp, extra_flops=0):
+    est = p.src[0].arg.estimates
+    print(p.arg.name, est.ops, est.mem, est.lds)
+    self.assertEqual(est.ops, 2*N*N*N + extra_flops)  # N**3 mulaccs
+    self.assertEqual(est.mem, 3*N*N*4) # 3 NxN mats with floats
 
   def test_gemm(self):
-    p = get_program(replace_opts(self.ast_gemm, []), renderer=Device[Device.DEFAULT].renderer)
+    p = to_program(replace_opts(self.ast_gemm, []), renderer=Device[Device.DEFAULT].renderer)
     self.check_gemm(p)
-    self.assertEqual(p.estimates.lds, 2*N*N*N*4 + 4*N*N)
+    self.assertEqual(p.src[0].arg.estimates.lds, 2*N*N*N*4 + 4*N*N)
 
   def test_gemm_tc_unroll(self):
     try:
-      p = get_program(replace_opts(self.ast_gemm, [Opt(OptOps.TC, 0, (-1, 0, 1)), Opt(OptOps.UNROLL, 0, 2)]),
+      p = to_program(replace_opts(self.ast_gemm, [Opt(OptOps.TC, 0, (-1, 0, 1)), Opt(OptOps.UNROLL, 0, 2)]),
                       renderer=Device[Device.DEFAULT].renderer)
     except KernelOptError:
       raise unittest.SkipTest("no tensor cores")
-    print(p.src)
+    print(p.src[3].arg)
     self.check_gemm(p)
 
   # this is a good lesson about why UPCASTing is a good idea
 
   def test_gemm_one_upcasted(self):
-    p = get_program(replace_opts(self.ast_gemm, [Opt(OptOps.UPCAST, 0, 4)]), renderer=Device[Device.DEFAULT].renderer)
+    p = to_program(replace_opts(self.ast_gemm, [Opt(OptOps.UPCAST, 0, 4)]), renderer=Device[Device.DEFAULT].renderer)
     self.check_gemm(p)
-    self.assertEqual(p.estimates.lds, N*N*N*4 + N*N*N*4//4 + 4*N*N)
+    self.assertEqual(p.src[0].arg.estimates.lds, N*N*N*4 + N*N*N*4//4 + 4*N*N)
 
   def test_gemm_upcasted(self):
-    p = get_program(replace_opts(self.ast_gemm, [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 4)]),
+    p = to_program(replace_opts(self.ast_gemm, [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.UNROLL, 0, 4)]),
                     renderer=Device[Device.DEFAULT].renderer)
     self.check_gemm(p)
-    self.assertEqual(p.estimates.lds, 2*N*N*N*4//4 + 4*N*N)
+    self.assertEqual(p.src[0].arg.estimates.lds, 2*N*N*N*4//4 + 4*N*N)
 
   def test_gemm_upcasted_locals(self):
     try:
-      p = get_program(replace_opts(self.ast_gemm, [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.LOCAL, 0, 4),
+      p = to_program(replace_opts(self.ast_gemm, [Opt(OptOps.UPCAST, 0, 4), Opt(OptOps.UPCAST, 1, 4), Opt(OptOps.LOCAL, 0, 4),
                                                    Opt(OptOps.LOCAL, 1, 4)]), renderer=Device[Device.DEFAULT].renderer)
     except KernelOptError:
       raise unittest.SkipTest("no locals")
     self.check_gemm(p)
-    self.assertEqual(p.estimates.lds, 2*N*N*N*4//4 + 4*N*N)
+    self.assertEqual(p.src[0].arg.estimates.lds, 2*N*N*N*4//4 + 4*N*N)
 
   def test_gemm_group(self):
     try:
-      p = get_program(replace_opts(self.ast_gemm, [Opt(OptOps.GROUP, 0, 4)]), renderer=Device[Device.DEFAULT].renderer)
+      p = to_program(replace_opts(self.ast_gemm, [Opt(OptOps.GROUP, 0, 4)]), renderer=Device[Device.DEFAULT].renderer)
     except KernelOptError:
       raise unittest.SkipTest("no locals")
     SZ = N*N*4
     # NOTE: these are sort of wrong. they aren't honoring the IF statement
     self.check_gemm(p, extra_flops=SZ*4)
-    self.assertEqual(p.estimates.lds, 2*N*N*N*4 + SZ*4 + (SZ*4 + 4*N*N)*4)
+    self.assertEqual(p.src[0].arg.estimates.lds, 2*N*N*N*4 + SZ*4 + (SZ*4 + 4*N*N)*4)
 
   def test_reduce(self):
-    p = get_program(replace_opts(self.ast_reduce, []), renderer=Device[Device.DEFAULT].renderer)
-    print(p.name, p.estimates.ops, p.estimates.mem, p.estimates.lds)
-    self.assertEqual(p.estimates.ops, N*N)
-    self.assertEqual(p.estimates.mem, N*N*4 + 4)
+    p = to_program(replace_opts(self.ast_reduce, []), renderer=Device[Device.DEFAULT].renderer)
+    est = p.src[0].arg.estimates
+    print(p.arg.name, est.ops, est.mem, est.lds)
+    self.assertEqual(est.ops, N*N)
+    self.assertEqual(est.mem, N*N*4 + 4)
 
   def test_reduce_group(self):
     try:
-      p = get_program(replace_opts(self.ast_reduce, [Opt(OptOps.GROUP, 0, 50)]), renderer=Device[Device.DEFAULT].renderer)
+      p = to_program(replace_opts(self.ast_reduce, [Opt(OptOps.GROUP, 0, 50)]), renderer=Device[Device.DEFAULT].renderer)
     except KernelOptError:
       raise unittest.SkipTest("no locals")
-    # NOTE: these are wrong, they don't respect the if statement
-    print(p.name, p.estimates.ops, p.estimates.mem, p.estimates.lds)
+    est = p.src[0].arg.estimates
+    print(p.arg.name, est.ops, est.mem, est.lds)
 
 if __name__ == '__main__':
   unittest.main(verbosity=2)

@@ -147,10 +147,10 @@ class MetalProgram:
     encoder.endEncoding()
     command_buffer.setLabel(to_ns_str(self.name)) # TODO: is this always needed?
     command_buffer.commit()
-    self.dev.mtl_buffers_in_flight.append(command_buffer)
     if wait:
       wait_check(command_buffer)
       return command_buffer.GPUEndTime() - command_buffer.GPUStartTime()
+    self.dev.mtl_buffers_in_flight.append(command_buffer)
 
 class MetalBuffer:
   def __init__(self, buf:metal.MTLBuffer, size:int, offset=0): self.buf, self.size, self.offset = buf, size, offset

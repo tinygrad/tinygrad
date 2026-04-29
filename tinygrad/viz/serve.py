@@ -358,7 +358,7 @@ wave_colors = {"WMMA": "#1F7857", **{x:"#ffffc0" for x in ["VALU", "VINTERP"]}, 
 def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, None, None]:
   from tinygrad.renderer.amd.sqtt import (map_insts, InstructionInfo, PacketType, INST, InstOp, VALUINST, IMMEDIATE, IMMEDIATE_MASK, VMEMEXEC,
                                           ALUEXEC, INST_RDNA4, InstOpRDNA4, TS_DELTA_OR_MARK, TS_DELTA_OR_MARK_RDNA4, CDNA_INST, InstOpCDNA,
-                                          WAVEEND, CDNA_WAVEEND, WAVERDY)
+                                          WAVEEND, WAVEEND_RDNA4, CDNA_WAVEEND, WAVERDY)
   pc_map = {addr:str(inst) for addr,inst in amd_decode(lib, target).items()}
   row_ends:dict[str, Decimal] = {}
   row_counts:dict[str, itertools.count] = {}
@@ -374,20 +374,24 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
     link = f"PC:{info.pc}" if info else None
     if isinstance(p, (ALUEXEC, VMEMEXEC)):
       dispatch_id, op_type = exec_pending[name].pop(0)
-      # get the number of cycles from the op type
+      # wmma exec gets its own color and its own row on rdna4
+      if op_type.startswith("WMMA"):
+        name = name+"_WMMA"
+        if not op_type.startswith("WMMA_VALU"): row = "ALUEXEC:0 WMMA"
+      # transcendental valu gets its own row
+      if op_type.startswith("VALUT"): row = "ALUEXEC:0 TFU"
+      # extend execs by the op type's known duration, p._time marks the first or last cycle based on the op type
       duration = int(dur_match.group(1)) if (dur_match:=re.match(r".*_(\d+)$", op_type)) else 1
-      # for execs, extend end time by the duration
-      start_time, end_time = p._time, p._time+duration
+      if any(ss in row for ss in ("SALU", "TFU", "VMEM", "LDS")): start_time, end_time = p._time, p._time+duration
+      else: start_time, end_time = p._time-duration, p._time
       link = f"LINK:{dispatch_id}"
-      # wmma exec gets its own row and color
-      if op_type.startswith("WMMA"): name, row = name+"_WMMA", "ALUEXEC:0 WMMA"
     # queue inst dispatches
     idx = next(row_counts.setdefault(row, itertools.count(0)))
     if isinstance(p, (VALUINST, INST, INST_RDNA4)) and (exec_type:=dispatch_to_exec.get(name.replace("OTHER_", "").split("_")[0])) is not None:
       if name.startswith("OTHER_"): exec_type = f"{exec_type}_ALT"
       # detect rdna3 wmma from the asm, only rdna4 has an op type for it
       if isinstance(p, VALUINST) and (asm:=getattr(unwrap(info).inst, "op_name", "")).startswith("V_WMMA"):
-        name = f"WMMA_{16 if 'IU4' in asm else 32}"
+        name = f"WMMA_VALU_{16 if 'IU4' in asm else 32}"
       exec_pending.setdefault(exec_type, []).append((f"{row}-{idx}", name))
     # construct and yield the event for this packet
     if row not in row_ends: yield ProfilePointEvent(row, "JSON", "pcMap", pc_map, ts=Decimal(0))
@@ -412,7 +416,7 @@ def sqtt_timeline(data:bytes, lib:bytes, target:str) -> Generator[ProfileEvent, 
     if isinstance(p, (INST, INST_RDNA4, CDNA_INST)):
       name = p.op.name if isinstance(p.op, (InstOp, InstOpRDNA4, InstOpCDNA)) else f"0x{p.op:02x}"
       yield from add(name, p, info=info)
-    if isinstance(p, (VALUINST, IMMEDIATE, WAVEEND, CDNA_WAVEEND)): yield from add(p.__class__.__name__, p, info=info)
+    if isinstance(p, (VALUINST, IMMEDIATE, WAVEEND, WAVEEND_RDNA4, CDNA_WAVEEND)): yield from add(p.__class__.__name__, p, info=info)
     if isinstance(p, IMMEDIATE_MASK): yield from add("IMMEDIATE", p, wave=unwrap(info).wave, info=info)
     if isinstance(p, WAVERDY):
       for wave in range(16):

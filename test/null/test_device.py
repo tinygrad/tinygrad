@@ -153,7 +153,7 @@ class TestDevVar(unittest.TestCase):
       self.assertEqual(DEV.target("CPU"), Target("CPU"))
 
   def test_dev_arch_override(self):
-    with Context(DEV="NULL:HIP:gfx1100"):
+    with Context(DEV="NULL::gfx1100"):
       self.assertEqual(Device["NULL"].renderer.target.arch, "gfx1100")
 
 class MockCompiler(Compiler):

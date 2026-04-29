@@ -20,9 +20,9 @@ class TestHCQUnit(unittest.TestCase):
     inp, inp_cpu = Tensor.randn(10, 10, device=Device.DEFAULT).realize(), Tensor.randn(10, 10, device="CPU").realize()
     for _ in range(5): f(inp, inp_cpu)
 
-    # construct minimal CALL UOps for supports_exec_item
-    gpu_call = UOp(Ops.SINK).call(UOp.new_buffer(Device.DEFAULT, 1, dtypes.float))
-    cpu_call = UOp(Ops.SINK).call(UOp.new_buffer("CPU", 1, dtypes.float))
+    # construct minimal CALL UOps for supports_exec_item (graphs only see PROGRAMs after compile_linear)
+    gpu_call = UOp(Ops.PROGRAM).call(UOp.new_buffer(Device.DEFAULT, 1, dtypes.float))
+    cpu_call = UOp(Ops.PROGRAM).call(UOp.new_buffer("CPU", 1, dtypes.float))
     gpu_devs = [d0]
 
     # local MMIO: GPU works alone and with CPU in batch (cpu_support=True)

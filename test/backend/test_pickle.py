@@ -142,10 +142,10 @@ class TestPickle(unittest.TestCase):
   def test_pickle_schedule(self):
     a = Tensor([1,2])
     out = a + 2
-    sched = out.schedule()
+    sched = out.schedule_linear()
     pk = pickle.dumps(sched)
     sched_pk = pickle.loads(pk)
-    self.assertEqual(sched_pk[-1].ast, sched[-1].ast)
+    self.assertEqual(sched_pk.src[-1].src[0], sched.src[-1].src[0])
 
   def test_pickle_renderer(self):
     from tinygrad.device import Device
