@@ -48,6 +48,13 @@ def fold_add_divmod_recombine(x:UOp) -> UOp|None:
           return (base % (div*d)).usum(*[t for k,t in enumerate(terms) if k not in (i,j)])
   return None
 
+def fold_masked(root:UOp, x:UOp, mask:UOp) -> UOp|None:
+  if root.op is Ops.CAST:
+    return x.cast(root.dtype) if x.dtype.scalar() == dtypes.uint64 and root.dtype.scalar() == dtypes.uint32 and mask.arg == 0xFFFFFFFF else None
+  if root.op is Ops.SHR and root.src[1].op is Ops.CONST:
+    return x >> root.src[1].arg if mask.arg | ((1 << root.src[1].arg) - 1) == -1 else None
+  return None
+
 # this needs to be before symbolic so that 0*something_that_might_be_invalid doesnt become 0
 propagate_invalid = PatternMatcher([
   # propagate invalid, push it past children
@@ -100,13 +107,6 @@ symbolic_simple = propagate_invalid + PatternMatcher([
   (UPat.var("x") % UPat.var("x"), lambda x: x.const_like(0)), # x%x -> 0
   (UPat.var("x") ^ UPat.var("x"), lambda x: x.const_like(0)), # x^x -> 0
   (UPat.var("x") & 0, lambda x: x.const_like(0)), # x&0 -> 0
-  # (x&mask)>>k -> x>>k when mask only clears bits below k
-  # (x&mask)<<k -> x<<k when mask only clears bits in the top k (shifted out)
-  # TODO: combine this with "# rules for threefry" below
-  ((UPat.var("x") & UPat.cvar("mask", vec=False)) >> UPat.cvar("k", vec=False),
-   lambda x,mask,k: x >> k.arg if mask.arg | ((1 << k.arg) - 1) == -1 else None),
-  ((UPat.var("x") & UPat.cvar("mask", vec=False)) << UPat.cvar("k", vec=False),
-   lambda x,mask,k: x << k.arg if (mask.arg & (m:=(1<<(x.dtype.scalar().bitsize-k.arg))-1 if x.dtype.scalar().bitsize>k.arg else 0)) == m else None),
   (UPat.var("x", dtype=dtypes.ints+(dtypes.bool, dtypes.weakint)) != UPat.var("x"),
    lambda x: x.const_like(False).cast(dtypes.bool.vec(x.dtype.count))), # x != x -> False (only ints)
   # ** constant folding **
@@ -144,7 +144,7 @@ symbolic_simple = propagate_invalid + PatternMatcher([
   # positive const ** x
   (UPat.cvar("c", vec=False).alu(Ops.POW, UPat.var("x")), lambda c,x: c if c.arg == 1 else (x*math.log2(c.arg)).exp2() if c.arg > 0 else None),
   # rules for threefry
-  ((UPat.var('x', dtypes.uint64)&0xFFFFFFFF).cast(dtypes.uint32), lambda x: x.cast(dtypes.uint32)),
+  (UPat((Ops.CAST, Ops.SHR), name="root", src=(UPat.var("x") & UPat.cvar("mask", vec=False),), allow_any_len=True), fold_masked),
   (((UPat.var(None, dtypes.uint64)*(1<<32)) | UPat.var('y',  dtypes.uint32).cast(dtypes.uint64)).cast(dtypes.uint32), lambda y: y),
   (((UPat.var('x',  dtypes.uint64)*(1<<32)) | UPat.var(None, dtypes.uint32).cast(dtypes.uint64))//(1<<32), lambda x: x),
   (((UPat.var(None, dtypes.uint64)<<32) | UPat.var('y',  dtypes.uint32).cast(dtypes.uint64)).cast(dtypes.uint32), lambda y: y),
