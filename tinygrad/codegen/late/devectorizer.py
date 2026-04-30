@@ -197,8 +197,9 @@ def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
   return UOp(Ops.VCAT, ls.dtype, tuple(ret)) if ls.op is Ops.LOAD else UOp.group(*ret)
 
 def get_image_idx(idx:UOp, width:int):
-  oidx = UOp(Ops.STACK, dtypes.weakint.vec(2), (((x:=idx.src[1].get_idx()) // 4) % width, (x // (4*width))))
-  return idx.replace(src=(idx.src[0], oidx.valid(idx.src[1].get_valid())))
+  x, valid = idx.src[1].get_idx(), idx.src[1].get_valid()
+  idx_x, idx_y = (x // 4) % width, x // (4*width)
+  return idx.replace(src=(idx.src[0], UOp.vectorize(idx_x, idx_y).valid(valid)))
 
 def image_fixup(ls:UOp):
   # normal image load or store, with the CAST from expand_index

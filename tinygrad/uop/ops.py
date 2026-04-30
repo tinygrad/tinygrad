@@ -1136,8 +1136,8 @@ class UPat(OpMixin):
 
   # copied from UOp
   def sink(self, *srcs:UPat|None, **kwargs): return UPat(Ops.SINK, dtypes.void, (self,)+tuple([x for x in srcs if x is not None]), **kwargs)
-  def index(self, idx:UPat, valid:UPat|None=None, **kwargs):
-    return UPat(Ops.INDEX, self.match_dtype, (self,idx,valid) if valid is not None else (self,idx), **kwargs)
+  def index(self, *srcs:UPat|None, **kwargs):
+    return UPat(Ops.INDEX, self.match_dtype, (self,)+tuple(x for x in srcs if x is not None), **kwargs)
   def cast(self, dtype=None, **kwargs):
     if dtype is not None and self.match_dtype == (dtype,): return self
     return UPat(Ops.CAST, dtype, (self,), **kwargs)
