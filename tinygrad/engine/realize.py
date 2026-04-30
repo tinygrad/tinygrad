@@ -81,7 +81,7 @@ def optimize_local_size(call:UOp, prg:UOp) -> UOp|None:
   new_global = tuple(g//l if g%l == 0 else g/l for g,l in zip(prg.arg.global_size, local_size))
   return call.replace(src=(prg.replace(arg=replace(prg.arg, global_size=new_global, local_size=local_size)), *call.src[1:]))
 
-# **************** method cache ****************
+# **************** runtime cache ****************
 
 runtime_cache: dict[tuple[bytes, str], Any] = {}
 def get_runtime(device:str, ast:UOp):
