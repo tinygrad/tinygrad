@@ -449,7 +449,9 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     return self.index(*[UOp.const(dtypes.weakint, x) if isinstance(x, int) else x for x in idx])
   def const_like(self, b:ConstLike, dtype:DType|None=None):
     # constants can optionally have a DEVICE source
-    ret = UOp.const(dtype or self.dtype.base, b, device=self._device, shape=self.shard_shape if self.axis is not None else self._shape)
+    dtype = dtype or self.dtype.base
+    shape = (self.shard_shape if self.axis is not None else self._shape) if dtype.count == 1 else None
+    ret = UOp.const(dtype, b, device=self._device, shape=shape)
     return ret.multi(self.axis) if self.axis is not None else ret
   def ufix(self, x):
     if isinstance(x, UOp): return x
