@@ -791,7 +791,7 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
     ```
     """
     # asinh is odd, evaluate on |x| to avoid catastrophic cancellation in x+sqrt(x*x+1) for large negative x
-    ax = (self < 0).where(-self, self)
+    ax = self.maximum(-self)
     out = (ax + (self.square() + 1).sqrt()).log()
     return (self < 0).where(-out, out)
 
