@@ -321,7 +321,6 @@ class TestCustomKernel(unittest.TestCase):
     self.assertEqual(GlobalCounters.kernel_count, 2)
     self.assertEqual(z.tolist(), x.add(2).tolist())
 
-  @unittest.expectedFailure
   def test_custom_kernel_sched_copy(self): self.test_custom_kernel_sched(use_custom=True)
 
 class TestUOpReduce(unittest.TestCase):
