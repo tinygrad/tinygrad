@@ -493,6 +493,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     return UOp(op, out_dtype, all_srcs, **kwargs)
   @staticmethod
   def const(dtype:DType, b:ConstLike, device:str|tuple[str, ...]|None=None, shape:tuple[sint, ...]|None=None):
+    if shape == (): assert dtype.count == 1, "if shape is () you can't have a vec dtype"
     if isinstance(b, UOp): return b.unbind()[0] if b.op is Ops.BIND else b
     if isinstance(b, tuple) and all_same(b):
       assert len(b) > 0, "can't create const from empty tuple"
