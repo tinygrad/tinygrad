@@ -24,6 +24,8 @@ def scalar_amax(amax_buf:Tensor) -> Tensor:
     return local_abs_max(amax_buf).detach()
   return amax_buf.max().detach()
 
+def fp8_grad_handoff(): pass
+
 def shard_shape(shape:tuple, axis:int, ndev:int) -> list:
   s = list(shape)
   s[axis] //= ndev
