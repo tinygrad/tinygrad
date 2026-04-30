@@ -344,8 +344,9 @@ def late_buffer_view(t:UOp, b:UOp):
   else: offset = max(sum(idx.vmin for idx in x.src[1:]), 0)
 
   # remove the BUFFERIZE and the INDEX
-  return UOp(Ops.BUFFER_VIEW, t.dtype, (x.base.src[0],), (size, offset))
-  #return b.replace(src=(UOp(Ops.BUFFER_VIEW, t.dtype, (x.base,), (size, offset)), b.src[1]))
+  #assert x.op is Ops.INDEX, "must be INDEX"
+  #return UOp(Ops.BUFFER_VIEW, t.dtype, (x.src[0],), (size, offset))
+  return b.replace(src=(UOp(Ops.BUFFER_VIEW, t.dtype, (x.base,), (size, offset)), b.src[1]))
 
 to_bufferview = PatternMatcher([
   (UPat(Ops.BUFFERIZE, src=(UPat((Ops.BITCAST, Ops.CONTIGUOUS), name="t"), UPat()), name="b"), late_buffer_view),
