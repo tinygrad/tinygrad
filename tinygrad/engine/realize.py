@@ -23,7 +23,7 @@ def get_call_outs_ins(call:UOp) -> tuple[tuple[int, ...], tuple[int, ...]]:
   return (), ()
 
 def get_call_name(call:UOp, bufs:list[Buffer]) -> str:
-  def _uop_sz_to_str(uop:UOp) -> int: return size_to_str(prod(uop.shape) * uop.dtype.itemsize)
+  def _uop_sz_to_str(uop:UOp) -> str: return size_to_str(prod(uop.shape) * uop.dtype.itemsize)
 
   ast, arg_uops = call.src[0], get_call_arg_uops(call)
   if ast.op is Ops.PROGRAM: return ast.arg.name
