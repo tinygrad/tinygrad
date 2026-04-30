@@ -23,6 +23,11 @@ def validate_index(buf:UOp, idx:UOp, gate:UOp|None=None):
   from tinygrad.uop.validate import validate_index_with_z3
   return validate_index_with_z3(sz, idx, gate)
 
+def validate_image_index(buf:UOp, idx_x:UOp, idx_y:UOp, gate:UOp|None=None):
+  if not isinstance(buf.dtype, ImageDType): return None
+  return idx_x.dtype in dtypes.ints+(dtypes.weakint,) and idx_y.dtype in dtypes.ints+(dtypes.weakint,) and \
+    (gate is None or gate.dtype == dtypes.bool)
+
 # four specs:
 #   shared_spec  -- usable anywhere
 #   tensor_spec  -- usable in tensor graph
@@ -175,6 +180,7 @@ shared_codegen_spec = PatternMatcher([
 
   # LOAD(idx) / STORE(idx, val)
   (UPat().index(UPat()).or_casted().load(), lambda: True),
+  (UPat(Ops.INDEX, src=(UPat(), UPat(), UPat())).or_casted().load(), lambda: True),
   (UPat().index(UPat(), UPat(dtype=dtypes.bool)).or_casted().load(), lambda: True),  # gated load (alt added in program_spec)
   (UPat(Ops.INDEX).or_casted().store(UPat()), lambda: True),
 
@@ -187,6 +193,8 @@ shared_codegen_spec = PatternMatcher([
   # INDEX (2-arg and 3-arg with bool gate)
   (UPat(GroupOp.Defines|{Ops.AFTER}, name="buf").index(UPat.var("idx")), validate_index),
   (UPat(Ops.INDEX, src=(UPat(GroupOp.Defines|{Ops.AFTER}, name="buf"), UPat.var("idx"), UPat.var("gate", dtype=dtypes.bool))), validate_index),
+  (UPat(Ops.INDEX, src=(UPat(GroupOp.Defines|{Ops.AFTER}, name="buf"), UPat.var("idx_x"), UPat.var("idx_y"))), validate_image_index),
+  (UPat(Ops.INDEX, src=(UPat(GroupOp.Defines|{Ops.AFTER}, name="buf"), UPat.var("idx_x"), UPat.var("idx_y"), UPat.var("gate", dtype=dtypes.bool))), validate_image_index),
 
   # SPECIAL
   (UPat(Ops.SPECIAL, src=(UPat.var("x", (dtypes.weakint, dtypes.int32)),), name="s"), lambda s,x: s.dtype == x.dtype and isinstance(s.arg, str)),
@@ -237,6 +245,7 @@ tensor_spec = PatternMatcher([
 program_spec = PatternMatcher([
   # LOAD (idx, alt_value), LOAD can have an alt value, but only if the index has a gate
   (UPat().index(UPat(), UPat(dtype=dtypes.bool)).or_casted().load(UPat()), lambda: True),
+  (UPat(Ops.INDEX, src=(UPat(), UPat(), UPat(), UPat(dtype=dtypes.bool))).or_casted().load(UPat()), lambda: True),
 
   # END closes ranges
   (UPat(Ops.END, src=(UPat(), UPat(Ops.RANGE)), dtype=dtypes.void), lambda: True),

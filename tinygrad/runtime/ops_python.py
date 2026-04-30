@@ -93,12 +93,14 @@ class PythonProgram:
         elif uop is Ops.INDEX:
           ret:list = []
           if isinstance(src_dtypes[0], ImageDType):
-            for m,ox,oy in zip(src_values[0], src_values[1][0], src_values[1][1]):
+            for m,ox,oy in zip(src_values[0], src_values[1], src_values[2]):
               if ox < 0 or ox >= src_dtypes[0].shape[1] or oy < 0 or oy >= src_dtypes[0].shape[0]: ret.append((m, None))
               else: ret.append((m, ox*4 + oy*src_dtypes[0].shape[1]*4))
+            gate = src_values[3] if len(src_values) == 4 else [True]*len(ret)
           else:
             for m,o in zip(src_values[0], src_values[1]): ret.append((m,o))
-          values[i] = [(m,o,g) for (m,o),g in zip(ret, src_values[2] if len(src_values) == 3 else [True]*len(ret))] # set the gate last
+            gate = src_values[2] if len(src_values) == 3 else [True]*len(ret)
+          values[i] = [(m,o,g) for (m,o),g in zip(ret, gate)] # set the gate last
         elif uop is Ops.CAST and isinstance(dtype, PtrDType):
           values[i] = src_values[0]
         elif uop is Ops.RANGE:

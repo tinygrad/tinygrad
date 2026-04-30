@@ -137,7 +137,7 @@ class NIRRenderer(Renderer):
     (UPat(Ops.CAST, (dtypes.uchar, dtypes.ushort), src=(UPat.var("x", dtypes.floats),), name="c"), lambda x,c: x.cast(dtypes.int32).cast(c.dtype)),
     # load/store use pointer arithmetic, and the cast does nothing
     (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("off")), allow_any_len=True, name="x"), lambda x,buf,off: x.replace(
-      src=(buf,off.cast(dtypes.long))+x.src[2:]) if buf.dtype.addrspace != AddrSpace.REG and off.op not in (Ops.CAST, Ops.STACK) else None),
+      src=(buf,off.cast(dtypes.long))+x.src[2:]) if not isinstance(buf.dtype, ImageDType) and buf.dtype.addrspace != AddrSpace.REG and off.op not in (Ops.CAST, Ops.STACK) else None),
     (UPat(Ops.CAST, name="x"), lambda x: x.src[0] if isinstance(x.dtype, PtrDType) or x.src[0].dtype == dtypes.void else None),
   ])
 
@@ -249,30 +249,30 @@ class LVPRenderer(NIRRenderer):
     self.param_sz = sum([8 if u.op == Ops.PARAM else u.dtype.itemsize for u in uops if u.op in (Ops.PARAM, Ops.DEFINE_VAR)])
 
 # FIXME: this should be a rewrite rule
-def tovec(b, coord): return nalu(b, "vec4", nchannel(b, coord, 0), nchannel(b, coord, 1), nundef(b, dtypes.int), nundef(b, dtypes.int))
+def tovec(b, coord_x, coord_y): return nalu(b, "vec4", coord_x, coord_y, nundef(b, dtypes.int), nundef(b, dtypes.int))
 def nfloat(dtype): return mesa.nir_type_float16 if dtype == dtypes.half else mesa.nir_type_float32
 nstore_img = nir_instr(has_def=False, df=lambda img:img, num_components=lambda val:val.num_components,
   intrins=lambda dtype:{'IMAGE_DIM':mesa.GLSL_SAMPLER_DIM_2D, 'ACCESS':mesa.ACCESS_CAN_REORDER, 'SRC_TYPE':nfloat(dtype)},
-  srcs=lambda b,img,coord,val:[nsrc(x) for x in [img, tovec(b, coord), nundef(b, dtypes.int), val, nimm(b, 0, dtypes.int)]])(
-    lambda b,img,coord,val,dtype:mesa.nir_intrinsic_instr_create(b.shader,g("nir_intrinsic_image_store")))
+  srcs=lambda b,img,coord_x,coord_y,val:[nsrc(x) for x in [img, tovec(b, coord_x, coord_y), nundef(b, dtypes.int), val, nimm(b, 0, dtypes.int)]])(
+    lambda b,img,coord_x,coord_y,val,dtype:mesa.nir_intrinsic_instr_create(b.shader,g("nir_intrinsic_image_store")))
 
 _nload_img = nir_instr(intrins=lambda dtype:{'IMAGE_DIM':mesa.GLSL_SAMPLER_DIM_2D, 'ACCESS':mesa.ACCESS_CAN_REORDER, 'DEST_TYPE':nfloat(dtype)},
-  nc=4, bs=32, num_components=4, srcs=lambda b,img,coord:[nsrc(x) for x in [img, tovec(b, coord), nundef(b, dtypes.int), nimm(b, 0, dtypes.int)]])(
-    lambda b,img,coord,dtype: mesa.nir_intrinsic_instr_create(b.shader, g("nir_intrinsic_image_load")))
+  nc=4, bs=32, num_components=4, srcs=lambda b,img,coord_x,coord_y:[nsrc(x) for x in [img, tovec(b, coord_x, coord_y), nundef(b, dtypes.int), nimm(b, 0, dtypes.int)]])(
+    lambda b,img,coord_x,coord_y,dtype: mesa.nir_intrinsic_instr_create(b.shader, g("nir_intrinsic_image_load")))
 
 class IR3Renderer(NIRRenderer, OpenCLRenderer):
   has_aux = True
 
-  def nload_img(ctx,img,coord):
+  def nload_img(ctx,img,idx_x,idx_y):
     ctx.texs.add(img)
-    return _nload_img(ctx.b, ctx.r[img], ctx.r[coord], img.dtype)
+    return _nload_img(ctx.b, ctx.r[img], ctx.r[idx_x], ctx.r[idx_y], img.dtype)
 
   def_rewrite = PatternMatcher([
-    (UPat(Ops.STORE, src=(UPat.var('img').index(UPat.var('coord', dtypes.int.vec(2)), allow_any_len=True), UPat.var("val")),
-          allow_any_len=True), lambda ctx,img,coord,val: nstore_img(ctx.b, ctx.r[img], ctx.r[coord], ctx.r[val], val.dtype)),
-    (UPat(Ops.LOAD, src=(UPat.var('img').index(UPat.var('coord', dtypes.int.vec(2)), UPat.var("gate")), UPat.var("alt"))),
-     lambda ctx,img,coord,alt,gate: if_phi(ctx.b, ctx.r[gate], lambda: ctx.nload_img(img, coord), lambda: ctx.r[alt])),
-    (UPat(Ops.LOAD, src=(UPat.var('img').index(UPat.var('coord', dtypes.int.vec(2))),)), nload_img),
+    (UPat(Ops.STORE, src=(UPat.var('img').index(UPat.var('idx_x', dtypes.int), UPat.var('idx_y', dtypes.int), allow_any_len=True), UPat.var("val")),
+          allow_any_len=True), lambda ctx,img,idx_x,idx_y,val: nstore_img(ctx.b, ctx.r[img], ctx.r[idx_x], ctx.r[idx_y], ctx.r[val], val.dtype)),
+    (UPat(Ops.LOAD, src=(UPat.var('img').index(UPat.var('idx_x', dtypes.int), UPat.var('idx_y', dtypes.int), UPat.var("gate")), UPat.var("alt"))),
+     lambda ctx,img,idx_x,idx_y,alt,gate: if_phi(ctx.b, ctx.r[gate], lambda: ctx.nload_img(img, idx_x, idx_y), lambda: ctx.r[alt])),
+    (UPat(Ops.LOAD, src=(UPat.var('img').index(UPat.var('idx_x', dtypes.int), UPat.var('idx_y', dtypes.int)),)), nload_img),
   ]) + NIRRenderer.def_rewrite
 
   _param = LVPRenderer.param

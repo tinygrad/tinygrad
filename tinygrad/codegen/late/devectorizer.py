@@ -47,7 +47,10 @@ def simplify_valid_load(buf:UOp, start_idx:UOp, valid:UOp) -> UOp|None:
 
   if not drop_stmt and idx is start_idx: return None
   new_valid = UOp.uprod(*ss) if (ss:=[s for s in valid.split_uop(Ops.AND) if s not in drop_stmt]) else None
-  return buf.index(idx.valid(new_valid) if new_valid is not None else idx, ptr=True)
+  return buf.index(idx.gep(0), idx.gep(1), new_valid, ptr=True) if new_valid is not None else buf.index(idx.gep(0), idx.gep(1), ptr=True)
+
+def simplify_image_valid(buf:UOp, idx_x:UOp, idx_y:UOp, c:UOp) -> UOp|None:
+  return simplify_valid_load(buf, UOp(Ops.STACK, idx_x.dtype.vec(2), (idx_x, idx_y)), c) if isinstance(buf.dtype, ImageDType) else None
 
 
 load_store_indexing = PatternMatcher([
@@ -55,8 +58,11 @@ load_store_indexing = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat.var("buf"), invalid_gate)), lambda buf,x,i,cond: simplify_valid_load(buf, x, cond)),
   # simplify away long after index has been lowered
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("x", dtypes.long), UPat.var("c", dtypes.bool))), lambda buf,x,c: simplify_valid_load(buf, x, c)),
+  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx_x"), UPat.var("idx_y"), UPat.var("c", dtypes.bool))), simplify_image_valid),
   # drop true gate
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("x"), UPat.const(dtypes.bool, True)),), lambda buf,x: buf.index(x, ptr=True)),
+  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx_x"), UPat.var("idx_y"), UPat.const(dtypes.bool, True)),),
+   lambda buf,idx_x,idx_y: buf.index(idx_x, idx_y, ptr=True) if isinstance(buf.dtype, ImageDType) else None),
 ])
 
 # ***** load/store grouping *****
@@ -197,8 +203,9 @@ def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
   return UOp(Ops.VCAT, ls.dtype, tuple(ret)) if ls.op is Ops.LOAD else UOp.group(*ret)
 
 def get_image_idx(idx:UOp, width:int):
-  oidx = UOp(Ops.STACK, dtypes.weakint.vec(2), (((x:=idx.src[1].get_idx()) // 4) % width, (x // (4*width))))
-  return idx.replace(src=(idx.src[0], oidx.valid(idx.src[1].get_valid())))
+  x, valid = idx.src[1].get_idx(), idx.src[1].get_valid()
+  idx_x, idx_y = (x // 4) % width, x // (4*width)
+  return idx.replace(src=(idx.src[0], idx_x, idx_y) + (() if valid.op is Ops.CONST and valid.arg is True else (valid,)))
 
 def image_fixup(ls:UOp):
   # normal image load or store, with the CAST from expand_index
@@ -207,7 +214,7 @@ def image_fixup(ls:UOp):
     return ls.replace(src=(get_image_idx(ls.src[0].src[0], dt.shape[1]),)+ls.src[1:])
 
   # this is an unprocessed image without a cast, we should just make it a buffer
-  if isinstance(dt, ImageDType) and (off:=ls.src[0].src[1]).get_idx().dtype != dtypes.weakint.vec(2):
+  if isinstance(dt, ImageDType) and len(ls.src[0].src) == 2 and (off:=ls.src[0].src[1]).get_idx().dtype.count != 2:
     idx = ls.src[0].src[0].replace(dtype=(new_dt:=dtypes.half if dt.itemsize == 2 else dtypes.float).ptr(dt.size)).index(off)
     return ls.replace(src=(idx,), dtype=new_dt).cast(dtypes.float) if ls.op is Ops.LOAD else ls.replace(src=(idx, ls.src[1].cast(new_dt)))
 
@@ -234,12 +241,25 @@ def no_vectorized_wmma(wmma:UOp):
 
 def no_vectorized_alu(alu:UOp):
   if alu.dtype.vcount == 1: return None
-  if alu.op is Ops.WHERE and alu.src[2].arg is Invalid: return None  # image load/store has cond.where(idx.vec(2), Invalid) as the index
+  if alu.op is Ops.WHERE and alu.src[2].arg is Invalid: return None  # masked indexes use cond.where(idx, Invalid)
   alus = tuple(UOp(alu.op, alu.dtype.scalar(), tuple(s.gep(i) for s in alu.src), alu.arg) for i in range(alu.dtype.vcount))
   return UOp(Ops.STACK, alu.dtype, alus)
 
 def no_vectorized_buf(buf:UOp):
   return buf.replace(dtype=buf.ptrdtype.base.scalar().ptr(buf.ptrdtype.size*buf.ptrdtype.count, buf.ptrdtype.addrspace)).cast(buf.dtype)
+
+def drop_load_alt(x:UOp):
+  idx = x.src[0].src[0] if x.src[0].op is Ops.CAST else x.src[0]
+  if idx.op is not Ops.INDEX: return None
+  if len(idx.src) == 2 or (isinstance(idx.src[0].dtype, ImageDType) and len(idx.src) == 3): return x.replace(src=(x.src[0],)+x.src[2:])
+  return None
+
+def add_load_alt(x:UOp):
+  idx = x.src[0].src[0] if x.src[0].op is Ops.CAST else x.src[0]
+  if idx.op is not Ops.INDEX: return None
+  if not (len(idx.src) == 3 and idx.src[2].dtype == dtypes.bool) and \
+     not (isinstance(idx.src[0].dtype, ImageDType) and len(idx.src) == 4 and idx.src[3].dtype == dtypes.bool): return None
+  return x.replace(src=(x.src[0], x.const_like(0))+x.src[1:]) if len(x.src) == 1 or x.src[1].op in (Ops.CUSTOM, Ops.STORE, Ops.BARRIER) else None
 
 def no_vectorized_index(buf:UOp, cast:UOp, idx:UOp, bcast:UOp|None=None):
   cnt = cast.dtype.count
@@ -282,8 +302,8 @@ pm_render = PatternMatcher([
   (UPat(Ops.STACK, src=(UPat(name='x'),)), lambda x: x),
   # give any loads that are masked an alt value
   (UPat(Ops.LOAD, src=(UPat(Ops.INDEX, src=(UPat(), UPat(), UPat())).or_casted(),), allow_any_len=True, name="x"),
-    lambda x: x.replace(src=(x.src[0], x.const_like(0))+x.src[1:])
-      if len(x.src) == 1 or x.src[1].op in (Ops.CUSTOM, Ops.STORE, Ops.BARRIER) else None),
+    add_load_alt),
+  (UPat(Ops.LOAD, src=(UPat(Ops.INDEX).or_casted(), UPat()), allow_any_len=True, name="x"), drop_load_alt),
   # Where after gated load becomes alt value
   # NOTE: if a is CAST and a.src[0].dtype == l.dtype, use a.src[0] to avoid roundtrip cast (e.g. uint->float->uint)
   (UPat.var("c").where(UPat(Ops.LOAD, src=(UPat().index(UPat(), UPat.var("c")).or_casted(),), allow_any_len=True, name="l").or_casted(),

@@ -1136,8 +1136,8 @@ class UPat(OpMixin):
 
   # copied from UOp
   def sink(self, *srcs:UPat|None, **kwargs): return UPat(Ops.SINK, dtypes.void, (self,)+tuple([x for x in srcs if x is not None]), **kwargs)
-  def index(self, idx:UPat, valid:UPat|None=None, **kwargs):
-    return UPat(Ops.INDEX, self.match_dtype, (self,idx,valid) if valid is not None else (self,idx), **kwargs)
+  def index(self, *srcs:UPat|None, **kwargs):
+    return UPat(Ops.INDEX, self.match_dtype, (self,)+tuple(x for x in srcs if x is not None), **kwargs)
   def cast(self, dtype=None, **kwargs):
     if dtype is not None and self.match_dtype == (dtype,): return self
     return UPat(Ops.CAST, dtype, (self,), **kwargs)
@@ -1506,6 +1506,13 @@ def sint_to_uop(x:sint, dtype=dtypes.weakint) -> UOp: return UOp.const(dtype, x)
 def to_max_shape(shape:tuple[sint, ...]) -> tuple[int, ...]: return tuple(int(x.vmax) if isinstance(x, UOp) else x for x in shape)
 
 def select_dtype(u): return (dtypes.long if u.overflows(dtypes.int32) else dtypes.int).vec(u.dtype.count)
+def strip_index_casts(idx:UOp):
+  new_src = (idx.src[0],) + tuple(s.src[0] if s.op is Ops.CAST and s.dtype.scalar() is dtypes.weakint and s.src[0].dtype.scalar() in dtypes.ints else s for s in idx.src[1:])
+  return idx.replace(src=new_src) if new_src != idx.src else None
+def lower_image_index(idx:UOp):
+  if not isinstance(idx.src[0].dtype, ImageDType) or len(idx.src) not in (3, 4): return None
+  new_src = (idx.src[0],) + tuple(s if s.dtype == dtypes.int else s.cast(dtypes.int) for s in idx.src[1:3]) + idx.src[3:]
+  return idx.replace(src=new_src) if new_src != idx.src else None
 pm_lower_index_dtype = PatternMatcher([
   # There are no Unary ops at this point in symbolic, those are introduced later
   (UPat(GroupOp.Binary, name="u", src=(UPat.var("x").cast(dtypes.weakint), UPat.var("y").cast(dtypes.weakint))), lambda u,x,y:
@@ -1526,9 +1533,9 @@ pm_lower_index_dtype = PatternMatcher([
   # lower Invalid
   (UPat.var("buf").index(UPat.var("cond").where(UPat.var("idx"), UPat(Ops.CONST, arg=Invalid))), lambda buf,idx,cond: buf.index(idx, cond, ptr=True)),
   # remove hanging casts
-  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx", dtypes.ints).cast()),), lambda buf,idx: buf.index(idx, ptr=True)),
-  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx", dtypes.ints).cast(), UPat.var("valid"))),
-   lambda buf,idx,valid: buf.index(idx, valid, ptr=True)),
+  (UPat(Ops.INDEX, src=(UPat(), UPat()), allow_any_len=True, name="idx"), strip_index_casts),
+  # images are indexed with separate int x/y coordinates
+  (UPat(Ops.INDEX, src=(UPat(), UPat(), UPat()), allow_any_len=True, name="idx"), lower_image_index),
   (UPat((Ops.SINK, Ops.NOOP, Ops.END), name="n"),
    lambda n: n.replace(src=tuple(s.src[0] if s.op is Ops.CAST and s.dtype == dtypes.weakint else s for s in n.src))),
   # vectorized indexes (ie. images) must be int

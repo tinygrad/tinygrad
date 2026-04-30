@@ -2,7 +2,7 @@
 import math, struct
 from collections import defaultdict
 from tinygrad.uop.ops import Ops, PatternMatcher, UPat, UOp, GroupOp, exec_alu
-from tinygrad.dtype import ConstType, dtypes, PtrDType, can_lossless_cast, Invalid
+from tinygrad.dtype import ConstType, dtypes, PtrDType, ImageDType, can_lossless_cast, Invalid
 from tinygrad.helpers import partition, all_same, prod, flatten, get_single_element, unwrap, IMAGE, dedup
 from tinygrad.uop.decompositions import threefry2x32, xpow
 from tinygrad.uop.divandmod import div_and_mod_symbolic
@@ -398,6 +398,13 @@ def where_on_load(cond:UOp, buf:UOp, idx:UOp, or_cast:UOp) -> UOp|None:
   ret_idx = idx.cast(or_cast.dtype) if or_cast.op is Ops.CAST else idx
   return UOp.const(dtypes.bool, True).uprod(*keep).where(ret_idx, ret_idx.const_like(0))
 
+def index_with_gate(index:UOp, gate:UOp) -> UOp:
+  if isinstance(index.src[0].dtype, ImageDType) and len(index.src) in (3, 4):
+    return index.replace(src=index.src[:3] + (gate if len(index.src) == 3 else index.src[3] & gate,))
+  if len(index.src) == 3 and index.src[2].dtype == dtypes.bool:
+    return index.replace(src=(index.src[0], index.src[1], index.src[2] & gate))
+  return index.replace(src=(index.src[0], gate.where(index.src[1], UOp.invalid())) + index.src[2:])
+
 # where after gated load becomes alt value, TODO: this is sort of duplicated with rules in devectorizer
 pm_move_where_on_load = PatternMatcher([
   (UPat.var("cond").where(UPat.var("buf").index(UPat.var("idx")).or_casted("or_cast"), 0), where_on_load),
@@ -443,15 +450,19 @@ sym = symbolic+pm_simplify_valid+PatternMatcher([
   (UPat.store(UPat(Ops.INDEX, name="index"), UPat.load(UPat(Ops.INDEX, name="index"))), lambda index: UOp(Ops.NOOP)),
   (UPat.store(UPat(Ops.INDEX, name="index"), UPat.var("gate").where(UPat.var("alt"),
                                                                     UPat.load(UPat(Ops.INDEX, name="index"))), allow_any_len=True, name="store"),
-   lambda index, gate, alt, store: UOp.store(index.src[0].index(gate.where(index.src[1], UOp.invalid())), alt, *store.src[2:])),
+   lambda index, gate, alt, store: UOp.store(index_with_gate(index, gate), alt, *store.src[2:])),
   # fold gated LOAD/STORE
+  (UPat(Ops.STORE, src=(UPat(Ops.INDEX, src=(UPat(), UPat(), UPat(), UPat.const(dtypes.bool, False)), name="index"),), allow_any_len=True, name="x"),
+   lambda index,x: UOp(Ops.NOOP) if isinstance(index.src[0].dtype, ImageDType) else None),
+  (UPat(Ops.LOAD, src=(UPat(Ops.INDEX, src=(UPat(), UPat(), UPat(), UPat.const(dtypes.bool, False)), name="index"),), allow_any_len=True, name="x"),
+   lambda index,x: (x.src[1] if len(x.src) > 1 else x.const_like(0)) if isinstance(index.src[0].dtype, ImageDType) else None),
   (UPat(Ops.STORE, src=(UPat().index(UPat.const(dtypes.weakint, Invalid)).or_casted(),), allow_any_len=True, name="x"), lambda x: UOp(Ops.NOOP)),
   (UPat(Ops.LOAD, src=(UPat().index(UPat.const(dtypes.weakint, Invalid)).or_casted(),), allow_any_len=True, name="x"),
     lambda x: x.src[1] if len(x.src) > 1 else x.const_like(0)), # invalid load produces 0, or the alt value if we have one
   (UPat(Ops.STORE, src=(UPat(), invalid_pat), allow_any_len=True), lambda i: UOp(Ops.NOOP)),
   # store of where with invalid -> gated store
   (UPat(Ops.STORE, src=(UPat(Ops.INDEX, name="index"), UPat.var("cond").where(UPat.var("val"), invalid_pat)), allow_any_len=True, name="store"),
-   lambda index, cond, val, store, i: UOp.store(index.src[0].index(cond.where(index.src[1], UOp.invalid())), val, *store.src[2:])),
+   lambda index, cond, val, store, i: UOp.store(index_with_gate(index, cond), val, *store.src[2:])),
   ((UPat.var("x") * UPat.var("x")).reciprocal(), lambda x: x.reciprocal()*x.reciprocal()),  # 1/(x^c) -> (1/x)^c
   ((UPat.var("x") * UPat.var("x") * UPat.var("x")).reciprocal(), lambda x: x.reciprocal()*x.reciprocal()*x.reciprocal()),
   ((UPat.var("x") * UPat.cvar("c")).reciprocal(), lambda x,c: x.reciprocal()*c.reciprocal()), # 1/(x*c) -> (1/c)*(1/x)

@@ -15,7 +15,7 @@ def get_gated_load_uop(valid:UOp, idx:UOp):
 
 def get_load_image_uop(image_shape:tuple[int, ...], valid:UOp, idx:tuple[UOp, UOp]):
   return UOp(Ops.LOAD, dtypes.float.vec(4), (
-    UOp(Ops.PARAM, dtypes.imagef(image_shape), arg=0).index(UOp(Ops.STACK, dtypes.weakint.vec(2), idx).valid(valid), ptr=True),
+    UOp(Ops.PARAM, dtypes.imagef(image_shape), arg=0).index(idx[0], idx[1], valid, ptr=True),
     UOp(Ops.STACK, dtypes.float.vec(4), src=(UOp.const(dtypes.float, 0.0),) * 4)
   ))
 
@@ -218,16 +218,13 @@ class TestImageSimplification(unittest.TestCase):
   def check(self, load, svalid, sidx0, sidx1):
     with Context(NOOPT=1, SPEC=0):
       load = full_rewrite_to_sink(load.sink()).src[0]
-    idx = load.src[0].src[1]
-    self.assertEqual(idx.op, Ops.STACK)
-    self.assertEqual(len(idx.src), 2)
-    idx0, idx1 = idx.src[0], idx.src[1]
+    idx0, idx1 = load.src[0].src[1], load.src[0].src[2]
     check_uop_against_string(self, idx0, sidx0)
     check_uop_against_string(self, idx1, sidx1)
     if svalid is not None:
-      check_uop_against_string(self, load.src[0].src[2], svalid)
+      check_uop_against_string(self, load.src[0].src[3], svalid)
     else:
-      self.assertEqual(len(load.src[0].src), 2, "svalid is None but load still has a valid")
+      self.assertEqual(len(load.src[0].src), 3, "svalid is None but load still has a valid")
 
   def test_idx_gt_c(self):
     # (idx1 < c+1).ne(True) ? (..., idx1-1+c) : 0 can drop the valid
@@ -353,7 +350,7 @@ class TestImageSimplification(unittest.TestCase):
     load = get_load_image_uop(shape, valid, idx)
 
     self.check(load,
-               "((((idx2*2)+r0)<11)&((((idx1*8)+r1)<3)!=True))",
+               "(((idx2*2)+r0)<11)",
                "(idx0+(idx1*512+r1*64)+-192)",
                "((((idx2*2)+r0)+(((idx1+((r1+5)//8))+1)//2))+-4)")
 
@@ -481,7 +478,7 @@ class TestImageSimplification(unittest.TestCase):
       self.check(load, None, "(gidx0+lidx0*1024+r0*1024+lidx1*128+-3168)", "0")
     except AssertionError:
       # TODO: fold valid
-      self.check(load, "(((lidx1<1)!=True)&(((lidx0+r0)<3)!=True)&((lidx0+r0)<19))",
+      self.check(load, "(((lidx1<1)!=True)&((lidx0+r0)<19))",
                        "(gidx0+lidx1*128+(lidx0*1024+r0*1024)+-3168)", "0")
 
   def test_simplify10(self):
@@ -500,7 +497,7 @@ class TestImageSimplification(unittest.TestCase):
       self.check(load, None, "(lidx2+gidx0*4+lidx0*1024+r0*1024+lidx1*256+-3264)", "0")
     except AssertionError:
       # TODO: fold valid
-      self.check(load, "(((lidx1<1)!=True)&(((lidx0+r0)<3)!=True)&((lidx0+r0)<11))",
+      self.check(load, "(((lidx1<1)!=True)&((lidx0+r0)<11))",
                        "(lidx2+gidx0*4+lidx1*256+(lidx0*1024+r0*1024)+-3264)", "0")
 
 class TestUnfoldableImage(unittest.TestCase):
