@@ -212,7 +212,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     match self.op:
       # late ops don't have shape
       case Ops.UNIQUE | Ops.LUNIQUE | Ops.DEVICE | Ops.IF | Ops.BARRIER | Ops.CUSTOM | Ops.CUSTOMI | \
-           Ops.STACK | Ops.GEP | Ops.UNROLL | Ops.CONTRACT | Ops.SINK | Ops.END | \
+           Ops.STACK | Ops.GEP | Ops.UNROLL | Ops.CONTRACT | Ops.SINK | Ops.END | Ops.REWRITE_ERROR | \
            Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE | Ops.BINARY | Ops.INS | Ops.TUPLE | Ops.CALL | Ops.FUNCTION:
         return None
 
@@ -255,8 +255,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
         if len(self.src) >= 1: return tuple(self.src[0].sgep(i) for i in range(self.src[0].dtype.count))
         return None
 
-      # SHAPED_WMMA output shape = accumulator shape (src[2])
-      case Ops.SHAPED_WMMA: return self.src[2]._shape
+      # wmma output shape = accumulator shape (src[2])
+      case Ops.WMMA | Ops.SHAPED_WMMA: return self.src[2]._shape
 
       # passthrough ops
       case Ops.MSTACK | Ops.MSELECT | Ops.DETACH | Ops.CONTIGUOUS | Ops.CONTIGUOUS_BACKWARD | Ops.AFTER | Ops.LOAD:
@@ -278,10 +278,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
     # movement ops change the shape
     # NOTE: ssimplify is required because the shape needs to be canonical for broadcasting and same shape checking
-    if self.op in GroupOp.Movement.union({Ops.MULTI, Ops.REDUCE, Ops.WMMA}):
+    if self.op in GroupOp.Movement.union({Ops.MULTI, Ops.REDUCE}):
       ps = self.src[0]._shape
-      # TODO: WMMA is used for both axis WMMA and op WMMA. fix this and remove this hack. tested by BERT on AMD LLVM
-      if ps is None and self.op is Ops.WMMA: return None
       if ps is None: raise RuntimeError(f"movement op {self.op} requires shape")
       match self.op:
         case Ops.RESHAPE:
@@ -308,7 +306,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
           if len(ps) != len(self.marg) or not all(isinstance(x, bool) for x in self.marg): raise ValueError(f"bad flip on {ps}, {self.marg}")
           return ps
         case Ops.MULTI: return tuple(s*len(self.device) if a == self.axis else s for a,s in enumerate(ps))
-        case Ops.REDUCE | Ops.WMMA:
+        case Ops.REDUCE:
           axis_arg = self.arg[1] if self.op is Ops.REDUCE else self.arg[7]
           if not isinstance(axis_arg, tuple) or not all(isinstance(x, int) and x>=0 and x<len(ps) for x in axis_arg):
             raise ValueError(f"invalid type for axis: {axis_arg}")
@@ -492,7 +490,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     ret = UOp(Ops.VCONST if isinstance(b, tuple) else Ops.CONST, dtype,
               arg=dtype.const(b),
               src=(UOp(Ops.DEVICE, arg=device),) if device is not None else ())
-    return ret.reshape((1,)*len(shape)).expand(shape) if shape is not None else ret
+    return ret.reshape((1,)*len(shape)).expand(shape) if shape is not None and ret.shape != shape else ret
   @staticmethod
   def unique_const(fill_value:ConstType, dtype:DTypeLike|None=None, device:str|tuple[str, ...]|None=None,  # type: ignore[override]
                    shape:tuple[sint, ...]|None=None, unique=True):
@@ -500,7 +498,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     assert not isinstance(fill_value, (UOp, tuple)), "unique const only works on numbers"
     ret = UOp.const(to_dtype(dtype) if dtype is not None else dtypes.from_py(fill_value), fill_value, canonicalize_device(device))
     ret = ret.replace(src=(UOp.unique(None if unique is True else unique),) + ret.src)
-    return ret.reshape((1,)*len(shape)).expand(shape) if shape is not None else ret
+    return ret.reshape((1,)*len(shape)).expand(shape) if shape is not None and ret.shape != shape else ret
   @staticmethod
   def range(end:sint, axis_id, axis_type=AxisType.LOOP, *arg, dtype=dtypes.weakint, src=(), **kwargs):
     return UOp(Ops.RANGE, dtype=dtype, src=(sint_to_uop(end, dtype),)+src, arg=(axis_id, axis_type)+arg, **kwargs)
