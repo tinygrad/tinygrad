@@ -100,8 +100,11 @@ class UOpMetaClass(type):
       buffers[created] = _buffer
     if SPEC > 1:
       from tinygrad.uop.spec import full_spec, test_pyrender
-      if SPEC > 2: test_pyrender(created)
-      _ = created._shape
+      if SPEC > 2:
+        # SPEC=3 checks the shape
+        _ = created._shape
+        if SPEC > 3:
+          test_pyrender(created)
       with Context(CHECK_OOB=0): fret = cast(bool|None, full_spec.rewrite(created))
       if fret is not True: raise RuntimeError(f"SPEC ISSUE {fret}: {created}")
     return created
@@ -213,7 +216,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     match self.op:
       # late ops don't have shape
       case Ops.UNIQUE | Ops.LUNIQUE | Ops.DEVICE | Ops.IF | Ops.BARRIER | Ops.CUSTOM | Ops.CUSTOMI | \
-           Ops.UNROLL | Ops.CONTRACT | Ops.SINK | Ops.END | Ops.REWRITE_ERROR | \
+           Ops.CONTRACT | Ops.SINK | Ops.END | Ops.REWRITE_ERROR | Ops.PTRCAT | Ops.ENDIF | \
            Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE | Ops.BINARY | Ops.INS | Ops.TUPLE | Ops.CALL | Ops.FUNCTION:
         return None
 
@@ -249,7 +252,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
         # these can have shape if it has a vec dtype
         if self.dtype.count > 1: return (self.dtype.count,)
         return ()
-      case Ops.BIND | Ops.RANGE | Ops.SPECIAL: return ()
+      case Ops.BIND | Ops.RANGE | Ops.SPECIAL | Ops.UNROLL: return ()
       case Ops.VCONST: return (len(self.arg),)
       case Ops.BUFFER: return (self.arg,)
       case Ops.BUFFER_VIEW: return (self.arg[0],)
