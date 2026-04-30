@@ -282,7 +282,7 @@ pm_render = PatternMatcher([
   (UPat(Ops.STACK, src=(UPat(name='x'),)), lambda x: x),
   # give any loads that are masked an alt value
   (UPat(Ops.LOAD, src=(UPat(Ops.INDEX, src=(UPat(), UPat(), UPat())).or_casted(),), allow_any_len=True, name="x"),
-    lambda x: x.replace(src=(x.src[0], x.const_like(0))+x.src[1:])
+    lambda x: x.replace(src=(x.src[0], UOp.const(x.dtype, 0, device=x._device))+x.src[1:])
       if len(x.src) == 1 or x.src[1].op in (Ops.CUSTOM, Ops.STORE, Ops.BARRIER) else None),
   # Where after gated load becomes alt value
   # NOTE: if a is CAST and a.src[0].dtype == l.dtype, use a.src[0] to avoid roundtrip cast (e.g. uint->float->uint)

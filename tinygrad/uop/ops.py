@@ -237,8 +237,6 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       case Ops.GEP: return (len(self.arg),) if len(self.arg) > 1 else ()
       case Ops.STACK: return (len(self.src),)
       case Ops.INDEX:
-        # ImageDType has size 4
-        if isinstance(self.dtype, ImageDType): return (4,)
         shp:list[sint] = []
         # NOTE: the acc buffer can have a dtype with count, we need it back here
         if self.src[0].dtype.count > 1: shp.append(self.src[0].dtype.count)
