@@ -836,7 +836,7 @@ class Tensor(OpMixin):
     assert 1 <= self.ndim <= 2 and num_samples > 0, f"{self.ndim=} must be 1 or 2 dim, {num_samples=} must be positive"
     weight = self.unsqueeze(0) if self.ndim == 1 else self
     assert replacement or num_samples <= weight.shape[1], "no replacement samples must not exceed population size"
-    if replacement:
+    if replacement or num_samples == 1:
       cdf = (cw := weight.cumsum(1).float()) / cw[:, -1].unsqueeze(1)
       unif_samples = Tensor.rand(num_samples, cdf.shape[0], 1).to(self.device)
       indices = (unif_samples.expand((-1, -1, cdf.shape[1])) >= cdf).sum(2).permute((1, 0))

@@ -380,6 +380,15 @@ class TestRandomness(unittest.TestCase):
     full = Tensor(w).multinomial(len(w), replacement=False).numpy()
     self.assertEqual(sorted(full.tolist()), w)
 
+    w = [0.1, 0.2, 0.3, 0.4]
+    @TinyJit
+    def sample_three(): return Tensor(w).multinomial(3, replacement=False).realize()
+
+    tiny_draws = np.array([sample_three().numpy() for _ in range(1000)])
+    torch_draws = np.array([torch.tensor(w).multinomial(3, replacement=False).numpy() for _ in range(1000)])
+    for pos in range(3):
+      self.assertTrue(equal_distribution(lambda *_: Tensor(tiny_draws[:, pos]), lambda _: torch.tensor(torch_draws[:, pos])))
+
   @unittest.skip("this test is flaky")
   def test_multinomial_counterexample(self):
     tiny_res = Tensor([0.3, 0.6, 0.1]).multinomial(4000, replacement=True)
