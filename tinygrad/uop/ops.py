@@ -412,6 +412,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     return UOp(Ops.SINK, dtypes.void, tuple([x for x in srcs if x is not None]), **kwargs)
   def maketuple(*srcs:UOp):  # pylint: disable=no-self-argument
     return UOp(Ops.TUPLE, dtypes.void, srcs)
+  def stack(*srcs:UOp, **kwargs): # pylint: disable=no-self-argument
+    return UOp(Ops.STACK, srcs[0].dtype.vec(len(srcs)), srcs, **kwargs)
   def gettuple(self, idx:int) -> UOp:
     in_tuple = self.src[0] if self.op is Ops.FUNCTION else self
     assert in_tuple.op is Ops.TUPLE, f"gettuple requires FUNCTION or TUPLE source, got {self.op}"
@@ -419,8 +421,6 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   def group(*srcs:UOp|None):  # pylint: disable=no-self-argument
     if len(srcs) == 1 and isinstance(srcs[0], UOp): return srcs[0]
     return UOp(Ops.GROUP, dtypes.void, tuple([x for x in srcs if x is not None]))
-  def vectorize(self, *srcs, **kwargs):
-    return UOp(Ops.STACK, self.dtype.vec(len(srcs)+1), (self,)+srcs, **kwargs)
   def index(self, *srcs:UOp|None, ptr=False, **kwargs):
     return UOp(Ops.INDEX, kwargs.pop("dtype", self.dtype if ptr else self.dtype.base), (self,)+tuple([x for x in srcs if x is not None]), **kwargs)
   def __getitem__(self, idx):
@@ -1136,8 +1136,8 @@ class UPat(OpMixin):
 
   # copied from UOp
   def sink(self, *srcs:UPat|None, **kwargs): return UPat(Ops.SINK, dtypes.void, (self,)+tuple([x for x in srcs if x is not None]), **kwargs)
-  def index(self, idx:UPat, valid:UPat|None=None, **kwargs):
-    return UPat(Ops.INDEX, self.match_dtype, (self,idx,valid) if valid is not None else (self,idx), **kwargs)
+  def index(self, *srcs:UPat|None, **kwargs):
+    return UPat(Ops.INDEX, self.match_dtype, (self,)+tuple(x for x in srcs if x is not None), **kwargs)
   def cast(self, dtype=None, **kwargs):
     if dtype is not None and self.match_dtype == (dtype,): return self
     return UPat(Ops.CAST, dtype, (self,), **kwargs)
@@ -1533,7 +1533,7 @@ pm_lower_index_dtype = PatternMatcher([
    lambda n: n.replace(src=tuple(s.src[0] if s.op is Ops.CAST and s.dtype == dtypes.weakint else s for s in n.src))),
   # vectorized indexes (ie. images) must be int
   (UPat(Ops.INDEX, src=(UPat(), UPat(Ops.STACK, dtypes.long, name="vec")), allow_any_len=True, name="idx"),
-   lambda idx,vec: idx.replace(src=(idx.src[0], UOp.vectorize(*(u.cast(dtypes.int) for u in vec.src)), *idx.src[2:])))
+   lambda idx,vec: idx.replace(src=(idx.src[0], UOp.stack(*(u.cast(dtypes.int) for u in vec.src)), *idx.src[2:])))
 ])
 def _index_to_concrete_int(u:UOp) -> UOp: return graph_rewrite(u.sink(), pm_lower_index_dtype).src[0]
 

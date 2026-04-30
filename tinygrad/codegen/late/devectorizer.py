@@ -68,7 +68,7 @@ def expand_index(buf:UOp, vec:UOp):
     # search for dims that drop the most valid statements
     best_drop, cands = -1, []
     for ch, cw in ImageDType.valid_dims(dt):
-      if (dropped:=len(_drop_valid_stmts(valid, cidx:=uop_given_valid(valid, UOp.vectorize((x//4)%cw, x//(4*cw))), ch, cw))) > best_drop:
+      if (dropped:=len(_drop_valid_stmts(valid, cidx:=uop_given_valid(valid, UOp.stack((x//4)%cw, x//(4*cw))), ch, cw))) > best_drop:
         best_drop, cands = dropped, [(ch, cw, cidx)]
       elif dropped == best_drop: cands.append((ch, cw, cidx))
     # and tiebreak with indexing complexity (ie. number of nodes)
@@ -197,8 +197,9 @@ def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
   return UOp(Ops.VCAT, ls.dtype, tuple(ret)) if ls.op is Ops.LOAD else UOp.group(*ret)
 
 def get_image_idx(idx:UOp, width:int):
-  oidx = UOp(Ops.STACK, dtypes.weakint.vec(2), (((x:=idx.src[1].get_idx()) // 4) % width, (x // (4*width))))
-  return idx.replace(src=(idx.src[0], oidx.valid(idx.src[1].get_valid())))
+  x, valid = idx.src[1].get_idx(), idx.src[1].get_valid()
+  idx_x, idx_y = (x // 4) % width, x // (4*width)
+  return idx.replace(src=(idx.src[0], UOp.stack(idx_x, idx_y).valid(valid)))
 
 def image_fixup(ls:UOp):
   # normal image load or store, with the CAST from expand_index
@@ -385,7 +386,7 @@ def make_image(ls, buf, off):
   if (vcount:=buf.dtype.vcount) != 1: buf = buf.src[0]
   if buf.op == Ops.PARAM and not isinstance(dt:=buf.dtype, ImageDType) and (dims:=ImageDType.valid_dims(dt)):
     buf = buf.replace(dtype=(dtypes.imageh if dt.base == dtypes.half else dtypes.imagef)((*dims[0], 4)))
-    if vcount != 1: buf = UOp.vectorize(*([buf] * vcount))
+    if vcount != 1: buf = UOp.stack(*([buf] * vcount))
     if ls.op is Ops.LOAD: return ls.replace(src=(buf.index(off, ptr=True),), dtype=dtypes.float.vec(ls.dtype.vcount)).cast(dt.base)
     return buf.index(off, ptr=True).store(pm_imageh_store.rewrite(ls.src[1]) if dt.base == dtypes.half else ls.src[1])
 

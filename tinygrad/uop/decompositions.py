@@ -418,7 +418,7 @@ def f2f_clamp(val:UOp, dt:DType) -> UOp:
 
 def f2f_load(x: UOp, fr:DType, to:DType) -> UOp:
   if (n:=x.dtype.count) == 1: return f2f(x.replace(dtype=f2f_dt[fr]), fr, to)
-  return UOp.vectorize(*(f2f(x.replace(dtype=f2f_dt[fr], src=(reindex(x.src[0].src[0], i, 1),)), fr, to) for i in range(n)))
+  return UOp.stack(*(f2f(x.replace(dtype=f2f_dt[fr], src=(reindex(x.src[0].src[0], i, 1),)), fr, to) for i in range(n)))
 
 def f2f_store(st, idx, val, fr:DType, to:DType):
   if (n:=val.dtype.count) == 1: return st.replace(src=(idx, f2f(val.bitcast(f2f_dt[to]), to, fr)))
