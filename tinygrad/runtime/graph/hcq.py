@@ -260,7 +260,7 @@ class HCQGraph(MultiGraphRunner):
 
   def _dev_copy_queues(self, dev): return [q for (d, _), q in self.copy_queues.items() if d == dev]
 
-  def __call__(self, input_buffers: list[Buffer], var_vals: dict[str, int], wait=False, input_uops=None) -> float|None:
+  def __call__(self, input_uops:tuple[UOp, ...], var_vals:dict[str, int], wait=False) -> float|None:
     # Map input buffers
     for dev in self.devices:
       for iidx, dev_idx in self.input_replace_map[dev]:

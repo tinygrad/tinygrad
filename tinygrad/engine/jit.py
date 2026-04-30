@@ -5,7 +5,7 @@ from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv,
 from tinygrad.device import Buffer, Compiled, Device, MultiBuffer
 from tinygrad.dtype import DType, dtypes
 from tinygrad.uop.ops import UOp, PatternMatcher, Variable, sym_infer, Ops, buffers, track_rewrites, graph_rewrite
-from tinygrad.engine.realize import capturing, Runner, Estimates, compile_linear, run_linear, graph_cache, estimate_uop, get_runtime
+from tinygrad.engine.realize import capturing, Estimates, compile_linear, run_linear, graph_cache, estimate_uop, get_runtime
 from tinygrad.engine.realize import unwrap_multi, resolve_params
 from tinygrad.schedule.memory import memory_plan_rewrite, _collect_bufs
 from tinygrad.nn.state import get_parameters
@@ -95,7 +95,7 @@ def _check_no_non_tensor_return(ret):
 
 def graph_class(dev): return dev.graph.func if isinstance(dev.graph, functools.partial) else dev.graph
 
-class GraphRunner(Runner):
+class GraphRunner:
   def __init__(self, linear:UOp, input_uops:tuple[UOp, ...]=()):
     self.linear = linear.src[0]
     self.calls: list[tuple[int, UOp, list[Buffer], dict[str, int]]] = []
@@ -135,7 +135,10 @@ class GraphRunner(Runner):
     self.w_dependency_map: dict[int, list[tuple[int, int, Any]]] = collections.defaultdict(list)
     self.r_dependency_map: dict[int, list[tuple[int, int, Any]]] = collections.defaultdict(list)
 
-    super().__init__(colored(f"<batched {len(self.calls)}>", "cyan"), self.calls[0][2][0].device.split(":")[0], estimates.simplify())
+    self.device, self.estimates = self.calls[0][2][0].device.split(":")[0], estimates.simplify()
+    self.dev = Device[self.device]
+
+  def __call__(self, input_uops:tuple[UOp, ...], var_vals:dict[str, int], wait=False) -> float|None: raise NotImplementedError("override this")
 
   def updated_vars(self, var_vals: dict[str, int]):
     vals = [var_vals[v] for v in self.vars]

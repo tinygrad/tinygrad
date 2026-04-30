@@ -48,7 +48,7 @@ class MetalGraph(GraphRunner):
     self.range = metal.NSRange(0, len(self.calls))
     self.updatable = sorted({j for j,r in enumerate(self.uop_replace) if r} | self.var_vals_replace.keys() | self.launch_dims_replace.keys())
 
-  def __call__(self, input_buffers, var_vals, wait=False, input_uops=None):
+  def __call__(self, input_uops:tuple[UOp, ...], var_vals:dict[str, int], wait=False):
     if self.command_buffer is not None and self.command_buffer in self.dev.mtl_buffers_in_flight: wait_check(self.command_buffer)
     # NOTE: old command buffer may not be inflight anymore
     if self.command_buffer is not None and PROFILE: self.collect_timestamps()
