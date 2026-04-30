@@ -297,7 +297,7 @@ class TestVminVmaxVConst(unittest.TestCase):
     # vmin and vmax for a vector constant of bool values
     d1 = UOp(Ops.PARAM, dtypes.int.ptr(), (), 1)
     idx = UOp.const(dtypes.int, 0)
-    val = UOp(Ops.LOAD, dtypes.int.vec(2), (d1.index(idx),))
+    val = UOp(Ops.LOAD, dtypes.int.vec(2), (d1.index(idx).cast(dtypes.int.vec(2).ptr()),))
     uop = (val // 32).gep(0)
     self.assertEqual(uop.vmin, -67108864)
     self.assertEqual(uop.vmax, 67108863)
