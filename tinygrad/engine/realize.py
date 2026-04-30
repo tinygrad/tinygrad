@@ -1,3 +1,4 @@
+from __future__ import annotations
 from typing import cast, Iterator, Any
 import time, random, itertools, math, contextlib, weakref
 from dataclasses import dataclass, replace, field
@@ -10,9 +11,32 @@ from tinygrad.renderer import Estimates
 from tinygrad.codegen import to_program
 from tinygrad.codegen.opt.postrange import bufs_from_ast
 
+# **************** Helpers ****************
+
+def get_call_arg_uops(call:UOp) -> tuple[UOp, ...]: return tuple(s for s in call.src[1:] if s.op is not Ops.BIND)
+
+def get_call_outs_ins(call:UOp) -> tuple[tuple[int, ...], tuple[int, ...]]:
+  ast = call.src[0]
+  if ast.op is Ops.PROGRAM: return tuple(ast.arg.outs), tuple(ast.arg.ins)
+  if ast.op in (Ops.COPY, Ops.BUFFER_VIEW): return (0,), (1,)
+  if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "encdec": return (0,), tuple(range(1, len(get_call_arg_uops(call))))
+  return (), ()
+
+def get_call_name(call:UOp, bufs:list[Buffer]) -> str:
+  def _uop_sz_to_str(uop:UOp) -> int: return size_to_str(prod(uop.shape) * uop.dtype.itemsize)
+
+  ast, arg_uops = call.src[0], get_call_arg_uops(call)
+  if ast.op is Ops.PROGRAM: return ast.arg.name
+  elif ast.op is Ops.BUFFER_VIEW: return colored(f"view {_uop_sz_to_str(arg_uops[0]):>10} @ {ast.arg[1] * arg_uops[1].dtype.itemsize:<10d}", "yellow")
+  elif ast.op is Ops.COPY: return colored(f"copy {_uop_sz_to_str(arg_uops[0]):>10}, {bufs[0].device[:7]:>7s} <- {bufs[1].device[:7]:7s}", "yellow")
+  elif ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "encdec": return colored(f"enc/dec {_uop_sz_to_str(arg_uops[0])}", "yellow")
+  elif ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "graph": return colored(f"batched {len(ast.src[0].src)}", "cyan")
+  raise NotImplementedError("get_call_name is not implemented")
+
 # **************** Stat ****************
 
 def estimate_uop(call:UOp) -> Estimates:
+  assert call.src[0].op is not Ops.SINK, "SINK?"
   if call.src[0].op is Ops.SINK: call = pm_compile.rewrite(call)
 
   ast = call.src[0]
@@ -24,13 +48,14 @@ def estimate_uop(call:UOp) -> Estimates:
     return runner.estimates if (runner:=get_graph_runtime(ast)) is not None else Estimates()
   return Estimates()
 
-def update_stats(display_name:str, device:str, estimates:Estimates, var_vals:dict[str, int], et:float|None, buf_count:int,
-                 jit=False, metadata:tuple[Metadata, ...]=(), first_run=False):
+def update_stats(call:UOp, device:str, bufs:list[Buffer], var_vals:dict[str, int], et:float|None, jit=False, first_run=False):
+  estimates = estimate_uop(call)
   GlobalCounters.kernel_count += 1
   GlobalCounters.global_ops += (op_est:=sym_infer(estimates.ops, var_vals))
   GlobalCounters.global_mem += (mem_est:=sym_infer(estimates.mem, var_vals))
   if et is not None: GlobalCounters.time_sum_s += et
   if DEBUG >= 2:
+    display_name = get_call_name(call, bufs)
     lds_est = sym_infer(estimates.lds, var_vals)
     header_color = 'magenta' if jit else ('green' if first_run else None)
     ptm = colored(time_to_str(et, w=9), "yellow" if et > 0.01 else None) if et is not None else ""
@@ -39,15 +64,17 @@ def update_stats(display_name:str, device:str, estimates:Estimates, var_vals:dic
     mem_str = f"{membw*1e-9:4.0f}|{ldsbw*1e-9:<6.0f} GB/s" if membw < 1e13 and ldsbw < 1e15 else \
       colored(f"{membw*1e-12:4.0f}|{ldsbw*1e-12:<6.0f} TB/s", 'green')
     print(f"{colored(f'*** {device[:7]:7s} {GlobalCounters.kernel_count:4d}', header_color)}"+
-      f" {display_name+' '*(46-ansilen(display_name))} arg {buf_count:2d} mem {GlobalCounters.mem_used/1e9:6.2f} GB"+
+      f" {display_name+' '*(46-ansilen(display_name))} arg {len(bufs):2d} mem {GlobalCounters.mem_used/1e9:6.2f} GB"+
       ("" if et is None else f" tm {ptm}/{GlobalCounters.time_sum_s*1e3:9.2f}ms ({flops_str} {mem_str})")+
-      f" {[repr(m) if TRACEMETA >= 2 else str(m) for m in metadata] if metadata else ''}")
+      f" {[repr(m) if TRACEMETA >= 2 else str(m) for m in call.arg.metadata] if call.arg.metadata else ''}")
 
 first_run_cache:set[bytes] = set()
 @contextlib.contextmanager
-def track_stats(ctx:"ExecContext", call:UOp, device:str, display_name:str, bufs:list[Buffer], var_vals:dict[str, int], outputs=(0,), inputs=(1,)):
-  if PROFILE: cpu_events.append(ProfilePointEvent(device, "exec", len(cpu_events), {"metadata": call.arg.metadata, "var_vals": var_vals,
-                                                  "bufs": [b.trace_num for b in bufs], "name": display_name, "outputs": outputs, "inputs": inputs}))
+def track_stats(ctx:ExecContext, call:UOp, device:str, bufs:list[Buffer], var_vals:dict[str, int]):
+  if PROFILE:
+    outputs, inputs = get_call_outs_ins(call)
+    cpu_events.append(ProfilePointEvent(device, "exec", len(cpu_events), {"metadata": call.arg.metadata, "var_vals": var_vals,
+                                        "bufs": [b.trace_num for b in bufs], "name": get_call_name(call, bufs), "outputs": outputs, "inputs": inputs}))
   timing: list[float|None] = [None]
   if DEBUG >= 2: st = time.perf_counter()
   yield timing
@@ -55,8 +82,7 @@ def track_stats(ctx:"ExecContext", call:UOp, device:str, display_name:str, bufs:
   if DEBUG >= 2 and timing[0] is None:
     Device[device].synchronize()
     timing[0] = time.perf_counter() - st
-  update_stats(display_name, device, estimate_uop(call), var_vals, timing[0], len(bufs), jit=ctx.jit, metadata=call.arg.metadata,
-               first_run=call.src[0].key not in first_run_cache)
+  update_stats(call, device, bufs, var_vals, timing[0], jit=ctx.jit, first_run=call.src[0].key not in first_run_cache)
   first_run_cache.add(call.src[0].key)
 
 local_size_cache: dict[bytes, tuple[int, ...]] = {}
@@ -114,7 +140,7 @@ class ExecContext:
 def _resolve(b:UOp, inputs:tuple[UOp, ...]) -> UOp:
   if b.op in (Ops.BUFFER_VIEW, Ops.MSELECT) and b.src[0].op is Ops.PARAM: return b.replace(src=(inputs[b.src[0].arg], *b.src[1:]))
   return inputs[b.arg] if b.op is Ops.PARAM else b
-def resolve_params(call:UOp, inputs:tuple[UOp, ...]) -> list[UOp]: return [_resolve(b, inputs) for b in call.src[1:] if b.op is not Ops.BIND]
+def resolve_params(call:UOp, inputs:tuple[UOp, ...]) -> list[UOp]: return [_resolve(b, inputs) for b in get_call_arg_uops(call)]
 
 def unwrap_multi(call:UOp, resolved:list[UOp]) -> Iterator[tuple[list[Buffer], dict[str, int]]]:
   bufs = [b.buffer for b in resolved]
@@ -127,15 +153,14 @@ def exec_view(ctx:ExecContext, call, ast):
   resolved = resolve_params(call, ctx.input_uops)
   bufs = [cast(Buffer, b.buffer) for b in resolved]
   bv = bufs[1].view(resolved[0].arg, ast.dtype, ast.arg[1]*bufs[1].dtype.itemsize)
-  with track_stats(ctx, call, bv.device, colored(f"view {bv.nbytes:8d} @ {bv.offset:<10d}", "yellow"), [bv, bufs[1]], ctx.var_vals):
+  with track_stats(ctx, call, bv.device, [bv, bufs[1]], ctx.var_vals):
     buffers[resolved[0]] = bv
 
 def exec_copy(ctx:ExecContext, call, ast):
   for bufs, device_vars in unwrap_multi(call, resolve_params(call, ctx.input_uops)):
     dest, src = bufs[0].ensure_allocated(), bufs[1].ensure_allocated()
     xfer = hasattr(dest.allocator,'_transfer') and dest.allocator.supports_transfer and dest.device.split(":")[0] == src.device.split(":")[0]
-    name = colored(f"{'xfer' if xfer else 'copy'} {size_to_str(bufs[0].nbytes):>10}, {dest.device[:7]:>7s} <- {src.device[:7]:7s}", "yellow")
-    with track_stats(ctx, call, dest.device, name, [dest, src], ctx.var_vals):
+    with track_stats(ctx, call, dest.device, [dest, src], ctx.var_vals):
       if xfer:
         dest.allocator._transfer(dest._buf, src._buf, dest.nbytes, src_dev=src.allocator.dev, dest_dev=dest.allocator.dev) # type:ignore[attr-defined]
       elif src.device.startswith("DISK") and getattr(src.allocator.dev, 'fd', None) is not None \
@@ -151,7 +176,7 @@ def exec_kernel(ctx:ExecContext, call, ast):
     prg_bufs = [bufs[i].ensure_allocated() for i in ast.arg.globals]
     rt = get_runtime(device:=bufs[0].device, ast)
     global_size, local_size = ast.arg.launch_dims(var_vals)
-    with track_stats(ctx, call, device, ast.arg.name, prg_bufs, var_vals, outputs=ast.arg.outs, inputs=ast.arg.ins) as tm:
+    with track_stats(ctx, call, device, prg_bufs, var_vals) as tm:
       tm[0] = rt(*[b._buf for b in prg_bufs], global_size=global_size, local_size=local_size, vals=ast.arg.vals(var_vals), wait=DEBUG>=2)
 
 def exec_validate(ctx:ExecContext, call, ast):
@@ -167,12 +192,12 @@ def exec_validate(ctx:ExecContext, call, ast):
 def exec_encdec(ctx:ExecContext, call, ast):
   bufs = [cast(Buffer, b.buffer).ensure_allocated() for b in resolve_params(call, ctx.input_uops)]
   shape, pos_var = tuple(s.arg for s in ast.src if s.op is Ops.CONST), ast.variables()[0].expr
-  with track_stats(ctx, call, bufs[0].device, colored(f"enc/dec {size_to_str(bufs[0].nbytes)}", "yellow"), bufs, ctx.var_vals):
+  with track_stats(ctx, call, bufs[0].device, bufs, ctx.var_vals):
     bufs[0].allocator._encode_decode(bufs[0]._buf, bufs[1]._buf, bufs[2]._buf, [x._buf for x in bufs[3:]], shape, ctx.var_vals[pos_var])
 
 def exec_graph(ctx:ExecContext, call, ast):
   rt = get_graph_runtime(ast, ctx.input_uops)
-  with track_stats(ctx, call, rt.device, colored(f"batched {len(rt.calls)}", "cyan"), [], ctx.var_vals) as t:
+  with track_stats(ctx, call, rt.device, [], ctx.var_vals) as t:
     t[0] = rt(ctx.input_uops, ctx.var_vals, wait=DEBUG>=2) # type: ignore[call-arg]
 
 # flatten LINEAR-in-LINEAR: any nested LINEAR child gets inlined into its parent's src
@@ -182,7 +207,7 @@ pm_flatten_linear = PatternMatcher([
 ])
 
 def _validate(call:UOp, sink:UOp) -> UOp:
-  params = tuple(p for p in call.src[1:] if p.op is not Ops.BIND)
+  params = get_call_arg_uops(call)
   shadows = tuple(UOp.new_buffer(("CPU",)*len(p.device) if isinstance(p.device, tuple) else "CPU", prod(p.max_shape), p.dtype.base) for p in params)
   copies = tuple(p.copy_to_device(s.device).call(s, p) for s, p in zip(shadows, params))
   return UOp(Ops.LINEAR, src=copies + (call, UOp(Ops.CUSTOM_FUNCTION, dtypes.void, src=(sink,), arg="validate").call(*shadows, *params)))
