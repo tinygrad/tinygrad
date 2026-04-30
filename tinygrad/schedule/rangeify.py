@@ -343,7 +343,9 @@ def late_buffer_view(t:UOp, b:UOp):
   if len(shape) == 0: offset = x.src[1].arg
   else: offset = max(sum(idx.vmin for idx in x.src[1:]), 0)
 
-  return b.replace(src=(UOp(Ops.BUFFER_VIEW, t.dtype, (x.base,), (size, offset)), b.src[1]))
+  assert x.op == Ops.INDEX
+  return UOp(Ops.BUFFER_VIEW, t.dtype, (x.src[0],), (size, offset))
+  #return b.replace(src=(UOp(Ops.BUFFER_VIEW, t.dtype, (x.base,), (size, offset)), b.src[1]))
 
 to_bufferview = PatternMatcher([
   (UPat(Ops.BUFFERIZE, src=(UPat((Ops.BITCAST, Ops.CONTIGUOUS), name="t"), UPat()), name="b"), late_buffer_view),
@@ -498,6 +500,7 @@ def find_bufs(x:UOp):
 to_define_global = PatternMatcher([
   (UPat(Ops.STORE, name="x"), find_bufs),
   (UPat(Ops.BUFFER, name="buf"), debuf),
+  (UPat(Ops.BUFFER_VIEW, name="buf"), debuf),
   (UPat(Ops.PARAM, src=(UPat(), UPat(Ops.DEVICE)), name="buf"), debuf),
   (UPat(Ops.PARAM, src=(UPat(), UPat(), UPat.cvar('vmin'), UPat.cvar('vmax'), UPat.var("nm")), name="v"),
    lambda v, vmin, vmax, nm: UOp.variable(nm.arg, vmin.arg, vmax.arg, v.dtype)),
