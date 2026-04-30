@@ -4,7 +4,8 @@ import triton.language as tl
 from triton.compiler import AttrsDescriptor, ASTSource, compile as triton_compile
 import numpy as np
 from tinygrad import Tensor, dtypes, Device
-from tinygrad.engine.realize import CompiledRunner
+from tinygrad.engine.realize import get_runtime
+from tinygrad.codegen import to_program
 from tinygrad.uop.ops import Ops, UOp, KernelInfo, ProgramInfo
 from tinygrad.helpers import getenv
 np.set_printoptions(suppress=True)
@@ -92,13 +93,15 @@ if __name__ == "__main__":
   info = ProgramInfo(name="matmul_kernel",
                      global_size=(M//BLOCK_SIZE_M, N//BLOCK_SIZE_N, 1), local_size=(32*compiled.metadata.num_warps, 1, 1))
   sink = UOp.sink(arg=KernelInfo(name="matmul_kernel"))
-  prg_uop = UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=Device.DEFAULT), UOp(Ops.LINEAR), UOp(Ops.SOURCE, arg=src)), arg=info)
-  runner = CompiledRunner(prg_uop, Device.DEFAULT)
+  prg_uop = to_program(UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=Device.DEFAULT), UOp(Ops.LINEAR), UOp(Ops.SOURCE, arg=src)), arg=info),
+                       Device.default.renderer)
+  rt = get_runtime(Device.DEFAULT, prg_uop)
   all_bufs = [x.ensure_allocated() for x in bufs]
-  prg_bufs = [all_bufs[i] for i in runner.p.globals]
+  prg_bufs = [all_bufs[i] for i in info.globals]
+  gsize, lsize = info.launch_dims({})
   tflops = []
   for i in range(5):
-    tm = runner(prg_bufs, {}, wait=True)
+    tm = rt(*[b._buf for b in prg_bufs], global_size=gsize, local_size=lsize, vals=info.vals({}), wait=True)
     tflops.append((2*M*K*N/tm)*1e-12)
   print(f"TFLOPS: {max(tflops):.2f}")
 

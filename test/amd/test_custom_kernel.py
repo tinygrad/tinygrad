@@ -99,13 +99,13 @@ def custom_lds_sync(A:UOp, arch:str) -> UOp:
   sink = UOp.sink(A.base, lds, threads, wg, arg=KernelInfo("custom_lds_sync"))
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg="AMD"), UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=x) for x in insts]))))
 
-def custom_handwritten(A:UOp, arch:str) -> UOp:
+def custom_handwritten(A:UOp) -> UOp:
   A = A.flatten()
   threads = UOp.special(128, "lidx0")
   wg = UOp.special(1, "gidx0")
   lds = UOp(Ops.DEFINE_LOCAL, dtypes.uint8.ptr(size=512, addrspace=AddrSpace.LOCAL), (), 'lds')  # 128 * 4 bytes
   pipes = {getenv("PIPE", "")} if getenv("PIPE", "") else {"SALU", "VALU", "TRANSCENDENTAL", "WMMA"}
-  k = Kernel(arch)
+  k = Kernel()
   # wrap in loop to filter out icache misses
   LOOP_N, UNROLL_N = 8, 5
   k.emit(r4.s_mov_b32(s[1], LOOP_N))
@@ -145,10 +145,10 @@ def custom_handwritten(A:UOp, arch:str) -> UOp:
   sink = UOp.sink(A.base, threads, wg, lds, arg=KernelInfo("custom_handwritten"))
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg="AMD"), UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=x) for x in insts]))))
 
-def custom_data_deps(A:UOp, arch:str) -> UOp:
+def custom_data_deps(A:UOp) -> UOp:
   A = A.flatten()
   threads = UOp.special(A.numel(), "lidx0")
-  k = Kernel(arch)
+  k = Kernel()
   k.emit(s_load_b64(s[0:1], s[0:1], soffset=NULL))
   k.emit(s_waitcnt_lgkmcnt(sdst=NULL, simm16=0))
   k.emit(v_lshlrev_b32_e32(v[0], 2, v[0]))
@@ -198,13 +198,13 @@ class TestCustomKernel(unittest.TestCase):
   def test_handwritten(self):
     if self.arch != "rdna4": self.skipTest("only tested on rdna4")
     a = Tensor.empty(1024, dtype=dtypes.int32).contiguous().realize()
-    a = Tensor.custom_kernel(a, fxn=functools.partial(custom_handwritten, arch=self.arch))[0]
+    a = Tensor.custom_kernel(a, fxn=custom_handwritten)[0]
     a.realize()
 
   def test_data_deps(self):
     if self.arch != "rdna3": self.skipTest("only tested on rdna3")
     a = Tensor(np.full(32, 5.0, dtype=np.float32)).realize()
-    a = Tensor.custom_kernel(a, fxn=functools.partial(custom_data_deps, arch=self.arch))[0]
+    a = Tensor.custom_kernel(a, fxn=custom_data_deps)[0]
     a.realize()
     self.assertTrue((a.numpy() == 6.0).all())
 

@@ -75,14 +75,14 @@ pm_split_ranges = PatternMatcher([
 def no_range(u:UOp) -> bool: return not any(x.op is Ops.RANGE for x in u.backward_slice_with_self)
 
 def reduce_unparented(red:UOp) -> UOp|None:
-  if red.arg not in {Ops.ADD, Ops.MAX, Ops.MUL}: return None
+  if red.arg[0] not in {Ops.ADD, Ops.MAX, Ops.MUL}: return None
   assert all(x.op is Ops.RANGE for x in red.src[1:]), "some reduce srcs aren't ranges"
   reduce_parented, reduce_unparented = partition(red.src[1:], lambda x: x in red.src[0].ranges)
   if len(reduce_unparented) == 0: return None
   ret = red.replace(src=(red.src[0],)+tuple(reduce_parented)) if len(reduce_parented) or red.dtype != red.src[0].dtype else red.src[0]
-  if red.arg is Ops.ADD:
+  if red.arg[0] is Ops.ADD:
     for r in reduce_unparented: ret = ret * r.src[0].cast(ret.dtype.scalar()).broadcast(ret.dtype.count)
-  if red.arg is Ops.MUL:
+  if red.arg[0] is Ops.MUL:
     for r in reduce_unparented: ret = ret ** r.src[0].cast(ret.dtype.scalar()).broadcast(ret.dtype.count)
   return ret
 
@@ -145,12 +145,12 @@ def reduce_load_collapse(red:UOp, u:UOp) -> UOp|None: return reduce_collapse(red
 
 # remove REDUCE without loads (generic arange opt / indexing).
 pm_reduce_simplify = pm_reduce_unparented + PatternMatcher([
-  (UPat(Ops.REDUCE, src=(UPat.var("u"),), allow_any_len=True, arg=Ops.ADD, name="red"), reduce_collapse),
+  (UPat(Ops.REDUCE, src=(UPat.var("u"),), allow_any_len=True, arg=(Ops.ADD, ()), name="red"), reduce_collapse),
 ])
 # remove REDUCE on load, comes from indexing a tensor with another tensor
 def no_load(u:UOp) -> bool: return not any(x.op is Ops.INDEX for x in u.backward_slice_with_self)
 pm_load_collapse = PatternMatcher([
-  (UPat(Ops.REDUCE, arg=Ops.ADD, src=(UPat.var("u"), UPat()), name="red"), reduce_load_collapse),
+  (UPat(Ops.REDUCE, arg=(Ops.ADD, ()), src=(UPat.var("u"), UPat()), name="red"), reduce_load_collapse),
   # we want to make sure we dont do math on a loaded index since that can cause overflow, this undoes the rule in pm_reduce_load_collapse
   ((UPat.var("x", dtypes.weakint)+UPat.var("y"))<UPat.var("c"), lambda x,y,c: x < c-y if no_load(y) and no_load(c) and not no_load(x) else None),
 ])

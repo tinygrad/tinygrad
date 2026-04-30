@@ -1629,15 +1629,15 @@ class struct_hsa_ven_amd_aqlprofile_1_00_pfn_s(c.Struct):
 struct_hsa_ven_amd_aqlprofile_1_00_pfn_s.register_fields([('hsa_ven_amd_aqlprofile_version_major', c.CFUNCTYPE[uint32_t, []], 0), ('hsa_ven_amd_aqlprofile_version_minor', c.CFUNCTYPE[uint32_t, []], 8), ('hsa_ven_amd_aqlprofile_error_string', c.CFUNCTYPE[ctypes.c_uint32, [c.POINTER[c.POINTER[ctypes.c_char]]]], 16), ('hsa_ven_amd_aqlprofile_validate_event', c.CFUNCTYPE[ctypes.c_uint32, [hsa_agent_t, c.POINTER[hsa_ven_amd_aqlprofile_event_t], c.POINTER[ctypes.c_bool]]], 24), ('hsa_ven_amd_aqlprofile_start', c.CFUNCTYPE[ctypes.c_uint32, [c.POINTER[hsa_ven_amd_aqlprofile_profile_t], c.POINTER[hsa_ext_amd_aql_pm4_packet_t]]], 32), ('hsa_ven_amd_aqlprofile_stop', c.CFUNCTYPE[ctypes.c_uint32, [c.POINTER[hsa_ven_amd_aqlprofile_profile_t], c.POINTER[hsa_ext_amd_aql_pm4_packet_t]]], 40), ('hsa_ven_amd_aqlprofile_read', c.CFUNCTYPE[ctypes.c_uint32, [c.POINTER[hsa_ven_amd_aqlprofile_profile_t], c.POINTER[hsa_ext_amd_aql_pm4_packet_t]]], 48), ('hsa_ven_amd_aqlprofile_legacy_get_pm4', c.CFUNCTYPE[ctypes.c_uint32, [c.POINTER[hsa_ext_amd_aql_pm4_packet_t], ctypes.c_void_p]], 56), ('hsa_ven_amd_aqlprofile_get_info', c.CFUNCTYPE[ctypes.c_uint32, [c.POINTER[hsa_ven_amd_aqlprofile_profile_t], ctypes.c_uint32, ctypes.c_void_p]], 64), ('hsa_ven_amd_aqlprofile_iterate_data', c.CFUNCTYPE[ctypes.c_uint32, [c.POINTER[hsa_ven_amd_aqlprofile_profile_t], hsa_ven_amd_aqlprofile_data_callback_t, ctypes.c_void_p]], 72), ('hsa_ven_amd_aqlprofile_iterate_event_ids', c.CFUNCTYPE[ctypes.c_uint32, [hsa_ven_amd_aqlprofile_eventname_callback_t]], 80), ('hsa_ven_amd_aqlprofile_iterate_event_coord', c.CFUNCTYPE[ctypes.c_uint32, [hsa_agent_t, hsa_ven_amd_aqlprofile_event_t, uint32_t, hsa_ven_amd_aqlprofile_coordinate_callback_t, ctypes.c_void_p]], 88), ('hsa_ven_amd_aqlprofile_att_marker', c.CFUNCTYPE[ctypes.c_uint32, [c.POINTER[hsa_ven_amd_aqlprofile_profile_t], c.POINTER[hsa_ext_amd_aql_pm4_packet_t], uint32_t, ctypes.c_uint32]], 96)])
 hsa_ven_amd_aqlprofile_1_00_pfn_t: TypeAlias = struct_hsa_ven_amd_aqlprofile_1_00_pfn_s
 hsa_ven_amd_aqlprofile_pfn_t: TypeAlias = struct_hsa_ven_amd_aqlprofile_1_00_pfn_s
-HSA_VERSION_1_0 = 1 # type: ignore
-HSA_AMD_INTERFACE_VERSION_MAJOR = 1 # type: ignore
-HSA_AMD_INTERFACE_VERSION_MINOR = 14 # type: ignore
-AMD_SIGNAL_ALIGN_BYTES = 64 # type: ignore
-AMD_QUEUE_ALIGN_BYTES = 64 # type: ignore
-MAX_NUM_XCC = 128 # type: ignore
-AMD_CONTROL_DIRECTIVES_ALIGN_BYTES = 64 # type: ignore
-AMD_ISA_ALIGN_BYTES = 256 # type: ignore
-AMD_KERNEL_CODE_ALIGN_BYTES = 64 # type: ignore
-HSA_AQLPROFILE_VERSION_MAJOR = 2 # type: ignore
-HSA_AQLPROFILE_VERSION_MINOR = 0 # type: ignore
-hsa_ven_amd_aqlprofile_VERSION_MAJOR = 1 # type: ignore
+HSA_VERSION_1_0 = 1
+HSA_AMD_INTERFACE_VERSION_MAJOR = 1
+HSA_AMD_INTERFACE_VERSION_MINOR = 14
+AMD_SIGNAL_ALIGN_BYTES = 64
+AMD_QUEUE_ALIGN_BYTES = 64
+MAX_NUM_XCC = 128
+AMD_CONTROL_DIRECTIVES_ALIGN_BYTES = 64
+AMD_ISA_ALIGN_BYTES = 256
+AMD_KERNEL_CODE_ALIGN_BYTES = 64
+HSA_AQLPROFILE_VERSION_MAJOR = 2
+HSA_AQLPROFILE_VERSION_MINOR = 0
+hsa_ven_amd_aqlprofile_VERSION_MAJOR = 1

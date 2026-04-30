@@ -3,12 +3,12 @@ import unittest
 
 from tinygrad import Device, Tensor, dtypes
 from tinygrad.tensor import _to_np_dtype
-from tinygrad.uop.ops import Ops
+from tinygrad.uop.ops import Ops, UOp, buffers
 from tinygrad.dtype import DType
-from tinygrad.device import is_dtype_supported
+from tinygrad.device import Buffer, is_dtype_supported
 from tinygrad.helpers import DEV, Context
 from test.helpers import slow, replace_opts
-from tinygrad.engine.realize import CompiledRunner
+from tinygrad.engine.realize import run_linear
 from tinygrad.codegen import to_program
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
 from tinygrad.codegen.opt.tc import amd_cdna_1616128
@@ -19,6 +19,11 @@ from test.backend.test_linearizer import helper_realized_ast, helper_linearizer_
 # NOTE: to_program always passes in Device[Device.DEFAULT].renderer explicitly for process_replay!!!
 
 AMX = "AMX" in DEV.arch
+
+def run_program(prg:UOp, bufs:list[Buffer]):
+  buf_uops = [UOp.new_buffer(b.device, b.size, b.dtype) for b in bufs]
+  for u,b in zip(buf_uops, bufs): buffers[u] = b
+  run_linear(UOp(Ops.LINEAR, src=(prg.call(*buf_uops),)))
 
 def helper_tc_ensure_uops_and_opts_count(N: int, M:int, K:int, dtype_in:DType, dtype_out:DType, axis:int=0, tc_select:int=-1, tc_opt:int=0,
                                          ensure_triggered:bool=True):
@@ -47,11 +52,11 @@ def helper_tc_allclose(N:int, M:int, K:int, dtype_in:DType, dtype_out:DType, axi
   if dtype_in == dtypes.bfloat16: r = r.float()
   realized_ast, bufs = helper_realized_ast(r)
   opts = [Opt(op=OptOps.TC, axis=axis, arg=(tc_select, tc_opt, use_tensor_cores))]
-  pu = to_program(replace_opts(realized_ast, opts), Device[Device.DEFAULT].renderer)
+  ast = replace_opts(realized_ast, opts)
+  pu = to_program(ast, Device[Device.DEFAULT].renderer)
   if use_tensor_cores == 1: assert len([uop for uop in pu.src[2].src if uop.op is Ops.WMMA]) > 0, "wmma not triggered"
   assert len([x for x in pu.src[0].arg.applied_opts if x.op is OptOps.TC]) == 1, "tensor core opt not included"
-  prg = CompiledRunner(pu, Device.DEFAULT)
-  prg.exec(bufs)
+  run_program(ast, bufs)
   if dtype_in == dtypes.half: tc_atol, tc_rtol = 1e-2, 1e-3
   elif dtype_in == dtypes.bfloat16: tc_atol, tc_rtol = (1e-1, 2e-2) if dtype_out == dtypes.bfloat16 else (1e-2, 1e-2)
   else: tc_atol, tc_rtol = 5e-3, 1e-4
@@ -145,15 +150,15 @@ class TestTensorCores(unittest.TestCase):
         c = a.conv2d(b, padding=1, dtype=tc.dtype_out)
         realized_ast, real_bufs = helper_realized_ast(c)
 
-        program = to_program(replace_opts(realized_ast, [Opt(OptOps.TC, axis, (-1, 2, 1))]), Device[Device.DEFAULT].renderer)
+        ast = replace_opts(realized_ast, [Opt(OptOps.TC, axis, (-1, 2, 1))])
+        program = to_program(ast, Device[Device.DEFAULT].renderer)
         assert len([uop for uop in tuple(program.src[2].src) if uop.op is Ops.WMMA]) > 0, "tensor core not triggered"
         assert len([x for x in program.src[0].arg.applied_opts if x.op is OptOps.TC]) == 1, "tensor core opt not included"
 
-        prg = CompiledRunner(program, Device.DEFAULT)
         # TODO: support this even if numpy doesn't
         if _to_np_dtype(real_bufs[0].dtype) is None: continue
         real_bufs[0].copyin(np.zeros((real_bufs[0].size, ), dtype=_to_np_dtype(real_bufs[0].dtype)).data) # Zero to check that all values are filled
-        prg.exec(real_bufs)
+        run_program(ast, real_bufs)
         result = np.frombuffer(real_bufs[0].as_memoryview(), _to_np_dtype(real_bufs[0].dtype))
 
         # ensure the results for each choice of axis matches

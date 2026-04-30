@@ -552,11 +552,18 @@ class Tensor(OpMixin):
     Tensor._seed, Tensor._device_seeds, Tensor._device_rng_counters = seed, {}, {}
 
   @staticmethod
-  def _threefry_random_bits(key:Tensor, counts0:Tensor, counts1:Tensor) -> Tensor:
-    x = (counts1.cast(dtypes.uint64) << 32) | counts0.cast(dtypes.uint64)
-    x = x._apply_uop(UOp.threefry, (key[1]._broadcast_to(x.shape).cast(dtypes.uint64) << 32) | key[0]._broadcast_to(x.shape).cast(dtypes.uint64))
-    counts0, counts1 = (x & 0xffffffff).cast(dtypes.uint32), ((x >> 32) & 0xffffffff).cast(dtypes.uint32)
-    return counts0.cat(counts1)
+  def _next_counter(device:str, num:int) -> tuple[Tensor, Tensor]:
+    if device not in Tensor._device_seeds:
+      seed = [int.from_bytes(hashlib.sha256(len(Tensor._device_seeds).to_bytes(4, "big")).digest(), "big"), Tensor._seed]
+      Tensor._device_seeds[device] = Tensor(seed, device=device, dtype=dtypes.uint32, requires_grad=False)
+      Tensor._device_rng_counters[device] = Tensor([0, 0], device=device, dtype=dtypes.uint32, requires_grad=False)
+    counter = Tensor._device_rng_counters[device]
+    new_low = counter[0:1] + (num & 0xffffffff)
+    new_high = counter[1:2] + (num >> 32) + (new_low < counter[0])
+    counter.assign(new_low.cat(new_high))
+    low = counter[0:1] - (num & 0xffffffff)
+    high = counter[1:2] - (num >> 32) - (counter[0] < (num & 0xffffffff))
+    return Tensor._device_seeds[device], low.cat(high)
 
   @staticmethod
   def rand(*shape, device:str|None=None, dtype:DTypeLike|None=None, contiguous:bool=True, **kwargs) -> Tensor:
@@ -581,43 +588,9 @@ class Tensor(OpMixin):
     # if shape has 0, return zero tensor
     if (numel := prod(shape)) == 0: return Tensor.zeros(shape, device=device, dtype=dt, **kwargs)
     num = ceildiv(numel * dt.itemsize, 4)
-
-    # generate per device seeds and rng counter if we haven't seen this device yet
-    if device not in Tensor._device_seeds:
-      Tensor._device_seeds[device] = Tensor(
-        [int.from_bytes(hashlib.sha256(len(Tensor._device_seeds).to_bytes(4, "big")).digest(), "big"), Tensor._seed],
-        device=device, dtype=dtypes.uint32, requires_grad=False)
-      Tensor._device_rng_counters[device] = Tensor([0, 0], device=device, dtype=dtypes.uint32, requires_grad=False).contiguous()
-
-    # increment rng counter for devices
-    new_low = Tensor._device_rng_counters[device][0:1] + (num & 0xffffffff)
-    new_high = Tensor._device_rng_counters[device][1:2] + (num >> 32) + (new_low < Tensor._device_rng_counters[device][0]).cast(dtypes.uint32)
-    Tensor._device_rng_counters[device].assign(new_low.cat(new_high))
-
-    low = Tensor._device_rng_counters[device][0:1] - (num & 0xffffffff)
-    high = Tensor._device_rng_counters[device][1:2] - (num >> 32) - (Tensor._device_rng_counters[device][0] < (num & 0xffffffff)).cast(dtypes.uint32)
-
-    # threefry random bits
-    bits_list = []
-    for i in range(0, num, dtypes.uint32.max):
-      chunk_num = min(num - i, dtypes.uint32.max)
-      c_low = low + (i & 0xffffffff)
-      c_high = high + (i >> 32) + (c_low < low).cast(dtypes.uint32)
-      new_key = Tensor._threefry_random_bits(Tensor._device_seeds[device], c_low, c_high)
-      counts0 = Tensor.arange(ceildiv(chunk_num, 2), device=device, dtype=dtypes.uint32, requires_grad=False)
-      counts1 = counts0 + ceildiv(chunk_num, 2)
-      bits_list.append(Tensor._threefry_random_bits(new_key, counts0, counts1)[:chunk_num])
-    bits = Tensor.cat(*bits_list)
-
-    # bitcast to uint with same number of bits
-    _, nmant = dtypes.finfo(dt)
-    uint_dtype = {1: dtypes.uint8, 2: dtypes.uint16, 4: dtypes.uint32, 8: dtypes.uint64}[dt.itemsize]
-    bits = bits.bitcast(uint_dtype)
-    # only randomize the mantissa bits and set the exponent to 1
-    one = Tensor.ones_like(bits, device=bits.device, dtype=dt).bitcast(uint_dtype)
-    bits = bits.rshift(dt.bitsize - nmant).bitwise_or(one)
-    # bitcast back to the original dtype and reshape
-    out = bits.bitcast(dt)[:numel].sub(1).reshape(shape).requires_grad_(kwargs.get("requires_grad"))
+    key, counter = Tensor._next_counter(device, num)
+    bits = Tensor.random_bits(key, counter, num)
+    out = Tensor._bits_to_rand(bits, shape, dt).requires_grad_(kwargs.get("requires_grad"))
     return out.contiguous() if contiguous else out
 
   # ***** creation helper functions *****

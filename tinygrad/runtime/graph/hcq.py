@@ -27,19 +27,19 @@ class HCQGraph(MultiGraphRunner):
 
     # Allocate kernel args.
     kernargs_size: dict[Compiled, int] = collections.defaultdict(int)
-    for prg in self.progs:
-      if prg is None: continue
-      kernargs_size[prg.dev] += round_up(prg._prg.kernargs_alloc_size, 16)
+    for runtime in self.runtimes:
+      if runtime is None: continue
+      kernargs_size[runtime.dev] += round_up(runtime.kernargs_alloc_size, 16)
     self.kernargs_bufs: dict[Compiled, HCQBuffer] = {d:d.allocator._alloc(max(sz, 1), BufferSpec(cpu_access=True)) for d,sz in kernargs_size.items()}
 
     # Fill initial arguments.
     self.ji_args: dict[int, HCQArgsState] = {}
 
     kargs_alloc: dict[Compiled, BumpAllocator] = {dev:BumpAllocator(buf.size) for dev,buf in self.kernargs_bufs.items()}
-    for j, prg in enumerate(self.progs):
-      if prg is None: continue
-      argsbuf = self.kernargs_bufs[prg.dev].offset(kargs_alloc[prg.dev].alloc(prg._prg.kernargs_alloc_size, 16))
-      self.ji_args[j] = prg._prg.fill_kernargs(self.hcq_bufs[j], prg.p.vars, argsbuf)
+    for j, runtime in enumerate(self.runtimes):
+      if runtime is None: continue
+      argsbuf = self.kernargs_bufs[runtime.dev].offset(kargs_alloc[runtime.dev].alloc(runtime.kernargs_alloc_size, 16))
+      self.ji_args[j] = runtime.fill_kernargs(self.hcq_bufs[j], self.calls[j][1].arg.vars, argsbuf)
 
     # Schedule Dependencies.
     # There are two types of queues on each device: copy and compute. Both must synchronize with all external operations before launching any
@@ -83,13 +83,13 @@ class HCQGraph(MultiGraphRunner):
     self.input_replace_map: dict[HCQCompiled, set[tuple[int, int]]] = collections.defaultdict(set)
     self.device_vars: dict[HCQCompiled, dict[str, int]] = {}
 
-    for j, ((_, ast, bufs, device_vars), prg) in enumerate(zip(self.calls, self.progs)):
+    for j, ((_, ast, bufs, device_vars), runtime) in enumerate(zip(self.calls, self.runtimes)):
       is_xfer = ast.op is Ops.COPY and hasattr(alc:=Device[bufs[0].device].allocator, '_transfer') and alc.supports_transfer \
                 and bufs[0].device.split(":")[0] == bufs[1].device.split(":")[0]
       ji_devs = [cast(HCQCompiled, Device[b.device]) for b in bufs] if is_xfer else []
       is_rdma = len(ji_devs) > 0 and not any(d._is_cpu() for d in ji_devs) and len(set(d.peer_group for d in ji_devs)) > 1
 
-      if prg is not None: enqueue_dev: HCQCompiled = prg.dev
+      if runtime is not None: enqueue_dev: HCQCompiled = runtime.dev
       else:
         # For copy ops prioritize enqeueuing on the src device, so reverse the buffers.
         for b in bufs[::-1]:
@@ -97,9 +97,9 @@ class HCQGraph(MultiGraphRunner):
 
       # set any fixedvars on the device
       self.device_vars[enqueue_dev] = merge_dicts([self.device_vars.get(enqueue_dev, {}), device_vars])
-      if prg is not None: self.device_vars[enqueue_dev] = merge_dicts([self.device_vars[enqueue_dev], prg.p.runtimevars])
+      if runtime is not None: self.device_vars[enqueue_dev] = merge_dicts([self.device_vars[enqueue_dev], ast.arg.runtimevars])
 
-      if prg is not None:
+      if runtime is not None:
         enqueue_queue = self.comp_queues[enqueue_dev]
       elif is_rdma:
         enqueue_queue = self.comp_queues[enqueue_dev]
@@ -125,10 +125,10 @@ class HCQGraph(MultiGraphRunner):
         self.rdma_deps[j] = (peer_queue, peer_sync_signals + peer_opt_deps, peer_out_signal, j + 1)
         self.last_j[peer_queue] = j
       else:
-        sync_signals, opt_deps, rdeps = self._resolve_deps(bufs, prg.p.outs if prg is not None else [0], enqueue_queue,
+        sync_signals, opt_deps, rdeps = self._resolve_deps(bufs, ast.arg.outs if runtime is not None else [0], enqueue_queue,
           enqueue_dev, out_signal, j, is_copy=is_xfer)
 
-      self.ji_schedule[j] = (enqueue_dev, enqueue_queue, sync_signals, opt_deps[::-1], out_signal, None if prg is not None else (j + 1))
+      self.ji_schedule[j] = (enqueue_dev, enqueue_queue, sync_signals, opt_deps[::-1], out_signal, None if runtime is not None else (j + 1))
 
       # Collect profile information if profiling is enabled.
       if PROFILE:
@@ -136,9 +136,9 @@ class HCQGraph(MultiGraphRunner):
         sig_st = prev_ji * 2 + 1 if len(opt_deps) == 0 and (prev_ji:=self.last_j[enqueue_queue]) is not None else j * 2
 
         # Description based on the command.
-        prof_ji_desc = prg._prg.name if prg is not None else TracingKey(f"{bufs[1].device} -> {bufs[0].device}", ret=bufs[0].nbytes) # type: ignore
+        prof_ji_desc = runtime.name if runtime is not None else TracingKey(f"{bufs[1].device} -> {bufs[0].device}", ret=bufs[0].nbytes) # type: ignore
 
-        prof_name = enqueue_dev.device if prg is not None else f"{enqueue_dev.device}:SDMA:{queue_idx}"
+        prof_name = enqueue_dev.device if runtime is not None else f"{enqueue_dev.device}:SDMA:{queue_idx}"
         self.prof_graph_entries.append(ProfileGraphEntry(prof_name, prof_ji_desc, sig_st, j * 2 + 1))
         self.prof_graph_deps.append([d - 1 for _, d in rdeps])
 
@@ -159,7 +159,7 @@ class HCQGraph(MultiGraphRunner):
       self.comp_queues[dev].memory_barrier().wait(self.virt_timeline_signals[dev], self.virt_timeline_vals[dev]) \
                            .wait(self.kick_signals[dev.peer_group], self.kickoff_var).signal(self.signals[dev], self.kickoff_var)
 
-    for j, ((dev_idx, ast, bufs, _), prg) in enumerate(zip(self.calls, self.progs)):
+    for j, ((dev_idx, ast, bufs, _), runtime) in enumerate(zip(self.calls, self.runtimes)):
       enqueue_dev, enqueue_queue, sync_signals, deps, signal, signal_val = self.ji_schedule[j]
 
       # Lazy allocate signals
@@ -171,8 +171,8 @@ class HCQGraph(MultiGraphRunner):
       if PROFILE and j * 2 in self.prof_signal_is_used: enqueue_queue.timestamp(self.prof_signals[j * 2])
 
       # Encode main commands based on ji type.
-      if prg is not None:
-        enqueue_queue.exec(prg._prg, self.ji_args[j], tuple(prg.p.global_size or (1,1,1)), tuple(prg.p.local_size or (1,1,1)))  # type: ignore[arg-type]
+      if runtime is not None:
+        enqueue_queue.exec(runtime, self.ji_args[j], ast.arg.global_size or (1,1,1), ast.arg.local_size or (1,1,1))  # type: ignore[arg-type]
       elif j in self.rdma_deps:
         dest_queue, dest_deps, dest_out_signal, dest_out_val = self.rdma_deps[j]
         for sig, val in dest_deps: dest_queue.wait(sig, val)

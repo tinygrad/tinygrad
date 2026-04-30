@@ -102,7 +102,7 @@ class Ops(FastEnum):
   MULTI = auto()  # MULTI is really a movement op
 
   # reduce
-  REDUCE_AXIS = auto(); REDUCE = auto(); ALLREDUCE = auto()
+  REDUCE = auto(); ALLREDUCE = auto()
 
   # expander ops
   UNROLL = auto(); CONTRACT = auto(); VCAT = auto(); PTRCAT = auto()

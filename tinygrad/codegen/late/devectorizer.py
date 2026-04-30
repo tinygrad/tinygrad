@@ -317,12 +317,12 @@ def reduce_to_acc(ctx:ReduceContext, red:UOp):
     topo = inp.toposort()
     ended_ranges = flatten([x.ended_ranges for x in topo if x.op is Ops.END])
     input_ranges = tuple([x for x in topo if x.op is Ops.RANGE and x not in reduce_range and x not in ended_ranges])
-    identity = red.const(red.dtype, identity_element(red.arg, red.dtype.scalar()))
+    identity = red.const(red.dtype, identity_element(red.arg[0], red.dtype.scalar()))
     acc = UOp.placeholder((1,), red.dtype, ctx.acc_num, AddrSpace.REG)
     acc_init = acc.after(*input_ranges).index(UOp.const(dtypes.weakint, 0)).store(identity)
     lst = [acc.after(acc_init, *reduce_range).index(UOp.const(dtypes.weakint, 0))] + lst  # put acc as the first element
     ctx.acc_num += 1
-  ret = functools.reduce(lambda x,y: x.alu(red.arg, y), lst)
+  ret = functools.reduce(lambda x,y: x.alu(red.arg[0], y), lst)
   if len(reduce_range) == 0: return ret
   end = acc.index(UOp.const(dtypes.weakint, 0)).store(ret).end(*reduce_range).rtag("mergeable")
   return acc.after(end).index(UOp.const(dtypes.weakint, 0))

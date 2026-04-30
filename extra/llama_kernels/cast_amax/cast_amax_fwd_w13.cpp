@@ -24,9 +24,9 @@ static_assert(HIDDEN % VEC == 0, "HIDDEN must be divisible by VEC (so VEC loads 
 extern "C" __global__ __launch_bounds__(THREADS_PER_WG) void
 fused_silu_mul_cast_amax_w13(
     __hip_fp8_storage_t*  __restrict__ fp8_out,         // fp8, N_ELEMS
-    __hip_bfloat16*       __restrict__ amax_buf,        // bf16, NUM_WG (per-WG amaxes)
+    float*                __restrict__ amax_buf,        // fp32, NUM_WG (per-WG amaxes)
     const __hip_bfloat16* __restrict__ xw13,            // bf16, 2*N_ELEMS
-    const __hip_bfloat16* __restrict__ amax_state)      // bf16 scalar
+    const float*          __restrict__ amax_state)      // fp32 scalar
 {
   __shared__ float sdata[THREADS_PER_WG];
 
@@ -75,5 +75,5 @@ fused_silu_mul_cast_amax_w13(
     __syncthreads();
   }
 
-  if (tid == 0) amax_buf[wg] = static_cast<__hip_bfloat16>(sdata[0]);
+  if (tid == 0) amax_buf[wg] = sdata[0];
 }

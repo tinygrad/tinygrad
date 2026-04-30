@@ -515,10 +515,10 @@ class struct_rgp_sqtt_marker_pipeline_bind(c.Struct):
   dword02: int
   dword03: int
 struct_rgp_sqtt_marker_pipeline_bind.register_fields([('identifier', uint32_t, 0, 4, 0), ('ext_dwords', uint32_t, 0, 3, 4), ('bind_point', uint32_t, 0, 1, 7), ('cb_id', uint32_t, 1, 20, 0), ('reserved', uint32_t, 3, 4, 4), ('dword01', uint32_t, 0), ('api_pso_hash', c.Array[uint32_t, Literal[2]], 4), ('dword02', uint32_t, 4), ('dword03', uint32_t, 8)])
-SQTT_FILE_MAGIC_NUMBER = 0x50303042 # type: ignore
-SQTT_FILE_VERSION_MAJOR = 1 # type: ignore
-SQTT_FILE_VERSION_MINOR = 5 # type: ignore
-SQTT_GPU_NAME_MAX_SIZE = 256 # type: ignore
-SQTT_MAX_NUM_SE = 32 # type: ignore
-SQTT_SA_PER_SE = 2 # type: ignore
-SQTT_ACTIVE_PIXEL_PACKER_MASK_DWORDS = 4 # type: ignore
+SQTT_FILE_MAGIC_NUMBER = 0x50303042
+SQTT_FILE_VERSION_MAJOR = 1
+SQTT_FILE_VERSION_MINOR = 5
+SQTT_GPU_NAME_MAX_SIZE = 256
+SQTT_MAX_NUM_SE = 32
+SQTT_SA_PER_SE = 2
+SQTT_ACTIVE_PIXEL_PACKER_MASK_DWORDS = 4
