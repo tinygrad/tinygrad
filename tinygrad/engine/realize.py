@@ -22,8 +22,8 @@ def get_call_outs_ins(call:UOp) -> tuple[tuple[int, ...], tuple[int, ...]]:
   if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "encdec": return (0,), tuple(range(1, len(get_call_arg_uops(call))))
   return (), ()
 
-def get_call_name(call:UOp, bufs:list[Buffer]) -> str:
-  def _uop_sz_to_str(uop:UOp) -> str: return size_to_str(prod(uop.shape) * uop.dtype.itemsize)
+def get_call_name(call:UOp, bufs:list[Buffer], var_vals:dict[str, int]|None=None) -> str:
+  def _uop_sz_to_str(uop:UOp) -> str: return size_to_str(sym_infer(prod(uop.shape) * uop.dtype.itemsize, var_vals or {}))
 
   ast, arg_uops = call.src[0], get_call_arg_uops(call)
   if ast.op is Ops.PROGRAM: return ast.arg.name
@@ -52,7 +52,7 @@ def track_stats(ctx:ExecContext, call:UOp, device:str, bufs:list[Buffer], var_va
   if PROFILE:
     outputs, inputs = get_call_outs_ins(call)
     cpu_events.append(ProfilePointEvent(device, "exec", len(cpu_events), {"metadata": call.arg.metadata, "var_vals": var_vals,
-      "bufs": [b.trace_num for b in bufs], "name": get_call_name(call, bufs), "outputs": outputs, "inputs": inputs}))
+      "bufs": [b.trace_num for b in bufs], "name": get_call_name(call, bufs, var_vals), "outputs": outputs, "inputs": inputs}))
   et: list[float|None] = [None]
   if DEBUG >= 2: st = time.perf_counter()
   yield et
@@ -68,7 +68,7 @@ def track_stats(ctx:ExecContext, call:UOp, device:str, bufs:list[Buffer], var_va
   GlobalCounters.global_mem += (mem_est:=sym_infer(estimates.mem, var_vals))
   if et[0] is not None: GlobalCounters.time_sum_s += et[0]
   if DEBUG >= 2:
-    display_name = get_call_name(call, bufs)
+    display_name = get_call_name(call, bufs, var_vals)
     lds_est = sym_infer(estimates.lds, var_vals)
     header_color = 'magenta' if ctx.jit else ('green' if call.src[0].key not in first_run_cache else None)
     ptm = colored(time_to_str(et[0], w=9), "yellow" if et[0] > 0.01 else None) if et[0] is not None else ""
