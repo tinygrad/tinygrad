@@ -358,10 +358,14 @@ pm_reduce = PatternMatcher([
 
 # add loads
 
+def add_load(idx:UOp):
+  if isinstance(idx.dtype, PtrDType): return None
+  assert isinstance(idx.src[0].dtype, PtrDType), f"param is not PtrDType {idx.src[0].dtype}"
+  return idx.replace(dtype=idx.src[0].dtype).load(dtype=idx.dtype.base)
+
 pm_add_loads = PatternMatcher([
   # add loads to non ptr index
-  (UPat(Ops.INDEX, name="idx"), lambda idx: None if isinstance(idx.dtype, PtrDType) else
-    idx.replace(dtype=idx.src[0].dtype).load(dtype=idx.dtype.base)),
+  (UPat(Ops.INDEX, name="idx"), add_load),
   # remove loads from stores
   (UPat(Ops.STORE, src=(UPat(Ops.LOAD), UPat(name="val")), name="s"), lambda s,val: s.replace(src=(s.src[0].src[0], val))),
 ])
