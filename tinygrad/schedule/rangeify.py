@@ -63,12 +63,17 @@ pm_fold_moved_after = PatternMatcher([
   (UPat(GroupOp.ALU, name="alu"), lambda ctx,alu: alu.replace(src=new_src) if (new_src:=tuple(ctx.get(s, s) for s in alu.src)) != alu.src else None),
 ])
 
+def move_mop_before_index(r:UOp, idx:UOp):
+  # TODO: store requires this
+  try: src_shape = r.src[0]._shape
+  except RuntimeError: return None
+  return r.src[0].index(*apply_movement_op(r.op, r.src[0].shape, r.marg, idx.src[1:]), dtype=idx.dtype, arg=idx.arg) \
+    if src_shape is not None and len(idx.src[1:]) == len(r.shape) else None
+
 # movement op on INDEX as a PatternMatcher
 # TODO: clean up .src[0]._shape is not None
 pm_mops = PatternMatcher([
-  (UPat(GroupOp.Movement, name="r").f(Ops.INDEX, allow_any_len=True, name="idx"),
-   lambda r,idx: r.src[0].index(*apply_movement_op(r.op, r.src[0].shape, r.marg, idx.src[1:]), dtype=idx.dtype, arg=idx.arg)
-     if r.src[0]._shape is not None and len(idx.src[1:]) == len(r.shape) else None),
+  (UPat(GroupOp.Movement, name="r").f(Ops.INDEX, allow_any_len=True, name="idx"), move_mop_before_index),
   # move movement ops and INDEX after AFTER (but not when AFTER has a raw STORE with shaped children — from replace_contig_with_store_after)
   (UPat(GroupOp.Movement|{Ops.INDEX}, name="r").after(name="a", allow_any_len=True),
    lambda r,a: UOp(r.op, r.dtype, (a.replace(src=(r.src[0],)+a.src[1:]),)+r.src[1:], r.arg)),
@@ -343,9 +348,6 @@ def late_buffer_view(t:UOp, b:UOp):
   if len(shape) == 0: offset = x.src[1].arg
   else: offset = max(sum(idx.vmin for idx in x.src[1:]), 0)
 
-  # remove the BUFFERIZE and the INDEX
-  #assert x.op is Ops.INDEX, "must be INDEX"
-  #return UOp(Ops.BUFFER_VIEW, t.dtype, (x.src[0],), (size, offset))
   return b.replace(src=(UOp(Ops.BUFFER_VIEW, t.dtype, (x.base,), (size, offset)), b.src[1]))
 
 to_bufferview = PatternMatcher([
