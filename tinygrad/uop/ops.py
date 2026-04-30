@@ -212,7 +212,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     match self.op:
       # late ops don't have shape
       case Ops.UNIQUE | Ops.LUNIQUE | Ops.DEVICE | Ops.IF | Ops.BARRIER | Ops.CUSTOM | Ops.CUSTOMI | \
-           Ops.UNROLL | Ops.CONTRACT | Ops.SINK | Ops.END | \
+           Ops.UNROLL | Ops.CONTRACT | Ops.SINK | Ops.END | Ops.REWRITE_ERROR | \
            Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE | Ops.BINARY | Ops.INS | Ops.TUPLE | Ops.CALL | Ops.FUNCTION:
         return None
 
@@ -237,14 +237,9 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       case Ops.GEP: return (len(self.arg),) if len(self.arg) > 1 else ()
       case Ops.STACK: return (len(self.src),)
       case Ops.INDEX:
-        # if it has a vec dtype, set the shape
-        if self.dtype.count > 1: return (self.dtype.count,)
-        # non pointer index doesn't have a shape
-        if not isinstance(self.dtype, PtrDType): return None
-        # fully indexed doesn't have a shape. TODO: remove this
-        if self.src[0]._shape is None or len(self.src[1:]) == len(self.src[0].shape): return None
-        # pointer index
-        return self.src[0].shape[len(self.src[1:]):]
+        shp = []
+        for s in self.src[1:]: shp.extend(list(s.shape))
+        return tuple(shp) + self.src[0].shape[len(self.src[1:]):]
 
       # some ops init the shape
       case Ops.CONST | Ops.DEFINE_VAR:
