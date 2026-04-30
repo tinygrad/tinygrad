@@ -2,14 +2,14 @@ import unittest
 import numpy as np
 from tinygrad import Tensor, GlobalCounters, dtypes, nn, Device, Variable
 from tinygrad.helpers import Context, getenv, DEV
-from tinygrad.engine.realize import run_linear, estimate_uop
+from tinygrad.engine.realize import run_linear, estimate_uop, compile_linear
 from tinygrad.renderer.ptx import PTXRenderer
 from test.helpers import needs_second_gpu
 
 class TestArange(unittest.TestCase):
   def _get_flops(self, tensor, desired):
     GlobalCounters.reset()
-    linear = tensor.schedule_linear()
+    linear = compile_linear(tensor.schedule_linear())
     self.assertEqual(len(linear.src), 1)
     run_linear(linear)
     np.testing.assert_equal(tensor.numpy(), desired)
@@ -36,7 +36,7 @@ class TestArange(unittest.TestCase):
   def test_tri_complexity(self):
     with Context(NOOPT=1):
       t = Tensor.ones(256, 256).contiguous().realize()
-      linear = t.triu().schedule_linear()
+      linear = compile_linear(t.triu().schedule_linear())
       self.assertLessEqual(estimate_uop(linear.src[-1]).ops, 4 * 256 * 256)
 
 DSET, DDIM = 2048, 32
@@ -229,7 +229,7 @@ class TestIndexing(unittest.TestCase):
     xq = xq.reshape(bs, seqlen, n_heads, head_dim)
     xq_rope, _ = apply_rotary_emb(xq, xq, freqs_cis)
     xq_rope.sum().backward()
-    linear = wq.grad.schedule_linear()
+    linear = compile_linear(wq.grad.schedule_linear())
     assert len(linear.src) == 1, f"expected one kernel for backward, got: {len(linear.src)}"
     bwd_ops = estimate_uop(linear.src[0]).ops
     # bfloat16 on non CDNA4 has ~10x ops overhead because of the software emulation
