@@ -100,7 +100,11 @@ class UOpMetaClass(type):
       buffers[created] = _buffer
     if SPEC > 1:
       from tinygrad.uop.spec import full_spec, test_pyrender
-      if SPEC > 2: test_pyrender(created)
+      if SPEC > 2:
+        # SPEC=3 checks the shape
+        _ = created._shape
+        if SPEC > 3:
+          test_pyrender(created)
       with Context(CHECK_OOB=0): fret = cast(bool|None, full_spec.rewrite(created))
       if fret is not True: raise RuntimeError(f"SPEC ISSUE {fret}: {created}")
     return created
@@ -212,7 +216,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     match self.op:
       # late ops don't have shape
       case Ops.UNIQUE | Ops.LUNIQUE | Ops.DEVICE | Ops.IF | Ops.BARRIER | Ops.CUSTOM | Ops.CUSTOMI | \
-           Ops.STACK | Ops.GEP | Ops.UNROLL | Ops.CONTRACT | Ops.SINK | Ops.END | Ops.REWRITE_ERROR | \
+           Ops.CONTRACT | Ops.SINK | Ops.END | Ops.REWRITE_ERROR | Ops.PTRCAT | Ops.ENDIF | \
            Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE | Ops.BINARY | Ops.INS | Ops.TUPLE | Ops.CALL | Ops.FUNCTION:
         return None
 
@@ -233,17 +237,16 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
           return None
 
       case Ops.INDEX:
-        # non pointer index doesn't have a shape
-        if not isinstance(self.dtype, PtrDType): return None
-        # fully indexed doesn't have a shape. TODO: remove this
-        if self.src[0]._shape is None or len(self.src[1:]) == len(self.src[0].shape): return None
-        # pointer index
-        return self.src[0].shape[len(self.src[1:]):]
+        shp:list[sint] = []
+        for s in self.src[1:]: shp.extend(list(s.shape))
+        return tuple(shp) + self.src[0].shape[len(self.src[1:]):]
+
+      # TODO: these should have the shape of the dtype.count
+      case Ops.CONST | Ops.DEFINE_VAR: return ()
+      case Ops.GEP | Ops.STACK | Ops.VCONST | Ops.VCAT: return ()
 
       # some ops init the shape
-      case Ops.CONST | Ops.DEFINE_VAR | Ops.BIND | Ops.RANGE | Ops.SPECIAL: return ()
-      # TODO: VCONST should have the shape of the arg
-      case Ops.VCONST: return ()
+      case Ops.BIND | Ops.RANGE | Ops.SPECIAL | Ops.UNROLL: return ()
       case Ops.BUFFER: return (self.arg,)
       case Ops.BUFFER_VIEW: return (self.arg[0],)
       case Ops.CUSTOM_FUNCTION: return None
@@ -280,7 +283,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     # NOTE: ssimplify is required because the shape needs to be canonical for broadcasting and same shape checking
     if self.op in GroupOp.Movement.union({Ops.MULTI, Ops.REDUCE}):
       ps = self.src[0]._shape
-      if ps is None: raise RuntimeError(f"movement op {self.op} requires shape")
+      if ps is None: raise RuntimeError(f"movement op {self.op} requires shape, {self.src[0].op} doesn't have one")
       match self.op:
         case Ops.RESHAPE:
           if not all(x >= 0 for x in self.marg): raise ValueError(f"shape can't contain negative numbers {self.marg}")
@@ -316,7 +319,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     if self.op in GroupOp.ALU.union({Ops.CAST, Ops.COPY, Ops.NOOP, Ops.GROUP, Ops.SINK, Ops.ALLREDUCE, Ops.STORE}):
       input_shapes = [x._shape for x in self.src if x._shape is not None]
       if len(input_shapes) == 0: return None
-      if not all_same(input_shapes): raise RuntimeError(f"shape mismatch at {self.op}: {input_shapes}")
+      if not all_same(input_shapes): raise RuntimeError(f"shape mismatch at {self.op}: {input_shapes} {[x.op for x in self.src]}")
       return input_shapes[0]
 
     # all Ops must be explicitly handled
