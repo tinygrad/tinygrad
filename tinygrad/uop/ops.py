@@ -270,9 +270,9 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       # REDUCE with empty axis is passthrough (lowered form)
       case Ops.REDUCE if len(self.arg[1]) == 0:
         # these can mismatch if there's a horizonal reduce
-        if self.dtype.count > 1:
+        if self.src[0].dtype.count > 1:
           assert len(self.src[0]._shape) == 1
-          return (self.dtype.count,)
+          return () if self.dtype.count == 1 else (self.dtype.count,)
         return self.src[0]._shape
 
       # TODO: disallow shape changing bitcast
