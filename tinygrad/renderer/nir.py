@@ -136,8 +136,9 @@ class NIRRenderer(Renderer):
     # ref: https://registry.khronos.org/SPIR-V/specs/unified1/SPIRV.html#OpConvertFToU
     (UPat(Ops.CAST, (dtypes.uchar, dtypes.ushort), src=(UPat.var("x", dtypes.floats),), name="c"), lambda x,c: x.cast(dtypes.int32).cast(c.dtype)),
     # load/store use pointer arithmetic, and the cast does nothing
-    (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("off")), allow_any_len=True, name="x"), lambda x,buf,off: x.replace(
-      src=(buf,off.cast(dtypes.long))+x.src[2:]) if not isinstance(buf.dtype, ImageDType) and buf.dtype.addrspace != AddrSpace.REG and off.op not in (Ops.CAST, Ops.STACK) else None),
+    (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("off")), allow_any_len=True, name="x"), lambda x,buf,off:
+      x.replace(src=(buf,off.cast(dtypes.long))+x.src[2:]) if not isinstance(buf.dtype, ImageDType) and \
+        buf.dtype.addrspace != AddrSpace.REG and off.op not in (Ops.CAST, Ops.STACK) else None),
     (UPat(Ops.CAST, name="x"), lambda x: x.src[0] if isinstance(x.dtype, PtrDType) or x.src[0].dtype == dtypes.void else None),
   ])
 
@@ -257,7 +258,8 @@ nstore_img = nir_instr(has_def=False, df=lambda img:img, num_components=lambda v
     lambda b,img,coord_x,coord_y,val,dtype:mesa.nir_intrinsic_instr_create(b.shader,g("nir_intrinsic_image_store")))
 
 _nload_img = nir_instr(intrins=lambda dtype:{'IMAGE_DIM':mesa.GLSL_SAMPLER_DIM_2D, 'ACCESS':mesa.ACCESS_CAN_REORDER, 'DEST_TYPE':nfloat(dtype)},
-  nc=4, bs=32, num_components=4, srcs=lambda b,img,coord_x,coord_y:[nsrc(x) for x in [img, tovec(b, coord_x, coord_y), nundef(b, dtypes.int), nimm(b, 0, dtypes.int)]])(
+  nc=4, bs=32, num_components=4,
+  srcs=lambda b,img,coord_x,coord_y:[nsrc(x) for x in [img, tovec(b, coord_x, coord_y), nundef(b, dtypes.int), nimm(b, 0, dtypes.int)]])(
     lambda b,img,coord_x,coord_y,dtype: mesa.nir_intrinsic_instr_create(b.shader, g("nir_intrinsic_image_load")))
 
 class IR3Renderer(NIRRenderer, OpenCLRenderer):

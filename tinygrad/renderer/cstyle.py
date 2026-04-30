@@ -305,12 +305,17 @@ class OpenCLRenderer(CStyleLanguage):
     (UPat(Ops.CONST, dtypes.bfloat16, name="x"),
       lambda ctx,x: f"{(struct.unpack('I', struct.pack('f', float_to_bf16(x.arg)))[0] >> 16)}u"),
     # load/store image (OpenCL)
-    (UPat(Ops.LOAD, dtype=dtypes.float.vec(4), src=(UPat.var('buf').index(UPat.var('idx_x', dtypes.int), UPat.var('idx_y', dtypes.int), UPat.var("gate")), UPat.var("var"))),
+    (UPat(Ops.INDEX, src=(UPat.var('buf'), UPat.var('idx_x', dtypes.int), UPat.var('idx_y', dtypes.int)), allow_any_len=True),
+      lambda ctx,buf,idx_x,idx_y: ctx.image_coord(ctx, idx_x, idx_y) if isinstance(buf.dtype, ImageDType) else None),
+    (UPat(Ops.LOAD, dtype=dtypes.float.vec(4), src=(
+      UPat.var('buf').index(UPat.var('idx_x', dtypes.int), UPat.var('idx_y', dtypes.int), UPat.var("gate")), UPat.var("var"))),
       lambda ctx,buf,idx_x,idx_y,var,gate: f"({ctx[gate]}?read_imagef({ctx[buf]}, smp, {ctx.image_coord(ctx, idx_x, idx_y)}):{ctx[var]})"),
-    (UPat(Ops.LOAD, dtype=dtypes.float.vec(4), src=(UPat.var('buf').index(UPat.var('idx_x', dtypes.int), UPat.var('idx_y', dtypes.int)),)),
+    (UPat(Ops.LOAD, dtype=dtypes.float.vec(4), src=(
+      UPat.var('buf').index(UPat.var('idx_x', dtypes.int), UPat.var('idx_y', dtypes.int)),)),
       lambda ctx,buf,idx_x,idx_y: f"read_imagef({ctx[buf]}, smp, {ctx.image_coord(ctx, idx_x, idx_y)})"),
-    (UPat(Ops.STORE, src=(UPat.var('buf').index(UPat.var('idx_x', dtypes.int), UPat.var('idx_y', dtypes.int), allow_any_len=True),
-                           UPat.var("var", dtypes.float.vec(4))), allow_any_len=True),
+    (UPat(Ops.STORE, src=(
+      UPat.var('buf').index(UPat.var('idx_x', dtypes.int), UPat.var('idx_y', dtypes.int), allow_any_len=True),
+      UPat.var("var", dtypes.float.vec(4))), allow_any_len=True),
       lambda ctx,buf,idx_x,idx_y,var: f"write_imagef({ctx[buf]}, {ctx.image_coord(ctx, idx_x, idx_y)}, {ctx[var]});"),
   ]) + base_rewrite
 

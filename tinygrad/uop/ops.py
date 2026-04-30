@@ -1507,8 +1507,9 @@ def to_max_shape(shape:tuple[sint, ...]) -> tuple[int, ...]: return tuple(int(x.
 
 def select_dtype(u): return (dtypes.long if u.overflows(dtypes.int32) else dtypes.int).vec(u.dtype.count)
 def strip_index_casts(idx:UOp):
-  new_src = (idx.src[0],) + tuple(s.src[0] if s.op is Ops.CAST and s.dtype.scalar() is dtypes.weakint and s.src[0].dtype.scalar() in dtypes.ints else s for s in idx.src[1:])
-  return idx.replace(src=new_src) if new_src != idx.src else None
+  new_src = (idx.src[0],) + tuple(s.src[0] if s.op is Ops.CAST and s.dtype.scalar() is dtypes.weakint and
+                                  s.src[0].dtype.scalar() in dtypes.ints else s for s in idx.src[1:])
+  return new_src[0].index(*new_src[1:], ptr=True) if new_src != idx.src else None
 def lower_image_index(idx:UOp):
   if not isinstance(idx.src[0].dtype, ImageDType) or len(idx.src) not in (3, 4): return None
   new_src = (idx.src[0],) + tuple(s if s.dtype == dtypes.int else s.cast(dtypes.int) for s in idx.src[1:3]) + idx.src[3:]
