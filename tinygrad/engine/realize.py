@@ -2,7 +2,7 @@ from __future__ import annotations
 from typing import cast, Iterator, Any
 import time, random, itertools, math, contextlib, weakref
 from dataclasses import dataclass, replace, field
-from tinygrad.helpers import colored, DEBUG, GlobalCounters, ansilen, all_int, Metadata, TRACEMETA, prod, flatten
+from tinygrad.helpers import colored, DEBUG, GlobalCounters, ansilen, all_int, TRACEMETA, prod, flatten
 from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer, buffers, graph_rewrite, ProgramInfo
@@ -52,7 +52,7 @@ def track_stats(ctx:ExecContext, call:UOp, device:str, bufs:list[Buffer], var_va
   if PROFILE:
     outputs, inputs = get_call_outs_ins(call)
     cpu_events.append(ProfilePointEvent(device, "exec", len(cpu_events), {"metadata": call.arg.metadata, "var_vals": var_vals,
-                                        "bufs": [b.trace_num for b in bufs], "name": get_call_name(call, bufs), "outputs": outputs, "inputs": inputs}))
+      "bufs": [b.trace_num for b in bufs], "name": get_call_name(call, bufs), "outputs": outputs, "inputs": inputs}))
   et: list[float|None] = [None]
   if DEBUG >= 2: st = time.perf_counter()
   yield et
