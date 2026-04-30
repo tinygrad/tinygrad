@@ -307,17 +307,26 @@ class TestRandomness(unittest.TestCase):
     with self.assertRaises(TypeError): Tensor.randint((3, 4), low=0, high=3.5)
     with self.assertRaises(TypeError): Tensor.randint((3, 4), low=1, high=3, dtype="float")
     with self.assertRaises(TypeError): Tensor.randint((3, 4), low=0, high=3, dtype=dtypes.float32)
+    # check low < high
+    with self.assertRaises(ValueError): Tensor.randint((3, 4), low=10, high=5)
+    with self.assertRaises(ValueError): Tensor.randint((3, 4), low=10, high=10)
+    np.testing.assert_array_equal(Tensor.randint(16, low=5, high=6).numpy(), 5)
 
   def test_normal(self):
     self.assertTrue(normal_test(Tensor.normal))
     self.assertTrue(equal_distribution(Tensor.normal, lambda x: torch.nn.init.normal_(torch.empty(x), mean=0, std=1),
                                                       lambda x: np.random.normal(loc=0, scale=1, size=x)))
+    # check std >= 0
+    with self.assertRaises(ValueError): Tensor.normal((3, 4), mean=0, std=-1)
 
   def test_uniform(self):
     self.assertFalse(normal_test(Tensor.uniform))
     self.assertTrue(equal_distribution(Tensor.uniform, lambda x: torch.nn.init.uniform_(torch.empty(x)), lambda x: np.random.uniform(size=x)))
     self.assertTrue(equal_distribution(partial(Tensor.uniform, low=-100, high=100, dtype=dtypes.int32),
                                        numpy_func=lambda x: np.random.randint(low=-100, high=100, size=x)))
+    # check low < high
+    with self.assertRaises(ValueError): Tensor.uniform((3, 4), low=5.0, high=3.0)
+    with self.assertRaises(ValueError): Tensor.uniform((3, 4), low=1.0, high=1.0)
 
   def test_scaled_uniform(self):
     self.assertFalse(normal_test(Tensor.scaled_uniform))
