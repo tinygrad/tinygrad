@@ -1,16 +1,17 @@
-from typing import Any
+from typing import Any, cast
 import ctypes, decimal
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import dedup, getenv, PROFILE
-from tinygrad.device import ProfileGraphEntry, ProfileGraphEvent
+from tinygrad.device import Buffer, Device, ProfileGraphEntry, ProfileGraphEvent
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.engine.jit import GraphRunner, GraphException
-from tinygrad.runtime.ops_metal import wait_check, to_ns_str
+from tinygrad.runtime.ops_metal import MetalDevice, MetalAllocator, wait_check, to_ns_str
 from tinygrad.runtime.autogen import metal
 
 class MetalGraph(GraphRunner):
   def __init__(self, linear, input_uops=()):
     super().__init__(linear, input_uops)
+    self.dev = cast(MetalDevice, Device[self.device])
 
     # create metal batch exec
     icb_descriptor = metal.MTLIndirectCommandBufferDescriptor.new()
@@ -44,11 +45,11 @@ class MetalGraph(GraphRunner):
     self.all_resources = dedup(all_resources)
     self.all_pipelines = dedup(all_pipelines)
     self.command_buffer: Any = None
-    if len(self.vars): self.int_buf_view = self.dev.allocator._as_buffer(self.int_buf).cast('i')
+    if len(self.vars): self.int_buf_view = cast(MetalAllocator, self.dev.allocator)._as_buffer(self.int_buf).cast('i')
     self.range = metal.NSRange(0, len(self.calls))
     self.updatable = sorted({j for j,r in enumerate(self.uop_replace) if r} | self.var_vals_replace.keys() | self.launch_dims_replace.keys())
 
-  def __call__(self, input_buffers, var_vals, wait=False, input_uops=None):
+  def __call__(self, input_uops:tuple[UOp, ...], var_vals:dict[str, int], wait=False):
     if self.command_buffer is not None and self.command_buffer in self.dev.mtl_buffers_in_flight: wait_check(self.command_buffer)
     # NOTE: old command buffer may not be inflight anymore
     if self.command_buffer is not None and PROFILE: self.collect_timestamps()
@@ -57,7 +58,7 @@ class MetalGraph(GraphRunner):
     for j in self.updatable:
       computeCommand = self.icb.indirectComputeCommandAtIndex(j)
       for pos, iidx in self.uop_replace[j]:
-        buf = input_uops[iidx].buffer
+        buf = cast(Buffer, input_uops[iidx].buffer)
         computeCommand.setKernelBuffer_offset_atIndex(buf._buf.buf, buf._buf.offset, pos)
         updated_bufs.append(buf._buf.buf)
 

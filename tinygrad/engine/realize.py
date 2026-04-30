@@ -21,7 +21,7 @@ def estimate_uop(call:UOp) -> Estimates:
     nbytes = prod(call.src[1].shape) * call.src[1].dtype.itemsize
     return Estimates(lds=nbytes, mem=nbytes)
   if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "graph":
-    return runner.estimates if (runner:=graph_cache.get(ast)) is not None else Estimates()
+    return runner.estimates if (runner:=get_graph_runtime(ast)) is not None else Estimates()
   return Estimates()
 
 def update_stats(display_name:str, device:str, estimates:Estimates, var_vals:dict[str, int], et:float|None, buf_count:int,
@@ -59,18 +59,6 @@ def track_stats(ctx:"ExecContext", call:UOp, device:str, display_name:str, bufs:
                first_run=call.src[0].key not in first_run_cache)
   first_run_cache.add(call.src[0].key)
 
-# **************** Runners ****************
-
-class Runner:
-  def __init__(self, display_name:str, device:str, estimates=Estimates()):
-    self.first_run, self.display_name, self.device, self.estimates = True, display_name, device, estimates
-  @property
-  def dev(self): return Device[self.device]
-  def exec(self, rawbufs:list[Buffer], var_vals:dict[str, int]|None=None) -> float|None:
-    return self(rawbufs, {} if var_vals is None else var_vals)
-  def __call__(self, rawbufs:list[Buffer], var_vals:dict[str, int], wait=False) -> float|None:
-    raise NotImplementedError("override this")
-
 local_size_cache: dict[bytes, tuple[int, ...]] = {}
 def optimize_local_size(call:UOp, prg:UOp) -> UOp|None:
   device = prg.src[1].arg
@@ -93,7 +81,7 @@ def optimize_local_size(call:UOp, prg:UOp) -> UOp|None:
   new_global = tuple(g//l if g%l == 0 else g/l for g,l in zip(prg.arg.global_size, local_size))
   return call.replace(src=(prg.replace(arg=replace(prg.arg, global_size=new_global, local_size=local_size)), *call.src[1:]))
 
-# **************** method cache ****************
+# **************** runtime cache ****************
 
 runtime_cache: dict[tuple[bytes, str], Any] = {}
 def get_runtime(device:str, ast:UOp):
@@ -103,6 +91,13 @@ def get_runtime(device:str, ast:UOp):
     if DEBUG >= 4: print(ast.src[3].arg)
     if DEBUG >= 7: Device[device].compiler.disassemble(ast.src[4].arg)
     runtime = runtime_cache[key] = Device[device].runtime(ast.arg.function_name, ast.src[4].arg, *ast.arg.aux, runtimevars=ast.arg.runtimevars)
+  return runtime
+
+graph_cache:weakref.WeakKeyDictionary[UOp, Any] = weakref.WeakKeyDictionary()
+def get_graph_runtime(ast:UOp, input_uops:tuple[UOp, ...]|None=None):
+  assert ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "graph", "get_graph_runtime should only be called with a graph ast"
+  if (runtime:=graph_cache.get(ast)) is None and input_uops is not None:
+    graph_cache[ast] = runtime = Device[ast.device if isinstance(ast.device, str) else ast.device[0]].graph(ast, input_uops=input_uops)
   return runtime
 
 # **************** run linear ****************
@@ -175,13 +170,10 @@ def exec_encdec(ctx:ExecContext, call, ast):
   with track_stats(ctx, call, bufs[0].device, colored(f"enc/dec {size_to_str(bufs[0].nbytes)}", "yellow"), bufs, ctx.var_vals):
     bufs[0].allocator._encode_decode(bufs[0]._buf, bufs[1]._buf, bufs[2]._buf, [x._buf for x in bufs[3:]], shape, ctx.var_vals[pos_var])
 
-graph_cache:weakref.WeakKeyDictionary[UOp, Runner] = weakref.WeakKeyDictionary()
-def exec_graph(ctx:ExecContext, call, cf):
-  bufs = flatten([b.bufs if isinstance(b, MultiBuffer) else [b] for b in (u.buffer for u in resolve_params(call, ctx.input_uops))])
-  if (runner:=graph_cache.get(cf)) is None:
-    graph_cache[cf] = runner = Device[cf.device if isinstance(cf.device, str) else cf.device[0]].graph(cf, input_uops=ctx.input_uops)
-  with track_stats(ctx, call, runner.device, runner.display_name, bufs, ctx.var_vals) as t:
-    t[0] = runner(bufs, ctx.var_vals, wait=DEBUG >= 2, input_uops=ctx.input_uops) # type: ignore[call-arg]
+def exec_graph(ctx:ExecContext, call, ast):
+  rt = get_graph_runtime(ast, ctx.input_uops)
+  with track_stats(ctx, call, rt.device, colored(f"batched {len(rt.calls)}", "cyan"), [], ctx.var_vals) as t:
+    t[0] = rt(ctx.input_uops, ctx.var_vals, wait=DEBUG>=2) # type: ignore[call-arg]
 
 # flatten LINEAR-in-LINEAR: any nested LINEAR child gets inlined into its parent's src
 pm_flatten_linear = PatternMatcher([
@@ -216,7 +208,7 @@ pm_exec = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.COPY, name="ast"),), name="call", allow_any_len=True), exec_copy),
   (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, name="ast"),), name="call", allow_any_len=True), exec_kernel),
   (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="encdec", name="ast"),), name="call", allow_any_len=True), exec_encdec),
-  (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="graph", name="cf"),), name="call", allow_any_len=True), exec_graph),
+  (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="graph", name="ast"),), name="call", allow_any_len=True), exec_graph),
   (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="validate", name="ast"),), name="call", allow_any_len=True), exec_validate),
 ])
 
