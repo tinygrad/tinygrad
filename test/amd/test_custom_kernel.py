@@ -3,7 +3,7 @@ import functools
 import numpy as np
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
-from tinygrad.engine.realize import run_linear, estimate_uop
+from tinygrad.engine.realize import run_linear, estimate_uop, compile_linear
 from tinygrad.renderer import Estimates
 from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import getenv
@@ -169,7 +169,7 @@ class TestCustomKernel(unittest.TestCase):
     if self.arch != "rdna3": self.skipTest("only rdna3")
     a = Tensor.full((16, 16), 1.).contiguous().realize()
     a = Tensor.custom_kernel(a, fxn=custom_add_one)[0]
-    linear = a.schedule_linear()
+    linear = compile_linear(a.schedule_linear())
     est = estimate_uop(linear.src[-1])
     self.assertEqual(est.ops, a.numel())
     self.assertEqual(est.mem, a.nbytes()*2)

@@ -1,5 +1,5 @@
 import unittest
-from tinygrad import Tensor, UOp
+from tinygrad import Tensor, UOp, GlobalCounters
 from tinygrad.dtype import AddrSpace, dtypes
 from tinygrad.uop.ops import KernelInfo, AxisType
 
@@ -307,6 +307,22 @@ class TestCustomKernel(unittest.TestCase):
     result = run(a, b).flatten().tolist()
     expected = (3+2)*2+2
     assert all(x == expected for x in result), f"expected all {expected}, got {result}"
+
+  def test_custom_kernel_sched(self, use_custom=False):
+    x = Tensor.arange(32).reshape(8, 4).realize()
+    y = Tensor.empty_like(x)
+    y = Tensor.custom_kernel(y, x, fxn=custom_add_one_kernel)[0]
+    if use_custom:
+      z = Tensor.empty_like(x)
+      z = Tensor.custom_kernel(y, y.T.T, fxn=custom_add_one_kernel)[0]
+    else: z = y.T.T+1
+    GlobalCounters.reset()
+    z.realize()
+    self.assertEqual(GlobalCounters.kernel_count, 2)
+    self.assertEqual(z.tolist(), x.add(2).tolist())
+
+  @unittest.expectedFailure
+  def test_custom_kernel_sched_copy(self): self.test_custom_kernel_sched(use_custom=True)
 
 class TestUOpReduce(unittest.TestCase):
   def test_uop_sum(self):
