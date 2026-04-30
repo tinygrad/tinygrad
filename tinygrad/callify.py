@@ -63,10 +63,16 @@ def _make_buffer_view(src:UOp) -> UOp|None:
   return UOp(Ops.BUFFER_VIEW, src.dtype, (buf,), (src.numel(), offset)).reshape(src.shape)
 
 def contiguous_mops_to_view(c:UOp, src:UOp):
-  """CONTIGUOUS(MOPS(BUFFER)) → CONTIGUOUS(BUFFER_VIEW) when movement ops collapse to a contiguous range."""
-  buf = src.base
-  if buf.op not in {Ops.BUFFER, Ops.BUFFER_VIEW}: return None
-  if src.op is Ops.RESHAPE and src.src[0].op in {Ops.BUFFER, Ops.BUFFER_VIEW}: return None
+  """CONTIGUOUS(MOPS(BUFFER/AFTER)) -> BUFFER_VIEW when movement ops collapse to a contiguous range."""
+  # src.base only locates AFTER deps; _make_buffer_view still validates the full movement chain.
+  base = src.base
+  deps = ()
+  while base.op is Ops.AFTER:
+    deps = base.src[1:] + deps
+    src = src.substitute({base:base.src[0]})
+    base = src.base
+  if base.op not in {Ops.BUFFER, Ops.BUFFER_VIEW}: return None
+  if not deps and src.op is Ops.RESHAPE and src.src[0].op in {Ops.BUFFER, Ops.BUFFER_VIEW}: return None
 
   # no symbolic shape
   if not all_int(c.shape): return None
@@ -83,11 +89,11 @@ def contiguous_mops_to_view(c:UOp, src:UOp):
     resolved = graph_rewrite(src, multi_pm, name="multi_buffer_view")
     if resolved.op is not Ops.MULTI: return None
     if (view := _make_buffer_view(resolved.src[0])) is None: return None
-    return view.multi(resolved.arg).contiguous(tag=c.tag)
+    ret = view.multi(resolved.arg)
+  elif (ret := _make_buffer_view(src)) is None: return None
 
   # NOTE: this contiguous is removed because this BUFFER_VIEW/RESHAPE has_buffer_identity
-  if (view := _make_buffer_view(src)) is None: return None
-  return view.contiguous(tag=c.tag)
+  return ret.after(*deps, tag=c.tag) if deps else ret.contiguous(tag=c.tag)
 
 def transform_precompiled_call(c:UOp) -> UOp|None:
   if not c.arg.precompile: return None

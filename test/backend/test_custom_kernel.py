@@ -321,8 +321,31 @@ class TestCustomKernel(unittest.TestCase):
     self.assertEqual(GlobalCounters.kernel_count, 2)
     self.assertEqual(z.tolist(), x.add(2).tolist())
 
-  @unittest.expectedFailure
   def test_custom_kernel_sched_copy(self): self.test_custom_kernel_sched(use_custom=True)
+
+  def test_custom_kernel_sched_contiguous_view(self):
+    x = Tensor.arange(64).realize()
+    y = Tensor.empty_like(x)
+    y = Tensor.custom_kernel(y, x, fxn=custom_add_one_kernel)[0]
+    ys = y.shrink(((4, 36),))
+    z = Tensor.empty_like(ys)
+    z = Tensor.custom_kernel(z, ys, fxn=custom_add_one_kernel)[0]
+    GlobalCounters.reset()
+    z.realize()
+    self.assertEqual(GlobalCounters.kernel_count, 2)
+    self.assertEqual(z.tolist(), list(range(6, 38)))
+
+  def test_custom_kernel_sched_reshape_view(self):
+    x = Tensor.arange(64).realize()
+    y = Tensor.empty_like(x)
+    y = Tensor.custom_kernel(y, x, fxn=custom_add_one_kernel)[0]
+    yr = y.reshape(8, 8)
+    z = Tensor.empty_like(yr)
+    z = Tensor.custom_kernel(z, yr, fxn=custom_add_one_kernel)[0]
+    GlobalCounters.reset()
+    z.realize()
+    self.assertEqual(GlobalCounters.kernel_count, 2)
+    self.assertEqual(z.tolist(), x.add(2).reshape(8, 8).tolist())
 
 class TestUOpReduce(unittest.TestCase):
   def test_uop_sum(self):
