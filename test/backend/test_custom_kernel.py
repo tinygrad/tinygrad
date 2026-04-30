@@ -308,21 +308,20 @@ class TestCustomKernel(unittest.TestCase):
     expected = (3+2)*2+2
     assert all(x == expected for x in result), f"expected all {expected}, got {result}"
 
-  def test_custom_kernel_sched(self, use_custom=False):
+  def test_custom_kernel_sched(self, use_custom=False, extra_kernels=0):
     x = Tensor.arange(32).reshape(8, 4).realize()
-    y = Tensor.empty_like(x)
+    y = Tensor.invalids(*x.shape, dtype=x.dtype)
     y = Tensor.custom_kernel(y, x, fxn=custom_add_one_kernel)[0]
     if use_custom:
-      z = Tensor.empty_like(x)
+      z = Tensor.invalids(*x.shape, dtype=x.dtype)
       z = Tensor.custom_kernel(y, y.T.T, fxn=custom_add_one_kernel)[0]
     else: z = y.T.T+1
     GlobalCounters.reset()
     z.realize()
-    self.assertEqual(GlobalCounters.kernel_count, 2)
+    self.assertEqual(GlobalCounters.kernel_count, 3+extra_kernels)
     self.assertEqual(z.tolist(), x.add(2).tolist())
 
-  @unittest.expectedFailure
-  def test_custom_kernel_sched_copy(self): self.test_custom_kernel_sched(use_custom=True)
+  def test_custom_kernel_sched_copy(self): self.test_custom_kernel_sched(use_custom=True, extra_kernels=1)
 
 class TestUOpReduce(unittest.TestCase):
   def test_uop_sum(self):
