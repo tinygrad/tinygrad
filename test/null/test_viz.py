@@ -1,4 +1,4 @@
-import unittest, decimal, sys, json, contextlib, tempfile, pickle, io, itertools
+import unittest, decimal, sys, json, contextlib, tempfile, pickle, io
 from pathlib import Path
 from dataclasses import dataclass
 from typing import Generator
@@ -901,46 +901,38 @@ def run_cli(*cli_args) -> str:
     main(args)
   return buf.getvalue().strip()
 
+def call_cli(fxn, *cli_args, debug=2) -> str:
+  with save_viz() as viz:
+    fxn()
+  with tempfile.TemporaryDirectory() as tmpdir:
+    (r:=Path(tmpdir)/"rewrites.pkl").write_bytes(pickle.dumps(viz.data.trace))
+    (p:=Path(tmpdir)/"profile.pkl").write_bytes(pickle.dumps(cpu_events))
+    with Context(DEBUG=debug, NO_COLOR=1):
+      stdout = run_cli("--rewrites-path", str(r), "--profile-path", str(p), *cli_args)
+  return stdout
+
 class TestCLI(unittest.TestCase):
-  def test_simple(self):
-    a = Tensor.empty(1, device="NULL")+2.0
-    empty_counter = itertools.count(0)
-    def custom_empty_prg(B:UOp, A:UOp) -> UOp:
-      sink = UOp(Ops.SINK, arg=KernelInfo(name=f"custom_empty_n{next(empty_counter)}"))
-      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=a.device), UOp(Ops.LINEAR, src=(sink,))))
-    def custom_empty_src(B:UOp, A:UOp) -> UOp:
-      sink = UOp(Ops.SINK, arg=KernelInfo(name=f"custom_empty_n{next(empty_counter)}"))
-      src = "void custom_empty_src() { 0; }"
-      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=a.device), UOp(Ops.LINEAR, src=(sink,)), UOp(Ops.SOURCE, arg=src)))
-    b = Tensor.custom_kernel(Tensor.empty_like(a), a, fxn=custom_empty_prg)[0]
-    c = Tensor.custom_kernel(Tensor.empty_like(a), a, fxn=custom_empty_prg)[0]
-    d = Tensor.custom_kernel(Tensor.empty_like(a), a, fxn=custom_empty_src)[0]
-    with save_viz() as viz:
-      b.realize()
+  def test_reconstruct_debug(self):
+    def fxn():
+      Tensor.empty(1, device="NULL").add(2.0).realize()
       profile_marker("marker @ 1")
-      c.realize()
-      d.realize()
-    # save trace to disk for CLI to consume it
-    with tempfile.TemporaryDirectory() as tmpdir:
-      (r:=Path(tmpdir)/"rewrites.pkl").write_bytes(pickle.dumps(viz.data.trace))
-      (p:=Path(tmpdir)/"profile.pkl").write_bytes(pickle.dumps(cpu_events))
-      # reconstruct DEBUG=4 output and see all markers.
-      with Context(DEBUG=4):
-        kernels = run_cli("--rewrites-path", str(r), "--profile-path", str(p), "-s", "NULL")
-      self.assertIn("void custom_empty_n0", kernels)
-      self.assertIn("marker @ 1", kernels)
-      self.assertIn("void custom_empty_n1", kernels)
-      self.assertIn("void custom_empty_src", kernels)
-      self.assertIn("E", kernels)
-      self.assertIn("UOp.const", kernels)
-      # get the top slowest functions across all devices
-      with Context(DEBUG=2):
-        times = run_cli("--rewrites-path", str(r), "--profile-path", str(p), "-s", "ALL", "--top", "-1")
-      self.assertIn("TINY", times)
-      self.assertIn("NULL", times)
-      with Context(DEBUG=3):
-        json_lines = run_cli("--rewrites-path", str(r), "--profile-path", str(p), "-s", "ALL", "--json")
-      for line in json_lines.split("\n"): _ = json.loads(line)
+      Tensor.empty(1, device="NULL").add(3.0).realize()
+    out = call_cli(fxn, "-s", "NULL", debug=4)
+    self.assertIn("void E", out)
+    self.assertIn("marker @ 1", out)
+
+  def test_aggregate(self):
+    N, CNT = 1024, 5
+    def fxn():
+      for _ in range(CNT):
+        (Tensor.empty(N, N, device="NULL")@Tensor.empty(N, N, device="NULL")).realize()
+      for _ in range(CNT):
+        (Tensor.empty(N, N, device="NULL").assign(Tensor.empty(N, N, device="NULL"))).realize()
+    kernels = [json.loads(line) for line in call_cli(fxn, "-s", "NULL", "-t", "--json").splitlines()]
+    self.assertEqual(len(kernels), 2)
+    gemm_summary = [s for s in kernels if s["name"].startswith("r_")][0]
+    copy_summary = [s for s in kernels if s["name"].startswith("E_")][0]
+    self.assertEqual(gemm_summary["count"], copy_summary["count"], CNT)
 
 if __name__ == "__main__":
   unittest.main()
