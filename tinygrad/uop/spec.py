@@ -6,8 +6,8 @@ from tinygrad.dtype import DType, ImageDType, dtypes, PtrDType, AddrSpace, Inval
 from tinygrad.helpers import DEBUG, Context, prod, SPEC, Metadata, panic, CHECK_OOB
 
 def validate_index(buf:UOp, idx:UOp):
+  # gate now lives on LOAD/STORE; INDEX is always 2-src (buf, idx)
   if idx.op is Ops.CONST and idx.arg is Invalid: return True
-  gate = UOp.const(dtypes.bool, True)
   # TODO: check for overflow
   if not CHECK_OOB or isinstance(buf.dtype, ImageDType) or (sz := buf.ptrdtype.size) == -1: return True
 
@@ -17,12 +17,12 @@ def validate_index(buf:UOp, idx:UOp):
   # TODO: validate these
   # WEBGPU has a BITCAST in the index, PTX casts pointer to long
   # VECTORIZE/GEP can't be properly modeled in z3 since it doesn't support vectors
-  for x in idx.toposort() | gate.toposort():
+  for x in idx.toposort():
     if x.op in {Ops.BITCAST, Ops.STACK, Ops.GEP} or (x.op is Ops.CAST and isinstance(x.src[0].dtype, PtrDType)): return True
 
   # if all is good and CHECK_OOB=1, validate with z3
   from tinygrad.uop.validate import validate_index_with_z3
-  return validate_index_with_z3(sz, idx, gate)
+  return validate_index_with_z3(sz, idx, UOp.const(dtypes.bool, True))
 
 # four specs:
 #   shared_spec  -- usable anywhere
@@ -174,9 +174,10 @@ shared_codegen_spec = PatternMatcher([
   (UPat(Ops.STACK, name="x"), lambda x: len(x.src)>1 and len(x.src) == x.dtype.vcount and all(x.dtype == y.dtype.vec(len(x.src)) for y in x.src)),
   (UPat(Ops.GEP, src=(UPat.var("src"),), name="gep"), lambda gep,src: gep.dtype == src.dtype.scalar()),
 
-  # LOAD(idx) / STORE(idx, val) / LOAD(idx, gate) gated / STORE(idx, val, gate) gated
+  # LOAD(idx) / STORE(idx, val) / LOAD(idx, gate, alt?) gated / STORE(idx, val, gate) gated
   (UPat().index(UPat()).or_casted().load(), lambda: True),
-  (UPat(Ops.LOAD, src=(UPat(Ops.INDEX).or_casted(), UPat(dtype=dtypes.bool))), lambda: True),  # gated load (alt added in program_spec)
+  (UPat(Ops.LOAD, src=(UPat(Ops.INDEX).or_casted(), UPat(dtype=dtypes.bool))), lambda: True),  # gated load
+  (UPat(Ops.LOAD, src=(UPat(Ops.INDEX).or_casted(), UPat(dtype=dtypes.bool), UPat())), lambda: True),  # gated load with alt
   (UPat(Ops.STORE, dtypes.void, src=(UPat(Ops.INDEX).or_casted(), UPat())), lambda: True),
   (UPat(Ops.STORE, dtypes.void, src=(UPat(Ops.INDEX).or_casted(), UPat(), UPat(dtype=dtypes.bool))), lambda: True),  # gated store
 
