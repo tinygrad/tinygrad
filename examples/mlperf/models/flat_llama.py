@@ -45,7 +45,8 @@ def quantize_fp8(x:Tensor, amax_state:Tensor|None=None):
   x_clamped = x_scaled + (x_scaled.detach().clamp(-FP8_MAX, FP8_MAX) - x_scaled.detach())  # STE
   return x_clamped.cast(FP8_DTYPE), scale.float().reciprocal(), new_amax
 
-def matmul(x:Tensor, w:Tensor, fp8=FP8, amax_x:Tensor|None=None, amax_w:Tensor|None=None) -> tuple[Tensor,...]:
+def matmul(x:Tensor, w:Tensor, fp8:bool|None=None, amax_x:Tensor|None=None, amax_w:Tensor|None=None) -> tuple[Tensor,...]:
+  if fp8 is None: fp8 = FP8
   if not fp8:
     if getenv("ASM_GEMM"):
       from extra.gemm.cdna_asm_gemm import can_use_asm_gemm, asm_gemm
@@ -64,8 +65,9 @@ def _int8_rowwise_quantize(w:Tensor, scale_dtype=dtypes.float16) -> tuple[Tensor
   scale = w.abs().max(axis=-1) / 127.0 + 1e-8
   return (w / scale.unsqueeze(-1)).round().cast(dtypes.int8), scale
 
-def _base_matmul(x:Tensor, w:Tensor, fp8=FP8, amax_x:Tensor|None=None, amax_w:Tensor|None=None,
+def _base_matmul(x:Tensor, w:Tensor, fp8:bool|None=None, amax_x:Tensor|None=None, amax_w:Tensor|None=None,
                  w_scale:Tensor|None=None) -> tuple[Tensor, ...]:
+  if fp8 is None: fp8 = FP8
   if w_scale is not None:
     if fp8: raise NotImplementedError("fp8 kernels with quantized llama base weights are not supported")
     return (x.dot(w.cast(w_scale.dtype).T * w_scale),)
@@ -241,6 +243,22 @@ class FlatTransformer:
     h = h + ffn
     return (h, *attn_amaxs, *ffn_amaxs, *attn_saves, *ffn_saves)
 
+  def run_layer_fp8(self, x:Tensor, freqs_cis:Tensor,
+                    attention_norm:Tensor, wqkv:Tensor, wo:Tensor,
+                    ffn_norm:Tensor, w1:Tensor, w2:Tensor, w3:Tensor,
+                    amax_xqkv=None, amax_wqkv=None, amax_xo=None, amax_wo=None,
+                    amax_x1=None, amax_w1=None, amax_x2=None, amax_w2=None, amax_x3=None, amax_w3=None):
+    attn, *attn_ret = self.attention(x, freqs_cis, attention_norm, wqkv, wo,
+                                     amax_xqkv=amax_xqkv, amax_wqkv=amax_wqkv, amax_xo=amax_xo, amax_wo=amax_wo)
+    attn_amaxs = attn_ret[:4]
+    h = x + attn
+    ffn, *ffn_ret = self.feed_forward(h, ffn_norm, w1, w2, w3,
+                                      amax_x1=amax_x1, amax_w1=amax_w1, amax_x2=amax_x2, amax_w2=amax_w2,
+                                      amax_x3=amax_x3, amax_w3=amax_w3)
+    ffn_amaxs = ffn_ret[:6]
+    h = h + ffn
+    return (h, *attn_amaxs, *ffn_amaxs)
+
   def shard(self, device:tuple[str, ...], mp:bool=False):
     from tinygrad.nn.state import get_parameters
     if not mp:
@@ -370,15 +388,16 @@ class FlatTransformer:
                      "w1_scale": self.w1_scale[i], "w2_scale": self.w2_scale[i], "w3_scale": self.w3_scale[i]} if self.base_quantize == "int8" else {}
       lora_layer = {"wqkv_lora_a": self.wqkv_lora_a[i], "wqkv_lora_b": self.wqkv_lora_b[i],
                     "wo_lora_a": self.wo_lora_a[i], "wo_lora_b": self.wo_lora_b[i]} if self.lora_rank else {}
-      h, *ret = self.run_layer(h, freqs_cis,
-                               self.attention_norm[i], self.wqkv[i], self.wo[i],
-                               self.ffn_norm[i], self.w1[i], self.w2[i], self.w3[i],
-                               **amax_layer, **quant_layer, **lora_layer)
+      layer_runner = self.run_layer_fp8 if a else self.run_layer
+      h, *ret = layer_runner(h, freqs_cis,
+                             self.attention_norm[i], self.wqkv[i], self.wo[i],
+                             self.ffn_norm[i], self.w1[i], self.w2[i], self.w3[i],
+                             **amax_layer, **quant_layer, **lora_layer)
       if a:
         amaxs = ret[:10]
         amax_names = ["xqkv", "wqkv", "xo", "wo", "x1", "w1", "x3", "w3", "x2", "w2"]
         for name, new_val in zip(amax_names, amaxs):
-          a[name][i].assign(new_val)
+          a[name][i].assign(new_val.cast(a[name][i].dtype))
 
     logits = matmul(self.norm(h).contiguous().contiguous_backward(), self.output[0], fp8=False)[0].contiguous_backward()
     return logits
