@@ -1331,6 +1331,18 @@ class Tensor(OpMixin):
     a, b = self._broadcasted(x, reverse)
     return a - a.div(b, rounding_mode="floor") * b
 
+  def fmod(self, x:Tensor|ConstType) -> Tensor:
+    """
+    C-style remainder of `self` divided by `x` (sign follows the dividend), using truncating division.
+    Differs from `mod`/`%`, which uses Python floor remainder.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-4, 7, 5, 4, -7, 8]).fmod(Tensor([2, -3, 8, -2, 3, 5])).numpy())
+    ```
+    """
+    a, b = self._broadcasted(x)
+    return a - a.div(b, rounding_mode="trunc") * b
+
   def where(self:Tensor, x:Tensor|ConstType|sint, y:Tensor|ConstType|sint) -> Tensor:
     """
     Returns a tensor of elements selected from either `x` or `y`, depending on `self`.
