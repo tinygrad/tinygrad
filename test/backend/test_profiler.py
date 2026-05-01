@@ -64,8 +64,7 @@ class TestProfiler(unittest.TestCase):
     assert _dev_base(kernel_runs[0].device) == kernel_runs[0].device, "kernel should not be on a sub-device"
 
   def test_profile_kernel_run_wait(self):
-    with self.assertRaises(AssertionError) if Device.DEFAULT == "METAL" else contextlib.nullcontext():
-      self.test_profile_kernel_run(wait=True)
+    self.test_profile_kernel_run(wait=True)
 
   def test_profile_copyin(self):
     buf1 = Buffer(Device.DEFAULT, 2, dtypes.float, options=BufferSpec(nolru=True)).ensure_allocated()
