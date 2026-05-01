@@ -53,10 +53,15 @@ def simplify_valid_load(buf:UOp, start_idx:UOp, valid:UOp) -> UOp|None:
 load_store_indexing = PatternMatcher([
   # image load valid idx simplification
   (UPat(Ops.INDEX, src=(UPat.var("buf"), invalid_gate)), lambda buf,x,i,cond: simplify_valid_load(buf, x, cond)),
-  # simplify away long after index has been lowered
-  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("x", dtypes.long), UPat.var("c", dtypes.bool))), lambda buf,x,c: simplify_valid_load(buf, x, c)),
-  # drop true gate
-  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("x"), UPat.const(dtypes.bool, True)),), lambda buf,x: buf.index(x, ptr=True)),
+  # drop true gate from gated LOAD with alt: also drop the now-unused alt
+  (UPat(Ops.LOAD, src=(UPat.var("idx"), UPat.const(dtypes.bool, True), UPat()), allow_any_len=True, name="ld"),
+   lambda ld,idx: ld.replace(src=(idx,)+ld.src[3:])),
+  # drop true gate from gated LOAD without alt
+  (UPat(Ops.LOAD, src=(UPat.var("idx"), UPat.const(dtypes.bool, True)), allow_any_len=True, name="ld"),
+   lambda ld,idx: ld.replace(src=(idx,)+ld.src[2:])),
+  # drop true gate from STORE
+  (UPat(Ops.STORE, src=(UPat.var("idx"), UPat.var("val"), UPat.const(dtypes.bool, True))),
+   lambda idx,val: idx.store(val)),
 ])
 
 # ***** load/store grouping *****
@@ -281,18 +286,18 @@ pm_render = PatternMatcher([
   (UPat(Ops.GEP, name='gep'), lambda gep: UOp(Ops.STACK, gep.dtype, tuple(gep.src[0].gep(x) for x in gep.arg)) if len(gep.arg) > 1 else None),
   (UPat(Ops.GEP, name='gep'), lambda gep: gep.src[0] if gep.src[0].dtype.vcount == 1 and gep.arg == (0,) else None),
   (UPat(Ops.STACK, src=(UPat(name='x'),)), lambda x: x),
-  # give any loads that are masked an alt value
-  (UPat(Ops.LOAD, src=(UPat(Ops.INDEX, src=(UPat(), UPat(), UPat())).or_casted(),), allow_any_len=True, name="x"),
-    lambda x: x.replace(src=(x.src[0], x.const_like(0))+x.src[1:])
-      if len(x.src) == 1 or x.src[1].op in (Ops.CUSTOM, Ops.STORE, Ops.BARRIER) else None),
+  # give any gated loads (gate at src[1]) an alt value at src[2]
+  (UPat(Ops.LOAD, src=(UPat(Ops.INDEX).or_casted(), UPat(dtype=dtypes.bool)), allow_any_len=True, name="x"),
+    lambda x: x.replace(src=(x.src[0], x.src[1], x.const_like(0))+x.src[2:])
+      if len(x.src) == 2 or x.src[2].op in (Ops.CUSTOM, Ops.STORE, Ops.BARRIER) else None),
   # Where after gated load becomes alt value
   # NOTE: if a is CAST and a.src[0].dtype == l.dtype, use a.src[0] to avoid roundtrip cast (e.g. uint->float->uint)
-  (UPat.var("c").where(UPat(Ops.LOAD, src=(UPat().index(UPat(), UPat.var("c")).or_casted(),), allow_any_len=True, name="l").or_casted(),
-    UPat.var("a")), lambda c,l,a: l.replace(src=(l.src[0], a.src[0] if a.op is Ops.CAST and a.src[0].dtype == l.dtype else a.cast(l.dtype))+
-                                            l.src[2:]).cast(a.dtype)),
-  (UPat.var("c").where(UPat.var("a"), UPat(Ops.LOAD, src=(UPat().index(UPat(), UPat.var("c", dtype=dtypes.bool).logical_not()).or_casted(),),
-    allow_any_len=True, name="l").or_casted()), lambda c,l,a: l.replace(src=(l.src[0], a.src[0] if a.op is Ops.CAST and a.src[0].dtype == l.dtype
-                                                                             else a.cast(l.dtype))+l.src[2:]).cast(a.dtype)),
+  (UPat.var("c").where(UPat(Ops.LOAD, src=(UPat(Ops.INDEX).or_casted(), UPat.var("c")), allow_any_len=True, name="l").or_casted(),
+    UPat.var("a")), lambda c,l,a: l.replace(src=(l.src[0], l.src[1], a.src[0] if a.op is Ops.CAST and a.src[0].dtype == l.dtype else a.cast(l.dtype))+
+                                            l.src[3:]).cast(a.dtype)),
+  (UPat.var("c").where(UPat.var("a"), UPat(Ops.LOAD, src=(UPat(Ops.INDEX).or_casted(), UPat.var("c", dtype=dtypes.bool).logical_not()),
+    allow_any_len=True, name="l").or_casted()), lambda c,l,a: l.replace(src=(l.src[0], l.src[1], a.src[0] if a.op is Ops.CAST and a.src[0].dtype == l.dtype
+                                                                             else a.cast(l.dtype))+l.src[3:]).cast(a.dtype)),
 ])
 
 # *** Ops.REDUCE -> Ops.DEFINE_ACC ***

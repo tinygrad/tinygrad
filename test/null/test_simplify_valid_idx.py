@@ -49,7 +49,7 @@ class TestValidIdxSimplification(unittest.TestCase):
   def check(self, load, sidx, svalid, extra=()):
     with Context(NOOPT=1, SPEC=0):
       load = full_rewrite_to_sink(UOp.sink(load, *extra)).src[0]
-    idx, valid = load.src[0].src[1], load.src[0].src[2]
+    idx, valid = load.src[0].src[1], load.src[1]
     check_uop_against_string(self, idx, sidx)
     check_uop_against_string(self, valid, svalid)
 
@@ -225,9 +225,11 @@ class TestImageSimplification(unittest.TestCase):
     check_uop_against_string(self, idx0, sidx0)
     check_uop_against_string(self, idx1, sidx1)
     if svalid is not None:
-      check_uop_against_string(self, load.src[0].src[2], svalid)
+      check_uop_against_string(self, load.src[1], svalid)
     else:
-      self.assertEqual(len(load.src[0].src), 2, "svalid is None but load still has a valid")
+      # gate is at LOAD.src[1] when present; if simplified away, src[1] should not be bool
+      self.assertFalse(len(load.src) >= 2 and load.src[1].dtype.scalar() == dtypes.bool,
+                       "svalid is None but load still has a valid")
 
   def test_idx_gt_c(self):
     # (idx1 < c+1).ne(True) ? (..., idx1-1+c) : 0 can drop the valid
@@ -512,18 +514,34 @@ class TestUnfoldableImage(unittest.TestCase):
       self.assertEqual(res.src[0].src[0].dtype, dtypes.float.ptr(400))
 
 class TestDropTrueGate(unittest.TestCase):
-  def test_drop_true_gate_on_index(self):
-    # test that INDEX with a constant True gate gets simplified to drop the gate
+  def test_drop_true_gate_on_load(self):
+    # test that LOAD with a constant True gate gets simplified to drop the gate
     from tinygrad.codegen.late.devectorizer import load_store_indexing
     from tinygrad.uop.ops import graph_rewrite
     buf = UOp(Ops.PARAM, dtypes.int.ptr(), arg=0)
     idx = UOp.const(dtypes.weakint, 0)
     true_gate = UOp.const(dtypes.bool, True)
-    index_with_gate = UOp(Ops.INDEX, dtypes.int.ptr(), (buf, idx, true_gate))
+    bidx = UOp(Ops.INDEX, dtypes.int.ptr(), (buf, idx))
+    load = UOp(Ops.LOAD, dtypes.int, (bidx, true_gate))
     # apply the optimization
-    result = graph_rewrite(index_with_gate, load_store_indexing)
-    # the True gate should be dropped (INDEX should only have 2 sources)
-    self.assertEqual(len(result.src), 2, "True gate should be dropped from INDEX")
+    result = graph_rewrite(load, load_store_indexing)
+    # the True gate should be dropped (LOAD should only have 1 source)
+    self.assertEqual(len(result.src), 1, "True gate should be dropped from LOAD")
+
+  def test_drop_true_gate_on_store(self):
+    # test that STORE with a constant True gate gets simplified to drop the gate
+    from tinygrad.codegen.late.devectorizer import load_store_indexing
+    from tinygrad.uop.ops import graph_rewrite
+    buf = UOp(Ops.PARAM, dtypes.int.ptr(), arg=0)
+    idx = UOp.const(dtypes.weakint, 0)
+    val = UOp.const(dtypes.int, 42)
+    true_gate = UOp.const(dtypes.bool, True)
+    bidx = UOp(Ops.INDEX, dtypes.int.ptr(), (buf, idx))
+    store = UOp(Ops.STORE, dtypes.void, (bidx, val, true_gate))
+    # apply the optimization
+    result = graph_rewrite(store, load_store_indexing)
+    # the True gate should be dropped (STORE should only have 2 sources)
+    self.assertEqual(len(result.src), 2, "True gate should be dropped from STORE")
 
 class TestRangeShrink(unittest.TestCase):
   def get_ranges(self, sink):

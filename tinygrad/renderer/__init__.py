@@ -3,7 +3,7 @@ from typing import Callable, cast
 from dataclasses import dataclass
 from tinygrad.helpers import prod, Target
 from tinygrad.uop.ops import Ops, UOp, sint, ssimplify, smin, GroupOp, PatternMatcher
-from tinygrad.dtype import AddrSpace, PtrDType
+from tinygrad.dtype import AddrSpace, PtrDType, dtypes
 from tinygrad.codegen.opt.tc import TensorCore
 from tinygrad.device import Compiler
 
@@ -31,8 +31,11 @@ class Estimates:
         if u.op in {Ops.LOAD, Ops.STORE}:
           # if u.src[0] is INDEX, we have to include the buffer since it might be an AFTER
           dont_count = dont_count.union((UOp.sink(*u.src[0].src[1:]) if u.src[0].op is Ops.INDEX else u.src[0]).toposort(range_gate))
-          # TODO: is this correct? this all needs to be cleaned up
-          if len(u.src) > 2: dont_count = dont_count.union(u.src[2].toposort())
+          # gate (bool-typed src) is part of indexing/predication, exclude its computation
+          # LOAD: gate at src[1]; STORE: gate at src[2]
+          gate_pos = 1 if u.op is Ops.LOAD else 2
+          if len(u.src) > gate_pos and u.src[gate_pos].dtype.scalar() == dtypes.bool:
+            dont_count = dont_count.union(u.src[gate_pos].toposort(range_gate))
         elif u.op is Ops.IF:
           dont_count = dont_count.union(u.src[0].toposort())
     for u in uops:

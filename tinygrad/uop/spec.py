@@ -5,9 +5,9 @@ from tinygrad.uop.render import print_uops, pyrender
 from tinygrad.dtype import DType, ImageDType, dtypes, PtrDType, AddrSpace, Invalid, ConstFloat
 from tinygrad.helpers import DEBUG, Context, prod, SPEC, Metadata, panic, CHECK_OOB
 
-def validate_index(buf:UOp, idx:UOp, gate:UOp|None=None):
+def validate_index(buf:UOp, idx:UOp):
   if idx.op is Ops.CONST and idx.arg is Invalid: return True
-  if gate is None: gate = UOp.const(dtypes.bool, True)
+  gate = UOp.const(dtypes.bool, True)
   # TODO: check for overflow
   if not CHECK_OOB or isinstance(buf.dtype, ImageDType) or (sz := buf.ptrdtype.size) == -1: return True
 
@@ -174,10 +174,11 @@ shared_codegen_spec = PatternMatcher([
   (UPat(Ops.STACK, name="x"), lambda x: len(x.src)>1 and len(x.src) == x.dtype.vcount and all(x.dtype == y.dtype.vec(len(x.src)) for y in x.src)),
   (UPat(Ops.GEP, src=(UPat.var("src"),), name="gep"), lambda gep,src: gep.dtype == src.dtype.scalar()),
 
-  # LOAD(idx) / STORE(idx, val)
+  # LOAD(idx) / STORE(idx, val) / LOAD(idx, gate) gated / STORE(idx, val, gate) gated
   (UPat().index(UPat()).or_casted().load(), lambda: True),
-  (UPat().index(UPat(), UPat(dtype=dtypes.bool)).or_casted().load(), lambda: True),  # gated load (alt added in program_spec)
-  (UPat(Ops.INDEX).or_casted().store(UPat()), lambda: True),
+  (UPat(Ops.LOAD, src=(UPat(Ops.INDEX).or_casted(), UPat(dtype=dtypes.bool))), lambda: True),  # gated load (alt added in program_spec)
+  (UPat(Ops.STORE, dtypes.void, src=(UPat(Ops.INDEX).or_casted(), UPat())), lambda: True),
+  (UPat(Ops.STORE, dtypes.void, src=(UPat(Ops.INDEX).or_casted(), UPat(), UPat(dtype=dtypes.bool))), lambda: True),  # gated store
 
   # CUSTOM (inline and non inline)
   (UPat((Ops.CUSTOMI, Ops.CUSTOM)), lambda: True),
@@ -185,9 +186,8 @@ shared_codegen_spec = PatternMatcher([
   # assembly instruction
   (UPat(Ops.INS), lambda: True),
 
-  # INDEX (2-arg and 3-arg with bool gate)
+  # INDEX (always 2-arg, no gate; gate now lives on LOAD/STORE)
   (UPat(GroupOp.Defines|{Ops.AFTER}, name="buf").index(UPat.var("idx")), validate_index),
-  (UPat(Ops.INDEX, src=(UPat(GroupOp.Defines|{Ops.AFTER}, name="buf"), UPat.var("idx"), UPat.var("gate", dtype=dtypes.bool))), validate_index),
 
   # SPECIAL
   (UPat(Ops.SPECIAL, src=(UPat.var("x", (dtypes.weakint, dtypes.int32)),), name="s"), lambda s,x: s.dtype == x.dtype and isinstance(s.arg, str)),
@@ -236,8 +236,8 @@ tensor_spec = PatternMatcher([
 # ***** UOp spec in linearized programs *****
 
 program_spec = PatternMatcher([
-  # LOAD (idx, alt_value), LOAD can have an alt value, but only if the index has a gate
-  (UPat().index(UPat(), UPat(dtype=dtypes.bool)).or_casted().load(UPat()), lambda: True),
+  # LOAD (idx, gate, alt_value), LOAD can have an alt value, but only if there's a gate
+  (UPat(Ops.LOAD, src=(UPat(Ops.INDEX).or_casted(), UPat(dtype=dtypes.bool), UPat())), lambda: True),
 
   # END closes ranges
   (UPat(Ops.END, src=(UPat(), UPat(Ops.RANGE)), dtype=dtypes.void), lambda: True),

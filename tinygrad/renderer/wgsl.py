@@ -10,21 +10,27 @@ def sign_extend(val:UOp, sext_am:int):
         | val.bitcast(dtypes.uint32)).bitcast(dtypes.int)
 
 # store for char: buf[idx/4] <- (var << (idx%4)*8))
-def packed_store(bidx:UOp, var:UOp):
+def packed_store(bidx:UOp, var:UOp, *extra:UOp):
   elems, mask = 4//var.dtype.itemsize, _mask(var.dtype)
   shift_am, div_idx = (bidx.src[1].cast(dtypes.uint32) % elems) * (8*var.dtype.itemsize), bidx.src[1] // elems
   new_v, wmask = (var & mask).cast(dtypes.uint32) << shift_am, ((mask << shift_am) ^ 0xFFFFFFFF).cast(dtypes.uint32)
-  # preserve valid condition (bidx.src[2]) if it exists for gated stores
-  idx_src = (bidx.src[0], div_idx) if len(bidx.src) == 2 else (bidx.src[0], div_idx, bidx.src[2])
-  buf = UOp.load(UOp(Ops.INDEX, bidx.dtype, idx_src), dtype=dtypes.uint32)
-  return UOp.store(UOp(Ops.INDEX, bidx.dtype, idx_src), (buf & wmask) | new_v)
+  new_idx = UOp(Ops.INDEX, bidx.dtype, (bidx.src[0], div_idx))
+  buf = UOp.load(new_idx, dtype=dtypes.uint32)
+  # preserve trailing srcs (e.g. gate at src[2] for gated stores)
+  return UOp(Ops.STORE, dtypes.void, (new_idx, (buf & wmask) | new_v) + extra)
 
 # load for char: sign_extend(buf[idx/4] >> ((idx%4)*8))
 def packed_load(root:UOp, bidx:UOp, dtype:DType, var:UOp|None=None):
   elems, mask = 4//dtype.itemsize, _mask(dtype)
   shift_am, div_idx = (bidx.src[1].cast(dtypes.uint32) % elems) * (8*dtype.itemsize), bidx.src[1] // elems
-  idx = UOp(Ops.INDEX, bidx.dtype, (bidx.src[0], div_idx, bidx.src[2]) if var is not None else (bidx.src[0], div_idx))
-  load = UOp.load(idx, *([var] if var is not None else root.src[1:]), dtype=dtypes.uint32, arg=root.arg)
+  new_idx = UOp(Ops.INDEX, bidx.dtype, (bidx.src[0], div_idx))
+  # rebuild LOAD srcs preserving gate at src[1] (if bool) and replacing alt with var if provided
+  other_srcs = list(root.src[1:])
+  if var is not None:
+    alt_pos = 1 if (len(other_srcs) >= 1 and other_srcs[0].dtype.scalar() == dtypes.bool) else 0
+    if alt_pos < len(other_srcs): other_srcs[alt_pos] = var
+    else: other_srcs.append(var)
+  load = UOp.load(new_idx, *other_srcs, dtype=dtypes.uint32, arg=root.arg)
   val = (load.cast(dtypes.uint32) >> shift_am) & mask
   return sign_extend(val, 8*dtype.itemsize).cast(dtype) if dtype in [dtypes.char, dtypes.short] else val.cast(dtype)
 
@@ -40,12 +46,12 @@ def is_nan(a):
 wgsl_matcher = PatternMatcher([
   (UPat((Ops.CMPLT, Ops.XOR), src=(UPat(name="a", dtype=dtypes.bool), UPat.var("b")), name="c"),
    lambda a,b,c: a.cast(dtypes.int).alu(c.op, b.cast(dtypes.int)).cast(dtypes.bool)),
-  # TODO: load alt value doesnt have to be a const
-  (UPat.load(UPat.var("b"), UPat.cvar("c"), allow_any_len=True, name="l"),
-   lambda l,b,c: packed_load(l,b,l.dtype,c.cast(dtypes.uint32)) if is_packed(l.dtype, b.dtype) else None),
+  # TODO: load alt value doesnt have to be a const (alt is at src[2] in gated LOAD)
+  (UPat.load(UPat.var("b"), UPat.var("g", dtype=dtypes.bool), UPat.cvar("c"), name="l"),
+   lambda l,b,g,c: packed_load(l,b,l.dtype,c.cast(dtypes.uint32)) if is_packed(l.dtype, b.dtype) else None),
   (UPat.load(UPat.var("b"), name='l', allow_any_len=True), lambda l,b: packed_load(l, b, l.dtype) if is_packed(l.dtype, b.dtype) else None),
-  (UPat.store(UPat.var("bidx"), UPat.var("var"), allow_any_len=True),
-   lambda bidx,var: packed_store(bidx,var) if is_packed(var.dtype, bidx.dtype) else None),
+  (UPat.store(UPat.var("bidx"), UPat.var("var"), allow_any_len=True, name="sto"),
+   lambda bidx,var,sto: packed_store(bidx,var,*sto.src[2:]) if is_packed(var.dtype, bidx.dtype) else None),
   (UPat.var("a") << UPat.var("b"),lambda a,b:(a.bitcast(dtypes.uint32)<<b.cast(dtypes.uint32)).bitcast(a.dtype) if b.dtype!=dtypes.uint32 else None),
   (UPat.var("x") >> UPat.var("y"), lambda x,y: UOp(Ops.SHR, x.dtype, (x,y.cast(dtypes.uint))) if y.dtype != dtypes.uint else None),
   # fix nan check: 'a != a -> is_nan()'
@@ -81,15 +87,15 @@ class WGSLRenderer(CStyleLanguage):
     (UPat(Ops.BITCAST, dtype=dtypes.short, name="x"), lambda ctx,x: f"bitcast<i32>(vec2<f16>({ctx[x.src[0]]},0))" \
      if x.src[0].dtype == dtypes.half else f"((i32({ctx[x.src[0]]}&0xFFFF)<<16)>>16)"),
     (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"bitcast<{ctx.type_map[x.dtype]}>({ctx[x.src[0]]})"),
-    # TODO: load alt value doesnt have to be a const
-    (UPat.load(UPat.var("b"), UPat.cvar("v"), allow_any_len=True),
-      lambda ctx,b,v: f"select({ctx[v]}, {ctx.render_load(ctx[b],b.src[0].dtype)}, {ctx[b.src[2]]})"),
+    # TODO: load alt value doesnt have to be a const (gated load: src[1]=gate, src[2]=alt)
+    (UPat.load(UPat.var("b"), UPat.var("g", dtype=dtypes.bool), UPat.cvar("v")),
+      lambda ctx,b,g,v: f"select({ctx[v]}, {ctx.render_load(ctx[b],b.src[0].dtype)}, {ctx[g]})"),
     (UPat.load(UPat.var("b"), allow_any_len=True), lambda ctx, b: ctx.render_load(ctx[b], b.dtype)),
     (UPat.store(UPat.var("b"), UPat.var("v"), allow_any_len=True),lambda ctx,b,v:\
      # (load & mask) | var -> mask = v.src[0].src[1], var = v.src[1]
      f"atomicAnd(&{ctx[b]},{ctx[v.src[0].src[1]]});\n  atomicAdd(&{ctx[b]},{ctx[v.src[1]]});" if is_packed(b.src[0].dtype) \
       else f"{ctx[b]} = {ctx[v]};"),
-    (UPat(Ops.INDEX, src=(UPat.var("b"), UPat.var("idx")), allow_any_len=True),
+    (UPat(Ops.INDEX, src=(UPat.var("b"), UPat.var("idx"))),
      lambda ctx,b,idx: f"{ctx[b]}[{strip_parens(ctx[idx]) if idx.arg is Ops.ADD else ctx[idx]}]"),
   ]) + base_rewrite
 
