@@ -1819,8 +1819,6 @@ def train_flux():
     model.init_weights()
     model.shard(GPUS)
 
-    Tensor.realize(*get_parameters(model))
-
     return model
 
   def get_train_iter() -> Iterator[tuple[Tensor, Tensor, Tensor, Tensor, Tensor]]:

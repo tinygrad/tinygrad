@@ -374,38 +374,38 @@ class Flux:
       return w, b
 
     # Small embedding/output layers — replicate
-    for p in nn.state.get_parameters(self.img_in): p.shard_(devices, axis=None)
-    for p in nn.state.get_parameters(self.txt_in): p.shard_(devices, axis=None)
-    for p in nn.state.get_parameters(self.time_in): p.shard_(devices, axis=None)
-    for p in nn.state.get_parameters(self.vector_in): p.shard_(devices, axis=None)
+    for p in nn.state.get_parameters(self.img_in): p.shard_(devices, axis=None).realize()
+    for p in nn.state.get_parameters(self.txt_in): p.shard_(devices, axis=None).realize()
+    for p in nn.state.get_parameters(self.time_in): p.shard_(devices, axis=None).realize()
+    for p in nn.state.get_parameters(self.vector_in): p.shard_(devices, axis=None).realize()
     if isinstance(self.guidance_in, MLPEmbedder):
-      for p in nn.state.get_parameters(self.guidance_in): p.shard_(devices, axis=None)
-    for p in nn.state.get_parameters(self.final_layer): p.shard_(devices, axis=None)
+      for p in nn.state.get_parameters(self.guidance_in): p.shard_(devices, axis=None).realize()
+    for p in nn.state.get_parameters(self.final_layer): p.shard_(devices, axis=None).realize()
 
     # DoubleStreamBlocks — Megatron-style TP
     for block in self.double_blocks:
       for attn in [block.img_attn, block.txt_attn]:
         # Reorder QKV to head-interleaved layout, then column-parallel
         attn.qkv.weight, attn.qkv.bias = _reorder_qkv(attn.qkv.weight, attn.qkv.bias)
-        attn.qkv.weight.shard_(devices, axis=0)
-        attn.qkv.bias.shard_(devices, axis=0)
+        attn.qkv.weight.shard_(devices, axis=0).realize()
+        attn.qkv.bias.shard_(devices, axis=0).realize()
         # Row-parallel: proj (shard input dim)
-        attn.proj.weight.shard_(devices, axis=1)
-        attn.proj.bias.shard_(devices, axis=None)
+        attn.proj.weight.shard_(devices, axis=1).realize()
+        attn.proj.bias.shard_(devices, axis=None).realize()
         # Replicate: QKNorm
-        for p in nn.state.get_parameters(attn.norm): p.shard_(devices, axis=None)
+        for p in nn.state.get_parameters(attn.norm): p.shard_(devices, axis=None).realize()
       for mlp in [block.img_mlp, block.txt_mlp]:
         # Column-parallel: MLP in
-        mlp[0].weight.shard_(devices, axis=0)
-        mlp[0].bias.shard_(devices, axis=0)
+        mlp[0].weight.shard_(devices, axis=0).realize()
+        mlp[0].bias.shard_(devices, axis=0).realize()
         # Row-parallel: MLP out
-        mlp[2].weight.shard_(devices, axis=1)
-        mlp[2].bias.shard_(devices, axis=None)
+        mlp[2].weight.shard_(devices, axis=1).realize()
+        mlp[2].bias.shard_(devices, axis=None).realize()
       # Row-parallel modulation: shard weight on input dim (axis=1) to save memory.
       # With replicated vec input, the dot allreduces correctly to produce replicated output.
       for mod in [block.img_mod, block.txt_mod]:
-        mod.lin.weight.shard_(devices, axis=1)
-        mod.lin.bias.shard_(devices, axis=None)
+        mod.lin.weight.shard_(devices, axis=1).realize()
+        mod.lin.bias.shard_(devices, axis=None).realize()
 
     # SingleStreamBlocks — split fused linear1 into separate qkv + mlp projections for TP
     for block in self.single_blocks:
@@ -416,23 +416,37 @@ class Flux:
       # Reorder QKV to head-interleaved
       w_qkv, b_qkv = _reorder_qkv(w_qkv, b_qkv)
       # Store as separate attributes and shard column-parallel
-      block.qkv_weight = w_qkv.contiguous(); block.qkv_weight.shard_(devices, axis=0)
-      block.qkv_bias = b_qkv.contiguous(); block.qkv_bias.shard_(devices, axis=0)
-      block.mlp_in_weight = w_mlp.contiguous(); block.mlp_in_weight.shard_(devices, axis=0)
-      block.mlp_in_bias = b_mlp.contiguous(); block.mlp_in_bias.shard_(devices, axis=0)
+      block.qkv_weight = w_qkv.contiguous().shard_(devices, axis=0)
+      block.qkv_weight.realize()
+      block.qkv_bias = b_qkv.contiguous().shard_(devices, axis=0)
+      block.qkv_bias.realize()
+
+      block.mlp_in_weight = w_mlp.contiguous().shard_(devices, axis=0)
+      block.mlp_in_weight.realize()
+      block.mlp_in_bias = b_mlp.contiguous().shard_(devices, axis=0)
+      block.mlp_in_bias.realize()
+
       del block.linear1
+
       # Split linear2 (fused attn_out+mlp_out) into separate row-parallel projections
       # This avoids Tensor.cat on sharded dim which tinygrad doesn't support
-      block.attn_out_weight = block.linear2.weight[:, :hs].contiguous(); block.attn_out_weight.shard_(devices, axis=1)
-      block.mlp_out_weight = block.linear2.weight[:, hs:].contiguous(); block.mlp_out_weight.shard_(devices, axis=1)
-      block.linear2_bias = block.linear2.bias; block.linear2_bias.shard_(devices, axis=None)
-      del block.linear2
-      # Row-parallel modulation: shard weight on input dim (axis=1) to save memory.
-      block.modulation.lin.weight.shard_(devices, axis=1)
-      block.modulation.lin.bias.shard_(devices, axis=None)
-      # Replicate: QKNorm
-      for p in nn.state.get_parameters(block.norm): p.shard_(devices, axis=None)
+      block.attn_out_weight = block.linear2.weight[:, :hs].contiguous().shard_(devices, axis=1)
+      block.attn_out_weight.realize()
 
+      block.mlp_out_weight = block.linear2.weight[:, hs:].contiguous().shard_(devices, axis=1)
+      block.mlp_out_weight.realize()
+
+      block.linear2_bias = block.linear2.bias.shard_(devices, axis=None)
+      block.linear2_bias.realize()
+
+      del block.linear2
+
+      # Row-parallel modulation: shard weight on input dim (axis=1) to save memory.
+      block.modulation.lin.weight.shard_(devices, axis=1).realize()
+      block.modulation.lin.bias.shard_(devices, axis=None).realize()
+
+      # Replicate: QKNorm
+      for p in nn.state.get_parameters(block.norm): p.shard_(devices, axis=None).realize()
 
   def init_weights(self):
     self.img_in.weight = Tensor.glorot_uniform(*self.img_in.weight.shape)
