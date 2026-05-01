@@ -77,16 +77,6 @@ def consumer_map_from_toposort(lst:Iterable[UOp]):
       if s in ret: ret[s][u] = None
   return ret
 
-def pretty_print(x:UOp, cache=None, d=0)->str:
-  def dfs(x:UOp, cache:dict):
-    for s in x.src:
-      cache.setdefault(s, [len(cache), 0, False])[1] += 1
-      if cache[s][1] == 1: dfs(s, cache)
-  if cache is None: dfs(x, cache:={})
-  if (cx:=cache.setdefault(x, [0,0,False]))[2]: return f"{' '*d}x{cx[0]}"
-  cx[2], srcs = True, (''.join(f'\n{pretty_print(s, cache, d+2)},' for s in x.src))
-  return f"{' '*d}{f'x{cx[0]}:=' * (cx[1]>1)}{type(x).__name__}({x.op}, {x.dtype}, arg={x.argstr()}{x.tagstr()}, src=({srcs}))"
-
 class UOpMetaClass(type):
   ucache:dict[tuple, weakref.ReferenceType[UOp]] = {}
   def __call__(cls, op:Ops, dtype:DType=dtypes.void, src:tuple[UOp,...]=tuple(), arg:Any=None, tag:Any=None,
@@ -154,7 +144,9 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   @recursive_property
   def key(self) -> bytes:
     return hashlib.sha256(str((self.op, self.dtype, self.arg)).encode() + b"".join([s.key for s in self.src])).digest()
-  def __repr__(self): return pretty_print(self)
+  def __repr__(self):
+    from tinygrad.uop.render import pretty_print
+    return pretty_print(self)
   def argstr(self):
     if self.op is Ops.REDUCE: return f'({", ".join(map(str, self.arg))})'
     return f"ConstFloat({float.__repr__(self.arg)})" if isinstance(self.arg, ConstFloat) else repr(self.arg)
