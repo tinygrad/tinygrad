@@ -232,9 +232,9 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
         return inner_shape
 
       case Ops.CAST:
-        # when PTX casts from ptr to non ptr, remove the shape
+        # when PTX casts from ptr to non ptr, remove the shape of the buffer
         if isinstance(self.src[0].dtype, PtrDType) and not isinstance(self.src[0].dtype, ImageDType) and not isinstance(self.dtype, PtrDType):
-          return None
+          return ()
 
       case Ops.INDEX:
         shp:list[sint] = []
