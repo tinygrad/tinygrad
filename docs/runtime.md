@@ -5,7 +5,7 @@ tinygrad supports various runtimes, enabling your code to scale across a wide ra
 | Runtime | Description | Compiler Options | Requirements |
 |---------|-------------|------------------|--------------|
 | [NV](https://github.com/tinygrad/tinygrad/tree/master/tinygrad/runtime/ops_nv.py) | Provides acceleration for NVIDIA GPUs | nvrtc (default)<br>PTX (`DEV=NV:PTX`) | Ampere/Ada/Blackwell series GPUs.<br>You can select an interface via [the `DEV` variable](env_vars.md#dev-variable). See [NV interfaces](#nv-interfaces) for details. |
-| [AMD](https://github.com/tinygrad/tinygrad/tree/master/tinygrad/runtime/ops_amd.py) | Provides acceleration for AMD GPUs | LLVM (`DEV=AMD:LLVM`)<br>HIP/COMGR (`DEV=AMD:HIP`) | RDNA2 or newer GPUs.<br>You can select an interface via [the `DEV` variable](env_vars.md#dev-variable). See [AMD interfaces](#amd-interfaces) for details. |
+| [AMD](https://github.com/tinygrad/tinygrad/tree/master/tinygrad/runtime/ops_amd.py) | Provides acceleration for AMD GPUs | LLVM (`DEV=AMD:LLVM`)<br>HIP/COMGR (`DEV=AMD:HIP`) | CDNA3, CDNA4, RDNA3 or RDNA4 GPUs.<br>You can select an interface via [the `DEV` variable](env_vars.md#dev-variable). See [AMD interfaces](#amd-interfaces) for details. |
 | [QCOM](https://github.com/tinygrad/tinygrad/tree/master/tinygrad/runtime/ops_qcom.py) | Provides acceleration for QCOM GPUs | - | 6xx series GPUs |
 | [METAL](https://github.com/tinygrad/tinygrad/tree/master/tinygrad/runtime/ops_metal.py) | Utilizes Metal for acceleration on Apple devices | - | M1+ Macs; Metal 3.0+ for `bfloat` support |
 | [CUDA](https://github.com/tinygrad/tinygrad/tree/master/tinygrad/runtime/ops_cuda.py) | Utilizes CUDA for acceleration on NVIDIA GPUs | nvrtc (default)<br> PTX (`DEV=CUDA:PTX`) | NVIDIA GPU with CUDA support |
