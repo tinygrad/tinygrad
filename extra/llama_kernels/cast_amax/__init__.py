@@ -3,7 +3,12 @@ import functools, pathlib
 from tinygrad import Tensor, dtypes
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.renderer import Estimates
-from extra.llama_kernels import FP8_MAX, NUM_WG, THREADS_PER_WG, compile_cpp, alloc_like, alloc_local, scalar_amax, dname_of, fp8_grad_handoff
+from extra.llama_kernels import FP8_MAX, NUM_WG, THREADS_PER_WG, compile_cpp, alloc_like, alloc_local, scalar_amax, dname_of
+
+# module-level mailbox: grad_xw13 UOp -> (grad_xw13_fp8 UOp, inv_scale UOp, new_amax UOp, store_effect)
+# lets cdna_asm_gemm's bwd reuse the fp8 companion produced by the fused silu_mul bwd kernel
+# instead of doing a redundant bf16 -> fp8 quantize.
+_grad_fp8_mailbox:dict = {}
 
 @functools.cache
 def _custom_fused_bwd_w13(grad_xw13:UOp, grad_xw13_fp8:UOp, grad_amax_buf:UOp,
@@ -45,10 +50,13 @@ def _fused_quantize_bwd_w13(gradient:UOp, kernel:UOp):
   grad_xw13, grad_xw13_fp8, grad_amax_buf, *_ = Tensor.custom_kernel(
     grad_xw13, grad_xw13_fp8, grad_amax_buf,
     Tensor(xw13, device=device), Tensor(gradient, device=device).cast(dtypes.bfloat16),
-    Tensor(amax_state, device=device), grad_amax_state_t, fxn=fxn, grad_fxn=fp8_grad_handoff)
-  store_effect = grad_amax_state_t.uop.store(scalar_amax(grad_amax_buf).uop)
-  ret_uop = grad_xw13.uop.src[0].after(*grad_xw13.uop.src[1:], store_effect)
-  return (None, None, ret_uop, None, None)
+    Tensor(amax_state, device=device), grad_amax_state_t, fxn=fxn)
+  inv_scale = (grad_amax_state_t.float() + 1e-8) / FP8_MAX
+  new_grad_amax = scalar_amax(grad_amax_buf)
+  store_effect = grad_amax_state_t.uop.store(new_grad_amax.uop)
+  # Stash fp8 companion + amax store for cdna_asm_gemm's bwd to attach to grad_a.
+  _grad_fp8_mailbox[grad_xw13.uop] = (grad_xw13_fp8.uop, inv_scale.uop, new_grad_amax.uop, store_effect)
+  return (None, None, grad_xw13.uop, None, None)
 
 def fused_quantize_fp8_w13(xw13:Tensor, amax_state:Tensor, fp8_dtype, grad_amax_state:Tensor) -> tuple[Tensor, Tensor, Tensor]:
   # NOTE: silu(xw1)*xw3 -> fp8 + amax over fused xw13 layout. Returns (fp8, inv_scale, new_amax)

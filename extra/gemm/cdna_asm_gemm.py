@@ -2708,25 +2708,23 @@ def custom_gemm_bw(gradient:UOp, kernel:UOp):
     a_t, b_t, g_t = Tensor(a, device=a.device), Tensor(b, device=a.device), Tensor(gradient, device=a.device)
     s_x_t, s_w_t = Tensor(s_x, device=a.device), Tensor(s_w, device=a.device)
     g_t = g_t[:a.shape[0]]
+    from extra.llama_kernels.cast_amax import _grad_fp8_mailbox
     from extra.llama_kernels.quantize_fp8_delayed import quantize_fp8_delayed
-    from extra.llama_kernels import FP8_MAX, fp8_grad_handoff
-    silu_bwd_call = None
-    if gradient.op is Ops.AFTER and len(gradient.src) >= 2 and gradient.src[1].op is Ops.CALL and gradient.src[1].arg.grad_fxn is fp8_grad_handoff:
-      silu_bwd_call = gradient.src[1]
-    if silu_bwd_call is not None:
-      g_fp8 = Tensor(silu_bwd_call.src[2].after(silu_bwd_call), device=a.device)[:a.shape[0]]
-      g_scale = (Tensor(silu_bwd_call.src[7], device=a.device).float() + 1e-8) / FP8_MAX
-      store_effect = gradient.src[2] if len(gradient.src) >= 3 and gradient.src[2].op is Ops.STORE else None
+    gbase = gradient.base if hasattr(gradient, "base") else gradient
+    mailbox_entry = _grad_fp8_mailbox.pop(gbase, None) or _grad_fp8_mailbox.pop(gradient, None)
+    if mailbox_entry is not None:
+      g_fp8_u, inv_scale_u, _new_amax_u, store_effect = mailbox_entry
+      g_fp8 = Tensor(g_fp8_u, device=a.device)[:a.shape[0]]
+      g_scale = Tensor(inv_scale_u, device=a.device)
     else:
-      assert grad_amax_state is not None, "fp8 matmul bwd needs either a silu_bwd hand-off or a grad_amax_state"
+      assert grad_amax_state is not None, "fp8 matmul bwd needs either a mailbox entry or a grad_amax_state"
       g_fp8, g_scale, _, store_effect = quantize_fp8_delayed(g_t, Tensor(grad_amax_state, device=a.device))
     # dgrad: uses g_scale * x_scale * w_scale
     grad_a = asm_gemm(g_fp8, b_t, x_scale=g_scale * s_x_t, w_scale=s_w_t)
     # wgrad: no w_scale
     grad_b = asm_gemm(g_fp8.permute(2, 0, 1).reshape(g_t.shape[-1], -1), a_t.reshape(-1, a_t.shape[-1]), x_scale=g_scale * s_x_t)
     # Attach the delayed-amax store effect (if any) to grad_a so realizing grads commits the amax update.
-    grad_a_uop = grad_a.uop.after(store_effect) if store_effect is not None else grad_a.uop
-    ret = (None, grad_a_uop, grad_b.uop, None, None)
+    ret = (None, grad_a.uop.after(store_effect), grad_b.uop, None, None)
     if len(inputs) == 6: ret = ret + (None,)
     return ret
   else:
