@@ -6,7 +6,8 @@ from tinygrad import Tensor, nn, dtypes
 from tinygrad.nn.state import get_parameters, safe_save
 from tinygrad.device import is_dtype_supported, Device
 from extra.models.llama import Transformer
-from examples.mlperf.models.flat_llama import FlatTransformer
+from examples.mlperf.models.flat_llama import FlatTransformer, apply_grad
+from examples.mlperf.optim import GradAccClipAdamW
 
 def copy_weights(flat:FlatTransformer, ref:Transformer):
   n_layers = flat.n_layers
@@ -153,6 +154,29 @@ class TestFlatLlama(unittest.TestCase):
     flat = FlatTransformer(**params)
     self.assertEqual(flat.adapter_state_dict(), {})
     self.assertEqual(flat.adapter_parameters(), [])
+
+  @unittest.skipUnless(Device.DEFAULT in {"CPU", "NULL"}, "multi-device graph test")
+  def test_mp_lora_apply_grad_multi_layer(self):
+    Tensor.manual_seed(42)
+    devices = (f"{Device.DEFAULT}:0", f"{Device.DEFAULT}:1")
+    params = dict(dim=32, hidden_dim=64, n_heads=8, n_kv_heads=2, n_layers=2, norm_eps=1e-5, vocab_size=64, rope_theta=10000, max_context=8)
+    flat = FlatTransformer(**params, lora_rank=2, lora_alpha=4, lora_dropout=0.0, base_quantize="int8")
+    flat.shard(devices, mp=True)
+
+    optim = GradAccClipAdamW(flat.adapter_parameters(), lr=0.001, grad_acc=1, clip_norm=0.3, fused=False)
+    grads = []
+    for p in optim.params:
+      p.grad = p.zeros_like().contiguous().realize()
+      grads.append(p.grad)
+    self.assertEqual([p.uop.axis for p in optim.params], [g.uop.axis for g in grads])
+    tokens = Tensor([[1, 2, 3, 4, 5, 6, 7, 8]], dtype=dtypes.int32).shard(devices)
+    with Tensor.train():
+      loss = flat(tokens[:, :-1]).sparse_categorical_crossentropy(tokens[:, 1:])
+      for param, grad_buf, new_grad in zip(optim.params, grads, loss.gradient(*optim.params)):
+        apply_grad(grad_buf, new_grad.uop)
+        self.assertEqual(param.uop.axis, grad_buf.uop.axis)
+      Tensor.realize(*grads)
+      optim.fstep(grads)
 
   def test_load_from_state_dict(self):
     Tensor.manual_seed(42)

@@ -437,7 +437,7 @@ if __name__ == "__main__":
     model.shard(tuple(f"{Device.DEFAULT}:{i}" for i in range(MP)), mp=True)
 
   # preallocate all the grad buffers and zero them out
-  grads = {x:Tensor.zeros(x.shape, dtype=x.dtype, device=x.device).contiguous()
+  grads = {x:x.zeros_like().contiguous()
            for x in state.values() if x.requires_grad is None}
 
   # print model size
