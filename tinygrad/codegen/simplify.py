@@ -14,7 +14,7 @@ def flatten_range(r:UOp) -> UOp|None:
 
 pm_flatten_range = PatternMatcher([
   # real ranges only
-  (UPat((Ops.REDUCE, Ops.STORE, Ops.END), name="r"), flatten_range),
+  (UPat((Ops.REDUCE, Ops.END), name="r"), flatten_range),
 ])
 
 def count_divmod(x:UOp) -> int: return sum(u.op in {Ops.IDIV, Ops.MOD} for u in x.backward_slice)
