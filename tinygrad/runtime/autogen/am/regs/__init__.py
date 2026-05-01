@@ -3,7 +3,12 @@ from tinygrad.runtime.autogen import load
 from tinygrad.runtime.autogen.am import am_src
 
 # 9060xt
-__all__ = ["gc_12_0_0", "hdp_7_0_0", "mmhub_4_1_0", "mp_11_0", "mp_14_0_2", "nbif_6_3_1", "osssys_7_0_0"]
+__all__ = ["gc_11_0_0", "gc_12_0_0",
+           "hdp_6_0_0", "hdp_7_0_0",
+           "mmhub_3_0_0", "mmhub_4_1_0",
+           "mp_11_0", "mp_13_0_0", "mp_14_0_2",
+           "nbio_4_3_0", "nbif_6_3_1",
+           "osssys_6_0_0", "osssys_7_0_0"]
 
 patterns = {
   # FIXME: CDNA4 naming
@@ -12,9 +17,10 @@ patterns = {
          "SDMA[01]_(WATCHDOG_CNTL|UTCL1_(CNTL|PAGE)|MCU_CNTL|F32_CNTL|CNTL($|_BASE_IDX$)|QUEUE0_|RLC_CGCG_CTRL)", "SCRATCH_REG[67]"],
   # FIXME: CDNA4 naming
   "mmhub": ["MMVM", "MMMC_VM", "MM_ATC_L2_MISC_CG"],
-  "nbif": ["BIF_BX_PF[01]_GPU_HDP_FLUSH", "BIF_BX_PF0_RSMU", "BIF_BX0_(REMAP_HDP_MEM_FLUSH_CNTL|BIF_DOORBELL_INT_CNTL|PCIE_INDEX2|PCIE_DATA2)",
-           "BIFC_(DOORBELL_ACCESS_EN_PF|GFX_INT_MONITOR_MASK)", "XCC_DOORBELL_FENCE", "DOORBELL0_CTRL_ENTRY", "GDC_S2A0_S2A_DOORBELL_ENTRY",
-           "S2A_DOORBELL_ENTRY", "RCC_DEV0_EPF0_RCC_DOORBELL_APER_EN", "RCC_DEV0_EPF2_STRAP2($|_BASE_IDX$)"],
+  "nbif": (nbif:=["BIF_BX_PF[01]_GPU_HDP_FLUSH", "BIF_BX_PF0_RSMU", "BIF_BX0_(REMAP_HDP_MEM_FLUSH_CNTL|BIF_DOORBELL_INT_CNTL|PCIE_INDEX2|PCIE_DATA2)",
+                  "BIFC_(DOORBELL_ACCESS_EN_PF|GFX_INT_MONITOR_MASK)", "XCC_DOORBELL_FENCE", "DOORBELL0_CTRL_ENTRY", "GDC_S2A0_S2A_DOORBELL_ENTRY",
+                  "S2A_DOORBELL_ENTRY", "RCC_DEV0_EPF0_RCC_DOORBELL_APER_EN", "RCC_DEV0_EPF2_STRAP2($|_BASE_IDX$)"]),
+  "nbio": nbif,
   "mp": ["MP([01]|ASP)_SMN_C2PMSG"],
   "hdp": ["HDP_MEM_POWER_CTRL"],
   "oss": ["IH_"]
