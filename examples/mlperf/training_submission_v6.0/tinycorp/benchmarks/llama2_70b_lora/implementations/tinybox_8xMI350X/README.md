@@ -75,7 +75,7 @@ MODEL_PATH=/raid/weights/llama2-70b-fused-qkv-mlperf \
 examples/mlperf/training_submission_v6.0/tinycorp/benchmarks/llama2_70b_lora/implementations/tinybox_8xMI350X/dev_run.sh
 ```
 
-For the submission wrapper, override only `DATASET_PATH`, `MODEL_PATH`, `TOKENIZER_PATH`, `SEED`, or `LOGFILE` as needed for the host and dataset layout. During `RUNMLPERF=1`, `DATASET_PATH` must be a dataset directory exposing both train and validation splits. Use `dev_run.sh` for experiments that intentionally change benchmark shape, runtime knobs, or checkpoint behavior. `LLAMA_LAYERS` is only for the fake-data init warmup path and is scrubbed before the real benchmark run. The wrapper also ignores ambient `TRAIN`, `CKPT`, `FP8`, `LOAD_CKPT`, `RESUME_CKPT`, `TRAIN_ON_VAL`, `SMALL`, `SAMPLES`, and `EVAL_SAMPLES` overrides. `LOGFILE` is written relative to the caller shell, while adapter checkpoints land under repo-root `./ckpts/`. MLPerf events are written separately to `result_llama2_70b_lora_<SEED>.log` in the repo root.
+For the submission wrapper, override only `DATASET_PATH`, `MODEL_PATH`, `TOKENIZER_PATH`, `SEED`, or `LOGFILE` as needed for the host and dataset layout. During `RUNMLPERF=1`, `DATASET_PATH` must be a dataset directory exposing both train and validation splits. Use `dev_run.sh` for experiments that intentionally change benchmark shape, runtime knobs, or checkpoint behavior. `LLAMA_LAYERS` is only for the fake-data init warmup path and is scrubbed before the real benchmark run. The wrapper also ignores ambient `TRAIN`, `CKPT`, `FP8`, `LOAD_CKPT`, `RESUME_CKPT`, `TRAIN_ON_VAL`, `SMALL`, `SAMPLES`, and `EVAL_SAMPLES` overrides. `LOGFILE` is written relative to the caller shell. Adapter checkpoints default to repo-root `./ckpts/`; set `SAVE_CKPT_DIR` for development runs that should write or resume elsewhere. MLPerf events are written separately to `result_llama2_70b_lora_<SEED>.log` in the repo root.
 
 ## Preflight gates
 
@@ -99,7 +99,7 @@ I would only accept the implementation as successful after all of the following 
 
 These are separate from the default `run_and_time.sh` invocation, but I would still require them before calling the implementation done:
 1. `dev_run.sh CKPT=1 ...` writes adapter-only checkpoints as both `llama2_70b_lora_<step>.safe` and `llama2_70b_lora_<step>_state.safe`.
-2. `dev_run.sh CKPT=1 RESUME_CKPT=ckpts/llama2_70b_lora_<step>_state.safe ...` restarts cleanly, preserves step/sample accounting, and continues from the same next training batch.
+2. `dev_run.sh CKPT=1 RESUME_CKPT=<step> SAVE_CKPT_DIR=<checkpoint_dir> ...` restarts cleanly, preserves step/sample accounting, and continues from the same next training batch.
 3. The chosen `LOGFILE` captures stdout/stderr for both wrapper phases, while `result_llama2_70b_lora_<SEED>.log` remains the source of truth for MLPerf event verification.
 
 Anything less than that is still a bring-up run, not proof that the implementation is done.

@@ -1337,6 +1337,7 @@ def _train_flat_llama(model_name:str):
   EVAL_TARGET        = config["EVAL_TARGET"]            = getenv("EVAL_TARGET", eval_target_default)
   LOAD_CKPT          = config["LOAD_CKPT"]              = getenv("LOAD_CKPT", "")
   RESUME_CKPT        = config["RESUME_CKPT"]            = getenv("RESUME_CKPT", "")
+  SAVE_CKPT_DIR      = config["SAVE_CKPT_DIR"]          = Path(getenv("SAVE_CKPT_DIR", "./ckpts"))
   assert not (LOAD_CKPT and RESUME_CKPT), "LOAD_CKPT and RESUME_CKPT are mutually exclusive"
   lora_params = _llama_lora_config(config, llama_spec if "lora_rank" in llama_spec else None)
   base_quantize = config["LLAMA_BASE_QUANTIZE"] = getenv("LLAMA_BASE_QUANTIZE", "") or None
@@ -1459,7 +1460,8 @@ def _train_flat_llama(model_name:str):
     model.load_from_pretrained(MODEL_PATH)
 
   if LOAD_CKPT:
-    fn = _llama_load_model_checkpoint(model, LOAD_CKPT, checkpoint_prefix=llama_spec["checkpoint_prefix"], strict=not adapter_only)
+    fn = _llama_load_model_checkpoint(model, LOAD_CKPT, checkpoint_prefix=llama_spec["checkpoint_prefix"], strict=not adapter_only,
+                                      ckpt_dir=SAVE_CKPT_DIR)
     print(f"loading model checkpoint from {fn}")
 
   optim_params, trainable_names = _llama_configure_trainable_params(model, adapter_only=adapter_only)
@@ -1483,7 +1485,7 @@ def _train_flat_llama(model_name:str):
 
   start_step = 0
   if RESUME_CKPT:
-    resume_state = _llama_checkpoint_path(RESUME_CKPT, llama_spec["checkpoint_prefix"], "_state.safe")
+    resume_state = _llama_checkpoint_path(RESUME_CKPT, llama_spec["checkpoint_prefix"], "_state.safe", ckpt_dir=SAVE_CKPT_DIR)
     if resume_state.exists():
       state_dict = safe_load(resume_state)
       if _llama_is_training_state(state_dict):
@@ -1495,9 +1497,10 @@ def _train_flat_llama(model_name:str):
         from examples.mlperf.llama import llama_model_state_dict
         load_state_dict(model, llama_model_state_dict(state_dict), strict=not adapter_only, realize=False)
     else:
-      fn = _llama_load_model_checkpoint(model, RESUME_CKPT, checkpoint_prefix=llama_spec["checkpoint_prefix"], strict=not adapter_only)
+      fn = _llama_load_model_checkpoint(model, RESUME_CKPT, checkpoint_prefix=llama_spec["checkpoint_prefix"], strict=not adapter_only,
+                                        ckpt_dir=SAVE_CKPT_DIR)
       print(f"loading model checkpoint from {fn}")
-      optim_fn = _llama_checkpoint_path(RESUME_CKPT, llama_spec["checkpoint_prefix"], "_optim.safe")
+      optim_fn = _llama_checkpoint_path(RESUME_CKPT, llama_spec["checkpoint_prefix"], "_optim.safe", ckpt_dir=SAVE_CKPT_DIR)
       if adapter_only:
         print("skipping legacy optimizer checkpoint load for adapter-only training")
       elif optim_fn.exists():
@@ -1663,12 +1666,12 @@ def _train_flat_llama(model_name:str):
 
       if (ckpt_freq := getenv("CKPT")) and (i % ckpt_freq == 0 and (i != 1 or ckpt_freq == 1)):
         tqdm.write("saving checkpoint")
-        if not os.path.exists(ckpt_dir := "./ckpts"): os.mkdir(ckpt_dir)
-        fn = f"{ckpt_dir}/{llama_spec['checkpoint_prefix']}_{i}.safe"
+        SAVE_CKPT_DIR.mkdir(parents=True, exist_ok=True)
+        fn = SAVE_CKPT_DIR / f"{llama_spec['checkpoint_prefix']}_{i}.safe"
         safe_save(_llama_checkpoint_state(model, adapter_only=adapter_only), fn)
 
         tqdm.write("saving trainer checkpoint")
-        fn = f"{ckpt_dir}/{llama_spec['checkpoint_prefix']}_{i}_state.safe"
+        fn = SAVE_CKPT_DIR / f"{llama_spec['checkpoint_prefix']}_{i}_state.safe"
         safe_save(_llama_training_checkpoint_state(model, optim, scheduler, adapter_only=adapter_only), fn)
 
       if i == BENCHMARK:
@@ -1724,8 +1727,8 @@ def _train_flat_llama(model_name:str):
           MLLOGGER.event(key=mllog_constants.TRAIN_SAMPLES, value=sequences_seen)
           MLLOGGER.end(key=mllog_constants.RUN_STOP, metadata={mllog_constants.STATUS: mllog_constants.SUCCESS})
         if getenv("CKPT"):
-          if not os.path.exists(ckpt_dir := "./ckpts"): os.mkdir(ckpt_dir)
-          fn = f"{ckpt_dir}/{llama_spec['checkpoint_prefix']}.safe"
+          SAVE_CKPT_DIR.mkdir(parents=True, exist_ok=True)
+          fn = SAVE_CKPT_DIR / f"{llama_spec['checkpoint_prefix']}.safe"
           safe_save(_llama_checkpoint_state(model, adapter_only=adapter_only), fn)
         break
       if MLLOGGER and RUNMLPERF:
@@ -1759,18 +1762,19 @@ def _llama_configure_trainable_params(model, adapter_only:bool=False) -> tuple[l
   if adapter_only and not params: raise RuntimeError("adapter-only optimization requested, but no LoRA parameters were found")
   return params, trainable_names
 
-def _llama_checkpoint_path(ckpt_ref:str, checkpoint_prefix:str, suffix:str=".safe") -> Path:
+def _llama_checkpoint_path(ckpt_ref:str, checkpoint_prefix:str, suffix:str=".safe", ckpt_dir:str|Path="./ckpts") -> Path:
   ckpt_path = Path(ckpt_ref)
   if ckpt_path.is_absolute() or ckpt_path.parent != Path(".") or ckpt_path.suffix:
     return ckpt_path
-  return Path("./ckpts") / f"{checkpoint_prefix}_{ckpt_ref}{suffix}"
+  return Path(ckpt_dir) / f"{checkpoint_prefix}_{ckpt_ref}{suffix}"
 
 def _llama_is_training_state(state_dict:dict[str, Tensor]) -> bool:
   return any(k.startswith("optimizer.") or k.startswith("scheduler.") for k in state_dict)
 
-def _llama_load_model_checkpoint(model, ckpt_ref:str, checkpoint_prefix:str="llama3", strict:bool=True) -> Path:
+def _llama_load_model_checkpoint(model, ckpt_ref:str, checkpoint_prefix:str="llama3", strict:bool=True,
+                                 ckpt_dir:str|Path="./ckpts") -> Path:
   from examples.mlperf.llama import llama_model_state_dict
-  ckpt_path = _llama_checkpoint_path(ckpt_ref, checkpoint_prefix)
+  ckpt_path = _llama_checkpoint_path(ckpt_ref, checkpoint_prefix, ckpt_dir=ckpt_dir)
   state_dict = safe_load(ckpt_path)
   load_state_dict(model, llama_model_state_dict(state_dict), strict=strict, realize=False)
   return ckpt_path
@@ -1811,10 +1815,11 @@ def _llama_load_training_checkpoint(model, optim, scheduler, state_dict:dict[str
     load_training_state(model, optim, scheduler, state_dict)
     return
   from examples.mlperf.llama import llama_model_state_dict
-  load_state_dict(model, llama_model_state_dict(state_dict), strict=False, verbose=False, realize=False)
-  load_state_dict({"optimizer": optim, "scheduler": scheduler},
-                  {k:v for k,v in state_dict.items() if k.startswith("optimizer.") or k.startswith("scheduler.")},
-                  strict=False, verbose=False, realize=False)
+  loaded = load_state_dict(model, llama_model_state_dict(state_dict), strict=False, verbose=False, realize=False)
+  loaded += load_state_dict({"optimizer": optim, "scheduler": scheduler},
+                            {k:v for k,v in state_dict.items() if k.startswith("optimizer.") or k.startswith("scheduler.")},
+                            strict=False, verbose=False, realize=False)
+  Tensor.realize(*loaded)
   _llama_load_rng_checkpoint(state_dict)
 
 def _llama_sequences_seen(step:int, bs:int, grad_acc:int, unaccumulated_steps:int=2) -> int:

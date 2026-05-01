@@ -131,6 +131,8 @@ class TestLlamaLoRATrainWiring(unittest.TestCase):
   def test_checkpoint_path_uses_benchmark_prefix(self):
     self.assertEqual(_llama_checkpoint_path("17", "llama3"), Path("./ckpts/llama3_17.safe"))
     self.assertEqual(_llama_checkpoint_path("17", "llama2_70b_lora", "_state.safe"), Path("./ckpts/llama2_70b_lora_17_state.safe"))
+    self.assertEqual(_llama_checkpoint_path("17", "llama2_70b_lora", "_state.safe", ckpt_dir="/tmp/llama"),
+                     Path("/tmp/llama/llama2_70b_lora_17_state.safe"))
 
   def test_llama2_70b_lora_training_writes_adapter_only_checkpoints(self):
     tiny_params = dict(dim=128, hidden_dim=256, n_heads=4, n_kv_heads=2, n_layers=2, norm_eps=1e-5, vocab_size=1024, rope_theta=10000)
@@ -166,6 +168,7 @@ class TestLlamaLoRATrainWiring(unittest.TestCase):
         "LR": "1e-3",
         "MAX_STEPS": "1",
         "MODEL_PATH": base_path.as_posix(),
+        "SAVE_CKPT_DIR": (tmpdir / "saved").as_posix(),
         "SEQLEN": "5",
         "WARMUP_STEPS": "0",
       }
@@ -179,8 +182,8 @@ class TestLlamaLoRATrainWiring(unittest.TestCase):
         finally:
           os.chdir(cwd)
 
-      model_ckpt = safe_load(tmpdir / "ckpts" / "llama2_70b_lora_1.safe")
-      trainer_ckpt = safe_load(tmpdir / "ckpts" / "llama2_70b_lora_1_state.safe")
+      model_ckpt = safe_load(tmpdir / "saved" / "llama2_70b_lora_1.safe")
+      trainer_ckpt = safe_load(tmpdir / "saved" / "llama2_70b_lora_1_state.safe")
       self.assertSetEqual(set(model_ckpt.keys()), {"wqkv_lora_a", "wqkv_lora_b", "wo_lora_a", "wo_lora_b"})
       self.assertNotIn("model.wqkv", trainer_ckpt)
       self.assertIn("rng.seed", trainer_ckpt)
@@ -311,6 +314,7 @@ class TestLlamaLoRATrainWiring(unittest.TestCase):
         patch("examples.mlperf.llama.llama_benchmark_config",
               side_effect=lambda model_name, small=False: spec if model_name == "llama2_70b_lora" else original_config(model_name, small=small)),
       ):
+        cached_getenv.cache_clear()
         cwd = os.getcwd()
         os.chdir(baseline_dir)
         try:
@@ -320,11 +324,13 @@ class TestLlamaLoRATrainWiring(unittest.TestCase):
 
       resume_dir = tmpdir / "resume"
       resume_dir.mkdir()
+      resume_ckpt_dir = resume_dir / "saved"
       with (
-        patch.dict(os.environ, base_env | {"MAX_STEPS": "1"}, clear=False),
+        patch.dict(os.environ, base_env | {"MAX_STEPS": "2", "SAMPLES": "1", "SAVE_CKPT_DIR": resume_ckpt_dir.as_posix()}, clear=False),
         patch("examples.mlperf.llama.llama_benchmark_config",
               side_effect=lambda model_name, small=False: spec if model_name == "llama2_70b_lora" else original_config(model_name, small=small)),
       ):
+        cached_getenv.cache_clear()
         cwd = os.getcwd()
         os.chdir(resume_dir)
         try:
@@ -332,12 +338,12 @@ class TestLlamaLoRATrainWiring(unittest.TestCase):
         finally:
           os.chdir(cwd)
 
-      resume_ckpt = resume_dir / "ckpts" / "llama2_70b_lora_1_state.safe"
       with (
-        patch.dict(os.environ, base_env | {"MAX_STEPS": "2", "RESUME_CKPT": resume_ckpt.as_posix()}, clear=False),
+        patch.dict(os.environ, base_env | {"MAX_STEPS": "2", "RESUME_CKPT": "1", "SAVE_CKPT_DIR": resume_ckpt_dir.as_posix()}, clear=False),
         patch("examples.mlperf.llama.llama_benchmark_config",
               side_effect=lambda model_name, small=False: spec if model_name == "llama2_70b_lora" else original_config(model_name, small=small)),
       ):
+        cached_getenv.cache_clear()
         cwd = os.getcwd()
         os.chdir(resume_dir)
         try:
@@ -346,7 +352,7 @@ class TestLlamaLoRATrainWiring(unittest.TestCase):
           os.chdir(cwd)
 
       baseline_ckpt = safe_load(baseline_dir / "ckpts" / "llama2_70b_lora_2.safe")
-      resumed_ckpt = safe_load(resume_dir / "ckpts" / "llama2_70b_lora_2.safe")
+      resumed_ckpt = safe_load(resume_ckpt_dir / "llama2_70b_lora_2.safe")
       self.assertSetEqual(set(baseline_ckpt.keys()), set(resumed_ckpt.keys()))
       for key in baseline_ckpt:
         diff = np.abs(baseline_ckpt[key].numpy() - resumed_ckpt[key].numpy()).max()
