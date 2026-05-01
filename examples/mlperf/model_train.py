@@ -1494,8 +1494,7 @@ def _train_flat_llama(model_name:str):
         start_step = int(scheduler.epoch_counter.item())
       else:
         print(f"{resume_state} is not a trainer checkpoint, loading model weights only")
-        from examples.mlperf.llama import llama_model_state_dict
-        load_state_dict(model, llama_model_state_dict(state_dict), strict=not adapter_only, realize=False)
+        _llama_load_model_state_dict(model, state_dict, strict=not adapter_only)
     else:
       fn = _llama_load_model_checkpoint(model, RESUME_CKPT, checkpoint_prefix=llama_spec["checkpoint_prefix"], strict=not adapter_only,
                                         ckpt_dir=SAVE_CKPT_DIR)
@@ -1773,14 +1772,39 @@ def _llama_is_training_state(state_dict:dict[str, Tensor]) -> bool:
 
 def _llama_load_model_checkpoint(model, ckpt_ref:str, checkpoint_prefix:str="llama3", strict:bool=True,
                                  ckpt_dir:str|Path="./ckpts") -> Path:
-  from examples.mlperf.llama import llama_model_state_dict
   ckpt_path = _llama_checkpoint_path(ckpt_ref, checkpoint_prefix, ckpt_dir=ckpt_dir)
-  state_dict = safe_load(ckpt_path)
-  load_state_dict(model, llama_model_state_dict(state_dict), strict=strict, realize=False)
+  _llama_load_model_state_dict(model, safe_load(ckpt_path), strict=strict)
   return ckpt_path
 
+def _llama_cpu_checkpoint_tensor(tensor:Tensor) -> Tensor:
+  if dtypes.is_float(tensor.dtype) and tensor.dtype != dtypes.float32:
+    tensor = tensor.float()
+  if isinstance(tensor.device, tuple) and tensor.uop.axis is None:
+    return Tensor(tensor.numpy(), device="CPU", dtype=tensor.dtype, requires_grad=False).reshape(tensor.shape).contiguous()
+  return tensor.to("CPU").contiguous().requires_grad_(False)
+
+def _llama_cpu_checkpoint_state(state_dict:dict[str, Tensor]) -> dict[str, Tensor]:
+  return {name: _llama_cpu_checkpoint_tensor(tensor) for name, tensor in state_dict.items()}
+
+def _llama_cast_checkpoint_like(state_dict:dict[str, Tensor], target_state:dict[str, Tensor]) -> dict[str, Tensor]:
+  matched = {}
+  for name, tensor in state_dict.items():
+    if (target:=target_state.get(name)) is not None:
+      if isinstance(target.device, tuple) and not isinstance(tensor.device, tuple):
+        tensor = tensor.shard(target.device, target.uop.axis)
+      elif isinstance(target.device, str) and tensor.device != target.device:
+        tensor = tensor.to(target.device)
+      if tensor.dtype != target.dtype: tensor = tensor.cast(target.dtype)
+    matched[name] = tensor
+  return matched
+
+def _llama_load_model_state_dict(model, state_dict:dict[str, Tensor], strict:bool=True, verbose:bool=True) -> list[Tensor]:
+  from examples.mlperf.llama import llama_model_state_dict
+  return load_state_dict(model, _llama_cast_checkpoint_like(llama_model_state_dict(state_dict), get_state_dict(model)),
+                         strict=strict, verbose=verbose, realize=False)
+
 def _llama_checkpoint_state(model, adapter_only:bool=False) -> dict[str, Tensor]:
-  return model.adapter_state_dict() if adapter_only else get_state_dict(model)
+  return _llama_cpu_checkpoint_state(model.adapter_state_dict()) if adapter_only else get_state_dict(model)
 
 def _llama_rng_checkpoint_state() -> dict[str, Tensor]:
   rng_state = {"rng.seed": Tensor([Tensor._seed], device="CPU", dtype=dtypes.int64, requires_grad=False)}
@@ -1806,18 +1830,19 @@ def _llama_training_checkpoint_state(model, optim, scheduler, adapter_only:bool=
   if not adapter_only:
     return get_training_state(model, optim, scheduler)
   state_dict = {f"model.{name}": tensor for name, tensor in model.adapter_state_dict().items()}
-  state_dict.update(dedup_dict(get_state_dict({"optimizer": optim, "scheduler": scheduler})))
+  state_dict.update({k:v for k,v in dedup_dict(get_state_dict({"optimizer": optim, "scheduler": scheduler})).items()
+                     if not k.startswith("optimizer.params.")})
   state_dict.update(_llama_rng_checkpoint_state())
-  return state_dict
+  return _llama_cpu_checkpoint_state(state_dict)
 
 def _llama_load_training_checkpoint(model, optim, scheduler, state_dict:dict[str, Tensor], adapter_only:bool=False) -> None:
   if not adapter_only:
     load_training_state(model, optim, scheduler, state_dict)
     return
-  from examples.mlperf.llama import llama_model_state_dict
-  loaded = load_state_dict(model, llama_model_state_dict(state_dict), strict=False, verbose=False, realize=False)
+  loaded = _llama_load_model_state_dict(model, state_dict, strict=False, verbose=False)
+  optim_state = {k:v for k,v in state_dict.items() if (k.startswith("optimizer.") or k.startswith("scheduler.")) and not k.startswith("optimizer.params.")}
   loaded += load_state_dict({"optimizer": optim, "scheduler": scheduler},
-                            {k:v for k,v in state_dict.items() if k.startswith("optimizer.") or k.startswith("scheduler.")},
+                            _llama_cast_checkpoint_like(optim_state, get_state_dict({"optimizer": optim, "scheduler": scheduler})),
                             strict=False, verbose=False, realize=False)
   Tensor.realize(*loaded)
   _llama_load_rng_checkpoint(state_dict)

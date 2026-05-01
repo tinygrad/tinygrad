@@ -11,7 +11,8 @@ def stochastic_round_bf16(x:Tensor) -> Tensor:
   bits = x.bitcast(dtypes.uint32)
   if isinstance(x.device, tuple):
     shape = x.uop.shard_shape if x.uop.axis is not None else x.shape
-    noise = Tensor(UOp(Ops.MSTACK, dtypes.default_float, tuple(Tensor.rand(*shape, device=d).uop for d in x.device)))
+    noise = Tensor.rand(*shape, device=x.device[0]).shard(x.device) if x.uop.axis is None else \
+      Tensor(UOp(Ops.MSTACK, dtypes.default_float, tuple(Tensor.rand(*shape, device=d).uop for d in x.device)))
   else:
     noise = x.rand_like()
   noise = (noise * 0xFFFF).cast(dtypes.uint32)

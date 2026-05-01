@@ -6,7 +6,7 @@ import numpy as np
 
 os.environ["WQKV"] = "1"
 
-from tinygrad import Device, Tensor, nn
+from tinygrad import Device, Tensor, dtypes, nn
 from tinygrad.helpers import getenv as cached_getenv
 from tinygrad.nn.state import safe_save
 
@@ -149,6 +149,108 @@ class TestMLPerfLlama2LoRAEval(unittest.TestCase):
         eval_loss = eval_llama2_70b_lora()
 
     self.assertTrue(math.isfinite(eval_loss))
+
+  def test_eval_llama2_70b_lora_preserves_adapter_dtype(self):
+    tiny_params = dict(dim=128, hidden_dim=256, n_heads=4, n_kv_heads=2, n_layers=2, norm_eps=1e-5, vocab_size=1024, rope_theta=10000)
+    spec = {"model_params": tiny_params, "real_vocab_size": tiny_params["vocab_size"], "lora_rank": 4, "lora_alpha": 8, "lora_dropout": 0.0}
+
+    class CapturingFlatTransformer:
+      last = None
+      def __init__(self, *args, **kwargs):
+        self.vocab_size = tiny_params["vocab_size"]
+        self.wqkv_lora_a = Tensor.zeros(2, 4, 128, dtype=dtypes.bfloat16)
+        self.wqkv_lora_b = Tensor.zeros(2, 256, 4, dtype=dtypes.bfloat16)
+        self.wo_lora_a = Tensor.zeros(2, 4, 128, dtype=dtypes.bfloat16)
+        self.wo_lora_b = Tensor.zeros(2, 128, 4, dtype=dtypes.bfloat16)
+        CapturingFlatTransformer.last = self
+      def adapter_state_dict(self):
+        return {name: getattr(self, name) for name in ["wqkv_lora_a", "wqkv_lora_b", "wo_lora_a", "wo_lora_b"]}
+      def load_from_pretrained(self, *_args, **_kwargs): pass
+      def shard(self, *_args, **_kwargs): pass
+      def __call__(self, tokens:Tensor):
+        logits = np.zeros((tokens.shape[0], tokens.shape[1], self.vocab_size), dtype=np.float32)
+        logits[..., 3] = 1.0
+        return Tensor(logits)
+
+    with tempfile.TemporaryDirectory(prefix="llama2-lora-eval-dtype-") as tmpdir:
+      tmpdir = Path(tmpdir)
+      adapter_model = FlatTransformer(**tiny_params, max_context=8, lora_rank=4, lora_alpha=8, lora_dropout=0.0)
+      for name, tensor in adapter_model.adapter_state_dict().items():
+        setattr(adapter_model, name, tensor.cast(dtypes.bfloat16).realize())
+      adapter_path = tmpdir / "adapter.safetensors"
+      safe_save({name: tensor.float().to("CPU").contiguous().requires_grad_(False)
+                 for name, tensor in adapter_model.adapter_state_dict().items()}, adapter_path.as_posix())
+
+      dataset_path = tmpdir / "validation.jsonl"
+      dataset_path.write_text(json.dumps({"input_ids": [1, 2, 3, 4, 5], "labels": [-1, -1, 3, 4, -1]}) + "\n")
+
+      env = {
+        "BS": "1",
+        "SEQLEN": "5",
+        "DATASET_PATH": dataset_path.as_posix(),
+        "ADAPTER_CKPT": adapter_path.as_posix(),
+        "LLAMA_LORA_RANK": "4",
+        "LLAMA_LORA_ALPHA": "8",
+        "LLAMA_LORA_DROPOUT": "0",
+      }
+      with (
+        patch.dict(os.environ, env, clear=False),
+        patch.object(llama_helpers, "llama_benchmark_config", side_effect=lambda model_name, small=False: spec),
+        patch("examples.mlperf.models.flat_llama.FlatTransformer", CapturingFlatTransformer),
+      ):
+        eval_loss = eval_llama2_70b_lora()
+
+    self.assertTrue(math.isfinite(eval_loss))
+    self.assertIsNotNone(CapturingFlatTransformer.last)
+    self.assertSetEqual({tensor.dtype for tensor in CapturingFlatTransformer.last.adapter_state_dict().values()}, {dtypes.bfloat16})
+
+  def test_eval_llama2_70b_lora_loads_trainer_state_adapter_keys(self):
+    tiny_params = dict(dim=128, hidden_dim=256, n_heads=4, n_kv_heads=2, n_layers=2, norm_eps=1e-5, vocab_size=1024, rope_theta=10000)
+    spec = {"model_params": tiny_params, "real_vocab_size": tiny_params["vocab_size"], "lora_rank": 4, "lora_alpha": 8, "lora_dropout": 0.0}
+
+    class CapturingFlatTransformer:
+      last = None
+      def __init__(self, *args, **kwargs):
+        self.vocab_size = tiny_params["vocab_size"]
+        self.wqkv_lora_a = Tensor.zeros(2, 4, 128, dtype=dtypes.bfloat16)
+        self.wqkv_lora_b = Tensor.zeros(2, 256, 4, dtype=dtypes.bfloat16)
+        self.wo_lora_a = Tensor.zeros(2, 4, 128, dtype=dtypes.bfloat16)
+        self.wo_lora_b = Tensor.zeros(2, 128, 4, dtype=dtypes.bfloat16)
+        CapturingFlatTransformer.last = self
+      def adapter_state_dict(self):
+        return {name: getattr(self, name) for name in ["wqkv_lora_a", "wqkv_lora_b", "wo_lora_a", "wo_lora_b"]}
+      def load_from_pretrained(self, *_args, **_kwargs): pass
+      def shard(self, *_args, **_kwargs): pass
+      def __call__(self, tokens:Tensor):
+        logits = np.zeros((tokens.shape[0], tokens.shape[1], self.vocab_size), dtype=np.float32)
+        logits[..., 3] = 1.0
+        return Tensor(logits)
+
+    with tempfile.TemporaryDirectory(prefix="llama2-lora-eval-state-") as tmpdir:
+      tmpdir = Path(tmpdir)
+      adapter_model = FlatTransformer(**tiny_params, max_context=8, lora_rank=4, lora_alpha=8, lora_dropout=0.0)
+      for name, tensor in adapter_model.adapter_state_dict().items():
+        setattr(adapter_model, name, tensor.cast(dtypes.bfloat16).realize())
+      adapter_path = tmpdir / "adapter_state.safetensors"
+      safe_save({f"model.{name}": tensor.float().to("CPU").contiguous().requires_grad_(False)
+                 for name, tensor in adapter_model.adapter_state_dict().items()}, adapter_path.as_posix())
+
+      dataset_path = tmpdir / "validation.jsonl"
+      dataset_path.write_text(json.dumps({"input_ids": [1, 2, 3, 4, 5], "labels": [-1, -1, 3, 4, -1]}) + "\n")
+
+      with (
+        patch.dict(os.environ, {
+          "BS": "1", "SEQLEN": "5", "DATASET_PATH": dataset_path.as_posix(), "ADAPTER_CKPT": adapter_path.as_posix(),
+          "LLAMA_LORA_RANK": "4", "LLAMA_LORA_ALPHA": "8", "LLAMA_LORA_DROPOUT": "0",
+        }, clear=False),
+        patch.object(llama_helpers, "llama_benchmark_config", side_effect=lambda model_name, small=False: spec),
+        patch("examples.mlperf.models.flat_llama.FlatTransformer", CapturingFlatTransformer),
+      ):
+        eval_loss = eval_llama2_70b_lora()
+
+    self.assertTrue(math.isfinite(eval_loss))
+    self.assertIsNotNone(CapturingFlatTransformer.last)
+    self.assertSetEqual({tensor.dtype for tensor in CapturingFlatTransformer.last.adapter_state_dict().values()}, {dtypes.bfloat16})
 
   def test_eval_llama2_70b_lora_loads_int8_base_and_adapter(self):
     Tensor.manual_seed(42)

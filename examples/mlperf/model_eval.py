@@ -250,7 +250,7 @@ def eval_llama3():
 def eval_llama2_70b_lora():
   from tinygrad.helpers import tqdm
   from examples.mlperf.dataloader import iterate_llama2_70b_lora_dataset
-  from examples.mlperf.llama import llama_benchmark_config, llama_masked_crossentropy, llama_model_state_dict, load_llama_sentencepiece_tokenizer
+  from examples.mlperf.llama import llama_benchmark_config, llama_masked_crossentropy, load_llama_sentencepiece_tokenizer
   from examples.mlperf.models.flat_llama import FlatTransformer
 
   BS = getenv("BS", 1)
@@ -275,7 +275,18 @@ def eval_llama2_70b_lora():
   if MODEL_PATH:
     model.load_from_pretrained(MODEL_PATH)
   if ADAPTER_CKPT:
-    load_state_dict(model, llama_model_state_dict(safe_load(ADAPTER_CKPT)), strict=False, consume=True)
+    from examples.mlperf.llama import llama_model_state_dict
+    target_state = {name: tensor for name, tensor in model.adapter_state_dict().items()}
+    adapter_state = llama_model_state_dict(safe_load(ADAPTER_CKPT))
+    adapter_state = {name: (tensor.shard(target_state[name].device, target_state[name].uop.axis)
+                            if isinstance(target_state[name].device, tuple) and not isinstance(tensor.device, tuple)
+                            else tensor.to(target_state[name].device) if isinstance(target_state[name].device, str) and tensor.device != target_state[name].device
+                            else tensor)
+                     for name, tensor in adapter_state.items() if name in target_state}
+    adapter_state = {name: tensor.cast(target_state[name].dtype) if tensor.dtype != target_state[name].dtype else tensor
+                     for name, tensor in adapter_state.items()}
+    loaded = load_state_dict(model, adapter_state, strict=False, consume=True, verbose=False, realize=False)
+    if Device.DEFAULT != "CPU": Tensor.realize(*loaded)
 
   tokenizer = load_llama_sentencepiece_tokenizer(MODEL_PATH)
 

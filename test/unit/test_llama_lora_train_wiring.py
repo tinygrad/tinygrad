@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 import numpy as np
 
-from tinygrad import Tensor, nn
+from tinygrad import Tensor, dtypes, nn
 from tinygrad.helpers import getenv as cached_getenv
 from tinygrad.nn.state import get_state_dict, safe_load, safe_save
 
@@ -22,8 +22,10 @@ if "tqdm" not in sys.modules:
 from examples.mlperf.llama import llama_benchmark_config
 from examples.mlperf.model_train import (
   _llama_checkpoint_path,
+  _llama_checkpoint_state,
   _llama_configure_trainable_params,
   _llama_load_model_checkpoint,
+  _llama_load_model_state_dict,
   _llama_load_training_checkpoint,
   _llama_sequences_seen,
   _llama_train_microbatches_seen,
@@ -96,6 +98,79 @@ class TestLlamaLoRATrainWiring(unittest.TestCase):
 
     diff = (lora.wqkv - base.wqkv).abs().max().item()
     self.assertLess(diff, 1e-8)
+
+  def test_adapter_checkpoint_saves_float32_and_loads_target_dtype(self):
+    source = FlatTransformer(**self.params, lora_rank=8, lora_alpha=16, lora_dropout=0.0)
+    target = FlatTransformer(**self.params, lora_rank=8, lora_alpha=16, lora_dropout=0.0)
+    for name, tensor in source.adapter_state_dict().items():
+      setattr(source, name, tensor.cast(dtypes.bfloat16).realize())
+    for name, tensor in target.adapter_state_dict().items():
+      setattr(target, name, tensor.cast(dtypes.bfloat16).realize())
+    source.shard(("CPU:0", "CPU:1"), mp=True)
+    target.shard(("CPU:0", "CPU:1"), mp=True)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+      ckpt = Path(tmpdir) / "llama2_70b_lora_1.safe"
+      safe_save(_llama_checkpoint_state(source, adapter_only=True), ckpt.as_posix())
+      saved_state = safe_load(ckpt)
+      self.assertSetEqual({tensor.dtype for tensor in saved_state.values()}, {dtypes.float32})
+      _llama_load_model_checkpoint(target, ckpt.as_posix(), strict=False)
+
+    for name, tensor in target.adapter_state_dict().items():
+      self.assertEqual(tensor.dtype, dtypes.bfloat16, name)
+      self.assertIsInstance(tensor.device, tuple, name)
+
+  def test_adapter_checkpoint_state_fallback_preserves_target_dtype(self):
+    source = FlatTransformer(**self.params, lora_rank=8, lora_alpha=16, lora_dropout=0.0)
+    target = FlatTransformer(**self.params, lora_rank=8, lora_alpha=16, lora_dropout=0.0)
+    for name, tensor in source.adapter_state_dict().items():
+      setattr(source, name, tensor.cast(dtypes.bfloat16).realize())
+    for name, tensor in target.adapter_state_dict().items():
+      setattr(target, name, tensor.cast(dtypes.bfloat16).realize())
+
+    state_dict = {f"model.{k}": v for k, v in _llama_checkpoint_state(source, adapter_only=True).items()}
+    _llama_load_model_state_dict(target, state_dict, strict=False, verbose=False)
+
+    for name, tensor in target.adapter_state_dict().items():
+      self.assertEqual(tensor.dtype, dtypes.bfloat16, name)
+
+  def test_adapter_training_checkpoint_saves_float32_and_loads_target_dtype(self):
+    from examples.mlperf.lr_schedulers import CosineAnnealingLRWithWarmup
+    from examples.mlperf.optim import GradAccClipAdamW
+
+    source = FlatTransformer(**self.params, lora_rank=8, lora_alpha=16, lora_dropout=0.0)
+    target = FlatTransformer(**self.params, lora_rank=8, lora_alpha=16, lora_dropout=0.0)
+    for model in [source, target]:
+      for name, tensor in model.adapter_state_dict().items():
+        setattr(model, name, tensor.cast(dtypes.bfloat16).realize())
+      model.shard(("CPU:0", "CPU:1"), mp=True)
+
+    source_optim_params, _ = _llama_configure_trainable_params(source, adapter_only=True)
+    source_optim = GradAccClipAdamW(source_optim_params, lr=1e-3, grad_acc=1, clip_norm=0.3)
+    source_scheduler = CosineAnnealingLRWithWarmup(source_optim, 1e-3, 0.0, 0, 4)
+    target_optim_params, _ = _llama_configure_trainable_params(target, adapter_only=True)
+    target_optim = GradAccClipAdamW(target_optim_params, lr=1e-3, grad_acc=1, clip_norm=0.3)
+    target_scheduler = CosineAnnealingLRWithWarmup(target_optim, 1e-3, 0.0, 0, 4)
+
+    state_dict = _llama_training_checkpoint_state(source, source_optim, source_scheduler, adapter_only=True)
+    self.assertSetEqual({tensor.dtype for name, tensor in state_dict.items() if name.startswith("model.")}, {dtypes.float32})
+    self.assertFalse(any(k.startswith("optimizer.params.") for k in state_dict))
+    _llama_load_training_checkpoint(target, target_optim, target_scheduler, state_dict, adapter_only=True)
+
+    for name, tensor in target.adapter_state_dict().items():
+      self.assertEqual(tensor.dtype, dtypes.bfloat16, name)
+      self.assertIsInstance(tensor.device, tuple, name)
+
+  def test_stochastic_round_uses_shared_noise_for_replicated_mp_tensors(self):
+    from examples.mlperf.optim import stochastic_round_bf16
+
+    Tensor.manual_seed(123)
+    x = Tensor.full((32,), 1.001, dtype=dtypes.float32).shard(("CPU:0", "CPU:1"), axis=None)
+    rounded = stochastic_round_bf16(x).realize()
+
+    replica0 = Tensor(rounded.uop.mselect(0)).numpy()
+    replica1 = Tensor(rounded.uop.mselect(1)).numpy()
+    np.testing.assert_array_equal(replica0, replica1)
 
   def test_resume_sequence_count(self):
     self.assertEqual(_llama_sequences_seen(0, bs=3, grad_acc=4), 0)
@@ -187,6 +262,7 @@ class TestLlamaLoRATrainWiring(unittest.TestCase):
       self.assertSetEqual(set(model_ckpt.keys()), {"wqkv_lora_a", "wqkv_lora_b", "wo_lora_a", "wo_lora_b"})
       self.assertNotIn("model.wqkv", trainer_ckpt)
       self.assertIn("rng.seed", trainer_ckpt)
+      self.assertFalse(any(k.startswith("optimizer.params.") for k in trainer_ckpt))
       self.assertTrue(any(k.startswith("optimizer.") for k in trainer_ckpt))
       self.assertTrue(any(k.startswith("rng.device.") for k in trainer_ckpt))
       self.assertTrue(any(k.startswith("scheduler.") for k in trainer_ckpt))
@@ -246,6 +322,7 @@ class TestLlamaLoRATrainWiring(unittest.TestCase):
       self.assertSetEqual(set(model_ckpt.keys()), {"wqkv_lora_a", "wqkv_lora_b", "wo_lora_a", "wo_lora_b"})
       self.assertNotIn("model.wqkv", trainer_ckpt)
       self.assertIn("rng.seed", trainer_ckpt)
+      self.assertFalse(any(k.startswith("optimizer.params.") for k in trainer_ckpt))
 
   def test_adapter_only_training_checkpoint_restores_rng_state(self):
     from examples.mlperf.lr_schedulers import CosineAnnealingLRWithWarmup
