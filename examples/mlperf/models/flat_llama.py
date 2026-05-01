@@ -337,28 +337,59 @@ class FlatTransformer:
         dim=0,
       )
 
-    def assign_linear(dst:Tensor, src:Tensor, scale:Tensor|None=None) -> None:
+    def shard_like(dst:Tensor, src:Tensor, axis:int|None=None) -> Tensor:
+      return src.shard(dst.device, axis=axis) if isinstance(dst.device, tuple) else src
+
+    def assign_linear(dst:Tensor, src:Tensor, axis:int|None=None, scale:Tensor|None=None, scale_axis:int|None=None) -> None:
       if scale is None:
-        dst.assign(src.cast(dst.dtype))
+        dst.assign(shard_like(dst, src.cast(dst.dtype), axis)).realize()
       else:
         quantized, scales = _int8_rowwise_quantize(src)
-        dst.assign(quantized)
-        scale.assign(scales.cast(scale.dtype))
+        dst.assign(shard_like(dst, quantized, axis))
+        scale.assign(shard_like(scale, scales.cast(scale.dtype), scale_axis))
+        dst.realize(scale)
 
-    assign_linear(self.wqkv, Tensor.stack(*[get_qkv(i) for i in range(self.n_layers)], dim=0), getattr(self, "wqkv_scale", None))
-    assign_linear(self.wo, Tensor.stack(*[get_tensor(f"layers.{i}.attention.wo.weight") for i in range(self.n_layers)], dim=0), getattr(self, "wo_scale", None))
-    assign_linear(self.w1, Tensor.stack(*[get_tensor(f"layers.{i}.feed_forward.w1.weight") for i in range(self.n_layers)], dim=0), getattr(self, "w1_scale", None))
-    assign_linear(self.w2, Tensor.stack(*[get_tensor(f"layers.{i}.feed_forward.w2.weight") for i in range(self.n_layers)], dim=0), getattr(self, "w2_scale", None))
-    assign_linear(self.w3, Tensor.stack(*[get_tensor(f"layers.{i}.feed_forward.w3.weight") for i in range(self.n_layers)], dim=0), getattr(self, "w3_scale", None))
-    self.attention_norm.assign(Tensor.stack(
+    def pad_vocab(src:Tensor, vocab_size:int) -> Tensor:
+      return src.pad(((0, vocab_size - src.shape[0]), (0, 0))) if src.shape[0] < vocab_size else src
+
+    def assign_quantized_layers(dst:Tensor, srcs, axis:int, scale:Tensor, scale_axis:int|None=None) -> None:
+      if not isinstance(dst.device, tuple):
+        quantized_layers, scale_layers = [], []
+        for src in srcs:
+          quantized, scales = _int8_rowwise_quantize(src)
+          quantized_layers.append(quantized.reshape(1, *quantized.shape).realize())
+          scale_layers.append(scales.reshape(1, *scales.shape).realize())
+        dst.assign(quantized_layers[0].cat(*quantized_layers[1:], dim=0))
+        scale.assign(scale_layers[0].cat(*scale_layers[1:], dim=0).cast(scale.dtype))
+        dst.realize(scale)
+        return
+      for layer, src in enumerate(srcs):
+        quantized, scales = _int8_rowwise_quantize(src)
+        dst_slice, scale_slice = dst[layer:layer+1], scale[layer:layer+1]
+        dst_slice.assign(shard_like(dst_slice, quantized.reshape(1, *quantized.shape), axis)).realize()
+        scale_slice.assign(shard_like(scale_slice, scales.reshape(1, *scales.shape).cast(scale.dtype), scale_axis)).realize()
+
+    if self.base_quantize == "int8":
+      assign_quantized_layers(self.wqkv, (get_qkv(i) for i in range(self.n_layers)), axis=1, scale=self.wqkv_scale, scale_axis=1)
+      assign_quantized_layers(self.wo, (get_tensor(f"layers.{i}.attention.wo.weight") for i in range(self.n_layers)), axis=2, scale=self.wo_scale)
+      assign_quantized_layers(self.w1, (get_tensor(f"layers.{i}.feed_forward.w1.weight") for i in range(self.n_layers)), axis=1, scale=self.w1_scale, scale_axis=1)
+      assign_quantized_layers(self.w2, (get_tensor(f"layers.{i}.feed_forward.w2.weight") for i in range(self.n_layers)), axis=2, scale=self.w2_scale)
+      assign_quantized_layers(self.w3, (get_tensor(f"layers.{i}.feed_forward.w3.weight") for i in range(self.n_layers)), axis=1, scale=self.w3_scale, scale_axis=1)
+    else:
+      assign_linear(self.wqkv, Tensor.stack(*[get_qkv(i) for i in range(self.n_layers)], dim=0), axis=1)
+      assign_linear(self.wo, Tensor.stack(*[get_tensor(f"layers.{i}.attention.wo.weight") for i in range(self.n_layers)], dim=0), axis=2)
+      assign_linear(self.w1, Tensor.stack(*[get_tensor(f"layers.{i}.feed_forward.w1.weight") for i in range(self.n_layers)], dim=0), axis=1)
+      assign_linear(self.w2, Tensor.stack(*[get_tensor(f"layers.{i}.feed_forward.w2.weight") for i in range(self.n_layers)], dim=0), axis=2)
+      assign_linear(self.w3, Tensor.stack(*[get_tensor(f"layers.{i}.feed_forward.w3.weight") for i in range(self.n_layers)], dim=0), axis=1)
+    self.attention_norm.assign(shard_like(self.attention_norm, Tensor.stack(
       *[get_tensor(f"layers.{i}.attention_norm.weight") for i in range(self.n_layers)], dim=0,
-    ).cast(self.attention_norm.dtype))
-    self.ffn_norm.assign(Tensor.stack(
+    ).cast(self.attention_norm.dtype))).realize()
+    self.ffn_norm.assign(shard_like(self.ffn_norm, Tensor.stack(
       *[get_tensor(f"layers.{i}.ffn_norm.weight") for i in range(self.n_layers)], dim=0,
-    ).cast(self.ffn_norm.dtype))
-    self.norm.weight.assign(get_tensor("norm.weight").cast(self.norm.weight.dtype))
-    self.tok_embeddings.weight.assign(get_tensor("tok_embeddings.weight").cast(self.tok_embeddings.weight.dtype))
-    self.output.assign(get_tensor("output.weight").cast(self.output.dtype).reshape(1, *self.output.shape[1:]))
+    ).cast(self.ffn_norm.dtype))).realize()
+    self.norm.weight.assign(shard_like(self.norm.weight, get_tensor("norm.weight").cast(self.norm.weight.dtype))).realize()
+    self.tok_embeddings.weight.assign(shard_like(self.tok_embeddings.weight, pad_vocab(get_tensor("tok_embeddings.weight"), self.vocab_size).cast(self.tok_embeddings.weight.dtype), axis=0)).realize()
+    self.output.assign(shard_like(self.output, pad_vocab(get_tensor("output.weight"), self.vocab_size).cast(self.output.dtype).reshape(1, *self.output.shape[1:]), axis=1)).realize()
 
   def load_from_pretrained(self, model_path:str|Path, n_files:int=1) -> None:
     model_path = Path(model_path)
