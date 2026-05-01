@@ -248,7 +248,10 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       # some ops init the shape
       case Ops.BIND | Ops.RANGE | Ops.SPECIAL | Ops.UNROLL: return ()
       case Ops.BUFFER: return (self.arg,)
-      case Ops.BUFFER_VIEW: return (self.arg[0],)
+      case Ops.BUFFER_VIEW:
+        # HACK: BUFFER_VIEW is used inside kernels, so we set the shape to () if it's on an INDEX
+        if self.src[0].op is Ops.INDEX: return ()
+        return (self.arg[0],)
       case Ops.CUSTOM_FUNCTION: return None
       case Ops.BUFFERIZE: return tuple([int(r.vmax+1) for r in self.src[1:]])
       case Ops.DEFINE_LOCAL | Ops.DEFINE_REG: return (self.ptrdtype.size,)
