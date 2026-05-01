@@ -1,5 +1,5 @@
 import unittest
-from tinygrad import Tensor, UOp, GlobalCounters
+from tinygrad import Tensor, UOp, GlobalCounters, Device
 from tinygrad.dtype import AddrSpace, dtypes
 from tinygrad.uop.ops import KernelInfo, AxisType
 
@@ -334,7 +334,7 @@ class TestCustomKernel(unittest.TestCase):
     GlobalCounters.reset()
     y = run(x[0]).realize()
     # TODO: it's copying the output
-    self.assertEqual(GlobalCounters.kernel_count, 2)
+    self.assertEqual(GlobalCounters.kernel_count, 2 if hasattr(Device[Device.DEFAULT].allocator, "_offset") else 3)
     self.assertEqual(y.tolist(), [1, 2, 3, 4])
 
 class TestUOpReduce(unittest.TestCase):
