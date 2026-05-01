@@ -903,8 +903,8 @@ class TestAssignToUnrealizedView(unittest.TestCase):
 
   def test_reduce(self):
     a = Tensor([[1,2],[3,4]]).contiguous().realize()
-    r = a.sum(axis=0)  # unrealized REDUCE_AXIS
-    self.assertIs(r.uop.base.op, Ops.REDUCE_AXIS)
+    r = a.sum(axis=0)  # unrealized REDUCE
+    self.assertIs(r.uop.base.op, Ops.REDUCE)
     r[:1].assign(Tensor([99]).realize())
     try:
       self.assertEqual(r.tolist(), [99,6])

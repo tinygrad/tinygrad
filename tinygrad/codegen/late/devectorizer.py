@@ -197,8 +197,9 @@ def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
   return UOp(Ops.VCAT, ls.dtype, tuple(ret)) if ls.op is Ops.LOAD else UOp.group(*ret)
 
 def get_image_idx(idx:UOp, width:int):
-  oidx = UOp(Ops.STACK, dtypes.weakint.vec(2), (((x:=idx.src[1].get_idx()) // 4) % width, (x // (4*width))))
-  return idx.replace(src=(idx.src[0], oidx.valid(idx.src[1].get_valid())))
+  x, valid = idx.src[1].get_idx(), idx.src[1].get_valid()
+  idx_x, idx_y = (x // 4) % width, x // (4*width)
+  return idx.replace(src=(idx.src[0], UOp.vectorize(idx_x, idx_y).valid(valid)))
 
 def image_fixup(ls:UOp):
   # normal image load or store, with the CAST from expand_index
@@ -317,12 +318,12 @@ def reduce_to_acc(ctx:ReduceContext, red:UOp):
     topo = inp.toposort()
     ended_ranges = flatten([x.ended_ranges for x in topo if x.op is Ops.END])
     input_ranges = tuple([x for x in topo if x.op is Ops.RANGE and x not in reduce_range and x not in ended_ranges])
-    identity = red.const(red.dtype, identity_element(red.arg, red.dtype.scalar()))
+    identity = red.const(red.dtype, identity_element(red.arg[0], red.dtype.scalar()))
     acc = UOp.placeholder((1,), red.dtype, ctx.acc_num, AddrSpace.REG)
     acc_init = acc.after(*input_ranges).index(UOp.const(dtypes.weakint, 0)).store(identity)
     lst = [acc.after(acc_init, *reduce_range).index(UOp.const(dtypes.weakint, 0))] + lst  # put acc as the first element
     ctx.acc_num += 1
-  ret = functools.reduce(lambda x,y: x.alu(red.arg, y), lst)
+  ret = functools.reduce(lambda x,y: x.alu(red.arg[0], y), lst)
   if len(reduce_range) == 0: return ret
   end = acc.index(UOp.const(dtypes.weakint, 0)).store(ret).end(*reduce_range).rtag("mergeable")
   return acc.after(end).index(UOp.const(dtypes.weakint, 0))
@@ -358,10 +359,14 @@ pm_reduce = PatternMatcher([
 
 # add loads
 
+def add_load(idx:UOp):
+  if isinstance(idx.dtype, PtrDType): return None
+  assert isinstance(idx.src[0].dtype, PtrDType), f"param is not PtrDType {idx.src[0].dtype}"
+  return idx.replace(dtype=idx.src[0].dtype).load(dtype=idx.dtype.base)
+
 pm_add_loads = PatternMatcher([
   # add loads to non ptr index
-  (UPat(Ops.INDEX, name="idx"), lambda idx: None if isinstance(idx.dtype, PtrDType) else
-    idx.replace(dtype=idx.src[0].dtype).load(dtype=idx.dtype.base)),
+  (UPat(Ops.INDEX, name="idx"), add_load),
   # remove loads from stores
   (UPat(Ops.STORE, src=(UPat(Ops.LOAD), UPat(name="val")), name="s"), lambda s,val: s.replace(src=(s.src[0].src[0], val))),
 ])

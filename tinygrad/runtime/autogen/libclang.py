@@ -4,8 +4,8 @@ import ctypes
 from typing import Literal, TypeAlias
 from tinygrad.runtime.support.c import _IO, _IOW, _IOR, _IOWR
 from tinygrad.runtime.support import c
-from tinygrad.helpers import OSX
-dll = c.DLL('libclang', '/opt/homebrew/opt/llvm@20/lib/libclang.dylib' if OSX else ['clang-20', 'clang'])
+from tinygrad.helpers import WIN, OSX
+dll = c.DLL('libclang', 'C:\\Program Files\\LLVM\\bin\\libclang.dll' if WIN else ['/opt/homebrew/opt/llvm@21/lib/libclang.dylib', '/opt/homebrew/opt/llvm@20/lib/libclang.dylib', '/opt/homebrew/opt/llvm@19/lib/libclang.dylib', '/opt/homebrew/opt/llvm@18/lib/libclang.dylib', '/opt/homebrew/opt/llvm@17/lib/libclang.dylib', '/opt/homebrew/opt/llvm@16/lib/libclang.dylib', '/opt/homebrew/opt/llvm@15/lib/libclang.dylib', '/opt/homebrew/opt/llvm@14/lib/libclang.dylib'] if OSX else ['clang', 'clang-21', 'clang-20', 'clang-19', 'clang-18', 'clang-17', 'clang-16', 'clang-15', 'clang-14'])
 CXIndex: TypeAlias = ctypes.c_void_p
 class struct_CXTargetInfoImpl(c.Struct): pass
 CXTargetInfo: TypeAlias = c.POINTER[struct_CXTargetInfoImpl]
@@ -1012,8 +1012,8 @@ def clang_getFileUniqueID(file:CXFile, outID:c.POINTER[CXFileUniqueID]) -> int: 
 def clang_File_isEqual(file1:CXFile, file2:CXFile) -> int: ...
 @dll.bind(CXString, CXFile)
 def clang_File_tryGetRealPathName(file:CXFile) -> CXString: ...
-CINDEX_VERSION_MAJOR = 0 # type: ignore
-CINDEX_VERSION_MINOR = 64 # type: ignore
+CINDEX_VERSION_MAJOR = 0
+CINDEX_VERSION_MINOR = 64
 CINDEX_VERSION_ENCODE = lambda major,minor: (((major)*10000) + ((minor)*1)) # type: ignore
-CINDEX_VERSION = CINDEX_VERSION_ENCODE(CINDEX_VERSION_MAJOR, CINDEX_VERSION_MINOR) # type: ignore
+CINDEX_VERSION = CINDEX_VERSION_ENCODE(CINDEX_VERSION_MAJOR, CINDEX_VERSION_MINOR)
 CINDEX_VERSION_STRINGIZE = lambda major,minor: CINDEX_VERSION_STRINGIZE_(major, minor) # type: ignore

@@ -1457,9 +1457,9 @@ MTLCommandEncoder._methods_ = [
   ('label', NSString, []),
   ('setLabel:', None, [NSString]),
 ]
-MTLResourceCPUCacheModeShift = 0 # type: ignore
-MTLResourceCPUCacheModeMask = (0xf << MTLResourceCPUCacheModeShift) # type: ignore
-MTLResourceStorageModeShift = 4 # type: ignore
-MTLResourceStorageModeMask = (0xf << MTLResourceStorageModeShift) # type: ignore
-MTLResourceHazardTrackingModeShift = 8 # type: ignore
-MTLResourceHazardTrackingModeMask = (0x3 << MTLResourceHazardTrackingModeShift) # type: ignore
+MTLResourceCPUCacheModeShift = 0
+MTLResourceCPUCacheModeMask = (0xf << MTLResourceCPUCacheModeShift)
+MTLResourceStorageModeShift = 4
+MTLResourceStorageModeMask = (0xf << MTLResourceStorageModeShift)
+MTLResourceHazardTrackingModeShift = 8
+MTLResourceHazardTrackingModeMask = (0x3 << MTLResourceHazardTrackingModeShift)

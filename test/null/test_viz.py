@@ -11,7 +11,7 @@ from tinygrad.helpers import cpu_profile, ProfilePointEvent, unwrap
 from tinygrad.device import Buffer
 
 from tinygrad.uop.ops import tracked_keys, tracked_ctxs, uop_fields, active_rewrites, active_group, _name_cnt, RewriteTrace
-from tinygrad.viz.serve import load_rewrites, get_full_rewrite, uop_to_json, VizData
+from tinygrad.viz.serve import load_rewrites, get_full_rewrite, uop_to_json, VizData, get_render
 from tinygrad.codegen import to_program_cache
 from tinygrad.codegen import to_program
 
@@ -321,7 +321,6 @@ class TestVizGC(unittest.TestCase):
 # VIZ integrates with other parts of tinygrad
 
 from tinygrad import Tensor, Device
-from tinygrad.engine.realize import get_runner
 
 class TestVizIntegration(unittest.TestCase):
   # codegen supports rendering of code blocks
@@ -707,7 +706,6 @@ class TestVizMemoryLayout(unittest.TestCase):
     self.assertEqual(len(programs), len(set(users)), n)
 
 from tinygrad.uop.ops import KernelInfo
-from tinygrad.viz.serve import amdgpu_cfg
 from tinygrad.renderer.amd.dsl import s
 from tinygrad.runtime.autogen.amd.rdna3.ins import (s_add_u32, s_branch, s_cbranch_execz, s_cbranch_scc0, s_cbranch_scc1, s_cmp_eq_i32,
                                                     s_cmp_eq_u64, s_code_end, s_endpgm, s_mov_b32, s_nop)
@@ -723,13 +721,16 @@ class TestCfg(unittest.TestCase):
       gidx = UOp.special(1, "gidx0")
       sink = UOp.sink(out.base, lidx, gidx, arg=KernelInfo(name=name))
       return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg="NULL"), UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=x) for x in insts]))))
-    with Context(DEV=f"NULL::{self.arch}"):
-      out = Tensor.custom_kernel(Tensor.empty(1), fxn=fxn)[0]
-      runner = get_runner(out.device, out.schedule_linear().src[-1].src[0])
-      return amdgpu_cfg(runner.prg.src[4].arg, self.arch)
+    with save_viz() as viz:
+      with Context(DEV=f"NULL::{self.arch}"):
+        out = Tensor.custom_kernel(Tensor.empty(1), fxn=fxn)[0]
+        _ = to_program(out.schedule_linear().src[-1].src[0], Device[out.device].renderer)
+    codegen_rewrites = next(s for s in viz.list_items() if s["name"] == name)
+    disasm = next(s for s in codegen_rewrites["steps"] if s["name"] == "View Disassembly")
+    return get_render(viz.data, disasm["query"])
 
   def test_simple(self):
-    k = Kernel(arch=self.arch)
+    k = Kernel()
     k.label("entry")
     k.emit(s_branch(), target="bb1")
     k.label("bb1")
@@ -739,7 +740,7 @@ class TestCfg(unittest.TestCase):
     self.assertEqual(len(cfg["blocks"]), 2)
 
   def test_diamond(self):
-    k = Kernel(arch=self.arch)
+    k = Kernel()
     k.label("entry")
     k.emit(s_mov_b32(s[0], 0))
     k.emit(s_mov_b32(s[1], 0))
@@ -773,7 +774,7 @@ class TestCfg(unittest.TestCase):
       assert st.startswith("s_code_end") and st.endswith("x)"), st
 
   def test_loop(self):
-    k = Kernel(arch=self.arch)
+    k = Kernel()
     k.label("entry")
     k.emit(s_mov_b32(s[1], 4))
     k.label("loop")
@@ -785,7 +786,7 @@ class TestCfg(unittest.TestCase):
     self.get_cfg("simple_loop", k)
 
   def test_loop_branch(self):
-    k = Kernel(arch=self.arch)
+    k = Kernel()
     k.label("entry")
     k.emit(s_mov_b32(s[1], 4))
     k.label("loop")
@@ -803,7 +804,7 @@ class TestCfg(unittest.TestCase):
     self.get_cfg("loop_if", k)
 
   def test_loop_break(self):
-    k = Kernel(arch=self.arch)
+    k = Kernel()
     k.label("entry")
     k.emit(s_mov_b32(s[1], 8))
     k.label("loop")
@@ -818,7 +819,7 @@ class TestCfg(unittest.TestCase):
     self.get_cfg("loop_break", k)
 
   def test_switch(self):
-    k = Kernel(arch=self.arch)
+    k = Kernel()
     k.label("entry")
     k.emit(s_cmp_eq_i32(s[0], 0))
     k.emit(s_cbranch_scc1(), target="case0")
@@ -840,7 +841,7 @@ class TestCfg(unittest.TestCase):
     self.get_cfg("switch_case", k)
 
   def test_ping_pong(self):
-    k = Kernel(arch=self.arch)
+    k = Kernel()
     k.label("entry")
     k.emit(s_cmp_eq_i32(s[0], 0))
     k.emit(s_cbranch_scc1(), target="ping")
@@ -859,7 +860,7 @@ class TestCfg(unittest.TestCase):
 
   def test_colored_blocks(self):
     N = 10
-    k = Kernel(arch=self.arch)
+    k = Kernel()
     k.label("entry")
     k.emit(s_branch(), target="init0")
     for i in range(N):
@@ -879,7 +880,7 @@ class TestCfg(unittest.TestCase):
     self.get_cfg("test_colored_blocks", k)
 
   def test_jump_back_to_end(self):
-    k = Kernel(arch=self.arch)
+    k = Kernel()
     k.label("entry")
     k.emit(s_mov_b32(s[1], 2))
     k.emit(s_cbranch_execz(), target="loop")

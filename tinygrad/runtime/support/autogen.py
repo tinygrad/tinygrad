@@ -99,8 +99,8 @@ arc_families = ['alloc', 'copy', 'mutableCopy', 'new']
 
 def normalize(a): return ("_" + n if keyword.iskeyword(n:=nm(a)) else n)
 
-def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False, errno=False, anon_names={}, types={}, parse_macros=True, paths=[]):
-  macros, lines, anoncnt, types, objc, fns = [], [], itertools.count().__next__, {k:(v,True) for k,v in types.items()}, False, set()
+def gen(name, files, dll="", args=[], prolog=[], rules=[], epilog=[], recsym=False, errno=False, anon_names={}, types={}, macros=True, paths=[]):
+  extras, lines, anoncnt, types, objc, fns = [], [], itertools.count().__next__, {k:(v,True) for k,v in types.items()}, False, set()
 
   # ctypes automatically "unboxes" simple types
   def typehint(ty) -> str:
@@ -240,13 +240,13 @@ def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False,
             if clang.CXCursor_NSReturnsRetained in attrs(c): lines.append(f"{nm(c)} = objc.returns_retained({nm(c)})")
           case (clang.CXCursor_StructDecl | clang.CXCursor_UnionDecl | clang.CXCursor_TypedefDecl | clang.CXCursor_EnumDecl
                 | clang.CXCursor_ObjCInterfaceDecl): tname(clang.clang_getCursorType(c))
-          case clang.CXCursor_MacroDefinition if parse_macros and nm(c) and len(toks:=Tokens(c)) > 1:
+          case clang.CXCursor_MacroDefinition if macros and nm(c) and len(toks:=Tokens(c)) > 1:
             if nm(toks[1])=='(' and clang.clang_equalLocations(clang.clang_getRangeEnd(extent(toks[0])), clang.clang_getRangeStart(extent(toks[1]))):
               it = iter(toks[1:])
               _args = [nm(t) for t in itertools.takewhile(lambda t:nm(t)!=')', it) if clang.clang_getTokenKind(t) == clang.CXToken_Identifier]
               if len(body:=list(it)) == 0: continue
-              macros += [f"{nm(c)} = lambda{' ' * bool(_args)}{','.join(_args)}: {readext(f,loc(body[0]),clang.clang_getRangeEnd(extent(toks[-1])))}"]
-            else: macros += [f"{nm(c)} = {readext(f, loc(toks[1]), clang.clang_getRangeEnd(extent(toks[-1])))}"]
+              extras += [f"{nm(c)} = lambda{' ' * bool(_args)}{','.join(_args)}: {readext(f,loc(body[0]),clang.clang_getRangeEnd(extent(toks[-1])))}"]
+            else: extras += [f"{nm(c)} = {readext(f, loc(toks[1]), clang.clang_getRangeEnd(extent(toks[-1])))}"]
           case clang.CXCursor_VarDecl if clang.clang_getCursorLinkage(c) == clang.CXLinkage_Internal:
             ty = clang.clang_getCursorType(c)
             if (ty.kind == clang.CXType_ConstantArray and clang.clang_getCanonicalType(clang.clang_getArrayElementType(ty)).kind in ints and
@@ -254,10 +254,10 @@ def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False,
               cs = children(init)
               if all(re.match(r"\[.*\].*=", readext(f, extent(ch))) for ch in cs):
                 items = ','.join(f'{readext(f, extent(next(it:=iter(children(ch)))))}:{readext(f, extent(next(it)))}' for ch in cs)
-                macros += [f"{nm(c)} = {{{items}}}"]
-              else: macros += [f"{nm(c)} = ({','.join(readext(f, extent(ch)) for ch in cs)},)"]
-            elif clang.clang_getCanonicalType(ty).kind in ints: macros += [f"{nm(c)} = {readext(f, extent(children(c)[-1]))}"]
-            else: macros += [f"{nm(c)} = {tname(ty)}({readext(f, extent(children(c)[-1]))})"]
+                extras += [f"{nm(c)} = {{{items}}}"]
+              else: extras += [f"{nm(c)} = ({','.join(readext(f, extent(ch)) for ch in cs)},)"]
+            elif clang.clang_getCanonicalType(ty).kind in ints: extras += [f"{nm(c)} = {readext(f, extent(children(c)[-1]))}"]
+            else: extras += [f"{nm(c)} = {tname(ty)}({readext(f, extent(children(c)[-1]))})"]
           case clang.CXCursor_VarDecl if clang.clang_getCursorLinkage(c) == clang.CXLinkage_External and dll:
             lines.append(f"try: {nm(c)} = {tname(clang.clang_getCursorType(c))}.in_dll(dll, '{nm(c)}') # type: ignore\n" +
                          "except (ValueError,AttributeError): pass")
@@ -272,15 +272,16 @@ def gen(name, dll, files, args=[], prolog=[], rules=[], epilog=[], recsym=False,
                     "from typing import Literal, TypeAlias", "from tinygrad.runtime.support.c import _IO, _IOW, _IOR, _IOWR",
                     "from tinygrad.runtime.support import c", *prolog, *(["from tinygrad.runtime.support import objc"]*objc),
                     *([f"dll = c.DLL('{name}', {dll}{f', {paths}'*bool(paths)}{', use_errno=True'*errno})"] if dll else []), *lines]) + '\n'
-  macros = [f"{r} # type: ignore" for m in macros if (r:=functools.reduce(lambda s,r:re.sub(r[0], r[1], s), rules + base_rules, m))]
+  extras = [f"{r} # type: ignore" if "lambda" in r else r
+            for m in extras if (r:=functools.reduce(lambda s,r:re.sub(r[0], r[1], s), rules + base_rules, m))]
   while True:
     try:
-      exec(main + '\n'.join(macros), {})
+      exec(main + '\n'.join(extras), {})
       break
     except (SyntaxError, NameError, TypeError) as e:
-      macrono = unwrap(e.lineno if isinstance(e, SyntaxError) else unwrap(unwrap(e.__traceback__).tb_next).tb_lineno) - main.count('\n') - 1
-      assert macrono >= 0 and macrono < len(macros), f"error outside macro range: {e}"
-      print(f"skipping {macros[macrono]}: {e}")
-      del macros[macrono]
+      extrano = unwrap(e.lineno if isinstance(e, SyntaxError) else unwrap(unwrap(e.__traceback__).tb_next).tb_lineno) - main.count('\n') - 1
+      assert extrano >= 0 and extrano < len(extras), f"error outside extra range: {e}"
+      print(f"skipping {extras[extrano]}: {e}")
+      del extras[extrano]
     except Exception as e: raise Exception("parsing failed") from e
-  return main + '\n'.join(macros + epilog)
+  return main + '\n'.join(extras + epilog)

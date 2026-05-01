@@ -133,14 +133,20 @@ def bench(run, inputs):
       run(**inputs).numpy()
 
 if __name__ == "__main__":
-  onnx_file = fetch(OPENPILOT_MODEL)
-  inputs, outputs = compile(onnx_file)
+  if getenv("RUN_PICKLE"):
+    with open(OUTPUT, "rb") as f: pickle_loaded = pickle.load(f)
+    inputs = {name: Tensor(Tensor.randn(*[int(s) for s in view.src[1].arg], dtype=dtype).numpy(), device=device)
+              for name, (view, _vars, dtype, device) in zip(pickle_loaded.captured.expected_names, pickle_loaded.captured.expected_input_info)}
+    test_vs_compile(pickle_loaded, inputs)
+  else:
+    onnx_file = fetch(OPENPILOT_MODEL)
+    inputs, outputs = compile(onnx_file)
 
-  with open(OUTPUT, "rb") as f: pickle_loaded = pickle.load(f)
+    with open(OUTPUT, "rb") as f: pickle_loaded = pickle.load(f)
 
-  test_vs_compile(pickle_loaded, inputs, outputs)
-  if getenv("SELFTEST"):
-    test_vs_onnx(inputs, outputs, onnx_file, 1e-4)
+    test_vs_compile(pickle_loaded, inputs, outputs)
+    if getenv("SELFTEST"):
+      test_vs_onnx(inputs, outputs, onnx_file, 1e-4)
 
   if getenv("BENCHMARK_LOG", ""):
     bench(pickle_loaded, inputs)

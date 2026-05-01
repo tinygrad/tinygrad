@@ -60,7 +60,6 @@ def main(args) -> None:
 
   def fmt(val, to_str=str) -> str: return json.dumps(val if isinstance(val, dict) else {"value":val}) if args.json else to_str(val)
 
-  rewrites = {c["name"]:{s["name"]:s for s in c["steps"]} for c in viz_data.ctxs if c.get("steps")}
   def print_step(step:dict) -> None:
     data = viz.get_render(viz_data, step["query"])
     if isinstance(data.get("value"), Iterator):
@@ -68,7 +67,7 @@ def main(args) -> None:
         if m.get("uop"): print(fmt(m["uop"]))
         if m.get("diff"):
           loc = pathlib.Path(m["upat"][0][0])
-          print(fmt(f"Rewrite at {loc.parent.name}/{loc.name}:{m['upat'][0][1]}\n{m['upat'][1]}"))
+          print(fmt(f"{loc.parent.name}/{loc.name}:{m['upat'][0][1]}\n{m['upat'][1]}"))
           for line in m["diff"]: print(fmt(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None)))
     if data.get("src") is not None: print(fmt(data["src"]))
 
@@ -188,15 +187,13 @@ def main(args) -> None:
           if DEBUG >= 3 and s["name"] == "View Base AST": print_step(s)
           if DEBUG >= 4 and s["name"] == "View Source": print_step(s)
           if DEBUG >= 5 or ls: print(fmt(" "*s["depth"]+s["name"]+(f" - {s['match_count']}" if s.get('match_count', 0) else '')))
-          if DEBUG >= 6: print_step(s)
+          if DEBUG >= 6 or args.item and len(args.item) > 1 and s["name"] == args.item[1]: print_step(s)
       elif DEBUG >= 3 and k.get("ext"): print(fmt(k["ext"]))
     produce = produce_top_kernels if args.top else produce_all_kernels
     if args.item:
       if len(args.item) > 2: raise RuntimeError(f"-i takes at most 2 names (got {args.item})")
       k = get({r["name"]:r for r in produce()}, args.item[0])
-      if len(args.item) == 1:
-        with Context(DEBUG=max(DEBUG.value, 3)): render_event(k, ls=True)
-      else: print_step(get(rewrites[viz_data.ctxs[k["ref"]]["name"]], args.item[1]))
+      with Context(DEBUG=max(DEBUG.value, 3)): render_event(k, ls=True)
     else:
       for k in produce(): render_event(k)
 

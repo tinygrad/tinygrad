@@ -2750,48 +2750,48 @@ class struct_common_firmware_header(c.Struct):
   ucode_size_bytes: int
   ucode_array_offset_bytes: int
   crc32: int
-struct_common_firmware_header.register_fields([('size_bytes', ctypes.c_uint32, 0), ('header_size_bytes', ctypes.c_uint32, 4), ('header_version_major', ctypes.c_uint16, 8), ('header_version_minor', ctypes.c_uint16, 10), ('ip_version_major', ctypes.c_uint16, 12), ('ip_version_minor', ctypes.c_uint16, 14), ('ucode_version', ctypes.c_uint32, 16), ('ucode_size_bytes', ctypes.c_uint32, 20), ('ucode_array_offset_bytes', ctypes.c_uint32, 24), ('crc32', ctypes.c_uint32, 28)])
+struct_common_firmware_header.register_fields([('size_bytes', uint32_t, 0), ('header_size_bytes', uint32_t, 4), ('header_version_major', uint16_t, 8), ('header_version_minor', uint16_t, 10), ('ip_version_major', uint16_t, 12), ('ip_version_minor', uint16_t, 14), ('ucode_version', uint32_t, 16), ('ucode_size_bytes', uint32_t, 20), ('ucode_array_offset_bytes', uint32_t, 24), ('crc32', uint32_t, 28)])
 @c.record
 class struct_mc_firmware_header_v1_0(c.Struct):
   SIZE = 40
   header: struct_common_firmware_header
   io_debug_size_bytes: int
   io_debug_array_offset_bytes: int
-struct_mc_firmware_header_v1_0.register_fields([('header', struct_common_firmware_header, 0), ('io_debug_size_bytes', ctypes.c_uint32, 32), ('io_debug_array_offset_bytes', ctypes.c_uint32, 36)])
+struct_mc_firmware_header_v1_0.register_fields([('header', struct_common_firmware_header, 0), ('io_debug_size_bytes', uint32_t, 32), ('io_debug_array_offset_bytes', uint32_t, 36)])
 @c.record
 class struct_smc_firmware_header_v1_0(c.Struct):
   SIZE = 36
   header: struct_common_firmware_header
   ucode_start_addr: int
-struct_smc_firmware_header_v1_0.register_fields([('header', struct_common_firmware_header, 0), ('ucode_start_addr', ctypes.c_uint32, 32)])
+struct_smc_firmware_header_v1_0.register_fields([('header', struct_common_firmware_header, 0), ('ucode_start_addr', uint32_t, 32)])
 @c.record
 class struct_smc_firmware_header_v2_0(c.Struct):
   SIZE = 44
   v1_0: struct_smc_firmware_header_v1_0
   ppt_offset_bytes: int
   ppt_size_bytes: int
-struct_smc_firmware_header_v2_0.register_fields([('v1_0', struct_smc_firmware_header_v1_0, 0), ('ppt_offset_bytes', ctypes.c_uint32, 36), ('ppt_size_bytes', ctypes.c_uint32, 40)])
+struct_smc_firmware_header_v2_0.register_fields([('v1_0', struct_smc_firmware_header_v1_0, 0), ('ppt_offset_bytes', uint32_t, 36), ('ppt_size_bytes', uint32_t, 40)])
 @c.record
 class struct_smc_soft_pptable_entry(c.Struct):
   SIZE = 12
   id: int
   ppt_offset_bytes: int
   ppt_size_bytes: int
-struct_smc_soft_pptable_entry.register_fields([('id', ctypes.c_uint32, 0), ('ppt_offset_bytes', ctypes.c_uint32, 4), ('ppt_size_bytes', ctypes.c_uint32, 8)])
+struct_smc_soft_pptable_entry.register_fields([('id', uint32_t, 0), ('ppt_offset_bytes', uint32_t, 4), ('ppt_size_bytes', uint32_t, 8)])
 @c.record
 class struct_smc_firmware_header_v2_1(c.Struct):
   SIZE = 44
   v1_0: struct_smc_firmware_header_v1_0
   pptable_count: int
   pptable_entry_offset: int
-struct_smc_firmware_header_v2_1.register_fields([('v1_0', struct_smc_firmware_header_v1_0, 0), ('pptable_count', ctypes.c_uint32, 36), ('pptable_entry_offset', ctypes.c_uint32, 40)])
+struct_smc_firmware_header_v2_1.register_fields([('v1_0', struct_smc_firmware_header_v1_0, 0), ('pptable_count', uint32_t, 36), ('pptable_entry_offset', uint32_t, 40)])
 @c.record
 class struct_psp_fw_legacy_bin_desc(c.Struct):
   SIZE = 12
   fw_version: int
   offset_bytes: int
   size_bytes: int
-struct_psp_fw_legacy_bin_desc.register_fields([('fw_version', ctypes.c_uint32, 0), ('offset_bytes', ctypes.c_uint32, 4), ('size_bytes', ctypes.c_uint32, 8)])
+struct_psp_fw_legacy_bin_desc.register_fields([('fw_version', uint32_t, 0), ('offset_bytes', uint32_t, 4), ('size_bytes', uint32_t, 8)])
 @c.record
 class struct_psp_firmware_header_v1_0(c.Struct):
   SIZE = 44
@@ -2828,7 +2828,7 @@ class struct_psp_fw_bin_desc(c.Struct):
   fw_version: int
   offset_bytes: int
   size_bytes: int
-struct_psp_fw_bin_desc.register_fields([('fw_type', ctypes.c_uint32, 0), ('fw_version', ctypes.c_uint32, 4), ('offset_bytes', ctypes.c_uint32, 8), ('size_bytes', ctypes.c_uint32, 12)])
+struct_psp_fw_bin_desc.register_fields([('fw_type', uint32_t, 0), ('fw_version', uint32_t, 4), ('offset_bytes', uint32_t, 8), ('size_bytes', uint32_t, 12)])
 enum_psp_fw_type: dict[int, str] = {(PSP_FW_TYPE_UNKOWN:=0): 'PSP_FW_TYPE_UNKOWN', (PSP_FW_TYPE_PSP_SOS:=1): 'PSP_FW_TYPE_PSP_SOS', (PSP_FW_TYPE_PSP_SYS_DRV:=2): 'PSP_FW_TYPE_PSP_SYS_DRV', (PSP_FW_TYPE_PSP_KDB:=3): 'PSP_FW_TYPE_PSP_KDB', (PSP_FW_TYPE_PSP_TOC:=4): 'PSP_FW_TYPE_PSP_TOC', (PSP_FW_TYPE_PSP_SPL:=5): 'PSP_FW_TYPE_PSP_SPL', (PSP_FW_TYPE_PSP_RL:=6): 'PSP_FW_TYPE_PSP_RL', (PSP_FW_TYPE_PSP_SOC_DRV:=7): 'PSP_FW_TYPE_PSP_SOC_DRV', (PSP_FW_TYPE_PSP_INTF_DRV:=8): 'PSP_FW_TYPE_PSP_INTF_DRV', (PSP_FW_TYPE_PSP_DBG_DRV:=9): 'PSP_FW_TYPE_PSP_DBG_DRV', (PSP_FW_TYPE_PSP_RAS_DRV:=10): 'PSP_FW_TYPE_PSP_RAS_DRV', (PSP_FW_TYPE_PSP_IPKEYMGR_DRV:=11): 'PSP_FW_TYPE_PSP_IPKEYMGR_DRV', (PSP_FW_TYPE_MAX_INDEX:=12): 'PSP_FW_TYPE_MAX_INDEX'}
 @c.record
 class struct_psp_firmware_header_v2_0(c.Struct):
@@ -2836,7 +2836,7 @@ class struct_psp_firmware_header_v2_0(c.Struct):
   header: struct_common_firmware_header
   psp_fw_bin_count: int
   psp_fw_bin: c.Array[struct_psp_fw_bin_desc, Literal[1]]
-struct_psp_firmware_header_v2_0.register_fields([('header', struct_common_firmware_header, 0), ('psp_fw_bin_count', ctypes.c_uint32, 32), ('psp_fw_bin', c.Array[struct_psp_fw_bin_desc, Literal[1]], 36)])
+struct_psp_firmware_header_v2_0.register_fields([('header', struct_common_firmware_header, 0), ('psp_fw_bin_count', uint32_t, 32), ('psp_fw_bin', c.Array[struct_psp_fw_bin_desc, Literal[1]], 36)])
 @c.record
 class struct_psp_firmware_header_v2_1(c.Struct):
   SIZE = 56
@@ -2844,7 +2844,7 @@ class struct_psp_firmware_header_v2_1(c.Struct):
   psp_fw_bin_count: int
   psp_aux_fw_bin_index: int
   psp_fw_bin: c.Array[struct_psp_fw_bin_desc, Literal[1]]
-struct_psp_firmware_header_v2_1.register_fields([('header', struct_common_firmware_header, 0), ('psp_fw_bin_count', ctypes.c_uint32, 32), ('psp_aux_fw_bin_index', ctypes.c_uint32, 36), ('psp_fw_bin', c.Array[struct_psp_fw_bin_desc, Literal[1]], 40)])
+struct_psp_firmware_header_v2_1.register_fields([('header', struct_common_firmware_header, 0), ('psp_fw_bin_count', uint32_t, 32), ('psp_aux_fw_bin_index', uint32_t, 36), ('psp_fw_bin', c.Array[struct_psp_fw_bin_desc, Literal[1]], 40)])
 @c.record
 class struct_ta_firmware_header_v1_0(c.Struct):
   SIZE = 92
@@ -2862,7 +2862,7 @@ class struct_ta_firmware_header_v2_0(c.Struct):
   header: struct_common_firmware_header
   ta_fw_bin_count: int
   ta_fw_bin: c.Array[struct_psp_fw_bin_desc, Literal[1]]
-struct_ta_firmware_header_v2_0.register_fields([('header', struct_common_firmware_header, 0), ('ta_fw_bin_count', ctypes.c_uint32, 32), ('ta_fw_bin', c.Array[struct_psp_fw_bin_desc, Literal[1]], 36)])
+struct_ta_firmware_header_v2_0.register_fields([('header', struct_common_firmware_header, 0), ('ta_fw_bin_count', uint32_t, 32), ('ta_fw_bin', c.Array[struct_psp_fw_bin_desc, Literal[1]], 36)])
 @c.record
 class struct_gfx_firmware_header_v1_0(c.Struct):
   SIZE = 44
@@ -2870,7 +2870,7 @@ class struct_gfx_firmware_header_v1_0(c.Struct):
   ucode_feature_version: int
   jt_offset: int
   jt_size: int
-struct_gfx_firmware_header_v1_0.register_fields([('header', struct_common_firmware_header, 0), ('ucode_feature_version', ctypes.c_uint32, 32), ('jt_offset', ctypes.c_uint32, 36), ('jt_size', ctypes.c_uint32, 40)])
+struct_gfx_firmware_header_v1_0.register_fields([('header', struct_common_firmware_header, 0), ('ucode_feature_version', uint32_t, 32), ('jt_offset', uint32_t, 36), ('jt_size', uint32_t, 40)])
 @c.record
 class struct_gfx_firmware_header_v2_0(c.Struct):
   SIZE = 60
@@ -2882,7 +2882,7 @@ class struct_gfx_firmware_header_v2_0(c.Struct):
   data_offset_bytes: int
   ucode_start_addr_lo: int
   ucode_start_addr_hi: int
-struct_gfx_firmware_header_v2_0.register_fields([('header', struct_common_firmware_header, 0), ('ucode_feature_version', ctypes.c_uint32, 32), ('ucode_size_bytes', ctypes.c_uint32, 36), ('ucode_offset_bytes', ctypes.c_uint32, 40), ('data_size_bytes', ctypes.c_uint32, 44), ('data_offset_bytes', ctypes.c_uint32, 48), ('ucode_start_addr_lo', ctypes.c_uint32, 52), ('ucode_start_addr_hi', ctypes.c_uint32, 56)])
+struct_gfx_firmware_header_v2_0.register_fields([('header', struct_common_firmware_header, 0), ('ucode_feature_version', uint32_t, 32), ('ucode_size_bytes', uint32_t, 36), ('ucode_offset_bytes', uint32_t, 40), ('data_size_bytes', uint32_t, 44), ('data_offset_bytes', uint32_t, 48), ('ucode_start_addr_lo', uint32_t, 52), ('ucode_start_addr_hi', uint32_t, 56)])
 @c.record
 class struct_mes_firmware_header_v1_0(c.Struct):
   SIZE = 72
@@ -2897,7 +2897,7 @@ class struct_mes_firmware_header_v1_0(c.Struct):
   mes_uc_start_addr_hi: int
   mes_data_start_addr_lo: int
   mes_data_start_addr_hi: int
-struct_mes_firmware_header_v1_0.register_fields([('header', struct_common_firmware_header, 0), ('mes_ucode_version', ctypes.c_uint32, 32), ('mes_ucode_size_bytes', ctypes.c_uint32, 36), ('mes_ucode_offset_bytes', ctypes.c_uint32, 40), ('mes_ucode_data_version', ctypes.c_uint32, 44), ('mes_ucode_data_size_bytes', ctypes.c_uint32, 48), ('mes_ucode_data_offset_bytes', ctypes.c_uint32, 52), ('mes_uc_start_addr_lo', ctypes.c_uint32, 56), ('mes_uc_start_addr_hi', ctypes.c_uint32, 60), ('mes_data_start_addr_lo', ctypes.c_uint32, 64), ('mes_data_start_addr_hi', ctypes.c_uint32, 68)])
+struct_mes_firmware_header_v1_0.register_fields([('header', struct_common_firmware_header, 0), ('mes_ucode_version', uint32_t, 32), ('mes_ucode_size_bytes', uint32_t, 36), ('mes_ucode_offset_bytes', uint32_t, 40), ('mes_ucode_data_version', uint32_t, 44), ('mes_ucode_data_size_bytes', uint32_t, 48), ('mes_ucode_data_offset_bytes', uint32_t, 52), ('mes_uc_start_addr_lo', uint32_t, 56), ('mes_uc_start_addr_hi', uint32_t, 60), ('mes_data_start_addr_lo', uint32_t, 64), ('mes_data_start_addr_hi', uint32_t, 68)])
 @c.record
 class struct_rlc_firmware_header_v1_0(c.Struct):
   SIZE = 52
@@ -2907,7 +2907,7 @@ class struct_rlc_firmware_header_v1_0(c.Struct):
   clear_state_descriptor_offset: int
   avail_scratch_ram_locations: int
   master_pkt_description_offset: int
-struct_rlc_firmware_header_v1_0.register_fields([('header', struct_common_firmware_header, 0), ('ucode_feature_version', ctypes.c_uint32, 32), ('save_and_restore_offset', ctypes.c_uint32, 36), ('clear_state_descriptor_offset', ctypes.c_uint32, 40), ('avail_scratch_ram_locations', ctypes.c_uint32, 44), ('master_pkt_description_offset', ctypes.c_uint32, 48)])
+struct_rlc_firmware_header_v1_0.register_fields([('header', struct_common_firmware_header, 0), ('ucode_feature_version', uint32_t, 32), ('save_and_restore_offset', uint32_t, 36), ('clear_state_descriptor_offset', uint32_t, 40), ('avail_scratch_ram_locations', uint32_t, 44), ('master_pkt_description_offset', uint32_t, 48)])
 @c.record
 class struct_rlc_firmware_header_v2_0(c.Struct):
   SIZE = 104
@@ -2930,7 +2930,7 @@ class struct_rlc_firmware_header_v2_0(c.Struct):
   reg_list_format_separate_array_offset_bytes: int
   reg_list_separate_size_bytes: int
   reg_list_separate_array_offset_bytes: int
-struct_rlc_firmware_header_v2_0.register_fields([('header', struct_common_firmware_header, 0), ('ucode_feature_version', ctypes.c_uint32, 32), ('jt_offset', ctypes.c_uint32, 36), ('jt_size', ctypes.c_uint32, 40), ('save_and_restore_offset', ctypes.c_uint32, 44), ('clear_state_descriptor_offset', ctypes.c_uint32, 48), ('avail_scratch_ram_locations', ctypes.c_uint32, 52), ('reg_restore_list_size', ctypes.c_uint32, 56), ('reg_list_format_start', ctypes.c_uint32, 60), ('reg_list_format_separate_start', ctypes.c_uint32, 64), ('starting_offsets_start', ctypes.c_uint32, 68), ('reg_list_format_size_bytes', ctypes.c_uint32, 72), ('reg_list_format_array_offset_bytes', ctypes.c_uint32, 76), ('reg_list_size_bytes', ctypes.c_uint32, 80), ('reg_list_array_offset_bytes', ctypes.c_uint32, 84), ('reg_list_format_separate_size_bytes', ctypes.c_uint32, 88), ('reg_list_format_separate_array_offset_bytes', ctypes.c_uint32, 92), ('reg_list_separate_size_bytes', ctypes.c_uint32, 96), ('reg_list_separate_array_offset_bytes', ctypes.c_uint32, 100)])
+struct_rlc_firmware_header_v2_0.register_fields([('header', struct_common_firmware_header, 0), ('ucode_feature_version', uint32_t, 32), ('jt_offset', uint32_t, 36), ('jt_size', uint32_t, 40), ('save_and_restore_offset', uint32_t, 44), ('clear_state_descriptor_offset', uint32_t, 48), ('avail_scratch_ram_locations', uint32_t, 52), ('reg_restore_list_size', uint32_t, 56), ('reg_list_format_start', uint32_t, 60), ('reg_list_format_separate_start', uint32_t, 64), ('starting_offsets_start', uint32_t, 68), ('reg_list_format_size_bytes', uint32_t, 72), ('reg_list_format_array_offset_bytes', uint32_t, 76), ('reg_list_size_bytes', uint32_t, 80), ('reg_list_array_offset_bytes', uint32_t, 84), ('reg_list_format_separate_size_bytes', uint32_t, 88), ('reg_list_format_separate_array_offset_bytes', uint32_t, 92), ('reg_list_separate_size_bytes', uint32_t, 96), ('reg_list_separate_array_offset_bytes', uint32_t, 100)])
 @c.record
 class struct_rlc_firmware_header_v2_1(c.Struct):
   SIZE = 156
@@ -2948,7 +2948,7 @@ class struct_rlc_firmware_header_v2_1(c.Struct):
   save_restore_list_srm_feature_ver: int
   save_restore_list_srm_size_bytes: int
   save_restore_list_srm_offset_bytes: int
-struct_rlc_firmware_header_v2_1.register_fields([('v2_0', struct_rlc_firmware_header_v2_0, 0), ('reg_list_format_direct_reg_list_length', ctypes.c_uint32, 104), ('save_restore_list_cntl_ucode_ver', ctypes.c_uint32, 108), ('save_restore_list_cntl_feature_ver', ctypes.c_uint32, 112), ('save_restore_list_cntl_size_bytes', ctypes.c_uint32, 116), ('save_restore_list_cntl_offset_bytes', ctypes.c_uint32, 120), ('save_restore_list_gpm_ucode_ver', ctypes.c_uint32, 124), ('save_restore_list_gpm_feature_ver', ctypes.c_uint32, 128), ('save_restore_list_gpm_size_bytes', ctypes.c_uint32, 132), ('save_restore_list_gpm_offset_bytes', ctypes.c_uint32, 136), ('save_restore_list_srm_ucode_ver', ctypes.c_uint32, 140), ('save_restore_list_srm_feature_ver', ctypes.c_uint32, 144), ('save_restore_list_srm_size_bytes', ctypes.c_uint32, 148), ('save_restore_list_srm_offset_bytes', ctypes.c_uint32, 152)])
+struct_rlc_firmware_header_v2_1.register_fields([('v2_0', struct_rlc_firmware_header_v2_0, 0), ('reg_list_format_direct_reg_list_length', uint32_t, 104), ('save_restore_list_cntl_ucode_ver', uint32_t, 108), ('save_restore_list_cntl_feature_ver', uint32_t, 112), ('save_restore_list_cntl_size_bytes', uint32_t, 116), ('save_restore_list_cntl_offset_bytes', uint32_t, 120), ('save_restore_list_gpm_ucode_ver', uint32_t, 124), ('save_restore_list_gpm_feature_ver', uint32_t, 128), ('save_restore_list_gpm_size_bytes', uint32_t, 132), ('save_restore_list_gpm_offset_bytes', uint32_t, 136), ('save_restore_list_srm_ucode_ver', uint32_t, 140), ('save_restore_list_srm_feature_ver', uint32_t, 144), ('save_restore_list_srm_size_bytes', uint32_t, 148), ('save_restore_list_srm_offset_bytes', uint32_t, 152)])
 @c.record
 class struct_rlc_firmware_header_v2_2(c.Struct):
   SIZE = 172
@@ -2957,7 +2957,7 @@ class struct_rlc_firmware_header_v2_2(c.Struct):
   rlc_iram_ucode_offset_bytes: int
   rlc_dram_ucode_size_bytes: int
   rlc_dram_ucode_offset_bytes: int
-struct_rlc_firmware_header_v2_2.register_fields([('v2_1', struct_rlc_firmware_header_v2_1, 0), ('rlc_iram_ucode_size_bytes', ctypes.c_uint32, 156), ('rlc_iram_ucode_offset_bytes', ctypes.c_uint32, 160), ('rlc_dram_ucode_size_bytes', ctypes.c_uint32, 164), ('rlc_dram_ucode_offset_bytes', ctypes.c_uint32, 168)])
+struct_rlc_firmware_header_v2_2.register_fields([('v2_1', struct_rlc_firmware_header_v2_1, 0), ('rlc_iram_ucode_size_bytes', uint32_t, 156), ('rlc_iram_ucode_offset_bytes', uint32_t, 160), ('rlc_dram_ucode_size_bytes', uint32_t, 164), ('rlc_dram_ucode_offset_bytes', uint32_t, 168)])
 @c.record
 class struct_rlc_firmware_header_v2_3(c.Struct):
   SIZE = 204
@@ -2970,7 +2970,7 @@ class struct_rlc_firmware_header_v2_3(c.Struct):
   rlcv_ucode_feature_version: int
   rlcv_ucode_size_bytes: int
   rlcv_ucode_offset_bytes: int
-struct_rlc_firmware_header_v2_3.register_fields([('v2_2', struct_rlc_firmware_header_v2_2, 0), ('rlcp_ucode_version', ctypes.c_uint32, 172), ('rlcp_ucode_feature_version', ctypes.c_uint32, 176), ('rlcp_ucode_size_bytes', ctypes.c_uint32, 180), ('rlcp_ucode_offset_bytes', ctypes.c_uint32, 184), ('rlcv_ucode_version', ctypes.c_uint32, 188), ('rlcv_ucode_feature_version', ctypes.c_uint32, 192), ('rlcv_ucode_size_bytes', ctypes.c_uint32, 196), ('rlcv_ucode_offset_bytes', ctypes.c_uint32, 200)])
+struct_rlc_firmware_header_v2_3.register_fields([('v2_2', struct_rlc_firmware_header_v2_2, 0), ('rlcp_ucode_version', uint32_t, 172), ('rlcp_ucode_feature_version', uint32_t, 176), ('rlcp_ucode_size_bytes', uint32_t, 180), ('rlcp_ucode_offset_bytes', uint32_t, 184), ('rlcv_ucode_version', uint32_t, 188), ('rlcv_ucode_feature_version', uint32_t, 192), ('rlcv_ucode_size_bytes', uint32_t, 196), ('rlcv_ucode_offset_bytes', uint32_t, 200)])
 @c.record
 class struct_rlc_firmware_header_v2_4(c.Struct):
   SIZE = 244
@@ -2985,7 +2985,7 @@ class struct_rlc_firmware_header_v2_4(c.Struct):
   se2_tap_delays_ucode_offset_bytes: int
   se3_tap_delays_ucode_size_bytes: int
   se3_tap_delays_ucode_offset_bytes: int
-struct_rlc_firmware_header_v2_4.register_fields([('v2_3', struct_rlc_firmware_header_v2_3, 0), ('global_tap_delays_ucode_size_bytes', ctypes.c_uint32, 204), ('global_tap_delays_ucode_offset_bytes', ctypes.c_uint32, 208), ('se0_tap_delays_ucode_size_bytes', ctypes.c_uint32, 212), ('se0_tap_delays_ucode_offset_bytes', ctypes.c_uint32, 216), ('se1_tap_delays_ucode_size_bytes', ctypes.c_uint32, 220), ('se1_tap_delays_ucode_offset_bytes', ctypes.c_uint32, 224), ('se2_tap_delays_ucode_size_bytes', ctypes.c_uint32, 228), ('se2_tap_delays_ucode_offset_bytes', ctypes.c_uint32, 232), ('se3_tap_delays_ucode_size_bytes', ctypes.c_uint32, 236), ('se3_tap_delays_ucode_offset_bytes', ctypes.c_uint32, 240)])
+struct_rlc_firmware_header_v2_4.register_fields([('v2_3', struct_rlc_firmware_header_v2_3, 0), ('global_tap_delays_ucode_size_bytes', uint32_t, 204), ('global_tap_delays_ucode_offset_bytes', uint32_t, 208), ('se0_tap_delays_ucode_size_bytes', uint32_t, 212), ('se0_tap_delays_ucode_offset_bytes', uint32_t, 216), ('se1_tap_delays_ucode_size_bytes', uint32_t, 220), ('se1_tap_delays_ucode_offset_bytes', uint32_t, 224), ('se2_tap_delays_ucode_size_bytes', uint32_t, 228), ('se2_tap_delays_ucode_offset_bytes', uint32_t, 232), ('se3_tap_delays_ucode_size_bytes', uint32_t, 236), ('se3_tap_delays_ucode_offset_bytes', uint32_t, 240)])
 @c.record
 class struct_sdma_firmware_header_v1_0(c.Struct):
   SIZE = 48
@@ -2994,13 +2994,13 @@ class struct_sdma_firmware_header_v1_0(c.Struct):
   ucode_change_version: int
   jt_offset: int
   jt_size: int
-struct_sdma_firmware_header_v1_0.register_fields([('header', struct_common_firmware_header, 0), ('ucode_feature_version', ctypes.c_uint32, 32), ('ucode_change_version', ctypes.c_uint32, 36), ('jt_offset', ctypes.c_uint32, 40), ('jt_size', ctypes.c_uint32, 44)])
+struct_sdma_firmware_header_v1_0.register_fields([('header', struct_common_firmware_header, 0), ('ucode_feature_version', uint32_t, 32), ('ucode_change_version', uint32_t, 36), ('jt_offset', uint32_t, 40), ('jt_size', uint32_t, 44)])
 @c.record
 class struct_sdma_firmware_header_v1_1(c.Struct):
   SIZE = 52
   v1_0: struct_sdma_firmware_header_v1_0
   digest_size: int
-struct_sdma_firmware_header_v1_1.register_fields([('v1_0', struct_sdma_firmware_header_v1_0, 0), ('digest_size', ctypes.c_uint32, 48)])
+struct_sdma_firmware_header_v1_1.register_fields([('v1_0', struct_sdma_firmware_header_v1_0, 0), ('digest_size', uint32_t, 48)])
 @c.record
 class struct_sdma_firmware_header_v2_0(c.Struct):
   SIZE = 64
@@ -3013,7 +3013,7 @@ class struct_sdma_firmware_header_v2_0(c.Struct):
   ctl_ucode_size_bytes: int
   ctl_jt_offset: int
   ctl_jt_size: int
-struct_sdma_firmware_header_v2_0.register_fields([('header', struct_common_firmware_header, 0), ('ucode_feature_version', ctypes.c_uint32, 32), ('ctx_ucode_size_bytes', ctypes.c_uint32, 36), ('ctx_jt_offset', ctypes.c_uint32, 40), ('ctx_jt_size', ctypes.c_uint32, 44), ('ctl_ucode_offset', ctypes.c_uint32, 48), ('ctl_ucode_size_bytes', ctypes.c_uint32, 52), ('ctl_jt_offset', ctypes.c_uint32, 56), ('ctl_jt_size', ctypes.c_uint32, 60)])
+struct_sdma_firmware_header_v2_0.register_fields([('header', struct_common_firmware_header, 0), ('ucode_feature_version', uint32_t, 32), ('ctx_ucode_size_bytes', uint32_t, 36), ('ctx_jt_offset', uint32_t, 40), ('ctx_jt_size', uint32_t, 44), ('ctl_ucode_offset', uint32_t, 48), ('ctl_ucode_size_bytes', uint32_t, 52), ('ctl_jt_offset', uint32_t, 56), ('ctl_jt_size', uint32_t, 60)])
 @c.record
 class struct_vpe_firmware_header_v1_0(c.Struct):
   SIZE = 64
@@ -3026,7 +3026,7 @@ class struct_vpe_firmware_header_v1_0(c.Struct):
   ctl_ucode_size_bytes: int
   ctl_jt_offset: int
   ctl_jt_size: int
-struct_vpe_firmware_header_v1_0.register_fields([('header', struct_common_firmware_header, 0), ('ucode_feature_version', ctypes.c_uint32, 32), ('ctx_ucode_size_bytes', ctypes.c_uint32, 36), ('ctx_jt_offset', ctypes.c_uint32, 40), ('ctx_jt_size', ctypes.c_uint32, 44), ('ctl_ucode_offset', ctypes.c_uint32, 48), ('ctl_ucode_size_bytes', ctypes.c_uint32, 52), ('ctl_jt_offset', ctypes.c_uint32, 56), ('ctl_jt_size', ctypes.c_uint32, 60)])
+struct_vpe_firmware_header_v1_0.register_fields([('header', struct_common_firmware_header, 0), ('ucode_feature_version', uint32_t, 32), ('ctx_ucode_size_bytes', uint32_t, 36), ('ctx_jt_offset', uint32_t, 40), ('ctx_jt_size', uint32_t, 44), ('ctl_ucode_offset', uint32_t, 48), ('ctl_ucode_size_bytes', uint32_t, 52), ('ctl_jt_offset', uint32_t, 56), ('ctl_jt_size', uint32_t, 60)])
 @c.record
 class struct_umsch_mm_firmware_header_v1_0(c.Struct):
   SIZE = 80
@@ -3043,7 +3043,7 @@ class struct_umsch_mm_firmware_header_v1_0(c.Struct):
   umsch_mm_uc_start_addr_hi: int
   umsch_mm_data_start_addr_lo: int
   umsch_mm_data_start_addr_hi: int
-struct_umsch_mm_firmware_header_v1_0.register_fields([('header', struct_common_firmware_header, 0), ('umsch_mm_ucode_version', ctypes.c_uint32, 32), ('umsch_mm_ucode_size_bytes', ctypes.c_uint32, 36), ('umsch_mm_ucode_offset_bytes', ctypes.c_uint32, 40), ('umsch_mm_ucode_data_version', ctypes.c_uint32, 44), ('umsch_mm_ucode_data_size_bytes', ctypes.c_uint32, 48), ('umsch_mm_ucode_data_offset_bytes', ctypes.c_uint32, 52), ('umsch_mm_irq_start_addr_lo', ctypes.c_uint32, 56), ('umsch_mm_irq_start_addr_hi', ctypes.c_uint32, 60), ('umsch_mm_uc_start_addr_lo', ctypes.c_uint32, 64), ('umsch_mm_uc_start_addr_hi', ctypes.c_uint32, 68), ('umsch_mm_data_start_addr_lo', ctypes.c_uint32, 72), ('umsch_mm_data_start_addr_hi', ctypes.c_uint32, 76)])
+struct_umsch_mm_firmware_header_v1_0.register_fields([('header', struct_common_firmware_header, 0), ('umsch_mm_ucode_version', uint32_t, 32), ('umsch_mm_ucode_size_bytes', uint32_t, 36), ('umsch_mm_ucode_offset_bytes', uint32_t, 40), ('umsch_mm_ucode_data_version', uint32_t, 44), ('umsch_mm_ucode_data_size_bytes', uint32_t, 48), ('umsch_mm_ucode_data_offset_bytes', uint32_t, 52), ('umsch_mm_irq_start_addr_lo', uint32_t, 56), ('umsch_mm_irq_start_addr_hi', uint32_t, 60), ('umsch_mm_uc_start_addr_lo', uint32_t, 64), ('umsch_mm_uc_start_addr_hi', uint32_t, 68), ('umsch_mm_data_start_addr_lo', uint32_t, 72), ('umsch_mm_data_start_addr_hi', uint32_t, 76)])
 @c.record
 class struct_sdma_firmware_header_v3_0(c.Struct):
   SIZE = 44
@@ -3051,7 +3051,7 @@ class struct_sdma_firmware_header_v3_0(c.Struct):
   ucode_feature_version: int
   ucode_offset_bytes: int
   ucode_size_bytes: int
-struct_sdma_firmware_header_v3_0.register_fields([('header', struct_common_firmware_header, 0), ('ucode_feature_version', ctypes.c_uint32, 32), ('ucode_offset_bytes', ctypes.c_uint32, 36), ('ucode_size_bytes', ctypes.c_uint32, 40)])
+struct_sdma_firmware_header_v3_0.register_fields([('header', struct_common_firmware_header, 0), ('ucode_feature_version', uint32_t, 32), ('ucode_offset_bytes', uint32_t, 36), ('ucode_size_bytes', uint32_t, 40)])
 @c.record
 class struct_gpu_info_firmware_v1_0(c.Struct):
   SIZE = 60
@@ -3070,35 +3070,35 @@ class struct_gpu_info_firmware_v1_0(c.Struct):
   gc_max_waves_per_simd: int
   gc_max_scratch_slots_per_cu: int
   gc_lds_size: int
-struct_gpu_info_firmware_v1_0.register_fields([('gc_num_se', ctypes.c_uint32, 0), ('gc_num_cu_per_sh', ctypes.c_uint32, 4), ('gc_num_sh_per_se', ctypes.c_uint32, 8), ('gc_num_rb_per_se', ctypes.c_uint32, 12), ('gc_num_tccs', ctypes.c_uint32, 16), ('gc_num_gprs', ctypes.c_uint32, 20), ('gc_num_max_gs_thds', ctypes.c_uint32, 24), ('gc_gs_table_depth', ctypes.c_uint32, 28), ('gc_gsprim_buff_depth', ctypes.c_uint32, 32), ('gc_parameter_cache_depth', ctypes.c_uint32, 36), ('gc_double_offchip_lds_buffer', ctypes.c_uint32, 40), ('gc_wave_size', ctypes.c_uint32, 44), ('gc_max_waves_per_simd', ctypes.c_uint32, 48), ('gc_max_scratch_slots_per_cu', ctypes.c_uint32, 52), ('gc_lds_size', ctypes.c_uint32, 56)])
+struct_gpu_info_firmware_v1_0.register_fields([('gc_num_se', uint32_t, 0), ('gc_num_cu_per_sh', uint32_t, 4), ('gc_num_sh_per_se', uint32_t, 8), ('gc_num_rb_per_se', uint32_t, 12), ('gc_num_tccs', uint32_t, 16), ('gc_num_gprs', uint32_t, 20), ('gc_num_max_gs_thds', uint32_t, 24), ('gc_gs_table_depth', uint32_t, 28), ('gc_gsprim_buff_depth', uint32_t, 32), ('gc_parameter_cache_depth', uint32_t, 36), ('gc_double_offchip_lds_buffer', uint32_t, 40), ('gc_wave_size', uint32_t, 44), ('gc_max_waves_per_simd', uint32_t, 48), ('gc_max_scratch_slots_per_cu', uint32_t, 52), ('gc_lds_size', uint32_t, 56)])
 @c.record
 class struct_gpu_info_firmware_v1_1(c.Struct):
   SIZE = 68
   v1_0: struct_gpu_info_firmware_v1_0
   num_sc_per_sh: int
   num_packer_per_sc: int
-struct_gpu_info_firmware_v1_1.register_fields([('v1_0', struct_gpu_info_firmware_v1_0, 0), ('num_sc_per_sh', ctypes.c_uint32, 60), ('num_packer_per_sc', ctypes.c_uint32, 64)])
+struct_gpu_info_firmware_v1_1.register_fields([('v1_0', struct_gpu_info_firmware_v1_0, 0), ('num_sc_per_sh', uint32_t, 60), ('num_packer_per_sc', uint32_t, 64)])
 @c.record
 class struct_gpu_info_firmware_header_v1_0(c.Struct):
   SIZE = 36
   header: struct_common_firmware_header
   version_major: int
   version_minor: int
-struct_gpu_info_firmware_header_v1_0.register_fields([('header', struct_common_firmware_header, 0), ('version_major', ctypes.c_uint16, 32), ('version_minor', ctypes.c_uint16, 34)])
+struct_gpu_info_firmware_header_v1_0.register_fields([('header', struct_common_firmware_header, 0), ('version_major', uint16_t, 32), ('version_minor', uint16_t, 34)])
 @c.record
 class struct_dmcu_firmware_header_v1_0(c.Struct):
   SIZE = 40
   header: struct_common_firmware_header
   intv_offset_bytes: int
   intv_size_bytes: int
-struct_dmcu_firmware_header_v1_0.register_fields([('header', struct_common_firmware_header, 0), ('intv_offset_bytes', ctypes.c_uint32, 32), ('intv_size_bytes', ctypes.c_uint32, 36)])
+struct_dmcu_firmware_header_v1_0.register_fields([('header', struct_common_firmware_header, 0), ('intv_offset_bytes', uint32_t, 32), ('intv_size_bytes', uint32_t, 36)])
 @c.record
 class struct_dmcub_firmware_header_v1_0(c.Struct):
   SIZE = 40
   header: struct_common_firmware_header
   inst_const_bytes: int
   bss_data_bytes: int
-struct_dmcub_firmware_header_v1_0.register_fields([('header', struct_common_firmware_header, 0), ('inst_const_bytes', ctypes.c_uint32, 32), ('bss_data_bytes', ctypes.c_uint32, 36)])
+struct_dmcub_firmware_header_v1_0.register_fields([('header', struct_common_firmware_header, 0), ('inst_const_bytes', uint32_t, 32), ('bss_data_bytes', uint32_t, 36)])
 @c.record
 class struct_imu_firmware_header_v1_0(c.Struct):
   SIZE = 48
@@ -3107,7 +3107,7 @@ class struct_imu_firmware_header_v1_0(c.Struct):
   imu_iram_ucode_offset_bytes: int
   imu_dram_ucode_size_bytes: int
   imu_dram_ucode_offset_bytes: int
-struct_imu_firmware_header_v1_0.register_fields([('header', struct_common_firmware_header, 0), ('imu_iram_ucode_size_bytes', ctypes.c_uint32, 32), ('imu_iram_ucode_offset_bytes', ctypes.c_uint32, 36), ('imu_dram_ucode_size_bytes', ctypes.c_uint32, 40), ('imu_dram_ucode_offset_bytes', ctypes.c_uint32, 44)])
+struct_imu_firmware_header_v1_0.register_fields([('header', struct_common_firmware_header, 0), ('imu_iram_ucode_size_bytes', uint32_t, 32), ('imu_iram_ucode_offset_bytes', uint32_t, 36), ('imu_dram_ucode_size_bytes', uint32_t, 40), ('imu_dram_ucode_offset_bytes', uint32_t, 44)])
 @c.record
 class union_amdgpu_firmware_header(c.Struct):
   SIZE = 256
@@ -3139,7 +3139,7 @@ class union_amdgpu_firmware_header(c.Struct):
   dmcub: struct_dmcub_firmware_header_v1_0
   imu: struct_imu_firmware_header_v1_0
   raw: c.Array[ctypes.c_ubyte, Literal[256]]
-union_amdgpu_firmware_header.register_fields([('common', struct_common_firmware_header, 0), ('mc', struct_mc_firmware_header_v1_0, 0), ('smc', struct_smc_firmware_header_v1_0, 0), ('smc_v2_0', struct_smc_firmware_header_v2_0, 0), ('psp', struct_psp_firmware_header_v1_0, 0), ('psp_v1_1', struct_psp_firmware_header_v1_1, 0), ('psp_v1_3', struct_psp_firmware_header_v1_3, 0), ('psp_v2_0', struct_psp_firmware_header_v2_0, 0), ('psp_v2_1', struct_psp_firmware_header_v2_0, 0), ('ta', struct_ta_firmware_header_v1_0, 0), ('ta_v2_0', struct_ta_firmware_header_v2_0, 0), ('gfx', struct_gfx_firmware_header_v1_0, 0), ('gfx_v2_0', struct_gfx_firmware_header_v2_0, 0), ('rlc', struct_rlc_firmware_header_v1_0, 0), ('rlc_v2_0', struct_rlc_firmware_header_v2_0, 0), ('rlc_v2_1', struct_rlc_firmware_header_v2_1, 0), ('rlc_v2_2', struct_rlc_firmware_header_v2_2, 0), ('rlc_v2_3', struct_rlc_firmware_header_v2_3, 0), ('rlc_v2_4', struct_rlc_firmware_header_v2_4, 0), ('sdma', struct_sdma_firmware_header_v1_0, 0), ('sdma_v1_1', struct_sdma_firmware_header_v1_1, 0), ('sdma_v2_0', struct_sdma_firmware_header_v2_0, 0), ('sdma_v3_0', struct_sdma_firmware_header_v3_0, 0), ('gpu_info', struct_gpu_info_firmware_header_v1_0, 0), ('dmcu', struct_dmcu_firmware_header_v1_0, 0), ('dmcub', struct_dmcub_firmware_header_v1_0, 0), ('imu', struct_imu_firmware_header_v1_0, 0), ('raw', c.Array[ctypes.c_ubyte, Literal[256]], 0)])
+union_amdgpu_firmware_header.register_fields([('common', struct_common_firmware_header, 0), ('mc', struct_mc_firmware_header_v1_0, 0), ('smc', struct_smc_firmware_header_v1_0, 0), ('smc_v2_0', struct_smc_firmware_header_v2_0, 0), ('psp', struct_psp_firmware_header_v1_0, 0), ('psp_v1_1', struct_psp_firmware_header_v1_1, 0), ('psp_v1_3', struct_psp_firmware_header_v1_3, 0), ('psp_v2_0', struct_psp_firmware_header_v2_0, 0), ('psp_v2_1', struct_psp_firmware_header_v2_0, 0), ('ta', struct_ta_firmware_header_v1_0, 0), ('ta_v2_0', struct_ta_firmware_header_v2_0, 0), ('gfx', struct_gfx_firmware_header_v1_0, 0), ('gfx_v2_0', struct_gfx_firmware_header_v2_0, 0), ('rlc', struct_rlc_firmware_header_v1_0, 0), ('rlc_v2_0', struct_rlc_firmware_header_v2_0, 0), ('rlc_v2_1', struct_rlc_firmware_header_v2_1, 0), ('rlc_v2_2', struct_rlc_firmware_header_v2_2, 0), ('rlc_v2_3', struct_rlc_firmware_header_v2_3, 0), ('rlc_v2_4', struct_rlc_firmware_header_v2_4, 0), ('sdma', struct_sdma_firmware_header_v1_0, 0), ('sdma_v1_1', struct_sdma_firmware_header_v1_1, 0), ('sdma_v2_0', struct_sdma_firmware_header_v2_0, 0), ('sdma_v3_0', struct_sdma_firmware_header_v3_0, 0), ('gpu_info', struct_gpu_info_firmware_header_v1_0, 0), ('dmcu', struct_dmcu_firmware_header_v1_0, 0), ('dmcub', struct_dmcub_firmware_header_v1_0, 0), ('imu', struct_imu_firmware_header_v1_0, 0), ('raw', c.Array[uint8_t, Literal[256]], 0)])
 enum_AMDGPU_UCODE_ID: dict[int, str] = {(AMDGPU_UCODE_ID_CAP:=0): 'AMDGPU_UCODE_ID_CAP', (AMDGPU_UCODE_ID_SDMA0:=1): 'AMDGPU_UCODE_ID_SDMA0', (AMDGPU_UCODE_ID_SDMA1:=2): 'AMDGPU_UCODE_ID_SDMA1', (AMDGPU_UCODE_ID_SDMA2:=3): 'AMDGPU_UCODE_ID_SDMA2', (AMDGPU_UCODE_ID_SDMA3:=4): 'AMDGPU_UCODE_ID_SDMA3', (AMDGPU_UCODE_ID_SDMA4:=5): 'AMDGPU_UCODE_ID_SDMA4', (AMDGPU_UCODE_ID_SDMA5:=6): 'AMDGPU_UCODE_ID_SDMA5', (AMDGPU_UCODE_ID_SDMA6:=7): 'AMDGPU_UCODE_ID_SDMA6', (AMDGPU_UCODE_ID_SDMA7:=8): 'AMDGPU_UCODE_ID_SDMA7', (AMDGPU_UCODE_ID_SDMA_UCODE_TH0:=9): 'AMDGPU_UCODE_ID_SDMA_UCODE_TH0', (AMDGPU_UCODE_ID_SDMA_UCODE_TH1:=10): 'AMDGPU_UCODE_ID_SDMA_UCODE_TH1', (AMDGPU_UCODE_ID_SDMA_RS64:=11): 'AMDGPU_UCODE_ID_SDMA_RS64', (AMDGPU_UCODE_ID_CP_CE:=12): 'AMDGPU_UCODE_ID_CP_CE', (AMDGPU_UCODE_ID_CP_PFP:=13): 'AMDGPU_UCODE_ID_CP_PFP', (AMDGPU_UCODE_ID_CP_ME:=14): 'AMDGPU_UCODE_ID_CP_ME', (AMDGPU_UCODE_ID_CP_RS64_PFP:=15): 'AMDGPU_UCODE_ID_CP_RS64_PFP', (AMDGPU_UCODE_ID_CP_RS64_ME:=16): 'AMDGPU_UCODE_ID_CP_RS64_ME', (AMDGPU_UCODE_ID_CP_RS64_MEC:=17): 'AMDGPU_UCODE_ID_CP_RS64_MEC', (AMDGPU_UCODE_ID_CP_RS64_PFP_P0_STACK:=18): 'AMDGPU_UCODE_ID_CP_RS64_PFP_P0_STACK', (AMDGPU_UCODE_ID_CP_RS64_PFP_P1_STACK:=19): 'AMDGPU_UCODE_ID_CP_RS64_PFP_P1_STACK', (AMDGPU_UCODE_ID_CP_RS64_ME_P0_STACK:=20): 'AMDGPU_UCODE_ID_CP_RS64_ME_P0_STACK', (AMDGPU_UCODE_ID_CP_RS64_ME_P1_STACK:=21): 'AMDGPU_UCODE_ID_CP_RS64_ME_P1_STACK', (AMDGPU_UCODE_ID_CP_RS64_MEC_P0_STACK:=22): 'AMDGPU_UCODE_ID_CP_RS64_MEC_P0_STACK', (AMDGPU_UCODE_ID_CP_RS64_MEC_P1_STACK:=23): 'AMDGPU_UCODE_ID_CP_RS64_MEC_P1_STACK', (AMDGPU_UCODE_ID_CP_RS64_MEC_P2_STACK:=24): 'AMDGPU_UCODE_ID_CP_RS64_MEC_P2_STACK', (AMDGPU_UCODE_ID_CP_RS64_MEC_P3_STACK:=25): 'AMDGPU_UCODE_ID_CP_RS64_MEC_P3_STACK', (AMDGPU_UCODE_ID_CP_MEC1:=26): 'AMDGPU_UCODE_ID_CP_MEC1', (AMDGPU_UCODE_ID_CP_MEC1_JT:=27): 'AMDGPU_UCODE_ID_CP_MEC1_JT', (AMDGPU_UCODE_ID_CP_MEC2:=28): 'AMDGPU_UCODE_ID_CP_MEC2', (AMDGPU_UCODE_ID_CP_MEC2_JT:=29): 'AMDGPU_UCODE_ID_CP_MEC2_JT', (AMDGPU_UCODE_ID_CP_MES:=30): 'AMDGPU_UCODE_ID_CP_MES', (AMDGPU_UCODE_ID_CP_MES_DATA:=31): 'AMDGPU_UCODE_ID_CP_MES_DATA', (AMDGPU_UCODE_ID_CP_MES1:=32): 'AMDGPU_UCODE_ID_CP_MES1', (AMDGPU_UCODE_ID_CP_MES1_DATA:=33): 'AMDGPU_UCODE_ID_CP_MES1_DATA', (AMDGPU_UCODE_ID_IMU_I:=34): 'AMDGPU_UCODE_ID_IMU_I', (AMDGPU_UCODE_ID_IMU_D:=35): 'AMDGPU_UCODE_ID_IMU_D', (AMDGPU_UCODE_ID_GLOBAL_TAP_DELAYS:=36): 'AMDGPU_UCODE_ID_GLOBAL_TAP_DELAYS', (AMDGPU_UCODE_ID_SE0_TAP_DELAYS:=37): 'AMDGPU_UCODE_ID_SE0_TAP_DELAYS', (AMDGPU_UCODE_ID_SE1_TAP_DELAYS:=38): 'AMDGPU_UCODE_ID_SE1_TAP_DELAYS', (AMDGPU_UCODE_ID_SE2_TAP_DELAYS:=39): 'AMDGPU_UCODE_ID_SE2_TAP_DELAYS', (AMDGPU_UCODE_ID_SE3_TAP_DELAYS:=40): 'AMDGPU_UCODE_ID_SE3_TAP_DELAYS', (AMDGPU_UCODE_ID_RLC_RESTORE_LIST_CNTL:=41): 'AMDGPU_UCODE_ID_RLC_RESTORE_LIST_CNTL', (AMDGPU_UCODE_ID_RLC_RESTORE_LIST_GPM_MEM:=42): 'AMDGPU_UCODE_ID_RLC_RESTORE_LIST_GPM_MEM', (AMDGPU_UCODE_ID_RLC_RESTORE_LIST_SRM_MEM:=43): 'AMDGPU_UCODE_ID_RLC_RESTORE_LIST_SRM_MEM', (AMDGPU_UCODE_ID_RLC_IRAM:=44): 'AMDGPU_UCODE_ID_RLC_IRAM', (AMDGPU_UCODE_ID_RLC_DRAM:=45): 'AMDGPU_UCODE_ID_RLC_DRAM', (AMDGPU_UCODE_ID_RLC_P:=46): 'AMDGPU_UCODE_ID_RLC_P', (AMDGPU_UCODE_ID_RLC_V:=47): 'AMDGPU_UCODE_ID_RLC_V', (AMDGPU_UCODE_ID_RLC_G:=48): 'AMDGPU_UCODE_ID_RLC_G', (AMDGPU_UCODE_ID_STORAGE:=49): 'AMDGPU_UCODE_ID_STORAGE', (AMDGPU_UCODE_ID_SMC:=50): 'AMDGPU_UCODE_ID_SMC', (AMDGPU_UCODE_ID_PPTABLE:=51): 'AMDGPU_UCODE_ID_PPTABLE', (AMDGPU_UCODE_ID_UVD:=52): 'AMDGPU_UCODE_ID_UVD', (AMDGPU_UCODE_ID_UVD1:=53): 'AMDGPU_UCODE_ID_UVD1', (AMDGPU_UCODE_ID_VCE:=54): 'AMDGPU_UCODE_ID_VCE', (AMDGPU_UCODE_ID_VCN:=55): 'AMDGPU_UCODE_ID_VCN', (AMDGPU_UCODE_ID_VCN1:=56): 'AMDGPU_UCODE_ID_VCN1', (AMDGPU_UCODE_ID_DMCU_ERAM:=57): 'AMDGPU_UCODE_ID_DMCU_ERAM', (AMDGPU_UCODE_ID_DMCU_INTV:=58): 'AMDGPU_UCODE_ID_DMCU_INTV', (AMDGPU_UCODE_ID_VCN0_RAM:=59): 'AMDGPU_UCODE_ID_VCN0_RAM', (AMDGPU_UCODE_ID_VCN1_RAM:=60): 'AMDGPU_UCODE_ID_VCN1_RAM', (AMDGPU_UCODE_ID_DMCUB:=61): 'AMDGPU_UCODE_ID_DMCUB', (AMDGPU_UCODE_ID_VPE_CTX:=62): 'AMDGPU_UCODE_ID_VPE_CTX', (AMDGPU_UCODE_ID_VPE_CTL:=63): 'AMDGPU_UCODE_ID_VPE_CTL', (AMDGPU_UCODE_ID_VPE:=64): 'AMDGPU_UCODE_ID_VPE', (AMDGPU_UCODE_ID_UMSCH_MM_UCODE:=65): 'AMDGPU_UCODE_ID_UMSCH_MM_UCODE', (AMDGPU_UCODE_ID_UMSCH_MM_DATA:=66): 'AMDGPU_UCODE_ID_UMSCH_MM_DATA', (AMDGPU_UCODE_ID_UMSCH_MM_CMD_BUFFER:=67): 'AMDGPU_UCODE_ID_UMSCH_MM_CMD_BUFFER', (AMDGPU_UCODE_ID_P2S_TABLE:=68): 'AMDGPU_UCODE_ID_P2S_TABLE', (AMDGPU_UCODE_ID_JPEG_RAM:=69): 'AMDGPU_UCODE_ID_JPEG_RAM', (AMDGPU_UCODE_ID_ISP:=70): 'AMDGPU_UCODE_ID_ISP', (AMDGPU_UCODE_ID_MAXIMUM:=71): 'AMDGPU_UCODE_ID_MAXIMUM'}
 enum_AMDGPU_UCODE_STATUS: dict[int, str] = {(AMDGPU_UCODE_STATUS_INVALID:=0): 'AMDGPU_UCODE_STATUS_INVALID', (AMDGPU_UCODE_STATUS_NOT_LOADED:=1): 'AMDGPU_UCODE_STATUS_NOT_LOADED', (AMDGPU_UCODE_STATUS_LOADED:=2): 'AMDGPU_UCODE_STATUS_LOADED'}
 enum_amdgpu_firmware_load_type: dict[int, str] = {(AMDGPU_FW_LOAD_DIRECT:=0): 'AMDGPU_FW_LOAD_DIRECT', (AMDGPU_FW_LOAD_PSP:=1): 'AMDGPU_FW_LOAD_PSP', (AMDGPU_FW_LOAD_SMU:=2): 'AMDGPU_FW_LOAD_SMU', (AMDGPU_FW_LOAD_RLC_BACKDOOR_AUTO:=3): 'AMDGPU_FW_LOAD_RLC_BACKDOOR_AUTO'}
@@ -3154,7 +3154,7 @@ class struct_amdgpu_firmware_info(c.Struct):
   tmr_mc_addr_lo: int
   tmr_mc_addr_hi: int
 class struct_firmware(c.Struct): pass
-struct_amdgpu_firmware_info.register_fields([('ucode_id', ctypes.c_uint32, 0), ('fw', c.POINTER[struct_firmware], 8), ('mc_addr', ctypes.c_uint64, 16), ('kaddr', ctypes.c_void_p, 24), ('ucode_size', ctypes.c_uint32, 32), ('tmr_mc_addr_lo', ctypes.c_uint32, 36), ('tmr_mc_addr_hi', ctypes.c_uint32, 40)])
+struct_amdgpu_firmware_info.register_fields([('ucode_id', ctypes.c_uint32, 0), ('fw', c.POINTER[struct_firmware], 8), ('mc_addr', uint64_t, 16), ('kaddr', ctypes.c_void_p, 24), ('ucode_size', uint32_t, 32), ('tmr_mc_addr_lo', uint32_t, 36), ('tmr_mc_addr_hi', uint32_t, 40)])
 enum_psp_gfx_crtl_cmd_id: dict[int, str] = {(GFX_CTRL_CMD_ID_INIT_RBI_RING:=65536): 'GFX_CTRL_CMD_ID_INIT_RBI_RING', (GFX_CTRL_CMD_ID_INIT_GPCOM_RING:=131072): 'GFX_CTRL_CMD_ID_INIT_GPCOM_RING', (GFX_CTRL_CMD_ID_DESTROY_RINGS:=196608): 'GFX_CTRL_CMD_ID_DESTROY_RINGS', (GFX_CTRL_CMD_ID_CAN_INIT_RINGS:=262144): 'GFX_CTRL_CMD_ID_CAN_INIT_RINGS', (GFX_CTRL_CMD_ID_ENABLE_INT:=327680): 'GFX_CTRL_CMD_ID_ENABLE_INT', (GFX_CTRL_CMD_ID_DISABLE_INT:=393216): 'GFX_CTRL_CMD_ID_DISABLE_INT', (GFX_CTRL_CMD_ID_MODE1_RST:=458752): 'GFX_CTRL_CMD_ID_MODE1_RST', (GFX_CTRL_CMD_ID_GBR_IH_SET:=524288): 'GFX_CTRL_CMD_ID_GBR_IH_SET', (GFX_CTRL_CMD_ID_CONSUME_CMD:=589824): 'GFX_CTRL_CMD_ID_CONSUME_CMD', (GFX_CTRL_CMD_ID_DESTROY_GPCOM_RING:=786432): 'GFX_CTRL_CMD_ID_DESTROY_GPCOM_RING', (GFX_CTRL_CMD_ID_MAX:=983040): 'GFX_CTRL_CMD_ID_MAX'}
 @c.record
 class struct_psp_gfx_ctrl(c.Struct):
@@ -3383,7 +3383,7 @@ class struct_amdgpu_iv_entry(c.Struct):
   node_id: int
   src_data: c.Array[ctypes.c_uint32, Literal[4]]
   iv_entry: c.POINTER[ctypes.c_uint32]
-struct_amdgpu_iv_entry.register_fields([('client_id', ctypes.c_uint32, 0), ('src_id', ctypes.c_uint32, 4), ('ring_id', ctypes.c_uint32, 8), ('vmid', ctypes.c_uint32, 12), ('vmid_src', ctypes.c_uint32, 16), ('timestamp', ctypes.c_uint64, 24), ('timestamp_src', ctypes.c_uint32, 32), ('pasid', ctypes.c_uint32, 36), ('node_id', ctypes.c_uint32, 40), ('src_data', c.Array[ctypes.c_uint32, Literal[4]], 44), ('iv_entry', c.POINTER[ctypes.c_uint32], 64)])
+struct_amdgpu_iv_entry.register_fields([('client_id', ctypes.c_uint32, 0), ('src_id', ctypes.c_uint32, 4), ('ring_id', ctypes.c_uint32, 8), ('vmid', ctypes.c_uint32, 12), ('vmid_src', ctypes.c_uint32, 16), ('timestamp', uint64_t, 24), ('timestamp_src', ctypes.c_uint32, 32), ('pasid', ctypes.c_uint32, 36), ('node_id', ctypes.c_uint32, 40), ('src_data', c.Array[ctypes.c_uint32, Literal[4]], 44), ('iv_entry', c.POINTER[uint32_t], 64)])
 enum_interrupt_node_id_per_aid: dict[int, str] = {(AID0_NODEID:=0): 'AID0_NODEID', (XCD0_NODEID:=1): 'XCD0_NODEID', (XCD1_NODEID:=2): 'XCD1_NODEID', (AID1_NODEID:=4): 'AID1_NODEID', (XCD2_NODEID:=5): 'XCD2_NODEID', (XCD3_NODEID:=6): 'XCD3_NODEID', (AID2_NODEID:=8): 'AID2_NODEID', (XCD4_NODEID:=9): 'XCD4_NODEID', (XCD5_NODEID:=10): 'XCD5_NODEID', (AID3_NODEID:=12): 'AID3_NODEID', (XCD6_NODEID:=13): 'XCD6_NODEID', (XCD7_NODEID:=14): 'XCD7_NODEID', (NODEID_MAX:=15): 'NODEID_MAX'}
 enum_AMDGPU_DOORBELL_ASSIGNMENT: dict[int, str] = {(AMDGPU_DOORBELL_KIQ:=0): 'AMDGPU_DOORBELL_KIQ', (AMDGPU_DOORBELL_HIQ:=1): 'AMDGPU_DOORBELL_HIQ', (AMDGPU_DOORBELL_DIQ:=2): 'AMDGPU_DOORBELL_DIQ', (AMDGPU_DOORBELL_MEC_RING0:=16): 'AMDGPU_DOORBELL_MEC_RING0', (AMDGPU_DOORBELL_MEC_RING1:=17): 'AMDGPU_DOORBELL_MEC_RING1', (AMDGPU_DOORBELL_MEC_RING2:=18): 'AMDGPU_DOORBELL_MEC_RING2', (AMDGPU_DOORBELL_MEC_RING3:=19): 'AMDGPU_DOORBELL_MEC_RING3', (AMDGPU_DOORBELL_MEC_RING4:=20): 'AMDGPU_DOORBELL_MEC_RING4', (AMDGPU_DOORBELL_MEC_RING5:=21): 'AMDGPU_DOORBELL_MEC_RING5', (AMDGPU_DOORBELL_MEC_RING6:=22): 'AMDGPU_DOORBELL_MEC_RING6', (AMDGPU_DOORBELL_MEC_RING7:=23): 'AMDGPU_DOORBELL_MEC_RING7', (AMDGPU_DOORBELL_GFX_RING0:=32): 'AMDGPU_DOORBELL_GFX_RING0', (AMDGPU_DOORBELL_sDMA_ENGINE0:=480): 'AMDGPU_DOORBELL_sDMA_ENGINE0', (AMDGPU_DOORBELL_sDMA_ENGINE1:=481): 'AMDGPU_DOORBELL_sDMA_ENGINE1', (AMDGPU_DOORBELL_IH:=488): 'AMDGPU_DOORBELL_IH', (AMDGPU_DOORBELL_MAX_ASSIGNMENT:=1023): 'AMDGPU_DOORBELL_MAX_ASSIGNMENT', (AMDGPU_DOORBELL_INVALID:=65535): 'AMDGPU_DOORBELL_INVALID'}
 enum_AMDGPU_VEGA20_DOORBELL_ASSIGNMENT: dict[int, str] = {(AMDGPU_VEGA20_DOORBELL_KIQ:=0): 'AMDGPU_VEGA20_DOORBELL_KIQ', (AMDGPU_VEGA20_DOORBELL_HIQ:=1): 'AMDGPU_VEGA20_DOORBELL_HIQ', (AMDGPU_VEGA20_DOORBELL_DIQ:=2): 'AMDGPU_VEGA20_DOORBELL_DIQ', (AMDGPU_VEGA20_DOORBELL_MEC_RING0:=3): 'AMDGPU_VEGA20_DOORBELL_MEC_RING0', (AMDGPU_VEGA20_DOORBELL_MEC_RING1:=4): 'AMDGPU_VEGA20_DOORBELL_MEC_RING1', (AMDGPU_VEGA20_DOORBELL_MEC_RING2:=5): 'AMDGPU_VEGA20_DOORBELL_MEC_RING2', (AMDGPU_VEGA20_DOORBELL_MEC_RING3:=6): 'AMDGPU_VEGA20_DOORBELL_MEC_RING3', (AMDGPU_VEGA20_DOORBELL_MEC_RING4:=7): 'AMDGPU_VEGA20_DOORBELL_MEC_RING4', (AMDGPU_VEGA20_DOORBELL_MEC_RING5:=8): 'AMDGPU_VEGA20_DOORBELL_MEC_RING5', (AMDGPU_VEGA20_DOORBELL_MEC_RING6:=9): 'AMDGPU_VEGA20_DOORBELL_MEC_RING6', (AMDGPU_VEGA20_DOORBELL_MEC_RING7:=10): 'AMDGPU_VEGA20_DOORBELL_MEC_RING7', (AMDGPU_VEGA20_DOORBELL_USERQUEUE_START:=11): 'AMDGPU_VEGA20_DOORBELL_USERQUEUE_START', (AMDGPU_VEGA20_DOORBELL_USERQUEUE_END:=138): 'AMDGPU_VEGA20_DOORBELL_USERQUEUE_END', (AMDGPU_VEGA20_DOORBELL_GFX_RING0:=139): 'AMDGPU_VEGA20_DOORBELL_GFX_RING0', (AMDGPU_VEGA20_DOORBELL_sDMA_ENGINE0:=256): 'AMDGPU_VEGA20_DOORBELL_sDMA_ENGINE0', (AMDGPU_VEGA20_DOORBELL_sDMA_ENGINE1:=266): 'AMDGPU_VEGA20_DOORBELL_sDMA_ENGINE1', (AMDGPU_VEGA20_DOORBELL_sDMA_ENGINE2:=276): 'AMDGPU_VEGA20_DOORBELL_sDMA_ENGINE2', (AMDGPU_VEGA20_DOORBELL_sDMA_ENGINE3:=286): 'AMDGPU_VEGA20_DOORBELL_sDMA_ENGINE3', (AMDGPU_VEGA20_DOORBELL_sDMA_ENGINE4:=296): 'AMDGPU_VEGA20_DOORBELL_sDMA_ENGINE4', (AMDGPU_VEGA20_DOORBELL_sDMA_ENGINE5:=306): 'AMDGPU_VEGA20_DOORBELL_sDMA_ENGINE5', (AMDGPU_VEGA20_DOORBELL_sDMA_ENGINE6:=316): 'AMDGPU_VEGA20_DOORBELL_sDMA_ENGINE6', (AMDGPU_VEGA20_DOORBELL_sDMA_ENGINE7:=326): 'AMDGPU_VEGA20_DOORBELL_sDMA_ENGINE7', (AMDGPU_VEGA20_DOORBELL_IH:=376): 'AMDGPU_VEGA20_DOORBELL_IH', (AMDGPU_VEGA20_DOORBELL64_VCN0_1:=392): 'AMDGPU_VEGA20_DOORBELL64_VCN0_1', (AMDGPU_VEGA20_DOORBELL64_VCN2_3:=393): 'AMDGPU_VEGA20_DOORBELL64_VCN2_3', (AMDGPU_VEGA20_DOORBELL64_VCN4_5:=394): 'AMDGPU_VEGA20_DOORBELL64_VCN4_5', (AMDGPU_VEGA20_DOORBELL64_VCN6_7:=395): 'AMDGPU_VEGA20_DOORBELL64_VCN6_7', (AMDGPU_VEGA20_DOORBELL64_VCN8_9:=396): 'AMDGPU_VEGA20_DOORBELL64_VCN8_9', (AMDGPU_VEGA20_DOORBELL64_VCNa_b:=397): 'AMDGPU_VEGA20_DOORBELL64_VCNa_b', (AMDGPU_VEGA20_DOORBELL64_VCNc_d:=398): 'AMDGPU_VEGA20_DOORBELL64_VCNc_d', (AMDGPU_VEGA20_DOORBELL64_VCNe_f:=399): 'AMDGPU_VEGA20_DOORBELL64_VCNe_f', (AMDGPU_VEGA20_DOORBELL64_UVD_RING0_1:=392): 'AMDGPU_VEGA20_DOORBELL64_UVD_RING0_1', (AMDGPU_VEGA20_DOORBELL64_UVD_RING2_3:=393): 'AMDGPU_VEGA20_DOORBELL64_UVD_RING2_3', (AMDGPU_VEGA20_DOORBELL64_UVD_RING4_5:=394): 'AMDGPU_VEGA20_DOORBELL64_UVD_RING4_5', (AMDGPU_VEGA20_DOORBELL64_UVD_RING6_7:=395): 'AMDGPU_VEGA20_DOORBELL64_UVD_RING6_7', (AMDGPU_VEGA20_DOORBELL64_VCE_RING0_1:=396): 'AMDGPU_VEGA20_DOORBELL64_VCE_RING0_1', (AMDGPU_VEGA20_DOORBELL64_VCE_RING2_3:=397): 'AMDGPU_VEGA20_DOORBELL64_VCE_RING2_3', (AMDGPU_VEGA20_DOORBELL64_VCE_RING4_5:=398): 'AMDGPU_VEGA20_DOORBELL64_VCE_RING4_5', (AMDGPU_VEGA20_DOORBELL64_VCE_RING6_7:=399): 'AMDGPU_VEGA20_DOORBELL64_VCE_RING6_7', (AMDGPU_VEGA20_DOORBELL64_FIRST_NON_CP:=256): 'AMDGPU_VEGA20_DOORBELL64_FIRST_NON_CP', (AMDGPU_VEGA20_DOORBELL64_LAST_NON_CP:=399): 'AMDGPU_VEGA20_DOORBELL64_LAST_NON_CP', (AMDGPU_VEGA20_DOORBELL_XCC1_KIQ_START:=400): 'AMDGPU_VEGA20_DOORBELL_XCC1_KIQ_START', (AMDGPU_VEGA20_DOORBELL_XCC1_MEC_RING0_START:=407): 'AMDGPU_VEGA20_DOORBELL_XCC1_MEC_RING0_START', (AMDGPU_VEGA20_DOORBELL_AID1_sDMA_START:=464): 'AMDGPU_VEGA20_DOORBELL_AID1_sDMA_START', (AMDGPU_VEGA20_DOORBELL_MAX_ASSIGNMENT:=503): 'AMDGPU_VEGA20_DOORBELL_MAX_ASSIGNMENT', (AMDGPU_VEGA20_DOORBELL_INVALID:=65535): 'AMDGPU_VEGA20_DOORBELL_INVALID'}
@@ -4110,201 +4110,199 @@ class struct_v9_gfx_meta_data(c.Struct):
 struct_v9_gfx_meta_data.register_fields([('ce_payload', struct_v9_ce_ib_state, 0), ('reserved1', c.Array[uint32_t, Literal[54]], 40), ('de_payload', struct_v9_de_ib_state, 256), ('DeIbBaseAddrLo', uint32_t, 364), ('DeIbBaseAddrHi', uint32_t, 368), ('reserved2', c.Array[uint32_t, Literal[931]], 372)])
 enum_soc15_ih_clientid: dict[int, str] = {(SOC15_IH_CLIENTID_IH:=0): 'SOC15_IH_CLIENTID_IH', (SOC15_IH_CLIENTID_ACP:=1): 'SOC15_IH_CLIENTID_ACP', (SOC15_IH_CLIENTID_ATHUB:=2): 'SOC15_IH_CLIENTID_ATHUB', (SOC15_IH_CLIENTID_BIF:=3): 'SOC15_IH_CLIENTID_BIF', (SOC15_IH_CLIENTID_DCE:=4): 'SOC15_IH_CLIENTID_DCE', (SOC15_IH_CLIENTID_ISP:=5): 'SOC15_IH_CLIENTID_ISP', (SOC15_IH_CLIENTID_PCIE0:=6): 'SOC15_IH_CLIENTID_PCIE0', (SOC15_IH_CLIENTID_RLC:=7): 'SOC15_IH_CLIENTID_RLC', (SOC15_IH_CLIENTID_SDMA0:=8): 'SOC15_IH_CLIENTID_SDMA0', (SOC15_IH_CLIENTID_SDMA1:=9): 'SOC15_IH_CLIENTID_SDMA1', (SOC15_IH_CLIENTID_SE0SH:=10): 'SOC15_IH_CLIENTID_SE0SH', (SOC15_IH_CLIENTID_SE1SH:=11): 'SOC15_IH_CLIENTID_SE1SH', (SOC15_IH_CLIENTID_SE2SH:=12): 'SOC15_IH_CLIENTID_SE2SH', (SOC15_IH_CLIENTID_SE3SH:=13): 'SOC15_IH_CLIENTID_SE3SH', (SOC15_IH_CLIENTID_UVD1:=14): 'SOC15_IH_CLIENTID_UVD1', (SOC15_IH_CLIENTID_THM:=15): 'SOC15_IH_CLIENTID_THM', (SOC15_IH_CLIENTID_UVD:=16): 'SOC15_IH_CLIENTID_UVD', (SOC15_IH_CLIENTID_VCE0:=17): 'SOC15_IH_CLIENTID_VCE0', (SOC15_IH_CLIENTID_VMC:=18): 'SOC15_IH_CLIENTID_VMC', (SOC15_IH_CLIENTID_XDMA:=19): 'SOC15_IH_CLIENTID_XDMA', (SOC15_IH_CLIENTID_GRBM_CP:=20): 'SOC15_IH_CLIENTID_GRBM_CP', (SOC15_IH_CLIENTID_ATS:=21): 'SOC15_IH_CLIENTID_ATS', (SOC15_IH_CLIENTID_ROM_SMUIO:=22): 'SOC15_IH_CLIENTID_ROM_SMUIO', (SOC15_IH_CLIENTID_DF:=23): 'SOC15_IH_CLIENTID_DF', (SOC15_IH_CLIENTID_VCE1:=24): 'SOC15_IH_CLIENTID_VCE1', (SOC15_IH_CLIENTID_PWR:=25): 'SOC15_IH_CLIENTID_PWR', (SOC15_IH_CLIENTID_RESERVED:=26): 'SOC15_IH_CLIENTID_RESERVED', (SOC15_IH_CLIENTID_UTCL2:=27): 'SOC15_IH_CLIENTID_UTCL2', (SOC15_IH_CLIENTID_EA:=28): 'SOC15_IH_CLIENTID_EA', (SOC15_IH_CLIENTID_UTCL2LOG:=29): 'SOC15_IH_CLIENTID_UTCL2LOG', (SOC15_IH_CLIENTID_MP0:=30): 'SOC15_IH_CLIENTID_MP0', (SOC15_IH_CLIENTID_MP1:=31): 'SOC15_IH_CLIENTID_MP1', (SOC15_IH_CLIENTID_MAX:=32): 'SOC15_IH_CLIENTID_MAX', (SOC15_IH_CLIENTID_VCN:=16): 'SOC15_IH_CLIENTID_VCN', (SOC15_IH_CLIENTID_VCN1:=14): 'SOC15_IH_CLIENTID_VCN1', (SOC15_IH_CLIENTID_SDMA2:=1): 'SOC15_IH_CLIENTID_SDMA2', (SOC15_IH_CLIENTID_SDMA3:=4): 'SOC15_IH_CLIENTID_SDMA3', (SOC15_IH_CLIENTID_SDMA3_Sienna_Cichlid:=5): 'SOC15_IH_CLIENTID_SDMA3_Sienna_Cichlid', (SOC15_IH_CLIENTID_SDMA4:=5): 'SOC15_IH_CLIENTID_SDMA4', (SOC15_IH_CLIENTID_SDMA5:=17): 'SOC15_IH_CLIENTID_SDMA5', (SOC15_IH_CLIENTID_SDMA6:=19): 'SOC15_IH_CLIENTID_SDMA6', (SOC15_IH_CLIENTID_SDMA7:=24): 'SOC15_IH_CLIENTID_SDMA7', (SOC15_IH_CLIENTID_VMC1:=6): 'SOC15_IH_CLIENTID_VMC1'}
 enum_soc21_ih_clientid: dict[int, str] = {(SOC21_IH_CLIENTID_IH:=0): 'SOC21_IH_CLIENTID_IH', (SOC21_IH_CLIENTID_ATHUB:=2): 'SOC21_IH_CLIENTID_ATHUB', (SOC21_IH_CLIENTID_BIF:=3): 'SOC21_IH_CLIENTID_BIF', (SOC21_IH_CLIENTID_DCN:=4): 'SOC21_IH_CLIENTID_DCN', (SOC21_IH_CLIENTID_ISP:=5): 'SOC21_IH_CLIENTID_ISP', (SOC21_IH_CLIENTID_MP3:=6): 'SOC21_IH_CLIENTID_MP3', (SOC21_IH_CLIENTID_RLC:=7): 'SOC21_IH_CLIENTID_RLC', (SOC21_IH_CLIENTID_GFX:=10): 'SOC21_IH_CLIENTID_GFX', (SOC21_IH_CLIENTID_IMU:=11): 'SOC21_IH_CLIENTID_IMU', (SOC21_IH_CLIENTID_VCN1:=14): 'SOC21_IH_CLIENTID_VCN1', (SOC21_IH_CLIENTID_THM:=15): 'SOC21_IH_CLIENTID_THM', (SOC21_IH_CLIENTID_VCN:=16): 'SOC21_IH_CLIENTID_VCN', (SOC21_IH_CLIENTID_VPE1:=17): 'SOC21_IH_CLIENTID_VPE1', (SOC21_IH_CLIENTID_VMC:=18): 'SOC21_IH_CLIENTID_VMC', (SOC21_IH_CLIENTID_GRBM_CP:=20): 'SOC21_IH_CLIENTID_GRBM_CP', (SOC21_IH_CLIENTID_ROM_SMUIO:=22): 'SOC21_IH_CLIENTID_ROM_SMUIO', (SOC21_IH_CLIENTID_DF:=23): 'SOC21_IH_CLIENTID_DF', (SOC21_IH_CLIENTID_VPE:=24): 'SOC21_IH_CLIENTID_VPE', (SOC21_IH_CLIENTID_PWR:=25): 'SOC21_IH_CLIENTID_PWR', (SOC21_IH_CLIENTID_LSDMA:=26): 'SOC21_IH_CLIENTID_LSDMA', (SOC21_IH_CLIENTID_MP0:=30): 'SOC21_IH_CLIENTID_MP0', (SOC21_IH_CLIENTID_MP1:=31): 'SOC21_IH_CLIENTID_MP1', (SOC21_IH_CLIENTID_MAX:=32): 'SOC21_IH_CLIENTID_MAX'}
-AMDGPU_VM_MAX_UPDATE_SIZE = 0x3FFFF # type: ignore
-AMDGPU_PTE_VALID = (1 << 0) # type: ignore
-AMDGPU_PTE_SYSTEM = (1 << 1) # type: ignore
-AMDGPU_PTE_SNOOPED = (1 << 2) # type: ignore
-AMDGPU_PTE_TMZ = (1 << 3) # type: ignore
-AMDGPU_PTE_EXECUTABLE = (1 << 4) # type: ignore
-AMDGPU_PTE_READABLE = (1 << 5) # type: ignore
-AMDGPU_PTE_WRITEABLE = (1 << 6) # type: ignore
+AMDGPU_VM_MAX_UPDATE_SIZE = 0x3FFFF
+AMDGPU_PTE_VALID = (1 << 0)
+AMDGPU_PTE_SYSTEM = (1 << 1)
+AMDGPU_PTE_SNOOPED = (1 << 2)
+AMDGPU_PTE_TMZ = (1 << 3)
+AMDGPU_PTE_EXECUTABLE = (1 << 4)
+AMDGPU_PTE_READABLE = (1 << 5)
+AMDGPU_PTE_WRITEABLE = (1 << 6)
 AMDGPU_PTE_FRAG = lambda x: ((x & 0x1f) << 7) # type: ignore
-AMDGPU_PTE_PRT = (1 << 51) # type: ignore
-AMDGPU_PDE_PTE = (1 << 54) # type: ignore
-AMDGPU_PTE_LOG = (1 << 55) # type: ignore
-AMDGPU_PTE_TF = (1 << 56) # type: ignore
-AMDGPU_PTE_NOALLOC = (1 << 58) # type: ignore
+AMDGPU_PTE_PRT = (1 << 51)
+AMDGPU_PDE_PTE = (1 << 54)
+AMDGPU_PTE_LOG = (1 << 55)
+AMDGPU_PTE_TF = (1 << 56)
+AMDGPU_PTE_NOALLOC = (1 << 58)
 AMDGPU_PDE_BFS = lambda a: (a << 59) # type: ignore
-AMDGPU_VM_NORETRY_FLAGS = (AMDGPU_PTE_EXECUTABLE | AMDGPU_PDE_PTE | AMDGPU_PTE_TF) # type: ignore
-AMDGPU_VM_NORETRY_FLAGS_TF = (AMDGPU_PTE_VALID | AMDGPU_PTE_SYSTEM | AMDGPU_PTE_PRT) # type: ignore
+AMDGPU_VM_NORETRY_FLAGS = (AMDGPU_PTE_EXECUTABLE | AMDGPU_PDE_PTE | AMDGPU_PTE_TF)
+AMDGPU_VM_NORETRY_FLAGS_TF = (AMDGPU_PTE_VALID | AMDGPU_PTE_SYSTEM | AMDGPU_PTE_PRT)
 AMDGPU_PTE_MTYPE_VG10_SHIFT = lambda mtype: ((mtype) << 57) # type: ignore
-AMDGPU_PTE_MTYPE_VG10_MASK = AMDGPU_PTE_MTYPE_VG10_SHIFT(3) # type: ignore
+AMDGPU_PTE_MTYPE_VG10_MASK = AMDGPU_PTE_MTYPE_VG10_SHIFT(3)
 AMDGPU_PTE_MTYPE_VG10 = lambda flags,mtype: (((flags) & (~AMDGPU_PTE_MTYPE_VG10_MASK)) | AMDGPU_PTE_MTYPE_VG10_SHIFT(mtype)) # type: ignore
-AMDGPU_MTYPE_NC = 0 # type: ignore
-AMDGPU_MTYPE_CC = 2 # type: ignore
+AMDGPU_MTYPE_NC = 0
+AMDGPU_MTYPE_CC = 2
 AMDGPU_PTE_MTYPE_NV10_SHIFT = lambda mtype: ((mtype) << 48) # type: ignore
-AMDGPU_PTE_MTYPE_NV10_MASK = AMDGPU_PTE_MTYPE_NV10_SHIFT(7) # type: ignore
+AMDGPU_PTE_MTYPE_NV10_MASK = AMDGPU_PTE_MTYPE_NV10_SHIFT(7)
 AMDGPU_PTE_MTYPE_NV10 = lambda flags,mtype: (((flags) & (~AMDGPU_PTE_MTYPE_NV10_MASK)) | AMDGPU_PTE_MTYPE_NV10_SHIFT(mtype)) # type: ignore
-AMDGPU_PTE_PRT_GFX12 = (1 << 56) # type: ignore
+AMDGPU_PTE_PRT_GFX12 = (1 << 56)
 AMDGPU_PTE_MTYPE_GFX12_SHIFT = lambda mtype: ((mtype) << 54) # type: ignore
-AMDGPU_PTE_MTYPE_GFX12_MASK = AMDGPU_PTE_MTYPE_GFX12_SHIFT(3) # type: ignore
+AMDGPU_PTE_MTYPE_GFX12_MASK = AMDGPU_PTE_MTYPE_GFX12_SHIFT(3)
 AMDGPU_PTE_MTYPE_GFX12 = lambda flags,mtype: (((flags) & (~AMDGPU_PTE_MTYPE_GFX12_MASK)) | AMDGPU_PTE_MTYPE_GFX12_SHIFT(mtype)) # type: ignore
-AMDGPU_PTE_IS_PTE = (1 << 63) # type: ignore
+AMDGPU_PTE_IS_PTE = (1 << 63)
 AMDGPU_PDE_BFS_GFX12 = lambda a: (((a) & 0x1f) << 58) # type: ignore
-AMDGPU_PDE_PTE_GFX12 = (1 << 63) # type: ignore
-AMDGPU_VM_FAULT_STOP_NEVER = 0 # type: ignore
-AMDGPU_VM_FAULT_STOP_FIRST = 1 # type: ignore
-AMDGPU_VM_FAULT_STOP_ALWAYS = 2 # type: ignore
-AMDGPU_VM_RESERVED_VRAM = (8 << 20) # type: ignore
-AMDGPU_MAX_VMHUBS = 13 # type: ignore
-AMDGPU_GFXHUB_START = 0 # type: ignore
-AMDGPU_MMHUB0_START = 8 # type: ignore
-AMDGPU_MMHUB1_START = 12 # type: ignore
+AMDGPU_PDE_PTE_GFX12 = (1 << 63)
+AMDGPU_VM_FAULT_STOP_NEVER = 0
+AMDGPU_VM_FAULT_STOP_FIRST = 1
+AMDGPU_VM_FAULT_STOP_ALWAYS = 2
+AMDGPU_VM_RESERVED_VRAM = (8 << 20)
+AMDGPU_MAX_VMHUBS = 13
+AMDGPU_GFXHUB_START = 0
+AMDGPU_MMHUB0_START = 8
+AMDGPU_MMHUB1_START = 12
 AMDGPU_GFXHUB = lambda x: (AMDGPU_GFXHUB_START + (x)) # type: ignore
 AMDGPU_MMHUB0 = lambda x: (AMDGPU_MMHUB0_START + (x)) # type: ignore
 AMDGPU_MMHUB1 = lambda x: (AMDGPU_MMHUB1_START + (x)) # type: ignore
 AMDGPU_IS_GFXHUB = lambda x: ((x) >= AMDGPU_GFXHUB_START and (x) < AMDGPU_MMHUB0_START) # type: ignore
 AMDGPU_IS_MMHUB0 = lambda x: ((x) >= AMDGPU_MMHUB0_START and (x) < AMDGPU_MMHUB1_START) # type: ignore
 AMDGPU_IS_MMHUB1 = lambda x: ((x) >= AMDGPU_MMHUB1_START and (x) < AMDGPU_MAX_VMHUBS) # type: ignore
-AMDGPU_VA_RESERVED_CSA_SIZE = (2 << 20) # type: ignore
-AMDGPU_VA_RESERVED_SEQ64_SIZE = (2 << 20) # type: ignore
+AMDGPU_VA_RESERVED_CSA_SIZE = (2 << 20)
+AMDGPU_VA_RESERVED_SEQ64_SIZE = (2 << 20)
 AMDGPU_VA_RESERVED_SEQ64_START = lambda adev: (AMDGPU_VA_RESERVED_CSA_START(adev) - AMDGPU_VA_RESERVED_SEQ64_SIZE) # type: ignore
-AMDGPU_VA_RESERVED_TRAP_SIZE = (2 << 12) # type: ignore
+AMDGPU_VA_RESERVED_TRAP_SIZE = (2 << 12)
 AMDGPU_VA_RESERVED_TRAP_START = lambda adev: (AMDGPU_VA_RESERVED_SEQ64_START(adev) - AMDGPU_VA_RESERVED_TRAP_SIZE) # type: ignore
-AMDGPU_VA_RESERVED_BOTTOM = (1 << 16) # type: ignore
-AMDGPU_VA_RESERVED_TOP = (AMDGPU_VA_RESERVED_TRAP_SIZE + AMDGPU_VA_RESERVED_SEQ64_SIZE + AMDGPU_VA_RESERVED_CSA_SIZE) # type: ignore
-AMDGPU_VM_USE_CPU_FOR_GFX = (1 << 0) # type: ignore
-AMDGPU_VM_USE_CPU_FOR_COMPUTE = (1 << 1) # type: ignore
-PSP_HEADER_SIZE = 256 # type: ignore
-BINARY_SIGNATURE = 0x28211407 # type: ignore
-DISCOVERY_TABLE_SIGNATURE = 0x53445049 # type: ignore
-GC_TABLE_ID = 0x4347 # type: ignore
-HARVEST_TABLE_SIGNATURE = 0x56524148 # type: ignore
-VCN_INFO_TABLE_ID = 0x004E4356 # type: ignore
-MALL_INFO_TABLE_ID = 0x4C4C414D # type: ignore
-NPS_INFO_TABLE_ID = 0x0053504E # type: ignore
-VCN_INFO_TABLE_MAX_NUM_INSTANCES = 4 # type: ignore
-NPS_INFO_TABLE_MAX_NUM_INSTANCES = 12 # type: ignore
-HWIP_MAX_INSTANCE = 44 # type: ignore
-HW_ID_MAX = 300 # type: ignore
-MP1_HWID = 1 # type: ignore
-MP2_HWID = 2 # type: ignore
-THM_HWID = 3 # type: ignore
-SMUIO_HWID = 4 # type: ignore
-FUSE_HWID = 5 # type: ignore
-CLKA_HWID = 6 # type: ignore
-PWR_HWID = 10 # type: ignore
-GC_HWID = 11 # type: ignore
-UVD_HWID = 12 # type: ignore
-VCN_HWID = UVD_HWID # type: ignore
-AUDIO_AZ_HWID = 13 # type: ignore
-ACP_HWID = 14 # type: ignore
-DCI_HWID = 15 # type: ignore
-DMU_HWID = 271 # type: ignore
-DCO_HWID = 16 # type: ignore
-DIO_HWID = 272 # type: ignore
-XDMA_HWID = 17 # type: ignore
-DCEAZ_HWID = 18 # type: ignore
-DAZ_HWID = 274 # type: ignore
-SDPMUX_HWID = 19 # type: ignore
-NTB_HWID = 20 # type: ignore
-VPE_HWID = 21 # type: ignore
-IOHC_HWID = 24 # type: ignore
-L2IMU_HWID = 28 # type: ignore
-VCE_HWID = 32 # type: ignore
-MMHUB_HWID = 34 # type: ignore
-ATHUB_HWID = 35 # type: ignore
-DBGU_NBIO_HWID = 36 # type: ignore
-DFX_HWID = 37 # type: ignore
-DBGU0_HWID = 38 # type: ignore
-DBGU1_HWID = 39 # type: ignore
-OSSSYS_HWID = 40 # type: ignore
-HDP_HWID = 41 # type: ignore
-SDMA0_HWID = 42 # type: ignore
-SDMA1_HWID = 43 # type: ignore
-ISP_HWID = 44 # type: ignore
-DBGU_IO_HWID = 45 # type: ignore
-DF_HWID = 46 # type: ignore
-CLKB_HWID = 47 # type: ignore
-FCH_HWID = 48 # type: ignore
-DFX_DAP_HWID = 49 # type: ignore
-L1IMU_PCIE_HWID = 50 # type: ignore
-L1IMU_NBIF_HWID = 51 # type: ignore
-L1IMU_IOAGR_HWID = 52 # type: ignore
-L1IMU3_HWID = 53 # type: ignore
-L1IMU4_HWID = 54 # type: ignore
-L1IMU5_HWID = 55 # type: ignore
-L1IMU6_HWID = 56 # type: ignore
-L1IMU7_HWID = 57 # type: ignore
-L1IMU8_HWID = 58 # type: ignore
-L1IMU9_HWID = 59 # type: ignore
-L1IMU10_HWID = 60 # type: ignore
-L1IMU11_HWID = 61 # type: ignore
-L1IMU12_HWID = 62 # type: ignore
-L1IMU13_HWID = 63 # type: ignore
-L1IMU14_HWID = 64 # type: ignore
-L1IMU15_HWID = 65 # type: ignore
-WAFLC_HWID = 66 # type: ignore
-FCH_USB_PD_HWID = 67 # type: ignore
-SDMA2_HWID = 68 # type: ignore
-SDMA3_HWID = 69 # type: ignore
-PCIE_HWID = 70 # type: ignore
-PCS_HWID = 80 # type: ignore
-DDCL_HWID = 89 # type: ignore
-SST_HWID = 90 # type: ignore
-LSDMA_HWID = 91 # type: ignore
-IOAGR_HWID = 100 # type: ignore
-NBIF_HWID = 108 # type: ignore
-IOAPIC_HWID = 124 # type: ignore
-SYSTEMHUB_HWID = 128 # type: ignore
-NTBCCP_HWID = 144 # type: ignore
-UMC_HWID = 150 # type: ignore
-SATA_HWID = 168 # type: ignore
-USB_HWID = 170 # type: ignore
-CCXSEC_HWID = 176 # type: ignore
-XGMI_HWID = 200 # type: ignore
-XGBE_HWID = 216 # type: ignore
-MP0_HWID = 255 # type: ignore
-hw_id_map = {GC_HWIP:GC_HWID,HDP_HWIP:HDP_HWID,SDMA0_HWIP:SDMA0_HWID,SDMA1_HWIP:SDMA1_HWID,SDMA2_HWIP:SDMA2_HWID,SDMA3_HWIP:SDMA3_HWID,LSDMA_HWIP:LSDMA_HWID,MMHUB_HWIP:MMHUB_HWID,ATHUB_HWIP:ATHUB_HWID,NBIO_HWIP:NBIF_HWID,MP0_HWIP:MP0_HWID,MP1_HWIP:MP1_HWID,UVD_HWIP:UVD_HWID,VCE_HWIP:VCE_HWID,DF_HWIP:DF_HWID,DCE_HWIP:DMU_HWID,OSSSYS_HWIP:OSSSYS_HWID,SMUIO_HWIP:SMUIO_HWID,PWR_HWIP:PWR_HWID,NBIF_HWIP:NBIF_HWID,THM_HWIP:THM_HWID,CLK_HWIP:CLKA_HWID,UMC_HWIP:UMC_HWID,XGMI_HWIP:XGMI_HWID,DCI_HWIP:DCI_HWID,PCIE_HWIP:PCIE_HWID,VPE_HWIP:VPE_HWID,ISP_HWIP:ISP_HWID} # type: ignore
-int32_t = int # type: ignore
-AMDGPU_SDMA0_UCODE_LOADED = 0x00000001 # type: ignore
-AMDGPU_SDMA1_UCODE_LOADED = 0x00000002 # type: ignore
-AMDGPU_CPCE_UCODE_LOADED = 0x00000004 # type: ignore
-AMDGPU_CPPFP_UCODE_LOADED = 0x00000008 # type: ignore
-AMDGPU_CPME_UCODE_LOADED = 0x00000010 # type: ignore
-AMDGPU_CPMEC1_UCODE_LOADED = 0x00000020 # type: ignore
-AMDGPU_CPMEC2_UCODE_LOADED = 0x00000040 # type: ignore
-AMDGPU_CPRLC_UCODE_LOADED = 0x00000100 # type: ignore
-PSP_GFX_CMD_BUF_VERSION = 0x00000001 # type: ignore
-GFX_CMD_STATUS_MASK = 0x0000FFFF # type: ignore
-GFX_CMD_ID_MASK = 0x000F0000 # type: ignore
-GFX_CMD_RESERVED_MASK = 0x7FF00000 # type: ignore
-GFX_CMD_RESPONSE_MASK = 0x80000000 # type: ignore
-C2PMSG_CMD_GFX_USB_PD_FW_VER = 0x2000000 # type: ignore
-GFX_FLAG_RESPONSE = 0x80000000 # type: ignore
-GFX_BUF_MAX_DESC = 64 # type: ignore
-FRAME_TYPE_DESTROY = 1 # type: ignore
-PSP_ERR_UNKNOWN_COMMAND = 0x00000100 # type: ignore
-PSP_FENCE_BUFFER_SIZE = 0x1000 # type: ignore
-PSP_CMD_BUFFER_SIZE = 0x1000 # type: ignore
-PSP_1_MEG = 0x100000 # type: ignore
-PSP_TMR_ALIGNMENT = 0x100000 # type: ignore
-PSP_FW_NAME_LEN = 0x24 # type: ignore
-AMDGPU_XGMI_MAX_CONNECTED_NODES = 64 # type: ignore
-MEM_TRAIN_SYSTEM_SIGNATURE = 0x54534942 # type: ignore
-GDDR6_MEM_TRAINING_DATA_SIZE_IN_BYTES = 0x1000 # type: ignore
-GDDR6_MEM_TRAINING_OFFSET = 0x8000 # type: ignore
-BIST_MEM_TRAINING_ENCROACHED_SIZE = 0x2000000 # type: ignore
-PSP_RUNTIME_DB_SIZE_IN_BYTES = 0x10000 # type: ignore
-PSP_RUNTIME_DB_OFFSET = 0x100000 # type: ignore
-PSP_RUNTIME_DB_COOKIE_ID = 0x0ed5 # type: ignore
-PSP_RUNTIME_DB_VER_1 = 0x0100 # type: ignore
-PSP_RUNTIME_DB_DIAG_ENTRY_MAX_COUNT = 0x40 # type: ignore
-int32_t = int # type: ignore
-AMDGPU_MAX_IRQ_SRC_ID = 0x100 # type: ignore
-AMDGPU_MAX_IRQ_CLIENT_ID = 0x100 # type: ignore
-AMDGPU_IRQ_CLIENTID_LEGACY = 0 # type: ignore
-AMDGPU_IRQ_CLIENTID_MAX = SOC15_IH_CLIENTID_MAX # type: ignore
-AMDGPU_IRQ_SRC_DATA_MAX_SIZE_DW = 4 # type: ignore
-SOC15_INTSRC_CP_END_OF_PIPE = 181 # type: ignore
-SOC15_INTSRC_CP_BAD_OPCODE = 183 # type: ignore
-SOC15_INTSRC_SQ_INTERRUPT_MSG = 239 # type: ignore
-SOC15_INTSRC_VMC_FAULT = 0 # type: ignore
-SOC15_INTSRC_VMC_UTCL2_POISON = 1 # type: ignore
-SOC15_INTSRC_SDMA_TRAP = 224 # type: ignore
-SOC15_INTSRC_SDMA_ECC = 220 # type: ignore
-SOC21_INTSRC_SDMA_TRAP = 49 # type: ignore
-SOC21_INTSRC_SDMA_ECC = 62 # type: ignore
+AMDGPU_VA_RESERVED_BOTTOM = (1 << 16)
+AMDGPU_VA_RESERVED_TOP = (AMDGPU_VA_RESERVED_TRAP_SIZE + AMDGPU_VA_RESERVED_SEQ64_SIZE + AMDGPU_VA_RESERVED_CSA_SIZE)
+AMDGPU_VM_USE_CPU_FOR_GFX = (1 << 0)
+AMDGPU_VM_USE_CPU_FOR_COMPUTE = (1 << 1)
+PSP_HEADER_SIZE = 256
+BINARY_SIGNATURE = 0x28211407
+DISCOVERY_TABLE_SIGNATURE = 0x53445049
+GC_TABLE_ID = 0x4347
+HARVEST_TABLE_SIGNATURE = 0x56524148
+VCN_INFO_TABLE_ID = 0x004E4356
+MALL_INFO_TABLE_ID = 0x4C4C414D
+NPS_INFO_TABLE_ID = 0x0053504E
+VCN_INFO_TABLE_MAX_NUM_INSTANCES = 4
+NPS_INFO_TABLE_MAX_NUM_INSTANCES = 12
+HWIP_MAX_INSTANCE = 44
+HW_ID_MAX = 300
+MP1_HWID = 1
+MP2_HWID = 2
+THM_HWID = 3
+SMUIO_HWID = 4
+FUSE_HWID = 5
+CLKA_HWID = 6
+PWR_HWID = 10
+GC_HWID = 11
+UVD_HWID = 12
+VCN_HWID = UVD_HWID
+AUDIO_AZ_HWID = 13
+ACP_HWID = 14
+DCI_HWID = 15
+DMU_HWID = 271
+DCO_HWID = 16
+DIO_HWID = 272
+XDMA_HWID = 17
+DCEAZ_HWID = 18
+DAZ_HWID = 274
+SDPMUX_HWID = 19
+NTB_HWID = 20
+VPE_HWID = 21
+IOHC_HWID = 24
+L2IMU_HWID = 28
+VCE_HWID = 32
+MMHUB_HWID = 34
+ATHUB_HWID = 35
+DBGU_NBIO_HWID = 36
+DFX_HWID = 37
+DBGU0_HWID = 38
+DBGU1_HWID = 39
+OSSSYS_HWID = 40
+HDP_HWID = 41
+SDMA0_HWID = 42
+SDMA1_HWID = 43
+ISP_HWID = 44
+DBGU_IO_HWID = 45
+DF_HWID = 46
+CLKB_HWID = 47
+FCH_HWID = 48
+DFX_DAP_HWID = 49
+L1IMU_PCIE_HWID = 50
+L1IMU_NBIF_HWID = 51
+L1IMU_IOAGR_HWID = 52
+L1IMU3_HWID = 53
+L1IMU4_HWID = 54
+L1IMU5_HWID = 55
+L1IMU6_HWID = 56
+L1IMU7_HWID = 57
+L1IMU8_HWID = 58
+L1IMU9_HWID = 59
+L1IMU10_HWID = 60
+L1IMU11_HWID = 61
+L1IMU12_HWID = 62
+L1IMU13_HWID = 63
+L1IMU14_HWID = 64
+L1IMU15_HWID = 65
+WAFLC_HWID = 66
+FCH_USB_PD_HWID = 67
+SDMA2_HWID = 68
+SDMA3_HWID = 69
+PCIE_HWID = 70
+PCS_HWID = 80
+DDCL_HWID = 89
+SST_HWID = 90
+LSDMA_HWID = 91
+IOAGR_HWID = 100
+NBIF_HWID = 108
+IOAPIC_HWID = 124
+SYSTEMHUB_HWID = 128
+NTBCCP_HWID = 144
+UMC_HWID = 150
+SATA_HWID = 168
+USB_HWID = 170
+CCXSEC_HWID = 176
+XGMI_HWID = 200
+XGBE_HWID = 216
+MP0_HWID = 255
+hw_id_map = {GC_HWIP:GC_HWID,HDP_HWIP:HDP_HWID,SDMA0_HWIP:SDMA0_HWID,SDMA1_HWIP:SDMA1_HWID,SDMA2_HWIP:SDMA2_HWID,SDMA3_HWIP:SDMA3_HWID,LSDMA_HWIP:LSDMA_HWID,MMHUB_HWIP:MMHUB_HWID,ATHUB_HWIP:ATHUB_HWID,NBIO_HWIP:NBIF_HWID,MP0_HWIP:MP0_HWID,MP1_HWIP:MP1_HWID,UVD_HWIP:UVD_HWID,VCE_HWIP:VCE_HWID,DF_HWIP:DF_HWID,DCE_HWIP:DMU_HWID,OSSSYS_HWIP:OSSSYS_HWID,SMUIO_HWIP:SMUIO_HWID,PWR_HWIP:PWR_HWID,NBIF_HWIP:NBIF_HWID,THM_HWIP:THM_HWID,CLK_HWIP:CLKA_HWID,UMC_HWIP:UMC_HWID,XGMI_HWIP:XGMI_HWID,DCI_HWIP:DCI_HWID,PCIE_HWIP:PCIE_HWID,VPE_HWIP:VPE_HWID,ISP_HWIP:ISP_HWID}
+AMDGPU_SDMA0_UCODE_LOADED = 0x00000001
+AMDGPU_SDMA1_UCODE_LOADED = 0x00000002
+AMDGPU_CPCE_UCODE_LOADED = 0x00000004
+AMDGPU_CPPFP_UCODE_LOADED = 0x00000008
+AMDGPU_CPME_UCODE_LOADED = 0x00000010
+AMDGPU_CPMEC1_UCODE_LOADED = 0x00000020
+AMDGPU_CPMEC2_UCODE_LOADED = 0x00000040
+AMDGPU_CPRLC_UCODE_LOADED = 0x00000100
+PSP_GFX_CMD_BUF_VERSION = 0x00000001
+GFX_CMD_STATUS_MASK = 0x0000FFFF
+GFX_CMD_ID_MASK = 0x000F0000
+GFX_CMD_RESERVED_MASK = 0x7FF00000
+GFX_CMD_RESPONSE_MASK = 0x80000000
+C2PMSG_CMD_GFX_USB_PD_FW_VER = 0x2000000
+GFX_FLAG_RESPONSE = 0x80000000
+GFX_BUF_MAX_DESC = 64
+FRAME_TYPE_DESTROY = 1
+PSP_ERR_UNKNOWN_COMMAND = 0x00000100
+PSP_FENCE_BUFFER_SIZE = 0x1000
+PSP_CMD_BUFFER_SIZE = 0x1000
+PSP_1_MEG = 0x100000
+PSP_TMR_ALIGNMENT = 0x100000
+PSP_FW_NAME_LEN = 0x24
+AMDGPU_XGMI_MAX_CONNECTED_NODES = 64
+MEM_TRAIN_SYSTEM_SIGNATURE = 0x54534942
+GDDR6_MEM_TRAINING_DATA_SIZE_IN_BYTES = 0x1000
+GDDR6_MEM_TRAINING_OFFSET = 0x8000
+BIST_MEM_TRAINING_ENCROACHED_SIZE = 0x2000000
+PSP_RUNTIME_DB_SIZE_IN_BYTES = 0x10000
+PSP_RUNTIME_DB_OFFSET = 0x100000
+PSP_RUNTIME_DB_COOKIE_ID = 0x0ed5
+PSP_RUNTIME_DB_VER_1 = 0x0100
+PSP_RUNTIME_DB_DIAG_ENTRY_MAX_COUNT = 0x40
+AMDGPU_MAX_IRQ_SRC_ID = 0x100
+AMDGPU_MAX_IRQ_CLIENT_ID = 0x100
+AMDGPU_IRQ_CLIENTID_LEGACY = 0
+AMDGPU_IRQ_CLIENTID_MAX = SOC15_IH_CLIENTID_MAX
+AMDGPU_IRQ_SRC_DATA_MAX_SIZE_DW = 4
+SOC15_INTSRC_CP_END_OF_PIPE = 181
+SOC15_INTSRC_CP_BAD_OPCODE = 183
+SOC15_INTSRC_SQ_INTERRUPT_MSG = 239
+SOC15_INTSRC_VMC_FAULT = 0
+SOC15_INTSRC_VMC_UTCL2_POISON = 1
+SOC15_INTSRC_SDMA_TRAP = 224
+SOC15_INTSRC_SDMA_ECC = 220
+SOC21_INTSRC_SDMA_TRAP = 49
+SOC21_INTSRC_SDMA_ECC = 62
 SOC15_CLIENT_ID_FROM_IH_ENTRY = lambda entry: ((entry[0]) & 0xff) # type: ignore
 SOC15_SOURCE_ID_FROM_IH_ENTRY = lambda entry: ((entry[0]) >> 8 & 0xff) # type: ignore
 SOC15_RING_ID_FROM_IH_ENTRY = lambda entry: ((entry[0]) >> 16 & 0xff) # type: ignore
@@ -4316,155 +4314,155 @@ SOC15_CONTEXT_ID0_FROM_IH_ENTRY = lambda entry: ((entry[4])) # type: ignore
 SOC15_CONTEXT_ID1_FROM_IH_ENTRY = lambda entry: ((entry[5])) # type: ignore
 SOC15_CONTEXT_ID2_FROM_IH_ENTRY = lambda entry: ((entry[6])) # type: ignore
 SOC15_CONTEXT_ID3_FROM_IH_ENTRY = lambda entry: ((entry[7])) # type: ignore
-GFX_9_0__SRCID__CP_RB_INTERRUPT_PKT = 176 # type: ignore
-GFX_9_0__SRCID__CP_IB1_INTERRUPT_PKT = 177 # type: ignore
-GFX_9_0__SRCID__CP_IB2_INTERRUPT_PKT = 178 # type: ignore
-GFX_9_0__SRCID__CP_PM4_PKT_RSVD_BIT_ERROR = 180 # type: ignore
-GFX_9_0__SRCID__CP_EOP_INTERRUPT = 181 # type: ignore
-GFX_9_0__SRCID__CP_BAD_OPCODE_ERROR = 183 # type: ignore
-GFX_9_0__SRCID__CP_PRIV_REG_FAULT = 184 # type: ignore
-GFX_9_0__SRCID__CP_PRIV_INSTR_FAULT = 185 # type: ignore
-GFX_9_0__SRCID__CP_WAIT_MEM_SEM_FAULT = 186 # type: ignore
-GFX_9_0__SRCID__CP_CTX_EMPTY_INTERRUPT = 187 # type: ignore
-GFX_9_0__SRCID__CP_CTX_BUSY_INTERRUPT = 188 # type: ignore
-GFX_9_0__SRCID__CP_ME_WAIT_REG_MEM_POLL_TIMEOUT = 192 # type: ignore
-GFX_9_0__SRCID__CP_SIG_INCOMPLETE = 193 # type: ignore
-GFX_9_0__SRCID__CP_PREEMPT_ACK = 194 # type: ignore
-GFX_9_0__SRCID__CP_GPF = 195 # type: ignore
-GFX_9_0__SRCID__CP_GDS_ALLOC_ERROR = 196 # type: ignore
-GFX_9_0__SRCID__CP_ECC_ERROR = 197 # type: ignore
-GFX_9_0__SRCID__CP_COMPUTE_QUERY_STATUS = 199 # type: ignore
-GFX_9_0__SRCID__CP_VM_DOORBELL = 200 # type: ignore
-GFX_9_0__SRCID__CP_FUE_ERROR = 201 # type: ignore
-GFX_9_0__SRCID__RLC_STRM_PERF_MONITOR_INTERRUPT = 202 # type: ignore
-GFX_9_0__SRCID__GRBM_RD_TIMEOUT_ERROR = 232 # type: ignore
-GFX_9_0__SRCID__GRBM_REG_GUI_IDLE = 233 # type: ignore
-GFX_9_0__SRCID__SQ_INTERRUPT_ID = 239 # type: ignore
-GFX_11_0_0__SRCID__UTCL2_FAULT = 0 # type: ignore
-GFX_11_0_0__SRCID__UTCL2_DATA_POISONING = 1 # type: ignore
-GFX_11_0_0__SRCID__MEM_ACCES_MON = 10 # type: ignore
-GFX_11_0_0__SRCID__SDMA_ATOMIC_RTN_DONE = 48 # type: ignore
-GFX_11_0_0__SRCID__SDMA_TRAP = 49 # type: ignore
-GFX_11_0_0__SRCID__SDMA_SRBMWRITE = 50 # type: ignore
-GFX_11_0_0__SRCID__SDMA_CTXEMPTY = 51 # type: ignore
-GFX_11_0_0__SRCID__SDMA_PREEMPT = 52 # type: ignore
-GFX_11_0_0__SRCID__SDMA_IB_PREEMPT = 53 # type: ignore
-GFX_11_0_0__SRCID__SDMA_DOORBELL_INVALID = 54 # type: ignore
-GFX_11_0_0__SRCID__SDMA_QUEUE_HANG = 55 # type: ignore
-GFX_11_0_0__SRCID__SDMA_ATOMIC_TIMEOUT = 56 # type: ignore
-GFX_11_0_0__SRCID__SDMA_POLL_TIMEOUT = 57 # type: ignore
-GFX_11_0_0__SRCID__SDMA_PAGE_TIMEOUT = 58 # type: ignore
-GFX_11_0_0__SRCID__SDMA_PAGE_NULL = 59 # type: ignore
-GFX_11_0_0__SRCID__SDMA_PAGE_FAULT = 60 # type: ignore
-GFX_11_0_0__SRCID__SDMA_VM_HOLE = 61 # type: ignore
-GFX_11_0_0__SRCID__SDMA_ECC = 62 # type: ignore
-GFX_11_0_0__SRCID__SDMA_FROZEN = 63 # type: ignore
-GFX_11_0_0__SRCID__SDMA_SRAM_ECC = 64 # type: ignore
-GFX_11_0_0__SRCID__SDMA_SEM_INCOMPLETE_TIMEOUT = 65 # type: ignore
-GFX_11_0_0__SRCID__SDMA_SEM_WAIT_FAIL_TIMEOUT = 66 # type: ignore
-GFX_11_0_0__SRCID__SDMA_FENCE = 67 # type: ignore
-GFX_11_0_0__SRCID__RLC_GC_FED_INTERRUPT = 128 # type: ignore
-GFX_11_0_0__SRCID__CP_GENERIC_INT = 177 # type: ignore
-GFX_11_0_0__SRCID__CP_PM4_PKT_RSVD_BIT_ERROR = 180 # type: ignore
-GFX_11_0_0__SRCID__CP_EOP_INTERRUPT = 181 # type: ignore
-GFX_11_0_0__SRCID__CP_BAD_OPCODE_ERROR = 183 # type: ignore
-GFX_11_0_0__SRCID__CP_PRIV_REG_FAULT = 184 # type: ignore
-GFX_11_0_0__SRCID__CP_PRIV_INSTR_FAULT = 185 # type: ignore
-GFX_11_0_0__SRCID__CP_WAIT_MEM_SEM_FAULT = 186 # type: ignore
-GFX_11_0_0__SRCID__CP_CTX_EMPTY_INTERRUPT = 187 # type: ignore
-GFX_11_0_0__SRCID__CP_CTX_BUSY_INTERRUPT = 188 # type: ignore
-GFX_11_0_0__SRCID__CP_ME_WAIT_REG_MEM_POLL_TIMEOUT = 192 # type: ignore
-GFX_11_0_0__SRCID__CP_SIG_INCOMPLETE = 193 # type: ignore
-GFX_11_0_0__SRCID__CP_PREEMPT_ACK = 194 # type: ignore
-GFX_11_0_0__SRCID__CP_GPF = 195 # type: ignore
-GFX_11_0_0__SRCID__CP_GDS_ALLOC_ERROR = 196 # type: ignore
-GFX_11_0_0__SRCID__CP_ECC_ERROR = 197 # type: ignore
-GFX_11_0_0__SRCID__CP_COMPUTE_QUERY_STATUS = 199 # type: ignore
-GFX_11_0_0__SRCID__CP_VM_DOORBELL = 200 # type: ignore
-GFX_11_0_0__SRCID__CP_FUE_ERROR = 201 # type: ignore
-GFX_11_0_0__SRCID__RLC_STRM_PERF_MONITOR_INTERRUPT = 202 # type: ignore
-GFX_11_0_0__SRCID__GRBM_RD_TIMEOUT_ERROR = 232 # type: ignore
-GFX_11_0_0__SRCID__GRBM_REG_GUI_IDLE = 233 # type: ignore
-GFX_11_0_0__SRCID__SQ_INTERRUPT_ID = 239 # type: ignore
-GFX_12_0_0__SRCID__UTCL2_FAULT = 0 # type: ignore
-GFX_12_0_0__SRCID__UTCL2_DATA_POISONING = 1 # type: ignore
-GFX_12_0_0__SRCID__MEM_ACCES_MON = 10 # type: ignore
-GFX_12_0_0__SRCID__SDMA_ATOMIC_RTN_DONE = 48 # type: ignore
-GFX_12_0_0__SRCID__SDMA_TRAP = 49 # type: ignore
-GFX_12_0_0__SRCID__SDMA_SRBMWRITE = 50 # type: ignore
-GFX_12_0_0__SRCID__SDMA_CTXEMPTY = 51 # type: ignore
-GFX_12_0_0__SRCID__SDMA_PREEMPT = 52 # type: ignore
-GFX_12_0_0__SRCID__SDMA_IB_PREEMPT = 53 # type: ignore
-GFX_12_0_0__SRCID__SDMA_DOORBELL_INVALID = 54 # type: ignore
-GFX_12_0_0__SRCID__SDMA_QUEUE_HANG = 55 # type: ignore
-GFX_12_0_0__SRCID__SDMA_ATOMIC_TIMEOUT = 56 # type: ignore
-GFX_12_0_0__SRCID__SDMA_POLL_TIMEOUT = 57 # type: ignore
-GFX_12_0_0__SRCID__SDMA_PAGE_TIMEOUT = 58 # type: ignore
-GFX_12_0_0__SRCID__SDMA_PAGE_NULL = 59 # type: ignore
-GFX_12_0_0__SRCID__SDMA_PAGE_FAULT = 60 # type: ignore
-GFX_12_0_0__SRCID__SDMA_VM_HOLE = 61 # type: ignore
-GFX_12_0_0__SRCID__SDMA_ECC = 62 # type: ignore
-GFX_12_0_0__SRCID__SDMA_FROZEN = 63 # type: ignore
-GFX_12_0_0__SRCID__SDMA_SRAM_ECC = 64 # type: ignore
-GFX_12_0_0__SRCID__SDMA_SEM_INCOMPLETE_TIMEOUT = 65 # type: ignore
-GFX_12_0_0__SRCID__SDMA_SEM_WAIT_FAIL_TIMEOUT = 66 # type: ignore
-GFX_12_0_0__SRCID__SDMA_FENCE = 70 # type: ignore
-GFX_12_0_0__SRCID__RLC_GC_FED_INTERRUPT = 128 # type: ignore
-GFX_12_0_0__SRCID__CP_GENERIC_INT = 177 # type: ignore
-GFX_12_0_0__SRCID__CP_PM4_PKT_RSVD_BIT_ERROR = 180 # type: ignore
-GFX_12_0_0__SRCID__CP_EOP_INTERRUPT = 181 # type: ignore
-GFX_12_0_0__SRCID__CP_BAD_OPCODE_ERROR = 183 # type: ignore
-GFX_12_0_0__SRCID__CP_PRIV_REG_FAULT = 184 # type: ignore
-GFX_12_0_0__SRCID__CP_PRIV_INSTR_FAULT = 185 # type: ignore
-GFX_12_0_0__SRCID__CP_WAIT_MEM_SEM_FAULT = 186 # type: ignore
-GFX_12_0_0__SRCID__CP_CTX_EMPTY_INTERRUPT = 187 # type: ignore
-GFX_12_0_0__SRCID__CP_CTX_BUSY_INTERRUPT = 188 # type: ignore
-GFX_12_0_0__SRCID__CP_ME_WAIT_REG_MEM_POLL_TIMEOUT = 192 # type: ignore
-GFX_12_0_0__SRCID__CP_SIG_INCOMPLETE = 193 # type: ignore
-GFX_12_0_0__SRCID__CP_PREEMPT_ACK = 194 # type: ignore
-GFX_12_0_0__SRCID__CP_GPF = 195 # type: ignore
-GFX_12_0_0__SRCID__CP_GDS_ALLOC_ERROR = 196 # type: ignore
-GFX_12_0_0__SRCID__CP_ECC_ERROR = 197 # type: ignore
-GFX_12_0_0__SRCID__CP_COMPUTE_QUERY_STATUS = 199 # type: ignore
-GFX_12_0_0__SRCID__CP_VM_DOORBELL = 200 # type: ignore
-GFX_12_0_0__SRCID__CP_FUE_ERROR = 201 # type: ignore
-GFX_12_0_0__SRCID__RLC_STRM_PERF_MONITOR_INTERRUPT = 202 # type: ignore
-GFX_12_0_0__SRCID__GRBM_RD_TIMEOUT_ERROR = 232 # type: ignore
-GFX_12_0_0__SRCID__GRBM_REG_GUI_IDLE = 233 # type: ignore
-GFX_12_0_0__SRCID__SQ_INTERRUPT_ID = 239 # type: ignore
-SDMA0_4_0__SRCID__SDMA_ATOMIC_RTN_DONE = 217 # type: ignore
-SDMA0_4_0__SRCID__SDMA_ATOMIC_TIMEOUT = 218 # type: ignore
-SDMA0_4_0__SRCID__SDMA_IB_PREEMPT = 219 # type: ignore
-SDMA0_4_0__SRCID__SDMA_ECC = 220 # type: ignore
-SDMA0_4_0__SRCID__SDMA_PAGE_FAULT = 221 # type: ignore
-SDMA0_4_0__SRCID__SDMA_PAGE_NULL = 222 # type: ignore
-SDMA0_4_0__SRCID__SDMA_XNACK = 223 # type: ignore
-SDMA0_4_0__SRCID__SDMA_TRAP = 224 # type: ignore
-SDMA0_4_0__SRCID__SDMA_SEM_INCOMPLETE_TIMEOUT = 225 # type: ignore
-SDMA0_4_0__SRCID__SDMA_SEM_WAIT_FAIL_TIMEOUT = 226 # type: ignore
-SDMA0_4_0__SRCID__SDMA_SRAM_ECC = 228 # type: ignore
-SDMA0_4_0__SRCID__SDMA_PREEMPT = 240 # type: ignore
-SDMA0_4_0__SRCID__SDMA_VM_HOLE = 242 # type: ignore
-SDMA0_4_0__SRCID__SDMA_CTXEMPTY = 243 # type: ignore
-SDMA0_4_0__SRCID__SDMA_DOORBELL_INVALID = 244 # type: ignore
-SDMA0_4_0__SRCID__SDMA_FROZEN = 245 # type: ignore
-SDMA0_4_0__SRCID__SDMA_POLL_TIMEOUT = 246 # type: ignore
-SDMA0_4_0__SRCID__SDMA_SRBMWRITE = 247 # type: ignore
-SDMA0_5_0__SRCID__SDMA_ATOMIC_RTN_DONE = 217 # type: ignore
-SDMA0_5_0__SRCID__SDMA_ATOMIC_TIMEOUT = 218 # type: ignore
-SDMA0_5_0__SRCID__SDMA_IB_PREEMPT = 219 # type: ignore
-SDMA0_5_0__SRCID__SDMA_ECC = 220 # type: ignore
-SDMA0_5_0__SRCID__SDMA_PAGE_FAULT = 221 # type: ignore
-SDMA0_5_0__SRCID__SDMA_PAGE_NULL = 222 # type: ignore
-SDMA0_5_0__SRCID__SDMA_XNACK = 223 # type: ignore
-SDMA0_5_0__SRCID__SDMA_TRAP = 224 # type: ignore
-SDMA0_5_0__SRCID__SDMA_SEM_INCOMPLETE_TIMEOUT = 225 # type: ignore
-SDMA0_5_0__SRCID__SDMA_SEM_WAIT_FAIL_TIMEOUT = 226 # type: ignore
-SDMA0_5_0__SRCID__SDMA_SRAM_ECC = 228 # type: ignore
-SDMA0_5_0__SRCID__SDMA_PREEMPT = 240 # type: ignore
-SDMA0_5_0__SRCID__SDMA_VM_HOLE = 242 # type: ignore
-SDMA0_5_0__SRCID__SDMA_CTXEMPTY = 243 # type: ignore
-SDMA0_5_0__SRCID__SDMA_DOORBELL_INVALID = 244 # type: ignore
-SDMA0_5_0__SRCID__SDMA_FROZEN = 245 # type: ignore
-SDMA0_5_0__SRCID__SDMA_POLL_TIMEOUT = 246 # type: ignore
-SDMA0_5_0__SRCID__SDMA_SRBMWRITE = 247 # type: ignore
+GFX_9_0__SRCID__CP_RB_INTERRUPT_PKT = 176
+GFX_9_0__SRCID__CP_IB1_INTERRUPT_PKT = 177
+GFX_9_0__SRCID__CP_IB2_INTERRUPT_PKT = 178
+GFX_9_0__SRCID__CP_PM4_PKT_RSVD_BIT_ERROR = 180
+GFX_9_0__SRCID__CP_EOP_INTERRUPT = 181
+GFX_9_0__SRCID__CP_BAD_OPCODE_ERROR = 183
+GFX_9_0__SRCID__CP_PRIV_REG_FAULT = 184
+GFX_9_0__SRCID__CP_PRIV_INSTR_FAULT = 185
+GFX_9_0__SRCID__CP_WAIT_MEM_SEM_FAULT = 186
+GFX_9_0__SRCID__CP_CTX_EMPTY_INTERRUPT = 187
+GFX_9_0__SRCID__CP_CTX_BUSY_INTERRUPT = 188
+GFX_9_0__SRCID__CP_ME_WAIT_REG_MEM_POLL_TIMEOUT = 192
+GFX_9_0__SRCID__CP_SIG_INCOMPLETE = 193
+GFX_9_0__SRCID__CP_PREEMPT_ACK = 194
+GFX_9_0__SRCID__CP_GPF = 195
+GFX_9_0__SRCID__CP_GDS_ALLOC_ERROR = 196
+GFX_9_0__SRCID__CP_ECC_ERROR = 197
+GFX_9_0__SRCID__CP_COMPUTE_QUERY_STATUS = 199
+GFX_9_0__SRCID__CP_VM_DOORBELL = 200
+GFX_9_0__SRCID__CP_FUE_ERROR = 201
+GFX_9_0__SRCID__RLC_STRM_PERF_MONITOR_INTERRUPT = 202
+GFX_9_0__SRCID__GRBM_RD_TIMEOUT_ERROR = 232
+GFX_9_0__SRCID__GRBM_REG_GUI_IDLE = 233
+GFX_9_0__SRCID__SQ_INTERRUPT_ID = 239
+GFX_11_0_0__SRCID__UTCL2_FAULT = 0
+GFX_11_0_0__SRCID__UTCL2_DATA_POISONING = 1
+GFX_11_0_0__SRCID__MEM_ACCES_MON = 10
+GFX_11_0_0__SRCID__SDMA_ATOMIC_RTN_DONE = 48
+GFX_11_0_0__SRCID__SDMA_TRAP = 49
+GFX_11_0_0__SRCID__SDMA_SRBMWRITE = 50
+GFX_11_0_0__SRCID__SDMA_CTXEMPTY = 51
+GFX_11_0_0__SRCID__SDMA_PREEMPT = 52
+GFX_11_0_0__SRCID__SDMA_IB_PREEMPT = 53
+GFX_11_0_0__SRCID__SDMA_DOORBELL_INVALID = 54
+GFX_11_0_0__SRCID__SDMA_QUEUE_HANG = 55
+GFX_11_0_0__SRCID__SDMA_ATOMIC_TIMEOUT = 56
+GFX_11_0_0__SRCID__SDMA_POLL_TIMEOUT = 57
+GFX_11_0_0__SRCID__SDMA_PAGE_TIMEOUT = 58
+GFX_11_0_0__SRCID__SDMA_PAGE_NULL = 59
+GFX_11_0_0__SRCID__SDMA_PAGE_FAULT = 60
+GFX_11_0_0__SRCID__SDMA_VM_HOLE = 61
+GFX_11_0_0__SRCID__SDMA_ECC = 62
+GFX_11_0_0__SRCID__SDMA_FROZEN = 63
+GFX_11_0_0__SRCID__SDMA_SRAM_ECC = 64
+GFX_11_0_0__SRCID__SDMA_SEM_INCOMPLETE_TIMEOUT = 65
+GFX_11_0_0__SRCID__SDMA_SEM_WAIT_FAIL_TIMEOUT = 66
+GFX_11_0_0__SRCID__SDMA_FENCE = 67
+GFX_11_0_0__SRCID__RLC_GC_FED_INTERRUPT = 128
+GFX_11_0_0__SRCID__CP_GENERIC_INT = 177
+GFX_11_0_0__SRCID__CP_PM4_PKT_RSVD_BIT_ERROR = 180
+GFX_11_0_0__SRCID__CP_EOP_INTERRUPT = 181
+GFX_11_0_0__SRCID__CP_BAD_OPCODE_ERROR = 183
+GFX_11_0_0__SRCID__CP_PRIV_REG_FAULT = 184
+GFX_11_0_0__SRCID__CP_PRIV_INSTR_FAULT = 185
+GFX_11_0_0__SRCID__CP_WAIT_MEM_SEM_FAULT = 186
+GFX_11_0_0__SRCID__CP_CTX_EMPTY_INTERRUPT = 187
+GFX_11_0_0__SRCID__CP_CTX_BUSY_INTERRUPT = 188
+GFX_11_0_0__SRCID__CP_ME_WAIT_REG_MEM_POLL_TIMEOUT = 192
+GFX_11_0_0__SRCID__CP_SIG_INCOMPLETE = 193
+GFX_11_0_0__SRCID__CP_PREEMPT_ACK = 194
+GFX_11_0_0__SRCID__CP_GPF = 195
+GFX_11_0_0__SRCID__CP_GDS_ALLOC_ERROR = 196
+GFX_11_0_0__SRCID__CP_ECC_ERROR = 197
+GFX_11_0_0__SRCID__CP_COMPUTE_QUERY_STATUS = 199
+GFX_11_0_0__SRCID__CP_VM_DOORBELL = 200
+GFX_11_0_0__SRCID__CP_FUE_ERROR = 201
+GFX_11_0_0__SRCID__RLC_STRM_PERF_MONITOR_INTERRUPT = 202
+GFX_11_0_0__SRCID__GRBM_RD_TIMEOUT_ERROR = 232
+GFX_11_0_0__SRCID__GRBM_REG_GUI_IDLE = 233
+GFX_11_0_0__SRCID__SQ_INTERRUPT_ID = 239
+GFX_12_0_0__SRCID__UTCL2_FAULT = 0
+GFX_12_0_0__SRCID__UTCL2_DATA_POISONING = 1
+GFX_12_0_0__SRCID__MEM_ACCES_MON = 10
+GFX_12_0_0__SRCID__SDMA_ATOMIC_RTN_DONE = 48
+GFX_12_0_0__SRCID__SDMA_TRAP = 49
+GFX_12_0_0__SRCID__SDMA_SRBMWRITE = 50
+GFX_12_0_0__SRCID__SDMA_CTXEMPTY = 51
+GFX_12_0_0__SRCID__SDMA_PREEMPT = 52
+GFX_12_0_0__SRCID__SDMA_IB_PREEMPT = 53
+GFX_12_0_0__SRCID__SDMA_DOORBELL_INVALID = 54
+GFX_12_0_0__SRCID__SDMA_QUEUE_HANG = 55
+GFX_12_0_0__SRCID__SDMA_ATOMIC_TIMEOUT = 56
+GFX_12_0_0__SRCID__SDMA_POLL_TIMEOUT = 57
+GFX_12_0_0__SRCID__SDMA_PAGE_TIMEOUT = 58
+GFX_12_0_0__SRCID__SDMA_PAGE_NULL = 59
+GFX_12_0_0__SRCID__SDMA_PAGE_FAULT = 60
+GFX_12_0_0__SRCID__SDMA_VM_HOLE = 61
+GFX_12_0_0__SRCID__SDMA_ECC = 62
+GFX_12_0_0__SRCID__SDMA_FROZEN = 63
+GFX_12_0_0__SRCID__SDMA_SRAM_ECC = 64
+GFX_12_0_0__SRCID__SDMA_SEM_INCOMPLETE_TIMEOUT = 65
+GFX_12_0_0__SRCID__SDMA_SEM_WAIT_FAIL_TIMEOUT = 66
+GFX_12_0_0__SRCID__SDMA_FENCE = 70
+GFX_12_0_0__SRCID__RLC_GC_FED_INTERRUPT = 128
+GFX_12_0_0__SRCID__CP_GENERIC_INT = 177
+GFX_12_0_0__SRCID__CP_PM4_PKT_RSVD_BIT_ERROR = 180
+GFX_12_0_0__SRCID__CP_EOP_INTERRUPT = 181
+GFX_12_0_0__SRCID__CP_BAD_OPCODE_ERROR = 183
+GFX_12_0_0__SRCID__CP_PRIV_REG_FAULT = 184
+GFX_12_0_0__SRCID__CP_PRIV_INSTR_FAULT = 185
+GFX_12_0_0__SRCID__CP_WAIT_MEM_SEM_FAULT = 186
+GFX_12_0_0__SRCID__CP_CTX_EMPTY_INTERRUPT = 187
+GFX_12_0_0__SRCID__CP_CTX_BUSY_INTERRUPT = 188
+GFX_12_0_0__SRCID__CP_ME_WAIT_REG_MEM_POLL_TIMEOUT = 192
+GFX_12_0_0__SRCID__CP_SIG_INCOMPLETE = 193
+GFX_12_0_0__SRCID__CP_PREEMPT_ACK = 194
+GFX_12_0_0__SRCID__CP_GPF = 195
+GFX_12_0_0__SRCID__CP_GDS_ALLOC_ERROR = 196
+GFX_12_0_0__SRCID__CP_ECC_ERROR = 197
+GFX_12_0_0__SRCID__CP_COMPUTE_QUERY_STATUS = 199
+GFX_12_0_0__SRCID__CP_VM_DOORBELL = 200
+GFX_12_0_0__SRCID__CP_FUE_ERROR = 201
+GFX_12_0_0__SRCID__RLC_STRM_PERF_MONITOR_INTERRUPT = 202
+GFX_12_0_0__SRCID__GRBM_RD_TIMEOUT_ERROR = 232
+GFX_12_0_0__SRCID__GRBM_REG_GUI_IDLE = 233
+GFX_12_0_0__SRCID__SQ_INTERRUPT_ID = 239
+SDMA0_4_0__SRCID__SDMA_ATOMIC_RTN_DONE = 217
+SDMA0_4_0__SRCID__SDMA_ATOMIC_TIMEOUT = 218
+SDMA0_4_0__SRCID__SDMA_IB_PREEMPT = 219
+SDMA0_4_0__SRCID__SDMA_ECC = 220
+SDMA0_4_0__SRCID__SDMA_PAGE_FAULT = 221
+SDMA0_4_0__SRCID__SDMA_PAGE_NULL = 222
+SDMA0_4_0__SRCID__SDMA_XNACK = 223
+SDMA0_4_0__SRCID__SDMA_TRAP = 224
+SDMA0_4_0__SRCID__SDMA_SEM_INCOMPLETE_TIMEOUT = 225
+SDMA0_4_0__SRCID__SDMA_SEM_WAIT_FAIL_TIMEOUT = 226
+SDMA0_4_0__SRCID__SDMA_SRAM_ECC = 228
+SDMA0_4_0__SRCID__SDMA_PREEMPT = 240
+SDMA0_4_0__SRCID__SDMA_VM_HOLE = 242
+SDMA0_4_0__SRCID__SDMA_CTXEMPTY = 243
+SDMA0_4_0__SRCID__SDMA_DOORBELL_INVALID = 244
+SDMA0_4_0__SRCID__SDMA_FROZEN = 245
+SDMA0_4_0__SRCID__SDMA_POLL_TIMEOUT = 246
+SDMA0_4_0__SRCID__SDMA_SRBMWRITE = 247
+SDMA0_5_0__SRCID__SDMA_ATOMIC_RTN_DONE = 217
+SDMA0_5_0__SRCID__SDMA_ATOMIC_TIMEOUT = 218
+SDMA0_5_0__SRCID__SDMA_IB_PREEMPT = 219
+SDMA0_5_0__SRCID__SDMA_ECC = 220
+SDMA0_5_0__SRCID__SDMA_PAGE_FAULT = 221
+SDMA0_5_0__SRCID__SDMA_PAGE_NULL = 222
+SDMA0_5_0__SRCID__SDMA_XNACK = 223
+SDMA0_5_0__SRCID__SDMA_TRAP = 224
+SDMA0_5_0__SRCID__SDMA_SEM_INCOMPLETE_TIMEOUT = 225
+SDMA0_5_0__SRCID__SDMA_SEM_WAIT_FAIL_TIMEOUT = 226
+SDMA0_5_0__SRCID__SDMA_SRAM_ECC = 228
+SDMA0_5_0__SRCID__SDMA_PREEMPT = 240
+SDMA0_5_0__SRCID__SDMA_VM_HOLE = 242
+SDMA0_5_0__SRCID__SDMA_CTXEMPTY = 243
+SDMA0_5_0__SRCID__SDMA_DOORBELL_INVALID = 244
+SDMA0_5_0__SRCID__SDMA_FROZEN = 245
+SDMA0_5_0__SRCID__SDMA_POLL_TIMEOUT = 246
+SDMA0_5_0__SRCID__SDMA_SRBMWRITE = 247

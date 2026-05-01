@@ -1357,6 +1357,7 @@ def train_llama3():
       MLLOGGER.event(key=mllog_constants.OPT_LR_WARMUP_STEPS, value=WARMUP_STEPS)
       MLLOGGER.event(key=mllog_constants.NUM_WARMUP_STEPS, value=WARMUP_STEPS)
       MLLOGGER.event(key=mllog_constants.OPT_LR_DECAY_STEPS, value=MAX_STEPS - WARMUP_STEPS)
+      MLLOGGER.event(key=mllog_constants.OPT_LR_DECAY_SCHEDULE, value="cosine with linear warmup")
       MLLOGGER.event(key=mllog_constants.OPT_GRADIENT_CLIP_NORM, value=1.0)
   else:
     MLLOGGER = None
@@ -1433,6 +1434,7 @@ def train_llama3():
     load_state_dict(scheduler, safe_load(fn), realize=False)
 
   fp8_amax = [t for ts in model._fp8_amax.values() for t in ts]
+  fp8_grad_amax = [t for ts in model._fp8_grad_amax.values() for t in ts] if hasattr(model, "_fp8_grad_amax") else []
   fp8_inv_scales = list(model._fp8_inv_scale.values())
 
   from tinygrad.nn.state import get_state_dict
@@ -1443,6 +1445,10 @@ def train_llama3():
     if optim.master_params:
       idx = next(j for j, p in enumerate(optim.params) if p is w)
       optim.master_params[idx].assign((optim.master_params[idx] * w._inv_scale.reshape(-1, *([1]*(w.ndim-1)))).contiguous())
+
+  # realize everything here
+  if optim.master_params: Tensor.realize(*optim.master_params)
+  Tensor.realize(*optim.params, *fp8_inv_scales, *fp8_amax, *fp8_grad_amax)
 
   @TinyJit
   def minibatch(tokens:Tensor):
@@ -1460,7 +1466,7 @@ def train_llama3():
       apply_grad(g, new_g.uop)
 
     loss_cpu = loss.flatten().float().to("CPU")
-    return loss_cpu.realize(*grads, *fp8_amax)
+    return loss_cpu.realize(*grads, *fp8_amax, *fp8_grad_amax)
 
   @TinyJit
   def optim_step():
@@ -1635,7 +1641,6 @@ def train_llama3():
         tqdm.write(f"target achieved after {sequences_seen} sequences")
         if MLLOGGER and RUNMLPERF:
           MLLOGGER.end(key=mllog_constants.EPOCH_STOP, metadata={mllog_constants.SAMPLES_COUNT: sequences_seen})
-          MLLOGGER.event(key=mllog_constants.TRAIN_SAMPLES, value=sequences_seen)
           MLLOGGER.end(key=mllog_constants.RUN_STOP, metadata={mllog_constants.STATUS: mllog_constants.SUCCESS})
         if getenv("CKPT"):
           if not os.path.exists(ckpt_dir := "./ckpts"): os.mkdir(ckpt_dir)

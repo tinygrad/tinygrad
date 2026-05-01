@@ -230,7 +230,7 @@ class struct_smu_state_memory_block(c.Struct):
   dll_off: bool
   m3arb: int
   unused: c.Array[ctypes.c_ubyte, Literal[3]]
-struct_smu_state_memory_block.register_fields([('dll_off', ctypes.c_bool, 0), ('m3arb', ctypes.c_ubyte, 1), ('unused', c.Array[ctypes.c_ubyte, Literal[3]], 2)])
+struct_smu_state_memory_block.register_fields([('dll_off', ctypes.c_bool, 0), ('m3arb', uint8_t, 1), ('unused', c.Array[uint8_t, Literal[3]], 2)])
 @c.record
 class struct_smu_state_software_algorithm_block(c.Struct):
   SIZE = 2
@@ -258,13 +258,13 @@ class struct_smu_state_validation_block(c.Struct):
   single_display_only: bool
   disallow_on_dc: bool
   supported_power_levels: int
-struct_smu_state_validation_block.register_fields([('single_display_only', ctypes.c_bool, 0), ('disallow_on_dc', ctypes.c_bool, 1), ('supported_power_levels', ctypes.c_ubyte, 2)])
+struct_smu_state_validation_block.register_fields([('single_display_only', ctypes.c_bool, 0), ('disallow_on_dc', ctypes.c_bool, 1), ('supported_power_levels', uint8_t, 2)])
 @c.record
 class struct_smu_uvd_clocks(c.Struct):
   SIZE = 8
   vclk: int
   dclk: int
-struct_smu_uvd_clocks.register_fields([('vclk', ctypes.c_uint32, 0), ('dclk', ctypes.c_uint32, 4)])
+struct_smu_uvd_clocks.register_fields([('vclk', uint32_t, 0), ('dclk', uint32_t, 4)])
 enum_smu_power_src_type: dict[int, str] = {(SMU_POWER_SOURCE_AC:=0): 'SMU_POWER_SOURCE_AC', (SMU_POWER_SOURCE_DC:=1): 'SMU_POWER_SOURCE_DC', (SMU_POWER_SOURCE_COUNT:=2): 'SMU_POWER_SOURCE_COUNT'}
 enum_smu_ppt_limit_type: dict[int, str] = {(SMU_DEFAULT_PPT_LIMIT:=0): 'SMU_DEFAULT_PPT_LIMIT', (SMU_FAST_PPT_LIMIT:=1): 'SMU_FAST_PPT_LIMIT'}
 enum_smu_ppt_limit_level: dict[int, str] = {(SMU_PPT_LIMIT_MIN:=-1): 'SMU_PPT_LIMIT_MIN', (SMU_PPT_LIMIT_CURRENT:=0): 'SMU_PPT_LIMIT_CURRENT', (SMU_PPT_LIMIT_DEFAULT:=1): 'SMU_PPT_LIMIT_DEFAULT', (SMU_PPT_LIMIT_MAX:=2): 'SMU_PPT_LIMIT_MAX'}
@@ -281,7 +281,7 @@ class struct_smu_user_dpm_profile(c.Struct):
   user_od: int
   clk_mask: c.Array[ctypes.c_uint32, Literal[28]]
   clk_dependency: int
-struct_smu_user_dpm_profile.register_fields([('fan_mode', ctypes.c_uint32, 0), ('power_limit', ctypes.c_uint32, 4), ('fan_speed_pwm', ctypes.c_uint32, 8), ('fan_speed_rpm', ctypes.c_uint32, 12), ('flags', ctypes.c_uint32, 16), ('user_od', ctypes.c_uint32, 20), ('clk_mask', c.Array[ctypes.c_uint32, Literal[28]], 24), ('clk_dependency', ctypes.c_uint32, 136)])
+struct_smu_user_dpm_profile.register_fields([('fan_mode', uint32_t, 0), ('power_limit', uint32_t, 4), ('fan_speed_pwm', uint32_t, 8), ('fan_speed_rpm', uint32_t, 12), ('flags', uint32_t, 16), ('user_od', uint32_t, 20), ('clk_mask', c.Array[uint32_t, Literal[28]], 24), ('clk_dependency', uint32_t, 136)])
 @c.record
 class struct_smu_table(c.Struct):
   SIZE = 48
@@ -293,7 +293,7 @@ class struct_smu_table(c.Struct):
   bo: c.POINTER[struct_amdgpu_bo]
   version: int
 class struct_amdgpu_bo(c.Struct): pass
-struct_smu_table.register_fields([('size', ctypes.c_uint64, 0), ('align', ctypes.c_uint32, 8), ('domain', ctypes.c_ubyte, 12), ('mc_address', ctypes.c_uint64, 16), ('cpu_addr', ctypes.c_void_p, 24), ('bo', c.POINTER[struct_amdgpu_bo], 32), ('version', ctypes.c_uint32, 40)])
+struct_smu_table.register_fields([('size', uint64_t, 0), ('align', uint32_t, 8), ('domain', uint8_t, 12), ('mc_address', uint64_t, 16), ('cpu_addr', ctypes.c_void_p, 24), ('bo', c.POINTER[struct_amdgpu_bo], 32), ('version', uint32_t, 40)])
 enum_smu_perf_level_designation: dict[int, str] = {(PERF_LEVEL_ACTIVITY:=0): 'PERF_LEVEL_ACTIVITY', (PERF_LEVEL_POWER_CONTAINMENT:=1): 'PERF_LEVEL_POWER_CONTAINMENT'}
 @c.record
 class struct_smu_performance_level(c.Struct):
@@ -304,7 +304,7 @@ class struct_smu_performance_level(c.Struct):
   vddci: int
   non_local_mem_freq: int
   non_local_mem_width: int
-struct_smu_performance_level.register_fields([('core_clock', ctypes.c_uint32, 0), ('memory_clock', ctypes.c_uint32, 4), ('vddc', ctypes.c_uint32, 8), ('vddci', ctypes.c_uint32, 12), ('non_local_mem_freq', ctypes.c_uint32, 16), ('non_local_mem_width', ctypes.c_uint32, 20)])
+struct_smu_performance_level.register_fields([('core_clock', uint32_t, 0), ('memory_clock', uint32_t, 4), ('vddc', uint32_t, 8), ('vddci', uint32_t, 12), ('non_local_mem_freq', uint32_t, 16), ('non_local_mem_width', uint32_t, 20)])
 @c.record
 class struct_smu_clock_info(c.Struct):
   SIZE = 24
@@ -314,7 +314,7 @@ class struct_smu_clock_info(c.Struct):
   max_eng_clk: int
   min_bus_bandwidth: int
   max_bus_bandwidth: int
-struct_smu_clock_info.register_fields([('min_mem_clk', ctypes.c_uint32, 0), ('max_mem_clk', ctypes.c_uint32, 4), ('min_eng_clk', ctypes.c_uint32, 8), ('max_eng_clk', ctypes.c_uint32, 12), ('min_bus_bandwidth', ctypes.c_uint32, 16), ('max_bus_bandwidth', ctypes.c_uint32, 20)])
+struct_smu_clock_info.register_fields([('min_mem_clk', uint32_t, 0), ('max_mem_clk', uint32_t, 4), ('min_eng_clk', uint32_t, 8), ('max_eng_clk', uint32_t, 12), ('min_bus_bandwidth', uint32_t, 16), ('max_bus_bandwidth', uint32_t, 20)])
 @c.record
 class struct_smu_bios_boot_up_values(c.Struct):
   SIZE = 68
@@ -337,197 +337,196 @@ class struct_smu_bios_boot_up_values(c.Struct):
   fclk: int
   lclk: int
   firmware_caps: int
-struct_smu_bios_boot_up_values.register_fields([('revision', ctypes.c_uint32, 0), ('gfxclk', ctypes.c_uint32, 4), ('uclk', ctypes.c_uint32, 8), ('socclk', ctypes.c_uint32, 12), ('dcefclk', ctypes.c_uint32, 16), ('eclk', ctypes.c_uint32, 20), ('vclk', ctypes.c_uint32, 24), ('dclk', ctypes.c_uint32, 28), ('vddc', ctypes.c_uint16, 32), ('vddci', ctypes.c_uint16, 34), ('mvddc', ctypes.c_uint16, 36), ('vdd_gfx', ctypes.c_uint16, 38), ('cooling_id', ctypes.c_ubyte, 40), ('pp_table_id', ctypes.c_uint32, 44), ('format_revision', ctypes.c_uint32, 48), ('content_revision', ctypes.c_uint32, 52), ('fclk', ctypes.c_uint32, 56), ('lclk', ctypes.c_uint32, 60), ('firmware_caps', ctypes.c_uint32, 64)])
+struct_smu_bios_boot_up_values.register_fields([('revision', uint32_t, 0), ('gfxclk', uint32_t, 4), ('uclk', uint32_t, 8), ('socclk', uint32_t, 12), ('dcefclk', uint32_t, 16), ('eclk', uint32_t, 20), ('vclk', uint32_t, 24), ('dclk', uint32_t, 28), ('vddc', uint16_t, 32), ('vddci', uint16_t, 34), ('mvddc', uint16_t, 36), ('vdd_gfx', uint16_t, 38), ('cooling_id', uint8_t, 40), ('pp_table_id', uint32_t, 44), ('format_revision', uint32_t, 48), ('content_revision', uint32_t, 52), ('fclk', uint32_t, 56), ('lclk', uint32_t, 60), ('firmware_caps', uint32_t, 64)])
 enum_smu_table_id: dict[int, str] = {(SMU_TABLE_PPTABLE:=0): 'SMU_TABLE_PPTABLE', (SMU_TABLE_WATERMARKS:=1): 'SMU_TABLE_WATERMARKS', (SMU_TABLE_CUSTOM_DPM:=2): 'SMU_TABLE_CUSTOM_DPM', (SMU_TABLE_DPMCLOCKS:=3): 'SMU_TABLE_DPMCLOCKS', (SMU_TABLE_AVFS:=4): 'SMU_TABLE_AVFS', (SMU_TABLE_AVFS_PSM_DEBUG:=5): 'SMU_TABLE_AVFS_PSM_DEBUG', (SMU_TABLE_AVFS_FUSE_OVERRIDE:=6): 'SMU_TABLE_AVFS_FUSE_OVERRIDE', (SMU_TABLE_PMSTATUSLOG:=7): 'SMU_TABLE_PMSTATUSLOG', (SMU_TABLE_SMU_METRICS:=8): 'SMU_TABLE_SMU_METRICS', (SMU_TABLE_DRIVER_SMU_CONFIG:=9): 'SMU_TABLE_DRIVER_SMU_CONFIG', (SMU_TABLE_ACTIVITY_MONITOR_COEFF:=10): 'SMU_TABLE_ACTIVITY_MONITOR_COEFF', (SMU_TABLE_OVERDRIVE:=11): 'SMU_TABLE_OVERDRIVE', (SMU_TABLE_I2C_COMMANDS:=12): 'SMU_TABLE_I2C_COMMANDS', (SMU_TABLE_PACE:=13): 'SMU_TABLE_PACE', (SMU_TABLE_ECCINFO:=14): 'SMU_TABLE_ECCINFO', (SMU_TABLE_COMBO_PPTABLE:=15): 'SMU_TABLE_COMBO_PPTABLE', (SMU_TABLE_WIFIBAND:=16): 'SMU_TABLE_WIFIBAND', (SMU_TABLE_COUNT:=17): 'SMU_TABLE_COUNT'}
-PPSMC_Result_OK = 0x1 # type: ignore
-PPSMC_Result_Failed = 0xFF # type: ignore
-PPSMC_Result_UnknownCmd = 0xFE # type: ignore
-PPSMC_Result_CmdRejectedPrereq = 0xFD # type: ignore
-PPSMC_Result_CmdRejectedBusy = 0xFC # type: ignore
-PPSMC_MSG_TestMessage = 0x1 # type: ignore
-PPSMC_MSG_GetSmuVersion = 0x2 # type: ignore
-PPSMC_MSG_GfxDriverReset = 0x3 # type: ignore
-PPSMC_MSG_GetDriverIfVersion = 0x4 # type: ignore
-PPSMC_MSG_EnableAllSmuFeatures = 0x5 # type: ignore
-PPSMC_MSG_DisableAllSmuFeatures = 0x6 # type: ignore
-PPSMC_MSG_RequestI2cTransaction = 0x7 # type: ignore
-PPSMC_MSG_GetMetricsVersion = 0x8 # type: ignore
-PPSMC_MSG_GetMetricsTable = 0x9 # type: ignore
-PPSMC_MSG_GetEccInfoTable = 0xA # type: ignore
-PPSMC_MSG_GetEnabledSmuFeaturesLow = 0xB # type: ignore
-PPSMC_MSG_GetEnabledSmuFeaturesHigh = 0xC # type: ignore
-PPSMC_MSG_SetDriverDramAddrHigh = 0xD # type: ignore
-PPSMC_MSG_SetDriverDramAddrLow = 0xE # type: ignore
-PPSMC_MSG_SetToolsDramAddrHigh = 0xF # type: ignore
-PPSMC_MSG_SetToolsDramAddrLow = 0x10 # type: ignore
-PPSMC_MSG_SetSystemVirtualDramAddrHigh = 0x11 # type: ignore
-PPSMC_MSG_SetSystemVirtualDramAddrLow = 0x12 # type: ignore
-PPSMC_MSG_SetSoftMinByFreq = 0x13 # type: ignore
-PPSMC_MSG_SetSoftMaxByFreq = 0x14 # type: ignore
-PPSMC_MSG_GetMinDpmFreq = 0x15 # type: ignore
-PPSMC_MSG_GetMaxDpmFreq = 0x16 # type: ignore
-PPSMC_MSG_GetDpmFreqByIndex = 0x17 # type: ignore
-PPSMC_MSG_SetPptLimit = 0x18 # type: ignore
-PPSMC_MSG_GetPptLimit = 0x19 # type: ignore
-PPSMC_MSG_DramLogSetDramAddrHigh = 0x1A # type: ignore
-PPSMC_MSG_DramLogSetDramAddrLow = 0x1B # type: ignore
-PPSMC_MSG_DramLogSetDramSize = 0x1C # type: ignore
-PPSMC_MSG_GetDebugData = 0x1D # type: ignore
-PPSMC_MSG_HeavySBR = 0x1E # type: ignore
-PPSMC_MSG_SetNumBadHbmPagesRetired = 0x1F # type: ignore
-PPSMC_MSG_DFCstateControl = 0x20 # type: ignore
-PPSMC_MSG_GetGmiPwrDnHyst = 0x21 # type: ignore
-PPSMC_MSG_SetGmiPwrDnHyst = 0x22 # type: ignore
-PPSMC_MSG_GmiPwrDnControl = 0x23 # type: ignore
-PPSMC_MSG_EnterGfxoff = 0x24 # type: ignore
-PPSMC_MSG_ExitGfxoff = 0x25 # type: ignore
-PPSMC_MSG_EnableDeterminism = 0x26 # type: ignore
-PPSMC_MSG_DisableDeterminism = 0x27 # type: ignore
-PPSMC_MSG_DumpSTBtoDram = 0x28 # type: ignore
-PPSMC_MSG_STBtoDramLogSetDramAddrHigh = 0x29 # type: ignore
-PPSMC_MSG_STBtoDramLogSetDramAddrLow = 0x2A # type: ignore
-PPSMC_MSG_STBtoDramLogSetDramSize = 0x2B # type: ignore
-PPSMC_MSG_SetSystemVirtualSTBtoDramAddrHigh = 0x2C # type: ignore
-PPSMC_MSG_SetSystemVirtualSTBtoDramAddrLow = 0x2D # type: ignore
-PPSMC_MSG_GfxDriverResetRecovery = 0x2E # type: ignore
-PPSMC_MSG_TriggerVFFLR = 0x2F # type: ignore
-PPSMC_MSG_SetSoftMinGfxClk = 0x30 # type: ignore
-PPSMC_MSG_SetSoftMaxGfxClk = 0x31 # type: ignore
-PPSMC_MSG_GetMinGfxDpmFreq = 0x32 # type: ignore
-PPSMC_MSG_GetMaxGfxDpmFreq = 0x33 # type: ignore
-PPSMC_MSG_PrepareForDriverUnload = 0x34 # type: ignore
-PPSMC_MSG_ReadThrottlerLimit = 0x35 # type: ignore
-PPSMC_MSG_QueryValidMcaCount = 0x36 # type: ignore
-PPSMC_MSG_McaBankDumpDW = 0x37 # type: ignore
-PPSMC_MSG_GetCTFLimit = 0x38 # type: ignore
-PPSMC_MSG_ClearMcaOnRead = 0x39 # type: ignore
-PPSMC_MSG_QueryValidMcaCeCount = 0x3A # type: ignore
-PPSMC_MSG_McaBankCeDumpDW = 0x3B # type: ignore
-PPSMC_MSG_SelectPLPDMode = 0x40 # type: ignore
-PPSMC_MSG_PmLogReadSample = 0x41 # type: ignore
-PPSMC_MSG_PmLogGetTableVersion = 0x42 # type: ignore
-PPSMC_MSG_RmaDueToBadPageThreshold = 0x43 # type: ignore
-PPSMC_MSG_SetThrottlingPolicy = 0x44 # type: ignore
-PPSMC_MSG_SetPhaseDetectCSBWThreshold = 0x45 # type: ignore
-PPSMC_MSG_SetPhaseDetectFreqHigh = 0x46 # type: ignore
-PPSMC_MSG_SetPhaseDetectFreqLow = 0x47 # type: ignore
-PPSMC_MSG_SetPhaseDetectDownHysterisis = 0x48 # type: ignore
-PPSMC_MSG_SetPhaseDetectAlphaX1e6 = 0x49 # type: ignore
-PPSMC_MSG_SetPhaseDetectOnOff = 0x4A # type: ignore
-PPSMC_MSG_GetPhaseDetectResidency = 0x4B # type: ignore
-PPSMC_MSG_UpdatePccWaitDecMaxStr = 0x4C # type: ignore
-PPSMC_MSG_ResetSDMA = 0x4D # type: ignore
-PPSMC_MSG_GetRasTableVersion = 0x4E # type: ignore
-PPSMC_MSG_GetBadPageCount = 0x50 # type: ignore
-PPSMC_MSG_GetBadPageMcaAddress = 0x51 # type: ignore
-PPSMC_MSG_SetTimestamp = 0x53 # type: ignore
-PPSMC_MSG_SetTimestampHi = 0x54 # type: ignore
-PPSMC_MSG_GetTimestamp = 0x55 # type: ignore
-PPSMC_MSG_GetBadPageIpIdLoHi = 0x57 # type: ignore
-PPSMC_MSG_EraseRasTable = 0x58 # type: ignore
-PPSMC_MSG_GetStaticMetricsTable = 0x59 # type: ignore
-PPSMC_MSG_ResetVfArbitersByIndex = 0x5A # type: ignore
-PPSMC_MSG_GetSystemMetricsTable = 0x5C # type: ignore
-PPSMC_MSG_GetSystemMetricsVersion = 0x5D # type: ignore
-PPSMC_MSG_ResetVCN = 0x5E # type: ignore
-PPSMC_MSG_SetFastPptLimit = 0x5F # type: ignore
-PPSMC_MSG_GetFastPptLimit = 0x60 # type: ignore
-PPSMC_Message_Count = 0x61 # type: ignore
-PPSMC_RESET_TYPE_DRIVER_MODE_1_RESET = 0x1 # type: ignore
-PPSMC_RESET_TYPE_DRIVER_MODE_2_RESET = 0x2 # type: ignore
-PPSMC_RESET_TYPE_DRIVER_MODE_3_RESET = 0x3 # type: ignore
-PPSMC_THROTTLING_LIMIT_TYPE_SOCKET = 0x1 # type: ignore
-PPSMC_THROTTLING_LIMIT_TYPE_HBM = 0x2 # type: ignore
-PPSMC_AID_THM_TYPE = 0x1 # type: ignore
-PPSMC_CCD_THM_TYPE = 0x2 # type: ignore
-PPSMC_XCD_THM_TYPE = 0x3 # type: ignore
-PPSMC_HBM_THM_TYPE = 0x4 # type: ignore
-PPSMC_PLPD_MODE_DEFAULT = 0x1 # type: ignore
-PPSMC_PLPD_MODE_OPTIMIZED = 0x2 # type: ignore
-NUM_VCLK_DPM_LEVELS = 4 # type: ignore
-NUM_DCLK_DPM_LEVELS = 4 # type: ignore
-NUM_SOCCLK_DPM_LEVELS = 4 # type: ignore
-NUM_LCLK_DPM_LEVELS = 4 # type: ignore
-NUM_UCLK_DPM_LEVELS = 4 # type: ignore
-NUM_FCLK_DPM_LEVELS = 4 # type: ignore
-NUM_XGMI_DPM_LEVELS = 2 # type: ignore
-NUM_CXL_BITRATES = 4 # type: ignore
-NUM_PCIE_BITRATES = 4 # type: ignore
-NUM_XGMI_BITRATES = 4 # type: ignore
-NUM_XGMI_WIDTHS = 3 # type: ignore
-NUM_TDP_GROUPS = 4 # type: ignore
-NUM_SOC_P2S_TABLES = 6 # type: ignore
-NUM_GFX_P2S_TABLES = 8 # type: ignore
-NUM_PSM_DIDT_THRESHOLDS = 3 # type: ignore
-NUM_XVMIN_VMIN_THRESHOLDS = 3 # type: ignore
-PRODUCT_MODEL_NUMBER_LEN = 20 # type: ignore
-PRODUCT_NAME_LEN = 64 # type: ignore
-PRODUCT_SERIAL_LEN = 20 # type: ignore
-PRODUCT_MANUFACTURER_NAME_LEN = 32 # type: ignore
-PRODUCT_FRU_ID_LEN = 32 # type: ignore
-SMU_METRICS_TABLE_VERSION = 0x15 # type: ignore
-SMU_SYSTEM_METRICS_TABLE_VERSION = 0x1 # type: ignore
-SMU_VF_METRICS_TABLE_MASK = (1 << 31) # type: ignore
-SMU_VF_METRICS_TABLE_VERSION = (0x6 | SMU_VF_METRICS_TABLE_MASK) # type: ignore
-SMU13_0_6_DRIVER_IF_VERSION = 0x08042024 # type: ignore
-NUM_I2C_CONTROLLERS = 8 # type: ignore
-I2C_CONTROLLER_ENABLED = 1 # type: ignore
-I2C_CONTROLLER_DISABLED = 0 # type: ignore
-MAX_SW_I2C_COMMANDS = 24 # type: ignore
-CMDCONFIG_STOP_BIT = 0 # type: ignore
-CMDCONFIG_RESTART_BIT = 1 # type: ignore
-CMDCONFIG_READWRITE_BIT = 2 # type: ignore
-CMDCONFIG_STOP_MASK = (1 << CMDCONFIG_STOP_BIT) # type: ignore
-CMDCONFIG_RESTART_MASK = (1 << CMDCONFIG_RESTART_BIT) # type: ignore
-CMDCONFIG_READWRITE_MASK = (1 << CMDCONFIG_READWRITE_BIT) # type: ignore
-IH_INTERRUPT_ID_TO_DRIVER = 0xFE # type: ignore
-IH_INTERRUPT_CONTEXT_ID_THERMAL_THROTTLING = 0x7 # type: ignore
-THROTTLER_PROCHOT_BIT = 0 # type: ignore
-THROTTLER_PPT_BIT = 1 # type: ignore
-THROTTLER_THERMAL_SOCKET_BIT = 2 # type: ignore
-THROTTLER_THERMAL_VR_BIT = 3 # type: ignore
-THROTTLER_THERMAL_HBM_BIT = 4 # type: ignore
-ClearMcaOnRead_UE_FLAG_MASK = 0x1 # type: ignore
-ClearMcaOnRead_CE_POLL_MASK = 0x2 # type: ignore
-int32_t = int # type: ignore
-SMU_THERMAL_MINIMUM_ALERT_TEMP = 0 # type: ignore
-SMU_THERMAL_MAXIMUM_ALERT_TEMP = 255 # type: ignore
-SMU_TEMPERATURE_UNITS_PER_CENTIGRADES = 1000 # type: ignore
-SMU_FW_NAME_LEN = 0x24 # type: ignore
-SMU_DPM_USER_PROFILE_RESTORE = (1 << 0) # type: ignore
-SMU_CUSTOM_FAN_SPEED_RPM = (1 << 1) # type: ignore
-SMU_CUSTOM_FAN_SPEED_PWM = (1 << 2) # type: ignore
-SMU_THROTTLER_PPT0_BIT = 0 # type: ignore
-SMU_THROTTLER_PPT1_BIT = 1 # type: ignore
-SMU_THROTTLER_PPT2_BIT = 2 # type: ignore
-SMU_THROTTLER_PPT3_BIT = 3 # type: ignore
-SMU_THROTTLER_SPL_BIT = 4 # type: ignore
-SMU_THROTTLER_FPPT_BIT = 5 # type: ignore
-SMU_THROTTLER_SPPT_BIT = 6 # type: ignore
-SMU_THROTTLER_SPPT_APU_BIT = 7 # type: ignore
-SMU_THROTTLER_TDC_GFX_BIT = 16 # type: ignore
-SMU_THROTTLER_TDC_SOC_BIT = 17 # type: ignore
-SMU_THROTTLER_TDC_MEM_BIT = 18 # type: ignore
-SMU_THROTTLER_TDC_VDD_BIT = 19 # type: ignore
-SMU_THROTTLER_TDC_CVIP_BIT = 20 # type: ignore
-SMU_THROTTLER_EDC_CPU_BIT = 21 # type: ignore
-SMU_THROTTLER_EDC_GFX_BIT = 22 # type: ignore
-SMU_THROTTLER_APCC_BIT = 23 # type: ignore
-SMU_THROTTLER_TEMP_GPU_BIT = 32 # type: ignore
-SMU_THROTTLER_TEMP_CORE_BIT = 33 # type: ignore
-SMU_THROTTLER_TEMP_MEM_BIT = 34 # type: ignore
-SMU_THROTTLER_TEMP_EDGE_BIT = 35 # type: ignore
-SMU_THROTTLER_TEMP_HOTSPOT_BIT = 36 # type: ignore
-SMU_THROTTLER_TEMP_SOC_BIT = 37 # type: ignore
-SMU_THROTTLER_TEMP_VR_GFX_BIT = 38 # type: ignore
-SMU_THROTTLER_TEMP_VR_SOC_BIT = 39 # type: ignore
-SMU_THROTTLER_TEMP_VR_MEM0_BIT = 40 # type: ignore
-SMU_THROTTLER_TEMP_VR_MEM1_BIT = 41 # type: ignore
-SMU_THROTTLER_TEMP_LIQUID0_BIT = 42 # type: ignore
-SMU_THROTTLER_TEMP_LIQUID1_BIT = 43 # type: ignore
-SMU_THROTTLER_VRHOT0_BIT = 44 # type: ignore
-SMU_THROTTLER_VRHOT1_BIT = 45 # type: ignore
-SMU_THROTTLER_PROCHOT_CPU_BIT = 46 # type: ignore
-SMU_THROTTLER_PROCHOT_GFX_BIT = 47 # type: ignore
-SMU_THROTTLER_PPM_BIT = 56 # type: ignore
-SMU_THROTTLER_FIT_BIT = 57 # type: ignore
+PPSMC_Result_OK = 0x1
+PPSMC_Result_Failed = 0xFF
+PPSMC_Result_UnknownCmd = 0xFE
+PPSMC_Result_CmdRejectedPrereq = 0xFD
+PPSMC_Result_CmdRejectedBusy = 0xFC
+PPSMC_MSG_TestMessage = 0x1
+PPSMC_MSG_GetSmuVersion = 0x2
+PPSMC_MSG_GfxDriverReset = 0x3
+PPSMC_MSG_GetDriverIfVersion = 0x4
+PPSMC_MSG_EnableAllSmuFeatures = 0x5
+PPSMC_MSG_DisableAllSmuFeatures = 0x6
+PPSMC_MSG_RequestI2cTransaction = 0x7
+PPSMC_MSG_GetMetricsVersion = 0x8
+PPSMC_MSG_GetMetricsTable = 0x9
+PPSMC_MSG_GetEccInfoTable = 0xA
+PPSMC_MSG_GetEnabledSmuFeaturesLow = 0xB
+PPSMC_MSG_GetEnabledSmuFeaturesHigh = 0xC
+PPSMC_MSG_SetDriverDramAddrHigh = 0xD
+PPSMC_MSG_SetDriverDramAddrLow = 0xE
+PPSMC_MSG_SetToolsDramAddrHigh = 0xF
+PPSMC_MSG_SetToolsDramAddrLow = 0x10
+PPSMC_MSG_SetSystemVirtualDramAddrHigh = 0x11
+PPSMC_MSG_SetSystemVirtualDramAddrLow = 0x12
+PPSMC_MSG_SetSoftMinByFreq = 0x13
+PPSMC_MSG_SetSoftMaxByFreq = 0x14
+PPSMC_MSG_GetMinDpmFreq = 0x15
+PPSMC_MSG_GetMaxDpmFreq = 0x16
+PPSMC_MSG_GetDpmFreqByIndex = 0x17
+PPSMC_MSG_SetPptLimit = 0x18
+PPSMC_MSG_GetPptLimit = 0x19
+PPSMC_MSG_DramLogSetDramAddrHigh = 0x1A
+PPSMC_MSG_DramLogSetDramAddrLow = 0x1B
+PPSMC_MSG_DramLogSetDramSize = 0x1C
+PPSMC_MSG_GetDebugData = 0x1D
+PPSMC_MSG_HeavySBR = 0x1E
+PPSMC_MSG_SetNumBadHbmPagesRetired = 0x1F
+PPSMC_MSG_DFCstateControl = 0x20
+PPSMC_MSG_GetGmiPwrDnHyst = 0x21
+PPSMC_MSG_SetGmiPwrDnHyst = 0x22
+PPSMC_MSG_GmiPwrDnControl = 0x23
+PPSMC_MSG_EnterGfxoff = 0x24
+PPSMC_MSG_ExitGfxoff = 0x25
+PPSMC_MSG_EnableDeterminism = 0x26
+PPSMC_MSG_DisableDeterminism = 0x27
+PPSMC_MSG_DumpSTBtoDram = 0x28
+PPSMC_MSG_STBtoDramLogSetDramAddrHigh = 0x29
+PPSMC_MSG_STBtoDramLogSetDramAddrLow = 0x2A
+PPSMC_MSG_STBtoDramLogSetDramSize = 0x2B
+PPSMC_MSG_SetSystemVirtualSTBtoDramAddrHigh = 0x2C
+PPSMC_MSG_SetSystemVirtualSTBtoDramAddrLow = 0x2D
+PPSMC_MSG_GfxDriverResetRecovery = 0x2E
+PPSMC_MSG_TriggerVFFLR = 0x2F
+PPSMC_MSG_SetSoftMinGfxClk = 0x30
+PPSMC_MSG_SetSoftMaxGfxClk = 0x31
+PPSMC_MSG_GetMinGfxDpmFreq = 0x32
+PPSMC_MSG_GetMaxGfxDpmFreq = 0x33
+PPSMC_MSG_PrepareForDriverUnload = 0x34
+PPSMC_MSG_ReadThrottlerLimit = 0x35
+PPSMC_MSG_QueryValidMcaCount = 0x36
+PPSMC_MSG_McaBankDumpDW = 0x37
+PPSMC_MSG_GetCTFLimit = 0x38
+PPSMC_MSG_ClearMcaOnRead = 0x39
+PPSMC_MSG_QueryValidMcaCeCount = 0x3A
+PPSMC_MSG_McaBankCeDumpDW = 0x3B
+PPSMC_MSG_SelectPLPDMode = 0x40
+PPSMC_MSG_PmLogReadSample = 0x41
+PPSMC_MSG_PmLogGetTableVersion = 0x42
+PPSMC_MSG_RmaDueToBadPageThreshold = 0x43
+PPSMC_MSG_SetThrottlingPolicy = 0x44
+PPSMC_MSG_SetPhaseDetectCSBWThreshold = 0x45
+PPSMC_MSG_SetPhaseDetectFreqHigh = 0x46
+PPSMC_MSG_SetPhaseDetectFreqLow = 0x47
+PPSMC_MSG_SetPhaseDetectDownHysterisis = 0x48
+PPSMC_MSG_SetPhaseDetectAlphaX1e6 = 0x49
+PPSMC_MSG_SetPhaseDetectOnOff = 0x4A
+PPSMC_MSG_GetPhaseDetectResidency = 0x4B
+PPSMC_MSG_UpdatePccWaitDecMaxStr = 0x4C
+PPSMC_MSG_ResetSDMA = 0x4D
+PPSMC_MSG_GetRasTableVersion = 0x4E
+PPSMC_MSG_GetBadPageCount = 0x50
+PPSMC_MSG_GetBadPageMcaAddress = 0x51
+PPSMC_MSG_SetTimestamp = 0x53
+PPSMC_MSG_SetTimestampHi = 0x54
+PPSMC_MSG_GetTimestamp = 0x55
+PPSMC_MSG_GetBadPageIpIdLoHi = 0x57
+PPSMC_MSG_EraseRasTable = 0x58
+PPSMC_MSG_GetStaticMetricsTable = 0x59
+PPSMC_MSG_ResetVfArbitersByIndex = 0x5A
+PPSMC_MSG_GetSystemMetricsTable = 0x5C
+PPSMC_MSG_GetSystemMetricsVersion = 0x5D
+PPSMC_MSG_ResetVCN = 0x5E
+PPSMC_MSG_SetFastPptLimit = 0x5F
+PPSMC_MSG_GetFastPptLimit = 0x60
+PPSMC_Message_Count = 0x61
+PPSMC_RESET_TYPE_DRIVER_MODE_1_RESET = 0x1
+PPSMC_RESET_TYPE_DRIVER_MODE_2_RESET = 0x2
+PPSMC_RESET_TYPE_DRIVER_MODE_3_RESET = 0x3
+PPSMC_THROTTLING_LIMIT_TYPE_SOCKET = 0x1
+PPSMC_THROTTLING_LIMIT_TYPE_HBM = 0x2
+PPSMC_AID_THM_TYPE = 0x1
+PPSMC_CCD_THM_TYPE = 0x2
+PPSMC_XCD_THM_TYPE = 0x3
+PPSMC_HBM_THM_TYPE = 0x4
+PPSMC_PLPD_MODE_DEFAULT = 0x1
+PPSMC_PLPD_MODE_OPTIMIZED = 0x2
+NUM_VCLK_DPM_LEVELS = 4
+NUM_DCLK_DPM_LEVELS = 4
+NUM_SOCCLK_DPM_LEVELS = 4
+NUM_LCLK_DPM_LEVELS = 4
+NUM_UCLK_DPM_LEVELS = 4
+NUM_FCLK_DPM_LEVELS = 4
+NUM_XGMI_DPM_LEVELS = 2
+NUM_CXL_BITRATES = 4
+NUM_PCIE_BITRATES = 4
+NUM_XGMI_BITRATES = 4
+NUM_XGMI_WIDTHS = 3
+NUM_TDP_GROUPS = 4
+NUM_SOC_P2S_TABLES = 6
+NUM_GFX_P2S_TABLES = 8
+NUM_PSM_DIDT_THRESHOLDS = 3
+NUM_XVMIN_VMIN_THRESHOLDS = 3
+PRODUCT_MODEL_NUMBER_LEN = 20
+PRODUCT_NAME_LEN = 64
+PRODUCT_SERIAL_LEN = 20
+PRODUCT_MANUFACTURER_NAME_LEN = 32
+PRODUCT_FRU_ID_LEN = 32
+SMU_METRICS_TABLE_VERSION = 0x15
+SMU_SYSTEM_METRICS_TABLE_VERSION = 0x1
+SMU_VF_METRICS_TABLE_MASK = (1 << 31)
+SMU_VF_METRICS_TABLE_VERSION = (0x6 | SMU_VF_METRICS_TABLE_MASK)
+SMU13_0_6_DRIVER_IF_VERSION = 0x08042024
+NUM_I2C_CONTROLLERS = 8
+I2C_CONTROLLER_ENABLED = 1
+I2C_CONTROLLER_DISABLED = 0
+MAX_SW_I2C_COMMANDS = 24
+CMDCONFIG_STOP_BIT = 0
+CMDCONFIG_RESTART_BIT = 1
+CMDCONFIG_READWRITE_BIT = 2
+CMDCONFIG_STOP_MASK = (1 << CMDCONFIG_STOP_BIT)
+CMDCONFIG_RESTART_MASK = (1 << CMDCONFIG_RESTART_BIT)
+CMDCONFIG_READWRITE_MASK = (1 << CMDCONFIG_READWRITE_BIT)
+IH_INTERRUPT_ID_TO_DRIVER = 0xFE
+IH_INTERRUPT_CONTEXT_ID_THERMAL_THROTTLING = 0x7
+THROTTLER_PROCHOT_BIT = 0
+THROTTLER_PPT_BIT = 1
+THROTTLER_THERMAL_SOCKET_BIT = 2
+THROTTLER_THERMAL_VR_BIT = 3
+THROTTLER_THERMAL_HBM_BIT = 4
+ClearMcaOnRead_UE_FLAG_MASK = 0x1
+ClearMcaOnRead_CE_POLL_MASK = 0x2
+SMU_THERMAL_MINIMUM_ALERT_TEMP = 0
+SMU_THERMAL_MAXIMUM_ALERT_TEMP = 255
+SMU_TEMPERATURE_UNITS_PER_CENTIGRADES = 1000
+SMU_FW_NAME_LEN = 0x24
+SMU_DPM_USER_PROFILE_RESTORE = (1 << 0)
+SMU_CUSTOM_FAN_SPEED_RPM = (1 << 1)
+SMU_CUSTOM_FAN_SPEED_PWM = (1 << 2)
+SMU_THROTTLER_PPT0_BIT = 0
+SMU_THROTTLER_PPT1_BIT = 1
+SMU_THROTTLER_PPT2_BIT = 2
+SMU_THROTTLER_PPT3_BIT = 3
+SMU_THROTTLER_SPL_BIT = 4
+SMU_THROTTLER_FPPT_BIT = 5
+SMU_THROTTLER_SPPT_BIT = 6
+SMU_THROTTLER_SPPT_APU_BIT = 7
+SMU_THROTTLER_TDC_GFX_BIT = 16
+SMU_THROTTLER_TDC_SOC_BIT = 17
+SMU_THROTTLER_TDC_MEM_BIT = 18
+SMU_THROTTLER_TDC_VDD_BIT = 19
+SMU_THROTTLER_TDC_CVIP_BIT = 20
+SMU_THROTTLER_EDC_CPU_BIT = 21
+SMU_THROTTLER_EDC_GFX_BIT = 22
+SMU_THROTTLER_APCC_BIT = 23
+SMU_THROTTLER_TEMP_GPU_BIT = 32
+SMU_THROTTLER_TEMP_CORE_BIT = 33
+SMU_THROTTLER_TEMP_MEM_BIT = 34
+SMU_THROTTLER_TEMP_EDGE_BIT = 35
+SMU_THROTTLER_TEMP_HOTSPOT_BIT = 36
+SMU_THROTTLER_TEMP_SOC_BIT = 37
+SMU_THROTTLER_TEMP_VR_GFX_BIT = 38
+SMU_THROTTLER_TEMP_VR_SOC_BIT = 39
+SMU_THROTTLER_TEMP_VR_MEM0_BIT = 40
+SMU_THROTTLER_TEMP_VR_MEM1_BIT = 41
+SMU_THROTTLER_TEMP_LIQUID0_BIT = 42
+SMU_THROTTLER_TEMP_LIQUID1_BIT = 43
+SMU_THROTTLER_VRHOT0_BIT = 44
+SMU_THROTTLER_VRHOT1_BIT = 45
+SMU_THROTTLER_PROCHOT_CPU_BIT = 46
+SMU_THROTTLER_PROCHOT_GFX_BIT = 47
+SMU_THROTTLER_PPM_BIT = 56
+SMU_THROTTLER_FIT_BIT = 57

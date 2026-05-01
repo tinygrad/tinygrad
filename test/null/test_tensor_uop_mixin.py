@@ -137,6 +137,22 @@ class TestTensorUOpAllclose(unittest.TestCase):
     a, b = _t(4).float(), _t(4).float()
     self.assertIs(_strip_unique(a.allclose(b).uop), _strip_unique(a.uop.allclose(b.uop)))
 
+class TestTensorUOpBitcast(unittest.TestCase):
+  def test_bitcast_same_dtype(self): _check(self, _t(4).float(), lambda x: x.bitcast(dtypes.float32))
+
+class TestTensorUOpRand(unittest.TestCase):
+  def test_random_bits(self):
+    k = UOp.empty((2,), dtype=dtypes.uint32)
+    c = UOp.zeros(2, dtype=dtypes.uint32)
+    for num in (1, 4, 7, 1024):
+      self.assertIs(_strip_unique(Tensor.random_bits(Tensor(k), Tensor(c), num).uop),
+                    _strip_unique(UOp.random_bits(k, c, num)))
+  def test_bits_to_rand_float32(self):
+    bits_uop = UOp.empty((8,), dtype=dtypes.uint32)
+    for shape in ((8,), (2, 4), (5,)):
+      self.assertIs(_strip_unique(Tensor._bits_to_rand(Tensor(bits_uop), shape, dtypes.float32).uop),
+                    _strip_unique(UOp._bits_to_rand(bits_uop, shape, dtypes.float32)))
+
 class TestTensorUOpGather(unittest.TestCase):
   def _check(self, t, dim, idx):
     self.assertIs(_strip_unique(t.gather(dim, idx).uop), _strip_unique(t.uop.gather(dim, idx.uop)))

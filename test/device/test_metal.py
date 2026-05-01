@@ -50,6 +50,19 @@ kernel void r_5(device int* data0, const device int* data1, uint3 gid [[threadgr
       compiled = compiled[:40] # corrupt the compiled program
       MetalProgram(device, "r_5", compiled)
 
+  def test_wait_skips_in_flight(self):
+    device = MetalDevice("metal")
+    compiled = MetalCompiler().compile("""
+#include <metal_stdlib>
+kernel void noop(uint3 gid [[threadgroup_position_in_grid]], uint3 lid [[thread_position_in_threadgroup]]) {}
+""")
+    prg = MetalProgram(device, "noop", compiled)
+    self.assertIsInstance(prg(wait=True), float)
+    self.assertEqual(device.mtl_buffers_in_flight, [])
+    self.assertIsNone(prg(wait=False))
+    self.assertEqual(len(device.mtl_buffers_in_flight), 1)
+    device.synchronize()
+
   def test_free(self):
     size = 2**16
     device = Device['METAL']

@@ -37,13 +37,12 @@ def _custom_fused_ce_loss_bwd(d_logits:UOp, logits:UOp, lse:UOp, targets:UOp, sc
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dname), UOp(Ops.LINEAR, src=(*sink.src, sink)),
                                UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=lib)))
 
-def _fused_ce_loss_bwd(gradient:UOp, kernel:UOp):
+def _fused_ce_loss_bwd(gradient:UOp, kernel:UOp, label_smoothing:float):
   # NOTE: forward inputs are (loss_out, max_out, lse_out, logits, targets)
   # gradient is the upstream grad w.r.t. per-row loss (shape: (rows,) fp32)
   _, _, lse_u, logits_u, targets_u = kernel.src[1:]
   device = logits_u.device
-  rows_vocab = logits_u.shape  # (rows, VOCAB) after reshape
-  rows, VOCAB = rows_vocab
+  rows, VOCAB = logits_u.shape  # (rows, VOCAB) after reshape
   if isinstance(device, tuple):
     axis = logits_u.axis
     ndev = len(device)
@@ -54,9 +53,8 @@ def _fused_ce_loss_bwd(gradient:UOp, kernel:UOp):
     d_logits = Tensor.invalids(rows, VOCAB, dtype=dtypes.bfloat16, device=device)
     dname = device.split(":")[0] if isinstance(device, str) else device
     rows_per_dev = rows
-  grad_t = Tensor(gradient, device=device).float().reshape(-1)  # (rows,) fp32
   # NOTE: .mean() backward gives same grad per row (1/N), so broadcast is safe; take scalar
-  scale = grad_t[0:1].contiguous()
+  scale = Tensor(gradient, device=device).float().reshape(-1)[0:1].contiguous()
   logits_t = Tensor(logits_u.after(kernel), device=device)
   lse_t = Tensor(lse_u.after(kernel), device=device)
   targets_t = Tensor(targets_u, device=device)
@@ -94,5 +92,5 @@ def fused_ce_loss(logits:Tensor, targets:Tensor, label_smoothing:float=0.1) -> T
                           label_smoothing=label_smoothing)
   loss_out, max_out, lse_out, *_ = Tensor.custom_kernel(
     loss_out, max_out, lse_out, logits_flat, targets_flat,
-    fxn=fxn, grad_fxn=_fused_ce_loss_bwd)
+    fxn=fxn, grad_fxn=functools.partial(_fused_ce_loss_bwd, label_smoothing=label_smoothing))
   return loss_out.mean()
