@@ -1446,6 +1446,10 @@ def train_llama3():
       idx = next(j for j, p in enumerate(optim.params) if p is w)
       optim.master_params[idx].assign((optim.master_params[idx] * w._inv_scale.reshape(-1, *([1]*(w.ndim-1)))).contiguous())
 
+  # realize everything here
+  if optim.master_params: Tensor.realize(*optim.master_params)
+  Tensor.realize(*optim.params, *fp8_inv_scales, *fp8_amax, *fp8_grad_amax)
+
   @TinyJit
   def minibatch(tokens:Tensor):
     if is_dp: tokens = tokens.to(None).shard(device, 0)

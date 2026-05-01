@@ -692,7 +692,7 @@ class Tensor(OpMixin):
   def randint(*shape, low=0, high=10, dtype=dtypes.int32, **kwargs) -> Tensor:
     """
     Creates a tensor with the given shape, filled with random integer values generated uniformly from the interval `[low, high)`.
-    If `dtype` is not specified, the default type is used.
+    Requires `low < high`. If `dtype` is not specified, the default type is used.
 
     You can pass in the `device` keyword argument to control device of the tensor.
     Additionally, all other keyword arguments are passed to the constructor of the tensor.
@@ -704,12 +704,14 @@ class Tensor(OpMixin):
     """
     if not all_int([low, high]): raise TypeError(f"{low=} and {high=} must be integers")
     if not dtypes.is_int(dtype := to_dtype(dtype)): raise TypeError(f"{dtype=} must be int")
+    if low >= high: raise ValueError(f"Tensor.randint requires low < high, got {low=}, {high=}")
     return Tensor.uniform(*shape, low=low, high=high, dtype=dtype, **kwargs)
 
   @staticmethod
   def normal(*shape, mean=0.0, std=1.0, requires_grad:bool|None=None, **kwargs) -> Tensor:
     """
     Creates a tensor with the given shape, filled with random values from a normal distribution with the given `mean` and standard deviation `std`.
+    Requires `std >= 0`.
 
     You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
     Additionally, all other keyword arguments are passed to the constructor of the tensor.
@@ -719,12 +721,14 @@ class Tensor(OpMixin):
     print(Tensor.normal(2, 3, mean=10, std=2).numpy())
     ```
     """
+    if std < 0: raise ValueError(f"Tensor.normal requires std >= 0, got {std=}")
     return (std * Tensor.randn(*shape, **kwargs) + mean).requires_grad_(requires_grad)
 
   @staticmethod
   def uniform(*shape, low=0.0, high=1.0, dtype:DTypeLike|None=None, requires_grad:bool|None=None, **kwargs) -> Tensor:
     """
     Creates a tensor with the given shape, filled with random values from a uniform distribution over the interval `[low, high)`.
+    Requires `low < high`.
 
     You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
     Additionally, all other keyword arguments are passed to the constructor of the tensor.
@@ -734,6 +738,8 @@ class Tensor(OpMixin):
     print(Tensor.uniform(2, 3, low=2, high=10).numpy())
     ```
     """
+    if not all_int(shape:=argfix(*shape)) or not all(s >= 0 for s in shape): raise ValueError(f"invalid input {shape=}")
+    if low >= high: raise ValueError(f"Tensor.uniform requires low < high, got {low=}, {high=}")
     return (((high-low) * Tensor.rand(*shape, **kwargs)).cast(dtype or dtypes.default_float) + low).requires_grad_(requires_grad)
 
   @staticmethod
@@ -816,19 +822,27 @@ class Tensor(OpMixin):
     """
     Returns a tensor with `num_samples` indices sampled from a multinomial distribution weighted by `self`.
 
-    NOTE: `replacement=False` for `num_samples > 1` is not supported yet.
     ```python exec="true" source="above" session="tensor" result="python"
     Tensor.manual_seed(42)
     t = Tensor([1, 2, 3, 4])
     print(t.multinomial(20, replacement=True).numpy())
     ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    t = Tensor([1, 2, 3, 4])
+    print(t.multinomial(3, replacement=False).numpy())
+    ```
     """
     assert 1 <= self.ndim <= 2 and num_samples > 0, f"{self.ndim=} must be 1 or 2 dim, {num_samples=} must be positive"
-    assert replacement or num_samples == 1, "no replacement only supports num_samples = 1"
     weight = self.unsqueeze(0) if self.ndim == 1 else self
-    cdf = (cw := weight.cumsum(1).float()) / cw[:, -1].unsqueeze(1)
-    unif_samples = Tensor.rand(num_samples, cdf.shape[0], 1).to(self.device)
-    indices = (unif_samples.expand((-1, -1, cdf.shape[1])) >= cdf).sum(2).permute((1, 0))
+    assert replacement or num_samples <= weight.shape[1], "no replacement samples must not exceed population size"
+    if replacement or num_samples == 1:
+      cdf = (cw := weight.cumsum(1).float()) / cw[:, -1].unsqueeze(1)
+      unif_samples = Tensor.rand(num_samples, cdf.shape[0], 1).to(self.device)
+      indices = (unif_samples.expand((-1, -1, cdf.shape[1])) >= cdf).sum(2).permute((1, 0))
+    else:
+      # Efraimidis–Spirakis
+      indices = (weight.rand_like(dtype=dtypes.float32).log2() / weight).topk(num_samples, dim=1)[1]
     return (indices.squeeze(0) if self.ndim == 1 else indices).cast(dtypes.int32)
 
   # ***** toposort and backward pass *****

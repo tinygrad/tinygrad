@@ -55,8 +55,6 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
   assert attn_mask is None, "attn_mask not supported"
   assert is_causal, "only causal attention supported"
 
-  xq, xk, xv = xq.transpose(1, 2), xk.transpose(1, 2), xv.transpose(1, 2)
-
   B, N, H, D = xq.shape
   H_KV = xk.shape[2]
   assert D == 128, "only D=128 supported"
@@ -81,7 +79,7 @@ def flash_attention(xq, xk, xv, attn_mask:Tensor|None=None, is_causal:bool=False
 
   attn, l_vec = Tensor.custom_kernel(attn, l_vec, xq, xk, xv, fxn=functools.partial(custom_fa_forward, device=single_device, arch=arch, B=B_local, N=N, H=H_local, H_KV=H_KV_local, D=D), grad_fxn=grad)[:2]
 
-  return attn.transpose(1, 2), attn, l_vec
+  return attn, attn, l_vec
 
 @functools.cache
 def custom_fa_forward(o:UOp, l_vec:UOp, q:UOp, k:UOp, v:UOp, device:str, arch:str, B:int, N:int, H:int, H_KV:int, D:int):
