@@ -932,7 +932,8 @@ class TestCLI(unittest.TestCase):
     self.assertEqual(len(kernels), 2)
     gemm_summary = [s for s in kernels if s["name"].startswith("r_")][0]
     copy_summary = [s for s in kernels if s["name"].startswith("E_")][0]
-    self.assertEqual(gemm_summary["count"], copy_summary["count"], CNT)
+    self.assertEqual(gemm_summary["count"], CNT)
+    self.assertEqual(copy_summary["count"], CNT)
 
 if __name__ == "__main__":
   unittest.main()
