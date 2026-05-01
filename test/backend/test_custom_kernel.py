@@ -324,6 +324,20 @@ class TestCustomKernel(unittest.TestCase):
   @unittest.expectedFailure
   def test_custom_kernel_sched_copy(self): self.test_custom_kernel_sched(use_custom=True)
 
+  @unittest.expectedFailure
+  def test_sliced_buffer_function(self):
+    x = Tensor.arange(32).reshape(8, 4).realize()
+    from tinygrad import function
+    @function(precompile=True)
+    def run(x:Tensor) -> Tensor:
+      y = Tensor.invalids(*x.shape, dtype=x.dtype)
+      return Tensor.custom_kernel(y, x, fxn=custom_add_one_kernel)[0]
+    GlobalCounters.reset()
+    y = run(x[0]).realize()
+    # it's copying the input and the output
+    self.assertEqual(GlobalCounters.kernel_count, 1)
+    self.assertEqual(y.tolist(), [1, 2, 3, 4])
+
 class TestUOpReduce(unittest.TestCase):
   def test_uop_sum(self):
     a = Tensor([1.0, 2, 3, 4, 5])
