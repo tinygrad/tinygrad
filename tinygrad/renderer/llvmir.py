@@ -100,6 +100,10 @@ base_rewrite = PatternMatcher([
   (UPat(Ops.CAST, name="x"), lambda ctx,x: f"  {ctx[x]} = {lcast(x.src[0].dtype, x.dtype)} {ldt(x.src[0].dtype)} {ctx[x.src[0]]} to {ldt(x.dtype)}"),
   (UPat(Ops.TRUNC, name="x"),
    lambda ctx,x: f"  {ctx[x]} = call {ldt(x.dtype)} @llvm.trunc.{ldt(x.dtype.scalar())}({ldt(x.src[0].dtype)} {ctx[x.src[0]]})"),
+  (UPat(Ops.MULHI, name="x"), lambda ctx,x:
+   f"  {ctx[x]}_a = sext i64 {ctx[x.src[0]]} to i128\n  {ctx[x]}_b = sext i64 {ctx[x.src[1]]} to i128\n"
+   f"  {ctx[x]}_m = mul i128 {ctx[x]}_a, {ctx[x]}_b\n  {ctx[x]}_s = ashr i128 {ctx[x]}_m, 64\n"
+   f"  {ctx[x]} = trunc i128 {ctx[x]}_s to i64"),
   (UPat(GroupOp.Binary, name="x"), lambda ctx,x:
    f"  {ctx[x]} = {lop[x.src[0].dtype.scalar()][x.op]} {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, {ctx[x.src[1]]}"),
   (UPat(Ops.WHERE, name="x"), lambda ctx,x:

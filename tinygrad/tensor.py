@@ -161,6 +161,10 @@ class Tensor(OpMixin):
     return ret
 
   # alu and const_like are used by the mixins
+  def mul_hi(self, x: Tensor) -> Tensor:
+    if self.dtype != dtypes.int64 or x.dtype != dtypes.int64:
+      raise RuntimeError(f"mul_hi requires int64 inputs, got {self.dtype} and {x.dtype}")
+    return self._binop(Ops.MULHI, x, False)
   def alu(self, op: Ops, *src: Tensor) -> Tensor: return self._apply_uop(lambda *u: u[0].alu(op, *u[1:]), *src)
   def const_like(self, b:ConstType) -> Tensor: return Tensor(self.uop.const_like(b), requires_grad=False)
   @staticmethod
