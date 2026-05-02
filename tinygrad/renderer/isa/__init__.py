@@ -49,7 +49,7 @@ class ISARenderer(Renderer):
   def copy(self, x:UOp, reg:Register) -> UOp: raise NotImplementedError("arch specific")
   def spill(self, disp:UOp, x:UOp) -> UOp: raise NotImplementedError("arch specific")
   def fill(self, disp:UOp, x:UOp, reg:Register) -> UOp: raise NotImplementedError("arch specific")
-  def asm(self, uops:list[UOp], function_name:str) -> str: raise NotImplementedError("arch specific")
+  def asm_str(self, uops:list[UOp], function_name:str) -> str: raise NotImplementedError("arch specific")
   # TODO: these should go with the other rewrites in codegen
   def lower(self, sink:UOp):
     from tinygrad.codegen.late.linearizer import linearize
@@ -63,6 +63,6 @@ class ISARenderer(Renderer):
     regalloc_ctx = LinearScanRegallocContext(lst, self, isel_ctx.stack_size)
     lst = line_rewrite(lst, pm_regalloc_rewrite, regalloc_ctx)
     lst = line_rewrite(lst, self.post_regalloc_matcher, regalloc_ctx)
-    if DEBUG >= 4: print(self.asm(lst, function_name))
+    if DEBUG >= 4: print(self.asm_str(lst, function_name))
     if SPEC: type_verify(lst, self.isa_spec)
     return lst

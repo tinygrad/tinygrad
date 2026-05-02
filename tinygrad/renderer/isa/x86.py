@@ -864,7 +864,7 @@ class X86Renderer(ISARenderer):
     assert ret is not None
     return ret.replace(dtype=x.dtype)
 
-  def asm(self, uops:list[UOp], function_name:str) -> str:
+  def asm_str(self, uops:list[UOp], function_name:str) -> str:
     def _format_op(x:UOp) -> str: return f"    {(o[7:-1] if (o:=str(x.arg))[-1] in ('i', 'm') else o[7:]).lower():7s}"
     def _format_operands(x:UOp) -> str:
       def _format(src:tuple[UOp, ...]) -> list[str]:
