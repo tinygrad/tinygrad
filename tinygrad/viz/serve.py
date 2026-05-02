@@ -8,7 +8,7 @@ from urllib.parse import parse_qs, urlparse
 from http.server import BaseHTTPRequestHandler
 from typing import Any, TypedDict, TypeVar, Generator, Callable
 from tinygrad.helpers import colored, getenv, tqdm, unwrap, word_wrap, TRACEMETA, ProfileEvent, ProfileRangeEvent, TracingKey, ProfilePointEvent, temp
-from tinygrad.helpers import printable, Context, START_TIME, ansistrip
+from tinygrad.helpers import printable, Context, START_TIME
 from tinygrad.renderer.amd.dsl import Inst
 from tinygrad.renderer.amd import detect_format
 
@@ -211,7 +211,6 @@ def flatten_events(profile:list[ProfileEvent], device_ts_diffs:dict[str, Decimal
 # normalize event timestamps and attach kernel metadata
 def timeline_layout(data:VizData, dev_events:list[tuple[int, int, float, DevEvent]], start_ts:int, scache:dict[str, int]) -> bytes|None:
   events:list[bytes] = []
-  exec_points:list[ProfilePointEvent] = []
   ei:ProfilePointEvent|None = None
   for st,et,dur,e in dev_events:
     if isinstance(e, ProfilePointEvent) and e.name == "exec": ei = e
