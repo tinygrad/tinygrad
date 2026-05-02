@@ -103,6 +103,13 @@ def uops_to_dtypes(uops:list[UOp]) -> list[DType]: return dedup(u.dtype for u in
 def wmma_args(uops:list[UOp]):
   return dedup((uop.arg[0], uop.arg[1], uop.arg[2], uop.dtype.scalar(), *(uop.arg[4:8])) for uop in uops if uop.op is Ops.WMMA)
 
+def c_mulhi(a, b, dtype):
+  bits, wide, out = dtype.itemsize*8, "__int128" if dtype == dtypes.int64 else "long long", "long" if dtype == dtypes.int64 else "int"
+  return f"({out})((({wide})({a})*({wide})({b}))>>{bits})"
+
+def cuda_mulhi(a, b, dtype):
+  return f"__mul64hi((long long)({a}), (long long)({b}))" if dtype == dtypes.int64 else f"__mulhi((int)({a}), (int)({b}))"
+
 class CStyleLanguage(Renderer):
   kernel_typedef: str = "void"
   buffer_prefix: str = ""
@@ -233,7 +240,7 @@ class ClangRenderer(CStyleLanguage):
                  Ops.SQRT: lambda x,dtype: f"__builtin_sqrt({x})" if dtype == dtypes.float64 else f"__builtin_sqrtf({x})",
                  Ops.TRUNC: lambda x,dtype: f"__builtin_trunc({x})" if dtype == dtypes.float64 else f"__builtin_truncf({x})",
                  Ops.FDIV: lambda a,b,dtype: f"({a}/{b})",
-                 Ops.MULHI: lambda a,b,dtype: f"(long)(((__int128)({a})*(__int128)({b}))>>64)"}
+                 Ops.MULHI: c_mulhi}
 
   # LLVM legalizes double => half/bf16 cast on systems that don't support it natively (like x86 cpus without AVX512-FP16) into a compiler-rt libcall.
   # there is also no native bfl16 <-> fp16 conversion on those CPUs
@@ -416,7 +423,7 @@ class CUDARenderer(CStyleLanguage):
     Ops.EXP2: lambda x,dtype: f"hexp2({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"exp2({x})",
     Ops.SQRT: lambda x,dtype: f"hsqrt({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"sqrt({x})",
     Ops.RECIPROCAL: lambda x,dtype: f"hrcp({x})" if dtype in (dtypes.half, dtypes.bfloat16) else f"(1/{x})",
-    Ops.MULHI: lambda a,b,dtype: f"__mul64hi((long long)({a}), (long long)({b}))" }
+    Ops.MULHI: cuda_mulhi }
   type_map = {dtypes.bfloat16: "nv_bfloat16", dtypes.fp8e4m3: "__nv_fp8_e4m3", dtypes.fp8e5m2: "__nv_fp8_e5m2"}
   extra_matcher = create_non_native_float_pats(dtypes.fp8s, casting=False) + PatternMatcher([
     (UPat(Ops.CAST, dtypes.fp8s, UPat.var("x", dtypes.fp8s), name='y'), lambda x,y: x.cast(dtypes.float).cast(y.dtype) if x.dtype!=y.dtype else None),
