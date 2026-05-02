@@ -320,7 +320,7 @@ class TestVizGC(unittest.TestCase):
 
 # VIZ integrates with other parts of tinygrad
 
-from tinygrad import Tensor, Device
+from tinygrad import Tensor, Device, TinyJit, Variable
 
 class TestVizIntegration(unittest.TestCase):
   # codegen supports rendering of code blocks
@@ -934,6 +934,18 @@ class TestCLI(unittest.TestCase):
     copy_summary = [s for s in kernels if s["name"].startswith("E_")][0]
     self.assertEqual(gemm_summary["count"], CNT)
     self.assertEqual(copy_summary["count"], CNT)
+
+  def test_flops(self):
+    @TinyJit
+    def f(a, b): return (a@a.T), (b@b.T)
+    #a = Tensor.empty(64, 64, device="NULL")
+    #b = Tensor.empty(64, 64, device="NULL")
+    a = Tensor.empty(64, 64, device="CPU")
+    b = Tensor.empty(64, 64, device="CPU")
+    for i_val, j_val in ((8, 16), (16, 32), (32, 64),):
+      i = Variable("i", 1, 1024).bind(i_val)
+      j = Variable("j", 1, 2048).bind(j_val)
+      Tensor.realize(*f(a[:i], b[:j]))
 
 if __name__ == "__main__":
   unittest.main()
