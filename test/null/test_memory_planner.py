@@ -29,6 +29,17 @@ def _get_arena(buf, linear, result):
       if orig is buf and new.op is Ops.BUFFER_VIEW: return new.src[0]
   return None
 
+def _get_replacement(buf, linear, result):
+  for orig_si, new_si in zip(linear.src, result.src):
+    for orig, new in zip(orig_si.src[1:], new_si.src[1:]):
+      if orig is buf: return new
+  return None
+
+def _buffer_view_bases(u):
+  if u.op is Ops.BUFFER_VIEW: return [u.src[0]]
+  if u.op is Ops.MSTACK: return [b for s in u.src for b in _buffer_view_bases(s)]
+  return []
+
 def check_assign(buffer_lists, copies=None):
   linear = _make_linear(buffer_lists, copies)
   result = memory_plan_rewrite(linear, held_bufs)
@@ -78,6 +89,32 @@ class TestMemoryPlanner(unittest.TestCase):
       [b(5), b(2)],
     ]
     check_assign(bs)
+
+  def test_tuple_device_buffer(self):
+    buf = UOp.new_buffer(("NULL", "NULL:1"), 16, dtypes.int8)
+    linear = _make_linear([[buf], [buf]])
+    result = memory_plan_rewrite(linear)
+    repl = _get_replacement(buf, linear, result)
+    assert repl is not None and repl.op is Ops.MSTACK
+    assert [x.op for x in repl.src] == [Ops.BUFFER_VIEW, Ops.BUFFER_VIEW]
+    assert [x.src[0].device for x in repl.src] == ["NULL", "NULL:1"]
+
+  def test_tuple_device_buffer_reuses_device_buffers(self):
+    buf = UOp.new_buffer(("NULL", "NULL:1"), 16, dtypes.int8)
+    b0, b1 = UOp.new_buffer("NULL", 16, dtypes.int8), UOp.new_buffer("NULL:1", 16, dtypes.int8)
+    linear = _make_linear([[buf], [b0], [b1]])
+    result = memory_plan_rewrite(linear)
+    bases = {id(base): base for si in result.src for x in si.src[1:] for base in _buffer_view_bases(x)}
+    assert sorted(str(base.device) for base in bases.values()) == ["NULL", "NULL:1"]
+
+  def test_tuple_device_buffer_repeated_device(self):
+    buf = UOp.new_buffer(("NULL", "NULL"), 16, dtypes.int8)
+    linear = _make_linear([[buf]])
+    result = memory_plan_rewrite(linear)
+    repl = _get_replacement(buf, linear, result)
+    assert repl is not None and repl.op is Ops.MSTACK
+    assert [x.src[0].device for x in repl.src] == ["NULL", "NULL"]
+    assert len({x.arg[1] for x in repl.src}) == 2
 
   def test_simple_pinned(self):
     bs = [

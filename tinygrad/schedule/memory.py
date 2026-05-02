@@ -34,7 +34,10 @@ def memory_plan_rewrite(linear:UOp, held_bufs:set[UOp]|None=None) -> UOp:
   if not first_appearance: return linear
 
   # separate copy and compute buffers into different lanes to avoid introducing dependencies (copy->compute->copy)
-  def _key(b:UOp): return (b.device, 1 if b in copy_bufs else 0)
+  def _lane(b:UOp) -> int: return 1 if b in copy_bufs else 0
+  def _key(b:UOp) -> LaneKey:
+    assert isinstance(b.device, str)
+    return (b.device, _lane(b))
   buf_hold = {b: last_appearance[b] - first_appearance[b] + 1 for b in first_appearance if b in copy_bufs}
 
   # suballocation: build sorted open/close events, then alloc/free in order
@@ -46,18 +49,41 @@ def memory_plan_rewrite(linear:UOp, held_bufs:set[UOp]|None=None) -> UOp:
 
   offsets:dict[UOp, int] = {}
   peaks:dict[LaneKey, tuple[int, TLSFAllocator]] = defaultdict(lambda: (0, TLSFAllocator(total_memory, block_size=block_size, lv2_cnt=32)))
+  tuple_offsets: dict[UOp, list[int]] = {}
+  def _phys_lanes(b:UOp) -> list[LaneKey]:
+    return [(d, _lane(b)) for d in b.device] if isinstance(b.device, tuple) else [_key(b)]
   for _, is_open, buf in events:
-    if is_open: offsets[buf] = peaks[_key(buf)][1].alloc(nbytes[buf])
-    else: peaks[_key(buf)][1].free(offsets[buf])
-    peaks[_key(buf)] = (max(peaks[_key(buf)][0], offsets[buf] + buf.arg * buf.dtype.itemsize), peaks[_key(buf)][1])
+    lanes = _phys_lanes(buf)
+    if is_open:
+      if isinstance(buf.device, tuple):
+        tuple_offsets[buf] = [peaks[(d, lane)][1].alloc(nbytes[buf]) for d, lane in lanes]
+        offsets[buf] = 0
+      else:
+        offsets[buf] = peaks[lanes[0]][1].alloc(nbytes[buf])
+    else:
+      if isinstance(buf.device, tuple):
+        for (d, lane), off in zip(lanes, tuple_offsets[buf]): peaks[(d, lane)][1].free(off)
+      else:
+        peaks[lanes[0]][1].free(offsets[buf])
+    for i, (d, lane) in enumerate(lanes):
+      off = tuple_offsets[buf][i] if buf in tuple_offsets else offsets[buf]
+      peaks[(d, lane)] = (max(peaks[(d, lane)][0], off + buf.arg * buf.dtype.itemsize), peaks[(d, lane)][1])
   arena_sizes = {key: round_up(peak, block_size) for key, (peak, _) in peaks.items()}
 
   # build replace_map: each buffer becomes a BUFFER_VIEW into a shared per-device-lane arena
   arenas = {key: UOp.new_buffer(key[0], sz, dtypes.int8) for key, sz in arena_sizes.items()}
   replace_map:dict[UOp, UOp] = {}
   for buf_uop, offset in offsets.items():
-    assert offset % buf_uop.dtype.itemsize == 0, f"offset {offset} not aligned to {buf_uop.dtype.itemsize}"
-    replace_map[buf_uop] = UOp(Ops.BUFFER_VIEW, buf_uop.dtype, (arenas[_key(buf_uop)],), (buf_uop.arg, offset // buf_uop.dtype.itemsize))
+    if buf_uop in tuple_offsets:
+      lane = _lane(buf_uop)
+      views = []
+      for d, d_off in zip(buf_uop.device, tuple_offsets[buf_uop]):
+        assert d_off % buf_uop.dtype.itemsize == 0, f"offset {d_off} not aligned to {buf_uop.dtype.itemsize}"
+        views.append(UOp(Ops.BUFFER_VIEW, buf_uop.dtype, (arenas[(d, lane)],), (buf_uop.arg, d_off // buf_uop.dtype.itemsize)))
+      replace_map[buf_uop] = UOp(Ops.MSTACK, buf_uop.dtype, tuple(views))
+    else:
+      assert offset % buf_uop.dtype.itemsize == 0, f"offset {offset} not aligned to {buf_uop.dtype.itemsize}"
+      replace_map[buf_uop] = UOp(Ops.BUFFER_VIEW, buf_uop.dtype, (arenas[_key(buf_uop)],), (buf_uop.arg, offset // buf_uop.dtype.itemsize))
 
   if DEBUG >= 1 and (omem:=sum(nbytes.values()) / 1e6) != (nmem:=sum(arena_sizes.values()) / 1e6):
     print(f"memory reduced from {omem:.2f} MB -> {nmem:.2f} MB, {len(first_appearance)} -> {len(arenas)} bufs")
