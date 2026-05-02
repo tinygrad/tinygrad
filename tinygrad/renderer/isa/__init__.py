@@ -45,6 +45,7 @@ class ISARenderer(Renderer):
   post_regalloc_matcher: PatternMatcher
 
   def is_two_address(self, x:UOp) -> bool: return False
+  def stack_pointer(self) -> UOp: raise NotImplementedError("arch specific")
   def copy(self, x:UOp, reg:Register) -> UOp: raise NotImplementedError("arch specific")
   def spill(self, disp:UOp, x:UOp) -> UOp: raise NotImplementedError("arch specific")
   def fill(self, disp:UOp, x:UOp, reg:Register) -> UOp: raise NotImplementedError("arch specific")

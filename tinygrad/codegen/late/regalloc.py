@@ -19,6 +19,7 @@ class LinearScanRegallocContext:
     self.idx = itertools.count()
     self.ren = ren
     self.stack_size = stack_size
+    self.uops = uops
     # the label associated with each loop NOTE: this is only used post regalloc and should be removed
     self.loop_label: dict[UOp, str] = {}
     # compute live ranges
@@ -110,10 +111,18 @@ def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
     else: nsrc.append(s)
   ndefs = tuple(ctx.real_defs[v] for v in x.tag) if isinstance(x.tag, tuple) else x.tag
   nx = x.replace(src=tuple(nsrc), tag=ndefs)
-  fills = [ctx.ren.fill(ctx.spills[v], ctx.defs[v], r) for v,r in ctx.insert_before.get(i, [])]
-  spills = [ctx.ren.spill(ctx.spills[v], nx) for v in x.tag if v in ctx.spills] if isinstance(x.tag, tuple) else []
-  return nx, fills + [nx] + spills
+  before = [ctx.ren.fill(ctx.spills[v], ctx.defs[v], r) for v,r in ctx.insert_before.get(i, [])]
+  after = [ctx.ren.spill(ctx.spills[v], nx) for v in x.tag if v in ctx.spills] if isinstance(x.tag, tuple) else []
+
+  # alloc/dealloc stack
+  if ctx.stack_size > 0:
+    sp = ctx.ren.stack_pointer()
+    offset = UOp(Ops.CONST, sp.dtype, arg=ctx.stack_size)
+    if i == 0: before = [ctx.ren.isel_matcher.rewrite(UOp(Ops.SUB, sp.dtype, (sp, offset), tag=sp.tag))] + before
+    elif i == len(ctx.uops) - 1: before += [ctx.ren.isel_matcher.rewrite(UOp(Ops.ADD, sp.dtype, (sp, offset), tag=sp.tag))]
+
+  return nx, before + [nx] + after
 
 pm_regalloc_rewrite = PatternMatcher([
-  (UPat({Ops.INS, Ops.RANGE, Ops.END} | PSEUDO_OPS, name="x"), regalloc_rewrite),
+  (UPat({Ops.INS, Ops.RANGE, Ops.END, Ops.DEFINE_REG} | PSEUDO_OPS, name="x"), regalloc_rewrite),
 ])

@@ -13,7 +13,7 @@ from tinygrad.helpers import getenv, CPU_COUNT, unwrap, Target
 class X86Ops(FastEnum):
   # NOTE: X86Ops with i suffix are variants that take an immediate, m suffix are variants that can write to memory instead of read from
   # these aren't real instructions
-  DEFINE_REG = auto(); FRAME_INDEX = auto(); LABEL = auto()
+  FRAME_INDEX = auto(); LABEL = auto()
   # index
   LEA = auto()
   # register / memory / immediate moves
@@ -224,7 +224,7 @@ XMM = tuple(Register(f"xmm{i}", i) for i in range(16))
 # gprs you can write to
 WGPR = tuple(r for r in GPR if r != RSP)
 
-CALLEE_SAVED = (RBX, RSP, RBP, GPR[12], GPR[13], GPR[14], GPR[15]) + ((RSI, RDI) + XMM[6:16] if sys.platform == "win32" else ())
+CALLEE_SAVED = (RBX, RBP, GPR[12], GPR[13], GPR[14], GPR[15]) + ((RSI, RDI) + XMM[6:16] if sys.platform == "win32" else ())
 
 reg_strs = {"rax": {4:"eax", 2:"ax", 1:"al"}, "rcx": {4:"ecx", 2:"cx", 1:"cl"}, "rdx": {4:"edx", 2:"dx", 1:"dl"}, "rbx": {4:"ebx", 2:"bx", 1:"bl"},
         "rsp": {4:"esp", 2:"sp", 1:"spl"}, "rbp": {4:"ebp", 2:"bp", 1:"bpl"}, "rsi": {4:"esi", 2:"si", 1:"sil"}, "rdi": {4:"edi", 2:"di", 1:"dil"},
@@ -236,7 +236,7 @@ def is_foldable_load(ctx:IselContext, x:UOp, s:UOp) -> bool: return s.op is Ops.
 def base(x:UOp, i:int) -> UOp: return s.src[0] if (s:=x.src[i]).op is Ops.GEP else s
 def lane(x:UOp, i:int) -> int: return s.arg[0] if (s:=x.src[i]).op is Ops.GEP else 0
 def to_int(dt:DType): return {dtypes.float16: dtypes.int16, dtypes.float32: dtypes.int32, dtypes.float64: dtypes.int64}[dt]
-def def_reg(dt:DType, reg:Register|None=None) -> UOp: return UOp(Ops.INS, arg=X86Ops.DEFINE_REG, dtype=dt, tag=None if reg is None else (reg,))
+def def_reg(dt:DType, reg:Register|None=None) -> UOp: return UOp(Ops.DEFINE_REG, dt, tag=None if reg is None else (reg,))
 def imm(dt:DType, v:int) -> UOp: return UOp.const(dt, truncate[dt](v)).rtag()
 def to_imm(c:UOp) -> UOp|None:
   if c.op is not Ops.CONST: return None
@@ -314,7 +314,7 @@ def idiv(ctx:IselContext, x:UOp) -> UOp:
   # for >8bit both rax and rdx are written to
   defs = (ctx.vreg(RAX),) if x.dtype in dtypes.int8s else (ctx.vreg(RAX), ctx.vreg(RDX))
   idiv = x.ins(op, src=(dividend, divisor) + tuple(ext), tag=defs)
-  # this move "cleanses" the register constraint (rax) of idiv as it only applies on definition and not on the uses of idiv
+  # this move "cleanses" the register constraints (rax/rdx) of idiv as that only applies on definition and not on the uses of idiv
   return x.ins(X86Ops.MOV, src=(idiv,))
 
 def fold_address(x:UOp) -> tuple[UOp, UOp, UOp]:
@@ -336,8 +336,10 @@ def abi(ctx:IselContext, x:UOp) -> UOp:
   return x.ins(X86Ops.MOV, src=src)
 
 def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
-  # immediates and real registers
-  if x.arg in (X86Ops.FRAME_INDEX, X86Ops.DEFINE_REG) and x.tag is not None: return None
+  # real registers
+  if x.op is Ops.DEFINE_REG and x.tag is not None: return None
+  # this is an immediate
+  if x.arg is X86Ops.FRAME_INDEX: return None
   # no register definition
   if x.dtype is dtypes.void: return None
   # already allocated vregs
@@ -373,8 +375,8 @@ isel_matcher = PatternMatcher([
   # function abi constraints
   (UPat((Ops.PARAM, Ops.DEFINE_VAR, Ops.SPECIAL), name="x"), abi),
   # these are treated the same for now
-  (UPat((Ops.DEFINE_REG, Ops.DEFINE_LOCAL), name="x"), lambda ctx,x:
-   x.ins(X86Ops.LEA, src=(def_reg(dtypes.uint64, RSP), UOp(Ops.NOOP), imm(dtypes.int32, ctx.inc_stack(x.dtype.nbytes()))))),
+  (UPat((Ops.DEFINE_REG, Ops.DEFINE_LOCAL), name="x"), lambda ctx,x: x.ins(X86Ops.LEA,
+    src=(def_reg(dtypes.uint64, RSP), UOp(Ops.NOOP), imm(dtypes.int32, ctx.inc_stack(x.dtype.nbytes())))) if isinstance(x.arg, int) else None),
   # constants that can't be immediates, move them to registers
   (UPat.cvar("x", dtypes.int64s), lambda x: x.ins(X86Ops.MOVABS, src=(imm(x.dtype, x.arg),)) if not x.tag else None),
   (UPat.cvar("x", dtypes.ints+(dtypes.bool,)), lambda x: x.ins(X86Ops.MOVi, src=(imm(x.dtype, x.arg),)) if not x.tag else None),
@@ -571,7 +573,7 @@ isel_matcher = PatternMatcher([
   (UPat(Ops.INS, src=(UPat(), UPat(), UPat(Ops.LOAD, name="y")), allow_any_len=True, name="x"), lambda ctx,y,x:
    x.replace(src=x.src[:2] + fold_address(y.src[0]) + x.src[3:]) if x.arg in X86GroupOp.ReadMem3rd and is_foldable_load(ctx, x, y) else None),
   # allocate virtual registers
-  (UPat(Ops.INS, name="x"), alloc_vregs),
+  (UPat((Ops.INS, Ops.DEFINE_REG), name="x"), alloc_vregs),
 ])
 
 # ***** pre register allocation *****
@@ -604,12 +606,6 @@ def lower_range(ctx, x:UOp) -> tuple[UOp, list[UOp]]:
 
 # final rewrite to match the isa spec
 post_regalloc_matcher = PatternMatcher([
-  # alloc stack space
-  (UPat(Ops.INS, arg=X86Ops.DEFINE_REG, dtype=dtypes.uint64, name="x"), lambda ctx,x:
-   (x, [x, x.ins(X86Ops.SUBi, src=(imm(dtypes.uint32, ctx.stack_size),), tag=(RSP,))]) if ctx.stack_size > 0 and x.reg is RSP else None),
-  # dealloc stack space
-  (UPat(Ops.INS, arg=X86Ops.RET, name="x"), lambda ctx,x: (x, [UOp(Ops.INS, arg=X86Ops.ADDi, dtype=dtypes.uint64,
-                      src=(imm(dtypes.uint32, ctx.stack_size),), tag=(RSP,)), x]) if ctx.stack_size > 0 else None),
   # rewrite FRAME_INDEX to IMM now that the stack size is known
   (UPat(Ops.INS, arg=X86Ops.FRAME_INDEX, name="x"), lambda ctx,x: (nx:=x.const_like(ctx.stack_size + x.tag), [nx])),
   # rewrite RANGE to ACC = 0 -> LABEL -> JUMP if ACC >= loop bound
@@ -626,7 +622,7 @@ post_regalloc_matcher = PatternMatcher([
 # TODO: do we even want this?
 isa_spec = PatternMatcher([
   # these are the only non X86Ops allowed
-  (UPat((Ops.CONST, Ops.NOOP, Ops.GROUP, Ops.AFTER, Ops.BARRIER)), lambda: True),
+  (UPat((Ops.CONST, Ops.NOOP, Ops.GROUP, Ops.AFTER, Ops.BARRIER, Ops.DEFINE_REG)), lambda: True),
   (UPat(Ops.INS, name="x"), lambda x: x.arg in X86GroupOp.All),
 ])
 
@@ -848,6 +844,7 @@ class X86Renderer(ISARenderer):
     from tinygrad.runtime.support.compiler_cpu import X86Compiler
     self.compiler = X86Compiler()
   def is_two_address(self, x:UOp) -> bool: return x.arg in X86GroupOp.TwoAddress
+  def stack_pointer(self) -> UOp: return def_reg(dtypes.uint64, RSP)
   # nasty hacks to deal with pointers TODO: rm pointers
   def copy(self, x:UOp, reg:Register):
     dt = dtypes.uint64 if isinstance(x.dtype, PtrDType) else x.dtype
@@ -857,13 +854,13 @@ class X86Renderer(ISARenderer):
 
   def spill(self, disp:UOp, x:UOp) -> UOp:
     nx = x.replace(dtype=dtypes.uint64 if isinstance(x.dtype, PtrDType) else x.dtype)
-    ret = isel_matcher.rewrite(def_reg(dtypes.uint64, RSP).index(disp).store(nx))
+    ret = isel_matcher.rewrite(self.stack_pointer().index(disp).store(nx))
     assert ret is not None
     return ret.replace(src=(s if s is not nx else x for s in ret.src))
 
   def fill(self, disp:UOp, x:UOp, reg:Register) -> UOp:
     ndt = dtypes.uint64 if isinstance(x.dtype, PtrDType) else x.dtype
-    ret = isel_matcher.rewrite(def_reg(dtypes.uint64, RSP).index(disp).load(dtype=ndt, tag=reg))
+    ret = isel_matcher.rewrite(self.stack_pointer().index(disp).load(dtype=ndt, tag=reg))
     assert ret is not None
     return ret.replace(dtype=x.dtype)
 
@@ -884,7 +881,6 @@ class X86Renderer(ISARenderer):
     asm = [f".{function_name}:"]
     for u in uops:
       if u.op is not Ops.INS: continue
-      if u.arg is X86Ops.DEFINE_REG: continue
       if u.arg is X86Ops.LABEL: asm.append(f"{str(u.tag)}:")
       elif u.arg is X86Ops.RET: asm.append(_format_op(u))
       else: asm.append(_format_op(u) + " " + _format_operands(u))
@@ -897,7 +893,6 @@ class X86Renderer(ISARenderer):
     binary = bytearray()
     for u in uops:
       if u.op is not Ops.INS: continue
-      if u.arg is X86Ops.DEFINE_REG: continue
       if u.arg is X86Ops.LABEL:
         targets[u.tag] = len(binary)
         continue
