@@ -1,6 +1,6 @@
-import json, uuid
+import json, re, uuid
 
-TOOL_CALL_OPEN = "<tool_call>"
+TOOL_CALL_OPEN, TOOL_CALL_CLOSE = "<tool_call>", "</tool_call>"
 
 # compact tool signatures keep the prompt small
 def _tool_sig(t):
@@ -36,8 +36,12 @@ def _tool_call(obj: str|dict, tools: list|None=None) -> dict|None:
 # prompt the model with compact signatures, keeping the response format explicit
 def format_tools(tools: list|None) -> str:
   if not tools: return ""
-  return "<tools>\n" + "\n".join(_tool_sig(t) for t in tools) + "\n</tools>\nReply only: " + TOOL_CALL_OPEN + '{"name":"...","arguments":{...}}'
+  tool_names = [t.get('function', t)['name'] for t in tools]
+  prompt = "<tools>\n" + "\n".join(_tool_sig(t) for t in tools) + "\n</tools>\nTool names: " + ", ".join(tool_names) + \
+    "Use exactly one listed tool name in \"name\".\nReply only with a complete tool call: "
+  return prompt + TOOL_CALL_OPEN + '{"name":"...","arguments":{...}}' + TOOL_CALL_CLOSE
 
 # parse the last tool_call block
 def parse_tool_calls(text: str, tools: list|None=None) -> list[dict]:
-  return [tc] if (i:=text.rfind(TOOL_CALL_OPEN)) != -1 and (tc:=_tool_call(text[i+len(TOOL_CALL_OPEN):], tools)) is not None else []
+  matches = re.findall(rf'{re.escape(TOOL_CALL_OPEN)}\s*(.*?)\s*{re.escape(TOOL_CALL_CLOSE)}', text, re.DOTALL)
+  return [tc] if matches and (tc:=_tool_call(matches[-1], tools)) is not None else []
