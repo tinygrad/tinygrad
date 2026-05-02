@@ -1,0 +1,3 @@
+regs = {
+'regHDP_MEM_POWER_CTRL': (212, 0, {'iph_mem_power_ctrl_en': (0, 0), 'iph_mem_power_ls_en': (1, 1), 'iph_mem_power_ds_en': (2, 2), 'iph_mem_power_sd_en': (3, 3), 'iph_mem_idle_hysteresis': (4, 6), 'iph_mem_power_up_recover_delay': (8, 13), 'iph_mem_power_down_ls_enter_delay': (14, 15), 'rc_mem_power_ctrl_en': (16, 16), 'rc_mem_power_ls_en': (17, 17), 'rc_mem_power_ds_en': (18, 18), 'rc_mem_power_sd_en': (19, 19), 'rc_mem_idle_hysteresis': (20, 22), 'rc_mem_power_up_recover_delay': (24, 29), 'rc_mem_power_down_ls_enter_delay': (30, 31)}),
+}
