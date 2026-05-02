@@ -1,4 +1,4 @@
-import unittest, decimal, sys, json, contextlib, tempfile, pickle, io
+import unittest, decimal, sys, json, contextlib, tempfile, pickle, io, re, os
 from pathlib import Path
 from dataclasses import dataclass
 from typing import Generator
@@ -946,16 +946,26 @@ class TestCLI(unittest.TestCase):
         i = Variable("i", 1, 1024).bind(i_val)
         j = Variable("j", 1, 2048).bind(j_val)
         Tensor.realize(*f(a[:i], b[:j]))
-    out = call_cli(fxn, "-s", "NULL")
-    print(out)
-    out = out.splitlines()
+    out = [json.loads(line) for line in call_cli(fxn, "-s", "NULL", "--json").splitlines()]
     self.assertEqual(len(out), 3*2)
-    for i in range(0, 6, 2):
-      r1, r2 = out[i:i+2]
-      print(test_n[i//2])
-      print(r1)
-      print(r2)
-      print("------")
+    gflops = [int(unwrap(re.search(r"(\d+) GFLOPS", row["fmt"]))[1]) for row in out]
+    self.assertGreater(gflops[4], gflops[2])
+    self.assertGreater(gflops[5], gflops[3])
+
+  def test_flops_simpler(self):
+    test_n = [16, 32, 64]
+    def fxn():
+      @TinyJit
+      def f(a): return (a@a.T)
+      a = Tensor.empty(64, 64, device="NULL")
+      for n_val in test_n:
+        n = Variable("n", 1, 64).bind(n_val)
+        f(a[:n]).realize()
+    out = [json.loads(line) for line in call_cli(fxn, "-s", "NULL", "--json").splitlines()]
+    self.assertEqual(len(out), len(test_n))
+    gflops = [int(unwrap(re.search(r"(\d+) GFLOPS", row["fmt"]))[1]) for row in out]
+    self.assertGreater(gflops[1], gflops[0])
+    self.assertGreater(gflops[2], gflops[1])
 
 if __name__ == "__main__":
   unittest.main()
