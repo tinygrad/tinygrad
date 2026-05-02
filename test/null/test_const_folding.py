@@ -7,8 +7,8 @@ import numpy as np
 
 def _check_ast_count(desired_count:int, t:Tensor):
   # NOTE: this has side effect because everything can be scheduled only once
-  schedule = t.schedule()
-  asts = [s for s in schedule if s.ast.op is Ops.SINK]
+  linear = t.schedule_linear()
+  asts = [s for s in linear.src if s.src[0].op is Ops.SINK]
   len(asts)
   # NOT SUPPORTED ANYMORE
   #assert len(asts) == desired_count, f"{len(asts)} != {desired_count}"
@@ -128,7 +128,7 @@ class TestBitcastConstFolding(unittest.TestCase):
   def test_vec_bitcast(self):
     with Context(SPEC=0):
       r = full_rewrite_to_sink(UOp.const(dtypes.int32.vec(3), (-1, -2**31, 75)).bitcast(dtypes.uint32.vec(3)).sink()).src[0]
-    self.assertEqual(r.op, Ops.VECTORIZE)
+    self.assertEqual(r.op, Ops.STACK)
     self.assertEqual(r.dtype, dtypes.uint32.vec(3))
     self.assertEqual(tuple(x.arg for x in r.src), (2**32-1, 2**31, 75))
 

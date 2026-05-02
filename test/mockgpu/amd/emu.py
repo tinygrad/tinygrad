@@ -53,10 +53,11 @@ class _MXCSRContext:
 
 from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
 from tinygrad.dtype import dtypes, AddrSpace
-from tinygrad.device import Buffer, BufferSpec
+from tinygrad.device import Buffer, BufferSpec, Device
 from tinygrad.runtime.autogen import hsa
 from tinygrad.helpers import Context, DEBUG, PROFILE, colored
-from tinygrad.engine.realize import get_runner
+from tinygrad.engine.realize import get_runtime
+from tinygrad.codegen import to_program
 
 from tinygrad.renderer.amd import decode_inst
 from tinygrad.runtime.autogen.amd.rdna3.str_pcode import PCODE as PCODE_RDNA3
@@ -161,7 +162,7 @@ def _init_sqtt_encoder():
     """Emit an SQTT packet for one executed instruction."""
     w = wave_id & 0x1F
     if wave_id not in started:
-      _emit_nibbles(nibbles, WAVESTART, delta=1, simd=0, cu_lo=0, wave=w, id7=wave_id)
+      _emit_nibbles(nibbles, WAVESTART, delta=1, simd=0, wgp=0, wave=w, id7=wave_id)
       started.add(wave_id)
     inst_type, inst_op, op_name = type(inst), inst.op.value if hasattr(inst, 'op') else 0, inst.op.name if hasattr(inst, 'op') else ""
     if issubclass(inst_type, _SOPP):
@@ -180,7 +181,7 @@ def _init_sqtt_encoder():
 
   def finish(wave_id: int):
     """Emit WAVEEND for a completed wave."""
-    if wave_id in started: _emit_nibbles(nibbles, WAVEEND, delta=1, simd=0, cu_lo=0, wave=wave_id & 0x1F)
+    if wave_id in started: _emit_nibbles(nibbles, WAVEEND, delta=1, simd=0, wgp=0, wave=wave_id & 0x1F)
 
   def finalize() -> bytes:
     """Pad and return the encoded SQTT blob."""
@@ -2045,18 +2046,18 @@ _INST_HANDLERS: dict[type, Callable[..., UOp]] = {
 # PROGRAM DECODE AND COMPILATION
 # ═══════════════════════════════════════════════════════════════════════════════
 
-_canonical_runner_cache: list[tuple[type, int, int, int, object]] = []  # [(inst_type, base, mask, size, runner), ...]
+_canonical_runner_cache: list[tuple[type, int, int, int, tuple[UOp, object]]] = []  # [(inst_type, base, mask, size, (prg, runtime)), ...]
 
 @functools.cache
 def _get_runner(inst_bytes: bytes, arch: str = "rdna3"):
-  """Build and compile instruction to CompiledRunner. Cached by instruction bytes, with canonical dedup."""
+  """Build and compile instruction to (prg, runtime). Cached by instruction bytes, with canonical dedup."""
   inst = decode_inst(inst_bytes, arch)
   inst_size = inst.size()
   inst_int = int.from_bytes(inst_bytes[:inst_size], 'little')
 
   # Check if instruction matches any cached canonical pattern (must also match instruction type to avoid variant conflicts)
-  for inst_type, base, mask, size, runner in _canonical_runner_cache:
-    if type(inst) is inst_type and inst_size == size and (inst_int & mask) == base: return runner
+  for inst_type, base, mask, size, entry in _canonical_runner_cache:
+    if type(inst) is inst_type and inst_size == size and (inst_int & mask) == base: return entry
 
   # Look up handler by type, falling back to base classes for _LIT variants
   handler = _INST_HANDLERS.get(type(inst))
@@ -2075,9 +2076,10 @@ def _get_runner(inst_bytes: bytes, arch: str = "rdna3"):
 
   # NOTE: renderer output is not reproducible because of _MXCSRContext. PROFILE=0 prevents emulator instruction runners from polluting profiling.
   with Context(NOOPT=1, CHECK_OOB=0, TUPLE_ORDER=0, EMULATED_DTYPES="", CAPTURE_PROCESS_REPLAY=0, PROFILE=0):
-    runner = get_runner('CPU', sink)
-  _canonical_runner_cache.append((type(inst), base, mask, size, runner))
-  return runner
+    prg = to_program(sink, Device['CPU'].renderer)
+    runtime = get_runtime('CPU', prg)
+  _canonical_runner_cache.append((type(inst), base, mask, size, (prg, runtime)))
+  return prg, runtime
 
 _BARRIER_OPS = {ir3.SOPPOp.S_BARRIER, irc.SOPPOp.S_BARRIER}
 if hasattr(ir4.SOPPOp, 'S_BARRIER_WAIT'): _BARRIER_OPS.add(ir4.SOPPOp.S_BARRIER_WAIT)
@@ -2208,10 +2210,10 @@ def run_asm(lib: int, lib_sz: int, gx: int, gy: int, gz: int, lx: int, ly: int, 
   def _ensure_compiled(pc: int) -> tuple[Callable, list[int], bool, Inst]:
     if pc not in program:
       prev_len = len(_canonical_runner_cache)
-      runner, inst = _decode_at(pc, arch)
+      (prg, runtime), inst = _decode_at(pc, arch)
       is_barrier = (isinstance(inst, (ir3.SOPP, ir4.SOPP, irc.SOPP)) and inst.op in _BARRIER_OPS) or \
                    (isinstance(inst, (ir4.SOP1,)) and inst.op in _BARRIER_SOP1_OPS)
-      program[pc] = (runner._prg.fxn, runner.p.globals, is_barrier, inst)
+      program[pc] = (runtime.fxn, prg.arg.globals, is_barrier, inst)
       if DEBUG >= 3:
         msg = f"[emu] PC={pc - lib}: {inst!r}"
         print(colored(msg, 'green') if len(_canonical_runner_cache) > prev_len else msg)

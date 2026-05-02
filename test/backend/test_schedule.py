@@ -12,8 +12,7 @@ from tinygrad.device import is_dtype_supported
 from tinygrad.dtype import DType
 from tinygrad.uop.ops import UOp, Ops, UPat
 from tinygrad.helpers import CI, DEBUG, OSX, GlobalCounters, Context, getenv, all_same, temp
-from tinygrad.engine.realize import CompiledRunner, run_schedule, run_linear
-from tinygrad.schedule import linear_to_schedule
+from tinygrad.engine.realize import compile_linear, run_linear
 
 class KernelCountException(Exception): pass
 def check_schedule(t:Tensor|list[Tensor]|UOp, allowed:int, to_prerealize:list[Tensor]|None=None, filter_sink=True):
@@ -24,17 +23,17 @@ def check_schedule(t:Tensor|list[Tensor]|UOp, allowed:int, to_prerealize:list[Te
   else:
     assert isinstance(t, UOp), f"can't schedule {t}"
     linear, var_vals = Tensor(t).linear_with_vars()
-  # test lowering all the ExecItems
-  sched = linear_to_schedule(linear)
-  for si in sched: si.lower()
-  kernel_cnt = len([si for si in sched if isinstance(si.prg, CompiledRunner) or not filter_sink])
+  kernel_cnt = sum((len(call.device) if isinstance(call.device, tuple) else 1)
+                   for call in linear.src if call.src[0].op is Ops.SINK or not filter_sink)
   if kernel_cnt != allowed:
     print(f"SCHEDULE ISSUE, expecting {allowed} got {kernel_cnt}")
     if DEBUG >= 3:
-      for i,s in enumerate(sched):
+      for i,call in enumerate(linear.src):
         print("kernel", i+1)
-        print(s.ast)
+        print(call.src[0])
     raise KernelCountException(f"{kernel_cnt} != {allowed}")
+  # test compiling the linear
+  compile_linear(linear)
   return linear, var_vals
 
 def _realize_weights(m):
@@ -49,9 +48,9 @@ def _test_conv2d(allowed:int, dtype:DType=dtypes.float):
   w = Tensor.uniform(16, CIN, 3, 3, requires_grad=True).realize()
   ret = Tensor.conv2d(img, w).relu().mean().backward()
   dtypes.default_float = old_default_float
-  s = Tensor.schedule(ret, img.grad, w.grad)
-  run_schedule(s.copy())
-  cnt = len([si for si in s if si.ast.op is Ops.SINK])
+  linear, var_vals = Tensor.linear_with_vars(ret, img.grad, w.grad)
+  run_linear(linear, var_vals)
+  cnt = len([call for call in linear.src if call.src[0].op is Ops.SINK])
   assert cnt == allowed, f"expected {allowed} kernels, got {cnt}"
   if getenv("CHECK", 1):
     import torch
@@ -72,9 +71,9 @@ class TestSchedule(unittest.TestCase):
   def test_arange_avgpool2d(self, kcount=1):
     x = Tensor.arange(25).reshape(1,1,5,5).cast(dtypes.float32)
     t = x.avg_pool2d(padding=1)
-    sched = t.schedule()
-    self.assertEqual(len(sched), kcount)
-    run_schedule(sched)
+    linear, var_vals = t.linear_with_vars()
+    self.assertEqual(len(linear.src), kcount)
+    run_linear(linear, var_vals)
     import torch
     torch_out = torch.nn.functional.avg_pool2d(torch.arange(25).reshape(1,1,5,5).float(), kernel_size=(2,2), padding=1).numpy()
     np.testing.assert_allclose(t.numpy(), torch_out)
@@ -788,7 +787,7 @@ class TestSchedule(unittest.TestCase):
     gc.collect()
     base = GlobalCounters.mem_used
     x = Tensor.ones(256).contiguous().realize()
-    (x+Tensor.ones(256).contiguous()).schedule()
+    (x+Tensor.ones(256).contiguous()).schedule_linear()
     gc.collect()
     self.assertEqual(GlobalCounters.mem_used-base, 1024)
 
@@ -798,9 +797,8 @@ class TestSchedule(unittest.TestCase):
       def cnt():
         x, y, z = Tensor.empty((64, 64), dtype='float'), Tensor.empty((64, 64), dtype='float'), Tensor.empty((64, 64), dtype='float')
         a = (x @ y).relu()
-        sched = ((a @ z).relu() + a).schedule()
-        for si in sched: si.lower()
-        return len([si for si in sched if isinstance(si.prg, CompiledRunner)])
+        linear = compile_linear(((a @ z).relu() + a).schedule_linear())
+        return len([call for call in linear.src if call.src[0].op is Ops.PROGRAM])
 
       with Context(IMAGE=1):
         self.assertEqual(cnt(), 5)
@@ -815,9 +813,8 @@ class TestSchedule(unittest.TestCase):
         rb = (((((inp @ b1) + c1).relu() @ b2) + c2).relu() + inp).relu()
         b16, c16 = Tensor.empty((512, 16), dtype='float'), Tensor.empty((16,), dtype='float')
         b32, c32 = Tensor.empty((512, 32), dtype='float'), Tensor.empty((32,), dtype='float')
-        sched = Tensor.schedule((rb @ b16 + c16).relu(), (rb @ b32 + c32).relu())
-        for si in sched: si.lower()
-        return len([si for si in sched if isinstance(si.prg, CompiledRunner)])
+        linear = compile_linear(Tensor.schedule_linear((rb @ b16 + c16).relu(), (rb @ b32 + c32).relu()))
+        return len([call for call in linear.src if call.src[0].op is Ops.PROGRAM])
 
       with Context(IMAGE=1):
         self.assertEqual(cnt(), 9)
@@ -829,9 +826,8 @@ class TestSchedule(unittest.TestCase):
         x, y, z = Tensor.empty((1, 4, 3, 3)), Tensor.empty((4, 1, 3, 3)), Tensor.empty((4, 1, 7, 7))
         a = x.conv2d(y, Tensor.empty(4), groups=4, padding=1)
         b = a.conv2d(z, groups=4, padding=3)
-        sched = (a + b).schedule()
-        for si in sched: si.lower()
-        return len([si for si in sched if isinstance(si.prg, CompiledRunner)])
+        linear = compile_linear((a + b).schedule_linear())
+        return len([call for call in linear.src if call.src[0].op is Ops.PROGRAM])
 
       with Context(IMAGE=1):
         self.assertEqual(cnt(), 5)
@@ -1053,8 +1049,9 @@ class TestSchedule(unittest.TestCase):
     a2 = mop(a)
     expected = (a+a2).tolist()
     a.assign(a+a2)
-    kcount = len(sched:=a.schedule())
-    run_schedule(sched)
+    linear, var_vals = a.linear_with_vars()
+    kcount = len(linear.src)
+    run_linear(linear, var_vals)
     self.assertListEqual(a.tolist(), expected)
     self.assertEqual(kcount, expected_kcount)
   def test_setitem_permuted_sched(self): self.test_setitem_sched(lambda x: x.T, 2)
@@ -1332,7 +1329,7 @@ class TestCopyFolding(unittest.TestCase):
     b = Tensor.empty(4, device="CPU")
     add = a+b
     assert all_same([x.device for x in add.uop.src]), f"ALU has different devices! {[x.device for x in add.src]}"
-    add.schedule()
+    add.schedule_linear()
 
   def test_alu_before_copy(self):
     buf = Tensor.ones(1).contiguous().realize()
@@ -1353,9 +1350,9 @@ class TestCopyFolding(unittest.TestCase):
   def test_copy_to_same_device_sched(self):
     a = Tensor.ones(4).contiguous().realize().uop.buf_uop
     t = Tensor(a.copy_to_device(a.device))
-    sched = t.schedule()
-    assert len([s for s in sched if s.ast.op is Ops.COPY]) == 0
-    run_schedule(sched)
+    linear, var_vals = t.linear_with_vars()
+    assert len([call for call in linear.src if call.src[0].op is Ops.COPY]) == 0
+    run_linear(linear, var_vals)
     assert t.uop.is_realized, f"didn't realize Tensor {t}"
     self.assertListEqual(t.tolist(), [1.,1.,1.,1.])
 
@@ -1442,8 +1439,7 @@ class TestFusionOp(unittest.TestCase):
   def test_expand_fuse(self):
     bt = Tensor(np.ones((10, 1)), dtype=dtypes.float32)
     out = (bt*2).expand(10,10).sum(1)
-    sched = out.schedule()
-    run_schedule(sched)
+    run_linear(*out.linear_with_vars())
     outd = out.tolist()
     assert all(x == 20.0 for x in outd)
 

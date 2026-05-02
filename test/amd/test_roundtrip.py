@@ -57,49 +57,53 @@ class KernelSnapshot:
 def get_kernels_from_tinygrad(op_fn) -> tuple[list[KernelSnapshot], dict[int, int], dict[int, bytes]]:
   """Compile a tinygrad operation and extract all kernels with their buffer mappings."""
   from tinygrad import Tensor
+  from tinygrad.uop.ops import Ops
+  from tinygrad.engine.realize import compile_linear, resolve_params, unwrap_multi
   from tinygrad.runtime.support.elf import elf_loader
 
   out = op_fn(Tensor)
-  sched = out.schedule()
+  linear = compile_linear(out.schedule_linear())
   kernels = []
   buf_pool: dict[int, int] = {}  # buffer id -> size
   buf_data: dict[int, bytes] = {}  # buffer id -> initial data from COPY
 
-  for ei in sched:
-    lowered = ei.lower()
-    if ei.ast.op.name == 'COPY':
-      # Handle COPY: extract source data to initialize destination buffer
-      if len(lowered.bufs) >= 2:
-        dst_buf, src_buf = lowered.bufs[0], lowered.bufs[1]
-        dst_id = id(dst_buf)
-        if dst_id not in buf_pool:
-          buf_pool[dst_id] = dst_buf.nbytes
-        # Get source data if it's from numpy/CPU
-        if hasattr(src_buf, 'base') and src_buf.base is not None and hasattr(src_buf.base, '_buf'):
-          src_data = bytes(src_buf.base._buf)
-          buf_data[dst_id] = src_data
-    elif ei.ast.op.name == 'SINK':
-      if lowered.prg and lowered.prg.p.lib:
-        lib = bytes(lowered.prg.p.lib)
-        _, sections, _ = elf_loader(lib)
-        for sec in sections:
-          if sec.name == '.text':
-            buf_idxs = []
-            buf_sizes = []
-            for b in lowered.bufs:
-              buf_id = id(b)
-              if buf_id not in buf_pool:
-                buf_pool[buf_id] = b.nbytes
-              buf_idxs.append(buf_id)
-              buf_sizes.append(b.nbytes)
-            kernels.append(KernelSnapshot(
-              code=bytes(sec.content),
-              src=lowered.prg.p.src,
-              global_size=tuple(lowered.prg.p.global_size),
-              local_size=tuple(lowered.prg.p.local_size),
-              buf_idxs=buf_idxs,
-              buf_sizes=buf_sizes
-            ))
+  for call in linear.src:
+    ast = call.src[0]
+    for bufs, _ in unwrap_multi(call, resolve_params(call, ())):
+      if ast.op is Ops.COPY:
+        # Handle COPY: extract source data to initialize destination buffer
+        if len(bufs) >= 2:
+          dst_buf, src_buf = bufs[0], bufs[1]
+          dst_id = id(dst_buf)
+          if dst_id not in buf_pool:
+            buf_pool[dst_id] = dst_buf.nbytes
+          # Get source data if it's from numpy/CPU
+          if hasattr(src_buf, 'base') and src_buf.base is not None and hasattr(src_buf.base, '_buf'):
+            src_data = bytes(src_buf.base._buf)
+            buf_data[dst_id] = src_data
+      elif ast.op is Ops.PROGRAM:
+        info = ast.arg
+        if len(ast.src) > 4 and ast.src[4].op is Ops.BINARY:
+          lib = bytes(ast.src[4].arg)
+          _, sections, _ = elf_loader(lib)
+          for sec in sections:
+            if sec.name == '.text':
+              buf_idxs = []
+              buf_sizes = []
+              for b in bufs:
+                buf_id = id(b)
+                if buf_id not in buf_pool:
+                  buf_pool[buf_id] = b.nbytes
+                buf_idxs.append(buf_id)
+                buf_sizes.append(b.nbytes)
+              kernels.append(KernelSnapshot(
+                code=bytes(sec.content),
+                src=ast.src[3].arg,
+                global_size=tuple(info.global_size),
+                local_size=tuple(info.local_size),
+                buf_idxs=buf_idxs,
+                buf_sizes=buf_sizes
+              ))
   if not kernels: raise RuntimeError("No kernel found")
   return kernels, buf_pool, buf_data
 

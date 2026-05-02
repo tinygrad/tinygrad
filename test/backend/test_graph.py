@@ -6,7 +6,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.helpers import Context, from_mv
 from tinygrad.dtype import dtypes
 from tinygrad.engine.jit import MultiGraphRunner
-from tinygrad.schedule import linear_to_schedule
+from tinygrad.engine.realize import run_linear, compile_linear
 from tinygrad.uop.ops import UOp, Ops, buffers
 
 from test.helpers import needs_second_gpu
@@ -24,7 +24,7 @@ def get_ast(device:str, num_inputs:int) -> UOp:
       fst = [Tensor.randn(BUF_SIZE, dtype=dtypes.int).realize() for _ in range(num_inputs)]
       s = fst[0]
       for i in range(1, num_inputs): s = s.bitwise_xor(fst[i])
-      cached_asts[(device, num_inputs)] = s.schedule()[-1].ast
+      cached_asts[(device, num_inputs)] = s.schedule_linear().src[-1].src[0]
   return cached_asts[(device, num_inputs)]
 
 def make_buffer(device, size=BUF_SIZE, fill=False):
@@ -44,12 +44,12 @@ def get_buf_uop(buf:Buffer, cache:dict[Buffer,UOp]) -> UOp:
   return cache[buf]
 
 def make_graph(graph_cls, calls:list[UOp]):
-  linear = UOp(Ops.LINEAR, src=tuple(calls))
+  linear = compile_linear(UOp(Ops.LINEAR, src=tuple(calls)))
   cf = UOp(Ops.CUSTOM_FUNCTION, dtypes.void, src=(linear,), arg="graph")
   return graph_cls(cf, [])
 
 def run_schedule(calls:list[UOp]):
-  for ei in linear_to_schedule(UOp(Ops.LINEAR, src=tuple(calls))): ei.lower().run({})
+  run_linear(UOp(Ops.LINEAR, src=tuple(calls)))
 
 def zero_bufs(bufs):
   for b in bufs:

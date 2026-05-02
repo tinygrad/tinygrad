@@ -93,12 +93,12 @@ cl_lib_img_desc.register_fields([('_unk0', c.Array[ctypes.c_char, Literal[196]],
 def cl_compiler_free_handle(handle:c.POINTER[cl_handle]) -> None: ...
 @dll.bind(None, ctypes.c_void_p)
 def cl_compiler_free_assembly(ptr:ctypes.c_void_p) -> None: ...
-CL_MODE_32BIT = 0 # type: ignore
-CL_MODE_64BIT = 1 # type: ignore
-CL_SRC_STR = 0 # type: ignore
-CL_SRC_BLOB = 1 # type: ignore
-CL_LIB_PROGRAM = 0 # type: ignore
-CL_LIB_CONSTS = 6 # type: ignore
-CL_LIB_IMAGE = 7 # type: ignore
-CL_LIB_CODE = 10 # type: ignore
-CL_LIB_IMAGE_DESC = 11 # type: ignore
+CL_MODE_32BIT = 0
+CL_MODE_64BIT = 1
+CL_SRC_STR = 0
+CL_SRC_BLOB = 1
+CL_LIB_PROGRAM = 0
+CL_LIB_CONSTS = 6
+CL_LIB_IMAGE = 7
+CL_LIB_CODE = 10
+CL_LIB_IMAGE_DESC = 11

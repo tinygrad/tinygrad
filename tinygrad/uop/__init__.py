@@ -35,10 +35,10 @@ class Ops(FastEnum):
 
   # AFTER passes src[0] through and promises in the toposort that any consumers of the AFTER run after src[1:]
   # GROUP is a NOOP that just merges things together
-  SINK = auto(); AFTER = auto(); GROUP = auto(); BEAM = auto()
+  SINK = auto(); AFTER = auto(); GROUP = auto()
 
   # vector creation / item selection
-  GEP = auto(); VECTORIZE = auto()
+  GEP = auto(); STACK = auto()
 
   # tuple/gettuple for function with multiple returns
   TUPLE = auto(); GETTUPLE = auto()
@@ -102,7 +102,7 @@ class Ops(FastEnum):
   MULTI = auto()  # MULTI is really a movement op
 
   # reduce
-  REDUCE_AXIS = auto(); REDUCE = auto(); ALLREDUCE = auto()
+  REDUCE = auto(); ALLREDUCE = auto()
 
   # expander ops
   UNROLL = auto(); CONTRACT = auto(); VCAT = auto(); PTRCAT = auto()

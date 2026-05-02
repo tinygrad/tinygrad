@@ -93,7 +93,20 @@ constexpr int NUM_WARPS = 8;
 
 using G = kittens::group<NUM_WARPS>;
 
-__global__ __launch_bounds__(512, 2) void hk_fp8_gemm(bf16 *C_ptr, fp8e4m3 *A_ptr, fp8e4m3 *B_ptr, float *x_scale_ptr, float *w_scale_ptr) {
+// scale_mode: 0=no scale, 1=x only, 2=w only, 3=both
+#ifndef SCALE_MODE
+#define SCALE_MODE 3
+#endif
+
+__global__ __launch_bounds__(512, 2) void hk_fp8_gemm(bf16 *C_ptr, fp8e4m3 *A_ptr, fp8e4m3 *B_ptr
+#if SCALE_MODE == 1
+    , float *x_scale_ptr
+#elif SCALE_MODE == 2
+    , float *w_scale_ptr
+#elif SCALE_MODE == 3
+    , float *x_scale_ptr, float *w_scale_ptr
+#endif
+) {
     constexpr int M = GEMM_M, N = GEMM_N, K = GEMM_K;
 
     kittens::gl<fp8e4m3, 1, 1, M, K> A{A_ptr, nullptr, nullptr, nullptr, nullptr};
@@ -333,11 +346,25 @@ __global__ __launch_bounds__(512, 2) void hk_fp8_gemm(bf16 *C_ptr, fp8e4m3 *A_pt
     }
 
     // apply x_scale * w_scale before bf16 store to prevent overflow
+#if SCALE_MODE == 1
+    float scale = *x_scale_ptr;
+    mul(cA, cA, scale);
+    mul(cB, cB, scale);
+    mul(cC, cC, scale);
+    mul(cD, cD, scale);
+#elif SCALE_MODE == 2
+    float scale = *w_scale_ptr;
+    mul(cA, cA, scale);
+    mul(cB, cB, scale);
+    mul(cC, cC, scale);
+    mul(cD, cD, scale);
+#elif SCALE_MODE == 3
     float scale = *x_scale_ptr * *w_scale_ptr;
     mul(cA, cA, scale);
     mul(cB, cB, scale);
     mul(cC, cC, scale);
     mul(cD, cD, scale);
+#endif
 
     store(C, cA, {0, 0, block_row * WARPS_ROW * 2 + warp_m, block_col * WARPS_COL * 2 + warp_n});
     store(C, cB, {0, 0, block_row * WARPS_ROW * 2 + warp_m, block_col * WARPS_COL * 2 + WARPS_COL + warp_n});

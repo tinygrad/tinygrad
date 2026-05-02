@@ -20,17 +20,17 @@ test_llvm.py tests asm/disasm on the LLVM tests, confirming it behaves the same 
 
 tinygrad's dtype tests should pass with and without LLVM. they run in about 12 seconds.
 
-`DEV=MOCKKFD+AMD pytest -n=12 test/backend/test_dtype_alu.py test/backend/test_dtype.py`
-`DEV=MOCKKFD+AMD:LLVM pytest -n=12 test/backend/test_dtype_alu.py test/backend/test_dtype.py`
+`DEV=MOCK+AMD pytest -n=12 test/backend/test_dtype_alu.py test/backend/test_dtype.py`
+`DEV=MOCK+AMD:LLVM pytest -n=12 test/backend/test_dtype_alu.py test/backend/test_dtype.py`
 
 The ops tests also pass, but they are very slow, so you should run them one at a time.
 
-`SKIP_SLOW_TEST=1 DEV=MOCKKFD+AMD pytest -n=12 test/backend/test_ops.py`
-`SKIP_SLOW_TEST=1 DEV=NOCKKFD+AMD:LLVM pytest -n=12 test/backend/test_ops.py`
+`SKIP_SLOW_TEST=1 DEV=MOCK+AMD pytest -n=12 test/backend/test_ops.py`
+`SKIP_SLOW_TEST=1 DEV=NOCK+AMD:LLVM pytest -n=12 test/backend/test_ops.py`
 
 When something is caught by main tinygrad tests, a local regression test should be added to `test/amd`.
 While working with tinygrad, you can dump the assembly with `DEBUG=7`. These tests all pass on real hardware
-If a test is failing with `DEV=MOCKKFD+AMD` it's because an instruction is emulated incorrectly.
+If a test is failing with `DEV=MOCK+AMD` it's because an instruction is emulated incorrectly.
 You can test with just `DEV=AMD` to test on real hardware, if it works on real hardware there's a bug in the emulator.
 IMPORTANT: if a test is failing in the emulator, it's an instruction bug. Use DEBUG=7, get the instructions, and debug.
 

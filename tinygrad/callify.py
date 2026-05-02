@@ -18,7 +18,7 @@ def tag_uop(ctx:AllocCtx, x:UOp):
 def disk_copy_is_buffer(ctx:AllocCtx, u:UOp):
   # copies to disk are replaced with the disk buffer
   to_disk = isinstance(u._device, str) and u._device.startswith(("DISK", "TINYFS"))
-  if to_disk: ctx.buffer_map[u] = UOp.new_buffer(u.device, u.shard_size, u.dtype).reshape(u.max_shard_shape)
+  if to_disk: ctx.buffer_map[u] = u.empty_like()
   # all copies from disk/numpy are realized into a real buffer
   from_creation = isinstance(u.src[0]._device, str) and any(u.src[0]._device.startswith(x) for x in ["NPY", "DISK", "PYTHON", "TINYFS"])
   if from_creation: return tag_uop(ctx, u)
@@ -40,11 +40,6 @@ add_tags = PatternMatcher([
   (UPat(GroupOp.All, name="x"), lambda ctx,x: tag_uop(ctx,x) if x in ctx.bases else None),
 ])
 
-def _buffer_like(u:UOp) -> UOp:
-  buffer = UOp.new_buffer(u.device, u.shard_size, u.dtype).reshape(u.max_shard_shape).shrink_to(u.shard_shape)
-  if isinstance(u.device, tuple) and u.axis is not None: buffer = buffer.multi(u.axis)
-  return buffer
-
 def replace_contig_with_store_after(u:UOp):
   # can't allocate a buffer without a device (e.g., inside a CALL function body with only PARAMs)
   if u._device is None: return None
@@ -52,7 +47,7 @@ def replace_contig_with_store_after(u:UOp):
   if 0 in u.shape: return u.src[0]
   # no real contig for DISK/TINYFS tensors, they are left alone
   if isinstance(u._device, str) and u._device.startswith(("DISK", "TINYFS")): return u.rtag(None)
-  buf = _buffer_like(u)
+  buf = u.empty_like()
   return buf.after(buf.store(u.src[0])).rtag(u.tag)
 
 def replace_store_after_with_contig(u:UOp, src:UOp):
@@ -102,7 +97,7 @@ def transform_precompiled_call(c:UOp) -> UOp|None:
   # add the outputs to the call
   srcs = c.src[0].src
   resolved = [c.gettuple(i) for i in range(len(srcs))]
-  outs = tuple(_buffer_like(r) for r in resolved)
+  outs = tuple(r.empty_like() for r in resolved)
   targets = [o.param_like(len(c.src)-1+i).shrink_to(s.shape) for i,(o,s) in enumerate(zip(outs, srcs))]
   fxn = UOp.sink(*[t.after(t.store(s)) for t,s in zip(targets, srcs)])
 
@@ -141,19 +136,19 @@ pm_early_transform_tensor_graph = PatternMatcher([
   (UPat((Ops.DETACH, Ops.CONTIGUOUS_BACKWARD), name="x"), lambda x: x.src[0]),
 ])
 
-def untag_and_append(ctx:AllocCtx, x:UOp):
-  if x.tag is None: return None
+def finalize_after(ctx:AllocCtx, x:UOp):
+  # untagged: record as an assign for the call body
+  if x.tag is None:
+    ctx.assigns.append(x)
+    return None
+  # tagged: untag and map each original pre-rewrite UOp to the stripped buffer; the untagged result is reprocessed as untagged
   ret = x.replace(tag=None)
+  replace_uop = ret
+  while replace_uop.op is Ops.AFTER: replace_uop = replace_uop.src[0]
   for t in x.tag:
     original_uop: UOp = ctx.uop_list[t]
-    replace_uop = ret
-    while replace_uop.op is Ops.AFTER: replace_uop = replace_uop.src[0]
     ctx.buffer_map[original_uop] = replace_uop.shrink_to(original_uop.shape)
-  if ret.op is not Ops.AFTER: ctx.assigns.append(ret)  # AFTER gets appended by append_after
   return ret
-
-def append_after(ctx:AllocCtx, x:UOp):
-  ctx.assigns.append(x)
 
 def replace_input_buffer(ctx:AllocCtx, b:UOp):
   ctx.replacements.append(b)
@@ -161,9 +156,8 @@ def replace_input_buffer(ctx:AllocCtx, b:UOp):
                    b._min_max if b.op is Ops.BIND else None, b.src[0].arg[0] if b.op is Ops.BIND else None)
 
 pm_finalize_call = PatternMatcher([
-  (UPat(Ops.AFTER, name="x"), untag_and_append),
-  (UPat(Ops.AFTER, name="x"), append_after),
-  (UPat(Ops.COPY, name="x"), lambda ctx,x: append_after(ctx,x) if isinstance(x.device, str) and x.device.startswith(("DISK", "TINYFS")) else None),
+  (UPat(Ops.AFTER, name="x"), finalize_after),
+  (UPat(Ops.COPY, name="x"), lambda ctx,x: ctx.assigns.append(x) if isinstance(x.device, str) and x.device.startswith(("DISK", "TINYFS")) else None),
   # remove unique from const. TODO: this is copied in function.py
   (UPat(Ops.CONST, src=(UPat(Ops.UNIQUE), UPat(Ops.DEVICE, name="d")), name="b"), lambda b,d: b.replace(src=(d,))),
 ])

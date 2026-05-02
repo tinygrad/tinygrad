@@ -62,7 +62,7 @@ def import_soc(ip):
   # rocm soc headers have more profiling enums than upstream linux
   return type("SOC", (object,), import_header(f"aqlprofile/linux/{({9: 'vega10', 10: 'navi10', 11: 'soc21', 12: 'soc24'}[ip[0]])}_enum.h", ROCM_URL))
 
-def import_ip_offsets(ip): return type("IPOFF", (object,), import_header(f"include/{('sienna_cichlid' if ip[0] > 9 else 'vega20')}_ip_offset.h"))
+def import_ip_offsets(ip): return getattr(tinygrad.runtime.autogen.am, f"{'navi' if ip[0] > 9 else 'vega'}_offsets")
 
 def import_pmc(ip) -> dict[str, tuple[str, int]]:
   res:dict[str, tuple[str, int]] = {}

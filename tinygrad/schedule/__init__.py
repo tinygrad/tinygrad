@@ -1,11 +1,8 @@
 import time, inspect
-from typing import cast
 from collections import deque
-from tinygrad.uop.ops import UOp, Ops, buffers, UOpMetaClass, track_rewrites, graph_rewrite, gate_kernel_sink, KernelInfo
+from tinygrad.uop.ops import UOp, Ops, UOpMetaClass, track_rewrites, graph_rewrite, gate_kernel_sink, KernelInfo
 from tinygrad.uop.spec import type_verify, tensor_spec
-from tinygrad.device import Buffer, MultiBuffer
-from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, pluralize, SCACHE, BASEDIR, flatten, BEAM, partition
-from tinygrad.engine.realize import ExecItem
+from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, pluralize, SCACHE, BASEDIR, partition
 
 # **** schedule linearizer
 
@@ -69,33 +66,8 @@ def create_schedule(sched_sink:UOp) -> UOp:
         if in_degree[x] == 0: queue.append(x)
   return UOp(Ops.LINEAR, src=tuple(linearized))
 
-def linear_to_schedule(linear:UOp) -> list[ExecItem]:
-  """Convert a LINEAR UOp to a list of ExecItems."""
-  schedule: list[ExecItem] = []
-  for si in linear.src:
-    ast, buf_uops = si.src[0], si.src[1:]
-    # create subbuffers if needed
-    if ast.op is Ops.BUFFER_VIEW:
-      base = buf_uops[1].buffer
-      assert isinstance(base, Buffer), "base can't be MultiBuffer"
-      buffers[buf_uops[0]] = base.view(buf_uops[0].arg, ast.dtype, ast.arg[1]*base.dtype.itemsize)
-    # wrap SINK with BEAM UOp when beam search is enabled
-    if ast.op is Ops.SINK and BEAM >= 1: ast = UOp(Ops.BEAM, src=(ast,), arg=BEAM.value)
-    ubufs = [b.buffer for b in buf_uops if b.op is not Ops.BIND]
-    metadata = si.arg.metadata
-    if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "graph":
-      schedule.append(ExecItem(ast, flatten([b.bufs if isinstance(b, MultiBuffer) else [b] for b in ubufs]), metadata))
-    elif any(isinstance(x, MultiBuffer) for x in ubufs):
-      assert all(isinstance(x, MultiBuffer) for x in ubufs), "kernel must all be multibuffer"
-      dnums = [x for x in ast.variables() if x.expr == '_device_num']
-      for j, bufs in enumerate(zip(*[x.bufs for x in cast(tuple[MultiBuffer, ...], ubufs)])):
-        schedule.append(ExecItem(ast, list(bufs), metadata, {dnums[0].expr:j} if len(dnums) else {}))
-    else:
-      schedule.append(ExecItem(ast, cast(list[Buffer|None], ubufs), metadata))
-  return schedule
-
 from tinygrad.schedule.memory import memory_plan_rewrite
-from tinygrad.engine.realize import capturing
+from tinygrad.engine.realize import capturing, pm_flatten_linear
 from tinygrad.schedule.rangeify import get_kernel_graph
 from tinygrad.helpers import CAPTURING
 from tinygrad.uop.ops import PatternMatcher, UPat
@@ -114,10 +86,7 @@ pm_resolve_linear_call = PatternMatcher([
   # call LINEAR is resolved here
   (UPat(Ops.CALL, src=(UPat(Ops.LINEAR),), name="linear_call", allow_any_len=True), lambda linear_call:
    graph_rewrite(linear_call.src[0], pm_post_sched_cache, ctx=({}, linear_call.src[1:]), walk=True, name="params to buffers")),
-  # LINEAR on LINEAR
-  (UPat(Ops.LINEAR, custom_early_reject={Ops.LINEAR}, name="x"),
-   lambda x: x.replace(src=tuple(flatten(x.src if x.op is Ops.LINEAR else (x,) for x in x.src)))),
-])
+])+pm_flatten_linear
 
 schedule_cache: dict[bytes, UOp] = {}
 # ctx is just for DEBUG on inner

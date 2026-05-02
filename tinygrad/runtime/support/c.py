@@ -112,7 +112,7 @@ class DLL(ctypes.CDLL):
               if f.read(4) == b'\x7FELF': return str(l)
 
   def __init__(self, nm:str, paths:str|list[str], extra_paths=[], emsg="", **kwargs):
-    self.nm, self.emsg = nm, emsg
+    self.nm, self.emsg = nm, emsg or f"try setting {nm.upper()+'_PATH'}?"
     if (path:= DLL.findlib(nm, paths if isinstance(paths, list) else [paths], extra_paths if isinstance(extra_paths, list) else [extra_paths])):
       if DEBUG >= 3: print(f"loading {nm} from {path}")
       try:
@@ -126,6 +126,7 @@ class DLL(ctypes.CDLL):
   def bind(self, restype, *argtypes):
     def wrap(fn):
       cfunc = None
+      @functools.wraps(fn)
       def wrapper(*args):
         nonlocal cfunc
         if cfunc is None: (cfunc:=getattr(self, fn.__name__)).argtypes, cfunc.restype = argtypes, restype
@@ -134,6 +135,5 @@ class DLL(ctypes.CDLL):
     return wrap
 
   def __getattr__(self, nm):
-    if self.nm not in self._loaded_:
-      raise AttributeError(f"failed to load library {self.nm}: " + (self.emsg or f"try setting {self.nm.upper()+'_PATH'}?"))
+    if self.nm not in self._loaded_: raise AttributeError(f"failed to load library {self.nm}: {self.emsg}")
     return super().__getattr__(nm)

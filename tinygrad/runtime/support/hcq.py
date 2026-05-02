@@ -5,7 +5,7 @@ from dataclasses import replace
 try: import fcntl # windows misses that
 except ImportError: fcntl = None #type:ignore[assignment]
 from tinygrad.helpers import DEV, PROFILE, getenv, to_mv, from_mv, cpu_profile, ProfileRangeEvent, select_first_inited, select_by_name, unwrap
-from tinygrad.helpers import suppress_finalizing, TracingKey
+from tinygrad.helpers import suppress_finalizing, pluralize, TracingKey
 from tinygrad.device import Device, BufferSpec, Compiled, LRUAllocator, ProfileDeviceEvent, ProfileProgramEvent
 from tinygrad.uop.ops import sym_infer, sint, UOp
 from tinygrad.runtime.autogen import libc
@@ -62,13 +62,15 @@ if DEV.interface.startswith("MOCK"): from test.mockgpu.mockgpu import MockFileIO
 
 def hcq_filter_visible_devices(devs, device):
   assert (v:=getenv("HCQ_VISIBLE_DEVICES", "")) == "", f"HCQ_VISIBLE_DEVICES={v} is deprecated, use DEV={DEV.target(device, indices=v)} instead"
-  return [devs[x] for x in ids] if (ids:=[int(x) for x in DEV.target(device).indices.split(',') if x.strip()]) else devs
+  if '-' in (idstr:=DEV.target(device).indices): ids = list(range(int(idstr.split('-')[0]), int(idstr.split('-')[1])+1))
+  else: ids = [int(x) for x in idstr.split(',') if x.strip()]
+  assert all(x < len(devs) for x in ids), f"invalid visibility filter: {ids} ({pluralize('device', len(devs))} available)"
+  return [devs[x] for x in ids] if ids else devs
 
 SignalType = TypeVar('SignalType', bound='HCQSignal')
 HCQDeviceType = TypeVar('HCQDeviceType', bound='HCQCompiled')
 ProgramType = TypeVar('ProgramType', bound='HCQProgram')
 ArgsStateType = TypeVar('ArgsStateType', bound='HCQArgsState')
-QueueType = TypeVar('QueueType', bound='HWQueue')
 
 class HWQueue(Generic[SignalType, HCQDeviceType, ProgramType, ArgsStateType]):
   """
@@ -421,6 +423,8 @@ class HCQCompiled(Compiled, Generic[SignalType]):
 
     if self._is_cpu(): HCQCompiled.cpu_devices.append(self)
 
+  def count(self) -> int: return self.iface.count if hasattr(self, 'iface') else 1
+
   def synchronize(self, timeout:int|None=None):
     if self.error_state is not None: raise self.error_state
     if not hasattr(self, 'timeline_signal'): return
@@ -486,11 +490,12 @@ class HCQCompiled(Compiled, Generic[SignalType]):
       buf, realloced = self.allocator.alloc(oldbuf.size if oldbuf is not None else new_size, options=options), False
     return buf, realloced
 
-  def _select_iface(self, *ifaces:Type):
+  def _select_iface(self):
     assert (v:=getenv(k:=f'{type(self).__name__[:-6].upper()}_IFACE', "")) == "",  \
       f"{k}={v} is deprecated, use DEV={replace(DEV.target(type(self).__name__[:-6]), interface=v)} instead"
+    assert hasattr(self, "ifaces"), "must have ifaces to select an iface"
     t = DEV.target(dev:=type(self).__name__[:-6])
-    filtered = select_by_name(ifaces, lambda i: i.__name__[:-5], t.interface, f"{dev} has no interface {t.interface!r}")
+    filtered = select_by_name(self.ifaces, lambda i: i.__name__[:-5], t.interface, f"{dev} has no interface {t.interface!r}")
     filtered = [i for i in filtered if t.interface.startswith("MOCK") or not i.__name__[:-5].startswith("MOCK")] # never fallback to mock ifaces
     return select_first_inited([functools.partial(cast(Callable, iface), self, self.device_id) for iface in filtered],
                                f"No interface for {dev}:{self.device_id} is available")

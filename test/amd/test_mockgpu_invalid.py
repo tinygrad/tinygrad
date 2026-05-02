@@ -8,17 +8,14 @@ class TestMockGPUInvalidInstruction(unittest.TestCase):
     test_code = '''
 import struct
 from tinygrad import Device, Tensor
-from tinygrad.engine.realize import get_runner
+from tinygrad.engine.realize import compile_linear
 from tinygrad.runtime.ops_amd import AMDProgram
 
 dev = Device["AMD"]
 a = Tensor([1.0]).realize()
 b = a + 1
-si = b.schedule()[-1]
-runner = get_runner(dev.device, si.ast)
-
-prg = runner._prg
-lib = bytearray(prg.lib)
+linear = compile_linear(b.schedule_linear())
+lib = bytearray(linear.src[-1].src[0].src[4].arg)
 
 # Find s_endpgm (0xBFB00000) and replace with V_MOVRELD_B32 (op=66) which has no pcode
 # VOP1 encoding: bits[31:25]=0x7E, op=bits[16:9], so op=66 -> 66<<9 = 0x8400

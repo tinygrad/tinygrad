@@ -2,6 +2,7 @@ import unittest
 import numpy as np
 from tinygrad import Tensor, GlobalCounters, Context, Device
 from tinygrad.dtype import DTypeLike, dtypes
+from tinygrad.engine.realize import run_linear
 from tinygrad.helpers import DEBUG, get_single_element
 from tinygrad.device import is_dtype_supported
 
@@ -26,7 +27,10 @@ def single_kernel_softmax(x_in:Tensor, axis=-1, dtype:DTypeLike|None=None) -> Te
   out = e.div(ss).reshape(x_in.shape)
   return out
 
-def run_one_schedule_item(out): get_single_element(out.schedule()).run()
+def run_one_schedule_item(out):
+  linear = out.schedule_linear()
+  get_single_element(linear.src)
+  run_linear(linear)
 
 class TestFuse(unittest.TestCase):
   def _test_fuse(self, fxn, *args, atol=1e-6, allow_multiple=False, **kwargs):
@@ -100,8 +104,8 @@ class TestFuse(unittest.TestCase):
     k = (x @ wk).contiguous()
     v = (x @ wv).contiguous()
     attn = q.scaled_dot_product_attention(k, v)
-    s = attn.schedule()
-    self.assertEqual(len(s), 4) # 3 matmul and 1 attention
+    s = attn.schedule_linear()
+    self.assertEqual(len(s.src), 4) # 3 matmul and 1 attention
 
   @unittest.skip("needs RANGEIFY>1")
   def test_flash_attention(self):

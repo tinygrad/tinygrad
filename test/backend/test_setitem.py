@@ -293,7 +293,7 @@ class TestSetitem(unittest.TestCase):
     np.testing.assert_allclose(b.numpy(), [0, 2, 4, 6])
 
   def test_setitem_multiple_disjoint_on_invalid(self):
-    z = Tensor.invalid(10, dtype="int").realize()
+    z = Tensor.invalids(10, dtype="int").realize()
     z[2:5] = 2
     z[6:7] = 3
     z.realize()

@@ -5,19 +5,19 @@ from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.helpers import CI, Context
 from tinygrad.dtype import dtypes, DType, AddrSpace, ConstFloat  # noqa: F401
 from tinygrad.device import Buffer, Device
-from tinygrad.uop.ops import Ops, UOp, KernelInfo, AxisType
+from tinygrad.uop.ops import Ops, UOp, KernelInfo, AxisType, buffers
 from tinygrad.renderer.cstyle import CStyleLanguage
-from tinygrad.engine.realize import CompiledRunner, get_program, get_runner
-from tinygrad.schedule import ExecItem
+from tinygrad.engine.realize import run_linear
+from tinygrad.codegen import to_program
 from tinygrad.device import is_dtype_supported
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.renderer.ptx import PTXRenderer
 from test.helpers import to_uops_list
-from dataclasses import replace
 
-def _uops_to_prg(uops_list):
-  prg = get_program(UOp.sink(*uops_list, arg=KernelInfo()), Device[Device.DEFAULT].renderer)
-  return CompiledRunner(replace(prg, device=Device.DEFAULT))
+def run_uops(uops_list:list[UOp], bufs:list[Buffer]):
+  buf_uops = [UOp.new_buffer(b.device, b.size, b.dtype) for b in bufs]
+  for u,b in zip(buf_uops, bufs): buffers[u] = b
+  run_linear(UOp(Ops.LINEAR, src=(UOp.sink(*uops_list, arg=KernelInfo()).call(*buf_uops),)))
 
 def uop(uops:list[UOp], op:Ops, dtype:Optional[DType], src:tuple[UOp, ...], arg:Any=None) -> UOp:
   if op is Ops.CONST: uops.append(UOp.const(dtype, arg))
@@ -34,8 +34,7 @@ def _test_single_value(vals, op, dts):
   out = uop(uops, Ops.STORE, dtypes.void, (buf_store.index(uop(uops, Ops.CONST, dtypes.int32, (), 0), ptr=True), alu))
   buf = Buffer(Device.DEFAULT, 1, output_dtype).allocate()
   buf2 = [Buffer(Device.DEFAULT, 1, dtype).allocate().copyin(np.array([a], dtype=_to_np_dtype(dtype)).data) for a,dtype in zip(vals, dts)]
-  prg = _uops_to_prg([out])
-  prg.exec([buf]+buf2)
+  run_uops([out], [buf]+buf2)
   ret = np.empty(1, _to_np_dtype(output_dtype))
   buf.copyout(ret.data)
   return ret[0]
@@ -48,8 +47,7 @@ def _test_single_value_const(vals, op, dts):
   alu = uop(uops, op, output_dtype, loads)
   out = buf_store[UOp.const(dtypes.int32, 0)].store(alu)
   buf = Buffer(Device.DEFAULT, 1, output_dtype).allocate()
-  prg = _uops_to_prg([out])
-  prg.exec([buf])
+  run_uops([out], [buf])
   ret = np.empty(1, _to_np_dtype(output_dtype))
   buf.copyout(ret.data)
   return ret[0]
@@ -60,8 +58,7 @@ def _test_uops_result(output_dtype, uops, res):
   # res = output_fn(uops)
   out = uop(uops, Ops.STORE, dtypes.void, (buf_store.index(uop(uops, Ops.CONST, dtypes.int32, (), 0)), res))
   buf = Buffer(Device.DEFAULT, 1, output_dtype).allocate()
-  prg = _uops_to_prg([out])
-  prg.exec([buf])
+  run_uops([out], [buf])
   ret = np.empty(1, _to_np_dtype(output_dtype))
   buf.copyout(ret.data)
   return ret[0]
@@ -246,11 +243,11 @@ class TestAssembly(unittest.TestCase):
     a = Tensor.empty(1024)
     b = Tensor.empty(1024)
     c = (a*b).sum()
-    ast = c.schedule()[-1].ast
+    ast = c.schedule_linear().src[-1].src[0]
     opts_to_apply = [Opt(OptOps.UNROLL, 0, 4)]
     ast = ast.replace(arg=KernelInfo(opts_to_apply=tuple(opts_to_apply)))
-    program = get_program(ast, Device[Device.DEFAULT].renderer)
-    uops = program.uops
+    program = to_program(ast, Device[Device.DEFAULT].renderer)
+    uops = tuple(program.src[2].src)
     self.assertGreaterEqual(len([x.op for x in uops if x.op is Ops.MULACC]), 4)
 
   def test_mulacc_shl(self):
@@ -281,7 +278,7 @@ class TestZeroRange(unittest.TestCase):
 
 class TestUOpPrograms(unittest.TestCase):
   def _run(self, prog:UOp, *tensors:Tensor):
-    ExecItem(prog, [t.uop.buffer for t in tensors], prg=get_runner(Device.DEFAULT, prog)).run(wait=True)
+    run_linear(UOp(Ops.LINEAR, src=(prog.call(*[t.uop.buf_uop for t in tensors]),)), do_update_stats=False)
 
   def test_simple(self):
     out = Tensor.empty(10,10,dtype=dtypes.int)

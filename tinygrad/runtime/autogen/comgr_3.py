@@ -201,5 +201,5 @@ def amd_comgr_lookup_code_object(data:amd_comgr_data_t, info_list:c.POINTER[amd_
 @dll.bind(amd_comgr_status_t, amd_comgr_data_t, uint64_t, c.POINTER[uint64_t], c.POINTER[uint64_t], c.POINTER[ctypes.c_bool])
 def amd_comgr_map_elf_virtual_address_to_code_object_offset(data:amd_comgr_data_t, elf_virtual_address:uint64_t, code_object_offset:c.POINTER[uint64_t], slice_size:c.POINTER[uint64_t], nobits:c.POINTER[ctypes.c_bool]) -> amd_comgr_status_t: ...
 AMD_COMGR_DEPRECATED = lambda msg: __attribute__((deprecated(msg))) # type: ignore
-AMD_COMGR_INTERFACE_VERSION_MAJOR = 3 # type: ignore
-AMD_COMGR_INTERFACE_VERSION_MINOR = 0 # type: ignore
+AMD_COMGR_INTERFACE_VERSION_MAJOR = 3
+AMD_COMGR_INTERFACE_VERSION_MINOR = 0

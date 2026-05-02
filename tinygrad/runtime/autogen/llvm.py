@@ -5,7 +5,7 @@ from typing import Literal, TypeAlias
 from tinygrad.runtime.support.c import _IO, _IOW, _IOR, _IOWR
 from tinygrad.runtime.support import c
 from tinygrad.helpers import WIN, OSX
-dll = c.DLL('llvm', 'C:\\Program Files\\LLVM\\bin\\LLVM-C.dll' if WIN else '/opt/homebrew/opt/llvm@20/lib/libLLVM.dylib' if OSX else ['LLVM', 'LLVM-21', 'LLVM-20', 'LLVM-19', 'LLVM-18', 'LLVM-17', 'LLVM-16', 'LLVM-15', 'LLVM-14'])
+dll = c.DLL('llvm', 'C:\\Program Files\\LLVM\\bin\\LLVM-C.dll' if WIN else ['/opt/homebrew/opt/llvm@21/lib/libLLVM.dylib', '/opt/homebrew/opt/llvm@20/lib/libLLVM.dylib', '/opt/homebrew/opt/llvm@19/lib/libLLVM.dylib', '/opt/homebrew/opt/llvm@18/lib/libLLVM.dylib', '/opt/homebrew/opt/llvm@17/lib/libLLVM.dylib', '/opt/homebrew/opt/llvm@16/lib/libLLVM.dylib', '/opt/homebrew/opt/llvm@15/lib/libLLVM.dylib', '/opt/homebrew/opt/llvm@14/lib/libLLVM.dylib'] if OSX else ['LLVM', 'LLVM-21', 'LLVM-20', 'LLVM-19', 'LLVM-18', 'LLVM-17', 'LLVM-16', 'LLVM-15', 'LLVM-14'])
 intmax_t: TypeAlias = ctypes.c_int64
 @dll.bind(intmax_t, intmax_t)
 def imaxabs(__n:intmax_t) -> intmax_t: ...
@@ -3148,44 +3148,44 @@ def thinlto_codegen_set_cache_size_bytes(cg:thinlto_code_gen_t, max_size_bytes:i
 def thinlto_codegen_set_cache_size_megabytes(cg:thinlto_code_gen_t, max_size_megabytes:int) -> None: ...
 @dll.bind(None, thinlto_code_gen_t, ctypes.c_uint32)
 def thinlto_codegen_set_cache_size_files(cg:thinlto_code_gen_t, max_size_files:int) -> None: ...
-LLVMDisassembler_Option_UseMarkup = 1 # type: ignore
-LLVMDisassembler_Option_PrintImmHex = 2 # type: ignore
-LLVMDisassembler_Option_AsmPrinterVariant = 4 # type: ignore
-LLVMDisassembler_Option_SetInstrComments = 8 # type: ignore
-LLVMDisassembler_Option_PrintLatency = 16 # type: ignore
-LLVMDisassembler_Option_Color = 32 # type: ignore
-LLVMDisassembler_VariantKind_None = 0 # type: ignore
-LLVMDisassembler_VariantKind_ARM_HI16 = 1 # type: ignore
-LLVMDisassembler_VariantKind_ARM_LO16 = 2 # type: ignore
-LLVMDisassembler_VariantKind_ARM64_PAGE = 1 # type: ignore
-LLVMDisassembler_VariantKind_ARM64_PAGEOFF = 2 # type: ignore
-LLVMDisassembler_VariantKind_ARM64_GOTPAGE = 3 # type: ignore
-LLVMDisassembler_VariantKind_ARM64_GOTPAGEOFF = 4 # type: ignore
-LLVMDisassembler_VariantKind_ARM64_TLVP = 5 # type: ignore
-LLVMDisassembler_VariantKind_ARM64_TLVOFF = 6 # type: ignore
-LLVMDisassembler_ReferenceType_InOut_None = 0 # type: ignore
-LLVMDisassembler_ReferenceType_In_Branch = 1 # type: ignore
-LLVMDisassembler_ReferenceType_In_PCrel_Load = 2 # type: ignore
-LLVMDisassembler_ReferenceType_In_ARM64_ADRP = 0x100000001 # type: ignore
-LLVMDisassembler_ReferenceType_In_ARM64_ADDXri = 0x100000002 # type: ignore
-LLVMDisassembler_ReferenceType_In_ARM64_LDRXui = 0x100000003 # type: ignore
-LLVMDisassembler_ReferenceType_In_ARM64_LDRXl = 0x100000004 # type: ignore
-LLVMDisassembler_ReferenceType_In_ARM64_ADR = 0x100000005 # type: ignore
-LLVMDisassembler_ReferenceType_Out_SymbolStub = 1 # type: ignore
-LLVMDisassembler_ReferenceType_Out_LitPool_SymAddr = 2 # type: ignore
-LLVMDisassembler_ReferenceType_Out_LitPool_CstrAddr = 3 # type: ignore
-LLVMDisassembler_ReferenceType_Out_Objc_CFString_Ref = 4 # type: ignore
-LLVMDisassembler_ReferenceType_Out_Objc_Message = 5 # type: ignore
-LLVMDisassembler_ReferenceType_Out_Objc_Message_Ref = 6 # type: ignore
-LLVMDisassembler_ReferenceType_Out_Objc_Selector_Ref = 7 # type: ignore
-LLVMDisassembler_ReferenceType_Out_Objc_Class_Ref = 8 # type: ignore
-LLVMDisassembler_ReferenceType_DeMangled_Name = 9 # type: ignore
-LLVMErrorSuccess = 0 # type: ignore
-REMARKS_API_VERSION = 1 # type: ignore
-LLVM_BLAKE3_VERSION_STRING = "1.3.1" # type: ignore
-LLVM_BLAKE3_KEY_LEN = 32 # type: ignore
-LLVM_BLAKE3_OUT_LEN = 32 # type: ignore
-LLVM_BLAKE3_BLOCK_LEN = 64 # type: ignore
-LLVM_BLAKE3_CHUNK_LEN = 1024 # type: ignore
-LLVM_BLAKE3_MAX_DEPTH = 54 # type: ignore
-LTO_API_VERSION = 29 # type: ignore
+LLVMDisassembler_Option_UseMarkup = 1
+LLVMDisassembler_Option_PrintImmHex = 2
+LLVMDisassembler_Option_AsmPrinterVariant = 4
+LLVMDisassembler_Option_SetInstrComments = 8
+LLVMDisassembler_Option_PrintLatency = 16
+LLVMDisassembler_Option_Color = 32
+LLVMDisassembler_VariantKind_None = 0
+LLVMDisassembler_VariantKind_ARM_HI16 = 1
+LLVMDisassembler_VariantKind_ARM_LO16 = 2
+LLVMDisassembler_VariantKind_ARM64_PAGE = 1
+LLVMDisassembler_VariantKind_ARM64_PAGEOFF = 2
+LLVMDisassembler_VariantKind_ARM64_GOTPAGE = 3
+LLVMDisassembler_VariantKind_ARM64_GOTPAGEOFF = 4
+LLVMDisassembler_VariantKind_ARM64_TLVP = 5
+LLVMDisassembler_VariantKind_ARM64_TLVOFF = 6
+LLVMDisassembler_ReferenceType_InOut_None = 0
+LLVMDisassembler_ReferenceType_In_Branch = 1
+LLVMDisassembler_ReferenceType_In_PCrel_Load = 2
+LLVMDisassembler_ReferenceType_In_ARM64_ADRP = 0x100000001
+LLVMDisassembler_ReferenceType_In_ARM64_ADDXri = 0x100000002
+LLVMDisassembler_ReferenceType_In_ARM64_LDRXui = 0x100000003
+LLVMDisassembler_ReferenceType_In_ARM64_LDRXl = 0x100000004
+LLVMDisassembler_ReferenceType_In_ARM64_ADR = 0x100000005
+LLVMDisassembler_ReferenceType_Out_SymbolStub = 1
+LLVMDisassembler_ReferenceType_Out_LitPool_SymAddr = 2
+LLVMDisassembler_ReferenceType_Out_LitPool_CstrAddr = 3
+LLVMDisassembler_ReferenceType_Out_Objc_CFString_Ref = 4
+LLVMDisassembler_ReferenceType_Out_Objc_Message = 5
+LLVMDisassembler_ReferenceType_Out_Objc_Message_Ref = 6
+LLVMDisassembler_ReferenceType_Out_Objc_Selector_Ref = 7
+LLVMDisassembler_ReferenceType_Out_Objc_Class_Ref = 8
+LLVMDisassembler_ReferenceType_DeMangled_Name = 9
+LLVMErrorSuccess = 0
+REMARKS_API_VERSION = 1
+LLVM_BLAKE3_VERSION_STRING = "1.3.1"
+LLVM_BLAKE3_KEY_LEN = 32
+LLVM_BLAKE3_OUT_LEN = 32
+LLVM_BLAKE3_BLOCK_LEN = 64
+LLVM_BLAKE3_CHUNK_LEN = 1024
+LLVM_BLAKE3_MAX_DEPTH = 54
+LTO_API_VERSION = 29

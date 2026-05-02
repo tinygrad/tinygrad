@@ -23,7 +23,7 @@ class TestElfLoader(unittest.TestCase):
       }
     '''
     with self.assertRaisesRegex(RuntimeError, 'evil_external_function'):
-      ClangJITCompiler().compile(src)
+      ClangJITCompiler([{'AMD64':'x86_64', 'aarch64':'arm64'}.get(m:=platform.machine(), m), "native"]).compile(src)
   def test_link(self):
     src = '''
       float powf(float, float); // from libm

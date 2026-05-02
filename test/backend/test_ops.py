@@ -636,6 +636,17 @@ class TestOps(unittest.TestCase):
         helper_test_op(None, lambda x: 100%x, forward_only=True, vals=[va])
         helper_test_op(None, lambda x: 100.5%x, forward_only=True, vals=[va])
 
+  def test_fmod(self):
+    a = [-4, 7, 5, 4, -7, 8, -9]
+    b = [2, -3, 8, -2, 3, 5, -5]
+    for float_a in [True, False]:
+      for float_b in [True, False]:
+        va = [float(ai) for ai in a] if float_a else a
+        vb = [float(bi) for bi in b] if float_b else b
+        helper_test_op(None, lambda x,y: x.fmod(y), forward_only=True, vals=[va, vb])
+        helper_test_op(None, lambda x: x.fmod(2), forward_only=True, vals=[va])
+        helper_test_op(None, lambda x: x.fmod(3.5), forward_only=True, vals=[va])
+
   def test_mul_naninf(self):
     helper_test_op([(45,65)], lambda x: x*math.inf)
     helper_test_op([(45,65)], lambda x: x*-math.inf)
@@ -3298,13 +3309,11 @@ class TestOps(unittest.TestCase):
     data = [1, 2, 4]
     helper_test_op([], lambda: torch.nn.functional.one_hot(torch.tensor(data), 6).type(torch.int32),
                        lambda: Tensor(data).one_hot(6), forward_only=True)
-    helper_test_op([], lambda: torch.nn.functional.one_hot(torch.tensor(data)).type(torch.int32),
-                       lambda: Tensor(data).one_hot(), forward_only=True)
+    # like jax.nn.one_hot, num_classes must be non-negative (torch accepts -1 for auto-inference, we don't)
+    with self.assertRaises(ValueError): Tensor(data).one_hot(-1)
     data = [[[1, 2, 3], [0, 3, 5]], [[1, 2, 3], [0, 3, 5]]]
     helper_test_op([], lambda: torch.nn.functional.one_hot(torch.tensor(data), 8).type(torch.int32),
                        lambda: Tensor(data).one_hot(8), forward_only=True)
-    helper_test_op([], lambda: torch.nn.functional.one_hot(torch.tensor(data)).type(torch.int32),
-                       lambda: Tensor(data).one_hot(), forward_only=True)
 
   def test_masked_fill(self):
     helper_test_op([(32,10)], lambda x: x.masked_fill((x>0.1).detach(), -math.inf))

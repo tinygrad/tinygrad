@@ -305,9 +305,9 @@ CFDataSearchFlags: TypeAlias = ctypes.c_uint64
 _anonenum3: dict[int, str] = {(kCFDataSearchBackwards:=1): 'kCFDataSearchBackwards', (kCFDataSearchAnchored:=2): 'kCFDataSearchAnchored'}
 @dll.bind(CFRange, CFDataRef, CFDataRef, CFRange, CFDataSearchFlags)
 def CFDataFind(theData:CFDataRef, dataToFind:CFDataRef, searchRange:CFRange, compareOptions:CFDataSearchFlags) -> CFRange: ...
-__COREFOUNDATION_CFSTRING__ = 1 # type: ignore
-kCFStringEncodingInvalidId = (0xffffffff) # type: ignore
+__COREFOUNDATION_CFSTRING__ = 1
+kCFStringEncodingInvalidId = (0xffffffff)
 CF_FORMAT_FUNCTION = lambda F,A: __attribute__((format(CFString, F, A))) # type: ignore
 CF_FORMAT_ARGUMENT = lambda A: __attribute__((format_arg(A))) # type: ignore
-__kCFStringInlineBufferLength = 64 # type: ignore
-__COREFOUNDATION_CFDATA__ = 1 # type: ignore
+__kCFStringInlineBufferLength = 64
+__COREFOUNDATION_CFDATA__ = 1

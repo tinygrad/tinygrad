@@ -64,7 +64,7 @@ def get_bar0_size(pcibus):
 
 class AMSMI(AMDev):
   def __init__(self, pcibus, vram_bar:MMIOInterface, doorbell_bar:MMIOInterface, mmio_bar:MMIOInterface):
-    self.pcibus = pcibus
+    self.pcibus, self.devfmt = pcibus, pcibus
     self.vram, self.doorbell64, self.mmio = vram_bar, doorbell_bar, mmio_bar
     self.pci_state = self.read_pci_state()
     if self.pci_state == "D0": self._init_from_d0()
@@ -91,6 +91,7 @@ class SMICtx:
     self.prev_lines_cnt = 0
     self.prev_terminal_width = 0
     self.prev_terminal_height = 0
+    self.prev_metrics = {}
 
     remove_parts = ["Advanced Micro Devices, Inc. [AMD/ATI]", "VGA compatible controller:", "Processing accelerators:"]
     lspci = subprocess.check_output(["lspci"]).decode("utf-8").splitlines()
@@ -235,6 +236,29 @@ class SMICtx:
       case (13,0,12): return self._smuq10_round(metrics.SocketPower), self._smuq10_round(metrics.SocketPowerLimit)
       case _: return metrics.SmuMetrics.AverageSocketPower, metrics.SmuMetrics.dGPU_W_MAX
 
+  def get_throttle_info(self, dev, metrics):
+    match dev.ip_ver[am.MP1_HWIP]:
+      case (13,0,6)|(13,0,12):
+        throttle_fields = [('ProchotResidencyAcc', 'Prochot'), ('PptResidencyAcc', 'PPT'),
+                           ('SocketThmResidencyAcc', 'Socket Thm'), ('VrThmResidencyAcc', 'VR Thm'), ('HbmThmResidencyAcc', 'HBM Thm')]
+        prev = self.prev_metrics.get(dev.pcibus)
+        active = []
+        if prev is not None:
+          acc_delta = metrics.AccumulationCounter - prev.AccumulationCounter
+          if acc_delta > 0:
+            for field, name in throttle_fields:
+              delta = getattr(metrics, field) - getattr(prev, field)
+              if delta > 0 and (pct := min(100, (delta * 100 + acc_delta // 2) // acc_delta)) > 0: active.append((name, pct))
+        return active
+      case _:
+        smu_mod = dev.smu.smu_mod
+        throttler_names = {getattr(smu_mod, a): a[len('THROTTLER_'):-len('_BIT')]
+                           for a in dir(smu_mod) if a.startswith('THROTTLER_') and a.endswith('_BIT')}
+        active = []
+        for i, pct in enumerate(metrics.SmuMetrics.ThrottlingPercentage):
+          if pct > 0: active.append((throttler_names.get(i, f"UNK_{i}"), int(pct)))
+        return active
+
   def get_mem_usage(self, dev):
     usage = 0
     pt_stack = [dev.mm.root_page_table]
@@ -281,6 +305,13 @@ class SMICtx:
                     + [f"MEM Activity {draw_bar(self.get_mem_activity(dev, metrics) / 100, activity_line_width)}"] \
                     + [f"MEM Usage    {draw_bar(mem_used / mem_total, activity_line_width, opt_text=mem_fmt)}"] \
 
+      throttle_info = self.get_throttle_info(dev, metrics)
+      if throttle_info:
+        throttle_text = colored(', '.join(f"{name} {pct}%" for name, pct in throttle_info), "red")
+      else:
+        throttle_text = colored("None", "green")
+      activity_line += [f"Throttle     {throttle_text}" + " " * (activity_line_width + 2)]
+
       temps_data, temps_data_compact = self.get_temps(dev, metrics), self.get_temps(dev, metrics, compact=True)
       temps_table = ["=== Temps (°C) ==="] + [f"{name:<16}: {color_temp(val)}" for name, val in temps_data.items()]
       temps_table_compact = ["Temps (°C):" + '/'.join([f"{color_temp(val)} {name}" for name, val in temps_data_compact.items()])]
@@ -323,6 +354,8 @@ class SMICtx:
         activity_line += power_line_compact
 
       dev_content.append(device_line + activity_line + same_line([temps_table, power_table, frequency_table]))
+
+    self.prev_metrics = {dev.pcibus: m for dev, m in dev_metrics.items() if m is not None}
 
     raw_text = 'AM Monitor'.center(terminal_width) + "\n" + "=" * terminal_width + "\n\n"
     for i in range(0, len(dev_content), 2):
