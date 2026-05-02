@@ -50,8 +50,9 @@ def fold_add_divmod_recombine(x:UOp) -> UOp|None:
 
 def fold_redundant_mask(root:UOp, x:UOp, mask:UOp) -> UOp|None:
   if root.op is Ops.CAST:
-    return x.cast(root.dtype) if x.dtype.scalar() == dtypes.uint64 and root.dtype.scalar() == dtypes.uint32 and mask.arg == 0xFFFFFFFF else None
+    return x.cast(dtypes.uint32) if x.dtype.scalar() == dtypes.uint64 and mask.arg == 0xFFFFFFFF and root.dtype.scalar() == dtypes.uint32 else None
   if root.op is Ops.SHR and root.src[1].op is Ops.CONST:
+    # (x&mask)>>k -> x>>k when mask only clears bits below k
     return x >> root.src[1].arg if mask.arg | ((1 << root.src[1].arg) - 1) == -1 else None
   return None
 
