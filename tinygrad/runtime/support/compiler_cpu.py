@@ -106,4 +106,4 @@ class CPULLVMCompiler(LLVMCompiler):
 class X86Compiler(Compiler):
   def __init__(self): super().__init__(None)
   def compile(self, src:str) -> bytes: return bytes.fromhex(src)
-  def disassemble(self, lib:bytes): return capstone_flatdump(lib)
+  def disassemble(self, lib:bytes): return capstone_flatdump(lib, "x86_64")
