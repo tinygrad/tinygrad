@@ -946,7 +946,9 @@ class TestCLI(unittest.TestCase):
         i = Variable("i", 1, 1024).bind(i_val)
         j = Variable("j", 1, 2048).bind(j_val)
         Tensor.realize(*f(a[:i], b[:j]))
-    out = call_cli(fxn, "-s", "NULL").splitlines()
+    out = call_cli(fxn, "-s", "NULL")
+    print(out)
+    out = out.splitlines()
     self.assertEqual(len(out), 3*2)
     for i in range(0, 6, 2):
       r1, r2 = out[i:i+2]

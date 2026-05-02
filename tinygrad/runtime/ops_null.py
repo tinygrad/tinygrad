@@ -4,7 +4,7 @@ from tinygrad.engine.jit import MultiGraphRunner
 from tinygrad.renderer import Renderer, cstyle, nir, ptx, llvmir, wgsl
 from tinygrad.renderer.cstyle import CStyleLanguage
 from tinygrad.uop.ops import UOp, Ops
-from tinygrad.helpers import cpu_profile, getenv, dedup, NULL_ALLOW_COPYOUT, PROFILE, perf_counter_us, TracingKey, cpu_events
+from tinygrad.helpers import cpu_profile, getenv, dedup, NULL_ALLOW_COPYOUT, PROFILE, TracingKey, cpu_events, perf_counter_us
 
 class NullRenderer(CStyleLanguage):
   has_local = False
@@ -33,13 +33,12 @@ class NullAllocator(Allocator['NullDevice']):
 class NullGraph(MultiGraphRunner):
   def __call__(self, input_uops:tuple[UOp, ...], var_vals:dict[str, int], wait=False) -> float|None:
     if PROFILE:
-      n, st = len(self.runtimes), perf_counter_us()
-      ents = []
+      ents, st = [], perf_counter_us()
       for i,((_,_,bufs,_),runtime) in enumerate(zip(self.calls, self.runtimes)):
         prof_ji_desc = runtime.name if runtime is not None else TracingKey(f"{bufs[1].device} -> {bufs[0].device}", ret=bufs[0].nbytes)
         prof_name = self.device if runtime is not None else f"{self.device}:SDMA:0"
         ents.append(ProfileGraphEntry(prof_name, prof_ji_desc, i, i+1))
-      cpu_events.append(ProfileGraphEvent(ents, [], [st + 100000*i//n for i in range(n+1)]))
+      cpu_events.append(ProfileGraphEvent(ents, [], [st+i for i in range(len(ents)+1)]))
     return 1e-1
 
 class NullDevice(Compiled):
