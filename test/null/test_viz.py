@@ -936,18 +936,24 @@ class TestCLI(unittest.TestCase):
     self.assertEqual(copy_summary["count"], CNT)
 
   def test_flops(self):
-    @TinyJit
-    def f(a, b): return (a@a.T), (b@b.T)
-    # TODO: use NULL once NullGraph has tracing
-    #a = Tensor.empty(64, 64, device="NULL")
-    #b = Tensor.empty(64, 64, device="NULL")
-    a = Tensor.empty(64, 64, device="CPU")
-    b = Tensor.empty(64, 64, device="CPU")
-    for i_val, j_val in ((8, 16), (16, 32), (32, 64),):
-      i = Variable("i", 1, 1024).bind(i_val)
-      j = Variable("j", 1, 2048).bind(j_val)
-      Tensor.realize(*f(a[:i], b[:j]))
-    # TODO: assert that output FLOPS is gradually increasing.
+    test_n = [(8, 16), (16, 32), (32, 64)]
+    def fxn():
+      @TinyJit
+      def f(a, b): return (a@a.T), (b@b.T)
+      a = Tensor.empty(64, 64, device="NULL")
+      b = Tensor.empty(64, 64, device="NULL")
+      for i_val, j_val in test_n:
+        i = Variable("i", 1, 1024).bind(i_val)
+        j = Variable("j", 1, 2048).bind(j_val)
+        Tensor.realize(*f(a[:i], b[:j]))
+    out = call_cli(fxn, "-s", "NULL").splitlines()
+    self.assertEqual(len(out), 3*2)
+    for i in range(0, 6, 2):
+      r1, r2 = out[i:i+2]
+      print(test_n[i//2])
+      print(r1)
+      print(r2)
+      print("------")
 
 if __name__ == "__main__":
   unittest.main()
