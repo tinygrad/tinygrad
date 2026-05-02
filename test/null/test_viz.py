@@ -938,6 +938,7 @@ class TestCLI(unittest.TestCase):
   def test_flops(self):
     @TinyJit
     def f(a, b): return (a@a.T), (b@b.T)
+    # TODO: use NULL once NullGraph has tracing
     #a = Tensor.empty(64, 64, device="NULL")
     #b = Tensor.empty(64, 64, device="NULL")
     a = Tensor.empty(64, 64, device="CPU")
@@ -946,6 +947,7 @@ class TestCLI(unittest.TestCase):
       i = Variable("i", 1, 1024).bind(i_val)
       j = Variable("j", 1, 2048).bind(j_val)
       Tensor.realize(*f(a[:i], b[:j]))
+    # TODO: assert that output FLOPS is gradually increasing.
 
 if __name__ == "__main__":
   unittest.main()
