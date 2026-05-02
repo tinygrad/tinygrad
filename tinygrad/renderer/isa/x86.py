@@ -170,7 +170,7 @@ extra_matcher = PatternMatcher([
   (UPat.var("m", dtypes.bool).where(UPat.var("a", dtypes.floats), UPat.var("b")),
    lambda m,a,b: m.cast(a.dtype).ne(0).where(a, b) if m.src[0].dtype not in dtypes.floats else None),
   # TODO: do we want this? If yes make it general
-  #(UPat(Ops.VECTORIZE, dtypes.float16, name="x"), lambda x: x.replace(dtype=dtypes.float32.vec(x.dtype.count),
+  #(UPat(Ops.STACK, dtypes.float16, name="x"), lambda x: x.replace(dtype=dtypes.float32.vec(x.dtype.count),
   #  src=tuple(s.src[0] for s in x.src)).cast(x.dtype) if all(s.op is Ops.CAST for s in x.src) else None),
   # rewrite -x -> 0 - x
   (UPat(Ops.NEG, name="x"), lambda x: UOp(Ops.SUB, x.dtype, (x.const_like(0),) + x.src)),
@@ -194,7 +194,7 @@ pre_isel_matcher = PatternMatcher([
   # noop of a noop is removed
   (UPat(Ops.NOOP, src=(UPat(Ops.NOOP),), name="x"), lambda x: x.replace(src=x.src[0].src)),
   # moving elements of a single register to another without shuffling is a noop
-  (UPat(Ops.VECTORIZE, src=(UPat.var("y"),), allow_any_len=True, name="x"),
+  (UPat(Ops.STACK, src=(UPat.var("y"),), allow_any_len=True, name="x"),
    lambda y,x: UOp(Ops.NOOP, x.dtype, y.src) if all(s.op is Ops.GEP and s.src == y.src and s.arg[0] == i for i,s in enumerate(x.src)) else None),
   # gated index becomes a conditional move on the index, the load/store are unconditional
   (UPat.var("base").index(UPat.var("idx"), UPat.var("gate")).load(UPat.var("alt"), name="x"), lambda base,idx,gate,alt,x:
@@ -437,13 +437,13 @@ isel_matcher = PatternMatcher([
   # shufles
   (UPat.var("y", dtypes.float32).broadcast(name="x"), lambda y,x: x.ins(X86Ops.VBROADCASTSS, src=(y,))),
   # for float16 we route the srcs through gprs unless we can fold them, this is suboptimal for values in xmms, in that case we want vpunpcklwd
-  (UPat(Ops.VECTORIZE, dtypes.float16, name="x"), lambda ctx,x:
+  (UPat(Ops.STACK, dtypes.float16, name="x"), lambda ctx,x:
    vpins(x.replace(src=tuple(s if is_foldable_load(ctx, x, s) else s.bitcast(dtypes.int16) for s in x.src)))),
-  (UPat(Ops.VECTORIZE, (dtypes.float32.vec(4), dtypes.float32.vec(8)), name="x"), vshufps),
-  (UPat(Ops.VECTORIZE, (dtypes.float64.vec(2), dtypes.float64.vec(4)), name="x"), vshufpd),
-  (UPat(Ops.VECTORIZE, dtypes.float32, name="x"), vinsertps),
+  (UPat(Ops.STACK, (dtypes.float32.vec(4), dtypes.float32.vec(8)), name="x"), vshufps),
+  (UPat(Ops.STACK, (dtypes.float64.vec(2), dtypes.float64.vec(4)), name="x"), vshufpd),
+  (UPat(Ops.STACK, dtypes.float32, name="x"), vinsertps),
   (UPat.var("y", dtypes.ints+(dtypes.bool,)).broadcast(name="x"), vpbroadcast),
-  (UPat(Ops.VECTORIZE, dtypes.ints+(dtypes.bool,), name="x"), vpins),
+  (UPat(Ops.STACK, dtypes.ints+(dtypes.bool,), name="x"), vpins),
   # gep
   (UPat.var("y", dtypes.int8s+(dtypes.bool,)).gep(name="x"), lambda y,x: x.ins(X86Ops.VPEXTRB, src=(y, imm(dtypes.uint8, x.arg[0])))),
   (UPat.var("y", dtypes.int16s).gep(name="x"), lambda y,x: x.ins(X86Ops.VPEXTRW, src=(y, imm(dtypes.uint8, x.arg[0])))),

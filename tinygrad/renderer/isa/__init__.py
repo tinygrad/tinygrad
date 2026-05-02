@@ -2,7 +2,7 @@ from __future__ import annotations
 import itertools
 from dataclasses import dataclass, field
 from tinygrad.renderer import Renderer
-from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, Ops
+from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, Ops, consumer_map_from_toposort
 from tinygrad.codegen import line_rewrite
 from tinygrad.uop.spec import type_verify
 from tinygrad.helpers import SPEC, DEBUG
@@ -18,7 +18,7 @@ class Register:
 
 class IselContext:
   def __init__(self, sink:UOp):
-    self.uses = sink.get_consumer_map()
+    self.uses = consumer_map_from_toposort(sink.toposort())
     self.reg_n = itertools.count()
     self.stack_size = 0
     arg_order = {Ops.PARAM: 0, Ops.DEFINE_VAR: 1, Ops.SPECIAL: 2}
