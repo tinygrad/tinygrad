@@ -1366,10 +1366,9 @@ if TRACK_MATCH_STATS or PROFILE:
       with open(fn:=temp("rewrites.pkl", append_user=True), "wb") as f:
         print(f"rewrote {len(tracked_ctxs)} graphs and matched {sum(len(r.matches) for x in tracked_ctxs for r in x)} times, saved to {fn}")
         pickle.dump(RewriteTrace(tracked_keys, tracked_ctxs, uop_fields), f)
-    if VIZ > 0:
-      TRACK_MATCH_STATS.value = 0
-      return launch_viz("REWRITE_DATA", temp("rewrites.pkl", append_user=True))
-    if getenv("PRINT_MATCH_STATS", TRACK_MATCH_STATS.value and VIZ.value>=0):
+    TRACK_MATCH_STATS.value = 0
+    launch_viz("REWRITE_DATA", temp("rewrites.pkl", append_user=True))
+    if getenv("PRINT_MATCH_STATS", TRACK_MATCH_STATS.value and not VIZ):
       ret = [0,0,0.0,0.0]
       for k,v in sorted(list(match_stats.items()), key=lambda x: x[1][2]+x[1][3]):
         loc_str = f"{k.location[0].split('/')[-1]}:{k.location[1]}"
@@ -1385,8 +1384,9 @@ if TRACK_MATCH_STATS or PROFILE:
       args = ['--rewrites-path', os.getenv("REWRITE_DATA", "")] if os.getenv("REWRITE_DATA", "") else []
       args += ['--profile-path', os.getenv("PROFILE_DATA", "")] if os.getenv("PROFILE_DATA", "") else []
       viz_path = pathlib.Path(__file__).resolve().parent.parent / "viz" / "serve.py"
-      if sys.stdout.isatty(): os.execv(sys.executable, [sys.executable, viz_path.as_posix()] + args)
-      else: print("Successfully saved VIZ files, view using: python -m tinygrad.viz.cli")
+      if VIZ > 0 and sys.stdout.isatty(): os.execv(sys.executable, [sys.executable, viz_path.as_posix()] + args)
+      print("Successfully saved VIZ files, view using: python -m tinygrad.viz.cli")
+      VIZ.value = 0
 
 # *** simple graph rewrite engine ***
 
