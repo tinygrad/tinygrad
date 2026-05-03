@@ -137,12 +137,11 @@ def main(args) -> None:
       for dev,e in tagged:
         et = e["dur"] * 1e-3
         t, c, ref, f, m = agg.get((dev,e["name"]), (0.0, 0, None, 0.0, 0.0))
-        flops, mem = 0, 0
-        for line in e["fmt"].split("\n"):
-          p = line.split()
-          if len(p) == 2 and p[1] in {"GFLOPS", "TFLOPS"}: flops = int(float(p[0]) * (1e9 if p[1] == "GFLOPS" else 1e12))
-          if len(p) == 3 and p[1] in {"GB/s", "TB/s"} and p[2] == "mem": mem = int(float(p[0]) * (1e9 if p[1] == "GB/s" else 1e12))
-        agg[(dev,e["name"])] = (t+et, c+1, e["ref"], f+flops*e["dur"]*1e-6, m+mem*e["dur"]*1e-6)
+        if "FLOP" in e["fmt"]:
+          ops_str, mem_str = [s.split() for s in e["fmt"].split("\n")[:2]]
+          f += float(ops_str[0])*(1e9 if ops_str[1].startswith("G") else 1e12)*e["dur"]*1e-6
+          m += float(mem_str[0])*(1e9 if mem_str[1].startswith("G") else 1e12)*e["dur"]*1e-6
+        agg[(dev,e["name"])] = (t+et, c+1, e["ref"], f, m)
         total += et
       items = sorted(agg.items(), key=lambda kv:kv[1][0], reverse=True)
       num_rows = len(items) if args.top < 0 else args.top
