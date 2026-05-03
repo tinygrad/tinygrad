@@ -137,7 +137,12 @@ def main(args) -> None:
       for dev,e in tagged:
         et = e["dur"] * 1e-3
         t, c, ref, f, m = agg.get((dev,e["name"]), (0.0, 0, None, 0, 0))
-        agg[(dev,e["name"])] = (t+et, c+1, e["ref"], f, m)
+        flops, mem = 0, 0
+        for line in e["fmt"].split("\n"):
+          p = line.split()
+          if len(p) == 2 and p[1] in {"GFLOPS", "TFLOPS"}: flops = int(float(p[0]) * (1e9 if p[1] == "GFLOPS" else 1e12))
+          if len(p) == 3 and p[1] in {"GB/s", "TB/s"} and p[2] == "mem": mem = int(float(p[0]) * (1e9 if p[1] == "GB/s" else 1e12))
+        agg[(dev,e["name"])] = (t+et, c+1, e["ref"], f+flops, m+mem)
         total += et
       items = sorted(agg.items(), key=lambda kv:kv[1][0], reverse=True)
       num_rows = len(items) if args.top < 0 else args.top
