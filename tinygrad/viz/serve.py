@@ -214,7 +214,7 @@ def timeline_layout(data:VizData, dev_events:list[tuple[int, int, float, DevEven
   exec_points:dict[str, ProfilePointEvent] = {}
   ei:ProfilePointEvent|None = None
   for st,et,dur,e in dev_events:
-    if isinstance(e, ProfilePointEvent) and e.name == "exec": exec_points[e.arg["name"]] = e
+    if isinstance(e, ProfilePointEvent) and e.name == "exec": ei = e
     if dur == 0: continue
     name, fmt, key = e.name, [], None
     if (ref:=data.ref_map.get(name)) is not None and ref < len(data.ctxs):
