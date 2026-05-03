@@ -31,7 +31,7 @@ class NullAllocator(Allocator['NullDevice']):
   def _offset(self, buf, offset:int, size:int): pass
 
 class NullGraph(MultiGraphRunner):
-  def __call__(self, input_buffers, var_vals, wait=False, input_uops=None) -> float|None: return 1e-1
+  def __call__(self, input_uops:tuple[UOp, ...], var_vals:dict[str, int], wait=False) -> float|None: return 1e-1
 
 class NullDevice(Compiled):
   def __init__(self, device:str):

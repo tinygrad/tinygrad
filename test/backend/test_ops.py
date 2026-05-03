@@ -636,6 +636,17 @@ class TestOps(unittest.TestCase):
         helper_test_op(None, lambda x: 100%x, forward_only=True, vals=[va])
         helper_test_op(None, lambda x: 100.5%x, forward_only=True, vals=[va])
 
+  def test_fmod(self):
+    a = [-4, 7, 5, 4, -7, 8, -9]
+    b = [2, -3, 8, -2, 3, 5, -5]
+    for float_a in [True, False]:
+      for float_b in [True, False]:
+        va = [float(ai) for ai in a] if float_a else a
+        vb = [float(bi) for bi in b] if float_b else b
+        helper_test_op(None, lambda x,y: x.fmod(y), forward_only=True, vals=[va, vb])
+        helper_test_op(None, lambda x: x.fmod(2), forward_only=True, vals=[va])
+        helper_test_op(None, lambda x: x.fmod(3.5), forward_only=True, vals=[va])
+
   def test_mul_naninf(self):
     helper_test_op([(45,65)], lambda x: x*math.inf)
     helper_test_op([(45,65)], lambda x: x*-math.inf)
