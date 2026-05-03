@@ -132,23 +132,23 @@ def main(args) -> None:
     timelines = [(n,l) for n,l in profile["layout"].items() if isinstance(l, dict) and l.get("event_type") == 0]
     def produce_top_kernels() -> Iterator[dict]:
       tagged = ((n,e) for n,l in timelines for e in l["events"]) if args.src == "ALL" else ((args.src,e) for e in unwrap(data)["events"])
-      agg:dict[tuple[str,str], tuple[float, int, int|None, int, int]] = {} # map (device, kernel name) to (total time, count, ref, flops, mem bw)
+      agg:dict[tuple[str,str], tuple[float, int, int|None, float, float]] = {} # map (device, kernel name) to (total time, count, ref, flops, mem bytes)
       total = 0
       for dev,e in tagged:
         et = e["dur"] * 1e-3
-        t, c, ref, f, m = agg.get((dev,e["name"]), (0.0, 0, None, 0, 0))
+        t, c, ref, f, m = agg.get((dev,e["name"]), (0.0, 0, None, 0.0, 0.0))
         flops, mem = 0, 0
         for line in e["fmt"].split("\n"):
           p = line.split()
           if len(p) == 2 and p[1] in {"GFLOPS", "TFLOPS"}: flops = int(float(p[0]) * (1e9 if p[1] == "GFLOPS" else 1e12))
           if len(p) == 3 and p[1] in {"GB/s", "TB/s"} and p[2] == "mem": mem = int(float(p[0]) * (1e9 if p[1] == "GB/s" else 1e12))
-        agg[(dev,e["name"])] = (t+et, c+1, e["ref"], f+flops, m+mem)
+        agg[(dev,e["name"])] = (t+et, c+1, e["ref"], f+flops*e["dur"]*1e-6, m+mem*e["dur"]*1e-6)
         total += et
       items = sorted(agg.items(), key=lambda kv:kv[1][0], reverse=True)
       num_rows = len(items) if args.top < 0 else args.top
       for (dev,name),(t,c,ref,f,m) in items[:num_rows]:
         display = f"{dev[:7]:7s} {fmt_colored(name)}" if args.src == "ALL" else fmt_colored(name)
-        flops, mem = f/c, m/c
+        flops, mem = f/(t*1e-3), m/(t*1e-3)
         fmt = [f"{flops*1e-9:7.0f} GFLOPS" if flops < 1e14 else f"{flops*1e-12:7.0f} TFLOPS",
                (f"{mem*1e-9:4.0f} GB/s" if mem < 1e13 else f"{mem*1e-12:4.0f} TB/s")+" mem"]
         yield {"name":display, "dur_ms":t, "count":c, "pct":t/total*100.0, "ref":ref, "fmt":"\n".join(fmt)}
