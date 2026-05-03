@@ -132,7 +132,7 @@ def main(args) -> None:
     timelines = [(n,l) for n,l in profile["layout"].items() if isinstance(l, dict) and l.get("event_type") == 0]
     def produce_top_kernels() -> Iterator[dict]:
       tagged = ((n,e) for n,l in timelines for e in l["events"]) if args.src == "ALL" else ((args.src,e) for e in unwrap(data)["events"])
-      agg:dict[tuple[str,str], tuple[float, int, int|None, int, int]] = {} # map (device, kernel name) to (total time, count, ref, ops, mem)
+      agg:dict[tuple[str,str], tuple[float, int, int|None, int, int]] = {} # map (device, kernel name) to (total time, count, ref, flops, mem bw)
       total = 0
       for dev,e in tagged:
         et = e["dur"] * 1e-3
@@ -148,11 +148,14 @@ def main(args) -> None:
       num_rows = len(items) if args.top < 0 else args.top
       for (dev,name),(t,c,ref,f,m) in items[:num_rows]:
         display = f"{dev[:7]:7s} {fmt_colored(name)}" if args.src == "ALL" else fmt_colored(name)
-        yield {"name":display, "dur_ms":t, "count":c, "pct":t/total*100.0, "ref":ref, "flops":f, "mem":m}
+        flops, mem = f/c, m/c
+        fmt = [f"{flops*1e-9:7.0f} GFLOPS" if flops < 1e14 else f"{flops*1e-12:7.0f} TFLOPS",
+               (f"{mem*1e-9:4.0f} GB/s" if mem < 1e13 else f"{mem*1e-12:4.0f} TB/s")+" mem"]
+        yield {"name":display, "dur_ms":t, "count":c, "pct":t/total*100.0, "ref":ref, "fmt":"\n".join(fmt)}
       if num_rows > 0 and items[num_rows:]:
         other_t = sum(t for _,(t,_,_,_,_) in items[num_rows:])
         other_c = sum(c for _,(_,c,_,_,_) in items[num_rows:])
-        yield {"name":"Other", "dur_ms":other_t, "count":other_c, "pct":other_t/total*100.0, "ref":None, "flops":None, "mem":None}
+        yield {"name":"Other", "dur_ms":other_t, "count":other_c, "pct":other_t/total*100.0, "ref":None, "fmt":None}
     def produce_all_kernels() -> Iterator[dict]:
       event_streams = [[(e["st"], n, e) for e in l["events"]] for n,l in timelines] if args.src == "ALL" \
                       else [[(e["st"], args.src, e) for e in unwrap(data)["events"]]]
@@ -175,8 +178,9 @@ def main(args) -> None:
         yield {"device":dev, "name":fmt_colored(e["name"]), "dur_ms":e["dur"]*1e-3,
                "st_ms":e["st"]*1e-3, "fmt":fmt, "ref":e["ref"], "ext":"\n".join(ext)}
     def fmt_top(k:dict) -> str:
+      fmt_str = "  ".join(p+" "*max(0, 18-ansilen(p)) for p in (k["fmt"] or "").split("\n"))
       return f"{fmt_colored(k['name'])}{' ' * max(0, 38-ansilen(k['name']))} {time_to_str(k['dur_ms']*1e-3, w=9)} {k['count']:7d} {k['pct']:6.2f}%"+\
-          f" {k['flops']} FLOP/s {k['mem']} BYTES/s"
+          (" "*4+f"{fmt_str}" if fmt_str else "")
     def fmt_all(k:dict) -> str:
       if k["device"] in {"MARKER", "SOURCE"}: return f"--- {k['device']} {k['name']}"+(f"/{k['st_ms']:9.2f}ms" if k['st_ms'] else "")
       ptm = colored(time_to_str(k["dur_ms"]*1e-3, w=9), "yellow" if k["dur_ms"] > 10 else None)
