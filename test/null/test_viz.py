@@ -414,9 +414,11 @@ class TestVizIntegration(unittest.TestCase):
       def f(a, b, c): return (a+b).contiguous().mul(3), c.assign(a.to(c.device))
       a, b, c = Tensor.empty(16, device="NULL"), Tensor.empty(16, device="NULL"), Tensor.empty(16, device="NULL:1")
       for _ in range(3): Tensor.realize(*f(a, b, c))
-    graphs = [e for e in cpu_events if isinstance(e, ProfileGraphEvent)]
     out = load_profile(cpu_events)
     self.assertEqual(["NULL", "NULL Graph", "NULL:SDMA:0"], [k for k in out["layout"] if k.startswith("NULL")])
+    self.assertEqual(len(out["layout"]["NULL"]["events"]), 2*3)
+    self.assertEqual(len(out["layout"]["NULL:SDMA:0"]["events"]), 3)
+    self.assertEqual(len(out["layout"]["NULL Graph"]["events"]), 2)
 
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry
 from tinygrad.viz.serve import get_profile
@@ -953,8 +955,8 @@ class TestCLI(unittest.TestCase):
       a = Tensor.empty(64, 64, device="NULL")
       b = Tensor.empty(64, 64, device="NULL")
       for i_val, j_val in test_n:
-        i = Variable("i", 1, 1024).bind(i_val)
-        j = Variable("j", 1, 2048).bind(j_val)
+        i = Variable("i", 1, 64).bind(i_val)
+        j = Variable("j", 1, 64).bind(j_val)
         Tensor.realize(*f(a[:i], b[:j]))
     out = [json.loads(line) for line in call_cli(fxn, "-s", "NULL", "--json").splitlines()]
     self.assertEqual(len(out), 3*2)
