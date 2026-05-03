@@ -75,8 +75,8 @@ pm_gradient = PatternMatcher([
   (UPat(Ops.COPY, name="ret"), lambda ctx, ret: (ctx.copy_to_device(ret.src[0].device), None)),
   (UPat(Ops.MULTI, name="ret"), lambda ctx, ret: ctx.shard(ret.device, ret.axis).src),
   (UPat(Ops.TUPLE), lambda ctx: ctx.src),
-  # NOTE: this is only correct when the KERNEL has a single output
-  (UPat(Ops.AFTER), lambda ctx: (ctx, ctx)),
+  (UPat(Ops.AFTER, src=(UPat.var("d"), UPat(Ops.CALL, name="k"))), lambda ctx, d, k:
+    (ctx, UOp.maketuple(*(ctx if i == k.src.index(d)-1 else UOp(Ops.NOOP) for i in range(len(k.src)-1))))),
   # there's no gradient for bitcast
   (UPat(Ops.BITCAST), lambda: (None,)),
 ])
@@ -113,7 +113,11 @@ def compute_gradient(root:UOp, root_grad:UOp, targets:set[UOp]) -> dict[UOp, UOp
     assert len(lgrads) == len(t0.src), f"got {len(lgrads)} gradient, expected {len(t0.src)}"
     for k,v in zip(t0.src, lgrads):
       if v is None: continue
-      if k in grads and grads[k].op is not Ops.NOOP: grads[k] = grads[k] + v
+      if k in grads and grads[k].op is not Ops.NOOP:
+        if v.op is Ops.TUPLE and grads[k].op is Ops.TUPLE:
+          grads[k] = UOp.maketuple(*(p + n if (p.op is not Ops.NOOP and n.op is not Ops.NOOP) else
+                                     n if p.op is Ops.NOOP else p for p, n in zip(grads[k].src, v.src)))
+        else: grads[k] = grads[k] + v
       else: grads[k] = v
       if len(forward_metadata:=all_metadata.get(t0, ())):
         backward_metadata = tuple(dataclasses.replace(x, backward=True) for x in forward_metadata)
