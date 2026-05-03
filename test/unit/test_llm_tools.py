@@ -1,37 +1,23 @@
 import json, unittest
 from tinygrad.llm.tools import TOOL_CALL_OPEN, TOOL_CALL_CLOSE, format_tools, parse_tool_calls
 
-BASH_TOOL = {"function": {"name": "bash", "parameters": {
-  "properties": {"command": {"type": "string"}, "description": {"type": "string"}}, "required": ["command", "description"]}}}
-READ_TOOL = {"function": {"name": "read", "parameters": {
-  "properties": {"filePath": {"type": "string"}}, "required": ["filePath"]}}}
+BASH_TOOL = {"function": {"name": "bash", "parameters": {"properties": {"command": {}, "description": {}}, "required": ["command", "description"]}}}
+READ_TOOL = {"function": {"name": "read", "parameters": {"properties": {"filePath": {}}, "required": ["filePath"]}}}
+def tool_call(name, arguments): return TOOL_CALL_OPEN + json.dumps({"name": name, "arguments": arguments}) + TOOL_CALL_CLOSE
 
-class TestLLMAgent(unittest.TestCase):
-  def test_format_tools_uses_compact_signatures(self):
+class TestLLMTools(unittest.TestCase):
+  def test_format_tools(self):
     out = format_tools([BASH_TOOL, READ_TOOL])
-    self.assertIn("<tools>", out)
-    self.assertIn("bash(command:string, description:string", out)
-    self.assertIn("read(filePath:string)", out)
-    self.assertIn(TOOL_CALL_OPEN, out)
-    self.assertIn(TOOL_CALL_CLOSE, out)
+    self.assertIn("bash(command,description)", out)
+    self.assertIn("read(filePath)", out)
+    self.assertIn(TOOL_CALL_OPEN + '{"name":"...","arguments":{...}}' + TOOL_CALL_CLOSE, out)
     self.assertNotIn('"properties"', out)
 
-  def test_parse_tool_calls_complete_tag(self):
-    text = TOOL_CALL_OPEN + '{"name":"read","arguments":{"filePath":"x.py"}}' + TOOL_CALL_CLOSE
-    calls = parse_tool_calls(text)
+  def test_parse_tool_calls(self):
+    calls = parse_tool_calls(tool_call("read", {"filePath": "old.py"}) + tool_call("bash", {"command": "ls"}))
     self.assertEqual(len(calls), 1)
-    self.assertEqual(calls[0]["function"]["name"], "read")
-    self.assertEqual(json.loads(calls[0]["function"]["arguments"]), {"filePath": "x.py"})
+    self.assertEqual(calls[0]["function"]["name"], "bash")
+    self.assertEqual(json.loads(calls[0]["function"]["arguments"]), {"command": "ls"})
 
-  def test_parse_tool_calls_adds_required_description(self):
-    text = TOOL_CALL_OPEN + '{"name":"bash","arguments":{"command":"ls"}}' + TOOL_CALL_CLOSE
-    calls = parse_tool_calls(text, [BASH_TOOL])
-    self.assertEqual(len(calls), 1)
-    self.assertEqual(json.loads(calls[0]["function"]["arguments"]), {"command": "ls", "description": ""})
-
-  def test_parse_tool_calls_returns_empty_on_bad_json(self):
-    text = TOOL_CALL_OPEN + '{"name":"bash","arguments":' + TOOL_CALL_CLOSE
-    self.assertEqual(parse_tool_calls(text), [])
-
-if __name__ == "__main__":
-  unittest.main()
+  def test_parse_tool_calls_bad_json(self):
+    self.assertEqual(parse_tool_calls(TOOL_CALL_OPEN + '{"name":"bash","arguments":' + TOOL_CALL_CLOSE), [])

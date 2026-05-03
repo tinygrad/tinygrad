@@ -137,13 +137,10 @@ class Handler(HTTPRequestHandler):
     # tool-enabled replies are parsed from the final decoded text
     text = tok.decode(out) if tools else dec()
     # emit tool_calls instead of assistant text when the model chose a tool
-    if tools and (calls:=parse_tool_calls(text, tools)):
+    if tools and (calls:=parse_tool_calls(text)):
       yield {"choices": [{"index":0, "delta":{"tool_calls":[{"index":i, **tc} for i,tc in enumerate(calls)]}, "finish_reason":None}], **tmpl}
       finish_reason = "tool_calls"
-    elif text:
-      # drop the tool_call block before returning visible assistant text
-      if tools: text = text.split(TOOL_CALL_OPEN, 1)[0].strip()
-      yield {"choices": [{"index":0, "delta":{"content":text}, "finish_reason":None}], **tmpl}
+    elif text: yield {"choices": [{"index":0, "delta":{"content":text}, "finish_reason":None}], **tmpl}
     yield {"choices": [{"index":0, "delta":{},"finish_reason":finish_reason}], **tmpl}
     if include_usage:
       yield {"choices": [], "usage": {"prompt_tokens": len(ids), "completion_tokens": len(out), "total_tokens": len(ids) + len(out)}, **tmpl}
