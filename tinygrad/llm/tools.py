@@ -8,13 +8,12 @@ def _tool_sig(fn: dict) -> str:
   return f"{fn['name']}({','.join(k for k in props.keys() if k in req_set)})"
 
 # normalize model output into OpenAI-style tool_calls
-def _tool_call(obj: str) -> dict|None:
+def _tool_call(text: str) -> dict|None:
   try:
-    obj = json.loads(obj.strip())
+    obj = json.loads(text.strip())
     args = obj.get('arguments', {})
-    if isinstance(args, str): args = json.loads(args)
     return {'id': f'call_{uuid.uuid4().hex[:24]}', 'type': 'function', 'function': {'name': obj['name'], 'arguments': json.dumps(args)}}
-  except (json.JSONDecodeError, TypeError): pass
+  except json.JSONDecodeError: pass
   return None
 
 # prompt the model with compact signatures, keeping the response format explicit
