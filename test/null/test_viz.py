@@ -433,9 +433,9 @@ class TestVizProfiler(unittest.TestCase):
       a.to("NULL:1").realize()
     range_events = [e for e in cpu_events if isinstance(e, ProfileRangeEvent)]
     compute_events = [e for e in range_events if e.device == "NULL"]
-    copy_events = [e for e in range_events if e.device.endswith(":COPY")]
+    copy_events = [e for e in range_events if e.device.endswith(":SDMA:0")]
     self.assertGreater(len(compute_events), 0, "expected compute events on base device")
-    self.assertGreater(len(copy_events), 0, "transfer must produce events with ':COPY' device suffix")
+    self.assertGreater(len(copy_events), 0, "transfer must produce events with ':SDMA' device suffix")
 
   def test_node(self):
     prof = [ProfileRangeEvent(device='NV', name='E_2', st=decimal.Decimal(1000), en=decimal.Decimal(1010)),
