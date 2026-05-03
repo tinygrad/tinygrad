@@ -211,14 +211,14 @@ def flatten_events(profile:list[ProfileEvent], device_ts_diffs:dict[str, Decimal
 # normalize event timestamps and attach kernel metadata
 def timeline_layout(data:VizData, dev_events:list[tuple[int, int, float, DevEvent]], start_ts:int, scache:dict[str, int]) -> bytes|None:
   events:list[bytes] = []
-  exec_points:dict[str, ProfilePointEvent] = {}
+  ei:ProfilePointEvent|None = None
   for st,et,dur,e in dev_events:
-    if isinstance(e, ProfilePointEvent) and e.name == "exec": exec_points[e.arg["name"]] = e
+    if isinstance(e, ProfilePointEvent) and e.name == "exec": ei = e
     if dur == 0: continue
     name, fmt, key = e.name, [], None
     if (ref:=data.ref_map.get(name)) is not None and ref < len(data.ctxs):
       name = data.ctxs[ref]["name"]
-      if (p:=data.ctxs[ref].get("prg")) is not None and (ki:=p.src[0].arg).estimates is not None and (ei:=exec_points.get(ki.name)) is not None:
+      if (p:=data.ctxs[ref].get("prg")) is not None and (ki:=p.src[0].arg).estimates is not None and ei is not None:
         flops = sym_infer(ki.estimates.ops, var_vals:=ei.arg['var_vals'])/(t:=dur*1e-6)
         membw, ldsbw = sym_infer(ki.estimates.mem, var_vals)/t, sym_infer(ki.estimates.lds, var_vals)/t
         fmt = [f"{flops*1e-9:.0f} GFLOPS" if flops < 1e14 else f"{flops*1e-12:.0f} TFLOPS",

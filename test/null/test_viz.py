@@ -1,4 +1,4 @@
-import unittest, decimal, sys, json, contextlib, tempfile, pickle, io
+import unittest, decimal, sys, json, contextlib, tempfile, pickle, io, re
 from pathlib import Path
 from dataclasses import dataclass
 from typing import Generator
@@ -320,7 +320,7 @@ class TestVizGC(unittest.TestCase):
 
 # VIZ integrates with other parts of tinygrad
 
-from tinygrad import Tensor, Device
+from tinygrad import Tensor, Device, TinyJit, Variable
 
 class TestVizIntegration(unittest.TestCase):
   # codegen supports rendering of code blocks
@@ -408,6 +408,18 @@ class TestVizIntegration(unittest.TestCase):
     lst = viz.list_items()
     assert len(lst) == 1
 
+  def test_jit(self):
+    with save_viz():
+      @TinyJit
+      def f(a, b, c): return (a+b).contiguous().mul(3), c.assign(a.to(c.device))
+      a, b, c = Tensor.empty(16, device="NULL"), Tensor.empty(16, device="NULL"), Tensor.empty(16, device="NULL:1")
+      for _ in range(3): Tensor.realize(*f(a, b, c))
+    out = load_profile(cpu_events)
+    self.assertEqual(["NULL", "NULL Graph", "NULL:SDMA:0"], [k for k in out["layout"] if k.startswith("NULL")])
+    self.assertEqual(len(out["layout"]["NULL"]["events"]), 2*3)
+    self.assertEqual(len(out["layout"]["NULL:SDMA:0"]["events"]), 3)
+    self.assertEqual(len(out["layout"]["NULL Graph"]["events"]), 2)
+
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry
 from tinygrad.viz.serve import get_profile
 from tinygrad.viz.cli import decode_profile
@@ -421,9 +433,9 @@ class TestVizProfiler(unittest.TestCase):
       a.to("NULL:1").realize()
     range_events = [e for e in cpu_events if isinstance(e, ProfileRangeEvent)]
     compute_events = [e for e in range_events if e.device == "NULL"]
-    copy_events = [e for e in range_events if e.device.endswith(":COPY")]
+    copy_events = [e for e in range_events if e.device.endswith(":SDMA:0")]
     self.assertGreater(len(compute_events), 0, "expected compute events on base device")
-    self.assertGreater(len(copy_events), 0, "transfer must produce events with ':COPY' device suffix")
+    self.assertGreater(len(copy_events), 0, "transfer must produce events with ':SDMA' device suffix")
 
   def test_node(self):
     prof = [ProfileRangeEvent(device='NV', name='E_2', st=decimal.Decimal(1000), en=decimal.Decimal(1010)),
@@ -934,6 +946,24 @@ class TestCLI(unittest.TestCase):
     copy_summary = [s for s in kernels if s["name"].startswith("E_")][0]
     self.assertEqual(gemm_summary["count"], CNT)
     self.assertEqual(copy_summary["count"], CNT)
+
+  def test_flops(self):
+    test_n = [(8, 16), (16, 32), (32, 64)]
+    def fxn():
+      @TinyJit
+      def f(a, b): return (a@a.T), (b@b.T)
+      a = Tensor.empty(64, 64, device="NULL")
+      b = Tensor.empty(64, 64, device="NULL")
+      for i_val, j_val in test_n:
+        i = Variable("i", 1, 64).bind(i_val)
+        j = Variable("j", 1, 64).bind(j_val)
+        Tensor.realize(*f(a[:i], b[:j]))
+    out = [json.loads(line) for line in call_cli(fxn, "-s", "NULL", "--json").splitlines()]
+    self.assertEqual(len(out), 3*2)
+    # flops increases as N gets larger
+    gflops = [int(unwrap(re.search(r"(\d+) GFLOPS", row["fmt"]))[1]) for row in out]
+    self.assertGreater(gflops[4], gflops[2])
+    self.assertGreater(gflops[5], gflops[3])
 
 if __name__ == "__main__":
   unittest.main()
