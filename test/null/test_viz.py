@@ -967,8 +967,8 @@ class TestCLI(unittest.TestCase):
     # aggregate flops
     out = [json.loads(line) for line in call_cli(fxn, "-s", "NULL", "-t", "--json").splitlines()]
     self.assertEqual(len(out), 2)
-    print(out[0])
-    print(out[1])
+    agg_gflops = [int(unwrap(re.search(r"(\d+) GFLOPS", row["fmt"]))[1]) for row in out]
+    assert all(min(gflops) < v < max(gflops) for v in agg_gflops), f"{agg_gflops}"
 
 if __name__ == "__main__":
   unittest.main()
