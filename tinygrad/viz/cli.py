@@ -132,7 +132,7 @@ def main(args) -> None:
     timelines = [(n,l) for n,l in profile["layout"].items() if isinstance(l, dict) and l.get("event_type") == 0]
     def produce_top_kernels() -> Iterator[dict]:
       tagged = ((n,e) for n,l in timelines for e in l["events"]) if args.src == "ALL" else ((args.src,e) for e in unwrap(data)["events"])
-      agg:dict[tuple[str,str], tuple[float, int, int|None, list[float]]] = {} # map (device, kernel name) to (total time, count, ref, ests)
+      agg:dict[tuple[str,str], tuple[float, int, int|None, list[float]]] = {} # map (device, kernel name) to (total time, count, ref, est)
       total = 0
       for dev,e in tagged:
         et = e["dur"] * 1e-3
@@ -172,9 +172,8 @@ def main(args) -> None:
         yield {"device":dev, "name":fmt_colored(e["name"]), "dur_ms":e["dur"]*1e-3,
                "st_ms":e["st"]*1e-3, "fmt":fmt, "ref":e["ref"], "ext":"\n".join(ext)}
     def fmt_top(k:dict) -> str:
-      fmt_str = "  ".join(p+" "*max(0, 18-ansilen(p)) for p in (k["fmt"] or "").split("\n"))
       return f"{fmt_colored(k['name'])}{' ' * max(0, 38-ansilen(k['name']))} {time_to_str(k['dur_ms']*1e-3, w=9)} {k['count']:7d} {k['pct']:6.2f}%"+\
-          (" "*4+f"{fmt_str}" if fmt_str else "")
+          (" "*4+"  ".join(p+" "*max(0, 18-ansilen(p)) for p in k['fmt'].split("\n")) if k['fmt'] else "")
     def fmt_all(k:dict) -> str:
       if k["device"] in {"MARKER", "SOURCE"}: return f"--- {k['device']} {k['name']}"+(f"/{k['st_ms']:9.2f}ms" if k['st_ms'] else "")
       ptm = colored(time_to_str(k["dur_ms"]*1e-3, w=9), "yellow" if k["dur_ms"] > 10 else None)
