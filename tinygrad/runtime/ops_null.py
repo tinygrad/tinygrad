@@ -33,12 +33,12 @@ class NullAllocator(Allocator['NullDevice']):
 class NullGraph(MultiGraphRunner):
   def __call__(self, input_uops:tuple[UOp, ...], var_vals:dict[str, int], wait=False) -> float|None:
     if PROFILE:
-      ents, sigs = [], [perf_counter_us().to_integral_value()]
+      ents, sigs = [], [perf_counter_us()]
       for i,((_,_,bufs,_),runtime) in enumerate(zip(self.calls, self.runtimes)):
         prof_ji_desc = runtime.name if runtime is not None else TracingKey(f"{bufs[1].device} -> {bufs[0].device}", ret=bufs[0].nbytes)
         prof_name = self.device if runtime is not None else f"{self.device}:SDMA:0"
         ents.append(ProfileGraphEntry(prof_name, prof_ji_desc, i, i+1))
-        sigs.append(sigs[-1]+1)
+        sigs.append(perf_counter_us())
       if ents: cpu_events.append(ProfileGraphEvent(ents, [[] for _ in ents], sigs))
     return 1e-1
 

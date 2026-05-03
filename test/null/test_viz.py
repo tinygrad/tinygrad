@@ -509,18 +509,6 @@ class TestVizProfiler(unittest.TestCase):
     gbs = sz/(dur*1e-6)*1e-9
     self.assertEqual(sdma_events[0]["fmt"], f"{gbs:.0f} GB/s\n{sz/1e6:.0f} MB")
 
-  def test_null_graph_timestamps_are_integral(self):
-    with save_viz():
-      @TinyJit
-      def f(a, b): return (a+b).contiguous(), (a*b).contiguous()
-      a, b = Tensor.empty(16, device="NULL"), Tensor.empty(16, device="NULL")
-      for _ in range(3): Tensor.realize(*f(a, b))
-    graphs = [e for e in cpu_events if isinstance(e, ProfileGraphEvent)]
-    self.assertTrue(any(len(g.ents) > 1 for g in graphs))
-    for g in graphs:
-      self.assertTrue(all(s == int(s) for s in g.sigs))
-      for a,b in zip(g.ents, g.ents[1:]): self.assertEqual(g.sigs[a.en_id], g.sigs[b.st_id])
-
   def test_block_ordering(self):
     prof = [ProfileDeviceEvent(device='NV', tdiff=decimal.Decimal(-1000)),
             ProfileDeviceEvent(device='NV:1', tdiff=decimal.Decimal(-500)),
