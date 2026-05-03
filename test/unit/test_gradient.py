@@ -136,7 +136,8 @@ class TestMultiOutputGradient(unittest.TestCase):
 
     a, b = Tensor(a_np, requires_grad=True), Tensor(b_np, requires_grad=True)
     Tensor.realize(a, b)
-    c, d, e, _, _ = Tensor.custom_kernel(Tensor.empty(4, 4), Tensor.empty(4, 4), Tensor.empty(4, 4), a, b, fxn=addmulsub_kernel, grad_fxn=backward_addmulsub)
+    c, d, e, _, _ = Tensor.custom_kernel(Tensor.empty(4, 4), Tensor.empty(4, 4), Tensor.empty(4, 4), a, b,
+                                          fxn=addmulsub_kernel, grad_fxn=backward_addmulsub)
     (c.sum() + d.sum() + e.sum()).backward()
     np.testing.assert_allclose(a.grad.numpy(), a_ref.grad.numpy(), rtol=1e-5)
     np.testing.assert_allclose(b.grad.numpy(), b_ref.grad.numpy(), rtol=1e-5)
