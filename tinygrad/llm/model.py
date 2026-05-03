@@ -310,8 +310,8 @@ class Transformer:
 
   def forward(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor) -> Tensor:
     x = self.token_embd(tokens).float()                   # (B, T, D)
-    for block in self.blk: x = block(x.to(block.attn_norm.weight.device), start_pos)
-    logits = self.output(self.output_norm(x.to(self.output_norm.weight.device)))[:, -1, :]
+    for block in self.blk: x = block(x.to(getattr(block.attn_norm, "weight").device), start_pos)
+    logits = self.output(self.output_norm(x.to(self.output.weight.device)))[:, -1, :]
     # Gumbel-max trick: argmax(logits/temp - log(-log(uniform))) is equivalent to sampling from softmax(logits/temp)
     return (logits / temperature.maximum(1e-12) - (Tensor.rand_like(logits).maximum(1e-12).log().neg()).log()).argmax(-1, keepdim=True)
 

@@ -182,7 +182,7 @@ def gguf_load(fn: Tensor|str|pathlib.Path, devices:tuple[str,...]|None=None) -> 
 
   NOTE: The provided tensor must be on a device that supports execution.
   """
-  kv, sd, n_blk = _gguf_parse(fn if isinstance(fn, Tensor) else Tensor(fn), devices)
+  kv, sd, n_blk = _gguf_parse(fn if isinstance(fn, Tensor) else Tensor(pathlib.Path(fn)), devices)
   if kv.get('split.count', 1) <= 1: return kv, sd
   if isinstance(fn, Tensor): raise ValueError("multi-part GGUF requires a path argument (got Tensor)")
   for pp in _gguf_split_paths(pathlib.Path(fn), kv)[1:]: sd.update(_gguf_parse(Tensor(pp), devices, n_blk)[1])
