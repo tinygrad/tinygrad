@@ -5,7 +5,7 @@ from tinygrad.uop.ops import UOp, Ops
 from tinygrad.helpers import partition, DEBUG, Timing, GlobalCounters, stderr_log, colored, Context, fetch
 from tinygrad.viz.serve import TCPServerWithReuse, HTTPRequestHandler
 from tinygrad.llm.model import Transformer
-from tinygrad.llm.tools import TOOL_CALL_OPEN, format_tools, parse_tool_calls
+from tinygrad.llm.tools import format_tools, parse_tool_calls
 
 class SimpleTokenizer:
   def __init__(self, normal_tokens:dict[str, int], special_tokens:dict[str, int], preset:str="llama3",
