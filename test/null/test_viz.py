@@ -964,6 +964,11 @@ class TestCLI(unittest.TestCase):
     gflops = [int(unwrap(re.search(r"(\d+) GFLOPS", row["fmt"]))[1]) for row in out]
     self.assertGreater(gflops[4], gflops[2])
     self.assertGreater(gflops[5], gflops[3])
+    # aggregate flops
+    out = [json.loads(line) for line in call_cli(fxn, "-s", "NULL", "-t", "--json").splitlines()]
+    self.assertEqual(len(out), 2)
+    print(out[0])
+    print(out[1])
 
 if __name__ == "__main__":
   unittest.main()
