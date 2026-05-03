@@ -208,6 +208,11 @@ def flatten_events(profile:list[ProfileEvent], device_ts_diffs:dict[str, Decimal
       yield (st:=min(cpu_ts)), (et:=max(cpu_ts)), ProfileRangeEvent(f"{e.ents[0].device.split(':')[0]} Graph", f"batched {len(e.ents)}", st, et)
       for i,ent in enumerate(e.ents): yield (cpu_ts[i*2], cpu_ts[i*2+1], ent)
 
+def fmt_estimates(flops:float, membw:float, ldsbw:float) -> list[str]:
+  return [f"{flops*1e-9:.0f} GFLOPS" if flops < 1e14 else f"{flops*1e-12:.0f} TFLOPS",
+          (f"{membw*1e-9:.0f} GB/s" if membw < 1e13 else f"{membw*1e-12:.0f} TB/s")+" mem",
+          (f"{ldsbw*1e-9:.0f} GB/s" if ldsbw < 1e15 else f"{ldsbw*1e-12:.0f} TB/s")+" lds"]
+
 # normalize event timestamps and attach kernel metadata
 def timeline_layout(data:VizData, dev_events:list[tuple[int, int, float, DevEvent]], start_ts:int, scache:dict[str, int]) -> bytes|None:
   events:list[bytes] = []
@@ -221,9 +226,7 @@ def timeline_layout(data:VizData, dev_events:list[tuple[int, int, float, DevEven
       if (p:=data.ctxs[ref].get("prg")) is not None and (ki:=p.src[0].arg).estimates is not None and ei is not None:
         flops = sym_infer(ki.estimates.ops, var_vals:=ei.arg['var_vals'])/(t:=dur*1e-6)
         membw, ldsbw = sym_infer(ki.estimates.mem, var_vals)/t, sym_infer(ki.estimates.lds, var_vals)/t
-        fmt = [f"{flops*1e-9:.0f} GFLOPS" if flops < 1e14 else f"{flops*1e-12:.0f} TFLOPS",
-              (f"{membw*1e-9:.0f} GB/s" if membw < 1e13 else f"{membw*1e-12:.0f} TB/s")+" mem",
-              (f"{ldsbw*1e-9:.0f} GB/s" if ldsbw < 1e15 else f"{ldsbw*1e-12:.0f} TB/s")+" lds"]
+        fmt = fmt_estimates(flops, membw, ldsbw)
         if (metadata_str:=",".join([str(m) for m in (ei.arg['metadata'] or ())])): fmt.append(metadata_str)
         if isinstance(e, ProfileGraphEntry): fmt.append("(batched)")
         key = ei.key

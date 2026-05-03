@@ -132,28 +132,23 @@ def main(args) -> None:
     timelines = [(n,l) for n,l in profile["layout"].items() if isinstance(l, dict) and l.get("event_type") == 0]
     def produce_top_kernels() -> Iterator[dict]:
       tagged = ((n,e) for n,l in timelines for e in l["events"]) if args.src == "ALL" else ((args.src,e) for e in unwrap(data)["events"])
-      agg:dict[tuple[str,str], tuple[float, int, int|None, float, float]] = {} # map (device, kernel name) to (total time, count, ref, ops, mem)
+      agg:dict[tuple[str,str], tuple[float, int, int|None, list[float]]] = {} # map (device, kernel name) to (total time, count, ref, ests)
       total = 0
       for dev,e in tagged:
         et = e["dur"] * 1e-3
-        t, c, ref, f, m = agg.get((dev,e["name"]), (0.0, 0, None, 0.0, 0.0))
+        t, c, ref, est = agg.get((dev,e["name"]), (0.0, 0, None, [0.0, 0.0, 0.0]))
         if "FLOP" in e["fmt"]:
-          ops_str, mem_str = [s.split() for s in e["fmt"].split("\n")[:2]]
-          f += float(ops_str[0])*(1e9 if ops_str[1].startswith("G") else 1e12)*e["dur"]*1e-6
-          m += float(mem_str[0])*(1e9 if mem_str[1].startswith("G") else 1e12)*e["dur"]*1e-6
-        agg[(dev,e["name"])] = (t+et, c+1, e["ref"], f, m)
+          for i,fmt in enumerate(e["fmt"].split("\n")[:3]): est[i] += float((p:=fmt.split())[0])*(1e9 if p[1].startswith("G") else 1e12)*e["dur"]*1e-6
+        agg[(dev,e["name"])] = (t+et, c+1, e["ref"], est)
         total += et
       items = sorted(agg.items(), key=lambda kv:kv[1][0], reverse=True)
       num_rows = len(items) if args.top < 0 else args.top
-      for (dev,name),(t,c,ref,f,m) in items[:num_rows]:
+      for (dev,name),(t,c,ref,est) in items[:num_rows]:
         display = f"{dev[:7]:7s} {fmt_colored(name)}" if args.src == "ALL" else fmt_colored(name)
-        flops, mem = f/(t*1e-3), m/(t*1e-3)
-        fmt = [f"{flops*1e-9:7.0f} GFLOPS" if flops < 1e14 else f"{flops*1e-12:7.0f} TFLOPS",
-               (f"{mem*1e-9:4.0f} GB/s" if mem < 1e13 else f"{mem*1e-12:4.0f} TB/s")+" mem"]
-        yield {"name":display, "dur_ms":t, "count":c, "pct":t/total*100.0, "ref":ref, "fmt":"\n".join(fmt)}
+        yield {"name":display, "dur_ms":t, "count":c, "pct":t/total*100.0, "ref":ref, "fmt":"\n".join(viz.fmt_estimates(*[v/(t*1e-3) for v in est]))}
       if num_rows > 0 and items[num_rows:]:
-        other_t = sum(t for _,(t,_,_,_,_) in items[num_rows:])
-        other_c = sum(c for _,(_,c,_,_,_) in items[num_rows:])
+        other_t = sum(t for _,(t,_,_,_) in items[num_rows:])
+        other_c = sum(c for _,(_,c,_,_) in items[num_rows:])
         yield {"name":"Other", "dur_ms":other_t, "count":other_c, "pct":other_t/total*100.0, "ref":None, "fmt":None}
     def produce_all_kernels() -> Iterator[dict]:
       event_streams = [[(e["st"], n, e) for e in l["events"]] for n,l in timelines] if args.src == "ALL" \
