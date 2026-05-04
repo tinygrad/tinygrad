@@ -112,7 +112,7 @@ class AMFirmware:
     if (sys.version_info >= (3,14) and (p:=pathlib.Path("/lib/firmware/amdgpu")/f"{fname}.zst").is_file() and
         hashlib.sha256(b:=zstd.decompress(p.read_bytes())).hexdigest() == fw.hashes[fname]): blob = memoryview(bytearray(b))
     else: blob = memoryview(bytearray(fetch(f"https://gitlab.com/kernel-firmware/linux-firmware/-/raw/1e2c15348485939baf1b6d1f5a7a3b799d80703d/amdgpu/{fname}",
-                                            subdir="fw").read_bytes()))
+                                            subdir="fw", sha256=fw.hashes[fname]).read_bytes()))
     if AM_DEBUG >= 1: print(f"am {self.adev.devfmt}: loading firmware {fname}: {hashlib.sha256(blob).hexdigest()}")
     if versioned_header:
       chdr = am.struct_common_firmware_header.from_address(mv_address(blob))
