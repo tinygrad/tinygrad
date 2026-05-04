@@ -3,9 +3,9 @@ from tinygrad.runtime.autogen import load
 from tinygrad.runtime.autogen.am import am_src
 
 __all__ = ["gc_9_4_3", "gc_11_0_0", "gc_11_0_3", "gc_11_5_0", "gc_12_0_0",
-           "mp_11_0", "mp_13_0_0", "mp_14_0_2",
+           "mp_11_0_0", "mp_13_0_0", "mp_14_0_2",
            "mmhub_1_8_0", "mmhub_3_0_0", "mmhub_3_0_1", "mmhub_3_0_2", "mmhub_3_3_0", "mmhub_4_1_0",
-           "nbio_4_3_0", "nbio_6_1", "nbio_7_0", "nbio_7_2_0", "nbio_7_4", "nbio_7_7_0", "nbio_7_9_0", "nbio_7_11_0", "nbif_6_3_1",
+           "nbio_4_3_0", "nbio_7_2_0", "nbio_7_7_0", "nbio_7_9_0", "nbio_7_11_0", "nbif_6_3_1",
            "hdp_4_4_2", "hdp_6_0_0", "hdp_7_0_0",
            "osssys_4_4_2", "osssys_6_0_0", "osssys_6_1_0", "osssys_7_0_0",
            "sdma_4_4_2"]
@@ -43,5 +43,5 @@ def __getattr__(nm):
     return "\n".join(["regs = {"] + [f"{k!r}: {v!r}," for k,v in regs.items()] + ["}"])
 
   assert prefix in patterns, f"Failed to load ASIC registers for {prefix.upper()}"
-  return load(f"am/regs/{nm}", [f"../amdgpu-33970e1351f5e511029602454979f3de7e22260f/drivers/gpu/drm/amd/include/asic_reg/{prefix}/{nm}"],
-                           patterns=patterns[prefix], gen=genreg)
+  return load(f"am/regs/{nm}", ["{}/drivers/gpu/drm/amd/include/asic_reg/" + prefix + "/" + {"mp_11_0_0":"mp_11_0"}.get(nm, nm)],
+              patterns=patterns[prefix], srcs=am_src, gen=genreg)
