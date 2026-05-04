@@ -1,4 +1,4 @@
-import functools, re, tinygrad.runtime.autogen.am.regs
+import functools, re, tinygrad.runtime.autogen.am
 from dataclasses import dataclass
 from tinygrad.helpers import getbits, fetch
 
@@ -75,8 +75,7 @@ def import_pmc(ip) -> dict[str, tuple[str, int]]:
   return res
 
 def import_asic_regs(prefix:str, version:tuple[int, ...], cls=AMDReg) -> dict[str, AMDReg]:
-  def is_valid(modver): return modver[0] == version[0] and modver <= version
-  if (mods:=[m for m in tinygrad.runtime.autogen.am.regs.__all__ if m.startswith(prefix) and is_valid(tuple(map(int, m.split('_')[1:])))]):
-    regs = getattr(tinygrad.runtime.autogen.am.regs, mods[0]).regs
-    return {reg:cls(name=reg, offset=off, segment=seg, fields=fields) for reg,(off,seg,fields) in regs.items()}
+  from tinygrad.runtime.autogen.am import regs
+  if (mods:=[m for m in regs.__all__ if m.startswith(prefix) and (v:=tuple(map(int, m.split('_')[1:])))[0] == version[0] and v <= version]):
+    return {reg:cls(name=reg, offset=off, segment=seg, fields=fields) for reg,(off,seg,fields) in getattr(regs, mods[0]).items()}
   raise ImportError(f"Failed to load ASIC registers for {prefix.upper()} {'.'.join(map(str, version))}")
