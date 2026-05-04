@@ -1,10 +1,10 @@
 import inspect, functools
-from tinygrad.device import Compiled, Allocator
+from tinygrad.device import Compiled, Allocator, ProfileGraphEntry, ProfileGraphEvent
 from tinygrad.engine.jit import MultiGraphRunner
 from tinygrad.renderer import Renderer, cstyle, nir, ptx, llvmir, wgsl
 from tinygrad.renderer.cstyle import CStyleLanguage
 from tinygrad.uop.ops import UOp, Ops
-from tinygrad.helpers import cpu_profile, getenv, dedup, NULL_ALLOW_COPYOUT
+from tinygrad.helpers import cpu_profile, getenv, dedup, NULL_ALLOW_COPYOUT, PROFILE, cpu_events, perf_counter_us
 
 class NullRenderer(CStyleLanguage):
   has_local = False
@@ -27,11 +27,16 @@ class NullAllocator(Allocator['NullDevice']):
   def _copyout(self, dest:memoryview, src):
     if not NULL_ALLOW_COPYOUT: raise RuntimeError("no copyout on NULL")
   def _transfer(self, dest, src, sz:int, src_dev, dest_dev):
-    with cpu_profile(f"{src_dev.device} -> {dest_dev.device}", f"{self.dev.device}:COPY"): pass
+    with cpu_profile(f"{src_dev.device} -> {dest_dev.device}", f"{src_dev.device}:SDMA:0"): pass
   def _offset(self, buf, offset:int, size:int): pass
 
 class NullGraph(MultiGraphRunner):
-  def __call__(self, input_uops:tuple[UOp, ...], var_vals:dict[str, int], wait=False) -> float|None: return 1e-1
+  def __call__(self, input_uops:tuple[UOp, ...], var_vals:dict[str, int], wait=False) -> float|None:
+    # description based on command, copied from HCQ graph
+    if PROFILE: cpu_events.append(ProfileGraphEvent(ents:=[ProfileGraphEntry(self.device if runtime is not None else f"{self.device}:SDMA:0", \
+        runtime.name if runtime is not None else f"{bufs[1].device} -> {bufs[0].device}", i, i+1) \
+        for i,((_,_,bufs,_),runtime) in enumerate(zip(self.calls, self.runtimes))], [], [perf_counter_us() for _ in range(len(ents)+1)]))
+    return 1e-1
 
 class NullDevice(Compiled):
   def __init__(self, device:str):
