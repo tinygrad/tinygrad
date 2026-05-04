@@ -263,8 +263,8 @@ def remove_bufferize(src:UOp, buf:UOp, idx:UOp):
   del red_gate
   accessed_buffers = dedup(accessed_buffers)
 
-  # if this is generated from multiple buffers, don't remove this buffer
-  if len(accessed_buffers) > 3 and not (PCONTIG > 2): return None
+  # if this is generated from multiple non-scalar buffers, don't remove this buffer
+  if len([x for x in accessed_buffers if x.numel() != 1]) > 3 and not (PCONTIG > 2): return None
 
   # if any reduces access a buffer, don't remove this buffer
   buffer_in_reduce = False
