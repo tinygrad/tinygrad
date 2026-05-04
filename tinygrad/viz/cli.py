@@ -51,7 +51,6 @@ def fmt_colored(s:str) -> str: return ansistrip(s) if NO_COLOR else s
 def to_str(k:str, v) -> str:
   if k == "FLOPS" or k.startswith("B/s"): return f"{v*1e-9:.0f} G{k}" if v < 1e13 else f"{v*1e-12:.0f} T{k}"
   if k == "B": return next((f"{v/s:.0f} {u}" for s,u in ((1e9,"GB"),(1e6,"MB"),(1e3,"KB")) if v>=s), f"{v:.0f} B")
-  if k == "pc": return f"pc=0x{v:06x}"
   return f"{k}={v}"
 def fmt_data(data:dict) -> str: return "  ".join((p:=to_str(k, v))+" "*max(0, 14-ansilen(p)) for k,v in data.items())
 
