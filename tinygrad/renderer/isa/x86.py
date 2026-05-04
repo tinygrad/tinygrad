@@ -327,7 +327,7 @@ def fold_address(x:UOp) -> tuple[UOp, UOp, UOp]:
   if idx.op is Ops.CONST: return (base, UOp(Ops.NOOP), _disp(idx.arg * disp_scale))
   return (base, _cast(idx), _disp(0))
 
-def abi(ctx:IselContext, x:UOp) -> UOp:
+def abi(ctx:IselContext, x:UOp) -> UOp|None:
   if isinstance(x.tag, tuple): return None
   i = ctx.func_args.index(x)
   def _stack_arg(disp:int): return (def_reg(dtypes.uint64, RSP), UOp(Ops.NOOP), UOp(Ops.INS, arg=X86Ops.FRAME_INDEX, dtype=dtypes.int32, tag=disp))
@@ -373,11 +373,12 @@ isel_matcher = PatternMatcher([
   # so regalloc builds the prologue/epilogue naturally
   (UPat(Ops.SINK, name="x"), lambda x:
    x.replace(src=(x.ins(X86Ops.RET, src=x.src + tuple(def_reg(dtypes.uint64 if r in GPR else dtypes.float64.vec(2), r) for r in CALLEE_SAVED)),)) \
-    if x.src and x.src[0].arg is not X86Ops.RET else None),
+    if not x.src or x.src[0].arg is not X86Ops.RET else None),
   # function abi constraints
   (UPat((Ops.PARAM, Ops.DEFINE_VAR, Ops.SPECIAL), name="x"), abi),
   # these are treated the same for now
-  (UPat(Ops.DEFINE_REG, name="x"), lambda x: x.replace(op=Ops.DEFINE_LOCAL, dtype=x.dtype.base.ptr(x.dtype.size, AddrSpace.LOCAL)) if isinstance(x.arg, int) else None),
+  (UPat(Ops.DEFINE_REG, name="x"), lambda x:
+   x.replace(op=Ops.DEFINE_LOCAL, dtype=x.dtype.base.ptr(x.dtype.size, AddrSpace.LOCAL)) if isinstance(x.arg, int) else None),
   #(UPat((Ops.DEFINE_REG, Ops.DEFINE_LOCAL), name="x"), lambda ctx,x: x.ins(X86Ops.LEA, src=(def_reg(dtypes.uint64, RSP), UOp(Ops.NOOP),
   #                  imm(dtypes.int32, ctx.inc_stack(x.dtype.nbytes())))) if x.op is Ops.DEFINE_LOCAL or isinstance(x.arg, int) else None),
   # constants that can't be immediates, move them to registers
