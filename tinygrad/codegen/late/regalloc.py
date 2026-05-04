@@ -16,6 +16,7 @@ class LinearScanRegallocContext:
     self.spills: dict[Register, UOp] = {} # mapping from virtual to stack slot
     self.fills: dict[int, dict[int, tuple[Register, Register]]] = {} # mapping from program point to mapping from idx to virtual and real to fill to
     self.insert_before: dict[int, list[tuple[Register, Register]]] = {} # mapping from program point to fills to be inserted
+    self.locals: dict[UOp, UOp] = {}
     self.idx = itertools.count()
     self.ren = ren
     self.stack_size = stack_size
@@ -79,6 +80,11 @@ class LinearScanRegallocContext:
           # HACK: cause the range is missing the comparison
           self.real_defs[v] = live[v] = alloc(cons, i+1 if u.op is not Ops.RANGE else i)
 
+      # allocate stack array
+      if u.op is Ops.DEFINE_LOCAL:
+        self.locals[u] = UOp.const(dtypes.int32, self.stack_size)
+        self.stack_size += u.dtype.nbytes()
+
       # loop prologue, avoid loading inside the loop
       if u.op is Ops.RANGE:
         # we move to registers vars used in the loop sorted by next use, vars not used in the loop will not be reloaded in the epilogue
@@ -110,7 +116,8 @@ def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
       nsrc.append(ctx.ren.fill(ctx.spills[v], ctx.defs[v], r))
     else: nsrc.append(s)
   ndefs = tuple(ctx.real_defs[v] for v in x.tag) if isinstance(x.tag, tuple) else x.tag
-  nx = x.replace(src=tuple(nsrc), tag=ndefs)
+  if x.op is Ops.DEFINE_LOCAL: nx = ctx.ren.isel_matcher.rewrite(ctx.ren.stack_pointer().index(ctx.locals[x], dtype=x.dtype, tag=ndefs))
+  else: nx = x.replace(src=tuple(nsrc), tag=ndefs)
   before = [ctx.ren.fill(ctx.spills[v], ctx.defs[v], r) for v,r in ctx.insert_before.get(i, [])]
   after = [ctx.ren.spill(ctx.spills[v], nx) for v in x.tag if v in ctx.spills] if isinstance(x.tag, tuple) else []
 
@@ -119,10 +126,10 @@ def regalloc_rewrite(ctx:LinearScanRegallocContext, x:UOp):
     sp = ctx.ren.stack_pointer()
     offset = UOp(Ops.CONST, sp.dtype, arg=ctx.stack_size)
     if i == 0: before = [ctx.ren.isel_matcher.rewrite(UOp(Ops.SUB, sp.dtype, (sp, offset), tag=sp.tag))] + before
-    elif i == len(ctx.uops) - 1: before += [ctx.ren.isel_matcher.rewrite(UOp(Ops.ADD, sp.dtype, (sp, offset), tag=sp.tag))]
+    elif i == len(ctx.uops) - 2: before += [ctx.ren.isel_matcher.rewrite(UOp(Ops.ADD, sp.dtype, (sp, offset), tag=sp.tag))]
 
   return nx, before + [nx] + after
 
 pm_regalloc_rewrite = PatternMatcher([
-  (UPat({Ops.INS, Ops.RANGE, Ops.END, Ops.DEFINE_REG} | PSEUDO_OPS, name="x"), regalloc_rewrite),
+  (UPat({Ops.INS, Ops.RANGE, Ops.END, Ops.DEFINE_REG, Ops.DEFINE_LOCAL} | PSEUDO_OPS, name="x"), regalloc_rewrite),
 ])

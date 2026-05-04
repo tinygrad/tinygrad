@@ -2,7 +2,7 @@
 # allow semicolons to put multiple ops on one line
 import sys, struct, functools
 from typing import cast
-from tinygrad.dtype import dtypes, PtrDType, DType, truncate
+from tinygrad.dtype import dtypes, PtrDType, DType, truncate, AddrSpace
 from tinygrad.uop import FastEnum, auto, Ops, GroupOp
 from tinygrad.uop.ops import UOp, UPat, PatternMatcher
 from tinygrad.renderer.isa import ISARenderer, IselContext, Register, PreRegAllocContext
@@ -198,10 +198,10 @@ pre_isel_matcher = PatternMatcher([
    lambda y,x: UOp(Ops.NOOP, x.dtype, y.src) if all(s.op is Ops.GEP and s.src == y.src and s.arg[0] == i for i,s in enumerate(x.src)) else None),
   # gated index becomes a conditional move on the index, the load/store are unconditional
   (UPat.var("base").index(UPat.var("idx"), UPat.var("gate")).load(UPat.var("alt"), name="x"), lambda base,idx,gate,alt,x:
-   gate.where(base.index(idx, ptr=True), (l:=UOp(Ops.DEFINE_LOCAL, base.dtype.base.ptr(x.dtype.count), arg=0)
+   gate.where(base.index(idx, ptr=True), (l:=UOp(Ops.DEFINE_LOCAL, base.dtype.base.ptr(x.dtype.count, AddrSpace.LOCAL), arg=-1)
               .index(UOp.const(dtypes.int32, 0), ptr=True)).after(l.store(alt))).load(dtype=x.dtype)),
   (UPat.var("base").index(UPat.var("idx"), UPat.var("gate")).store(UPat.var("val")), lambda base,idx,gate,val:
-   gate.where(base.index(idx, ptr=True), UOp(Ops.DEFINE_LOCAL, base.dtype.base.ptr(val.dtype.count), arg=0)
+   gate.where(base.index(idx, ptr=True), UOp(Ops.DEFINE_LOCAL, base.dtype.base.ptr(val.dtype.count, AddrSpace.LOCAL), arg=-1)
               .index(UOp.const(dtypes.int32, 0), ptr=True)).store(val)),
   # TODO: remove this once we allow all flag producing ops in cmove
   # if gate in scalar int cmove is not a comparison need to add one to set the flag
@@ -371,12 +371,14 @@ isel_matcher = PatternMatcher([
   # add callee saved registers to the RET, these will be scheduled at the top of the kernel and will be saved/restored if they are used in regalloc
   # so regalloc builds the prologue/epilogue naturally
   (UPat(Ops.SINK, name="x"), lambda x:
-   x.ins(X86Ops.RET, src=x.src + tuple(def_reg(dtypes.uint64 if r in GPR else dtypes.float64.vec(2), r) for r in CALLEE_SAVED))),
+   x.replace(src=(x.ins(X86Ops.RET, src=x.src + tuple(def_reg(dtypes.uint64 if r in GPR else dtypes.float64.vec(2), r) for r in CALLEE_SAVED)),)) \
+    if x.src[0].arg is not X86Ops.RET else None),
   # function abi constraints
   (UPat((Ops.PARAM, Ops.DEFINE_VAR, Ops.SPECIAL), name="x"), abi),
   # these are treated the same for now
-  (UPat((Ops.DEFINE_REG, Ops.DEFINE_LOCAL), name="x"), lambda ctx,x: x.ins(X86Ops.LEA, src=(def_reg(dtypes.uint64, RSP), UOp(Ops.NOOP),
-                    imm(dtypes.int32, ctx.inc_stack(x.dtype.nbytes())))) if x.op is Ops.DEFINE_LOCAL or isinstance(x.arg, int) else None),
+  (UPat(Ops.DEFINE_REG, name="x"), lambda x: x.replace(op=Ops.DEFINE_LOCAL, dtype=x.dtype.base.ptr(x.dtype.size, AddrSpace.LOCAL)) if isinstance(x.arg, int) else None),
+  #(UPat((Ops.DEFINE_REG, Ops.DEFINE_LOCAL), name="x"), lambda ctx,x: x.ins(X86Ops.LEA, src=(def_reg(dtypes.uint64, RSP), UOp(Ops.NOOP),
+  #                  imm(dtypes.int32, ctx.inc_stack(x.dtype.nbytes())))) if x.op is Ops.DEFINE_LOCAL or isinstance(x.arg, int) else None),
   # constants that can't be immediates, move them to registers
   (UPat.cvar("x", dtypes.int64s), lambda x: x.ins(X86Ops.MOVABS, src=(imm(x.dtype, x.arg),)) if not x.tag else None),
   (UPat.cvar("x", dtypes.ints+(dtypes.bool,)), lambda x: x.ins(X86Ops.MOVi, src=(imm(x.dtype, x.arg),)) if not x.tag else None),
@@ -573,7 +575,7 @@ isel_matcher = PatternMatcher([
   (UPat(Ops.INS, src=(UPat(), UPat(), UPat(Ops.LOAD, name="y")), allow_any_len=True, name="x"), lambda ctx,y,x:
    x.replace(src=x.src[:2] + fold_address(y.src[0]) + x.src[3:]) if x.arg in X86GroupOp.ReadMem3rd and is_foldable_load(ctx, x, y) else None),
   # allocate virtual registers
-  (UPat((Ops.INS, Ops.DEFINE_REG), name="x"), alloc_vregs),
+  (UPat((Ops.INS, Ops.DEFINE_REG, Ops.DEFINE_LOCAL), name="x"), alloc_vregs),
 ])
 
 # ***** pre register allocation *****
@@ -886,8 +888,7 @@ class X86Renderer(ISARenderer):
       else: asm.append(_format_op(u) + " " + _format_operands(u))
     return "\n".join(asm)
 
-  def render(self, uops:list[UOp], lower:bool=True) -> str:
-    if lower: uops = self.lower(uops[-1])
+  def render(self, uops:list[UOp]) -> str:
     targets: dict[str, int] = {}
     jumps: dict[UOp, int] = {}
     binary = bytearray()

@@ -7,6 +7,7 @@ from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, pm_lower_index_
 from tinygrad.uop.render import pyrender
 from tinygrad.uop.spec import type_verify, program_spec, kernel_spec
 from tinygrad.renderer import Renderer, Estimates
+from tinygrad.renderer.isa import ISARenderer, IselContext, PreRegAllocContext
 from tinygrad.dtype import dtypes
 
 # import all pattern matchers here
@@ -20,6 +21,7 @@ from tinygrad.codegen.opt.postrange import apply_opts
 from tinygrad.codegen.simplify import pm_simplify_ranges, pm_flatten_range, pm_split_ranges, pm_load_collapse
 from tinygrad.schedule.rangeify import pm_add_buffers_local, rangeify_codegen, pm_mops, pm_syntactic_sugar, pm_store_ranges
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
+from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite
 
 def full_rewrite_to_sink(sink:UOp, ren:Renderer|None=None, optimize:bool=True, beam:int=0) -> UOp:
   if ren is None: ren = Renderer(Target())
@@ -124,9 +126,17 @@ def line_rewrite(lst:list[UOp], pm:PatternMatcher, ctx=None) -> list[UOp]:
     newlst.extend(ret[1])
   return newlst
 
-def do_linearize(prg:UOp, sink:UOp) -> UOp:
+def do_linearize(ctx:Renderer, prg:UOp, sink:UOp) -> UOp:
   lst = line_rewrite(linearize(sink), pm_linearize_cleanups)
   if SPEC: type_verify(lst, program_spec)
+  # isa renderers need to allocate registers
+  if isinstance(ctx, ISARenderer):
+    if ctx.pre_regalloc_matcher is not None: lst = line_rewrite(lst, ctx.pre_regalloc_matcher, PreRegAllocContext())
+    regalloc_ctx = LinearScanRegallocContext(lst, ctx)
+    lst = line_rewrite(lst, pm_regalloc_rewrite, regalloc_ctx)
+    lst = line_rewrite(lst, ctx.post_regalloc_matcher, regalloc_ctx)
+    if DEBUG >= 4: print(ctx.asm_str(lst, sink.arg.function_name))
+    #if SPEC: type_verify(lst, ctx.isa_spec)
   return prg.replace(src=prg.src + (UOp(Ops.LINEAR, src=tuple(lst)),))
 
 def do_estimates(prg:UOp, sink:UOp, lin:UOp) -> UOp|None:
@@ -172,7 +182,12 @@ def do_to_program(ast:UOp, renderer:Renderer) -> UOp:
   elif ast.op is Ops.SINK:
     assert isinstance(ast.arg, KernelInfo), "requires KernelInfo on arg to to_program"
     full_sink = full_rewrite_to_sink(ast, renderer, optimize=ast.tag is None, beam=ast.arg.beam)
-    prg = UOp(Ops.PROGRAM, src=(full_sink, UOp(Ops.DEVICE, arg=renderer.target.device)), arg=ProgramInfo.from_sink(full_sink))
+    prog_info = ProgramInfo.from_sink(full_sink)
+    # instruction selection
+    if isinstance(renderer, ISARenderer):
+      full_sink = graph_rewrite(full_sink, renderer.pre_isel_matcher, name="pre instruction selection", bottom_up=True)
+      full_sink = graph_rewrite(full_sink, renderer.isel_matcher, ctx=IselContext(full_sink), name="instruction selection", bottom_up=True)
+    prg = UOp(Ops.PROGRAM, src=(full_sink, UOp(Ops.DEVICE, arg=renderer.target.device)), arg=prog_info)
   else: raise RuntimeError(f"can't call to_program on {ast.op}")
   if not isinstance(prg.arg, ProgramInfo): prg = prg.replace(arg=ProgramInfo.from_sink(prg.src[0]))
   prg = graph_rewrite(prg, pm_to_program, ctx=renderer, name="linearize/render")
