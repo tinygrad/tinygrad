@@ -75,7 +75,7 @@ def import_pmc(ip) -> dict[str, tuple[str, int]]:
   return res
 
 def import_asic_regs(prefix:str, version:tuple[int, ...], cls=AMDReg) -> dict[str, AMDReg]:
-  def is_valid(modver): modver[0] == version[0] and modver < version
+  def is_valid(modver): modver[0] == version[0] and modver <= version
   if (mods:=[mod for mod in tinygrad.runtime.autogen.am.regs.__all__ if mod.startswith(prefix) and is_valid(tuple(mod.split('_')[1:]))]):
     regs = getattr(tinygrad.runtime.autogen.am.regs, mods).regs
     return {reg:cls(name=reg, offset=off, segment=seg, fields=fields) for reg,(off,seg,fields) in regs.items()}
