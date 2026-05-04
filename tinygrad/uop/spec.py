@@ -176,8 +176,9 @@ shared_codegen_spec = PatternMatcher([
 
   # LOAD(idx) / STORE(idx, val)
   (UPat().index(UPat()).or_casted().load(), lambda: True),
-  (UPat().index(UPat(), UPat(dtype=dtypes.bool)).or_casted().load(), lambda: True),  # gated load (alt added in program_spec)
+  (UPat().index(UPat()).or_casted().load(UPat(dtype=dtypes.bool), UPat()), lambda: True),   # gated load
   (UPat(Ops.INDEX).or_casted().store(UPat()), lambda: True),
+  (UPat(Ops.INDEX).or_casted().store(UPat(), UPat(dtype=dtypes.bool)), lambda: True),       # gated store
 
   # CUSTOM (inline and non inline)
   (UPat((Ops.CUSTOMI, Ops.CUSTOM)), lambda: True),
