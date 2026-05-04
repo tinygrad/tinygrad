@@ -328,10 +328,11 @@ def fold_address(x:UOp) -> tuple[UOp, UOp, UOp]:
   return (base, _cast(idx), _disp(0))
 
 def abi(ctx:IselContext, x:UOp) -> UOp:
+  if x.tag is not None: return None
   i = ctx.func_args.index(x)
   def _stack_arg(disp:int): return (def_reg(dtypes.uint64, RSP), UOp(Ops.NOOP), UOp(Ops.INS, arg=X86Ops.FRAME_INDEX, dtype=dtypes.int32, tag=disp))
-  if sys.platform == "win32": src = (def_reg(x.dtype, (RCX, RDX, GPR[8], GPR[9])[i]),) if i < 4 else _stack_arg((i-3)*8+32)
-  else: src = (def_reg(x.dtype, (RDI, RSI, RDX, RCX, GPR[8], GPR[9])[i]),) if i < 6 else _stack_arg((i-5)*8)
+  if sys.platform == "win32": src = (x.replace(tag=((RCX, RDX, GPR[8], GPR[9])[i],)),) if i < 4 else _stack_arg((i-3)*8+32)
+  else: src = (x.replace(tag=((RDI, RSI, RDX, RCX, GPR[8], GPR[9])[i],)),) if i < 6 else _stack_arg((i-5)*8)
   # this move "cleanses" the abi register constraint
   return x.ins(X86Ops.MOV, src=src)
 
