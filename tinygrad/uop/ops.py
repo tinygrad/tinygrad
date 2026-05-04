@@ -1385,7 +1385,7 @@ if TRACK_MATCH_STATS or PROFILE:
       args += ['--profile-path', os.getenv("PROFILE_DATA", "")] if os.getenv("PROFILE_DATA", "") else []
       viz_path = pathlib.Path(__file__).resolve().parent.parent / "viz" / "serve.py"
       if VIZ > 0 and sys.stdout.isatty(): os.execv(sys.executable, [sys.executable, viz_path.as_posix()] + args)
-      print("saved viz files, view using: python -m tinygrad.viz.cli")
+      if VIZ: print("saved viz files, view using: python -m tinygrad.viz.cli")
       VIZ.value = 0
 
 # *** simple graph rewrite engine ***
