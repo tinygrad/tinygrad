@@ -166,7 +166,7 @@ def main(args) -> None:
         if dev == "MARKER":
           yield {"device":dev, "name":fmt_colored(e["name"]), "st_ms":ts*1e-3, "ref":None, "ext":None}
           continue
-        ext, fmt, loc = [], e["fmt"], None
+        ext, fmt = [], e["fmt"]
         if (tb:=fmt.pop("tb", [])):
           while tb:
             file, lineno, fxn, code = tb.pop()
