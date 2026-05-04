@@ -1305,8 +1305,7 @@ class Tensor(OpMixin):
     """
     if rounding_mode is None: return super().div(x, reverse)  # type: ignore[arg-type]
     numerator, denominator = self._broadcasted(x, reverse)
-    if dtypes.is_int(dt:=least_upper_dtype(numerator.dtype, denominator.dtype)):
-      numerator, denominator = numerator.cast(dt), denominator.cast(dt)
+    if dtypes.is_int(numerator.dtype):
       if rounding_mode == "trunc": return numerator.idiv(denominator)
       if rounding_mode == "floor":
         truncate_div, truncate_mod = numerator.idiv(denominator), numerator._binop(Ops.MOD, denominator, False)
