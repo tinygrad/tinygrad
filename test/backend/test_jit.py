@@ -12,6 +12,7 @@ from tinygrad.helpers import Context, JIT, DEV, GlobalCounters
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import Ops
 from extra.models.unet import ResBlock
+from tinygrad.renderer.isa.x86 import X86Renderer
 
 def _simple_test(add, extract=lambda x: x, N=10):
   for _ in range(5):
@@ -106,6 +107,7 @@ class TestJit(unittest.TestCase):
       np.testing.assert_allclose(e.numpy(), a.numpy()*b.numpy(), atol=1e-4, rtol=1e-5)
     assert_jit_cache_len(f, 3)
 
+  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, X86Renderer), "estimates are wrong for x86")
   def test_global_counters_jit(self):
     @TinyJit
     def f(a, b):

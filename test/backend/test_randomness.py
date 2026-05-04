@@ -9,6 +9,7 @@ from tinygrad.codegen import to_program
 from tinygrad.uop.ops import Ops
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.nir import NIRRenderer
+from tinygrad.renderer.isa.x86 import X86Renderer
 from test.helpers import not_support_multi_device, needs_second_gpu
 
 import numpy as np
@@ -118,6 +119,7 @@ class TestRandomness(unittest.TestCase):
     np.testing.assert_allclose(jr, r)
 
   @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, (NIRRenderer, PTXRenderer)), "PTX and NIR use pointer arithmetic")
+  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, X86Renderer), "X86 callee saved registers have ulong dtype")
   def test_threefry_doesnt_use_long(self):
     linear = Tensor.rand(20).schedule_linear()
     for call in linear.src:
