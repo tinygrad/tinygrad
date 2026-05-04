@@ -31,7 +31,7 @@ def decode_profile(data:bytes) -> dict:
     if event_type == 0:
       for _ in range(event_count):
         name, ref, key, st, dur, fmt = u("<IIIIfI")
-        v["events"].append({"name":strings[name], "ref":option(ref), "key":option(key), "st":st, "dur":dur, "fmt":strings[fmt]})
+        v["events"].append({"name":strings[name], "ref":option(ref), "key":option(key), "st":st, "dur":dur, "fmt":json.loads(strings[fmt])})
     else:
       v["linear"] = u("<B")[0]
       v["peak"] = u("<Q")[0]
@@ -47,6 +47,12 @@ def decode_profile(data:bytes) -> dict:
   return {"dur":total_dur, "peak":global_peak, "layout":layout, "markers":markers}
 
 def fmt_colored(s:str) -> str: return ansistrip(s) if NO_COLOR else s
+
+def to_str(k:str, v) -> str:
+  if k == "FLOPS" or k.startswith("B/s"): return f"{v*1e-9:.0f} G{k}" if v < 1e13 else f"{v*1e-12:.0f} T{k}"
+  if k == "B": return next((f"{v/s:.0f} {u}" for s,u in ((1e9,"GB"),(1e6,"MB"),(1e3,"KB")) if v>=s), f"{v:.0f} B")
+  return f"{k}={v}"
+def fmt_data(data:dict) -> str: return "  ".join((p:=to_str(k, v))+" "*max(0, 14-ansilen(p)) for k,v in data.items())
 
 def get(data:dict, key:str):
   for k,v in data.items():
@@ -94,17 +100,17 @@ def main(args) -> None:
       if not isinstance(e, ProfileRangeEvent): continue
       if inst_st is None: inst_st = int(e.st)
       assert isinstance(e.name, TracingKey)
-      op_name, info = e.name.display_name, e.name.ret or ""
+      op_name, ret, info = e.name.display_name, json.loads(e.name.ret[4:]) if e.name.ret else {}, ""
       color = next((v for k,v in viz.wave_colors.items() if k in op_name), None)
       op_str = hex_colored(op_name, color) if color and not NO_COLOR else op_name
       phase, delay = None, 0
       idx = next(pkt_idxs.setdefault(e.device, itertools.count()))
       if e.device.startswith("WAVE"):
-        inst = f"0x{(pc:=int(info.replace('PC:', ''))):05x} {pc_map[pc]}" if info else f"{'':7} {op_name}"
+        inst = f"0x{pc:05x} {pc_map[pc]}" if (pc:=ret.get("pc")) is not None else f"{'':7} {op_name}"
         dispatch_to_inst[f"{e.device}-{idx}"] = (inst, int(e.st))
         phase = "DISPATCH"
-      if info.startswith("LINK:"):
-        inst, dispatch_st = dispatch_to_inst[info.replace("LINK:", "")]
+      if (link:=ret.get("link")) is not None:
+        inst, dispatch_st = dispatch_to_inst[link]
         phase, delay = "EXEC", int(e.st) - dispatch_st
       if inst and phase: info = f"{phase:<8} {inst}"
       unit = e.device.replace(" ", "-")
@@ -161,14 +167,13 @@ def main(args) -> None:
         if dev == "MARKER":
           yield {"device":dev, "name":fmt_colored(e["name"]), "st_ms":ts*1e-3, "ref":None, "ext":None}
           continue
-        ext:list[str] = []
-        if (fmt:=e["fmt"]).startswith("TB:"):
-          tb, fmt = json.loads(e["fmt"].replace("TB:", "")), ""
+        ext, fmt = [], e["fmt"]
+        if (tb:=fmt.pop("tb", [])):
           while tb:
             file, lineno, fxn, code = tb.pop()
             line = f"{file.split('/')[-1]}:{lineno} {fxn}"
             if fmt: ext.append(f"{line} {code}")
-            elif not file.startswith("<") and not fxn.startswith("<"): fmt = line
+            elif not file.startswith("<") and not fxn.startswith("<"): fmt["loc"] = line
         yield {"device":dev, "name":fmt_colored(e["name"]), "dur_ms":e["dur"]*1e-3,
                "st_ms":e["st"]*1e-3, "fmt":fmt, "ref":e["ref"], "ext":"\n".join(ext)}
     def fmt_top(k:dict) -> str:
@@ -177,9 +182,8 @@ def main(args) -> None:
     def fmt_all(k:dict) -> str:
       if k["device"] in {"MARKER", "SOURCE"}: return f"--- {k['device']} {k['name']}"+(f"/{k['st_ms']:9.2f}ms" if k['st_ms'] else "")
       ptm = colored(time_to_str(k["dur_ms"]*1e-3, w=9), "yellow" if k["dur_ms"] > 10 else None)
-      fmt_str = "  ".join(p+" "*max(0, 14-ansilen(p)) for p in k["fmt"].split("\n"))
       name = f"*** {k['device'][:7]:7s} "+k["name"]+" "*(46-ansilen(k["name"]))
-      return f"{name} tm {ptm}/{k['st_ms']:9.2f}ms"+(f" ({fmt_str})" if k["fmt"] else "")
+      return f"{name} tm {ptm}/{k['st_ms']:9.2f}ms"+(f" ({fmt_data(k['fmt'])})" if k["fmt"] else "")
     fmt_row = fmt_top if args.top else fmt_all
     seen_refs:set[int] = set()
     def render_event(k:dict, ls=args.list) -> None:
