@@ -1,4 +1,4 @@
-__all__ = ['gc_9_4_3', 'gc_11_0_0', 'gc_11_0_3', 'gc_11_5_0', 'gc_12_0_0', 'mmhub_1_8_0', 'mmhub_3_0_0', 'mmhub_3_0_1', 'mmhub_3_0_2', 'mmhub_3_3_0', 'mmhub_4_1_0', 'nbio_4_3_0', 'nbio_7_2_0', 'nbio_7_7_0', 'nbio_7_9_0', 'nbio_7_11_0', 'nbif_6_3_1', 'mp_11_0_0', 'mp_13_0_0', 'mp_14_0_2', 'hdp_4_4_2', 'hdp_6_0_0', 'hdp_7_0_0', 'osssys_4_4_2', 'osssys_6_0_0', 'osssys_6_1_0', 'osssys_7_0_0', 'sdma_4_4_2']
+__all__ = ['gc_11_0_0', 'gc_11_0_3', 'gc_11_5_0', 'gc_12_0_0', 'gc_9_4_3', 'hdp_4_4_2', 'hdp_6_0_0', 'hdp_7_0_0', 'mmhub_1_8_0', 'mmhub_3_0_0', 'mmhub_3_0_1', 'mmhub_3_0_2', 'mmhub_3_3_0', 'mmhub_4_1_0', 'mp_11_0_0', 'mp_13_0_0', 'mp_14_0_2', 'nbif_6_3_1', 'nbio_4_3_0', 'nbio_7_11_0', 'nbio_7_2_0', 'nbio_7_7_0', 'nbio_7_9_0', 'osssys_4_4_2', 'osssys_6_0_0', 'osssys_6_1_0', 'osssys_7_0_0', 'sdma_4_4_2']
 gc_9_4_3 = {
   'regGRBM_CNTL': (0, 0, {'read_timeout': (0, 7), 'report_last_rderr': (31, 31)}),
   'regGRBM_SKEW_CNTL': (1, 0, {'skew_top_threshold': (0, 5), 'skew_count': (6, 11)}),

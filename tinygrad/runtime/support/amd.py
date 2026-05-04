@@ -77,5 +77,5 @@ def import_pmc(ip) -> dict[str, tuple[str, int]]:
 def import_asic_regs(prefix:str, version:tuple[int, ...], cls=AMDReg) -> dict[str, AMDReg]:
   from tinygrad.runtime.autogen.am import regs
   if (mods:=[m for m in regs.__all__ if m.startswith(prefix) and (v:=tuple(map(int, m.split('_')[1:])))[0] == version[0] and v <= version]):
-    return {reg:cls(name=reg, offset=off, segment=seg, fields=fields) for reg,(off,seg,fields) in getattr(regs, mods[0]).items()}
+    return {reg:cls(name=reg, offset=off, segment=seg, fields=fields) for reg,(off,seg,fields) in getattr(regs, mods[-1]).items()}
   raise ImportError(f"Failed to load ASIC registers for {prefix.upper()} {'.'.join(map(str, version))}")

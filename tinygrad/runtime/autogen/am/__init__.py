@@ -58,7 +58,7 @@ def __getattr__(nm):
     case "vega_offsets": return load("am/vega_offsets", [f"{AMD}/include/vega20_ip_offset.h"], srcs=am_src)
     case "regs":
       def genreg(_, files, **kwargs):
-        out = ["__all__ = " + repr([file.split('/')[-1] for file in files])]
+        out = ["__all__ = " + repr(sorted([file.split('/')[-1] for file in files]))]
         for file, nm in [(file.replace("mp_11_0_0", "mp_11_0"), file.split('/')[-1]) for file in files]:
           patterns = reg_patterns[prefix := {"osssys": "oss"}.get(x:=nm.split("_", 1)[0], x)]
 
