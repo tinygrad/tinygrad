@@ -58,7 +58,7 @@ def __getattr__(nm):
     case "vega_offsets": return load("am/vega_offsets", [f"{AMD}/include/vega20_ip_offset.h"], srcs=am_src)
     case "regs":
       def genreg(_, files, **kwargs):
-        out = ["__all__ = " + repr(sorted([file.split('/')[-1] for file in files]))]
+        out = ["__all__ = " + repr([file.split('/')[-1] for file in files])]
         for file, nm in [(file.replace("mp_11_0_0", "mp_11_0"), file.split('/')[-1]) for file in files]:
           patterns = reg_patterns[prefix := {"osssys": "oss"}.get(x:=nm.split("_", 1)[0], x)]
 
@@ -79,5 +79,5 @@ def __getattr__(nm):
           out.extend([f"{nm} = {{"] + [f"  {k!r}: {v!r}," for k,v in regs.items()] + ["}"])
         return "\n".join(out)
       return load("am/regs", [AMDINC + "/asic_reg/" + {"osssys":"oss"}.get(pre, pre) + f"/{pre}_{'_'.join(map(str, ver))}"
-                              for pre in reg_files for ver in reg_files[pre]], srcs=am_src, gen=genreg)
+                              for pre in reg_files for ver in sorted(reg_files[pre])], srcs=am_src, gen=genreg)
     case _: raise AttributeError(f"no such autogen: {nm}")
