@@ -743,8 +743,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
         buffers[self] = mbuf
         return mbuf
       assert isinstance(buf, Buffer), "must be a Buffer for BUFFER_VIEW"
-      buffers[self] = ret = buf.view(self.arg[0], self.dtype, self.arg[1] * self.dtype.itemsize)
-      return ret
+      buffers[self] = bv = buf.view(self.arg[0], self.dtype, self.arg[1] * self.dtype.itemsize)
+      return bv
     if self.op is Ops.MSELECT:
       ret = self.src[0].buffer
       assert isinstance(ret, MultiBuffer)
