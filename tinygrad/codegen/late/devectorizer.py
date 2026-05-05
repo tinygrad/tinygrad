@@ -288,10 +288,10 @@ pm_render = PatternMatcher([
   # Where after gated load becomes alt value
   # NOTE: if a is CAST and a.src[0].dtype == l.dtype, use a.src[0] to avoid roundtrip cast (e.g. uint->float->uint)
   (UPat.var("gate").where(UPat(Ops.LOAD, src=(UPat(), UPat(), UPat.var("gate")), name="l").or_casted(), UPat.var("a")), lambda gate,l,a:
-   l.replace(src=(l.src[0], a.src[0] if a.op is Ops.CAST and a.src[0].dtype == l.dtype else a.cast(l.dtype), gate)).cast(a.dtype)),
+   l.replace(src=(l.src[0], a.src[0] if a.op is Ops.CAST and a.src[0].dtype == l.dtype else a.cast(l.dtype), l.src[2])).cast(a.dtype)),
   (UPat.var("gate").where(UPat.var("a"), UPat(Ops.LOAD,
     src=(UPat(), UPat(), UPat.var("gate", dtype=dtypes.bool).logical_not()), name="l").or_casted()), lambda gate,l,a:
-   l.replace(src=(l.src[0], a.src[0] if a.op is Ops.CAST and a.src[0].dtype == l.dtype else a.cast(l.dtype), gate)).cast(a.dtype)),
+   l.replace(src=(l.src[0], a.src[0] if a.op is Ops.CAST and a.src[0].dtype == l.dtype else a.cast(l.dtype), l.src[2])).cast(a.dtype)),
 ])
 
 # *** Ops.REDUCE -> Ops.DEFINE_ACC ***
