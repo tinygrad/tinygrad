@@ -12,6 +12,7 @@ liburing_src = "https://raw.githubusercontent.com/axboe/liburing/refs/tags/libur
 ggml_common_src = "https://raw.githubusercontent.com/ggml-org/ggml/d4fcfe88a8bcf5c9840be14be6c2fbf1f5b3b2db/src/ggml-common.h"
 cudart_src = "https://developer.download.nvidia.com/compute/cuda/redist/cuda_cudart/linux-x86_64/cuda_cudart-linux-x86_64-12.0.146-archive.tar.xz"
 nvrtc_src = "https://developer.download.nvidia.com/compute/cuda/redist/cuda_nvrtc/linux-x86_64/cuda_nvrtc-linux-x86_64-12.0.140-archive.tar.xz"
+opencl_src = "https://github.com/KhronosGroup/OpenCL-Headers/archive/2e30669d48718fd460f085b4b35b160dad51ce9d.tar.gz"
 macossdk = "/var/db/xcode_select_link/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk"
 
 llvm_lib = (
@@ -52,7 +53,7 @@ def __getattr__(nm):
       [i for i in system("dpkg -L libc6-dev").split() if 'sys/mman.h' in i or 'sys/syscall.h' in i] +
       ["/usr/include/string.h", "/usr/include/elf.h", "/usr/include/unistd.h", "/usr/include/asm-generic/mman-common.h"]), dll="'c'", errno=True)
     case "avcodec": return load("avcodec", ["{}/libavcodec/hevc/hevc.h", "{}/libavcodec/cbs_h265.h"], srcs=ffmpeg_src)
-    case "opencl": return load("opencl", ["/usr/include/CL/cl.h"], dll="'OpenCL'")
+    case "opencl": return load("opencl", ["{}/CL/cl.h"], dll="'OpenCL'", srcs=opencl_src)
     case "cuda": return load("cuda", ["{}/include/cuda.h"], dll="'cuda'", args=["-D__CUDA_API_VERSION_INTERNAL"], srcs=cudart_src, macros=False)
     case "nvrtc": return load("nvrtc", ["{}/include/nvrtc.h"], dll="'nvrtc'", paths=nv_lib_path, srcs=nvrtc_src, prolog=["import sysconfig"])
     case "nvjitlink": load("nvjitlink", [root/"extra/nvJitLink.h"], dll="'nvJitLink'", paths=nv_lib_path, prolog=["import sysconfig"])
