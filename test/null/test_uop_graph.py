@@ -428,7 +428,7 @@ class TestUOpGraph(unittest.TestCase):
     uops = to_uops_list([w, red])
     for u in uops:
       assert u.op is not Ops.WHERE
-      if u.op is Ops.LOAD and u.src[0].src[0].op is Ops.PARAM: assert u.src[1].arg==5
+      if u.op is Ops.LOAD and u.src[0].src[0].op is Ops.PARAM: assert u.src[2].arg==5
 
   def test_where_on_gated_load_folds_swapped_branches(self):
     ridx0 = UOp.range(100, 0)
@@ -438,7 +438,7 @@ class TestUOpGraph(unittest.TestCase):
     uops = to_uops_list([w])
     for u in uops:
       assert u.op is not Ops.WHERE
-      if u.op is Ops.LOAD: assert u.src[1].arg==5
+      if u.op is Ops.LOAD: assert u.src[2].arg==5
 
   def test_where_on_gated_load_with_cast(self):
     ridx0 = UOp.range(100, 0)
@@ -451,7 +451,7 @@ class TestUOpGraph(unittest.TestCase):
     uops = to_uops_list([w, red])
     for u in uops:
       assert u.op is not Ops.WHERE
-      if u.op is Ops.LOAD and u.src[0].src[0].op is Ops.PARAM: assert u.src[1].arg == 5
+      if u.op is Ops.LOAD and u.src[0].src[0].op is Ops.PARAM: assert u.src[2].arg == 5
 
   def test_where_on_casted_gated_load_extra_cond(self):
     ridx0 = UOp.range(100, 0)
