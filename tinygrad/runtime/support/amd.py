@@ -2,7 +2,6 @@ import functools, re, tinygrad.runtime.autogen.am
 from dataclasses import dataclass
 from tinygrad.helpers import getbits, fetch
 
-AMDGPU_URL = "https://gitlab.com/linux-kernel/linux-next/-/raw/cf6d949a409e09539477d32dbe7c954e4852e744/drivers/gpu/drm/amd"
 ROCM_URL = "https://raw.githubusercontent.com/ROCm/rocm-systems/cccc350dc620e61ae2554978b62ab3532dc10bd9/projects"
 
 @dataclass
@@ -37,17 +36,9 @@ def import_module(name:str, target:tuple[int, ...], submod=""):
     return getattr(mod, children[-1])
   raise ImportError(f"Failed to import {submod+'.' if submod else ''}{name} {'.'.join(map(str, target))}")
 
-def header_download(file, name=None, subdir="defines", url=AMDGPU_URL) -> str: return fetch(f"{url}/{file}", name=name, subdir=subdir).read_text()
+def header_download(file, url) -> str: return fetch(f"{url}/{file}", subdir="defines").read_text()
 
-def import_header(path:str, url=AMDGPU_URL):
-  t = re.sub(r'//.*|/\*.*?\*/','', header_download(path, subdir="defines", url=url), flags=re.S)
-  # TODO: refactor when clang2py is replaced
-  return {k:int(v,0) for k,v in re.findall(r'\b([A-Za-z_]\w*)\s*=\s*(0x[0-9A-Fa-f]+|\d+)', t) + \
-                                re.findall(r'^\s*#\s*define\s+([A-Za-z_0-9]\w*)\s+(0x[0-9A-Fa-f]+|\d+)', t, re.M)}
-
-def import_soc(ip):
-  # rocm soc headers have more profiling enums than upstream linux
-  return type("SOC", (object,), import_header(f"aqlprofile/linux/{({9: 'vega10', 10: 'navi10', 11: 'soc21', 12: 'soc24'}[ip[0]])}_enum.h", ROCM_URL))
+def import_soc(ip): return getattr(tinygrad.runtime.autogen.am, f"soc_{ip[0]}")
 
 def import_pmc(ip) -> dict[str, tuple[str, int]]:
   res:dict[str, tuple[str, int]] = {}
@@ -55,7 +46,7 @@ def import_pmc(ip) -> dict[str, tuple[str, int]]:
   # NOTE: precise arch for mi300+, generic for others, since rocm headers lack some archs
   arch = f"gfx{ip[0]}{ip[1]:x}{ip[2]:x}" if ip[0] == 9 else f"gfx{ip[0]}"
 
-  for sec in header_download("rocprofiler-compute/src/rocprof_compute_soc/profile_configs/counter_defs.yaml", url=ROCM_URL).split('- name: ')[1:]:
+  for sec in header_download("rocprofiler-compute/src/rocprof_compute_soc/profile_configs/counter_defs.yaml", ROCM_URL).split('- name: ')[1:]:
     for arch_spec in sec.split('- architectures:')[1:]:
       if arch in arch_spec and (block:=re.search(r'block:\s*([A-Za-z0-9_]+)', arch_spec)) and (ev:=re.search(r'event:\s*(\d+)', arch_spec)):
         res[sec.splitlines()[0].strip()] = (block.group(1), int(ev.group(1)))
