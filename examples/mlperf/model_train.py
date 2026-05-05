@@ -1361,15 +1361,15 @@ def train_llama3(llama2_70b_lora:bool=False):
       MLLOGGER.event(key=mllog_constants.OPT_NAME, value=mllog_constants.ADAMW)
       MLLOGGER.event(key=mllog_constants.OPT_BASE_LR, value=LR)
       MLLOGGER.event(key=mllog_constants.OPT_END_LR, value=END_LR)
-      MLLOGGER.event(key=mllog_constants.OPT_ADAMW_BETA_1, value=0.9)
-      MLLOGGER.event(key=mllog_constants.OPT_ADAMW_BETA_2, value=0.95)
-      MLLOGGER.event(key=mllog_constants.OPT_ADAMW_EPSILON, value=1e-5)
-      MLLOGGER.event(key=mllog_constants.OPT_ADAMW_WEIGHT_DECAY, value=0.1)
+      MLLOGGER.event(key=mllog_constants.OPT_ADAMW_BETA_1, value=ADAM_BETA_1)
+      MLLOGGER.event(key=mllog_constants.OPT_ADAMW_BETA_2, value=ADAM_BETA_2)
+      MLLOGGER.event(key=mllog_constants.OPT_ADAMW_EPSILON, value=ADAM_EPSILON)
+      MLLOGGER.event(key=mllog_constants.OPT_ADAMW_WEIGHT_DECAY, value=WEIGHT_DECAY)
       MLLOGGER.event(key=mllog_constants.OPT_LR_WARMUP_STEPS, value=WARMUP_STEPS)
       MLLOGGER.event(key=mllog_constants.NUM_WARMUP_STEPS, value=WARMUP_STEPS)
       MLLOGGER.event(key=mllog_constants.OPT_LR_DECAY_STEPS, value=MAX_STEPS - WARMUP_STEPS)
       MLLOGGER.event(key=mllog_constants.OPT_LR_DECAY_SCHEDULE, value="cosine with linear warmup")
-      MLLOGGER.event(key=mllog_constants.OPT_GRADIENT_CLIP_NORM, value=1.0)
+      MLLOGGER.event(key=mllog_constants.OPT_GRADIENT_CLIP_NORM, value=MAX_GRAD_NORM)
   else:
     MLLOGGER = None
 
