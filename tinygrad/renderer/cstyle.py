@@ -138,7 +138,7 @@ class CStyleLanguage(Renderer):
     if any(isinstance(dtype, ImageDType) for _,(dtype,_) in bufs):
       tmp = "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n"
     buftypes = [(name, self.render_dtype(dtype, mutable)+self.buffer_suffix if isinstance(dtype, (ImageDType, PtrDType)) else
-                self.arg_int_prefix if dtype == dtypes.int else None) for name,(dtype,mutable) in bufs]
+                self.render_dtype(dtype)) for name,(dtype,mutable) in bufs]
     local_dims = [u.src[0] for u in uops if u.op is Ops.SPECIAL and u.arg[0] == "l"]
     launch_bounds = prod([d.vmax for d in local_dims])
     prg = ''.join([f"{self.kernel_typedef.format(launch_bounds=launch_bounds)} {function_name}(",] +
@@ -280,6 +280,10 @@ class ClangJITRenderer(ClangRenderer):
     from tinygrad.runtime.support.compiler_cpu import ClangJITCompiler
     if "AMX" in target.arch: self.tensor_cores = tc.amx
     self.compiler = ClangJITCompiler([x for x in target.arch.split(",") if x != "AMX"])
+    # CPU memory barrier (Ops.BARRIER): full hardware fence on x86/arm64, compiler-only fallback.
+    self.barrier = '__asm__ volatile("mfence" ::: "memory");' if target.arch.startswith("x86_64") \
+                   else '__asm__ volatile("dmb sy" ::: "memory");' if target.arch.startswith("arm64") \
+                   else '__asm__ volatile("" ::: "memory");'
 
 class OpenCLRenderer(CStyleLanguage):
   has_aux = True

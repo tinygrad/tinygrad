@@ -72,7 +72,7 @@ class MLXIface(PCIIfaceBase):
 class RDMAAllocator(HCQAllocatorBase):
   def __init__(self, dev:RDMADevice): super().__init__(dev, batch_cnt=0)
 
-  def _map(self, buf:HCQBuffer) -> HCQBuffer:
+  def _do_map(self, buf:HCQBuffer) -> HCQBuffer:
     owner = unwrap(buf.base.owner)
     bar, paddrs = owner.iface.pci_dev.bar_info(owner.iface.vram_bar)[0], buf.base.meta.mapping.paddrs  # type: ignore[attr-defined]
     page_sz = (2 << 20) if min(sz for _, sz in paddrs) >= (2 << 20) else (4 << 10)

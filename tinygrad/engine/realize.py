@@ -233,7 +233,12 @@ def compile_linear(linear:UOp, beam=0, validate=False) -> UOp:
   if validate: linear = graph_rewrite(linear, pm_validate, name="validate", walk=True)
   if (beam_val:=(beam or BEAM.value)) >= 1: linear = graph_rewrite(linear, pm_beam, ctx=beam_val, walk=True)
   linear = graph_rewrite(linear, pm_compile, name="precompile kernels", walk=True)
-  return graph_rewrite(linear, pm_optimize_local_size, name="optimize local size", walk=True)
+  linear = graph_rewrite(linear, pm_optimize_local_size, name="optimize local size", walk=True)
+
+  # device specific rewrites
+  from tinygrad.runtime.support.hcq2 import pm_hcq_schedule
+  linear = graph_rewrite(linear, pm_hcq_schedule+pm_flatten_linear, name="device specific", walk=True)
+  return linear
 
 def run_linear(linear:UOp, var_vals:dict[str, int]|None=None, input_uops:tuple[UOp, ...]=(), do_update_stats=True, jit=False):
   if not jit: linear = compile_linear(linear, validate=VALIDATE_WITH_CPU)
