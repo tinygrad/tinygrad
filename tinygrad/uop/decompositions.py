@@ -290,8 +290,10 @@ def fast_idiv(target: Target, x: UOp, d: int, dont_cast=False) -> UOp|None:
   if m*vmin >= x.dtype.min and m*vmax <= x.dtype.max:
     return ((x*m) >> s) if is_unsigned else ((x*m) >> s) + (x<0).where(x.ufix(1), 0)
   # before we try casting to a larger dtype (slow), we see if there are powers of two in d we can shift to make x smaller
+  # use explicit Ops.IDIV (trunc) since the recursion assumes trunc semantics throughout
   if (largest_factor_of_two_in_d := (d & -d)) > 1:
-    if (ret:=fast_idiv(target, x//largest_factor_of_two_in_d, d//largest_factor_of_two_in_d, dont_cast=True)) is not None: return ret
+    if (ret:=fast_idiv(target, x.alu(Ops.IDIV, x.const_like(largest_factor_of_two_in_d)),
+                       d//largest_factor_of_two_in_d, dont_cast=True)) is not None: return ret
   if dont_cast: return None
   # promo_lattice needs to return an unsigned type if the type is unsigned
   if dtypes.is_int(next_dtype := promo_lattice[x.dtype.scalar()][-1]) and is_dtype_supported(next_dtype, target):
