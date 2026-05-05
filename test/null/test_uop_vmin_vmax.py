@@ -192,6 +192,20 @@ class TestVminVmaxDivMod(unittest.TestCase):
     self.assertEqual(uop.vmin, 3)
     self.assertEqual(uop.vmax, 6)
 
+  def test_vmin_vmax_floordiv_floormod(self):
+    # FLOORDIV/FLOORMOD ranges differ from IDIV/MOD when the dividend can be negative
+    x = UOp.variable('x', -7, 7)
+    floordiv = x.alu(Ops.FLOORDIV, x.const_like(3))
+    self.assertEqual(floordiv.vmin, -3)
+    self.assertEqual(floordiv.vmax, 2)
+    floormod = x.alu(Ops.FLOORMOD, x.const_like(3))
+    self.assertEqual(floormod.vmin, 0)
+    self.assertEqual(floormod.vmax, 2)
+    # negative const divisor: floormod range is [c+1, 0]
+    floormod_neg = x.alu(Ops.FLOORMOD, x.const_like(-3))
+    self.assertEqual(floormod_neg.vmin, -2)
+    self.assertEqual(floormod_neg.vmax, 0)
+
     # cross 0
     x = UOp.variable('x', -10, 10)
     uop = x // -2

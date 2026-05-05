@@ -438,16 +438,31 @@ def get_transcendental_patterns(ops:tuple[Ops, ...], force_transcendental:bool) 
   if Ops.SQRT not in ops or force_transcendental: pat.append((UPat(Ops.SQRT, src=UPat.var("d")), lambda d: xpow(d, d.const_like(0.5))))
   return PatternMatcher(pat)
 
+def floordiv_to_idiv(d:UOp, a:UOp, b:UOp) -> UOp:
+  if (a.vmin >= 0 and b.vmin > 0) or (a.vmax <= 0 and b.vmax < 0): return a.alu(Ops.IDIV, b)
+  return a.alu(Ops.IDIV, b) - (a.alu(Ops.MOD, b).ne(0) & (a<0).ne(b<0)).cast(d.dtype)
+
+def floormod_to_mod(d:UOp, a:UOp, b:UOp) -> UOp:
+  if (a.vmin >= 0 and b.vmin > 0) or (a.vmax <= 0 and b.vmax < 0): return a.alu(Ops.MOD, b)
+  r = a.alu(Ops.MOD, b)
+  # use where instead of mul to avoid being fused into MULACC (which int64 long-decomp doesn't handle)
+  return r + (r.ne(0) & (a<0).ne(b<0)).where(b, b.const_like(0))
+
 powers_of_two: dict[int, int] = {2**i:i for i in range(64)}
 @functools.cache
 def get_late_rewrite_patterns(ops:tuple[Ops, ...], disable_fast_idiv:bool) -> PatternMatcher:
-  pat: list[tuple[UPat, Callable]] = []
+  pat: list[tuple[UPat, Callable]] = [
+    (UPat(Ops.FLOORDIV, name="d", src=(UPat.var("a"), UPat.var("b"))), floordiv_to_idiv),
+    (UPat(Ops.FLOORMOD, name="d", src=(UPat.var("a"), UPat.var("b"))), floormod_to_mod),
+  ]
   # no real hardware supports THREEFRY, but NullRenderer does
   if Ops.THREEFRY not in ops: pat.append((UPat(Ops.THREEFRY, dtype=dtypes.uint64, src=(UPat.var("x"), UPat.var("key"))), threefry2x32))
   # MAX can be rewritten as CMPLT + WHERE (max function is annoying on many cstyle backends)
   if Ops.MAX not in ops and Ops.CMPLT in ops: pat.append((UPat(Ops.MAX, name="m"), lambda m: (m.src[0] < m.src[1]).where(m.src[1], m.src[0])))
   # rewrite MOD to AND (which should always be supported, but not for generic in tests): x % (2**y) -> x & (2**y-1)
-  if Ops.AND in ops: pat += [(UPat.var("x", dtypes.ints)%UPat.cvar("c"), lambda x,c: x & (c.arg-1) if c.arg in powers_of_two else None)]
+  # TODO: drop the x.vmin>=0 guard once UOp `%` lowers to FLOORMOD instead of MOD
+  if Ops.AND in ops: pat += [(UPat.var("x", dtypes.ints)%UPat.cvar("c"),
+    lambda x,c: x & (c.arg-1) if c.arg in powers_of_two and x.vmin >= 0 else None)]
   if Ops.OR in ops: pat += [(UPat.var("x", dtypes.bool).logical_not()&UPat.var("y", dtypes.bool).logical_not(),
     lambda x,y: (x | y).logical_not())]
   # rewrite MUL/IDIV to SHL+SHR: x*(2**y) -> shl(x,y) and x//(2**y) -> shr(x,y)
