@@ -237,9 +237,6 @@ tensor_spec = PatternMatcher([
 # ***** UOp spec in linearized programs *****
 
 program_spec = PatternMatcher([
-  # LOAD (idx, alt_value), LOAD can have an alt value, but only if the index has a gate
-  (UPat().index(UPat(), UPat(dtype=dtypes.bool)).or_casted().load(UPat()), lambda: True),
-
   # END closes ranges
   (UPat(Ops.END, src=(UPat(), UPat(Ops.RANGE)), dtype=dtypes.void), lambda: True),
 
