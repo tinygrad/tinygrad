@@ -416,13 +416,15 @@ def f2f_clamp(val:UOp, dt:DType) -> UOp:
   # FIXME: CMPLT of nan is undefined
   return val.ne(val).where(val, (val < -mx).where(-sat, (mx < val).where(sat, val)))
 
-def f2f_load(x: UOp, fr:DType, to:DType) -> UOp:
-  if (n:=x.dtype.count) == 1: return f2f(x.replace(dtype=f2f_dt[fr]), fr, to)
-  return UOp.vectorize(*(f2f(x.replace(dtype=f2f_dt[fr], src=(reindex(x.src[0].src[0], i, 1),)), fr, to) for i in range(n)))
+def f2f_load(x:UOp, fr:DType, to:DType) -> UOp:
+  if (n:=x.dtype.count) == 1:
+    return f2f(x.replace(src=(x.src[0],)+((x.src[1].cast(f2f_dt[fr]), x.src[2]) if len(x.src) >= 3 else ()), dtype=f2f_dt[fr]), fr, to)
+  return UOp.vectorize(*(f2f(x.replace(dtype=f2f_dt[fr], src=(reindex(x.src[0].src[0], i, 1),) + \
+                                       ((x.src[1].gep(i).cast(f2f_dt[fr]), x.src[2]) if len(x.src) >= 3 else ())), fr, to) for i in range(n)))
 
-def f2f_store(st, idx, val, fr:DType, to:DType):
-  if (n:=val.dtype.count) == 1: return st.replace(src=(idx, f2f(val.bitcast(f2f_dt[to]), to, fr)))
-  return UOp.group(*(st.replace(src=(reindex(idx, i, 1), f2f(val.gep(i).bitcast(f2f_dt[to]), to, fr))) for i in range(n)))
+def f2f_store(st:UOp, idx, val, fr:DType, to:DType):
+  if (n:=val.dtype.count) == 1: return st.replace(src=(idx, f2f(val.bitcast(f2f_dt[to]), to, fr))+st.src[2:])
+  return UOp.group(*(st.replace(src=(reindex(idx, i, 1), f2f(val.gep(i).bitcast(f2f_dt[to]), to, fr))+st.src[2:]) for i in range(n)))
 
 # ***** decomposition patterns *****
 
@@ -561,7 +563,4 @@ pm_dtype_decomps = PatternMatcher([
    ctx[0].add({dtypes.ulong:dtypes.long}.get(dt:=x.dtype.base.scalar(), dt))),
   # do the rewrites
   (UPat(Ops.SINK, name="sink"), do_dtype_decomps),
-  # fix mismatch of ALT dtype (TODO: do dtype decomp before gating?)
-  (UPat(Ops.LOAD, src=(UPat(), UPat.var("alt"), UPat()), name="x"),
-    lambda x,alt: x.replace(src=(x.src[0], alt.cast(x.dtype), x.src[2])) if x.dtype != alt.dtype else None),
 ])
