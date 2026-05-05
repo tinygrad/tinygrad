@@ -209,6 +209,11 @@ class TestFetch(unittest.TestCase):
           headers={"Range": "bytes=0-100"}).read_bytes()
     assert len(x) == 101, f"{len(x) != 101}"
 
+  def test_fetch_sha(self):
+    self.assertRaises(Exception, fetch, "https://ftp.gnu.org/gnu/gzip/gzip-1.13.tar.gz", allow_caching=False, sha256="a")
+    fetch("https://ftp.gnu.org/gnu/gzip/gzip-1.13.tar.gz", allow_caching=False,
+          sha256="20fc818aeebae87cdbf209d35141ad9d3cf312b35a5e6be61bfcfbf9eddd212a")
+
 class TestFullyFlatten(unittest.TestCase):
   def test_fully_flatten(self):
     self.assertEqual(fully_flatten([[1, 3], [1, 2]]), [1, 3, 1, 2])

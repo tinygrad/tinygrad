@@ -3,7 +3,7 @@ from typing import Any, cast
 import tinygrad.runtime.autogen.cuda as cuda
 from tinygrad.runtime.support.c import init_c_var
 from tinygrad.device import Device, MultiBuffer
-from tinygrad.uop.ops import Ops
+from tinygrad.uop.ops import UOp, Ops
 from tinygrad.runtime.ops_cuda import CUDADevice, check, encode_args, cu_time_execution
 from tinygrad.engine.jit import MultiGraphRunner
 
@@ -44,7 +44,7 @@ class CUDAGraph(MultiGraphRunner):
     deps = self._access_resources(bufs, write, new_dependency=(node:=cuda.CUgraphNode()))
     return (cuda.CUgraphNode*len(deps))(*deps) if deps else None, node
 
-  def __call__(self, input_buffers, var_vals, wait=False, input_uops=None):
+  def __call__(self, input_uops:tuple[UOp, ...], var_vals:dict[str, int], wait=False):
     # Update buffers in the c_args struct.
     for j in self.updatable:
       (_, params, c_args, is_copy), dev_idx = self.nodes[j], self.calls[j][0]

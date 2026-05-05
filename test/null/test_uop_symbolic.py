@@ -3,7 +3,6 @@ import unittest, pickle, functools, math
 import z3
 
 from tinygrad.dtype import dtypes, ConstType, DType, Invalid
-from tinygrad.helpers import Context
 from test.helpers import get_uops
 from tinygrad.uop.ops import UOp, Ops, graph_rewrite, sym_infer
 from tinygrad.uop.symbolic import sym, commutative, pm_simplify_valid, pm_move_where_on_load
@@ -181,8 +180,8 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(Variable("a", 0, 8)*1, 0, 8, "a")
 
   def test_mul_neg_1(self):
-    self.helper_test_variable((Variable("a", 0, 2)*-1)//3, 0, 0, "0")
-    self.helper_test_variable((Variable("a", 2, 7)*-1)//3, -2, 0, "((a//3)*-1)")
+    self.helper_test_variable((Variable("a", 0, 2)*-1)//3, -1, 0, "((a*-1)//3)")
+    self.helper_test_variable((Variable("a", 2, 7)*-1)//3, -3, -1, "((a*-1)//3)")
 
   def test_mul_2(self):
     self.helper_test_variable(Variable("a", 0, 8)*2, 0, 16, "(a*2)")
@@ -203,8 +202,8 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(Variable("a", 0, 7) // 20, 0, 0, "0")
 
   def test_div_neg_min_max(self):
-    self.helper_test_variable(Variable("a", 1, 7) // -2, -3, 0, "((a//2)*-1)")
-    self.helper_test_variable(Variable("a", 0, 6) // -2, -3, 0, "((a//2)*-1)")
+    self.helper_test_variable(Variable("a", 1, 7) // -2, -4, -1, "(a//-2)")
+    self.helper_test_variable(Variable("a", 0, 6) // -2, -3, 0, "(a//-2)")
 
   def test_div_mod_zero(self):
     with self.assertRaises(ZeroDivisionError):
@@ -238,14 +237,14 @@ class TestSymbolic(unittest.TestCase):
 
   def test_mod_min_max(self):
     self.helper_test_variable(Variable("x", 0, 10)%Variable("y", 1, 10), 0, 9, "(x%y)")
-    self.helper_test_variable(Variable("x", -10, 0)%Variable("y", 1, 10), -9, 0, "(((x*-1)%y)*-1)")
-    self.helper_test_variable(Variable("x", 0, 10)%Variable("y", -10, -1), 0, 9, "(x%(y*-1))")
-    self.helper_test_variable(Variable("x", -10, 0)%Variable("y", -10, -1), -9, 0, "(((x*-1)%(y*-1))*-1)")
-    self.helper_test_variable(Variable("x", -10, 10)%Variable("y", -10, -1), -9, 9, "(x%(y*-1))")
+    self.helper_test_variable(Variable("x", -10, 0)%Variable("y", 1, 10), 0, 9, "(x%y)")
+    self.helper_test_variable(Variable("x", 0, 10)%Variable("y", -10, -1), -9, 0, "(x%y)")
+    self.helper_test_variable(Variable("x", -10, 0)%Variable("y", -10, -1), -9, 0, "(x%y)")
+    self.helper_test_variable(Variable("x", -10, 10)%Variable("y", -10, -1), -9, 0, "(x%y)")
 
-    # test _min_max directly without the rewrite taking out the sign
+    # test _min_max directly: floor mod with positive divisor is in [0, c-1]; with negative divisor in [c+1, 0]
     self.assertEqual((Variable("x", -10, 0)%Variable("y", -10, -1))._min_max, (-9, 0))
-    self.assertEqual((Variable("x", -10, 0)%Variable("y", 1, 10))._min_max, (-9, 0))
+    self.assertEqual((Variable("x", -10, 0)%Variable("y", 1, 10))._min_max, (0, 9))
 
   def test_range_div_its_symbolic_bound(self):
     a = Variable("a", 1, 10, dtypes.weakint)
@@ -262,12 +261,12 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(Variable("a", 0, 6) // 2, 0, 3, "(a//2)")
 
     self.helper_test_variable(Variable("x", 0, 10)//Variable("y", 1, 10), 0, 10, "(x//y)")
-    self.helper_test_variable(Variable("x", -10, 0)//Variable("y", 1, 10), -10, 0, "(((x*-1)//y)*-1)")
-    self.helper_test_variable(Variable("x", 0, 10)//Variable("y", -10, -1), -10, 0, "((x//(y*-1))*-1)")
-    self.helper_test_variable(Variable("x", -10, 0)//Variable("y", -10, -1), 0, 10, "((x*-1)//(y*-1))")
+    self.helper_test_variable(Variable("x", -10, 0)//Variable("y", 1, 10), -10, 0, "(x//y)")
+    self.helper_test_variable(Variable("x", 0, 10)//Variable("y", -10, -1), -10, 0, "(x//y)")
+    self.helper_test_variable(Variable("x", -10, 0)//Variable("y", -10, -1), 0, 10, "(x//y)")
 
     self.helper_test_variable(Variable("x", -10, 10)//Variable("y", 1, 10), -10, 10, "(x//y)")
-    self.helper_test_variable(Variable("x", -10, 10)//Variable("y", -10, -1), -10, 10, "((x//(y*-1))*-1)")
+    self.helper_test_variable(Variable("x", -10, 10)//Variable("y", -10, -1), -10, 10, "(x//y)")
 
   def test_mod_factor(self):
     self.helper_test_variable(usum([Variable("a", 0, 7)*100, Variable("b", 0, 3)*50]) % 100, 0, 50, "((b%2)*50)")
@@ -334,12 +333,12 @@ class TestSymbolic(unittest.TestCase):
   def test_mod_mod_wrong_sign(self):
     v1=Variable("v1", 0, 128)
     v3=Variable("v3", 0, 7)
-    self.helper_test_variable((((((v1%2)*2)+((v3+-1)%5))+-2)%5), -3, 4, "(v1%2*2+(v3+-1)%5+-2)")
+    self.helper_test_variable((((((v1%2)*2)+((v3+-1)%5))+-2)%5), 0, 4, "((v3+v1%2*2+-3)%5)")
 
   def test_mod_mod_wrong_sign2(self):
     v2=Variable("v2", 0, 8)
     v3=Variable("v3", 0, 4)
-    self.helper_test_variable((((((v3+3)%7)+(v2+-2))%7)%7), -2, 6, "(((v2+((v3+3)%7))+-2)%7)")
+    self.helper_test_variable((((((v3+3)%7)+(v2+-2))%7)%7), 0, 6, "((v2+v3+1)%7)")
 
   def test_mul_mul(self):
     self.helper_test_variable((Variable("a", 0, 5)*10)*9, 0, 5*10*9, "(a*90)")
@@ -357,21 +356,21 @@ class TestSymbolic(unittest.TestCase):
   def test_div_const_div(self):
     a = Variable("a", 0, 124)
     self.helper_test_variable((a//2+1)//2, 0, 31, "((a+2)//4)")
-    self.helper_test_variable(((-a)//2-1)//2, -31, 0, "(((a+2)//4)*-1)")
-    self.helper_test_variable(((-a)//2+10)//2, -26, 5, "((((a//2)*-1)+10)//2)")
+    self.helper_test_variable(((-a)//2-1)//2, -32, -1, "((a*-1+2)//4+-1)")
+    self.helper_test_variable(((-a)//2+10)//2, -26, 5, "(a*-1//4+5)")
 
   def test_div_const_div_wrong_sign(self):
     a = Variable("a", 0, 124)
-    self.helper_test_variable(((a-10)//2+10)//2, 2, 33, "((((a+-10)//2)+10)//2)")
+    self.helper_test_variable(((a-10)//2+10)//2, 2, 33, "((a+2)//4+2)")
 
   def test_div_const_div_wrong_sign_divisor(self):
     a = Variable("a", 0, 124)
-    self.helper_test_variable(((a+10)//-2+10)//-4, -1, 14, "(((((a//2)*-1)+5)//4)*-1)")
+    self.helper_test_variable(((a+10)//-2+10)//-4, -2, 14, "(((a+10)//-2+10)//-4)")
 
   def test_neg_mod(self):
     a = Variable("a", 0, 124)
-    self.helper_test_variable((-a)%4, -3, 0, "((a%4)*-1)")
-    self.helper_test_variable(a%-4, 0, 3, "(a%4)")
+    self.helper_test_variable((-a)%4, 0, 3, "(a*-1%4)")
+    self.helper_test_variable(a%-4, -3, 0, "(a%-4)")
 
   def test_distribute_mul(self):
     self.helper_test_variable(usum([Variable("a", 0, 3), Variable("b", 0, 5)])*3, 0, 24, "((a*3)+(b*3))")
@@ -387,11 +386,11 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(Variable("a", 0, 6)%100, 0, 6, "a")
 
   def test_big_mod(self):
-    self.helper_test_variable(Variable("a", -20, 20)%10, -9, 9, "(a%10)")
-    self.helper_test_variable(Variable("a", -20, 0)%10, -9, 0, "(((a*-1)%10)*-1)")
-    self.helper_test_variable(Variable("a", -20, 1)%10, -9, 1, "(a%10)")
+    self.helper_test_variable(Variable("a", -20, 20)%10, 0, 9, "(a%10)")
+    self.helper_test_variable(Variable("a", -20, 0)%10, 0, 9, "(a%10)")
+    self.helper_test_variable(Variable("a", -20, 1)%10, 0, 9, "(a%10)")
     self.helper_test_variable(Variable("a", 0, 20)%10, 0, 9, "(a%10)")
-    self.helper_test_variable(Variable("a", -1, 20)%10, -1, 9, "(a%10)")
+    self.helper_test_variable(Variable("a", -1, 20)%10, 0, 9, "(a%10)")
 
   def test_ge_remove(self):
     self.helper_test_variable(Variable("a", 0, 6) >= 25, 0, 0, "False")
@@ -439,8 +438,8 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(c & c.logical_not(), False, False, "False")
 
   def test_mod_factor_negative(self):
-    self.helper_test_variable(usum([uconst(-29), Variable("a", 0, 10), Variable("b", 0, 10)*28]) % 28, -27, 27, "(((a+(b*28))+-29)%28)")
-    self.helper_test_variable(usum([uconst(-29), Variable("a", 0, 100), Variable("b", 0, 10)*28]) % 28, -27, 27, "(((a+(b*28))+-29)%28)")
+    self.helper_test_variable(usum([uconst(-29), Variable("a", 0, 10), Variable("b", 0, 10)*28]) % 28, 0, 27, "((a+b*28+-29)%28)")
+    self.helper_test_variable(usum([uconst(-29), Variable("a", 0, 100), Variable("b", 0, 10)*28]) % 28, 0, 27, "((a+b*28+-29)%28)")
 
   def test_sum_combine_num(self):
     self.helper_test_variable(usum([uconst(29), Variable("a", 0, 10), uconst(-23)]), 6, 16, "(a+6)")
@@ -448,21 +447,11 @@ class TestSymbolic(unittest.TestCase):
   def test_sum_num_hoisted_and_factors_cancel_out(self):
     self.helper_test_variable(usum([Variable("a", 0, 1) * -4 + 1, Variable("a", 0, 1) * 4]), 1, 1, "1")
 
-  @unittest.expectedFailure  # only correct for floordiv, not truncdiv
   def test_div_cancel(self):
     self.helper_test_variable(usum([uconst(-40), Variable("a", 0, 10)*2, Variable("b", 0, 10)*40])//40, -1, 9, "(b+-1)")
 
-  def test_div_cancel_correct(self):
-    with Context(CORRECT_DIVMOD_FOLDING=1):
-      self.helper_test_variable(usum([uconst(-40), Variable("a", 0, 10)*2, Variable("b", 0, 10)*40])//40, -1, 9, "(((a+(b*20))+-20)//20)")
-
-  @unittest.expectedFailure  # only correct for floordiv, not truncdiv
   def test_mod_cancel(self):
     self.helper_test_variable(usum([uconst(-40), Variable("a", 0, 10)*2, Variable("b", 0, 10)*40]) % 40, 0, 20, "(a*2)")
-
-  def test_mod_cancel_correct(self):
-    with Context(CORRECT_DIVMOD_FOLDING=1):
-      self.helper_test_variable(usum([uconst(-40), Variable("a", 0, 10)*2, Variable("b", 0, 10)*40]) % 40, -38, 38, "((((a+(b*20))+-20)%20)*2)")
 
   def test_mul_div(self):
     self.helper_test_variable((Variable("a", 0, 10)*4)//4, 0, 10, "a")
@@ -475,22 +464,22 @@ class TestSymbolic(unittest.TestCase):
     lidx1 = UOp.variable("lidx1", 0, 1)
     ridx1005 = UOp.variable("ridx1005", 0, 2)
     ridx1006 = UOp.variable("ridx1006", 0, 2)
-    self.helper_test_variable((lidx1+((gidx1*18)+(ridx1005*18)+(lidx0*162))+(gidx0*2)+(ridx1006*2)+-40)//18, -2, 20,
-      "(((((lidx1+(((gidx1*18)+(ridx1005*18))+(lidx0*162)))+(gidx0*2))+(ridx1006*2))+-40)//18)")
+    self.helper_test_variable((lidx1+((gidx1*18)+(ridx1005*18)+(lidx0*162))+(gidx0*2)+(ridx1006*2)+-40)//18, -3, 20,
+      "(gidx1+ridx1005+lidx0*9+(gidx0+ridx1006+7)//9+-3)")
 
   def test_add_div(self):
     # careful about the lower bounds and upper bounds
-    self.helper_test_variable((Variable("a", 0, 5)-2)//4, 0, 0, "0")
-    self.helper_test_variable((Variable("a", 0, 5)-1)//4, 0, 1, "((a+-1)//4)")
+    self.helper_test_variable((Variable("a", 0, 5)-2)//4, -1, 0, "((a+2)//4+-1)")
+    self.helper_test_variable((Variable("a", 0, 5)-1)//4, -1, 1, "((a+3)//4+-1)")
     self.helper_test_variable((Variable("a", 0, 5))//4, 0, 1, "(a//4)")
     self.helper_test_variable((Variable("a", 0, 5)+1)//4, 0, 1, "((a+1)//4)")
     self.helper_test_variable((Variable("a", 0, 5)+2)//4, 0, 1, "((a+2)//4)")
     self.helper_test_variable((Variable("a", 0, 5)+3)//4, 0, 2, "((a+3)//4)")
-    self.helper_test_variable((Variable("a", 0, 5)+4)//4, 1, 2, "((a//4)+1)")
-    self.helper_test_variable((Variable("a", 0, 5)+5)//4, 1, 2, "(((a+1)//4)+1)")
+    self.helper_test_variable((Variable("a", 0, 5)+4)//4, 1, 2, "(a//4+1)")
+    self.helper_test_variable((Variable("a", 0, 5)+5)//4, 1, 2, "((a+1)//4+1)")
 
   def test_div_neg_rem(self):
-    self.helper_test_variable((-Variable("a", 0, 255)+256)//2, 0, 128, "((((a+1)//2)*-1)+128)")
+    self.helper_test_variable((-Variable("a", 0, 255)+256)//2, 0, 128, "(a*-1//2+128)")
 
   def test_mul_div_factor_mul(self):
     self.helper_test_variable((Variable("a", 0, 10)*8)//4, 0, 20, "(a*2)")
@@ -502,7 +491,7 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((Variable("a", 0, 10)*4)//8, 0, 5, "(a//2)")
 
   def test_mul_div_factor_div_neg(self):
-    self.helper_test_variable((Variable("a", 0, 10)*-4+4)//8, -4, 0, "(((a*-1)+1)//2)")
+    self.helper_test_variable((Variable("a", 0, 10)*-4+4)//8, -5, 0, "((a*-1+1)//2)")
 
   def test_div_symbolic_const_gcd(self):
     a = Variable("a", -10, 10)
@@ -520,8 +509,8 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((d1*a*d2*b*d1)//(d1*d2),  -1000, 1000, "(a*(b*d1))", test_z3=False)
     self.helper_test_variable((d1*a + b*d1)//(d1), -20, 20, "(a+b)", test_z3=False)
     self.helper_test_variable((d1*a + b*d1 + c*d1)//(d1), -30, 30, "(c+(a+b))", test_z3=False)
-    self.helper_test_variable((3*a*d1 + 9*b*d1)//(3*d1*d2), -40, 40, "(((a+(b*3))//(d2*-1))*-1)", test_z3=False)
-    self.helper_test_variable((3*a*d1 + 9*b*d1+3)//(3*d1*d2), -401, 399, "(((((a*d1)+((b*d1)*3))+1)//((d1*d2)*-1))*-1)", test_z3=False)
+    self.helper_test_variable((3*a*d1 + 9*b*d1)//(3*d1*d2), -40, 40, "((a+b*3)//d2)", test_z3=False)
+    self.helper_test_variable((3*a*d1 + 9*b*d1+3)//(3*d1*d2), -401, 399, "((a*d1+b*d1*3+1)//(d1*d2))", test_z3=False)
 
   def test_symbolic_factor_remainder_div(self):
     a = Variable("a", 0, 10)
@@ -532,7 +521,7 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((d*a*20+b*d*5+10)//(5*d), 0, 52, "((b+(a*4))+(2//d))")
 
   def test_mod_gcd_factor_neg(self):
-    self.helper_test_variable((Variable("a", 0, 10)*-4+4)%8, -4, 4, "((((a*-1)+1)%2)*4)")
+    self.helper_test_variable((Variable("a", 0, 10)*-4+4)%8, 0, 4, "((a*-1+1)%2*4)")
 
   def test_mod_gcd_fold_neg(self):
     self.helper_test_variable((Variable("a", 0, 10)*-8+20)%4, 0, 0, "0")
@@ -540,22 +529,21 @@ class TestSymbolic(unittest.TestCase):
   def test_sum_div_partial_remove(self):
     self.helper_test_variable(usum([Variable("idx0", 0, 127)*4, Variable("idx2", 0, 3)])//4, 0, 127, "idx0")
 
-  def test_cdiv_const_evaluation(self):
-    self.helper_test_variable((Variable("a", 0, 2)-12)//8, -1, -1, "-1")
-    self.helper_test_variable((-Variable("a", 0, 2))//7, 0, 0, "0")
+  def test_floordiv_const_evaluation(self):
+    self.helper_test_variable((Variable("a", 0, 2)-12)//8, -2, -2, "-2")
+    self.helper_test_variable((-Variable("a", 0, 2))//7, -1, 0, "(a*-1//7)")
 
-  def test_cmod_const_evaluation(self):
-    self.helper_test_variable((Variable("a", 1, 1)*-3)%8, -3, -3, "-3")
-    self.helper_test_variable((-Variable("a", 10, 10))%7, -3, -3, "-3")
+  def test_floormod_const_evaluation(self):
+    self.helper_test_variable((Variable("a", 1, 1)*-3)%8, 5, 5, "5")
+    self.helper_test_variable((-Variable("a", 10, 10))%7, 4, 4, "4")
 
   def test_div_numerator_negative(self):
-    with Context(CORRECT_DIVMOD_FOLDING=1):
-      self.helper_test_variable((Variable("idx", 0, 9)*-10)//11, -8, 0, "(((idx*10)//11)*-1)")
+    self.helper_test_variable((Variable("idx", 0, 9)*-10)//11, -9, 0, "(idx*-1)")
 
   def test_nest_div_negative_factor(self):
     ridx0=Variable("ridx0", 0, 9)
     ridx1=Variable("ridx1", 0, 6)
-    self.helper_test_variable(((((ridx0*-7)+ridx1)+63)//35), 0, 1, "(((ridx0//5)*-1)+1)")
+    self.helper_test_variable(((((ridx0*-7)+ridx1)+63)//35), 0, 1, "((ridx1+ridx0*-7+28)//35+1)")
 
   def test_div_into_mod(self):
     self.helper_test_variable((Variable("idx", 0, 16)*4)%8//4, 0, 1, "(idx%2)")
@@ -568,11 +556,11 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable(x%12//4*4 + x%4 + x//12*12, 0, 23, "x")
 
   def test_div_neg_cancel(self):
-    self.helper_test_variable((-Variable("idx", 0, 100)+199)//-4 + 50, 1, 26, "((idx//4)+1)")
-    self.helper_test_variable((-Variable("idx", 0, 100)+200)//-4 + 50, 0, 25, "((idx+3)//4)")
-    self.helper_test_variable((-Variable("idx", 0, 100)+201)//-4 + 50, 0, 25, "((idx+2)//4)")
-    self.helper_test_variable((-Variable("idx", 0, 100))//2, -50, 0, "((idx//2)*-1)")
-    self.helper_test_variable(Variable("idx", 0, 100)//-2, -50, 0, "((idx//2)*-1)")
+    self.helper_test_variable((-Variable("idx", 0, 100)+199)//-4 + 50, 0, 25, "((idx*-1+199)//-4+50)")
+    self.helper_test_variable((-Variable("idx", 0, 100)+200)//-4 + 50, 0, 25, "((idx*-1+200)//-4+50)")
+    self.helper_test_variable((-Variable("idx", 0, 100)+201)//-4 + 50, -1, 24, "((idx*-1+201)//-4+50)")
+    self.helper_test_variable((-Variable("idx", 0, 100))//2, -50, 0, "(idx*-1//2)")
+    self.helper_test_variable(Variable("idx", 0, 100)//-2, -50, 0, "(idx//-2)")
 
   def test_sum_div_big_const(self):
     gidx0 = Variable("gidx0", 0, 24)
@@ -647,22 +635,22 @@ class TestSymbolic(unittest.TestCase):
   def test_div_neg_all_range(self):
     gidx = Variable("gidx", 0, 124)
     lidx = Variable("lidx", 0, 7)
-    self.helper_test_variable((-gidx*8-lidx+999)//-4 + 250, 1, 250, "(((gidx*2)+(lidx//4))+1)")
-    self.helper_test_variable((-gidx*8-lidx+1000)//-4 + 250, 0, 250, "((gidx*2)+((lidx+3)//4))")
-    self.helper_test_variable((-gidx*8-lidx+1001)//-4 + 250, 0, 250, "((gidx*2)+((lidx+2)//4))")
-    self.helper_test_variable((-gidx*8-lidx+1002)//-4 + 250, 0, 250, "((gidx*2)+((lidx+1)//4))")
+    self.helper_test_variable((-gidx*8-lidx+999)//-4 + 250, 0, 250, "((gidx*-8+lidx*-1+999)//-4+250)")
+    self.helper_test_variable((-gidx*8-lidx+1000)//-4 + 250, 0, 249, "((gidx*-8+lidx*-1+1000)//-4+250)")
+    self.helper_test_variable((-gidx*8-lidx+1001)//-4 + 250, -1, 249, "((gidx*-8+lidx*-1+1001)//-4+250)")
+    self.helper_test_variable((-gidx*8-lidx+1002)//-4 + 250, -1, 249, "((gidx*-8+lidx*-1+1002)//-4+250)")
 
   def test_div_neg_then_neg(self):
     # taken from arange opts
     lidx0 = Variable("lidx0", 0, 7)
     lidx1 = Variable("lidx1", 0, 7)
     alu2 = -lidx0-lidx1
-    self.helper_test_variable((((alu2+14)//(-32))+4), 4, 4, "4")
-    self.helper_test_variable(-(((alu2+14)//(-32))+4), -4, -4, "-4")
-    self.helper_test_variable((((alu2+134)//(-32))+4), 0, 1, "(((lidx0+lidx1)+25)//32)")
-    self.helper_test_variable((((alu2+142)//(-32))+4), 0, 0, "0")
-    self.helper_test_variable((((alu2+150)//(-32))+4), 0, 0, "0")
-    self.helper_test_variable((((alu2+158)//(-32))+4), 0, 0, "0")
+    self.helper_test_variable((((alu2+14)//(-32))+4), 3, 4, "((lidx0*-1+lidx1*-1+14)//-32+4)")
+    self.helper_test_variable(-(((alu2+14)//(-32))+4), -4, -3, "((lidx0*-1+lidx1*-1+14)//-32*-1+-4)")
+    self.helper_test_variable((((alu2+134)//(-32))+4), -1, 0, "((lidx0*-1+lidx1*-1+134)//-32+4)")
+    self.helper_test_variable((((alu2+142)//(-32))+4), -1, 0, "((lidx0*-1+lidx1*-1+142)//-32+4)")
+    self.helper_test_variable((((alu2+150)//(-32))+4), -1, -1, "-1")
+    self.helper_test_variable((((alu2+158)//(-32))+4), -1, -1, "-1")
 
   def test_div_mod_recombine(self):
     gidx = Variable("gidx", 0, 124)
@@ -696,7 +684,7 @@ class TestSymbolic(unittest.TestCase):
     # negative variable range
     xn = Variable("x", -1000, 1000)
     self.helper_test_variable(xn//3%224*3 + xn%3 + xn//672*672, -1000, 1000, "x")
-    self.helper_test_variable(xn//3%7*3 + xn//21*21, -999, 999, "(x//3*3)")
+    self.helper_test_variable(xn//3%7*3 + xn//21*21, -1002, 999, "(x//3*3)")
     # should NOT simplify: a*c1 != b (3*224 != 600)
     self.helper_test_variable(gidx//3%224*3 + gidx//600*600, 0, 150669, "(gidx//600*600+gidx//3%224*3)")
     # should NOT simplify: c1*c2 != c3 (224*3 != 700)
@@ -709,7 +697,7 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((30 * b + 1) % 18 + ((30 * b + 1) // 18) * 18, 1, 3001, "((b*30)+1)")
 
   def test_div_partial_quotient(self):
-    # IDIV should extract partial quotients when const_factor > divisor, matching what MOD already does
+    # FLOORDIV should extract partial quotients when const_factor > divisor, matching what FLOORMOD already does
     # (f*x+c)//d -> (f%d*x+c)//d + (f//d)*x  when f >= d
     b = Variable("b", 0, 100)
     self.helper_test_variable((31*b+1)//18, 0, 172, "(((b*13)+1)//18+b)")
@@ -730,8 +718,7 @@ class TestSymbolic(unittest.TestCase):
   def test_div_by_factor_tie_break(self):
     a = Variable("a", 0, 1)
     b = Variable("b", 0, 1)
-    with Context(CORRECT_DIVMOD_FOLDING=1):
-      self.helper_test_variable((a*2+b*3+2)//6, 0, 1, "((a+b+1)//3)")
+    self.helper_test_variable((a*2+b*3+2)//6, 0, 1, "((a+b+1)//3)")
 
   def test_div_mod_recombine_large_coeff(self):
     # recombine must work even when coeff > divisor: both mod and div reduce the coeff the same way
@@ -741,7 +728,7 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((25*a+3)%10 + ((25*a+3)//10)*10, 3, 253, "((a*25)+3)")
 
   def test_mod_nest_by_factor(self):
-    # (a*f+b) % (f*k) = (a%k)*f + b when 0<=b<f — mirrors nest_div_by_factor for MOD
+    # (a*f+b) % (f*k) = (a%k)*f + b when 0<=b<f — mirrors nest_div_by_factor for FLOORMOD
     gidx0 = Variable("gidx0", 0, 15)
     lidx0 = Variable("lidx0", 0, 3)
     # f=4, k=2, c=8: (gidx0*4+lidx0)%8 = (gidx0%2)*4 + lidx0
@@ -755,7 +742,7 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((a*3+b)%9, 0, 8, "(b+a%3*3)")
 
   def test_mod_nest_by_factor_with_const(self):
-    # nest_by_factor MOD with non-zero constant offset: (a*f+b+const) % (f*k) = (a%k)*f + b + const when 0<=b+const<f
+    # nest_by_factor FLOORMOD with non-zero constant offset: (a*f+b+const) % (f*k) = (a%k)*f + b + const when 0<=b+const<f
     a = Variable("a", 0, 7)
     b = Variable("b", 0, 1)
     # f=4, k=2, const=2: (a*4+b+2)%8 = (a%2)*4 + b + 2
@@ -767,7 +754,7 @@ class TestSymbolic(unittest.TestCase):
     self.helper_test_variable((a*3+b+1)%6, 1, 5, "(b+a%2*3+1)")
 
   def test_div_nest_by_factor_with_const(self):
-    # nest_by_factor IDIV: (160*a + 5*b + 4*c + K) // 60 should pick div=5 (clean) over div=4 (dirty)
+    # nest_by_factor FLOORDIV: (160*a + 5*b + 4*c + K) // 60 should pick div=5 (clean) over div=4 (dirty)
     a = Variable("a", 0, 2)
     b = Variable("b", 0, 31)
     c = Variable("c", 0, 1)
@@ -827,12 +814,26 @@ class TestSymbolic(unittest.TestCase):
     # TODO: simplify the true branch
     self.helper_test_variable((idx<4).where(idx//4, idx.const_like(-1)), -1, 6, "(idx<4).where((idx//4), -1)")
 
-  def test_idiv_lt(self):
+  def test_floordiv_lt(self):
+    # x//d<c <=> x<c*d for d>0
     idx = Variable("idx", 0, 24)
     self.helper_test_variable((idx//4<3), 0, 1, "(idx<12)")
-    self.helper_test_variable(((idx-20)//4<-3), 0, 1, "(idx<5)")
-    self.helper_test_variable(((idx-10)//4<0), 0, 1, "(idx<7)")
-    self.helper_test_variable((idx//-4<-3), 0, 1, "(((idx//4)*-1)<-3)")
+    self.helper_test_variable(((idx-20)//4<-3), 0, 1, "(idx<8)")
+    self.helper_test_variable(((idx-10)//4<0), 0, 1, "(idx<10)")
+    self.helper_test_variable((idx//-4<-3), 0, 1, "((idx//-4)<-3)")
+
+  def test_nested_div_mod_negative_inner_divisor(self):
+    # (x % (k*c)) // c -> (x // c) % k requires k>0; (x % (k*c)) % c -> x % c is unconditional for c>0
+    a = Variable("a", 0, 100)
+    self.helper_test_variable((a % -8) // 2, -4, 0, "(a%-8//2)")
+    self.helper_test_variable((a % -8) % 2, 0, 1, "(a%2)")
+
+  def test_floordiv_lt_negative_c(self):
+    # x//d<c with negative c also reduces to x<c*d for d>0
+    idx = Variable("idx", -20, 20)
+    self.helper_test_variable((idx//4 < 0), 0, 1, "(idx<0)")
+    self.helper_test_variable((idx//4 < -1), 0, 1, "(idx<-4)")
+    self.helper_test_variable((idx//4 < -2), 0, 1, "(idx<-8)")
 
   def test_simplex_lt(self):
     a = Variable("a", 0, 3)
@@ -981,10 +982,10 @@ class TestSymbolic(unittest.TestCase):
     self.assertIn((a.cast(dtypes.long)*b.cast(dtypes.long)).render(), "(long)((a*b))")
 
   def test_nested_mod_negative_range(self):
-    # (x%(k*c))%c = x%c holds for cmod regardless of signs since sign(x%(k*c)) = sign(x)
+    # (x%(k*c))%c = x%c for positive c
     x = Variable("x", 0, 1575)
-    self.helper_test_variable(((x + (-1064)) % 512) % 4, -3, 3, "((x+-1064)%4)")
-    self.helper_test_variable(((x + (-1064)) % 512) % 128, -127, 127, "((x+-1064)%128)")
+    self.helper_test_variable(((x + (-1064)) % 512) % 4, 0, 3, "((x+-1064)%4)")
+    self.helper_test_variable(((x + (-1064)) % 512) % 128, 0, 127, "((x+-1064)%128)")
 
 class TestSymbolicNumeric(unittest.TestCase):
   def helper_test_numeric(self, f):
@@ -1062,12 +1063,13 @@ class TestSymInfer(unittest.TestCase):
     assert sym_infer(a+b+c, var_vals) == 9
     assert sym_infer(a*b, var_vals) == 6
     assert sym_infer(a*b+c, var_vals) == 10
-  def test_sym_infer_cdiv_cmod(self):
+  def test_sym_infer_floordiv_floormod(self):
     a = Variable("a", -1000, 1)
     b = Variable("b", -1000, 1)
     var_vals = {a.expr: 1, b.expr: -1000}
-    assert sym_infer(a%b, var_vals) == 1
-    assert sym_infer(a//b, var_vals) == 0
+    # floor: 1 % -1000 = -999, 1 // -1000 = -1
+    assert sym_infer(a%b, var_vals) == -999
+    assert sym_infer(a//b, var_vals) == -1
   def test_sym_infer_with_bitcast(self):
     a = Variable("a", 1, 10, dtypes.int)
     expr = ((a.bitcast(dtypes.uint) << UOp.const(dtypes.uint, 1)).bitcast(dtypes.int) + 2)
@@ -1286,7 +1288,8 @@ class TestGatedUopGivenValid(unittest.TestCase):
 
     idx:UOp = (r0 < 3).where((r0 + uconst(-1)) // uconst(3), UOp.invalid())
     idx = graph_rewrite(idx, pm_simplify_valid)
-    self.assertEqual(idx, (r0 < 3).where(uconst(0), UOp.invalid()))
+    # (r0-1)//3 = (r0+2)//3 - 1 (constant offset split)
+    self.assertEqual(idx, (r0 < 3).where((r0 + uconst(2)) // uconst(3) + uconst(-1), UOp.invalid()))
 
   def test_invalid_gate_simplifies_vectorize(self):
     r0 = Variable("r0", 0, 2)
@@ -1295,8 +1298,8 @@ class TestGatedUopGivenValid(unittest.TestCase):
     idx1 = r0 % uconst(3)
     idx:UOp = (r0 < 3).where(UOp(Ops.STACK, dtypes.weakint.vec(2), (idx0, idx1)), UOp.invalid())
     idx = graph_rewrite(idx, pm_simplify_valid)
-    # NOTE: independent simplification: (r0-1)//3 -> 0, r0%3 -> r0 when r0 in [0,2]
-    expected_vec = UOp(Ops.STACK, dtypes.weakint.vec(2), (uconst(0), r0))
+    # independent simplification: (r0-1)//3 -> (r0+2)//3 - 1, and r0%3 -> r0 when r0 in [0,2]
+    expected_vec = UOp(Ops.STACK, dtypes.weakint.vec(2), ((r0 + uconst(2)) // uconst(3) + uconst(-1), r0))
     self.assertEqual(idx, (r0 < 3).where(expected_vec, UOp.invalid()))
 
 class TestRangeSplitting(unittest.TestCase):
@@ -1335,8 +1338,8 @@ class TestBounds(unittest.TestCase):
     alu0 = gidx0 * -1
     assert alu0.vmin == -2559 and alu0.vmax == 0
     assert (alu0+2559).vmin == 0 and (alu0+2559).vmax == 2559
-    assert ((alu0+2559)//-4).vmin == -639 and ((alu0+2559)//-4).vmax == 0
-    assert (((alu0+2559)//-4)*(-1)).vmin == 0 and (((alu0+2559)//-4)*(-1)).vmax == 639
+    assert ((alu0+2559)//-4).vmin == -640 and ((alu0+2559)//-4).vmax == 0
+    assert (((alu0+2559)//-4)*(-1)).vmin == 0 and (((alu0+2559)//-4)*(-1)).vmax == 640
 
 class TestFuzzFailure(unittest.TestCase):
   def test_fuzz_failure1(self):

@@ -1,16 +1,8 @@
 import unittest
 from tinygrad import Variable
-from tinygrad.helpers import Context
 
 
 class TestFuzzFailure(unittest.TestCase):
-  def setUp(self):
-    self.context = Context(CORRECT_DIVMOD_FOLDING=1)
-    self.context.__enter__()
-
-  def tearDown(self):
-    self.context.__exit__(None, None, None)
-
   def test_fuzz_failure1(self):
     v1=Variable('v1', 0, 8)
     v2=Variable('v2', 0, 2)

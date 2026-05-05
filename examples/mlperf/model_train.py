@@ -1419,7 +1419,10 @@ def train_llama3():
 
   for p in optim.params:
     grad_dtype = dtypes.bfloat16 if p.dtype == FP8_DTYPE else p.dtype
-    p.grad = Tensor.zeros(p.shape, dtype=grad_dtype, device=p.device).contiguous()
+    if isinstance(p.device, tuple) and p.uop.axis is not None:
+      p.grad = Tensor.zeros(p.shape, dtype=grad_dtype, device=p.device[0]).shard_(p.device, axis=p.uop.axis).contiguous()
+    else:
+      p.grad = Tensor.zeros(p.shape, dtype=grad_dtype, device=p.device).contiguous()
   grads = [p.grad for p in optim.params]
 
   scheduler = CosineAnnealingLRWithWarmup(optim, opt_base_learning_rate, opt_end_learning_rate, opt_learning_rate_warmup_steps, opt_learning_rate_decay_steps)
@@ -1445,6 +1448,10 @@ def train_llama3():
     if optim.master_params:
       idx = next(j for j, p in enumerate(optim.params) if p is w)
       optim.master_params[idx].assign((optim.master_params[idx] * w._inv_scale.reshape(-1, *([1]*(w.ndim-1)))).contiguous())
+
+  # realize everything here
+  if optim.master_params: Tensor.realize(*optim.master_params)
+  Tensor.realize(*optim.params, *fp8_inv_scales, *fp8_amax, *fp8_grad_amax)
 
   @TinyJit
   def minibatch(tokens:Tensor):

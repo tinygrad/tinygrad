@@ -2,7 +2,7 @@ import unittest, itertools, math
 from tinygrad import Tensor, dtypes, Context
 from tinygrad.dtype import DType, ConstType
 from tinygrad.uop.ops import Ops, UOp
-from tinygrad.codegen import full_rewrite_to_sink
+from test.helpers import full_rewrite
 import numpy as np
 
 def _check_ast_count(desired_count:int, t:Tensor):
@@ -103,7 +103,7 @@ class TestBitcastConstFolding(unittest.TestCase):
     def t(cases: dict[DType, ConstType]):
       for (from_dt, from_v), (to_dt, to_v) in itertools.product(cases.items(), cases.items()):
         if not math.isnan(from_v):
-          r = full_rewrite_to_sink(UOp.const(from_dt, from_v).bitcast(to_dt).sink()).src[0]
+          r = full_rewrite(UOp.const(from_dt, from_v).bitcast(to_dt).sink()).src[0]
           self.assertEqual(r.op, Ops.CONST, msg:=f"{from_dt} -> {to_dt} ({from_v} -> {to_v})")
           self.assertEqual(r.dtype, to_dt, msg)
           np.testing.assert_equal(r.arg, to_v, msg)
@@ -127,7 +127,7 @@ class TestBitcastConstFolding(unittest.TestCase):
 
   def test_vec_bitcast(self):
     with Context(SPEC=0):
-      r = full_rewrite_to_sink(UOp.const(dtypes.int32.vec(3), (-1, -2**31, 75)).bitcast(dtypes.uint32.vec(3)).sink()).src[0]
+      r = full_rewrite(UOp.const(dtypes.int32.vec(3), (-1, -2**31, 75)).bitcast(dtypes.uint32.vec(3)).sink()).src[0]
     self.assertEqual(r.op, Ops.STACK)
     self.assertEqual(r.dtype, dtypes.uint32.vec(3))
     self.assertEqual(tuple(x.arg for x in r.src), (2**32-1, 2**31, 75))

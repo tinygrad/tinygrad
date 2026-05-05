@@ -97,7 +97,7 @@ class HCQGraph(MultiGraphRunner):
 
       # set any fixedvars on the device
       self.device_vars[enqueue_dev] = merge_dicts([self.device_vars.get(enqueue_dev, {}), device_vars])
-      if runtime is not None: self.device_vars[enqueue_dev] = merge_dicts([self.device_vars[enqueue_dev], ast.arg.runtimevars])
+      if runtime is not None: self.device_vars[enqueue_dev] = merge_dicts([self.device_vars[enqueue_dev], {k: 0 for k in ast.arg.runtimevars}])
 
       if runtime is not None:
         enqueue_queue = self.comp_queues[enqueue_dev]
@@ -260,7 +260,7 @@ class HCQGraph(MultiGraphRunner):
 
   def _dev_copy_queues(self, dev): return [q for (d, _), q in self.copy_queues.items() if d == dev]
 
-  def __call__(self, input_buffers: list[Buffer], var_vals: dict[str, int], wait=False, input_uops=None) -> float|None:
+  def __call__(self, input_uops:tuple[UOp, ...], var_vals:dict[str, int], wait=False) -> float|None:
     # Map input buffers
     for dev in self.devices:
       for iidx, dev_idx in self.input_replace_map[dev]:
@@ -316,7 +316,7 @@ class HCQGraph(MultiGraphRunner):
     for fdev, buf in self.kernargs_bufs.items(): fdev.allocator._free(buf, BufferSpec(cpu_access=True))
 
   @staticmethod
-  def supports_exec_item(batch_devs:list[Compiled], new_call:UOp) -> bool:
+  def supports_uop(batch_devs:list[Compiled], new_call:UOp) -> bool:
     # Check if all devices are HCQ
     all_devs = cast(list[HCQCompiled], GraphRunner._all_devs(batch_devs, new_call))
     if not all(issubclass(type(d), HCQCompiled) for d in all_devs): return False

@@ -442,7 +442,7 @@ pm_add_buffers = pm_mops+pm_flatten_bufferize+to_bufferview+PatternMatcher([
   (UPat(Ops.AFTER, src=(UPat.var("x"), UPat(Ops.AFTER, name="y"))), lambda x,y: x.after(*y.src[1:])),
 
   # remove invalid writes
-  (UPat(Ops.STORE, src=(UPat(), UPat(Ops.CONTIGUOUS, src=(UPat(Ops.CONST, arg=Invalid),))), allow_any_len=True), lambda: UOp(Ops.NOOP)),
+  (UPat(Ops.STORE, src=(UPat(), UPat(Ops.CONTIGUOUS, src=(UPat(Ops.CONST, arg=Invalid),)))), lambda: UOp(Ops.NOOP)),
   (UPat(Ops.AFTER, src=(UPat.var("x"), UPat(Ops.NOOP, src=()))), lambda x: x),
   (UPat(Ops.AFTER, src=(UPat.var("x"), UPat(Ops.END, src=(UPat(Ops.NOOP, src=()),), allow_any_len=True))), lambda x: x),
 ])
@@ -545,8 +545,6 @@ pm_add_range_tags = PatternMatcher([
 def split_store(x:UOp) -> UOp|None:
   # if we have any open ranges here, we don't split
   if x.ranges: return None
-  # raw STORE (not from bufferize_to_store) should be processed through its END wrapper, not independently
-  if x.op is Ops.STORE and x.src[0]._shape is not None: return None
 
   # local kernel rewrite
   lctx = LocalAddBufferContext()

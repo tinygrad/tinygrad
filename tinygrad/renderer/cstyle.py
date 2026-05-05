@@ -307,7 +307,7 @@ class OpenCLRenderer(CStyleLanguage):
     (UPat(Ops.LOAD, dtype=dtypes.float.vec(4), src=(UPat.var('buf').index(UPat.var('idx', dtypes.int.vec(2))),)),
       lambda ctx,buf,idx: f"read_imagef({ctx[buf]}, smp, {ctx[idx]})"),
     (UPat(Ops.STORE, src=(UPat.var('buf').index(UPat.var('idx', dtypes.int.vec(2)), allow_any_len=True),
-                          UPat.var("var", dtypes.float.vec(4))), allow_any_len=True),
+                          UPat.var("var", dtypes.float.vec(4)))),
       lambda ctx,buf,idx,var: f"write_imagef({ctx[buf]}, {ctx[idx]}, {ctx[var]});"),
   ]) + base_rewrite
 
