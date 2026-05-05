@@ -228,7 +228,7 @@ def gen(name, files, dll="", args=[], prolog=[], rules=[], epilog=[], recsym=Fal
     while q:
       c = q.pop()
       if loc_file(loc(c)) != str(f) and (not recsym or c.kind not in (clang.CXCursor_FunctionDecl,)): continue
-      if all(not re.match(p, nm(c)) for p in patterns): continue
+      if patterns and not any(re.match(p, nm(c)) for p in patterns): continue
       rollback = lines, types
       try:
         match c.kind:
