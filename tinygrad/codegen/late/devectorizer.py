@@ -368,7 +368,7 @@ pm_add_loads = PatternMatcher([
   # add loads to non ptr index
   (UPat(Ops.INDEX, name="idx"), add_load),
   # remove loads from stores
-  (UPat(Ops.STORE, src=(UPat(Ops.LOAD), UPat(name="val")), name="s"), lambda s,val: s.replace(src=(s.src[0].src[0], val))),
+  (UPat(Ops.STORE, src=(UPat(Ops.LOAD),), allow_any_len=True, name="s"), lambda s: s.replace(src=(s.src[0].src[0],)+s.src[1:])),
 ])
 
 # make images
