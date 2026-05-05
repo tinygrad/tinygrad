@@ -121,7 +121,7 @@ const drawGraph = (data) => {
     .attr("transform", d => `translate(${-d.width/2}, ${0})`).datum(d => d.collapsed ? "+" : "−"));
   addTags(nodes.selectAll("g.ref").data(d => d.ref != null ? [d] : []).join("g").attr("class", "tag ref")
     .attr("transform", d => `translate(${d.width/2-2}, ${-d.height/2+2})`).on("click", (e,d) => { e.stopPropagation(); switchCtx(d.ref); }),
-    "M-2 2 L2 -2 M-0.7 -2 H2 V0.7");
+    "M-1.7 1.7 L1.7 -1.7 M-0.55 -1.7 H1.7 V0.55");
   // draw edges
   const line = d3.line().x(d => d.x).y(d => d.y).curve(d3.curveBasis), edges = g.edges();
   d3.select("#edges").selectAll("path.edgePath").data(edges).join("path").attr("class", "edgePath").attr("d", (e) => {
