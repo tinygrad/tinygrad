@@ -19,7 +19,6 @@ class AMDReg:
 @dataclass
 class AMDIP:
   name:str; version:tuple[int, ...]; bases:dict[int, tuple[int, ...]] # noqa: E702
-  def __post_init__(self): self.version = fixup_ip_version(self.name, self.version)[0]
 
   @functools.cached_property
   def regs(self): return import_asic_regs(self.name, self.version, cls=functools.partial(AMDReg, bases=self.bases))
