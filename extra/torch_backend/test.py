@@ -808,6 +808,15 @@ class TestBackendHelpers(unittest.TestCase):
     np.testing.assert_equal(out.cpu().numpy(), [1, 2, 3, 4])
     assert ret is out
 
+  def test_cat_out_empty_1d(self):
+    a = torch.tensor([], device=device)
+    b = torch.tensor([1, 2, 3, 4], device=device).reshape((2, 2))
+    out = torch.empty((2, 2), device=device)
+    ret = torch.cat([a, b], out=out)
+    np.testing.assert_equal(out.cpu().numpy(), [[1, 2], [3, 4]])
+    assert ret is out
+
+
   def test_scatter_add_out(self):
     src = torch.tensor([[1, 2, 3], [4, 5, 6]], device=device, dtype=torch.float32)
     index = torch.tensor([[0, 1, 2], [0, 1, 2]], device=device)

@@ -374,25 +374,12 @@ def copy_(self, src, non_blocking=False):
 
 @torch.library.impl("aten::cat.out", "privateuseone")
 def cat_out(tensors, dim=0, out=None):
-  unwrapped = [unwrap(x) for x in tensors]
-  has_empty_1d = any(u.numel() == 0 and u.ndim == 1 for u in unwrapped)
-  if has_empty_1d:
-    target = next((u for u in unwrapped if u.numel() > 0), None)
-    if target is not None:
-      fixed = []
-      for u in unwrapped:
-        if u.numel() == 0 and u.ndim == 1:
-          new_shape = list(target.shape)
-          new_shape[dim] = 0
-          fixed.append(Tensor.zeros(*new_shape, dtype=u.dtype, device=u.device))
-        else:
-          fixed.append(u)
-      unwrapped = fixed
-  result = Tensor.cat(*unwrapped, dim=dim)
-  if out is not None:
-    _apply_inplace(unwrap(out), result)
-    return out
-  return wrap(result)
+  tensors = list(tensors)  # Not sure tensors is guaranteed to be a list
+  for i, u in enumerate(tensors):
+    if u.numel() == 0 and u.ndim == 1:
+      tensors[i] = u.reshape([0 if i == dim else x for i, x in enumerate(out.shape)])
+  _apply_inplace(unwrap(out), Tensor.cat(*[unwrap(x) for x in tensors], dim=dim))
+  return out
 
 @torch.library.impl("aten::topk.values", "privateuseone")
 def topk_values(input, k, dim=None, largest=True, sorted=True, values=None, indices=None):
