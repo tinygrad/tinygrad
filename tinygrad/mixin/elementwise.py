@@ -181,7 +181,7 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
     return self._binop(Ops.IDIV, x, reverse)
 
   def mod(self, x: Self | ConstType, reverse: bool = False) -> Self:
-    return self._binop(Ops.MOD, x, reverse)
+    return self._binop(Ops.FLOORMOD, x, reverse)
 
   def div(self, x: Self | ConstType, reverse: bool = False) -> Self:
     lhs, rhs = self._broadcasted(x, reverse)
@@ -206,7 +206,7 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
     return self.div(x)
 
   def __floordiv__(self, x: Self | ConstType) -> Self:
-    return self.idiv(x)  # TODO: idiv is trunc div, not floordiv
+    return self._binop(Ops.FLOORDIV, x, False)
 
   def __mod__(self, x: Self | ConstType) -> Self:
     return self.mod(x)
@@ -233,7 +233,7 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
     return self.div(x, True)
 
   def __rfloordiv__(self, x: Self | ConstType) -> Self:
-    return self.idiv(x, True)
+    return self._binop(Ops.FLOORDIV, x, True)
 
   def __rand__(self, x: Self | ConstType) -> Self:
     return self.bitwise_and(x, True)
