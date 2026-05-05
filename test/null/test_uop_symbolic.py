@@ -367,6 +367,13 @@ class TestSymbolic(unittest.TestCase):
     a = Variable("a", 0, 124)
     self.helper_test_variable(((a+10)//-2+10)//-4, -2, 14, "(((a+10)//-2+10)//-4)")
 
+  def test_nested_div_negative_divisor(self):
+    # (x//c1)//c2 -> x//(c1*c2) only when c2>0
+    a = Variable("a", 0, 124)
+    self.helper_test_variable((a//-2)//-3, 0, 20, "((a//-2)//-3)")
+    self.helper_test_variable((a//2)//-3, -21, 0, "((a//2)//-3)")
+    self.helper_test_variable((a//-2)//3, -21, 0, "(a//-6)")
+
   def test_neg_mod(self):
     a = Variable("a", 0, 124)
     self.helper_test_variable((-a)%4, 0, 3, "(a*-1%4)")
