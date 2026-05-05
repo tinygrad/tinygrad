@@ -546,4 +546,7 @@ pm_dtype_decomps = PatternMatcher([
    ctx[0].add({dtypes.ulong:dtypes.long}.get(dt:=x.dtype.base.scalar(), dt))),
   # do the rewrites
   (UPat(Ops.SINK, name="sink"), do_dtype_decomps),
+  # fix mismatch of ALT dtype (TODO: do dtype decomp before gating?)
+  (UPat(Ops.LOAD, src=(UPat(), UPat.var("alt"), UPat()), name="x"),
+    lambda x,alt: x.replace(src=(x.src[0], alt.cast(x.dtype), x.src[2])) if x.dtype != alt.dtype else None),
 ])

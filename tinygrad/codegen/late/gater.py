@@ -1,3 +1,5 @@
+# this transforms Invalid into gated load/stores
+
 from tinygrad.uop.ops import PatternMatcher, UPat
 from tinygrad.dtype import Invalid
 
