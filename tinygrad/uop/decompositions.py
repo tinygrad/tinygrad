@@ -505,8 +505,8 @@ pm_long_decomp = PatternMatcher([
   (UPat((*GroupOp.Defines, Ops.INDEX), name="x"), lambda x:
    x.replace(dtype=l2i_dt[x.dtype.base].ptr(x.dtype.size * 2)) if hasattr(x.dtype, 'size') and x.dtype.base in l2i_dt else None),
   (UPat(Ops.INDEX, tuple(l2i_dt.keys()), name='x'), lambda x: reindex(x, x.tag).replace(dtype=l2i_dt[x.dtype])),
-  (UPat(Ops.STORE, src=(UPat.var('idx'), UPat.var('val', tuple(l2i_dt.keys()))), name='st'), lambda st,idx,val:
-   st.replace(src=(reindex(idx, 0), val.rtag(0))).group(st.replace(src=(reindex(idx, 1), val.rtag(1)))) if val.tag is None else None),
+  (UPat(Ops.STORE, src=(UPat.var('idx'), UPat.var('val', tuple(l2i_dt.keys()))), allow_any_len=True, name='st'), lambda st,idx,val:
+   st.replace(src=(reindex(idx, 0), val.rtag(0))+st.src[2:]).group(st.replace(src=(reindex(idx, 1), val.rtag(1)))) if val.tag is None else None),
   (UPat(GroupOp.Comparison, src=(UPat.var('a', tuple(l2i_dt.keys())), UPat.var('b', tuple(l2i_dt.keys()))), name="x"), lambda a,b,x:
    l2i(x.op, dt:=l2i_dt[a.dtype], a.rtag(0).cast(dt), a.rtag(1).cast(dt), b.rtag(0).cast(dt), b.rtag(1).cast(dt))),
   (UPat(Ops.CAST, tuple(l2i_dt.keys()), src=(UPat.var('a'),), name="x"), lambda a,x:
@@ -518,7 +518,10 @@ pm_long_decomp = PatternMatcher([
   (UPat((*(GroupOp.ALU - GroupOp.Comparison), Ops.BITCAST), tuple(l2i_dt.keys()), name="x"), lambda x:
    l2i(x.op, l2i_dt[x.dtype], *flatten((a.rtag(0).cast(dt:=l2i_dt[x.src[-1].dtype]), a.rtag(1).cast(dt))
                                        if a.dtype in l2i_dt else (a,) for a in x.src))[x.tag] if x.tag is not None else None),
-  (UPat(Ops.LOAD, tuple(l2i_dt.keys()), src=(UPat.var('idx'),), name='x'), lambda x,idx: x.replace(dtype=l2i_dt[x.dtype],src=(reindex(idx, x.tag),))),
+  (UPat(Ops.LOAD, tuple(l2i_dt.keys()), src=(UPat.var('idx'), UPat.var('alt'), UPat.var('gate')), name='x'), lambda x,idx,alt,gate:
+   x.replace(dtype=l2i_dt[x.dtype], src=(reindex(idx, x.tag), alt.cast(l2i_dt[x.dtype]), gate))),
+  (UPat(Ops.LOAD, tuple(l2i_dt.keys()), src=(UPat.var('idx'),), name='x'), lambda x,idx:
+   x.replace(dtype=l2i_dt[x.dtype], src=(reindex(idx, x.tag),))),
   (UPat(Ops.CONST, tuple(l2i_dt.keys()), name='x'), lambda x:
    UOp.const(dt:=l2i_dt[x.dtype], truncate[dt]((x.arg >> 32) if x.tag == 1 else (x.arg & 0xFFFFFFFF))))
 ])
@@ -542,9 +545,9 @@ pm_float_decomp = PatternMatcher([
   (UPat(GroupOp.All-{Ops.BITCAST}, dtypes.floats, name="x"), lambda ctx,x:
    x.replace(dtype=ctx[1].vec(x.dtype.count), src=tuple(s.cast(ctx[1]) if s.dtype == ctx[0] else s for s in x.src))
    if x.dtype.scalar() == ctx[0] else None),
-  (UPat(Ops.STORE, src=(UPat.var("idx"), UPat(Ops.BITCAST, dtypes.floats, name="val")), name='st'), lambda ctx,st,idx,val:
-   st.replace(src=(idx, val.replace(dtype=f2f_dt[ctx[0]]))) if val.dtype == ctx[0] and idx.tag == ctx[0] else None),
-  (UPat(Ops.STORE, src=(UPat.var("idx"), UPat.var("val", dtypes.floats)), name='st'), lambda ctx,st,idx,val:
+  (UPat(Ops.STORE, src=(UPat.var("idx"), UPat(Ops.BITCAST, dtypes.floats, name="val")), allow_any_len=True, name='st'), lambda ctx,st,idx,val:
+   st.replace(src=(idx, val.replace(dtype=f2f_dt[ctx[0]]))+st.src[2:]) if val.dtype == ctx[0] and idx.tag == ctx[0] else None),
+  (UPat(Ops.STORE, src=(UPat.var("idx"), UPat.var("val", dtypes.floats)), allow_any_len=True, name='st'), lambda ctx,st,idx,val:
    f2f_store(st, idx, val, *ctx) if val.dtype.scalar() == ctx[1] and (idx:=idx.src[0] if idx.op == Ops.CAST else idx).tag == ctx[0] else None),
 ])
 

@@ -42,8 +42,6 @@ wgsl_matcher = PatternMatcher([
   # TODO: load alt value doesnt have to be a const
   (UPat.load(UPat.var("b"), UPat.cvar("c"), UPat.var("gate"), name="l"),
    lambda l,b,c,gate: packed_load(l,b,l.dtype,c.cast(dtypes.uint32),gate) if is_packed(l.dtype, b.dtype) else None),
-  (UPat.load(UPat.var("b"), UPat.cvar("c"), name="l"),
-   lambda l,b,c: packed_load(l,b,l.dtype,c.cast(dtypes.uint32)) if is_packed(l.dtype, b.dtype) else None),
   (UPat.load(UPat.var("b"), name='l'), lambda l,b: packed_load(l, b, l.dtype) if is_packed(l.dtype, b.dtype) else None),
   (UPat.store(UPat.var("bidx"), UPat.var("var"), UPat.var("gate")),
    lambda bidx,var,gate: packed_store(bidx,var,gate) if is_packed(var.dtype, bidx.dtype) else None),
