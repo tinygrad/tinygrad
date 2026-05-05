@@ -291,9 +291,7 @@ full_spec = PatternMatcher([
 
   # temp VECTORIZE/INDEX during rewrite have the wrong dtype
   (UPat(Ops.STACK), lambda: True),
-
-  # no more bool in index
-  (UPat(Ops.INDEX, name="idx"), lambda idx: not any([dtypes.is_bool(x.dtype) for x in idx.src])),
+  (UPat(Ops.INDEX), lambda: True),
 
   # all loads/stores
   (UPat((Ops.LOAD, Ops.STORE)), lambda: True),
