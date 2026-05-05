@@ -534,7 +534,7 @@ def batch_load_train_stable_diffusion(urls:str, BS:int):
 
 def _download_llama2_70b_lora_dataset(base_dir: Path) -> Path:
     from huggingface_hub import snapshot_download
-    return Path(snapshot_download(repo_id="regisss/scrolls_gov_report_preprocessed_mlperf_2", repo_type="dataset", local_dir=base_dir))
+    return Path(snapshot_download(repo_id="regisss/scrolls_gov_report_preprocessed_mlperf_2", revision="21ff1233ee3e87bc780ab719c755170148aba1cb", repo_type="dataset", local_dir=base_dir))
 
 def _load_llama2_70b_lora_split(base_dir:Path, split:str) -> tuple[np.ndarray, np.ndarray]:
   from datasets import load_dataset

@@ -14,6 +14,7 @@ DEV.value = 'CPU'
 
 HF_REPO_ID = "imaolo/llama2-70b-fused-qkv-flat-mlperf"
 HF_REF_REPO_ID = "regisss/llama2-70b-fused-qkv-mlperf"
+HF_REF_REVISION = "647cb0c8858ddefd10231a20ddfa68e4eb5e850e"
 
 REF_WEIGHTS_PATH = DOWNLOADS_DIR/HF_REF_REPO_ID
 WEIGHTS_PATH = DOWNLOADS_DIR/HF_REPO_ID
@@ -21,7 +22,7 @@ WEIGHTS_PATH = DOWNLOADS_DIR/HF_REPO_ID
 def download_reference_weights() -> None:
   print(f"downloading reference weights to {REF_WEIGHTS_PATH}")
   REF_WEIGHTS_PATH.mkdir(parents=True, exist_ok=True)
-  snapshot_download_with_retry(repo_id=HF_REF_REPO_ID, local_dir=REF_WEIGHTS_PATH, allow_patterns=["*safetensors*", "*.json", "*.md"])
+  snapshot_download_with_retry(repo_id=HF_REF_REPO_ID, revision=HF_REF_REVISION, local_dir=REF_WEIGHTS_PATH, allow_patterns=["*safetensors*", "*.json", "*.md"])
   print("downloaded reference weights")
 
 def load_reference_state_dict() -> dict[str, Tensor]:
