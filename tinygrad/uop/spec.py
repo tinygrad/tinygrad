@@ -26,7 +26,7 @@ def validate_index(buf:UOp, idx:UOp, gate:UOp|None=None):
 
 def validate_mem_index(bidx:UOp, gate:UOp|None=None):
   idx = bidx.src[0] if bidx.op is Ops.CAST else bidx
-  if idx.op is not Ops.INDEX or len(idx.src) != 2: return False
+  if idx.op is not Ops.INDEX: return False
   return validate_index(idx.src[0], idx.src[1], gate)
 
 # four specs:
