@@ -112,7 +112,7 @@ class AMFirmware:
     if (sys.version_info >= (3,14) and (p:=pathlib.Path("/lib/firmware/amdgpu")/f"{fname}.zst").is_file() and
         hashlib.sha256(b:=zstd.decompress(p.read_bytes())).hexdigest() == fw.hashes[fname]): blob = memoryview(bytearray(b))
     else: blob = memoryview(bytearray(fetch(f"https://gitlab.com/kernel-firmware/linux-firmware/-/raw/1e2c15348485939baf1b6d1f5a7a3b799d80703d/amdgpu/{fname}",
-                                            subdir="fw").read_bytes()))
+                                            subdir="fw", sha256=fw.hashes[fname]).read_bytes()))
     if AM_DEBUG >= 1: print(f"am {self.adev.devfmt}: loading firmware {fname}: {hashlib.sha256(blob).hexdigest()}")
     if versioned_header:
       chdr = am.struct_common_firmware_header.from_address(mv_address(blob))
@@ -326,7 +326,7 @@ class AMDev:
   @functools.cached_property
   def hwid_names(self) -> dict[int, str]: return {v:k.removesuffix('_HWID') for k,v in vars(am).items() if k.endswith('_HWID') and isinstance(v, int)}
 
-  def _ip_module(self, prefix:str, hwip, prever_prefix:str=""): return import_module(prefix, self.ip_ver[hwip], prever_prefix)
+  def _ip_module(self, prefix:str, hwip): return import_module(prefix, self.ip_ver[hwip])
 
   def _build_regs(self):
     mods = [("mp", am.MP0_HWIP), ("hdp", am.HDP_HWIP), ("gc", am.GC_HWIP), ("mmhub", am.MMHUB_HWIP), ("osssys", am.OSSSYS_HWIP),
@@ -335,4 +335,4 @@ class AMDev:
 
     for prefix, hwip in mods:
       self.__dict__.update(import_asic_regs(prefix, self.ip_ver[hwip], cls=functools.partial(AMRegister, adev=self, bases=self.regs_offset[hwip])))
-    self.__dict__.update(import_asic_regs('mp', (11, 0), cls=functools.partial(AMRegister, adev=self, bases=self.regs_offset[am.MP1_HWIP])))
+    self.__dict__.update(import_asic_regs('mp', (11, 0, 0), cls=functools.partial(AMRegister, adev=self, bases=self.regs_offset[am.MP1_HWIP])))

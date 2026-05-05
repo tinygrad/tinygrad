@@ -46,6 +46,20 @@ class TestExecALU(unittest.TestCase):
     self.assertEqual(exec_alu(Ops.IDIV, dtypes.int8, (7, -3)), -2)
     self.assertEqual(exec_alu(Ops.IDIV, dtypes.int8, (-50, 6)), -8)
 
+  def test_floordiv(self):
+    self.assertEqual(exec_alu(Ops.FLOORDIV, dtypes.int8, (8, 2)), 4)
+    self.assertEqual(exec_alu(Ops.FLOORDIV, dtypes.int8, (7, 3)), 2)
+    self.assertEqual(exec_alu(Ops.FLOORDIV, dtypes.int8, (7, -3)), -3)
+    self.assertEqual(exec_alu(Ops.FLOORDIV, dtypes.int8, (-7, 3)), -3)
+    self.assertEqual(exec_alu(Ops.FLOORDIV, dtypes.int8, (-50, 6)), -9)
+
+  def test_floormod(self):
+    self.assertEqual(exec_alu(Ops.FLOORMOD, dtypes.int8, (8, 2)), 0)
+    self.assertEqual(exec_alu(Ops.FLOORMOD, dtypes.int8, (7, 3)), 1)
+    self.assertEqual(exec_alu(Ops.FLOORMOD, dtypes.int8, (7, -3)), -2)
+    self.assertEqual(exec_alu(Ops.FLOORMOD, dtypes.int8, (-7, 3)), 2)
+    self.assertEqual(exec_alu(Ops.FLOORMOD, dtypes.int8, (-50, 6)), 4)
+
     np.testing.assert_allclose(exec_alu(Ops.MUL, dtypes.float32, (7.0, exec_alu(Ops.RECIPROCAL, dtypes.float32, (3.0,)))), 2+(1.0/3.0))
     np.testing.assert_allclose(exec_alu(Ops.MUL, dtypes.float32, (7.0, exec_alu(Ops.RECIPROCAL, dtypes.float32, (-3.0,)))), -2-(1.0/3.0))
 
@@ -162,6 +176,18 @@ class TestFastIdiv(unittest.TestCase):
       ops = [x.op for x in uops]
       self.assertIn(Ops.SHR, ops, f"For dtype={dt} divison by power of two did not simplify to shift")
       self.assertNotIn(Ops.IDIV, ops, f"For dtype={dt} divison by power of two did not simplify to shift")
+
+  def test_floordiv_power_of_two_uint(self):
+    # uint FLOORDIV by a power of two lowers to a shift, leaving no IDIV/FLOORDIV in the kernel
+    for dt in (dtypes.uint32, dtypes.uint64):
+      g = UOp(Ops.PARAM, dt.ptr(), (), 0)
+      c = UOp.const(dt, 2)
+      a = UOp(Ops.FLOORDIV, dt, (g.index(c), c))
+      uops = to_uops_list([a], ren=Device[Device.DEFAULT].renderer)
+      ops = [x.op for x in uops]
+      self.assertIn(Ops.SHR, ops, f"For dtype={dt} FLOORDIV by power of two did not simplify to shift")
+      self.assertNotIn(Ops.IDIV, ops, f"For dtype={dt} FLOORDIV by power of two did not simplify to shift")
+      self.assertNotIn(Ops.FLOORDIV, ops, f"For dtype={dt} FLOORDIV survived past late rewrite")
 
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU doesn't support long")
   def test_fast_idiv_and_mod(self):

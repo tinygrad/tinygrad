@@ -1305,13 +1305,9 @@ class Tensor(OpMixin):
     """
     if rounding_mode is None: return super().div(x, reverse)  # type: ignore[arg-type]
     numerator, denominator = self._broadcasted(x, reverse)
-    if dtypes.is_int(dt:=least_upper_dtype(numerator.dtype, denominator.dtype)):
-      numerator, denominator = numerator.cast(dt), denominator.cast(dt)
+    if dtypes.is_int(numerator.dtype):
       if rounding_mode == "trunc": return numerator.idiv(denominator)
-      if rounding_mode == "floor":
-        truncate_div, truncate_mod = numerator.idiv(denominator), numerator._binop(Ops.MOD, denominator, False)
-        opposite_sign = ((numerator>0)&(denominator<0)) | ((numerator<0)&(denominator>0))
-        return (opposite_sign&(truncate_mod!=0)).where(truncate_div-1, truncate_div)
+      if rounding_mode == "floor": return numerator._binop(Ops.FLOORDIV, denominator, False)
     d = numerator.cast(least_upper_float(numerator.dtype)) * denominator.cast(least_upper_float(denominator.dtype)).reciprocal()
     output_dtype = numerator.dtype if dtypes.is_int(numerator.dtype) else d.dtype
     if rounding_mode == "trunc": return d.trunc().cast(output_dtype)
@@ -1329,6 +1325,7 @@ class Tensor(OpMixin):
     ```
     """
     a, b = self._broadcasted(x, reverse)
+    if dtypes.is_int(a.dtype): return a._binop(Ops.FLOORMOD, b, False)
     return a - a.div(b, rounding_mode="floor") * b
 
   def fmod(self, x:Tensor|ConstType) -> Tensor:
