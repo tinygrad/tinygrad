@@ -290,8 +290,10 @@ def fast_idiv(target: Target, x: UOp, d: int, dont_cast=False) -> UOp|None:
   if m*vmin >= x.dtype.min and m*vmax <= x.dtype.max:
     return ((x*m) >> s) if is_unsigned else ((x*m) >> s) + (x<0).where(x.ufix(1), 0)
   # before we try casting to a larger dtype (slow), we see if there are powers of two in d we can shift to make x smaller
+  # use explicit Ops.IDIV (trunc) since the recursion assumes trunc semantics throughout
   if (largest_factor_of_two_in_d := (d & -d)) > 1:
-    if (ret:=fast_idiv(target, x//largest_factor_of_two_in_d, d//largest_factor_of_two_in_d, dont_cast=True)) is not None: return ret
+    if (ret:=fast_idiv(target, x.alu(Ops.IDIV, x.const_like(largest_factor_of_two_in_d)),
+                       d//largest_factor_of_two_in_d, dont_cast=True)) is not None: return ret
   if dont_cast: return None
   # promo_lattice needs to return an unsigned type if the type is unsigned
   if dtypes.is_int(next_dtype := promo_lattice[x.dtype.scalar()][-1]) and is_dtype_supported(next_dtype, target):
@@ -459,22 +461,30 @@ def get_late_rewrite_patterns(ops:tuple[Ops, ...], disable_fast_idiv:bool) -> Pa
   if Ops.THREEFRY not in ops: pat.append((UPat(Ops.THREEFRY, dtype=dtypes.uint64, src=(UPat.var("x"), UPat.var("key"))), threefry2x32))
   # MAX can be rewritten as CMPLT + WHERE (max function is annoying on many cstyle backends)
   if Ops.MAX not in ops and Ops.CMPLT in ops: pat.append((UPat(Ops.MAX, name="m"), lambda m: (m.src[0] < m.src[1]).where(m.src[1], m.src[0])))
-  # rewrite MOD to AND (which should always be supported, but not for generic in tests): x % (2**y) -> x & (2**y-1)
-  # TODO: drop the x.vmin>=0 guard once UOp `%` lowers to FLOORMOD instead of MOD
+  # rewrite FLOORMOD to AND on power-of-2 const: x % (2**y) -> x & (2**y-1) (correct floor mod for any sign in two's complement)
   if Ops.AND in ops: pat += [(UPat.var("x", dtypes.ints)%UPat.cvar("c"),
-    lambda x,c: x & (c.arg-1) if c.arg in powers_of_two and x.vmin >= 0 else None)]
+    lambda x,c: x & (c.arg-1) if c.arg in powers_of_two else None)]
   if Ops.OR in ops: pat += [(UPat.var("x", dtypes.bool).logical_not()&UPat.var("y", dtypes.bool).logical_not(),
     lambda x,y: (x | y).logical_not())]
   # rewrite MUL/IDIV to SHL+SHR: x*(2**y) -> shl(x,y) and x//(2**y) -> shr(x,y)
   if Ops.SHL in ops: pat += [(UPat.var("x", dtypes.ints)*UPat.cvar("c"), lambda c,x: x << v if (v:=powers_of_two.get(c.arg, 0)) else None)]
   if Ops.SHR in ops:
-    # no reason to check x<0 for uints
-    pat += [(UPat.var("x", dtypes.uints)//UPat.cvar("c"), lambda x,c: x >> v if (v:=powers_of_two.get(c.arg, 0)) else None)]
-    pat += [(UPat.var("x", dtypes.ints)//UPat.cvar("c"), lambda x,c: (x+(l.const_like(l.vmin) if (l:=(x<0)).vmin==l.vmax else l).where(
-      c-1, 0)) >> v if (v:=powers_of_two.get(c.arg, 0)) else None)]  # (x+(x<0).where(c-1, 0)) >> v
+    # uint floor==trunc, so safe for both ops
+    pat += [(UPat((Ops.IDIV, Ops.FLOORDIV), src=(UPat.var("x", dtypes.uints), UPat.cvar("c"))),
+      lambda x,c: x >> v if (v:=powers_of_two.get(c.arg, 0)) else None)]
+    # signed FLOORDIV by 2**v -> (x + (x<0 ? c-1 : 0)) >> v
+    # signed IDIV (trunc) by 2**v -> (x + (x<0 ? c-1 : 0)) >> v; only correct for trunc, so match raw Ops.IDIV
+    pat += [(UPat(Ops.IDIV, src=(UPat.var("x", dtypes.ints), UPat.cvar("c"))),
+      lambda x,c: (x+(l.const_like(l.vmin) if (l:=(x<0)).vmin==l.vmax else l).where(c-1, 0)) >> v
+        if (v:=powers_of_two.get(c.arg, 0)) else None)]
     if not disable_fast_idiv:
-      pat += [(UPat.var("x", dtypes.ints)//UPat.cvar("d", vec=False), lambda ctx, x, d: fast_idiv(ctx, x, d.arg))]
-      pat += [(UPat.var("x", dtypes.ints)%UPat.var("d"), lambda x, d: x-d*(x//d))]
+      # fast_idiv handles non-pow2: only fire on non-negative inputs (signed magic-mul is unreliable for x<0)
+      pat += [(UPat(Ops.IDIV, src=(UPat.var("x", dtypes.ints), UPat.cvar("d", vec=False))),
+        lambda ctx, x, d: fast_idiv(ctx, x, d.arg) if x.vmin >= 0 or x.dtype in dtypes.uints else None)]
+      # rewrite raw MOD -> x - d*IDIV(x,d) so fast_idiv can pick up the IDIV. only on non-negative inputs;
+      # avoids disturbing floormod_to_mod's general-path output (which uses a trunc Ops.MOD as an implementation detail)
+      pat += [(UPat(Ops.MOD, src=(UPat.var("x", dtypes.ints), UPat.var("d"))),
+        lambda x, d: x - d * x.alu(Ops.IDIV, d) if x.vmin >= 0 or x.dtype in dtypes.uints else None)]
   if Ops.NEG in ops:
     pat += [(UPat.var('x')*-1, lambda ctx,x: x.alu(Ops.NEG))]
     if Ops.SUB in ops: pat += [(UPat.var('x')+UPat.var('y').alu(Ops.NEG), lambda ctx,x,y: x.alu(Ops.SUB, y))]
