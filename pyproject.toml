@@ -15,18 +15,10 @@ dependencies = []
 requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
-
-[tool.setuptools.package-dir]
-"tinygrad" = "tinygrad"
-"extra" = "extra"
-"tinygrad.extra" = "extra"
-
 [tool.setuptools]
 include-package-data = true
 packages = [
   'tinygrad',
-  'tinygrad.extra',
-  'extra',
   'tinygrad.codegen',
   'tinygrad.codegen.opt',
   'tinygrad.codegen.late',
@@ -105,10 +97,6 @@ testing = [
   "boto3",
   "pandas",
   "influxdb3-python",
-  "ninja",
-  "marimo>=0.23.5",
-  "pyrefly>=0.63.1",
-  "accelerate",
 ]
 docs = [
   "mkdocs",
@@ -269,6 +257,3 @@ select = [
 
 [tool.ruff.format]
 exclude = ["*"]
-
-[tool.marimo.language_servers.pyrefly]
-enabled = true
