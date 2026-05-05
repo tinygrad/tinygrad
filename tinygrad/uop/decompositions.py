@@ -467,14 +467,22 @@ def get_late_rewrite_patterns(ops:tuple[Ops, ...], disable_fast_idiv:bool) -> Pa
   # rewrite MUL/IDIV to SHL+SHR: x*(2**y) -> shl(x,y) and x//(2**y) -> shr(x,y)
   if Ops.SHL in ops: pat += [(UPat.var("x", dtypes.ints)*UPat.cvar("c"), lambda c,x: x << v if (v:=powers_of_two.get(c.arg, 0)) else None)]
   if Ops.SHR in ops:
-    # uint x // (2**v) -> x >> v (matches both ops since uint FLOORDIV may already be lowered to IDIV)
+    # uint floor==trunc, so safe for both ops
     pat += [(UPat((Ops.IDIV, Ops.FLOORDIV), src=(UPat.var("x", dtypes.uints), UPat.cvar("c"))),
       lambda x,c: x >> v if (v:=powers_of_two.get(c.arg, 0)) else None)]
-    pat += [(UPat.var("x", dtypes.ints)//UPat.cvar("c"), lambda x,c: (x+(l.const_like(l.vmin) if (l:=(x<0)).vmin==l.vmax else l).where(
-      c-1, 0)) >> v if (v:=powers_of_two.get(c.arg, 0)) else None)]  # (x+(x<0).where(c-1, 0)) >> v
+    # signed FLOORDIV by 2**v -> (x + (x<0 ? c-1 : 0)) >> v
+    # signed IDIV (trunc) by 2**v -> (x + (x<0 ? c-1 : 0)) >> v; only correct for trunc, so match raw Ops.IDIV
+    pat += [(UPat(Ops.IDIV, src=(UPat.var("x", dtypes.ints), UPat.cvar("c"))),
+      lambda x,c: (x+(l.const_like(l.vmin) if (l:=(x<0)).vmin==l.vmax else l).where(c-1, 0)) >> v
+        if (v:=powers_of_two.get(c.arg, 0)) else None)]
     if not disable_fast_idiv:
-      pat += [(UPat.var("x", dtypes.ints)//UPat.cvar("d", vec=False), lambda ctx, x, d: fast_idiv(ctx, x, d.arg))]
-      pat += [(UPat.var("x", dtypes.ints)%UPat.var("d"), lambda x, d: x-d*(x//d))]
+      # fast_idiv handles non-pow2: only fire on non-negative inputs (signed magic-mul is unreliable for x<0)
+      pat += [(UPat(Ops.IDIV, src=(UPat.var("x", dtypes.ints), UPat.cvar("d", vec=False))),
+        lambda ctx, x, d: fast_idiv(ctx, x, d.arg) if x.vmin >= 0 or x.dtype in dtypes.uints else None)]
+      # rewrite raw MOD -> x - d*IDIV(x,d) so fast_idiv can pick up the IDIV. only on non-negative inputs;
+      # avoids disturbing floormod_to_mod's general-path output (which uses a trunc Ops.MOD as an implementation detail)
+      pat += [(UPat(Ops.MOD, src=(UPat.var("x", dtypes.ints), UPat.var("d"))),
+        lambda x, d: x - d * x.alu(Ops.IDIV, d) if x.vmin >= 0 or x.dtype in dtypes.uints else None)]
   if Ops.NEG in ops:
     pat += [(UPat.var('x')*-1, lambda ctx,x: x.alu(Ops.NEG))]
     if Ops.SUB in ops: pat += [(UPat.var('x')+UPat.var('y').alu(Ops.NEG), lambda ctx,x,y: x.alu(Ops.SUB, y))]

@@ -1,11 +1,17 @@
 import unittest, itertools
 
+from tinygrad.codegen.late.devectorizer import load_store_indexing
 from tinygrad.dtype import dtypes
-from tinygrad.uop.ops import UOp, Ops
-from tinygrad.uop.symbolic import simplify_valid
+from tinygrad.uop.ops import UOp, Ops, graph_rewrite
+from tinygrad.uop.symbolic import simplify_valid, sym, pm_move_where_on_load
 from tinygrad.helpers import Context
 from test.helpers import full_rewrite
 from test.null.test_uop_symbolic import check_uop_against_string
+
+# symbolic-only idx + valid simplification (no late lowering of FLOORDIV/FLOORMOD)
+def simplify_valid_idx(sink: UOp) -> UOp: return graph_rewrite(sink, sym+pm_move_where_on_load, name="simplify_valid_idx")
+# image-aware idx + valid simplification: adds the codegen-layer matcher that drops provably in-bounds gates
+def simplify_image_idx(sink: UOp) -> UOp: return graph_rewrite(sink, sym+pm_move_where_on_load+load_store_indexing, name="simplify_image_idx")
 
 def get_gated_load_uop(valid:UOp, idx:UOp):
   return UOp(Ops.LOAD, dtypes.float, (
@@ -47,11 +53,10 @@ class TestHelpers(unittest.TestCase):
 
 class TestValidIdxSimplification(unittest.TestCase):
   def check(self, load, sidx, svalid, extra=()):
-    with Context(NOOPT=1, SPEC=0):
-      load = full_rewrite(UOp.sink(load, *extra)).src[0]
-    idx, valid = load.src[0].src[1], load.src[0].src[2]
-    check_uop_against_string(self, idx, sidx)
-    check_uop_against_string(self, valid, svalid)
+    load = simplify_valid_idx(UOp.sink(load, *extra)).src[0]
+    off = load.src[0].src[1]
+    check_uop_against_string(self, off.get_idx(), sidx)
+    check_uop_against_string(self, off.get_valid(), svalid)
 
   def test_cumsum(self):
     gidx0 = Special("gidx0", 5)
@@ -216,18 +221,18 @@ class TestValidIdxSimplification(unittest.TestCase):
 
 class TestImageSimplification(unittest.TestCase):
   def check(self, load, svalid, sidx0, sidx1):
-    with Context(NOOPT=1, SPEC=0):
-      load = full_rewrite(load.sink()).src[0]
-    idx = load.src[0].src[1]
+    load = simplify_image_idx(load.sink()).src[0]
+    off = load.src[0].src[1]
+    idx = off.get_idx()
     self.assertEqual(idx.op, Ops.STACK)
     self.assertEqual(len(idx.src), 2)
     idx0, idx1 = idx.src[0], idx.src[1]
     check_uop_against_string(self, idx0, sidx0)
     check_uop_against_string(self, idx1, sidx1)
     if svalid is not None:
-      check_uop_against_string(self, load.src[0].src[2], svalid)
+      check_uop_against_string(self, off.get_valid(), svalid)
     else:
-      self.assertEqual(len(load.src[0].src), 2, "svalid is None but load still has a valid")
+      self.assertEqual(off.get_valid(), UOp.const(dtypes.bool, True), "svalid is None but valid is not True")
 
   def test_idx_gt_c(self):
     # (idx1 < c+1).ne(True) ? (..., idx1-1+c) : 0 can drop the valid
@@ -447,12 +452,12 @@ class TestImageSimplification(unittest.TestCase):
     load = get_load_image_uop((32, 1024, 4), valid, (alu0, alu1))
     self.check(load, None, "(lidx1*128+gidx0//2+144)", "(lidx0*2+r0+-3)")
 
-    # TODO: this is the same idx as above, but simplifying idx too early makes it hard to drop the valid
+    # same idx, written without the inline simplification of the inner div/mod
     alu0 = ((gidx0*2+lidx1*512+(lidx0*8192+r0*4096)+-11711)//4%1024)
     alu1 = (lidx0*2+r0+-3)
     valid = ((lidx1<7)&((((lidx0*2+r0)<3)!=1)&((lidx0*2+r0)<35)))
     load = get_load_image_uop((32, 1024, 4), valid, (alu0, alu1))
-    self.check(load, "(lidx1<7)", "((gidx0*2+lidx1*512+(lidx0*8192+r0*4096)+-11711)//4%1024)", "(lidx0*2+r0+-3)")
+    self.check(load, None, "(lidx1*128+gidx0//2+144)", "(lidx0*2+r0+-3)")
 
   def test_simplify8(self):
     # from openpilot compile3, kernel r_4_16_8_16_4_4_3_3n1
