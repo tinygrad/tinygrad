@@ -72,10 +72,7 @@ class Ops(FastEnum):
   # ** 5 -- control flow / consts / custom **
 
   # control flow ops
-  BARRIER = auto(); RANGE = auto(); IF = auto(); END = auto(); ENDIF = auto()
-
-  # HCQ2: wait until *signal_buf >= value (src=(signal_buf, value))
-  WAIT = auto()
+  BARRIER = auto(); RANGE = auto(); IF = auto(); END = auto(); ENDIF = auto(); WAIT = auto()
 
   # consts. VCONST is a vectorized const
   VCONST = auto(); CONST = auto()
