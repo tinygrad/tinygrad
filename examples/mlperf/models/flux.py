@@ -33,7 +33,6 @@ def attention(q:Tensor, k:Tensor, v:Tensor, pe:Tensor) -> Tensor:
   return x.rearrange("B H L D -> B L (H D)")
 
 def split_qkv(qkv:Tensor, num_heads:int) -> tuple[Tensor, Tensor, Tensor]:
-  """Split QKV tensor into Q, K, V. Handles both standard [Q,K,V] and head-interleaved [qkv_h0,qkv_h1,...] layouts."""
   B, L, _ = qkv.shape
   D = qkv.shape[-1] // (3 * num_heads)
   if isinstance(qkv.device, tuple):
@@ -99,20 +98,12 @@ class QKNorm:
 
 class SelfAttention:
   def __init__(self, dim:int, num_heads:int = 8, qkv_bias:bool = False):
-    self.num_heads = num_heads
-    head_dim = dim // num_heads
+    self.num_heads, head_dim = num_heads, dim // num_heads
 
     self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
     self.norm = QKNorm(head_dim)
     self.proj = nn.Linear(dim, dim)
 
-  def __call__(self, x:Tensor, pe:Tensor) -> Tensor:
-    qkv = self.qkv(x)
-    q, k, v = split_qkv(qkv, self.num_heads)
-    q, k = self.norm(q, k)
-    x = attention(q, k, v, pe=pe)
-    return self.proj(x)
-  
   def init_weights(self):
     for layer in (self.qkv, self.proj):
       layer.weight = Tensor.glorot_uniform(*layer.weight.shape)
@@ -364,16 +355,12 @@ class Flux:
     return self.final_layer(img, vec)  # (N, T, patch_size ** 2 * out_channels)
 
   def shard(self, devices):
-    num_heads, head_dim = self.num_heads, self.hidden_size // self.num_heads
-
-    def _reorder_qkv(weight, bias):
-      """Reorder QKV from [Q_all,K_all,V_all] to head-interleaved [qkv_h0,qkv_h1,...] for shard-compatible reshape."""
-      # weight: (3*H*D, in) → (3, H, D, in) → (H, 3, D, in) → (H*3*D, in)
-      w = weight.reshape(3, num_heads, head_dim, -1).permute(1, 0, 2, 3).contiguous().reshape(weight.shape[0], -1)
-      b = bias.reshape(3, num_heads, head_dim).permute(1, 0, 2).contiguous().reshape(-1)
+    def reorder_qkv(weight, bias):
+      head_dim = self.hidden_size // self.num_heads
+      w = weight.reshape(3, self.num_heads, head_dim, -1).permute(1, 0, 2, 3).contiguous().reshape(weight.shape[0], -1)
+      b = bias.reshape(3, self.num_heads, head_dim).permute(1, 0, 2).contiguous().reshape(-1)
       return w, b
 
-    # Small embedding/output layers — replicate
     for p in nn.state.get_parameters(self.img_in): p.shard_(devices, axis=None).realize()
     for p in nn.state.get_parameters(self.txt_in): p.shard_(devices, axis=None).realize()
     for p in nn.state.get_parameters(self.time_in): p.shard_(devices, axis=None).realize()
@@ -382,40 +369,28 @@ class Flux:
       for p in nn.state.get_parameters(self.guidance_in): p.shard_(devices, axis=None).realize()
     for p in nn.state.get_parameters(self.final_layer): p.shard_(devices, axis=None).realize()
 
-    # DoubleStreamBlocks — Megatron-style TP
     for block in self.double_blocks:
       for attn in [block.img_attn, block.txt_attn]:
-        # Reorder QKV to head-interleaved layout, then column-parallel
-        attn.qkv.weight, attn.qkv.bias = _reorder_qkv(attn.qkv.weight, attn.qkv.bias)
+        attn.qkv.weight, attn.qkv.bias = reorder_qkv(attn.qkv.weight, attn.qkv.bias)
         attn.qkv.weight.shard_(devices, axis=0).realize()
         attn.qkv.bias.shard_(devices, axis=0).realize()
-        # Row-parallel: proj (shard input dim)
         attn.proj.weight.shard_(devices, axis=1).realize()
         attn.proj.bias.shard_(devices, axis=None).realize()
-        # Replicate: QKNorm
         for p in nn.state.get_parameters(attn.norm): p.shard_(devices, axis=None).realize()
       for mlp in [block.img_mlp, block.txt_mlp]:
-        # Column-parallel: MLP in
         mlp[0].weight.shard_(devices, axis=0).realize()
         mlp[0].bias.shard_(devices, axis=0).realize()
-        # Row-parallel: MLP out
         mlp[2].weight.shard_(devices, axis=1).realize()
         mlp[2].bias.shard_(devices, axis=None).realize()
-      # Row-parallel modulation: shard weight on input dim (axis=1) to save memory.
-      # With replicated vec input, the dot allreduces correctly to produce replicated output.
       for mod in [block.img_mod, block.txt_mod]:
         mod.lin.weight.shard_(devices, axis=1).realize()
         mod.lin.bias.shard_(devices, axis=None).realize()
 
-    # SingleStreamBlocks — split fused linear1 into separate qkv + mlp projections for TP
     for block in self.single_blocks:
       hs = block.hidden_size
-      # Split linear1 (fused QKV+MLP) into separate projections
       w_qkv, w_mlp = block.linear1.weight[:3*hs], block.linear1.weight[3*hs:]
       b_qkv, b_mlp = block.linear1.bias[:3*hs], block.linear1.bias[3*hs:]
-      # Reorder QKV to head-interleaved
-      w_qkv, b_qkv = _reorder_qkv(w_qkv, b_qkv)
-      # Store as separate attributes and shard column-parallel
+      w_qkv, b_qkv = reorder_qkv(w_qkv, b_qkv)
       block.qkv_weight = w_qkv.contiguous().shard_(devices, axis=0)
       block.qkv_weight.realize()
       block.qkv_bias = b_qkv.contiguous().shard_(devices, axis=0)
@@ -428,8 +403,6 @@ class Flux:
 
       del block.linear1
 
-      # Split linear2 (fused attn_out+mlp_out) into separate row-parallel projections
-      # This avoids Tensor.cat on sharded dim which tinygrad doesn't support
       block.attn_out_weight = block.linear2.weight[:, :hs].contiguous().shard_(devices, axis=1)
       block.attn_out_weight.realize()
 
@@ -441,11 +414,9 @@ class Flux:
 
       del block.linear2
 
-      # Row-parallel modulation: shard weight on input dim (axis=1) to save memory.
       block.modulation.lin.weight.shard_(devices, axis=1).realize()
       block.modulation.lin.bias.shard_(devices, axis=None).realize()
 
-      # Replicate: QKNorm
       for p in nn.state.get_parameters(block.norm): p.shard_(devices, axis=None).realize()
 
   def init_weights(self):
