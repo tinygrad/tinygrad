@@ -24,11 +24,6 @@ def validate_index(buf:UOp, idx:UOp, gate:UOp|None=None):
   from tinygrad.uop.validate import validate_index_with_z3
   return validate_index_with_z3(sz, idx, gate)
 
-def validate_mem_index(bidx:UOp, gate:UOp|None=None):
-  idx = bidx.src[0] if bidx.op is Ops.CAST else bidx
-  if idx.op is not Ops.INDEX: return False
-  return validate_index(idx.src[0], idx.src[1], gate)
-
 # four specs:
 #   shared_spec  -- usable anywhere
 #   tensor_spec  -- usable in tensor graph
@@ -179,13 +174,11 @@ shared_codegen_spec = PatternMatcher([
   (UPat(Ops.STACK, name="x"), lambda x: len(x.src)>1 and len(x.src) == x.dtype.vcount and all(x.dtype == y.dtype.vec(len(x.src)) for y in x.src)),
   (UPat(Ops.GEP, src=(UPat.var("src"),), name="gep"), lambda gep,src: gep.dtype == src.dtype.scalar()),
 
-  # LOAD(idx) / STORE(idx, val). OOB validation happens here because gates live on memory ops after gater.py.
-  (UPat(Ops.INDEX).or_casted("bidx").load(), lambda bidx: validate_mem_index(bidx)),
-  (UPat(Ops.INDEX).or_casted("bidx").load(UPat.var("gate", dtype=dtypes.bool), UPat()),
-   lambda bidx,gate: validate_mem_index(bidx, gate)),   # gated load
-  (UPat(Ops.INDEX).or_casted("bidx").store(UPat()), lambda bidx: validate_mem_index(bidx)),
-  (UPat(Ops.INDEX).or_casted("bidx").store(UPat(), UPat.var("gate", dtype=dtypes.bool)),
-   lambda bidx,gate: validate_mem_index(bidx, gate)),   # gated store
+  # LOAD(idx) / STORE(idx, val) with gates on the LOAD/STORE
+  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))).or_casted().load(), validate_index),
+  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))).or_casted().load(UPat.var("gate", dtype=dtypes.bool), UPat()), validate_index),
+  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))).or_casted().store(UPat()), validate_index),
+  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))).or_casted().store(UPat(), UPat.var("gate", dtype=dtypes.bool)), validate_index),
 
   # CUSTOM (inline and non inline)
   (UPat((Ops.CUSTOMI, Ops.CUSTOM)), lambda: True),
@@ -195,9 +188,6 @@ shared_codegen_spec = PatternMatcher([
 
   # INDEX is just address calculation. OOB validation is on LOAD/STORE where the gate is available.
   (UPat(GroupOp.Defines|{Ops.AFTER}).index(UPat()), lambda: True),
-
-  # NOTE: gated index is no longer supported
-  #(UPat(Ops.INDEX, src=(UPat(GroupOp.Defines|{Ops.AFTER}, name="buf"), UPat.var("idx"), UPat.var("gate", dtype=dtypes.bool))), validate_index),
 
   # SPECIAL
   (UPat(Ops.SPECIAL, src=(UPat.var("x", (dtypes.weakint, dtypes.int32)),), name="s"), lambda s,x: s.dtype == x.dtype and isinstance(s.arg, str)),
