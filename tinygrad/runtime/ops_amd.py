@@ -131,7 +131,7 @@ class AMDComputeQueue(HWQueue):
     return self
 
   def memory_barrier(self):
-    pf = '' if self.nbio.version[0] == 2 else '0' if self.nbio.version[:2] != (7, 11) else '1'
+    pf = '0' if self.nbio.version[:2] != (7, 11) else '1'
     self.wait_reg_mem(reg=getattr(self.nbio, f'regBIF_BX_PF{pf}_GPU_HDP_FLUSH_REQ').addr[0],
                       reg_done=getattr(self.nbio, f'regBIF_BX_PF{pf}_GPU_HDP_FLUSH_DONE').addr[0], value=0xffffffff)
     return self.acquire_mem()

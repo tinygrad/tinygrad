@@ -1,5 +1,4 @@
-import functools, re, urllib, tinygrad.runtime.autogen
-from collections import defaultdict
+import functools, re, tinygrad.runtime.autogen.am
 from dataclasses import dataclass
 from tinygrad.helpers import getbits, fetch
 
@@ -20,7 +19,6 @@ class AMDReg:
 @dataclass
 class AMDIP:
   name:str; version:tuple[int, ...]; bases:dict[int, tuple[int, ...]] # noqa: E702
-  def __post_init__(self): self.version = fixup_ip_version(self.name, self.version)[0]
 
   @functools.cached_property
   def regs(self): return import_asic_regs(self.name, self.version, cls=functools.partial(AMDReg, bases=self.bases))
@@ -37,7 +35,7 @@ def fixup_ip_version(ip:str, version:tuple[int, ...]) -> list[tuple[int, ...]]:
       if version[:len(ver)] == ver: return ovrd_ver
     return version
 
-  if ip in ['nbio', 'nbif']: version = _apply_ovrd({(3,3): (2,3,0), (7,3): (7,2,0)})
+  if ip in ['nbio', 'nbif']: version = _apply_ovrd({(7,3): (7,2,0)})
   elif ip in ['mp', 'smu']: version = _apply_ovrd({(14,0,3): (14,0,2)})
   elif ip in ['gc']: version = _apply_ovrd({(9,5,0): (9,4,3)})
   elif ip in ['sdma']: version = _apply_ovrd({(4,4,4): (4,4,2)})
@@ -76,35 +74,7 @@ def import_pmc(ip) -> dict[str, tuple[str, int]]:
   return res
 
 def import_asic_regs(prefix:str, version:tuple[int, ...], cls=AMDReg) -> dict[str, AMDReg]:
-  def _split_name(name): return name[:(pos:=next((i for i,c in enumerate(name) if c.isupper()), len(name)))], name[pos:]
-  def _extract_regs(txt):
-    x = {}
-    for k,v in {m.group(1): int(m.group(2), 0) for line in txt.splitlines() if (m:=re.match(r'#define\s+(\S+)\s+(0x[\da-fA-F]+|\d+)', line))}.items():
-      if k.startswith('VM_') or k.startswith('MC_'): x[prefix.upper()[:2]+k] = v
-      elif k.startswith('regVM_') or k.startswith('regMC_'): x["reg"+prefix.upper()[:2]+k[3:]] = v
-      else: x[k] = v
-    return x
-  def _download_file(ver, suff) -> str:
-    dir_prefix = {"osssys": "oss"}.get(prefix, prefix)
-    fetch_name = f"{prefix}_{'_'.join(map(str, ver))}_{suff}.h"
-    return header_download(f"include/asic_reg/{dir_prefix}/{fetch_name}", name=fetch_name, subdir="asic_regs")
-
-  for ver in fixup_ip_version(prefix, version):
-    try: offs, sh_masks = _extract_regs(_download_file(ver, "offset")), _extract_regs(_download_file(ver, "sh_mask"))
-    except urllib.error.HTTPError as e:
-      if e.code == 404: continue
-      raise
-
-    offsets = {k:v for k,v in offs.items() if _split_name(k)[0] in {'reg', 'mm'} and not k.endswith('_BASE_IDX')}
-    bases = {k[:-len('_BASE_IDX')]:v for k,v in offs.items() if _split_name(k)[0] in {'reg', 'mm'} and k.endswith('_BASE_IDX')}
-
-    fields: defaultdict[str, dict[str, tuple[int, int]]] = defaultdict(dict)
-    for field_name, field_mask in sh_masks.items():
-      if not ('__' in field_name and field_name.endswith('_MASK')): continue
-      reg_name, reg_field_name = field_name[:-len('_MASK')].split('__')
-      if reg_name.startswith('MC_') or reg_name.startswith('VM_'): reg_name = f"{prefix.upper()[:2]}{reg_name}"
-      fields[reg_name][reg_field_name.lower()] = ((field_mask & -field_mask).bit_length()-1, field_mask.bit_length()-1)
-
-    # NOTE: Some registers like regGFX_IMU_FUSESTRAP in gc_11_0_0 are missing base idx, just skip them
-    return {reg:cls(name=reg, offset=off, segment=bases[reg], fields=fields[_split_name(reg)[1]]) for reg,off in offsets.items() if reg in bases}
+  from tinygrad.runtime.autogen.am import regs
+  if (mods:=[m for m in regs.__all__ if m.startswith(prefix) and (v:=tuple(map(int, m.split('_')[1:])))[0] == version[0] and v <= version]):
+    return {reg:cls(name=reg, offset=off, segment=seg, fields=fields) for reg,(off,seg,fields) in getattr(regs, mods[-1]).items()}
   raise ImportError(f"Failed to load ASIC registers for {prefix.upper()} {'.'.join(map(str, version))}")
