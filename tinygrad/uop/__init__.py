@@ -65,6 +65,7 @@ class Ops(FastEnum):
   CMPLT = auto(); CMPNE = auto(); CMPEQ = auto()
   XOR = auto(); OR = auto(); AND = auto()
   THREEFRY = auto(); SUB = auto(); FDIV = auto(); POW = auto()
+  FLOORDIV = auto(); FLOORMOD = auto()
 
   # TernaryOps
   WHERE = auto(); MULACC = auto()
@@ -110,7 +111,7 @@ class Ops(FastEnum):
 class GroupOp:
   Unary = {Ops.EXP2, Ops.LOG2, Ops.SIN, Ops.SQRT, Ops.RECIPROCAL, Ops.NEG, Ops.TRUNC}
   Binary = {Ops.ADD, Ops.MUL, Ops.IDIV, Ops.MAX, Ops.MOD, Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ,
-            Ops.XOR, Ops.SHL, Ops.SHR, Ops.OR, Ops.AND, Ops.THREEFRY, Ops.SUB, Ops.FDIV, Ops.POW}
+            Ops.XOR, Ops.SHL, Ops.SHR, Ops.OR, Ops.AND, Ops.THREEFRY, Ops.SUB, Ops.FDIV, Ops.POW, Ops.FLOORDIV, Ops.FLOORMOD}
   Ternary = {Ops.WHERE, Ops.MULACC}
   ALU = set.union(Unary, Binary, Ternary)
 
@@ -137,6 +138,6 @@ class GroupOp:
   Comparison = {Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ}
 
   # do not preserve f(0) = 0
-  UnsafePad = {Ops.RECIPROCAL, Ops.LOG2, Ops.EXP2, Ops.IDIV, Ops.POW}
+  UnsafePad = {Ops.RECIPROCAL, Ops.LOG2, Ops.EXP2, Ops.IDIV, Ops.POW, Ops.FLOORDIV}
 
   All = set(Ops)

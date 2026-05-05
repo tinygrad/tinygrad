@@ -316,7 +316,7 @@ class HCQGraph(MultiGraphRunner):
     for fdev, buf in self.kernargs_bufs.items(): fdev.allocator._free(buf, BufferSpec(cpu_access=True))
 
   @staticmethod
-  def supports_exec_item(batch_devs:list[Compiled], new_call:UOp) -> bool:
+  def supports_uop(batch_devs:list[Compiled], new_call:UOp) -> bool:
     # Check if all devices are HCQ
     all_devs = cast(list[HCQCompiled], GraphRunner._all_devs(batch_devs, new_call))
     if not all(issubclass(type(d), HCQCompiled) for d in all_devs): return False
