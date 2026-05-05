@@ -128,7 +128,7 @@ class NIRRenderer(Renderer):
     # load/store bool -> uint8
     (UPat(Ops.LOAD, dtypes.bool, name="x"),
      lambda x: x.replace(dtype=dtypes.uint8, src=x.src[0:1]+((x.src[1].cast(dtypes.uint8),) if len(x.src)>=2 else ())+x.src[2:]).cast(dtypes.bool)),
-    (UPat(Ops.STORE, src=(UPat(), UPat(dtype=dtypes.bool)), name="x"),
+    (UPat(Ops.STORE, src=(UPat(), UPat(dtype=dtypes.bool)), name="x", allow_any_len=True),
      lambda x: x.replace(src=(x.src[0], x.src[1].cast(dtypes.uint8)))),
     # NIR requires shift amount to be 32 bit: https://docs.mesa3d.org/nir/alu.html#nir-alu-op-ishl
     (UPat((Ops.SHL, Ops.SHR), name="x"), lambda x: x.replace(src=(x.src[0], x.src[1].cast(dtypes.uint))) if x.src[1].dtype.bitsize != 32 else None),
@@ -268,7 +268,7 @@ class IR3Renderer(NIRRenderer, OpenCLRenderer):
     return _nload_img(ctx.b, ctx.r[img], ctx.r[coord], img.dtype)
 
   def_rewrite = PatternMatcher([
-    (UPat(Ops.STORE, src=(UPat.var('img').index(UPat.var('coord', dtypes.int.vec(2)), allow_any_len=True), UPat.var("val"))),
+    (UPat(Ops.STORE, src=(UPat.var('img').index(UPat.var('coord', dtypes.int.vec(2))), UPat.var("val")), allow_any_len=True),
      lambda ctx,img,coord,val: nstore_img(ctx.b, ctx.r[img], ctx.r[coord], ctx.r[val], val.dtype)),
     (UPat(Ops.LOAD, src=(UPat.var('img').index(UPat.var('coord', dtypes.int.vec(2))), UPat.var("alt"), UPat.var("gate"))),
      lambda ctx,img,coord,alt,gate: if_phi(ctx.b, ctx.r[gate], lambda: ctx.nload_img(img, coord), lambda: ctx.r[alt])),
