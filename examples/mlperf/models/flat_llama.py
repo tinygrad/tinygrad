@@ -26,7 +26,6 @@ FUSED_INPUT_QUANTIZE = getenv("FUSED_INPUT_QUANTIZE", 0)
 FUSED_ADD_NORM_MUL_QUANTIZE = getenv("FUSED_ADD_NORM_MUL_QUANTIZE", 0)
 FUSED_SILU_W13 = getenv("FUSED_SILU_W13", 0)
 
-
 FP8_DTYPE = dtypes.fp8e4m3
 FP8_GRAD_DTYPE = dtypes.fp8e5m2
 
@@ -154,7 +153,7 @@ class FlatTransformer:
     fp8_weights, init_inv_scales = list(zip(*[quantize_fp8_weight(getattr(self, w_name)) for w_name in w_names]))
     for weight, name in zip(fp8_weights, w_names): getattr(self, name).replace(weight)
     self._fp8_inv_scale = {wname: inv_scales.float().contiguous().requires_grad_(False)
-                             for wname, inv_scales in zip(w_names, init_inv_scales)}
+                           for wname, inv_scales in zip(w_names, init_inv_scales)}
 
   def create_lora_params(self, in_dim:int, out_dim:float, rank:int) -> tuple[Tensor, Tensor]:
     kwargs = {'dtype': LORA_DTYPE} if (LORA_DTYPE:=getenv('LORA_DTYPE', '')) else {}
