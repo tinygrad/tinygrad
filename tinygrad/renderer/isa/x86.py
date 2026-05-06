@@ -174,6 +174,8 @@ extra_matcher = PatternMatcher([
   #  src=tuple(s.src[0] for s in x.src)).cast(x.dtype) if all(s.op is Ops.CAST for s in x.src) else None),
   # rewrite -x -> 0 - x
   (UPat(Ops.NEG, name="x"), lambda x: UOp(Ops.SUB, x.dtype, (x.const_like(0),) + x.src)),
+  # TODO: add support for mod, requires support for accessing the 2nd+ reg of a multi output instruction
+  (UPat(Ops.MOD, src=(UPat.var("x"), UPat.var("y"))), lambda x,y: x - y * x.alu(Ops.IDIV, y)),
 ])
 
 # ***** X86 pre instruction selection *****
@@ -480,7 +482,7 @@ isel_matcher = PatternMatcher([
   (UPat(Ops.MUL, dtypes.int16s, name="x"), lambda x: x.ins(X86Ops.VPMULLW) if x.dtype.count > 1 else None),
   (UPat(Ops.MUL, dtypes.int32s, name="x"), lambda x: x.ins(X86Ops.VPMULLD) if x.dtype.count > 1 else None),
   # scalar int binary
-  ((UPat(dtype=dtypes.ints) // UPat()).named("x"), idiv),
+  ((UPat(dtype=dtypes.ints).alu(Ops.IDIV, UPat())).named("x"), idiv),
   # scalar int binary with immediate
   (UPat.var("a", dtypes.ints) << UPat.cvar("c"), lambda a,c: a.ins(X86Ops.SHLi, src=(a, imm(dtypes.uint8, c.arg)))),
   (UPat.var("a", dtypes.uints) >> UPat.cvar("c"), lambda a,c: a.ins(X86Ops.SHRi, src=(a, imm(dtypes.uint8, c.arg)))),
