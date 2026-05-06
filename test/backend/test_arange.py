@@ -6,6 +6,8 @@ from tinygrad.engine.realize import run_linear, estimate_uop, compile_linear
 from tinygrad.renderer.ptx import PTXRenderer
 from test.helpers import needs_second_gpu
 
+EMBEDDING_ATOMICS_SUPPORTED = Device.DEFAULT in ("CPU", "AMD", "CUDA") and not isinstance(Device[Device.DEFAULT].renderer, PTXRenderer)
+
 class TestArange(unittest.TestCase):
   def _get_flops(self, tensor, desired):
     GlobalCounters.reset()
@@ -163,7 +165,7 @@ class TestIndexing(unittest.TestCase):
   def test_llama_embedding_opt(self): self.test_llama_embedding(0, 1_736_704_000)
 
   # NOTE: call doesn't work with SPEC=2
-  @unittest.skipIf(Device.DEFAULT not in ("CPU", "AMD"), "atomics only on AMD/CPU")
+  @unittest.skipIf(not EMBEDDING_ATOMICS_SUPPORTED, "atomics only on CPU/AMD/CUDA")
   @Context(USE_ATOMICS=1, SPEC=1)
   def test_llama_8b_embedding_backward(self):
     from tinygrad.renderer.cstyle import CStyleLanguage
@@ -188,7 +190,7 @@ class TestIndexing(unittest.TestCase):
     np.testing.assert_allclose(emb.weight.grad.numpy(), expected_grad, rtol=1e-5, atol=1e-5)
 
   @needs_second_gpu
-  @unittest.skipIf(Device.DEFAULT not in ("CPU", "AMD"), "atomics only on AMD/CPU")
+  @unittest.skipIf(not EMBEDDING_ATOMICS_SUPPORTED, "atomics only on CPU/AMD/CUDA")
   @Context(USE_ATOMICS=1, SPEC=1)
   def test_embedding_backward_vocab_sharded(self):
     from tinygrad.renderer.cstyle import CStyleLanguage
@@ -213,6 +215,39 @@ class TestIndexing(unittest.TestCase):
     loss = (emb(idx)-gt).square().sum()
     loss.backward()
     np.testing.assert_allclose(emb.weight.grad.numpy(), expected_grad, rtol=1e-5, atol=1e-5)
+
+  def _test_embedding_backward_atomic_repeated_indices(self, sharded:bool):
+    from tinygrad.renderer.cstyle import CStyleLanguage
+    if Device.DEFAULT == "CPU" and not isinstance(Device["CPU"].renderer, CStyleLanguage): self.skipTest("CPU needs Clang renderer")
+    if sharded and Device.DEFAULT not in ("CPU", "AMD", "CUDA"): self.skipTest("needs multi-device backend")
+    devices = (f"{Device.DEFAULT}:0", f"{Device.DEFAULT}:1")
+    vocab_size, embed_size = 16, 8
+    idx_np = np.array([[0, 1, 7, 7], [8, 8, 15, 0]], dtype=np.int32)
+    grad_np = (np.arange(idx_np.size * embed_size, dtype=np.float32).reshape(*idx_np.shape, embed_size) % 7) / 3.0
+    expected_grad = np.zeros((vocab_size, embed_size), dtype=np.float32)
+    for token, grad in zip(idx_np.reshape(-1), grad_np.reshape(-1, embed_size)): expected_grad[token] += grad
+    idx = Tensor(idx_np)
+    emb = nn.Embedding(vocab_size, embed_size)
+    emb.weight = Tensor.ones(vocab_size, embed_size, requires_grad=True)
+    grad = Tensor(grad_np)
+    if sharded:
+      emb.weight.shard_(devices, axis=0)
+      idx = idx.shard(devices, axis=None)
+      grad = grad.shard(devices, axis=None)
+    Tensor.realize(idx, emb.weight, grad)
+    (emb(idx) * grad).sum().backward()
+    np.testing.assert_allclose(emb.weight.grad.numpy(), expected_grad, rtol=1e-5, atol=1e-5)
+
+  @unittest.skipIf(not EMBEDDING_ATOMICS_SUPPORTED, "atomics only on CPU/AMD/CUDA")
+  @Context(USE_ATOMICS=1, SPEC=1)
+  def test_embedding_backward_atomic_repeated_indices(self):
+    self._test_embedding_backward_atomic_repeated_indices(False)
+
+  @needs_second_gpu
+  @unittest.skipIf(not EMBEDDING_ATOMICS_SUPPORTED, "atomics only on CPU/AMD/CUDA")
+  @Context(USE_ATOMICS=1, SPEC=1)
+  def test_embedding_backward_atomic_repeated_indices_sharded(self):
+    self._test_embedding_backward_atomic_repeated_indices(True)
 
   @unittest.skipUnless(Device.DEFAULT == "AMD" or (Device.DEFAULT == "NULL" and DEV.arch.startswith("gfx")), "tests AMD bf16 cast overhead")
   def base_test_llama_8b_rope_backward(self, dtype):
