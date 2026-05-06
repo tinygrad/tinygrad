@@ -77,11 +77,13 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   else: pm_devectorize = sym+load_store_folding+correct_load_store+load_store_indexing
   if DEVECTORIZE >= 0: sink = graph_rewrite(sink, pm_devectorize, ctx=ren, name="devectorize")
 
+  # lower the index dtype to a concrete int. this needs to happen while gates are still present
+  sink = graph_rewrite(sink, pm_lower_index_dtype+load_store_indexing+gep_pushing, name="lower all index dtypes")
+
   # move the gates from index onto the loads and stores
   sink = graph_rewrite(sink, pm_move_gates_from_index, name="move gates from index")
 
-  # lower the index dtype to a concrete int
-  sink = graph_rewrite(sink, pm_lower_index_dtype+load_store_indexing+gep_pushing, name="lower all index dtypes")
+  # a final symbolic
   sink = graph_rewrite(sink, symbolic, name="post index symbolic")
 
   # optional pre matcher

@@ -37,6 +37,7 @@ def _drop_valid_stmts(valid:UOp, idx:UOp, height:int, width:int) -> list[UOp]:
   return drop_stmt
 
 def simplify_valid_load(buf:UOp, start_idx:UOp, valid:UOp) -> UOp|None:
+  start_idx = start_idx.simplify()  # if you don't do this, uop_given_valid may simplify things and this might inf loop
   idx = uop_given_valid(valid, start_idx)
   if not isinstance(buf.dtype, ImageDType): return None if idx is start_idx else buf.index(idx.valid(valid), ptr=True)
 
