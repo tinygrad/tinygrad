@@ -104,7 +104,7 @@ def main(args) -> None:
       op_name, ret, info = e.name.display_name, json.loads(e.name.ret[4:]) if e.name.ret else {}, ""
       color = next((v for k,v in viz.wave_colors.items() if k in op_name), None)
       op_str = hex_colored(op_name, color) if color and not NO_COLOR else op_name
-      phase, delay = None, 0
+      inst, phase, delay = None, None, 0
       idx = next(pkt_idxs.setdefault(e.device, itertools.count()))
       if e.device.startswith("WAVE"):
         inst = f"0x{pc:05x} {pc_map[pc]}" if (pc:=ret.get("pc")) is not None else f"{'':7} {op_name}"
