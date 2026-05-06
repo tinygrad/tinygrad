@@ -174,10 +174,12 @@ shared_codegen_spec = PatternMatcher([
   (UPat(Ops.STACK, name="x"), lambda x: len(x.src)>1 and len(x.src) == x.dtype.vcount and all(x.dtype == y.dtype.vec(len(x.src)) for y in x.src)),
   (UPat(Ops.GEP, src=(UPat.var("src"),), name="gep"), lambda gep,src: gep.dtype == src.dtype.scalar()),
 
-  # LOAD(idx) / STORE(idx, val)
-  (UPat().index(UPat()).or_casted().load(), lambda: True),
-  (UPat().index(UPat(), UPat(dtype=dtypes.bool)).or_casted().load(), lambda: True),  # gated load (alt added in program_spec)
-  (UPat(Ops.INDEX).or_casted().store(UPat()), lambda: True),
+  # LOAD(idx) / STORE(idx, val) with gates on the LOAD/STORE
+  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))).or_casted().load(), validate_index),
+  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))).or_casted().load(UPat.var("alt"), UPat.var("gate", dtype=dtypes.bool), name="load"),
+   lambda buf,idx,gate,alt,load: validate_index(buf, idx, gate) if alt.dtype == load.dtype else False),
+  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))).or_casted().store(UPat()), validate_index),
+  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))).or_casted().store(UPat(), UPat.var("gate", dtype=dtypes.bool)), validate_index),
 
   # CUSTOM (inline and non inline)
   (UPat((Ops.CUSTOMI, Ops.CUSTOM)), lambda: True),
