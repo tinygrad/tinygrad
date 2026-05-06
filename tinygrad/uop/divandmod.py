@@ -56,26 +56,26 @@ def fold_divmod_general(d: UOp) -> UOp|None:
         return sum((f-r)//c * v for f,r,v in zip(factors,rems,terms)) + const//c + rem.vmin//c
 
     # gcd_with_remainder: factor out common gcd from numerator
-    if x.vmin >= 0 and (g:=math.gcd(*factors, c)) > 1:
+    if (g:=math.gcd(*factors, c)) > 1:
       new_x = unwrap(x_peeled.divides(g)).simplify() + (const//g)%(c//g)
       if new_x.vmin >= 0:
         if d.op is Ops.FLOORMOD: return new_x % (c//g) * g + const%g
         return new_x // (c//g) + const//c
 
     # nest_by_factor: x//c -> (x//f)//(c//f), x%c -> (x//f%(c//f))*f + b where b=x%f
-    if x.vmin >= 0:
-      results = []
-      for div in {abs(f) for u, f in zip(uops_no_const, factors) if u.op not in (Ops.CONST, Ops.VCONST) and 1 < abs(f) < c and (c%f)==0}:
-        if (newxs := fold_divmod_general(x//div)) is not None and newxs.vmin >= 0:
-          if d.op is Ops.FLOORDIV:
-            results.append((len(newxs.backward_slice), newxs // (c // div)))
-          else:
-            b_parts = [f%div*t for f, t in zip(factors, terms) if f%div]
-            if const % div: b_parts.append(x.const_like(const % div))
-            b = UOp.usum(*b_parts) if b_parts else x.const_like(0)
-            if 0 <= b.vmin and b.vmax < div:
-              results.append((len((r:=(newxs % x.ufix(c//div))*div + b).backward_slice), r))
-      if results: return min(results, key=lambda r: r[0])[1]
+    # FLOORDIV identity holds for any sign of x; FLOORMOD reconstruction needs x.vmin>=0
+    results = []
+    for div in {abs(f) for u, f in zip(uops_no_const, factors) if u.op not in (Ops.CONST, Ops.VCONST) and 1 < abs(f) < c and (c%f)==0}:
+      if (newxs := fold_divmod_general(x//div)) is not None:
+        if d.op is Ops.FLOORDIV:
+          results.append((len(newxs.backward_slice), newxs // (c // div)))
+        elif x.vmin >= 0 and newxs.vmin >= 0:
+          b_parts = [f%div*t for f, t in zip(factors, terms) if f%div]
+          if const % div: b_parts.append(x.const_like(const % div))
+          b = UOp.usum(*b_parts) if b_parts else x.const_like(0)
+          if 0 <= b.vmin and b.vmax < div:
+            results.append((len((r:=(newxs % x.ufix(c//div))*div + b).backward_slice), r))
+    if results: return min(results, key=lambda r: r[0])[1]
 
   # ** Variable Denominator / Fallback Rules **
   # These rules apply to variables OR constants that failed the checks above.

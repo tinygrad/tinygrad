@@ -177,6 +177,18 @@ class TestFastIdiv(unittest.TestCase):
       self.assertIn(Ops.SHR, ops, f"For dtype={dt} divison by power of two did not simplify to shift")
       self.assertNotIn(Ops.IDIV, ops, f"For dtype={dt} divison by power of two did not simplify to shift")
 
+  def test_floormod_power_of_two(self):
+    # FLOORMOD by a power of two lowers to AND (correct floor mod for any sign in two's complement)
+    for dt in (dtypes.int32, dtypes.uint32):
+      g = UOp(Ops.PARAM, dt.ptr(), (), 0)
+      c = UOp.const(dt, 8)
+      a = UOp(Ops.FLOORMOD, dt, (g.index(c), c))
+      uops = to_uops_list([a], ren=Device[Device.DEFAULT].renderer)
+      ops = [x.op for x in uops]
+      self.assertIn(Ops.AND, ops, f"For dtype={dt} FLOORMOD by pow2 did not simplify to AND")
+      self.assertNotIn(Ops.MOD, ops, f"For dtype={dt} FLOORMOD by pow2 left a MOD")
+      self.assertNotIn(Ops.FLOORMOD, ops, f"For dtype={dt} FLOORMOD survived past late rewrite")
+
   def test_floordiv_power_of_two_uint(self):
     # uint FLOORDIV by a power of two lowers to a shift, leaving no IDIV/FLOORDIV in the kernel
     for dt in (dtypes.uint32, dtypes.uint64):
