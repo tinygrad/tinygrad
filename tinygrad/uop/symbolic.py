@@ -38,8 +38,8 @@ def fold_add_divmod_recombine(x:UOp) -> UOp|None:
       q, exact = v.src[0], False
       # (base%div)*mul + (base//div)*(div*mul) -> base*mul
       if q.op is Ops.FLOORDIV and q.src[1].op is Ops.CONST and q.src[1].arg == div: exact = q.src[0] is base
-      # ((base//d)%div)*mul + (base//(d*div))*(div*mul) -> (base//d)*mul
-      if not exact and base.op is Ops.FLOORDIV and base.src[1].op is Ops.CONST:
+      # ((base//d)%div)*mul + (base//(d*div))*(div*mul) -> (base//d)*mul if div>0
+      if not exact and div > 0 and base.op is Ops.FLOORDIV and base.src[1].op is Ops.CONST:
         exact = q.op is Ops.FLOORDIV and q.src[1].op is Ops.CONST and q.src[0] is base.src[0] and q.src[1].arg == base.src[1].arg*div
       if exact: return (base*mul).usum(*[t for k,t in enumerate(terms) if k not in (i,j)])
       # ((base//div)%d)*div + base%div -> base%(div*d)
