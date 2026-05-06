@@ -1,7 +1,11 @@
 import pathlib, hashlib, re, itertools
 from tinygrad.runtime.autogen import load, root
 
+__all__ = ["am", "pm4_soc15", "pm4_nv", "sdma_4_0_0", "sdma_5_0_0", "sdma_6_0_0", "smu_13_0_0", "smu_13_0_6", "smu_13_0_12", "smu_14_0_2",
+           "fw", "navi_offsets", "vega_offsets", "regs", "soc_9", "soc_11", "soc_12"]
+
 am_src="https://github.com/ROCm/ROCK-Kernel-Driver/archive/33970e1351f5e511029602454979f3de7e22260f.tar.gz"
+rocm_src="https://github.com/ROCm/rocm-systems/archive/cccc350dc620e61ae2554978b62ab3532dc10bd9.tar.gz"
 AMD, AMDINC = "{}/drivers/gpu/drm/amd", "{}/drivers/gpu/drm/amd/include"
 inc, kern_rules = ["-include", "stdint.h"], [(r'le32_to_cpu', ''),]
 fw_src="https://gitlab.com/kernel-firmware/linux-firmware/-/archive/1e2c15348485939baf1b6d1f5a7a3b799d80703d/1e2c15348485939baf1b6d1f5a7a3b799d80703d.tar.gz"
@@ -26,6 +30,8 @@ reg_patterns = {
   "mp": ["MP([01]|ASP)_SMN_C2PMSG"], "hdp": ["HDP_MEM_POWER_CTRL"], "oss": ["IH_"], "sdma": ["SDMA_GFX", "SDMA_CNTL"]
 }
 
+soc_patterns = ["SQ_TT", "VGT_EVENT_TYPE", "CS", "MTYPE", "SH"]
+
 def __getattr__(nm):
   match nm:
     case "am": return load("am/am", [root/f"extra/amdpci/headers/{s}.h" for s in ["v11_structs", "v12_structs", "amdgpu_vm",
@@ -40,13 +46,13 @@ def __getattr__(nm):
                                    args=["-I/opt/rocm/include", "-x", "c++"], srcs=am_src)
     case "sdma_6_0_0": return load("am/sdma_6_0_0", [root/"extra/hip_gpu_driver/sdma_registers.h", f"{AMD}/amdgpu/sdma_v6_0_0_pkt_open.h"],
                                    args=["-I/opt/rocm/include", "-x", "c++"], srcs=am_src)
-    case "smu_v13_0_0": return load("am/smu_v13_0_0", [f"{AMD}/pm/swsmu/inc/pmfw_if/{s}.h" for s in ["smu_v13_0_0_ppsmc","smu13_driver_if_v13_0_0"]]
+    case "smu_13_0_0": return load("am/smu_13_0_0", [f"{AMD}/pm/swsmu/inc/pmfw_if/{s}.h" for s in ["smu_v13_0_0_ppsmc","smu13_driver_if_v13_0_0"]]
                                     +[root/"extra/amdpci/headers/amdgpu_smu.h"], args=inc, srcs=am_src)
-    case "smu_v13_0_6": return load("am/smu_v13_0_6", [f"{AMD}/pm/swsmu/inc/pmfw_if/{s}.h" for s in ["smu_v13_0_6_ppsmc","smu_v13_0_6_pmfw", \
+    case "smu_13_0_6": return load("am/smu_13_0_6", [f"{AMD}/pm/swsmu/inc/pmfw_if/{s}.h" for s in ["smu_v13_0_6_ppsmc","smu_v13_0_6_pmfw", \
       "smu13_driver_if_v13_0_6"]] +[root/"extra/amdpci/headers/amdgpu_smu.h"], args=inc, srcs=am_src)
-    case "smu_v13_0_12": return load("am/smu_v13_0_12", [f"{AMD}/pm/swsmu/inc/pmfw_if/{s}.h" for s in ["smu_v13_0_12_ppsmc","smu_v13_0_12_pmfw",
+    case "smu_13_0_12": return load("am/smu_13_0_12", [f"{AMD}/pm/swsmu/inc/pmfw_if/{s}.h" for s in ["smu_v13_0_12_ppsmc","smu_v13_0_12_pmfw",
       "smu13_driver_if_v13_0_6"]] +[root/"extra/amdpci/headers/amdgpu_smu.h"], args=inc, srcs=am_src)
-    case "smu_v14_0_2": return load("am/smu_v14_0_2", [f"{AMD}/pm/swsmu/inc/pmfw_if/{s}.h" for s in ["smu_v14_0_0_pmfw", "smu_v14_0_2_ppsmc",
+    case "smu_14_0_2": return load("am/smu_14_0_2", [f"{AMD}/pm/swsmu/inc/pmfw_if/{s}.h" for s in ["smu_v14_0_0_pmfw", "smu_v14_0_2_ppsmc",
                                     "smu14_driver_if_v14_0"]]+[root/"extra/amdpci/headers/amdgpu_smu.h"], args=inc, srcs=am_src)
     # firmware hashes
     case "fw":
@@ -79,4 +85,7 @@ def __getattr__(nm):
         return "\n".join(out)
       return load("am/regs", [AMDINC + "/asic_reg/" + {"osssys":"oss"}.get(pre, pre) + f"/{pre}_{'_'.join(map(str, ver))}"
                               for pre in reg_files for ver in sorted(reg_files[pre])], srcs=am_src, gen=genreg)
+    case "soc_9" | "soc_11" | "soc_12":
+      return load(f"am/{nm}", ["{}/projects/aqlprofile/linux/" + {9: "vega10", 11: "soc21", 12: "soc24"}[int(nm.split('_')[1])] + "_enum.h"],
+                  srcs=rocm_src, patterns=soc_patterns, macros=False)
     case _: raise AttributeError(f"no such autogen: {nm}")

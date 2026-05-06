@@ -33,7 +33,7 @@ class NullAllocator(Allocator['NullDevice']):
 class NullGraph(MultiGraphRunner):
   def __call__(self, input_uops:tuple[UOp, ...], var_vals:dict[str, int], wait=False) -> float|None:
     # description based on command, copied from HCQ graph
-    if PROFILE: cpu_events.append(ProfileGraphEvent(ents:=[ProfileGraphEntry(self.device if runtime is not None else f"{self.device}:SDMA:0", \
+    if PROFILE: cpu_events.append(ProfileGraphEvent(ents:=[ProfileGraphEntry(runtime.device if runtime is not None else f"{bufs[1].device}:SDMA:0", \
         runtime.name if runtime is not None else f"{bufs[1].device} -> {bufs[0].device}", i, i+1) \
         for i,((_,_,bufs,_),runtime) in enumerate(zip(self.calls, self.runtimes))], [], [perf_counter_us() for _ in range(len(ents)+1)]))
     return 1e-1
