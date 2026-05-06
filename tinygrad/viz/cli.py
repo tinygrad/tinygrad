@@ -66,19 +66,20 @@ def main(args) -> None:
 
   def fmt(val, to_str=str) -> str: return json.dumps(val if isinstance(val, dict) else {"value":val}) if args.json else to_str(val)
 
-  def print_step(step:dict) -> None:
+  def print_step(step:dict, reconstruct_matches=False) -> None:
     data = viz.get_render(viz_data, step["query"])
     if isinstance(data.get("value"), Iterator):
       for m in data["value"]:
         if m.get("uop"): print(fmt(m["uop"]))
+        if not reconstruct_matches: return None
         if m.get("diff"):
           loc = pathlib.Path(m["upat"][0][0])
           print(fmt(f"{loc.parent.name}/{loc.name}:{m['upat'][0][1]}\n{m['upat'][1]}"))
           for line in m["diff"]: print(fmt(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None)))
     if data.get("src") is not None: print(fmt(data["src"]))
 
-  events:list = viz.load_pickle(args.profile_path, default=[])
-  if (profile_bytes:=viz.get_profile(viz_data, events)) is None: raise RuntimeError(f"empty profile in {args.profile_path}")
+  profile_bytes = viz.get_profile(viz_data, viz.load_pickle(args.profile_path, default=[]))
+  if profile_bytes is None: raise RuntimeError(f"empty profile in {args.profile_path}")
   profile = decode_profile(profile_bytes)
   profile["layout"].update([(f'{c["name"][5:]}{" SQTT" if s["name"].endswith("PKTS") else ""} {s["name"]}', s["data"]) for c in viz_data.ctxs
                             if c["name"].startswith("SQTT") for s in c["steps"] if s["name"].endswith(("PMC", "PKTS"))])
@@ -174,8 +175,8 @@ def main(args) -> None:
             line = f"{file.split('/')[-1]}:{lineno} {fxn}"
             if fmt: ext.append(f"{line} {code}")
             elif not file.startswith("<") and not fxn.startswith("<"): fmt["loc"] = line
-        yield {"device":dev, "name":fmt_colored(e["name"]), "dur_ms":e["dur"]*1e-3,
-               "st_ms":e["st"]*1e-3, "fmt":fmt, "ref":e["ref"], "ext":"\n".join(ext)}
+        yield {"device":dev, "name":fmt_colored(e["name"]), "dur_ms":e["dur"]*1e-3, "st_ms":e["st"]*1e-3, "fmt":fmt, "ref":e["ref"],
+               "ext":"\n".join(ext)}
     def fmt_top(k:dict) -> str:
       return f"{fmt_colored(k['name'])}{' ' * max(0, 38-ansilen(k['name']))} {time_to_str(k['dur_ms']*1e-3, w=9)} {k['count']:7d} {k['pct']:6.2f}%"+\
           (" "*4+fmt_data(k['fmt']) if k['fmt'] else "")
@@ -194,7 +195,8 @@ def main(args) -> None:
           if DEBUG >= 3 and s["name"] == "View Base AST": print_step(s)
           if DEBUG >= 4 and s["name"] == "View Source": print_step(s)
           if DEBUG >= 5 or ls: print(fmt(" "*s["depth"]+s["name"]+(f" - {s['match_count']}" if s.get('match_count', 0) else '')))
-          if DEBUG >= 6 or args.item and len(args.item) > 1 and s["name"] == args.item[1]: print_step(s)
+          if DEBUG >= 6: print_step(s)
+          if DEBUG >= 7 or (args.item and len(args.item) > 1 and s["name"] == args.item[1]): print_step(s, reconstruct_matches=True)
       elif DEBUG >= 3 and k.get("ext"): print(fmt(k["ext"]))
     produce = produce_top_kernels if args.top else produce_all_kernels
     if args.item:
