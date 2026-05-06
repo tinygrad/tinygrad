@@ -12,8 +12,6 @@ BLOCK_K = getenv("BK", 16)
 assert N % BLOCK_N == 0 and M % BLOCK_M == 0 and K % BLOCK_K == 0
 
 use_wmma = getenv("WMMA")
-LDS_K = getenv("LDSK", BLOCK_K + 8 if use_wmma else BLOCK_K)
-assert LDS_K >= BLOCK_K
 if use_wmma:
   is_rdna4 = Device[Device.DEFAULT].renderer.target.arch.startswith("gfx12")
 
@@ -28,6 +26,9 @@ else:
   WAVES_M, WAVES_N = 4, 1
   LANES_PER_WAVE_M, LANES_PER_WAVE_N = 4, 8
   UNROLL_M, UNROLL_N = 4, 4
+
+LDS_K = getenv("LDSK", WMMA_K + 4 if use_wmma else BLOCK_K)
+assert LDS_K >= (WMMA_K if use_wmma else BLOCK_K)
 
 # total lanes must be the warp size
 assert LANES_PER_WAVE_M*LANES_PER_WAVE_N == WARP_SIZE
@@ -48,16 +49,16 @@ def block_128x128_gemm(c:UOp, a:UOp, b:UOp) -> UOp:
   # -- GLOBAL -> LOCAL --
   # wmma: spatial outer, k inner (k contiguous for vectorized WMMA tile loads)
   # gemm: k outer, spatial inner
-  A_local = UOp.placeholder((BLOCK_M, LDS_K) if use_wmma else (BLOCK_K, BLOCK_M), a.dtype.base, slot=0, addrspace=AddrSpace.LOCAL)
-  B_local = UOp.placeholder((BLOCK_N, LDS_K) if use_wmma else (BLOCK_K, BLOCK_N), b.dtype.base, slot=1, addrspace=AddrSpace.LOCAL)
+  A_local = UOp.placeholder((BLOCK_M, BLOCK_K // WMMA_K, LDS_K) if use_wmma else (BLOCK_K, BLOCK_M), a.dtype.base, slot=0, addrspace=AddrSpace.LOCAL)
+  B_local = UOp.placeholder((BLOCK_N, BLOCK_K // WMMA_K, LDS_K) if use_wmma else (BLOCK_K, BLOCK_N), b.dtype.base, slot=1, addrspace=AddrSpace.LOCAL)
 
   a = a.reshape(K // BLOCK_K, BLOCK_K, BLOCK_M)
   b = b.reshape(K // BLOCK_K, BLOCK_K, BLOCK_N)
   k_tile = UOp.range(K // BLOCK_K, 100, AxisType.REDUCE)
 
   # copy with transpose for wmma (input is k×spatial, LDS is spatial×k)
-  A_copy = A_local.permute((1,0)).shrink(((0, BLOCK_K), (0, BLOCK_M))) if use_wmma else A_local
-  B_copy = B_local.permute((1,0)).shrink(((0, BLOCK_K), (0, BLOCK_N))) if use_wmma else B_local
+  A_copy = A_local.shrink(((0, BLOCK_M), (0, BLOCK_K // WMMA_K), (0, WMMA_K))).permute((1,2,0)) if use_wmma else A_local
+  B_copy = B_local.shrink(((0, BLOCK_N), (0, BLOCK_K // WMMA_K), (0, WMMA_K))).permute((1,2,0)) if use_wmma else B_local
   A_store = A_copy.reshape(-1, THREADS_PER_BLOCK)[:, tid].store(a[k_tile].reshape(-1, THREADS_PER_BLOCK)[:, tid])
   B_store = B_copy.reshape(-1, THREADS_PER_BLOCK)[:, tid].store(b[k_tile].reshape(-1, THREADS_PER_BLOCK)[:, tid])
   barrier = UOp.barrier(A_store, B_store)
