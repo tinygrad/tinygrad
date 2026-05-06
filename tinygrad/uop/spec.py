@@ -187,9 +187,8 @@ shared_codegen_spec = PatternMatcher([
   # assembly instruction
   (UPat(Ops.INS), lambda: True),
 
-  # INDEX (2-arg and 3-arg with bool gate)
-  (UPat(GroupOp.Defines|{Ops.AFTER}, name="buf").index(UPat.var("idx")), validate_index),
-  (UPat(Ops.INDEX, src=(UPat(GroupOp.Defines|{Ops.AFTER}, name="buf"), UPat.var("idx"), UPat.var("gate", dtype=dtypes.bool))), validate_index),
+  # INDEX is just address calculation. OOB validation is on LOAD/STORE where the gate is available.
+  (UPat(GroupOp.Defines|{Ops.AFTER}).index(UPat()), lambda: True),
 
   # SPECIAL
   (UPat(Ops.SPECIAL, src=(UPat.var("x", (dtypes.weakint, dtypes.int32)),), name="s"), lambda s,x: s.dtype == x.dtype and isinstance(s.arg, str)),
@@ -238,9 +237,6 @@ tensor_spec = PatternMatcher([
 # ***** UOp spec in linearized programs *****
 
 program_spec = PatternMatcher([
-  # LOAD (idx, alt_value), LOAD can have an alt value, but only if the index has a gate
-  (UPat().index(UPat(), UPat(dtype=dtypes.bool)).or_casted().load(UPat()), lambda: True),
-
   # END closes ranges
   (UPat(Ops.END, src=(UPat(), UPat(Ops.RANGE)), dtype=dtypes.void), lambda: True),
 
