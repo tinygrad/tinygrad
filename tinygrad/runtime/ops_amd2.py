@@ -5,7 +5,7 @@ assert sys.platform != 'win32'
 from dataclasses import dataclass
 from tinygrad.runtime.support.hcq2 import HCQ2Compiled, HCQAllocator, HCQ2Buffer, HWQueue, CLikeArgsState, HCQSignal, HCQProgram, FileIOInterface
 from tinygrad.runtime.support.hcq2 import MMIOInterface, BumpAllocator, hcq_filter_visible_devices, hcq_profile
-from tinygrad.uop.ops import sint, UOp, buffers
+from tinygrad.uop.ops import sint, UOp
 from tinygrad.device import Compiled, BufferSpec, Buffer, Device
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import getenv, round_up, data64_le, DEBUG, PROFILE, ProfileEvent, lo32, hi32, colored, prod, ContextVar, TracingKey
@@ -32,131 +32,128 @@ WAIT_REG_MEM_FUNCTION_NEQ = 4 # !=
 WAIT_REG_MEM_FUNCTION_GEQ = 5 # >=
 
 # new queue submition
-from tinygrad.runtime.support.hcq2 import HCQEncodeCtx, HCQRoutineCtx, hcq_blob_append
+from tinygrad.runtime.support.hcq2 import HCQ2LowerCtx, hcq_routine
+from tinygrad.engine.realize import get_runtime
 from tinygrad.uop.ops import Ops, UPat, PatternMatcher
 
-def pkt3(ctx:HCQEncodeCtx, cmd, *vals): hcq_blob_append(ctx, [ctx.dev.pm4.PACKET3(cmd, len(vals) - 1), *vals])
+def pm4_pkt3(ctx:HCQ2LowerCtx, cmd, *vals): ctx.append(ctx.dev.pm4.PACKET3(cmd, len(vals) - 1), *vals)
 
-def wreg(ctx:HCQEncodeCtx, reg, *args):
+def pm4_wreg(ctx:HCQ2LowerCtx, reg, *args):
   pm4 = ctx.dev.pm4
   if pm4.PACKET3_SET_SH_REG_START <= reg.addr[0] < pm4.PACKET3_SET_SH_REG_END:
-    pkt3(ctx, pm4.PACKET3_SET_SH_REG, reg.addr[0] - pm4.PACKET3_SET_SH_REG_START, *args)
+    pm4_pkt3(ctx, pm4.PACKET3_SET_SH_REG, reg.addr[0] - pm4.PACKET3_SET_SH_REG_START, *args)
   elif pm4.PACKET3_SET_UCONFIG_REG_START <= reg.addr[0] < pm4.PACKET3_SET_UCONFIG_REG_START + 2**16-1:
-    pkt3(ctx, pm4.PACKET3_SET_UCONFIG_REG, reg.addr[0] - pm4.PACKET3_SET_UCONFIG_REG_START, *args)
+    pm4_pkt3(ctx, pm4.PACKET3_SET_UCONFIG_REG, reg.addr[0] - pm4.PACKET3_SET_UCONFIG_REG_START, *args)
   else: raise RuntimeError(f'Cannot set {reg.name}')
 
-def pm4_wait(ctx:HCQEncodeCtx, wait:UOp) -> UOp:
+def pm4_wait(ctx:HCQ2LowerCtx, x:UOp):
   pm4 = ctx.dev.pm4
-  sig_addr = buffers[wait.src[0]].get_buf(ctx.dev.device).va_addr
-  wrm_info = pm4.WAIT_REG_MEM_MEM_SPACE(1) | pm4.WAIT_REG_MEM_FUNCTION(WAIT_REG_MEM_FUNCTION_GEQ) | pm4.WAIT_REG_MEM_ENGINE(0)
-  pkt3(ctx, pm4.PACKET3_WAIT_REG_MEM, wrm_info, *data64_le(sig_addr), wait.src[1].arg, 0xffffffff, 4)
-  return wait
+  wrm = pm4.WAIT_REG_MEM_MEM_SPACE(1) | pm4.WAIT_REG_MEM_FUNCTION(WAIT_REG_MEM_FUNCTION_GEQ) | pm4.WAIT_REG_MEM_ENGINE(0)
+  pm4_pkt3(ctx, pm4.PACKET3_WAIT_REG_MEM, wrm, *data64_le(ctx.addr(x.src[0])), x.src[1], 0xffffffff, 4)
 
-def pm4_barrier(ctx:HCQEncodeCtx, barrier:UOp) -> UOp:
-  dev, pm4, nbio = ctx.dev, ctx.dev.pm4, ctx.dev.nbio
-  # HDP flush
+def pm4_barrier(ctx:HCQ2LowerCtx, x:UOp):
+  pm4, nbio = ctx.dev.pm4, ctx.dev.nbio
   pf = '' if nbio.version[0] == 2 else '0' if nbio.version[:2] != (7, 11) else '1'
-  req_reg, done_reg = getattr(nbio, f'regBIF_BX_PF{pf}_GPU_HDP_FLUSH_REQ').addr[0], getattr(nbio, f'regBIF_BX_PF{pf}_GPU_HDP_FLUSH_DONE').addr[0]
-  wrm_info = pm4.WAIT_REG_MEM_FUNCTION(WAIT_REG_MEM_FUNCTION_GEQ) | pm4.WAIT_REG_MEM_ENGINE(0) | pm4.WAIT_REG_MEM_OPERATION(1)
-  pkt3(ctx, pm4.PACKET3_WAIT_REG_MEM, wrm_info, req_reg, done_reg, 0xffffffff, 0xffffffff, 4)
-  # acquire_mem
-  if dev.target[0] != 9:
-    cache_flags = pm4.PACKET3_ACQUIRE_MEM_GCR_CNTL_GLI_INV(1) | pm4.PACKET3_ACQUIRE_MEM_GCR_CNTL_GLM_INV(1) | pm4.PACKET3_ACQUIRE_MEM_GCR_CNTL_GLM_WB(1) \
-                | pm4.PACKET3_ACQUIRE_MEM_GCR_CNTL_GLK_INV(1) | pm4.PACKET3_ACQUIRE_MEM_GCR_CNTL_GLK_WB(1) | pm4.PACKET3_ACQUIRE_MEM_GCR_CNTL_GLV_INV(1) \
-                | pm4.PACKET3_ACQUIRE_MEM_GCR_CNTL_GL1_INV(1) | pm4.PACKET3_ACQUIRE_MEM_GCR_CNTL_GL2_INV(1) | pm4.PACKET3_ACQUIRE_MEM_GCR_CNTL_GL2_WB(1)
-    pkt3(ctx, pm4.PACKET3_ACQUIRE_MEM, 0, *data64_le((1 << 64) - 1), *data64_le(0), 0, cache_flags)
+  req_reg = getattr(nbio, f'regBIF_BX_PF{pf}_GPU_HDP_FLUSH_REQ').addr[0]
+  done_reg = getattr(nbio, f'regBIF_BX_PF{pf}_GPU_HDP_FLUSH_DONE').addr[0]
+  wrm = pm4.WAIT_REG_MEM_FUNCTION(WAIT_REG_MEM_FUNCTION_GEQ) | pm4.WAIT_REG_MEM_ENGINE(0) | pm4.WAIT_REG_MEM_OPERATION(1)
+  pm4_pkt3(ctx, pm4.PACKET3_WAIT_REG_MEM, wrm, req_reg, done_reg, 0xffffffff, 0xffffffff, 4)
+  if ctx.dev.target[0] != 9:
+    cache_flags = pm4.PACKET3_ACQUIRE_MEM_GCR_CNTL_GLI_INV(1) | pm4.PACKET3_ACQUIRE_MEM_GCR_CNTL_GLM_INV(1) \
+                | pm4.PACKET3_ACQUIRE_MEM_GCR_CNTL_GLM_WB(1) | pm4.PACKET3_ACQUIRE_MEM_GCR_CNTL_GLK_INV(1) \
+                | pm4.PACKET3_ACQUIRE_MEM_GCR_CNTL_GLK_WB(1) | pm4.PACKET3_ACQUIRE_MEM_GCR_CNTL_GLV_INV(1) \
+                | pm4.PACKET3_ACQUIRE_MEM_GCR_CNTL_GL1_INV(1) | pm4.PACKET3_ACQUIRE_MEM_GCR_CNTL_GL2_INV(1) \
+                | pm4.PACKET3_ACQUIRE_MEM_GCR_CNTL_GL2_WB(1)
+    pm4_pkt3(ctx, pm4.PACKET3_ACQUIRE_MEM, 0, *data64_le((1 << 64) - 1), *data64_le(0), 0, cache_flags)
   else:
-    cp_coher = pm4.PACKET3_ACQUIRE_MEM_CP_COHER_CNTL_SH_ICACHE_ACTION_ENA(1) | pm4.PACKET3_ACQUIRE_MEM_CP_COHER_CNTL_SH_KCACHE_ACTION_ENA(1) \
-             | pm4.PACKET3_ACQUIRE_MEM_CP_COHER_CNTL_TC_ACTION_ENA(1) | pm4.PACKET3_ACQUIRE_MEM_CP_COHER_CNTL_TCL1_ACTION_ENA(1) \
+    cp_coher = pm4.PACKET3_ACQUIRE_MEM_CP_COHER_CNTL_SH_ICACHE_ACTION_ENA(1) \
+             | pm4.PACKET3_ACQUIRE_MEM_CP_COHER_CNTL_SH_KCACHE_ACTION_ENA(1) \
+             | pm4.PACKET3_ACQUIRE_MEM_CP_COHER_CNTL_TC_ACTION_ENA(1) \
+             | pm4.PACKET3_ACQUIRE_MEM_CP_COHER_CNTL_TCL1_ACTION_ENA(1) \
              | pm4.PACKET3_ACQUIRE_MEM_CP_COHER_CNTL_TC_WB_ACTION_ENA(1)
-    pkt3(ctx, pm4.PACKET3_ACQUIRE_MEM, cp_coher, *data64_le((1 << 64) - 1), *data64_le(0), 0x0000000A)
-  return barrier
+    pm4_pkt3(ctx, pm4.PACKET3_ACQUIRE_MEM, cp_coher, *data64_le((1 << 64) - 1), *data64_le(0), 0x0000000A)
 
-def pm4_program(ctx:HCQEncodeCtx, prog:UOp) -> UOp:
-  dev, pm4, gc, soc = ctx.dev, ctx.dev.pm4, ctx.dev.gc, ctx.dev.soc
-  global_size, local_size, rt, args_state = prog.arg
+def pm4_program(ctx:HCQ2LowerCtx, x:UOp):
+  rt, info = x.arg
+  args = x.src[1]
+  pm4, gc, soc = ctx.dev.pm4, ctx.dev.gc, ctx.dev.soc
 
-  # acquire_mem for coherency (gli=0, gl2=0)
-  if dev.target[0] != 9:
+  if ctx.dev.target[0] != 9:
     cache_flags = pm4.PACKET3_ACQUIRE_MEM_GCR_CNTL_GLM_INV(1) | pm4.PACKET3_ACQUIRE_MEM_GCR_CNTL_GLM_WB(1) \
-                | pm4.PACKET3_ACQUIRE_MEM_GCR_CNTL_GLK_INV(1) | pm4.PACKET3_ACQUIRE_MEM_GCR_CNTL_GLK_WB(1) | pm4.PACKET3_ACQUIRE_MEM_GCR_CNTL_GLV_INV(1) \
-                | pm4.PACKET3_ACQUIRE_MEM_GCR_CNTL_GL1_INV(1)
-    pkt3(ctx, pm4.PACKET3_ACQUIRE_MEM, 0, *data64_le((1 << 64) - 1), *data64_le(0), 0, cache_flags)
+                | pm4.PACKET3_ACQUIRE_MEM_GCR_CNTL_GLK_INV(1) | pm4.PACKET3_ACQUIRE_MEM_GCR_CNTL_GLK_WB(1) \
+                | pm4.PACKET3_ACQUIRE_MEM_GCR_CNTL_GLV_INV(1) | pm4.PACKET3_ACQUIRE_MEM_GCR_CNTL_GL1_INV(1)
+    pm4_pkt3(ctx, pm4.PACKET3_ACQUIRE_MEM, 0, *data64_le((1 << 64) - 1), *data64_le(0), 0, cache_flags)
   else:
     cp_coher = pm4.PACKET3_ACQUIRE_MEM_CP_COHER_CNTL_SH_KCACHE_ACTION_ENA(1) | pm4.PACKET3_ACQUIRE_MEM_CP_COHER_CNTL_TCL1_ACTION_ENA(1)
-    pkt3(ctx, pm4.PACKET3_ACQUIRE_MEM, cp_coher, *data64_le((1 << 64) - 1), *data64_le(0), 0x0000000A)
+    pm4_pkt3(ctx, pm4.PACKET3_ACQUIRE_MEM, cp_coher, *data64_le((1 << 64) - 1), *data64_le(0), 0x0000000A)
 
-  # user regs setup
   user_regs = []
   if rt.enable_private_segment_sgpr:
-    scratch_hilo = data64_le(dev.scratch.va_addr)
+    scratch_hilo = data64_le(ctx.dev.scratch.va_addr)
     user_regs = [scratch_hilo[0], scratch_hilo[1] | 1 << 31, 0xffffffff, 0x20c14000]
-  if rt.enable_dispatch_ptr:
-    user_regs += [*data64_le(args_state.buf._buf.va_addr + rt.kernargs_segment_size)]
-  user_regs += [*data64_le(args_state.buf._buf.va_addr)]
+  if rt.enable_dispatch_ptr: user_regs += [*data64_le(ctx.addr(args) + rt.kernargs_segment_size)]
+  user_regs += [*data64_le(ctx.addr(args))]
 
-  wreg(ctx, gc.regCOMPUTE_PGM_LO, *data64_le(rt.prog_addr >> 8))
-  wreg(ctx, gc.regCOMPUTE_PGM_RSRC1, rt.rsrc1, rt.rsrc2)
-  wreg(ctx, gc.regCOMPUTE_PGM_RSRC3, rt.rsrc3)
-  wreg(ctx, gc.regCOMPUTE_TMPRING_SIZE, dev.tmpring_size)
+  pm4_wreg(ctx, gc.regCOMPUTE_PGM_LO, *data64_le(rt.prog_addr >> 8))
+  pm4_wreg(ctx, gc.regCOMPUTE_PGM_RSRC1, rt.rsrc1, rt.rsrc2)
+  pm4_wreg(ctx, gc.regCOMPUTE_PGM_RSRC3, rt.rsrc3)
+  pm4_wreg(ctx, gc.regCOMPUTE_TMPRING_SIZE, ctx.dev.tmpring_size)
 
-  for xcc_id in range(dev.xccs):
-    scratch_base = dev.scratch.va_addr + (dev.scratch.size // dev.xccs * xcc_id)
-    wreg(ctx, gc.regCOMPUTE_DISPATCH_SCRATCH_BASE_LO, *data64_le(scratch_base >> 8))
+  for xcc_id in range(ctx.dev.xccs):
+    scratch_base = ctx.dev.scratch.va_addr + (ctx.dev.scratch.size // ctx.dev.xccs * xcc_id)
+    pm4_wreg(ctx, gc.regCOMPUTE_DISPATCH_SCRATCH_BASE_LO, *data64_le(scratch_base >> 8))
 
-  wreg(ctx, gc.regCOMPUTE_RESTART_X, 0, 0, 0)
-  wreg(ctx, gc.regCOMPUTE_USER_DATA_0, *user_regs)
-  wreg(ctx, gc.regCOMPUTE_RESOURCE_LIMITS, gc.regCOMPUTE_RESOURCE_LIMITS.encode(waves_per_sh=getenv("WAVES_PER_SH")))
-  wreg(ctx, gc.regCOMPUTE_START_X, 0, 0, 0, *local_size, 0, 0)
+  pm4_wreg(ctx, gc.regCOMPUTE_RESTART_X, 0, 0, 0)
+  pm4_wreg(ctx, gc.regCOMPUTE_USER_DATA_0, *user_regs)
+  pm4_wreg(ctx, gc.regCOMPUTE_RESOURCE_LIMITS, gc.regCOMPUTE_RESOURCE_LIMITS.encode(waves_per_sh=getenv("WAVES_PER_SH")))
+  pm4_wreg(ctx, gc.regCOMPUTE_START_X, 0, 0, 0, *(info.local_size or (1, 1, 1)), 0, 0)
 
-  dispatch_init = gc.regCOMPUTE_DISPATCH_INITIATOR.encode(**({'cs_w32_en': int(rt.wave32)} if dev.target[0] != 9 else {}),
+  dispatch_init = gc.regCOMPUTE_DISPATCH_INITIATOR.encode(**({'cs_w32_en': int(rt.wave32)} if ctx.dev.target[0] != 9 else {}),
                                                           force_start_at_000=1, compute_shader_en=1)
-  pkt3(ctx, pm4.PACKET3_DISPATCH_DIRECT, *global_size, dispatch_init)
-  pkt3(ctx, pm4.PACKET3_EVENT_WRITE, pm4.EVENT_TYPE(soc.CS_PARTIAL_FLUSH) | pm4.EVENT_INDEX(EVENT_INDEX_PARTIAL_FLUSH))
-  return prog
+  pm4_pkt3(ctx, pm4.PACKET3_DISPATCH_DIRECT, *info.global_size, dispatch_init)
+  pm4_pkt3(ctx, pm4.PACKET3_EVENT_WRITE, pm4.EVENT_TYPE(soc.CS_PARTIAL_FLUSH) | pm4.EVENT_INDEX(EVENT_INDEX_PARTIAL_FLUSH))
 
-def pm4_store(ctx:HCQEncodeCtx, store:UOp) -> UOp:
-  dev, pm4 = ctx.dev, ctx.dev.pm4
-  sig_addr = buffers[store.src[0]].get_buf(ctx.dev.device).va_addr
-
-  if dev.target[0] != 9:
-    cache_flags = pm4.PACKET3_RELEASE_MEM_GCR_GLV_INV | pm4.PACKET3_RELEASE_MEM_GCR_GL1_INV | pm4.PACKET3_RELEASE_MEM_GCR_GL2_INV \
-                | pm4.PACKET3_RELEASE_MEM_GCR_GLM_WB | pm4.PACKET3_RELEASE_MEM_GCR_GLM_INV | pm4.PACKET3_RELEASE_MEM_GCR_GL2_WB \
-                | pm4.PACKET3_RELEASE_MEM_GCR_SEQ
+def pm4_store(ctx:HCQ2LowerCtx, x:UOp):
+  pm4 = ctx.dev.pm4
+  if ctx.dev.target[0] != 9:
+    cache_flags = pm4.PACKET3_RELEASE_MEM_GCR_GLV_INV | pm4.PACKET3_RELEASE_MEM_GCR_GL1_INV \
+                | pm4.PACKET3_RELEASE_MEM_GCR_GL2_INV | pm4.PACKET3_RELEASE_MEM_GCR_GLM_WB \
+                | pm4.PACKET3_RELEASE_MEM_GCR_GLM_INV | pm4.PACKET3_RELEASE_MEM_GCR_GL2_WB | pm4.PACKET3_RELEASE_MEM_GCR_SEQ
     event_dw = pm4.PACKET3_RELEASE_MEM_EVENT_TYPE(pm4.CACHE_FLUSH_AND_INV_TS_EVENT) \
              | pm4.PACKET3_RELEASE_MEM_EVENT_INDEX(pm4.event_index__mec_release_mem__end_of_pipe)
     memsel_dw = pm4.PACKET3_RELEASE_MEM_DATA_SEL(pm4.data_sel__mec_release_mem__send_32_bit_low) \
-              | pm4.PACKET3_RELEASE_MEM_INT_SEL(pm4.int_sel__mec_release_mem__send_interrupt_after_write_confirm) | pm4.PACKET3_RELEASE_MEM_DST_SEL(0)
+              | pm4.PACKET3_RELEASE_MEM_INT_SEL(pm4.int_sel__mec_release_mem__send_interrupt_after_write_confirm) \
+              | pm4.PACKET3_RELEASE_MEM_DST_SEL(0)
   else:
     cache_flags = pm4.EOP_TC_WB_ACTION_EN | pm4.EOP_TC_NC_ACTION_EN
     event_dw = pm4.EVENT_TYPE(pm4.CACHE_FLUSH_AND_INV_TS_EVENT) | pm4.EVENT_INDEX(pm4.event_index__mec_release_mem__end_of_pipe)
-    memsel_dw = pm4.DATA_SEL(pm4.data_sel__mec_release_mem__send_32_bit_low) | pm4.INT_SEL(pm4.int_sel__mec_release_mem__send_interrupt_after_write_confirm)
+    memsel_dw = pm4.DATA_SEL(pm4.data_sel__mec_release_mem__send_32_bit_low) \
+              | pm4.INT_SEL(pm4.int_sel__mec_release_mem__send_interrupt_after_write_confirm)
+  pm4_pkt3(ctx, pm4.PACKET3_RELEASE_MEM, event_dw | cache_flags, memsel_dw, *data64_le(ctx.addr(x.src[0])), x.src[1], 0, 0)
 
-  pkt3(ctx, pm4.PACKET3_RELEASE_MEM, event_dw | cache_flags, memsel_dw, *data64_le(sig_addr), store.src[1].arg, 0, 0)
-  return store
-
-pm_amd_pm4_encode = PatternMatcher([
-  (UPat(Ops.WAIT, name="wait"), pm4_wait),
-  (UPat(Ops.BARRIER, name="barrier"), pm4_barrier),
-  (UPat(Ops.PROGRAM, name="prog"), pm4_program),
-  (UPat(Ops.STORE, name="store"), pm4_store),
+amd_pm4_encode = PatternMatcher([
+  (UPat(Ops.WAIT,    name="x"), pm4_wait),
+  (UPat(Ops.BARRIER, name="x"), pm4_barrier),
+  (UPat(Ops.PROGRAM, name="x"), pm4_program),
+  (UPat(Ops.STORE,   name="x"), pm4_store),
 ])
 
-def pm4_submit_routine(ctx:HCQRoutineCtx, blob:UOp, size:UOp):
-  q = Device[ctx.device].compute_queue
-  ring = ctx.param(q.ring, dtypes.uint32.ptr())
-  wptr = ctx.param(q.write_ptr, dtypes.uint64.ptr())
-  door = ctx.param(q.doorbell, dtypes.uint64.ptr())
-  put_p = ctx.param(q.put_value, dtypes.uint64.ptr())
-  zero = UOp.const(dtypes.int, 0)
-  put = put_p.index(zero, ptr=True).load()
-  i = UOp.range(size.cast(dtypes.int), 0, dtype=dtypes.int)
-  ring_idx = ((put + i.cast(dtypes.uint64)) % UOp.const(dtypes.uint64, q.ring.size)).cast(dtypes.int)
-  copy = ring.index(ring_idx, ptr=True).store(blob.index(i, ptr=True).load())
-  new_put = put + size.cast(dtypes.uint64)
-  ctx.uops += [copy.end(i), put_p.index(zero, ptr=True).store(new_put), wptr.index(zero, ptr=True).store(new_put),
-               UOp(Ops.BARRIER, dtypes.void), door.index(zero, ptr=True).store(new_put)]
+@hcq_routine
+def pm4_submit_routine(ctx, blob, size, ring, wptr, doorbell, put_ptr, ring_dwords):
+  put = put_ptr[0]
+  i = UOp.range(size, 0, dtype=dtypes.int)
+  next_put = put + size.cast(put.dtype)
+  ring_idx = ((put + i.cast(put.dtype)) % ring_dwords).cast(dtypes.int)
 
+  copy_to_ring = ring[ring_idx].store(blob[i]).end(i)
+  bump_put_ptr = put_ptr[0].store(next_put)
+  bump_wptr = wptr[0].store(next_put)
+  flush = UOp.barrier(copy_to_ring, bump_put_ptr, bump_wptr)
+  return doorbell.after(flush)[0].store(next_put)
+
+def pm4_submit(ctx, blob, size):
+  q = ctx.dev.compute_queue
+  pm4_submit_routine(ctx, blob, size, q.ring, q.write_ptr, q.doorbell, q.put_value, q.ring.size)
 
 class AMDSignal(HCQSignal):
   def __init__(self, *args, **kwargs): super().__init__(*args, **{**kwargs, 'timestamp_divider': 100})
@@ -672,8 +669,8 @@ class AMD2Device(HCQ2Compiled):
     self._ensure_has_local_memory(128) # set default scratch size to 128 bytes per thread
 
     # HCQ2 PM4 encoder
-    self.pm_encode = pm_amd_pm4_encode
-    self.pm4_submit_routine = pm4_submit_routine
+    self.pm_encode = amd_pm4_encode
+    self.submit_routine = pm4_submit
 
     # HCQ2 helpers: timeline signal/value as UOps so HCQ2Graph rewrites can reference them.
     # self.timeline_signal_uop = self._wrap_buffer_uop(self.timeline_signal.base_buf)

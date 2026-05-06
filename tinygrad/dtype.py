@@ -336,6 +336,10 @@ def fp8_to_float(x: int, dtype: DType) -> float:
 
 def storage_fmt_for_dtype(dtype:DType): return 'H' if dtype == dtypes.bfloat16 else 'B' if dtype in dtypes.fp8s else dtype.fmt
 
+@functools.cache
+def dtype_for_fmt(fmt:FmtStr) -> DType:
+  return next(dt for dt in vars(dtypes).values() if isinstance(dt, DType) and dt.fmt == fmt)
+
 def to_storage_scalar(x, dtype:DType):
   if dtype == dtypes.half: return float_to_fp16(x)
   if dtype == dtypes.bfloat16: return (struct.unpack('I', struct.pack('f', float_to_bf16(x)))[0] >> 16) & 0xFFFF
