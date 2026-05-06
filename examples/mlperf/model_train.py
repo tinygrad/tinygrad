@@ -1442,6 +1442,7 @@ def train_llama3(llama2_70b_lora:bool=False):
 
     load_state_dict(model, state_dict, strict=False, realize=True, consume=True)
     del state_dict # just in case
+    model.quantize()
 
   if is_dp: vocab_mask.shard_(device, axis=None).realize()
   if is_mp: vocab_mask.shard_(device, axis=2).realize()
