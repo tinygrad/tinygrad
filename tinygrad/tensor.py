@@ -822,19 +822,27 @@ class Tensor(OpMixin):
     """
     Returns a tensor with `num_samples` indices sampled from a multinomial distribution weighted by `self`.
 
-    NOTE: `replacement=False` for `num_samples > 1` is not supported yet.
     ```python exec="true" source="above" session="tensor" result="python"
     Tensor.manual_seed(42)
     t = Tensor([1, 2, 3, 4])
     print(t.multinomial(20, replacement=True).numpy())
     ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    t = Tensor([1, 2, 3, 4])
+    print(t.multinomial(3, replacement=False).numpy())
+    ```
     """
     assert 1 <= self.ndim <= 2 and num_samples > 0, f"{self.ndim=} must be 1 or 2 dim, {num_samples=} must be positive"
-    assert replacement or num_samples == 1, "no replacement only supports num_samples = 1"
     weight = self.unsqueeze(0) if self.ndim == 1 else self
-    cdf = (cw := weight.cumsum(1).float()) / cw[:, -1].unsqueeze(1)
-    unif_samples = Tensor.rand(num_samples, cdf.shape[0], 1).to(self.device)
-    indices = (unif_samples.expand((-1, -1, cdf.shape[1])) >= cdf).sum(2).permute((1, 0))
+    assert replacement or num_samples <= weight.shape[1], "no replacement samples must not exceed population size"
+    if replacement or num_samples == 1:
+      cdf = (cw := weight.cumsum(1).float()) / cw[:, -1].unsqueeze(1)
+      unif_samples = Tensor.rand(num_samples, cdf.shape[0], 1).to(self.device)
+      indices = (unif_samples.expand((-1, -1, cdf.shape[1])) >= cdf).sum(2).permute((1, 0))
+    else:
+      # Efraimidis–Spirakis
+      indices = (weight.rand_like(dtype=dtypes.float32).log2() / weight).topk(num_samples, dim=1)[1]
     return (indices.squeeze(0) if self.ndim == 1 else indices).cast(dtypes.int32)
 
   # ***** toposort and backward pass *****
@@ -1322,6 +1330,18 @@ class Tensor(OpMixin):
     """
     a, b = self._broadcasted(x, reverse)
     return a - a.div(b, rounding_mode="floor") * b
+
+  def fmod(self, x:Tensor|ConstType) -> Tensor:
+    """
+    C-style remainder of `self` divided by `x` (sign follows the dividend), using truncating division.
+    Differs from `mod`/`%`, which uses Python floor remainder.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-4, 7, 5, 4, -7, 8]).fmod(Tensor([2, -3, 8, -2, 3, 5])).numpy())
+    ```
+    """
+    a, b = self._broadcasted(x)
+    return a - a.div(b, rounding_mode="trunc") * b
 
   def where(self:Tensor, x:Tensor|ConstType|sint, y:Tensor|ConstType|sint) -> Tensor:
     """

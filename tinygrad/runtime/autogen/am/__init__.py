@@ -34,4 +34,6 @@ def __getattr__(nm):
                                                                            for f in files if (p:=pathlib.Path(f)).is_file()] + ["}"])
       return load("am/fw", ["{}/amdgpu/psp_*_sos.bin", "{}/amdgpu/smu_*.bin", "{}/amdgpu/sdma_*.bin"] +
                            [f"{{}}/amdgpu/gc_*_{x}.bin" for x in ["pfp", "me", "mec", "imu", "rlc"]], srcs=fw_src, gen=genfw)
+    case "navi_offsets": return load("am/navi_offsets", [f"{AMD}/include/sienna_cichlid_ip_offset.h"], srcs=am_src)
+    case "vega_offsets": return load("am/vega_offsets", [f"{AMD}/include/vega20_ip_offset.h"], srcs=am_src)
     case _: raise AttributeError(f"no such autogen: {nm}")

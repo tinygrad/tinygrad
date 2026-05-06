@@ -45,7 +45,7 @@ def do_expand(root:UOp):
     else:
       # non-UNROLL input
       if root.op in range_start and i >= range_start[root.op]:
-        # for any range args of STORE/REDUCE, pass them through
+        # for any range args of REDUCE/WMMA/END/etc., pass them through
         new_srcs.append(src)
       elif root.op is Ops.INDEX and i >= 1 and not isinstance(root.dtype, PtrDType):
         new_srcs.append(src)

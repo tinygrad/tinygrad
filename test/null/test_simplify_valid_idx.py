@@ -1,10 +1,10 @@
 import unittest, itertools
 
-from tinygrad.codegen import full_rewrite_to_sink
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.uop.symbolic import simplify_valid
 from tinygrad.helpers import Context
+from test.helpers import full_rewrite
 from test.null.test_uop_symbolic import check_uop_against_string
 
 def get_gated_load_uop(valid:UOp, idx:UOp):
@@ -48,7 +48,7 @@ class TestHelpers(unittest.TestCase):
 class TestValidIdxSimplification(unittest.TestCase):
   def check(self, load, sidx, svalid, extra=()):
     with Context(NOOPT=1, SPEC=0):
-      load = full_rewrite_to_sink(UOp.sink(load, *extra)).src[0]
+      load = full_rewrite(UOp.sink(load, *extra)).src[0]
     idx, valid = load.src[0].src[1], load.src[0].src[2]
     check_uop_against_string(self, idx, sidx)
     check_uop_against_string(self, valid, svalid)
@@ -217,7 +217,7 @@ class TestValidIdxSimplification(unittest.TestCase):
 class TestImageSimplification(unittest.TestCase):
   def check(self, load, svalid, sidx0, sidx1):
     with Context(NOOPT=1, SPEC=0):
-      load = full_rewrite_to_sink(load.sink()).src[0]
+      load = full_rewrite(load.sink()).src[0]
     idx = load.src[0].src[1]
     self.assertEqual(idx.op, Ops.STACK)
     self.assertEqual(len(idx.src), 2)
@@ -287,7 +287,7 @@ class TestImageSimplification(unittest.TestCase):
     # empty -> invalid
     load = get_load_image_uop(shape, (gidx0<8) & (gidx0<8).ne(True), idx)
     with Context(NOOPT=1, SPEC=0):
-      load = full_rewrite_to_sink(load.sink()).src[0]
+      load = full_rewrite(load.sink()).src[0]
     self.assertEqual(load.op, Ops.STACK)
     self.assertEqual(load.dtype.count, 4)
 
@@ -508,7 +508,7 @@ class TestUnfoldableImage(unittest.TestCase):
     with Context(SPEC=0):
       lidx = Special("lidx", 2)
       load = UOp(Ops.LOAD, dtypes.float, (UOp(Ops.PARAM, dtypes.imagef((10, 10, 4)), arg=0).index(lidx, ptr=True), UOp.const(dtypes.float, 0)))
-      res = full_rewrite_to_sink(load.sink()).src[0]
+      res = full_rewrite(load.sink()).src[0]
       self.assertEqual(res.src[0].src[0].dtype, dtypes.float.ptr(400))
 
 class TestDropTrueGate(unittest.TestCase):
@@ -528,7 +528,7 @@ class TestDropTrueGate(unittest.TestCase):
 class TestRangeShrink(unittest.TestCase):
   def get_ranges(self, sink):
     with Context(NOOPT=1, SPEC=0):
-      result = full_rewrite_to_sink(sink)
+      result = full_rewrite(sink)
     return [u for u in result.toposort() if u.op is Ops.RANGE]
 
   def test_range_shrink_single_guard(self):

@@ -31,7 +31,7 @@ def decode_profile(data:bytes) -> dict:
     if event_type == 0:
       for _ in range(event_count):
         name, ref, key, st, dur, fmt = u("<IIIIfI")
-        v["events"].append({"name":strings[name], "ref":option(ref), "key":option(key), "st":st, "dur":dur, "fmt":strings[fmt]})
+        v["events"].append({"name":strings[name], "ref":option(ref), "key":option(key), "st":st, "dur":dur, "fmt":json.loads(strings[fmt])})
     else:
       v["linear"] = u("<B")[0]
       v["peak"] = u("<Q")[0]
@@ -47,6 +47,12 @@ def decode_profile(data:bytes) -> dict:
   return {"dur":total_dur, "peak":global_peak, "layout":layout, "markers":markers}
 
 def fmt_colored(s:str) -> str: return ansistrip(s) if NO_COLOR else s
+
+def to_str(k:str, v) -> str:
+  if k == "FLOPS" or k.startswith("B/s"): return f"{v*1e-9:.0f} G{k}" if v < 1e13 else f"{v*1e-12:.0f} T{k}"
+  if k == "B": return next((f"{v/s:.0f} {u}" for s,u in ((1e9,"GB"),(1e6,"MB"),(1e3,"KB")) if v>=s), f"{v:.0f} B")
+  return f"{k}={v}"
+def fmt_data(data:dict) -> str: return "  ".join((p:=to_str(k, v))+" "*max(0, 14-ansilen(p)) for k,v in data.items())
 
 def get(data:dict, key:str):
   for k,v in data.items():
@@ -94,17 +100,17 @@ def main(args) -> None:
       if not isinstance(e, ProfileRangeEvent): continue
       if inst_st is None: inst_st = int(e.st)
       assert isinstance(e.name, TracingKey)
-      op_name, info = e.name.display_name, e.name.ret or ""
+      op_name, ret, info = e.name.display_name, json.loads(e.name.ret[4:]) if e.name.ret else {}, ""
       color = next((v for k,v in viz.wave_colors.items() if k in op_name), None)
       op_str = hex_colored(op_name, color) if color and not NO_COLOR else op_name
       phase, delay = None, 0
       idx = next(pkt_idxs.setdefault(e.device, itertools.count()))
       if e.device.startswith("WAVE"):
-        inst = f"0x{(pc:=int(info.replace('PC:', ''))):05x} {pc_map[pc]}" if info else f"{'':7} {op_name}"
+        inst = f"0x{pc:05x} {pc_map[pc]}" if (pc:=ret.get("pc")) is not None else f"{'':7} {op_name}"
         dispatch_to_inst[f"{e.device}-{idx}"] = (inst, int(e.st))
         phase = "DISPATCH"
-      if info.startswith("LINK:"):
-        inst, dispatch_st = dispatch_to_inst[info.replace("LINK:", "")]
+      if (link:=ret.get("link")) is not None:
+        inst, dispatch_st = dispatch_to_inst[link]
         phase, delay = "EXEC", int(e.st) - dispatch_st
       if inst and phase: info = f"{phase:<8} {inst}"
       unit = e.device.replace(" ", "-")
@@ -132,22 +138,24 @@ def main(args) -> None:
     timelines = [(n,l) for n,l in profile["layout"].items() if isinstance(l, dict) and l.get("event_type") == 0]
     def produce_top_kernels() -> Iterator[dict]:
       tagged = ((n,e) for n,l in timelines for e in l["events"]) if args.src == "ALL" else ((args.src,e) for e in unwrap(data)["events"])
-      agg:dict[tuple[str,str], tuple[float, int, int|None]] = {} # map (device, kernel name) to (total time, count and ref)
+      agg:dict[tuple[str,str], tuple[float, int, int|None, dict[str, float]]] = {} # map (device, kernel name) to (total time, count, ref, est)
+      est_keys = ("FLOPS", "B/s mem", "B/s lds")
       total = 0
       for dev,e in tagged:
         et = e["dur"] * 1e-3
-        t, c, ref = agg.get((dev,e["name"]), (0.0, 0, None))
-        agg[(dev,e["name"])] = (t+et, c+1, e["ref"])
+        t, c, ref, est = agg.get((dev,e["name"]), (0.0, 0, None, {}))
+        est.update({k:est.get(k, 0.0)+e["fmt"][k]*e["dur"]*1e-6 for k in est_keys if k in e["fmt"]})
+        agg[(dev,e["name"])] = (t+et, c+1, e["ref"], est)
         total += et
       items = sorted(agg.items(), key=lambda kv:kv[1][0], reverse=True)
       num_rows = len(items) if args.top < 0 else args.top
-      for (dev,name),(t,c,ref) in items[:num_rows]:
+      for (dev,name),(t,c,ref,est) in items[:num_rows]:
         display = f"{dev[:7]:7s} {fmt_colored(name)}" if args.src == "ALL" else fmt_colored(name)
-        yield {"name":display, "dur_ms":t, "count":c, "pct":t/total*100.0, "ref":ref}
+        yield {"name":display, "dur_ms":t, "count":c, "pct":t/total*100.0, "ref":ref, "fmt":{k:int(est[k]/(t*1e-3)) for k in est_keys if k in est}}
       if num_rows > 0 and items[num_rows:]:
-        other_t = sum(t for _,(t,_,_) in items[num_rows:])
-        other_c = sum(c for _,(_,c,_) in items[num_rows:])
-        yield {"name":"Other", "dur_ms":other_t, "count":other_c, "pct":other_t/total*100.0, "ref":None}
+        other_t = sum(t for _,(t,_,_,_) in items[num_rows:])
+        other_c = sum(c for _,(_,c,_,_) in items[num_rows:])
+        yield {"name":"Other", "dur_ms":other_t, "count":other_c, "pct":other_t/total*100.0, "ref":None, "fmt":None}
     def produce_all_kernels() -> Iterator[dict]:
       event_streams = [[(e["st"], n, e) for e in l["events"]] for n,l in timelines] if args.src == "ALL" \
                       else [[(e["st"], args.src, e) for e in unwrap(data)["events"]]]
@@ -159,24 +167,23 @@ def main(args) -> None:
         if dev == "MARKER":
           yield {"device":dev, "name":fmt_colored(e["name"]), "st_ms":ts*1e-3, "ref":None, "ext":None}
           continue
-        ext:list[str] = []
-        if (fmt:=e["fmt"]).startswith("TB:"):
-          tb, fmt = json.loads(e["fmt"].replace("TB:", "")), ""
+        ext, fmt = [], e["fmt"]
+        if (tb:=fmt.pop("tb", [])):
           while tb:
             file, lineno, fxn, code = tb.pop()
             line = f"{file.split('/')[-1]}:{lineno} {fxn}"
             if fmt: ext.append(f"{line} {code}")
-            elif not file.startswith("<") and not fxn.startswith("<"): fmt = line
+            elif not file.startswith("<") and not fxn.startswith("<"): fmt["loc"] = line
         yield {"device":dev, "name":fmt_colored(e["name"]), "dur_ms":e["dur"]*1e-3,
                "st_ms":e["st"]*1e-3, "fmt":fmt, "ref":e["ref"], "ext":"\n".join(ext)}
     def fmt_top(k:dict) -> str:
-      return f"{fmt_colored(k['name'])}{' ' * max(0, 36-ansilen(k['name']))} {time_to_str(k['dur_ms']*1e-3, w=9)} {k['count']:7d} {k['pct']:6.2f}%"
+      return f"{fmt_colored(k['name'])}{' ' * max(0, 38-ansilen(k['name']))} {time_to_str(k['dur_ms']*1e-3, w=9)} {k['count']:7d} {k['pct']:6.2f}%"+\
+          (" "*4+fmt_data(k['fmt']) if k['fmt'] else "")
     def fmt_all(k:dict) -> str:
       if k["device"] in {"MARKER", "SOURCE"}: return f"--- {k['device']} {k['name']}"+(f"/{k['st_ms']:9.2f}ms" if k['st_ms'] else "")
       ptm = colored(time_to_str(k["dur_ms"]*1e-3, w=9), "yellow" if k["dur_ms"] > 10 else None)
-      fmt_str = "  ".join(p+" "*max(0, 14-ansilen(p)) for p in k["fmt"].split("\n"))
       name = f"*** {k['device'][:7]:7s} "+k["name"]+" "*(46-ansilen(k["name"]))
-      return f"{name} tm {ptm}/{k['st_ms']:9.2f}ms"+(f" ({fmt_str})" if k["fmt"] else "")
+      return f"{name} tm {ptm}/{k['st_ms']:9.2f}ms"+(f" ({fmt_data(k['fmt'])})" if k["fmt"] else "")
     fmt_row = fmt_top if args.top else fmt_all
     seen_refs:set[int] = set()
     def render_event(k:dict, ls=args.list) -> None:

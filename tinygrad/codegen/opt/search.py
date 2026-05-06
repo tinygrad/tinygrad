@@ -1,6 +1,7 @@
 import math, time, multiprocessing, traceback, signal, atexit
 from dataclasses import replace
-from tinygrad.uop.ops import sym_infer, AxisType, pyrender, UOp
+from tinygrad.uop.ops import sym_infer, AxisType, UOp
+from tinygrad.uop.render import pyrender
 from tinygrad.device import Device, Buffer
 from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, colored, time_to_str, unwrap
 from tinygrad.helpers import IGNORE_BEAM_CACHE

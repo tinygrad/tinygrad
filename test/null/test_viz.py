@@ -1,4 +1,4 @@
-import unittest, decimal, sys, json, contextlib, tempfile, pickle, io, itertools
+import unittest, decimal, sys, json, contextlib, tempfile, pickle, io
 from pathlib import Path
 from dataclasses import dataclass
 from typing import Generator
@@ -320,7 +320,7 @@ class TestVizGC(unittest.TestCase):
 
 # VIZ integrates with other parts of tinygrad
 
-from tinygrad import Tensor, Device
+from tinygrad import Tensor, Device, TinyJit, Variable
 
 class TestVizIntegration(unittest.TestCase):
   # codegen supports rendering of code blocks
@@ -408,6 +408,18 @@ class TestVizIntegration(unittest.TestCase):
     lst = viz.list_items()
     assert len(lst) == 1
 
+  def test_jit(self):
+    with save_viz():
+      @TinyJit
+      def f(a, b, c): return (a+b).contiguous().mul(3), c.assign(a.to(c.device))
+      a, b, c = Tensor.empty(16, device="NULL"), Tensor.empty(16, device="NULL"), Tensor.empty(16, device="NULL:1")
+      for _ in range(3): Tensor.realize(*f(a, b, c))
+    out = load_profile(cpu_events)
+    self.assertEqual(["NULL", "NULL Graph", "NULL:SDMA:0"], [k for k in out["layout"] if k.startswith("NULL")])
+    self.assertEqual(len(out["layout"]["NULL"]["events"]), 2*3)
+    self.assertEqual(len(out["layout"]["NULL:SDMA:0"]["events"]), 3)
+    self.assertEqual(len(out["layout"]["NULL Graph"]["events"]), 2)
+
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry
 from tinygrad.viz.serve import get_profile
 from tinygrad.viz.cli import decode_profile
@@ -421,9 +433,9 @@ class TestVizProfiler(unittest.TestCase):
       a.to("NULL:1").realize()
     range_events = [e for e in cpu_events if isinstance(e, ProfileRangeEvent)]
     compute_events = [e for e in range_events if e.device == "NULL"]
-    copy_events = [e for e in range_events if e.device.endswith(":COPY")]
+    copy_events = [e for e in range_events if e.device.endswith(":SDMA:0")]
     self.assertGreater(len(compute_events), 0, "expected compute events on base device")
-    self.assertGreater(len(copy_events), 0, "transfer must produce events with ':COPY' device suffix")
+    self.assertGreater(len(copy_events), 0, "transfer must produce events with ':SDMA' device suffix")
 
   def test_node(self):
     prof = [ProfileRangeEvent(device='NV', name='E_2', st=decimal.Decimal(1000), en=decimal.Decimal(1010)),
@@ -464,8 +476,7 @@ class TestVizProfiler(unittest.TestCase):
             ProfileDeviceEvent(device='NV:SDMA:0', tdiff=decimal.Decimal(-1000))]
     j = load_profile(prof)
     event = j['layout']['NV:SDMA:0']['events'][0]
-    gbs = sz/(dur*1e-6)*1e-9
-    self.assertEqual(event['fmt'], f"{gbs:.0f} GB/s\n{sz/1e6:.0f} MB")
+    self.assertEqual(event['fmt'], {"B/s": sz/(dur*1e-6), "B": sz})
 
   def test_graph(self):
     prof = [ProfileDeviceEvent(device='NV', tdiff=decimal.Decimal(-1000)),
@@ -506,8 +517,7 @@ class TestVizProfiler(unittest.TestCase):
 
     j = load_profile(prof)
     sdma_events = j['layout']['NV:1:SDMA:0']['events']
-    gbs = sz/(dur*1e-6)*1e-9
-    self.assertEqual(sdma_events[0]["fmt"], f"{gbs:.0f} GB/s\n{sz/1e6:.0f} MB")
+    self.assertEqual(sdma_events[0]["fmt"], {"B/s": sz/(dur*1e-6), "B": sz})
 
   def test_block_ordering(self):
     prof = [ProfileDeviceEvent(device='NV', tdiff=decimal.Decimal(-1000)),
@@ -571,7 +581,7 @@ class TestVizProfiler(unittest.TestCase):
     profile_ret = load_profile(cpu_events)
     e = profile_ret["layout"]["CUSTOM"]["events"][0]
     self.assertEqual(e["name"], "test_fxn")
-    runtime_trace = json.loads(e["fmt"].replace("TB:", ""))
+    runtime_trace = e["fmt"]["tb"]
     assert any(fxn.__code__.co_filename == f and fxn.__code__.co_firstlineno+1 == l for f,l,*_ in runtime_trace), str(runtime_trace)
 
   # can pack up to 1hr 11 min of trace events
@@ -901,46 +911,62 @@ def run_cli(*cli_args) -> str:
     main(args)
   return buf.getvalue().strip()
 
+def call_cli(fxn, *cli_args, debug=2) -> str:
+  with save_viz() as viz:
+    fxn()
+  with tempfile.TemporaryDirectory() as tmpdir:
+    (r:=Path(tmpdir)/"rewrites.pkl").write_bytes(pickle.dumps(viz.data.trace))
+    (p:=Path(tmpdir)/"profile.pkl").write_bytes(pickle.dumps(cpu_events))
+    with Context(DEBUG=debug, NO_COLOR=1):
+      stdout = run_cli("--rewrites-path", str(r), "--profile-path", str(p), *cli_args)
+  return stdout
+
 class TestCLI(unittest.TestCase):
-  def test_simple(self):
-    a = Tensor.empty(1, device="NULL")+2.0
-    empty_counter = itertools.count(0)
-    def custom_empty_prg(B:UOp, A:UOp) -> UOp:
-      sink = UOp(Ops.SINK, arg=KernelInfo(name=f"custom_empty_n{next(empty_counter)}"))
-      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=a.device), UOp(Ops.LINEAR, src=(sink,))))
-    def custom_empty_src(B:UOp, A:UOp) -> UOp:
-      sink = UOp(Ops.SINK, arg=KernelInfo(name=f"custom_empty_n{next(empty_counter)}"))
-      src = "void custom_empty_src() { 0; }"
-      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=a.device), UOp(Ops.LINEAR, src=(sink,)), UOp(Ops.SOURCE, arg=src)))
-    b = Tensor.custom_kernel(Tensor.empty_like(a), a, fxn=custom_empty_prg)[0]
-    c = Tensor.custom_kernel(Tensor.empty_like(a), a, fxn=custom_empty_prg)[0]
-    d = Tensor.custom_kernel(Tensor.empty_like(a), a, fxn=custom_empty_src)[0]
-    with save_viz() as viz:
-      b.realize()
+  def test_reconstruct_debug(self):
+    def fxn():
+      Tensor.empty(1, device="NULL").add(2.0).realize()
       profile_marker("marker @ 1")
-      c.realize()
-      d.realize()
-    # save trace to disk for CLI to consume it
-    with tempfile.TemporaryDirectory() as tmpdir:
-      (r:=Path(tmpdir)/"rewrites.pkl").write_bytes(pickle.dumps(viz.data.trace))
-      (p:=Path(tmpdir)/"profile.pkl").write_bytes(pickle.dumps(cpu_events))
-      # reconstruct DEBUG=4 output and see all markers.
-      with Context(DEBUG=4):
-        kernels = run_cli("--rewrites-path", str(r), "--profile-path", str(p), "-s", "NULL")
-      self.assertIn("void custom_empty_n0", kernels)
-      self.assertIn("marker @ 1", kernels)
-      self.assertIn("void custom_empty_n1", kernels)
-      self.assertIn("void custom_empty_src", kernels)
-      self.assertIn("E", kernels)
-      self.assertIn("UOp.const", kernels)
-      # get the top slowest functions across all devices
-      with Context(DEBUG=2):
-        times = run_cli("--rewrites-path", str(r), "--profile-path", str(p), "-s", "ALL", "--top", "-1")
-      self.assertIn("TINY", times)
-      self.assertIn("NULL", times)
-      with Context(DEBUG=3):
-        json_lines = run_cli("--rewrites-path", str(r), "--profile-path", str(p), "-s", "ALL", "--json")
-      for line in json_lines.split("\n"): _ = json.loads(line)
+      Tensor.empty(1, device="NULL").add(3.0).realize()
+    out = call_cli(fxn, "-s", "NULL", debug=4)
+    self.assertIn("void E", out)
+    self.assertIn("marker @ 1", out)
+
+  def test_aggregate(self):
+    N, CNT = 1024, 5
+    def fxn():
+      for _ in range(CNT):
+        (Tensor.empty(N, N, device="NULL")@Tensor.empty(N, N, device="NULL")).realize()
+      for _ in range(CNT):
+        (Tensor.empty(N, N, device="NULL").assign(Tensor.empty(N, N, device="NULL"))).realize()
+    kernels = [json.loads(line) for line in call_cli(fxn, "-s", "NULL", "-t", "--json").splitlines()]
+    self.assertEqual(len(kernels), 2)
+    gemm_summary = [s for s in kernels if s["name"].startswith("r_")][0]
+    copy_summary = [s for s in kernels if s["name"].startswith("E_")][0]
+    self.assertEqual(gemm_summary["count"], CNT)
+    self.assertEqual(copy_summary["count"], CNT)
+
+  def test_flops(self):
+    test_n = [(8, 16), (16, 32), (32, 64)]
+    def fxn():
+      @TinyJit
+      def f(a, b): return (a@a.T), (b@b.T)
+      a = Tensor.empty(64, 64, device="NULL")
+      b = Tensor.empty(64, 64, device="NULL")
+      for i_val, j_val in test_n:
+        i = Variable("i", 1, 64).bind(i_val)
+        j = Variable("j", 1, 64).bind(j_val)
+        Tensor.realize(*f(a[:i], b[:j]))
+    out = [json.loads(line) for line in call_cli(fxn, "-s", "NULL", "--json").splitlines()]
+    self.assertEqual(len(out), 3*2)
+    # flops increases as N gets larger
+    gflops = [row["fmt"]["FLOPS"] for row in out]
+    self.assertGreater(gflops[4], gflops[2])
+    self.assertGreater(gflops[5], gflops[3])
+    # aggregate flops
+    out = [json.loads(line) for line in call_cli(fxn, "-s", "NULL", "-t", "--json").splitlines()]
+    self.assertEqual(len(out), 2)
+    agg_gflops = [row["fmt"]["FLOPS"] for row in out]
+    assert all(min(gflops) < v < max(gflops) for v in agg_gflops), f"{agg_gflops}"
 
 if __name__ == "__main__":
   unittest.main()
