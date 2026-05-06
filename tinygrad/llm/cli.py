@@ -138,6 +138,7 @@ class Handler(HTTPRequestHandler):
     text = tok.decode(out) if tools else dec()
     # emit tool_calls instead of assistant text when the model chose a tool
     if tools and (calls:=parse_tool_calls(text)):
+      print(calls)
       yield {"choices": [{"index":0, "delta":{"tool_calls":[{"index":i, **tc} for i,tc in enumerate(calls)]}, "finish_reason":None}], **tmpl}
       finish_reason = "tool_calls"
     elif text: yield {"choices": [{"index":0, "delta":{"content":text}, "finish_reason":None}], **tmpl}
@@ -158,6 +159,7 @@ class Handler(HTTPRequestHandler):
       tools = body.get("tools")
       ids: list[int] = tok.prefix()
       if tools and (tool_text:=format_tools(tools)):
+        print(tool_text)
         role = "system" if tok.preset != 'tekken' else "user"
         ids += tok.role(role) + tok.encode(tool_text) + tok.end_turn()
       for i, msg in enumerate(messages):
