@@ -745,6 +745,11 @@ class TestSymbolic(unittest.TestCase):
     a = Variable("a", 0, 10)
     self.helper_test_variable((25*a+3)%10 + ((25*a+3)//10)*10, 3, 253, "((a*25)+3)")
 
+  def test_div_mod_recombine_negative_div_unsound(self):
+    # ((b//d)%div)*mul + (b//(d*div))*(div*mul) only equals (b//d)*mul when div>0
+    b = Variable("b", -100, 100)
+    self.helper_test_variable(((b//(-3))%(-2)) + (b//6)*(-2), -33, 34, "(b//6*-2+b//-3%-2)")
+
   def test_mod_nest_by_factor(self):
     # (a*f+b) % (f*k) = (a%k)*f + b when 0<=b<f — mirrors nest_div_by_factor for FLOORMOD
     gidx0 = Variable("gidx0", 0, 15)
