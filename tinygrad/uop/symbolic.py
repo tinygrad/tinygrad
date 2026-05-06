@@ -38,14 +38,14 @@ def fold_add_divmod_recombine(x:UOp) -> UOp|None:
       q, exact = v.src[0], False
       # (base%div)*mul + (base//div)*(div*mul) -> base*mul
       if q.op is Ops.FLOORDIV and q.src[1].op is Ops.CONST and q.src[1].arg == div: exact = q.src[0] is base
-      # ((base//d)%div)*mul + (base//(d*div))*(div*mul) -> (base//d)*mul
-      if not exact and base.op is Ops.FLOORDIV and base.src[1].op is Ops.CONST:
+      # ((base//d)%div)*mul + (base//(d*div))*(div*mul) -> (base//d)*mul if div>0
+      if not exact and div > 0 and base.op is Ops.FLOORDIV and base.src[1].op is Ops.CONST:
         exact = q.op is Ops.FLOORDIV and q.src[1].op is Ops.CONST and q.src[0] is base.src[0] and q.src[1].arg == base.src[1].arg*div
       if exact: return (base*mul).usum(*[t for k,t in enumerate(terms) if k not in (i,j)])
-      # ((base//div)%d)*div + base%div -> base%(div*d)
-      if mul == 1 and div > 0 and q.op is Ops.FLOORMOD and q.src[1].op is Ops.CONST and (d:=q.src[1].arg) > 0 and q.src[0].op is Ops.FLOORDIV:
+      # ((base//div)%d)*(div*mul) + (base%div)*mul -> (base%(div*d))*mul
+      if div > 0 and q.op is Ops.FLOORMOD and q.src[1].op is Ops.CONST and (d:=q.src[1].arg) > 0 and q.src[0].op is Ops.FLOORDIV:
         if q.src[0].src[0] is base and q.src[0].src[1].op is Ops.CONST and q.src[0].src[1].arg == div:
-          return (base % (div*d)).usum(*[t for k,t in enumerate(terms) if k not in (i,j)])
+          return ((base % (div*d))*mul).usum(*[t for k,t in enumerate(terms) if k not in (i,j)])
   return None
 
 # this needs to be before symbolic so that 0*something_that_might_be_invalid doesnt become 0
@@ -255,7 +255,8 @@ symbolic = symbolic_simple+commutative+PatternMatcher([
   *((UPat.var("x").alu(op, UPat.cvar("c1")).alu(op, UPat.cvar("c2")).named("f"),
      lambda f,x,c1,c2: x.alu(f.op,c1.alu(f.op,c2))) for op in GroupOp.Associative),
   ((UPat.cvar("c0") + UPat.var("x")) < UPat.cvar("c1"), lambda x,c0,c1: x<(c1-c0)),  # c0 + x < c1 -> x < c1 - c0
-  ((UPat.var("x") // UPat.cvar("c1")) // UPat.cvar("c2"), lambda x,c1,c2: x//(c1*c2)), # (x//c1)//c2 -> x//(c1*c2)
+  # (x//c1)//c2 -> x//(c1*c2) for c2>0
+  ((UPat.var("x") // UPat.cvar("c1")) // UPat.cvar("c2"), lambda x,c1,c2: x//(c1*c2) if c2.vmin>0 else None),
   # ** lt **
   # c0*x<c1 for positive int c0,c1
   ((UPat.cvar("c0", vec=False)*UPat.var("x", dtype=dtypes.weakint))<UPat.cvar("c1", vec=False),
