@@ -11,10 +11,10 @@ pm_move_gates_from_index = PatternMatcher([
     lambda buf,gate,idx,cast,alt,l: buf.index(idx, ptr=True).cast(cast.dtype).load(alt, gate, dtype=l.dtype)),
   (UPat.var("buf").index(UPat.var("idx"), UPat.var("gate")).or_casted(name="cast").store(UPat.var("data")),
     lambda buf,gate,idx,cast,data: buf.index(idx, ptr=True).cast(cast.dtype).store(data, gate)),
+
   # Where after gated load becomes alt value
-  (UPat.var("gate").where(UPat(Ops.LOAD, src=(UPat(), UPat(), UPat.var("gate")), name="l").or_casted(), UPat.var("a")), lambda gate,l,a:
+  (UPat.var("gate").where(UPat().load(UPat(), UPat.var("gate"), name="l").or_casted(), UPat.var("a")), lambda gate,l,a:
    l.replace(src=(l.src[0], a.src[0] if a.op is Ops.CAST and a.src[0].dtype == l.dtype else a.cast(l.dtype), l.src[2])).cast(a.dtype)),
-  (UPat.var("gate").where(UPat.var("a"), UPat(Ops.LOAD,
-    src=(UPat(), UPat(), UPat.var("gate", dtype=dtypes.bool).logical_not()), name="l").or_casted()), lambda gate,l,a:
+  (UPat.var("gate").where(UPat.var("a"), UPat().load(UPat(), ~UPat.var("gate", dtype=dtypes.bool), name="l").or_casted()), lambda gate,l,a:
    l.replace(src=(l.src[0], a.src[0] if a.op is Ops.CAST and a.src[0].dtype == l.dtype else a.cast(l.dtype), l.src[2])).cast(a.dtype)),
 ])
