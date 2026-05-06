@@ -367,6 +367,13 @@ class TestSymbolic(unittest.TestCase):
     a = Variable("a", 0, 124)
     self.helper_test_variable(((a+10)//-2+10)//-4, -2, 14, "(((a+10)//-2+10)//-4)")
 
+  def test_nested_div_negative_divisor(self):
+    # (x//c1)//c2 -> x//(c1*c2) only when c2>0
+    a = Variable("a", 0, 124)
+    self.helper_test_variable((a//-2)//-3, 0, 20, "((a//-2)//-3)")
+    self.helper_test_variable((a//2)//-3, -21, 0, "((a//2)//-3)")
+    self.helper_test_variable((a//-2)//3, -21, 0, "(a//-6)")
+
   def test_neg_mod(self):
     a = Variable("a", 0, 124)
     self.helper_test_variable((-a)%4, 0, 3, "(a*-1%4)")
@@ -543,7 +550,18 @@ class TestSymbolic(unittest.TestCase):
   def test_nest_div_negative_factor(self):
     ridx0=Variable("ridx0", 0, 9)
     ridx1=Variable("ridx1", 0, 6)
-    self.helper_test_variable(((((ridx0*-7)+ridx1)+63)//35), 0, 1, "((ridx1+ridx0*-7+28)//35+1)")
+    self.helper_test_variable(((((ridx0*-7)+ridx1)+63)//35), 0, 1, "((ridx0*-1+4)//5+1)")
+
+  def test_floordiv_factor_nest_negative_numerator(self):
+    # x//c = (x//f)//(c//f) for f|c, any sign of x
+    a = Variable("a", -10, 10)
+    b = Variable("b", 0, 3)
+    self.helper_test_variable((a*4 + b)//12, -4, 3, "(a//3)")
+
+  def test_floordiv_gcd_with_remainder_negative_numerator(self):
+    # factor gcd from numerator, even when x crosses zero, as long as the shifted numerator stays nonneg
+    a = Variable("a", -1, 5)
+    self.helper_test_variable((a*2 + 7)//8, 0, 2, "((a+3)//4)")
 
   def test_div_into_mod(self):
     self.helper_test_variable((Variable("idx", 0, 16)*4)%8//4, 0, 1, "(idx%2)")
