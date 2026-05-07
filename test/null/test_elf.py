@@ -1,8 +1,35 @@
-import unittest, subprocess, platform
+import unittest, subprocess, platform, importlib, ctypes
+from unittest.mock import patch
+import tinygrad.runtime.support.compiler_cpu as compiler_cpu
+import tinygrad.runtime.ops_cpu as ops_cpu
 from tinygrad.runtime.support.compiler_cpu import ClangJITCompiler
 from tinygrad.runtime.support.elf import elf_loader
 
 class TestElfLoader(unittest.TestCase):
+  def test_windows_arm64_aliases(self):
+    try:
+      with patch("platform.machine", return_value="ARM64"):
+        importlib.reload(compiler_cpu)
+        importlib.reload(ops_cpu)
+        self.assertEqual(compiler_cpu.LLVMCompiler.target_arch, "AArch64")
+
+        with patch("subprocess.check_output", return_value=b"") as check:
+          compiler_cpu.ClangJITCompiler().compile_to_obj("int test(void) { return 0; }")
+        self.assertIn("--target=arm64-none-unknown-elf", check.call_args.args[0])
+        self.assertIn("-ffixed-x18", check.call_args.args[0])
+
+        seen = []
+        class Prg:
+          runtimevars = {}
+          def fxn(self, *args): seen.extend(type(arg) for arg in args)
+
+        queue = object.__new__(ops_cpu.CPUComputeQueue)
+        queue._exec(0, Prg(), 1, 1, 2)
+        self.assertIs(seen[1], ctypes.c_int64)
+    finally:
+      importlib.reload(compiler_cpu)
+      importlib.reload(ops_cpu)
+
   def test_load_clang_jit_strtab(self):
     src = '''
       int something; // will be a load from a relocation (needed for .rela.text to exist)
