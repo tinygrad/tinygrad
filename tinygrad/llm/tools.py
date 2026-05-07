@@ -9,12 +9,10 @@ def _tool_sig(fn: dict) -> str:
   return f"{fn['name']}({','.join(k for k in props.keys() if k in req_set)})"
 
 # normalize model output into OpenAI-style tool_calls
-def _tool_call(obj: str) -> dict|None:
-  print(type(obj), obj)
+def _tool_call(text: str) -> dict|None:
   try:
-    obj = json.loads(obj.strip())
+    obj = json.loads(text.strip())
     args = obj.get('arguments', {})
-    print(type(args), args)
     if isinstance(args, str): args = json.loads(args)
     return {'id': f'call_{uuid.uuid4().hex[:24]}', 'type': 'function', 'function': {'name': obj['name'], 'arguments': json.dumps(args)}}
   except json.JSONDecodeError: pass
