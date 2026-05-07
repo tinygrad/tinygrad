@@ -11,7 +11,7 @@ from test.mockgpu.usb import MockUSB
 @unittest.skipUnless(issubclass(type(Device[Device.DEFAULT]), HCQCompiled), "HCQ device required to run")
 class TestHCQUnit(unittest.TestCase):
   @unittest.skipIf(Device.DEFAULT == "CPU", "requires non-CPU HCQ device")
-  def test_supports_exec_item(self):
+  def test_supports_uop(self):
     d0, cpu_dev = Device[Device.DEFAULT], Device["CPU"]
 
     @TinyJit
@@ -20,23 +20,23 @@ class TestHCQUnit(unittest.TestCase):
     inp, inp_cpu = Tensor.randn(10, 10, device=Device.DEFAULT).realize(), Tensor.randn(10, 10, device="CPU").realize()
     for _ in range(5): f(inp, inp_cpu)
 
-    # construct minimal CALL UOps for supports_exec_item (graphs only see PROGRAMs after compile_linear)
+    # construct minimal CALL UOps for supports_uop (graphs only see PROGRAMs after compile_linear)
     gpu_call = UOp(Ops.PROGRAM).call(UOp.new_buffer(Device.DEFAULT, 1, dtypes.float))
     cpu_call = UOp(Ops.PROGRAM).call(UOp.new_buffer("CPU", 1, dtypes.float))
     gpu_devs = [d0]
 
     # local MMIO: GPU works alone and with CPU in batch (cpu_support=True)
-    assert HCQGraph.supports_exec_item(gpu_devs, gpu_call) is True
-    assert HCQGraph.supports_exec_item(gpu_devs, cpu_call) is True
-    assert HCQGraph.supports_exec_item(gpu_devs + [cpu_dev], gpu_call) is True
+    assert HCQGraph.supports_uop(gpu_devs, gpu_call) is True
+    assert HCQGraph.supports_uop(gpu_devs, cpu_call) is True
+    assert HCQGraph.supports_uop(gpu_devs + [cpu_dev], gpu_call) is True
 
     # USB MMIO: GPU-only still works, but CPU batching must be rejected (cpu_support=False)
     orig_view = d0.timeline_signal.base_buf.view
     try:
       d0.timeline_signal.base_buf.view = USBMMIOInterface(MockUSB(bytearray(256)), 0, 16, fmt='B')
-      assert HCQGraph.supports_exec_item(gpu_devs, gpu_call) is True
-      assert HCQGraph.supports_exec_item(gpu_devs, cpu_call) is False
-      assert HCQGraph.supports_exec_item(gpu_devs + [cpu_dev], gpu_call) is False
+      assert HCQGraph.supports_uop(gpu_devs, gpu_call) is True
+      assert HCQGraph.supports_uop(gpu_devs, cpu_call) is False
+      assert HCQGraph.supports_uop(gpu_devs + [cpu_dev], gpu_call) is False
     finally:
       d0.timeline_signal.base_buf.view = orig_view
 

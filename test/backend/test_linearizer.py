@@ -14,7 +14,7 @@ from tinygrad.renderer.cstyle import CUDARenderer
 from test.helpers import replace_opts
 MOCKGPU = DEV.interface.startswith("MOCK")
 
-from tinygrad.uop.ops import print_uops # noqa: F401 # pylint: disable=unused-import
+from tinygrad.uop.render import print_uops # noqa: F401 # pylint: disable=unused-import
 
 class TestLinearizer(unittest.TestCase):
   def test_arg_dedup(self):

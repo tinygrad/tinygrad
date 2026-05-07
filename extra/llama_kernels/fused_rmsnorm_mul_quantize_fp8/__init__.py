@@ -63,7 +63,7 @@ def _bwd_common(fp8_grad_u, h_grad_u, x_u, x_normed_u, rrms_u, weight_u, amax_st
   MBS, SEQ, HIDDEN = x_normed_u.shape
   axis = x_normed_u.axis if isinstance(device, tuple) else None
   grad_x = alloc_like((MBS, SEQ, HIDDEN), dtypes.bfloat16, device, axis)
-  grad_weight_partial = alloc_local((NUM_WG, HIDDEN), dtypes.float32, device)
+  grad_weight_partial = alloc_local((NUM_WG, HIDDEN), dtypes.float32, device, axis)
   grad_h_from_fp8 = None
   grad_weight_uop = None
   if fp8_grad_u is not None:
@@ -119,11 +119,11 @@ def fused_rmsnorm_mul_quantize_fp8(x:Tensor, weight:Tensor, amax_state:Tensor, e
   assert x.shape[-1] == weight.shape[-1], f"HIDDEN mismatch: x={x.shape}, weight={weight.shape}"
   MBS, SEQ, HIDDEN = x.shape
   axis = x.uop.axis if isinstance(x.device, tuple) else None
-  if isinstance(x.device, tuple): assert axis in (0, 1), f"unsupported sharding axis={axis}"
+  if isinstance(x.device, tuple): assert axis in (None, 0, 1), f"unsupported sharding axis={axis}"
   fp8_out      = alloc_like((MBS, SEQ, HIDDEN), fp8_dtype,       x.device, axis)
   x_normed_out = alloc_like((MBS, SEQ, HIDDEN), dtypes.bfloat16, x.device, axis)
   rrms_out     = alloc_like((MBS, SEQ),         dtypes.float32,  x.device, axis)
-  amax_buf     = alloc_local((NUM_WG,),         dtypes.float32,  x.device)
+  amax_buf     = alloc_local((NUM_WG,),         dtypes.float32,  x.device, axis)
   fxn = functools.partial(_custom_fwd, dname=dname_of(x.device), eps_val=eps)
   fp8_out, x_normed_out, rrms_out, amax_buf, *_ = Tensor.custom_kernel(
     fp8_out, x_normed_out, rrms_out, amax_buf, x, weight, amax_state, fxn=fxn, grad_fxn=_fused_bwd)
@@ -139,12 +139,12 @@ def fused_add_rmsnorm_mul_quantize_fp8(x:Tensor, residual:Tensor, weight:Tensor,
   assert x.shape == residual.shape
   MBS, SEQ, HIDDEN = x.shape
   axis = x.uop.axis if isinstance(x.device, tuple) else None
-  if isinstance(x.device, tuple): assert axis in (0, 1), f"unsupported sharding axis={axis}"
+  if isinstance(x.device, tuple): assert axis in (None, 0, 1), f"unsupported sharding axis={axis}"
   fp8_out      = alloc_like((MBS, SEQ, HIDDEN), fp8_dtype,       x.device, axis)
   h_out        = alloc_like((MBS, SEQ, HIDDEN), dtypes.bfloat16, x.device, axis)
   x_normed_out = alloc_like((MBS, SEQ, HIDDEN), dtypes.bfloat16, x.device, axis)
   rrms_out     = alloc_like((MBS, SEQ),         dtypes.float32,  x.device, axis)
-  amax_buf     = alloc_local((NUM_WG,),         dtypes.float32,  x.device)
+  amax_buf     = alloc_local((NUM_WG,),         dtypes.float32,  x.device, axis)
   fxn = functools.partial(_custom_fwd_add, dname=dname_of(x.device), eps_val=eps)
   fp8_out, h_out, x_normed_out, rrms_out, amax_buf, *_ = Tensor.custom_kernel(
     fp8_out, h_out, x_normed_out, rrms_out, amax_buf, x, residual, weight, amax_state,
