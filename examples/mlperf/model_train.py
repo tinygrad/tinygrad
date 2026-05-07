@@ -1443,10 +1443,9 @@ def train_llama3(llama2_70b_lora:bool=False):
     load_state_dict(model, state_dict, strict=False, realize=True, consume=True)
     del state_dict # just in case
     if QUANTIZE:
-      model.quantize()
+      model.quantize(realize=True)
       params = get_parameters(model)
       for p in params:
-        p.realize()
         if not p.requires_grad:
           p.requires_grad_(False)
 
@@ -1478,6 +1477,7 @@ def train_llama3(llama2_70b_lora:bool=False):
     load_state_dict(scheduler, safe_load(fn), realize=False)
 
   fp8_amax = [t for ts in model._fp8_amax.values() for t in ts] if hasattr(model, "_fp8_amax") else []
+  fp8_amax_next = [t for ts in model._fp8_amax_next.values() for t in ts] if hasattr(model, "_fp8_amax_next") else []
   fp8_grad_amax = [t for ts in model._fp8_grad_amax.values() for t in ts] if hasattr(model, "_fp8_grad_amax") else []
   fp8_inv_scales = list(model._fp8_inv_scale.values()) if hasattr(model, "_fp8_inv_scale") else []
 
@@ -1492,7 +1492,7 @@ def train_llama3(llama2_70b_lora:bool=False):
 
   # realize everything here
   if optim.master_params: Tensor.realize(*optim.master_params)
-  Tensor.realize(*optim.params, *fp8_inv_scales, *fp8_amax, *fp8_grad_amax)
+  Tensor.realize(*optim.params, *fp8_inv_scales, *fp8_amax, *fp8_amax_next, *fp8_grad_amax)
 
   @TinyJit
   @Tensor.train()
@@ -1512,7 +1512,7 @@ def train_llama3(llama2_70b_lora:bool=False):
       apply_grad(g, new_g.uop)
 
     loss_cpu = loss.flatten().float().to("CPU")
-    return loss_cpu.realize(*grads, *fp8_amax, *fp8_grad_amax)
+    return loss_cpu.realize(*grads, *fp8_amax, *fp8_amax_next, *fp8_grad_amax)
 
   @TinyJit
   def optim_step():
@@ -1616,6 +1616,7 @@ def train_llama3(llama2_70b_lora:bool=False):
         mst = time.perf_counter()
         data_time += mst - ist
         losses.append(minibatch(tokens).item())
+        model.commit_fp8_amax()
         dev_time += time.perf_counter() - mst
       if stopped: break
 

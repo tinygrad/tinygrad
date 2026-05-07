@@ -147,7 +147,7 @@ class FlatTransformer:
     # quantize weights
     if QUANTIZE: self.quantize() 
 
-  def quantize(self):    
+  def quantize(self, realize:bool=False):
     def _amax():
       t = Tensor.full((), FP8_MAX, dtype=dtypes.float32).contiguous().requires_grad_(False)
       if isinstance(self.wqkv.device, tuple):
@@ -155,13 +155,23 @@ class FlatTransformer:
       return t
     names = ["xqkv", "xo", "x13", "x2"]
     self._fp8_amax = {name: [_amax() for _ in range(self.n_layers)] for name in names}
+    if QUANTIZE and RECOMPUTE:
+      self._fp8_amax_next = {name: [_amax() for _ in range(self.n_layers)] for name in names}
     grad_names = ["xqkv", "xo", "xw13", "xout"]
     self._fp8_grad_amax = {name: [_amax() for _ in range(self.n_layers)] for name in grad_names}
     w_names = ["wqkv", "wo", "w13", "w2"]
-    fp8_weights, init_inv_scales = list(zip(*[quantize_fp8_weight(getattr(self, w_name)) for w_name in w_names]))
-    for weight, name in zip(fp8_weights, w_names): getattr(self, name).replace(weight)
-    self._fp8_inv_scale = {wname: inv_scales.float().contiguous().requires_grad_(False)
-                           for wname, inv_scales in zip(w_names, init_inv_scales)}
+    self._fp8_inv_scale = {}
+    for wname in w_names:
+      fp8_weight, inv_scale = quantize_fp8_weight(getattr(self, wname))
+      inv_scale = inv_scale.float().contiguous().requires_grad_(False)
+      if realize: fp8_weight.realize(inv_scale)
+      getattr(self, wname).replace(fp8_weight)
+      self._fp8_inv_scale[wname] = inv_scale
+
+  def commit_fp8_amax(self):
+    if not hasattr(self, "_fp8_amax_next"): return
+    Tensor.realize(*[self._fp8_amax[name][i].assign(self._fp8_amax_next[name][i])
+                     for name in self._fp8_amax for i in range(len(self._fp8_amax[name]))])
 
   def create_lora_params(self, in_dim:int, out_dim:float, rank:int) -> tuple[Tensor, Tensor]:
     a = self.lin_per_layer(in_dim, rank, requires_grad=True, use_kaiming=True)
@@ -291,7 +301,8 @@ class FlatTransformer:
       self.tok_embeddings.weight.shard_(device, axis=0).realize()
       self.output.shard_(device, axis=1).realize()
       self.freqs_cis.shard_(device, axis=None).realize()
-      for amax_dict in (self._fp8_amax, self._fp8_grad_amax):
+      amax_dicts = (self._fp8_amax, self._fp8_grad_amax) + ((self._fp8_amax_next,) if hasattr(self, "_fp8_amax_next") else tuple())
+      for amax_dict in amax_dicts:
         for name in amax_dict:
           for i in range(len(amax_dict[name])):
             amax_dict[name][i] = amax_dict[name][i].to(device).contiguous().requires_grad_(False)
@@ -302,6 +313,7 @@ class FlatTransformer:
     h = self.tok_embeddings(tokens)
     freqs_cis = self.freqs_cis.cast(h.dtype)[:, :tokens.shape[1], :, :, :]
     if QUANTIZE: a, ga, s = self._fp8_amax, self._fp8_grad_amax, self._fp8_inv_scale
+    if QUANTIZE: next_a = self._fp8_amax_next if hasattr(self, "_fp8_amax_next") else a
     for i in range(self.n_layers):
       lora_layer = dict(lora_a=self.lora_a[i], lora_a_wo=self.lora_a_wo[i],
                         lora_b=self.lora_b[i], lora_b_wo=self.lora_b_wo[i]) if LORA else {}
@@ -317,8 +329,8 @@ class FlatTransformer:
                                **quantize_args,
                                **lora_layer)
       if QUANTIZE:
-        for name, new_val in zip(["xqkv", "xo", "x13", "x2"], ret[:5]):
-          a[name][i].assign(new_val)
+        for name, new_val in zip(["xqkv", "xo", "x13", "x2"], ret[:4]):
+          next_a[name][i].assign(new_val)
 
     logits = matmul(self.norm(h), self.output[0], fp8=False)[0]
     return logits
