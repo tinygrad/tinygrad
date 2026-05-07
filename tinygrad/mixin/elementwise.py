@@ -1,5 +1,5 @@
 import math, functools, operator
-from typing import Self
+from typing import Literal, Self
 from tinygrad.uop import Ops
 from tinygrad.dtype import dtypes, ConstType, PyConst, least_upper_dtype, least_upper_float
 from tinygrad.helpers import argfix, polyN
@@ -167,19 +167,6 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
     self._check_dtype()
     return self._binop(Ops.XOR, x, reverse)
 
-  def idiv(self, x: Self | ConstType, reverse: bool = False) -> Self:
-    """
-    Divides `self` by `x`.
-    Equivalent to `self // x`.
-    Supports broadcasting to a common shape, type promotion, and integer inputs.
-    `idiv` performs integer division (truncate towards zero).
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-4, 7, 5, 4, -7, 8]).idiv(Tensor([2, -3, 8, -2, 3, 5])).numpy())
-    ```
-    """
-    return self._binop(Ops.IDIV, x, reverse)
-
   def mod(self, x: Self | ConstType, reverse: bool = False) -> Self:
     """
     Mod `self` by `x`.
@@ -207,9 +194,35 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
     if dtypes.is_int(a.dtype): return a.alu(Ops.MOD, b)
     return a - (a*b.reciprocal()).trunc() * b
 
-  def div(self, x: Self | ConstType, reverse: bool = False) -> Self:
+  def div(self, x: Self | ConstType, reverse: bool = False, rounding_mode: Literal["trunc", "floor"] | None = None) -> Self:
+    """
+    Divides `self` by `x`.
+    Equivalent to `self / x`.
+    Supports broadcasting to a common shape, type promotion, and integer, float, boolean inputs.
+    `div` performs true division by default; pass `rounding_mode="trunc"` for truncating toward zero
+    or `rounding_mode="floor"` for floor division.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    t = Tensor.randn(4)
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.div(3).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([1, 4, 10]).div(Tensor([2, 3, 4])).numpy())
+    ```
+    """
     lhs, rhs = self._broadcasted(x, reverse)
-    return lhs * rhs.reciprocal()
+    if rounding_mode is None: return lhs * rhs.reciprocal()
+    if dtypes.is_int(lhs.dtype):
+      if rounding_mode == "trunc": return lhs.alu(Ops.IDIV, rhs)
+      if rounding_mode == "floor": return lhs // rhs
+    d = lhs.cast(least_upper_float(lhs.dtype)) * rhs.cast(least_upper_float(rhs.dtype)).reciprocal()
+    if rounding_mode == "trunc": return d.trunc()
+    if rounding_mode == "floor": return d.floor()
+    raise RuntimeError(f"{rounding_mode=} is not supported")
 
   def __neg__(self) -> Self:
     return self.neg()

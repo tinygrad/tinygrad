@@ -103,8 +103,8 @@ pm_pyrender_extra = PatternMatcher([
   # TODO: movement ops simplify stuff, this can break SPEC=2
   #(UPat(GroupOp.Movement, name="x"), lambda ctx,x: f"{ctx[x.src[0]]}.{x.op.name.lower()}({render_marg(ctx,x)})"),
   # NOTE: CMPNE doesn't work cause there's no __rne__
-  # explicit trunc ops: `//` and `%` parse as FLOORDIV/FLOORMOD, so render IDIV/MOD via their named methods
-  (UPat(Ops.IDIV, name="x"), lambda ctx,x: f"{ctx[x.src[0]]}.idiv({ctx[x.src[1]]})"),
+  # explicit trunc ops: `//` and `%` parse as FLOORDIV/FLOORMOD, so render IDIV/MOD via .alu()
+  (UPat(Ops.IDIV, name="x"), lambda ctx,x: f"{ctx[x.src[0]]}.alu(Ops.IDIV, {ctx[x.src[1]]})"),
   (UPat(Ops.MOD, name="x"), lambda ctx,x: f"{ctx[x.src[0]]}.alu(Ops.MOD, {ctx[x.src[1]]})"),
   # NOTE: only match CONSTs without UNIQUE (len(src)==1), unique_const needs explicit rendering
   (UPat(set(syms.keys())-{Ops.SUB, Ops.CMPNE, Ops.IDIV, Ops.MOD}, src=(UPat(Ops.CONST, src=(UPat(Ops.DEVICE),), name="y"), UPat(name="z")), name="x"),

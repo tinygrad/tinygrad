@@ -2,9 +2,9 @@
 from __future__ import annotations
 import time, math, itertools, functools, struct, sys, inspect, pathlib, hashlib, weakref
 from contextlib import ContextDecorator
-from typing import Any, Callable, ClassVar, Sequence, cast, get_args, Literal, ParamSpec, TypeVar, Generic, TYPE_CHECKING
+from typing import Any, Callable, ClassVar, Sequence, cast, get_args, ParamSpec, TypeVar, Generic, TYPE_CHECKING
 if TYPE_CHECKING: import numpy
-from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_float, least_upper_dtype, to_dtype, truncate
+from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_dtype, to_dtype, truncate
 from tinygrad.dtype import _from_np_dtype, _to_np_dtype, PyConst, Invalid
 from tinygrad.helpers import argfix, flatten, prod, all_int, round_up, getenv, all_same, fully_flatten, ceildiv, fetch, flat_to_grouped
 from tinygrad.helpers import resolve_pool_pads, IMAGE, FLOAT16, WINO, Metadata, TRACEMETA, is_numpy_ndarray, TracingKey, cpu_profile
@@ -1283,35 +1283,6 @@ class Tensor(OpMixin):
     # TODO: x:ConstType|UOp does not work because mixin only accepts Self | ConstType
     assert isinstance(x, (*get_args(ConstType), UOp)), f"{type(x)=}, {x=}"
     return Tensor(x, self.device, self.dtype if self._ufix_keep_dtype(x) else None, requires_grad=False)
-
-  def div(self, x:Tensor|ConstType|UOp, reverse=False, rounding_mode:Literal["trunc", "floor"]|None=None) -> Tensor:
-    """
-    Divides `self` by `x`.
-    Equivalent to `self / x`.
-    Supports broadcasting to a common shape, type promotion, and integer, float, boolean inputs.
-    `div` performs true division.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    Tensor.manual_seed(42)
-    t = Tensor.randn(4)
-    print(t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.div(3).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([1, 4, 10]).div(Tensor([2, 3, 4])).numpy())
-    ```
-    """
-    if rounding_mode is None: return super().div(x, reverse)  # type: ignore[arg-type]
-    numerator, denominator = self._broadcasted(x, reverse)
-    if dtypes.is_int(numerator.dtype):
-      if rounding_mode == "trunc": return numerator.idiv(denominator)
-      if rounding_mode == "floor": return numerator // denominator
-    d = numerator.cast(least_upper_float(numerator.dtype)) * denominator.cast(least_upper_float(denominator.dtype)).reciprocal()
-    if rounding_mode == "trunc": return d.trunc()
-    if rounding_mode == "floor": return d.floor()
-    raise RuntimeError(f"{rounding_mode=} is not supported")
 
   def where(self:Tensor, x:Tensor|ConstType|sint, y:Tensor|ConstType|sint) -> Tensor:
     """
