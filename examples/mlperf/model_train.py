@@ -1286,7 +1286,7 @@ def train_llama2_70b_lora():
   train_llama3(True)
 
 def train_llama3(llama2_70b_lora:bool=False):
-  from examples.mlperf.models.flat_llama import FlatTransformer, apply_grad, FP8_DTYPE, LORA, QUANTIZE
+  from examples.mlperf.models.flat_llama import FlatTransformer, apply_grad, FP8_DTYPE, LORA, QUANTIZE, RECOMPUTE
   from examples.llama3 import MODEL_PARAMS
   from examples.mlperf.lr_schedulers import CosineAnnealingLRWithWarmup
   from examples.mlperf.optim import GradAccClipAdamW
@@ -1466,6 +1466,8 @@ def train_llama3(llama2_70b_lora:bool=False):
   grads = [p.grad for p in optim.params]
 
   scheduler = CosineAnnealingLRWithWarmup(optim, opt_base_learning_rate, opt_end_learning_rate, opt_learning_rate_warmup_steps, opt_learning_rate_decay_steps)
+  model_state_for_names = get_state_dict(model)
+  optim_param_names = [next((k for k,v in model_state_for_names.items() if v is p), f"param_{j}") for j,p in enumerate(optim.params)]
 
   if resume_ckpt := getenv("RESUME_CKPT"):
     fn = f"./ckpts/llama3_{resume_ckpt}.safe"
@@ -1553,6 +1555,24 @@ def train_llama3(llama2_70b_lora:bool=False):
     loss = vocab_mask.where(-1e9, logits).sparse_categorical_crossentropy(tokens[:, 1:])
     return loss.flatten().float().to("CPU")
 
+  @Tensor.train()
+  def lora_grad_diag(tokens:Tensor):
+    if is_dp: tokens = tokens.to(None).shard(device, 0)
+    if is_mp: tokens = tokens.to(None).shard(device)
+    if not is_sharding: tokens = tokens.to(None)
+    logits = model(tokens)[:, :-1] if llama2_70b_lora else model(tokens[:, :-1])
+    if getenv("FAST_CE", 0):
+      from extra.llama_kernels.fused_ce import fused_ce_loss
+      loss = fused_ce_loss(logits.cast(dtypes.bfloat16), tokens[:, 1:], label_smoothing=0.0)
+    else:
+      loss = vocab_mask.where(-1e9, logits).sparse_categorical_crossentropy(tokens[:, 1:])
+    diag_grads = loss.gradient(*optim.params)
+    grad_norms = [g.float().square().sum().sqrt().to("CPU") for g in diag_grads]
+    total_grad_norm = Tensor.stack(*[g.float().square().sum() for g in diag_grads]).sum().sqrt().to("CPU")
+    loss_cpu = loss.flatten().float().to("CPU")
+    Tensor.realize(loss_cpu, total_grad_norm, *grad_norms, *fp8_amax, *fp8_amax_next, *fp8_grad_amax)
+    return loss_cpu, total_grad_norm, grad_norms
+
   # ** data iters **
   def fake_data(bs, samples):
     import numpy as np
@@ -1591,6 +1611,14 @@ def train_llama3(llama2_70b_lora:bool=False):
 
   num_params = sum(p.numel() for p in params) - model_params["vocab_size"]*model_params["dim"]
   train_iter = get_train_iter()
+  if getenv("DIAG_LORA_GRADS", 0):
+    tokens = next(train_iter)
+    loss_cpu, total_grad_norm, grad_norms = lora_grad_diag(tokens)
+    tqdm.write(f"DIAG_LORA_GRADS QUANTIZE={QUANTIZE} RECOMPUTE={RECOMPUTE} BS={BS} SEQLEN={SEQLEN}")
+    tqdm.write(f"DIAG loss={loss_cpu.item():.9f} total_grad_norm={total_grad_norm.item():.9f}")
+    for name, param, grad_norm in zip(optim_param_names, optim.params, grad_norms):
+      tqdm.write(f"DIAG grad {name}: shape={param.shape} dtype={param.dtype} norm={grad_norm.item():.9f}")
+    return
   i, sequences_seen = resume_ckpt, 0
   step_times = []
 
