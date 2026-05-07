@@ -189,7 +189,7 @@ jobs:
         path: |
           onnx_inference_speed.csv
     - name: Run process replay tests
-      run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3.11 process_replay.py
+      uses: ./.github/actions/process-replay
 
   testusbgpu:
     name: UsbGPU Benchmark
@@ -324,7 +324,7 @@ jobs:
         path: |
           onnx_inference_speed.csv
     - name: Run process replay tests
-      run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
+      uses: ./.github/actions/process-replay
 
   testmorenvidiabenchmark:
     name: tinybox green Training Benchmark
@@ -386,7 +386,7 @@ jobs:
       # TODO: remove BERT_LAYERS once scheduler is fast
       run: BENCHMARK_LOG=bert_10steps_6gpu DEV=NV CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=72 GPUS=6 BERT_LAYERS=2 MODEL=bert python3 examples/mlperf/model_train.py
     - name: Run process replay tests
-      run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
+      uses: ./.github/actions/process-replay
 
   testamdbenchmark:
     name: tinybox red Benchmark
@@ -498,7 +498,7 @@ jobs:
     - name: Run GPT2 w HALF/BEAM
       run: BENCHMARK_LOG=gpt2_half_beam DEV=AMD HALF=1 JITBEAM=2 IGNORE_BEAM_CACHE=1 python3 examples/gpt2.py --count 10 --temperature 0 --timing
     - name: Run process replay tests
-      run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
+      uses: ./.github/actions/process-replay
 
   testmoreamdbenchmark:
     name: tinybox red Training Benchmark
@@ -555,7 +555,7 @@ jobs:
     #- name: Test full tinyfs load
     #  run: TINYFS_ENDPOINT=10.0.52.11:6767 PYTHONPATH=. python extra/tinyfs/fetch_file.py --hash d734f5e3be9f1e9d863bfaa4fc6c1ef2 --len 175866113 --dest mapping.json --check
     - name: Run process replay tests
-      run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
+      uses: ./.github/actions/process-replay
 
   testmlperfamdbenchmark:
     name: tinybox red MLPerf Benchmark
@@ -601,7 +601,7 @@ jobs:
       # TODO: remove BERT_LAYERS once scheduler is fast
       run: BENCHMARK_LOG=bert_10steps_6gpu DEV=AMD CAPTURE_PROCESS_REPLAY=0 DEFAULT_FLOAT=HALF BENCHMARK=10 BS=72 GPUS=6 BERT_LAYERS=2 MODEL=bert python3 examples/mlperf/model_train.py
     - name: Run process replay tests
-      run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
+      uses: ./.github/actions/process-replay
 
   testqualcommbenchmark:
     name: comma Benchmark
@@ -648,7 +648,7 @@ jobs:
         # benchmark on DSP with NOOPT=1, the devectorizer has issues
         PYTHONPATH=. CC=clang-19 DEV=DSP NOOPT=1 CNT=2 DEBUG=2 python3 examples/test_onnx_imagenet.py /tmp/model.quant.onnx
     - name: Run process replay tests
-      run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
+      uses: ./.github/actions/process-replay
 
   testcommausbgpubenchmark:
     name: UsbGPU Benchmark (comma)
@@ -745,7 +745,7 @@ jobs:
         DEBUG=2 PYTHONPATH=. REMOTE=127.0.0.1:6482 AM_RESET=1 DEV=PCI+AMD AMD_AQL=1 python3 test/test_tiny.py
         pkill -f 'extra/remote/serve.py' || true
     - name: Run process replay tests
-      run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
+      uses: ./.github/actions/process-replay
 
   testgreendriverbenchmark:
     name: NV Benchmark
@@ -808,4 +808,4 @@ jobs:
         DEBUG=2 PYTHONPATH=. REMOTE=127.0.0.1:6483 DEV=NV python3 test/test_tiny.py
         pkill -f 'extra/remote/serve.py' || true
     - name: Run process replay tests
-      run: cp test/external/process_replay/process_replay.py ./process_replay.py && git fetch origin master && git -c advice.detachedHead=false checkout origin/master && PYTHONPATH=. python3 process_replay.py
+      uses: ./.github/actions/process-replay

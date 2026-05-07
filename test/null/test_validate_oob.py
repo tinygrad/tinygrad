@@ -154,7 +154,7 @@ class TestValidateOOB(unittest.TestCase):
 
       gate = (gidx<400) & (lidx<8)
 
-      local_store = sbuf.index(lidx).store(UOp.const(dtypes.uint, 1), lidx<8)
+      local_store = sbuf.index(lidx.valid(lidx<8)).store(UOp.const(dtypes.uint, 1))
 
       barrier = UOp(Ops.BARRIER, dtypes.void, (local_store,))
       if_barrier = UOp(Ops.IF, dtypes.void, (gate, barrier))
