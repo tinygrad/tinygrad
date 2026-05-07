@@ -1831,6 +1831,7 @@ def train_flux():
   def get_train_iter() -> Iterator[tuple[Tensor, Tensor, Tensor, Tensor, Tensor]]:
     return batch_load_flux(BS, BASEDIR, empty_enc_dir=EMPTYENCDIR, seed=SEED)
 
+  @TinyJit
   def train_step(model:Flux, optim:AdamW, sample) -> Tensor:
     optim.zero_grad()
 

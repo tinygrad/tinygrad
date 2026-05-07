@@ -808,17 +808,17 @@ class FluxDataset:
 
       if self.cfg_prob > 0.0 and self.rng.random() < self.cfg_prob:
         assert self.empty_enc_dir is not None, f"empty_enc_dir is {self.empty_enc_dir}"
-        sample_preproc["t5_encodings"] = Tensor(self.t5_empty_enc, dtype=dtypes.bfloat16)
-        sample_preproc["clip_encodings"] = Tensor(self.clip_empty_enc, dtype=dtypes.bfloat16)
+        sample_preproc["t5_encodings"] = Tensor(self.t5_empty_enc).cast(dtypes.bfloat16)
+        sample_preproc["clip_encodings"] = Tensor(self.clip_empty_enc).cast(dtypes.bfloat16)
 
       yield sample_preproc
 
   @functools.cached_property
-  def t5_empty_enc(self) -> Tensor:
+  def t5_empty_enc(self) -> np.ndarray:
     return np.load(self.empty_enc_dir / "t5_empty.npy")[0]
 
   @functools.cached_property
-  def clip_empty_enc(self) -> Tensor:
+  def clip_empty_enc(self) -> np.ndarray:
     return np.load(self.empty_enc_dir / "clip_empty.npy")[0]
 
   def _preprocess_data(self, sample:dict[str, str|bytes]) -> dict[str, Tensor]:
