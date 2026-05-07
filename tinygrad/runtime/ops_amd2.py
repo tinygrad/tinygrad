@@ -3,7 +3,7 @@ from typing import cast
 import os, ctypes, struct, hashlib, functools, importlib, mmap, errno, array, contextlib, sys, weakref, itertools, collections, atexit
 assert sys.platform != 'win32'
 from dataclasses import dataclass
-from tinygrad.runtime.support.hcq2 import HCQ2Compiled, HCQAllocator, HCQ2Buffer, HWQueue, CLikeArgsState, HCQSignal, HCQProgram, FileIOInterface
+from tinygrad.runtime.support.hcq2 import HCQ2Compiled, HCQAllocator, HCQ2Buffer, HWQueue, HCQSignal, FileIOInterface
 from tinygrad.runtime.support.hcq2 import MMIOInterface, BumpAllocator, hcq_filter_visible_devices, hcq_profile
 from tinygrad.uop.ops import sint, UOp
 from tinygrad.device import Compiled, BufferSpec, Buffer, Device
@@ -32,7 +32,7 @@ WAIT_REG_MEM_FUNCTION_NEQ = 4 # !=
 WAIT_REG_MEM_FUNCTION_GEQ = 5 # >=
 
 # new queue submition
-from tinygrad.runtime.support.hcq2 import HCQ2LowerCtx, hcq_routine
+from tinygrad.runtime.support.hcq2 import HCQ2LowerCtx
 from tinygrad.engine.realize import get_runtime
 from tinygrad.uop.ops import Ops, UPat, PatternMatcher
 
@@ -74,8 +74,9 @@ def pm4_barrier(ctx:HCQ2LowerCtx, x:UOp):
     pm4_pkt3(ctx, pm4.PACKET3_ACQUIRE_MEM, cp_coher, *data64_le((1 << 64) - 1), *data64_le(0), 0x0000000A)
 
 def pm4_program(ctx:HCQ2LowerCtx, x:UOp):
-  rt, info = x.arg
-  args = x.src[1]
+  data, info = x.arg
+  lib_gpu, args = x.src
+  prog_addr = ctx.addr(lib_gpu) + data.entry_point_offset
   pm4, gc, soc = ctx.dev.pm4, ctx.dev.gc, ctx.dev.soc
 
   if ctx.dev.target[0] != 9:
@@ -88,15 +89,15 @@ def pm4_program(ctx:HCQ2LowerCtx, x:UOp):
     pm4_pkt3(ctx, pm4.PACKET3_ACQUIRE_MEM, cp_coher, *data64_le((1 << 64) - 1), *data64_le(0), 0x0000000A)
 
   user_regs = []
-  if rt.enable_private_segment_sgpr:
+  if data.enable_private_segment_sgpr:
     scratch_hilo = data64_le(ctx.dev.scratch.va_addr)
     user_regs = [scratch_hilo[0], scratch_hilo[1] | 1 << 31, 0xffffffff, 0x20c14000]
-  if rt.enable_dispatch_ptr: user_regs += [*data64_le(ctx.addr(args) + rt.kernargs_segment_size)]
+  if data.enable_dispatch_ptr: user_regs += [*data64_le(ctx.addr(args) + data.kernargs_segment_size)]
   user_regs += [*data64_le(ctx.addr(args))]
 
-  pm4_wreg(ctx, gc.regCOMPUTE_PGM_LO, *data64_le(rt.prog_addr >> 8))
-  pm4_wreg(ctx, gc.regCOMPUTE_PGM_RSRC1, rt.rsrc1, rt.rsrc2)
-  pm4_wreg(ctx, gc.regCOMPUTE_PGM_RSRC3, rt.rsrc3)
+  pm4_wreg(ctx, gc.regCOMPUTE_PGM_LO, *data64_le(prog_addr >> 8))
+  pm4_wreg(ctx, gc.regCOMPUTE_PGM_RSRC1, data.rsrc1, data.rsrc2)
+  pm4_wreg(ctx, gc.regCOMPUTE_PGM_RSRC3, data.rsrc3)
   pm4_wreg(ctx, gc.regCOMPUTE_TMPRING_SIZE, ctx.dev.tmpring_size)
 
   for xcc_id in range(ctx.dev.xccs):
@@ -108,7 +109,7 @@ def pm4_program(ctx:HCQ2LowerCtx, x:UOp):
   pm4_wreg(ctx, gc.regCOMPUTE_RESOURCE_LIMITS, gc.regCOMPUTE_RESOURCE_LIMITS.encode(waves_per_sh=getenv("WAVES_PER_SH")))
   pm4_wreg(ctx, gc.regCOMPUTE_START_X, 0, 0, 0, *(info.local_size or (1, 1, 1)), 0, 0)
 
-  dispatch_init = gc.regCOMPUTE_DISPATCH_INITIATOR.encode(**({'cs_w32_en': int(rt.wave32)} if ctx.dev.target[0] != 9 else {}),
+  dispatch_init = gc.regCOMPUTE_DISPATCH_INITIATOR.encode(**({'cs_w32_en': int(data.wave32)} if ctx.dev.target[0] != 9 else {}),
                                                           force_start_at_000=1, compute_shader_en=1)
   pm4_pkt3(ctx, pm4.PACKET3_DISPATCH_DIRECT, *info.global_size, dispatch_init)
   pm4_pkt3(ctx, pm4.PACKET3_EVENT_WRITE, pm4.EVENT_TYPE(soc.CS_PARTIAL_FLUSH) | pm4.EVENT_INDEX(EVENT_INDEX_PARTIAL_FLUSH))
@@ -138,8 +139,11 @@ amd_pm4_encode = PatternMatcher([
   (UPat(Ops.STORE,   name="x"), pm4_store),
 ])
 
-@hcq_routine
-def pm4_submit_routine(blob:UOp, ring:UOp, wptr:UOp, doorbell:UOp, put_ptr:UOp, size:UOp, ring_dwords:int):
+def pm4_submit(ctx:HCQ2LowerCtx, blob:UOp) -> UOp:
+  q = ctx.dev.compute_queue
+  ring, wptr, doorbell, put_ptr = (ctx.param(b) for b in (q.ring, q.write_ptr, q.doorbell, q.put_value))
+  size, ring_dwords = UOp.const(dtypes.uint32, blob.dtype.size), q.ring.size
+
   put = put_ptr[0]
   i = UOp.range(size, 0, dtype=dtypes.int)
   next_put = put + size.cast(put.dtype)
@@ -151,9 +155,10 @@ def pm4_submit_routine(blob:UOp, ring:UOp, wptr:UOp, doorbell:UOp, put_ptr:UOp, 
   flush = UOp.barrier(copy_to_ring, bump_put_ptr, bump_wptr)
   return doorbell.after(flush)[0].store(next_put)
 
-def pm4_submit(ctx, blob, size):
-  q = ctx.dev.compute_queue
-  pm4_submit_routine.build(ctx, blob, q.ring, q.write_ptr, q.doorbell, q.put_value, size, q.ring.size)
+amd_hcq_routines = PatternMatcher([
+  (UPat(Ops.PARAM, name="blob"), pm4_submit),
+])
+
 
 
 class AMDSignal(HCQSignal):
@@ -236,52 +241,6 @@ class AMDComputeQueue(HWQueue):
     self.wait_reg_mem(reg=getattr(self.nbio, f'regBIF_BX_PF{pf}_GPU_HDP_FLUSH_REQ').addr[0],
                       reg_done=getattr(self.nbio, f'regBIF_BX_PF{pf}_GPU_HDP_FLUSH_DONE').addr[0], value=0xffffffff)
     return self.acquire_mem()
-
-  def exec(self, prg:AMDProgram, args_state:CLikeArgsState, global_size:tuple[sint, ...], local_size:tuple[sint, ...]):
-    self.bind_args_state(args_state)
-
-    self.acquire_mem(gli=0, gl2=0)
-
-    user_regs = []
-    if prg.enable_private_segment_sgpr:
-      assert self.dev.xccs == 1, "Only architected flat scratch is supported on multi-xcc"
-      scratch_hilo = data64_le(prg.dev.scratch.va_addr)
-      # sgpr word1 bit31 enables swizzle
-      # sgpr word3 = 0x14 << 12 | 2 << 28 | 2 << 21 | 1 << 23
-      user_regs = [scratch_hilo[0], scratch_hilo[1] | 1 << 31, 0xffffffff, 0x20c14000]
-
-    if prg.enable_dispatch_ptr:
-      dp = (dp_t:=hsa.hsa_kernel_dispatch_packet_t).from_address(int((disp_buf:=args_state.buf.offset(prg.kernargs_segment_size)).va_addr))
-
-      self.bind_sints(*local_size, mem=disp_buf.cpu_view(), struct_t=dp_t, start_field='workgroup_size_x', fmt='H')
-      self.bind_sints(*[g*l for g,l in zip(global_size, local_size)], mem=disp_buf.cpu_view(), struct_t=dp_t, start_field='grid_size_x', fmt='I')
-      dp.group_segment_size, dp.private_segment_size  = prg.group_segment_size, prg.private_segment_size
-      dp.kernarg_address = cast(ctypes.c_void_p, args_state.buf.va_addr)
-      user_regs += [*data64_le(disp_buf.va_addr)]
-
-    user_regs += [*data64_le(args_state.buf.va_addr)]
-
-    self.wreg(self.gc.regCOMPUTE_PGM_LO, *data64_le(prg.prog_addr >> 8))
-    self.wreg(self.gc.regCOMPUTE_PGM_RSRC1, prg.rsrc1, prg.rsrc2)
-    self.wreg(self.gc.regCOMPUTE_PGM_RSRC3, prg.rsrc3)
-    self.wreg(self.gc.regCOMPUTE_TMPRING_SIZE, prg.dev.tmpring_size)
-
-    # this is what llvm refers to as "architected flat scratch"
-    for xcc_id in range(self.dev.xccs):
-      scratch_base = prg.dev.scratch.va_addr + (prg.dev.scratch.size // self.dev.xccs * xcc_id)
-      self.wreg(self.gc.regCOMPUTE_DISPATCH_SCRATCH_BASE_LO, *data64_le(scratch_base >> 8))
-
-    self.wreg(self.gc.regCOMPUTE_RESTART_X, 0, 0, 0)
-    self.wreg(self.gc.regCOMPUTE_USER_DATA_0, *user_regs)
-    self.wreg(self.gc.regCOMPUTE_RESOURCE_LIMITS, waves_per_sh=getenv("WAVES_PER_SH"))
-    self.wreg(self.gc.regCOMPUTE_START_X, 0, 0, 0, *local_size, 0, 0)
-
-    self.pkt3(self.pm4.PACKET3_DISPATCH_DIRECT, *global_size,
-              self.gc.regCOMPUTE_DISPATCH_INITIATOR.encode(**({'cs_w32_en': int(prg.wave32)} if prg.dev.target[0] != 9 else {}),
-                                                           force_start_at_000=1, compute_shader_en=1))
-
-    self.pkt3(self.pm4.PACKET3_EVENT_WRITE, self.pm4.EVENT_TYPE(self.soc.CS_PARTIAL_FLUSH) | self.pm4.EVENT_INDEX(EVENT_INDEX_PARTIAL_FLUSH))
-    return self
 
   def wait(self, signal:AMDSignal, value:sint=0): return self.wait_reg_mem(mem=signal.value_addr, value=value, mask=0xffffffff)
 
@@ -433,59 +392,45 @@ class AMDCopyQueue(HWQueue):
 
     q.signal_doorbell(dev)
 
-class AMDProgram(HCQProgram):
-  def __init__(self, dev:AMD2Device, name:str, lib:bytes, **kwargs):
-    # TODO; this API needs the type signature of the function and global_size/local_size
-    self.dev, self.name, self.lib = dev, name, lib
+@dataclass(frozen=True)
+class AMDProgramData:
+  entry_point_offset:int; rsrc1:int; rsrc2:int; rsrc3:int; wave32:bool
+  kernargs_segment_size:int; kernargs_alloc_size:int
+  enable_dispatch_ptr:int; enable_private_segment_sgpr:int
 
-    image, sections, relocs = elf_loader(self.lib)
+_amd_program_cache:dict[tuple[bytes,str], tuple[AMDProgramData,Buffer]] = {}
 
-    rodata_entry = next((sh.header.sh_addr for sh in sections if sh.name == ".rodata"), -1)
-    assert rodata_entry >= 0, ".rodata section not found"
+def amd_build_program(ctx:HCQ2LowerCtx, prg:UOp) -> UOp:
+  if (cached:=_amd_program_cache.get(key:=(lib:=prg.src[4].arg, ctx.dev.device))) is None:
+    image, sections, relocs = elf_loader(lib)
+    rodata = next(sh.header.sh_addr for sh in sections if sh.name == ".rodata")
+    for off, sym, typ, addent in relocs:
+      assert typ == 5, f"unknown AMD reloc {typ}"  # R_AMDGPU_REL64
+      image[off:off+8] = struct.pack('<q', sym - off + addent)
+    lib_gpu = Buffer(ctx.dev.device, round_up(image.nbytes, 0x1000), dtypes.uint8, options=BufferSpec(nolru=True), preallocate=True)
+    ctx.dev.allocator._copyin(lib_gpu._buf, image)
+    ctx.dev.synchronize()
+    desc = amdgpu_kd.llvm_amdhsa_kernel_descriptor_t.from_buffer_copy(bytes(image[rodata:rodata+ctypes.sizeof(amdgpu_kd.llvm_amdhsa_kernel_descriptor_t)]))
+    if (lds:=((desc.group_segment_fixed_size+511)//512)&0x1FF) > (ctx.dev.iface.props['lds_size_in_kb']*1024)//512:
+      raise RuntimeError("Too many resources requested: group_segment_size")
+    ctx.dev._ensure_has_local_memory(desc.private_segment_fixed_size)
+    edp = desc.kernel_code_properties & hsa.AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_DISPATCH_PTR
+    cached = _amd_program_cache[key] = (AMDProgramData(
+      entry_point_offset=rodata + desc.kernel_code_entry_byte_offset,
+      rsrc1=desc.compute_pgm_rsrc1 | ((1<<20) if ctx.dev.target[0]==11 else 0),  # priv=1 on gfx11 for cwsr
+      rsrc2=desc.compute_pgm_rsrc2 | (lds<<15), rsrc3=desc.compute_pgm_rsrc3,
+      wave32=bool(desc.kernel_code_properties & 0x400),
+      kernargs_segment_size=desc.kernarg_size,
+      kernargs_alloc_size=desc.kernarg_size + (ctypes.sizeof(hsa.hsa_kernel_dispatch_packet_t) if edp else 0),
+      enable_dispatch_ptr=edp,
+      enable_private_segment_sgpr=desc.kernel_code_properties & hsa.AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER,
+    ), lib_gpu)
+  data, lib_gpu = cached
+  return prg.replace(src=(UOp.from_buffer(lib_gpu, ctx.dev.device),), arg=(data, prg.arg))
 
-    for apply_image_offset, rel_sym_offset, typ, addent in relocs:
-      if typ == 5: image[apply_image_offset:apply_image_offset+8] = struct.pack('<q', rel_sym_offset - apply_image_offset + addent) # R_AMDGPU_REL64
-      else: raise RuntimeError(f"unknown AMD reloc {typ}")
-
-    self.lib_gpu = Buffer(self.dev.device, round_up(image.nbytes, 0x1000), dtypes.uint8, options=BufferSpec(nolru=True), preallocate=True)
-    self.dev.allocator._copyin(self.lib_gpu._buf, image)
-    self.dev.synchronize()
-
-    desc_sz = ctypes.sizeof(amdgpu_kd.llvm_amdhsa_kernel_descriptor_t)
-    desc = amdgpu_kd.llvm_amdhsa_kernel_descriptor_t.from_buffer_copy(bytes(image[rodata_entry:rodata_entry+desc_sz]))
-    self.group_segment_size = desc.group_segment_fixed_size
-    self.private_segment_size = desc.private_segment_fixed_size
-    self.kernargs_segment_size = desc.kernarg_size
-    lds_size = ((self.group_segment_size + 511) // 512) & 0x1FF
-    if lds_size > (self.dev.iface.props['lds_size_in_kb'] * 1024) // 512: raise RuntimeError("Too many resources requested: group_segment_size")
-
-    # Ensure scratch size
-    self.dev._ensure_has_local_memory(self.private_segment_size)
-
-    self.wave32: bool = desc.kernel_code_properties & 0x400 == 0x400
-
-    # Set rsrc1.priv=1 on gfx11 to workaround cwsr.
-    self.rsrc1: int = desc.compute_pgm_rsrc1 | ((1 << 20) if self.dev.target[0] == 11 else 0)
-    self.rsrc2: int = desc.compute_pgm_rsrc2 | (lds_size << 15)
-    self.rsrc3: int = desc.compute_pgm_rsrc3
-    self.aql_prog_addr: int = self.lib_gpu._buf.va_addr + rodata_entry
-    self.prog_addr: int = self.lib_gpu._buf.va_addr + rodata_entry + desc.kernel_code_entry_byte_offset
-    # Some programs use hsa_kernel_dispatch_packet_t to read workgroup sizes during execution.
-    # The packet is represented as a pointer and set up in SGPRs. Space for the packet is allocated as part of the kernel arguments.
-    self.enable_dispatch_ptr: int = desc.kernel_code_properties & hsa.AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_DISPATCH_PTR
-    self.enable_private_segment_sgpr: int = desc.kernel_code_properties & hsa.AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER
-    additional_alloc_sz = ctypes.sizeof(hsa.hsa_kernel_dispatch_packet_t) if self.enable_dispatch_ptr else 0
-
-    if dev.sqtt_enabled: self.libhash: tuple[int, int] = struct.unpack('<Q', hashlib.md5(self.lib).digest()[:8])*2
-
-    super().__init__(CLikeArgsState, self.dev, self.name, kernargs_alloc_size=self.kernargs_segment_size+additional_alloc_sz, lib=self.lib,
-                     base=self.lib_gpu._buf.va_addr)
-    weakref.finalize(self, self._fini, self.dev, self.lib_gpu._buf, BufferSpec(nolru=True))
-
-  def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int|None, ...]=(),
-               wait=False, timeout:int|None=None):
-    res = super().__call__(*bufs, global_size=global_size, local_size=local_size, vals=vals, wait=wait, timeout=timeout)
-    return res
+amd_pm_program = PatternMatcher([
+  (UPat(Ops.PROGRAM, src=(UPat(), UPat(), UPat(), UPat(), UPat(Ops.BINARY)), name="prg"), amd_build_program),
+])
 
 class AMDAllocator(HCQAllocator['AMD2Device']):
   def __init__(self, dev:AMD2Device):
@@ -624,7 +569,7 @@ class AMD2Device(HCQ2Compiled):
   def is_am(self) -> bool: return isinstance(self.iface, (PCIIface,))
   def is_usb(self) -> bool: return False
 
-  submit_routine = staticmethod(pm4_submit)
+  hcq_routines = amd_hcq_routines
 
   def __init__(self, device:str=""):
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
@@ -661,7 +606,7 @@ class AMD2Device(HCQ2Compiled):
     self.sdma_queues:dict = {}
     self.has_sdma_queue = False #self.sdma_queue(0) is not None
 
-    super().__init__(device, AMDAllocator(self), [HIPRenderer, AMDLLVMRenderer, HIPCCRenderer], functools.partial(AMDProgram, self), AMDSignal,
+    super().__init__(device, AMDAllocator(self), [HIPRenderer, AMDLLVMRenderer, HIPCCRenderer], None, AMDSignal,
                      functools.partial(AMDComputeAQLQueue if self.is_aql else AMDComputeQueue, self),
                      functools.partial(AMDCopyQueue, self, max_copy_size=self.max_copy_size) if self.has_sdma_queue else None,
                      kernargs_size=(8 << 10) if self.is_usb() else (16 << 20), sigalloc_size=0x100 if self.is_usb() else 0x1000,
@@ -671,8 +616,8 @@ class AMD2Device(HCQ2Compiled):
     self.max_private_segment_size = 0
     self._ensure_has_local_memory(128) # set default scratch size to 128 bytes per thread
 
-    # HCQ2 PM4 encoder
-    self.pm_encode = amd_pm4_encode
+    # HCQ2 device-specific pattern matchers
+    self.pm_program, self.pm_encode = amd_pm_program, amd_pm4_encode
 
     # HCQ2 helpers: timeline signal/value as UOps so HCQ2Graph rewrites can reference them.
     # self.timeline_signal_uop = self._wrap_buffer_uop(self.timeline_signal.base_buf)
