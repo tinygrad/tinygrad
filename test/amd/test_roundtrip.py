@@ -58,7 +58,6 @@ def get_kernels_from_tinygrad(op_fn) -> tuple[list[KernelSnapshot], dict[int, in
   """Compile a tinygrad operation and extract all kernels with their buffer mappings."""
   from tinygrad import Tensor
   from tinygrad.uop.ops import Ops
-  from tinygrad.renderer import ProgramSpec
   from tinygrad.engine.realize import compile_linear, resolve_params, unwrap_multi
   from tinygrad.runtime.support.elf import elf_loader
 
@@ -83,9 +82,9 @@ def get_kernels_from_tinygrad(op_fn) -> tuple[list[KernelSnapshot], dict[int, in
             src_data = bytes(src_buf.base._buf)
             buf_data[dst_id] = src_data
       elif ast.op is Ops.PROGRAM:
-        prg = ProgramSpec.from_uop(ast)
-        if prg.lib:
-          lib = bytes(prg.lib)
+        info = ast.arg
+        if len(ast.src) > 4 and ast.src[4].op is Ops.BINARY:
+          lib = bytes(ast.src[4].arg)
           _, sections, _ = elf_loader(lib)
           for sec in sections:
             if sec.name == '.text':
@@ -99,9 +98,9 @@ def get_kernels_from_tinygrad(op_fn) -> tuple[list[KernelSnapshot], dict[int, in
                 buf_sizes.append(b.nbytes)
               kernels.append(KernelSnapshot(
                 code=bytes(sec.content),
-                src=prg.src,
-                global_size=tuple(prg.global_size),
-                local_size=tuple(prg.local_size),
+                src=ast.src[3].arg,
+                global_size=tuple(info.global_size),
+                local_size=tuple(info.local_size),
                 buf_idxs=buf_idxs,
                 buf_sizes=buf_sizes
               ))

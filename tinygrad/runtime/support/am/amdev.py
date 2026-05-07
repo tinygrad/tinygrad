@@ -1,8 +1,8 @@
 from __future__ import annotations
 import ctypes, collections, dataclasses, functools, hashlib, array
-from tinygrad.helpers import mv_address, getenv, DEBUG, fetch, lo32, hi32
+from tinygrad.helpers import mv_address, getenv, DEBUG, lo32, hi32, fetch_fw
 from tinygrad.runtime.autogen import pci
-from tinygrad.runtime.autogen.am import am
+from tinygrad.runtime.autogen.am import am, fw
 from tinygrad.runtime.support.amd import AMDReg, import_module, import_asic_regs
 from tinygrad.runtime.support.memory import TLSFAllocator, MemoryManager, AddrSpace
 from tinygrad.runtime.support.system import PCIDevice
@@ -108,8 +108,7 @@ class AMFirmware:
     self.descs += [self.desc(blob, hdr0.header.ucode_array_offset_bytes, hdr0.header.ucode_size_bytes, am.GFX_FW_TYPE_RLC_G)]
 
   def load_fw(self, fname:str, *headers, versioned_header:str|None=None):
-    fpath = fetch(f"https://gitlab.com/kernel-firmware/linux-firmware/-/raw/1e2c15348485939baf1b6d1f5a7a3b799d80703d/amdgpu/{fname}", subdir="fw")
-    blob = memoryview(bytearray(fpath.read_bytes()))
+    blob = memoryview(bytearray(fetch_fw("amdgpu", fname, fw.hashes[fname])))
     if AM_DEBUG >= 1: print(f"am {self.adev.devfmt}: loading firmware {fname}: {hashlib.sha256(blob).hexdigest()}")
     if versioned_header:
       chdr = am.struct_common_firmware_header.from_address(mv_address(blob))
@@ -174,10 +173,12 @@ class AMDev:
     # Init hw for IP blocks where it is needed
     if not self.partial_boot:
       if self.psp.is_sos_alive() and self.smu.is_smu_alive():
+        self.pci_dev.write_config_flush(pci.PCI_COMMAND, self.pci_dev.read_config(pci.PCI_COMMAND, 2) & ~pci.PCI_COMMAND_MASTER, 2)
         if self.is_hive():
           if reset_mode: return # in reset mode, do not raise
           raise RuntimeError("Malformed state. Use extra/amdpci/hive_reset.py to reset the hive")
         self.smu.mode1_reset()
+      self.pci_dev.write_config_flush(pci.PCI_COMMAND, self.pci_dev.read_config(pci.PCI_COMMAND, 2) | pci.PCI_COMMAND_MASTER, 2)
       self.init_hw(self.soc, self.gmc, self.ih, self.psp, self.smu)
 
     # Booting done
@@ -185,7 +186,6 @@ class AMDev:
 
     # Re-initialize main blocks
     self.init_hw(self.gfx, self.sdma)
-    self.pci_dev.write_config(pci.PCI_COMMAND, self.pci_dev.read_config(pci.PCI_COMMAND, 2) | pci.PCI_COMMAND_MASTER, 2)
 
     if (max_power:=getenv("AM_POWER_LIMIT", 0.0)) > 0:
       self.smu.set_power_limit(max_power)
@@ -322,7 +322,7 @@ class AMDev:
   @functools.cached_property
   def hwid_names(self) -> dict[int, str]: return {v:k.removesuffix('_HWID') for k,v in vars(am).items() if k.endswith('_HWID') and isinstance(v, int)}
 
-  def _ip_module(self, prefix:str, hwip, prever_prefix:str=""): return import_module(prefix, self.ip_ver[hwip], prever_prefix)
+  def _ip_module(self, prefix:str, hwip): return import_module(prefix, self.ip_ver[hwip])
 
   def _build_regs(self):
     mods = [("mp", am.MP0_HWIP), ("hdp", am.HDP_HWIP), ("gc", am.GC_HWIP), ("mmhub", am.MMHUB_HWIP), ("osssys", am.OSSSYS_HWIP),
@@ -331,4 +331,4 @@ class AMDev:
 
     for prefix, hwip in mods:
       self.__dict__.update(import_asic_regs(prefix, self.ip_ver[hwip], cls=functools.partial(AMRegister, adev=self, bases=self.regs_offset[hwip])))
-    self.__dict__.update(import_asic_regs('mp', (11, 0), cls=functools.partial(AMRegister, adev=self, bases=self.regs_offset[am.MP1_HWIP])))
+    self.__dict__.update(import_asic_regs('mp', (11, 0, 0), cls=functools.partial(AMRegister, adev=self, bases=self.regs_offset[am.MP1_HWIP])))

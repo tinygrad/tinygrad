@@ -1,9 +1,8 @@
 import unittest, math, time
 
-from tinygrad import Tensor, Device, dtypes, Context
+from tinygrad import Tensor, Device, dtypes, Context, GlobalCounters
 from tinygrad.uop.ops import UOp, Ops
-from tinygrad.engine.realize import get_runner
-from tinygrad.schedule import ExecItem
+from tinygrad.engine.realize import run_linear
 from tinygrad.engine.jit import TinyJit
 import numpy as np
 
@@ -67,8 +66,9 @@ class TestTK(unittest.TestCase):
       c = Tensor.empty(1, 1, N, N, dtype="float32")
       Tensor.realize(a, b, c)
 
-    ei = ExecItem(sink, [t.uop.buffer for t in (c, a, b)], prg=get_runner(Device.DEFAULT, sink))
-    for _ in range(5): ei.run(wait=True)
+    linear = UOp(Ops.LINEAR, src=(sink.call(*[t.uop.buf_uop for t in (c, a, b)]),))
+
+    for _ in range(5): run_linear(linear, do_update_stats=False)
     c = c.float()
 
     ref = a.matmul(b, dtype=dtypes.float32).float()
@@ -115,8 +115,9 @@ class TestTK(unittest.TestCase):
       c = Tensor.empty(1, 1, N, N, dtype="float32")
       Tensor.realize(a, b, c)
 
-    ei = ExecItem(sink, [t.uop.buffer for t in (c, a, b)], prg=get_runner(Device.DEFAULT, sink))
-    for _ in range(5): ei.run(wait=True)
+    linear = UOp(Ops.LINEAR, src=(sink.call(*[t.uop.buf_uop for t in (c, a, b)]),))
+
+    for _ in range(5): run_linear(linear, do_update_stats=False)
     c = c.float()
 
     ref = a.matmul(b.transpose(2, 3), dtype=dtypes.float32).float()
@@ -151,8 +152,9 @@ class TestTK(unittest.TestCase):
       b = Tensor.empty(1, 1, N, N, dtype="float32")
       Tensor.realize(a, b)
 
-    ei = ExecItem(sink, [t.uop.buffer for t in (b, a)], prg=get_runner(Device.DEFAULT, sink))
-    for _ in range(5): ei.run(wait=True)
+    linear = UOp(Ops.LINEAR, src=(sink.call(*[t.uop.buf_uop for t in (b, a)]),))
+
+    for _ in range(5): run_linear(linear, do_update_stats=False)
     b = b.float()
 
     ref = a.float()
@@ -190,8 +192,9 @@ class TestTK(unittest.TestCase):
       b = Tensor.empty(1, 1, N, N, dtype="float32")
       Tensor.realize(a, b)
 
-    ei = ExecItem(sink, [t.uop.buffer for t in (b, a)], prg=get_runner(Device.DEFAULT, sink))
-    for _ in range(5): ei.run(wait=True)
+    linear = UOp(Ops.LINEAR, src=(sink.call(*[t.uop.buf_uop for t in (b, a)]),))
+
+    for _ in range(5): run_linear(linear, do_update_stats=False)
     b = b.float()
 
     ref = a.float()
@@ -232,8 +235,9 @@ class TestTK(unittest.TestCase):
       c = Tensor.empty(1, 1, N, N, dtype="float32")
       Tensor.realize(a, b, c)
 
-    ei = ExecItem(sink, [t.uop.buffer for t in (b, c, a)], prg=get_runner(Device.DEFAULT, sink))
-    for _ in range(5): ei.run(wait=True)
+    linear = UOp(Ops.LINEAR, src=(sink.call(*[t.uop.buf_uop for t in (b, c, a)]),))
+
+    for _ in range(5): run_linear(linear, do_update_stats=False)
     b = b.float()
     c = c.float()
 
@@ -272,8 +276,9 @@ class TestTK(unittest.TestCase):
       b = Tensor.empty(1, 1, N, N, dtype="float32")
       Tensor.realize(a, b)
 
-    ei = ExecItem(sink, [t.uop.buffer for t in (b, a)], prg=get_runner(Device.DEFAULT, sink))
-    for _ in range(5): ei.run(wait=True)
+    linear = UOp(Ops.LINEAR, src=(sink.call(*[t.uop.buf_uop for t in (b, a)]),))
+
+    for _ in range(5): run_linear(linear, do_update_stats=False)
     b = b.float()
 
     ref = a.float()
@@ -309,8 +314,9 @@ class TestTK(unittest.TestCase):
         b = Tensor.empty(1, 1, N, N, dtype="float32")
         Tensor.realize(a, b)
 
-      ei = ExecItem(sink, [t.uop.buffer for t in (b, a)], prg=get_runner(Device.DEFAULT, sink))
-      for _ in range(5): ei.run(wait=True)
+      linear = UOp(Ops.LINEAR, src=(sink.call(*[t.uop.buf_uop for t in (b, a)]),))
+
+      for _ in range(5): run_linear(linear, do_update_stats=False)
       b = b.float()
 
       ref = a.float() + 1
@@ -354,8 +360,9 @@ class TestTK(unittest.TestCase):
       b = Tensor.empty(1, 1, N, N, dtype="float32")
       Tensor.realize(a, b)
 
-    ei = ExecItem(sink, [t.uop.buffer for t in (b, a)], prg=get_runner(Device.DEFAULT, sink))
-    for _ in range(5): ei.run(wait=True)
+    linear = UOp(Ops.LINEAR, src=(sink.call(*[t.uop.buf_uop for t in (b, a)]),))
+
+    for _ in range(5): run_linear(linear, do_update_stats=False)
     b = b.float()
 
     ref = a.float().max(axis=2, keepdim=True).expand(a.shape)
@@ -399,8 +406,9 @@ class TestTK(unittest.TestCase):
       b = Tensor.empty(1, 1, N, M, dtype="float32")
       Tensor.realize(a, b)
 
-    ei = ExecItem(sink, [t.uop.buffer for t in (b, a)], prg=get_runner(Device.DEFAULT, sink))
-    for _ in range(5): ei.run(wait=True)
+    linear = UOp(Ops.LINEAR, src=(sink.call(*[t.uop.buf_uop for t in (b, a)]),))
+
+    for _ in range(5): run_linear(linear, do_update_stats=False)
     b = b.float()
 
     ref = a.float().max(axis=2, keepdim=True).expand(a.shape)
@@ -444,8 +452,9 @@ class TestTK(unittest.TestCase):
       b = Tensor.empty(1, 1, N, N, dtype="float32")
       Tensor.realize(a, b)
 
-    ei = ExecItem(sink, [t.uop.buffer for t in (b, a)], prg=get_runner(Device.DEFAULT, sink))
-    for _ in range(5): ei.run(wait=True)
+    linear = UOp(Ops.LINEAR, src=(sink.call(*[t.uop.buf_uop for t in (b, a)]),))
+
+    for _ in range(5): run_linear(linear, do_update_stats=False)
     b = b.float()
 
     ref = a.float().sum(axis=2, keepdim=True).expand(a.shape)
@@ -489,8 +498,9 @@ class TestTK(unittest.TestCase):
       b = Tensor.empty(1, 1, N, M, dtype="float32")
       Tensor.realize(a, b)
 
-    ei = ExecItem(sink, [t.uop.buffer for t in (b, a)], prg=get_runner(Device.DEFAULT, sink))
-    for _ in range(5): ei.run(wait=True)
+    linear = UOp(Ops.LINEAR, src=(sink.call(*[t.uop.buf_uop for t in (b, a)]),))
+
+    for _ in range(5): run_linear(linear, do_update_stats=False)
     b = b.float()
 
     ref = a.float().sum(axis=2, keepdim=True).expand(a.shape)
@@ -549,8 +559,9 @@ class TestTK(unittest.TestCase):
       b = Tensor.empty(1, 1, BLOCK_SIZE, N, dtype="float32")
       Tensor.realize(a, b)
 
-    ei = ExecItem(sink, [t.uop.buffer for t in (b, a)], prg=get_runner(Device.DEFAULT, sink))
-    for _ in range(5): ei.run(wait=True)
+    linear = UOp(Ops.LINEAR, src=(sink.call(*[t.uop.buf_uop for t in (b, a)]),))
+
+    for _ in range(5): run_linear(linear, do_update_stats=False)
     b = b.float()
 
     ref = a.float().softmax(axis=3)
@@ -609,8 +620,9 @@ class TestTK(unittest.TestCase):
       b = Tensor.empty(1, 1, N, BLOCK_SIZE, dtype="float32")
       Tensor.realize(a, b)
 
-    ei = ExecItem(sink, [t.uop.buffer for t in (b, a)], prg=get_runner(Device.DEFAULT, sink))
-    for _ in range(5): ei.run(wait=True)
+    linear = UOp(Ops.LINEAR, src=(sink.call(*[t.uop.buf_uop for t in (b, a)]),))
+
+    for _ in range(5): run_linear(linear, do_update_stats=False)
     b = b.float()
 
     ref = a.float().softmax(axis=2)
@@ -719,9 +731,11 @@ class TestTK(unittest.TestCase):
       out = Tensor.empty(B, N, H, D, dtype=dtypes.bfloat16)
       Tensor.realize(q, k, v, out)
 
-    ei = ExecItem(sink, [t.uop.buffer for t in (out, q, k, v)], prg=get_runner(Device.DEFAULT, sink))
+    linear = UOp(Ops.LINEAR, src=(sink.call(*[t.uop.buf_uop for t in (out, q, k, v)]),))
     for _ in range(5):
-      et = ei.run(wait=True)
+      GlobalCounters.reset()
+      with Context(DEBUG=2): run_linear(linear)
+      et = GlobalCounters.time_sum_s
       attn_flops = 2 * B * H * N * N * D + \
                    4 * B * H * N * N + \
                    2 * B * H * N * N * D

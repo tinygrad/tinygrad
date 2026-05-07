@@ -4,7 +4,7 @@ from tinygrad import nn, dtypes, Device, Tensor
 from tinygrad.uop.ops import UOp, Ops, GroupOp, UPat, KernelInfo
 from tinygrad.helpers import DEBUG, GlobalCounters, Context
 from tinygrad.engine.realize import compile_linear, run_linear
-from tinygrad.codegen import get_program
+from tinygrad.codegen import to_program
 
 class KernelCountException(Exception): pass
 def check_schedule(t:Tensor|list[Tensor]|UOp, allowed:int, to_prerealize:list[Tensor]|None=None, filter_sink=True):
@@ -212,7 +212,7 @@ class TestSchedule(unittest.TestCase):
     linear, _ = Tensor.linear_with_vars(v)
     self.assertEqual(len(linear.src), 0)
 
-  # NOTE: because empty does not have a lowered ExecItem if realize is called on a childless empty, it never gets allocated.
+  # NOTE: because empty does not have a lowered kernel if realize is called on a childless empty, it never gets allocated.
   def test_childless_empty_never_allocates(self):
     a = Tensor.empty(10)
     a.realize()
@@ -380,7 +380,7 @@ class TestSchedule(unittest.TestCase):
     r1 = (x - r0).sum(axis=0).div(2)
     out = r0 + r1
     linear, _ = check_schedule(out, 2)
-    reduceops = [x for si in linear.src for x in si.src[0].toposort() if x.op in {Ops.REDUCE_AXIS, Ops.REDUCE}]
+    reduceops = [x for si in linear.src for x in si.src[0].toposort() if x.op is Ops.REDUCE]
     assert len(reduceops) == 2
 
   def test_cache_reduce_multiple_children(self):
@@ -391,7 +391,7 @@ class TestSchedule(unittest.TestCase):
     out0 = r0 + y
     out1 = r1 + y
     linear, _ = check_schedule([out0, out1], 3)
-    reduceops = [x for si in linear.src for x in si.src[0].toposort() if x.op in {Ops.REDUCE_AXIS, Ops.REDUCE}]
+    reduceops = [x for si in linear.src for x in si.src[0].toposort() if x.op is Ops.REDUCE]
     self.assertEqual(len(reduceops), 2) # why is RANGEIFY different?
 
   def test_dedup_assign(self):
@@ -1175,9 +1175,9 @@ class TestFusionOp(unittest.TestCase):
     a = Tensor([1,2,3,4])
     for _ in range(24): a = a + a
     linear = a.schedule_linear()
-    prg = get_program(linear.src[-1].src[0], renderer=Device[Device.DEFAULT].renderer)
+    prg = to_program(linear.src[-1].src[0], renderer=Device[Device.DEFAULT].renderer)
     self.assertLess(time.perf_counter()-st, 2.0)
-    assert len(prg.src.splitlines()) < 250
+    assert len(prg.src[3].arg.splitlines()) < 250
 
   def test_recursive_add_cmp(self):
     st = time.perf_counter()

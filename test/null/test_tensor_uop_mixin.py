@@ -137,6 +137,22 @@ class TestTensorUOpAllclose(unittest.TestCase):
     a, b = _t(4).float(), _t(4).float()
     self.assertIs(_strip_unique(a.allclose(b).uop), _strip_unique(a.uop.allclose(b.uop)))
 
+class TestTensorUOpBitcast(unittest.TestCase):
+  def test_bitcast_same_dtype(self): _check(self, _t(4).float(), lambda x: x.bitcast(dtypes.float32))
+
+class TestTensorUOpRand(unittest.TestCase):
+  def test_random_bits(self):
+    k = UOp.empty((2,), dtype=dtypes.uint32)
+    c = UOp.zeros(2, dtype=dtypes.uint32)
+    for num in (1, 4, 7, 1024):
+      self.assertIs(_strip_unique(Tensor.random_bits(Tensor(k), Tensor(c), num).uop),
+                    _strip_unique(UOp.random_bits(k, c, num)))
+  def test_bits_to_rand_float32(self):
+    bits_uop = UOp.empty((8,), dtype=dtypes.uint32)
+    for shape in ((8,), (2, 4), (5,)):
+      self.assertIs(_strip_unique(Tensor._bits_to_rand(Tensor(bits_uop), shape, dtypes.float32).uop),
+                    _strip_unique(UOp._bits_to_rand(bits_uop, shape, dtypes.float32)))
+
 class TestTensorUOpGather(unittest.TestCase):
   def _check(self, t, dim, idx):
     self.assertIs(_strip_unique(t.gather(dim, idx).uop), _strip_unique(t.uop.gather(dim, idx.uop)))
@@ -242,6 +258,17 @@ class TestTensorUOpCat(unittest.TestCase):
   def test_cat_dim1(self):     _check(self, _t(2, 3), lambda x: x.cat(x, dim=1))
   def test_cat_3tensors(self): _check(self, _t(2, 3), lambda x: x.cat(x, x, dim=0))
   def test_cat_neg_dim(self):  _check(self, _t(2, 3, 4), lambda x: x.cat(x, dim=-1))
+
+class TestTensorUOpPad(unittest.TestCase):
+  def test_pad_flat(self):               _check(self, _t(4, 5), lambda x: x.pad((1, 2, 0, 3)))
+  def test_pad_flat_negative(self):      _check(self, _t(4, 5), lambda x: x.pad((1, -1, 0, 2), value=-1.0))
+  def test_pad_grouped_none(self):       _check(self, _t(4, 5), lambda x: x.pad((None, (0, 3))))
+  def test_pad_circular(self):           _check(self, _t(4, 5), lambda x: x.pad(((1, 2), (0, 3)), mode="circular"))
+  def test_pad_circular_zero_after(self):_check(self, _t(4, 5), lambda x: x.pad(((1, 0), (2, 0)), mode="circular"))
+  def test_pad_reflect(self):            _check(self, _t(4, 5), lambda x: x.pad(((1, 2), (0, 3)), mode="reflect"))
+  def test_pad_reflect_negative(self):   _check(self, _t(4, 5), lambda x: x.pad(((1, -1), (0, 2)), mode="reflect"))
+  def test_pad_replicate(self):          _check(self, _t(4, 5), lambda x: x.pad(((1, 2), (0, 3)), mode="replicate"))
+  def test_pad_replicate_negative(self): _check(self, _t(4, 5), lambda x: x.pad(((1, -1), (0, 2)), mode="replicate"))
 
 class TestTensorUOpStack(unittest.TestCase):
   def test_stack_dim0(self):     _check(self, _t(2, 3), lambda x: x.stack(x, dim=0))

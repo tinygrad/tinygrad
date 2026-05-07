@@ -6,7 +6,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.helpers import Context, from_mv
 from tinygrad.dtype import dtypes
 from tinygrad.engine.jit import MultiGraphRunner
-from tinygrad.engine.realize import run_linear
+from tinygrad.engine.realize import run_linear, compile_linear
 from tinygrad.uop.ops import UOp, Ops, buffers
 
 from test.helpers import needs_second_gpu
@@ -44,7 +44,7 @@ def get_buf_uop(buf:Buffer, cache:dict[Buffer,UOp]) -> UOp:
   return cache[buf]
 
 def make_graph(graph_cls, calls:list[UOp]):
-  linear = UOp(Ops.LINEAR, src=tuple(calls))
+  linear = compile_linear(UOp(Ops.LINEAR, src=tuple(calls)))
   cf = UOp(Ops.CUSTOM_FUNCTION, dtypes.void, src=(linear,), arg="graph")
   return graph_cls(cf, [])
 

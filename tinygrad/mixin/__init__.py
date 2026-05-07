@@ -6,7 +6,7 @@ from tinygrad.mixin.movement import MovementMixin
 from tinygrad.mixin.reduce import ReduceMixin
 from tinygrad.uop import Ops
 from tinygrad.uop.ops import _broadcast_shape, resolve, smax, smin, identity_element
-from tinygrad.dtype import ConstType, DTypeLike, Invalid, InvalidType, PtrDType, PyConst, dtypes, least_upper_dtype, sum_acc_dtype, to_dtype
+from tinygrad.dtype import ConstType, DType, DTypeLike, Invalid, InvalidType, PtrDType, PyConst, dtypes, least_upper_dtype, sum_acc_dtype, to_dtype
 from tinygrad.helpers import all_int, argfix, ceildiv, flatten, flat_to_grouped, make_tuple, prod, resolve_pool_pads, round_up
 
 if TYPE_CHECKING:
@@ -191,6 +191,36 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     """
     return self._tri(self.shape[-2], self.shape[-1], diagonal+1, self.device).where(self.zeros_like(), self)
 
+  # ***** random *****
+
+  @staticmethod
+  def _threefry_random_bits(key, counts0, counts1):
+    x = (counts1.cast(dtypes.uint64) << 32) | counts0.cast(dtypes.uint64)
+    x = x.threefry((key[1]._broadcast_to(x.shape).cast(dtypes.uint64) << 32) | key[0]._broadcast_to(x.shape).cast(dtypes.uint64))
+    return (x & 0xffffffff).cast(dtypes.uint32).cat(((x >> 32) & 0xffffffff).cast(dtypes.uint32))
+
+  @classmethod
+  def random_bits(cls, key:Self, counter:Self, num:int) -> Self:
+    low, high = counter[0:1], counter[1:2]
+    bits = []
+    for i in range(0, num, dtypes.uint32.max):
+      chunk_num = min(num - i, dtypes.uint32.max)
+      c_low = low + (i & 0xffffffff)
+      c_high = high + (i >> 32) + (c_low < low).cast(dtypes.uint32)
+      new_key = cls._threefry_random_bits(key, c_low, c_high)
+      counts0 = cls.arange(ceildiv(chunk_num, 2), device=key.device, dtype=dtypes.uint32)
+      counts1 = counts0 + ceildiv(chunk_num, 2)
+      bits.append(cls._threefry_random_bits(new_key, counts0, counts1)[:chunk_num])
+    return bits[0].cat(*bits[1:])
+
+  @staticmethod
+  def _bits_to_rand(bits, shape:tuple[int, ...], dtype:DType):
+    _, nmant = dtypes.finfo(dtype)
+    uint_dtype = {1: dtypes.uint8, 2: dtypes.uint16, 4: dtypes.uint32, 8: dtypes.uint64}[dtype.itemsize]
+    uint_bits = bits.bitcast(uint_dtype)
+    float_one_bits = uint_bits.ones_like(dtype=dtype).bitcast(uint_dtype)
+    return uint_bits.rshift(dtype.bitsize - nmant).bitwise_or(float_one_bits).bitcast(dtype)[:prod(shape)].sub(1).reshape(shape)
+
   def _pad_constant(self, pX, value:float) -> Self:
     # shrink first for negative pads, then pad with only non-negative values
     pX = tuple((0, 0) if p is None else p for p in pX)
@@ -201,6 +231,73 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     if value == 0: return base
     base = base.cast(least_upper_dtype(base.dtype, dtypes.from_py(value)))
     return base + MovementMixin.pad(X.ones_like(), pads).cast(dtypes.bool).where(base.zeros_like(), base.full_like(value))
+
+  def _pad_circular(self, pX:tuple[tuple[sint, sint], ...]) -> Self:
+    if any(pB>sh or pA>sh for (pB,pA),sh in zip(pX, self.shape)): raise ValueError('Padding value causes wrapping around more than once.')
+    if any(pB<0 or pA<0 for pB,pA in pX): raise NotImplementedError("Negative pads with circular pads is not supported")
+    orig_shape, X = self.shape, self.repeat(tuple(1 + bool(pB) + bool(pA) for pB,pA in pX))
+    return X.shrink(tuple((0 if pB == 0 else osh-pB, xsh if pA == 0 else xsh-osh+pA) for (pB,pA),osh,xsh in zip(pX, orig_shape, X.shape)))
+
+  def _pad_reflect_replicate(self, pX:tuple[tuple[sint, sint], ...], mode:str) -> Self:
+    X, pads = self, tuple((smax(pB,0), smax(pA,0)) for pB,pA in pX)
+    for d,(pB,pA) in enumerate(pads):
+      if mode == "reflect":
+        if pB >= (s:=X.shape[d]) or pA>=s: raise ValueError(f"Padding ({pB}, {pA}) should be less than the input size={s} for dim={d}.")
+        slcB, slcA = slice(pB,0,-1), slice(s-2 if s-2>=0 else None, s-2-pA if s-2-pA>=0 else None, -1)
+        xB, xA = (X[[slc if i == d else slice(None) for i in range(X.ndim)]] if p > 0 else None for slc, p in ((slcB, pB), (slcA, pA)))
+      else:
+        shrB, shrA = tuple((0,1) if i==d else None for i in range(X.ndim)), tuple((X.shape[i]-1,X.shape[i]) if i==d else None for i in range(X.ndim))
+        xB, xA = (X.shrink(shr).expand(tuple(p if i==d else None for i in range(X.ndim))) if p > 0 else None for shr, p in ((shrB, pB), (shrA, pA)))
+      pieces = [X_ for X_ in (xB, X, xA) if X_ is not None]
+      X = pieces[0].cat(*pieces[1:], dim=d)
+    # shrink after for negative pads (reflection/replication must see full data first)
+    return X.shrink(tuple((-min(pB,0), min(pA+s,s)) for (pB,pA),s in zip(pX, X.shape)))
+
+  def pad(self, padding:Sequence[sint]|Sequence[tuple[sint, sint]|None], mode:str="constant", value:float=0.0) -> Self:
+    """
+    Returns a tensor with padding applied based on the input `padding`.
+
+    `padding` supports two padding structures:
+
+    1. Flat padding: `(padding_left, padding_right, padding_top, padding_bottom, ...)`
+        - This structure matches PyTorch's pad.
+        - `padding` length must be even.
+
+    2. Group padding: `(..., (padding_top, padding_bottom), (padding_left, padding_right))`
+        - This structure matches pad for JAX, NumPy, TensorFlow, and others.
+        - For each axis, padding can be `None`, meaning no padding, or a tuple `(start, end)`.
+        - `padding` must have the same length as `self.ndim`.
+
+    Padding values can be negative, resulting in dimension shrinks that work similarly to Python negative slices.
+    Padding modes is selected with `mode` which supports `constant`, `reflect` and `replicate`.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.arange(9).reshape(1, 1, 3, 3)
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.pad((1, 2, 0, -1)).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.pad(((None, None, (0, -1), (1, 2)))).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.pad((1, 2, 0, -1), value=-float('inf')).numpy())
+    ```
+    """
+    # normalize to grouped format
+    pX: tuple[tuple[sint, sint], ...]
+    if not any(isinstance(p, (tuple, type(None))) for p in padding):
+      if len(padding)%2 != 0: raise ValueError("Flat padding must have even number of pads")
+      pX = ((0,0),)*(self.ndim - len(padding)//2) + flat_to_grouped(padding)  # type: ignore[arg-type]
+    else: pX = tuple((0,0) if p is None else p for p in padding)  # type: ignore[misc]
+    if len(pX) != self.ndim: raise ValueError(f"padding length is improper, {padding=} {self.ndim=}")
+    # dispatch
+    if mode == "constant": return self._pad_constant(pX, value)
+    assert all_int(self.shape), f"does not support symbolic shape {self.shape}"
+    if mode == "circular": return self._pad_circular(pX)
+    if mode in {"reflect", "replicate"}: return self._pad_reflect_replicate(pX, mode)
+    raise NotImplementedError(f"{mode=} is not supported")
 
   def _ufix_keep_dtype(self, x) -> bool:
     # matches Tensor scalar-wrapping behavior: keep self.dtype for float self, or for int self with int/Invalid scalar

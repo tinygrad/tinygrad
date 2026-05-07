@@ -644,7 +644,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
   def BitwiseOr(x:Tensor,y:Tensor): return x | y
   def BitwiseXor(x:Tensor,y:Tensor): return x ^ y
   def BitwiseNot(x:Tensor): return ~x
-  def Mod(x:Tensor,y:Tensor,fmod=0): return x - x.div(y, rounding_mode="trunc") * y if fmod else x % y
+  def Mod(x:Tensor,y:Tensor,fmod=0): return x.fmod(y) if fmod else x % y
 
   # ***** Casting Ops *****
   # NOTE: saturate only applies to FP8 types

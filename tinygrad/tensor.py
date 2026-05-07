@@ -11,8 +11,8 @@ from tinygrad.helpers import resolve_pool_pads, IMAGE, FLOAT16, WINO, Metadata, 
 from tinygrad.helpers import suppress_finalizing, disable_gc
 from tinygrad.gradient import compute_gradient
 from tinygrad.mixin import OpMixin
-from tinygrad.uop.ops import smax, UOp, Ops, sint, all_metadata, _index_to_concrete_int, Variable, _broadcast_shape
-from tinygrad.schedule import ExecItem, create_linear_with_vars, linear_to_schedule
+from tinygrad.uop.ops import UOp, Ops, sint, all_metadata, _index_to_concrete_int, Variable, _broadcast_shape
+from tinygrad.schedule import create_linear_with_vars
 from tinygrad.device import Buffer, canonicalize_device
 from tinygrad.engine.realize import run_linear
 from tinygrad.callify import transform_to_call
@@ -231,21 +231,6 @@ class Tensor(OpMixin):
     big_sink, becomes_map = transform_to_call(UOp.sink(*[x.uop for x in (self,)+lst]))
     _apply_map_to_tensors(becomes_map, name="buffers")
     return create_linear_with_vars(big_sink)
-
-  def schedule_with_vars(self, *lst:Tensor) -> tuple[list[ExecItem], dict[str, int]]:
-    """
-    Creates the schedule needed to realize these Tensor(s), with Variables.
-
-    NOTE: A Tensor can only be scheduled once.
-    """
-    linear, var_vals = self.linear_with_vars(*lst)
-    return linear_to_schedule(linear), var_vals
-
-  def schedule(self, *lst:Tensor) -> list[ExecItem]:
-    """Creates the schedule needed to realize these Tensor(s)."""
-    schedule, var_vals = self.schedule_with_vars(*lst)
-    assert len(var_vals) == 0
-    return schedule
 
   def schedule_linear(self, *lst:Tensor) -> UOp:
     """Creates the schedule needed to realize these Tensor(s)."""
@@ -567,11 +552,18 @@ class Tensor(OpMixin):
     Tensor._seed, Tensor._device_seeds, Tensor._device_rng_counters = seed, {}, {}
 
   @staticmethod
-  def _threefry_random_bits(key:Tensor, counts0:Tensor, counts1:Tensor) -> Tensor:
-    x = (counts1.cast(dtypes.uint64) << 32) | counts0.cast(dtypes.uint64)
-    x = x._apply_uop(UOp.threefry, (key[1]._broadcast_to(x.shape).cast(dtypes.uint64) << 32) | key[0]._broadcast_to(x.shape).cast(dtypes.uint64))
-    counts0, counts1 = (x & 0xffffffff).cast(dtypes.uint32), ((x >> 32) & 0xffffffff).cast(dtypes.uint32)
-    return counts0.cat(counts1)
+  def _next_counter(device:str, num:int) -> tuple[Tensor, Tensor]:
+    if device not in Tensor._device_seeds:
+      seed = [int.from_bytes(hashlib.sha256(len(Tensor._device_seeds).to_bytes(4, "big")).digest(), "big"), Tensor._seed]
+      Tensor._device_seeds[device] = Tensor(seed, device=device, dtype=dtypes.uint32, requires_grad=False)
+      Tensor._device_rng_counters[device] = Tensor([0, 0], device=device, dtype=dtypes.uint32, requires_grad=False)
+    counter = Tensor._device_rng_counters[device]
+    new_low = counter[0:1] + (num & 0xffffffff)
+    new_high = counter[1:2] + (num >> 32) + (new_low < counter[0])
+    counter.assign(new_low.cat(new_high))
+    low = counter[0:1] - (num & 0xffffffff)
+    high = counter[1:2] - (num >> 32) - (counter[0] < (num & 0xffffffff))
+    return Tensor._device_seeds[device], low.cat(high)
 
   @staticmethod
   def rand(*shape, device:str|None=None, dtype:DTypeLike|None=None, contiguous:bool=True, **kwargs) -> Tensor:
@@ -596,43 +588,9 @@ class Tensor(OpMixin):
     # if shape has 0, return zero tensor
     if (numel := prod(shape)) == 0: return Tensor.zeros(shape, device=device, dtype=dt, **kwargs)
     num = ceildiv(numel * dt.itemsize, 4)
-
-    # generate per device seeds and rng counter if we haven't seen this device yet
-    if device not in Tensor._device_seeds:
-      Tensor._device_seeds[device] = Tensor(
-        [int.from_bytes(hashlib.sha256(len(Tensor._device_seeds).to_bytes(4, "big")).digest(), "big"), Tensor._seed],
-        device=device, dtype=dtypes.uint32, requires_grad=False)
-      Tensor._device_rng_counters[device] = Tensor([0, 0], device=device, dtype=dtypes.uint32, requires_grad=False).contiguous()
-
-    # increment rng counter for devices
-    new_low = Tensor._device_rng_counters[device][0:1] + (num & 0xffffffff)
-    new_high = Tensor._device_rng_counters[device][1:2] + (num >> 32) + (new_low < Tensor._device_rng_counters[device][0]).cast(dtypes.uint32)
-    Tensor._device_rng_counters[device].assign(new_low.cat(new_high))
-
-    low = Tensor._device_rng_counters[device][0:1] - (num & 0xffffffff)
-    high = Tensor._device_rng_counters[device][1:2] - (num >> 32) - (Tensor._device_rng_counters[device][0] < (num & 0xffffffff)).cast(dtypes.uint32)
-
-    # threefry random bits
-    bits_list = []
-    for i in range(0, num, dtypes.uint32.max):
-      chunk_num = min(num - i, dtypes.uint32.max)
-      c_low = low + (i & 0xffffffff)
-      c_high = high + (i >> 32) + (c_low < low).cast(dtypes.uint32)
-      new_key = Tensor._threefry_random_bits(Tensor._device_seeds[device], c_low, c_high)
-      counts0 = Tensor.arange(ceildiv(chunk_num, 2), device=device, dtype=dtypes.uint32, requires_grad=False)
-      counts1 = counts0 + ceildiv(chunk_num, 2)
-      bits_list.append(Tensor._threefry_random_bits(new_key, counts0, counts1)[:chunk_num])
-    bits = Tensor.cat(*bits_list)
-
-    # bitcast to uint with same number of bits
-    _, nmant = dtypes.finfo(dt)
-    uint_dtype = {1: dtypes.uint8, 2: dtypes.uint16, 4: dtypes.uint32, 8: dtypes.uint64}[dt.itemsize]
-    bits = bits.bitcast(uint_dtype)
-    # only randomize the mantissa bits and set the exponent to 1
-    one = Tensor.ones_like(bits, device=bits.device, dtype=dt).bitcast(uint_dtype)
-    bits = bits.rshift(dt.bitsize - nmant).bitwise_or(one)
-    # bitcast back to the original dtype and reshape
-    out = bits.bitcast(dt)[:numel].sub(1).reshape(shape).requires_grad_(kwargs.get("requires_grad"))
+    key, counter = Tensor._next_counter(device, num)
+    bits = Tensor.random_bits(key, counter, num)
+    out = Tensor._bits_to_rand(bits, shape, dt).requires_grad_(kwargs.get("requires_grad"))
     return out.contiguous() if contiguous else out
 
   # ***** creation helper functions *****
@@ -734,7 +692,7 @@ class Tensor(OpMixin):
   def randint(*shape, low=0, high=10, dtype=dtypes.int32, **kwargs) -> Tensor:
     """
     Creates a tensor with the given shape, filled with random integer values generated uniformly from the interval `[low, high)`.
-    If `dtype` is not specified, the default type is used.
+    Requires `low < high`. If `dtype` is not specified, the default type is used.
 
     You can pass in the `device` keyword argument to control device of the tensor.
     Additionally, all other keyword arguments are passed to the constructor of the tensor.
@@ -746,12 +704,14 @@ class Tensor(OpMixin):
     """
     if not all_int([low, high]): raise TypeError(f"{low=} and {high=} must be integers")
     if not dtypes.is_int(dtype := to_dtype(dtype)): raise TypeError(f"{dtype=} must be int")
+    if low >= high: raise ValueError(f"Tensor.randint requires low < high, got {low=}, {high=}")
     return Tensor.uniform(*shape, low=low, high=high, dtype=dtype, **kwargs)
 
   @staticmethod
   def normal(*shape, mean=0.0, std=1.0, requires_grad:bool|None=None, **kwargs) -> Tensor:
     """
     Creates a tensor with the given shape, filled with random values from a normal distribution with the given `mean` and standard deviation `std`.
+    Requires `std >= 0`.
 
     You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
     Additionally, all other keyword arguments are passed to the constructor of the tensor.
@@ -761,12 +721,14 @@ class Tensor(OpMixin):
     print(Tensor.normal(2, 3, mean=10, std=2).numpy())
     ```
     """
+    if std < 0: raise ValueError(f"Tensor.normal requires std >= 0, got {std=}")
     return (std * Tensor.randn(*shape, **kwargs) + mean).requires_grad_(requires_grad)
 
   @staticmethod
   def uniform(*shape, low=0.0, high=1.0, dtype:DTypeLike|None=None, requires_grad:bool|None=None, **kwargs) -> Tensor:
     """
     Creates a tensor with the given shape, filled with random values from a uniform distribution over the interval `[low, high)`.
+    Requires `low < high`.
 
     You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
     Additionally, all other keyword arguments are passed to the constructor of the tensor.
@@ -776,6 +738,8 @@ class Tensor(OpMixin):
     print(Tensor.uniform(2, 3, low=2, high=10).numpy())
     ```
     """
+    if not all_int(shape:=argfix(*shape)) or not all(s >= 0 for s in shape): raise ValueError(f"invalid input {shape=}")
+    if low >= high: raise ValueError(f"Tensor.uniform requires low < high, got {low=}, {high=}")
     return (((high-low) * Tensor.rand(*shape, **kwargs)).cast(dtype or dtypes.default_float) + low).requires_grad_(requires_grad)
 
   @staticmethod
@@ -858,19 +822,27 @@ class Tensor(OpMixin):
     """
     Returns a tensor with `num_samples` indices sampled from a multinomial distribution weighted by `self`.
 
-    NOTE: `replacement=False` for `num_samples > 1` is not supported yet.
     ```python exec="true" source="above" session="tensor" result="python"
     Tensor.manual_seed(42)
     t = Tensor([1, 2, 3, 4])
     print(t.multinomial(20, replacement=True).numpy())
     ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    t = Tensor([1, 2, 3, 4])
+    print(t.multinomial(3, replacement=False).numpy())
+    ```
     """
     assert 1 <= self.ndim <= 2 and num_samples > 0, f"{self.ndim=} must be 1 or 2 dim, {num_samples=} must be positive"
-    assert replacement or num_samples == 1, "no replacement only supports num_samples = 1"
     weight = self.unsqueeze(0) if self.ndim == 1 else self
-    cdf = (cw := weight.cumsum(1).float()) / cw[:, -1].unsqueeze(1)
-    unif_samples = Tensor.rand(num_samples, cdf.shape[0], 1).to(self.device)
-    indices = (unif_samples.expand((-1, -1, cdf.shape[1])) >= cdf).sum(2).permute((1, 0))
+    assert replacement or num_samples <= weight.shape[1], "no replacement samples must not exceed population size"
+    if replacement or num_samples == 1:
+      cdf = (cw := weight.cumsum(1).float()) / cw[:, -1].unsqueeze(1)
+      unif_samples = Tensor.rand(num_samples, cdf.shape[0], 1).to(self.device)
+      indices = (unif_samples.expand((-1, -1, cdf.shape[1])) >= cdf).sum(2).permute((1, 0))
+    else:
+      # Efraimidis–Spirakis
+      indices = (weight.rand_like(dtype=dtypes.float32).log2() / weight).topk(num_samples, dim=1)[1]
     return (indices.squeeze(0) if self.ndim == 1 else indices).cast(dtypes.int32)
 
   # ***** toposort and backward pass *****
@@ -924,71 +896,6 @@ class Tensor(OpMixin):
 
   def _mop(self, op:Ops, arg) -> Tensor: return self._apply_uop(UOp._mop, extra_args=(op,), arg=arg)
   def _rop(self, op:Ops, axis:tuple[int, ...]) -> Tensor: return self._apply_uop(UOp._rop, op=op, axis=axis)
-
-  def _pad_circular(self, pX:tuple[tuple[sint, sint], ...]) -> Tensor:
-    if any(pB>sh or pA>sh for (pB,pA),sh in zip(pX, self.shape)): raise ValueError('Padding value causes wrapping around more than once.')
-    if any(pB<0 or pA<0 for pB,pA in pX): raise NotImplementedError("Negative pads with circular pads is not supported")
-    orig_shape, X = self.shape, self.repeat(tuple(1 + bool(pB) + bool(pA) for pB,pA in pX))
-    return X.shrink(tuple((0 if pB == 0 else osh-pB, xsh if pA == 0 else xsh-osh+pA) for (pB,pA),osh,xsh in zip(pX, orig_shape, X.shape)))
-
-  def _pad_reflect_replicate(self, pX:tuple[tuple[sint, sint], ...], mode:str) -> Tensor:
-    X, pads = self, tuple((smax(pB,0), smax(pA,0)) for pB,pA in pX)
-    for d,(pB,pA) in enumerate(pads):
-      if mode == "reflect":
-        if pB >= (s:=X.shape[d]) or pA>=s: raise ValueError(f"Padding ({pB}, {pA}) should be less than the input size={s} for dim={d}.")
-        slcB, slcA = slice(pB,0,-1), slice(s-2 if s-2>=0 else None, s-2-pA if s-2-pA>=0 else None, -1)
-        xB, xA = (X[[slc if i == d else slice(None) for i in range(X.ndim)]] if p > 0 else None for slc, p in ((slcB, pB), (slcA, pA)))
-      else:
-        shrB, shrA = tuple((0,1) if i==d else None for i in range(X.ndim)), tuple((X.shape[i]-1,X.shape[i]) if i==d else None for i in range(X.ndim))
-        xB, xA = (X.shrink(shr).expand(tuple(p if i==d else None for i in range(X.ndim))) if p > 0 else None for shr, p in ((shrB, pB), (shrA, pA)))
-      X = Tensor.cat(*(X_ for X_ in (xB, X, xA) if X_ is not None), dim=d)
-    # shrink after for negative pads (reflection/replication must see full data first)
-    return X.shrink(tuple((-min(pB,0), min(pA+s,s)) for (pB,pA),s in zip(pX, X.shape)))
-
-  def pad(self, padding:Sequence[sint]|Sequence[tuple[sint, sint]|None], mode:str="constant", value:float=0.0) -> Tensor:
-    """
-    Returns a tensor with padding applied based on the input `padding`.
-
-    `padding` supports two padding structures:
-
-    1. Flat padding: `(padding_left, padding_right, padding_top, padding_bottom, ...)`
-        - This structure matches PyTorch's pad.
-        - `padding` length must be even.
-
-    2. Group padding: `(..., (padding_top, padding_bottom), (padding_left, padding_right))`
-        - This structure matches pad for JAX, NumPy, TensorFlow, and others.
-        - For each axis, padding can be `None`, meaning no padding, or a tuple `(start, end)`.
-        - `padding` must have the same length as `self.ndim`.
-
-    Padding values can be negative, resulting in dimension shrinks that work similarly to Python negative slices.
-    Padding modes is selected with `mode` which supports `constant`, `reflect` and `replicate`.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor.arange(9).reshape(1, 1, 3, 3)
-    print(t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.pad((1, 2, 0, -1)).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.pad(((None, None, (0, -1), (1, 2)))).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.pad((1, 2, 0, -1), value=-float('inf')).numpy())
-    ```
-    """
-    # normalize to grouped format
-    if all(isinstance(p, (int,UOp)) for p in padding):
-      if len(padding)%2 != 0: raise ValueError("Flat padding must have even number of pads")
-      pX = ((0,0),)*(self.ndim - len(padding)//2) + flat_to_grouped(cast(Sequence[sint], padding))
-    else: pX = tuple((0,0) if p is None else p for p in cast(Sequence[tuple[sint, sint]|None], padding))
-    if len(pX) != self.ndim: raise ValueError(f"padding length is improper, {padding=} {self.ndim=}")
-    # dispatch
-    if mode == "constant": return self._pad_constant(pX, value)
-    assert all_int(self.shape), f"does not support symbolic shape {self.shape}"
-    if mode == "circular": return self._pad_circular(pX)
-    if mode in {"reflect", "replicate"}: return self._pad_reflect_replicate(pX, mode)
-    raise NotImplementedError(f"{mode=} is not supported")
 
   def _getitem(self, indices, v: Tensor|None = None) -> Tensor:
     # view-only indexing (no Tensor/list indices, no setitem) is handled by MovementMixin.__getitem__
@@ -1398,13 +1305,9 @@ class Tensor(OpMixin):
     """
     if rounding_mode is None: return super().div(x, reverse)  # type: ignore[arg-type]
     numerator, denominator = self._broadcasted(x, reverse)
-    if dtypes.is_int(dt:=least_upper_dtype(numerator.dtype, denominator.dtype)):
-      numerator, denominator = numerator.cast(dt), denominator.cast(dt)
+    if dtypes.is_int(numerator.dtype):
       if rounding_mode == "trunc": return numerator.idiv(denominator)
-      if rounding_mode == "floor":
-        truncate_div, truncate_mod = numerator.idiv(denominator), numerator._binop(Ops.MOD, denominator, False)
-        opposite_sign = ((numerator>0)&(denominator<0)) | ((numerator<0)&(denominator>0))
-        return (opposite_sign&(truncate_mod!=0)).where(truncate_div-1, truncate_div)
+      if rounding_mode == "floor": return numerator._binop(Ops.FLOORDIV, denominator, False)
     d = numerator.cast(least_upper_float(numerator.dtype)) * denominator.cast(least_upper_float(denominator.dtype)).reciprocal()
     output_dtype = numerator.dtype if dtypes.is_int(numerator.dtype) else d.dtype
     if rounding_mode == "trunc": return d.trunc().cast(output_dtype)
@@ -1422,7 +1325,20 @@ class Tensor(OpMixin):
     ```
     """
     a, b = self._broadcasted(x, reverse)
+    if dtypes.is_int(a.dtype): return a._binop(Ops.FLOORMOD, b, False)
     return a - a.div(b, rounding_mode="floor") * b
+
+  def fmod(self, x:Tensor|ConstType) -> Tensor:
+    """
+    C-style remainder of `self` divided by `x` (sign follows the dividend), using truncating division.
+    Differs from `mod`/`%`, which uses Python floor remainder.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-4, 7, 5, 4, -7, 8]).fmod(Tensor([2, -3, 8, -2, 3, 5])).numpy())
+    ```
+    """
+    a, b = self._broadcasted(x)
+    return a - a.div(b, rounding_mode="trunc") * b
 
   def where(self:Tensor, x:Tensor|ConstType|sint, y:Tensor|ConstType|sint) -> Tensor:
     """

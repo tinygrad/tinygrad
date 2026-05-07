@@ -8,7 +8,7 @@ def reduce_gradient(ctx:UOp, ret:UOp, op:Ops):
   def broadcast_to_input(x): return x.reshape(x.shape+(1,)*(len(ret.src[0].shape)-len(x.shape))).expand(ret.src[0].shape)
   if op == Ops.ADD: return (broadcast_to_input(ctx),)
   if op == Ops.MAX:
-    assert ret.op is Ops.REDUCE_AXIS, "only works on REDUCE_AXIS"
+    assert ret.op is Ops.REDUCE, "only works on REDUCE"
     mask = ret.src[0].eq(broadcast_to_input(ret)).cast(ctx.dtype)
     count = mask._rop(Ops.ADD, ret.arg[1])
     return ((mask/broadcast_to_input(count)) * broadcast_to_input(ctx),)
@@ -61,7 +61,7 @@ pm_gradient = PatternMatcher([
     ((x>y).where(ctx, (x.eq(y)).where(ctx * 0.5, 0)), (x<y).where(ctx, (x.eq(y)).where(ctx * 0.5, 0)))),
   (UPat(Ops.MUL, name="ret"), lambda ctx, ret: (ret.src[1]*ctx, ret.src[0]*ctx)),
   (UPat(Ops.WHERE, name="ret"), lambda ctx, ret: (None, ret.src[0].where(ctx, ctx.const_like(0)), ret.src[0].where(ctx.const_like(0), ctx))),
-  (UPat(Ops.REDUCE_AXIS, name="ret"), lambda ctx, ret: reduce_gradient(ctx, ret, ret.arg[0])),
+  (UPat(Ops.REDUCE, name="ret"), lambda ctx, ret: reduce_gradient(ctx, ret, ret.arg[0])),
   (UPat(Ops.CONTIGUOUS), lambda ctx: (ctx,)),
   (UPat(Ops.CONTIGUOUS_BACKWARD), lambda ctx: (ctx.contiguous(),)),
   (UPat(Ops.RESHAPE, name="ret"), lambda ctx, ret: (ctx.reshape(ret.src[0].shape), None)),
@@ -75,8 +75,8 @@ pm_gradient = PatternMatcher([
   (UPat(Ops.COPY, name="ret"), lambda ctx, ret: (ctx.copy_to_device(ret.src[0].device), None)),
   (UPat(Ops.MULTI, name="ret"), lambda ctx, ret: ctx.shard(ret.device, ret.axis).src),
   (UPat(Ops.TUPLE), lambda ctx: ctx.src),
-  # NOTE: this is only correct when the KERNEL has a single output
-  (UPat(Ops.AFTER), lambda ctx: (ctx, ctx)),
+  (UPat(Ops.AFTER, src=(UPat.var("d"), UPat(Ops.CALL, name="k"))), lambda ctx, d, k:
+    (ctx, UOp.maketuple(*(ctx if i == k.src.index(d)-1 else UOp(Ops.NOOP) for i in range(len(k.src)-1))))),
   # there's no gradient for bitcast
   (UPat(Ops.BITCAST), lambda: (None,)),
 ])
@@ -113,7 +113,11 @@ def compute_gradient(root:UOp, root_grad:UOp, targets:set[UOp]) -> dict[UOp, UOp
     assert len(lgrads) == len(t0.src), f"got {len(lgrads)} gradient, expected {len(t0.src)}"
     for k,v in zip(t0.src, lgrads):
       if v is None: continue
-      if k in grads and grads[k].op is not Ops.NOOP: grads[k] = grads[k] + v
+      if k in grads and grads[k].op is not Ops.NOOP:
+        if v.op is Ops.TUPLE and grads[k].op is Ops.TUPLE:
+          grads[k] = UOp.maketuple(*(p + n if (p.op is not Ops.NOOP and n.op is not Ops.NOOP) else
+                                     n if p.op is Ops.NOOP else p for p, n in zip(grads[k].src, v.src)))
+        else: grads[k] = grads[k] + v
       else: grads[k] = v
       if len(forward_metadata:=all_metadata.get(t0, ())):
         backward_metadata = tuple(dataclasses.replace(x, backward=True) for x in forward_metadata)

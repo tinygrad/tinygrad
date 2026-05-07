@@ -4,6 +4,7 @@ import numpy as np
 
 from hypothesis import given, settings, strategies as strat
 from test.helpers import assert_jit_cache_len, call_is_graph, not_support_multi_device, needs_second_gpu
+from tinygrad import Variable
 from tinygrad.tensor import Tensor
 from tinygrad.engine.jit import TinyJit, JitError, graph_class
 from tinygrad.device import Device
@@ -38,6 +39,19 @@ class TestJit(unittest.TestCase):
     @TinyJit
     def add(a, b): return (a+b).realize()
     _simple_test(add)
+
+  @unittest.skipUnless(Device.DEFAULT == "CPU", "core_id is a CPU runtimevar")
+  def test_hcq_core_id_runtimevar_merge(self):
+    N = 262144
+    @TinyJit
+    def f(x, st):
+      y = (x + 1).contiguous().realize()
+      z = x.shrink(((st, st + N),)).contiguous().realize()
+      return y, z
+    x = Tensor.arange(2*N).contiguous().realize()
+    for _ in range(3): y, z = f(x, Variable("a", 0, N).bind(0))
+    self.assertEqual(y.shape, (2*N,))
+    self.assertEqual(z.shape, (N,))
 
   def test_jitbeam_triggers_beam(self):
     from unittest.mock import patch
@@ -91,6 +105,20 @@ class TestJit(unittest.TestCase):
       np.testing.assert_allclose(d.numpy(), a.numpy()-b.numpy(), atol=1e-4, rtol=1e-5)
       np.testing.assert_allclose(e.numpy(), a.numpy()*b.numpy(), atol=1e-4, rtol=1e-5)
     assert_jit_cache_len(f, 3)
+
+  def test_global_counters_jit(self):
+    @TinyJit
+    def f(a, b):
+      c = (a + b).realize()
+      d = (c * 2).realize()
+      return (d - a).realize()
+    a, b = Tensor.randn(64, 64).realize(), Tensor.randn(64, 64).realize()
+    for _ in range(4):
+      GlobalCounters.reset()
+      f(a, b)
+      Device[a.device].synchronize()
+      self.assertGreater(GlobalCounters.global_mem, 0)
+      self.assertGreater(GlobalCounters.global_ops, 0)
 
   def test_nothing_jitted(self):
     @TinyJit

@@ -1282,7 +1282,7 @@ def train_bert():
         previous_step = i
 
 def train_llama3():
-  from examples.mlperf.models.flat_llama import FlatTransformer, apply_grad, FP8, FP8_DTYPE
+  from examples.mlperf.models.flat_llama import FlatTransformer, apply_grad, FP8_DTYPE
   from examples.llama3 import MODEL_PARAMS
   from examples.mlperf.lr_schedulers import CosineAnnealingLRWithWarmup
   from examples.mlperf.optim import GradAccClipAdamW
@@ -1357,6 +1357,7 @@ def train_llama3():
       MLLOGGER.event(key=mllog_constants.OPT_LR_WARMUP_STEPS, value=WARMUP_STEPS)
       MLLOGGER.event(key=mllog_constants.NUM_WARMUP_STEPS, value=WARMUP_STEPS)
       MLLOGGER.event(key=mllog_constants.OPT_LR_DECAY_STEPS, value=MAX_STEPS - WARMUP_STEPS)
+      MLLOGGER.event(key=mllog_constants.OPT_LR_DECAY_SCHEDULE, value="cosine with linear warmup")
       MLLOGGER.event(key=mllog_constants.OPT_GRADIENT_CLIP_NORM, value=1.0)
   else:
     MLLOGGER = None
@@ -1418,7 +1419,10 @@ def train_llama3():
 
   for p in optim.params:
     grad_dtype = dtypes.bfloat16 if p.dtype == FP8_DTYPE else p.dtype
-    p.grad = Tensor.zeros(p.shape, dtype=grad_dtype, device=p.device).contiguous()
+    if isinstance(p.device, tuple) and p.uop.axis is not None:
+      p.grad = Tensor.zeros(p.shape, dtype=grad_dtype, device=p.device[0]).shard_(p.device, axis=p.uop.axis).contiguous()
+    else:
+      p.grad = Tensor.zeros(p.shape, dtype=grad_dtype, device=p.device).contiguous()
   grads = [p.grad for p in optim.params]
 
   scheduler = CosineAnnealingLRWithWarmup(optim, opt_base_learning_rate, opt_end_learning_rate, opt_learning_rate_warmup_steps, opt_learning_rate_decay_steps)
@@ -1432,18 +1436,22 @@ def train_llama3():
     print(f"loading optim checkpoint from {fn}")
     load_state_dict(scheduler, safe_load(fn), realize=False)
 
-  fp8_amax = [t for ts in model._fp8_amax.values() for t in ts] if FP8 else []
-  fp8_inv_scales = list(model._fp8_inv_scale.values()) if FP8 else []
+  fp8_amax = [t for ts in model._fp8_amax.values() for t in ts]
+  fp8_grad_amax = [t for ts in model._fp8_grad_amax.values() for t in ts] if hasattr(model, "_fp8_grad_amax") else []
+  fp8_inv_scales = list(model._fp8_inv_scale.values())
 
-  if FP8:
-    from tinygrad.nn.state import get_state_dict
-    model_state = get_state_dict(model)
-    for wname in ["wqkv", "wo", "w13", "w2"]:
-      w = model_state[wname]
-      w._inv_scale = model._fp8_inv_scale[wname]
-      if optim.master_params:
-        idx = next(j for j, p in enumerate(optim.params) if p is w)
-        optim.master_params[idx].assign((optim.master_params[idx] * w._inv_scale.reshape(-1, *([1]*(w.ndim-1)))).contiguous())
+  from tinygrad.nn.state import get_state_dict
+  model_state = get_state_dict(model)
+  for wname in ["wqkv", "wo", "w13", "w2"]:
+    w = model_state[wname]
+    w._inv_scale = model._fp8_inv_scale[wname]
+    if optim.master_params:
+      idx = next(j for j, p in enumerate(optim.params) if p is w)
+      optim.master_params[idx].assign((optim.master_params[idx] * w._inv_scale.reshape(-1, *([1]*(w.ndim-1)))).contiguous())
+
+  # realize everything here
+  if optim.master_params: Tensor.realize(*optim.master_params)
+  Tensor.realize(*optim.params, *fp8_inv_scales, *fp8_amax, *fp8_grad_amax)
 
   @TinyJit
   def minibatch(tokens:Tensor):
@@ -1452,7 +1460,7 @@ def train_llama3():
     if not is_sharding: tokens = tokens.to(None)
     logits:Tensor = model(tokens[:, :-1])
     if getenv("FAST_CE", 0):
-      from extra.amax.cast_amax import fused_ce_loss
+      from extra.llama_kernels.fused_ce import fused_ce_loss
       loss = fused_ce_loss(logits.cast(dtypes.bfloat16), tokens[:, 1:], label_smoothing=0.0)
     else:
       loss = vocab_mask.where(-1e9, logits).sparse_categorical_crossentropy(tokens[:, 1:])
@@ -1461,7 +1469,7 @@ def train_llama3():
       apply_grad(g, new_g.uop)
 
     loss_cpu = loss.flatten().float().to("CPU")
-    return loss_cpu.realize(*grads, *fp8_amax)
+    return loss_cpu.realize(*grads, *fp8_amax, *fp8_grad_amax)
 
   @TinyJit
   def optim_step():
@@ -1559,7 +1567,7 @@ def train_llama3():
 
       mem_gb = GlobalCounters.mem_used / 1e9
       gflops = GlobalCounters.global_ops / 1e9 / dev_time
-      mfu = ((6 * num_params * SEQLEN * GBS) / (dev_time * device_count * (4.6e15 if FP8 else 2.3e15))) * 100
+      mfu = ((6 * num_params * SEQLEN * GBS) / (dev_time * device_count * 4.6e15)) * 100
       tqdm.write(
           f"{i:5} {step_time:.3f} s step, {gbs_time:.3f} s gbs, {optim_time:.3f} s optim, {data_time:.3f} s data, {loss:.4f} loss, " \
           f"{lr:.12f} LR, {grad_norm:.6f} grad_norm, {mem_gb:.2f} GB used, {gflops:9.2f} GFLOPS, {mfu:5.2f}% MFU")
@@ -1636,7 +1644,6 @@ def train_llama3():
         tqdm.write(f"target achieved after {sequences_seen} sequences")
         if MLLOGGER and RUNMLPERF:
           MLLOGGER.end(key=mllog_constants.EPOCH_STOP, metadata={mllog_constants.SAMPLES_COUNT: sequences_seen})
-          MLLOGGER.event(key=mllog_constants.TRAIN_SAMPLES, value=sequences_seen)
           MLLOGGER.end(key=mllog_constants.RUN_STOP, metadata={mllog_constants.STATUS: mllog_constants.SUCCESS})
         if getenv("CKPT"):
           if not os.path.exists(ckpt_dir := "./ckpts"): os.mkdir(ckpt_dir)

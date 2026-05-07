@@ -6,7 +6,7 @@ from tinygrad.device import is_dtype_supported
 from tinygrad.uop.ops import Ops, UOp
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.nir import NIRRenderer
-from tinygrad.engine.realize import get_program
+from tinygrad.codegen import to_program
 from tinygrad.dtype import DType
 
 x_init = np.random.randn(1,3).astype(np.float32)
@@ -67,8 +67,8 @@ class TestIdxUpcast(unittest.TestCase):
       ast = si.src[0]
       if ast.op is Ops.SINK:
         renderer = Device[si.src[1].buffer.device].renderer
-        prg = get_program(ast, renderer)
-        return prg.uops
+        prg = to_program(ast, renderer)
+        return tuple(prg.src[2].src)
 
   def _assert(self, dtype: DType, a: Tensor):
     uops = self._schedule_render(a)
