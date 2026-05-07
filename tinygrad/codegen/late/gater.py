@@ -1,20 +1,17 @@
 # this is a temporary intermediate step while we remove this index style
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops
-from tinygrad.dtype import Invalid, dtypes
+from tinygrad.dtype import Invalid, PtrDType, dtypes
+
+def _idx(buf, idx, cast):
+  ret = buf.index(idx, ptr=True)
+  return ret.cast(cast.dtype) if cast.op is Ops.CAST and isinstance(cast.dtype, PtrDType) else ret
 
 pm_move_gates_from_index = PatternMatcher([
   # here we create the alt value for load to be 0s and remove the where Invalid
   (UPat.var("buf").index(UPat.var("gate").where(UPat.var("idx"), UPat(arg=Invalid))).or_casted(name="cast").load(name="l"),
-   lambda buf,gate,idx,cast,l: buf.index(idx, ptr=True).cast(cast.dtype).load(l.const_like(0), gate, dtype=l.dtype)),
+   lambda buf,gate,idx,cast,l: _idx(buf, idx, cast).load(l.const_like(0), gate, dtype=l.dtype)),
   (UPat.var("buf").index(UPat.var("gate").where(UPat.var("idx"), UPat(arg=Invalid))).or_casted(name="cast").store(UPat.var("data")),
-   lambda buf,gate,idx,cast,data: buf.index(idx, ptr=True).cast(cast.dtype).store(data, gate)),
-
-  # here we create the alt value for load to be 0s
-  # TODO: remove this
-  (UPat.var("buf").index(UPat.var("idx"), UPat.var("gate")).or_casted(name="cast").load(name="l"),
-    lambda buf,gate,idx,cast,l: buf.index(idx, ptr=True).cast(cast.dtype).load(l.const_like(0), gate, dtype=l.dtype)),
-  (UPat.var("buf").index(UPat.var("idx"), UPat.var("gate")).or_casted(name="cast").store(UPat.var("data")),
-    lambda buf,gate,idx,cast,data: buf.index(idx, ptr=True).cast(cast.dtype).store(data, gate)),
+   lambda buf,gate,idx,cast,data: _idx(buf, idx, cast).store(data, gate)),
 
   # Where after gated load becomes alt value
   (UPat.var("gate").where(UPat().load(UPat(), UPat.var("gate"), name="l").or_casted(), UPat.var("a")), lambda gate,l,a:
