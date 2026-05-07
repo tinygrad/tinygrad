@@ -68,6 +68,8 @@ class Renderer:
   has_threads: bool = False
   has_shared: bool = True
   has_aux: bool = False # additional program info, eg. image shapes
+  has_warp_reduce: bool = False
+  warp_size: int = 32
   # NOTE: these two should be in (x,y,z) order to match the max_sizes argument in get_grouped_dims
   global_max: tuple[int, ...]|None = (0x8FFFFFFF,) * (3) # TODO: Ops.SPECIAL int32 indexes right now
   local_max: tuple[int, ...]|None = (0x8FFFFFFF,) * (3) # TODO: Ops.SPECIAL int32 indexes right now

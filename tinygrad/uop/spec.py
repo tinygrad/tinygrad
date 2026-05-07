@@ -170,6 +170,9 @@ shared_codegen_spec = PatternMatcher([
   # WMMA has a <a, b, acc>
   (UPat(Ops.WMMA, src=(UPat(), UPat(), UPat()), name="x"), lambda x: isinstance(x.arg, tuple) and len(x.arg) == 8),
 
+  # WARP_REDUCE has a single float32 source and an Ops arg (ADD or MAX)
+  (UPat(Ops.WARP_REDUCE, dtype=dtypes.float, src=(UPat(dtype=dtypes.float),), name="x"), lambda x: x.arg in (Ops.ADD, Ops.MAX)),
+
   # VECTORIZE/GEP
   (UPat(Ops.STACK, name="x"), lambda x: len(x.src)>1 and len(x.src) == x.dtype.vcount and all(x.dtype == y.dtype.vec(len(x.src)) for y in x.src)),
   (UPat(Ops.GEP, src=(UPat.var("src"),), name="gep"), lambda gep,src: gep.dtype == src.dtype.scalar()),
