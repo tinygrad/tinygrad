@@ -35,6 +35,18 @@ class TestTensorUOpBinop(unittest.TestCase):
   def test_isclose(self):
     t = _t(4).float()
     self.assertIs(_strip_unique(t.isclose(t).uop), _strip_unique(t.uop.isclose(t.uop)))
+  # __floordiv__/mod/idiv/fmod dispatch on dtype in mixin
+  def test_floordiv_int(self):   _check(self, _t(4), lambda x: x // 3)
+  def test_floordiv_float(self): _check(self, _t(4).float() + 1.5, lambda x: x // 2.0)
+  def test_rfloordiv_int(self):  _check(self, _t(4)+1, lambda x: 7 // x)
+  def test_mod_int(self):        _check(self, _t(4), lambda x: x % 3)
+  def test_mod_float(self):      _check(self, _t(4).float() + 1.5, lambda x: x % 2.0)
+  def test_idiv_int(self):       _check(self, _t(4), lambda x: x.idiv(3))
+  def test_fmod_int(self):       _check(self, _t(4), lambda x: x.fmod(3))
+  def test_fmod_float(self):     _check(self, _t(4).float() + 1.5, lambda x: x.fmod(2.0))
+  def test_floordiv_bool(self):  _check(self, _t(4).cast(dtypes.bool), lambda x: x // True)
+  def test_mod_bool(self):       _check(self, _t(4).cast(dtypes.bool), lambda x: x % True)
+  def test_fmod_bool(self):      _check(self, _t(4).cast(dtypes.bool), lambda x: x.fmod(True))
 
 class TestTensorUOpGetitem(unittest.TestCase):
   # ---- pure slice patterns ----

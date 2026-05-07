@@ -181,7 +181,31 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
     return self._binop(Ops.IDIV, x, reverse)
 
   def mod(self, x: Self | ConstType, reverse: bool = False) -> Self:
-    return self._binop(Ops.FLOORMOD, x, reverse)
+    """
+    Mod `self` by `x`.
+    Equivalent to `self % x`.
+    Supports broadcasting to a common shape, type promotion, and integer inputs.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-4, 7, 5, 4, -7, 8]).mod(Tensor([2, -3, 8, -2, 3, 5])).numpy())
+    ```
+    """
+    a, b = self._broadcasted(x, reverse)
+    if dtypes.is_int(a.dtype): return a.alu(Ops.FLOORMOD, b)
+    return a - (a // b) * b
+
+  def fmod(self, x: Self | ConstType) -> Self:
+    """
+    C-style remainder of `self` divided by `x` (sign follows the dividend), using truncating division.
+    Differs from `mod`/`%`, which uses Python floor remainder.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-4, 7, 5, 4, -7, 8]).fmod(Tensor([2, -3, 8, -2, 3, 5])).numpy())
+    ```
+    """
+    a, b = self._broadcasted(x)
+    if dtypes.is_int(a.dtype): return a.alu(Ops.MOD, b)
+    return a - (a*b.reciprocal()).trunc() * b
 
   def div(self, x: Self | ConstType, reverse: bool = False) -> Self:
     lhs, rhs = self._broadcasted(x, reverse)
@@ -206,7 +230,8 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
     return self.div(x)
 
   def __floordiv__(self, x: Self | ConstType) -> Self:
-    return self._binop(Ops.FLOORDIV, x, False)
+    a, b = self._broadcasted(x, reverse=False)
+    return a.alu(Ops.FLOORDIV, b) if dtypes.is_int(a.dtype) else (a*b.reciprocal()).floor()
 
   def __mod__(self, x: Self | ConstType) -> Self:
     return self.mod(x)
@@ -233,7 +258,7 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
     return self.div(x, True)
 
   def __rfloordiv__(self, x: Self | ConstType) -> Self:
-    return self._binop(Ops.FLOORDIV, x, True)
+    return self.ufix(x) // self
 
   def __rand__(self, x: Self | ConstType) -> Self:
     return self.bitwise_and(x, True)

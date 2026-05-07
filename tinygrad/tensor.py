@@ -1307,38 +1307,11 @@ class Tensor(OpMixin):
     numerator, denominator = self._broadcasted(x, reverse)
     if dtypes.is_int(numerator.dtype):
       if rounding_mode == "trunc": return numerator.idiv(denominator)
-      if rounding_mode == "floor": return numerator._binop(Ops.FLOORDIV, denominator, False)
+      if rounding_mode == "floor": return numerator // denominator
     d = numerator.cast(least_upper_float(numerator.dtype)) * denominator.cast(least_upper_float(denominator.dtype)).reciprocal()
-    output_dtype = numerator.dtype if dtypes.is_int(numerator.dtype) else d.dtype
-    if rounding_mode == "trunc": return d.trunc().cast(output_dtype)
-    if rounding_mode == "floor": return d.floor().cast(output_dtype)
+    if rounding_mode == "trunc": return d.trunc()
+    if rounding_mode == "floor": return d.floor()
     raise RuntimeError(f"{rounding_mode=} is not supported")
-
-  def mod(self, x:Tensor|ConstType, reverse=False) -> Tensor:
-    """
-    Mod `self` by `x`.
-    Equivalent to `self % x`.
-    Supports broadcasting to a common shape, type promotion, and integer inputs.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-4, 7, 5, 4, -7, 8]).mod(Tensor([2, -3, 8, -2, 3, 5])).numpy())
-    ```
-    """
-    a, b = self._broadcasted(x, reverse)
-    if dtypes.is_int(a.dtype): return a._binop(Ops.FLOORMOD, b, False)
-    return a - a.div(b, rounding_mode="floor") * b
-
-  def fmod(self, x:Tensor|ConstType) -> Tensor:
-    """
-    C-style remainder of `self` divided by `x` (sign follows the dividend), using truncating division.
-    Differs from `mod`/`%`, which uses Python floor remainder.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-4, 7, 5, 4, -7, 8]).fmod(Tensor([2, -3, 8, -2, 3, 5])).numpy())
-    ```
-    """
-    a, b = self._broadcasted(x)
-    return a - a.div(b, rounding_mode="trunc") * b
 
   def where(self:Tensor, x:Tensor|ConstType|sint, y:Tensor|ConstType|sint) -> Tensor:
     """
@@ -1366,17 +1339,12 @@ class Tensor(OpMixin):
 
   # ***** op wrappers *****
 
-  # TODO: combine with UOps __floordiv__
-  def __floordiv__(self, x): return self.div(x, rounding_mode="floor")
-  def __rfloordiv__(self, x): return self.div(x, rounding_mode="floor", reverse=True)
-
-  def __ifloordiv__(self, x) -> Tensor: return self.assign(self.__floordiv__(x))
-
   # unlike Tensors, UOps are immutable, so these don't go in mixin
   def __iadd__(self, x) -> Tensor: return self.assign(self.add(x)) # type: ignore[misc]
   def __isub__(self, x) -> Tensor: return self.assign(self.sub(x)) # type: ignore[misc]
   def __imul__(self, x) -> Tensor: return self.assign(self.mul(x)) # type: ignore[misc]
   def __itruediv__(self, x) -> Tensor: return self.assign(self.div(x)) # type: ignore[misc]
+  def __ifloordiv__(self, x) -> Tensor: return self.assign(self.__floordiv__(x)) # type: ignore[misc]
   def __ipow__(self, x) -> Tensor: return self.assign(self.pow(x)) # type: ignore[misc]
   def __iand__(self, x) -> Tensor: return self.assign(self.bitwise_and(x)) # type: ignore[misc]
   def __ior__(self, x) -> Tensor: return self.assign(self.bitwise_or(x)) # type: ignore[misc]

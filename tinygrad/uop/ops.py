@@ -1179,6 +1179,10 @@ class UPat(OpMixin):
   # UPat patterns are built with `upat + 1`-style operators; don't insert CAST nodes like _broadcasted does
   def _binop(self, op:Ops, x, reverse:bool) -> UPat:
     return self.ufix(x).alu(op, self) if reverse else self.alu(op, self.ufix(x))
+  # TODO: need these override due to dtypes.void on broadcast
+  def __floordiv__(self, x): return self._binop(Ops.FLOORDIV, x, False)
+  def __rfloordiv__(self, x): return self._binop(Ops.FLOORDIV, x, True)
+  def mod(self, x, reverse=False): return self._binop(Ops.FLOORMOD, x, reverse)
   def alu(self, op:Ops, *src:UPat):
     asrc = (self,)+src
     return UPat(op, dtypes.bool if op in {Ops.CMPLT, Ops.CMPNE} else asrc[-1].match_dtype, list(asrc) if op in GroupOp.Commutative else asrc)
