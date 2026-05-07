@@ -133,8 +133,7 @@ class MockPSP(MockIPBlock):
 
 class MockSMU(MockIPBlock):
   def __init__(self, gpu, mmio):
-    try: regs = import_asic_regs('mp', (11, 0), cls=functools.partial(AMDReg, bases={0: IP_BASES[am.MP1_HWIP]}))
-    except Exception: regs = {}
+    regs = import_asic_regs('mp', (11, 0, 0), cls=functools.partial(AMDReg, bases={0: IP_BASES[am.MP1_HWIP]}))
     super().__init__(gpu, mmio, regs)
     self._msg_pending = False
     def r(n): return self.reg(f"mmMP1_SMN_C2PMSG_{n}")

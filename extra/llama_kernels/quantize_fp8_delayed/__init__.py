@@ -49,7 +49,7 @@ def quantize_fp8_delayed(x:Tensor, amax_state:Tensor, fp8_dtype=dtypes.fp8e4m3) 
   assert x.dtype == dtypes.bfloat16, f"expected bf16, got {x.dtype}"
   axis = x.uop.axis if isinstance(x.device, tuple) else None
   fp8_out      = alloc_like(x.shape,  fp8_dtype,      x.device, axis)
-  amax_partial = alloc_local((NUM_WG,), dtypes.float32, x.device)
+  amax_partial = alloc_local((NUM_WG,), dtypes.float32, x.device, axis)
   fxn = functools.partial(_custom_quantize_fp8_with_amax, dname=dname_of(x.device))
   fp8_out, amax_partial, *_ = Tensor.custom_kernel(fp8_out, amax_partial, x, amax_state,
                                                     fxn=fxn, grad_fxn=_quantize_fp8_delayed_bwd)
