@@ -139,7 +139,7 @@ amd_pm4_encode = PatternMatcher([
 ])
 
 @hcq_routine
-def pm4_submit_routine(ctx, blob, size, ring, wptr, doorbell, put_ptr, ring_dwords):
+def pm4_submit_routine(blob:UOp, ring:UOp, wptr:UOp, doorbell:UOp, put_ptr:UOp, size:UOp, ring_dwords:int):
   put = put_ptr[0]
   i = UOp.range(size, 0, dtype=dtypes.int)
   next_put = put + size.cast(put.dtype)
@@ -153,7 +153,8 @@ def pm4_submit_routine(ctx, blob, size, ring, wptr, doorbell, put_ptr, ring_dwor
 
 def pm4_submit(ctx, blob, size):
   q = ctx.dev.compute_queue
-  pm4_submit_routine(ctx, blob, size, q.ring, q.write_ptr, q.doorbell, q.put_value, q.ring.size)
+  pm4_submit_routine.build(ctx, blob, q.ring, q.write_ptr, q.doorbell, q.put_value, size, q.ring.size)
+
 
 class AMDSignal(HCQSignal):
   def __init__(self, *args, **kwargs): super().__init__(*args, **{**kwargs, 'timestamp_divider': 100})
@@ -623,6 +624,8 @@ class AMD2Device(HCQ2Compiled):
   def is_am(self) -> bool: return isinstance(self.iface, (PCIIface,))
   def is_usb(self) -> bool: return False
 
+  submit_routine = staticmethod(pm4_submit)
+
   def __init__(self, device:str=""):
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
 
@@ -670,7 +673,6 @@ class AMD2Device(HCQ2Compiled):
 
     # HCQ2 PM4 encoder
     self.pm_encode = amd_pm4_encode
-    self.submit_routine = pm4_submit
 
     # HCQ2 helpers: timeline signal/value as UOps so HCQ2Graph rewrites can reference them.
     # self.timeline_signal_uop = self._wrap_buffer_uop(self.timeline_signal.base_buf)
