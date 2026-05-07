@@ -1568,10 +1568,11 @@ def train_llama3(llama2_70b_lora:bool=False):
       loss = vocab_mask.where(-1e9, logits).sparse_categorical_crossentropy(tokens[:, 1:])
     diag_grads = loss.gradient(*optim.params)
     grad_norms = [g.float().square().sum().sqrt().to("CPU") for g in diag_grads]
+    grad_maxes = [g.float().abs().max().to("CPU") for g in diag_grads]
     total_grad_norm = Tensor.stack(*[g.float().square().sum() for g in diag_grads]).sum().sqrt().to("CPU")
     loss_cpu = loss.flatten().float().to("CPU")
-    Tensor.realize(loss_cpu, total_grad_norm, *grad_norms, *fp8_amax, *fp8_amax_next, *fp8_grad_amax)
-    return loss_cpu, total_grad_norm, grad_norms
+    Tensor.realize(loss_cpu, total_grad_norm, *grad_norms, *grad_maxes, *fp8_amax, *fp8_amax_next, *fp8_grad_amax)
+    return loss_cpu, total_grad_norm, grad_norms, grad_maxes
 
   # ** data iters **
   def fake_data(bs, samples):
@@ -1612,12 +1613,15 @@ def train_llama3(llama2_70b_lora:bool=False):
   num_params = sum(p.numel() for p in params) - model_params["vocab_size"]*model_params["dim"]
   train_iter = get_train_iter()
   if getenv("DIAG_LORA_GRADS", 0):
-    tokens = next(train_iter)
-    loss_cpu, total_grad_norm, grad_norms = lora_grad_diag(tokens)
-    tqdm.write(f"DIAG_LORA_GRADS QUANTIZE={QUANTIZE} RECOMPUTE={RECOMPUTE} BS={BS} SEQLEN={SEQLEN}")
-    tqdm.write(f"DIAG loss={loss_cpu.item():.9f} total_grad_norm={total_grad_norm.item():.9f}")
-    for name, param, grad_norm in zip(optim_param_names, optim.params, grad_norms):
-      tqdm.write(f"DIAG grad {name}: shape={param.shape} dtype={param.dtype} norm={grad_norm.item():.9f}")
+    diag_steps = getenv("DIAG_LORA_GRADS_STEPS", 1)
+    tqdm.write(f"DIAG_LORA_GRADS QUANTIZE={QUANTIZE} RECOMPUTE={RECOMPUTE} BS={BS} SEQLEN={SEQLEN} STEPS={diag_steps}")
+    for diag_step in range(diag_steps):
+      tokens = next(train_iter)
+      loss_cpu, total_grad_norm, grad_norms, grad_maxes = lora_grad_diag(tokens)
+      tqdm.write(f"DIAG step={diag_step+1} loss={loss_cpu.item():.9f} total_grad_norm={total_grad_norm.item():.9e}")
+      for name, param, grad_norm, grad_max in zip(optim_param_names, optim.params, grad_norms, grad_maxes):
+        tqdm.write(f"DIAG grad {name}: shape={param.shape} dtype={param.dtype} norm={grad_norm.item():.9e} max_abs={grad_max.item():.9e}")
+      model.commit_fp8_amax()
     return
   i, sequences_seen = resume_ckpt, 0
   step_times = []

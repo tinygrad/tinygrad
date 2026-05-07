@@ -200,8 +200,13 @@ class FlatTransformer:
     bsz, seqlen, _ = x.shape
     new_amaxs, saves = [], []
 
-    xqkv, x_normed, rrms, ret = norm_quantize_matmul(x, attention_norm, wqkv, s_qkv, self.norm_eps,
-                                                     amax_x=amax_xqkv, grad_amax_state=grad_amax_xqkv)
+    if getenv("DIAG_DEQUANT_WQKV", 0) and QUANTIZE:
+      x_normed, rrms = rmsnorm(x, self.norm_eps)
+      xqkv = matmul(x_normed * attention_norm, wqkv.float() * s_qkv.reshape(-1, 1), fp8=False)[0]
+      ret = [amax_xqkv]
+    else:
+      xqkv, x_normed, rrms, ret = norm_quantize_matmul(x, attention_norm, wqkv, s_qkv, self.norm_eps,
+                                                       amax_x=amax_xqkv, grad_amax_state=grad_amax_xqkv)
     if LORA: xqkv = xqkv + self.run_lora(lora_a, lora_b, x_normed * attention_norm)
     saves.extend([x_normed, rrms])
     new_amaxs.extend(ret[:1])
@@ -222,7 +227,10 @@ class FlatTransformer:
       attn = xq.scaled_dot_product_attention(xk, xv, is_causal=True, enable_gqa=True).transpose(1, 2)
     attn = attn.reshape(bsz, seqlen, -1)
 
-    out, *ret = matmul(attn, wo, amax_x=amax_xo, w_inv_scale=s_o, grad_amax_state=grad_amax_xo)
+    if getenv("DIAG_DEQUANT_WO", 0) and QUANTIZE:
+      out, ret = matmul(attn, wo.float() * s_o.reshape(-1, 1), fp8=False)[0], [amax_xo]
+    else:
+      out, *ret = matmul(attn, wo, amax_x=amax_xo, w_inv_scale=s_o, grad_amax_state=grad_amax_xo)
     if LORA: out = out + self.run_lora(lora_a_wo, lora_b_wo, attn)
     new_amaxs.extend(ret[:1])
     saves.extend(ret[1:] + [out])
