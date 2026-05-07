@@ -414,8 +414,11 @@ class NV_GSP(NV_IP):
     _, self.gsp_signature_sysmem = self.nvdev._alloc_sysmem(len(signature), contiguous=True, data=signature)
 
   def init_boot_binary_image(self):
-    self.booter_image = self.nvdev.extract_fw("kgspBinArchiveGspRmBoot", "ucode_image_prod_data")
-    self.booter_desc = nv.RM_RISCV_UCODE_DESC.from_buffer_copy(self.nvdev.extract_fw("kgspBinArchiveGspRmBoot", "ucode_desc_prod_data"))
+    sha = {"GA102":"82428f532240727e95bb3083fbaaba9b2cc7b937314323f2d546ce7245f27fad",
+           "AD102":"65ab2e6b6e0fca95365c4deac79a34582abcfeb15b6ae234138f22e7183118a8",
+           "GB202":"d40b48e431d1707dc77af3605db358ed7a32ebfc2830eb74de2eddb4d3025071"}[self.nvdev.fw_name]
+    h = nv.struct_nvfw_bin_hdr.from_buffer_copy(b:=fetch_fw(f"nvidia/{self.nvdev.fw_name.lower()}/gsp", "bootloader-570.144.bin", sha))
+    self.booter_image, self.booter_desc = b[h.data_offset:h.data_offset+h.data_size], nv.RM_RISCV_UCODE_DESC.from_buffer_copy(b, h.header_offset)
     _, self.booter_sysmem = self.nvdev._alloc_sysmem(len(self.booter_image), contiguous=True, data=self.booter_image)
 
   def init_wpr_meta(self):
