@@ -87,7 +87,7 @@ def main(args) -> None:
 
   # ** SQTT printer
   data = None if not args.src else get(profile["layout"], args.src[0])
-  if "SQTT" in args.src[0]:
+  if args.src and "SQTT" in args.src[0]:
     # modern terminals support 24-bit color
     def hex_colored(st:str, color:str) -> str: return f"\x1b[38;2;{int(color[1:3],16)};{int(color[3:5],16)};{int(color[5:7],16)}m{st}\x1b[0m"
     print(f"{'Clk':<12} {'Unit':<20} {'Op':<22} {'Dur':<4} {'Delay':<4} {'Info'}")
@@ -119,7 +119,7 @@ def main(args) -> None:
       print(emit(row, lambda _: f"{row['clk']:<12} {unit:<20} {op_str}{' '*(22-ansilen(op_str))} {row['dur']:<4} {str(row['delay']):<4} {info}"))
 
   # ** PMC printer
-  elif "PMC" in args.src[0]:
+  elif args.src and "PMC" in args.src[0]:
     pmc = viz.unpack_pmc(unwrap(data))
     pmc_fmt:list[str] = []
     for name,val,*detail in pmc["rows"]:
