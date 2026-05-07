@@ -616,6 +616,13 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     dim = self._resolve_dim(dim)
     for arg in args: assert arg.ndim==self.ndim and all(ti==ai for i,(ti,ai) in enumerate(zip(self.shape, arg.shape)) if i!=dim)
     tensors = [self, *args]
+    # CONCAT: single op instead of pad+sum. arg=(dim, tuple of sizes along dim)
+    # TODO: currently only dim=0 with concrete shapes; fall back to pad+sum otherwise
+    if dim == 0 and all(isinstance(s, int) for t in tensors for s in t.shape):
+      from tinygrad.uop.ops import UOp, Ops
+      out_shape = list(self.shape)
+      out_shape[0] = sum(t.shape[0] for t in tensors)
+      return self.__class__(UOp(Ops.CONCAT, self.uop.dtype, tuple(t.uop for t in tensors), arg=(0, tuple(out_shape))))
     dim_cumsum = list(itertools.accumulate([t.shape[dim] for t in tensors], initial=0))
     padded = [t.pad(tuple((dim_cumsum[i], dim_cumsum[-1]-dim_cumsum[i+1]) if j==dim else None for j in range(t.ndim))) for i,t in enumerate(tensors)]
     return padded[0].usum(*padded[1:])

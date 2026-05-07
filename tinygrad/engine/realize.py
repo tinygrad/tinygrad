@@ -19,6 +19,7 @@ def get_call_outs_ins(call:UOp) -> tuple[tuple[int, ...], tuple[int, ...]]:
   ast = call.src[0]
   if ast.op is Ops.PROGRAM: return tuple(ast.arg.outs), tuple(ast.arg.ins)
   if ast.op in (Ops.COPY, Ops.BUFFER_VIEW): return (0,), (1,)
+  if ast.op is Ops.CONCAT: return (0,), tuple(range(1, len(get_call_arg_uops(call))))
   if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "encdec": return (0,), tuple(range(1, len(get_call_arg_uops(call))))
   return (), ()
 
@@ -29,6 +30,7 @@ def get_call_name(call:UOp, bufs:list[Buffer], var_vals:dict[str, int]|None=None
   if ast.op is Ops.PROGRAM: return ast.arg.name
   if ast.op is Ops.BUFFER_VIEW: return colored(f"view {_uop_sz_to_str(arg_uops[0]):>10} @ {ast.arg[1] * arg_uops[1].dtype.itemsize:<10d}", "yellow")
   if ast.op is Ops.COPY: return colored(f"copy {_uop_sz_to_str(arg_uops[0]):>10}, {bufs[0].device[:7]:>7s} <- {bufs[1].device[:7]:7s}", "yellow")
+  if ast.op is Ops.CONCAT: return colored(f"concat {len(arg_uops)-1} srcs -> {_uop_sz_to_str(arg_uops[0]):>10}", "green")
   if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "encdec": return colored(f"enc/dec {_uop_sz_to_str(arg_uops[0])}", "yellow")
   if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "graph": return colored(f"batched {len(ast.src[0].src)}", "cyan")
   raise NotImplementedError("get_call_name is not implemented")
@@ -163,6 +165,18 @@ def exec_copy(ctx:ExecContext, call, ast):
         src.allocator._copyout(dest.allocator._as_buffer(dest._buf), src._buf)
       else: dest.copyin(src.as_memoryview(allow_zero_copy=True))
 
+def exec_concat(ctx:ExecContext, call, ast):
+  """Execute CONCAT by concatenating source buffers and copying into dest in one shot."""
+  import numpy as np
+  resolved = resolve_params(call, ctx.input_uops)
+  bufs = [cast(Buffer, b.buffer) for b in resolved]
+  dest = bufs[0].ensure_allocated()
+  srcs = [b.ensure_allocated() for b in bufs[1:]]
+  with track_stats(ctx, call, dest.device, [dest] + srcs, ctx.var_vals):
+    # concatenate all source data on the host, then single copyin
+    combined = np.concatenate([s.numpy() for s in srcs], axis=ast.arg[0])
+    dest.copyin(memoryview(combined))
+
 def exec_kernel(ctx:ExecContext, call, ast):
   for bufs, device_vars in unwrap_multi(call, resolve_params(call, ctx.input_uops)):
     var_vals = {**ctx.var_vals, **device_vars}
@@ -223,6 +237,7 @@ pm_optimize_local_size = PatternMatcher([
 pm_exec = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.BUFFER_VIEW, name="ast"),), name="call", allow_any_len=True), exec_view),
   (UPat(Ops.CALL, src=(UPat(Ops.COPY, name="ast"),), name="call", allow_any_len=True), exec_copy),
+  (UPat(Ops.CALL, src=(UPat(Ops.CONCAT, name="ast"),), name="call", allow_any_len=True), exec_concat),
   (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, name="ast"),), name="call", allow_any_len=True), exec_kernel),
   (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="encdec", name="ast"),), name="call", allow_any_len=True), exec_encdec),
   (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="graph", name="ast"),), name="call", allow_any_len=True), exec_graph),

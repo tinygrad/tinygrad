@@ -79,7 +79,7 @@ movement_ops = PatternMatcher([
   (UPat({Ops.ADD, Ops.MUL, Ops.IDIV, Ops.FLOORDIV}, dtype=dtypes.weakint), lambda: True),
 
   # AFTER on Movement Op, INDEX, BUFFER, COPY, or BITCAST
-  (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.INDEX, Ops.MULTI, Ops.CONTIGUOUS, Ops.BUFFER, Ops.BITCAST, Ops.COPY})),),
+  (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.INDEX, Ops.MULTI, Ops.CONTIGUOUS, Ops.BUFFER, Ops.BITCAST, Ops.COPY, Ops.CONCAT})),),
    allow_any_len=True), lambda: True),
 ])
 
@@ -124,6 +124,8 @@ _tensor_spec = PatternMatcher([
 
   # COPY/ALLREDUCE/MULTI
   (UPat(Ops.COPY, name="copy", src=(UPat.var("x"), UPat(Ops.DEVICE)), arg=None), lambda copy,x: copy.dtype == x.dtype),
+  # CONCAT: K sources, arg=(dim, sizes)
+  (UPat(Ops.CONCAT, allow_any_len=True, name="c"), lambda c: isinstance(c.arg, tuple) and len(c.arg) == 2),
   (UPat(Ops.ALLREDUCE, name="red", src=(UPat.var("x"), UPat(Ops.DEVICE))), lambda red,x: red.dtype == x.dtype and isinstance(red.arg, Ops)),
   (UPat(Ops.MULTI, name="multi"), lambda multi: all(x.dtype == multi.dtype for x in multi.src) and isinstance(multi.arg, int)),
 
