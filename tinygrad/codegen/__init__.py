@@ -13,7 +13,7 @@ from tinygrad.dtype import dtypes
 from tinygrad.codegen.gpudims import pm_add_gpudims
 from tinygrad.uop.symbolic import sym, symbolic_simple, gep_pushing, symbolic, pm_move_where_on_load
 from tinygrad.uop.decompositions import get_late_rewrite_patterns, get_transcendental_patterns, pm_dtype_decomps
-from tinygrad.codegen.late.expander import expander, pm_pre_expander, pm_group_for_reduce
+from tinygrad.codegen.late.expander import expander, pm_pre_expander, pm_group_for_reduce, pm_group_for_reduce_warp
 from tinygrad.codegen.late.devectorizer import load_store_folding, load_store_indexing, devectorize, pm_reduce, \
   ReduceContext, correct_load_store, pm_render, pm_add_loads, pm_make_images
 from tinygrad.codegen.opt.postrange import apply_opts
@@ -50,7 +50,8 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   sink = graph_rewrite(sink, sym+pm_move_where_on_load, name="postopt symbolic")
 
   # expand
-  sink = graph_rewrite(sink, sym+pm_pre_expander+pm_group_for_reduce+expander, name="expander")
+  pm_gfr = pm_group_for_reduce_warp if ren.has_warp_reduce else pm_group_for_reduce
+  sink = graph_rewrite(sink, sym+pm_pre_expander+pm_gfr+expander, name="expander")
 
   # add locals
   sink = graph_rewrite(sink, pm_add_buffers_local+rangeify_codegen, ctx=itertools.count(0), name="add local buffers")

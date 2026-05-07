@@ -14,6 +14,7 @@ base_rewrite = PatternMatcher([
   (UPat(Ops.IF, name="x"), lambda ctx,x: f"if ({ctx[x.src[0]]}) {{"),
   (UPat((Ops.ENDIF, Ops.END)), lambda ctx: "}"),
   (UPat(Ops.WMMA, name="x"), lambda ctx,x: f"__{x.arg[0]}({ctx[x.src[0]]}, {ctx[x.src[1]]}, {ctx[x.src[2]]})"),
+  (UPat(Ops.WARP_REDUCE, name="x"), lambda ctx,x: ctx.render_warp_reduce(ctx[x.src[0]], x.arg)),
   # r method accesses
   (UPat(Ops.RANGE, name="x"),
    lambda ctx,x: f"for ({ctx.render_dtype(x.dtype)} {ctx[x]} = 0; {ctx[x]} < {ctx[x.src[0]]}; {ctx[x]}++) {{"),
@@ -132,6 +133,8 @@ class CStyleLanguage(Renderer):
 
   string_rewrite = base_rewrite
   extra_matcher = extra_pm
+
+  def render_warp_reduce(self, val:str, op:Ops) -> str: raise NotImplementedError("WARP_REDUCE not supported on this backend")
 
   def render_kernel(self, function_name:str, kernel:list[str], bufs:list[tuple[str,tuple[DType,bool]]], uops:list[UOp], prefix=None) -> str:
     tmp = ""
@@ -341,10 +344,15 @@ class IntelRenderer(OpenCLRenderer):
 
 class MetalRenderer(CStyleLanguage):
   shared_max = 32768
+  has_warp_reduce = True
+  warp_size = 32
   def __init__(self, target:Target):
     super().__init__(target)
     from tinygrad.runtime.ops_metal import MetalCompiler
     self.compiler, self.tensor_cores = MetalCompiler(), tc.metal if target.arch == "arm64" else []
+
+  def render_warp_reduce(self, val:str, op:Ops) -> str:
+    return f"simd_sum({val})" if op == Ops.ADD else f"simd_max({val})"
 
   # language options
   kernel_typedef = "kernel void"
@@ -387,6 +395,12 @@ _nms = list("xyzwabcdefghijkl") + [f'v{i}' for i in range(16, 32)]
 
 class CUDARenderer(CStyleLanguage):
   global_max = (2147483647, 65535, 65535)
+  has_warp_reduce = True
+  warp_size = 32
+
+  def render_warp_reduce(self, val:str, op:Ops) -> str:
+    fn = "__warp_reduce_add" if op == Ops.ADD else "__warp_reduce_max"
+    return f"{fn}({val})"
   local_max = (1024, 1024, 64)
   shared_max = 49152
 
@@ -431,6 +445,11 @@ class CUDARenderer(CStyleLanguage):
     # TODO: why is dtypes.bfloat16.name == "__bf16"? would be easier not override dtypes.name
     prefix = ["#define INFINITY (__int_as_float(0x7f800000))", "#define NAN (__int_as_float(0x7fffffff))",
               "template <class T, class F> __device__ __forceinline__ T tg_bitcast(F v) { union U { F f; T t; }; U u; u.f = v; return u.t; }"]
+    if any(u.op is Ops.WARP_REDUCE for u in uops):
+      prefix.append("__device__ __forceinline__ float __warp_reduce_add(float v) {"
+        " for (int o=16;o>=1;o>>=1) v+=__shfl_down_sync(0xffffffff,v,o); return v; }")
+      prefix.append("__device__ __forceinline__ float __warp_reduce_max(float v) {"
+        " for (int o=16;o>=1;o>>=1) v=max(v,__shfl_down_sync(0xffffffff,v,o)); return v; }")
     used_dtypes = uops_to_dtypes(uops)
     if any(dt.scalar() in dtypes.fp8s for dt in used_dtypes): prefix.append("#include <cuda_fp8.h>")
     if any(dt.scalar() == dtypes.half for dt in used_dtypes): prefix.append("#include <cuda_fp16.h>")

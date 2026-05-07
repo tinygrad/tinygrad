@@ -56,6 +56,9 @@ class Ops(FastEnum):
   # tensor core math op, not elementwise
   WMMA = auto(); SHAPED_WMMA = auto()
 
+  # warp-level reduction (simd_sum on Metal, __shfl_down_sync loop on CUDA)
+  WARP_REDUCE = auto()
+
   # UnaryOps
   CAST = auto(); BITCAST = auto(); EXP2 = auto(); LOG2 = auto(); SIN = auto()
   SQRT = auto(); RECIPROCAL = auto(); NEG = auto(); TRUNC = auto()

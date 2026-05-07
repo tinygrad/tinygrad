@@ -144,6 +144,22 @@ def fix_group_for_reduce(x:UOp):
   # do the final reduce (if/barrier are added in gpudims step)
   return buf.reduce(*reduce_loop, arg=x.arg)
 
+def fix_group_for_reduce_warp(x:UOp):
+  """When GROUP_REDUCE exactly matches warp size, is the only local/warp dim, no other reduce ranges, ADD/MAX only, use WARP_REDUCE."""
+  if x.arg[0] not in (Ops.ADD, Ops.MAX): return None
+  reduce_gfr, reduce_r = partition(x.src[1:], lambda u: u.op is Ops.RANGE and u.arg[1] == AxisType.GROUP_REDUCE)
+  if len(reduce_gfr) != 1: return None
+  if len(reduce_r) != 0: return None
+  group_size = reduce_gfr[0].vmax + 1
+  if not isinstance(group_size, int) or group_size != 32: return None
+  if x.dtype != dtypes.float: return None
+  topo = list(x.toposort())
+  other_local_dims = [u for u in topo if u.op is Ops.RANGE and u.arg[1] in {AxisType.LOCAL, AxisType.WARP, AxisType.GROUP_REDUCE}
+                      and u not in reduce_gfr]
+  if len(other_local_dims) != 0: return None
+  if any(u.op in {Ops.UNROLL, Ops.CONTRACT} for u in topo): return None
+  return UOp(Ops.WARP_REDUCE, x.dtype, (x.src[0],), x.arg[0])
+
 pm_pre_expander = PatternMatcher([
   # rewrite UPCAST/UNROLL range to something to be expanded
   (UPat(Ops.RANGE, name="r"),
@@ -156,5 +172,10 @@ pm_pre_expander = PatternMatcher([
 
 pm_group_for_reduce = PatternMatcher([
   # fix group for reduce
+  (UPat(Ops.REDUCE, name="x"), fix_group_for_reduce),
+])
+
+pm_group_for_reduce_warp = PatternMatcher([
+  (UPat(Ops.REDUCE, name="x"), fix_group_for_reduce_warp),
   (UPat(Ops.REDUCE, name="x"), fix_group_for_reduce),
 ])
