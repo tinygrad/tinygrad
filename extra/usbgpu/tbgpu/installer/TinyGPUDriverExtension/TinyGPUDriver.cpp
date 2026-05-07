@@ -188,8 +188,8 @@ kern_return_t TinyGPUDriver::CfgWrite(uint32_t off, uint32_t size, uint32_t val)
 kern_return_t TinyGPUDriver::ResetDevice()
 {
 	if (!ivars->pci) return kIOReturnNotReady;
-	ivars->pci->Reset(kIOPCIDeviceResetTypeFunctionReset);
-	return 0;
+	kern_return_t ret = ivars->pci->Reset(kIOPCIDeviceResetTypeFunctionReset);
+	return ret == kIOReturnSuccess ? ret : ivars->pci->Reset(kIOPCIDeviceResetTypeHotReset);
 }
 
 IOPCIDevice* TinyGPUDriver::GetPCI()
