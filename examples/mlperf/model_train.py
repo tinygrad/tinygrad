@@ -1430,7 +1430,7 @@ def train_llama3(llama2_70b_lora:bool=False):
 
     assert not (unused := (state_dict.keys() - get_state_dict(model).keys())), f"unused weights in state_dict: {sorted(unused)}"
 
-    load_state_dict(model, state_dict, strict=False, realize=True, consume=True)
+    load_state_dict(model, state_dict, strict=False, realize=False, consume=True)
     del state_dict # just in case
     if QUANTIZE: model.quantize()
 
