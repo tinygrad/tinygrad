@@ -38,6 +38,21 @@ def _apply_map_to_tensors(applied_map:dict[UOp, UOp], name:str, walk:bool=False)
 
 # **** Tensor helper functions ****
 
+def _is_realized_npy(t) -> bool:
+  u = t.uop
+  while u.op is Ops.RESHAPE: u = u.src[0]
+  if u.op is not Ops.COPY: return False
+  src = u.src[0]
+  while src.op is Ops.RESHAPE: src = src.src[0]
+  return src.op is Ops.BUFFER and src.buffer.is_allocated() and src.buffer.device == "NPY"
+
+def _get_npy_data(t):
+  u = t.uop
+  while u.op is Ops.RESHAPE: u = u.src[0]
+  src = u.src[0]
+  while src.op is Ops.RESHAPE: src = src.src[0]
+  return src.buffer._buf.reshape(t.shape)
+
 def _fromnp(x: 'numpy.ndarray') -> UOp:
   ret = UOp.new_buffer("NPY", x.size, _from_np_dtype(x.dtype))
   # fake realize
@@ -893,6 +908,28 @@ class Tensor(OpMixin):
     return self
 
   # ***** movement ops *****
+
+  def cat(self, *args:Tensor, dim:int=0) -> Tensor:
+    """
+    Concatenates self with other tensors in `args` along an axis specified by `dim`.
+    All tensors must have the same shape except in the concatenating dimension.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t0, t1, t2 = Tensor([[1, 2]]), Tensor([[3, 4]]), Tensor([[5, 6]])
+    print(t0.cat(t1, t2, dim=0).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t0.cat(t1, t2, dim=1).numpy())
+    ```
+    """
+    dim = self._resolve_dim(dim)
+    tensors = [self, *args]
+    for arg in args: assert arg.ndim==self.ndim and all(ti==ai for i,(ti,ai) in enumerate(zip(self.shape, arg.shape)) if i!=dim)
+    if len(tensors) > 4 and not any(t.requires_grad for t in tensors) and all(_is_realized_npy(t) for t in tensors):
+      import numpy as np
+      arrays = [_get_npy_data(t) for t in tensors]
+      return Tensor(np.concatenate(arrays, axis=dim))
+    return super().cat(*args, dim=dim)
 
   def _mop(self, op:Ops, arg) -> Tensor: return self._apply_uop(UOp._mop, extra_args=(op,), arg=arg)
   def _rop(self, op:Ops, axis:tuple[int, ...]) -> Tensor: return self._apply_uop(UOp._rop, op=op, axis=axis)
