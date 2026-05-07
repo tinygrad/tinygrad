@@ -77,11 +77,9 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   else: pm_devectorize = sym+load_store_folding+correct_load_store+load_store_indexing
   if DEVECTORIZE >= 0: sink = graph_rewrite(sink, pm_devectorize, ctx=ren, name="devectorize")
 
-  # move gates before lowering indexes, so bool gates don't become INDEX sources
-  sink = graph_rewrite(sink, pm_move_gates_from_index, name="move gates from index")
-
   # lower the index dtype to a concrete int
   sink = graph_rewrite(sink, pm_lower_index_dtype+load_store_indexing+gep_pushing, name="lower all index dtypes")
+  sink = graph_rewrite(sink, pm_lower_index_dtype+pm_move_gates_from_index, name="move gates from index")
   sink = graph_rewrite(sink, symbolic, name="post index symbolic")
 
   # optional pre matcher
@@ -94,7 +92,6 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   sink = graph_rewrite(sink, pm_decomp, ctx=ren.target, name="decompositions")
   sink = graph_rewrite(sink, pm_dtype_decomps, ctx=(set(), ren.target), name="decomp dtypes")
   sink = graph_rewrite(sink, pm_transcendental, name="transcendental")
-  sink = graph_rewrite(sink, pm_move_gates_from_index, name="move gates from index late")
 
   # final rules for the renderer (without sym)
   extra_matcher = ren.extra_matcher if ren.extra_matcher is not None else PatternMatcher([])
