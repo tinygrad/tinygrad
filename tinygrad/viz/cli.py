@@ -149,7 +149,7 @@ def main(args) -> None:
         agg[(dev,e["name"])] = (t+et, c+1, e["ref"], est)
         total += et
       items = sorted(agg.items(), key=lambda kv:kv[1][0], reverse=True)
-      num_rows = len(items) if args.top < 0 else args.top
+      num_rows = len(items) if args.t < 0 else args.t
       for (dev,name),(t,c,ref,est) in items[:num_rows]:
         display = f"{dev[:7]:7s} {fmt_colored(name)}" if not args.src else fmt_colored(name)
         yield {"name":display, "dur_ms":t, "count":c, "pct":t/total*100.0, "ref":ref, "fmt":{k:int(est[k]/(t*1e-3)) for k in est_keys if k in est}}
@@ -185,7 +185,7 @@ def main(args) -> None:
       ptm = colored(time_to_str(k["dur_ms"]*1e-3, w=9), "yellow" if k["dur_ms"] > 10 else None)
       name = f"*** {k['device'][:7]:7s} "+k["name"]+" "*(46-ansilen(k["name"]))
       return f"{name} tm {ptm}/{k['st_ms']:9.2f}ms"+(f" ({fmt_data(k['fmt'])})" if k["fmt"] else "")
-    fmt_row = fmt_top if args.top else fmt_all
+    fmt_row = fmt_top if args.t else fmt_all
     seen_refs:set[int] = set()
     def render_event(k:dict, ls=args.list) -> None:
       print(emit(k, to_str=fmt_row))
@@ -198,7 +198,7 @@ def main(args) -> None:
           if DEBUG >= 6: print_step(s)
           if DEBUG >= 7 or (len(args.src) > 2 and s["name"] == args.src[2]): print_step(s, reconstruct_matches=True)
       elif DEBUG >= 3 and k.get("ext"): print(emit(k["ext"]))
-    produce = produce_top_kernels if args.top else produce_all_kernels
+    produce = produce_top_kernels if args.t else produce_all_kernels
     if len(args.src) > 1:
       k = get({r["name"]:r for r in produce()}, args.src[1])
       with Context(DEBUG=max(DEBUG.value, 3)): render_event(k, ls=True)
@@ -210,7 +210,7 @@ def get_arg_parser() -> argparse.ArgumentParser:
   g_opts = parser.add_argument_group("optional args")
   g_opts.add_argument("-s", "--src", nargs="+", default=[], metavar="NAME", help="Select a data source (default: ALL)")
   g_opts.add_argument("--list", "--ls", dest="list", action="store_true", help="List sources")
-  g_opts.add_argument("-t", "--top", nargs="?", type=int, const=20, metavar="COUNT", help="Aggregate top kernels (optional count, default 20)")
+  g_opts.add_argument("-t", nargs="?", type=int, const=20, metavar="COUNT", help="Aggregate top kernels (optional count, default 20)")
   g_opts.add_argument("--profile-path", type=str, metavar="PATH", help="Optional path to profile.pkl (default: latest profile)",
                       default=temp("profile.pkl", append_user=True))
   g_opts.add_argument("--rewrites-path", type=str, metavar="PATH", help="Optional path to rewrites.pkl (default: latest rewrites)",
