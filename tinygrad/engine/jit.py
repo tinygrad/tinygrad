@@ -48,8 +48,8 @@ def graph_split_rewrite(linear:UOp, max_batch_size:int=0) -> UOp:
     devs = dedup([Device[x] for b in si.src[1:] if b.op is not Ops.BIND for x in (b.device if isinstance(b.device, tuple) else (b.device,))])
     graph_t = graph_class(devs[0]) if devs[0].graph is not None else None
 
-    can_graph = graph_t is not None and graph_t.supports_exec_item(devs, si)
-    can_extend = can_graph and graph_t is not None and (not current_batch_devs or graph_t.supports_exec_item(current_batch_devs, si)) \
+    can_graph = graph_t is not None and graph_t.supports_uop(devs, si)
+    can_extend = can_graph and graph_t is not None and (not current_batch_devs or graph_t.supports_uop(current_batch_devs, si)) \
       and (max_batch_size == 0 or len(current_batch) < max_batch_size)
     if not can_extend and current_batch: flush_batch()
 
@@ -166,13 +166,13 @@ class GraphRunner:
                  for x in (b.device if isinstance(b.device, tuple) else (b.device,))])
 
   @staticmethod
-  def supports_exec_item(batch_devs:list[Compiled], new_call:UOp) -> bool:
+  def supports_uop(batch_devs:list[Compiled], new_call:UOp) -> bool:
     return new_call.src[0].op is Ops.PROGRAM and len(GraphRunner._all_devs(batch_devs, new_call)) == 1
 
 # a marker for your graph supporting multiple devices of the same type
 class MultiGraphRunner(GraphRunner):
   @staticmethod
-  def supports_exec_item(batch_devs:list[Compiled], new_call:UOp) -> bool:
+  def supports_uop(batch_devs:list[Compiled], new_call:UOp) -> bool:
     # Devices must be the same type
     return new_call.src[0].op in (Ops.PROGRAM, Ops.COPY) and len(dedup([type(d) for d in GraphRunner._all_devs(batch_devs, new_call)])) == 1
 

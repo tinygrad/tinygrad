@@ -449,8 +449,8 @@ class TestFunctionTuple(unittest.TestCase):
       store_d = D[i].store(A[i] * 3.0)
       return UOp.group(store_c, store_d).end(i).sink(arg=KernelInfo(name="my_kernel"))
 
-    def my_grad(d_combined:UOp, call:UOp):
-      return (None, None, Tensor(d_combined).uop)
+    def my_grad(d_c:UOp, d_d:UOp, call:UOp):
+      return (None, None, (Tensor(d_c) + Tensor(d_d)).uop)
 
     @function(precompile=True, precompile_backward=True)
     def f(a:Tensor):
