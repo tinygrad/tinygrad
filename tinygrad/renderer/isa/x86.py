@@ -233,8 +233,8 @@ reg_strs = {"rax": {4:"eax", 2:"ax", 1:"al"}, "rcx": {4:"ecx", 2:"cx", 1:"cl"}, 
         **{f"r{i}": {4:f"r{i}d", 2:f"r{i}w", 1:f"r{i}b"} for i in range(8, 16)}, **{f"xmm{i}": {64:f"zmm{i}", 32:f"ymm{i}"} for i in range(16)}}
 
 # ***** X86 instruction selection *****
-# if the load is used multiple times we don't fold
-def is_foldable_load(ctx:IselContext, x:UOp, s:UOp) -> bool: return s.op is Ops.LOAD and len(ctx.uses[s]) == x.src.count(s) == 1
+# if s is used multiple times we don't fold
+def is_foldable(ctx:IselContext, x:UOp, s:UOp) -> bool: return len(ctx.uses[s]) == x.src.count(s) == 1
 def base(x:UOp, i:int) -> UOp: return s.src[0] if (s:=x.src[i]).op is Ops.GEP else s
 def lane(x:UOp, i:int) -> int: return s.arg[0] if (s:=x.src[i]).op is Ops.GEP else 0
 def to_int(dt:DType): return {dtypes.float16: dtypes.int16, dtypes.float32: dtypes.int32, dtypes.float64: dtypes.int64}[dt]
@@ -294,7 +294,7 @@ def vpins(x:UOp) -> UOp:
 # inserts scalar int in xmm0 into all lanes of xmm1
 def vpbroadcast(ctx:IselContext, x:UOp, y:UOp) -> UOp:
   n = x.ins({1: X86Ops.VPBROADCASTB, 2: X86Ops.VPBROADCASTW, 4: X86Ops.VPBROADCASTD, 8: X86Ops.VPBROADCASTQ}[y.dtype.itemsize], src=(y,))
-  if is_foldable_load(ctx, n, y): return n
+  if y.op is Ops.LOAD and is_foldable(ctx, n, y): return n
   # if there isn't a load we can fold we need to move y from gpr to xmm
   # this is hacky but required because int.vec(1) isn't supported
   y = y if y.dtype.itemsize > 1 else y.cast(dtypes.int16)
@@ -444,7 +444,7 @@ isel_matcher = PatternMatcher([
   (UPat.var("y", dtypes.float32).broadcast(name="x"), lambda y,x: x.ins(X86Ops.VBROADCASTSS, src=(y,))),
   # for float16 we route the srcs through gprs unless we can fold them, this is suboptimal for values in xmms, in that case we want vpunpcklwd
   (UPat(Ops.STACK, dtypes.float16, name="x"), lambda ctx,x:
-   vpins(x.replace(src=tuple(s if is_foldable_load(ctx, x, s) else s.bitcast(dtypes.int16) for s in x.src)))),
+   vpins(x.replace(src=tuple(s if s.op is Ops.LOAD and is_foldable(ctx, x, s) else s.bitcast(dtypes.int16) for s in x.src)))),
   (UPat(Ops.STACK, (dtypes.float32.vec(4), dtypes.float32.vec(8)), name="x"), vshufps),
   (UPat(Ops.STACK, (dtypes.float64.vec(2), dtypes.float64.vec(4)), name="x"), vshufpd),
   (UPat(Ops.STACK, dtypes.float32, name="x"), vinsertps),
@@ -456,11 +456,11 @@ isel_matcher = PatternMatcher([
   (UPat.var("y", dtypes.int32s).gep(name="x"), lambda y,x: x.ins(X86Ops.VPEXTRD, src=(y, imm(dtypes.uint8, x.arg[0])))),
   (UPat.var("y", dtypes.int64s).gep(name="x"), lambda y,x: x.ins(X86Ops.VPEXTRQ, src=(y, imm(dtypes.uint8, x.arg[0])))),
   (UPat.var("y", dtypes.floats).gep(name="x"), lambda y,x: x.ins(X86Ops.VPSRLDQ, src=(y, imm(dtypes.uint8, x.arg[0] * x.dtype.itemsize)))),
-  # fused multiply add TODO: don't fuse if mul used several times
-  (UPat.var('a', dtypes.float32) * UPat.var('b') + UPat.var('c'), lambda a,b,c:
-   a.ins(X86Ops.VFMADD213SS if a.dtype.count == 1 else X86Ops.VFMADD213PS, src=(a, b, c))),
-  (UPat.var('a', dtypes.float64) * UPat.var('b') + UPat.var('c'), lambda a,b,c:
-   a.ins(X86Ops.VFMADD213SD if a.dtype.count == 1 else X86Ops.VFMADD213PD, src=(a, b, c))),
+  # fused multiply add
+  ((UPat(Ops.MUL, dtypes.float32, name="a") + UPat.var("b")).named("c"), lambda ctx,a,b,c:
+   (a.ins(X86Ops.VFMADD213SS if a.dtype.count == 1 else X86Ops.VFMADD213PS, src=(*a.src, b))) if is_foldable(ctx, c, a) else None),
+  ((UPat(Ops.MUL, dtypes.float64, name="a") + UPat.var("b")).named("c"), lambda ctx,a,b,c:
+   (a.ins(X86Ops.VFMADD213SD if a.dtype.count == 1 else X86Ops.VFMADD213PD, src=(*a.src, b))) if is_foldable(ctx, c, a) else None),
   # packed bitwise
   ((UPat() & UPat()).named("x"), lambda x: x.ins(X86Ops.VPAND) if x.dtype.count > 1 else None),
   ((UPat() | UPat()).named("x"), lambda x: x.ins(X86Ops.VPOR) if x.dtype.count > 1 else None),
@@ -573,11 +573,11 @@ isel_matcher = PatternMatcher([
   # **** X86Op -> X86Op ****
   # fold loads into X86Ops that allow it, if beneficial
   (UPat(Ops.INS, src=(UPat(Ops.LOAD, name="y"),), allow_any_len=True, name="x"), lambda ctx,y,x:
-   x.replace(src=fold_address(y.src[0]) + x.src[1:]) if x.arg in X86GroupOp.ReadMem1st and is_foldable_load(ctx, x, y) else None),
+   x.replace(src=fold_address(y.src[0]) + x.src[1:]) if x.arg in X86GroupOp.ReadMem1st and is_foldable(ctx, x, y) else None),
   (UPat(Ops.INS, src=(UPat(), UPat(Ops.LOAD, name="y")), allow_any_len=True, name="x"), lambda ctx,y,x:
-   x.replace(src=x.src[:1] + fold_address(y.src[0]) + x.src[2:]) if x.arg in X86GroupOp.ReadMem2nd and is_foldable_load(ctx, x, y) else None),
+   x.replace(src=x.src[:1] + fold_address(y.src[0]) + x.src[2:]) if x.arg in X86GroupOp.ReadMem2nd and is_foldable(ctx, x, y) else None),
   (UPat(Ops.INS, src=(UPat(), UPat(), UPat(Ops.LOAD, name="y")), allow_any_len=True, name="x"), lambda ctx,y,x:
-   x.replace(src=x.src[:2] + fold_address(y.src[0]) + x.src[3:]) if x.arg in X86GroupOp.ReadMem3rd and is_foldable_load(ctx, x, y) else None),
+   x.replace(src=x.src[:2] + fold_address(y.src[0]) + x.src[3:]) if x.arg in X86GroupOp.ReadMem3rd and is_foldable(ctx, x, y) else None),
   # allocate virtual registers
   (UPat((Ops.INS, Ops.DEFINE_REG, Ops.DEFINE_LOCAL), name="x"), alloc_vregs),
 ])

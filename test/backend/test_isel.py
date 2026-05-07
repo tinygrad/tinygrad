@@ -46,12 +46,11 @@ class TestIselX86(unittest.TestCase):
              (dtypes.float32.vec(4), X86Ops.VFMADD213PS), (dtypes.float64.vec(4), X86Ops.VFMADD213PD)]
     self._check_op(dt_op, lambda a,b,c: a * b + c)
 
-  # TODO: shouldn't match fmadd if var is used multiple times
-  @unittest.expectedFailure
-  def test_vfmadd_fail(self):
+  # don't use fmadd if op being fused (mul) is used multiple times
+  def test_no_vfmadd(self):
     dt_op = [(dtypes.float32, X86Ops.VADDSS), (dtypes.float64, X86Ops.VADDSD),
              (dtypes.float32.vec(4), X86Ops.VADDPS), (dtypes.float64.vec(4), X86Ops.VADDPD)]
-    self._check_op(dt_op, lambda a,b: a * b + b)
+    self._check_op(dt_op, lambda a,b: a * b + a * b)
 
   def test_vpbroadcast(self):
     a = UOp.variable("a", 0, 0, dtypes.int32)
