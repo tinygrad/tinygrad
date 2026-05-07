@@ -1,13 +1,12 @@
 from __future__ import annotations
-import ctypes, collections, dataclasses, functools, hashlib, array, pathlib, sys
-from tinygrad.helpers import mv_address, getenv, DEBUG, fetch, lo32, hi32
+import ctypes, collections, dataclasses, functools, hashlib, array
+from tinygrad.helpers import mv_address, getenv, DEBUG, lo32, hi32, fetch_fw
 from tinygrad.runtime.autogen import pci
 from tinygrad.runtime.autogen.am import am, fw
 from tinygrad.runtime.support.amd import AMDReg, import_module, import_asic_regs
 from tinygrad.runtime.support.memory import TLSFAllocator, MemoryManager, AddrSpace
 from tinygrad.runtime.support.system import PCIDevice
 from tinygrad.runtime.support.am.ip import AM_IP, AM_SOC, AM_GMC, AM_IH, AM_PSP, AM_SMU, AM_GFX, AM_SDMA
-if sys.version_info >= (3, 14): from compression import zstd
 
 AM_DEBUG = getenv("AM_DEBUG", 0)
 
@@ -109,10 +108,7 @@ class AMFirmware:
     self.descs += [self.desc(blob, hdr0.header.ucode_array_offset_bytes, hdr0.header.ucode_size_bytes, am.GFX_FW_TYPE_RLC_G)]
 
   def load_fw(self, fname:str, *headers, versioned_header:str|None=None):
-    if (sys.version_info >= (3,14) and (p:=pathlib.Path("/lib/firmware/amdgpu")/f"{fname}.zst").is_file() and
-        hashlib.sha256(b:=zstd.decompress(p.read_bytes())).hexdigest() == fw.hashes[fname]): blob = memoryview(bytearray(b))
-    else: blob = memoryview(bytearray(fetch(f"https://gitlab.com/kernel-firmware/linux-firmware/-/raw/1e2c15348485939baf1b6d1f5a7a3b799d80703d/amdgpu/{fname}",
-                                            subdir="fw", sha256=fw.hashes[fname]).read_bytes()))
+    blob = memoryview(bytearray(fetch_fw("amdgpu", fname, fw.hashes[fname])))
     if AM_DEBUG >= 1: print(f"am {self.adev.devfmt}: loading firmware {fname}: {hashlib.sha256(blob).hexdigest()}")
     if versioned_header:
       chdr = am.struct_common_firmware_header.from_address(mv_address(blob))

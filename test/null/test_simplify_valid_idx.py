@@ -518,17 +518,18 @@ class TestUnfoldableImage(unittest.TestCase):
 
 class TestDropTrueGate(unittest.TestCase):
   def test_drop_true_gate_on_index(self):
-    # test that INDEX with a constant True gate gets simplified to drop the gate
+    # test that INDEX with a constant True valid gets simplified to drop the valid
     from tinygrad.codegen.late.devectorizer import load_store_indexing
     from tinygrad.uop.ops import graph_rewrite
+    from tinygrad.uop.symbolic import sym
     buf = UOp(Ops.PARAM, dtypes.int.ptr(), arg=0)
     idx = UOp.const(dtypes.weakint, 0)
     true_gate = UOp.const(dtypes.bool, True)
-    index_with_gate = UOp(Ops.INDEX, dtypes.int.ptr(), (buf, idx, true_gate))
+    index_with_gate = UOp(Ops.INDEX, dtypes.int.ptr(), (buf, idx.valid(true_gate)))
     # apply the optimization
-    result = graph_rewrite(index_with_gate, load_store_indexing)
-    # the True gate should be dropped (INDEX should only have 2 sources)
-    self.assertEqual(len(result.src), 2, "True gate should be dropped from INDEX")
+    result = graph_rewrite(index_with_gate, sym+load_store_indexing)
+    # the True valid should be dropped (INDEX should only have 2 sources)
+    self.assertEqual(len(result.src), 2, "True valid should be dropped from INDEX")
 
 class TestRangeShrink(unittest.TestCase):
   def get_ranges(self, sink):

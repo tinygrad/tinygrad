@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, codecs, io, struct, re
-import pathlib, traceback, itertools, socketserver
+import multiprocessing, pickle, difflib, os, threading, json, time, sys, webbrowser, socket, argparse, codecs, io, struct, re, traceback, itertools
+import socketserver
 from contextlib import redirect_stdout, redirect_stderr, contextmanager
 from decimal import Decimal
 from dataclasses import dataclass, field
@@ -679,14 +679,14 @@ def reloader():
 T = TypeVar("T")
 # unpickling may load libraries, turn off DEBUG=3 output
 @Context(DEBUG=0)
-def load_pickle(path:pathlib.Path, default:T) -> T:
-  if not path.exists(): return default
-  with path.open("rb") as f:return pickle.load(f)
+def load_pickle(path:str, default:T) -> T:
+  if not os.path.exists(path): return default
+  with open(path, "rb") as f: return pickle.load(f)
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser()
-  parser.add_argument('--rewrites-path', type=pathlib.Path, help='Path to rewrites', default=pathlib.Path(temp("rewrites.pkl", append_user=True)))
-  parser.add_argument('--profile-path', type=pathlib.Path, help='Path to profile', default=pathlib.Path(temp("profile.pkl", append_user=True)))
+  parser.add_argument('--rewrites-path', type=str, help='Path to rewrites', default=temp("rewrites.pkl", append_user=True))
+  parser.add_argument('--profile-path', type=str, help='Path to profile', default=temp("profile.pkl", append_user=True))
   args = parser.parse_args()
 
   with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:

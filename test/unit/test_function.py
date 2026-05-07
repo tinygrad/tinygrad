@@ -2,7 +2,7 @@ import numpy as np
 import unittest
 from tinygrad.function import function
 from tinygrad import Tensor, GlobalCounters
-from tinygrad.uop.ops import UOp, KernelInfo
+from tinygrad.uop.ops import UOp, Ops, KernelInfo
 
 class TestFunction(unittest.TestCase):
   def test_simple(self):
@@ -463,6 +463,35 @@ class TestFunctionTuple(unittest.TestCase):
     Tensor.realize(a)
     c, d = f(a)
     (c.sum() + d.sum()).backward()  # dL/da = (1 + 1) since grad_fxn passes d_combined through
+    Tensor.realize(a.grad)
+    np.testing.assert_allclose(a.grad.numpy(), [2., 2., 2., 2.])
+
+  def test_custom_kernel_precompile_no_copy_kernel(self):
+    def my_kernel(C:UOp, A:UOp) -> UOp:
+      i = UOp.range(A.shape[0], 0)
+      return C[i].store(A[i] * 2.0).end(i).sink(arg=KernelInfo(name="my_kernel"))
+
+    def my_grad(d_c:UOp, call:UOp):
+      return (None, (Tensor(d_c) * 2.0).uop)
+
+    @function(precompile=True, precompile_backward=True)
+    def f(a:Tensor):
+      c = Tensor.invalids(*a.shape, dtype=a.dtype, device=a.device)
+      c = Tensor.custom_kernel(c, a, fxn=my_kernel, grad_fxn=my_grad)[0]
+      return c
+
+    def count_kernels(t:Tensor):
+      linear, _ = t.linear_with_vars()
+      return sum((len(call.device) if isinstance(call.device, tuple) else 1)
+                 for call in linear.src if call.src[0].op is Ops.SINK)
+
+    a = Tensor([1., 2., 3., 4.], requires_grad=True).contiguous()
+    Tensor.realize(a)
+    c = f(a)
+
+    self.assertEqual(count_kernels(c), 1)
+
+    c.sum().backward()
     Tensor.realize(a.grad)
     np.testing.assert_allclose(a.grad.numpy(), [2., 2., 2., 2.])
 

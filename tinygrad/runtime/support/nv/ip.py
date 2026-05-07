@@ -2,7 +2,7 @@ from __future__ import annotations
 import ctypes, time, array, struct, itertools, dataclasses
 from typing import cast, Any
 from tinygrad.runtime.autogen import nv, nv_570 as nv_gpu, pci
-from tinygrad.helpers import lo32, hi32, DEBUG, round_up, round_down, fetch, wait_cond, ceildiv
+from tinygrad.helpers import lo32, hi32, DEBUG, round_up, round_down, fetch_fw, wait_cond, ceildiv
 from tinygrad.runtime.support.system import System, MMIOInterface
 from tinygrad.runtime.support.elf import elf_loader
 
@@ -390,9 +390,7 @@ class NV_GSP(NV_IP):
     libos_args_view[:sum(ctypes.sizeof(s) for s in libos_structs)] = b''.join(bytes(s) for s in libos_structs)
 
   def init_gsp_image(self):
-    fw = fetch("https://github.com/NVIDIA/linux-firmware/raw/refs/heads/nvidia-staging/nvidia/ga102/gsp/gsp-570.144.bin", subdir="fw").read_bytes()
-
-    _, sections, _ = elf_loader(fw)
+    _, sections, _ = elf_loader(fetch_fw("nvidia/ga102/gsp", "gsp-570.144.bin", "a8c3ebeed280323aedb51c061f321e73379cce7a9ae643a33dd03915df027f7f"))
     self.gsp_image = next((sh.content for sh in sections if sh.name == ".fwimage"))
     signature = next((sh.content for sh in sections if sh.name == (f".fwsignature_{self.nvdev.chip_name[:4].lower()}x")))
 

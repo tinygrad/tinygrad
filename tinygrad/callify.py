@@ -99,7 +99,18 @@ def transform_precompiled_call(c:UOp) -> UOp|None:
   resolved = [c.gettuple(i) for i in range(len(srcs))]
   outs = tuple(r.empty_like() for r in resolved)
   targets = [o.param_like(len(c.src)-1+i).shrink_to(s.shape) for i,(o,s) in enumerate(zip(outs, srcs))]
-  fxn = UOp.sink(*[t.after(t.store(s)) for t,s in zip(targets, srcs)])
+
+  subs:dict[UOp, UOp] = {}
+  items:list[UOp] = []
+  for s, t in zip(srcs, targets):
+    while s.op is Ops.AFTER: s = s.src[0]
+    base = s.base
+    if base.op in {Ops.CONTIGUOUS, Ops.BUFFER} and base.shape == t.shape and base not in subs:
+      subs[base] = t.after(t.store(base.src[0])) if base.op is Ops.CONTIGUOUS else t
+      items.append(s)
+    else:
+      items.append(t.after(t.store(s)))
+  fxn = UOp.sink(*(x.substitute(subs) for x in items))
 
   # body switches from TUPLE to SINK, so the node becomes an opaque CALL (not FUNCTION)
   new_call = UOp(Ops.CALL, c.dtype, (fxn, *input_buffers, *outs), c.arg)
