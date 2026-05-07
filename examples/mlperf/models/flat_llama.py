@@ -29,11 +29,6 @@ FUSED_SILU_W13 = getenv("FUSED_SILU_W13", 0)
 FP8_DTYPE = dtypes.fp8e4m3
 FP8_GRAD_DTYPE = dtypes.fp8e5m2
 
-def quantize_fp8_weight(w:Tensor) -> tuple[Tensor, Tensor]:
-  amax = w.abs().flatten(1).max(1).detach()
-  scale = FP8_MAX / (amax + 1e-8)
-  return (w * scale.reshape(-1, 1, 1)).clamp(-FP8_MAX, FP8_MAX).cast(FP8_DTYPE), (amax + 1e-8) / FP8_MAX
-
 def quantize_fp8(x:Tensor, amax_state:Tensor|None=None):
   new_amax = (local_abs_max(x) if isinstance(x.device, tuple) else x.abs().max()).detach().cast(dtypes.float32)
   scale = FP8_MAX / ((amax_state if amax_state is not None else new_amax) + 1e-8)
@@ -140,25 +135,19 @@ class FlatTransformer:
     self.output = Tensor.normal(1, vocab_size, dim, mean=0.0, std=0.02, dtype=dtypes.bfloat16)
     self.freqs_cis = precompute_freqs_cis(dim // n_heads, max_context * 2, rope_theta).contiguous().requires_grad_(False)
 
-    # quantize
-    self.quantize()
-
-  def quantize(self):    
     def _amax(): return Tensor.full((), FP8_MAX, dtype=dtypes.float32).contiguous().requires_grad_(False)
     names = ["xqkv", "xo", "x13", "x2"]
-    self._fp8_amax = {name: [_amax() for _ in range(self.n_layers)] for name in names}
+    self._fp8_amax = {name: [_amax() for _ in range(n_layers)] for name in names}
     grad_names = ["xqkv", "xo", "xw13", "xout"]
-    self._fp8_grad_amax = {name: [_amax() for _ in range(self.n_layers)] for name in grad_names}
+    self._fp8_grad_amax = {name: [_amax() for _ in range(n_layers)] for name in grad_names}
     w_names = ["wqkv", "wo", "w13", "w2"]
-    fp8_weights, init_inv_scales = list(zip(*[quantize_fp8_weight(getattr(self, w_name)) for w_name in w_names]))
-    for weight, name in zip(fp8_weights, w_names): getattr(self, name).replace(weight)
     self._fp8_inv_scale = {wname: inv_scales.float().contiguous().requires_grad_(False)
-                           for wname, inv_scales in zip(w_names, init_inv_scales)}
+                           for wname, inv_scales in zip(w_names, self._init_inv_scales)}
+    del self._init_inv_scales
 
   def create_lora_params(self, in_dim:int, out_dim:float, rank:int) -> tuple[Tensor, Tensor]:
-    kwargs = {'dtype': LORA_DTYPE} if (LORA_DTYPE:=getenv('LORA_DTYPE', '')) else {}
-    a = self.lin_per_layer(in_dim, rank, requires_grad=True, use_kaiming=True, **kwargs)
-    b = self.lin_per_layer(rank, out_dim, zerod=True, requires_grad=True, **kwargs)
+    a = self.lin_per_layer(in_dim, rank, requires_grad=True, use_kaiming=True)
+    b = self.lin_per_layer(rank, out_dim, requires_grad=True, zeros=True)
     return a, b
 
   def run_lora(self, lora_a: Tensor, lora_b: Tensor, x: Tensor) -> Tensor:
@@ -166,14 +155,18 @@ class FlatTransformer:
     out, *_ = matmul(out, lora_b, fp8=False)
     return out * self.lora_scale
 
-  def lin_per_layer(self, in_features:int, out_features:int, std:float=0.02, zerod:bool=False, use_kaiming:bool=False, **kwargs):
-    if zerod or getenv("ZEROS"):
-      return Tensor.zeros(self.n_layers, out_features, in_features, **kwargs)
+  def lin_per_layer(self, in_features:int, out_features:int, std:float=0.02, zeros:bool=False, use_kaiming:bool=False, **kwargs):
+    if zeros or getenv("ZEROS"):
+      w = Tensor.zeros(self.n_layers, out_features, in_features, **kwargs)
     else:
       if use_kaiming:
-        return Tensor.kaiming_uniform(self.n_layers, out_features, in_features, a=math.sqrt(5), **kwargs)
+        w = Tensor.kaiming_uniform(self.n_layers, out_features, in_features, a=math.sqrt(5), **kwargs)
       else:
-        return Tensor.normal(self.n_layers, out_features, in_features, mean=0.0, std=std, **kwargs)
+        w = Tensor.normal(self.n_layers, out_features, in_features, mean=0.0, std=std, **kwargs)
+    amax = w.abs().flatten(1).max(1).detach()
+    scale = FP8_MAX / (amax + 1e-8)
+    self._init_inv_scales.append((amax + 1e-8) / FP8_MAX)
+    return (w * scale.reshape(-1, 1, 1)).clamp(-FP8_MAX, FP8_MAX).cast(FP8_DTYPE)
 
   def attention(self, x:Tensor, freqs_cis:Tensor, attention_norm:Tensor, wqkv:Tensor, wo:Tensor,
                 amax_xqkv:Tensor, amax_xo:Tensor, s_qkv:Tensor, s_o:Tensor,
