@@ -384,8 +384,8 @@ class TestLinearizer(unittest.TestCase):
     self.assertEqual(stores[0].src[1].dtype, dtypes.float.vec(4))
     #assert stores[0].src[-1].op is not Ops.VECTORIZE
 
-    # the global store doesn't change
-    assert stores[1].src[1].dtype == dtypes.float
+    # the global store may be vectorized depending on MV_ROWS_PER_THREAD
+    assert stores[1].src[1].dtype in (dtypes.float, dtypes.float.vec(4))
 
 # *** helpers ***
 
