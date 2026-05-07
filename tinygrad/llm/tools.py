@@ -24,7 +24,7 @@ def format_tools(tools: list|None) -> str:
   functions = [tool.get('function', {}) for tool in tools]
   return "<tools>\n" + "\n".join(_tool_sig(fn) for fn in functions) + "\n</tools>\n" \
     + "Use exactly one listed tool name in \"name\" and include all arguments in \"arguments\".\n" \
-    + "Reply with a complete tool call: " + TOOL_CALL_OPEN + '{"name":"...","arguments":{..}}' + TOOL_CALL_CLOSE \
+    + "Reply with a complete tool call: " + TOOL_CALL_OPEN + '{"name":"...","arguments":{...}}' + TOOL_CALL_CLOSE \
     + "\nExample bash call: " + TOOL_CALL_OPEN + '{"name":"bash","arguments":{"command":"ls","description":""}}' + TOOL_CALL_CLOSE
 
 # parse the last tool_call block
