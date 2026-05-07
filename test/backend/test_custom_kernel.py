@@ -1,5 +1,5 @@
 import unittest
-from tinygrad import Tensor, UOp
+from tinygrad import Tensor, UOp, GlobalCounters
 from tinygrad.dtype import AddrSpace, dtypes
 from tinygrad.uop.ops import KernelInfo, AxisType
 
@@ -189,7 +189,7 @@ class TestCustomKernel(unittest.TestCase):
     A = Tensor.randn(16, 16).contiguous()
     B = Tensor.empty(16)
     B = Tensor.custom_kernel(B, A, fxn=slice_sum_kernel)[0]
-    self.assertTrue(B.allclose(A.sum(1)))
+    self.assertTrue(B.allclose(A.sum(1)).item())
 
   def test_gemm(self):
     N = 16
@@ -273,12 +273,12 @@ class TestCustomKernel(unittest.TestCase):
     C, D, _, _ = Tensor.custom_kernel(C, D, A2, B2, fxn=custom_elementwise_addmul_kernel)  # depends on A2 AND B2
     E = (A2 * 3).contiguous()                      # kernel 2: depends only on A2
     result = (C + D + E).sum()                     # kernel 3: custom_addmul, then kernel 4: sum
-    schedule = result.schedule()
+    schedule = result.schedule_linear().src
 
     # Find the custom_addmul kernel position
     custom_idx = next((i for i, item in enumerate(schedule)
-                       if hasattr(item.ast, "arg") and hasattr(item.ast.arg, "name")
-                       and "custom_addmul" in item.ast.arg.name), None)
+                       if hasattr(item.src[0], "arg") and hasattr(item.src[0].arg, "name")
+                       and "custom_addmul" in item.src[0].arg.name), None)
 
     self.assertIsNotNone(custom_idx, "custom_addmul kernel not found in schedule")
     self.assertEqual(custom_idx, 3, f"custom_addmul should be at index 3, got {custom_idx}")
@@ -299,14 +299,44 @@ class TestCustomKernel(unittest.TestCase):
     from tinygrad import function
     @function(precompile=True)
     def run(x:Tensor, w:Tensor) -> Tensor:
-      out = Tensor.invalid(*x.shape, dtype=x.dtype)
-      tmp = Tensor.invalid(*x.shape, dtype=x.dtype)
+      out = Tensor.invalids(*x.shape, dtype=x.dtype)
+      tmp = Tensor.invalids(*x.shape, dtype=x.dtype)
       out, tmp = Tensor.custom_kernel(out, tmp, x, w, fxn=custom_add_with_tmp)[:2]
       return out+tmp
 
     result = run(a, b).flatten().tolist()
     expected = (3+2)*2+2
     assert all(x == expected for x in result), f"expected all {expected}, got {result}"
+
+  def test_custom_kernel_sched(self, use_custom=False):
+    x = Tensor.arange(32).reshape(8, 4).realize()
+    y = Tensor.empty_like(x)
+    y = Tensor.custom_kernel(y, x, fxn=custom_add_one_kernel)[0]
+    if use_custom:
+      z = Tensor.empty_like(x)
+      z = Tensor.custom_kernel(y, y.T.T, fxn=custom_add_one_kernel)[0]
+    else: z = y.T.T+1
+    GlobalCounters.reset()
+    z.realize()
+    self.assertEqual(GlobalCounters.kernel_count, 2)
+    self.assertEqual(z.tolist(), x.add(2).tolist())
+
+  @unittest.expectedFailure
+  def test_custom_kernel_sched_copy(self): self.test_custom_kernel_sched(use_custom=True)
+
+  @unittest.expectedFailure
+  def test_sliced_buffer_function(self):
+    x = Tensor.arange(32).reshape(8, 4).realize()
+    from tinygrad import function
+    @function(precompile=True)
+    def run(x:Tensor) -> Tensor:
+      y = Tensor.invalids(*x.shape, dtype=x.dtype)
+      return Tensor.custom_kernel(y, x, fxn=custom_add_one_kernel)[0]
+    GlobalCounters.reset()
+    y = run(x[0]).realize()
+    # it's copying the input and the output
+    self.assertEqual(GlobalCounters.kernel_count, 1)
+    self.assertEqual(y.tolist(), [1, 2, 3, 4])
 
 class TestUOpReduce(unittest.TestCase):
   def test_uop_sum(self):

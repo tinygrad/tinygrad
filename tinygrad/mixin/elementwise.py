@@ -1,5 +1,5 @@
 import math, functools, operator
-from typing import Self
+from typing import Literal, Self
 from tinygrad.uop import Ops
 from tinygrad.dtype import dtypes, ConstType, PyConst, least_upper_dtype, least_upper_float
 from tinygrad.helpers import argfix, polyN
@@ -38,6 +38,8 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
     ```
     """
     return self.cast(dtypes.bool).ne(True)
+
+  def contiguous(self, *args, **kwargs) -> Self: raise NotImplementedError
 
   def contiguous_backward(self) -> Self:
     """
@@ -165,24 +167,62 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
     self._check_dtype()
     return self._binop(Ops.XOR, x, reverse)
 
-  def idiv(self, x: Self | ConstType, reverse: bool = False) -> Self:
+  def mod(self, x: Self | ConstType, reverse: bool = False) -> Self:
     """
-    Divides `self` by `x`.
-    Equivalent to `self // x`.
+    Mod `self` by `x`.
+    Equivalent to `self % x`.
     Supports broadcasting to a common shape, type promotion, and integer inputs.
-    `idiv` performs integer division (truncate towards zero).
 
     ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-4, 7, 5, 4, -7, 8]).idiv(Tensor([2, -3, 8, -2, 3, 5])).numpy())
+    print(Tensor([-4, 7, 5, 4, -7, 8]).mod(Tensor([2, -3, 8, -2, 3, 5])).numpy())
     ```
     """
-    return self._binop(Ops.IDIV, x, reverse)
+    a, b = self._broadcasted(x, reverse)
+    if dtypes.is_int(a.dtype): return a.alu(Ops.FLOORMOD, b)
+    return a - (a // b) * b
 
-  def mod(self, x: Self | ConstType, reverse: bool = False) -> Self:
-    return self._binop(Ops.MOD, x, reverse)
+  def fmod(self, x: Self | ConstType) -> Self:
+    """
+    C-style remainder of `self` divided by `x` (sign follows the dividend), using truncating division.
+    Differs from `mod`/`%`, which uses Python floor remainder.
 
-  def div(self, x: Self | ConstType, reverse: bool = False) -> Self:
-    return (self.ufix(x) * self.alu(Ops.RECIPROCAL)) if reverse else (self * self.ufix(x).alu(Ops.RECIPROCAL))
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([-4, 7, 5, 4, -7, 8]).fmod(Tensor([2, -3, 8, -2, 3, 5])).numpy())
+    ```
+    """
+    a, b = self._broadcasted(x)
+    if dtypes.is_int(a.dtype): return a.alu(Ops.MOD, b)
+    return a - (a*b.reciprocal()).trunc() * b
+
+  def div(self, x: Self | ConstType, reverse: bool = False, rounding_mode: Literal["trunc", "floor"] | None = None) -> Self:
+    """
+    Divides `self` by `x`.
+    Equivalent to `self / x`.
+    Supports broadcasting to a common shape, type promotion, and integer, float, boolean inputs.
+    `div` performs true division by default; pass `rounding_mode="trunc"` for truncating toward zero
+    or `rounding_mode="floor"` for floor division.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    Tensor.manual_seed(42)
+    t = Tensor.randn(4)
+    print(t.numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.div(3).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([1, 4, 10]).div(Tensor([2, 3, 4])).numpy())
+    ```
+    """
+    lhs, rhs = self._broadcasted(x, reverse)
+    if rounding_mode is None: return lhs * rhs.reciprocal()
+    if dtypes.is_int(lhs.dtype):
+      if rounding_mode == "trunc": return lhs.alu(Ops.IDIV, rhs)
+      if rounding_mode == "floor": return lhs // rhs
+    d = lhs.cast(least_upper_float(lhs.dtype)) * rhs.cast(least_upper_float(rhs.dtype)).reciprocal()
+    if rounding_mode == "trunc": return d.trunc()
+    if rounding_mode == "floor": return d.floor()
+    raise RuntimeError(f"{rounding_mode=} is not supported")
 
   def __neg__(self) -> Self:
     return self.neg()
@@ -203,7 +243,8 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
     return self.div(x)
 
   def __floordiv__(self, x: Self | ConstType) -> Self:
-    return self.idiv(x)  # TODO: idiv is trunc div, not floordiv
+    a, b = self._broadcasted(x, reverse=False)
+    return a.alu(Ops.FLOORDIV, b) if dtypes.is_int(a.dtype) else (a*b.reciprocal()).floor()
 
   def __mod__(self, x: Self | ConstType) -> Self:
     return self.mod(x)
@@ -230,7 +271,7 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
     return self.div(x, True)
 
   def __rfloordiv__(self, x: Self | ConstType) -> Self:
-    return self.idiv(x, True)
+    return self.ufix(x) // self
 
   def __rand__(self, x: Self | ConstType) -> Self:
     return self.bitwise_and(x, True)
@@ -566,7 +607,7 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
     ```
     """
     is_finite_close = self.isfinite() & other.isfinite() & ((self - other).abs() <= atol + rtol * other.abs())
-    is_infinite_close = (self.isinf() | other.isinf()) & (self == other)
+    is_infinite_close = (self.isinf() | other.isinf()) & self.eq(other)
     is_nan_close = (self.isnan() & other.isnan()) & equal_nan
     return is_finite_close | is_infinite_close | is_nan_close
 

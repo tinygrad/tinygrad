@@ -6,7 +6,7 @@ from tinygrad import Tensor, TinyJit, GlobalCounters, Device
 from tinygrad.helpers import getenv, Context
 from tinygrad.nn.optim import SGD
 from tinygrad.nn.state import get_parameters
-from tinygrad.engine.realize import run_schedule
+from tinygrad.engine.realize import run_linear
 
 from extra.models import resnet
 from examples.mlperf.initializers import Conv2dHeNormal, Linear
@@ -71,11 +71,11 @@ class BenchmarkResnetTrain(unittest.TestCase):
 
       y = x.sequential(layer).contiguous().contiguous_backward()
       y.sum().backward()
-      if getenv("ASSIGN", 1): sched, _ = Tensor.schedule_with_vars(y, x.grad, *optim.schedule_step())
-      else: sched, _ = Tensor.schedule_with_vars(y, x.grad, *[t.grad for t in optim.params])
+      if getenv("ASSIGN", 1): linear, var_vals = Tensor.linear_with_vars(y, x.grad, *optim.schedule_step())
+      else: linear, var_vals = Tensor.linear_with_vars(y, x.grad, *[t.grad for t in optim.params])
 
       for _ in range(JITCNT):
-        run_schedule(list(sched))
+        run_linear(linear, var_vals)
 
     CNT = getenv("CNT", 5)
     best_tm = None

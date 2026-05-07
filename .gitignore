@@ -68,3 +68,4 @@ mutants
 .mutmut-cache
 dagre/
 graphlib/
+uv.lock

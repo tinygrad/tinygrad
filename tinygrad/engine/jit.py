@@ -1,13 +1,13 @@
-from typing import TypeVar, Generic, Callable, cast, Any
+from typing import TypeVar, Generic, Callable, Any
 import functools, collections
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, colored, JIT, JIT_BATCH_SIZE, dedup, pluralize, VIZ
+from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, JIT, JIT_BATCH_SIZE, dedup, pluralize, VIZ
 from tinygrad.device import Buffer, Compiled, Device, MultiBuffer
 from tinygrad.dtype import DType, dtypes
-from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Variable, sym_infer, Ops, buffers, track_rewrites, graph_rewrite
-from tinygrad.engine.realize import ExecItem, capturing, BufferCopy, BufferXfer, EncDec, CompiledRunner, Runner, Estimates, pm_beam
+from tinygrad.uop.ops import UOp, PatternMatcher, Variable, sym_infer, Ops, buffers, track_rewrites, graph_rewrite
+from tinygrad.engine.realize import capturing, Estimates, compile_linear, run_linear, graph_cache, estimate_uop, get_runtime
+from tinygrad.engine.realize import unwrap_multi, resolve_params, get_call_arg_uops, get_call_outs_ins
 from tinygrad.schedule.memory import memory_plan_rewrite, _collect_bufs
-from tinygrad.schedule import linear_to_schedule
 from tinygrad.nn.state import get_parameters
 from tinygrad.schedule.rangeify import mop_cleanup
 from dataclasses import dataclass
@@ -24,8 +24,8 @@ def prune_linear(linear:UOp, needed:set[UOp]) -> tuple[UOp, UOp]:
 
 def create_graph_call(batch:list[UOp]) -> UOp:
   # all external inputs are PARAMs
-  input_list = dedup(b for si in batch for b in si.src[1:] if b.op is Ops.PARAM)
-  cf = UOp(Ops.CUSTOM_FUNCTION, dtypes.void, src=(UOp(Ops.LINEAR, src=tuple(batch)), *input_list), arg="graph")
+  input_list = dedup(u for si in batch for b in si.src[1:] for u in b.toposort() if u.op is Ops.PARAM)
+  cf = UOp(Ops.CUSTOM_FUNCTION, dtypes.void, src=(UOp(Ops.LINEAR, src=tuple(batch)),), arg="graph")
   return cf.call(*input_list, metadata=tuple(m for si in batch for m in si.arg.metadata))
 
 def graph_split_rewrite(linear:UOp, max_batch_size:int=0) -> UOp:
@@ -45,11 +45,11 @@ def graph_split_rewrite(linear:UOp, max_batch_size:int=0) -> UOp:
   for si in linear.src:
     if si.src[0].op is Ops.BUFFER_VIEW: continue
 
-    devs = [Device[x] for x in (si.device if isinstance(si.device, tuple) else (si.device,))]
+    devs = dedup([Device[x] for b in si.src[1:] if b.op is not Ops.BIND for x in (b.device if isinstance(b.device, tuple) else (b.device,))])
     graph_t = graph_class(devs[0]) if devs[0].graph is not None else None
 
-    can_graph = graph_t is not None and graph_t.supports_exec_item(devs, si)
-    can_extend = can_graph and graph_t is not None and (not current_batch_devs or graph_t.supports_exec_item(current_batch_devs, si)) \
+    can_graph = graph_t is not None and graph_t.supports_uop(devs, si)
+    can_extend = can_graph and graph_t is not None and (not current_batch_devs or graph_t.supports_uop(current_batch_devs, si)) \
       and (max_batch_size == 0 or len(current_batch) < max_batch_size)
     if not can_extend and current_batch: flush_batch()
 
@@ -59,13 +59,9 @@ def graph_split_rewrite(linear:UOp, max_batch_size:int=0) -> UOp:
   if current_batch: flush_batch()
   return linear.replace(src=tuple(new_src))
 
-def jit_cache_bufs(jit_cache:list[ExecItem]):
-  for ei in jit_cache:
-    for b in ei.bufs:
-      if b is not None: yield b
-    if isinstance(ei.prg, GraphRunner): yield from jit_cache_bufs(ei.prg.jit_cache)
-
-def _unwrap_beam(ast:UOp) -> UOp: return ast.src[0] if ast.op is Ops.BEAM else ast
+def _copy_input(u:UOp) -> UOp:
+  run_linear(UOp(Ops.LINEAR, src=(u.copy_to_device(u.device).call(new:=UOp.new_buffer(u.device, u.arg, u.dtype), u, metadata=()),)))
+  return new
 
 @track_rewrites(lambda linear,held_bufs,input_uops,ret=(): f"JIT {pluralize('call', len(linear.src))}")
 def jit_lower(linear:UOp, held_bufs:set[UOp], input_uops:list[UOp]) -> UOp:
@@ -73,10 +69,7 @@ def jit_lower(linear:UOp, held_bufs:set[UOp], input_uops:list[UOp]) -> UOp:
 
   # parametrize input buffers: map each input buffer UOp to a PARAM with the correct slot index
   linear = linear.substitute({u: UOp.param(i, u.dtype, u.shape, u.device) for i,u in enumerate(input_uops)}, walk=True)
-
-  # wrap SINKs with BEAM if jitbeam is set
-  if (jitbeam:=getenv("JITBEAM", BEAM.value)) >= 1: linear = graph_rewrite(linear, pm_beam, ctx=jitbeam, walk=True)
-
+  linear = compile_linear(linear, beam=getenv("JITBEAM", BEAM.value))
   linear = memory_plan_rewrite(linear, held_bufs)
   if JIT < 2: linear = graph_split_rewrite(linear, max_batch_size=JIT_BATCH_SIZE.value)
   if VIZ: graph_rewrite(linear, PatternMatcher([]), name="View graphed linear")
@@ -94,71 +87,49 @@ def _check_no_non_tensor_return(ret):
 
 def graph_class(dev): return dev.graph.func if isinstance(dev.graph, functools.partial) else dev.graph
 
-def get_input_replace(jit_cache: list[ExecItem], input_buffers:list[Buffer]) -> dict[tuple[int, int], int]:
-  input_replace: dict[tuple[int, int], int] = {}
-  for j,ji in enumerate(jit_cache):
-    for i,a in enumerate(ji.bufs):
-      if a in input_buffers: input_replace[(j,i)] = input_buffers.index(a)
-  return input_replace
-
-pm_params = PatternMatcher([(UPat(Ops.PARAM, src=(UPat(), UPat(Ops.DEVICE)), name="p"), lambda ctx,p: ctx[p.arg])])
-
-def linear_to_jit_cache(linear:UOp, input_uops:list[UOp]) -> tuple[list[ExecItem], dict[tuple[int,int],int], list[tuple[int,int,str,int,DType]]]:
-  # substitute PARAMs with input buffer UOps before lowering
-  linear = graph_rewrite(linear, pm_params, ctx=input_uops, walk=True, enter_calls=True)
-  # convert to jit_cache
-  jit_cache = [ei.lower() for ei in linear_to_schedule(linear)]
-  for b in jit_cache_bufs(jit_cache): b.ensure_allocated()
-  # derive input_buffers from input_uops
-  input_buffers: list[Buffer] = flatten([b.bufs if isinstance(b, MultiBuffer) else [b] for u in input_uops if (b:=buffers[u]) is not None])
-  # track view buffers whose base is an input buffer
-  extra_view_inputs: list[tuple[int, int, str, int, DType]] = []
-  for ei in jit_cache:
-    for b in ei.bufs:
-      if b is not None and b._base is not None and b._base in input_buffers and b not in input_buffers:
-        extra_view_inputs.append((input_buffers.index(b._base), b.offset, b.device, b.size, b.dtype))
-        input_buffers.append(b)
-  return jit_cache, get_input_replace(jit_cache, input_buffers), extra_view_inputs
-
-class GraphRunner(Runner):
-  def __init__(self, linear:UOp, input_buffers:list[Buffer]):
-    self.jit_cache = [ei.lower() for ei in linear_to_schedule(linear.src[0])]
-    for b in jit_cache_bufs(self.jit_cache): b.ensure_allocated()
-    self.input_replace = get_input_replace(self.jit_cache, input_buffers) if input_buffers else {}
+class GraphRunner:
+  def __init__(self, linear:UOp, input_uops:tuple[UOp, ...]=()):
+    self.linear = linear.src[0]
+    self.calls: list[tuple[int, UOp, list[Buffer], dict[str, int]]] = []
+    self.runtimes: list[Any|None] = []
+    self.uop_replace: list[list[tuple[int, int]]] = []
+    for call in self.linear.src:
+      replace = [(p, b.arg) for p, b in enumerate(get_call_arg_uops(call)) if b.op is Ops.PARAM]
+      for dev_idx, (bufs, device_vars) in enumerate(unwrap_multi(call, resolve_params(call, input_uops))):
+        self.calls.append((dev_idx, call.src[0], [b.ensure_allocated() for b in bufs], device_vars))
+        self.runtimes.append(get_runtime(bufs[0].device, call.src[0]) if call.src[0].op is Ops.PROGRAM else None)
+        self.uop_replace.append(replace)
 
     self.var_vals_replace:dict[int, list[tuple[int, int]]] = {}
     self.launch_dims_replace:dict[int, tuple[int|None, int|None]] = {}
-    self.launch_dims_base:dict[int, tuple[tuple[int, ...], tuple[int, ...]]] = {}
+    self.launch_dims_base:dict[int, tuple[tuple[int|float, ...], tuple[int, ...]]] = {}
 
     def is_sym_dim(dim) -> bool: return not all(isinstance(d, (int, float)) for d in dim)
 
-    crs = [(ji, ji.prg) for ji in self.jit_cache if isinstance(ji.prg, CompiledRunner)]
-    self.vars = sorted({v.expr for ji,p in crs for v in p.p.vars if v.expr not in ji.fixedvars | p.p.runtimevars})
-    self.symbolic_dims = dedup([tuple(d) for _,p in crs if (d:=p.p.local_size) and is_sym_dim(d)] +
-                               [tuple(d) for _,p in crs if (d:=p.p.global_size) and is_sym_dim(d)])
+    crs = [(j, self.calls[j][1].arg, self.calls[j][3]) for j in range(len(self.calls)) if self.calls[j][1].op is Ops.PROGRAM]
+    self.vars = sorted({v.expr for _,p,dv in crs for v in p.vars if v.expr not in dv | p.runtimevars})
+    self.symbolic_dims = dedup(tuple(d) for _,p,_ in crs for d in (p.local_size, p.global_size) if d and is_sym_dim(d))
 
     def find_symbolic_dim(dim): return self.symbolic_dims.index(tuple(dim)) if dim is not None and tuple(dim) in self.symbolic_dims else None
 
-    estimates = Estimates()
-    for j,ji in enumerate(self.jit_cache):
-      assert ji.prg is not None
-      estimates += ji.prg.estimates
-      if isinstance(ji.prg, CompiledRunner):
-        if (replace:=[(i, self.vars.index(v.expr)) for i, v in enumerate(ji.prg.p.vars) if v.expr not in ji.fixedvars | ji.prg.p.runtimevars]):
-          self.var_vals_replace[j] = replace
+    for j,p,dv in crs:
+      if (replace:=[(i, self.vars.index(v.expr)) for i, v in enumerate(p.vars) if v.expr not in dv | p.runtimevars]):
+        self.var_vals_replace[j] = replace
+      global_dim_idx, local_dim_idx = find_symbolic_dim(p.global_size), find_symbolic_dim(p.local_size)
+      if global_dim_idx is not None or local_dim_idx is not None:
+        self.launch_dims_replace[j] = (global_dim_idx, local_dim_idx)
+        assert p.local_size is not None
+        self.launch_dims_base[j] = (tuple(p.global_size), tuple(p.local_size))
 
-        global_dim_idx, local_dim_idx = find_symbolic_dim(ji.prg.p.global_size), find_symbolic_dim(ji.prg.p.local_size)
-        if global_dim_idx is not None or local_dim_idx is not None:
-          self.launch_dims_replace[j] = (global_dim_idx, local_dim_idx)
-          assert ji.prg.p.local_size is not None
-          self.launch_dims_base[j] = (tuple(ji.prg.p.global_size), tuple(ji.prg.p.local_size))
+    estimates = sum((estimate_uop(call) for call in self.linear.src), Estimates())
 
     # used in MultiGraphRunner. tracks (offset, end, dep) ranges per base buffer id to handle suballocated buffers correctly.
     self.w_dependency_map: dict[int, list[tuple[int, int, Any]]] = collections.defaultdict(list)
     self.r_dependency_map: dict[int, list[tuple[int, int, Any]]] = collections.defaultdict(list)
 
-    assert self.jit_cache[0].prg is not None
-    super().__init__(colored(f"<batched {len(self.jit_cache)}>", "cyan"), self.jit_cache[0].prg.device.split(":")[0], estimates.simplify())
+    self.device, self.estimates = self.calls[0][2][0].device.split(":")[0], estimates.simplify()
+
+  def __call__(self, input_uops:tuple[UOp, ...], var_vals:dict[str, int], wait=False) -> float|None: raise NotImplementedError("override this")
 
   def updated_vars(self, var_vals: dict[str, int]):
     vals = [var_vals[v] for v in self.vars]
@@ -191,30 +162,19 @@ class GraphRunner(Runner):
 
   @staticmethod
   def _all_devs(batch_devs:list[Compiled], new_call:UOp) -> list[Compiled]:
-    return dedup(batch_devs + [Device[x] for b in new_call.src[1:] if b.op is not Ops.BIND
+    return dedup(batch_devs + [Device[x] for b in get_call_arg_uops(new_call)
                  for x in (b.device if isinstance(b.device, tuple) else (b.device,))])
 
   @staticmethod
-  def supports_exec_item(batch_devs:list[Compiled], new_call:UOp) -> bool:
-    return _unwrap_beam(new_call.src[0]).op in (Ops.SINK, Ops.PROGRAM) and len(GraphRunner._all_devs(batch_devs, new_call)) == 1
+  def supports_uop(batch_devs:list[Compiled], new_call:UOp) -> bool:
+    return new_call.src[0].op is Ops.PROGRAM and len(GraphRunner._all_devs(batch_devs, new_call)) == 1
 
 # a marker for your graph supporting multiple devices of the same type
 class MultiGraphRunner(GraphRunner):
   @staticmethod
-  def supports_exec_item(batch_devs:list[Compiled], new_call:UOp) -> bool:
+  def supports_uop(batch_devs:list[Compiled], new_call:UOp) -> bool:
     # Devices must be the same type
-    return _unwrap_beam(new_call.src[0]).op in (Ops.SINK, Ops.PROGRAM, Ops.COPY) \
-      and len(dedup([type(d) for d in GraphRunner._all_devs(batch_devs, new_call)])) == 1
-
-def get_out_buffers_for_ei(ei:ExecItem) -> list[Buffer]:
-  if isinstance(ei.prg, CompiledRunner): return [cast(Buffer, ei.bufs[out]) for out in ei.prg.p.outs if out not in ei.prg.p.ins]
-  if isinstance(ei.prg, (BufferCopy, BufferXfer, EncDec)): return [cast(Buffer, ei.bufs[0])]
-  if isinstance(ei.prg, GraphRunner): return dedup([b for inner in ei.prg.jit_cache for b in get_out_buffers_for_ei(inner)])
-  return []
-
-def update_depends(depends:set[Buffer|None], jit_cache:list[ExecItem]):
-  for ei in jit_cache:
-    if any(b in depends for b in ei.bufs): depends.update(get_out_buffers_for_ei(ei))
+    return new_call.src[0].op in (Ops.PROGRAM, Ops.COPY) and len(dedup([type(d) for d in GraphRunner._all_devs(batch_devs, new_call)])) == 1
 
 ReturnType = TypeVar('ReturnType')
 @dataclass
@@ -225,47 +185,36 @@ class CapturedJit(Generic[ReturnType]):
   expected_input_info: list[tuple[UOp, tuple[Variable, ...], DType, str]]  # (view, variables, dtype, device) per input
 
   def __reduce__(self): return self.__class__, (self.ret, self.linear, self.expected_names, self.expected_input_info)
-  def __post_init__(self): self._jit_cache = None
-  @property
-  def jit_cache(self) -> list[ExecItem]: return self._jit_cache if self._jit_cache is not None else []
 
-  def _init(self, input_uops:list[UOp]):
-    self._jit_cache, self._input_replace, self._extra_view_inputs = linear_to_jit_cache(self.linear, input_uops)
-    self._output_to_writer = {b: j for j, ei in enumerate(self._jit_cache) for b in get_out_buffers_for_ei(ei)}
-    self._input_to_max_reader: dict[int, int] = {}
-    for (j, i), idx in self._input_replace.items():
-      if self._jit_cache[j].bufs[i] not in get_out_buffers_for_ei(self._jit_cache[j]):
-        self._input_to_max_reader[idx] = max(self._input_to_max_reader.get(idx, -1), j)
-    for (j,i) in self._input_replace.keys(): self._jit_cache[j].bufs[i] = None
+  @functools.cached_property
+  def _written_uops(self) -> set[UOp]:
+    out: set[UOp] = set()
+    for call in self.linear.toposort():
+      if call.op is not Ops.CALL: continue
+      arg_uops = get_call_arg_uops(call)
+      outs, ins = get_call_outs_ins(call)
+      out |= {arg_uops[k] for k in set(outs) - set(ins) if arg_uops[k].op in (Ops.BUFFER, Ops.BUFFER_VIEW)}
+    return out
 
   def __call__(self, input_uops:list[UOp], var_vals:dict[str, int]) -> ReturnType:
-    if self._jit_cache is None: self._init(input_uops)
-    assert self._jit_cache is not None
-    # derive input_buffers from input_uops (flatten MultiBuffer)
-    input_buffers: list[Buffer] = flatten([b.bufs if isinstance(b, MultiBuffer) else [b] for u in input_uops if (b:=buffers[u]) is not None])
-    # recreate view buffers from input bases
-    for idx, offset, device, size, dtype in self._extra_view_inputs:
-      input_buffers.append(Buffer(device, size, dtype, base=input_buffers[idx], offset=offset).ensure_allocated())
-    # copy aliased inputs to prevent read-after-write hazard
-    for i, ib in enumerate(input_buffers):
-      if (writer := self._output_to_writer.get(ib)) is not None and self._input_to_max_reader.get(i, -1) >= writer:
-        input_buffers[i] = Buffer(ib.device, ib.size, ib.dtype).ensure_allocated().copyin(ib.as_memoryview())
-    for (j,i),input_idx in self._input_replace.items(): self._jit_cache[j].bufs[i] = input_buffers[input_idx]
-    if DEBUG >= 1 and len(self._jit_cache) >= 10: print(f"jit execs {len(self._jit_cache)} kernels")
-    for ei in self._jit_cache: ei.run(var_vals, jit=True)
-    for (j,i) in self._input_replace.keys(): self._jit_cache[j].bufs[i] = None
+    concrete = tuple(_copy_input(u) if u in self._written_uops else u for u in input_uops)
+    if DEBUG >= 1 and len(self.linear.src) >= 10: print(f"jit execs {len(self.linear.src)} calls")
+    run_linear(self.linear, var_vals, input_uops=concrete, jit=True)
     return self.ret
 
   def free_intermediates(self):
-    depends: set[Buffer|None] = set([None])
-    update_depends(depends, self.jit_cache)
-    arenas = {b._base for b in depends if b is not None and b._base is not None}
-    to_free = {b for b in depends if b is not None} | {b for b in jit_cache_bufs(self.jit_cache) if b._base in arenas}
-    for b in to_free:
-      if hasattr(b, '_buf'): b.deallocate()
-    for a in arenas:
-      if a.allocated_views == 0 and a.is_allocated(): a.deallocate()
-    self.__post_init__()
+    # drop graph runners
+    for call in self.linear.src:
+      if call.src[0].op is Ops.CUSTOM_FUNCTION and call.src[0].arg == "graph": graph_cache.pop(call.src[0], None)
+    bases: set[Buffer] = set()
+    for u in self._written_uops:
+      try: buf = u.buffer
+      except Exception: continue
+      for b in (buf.bufs if isinstance(buf, MultiBuffer) else [buf]):
+        if hasattr(b, '_buf'): b.deallocate()
+        if b._base is not None: bases.add(b._base)
+    for a in bases:
+      if a.is_allocated() and a.allocated_views == 0: a.deallocate()
 
 def _prepare_jit_inputs(args, kwargs):
   input_tensors: list[tuple[int|str, Tensor]] = [(name,t) for name,t in list(enumerate(args))+sorted(kwargs.items()) if t.__class__ is Tensor]
@@ -306,13 +255,6 @@ class TinyJit(Generic[ReturnType]):
     assert self.captured is not None, "can't pickle an uncaptured JIT"
     return self.__class__, (None, self.captured)
 
-  # keep legacy code working
-  @property
-  def jit_cache(self) -> list[ExecItem]: return self.captured._jit_cache if self.captured is not None and self.captured._jit_cache is not None else []
-  @property
-  def input_replace(self) -> dict[tuple[int, int], int]:
-    return self.captured._input_replace if self.captured is not None and self.captured._jit_cache is not None else {}
-
   def __get__(self, obj, objtype): return functools.partial(self.__call__, obj) # add support for instance methods
 
   def __call__(self, *args, **kwargs) -> ReturnType:
@@ -337,16 +279,14 @@ class TinyJit(Generic[ReturnType]):
       _check_no_non_tensor_return(ret)
       if DEBUG >= 1: print(f"JIT captured {len(self._linears)} linears with {len(input_buf_uops)} inputs")
 
-      # combine all captured linears into one, memory plan, and convert to ExecItems
+      # combine all captured linears into one, memory plan, and graph split
       big_linear = UOp(Ops.LINEAR, src=tuple(flatten([l.src for l in self._linears])))
       del self._linears
 
       if self.prune:
         big_linear, onetime_linear = prune_linear(big_linear, set(input_buf_uops))
         if DEBUG >= 1: print(f"pruned from {len(big_linear.src) + len(onetime_linear.src)} -> {len(big_linear.src)} kernels")
-        for ei in (si.lower() for si in linear_to_schedule(onetime_linear)):
-          for b in ei.bufs: cast(Buffer, b).ensure_allocated()
-          ei.run(var_vals, jit=True)
+        run_linear(onetime_linear, var_vals)
 
       held_bufs = set(buffers) | {t.uop.buf_uop for t in get_parameters(ret) if t.uop.buf_uop.op is Ops.BUFFER}
       linear = jit_lower(big_linear, held_bufs, input_buf_uops)

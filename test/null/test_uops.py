@@ -46,6 +46,20 @@ class TestExecALU(unittest.TestCase):
     self.assertEqual(exec_alu(Ops.IDIV, dtypes.int8, (7, -3)), -2)
     self.assertEqual(exec_alu(Ops.IDIV, dtypes.int8, (-50, 6)), -8)
 
+  def test_floordiv(self):
+    self.assertEqual(exec_alu(Ops.FLOORDIV, dtypes.int8, (8, 2)), 4)
+    self.assertEqual(exec_alu(Ops.FLOORDIV, dtypes.int8, (7, 3)), 2)
+    self.assertEqual(exec_alu(Ops.FLOORDIV, dtypes.int8, (7, -3)), -3)
+    self.assertEqual(exec_alu(Ops.FLOORDIV, dtypes.int8, (-7, 3)), -3)
+    self.assertEqual(exec_alu(Ops.FLOORDIV, dtypes.int8, (-50, 6)), -9)
+
+  def test_floormod(self):
+    self.assertEqual(exec_alu(Ops.FLOORMOD, dtypes.int8, (8, 2)), 0)
+    self.assertEqual(exec_alu(Ops.FLOORMOD, dtypes.int8, (7, 3)), 1)
+    self.assertEqual(exec_alu(Ops.FLOORMOD, dtypes.int8, (7, -3)), -2)
+    self.assertEqual(exec_alu(Ops.FLOORMOD, dtypes.int8, (-7, 3)), 2)
+    self.assertEqual(exec_alu(Ops.FLOORMOD, dtypes.int8, (-50, 6)), 4)
+
     np.testing.assert_allclose(exec_alu(Ops.MUL, dtypes.float32, (7.0, exec_alu(Ops.RECIPROCAL, dtypes.float32, (3.0,)))), 2+(1.0/3.0))
     np.testing.assert_allclose(exec_alu(Ops.MUL, dtypes.float32, (7.0, exec_alu(Ops.RECIPROCAL, dtypes.float32, (-3.0,)))), -2-(1.0/3.0))
 
@@ -163,6 +177,30 @@ class TestFastIdiv(unittest.TestCase):
       self.assertIn(Ops.SHR, ops, f"For dtype={dt} divison by power of two did not simplify to shift")
       self.assertNotIn(Ops.IDIV, ops, f"For dtype={dt} divison by power of two did not simplify to shift")
 
+  def test_floormod_power_of_two(self):
+    # FLOORMOD by a power of two lowers to AND (correct floor mod for any sign in two's complement)
+    for dt in (dtypes.int32, dtypes.uint32):
+      g = UOp(Ops.PARAM, dt.ptr(), (), 0)
+      c = UOp.const(dt, 8)
+      a = UOp(Ops.FLOORMOD, dt, (g.index(c), c))
+      uops = to_uops_list([a], ren=Device[Device.DEFAULT].renderer)
+      ops = [x.op for x in uops]
+      self.assertIn(Ops.AND, ops, f"For dtype={dt} FLOORMOD by pow2 did not simplify to AND")
+      self.assertNotIn(Ops.MOD, ops, f"For dtype={dt} FLOORMOD by pow2 left a MOD")
+      self.assertNotIn(Ops.FLOORMOD, ops, f"For dtype={dt} FLOORMOD survived past late rewrite")
+
+  def test_floordiv_power_of_two_uint(self):
+    # uint FLOORDIV by a power of two lowers to a shift, leaving no IDIV/FLOORDIV in the kernel
+    for dt in (dtypes.uint32, dtypes.uint64):
+      g = UOp(Ops.PARAM, dt.ptr(), (), 0)
+      c = UOp.const(dt, 2)
+      a = UOp(Ops.FLOORDIV, dt, (g.index(c), c))
+      uops = to_uops_list([a], ren=Device[Device.DEFAULT].renderer)
+      ops = [x.op for x in uops]
+      self.assertIn(Ops.SHR, ops, f"For dtype={dt} FLOORDIV by power of two did not simplify to shift")
+      self.assertNotIn(Ops.IDIV, ops, f"For dtype={dt} FLOORDIV by power of two did not simplify to shift")
+      self.assertNotIn(Ops.FLOORDIV, ops, f"For dtype={dt} FLOORDIV survived past late rewrite")
+
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU doesn't support long")
   def test_fast_idiv_and_mod(self):
     g = UOp(Ops.PARAM, dtypes.uint32.ptr(), (), 0)
@@ -228,7 +266,7 @@ class TestUOpMethod(unittest.TestCase):
     a = UOp.variable("a", 1, 10)
     uop_var = Tensor(a.bind(1))
     st_var = Tensor.empty((2, 10))[:, :a.bind(1)]
-    _, var_vals = (uop_var+st_var).schedule_with_vars()
+    _, var_vals = (uop_var+st_var).linear_with_vars()
     self.assertEqual(len(var_vals), 1)
     self.assertEqual(list(var_vals)[0], a.expr)
 
@@ -266,7 +304,7 @@ class TestUOpStr(unittest.TestCase):
     assert str(eval(str(a))) == str(a)
 
   def test_vectorized_str(self):
-    vec = UOp(Ops.VECTORIZE, dtypes.int.vec(4), tuple(UOp.const(dtypes.int, x) for x in range(4)))
+    vec = UOp(Ops.STACK, dtypes.int.vec(4), tuple(UOp.const(dtypes.int, x) for x in range(4)))
     assert str(eval(str(vec))) == str(vec)
 
   def test_device_arg(self):
@@ -299,22 +337,22 @@ class TestUopsObject(unittest.TestCase):
 
 class TestUOpRender(unittest.TestCase):
   def test_render_vectorize_empty(self):
-    u = UOp(Ops.VECTORIZE, dtype=dtypes.int.vec(0), src=())
+    u = UOp(Ops.STACK, dtype=dtypes.int.vec(0), src=())
     self.assertEqual(u.render(simplify=False), "{}")
   def test_render_vectorize_empty_simplified(self):
-    u = UOp(Ops.VECTORIZE, dtype=dtypes.int.vec(0), src=())
+    u = UOp(Ops.STACK, dtype=dtypes.int.vec(0), src=())
     self.assertEqual(u.render(), "{}")
   def test_render_vectorize_same(self):
-    u = UOp(Ops.VECTORIZE, dtype=dtypes.int.vec(3), src=(UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 0)))
+    u = UOp(Ops.STACK, dtype=dtypes.int.vec(3), src=(UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 0)))
     self.assertEqual(u.render(simplify=False), "{0, ...}")
   def test_render_vectorize_different(self):
-    u = UOp(Ops.VECTORIZE, dtype=dtypes.int.vec(3), src=(UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 1), UOp.const(dtypes.int, 2)))
+    u = UOp(Ops.STACK, dtype=dtypes.int.vec(3), src=(UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 1), UOp.const(dtypes.int, 2)))
     self.assertEqual(u.render(simplify=False), "{0,1,2}")
   def test_render_vectorize_same_simplified(self):
-    u = UOp(Ops.VECTORIZE, dtype=dtypes.int.vec(3), src=(UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 0)))
+    u = UOp(Ops.STACK, dtype=dtypes.int.vec(3), src=(UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 0)))
     self.assertEqual(u.render(), "0")
   def test_render_vectorize_different_simplified(self):
-    u = UOp(Ops.VECTORIZE, dtype=dtypes.int.vec(3), src=(UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 1), UOp.const(dtypes.int, 2)))
+    u = UOp(Ops.STACK, dtype=dtypes.int.vec(3), src=(UOp.const(dtypes.int, 0), UOp.const(dtypes.int, 1), UOp.const(dtypes.int, 2)))
     self.assertEqual(u.render(), "(0, 1, 2)")
 
 if __name__ == '__main__':

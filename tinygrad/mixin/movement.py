@@ -18,6 +18,10 @@ class MovementMixin:
   def shape(self) -> tuple[sint, ...]:
     raise NotImplementedError
 
+  @property
+  def device(self) -> str|tuple[str, ...]:
+    raise NotImplementedError
+
   # great functions you get!
   @property
   def ndim(self) -> int:

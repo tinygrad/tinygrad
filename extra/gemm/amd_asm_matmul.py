@@ -13,7 +13,7 @@ from tinygrad import Tensor, Device, Context, GlobalCounters
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.helpers import getenv, colored
 from tinygrad.dtype import dtypes, AddrSpace
-from tinygrad.engine.realize import Estimates
+from tinygrad.engine.realize import Estimates, run_linear
 from tinygrad.renderer.amd.dsl import s, v, VCC_LO, NULL
 from tinygrad.runtime.autogen.amd.rdna3.ins import *
 
@@ -167,7 +167,7 @@ PREFETCH_LOADS = [(V_LDS_A_DATA[4+2*i], V_LDS_A_DATA[4+2*i+1], V_GLOBAL_B_ADDR, 
 # =============================================================================
 
 class Kernel:
-  def __init__(self, arch='gfx1100'): self.instructions, self.labels, self.pos, self.arch = [], {}, 0, arch
+  def __init__(self): self.instructions, self.labels, self.pos = [], {}, 0
   def label(self, name): self.labels[name] = self.pos
 
   def emit(self, inst, target=None):
@@ -196,10 +196,10 @@ class Kernel:
 # Kernel builder
 # =============================================================================
 
-def build_kernel(N, arch='gfx1100'):
+def build_kernel(N):
   assert N % 128 == 0, f"N must be a multiple of 128 (tile size), got {N}"
   assert N >= 256, f"N must be >= 256 (prefetch pipeline requires at least 2 K-blocks), got {N}"
-  k = Kernel(arch)
+  k = Kernel()
 
   # ===========================================================================
   # PROLOGUE: Load kernel arguments, compute tile coordinates and addresses
@@ -443,7 +443,7 @@ def test_matmul():
   dev = Device[Device.DEFAULT]
   print(f"Device arch: {dev.renderer.target.arch}")
 
-  insts = build_kernel(N, dev.renderer.target.arch)
+  insts = build_kernel(N)
 
   rng = np.random.default_rng(42)
   a = Tensor(rng.random((N, N), dtype=np.float32) - 0.5)
@@ -463,11 +463,14 @@ def test_matmul():
                                                                                   estimates=Estimates(ops=N*N*N*2, mem=N*N*4*3)))
     return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dname), UOp(Ops.LINEAR, src=tuple([UOp(Ops.INS, arg=x) for x in insts]))))
   c = Tensor.custom_kernel(a, b, c, fxn=asm_kernel)[2]
-  ei = c.schedule()[0].lower()
+  linear = c.schedule_linear()
 
   ets = []
   with Context(DEBUG=2):
-    for _ in range(getenv("CNT", 5)): ets.append(ei.run(wait=True))
+    for _ in range(getenv("CNT", 5)):
+      start = GlobalCounters.time_sum_s
+      run_linear(linear)
+      ets.append(GlobalCounters.time_sum_s - start)
   print(f"REAL TFLOPS {N * N * N * 2 / min(ets) * 1e-12:.2f}")
 
   if getenv("VERIFY", 1):

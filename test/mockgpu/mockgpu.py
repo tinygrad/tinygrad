@@ -11,8 +11,8 @@ libc = ctypes.CDLL(ctypes.util.find_library("c"))
 libc.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long]
 libc.mmap.restype = ctypes.c_void_p
 
-drivers = [cls() for t in DEV.value if (cls:={"MOCKPCI+AMD": AMDriver, "MOCKKFD+AMD": AMDDriver, "MOCKUSB+AMD": AMUSBDriver,
-                                              "MOCKNVK+NV": NVDriver}.get(f"{t.interface}+{t.device}"))]
+drivers = [cls() for t in DEV.value if (cls:={"MOCKPCI+AMD": AMDriver, "MOCKKFD+AMD": AMDDriver, "MOCK+AMD": AMDDriver, "MOCKUSB+AMD": AMUSBDriver,
+                                              "MOCK+NV": NVDriver}.get(f"{t.interface}+{t.device}"))]
 tracked_fds = {}
 
 original_memoryview = builtins.memoryview
@@ -67,7 +67,7 @@ class MockFileIOInterface(FileIOInterface):
     if self.fd in tracked_fds:
       tracked_fds[self.fd].close(self.fd)
       tracked_fds.pop(self.fd)
-    else: os.close(self.fd)
+    elif self.fd is not None: os.close(self.fd)
 
   def ioctl(self, request, arg):
     if self.fd in tracked_fds:

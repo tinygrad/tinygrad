@@ -1,12 +1,11 @@
 # ruff: noqa: E501
 import numpy as np
 import unittest
-from dataclasses import replace
-from tinygrad import Tensor, Context, Device, dtypes
+from tinygrad import Tensor, Context, Device, dtypes, UOp
 from tinygrad.uop.ops import Ops
 from tinygrad.codegen.opt import Opt, OptOps
-from tinygrad.engine.realize import CompiledRunner, get_program
-from tinygrad.schedule import ExecItem
+from tinygrad.engine.realize import run_linear
+from tinygrad.codegen import to_program
 from test.helpers import replace_opts
 
 N = 512
@@ -39,13 +38,16 @@ def create_gemm_model(model_path:str, batch_size=N, in_size=N, out_size=N, bias=
   return model_path
 
 def sexec(out:Tensor, opts:list[Opt], replace_src=None, run_count=3):
-  si = out.schedule()[-1]
-  prg = get_program(replace_opts(si.ast, opts), renderer=Device[Device.DEFAULT].renderer)
+  linear = out.schedule_linear()
+  call = linear.src[-1]
+  prg = to_program(replace_opts(call.src[0], opts), renderer=Device[Device.DEFAULT].renderer)
   if replace_src is not None:
-    old_name = prg.src.split("__attribute__((noinline)) void ")[1].split("(")[0]
-    prg = replace(prg, src=replace_src + "/* DSP boilerplate */" + prg.src.split("/* DSP boilerplate */")[1].replace(old_name, "fxn"))
-  new_si = ExecItem(si.ast, [x.ensure_allocated() for x in si.bufs], si.metadata, prg=CompiledRunner(prg))
-  for _ in range(run_count): new_si.run(wait=True)
+    old_name = prg.src[3].arg.split("__attribute__((noinline)) void ")[1].split("(")[0]
+    new_src = replace_src + "/* DSP boilerplate */" + prg.src[3].arg.split("/* DSP boilerplate */")[1].replace(old_name, "fxn")
+    # drop BINARY and replace SOURCE so run_linear recompiles
+    prg = prg.replace(src=prg.src[:3] + (UOp(Ops.SOURCE, arg=new_src),))
+  linear = linear.replace(src=linear.src[:-1] + (call.replace(src=(prg, *call.src[1:])),))
+  for _ in range(run_count): run_linear(linear)
 
 def get_quantized_model(sz):
   from onnxruntime.quantization import quantize_static, QuantFormat, QuantType, CalibrationDataReader
@@ -75,9 +77,9 @@ class TestQuantizeOnnxCPU(unittest.TestCase):
     run_onnx = OnnxRunner(out_file)
     inp = Tensor(np.random.uniform(size=(sz, sz)).astype(np.float32))
     with Context(QUANTIZE=1):
-      sched = run_onnx({"input":inp})["output"].schedule()
-      sched[-2].lower()
-      daccs = [u for u in sched[-2].prg.p.uops if u.op is Ops.DEFINE_REG]
+      linear = run_onnx({"input":inp})["output"].schedule_linear()
+      prg = to_program(linear.src[-2].src[0], renderer=Device[Device.DEFAULT].renderer)
+      daccs = [u for u in tuple(prg.src[2].src) if u.op is Ops.DEFINE_REG]
       assert all(u.dtype.scalar() is dtypes.int for u in daccs)
 
 @unittest.skipIf(Device.DEFAULT != "DSP", "only tests for DSP")

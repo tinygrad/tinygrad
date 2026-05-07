@@ -3,8 +3,8 @@ import gc, unittest, time
 from tinygrad import nn, dtypes, Device, Tensor
 from tinygrad.uop.ops import UOp, Ops, GroupOp, UPat, KernelInfo
 from tinygrad.helpers import DEBUG, GlobalCounters, Context
-from tinygrad.engine.realize import CompiledRunner, run_schedule, run_linear
-from tinygrad.schedule import linear_to_schedule
+from tinygrad.engine.realize import compile_linear, run_linear
+from tinygrad.codegen import to_program
 
 class KernelCountException(Exception): pass
 def check_schedule(t:Tensor|list[Tensor]|UOp, allowed:int, to_prerealize:list[Tensor]|None=None, filter_sink=True):
@@ -15,17 +15,17 @@ def check_schedule(t:Tensor|list[Tensor]|UOp, allowed:int, to_prerealize:list[Te
   else:
     assert isinstance(t, UOp), f"can't schedule {t}"
     linear, var_vals = Tensor(t).linear_with_vars()
-  # test lowering all the ExecItems
-  sched = linear_to_schedule(linear)
-  for si in sched: si.lower()
-  kernel_cnt = len([si for si in sched if isinstance(si.prg, CompiledRunner) or not filter_sink])
+  kernel_cnt = sum((len(call.device) if isinstance(call.device, tuple) else 1)
+                   for call in linear.src if call.src[0].op is Ops.SINK or not filter_sink)
   if kernel_cnt != allowed:
     print(f"SCHEDULE ISSUE, expecting {allowed} got {kernel_cnt}")
     if DEBUG >= 3:
-      for i,s in enumerate(sched):
+      for i,call in enumerate(linear.src):
         print("kernel", i+1)
-        print(s.ast)
+        print(call.src[0])
     raise KernelCountException(f"{kernel_cnt} != {allowed}")
+  # test compiling the linear
+  compile_linear(linear)
   return linear, var_vals
 
 def _realize_weights(m):
@@ -40,9 +40,9 @@ class TestBufferUOp(unittest.TestCase):
     # the device Buffer remains unallocated until it's we run the schedule
     self.assertFalse(buf.uop.buffer.is_allocated())
     add = buf+1
-    sched = add.schedule()
+    linear, var_vals = add.linear_with_vars()
     self.assertFalse(buf.uop.buffer.is_allocated())
-    run_schedule(sched)
+    run_linear(linear, var_vals)
     self.assertTrue(buf.uop.buffer.is_allocated())
 
   def test_buffer_has_unique_buffer(self):
@@ -88,7 +88,7 @@ class TestBufferUOp(unittest.TestCase):
     # unused variable should not appear in var_vals even when there's other work
     a = Tensor(UOp.variable("unused", 0, 10).bind(1))
     b = Tensor.empty(3) + 1
-    _, var_vals = Tensor.schedule_with_vars(a, b)
+    _, var_vals = Tensor.linear_with_vars(a, b)
     self.assertEqual(var_vals, {})
     self.assertIsNone(a.uop.base.realized)
 
@@ -142,7 +142,7 @@ class TestSimpleSchedule(unittest.TestCase):
     a = Tensor.empty(16,16).sum(axis=1)
     a1 = a.reshape(4,4)
     a2 = a.reshape(16,1,1)
-    self.assertEqual(len(Tensor.schedule(a1, a2)), 1)
+    self.assertEqual(len(Tensor.schedule_linear(a1, a2).src), 1)
 
 class TestSchedule(unittest.TestCase):
   def test_create_schedule_handles_multi_kernel_after_and_after_deps(self):
@@ -167,8 +167,8 @@ class TestSchedule(unittest.TestCase):
     kc = Tensor.custom_kernel(out, src_after, fxn=named_copy("kc"))[0]
     out_after = Tensor(kc.uop.src[0].after(*kc.uop.src[1:], kd.uop))
 
-    schedule = out_after.schedule()
-    names = [si.ast.arg.name for si in schedule]
+    linear = out_after.schedule_linear()
+    names = [call.src[0].arg.name for call in linear.src]
     self.assertEqual(set(names), {"ka", "kb", "kc", "kd"})
     self.assertEqual(names[-1], "kc")
     self.assertLess(names.index("ka"), names.index("kc"))
@@ -209,10 +209,10 @@ class TestSchedule(unittest.TestCase):
     t = Tensor.zeros((3, 3)).contiguous().realize()
     v = t[1]  # view - is_realized but not has_buffer_identity
     assert v.uop.is_realized
-    sched, _ = Tensor.schedule_with_vars(v)
-    self.assertEqual(len(sched), 0)
+    linear, _ = Tensor.linear_with_vars(v)
+    self.assertEqual(len(linear.src), 0)
 
-  # NOTE: because empty does not have a lowered ExecItem if realize is called on a childless empty, it never gets allocated.
+  # NOTE: because empty does not have a lowered kernel if realize is called on a childless empty, it never gets allocated.
   def test_childless_empty_never_allocates(self):
     a = Tensor.empty(10)
     a.realize()
@@ -380,7 +380,7 @@ class TestSchedule(unittest.TestCase):
     r1 = (x - r0).sum(axis=0).div(2)
     out = r0 + r1
     linear, _ = check_schedule(out, 2)
-    reduceops = [x for si in linear.src for x in si.src[0].toposort() if x.op in {Ops.REDUCE_AXIS, Ops.REDUCE}]
+    reduceops = [x for si in linear.src for x in si.src[0].toposort() if x.op is Ops.REDUCE]
     assert len(reduceops) == 2
 
   def test_cache_reduce_multiple_children(self):
@@ -391,7 +391,7 @@ class TestSchedule(unittest.TestCase):
     out0 = r0 + y
     out1 = r1 + y
     linear, _ = check_schedule([out0, out1], 3)
-    reduceops = [x for si in linear.src for x in si.src[0].toposort() if x.op in {Ops.REDUCE_AXIS, Ops.REDUCE}]
+    reduceops = [x for si in linear.src for x in si.src[0].toposort() if x.op is Ops.REDUCE]
     self.assertEqual(len(reduceops), 2) # why is RANGEIFY different?
 
   def test_dedup_assign(self):
@@ -668,9 +668,9 @@ class TestSchedule(unittest.TestCase):
     check_schedule(c, 2)
 
   def _alu_from_tensor(self, t:Tensor):
-    s = [s for s in t.schedule() if s.ast.op is Ops.SINK]
+    s = [s for s in t.schedule_linear().src if s.src[0].op is Ops.SINK]
     self.assertEqual(len(s), 1)
-    return [u.op for u in s[0].ast.toposort() if u.op in GroupOp.ALU]
+    return [u.op for u in s[0].src[0].toposort() if u.op in GroupOp.ALU]
 
   def test_2_pow_is_exp2(self):
     t = 2.0 ** Tensor([1.0, 2.0, 3.0])
@@ -799,12 +799,12 @@ class TestSchedule(unittest.TestCase):
     Tensor.manual_seed(0)
     x = Tensor.randn(4, 12, 64, 64, dtype=dtypes.half).realize()
     out = x.softmax(dtype=dtypes.float)
-    sched = out.schedule()
-    self.assertEqual(len(sched), 3)
+    linear = out.schedule_linear()
+    self.assertEqual(len(linear.src), 3)
     # max reduction stays in input dtype (no numerical loss), upcast happens after subtracting max
-    self.assertEqual(sched[0].bufs[0].dtype, dtypes.half)
-    self.assertEqual(sched[1].bufs[0].dtype, dtypes.float)
-    self.assertEqual(sched[2].bufs[0].dtype, dtypes.float)
+    self.assertEqual(linear.src[0].src[1].dtype, dtypes.half)
+    self.assertEqual(linear.src[1].src[1].dtype, dtypes.float)
+    self.assertEqual(linear.src[2].src[1].dtype, dtypes.float)
 
   def test_softmax_backward(self):
     Tensor.manual_seed(0)
@@ -961,7 +961,7 @@ class TestSchedule(unittest.TestCase):
     gc.collect()
     base = GlobalCounters.mem_used
     Tensor.ones(256).contiguous().realize()
-    Tensor.ones(5, 5).contiguous().schedule()
+    Tensor.ones(5, 5).contiguous().schedule_linear()
     gc.collect()
     self.assertEqual(GlobalCounters.mem_used-base, 0)
 
@@ -1174,24 +1174,24 @@ class TestFusionOp(unittest.TestCase):
     st = time.perf_counter()
     a = Tensor([1,2,3,4])
     for _ in range(24): a = a + a
-    sched = a.schedule()
-    sched[-1].lower()
+    linear = a.schedule_linear()
+    prg = to_program(linear.src[-1].src[0], renderer=Device[Device.DEFAULT].renderer)
     self.assertLess(time.perf_counter()-st, 2.0)
-    assert len(sched[-1].prg.p.src.splitlines()) < 250
+    assert len(prg.src[3].arg.splitlines()) < 250
 
   def test_recursive_add_cmp(self):
     st = time.perf_counter()
     a = Tensor([1,2,3,4])
     for _ in range(24): a = a + a
-    sched1 = a.schedule()
+    linear1 = a.schedule_linear()
     b = Tensor([1,2,3,4])
     for _ in range(24): b = b + b
-    sched2 = b.schedule()
+    linear2 = b.schedule_linear()
     c = Tensor([1,2,3,4])
     for _ in range(23): c = c + c
-    sched3 = c.schedule()
-    self.assertEqual(sched1[-1].ast, sched2[-1].ast)
-    with self.assertRaises(AssertionError): self.assertEqual(sched1[-1].ast, sched3[-1].ast)
+    linear3 = c.schedule_linear()
+    self.assertEqual(linear1.src[-1].src[0], linear2.src[-1].src[0])
+    with self.assertRaises(AssertionError): self.assertEqual(linear1.src[-1].src[0], linear3.src[-1].src[0])
     self.assertLess(time.perf_counter()-st, 2.0)
 
   def test_recursive_pad(self):
@@ -1199,8 +1199,8 @@ class TestFusionOp(unittest.TestCase):
     val = 1.0
     a = Tensor(val)
     for _ in range(24): a = Tensor.stack(a, a)[0]
-    sched = a.schedule()
-    self.assertLessEqual(len(sched), 1)
+    linear = a.schedule_linear()
+    self.assertLessEqual(len(linear.src), 1)
     self.assertLess(time.perf_counter()-st, 2.0)
 
   def test_recursive_reshape(self):
@@ -1209,8 +1209,8 @@ class TestFusionOp(unittest.TestCase):
     b = Tensor.empty(16, 2).realize()
     r = a.sum(1)
     for _ in range(24): r = r.reshape(16, 2) + b
-    sched = r.schedule()
-    self.assertEqual(len(sched), 1)
+    linear = r.schedule_linear()
+    self.assertEqual(len(linear.src), 1)
     self.assertLess(time.perf_counter()-st, 2.0)
 
 # NOTE: the NULL backend supports BUFFER_VIEW

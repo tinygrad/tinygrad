@@ -4,7 +4,9 @@ from functools import partial
 from tinygrad import nn, dtypes, Tensor, Device, TinyJit, Variable
 from tinygrad.helpers import getenv, CI, OSX
 from tinygrad.device import is_dtype_supported
-from tinygrad.engine.realize import CompiledRunner
+from tinygrad.codegen import to_program
+
+from tinygrad.uop.ops import Ops
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.nir import NIRRenderer
 from test.helpers import not_support_multi_device, needs_second_gpu
@@ -117,12 +119,13 @@ class TestRandomness(unittest.TestCase):
 
   @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, (NIRRenderer, PTXRenderer)), "PTX and NIR use pointer arithmetic")
   def test_threefry_doesnt_use_long(self):
-    sched = Tensor.rand(20).schedule()
-    for si in sched:
-      si.lower()
-      if isinstance(si.prg, CompiledRunner):
-        for u in si.prg.p.uops:
-          self.assertNotIn(u.dtype, {dtypes.long, dtypes.ulong}, msg=f"long found in {si.prg.p.name}")
+    linear = Tensor.rand(20).schedule_linear()
+    for call in linear.src:
+      ast = call.src[0]
+      if ast.op is Ops.SINK:
+        prg = to_program(ast, renderer=Device[Device.DEFAULT].renderer)
+        for u in tuple(prg.src[2].src):
+          self.assertNotIn(u.dtype, {dtypes.long, dtypes.ulong}, msg=f"long found in {prg.arg.name}")
 
   def test_threefry_against_reference_full(self):
     Tensor.manual_seed(1337)
@@ -187,24 +190,24 @@ class TestRandomness(unittest.TestCase):
 
     Tensor.rand(1).realize()
 
-    s = Tensor.rand(20).schedule()
-    s2 = Tensor.rand(20).schedule()
+    s = Tensor.rand(20).schedule_linear().src
+    s2 = Tensor.rand(20).schedule_linear().src
 
     assert len(s) == len(s2), f"{len(s)} != {len(s2)}"
     for x,y in zip(s, s2):
-      if not (x.ast == y.ast):
-        print(f"{x.ast} != {y.ast}")
+      if not (x.src[0] == y.src[0]):
+        print(f"{x.src[0]} != {y.src[0]}")
 
     Tensor.rand(1, device=f"{Device.DEFAULT}:1").realize()
 
-    s3 = Tensor.rand(20, device=f"{Device.DEFAULT}:1").schedule()
-    s4 = Tensor.rand(20, device=f"{Device.DEFAULT}:1").schedule()
+    s3 = Tensor.rand(20, device=f"{Device.DEFAULT}:1").schedule_linear().src
+    s4 = Tensor.rand(20, device=f"{Device.DEFAULT}:1").schedule_linear().src
 
     assert len(s3) == len(s4), f"{len(s3)} != {len(s4)}"
     assert len(s2) == len(s4), f"{len(s)} != {len(s3)}"
     for x,y in zip(s3, s4):
-      if not (x.ast == y.ast):
-        print(f"{x.ast} != {y.ast}")
+      if not (x.src[0] == y.src[0]):
+        print(f"{x.src[0]} != {y.src[0]}")
 
   @unittest.skipUnless(is_dtype_supported(dtypes.bfloat16), "need bfloat16 support")
   def test_rand_bfloat16(self):
@@ -304,17 +307,26 @@ class TestRandomness(unittest.TestCase):
     with self.assertRaises(TypeError): Tensor.randint((3, 4), low=0, high=3.5)
     with self.assertRaises(TypeError): Tensor.randint((3, 4), low=1, high=3, dtype="float")
     with self.assertRaises(TypeError): Tensor.randint((3, 4), low=0, high=3, dtype=dtypes.float32)
+    # check low < high
+    with self.assertRaises(ValueError): Tensor.randint((3, 4), low=10, high=5)
+    with self.assertRaises(ValueError): Tensor.randint((3, 4), low=10, high=10)
+    np.testing.assert_array_equal(Tensor.randint(16, low=5, high=6).numpy(), 5)
 
   def test_normal(self):
     self.assertTrue(normal_test(Tensor.normal))
     self.assertTrue(equal_distribution(Tensor.normal, lambda x: torch.nn.init.normal_(torch.empty(x), mean=0, std=1),
                                                       lambda x: np.random.normal(loc=0, scale=1, size=x)))
+    # check std >= 0
+    with self.assertRaises(ValueError): Tensor.normal((3, 4), mean=0, std=-1)
 
   def test_uniform(self):
     self.assertFalse(normal_test(Tensor.uniform))
     self.assertTrue(equal_distribution(Tensor.uniform, lambda x: torch.nn.init.uniform_(torch.empty(x)), lambda x: np.random.uniform(size=x)))
     self.assertTrue(equal_distribution(partial(Tensor.uniform, low=-100, high=100, dtype=dtypes.int32),
                                        numpy_func=lambda x: np.random.randint(low=-100, high=100, size=x)))
+    # check low < high
+    with self.assertRaises(ValueError): Tensor.uniform((3, 4), low=5.0, high=3.0)
+    with self.assertRaises(ValueError): Tensor.uniform((3, 4), low=1.0, high=1.0)
 
   def test_scaled_uniform(self):
     self.assertFalse(normal_test(Tensor.scaled_uniform))
@@ -349,7 +361,7 @@ class TestRandomness(unittest.TestCase):
     _check_with_torch(w=[0.231, 0., 1., 0.5], num_samples=300, replacement=True)
     _check_with_torch(w=[[0.2, 0.8]], num_samples=300, replacement=True)  # 2D but only 1 row
     _check_with_torch(w=[[0.453, 0., 1., 0.81], [0.1, 0.8, 0., 0.1]], num_samples=300, replacement=True)
-    # no-replacement isn't supported, unless taking only one sample
+    # no-replacement
     w = [0.1, 0.9]
     self.assertRaises(AssertionError, lambda: Tensor(w).multinomial(100, replacement=False))
 
@@ -359,6 +371,23 @@ class TestRandomness(unittest.TestCase):
     tiny_samples = [sample_one().item() for _ in range(1000)]
     torch_samples = [torch.tensor(w).multinomial(1, replacement=False).item() for _ in range(1000)]
     self.assertTrue(equal_distribution(lambda *_: Tensor(tiny_samples), lambda _: torch.tensor(torch_samples)))
+
+    w = list(range(32))
+    s1 = Tensor(w).multinomial(5, replacement=False).numpy()
+    self.assertEqual(len(set(s1.tolist())), 5)
+    s2 = Tensor(w).multinomial(5, replacement=False).numpy()
+    self.assertFalse(np.array_equal(s1, s2))
+    full = Tensor(w).multinomial(len(w), replacement=False).numpy()
+    self.assertEqual(sorted(full.tolist()), w)
+
+    w = [0.1, 0.2, 0.3, 0.4]
+    @TinyJit
+    def sample_three(): return Tensor(w).multinomial(3, replacement=False).realize()
+
+    tiny_draws = np.array([sample_three().numpy() for _ in range(1000)])
+    torch_draws = np.array([torch.tensor(w).multinomial(3, replacement=False).numpy() for _ in range(1000)])
+    for pos in range(3):
+      self.assertTrue(equal_distribution(lambda *_: Tensor(tiny_draws[:, pos]), lambda _: torch.tensor(torch_draws[:, pos])))
 
   @unittest.skip("this test is flaky")
   def test_multinomial_counterexample(self):

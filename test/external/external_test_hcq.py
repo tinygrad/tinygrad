@@ -2,7 +2,8 @@ import unittest, ctypes, struct, time, array
 from tinygrad import Device, Tensor, dtypes
 from tinygrad.helpers import to_mv, CI
 from tinygrad.device import Buffer, BufferSpec
-from tinygrad.engine.realize import get_runner
+from tinygrad.engine.realize import get_runtime
+from tinygrad.codegen import to_program
 
 def _time_queue(q, d):
   st = time.perf_counter()
@@ -20,14 +21,15 @@ class TestHCQ(unittest.TestCase):
     #TestHCQ.d1: AMDDevice = Device["AMD:1"]
     TestHCQ.a = Tensor([0.,1.], device=Device.DEFAULT).realize()
     TestHCQ.b = self.a + 1
-    si = self.b.schedule()[-1]
-    TestHCQ.runner = get_runner(TestHCQ.d0.device, si.ast)
+    linear = self.b.schedule_linear()
+    TestHCQ.prg = to_program(linear.src[-1].src[0], TestHCQ.d0.renderer)
+    TestHCQ.runtime = get_runtime(TestHCQ.d0.device, TestHCQ.prg)
     TestHCQ.b.uop.buffer.allocate()
     # wow that's a lot of abstraction layers
     TestHCQ.addr = struct.pack("QQ", TestHCQ.b.uop.buffer._buf, TestHCQ.a.uop.buffer._buf)
     TestHCQ.addr2 = struct.pack("QQ", TestHCQ.a.uop.buffer._buf, TestHCQ.b.uop.buffer._buf)
-    TestHCQ.kernargs_off = TestHCQ.runner._prg.kernargs_offset
-    TestHCQ.kernargs_size = TestHCQ.runner._prg.kernargs_alloc_size
+    TestHCQ.kernargs_off = TestHCQ.runtime.kernargs_offset
+    TestHCQ.kernargs_size = TestHCQ.runtime.kernargs_alloc_size
     ctypes.memmove(TestHCQ.d0.kernargs_ptr+TestHCQ.kernargs_off, TestHCQ.addr, len(TestHCQ.addr))
     ctypes.memmove(TestHCQ.d0.kernargs_ptr+TestHCQ.kernargs_size+TestHCQ.kernargs_off, TestHCQ.addr2, len(TestHCQ.addr2))
 
@@ -38,8 +40,8 @@ class TestHCQ(unittest.TestCase):
     elif Device.DEFAULT == "NV":
       from tinygrad.runtime.ops_nv import HWQueue, HWQueue
       # nv need to copy constbuffer there as well
-      to_mv(TestHCQ.d0.kernargs_ptr, 0x160).cast('I')[:] = array.array('I', TestHCQ.runner._prg.constbuffer_0)
-      to_mv(TestHCQ.d0.kernargs_ptr+TestHCQ.kernargs_size, 0x160).cast('I')[:] = array.array('I', TestHCQ.runner._prg.constbuffer_0)
+      to_mv(TestHCQ.d0.kernargs_ptr, 0x160).cast('I')[:] = array.array('I', TestHCQ.runtime.constbuffer_0)
+      to_mv(TestHCQ.d0.kernargs_ptr+TestHCQ.kernargs_size, 0x160).cast('I')[:] = array.array('I', TestHCQ.runtime.constbuffer_0)
       TestHCQ.compute_queue = HWQueue
       TestHCQ.copy_queue = HWQueue
 
@@ -53,11 +55,11 @@ class TestHCQ(unittest.TestCase):
     temp_signal, temp_value = TestHCQ.d0._alloc_signal(value=0), 0
     q = TestHCQ.compute_queue()
     for _ in range(1000):
-      q.exec(TestHCQ.runner._prg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.p.global_size, TestHCQ.runner.p.local_size)
+      q.exec(TestHCQ.runtime, TestHCQ.d0.kernargs_ptr, TestHCQ.prg.arg.global_size, TestHCQ.prg.arg.local_size)
       q.signal(temp_signal, temp_value + 1).wait(temp_signal, temp_value + 1)
       temp_value += 1
 
-      q.exec(TestHCQ.runner._prg, TestHCQ.d0.kernargs_ptr+TestHCQ.kernargs_size, TestHCQ.runner.p.global_size, TestHCQ.runner.p.local_size)
+      q.exec(TestHCQ.runtime, TestHCQ.d0.kernargs_ptr+TestHCQ.kernargs_size, TestHCQ.prg.arg.global_size, TestHCQ.prg.arg.local_size)
       q.signal(temp_signal, temp_value + 1).wait(temp_signal, temp_value + 1)
       temp_value += 1
 
@@ -71,10 +73,10 @@ class TestHCQ(unittest.TestCase):
   def test_run_1000_times(self):
     temp_signal = TestHCQ.d0._alloc_signal(value=0)
     q = TestHCQ.compute_queue()
-    q.exec(TestHCQ.runner._prg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.p.global_size, TestHCQ.runner.p.local_size)
+    q.exec(TestHCQ.runtime, TestHCQ.d0.kernargs_ptr, TestHCQ.prg.arg.global_size, TestHCQ.prg.arg.local_size)
     q.signal(temp_signal, 2).wait(temp_signal, 2)
-    q.exec(TestHCQ.runner._prg, TestHCQ.d0.kernargs_ptr+TestHCQ.kernargs_size, TestHCQ.runner.p.global_size,
-           TestHCQ.runner.p.local_size)
+    q.exec(TestHCQ.runtime, TestHCQ.d0.kernargs_ptr+TestHCQ.kernargs_size, TestHCQ.prg.arg.global_size,
+           TestHCQ.prg.arg.local_size)
     for _ in range(1000):
       TestHCQ.d0._set_signal(temp_signal, 1)
       q.submit(TestHCQ.d0)
@@ -87,11 +89,11 @@ class TestHCQ(unittest.TestCase):
   def test_run_to_3(self):
     temp_signal = TestHCQ.d0._alloc_signal(value=0)
     q = TestHCQ.compute_queue()
-    q.exec(TestHCQ.runner._prg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.p.global_size, TestHCQ.runner.p.local_size)
+    q.exec(TestHCQ.runtime, TestHCQ.d0.kernargs_ptr, TestHCQ.prg.arg.global_size, TestHCQ.prg.arg.local_size)
     q.signal(temp_signal, 1).wait(temp_signal, 1)
-    q.exec(TestHCQ.runner._prg, TestHCQ.d0.kernargs_ptr+TestHCQ.kernargs_size, TestHCQ.runner.p.global_size, TestHCQ.runner.p.local_size)
+    q.exec(TestHCQ.runtime, TestHCQ.d0.kernargs_ptr+TestHCQ.kernargs_size, TestHCQ.prg.arg.global_size, TestHCQ.prg.arg.local_size)
     q.signal(temp_signal, 2).wait(temp_signal, 2)
-    q.exec(TestHCQ.runner._prg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.p.global_size, TestHCQ.runner.p.local_size)
+    q.exec(TestHCQ.runtime, TestHCQ.d0.kernargs_ptr, TestHCQ.prg.arg.global_size, TestHCQ.prg.arg.local_size)
     q.signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
     TestHCQ.d0._wait_signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
     TestHCQ.d0.timeline_value += 1
@@ -101,7 +103,7 @@ class TestHCQ(unittest.TestCase):
   def test_update_exec(self):
     q = TestHCQ.compute_queue()
     exec_cmd_idx = len(q)
-    q.exec(TestHCQ.runner._prg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.p.global_size, TestHCQ.runner.p.local_size)
+    q.exec(TestHCQ.runtime, TestHCQ.d0.kernargs_ptr, TestHCQ.prg.arg.global_size, TestHCQ.prg.arg.local_size)
     q.update_exec(exec_cmd_idx, (1,1,1), (1,1,1))
     q.signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
     TestHCQ.d0._wait_signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
@@ -115,10 +117,10 @@ class TestHCQ(unittest.TestCase):
   def test_bind_run(self):
     temp_signal = TestHCQ.d0._alloc_signal(value=0)
     q = TestHCQ.compute_queue()
-    q.exec(TestHCQ.runner._prg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.p.global_size, TestHCQ.runner.p.local_size)
+    q.exec(TestHCQ.runtime, TestHCQ.d0.kernargs_ptr, TestHCQ.prg.arg.global_size, TestHCQ.prg.arg.local_size)
     q.signal(temp_signal, 2).wait(temp_signal, 2)
-    q.exec(TestHCQ.runner._prg, TestHCQ.d0.kernargs_ptr+TestHCQ.kernargs_size, TestHCQ.runner.p.global_size,
-           TestHCQ.runner.p.local_size)
+    q.exec(TestHCQ.runtime, TestHCQ.d0.kernargs_ptr+TestHCQ.kernargs_size, TestHCQ.prg.arg.global_size,
+           TestHCQ.prg.arg.local_size)
     q.bind(TestHCQ.d0)
     for _ in range(1000):
       TestHCQ.d0._set_signal(temp_signal, 1)
@@ -133,7 +135,7 @@ class TestHCQ(unittest.TestCase):
   def test_update_exec_binded(self):
     q = TestHCQ.compute_queue()
     exec_ptr = q.ptr()
-    q.exec(TestHCQ.runner._prg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.p.global_size, TestHCQ.runner.p.local_size)
+    q.exec(TestHCQ.runtime, TestHCQ.d0.kernargs_ptr, TestHCQ.prg.arg.global_size, TestHCQ.prg.arg.local_size)
     q.signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
     q.bind(TestHCQ.d0)
 
@@ -170,7 +172,7 @@ class TestHCQ(unittest.TestCase):
 
   def test_run_normal(self):
     q = TestHCQ.compute_queue()
-    q.exec(TestHCQ.runner._prg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.p.global_size, TestHCQ.runner.p.local_size)
+    q.exec(TestHCQ.runtime, TestHCQ.d0.kernargs_ptr, TestHCQ.prg.arg.global_size, TestHCQ.prg.arg.local_size)
     q.signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
     TestHCQ.d0._wait_signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
     TestHCQ.d0.timeline_value += 1
@@ -201,7 +203,7 @@ class TestHCQ(unittest.TestCase):
 
   def test_run_signal(self):
     q = TestHCQ.compute_queue()
-    q.exec(TestHCQ.runner._prg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.p.global_size, TestHCQ.runner.p.local_size)
+    q.exec(TestHCQ.runtime, TestHCQ.d0.kernargs_ptr, TestHCQ.prg.arg.global_size, TestHCQ.prg.arg.local_size)
     q.signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
     q.submit(TestHCQ.d0)
     TestHCQ.d0._wait_signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
@@ -278,7 +280,7 @@ class TestHCQ(unittest.TestCase):
   def test_interleave_compute_and_copy(self):
     q = TestHCQ.compute_queue()
     qc = TestHCQ.copy_queue()
-    q.exec(TestHCQ.runner._prg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.p.global_size, TestHCQ.runner.p.local_size)  # b = [1, 2]
+    q.exec(TestHCQ.runtime, TestHCQ.d0.kernargs_ptr, TestHCQ.prg.arg.global_size, TestHCQ.prg.arg.local_size)  # b = [1, 2]
     q.signal(sig:=TestHCQ.d0._alloc_signal(value=0), value=1)
     qc.wait(sig, value=1)
     qc.copy(TestHCQ.a.uop.buffer._buf, TestHCQ.b.uop.buffer._buf, 8)
@@ -315,7 +317,7 @@ class TestHCQ(unittest.TestCase):
     for _ in range(40):
       q = TestHCQ.compute_queue()
       q.wait(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value - 1)
-      q.exec(TestHCQ.runner._prg, TestHCQ.d0.kernargs_ptr, TestHCQ.runner.p.global_size, TestHCQ.runner.p.local_size)
+      q.exec(TestHCQ.runtime, TestHCQ.d0.kernargs_ptr, TestHCQ.prg.arg.global_size, TestHCQ.prg.arg.local_size)
       q.signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
       TestHCQ.d0._wait_signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value)
       TestHCQ.d0.timeline_value += 1

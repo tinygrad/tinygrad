@@ -94,7 +94,7 @@ def Muon(params: list[Tensor], lr=0.001, momentum=0.95, weight_decay=0.1, ns_ste
   """
   assert not fused, "FUSE_OPTIM not allowed for Muon optimizer"
   return LARS(params, lr, momentum, weight_decay, ns_steps, ns_coefficients, nesterov,
-              classic=False, pre_wd=False, tcoef=0.0, device=None, fused=fused)
+              classic=False, pre_wd=False, tcoef=0.0, device=device, fused=fused)
 
 class LARS(Optimizer):
   """

@@ -1,7 +1,6 @@
 import numpy as np, os
 from tinygrad.helpers import getenv, flat_mv
 from tinygrad import dtypes
-from tinygrad.engine.realize import get_program
 
 # for copied uops
 from tinygrad import dtypes

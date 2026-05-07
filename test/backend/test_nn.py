@@ -8,7 +8,7 @@ from tinygrad.helpers import GlobalCounters, Context
 from tinygrad.nn import Conv1d, ConvTranspose1d, Conv2d, ConvTranspose2d, Linear, Embedding
 from tinygrad.nn import BatchNorm, LayerNorm, LayerNorm2d, GroupNorm, InstanceNorm, RMSNorm, LSTMCell
 from tinygrad.nn.state import load_state_dict
-from tinygrad.engine.realize import run_schedule
+from tinygrad.engine.realize import run_linear
 from test.helpers import not_support_multi_device, needs_second_gpu, slow
 
 @slow
@@ -431,17 +431,19 @@ class TestNN(unittest.TestCase):
     a = Tensor([[1, 5, 9, 11],
                 [12, 19, 8, 1]])
     result = layer(a)
-    schedule = result.schedule()
-    self.assertEqual(len([item for item in schedule if item.ast.op is Ops.SINK]), kcount, "first run realizes weight and embedding")
-    run_schedule(schedule)
+    linear, var_vals = result.linear_with_vars()
+    self.assertEqual(len([call for call in linear.src if call.src[0].op is Ops.SINK]), kcount,
+                     "first run realizes weight and embedding")
+    run_linear(linear, var_vals)
 
     b = Tensor([[1, 2, 3],
                 [4, 5, 6],
                 [7, 8, 9]])
     result = layer(b)
-    schedule = result.schedule()
-    self.assertEqual(1, len([item for item in schedule if item.ast.op is Ops.SINK]), "second run realizes embedding only")
-    run_schedule(schedule)
+    linear, var_vals = result.linear_with_vars()
+    self.assertEqual(1, len([call for call in linear.src if call.src[0].op is Ops.SINK]),
+                     "second run realizes embedding only")
+    run_linear(linear, var_vals)
     print(f"Embedding used {GlobalCounters.global_ops} ops")
     self.assertLessEqual(GlobalCounters.global_ops, ops)
 

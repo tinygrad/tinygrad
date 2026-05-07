@@ -5,16 +5,17 @@ import tinygrad.runtime.ops_cpu as ops_cpu
 from tinygrad.runtime.support.compiler_cpu import ClangJITCompiler
 from tinygrad.runtime.support.elf import elf_loader
 
+def cpu_arch():
+  return {'amd64': 'x86_64', 'arm64': 'arm64', 'aarch64': 'arm64'}.get(m:=platform.machine().lower(), m)
+
 class TestElfLoader(unittest.TestCase):
   def test_windows_arm64_aliases(self):
     try:
       with patch("platform.machine", return_value="ARM64"):
-        importlib.reload(compiler_cpu)
         importlib.reload(ops_cpu)
-        self.assertEqual(compiler_cpu.LLVMCompiler.target_arch, "AArch64")
 
         with patch("subprocess.check_output", return_value=b"") as check:
-          compiler_cpu.ClangJITCompiler().compile_to_obj("int test(void) { return 0; }")
+          compiler_cpu.ClangJITCompiler([cpu_arch(), "native"]).compile_to_obj("int test(void) { return 0; }")
         self.assertIn("--target=arm64-none-unknown-elf", check.call_args.args[0])
         self.assertIn("-ffixed-x18", check.call_args.args[0])
 
@@ -27,7 +28,6 @@ class TestElfLoader(unittest.TestCase):
         queue._exec(0, Prg(), 1, 1, 2)
         self.assertIs(seen[1], ctypes.c_int64)
     finally:
-      importlib.reload(compiler_cpu)
       importlib.reload(ops_cpu)
 
   def test_load_clang_jit_strtab(self):
@@ -37,7 +37,7 @@ class TestElfLoader(unittest.TestCase):
         return something + x;
       }
     '''
-    args = ('-x', 'c', '-c', '-target', f'{platform.machine()}-none-unknown-elf', '-march=native', '-fPIC', '-O2', '-ffreestanding', '-nostdlib')
+    args = ('-x', 'c', '-c', '-target', f'{cpu_arch()}-none-unknown-elf', '-march=native', '-fPIC', '-O2', '-ffreestanding', '-nostdlib')
     obj = subprocess.check_output(('clang',) + args + ('-', '-o', '-'), input=src.encode('utf-8'))
     _, sections, _ = elf_loader(obj)
     section_names = [sh.name for sh in sections]
@@ -50,13 +50,13 @@ class TestElfLoader(unittest.TestCase):
       }
     '''
     with self.assertRaisesRegex(RuntimeError, 'evil_external_function'):
-      ClangJITCompiler().compile(src)
+      ClangJITCompiler([cpu_arch(), "native"]).compile(src)
   def test_link(self):
     src = '''
       float powf(float, float); // from libm
       float test(float x, float y) { return powf(x, y); }
     '''
-    args = ('-x', 'c', '-c', '-target', f'{platform.machine()}-none-unknown-elf', '-march=native', '-fPIC', '-O2', '-ffreestanding', '-nostdlib')
+    args = ('-x', 'c', '-c', '-target', f'{cpu_arch()}-none-unknown-elf', '-march=native', '-fPIC', '-O2', '-ffreestanding', '-nostdlib')
     obj = subprocess.check_output(('clang',) + args + ('-', '-o', '-'), input=src.encode())
     with self.assertRaisesRegex(RuntimeError, 'powf'): elf_loader(obj)
     elf_loader(obj, link_libs=['m'])

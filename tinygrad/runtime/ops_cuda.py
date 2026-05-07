@@ -12,7 +12,7 @@ if (MOCKGPU:=DEV.target("CUDA").interface == "MOCK"): from test.mockgpu.cuda imp
 
 def check(status):
   if status != 0:
-    error = ctypes.string_at(init_c_var(ctypes.POINTER(ctypes.c_char), lambda x: cuda.cuGetErrorString(status, x))).decode()
+    error = ctypes.string_at(init_c_var(ctypes.POINTER(ctypes.c_char), lambda x: cuda.cuGetErrorString(status, ctypes.byref(x)))).decode()
     raise RuntimeError(f"CUDA Error {status}, {error}")
 
 def encode_args(args, vals) -> tuple[ctypes.Structure, ctypes.Array]:
@@ -119,6 +119,8 @@ class CUDADevice(Compiled):
     from tinygrad.runtime.graph.cuda import CUDAGraph
     super().__init__(device, CUDAAllocator(self), [CUDARenderer, PTXRenderer, NVCCRenderer], functools.partial(CUDAProgram, self),
                      None if MOCKGPU else CUDAGraph, arch=f"sm_{major.value}{minor.value}")
+
+  def count(self) -> int: return init_c_var(ctypes.c_int, lambda x: check(cuda.cuDeviceGetCount(ctypes.byref(x)))).value
 
   def synchronize(self):
     check(cuda.cuCtxSetCurrent(self.context))

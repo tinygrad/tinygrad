@@ -1,15 +1,16 @@
 #!/usr/bin/env python
-import unittest, functools
+import unittest
 import numpy as np
 
 from hypothesis import given, settings, strategies as strat
-from test.helpers import assert_jit_cache_len, not_support_multi_device, needs_second_gpu
+from test.helpers import assert_jit_cache_len, call_is_graph, not_support_multi_device, needs_second_gpu
+from tinygrad import Variable
 from tinygrad.tensor import Tensor
-from tinygrad.engine.jit import TinyJit, JitError, GraphRunner, MultiGraphRunner, graph_class
-from tinygrad.engine.realize import CompiledRunner, BufferCopy, BufferXfer
+from tinygrad.engine.jit import TinyJit, JitError, graph_class
 from tinygrad.device import Device
 from tinygrad.helpers import Context, JIT, DEV, GlobalCounters
 from tinygrad.dtype import dtypes
+from tinygrad.uop.ops import Ops
 from extra.models.unet import ResBlock
 
 def _simple_test(add, extract=lambda x: x, N=10):
@@ -38,6 +39,19 @@ class TestJit(unittest.TestCase):
     @TinyJit
     def add(a, b): return (a+b).realize()
     _simple_test(add)
+
+  @unittest.skipUnless(Device.DEFAULT == "CPU", "core_id is a CPU runtimevar")
+  def test_hcq_core_id_runtimevar_merge(self):
+    N = 262144
+    @TinyJit
+    def f(x, st):
+      y = (x + 1).contiguous().realize()
+      z = x.shrink(((st, st + N),)).contiguous().realize()
+      return y, z
+    x = Tensor.arange(2*N).contiguous().realize()
+    for _ in range(3): y, z = f(x, Variable("a", 0, N).bind(0))
+    self.assertEqual(y.shape, (2*N,))
+    self.assertEqual(z.shape, (N,))
 
   def test_jitbeam_triggers_beam(self):
     from unittest.mock import patch
@@ -91,6 +105,20 @@ class TestJit(unittest.TestCase):
       np.testing.assert_allclose(d.numpy(), a.numpy()-b.numpy(), atol=1e-4, rtol=1e-5)
       np.testing.assert_allclose(e.numpy(), a.numpy()*b.numpy(), atol=1e-4, rtol=1e-5)
     assert_jit_cache_len(f, 3)
+
+  def test_global_counters_jit(self):
+    @TinyJit
+    def f(a, b):
+      c = (a + b).realize()
+      d = (c * 2).realize()
+      return (d - a).realize()
+    a, b = Tensor.randn(64, 64).realize(), Tensor.randn(64, 64).realize()
+    for _ in range(4):
+      GlobalCounters.reset()
+      f(a, b)
+      Device[a.device].synchronize()
+      self.assertGreater(GlobalCounters.global_mem, 0)
+      self.assertGreater(GlobalCounters.global_ops, 0)
 
   def test_nothing_jitted(self):
     @TinyJit
@@ -419,10 +447,10 @@ class TestJit(unittest.TestCase):
       if prev is not None: np.testing.assert_allclose(o, prev, atol=1e-4, rtol=1e-5)
       prev = o
 
-    graph_t = Device[Device.DEFAULT].graph.func if isinstance(Device[Device.DEFAULT].graph, functools.partial) else Device[Device.DEFAULT].graph
     # Checking that 2 graphs are inited.
-    assert isinstance(jf.jit_cache[0].prg, graph_t)
-    assert isinstance(jf.jit_cache[1].prg, graph_t)
+    assert len(jf.captured.linear.src) == 2
+    for si in jf.captured.linear.src:
+      assert call_is_graph(si)
 
   def test_jitted_clone(self):
     def f(a): return a.clone().realize()
@@ -583,7 +611,7 @@ class TestJitPrune(unittest.TestCase):
       a = Tensor.rand(16).realize()
       out = w2_prune(a)
       np.testing.assert_allclose(out.tolist(), [x*2+y for x,y in zip(weights.tolist(), a.tolist())])
-    assert len(w2_prune.captured.jit_cache) == 1
+    assert_jit_cache_len(w2_prune, 1)
 
   def test_prune_w_copy_correct(self):
     weights = Tensor.rand(16).realize()
@@ -617,7 +645,7 @@ class TestJitPrune(unittest.TestCase):
       out = w2_prune(a)
       np.testing.assert_allclose(out.tolist(), [x*2+y for x,y in zip(weights.tolist(), a.tolist())])
 
-    assert len(w2_prune.captured.jit_cache) == 1, "prune should have removed the copy"
+    assert_jit_cache_len(w2_prune, 1)
 
 class TestJitFree(unittest.TestCase):
   def test_free_intermediates(self):
@@ -688,8 +716,9 @@ class TestJitGraphSplit(unittest.TestCase):
     graph_t = graph_class(dev)
     if graph_t is None: return
 
-    got = f.jit_cache
+    got = f.captured.linear.src
     from tinygrad.runtime.graph.hcq import HCQGraph
+    from tinygrad.engine.jit import MultiGraphRunner
     if graph_t is HCQGraph:
       validate = hcqgraph
     elif issubclass(graph_t, MultiGraphRunner):
@@ -698,16 +727,16 @@ class TestJitGraphSplit(unittest.TestCase):
       validate = graph
 
     assert len(got) == len(validate), f"Expected {len(validate)} operations, got {len(got)}"
-    for expected, got in zip(validate, got):
+    for expected, si in zip(validate, got):
+      ast = si.src[0]
       if expected["type"] == "graph":
-        assert isinstance(got.prg, GraphRunner), f"Expected GraphRunner, got {type(got.prg)}"
-        assert len(got.prg.jit_cache) == expected["cnt"], f"Expected {expected['cnt']} operations in graph, got {len(got.prg.jit_cache)}"
+        assert call_is_graph(si), f"Expected graph, got {ast.op}"
+        inner_cnt = len(ast.src[0].src)
+        assert inner_cnt == expected["cnt"], f"Expected {expected['cnt']} operations in graph, got {inner_cnt}"
       elif expected["type"] == "comp":
-        assert isinstance(got.prg, CompiledRunner), f"Expected CompiledRunner, got {type(got.prg)}"
-      elif expected["type"] == "copy":
-        assert isinstance(got.prg, BufferCopy), f"Expected BufferCopy, got {type(got.prg)}"
-      elif expected["type"] == "xfer":
-        assert isinstance(got.prg, BufferXfer), f"Expected BufferXfer, got {type(got.prg)}"
+        assert ast.op in (Ops.SINK, Ops.PROGRAM), f"Expected kernel, got {ast.op}"
+      elif expected["type"] in ("copy", "xfer"):
+        assert ast.op is Ops.COPY, f"Expected COPY, got {ast.op}"
 
   def ji_graph(self, cnt): return {"type": "graph", "cnt": cnt}
   def ji_comp(self): return {"type": "comp"}

@@ -10,4 +10,4 @@ def extract_ast(*args) -> None:
   return None
 
 if __name__ == "__main__":
-  _pmap({"get_program":extract_ast})
+  _pmap({"do_to_program":extract_ast})

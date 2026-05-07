@@ -16,6 +16,9 @@ class HIPDevice(Compiled):
     self.time_event_st, self.time_event_en = [init_c_var(hip.hipEvent_t, lambda x: hip.hipEventCreate(ctypes.byref(x), 0)) for _ in range(2)]
 
     super().__init__(device, HIPAllocator(self), [HIPRenderer], functools.partial(HIPProgram, self), arch=self.arch)
+
+  def count(self) -> int: return init_c_var(ctypes.c_int, lambda x: check(hip.hipGetDeviceCount(x))).value
+
   def synchronize(self):
     check(hip.hipSetDevice(self.device_id))
     check(hip.hipDeviceSynchronize())
