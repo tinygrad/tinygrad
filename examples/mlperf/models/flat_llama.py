@@ -267,14 +267,15 @@ class FlatTransformer:
     assert not (mp and fsdp)
     if not mp:
       if fsdp:
-        self.wqkv.shard_(device, axis=1)
-        self.wo.shard_(device, axis=1)
-        self.w13.shard_(device, axis=1)
-        self.w2.shard_(device, axis=1)
+        self.wqkv.shard_(device, axis=1).realize()
+        self.wo.shard_(device, axis=1).realize()
+        self.w13.shard_(device, axis=1).realize()
+        self.w2.shard_(device, axis=1).realize()
         self.fsdp = True
       for v in get_parameters(self):
         if not isinstance(v.device, tuple):
           v.shard_(device, axis=None)
+        v.realize()
     else:
       # flat per-layer weights: axis 0 is n_layers, so shard axes are +1 vs per-layer Transformer
       self.wqkv.shard_(device, axis=1).realize()          # (n_layers, out, dim) shard out
