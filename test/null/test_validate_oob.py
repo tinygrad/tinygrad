@@ -53,7 +53,7 @@ class TestValidateOOB(unittest.TestCase):
         to_uops_list([buf.index(v.valid(v < 20)).store(0)])  # oob
 
   # ALU ops in index
-  def test_idiv(self):
+  def test_floordiv(self):
     with Context(CHECK_OOB=1, SPEC=2):
       buf = UOp(Ops.PARAM, dtypes.int.ptr(16), (), 0)
       to_uops_list([buf.index(UOp.range(32, 0, AxisType.GLOBAL) // 2, ptr=True).load(dtype=dtypes.int)])  # 0..15 valid
