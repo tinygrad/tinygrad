@@ -23,9 +23,12 @@ def format_tools(tools: list|None) -> str:
   if not tools: return ""
   functions = [tool.get('function', {}) for tool in tools]
   return "<tools>\n" + "\n".join(_tool_sig(fn) for fn in functions) + "\n</tools>\n" \
-    + "Use exactly one listed tool name in \"name\" and include all arguments in \"arguments\".\n" \
-    + "Reply with a complete tool call: " + TOOL_CALL_OPEN + '{"name":"...","arguments":{...}}' + TOOL_CALL_CLOSE \
-    + "\nExample bash call: " + TOOL_CALL_OPEN + '{"name":"bash","arguments":{"command":"ls","description":""}}' + TOOL_CALL_CLOSE
+    + "Each signature shows required arguments only. For tool(arg1,arg2), arguments must be {\"arg1\":...,\"arg2\":...}.\n" \
+    + "Use exactly one listed tool name in \"name\" and include every listed argument key in \"arguments\".\n" \
+    + "Return only one complete tool call, with valid JSON and double-quoted keys/strings:\n" \
+    + TOOL_CALL_OPEN + '{"name":"...","arguments":{...}}' + TOOL_CALL_CLOSE \
+    + "\nFor bash, both \"command\" and \"description\" are required; description must briefly state what the command does." \
+    + "\nExample: " + TOOL_CALL_OPEN + '{"name":"bash","arguments":{"command":"ls","description":"list files"}}' + TOOL_CALL_CLOSE
 
 # parse the last tool_call block
 def parse_tool_calls(text: str) -> list[dict]:
