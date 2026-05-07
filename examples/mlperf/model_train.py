@@ -1286,7 +1286,7 @@ def train_llama2_70b_lora():
   train_llama3(True)
 
 def train_llama3(llama2_70b_lora:bool=False):
-  from examples.mlperf.models.flat_llama import FlatTransformer, apply_grad, FP8_DTYPE, LORA
+  from examples.mlperf.models.flat_llama import FlatTransformer, apply_grad, FP8_DTYPE, LORA, QUANTIZE
   from examples.llama3 import MODEL_PARAMS
   from examples.mlperf.lr_schedulers import CosineAnnealingLRWithWarmup
   from examples.mlperf.optim import GradAccClipAdamW
@@ -1432,7 +1432,7 @@ def train_llama3(llama2_70b_lora:bool=False):
 
     load_state_dict(model, state_dict, strict=False, realize=True, consume=True)
     del state_dict # just in case
-    model.quantize()
+    if QUANTIZE: model.quantize()
 
   model.shard(device, is_mp, is_fsdp)
 
