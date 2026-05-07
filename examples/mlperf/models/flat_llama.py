@@ -148,7 +148,11 @@ class FlatTransformer:
     if QUANTIZE: self.quantize() 
 
   def quantize(self):    
-    def _amax(): return Tensor.full((), FP8_MAX, dtype=dtypes.float32).contiguous().requires_grad_(False)
+    def _amax():
+      t = Tensor.full((), FP8_MAX, dtype=dtypes.float32).contiguous().requires_grad_(False)
+      if isinstance(self.wqkv.device, tuple):
+        t = t.to(self.wqkv.device).contiguous().requires_grad_(False)
+      return t
     names = ["xqkv", "xo", "x13", "x2"]
     self._fp8_amax = {name: [_amax() for _ in range(self.n_layers)] for name in names}
     grad_names = ["xqkv", "xo", "xw13", "xout"]

@@ -1406,6 +1406,8 @@ def train_llama3(llama2_70b_lora:bool=False):
 
   model = FlatTransformer(**model_params, max_context=SEQLEN)
 
+  params = get_parameters(model)
+
   if getenv("EMPTYWEIGHT"):
     for v in get_parameters(model):
       v = v.assign(Tensor.empty(v.shape, dtype=v.dtype))
@@ -1416,6 +1418,14 @@ def train_llama3(llama2_70b_lora:bool=False):
   is_sharding = is_dp or is_mp
   device_count = max(DP, MP, FSDP)
   device = tuple(f"{Device.DEFAULT}:{i}" for i in range(device_count))
+
+  model.shard(device, is_mp, is_fsdp)
+
+  if llama2_70b_lora:
+    # anything not explicitly set is not trainable
+    for p in params:
+      if not p.requires_grad:
+        p.requires_grad_(False)
 
   # load the model
   if llama2_70b_lora and getenv("LOAD_MODEL", 1):
@@ -1430,16 +1440,10 @@ def train_llama3(llama2_70b_lora:bool=False):
 
     assert not (unused := (state_dict.keys() - get_state_dict(model).keys())), f"unused weights in state_dict: {sorted(unused)}"
 
-    load_state_dict(model, state_dict, strict=False, realize=False, consume=True)
+    load_state_dict(model, state_dict, strict=False, realize=True, consume=True)
     del state_dict # just in case
     if QUANTIZE: model.quantize()
-
-  model.shard(device, is_mp, is_fsdp)
-
-  params = get_parameters(model)
-
-  if llama2_70b_lora:
-    # anything not explicitly set is not trainable
+    params = get_parameters(model)
     for p in params:
       if not p.requires_grad:
         p.requires_grad_(False)
