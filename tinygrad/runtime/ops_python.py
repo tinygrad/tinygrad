@@ -18,8 +18,8 @@ def _load(m, i, dtype: DType):
   return from_storage_scalar(m[i], dtype)
 
 def load(inp, j, dtype: DType):
-  if len(inp) == 2: return [_load(m, x+j if x is not None else None, dtype) if gate else default for (m,x,gate),default in zip(*inp)]
-  return [_load(m, x+j if x is not None else None, dtype) for m,x,_ in inp[0]]
+  if len(inp) >= 3: return [_load(m, x+j if x is not None else None, dtype) if gate else default for (m,x),default,gate in zip(*inp[:3])]
+  return [_load(m, x+j if x is not None else None, dtype) for m,x in inp[0]]
 
 def _store(m, i, v, dtype: DType):
   if i < 0 or i >= len(m): raise IndexError(f"store out of bounds, size is {len(m)}, access is {i}, value is {v}")
@@ -67,8 +67,9 @@ class PythonProgram:
           continue
         assert dtype is not None, f"{uop} is missing a dtype"
         if uop is Ops.STORE:
+          store_gate = src_values[2] if len(src_values) >= 3 else [True] * warp_size
           for j,val in enumerate(src_values[1] if src_dtypes[1].count > 1 else [src_values[1]]):
-            for (m,o,g),v in zip(src_values[0], val):
+            for (m,o),v,g in zip(src_values[0], val, store_gate):
               if g: _store(m, o+j, v, src_dtypes[1].scalar())
           i += 1
           continue
@@ -91,6 +92,7 @@ class PythonProgram:
           elif arg[0] == 'l': values[i] = [x[2-int(arg[-1])] for x in warp]
         elif uop is Ops.CONST: values[i] = [arg] * warp_size
         elif uop is Ops.INDEX:
+          if len(src_values) != 2: raise RuntimeError("gates must be on LOAD/STORE, not INDEX")
           ret:list = []
           if isinstance(src_dtypes[0], ImageDType):
             for m,ox,oy in zip(src_values[0], src_values[1][0], src_values[1][1]):
@@ -98,7 +100,7 @@ class PythonProgram:
               else: ret.append((m, ox*4 + oy*src_dtypes[0].shape[1]*4))
           else:
             for m,o in zip(src_values[0], src_values[1]): ret.append((m,o))
-          values[i] = [(m,o,g) for (m,o),g in zip(ret, src_values[2] if len(src_values) == 3 else [True]*len(ret))] # set the gate last
+          values[i] = ret
         elif uop is Ops.CAST and isinstance(dtype, PtrDType):
           values[i] = src_values[0]
         elif uop is Ops.RANGE:

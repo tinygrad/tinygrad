@@ -81,7 +81,7 @@ class GradAccClipAdamW(Optimizer):
     if STOCHASTIC_ROUND and t.dtype == dtypes.bfloat16: return stochastic_round_bf16(new_w)
     if t.dtype in dtypes.fp8s:
       from examples.mlperf.models.flat_llama import FP8_MAX
-      amax = new_w.float().abs().flatten(1).max(1).detach()  # per-layer amax for (n_layers, out, in)
+      amax = new_w.float().abs().max(axis=tuple(range(1, new_w.ndim))).detach()  # per-layer amax for (n_layers, out, in)
       scale = FP8_MAX / (amax + 1e-8)
       fp8_w = (new_w * scale.reshape(-1, *([1]*(new_w.ndim-1)))).clamp(-FP8_MAX, FP8_MAX).cast(t.dtype)
       if hasattr(t, '_inv_scale'):
