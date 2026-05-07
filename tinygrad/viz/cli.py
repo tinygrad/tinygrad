@@ -83,11 +83,11 @@ def main(args) -> None:
   profile = decode_profile(profile_bytes)
   profile["layout"].update([(f'{c["name"][5:]}{" SQTT" if s["name"].endswith("PKTS") else ""} {s["name"]}', s["data"]) for c in viz_data.ctxs
                             if c["name"].startswith("SQTT") for s in c["steps"] if s["name"].endswith(("PMC", "PKTS"))])
-  if args.list and args.src == "ALL": return print("ALL\n"+"\n".join(fmt_colored(k) for k in profile["layout"]))
+  if args.list and not args.src: return print("ALL\n"+"\n".join(fmt_colored(k) for k in profile["layout"]))
 
   # ** SQTT printer
-  data = None if args.src == "ALL" else get(profile["layout"], args.src)
-  if "SQTT" in args.src:
+  data = None if not args.src else get(profile["layout"], args.src[0])
+  if "SQTT" in args.src[0]:
     # modern terminals support 24-bit color
     def hex_colored(st:str, color:str) -> str: return f"\x1b[38;2;{int(color[1:3],16)};{int(color[3:5],16)};{int(color[5:7],16)}m{st}\x1b[0m"
     print(f"{'Clk':<12} {'Unit':<20} {'Op':<22} {'Dur':<4} {'Delay':<4} {'Info'}")
@@ -119,7 +119,7 @@ def main(args) -> None:
       print(emit(row, lambda _: f"{row['clk']:<12} {unit:<20} {op_str}{' '*(22-ansilen(op_str))} {row['dur']:<4} {str(row['delay']):<4} {info}"))
 
   # ** PMC printer
-  elif "PMC" in args.src:
+  elif "PMC" in args.src[0]:
     pmc = viz.unpack_pmc(unwrap(data))
     pmc_fmt:list[str] = []
     for name,val,*detail in pmc["rows"]:
@@ -138,7 +138,7 @@ def main(args) -> None:
   else:
     timelines = [(n,l) for n,l in profile["layout"].items() if isinstance(l, dict) and l.get("event_type") == 0]
     def produce_top_kernels() -> Iterator[dict]:
-      tagged = ((n,e) for n,l in timelines for e in l["events"]) if args.src == "ALL" else ((args.src,e) for e in unwrap(data)["events"])
+      tagged = ((n,e) for n,l in timelines for e in l["events"]) if not args.src else ((args.src[0],e) for e in unwrap(data)["events"])
       agg:dict[tuple[str,str], tuple[float, int, int|None, dict[str, float]]] = {} # map (device, kernel name) to (total time, count, ref, est)
       est_keys = ("FLOPS", "B/s mem", "B/s lds")
       total = 0
@@ -151,16 +151,16 @@ def main(args) -> None:
       items = sorted(agg.items(), key=lambda kv:kv[1][0], reverse=True)
       num_rows = len(items) if args.top < 0 else args.top
       for (dev,name),(t,c,ref,est) in items[:num_rows]:
-        display = f"{dev[:7]:7s} {fmt_colored(name)}" if args.src == "ALL" else fmt_colored(name)
+        display = f"{dev[:7]:7s} {fmt_colored(name)}" if not args.src else fmt_colored(name)
         yield {"name":display, "dur_ms":t, "count":c, "pct":t/total*100.0, "ref":ref, "fmt":{k:int(est[k]/(t*1e-3)) for k in est_keys if k in est}}
       if num_rows > 0 and items[num_rows:]:
         other_t = sum(t for _,(t,_,_,_) in items[num_rows:])
         other_c = sum(c for _,(_,c,_,_) in items[num_rows:])
         yield {"name":"Other", "dur_ms":other_t, "count":other_c, "pct":other_t/total*100.0, "ref":None, "fmt":None}
     def produce_all_kernels() -> Iterator[dict]:
-      event_streams = [[(e["st"], n, e) for e in l["events"]] for n,l in timelines] if args.src == "ALL" \
-                      else [[(e["st"], args.src, e) for e in unwrap(data)["events"]]]
-      if args.src == "ALL":
+      event_streams = [[(e["st"], n, e) for e in l["events"]] for n,l in timelines] if not args.src \
+                      else [[(e["st"], args.src[0], e) for e in unwrap(data)["events"]]]
+      if not args.src:
         for n,l in profile["layout"].items():
           if not isinstance(l, dict) or l.get("event_type") != 0: yield {"device":"SOURCE", "name":n, "st_ms":0, "ref":None, "ext":None}
       marker_stream = sorted([(m["ts"], "MARKER", m) for m in profile.get("markers", [])], key=lambda t:t[0])
@@ -196,12 +196,11 @@ def main(args) -> None:
           if DEBUG >= 4 and s["name"] == "View Source": print_step(s)
           if DEBUG >= 5 or ls: print(emit(" "*s["depth"]+s["name"]+(f" - {s['match_count']}" if s.get('match_count', 0) else '')))
           if DEBUG >= 6: print_step(s)
-          if DEBUG >= 7 or (args.item and len(args.item) > 1 and s["name"] == args.item[1]): print_step(s, reconstruct_matches=True)
+          if DEBUG >= 7 or (len(args.src) > 2 and s["name"] == args.src[2]): print_step(s, reconstruct_matches=True)
       elif DEBUG >= 3 and k.get("ext"): print(emit(k["ext"]))
     produce = produce_top_kernels if args.top else produce_all_kernels
-    if args.item:
-      if len(args.item) > 2: raise RuntimeError(f"-i takes at most 2 names (got {args.item})")
-      k = get({r["name"]:r for r in produce()}, args.item[0])
+    if len(args.src) > 1:
+      k = get({r["name"]:r for r in produce()}, args.src[1])
       with Context(DEBUG=max(DEBUG.value, 3)): render_event(k, ls=True)
     else:
       for k in produce(): render_event(k)
@@ -209,8 +208,7 @@ def main(args) -> None:
 def get_arg_parser() -> argparse.ArgumentParser:
   parser = argparse.ArgumentParser(add_help=False, prog="python -m tinygrad.viz.cli")
   g_opts = parser.add_argument_group("optional args")
-  g_opts.add_argument("-s", "--src", type=str, default="ALL", metavar="NAME", help="Select a data source (default: ALL)")
-  g_opts.add_argument("-i", "--item", nargs="+", default=None, metavar="NAME", help="Select an item within the source (default: list all items)")
+  g_opts.add_argument("-s", "--src", nargs="+", default=[], metavar="NAME", help="Select a data source (default: ALL)")
   g_opts.add_argument("--list", "--ls", dest="list", action="store_true", help="List sources")
   g_opts.add_argument("-t", "--top", nargs="?", type=int, const=20, metavar="COUNT", help="Aggregate top kernels (optional count, default 20)")
   g_opts.add_argument("--profile-path", type=str, metavar="PATH", help="Optional path to profile.pkl (default: latest profile)",
