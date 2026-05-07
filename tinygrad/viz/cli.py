@@ -206,17 +206,15 @@ def main(args) -> None:
       for k in produce(): render_event(k)
 
 def get_arg_parser() -> argparse.ArgumentParser:
-  parser = argparse.ArgumentParser(add_help=False, prog="python -m tinygrad.viz.cli")
-  g_opts = parser.add_argument_group("optional args")
-  g_opts.add_argument("-s", "--src", nargs="+", default=[], metavar="NAME", help="Select a data source (default: ALL)")
-  g_opts.add_argument("--list", "--ls", dest="list", action="store_true", help="List sources")
-  g_opts.add_argument("-t", nargs="?", type=int, const=20, metavar="COUNT", help="Aggregate top kernels (optional count, default 20)")
-  g_opts.add_argument("--profile-path", type=str, metavar="PATH", help="Optional path to profile.pkl (default: latest profile)",
+  parser = argparse.ArgumentParser(prog="python -m tinygrad.viz.cli")
+  parser.add_argument("-s", "--src", nargs="+", default=[], metavar="NAME", help="Select a data source (default: all)")
+  parser.add_argument("--list", "--ls", dest="list", action="store_true", help="List sources")
+  parser.add_argument("-t", nargs="?", type=int, const=20, metavar="COUNT", help="Aggregate top kernels (optional count, default 20)")
+  parser.add_argument("--profile-path", type=str, metavar="PATH", help="Optional path to profile.pkl (default: latest profile)",
                       default=temp("profile.pkl", append_user=True))
-  g_opts.add_argument("--rewrites-path", type=str, metavar="PATH", help="Optional path to rewrites.pkl (default: latest rewrites)",
+  parser.add_argument("--rewrites-path", type=str, metavar="PATH", help="Optional path to rewrites.pkl (default: latest rewrites)",
                       default=temp("rewrites.pkl", append_user=True))
-  g_opts.add_argument("--json", action="store_true", help="Emit profiler output as JSON")
-  g_opts.add_argument("-h", "--help", action="help", help="show this help message and exit")
+  parser.add_argument("--json", action="store_true", help="Emit profiler output as JSON")
   return parser
 
 if __name__ == "__main__":
