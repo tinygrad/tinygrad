@@ -213,10 +213,10 @@ def get_arg_parser() -> argparse.ArgumentParser:
   g_opts.add_argument("-i", "--item", nargs="+", default=None, metavar="NAME", help="Select an item within the source (default: list all items)")
   g_opts.add_argument("--list", "--ls", dest="list", action="store_true", help="List sources")
   g_opts.add_argument("-t", "--top", nargs="?", type=int, const=20, metavar="COUNT", help="Aggregate top kernels (optional count, default 20)")
-  g_opts.add_argument("--profile-path", type=pathlib.Path, metavar="PATH", help="Optional path to profile.pkl (default: latest profile)",
-                      default=pathlib.Path(temp("profile.pkl", append_user=True)))
-  g_opts.add_argument("--rewrites-path", type=pathlib.Path, metavar="PATH", help="Optional path to rewrites.pkl (default: latest rewrites)",
-                      default=pathlib.Path(temp("rewrites.pkl", append_user=True)))
+  g_opts.add_argument("--profile-path", type=str, metavar="PATH", help="Optional path to profile.pkl (default: latest profile)",
+                      default=temp("profile.pkl", append_user=True))
+  g_opts.add_argument("--rewrites-path", type=str, metavar="PATH", help="Optional path to rewrites.pkl (default: latest rewrites)",
+                      default=temp("rewrites.pkl", append_user=True))
   g_opts.add_argument("--json", action="store_true", help="Emit profiler output as JSON")
   g_opts.add_argument("-h", "--help", action="help", help="show this help message and exit")
   return parser
