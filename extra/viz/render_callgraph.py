@@ -15,6 +15,7 @@ data = viz.VizData(viz.load_pickle(args.rewrites_path, default=None))
 ast = next(viz._reconstruct(data, data.trace.rewrites[i][0].sink) for i,k in enumerate(data.trace.keys) if ansistrip(k.display_name) == args.query)
 uop_names = {viz._reconstruct(data, data.trace.rewrites[i][0].sink):k.display_name for i,k in enumerate(data.trace.keys) if isinstance(k.ret, Renderer)}
 
+seen_bufs:set[UOp] = set()
 for i,k in enumerate(data.trace.keys):
   if not k.display_name.startswith("Schedule"): continue
   if (sink:=next((viz._reconstruct(data, s.sink) for s in data.trace.rewrites[i] if s.name == "View Kernel Graph"), None)) is None: continue
@@ -29,7 +30,9 @@ for i,k in enumerate(data.trace.keys):
       assert u.op in {Ops.BUFFER, Ops.PARAM}
       op_name = str(u.op).split(".")[1]
       arg_str.append(st:=f"{op_name[0].lower()}{u.arg}")
-      print(f"{op_name[:3]:<{op_w}} {st:<{buf_w}} {str(u.dtype):<8} {prod(u.size())}")
+      if u not in seen_bufs:
+        print(f"{op_name[:3]:<{op_w}} {st:<{buf_w}} {str(u.dtype):<8} {prod(u.size())}")
+        seen_bufs.add(u)
     body = c.src[0]
     print(f"{'CALL':<{op_w}} {fmt_colored(uop_names.get(body, '<unknown>').removeprefix('do_to_program for '))}")
     if DEBUG >= 3: print(body.pyrender())
