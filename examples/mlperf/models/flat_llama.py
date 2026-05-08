@@ -65,13 +65,7 @@ def matmul(x:Tensor, w:Tensor, fp8:bool=QUANTIZE, amax_x:Tensor|None=None, w_inv
     from extra.gemm.cdna_asm_gemm import can_use_asm_gemm, asm_gemm
     if can_use_asm_gemm(x_fp8, w.T):
       return asm_gemm(x_fp8, w.T, x_scale=x_scale, w_scale=w_inv_scale, grad_amax_state=grad_amax_state), x_new_amax, x_fp8, w
-  # Generic dot cannot differentiate through FP8 operands directly: dot casts for float
-  # accumulation, whose backward casts dgrad back to FP8 and zeros small attention grads.
-  if x is not None:
-    x_dequant_ste = x_fp8.detach().float() * x_scale + (x.float() - x.detach().float())
-    w_dequant = w.detach().float() * w_inv_scale.reshape(-1, *([1] * (w.ndim - 1)))
-    return x_dequant_ste.dot(w_dequant.T, dtype=dtypes.float), x_new_amax, x_fp8, w
-  return x_fp8.float().dot(w.T.float(), dtype=dtypes.float) * x_scale * w_inv_scale, x_new_amax, x_fp8, w
+  return x_fp8.dot(w.T, dtype=dtypes.float) * x_scale * w_inv_scale, x_new_amax, x_fp8, w
 
 def norm_quantize_matmul(x:Tensor, norm:Tensor, w:Tensor, w_inv_scale:Tensor, eps:float, amax_x:Tensor, grad_amax_state:Tensor):
   if FUSED_ADD_NORM_MUL_QUANTIZE:
@@ -206,13 +200,8 @@ class FlatTransformer:
     bsz, seqlen, _ = x.shape
     new_amaxs, saves = [], []
 
-    if getenv("DIAG_DEQUANT_WQKV", 0) and QUANTIZE:
-      x_normed, rrms = rmsnorm(x, self.norm_eps)
-      xqkv = matmul(x_normed * attention_norm, wqkv.float() * s_qkv.reshape(-1, 1), fp8=False)[0]
-      ret = [amax_xqkv]
-    else:
-      xqkv, x_normed, rrms, ret = norm_quantize_matmul(x, attention_norm, wqkv, s_qkv, self.norm_eps,
-                                                       amax_x=amax_xqkv, grad_amax_state=grad_amax_xqkv)
+    xqkv, x_normed, rrms, ret = norm_quantize_matmul(x, attention_norm, wqkv, s_qkv, self.norm_eps,
+                                                     amax_x=amax_xqkv, grad_amax_state=grad_amax_xqkv)
     if LORA: xqkv = xqkv + self.run_lora(lora_a, lora_b, x_normed * attention_norm)
     saves.extend([x_normed, rrms])
     new_amaxs.extend(ret[:1])
@@ -223,8 +212,7 @@ class FlatTransformer:
     xv = xqkv[:, :, :, self.n_rep+1].reshape(bsz, seqlen, self.n_kv_heads, self.head_dim)
 
     xq, xk = apply_rotary_emb(xq, xk, freqs_cis)
-    if not getenv("DIAG_ATTENTION_FLOAT32", 0):
-      xq, xk, xv = xq.cast(dtypes.bfloat16), xk.cast(dtypes.bfloat16), xv.cast(dtypes.bfloat16)
+    xq, xk, xv = xq.cast(dtypes.bfloat16), xk.cast(dtypes.bfloat16), xv.cast(dtypes.bfloat16)
     if getenv("HK_FLASH_ATTENTION"):
       from extra.thunder.amd.fa import flash_attention
       attn, *save = flash_attention(xq, xk, xv, is_causal=True)
@@ -234,10 +222,7 @@ class FlatTransformer:
       attn = xq.scaled_dot_product_attention(xk, xv, is_causal=True, enable_gqa=True).transpose(1, 2)
     attn = attn.reshape(bsz, seqlen, -1)
 
-    if getenv("DIAG_DEQUANT_WO", 0) and QUANTIZE:
-      out, ret = matmul(attn, wo.float() * s_o.reshape(-1, 1), fp8=False)[0], [amax_xo]
-    else:
-      out, *ret = matmul(attn, wo, amax_x=amax_xo, w_inv_scale=s_o, grad_amax_state=grad_amax_xo)
+    out, *ret = matmul(attn, wo, amax_x=amax_xo, w_inv_scale=s_o, grad_amax_state=grad_amax_xo)
     if LORA: out = out + self.run_lora(lora_a_wo, lora_b_wo, attn)
     new_amaxs.extend(ret[:1])
     saves.extend(ret[1:] + [out])
@@ -316,8 +301,7 @@ class FlatTransformer:
       self.tok_embeddings.weight.shard_(device, axis=0).realize()
       self.output.shard_(device, axis=1).realize()
       self.freqs_cis.shard_(device, axis=None).realize()
-      amax_dicts = (self._fp8_amax, self._fp8_grad_amax) + ((self._fp8_amax_next,) if hasattr(self, "_fp8_amax_next") else tuple())
-      for amax_dict in amax_dicts:
+      for amax_dict in (self._fp8_amax, self._fp8_grad_amax):
         for name in amax_dict:
           for i in range(len(amax_dict[name])):
             amax_dict[name][i] = amax_dict[name][i].to(device).contiguous().requires_grad_(False)

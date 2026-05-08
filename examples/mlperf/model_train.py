@@ -1466,8 +1466,6 @@ def train_llama3(llama2_70b_lora:bool=False):
   grads = [p.grad for p in optim.params]
 
   scheduler = CosineAnnealingLRWithWarmup(optim, opt_base_learning_rate, opt_end_learning_rate, opt_learning_rate_warmup_steps, opt_learning_rate_decay_steps)
-  model_state_for_names = get_state_dict(model)
-  optim_param_names = [next((k for k,v in model_state_for_names.items() if v is p), f"param_{j}") for j,p in enumerate(optim.params)]
 
   if resume_ckpt := getenv("RESUME_CKPT"):
     fn = f"./ckpts/llama3_{resume_ckpt}.safe"
@@ -1612,17 +1610,6 @@ def train_llama3(llama2_70b_lora:bool=False):
 
   num_params = sum(p.numel() for p in params) - model_params["vocab_size"]*model_params["dim"]
   train_iter = get_train_iter()
-  if getenv("DIAG_LORA_GRADS", 0):
-    diag_steps = getenv("DIAG_LORA_GRADS_STEPS", 1)
-    tqdm.write(f"DIAG_LORA_GRADS QUANTIZE={QUANTIZE} RECOMPUTE={RECOMPUTE} BS={BS} SEQLEN={SEQLEN} STEPS={diag_steps}")
-    for diag_step in range(diag_steps):
-      tokens = next(train_iter)
-      loss_cpu, total_grad_norm, grad_norms, grad_maxes = lora_grad_diag(tokens)
-      tqdm.write(f"DIAG step={diag_step+1} loss={loss_cpu.item():.9f} total_grad_norm={total_grad_norm.item():.9e}")
-      for name, param, grad_norm, grad_max in zip(optim_param_names, optim.params, grad_norms, grad_maxes):
-        tqdm.write(f"DIAG grad {name}: shape={param.shape} dtype={param.dtype} norm={grad_norm.item():.9e} max_abs={grad_max.item():.9e}")
-      model.commit_fp8_amax()
-    return
   i, sequences_seen = resume_ckpt, 0
   step_times = []
 
