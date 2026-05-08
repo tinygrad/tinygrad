@@ -30,11 +30,11 @@ user story: viewing code
   * schedule 2 (97) = main.py:97
   * schedule 3 (10) = main.py:145
 * web: click "schedule 1", get list of kernels (like DEBUG=2)
-* cli: `python -m tinygrad.viz.cli -s TINY -i "Schedule 3 Kernels n1"`
+* cli: `python -m tinygrad.viz.cli -s TINY "Schedule 3 Kernels n1"`
   * kernel 1 "E_34_34" -- 'sin'
   * kernel 2 "R_4545"
 * web: click "E_34_34"
-* cli: `python -m tinygrad.viz.cli -s TINY -i "do_to_program for E_34_34" "initial symbolic"`
+* cli: `python -m tinygrad.viz.cli -s TINY "do_to_program for E_34_34" "initial symbolic"`
   * pre-rewritten UOp graph (step through rewrite here)
   * post-rewritten UOp graph
   * UOp list

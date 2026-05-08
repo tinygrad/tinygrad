@@ -257,18 +257,19 @@ def _get_pads(uop:UOp) -> list[UOp]:
 
 def apply_grad(grad_buf:Tensor, new_grad:UOp):
   pads = _get_pads(new_grad)
-  new_grad = new_grad.cast(grad_buf.dtype)
   if len(pads) <= 1:
+    new_grad = new_grad.cast(grad_buf.dtype)
     store = grad_buf.uop.store(grad_buf.uop + new_grad)
     grad_buf.uop = grad_buf.uop.after(store)
     return
   sorted_pads = sorted(pads, key=lambda p: p.marg[0][0] if p.op == Ops.PAD else 0)
-  inners = [Tensor(p.src[0] if p.op == Ops.PAD else p, device=grad_buf.device).cast(grad_buf.dtype) for p in sorted_pads]
+  inners_raw = [Tensor(p.src[0] if p.op == Ops.PAD else p, device=grad_buf.device) for p in sorted_pads]
   if getenv("FUSED_PAD_GRAD_ACCUM", 0):
     from extra.llama_kernels.fused_pad_grad_accum import fused_pad_grad_accum, can_fused_pad_grad_accum
-    if can_fused_pad_grad_accum(grad_buf, inners):
-      grad_buf.uop = fused_pad_grad_accum(grad_buf, inners).uop
+    if can_fused_pad_grad_accum(grad_buf, inners_raw):
+      grad_buf.uop = fused_pad_grad_accum(grad_buf, inners_raw).uop
       return
+  inners = [t.cast(grad_buf.dtype) for t in inners_raw]
   grad_buf.assign(grad_buf + inners[0].cat(*inners[1:], dim=0))
 
 if __name__ == "__main__":
