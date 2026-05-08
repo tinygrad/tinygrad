@@ -20,41 +20,28 @@ for r in rows:
     pending = None
   if r.get("device", "") == "TINY" and (r["name"].startswith("Schedule") or r["name"].startswith("do_to_program")): pending = r["name"]
 
-query = "r_5_12_2_16_3_128_4"
+query = "r_2_32_2_2_4_4_8"
 ast = next(v["uop"] for v in data if ansistrip(v["name"]).endswith(query))
 # DO NOT CHANGE THIS TO ANSISTRIP
 uop_names = {v["uop"]:v["name"] for v in data}
 viz_data = VizData()
 
-def print_ast(ast:UOp, indent:int):
-  pad = "  "*indent
-  for line in ast.pyrender().splitlines(): print(pad + line)
-
-def param_buf(u:UOp) -> UOp:
-  while u.op is Ops.AFTER: u = u.src[0]
-  return u
-
-def graph_text(c:UOp) -> str:
-  bufs:list[UOp] = []
+def graph_text(root:UOp) -> str:
   op_w, buf_w = 4, 6
-
-  def buf_id(buf:UOp) -> str:
-    if buf not in bufs:
-      bufs.append(buf)
-      print(f"{'BUF':<{op_w}} {f'b{len(bufs)-1}':<{buf_w}} dtype={str(buf.dtype):<8} size={prod(buf.size())}")
-    return f"b{bufs.index(buf)}"
-
-  for call in c.toposort(enter_calls=False):
-    if call.op is not Ops.CALL: continue
-    body = call.src[0]
-    buffer_ids = {i:buf_id(param_buf(src)) for i,src in enumerate(call.src[1:])}
+  bufs:list[UOp] = []
+  for c in root.toposort(enter_calls=False):
+    if c.op is not Ops.CALL: continue
+    buf_ids:dict[int, str] = {}
+    for i,u in enumerate(c.src[1:]):
+      while u.op is Ops.AFTER: u = u.src[0]
+      assert u.op in {Ops.BUFFER, Ops.PARAM}
+      buf_ids[i] = st = f"{str(u.op).split(".")[1].lower()[0]}{u.arg}"
+      print(f"{u.op:<{op_w}} {st:<{buf_w}} {str(u.dtype):<8} {prod(u.size())}")
+    body = c.src[0]
     print(f"{'CALL':<{op_w}} {uop_names.get(body, '<unknown>').removeprefix('do_to_program for ')}")
-
     for u in body.toposort():
       if u.op is Ops.INDEX:
-        index_str = ' '.join(uop_to_json(viz_data, u)[id(u)]["label"].split("\n")[4:])
-        param = u.src[0].arg
-        print(f"{'I':<{op_w}} {buffer_ids[param]:<{buf_w}} {param:<2} {index_str}")
+        print(f"{'I':<{op_w}} {buf_ids[(p:=u.src[0].arg)]:<{buf_w}} {p:<2} {' '.join(uop_to_json(viz_data, u)[id(u)]['label'].split('\n')[4:])}")
 
 for v in data:
   sink = v["uop"]
