@@ -18,18 +18,26 @@ uop_names = {viz._reconstruct(data, data.trace.rewrites[i][0].sink):k.display_na
 seen_bufs:set[UOp] = set()
 for i,k in enumerate(data.trace.keys):
   if not k.display_name.startswith("Schedule"): continue
-  if (sink:=next((viz._reconstruct(data, s.sink) for s in data.trace.rewrites[i] if s.name == "View Kernel Graph"), None)) is None: continue
-  if (root:=next((u for u in sink.toposort(enter_calls=False) if u.op is Ops.CALL and u.src[0] is ast), None)) is None: continue
+  root:UOp|None = None
+  for s in data.trace.rewrites[i]:
+    if s.name != "View Kernel Graph": continue
+    for u in viz._reconstruct(data, s.sink).toposort(enter_calls=False):
+      if u.op is Ops.CALL and u.src[0] is ast: root = u; break
+  if root is None: continue
   for c in root.toposort(enter_calls=False):
-    if c.op is not Ops.CALL: continue
+    if c.op is not Ops.CALL or c.src[0].op is not Ops.SINK: continue
     arg_str:list[str] = []
     op_w, buf_w = 4, 16
     for u in c.src[1:]:
       while u.op is Ops.AFTER: u = u.src[0]
       # TODO: this can always be the BUFFER UNIQUE once it reconstructs the param -> buffer mapping
-      assert u.op in {Ops.BUFFER, Ops.PARAM}
       op_name = str(u.op).split(".")[1]
-      arg_str.append(st:=f"{op_name[0].lower()}{u.arg}")
+      if u.op is Ops.MSTACK:
+        arg_str.append(st:=f"{op_name[0].lower()} {u.device}")
+      elif u.op is Ops.INDEX: continue
+      else:
+        assert u.op in {Ops.BUFFER, Ops.PARAM}, f"{u.op}"
+        arg_str.append(st:=f"{op_name[0].lower()}{u.arg}")
       if u not in seen_bufs:
         print(f"{op_name[:3]:<{op_w}} {st:<{buf_w}} {str(u.dtype):<8} {prod(u.size())}")
         seen_bufs.add(u)
@@ -38,4 +46,4 @@ for i,k in enumerate(data.trace.keys):
     if DEBUG >= 3: print(body.pyrender())
     for u in body.toposort():
       if u.op is Ops.INDEX:
-        print(f"{'I':<{op_w}} {arg_str[(p:=u.src[0].arg)]:<{buf_w}} {p:<2} {' '.join(viz.uop_to_json(data, u)[id(u)]['label'].split('\n')[4:])}")
+        print(f"{'I':<{op_w}} {arg_str[(p:=u.src[0].base.arg)]:<{buf_w}} {p:<2} {' '.join(viz.uop_to_json(data, u)[id(u)]['label'].split('\n')[4:])}")
