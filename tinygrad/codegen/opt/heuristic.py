@@ -38,8 +38,9 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
       if rngs is not None:
         if rngs[1].src[0].divides(2) is not None:
           rngs[1] = tk.apply_opt(Opt(OptOps.UPCAST, tk.rngs.index(rngs[1]), 2))[0]
-        try: tk.apply_opt(Opt(OptOps.UNROLL, 0, 4))
-        except KernelOptError: pass
+        if not tk.ren.target.arch.startswith("gfx12"):
+          try: tk.apply_opt(Opt(OptOps.UNROLL, 0, 4))
+          except KernelOptError: pass
       return tk
 
   # make a copy so it does not mutate the input
