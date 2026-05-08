@@ -70,7 +70,6 @@ def hcq_filter_visible_devices(devs, device):
   assert all(x < len(devs) for x in ids), f"invalid visibility filter: {ids} ({pluralize('device', len(devs))} available)"
   return [devs[x] for x in ids] if ids else devs
 
-SignalType = TypeVar('SignalType', bound='HCQSignal')
 HCQDeviceType = TypeVar('HCQDeviceType', bound='HCQ2Compiled')
 
 class HCQ2Compiled(Compiled):
@@ -80,7 +79,7 @@ class HCQ2Compiled(Compiled):
   signal_pool: list[Buffer] = []
   cpu_devices: list[HCQ2Compiled] = []
 
-  def __init__(self, device:str, allocator:HCQAllocatorBase, compilers:list[type[Renderer]], runtime, signal_t:Type[SignalType]|None=None,
+  def __init__(self, device:str, allocator:HCQAllocatorBase, compilers:list[type[Renderer]], runtime, signal_t=None,
                comp_queue_t:Callable[..., HWQueue]|None=None, copy_queue_t:Callable[..., HWQueue]|None=None, kernargs_size=(16 << 20),
                sigalloc_size=0x1000, can_recover:bool=False, arch=None):
     self.device_id:int = int(device.split(":")[1]) if ":" in device else 0
@@ -90,7 +89,6 @@ class HCQ2Compiled(Compiled):
     self.hw_compute_queue_t, self.hw_copy_queue_t = comp_queue_t, copy_queue_t
     self.sigalloc_size, self.kernargs_size = sigalloc_size, kernargs_size
     self.kernargs_offset_allocator:BumpAllocator = BumpAllocator(kernargs_size, wrap=True)
-    self.timeline_value:int = 1
 
   @functools.cached_property
   def kernargs_buf(self) -> Buffer:
@@ -99,34 +97,17 @@ class HCQ2Compiled(Compiled):
   @functools.cached_property
   def timeline_signal(self) -> Buffer: return self.new_signal()
 
-  def count(self) -> int: return self.iface.count if hasattr(self, 'iface') else 1
+  @functools.cached_property
+  def timeline_value(self) -> Buffer:
+    buf = Buffer("CPU", 1, dtypes.uint64, preallocate=True)
+    buf.as_memoryview(force_zero_copy=True).cast('Q')[0] = 1
+    return buf
 
   def synchronize(self, timeout:int|None=None):
     if not hasattr(self, 'iface'): return
-    sig = self.timeline_signal._buf.view.view(fmt='Q')
-    
-    import time
-    time.sleep(0.2)
-    print(sig[0], self.timeline_value - 1)
-    # while sig[0] < self.timeline_value - 1: pass
-    # if self.error_state is not None: raise self.error_state
-    # if not hasattr(self, 'timeline_signal'): return
-
-    # # If we have any work on CPU devices, need to synchronize them. This is just an optimization to release GIL allowing to finish faster.
-    # if not self._is_cpu():
-    #   for dev in HCQ2Compiled.cpu_devices: dev.synchronize()
-
-    # try: self.timeline_signal.wait(self.timeline_value - 1, timeout=timeout if timeout is not None and self.can_recover else None)
-    # except RuntimeError as e:
-    #   self.error_state = e
-    #   if hasattr(self, 'on_device_hang'): self.on_device_hang()
-    #   raise e
-
-    # if self.timeline_value > (1 << 31): self._wrap_timeline_signal()
-
-  def next_timeline(self):
-    self.timeline_value += 1
-    return self.timeline_value - 1
+    sig = self.timeline_signal.as_memoryview(force_zero_copy=True).cast('Q')
+    tl = self.timeline_value.as_memoryview(force_zero_copy=True).cast('Q')
+    while sig[0] < tl[0] - 1: pass
 
   def new_signal(self) -> Buffer:
     if not HCQ2Compiled.signal_pool:
@@ -141,11 +122,6 @@ class HCQ2Compiled(Compiled):
   def hw_copy_queues(self) -> list[tuple[str, Callable[[], HWQueue]]]:
     return [("SDMA:0", self.hw_copy_queue_t)] if self.hw_copy_queue_t is not None else []
 
-  def _wrap_timeline_signal(self):
-    self.timeline_signal, self._shadow_timeline_signal, self.timeline_value = self._shadow_timeline_signal, self.timeline_signal, 1
-    self.timeline_signal.value = 0
-    cast(HCQAllocatorBase, self.allocator).b_timeline = [0] * len(cast(HCQAllocatorBase, self.allocator).b)
-
   def _realloc(self, oldbuf:HCQ2Buffer|None, new_size:int, options:BufferSpec|None=None, force=False) -> tuple[HCQ2Buffer, bool]:
     if oldbuf is not None: self.allocator.free(oldbuf, oldbuf.size, options=options)
     try: buf, realloced = self.allocator.alloc(new_size, options=options), True
@@ -154,6 +130,8 @@ class HCQ2Compiled(Compiled):
       buf, realloced = self.allocator.alloc(oldbuf.size if oldbuf is not None else new_size, options=options), False
     return buf, realloced
 
+  def count(self) -> int: return self.iface.count if hasattr(self, 'iface') else 1
+  
   def _select_iface(self):
     assert (v:=getenv(k:=f'{type(self).__name__[:-6].upper()}_IFACE', "")) == "",  \
       f"{k}={v} is deprecated, use DEV={replace(DEV.target(type(self).__name__[:-6]), interface=v)} instead"
@@ -211,7 +189,7 @@ class HCQAllocatorBase(LRUAllocator[HCQDeviceType], Generic[HCQDeviceType]):
 
   def _offset(self, buf, size:int, offset:int) -> HCQ2Buffer: return buf.offset(offset=offset, size=size)
 
-  def _as_buffer(self, buf): return buf.cpu_view()
+  def _as_buffer(self, buf): return buf.cpu_view().mv
 
 def _host_buffer(mv:memoryview) -> Buffer:
   return Buffer("CPU", mv.nbytes, dtypes.uint8, options=BufferSpec(external_ptr=mv_address(mv)), preallocate=True)
@@ -291,12 +269,8 @@ pm_hcq_prep_runtime = PatternMatcher([
 # **************** lower ****************
 
 def do_lower_program(ctx:HCQ2LowerCtx, call:UOp, prg:UOp) -> UOp:
-  sig = UOp.from_buffer(ctx.dev.timeline_signal)
-  return UOp.linear(
-    sig.wait(UOp.const(dtypes.uint64, ctx.dev.timeline_value - 1)),
-    UOp(Ops.BARRIER, dtypes.void),
-    prg,
-    sig.store(UOp.const(dtypes.uint64, ctx.dev.next_timeline())))
+  sig, tl = UOp.from_buffer(ctx.dev.timeline_signal), ctx.param(ctx.dev.timeline_value)
+  return UOp.linear(sig.wait(tl[0] - 1), UOp(Ops.BARRIER, dtypes.void), prg, sig.store(tl[0]))
 
 pm_hcq_lower = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, src=(UPat(Ops.BUFFER), UPat(Ops.BUFFER)), name="prg"),),
@@ -311,27 +285,30 @@ pm_hcq_encode = PatternMatcher([
 
 # **************** launcher ****************
 
-pm_hcq_blob_patches = PatternMatcher([
-  (UPat(Ops.PARAM, name="p"), lambda ctx,p: ctx.index(p.arg//4).store(p.src[0])),
+pm_hcq_create_launcher_sink = PatternMatcher([
+  (UPat(Ops.BINARY, name="blob"), lambda blob: UOp.sink(blob, arg=KernelInfo(name="hcq_submit"))),
 ])
 
-def hcq_build_blob_launcher(ctx:HCQ2LowerCtx, blob:UOp) -> UOp:
+def resolve_blob(ctx:HCQ2LowerCtx, blob:UOp) -> UOp:
+  # bufferize blob
   bb = Buffer("CPU", len(blob.arg)//4, dtypes.uint32, preallocate=True)
   bb.copyin(memoryview(bytearray(blob.arg)))
 
-  patches = graph_rewrite(UOp.sink(*blob.src), pm_hcq_blob_patches, ctx=ctx.param(bb), name="hcq: patch blob").src
-  uop = ctx.dev.hcq_routines.rewrite(ctx.param(bb), ctx=ctx)
-  if patches: uop = uop.after(patches[0].barrier(*patches[1:]))
-  return uop
+  # patches are related to the new buffer
+  bb_param = ctx.param(bb)
+  patch_stores = tuple(bb_param[p.arg//4].store(p.src[0]) for p in blob.src)
 
-pm_hcq_build_launcher = PatternMatcher([
-  (UPat(Ops.BINARY, name="blob"), hcq_build_blob_launcher),
+  submit_cf = UOp(Ops.CUSTOM_FUNCTION, dtypes.void, src=(bb_param.after(*patch_stores),), arg="submit_compute")
+
+  # bump timeline
+  tl = ctx.param(ctx.dev.timeline_value)
+  return tl.after(submit_cf)[0].store(tl[0] + 1)
+
+pm_hcq_resolve_blobs = PatternMatcher([
+  (UPat(Ops.BINARY, name="blob"), resolve_blob),
 ])
 
-# **************** finalize ****************
-
-def hcq_finalize(uop:UOp, ctx:HCQ2LowerCtx) -> UOp:
-  sink = UOp.sink(uop, arg=KernelInfo(name="hcq_submit"))
+def hcq_callify(sink:UOp, ctx:HCQ2LowerCtx) -> UOp:
   return to_program(sink, Device["CPU"].renderer).call(*[UOp.from_buffer(b, "CPU") for b in ctx.inputs])
 
 # **************** schedule ****************
@@ -341,8 +318,9 @@ def _hcq_schedule(dev:HCQ2Compiled, ctx:HCQ2LowerCtx, linear:UOp, ast:UOp) -> UO
   linear = graph_rewrite(linear, pm_hcq_prep_runtime, ctx=ctx, name="hcq: prepare runtime")
   linear = graph_rewrite(linear, pm_hcq_lower + pm_flatten_linear, ctx=ctx, name="hcq: lower (runtime)")
   linear = graph_rewrite(linear, dev.pm_encode + pm_hcq_encode, ctx=ctx, name="hcq: encode")
-  linear = graph_rewrite(linear, pm_hcq_build_launcher, ctx=ctx, name="hcq: launcher")
-  return hcq_finalize(linear, ctx)
+  linear = graph_rewrite(linear, pm_hcq_create_launcher_sink, name="hcq: create launcher sink", walk=True)
+  linear = graph_rewrite(linear, pm_hcq_resolve_blobs + dev.pm_submit, ctx=ctx, name="hcq: resolve blobs")
+  return hcq_callify(linear, ctx)
 
 def hcq_schedule_program(call:UOp, ast:UOp) -> UOp|None:
   # TODO unwrap calls

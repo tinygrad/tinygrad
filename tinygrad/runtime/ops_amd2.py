@@ -139,27 +139,26 @@ amd_pm4_encode = PatternMatcher([
   (UPat(Ops.STORE,   name="x"), pm4_store),
 ])
 
-def pm4_submit(ctx:HCQ2LowerCtx, blob:UOp) -> UOp:
+def pm4_submit(ctx:HCQ2LowerCtx, cf:UOp) -> UOp:
+  bb_param = cf.src[0]
   q = ctx.dev.compute_queue
   ring, wptr, doorbell, put_ptr = (ctx.param(b) for b in (q.ring, q.write_ptr, q.doorbell, q.put_value))
-  size, ring_dwords = UOp.const(dtypes.uint32, blob.dtype.size), q.ring.size
+  size, ring_dwords = UOp.const(dtypes.uint32, bb_param.dtype.size), q.ring.size
 
   put = put_ptr[0]
   i = UOp.range(size, 0, dtype=dtypes.int)
   next_put = put + size.cast(put.dtype)
   ring_idx = ((put + i.cast(put.dtype)) % ring_dwords).cast(dtypes.int)
 
-  copy_to_ring = ring[ring_idx].store(blob[i]).end(i)
+  copy_to_ring = ring[ring_idx].store(bb_param[i]).end(i)
   bump_put_ptr = put_ptr[0].store(next_put)
   bump_wptr = wptr[0].store(next_put)
   flush = UOp.barrier(copy_to_ring, bump_put_ptr, bump_wptr)
   return doorbell.after(flush)[0].store(next_put)
 
-amd_hcq_routines = PatternMatcher([
-  (UPat(Ops.PARAM, name="blob"), pm4_submit),
+amd_pm_submit = PatternMatcher([
+  (UPat(Ops.CUSTOM_FUNCTION, arg="submit_compute", name="cf"), pm4_submit),
 ])
-
-
 
 class AMDSignal(HCQSignal):
   def __init__(self, *args, **kwargs): super().__init__(*args, **{**kwargs, 'timestamp_divider': 100})
@@ -569,7 +568,7 @@ class AMD2Device(HCQ2Compiled):
   def is_am(self) -> bool: return isinstance(self.iface, (PCIIface,))
   def is_usb(self) -> bool: return False
 
-  hcq_routines = amd_hcq_routines
+  pm_submit = amd_pm_submit
 
   def __init__(self, device:str=""):
     self.device_id = int(device.split(":")[1]) if ":" in device else 0
