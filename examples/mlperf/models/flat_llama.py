@@ -65,7 +65,13 @@ def matmul(x:Tensor, w:Tensor, fp8:bool=QUANTIZE, amax_x:Tensor|None=None, w_inv
     from extra.gemm.cdna_asm_gemm import can_use_asm_gemm, asm_gemm
     if can_use_asm_gemm(x_fp8, w.T):
       return asm_gemm(x_fp8, w.T, x_scale=x_scale, w_scale=w_inv_scale, grad_amax_state=grad_amax_state), x_new_amax, x_fp8, w
-  return x_fp8.dot(w.T, dtype=dtypes.float) * x_scale * w_inv_scale, x_new_amax, x_fp8, w
+  # Generic dot cannot differentiate through FP8 operands directly: dot casts for float
+  # accumulation, whose backward casts dgrad back to FP8 and zeros small attention grads.
+  if x is not None:
+    x_dequant_ste = x_fp8.detach().float() * x_scale + (x.float() - x.detach().float())
+    w_dequant = w.detach().float() * w_inv_scale.reshape(-1, *([1] * (w.ndim - 1)))
+    return x_dequant_ste.dot(w_dequant.T, dtype=dtypes.float), x_new_amax, x_fp8, w
+  return x_fp8.float().dot(w.T.float(), dtype=dtypes.float) * x_scale * w_inv_scale, x_new_amax, x_fp8, w
 
 def norm_quantize_matmul(x:Tensor, norm:Tensor, w:Tensor, w_inv_scale:Tensor, eps:float, amax_x:Tensor, grad_amax_state:Tensor):
   if FUSED_ADD_NORM_MUL_QUANTIZE:
@@ -217,7 +223,8 @@ class FlatTransformer:
     xv = xqkv[:, :, :, self.n_rep+1].reshape(bsz, seqlen, self.n_kv_heads, self.head_dim)
 
     xq, xk = apply_rotary_emb(xq, xk, freqs_cis)
-    xq, xk, xv = xq.cast(dtypes.bfloat16), xk.cast(dtypes.bfloat16), xv.cast(dtypes.bfloat16)
+    if not getenv("DIAG_ATTENTION_FLOAT32", 0):
+      xq, xk, xv = xq.cast(dtypes.bfloat16), xk.cast(dtypes.bfloat16), xv.cast(dtypes.bfloat16)
     if getenv("HK_FLASH_ATTENTION"):
       from extra.thunder.amd.fa import flash_attention
       attn, *save = flash_attention(xq, xk, xv, is_causal=True)
