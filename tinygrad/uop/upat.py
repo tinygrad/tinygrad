@@ -1,5 +1,5 @@
 from typing import Any, Callable
-import itertools, inspect, functools, types
+import itertools, inspect, functools, types, re
 from tinygrad.helpers import partition, dedup, Context
 from tinygrad.uop.ops import UPat, UOp, Ops, PatternMatcher, graph_rewrite, deconstruct_function
 
@@ -113,14 +113,14 @@ pm_renderer = PatternMatcher([
   (UPat(Ops.GEP, src=UPat(Ops.NOOP, name="x"), name="g"), lambda x,g: x.replace(arg=x.arg+f".src[{g.arg[0]}]"))
 ], compiled=False)
 
-def _final_render(x:UOp, has_ctx:bool, depth=1) -> list[str]:
+def _final_render(x:UOp, has_ctx:bool, depth=1, fxn_name="_fxn") -> list[str]:
   assert x.op is Ops.AND
   and_pieces, store_pieces = [], []
   or_pieces: list[str] = []
   for s in x.src:
     if s.op is Ops.OR:
       assert len(or_pieces) == 0 and len(s.src) >= 1
-      for ss in s.src: or_pieces.extend(_final_render(ss, has_ctx, depth+1))
+      for ss in s.src: or_pieces.extend(_final_render(ss, has_ctx, depth+1, fxn_name))
     elif s.op is Ops.STORE:
       assert s.src[0].op is Ops.DEFINE_VAR and s.src[1].op is Ops.NOOP
       store_pieces.append(f"{s.src[0].arg}={s.src[1].arg}")
@@ -133,7 +133,7 @@ def _final_render(x:UOp, has_ctx:bool, depth=1) -> list[str]:
     return [f"{'  '*depth}if {and_clause if len(and_clause) else 'True'}:"] + or_pieces
   # if we don't, this is a final return
   store_clause = ', '.join((["ctx=ctx"] if has_ctx else [])+store_pieces)
-  and_clause = ' and '.join(and_pieces + [f"(_ret:=_fxn({store_clause})) is not None"])
+  and_clause = ' and '.join(and_pieces + [f"(_ret:={fxn_name}({store_clause})) is not None"])
   return [f"{'  '*depth}if {and_clause}: return _ret"]
 
 def _get_code(self:UPat, has_ctx:bool):
@@ -162,3 +162,52 @@ def upat_compile(self:UPat, fxn) -> Callable|None:
   namespace: dict = {}
   exec(code_str, globs, namespace)  # pylint: disable=W0122
   return namespace["compiled_match"]
+
+# **** mega-matcher: merge N per-op patterns into one function ****
+
+def _get_mega_code(patterns_with_fxns: list[tuple[UPat, Callable]]) -> tuple[str, dict[str, Any], dict[str, Callable]] | None:
+  all_parts: list[tuple[int, list[str]]] = []
+  merged_dyn: dict[str, Any] = {}
+  fxn_dict: dict[str, Callable] = {}
+  for i, (upat, fxn) in enumerate(patterns_with_fxns):
+    real_fxn = types.FunctionType(*deconstruct_function(fxn))
+    has_ctx = 'ctx' in inspect.signature(real_fxn).parameters
+    fxn_dict[f"_fxn{i}"] = real_fxn
+    try:
+      with Context(SPEC=0, TRACK_MATCH_STATS=0):
+        clause = _get_clause(upat, UOp(Ops.NOOP, arg="uop"), skip_op=True)
+        clause = graph_rewrite(clause, pm_proc, name="process UPat")
+        dyn_lookup: dict[str, Any] = {}
+        out = graph_rewrite(clause, pm_renderer, ctx=dyn_lookup, name="compile UPat")
+        rendered = _final_render(out, has_ctx, fxn_name=f"_fxn{i}")
+    except UPatCompileError:
+      return None
+    for old_key in sorted(dyn_lookup.keys(), key=len, reverse=True):
+      new_key = f"{old_key}_p{i}"
+      merged_dyn[new_key] = dyn_lookup[old_key]
+      for j, line in enumerate(rendered):
+        rendered[j] = re.sub(rf'\b{re.escape(old_key)}\b', new_key, line)
+    for j, line in enumerate(rendered):
+      rendered[j] = line.replace("uop.src[0]", "_s0").replace("uop.src[1]", "_s1")
+      rendered[j] = rendered[j].replace("_s0.op", "_s0op").replace("_s1.op", "_s1op")
+      rendered[j] = rendered[j].replace(") is not None: return _ret", ") is not None and _ret is not uop: return _ret")
+    all_parts.append((i, rendered))
+  lines = ["def mega_match(uop, ctx):"]
+  lines.append("  if len(uop.src) >= 2:")
+  lines.append("    _s0 = uop.src[0]; _s1 = uop.src[1]")
+  lines.append("    _s0op = _s0.op; _s1op = _s1.op")
+  lines.append("  elif len(uop.src) >= 1:")
+  lines.append("    _s0 = uop.src[0]; _s0op = _s0.op")
+  for _, rendered in all_parts:
+    lines.extend(rendered)
+  lines.append("  return None")
+  return '\n'.join(lines), merged_dyn, fxn_dict
+
+def mega_compile(patterns_with_fxns: tuple[tuple[UPat, Callable], ...]) -> Callable | None:
+  result = _get_mega_code(list(patterns_with_fxns))
+  if result is None: return None
+  code_str, dyn_lookup, fxn_dict = result
+  globs = {**dyn_lookup, **fxn_dict}
+  namespace: dict = {}
+  exec(code_str, globs, namespace)  # pylint: disable=W0122
+  return namespace["mega_match"]

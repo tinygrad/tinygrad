@@ -1250,6 +1250,9 @@ class PatternMatcher:
       entry: list = [p, None, p.early_reject]
       entry[1] = upat_deferred_compile(p, fxn, entry) if compiled else upat_interpret(p, fxn)
       for uop in p.op: self.pdict.setdefault(uop, []).append(entry)
+    self._mega: dict[Ops, Callable|None] = {}
+    if compiled and bool(getenv("MEGA_MATCH")):
+      self._fxn_map: dict[int, Callable] = {id(p): fxn for p, fxn in self.patterns}
 
   def __reduce__(self): return PatternMatcher, ([(x,deconstruct_function(fxn) if fxn.__name__ == "<lambda>" else fxn) for x,fxn in self.patterns],)
 
@@ -1258,6 +1261,20 @@ class PatternMatcher:
 
   def rewrite(self, uop:UOp, ctx=None):
     if len(pats:=self.pdict.get(uop.op, [])):
+      if uop.op in self._mega:
+        mega = self._mega[uop.op]
+        if mega is not None:
+          ret = mega(uop, ctx)
+          if ret is not None and ret is not uop: return ret
+          return None
+      elif hasattr(self, '_fxn_map') and len(pats) >= 2:
+        from tinygrad.uop.upat import mega_compile
+        mega = mega_compile(tuple((e[0], self._fxn_map[id(e[0])]) for e in pats))
+        self._mega[uop.op] = mega
+        if mega is not None:
+          ret = mega(uop, ctx)
+          if ret is not None and ret is not uop: return ret
+          return None
       if (ler:=uop.__dict__.get('_src_ops')) is None: uop.__dict__['_src_ops'] = ler = {u.op for u in uop.src}
       for _,match,early_reject in pats:
         if not early_reject.issubset(ler): continue
