@@ -36,27 +36,25 @@ def param_buf(u:UOp) -> UOp:
 
 def graph_text(c:UOp) -> str:
   bufs:list[UOp] = []
-  op_w, buf_w = 4, 3
+  op_w, buf_w = 4, 6
 
   def buf_id(buf:UOp) -> str:
     if buf not in bufs:
       bufs.append(buf)
-      print(f"{'BUF':<{op_w}} {f'b{len(bufs)-1}':<{buf_w}} size={prod(buf.size()):>6} dtype={buf.dtype.base.name}")
+      print(f"{'BUF':<{op_w}} {f'b{len(bufs)-1}':<{buf_w}} dtype={str(buf.dtype):<8} size={prod(buf.size())}")
     return f"b{bufs.index(buf)}"
 
   for call in c.toposort(enter_calls=False):
     if call.op is not Ops.CALL: continue
     body = call.src[0]
     buffer_ids = {i:buf_id(param_buf(src)) for i,src in enumerate(call.src[1:])}
-    print(f"{'CALL':<{op_w}} {uop_names.get(body, 'unknown').removeprefix('do_to_program for ')}")
-
-    def print_access(access:str, index_uop:UOp):
-      index_str = ' '.join(uop_to_json(viz_data, index_uop)[id(index_uop)]["label"].split("\n")[4:])
-      print(f"{access:<{op_w}} {buffer_ids[index_uop.src[0].arg]:<{buf_w}} index={index_str}")
+    print(f"{'CALL':<{op_w}} {uop_names.get(body, '<unknown>').removeprefix('do_to_program for ')}")
 
     for u in body.toposort():
-      if u.op is Ops.INDEX and u.dtype.base == u.dtype: print_access("R", u)
-      if u.op is Ops.STORE: print_access("W", u.src[0])
+      if u.op is Ops.INDEX:
+        index_str = ' '.join(uop_to_json(viz_data, u)[id(u)]["label"].split("\n")[4:])
+        param = u.src[0].arg
+        print(f"{'I':<{op_w}} {buffer_ids[param]:<{buf_w}} {param:<2} {index_str}")
 
 for v in data:
   sink = v["uop"]
