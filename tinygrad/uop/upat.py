@@ -7,13 +7,13 @@ class UPatCompileError(Exception): pass
 
 # **** UPat compiled ****
 
-def _get_clause(self:UPat, base:UOp, depth=0) -> UOp:
+def _get_clause(self:UPat, base:UOp, depth=0, skip_op=False) -> UOp:
   if self.is_any:
     assert len(self.src) == 1
     return UOp(Ops.AND, src=(UOp(Ops.OR, src=tuple(_get_clause(s, base, depth) for s in self.src[0])),))
   # build the and_clause for acceptance
   and_clause:list[UOp] = []
-  if self.op is not None:
+  if self.op is not None and not skip_op:
     if len(self.op) > 1: and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.BIND, arg=tuple(int(x) for x in self.op))), arg="{0}.op in {1}"))
     else: and_clause.append(UOp(Ops.CUSTOM, src=(base,), arg="{0}.op == "+str(self.op[0].value)))
   if self.arg is not None:
@@ -137,7 +137,7 @@ def _final_render(x:UOp, has_ctx:bool, depth=1) -> list[str]:
   return [f"{'  '*depth}if {and_clause}: return _ret"]
 
 def _get_code(self:UPat, has_ctx:bool):
-  ret = _get_clause(self, UOp(Ops.NOOP, arg="uop"))
+  ret = _get_clause(self, UOp(Ops.NOOP, arg="uop"), skip_op=True)
   try:
     # TODO: this should be tracked in a "system" rewrite, not untracked or tracked with kernel
     with Context(TRACK_MATCH_STATS=0):
