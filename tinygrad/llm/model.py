@@ -306,7 +306,7 @@ class Transformer:
     self._cached_tokens: list[int] = []
     # we specialize the JIT for prefill and rollout
     self.prefill_jit = TinyJit(self.forward)
-    self.rollout_jit = TinyJit(self.forward)
+    self.rollout_jit = TinyJit(self.forward, prune=True)
 
   def forward(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor) -> Tensor:
     x = self.token_embd(tokens).float()                   # (B, T, D)
@@ -381,9 +381,9 @@ class Transformer:
       expert_bias=f"blk.{kv.get(f'{arch}.leading_dense_block_count', 0)}.exp_probs_b.bias" in state_dict)
     model = Transformer(config)
     nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused
-    # NOTE: without this contiguous, it unpacks the weights from the model every time. we shouldn't need this, but for now it's faster
+    # contiguous breaks dequant-matmul fusion so prune can classify dequant kernels as onetime
+    for s in (params:=nn.state.get_parameters(model)): s.replace(s.contiguous())
     if realize:
-      for s in (params:=nn.state.get_parameters(model)): s.replace(s.contiguous())
       Tensor.realize(*params)
     return model, kv
 
