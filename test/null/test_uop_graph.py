@@ -756,7 +756,7 @@ class TestLoadStoreFolding(unittest.TestCase):
     buf = UOp(Ops.PARAM, dtypes.float.vec(4).ptr(), (), 0)
     idx = UOp.const(dtypes.int, 0)
     gate = UOp.const(dtypes.bool, True)
-    gated_index = buf.index(idx, gate)
+    gated_index = buf.index(idx.valid(gate))
     gep = gated_index.gep(0)
     alt = UOp.const(dtypes.float, 42.0)
     gated_load = gep.load(alt)

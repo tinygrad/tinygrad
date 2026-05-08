@@ -297,10 +297,11 @@ class NV_FLCN_COT(NV_IP):
     self.init_fmc_image()
 
   def init_fmc_image(self):
-    self.fmc_booter_image = self.nvdev.extract_fw("kgspBinArchiveGspRmFmcGfwProdSigned", "ucode_image_data")
-    self.fmc_booter_hash = memoryview(self.nvdev.extract_fw("kgspBinArchiveGspRmFmcGfwProdSigned", "ucode_hash_data")).cast('I')
-    self.fmc_booter_sig = memoryview(self.nvdev.extract_fw("kgspBinArchiveGspRmFmcGfwProdSigned", "ucode_sig_data")).cast('I')
-    self.fmc_booter_pkey = memoryview(self.nvdev.extract_fw("kgspBinArchiveGspRmFmcGfwProdSigned", "ucode_pkey_data") + b'\x00\x00\x00').cast('I')
+    _, sections, _ = elf_loader(fetch_fw(f"nvidia/{self.nvdev.fw_name.lower()}/gsp", "fmc-570.144.bin",
+                                         "cb59a35c1d4bd1274d7267fd10243c29f843ff41c851b9cbd59f5af2ddd7fece"))
+    def _section(s): return next((sh.content for sh in sections if sh.name == s))
+    self.fmc_booter_image, self.fmc_booter_hash = _section("image"), memoryview(_section("hash")).cast('I')
+    self.fmc_booter_sig, self.fmc_booter_pkey = memoryview(_section("signature")).cast('I'), memoryview(_section("publickey") + b"\x00" * 3).cast('I')
     _, self.fmc_booter_sysmem = self.nvdev._alloc_sysmem(len(self.fmc_booter_image), contiguous=True, data=self.fmc_booter_image)
 
   def init_hw(self):

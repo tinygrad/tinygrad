@@ -1179,6 +1179,10 @@ class UPat(OpMixin):
   # UPat patterns are built with `upat + 1`-style operators; don't insert CAST nodes like _broadcasted does
   def _binop(self, op:Ops, x, reverse:bool) -> UPat:
     return self.ufix(x).alu(op, self) if reverse else self.alu(op, self.ufix(x))
+  # TODO: need these override due to dtypes.void on broadcast
+  def __floordiv__(self, x): return self._binop(Ops.FLOORDIV, x, False)
+  def __rfloordiv__(self, x): return self._binop(Ops.FLOORDIV, x, True)
+  def mod(self, x, reverse=False): return self._binop(Ops.FLOORMOD, x, reverse)
   def alu(self, op:Ops, *src:UPat):
     asrc = (self,)+src
     return UPat(op, dtypes.bool if op in {Ops.CMPLT, Ops.CMPNE} else asrc[-1].match_dtype, list(asrc) if op in GroupOp.Commutative else asrc)
@@ -1544,17 +1548,12 @@ pm_lower_index_dtype = PatternMatcher([
   (UPat(Ops.DEFINE_VAR, dtype=dtypes.weakint, name="u"), lambda u: u.replace(dtype=dtypes.int).cast(dtypes.weakint)),
   (UPat(Ops.BIND, src=(UPat.var("var").cast(dtypes.weakint), UPat.cvar("val").cast(dtypes.weakint))),
     lambda var,val: var.bind(val).cast(dtypes.weakint)),
-  # lower Invalid
-  (UPat.var("buf").index(UPat.var("cond").where(UPat.var("idx"), UPat(Ops.CONST, arg=Invalid))), lambda buf,idx,cond: buf.index(idx, cond, ptr=True)),
   # remove hanging casts
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx", dtypes.ints).cast()),), lambda buf,idx: buf.index(idx, ptr=True)),
-  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx", dtypes.ints).cast(), UPat.var("valid"))),
-   lambda buf,idx,valid: buf.index(idx, valid, ptr=True)),
+  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("gate").where(UPat.var("idx", dtypes.ints).cast(), UPat(Ops.CONST, arg=Invalid)))),
+   lambda buf,idx,gate: buf.index(gate.where(idx, idx.const_like(Invalid)), ptr=True)),
   (UPat((Ops.SINK, Ops.NOOP, Ops.END), name="n"),
    lambda n: n.replace(src=tuple(s.src[0] if s.op is Ops.CAST and s.dtype == dtypes.weakint else s for s in n.src))),
-  # vectorized indexes (ie. images) must be int
-  (UPat(Ops.INDEX, src=(UPat(), UPat(Ops.STACK, dtypes.long, name="vec")), allow_any_len=True, name="idx"),
-   lambda idx,vec: idx.replace(src=(idx.src[0], UOp.vectorize(*(u.cast(dtypes.int) for u in vec.src)), *idx.src[2:])))
 ])
 def _index_to_concrete_int(u:UOp) -> UOp: return graph_rewrite(u.sink(), pm_lower_index_dtype).src[0]
 
