@@ -45,7 +45,7 @@ shared_spec = PatternMatcher([
   (UPat((Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ), dtype=dtypes.bool, src=(UPat.var("x"), UPat.var("y"))), lambda x,y: x.dtype.base == y.dtype.base),
   # and SHL/SHR, the shift distance can be an int
   (UPat((Ops.SHL, Ops.SHR), src=(UPat.var("x"), UPat.var("y")), name="a"), lambda a,x,y: a.dtype == x.dtype and y.dtype in (x.dtype, dtypes.uint)),
-  (UPat((Ops.IDIV, Ops.MOD, Ops.FLOORDIV, Ops.FLOORMOD), name="x"), lambda x: None if dtypes.is_int(x.dtype) else False),
+  (UPat((Ops.CDIV, Ops.CMOD, Ops.FLOORDIV, Ops.FLOORMOD), name="x"), lambda x: None if dtypes.is_int(x.dtype) else False),
   (UPat(GroupOp.ALU, name="x"), lambda x: all(x.dtype.base == y.dtype.base for y in x.src)),
 
   # CAST
@@ -76,7 +76,7 @@ movement_ops = PatternMatcher([
 
   # inputs to movement ops
   (UPat((Ops.STACK, Ops.VCONST), dtype=dtypes.weakint), lambda: True),
-  (UPat({Ops.ADD, Ops.MUL, Ops.IDIV, Ops.FLOORDIV}, dtype=dtypes.weakint), lambda: True),
+  (UPat({Ops.ADD, Ops.MUL, Ops.CDIV, Ops.FLOORDIV}, dtype=dtypes.weakint), lambda: True),
 
   # AFTER on Movement Op, INDEX, BUFFER, COPY, or BITCAST
   (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.INDEX, Ops.MULTI, Ops.CONTIGUOUS, Ops.BUFFER, Ops.BITCAST, Ops.COPY})),),
@@ -280,7 +280,7 @@ full_spec = PatternMatcher([
   # where on index in rhs position is fine
   (UPat(Ops.WHERE, dtype=dtypes.weakint, src=(UPat(dtype=dtypes.bool), UPat(), UPat(dtype=dtypes.weakint))), lambda: True),
   # allow index dtype on a restricted set of UOps
-  (UPat((Ops.ADD, Ops.MUL, Ops.MOD, Ops.IDIV, Ops.FLOORDIV, Ops.FLOORMOD, Ops.MAX,
+  (UPat((Ops.ADD, Ops.MUL, Ops.CMOD, Ops.CDIV, Ops.FLOORDIV, Ops.FLOORMOD, Ops.MAX,
          Ops.SPECIAL, Ops.CAST, Ops.RANGE, Ops.VCONST, Ops.STACK), dtype=dtypes.weakint), lambda: True),
 
   # while BIND is being casted

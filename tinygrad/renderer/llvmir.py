@@ -63,10 +63,10 @@ def render_wmma_amd(ctx, wmma: UOp, cdna=False) -> str:
       if wmma.dtype.scalar() != dtypes.float else ")")
 
 # llvm ops, lop[<dtype>][<op>]
-unsigned_lop = { Ops.ADD: "add", Ops.MUL: "mul", Ops.IDIV: "udiv", Ops.MOD: "urem",
+unsigned_lop = { Ops.ADD: "add", Ops.MUL: "mul", Ops.CDIV: "udiv", Ops.CMOD: "urem",
                  Ops.CMPLT: "icmp ult", Ops.CMPNE: "icmp ne", Ops.CMPEQ: "icmp eq", Ops.OR: "or", Ops.AND: "and", Ops.XOR: "xor",
                  Ops.SHL: "shl", Ops.SHR: "lshr",}
-signed_lop = {**unsigned_lop, Ops.ADD: "add nsw", Ops.CMPLT: "icmp slt", Ops.IDIV: "sdiv", Ops.MOD: "srem", Ops.SHR: "ashr"}
+signed_lop = {**unsigned_lop, Ops.ADD: "add nsw", Ops.CMPLT: "icmp slt", Ops.CDIV: "sdiv", Ops.CMOD: "srem", Ops.SHR: "ashr"}
 flags = " nsz arcp contract afn"
 float_lop = {Ops.ADD: "fadd"+flags, Ops.MUL: "fmul"+flags, Ops.CMPLT: f"fcmp{flags} olt",
     Ops.CMPNE: f"fcmp{flags} une", Ops.CMPEQ: f"fcmp{flags} oeq", Ops.FDIV: "fdiv"+flags}

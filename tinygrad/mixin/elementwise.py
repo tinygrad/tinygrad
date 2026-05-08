@@ -191,7 +191,7 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
     ```
     """
     a, b = self._broadcasted(x)
-    if dtypes.is_int(a.dtype): return a.alu(Ops.MOD, b)
+    if dtypes.is_int(a.dtype): return a.alu(Ops.CMOD, b)
     return a - (a*b.reciprocal()).trunc() * b
 
   def div(self, x: Self | ConstType, reverse: bool = False, rounding_mode: Literal["trunc", "floor"] | None = None) -> Self:
@@ -217,7 +217,7 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
     lhs, rhs = self._broadcasted(x, reverse)
     if rounding_mode is None: return lhs * rhs.reciprocal()
     if dtypes.is_int(lhs.dtype):
-      if rounding_mode == "trunc": return lhs.alu(Ops.IDIV, rhs)
+      if rounding_mode == "trunc": return lhs.alu(Ops.CDIV, rhs)
       if rounding_mode == "floor": return lhs // rhs
     d = lhs.cast(least_upper_float(lhs.dtype)) * rhs.cast(least_upper_float(rhs.dtype)).reciprocal()
     if rounding_mode == "trunc": return d.trunc()
