@@ -254,6 +254,7 @@ class PCIIfaceBase:
     with contextlib.suppress(Exception): self.pci_dev.resize_bar(vram_bar)
     self.dev_impl = dev_impl_t(self.pci_dev)
     self.dev, self.vram_bar, self.count = dev, vram_bar, len(hcq_filter_visible_devices(System.list_devices(vendor, devices, base_class), dn))
+    self._peer_mappings:dict[int, int] = {}  # va -> size, tracks IOMMU mappings of buffers owned by other devices
 
   def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, force_devmem=False, **kwargs) -> HCQBuffer:
     should_use_sysmem = host or ((cpu_access if self.is_bar_small() else (uncached and cpu_access)) and not force_devmem)
@@ -272,7 +273,7 @@ class PCIIfaceBase:
     return HCQBuffer(mapping.va_addr, size, view=barview, meta=PCIAllocationMeta(mapping, cpu_access, hMemory=mapping.paddrs[0][0]), owner=self.dev)
 
   def free(self, b:HCQBuffer):
-    if b.owner != self.dev: self.dev.iface.dev_impl.mm.unmap_range(b.va_addr, b.size)
+    if b.owner != self.dev and (sz:=self._peer_mappings.pop(int(b.va_addr), None)) is not None: self.dev_impl.mm.unmap_range(int(b.va_addr), sz)
     if b.owner == self.dev and b.meta.mapping.aspace is AddrSpace.PHYS: self.dev_impl.mm.vfree(b.meta.mapping)
     if b.owner == self.dev and self.is_local() and b.meta.has_cpu_mapping: FileIOInterface.munmap(b.va_addr, b.size)
 
@@ -294,7 +295,10 @@ class PCIIfaceBase:
       else: paddrs, aspace = ifa.p2p_paddrs(b.meta.mapping.paddrs)
     else: raise RuntimeError(f"map failed: {b.owner} -> {self.dev}")
 
-    self.dev_impl.mm.map_range(int(b.va_addr), round_up(b.size, 0x1000), paddrs, aspace=aspace, snooped=snooped, uncached=uncached)
+    va, sz = int(b.va_addr), round_up(b.size, 0x1000)
+    if (old_sz:=self._peer_mappings.get(va)) is not None: self.dev_impl.mm.unmap_range(va, old_sz)
+    self.dev_impl.mm.map_range(va, sz, paddrs, aspace=aspace, snooped=snooped, uncached=uncached)
+    self._peer_mappings[va] = sz
     return HCQBuffer(b.va_addr, b.size, meta=b.meta, owner=b.owner)
 
 # *** Remote PCI Devices

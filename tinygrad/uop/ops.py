@@ -660,11 +660,11 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   # *** uop Buffer stuff ***
 
   @staticmethod
-  def new_buffer(device:str|tuple[str, ...], size:int, dtype:DType, num=None):
-    return UOp(Ops.BUFFER, dtype, (UOp.unique(num), UOp(Ops.DEVICE, arg=device)), size)
+  def new_buffer(device:str|tuple[str, ...], size:int, dtype:DType, num=None, src=()):
+    return UOp(Ops.BUFFER, dtype, (UOp.unique(num), UOp(Ops.DEVICE, arg=device)) + src, size)
   @staticmethod
-  def from_buffer(opaque:Buffer, device:str|tuple[str, ...]|None=None):
-    buffers[uop:=UOp.new_buffer(device or opaque.device, opaque.size, opaque.dtype)] = opaque.ref(1)
+  def from_buffer(opaque:Buffer, device:str|tuple[str, ...]|None=None, src=()):
+    buffers[uop:=UOp.new_buffer(device or opaque.device, opaque.size, opaque.dtype, src=src)] = opaque.ref(1)
     return uop
   @staticmethod
   def empty(shape:tuple[sint, ...], dtype:DTypeLike|None=None, device:str|tuple[str, ...]|None=None, axis:int|None=None, num=None) -> UOp:
@@ -1099,7 +1099,7 @@ class UPat(OpMixin):
     self.match_dtype: tuple[DType, ...]|None = (dtype,) if isinstance(dtype, DType) else (tuple(dtype) if isinstance(dtype, set) else dtype)
     # device is matched as a prefix of `_device.split(":")[0]`. Multi-device uops (tuple device) never match a string filter.
     self.match_device: tuple[str, ...]|None = (device,) if isinstance(device, str) else (tuple(device) if device is not None else None)
-    self.match_tag = tag
+    self.match_tag: tuple[Any, ...]|None = (tag,) if isinstance(tag, str) else (tuple(tag) if isinstance(tag, set) else tag)
     self.arg, self.name, self._in_src, self.custom_early_reject = arg, name, src, custom_early_reject
     self.src: Any = None
     self.is_any = is_any
@@ -1191,7 +1191,7 @@ class UPat(OpMixin):
        (self.name is not None and store.setdefault(self.name, uop) is not uop) or \
        (self.match_dtype is not None and uop.dtype not in self.match_dtype and uop.dtype.scalar() not in self.match_dtype) or \
        (self.arg is not None and self.arg != uop.arg) or \
-       (self.match_tag is not None and self.match_tag != uop.tag) or \
+       (self.match_tag is not None and uop.tag not in self.match_tag) or \
        (self.match_device is not None and (not isinstance(d:=uop._device, str) or d.split(":")[0] not in self.match_device)) or \
        (len(uop.src) < self.required_len) or \
        (self.strict_length and len(uop.src) != self.required_len): return []
