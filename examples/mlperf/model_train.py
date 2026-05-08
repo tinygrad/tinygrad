@@ -1813,6 +1813,9 @@ def train_flux():
   EMPTYENCDIR = getenv("EMPTYENCDIR", "/raid/datasets/flux/empty_encodings")
 
   num_samples = 1099776
+  target_eval_loss = 0.586
+  gbs = BS
+  eval_freq_step = math.ceil(262144 / gbs)
   lr = 1e-4
   lr_eps = 1e-8
   lr_warmup_steps = 0
@@ -1832,7 +1835,7 @@ def train_flux():
     return batch_load_flux(BS, BASEDIR, empty_enc_dir=EMPTYENCDIR, seed=SEED)
 
   @TinyJit
-  def train_step(model:Flux, optim:AdamW, sample) -> Tensor:
+  def train_step(model:Flux, optim:AdamW, sample:dict[str, Tensor]) -> Tensor:
     optim.zero_grad()
 
     for k in sample: sample[k].shard_(GPUS, axis=None)
@@ -1865,6 +1868,9 @@ def train_flux():
 
     return loss
 
+  def eval_step(model:Flux, sample:dict[str, Tensor]) -> Tensor:
+    pass
+
   Tensor.manual_seed(SEED)
 
   # wandb
@@ -1896,9 +1902,22 @@ def train_flux():
   train_iter = get_train_iter()
 
   # training loop
+  i = 1
+
   for sample in tqdm(train_iter, total=num_samples//BS):
-    loss = train_step(model, optim, sample)
-    print(f"loss: {loss.float().item():.3f}")
+    if i >= NUM_STEPS:
+      break
+
+    train_loss = train_step(model, optim, sample)
+
+    if i % eval_freq_step == 0:
+      eval_loss = eval_step(model, [])
+
+      if eval_loss <= target_eval_loss:
+        print(f"target eval loss reached: {eval_loss:.3f} (target: {target_eval_loss:.3f})")
+        break
+
+    i += 1
 
 if __name__ == "__main__":
   multiprocessing.set_start_method('spawn')
