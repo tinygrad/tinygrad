@@ -39,7 +39,8 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
         for tc_dim in [1,0]:
           if rngs[tc_dim].src[0].divides(2) is not None:
             rngs[tc_dim] = tk.apply_opt(Opt(OptOps.UPCAST, tk.rngs.index(rngs[tc_dim]), 2))[0]
-        try: tk.apply_opt(Opt(OptOps.UNROLL, 0, 4))
+        unroll_factor = 2 if tk.ren.target.arch.startswith("gfx12") else 4
+        try: tk.apply_opt(Opt(OptOps.UNROLL, 0, unroll_factor))
         except KernelOptError: pass
       return tk
 
