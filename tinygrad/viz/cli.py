@@ -192,10 +192,8 @@ def main(args) -> None:
       if k["ref"] is not None and k["ref"] not in seen_refs:
         seen_refs.add(k["ref"])
         for s in viz_data.ctxs[k["ref"]]["steps"]:
-          if DEBUG >= 3 and s["name"] == "View Base AST": print_step(s)
-          if DEBUG >= 4 and s["name"] == "View Source": print_step(s)
-          if DEBUG >= 5 or ls: print(emit(" "*s["depth"]+s["name"]+(f" - {s['match_count']}" if s.get('match_count', 0) else '')))
-          if DEBUG >= 6: print_step(s)
+          if DEBUG >= 6 or ls: print(emit(" "*s["depth"]+s["name"]+(f" - {s['match_count']}" if s.get('match_count', 0) else '')))
+          if DEBUG >= 6 or DEBUG >= {"View Base AST":3, "View Source":4, "View Kernel Graph":5}.get(s["name"], 99): print_step(s)
           if DEBUG >= 7 or (len(args.src) > 2 and s["name"] == args.src[2]): print_step(s, reconstruct_matches=True)
       elif DEBUG >= 3 and k.get("ext"): print(emit(k["ext"]))
     produce = produce_top_kernels if args.t else produce_all_kernels
