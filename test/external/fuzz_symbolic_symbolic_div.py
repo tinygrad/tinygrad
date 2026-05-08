@@ -2,7 +2,7 @@ import random, sys
 import z3
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.uop.validate import uops_to_z3
-from tinygrad.helpers import DEBUG, Context, colored
+from tinygrad.helpers import DEBUG, colored
 
 seed = int(sys.argv[1]) if len(sys.argv) > 1 else random.randint(0, 100)
 print(f"Seed: {seed}", flush=True)
@@ -16,7 +16,7 @@ def get_random_term(ranges, factors):
 def get_random_expr(ranges, factors):
   num_terms = random.randint(2,4)
   x = UOp.usum(*[get_random_term(ranges, factors) for _ in range(num_terms)])
-  return x.alu(random.choice([Ops.IDIV, Ops.MOD]), x.ufix(random.choice(factors)*random.choice([1, 1, 1, -1])))
+  return x.alu(random.choice([Ops.CDIV, Ops.CMOD]), x.ufix(random.choice(factors)*random.choice([1, 1, 1, -1])))
 
 if __name__ == "__main__":
   skipped = 0
@@ -36,8 +36,7 @@ if __name__ == "__main__":
     variable_names += [f"r{i}" for i in range(num_ranges)]
     expr = get_random_expr(ranges, factors)
 
-    with Context(CORRECT_DIVMOD_FOLDING=1):
-      simplified_expr = expr.simplify()
+    simplified_expr = expr.simplify()
 
     if DEBUG>=1:
       print(expr.render(simplify=False), "  -->  ", simplified_expr.render(simplify=False))

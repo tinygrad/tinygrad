@@ -1,4 +1,4 @@
-import unittest, decimal, sys, json, contextlib, tempfile, pickle, io, re
+import unittest, decimal, sys, json, contextlib, tempfile, pickle, io
 from pathlib import Path
 from dataclasses import dataclass
 from typing import Generator
@@ -411,11 +411,11 @@ class TestVizIntegration(unittest.TestCase):
   def test_jit(self):
     with save_viz():
       @TinyJit
-      def f(a, b, c): return (a+b).contiguous().mul(3), c.assign(a.to(c.device))
+      def f(a, b, c): return (a+b).contiguous().mul(3), c.add(1).contiguous().assign(a.to(c.device)), b.assign(c.to(b.device))
       a, b, c = Tensor.empty(16, device="NULL"), Tensor.empty(16, device="NULL"), Tensor.empty(16, device="NULL:1")
       for _ in range(3): Tensor.realize(*f(a, b, c))
     out = load_profile(cpu_events)
-    self.assertEqual(["NULL", "NULL Graph", "NULL:SDMA:0"], [k for k in out["layout"] if k.startswith("NULL")])
+    self.assertEqual(["NULL", "NULL Graph", "NULL:SDMA:0", "NULL:1", "NULL:1:SDMA:0"], [k for k in out["layout"] if k.startswith("NULL")])
     self.assertEqual(len(out["layout"]["NULL"]["events"]), 2*3)
     self.assertEqual(len(out["layout"]["NULL:SDMA:0"]["events"]), 3)
     self.assertEqual(len(out["layout"]["NULL Graph"]["events"]), 2)
@@ -476,8 +476,7 @@ class TestVizProfiler(unittest.TestCase):
             ProfileDeviceEvent(device='NV:SDMA:0', tdiff=decimal.Decimal(-1000))]
     j = load_profile(prof)
     event = j['layout']['NV:SDMA:0']['events'][0]
-    gbs = sz/(dur*1e-6)*1e-9
-    self.assertEqual(event['fmt'], f"{gbs:.0f} GB/s\n{sz/1e6:.0f} MB")
+    self.assertEqual(event['fmt'], {"B/s": sz/(dur*1e-6), "B": sz})
 
   def test_graph(self):
     prof = [ProfileDeviceEvent(device='NV', tdiff=decimal.Decimal(-1000)),
@@ -518,8 +517,7 @@ class TestVizProfiler(unittest.TestCase):
 
     j = load_profile(prof)
     sdma_events = j['layout']['NV:1:SDMA:0']['events']
-    gbs = sz/(dur*1e-6)*1e-9
-    self.assertEqual(sdma_events[0]["fmt"], f"{gbs:.0f} GB/s\n{sz/1e6:.0f} MB")
+    self.assertEqual(sdma_events[0]["fmt"], {"B/s": sz/(dur*1e-6), "B": sz})
 
   def test_block_ordering(self):
     prof = [ProfileDeviceEvent(device='NV', tdiff=decimal.Decimal(-1000)),
@@ -583,7 +581,7 @@ class TestVizProfiler(unittest.TestCase):
     profile_ret = load_profile(cpu_events)
     e = profile_ret["layout"]["CUSTOM"]["events"][0]
     self.assertEqual(e["name"], "test_fxn")
-    runtime_trace = json.loads(e["fmt"].replace("TB:", ""))
+    runtime_trace = e["fmt"]["tb"]
     assert any(fxn.__code__.co_filename == f and fxn.__code__.co_firstlineno+1 == l for f,l,*_ in runtime_trace), str(runtime_trace)
 
   # can pack up to 1hr 11 min of trace events
@@ -961,9 +959,14 @@ class TestCLI(unittest.TestCase):
     out = [json.loads(line) for line in call_cli(fxn, "-s", "NULL", "--json").splitlines()]
     self.assertEqual(len(out), 3*2)
     # flops increases as N gets larger
-    gflops = [int(unwrap(re.search(r"(\d+) GFLOPS", row["fmt"]))[1]) for row in out]
+    gflops = [row["fmt"]["FLOPS"] for row in out]
     self.assertGreater(gflops[4], gflops[2])
     self.assertGreater(gflops[5], gflops[3])
+    # aggregate flops
+    out = [json.loads(line) for line in call_cli(fxn, "-s", "NULL", "-t", "--json").splitlines()]
+    self.assertEqual(len(out), 2)
+    agg_gflops = [row["fmt"]["FLOPS"] for row in out]
+    assert all(min(gflops) < v < max(gflops) for v in agg_gflops), f"{agg_gflops}"
 
 if __name__ == "__main__":
   unittest.main()

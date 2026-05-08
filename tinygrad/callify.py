@@ -77,6 +77,12 @@ def contiguous_mops_to_view(c:UOp, src:UOp):
     if not hasattr(Device[c.device].allocator, "_offset"): return None
   elif not all(hasattr(Device[d].allocator, "_offset") for d in c.device): return None
 
+  x = src
+  while x.op in GroupOp.Movement: x = x.src[0]
+  # NOTE: this contiguous is removed because this BUFFER_VIEW/RESHAPE has_buffer_identity
+  if x.op is not Ops.MULTI and (view := _make_buffer_view(src)) is not None:
+    return view.contiguous(tag=c.tag)
+
   # for MULTI tensors, use multi_pm to resolve per-shard movement ops, then create BUFFER_VIEW on the resolved result
   if not isinstance(c.device, str):
     from tinygrad.schedule.multi import multi_pm
@@ -85,9 +91,7 @@ def contiguous_mops_to_view(c:UOp, src:UOp):
     if (view := _make_buffer_view(resolved.src[0])) is None: return None
     return view.multi(resolved.arg).contiguous(tag=c.tag)
 
-  # NOTE: this contiguous is removed because this BUFFER_VIEW/RESHAPE has_buffer_identity
-  if (view := _make_buffer_view(src)) is None: return None
-  return view.contiguous(tag=c.tag)
+  return None
 
 def transform_precompiled_call(c:UOp) -> UOp|None:
   if not c.arg.precompile: return None
@@ -99,7 +103,18 @@ def transform_precompiled_call(c:UOp) -> UOp|None:
   resolved = [c.gettuple(i) for i in range(len(srcs))]
   outs = tuple(r.empty_like() for r in resolved)
   targets = [o.param_like(len(c.src)-1+i).shrink_to(s.shape) for i,(o,s) in enumerate(zip(outs, srcs))]
-  fxn = UOp.sink(*[t.after(t.store(s)) for t,s in zip(targets, srcs)])
+
+  subs:dict[UOp, UOp] = {}
+  items:list[UOp] = []
+  for s, t in zip(srcs, targets):
+    while s.op is Ops.AFTER: s = s.src[0]
+    base = s.base
+    if base.op in {Ops.CONTIGUOUS, Ops.BUFFER} and base.shape == t.shape and base not in subs:
+      subs[base] = t.after(t.store(base.src[0])) if base.op is Ops.CONTIGUOUS else t
+      items.append(s)
+    else:
+      items.append(t.after(t.store(s)))
+  fxn = UOp.sink(*(x.substitute(subs) for x in items))
 
   # body switches from TUPLE to SINK, so the node becomes an opaque CALL (not FUNCTION)
   new_call = UOp(Ops.CALL, c.dtype, (fxn, *input_buffers, *outs), c.arg)

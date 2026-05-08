@@ -1,5 +1,5 @@
 # test to compare every packet with the rocprof decoder
-import unittest, pickle, functools
+import unittest, pickle, functools, json
 from typing import Iterator
 from pathlib import Path
 from tinygrad.helpers import DEBUG, getenv, temp, ansistrip, Context
@@ -156,7 +156,7 @@ class TestSQTTMapRDNA4(TestSQTTMapBase):
     row_counts:dict[str, int] = {}
     for e in sqtt_timeline(events[1].blob, lib, target):
       if type(e).__name__ != "ProfileRangeEvent": continue
-      info = e.name.ret or ""
+      info = json.loads(e.name.ret) if e.name.ret else {}
       if e.device.startswith("WAVE"):
         idx = row_counts.get(e.device, 0)
         dispatch_st[f"{e.device}-{idx}"] = int(e.st)

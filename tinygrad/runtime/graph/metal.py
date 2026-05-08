@@ -107,7 +107,7 @@ class MetalGraph(GraphRunner):
       self.collect_timestamps()
 
   @staticmethod
-  def supports_exec_item(batch_devs, new_call:UOp) -> bool:
+  def supports_uop(batch_devs, new_call:UOp) -> bool:
     # Metal ICB replay encodes offsets as uint32; reject if any Metal buffer offset exceeds 32-bit range.
     if any(b.op is Ops.BUFFER_VIEW and b.arg[1] * b.dtype.itemsize > 0xFFFFFFFF for b in new_call.src[1:]): return False
-    return GraphRunner.supports_exec_item(batch_devs, new_call)
+    return GraphRunner.supports_uop(batch_devs, new_call)
