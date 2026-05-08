@@ -93,7 +93,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   sink = graph_rewrite(sink, pm_transcendental, name="transcendental")
 
   # move gates from unrenderable INVALID where
-  sink = graph_rewrite(sink, pm_lower_index_dtype+pm_move_gates_from_index, name="move gates from index")
+  sink = graph_rewrite(sink, pm_move_gates_from_index, name="move gates from index")
 
   # final rules for the renderer (without sym)
   extra_matcher = ren.extra_matcher if ren.extra_matcher is not None else PatternMatcher([])
