@@ -30,20 +30,12 @@ def print_ast(ast:UOp, indent:int):
   pad = "  "*indent
   for line in ast.pyrender().splitlines(): print(pad + line)
 
-def call_deps(c:UOp) -> list[UOp]:
-  deps:list[UOp] = []
-  for s in c.src[1:]:
-    for u in s.toposort(enter_calls=False):
-      if u.op is Ops.CALL and u not in deps: deps.append(u)
-  return deps
-
 def param_buf(u:UOp) -> UOp:
   while u.op is Ops.AFTER: u = u.src[0]
   return u
 
 def graph_text(c:UOp) -> str:
   bufs:list[UOp] = []
-  calls:list[UOp] = []
   op_w, buf_w = 4, 3
 
   def buf_id(buf:UOp) -> str:
@@ -52,24 +44,19 @@ def graph_text(c:UOp) -> str:
       print(f"{'BUF':<{op_w}} {f'b{len(bufs)-1}':<{buf_w}} size={prod(buf.size()):>6} dtype={buf.dtype.base.name}")
     return f"b{bufs.index(buf)}"
 
-  def emit_call(call:UOp):
-    for dep in call_deps(call): emit_call(dep)
-    if call in calls: return
-    calls.append(call)
+  for call in c.toposort(enter_calls=False):
+    if call.op is not Ops.CALL: continue
     body = call.src[0]
-    slot_to_buf = {i:param_buf(src) for i,src in enumerate(call.src[1:])}
-    for i,src in enumerate(call.src[1:]): buf_id(param_buf(src))
+    buffer_ids = {i:buf_id(param_buf(src)) for i,src in enumerate(call.src[1:])}
     print(f"{'CALL':<{op_w}} {uop_names.get(body, 'unknown').removeprefix('do_to_program for ')}")
 
     def print_access(access:str, index_uop:UOp):
       index_str = ' '.join(uop_to_json(viz_data, index_uop)[id(index_uop)]["label"].split("\n")[4:])
-      print(f"{access:<{op_w}} {buf_id(slot_to_buf[index_uop.src[0].arg]):<{buf_w}} index={index_str}")
+      print(f"{access:<{op_w}} {buffer_ids[index_uop.src[0].arg]:<{buf_w}} index={index_str}")
 
     for u in body.toposort():
       if u.op is Ops.INDEX and u.dtype.base == u.dtype: print_access("R", u)
       if u.op is Ops.STORE: print_access("W", u.src[0])
-
-  emit_call(c)
 
 for v in data:
   sink = v["uop"]
