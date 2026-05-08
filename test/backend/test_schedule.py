@@ -957,7 +957,7 @@ class TestSchedule(unittest.TestCase):
 
   def test_div_padded_arange(self):
     x = Tensor.full((2,2), 16)
-    y = x.idiv(Tensor.linspace(2, 8, steps=4, dtype=dtypes.int).reshape(2,2)).pad(((1,1), (1,1)))
+    y = x.div(Tensor.linspace(2, 8, steps=4, dtype=dtypes.int).reshape(2,2), rounding_mode="trunc").pad(((1,1), (1,1)))
     out = y.sum(axis=1)
     run_linear(*check_schedule(out, 1))
     self.assertListEqual(out.tolist(), [0, 12, 4, 0])
