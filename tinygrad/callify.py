@@ -77,8 +77,10 @@ def contiguous_mops_to_view(c:UOp, src:UOp):
     if not hasattr(Device[c.device].allocator, "_offset"): return None
   elif not all(hasattr(Device[d].allocator, "_offset") for d in c.device): return None
 
+  x = src
+  while x.op in GroupOp.Movement: x = x.src[0]
   # NOTE: this contiguous is removed because this BUFFER_VIEW/RESHAPE has_buffer_identity
-  if (view := _make_buffer_view(src)) is not None:
+  if x.op is not Ops.MULTI and (view := _make_buffer_view(src)) is not None:
     return view.contiguous(tag=c.tag)
 
   # for MULTI tensors, use multi_pm to resolve per-shard movement ops, then create BUFFER_VIEW on the resolved result
