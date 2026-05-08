@@ -3,7 +3,7 @@ from typing import cast
 import ctypes, functools, hashlib
 from tinygrad.runtime.autogen import opencl as cl
 from tinygrad.runtime.support import c
-from tinygrad.helpers import to_char_p_p, from_mv, OSX, DEBUG, mv_address, suppress_finalizing, unwrap
+from tinygrad.helpers import to_char_p_p, from_mv, OSX, DEBUG, IMAGE, mv_address, suppress_finalizing, unwrap
 from tinygrad.renderer.cstyle import OpenCLRenderer, IntelRenderer
 from tinygrad.device import BufferSpec, LRUAllocator, Compiled, Compiler, CompileError
 from tinygrad.dtype import ImageDType
@@ -119,7 +119,13 @@ class CLDevice(Compiled):
 
     renderer = IntelRenderer if "cl_intel_subgroup_matrix_multiply_accumulate" in self.device_exts else OpenCLRenderer
     self.cl_compiler = CLCompiler(self, f"{hashlib.md5(self.device_name.encode() + self.driver_version.encode()).hexdigest()}")
-    super().__init__(device, CLAllocator(self), [renderer], functools.partial(CLProgram, self))
+
+    if IMAGE:
+      check(cl.clGetDeviceInfo(self.device_id, cl.CL_DEVICE_IMAGE_PITCH_ALIGNMENT, 4, ctypes.byref(ipa := ctypes.c_uint32()), None))
+      check(cl.clGetDeviceInfo(self.device_id, cl.CL_DEVICE_MEM_BASE_ADDR_ALIGN, 4, ctypes.byref(iba := ctypes.c_uint32()), None))
+      arch = f"IMAGE_PITCH_ALIGNMENT={ipa.value},MEM_BASE_ADDR_ALIGN={iba.value}"
+    else: arch = ""
+    super().__init__(device, CLAllocator(self), [renderer], functools.partial(CLProgram, self), arch=arch)
 
   def count(self) -> int: return len(unwrap(self.device_ids))
 
