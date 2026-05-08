@@ -74,8 +74,8 @@ class TestRealWorld(unittest.TestCase):
       for l in model: t = l(t, t2)
       return t.realize()
 
-    # TODO: support _offset on CL to get mem down to 0.0002
-    exp_mem = 0.00037 if Device.DEFAULT == "CL" else 0.0002
+    # TODO: support _offset on CL to get mem down to 0.00011
+    exp_mem = 0.00037 if Device.DEFAULT == "CL" else 0.00011
     helper_test("test_unet_resblock", lambda: (Tensor.empty(4, 16, 8, 8), Tensor.empty(1, 24)), test, exp_mem, 37)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.float16), "need dtypes.float16")
@@ -88,7 +88,7 @@ class TestRealWorld(unittest.TestCase):
     @TinyJit
     def test(t): return model(t, 0).realize()
     # TODO: test first token vs rest properly
-    helper_test("test_llama", lambda: (Tensor([[1,2,3,4]]),), test, 0.23, 118, all_jitted=True)
+    helper_test("test_llama", lambda: (Tensor([[1,2,3,4]]),), test, 0.053, 118, all_jitted=True)
 
   @unittest.skipUnless(is_dtype_supported(dtypes.float16), "need dtypes.float16")
   def test_gpt2(self):
@@ -100,7 +100,7 @@ class TestRealWorld(unittest.TestCase):
     @TinyJit
     def test(t, v):
       with Context(JIT=0): return model(t, v).realize()
-    helper_test("test_gpt2", lambda: (Tensor([[1,]]),Variable("pos", 1, 100).bind(1)), test, 0.23, 168, all_jitted=True)
+    helper_test("test_gpt2", lambda: (Tensor([[1,]]),Variable("pos", 1, 100).bind(1)), test, 0.022, 168, all_jitted=True)
 
   @slow
   def test_train_mnist(self):
