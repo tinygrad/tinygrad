@@ -91,6 +91,8 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   sink = graph_rewrite(sink, pm_decomp, ctx=ren.target, name="decompositions")
   sink = graph_rewrite(sink, pm_dtype_decomps, ctx=(set(), ren.target), name="decomp dtypes")
   sink = graph_rewrite(sink, pm_transcendental, name="transcendental")
+
+  # move gates from unrenderable INVALID where
   sink = graph_rewrite(sink, pm_move_gates_from_index, name="move gates from index")
 
   # final rules for the renderer (without sym)

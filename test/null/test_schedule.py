@@ -1286,6 +1286,47 @@ class TestBufferView(unittest.TestCase):
     a = Tensor.arange(4*2).reshape(4, 2).contiguous().shard(devices, axis=1).realize()
     run_linear(*check_schedule(a.flip(0).contiguous(), 2))
 
+  def test_replicated_reshape_is_buffer_view(self):
+    devices = ("NULL:1", "NULL:2")
+    a = Tensor.arange(24).contiguous().to(devices).realize()
+    run_linear(*check_schedule(a.reshape(4, 6).contiguous(), 0))
+
+  def test_replicated_shrink_is_buffer_view(self):
+    # DP pattern: replicated weight[layer_idx]
+    devices = ("NULL:1", "NULL:2")
+    a = Tensor.arange(8*10).reshape(8, 10).contiguous().to(devices).realize()
+    run_linear(*check_schedule(a[3].contiguous(), 0))
+
+  def test_replicated_chained_mops_is_buffer_view(self):
+    devices = ("NULL:1", "NULL:2")
+    a = Tensor.arange(100).contiguous().to(devices).realize()
+    run_linear(*check_schedule(a.reshape(10, 10).shrink(((2, 7), None)).contiguous(), 0))
+
+  def test_replicated_shard_none_is_buffer_view(self):
+    devices = ("NULL:1", "NULL:2")
+    a = Tensor.arange(24).contiguous().shard(devices, axis=None).realize()
+    run_linear(*check_schedule(a.reshape(4, 6).contiguous(), 0))
+
+  def test_replicated_4_devices_is_buffer_view(self):
+    devices = tuple(f"NULL:{i}" for i in range(4))
+    a = Tensor.arange(8*10).reshape(8, 10).contiguous().to(devices).realize()
+    run_linear(*check_schedule(a[3].contiguous(), 0))
+
+  def test_replicated_expand_not_buffer_view(self):
+    devices = ("NULL:1", "NULL:2")
+    a = Tensor.arange(12).reshape(4, 1, 3).contiguous().to(devices).realize()
+    run_linear(*check_schedule(a.expand(4, 3, 3).contiguous(), 2))
+
+  def test_replicated_permute_not_buffer_view(self):
+    devices = ("NULL:1", "NULL:2")
+    a = Tensor.arange(24).reshape(4, 6).contiguous().to(devices).realize()
+    run_linear(*check_schedule(a.permute(1, 0).contiguous(), 2))
+
+  def test_replicated_flip_not_buffer_view(self):
+    devices = ("NULL:1", "NULL:2")
+    a = Tensor.arange(24).reshape(4, 6).contiguous().to(devices).realize()
+    run_linear(*check_schedule(a.flip(0).contiguous(), 2))
+
 class TestInvalidTensor(unittest.TestCase):
   def test_full_invalid_is_zero_kernels(self):
     from tinygrad.dtype import Invalid

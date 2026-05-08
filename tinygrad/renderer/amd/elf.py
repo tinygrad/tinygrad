@@ -98,7 +98,7 @@ def assemble_linear(prg:UOp, lin:UOp, arch:str) -> bytes:
   for i, s in enumerate(sections): shdrs[i] = libc.Elf64_Shdr(sh_names[i], *s)
 
   ehdr = libc.Elf64_Ehdr()
-  ehdr.e_shoff, ehdr.e_shnum, ehdr.e_shstrndx = shdr_offset, len(sections), 2
+  ehdr.e_ident[:5], ehdr.e_shoff, ehdr.e_shnum, ehdr.e_shstrndx = b"\x7FELF\x02", shdr_offset, len(sections), 2
 
   elf = bytearray(shdr_offset + ctypes.sizeof(shdrs))
   elf[0:ctypes.sizeof(ehdr)] = bytes(ehdr)

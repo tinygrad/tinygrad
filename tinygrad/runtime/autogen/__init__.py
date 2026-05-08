@@ -81,7 +81,7 @@ def __getattr__(nm):
       *[f"{{}}/src/nvidia/inc/kernel/vgpu/{s}.h" for s in ["rpc_headers", "rpc_global_enums"]],
       "{}/src/common/uproc/os/common/include/libos_init_args.h", "{}/src/common/shared/msgq/inc/msgq/msgq_priv.h",
       "{}/src/nvidia/generated/g_rpc-structures.h", root/"extra/nv_gpu_driver/g_rpc-message-header.h", root/"extra/nv_gpu_driver/gsp_static_config.h",
-      root/"extra/nv_gpu_driver/vbios.h", root/"extra/nv_gpu_driver/pci_exp_table.h"
+      *[root/f"extra/nv_gpu_driver/{s}.h" for s in ["vbios", "pci_exp_table", "fw", "hs"]]
     ], args=[
       "-DRPC_MESSAGE_STRUCTURES", "-DRPC_STRUCTURES", "-include", "{}/src/common/sdk/nvidia/inc/nvtypes.h", "-I{}/src/nvidia/generated",
       "-I{}/src/common/inc", "-I{}/src/nvidia/inc", "-I{}/src/nvidia/interface/", "-I{}/src/nvidia/inc/kernel", "-I{}/src/nvidia/inc/libraries",

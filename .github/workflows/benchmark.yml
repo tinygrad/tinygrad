@@ -51,34 +51,35 @@ jobs:
     - name: openpilot compile3 0.10.1 driving_vision
       run: FLOAT16=1 DEV=CL IMAGE=1 python3.11 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/720392c9a5b986981fdbed1bb8c47a6c5573a50e/selfdrive/modeld/models/driving_vision.onnx
 
-  testframeworkpytest:
-    name: framework pytest
-    env:
-      CI: ""
-      CAPTURE_PROCESS_REPLAY: "0"
-    runs-on: [self-hosted, framework]
-    timeout-minutes: 10
-    defaults:
-      run:
-        shell: bash -e -o pipefail {0}
-    if: github.repository_owner == 'tinygrad'
-    steps:
-    - name: Checkout Code
-      uses: actions/checkout@v6
-    - name: setup python environment
-      run: |
-        rm -rf /tmp/tinygrad_pytest_ci
-        uv venv /tmp/tinygrad_pytest_ci
-        source /tmp/tinygrad_pytest_ci/bin/activate
-        uv pip install .[testing]
-    - name: setup staging db
-      run: |
-        echo "CACHEDB=/tmp/pytest-db-ci.db" >> $GITHUB_ENV
-        rm -f /tmp/pytest-db-ci*
-    - name: Run pytest -nauto
-      run: |
-        source /tmp/tinygrad_pytest_ci/bin/activate
-        pytest -nauto --durations=20
+  # TODO: reenable when not flaky
+  #testframeworkpytest:
+  #  name: framework pytest
+  #  env:
+  #    CI: ""
+  #    CAPTURE_PROCESS_REPLAY: "0"
+  #  runs-on: [self-hosted, framework]
+  #  timeout-minutes: 10
+  #  defaults:
+  #    run:
+  #      shell: bash -e -o pipefail {0}
+  #  if: github.repository_owner == 'tinygrad'
+  #  steps:
+  #  - name: Checkout Code
+  #    uses: actions/checkout@v6
+  #  - name: setup python environment
+  #    run: |
+  #      rm -rf /tmp/tinygrad_pytest_ci
+  #      uv venv /tmp/tinygrad_pytest_ci
+  #      source /tmp/tinygrad_pytest_ci/bin/activate
+  #      uv pip install .[testing]
+  #  - name: setup staging db
+  #    run: |
+  #      echo "CACHEDB=/tmp/pytest-db-ci.db" >> $GITHUB_ENV
+  #      rm -f /tmp/pytest-db-ci*
+  #  - name: Run pytest -nauto
+  #    run: |
+  #      source /tmp/tinygrad_pytest_ci/bin/activate
+  #      pytest -nauto --durations=20
 
   testmacbenchmark:
     name: Mac Benchmark

@@ -4,7 +4,7 @@ from tinygrad.helpers import getbits, i2u, unwrap
 from tinygrad.runtime.autogen import libc
 
 @dataclass(frozen=True)
-class ElfSection: name:str; header:libc.Elf64_Shdr; content:bytes # noqa: E702
+class ElfSection: name:str; header:libc.Elf64_Shdr|libc.Elf32_Shdr; content:bytes # noqa: E702
 
 def link_sym(sym:str, libs:list[str]) -> int:
   for lib in libs:
@@ -13,17 +13,20 @@ def link_sym(sym:str, libs:list[str]) -> int:
   raise RuntimeError(f'Attempting to relocate against an undefined symbol {sym}')
 
 def elf_loader(blob:bytes, force_section_align:int=1, link_libs:list[str]|None=None) -> tuple[memoryview, list[ElfSection], list[tuple]]:
+  assert blob[:4] == libc.ELFMAG.encode(), "blob is not an ELF, missing magic bytes"
+  ecls = {libc.ELFCLASS32: "Elf32", libc.ELFCLASS64: "Elf64"}[blob[libc.EI_CLASS]]
+
   def _strtab(blob: bytes, idx: int) -> str: return blob[idx:blob.find(b'\x00', idx)].decode('utf-8')
 
-  header = libc.Elf64_Ehdr.from_buffer_copy(blob)
-  section_headers = (libc.Elf64_Shdr * header.e_shnum).from_buffer_copy(blob[header.e_shoff:])
+  header = getattr(libc, f"{ecls}_Ehdr").from_buffer_copy(blob)
+  section_headers = (getattr(libc, f"{ecls}_Shdr") * header.e_shnum).from_buffer_copy(blob[header.e_shoff:])
   sh_strtab = blob[(shstrst:=section_headers[header.e_shstrndx].sh_offset):shstrst+section_headers[header.e_shstrndx].sh_size]
   sections = [ElfSection(_strtab(sh_strtab, sh.sh_name), sh, blob[sh.sh_offset:sh.sh_offset+sh.sh_size]) for sh in section_headers]
 
   def _to_carray(sh, ctype): return (ctype * (sh.header.sh_size // sh.header.sh_entsize)).from_buffer_copy(sh.content)
-  rel = [(sh, sh.name[4:], _to_carray(sh, libc.Elf64_Rel)) for sh in sections if sh.header.sh_type == libc.SHT_REL]
-  rela = [(sh, sh.name[5:], _to_carray(sh, libc.Elf64_Rela)) for sh in sections if sh.header.sh_type == libc.SHT_RELA]
-  symtab = next((_to_carray(sh, libc.Elf64_Sym) for sh in sections if sh.header.sh_type == libc.SHT_SYMTAB), None)
+  rel = [(sh, sh.name[4:], _to_carray(sh, getattr(libc, f"{ecls}_Rel"))) for sh in sections if sh.header.sh_type == libc.SHT_REL]
+  rela = [(sh, sh.name[5:], _to_carray(sh, getattr(libc, f"{ecls}_Rela"))) for sh in sections if sh.header.sh_type == libc.SHT_RELA]
+  symtab = next((_to_carray(sh, getattr(libc, f"{ecls}_Sym")) for sh in sections if sh.header.sh_type == libc.SHT_SYMTAB), None)
   progbits = [sh for sh in sections if sh.header.sh_type == libc.SHT_PROGBITS]
 
   # Prealloc image for all fixed addresses.
@@ -39,7 +42,8 @@ def elf_loader(blob:bytes, force_section_align:int=1, link_libs:list[str]|None=N
   for sh, trgt_sh_name, c_rels in rel + rela:
     if trgt_sh_name == ".eh_frame": continue
     target_image_off = next(tsh for tsh in sections if tsh.name == trgt_sh_name).header.sh_addr
-    rels = [(r.r_offset, unwrap(symtab)[libc.ELF64_R_SYM(r.r_info)], libc.ELF64_R_TYPE(r.r_info), getattr(r, "r_addend", 0)) for r in c_rels]
+    rels = [(r.r_offset, unwrap(symtab)[getattr(libc, f"{ecls.upper()}_R_SYM")(r.r_info)], getattr(libc, f"{ecls.upper()}_R_TYPE")(r.r_info),
+             getattr(r, "r_addend", 0)) for r in c_rels]
     relocs += [(target_image_off + roff, link_sym(_strtab(sh_strtab, sym.st_name), link_libs or []) if sym.st_shndx == 0 else
                 sections[sym.st_shndx].header.sh_addr + sym.st_value, rtype, raddend) for roff, sym, rtype, raddend in rels]
 

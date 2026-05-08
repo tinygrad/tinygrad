@@ -206,15 +206,11 @@ class CapturedJit(Generic[ReturnType]):
     # drop graph runners
     for call in self.linear.src:
       if call.src[0].op is Ops.CUSTOM_FUNCTION and call.src[0].arg == "graph": graph_cache.pop(call.src[0], None)
-    bases: set[Buffer] = set()
     for u in self._written_uops:
-      try: buf = u.buffer
-      except Exception: continue
-      for b in (buf.bufs if isinstance(buf, MultiBuffer) else [buf]):
+      if (buf:=buffers.get(u)) is None: continue
+      for b in (buf.bufs if isinstance(buf, MultiBuffer) else (buf,)):
         if hasattr(b, '_buf'): b.deallocate()
-        if b._base is not None: bases.add(b._base)
-    for a in bases:
-      if a.is_allocated() and a.allocated_views == 0: a.deallocate()
+        if (base:=b._base) is not None and base.allocated_views == 0 and base.is_allocated(): base.deallocate()
 
 def _prepare_jit_inputs(args, kwargs):
   input_tensors: list[tuple[int|str, Tensor]] = [(name,t) for name,t in list(enumerate(args))+sorted(kwargs.items()) if t.__class__ is Tensor]

@@ -1,5 +1,5 @@
 from __future__ import annotations
-import ctypes, time, functools, re, gzip, struct
+import ctypes, time, functools, re
 from tinygrad.helpers import getenv, DEBUG, fetch, getbits
 from tinygrad.runtime.autogen import pci
 from tinygrad.runtime.support.memory import TLSFAllocator, MemoryManager, AddrSpace
@@ -112,7 +112,7 @@ class NVDev:
     self.chip_id = self.reg("NV_PMC_BOOT_0").read()
     self.chip_details = self.reg("NV_PMC_BOOT_42").read_bitfields()
     self.chip_name = {0x17: "GA1", 0x19: "AD1", 0x1b: "GB2"}[self.chip_details['architecture']] + f"{self.chip_details['implementation']:02d}"
-    self.fw_name = {"GB2": "GB202", "AD1": "AD102", "GA1": "GA102"}[self.chip_name[:3]]
+    self.fw_name = {"GB2": "gb202", "AD1": "ad102", "GA1": "ga102"}[self.chip_name[:3]]
     self.mmu_ver, self.fmc_boot = (3, True) if self.chip_details['architecture'] >= 0x1a else (2, False)
 
     self.flcn:NV_FLCN|NV_FLCN_COT = NV_FLCN_COT(self) if self.fmc_boot else NV_FLCN(self)
@@ -160,14 +160,6 @@ class NVDev:
   def _download(self, file:str) -> str:
     url = f"https://raw.githubusercontent.com/NVIDIA/open-gpu-kernel-modules/8ec351aeb96a93a4bb69ccc12a542bf8a8df2b6f/{file}"
     return fetch(url, subdir="defines").read_text()
-
-  def extract_fw(self, file:str, dname:str) -> bytes:
-    # Extracts the firmware binary from the given header
-    tname = file.replace("kgsp", "kgspGet")
-    text = self._download(f"src/nvidia/generated/g_bindata_{tname}_{self.fw_name}.c")
-    info, sl = text[text[:text.index(dnm:=f'{file}_{self.fw_name}_{dname}')].rindex("COMPRESSION:"):][:16], text[text.index(dnm) + len(dnm) + 7:]
-    image = bytes.fromhex(sl[:sl.find("};")].strip().replace("0x", "").replace(",", "").replace(" ", "").replace("\n", ""))
-    return gzip.decompress(struct.pack("<4BL2B", 0x1f, 0x8b, 8, 0, 0, 0, 3) + image) if "COMPRESSION: YES" in info else image
 
   def include(self, file:str):
     def _do_eval(s:str): return eval(s) # pylint: disable=eval-used

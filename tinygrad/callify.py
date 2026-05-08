@@ -77,6 +77,12 @@ def contiguous_mops_to_view(c:UOp, src:UOp):
     if not hasattr(Device[c.device].allocator, "_offset"): return None
   elif not all(hasattr(Device[d].allocator, "_offset") for d in c.device): return None
 
+  x = src
+  while x.op in GroupOp.Movement: x = x.src[0]
+  # NOTE: this contiguous is removed because this BUFFER_VIEW/RESHAPE has_buffer_identity
+  if x.op is not Ops.MULTI and (view := _make_buffer_view(src)) is not None:
+    return view.contiguous(tag=c.tag)
+
   # for MULTI tensors, use multi_pm to resolve per-shard movement ops, then create BUFFER_VIEW on the resolved result
   if not isinstance(c.device, str):
     from tinygrad.schedule.multi import multi_pm
@@ -85,9 +91,7 @@ def contiguous_mops_to_view(c:UOp, src:UOp):
     if (view := _make_buffer_view(resolved.src[0])) is None: return None
     return view.multi(resolved.arg).contiguous(tag=c.tag)
 
-  # NOTE: this contiguous is removed because this BUFFER_VIEW/RESHAPE has_buffer_identity
-  if (view := _make_buffer_view(src)) is None: return None
-  return view.contiguous(tag=c.tag)
+  return None
 
 def transform_precompiled_call(c:UOp) -> UOp|None:
   if not c.arg.precompile: return None
