@@ -47,10 +47,24 @@ def simplify_valid_load(buf:UOp, start_idx:UOp, valid:UOp) -> UOp|None:
 
   if not drop_stmt and idx is start_idx: return None
   new_valid = UOp.uprod(*ss) if (ss:=[s for s in valid.split_uop(Ops.AND) if s not in drop_stmt]) else None
-  return buf.index(idx.valid(new_valid) if new_valid is not None else idx, ptr=True)
+  x, y = idx.gep(0), idx.gep(1)
+  return buf.index(x.valid(new_valid) if new_valid is not None else x, y.valid(new_valid) if new_valid is not None else y, ptr=True)
+
+def simplify_valid_image_load(buf:UOp, start_x:UOp, start_y:UOp, valid:UOp) -> UOp|None:
+  if not isinstance(buf.dtype, ImageDType) or start_x.dtype.scalar() is not dtypes.weakint or start_y.dtype.scalar() is not dtypes.weakint: return None
+  x, y = uop_given_valid(valid, start_x), uop_given_valid(valid, start_y)
+  drop_stmt = _drop_valid_stmts(valid, UOp.vectorize(x, y), buf.dtype.shape[0], buf.dtype.shape[1])
+  if not drop_stmt and x is start_x and y is start_y: return None
+  new_valid = UOp.uprod(*ss) if (ss:=[s for s in valid.split_uop(Ops.AND) if s not in drop_stmt]) else None
+  return buf.index(x.valid(new_valid) if new_valid is not None else x, y.valid(new_valid) if new_valid is not None else y, ptr=True)
 
 
+image_invalid_gate_x = UPat.var("cond").where(UPat.var("x"), UPat(Ops.CONST, arg=Invalid))
+image_invalid_gate_y = UPat.var("cond").where(UPat.var("y"), UPat(Ops.CONST, arg=Invalid))
 load_store_indexing = PatternMatcher([
+  # image load valid idx simplification with scalar x/y coordinates
+  (UPat(Ops.INDEX, src=(UPat.var("buf"), image_invalid_gate_x, image_invalid_gate_y)),
+   lambda buf,x,y,cond: simplify_valid_image_load(buf, x, y, cond)),
   # image load valid idx simplification
   (UPat(Ops.INDEX, src=(UPat.var("buf"), invalid_gate)), lambda buf,x,i,cond: simplify_valid_load(buf, x, cond)),
 ])
@@ -195,7 +209,7 @@ def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
 def get_image_idx(idx:UOp, width:int):
   x, valid = idx.src[1].get_idx(), idx.src[1].get_valid()
   idx_x, idx_y = (x // 4) % width, x // (4*width)
-  return idx.replace(src=(idx.src[0], UOp.vectorize(idx_x, idx_y).valid(valid)))
+  return idx.replace(src=(idx.src[0], idx_x.valid(valid), idx_y.valid(valid)))
 
 def image_fixup(ls:UOp):
   # normal image load or store, with the CAST from expand_index
@@ -204,7 +218,8 @@ def image_fixup(ls:UOp):
     return ls.replace(src=(get_image_idx(ls.src[0].src[0], dt.shape[1]),)+ls.src[1:])
 
   # this is an unprocessed image without a cast, we should just make it a buffer
-  if isinstance(dt, ImageDType) and (off:=ls.src[0].src[1]).get_idx().dtype != dtypes.weakint.vec(2):
+  if isinstance(dt, ImageDType) and len(ls.src[0].src) != 3:
+    off = ls.src[0].src[1]
     idx = ls.src[0].src[0].replace(dtype=(new_dt:=dtypes.half if dt.itemsize == 2 else dtypes.float).ptr(dt.size)).index(off)
     return ls.replace(src=(idx,), dtype=new_dt).cast(dtypes.float) if ls.op is Ops.LOAD else ls.replace(src=(idx, ls.src[1].cast(new_dt)))
 
@@ -231,7 +246,7 @@ def no_vectorized_wmma(wmma:UOp):
 
 def no_vectorized_alu(alu:UOp):
   if alu.dtype.vcount == 1: return None
-  if alu.op is Ops.WHERE and alu.src[2].arg is Invalid: return None  # image load/store has cond.where(idx.vec(2), Invalid) as the index
+  if alu.op is Ops.WHERE and alu.src[2].arg is Invalid: return None  # gated indexes use cond.where(idx, Invalid)
   alus = tuple(UOp(alu.op, alu.dtype.scalar(), tuple(s.gep(i) for s in alu.src), alu.arg) for i in range(alu.dtype.vcount))
   return UOp(Ops.STACK, alu.dtype, alus)
 

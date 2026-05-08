@@ -97,6 +97,7 @@ pm_manual_bf16_cast = PatternMatcher([
 ])
 
 def uops_to_dtypes(uops:list[UOp]) -> list[DType]: return dedup(u.dtype for u in uops if not isinstance(u.dtype, (ImageDType, PtrDType)))
+def image_coord(ctx, x:UOp, y:UOp) -> str: return f"(int2)({ctx[x]}, {ctx[y]})"
 
 # (name, dims, dtype_in, dtype_out, device, threads, upcast_axes, reduce_axes)
 def wmma_args(uops:list[UOp]):
@@ -301,13 +302,15 @@ class OpenCLRenderer(CStyleLanguage):
     (UPat(Ops.CONST, dtypes.bfloat16, name="x"),
       lambda ctx,x: f"{(struct.unpack('I', struct.pack('f', float_to_bf16(x.arg)))[0] >> 16)}u"),
     # load/store image (OpenCL)
-    (UPat(Ops.LOAD, dtype=dtypes.float.vec(4), src=(UPat.var('buf').index(UPat.var('idx', dtypes.int.vec(2))), UPat.var("var"), UPat.var("gate"))),
-      lambda ctx,buf,idx,var,gate: f"({ctx[gate]}?read_imagef({ctx[buf]}, smp, {ctx[idx]}):{ctx[var]})"),
-    (UPat(Ops.LOAD, dtype=dtypes.float.vec(4), src=(UPat.var('buf').index(UPat.var('idx', dtypes.int.vec(2))),)),
-      lambda ctx,buf,idx: f"read_imagef({ctx[buf]}, smp, {ctx[idx]})"),
-    (UPat(Ops.STORE, src=(UPat.var('buf').index(UPat.var('idx', dtypes.int.vec(2))),
-                          UPat.var("var", dtypes.float.vec(4))), allow_any_len=True),
-      lambda ctx,buf,idx,var: f"write_imagef({ctx[buf]}, {ctx[idx]}, {ctx[var]});"),
+    (UPat(Ops.INDEX, src=(UPat.var('buf'), UPat.var('x'), UPat.var('y')), name="idx"),
+      lambda ctx,buf,x,y,idx: image_coord(ctx, x, y) if isinstance(buf.dtype, ImageDType) else None),
+    (UPat(Ops.LOAD, dtype=dtypes.float.vec(4), src=(UPat.var('buf').index(UPat.var('x'), UPat.var('y')), UPat.var("var"), UPat.var("gate"))),
+      lambda ctx,buf,x,y,var,gate: f"({ctx[gate]}?read_imagef({ctx[buf]}, smp, {image_coord(ctx, x, y)}):{ctx[var]})" if isinstance(buf.dtype, ImageDType) else None),
+    (UPat(Ops.LOAD, dtype=dtypes.float.vec(4), src=(UPat.var('buf').index(UPat.var('x'), UPat.var('y')),)),
+      lambda ctx,buf,x,y: f"read_imagef({ctx[buf]}, smp, {image_coord(ctx, x, y)})" if isinstance(buf.dtype, ImageDType) else None),
+    (UPat(Ops.STORE, src=(UPat.var('buf').index(UPat.var('x'), UPat.var('y')),
+                           UPat.var("var", dtypes.float.vec(4))), allow_any_len=True),
+      lambda ctx,buf,x,y,var: f"write_imagef({ctx[buf]}, {image_coord(ctx, x, y)}, {ctx[var]});" if isinstance(buf.dtype, ImageDType) else None),
   ]) + base_rewrite
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:

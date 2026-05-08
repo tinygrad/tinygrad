@@ -5,7 +5,7 @@
 from typing import Any, TYPE_CHECKING
 import pickle, base64, itertools, time, sys, functools
 from dataclasses import replace
-from tinygrad.dtype import DType, dtypes, ImageDType, PtrDType, truncate, storage_fmt_for_dtype, to_storage_scalar, from_storage_scalar
+from tinygrad.dtype import DType, dtypes, ImageDType, PtrDType, truncate, storage_fmt_for_dtype, to_storage_scalar, from_storage_scalar, Invalid
 from tinygrad.helpers import all_same, getenv, flatten, get_single_element, Target
 from tinygrad.device import Compiled, Compiler, Allocator
 from tinygrad.codegen.opt import tc
@@ -92,11 +92,12 @@ class PythonProgram:
           elif arg[0] == 'l': values[i] = [x[2-int(arg[-1])] for x in warp]
         elif uop is Ops.CONST: values[i] = [arg] * warp_size
         elif uop is Ops.INDEX:
-          if len(src_values) != 2: raise RuntimeError("gates must be on LOAD/STORE, not INDEX")
+          if len(src_values) != 2 and not isinstance(src_dtypes[0], ImageDType): raise RuntimeError("gates must be on LOAD/STORE, not INDEX")
           ret:list = []
           if isinstance(src_dtypes[0], ImageDType):
-            for m,ox,oy in zip(src_values[0], src_values[1][0], src_values[1][1]):
-              if ox < 0 or ox >= src_dtypes[0].shape[1] or oy < 0 or oy >= src_dtypes[0].shape[0]: ret.append((m, None))
+            xs, ys = (src_values[1][0], src_values[1][1]) if len(src_values) == 2 else (src_values[1], src_values[2])
+            for m,ox,oy in zip(src_values[0], xs, ys):
+              if ox is Invalid or oy is Invalid or ox < 0 or ox >= src_dtypes[0].shape[1] or oy < 0 or oy >= src_dtypes[0].shape[0]: ret.append((m, None))
               else: ret.append((m, ox*4 + oy*src_dtypes[0].shape[1]*4))
           else:
             for m,o in zip(src_values[0], src_values[1]): ret.append((m,o))

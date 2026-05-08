@@ -1531,6 +1531,19 @@ def sint_to_uop(x:sint, dtype=dtypes.weakint) -> UOp: return UOp.const(dtype, x)
 def to_max_shape(shape:tuple[sint, ...]) -> tuple[int, ...]: return tuple(int(x.vmax) if isinstance(x, UOp) else x for x in shape)
 
 def select_dtype(u): return (dtypes.long if u.overflows(dtypes.int32) else dtypes.int).vec(u.dtype.count)
+def lower_index_casts(idx:UOp) -> UOp|None:
+  new_src, changed = [idx.src[0]], False
+  for s in idx.src[1:]:
+    ns = None
+    if s.op is Ops.CAST and s.dtype == dtypes.weakint and s.src[0].dtype.scalar() in dtypes.ints:
+      ns = s.src[0]
+    elif s.op is Ops.WHERE and s.dtype.scalar() is dtypes.weakint and s.src[2].op is Ops.CONST and s.src[2].arg is Invalid:
+      val = s.src[1]
+      if val.op is Ops.CAST and val.dtype == dtypes.weakint and val.src[0].dtype.scalar() in dtypes.ints:
+        ns = s.src[0].where(val.src[0], val.src[0].const_like(Invalid))
+    new_src.append(ns if ns is not None else s)
+    changed = changed or ns is not None
+  return idx.replace(src=tuple(new_src)) if changed else None
 pm_lower_index_dtype = PatternMatcher([
   # There are no Unary ops at this point in symbolic, those are introduced later
   (UPat(GroupOp.Binary, name="u", src=(UPat.var("x").cast(dtypes.weakint), UPat.var("y").cast(dtypes.weakint))), lambda u,x,y:
@@ -1552,6 +1565,7 @@ pm_lower_index_dtype = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx", dtypes.ints).cast()),), lambda buf,idx: buf.index(idx, ptr=True)),
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("gate").where(UPat.var("idx", dtypes.ints).cast(), UPat(Ops.CONST, arg=Invalid)))),
    lambda buf,idx,gate: buf.index(gate.where(idx, idx.const_like(Invalid)), ptr=True)),
+  (UPat(Ops.INDEX, name="idx"), lower_index_casts),
   (UPat((Ops.SINK, Ops.NOOP, Ops.END), name="n"),
    lambda n: n.replace(src=tuple(s.src[0] if s.op is Ops.CAST and s.dtype == dtypes.weakint else s for s in n.src))),
 ])

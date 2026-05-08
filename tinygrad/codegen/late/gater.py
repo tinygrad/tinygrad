@@ -1,6 +1,18 @@
 # this is a temporary intermediate step while we remove this index style
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp
-from tinygrad.dtype import Invalid, dtypes
+from tinygrad.dtype import Invalid, dtypes, ImageDType
+
+def move_image_load_gate(buf:UOp, gate:UOp, x:UOp, y:UOp, cast:UOp, l:UOp):
+  if not isinstance(buf.dtype, ImageDType): return None
+  return buf.index(x, y, ptr=True).cast(cast.dtype).load(l.const_like(0), gate, dtype=l.dtype)
+
+def move_image_store_gate(buf:UOp, gate:UOp, x:UOp, y:UOp, cast:UOp, data:UOp):
+  if not isinstance(buf.dtype, ImageDType): return None
+  return buf.index(x, y, ptr=True).cast(cast.dtype).store(data, gate)
+
+def image_coords_to_int(idx:UOp, buf:UOp, x:UOp, y:UOp):
+  if not isinstance(buf.dtype, ImageDType) or (x.dtype != dtypes.long and y.dtype != dtypes.long): return None
+  return idx.replace(src=(buf, x.cast(dtypes.int) if x.dtype == dtypes.long else x, y.cast(dtypes.int) if y.dtype == dtypes.long else y))
 
 pm_move_gates_from_index = PatternMatcher([
   # here we create the alt value for load to be 0s and remove the where Invalid
@@ -8,6 +20,12 @@ pm_move_gates_from_index = PatternMatcher([
    lambda buf,gate,idx,cast,l: buf.index(idx, ptr=True).cast(cast.dtype).load(l.const_like(0), gate, dtype=l.dtype)),
   (UPat.var("buf").index(UPat.var("gate").where(UPat.var("idx"), UPat(arg=Invalid))).or_casted(name="cast").store(UPat.var("data")),
    lambda buf,gate,idx,cast,data: buf.index(idx, ptr=True).cast(cast.dtype).store(data, gate)),
+  (UPat.var("buf").index(UPat.var("gate").where(UPat.var("x"), UPat(arg=Invalid)),
+                           UPat.var("gate").where(UPat.var("y"), UPat(arg=Invalid))).or_casted(name="cast").load(name="l"),
+   move_image_load_gate),
+  (UPat.var("buf").index(UPat.var("gate").where(UPat.var("x"), UPat(arg=Invalid)),
+                           UPat.var("gate").where(UPat.var("y"), UPat(arg=Invalid))).or_casted(name="cast").store(UPat.var("data")),
+   move_image_store_gate),
 
   # Where after gated load becomes alt value
   (UPat.var("gate").where(UPat().load(UPat(), UPat.var("gate"), name="l").or_casted(), UPat.var("a")), lambda gate,l,a:
@@ -17,5 +35,6 @@ pm_move_gates_from_index = PatternMatcher([
 
   # vectorized indexes (ie. images) must be int
   (UPat(Ops.INDEX, src=(UPat(), UPat(Ops.STACK, dtypes.long, name="vec")), allow_any_len=True, name="idx"),
-   lambda idx,vec: idx.replace(src=(idx.src[0], UOp.vectorize(*(u.cast(dtypes.int) for u in vec.src)), *idx.src[2:])))
+   lambda idx,vec: idx.replace(src=(idx.src[0], UOp.vectorize(*(u.cast(dtypes.int) for u in vec.src)), *idx.src[2:]))),
+  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("x"), UPat.var("y")), name="idx"), image_coords_to_int),
 ])
