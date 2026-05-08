@@ -114,6 +114,11 @@ def nidx(b:mesa.nir_builder, buf, off, dtype, gate=None) -> mesa.nir_def:
        lambda: nalu(b, "iadd", buf, nalu(b, "imul", off, nimm(b, dtype.itemsize, dtypes.long))))
   return if_phi(b, gate, f, lambda: buf) if gate is not None else f()
 
+def cast_global_index(x:UOp, buf:UOp, off:UOp):
+  if isinstance(buf.dtype, ImageDType) or not isinstance(buf.dtype, PtrDType) or buf.dtype.addrspace == AddrSpace.REG or \
+     off.op in (Ops.CAST, Ops.STACK): return None
+  return x.replace(src=(buf, off.cast(dtypes.long))+x.src[2:])
+
 class NIRRenderer(Renderer):
   suffix = "NIR"
   nir_options: bytes
@@ -136,8 +141,7 @@ class NIRRenderer(Renderer):
     # ref: https://registry.khronos.org/SPIR-V/specs/unified1/SPIRV.html#OpConvertFToU
     (UPat(Ops.CAST, (dtypes.uchar, dtypes.ushort), src=(UPat.var("x", dtypes.floats),), name="c"), lambda x,c: x.cast(dtypes.int32).cast(c.dtype)),
     # load/store use pointer arithmetic, and the cast does nothing
-    (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("off")), allow_any_len=True, name="x"), lambda x,buf,off: x.replace(
-      src=(buf,off.cast(dtypes.long))+x.src[2:]) if not isinstance(buf.dtype, ImageDType) and buf.dtype.addrspace != AddrSpace.REG and off.op not in (Ops.CAST, Ops.STACK) else None),
+    (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("off")), allow_any_len=True, name="x"), cast_global_index),
     (UPat(Ops.CAST, name="x"), lambda x: x.src[0] if isinstance(x.dtype, PtrDType) or x.src[0].dtype == dtypes.void else None),
   ])
 
@@ -260,6 +264,14 @@ _nload_img = nir_instr(intrins=lambda dtype:{'IMAGE_DIM':mesa.GLSL_SAMPLER_DIM_2
   nc=4, bs=32, num_components=4, srcs=lambda b,img,x,y:[nsrc(z) for z in [img, tovec(b, x, y), nundef(b, dtypes.int), nimm(b, 0, dtypes.int)]])(
     lambda b,img,x,y,dtype: mesa.nir_intrinsic_instr_create(b.shader, g("nir_intrinsic_image_load")))
 
+def nstore_img_checked(ctx, img:UOp, x:UOp, y:UOp, val:UOp):
+  if not isinstance(img.dtype, ImageDType): return None
+  return nstore_img(ctx.b, ctx.r[img], ctx.r[x], ctx.r[y], ctx.r[val], val.dtype)
+
+def nload_img_gated(ctx, img:UOp, x:UOp, y:UOp, alt:UOp, gate:UOp):
+  if not isinstance(img.dtype, ImageDType): return None
+  return if_phi(ctx.b, ctx.r[gate], lambda: ctx.nload_img(img, x, y), lambda: ctx.r[alt])
+
 class IR3Renderer(NIRRenderer, OpenCLRenderer):
   has_aux = True
 
@@ -270,9 +282,9 @@ class IR3Renderer(NIRRenderer, OpenCLRenderer):
 
   def_rewrite = PatternMatcher([
     (UPat(Ops.STORE, src=(UPat.var('img').index(UPat.var('x'), UPat.var('y')), UPat.var("val")), allow_any_len=True),
-     lambda ctx,img,x,y,val: nstore_img(ctx.b, ctx.r[img], ctx.r[x], ctx.r[y], ctx.r[val], val.dtype) if isinstance(img.dtype, ImageDType) else None),
+     nstore_img_checked),
     (UPat(Ops.LOAD, src=(UPat.var('img').index(UPat.var('x'), UPat.var('y')), UPat.var("alt"), UPat.var("gate"))),
-     lambda ctx,img,x,y,alt,gate: if_phi(ctx.b, ctx.r[gate], lambda: ctx.nload_img(img, x, y), lambda: ctx.r[alt]) if isinstance(img.dtype, ImageDType) else None),
+     nload_img_gated),
     (UPat(Ops.LOAD, src=(UPat.var('img').index(UPat.var('x'), UPat.var('y')),)), nload_img),
   ]) + NIRRenderer.def_rewrite
 

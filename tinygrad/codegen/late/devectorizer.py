@@ -51,7 +51,8 @@ def simplify_valid_load(buf:UOp, start_idx:UOp, valid:UOp) -> UOp|None:
   return buf.index(x.valid(new_valid) if new_valid is not None else x, y.valid(new_valid) if new_valid is not None else y, ptr=True)
 
 def simplify_valid_image_load(buf:UOp, start_x:UOp, start_y:UOp, valid:UOp) -> UOp|None:
-  if not isinstance(buf.dtype, ImageDType) or start_x.dtype.scalar() is not dtypes.weakint or start_y.dtype.scalar() is not dtypes.weakint: return None
+  if not isinstance(buf.dtype, ImageDType) or start_x.dtype.scalar() is not dtypes.weakint or \
+     start_y.dtype.scalar() is not dtypes.weakint: return None
   x, y = uop_given_valid(valid, start_x), uop_given_valid(valid, start_y)
   drop_stmt = _drop_valid_stmts(valid, UOp.vectorize(x, y), buf.dtype.shape[0], buf.dtype.shape[1])
   if not drop_stmt and x is start_x and y is start_y: return None

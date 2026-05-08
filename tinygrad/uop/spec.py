@@ -25,7 +25,8 @@ def validate_index(buf:UOp, idx:UOp, gate:UOp|None=None):
   return validate_index_with_z3(sz, idx, gate)
 
 def validate_image_index(buf:UOp, idx0:UOp, idx1:UOp, gate:UOp|None=None):
-  return isinstance(buf.dtype, ImageDType) and validate_index(buf, idx0, gate) and validate_index(buf, idx1, gate)
+  if not isinstance(buf.dtype, ImageDType): return None
+  return validate_index(buf, idx0, gate) and validate_index(buf, idx1, gate)
 
 # four specs:
 #   shared_spec  -- usable anywhere
@@ -184,10 +185,12 @@ shared_codegen_spec = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))).or_casted().store(UPat()), validate_index),
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))).or_casted().store(UPat(), UPat.var("gate", dtype=dtypes.bool)), validate_index),
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx0"), UPat.var("idx1"))).or_casted().load(), validate_image_index),
-  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx0"), UPat.var("idx1"))).or_casted().load(UPat.var("alt"), UPat.var("gate", dtype=dtypes.bool), name="load"),
+  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx0"), UPat.var("idx1"))).or_casted().load(
+    UPat.var("alt"), UPat.var("gate", dtype=dtypes.bool), name="load"),
    lambda buf,idx0,idx1,gate,alt,load: validate_image_index(buf, idx0, idx1, gate) if alt.dtype == load.dtype else False),
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx0"), UPat.var("idx1"))).or_casted().store(UPat()), validate_image_index),
-  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx0"), UPat.var("idx1"))).or_casted().store(UPat(), UPat.var("gate", dtype=dtypes.bool)), validate_image_index),
+  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx0"), UPat.var("idx1"))).or_casted().store(
+    UPat(), UPat.var("gate", dtype=dtypes.bool)), validate_image_index),
 
   # CUSTOM (inline and non inline)
   (UPat((Ops.CUSTOMI, Ops.CUSTOM)), lambda: True),
@@ -197,7 +200,8 @@ shared_codegen_spec = PatternMatcher([
 
   # INDEX is just address calculation. OOB validation is on LOAD/STORE where the gate is available.
   (UPat(GroupOp.Defines|{Ops.AFTER}).index(UPat()), lambda: True),
-  (UPat(Ops.INDEX, src=(UPat(GroupOp.Defines|{Ops.AFTER}, name="buf"), UPat(), UPat())), lambda buf: isinstance(buf.dtype, ImageDType)),
+  (UPat(Ops.INDEX, src=(UPat(GroupOp.Defines|{Ops.AFTER}, name="buf"), UPat(), UPat())),
+   lambda buf: True if isinstance(buf.dtype, ImageDType) else None),
 
   # SPECIAL
   (UPat(Ops.SPECIAL, src=(UPat.var("x", (dtypes.weakint, dtypes.int32)),), name="s"), lambda s,x: s.dtype == x.dtype and isinstance(s.arg, str)),

@@ -97,7 +97,8 @@ class PythonProgram:
           if isinstance(src_dtypes[0], ImageDType):
             xs, ys = (src_values[1][0], src_values[1][1]) if len(src_values) == 2 else (src_values[1], src_values[2])
             for m,ox,oy in zip(src_values[0], xs, ys):
-              if ox is Invalid or oy is Invalid or ox < 0 or ox >= src_dtypes[0].shape[1] or oy < 0 or oy >= src_dtypes[0].shape[0]: ret.append((m, None))
+              invalid = ox is Invalid or oy is Invalid
+              if invalid or ox < 0 or ox >= src_dtypes[0].shape[1] or oy < 0 or oy >= src_dtypes[0].shape[0]: ret.append((m, None))
               else: ret.append((m, ox*4 + oy*src_dtypes[0].shape[1]*4))
           else:
             for m,o in zip(src_values[0], src_values[1]): ret.append((m,o))

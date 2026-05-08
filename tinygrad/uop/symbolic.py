@@ -451,7 +451,8 @@ sym = symbolic+pm_simplify_valid+PatternMatcher([
    lambda: UOp(Ops.NOOP)),
   (UPat(Ops.LOAD, src=(UPat().index(UPat.const(dtypes.weakint, Invalid)).or_casted(),), allow_any_len=True, name="x"),
     lambda x: x.src[1] if len(x.src) > 1 else x.const_like(0)), # invalid load produces 0, or the alt value if we have one
-  (UPat(Ops.LOAD, src=(UPat().index(UPat.const(dtypes.weakint, Invalid), UPat.const(dtypes.weakint, Invalid)).or_casted(),), allow_any_len=True, name="x"),
+  (UPat(Ops.LOAD, src=(UPat().index(UPat.const(dtypes.weakint, Invalid),
+                                      UPat.const(dtypes.weakint, Invalid)).or_casted(),), allow_any_len=True, name="x"),
     lambda x: x.src[1] if len(x.src) > 1 else x.const_like(0)),
   (UPat(Ops.STORE, src=(UPat(), invalid_pat)), lambda i: UOp(Ops.NOOP)),
   # store of where with invalid -> gated store
