@@ -69,8 +69,7 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
     idx0, idx1 = mulop.src[0].src[1].get_idx(), mulop.src[1].src[1].get_idx()
     if k.ranges_of(AxisType.REDUCE):
       first_reduce_rng = k.ranges_of(AxisType.REDUCE)[0]
-      if any(u is first_reduce_rng for u in idx0.split_uop(Ops.ADD)) and all(r in idx1.ranges for r in idx0.ranges) \
-          and set(idx0.ranges) != set(idx1.ranges):
+      if any(u is first_reduce_rng for u in idx0.split_uop(Ops.ADD)) and idx0.ranges != idx1.ranges and all(r in idx1.ranges for r in idx0.ranges):
         for global_idx in k.axes_of(AxisType.GLOBAL):
           if first_reduce_rng.src[0].divides(MV_THREADS_PER_ROW) is not None and k.full_shape[global_idx]%(MV_BLOCKSIZE*MV_ROWS_PER_THREAD) == 0:
             if DEBUG >= 3:
