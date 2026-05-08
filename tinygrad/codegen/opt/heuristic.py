@@ -38,10 +38,10 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
       if rngs is not None:
         if tk.ren.target.arch.startswith("gfx12"):
           for tc_dim in [1,0]:
-            szs = [sz for sz in [5,4,3,2] if rngs[tc_dim].src[0].divides(sz) is not None]
-            if szs: rngs[tc_dim] = tk.apply_opt(Opt(OptOps.UPCAST, tk.rngs.index(rngs[tc_dim]), szs[0]))[0]
-          if (szs := [sz for sz in [4,2] if rngs[0].src[0].divides(sz) is not None]):
-            tk.apply_opt(Opt(OptOps.LOCAL, tk.rngs.index(rngs[0]), szs[0]))
+            if rngs[tc_dim].src[0].divides(2) is not None:
+              rngs[tc_dim] = tk.apply_opt(Opt(OptOps.UPCAST, tk.rngs.index(rngs[tc_dim]), 2))[0]
+          try: tk.apply_opt(Opt(OptOps.UNROLL, 0, 2))
+          except KernelOptError: pass
         else:
           if rngs[1].src[0].divides(2) is not None:
             rngs[1] = tk.apply_opt(Opt(OptOps.UPCAST, tk.rngs.index(rngs[1]), 2))[0]
