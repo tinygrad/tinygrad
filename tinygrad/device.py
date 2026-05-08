@@ -323,7 +323,10 @@ class Compiled:
 # TODO: move this to each Device
 # this only tracks if the dtype is natively supported, it may be supported in the frontend using decomps
 def is_dtype_supported(dtype:DType, target:Target|None=None) -> bool:
-  target = target or DEV.target(Device.DEFAULT)
+  if target is None:
+    dev = Device[Device.DEFAULT]
+    base = DEV.target(dev.device.split(':')[0], **({"arch":dev.arch} if dev.arch else {}))
+    target = replace(base, renderer=base.renderer or dev._renderer_name(type(dev.renderer)))
   if dtype == dtypes.bfloat16:
     match target.device:
       case "METAL": return not CI or BENCHMARKS
