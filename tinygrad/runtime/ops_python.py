@@ -220,8 +220,7 @@ class PythonRenderer(Renderer):
     elif target.arch.startswith("sm"):
       self.target = replace(target, device="CUDA")
       self.tensor_cores = tc.get_cuda(target.arch)
-    elif target.arch == "": self.target = target
-    else: raise RuntimeError(f"unsupported arch: {target.arch}")
+    else: self.target = target
 
   def render(self, uops:list[UOp]) -> str:
     # the value of SPECIAL comes from local/global_size, not form its source
