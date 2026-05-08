@@ -41,10 +41,10 @@ class TestExecALU(unittest.TestCase):
     self.assertEqual(exec_alu(Ops.SQRT, dtypes.float, (0.0,)), 0.0)
 
   def test_div(self):
-    self.assertEqual(exec_alu(Ops.IDIV, dtypes.int8, (8, 2)), 4)
-    self.assertEqual(exec_alu(Ops.IDIV, dtypes.int8, (7, 3)), 2)
-    self.assertEqual(exec_alu(Ops.IDIV, dtypes.int8, (7, -3)), -2)
-    self.assertEqual(exec_alu(Ops.IDIV, dtypes.int8, (-50, 6)), -8)
+    self.assertEqual(exec_alu(Ops.CDIV, dtypes.int8, (8, 2)), 4)
+    self.assertEqual(exec_alu(Ops.CDIV, dtypes.int8, (7, 3)), 2)
+    self.assertEqual(exec_alu(Ops.CDIV, dtypes.int8, (7, -3)), -2)
+    self.assertEqual(exec_alu(Ops.CDIV, dtypes.int8, (-50, 6)), -8)
 
   def test_floordiv(self):
     self.assertEqual(exec_alu(Ops.FLOORDIV, dtypes.int8, (8, 2)), 4)
@@ -170,12 +170,12 @@ class TestFastIdiv(unittest.TestCase):
       g = UOp(Ops.PARAM, dt.ptr(), (), 0)
       c = UOp.const(dt, 2)
       l = g.index(c)
-      a = UOp(Ops.IDIV, dt, (l, c))
+      a = UOp(Ops.CDIV, dt, (l, c))
       uops = to_uops_list([a], ren=Device[Device.DEFAULT].renderer)
       Device[Device.DEFAULT].renderer.render(uops)
       ops = [x.op for x in uops]
       self.assertIn(Ops.SHR, ops, f"For dtype={dt} divison by power of two did not simplify to shift")
-      self.assertNotIn(Ops.IDIV, ops, f"For dtype={dt} divison by power of two did not simplify to shift")
+      self.assertNotIn(Ops.CDIV, ops, f"For dtype={dt} divison by power of two did not simplify to shift")
 
   def test_floormod_power_of_two(self):
     # FLOORMOD by a power of two lowers to AND (correct floor mod for any sign in two's complement)
@@ -186,7 +186,7 @@ class TestFastIdiv(unittest.TestCase):
       uops = to_uops_list([a], ren=Device[Device.DEFAULT].renderer)
       ops = [x.op for x in uops]
       self.assertIn(Ops.AND, ops, f"For dtype={dt} FLOORMOD by pow2 did not simplify to AND")
-      self.assertNotIn(Ops.MOD, ops, f"For dtype={dt} FLOORMOD by pow2 left a MOD")
+      self.assertNotIn(Ops.CMOD, ops, f"For dtype={dt} FLOORMOD by pow2 left a MOD")
       self.assertNotIn(Ops.FLOORMOD, ops, f"For dtype={dt} FLOORMOD survived past late rewrite")
 
   def test_floordiv_power_of_two_uint(self):
@@ -198,7 +198,7 @@ class TestFastIdiv(unittest.TestCase):
       uops = to_uops_list([a], ren=Device[Device.DEFAULT].renderer)
       ops = [x.op for x in uops]
       self.assertIn(Ops.SHR, ops, f"For dtype={dt} FLOORDIV by power of two did not simplify to shift")
-      self.assertNotIn(Ops.IDIV, ops, f"For dtype={dt} FLOORDIV by power of two did not simplify to shift")
+      self.assertNotIn(Ops.CDIV, ops, f"For dtype={dt} FLOORDIV by power of two did not simplify to shift")
       self.assertNotIn(Ops.FLOORDIV, ops, f"For dtype={dt} FLOORDIV survived past late rewrite")
 
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU doesn't support long")
@@ -206,19 +206,19 @@ class TestFastIdiv(unittest.TestCase):
     g = UOp(Ops.PARAM, dtypes.uint32.ptr(), (), 0)
     c = UOp.const(dtypes.uint, 3)
     l = g.index(c)
-    a = UOp(Ops.IDIV, dtypes.uint, (l, c))
+    a = UOp(Ops.CDIV, dtypes.uint, (l, c))
     uops = to_uops_list([a], ren=Device[Device.DEFAULT].renderer)
     Device[Device.DEFAULT].renderer.render(uops)
     ops = [x.op for x in uops]
     self.assertIn(Ops.SHR, ops)
-    self.assertNotIn(Ops.IDIV, ops)
+    self.assertNotIn(Ops.CDIV, ops)
 
-    b = UOp(Ops.MOD, dtypes.uint, (l, c))
+    b = UOp(Ops.CMOD, dtypes.uint, (l, c))
     uops = to_uops_list([b], ren=Device[Device.DEFAULT].renderer)
     Device[Device.DEFAULT].renderer.render(uops)
     ops = [x.op for x in uops]
     self.assertIn(Ops.SHR, ops)
-    self.assertNotIn(Ops.MOD, ops)
+    self.assertNotIn(Ops.CMOD, ops)
 
   def test_fast_idiv_remove_powers_of_two(self):
     ridx = UOp.range(2**20, 0)
@@ -234,23 +234,23 @@ class TestFastIdiv(unittest.TestCase):
     g = UOp(Ops.PARAM, dtypes.uint32.ptr(), (), 0)
     c = UOp.const(dtypes.uint, 7)
     l = UOp(Ops.LOAD, dtypes.uint, (g.index(c),))
-    a = UOp(Ops.IDIV, dtypes.uint, (l, c))
+    a = UOp(Ops.CDIV, dtypes.uint, (l, c))
     uops = to_uops_list([a], ren=Device[Device.DEFAULT].renderer)
     Device[Device.DEFAULT].renderer.render(uops)
     ops = [x.op for x in uops]
     self.assertIn(Ops.SHR, ops)
-    self.assertNotIn(Ops.IDIV, ops)
+    self.assertNotIn(Ops.CDIV, ops)
 
   def test_disable_fast_idiv(self):
     g = UOp(Ops.PARAM, dtypes.uint32.ptr(), (), 0)
     c = UOp.const(dtypes.uint, 3)
     l = g.index(c)
-    a = UOp(Ops.IDIV, dtypes.uint, (l, c))
+    a = UOp(Ops.CDIV, dtypes.uint, (l, c))
     with Context(DISABLE_FAST_IDIV=1):
       uops = to_uops_list([a], ren=Device[Device.DEFAULT].renderer)
     ops = [x.op for x in uops]
     self.assertNotIn(Ops.SHR, ops)
-    self.assertIn(Ops.IDIV, ops)
+    self.assertIn(Ops.CDIV, ops)
 
 class TestUOpMethod(unittest.TestCase):
   @unittest.skip("uops lt no longer ordered")

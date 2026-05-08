@@ -17,7 +17,7 @@ def z3_xor(a:z3.ExprRef, b:z3.ExprRef) -> z3.ExprRef:
   if isinstance(b, z3.IntNumRef) and b.as_long() == -1: return -(a+1)
   if isinstance(a, z3.IntNumRef) and a.as_long() == -1: return -(b+1)
   raise RuntimeError(f"z3 int XOR only supports XOR with -1, got {a=} {b=}")
-z3_alu: dict[Ops, Callable[..., z3.ExprRef]] = python_alu | {Ops.MOD: lambda a,b: a-z3_cdiv(a,b)*b, Ops.IDIV: z3_cdiv, Ops.FLOORDIV: z3_floordiv,
+z3_alu: dict[Ops, Callable[..., z3.ExprRef]] = python_alu | {Ops.CMOD: lambda a,b: a-z3_cdiv(a,b)*b, Ops.CDIV: z3_cdiv, Ops.FLOORDIV: z3_floordiv,
   Ops.FLOORMOD: lambda a,b: a-z3_floordiv(a,b)*b,
   Ops.SHR: lambda a,b: a/(2**b.as_long()), Ops.SHL: lambda a,b: a*(2**b.as_long()),
   Ops.AND: lambda a,b: a%(b+1) if isinstance(b, z3.ArithRef) else a&b, Ops.WHERE: z3.If, Ops.XOR: z3_xor, Ops.MAX: lambda a,b: z3.If(a<b, b, a),}
