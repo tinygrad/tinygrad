@@ -36,17 +36,11 @@ def hand_coded_optimizations(k:Scheduler) -> Scheduler:
     # skip hand-coded TC opts if AMX, upcasting will make kernel slower
     if good_tc_opt and "AMX" not in k.ren.target.arch:
       if rngs is not None:
-        if tk.ren.target.arch.startswith("gfx12"):
-          for tc_dim in [1,0]:
-            if rngs[tc_dim].src[0].divides(2) is not None:
-              rngs[tc_dim] = tk.apply_opt(Opt(OptOps.UPCAST, tk.rngs.index(rngs[tc_dim]), 2))[0]
-          try: tk.apply_opt(Opt(OptOps.UNROLL, 0, 2))
-          except KernelOptError: pass
-        else:
-          if rngs[1].src[0].divides(2) is not None:
-            rngs[1] = tk.apply_opt(Opt(OptOps.UPCAST, tk.rngs.index(rngs[1]), 2))[0]
-          try: tk.apply_opt(Opt(OptOps.UNROLL, 0, 4))
-          except KernelOptError: pass
+        for tc_dim in [1,0]:
+          if rngs[tc_dim].src[0].divides(2) is not None:
+            rngs[tc_dim] = tk.apply_opt(Opt(OptOps.UPCAST, tk.rngs.index(rngs[tc_dim]), 2))[0]
+        try: tk.apply_opt(Opt(OptOps.UNROLL, 0, 4))
+        except KernelOptError: pass
       return tk
 
   # make a copy so it does not mutate the input
