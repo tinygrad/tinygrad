@@ -1,9 +1,12 @@
+# usage: DEBUG=5 python -m tinygrad.viz.cli --json | python ./extra/viz/render_callgraph.py
 import json, sys
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.uop.spec import eval_pyrender
 from tinygrad.helpers import ansistrip, prod
 from tinygrad.viz.serve import uop_to_json, VizData
 
+# decode the viz.cli UOp stream
+# TODO: using pickle is better here
 pending:str|None = None
 data:list[dict] = []
 for line in sys.stdin:
@@ -17,12 +20,13 @@ for line in sys.stdin:
     pending = None
   if r.get("device", "") == "TINY" and (r["name"].startswith("Schedule") or r["name"].startswith("do_to_program")): pending = r["name"]
 
+# map calls to programs / buffers
 uop_names = {v["uop"]:v["name"] for v in data}
 ast = next(v["uop"] for v in data if ansistrip(v["name"]).endswith(sys.argv[1])) if len(sys.argv) > 1 else None
 if ast is None: ast = [v["uop"] for v in data if v["name"].startswith("do_to_program")][-4]
 root = next(s for v in data for s in v["uop"].toposort() if s.op is Ops.CALL and s.src[0] is ast)
 op_w, buf_w = 4, 16
-viz_data = VizData()
+viz_data = VizData() # TODO: it should not need this
 bufs:list[UOp] = []
 for c in root.toposort(enter_calls=False):
   if c.op is not Ops.CALL: continue
