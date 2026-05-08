@@ -121,6 +121,20 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
     """
     return self._binop(Ops.MUL, x, reverse)
 
+  def bitwise_not(self) -> Self:
+    """
+    Computes the bitwise NOT of `self`.
+    Equivalent to `~self`.
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([0, 2, 5, 255], dtype="int8").bitwise_not().numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([True, False]).bitwise_not().numpy())
+    ```
+    """
+    self._check_dtype()
+    return self.logical_not() if self.dtype == dtypes.bool else self ^ -1
+
   def bitwise_and(self, x: Self | ConstType, reverse: bool = False) -> Self:
     """
     Computes the bitwise AND of `self` and `x`.
@@ -375,15 +389,16 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
     Returns a tensor of with the magnitude of `self` and the sign of `other`, elementwise.
     """
     # NOTE: torch always return in float, we return based on the broadcasting rule.
-    other = self._broadcasted(other)[1]
-    return self.abs() * ((other < 0) | (other.reciprocal() < 0)).where(-1, 1)
+    a, b = self._broadcasted(other)
+    return a.abs() * ((b < 0) | (b.reciprocal() < 0)).where(-1, 1)
 
   def logaddexp(self, other: Self | ConstType) -> Self:
     """
     Calculates (self.exp()+other.exp()).log(), elementwise.
     """
-    m = self.maximum(other)
-    return ((self-m).exp() + (self._broadcasted(other)[1]-m).exp()).log() + m
+    a, b = self._broadcasted(other)
+    m = a.maximum(b)
+    return ((a-m).exp() + (b-m).exp()).log() + m
 
   def where(self, x: Self | ConstType, y: Self | ConstType) -> Self:
     ref: Self = x if isinstance(x, type(self)) else y if isinstance(y, type(self)) else \
@@ -1031,20 +1046,6 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
     ```
     """
     return self / (1 + self.abs())
-
-  def bitwise_not(self) -> Self:
-    """
-    Computes the bitwise NOT of `self`.
-    Equivalent to `~self`.
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([0, 2, 5, 255], dtype="int8").bitwise_not().numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([True, False]).bitwise_not().numpy())
-    ```
-    """
-    if self.dtype != dtypes.bool and not dtypes.is_int(self.dtype): raise RuntimeError(f"{self.dtype} is not supported")
-    return self.logical_not() if self.dtype == dtypes.bool else self ^ -1
 
   def lerp(self, end: Self, weight: Self | ConstType) -> Self:
     """
