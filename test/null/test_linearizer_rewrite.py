@@ -52,5 +52,17 @@ class TestMATVEC(unittest.TestCase):
     opts = prg.src[0].arg.applied_opts
     assert not any(o.op is OptOps.GROUP for o in opts), f"elementwise reduce misclassified as MATVEC: {opts}"
 
+class TestPTXBfloat16(unittest.TestCase):
+  def test_ptx_renderer_bf16_keyerror(self):
+    from tinygrad.renderer.ptx import PTXRenderer
+    from tinygrad.helpers import Target
+    from tinygrad.dtype import dtypes, AddrSpace
+    from tinygrad.uop.ops import UOp, Ops
+    ren = PTXRenderer(Target('CUDA', 'PTX', 'sm_89'))
+    ptr = dtypes.bfloat16.ptr(size=1, addrspace=AddrSpace.REG)
+    u = UOp(Ops.DEFINE_REG, ptr, (), 0)
+    sink = UOp(Ops.SINK, dtypes.void, (u,))
+    ren.render([u, sink])  # KeyError: dtypes.bfloat16 at ptx.py:183
+
 if __name__ == '__main__':
   unittest.main()
