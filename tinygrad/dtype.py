@@ -138,11 +138,12 @@ class ImageDType(PtrDType):
 
   # get list of (height, width) that do not require pitch padding
   @staticmethod
-  def valid_dims(ptr:PtrDType) -> list[tuple[int,int]]:
-    ALIGN, MAXW, pxls = getenv("IMAGE_PITCH_ALIGN", 256 if OSX else 64), 16384, ptr.size // 4
+  def valid_dims(ptr:PtrDType, arch:str) -> list[tuple[int,int]]:
+    if (ALIGN:=next((int(p.split('=')[1]) for p in arch.split(',') if p.startswith("IMAGE_PITCH_ALIGNMENT=")), 0)) == 0: return []
+    MAXW, pxls = 16384, ptr.size // 4
     if ptr.base not in (dtypes.half, dtypes.float) or ptr.size > 4*MAXW*MAXW: return []
     # height=1 images just need to abide by alignment requirements in bytes, not pixels!
-    if ptr.size % (ALIGN * 4) != 0: return [] if ptr.nbytes() % getenv("IMAGE_BASE_ALIGN", 64) != 0 or pxls > MAXW else [(1, pxls)]
+    if ptr.size % (ALIGN * 4) != 0: return [] if ptr.nbytes() % (64 if OSX else ALIGN) != 0 or pxls > MAXW else [(1, pxls)]
     return [(pxls//ALIGN//k, ALIGN*k) for k in range(ceildiv(pxls//ALIGN, MAXW), min(pxls//ALIGN, MAXW//ALIGN)+1) if (pxls//ALIGN)%k == 0]
 
 class dtypes:

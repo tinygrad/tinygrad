@@ -66,7 +66,7 @@ class NVCCCompiler(Compiler):
     with tempfile.NamedTemporaryFile(suffix=".cu") as srcf, tempfile.NamedTemporaryFile(suffix=suffix) as libf:
       srcf.write(src.encode())
       srcf.flush()
-      system(f"nvcc -arch={self.arch} {mode} -o {libf.name} {srcf.name}" + ' '.join(self.extra_options))
+      system(f"nvcc -arch={self.arch} {mode} -o {libf.name} {srcf.name} " + ' '.join(self.extra_options))
       return libf.read()
   def disassemble(self, lib:bytes): cuda_disassemble(lib, self.arch, ptx=self.ptx)
 

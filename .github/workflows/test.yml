@@ -169,8 +169,8 @@ jobs:
       run: DEV=PYTHON python3 -m pytest -rA test/backend/test_renderer_failures.py::TestRendererFailures
     - name: Test IMAGE support
       run: |
-        IMAGE=1 DEV=PYTHON python3 test/backend/test_ops.py TestOps.test_gemm
-        IMAGE=1 DEV=PYTHON python3 test/backend/test_ops.py TestOps.test_simple_conv2d
+        IMAGE=1 DEV=PYTHON::IMAGE_PITCH_ALIGNMENT=64 python3 test/backend/test_ops.py TestOps.test_gemm
+        IMAGE=1 DEV=PYTHON::IMAGE_PITCH_ALIGNMENT=64 python3 test/backend/test_ops.py TestOps.test_simple_conv2d
     - name: Test emulated METAL tensor cores
       run: |
         DEBUG=2 FORWARD_ONLY=1 DEV=PYTHON::METAL python3 test/backend/test_ops.py TestOps.test_big_gemm
