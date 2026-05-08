@@ -122,8 +122,7 @@ class CLDevice(Compiled):
 
     if IMAGE:
       check(cl.clGetDeviceInfo(self.device_id, cl.CL_DEVICE_IMAGE_PITCH_ALIGNMENT, 4, ctypes.byref(ipa := ctypes.c_uint32()), None))
-      check(cl.clGetDeviceInfo(self.device_id, cl.CL_DEVICE_MEM_BASE_ADDR_ALIGN, 4, ctypes.byref(iba := ctypes.c_uint32()), None))
-      arch = f"IMAGE_PITCH_ALIGNMENT={ipa.value},MEM_BASE_ADDR_ALIGN={iba.value}"
+      arch = f"IMAGE_PITCH_ALIGNMENT={ipa.value}"
     else: arch = ""
     super().__init__(device, CLAllocator(self), [renderer], functools.partial(CLProgram, self), arch=arch)
 
