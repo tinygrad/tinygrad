@@ -14,6 +14,37 @@ def image_coords_to_int(idx:UOp, buf:UOp, x:UOp, y:UOp):
   if not isinstance(buf.dtype, ImageDType) or (x.dtype != dtypes.long and y.dtype != dtypes.long): return None
   return idx.replace(src=(buf, x.cast(dtypes.int) if x.dtype == dtypes.long else x, y.cast(dtypes.int) if y.dtype == dtypes.long else y))
 
+def index_and_valid(idx:UOp) -> tuple[UOp, UOp]:
+  if idx.dtype.scalar() is dtypes.weakint: return idx.get_idx(), idx.get_valid()
+  if idx.op is Ops.WHERE and idx.src[2].arg is Invalid: return idx.src[1], idx.src[0]
+  return idx, UOp.const(dtypes.bool, idx.arg is not Invalid)
+
+def valid_idx(idx:UOp, valid:UOp) -> UOp:
+  return idx if valid.op is Ops.CONST and valid.arg is True else valid.where(idx, idx.const_like(Invalid))
+
+def get_image_idx(idx:UOp, width:int) -> UOp:
+  x, valid = index_and_valid(idx.src[1])
+  idx_x, idx_y = (x.gep(0), x.gep(1)) if x.dtype.count == 2 else ((x // 4) % width, x // (4*width))
+  return idx.replace(src=(idx.src[0], valid_idx(idx_x, valid), valid_idx(idx_y, valid)))
+
+def image_fixup(ls:UOp):
+  # normal image load/store from split_load_store: casted linear offset -> image x/y coordinates
+  if ls.src[0].op is Ops.CAST and (cast_idx:=ls.src[0].src[0]).op is Ops.INDEX and isinstance(dt:=cast_idx.src[0].dtype, ImageDType):
+    assert ls.src[0].dtype.count == 4, "image must be casted to 4"
+    return ls.replace(src=(cast_idx if len(cast_idx.src) == 3 else get_image_idx(cast_idx, dt.shape[1]),)+ls.src[1:])
+
+  if ls.src[0].op is not Ops.INDEX or not isinstance(dt:=ls.src[0].src[0].dtype, ImageDType) or len(ls.src[0].src) == 3: return None
+  off, _ = index_and_valid(ls.src[0].src[1])
+  if off.dtype.count == 2: return ls.replace(src=(get_image_idx(ls.src[0], dt.shape[1]),)+ls.src[1:])
+
+  # this is an unprocessed image without a cast, we should just make it a buffer
+  idx = ls.src[0].src[0].replace(dtype=(new_dt:=dtypes.half if dt.itemsize == 2 else dtypes.float).ptr(dt.size)).index(ls.src[0].src[1])
+  return ls.replace(src=(idx,), dtype=new_dt).cast(dtypes.float) if ls.op is Ops.LOAD else ls.replace(src=(idx, ls.src[1].cast(new_dt)))
+
+pm_image_index = PatternMatcher([
+  (UPat((Ops.LOAD, Ops.STORE), name="ls"), image_fixup),
+])
+
 pm_move_gates_from_index = PatternMatcher([
   # here we create the alt value for load to be 0s and remove the where Invalid
   (UPat.var("buf").index(UPat.var("gate").where(UPat.var("idx"), UPat(arg=Invalid))).or_casted(name="cast").load(name="l"),
