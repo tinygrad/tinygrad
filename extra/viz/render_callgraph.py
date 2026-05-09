@@ -18,29 +18,39 @@ if not args.query:
   exit(1)
 ast = next(viz._reconstruct(data, data.trace.rewrites[i][0].sink) for i,k in enumerate(data.trace.keys) if ansistrip(k.display_name) == args.query)
 
+def find_root(call_graphs:list[int], ast:UOp) -> tuple[int, UOp]:
+  for i,c in enumerate(call_graphs):
+    for u in viz._reconstruct(data, c).toposort(enter_calls=False):
+      if u.op is Ops.CALL and u.src[0] is ast: return i,u
+
 seen_bufs:set[UOp] = set()
 for i,k in enumerate(data.trace.keys):
+  # find call in schedule
   if not k.display_name.startswith("Schedule"): continue
-  root:UOp|None = None
+  if not (call_graphs:=[s.sink for s in data.trace.rewrites[i] if s.name == "View Kernel Graph"]): continue
+  if (found:=find_root(call_graphs, ast)) is None: continue
+  call_idx, root = found
+  # replace PARAM with BUFFER / BUFFER_VIEW
+  param_replace:dict[UOp, UOp] = {}
   for s in data.trace.rewrites[i]:
-    if s.name != "View Kernel Graph": continue
-    for u in viz._reconstruct(data, s.sink).toposort(enter_calls=False):
-      if u.op is Ops.CALL and u.src[0] is ast: root = u; break
-  if root is None: continue
-  """
+    if s.name not in {"params to buffers", "memory plan"}: continue
+    for m in s.matches: param_replace[viz._reconstruct(data, m[0])] = viz._reconstruct(data, m[1])
+  root = root.substitute(param_replace)
+  # print call
   for c in root.toposort(enter_calls=False):
     if c.op is not Ops.CALL or c.src[0].op is not Ops.SINK: continue
     arg_str:list[str] = []
-    op_w, buf_w = 4, 16
+    op_w, buf_w = 4, 32
     for u in c.src[1:]:
       while u.op is Ops.AFTER: u = u.src[0]
-      # TODO: this can always be the BUFFER UNIQUE once it reconstructs the param -> buffer mapping
       op_name = str(u.op).split(".")[1]
       if u.op is Ops.MSTACK:
         arg_str.append(st:=f"{op_name[0].lower()} {u.device}")
+      elif u.op is Ops.BUFFER_VIEW:
+        arg_str.append(st:=f"{op_name[0].lower()}{u.src[0].arg}[{u.arg[0]}:{u.arg[1]}]")
       else:
-        assert u.op in {Ops.BUFFER, Ops.PARAM}, f"{u.op}"
-        arg_str.append(st:=f"{op_name[0].lower()}{u.arg}")
+        assert u.op in {Ops.BUFFER}, f"{u.op}"
+        arg_str.append(st:=f"{op_name[0].lower()}{u.src[0].arg}")
       if u not in seen_bufs:
         print(f"{op_name[:3]:<{op_w}} {st:<{buf_w}} {str(u.dtype):<8} {prod(u.size())}")
         seen_bufs.add(u)
@@ -50,4 +60,3 @@ for i,k in enumerate(data.trace.keys):
     for u in body.toposort():
       if u.op is Ops.INDEX:
         print(f"{'I':<{op_w}} {arg_str[(p:=u.src[0].base.arg)]:<{buf_w}} {p:<2} {' '.join(viz.uop_to_json(data, u)[id(u)]['label'].split('\n')[4:])}")
-  """
