@@ -12,7 +12,7 @@ export WQKV=1
 
 export DEV="${DEV:-NULL}"
 export BS="${BS:-1}"
-export MP="${MP:-4}"
+export MP="${MP:-1}"
 export DP="${DP:-1}"
 export VIZ=${VIZ:-0}
 export JITBEAM=${JITBEAM:-3}
@@ -42,6 +42,7 @@ export MAX_GRAD_NORM=${MAX_GRAD_NORM:-0.3}
 
 export EVAL_TARGET="${EVAL_TARGET:-0.925}"
 export LOAD_MODEL="${LOAD_MODEL:-0}"
+export FAKEDATA="${FAKEDATA:-1}"
 export EVAL_SAMPLES=173
 export CPU_DISK_LOAD=1
 
