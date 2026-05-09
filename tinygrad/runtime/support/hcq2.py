@@ -14,7 +14,7 @@ from tinygrad.runtime.autogen import libc
 from tinygrad.runtime.support.memory import BumpAllocator
 from tinygrad.renderer import Renderer
 from tinygrad.runtime.support.hcq import HWQueue, hcq_profile
-from tinygrad.engine.realize import unwrap_multi, resolve_params, get_runtime, pm_compile, pm_flatten_linear
+from tinygrad.engine.realize import unwrap_multi, resolve_params, get_runtime, pm_compile, pm_flatten_linear, estimate_uop
 from tinygrad.codegen import to_program
 from tinygrad.renderer import Estimates
 
@@ -194,7 +194,6 @@ class HCQAllocator(HCQAllocatorBase, Generic[HCQDeviceType]):
     self.dev.synchronize()
     dest[:] = bytes(src.cpu_view().mv[:dest.nbytes])
   def _transfer(self, dest:HCQ2Buffer, src:HCQ2Buffer, sz:int, src_dev:HCQDeviceType, dest_dev:HCQDeviceType):
-    if src_dev.peer_group != dest_dev.peer_group: return src_dev.rdma_dev().allocator._transfer(dest, src, sz, src_dev, dest_dev)
     cast(HCQAllocator, src_dev.allocator)._map(dest)
     dest.cpu_view().mv[:sz] = bytes(src.cpu_view().mv[:sz])
 
@@ -205,11 +204,12 @@ class HCQ2LowerCtx:
   dev:HCQ2Compiled
   kernargs_buf:Buffer
   kernargs_allocator:BumpAllocator
+  name:str = "hcq_submit"
+  estimates:Estimates = field(default_factory=Estimates)
   inputs:list[Buffer] = field(default_factory=list)
+  holds:list[UOp] = field(default_factory=list)
 
-  def addr(self, uop:UOp) -> int: return uop.buffer.get_buf(self.dev.device).va_addr
-
-  def param(self, buf:Buffer) -> UOp:
+  def host_param(self, buf:Buffer) -> UOp:
     if buf not in self.inputs: self.inputs.append(buf)
     return UOp.placeholder((buf.size,), buf.dtype, self.inputs.index(buf))
 
@@ -228,22 +228,25 @@ def do_init_args(ctx:HCQ2LowerCtx, call:UOp, prg:UOp) -> UOp:
   return call.replace(src=(prg.replace(src=prg.src + (args_uop,)),) + call.src[1:])
 
 pm_hcq_prep_runtime = PatternMatcher([
+  # device-specific lowering of the program
   (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, src=(UPat(), UPat(), UPat(), UPat(), UPat(Ops.BINARY)), name="prg"),),
         name="call", allow_any_len=True), lambda ctx,call,prg: call.replace(src=(ctx.dev.pm_lower.rewrite(prg, ctx),) + call.src[1:])),
+
+  # init args for programs
   (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, src=(UPat(Ops.BUFFER),), name="prg"),), name="call", allow_any_len=True), do_init_args),
 ])
 
 # **************** lower ****************
 
 def do_lower_program(ctx:HCQ2LowerCtx, call:UOp, prg:UOp) -> UOp:
-  sig, tl = UOp.from_buffer(ctx.dev.timeline_signal), ctx.param(ctx.dev.timeline_value)
+  sig, tl = UOp.from_buffer(ctx.dev.timeline_signal), ctx.host_param(ctx.dev.timeline_value)
   return UOp.linear(sig.wait(tl[0] - 1), UOp(Ops.BARRIER, dtypes.void), prg, sig.store(tl[0]))
 
 def do_lower_copy(ctx:HCQ2LowerCtx, call:UOp, copy:UOp) -> UOp:
   dst, src, dev = call.src[1], call.src[2], ctx.dev
   src_dev = Device[src.device]
   devs = [dev, src_dev] if src_dev is not dev else [dev]
-  sigs_tls = [(UOp.from_buffer(d.timeline_signal), ctx.param(d.timeline_value)) for d in devs]
+  sigs_tls = [(UOp.from_buffer(d.timeline_signal), ctx.host_param(d.timeline_value)) for d in devs]
   return UOp.linear(*[s.wait(t[0] - 1) for s,t in sigs_tls], UOp(Ops.BARRIER, dtypes.void),
                     UOp(Ops.COPY, dtypes.void, src=(dst, src), arg=src.buffer.nbytes),
                     *[s.store(t[0]) for s,t in sigs_tls])
@@ -260,57 +263,59 @@ class HCQEncoder:
     self.ctx, self.dev, self.blob, self.patches, self.buffers = ctx, ctx.dev, b'', [], []
   @property
   def src(self) -> tuple[UOp, ...]: return tuple(self.patches + self.buffers)
-  def addr(self, uop:UOp) -> int:
-    if uop.op is Ops.AFTER and uop not in self.buffers: self.buffers.append(uop)
-    return self.ctx.addr(uop)
+  def unwrap_buf(self, uop:UOp) -> int:
+    if uop.op is Ops.AFTER:
+      if uop not in self.buffers: self.buffers.append(uop)
+    elif uop not in self.ctx.holds: self.ctx.holds.append(uop)
+    return uop.buffer.get_buf(self.dev.device).va_addr
   def append(self, *data, fmt='I'):
     for d in data:
       if isinstance(d, int): self.blob += struct.pack(f'<{fmt}', d)
       elif d.op is Ops.CONST: self.blob += struct.pack(f'<{fmt}', d.arg)
-      elif d.op in (Ops.BUFFER, Ops.BUFFER_VIEW): self.blob += struct.pack(f'<{fmt}', self.addr(d))
+      elif d.op in (Ops.BUFFER, Ops.BUFFER_VIEW): self.blob += struct.pack(f'<{fmt}', self.unwrap_buf(d))
       else:
         self.blob += struct.pack(f'<{fmt}', 0)
         self.patches.append(UOp(Ops.PARAM, dtype_for_fmt(fmt), src=(d,), arg=len(self.blob) - struct.calcsize(fmt)))
   def q(self, *values): self.append(*values)
 
-# **************** launcher ****************
+# **************** host program ****************
 
-pm_hcq_create_launcher_sink = PatternMatcher([
-  (UPat(Ops.LINEAR, name="l", allow_any_len=True), lambda ctx, l: UOp.sink(*l.src, arg=KernelInfo(name="hcq_submit", estimates=Estimates()), tag=1))
+pm_hcq_create_host_sink = PatternMatcher([
+  (UPat(Ops.LINEAR, name="l", allow_any_len=True), lambda ctx, l: UOp.sink(*l.src, arg=KernelInfo(name=ctx.name, estimates=ctx.estimates), tag=1))
 ])
 
-def resolve_blob(ctx:HCQ2LowerCtx, blob:UOp) -> UOp:
+def resolve_cmdbuf(ctx:HCQ2LowerCtx, blob:UOp) -> UOp:
   inner = blob.src[0] if blob.op is Ops.AFTER else blob
   bb = Buffer("CPU", len(inner.arg)//4, dtypes.uint32, preallocate=True)
   bb.copyin(memoryview(bytearray(inner.arg)))
-  bb_param = ctx.param(bb)
+  bb_param = ctx.host_param(bb)
   submit_cf = UOp(Ops.CUSTOM_FUNCTION, dtypes.void, src=(bb_param.after(*(blob.src[1:] if blob.op is Ops.AFTER else ())),),
                   arg=f"submit_{inner.tag.lower()}")
-  tl = ctx.param(ctx.dev.timeline_value)
+  tl = ctx.host_param(ctx.dev.timeline_value)
   return tl.after(UOp(Ops.BARRIER, dtypes.void, src=(submit_cf,))).index(0, ptr=True).store(tl[0] + 1)
 
 def resolve_patches(ctx:HCQ2LowerCtx, buf:UOp) -> UOp|None:
-  if buf.op is Ops.BUFFER: return ctx.param(buf.buffer)
+  if buf.op is Ops.BUFFER: return ctx.host_param(buf.buffer)
   if buf.op is Ops.PARAM: return None
-  src0 = buf.src[0]
-  bb_param = src0 if src0.op is Ops.PARAM else ctx.param(src0.buffer)
+  bb_param = buf.src[0] if buf.src[0].op is Ops.PARAM else ctx.host_param(buf.src[0].buffer)
   return bb_param.after(*(bb_param.index(p.arg//bb_param.dtype.base.itemsize, ptr=True).cast(p.dtype.ptr()).store(p.src[0].cast(p.dtype))
                           if p.op is Ops.PARAM else p for p in buf.src[1:]))
 
 pm_hcq_resolve = PatternMatcher([
-  (UPat(Ops.BINARY).or_after("blob"), resolve_blob),
+  (UPat(Ops.BINARY).or_after("blob"), resolve_cmdbuf),
   (UPat((Ops.BUFFER, Ops.PARAM)).or_after("buf"), resolve_patches),
 ])
 
-def hcq_callify(sink:UOp, ctx:HCQ2LowerCtx) -> UOp:
-  return to_program(sink, Device["CPU"].renderer).call(*[UOp.from_buffer(b, "CPU") if isinstance(b, Buffer) else b for b in ctx.inputs])
+def hcq_callify(ctx:HCQ2LowerCtx, sink:UOp) -> UOp:
+  call = to_program(sink, Device["CPU"].renderer).call(*[UOp.from_buffer(b, "CPU") if isinstance(b, Buffer) else b for b in ctx.inputs])
+  return call.replace(src=call.src + (UOp(Ops.BIND, dtypes.void, src=tuple(ctx.holds)),)) if ctx.holds else call
+pm_hcq_callify = PatternMatcher([(UPat(Ops.SINK, name="sink"), hcq_callify)])
 
-@track_rewrites(name=lambda ctx,linear,ast,**kw: f"hcq launcher {getattr(ast.arg, 'name', ast.op.name.lower())}")
-def hcq_build_launcher(ctx:HCQ2LowerCtx, linear:UOp, ast:UOp) -> UOp:
-  sink = graph_rewrite(linear, pm_hcq_create_launcher_sink, name="hcq: create launcher sink", walk=True)
+def hcq_build_host_program(ctx:HCQ2LowerCtx, linear:UOp, ast:UOp) -> UOp:
+  sink = graph_rewrite(linear, pm_hcq_create_host_sink, ctx=ctx, name="hcq: create host sink", walk=True)
   sink = graph_rewrite(sink, pm_hcq_resolve, ctx=ctx, bottom_up=True, name="hcq: resolve blobs")
   sink = graph_rewrite(sink, ctx.dev.pm_lower, ctx=ctx, name="hcq: device lower", walk=True)
-  return hcq_callify(sink, ctx)
+  return graph_rewrite(sink, pm_hcq_callify, ctx=ctx, name="hcq: callify")
 
 # **************** schedule ****************
 
@@ -323,17 +328,19 @@ def _hcq_schedule(dev:HCQ2Compiled, ctx:HCQ2LowerCtx, linear:UOp, ast:UOp) -> UO
   blob = graph_rewrite(linear, dev.pm_lower, ctx=ctx, name="hcq: encode")
   linear = UOp.linear(blob) # TODO: fix for multidevice
 
-  return hcq_build_launcher(ctx, linear, ast)
+  return hcq_build_host_program(ctx, linear, ast)
 
 def hcq_schedule_program(call:UOp, ast:UOp) -> UOp|None:
   # TODO unwrap calls
   dev = Device[ast.src[1].arg]
-  ctx = HCQ2LowerCtx(dev=dev, kernargs_buf=dev.kernargs_buf, kernargs_allocator=dev.kernargs_offset_allocator)
+  ctx = HCQ2LowerCtx(dev=dev, kernargs_buf=dev.kernargs_buf, kernargs_allocator=dev.kernargs_offset_allocator,
+                     name=f"submit_{ast.arg.name}", estimates=estimate_uop(call))
   return _hcq_schedule(dev, ctx, UOp.linear(call).rtag("COMPUTE"), ast)
 
 def hcq_schedule_copy(call:UOp, ast:UOp) -> UOp|None:
   dev = Device[ast.src[1].arg]
-  ctx = HCQ2LowerCtx(dev=dev, kernargs_buf=dev.kernargs_buf, kernargs_allocator=dev.kernargs_offset_allocator)
+  ctx = HCQ2LowerCtx(dev=dev, kernargs_buf=dev.kernargs_buf, kernargs_allocator=dev.kernargs_offset_allocator,
+                     name=ast.op.name.lower(), estimates=estimate_uop(call))
   src_buf = call.src[2].buffer
   try: src_buf.get_buf(dev.device)
   except Exception:

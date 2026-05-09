@@ -94,18 +94,18 @@ class AMDComputeQueue(HCQEncoder):
                       reg_done=getattr(self.nbio, f'regBIF_BX_PF{pf}_GPU_HDP_FLUSH_DONE').addr[0], value=0xffffffff)
     self.acquire_mem()
 
-  def wait(self, x): self.wait_reg_mem(x.src[1], mem=self.addr(x.src[0]))
+  def wait(self, x): self.wait_reg_mem(x.src[1], mem=self.unwrap_buf(x.src[0]))
 
   def barrier(self, x): self.memory_barrier()
 
   def store(self, x):
-    self.release_mem(self.addr(x.src[0]), x.src[1], self.pm4.data_sel__mec_release_mem__send_32_bit_low,
+    self.release_mem(self.unwrap_buf(x.src[0]), x.src[1], self.pm4.data_sel__mec_release_mem__send_32_bit_low,
                      self.pm4.int_sel__mec_release_mem__send_interrupt_after_write_confirm, cache_flush=True)
 
   def program(self, x):
     data, info = x.arg
     lib_gpu, args = x.src
-    prog_addr = self.addr(lib_gpu) + data.entry_point_offset
+    prog_addr = self.unwrap_buf(lib_gpu) + data.entry_point_offset
 
     self.acquire_mem(gli=0, gl2=0)
 
@@ -113,8 +113,8 @@ class AMDComputeQueue(HCQEncoder):
     if data.enable_private_segment_sgpr:
       scratch_hilo = data64_le(self.dev.scratch.va_addr)
       user_regs = [scratch_hilo[0], scratch_hilo[1] | 1 << 31, 0xffffffff, 0x20c14000]
-    if data.enable_dispatch_ptr: user_regs += [*data64_le(self.addr(args) + data.kernargs_segment_size)]
-    user_regs += [*data64_le(self.addr(args))]
+    if data.enable_dispatch_ptr: user_regs += [*data64_le(self.unwrap_buf(args) + data.kernargs_segment_size)]
+    user_regs += [*data64_le(self.unwrap_buf(args))]
 
     self.wreg(self.gc.regCOMPUTE_PGM_LO, *data64_le(prog_addr >> 8))
     self.wreg(self.gc.regCOMPUTE_PGM_RSRC1, data.rsrc1, data.rsrc2)
@@ -139,7 +139,7 @@ amd_inner_pm = PatternMatcher([
   (UPat(Ops.WAIT, name="x"),    lambda ctx, x: ctx.wait(x)),
   (UPat(Ops.BARRIER, name="x"), lambda ctx, x: ctx.barrier(x)),
   (UPat(Ops.PROGRAM, name="x"), lambda ctx, x: ctx.program(x)),
-  (UPat(Ops.STORE, src=(UPat(Ops.BUFFER), UPat()), name="x"), lambda ctx, x: ctx.store(x)),
+  (UPat(Ops.STORE, src=(UPat((Ops.BUFFER, Ops.PARAM)), UPat()), name="x"), lambda ctx, x: ctx.store(x)),
 ])
 
 def amd_lower_pm4(ctx, linear):
@@ -150,7 +150,7 @@ def amd_lower_pm4(ctx, linear):
 def amd_submit_pm4(ctx, cf):
   bb_param = cf.src[0]
   q = ctx.dev.compute_queue
-  ring, wptr, doorbell, put_ptr = (ctx.param(b) for b in (q.ring, q.write_ptr, q.doorbell, q.put_value))
+  ring, wptr, doorbell, put_ptr = (ctx.host_param(b) for b in (q.ring, q.write_ptr, q.doorbell, q.put_value))
   size, ring_dwords = UOp.const(dtypes.uint32, bb_param.dtype.size), q.ring.size
 
   put = put_ptr[0]
@@ -170,7 +170,7 @@ class AMDCopyQueue(HCQEncoder):
     self.sdma, self.queue_idx, self.max_copy_size = self.dev.sdma, queue_idx, self.dev.max_copy_size
 
   def copy(self, x):
-    dest, src, copy_size = self.addr(x.src[0]), self.addr(x.src[1]), x.arg
+    dest, src, copy_size = self.unwrap_buf(x.src[0]), self.unwrap_buf(x.src[1]), x.arg
     copied = 0
     while copied < copy_size:
       step = min(copy_size - copied, self.max_copy_size)
@@ -180,12 +180,12 @@ class AMDCopyQueue(HCQEncoder):
 
   def wait(self, x):
     self.q(self.sdma.SDMA_OP_POLL_REGMEM | self.sdma.SDMA_PKT_POLL_REGMEM_HEADER_FUNC(WAIT_REG_MEM_FUNCTION_GEQ) | \
-           self.sdma.SDMA_PKT_POLL_REGMEM_HEADER_MEM_POLL(1), *data64_le(self.addr(x.src[0])), x.src[1], 0xffffffff,
+           self.sdma.SDMA_PKT_POLL_REGMEM_HEADER_MEM_POLL(1), *data64_le(self.unwrap_buf(x.src[0])), x.src[1], 0xffffffff,
            self.sdma.SDMA_PKT_POLL_REGMEM_DW5_INTERVAL(0x04) | self.sdma.SDMA_PKT_POLL_REGMEM_DW5_RETRY_COUNT(0xfff))
 
   def store(self, x):
     fence_flags = self.sdma.SDMA_PKT_FENCE_HEADER_MTYPE(3) if self.dev.target[0] != 9 else 0
-    self.q(self.sdma.SDMA_OP_FENCE | fence_flags, *data64_le(self.addr(x.src[0])), x.src[1])
+    self.q(self.sdma.SDMA_OP_FENCE | fence_flags, *data64_le(self.unwrap_buf(x.src[0])), x.src[1])
     self.q(self.sdma.SDMA_OP_TRAP, 0)
 
 def amd_lower_sdma(ctx, linear):
@@ -197,13 +197,13 @@ amd_inner_sdma_pm = PatternMatcher([
   (UPat(Ops.WAIT,  name="x"), lambda ctx, x: ctx.wait(x)),
   (UPat(Ops.BARRIER, name="x"), lambda ctx, x: None),
   (UPat(Ops.COPY,  name="x"), lambda ctx, x: ctx.copy(x)),
-  (UPat(Ops.STORE, src=(UPat(Ops.BUFFER), UPat()), name="x"), lambda ctx, x: ctx.store(x)),
+  (UPat(Ops.STORE, src=(UPat((Ops.BUFFER, Ops.PARAM)), UPat()), name="x"), lambda ctx, x: ctx.store(x)),
 ])
 
 def amd_submit_sdma(ctx, cf):
   bb_param = cf.src[0]
   q = ctx.dev.sdma_queue(0)
-  ring, wptr, doorbell, put_ptr = (ctx.param(b) for b in (q.ring, q.write_ptr, q.doorbell, q.put_value))
+  ring, wptr, doorbell, put_ptr = (ctx.host_param(b) for b in (q.ring, q.write_ptr, q.doorbell, q.put_value))
   size_dw, ring_bytes = bb_param.dtype.size, q.ring.size * 4
 
   put_b = put_ptr[0]
