@@ -41,5 +41,16 @@ class TestLinearizerRewrite(unittest.TestCase):
     prg = to_program(ast.replace(arg=KernelInfo(name="custom")), Device["CPU"].renderer)
     self.assertEqual(prg.arg.name, "custom")
 
+class TestMATVEC(unittest.TestCase):
+  @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "MATVEC path requires has_local")
+  def test_elementwise_reduce_not_matvec(self):
+    a = Tensor.randn(4096, 4096).contiguous().realize()
+    b = Tensor.randn(4096, 4096).contiguous().realize()
+    out = (a * b).sum(axis=1)
+    si = out.schedule_linear().src[-1]
+    prg = to_program(si.src[0], Device[Device.DEFAULT].renderer)
+    opts = prg.src[0].arg.applied_opts
+    assert not any(o.op is OptOps.GROUP for o in opts), f"elementwise reduce misclassified as MATVEC: {opts}"
+
 if __name__ == '__main__':
   unittest.main()
