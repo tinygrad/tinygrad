@@ -9,7 +9,7 @@ def _read_lib(lib, off) -> int: return struct.unpack("I", lib[off:off+4])[0]
 
 class QCOMCompiler(Compiler):
   def __init__(self, arch:str):
-    assert arch == "a630", "only a630 supported"
+    assert arch.split(',')[0] == "a630", "only a630 supported"
     self.arch, self.chip_id, self.llvm_inst = arch, 0x6030001, llvm_qcom.cl_compiler_create_llvm_instance()
     super().__init__(f"compile_qcomcl_{arch}")
 

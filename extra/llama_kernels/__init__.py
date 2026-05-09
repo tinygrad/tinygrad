@@ -34,13 +34,12 @@ def dname_of(device) -> str:
   return device.split(":")[0] if isinstance(device, str) else device
 
 def alloc_like(shape, dtype, device, axis=None) -> Tensor:
-  if isinstance(device, tuple):
-    if axis is None: return Tensor(Tensor.invalids(*shape, dtype=dtype, device=device).uop.multi(0), device=device)
+  if isinstance(device, tuple) and axis is not None:
     return Tensor(Tensor.invalids(*shard_shape(shape, axis, len(device)), dtype=dtype, device=device).uop.multi(axis), device=device)
   return Tensor.invalids(*shape, dtype=dtype, device=device)
 
-def alloc_local(shape, dtype, device) -> Tensor:
-  if isinstance(device, tuple):
+def alloc_local(shape, dtype, device, axis=None) -> Tensor:
+  if isinstance(device, tuple) and axis is not None:
     return Tensor(Tensor.invalids(*shape, dtype=dtype, device=device).uop.multi(0), device=device)
   return Tensor.invalids(*shape, dtype=dtype, device=device)
 

@@ -173,7 +173,7 @@ class AM_GMC(AM_IP):
 
 class AM_SMU(AM_IP):
   def init_sw(self):
-    self.smu_mod = self.adev._ip_module("smu", am.MP1_HWIP, prever_prefix='v')
+    self.smu_mod = self.adev._ip_module("smu", am.MP1_HWIP)
     self.driver_table_paddr = self.adev.mm.palloc(0x4000, zero=False, boot=True)
 
   def init_hw(self):

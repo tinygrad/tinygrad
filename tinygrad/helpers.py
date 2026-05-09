@@ -64,6 +64,9 @@ def next_power2(x): return 1 if x == 0 else 1 << (x - 1).bit_length()
 # cstyle div and mod
 def cdiv(x:int, y:int) -> int: return abs(x)//abs(y)*(1,-1)[x*y<0] if y != 0 else 0
 def cmod(x:int, y:int) -> int: return x-cdiv(x,y)*y
+# python floor div and mod
+def floordiv(x:int, y:int) -> int: return x//y if y != 0 else 0
+def floormod(x:int, y:int) -> int: return x-floordiv(x,y)*y
 def lo32(x:Any) -> Any: return x & 0xFFFFFFFF # Any is sint
 def hi32(x:Any) -> Any: return x >> 32 # Any is sint
 def data64(data:Any) -> tuple[Any, Any]: return (data >> 32, data & 0xFFFFFFFF) # Any is sint
@@ -238,7 +241,7 @@ SPLIT_REDUCEOP, NO_MEMORY_PLANNER, LRU = ContextVar("SPLIT_REDUCEOP", 1), Contex
 RING, ALL2ALL, ALLREDUCE_CAST = ContextVar("RING", 1), ContextVar("ALL2ALL", 0), ContextVar("ALLREDUCE_CAST", 1)
 CACHELEVEL, IGNORE_BEAM_CACHE, DEVECTORIZE = ContextVar("CACHELEVEL", 2), ContextVar("IGNORE_BEAM_CACHE", 0), ContextVar("DEVECTORIZE", 1)
 VALIDATE_WITH_CPU, DISABLE_FAST_IDIV = ContextVar("VALIDATE_WITH_CPU", 0), ContextVar("DISABLE_FAST_IDIV", 0)
-CORRECT_DIVMOD_FOLDING, FUSE_OPTIM = ContextVar("CORRECT_DIVMOD_FOLDING", 0), ContextVar("FUSE_OPTIM", 0)
+FUSE_OPTIM = ContextVar("FUSE_OPTIM", 0)
 ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE = ContextVar("ALLOW_DEVICE_USAGE", 1), ContextVar("MAX_BUFFER_SIZE", 0)
 MAX_KERNEL_BUFFERS = ContextVar("MAX_KERNEL_BUFFERS", 0)
 EMULATED_DTYPES = ContextVar("EMULATED_DTYPES", "")
@@ -467,6 +470,13 @@ def fetch(url:str, name:pathlib.Path|str|None=None, subdir:str|None=None, gunzip
       progress_bar.update(close=True)
       if length and (file_size:=os.stat(fp).st_size) < length: raise RuntimeError(f"fetch size incomplete, {file_size} < {length}")
   return fp
+
+def fetch_fw(path:str, name:str, sha256:str) -> bytes:
+  if sys.version_info >= (3,14) and (p:=pathlib.Path(f"/lib/firmware/{path}/{name}.zst")).is_file():
+    from compression.zstd import decompress
+    if hashlib.sha256(b:=decompress(p.read_bytes())).hexdigest() == sha256: return b
+  return fetch(f"https://gitlab.com/kernel-firmware/linux-firmware/-/raw/1e2c15348485939baf1b6d1f5a7a3b799d80703d/{path}/{name}",
+               subdir="fw", sha256=sha256).read_bytes()
 
 # *** Exec helpers
 

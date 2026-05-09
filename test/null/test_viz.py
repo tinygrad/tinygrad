@@ -411,11 +411,11 @@ class TestVizIntegration(unittest.TestCase):
   def test_jit(self):
     with save_viz():
       @TinyJit
-      def f(a, b, c): return (a+b).contiguous().mul(3), c.assign(a.to(c.device))
+      def f(a, b, c): return (a+b).contiguous().mul(3), c.add(1).contiguous().assign(a.to(c.device)), b.assign(c.to(b.device))
       a, b, c = Tensor.empty(16, device="NULL"), Tensor.empty(16, device="NULL"), Tensor.empty(16, device="NULL:1")
       for _ in range(3): Tensor.realize(*f(a, b, c))
     out = load_profile(cpu_events)
-    self.assertEqual(["NULL", "NULL Graph", "NULL:SDMA:0"], [k for k in out["layout"] if k.startswith("NULL")])
+    self.assertEqual(["NULL", "NULL Graph", "NULL:SDMA:0", "NULL:1", "NULL:1:SDMA:0"], [k for k in out["layout"] if k.startswith("NULL")])
     self.assertEqual(len(out["layout"]["NULL"]["events"]), 2*3)
     self.assertEqual(len(out["layout"]["NULL:SDMA:0"]["events"]), 3)
     self.assertEqual(len(out["layout"]["NULL Graph"]["events"]), 2)

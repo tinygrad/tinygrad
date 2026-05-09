@@ -56,9 +56,10 @@ function intersectRect(r1, r2) {
   return {x:r1.x+dx*scale, y:r1.y+dy*scale};
 }
 
-function addTags(root) {
+function addTags(root, path) {
   root.selectAll("circle").data(d => [d]).join("circle").attr("r", 5);
-  root.selectAll("text").data(d => [d]).join("text").text(d => d).attr("dy", "0.35em");
+  if (path != null) root.selectAll("path").data(d => [d]).join("path").attr("d", path);
+  else root.selectAll("text").data(d => [d]).join("text").text(d => d).attr("dy", "0.35em");
 }
 
 const drawGraph = (data) => {
@@ -116,9 +117,11 @@ const drawGraph = (data) => {
   });
   addTags(nodes.selectAll("g.tag").data(d => d.tag != null ? [d] : []).join("g").attr("class", "tag")
     .attr("transform", d => `translate(${-d.width/2+8}, ${-d.height/2+8})`).datum(e => e.tag));
-  addTags(nodes.selectAll("g.type").data(d => d.callNode ? [d] : []).join("g")
-    .attr("class", d => `tag ${d.collapsed ? 'collapsed' : 'expanded'}`)
+  addTags(nodes.selectAll("g.type").data(d => d.callNode ? [d] : []).join("g").attr("class", d => `tag ${d.collapsed ? 'collapsed' : 'expanded'}`)
     .attr("transform", d => `translate(${-d.width/2}, ${0})`).datum(d => d.collapsed ? "+" : "−"));
+  addTags(nodes.selectAll("g.ref").data(d => d.ref != null ? [d] : []).join("g").attr("class", "tag ref")
+    .attr("transform", d => `translate(${d.width/2-2}, ${-d.height/2+2})`).on("click", (e,d) => { e.stopPropagation(); switchCtx(d.ref); }),
+    "M-1.7 1.7 L1.7 -1.7 M-0.55 -1.7 H1.7 V0.55");
   // draw edges
   const line = d3.line().x(d => d.x).y(d => d.y).curve(d3.curveBasis), edges = g.edges();
   d3.select("#edges").selectAll("path.edgePath").data(edges).join("path").attr("class", "edgePath").attr("d", (e) => {
@@ -1076,7 +1079,7 @@ async function main() {
       metadata.appendChild(codeBlock(upat[1], "python", { loc:upat[0], wrap:true }));
       const diffCode = metadata.appendChild(document.createElement("pre")).appendChild(document.createElement("code"));
       for (const line of diff) {
-        diffCode.appendChild(colored([{st:line, color:line.startsWith("+") ? "#3aa56d" : line.startsWith("−") ? "#d14b4b" : "#f0f0f5"}]));
+        diffCode.appendChild(colored([{st:line, color:line.startsWith("+") ? "#3aa56d" : line.startsWith("-") ? "#d14b4b" : "#f0f0f5"}]));
         diffCode.appendChild(document.createElement("br"));
       }
       diffCode.className = "wrap";

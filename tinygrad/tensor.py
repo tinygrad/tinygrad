@@ -2,9 +2,9 @@
 from __future__ import annotations
 import time, math, itertools, functools, struct, sys, inspect, pathlib, hashlib, weakref
 from contextlib import ContextDecorator
-from typing import Any, Callable, ClassVar, Sequence, cast, get_args, Literal, ParamSpec, TypeVar, Generic, TYPE_CHECKING
+from typing import Any, Callable, ClassVar, Sequence, cast, get_args, ParamSpec, TypeVar, Generic, TYPE_CHECKING
 if TYPE_CHECKING: import numpy
-from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_float, least_upper_dtype, to_dtype, truncate
+from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_dtype, to_dtype, truncate
 from tinygrad.dtype import _from_np_dtype, _to_np_dtype, PyConst, Invalid
 from tinygrad.helpers import argfix, flatten, prod, all_int, round_up, getenv, all_same, fully_flatten, ceildiv, fetch, flat_to_grouped
 from tinygrad.helpers import resolve_pool_pads, IMAGE, FLOAT16, WINO, Metadata, TRACEMETA, is_numpy_ndarray, TracingKey, cpu_profile
@@ -1284,65 +1284,6 @@ class Tensor(OpMixin):
     assert isinstance(x, (*get_args(ConstType), UOp)), f"{type(x)=}, {x=}"
     return Tensor(x, self.device, self.dtype if self._ufix_keep_dtype(x) else None, requires_grad=False)
 
-  def div(self, x:Tensor|ConstType|UOp, reverse=False, rounding_mode:Literal["trunc", "floor"]|None=None) -> Tensor:
-    """
-    Divides `self` by `x`.
-    Equivalent to `self / x`.
-    Supports broadcasting to a common shape, type promotion, and integer, float, boolean inputs.
-    `div` performs true division.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    Tensor.manual_seed(42)
-    t = Tensor.randn(4)
-    print(t.numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(t.div(3).numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([1, 4, 10]).div(Tensor([2, 3, 4])).numpy())
-    ```
-    """
-    if rounding_mode is None: return super().div(x, reverse)  # type: ignore[arg-type]
-    numerator, denominator = self._broadcasted(x, reverse)
-    if dtypes.is_int(dt:=least_upper_dtype(numerator.dtype, denominator.dtype)):
-      numerator, denominator = numerator.cast(dt), denominator.cast(dt)
-      if rounding_mode == "trunc": return numerator.idiv(denominator)
-      if rounding_mode == "floor":
-        truncate_div, truncate_mod = numerator.idiv(denominator), numerator._binop(Ops.MOD, denominator, False)
-        opposite_sign = ((numerator>0)&(denominator<0)) | ((numerator<0)&(denominator>0))
-        return (opposite_sign&(truncate_mod!=0)).where(truncate_div-1, truncate_div)
-    d = numerator.cast(least_upper_float(numerator.dtype)) * denominator.cast(least_upper_float(denominator.dtype)).reciprocal()
-    output_dtype = numerator.dtype if dtypes.is_int(numerator.dtype) else d.dtype
-    if rounding_mode == "trunc": return d.trunc().cast(output_dtype)
-    if rounding_mode == "floor": return d.floor().cast(output_dtype)
-    raise RuntimeError(f"{rounding_mode=} is not supported")
-
-  def mod(self, x:Tensor|ConstType, reverse=False) -> Tensor:
-    """
-    Mod `self` by `x`.
-    Equivalent to `self % x`.
-    Supports broadcasting to a common shape, type promotion, and integer inputs.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-4, 7, 5, 4, -7, 8]).mod(Tensor([2, -3, 8, -2, 3, 5])).numpy())
-    ```
-    """
-    a, b = self._broadcasted(x, reverse)
-    return a - a.div(b, rounding_mode="floor") * b
-
-  def fmod(self, x:Tensor|ConstType) -> Tensor:
-    """
-    C-style remainder of `self` divided by `x` (sign follows the dividend), using truncating division.
-    Differs from `mod`/`%`, which uses Python floor remainder.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([-4, 7, 5, 4, -7, 8]).fmod(Tensor([2, -3, 8, -2, 3, 5])).numpy())
-    ```
-    """
-    a, b = self._broadcasted(x)
-    return a - a.div(b, rounding_mode="trunc") * b
-
   def where(self:Tensor, x:Tensor|ConstType|sint, y:Tensor|ConstType|sint) -> Tensor:
     """
     Returns a tensor of elements selected from either `x` or `y`, depending on `self`.
@@ -1369,17 +1310,12 @@ class Tensor(OpMixin):
 
   # ***** op wrappers *****
 
-  # TODO: combine with UOps __floordiv__
-  def __floordiv__(self, x): return self.div(x, rounding_mode="floor")
-  def __rfloordiv__(self, x): return self.div(x, rounding_mode="floor", reverse=True)
-
-  def __ifloordiv__(self, x) -> Tensor: return self.assign(self.__floordiv__(x))
-
   # unlike Tensors, UOps are immutable, so these don't go in mixin
   def __iadd__(self, x) -> Tensor: return self.assign(self.add(x)) # type: ignore[misc]
   def __isub__(self, x) -> Tensor: return self.assign(self.sub(x)) # type: ignore[misc]
   def __imul__(self, x) -> Tensor: return self.assign(self.mul(x)) # type: ignore[misc]
   def __itruediv__(self, x) -> Tensor: return self.assign(self.div(x)) # type: ignore[misc]
+  def __ifloordiv__(self, x) -> Tensor: return self.assign(self.__floordiv__(x)) # type: ignore[misc]
   def __ipow__(self, x) -> Tensor: return self.assign(self.pow(x)) # type: ignore[misc]
   def __iand__(self, x) -> Tensor: return self.assign(self.bitwise_and(x)) # type: ignore[misc]
   def __ior__(self, x) -> Tensor: return self.assign(self.bitwise_or(x)) # type: ignore[misc]
