@@ -847,10 +847,10 @@ def iterate_flux_dataset(dataset:FluxDataset, batch_size:int) -> Generator[dict[
     batch = {k: Tensor.stack(*[s[k] for s in batch]) for k in batch[0].keys()}
     yield batch
 
-def batch_load_flux(batch_size:int, base_dir:str, empty_enc_dir:str|None=None, seed:int|None=None, cfg_prob:float=0.1, is_infinite:bool=True) -> Generator[dict[str, Tensor], None, None]:
+def batch_load_flux(batch_size:int, val:bool, base_dir:str, empty_enc_dir:str|None=None, seed:int|None=None, cfg_prob:float=0.1, is_infinite:bool=True) -> Generator[dict[str, Tensor], None, None]:
   from datasets import load_from_disk
 
-  ds = load_from_disk(base_dir)
+  ds = load_from_disk(Path(base_dir) / ("coco_preprocessed" if val else "cc12m_preprocessed"))
   dataset = FluxDataset(ds, empty_enc_dir, seed=seed, cfg_prob=cfg_prob, is_infinite=is_infinite)
   return iterate_flux_dataset(dataset, batch_size)
 
@@ -895,7 +895,7 @@ if __name__ == "__main__":
     print(f"min seq length: {min_}")
 
   def load_flux(val):
-    BASEDIR = getenv("BASEDIR", "/raid/datasets/flux/coco_preprocessed")
+    BASEDIR = getenv("BASEDIR", "/raid/datasets/flux/")
     EMPTYENCDIR = getenv("EMPTYENCDIR", "/raid/datasets/flux/empty_encodings")
 
     bs = 4
@@ -903,7 +903,7 @@ if __name__ == "__main__":
     total_num_samples = math.ceil((29696 if val else 1099776) / bs)
     cfg_prob = 0.0 if val else 0.1
 
-    for _ in tqdm(batch_load_flux(bs, BASEDIR, EMPTYENCDIR, seed=seed, cfg_prob=cfg_prob, is_infinite=False), total=total_num_samples):
+    for _ in tqdm(batch_load_flux(bs, val, BASEDIR, EMPTYENCDIR, seed=seed, cfg_prob=cfg_prob, is_infinite=False), total=total_num_samples):
       pass
 
 

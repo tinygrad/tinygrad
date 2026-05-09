@@ -1809,7 +1809,7 @@ def train_flux():
   NUM_STEPS = config["NUM_STEPS"] = getenv("NUM_STEPS", 30000)
   SEQ_LEN = config["seq_len"] = getenv("SEQ_LEN", 256)
   BS = config["BS"] = getenv("BS", 16)
-  BASEDIR = getenv("BASEDIR", "/raid/datasets/flux/cc12m_preprocessed")
+  BASEDIR = getenv("BASEDIR", "/raid/datasets/flux/")
   EMPTYENCDIR = getenv("EMPTYENCDIR", "/raid/datasets/flux/empty_encodings")
 
   num_samples = 1099776
@@ -1832,7 +1832,7 @@ def train_flux():
     return model
 
   def get_train_iter() -> Iterator[tuple[Tensor, Tensor, Tensor, Tensor, Tensor]]:
-    return batch_load_flux(BS, BASEDIR, empty_enc_dir=EMPTYENCDIR, seed=SEED)
+    return batch_load_flux(BS, False, BASEDIR, empty_enc_dir=EMPTYENCDIR, seed=SEED)
 
   @TinyJit
   def train_step(model:Flux, optim:AdamW, sample:dict[str, Tensor]) -> Tensor:
