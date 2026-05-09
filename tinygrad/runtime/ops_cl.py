@@ -119,7 +119,12 @@ class CLDevice(Compiled):
 
     renderer = IntelRenderer if "cl_intel_subgroup_matrix_multiply_accumulate" in self.device_exts else OpenCLRenderer
     self.cl_compiler = CLCompiler(self, f"{hashlib.md5(self.device_name.encode() + self.driver_version.encode()).hexdigest()}")
-    super().__init__(device, CLAllocator(self), [renderer], functools.partial(CLProgram, self))
+
+    if "cl_khr_image2d_from_buffer" in self.device_exts:
+      check(cl.clGetDeviceInfo(self.device_id, cl.CL_DEVICE_IMAGE_PITCH_ALIGNMENT, 4, ctypes.byref(ipa := ctypes.c_uint32()), None))
+      arch = f"IMAGE_PITCH_ALIGNMENT={ipa.value}"
+    else: arch = ""
+    super().__init__(device, CLAllocator(self), [renderer], functools.partial(CLProgram, self), arch=arch)
 
   def count(self) -> int: return len(unwrap(self.device_ids))
 
