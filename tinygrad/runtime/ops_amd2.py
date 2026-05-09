@@ -145,7 +145,7 @@ amd_inner_pm = PatternMatcher([
 def amd_lower_pm4(ctx, linear):
   enc = AMDComputeQueue(ctx)
   graph_rewrite(linear, amd_inner_pm, ctx=enc, name="amd: encode")
-  return UOp(Ops.BINARY, dtypes.void, arg=enc.blob, src=enc.src).rtag("COMPUTE")
+  return UOp(Ops.BINARY, dtypes.void, arg=enc.blob).rtag("COMPUTE").after(*enc.src)
 
 def amd_submit_pm4(ctx, cf):
   bb_param = cf.src[0]
@@ -191,7 +191,7 @@ class AMDCopyQueue(HCQEncoder):
 def amd_lower_sdma(ctx, linear):
   enc = AMDCopyQueue(ctx)
   graph_rewrite(linear, amd_inner_sdma_pm, ctx=enc, name="amd: encode sdma")
-  return UOp(Ops.BINARY, dtypes.void, arg=enc.blob, src=enc.src).rtag("COPY")
+  return UOp(Ops.BINARY, dtypes.void, arg=enc.blob).rtag("COPY").after(*enc.src)
 
 amd_inner_sdma_pm = PatternMatcher([
   (UPat(Ops.WAIT,  name="x"), lambda ctx, x: ctx.wait(x)),

@@ -903,6 +903,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     ret = _render_with_splits(list(sself.toposort()), renderer_infer, {sself})
     lines = [f"  {k}={v}" for k,v in ret.items() if k != "ast"] + [f"  return {ret['ast']}"]
     ns: dict[str, Any] = {"max": max, "cdiv": cdiv, "cmod": cmod, "bitcast": bitcast, "dtypes": dtypes}
+    print(f"def _f({','.join(varnames)}):\n"+'\n'.join(lines))
     exec(f"def _f({','.join(varnames)}):\n"+'\n'.join(lines), ns)  # pylint: disable=exec-used
     return ns["_f"], varnames
 
@@ -1244,10 +1245,11 @@ class PatternMatcher:
     self.pdict: dict[Ops, list[list]] = {}
     # uop is required, arg is optional
     for p,fxn in self.patterns:
-      assert p.op is not None
-      entry: list = [p, None, p.early_reject]
+      entry: list = [p, None, set() if p.is_any else p.early_reject]
       entry[1] = upat_deferred_compile(p, fxn, entry) if compiled else upat_interpret(p, fxn)
-      for uop in p.op: self.pdict.setdefault(uop, []).append(entry)
+      for sub in (p.src[0] if p.is_any else (p,)):
+        assert sub.op is not None
+        for uop in sub.op: self.pdict.setdefault(uop, []).append(entry)
 
   def __reduce__(self): return PatternMatcher, ([(x,deconstruct_function(fxn) if fxn.__name__ == "<lambda>" else fxn) for x,fxn in self.patterns],)
 
