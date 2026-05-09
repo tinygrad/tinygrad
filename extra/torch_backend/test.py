@@ -818,7 +818,7 @@ class TestBackendHelpers(unittest.TestCase):
         ret = torch.cat([a, b], out=out, dim=dim)
         np.testing.assert_equal(out.cpu().numpy(), [[1, 2], [3, 4]])
         assert ret is out
-  
+
   def test_cat_all_empty(self):
     for test_device in device, "cpu":
       a = torch.tensor([], device=device)
