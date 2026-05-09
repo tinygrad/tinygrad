@@ -373,7 +373,7 @@ def copy_(self, src, non_blocking=False):
   return self
 
 @torch.library.impl("aten::cat.out", "privateuseone")
-def cat_out(tensors: list[torch.Tensor], dim=0, *, out:torch.Tensor):
+def cat_out(tensors: list[torch.Tensor], dim: int=0, *, out: torch.Tensor):
   fixed_tensors = []
   for wrapped in tensors:
     if wrapped.shape == (0,): wrapped = wrapped.reshape([0 if i == (dim % out.ndim) else x for i, x in enumerate(out.shape)])
