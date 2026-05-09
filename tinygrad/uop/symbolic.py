@@ -38,14 +38,14 @@ def fold_add_divmod_recombine(x:UOp) -> UOp|None:
       q, exact = v.src[0], False
       # (base%div)*mul + (base//div)*(div*mul) -> base*mul
       if q.op is Ops.FLOORDIV and q.src[1].op is Ops.CONST and q.src[1].arg == div: exact = q.src[0] is base
-      # ((base//d)%div)*mul + (base//(d*div))*(div*mul) -> (base//d)*mul
-      if not exact and base.op is Ops.FLOORDIV and base.src[1].op is Ops.CONST:
+      # ((base//d)%div)*mul + (base//(d*div))*(div*mul) -> (base//d)*mul if div>0
+      if not exact and div > 0 and base.op is Ops.FLOORDIV and base.src[1].op is Ops.CONST:
         exact = q.op is Ops.FLOORDIV and q.src[1].op is Ops.CONST and q.src[0] is base.src[0] and q.src[1].arg == base.src[1].arg*div
       if exact: return (base*mul).usum(*[t for k,t in enumerate(terms) if k not in (i,j)])
-      # ((base//div)%d)*div + base%div -> base%(div*d)
-      if mul == 1 and div > 0 and q.op is Ops.FLOORMOD and q.src[1].op is Ops.CONST and (d:=q.src[1].arg) > 0 and q.src[0].op is Ops.FLOORDIV:
+      # ((base//div)%d)*(div*mul) + (base%div)*mul -> (base%(div*d))*mul
+      if div > 0 and q.op is Ops.FLOORMOD and q.src[1].op is Ops.CONST and (d:=q.src[1].arg) > 0 and q.src[0].op is Ops.FLOORDIV:
         if q.src[0].src[0] is base and q.src[0].src[1].op is Ops.CONST and q.src[0].src[1].arg == div:
-          return (base % (div*d)).usum(*[t for k,t in enumerate(terms) if k not in (i,j)])
+          return ((base % (div*d))*mul).usum(*[t for k,t in enumerate(terms) if k not in (i,j)])
   return None
 
 # this needs to be before symbolic so that 0*something_that_might_be_invalid doesnt become 0
@@ -409,7 +409,7 @@ pm_move_where_on_load = PatternMatcher([
 def gated_given_valid(cond:UOp, x:UOp, i:UOp) -> UOp|None:
   if x.dtype.scalar() is not dtypes.weakint: return None
   # Skip if x contains DIV/MOD AND IMAGE mode is enabled -> image index e.g. openpilot
-  if IMAGE.value > 0 and x.op_in_backward_slice_with_self(Ops.IDIV, Ops.MOD, Ops.FLOORDIV, Ops.FLOORMOD): return None
+  if IMAGE.value > 0 and x.op_in_backward_slice_with_self(Ops.CDIV, Ops.CMOD, Ops.FLOORDIV, Ops.FLOORMOD): return None
   return cond.where(uop_given_valid(cond, x, try_simplex=False), i)
 
 # TODO: this is O(number of WHERE * number of node)

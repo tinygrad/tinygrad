@@ -64,29 +64,30 @@ def get(data:dict, key:str):
 def main(args) -> None:
   viz.load_rewrites(viz_data:=viz.VizData(viz.load_pickle(args.rewrites_path, default=RewriteTrace([], [], {}))))
 
-  def fmt(val, to_str=str) -> str: return json.dumps(val if isinstance(val, dict) else {"value":val}) if args.json else to_str(val)
+  def emit(val, to_str=str) -> str: return json.dumps(val if isinstance(val, dict) else {"value":val}) if args.json else to_str(val)
 
-  def print_step(step:dict) -> None:
+  def print_step(step:dict, reconstruct_matches=False) -> None:
     data = viz.get_render(viz_data, step["query"])
     if isinstance(data.get("value"), Iterator):
       for m in data["value"]:
-        if m.get("uop"): print(fmt(m["uop"]))
+        if m.get("uop"): print(emit(m["uop"]))
+        if not reconstruct_matches: return None
         if m.get("diff"):
           loc = pathlib.Path(m["upat"][0][0])
-          print(fmt(f"{loc.parent.name}/{loc.name}:{m['upat'][0][1]}\n{m['upat'][1]}"))
-          for line in m["diff"]: print(fmt(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None)))
-    if data.get("src") is not None: print(fmt(data["src"]))
+          print(emit(f"{loc.parent.name}/{loc.name}:{m['upat'][0][1]}\n{m['upat'][1]}"))
+          for line in m["diff"]: print(emit(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None)))
+    if data.get("src") is not None: print(emit(data["src"]))
 
-  events:list = viz.load_pickle(args.profile_path, default=[])
-  if (profile_bytes:=viz.get_profile(viz_data, events)) is None: raise RuntimeError(f"empty profile in {args.profile_path}")
+  profile_bytes = viz.get_profile(viz_data, viz.load_pickle(args.profile_path, default=[]))
+  if profile_bytes is None: raise RuntimeError(f"empty profile in {args.profile_path}")
   profile = decode_profile(profile_bytes)
   profile["layout"].update([(f'{c["name"][5:]}{" SQTT" if s["name"].endswith("PKTS") else ""} {s["name"]}', s["data"]) for c in viz_data.ctxs
                             if c["name"].startswith("SQTT") for s in c["steps"] if s["name"].endswith(("PMC", "PKTS"))])
-  if args.list and args.src == "ALL": return print("ALL\n"+"\n".join(fmt_colored(k) for k in profile["layout"]))
+  if args.list and not args.src: return print("ALL\n"+"\n".join(fmt_colored(k) for k in profile["layout"]))
 
   # ** SQTT printer
-  data = None if args.src == "ALL" else get(profile["layout"], args.src)
-  if "SQTT" in args.src:
+  data = None if not args.src else get(profile["layout"], args.src[0])
+  if args.src and "SQTT" in args.src[0]:
     # modern terminals support 24-bit color
     def hex_colored(st:str, color:str) -> str: return f"\x1b[38;2;{int(color[1:3],16)};{int(color[3:5],16)};{int(color[5:7],16)}m{st}\x1b[0m"
     print(f"{'Clk':<12} {'Unit':<20} {'Op':<22} {'Dur':<4} {'Delay':<4} {'Info'}")
@@ -103,7 +104,7 @@ def main(args) -> None:
       op_name, ret, info = e.name.display_name, json.loads(e.name.ret[4:]) if e.name.ret else {}, ""
       color = next((v for k,v in viz.wave_colors.items() if k in op_name), None)
       op_str = hex_colored(op_name, color) if color and not NO_COLOR else op_name
-      phase, delay = None, 0
+      inst, phase, delay = None, None, 0
       idx = next(pkt_idxs.setdefault(e.device, itertools.count()))
       if e.device.startswith("WAVE"):
         inst = f"0x{pc:05x} {pc_map[pc]}" if (pc:=ret.get("pc")) is not None else f"{'':7} {op_name}"
@@ -115,29 +116,29 @@ def main(args) -> None:
       if inst and phase: info = f"{phase:<8} {inst}"
       unit = e.device.replace(" ", "-")
       row = {"clk":int(e.st)-inst_st, "cycle":int(e.st), "unit":unit, "op":op_name, "dur":int(unwrap(e.en)-e.st), "delay":delay or "", "info":info}
-      print(fmt(row, lambda _: f"{row['clk']:<12} {unit:<20} {op_str}{' '*(22-ansilen(op_str))} {row['dur']:<4} {str(row['delay']):<4} {info}"))
+      print(emit(row, lambda _: f"{row['clk']:<12} {unit:<20} {op_str}{' '*(22-ansilen(op_str))} {row['dur']:<4} {str(row['delay']):<4} {info}"))
 
   # ** PMC printer
-  elif "PMC" in args.src:
+  elif args.src and "PMC" in args.src[0]:
     pmc = viz.unpack_pmc(unwrap(data))
     pmc_fmt:list[str] = []
     for name,val,*detail in pmc["rows"]:
       pmc_fmt += [f"{name} {val}"]+([" ".join(f"{k}={v}" for k,v in zip(detail[0]["cols"], r)) for r in detail[0]["rows"]] if detail else [])
-    print(fmt(pmc, lambda _: "\n".join(pmc_fmt)))
+    print(emit(pmc, lambda _: "\n".join(pmc_fmt)))
 
   # ** Memory printer
   elif data is not None and data["event_type"] == 1:
-    print(fmt({"peak":data["peak"]}, lambda _: f"Peak: {data['peak']}"+"\n"+f"{'TS':<10}  {'Event':<6}  {'Key':>8}  Info"))
+    print(emit({"peak":data["peak"]}, lambda _: f"Peak: {data['peak']}"+"\n"+f"{'TS':<10}  {'Event':<6}  {'Key':>8}  Info"))
     for e in data["events"]:
       info = str(arg:=e.pop("arg", {}))
       if e["event"] == "free": info = ', '.join([f"{fmt_colored(k)} {['read','write','write+read'][m]}@data{n}" for _,k,n,m in arg["users"]])
-      print(fmt({**e, "info":info}, lambda _: f"{e['ts']:<10}  {e['event']:<6}  {e.get('key', ''):>8}  {info}"))
+      print(emit({**e, "info":info}, lambda _: f"{e['ts']:<10}  {e['event']:<6}  {e.get('key', ''):>8}  {info}"))
 
   # ** Profiler printer
   else:
     timelines = [(n,l) for n,l in profile["layout"].items() if isinstance(l, dict) and l.get("event_type") == 0]
     def produce_top_kernels() -> Iterator[dict]:
-      tagged = ((n,e) for n,l in timelines for e in l["events"]) if args.src == "ALL" else ((args.src,e) for e in unwrap(data)["events"])
+      tagged = ((n,e) for n,l in timelines for e in l["events"]) if not args.src else ((args.src[0],e) for e in unwrap(data)["events"])
       agg:dict[tuple[str,str], tuple[float, int, int|None, dict[str, float]]] = {} # map (device, kernel name) to (total time, count, ref, est)
       est_keys = ("FLOPS", "B/s mem", "B/s lds")
       total = 0
@@ -148,18 +149,18 @@ def main(args) -> None:
         agg[(dev,e["name"])] = (t+et, c+1, e["ref"], est)
         total += et
       items = sorted(agg.items(), key=lambda kv:kv[1][0], reverse=True)
-      num_rows = len(items) if args.top < 0 else args.top
+      num_rows = len(items) if args.t < 0 else args.t
       for (dev,name),(t,c,ref,est) in items[:num_rows]:
-        display = f"{dev[:7]:7s} {fmt_colored(name)}" if args.src == "ALL" else fmt_colored(name)
+        display = f"{dev[:7]:7s} {fmt_colored(name)}" if not args.src else fmt_colored(name)
         yield {"name":display, "dur_ms":t, "count":c, "pct":t/total*100.0, "ref":ref, "fmt":{k:int(est[k]/(t*1e-3)) for k in est_keys if k in est}}
       if num_rows > 0 and items[num_rows:]:
         other_t = sum(t for _,(t,_,_,_) in items[num_rows:])
         other_c = sum(c for _,(_,c,_,_) in items[num_rows:])
         yield {"name":"Other", "dur_ms":other_t, "count":other_c, "pct":other_t/total*100.0, "ref":None, "fmt":None}
     def produce_all_kernels() -> Iterator[dict]:
-      event_streams = [[(e["st"], n, e) for e in l["events"]] for n,l in timelines] if args.src == "ALL" \
-                      else [[(e["st"], args.src, e) for e in unwrap(data)["events"]]]
-      if args.src == "ALL":
+      event_streams = [[(e["st"], n, e) for e in l["events"]] for n,l in timelines] if not args.src \
+                      else [[(e["st"], args.src[0], e) for e in unwrap(data)["events"]]]
+      if not args.src:
         for n,l in profile["layout"].items():
           if not isinstance(l, dict) or l.get("event_type") != 0: yield {"device":"SOURCE", "name":n, "st_ms":0, "ref":None, "ext":None}
       marker_stream = sorted([(m["ts"], "MARKER", m) for m in profile.get("markers", [])], key=lambda t:t[0])
@@ -174,8 +175,8 @@ def main(args) -> None:
             line = f"{file.split('/')[-1]}:{lineno} {fxn}"
             if fmt: ext.append(f"{line} {code}")
             elif not file.startswith("<") and not fxn.startswith("<"): fmt["loc"] = line
-        yield {"device":dev, "name":fmt_colored(e["name"]), "dur_ms":e["dur"]*1e-3,
-               "st_ms":e["st"]*1e-3, "fmt":fmt, "ref":e["ref"], "ext":"\n".join(ext)}
+        yield {"device":dev, "name":fmt_colored(e["name"]), "dur_ms":e["dur"]*1e-3, "st_ms":e["st"]*1e-3, "fmt":fmt, "ref":e["ref"],
+               "ext":"\n".join(ext)}
     def fmt_top(k:dict) -> str:
       return f"{fmt_colored(k['name'])}{' ' * max(0, 38-ansilen(k['name']))} {time_to_str(k['dur_ms']*1e-3, w=9)} {k['count']:7d} {k['pct']:6.2f}%"+\
           (" "*4+fmt_data(k['fmt']) if k['fmt'] else "")
@@ -184,39 +185,36 @@ def main(args) -> None:
       ptm = colored(time_to_str(k["dur_ms"]*1e-3, w=9), "yellow" if k["dur_ms"] > 10 else None)
       name = f"*** {k['device'][:7]:7s} "+k["name"]+" "*(46-ansilen(k["name"]))
       return f"{name} tm {ptm}/{k['st_ms']:9.2f}ms"+(f" ({fmt_data(k['fmt'])})" if k["fmt"] else "")
-    fmt_row = fmt_top if args.top else fmt_all
+    fmt_row = fmt_top if args.t else fmt_all
     seen_refs:set[int] = set()
     def render_event(k:dict, ls=args.list) -> None:
-      print(fmt(k, to_str=fmt_row))
+      print(emit(k, to_str=fmt_row))
       if k["ref"] is not None and k["ref"] not in seen_refs:
         seen_refs.add(k["ref"])
         for s in viz_data.ctxs[k["ref"]]["steps"]:
           if DEBUG >= 3 and s["name"] == "View Base AST": print_step(s)
           if DEBUG >= 4 and s["name"] == "View Source": print_step(s)
-          if DEBUG >= 5 or ls: print(fmt(" "*s["depth"]+s["name"]+(f" - {s['match_count']}" if s.get('match_count', 0) else '')))
-          if DEBUG >= 6 or args.item and len(args.item) > 1 and s["name"] == args.item[1]: print_step(s)
-      elif DEBUG >= 3 and k.get("ext"): print(fmt(k["ext"]))
-    produce = produce_top_kernels if args.top else produce_all_kernels
-    if args.item:
-      if len(args.item) > 2: raise RuntimeError(f"-i takes at most 2 names (got {args.item})")
-      k = get({r["name"]:r for r in produce()}, args.item[0])
+          if DEBUG >= 5 or ls: print(emit(" "*s["depth"]+s["name"]+(f" - {s['match_count']}" if s.get('match_count', 0) else '')))
+          if DEBUG >= 6: print_step(s)
+          if DEBUG >= 7 or (len(args.src) > 2 and s["name"] == args.src[2]): print_step(s, reconstruct_matches=True)
+      elif DEBUG >= 3 and k.get("ext"): print(emit(k["ext"]))
+    produce = produce_top_kernels if args.t else produce_all_kernels
+    if len(args.src) > 1:
+      k = get({r["name"]:r for r in produce()}, args.src[1])
       with Context(DEBUG=max(DEBUG.value, 3)): render_event(k, ls=True)
     else:
       for k in produce(): render_event(k)
 
 def get_arg_parser() -> argparse.ArgumentParser:
-  parser = argparse.ArgumentParser(add_help=False, prog="python -m tinygrad.viz.cli")
-  g_opts = parser.add_argument_group("optional args")
-  g_opts.add_argument("-s", "--src", type=str, default="ALL", metavar="NAME", help="Select a data source (default: ALL)")
-  g_opts.add_argument("-i", "--item", nargs="+", default=None, metavar="NAME", help="Select an item within the source (default: list all items)")
-  g_opts.add_argument("--list", "--ls", dest="list", action="store_true", help="List sources")
-  g_opts.add_argument("-t", "--top", nargs="?", type=int, const=20, metavar="COUNT", help="Aggregate top kernels (optional count, default 20)")
-  g_opts.add_argument("--profile-path", type=pathlib.Path, metavar="PATH", help="Optional path to profile.pkl (default: latest profile)",
-                      default=pathlib.Path(temp("profile.pkl", append_user=True)))
-  g_opts.add_argument("--rewrites-path", type=pathlib.Path, metavar="PATH", help="Optional path to rewrites.pkl (default: latest rewrites)",
-                      default=pathlib.Path(temp("rewrites.pkl", append_user=True)))
-  g_opts.add_argument("--json", action="store_true", help="Emit profiler output as JSON")
-  g_opts.add_argument("-h", "--help", action="help", help="show this help message and exit")
+  parser = argparse.ArgumentParser(prog="python -m tinygrad.viz.cli")
+  parser.add_argument("-s", "--src", nargs="+", default=[], metavar="NAME", help="Select a data source (default: all)")
+  parser.add_argument("--list", "--ls", dest="list", action="store_true", help="List sources")
+  parser.add_argument("-t", nargs="?", type=int, const=20, metavar="COUNT", help="Aggregate top kernels (optional count, default 20)")
+  parser.add_argument("--profile-path", type=str, metavar="PATH", help="Optional path to profile.pkl (default: latest profile)",
+                      default=temp("profile.pkl", append_user=True))
+  parser.add_argument("--rewrites-path", type=str, metavar="PATH", help="Optional path to rewrites.pkl (default: latest rewrites)",
+                      default=temp("rewrites.pkl", append_user=True))
+  parser.add_argument("--json", action="store_true", help="Emit profiler output as JSON")
   return parser
 
 if __name__ == "__main__":

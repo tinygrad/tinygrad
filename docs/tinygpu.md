@@ -4,7 +4,7 @@ TinyGPU app lets you use AMD and NVIDIA GPUs on macOS over USB4/Thunderbolt with
 
 ## Requirements
 
-- macOS (12.1+)
+- macOS (13.0+)
 - USB4/Thunderbolt port
 - A supported GPU (AMD RDNA3+ or NVIDIA Ampere+)
 
