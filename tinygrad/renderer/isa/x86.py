@@ -200,7 +200,7 @@ pre_isel_matcher = PatternMatcher([
    lambda y,x: UOp(Ops.NOOP, x.dtype, y.src) if all(s.op is Ops.GEP and s.src == y.src and s.arg[0] == i for i,s in enumerate(x.src)) else None),
   # gated load/store become a conditional move on the index, the load/store are unconditional
   (UPat.var("base").index(UPat.var("idx")).load(UPat.var("alt"), UPat.var("gate"), name="x"), lambda base,idx,gate,alt,x:
-   gate.where(base.index(idx, ptr=True), (l:=UOp(Ops.DEFINE_LOCAL, base.dtype.base.ptr(x.dtype.count, AddrSpace.LOCAL), arg=1000+alt.arg)
+   gate.where(base.index(idx, ptr=True), (l:=UOp(Ops.DEFINE_LOCAL, base.dtype.base.ptr(x.dtype.count, AddrSpace.LOCAL), arg=id(alt))
               .index(UOp.const(dtypes.int32, 0), ptr=True)).after(l.store(alt))).load(dtype=x.dtype)),
   (UPat.var("base").index(UPat.var("idx")).store(UPat.var("val"), UPat.var("gate")), lambda base,idx,gate,val:
    gate.where(base.index(idx, ptr=True), UOp(Ops.DEFINE_LOCAL, base.dtype.base.ptr(val.dtype.count, AddrSpace.LOCAL), arg=-1)
