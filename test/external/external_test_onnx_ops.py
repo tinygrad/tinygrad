@@ -364,6 +364,15 @@ class TestMainOnnxOps(TestOnnxOps):
     inputs = {"data": np.random.randn(1, 1, 32, 32, 32).astype(np.half)*100}
     self.helper_test_single_op("ReduceL2", inputs, {}, ["reduced"])
 
+  def test_lstm_forward(self):
+    seq, batch, in_size, hid = 1, 1, 128, 128
+    inputs = {
+      "X": np.random.randn(seq, batch, in_size).astype(np.float32),
+      "W": np.random.randn(1, 4*hid, in_size).astype(np.float32),
+      "R": np.random.randn(1, 4*hid, hid).astype(np.float32),
+    }
+    self.helper_test_single_op("LSTM", inputs, {"hidden_size": hid}, ["Y", "Y_h", "Y_c"])
+
 class TestTrainingOnnxOps(TestOnnxOps):
   # NOTE: ORT doesn't actually support training ops on cpu so we test using functions provided by onnx
   DOMAIN = AI_ONNX_PREVIEW_TRAINING_DOMAIN
