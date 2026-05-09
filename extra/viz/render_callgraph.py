@@ -12,8 +12,11 @@ parser.add_argument("--rewrites-path", type=str, metavar="PATH", help="Optional 
 parser.add_argument("--query", type=str, metavar="NAME", help="kernel name")
 args = parser.parse_args()
 data = viz.VizData(viz.load_pickle(args.rewrites_path, default=None))
-ast = next(viz._reconstruct(data, data.trace.rewrites[i][0].sink) for i,k in enumerate(data.trace.keys) if ansistrip(k.display_name) == args.query)
 uop_names = {viz._reconstruct(data, data.trace.rewrites[i][0].sink):k.display_name for i,k in enumerate(data.trace.keys) if isinstance(k.ret, Renderer)}
+if not args.query:
+  for v in uop_names.values(): print(v)
+  exit(1)
+ast = next(viz._reconstruct(data, data.trace.rewrites[i][0].sink) for i,k in enumerate(data.trace.keys) if ansistrip(k.display_name) == args.query)
 
 seen_bufs:set[UOp] = set()
 for i,k in enumerate(data.trace.keys):
@@ -34,7 +37,6 @@ for i,k in enumerate(data.trace.keys):
       op_name = str(u.op).split(".")[1]
       if u.op is Ops.MSTACK:
         arg_str.append(st:=f"{op_name[0].lower()} {u.device}")
-      elif u.op is Ops.INDEX: continue
       else:
         assert u.op in {Ops.BUFFER, Ops.PARAM}, f"{u.op}"
         arg_str.append(st:=f"{op_name[0].lower()}{u.arg}")
