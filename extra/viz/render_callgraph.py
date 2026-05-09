@@ -27,6 +27,7 @@ for i,k in enumerate(data.trace.keys):
     for u in viz._reconstruct(data, s.sink).toposort(enter_calls=False):
       if u.op is Ops.CALL and u.src[0] is ast: root = u; break
   if root is None: continue
+  """
   for c in root.toposort(enter_calls=False):
     if c.op is not Ops.CALL or c.src[0].op is not Ops.SINK: continue
     arg_str:list[str] = []
@@ -49,3 +50,4 @@ for i,k in enumerate(data.trace.keys):
     for u in body.toposort():
       if u.op is Ops.INDEX:
         print(f"{'I':<{op_w}} {arg_str[(p:=u.src[0].base.arg)]:<{buf_w}} {p:<2} {' '.join(viz.uop_to_json(data, u)[id(u)]['label'].split('\n')[4:])}")
+  """

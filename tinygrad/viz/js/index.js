@@ -856,14 +856,14 @@ const evtSources = [];
 // rewrite: a single UOp transformation
 // step: collection of rewrites
 // context: collection of steps
-const state = {currentCtx:-1, currentStep:0, currentRewrite:0, expandSteps:false, callSrcMask:new Set()};
+const state = {currentCtx:-1, currentStep:0, currentRewrite:0, expandSteps:false, focusStep:false, callSrcMask:new Set()};
 function setState(ns) {
   saveToHistory(state);
-  const { ctx:prevCtx, step:prevStep } = select(state.currentCtx, state.currentStep);
+  const { ctx:prevCtx, step:prevStep } = select(state.currentCtx, state.focusStep ? state.currentStep : null);
   const prevRewrite = state.currentRewrite;
   Object.assign(state, ns);
   // update element styles if needed
-  const { ctx, step } = select(state.currentCtx, state.currentStep);
+  const { ctx, step } = select(state.currentCtx, state.focusStep ? state.currentStep : null);
   toggleCls(prevCtx, ctx, "expanded", state.expandSteps);
   if (ctx?.id !== prevCtx?.id) {
     toggleCls(prevCtx, ctx, "active");
@@ -890,7 +890,7 @@ function saveToHistory(ns) {
 }
 
 // switch to the start of a new graph and expand all the steps
-const switchCtx = (newCtx, step) => setState({ expandSteps:true, currentCtx:newCtx+1, currentStep:step ?? 0, currentRewrite:0 });
+const switchCtx = (newCtx, step) => setState({ expandSteps:true, currentCtx:newCtx+1, currentStep:step ?? 0, currentRewrite:0, focusStep:step != null });
 
 window.addEventListener("popstate", (e) => {
   if (e.state?.shape != null) return setFocus(e.state?.shape);
@@ -923,7 +923,7 @@ function appendSteps(root, idx, steps) {
       e.stopPropagation();
       const subrewrites = getSubrewrites(e.currentTarget.parentElement);
       if (subrewrites.length) { e.currentTarget.parentElement.classList.toggle("expanded"); }
-      setState({ currentStep:j, currentCtx:idx, currentRewrite:0 });
+      setState({ currentStep:j, currentCtx:idx, currentRewrite:0, focusStep:true });
     }
     stack.push(u);
   }
@@ -945,7 +945,7 @@ async function main() {
       const p = ul.appendChild(document.createElement("p"));
       p.appendChild(colored(name));
       p.onclick = () => {
-        setState(i === state.currentCtx ? { expandSteps:!state.expandSteps } : { expandSteps:true, currentCtx:i, currentStep:0, currentRewrite:0 });
+        setState(i === state.currentCtx ? { expandSteps:!state.expandSteps, focusStep:false } : { expandSteps:true, currentCtx:i, currentStep:0, currentRewrite:0, focusStep:false });
       }
       appendSteps(ul, i, steps);
     }
@@ -978,7 +978,7 @@ async function main() {
       ctx.steps.push(...ret.steps);
       while (el.ctx.children.length > 1) el.ctx.children[1].remove();
       appendSteps(el.ctx, state.currentCtx, ctx.steps);
-      return setState({ currentStep:state.currentStep+1, expandSteps:true });
+      return setState({ currentStep:state.currentStep+1, expandSteps:true, focusStep:true });
     }
     // timeline with cycles on the x axis
     if (ret instanceof ArrayBuffer) {
@@ -1125,7 +1125,7 @@ appendResizer(document.querySelector(".metadata-parent"), { minWidth: 20, maxWid
 
 // **** keyboard shortcuts
 
-const select = (ctx, step) => ({ ctx:document.getElementById(`ctx-${ctx}`), step:document.getElementById(`step-${ctx}-${step}`) });
+const select = (ctx, step) => ({ ctx:document.getElementById(`ctx-${ctx}`), step:step == null ? null : document.getElementById(`step-${ctx}-${step}`) });
 const deselect = (element) => {
   const parts = element?.id.split("-").map(Number);
   return element?.id.startsWith("ctx") ? { ctx:parts[1], step:null } : element?.id.startsWith("step") ? {ctx:parts[1], step:parts[2]} : {};
@@ -1136,32 +1136,35 @@ document.addEventListener("keydown", (event) => {
   const { currentCtx, currentStep, currentRewrite, expandSteps } = state;
   // up and down change the step or context from the list
   const changeStep = expandSteps && ctxs[currentCtx].steps?.length;
-  const { step, ctx } = select(currentCtx, currentStep);
+  const { step, ctx } = select(currentCtx, state.focusStep ? currentStep : null);
   if (event.key == "ArrowUp") {
     event.preventDefault();
     if (changeStep) {
+      if (step == null) return;
       let prev = deselect(step.previousElementSibling);
       if (prev.step == null && isExpanded(step.parentElement)) prev = deselect(step.parentElement);
-      return prev.step != null && !isExpanded(step) && setState({ currentRewrite:0, currentStep:prev.step });
+      if (prev.step == null && !isExpanded(step)) return setState({ focusStep:false });
+      return !isExpanded(step) && setState({ currentRewrite:0, currentStep:prev.step, focusStep:true });
     }
-    return setState({ currentStep:0, currentRewrite:0, currentCtx:Math.max(0, currentCtx-1), expandSteps:false });
+    return setState({ currentStep:0, currentRewrite:0, currentCtx:Math.max(0, currentCtx-1), expandSteps:false, focusStep:false });
   }
   if (event.key == "ArrowDown") {
     event.preventDefault();
     if (changeStep) {
-      const next = deselect(isExpanded(step) ? step.children[1] : step.nextElementSibling);
-      return next.step != null && setState({ currentRewrite:0, currentStep:next.step });
+      const next = deselect(step == null ? ctx.children[1] : isExpanded(step) ? step.children[1] : step.nextElementSibling);
+      return next.step != null && setState({ currentRewrite:0, currentStep:next.step, focusStep:true });
     }
-    return setState({ currentStep:0, currentRewrite:0, currentCtx:Math.min(ctxs.length-1, currentCtx+1), expandSteps:false });
+    return setState({ currentStep:0, currentRewrite:0, currentCtx:Math.min(ctxs.length-1, currentCtx+1), expandSteps:false, focusStep:false });
   }
   // enter toggles focus on a single rewrite stage
   if (event.key == "Enter") {
     event.preventDefault()
     if (currentCtx === -1) {
-      return setState({ currentCtx:0, expandSteps:true });
+      return setState({ currentCtx:0, expandSteps:true, focusStep:false });
     }
-    if (expandSteps && getSubrewrites(step).length) return step.children[0].click();
-    return setState({ expandSteps:!expandSteps });
+    if (!state.focusStep) return setState({ expandSteps:!expandSteps });
+    if (step != null && getSubrewrites(step).length) return step.children[0].click();
+    return;
   }
   // left and right go through rewrites in a single UOp, in profiler go forward/backward in time
   if (event.key == "ArrowLeft" || event.key == "ArrowRight") {
