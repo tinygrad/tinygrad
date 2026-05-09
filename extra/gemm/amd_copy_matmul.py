@@ -20,6 +20,7 @@ if use_wmma:
 
   # wmma params
   WMMA_M, WMMA_N, WMMA_K = 16, 16, 16
+  assert BLOCK_K % WMMA_K == 0
   WMMA_ACC = WMMA_M // LANES_PER_WAVE_M
   UNROLL_M, UNROLL_N = (WMMA_ACC, 1) if is_rdna4 else (1, 1)
 else:
@@ -27,7 +28,7 @@ else:
   LANES_PER_WAVE_M, LANES_PER_WAVE_N = 4, 8
   UNROLL_M, UNROLL_N = 4, 4
 
-LDS_K = getenv("LDSK", WMMA_K + 4 if use_wmma else BLOCK_K)
+LDS_K = getenv("LDSK", (WMMA_K + (8 if BLOCK_K <= 32 else 4) if BLOCK_K <= 64 else WMMA_K) if use_wmma else BLOCK_K)
 assert LDS_K >= (WMMA_K if use_wmma else BLOCK_K)
 
 # total lanes must be the warp size
