@@ -376,8 +376,7 @@ def copy_(self, src, non_blocking=False):
 def cat_out(tensors: list[torch.Tensor], dim=0, *, out:torch.Tensor):
   fixed_tensors = []
   for wrapped in tensors:
-    if wrapped.shape == (0,):
-      wrapped = wrapped.reshape([0 if i == (dim % out.ndim) else x for i, x in enumerate(out.shape)])
+    if wrapped.shape == (0,): wrapped = wrapped.reshape([0 if i == (dim % out.ndim) else x for i, x in enumerate(out.shape)])
     fixed_tensors.append(wrapped)
   _apply_inplace(unwrap(out), Tensor.cat(*map(unwrap, fixed_tensors), dim=dim))
   return out

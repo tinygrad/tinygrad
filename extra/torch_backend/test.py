@@ -828,7 +828,6 @@ class TestBackendHelpers(unittest.TestCase):
         np.testing.assert_equal(out.cpu().numpy(), [])
         assert ret is out
 
-
   def test_scatter_add_out(self):
     src = torch.tensor([[1, 2, 3], [4, 5, 6]], device=device, dtype=torch.float32)
     index = torch.tensor([[0, 1, 2], [0, 1, 2]], device=device)
