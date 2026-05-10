@@ -83,25 +83,31 @@ class KernelRuntimeProfile(BaseModel):
   runtime_ms: float = Field(description="Elapsed GPU/runtime time in milliseconds.")
 
 class Kernel(BaseModel):
+  model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
   source: str = Field(description="kernel source code.")
   global_size: tuple[int, ...] = Field(description="Launch grid/global dimensions.")
   local_size: tuple[int, ...]|None = Field(default=None, description="Launch workgroup/local dimensions, if the backend uses them.")
 
 class CorrectnessResult(BaseModel):
+  model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
   passed: bool
-  max_abs_error: float | None = None
-  max_rel_error: float | None = None
   message: str | None = None
 
 class CandidateEvaluation(BaseModel):
+  model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
   candidate: Kernel
   correctness: CorrectnessResult
-  runtime: KernelRuntimeProfile | None = None
+  profile: KernelRuntimeProfile | None = None # none if failed
   compiler_log: str | None = None
 
 class BufferArg(BaseModel):
+  model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
   shape: tuple[int, ...] = Field(description="Shapes for buffer arg. Buffers are assumed dense row-major contiguous.")
-  dtype: DType = Field(description="Datatype for buffer arg. Buffers are assumed dense row-major contiguous.")
+  dtype: str = Field(description="Datatype for buffer arg. Buffers are assumed dense row-major contiguous.")
 
 class KernelDescriptor(BaseModel):
   model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)

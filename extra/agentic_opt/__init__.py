@@ -1,22 +1,55 @@
 from __future__ import annotations
-import os
+import os, numpy as np
 from typing import Any
 from fastmcp import FastMCP
-from extra.agentic_opt.models import CandidateEvaluation, HardwareDescriptor, Kernel, KernelDescriptor
+
+from tinygrad import Tensor, Device
+from extra.agentic_opt.models import CandidateEvaluation, CorrectnessResult, HardwareDescriptor, Kernel, KernelDescriptor, KernelRuntimeProfile
+
 class AgenticOpt:
   def __init__(self, device:str, reference_kernel:KernelDescriptor):
+    self.device = Device.canonicalize(device)
     self.hardware = HardwareDescriptor.from_dev(device)
     self.reference_kernel = reference_kernel
-    self.history: list[CandidateEvaluation] = []
-    self.best_evaluation: CandidateEvaluation|None = None
+
+    # NOTE: assumming all buffers are purely in or out, not both
+    self.test_bufs = [Tensor.rand(*arg.shape, dtype=arg.dtype, device=self.device).realize() for arg in self.reference_kernel.buffer_args]
+    
+    self.correct_bufs = [buf.clone().realize() for buf in self.test_bufs]
+    t = self._run_kernel(self.reference_kernel.kernel, self.correct_bufs)
+    ref_eval = CandidateEvaluation(candidate=self.reference_kernel.kernel, correctness=CorrectnessResult(passed=True), profile=KernelRuntimeProfile(runtime_ms=t))
+
+    self.best_evaluation: CandidateEvaluation = ref_eval
+    self.history: list[CandidateEvaluation] = [self.best_evaluation]
+
+  def _run_kernel(self, kernel:Kernel, args: list[Tensor]) -> float:
+    dev = Device[self.device]
+    lib = dev.compiler.compile(kernel.source)
+    rt = dev.runtime(self.reference_kernel.entry_point, lib)
+    bufs = [arg._buffer() for arg in args]
+    t = rt(*[buf._buf for buf in bufs], global_size=self._dim3(kernel.global_size), local_size=self._dim3(kernel.local_size or (1,)), vals=(), wait=True)
+    assert isinstance(t, float)
+    dev.synchronize()
+    return t * 1000
+
+  @staticmethod
+  def _dim3(dims: tuple[int, ...]) -> tuple[int, int, int]:
+    if len(dims) > 3: raise ValueError(f"expected at most 3 launch dimensions, got {dims}")
+    return (dims + (1, 1, 1))[:3]
 
   def evaluate_kernel(self, candidate:Kernel) -> CandidateEvaluation:
-    ...
-    # TODO: run, time, and verify kernel, add to history, save best kernel
-    # evaluation = self.evaluator(candidate)
-    # self.history.append(evaluation)
-    # if self._is_better(evaluation, self.best_evaluation): self.best_evaluation = evaluation
-    # return evaluation
+    bufs = [buf.clone().realize() for buf in self.test_bufs]
+    try:
+      t = self._run_kernel(candidate, bufs)
+      for ref_buf, buf in zip(self.correct_bufs, bufs):
+        np.testing.assert_allclose(ref_buf.numpy(), buf.numpy())
+      eval = CandidateEvaluation(candidate=candidate, profile=KernelRuntimeProfile(runtime_ms=t), correctness=CorrectnessResult(passed=True))
+      if eval.profile.runtime_ms < self.best_evaluation.profile.runtime_ms:
+        self.best_evaluation = eval
+    except Exception as exc:
+      eval = CandidateEvaluation(candidate=candidate, correctness=CorrectnessResult(passed=False, message=str(exc)))
+    self.history.append(eval)
+    return eval
 
   def get_history(self) -> tuple[CandidateEvaluation, ...]:
     return tuple(self.history)
@@ -37,12 +70,6 @@ class AgenticOpt:
     def get_history() -> list[CandidateEvaluation]: return self.history
 
     return mcp
-
-  @staticmethod
-  def _is_better(candidate:CandidateEvaluation, best:CandidateEvaluation|None) -> bool:
-    if not candidate.correctness.passed or candidate.runtime is None: return False
-    if best is None or best.runtime is None: return True
-    return candidate.runtime.runtime_ms < best.runtime.runtime_ms
 
 def llama2_70b_lora_dummy_step(
   bs:int=1,
