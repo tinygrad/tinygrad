@@ -340,7 +340,7 @@ class TestNN(unittest.TestCase):
   def test_rmsnorm(self):
     B, T, embed_size = 4, 10, 20
 
-    torch_layer = torch.nn.RMSNorm(embed_size, eps=1e-6)
+    torch_layer = torch.nn.RMSNorm(embed_size, eps=1e-5)
     layer = RMSNorm(embed_size)
     layer.weight = Tensor(torch_layer.weight.detach().numpy(), requires_grad=True)
 
@@ -358,7 +358,7 @@ class TestNN(unittest.TestCase):
       np.testing.assert_allclose(x.grad.numpy(), torch_x.grad.detach().numpy(), atol=5e-4, rtol=5e-4)
       np.testing.assert_allclose(layer.weight.grad.numpy(), torch_layer.weight.grad.detach().numpy(), atol=5e-4, rtol=5e-4)
 
-    torch_layer = torch.nn.RMSNorm(embed_size, eps=1e-6, elementwise_affine=False)
+    torch_layer = torch.nn.RMSNorm(embed_size, eps=1e-5, elementwise_affine=False)
     layer = RMSNorm(embed_size, elementwise_affine=False)
 
     for _ in range(10):

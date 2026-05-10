@@ -1305,7 +1305,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     y = (self - self.mean(axis, keepdim=True))
     return y.mul((y*y).mean(axis, keepdim=True).add(eps).rsqrt())
 
-  def rmsnorm(self, axis:int|tuple[int, ...]=-1, eps=1e-6) -> Self:
+  def rmsnorm(self, axis:int|tuple[int, ...]=-1, eps=1e-5) -> Self:
     """
     Applies Root Mean Square Normalization to input.
 
