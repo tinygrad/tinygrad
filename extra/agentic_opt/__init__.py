@@ -3,6 +3,82 @@ from __future__ import annotations
 import os
 from typing import Any
 
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+
+class HardwareDescriptor(BaseModel):
+  model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+  hardware_family: str = Field(description="Hardware vendor/family, for example AMD, NVIDIA, Apple, Intel.", examples=["AMD"])
+  hardware_architecture: str = Field(description="Concrete hardware architecture/target, for example gfx942, sm_90, or apple7.", examples=["gfx942"])
+  source_language_dialect: str = Field(description="Candidate kernel source language or dialect.", examples=["HIP C++"])
+  compiler: str = Field(description="Compiler/toolchain used for candidate source.", examples=["hipcc"])
+  compiler_version: str = Field(description="Compiler/toolchain version string.", examples=["ROCm 6.3.0"])
+
+  @field_validator("*")
+  @classmethod
+  def _nonempty(cls, value:str) -> str:
+    if value == "": raise ValueError("must be non-empty")
+    return value
+
+  @classmethod
+  def from_dev(cls, device:str|None=None) -> "HardwareDescriptor":
+    """
+    Build the descriptor from tinygrad's active DEV target.
+
+    This intentionally avoids shelling out to compiler binaries. It reports the
+    concrete tinygrad device, selected renderer, compiler object, and arch.
+    """
+    from tinygrad.device import Device
+
+    dev = Device[Device.DEFAULT if device is None else device]
+    renderer = dev.renderer
+    compiler = renderer.compiler
+    source_language_dialect, compiler_name = candidate_source_and_compiler(dev)
+
+    base_device = renderer.target.device or dev.device.split(":", 1)[0].upper()
+    arch = _first_nonempty(
+      renderer.target.arch,
+      getattr(dev, "arch", None),
+      "unknown",
+    )
+
+    return cls(
+      hardware_family=base_device,
+      hardware_architecture=arch,
+      source_language_dialect=source_language_dialect,
+      compiler=compiler_name,
+      compiler_version=_first_nonempty(getattr(compiler, "version", None), "unknown"),
+    )
+
+
+def _first_nonempty(*values:object) -> str:
+  return next((str(x) for x in values if x is not None and str(x).strip()), "unknown")
+
+
+def candidate_source_and_compiler(device:Any|None=None) -> tuple[str, str]:
+  from tinygrad.device import Device
+  from tinygrad.helpers import getenv
+
+  dev = Device[Device.DEFAULT] if device is None else Device[device] if isinstance(device, str) else device
+  renderer = dev.renderer
+  compiler = renderer.compiler
+  renderer_name, compiler_name = type(renderer).__name__, type(compiler).__name__
+
+  match renderer_name:
+    case "HIPCCRenderer": return "HIP C++", "hipcc"
+    case "HIPRenderer": return "HIP C++", "COMGR"
+    case "AMDLLVMRenderer": return "LLVM IR", "tinygrad AMDLLVM"
+    case "CUDARenderer": return "CUDA C++", "nvrtc"
+    case "NVCCRenderer": return "CUDA C++", "nvcc"
+    case "PTXRenderer": return "PTX", "ptxas"
+    case "MetalRenderer": return "Metal Shading Language", "Metal runtime compiler"
+    case "OpenCLRenderer" | "IntelRenderer" | "QCOMCLRenderer": return "OpenCL C", "OpenCL runtime compiler"
+    case "ClangRenderer" | "ClangJITRenderer": return "C", getenv("CC", "clang")
+    case "CPULLVMRenderer": return "LLVM IR", "LLVM"
+
+  return renderer_name, compiler_name
+
 
 def llama2_70b_lora_dummy_step(
   bs:int=1,
