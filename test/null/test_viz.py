@@ -911,34 +911,33 @@ def run_cli(*cli_args) -> str:
     main(args)
   return buf.getvalue().strip()
 
-def call_cli(fxn, *cli_args, debug=2) -> str:
-  with save_viz() as viz:
-    fxn()
+@contextlib.contextmanager
+def write_files(viz) -> list[str]:
   with tempfile.TemporaryDirectory() as tmpdir:
     (r:=Path(tmpdir)/"rewrites.pkl").write_bytes(pickle.dumps(viz.data.trace))
     (p:=Path(tmpdir)/"profile.pkl").write_bytes(pickle.dumps(cpu_events))
-    with Context(DEBUG=debug, NO_COLOR=1):
-      stdout = run_cli("--rewrites-path", str(r), "--profile-path", str(p), *cli_args)
-  return stdout
+    yield ["--rewrites-path", str(r), "--profile-path", str(p)]
 
 class TestCLI(unittest.TestCase):
   def test_reconstruct_debug(self):
-    def fxn():
+    with save_viz() as viz:
       Tensor.empty(1, device="NULL").add(2.0).realize()
       profile_marker("marker @ 1")
       Tensor.empty(1, device="NULL").add(3.0).realize()
-    out = call_cli(fxn, "-s", "NULL", debug=4)
+    with write_files(viz) as files, Context(DEBUG=4):
+      out = run_cli(*files, "-s", "NULL")
     self.assertIn("void E", out)
     self.assertIn("marker @ 1", out)
 
   def test_aggregate(self):
     N, CNT = 1024, 5
-    def fxn():
+    with save_viz() as viz:
       for _ in range(CNT):
         (Tensor.empty(N, N, device="NULL")@Tensor.empty(N, N, device="NULL")).realize()
       for _ in range(CNT):
         (Tensor.empty(N, N, device="NULL").assign(Tensor.empty(N, N, device="NULL"))).realize()
-    kernels = [json.loads(line) for line in call_cli(fxn, "-s", "NULL", "-t", "--json").splitlines()]
+    with write_files(viz) as files, Context(NO_COLOR=1):
+      kernels = [json.loads(line) for line in run_cli(*files, "-s", "NULL", "-t", "--json").splitlines()]
     self.assertEqual(len(kernels), 2)
     gemm_summary = [s for s in kernels if s["name"].startswith("r_")][0]
     copy_summary = [s for s in kernels if s["name"].startswith("E_")][0]
@@ -947,7 +946,7 @@ class TestCLI(unittest.TestCase):
 
   def test_flops(self):
     test_n = [(8, 16), (16, 32), (32, 64)]
-    def fxn():
+    with save_viz() as viz:
       @TinyJit
       def f(a, b): return (a@a.T), (b@b.T)
       a = Tensor.empty(64, 64, device="NULL")
@@ -956,16 +955,17 @@ class TestCLI(unittest.TestCase):
         i = Variable("i", 1, 64).bind(i_val)
         j = Variable("j", 1, 64).bind(j_val)
         Tensor.realize(*f(a[:i], b[:j]))
-    out = [json.loads(line) for line in call_cli(fxn, "-s", "NULL", "--json").splitlines()]
+    with write_files(viz) as files:
+      out = [json.loads(line) for line in run_cli(*files, "-s", "NULL", "--json").splitlines()]
+      aggregate = [json.loads(line) for line in run_cli(*files, "-s", "NULL", "-t", "--json").splitlines()]
     self.assertEqual(len(out), 3*2)
     # flops increases as N gets larger
     gflops = [row["fmt"]["FLOPS"] for row in out]
     self.assertGreater(gflops[4], gflops[2])
     self.assertGreater(gflops[5], gflops[3])
     # aggregate flops
-    out = [json.loads(line) for line in call_cli(fxn, "-s", "NULL", "-t", "--json").splitlines()]
-    self.assertEqual(len(out), 2)
-    agg_gflops = [row["fmt"]["FLOPS"] for row in out]
+    self.assertEqual(len(aggregate), 2)
+    agg_gflops = [row["fmt"]["FLOPS"] for row in aggregate]
     assert all(min(gflops) < v < max(gflops) for v in agg_gflops), f"{agg_gflops}"
 
 if __name__ == "__main__":
