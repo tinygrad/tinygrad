@@ -34,10 +34,10 @@ class HardwareDescriptor(BaseModel):
     dev = Device[Device.DEFAULT if device is None else device]
     renderer = dev.renderer
     compiler = renderer.compiler
-    source_language_dialect, compiler_name = candidate_source_and_compiler(dev)
+    source_language_dialect, compiler_name = cls.candidate_source_and_compiler(dev)
 
     base_device = renderer.target.device or dev.device.split(":", 1)[0].upper()
-    arch = _first_nonempty(
+    arch = cls._first_nonempty(
       renderer.target.arch,
       getattr(dev, "arch", None),
       "unknown",
@@ -48,36 +48,36 @@ class HardwareDescriptor(BaseModel):
       hardware_architecture=arch,
       source_language_dialect=source_language_dialect,
       compiler=compiler_name,
-      compiler_version=_first_nonempty(getattr(compiler, "version", None), "unknown"),
+      compiler_version=cls._first_nonempty(getattr(compiler, "version", None), "unknown"),
     )
 
+  @staticmethod
+  def _first_nonempty(*values:object) -> str:
+    return next((str(x) for x in values if x is not None and str(x).strip()), "unknown")
 
-def _first_nonempty(*values:object) -> str:
-  return next((str(x) for x in values if x is not None and str(x).strip()), "unknown")
+  @staticmethod
+  def candidate_source_and_compiler(device:Any|None=None) -> tuple[str, str]:
+    from tinygrad.device import Device
+    from tinygrad.helpers import getenv
 
+    dev = Device[Device.DEFAULT] if device is None else Device[device] if isinstance(device, str) else device
+    renderer = dev.renderer
+    compiler = renderer.compiler
+    renderer_name, compiler_name = type(renderer).__name__, type(compiler).__name__
 
-def candidate_source_and_compiler(device:Any|None=None) -> tuple[str, str]:
-  from tinygrad.device import Device
-  from tinygrad.helpers import getenv
+    match renderer_name:
+      case "HIPCCRenderer": return "HIP C++", "hipcc"
+      case "HIPRenderer": return "HIP C++", "COMGR"
+      case "AMDLLVMRenderer": return "LLVM IR", "tinygrad AMDLLVM"
+      case "CUDARenderer": return "CUDA C++", "nvrtc"
+      case "NVCCRenderer": return "CUDA C++", "nvcc"
+      case "PTXRenderer": return "PTX", "ptxas"
+      case "MetalRenderer": return "Metal Shading Language", "Metal runtime compiler"
+      case "OpenCLRenderer" | "IntelRenderer" | "QCOMCLRenderer": return "OpenCL C", "OpenCL runtime compiler"
+      case "ClangRenderer" | "ClangJITRenderer": return "C", getenv("CC", "clang")
+      case "CPULLVMRenderer": return "LLVM IR", "LLVM"
 
-  dev = Device[Device.DEFAULT] if device is None else Device[device] if isinstance(device, str) else device
-  renderer = dev.renderer
-  compiler = renderer.compiler
-  renderer_name, compiler_name = type(renderer).__name__, type(compiler).__name__
-
-  match renderer_name:
-    case "HIPCCRenderer": return "HIP C++", "hipcc"
-    case "HIPRenderer": return "HIP C++", "COMGR"
-    case "AMDLLVMRenderer": return "LLVM IR", "tinygrad AMDLLVM"
-    case "CUDARenderer": return "CUDA C++", "nvrtc"
-    case "NVCCRenderer": return "CUDA C++", "nvcc"
-    case "PTXRenderer": return "PTX", "ptxas"
-    case "MetalRenderer": return "Metal Shading Language", "Metal runtime compiler"
-    case "OpenCLRenderer" | "IntelRenderer" | "QCOMCLRenderer": return "OpenCL C", "OpenCL runtime compiler"
-    case "ClangRenderer" | "ClangJITRenderer": return "C", getenv("CC", "clang")
-    case "CPULLVMRenderer": return "LLVM IR", "LLVM"
-
-  return renderer_name, compiler_name
+    return renderer_name, compiler_name
 
 
 def llama2_70b_lora_dummy_step(
