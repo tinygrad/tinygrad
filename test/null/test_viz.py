@@ -320,7 +320,7 @@ class TestVizGC(unittest.TestCase):
 
 # VIZ integrates with other parts of tinygrad
 
-from tinygrad import Tensor, Device, TinyJit, Variable
+from tinygrad import Tensor, Device, TinyJit, Variable, function
 
 class TestVizIntegration(unittest.TestCase):
   # codegen supports rendering of code blocks
@@ -979,6 +979,19 @@ class TestCLI(unittest.TestCase):
         select = run_cli(*files, "-s", "NULL", name)
     self.assertEqual(len([s for s in select if s.get("value")]), 1, "debug output was not deduped")
     self.assertEqual(len([s for s in select if s.get("device") == "NULL"]), CNT, f"expected 4 runs for {name}")
+
+  def test_call_graph(self):
+    with save_viz() as viz:
+      @function(precompile=True)
+      def f(x):
+        r = x.sum(axis=1).reshape(32, 1).expand(32, 32).contiguous()
+        return x + r
+      f(f(Tensor.empty(32, 32, device="NULL"))).realize()
+    with write_files(viz) as files, Context(NO_COLOR=1):
+      last_kernel = run_cli(*files, "-s", "NULL")[-1]["name"]
+      with Context(DEBUG=6):
+        out = run_cli(*files, "-s", "NULL", last_kernel)
+      print(out)
 
 if __name__ == "__main__":
   unittest.main()

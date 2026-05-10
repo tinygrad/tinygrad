@@ -4,7 +4,7 @@ os.environ["VIZ"] = "0"
 if hasattr(signal, "SIGPIPE"): signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 from typing import Iterator
 from tinygrad.viz import serve as viz
-from tinygrad.uop.ops import RewriteTrace
+from tinygrad.uop.ops import RewriteTrace, UOp, Ops
 from tinygrad.helpers import temp, ansistrip, colored, time_to_str, ansilen, ProfilePointEvent, ProfileRangeEvent, TracingKey, unwrap, NO_COLOR, DEBUG
 
 # profile decoder used in CLI and tests
@@ -45,8 +45,6 @@ def decode_profile(data:bytes) -> dict:
               for k,rep,num,mode in [u("<IIIB") for _ in range(u("<I")[0])]]}})
   return {"dur":total_dur, "peak":global_peak, "layout":layout, "markers":markers}
 
-def fmt_colored(s:str) -> str: return ansistrip(s) if NO_COLOR else s
-
 def to_str(k:str, v) -> str:
   if k == "FLOPS" or k.startswith("B/s"): return f"{v*1e-9:.0f} G{k}" if v < 1e13 else f"{v*1e-12:.0f} T{k}"
   if k == "B": return next((f"{v/s:.0f} {u}" for s,u in ((1e9,"GB"),(1e6,"MB"),(1e3,"KB")) if v>=s), f"{v:.0f} B")
@@ -59,6 +57,13 @@ def get(data:dict, key:str):
   import difflib
   match = difflib.get_close_matches(key, [ansistrip(k) for k in data], n=1, cutoff=0.6)
   raise RuntimeError(f'item "{key}" not found in list'+(f", did you mean {match[0]!r}?" if match else ''))
+
+def find_call(data:viz.VizData, ast:UOp) -> UOp|None:
+  for i,k in enumerate(data.trace.keys):
+    for s in data.trace.rewrites[i]:
+      if s.name == "View Kernel Graph":
+        for u in viz._reconstruct(data, s.sink).toposort(enter_calls=False):
+          if u.op is Ops.CALL and u.src[0] is ast: return u
 
 def main(args) -> None:
   viz.load_rewrites(viz_data:=viz.VizData(viz.load_pickle(args.rewrites_path, default=RewriteTrace([], [], {}))))
@@ -76,6 +81,13 @@ def main(args) -> None:
           print(emit(f"{loc.parent.name}/{loc.name}:{m['upat'][0][1]}\n{m['upat'][1]}"))
           for line in m["diff"]: print(emit(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None)))
     if data.get("src") is not None: print(emit(data["src"]))
+
+  def print_calls(name:str) -> None:
+    if (ast:=next((viz._reconstruct(viz_data, viz_data.trace.rewrites[i][0].sink) for i,k in enumerate(viz_data.trace.keys)
+                   if ansistrip(k.display_name) == ansistrip(name)), None)) is None: return print(emit(f"no AST for {name}"))
+    # find AST in CALL
+    if (found:=find_call(viz_data, ast)) is None: return None
+    print(viz.uop_to_json(viz_data, found))
 
   profile_bytes = viz.get_profile(viz_data, viz.load_pickle(args.profile_path, default=[]))
   if profile_bytes is None: raise RuntimeError(f"empty profile in {args.profile_path}")
@@ -189,11 +201,14 @@ def main(args) -> None:
     def render_event(k:dict, ls=args.list) -> None:
       if len(args.src) > 1 and ansistrip(k["name"]) not in args.src: return None
       print(emit(k, to_str=fmt_row))
+      if DEBUG >= 5 and len(args.src) > 1: print_calls(k["name"])
       if k["ref"] is not None and k["ref"] not in seen_refs:
         seen_refs.add(k["ref"])
         for s in viz_data.ctxs[k["ref"]]["steps"]:
-          if DEBUG >= 6 or ls: print(emit(" "*s["depth"]+s["name"]+(f" - {s['match_count']}" if s.get('match_count', 0) else '')))
-          if DEBUG >= 6 or DEBUG >= {"View Base AST":3, "View Source":4, "View Kernel Graph":5}.get(s["name"], 99): print_step(s)
+          if DEBUG >= 3 and s["name"] == "View Base AST": print_step(s)
+          if DEBUG >= 4 and s["name"] == "View Source": print_step(s)
+          if DEBUG >= 5 or ls: print(emit(" "*s["depth"]+s["name"]+(f" - {s['match_count']}" if s.get('match_count', 0) else '')))
+          if DEBUG >= 6: print_step(s)
           if DEBUG >= 7 or s["name"] in args.src: print_step(s, reconstruct_matches=True)
       elif DEBUG >= 3 and k.get("ext"): print(emit(k["ext"]))
     for k in (produce_top_kernels if args.t else produce_all_kernels)(): render_event(k)

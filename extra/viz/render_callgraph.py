@@ -38,7 +38,7 @@ for i,k in enumerate(data.trace.keys):
   root = root.substitute(param_replace)
   # print call
   for c in root.toposort(enter_calls=False):
-    if c.op is not Ops.CALL or c.src[0].op is not Ops.SINK: continue
+    if c.op is not Ops.CALL: continue
     arg_str:list[str] = []
     op_w, buf_w = 4, 32
     for u in c.src[1:]:
@@ -47,15 +47,17 @@ for i,k in enumerate(data.trace.keys):
       if u.op is Ops.MSTACK:
         arg_str.append(st:=f"{op_name[0].lower()} {u.device}")
       elif u.op is Ops.BUFFER_VIEW:
-        arg_str.append(st:=f"{op_name[0].lower()}{u.src[0].arg}[{u.arg[0]}:{u.arg[1]}]")
+        arg_str.append(st:=f"{op_name[0].lower()}{u.src[0].src[0].arg}[{u.arg[0]}:{u.arg[1]}]")
       else:
         assert u.op in {Ops.BUFFER}, f"{u.op}"
         arg_str.append(st:=f"{op_name[0].lower()}{u.src[0].arg}")
       if u not in seen_bufs:
-        print(f"{op_name[:3]:<{op_w}} {st:<{buf_w}} {str(u.dtype):<8} {prod(u.size())}")
+        print(f"{op_name[:3]:<{op_w}} {st:<{buf_w}} {str(u.dtype):<8} {u.device:<8} {prod(u.size())}")
         seen_bufs.add(u)
     body = c.src[0]
-    print(f"{'CALL':<{op_w}} {fmt_colored(uop_names.get(body, '<unknown>').removeprefix('do_to_program for '))}")
+    if body.op is Ops.SINK: name = fmt_colored(uop_names.get(body, '<unknown>').removeprefix('do_to_program for '))
+    else: name = f"{str(body.op).split('.')[1]}"
+    print(f"{'CALL':<{op_w}} {name}")
     if DEBUG >= 3: print(body.pyrender())
     for u in body.toposort():
       if u.op is Ops.INDEX:
