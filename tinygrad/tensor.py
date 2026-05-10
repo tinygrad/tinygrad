@@ -1075,7 +1075,7 @@ class Tensor(OpMixin):
     if not dtypes.is_bool(mask.dtype): raise RuntimeError(f"masked_select expects bool mask tensor, got {mask.dtype}")
     x, mask = self.flatten(), mask._broadcast_to(self.shape).flatten()
     mask_cumsum = mask.cumsum()
-    counts = Tensor.zeros(mask_cumsum[-1].item(), dtype=dtypes.int32)
+    counts = Tensor.zeros(mask_cumsum[-1].item(), dtype=dtypes.int32, device=self.device)
     idxs = counts.scatter(0, mask_cumsum, 1, reduce='add').cumsum()
     return x[idxs]
 
@@ -1398,7 +1398,7 @@ class Tensor(OpMixin):
     assert self.ndim > 1, f"expected two or more dimensions, got {self.ndim}"
     b_shape, m, n = self.shape[:-2], int(self.shape[-2]), int(self.shape[-1])
     R = self.clone()
-    Q = Tensor.eye(m, dtype=self.dtype).reshape((1,) * len(b_shape) + (m, m)).expand(b_shape + (m, m))
+    Q = Tensor.eye(m, dtype=self.dtype, device=self.device).reshape((1,) * len(b_shape) + (m, m)).expand(b_shape + (m, m))
     for i in range(min(m, n)):
       x = R[..., i:m, i]
       norm = x.square().sum(-1).sqrt()
@@ -1421,11 +1421,11 @@ class Tensor(OpMixin):
     num, q_num = min(m, n), max(m, n)
     # TODO: codegen infinite loop without contiguous
     U = R.shrink(tuple([None] * len(b_shape) + [(0, num), (0, num)])).contiguous()
-    V = Tensor.eye(num, dtype=self.dtype).reshape((1,) * len(b_shape) + (num, num)).expand(b_shape + (num, num)).contiguous()
+    V = Tensor.eye(num, dtype=self.dtype, device=self.device).reshape((1,) * len(b_shape) + (num, num)).expand(b_shape + (num, num)).contiguous()
     #prepare round robin pairing
-    permute, inverse_permute = Tensor.arange(0, num, dtype=dtypes.int), Tensor.zeros(num, dtype=dtypes.int)
+    permute, inverse_permute = Tensor.arange(0, num, dtype=dtypes.int, device=self.device), Tensor.zeros(num, dtype=dtypes.int, device=self.device)
     permute[num//2:num] = permute[num//2:num].flip(0)
-    inverse_permute[permute] = Tensor.arange(num, dtype=dtypes.int)
+    inverse_permute[permute] = Tensor.arange(num, dtype=dtypes.int, device=self.device)
     def one_round_jacobi(U, V,permute,inverse_permute):
       #pair all the columns
       V_permuted, runoff_V = (V[..., permute].split(num - 1, -1)) if num % 2 == 1 else (V[..., permute], None)
@@ -1449,7 +1449,7 @@ class Tensor(OpMixin):
       #prepare the next round robin pairings
       if num % 2 == 1: permute = ((permute - 1) % num)
       else: permute = permute[0].reshape(1).cat(((permute[1:num] - 2) % (num - 1)) + 1)
-      inverse_permute = inverse_permute.scatter(0,permute,Tensor.arange(num,dtype=dtypes.int32))
+      inverse_permute = inverse_permute.scatter(0,permute,Tensor.arange(num,dtype=dtypes.int32,device=self.device))
       return U, V, permute, inverse_permute
     max_iterations, iterations_per_round = 1, int(num * math.log2(num) * 2 + 2)#sorta heuristic, most use num*log2(num)
     for _ in range(max_iterations * iterations_per_round): U, V, permute, inverse_permute = one_round_jacobi(U, V, permute, inverse_permute)
@@ -1459,7 +1459,7 @@ class Tensor(OpMixin):
     U = U.gather(-1, new_indices) / (S != 0).where(S, 1).unsqueeze(-2)
     V = V.gather(-1, new_indices)
 
-    padded_u = Tensor.eye(q_num, dtype=U.dtype).reshape((1,) * len(b_shape) + (q_num, q_num)).expand(b_shape + (q_num, q_num))
+    padded_u = Tensor.eye(q_num, dtype=U.dtype, device=U.device).reshape((1,) * len(b_shape) + (q_num, q_num)).expand(b_shape + (q_num, q_num))
     padded_u[..., 0:num, 0:num] = U
     U = Q @ padded_u
     if not full_matrices: U, V = U[..., 0:num], V[..., 0:num]
