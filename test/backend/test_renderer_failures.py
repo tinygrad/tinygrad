@@ -4,8 +4,8 @@ from tinygrad.device import Device, is_dtype_supported
 from tinygrad.dtype import dtypes, ConstType
 from tinygrad.engine.realize import run_linear
 from tinygrad.codegen import to_program
-from tinygrad.helpers import prod
-from tinygrad.renderer.cstyle import CStyleLanguage
+from tinygrad.helpers import prod, Target
+from tinygrad.renderer.cstyle import CStyleLanguage, ClangRenderer
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.wgsl import WGSLRenderer
 from tinygrad.runtime.ops_python import PythonRenderer
@@ -49,6 +49,22 @@ class TestRendererFailures(unittest.TestCase):
     sink = UOp(Ops.SINK, dtypes.void, (gated_alu_store,), arg=KernelInfo())
     ret = _test_uop_result([], sink, local_size=[4, 2, 1])[0]
     np.testing.assert_equal(ret, [0, 0, 0, 0, 0, 1, 1, 1])
+
+class TestClangRendererFailures(unittest.TestCase):
+  def test_bfloat16_source_uses_ushort_storage(self):
+    const_linear = (Tensor.ones(4, dtype=dtypes.bfloat16) + Tensor.ones(4, dtype=dtypes.bfloat16)).schedule_linear()
+    assert len(const_linear.src) == 1
+    const_src = to_program(const_linear.src[0].src[0], ClangRenderer(Target("CPU"))).src[3].arg
+    self.assertNotIn("__bf16", const_src)
+    self.assertIn("unsigned short* restrict", const_src)
+    self.assertIn("16384u", const_src)
+
+    cast_linear = Tensor.empty(4, dtype=dtypes.bfloat16).cast(dtypes.half).schedule_linear()
+    assert len(cast_linear.src) == 1
+    cast_src = to_program(cast_linear.src[0].src[0], ClangRenderer(Target("CPU"))).src[3].arg
+    self.assertNotIn("__bf16", cast_src)
+    self.assertIn("__fp16* restrict", cast_src)
+    self.assertIn("unsigned short* restrict", cast_src)
 
 @unittest.skipIf(not isinstance(Device[Device.DEFAULT].renderer, CStyleLanguage), "uops are for cstyle")
 class TestCStyleFailures(unittest.TestCase):
