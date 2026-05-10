@@ -1,5 +1,5 @@
 from __future__ import annotations
-import os, time, numpy as np
+import os, time
 from typing import Any
 
 from tinygrad import Tensor, Device
@@ -393,4 +393,5 @@ def llama2_70b_lora_dummy_step(
 
 
 if __name__ == "__main__":
+  import numpy as np
   _main_gemm_optimization()
