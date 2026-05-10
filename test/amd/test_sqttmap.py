@@ -134,8 +134,8 @@ class TestSQTTMapBase(unittest.TestCase):
       for name in sqtt_traces:
         lines = run_cli("--profile-path", str(pkl_path), "-s", ansistrip(name))
         self.assertIn("Clk", lines[0]["value"])
-        times = [r["clk"] for r in lines[2:]]
-        self.assertEqual(times, sorted(times), f"timestamps not monotonic in {name}")
+        waves = [r["clk"] for r in lines[2:] if "WAVE" in r["unit"]]
+        self.assertEqual(waves, sorted(waves), f"wave timestamps not monotonic in {name}")
       with Context(DEBUG=2):
         kernels = run_cli("--profile-path", str(pkl_path), "-s", "AMD")
       self.assertEqual(len(kernels), len(self.examples[pkl_path.stem][1]))

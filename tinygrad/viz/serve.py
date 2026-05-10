@@ -342,7 +342,7 @@ def load_amd_counters(data:VizData, profile:list) -> None:
       for e in sqtt:
         if e.itrace: steps.append(create_step(f"SE:{e.se} PKTS", (f"/sqtt-{e.se}",len(data.ctxs),len(steps)), data=(e.blob,prg_events[k].lib,arch)))
       try:
-        from extra.sqtt.roc import unpack_occ
+        with Context(DEBUG=0): from extra.sqtt.roc import unpack_occ
         steps.append(create_step("OCC", ("/amd-sqtt-occ", len(data.ctxs), len(steps)),
                                  data={"fxn":unpack_occ, "args":((k, tag), sqtt, prg_events[k], arch)}))
       except Exception: pass
