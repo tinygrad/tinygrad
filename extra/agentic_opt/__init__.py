@@ -86,6 +86,23 @@ class KernelRuntimeProfile(BaseModel):
   runtime_ms: float = Field(description="Elapsed GPU/runtime time in milliseconds.")
 
 
+class KernelDescriptor(BaseModel):
+  model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+  entry_point: str = Field(description="Kernel function name. Candidates must preserve this name.")
+  type_family: str = Field(description="High-level kernel family, for example gemm, gemm_bwd, fa_fwd, fa_bwd_pre, fa_bwd, or fa_bwd_post.")
+  source: str = Field(description="Current candidate kernel source code.")
+  global_size: tuple[int, ...] = Field(description="Launch grid/global dimensions.")
+  local_size: tuple[int, ...]|None = Field(default=None, description="Launch workgroup/local dimensions, if the backend uses them.")
+  description: str|None = Field(default=None, description="Optional concise semantic note supplied by the MCP or caller.")
+
+  @field_validator("name", "type_family", "source")
+  @classmethod
+  def _nonempty(cls, value:str) -> str:
+    if value == "": raise ValueError("must be non-empty")
+    return value
+
+
 def llama2_70b_lora_dummy_step(
   bs:int=1,
   seqlen:int=128,
