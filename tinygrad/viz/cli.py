@@ -59,13 +59,6 @@ def get(data:dict, key:str):
   match = difflib.get_close_matches(key, [ansistrip(k) for k in data], n=1, cutoff=0.6)
   raise RuntimeError(f'item "{key}" not found in list'+(f", did you mean {match[0]!r}?" if match else ''))
 
-def find_call(data:viz.VizData, ast:UOp) -> UOp|None:
-  for i,k in enumerate(data.trace.keys):
-    for s in data.trace.rewrites[i]:
-      if s.name == "View Kernel Graph":
-        for u in viz._reconstruct(data, s.sink).toposort(enter_calls=False):
-          if u.op is Ops.CALL and u.src[0] is ast: return u
-
 def main(args) -> None:
   viz.load_rewrites(viz_data:=viz.VizData(viz.load_pickle(args.rewrites_path, default=RewriteTrace([], [], {}))))
 
@@ -86,9 +79,11 @@ def main(args) -> None:
   def print_calls(name:str) -> None:
     if (ast:=next((viz._reconstruct(viz_data, viz_data.trace.rewrites[i][0].sink) for i,k in enumerate(viz_data.trace.keys)
                    if ansistrip(k.display_name) == ansistrip(name)), None)) is None: return print(emit(f"no AST for {name}"))
-    # find AST in CALL
-    if (found:=find_call(viz_data, ast)) is None: return None
-    print(viz.uop_to_json(viz_data, found))
+    for i,k in enumerate(viz_data.trace.keys):
+      for s in viz_data.trace.rewrites[i]:
+        if s.name == "View Kernel Graph":
+          for u in viz._reconstruct(viz_data, s.sink).toposort(enter_calls=False):
+            if u.op is Ops.CALL and u.src[0] is ast: print(emit(viz.uop_to_json(viz_data, u)))
 
   profile_bytes = viz.get_profile(viz_data, viz.load_pickle(args.profile_path, default=[]))
   if profile_bytes is None: raise RuntimeError(f"empty profile in {args.profile_path}")
