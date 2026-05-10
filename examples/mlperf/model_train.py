@@ -1812,7 +1812,7 @@ def train_flux():
   BASEDIR = getenv("BASEDIR", "/raid/datasets/flux/")
   EMPTYENCDIR = getenv("EMPTYENCDIR", "/raid/datasets/flux/empty_encodings")
 
-  num_samples = 1099776
+  train_num_samples, val_num_samples = 1099776, 29696
   target_eval_loss = 0.586
   gbs = BS
   eval_freq_step = math.ceil(262144 / gbs)
@@ -1833,6 +1833,9 @@ def train_flux():
 
   def get_train_iter() -> Iterator[tuple[Tensor, Tensor, Tensor, Tensor, Tensor]]:
     return batch_load_flux(BS, False, BASEDIR, empty_enc_dir=EMPTYENCDIR, seed=SEED)
+
+  def get_val_iter() -> Iterator[tuple[Tensor, Tensor, Tensor, Tensor, Tensor]]:
+    return batch_load_flux(BS, True, BASEDIR, cfg_prob=0.0, is_infinite=False)
 
   @TinyJit
   def train_step(model:Flux, optim:AdamW, sample:dict[str, Tensor]) -> Tensor:
@@ -1900,18 +1903,20 @@ def train_flux():
   optim = AdamW(get_parameters(model), lr=lr, eps=lr_eps)
 
   train_iter = get_train_iter()
+  val_iter = get_val_iter()
 
   # training loop
   i = 1
 
-  for sample in tqdm(train_iter, total=num_samples//BS):
+  for sample in tqdm(train_iter, total=train_num_samples // BS):
     if i >= NUM_STEPS:
       break
 
     train_loss = train_step(model, optim, sample)
 
     if i % eval_freq_step == 0:
-      eval_loss = eval_step(model, [])
+      for sample in tqdm(val_iter, total=val_num_samples // BS):
+        eval_loss = eval_step(model, [])
 
       if eval_loss <= target_eval_loss:
         print(f"target eval loss reached: {eval_loss:.3f} (target: {target_eval_loss:.3f})")
