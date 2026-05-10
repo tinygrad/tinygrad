@@ -29,6 +29,8 @@ class AgenticOpt:
     self.history: list[CandidateEvaluation] = [self.best_evaluation]
 
   def _run_kernel(self, kernel:Kernel, args: list[Tensor]) -> float:
+    if self.reference_kernel.entry_point not in kernel.source:
+      raise RuntimeError(f"candidate source does not define required entry point {self.reference_kernel.entry_point!r}")
     dev = Device[self.device]
     lib = dev.compiler.compile(kernel.source)
     rt = dev.runtime(self.reference_kernel.entry_point, lib)
@@ -170,7 +172,7 @@ class AgenticOpt:
       "Search the internet for reference kernels and documentation"
     )
 
-def render_gemm_kernel_descriptor(n:int=2048, device:str="METAL", dtype:str="float") -> KernelDescriptor:
+def render_gemm_kernel_descriptor(n:int=2048, device:str="METAL", dtype:str="bfloat16") -> KernelDescriptor:
   from tinygrad.engine.realize import compile_linear
   from tinygrad.helpers import Context
   from tinygrad.uop.ops import Ops
@@ -187,7 +189,7 @@ def render_gemm_kernel_descriptor(n:int=2048, device:str="METAL", dtype:str="flo
   source = next(x.arg for x in prg.src if x.op is Ops.SOURCE)
 
   return KernelDescriptor(
-    entry_point=prg.arg.name,
+    entry_point=prg.arg.function_name,
     type_family="gemm",
     kernel=Kernel(source=source, global_size=tuple(int(x) for x in prg.arg.global_size),
                   local_size=tuple(int(x) for x in prg.arg.local_size) if prg.arg.local_size is not None else None),
@@ -197,10 +199,35 @@ def render_gemm_kernel_descriptor(n:int=2048, device:str="METAL", dtype:str="flo
       BufferArg(shape=(1, n, n), dtype=dtype),
       BufferArg(shape=(n, n), dtype=dtype),
     ],
-    description=f"Square GEMM C = A @ B for N={n}. Buffer ABI is C[1,N,N], A[1,N,N], B[N,N].",
+    description=f"Square GEMM C = A @ B for N={n}. Reference mode=naive. Buffer ABI is C[1,N,N], A[1,N,N], B[N,N].",
   )
 
-def _time_tinyjit_gemm_reference(n:int, device:str, dtype:str, jitbeam:int, warmup:int, repeats:int) -> tuple[list[Tensor], list[Tensor], float]:
+def _extract_tinyjit_gemm_descriptor(matmul:Any, n:int, dtype:str, reference:str) -> KernelDescriptor:
+  from tinygrad.uop.ops import Ops
+
+  if matmul.captured is None: raise RuntimeError("TinyJit did not capture a GEMM kernel")
+  calls = [call for call in matmul.captured.linear.src if call.src[0].op is Ops.PROGRAM]
+  if len(calls) != 1: raise RuntimeError(f"expected one captured GEMM program, got {len(calls)}")
+  prg = calls[0].src[0]
+  source = next((x.arg for x in prg.toposort() if x.op is Ops.SOURCE), None)
+  if source is None: raise RuntimeError("captured GEMM program has no rendered source")
+  global_size, local_size = prg.arg.launch_dims({})
+
+  return KernelDescriptor(
+    entry_point=prg.arg.function_name,
+    type_family="gemm",
+    kernel=Kernel(source=source, global_size=tuple(int(x) for x in global_size),
+                  local_size=tuple(int(x) for x in local_size) if local_size is not None else None),
+    buffer_args=[
+      BufferArg(shape=(1, n, n), dtype=dtype),
+      BufferArg(shape=(1, n, n), dtype=dtype),
+      BufferArg(shape=(n, n), dtype=dtype),
+    ],
+    description=f"Square GEMM C = A @ B for N={n}. Reference mode={reference}; source is the settled TinyJit/JITBEAM matmul kernel. "
+                "Buffer ABI is C[1,N,N], A[1,N,N], B[N,N].",
+  )
+
+def _time_tinyjit_gemm_reference(n:int, device:str, dtype:str, jitbeam:int, warmup:int, repeats:int) -> tuple[list[Tensor], list[Tensor], float, KernelDescriptor]:
   from tinygrad import TinyJit
   from tinygrad.helpers import Context
 
@@ -217,11 +244,12 @@ def _time_tinyjit_gemm_reference(n:int, device:str, dtype:str, jitbeam:int, warm
   os.environ["JITBEAM"] = str(jitbeam)
   times: list[float] = []
   try:
-    with Context(BEAM=jitbeam):
+    with Context(BEAM=jitbeam, CACHELEVEL=0):
       correct = None
-      for _ in range(warmup):
+      for _ in range(max(warmup, 2)):
         correct = matmul(a, b)
         Device[device].synchronize()
+      reference_kernel = _extract_tinyjit_gemm_descriptor(matmul, n, dtype, "beam")
       for _ in range(repeats):
         st = time.perf_counter()
         correct = matmul(a, b)
@@ -232,12 +260,12 @@ def _time_tinyjit_gemm_reference(n:int, device:str, dtype:str, jitbeam:int, warm
     else: os.environ["JITBEAM"] = old_jitbeam
 
   assert correct is not None
-  return [out, a, b], [correct.realize(), a.clone().realize(), b.clone().realize()], sorted(times)[len(times)//2]
+  return [out, a, b], [correct.realize(), a.clone().realize(), b.clone().realize()], sorted(times)[len(times)//2], reference_kernel
 
 def _main_gemm_optimization():
   device = os.getenv("AGENTIC_DEVICE", os.getenv("DEV", "METAL"))
   n = int(os.getenv("AGENTIC_N", "2048"))
-  dtype = os.getenv("AGENTIC_DTYPE", "float")
+  dtype = os.getenv("AGENTIC_DTYPE", "bfloat16")
   jitbeam = int(os.getenv("AGENTIC_JITBEAM", os.getenv("JITBEAM", "3")))
   warmup = int(os.getenv("AGENTIC_WARMUP", "1"))
   repeats = int(os.getenv("AGENTIC_REPEATS", "3"))
@@ -248,23 +276,29 @@ def _main_gemm_optimization():
   model = os.getenv("AGENTIC_MODEL")
   if model is None and (vendor:=os.getenv("AGENTIC_VENDOR")) and (model_name:=os.getenv("AGENTIC_MODEL_NAME")):
     model = f"{vendor}:{model_name}"
+  reference = os.getenv("AGENTIC_REFERENCE", "naive")
+  if reference not in ("naive", "beam"): raise ValueError(f"unknown AGENTIC_REFERENCE={reference!r}, expected 'naive' or 'beam'")
 
   if model is None:
     raise SystemExit("set AGENTIC_MODEL, for example AGENTIC_MODEL=openai:gpt-5.4 or AGENTIC_MODEL=anthropic:claude-sonnet-4-5")
 
-  print(f"rendering generic UOp GEMM for {device=} {n=} {dtype=}")
-  reference_kernel = render_gemm_kernel_descriptor(n=n, device=device, dtype=dtype)
-  print(f"reference entry={reference_kernel.entry_point} global={reference_kernel.kernel.global_size} local={reference_kernel.kernel.local_size}")
-
   print(f"timing tinygrad baseline with TinyJit/JITBEAM={jitbeam}")
-  test_bufs, correct_bufs, baseline_ms = _time_tinyjit_gemm_reference(n, device, dtype, jitbeam, warmup, repeats)
+  test_bufs, correct_bufs, baseline_ms, beam_kernel = _time_tinyjit_gemm_reference(n, device, dtype, jitbeam, warmup, repeats)
   print(f"tinygrad baseline median: {baseline_ms:.6f} ms")
 
+  if reference == "beam":
+    reference_kernel = beam_kernel
+  else:
+    print(f"rendering generic UOp GEMM for {device=} {n=} {dtype=} {reference=}")
+    reference_kernel = render_gemm_kernel_descriptor(n=n, device=device, dtype=dtype)
+  print(f"reference entry={reference_kernel.entry_point} global={reference_kernel.kernel.global_size} local={reference_kernel.kernel.local_size}")
+
   opt = AgenticOpt(device, reference_kernel, test_bufs=test_bufs, correct_bufs=correct_bufs, reference_runtime_ms=baseline_ms)
+  source_note = "the settled TinyJit/JITBEAM matmul kernel" if reference == "beam" else "the generic UOp GEMM scaffold"
   result = opt.optimize_kernel(
     model=model, max_iterations=max_iterations, patience=patience, target_speedup=target_speedup, max_failures=max_failures,
     prompt=(
-      "Optimize this square GEMM kernel for the provided target. The reference source is rendered from the generic UOp GEMM scaffold. "
+      f"Optimize this square GEMM kernel for the provided target. The reference source is {source_note}. "
       "The baseline runtime in history is the tinygrad TinyJit/JITBEAM matmul baseline, not the naive source runtime."
     ),
   )
