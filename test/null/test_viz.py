@@ -904,12 +904,12 @@ class TestCfg(unittest.TestCase):
     self.get_cfg("jump_back_to_end", k)
 
 # launch viz cli without subprocess
-def run_cli(*cli_args) -> str:
+def run_cli(*cli_args) -> list[dict]:
   from tinygrad.viz.cli import main, get_arg_parser
-  args = get_arg_parser().parse_args(cli_args)
+  args = get_arg_parser().parse_args(cli_args+("--json",))
   with contextlib.redirect_stdout(buf:=io.StringIO()):
     main(args)
-  return buf.getvalue().strip()
+  return [json.loads(line) for line in buf.getvalue().strip().splitlines()]
 
 @contextlib.contextmanager
 def write_files(viz) -> list[str]:
@@ -926,8 +926,8 @@ class TestCLI(unittest.TestCase):
       Tensor.empty(1, device="NULL").add(3.0).realize()
     with write_files(viz) as files, Context(DEBUG=4):
       out = run_cli(*files, "-s", "NULL")
-    self.assertIn("void E", out)
-    self.assertIn("marker @ 1", out)
+    assert any(s.get("value", "").startswith("void E") for s in out)
+    assert any(s.get("name", "") == "marker @ 1" for s in out)
 
   def test_aggregate(self):
     N, CNT = 1024, 5
@@ -937,7 +937,7 @@ class TestCLI(unittest.TestCase):
       for _ in range(CNT):
         (Tensor.empty(N, N, device="NULL").assign(Tensor.empty(N, N, device="NULL"))).realize()
     with write_files(viz) as files, Context(NO_COLOR=1):
-      kernels = [json.loads(line) for line in run_cli(*files, "-s", "NULL", "-t", "--json").splitlines()]
+      kernels = run_cli(*files, "-s", "NULL", "-t")
     self.assertEqual(len(kernels), 2)
     gemm_summary = [s for s in kernels if s["name"].startswith("r_")][0]
     copy_summary = [s for s in kernels if s["name"].startswith("E_")][0]
@@ -956,8 +956,8 @@ class TestCLI(unittest.TestCase):
         j = Variable("j", 1, 64).bind(j_val)
         Tensor.realize(*f(a[:i], b[:j]))
     with write_files(viz) as files:
-      out = [json.loads(line) for line in run_cli(*files, "-s", "NULL", "--json").splitlines()]
-      aggregate = [json.loads(line) for line in run_cli(*files, "-s", "NULL", "-t", "--json").splitlines()]
+      out = run_cli(*files, "-s", "NULL")
+      aggregate = run_cli(*files, "-s", "NULL", "-t")
     self.assertEqual(len(out), 3*2)
     # flops increases as N gets larger
     gflops = [row["fmt"]["FLOPS"] for row in out]
@@ -973,9 +973,9 @@ class TestCLI(unittest.TestCase):
       for _ in range(CNT:=4):
         Tensor.empty(4, device="NULL").add(1).realize()
     with write_files(viz) as files, Context(NO_COLOR=1):
-      name = json.loads(run_cli(*files, "-s", "NULL", "--json").splitlines()[0])["name"]
+      name = run_cli(*files, "-s", "NULL")[0]["name"]
       with Context(DEBUG=3):
-        select = [json.loads(line) for line in run_cli(*files, "-s", "NULL", name, "--json").splitlines()]
+        select = run_cli(*files, "-s", "NULL", name)
     self.assertEqual(len([s for s in select if s.get("value")]), 1, "debug output was not deduped")
     self.assertEqual(len([s for s in select if s.get("device") == "NULL"]), CNT, f"expected 4 runs for {name}")
 
