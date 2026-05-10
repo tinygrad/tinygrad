@@ -984,17 +984,22 @@ class TestCLI(unittest.TestCase):
     self.assertEqual(len([s for s in select if s.get("device") == "NULL"]), CNT, f"expected 4 runs for {name}")
 
   def test_call_graph(self):
-    with save_viz() as viz:
-      @function(precompile=True)
-      def f(x):
-        r = x.sum(axis=1).reshape(32, 1).expand(32, 32).contiguous()
-        return x + r
+    @function(precompile=True)
+    def f(x):
+      r = x.sum(axis=1).reshape(32, 1).expand(32, 32).contiguous()
+      return x + r
+    # turn of scache because this test requires a complete schedule rewrite
+    with save_viz() as viz, Context(SCACHE=0):
       f(f(Tensor.empty(32, 32, device="NULL"))).realize()
     with write_files(viz) as files, Context(NO_COLOR=1):
-      last_kernel = run_cli(*files, "-s", "NULL")[-1]["name"]
+      prgs = [s["name"] for s in run_cli(*files, "-s", "NULL")]
       with Context(DEBUG=6):
-        out = run_cli(*files, "-s", "NULL", last_kernel)
-      print(out)
+        out = run_cli(*files, "-s", "TINY")
+    i = next(i for i,s in enumerate(out) if s.get("value", "").lstrip() == "View Kernel Graph")
+    # next print is the CALL graph, CLI outputs exactly as web in TestVizIntegration.test_link_sched_codegen
+    call_nodes = [n for n in out[i+1].values() if n["label"].startswith("CALL")]
+    for i,n in enumerate(call_nodes):
+      assert prgs[i] in n["label"], f"CALL must contain kernel name, got {n['label']}"
 
 if __name__ == "__main__":
   unittest.main()
