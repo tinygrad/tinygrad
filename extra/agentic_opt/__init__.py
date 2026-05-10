@@ -93,6 +93,7 @@ class KernelDescriptor(BaseModel):
   type_family: str = Field(description="High-level kernel family, for example gemm, gemm_bwd, fa_fwd, fa_bwd_pre, fa_bwd, or fa_bwd_post.")
   source: str = Field(description="Current candidate kernel source code.")
   global_size: tuple[int, ...] = Field(description="Launch grid/global dimensions.")
+  buffer_shapes: tuple[tuple[int, ...]] = Field(description="Shapes for buffer arguments in kernel ABI order. Buffers are assumed dense row-major contiguous.")
   local_size: tuple[int, ...]|None = Field(default=None, description="Launch workgroup/local dimensions, if the backend uses them.")
   description: str|None = Field(default=None, description="Optional concise semantic note supplied by the MCP or caller.")
 
