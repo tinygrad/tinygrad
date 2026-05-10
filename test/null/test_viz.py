@@ -340,15 +340,18 @@ class TestVizIntegration(unittest.TestCase):
       c1 = Tensor.empty(4).add(1)
       c2 = Tensor.empty(8).add(1)
       sched = c1.schedule_linear(c2)
-      prgs = [to_program(si.src[0], Device[Device.DEFAULT].renderer).arg.name for si in sched.src]
+      with Context(NO_COLOR=0):
+        prgs = [to_program(si.src[0], Device[Device.DEFAULT].renderer).arg.name for si in sched.src]
     lst = viz.list_items()
     sched_idx = next(i for i,l in enumerate(lst) if l["name"].startswith("Schedule"))
     viz_kernel = next(i for i,s in enumerate(lst[sched_idx]["steps"]) if s["name"] == "View Kernel Graph")
-    graph = next(viz.get_details(sched_idx, viz_kernel))["graph"]
+    with Context(NO_COLOR=1):
+      graph = next(viz.get_details(sched_idx, viz_kernel))["graph"]
     call_nodes = [n for n in graph.values() if n["label"].startswith("CALL")]
     for i,n in enumerate(call_nodes):
       assert n["ref"] is not None
       self.assertEqual(lst[n["ref"]]["name"], prgs[i])
+      assert ansistrip(prgs[i]) in n["label"], f"CALL must contain kernel name, got {n['label']}"
 
   @Context(TRACEMETA=2)
   def test_metadata_tracing(self):
