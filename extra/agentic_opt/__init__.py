@@ -1,8 +1,48 @@
 from __future__ import annotations
-
 import os
 from typing import Any
+from fastmcp import FastMCP
+from extra.agentic_opt.models import CandidateEvaluation, HardwareDescriptor, Kernel, KernelDescriptor
+class AgenticOpt:
+  def __init__(self, device:str, reference_kernel:KernelDescriptor):
+    self.hardware = HardwareDescriptor.from_dev(device)
+    self.reference_kernel = reference_kernel
+    self.history: list[CandidateEvaluation] = []
+    self.best_evaluation: CandidateEvaluation|None = None
 
+  def evaluate_kernel(self, candidate:Kernel) -> CandidateEvaluation:
+    ...
+    # TODO: run, time, and verify kernel, add to history, save best kernel
+    # evaluation = self.evaluator(candidate)
+    # self.history.append(evaluation)
+    # if self._is_better(evaluation, self.best_evaluation): self.best_evaluation = evaluation
+    # return evaluation
+
+  def get_history(self) -> tuple[CandidateEvaluation, ...]:
+    return tuple(self.history)
+
+  def create_server(self, name:str="agentic-opt") -> Any:
+    mcp = FastMCP(name)
+
+    @mcp.tool()
+    def get_hardware_descriptor() -> HardwareDescriptor: return self.hardware
+
+    @mcp.tool()
+    def get_reference_kernel() -> KernelDescriptor: return self.reference_kernel
+
+    @mcp.tool()
+    def evaluate_kernel(candidate:Kernel) -> CandidateEvaluation: return self.evaluate_kernel(candidate)
+
+    @mcp.tool()
+    def get_history() -> list[CandidateEvaluation]: return self.history
+
+    return mcp
+
+  @staticmethod
+  def _is_better(candidate:CandidateEvaluation, best:CandidateEvaluation|None) -> bool:
+    if not candidate.correctness.passed or candidate.runtime is None: return False
+    if best is None or best.runtime is None: return True
+    return candidate.runtime.runtime_ms < best.runtime.runtime_ms
 
 def llama2_70b_lora_dummy_step(
   bs:int=1,
