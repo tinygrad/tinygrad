@@ -993,7 +993,7 @@ class TestCLI(unittest.TestCase):
       f(f(Tensor.empty(32, 32, device="NULL"))).realize()
     with write_files(viz) as files, Context(NO_COLOR=1):
       prgs = [s["name"] for s in run_cli(*files, "-s", "NULL")]
-      with Context(DEBUG=6):
+      with Context(DEBUG=5):
         out = run_cli(*files, "-s", "TINY")
     i = next(i for i,s in enumerate(out) if s.get("value", "").lstrip() == "View Kernel Graph")
     # next print is the CALL graph, CLI outputs exactly as web in TestVizIntegration.test_link_sched_codegen
