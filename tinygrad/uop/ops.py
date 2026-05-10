@@ -422,9 +422,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     return UOp(Ops.GROUP, dtypes.void, tuple([x for x in srcs if x is not None]))
   def vectorize(self, *srcs):
     return UOp(Ops.STACK, self.dtype.vec(len(srcs)+1), (self,)+srcs)
-  def index(self, *srcs:UOp|int|None, ptr=False, **kwargs):
-    srcs = tuple(UOp.const(dtypes.int, x) if isinstance(x, int) else x for x in srcs if x is not None)
-    return UOp(Ops.INDEX, kwargs.pop("dtype", self.dtype if ptr else self.dtype.base), (self,)+srcs, **kwargs)
+  def index(self, *srcs:UOp|None, ptr=False, **kwargs):
+    return UOp(Ops.INDEX, kwargs.pop("dtype", self.dtype if ptr else self.dtype.base), (self,)+tuple([x for x in srcs if x is not None]), **kwargs)
   def __getitem__(self, idx):
     # pointers index into INDEX UOps (scalar lookup); everything else uses the shared mixin view path
     if not isinstance(self.dtype, PtrDType): return super(UOp, self).__getitem__(idx)
@@ -1255,11 +1254,10 @@ class PatternMatcher:
     self.pdict: dict[Ops, list[list]] = {}
     # uop is required, arg is optional
     for p,fxn in self.patterns:
-      entry: list = [p, None, set() if p.is_any else p.early_reject]
+      assert p.op is not None
+      entry: list = [p, None, p.early_reject]
       entry[1] = upat_deferred_compile(p, fxn, entry) if compiled else upat_interpret(p, fxn)
-      for sub in (p.src[0] if p.is_any else (p,)):
-        assert sub.op is not None
-        for uop in sub.op: self.pdict.setdefault(uop, []).append(entry)
+      for uop in p.op: self.pdict.setdefault(uop, []).append(entry)
 
   def __reduce__(self): return PatternMatcher, ([(x,deconstruct_function(fxn) if fxn.__name__ == "<lambda>" else fxn) for x,fxn in self.patterns],)
 

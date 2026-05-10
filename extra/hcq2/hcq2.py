@@ -5,7 +5,7 @@ from dataclasses import replace
 from tinygrad.helpers import DEV, getenv, select_first_inited, select_by_name, suppress_finalizing, wait_cond
 from tinygrad.device import Device, Buffer, BufferSpec, Compiled, LRUAllocator
 from tinygrad.uop.ops import Ops, sint, UOp, UPat, PatternMatcher, KernelInfo, graph_rewrite, track_rewrites
-from tinygrad.dtype import dtypes, dtype_for_fmt
+from tinygrad.dtype import dtypes
 from dataclasses import dataclass, field
 from tinygrad.runtime.support.memory import BumpAllocator
 from tinygrad.runtime.support.hcq import MMIOInterface
@@ -197,14 +197,13 @@ class HCQEncoder:
     while uop.op in (Ops.AFTER,): uop = uop.src[0]
     return self.ctx.as_dev_uop(uop)
 
-  def append(self, *data, fmt='I'):
+  def append(self, *data, dtype=dtypes.uint32):
     for d in data:
-      if isinstance(d, int): self.blob += struct.pack(f'<{fmt}', d)
-      elif d.op is Ops.CONST: self.blob += struct.pack(f'<{fmt}', d.arg)
+      if isinstance(d, int): self.blob += struct.pack(f'<{dtype.fmt}', d)
+      elif d.op is Ops.CONST: self.blob += struct.pack(f'<{dtype.fmt}', d.arg)
       else:
-        # this uop is calculated later and applied as a patch
-        self.patches.append(UOp(Ops.PARAM, dtype_for_fmt(fmt), src=(d,), arg=len(self.blob)))
-        self.blob += struct.pack(f'<{fmt}', 0)
+        self.patches.append(UOp(Ops.PARAM, dtype, src=(d,), arg=len(self.blob)))
+        self.blob += struct.pack(f'<{dtype.fmt}', 0)
 
   def q(self, *values): self.append(*values)
 
@@ -214,8 +213,8 @@ def do_init_args(ctx:HCQ2LowerCtx, call:UOp, prg:UOp) -> UOp:
   data, info = prg.arg
 
   enc = HCQEncoder(ctx)
-  for gi in info.globals: enc.append(call.src[1+gi], fmt='Q')
-  for v in info.vars: enc.append(v, fmt='I')
+  for gi in info.globals: enc.append(call.src[1+gi], dtype=dtypes.uint64)
+  for v in info.vars: enc.append(v, dtype=dtypes.uint32)
 
   args_off = ctx.kernargs_allocator.alloc(data.kernargs_alloc_size, 16)
 
@@ -268,7 +267,7 @@ def resolve_cmdbuf(ctx:HCQ2LowerCtx, blob:UOp) -> UOp:
 
   # increment the timeline value
   tl = ctx.host_param(ctx.dev.timeline_value)
-  return tl.after(UOp(Ops.BARRIER, dtypes.void, src=(submit_cf,))).index(0, ptr=True).store(tl[0] + 1)
+  return tl.after(UOp(Ops.BARRIER, dtypes.void, src=(submit_cf,))).index(UOp.const(dtypes.int, 0), ptr=True).store(tl[0] + 1)
 
 def resolve_patches(ctx:HCQ2LowerCtx, buf:UOp) -> UOp|None:
   inner = buf.src[0]
@@ -276,7 +275,7 @@ def resolve_patches(ctx:HCQ2LowerCtx, buf:UOp) -> UOp|None:
   # buffer is accessed from the launcher, so transform it to a param
   if inner.op is Ops.BUFFER: inner = ctx.param(inner)
 
-  return inner.after(*(inner.index(p.arg//inner.dtype.base.itemsize, ptr=True).cast(p.dtype.ptr()).store(p.src[0].cast(p.dtype))
+  return inner.after(*(inner.index(UOp.const(dtypes.int, p.arg//inner.dtype.base.itemsize), ptr=True).cast(p.dtype.ptr()).store(p.src[0].cast(p.dtype))
                            if p.op is Ops.PARAM and len(p.src) == 1 else p for p in buf.src[1:]))
 
 def resolve_ref_buffers(ctx:HCQ2LowerCtx, buf:UOp) -> UOp:
