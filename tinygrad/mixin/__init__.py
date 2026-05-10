@@ -620,7 +620,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     padded = [t.pad(tuple((dim_cumsum[i], dim_cumsum[-1]-dim_cumsum[i+1]) if j==dim else None for j in range(t.ndim))) for i,t in enumerate(tensors)]
     return padded[0].usum(*padded[1:])
 
-  def stack(self, *args:Self, dim:int=0) -> Self:
+  def stack(self, *args, dim:int=0):
     """
     Concatenates self with other tensors in `args` along a new dimension specified by `dim`.
 
@@ -653,7 +653,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     ret = self.transpose(axis,-1)._pad_constant((None,)*(self.ndim-1)+((round_up(s,SPLIT)-s,0),), value).unflatten(-1,(-1,SPLIT))._cumalu(-1, op)
     base = ret[..., -1]._cumalu(-1, op)._pad_constant((None,)*(ret.ndim-2) + ((1, -1),), value)
     base = base.unsqueeze(-1).expand(*base.shape, ret.shape[-1])
-    def fix(x: Self) -> Self: return x.flatten(start_dim=-2)[..., -s:].transpose(axis,-1)
+    def fix(x): return x.flatten(start_dim=-2)[..., -s:].transpose(axis,-1)
     return getattr(fix(ret), {Ops.ADD: "add", Ops.MAX: "maximum", Ops.MUL: "mul"}[op])(fix(base))
 
   def cumsum(self, axis:int=0) -> Self:
@@ -843,7 +843,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     x = x.flatten(dim, dim+n_stages-1).shrink_to(self.shape)
     # compute indices for sorted values
     mask = type(self).ones(orig_len, orig_len, dtype=dtypes.bool, device=self.device).tril().reshape((None, None) + (1,)*(self.ndim-dim-1))
-    def compute_counts(t:Self): return (mask & t.unsqueeze(dim).eq(t.unsqueeze(dim+1))).sum(dim+1)
+    def compute_counts(t): return (mask & t.unsqueeze(dim).eq(t.unsqueeze(dim+1))).sum(dim+1)
     count_orig, count_sorted = compute_counts(self), compute_counts(x)
     cond = self.unsqueeze(dim+1).eq(x.unsqueeze(dim)) & count_orig.unsqueeze(dim+1).eq(count_sorted.unsqueeze(dim))
     idx = type(self).arange(orig_len, device=self.device).reshape(tuple(orig_len if i == dim else 1 for i in range(x.ndim)))
@@ -878,7 +878,8 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     ```
     """
     if not sorted_: raise NotImplementedError("topk with sorted_=False is not supported")
-    if k > self.shape[dim:=self._resolve_dim(dim)]: raise ValueError(f"selected index {k=} is out of range")
+    dim = self._resolve_dim(dim)
+    if k > self.shape[dim]: raise ValueError(f"selected index {k=} is out of range")
     x, idx = self.sort(dim, descending=largest)
     topk_shape = tuple(k if i == dim else None for i in range(self.ndim))
     return x.shrink_to(topk_shape), idx.shrink_to(topk_shape)
@@ -977,7 +978,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     # pad src and mask to self.shape so that reduce can be done with padded values as no-ops
     return src.pad_to(*self.shape, None), mask.pad_to(*self.shape, None)
 
-  def scatter_reduce(self, dim:int, index:Self, src:Self, reduce:Literal["sum", "prod", "mean", "amax", "amin"],
+  def scatter_reduce(self, dim:int, index:Self, src:Self, reduce:str,
                      include_self:bool=True) -> Self:
     """
     Scatters `src` values along an axis specified by `dim`.
@@ -1008,7 +1009,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     ```
     """
     src, mask = self._pre_scatter(dim, index, src)
-    def _inv_mask(a:Self|PyConst, b:Self|PyConst) -> Self: return mask.any(-1).logical_not().where(a, b)
+    def _inv_mask(a, b): return mask.any(-1).logical_not().where(a, b)
     if reduce == "sum": return mask.where(src, 0).sum(-1).add(self if include_self else _inv_mask(self, 0))
     if reduce == "prod": return mask.where(src, 1).prod(-1).mul(self if include_self else _inv_mask(self, 1))
     if reduce == "amax": return mask.where(src, m := src.dtype.min).max(-1).maximum(self if include_self else _inv_mask(self, m))
@@ -1018,7 +1019,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
       return mask.where(src, 0).sum(-1).add(self if include_self else _inv_mask(self, 0)).div(count)
     raise RuntimeError(f"{reduce=} must be one of 'sum', 'prod', 'mean', 'amax', 'amin'")
 
-  def scatter(self, dim:int, index:Self, src:Self|PyConst, reduce:Literal['multiply', 'add']|None=None) -> Self:
+  def scatter(self, dim:int, index:Self, src:Self|PyConst, reduce:str|None=None) -> Self:
     """
     Scatters `src` values along an axis specified by `dim`.
     Apply `add` or `multiply` reduction operation with `reduce`.
@@ -1107,7 +1108,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     return flatten(reversed(grouped_pads))
 
   # NOTE: these work for more than 2D
-  def avg_pool2d(self, kernel_size:tuple[int, ...]=(2,2), stride=None, dilation=1, padding:int|tuple[int, ...]=0,
+  def avg_pool2d(self, kernel_size:int|tuple[int, ...]=(2,2), stride=None, dilation=1, padding:int|tuple[int, ...]=0,
                  ceil_mode=False, count_include_pad=True) -> Self:
     """
     Applies average pooling over a tensor.
@@ -1145,7 +1146,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     """
     axis = tuple(range(-len(k_ := make_tuple(kernel_size, 2)), 0))
     s_ = stride if stride is not None else k_
-    def pool(x:Self, padding_:Sequence[int]) -> Self:
+    def pool(x, padding_:Sequence[int]):
       return x._pad_constant(((0,0),)*(x.ndim-len(k_)) + flat_to_grouped(padding_), 0.0)._pool(k_, s_, dilation)
     reg_pads = resolve_pool_pads(padding, len(k_))
     pads = self._apply_ceil_mode(reg_pads, k_, s_, dilation) if ceil_mode else reg_pads
@@ -1155,7 +1156,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     return pool(self, pads).sum(axis) / pool(self._pad_constant(((0,0),)*(self.ndim-len(k_)) + flat_to_grouped(reg_pads), 0.0).ones_like(),
                                               tuple(cp-rp for cp,rp in zip(pads, reg_pads))).sum(axis)
 
-  def max_pool2d(self, kernel_size:tuple[int, ...]=(2,2), stride=None, dilation=1, padding:int|tuple[int, ...]=0,
+  def max_pool2d(self, kernel_size:int|tuple[int, ...]=(2,2), stride=None, dilation=1, padding:int|tuple[int, ...]=0,
                  ceil_mode=False, return_indices=False) -> Self | tuple[Self, Self]:
     """
     Applies max pooling over a tensor.
@@ -1200,7 +1201,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     idx = m * idx._pad_constant(((0,0),)*(idx.ndim-len(k_)) + flat_to_grouped(pads), idx.dtype.min)._pool(k_, s_, dilation)
     return pooled.max(axis), spatial_sz - idx.max(axis)
 
-  def max_unpool2d(self, indices:Self, kernel_size:tuple[int, ...]=(2,2), stride=None, dilation=1, padding:int|tuple[int, ...]=0,
+  def max_unpool2d(self, indices:Self, kernel_size:int|tuple[int, ...]=(2,2), stride=None, dilation=1, padding:int|tuple[int, ...]=0,
                    output_size=None) -> Self:
     """
     Performs a partial inverse of `max_pool2d` using the indices from the argmax.
@@ -1329,13 +1330,13 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
 
   # ***** loss ops *****
 
-  def _do_reduction(self, reduction:ReductionStr="mean") -> Self:
+  def _do_reduction(self, reduction:str="mean") -> Self:
     if reduction == "none": return self
     if reduction == "sum": return self.sum()
     if reduction == "mean": return self.mean()
     raise ValueError(f"{reduction=} must be one of {get_args(ReductionStr)}")
 
-  def binary_crossentropy(self, Y:Self, reduction:ReductionStr="mean") -> Self:
+  def binary_crossentropy(self, Y:Self, reduction:str="mean") -> Self:
     """
     Computes the binary cross-entropy loss between `self` and `Y`.
 
@@ -1349,7 +1350,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     """
     return (-Y*self.log() - (1-Y)*(1-self).log())._do_reduction(reduction)
 
-  def binary_crossentropy_logits(self, Y:Self, reduction:ReductionStr="mean", pos_weight:Self|None=None) -> Self:
+  def binary_crossentropy_logits(self, Y:Self, reduction:str="mean", pos_weight:Self|None=None) -> Self:
     """
     Computes the binary cross-entropy loss between `self` and `Y` where `self` is logits.
 
@@ -1364,7 +1365,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     log_p, log_1_minus_p = self.logsigmoid(), (-self).logsigmoid()
     return (-((1 if pos_weight is None else pos_weight) * Y * log_p + (1-Y) * log_1_minus_p))._do_reduction(reduction)
 
-  def sparse_categorical_crossentropy(self, Y:Self, ignore_index:int=-1, label_smoothing=0.0, reduction:ReductionStr="mean") -> Self:
+  def sparse_categorical_crossentropy(self, Y:Self, ignore_index:int=-1, label_smoothing=0.0, reduction:str="mean") -> Self:
     """
     Computes the sparse categorical cross-entropy loss between `self` and `Y`.
 
@@ -1388,7 +1389,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     unreduced = ((1 - label_smoothing) * (log_probs * y).sum(-1) + smoothing)
     return -unreduced.sum() / loss_mask.sum() if reduction == "mean" else -unreduced._do_reduction(reduction)
 
-  def cross_entropy(self, Y:Self, reduction:ReductionStr="mean", label_smoothing:float=0.0) -> Self:
+  def cross_entropy(self, Y:Self, reduction:str="mean", label_smoothing:float=0.0) -> Self:
     """
     Computes the cross entropy loss between input logits and target.
 
@@ -1415,7 +1416,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     Y = (1 - label_smoothing)*Y + label_smoothing / int(Y.shape[classes_dim])
     return -self.log_softmax(classes_dim).mul(Y).sum(classes_dim)._do_reduction(reduction)
 
-  def nll_loss(self, Y:Self, weight:Self|None=None, ignore_index:int|None=None, reduction:ReductionStr="mean") -> Self:
+  def nll_loss(self, Y:Self, weight:Self|None=None, ignore_index:int|None=None, reduction:str="mean") -> Self:
     """
     Computes the negative log likelihood loss between log-probabilities and target labels.
 
@@ -1441,7 +1442,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
 
   # ***** matrix ops *****
 
-  def newton_schulz(self, steps:int, params:tuple[int, ...], eps:float=1.0e-7) -> Self:
+  def newton_schulz(self, steps:int, params:tuple[float, ...], eps:float=1.0e-7) -> Self:
     """
     Performs the newton-schulz algorithm for odd polynomials. The degree of the odd polynomial depends on the number of params.
 

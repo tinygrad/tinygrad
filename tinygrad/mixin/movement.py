@@ -175,13 +175,13 @@ class MovementMixin:
     ret = self._mop(Ops.RESHAPE, arg=new_shape)
     return self if ret.shape == self.shape else ret
 
-  def pad(self, arg:tuple[tuple[sint, sint] | None, ...]) -> Self:
+  def pad(self, arg:Sequence[tuple[sint, sint] | None]) -> Self:
     if self.ndim != len(arg):
       raise ValueError(f"{self.ndim=} != {len(arg)=}")
     ret = self._mop(Ops.PAD, tuple(x if x is not None else (0, 0) for x in arg))
     return self if ret.shape == self.shape else ret
 
-  def shrink(self, arg: tuple[tuple[sint, sint] | None, ...]) -> Self:
+  def shrink(self, arg:Sequence[tuple[sint, sint] | None]) -> Self:
     """
     Returns a tensor that shrinks the each axis based on input arg.
     `arg` must have the same length as `self.ndim`.
@@ -498,7 +498,8 @@ class MovementMixin:
     print(t.diagonal(offset=1).numpy())
     ```
     """
-    if (dim1:=self._resolve_dim(dim1)) == (dim2:=self._resolve_dim(dim2)): raise RuntimeError("dim1 and dim2 cannot be the same dimension")
+    dim1, dim2 = self._resolve_dim(dim1), self._resolve_dim(dim2)
+    if dim1 == dim2: raise RuntimeError("dim1 and dim2 cannot be the same dimension")
     x = self.permute(*[i for i in range(self.ndim) if i != dim1 and i != dim2], dim1, dim2)
     if offset >= 0: x = x.shrink(tuple(None for _ in x.shape[:-1]) + ((offset, x.shape[-1]),))
     else: x = x.shrink(tuple(None for _ in x.shape[:-2]) + ((-offset, x.shape[-2]), None))

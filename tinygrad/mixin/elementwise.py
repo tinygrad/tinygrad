@@ -1,7 +1,7 @@
 import math, functools, operator
-from typing import Literal, Self
+from typing import Self, cast
 from tinygrad.uop import Ops
-from tinygrad.dtype import dtypes, ConstType, PyConst, least_upper_dtype, least_upper_float
+from tinygrad.dtype import dtypes, PyConst, least_upper_dtype, least_upper_float
 from tinygrad.helpers import argfix, polyN
 from tinygrad.mixin.dtype import DTypeMixin
 from tinygrad.mixin.creation import CreationMixin
@@ -12,14 +12,14 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
   def alu(self, op: Ops, *src: Self) -> Self:
     raise NotImplementedError
 
-  def _broadcasted(self, y: Self | ConstType, reverse: bool = False) -> tuple[Self, Self]:
+  def _broadcasted(self, y, reverse: bool = False) -> tuple[Self, Self]:
     raise NotImplementedError
 
   # great functions you get!
-  def ufix(self, x: Self | ConstType) -> Self:
-    return self.const_like(x) if not isinstance(x, ElementwiseMixin) else x
+  def ufix(self, x) -> Self:
+    return self.const_like(x) if not isinstance(x, ElementwiseMixin) else cast(Self, x)
 
-  def _binop(self, op: Ops, x: Self | ConstType, reverse: bool) -> Self:
+  def _binop(self, op: Ops, x, reverse: bool) -> Self:
     return self.ufix(x).alu(op, self) if reverse else self.alu(op, self.ufix(x))
 
   def usum(self, *uops) -> Self: return functools.reduce(operator.or_ if self.dtype is dtypes.bool else operator.add, argfix(*uops), self)
@@ -61,7 +61,7 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
     if not (dtypes.is_bool(self.dtype) or dtypes.is_int(self.dtype)):
       raise RuntimeError(f"{self.dtype} is not supported")
 
-  def add(self, x: Self | ConstType, reverse: bool = False) -> Self:
+  def add(self, x, reverse: bool = False) -> Self:
     """
     Adds `self` and `x`.
     Equivalent to `self + x`.
@@ -80,7 +80,7 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
     """
     return self._binop(Ops.ADD, x, reverse)
 
-  def sub(self, x: Self | ConstType, reverse: bool = False) -> Self:
+  def sub(self, x, reverse: bool = False) -> Self:
     """
     Subtracts `x` from `self`.
     Equivalent to `self - x`.
@@ -101,7 +101,7 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
     a, b = self._broadcasted(x, reverse)
     return a + (-b)
 
-  def mul(self, x: Self | ConstType, reverse: bool = False) -> Self:
+  def mul(self, x, reverse: bool = False) -> Self:
     """
     Multiplies `self` and `x`.
     Equivalent to `self * x`.
@@ -135,7 +135,7 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
     self._check_dtype()
     return self.logical_not() if self.dtype == dtypes.bool else self ^ -1
 
-  def bitwise_and(self, x: Self | ConstType, reverse: bool = False) -> Self:
+  def bitwise_and(self, x, reverse: bool = False) -> Self:
     """
     Computes the bitwise AND of `self` and `x`.
     Equivalent to `self & x`.
@@ -150,7 +150,7 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
     self._check_dtype()
     return self._binop(Ops.AND, x, reverse)
 
-  def bitwise_or(self, x: Self | ConstType, reverse: bool = False) -> Self:
+  def bitwise_or(self, x, reverse: bool = False) -> Self:
     """
     Computes the bitwise OR of `self` and `x`.
     Equivalent to `self | x`.
@@ -165,7 +165,7 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
     self._check_dtype()
     return self._binop(Ops.OR, x, reverse)
 
-  def bitwise_xor(self, x: Self | ConstType, reverse: bool = False) -> Self:
+  def bitwise_xor(self, x, reverse: bool = False) -> Self:
     """
     Computes bitwise xor of `self` and `x`.
     Equivalent to `self ^ x`.
@@ -181,7 +181,7 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
     self._check_dtype()
     return self._binop(Ops.XOR, x, reverse)
 
-  def mod(self, x: Self | ConstType, reverse: bool = False) -> Self:
+  def mod(self, x, reverse: bool = False) -> Self:
     """
     Mod `self` by `x`.
     Equivalent to `self % x`.
@@ -195,7 +195,7 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
     if dtypes.is_int(a.dtype): return a.alu(Ops.FLOORMOD, b)
     return a - a.div(b, rounding_mode="floor") * b
 
-  def fmod(self, x: Self | ConstType) -> Self:
+  def fmod(self, x) -> Self:
     """
     C-style remainder of `self` divided by `x` (sign follows the dividend), using truncating division.
     Differs from `mod`/`%`, which uses Python floor remainder.
@@ -208,7 +208,7 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
     if dtypes.is_int(a.dtype): return a.alu(Ops.CMOD, b)
     return a - a.div(b, rounding_mode="trunc") * b
 
-  def div(self, x: Self | ConstType, reverse: bool = False, rounding_mode: Literal["trunc", "floor"] | None = None) -> Self:
+  def div(self, x, reverse: bool = False, rounding_mode: str | None = None) -> Self:
     """
     Divides `self` by `x`.
     Equivalent to `self / x`.
@@ -244,84 +244,84 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
   def __invert__(self) -> Self:
     return self.bitwise_not()
 
-  def __add__(self, x: Self | ConstType) -> Self:
+  def __add__(self, x) -> Self:
     return self.add(x)
 
-  def __sub__(self, x: Self | ConstType) -> Self:
+  def __sub__(self, x) -> Self:
     return self.sub(x)
 
-  def __mul__(self, x: Self | ConstType) -> Self:
+  def __mul__(self, x) -> Self:
     return self.mul(x)
 
-  def __truediv__(self, x: Self | ConstType) -> Self:
+  def __truediv__(self, x) -> Self:
     return self.div(x)
 
-  def __floordiv__(self, x: Self | ConstType) -> Self:
+  def __floordiv__(self, x) -> Self:
     return self.div(x, rounding_mode="floor")
 
-  def __mod__(self, x: Self | ConstType) -> Self:
+  def __mod__(self, x) -> Self:
     return self.mod(x)
 
-  def __and__(self, x: Self | ConstType) -> Self:
+  def __and__(self, x) -> Self:
     return self.bitwise_and(x)
 
-  def __or__(self, x: Self | ConstType) -> Self:
+  def __or__(self, x) -> Self:
     return self.bitwise_or(x)
 
-  def __xor__(self, x: Self | ConstType) -> Self:
+  def __xor__(self, x) -> Self:
     return self.bitwise_xor(x)
 
-  def __radd__(self, x: Self | ConstType) -> Self:
+  def __radd__(self, x) -> Self:
     return self.add(x, True)
 
-  def __rsub__(self, x: Self | ConstType) -> Self:
+  def __rsub__(self, x) -> Self:
     return self.sub(x, True)
 
-  def __rmul__(self, x: Self | ConstType) -> Self:
+  def __rmul__(self, x) -> Self:
     return self.mul(x, True)
 
-  def __rtruediv__(self, x: Self | ConstType) -> Self:
+  def __rtruediv__(self, x) -> Self:
     return self.div(x, True)
 
-  def __rfloordiv__(self, x: Self | ConstType) -> Self:
+  def __rfloordiv__(self, x) -> Self:
     return self.div(x, reverse=True, rounding_mode="floor")
 
-  def __rand__(self, x: Self | ConstType) -> Self:
+  def __rand__(self, x) -> Self:
     return self.bitwise_and(x, True)
 
-  def __ror__(self, x: Self | ConstType) -> Self:
+  def __ror__(self, x) -> Self:
     return self.bitwise_or(x, True)
 
-  def __rxor__(self, x: Self | ConstType) -> Self:
+  def __rxor__(self, x) -> Self:
     return self.bitwise_xor(x, True)
 
-  def __rmod__(self, x: Self | ConstType) -> Self:
+  def __rmod__(self, x) -> Self:
     return self.mod(x, True)
 
-  def __lt__(self, x: Self | ConstType) -> Self:
+  def __lt__(self, x) -> Self:
     return self._binop(Ops.CMPLT, x, False)
 
-  def __gt__(self, x: Self | ConstType) -> Self:
+  def __gt__(self, x) -> Self:
     return self._binop(Ops.CMPLT, x, True)
 
-  def __ge__(self, x: Self | ConstType) -> Self:
+  def __ge__(self, x) -> Self:
     return (self < x).logical_not()
 
-  def __le__(self, x: Self | ConstType) -> Self:
+  def __le__(self, x) -> Self:
     return (self > x).logical_not()
 
-  def ne(self, x: Self | ConstType) -> Self:
+  def ne(self, x) -> Self:
     return self._binop(Ops.CMPNE, x, False)
 
-  def eq(self, x: Self | ConstType) -> Self:
+  def eq(self, x) -> Self:
     return self.ne(x).logical_not()
 
-  def __ne__(self, x: Self | ConstType) -> Self:  # type: ignore[override]
+  def __ne__(self, x) -> Self:  # type: ignore[override]
     return self.ne(x)
 
   # NOTE: __eq__ isn't overridden, and means the same thing as is by default
 
-  def lshift(self, x: Self | int, reverse: bool = False) -> Self:
+  def lshift(self, x, reverse: bool = False) -> Self:
     """
     Computes left arithmetic shift of `self` by `x` bits. `self` must have integer dtype.
     Equivalent to `self << x`.
@@ -332,7 +332,7 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
     """
     return self._binop(Ops.SHL, x, reverse)
 
-  def rshift(self, x: Self | int, reverse: bool = False) -> Self:
+  def rshift(self, x, reverse: bool = False) -> Self:
     """
     Computes right arithmetic shift of `self` by `x` bits. `self` must have integer dtype.
     Equivalent to `self >> x`.
@@ -343,19 +343,19 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
     """
     return self._binop(Ops.SHR, x, reverse)
 
-  def __lshift__(self, x: Self | int) -> Self:
+  def __lshift__(self, x) -> Self:
     return self.lshift(x)
 
-  def __rshift__(self, x: Self | int) -> Self:
+  def __rshift__(self, x) -> Self:
     return self.rshift(x)
 
-  def __rlshift__(self, x: Self | int) -> Self:
+  def __rlshift__(self, x) -> Self:
     return self.lshift(x, True)
 
-  def __rrshift__(self, x: Self | int) -> Self:
+  def __rrshift__(self, x) -> Self:
     return self.rshift(x, True)
 
-  def maximum(self, x: Self | ConstType) -> Self:
+  def maximum(self, x) -> Self:
     """
     Computes element-wise maximum of `self` and `x`.
 
@@ -370,7 +370,7 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
 
   def _inverse(self) -> Self: return -self if self.is_floating_point() else ~self
 
-  def minimum(self, x: Self | ConstType) -> Self:
+  def minimum(self, x) -> Self:
     """
     Computes element-wise minimum of `self` and `x`.
 
@@ -384,7 +384,7 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
     t, x = self._broadcasted(x)
     return t._inverse().maximum(x._inverse())._inverse()
 
-  def copysign(self, other: Self | ConstType) -> Self:
+  def copysign(self, other) -> Self:
     """
     Returns a tensor of with the magnitude of `self` and the sign of `other`, elementwise.
     """
@@ -392,7 +392,7 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
     a, b = self._broadcasted(other)
     return a.abs() * ((b < 0) | (b.reciprocal() < 0)).where(-1, 1)
 
-  def logaddexp(self, other: Self | ConstType) -> Self:
+  def logaddexp(self, other) -> Self:
     """
     Calculates (self.exp()+other.exp()).log(), elementwise.
     """
@@ -400,7 +400,7 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
     m = a.maximum(b)
     return ((a-m).exp() + (b-m).exp()).log() + m
 
-  def where(self, x: Self | ConstType, y: Self | ConstType) -> Self:
+  def where(self, x, y) -> Self:
     ref: Self = x if isinstance(x, type(self)) else y if isinstance(y, type(self)) else \
       self.cast(least_upper_dtype(dtypes.from_py(x), dtypes.from_py(y)))
     return self.alu(Ops.WHERE, ref.ufix(x), ref.ufix(y))
@@ -518,7 +518,7 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
     """
     return self._ensure_float().alu(Ops.EXP2)
 
-  def pow(self, x: Self | ConstType, reverse: bool = False) -> Self:
+  def pow(self, x, reverse: bool = False) -> Self:
     """
     Computes power of `self` with `x`.
     Equivalent to `self ** x`.
@@ -541,10 +541,10 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
     # NOTE: pow(int, float) -> int
     return ret.round().cast(self.dtype) if not reverse and not dtypes.is_float(self.dtype) and dtypes.is_float(exponent.dtype) else ret
 
-  def __pow__(self, x: Self | ConstType) -> Self:
+  def __pow__(self, x) -> Self:
     return self.pow(x)
 
-  def __rpow__(self, x: Self | ConstType) -> Self:
+  def __rpow__(self, x) -> Self:
     return self.pow(x, True)
 
   def square(self) -> Self:
@@ -1047,7 +1047,7 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
     """
     return self / (1 + self.abs())
 
-  def lerp(self, end: Self, weight: Self | ConstType) -> Self:
+  def lerp(self, end: Self, weight) -> Self:
     """
     Linearly interpolates between `self` and `end` by `weight`.
 

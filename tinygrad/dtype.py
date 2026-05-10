@@ -360,12 +360,12 @@ def _to_np_dtype(dtype:DType) -> type|None:
   import numpy as np
   if dtype in { dtypes.bfloat16, *dtypes.fp8s }: return np.float32
   return np.dtype(dtype.fmt).type if dtype.fmt is not None else None
-def _from_np_dtype(npdtype:'np.dtype') -> DType: # type: ignore [name-defined] # noqa: F821
+def _from_np_dtype(npdtype) -> DType:
   import numpy as np
   return DTYPES_DICT[np.dtype(npdtype).name]
 
 @functools.cache
-def _to_torch_dtype(dtype:DType) -> 'torch.dtype'|None:  # type: ignore [name-defined] # noqa: F821
+def _to_torch_dtype(dtype:DType) -> object|None:
   import numpy as np, torch
   if dtype == dtypes.uint64: return torch.uint64
   if dtype == dtypes.bfloat16: return torch.bfloat16
@@ -374,5 +374,5 @@ def _to_torch_dtype(dtype:DType) -> 'torch.dtype'|None:  # type: ignore [name-de
   try: return torch.from_numpy(np.array([], dtype=_to_np_dtype(dtype))).dtype
   except TypeError: return None
 @functools.cache
-def _from_torch_dtype(torchdtype:'torch.dtype') -> DType: # type: ignore [name-defined] # noqa: F821
+def _from_torch_dtype(torchdtype:object) -> DType:
   return {v:k for k in DTYPES_DICT.values() if (v:=_to_torch_dtype(k)) is not None}[torchdtype]

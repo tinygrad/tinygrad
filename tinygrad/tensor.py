@@ -254,7 +254,7 @@ class Tensor(OpMixin):
     self.uop = x.uop
     return self
 
-  def assign(self, x:Tensor|PyConst|list|tuple) -> Tensor:
+  def assign(self, x:Any) -> Tensor:
     is_disk = isinstance(self.device, str) and self.device.startswith("DISK")
     if not isinstance(x, Tensor): x = Tensor(x, device="CPU" if is_disk else self.device, dtype=self.dtype)
     if self.uop is x.uop: return self  # a self assign is a NOOP
@@ -371,7 +371,8 @@ class Tensor(OpMixin):
     """
     Moves the tensor to the given device.
     """
-    if (device:=canonicalize_device(device)) == self.device: return self
+    device = canonicalize_device(device)
+    if device == self.device: return self
     ret = Tensor(self.uop.copy_to_device(device), requires_grad=self.requires_grad)
     if self.grad is not None: ret.grad = self.grad.to(device)
     return ret
@@ -1280,7 +1281,6 @@ class Tensor(OpMixin):
   # ***** broadcasted elementwise ops *****
 
   def ufix(self, x) -> Tensor:
-    # TODO: x:ConstType|UOp does not work because mixin only accepts Self | ConstType
     assert isinstance(x, (*get_args(ConstType), UOp)), f"{type(x)=}, {x=}"
     return Tensor(x, self.device, self.dtype if self._ufix_keep_dtype(x) else None, requires_grad=False)
 
