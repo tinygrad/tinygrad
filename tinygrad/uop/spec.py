@@ -215,7 +215,7 @@ kernel_spec = PatternMatcher([
   (UPat(Ops.END, src=(UPat(), UPat()), allow_any_len=True), lambda: True),
 
   # bufferize can be on anything
-  (UPat(Ops.BUFFERIZE, src=(UPat(),), allow_any_len=True), lambda: True),
+  (UPat(Ops.STAGE, src=(UPat(),), allow_any_len=True), lambda: True),
 
   # REDUCE has arg=(op, axis_tuple), src[1:] are ranges after lowering
   (UPat(Ops.REDUCE, src=(UPat(),), allow_any_len=True, name="x"),
