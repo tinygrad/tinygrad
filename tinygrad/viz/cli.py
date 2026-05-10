@@ -64,26 +64,17 @@ def main(args) -> None:
 
   def emit(val, to_str=str) -> str: return json.dumps(val if isinstance(val, dict) else {"value":val}) if args.json else to_str(val)
 
-  def print_step(step:dict, reconstruct_matches=False) -> None:
+  def print_step(step:dict, print_graph=False, reconstruct_matches=False) -> None:
     data = viz.get_render(viz_data, step["query"])
     if isinstance(data.get("value"), Iterator):
       for m in data["value"]:
-        if m.get("uop"): print(emit(m["uop"]))
+        if "uop" in m: print(emit(m["graph"] if print_graph else m["uop"]))
         if not reconstruct_matches: return None
         if m.get("diff"):
           loc = pathlib.Path(m["upat"][0][0])
           print(emit(f"{loc.parent.name}/{loc.name}:{m['upat'][0][1]}\n{m['upat'][1]}"))
           for line in m["diff"]: print(emit(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None)))
     if data.get("src") is not None: print(emit(data["src"]))
-
-  def print_calls(name:str) -> None:
-    if (ast:=next((viz._reconstruct(viz_data, viz_data.trace.rewrites[i][0].sink) for i,k in enumerate(viz_data.trace.keys)
-                   if ansistrip(k.display_name) == ansistrip(name)), None)) is None: return print(emit(f"no AST for {name}"))
-    for i,k in enumerate(viz_data.trace.keys):
-      for s in viz_data.trace.rewrites[i]:
-        if s.name == "View Kernel Graph":
-          for u in viz._reconstruct(viz_data, s.sink).toposort(enter_calls=False):
-            if u.op is Ops.CALL and u.src[0] is ast: print(emit(viz.uop_to_json(viz_data, u)))
 
   profile_bytes = viz.get_profile(viz_data, viz.load_pickle(args.profile_path, default=[]))
   if profile_bytes is None: raise RuntimeError(f"empty profile in {args.profile_path}")
@@ -197,14 +188,13 @@ def main(args) -> None:
     def render_event(k:dict, ls=args.list) -> None:
       if len(args.src) > 1 and ansistrip(k["name"]) not in args.src: return None
       print(emit(k, to_str=fmt_row))
-      if DEBUG >= 5 and len(args.src) > 1: print_calls(k["name"])
       if k["ref"] is not None and k["ref"] not in seen_refs:
         seen_refs.add(k["ref"])
-        for s in viz_data.ctxs[k["ref"]]["steps"]:
+        for i,s in enumerate(viz_data.ctxs[k["ref"]]["steps"]):
           if DEBUG >= 3 and s["name"] == "View Base AST": print_step(s)
           if DEBUG >= 4 and s["name"] == "View Source": print_step(s)
           if DEBUG >= 5 or ls: print(emit(" "*s["depth"]+s["name"]+(f" - {s['match_count']}" if s.get('match_count', 0) else '')))
-          if DEBUG >= 6: print_step(s)
+          if DEBUG >= 6: print_step(s, print_graph=True)
           if DEBUG >= 7 or s["name"] in args.src: print_step(s, reconstruct_matches=True)
       elif DEBUG >= 3 and k.get("ext"): print(emit(k["ext"]))
     for k in (produce_top_kernels if args.t else produce_all_kernels)(): render_event(k)
