@@ -968,5 +968,16 @@ class TestCLI(unittest.TestCase):
     agg_gflops = [row["fmt"]["FLOPS"] for row in aggregate]
     assert all(min(gflops) < v < max(gflops) for v in agg_gflops), f"{agg_gflops}"
 
+  def test_dedup(self):
+    with save_viz() as viz:
+      for _ in range(CNT:=4):
+        Tensor.empty(4, device="NULL").add(1).realize()
+    with write_files(viz) as files, Context(NO_COLOR=1):
+      name = json.loads(run_cli(*files, "-s", "NULL", "--json").splitlines()[0])["name"]
+      with Context(DEBUG=3):
+        select = [json.loads(line) for line in run_cli(*files, "-s", "NULL", name, "--json").splitlines()]
+    self.assertEqual(len([s for s in select if s.get("value")]), 1, "debug output was not deduped")
+    self.assertEqual(len([s for s in select if s.get("device") == "NULL"]), CNT, f"expected 4 runs for {name}")
+
 if __name__ == "__main__":
   unittest.main()

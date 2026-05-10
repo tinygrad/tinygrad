@@ -198,12 +198,7 @@ def main(args) -> None:
           if DEBUG >= 6: print_step(s)
           if DEBUG >= 7 or (len(args.src) > 2 and s["name"] == args.src[2]): print_step(s, reconstruct_matches=True)
       elif DEBUG >= 3 and k.get("ext"): print(emit(k["ext"]))
-    produce = produce_top_kernels if args.t else produce_all_kernels
-    if len(args.src) > 1:
-      k = get({r["name"]:r for r in produce()}, args.src[1])
-      with Context(DEBUG=max(DEBUG.value, 3)): render_event(k, ls=True)
-    else:
-      for k in produce(): render_event(k)
+    for k in (produce_top_kernels if args.t else produce_all_kernels)(): render_event(k)
 
 def get_arg_parser() -> argparse.ArgumentParser:
   parser = argparse.ArgumentParser(prog="python -m tinygrad.viz.cli")
