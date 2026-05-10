@@ -1,7 +1,6 @@
 from __future__ import annotations
 import os, numpy as np
 from typing import Any
-from fastmcp import FastMCP
 
 from tinygrad import Tensor, Device
 from extra.agentic_opt.models import AgenticOptResult, CandidateEvaluation, CorrectnessResult, HardwareDescriptor, Kernel, KernelDescriptor, KernelRuntimeProfile
