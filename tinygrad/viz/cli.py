@@ -5,8 +5,7 @@ if hasattr(signal, "SIGPIPE"): signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 from typing import Iterator
 from tinygrad.viz import serve as viz
 from tinygrad.uop.ops import RewriteTrace
-from tinygrad.helpers import temp, ansistrip, colored, time_to_str, ansilen, ProfilePointEvent, ProfileRangeEvent, TracingKey, unwrap, NO_COLOR
-from tinygrad.helpers import DEBUG, Context
+from tinygrad.helpers import temp, ansistrip, colored, time_to_str, ansilen, ProfilePointEvent, ProfileRangeEvent, TracingKey, unwrap, NO_COLOR, DEBUG
 
 # profile decoder used in CLI and tests
 def decode_profile(data:bytes) -> dict:
@@ -83,15 +82,15 @@ def main(args) -> None:
   profile = decode_profile(profile_bytes)
   profile["layout"].update([(f'{c["name"][5:]}{" SQTT" if s["name"].endswith("PKTS") else ""} {s["name"]}', s["data"]) for c in viz_data.ctxs
                             if c["name"].startswith("SQTT") for s in c["steps"] if s["name"].endswith(("PMC", "PKTS"))])
-  if args.list and not args.src: return print("ALL\n"+"\n".join(fmt_colored(k) for k in profile["layout"]))
+  if args.list and not args.src: return print("\n".join(emit(fmt_colored(k)) for k in ["ALL"]+list(profile["layout"])))
 
   # ** SQTT printer
   data = None if not args.src else get(profile["layout"], args.src[0])
   if args.src and "SQTT" in args.src[0]:
     # modern terminals support 24-bit color
     def hex_colored(st:str, color:str) -> str: return f"\x1b[38;2;{int(color[1:3],16)};{int(color[3:5],16)};{int(color[5:7],16)}m{st}\x1b[0m"
-    print(f"{'Clk':<12} {'Unit':<20} {'Op':<22} {'Dur':<4} {'Delay':<4} {'Info'}")
-    print("-" * 100)
+    print(emit(f"{'Clk':<12} {'Unit':<20} {'Op':<22} {'Dur':<4} {'Delay':<4} {'Info'}"))
+    print(emit("-" * 100))
     pc_map:dict[int, str] = {}
     pkt_idxs:dict[str, itertools.count] = {}
     dispatch_to_inst:dict[str, tuple[str, int]] = {}
@@ -188,20 +187,16 @@ def main(args) -> None:
     fmt_row = fmt_top if args.t else fmt_all
     seen_refs:set[int] = set()
     def render_event(k:dict, ls=args.list) -> None:
+      if len(args.src) > 1 and ansistrip(k["name"]) not in args.src: return None
       print(emit(k, to_str=fmt_row))
       if k["ref"] is not None and k["ref"] not in seen_refs:
         seen_refs.add(k["ref"])
         for s in viz_data.ctxs[k["ref"]]["steps"]:
           if DEBUG >= 6 or ls: print(emit(" "*s["depth"]+s["name"]+(f" - {s['match_count']}" if s.get('match_count', 0) else '')))
           if DEBUG >= 6 or DEBUG >= {"View Base AST":3, "View Source":4, "View Kernel Graph":5}.get(s["name"], 99): print_step(s)
-          if DEBUG >= 7 or (len(args.src) > 2 and s["name"] == args.src[2]): print_step(s, reconstruct_matches=True)
+          if DEBUG >= 7 or s["name"] in args.src: print_step(s, reconstruct_matches=True)
       elif DEBUG >= 3 and k.get("ext"): print(emit(k["ext"]))
-    produce = produce_top_kernels if args.t else produce_all_kernels
-    if len(args.src) > 1:
-      k = get({r["name"]:r for r in produce()}, args.src[1])
-      with Context(DEBUG=max(DEBUG.value, 3)): render_event(k, ls=True)
-    else:
-      for k in produce(): render_event(k)
+    for k in (produce_top_kernels if args.t else produce_all_kernels)(): render_event(k)
 
 def get_arg_parser() -> argparse.ArgumentParser:
   parser = argparse.ArgumentParser(prog="python -m tinygrad.viz.cli")
