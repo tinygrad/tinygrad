@@ -1,4 +1,5 @@
 from typing import Any
+from tinygrad.dtype import DType
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -98,13 +99,17 @@ class CandidateEvaluation(BaseModel):
   runtime: KernelRuntimeProfile | None = None
   compiler_log: str | None = None
 
+class BufferArg(BaseModel):
+  shape: tuple[int, ...] = Field(description="Shapes for buffer arg. Buffers are assumed dense row-major contiguous.")
+  dtype: DType = Field(description="Datatype for buffer arg. Buffers are assumed dense row-major contiguous.")
+
 class KernelDescriptor(BaseModel):
   model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
   entry_point: str = Field(description="Kernel function name. Candidates must preserve this name.")
   type_family: str = Field(description="High-level kernel family, for example gemm, gemm_bwd, fa_fwd, fa_bwd_pre, fa_bwd, or fa_bwd_post.")
   kernel: Kernel = Field(description="the kernel.")
-  buffer_shapes: tuple[tuple[int, ...], ...] = Field(description="Shapes for buffer arguments in kernel ABI order. Buffers are assumed dense row-major contiguous.")
+  buffer_args: list[BufferArg] = Field(description="buffer arguments in kernel ABI order")
   description: str|None = Field(default=None, description="Optional concise semantic note supplied by the MCP or caller.")
 
   # @field_validator("entry_point", "type_family"
