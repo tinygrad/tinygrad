@@ -80,6 +80,12 @@ class HardwareDescriptor(BaseModel):
     return renderer_name, compiler_name
 
 
+class KernelRuntimeProfile(BaseModel):
+  model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+  runtime_ms: float = Field(description="Elapsed GPU/runtime time in milliseconds.")
+
+
 def llama2_70b_lora_dummy_step(
   bs:int=1,
   seqlen:int=128,
