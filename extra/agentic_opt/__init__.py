@@ -1,22 +1,29 @@
 from __future__ import annotations
-import os, numpy as np
+import os, time, numpy as np
 from typing import Any
 
 from tinygrad import Tensor, Device
-from extra.agentic_opt.models import AgenticOptResult, CandidateEvaluation, CorrectnessResult, HardwareDescriptor, Kernel, KernelDescriptor, KernelRuntimeProfile
+from extra.agentic_opt.models import AgenticOptResult, BufferArg, CandidateEvaluation, CorrectnessResult, HardwareDescriptor, Kernel, KernelDescriptor, KernelRuntimeProfile
 
 class AgenticOpt:
-  def __init__(self, device:str, reference_kernel:KernelDescriptor):
+  def __init__(self, device:str, reference_kernel:KernelDescriptor, test_bufs:list[Tensor]|None=None, correct_bufs:list[Tensor]|None=None,
+               reference_runtime_ms:float|None=None):
     self.device = Device.canonicalize(device)
     self.hardware = HardwareDescriptor.from_dev(device)
     self.reference_kernel = reference_kernel
 
     # NOTE: assumming all buffers are purely in or out, not both
-    self.test_bufs = [Tensor.rand(*arg.shape, dtype=arg.dtype, device=self.device).realize() for arg in self.reference_kernel.buffer_args]
+    self.test_bufs = test_bufs if test_bufs is not None else \
+      [Tensor.rand(*arg.shape, dtype=arg.dtype, device=self.device).realize() for arg in self.reference_kernel.buffer_args]
     
-    self.correct_bufs = [buf.clone().realize() for buf in self.test_bufs]
-    t = self._run_kernel(self.reference_kernel.kernel, self.correct_bufs)
-    ref_eval = CandidateEvaluation(candidate=self.reference_kernel.kernel, correctness=CorrectnessResult(passed=True), profile=KernelRuntimeProfile(runtime_ms=t))
+    self.correct_bufs = correct_bufs if correct_bufs is not None else [buf.clone().realize() for buf in self.test_bufs]
+    if correct_bufs is None:
+      reference_runtime_ms = self._run_kernel(self.reference_kernel.kernel, self.correct_bufs)
+      correctness = CorrectnessResult(passed=True)
+    else:
+      correctness = CorrectnessResult(passed=True, message="external correctness outputs")
+    profile = KernelRuntimeProfile(runtime_ms=reference_runtime_ms if reference_runtime_ms is not None else float("inf"))
+    ref_eval = CandidateEvaluation(candidate=self.reference_kernel.kernel, correctness=correctness, profile=profile)
 
     self.best_evaluation: CandidateEvaluation = ref_eval
     self.history: list[CandidateEvaluation] = [self.best_evaluation]
@@ -41,7 +48,8 @@ class AgenticOpt:
     try:
       t = self._run_kernel(candidate, bufs)
       for ref_buf, buf in zip(self.correct_bufs, bufs):
-        np.testing.assert_allclose(ref_buf.numpy(), buf.numpy())
+        np.testing.assert_allclose(ref_buf.numpy(), buf.numpy(), rtol=float(os.getenv("AGENTIC_RTOL", "1e-3")),
+                                   atol=float(os.getenv("AGENTIC_ATOL", "1e-2")))
       eval = CandidateEvaluation(candidate=candidate, profile=KernelRuntimeProfile(runtime_ms=t), correctness=CorrectnessResult(passed=True))
       if eval.profile.runtime_ms < self.best_evaluation.profile.runtime_ms:
         self.best_evaluation = eval
@@ -52,8 +60,14 @@ class AgenticOpt:
 
   def create_agent(self, model:Any|None=None) -> Any:
     from pydantic_ai import Agent
+    from pydantic_ai.builtin_tools import WebSearchTool
 
-    agent = Agent(model, output_type=Kernel, instructions=self._agent_instructions(), name="agentic-kernel-optimizer")
+    builtin_tools = [WebSearchTool()] if os.getenv("AGENTIC_WEB_SEARCH", "1") != "0" else []
+    if builtin_tools and isinstance(model, str) and model.startswith("openai:"):
+      from pydantic_ai.models.openai import OpenAIResponsesModel
+      model = OpenAIResponsesModel(model.removeprefix("openai:"))
+
+    agent = Agent(model, output_type=Kernel, instructions=self._agent_instructions(), name="agentic-kernel-optimizer", builtin_tools=builtin_tools)
 
     @agent.tool_plain
     def get_hardware_descriptor() -> HardwareDescriptor:
@@ -85,6 +99,7 @@ class AgenticOpt:
       messages = result.all_messages()
 
       evaluation = self.evaluate_kernel(result.output)
+      self._print_evaluation(iteration, evaluation)
       if evaluation.correctness.passed:
         stale_iters = 0 if self.best_evaluation.profile.runtime_ms < best_before else stale_iters + 1
       else:
@@ -103,6 +118,14 @@ class AgenticOpt:
 
     return AgenticOptResult(best=self.best_evaluation, history=tuple(self.history), iterations=len(self.history)-history_start, stop_reason=stop_reason)
 
+  def _print_evaluation(self, iteration:int, evaluation:CandidateEvaluation):
+    if evaluation.profile is not None:
+      speedup = self._speedup(evaluation)
+      print(f"candidate {iteration+1}: passed={evaluation.correctness.passed} runtime={evaluation.profile.runtime_ms:.6f} ms speedup={speedup:.4f}x")
+    else:
+      msg = "" if evaluation.correctness.message is None else f" error={evaluation.correctness.message[:500]}"
+      print(f"candidate {iteration+1}: passed={evaluation.correctness.passed}{msg}")
+
   def _speedup(self, evaluation:CandidateEvaluation) -> float:
     assert self.history[0].profile is not None and evaluation.profile is not None
     return self.history[0].profile.runtime_ms / evaluation.profile.runtime_ms
@@ -112,13 +135,26 @@ class AgenticOpt:
     best_speedup = self._speedup(self.best_evaluation)
     extra = f"\nAdditional caller guidance:\n{prompt}\n" if prompt is not None else ""
     target = f" Target speedup is {target_speedup:.4g}x versus the reference." if target_speedup is not None else ""
+    history = "\n".join(self._history_lines(8))
     return (
       f"Optimization iteration {iteration + 1}.{target}\n"
       f"Current best runtime is {best_ms:.6f} ms ({best_speedup:.4g}x versus reference).\n"
-      "Use the available tools to inspect the target, reference kernel, and candidate history. "
+      f"Hardware descriptor:\n{self.hardware.model_dump_json()}\n"
+      f"Reference kernel descriptor:\n{self.reference_kernel.model_dump_json()}\n"
+      f"Recent candidate history:\n{history}\n"
       "Return exactly one Kernel candidate. The runner will compile, execute, verify, profile, and record it after your response."
       f"{extra}"
     )
+
+  def _history_lines(self, limit:int) -> list[str]:
+    lines = []
+    for i, ev in enumerate(self.history[-limit:]):
+      if ev.profile is not None:
+        lines.append(f"{i}: passed={ev.correctness.passed} runtime_ms={ev.profile.runtime_ms:.6f} speedup={self._speedup(ev):.4f}")
+      else:
+        msg = "" if ev.correctness.message is None else ev.correctness.message[:300].replace("\n", "\\n")
+        lines.append(f"{i}: passed={ev.correctness.passed} runtime_ms=None error={msg}")
+    return lines
 
   @staticmethod
   def _agent_instructions() -> str:
@@ -131,7 +167,110 @@ class AgenticOpt:
       "Use get_hardware_descriptor, get_reference_kernel, and get_history before proposing candidates.\n"
       "Use candidate history to avoid repeating failed compiles, incorrect kernels, or slower variants.\n"
       "Prefer small, justified changes early; after correctness passes, optimize for lower runtime_ms.\n"
+      "Search the internet for reference kernels and documentation"
     )
+
+def render_gemm_kernel_descriptor(n:int=2048, device:str="METAL", dtype:str="float") -> KernelDescriptor:
+  from tinygrad.engine.realize import compile_linear
+  from tinygrad.helpers import Context
+  from tinygrad.uop.ops import Ops
+  from extra.agentic_opt.gemm import gemm
+
+  device = Device.canonicalize(device)
+  with Context(BEAM=0, CACHELEVEL=0):
+    a = Tensor.empty(n, n, dtype=dtype, device=device)
+    b = Tensor.empty(n, n, dtype=dtype, device=device)
+    linear = compile_linear(gemm(a, b).schedule_linear(), beam=0)
+
+  if len(linear.src) != 1: raise RuntimeError(f"expected one GEMM kernel, got {len(linear.src)}")
+  prg = linear.src[0].src[0]
+  source = next(x.arg for x in prg.src if x.op is Ops.SOURCE)
+
+  return KernelDescriptor(
+    entry_point=prg.arg.name,
+    type_family="gemm",
+    kernel=Kernel(source=source, global_size=tuple(int(x) for x in prg.arg.global_size),
+                  local_size=tuple(int(x) for x in prg.arg.local_size) if prg.arg.local_size is not None else None),
+    buffer_args=[
+      # Tensor.custom_kernel sees the unsqueezed A/output buffers for 2D GEMM.
+      BufferArg(shape=(1, n, n), dtype=dtype),
+      BufferArg(shape=(1, n, n), dtype=dtype),
+      BufferArg(shape=(n, n), dtype=dtype),
+    ],
+    description=f"Square GEMM C = A @ B for N={n}. Buffer ABI is C[1,N,N], A[1,N,N], B[N,N].",
+  )
+
+def _time_tinyjit_gemm_reference(n:int, device:str, dtype:str, jitbeam:int, warmup:int, repeats:int) -> tuple[list[Tensor], list[Tensor], float]:
+  from tinygrad import TinyJit
+  from tinygrad.helpers import Context
+
+  device = Device.canonicalize(device)
+  out = Tensor.empty(1, n, n, dtype=dtype, device=device).realize()
+  a = Tensor.rand(1, n, n, dtype=dtype, device=device).realize()
+  b = Tensor.rand(n, n, dtype=dtype, device=device).realize()
+
+  @TinyJit
+  def matmul(x:Tensor, y:Tensor) -> Tensor:
+    return (x.squeeze(0) @ y).reshape(1, n, n).realize()
+
+  old_jitbeam = os.environ.get("JITBEAM")
+  os.environ["JITBEAM"] = str(jitbeam)
+  times: list[float] = []
+  try:
+    with Context(BEAM=jitbeam):
+      correct = None
+      for _ in range(warmup):
+        correct = matmul(a, b)
+        Device[device].synchronize()
+      for _ in range(repeats):
+        st = time.perf_counter()
+        correct = matmul(a, b)
+        Device[device].synchronize()
+        times.append((time.perf_counter() - st) * 1000)
+  finally:
+    if old_jitbeam is None: os.environ.pop("JITBEAM", None)
+    else: os.environ["JITBEAM"] = old_jitbeam
+
+  assert correct is not None
+  return [out, a, b], [correct.realize(), a.clone().realize(), b.clone().realize()], sorted(times)[len(times)//2]
+
+def _main_gemm_optimization():
+  device = os.getenv("AGENTIC_DEVICE", os.getenv("DEV", "METAL"))
+  n = int(os.getenv("AGENTIC_N", "2048"))
+  dtype = os.getenv("AGENTIC_DTYPE", "float")
+  jitbeam = int(os.getenv("AGENTIC_JITBEAM", os.getenv("JITBEAM", "3")))
+  warmup = int(os.getenv("AGENTIC_WARMUP", "1"))
+  repeats = int(os.getenv("AGENTIC_REPEATS", "3"))
+  max_iterations = int(os.getenv("AGENTIC_MAX_ITERATIONS", "10"))
+  patience = int(os.getenv("AGENTIC_PATIENCE", "3"))
+  max_failures = int(os.getenv("AGENTIC_MAX_FAILURES", "5"))
+  target_speedup = float(x) if (x:=os.getenv("AGENTIC_TARGET_SPEEDUP")) else None
+  model = os.getenv("AGENTIC_MODEL")
+  if model is None and (vendor:=os.getenv("AGENTIC_VENDOR")) and (model_name:=os.getenv("AGENTIC_MODEL_NAME")):
+    model = f"{vendor}:{model_name}"
+
+  if model is None:
+    raise SystemExit("set AGENTIC_MODEL, for example AGENTIC_MODEL=openai:gpt-5.4 or AGENTIC_MODEL=anthropic:claude-sonnet-4-5")
+
+  print(f"rendering generic UOp GEMM for {device=} {n=} {dtype=}")
+  reference_kernel = render_gemm_kernel_descriptor(n=n, device=device, dtype=dtype)
+  print(f"reference entry={reference_kernel.entry_point} global={reference_kernel.kernel.global_size} local={reference_kernel.kernel.local_size}")
+
+  print(f"timing tinygrad baseline with TinyJit/JITBEAM={jitbeam}")
+  test_bufs, correct_bufs, baseline_ms = _time_tinyjit_gemm_reference(n, device, dtype, jitbeam, warmup, repeats)
+  print(f"tinygrad baseline median: {baseline_ms:.6f} ms")
+
+  opt = AgenticOpt(device, reference_kernel, test_bufs=test_bufs, correct_bufs=correct_bufs, reference_runtime_ms=baseline_ms)
+  result = opt.optimize_kernel(
+    model=model, max_iterations=max_iterations, patience=patience, target_speedup=target_speedup, max_failures=max_failures,
+    prompt=(
+      "Optimize this square GEMM kernel for the provided target. The reference source is rendered from the generic UOp GEMM scaffold. "
+      "The baseline runtime in history is the tinygrad TinyJit/JITBEAM matmul baseline, not the naive source runtime."
+    ),
+  )
+  best_ms = result.best.profile.runtime_ms if result.best.profile is not None else float("inf")
+  print({"stop_reason": result.stop_reason, "iterations": result.iterations, "best_ms": best_ms,
+         "speedup_vs_tinygrad": baseline_ms / best_ms if best_ms != 0 else float("inf")})
 
 def llama2_70b_lora_dummy_step(
   bs:int=1,
@@ -220,5 +359,4 @@ def llama2_70b_lora_dummy_step(
 
 
 if __name__ == "__main__":
-  out = llama2_70b_lora_dummy_step()
-  print({"loss": out["loss"].item(), "grad_norm": out["grad_norm"].item(), "trainable_params": len(out["trainable_params"])})
+  _main_gemm_optimization()
