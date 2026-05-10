@@ -1,7 +1,6 @@
 from typing import Any
-from tinygrad.dtype import DType
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 class HardwareDescriptor(BaseModel):
   model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
@@ -102,6 +101,14 @@ class CandidateEvaluation(BaseModel):
   correctness: CorrectnessResult
   profile: KernelRuntimeProfile | None = None # none if failed
   compiler_log: str | None = None
+
+class AgenticOptResult(BaseModel):
+  model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+  best: CandidateEvaluation
+  history: tuple[CandidateEvaluation, ...]
+  iterations: int
+  stop_reason: str
 
 class BufferArg(BaseModel):
   model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)

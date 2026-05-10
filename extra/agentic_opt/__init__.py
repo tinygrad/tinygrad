@@ -4,7 +4,7 @@ from typing import Any
 from fastmcp import FastMCP
 
 from tinygrad import Tensor, Device
-from extra.agentic_opt.models import CandidateEvaluation, CorrectnessResult, HardwareDescriptor, Kernel, KernelDescriptor, KernelRuntimeProfile
+from extra.agentic_opt.models import AgenticOptResult, CandidateEvaluation, CorrectnessResult, HardwareDescriptor, Kernel, KernelDescriptor, KernelRuntimeProfile
 
 class AgenticOpt:
   def __init__(self, device:str, reference_kernel:KernelDescriptor):
@@ -51,25 +51,88 @@ class AgenticOpt:
     self.history.append(eval)
     return eval
 
-  def get_history(self) -> tuple[CandidateEvaluation, ...]:
-    return tuple(self.history)
+  def create_agent(self, model:Any|None=None) -> Any:
+    from pydantic_ai import Agent
 
-  def create_server(self, name:str="agentic-opt") -> Any:
-    mcp = FastMCP(name)
+    agent = Agent(model, output_type=Kernel, instructions=self._agent_instructions(), name="agentic-kernel-optimizer")
 
-    @mcp.tool()
-    def get_hardware_descriptor() -> HardwareDescriptor: return self.hardware
+    @agent.tool_plain
+    def get_hardware_descriptor() -> HardwareDescriptor:
+      """Return the target hardware and compiler descriptor."""
+      return self.hardware
 
-    @mcp.tool()
-    def get_reference_kernel() -> KernelDescriptor: return self.reference_kernel
+    @agent.tool_plain
+    def get_reference_kernel() -> KernelDescriptor:
+      """Return the reference kernel source, launch geometry, type family, and buffer argument metadata."""
+      return self.reference_kernel
 
-    @mcp.tool()
-    def evaluate_kernel(candidate:Kernel) -> CandidateEvaluation: return self.evaluate_kernel(candidate)
+    @agent.tool_plain
+    def get_history() -> list[CandidateEvaluation]:
+      """Return all candidate evaluations so far, including failures."""
+      return self.history
 
-    @mcp.tool()
-    def get_history() -> list[CandidateEvaluation]: return self.history
+    return agent
 
-    return mcp
+  def optimize_kernel(self, model:Any|None=None, max_iterations:int=10, patience:int=3, target_speedup:float|None=None,
+                      max_failures:int|None=None, prompt:str|None=None) -> AgenticOptResult:
+    agent = self.create_agent(model)
+    messages, stale_iters, failures = None, 0, 0
+    history_start = len(self.history)
+    stop_reason = "max_iterations"
+
+    for iteration in range(max_iterations):
+      best_before = self.best_evaluation.profile.runtime_ms
+      result = agent.run_sync(self._iteration_prompt(iteration, target_speedup, prompt), message_history=messages)
+      messages = result.all_messages()
+
+      evaluation = self.evaluate_kernel(result.output)
+      if evaluation.correctness.passed:
+        stale_iters = 0 if self.best_evaluation.profile.runtime_ms < best_before else stale_iters + 1
+      else:
+        failures += 1
+        stale_iters += 1
+
+      if target_speedup is not None and self._speedup(self.best_evaluation) >= target_speedup:
+        stop_reason = "target_speedup"
+        break
+      if max_failures is not None and failures >= max_failures:
+        stop_reason = "max_failures"
+        break
+      if patience > 0 and stale_iters >= patience:
+        stop_reason = "patience"
+        break
+
+    return AgenticOptResult(best=self.best_evaluation, history=tuple(self.history), iterations=len(self.history)-history_start, stop_reason=stop_reason)
+
+  def _speedup(self, evaluation:CandidateEvaluation) -> float:
+    assert self.history[0].profile is not None and evaluation.profile is not None
+    return self.history[0].profile.runtime_ms / evaluation.profile.runtime_ms
+
+  def _iteration_prompt(self, iteration:int, target_speedup:float|None, prompt:str|None) -> str:
+    best_ms = self.best_evaluation.profile.runtime_ms
+    best_speedup = self._speedup(self.best_evaluation)
+    extra = f"\nAdditional caller guidance:\n{prompt}\n" if prompt is not None else ""
+    target = f" Target speedup is {target_speedup:.4g}x versus the reference." if target_speedup is not None else ""
+    return (
+      f"Optimization iteration {iteration + 1}.{target}\n"
+      f"Current best runtime is {best_ms:.6f} ms ({best_speedup:.4g}x versus reference).\n"
+      "Use the available tools to inspect the target, reference kernel, and candidate history. "
+      "Return exactly one Kernel candidate. The runner will compile, execute, verify, profile, and record it after your response."
+      f"{extra}"
+    )
+
+  @staticmethod
+  def _agent_instructions() -> str:
+    return (
+      "You optimize a single tinygrad-rendered kernel by proposing replacement kernel source code.\n"
+      "Your output must be a Kernel object with source, global_size, and optional local_size.\n"
+      "Preserve the reference kernel entry point name, function signature, argument order, argument count, and externally visible semantics.\n"
+      "You may change the implementation and launch geometry.\n"
+      "Do not add new global buffers or require new arguments.\n"
+      "Use get_hardware_descriptor, get_reference_kernel, and get_history before proposing candidates.\n"
+      "Use candidate history to avoid repeating failed compiles, incorrect kernels, or slower variants.\n"
+      "Prefer small, justified changes early; after correctness passes, optimize for lower runtime_ms.\n"
+    )
 
 def llama2_70b_lora_dummy_step(
   bs:int=1,
