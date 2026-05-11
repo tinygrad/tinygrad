@@ -76,7 +76,7 @@ spec_shared = PatternMatcher([
   (UPat(Ops.DEFINE_REG, src=(), name="x"), lambda x: isinstance(x.arg, int)),
 
   # AFTER on Movement Op, PARAM, BUFFER, or another AFTER
-  (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.PARAM, Ops.BUFFER, Ops.DEFINE_REG, Ops.DEFINE_LOCAL, Ops.AFTER, Ops.MULTI})),),
+  (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.PARAM, Ops.BUFFER, Ops.DEFINE_REG, Ops.DEFINE_LOCAL, Ops.AFTER, Ops.MULTI, Ops.BITCAST})),),
         allow_any_len=True), lambda: True),
 
   # NOOP. TODO: remove this
@@ -87,6 +87,12 @@ spec_shared = PatternMatcher([
 
   # BARRIER (on any length). TODO: this should only be in spec_program
   (UPat(Ops.BARRIER, dtypes.void), lambda: True),
+
+  # SPECIAL. TODO: this should only be in spec_program
+  (UPat(Ops.SPECIAL, src=(UPat.var("x", (dtypes.weakint, dtypes.int32)),), name="s"), lambda s,x: s.dtype == x.dtype and isinstance(s.arg, str)),
+
+  # assembly instruction
+  (UPat(Ops.INS), lambda: True),
 ])
 
 # these ops can exist in tensor but not programs. example: movement
@@ -97,16 +103,24 @@ spec_tensor = PatternMatcher([
 
   # UNIQUE
   (UPat(Ops.UNIQUE, dtypes.void, ()), lambda: True),
+  (UPat(Ops.LUNIQUE, dtypes.void, ()), lambda: True),
 
   # CONST with a UNIQUE or DEVICE
   (UPat(Ops.CONST, src=(UPat(Ops.DEVICE),)), lambda: True),
-  (UPat(Ops.CONST, src=(UPat(Ops.UNIQUE), UPat(Ops.DEVICE))), lambda: True),
+  (UPat(Ops.CONST, src=(UPat((Ops.UNIQUE, Ops.LUNIQUE)), UPat(Ops.DEVICE))), lambda: True),
+
+  # BUFFER
+  (UPat(Ops.BUFFER, src=(UPat(Ops.LUNIQUE), UPat(Ops.DEVICE)), name="buf"),
+   lambda buf: isinstance(buf.arg, int) and isinstance(buf.dtype, DType)),
 
   # PARAM (that's really a variable)
   (UPat(Ops.PARAM, src=(UPat(), UPat(), UPat(), UPat(), UPat()), name="x"), lambda x: True),
 
+  # Tensor variable bindings
+  (UPat(Ops.BIND, (dtypes.int,dtypes.weakint,), (UPat(Ops.DEFINE_VAR), UPat.cvar(dtype=(dtypes.int,dtypes.weakint,))), arg=None), lambda: True),
+
   # CALL
-  (UPat(Ops.CALL, src=(UPat(Ops.SINK),), allow_any_len=True), lambda: True),
+  (UPat(Ops.CALL, src=(UPat((Ops.SINK, Ops.LINEAR, Ops.PROGRAM)),), allow_any_len=True), lambda: True),
 
   # FUNCTION + TUPLE must have void dtype, GETTUPLE can only appear on FUNCTION or TUPLE
   (UPat(Ops.FUNCTION, dtypes.void, src=(UPat(Ops.TUPLE),), allow_any_len=True), lambda: True),
@@ -139,22 +153,26 @@ spec_tensor = PatternMatcher([
 
   # MSELECT chooses one of the multi buffers
   (UPat(Ops.MSELECT, name="x"), lambda x: isinstance(x.src[0].device, tuple) and x.arg < len(x.src[0].device)),
+  # MSTACK combines buffers into multi
+  (UPat(Ops.MSTACK, name="x"), lambda x: all(isinstance(x.device, str) for x in x.src)),
 
   # CONTIGUOUS ensures the source UOp realizes
-  (UPat((Ops.CONTIGUOUS), name="root", src=(UPat.var("x"),), arg=None), lambda root,x: root.dtype == x.dtype),
+  (UPat((Ops.DETACH, Ops.CONTIGUOUS, Ops.CONTIGUOUS_BACKWARD), name="root", src=(UPat.var("x"),), arg=None),
+   lambda root,x: root.dtype == x.dtype),
 
   # TODO: this should not be here. STAGE is transformed to DEFINE_LOCAL later
   (UPat(Ops.STAGE, src=(UPat(),), allow_any_len=True), lambda: True),
 
   # TODO: the AMD emulator is using LOAD, it absolutely shouldn't be
   (UPat(Ops.LOAD, src=(UPat(),)), lambda: True),
+
+  # LINEAR
+  (UPat(Ops.LINEAR, dtypes.void), lambda: True),
+  (UPat(Ops.PROGRAM, dtypes.void, src=(UPat(Ops.SINK), UPat(Ops.DEVICE), UPat(Ops.LINEAR))), lambda: True),
 ])+spec_shared
 
 # these ops can exist in programs but not the tensor spec. example: LOAD
 spec_program = PatternMatcher([
-  # SPECIAL
-  (UPat(Ops.SPECIAL, src=(UPat.var("x", (dtypes.weakint, dtypes.int32)),), name="s"), lambda s,x: s.dtype == x.dtype and isinstance(s.arg, str)),
-
   # LOAD(idx) / STORE(idx, val) with gates on the LOAD/STORE
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))).or_casted().load(), validate_index),
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))).or_casted().load(UPat.var("alt"), UPat.var("gate", dtype=dtypes.bool), name="load"),
@@ -176,8 +194,6 @@ spec_program = PatternMatcher([
 
 # these are intermediate ops. everything should be deleted from here
 spec_full = PatternMatcher([
-  (UPat(Ops.BUFFER, src=(UPat(Ops.UNIQUE), UPat(Ops.DEVICE)), name="buf"),
-   lambda buf: isinstance(buf.arg, int) and isinstance(buf.dtype, DType)),
 ])+spec_tensor+spec_shared
 
 
