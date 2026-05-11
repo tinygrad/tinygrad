@@ -5,7 +5,7 @@ swref_path, hwref_path = "{}/src/common/inc/swref/published", "{}/kernel-open/nv
 swref = {
   "dev_therm": ["gb202"], "dev_vm": ["tu102", "gh100"], **{k:["tu102"] for k in ["dev_fb", "dev_bus"]},
   **{k:["ga102"] for k in ["dev_gc6_island", "dev_gsp", "dev_riscv_pri", "dev_fbif_v4", "dev_falcon_second_pri", "dev_sec_pri"]},
-  **{k:["ga102", "gh100"] for k in ["dev_falcon_v4", "dev_fsp_pri"]}
+  "dev_falcon_v4": ["ga102", "gh100"], "dev_fsp_pri": ["gh100"]
 }
 hwref = {"dev_mmu": ["tu102", "gh100"]}
 __all__ = ["nv_ref", *swref.keys(), *hwref.keys()]
