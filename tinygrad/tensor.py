@@ -1402,12 +1402,13 @@ class Tensor(OpMixin):
     for i in range(min(m, n)):
       x = R[..., i:m, i]
       norm = x.square().sum(-1).sqrt()
+      mask = norm != 0
       s = (x[..., 0] != 0).where(-x[..., 0].sign(), -1)
       u1 = x[..., 0] - s * norm
-      w = x.unsqueeze(-1) / (norm != 0).where(u1, 1).reshape(b_shape + (1, 1))
+      w = x.unsqueeze(-1) / mask.where(u1, 1)[..., None, None]
       w[..., 0, 0] = 1
-      tau = (-s * u1 / (norm != 0).where(norm, 1)).reshape(b_shape + (1, 1))
-      tau = (norm != 0).reshape(b_shape + (1, 1)).where(tau, 0)
+      tau = (-s * u1 / mask.where(norm, 1))[..., None, None]
+      tau = mask[..., None, None].where(tau, 0)
       R[..., i:m, :] = R[..., i:m, :] - (w * tau) @ (w.transpose(-2, -1) @ R[..., i:m, :])
       Q[..., :, i:m] = Q[..., :, i:m] - (Q[..., :, i:m] @ w) @ (tau * w).transpose(-2, -1)
     return Q, R
@@ -1417,7 +1418,7 @@ class Tensor(OpMixin):
     assert self.ndim > 1, f"expected two or more dimensions, got {self.ndim}"
     b_shape, m, n = self.shape[:-2], int(self.shape[-2]), int(self.shape[-1])
     #preprocess the matrix
-    Q, R = (self.qr() if m >= n else self.transpose(-2, -1).qr())
+    Q, R = (self if m >= n else self.transpose(-2, -1)).qr()
     num, q_num = min(m, n), max(m, n)
     # TODO: codegen infinite loop without contiguous
     U = R[..., :num, :num].contiguous()
