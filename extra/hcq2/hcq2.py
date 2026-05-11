@@ -9,10 +9,8 @@ from tinygrad.dtype import dtypes
 from dataclasses import dataclass, field
 from tinygrad.runtime.support.memory import BumpAllocator
 from tinygrad.runtime.support.hcq import MMIOInterface
-from tinygrad.renderer import Renderer
-from tinygrad.engine.realize import get_runtime, pm_flatten_linear, run_linear
-from tinygrad.codegen import to_program
-from tinygrad.renderer import Estimates
+from tinygrad.renderer import Renderer, Estimates
+from tinygrad.engine.realize import get_runtime, pm_flatten_linear, run_linear, to_program
 
 HCQDeviceType = TypeVar('HCQDeviceType', bound='HCQ2Compiled')
 
@@ -20,26 +18,25 @@ class HCQProgram:
   def __init__(self, dev:HCQ2Compiled, name:str, lib:bytes, *aux, runtimevars=None, prg:UOp|None=None, **kwargs):
     assert prg is not None
     self.dev, self.name, self.prg = dev, name, prg
-    n_bufs = max(prg.arg.globals, default=-1) + 1
-    ctx = HCQ2LowerCtx(dev=dev, name=f"submit_{name}")
-    self.buf_addrs = Buffer("CPU", n_bufs+1, dtypes.uint64, preallocate=True)
-    buf_addrs = ctx.host_param(self.buf_addrs)
-    ctx.kernargs, self.kernargs_i = ctx.host_param(dev.kernargs_buf, dev_uop=buf_addrs[0]), ctx.inputs.index(dev.kernargs_buf)
-    host_prg = _hcq_schedule(dev, ctx, UOp(Ops.LINEAR, dtypes.void, (prg.call(*[buf_addrs[i+1] for i in range(n_bufs)]),), arg="COMPUTE"), prg).src[0]
+    self.ctx = ctx = HCQ2LowerCtx(dev=dev, name=f"submit_{name}")
+
+    ctx.kernargs = ctx.host_param(dev.kernargs_buf, dev_uop=ctx.dev_param(dev.kernargs_buf))
+    self.kernargs_devslot, self.global_devslot_base = ctx.dev_inputs.index(dev.kernargs_buf), len(ctx.dev_inputs)
+    global_uops = [ctx.dev_param() for _ in range(max(prg.arg.globals, default=-1) + 1)]
+
+    host_prg = _hcq_schedule(dev, ctx, UOp(Ops.LINEAR, dtypes.void, (prg.call(*global_uops),), arg="COMPUTE"), prg).src[0]
     self.host_rt, self.host_globals = get_runtime("CPU", host_prg), host_prg.arg.globals
-    self.host_inputs, self.kernargs_alloc_size = ctx.inputs, max(ctx.kernargs_allocator.ptr, 1)
+    self.kernargs_alloc_size = max(ctx.kernargs_allocator.ptr, 1)
 
   def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int|None,...]=(),
                wait=False, timeout:int|None=None):
-    # allocate kernargs and fill buf_addrs with gpu addresses
-    self.host_inputs[self.kernargs_i] = self.dev.kernargs_buf.view(self.kernargs_alloc_size, dtypes.uint8,
+    self.ctx.inputs[self.ctx.kernargs.arg] = kernargs = self.dev.kernargs_buf.view(self.kernargs_alloc_size, dtypes.uint8,
       self.dev.kernargs_offset_allocator.alloc(self.kernargs_alloc_size, 8)).ensure_allocated()
-    addrs = self.buf_addrs.as_memoryview(force_zero_copy=True).cast('Q')
-    addrs[0] = self.host_inputs[self.kernargs_i].get_buf(self.dev.device).va_addr
-    for j, gi in enumerate(self.prg.arg.globals): addrs[gi+1] = bufs[j].va_addr
-    self.host_rt(*[self.host_inputs[i].get_buf("CPU") for i in self.host_globals], vals=vals)
+    devptrs = self.ctx.devptrs_buf.as_memoryview(force_zero_copy=True).cast('Q')
+    devptrs[self.kernargs_devslot] = kernargs.get_buf(self.dev.device).va_addr
+    for j, gi in enumerate(self.prg.arg.globals): devptrs[self.global_devslot_base + gi] = bufs[j].va_addr
+    self.host_rt(*[self.ctx.inputs[i].get_buf("CPU") for i in self.host_globals], vals=vals)
     if wait: self.dev.synchronize(timeout)
-    return None
 
 class HCQ2Compiled(Compiled):
   """
@@ -185,21 +182,33 @@ class HCQ2LowerCtx:
   dev:HCQ2Compiled
   kernargs:UOp|None = None
   kernargs_allocator:BumpAllocator = field(default_factory=lambda: BumpAllocator(0x1000, wrap=False))
+
   inputs:list[Buffer] = field(default_factory=list)
+  dev_inputs:list[Buffer|None] = field(default_factory=list)
+
   holds:list[UOp] = field(default_factory=list)
+
   param2dev:dict[UOp, UOp] = field(default_factory=dict)
+
   name:str = "hcq_submit"
 
   def host_param(self, buf:Buffer, dev_uop:UOp|None=None) -> UOp:
-    # dev_uop overrides the encoded device uop
     if buf not in self.inputs: self.inputs.append(buf)
     param = UOp.placeholder((buf.size,), buf.dtype, self.inputs.index(buf))
     if dev_uop is not None: self.param2dev[param] = dev_uop
     return param
 
-  def as_dev_uop(self, uop:UOp) -> UOp|int:
-    if uop.op in (Ops.BUFFER, Ops.BUFFER_VIEW): return uop.buffer.get_buf(self.dev.device).va_addr
-    return self.param2dev.get(uop, uop)
+  @functools.cached_property
+  def devptrs_buf(self) -> Buffer: return Buffer("CPU", 0x1000 // 8, dtypes.uint64, preallocate=True) # one page of va_addrs
+
+  @functools.cached_property
+  def devptrs_uop(self) -> UOp: return self.host_param(self.devptrs_buf)
+
+  def dev_param(self, buf:Buffer|None=None) -> UOp:
+    if buf is None or buf not in self.dev_inputs: self.dev_inputs.append(buf)
+    return self.devptrs_uop[self.dev_inputs.index(buf) if buf is not None else len(self.dev_inputs) - 1]
+
+  def as_dev_uop(self, uop:UOp) -> UOp: return self.param2dev.get(uop, uop)
 
 class HCQEncoder:
   def __init__(self, ctx:HCQ2LowerCtx): self.ctx, self.dev, self.blob, self.patches, self.deps = ctx, ctx.dev, b'', [], set()
@@ -210,7 +219,8 @@ class HCQEncoder:
   def get_dev_addr(self, uop:UOp) -> sint|UOp:
     self.deps.add(uop) # uops used to encode this blob are referenced as sources
     while uop.op in (Ops.AFTER,): uop = uop.src[0]
-    return self.ctx.as_dev_uop(uop)
+    uop = self.ctx.as_dev_uop(uop)
+    return uop.buffer.get_buf(self.dev.device).va_addr if uop.op in (Ops.BUFFER, Ops.BUFFER_VIEW) else uop
 
   def append(self, *data, dtype=dtypes.uint32):
     for d in data:
@@ -224,7 +234,15 @@ class HCQEncoder:
 
 # **************** prep runtime ****************
 
-def do_init_args(ctx:HCQ2LowerCtx, call:UOp, prg:UOp) -> UOp:
+pm_prep_runtime = PatternMatcher([
+  # device-specific lowering of the program
+  (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, src=(UPat(), UPat(), UPat(), UPat(), UPat(Ops.BINARY)), name="prg"),),
+        name="call", allow_any_len=True), lambda ctx,call,prg: call.replace(src=(ctx.dev.pm_lower.rewrite(prg, ctx),) + call.src[1:])),
+])
+
+# **************** lower hcq ****************
+
+def lower_kernargs(ctx:HCQ2LowerCtx, call:UOp, prg:UOp) -> UOp:
   data, info = prg.arg
 
   enc = HCQEncoder(ctx)
@@ -237,16 +255,6 @@ def do_init_args(ctx:HCQ2LowerCtx, call:UOp, prg:UOp) -> UOp:
   assert ctx.kernargs is not None
   args_uop = ctx.kernargs.after(*tuple(p.replace(arg=p.arg+args_off) for p in enc.patches))
   return call.replace(src=(prg.replace(src=prg.src + (args_uop,), arg=(data, info, args_off)),) + call.src[1:])
-
-pm_prep_runtime = PatternMatcher([
-  # device-specific lowering of the program
-  (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, src=(UPat(), UPat(), UPat(), UPat(), UPat(Ops.BINARY)), name="prg"),),
-        name="call", allow_any_len=True), lambda ctx,call,prg: call.replace(src=(ctx.dev.pm_lower.rewrite(prg, ctx),) + call.src[1:])),
-  # init args for programs
-  (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, src=(UPat(Ops.BUFFER),), name="prg"),), name="call", allow_any_len=True), do_init_args),
-])
-
-# **************** lower hcq ****************
 
 def lower_program(ctx:HCQ2LowerCtx, call:UOp, prg:UOp) -> UOp:
   sig, tl = UOp.from_buffer(ctx.dev.timeline_signal), ctx.host_param(ctx.dev.timeline_value)
@@ -262,6 +270,7 @@ def lower_copy(ctx:HCQ2LowerCtx, call:UOp, copy:UOp) -> UOp:
 
 # lower to hcq-specific commands
 pm_hcq_lower = PatternMatcher([
+  (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, src=(UPat(Ops.BUFFER),), name="prg"),), name="call", allow_any_len=True), lower_kernargs),
   (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, src=(UPat(Ops.BUFFER), UPat()), name="prg"),), name="call", allow_any_len=True), lower_program),
   (UPat(Ops.CALL, src=(UPat(Ops.COPY, name="copy"),), name="call", allow_any_len=True), lower_copy),
 ])
@@ -301,7 +310,7 @@ def hcq_callify(ctx:HCQ2LowerCtx, sink:UOp) -> UOp:
   return call.replace(src=call.src + (UOp(Ops.BIND, dtypes.void, src=tuple(ctx.holds)),)) if ctx.holds else call
 
 pm_create_host_sink = PatternMatcher([
-  (UPat(Ops.LINEAR, name="l", allow_any_len=True), lambda ctx, l: UOp.sink(*l.src, arg=KernelInfo(name=ctx.name), tag=1))
+  (UPat(Ops.LINEAR, name="l", allow_any_len=True), lambda ctx, l: UOp.sink(*l.src, arg=KernelInfo(name=ctx.name, estimates=Estimates()), tag=1))
 ])
 
 # lower cmdbuf submits
