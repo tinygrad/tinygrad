@@ -283,15 +283,15 @@ class NV_FLCN(NV_IP):
 
 class NV_FLCN_COT(NV_IP):
   def wait_for_reset(self):
-    self.nvdev.include("src/common/inc/swref/published/blackwell/gb202/dev_therm.h")
+    self.nvdev.include("dev_therm", "gb202")
     wait_cond(lambda _: self.nvdev.NV_THERM_I2CS_SCRATCH.read() == 0xff, "waiting for reset")
 
   def init_sw(self):
-    self.nvdev.include("src/common/inc/swref/published/ampere/ga102/dev_gsp.h")
-    self.nvdev.include("src/common/inc/swref/published/hopper/gh100/dev_falcon_v4.h")
-    self.nvdev.include("src/common/inc/swref/published/hopper/gh100/dev_vm.h")
-    self.nvdev.include("src/common/inc/swref/published/hopper/gh100/dev_fsp_pri.h")
-    self.nvdev.include("src/common/inc/swref/published/turing/tu102/dev_bus.h")
+    self.nvdev.include("dev_gsp", "ga102")
+    self.nvdev.include("dev_falcon_v4", "gh100")
+    self.nvdev.include("dev_vm", "gh100")
+    self.nvdev.include("dev_fsp_pri", "gh100")
+    self.nvdev.include("dev_bus", "tu102")
 
     self.fmc_boot_args_view, self.fmc_boot_args_sysmem = self.nvdev._alloc_boot_struct(nv.GSP_FMC_BOOT_PARAMS())
     self.init_fmc_image()
