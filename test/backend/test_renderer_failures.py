@@ -4,8 +4,8 @@ from tinygrad.device import Device, is_dtype_supported
 from tinygrad.dtype import dtypes, ConstType
 from tinygrad.engine.realize import run_linear
 from tinygrad.codegen import to_program
-from tinygrad.helpers import prod
-from tinygrad.renderer.cstyle import CStyleLanguage
+from tinygrad.helpers import prod, Target
+from tinygrad.renderer.cstyle import CStyleLanguage, ClangRenderer
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.wgsl import WGSLRenderer
 from tinygrad.runtime.ops_python import PythonRenderer
@@ -84,7 +84,7 @@ class TestCPUSourceFailures(unittest.TestCase):
     out = (x<0).where((x<0).where(y, z), (x<0).where(y+1, z+1))
     linear = out.schedule_linear()
     assert len(linear.src) == 1
-    src = to_program(replace_opts(linear.src[0].src[0], []), Device["CPU"].renderer).src[3].arg
+    src = to_program(replace_opts(linear.src[0].src[0], []), ClangRenderer(Target("CPU"))).src[3].arg
     self.assertEqual(src.count("?"), 1)
 
 @unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, WGSLRenderer), "tests for wgsl renderer")
