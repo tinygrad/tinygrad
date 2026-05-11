@@ -93,6 +93,13 @@ spec_shared = PatternMatcher([
 
   # assembly instruction
   (UPat(Ops.INS), lambda: True),
+
+  # LOAD(idx) / STORE(idx, val) with gates on the LOAD/STORE
+  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))).or_casted().load(), validate_index),
+  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))).or_casted().load(UPat.var("alt"), UPat.var("gate", dtype=dtypes.bool), name="load"),
+   lambda buf,idx,gate,alt,load: validate_index(buf, idx, gate) if alt.dtype == load.dtype else False),
+  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))).or_casted().store(UPat()), validate_index),
+  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))).or_casted().store(UPat(), UPat.var("gate", dtype=dtypes.bool)), validate_index),
 ])
 
 # these ops can exist in tensor but not programs. example: movement
@@ -142,7 +149,7 @@ spec_tensor = PatternMatcher([
   (UPat((Ops.PERMUTE, Ops.FLIP), name="mv", src=(UPat(),)), lambda mv: isinstance(mv.arg, tuple)),
 
   # STORE in tensor graph: store a value into a target
-  (UPat(Ops.STORE, dtypes.void, (UPat(), UPat())), lambda: True),
+  (UPat(Ops.STORE, dtypes.void, (UPat(name="x"), UPat())), lambda x: None if isinstance(x.dtype, PtrDType) else True),
 
   # REDUCE has arg=(op, axis_tuple), src[1:] are ranges after lowering
   (UPat(Ops.REDUCE, src=(UPat(),), allow_any_len=True, name="x"),
@@ -164,9 +171,6 @@ spec_tensor = PatternMatcher([
   # TODO: this should not be here. STAGE is transformed to DEFINE_LOCAL later
   (UPat(Ops.STAGE, src=(UPat(),), allow_any_len=True), lambda: True),
 
-  # TODO: the AMD emulator is using LOAD, it absolutely shouldn't be
-  (UPat(Ops.LOAD, src=(UPat(),)), lambda: True),
-
   # LINEAR
   (UPat(Ops.LINEAR, dtypes.void), lambda: True),
   (UPat(Ops.PROGRAM, dtypes.void, src=(UPat(Ops.SINK), UPat(Ops.DEVICE), UPat(Ops.LINEAR))), lambda: True),
@@ -174,13 +178,6 @@ spec_tensor = PatternMatcher([
 
 # these ops can exist in programs but not the tensor spec. example: LOAD
 spec_program = PatternMatcher([
-  # LOAD(idx) / STORE(idx, val) with gates on the LOAD/STORE
-  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))).or_casted().load(), validate_index),
-  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))).or_casted().load(UPat.var("alt"), UPat.var("gate", dtype=dtypes.bool), name="load"),
-   lambda buf,idx,gate,alt,load: validate_index(buf, idx, gate) if alt.dtype == load.dtype else False),
-  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))).or_casted().store(UPat()), validate_index),
-  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))).or_casted().store(UPat(), UPat.var("gate", dtype=dtypes.bool)), validate_index),
-
   # STACK/GEP in program. TODO: this should match Tensor
   (UPat(Ops.STACK, name="x"), lambda x: len(x.src)>1 and len(x.src) == x.dtype.vcount and all(x.dtype == y.dtype.vec(len(x.src)) for y in x.src)),
   (UPat(Ops.GEP, src=(UPat.var("src"),), name="gep"), lambda gep,src: gep.dtype == src.dtype.scalar()),
@@ -195,7 +192,9 @@ spec_program = PatternMatcher([
 
 # these are intermediate ops. everything should be deleted from here
 spec_full = PatternMatcher([
-])+spec_tensor+spec_shared
+  # codegen may end ranges after gpudims has replaced RANGE with SPECIAL.
+  (UPat(Ops.END, src=(UPat(), UPat()), allow_any_len=True), lambda: True),
+])+spec_program+spec_tensor+spec_shared
 
 
 # ***** old specs *****
