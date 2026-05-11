@@ -91,7 +91,7 @@ def __getattr__(nm):
                   srcs=rocm_src, patterns=soc_patterns, macros=False)
     case "pmc":
       def genpmc(_, files, **kwargs):
-        from yaml import safe_load
+        from yaml import safe_load # type: ignore
         with open(files[0], "r") as f: data = safe_load(f)
         out = ["counters = {"]
         for counter in [c for c in data['rocprofiler-sdk']['counters'] if any('block' in d for d in c['definitions'])]:
