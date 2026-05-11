@@ -41,17 +41,9 @@ def header_download(file, url) -> str: return fetch(f"{url}/{file}", subdir="def
 def import_soc(ip): return getattr(tinygrad.runtime.autogen.am, f"soc_{ip[0]}")
 
 def import_pmc(ip) -> dict[str, tuple[str, int]]:
-  res:dict[str, tuple[str, int]] = {}
-
+  from tinygrad.runtime.autogen.am import pmc
   # NOTE: precise arch for mi300+, generic for others, since rocm headers lack some archs
-  arch = f"gfx{ip[0]}{ip[1]:x}{ip[2]:x}" if ip[0] == 9 else f"gfx{ip[0]}"
-
-  for sec in header_download("rocprofiler-compute/src/rocprof_compute_soc/profile_configs/counter_defs.yaml", ROCM_URL).split('- name: ')[1:]:
-    for arch_spec in sec.split('- architectures:')[1:]:
-      if arch in arch_spec and (block:=re.search(r'block:\s*([A-Za-z0-9_]+)', arch_spec)) and (ev:=re.search(r'event:\s*(\d+)', arch_spec)):
-        res[sec.splitlines()[0].strip()] = (block.group(1), int(ev.group(1)))
-
-  return res
+  return {k:v[f"gfx{ip[0]}{ip[1]:x}{ip[2]:x}" if ip[0] == 9 else f"gfx{ip[0]}"] for k,v in pmc.counters}
 
 def import_asic_regs(prefix:str, version:tuple[int, ...], cls=AMDReg) -> dict[str, AMDReg]:
   return {reg:cls(name=reg, offset=off, segment=seg, fields=fields) for reg,(off,seg,fields) in import_module(prefix, version, submod="regs").items()}
