@@ -45,7 +45,7 @@ spec_shared = PatternMatcher([
 
   # CONST/DEFINE_VAR are everywhere
   (UPat(Ops.CONST, src=(), name="x"), lambda x: type(x.arg) is type(x.dtype.const(x.arg))),
-  (UPat(Ops.DEFINE_VAR, name="x"), lambda x: isinstance(x.arg[1], int) and isinstance(x.arg[2], int)),
+  (UPat(Ops.DEFINE_VAR, name="x"), lambda x: len(x.arg) == 3 and isinstance(x.arg[0], str)),
 
   # ALUs: most ALUs have all matching dtypes, except CMPLT, CMPNE, and WHERE
   (UPat(Ops.WHERE, name="w", src=(UPat(dtype=dtypes.bool), UPat.var("x"), UPat.var("y"))), lambda w,x,y: w.dtype == x.dtype == y.dtype),
@@ -117,7 +117,7 @@ spec_tensor = PatternMatcher([
   (UPat(Ops.CONST, src=(UPat((Ops.UNIQUE, Ops.LUNIQUE)), UPat(Ops.DEVICE))), lambda: True),
 
   # BUFFER
-  (UPat(Ops.BUFFER, src=(UPat(Ops.LUNIQUE), UPat(Ops.DEVICE)), name="buf"),
+  (UPat(Ops.BUFFER, src=(UPat((Ops.UNIQUE, Ops.LUNIQUE)), UPat(Ops.DEVICE)), name="buf"),
    lambda buf: isinstance(buf.arg, int) and isinstance(buf.dtype, DType)),
 
   # PARAM (that's really a variable)
@@ -140,7 +140,7 @@ spec_tensor = PatternMatcher([
   (UPat(Ops.PARAM, src=(UPat(), UPat(Ops.DEVICE), UPat(Ops.MULTI)), name="x"), lambda x: True),
 
   # inputs to movement ops
-  (UPat((Ops.STACK, Ops.VCONST), dtype=dtypes.weakint), lambda: True),
+  (UPat((Ops.STACK, Ops.VCONST)), lambda: True),
   (UPat({Ops.ADD, Ops.MUL, Ops.CDIV, Ops.FLOORDIV}, dtype=dtypes.weakint), lambda: True),
 
   # movement ops
@@ -192,9 +192,38 @@ spec_program = PatternMatcher([
 
 # these are intermediate ops. everything should be deleted from here
 spec_full = PatternMatcher([
+  # BUFFER_VIEW on BUFFER is allowed if BUFFER is
+  (UPat(Ops.BUFFER_VIEW, src=(UPat((Ops.BUFFER, Ops.PARAM)),)), lambda: True),
+
   # codegen may end ranges after gpudims has replaced RANGE with SPECIAL.
   (UPat(Ops.END, src=(UPat(), UPat()), allow_any_len=True), lambda: True),
-])+spec_program+spec_tensor+spec_shared
+
+  # codegen: PROGRAM with progressive sources through the pipeline (SINK, DEVICE, LINEAR?, SOURCE?, BINARY?)
+  (UPat(Ops.SOURCE, dtypes.void, src=()), lambda: True),
+  (UPat(Ops.BINARY, dtypes.void, src=()), lambda: True),
+  (UPat(Ops.PROGRAM, dtypes.void, src=(UPat(Ops.SINK), UPat(Ops.DEVICE))), lambda: True),
+  (UPat(Ops.PROGRAM, dtypes.void, src=(UPat(Ops.SINK), UPat(Ops.DEVICE), UPat(Ops.LINEAR), UPat(Ops.SOURCE))), lambda: True),
+  (UPat(Ops.PROGRAM, dtypes.void, src=(UPat(Ops.SINK), UPat(Ops.DEVICE), UPat(Ops.LINEAR), UPat(Ops.SOURCE), UPat(Ops.BINARY))), lambda: True),
+
+  # allow any AFTER
+  (UPat(Ops.AFTER, src=(UPat(),), allow_any_len=True), lambda: True),
+
+  # expander: unroll/contract/gep/ptrcat/cat
+  (UPat((Ops.UNROLL, Ops.CONTRACT), src=(UPat(),)), lambda: True),
+
+  # GEP multi is supported here
+  (UPat(Ops.GEP, name="gep"), lambda gep: gep.dtype is dtypes.void or gep.dtype.vcount == len(gep.arg)),
+
+  # all loads/stores
+  (UPat((Ops.LOAD, Ops.STORE)), lambda: True),
+
+  # TODO: PTRCAT and VCAT need to be deleted
+
+  # PTRCAT is like VECTORIZE, but it functions on ptrs
+  (UPat(Ops.PTRCAT, name="x"), lambda x: x.dtype.vcount == sum([y.dtype.base.count for y in x.src])),
+  # VCAT is like VECTORIZE, but the srcs can be vectors
+  (UPat(Ops.VCAT, name="x"), lambda x: x.dtype.vcount == sum([y.dtype.vcount for y in x.src])),
+])+spec_tensor+spec_program
 
 
 # ***** old specs *****
