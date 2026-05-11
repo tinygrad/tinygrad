@@ -189,6 +189,16 @@ class TestSymbolicJit(unittest.TestCase):
       np.testing.assert_allclose(symbolic, expected, atol=1e-6, rtol=1e-6)
     assert_jit_cache_len(jf, 1)
 
+  def test_jit_updates_bound_symbolic_return_shape(self):
+    def f(a): return (a+1).realize()
+    jf = TinyJit(f)
+    for i in range(1, 5):
+      vi = Variable("i", 1, 10).bind(i)
+      out = jf(Tensor.arange(10).shrink(((0, vi),)))
+      self.assertEqual(out.shape[0].val, i)
+      np.testing.assert_equal(out[:i].numpy(), np.arange(1, i+1))
+    assert_jit_cache_len(jf, 1)
+
   def test_slice(self):
     # slice is a movement, so we pair it with a simple function to test the JIT interaction
     def f(a): return (a+1).realize()

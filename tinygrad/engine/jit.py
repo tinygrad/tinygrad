@@ -177,6 +177,19 @@ class MultiGraphRunner(GraphRunner):
     return new_call.src[0].op in (Ops.PROGRAM, Ops.COPY) and len(dedup([type(d) for d in GraphRunner._all_devs(batch_devs, new_call)])) == 1
 
 ReturnType = TypeVar('ReturnType')
+def _update_return_bind_values(ret:ReturnType, var_vals:dict[str, int]) -> ReturnType:
+  def update_tensor(t:Tensor):
+    replacements = {u:u.src[0].bind(var_vals[u.src[0].expr]) for u in t.uop.toposort()
+                    if u.op is Ops.BIND and u.src[0].op is Ops.DEFINE_VAR and u.src[1].op is Ops.CONST
+                    and u.src[0].expr in var_vals and u.src[1].arg != var_vals[u.src[0].expr]}
+    if replacements: t.uop = t.uop.substitute(replacements)
+  if isinstance(ret, Tensor): update_tensor(ret)
+  elif isinstance(ret, (tuple, list)):
+    for item in ret: _update_return_bind_values(item, var_vals)
+  elif isinstance(ret, dict):
+    for item in ret.values(): _update_return_bind_values(item, var_vals)
+  return ret
+
 @dataclass
 class CapturedJit(Generic[ReturnType]):
   ret: Any  # includes the Tensors or any other returned object
@@ -200,7 +213,7 @@ class CapturedJit(Generic[ReturnType]):
     concrete = tuple(_copy_input(u) if u in self._written_uops else u for u in input_uops)
     if DEBUG >= 1 and len(self.linear.src) >= 10: print(f"jit execs {len(self.linear.src)} calls")
     run_linear(self.linear, var_vals, input_uops=concrete, jit=True)
-    return self.ret
+    return _update_return_bind_values(self.ret, var_vals)
 
   def free_intermediates(self):
     # drop graph runners
