@@ -102,7 +102,12 @@ def main(args) -> None:
           ss += [x[1] for x in graph[s]["src"]]
         # pyrender AST
         if v["ref"] is not None:
-          print(emit(next(viz.get_render(viz_data, viz_data.ctxs[v["ref"]]["steps"][0]["query"])["value"])["uop"]))
+          first = next(viz.get_render(viz_data, viz_data.ctxs[v["ref"]]["steps"][0]["query"])["value"])
+          # don't print the pyrender for binary
+          if "Ops.BINARY" in first["uop"]:
+            for k,v in first["graph"].items():
+              if v["label"].startswith("SOURCE") or v["label"].startswith("BINARY"): print(v["label"])
+          else: print(emit(first["uop"]))
 
   profile_bytes = viz.get_profile(viz_data, viz.load_pickle(args.profile_path, default=[]))
   if profile_bytes is None: raise RuntimeError(f"empty profile in {args.profile_path}")
