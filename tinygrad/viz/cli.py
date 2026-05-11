@@ -101,7 +101,8 @@ def main(args) -> None:
             print(emit(" ".join(idx_str+src_str)))
           ss += [x[1] for x in graph[s]["src"]]
         # pyrender AST
-        print(emit(next(viz.get_render(viz_data, viz_data.ctxs[v["ref"]]["steps"][0]["query"])["value"])["uop"]))
+        if v["ref"] is not None:
+          print(emit(next(viz.get_render(viz_data, viz_data.ctxs[v["ref"]]["steps"][0]["query"])["value"])["uop"]))
 
   profile_bytes = viz.get_profile(viz_data, viz.load_pickle(args.profile_path, default=[]))
   if profile_bytes is None: raise RuntimeError(f"empty profile in {args.profile_path}")
