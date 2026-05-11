@@ -145,6 +145,9 @@ spec_tensor = PatternMatcher([
 
   # TODO: this should not be here. STAGE is transformed to DEFINE_LOCAL later
   (UPat(Ops.STAGE, src=(UPat(),), allow_any_len=True), lambda: True),
+
+  # TODO: the AMD emulator is using LOAD, it absolutely shouldn't be
+  (UPat(Ops.LOAD, src=(UPat(),)), lambda: True),
 ])+spec_shared
 
 # these ops can exist in programs but not the tensor spec. example: LOAD
