@@ -1,8 +1,6 @@
-import functools, re, tinygrad.runtime.autogen.am
+import functools, tinygrad.runtime.autogen.am
 from dataclasses import dataclass
-from tinygrad.helpers import getbits, fetch
-
-ROCM_URL = "https://raw.githubusercontent.com/ROCm/rocm-systems/cccc350dc620e61ae2554978b62ab3532dc10bd9/projects"
+from tinygrad.helpers import getbits
 
 @dataclass
 class AMDReg:
@@ -35,8 +33,6 @@ def import_module(name:str, target:tuple[int, ...], submod=""):
   if (children:=[c for c in mod.__all__ if c.startswith(name) and (v:=tuple(map(int, c.split('_')[1:])))[0] == target[0] and v <= target]):
     return getattr(mod, children[-1])
   raise ImportError(f"Failed to import {submod+'.' if submod else ''}{name} {'.'.join(map(str, target))}")
-
-def header_download(file, url) -> str: return fetch(f"{url}/{file}", subdir="defines").read_text()
 
 def import_soc(ip): return getattr(tinygrad.runtime.autogen.am, f"soc_{ip[0]}")
 
