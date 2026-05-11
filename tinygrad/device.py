@@ -132,9 +132,12 @@ class Buffer:
   def is_allocated(self) -> bool: return self.base.is_allocated() if self._base is not None else self.device in self._bufs
   def get_buf(self, device: str) -> Any:
     if device not in self._bufs:
+      allocator = Device[device].allocator
       if device == self.device: self.ensure_allocated()
-      elif self._base is not None: self._bufs[device] = Device[device].allocator._offset(self._base.get_buf(device), self.nbytes, self.offset)
-      else: self._bufs[device] = Device[device].allocator._map(self.ensure_allocated()._buf)
+      elif self._base is not None:
+        assert hasattr(allocator, "_offset"), "offset function required for view"
+        self._bufs[device] = allocator._offset(self._base.get_buf(device), self.nbytes, self.offset)
+      else: self._bufs[device] = allocator._map(self.ensure_allocated()._buf)
     return self._bufs[device]
   def ensure_allocated(self) -> Buffer: return self.allocate() if not self.is_initialized() else self
   def allocate(self, opaque=None, external_ptr=None) -> Buffer:
@@ -169,7 +172,7 @@ class Buffer:
         if dev != self.device: Device[dev].allocator._unmap(mb)
       self.allocator.free(self._buf, self.nbytes, self.options)
     elif self._base is not None: self._base.allocated_views -= 1
-    del self._bufs[self.device]
+    self._bufs.clear()
   def __reduce__(self):
     buf = None
     if self._base is not None:
