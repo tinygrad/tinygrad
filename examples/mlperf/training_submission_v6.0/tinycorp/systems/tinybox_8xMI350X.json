@@ -34,5 +34,5 @@
         "ROCm": "7.1.1"
     },
     "operating_system": "Ubuntu 24.04.3 LTS",
-    "sw_notes": ""
+    "sw_notes": "tinygrad @ 026688f03f84a75ec3fef034bcba916bf8f8bdc6"
   }
