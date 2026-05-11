@@ -5,7 +5,7 @@ if hasattr(signal, "SIGPIPE"): signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 from typing import Iterator
 from tinygrad.viz import serve as viz
 from tinygrad.viz.serve import fmt_colored
-from tinygrad.uop.ops import RewriteTrace, UOp, Ops
+from tinygrad.uop.ops import RewriteTrace
 from tinygrad.helpers import temp, ansistrip, colored, time_to_str, ansilen, ProfilePointEvent, ProfileRangeEvent, TracingKey, unwrap, NO_COLOR, DEBUG
 
 # profile decoder used in CLI and tests
@@ -62,8 +62,7 @@ def get(data:dict, key:str):
 def main(args) -> None:
   viz.load_rewrites(viz_data:=viz.VizData(viz.load_pickle(args.rewrites_path, default=RewriteTrace([], [], {}))))
 
-  def emit(val, to_str=str) -> str:
-    return json.dumps({k:v for k,v in val.items() if not k.startswith("_")} if isinstance(val, dict) else {"value":val}) if args.json else to_str(val)
+  def emit(val, to_str=str) -> str: return json.dumps(val if isinstance(val, dict) else {"value":val}) if args.json else to_str(val)
 
   def print_step(step:dict, print_graph=False, reconstruct_matches=False) -> None:
     data = viz.get_render(viz_data, step["query"])
@@ -76,41 +75,6 @@ def main(args) -> None:
           print(emit(f"{loc.parent.name}/{loc.name}:{m['upat'][0][1]}\n{m['upat'][1]}"))
           for line in m["diff"]: print(emit(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None)))
     if data.get("src") is not None: print(emit(data["src"]))
-
-  def print_call(step:dict) -> None:
-    graph = next(viz.get_render(viz_data, step["query"])["value"])["graph"]
-    seen:set[int] = set()
-    for k,v in graph.items():
-      lines = v["label"].splitlines()
-      unique:dict[int, int] = {}
-      if lines[0].startswith("CALL"):
-        # first print the CALL name
-        print(emit(f"{lines[0]:<12} {lines[-1]}"))
-        # print memory sources and access pattern
-        for i,(_,s) in enumerate(v["src"][1:]):
-          while graph[s]["label"].startswith("AFTER"): s = graph[s]["src"][0][1]
-          if (num:=unique.get(s)) is None: unique[s] = num = len(unique)
-          print(emit(f"SRC {i} {' '.join(graph[s]['label'].splitlines())} g{num}"))
-        ss = [v["src"][0][1]]
-        seen:set[int] = set()
-        while ss:
-          if (s:=ss.pop()) in seen: continue
-          seen.add(s)
-          if graph[s]["label"].startswith("INDEX"):
-            idx_str = graph[s]["label"].splitlines()
-            src_str = ["SRC"]+graph[graph[s]["src"][0][1]]["label"].splitlines()[1:]
-            print(emit(" ".join(idx_str+src_str)))
-          ss += [x[1] for x in graph[s]["src"]]
-        # pyrender AST
-        if v["ref"] is not None:
-          first = next(viz.get_render(viz_data, viz_data.ctxs[v["ref"]]["steps"][0]["query"])["value"])
-          # don't print the pyrender for binary
-          if "Ops.BINARY" in first["uop"]:
-            for k,v in first["graph"].items():
-              if v["label"].startswith("SOURCE") or v["label"].startswith("BINARY"): print(v["label"])
-          else: print(emit(first["uop"]))
-        # stop once we reach the target CALL
-        if args.kernel_graph and args.kernel_graph in ansistrip(v["label"]): return None
 
   profile_bytes = viz.get_profile(viz_data, viz.load_pickle(args.profile_path, default=[]))
   if profile_bytes is None: raise RuntimeError(f"empty profile in {args.profile_path}")
@@ -186,21 +150,21 @@ def main(args) -> None:
       num_rows = len(items) if args.t < 0 else args.t
       for (dev,name),(t,c,ref,est) in items[:num_rows]:
         display = f"{dev[:7]:7s} {fmt_colored(name)}" if not args.src else fmt_colored(name)
-        yield {"name":display, "dur_ms":t, "count":c, "pct":t/total*100.0, "_ref":ref, "fmt":{k:int(est[k]/(t*1e-3)) for k in est_keys if k in est}}
+        yield {"name":display, "dur_ms":t, "count":c, "pct":t/total*100.0, "ref":ref, "fmt":{k:int(est[k]/(t*1e-3)) for k in est_keys if k in est}}
       if num_rows > 0 and items[num_rows:]:
         other_t = sum(t for _,(t,_,_,_) in items[num_rows:])
         other_c = sum(c for _,(_,c,_,_) in items[num_rows:])
-        yield {"name":"Other", "dur_ms":other_t, "count":other_c, "pct":other_t/total*100.0, "_ref":None, "fmt":None}
+        yield {"name":"Other", "dur_ms":other_t, "count":other_c, "pct":other_t/total*100.0, "ref":None, "fmt":None}
     def produce_all_kernels() -> Iterator[dict]:
       event_streams = [[(e["st"], n, e) for e in l["events"]] for n,l in timelines] if not args.src \
                       else [[(e["st"], args.src[0], e) for e in unwrap(data)["events"]]]
       if not args.src:
         for n,l in profile["layout"].items():
-          if not isinstance(l, dict) or l.get("event_type") != 0: yield {"device":"SOURCE", "name":n, "st_ms":0, "_ref":None, "ext":None}
+          if not isinstance(l, dict) or l.get("event_type") != 0: yield {"device":"SOURCE", "name":n, "st_ms":0, "ref":None, "ext":None}
       marker_stream = sorted([(m["ts"], "MARKER", m) for m in profile.get("markers", [])], key=lambda t:t[0])
       for ts,dev,e in heapq.merge(*event_streams, marker_stream, key=lambda t:t[0]):
         if dev == "MARKER":
-          yield {"device":dev, "name":fmt_colored(e["name"]), "st_ms":ts*1e-3, "_ref":None, "ext":None}
+          yield {"device":dev, "name":fmt_colored(e["name"]), "st_ms":ts*1e-3, "ref":None, "ext":None}
           continue
         ext, fmt = [], e["fmt"]
         if (tb:=fmt.pop("tb", [])):
@@ -209,7 +173,7 @@ def main(args) -> None:
             line = f"{file.split('/')[-1]}:{lineno} {fxn}"
             if fmt: ext.append(f"{line} {code}")
             elif not file.startswith("<") and not fxn.startswith("<"): fmt["loc"] = line
-        yield {"device":dev, "name":fmt_colored(e["name"]), "dur_ms":e["dur"]*1e-3, "st_ms":e["st"]*1e-3, "fmt":fmt, "_ref":e["ref"],
+        yield {"device":dev, "name":fmt_colored(e["name"]), "dur_ms":e["dur"]*1e-3, "st_ms":e["st"]*1e-3, "fmt":fmt, "ref":e["ref"],
                "ext":"\n".join(ext)}
     def fmt_top(k:dict) -> str:
       return f"{fmt_colored(k['name'])}{' ' * max(0, 38-ansilen(k['name']))} {time_to_str(k['dur_ms']*1e-3, w=9)} {k['count']:7d} {k['pct']:6.2f}%"+\
@@ -223,17 +187,14 @@ def main(args) -> None:
     seen_refs:set[int] = set()
     def render_event(k:dict, ls=args.list) -> None:
       if len(args.src) > 1 and ansistrip(k["name"]) not in args.src: return None
-      if args.kernel_graph and not k["name"].startswith("Schedule"): return None
       print(emit(k, to_str=fmt_row))
-      if k["_ref"] is not None and k["_ref"] not in seen_refs:
-        seen_refs.add(k["_ref"])
-        for i,s in enumerate(viz_data.ctxs[k["_ref"]]["steps"]):
+      if k["ref"] is not None and k["ref"] not in seen_refs:
+        seen_refs.add(k["ref"])
+        for i,s in enumerate(viz_data.ctxs[k["ref"]]["steps"]):
           if DEBUG >= 3 and s["name"] == "View Base AST": print_step(s)
           if DEBUG >= 4 and s["name"] == "View Source": print_step(s)
           if DEBUG >= 5 or ls: print(emit(" "*s["depth"]+s["name"]+(f" - {s['match_count']}" if s.get('match_count', 0) else '')))
-          if DEBUG >= 5 and s["name"] == "View Kernel Graph": print_step(s, print_graph=True)
-          #if (DEBUG >= 5 or args.kernel_graph) and s["name"] == "View Kernel Graph": print_call(s)
-          if DEBUG >= 6: print_step(s, print_graph=True)
+          if DEBUG >= 6 or (DEBUG >= 5 and s["name"] == "View Kernel Graph"): print_step(s, print_graph=True)
           if DEBUG >= 7 or s["name"] in args.src: print_step(s, reconstruct_matches=True)
       elif DEBUG >= 3 and k.get("ext"): print(emit(k["ext"]))
     for k in (produce_top_kernels if args.t else produce_all_kernels)(): render_event(k)
@@ -243,7 +204,6 @@ def get_arg_parser() -> argparse.ArgumentParser:
   parser.add_argument("-s", "--src", nargs="+", default=[], metavar="NAME", help="Select a data source (default: all)")
   parser.add_argument("--list", "--ls", dest="list", action="store_true", help="List sources")
   parser.add_argument("-t", nargs="?", type=int, const=20, metavar="COUNT", help="Aggregate top kernels (optional count, default 20)")
-  parser.add_argument("--kernel-graph", type=str, help="print graph of kernel name")
   parser.add_argument("--profile-path", type=str, metavar="PATH", help="Optional path to profile.pkl (default: latest profile)",
                       default=temp("profile.pkl", append_user=True))
   parser.add_argument("--rewrites-path", type=str, metavar="PATH", help="Optional path to rewrites.pkl (default: latest rewrites)",
