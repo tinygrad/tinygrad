@@ -320,7 +320,7 @@ class TestVizGC(unittest.TestCase):
 
 # VIZ integrates with other parts of tinygrad
 
-from tinygrad import Tensor, Device, TinyJit, Variable
+from tinygrad import Tensor, Device, TinyJit, Variable, function
 
 class TestVizIntegration(unittest.TestCase):
   # codegen supports rendering of code blocks
@@ -340,15 +340,18 @@ class TestVizIntegration(unittest.TestCase):
       c1 = Tensor.empty(4).add(1)
       c2 = Tensor.empty(8).add(1)
       sched = c1.schedule_linear(c2)
-      prgs = [to_program(si.src[0], Device[Device.DEFAULT].renderer).arg.name for si in sched.src]
+      with Context(NO_COLOR=0):
+        prgs = [to_program(si.src[0], Device[Device.DEFAULT].renderer).arg.name for si in sched.src]
     lst = viz.list_items()
     sched_idx = next(i for i,l in enumerate(lst) if l["name"].startswith("Schedule"))
     viz_kernel = next(i for i,s in enumerate(lst[sched_idx]["steps"]) if s["name"] == "View Kernel Graph")
-    graph = next(viz.get_details(sched_idx, viz_kernel))["graph"]
+    with Context(NO_COLOR=1):
+      graph = next(viz.get_details(sched_idx, viz_kernel))["graph"]
     call_nodes = [n for n in graph.values() if n["label"].startswith("CALL")]
     for i,n in enumerate(call_nodes):
       assert n["ref"] is not None
       self.assertEqual(lst[n["ref"]]["name"], prgs[i])
+      assert ansistrip(prgs[i]) in n["label"], f"CALL must contain kernel name, got {n['label']}"
 
   @Context(TRACEMETA=2)
   def test_metadata_tracing(self):
@@ -904,41 +907,40 @@ class TestCfg(unittest.TestCase):
     self.get_cfg("jump_back_to_end", k)
 
 # launch viz cli without subprocess
-def run_cli(*cli_args) -> str:
+def run_cli(*cli_args) -> list[dict]:
   from tinygrad.viz.cli import main, get_arg_parser
-  args = get_arg_parser().parse_args(cli_args)
+  args = get_arg_parser().parse_args(cli_args+("--json",))
   with contextlib.redirect_stdout(buf:=io.StringIO()):
     main(args)
-  return buf.getvalue().strip()
+  return [json.loads(line) for line in buf.getvalue().strip().splitlines()]
 
-def call_cli(fxn, *cli_args, debug=2) -> str:
-  with save_viz() as viz:
-    fxn()
+@contextlib.contextmanager
+def write_files(viz) -> list[str]:
   with tempfile.TemporaryDirectory() as tmpdir:
     (r:=Path(tmpdir)/"rewrites.pkl").write_bytes(pickle.dumps(viz.data.trace))
     (p:=Path(tmpdir)/"profile.pkl").write_bytes(pickle.dumps(cpu_events))
-    with Context(DEBUG=debug, NO_COLOR=1):
-      stdout = run_cli("--rewrites-path", str(r), "--profile-path", str(p), *cli_args)
-  return stdout
+    yield ["--rewrites-path", str(r), "--profile-path", str(p)]
 
 class TestCLI(unittest.TestCase):
   def test_reconstruct_debug(self):
-    def fxn():
+    with save_viz() as viz:
       Tensor.empty(1, device="NULL").add(2.0).realize()
       profile_marker("marker @ 1")
       Tensor.empty(1, device="NULL").add(3.0).realize()
-    out = call_cli(fxn, "-s", "NULL", debug=4)
-    self.assertIn("void E", out)
-    self.assertIn("marker @ 1", out)
+    with write_files(viz) as files, Context(DEBUG=4):
+      out = run_cli(*files, "-s", "NULL")
+    assert any(s.get("value", "").startswith("void E") for s in out)
+    assert any(s.get("name", "") == "marker @ 1" for s in out)
 
   def test_aggregate(self):
     N, CNT = 1024, 5
-    def fxn():
+    with save_viz() as viz:
       for _ in range(CNT):
         (Tensor.empty(N, N, device="NULL")@Tensor.empty(N, N, device="NULL")).realize()
       for _ in range(CNT):
         (Tensor.empty(N, N, device="NULL").assign(Tensor.empty(N, N, device="NULL"))).realize()
-    kernels = [json.loads(line) for line in call_cli(fxn, "-s", "NULL", "-t", "--json").splitlines()]
+    with write_files(viz) as files, Context(NO_COLOR=1):
+      kernels = run_cli(*files, "-s", "NULL", "-t")
     self.assertEqual(len(kernels), 2)
     gemm_summary = [s for s in kernels if s["name"].startswith("r_")][0]
     copy_summary = [s for s in kernels if s["name"].startswith("E_")][0]
@@ -947,7 +949,7 @@ class TestCLI(unittest.TestCase):
 
   def test_flops(self):
     test_n = [(8, 16), (16, 32), (32, 64)]
-    def fxn():
+    with save_viz() as viz:
       @TinyJit
       def f(a, b): return (a@a.T), (b@b.T)
       a = Tensor.empty(64, 64, device="NULL")
@@ -956,17 +958,48 @@ class TestCLI(unittest.TestCase):
         i = Variable("i", 1, 64).bind(i_val)
         j = Variable("j", 1, 64).bind(j_val)
         Tensor.realize(*f(a[:i], b[:j]))
-    out = [json.loads(line) for line in call_cli(fxn, "-s", "NULL", "--json").splitlines()]
+    with write_files(viz) as files:
+      out = run_cli(*files, "-s", "NULL")
+      aggregate = run_cli(*files, "-s", "NULL", "-t")
     self.assertEqual(len(out), 3*2)
     # flops increases as N gets larger
     gflops = [row["fmt"]["FLOPS"] for row in out]
     self.assertGreater(gflops[4], gflops[2])
     self.assertGreater(gflops[5], gflops[3])
     # aggregate flops
-    out = [json.loads(line) for line in call_cli(fxn, "-s", "NULL", "-t", "--json").splitlines()]
-    self.assertEqual(len(out), 2)
-    agg_gflops = [row["fmt"]["FLOPS"] for row in out]
+    self.assertEqual(len(aggregate), 2)
+    agg_gflops = [row["fmt"]["FLOPS"] for row in aggregate]
     assert all(min(gflops) < v < max(gflops) for v in agg_gflops), f"{agg_gflops}"
+
+  def test_dedup(self):
+    with save_viz() as viz:
+      for _ in range(CNT:=4):
+        Tensor.empty(4, device="NULL").add(1).realize()
+        Tensor.empty(8, device="NULL").add(1).realize()
+    with write_files(viz) as files, Context(NO_COLOR=1):
+      name = run_cli(*files, "-s", "NULL")[0]["name"]
+      with Context(DEBUG=3):
+        select = run_cli(*files, "-s", "NULL", name)
+    self.assertEqual(len([s for s in select if s.get("value")]), 1, "debug output was not deduped")
+    self.assertEqual(len([s for s in select if s.get("device") == "NULL"]), CNT, f"expected 4 runs for {name}")
+
+  def test_call_graph(self):
+    @function(precompile=True)
+    def f(x):
+      r = x.sum(axis=1).reshape(32, 1).expand(32, 32).contiguous()
+      return x + r
+    # turn of scache because this test requires a complete schedule rewrite
+    with save_viz() as viz, Context(SCACHE=0):
+      f(f(Tensor.empty(32, 32, device="NULL"))).realize()
+    with write_files(viz) as files, Context(NO_COLOR=1):
+      prgs = [s["name"] for s in run_cli(*files, "-s", "NULL")]
+      with Context(DEBUG=5):
+        out = run_cli(*files, "-s", "TINY")
+    i = next(i for i,s in enumerate(out) if s.get("value", "").lstrip() == "View Kernel Graph")
+    # next print is the CALL graph, CLI outputs exactly as web in TestVizIntegration.test_link_sched_codegen
+    call_nodes = [n for n in out[i+1].values() if n["label"].startswith("CALL")]
+    for i,n in enumerate(call_nodes):
+      assert prgs[i] in n["label"], f"CALL must contain kernel name, got {n['label']}"
 
 if __name__ == "__main__":
   unittest.main()
