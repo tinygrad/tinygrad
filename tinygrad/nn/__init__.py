@@ -293,14 +293,14 @@ class RMSNorm:
   print(norm(t).numpy())
   ```
   """
-  def __init__(self, normalized_shape:int|tuple[int, ...], eps:float=1e-5, elementwise_affine:bool=True):
-    self.normalized_shape: tuple[int, ...] = make_tuple(normalized_shape, 1)
-    self.axis, self.eps = tuple(-1-i for i in range(len(self.normalized_shape))), eps
-    self.weight: Tensor|None = Tensor.ones(*self.normalized_shape) if elementwise_affine else None
+  def __init__(self, dim:int, eps=1e-6, elementwise_affine=True):
+    self.eps = eps
+    self.weight = Tensor.ones(dim) if elementwise_affine else None
+
+  def _norm(self, x:Tensor) -> Tensor: return x * (x.square().mean(-1, keepdim=True) + self.eps).rsqrt()
 
   def __call__(self, x:Tensor) -> Tensor:
-    assert self.normalized_shape == x.shape[-len(self.normalized_shape):]
-    x = x.rmsnorm(axis=self.axis, eps=self.eps)
+    x = self._norm(x.float()).cast(x.dtype)
     return x if self.weight is None else x * self.weight
 
 from tinygrad.uop.ops import UOp, KernelInfo, Ops, AxisType

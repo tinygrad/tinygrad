@@ -1305,23 +1305,6 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     y = (self - self.mean(axis, keepdim=True))
     return y.mul((y*y).mean(axis, keepdim=True).add(eps).rsqrt())
 
-  def rmsnorm(self, axis:int|tuple[int, ...]=-1, eps=1e-5) -> Self:
-    """
-    Applies Root Mean Square Normalization to input.
-
-    - Paper: https://arxiv.org/abs/1910.07467
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor.randn(8, 10, 16) * 2 + 8
-    print(t.mean().item(), t.std().item())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    t = t.rmsnorm()
-    print(t.mean().item(), t.std().item())
-    ```
-    """
-    return self.mul((self.square().mean(axis, keepdim=True).add(eps)).rsqrt())
-
   def batchnorm(self, weight:Self|None, bias:Self|None, mean:Self, invstd:Self, axis:int|tuple[int, ...]=1) -> Self:
     """
     Applies Batch Normalization over a mini-batch of inputs.
