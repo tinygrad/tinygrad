@@ -799,12 +799,12 @@ class TestConstBufferize(unittest.TestCase):
     from tinygrad.schedule.rangeify import pm_const_buffer_folding, BufferizeOpts
     c = UOp.const(dtypes.float, 42.0)
     r1 = UOp.range(3, 0)
-    bufferize_with_range = UOp(Ops.BUFFERIZE, dtypes.float, (c, r1), arg=BufferizeOpts(device="CPU"))
+    bufferize_with_range = UOp(Ops.STAGE, dtypes.float, (c, r1), arg=BufferizeOpts(device="CPU"))
     self.assertEqual(len(bufferize_with_range.src), 2)  # const + 1 range
 
     result = graph_rewrite(bufferize_with_range, pm_const_buffer_folding, name='test')
     # BUFFERIZE should be removed, result is const broadcast to shape
-    self.assertNotEqual(result.op, Ops.BUFFERIZE)
+    self.assertNotEqual(result.op, Ops.STAGE)
     const_vals = [u.arg for u in result.toposort() if u.op is Ops.CONST and u.dtype == dtypes.float]
     self.assertIn(42.0, const_vals)
 
@@ -814,12 +814,12 @@ class TestConstBufferize(unittest.TestCase):
     c = UOp.const(dtypes.float, 3.14)
     r1 = UOp.range(3, 0)
     r2 = UOp.range(4, 1)
-    bufferize_with_ranges = UOp(Ops.BUFFERIZE, dtypes.float, (c, r1, r2), arg=BufferizeOpts(device="CPU"))
+    bufferize_with_ranges = UOp(Ops.STAGE, dtypes.float, (c, r1, r2), arg=BufferizeOpts(device="CPU"))
     self.assertEqual(len(bufferize_with_ranges.src), 3)  # const + 2 ranges
 
     result = graph_rewrite(bufferize_with_ranges, pm_const_buffer_folding, name='test')
     # BUFFERIZE should be removed
-    self.assertNotEqual(result.op, Ops.BUFFERIZE)
+    self.assertNotEqual(result.op, Ops.STAGE)
     const_vals = [u.arg for u in result.toposort() if u.op is Ops.CONST and u.dtype == dtypes.float]
     self.assertIn(3.14, const_vals)
 

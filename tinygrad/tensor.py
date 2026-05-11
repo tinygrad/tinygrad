@@ -1075,7 +1075,7 @@ class Tensor(OpMixin):
     if not dtypes.is_bool(mask.dtype): raise RuntimeError(f"masked_select expects bool mask tensor, got {mask.dtype}")
     x, mask = self.flatten(), mask._broadcast_to(self.shape).flatten()
     mask_cumsum = mask.cumsum()
-    counts = Tensor.zeros(mask_cumsum[-1].item(), dtype=dtypes.int32)
+    counts = Tensor.zeros(mask_cumsum[-1].item(), dtype=dtypes.int32, device=self.device)
     idxs = counts.scatter(0, mask_cumsum, 1, reduce='add').cumsum()
     return x[idxs]
 
@@ -1398,35 +1398,36 @@ class Tensor(OpMixin):
     assert self.ndim > 1, f"expected two or more dimensions, got {self.ndim}"
     b_shape, m, n = self.shape[:-2], int(self.shape[-2]), int(self.shape[-1])
     R = self.clone()
-    Q = Tensor.eye(m, dtype=self.dtype).reshape((1,) * len(b_shape) + (m, m)).expand(b_shape + (m, m))
+    Q = Tensor.eye(m, dtype=self.dtype, device=self.device).expand(b_shape + (m, m))
     for i in range(min(m, n)):
       x = R[..., i:m, i]
       norm = x.square().sum(-1).sqrt()
+      mask = norm != 0
       s = (x[..., 0] != 0).where(-x[..., 0].sign(), -1)
       u1 = x[..., 0] - s * norm
-      w = x.unsqueeze(-1) / (norm != 0).where(u1, 1).reshape(b_shape + (1, 1))
+      w = x.unsqueeze(-1) / mask.where(u1, 1)[..., None, None]
       w[..., 0, 0] = 1
-      tau = (-s * u1 / (norm != 0).where(norm, 1)).reshape(b_shape + (1, 1))
-      tau = (norm != 0).reshape(b_shape + (1, 1)).where(tau, 0)
+      tau = (-s * u1 / mask.where(norm, 1))[..., None, None]
+      tau = mask[..., None, None].where(tau, 0)
       R[..., i:m, :] = R[..., i:m, :] - (w * tau) @ (w.transpose(-2, -1) @ R[..., i:m, :])
       Q[..., :, i:m] = Q[..., :, i:m] - (Q[..., :, i:m] @ w) @ (tau * w).transpose(-2, -1)
-    return Q,R
+    return Q, R
 
   def svd(self, full_matrices = True) -> tuple[Tensor, Tensor, Tensor]:
     #partial implementation of https://www.netlib.org/lapack/lawnspdf/lawn169.pdf , pg 26
     assert self.ndim > 1, f"expected two or more dimensions, got {self.ndim}"
     b_shape, m, n = self.shape[:-2], int(self.shape[-2]), int(self.shape[-1])
     #preprocess the matrix
-    Q, R = (self.qr() if m >= n else self.transpose(-2, -1).qr())
+    Q, R = (self if m >= n else self.transpose(-2, -1)).qr()
     num, q_num = min(m, n), max(m, n)
     # TODO: codegen infinite loop without contiguous
-    U = R.shrink(tuple([None] * len(b_shape) + [(0, num), (0, num)])).contiguous()
-    V = Tensor.eye(num, dtype=self.dtype).reshape((1,) * len(b_shape) + (num, num)).expand(b_shape + (num, num)).contiguous()
+    U = R[..., :num, :num].contiguous()
+    V = Tensor.eye(num, dtype=self.dtype, device=self.device).expand(b_shape + (num, num)).contiguous()
     #prepare round robin pairing
-    permute, inverse_permute = Tensor.arange(0, num, dtype=dtypes.int), Tensor.zeros(num, dtype=dtypes.int)
+    permute, inverse_permute = Tensor.arange(0, num, dtype=dtypes.int, device=self.device), Tensor.zeros(num, dtype=dtypes.int, device=self.device)
     permute[num//2:num] = permute[num//2:num].flip(0)
-    inverse_permute[permute] = Tensor.arange(num, dtype=dtypes.int)
-    def one_round_jacobi(U, V,permute,inverse_permute):
+    inverse_permute[permute] = Tensor.arange(num, dtype=dtypes.int, device=self.device)
+    def one_round_jacobi(U, V, permute, inverse_permute):
       #pair all the columns
       V_permuted, runoff_V = (V[..., permute].split(num - 1, -1)) if num % 2 == 1 else (V[..., permute], None)
       V_left, V_right = V_permuted.split(num//2, -1)
@@ -1443,27 +1444,26 @@ class Tensor(OpMixin):
       s = c * t
       #apply the rotations
       U_left, U_right = c * U_left - s * U_right, s * U_left + c * U_right
-      U = U_left.cat(U_right.cat(runoff_U, dim = -1) if num % 2 == 1 else U_right, dim = -1)[..., inverse_permute]
+      U = U_left.cat(U_right.cat(runoff_U, dim=-1) if num % 2 == 1 else U_right, dim=-1)[..., inverse_permute]
       V_left, V_right = c * V_left - s * V_right, s * V_left + c * V_right
-      V = V_left.cat(V_right.cat(runoff_V, dim = -1) if num % 2 == 1 else V_right, dim = -1)[..., inverse_permute]
+      V = V_left.cat(V_right.cat(runoff_V, dim=-1) if num % 2 == 1 else V_right, dim=-1)[..., inverse_permute]
       #prepare the next round robin pairings
-      if num % 2 == 1: permute = ((permute - 1) % num)
+      if num % 2 == 1: permute = (permute - 1) % num
       else: permute = permute[0].reshape(1).cat(((permute[1:num] - 2) % (num - 1)) + 1)
-      inverse_permute = inverse_permute.scatter(0,permute,Tensor.arange(num,dtype=dtypes.int32))
+      inverse_permute = inverse_permute.scatter(0, permute, Tensor.arange(num, dtype=dtypes.int32, device=self.device))
       return U, V, permute, inverse_permute
-    max_iterations, iterations_per_round = 1, int(num * math.log2(num) * 2 + 2)#sorta heuristic, most use num*log2(num)
-    for _ in range(max_iterations * iterations_per_round): U, V, permute, inverse_permute = one_round_jacobi(U, V, permute, inverse_permute)
+    #sorta heuristic, most use num*log2(num)
+    for _ in range(int(num * math.log2(num) * 2 + 2)): U, V, permute, inverse_permute = one_round_jacobi(U, V, permute, inverse_permute)
     #extract singular values and sort. construct U from Q
-    S, indices = U.square().sum(-2).sqrt().sort(dim = -1, descending=True)
-    new_indices = indices.reshape(b_shape + (1, num)).expand(b_shape + (num, num))
+    S, indices = U.square().sum(-2).sqrt().sort(dim=-1, descending=True)
+    new_indices = indices.unsqueeze(-2).expand(b_shape + (num, num))
     U = U.gather(-1, new_indices) / (S != 0).where(S, 1).unsqueeze(-2)
     V = V.gather(-1, new_indices)
-
-    padded_u = Tensor.eye(q_num, dtype=U.dtype).reshape((1,) * len(b_shape) + (q_num, q_num)).expand(b_shape + (q_num, q_num))
+    padded_u = Tensor.eye(q_num, dtype=U.dtype, device=U.device).expand(b_shape + (q_num, q_num))
     padded_u[..., 0:num, 0:num] = U
     U = Q @ padded_u
-    if not full_matrices: U, V = U[..., 0:num], V[..., 0:num]
-    return (U, S, V.transpose(-2,-1)) if m >= n else (V, S, U.transpose(-2, -1))
+    if not full_matrices: U = U[..., 0:num]
+    return (U, S, V.transpose(-2, -1)) if m >= n else (V, S, U.transpose(-2, -1))
 
   # ***** cast ops *****
 

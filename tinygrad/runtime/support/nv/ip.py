@@ -95,14 +95,13 @@ class NV_FLCN(NV_IP):
                         self.nvdev.NV_PGC6_AON_SECURE_SCRATCH_GROUP_05[0].read() & 0xff == 0xff, "waiting for reset")
 
   def init_sw(self):
-    self.nvdev.include("src/common/inc/swref/published/ampere/ga102/dev_gsp.h")
-    self.nvdev.include("src/common/inc/swref/published/ampere/ga102/dev_falcon_v4.h")
-    self.nvdev.include("src/common/inc/swref/published/ampere/ga102/dev_falcon_v4_addendum.h")
-    self.nvdev.include("src/common/inc/swref/published/ampere/ga102/dev_riscv_pri.h")
-    self.nvdev.include("src/common/inc/swref/published/ampere/ga102/dev_fbif_v4.h")
-    self.nvdev.include("src/common/inc/swref/published/ampere/ga102/dev_falcon_second_pri.h")
-    self.nvdev.include("src/common/inc/swref/published/ampere/ga102/dev_sec_pri.h")
-    self.nvdev.include("src/common/inc/swref/published/turing/tu102/dev_bus.h")
+    self.nvdev.include("dev_gsp", "ga102")
+    self.nvdev.include("dev_falcon_v4", "ga102")
+    self.nvdev.include("dev_riscv_pri", "ga102")
+    self.nvdev.include("dev_fbif_v4", "ga102")
+    self.nvdev.include("dev_falcon_second_pri", "ga102")
+    self.nvdev.include("dev_sec_pri", "ga102")
+    self.nvdev.include("dev_bus", "tu102")
 
     self.prep_ucode()
     self.prep_booter()
@@ -284,17 +283,15 @@ class NV_FLCN(NV_IP):
 
 class NV_FLCN_COT(NV_IP):
   def wait_for_reset(self):
-    self.nvdev.include("src/common/inc/swref/published/blackwell/gb202/dev_therm.h")
+    self.nvdev.include("dev_therm", "gb202")
     wait_cond(lambda _: self.nvdev.NV_THERM_I2CS_SCRATCH.read() == 0xff, "waiting for reset")
 
   def init_sw(self):
-    self.nvdev.include("src/common/inc/swref/published/ampere/ga102/dev_gsp.h")
-    self.nvdev.include("src/common/inc/swref/published/hopper/gh100/dev_falcon_v4.h")
-    self.nvdev.include("src/common/inc/swref/published/hopper/gh100/dev_vm.h")
-    self.nvdev.include("src/common/inc/swref/published/hopper/gh100/dev_fsp_pri.h")
-    self.nvdev.include("src/common/inc/swref/published/turing/tu102/dev_bus.h")
-    self.nvdev.include("src/nvidia/arch/nvalloc/common/inc/fsp/fsp_mctp_format.h")
-    self.nvdev.include("src/nvidia/arch/nvalloc/common/inc/fsp/fsp_emem_channels.h")
+    self.nvdev.include("dev_gsp", "ga102")
+    self.nvdev.include("dev_falcon_v4", "gh100")
+    self.nvdev.include("dev_vm", "gh100")
+    self.nvdev.include("dev_fsp_pri", "gh100")
+    self.nvdev.include("dev_bus", "tu102")
 
     self.fmc_boot_args_view, self.fmc_boot_args_sysmem = self.nvdev._alloc_boot_struct(nv.GSP_FMC_BOOT_PARAMS())
     self.init_fmc_image()

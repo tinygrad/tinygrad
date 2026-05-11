@@ -111,7 +111,8 @@ def get_runtime(device:str, ast:UOp):
     if DEBUG >= 3 and ast.src[0].arg.applied_opts: print(ast.src[0].arg.applied_opts)
     if DEBUG >= 4: print(ast.src[3].arg)
     if DEBUG >= 7: Device[device].compiler.disassemble(ast.src[4].arg)
-    runtime = runtime_cache[key] = Device[device].runtime(ast.arg.function_name, ast.src[4].arg, *ast.arg.aux, runtimevars=ast.arg.runtimevars)
+    runtime = runtime_cache[key] = Device[device].runtime(ast.arg.function_name, ast.src[4].arg, *ast.arg.aux,
+                                                          runtimevars=ast.arg.runtimevars, prg=ast)
   return runtime
 
 graph_cache:weakref.WeakKeyDictionary[UOp, Any] = weakref.WeakKeyDictionary()
