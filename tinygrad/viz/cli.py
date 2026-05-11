@@ -62,7 +62,8 @@ def get(data:dict, key:str):
 def main(args) -> None:
   viz.load_rewrites(viz_data:=viz.VizData(viz.load_pickle(args.rewrites_path, default=RewriteTrace([], [], {}))))
 
-  def emit(val, to_str=str) -> str: return json.dumps(val if isinstance(val, dict) else {"value":val}) if args.json else to_str(val)
+  def emit(val, to_str=str) -> str:
+    return json.dumps({k:v for k,v in val.items() if not k.startswith("_")} if isinstance(val, dict) else {"value":val}) if args.json else to_str(val)
 
   def print_step(step:dict, print_graph=False, reconstruct_matches=False) -> None:
     data = viz.get_render(viz_data, step["query"])
@@ -185,21 +186,21 @@ def main(args) -> None:
       num_rows = len(items) if args.t < 0 else args.t
       for (dev,name),(t,c,ref,est) in items[:num_rows]:
         display = f"{dev[:7]:7s} {fmt_colored(name)}" if not args.src else fmt_colored(name)
-        yield {"name":display, "dur_ms":t, "count":c, "pct":t/total*100.0, "ref":ref, "fmt":{k:int(est[k]/(t*1e-3)) for k in est_keys if k in est}}
+        yield {"name":display, "dur_ms":t, "count":c, "pct":t/total*100.0, "_ref":ref, "fmt":{k:int(est[k]/(t*1e-3)) for k in est_keys if k in est}}
       if num_rows > 0 and items[num_rows:]:
         other_t = sum(t for _,(t,_,_,_) in items[num_rows:])
         other_c = sum(c for _,(_,c,_,_) in items[num_rows:])
-        yield {"name":"Other", "dur_ms":other_t, "count":other_c, "pct":other_t/total*100.0, "ref":None, "fmt":None}
+        yield {"name":"Other", "dur_ms":other_t, "count":other_c, "pct":other_t/total*100.0, "_ref":None, "fmt":None}
     def produce_all_kernels() -> Iterator[dict]:
       event_streams = [[(e["st"], n, e) for e in l["events"]] for n,l in timelines] if not args.src \
                       else [[(e["st"], args.src[0], e) for e in unwrap(data)["events"]]]
       if not args.src:
         for n,l in profile["layout"].items():
-          if not isinstance(l, dict) or l.get("event_type") != 0: yield {"device":"SOURCE", "name":n, "st_ms":0, "ref":None, "ext":None}
+          if not isinstance(l, dict) or l.get("event_type") != 0: yield {"device":"SOURCE", "name":n, "st_ms":0, "_ref":None, "ext":None}
       marker_stream = sorted([(m["ts"], "MARKER", m) for m in profile.get("markers", [])], key=lambda t:t[0])
       for ts,dev,e in heapq.merge(*event_streams, marker_stream, key=lambda t:t[0]):
         if dev == "MARKER":
-          yield {"device":dev, "name":fmt_colored(e["name"]), "st_ms":ts*1e-3, "ref":None, "ext":None}
+          yield {"device":dev, "name":fmt_colored(e["name"]), "st_ms":ts*1e-3, "_ref":None, "ext":None}
           continue
         ext, fmt = [], e["fmt"]
         if (tb:=fmt.pop("tb", [])):
@@ -208,7 +209,7 @@ def main(args) -> None:
             line = f"{file.split('/')[-1]}:{lineno} {fxn}"
             if fmt: ext.append(f"{line} {code}")
             elif not file.startswith("<") and not fxn.startswith("<"): fmt["loc"] = line
-        yield {"device":dev, "name":fmt_colored(e["name"]), "dur_ms":e["dur"]*1e-3, "st_ms":e["st"]*1e-3, "fmt":fmt, "ref":e["ref"],
+        yield {"device":dev, "name":fmt_colored(e["name"]), "dur_ms":e["dur"]*1e-3, "st_ms":e["st"]*1e-3, "fmt":fmt, "_ref":e["ref"],
                "ext":"\n".join(ext)}
     def fmt_top(k:dict) -> str:
       return f"{fmt_colored(k['name'])}{' ' * max(0, 38-ansilen(k['name']))} {time_to_str(k['dur_ms']*1e-3, w=9)} {k['count']:7d} {k['pct']:6.2f}%"+\
@@ -223,9 +224,9 @@ def main(args) -> None:
     def render_event(k:dict, ls=args.list) -> None:
       if len(args.src) > 1 and ansistrip(k["name"]) not in args.src: return None
       print(emit(k, to_str=fmt_row))
-      if k["ref"] is not None and k["ref"] not in seen_refs:
-        seen_refs.add(k["ref"])
-        for i,s in enumerate(viz_data.ctxs[k["ref"]]["steps"]):
+      if k["_ref"] is not None and k["_ref"] not in seen_refs:
+        seen_refs.add(k["_ref"])
+        for i,s in enumerate(viz_data.ctxs[k["_ref"]]["steps"]):
           if DEBUG >= 3 and s["name"] == "View Base AST": print_step(s)
           if DEBUG >= 4 and s["name"] == "View Source": print_step(s)
           if DEBUG >= 5 or ls: print(emit(" "*s["depth"]+s["name"]+(f" - {s['match_count']}" if s.get('match_count', 0) else '')))
