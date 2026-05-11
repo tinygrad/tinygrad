@@ -43,7 +43,9 @@ def type_verify(ast:UOp|list[UOp], check_spec:PatternMatcher):
 spec_shared = PatternMatcher([
   (UPat(Ops.SINK, dtypes.void), lambda: True), # NOTE: for testing, we let sinks be anything
 
+  # CONST/DEFINE_VAR are everywhere
   (UPat(Ops.CONST, src=(), name="x"), lambda x: type(x.arg) is type(x.dtype.const(x.arg))),
+  (UPat(Ops.DEFINE_VAR, name="x"), lambda x: isinstance(x.arg[1], int) and isinstance(x.arg[2], int)),
 
   # ALUs: most ALUs have all matching dtypes, except CMPLT, CMPNE, and WHERE
   (UPat(Ops.WHERE, name="w", src=(UPat(dtype=dtypes.bool), UPat.var("x"), UPat.var("y"))), lambda w,x,y: w.dtype == x.dtype == y.dtype),
@@ -66,8 +68,25 @@ spec_shared = PatternMatcher([
   # PARAM (that's really a DEFINE_GLOBAL)
   (UPat(Ops.PARAM, name="x"), lambda x: isinstance(x.dtype, (PtrDType, ImageDType)) and x.dtype.addrspace == AddrSpace.GLOBAL),
 
+  # GROUP of stores (or groups)
+  (UPat(Ops.GROUP, dtypes.void, src=UPat((Ops.GROUP, Ops.STORE))), lambda: True),
+
+  # TOOD: these should be buffer with different addrspace
+  (UPat(Ops.DEFINE_LOCAL, name="x"), lambda x: isinstance(x.dtype, PtrDType) and x.dtype.addrspace == AddrSpace.LOCAL),
+  (UPat(Ops.DEFINE_REG, src=(), name="x"), lambda x: isinstance(x.arg, int)),
+
+  # AFTER on Movement Op, PARAM, BUFFER, or another AFTER
+  (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.PARAM, Ops.BUFFER, Ops.DEFINE_REG, Ops.DEFINE_LOCAL, Ops.AFTER, Ops.MULTI})),),
+        allow_any_len=True), lambda: True),
+
   # NOOP. TODO: remove this
-  (UPat(Ops.NOOP), lambda: True)
+  (UPat(Ops.NOOP), lambda: True),
+
+  # CUSTOM (inline and non inline)
+  (UPat((Ops.CUSTOMI, Ops.CUSTOM)), lambda: True),
+
+  # BARRIER (on any length). TODO: this should only be in spec_program
+  (UPat(Ops.BARRIER, dtypes.void), lambda: True),
 ])
 
 # these ops can exist in tensor but not programs. example: movement
@@ -76,11 +95,23 @@ spec_tensor = PatternMatcher([
   (UPat(Ops.DEVICE, dtypes.void, (), name="d"), lambda d:
    isinstance(d.arg, str) or (isinstance(d.arg, tuple) and all(isinstance(s, str) for s in d.arg))),
 
-  # CONST with a DEVICE
+  # UNIQUE
+  (UPat(Ops.UNIQUE, dtypes.void, ()), lambda: True),
+
+  # CONST with a UNIQUE or DEVICE
   (UPat(Ops.CONST, src=(UPat(Ops.DEVICE),)), lambda: True),
+  (UPat(Ops.CONST, src=(UPat(Ops.UNIQUE), UPat(Ops.DEVICE))), lambda: True),
 
   # PARAM (that's really a variable)
   (UPat(Ops.PARAM, src=(UPat(), UPat(), UPat(), UPat(), UPat()), name="x"), lambda x: True),
+
+  # CALL
+  (UPat(Ops.CALL, src=(UPat(Ops.SINK),), allow_any_len=True), lambda: True),
+
+  # FUNCTION + TUPLE must have void dtype, GETTUPLE can only appear on FUNCTION or TUPLE
+  (UPat(Ops.FUNCTION, dtypes.void, src=(UPat(Ops.TUPLE),), allow_any_len=True), lambda: True),
+  (UPat(Ops.TUPLE, dtypes.void), lambda: True),
+  (UPat(Ops.GETTUPLE, src=(UPat((Ops.FUNCTION, Ops.TUPLE)),), name="g"), lambda g: isinstance(g.arg, int)),
 
   # PARAM
   (UPat(Ops.PARAM, src=(UPat(), UPat(Ops.DEVICE)), name="x"), lambda x: True),
@@ -97,9 +128,6 @@ spec_tensor = PatternMatcher([
   # STORE in tensor graph: store a value into a target
   (UPat(Ops.STORE, dtypes.void, (UPat(), UPat())), lambda: True),
 
-  # AFTER on Movement Op, INDEX, BUFFER, COPY, or BITCAST
-  (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.PARAM, Ops.BUFFER})),), allow_any_len=True), lambda: True),
-
   # REDUCE has arg=(op, axis_tuple), src[1:] are ranges after lowering
   (UPat(Ops.REDUCE, src=(UPat(),), allow_any_len=True, name="x"),
    lambda x: isinstance(x.arg, tuple) and len(x.arg) == 2 and x.arg[0] in {Ops.ADD, Ops.MUL, Ops.MAX}
@@ -107,6 +135,16 @@ spec_tensor = PatternMatcher([
 
   # COPY/ALLREDUCE/MULTI
   (UPat(Ops.COPY, name="copy", src=(UPat.var("x"), UPat(Ops.DEVICE)), arg=None), lambda copy,x: copy.dtype == x.dtype),
+  (UPat(Ops.MULTI, name="multi"), lambda multi: all(x.dtype == multi.dtype for x in multi.src) and isinstance(multi.arg, int)),
+
+  # MSELECT chooses one of the multi buffers
+  (UPat(Ops.MSELECT, name="x"), lambda x: isinstance(x.src[0].device, tuple) and x.arg < len(x.src[0].device)),
+
+  # CONTIGUOUS ensures the source UOp realizes
+  (UPat((Ops.CONTIGUOUS), name="root", src=(UPat.var("x"),), arg=None), lambda root,x: root.dtype == x.dtype),
+
+  # TODO: this should not be here. STAGE is transformed to DEFINE_LOCAL later
+  (UPat(Ops.STAGE, src=(UPat(),), allow_any_len=True), lambda: True),
 ])+spec_shared
 
 # these ops can exist in programs but not the tensor spec. example: LOAD
@@ -125,17 +163,18 @@ spec_program = PatternMatcher([
   (UPat(Ops.STACK, name="x"), lambda x: len(x.src)>1 and len(x.src) == x.dtype.vcount and all(x.dtype == y.dtype.vec(len(x.src)) for y in x.src)),
   (UPat(Ops.GEP, src=(UPat.var("src"),), name="gep"), lambda gep,src: gep.dtype == src.dtype.scalar()),
 
-  # TOOD: these should be buffer with different addrspace
-  (UPat(Ops.DEFINE_LOCAL, name="x"), lambda x: isinstance(x.dtype, PtrDType) and x.dtype.addrspace == AddrSpace.LOCAL),
-  (UPat(Ops.DEFINE_REG, src=(), name="x"), lambda x: isinstance(x.arg, int)),
+  # if has a <gate, index_for_dedup>
+  (UPat(Ops.IF, dtype=dtypes.void, src=(UPat(dtype=dtypes.bool), UPat((Ops.CAST, Ops.INDEX)))), lambda: True),
+  (UPat(Ops.ENDIF, dtype=dtypes.void, src=(UPat(Ops.IF),)), lambda: True),
 
-  # AFTER on DEFINE_REG
-  (UPat(Ops.AFTER, src=(UPat(Ops.DEFINE_REG),), allow_any_len=True), lambda: True),
+  # WMMA has a <a, b, acc>
+  (UPat(Ops.WMMA, src=(UPat(), UPat(), UPat()), name="x"), lambda x: isinstance(x.arg, tuple) and len(x.arg) == 8),
 ])+spec_shared
 
 # these are intermediate ops. everything should be deleted from here
 spec_full = PatternMatcher([
-
+  (UPat(Ops.BUFFER, src=(UPat(Ops.UNIQUE), UPat(Ops.DEVICE)), name="buf"),
+   lambda buf: isinstance(buf.arg, int) and isinstance(buf.dtype, DType)),
 ])+spec_tensor+spec_shared
 
 
@@ -243,7 +282,6 @@ _tensor_spec = PatternMatcher([
   (UPat(Ops.COPY, name="copy", src=(UPat.var("x"), UPat(Ops.DEVICE)), arg=None), lambda copy,x: copy.dtype == x.dtype),
   (UPat(Ops.ALLREDUCE, name="red", src=(UPat.var("x"), UPat(Ops.DEVICE))), lambda red,x: red.dtype == x.dtype and isinstance(red.arg, Ops)),
   (UPat(Ops.MULTI, name="multi"), lambda multi: all(x.dtype == multi.dtype for x in multi.src) and isinstance(multi.arg, int)),
-
 
   # AFTER if things were kernelized
   (UPat(Ops.AFTER, src=(UPat((Ops.BUFFER, Ops.AFTER)),), allow_any_len=True), lambda: True),
