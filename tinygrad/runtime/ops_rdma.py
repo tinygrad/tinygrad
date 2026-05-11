@@ -81,6 +81,7 @@ class RDMAAllocator(HCQAllocatorBase):
                      meta=self.dev.iface.mlx_dev.register_mem(pages, len(pages) * page_sz, page_sz.bit_length() - 1))
 
   def _do_free(self, buf:HCQBuffer, options): self.dev.iface.mlx_dev.unregister_mem(buf.meta)
+  def _unmap(self, mb): self.dev.iface.mlx_dev.unregister_mem(mb.meta)
 
   def _transfer(self, dest:HCQBuffer, src:HCQBuffer, sz:int, src_dev:HCQCompiled, dest_dev:HCQCompiled):
     # sync device
