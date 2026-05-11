@@ -223,6 +223,7 @@ def main(args) -> None:
     seen_refs:set[int] = set()
     def render_event(k:dict, ls=args.list) -> None:
       if len(args.src) > 1 and ansistrip(k["name"]) not in args.src: return None
+      if args.kernel_graph and not k["name"].startswith("Schedule"): return None
       print(emit(k, to_str=fmt_row))
       if k["_ref"] is not None and k["_ref"] not in seen_refs:
         seen_refs.add(k["_ref"])
