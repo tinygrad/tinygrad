@@ -172,7 +172,7 @@ class Buffer:
         if dev != self.device: Device[dev].allocator._unmap(mb)
       self.allocator.free(self._buf, self.nbytes, self.options)
     elif self._base is not None: self._base.allocated_views -= 1
-    del self._bufs[self.device]
+    self._bufs.clear()
   def __reduce__(self):
     buf = None
     if self._base is not None:
