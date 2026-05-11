@@ -52,6 +52,7 @@
 ::: tinygrad.Tensor.linear
 ::: tinygrad.Tensor.sequential
 ::: tinygrad.Tensor.layernorm
+::: tinygrad.Tensor.rmsnorm
 ::: tinygrad.Tensor.batchnorm
 ::: tinygrad.Tensor.dropout
 ::: tinygrad.Tensor.one_hot
