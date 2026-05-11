@@ -104,6 +104,8 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   # this was the linearizer
   sink = graph_rewrite(sink, pm_add_control_flow, ctx=CFGContext(sink), name="add control flow", bottom_up=True)
 
+  if VIZ: graph_rewrite(sink, PatternMatcher([]), name="View Output AST")
+
   # return the rewritten sink
   return sink
 
