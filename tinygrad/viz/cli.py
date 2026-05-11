@@ -108,6 +108,8 @@ def main(args) -> None:
             for k,v in first["graph"].items():
               if v["label"].startswith("SOURCE") or v["label"].startswith("BINARY"): print(v["label"])
           else: print(emit(first["uop"]))
+        # stop once we reach the target CALL
+        if args.kernel_graph and args.kernel_graph in ansistrip(v["label"]): return None
 
   profile_bytes = viz.get_profile(viz_data, viz.load_pickle(args.profile_path, default=[]))
   if profile_bytes is None: raise RuntimeError(f"empty profile in {args.profile_path}")
@@ -227,7 +229,7 @@ def main(args) -> None:
           if DEBUG >= 3 and s["name"] == "View Base AST": print_step(s)
           if DEBUG >= 4 and s["name"] == "View Source": print_step(s)
           if DEBUG >= 5 or ls: print(emit(" "*s["depth"]+s["name"]+(f" - {s['match_count']}" if s.get('match_count', 0) else '')))
-          if DEBUG >= 5 and s["name"] == "View Kernel Graph": print_call(s)
+          if (DEBUG >= 5 or args.kernel_graph) and s["name"] == "View Kernel Graph": print_call(s)
           if DEBUG >= 6: print_step(s, print_graph=True)
           if DEBUG >= 7 or s["name"] in args.src: print_step(s, reconstruct_matches=True)
       elif DEBUG >= 3 and k.get("ext"): print(emit(k["ext"]))
@@ -238,6 +240,7 @@ def get_arg_parser() -> argparse.ArgumentParser:
   parser.add_argument("-s", "--src", nargs="+", default=[], metavar="NAME", help="Select a data source (default: all)")
   parser.add_argument("--list", "--ls", dest="list", action="store_true", help="List sources")
   parser.add_argument("-t", nargs="?", type=int, const=20, metavar="COUNT", help="Aggregate top kernels (optional count, default 20)")
+  parser.add_argument("--kernel-graph", type=str, help="print graph of kernel name")
   parser.add_argument("--profile-path", type=str, metavar="PATH", help="Optional path to profile.pkl (default: latest profile)",
                       default=temp("profile.pkl", append_user=True))
   parser.add_argument("--rewrites-path", type=str, metavar="PATH", help="Optional path to rewrites.pkl (default: latest rewrites)",
