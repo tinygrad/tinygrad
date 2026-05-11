@@ -20,9 +20,11 @@ class HCQProgram:
     self.dev, self.name, self.prg = dev, name, prg
     self.ctx = ctx = HCQ2LowerCtx(dev=dev, name=f"submit_{name}")
 
-    ctx.kernargs = ctx.host_param(dev.kernargs_buf, dev_uop=ctx.dev_param(dev.kernargs_buf))
-    self.kernargs_devslot, self.global_devslot_base = ctx.dev_inputs.index(dev.kernargs_buf), len(ctx.dev_inputs)
-    global_uops = [ctx.dev_param() for _ in range(max(prg.arg.globals, default=-1) + 1)]
+    n_bufs = max(prg.arg.globals, default=-1) + 1
+    self.bufaddrs = Buffer("CPU", 1 + n_bufs, dtypes.uint64, preallocate=True)
+    bufaddrs_uop = ctx.host_param(self.bufaddrs)
+    ctx.kernargs_host, ctx.kernargs_gpu = ctx.host_param(dev.kernargs_buf), bufaddrs_uop[0]
+    global_uops = [bufaddrs_uop[1+i] for i in range(n_bufs)]
 
     host_prg = _hcq_schedule(dev, ctx, UOp(Ops.LINEAR, dtypes.void, (prg.call(*global_uops),), arg="COMPUTE"), prg).src[0]
     self.host_rt, self.host_globals = get_runtime("CPU", host_prg), host_prg.arg.globals
@@ -30,11 +32,11 @@ class HCQProgram:
 
   def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int|None,...]=(),
                wait=False, timeout:int|None=None):
-    self.ctx.inputs[self.ctx.kernargs.arg] = kernargs = self.dev.kernargs_buf.view(self.kernargs_alloc_size, dtypes.uint8,
+    self.ctx.inputs[self.ctx.kernargs_host.arg] = kernargs = self.dev.kernargs_buf.view(self.kernargs_alloc_size, dtypes.uint8,
       self.dev.kernargs_offset_allocator.alloc(self.kernargs_alloc_size, 8)).ensure_allocated()
-    devptrs = self.ctx.devptrs_buf.as_memoryview(force_zero_copy=True).cast('Q')
-    devptrs[self.kernargs_devslot] = kernargs.get_buf(self.dev.device).va_addr
-    for j, gi in enumerate(self.prg.arg.globals): devptrs[self.global_devslot_base + gi] = bufs[j].va_addr
+    addrs = self.bufaddrs.as_memoryview(force_zero_copy=True).cast('Q')
+    addrs[0] = kernargs.get_buf(self.dev.device).va_addr
+    for j, gi in enumerate(self.prg.arg.globals): addrs[1+gi] = bufs[j].va_addr
     self.host_rt(*[self.ctx.inputs[i].get_buf("CPU") for i in self.host_globals], vals=vals)
     if wait: self.dev.synchronize(timeout)
 
@@ -180,35 +182,19 @@ class HCQAllocator(HCQAllocatorBase, Generic[HCQDeviceType]):
 @dataclass
 class HCQ2LowerCtx:
   dev:HCQ2Compiled
-  kernargs:UOp|None = None
+  kernargs_host:UOp|None = None
+  kernargs_gpu:UOp|None = None
   kernargs_allocator:BumpAllocator = field(default_factory=lambda: BumpAllocator(0x1000, wrap=False))
 
   inputs:list[Buffer] = field(default_factory=list)
-  dev_inputs:list[Buffer|None] = field(default_factory=list)
 
   holds:list[UOp] = field(default_factory=list)
 
-  param2dev:dict[UOp, UOp] = field(default_factory=dict)
-
   name:str = "hcq_submit"
 
-  def host_param(self, buf:Buffer, dev_uop:UOp|None=None) -> UOp:
+  def host_param(self, buf:Buffer) -> UOp:
     if buf not in self.inputs: self.inputs.append(buf)
-    param = UOp.placeholder((buf.size,), buf.dtype, self.inputs.index(buf))
-    if dev_uop is not None: self.param2dev[param] = dev_uop
-    return param
-
-  @functools.cached_property
-  def devptrs_buf(self) -> Buffer: return Buffer("CPU", 0x1000 // 8, dtypes.uint64, preallocate=True) # one page of va_addrs
-
-  @functools.cached_property
-  def devptrs_uop(self) -> UOp: return self.host_param(self.devptrs_buf)
-
-  def dev_param(self, buf:Buffer|None=None) -> UOp:
-    if buf is None or buf not in self.dev_inputs: self.dev_inputs.append(buf)
-    return self.devptrs_uop[self.dev_inputs.index(buf) if buf is not None else len(self.dev_inputs) - 1]
-
-  def as_dev_uop(self, uop:UOp) -> UOp: return self.param2dev.get(uop, uop)
+    return UOp.placeholder((buf.size,), buf.dtype, self.inputs.index(buf))
 
 class HCQEncoder:
   def __init__(self, ctx:HCQ2LowerCtx): self.ctx, self.dev, self.blob, self.patches, self.deps = ctx, ctx.dev, b'', [], set()
@@ -219,7 +205,6 @@ class HCQEncoder:
   def get_dev_addr(self, uop:UOp) -> sint|UOp:
     self.deps.add(uop) # uops used to encode this blob are referenced as sources
     while uop.op in (Ops.AFTER, Ops.ATTACH): uop = uop.src[0]
-    uop = self.ctx.as_dev_uop(uop)
     return uop.buffer.get_buf(self.dev.device).va_addr if uop.op in (Ops.BUFFER, Ops.BUFFER_VIEW) else uop
 
   def append(self, *data, dtype=dtypes.uint32):
@@ -250,10 +235,10 @@ def lower_kernargs(ctx:HCQ2LowerCtx, call:UOp, prg:UOp) -> UOp:
   for v in info.vars: enc.append(v, dtype=dtypes.uint32)
 
   args_off = ctx.kernargs_allocator.alloc(data.kernargs_alloc_size, 16)
-  assert ctx.kernargs is not None
+  assert ctx.kernargs_host is not None and ctx.kernargs_gpu is not None
 
   # bake offset into the gpu addr; attach the host-side kernargs fills as deps that travel with it
-  args_uop = (ctx.as_dev_uop(ctx.kernargs) + args_off).attach(ctx.kernargs.after(*tuple(p.replace(arg=p.arg+args_off) for p in enc.patches)))
+  args_uop = (ctx.kernargs_gpu + args_off).attach(ctx.kernargs_host.after(*tuple(p.replace(arg=p.arg+args_off) for p in enc.patches)))
   return call.replace(src=(prg.replace(src=prg.src + (args_uop,), arg=(data, info)),) + call.src[1:])
 
 def lower_program(ctx:HCQ2LowerCtx, call:UOp, prg:UOp) -> UOp:
