@@ -218,7 +218,7 @@ class HCQEncoder:
 
   def get_dev_addr(self, uop:UOp) -> sint|UOp:
     self.deps.add(uop) # uops used to encode this blob are referenced as sources
-    while uop.op in (Ops.AFTER,): uop = uop.src[0]
+    while uop.op in (Ops.AFTER, Ops.ATTACH): uop = uop.src[0]
     uop = self.ctx.as_dev_uop(uop)
     return uop.buffer.get_buf(self.dev.device).va_addr if uop.op in (Ops.BUFFER, Ops.BUFFER_VIEW) else uop
 
@@ -227,7 +227,7 @@ class HCQEncoder:
       if isinstance(d, int): self.blob += struct.pack(f'<{dtype.fmt}', d)
       elif d.op is Ops.CONST: self.blob += struct.pack(f'<{dtype.fmt}', d.arg)
       else:
-        self.patches.append(UOp(Ops.PARAM, dtype, src=(d,), arg=len(self.blob)))
+        self.patches.append(UOp(Ops.PATCH, dtype, src=(d,), arg=len(self.blob)))
         self.blob += struct.pack(f'<{dtype.fmt}', 0)
 
   def q(self, *values): self.append(*values)
@@ -250,11 +250,11 @@ def lower_kernargs(ctx:HCQ2LowerCtx, call:UOp, prg:UOp) -> UOp:
   for v in info.vars: enc.append(v, dtype=dtypes.uint32)
 
   args_off = ctx.kernargs_allocator.alloc(data.kernargs_alloc_size, 16)
-
-  # attach kernargs patches
   assert ctx.kernargs is not None
-  args_uop = ctx.kernargs.after(*tuple(p.replace(arg=p.arg+args_off) for p in enc.patches))
-  return call.replace(src=(prg.replace(src=prg.src + (args_uop,), arg=(data, info, args_off)),) + call.src[1:])
+
+  # bake offset into the gpu addr; attach the host-side kernargs fills as deps that travel with it
+  args_uop = (ctx.as_dev_uop(ctx.kernargs) + args_off).attach(ctx.kernargs.after(*tuple(p.replace(arg=p.arg+args_off) for p in enc.patches)))
+  return call.replace(src=(prg.replace(src=prg.src + (args_uop,), arg=(data, info)),) + call.src[1:])
 
 def lower_program(ctx:HCQ2LowerCtx, call:UOp, prg:UOp) -> UOp:
   sig, tl = UOp.from_buffer(ctx.dev.timeline_signal), ctx.host_param(ctx.dev.timeline_value)
@@ -299,7 +299,7 @@ def resolve_patches(ctx:HCQ2LowerCtx, buf:UOp) -> UOp|None:
   if inner.op is Ops.BUFFER: inner = ctx.param(inner)
 
   return inner.after(*(inner.index(UOp.const(dtypes.int, p.arg//inner.dtype.base.itemsize), ptr=True).cast(p.dtype.ptr()).store(p.src[0].cast(p.dtype))
-                           if p.op is Ops.PARAM and len(p.src) == 1 else p for p in buf.src[1:]))
+                           if p.op is Ops.PATCH else p for p in buf.src[1:]))
 
 def resolve_ref_buffers(ctx:HCQ2LowerCtx, buf:UOp) -> UOp:
   if buf not in ctx.holds: ctx.holds.append(buf)

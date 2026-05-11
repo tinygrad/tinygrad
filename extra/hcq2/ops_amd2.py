@@ -96,13 +96,13 @@ class AMDComputeQueue(HCQEncoder):
                      self.pm4.int_sel__mec_release_mem__send_interrupt_after_write_confirm, cache_flush=True)
 
   def program(self, x):
-    data, info, args_off = x.arg
+    data, info = x.arg
     lib_gpu, args = x.src
     prog_addr = self.get_dev_addr(lib_gpu) + data.entry_point_offset
 
     self.acquire_mem(gli=0, gl2=0)
 
-    args_addr = self.get_dev_addr(args) + args_off
+    args_addr = self.get_dev_addr(args)
     user_regs = []
     if data.enable_private_segment_sgpr:
       scratch_hilo = data64_le(self.dev.scratch.va_addr)

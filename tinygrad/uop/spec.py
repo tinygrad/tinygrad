@@ -131,6 +131,9 @@ _tensor_spec = PatternMatcher([
   # AFTER if things were kernelized
   (UPat(Ops.AFTER, src=(UPat((Ops.BUFFER, Ops.AFTER)),), allow_any_len=True), lambda: True),
 
+  # ATTACH bundles a value with deps; value can be anything
+  (UPat(Ops.ATTACH, src=(UPat(),), allow_any_len=True), lambda: True),
+
   # allow CALL/FUNCTION/PARAM/CUSTOM_FUNCTION — both CALL and FUNCTION dtype is always void
   # FUNCTION must have a TUPLE body in src[0] (invariant enforced by UOp.call); CALL bodies are opaque
   (UPat(Ops.CALL, dtypes.void), lambda: True),
@@ -165,6 +168,7 @@ shared_codegen_spec = PatternMatcher([
 
   # allow AFTER on buffers, GROUP anywhere
   (UPat(Ops.AFTER, src=(UPat(GroupOp.Defines|{Ops.AFTER}),), allow_any_len=True), lambda: True),
+  (UPat(Ops.ATTACH, src=(UPat(),), allow_any_len=True), lambda: True),
   (UPat(Ops.GROUP, dtypes.void), lambda: True),
 
   # WMMA has a <a, b, acc>
