@@ -409,8 +409,6 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
   def sink(*srcs:UOp|None, **kwargs):  # pylint: disable=no-self-argument
     return UOp(Ops.SINK, dtypes.void, tuple([x for x in srcs if x is not None]), **kwargs)
-  def linear(*srcs:UOp):  # pylint: disable=no-self-argument
-    return UOp(Ops.LINEAR, dtypes.void, tuple(srcs))
   def maketuple(*srcs:UOp):  # pylint: disable=no-self-argument
     return UOp(Ops.TUPLE, dtypes.void, srcs)
   def gettuple(self, idx:int) -> UOp:

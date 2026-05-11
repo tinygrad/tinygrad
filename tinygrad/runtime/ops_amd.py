@@ -1109,4 +1109,4 @@ class AMDDevice(HCQCompiled):
 
   def hw_copy_queues(self): return [(f"SDMA:{i}", functools.partial(unwrap(self.hw_copy_queue_t), queue_idx=i)) for i in self.sdma_queues]
 
-if getenv("HCQ2"): from extra.hcq2.ops_amd2 import * # noqa: F401 # pylint: disable=unused-import
+if getenv("HCQ2"): from extra.hcq2.ops_amd2 import * # noqa: F401, F403 # pylint: disable=unused-import
