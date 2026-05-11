@@ -5,7 +5,7 @@ if hasattr(signal, "SIGPIPE"): signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 from typing import Iterator
 from tinygrad.viz import serve as viz
 from tinygrad.viz.serve import fmt_colored
-from tinygrad.uop.ops import RewriteTrace
+from tinygrad.uop.ops import RewriteTrace, UOp, Ops
 from tinygrad.helpers import temp, ansistrip, colored, time_to_str, ansilen, ProfilePointEvent, ProfileRangeEvent, TracingKey, unwrap, NO_COLOR, DEBUG
 
 # profile decoder used in CLI and tests
@@ -75,6 +75,33 @@ def main(args) -> None:
           print(emit(f"{loc.parent.name}/{loc.name}:{m['upat'][0][1]}\n{m['upat'][1]}"))
           for line in m["diff"]: print(emit(colored(line, "red" if line.startswith("-") else "green" if line.startswith("+") else None)))
     if data.get("src") is not None: print(emit(data["src"]))
+
+  def print_call(step:dict) -> None:
+    graph = next(viz.get_render(viz_data, step["query"])["value"])["graph"]
+    seen:set[int] = set()
+    for k,v in graph.items():
+      lines = v["label"].splitlines()
+      unique:dict[int, int] = {}
+      if lines[0].startswith("CALL"):
+        # first print the CALL name
+        print(f"{lines[0]:<12} {lines[-1]}")
+        # print memory sources and access pattern
+        for i,(_,s) in enumerate(v["src"][1:]):
+          while graph[s]["label"].startswith("AFTER"): s = graph[s]["src"][0][1]
+          if (num:=unique.get(s)) is None: unique[s] = num = len(unique)
+          print(f"SRC {i} {' '.join(graph[s]['label'].splitlines())} g{num}")
+        ss = [v["src"][0][1]]
+        seen:set[int] = set()
+        while ss:
+          if (s:=ss.pop()) in seen: continue
+          seen.add(s)
+          if graph[s]["label"].startswith("INDEX"):
+            idx_str = graph[s]["label"].splitlines()
+            src_str = ["SRC"]+graph[graph[s]["src"][0][1]]["label"].splitlines()[1:]
+            print(" ".join(idx_str+src_str))
+          ss += [x[1] for x in graph[s]["src"]]
+        # pyrender AST
+        print(next(viz.get_render(viz_data, viz_data.ctxs[v["ref"]]["steps"][0]["query"])["value"])["uop"])
 
   profile_bytes = viz.get_profile(viz_data, viz.load_pickle(args.profile_path, default=[]))
   if profile_bytes is None: raise RuntimeError(f"empty profile in {args.profile_path}")
@@ -194,7 +221,8 @@ def main(args) -> None:
           if DEBUG >= 3 and s["name"] == "View Base AST": print_step(s)
           if DEBUG >= 4 and s["name"] == "View Source": print_step(s)
           if DEBUG >= 5 or ls: print(emit(" "*s["depth"]+s["name"]+(f" - {s['match_count']}" if s.get('match_count', 0) else '')))
-          if DEBUG >= 6 or (DEBUG >= 5 and s["name"] == "View Kernel Graph"): print_step(s, print_graph=True)
+          if DEBUG >= 5 and s["name"] == "View Kernel Graph": print_call(s)
+          if DEBUG >= 6: print_step(s, print_graph=True)
           if DEBUG >= 7 or s["name"] in args.src: print_step(s, reconstruct_matches=True)
       elif DEBUG >= 3 and k.get("ext"): print(emit(k["ext"]))
     for k in (produce_top_kernels if args.t else produce_all_kernels)(): render_event(k)
