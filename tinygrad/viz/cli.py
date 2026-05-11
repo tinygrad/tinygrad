@@ -84,12 +84,12 @@ def main(args) -> None:
       unique:dict[int, int] = {}
       if lines[0].startswith("CALL"):
         # first print the CALL name
-        print(f"{lines[0]:<12} {lines[-1]}")
+        print(emit(f"{lines[0]:<12} {lines[-1]}"))
         # print memory sources and access pattern
         for i,(_,s) in enumerate(v["src"][1:]):
           while graph[s]["label"].startswith("AFTER"): s = graph[s]["src"][0][1]
           if (num:=unique.get(s)) is None: unique[s] = num = len(unique)
-          print(f"SRC {i} {' '.join(graph[s]['label'].splitlines())} g{num}")
+          print(emit(f"SRC {i} {' '.join(graph[s]['label'].splitlines())} g{num}"))
         ss = [v["src"][0][1]]
         seen:set[int] = set()
         while ss:
@@ -98,10 +98,10 @@ def main(args) -> None:
           if graph[s]["label"].startswith("INDEX"):
             idx_str = graph[s]["label"].splitlines()
             src_str = ["SRC"]+graph[graph[s]["src"][0][1]]["label"].splitlines()[1:]
-            print(" ".join(idx_str+src_str))
+            print(emit(" ".join(idx_str+src_str)))
           ss += [x[1] for x in graph[s]["src"]]
         # pyrender AST
-        print(next(viz.get_render(viz_data, viz_data.ctxs[v["ref"]]["steps"][0]["query"])["value"])["uop"])
+        print(emit(next(viz.get_render(viz_data, viz_data.ctxs[v["ref"]]["steps"][0]["query"])["value"])["uop"]))
 
   profile_bytes = viz.get_profile(viz_data, viz.load_pickle(args.profile_path, default=[]))
   if profile_bytes is None: raise RuntimeError(f"empty profile in {args.profile_path}")
