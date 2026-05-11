@@ -5,6 +5,8 @@ from tinygrad.uop.render import print_uops, pyrender
 from tinygrad.dtype import DType, ImageDType, dtypes, PtrDType, AddrSpace, Invalid, ConstFloat
 from tinygrad.helpers import DEBUG, Context, prod, SPEC, Metadata, panic, CHECK_OOB
 
+# ***** uop helpers *****
+
 def validate_index(buf:UOp, idx:UOp, gate:UOp|None=None):
   if idx.op is Ops.CONST and idx.arg is Invalid: return True
   if gate is None: gate = UOp.const(dtypes.bool, True)
@@ -23,6 +25,78 @@ def validate_index(buf:UOp, idx:UOp, gate:UOp|None=None):
   # if all is good and CHECK_OOB=1, validate with z3
   from tinygrad.uop.validate import validate_index_with_z3
   return validate_index_with_z3(sz, idx, gate)
+
+def type_verify(ast:UOp|list[UOp], check_spec:PatternMatcher):
+  lst = list(ast.toposort()) if isinstance(ast, UOp) else ast
+  if SPEC > 1: test_pyrender(lst[-1])  # assume this is the sink
+
+  with Context(TRACK_MATCH_STATS=0):
+    for i,u in enumerate(lst):
+      ret = check_spec.rewrite(u)
+      if cast(bool|None, ret) is not True:
+        if DEBUG >= 3: print_uops(lst)
+        raise RuntimeError(f"UOp verification failed at {i} on {u.op} {u.dtype} {len(u.src)} {[(x.op, x.dtype, x.arg) for x in u.src]} {u.arg}")
+
+# ***** new specs *****
+
+# these ops can be used in the tensor graph and programs
+spec_shared = PatternMatcher([
+  (UPat(Ops.SINK, dtypes.void), lambda: True), # NOTE: for testing, we let sinks be anything
+
+  (UPat(Ops.CONST, src=(), name="x"), lambda x: type(x.arg) is type(x.dtype.const(x.arg))),
+
+  # NOOP. TODO: remove this
+  (UPat(Ops.NOOP), lambda: True)
+])
+
+# these ops can exist in tensor but not programs. example: movement
+spec_tensor = PatternMatcher([
+  # DEVICE
+  (UPat(Ops.DEVICE, dtypes.void, (), name="d"), lambda d:
+   isinstance(d.arg, str) or (isinstance(d.arg, tuple) and all(isinstance(s, str) for s in d.arg))),
+
+  # CONST with a DEVICE
+  (UPat(Ops.CONST, src=(UPat(Ops.DEVICE),)), lambda: True),
+
+  # PARAM (that's really a variable)
+  (UPat(Ops.PARAM, src=(UPat(), UPat(), UPat(), UPat(), UPat()), name="x"), lambda x: True),
+
+  # PARAM
+  (UPat(Ops.PARAM, src=(UPat(), UPat(Ops.DEVICE)), name="x"), lambda x: True),
+
+  # inputs to movement ops
+  (UPat((Ops.STACK, Ops.VCONST), dtype=dtypes.weakint), lambda: True),
+  (UPat({Ops.ADD, Ops.MUL, Ops.CDIV, Ops.FLOORDIV}, dtype=dtypes.weakint), lambda: True),
+
+  # movement ops
+  (UPat((Ops.RESHAPE, Ops.EXPAND), src=(UPat(), UPat(dtype=dtypes.weakint))), lambda: True),
+  (UPat((Ops.PAD, Ops.SHRINK), src=(UPat(), UPat(dtype=dtypes.weakint), UPat(dtype=dtypes.weakint))), lambda: True),
+  (UPat((Ops.PERMUTE, Ops.FLIP), name="mv", src=(UPat(),)), lambda mv: isinstance(mv.arg, tuple)),
+
+  # STORE in tensor graph: store a value into a target
+  (UPat(Ops.STORE, dtypes.void, (UPat(), UPat())), lambda: True),
+
+  # AFTER on Movement Op, INDEX, BUFFER, COPY, or BITCAST
+  (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.PARAM, Ops.BUFFER})),), allow_any_len=True), lambda: True),
+
+  # REDUCE has arg=(op, axis_tuple), src[1:] are ranges after lowering
+  (UPat(Ops.REDUCE, src=(UPat(),), allow_any_len=True, name="x"),
+   lambda x: isinstance(x.arg, tuple) and len(x.arg) == 2 and x.arg[0] in {Ops.ADD, Ops.MUL, Ops.MAX}
+   and isinstance(x.arg[1], tuple) and all(y.dtype in (dtypes.weakint, dtypes.int) for y in x.src[1:])),
+])+spec_shared
+
+# these ops can exist in programs but not the tensor spec. example: LOAD
+spec_program = PatternMatcher([
+  (UPat(Ops.PARAM, name="x"), lambda x: isinstance(x.dtype, (PtrDType, ImageDType)) and x.dtype.addrspace == AddrSpace.GLOBAL),
+])+spec_shared
+
+# these are intermediate ops. everything should be deleted from here
+spec_full = PatternMatcher([
+
+])+spec_tensor+spec_shared
+
+
+# ***** old specs *****
 
 # four specs:
 #   shared_spec  -- usable anywhere
@@ -303,18 +377,7 @@ full_spec = PatternMatcher([
   (UPat(Ops.AFTER, src=(UPat(),), allow_any_len=True), lambda: True),
 ])+_tensor_spec+kernel_spec+program_spec+shared_spec
 
-# ***** uop helpers *****
-
-def type_verify(ast:UOp|list[UOp], check_spec:PatternMatcher):
-  lst = list(ast.toposort()) if isinstance(ast, UOp) else ast
-  if SPEC > 1: test_pyrender(lst[-1])  # assume this is the sink
-
-  with Context(TRACK_MATCH_STATS=0):
-    for i,u in enumerate(lst):
-      ret = check_spec.rewrite(u)
-      if cast(bool|None, ret) is not True:
-        if DEBUG >= 3: print_uops(lst)
-        raise RuntimeError(f"UOp verification failed at {i} on {u.op} {u.dtype} {len(u.src)} {[(x.op, x.dtype, x.arg) for x in u.src]} {u.arg}")
+# **** pyrender (move this) ****
 
 # late imports to avoid circular import
 from tinygrad.codegen.opt import Opt, OptOps
