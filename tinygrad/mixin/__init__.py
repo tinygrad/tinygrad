@@ -656,6 +656,18 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     def fix(x: Self) -> Self: return x.flatten(start_dim=-2)[..., -s:].transpose(axis,-1)
     return getattr(fix(ret), {Ops.ADD: "add", Ops.MAX: "maximum", Ops.MUL: "mul"}[op])(fix(base))
 
+  def associative_scan(self, combine_fn:Callable[[Self, Self], Self], axis:int=0, reverse:bool=False) -> Self:
+    axis = self._resolve_dim(axis)
+    if self.ndim == 0 or 0 in self.shape: return self
+    if not isinstance(n:=self.shape[axis], int): raise RuntimeError("associative_scan requires a concrete scan axis")
+    def slc(x:Self, start:int, end:int) -> Self: return x.shrink(tuple((start, end) if i == axis else None for i in range(x.ndim)))
+    ret = self.flip(axis) if reverse else self
+    fn = (lambda left, right: combine_fn(right, left)) if reverse else combine_fn
+    for stride in itertools.takewhile(lambda x: x < n, (1 << i for i in itertools.count())):
+      # keep codegen from fusing every doubling stage into one large tree
+      ret = slc(ret, 0, stride).cat(fn(slc(ret, 0, n-stride), slc(ret, stride, n)), dim=axis).contiguous()
+    return ret.flip(axis) if reverse else ret
+
   def cumsum(self, axis:int=0) -> Self:
     """
     Computes the cumulative sum of the tensor along the specified `axis`.

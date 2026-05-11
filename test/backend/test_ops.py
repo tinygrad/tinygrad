@@ -1107,6 +1107,33 @@ class TestOps(unittest.TestCase):
     helper_test_op([(0,3)], lambda x: torch.cumsum(x, dim=0), lambda x: Tensor.cumsum(x, axis=0))
     helper_test_op([(2,3,0)], lambda x: torch.cumsum(x, dim=2), lambda x: Tensor.cumsum(x, axis=2))
 
+  def test_associative_scan(self):
+    helper_test_op([(10,)], lambda x: torch.cumsum(x, dim=0), lambda x: x.associative_scan(lambda a,b: a+b, axis=0))
+    helper_test_op([(5,7)], lambda x: torch.cumsum(x, dim=1), lambda x: x.associative_scan(lambda a,b: a+b, axis=1))
+    helper_test_op([(10,)], lambda x: torch.cumprod(x, dim=0), lambda x: x.associative_scan(lambda a,b: a*b, axis=0))
+    helper_test_op([(10,)], lambda x: torch.cummax(x, dim=0).values, lambda x: x.associative_scan(lambda a,b: a.maximum(b), axis=0))
+    helper_test_op([(10,)], lambda x: torch.flip(torch.cumsum(torch.flip(x, (0,)), dim=0), (0,)),
+                   lambda x: x.associative_scan(lambda a,b: a+b, axis=0, reverse=True))
+    helper_test_op([(2,0,4)], lambda x: torch.cumsum(x, dim=1), lambda x: x.associative_scan(lambda a,b: a+b, axis=1))
+
+  def test_associative_scan_affine(self):
+    vals = np.array([[1.2, 0.5], [-0.7, 1.0], [0.3, -2.0], [1.5, 0.25]], dtype=np.float32)
+    expected, acc = [], np.array([1, 0], dtype=np.float32)
+    for a, b in vals:
+      acc = np.array([a*acc[0], a*acc[1]+b], dtype=np.float32)
+      expected.append(acc)
+    expected_rev = []
+    for start in range(len(vals)):
+      acc = np.array([1, 0], dtype=np.float32)
+      for a, b in vals[start:]:
+        acc = np.array([a*acc[0], a*acc[1]+b], dtype=np.float32)
+      expected_rev.append(acc)
+    def compose(left, right):
+      la, lb, ra, rb = left[:, 0:1], left[:, 1:2], right[:, 0:1], right[:, 1:2]
+      return (ra*la).cat(ra*lb+rb, dim=1)
+    np.testing.assert_allclose(Tensor(vals).associative_scan(compose, axis=0).numpy(), np.array(expected), rtol=1e-6, atol=1e-6)
+    np.testing.assert_allclose(Tensor(vals).associative_scan(compose, axis=0, reverse=True).numpy(), np.array(expected_rev), rtol=1e-6, atol=1e-6)
+
   def test_small_cumprod(self):
     helper_test_op([(10)],lambda x: torch.cumprod(x, dim=0),lambda x: Tensor.cumprod(x, axis=0))
   @slow_test
