@@ -178,8 +178,10 @@ class MultiGraphRunner(GraphRunner):
 
 ReturnType = TypeVar('ReturnType')
 def _update_return_bind_values(ret:ReturnType, var_vals:dict[str, int]) -> ReturnType:
+  if not var_vals: return ret
   def update_tensor(t:Tensor):
-    replacements = {u:u.src[0].bind(var_vals[u.src[0].expr]) for u in t.uop.toposort()
+    shape_uops = [s for s in t.shape if isinstance(s, UOp)]
+    replacements = {u:u.src[0].bind(var_vals[u.src[0].expr]) for s in shape_uops for u in s.toposort()
                     if u.op is Ops.BIND and u.src[0].op is Ops.DEFINE_VAR and u.src[1].op is Ops.CONST
                     and u.src[0].expr in var_vals and u.src[1].arg != var_vals[u.src[0].expr]}
     if replacements: t.uop = t.uop.substitute(replacements)
