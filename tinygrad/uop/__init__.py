@@ -27,18 +27,15 @@ class Ops(FastEnum):
   # uops that aren't rendered
   NOOP = auto(); REWRITE_ERROR = auto()
   # FUNCTION has a TUPLE body and is gradient-able; CALL is an opaque kernel invocation
-  PARAM = auto(); FUNCTION = auto(); CALL = auto()
-  # PATCH(src=(value,), arg=byte_offset) — transient HCQ encoder marker for a deferred store into a buffer at byte_offset
-  PATCH = auto()
+  PARAM = auto(); FUNCTION = auto(); CALL = auto(); PATCH = auto()
 
   # renderer
   # LINEAR is a list of UOps, SOURCE has a str arg that's human readable, BINARY has bytes arg that's compiled
   PROGRAM = auto(); LINEAR = auto(); SOURCE = auto(); BINARY = auto()
 
   # AFTER passes src[0] through and promises in the toposort that any consumers of the AFTER run after src[1:]
-  # ATTACH is like AFTER but src[0] can be any uop (no Defines restriction) — for bundling a computed value with deps
   # GROUP is a NOOP that just merges things together
-  SINK = auto(); AFTER = auto(); ATTACH = auto(); GROUP = auto()
+  SINK = auto(); AFTER = auto(); GROUP = auto()
 
   # vector creation / item selection
   GEP = auto(); STACK = auto()

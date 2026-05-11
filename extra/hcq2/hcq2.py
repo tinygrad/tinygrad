@@ -203,8 +203,11 @@ class HCQEncoder:
   def src(self) -> tuple[UOp, ...]: return tuple(self.patches + list(self.deps))
 
   def get_dev_addr(self, uop:UOp) -> sint|UOp:
-    self.deps.add(uop) # uops used to encode this blob are referenced as sources
-    while uop.op in (Ops.AFTER, Ops.ATTACH): uop = uop.src[0]
+    # unwrap transient AFTER on the value: deps flow into enc.deps separately, the outer wrapper never reaches the final graph
+    while uop.op is Ops.AFTER:
+      self.deps.update(uop.src[1:])
+      uop = uop.src[0]
+    self.deps.add(uop)
     return uop.buffer.get_buf(self.dev.device).va_addr if uop.op in (Ops.BUFFER, Ops.BUFFER_VIEW) else uop
 
   def append(self, *data, dtype=dtypes.uint32):
@@ -237,8 +240,7 @@ def lower_kernargs(ctx:HCQ2LowerCtx, call:UOp, prg:UOp) -> UOp:
   args_off = ctx.kernargs_allocator.alloc(data.kernargs_alloc_size, 16)
   assert ctx.kernargs_host is not None and ctx.kernargs_gpu is not None
 
-  # bake offset into the gpu addr; attach the host-side kernargs fills as deps that travel with it
-  args_uop = (ctx.kernargs_gpu + args_off).attach(ctx.kernargs_host.after(*tuple(p.replace(arg=p.arg+args_off) for p in enc.patches)))
+  args_uop = (ctx.kernargs_gpu + args_off).after(ctx.kernargs_host.after(*tuple(p.replace(arg=p.arg+args_off) for p in enc.patches)))
   return call.replace(src=(prg.replace(src=prg.src + (args_uop,), arg=(data, info)),) + call.src[1:])
 
 def lower_program(ctx:HCQ2LowerCtx, call:UOp, prg:UOp) -> UOp:
