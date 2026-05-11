@@ -40,11 +40,18 @@ class CPUWorker(threading.Thread):
       except Exception as e: self.dev.error_state = e
       finally: self.tasks.task_done()
 
+CPU_PTR_ARG = ctypes.c_uint64
+CPU_INT_ARG = ctypes.c_int64 if platform.machine().lower() == "arm64" else ctypes.c_int32
+
 class CPUComputeQueue(HWQueue):
   def _exec(self, tid, prg, bufs, *args):
-    vals = list(args[bufs:])
-    if 'core_id' in prg.runtimevars: vals[prg.runtimevars['core_id']] = tid
-    prg.fxn(*map(ctypes.c_uint64, args[:bufs]), *map(ctypes.c_int64 if platform.machine().lower() == "arm64" else ctypes.c_int32, vals))
+    if 'core_id' in prg.runtimevars:
+      core_vals = list(args[bufs:])
+      core_vals[prg.runtimevars['core_id']] = tid
+      return prg.fxn(*map(CPU_PTR_ARG, args[:bufs]), *map(CPU_INT_ARG, core_vals))
+    run_vals = args[bufs:]
+    if run_vals: prg.fxn(*map(CPU_PTR_ARG, args[:bufs]), *map(CPU_INT_ARG, run_vals))
+    else: prg.fxn(*map(CPU_PTR_ARG, args[:bufs]))
   def _signal(self, tid, signal_addr, value): to_mv(signal_addr, 4).cast('I')[0] = value
   def _wait(self, tid, tmpl_sig, signal_addr, value):
     tmpl_sig.base_buf = HCQBuffer(signal_addr, 16, view=MMIOInterface(signal_addr, 16))
