@@ -45,7 +45,9 @@ class TestGraphRewriteConst(unittest.TestCase):
     self.assertEqual(ret.dtype, dtypes.int.vec(3))
     self.assertEqual(ret.arg, 2)
 
-xfail_broken_const_wraparound = pytest.mark.xfail(reason="const folding does not properly implement modular arithmetic")
+def xfail_broken_const_wraparound(fn):
+  fn = pytest.mark.xfail(reason="const folding does not properly implement modular arithmetic")(fn)
+  return unittest.expectedFailure(fn)
 class TestModularWraparound(unittest.TestCase):
   def _test(self, uop:UOp, expected:int):
     results = to_uops_list([uop])
@@ -423,9 +425,8 @@ class TestUOpGraph(unittest.TestCase):
     d0 = UOp(Ops.PARAM, dtypes.long.ptr(), (), 0)
     ld = d0.index(ridx0.valid(ridx0<50))
     w = (ridx0<50).where(ld, 5)
-    # prevent ridx0 from being shrunk
-    red = ridx0.cast(dtypes.long).reduce(ridx0, arg=Ops.ADD)
-    uops = to_uops_list([w, red])
+    out = UOp(Ops.PARAM, dtypes.long.ptr(), (), 1)
+    uops = to_uops_list([out.index(ridx0).store(w)])
     for u in uops:
       assert u.op is not Ops.WHERE
       if u.op is Ops.LOAD and u.src[0].src[0].op is Ops.PARAM: assert u.src[1].arg==5
@@ -446,9 +447,8 @@ class TestUOpGraph(unittest.TestCase):
     gate_idx = ridx0.valid((ridx0<50))
     ld = d0.index(gate_idx).cast(dtypes.float)
     w = (ridx0<50).where(ld, 5.0)
-    # prevent ridx0 from being shrunk
-    red = ridx0.cast(dtypes.long).reduce(ridx0, arg=Ops.ADD)
-    uops = to_uops_list([w, red])
+    out = UOp(Ops.PARAM, dtypes.float.ptr(), (), 1)
+    uops = to_uops_list([out.index(ridx0).store(w)])
     for u in uops:
       assert u.op is not Ops.WHERE
       if u.op is Ops.LOAD and u.src[0].src[0].op is Ops.PARAM: assert u.src[1].arg == 5
@@ -458,9 +458,8 @@ class TestUOpGraph(unittest.TestCase):
     d0 = UOp(Ops.PARAM, dtypes.float.ptr(), (), 0)
     ld = d0.index(ridx0.valid(ridx0<50))
     w = ((ridx0<50) & (ridx0>30)).where(ld, UOp.const(dtypes.float, 0)).cast(dtypes.half)
-    # prevent ridx0 from being shrunk
-    red = ridx0.cast(dtypes.long).reduce(ridx0, arg=Ops.ADD)
-    uops = to_uops_list([w, red])
+    out = UOp(Ops.PARAM, dtypes.half.ptr(), (), 1)
+    uops = to_uops_list([out.index(ridx0).store(w)])
     for u in uops:
       assert u.op is not Ops.WHERE
 
@@ -469,9 +468,8 @@ class TestUOpGraph(unittest.TestCase):
     d0 = UOp(Ops.PARAM, dtypes.float.ptr(), (), 0)
     ld = d0.index(ridx0.valid(ridx0<50))
     w = ((ridx0<50) & (ridx0>30)).where(UOp.const(dtypes.float, 0), ld).cast(dtypes.half)
-    # prevent ridx0 from being shrunk
-    red = ridx0.cast(dtypes.long).reduce(ridx0, arg=Ops.ADD)
-    uops = to_uops_list([w, red])
+    out = UOp(Ops.PARAM, dtypes.half.ptr(), (), 1)
+    uops = to_uops_list([out.index(ridx0).store(w)])
     for u in uops:
       assert u.op is not Ops.WHERE
 
