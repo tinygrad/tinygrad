@@ -11,6 +11,7 @@ from tinygrad.renderer.wgsl import WGSLRenderer
 from tinygrad.runtime.ops_python import PythonRenderer
 from tinygrad.uop.ops import UOp, Ops, KernelInfo, python_alu
 from tinygrad.tensor import Tensor, _to_np_dtype
+from test.helpers import replace_opts
 
 def _test_uop_result(inputs:list[Tensor], sink:UOp, local_size=None):
   for x in inputs: x.realize()
@@ -74,6 +75,17 @@ class TestCStyleFailures(unittest.TestCase):
   @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, WGSLRenderer), "wgsl ends up with '(' * 5")
   def test_repeat_and(self): self._test_src_strip_paren(Ops.AND)
   def test_repeat_sub(self): self._test_src_strip_paren(Ops.SUB, should_strip_paren=False)
+
+class TestCPUSourceFailures(unittest.TestCase):
+  def test_where_closure_fold_direct_branch_source(self):
+    x = Tensor.empty(3, device="CPU")
+    y = Tensor.empty(3, device="CPU")
+    z = Tensor.empty(3, device="CPU")
+    out = (x<0).where((x<0).where(y, z), (x<0).where(y+1, z+1))
+    linear = out.schedule_linear()
+    assert len(linear.src) == 1
+    src = to_program(replace_opts(linear.src[0].src[0], []), Device["CPU"].renderer).src[3].arg
+    self.assertEqual(src.count("?"), 1)
 
 @unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, WGSLRenderer), "tests for wgsl renderer")
 class TestWGSLFailures(unittest.TestCase):

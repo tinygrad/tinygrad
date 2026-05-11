@@ -150,6 +150,8 @@ symbolic_simple = propagate_invalid + PatternMatcher([
   # a conditional with the same results either way is a noop, also fold const conditionals
   (UPat.var().where(UPat.var("val"), UPat.var("val")), lambda val: val),
   (UPat.cvar("gate", vec=False).where(UPat.var("c0"), UPat.var("c1")), lambda gate, c0, c1: c0 if gate.arg else c1),
+  (UPat.var("c").where(UPat.var("c").where(UPat.var("a"), UPat.var()), UPat.var("f")), lambda c,a,f: c.where(a,f)),
+  (UPat.var("c").where(UPat.var("t"), UPat.var("c").where(UPat.var(), UPat.var("b"))), lambda c,t,b: c.where(t,b)),
   # a.where(b.where(c, d), d) -> (a & b).where(c, d)
   (UPat.var("a").where(UPat.var("b").where(UPat.var("c"), UPat.var("d")), UPat.var("d")), lambda a,b,c,d: (a&b).where(c,d)),
 ])
@@ -412,15 +414,6 @@ def gated_given_valid(cond:UOp, x:UOp, i:UOp) -> UOp|None:
   if IMAGE.value > 0 and x.op_in_backward_slice_with_self(Ops.CDIV, Ops.CMOD, Ops.FLOORDIV, Ops.FLOORMOD): return None
   return cond.where(uop_given_valid(cond, x, try_simplex=False), i)
 
-# TODO: this is O(number of WHERE * number of node)
-# def fold_where_closure(cond:UOp, t:UOp, f:UOp) -> UOp|None:
-#   """In cond.where(t, f), fold nested cond.where(a, b) -> a in t, -> b in f"""
-#   def is_valid_where(u:UOp) -> bool: return u.op is Ops.WHERE and u.src[0] is cond and Invalid not in (u.src[1].arg, u.src[2].arg)
-#   t_subs, f_subs = {u: u.src[1] for u in t.toposort() if is_valid_where(u)}, {u: u.src[2] for u in f.toposort() if is_valid_where(u)}
-#   if not t_subs and not f_subs: return None
-#   new_t, new_f = t.substitute(t_subs).simplify() if t_subs else t, f.substitute(f_subs).simplify() if f_subs else f
-#   return None if new_t is t and new_f is f else cond.where(new_t, new_f)
-
 pm_simplify_valid = PatternMatcher([
   # simplify valid
   (UPat(Ops.AND, name="valid"), simplify_valid),
@@ -434,8 +427,6 @@ sym = symbolic+pm_simplify_valid+PatternMatcher([
   (UPat(GroupOp.ALU, src=(UPat(Ops.STACK, src=UPat(name='x')), UPat(Ops.STACK, src=UPat(name='y'))), name='alu'),
    lambda x,y,alu: UOp(Ops.STACK, alu.dtype, (UOp(alu.op, alu.dtype.scalar(), (x,y)),)*alu.dtype.count)),
   # ** where **
-  # # fold nested where with same condition: in cond.where(t,f), cond.where(a,b)->a in t, ->b in f
-  # (UPat.var("cond").where(UPat.var("t"), UPat.var("f")), fold_where_closure),
   # push cast to branches
   (UPat.var("s").where(UPat.var("a"), UPat.var("b")).cast().named("cast"), lambda s,a,b,cast: s.where(a.cast(cast.dtype), b.cast(cast.dtype))),
   # ** pow **

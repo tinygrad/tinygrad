@@ -974,6 +974,16 @@ class TestSymbolic(unittest.TestCase):
     # (a if ((s<5)&(s<6)) else b) -> (a if (s<5) else b)
     self.helper_test_variable(expr, 0, 3, "(s<5).where(a, b)")
 
+  def test_where_closure_folding_direct_branch(self):
+    x = Variable("x", 0, 10)
+    cond = x < 5
+    a = Variable("a", 0, 3)
+    b = Variable("b", 0, 3)
+    d = Variable("d", 0, 3)
+    e = Variable("e", 0, 3)
+    expr = cond.where(cond.where(a, b), cond.where(d, e))
+    self.helper_test_variable(expr, 0, 3, "(x<5).where(a, e)")
+
   @unittest.expectedFailure
   def test_where_closure_folding(self):
     # cond.where(t, f) where f contains cond.where(a, b) should fold the inner where to b in false branch
