@@ -72,12 +72,11 @@ class X86Ops(FastEnum):
   VPAND = auto(); VPOR = auto(); VPXOR = auto()
   # packed variable shifts
   VPSLLVD = auto(); VPSLLVQ = auto(); VPSRLVD = auto(); VPSRLVQ = auto(); VPSRAVD = auto()
-  # fused multiply add TODO: add other variants to fuse more loads
+  # fused multiply add
   VFMADD213SS = auto(); VFMADD213SD = auto(); VFMADD213PS = auto(); VFMADD213PD = auto()
   # return
   RET = auto()
 
-# TODO: add commutative groupop to fuse more loads
 class X86GroupOp:
   # X86Ops whose first src is also the destination
   TwoAddress = {X86Ops.ADD, X86Ops.ADDi, X86Ops.AND, X86Ops.ANDi, X86Ops.XOR, X86Ops.XORi, X86Ops.OR, X86Ops.ORi, X86Ops.IMUL,
@@ -137,7 +136,6 @@ class X86GroupOp:
 
 extra_matcher = PatternMatcher([
   # bool CMPNE is XOR, bool CMPEQ is XOR+XOR, bool CMPLT is XOR+AND
-  # TODO: how does this work for vector dtypes?
   (UPat.var('x', dtypes.bool).ne(UPat.var('y')), lambda x,y: x^y),
   (UPat.var('x', dtypes.bool).alu(Ops.CMPEQ, UPat.var('y')), lambda x,y: (x^y)^True),
   (UPat.var('x', dtypes.bool)<UPat.var('y'), lambda x,y: (x^True)&y),
@@ -166,12 +164,9 @@ extra_matcher = PatternMatcher([
   # no cmpne for packed ints, y != x => !(y==x)
   (UPat(Ops.CMPNE, src=(UPat.var("y", dtypes.ints), UPat.var("x")), name="cmp"),
    lambda y,x,cmp: UOp(Ops.CMPEQ, cmp.dtype, (y,x))^True if y.dtype.count > 1 else None),
-  # float where expects a mask TODO: handle float64 cmp to float32 where
+  # float where expects a mask
   (UPat.var("m", dtypes.bool).where(UPat.var("a", dtypes.floats), UPat.var("b")),
    lambda m,a,b: m.cast(a.dtype).ne(0).where(a, b) if m.src[0].dtype not in dtypes.floats else None),
-  # TODO: do we want this? If yes make it general
-  #(UPat(Ops.STACK, dtypes.float16, name="x"), lambda x: x.replace(dtype=dtypes.float32.vec(x.dtype.count),
-  #  src=tuple(s.src[0] for s in x.src)).cast(x.dtype) if all(s.op is Ops.CAST for s in x.src) else None),
   # rewrite -x -> 0 - x
   (UPat(Ops.NEG, name="x"), lambda x: UOp(Ops.SUB, x.dtype, (x.const_like(0),) + x.src)),
   # TODO: add support for mod, requires support for accessing the 2nd+ reg of a multi output instruction
@@ -719,9 +714,9 @@ def encode(x:UOp, opc:int, reg:int|None=None, pp:int=0, sel:int=0, we:int=0) -> 
   return None
 
 # https://www.felixcloutier.com/x86/
-# NOTE: LEGACY prefix == VEX prefix
-# pp field: None == 0, 66 == 1, F3 == 2, F2 == 3
-# map select: 0F == 1, 0F38 == 2, 0F3A == 3
+# legacy version -> VEX version
+# prefix field: None -> 0 | 66 -> 1 | F3 -> 2 | F2 -> 3
+# opcode map select: 0F -> 1 | 0F38 -> 2 | 0F3A -> 3
 encodings = {
   # moves
   X86Ops.MOVABS: lambda x:
@@ -874,13 +869,14 @@ class X86Renderer(ISARenderer):
       def _format(src:tuple[UOp, ...]) -> list[str]:
         return [str(s.arg) if s.op is Ops.CONST else reg_strs[o].get(s.dtype.itemsize if not isinstance(s.dtype, PtrDType) else 8, o) if \
                 (o:=str(s.reg)) in reg_strs else o for s in src if s.reg is not None]
-      def _mem_adress(base:UOp, idx:UOp, disp:UOp) -> str:
-        return f"[{base.reg}" + (f" + {idx.reg}*{base.dtype.itemsize}" if idx.reg else "") + (f" + {disp.arg}" if disp.arg else "") + "]"
+      def _mem_adress(base:UOp, idx:UOp, disp:UOp) -> list[str]:
+        return [f"[{base.reg}" + (f" + {idx.reg}*{base.dtype.itemsize}" if idx.reg else "") + (f" + {disp.arg}" if disp.arg else "") + "]"]
 
-      if len(x.src) > 3 and x.arg in X86GroupOp.WriteMem: return ", ".join([_mem_adress(*x.src[:3])] + _format(x.src[3:]))
-      elif len(x.src) > 2 and x.arg in X86GroupOp.Rm1st: return ", ".join(_format((x,)) + [_mem_adress(*x.src[:3])] + _format(x.src[3:]))
-      elif len(x.src) > 3 and x.arg in X86GroupOp.Rm2nd: return ", ".join(_format((x, x.src[0])) + [_mem_adress(*x.src[1:4])] + _format(x.src[4:]))
-      return ", ".join(_format((x,) + x.src))
+      if len(x.src) > 3 and x.arg in X86GroupOp.WriteMem: ret = _mem_adress(*x.src[:3]) + _format(x.src[3:])
+      elif len(x.src) > 2 and x.arg in X86GroupOp.Rm1st: ret = _format((x,)) + _mem_adress(*x.src[:3]) + _format(x.src[3:])
+      elif len(x.src) > 3 and x.arg in X86GroupOp.Rm2nd: ret = _format((x, x.src[0])) + _mem_adress(*x.src[1:4]) + _format(x.src[4:])
+      else: ret = _format((x,) + x.src)
+      return ", ".join(ret)
 
     asm = [f".{function_name}:"]
     for u in uops:

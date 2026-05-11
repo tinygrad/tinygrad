@@ -139,7 +139,6 @@ def do_linearize(ctx:Renderer, prg:UOp, sink:UOp) -> UOp:
     lst = line_rewrite(lst, pm_regalloc_rewrite, regalloc_ctx)
     lst = line_rewrite(lst, ctx.post_regalloc_matcher, regalloc_ctx)
     if DEBUG >= 4: print(ctx.asm_str(lst, sink.arg.function_name))
-    #if SPEC: type_verify(lst, ctx.isa_spec)
   return prg.replace(src=prg.src + (UOp(Ops.LINEAR, src=tuple(lst)),))
 
 def do_estimates(prg:UOp, sink:UOp, lin:UOp) -> UOp|None:

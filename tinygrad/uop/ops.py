@@ -540,7 +540,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
   @property
   def reg(self:UOp):
-    # TODO: add a way to access the nth element in src, sea of nodes call this a projection
+    # TODO: add a way to access the nth element in src
     if self.op in (Ops.NOOP, Ops.AFTER) and self.src: return self.src[0].reg
     if isinstance(self.tag, tuple): return self.tag[0]
     return self.tag

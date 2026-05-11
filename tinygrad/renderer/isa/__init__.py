@@ -17,14 +17,8 @@ class IselContext:
   def __init__(self, sink:UOp):
     self.uses = consumer_map_from_toposort(sink.toposort())
     self.reg_n = itertools.count()
-    self.stack_size = 0
     arg_order = {Ops.PARAM: 0, Ops.DEFINE_VAR: 1, Ops.SPECIAL: 2}
     self.func_args = sorted([u for u in self.uses if u.op in arg_order], key=lambda k: (arg_order[k.op], k.arg))
-
-  def inc_stack(self, amt:int):
-    ret = self.stack_size
-    self.stack_size += amt
-    return ret
 
   def vreg(self, cons:tuple[Register, ...]|Register):
     return Register(f"v{next(self.reg_n)}", 0, _cons=cons if isinstance(cons, tuple) else (cons,))
