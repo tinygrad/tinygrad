@@ -133,6 +133,7 @@ class Buffer:
   def get_buf(self, device: str) -> Any:
     if device not in self._bufs:
       if device == self.device: self.ensure_allocated()
+      elif self._base is not None: self._bufs[device] = Device[device].allocator._offset(self._base.get_buf(device), self.nbytes, self.offset)
       else: self._bufs[device] = Device[device].allocator._map(self.ensure_allocated()._buf)
     return self._bufs[device]
   def ensure_allocated(self) -> Buffer: return self.allocate() if not self.is_initialized() else self
@@ -164,6 +165,8 @@ class Buffer:
         GlobalCounters.mem_used -= self.nbytes
         GlobalCounters.mem_used_per_device[self.device] -= self.nbytes
       if PROFILE: Buffer.profile_events.append(ProfilePointEvent(self.device, "free", self.trace_num))
+      for dev, mb in self._bufs.items():
+        if dev != self.device: Device[dev].allocator._unmap(mb)
       self.allocator.free(self._buf, self.nbytes, self.options)
     elif self._base is not None: self._base.allocated_views -= 1
     del self._bufs[self.device]
@@ -236,6 +239,7 @@ class Allocator(Generic[DeviceType]):
   def _copyin(self, dest, src:memoryview): raise NotImplementedError("need copyin")
   def _copyout(self, dest:memoryview, src): raise NotImplementedError("need copyout")
   def _map(self, buf): raise NotImplementedError("need map")
+  def _unmap(self, mb): pass  # default no-op; override if _map allocates iface-side state
   # def _as_buffer(self, src) -> memoryview:
   # def _offset(self, buf, size:int, offset:int):
   # def _transfer(self, dest, src, sz:int, src_dev, dest_dev):
