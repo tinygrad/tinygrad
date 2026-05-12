@@ -153,6 +153,7 @@ def exec_view(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
   bufs = [cast(Buffer, b.buffer) for b in resolved]
   bv = bufs[1].view(resolved[0].arg, ast.dtype, ast.arg[1]*bufs[1].dtype.itemsize)
   with track_stats(ctx, call, bv.device, [bv, bufs[1]], ctx.var_vals): buffers[resolved[0]] = bv
+  return None
 
 def exec_copy(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
   for bufs, device_vars in unwrap_multi(call, resolve_params(call, ctx.input_uops)):
@@ -166,6 +167,7 @@ def exec_copy(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
       elif src.device.startswith(("DISK", "TINYFS")) and hasattr(dest.allocator, '_as_buffer'):
         src.allocator._copyout(dest.allocator._as_buffer(dest._buf), src._buf)
       else: dest.copyin(src.as_memoryview(allow_zero_copy=True))
+  return None
 
 def exec_kernel(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
   et = None
@@ -188,12 +190,14 @@ def exec_validate(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
     global_size, local_size = prg.arg.launch_dims(var_vals)
     cpu_rt(*[bufs[i].ensure_allocated()._buf for i in prg.arg.globals], global_size=global_size, local_size=local_size, vals=prg.arg.vals(var_vals))
     for i in prg.arg.outs: np.testing.assert_allclose(dev_bufs[i].ensure_allocated().numpy(), bufs[i].numpy(), rtol=1e-3, atol=1e-3)
+  return None
 
 def exec_encdec(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
   bufs = [cast(Buffer, b.buffer).ensure_allocated() for b in resolve_params(call, ctx.input_uops)]
   shape, pos_var = tuple(s.arg for s in ast.src if s.op is Ops.CONST), ast.variables()[0].expr
   with track_stats(ctx, call, bufs[0].device, bufs, ctx.var_vals):
     bufs[0].allocator._encode_decode(bufs[0]._buf, bufs[1]._buf, bufs[2]._buf, [x._buf for x in bufs[3:]], shape, ctx.var_vals[pos_var])
+  return None
 
 def exec_graph(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
   rt = get_graph_runtime(ast, ctx.input_uops)
