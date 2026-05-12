@@ -8,6 +8,7 @@ from tinygrad.nn.state import get_parameters, get_state_dict, load_state_dict, s
 from tinygrad.nn.optim import LAMB, LARS, SGD, OptimizerGroup, Adam, AdamW
 
 from extra.lr_scheduler import LRSchedulerGroup
+from examples.mlperf.helpers import get_training_state, load_training_state
 from extra.bench_log import BenchEvent, WallTimeEvent
 # TODO: fix benchmark logging and use tinygrad tqdm
 from tqdm import tqdm
@@ -1421,7 +1422,7 @@ def train_llama3(llama2_70b_lora:bool=False):
 
   model.shard(device, is_mp, is_fsdp)
 
-  # load the model
+  # load the weights
   if llama2_70b_lora and getenv("LOAD_MODEL", 1):
     from extra.huggingface_onnx.huggingface_manager import DOWNLOADS_DIR, snapshot_download_with_retry
 
@@ -1439,7 +1440,7 @@ def train_llama3(llama2_70b_lora:bool=False):
     model.quantize(realize=True)
 
   if llama2_70b_lora:
-    # anything not explicitly set is not trainable
+    # convert nulls to not trainable
     for p in params:
       if not p.requires_grad:
         p.requires_grad_(False)
