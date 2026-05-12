@@ -26,9 +26,6 @@ def _get_clause(self:UPat, base:UOp, depth=0) -> UOp:
     if len(self.match_dtype) > 1:
       and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.BIND, arg=tuple(self.match_dtype))), arg="({0}.dtype in {1} or {0}.dtype._scalar in {1})"))
     else: and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.BIND, arg=self.match_dtype[0])), arg="({0}.dtype == {1} or {0}.dtype._scalar == {1})"))
-  if self.match_device is not None:
-    and_clause.append(UOp(Ops.CUSTOM, src=(base, UOp(Ops.BIND, arg=self.match_device)),
-                          arg="(isinstance({0}._device, str) and {0}._device.split(':')[0] in {1})"))
   if self.src is not None:
     # single match
     if len(self.src) == 1 and isinstance(self.src[0], tuple):

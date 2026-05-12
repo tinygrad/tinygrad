@@ -320,7 +320,8 @@ def _run_host_call(ctx:ExecContext, call:UOp, dev:HCQ2Compiled, host_call:UOp, b
       tm[0] = (tss[1] - tss[0]) / dev.timestamp_divider / 1e6
   return tm[0] if tm[0] is not None else 0.0
 
-def hcq_exec_program(ctx:ExecContext, call:UOp, ast:UOp) -> float:
+def hcq_exec_program(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
+  if ast.src[1].arg.split(":")[0] != "AMD": return None
   dev, resolved_call = Device[ast.src[1].arg], _resolve_call(ctx, call, ast)
   hcq_ctx = HCQ2LowerCtx(dev=dev, name="submit_program",
                          kernargs_host=UOp.from_buffer(dev.kernargs_buf, dev.device),
@@ -331,7 +332,8 @@ def hcq_exec_program(ctx:ExecContext, call:UOp, ast:UOp) -> float:
   prg_bufs = [cast(Buffer, resolved_call.src[1+gi].buffer) for gi in ast.arg.globals]
   return _run_host_call(ctx, call, dev, host_call, prg_bufs, ts_buf=dev.timestamps_buf)
 
-def hcq_exec_copy(ctx:ExecContext, call:UOp, ast:UOp) -> float:
+def hcq_exec_copy(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
+  if ast.src[1].arg.split(":")[0] != "AMD": return None
   dev, resolved_call = Device[ast.src[1].arg], _resolve_call(ctx, call, ast)
   hcq_ctx = HCQ2LowerCtx(name="submit_copy", dev=dev, timestamps_gpu=UOp.const(dtypes.uint64, dev.timestamps_buf.get_buf(dev.device).va_addr))
   src_buf = resolved_call.src[2].buffer
@@ -345,6 +347,7 @@ def hcq_exec_copy(ctx:ExecContext, call:UOp, ast:UOp) -> float:
   return _run_host_call(ctx, call, dev, host_call, bufs, ts_buf=dev.timestamps_buf)
 
 pm_hcq_exec = PatternMatcher([
-  (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, name="ast"),), name="call", allow_any_len=True, device=("AMD",)), hcq_exec_program),
-  (UPat(Ops.CALL, src=(UPat(Ops.COPY, name="ast"),), name="call", allow_any_len=True, device=("AMD",)), hcq_exec_copy),
+  # TODO: use upat device=?
+  (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, name="ast"),), name="call", allow_any_len=True), hcq_exec_program),
+  (UPat(Ops.CALL, src=(UPat(Ops.COPY, name="ast"),), name="call", allow_any_len=True), hcq_exec_copy),
 ])
