@@ -6,7 +6,6 @@ from tinygrad.uop.ops import UOp, dtypes, graph_rewrite
 from tinygrad.renderer.isa.x86 import X86Renderer, X86Ops
 from tinygrad.renderer.isa import IselContext
 
-# these tests are to catch changes that don't cause incorrect codegen but cause worse codegen
 @unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, X86Renderer), "only x86")
 class TestIselX86(unittest.TestCase):
   def isel_rewrite(self, x:UOp):
@@ -106,18 +105,17 @@ class TestIselX86(unittest.TestCase):
                UOp.vectorize(a.gep(0), b.gep(1), a.gep(0), b.gep(1))]
     for shuf in invalid: self.assertIsNot(self.isel_rewrite(shuf).arg, X86Ops.VSHUFPD)
 
-  # this is the fallback slow VECTORIZE, 1 vinsertps per src in VECTORIZE
   def test_vinsertps(self):
     a = UOp.variable("a", 0, 0, dtypes.float32.vec(4))
     b = UOp.variable("b", 0, 0, dtypes.float32.vec(4))
     c = UOp.variable("c", 0, 0, dtypes.float32.vec(4))
     d = UOp.variable("e", 0, 0, dtypes.float32)
-    # pack 1 from vector and 1 from scalar, moving 0th element to position 0 does nothing so only 1 vinsertps is generated
+    # moving 0th element to position 0 does nothing so only 1 vinsertps is generated
     n = self.isel_rewrite(UOp.vectorize(a.gep(0), d))
     self.assertIs(n.arg, X86Ops.VINSERTPS)
     self.assertIsNot(n.src[0].arg, X86Ops.VINSERTPS)
 
-    valid = [UOp.vectorize(a.gep(0), b.gep(1), a.gep(2), b.gep(3)), # TODO: this should be vunpck
+    valid = [UOp.vectorize(a.gep(0), b.gep(1), a.gep(2), b.gep(3)),
              UOp.vectorize(a.gep(3), b.gep(2), c.gep(1), d)]
     for shuf in valid: self.assertIs(self.isel_rewrite(shuf).arg, X86Ops.VINSERTPS)
 
@@ -144,8 +142,6 @@ class TestIselX86(unittest.TestCase):
     # used mutiple times by same user
     n = self.isel_rewrite(load * load)
     self.assertTrue(len(n.src) == 2)
-
-  # TODO: might want to check that load isn't part of another range when fusing
 
 if __name__ == "__main__":
   unittest.main()
