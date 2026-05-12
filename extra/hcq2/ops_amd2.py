@@ -3,7 +3,7 @@ from typing import cast
 import os, ctypes, struct, hashlib, functools, importlib, mmap, errno, array, contextlib, sys, weakref, itertools, collections, atexit
 assert sys.platform != 'win32'
 from dataclasses import dataclass
-from extra.hcq2.hcq2 import HCQ2Compiled, HCQAllocator, HCQ2Buffer, HCQEncoder, HCQProgram
+from extra.hcq2.hcq2 import HCQ2Compiled, HCQAllocator, HCQ2Buffer, HCQEncoder
 from tinygrad.uop.ops import sint, UOp
 from tinygrad.device import Compiled, BufferSpec, Buffer, Device
 from tinygrad.dtype import dtypes
@@ -418,7 +418,7 @@ class AMDDevice(HCQ2Compiled):
     self.sdma_queues:dict = {}
     self.has_sdma_queue = self.sdma_queue(0) is not None
 
-    super().__init__(device, AMDAllocator(self), [HIPRenderer, AMDLLVMRenderer, HIPCCRenderer], functools.partial(HCQProgram, self),
+    super().__init__(device, AMDAllocator(self), [HIPRenderer, AMDLLVMRenderer, HIPCCRenderer], None,
                      kernargs_size=16 << 20, sigalloc_size=0x1000,
                      can_recover=self.is_am(), arch=self.arch)
 

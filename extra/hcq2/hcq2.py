@@ -10,35 +10,9 @@ from dataclasses import dataclass, field
 from tinygrad.runtime.support.memory import BumpAllocator
 from tinygrad.runtime.support.hcq import MMIOInterface
 from tinygrad.renderer import Renderer, Estimates
-from tinygrad.engine.realize import get_runtime, pm_flatten_linear, run_linear, to_program
+from tinygrad.engine.realize import pm_flatten_linear, to_program
 
 HCQDeviceType = TypeVar('HCQDeviceType', bound='HCQ2Compiled')
-
-class HCQProgram:
-  def __init__(self, dev:HCQ2Compiled, name:str, lib:bytes, *aux, runtimevars=None, prg:UOp|None=None, **kwargs):
-    assert prg is not None
-    self.dev, self.name, self.prg = dev, name, prg
-    self.ctx = ctx = HCQ2LowerCtx(dev=dev, name=f"submit_{name}")
-
-    n_bufs = max(prg.arg.globals, default=-1) + 1
-    self.bufaddrs = Buffer("CPU", 1 + n_bufs, dtypes.uint64, preallocate=True)
-    bufaddrs_uop = ctx.host_param(self.bufaddrs)
-    ctx.kernargs_host, ctx.kernargs_gpu = ctx.host_param(dev.kernargs_buf), bufaddrs_uop[0]
-    global_uops = [bufaddrs_uop[1+i] for i in range(n_bufs)]
-
-    host_prg = _hcq_schedule(dev, ctx, UOp(Ops.LINEAR, dtypes.void, (prg.call(*global_uops),), arg="COMPUTE"), prg).src[0]
-    self.host_rt, self.host_globals = get_runtime("CPU", host_prg), host_prg.arg.globals
-    self.kernargs_alloc_size = max(ctx.kernargs_allocator.ptr, 1)
-
-  def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int|None,...]=(),
-               wait=False, timeout:int|None=None):
-    self.ctx.inputs[self.ctx.kernargs_host.arg] = kernargs = self.dev.kernargs_buf.view(self.kernargs_alloc_size, dtypes.uint8,
-      self.dev.kernargs_offset_allocator.alloc(self.kernargs_alloc_size, 8)).ensure_allocated()
-    addrs = self.bufaddrs.as_memoryview(force_zero_copy=True).cast('Q')
-    addrs[0] = kernargs.get_buf(self.dev.device).va_addr
-    for j, gi in enumerate(self.prg.arg.globals): addrs[1+gi] = bufs[j].va_addr
-    self.host_rt(*[self.ctx.inputs[i].get_buf("CPU") for i in self.host_globals], vals=vals)
-    if wait: self.dev.synchronize(timeout)
 
 class HCQ2Compiled(Compiled):
   """
@@ -159,8 +133,9 @@ class HCQAllocator(HCQAllocatorBase, Generic[HCQDeviceType]):
     return Buffer(dev, sz, dtypes.uint8, opaque=opaque, options=BufferSpec(external_ptr=1))
 
   def _do_copy(self, dst:Buffer, src:Buffer):
+    from tinygrad.engine.realize import run_linear
     ast = UOp(Ops.COPY, dtypes.uint8, (su:=UOp.from_buffer(src), UOp(Ops.DEVICE, arg=dst.device)))
-    run_linear(UOp(Ops.LINEAR, dtypes.void, (hcq_schedule_copy(ast.call(UOp.from_buffer(dst), su), ast),)), jit=True, do_update_stats=False)
+    run_linear(UOp(Ops.LINEAR, dtypes.void, (ast.call(UOp.from_buffer(dst), su),)), jit=True, do_update_stats=False)
 
   def _copyin(self, dest:HCQ2Buffer, src:memoryview):
     s = Buffer(self.dev.device, len(src), dtypes.uint8, options=BufferSpec(host=True), preallocate=True)
@@ -333,18 +308,52 @@ def _hcq_schedule(dev:HCQ2Compiled, ctx:HCQ2LowerCtx, linear:UOp, ast:UOp) -> UO
   linear = UOp(Ops.LINEAR, dtypes.void, (graph_rewrite(linear, dev.pm_lower, ctx=ctx, name="hcq: encode cmdbuf ops"),))
   return hcq_build_host_program(ctx, linear, ast)
 
-def hcq_schedule_copy(call:UOp, ast:UOp) -> UOp|None:
-  dev = Device[ast.src[1].arg]
-  ctx = HCQ2LowerCtx(dev=dev)
-  src_buf = call.src[2].buffer
-  try: src_buf.get_buf(dev.device)
-  except Exception:
-    (cpubuf := Buffer("CPU", src_buf.nbytes, dtypes.uint8, preallocate=True)).copyin(src_buf.as_memoryview())
-    ctx.holds.append(buf_uop:=UOp.from_buffer(cpubuf, dev.device))
-    call = call.replace(src=call.src[:2] + (buf_uop,) + call.src[3:])
-  return _hcq_schedule(dev, ctx, UOp(Ops.LINEAR, dtypes.void, (call,), arg="COPY"), ast)
+_hcq_exec_cache: dict = {}
 
-# pm_hcq_schedule = PatternMatcher([
-#   (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, name="ast"),), name="call", allow_any_len=True), hcq_schedule_program),
-#   (UPat(Ops.CALL, src=(UPat(Ops.COPY, name="ast"),), name="call", allow_any_len=True), hcq_schedule_copy),
-# ])
+def hcq_exec_program(ctx, call:UOp, ast:UOp) -> UOp|None:
+  from tinygrad.engine.realize import resolve_params, run_linear
+  dev = Device[ast.src[1].arg]
+  resolved_call = call.replace(src=(ast,) + tuple(resolve_params(call, ctx.input_uops)) + tuple(s for s in call.src[1:] if s.op is Ops.BIND))
+  # if (cached:=_hcq_exec_cache.get(key:=resolved_call.key)) is None:
+  hcq_ctx = HCQ2LowerCtx(dev=dev, name=f"submit_{ast.arg.name}")
+  n_bufs = max(ast.arg.globals, default=-1) + 1
+  bufaddrs = Buffer("CPU", 1 + n_bufs, dtypes.uint64, preallocate=True)
+  bufaddrs_uop = hcq_ctx.host_param(bufaddrs)
+  hcq_ctx.kernargs_host, hcq_ctx.kernargs_gpu = hcq_ctx.host_param(dev.kernargs_buf), bufaddrs_uop[0]
+  global_uops = [bufaddrs_uop[1+i] for i in range(n_bufs)]
+  placeholder_call = ast.call(*global_uops)
+  host_call = _hcq_schedule(dev, hcq_ctx, UOp(Ops.LINEAR, dtypes.void, (placeholder_call,), arg="COMPUTE"), ast)
+  kernargs_alloc_size = max(hcq_ctx.kernargs_allocator.ptr, 1)
+  kernargs = dev.kernargs_buf.view(kernargs_alloc_size, dtypes.uint8,
+    dev.kernargs_offset_allocator.alloc(kernargs_alloc_size, 8)).ensure_allocated()
+  # host_call's BUFFER UOps were baked in by hcq_callify before the view existed; swap the kernargs_buf ref to the view
+  new_src = list(host_call.src)
+  new_src[1 + hcq_ctx.kernargs_host.arg] = UOp.from_buffer(kernargs, "CPU")
+  host_call = host_call.replace(src=tuple(new_src))
+  addrs = bufaddrs.as_memoryview(force_zero_copy=True).cast('Q')
+  addrs[0] = kernargs.get_buf(dev.device).va_addr
+  for gi in ast.arg.globals: addrs[1+gi] = resolved_call.src[1+gi].buffer.get_buf(dev.device).va_addr
+  run_linear(UOp(Ops.LINEAR, dtypes.void, (host_call,)), var_vals=ctx.var_vals, jit=True, do_update_stats=False)
+  return UOp(Ops.NOOP)
+
+def hcq_exec_copy(ctx, call:UOp, ast:UOp) -> UOp|None:
+  from tinygrad.engine.realize import resolve_params, run_linear
+  dev = Device[ast.src[1].arg]
+  resolved_call = call.replace(src=(ast,) + tuple(resolve_params(call, ctx.input_uops)) + tuple(s for s in call.src[1:] if s.op is Ops.BIND))
+  if (cached:=_hcq_exec_cache.get(key:=resolved_call.key)) is None:
+    hcq_ctx = HCQ2LowerCtx(dev=dev)
+    src_buf = resolved_call.src[2].buffer
+    try: src_buf.get_buf(dev.device)
+    except Exception:
+      (cpubuf := Buffer("CPU", src_buf.nbytes, dtypes.uint8, preallocate=True)).copyin(src_buf.as_memoryview())
+      hcq_ctx.holds.append(buf_uop:=UOp.from_buffer(cpubuf, dev.device))
+      resolved_call = resolved_call.replace(src=resolved_call.src[:2] + (buf_uop,) + resolved_call.src[3:])
+    host_call = _hcq_schedule(dev, hcq_ctx, UOp(Ops.LINEAR, dtypes.void, (resolved_call,), arg="COPY"), ast)
+    _hcq_exec_cache[key] = cached = (host_call, hcq_ctx)
+  run_linear(UOp(Ops.LINEAR, dtypes.void, (cached[0],)), var_vals=ctx.var_vals, jit=True, do_update_stats=False)
+  return UOp(Ops.NOOP)
+
+pm_hcq_exec = PatternMatcher([
+  (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, name="ast"),), name="call", allow_any_len=True, device=("AMD",)), hcq_exec_program),
+  (UPat(Ops.CALL, src=(UPat(Ops.COPY, name="ast"),), name="call", allow_any_len=True, device=("AMD",)), hcq_exec_copy),
+])
