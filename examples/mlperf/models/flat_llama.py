@@ -20,16 +20,11 @@ from extra.llama_kernels.rmsnorm import rmsnorm
 from extra.llama_kernels import FP8_MAX, local_abs_max
 
 LORA = getenv("LORA", 0)
-QUANTIZE = getenv("QUANTIZE", 1)
-RECOMPUTE = getenv("RECOMPUTE", 0)
 
 ASM_GEMM = getenv("ASM_GEMM", 0)
 FUSED_INPUT_QUANTIZE = getenv("FUSED_INPUT_QUANTIZE", 0)
 FUSED_ADD_NORM_MUL_QUANTIZE = getenv("FUSED_ADD_NORM_MUL_QUANTIZE", 0)
 FUSED_SILU_W13 = getenv("FUSED_SILU_W13", 0)
-
-if not QUANTIZE:
-  assert not (FUSED_INPUT_QUANTIZE or FUSED_ADD_NORM_MUL_QUANTIZE or FUSED_SILU_W13)
 
 FP8_DTYPE = dtypes.fp8e4m3
 FP8_GRAD_DTYPE = dtypes.fp8e5m2
@@ -46,7 +41,7 @@ def quantize_fp8(x:Tensor, amax_state:Tensor|None=None):
   x_clamped = x_scaled + (x_scaled.detach().clamp(-FP8_MAX, FP8_MAX) - x_scaled.detach())  # STE
   return x_clamped.cast(FP8_DTYPE), scale.float().reciprocal(), new_amax
 
-def matmul(x:Tensor, w:Tensor, fp8:bool=QUANTIZE, amax_x:Tensor|None=None, w_inv_scale:Tensor|None=None,
+def matmul(x:Tensor, w:Tensor, fp8:bool=True, amax_x:Tensor|None=None, w_inv_scale:Tensor|None=None,
            x_fp8:Tensor|None=None, x_scale:Tensor|None=None, x_new_amax:Tensor|None=None,
            grad_amax_state:Tensor|None=None) -> tuple[Tensor,...]:
   if not fp8:
@@ -145,7 +140,7 @@ class FlatTransformer:
     self.freqs_cis = precompute_freqs_cis(dim // n_heads, max_context * 2, rope_theta).contiguous().requires_grad_(False)
 
     # quantize weights
-    if QUANTIZE: self.quantize() 
+    self.quantize() 
 
   def quantize(self, realize:bool=False):
     def _amax():
@@ -155,8 +150,6 @@ class FlatTransformer:
       return t
     names = ["xqkv", "xo", "x13", "x2"]
     self._fp8_amax = {name: [_amax() for _ in range(self.n_layers)] for name in names}
-    if QUANTIZE and RECOMPUTE:
-      self._fp8_amax_next = {name: [_amax() for _ in range(self.n_layers)] for name in names}
     grad_names = ["xqkv", "xo", "xw13", "xout"]
     self._fp8_grad_amax = {name: [_amax() for _ in range(self.n_layers)] for name in grad_names}
     w_names = ["wqkv", "wo", "w13", "w2"]
@@ -164,14 +157,8 @@ class FlatTransformer:
     for wname in w_names:
       fp8_weight, inv_scale = quantize_fp8_weight(getattr(self, wname))
       inv_scale = inv_scale.float().contiguous().requires_grad_(False)
-      if realize: fp8_weight.realize(inv_scale)
       getattr(self, wname).replace(fp8_weight)
       self._fp8_inv_scale[wname] = inv_scale
-
-  def commit_fp8_amax(self):
-    if not hasattr(self, "_fp8_amax_next"): return
-    Tensor.realize(*[self._fp8_amax[name][i].assign(self._fp8_amax_next[name][i])
-                     for name in self._fp8_amax for i in range(len(self._fp8_amax[name]))])
 
   def create_lora_params(self, in_dim:int, out_dim:float, rank:int) -> tuple[Tensor, Tensor]:
     a = self.lin_per_layer(in_dim, rank, requires_grad=True, use_kaiming=True)
@@ -248,11 +235,11 @@ class FlatTransformer:
   def run_layer(self, x:Tensor, freqs_cis:Tensor,
                 attention_norm:Tensor, wqkv:Tensor, wo:Tensor,
                 ffn_norm:Tensor, w13:Tensor, w2:Tensor,
-                amax_xqkv:Tensor|None=None, amax_xo:Tensor|None=None,
-                amax_x13:Tensor|None=None, amax_x2:Tensor|None=None,
-                s_qkv:Tensor|None=None, s_o:Tensor|None=None, s_13:Tensor|None=None, s_2:Tensor|None=None,
-                grad_amax_xqkv:Tensor|None=None, grad_amax_xo:Tensor|None=None,
-                grad_amax_xw13:Tensor|None=None, grad_amax_xout:Tensor|None=None,
+                amax_xqkv:Tensor, amax_xo:Tensor,
+                amax_x13:Tensor, amax_x2:Tensor,
+                s_qkv:Tensor, s_o:Tensor, s_13:Tensor, s_2:Tensor,
+                grad_amax_xqkv:Tensor, grad_amax_xo:Tensor,
+                grad_amax_xw13:Tensor, grad_amax_xout:Tensor,
                 lora_a:Tensor|None=None, lora_a_wo:Tensor|None=None,
                 lora_b:Tensor|None=None, lora_b_wo:Tensor|None=None):
     if self.fsdp:
@@ -262,19 +249,13 @@ class FlatTransformer:
                                      grad_amax_xqkv=grad_amax_xqkv, grad_amax_xo=grad_amax_xo,
                                      lora_a=lora_a,  lora_a_wo=lora_a_wo,
                                      lora_b=lora_b, lora_b_wo=lora_b_wo)
+    attn_amaxs, attn_saves = attn_ret[:2], attn_ret[2:]
     ffn, h, *ffn_ret = self.feed_forward(x, attn, ffn_norm, w13, w2,
                                                    amax_x13=amax_x13, amax_x2=amax_x2, s_13=s_13, s_2=s_2,
                                                    grad_amax_xw13=grad_amax_xw13, grad_amax_xout=grad_amax_xout)
-    if QUANTIZE:
-      attn_amaxs, attn_saves = attn_ret[:2], attn_ret[2:]
-      ffn_amaxs, ffn_saves = ffn_ret[:2], ffn_ret[2:]
-    else:
-      attn_amaxs, attn_saves = (), attn_ret
-      ffn_amaxs, ffn_saves = (), ffn_ret
+    ffn_amaxs, ffn_saves = ffn_ret[:2], ffn_ret[2:]
     h = h + ffn
-    quantize_rets = (*attn_amaxs, *ffn_amaxs) if QUANTIZE else tuple()
-    recompute_rets = (*attn_saves, *ffn_saves) if not RECOMPUTE else tuple()
-    return (h, *quantize_rets, *recompute_rets)
+    return (h, *attn_amaxs, *ffn_amaxs, *attn_saves, *ffn_saves)
 
   def shard(self, device:tuple[str, ...], mp:bool=False, fsdp:bool=False):
     from tinygrad.nn.state import get_parameters
@@ -311,25 +292,22 @@ class FlatTransformer:
   def __call__(self, tokens:Tensor):
     h = self.tok_embeddings(tokens)
     freqs_cis = self.freqs_cis.cast(h.dtype)[:, :tokens.shape[1], :, :, :]
-    if QUANTIZE: a, ga, s = self._fp8_amax, self._fp8_grad_amax, self._fp8_inv_scale
-    if QUANTIZE: next_a = self._fp8_amax_next if hasattr(self, "_fp8_amax_next") else a
+    a, ga, s = self._fp8_amax, self._fp8_grad_amax, self._fp8_inv_scale
     for i in range(self.n_layers):
       lora_layer = dict(lora_a=self.lora_a[i], lora_a_wo=self.lora_a_wo[i],
                         lora_b=self.lora_b[i], lora_b_wo=self.lora_b_wo[i]) if LORA else {}
-      quantize_args = dict(amax_xqkv=a["xqkv"][i], amax_xo=a["xo"][i],
-                           amax_x13=a["x13"][i], amax_x2=a["x2"][i],
-                           s_qkv=s["wqkv"][i], s_o=s["wo"][i],
-                           s_13=s["w13"][i], s_2=s["w2"][i],
-                           grad_amax_xqkv=ga["xqkv"][i], grad_amax_xo=ga["xo"][i],
-                           grad_amax_xw13=ga["xw13"][i], grad_amax_xout=ga["xout"][i]) if QUANTIZE else {}
       h, *ret = self.run_layer(h, freqs_cis,
                                self.attention_norm[i], self.wqkv[i], self.wo[i],
                                self.ffn_norm[i], self.w13[i], self.w2[i],
-                               **quantize_args,
+                               amax_xqkv=a["xqkv"][i], amax_xo=a["xo"][i],
+                               amax_x13=a["x13"][i], amax_x2=a["x2"][i],
+                               s_qkv=s["wqkv"][i], s_o=s["wo"][i],
+                               s_13=s["w13"][i], s_2=s["w2"][i],
+                               grad_amax_xqkv=ga["xqkv"][i], grad_amax_xo=ga["xo"][i],
+                               grad_amax_xw13=ga["xw13"][i], grad_amax_xout=ga["xout"][i],
                                **lora_layer)
-      if QUANTIZE:
-        for name, new_val in zip(["xqkv", "xo", "x13", "x2"], ret[:4]):
-          next_a[name][i].assign(new_val)
+      for name, new_val in zip(["xqkv", "xo", "x13", "x2"], ret[:5]):
+        a[name][i].assign(new_val)
 
     logits = matmul(self.norm(h), self.output[0], fp8=False)[0]
     return logits

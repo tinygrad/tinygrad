@@ -1286,7 +1286,7 @@ def train_llama2_70b_lora():
   train_llama3(True)
 
 def train_llama3(llama2_70b_lora:bool=False):
-  from examples.mlperf.models.flat_llama import FlatTransformer, apply_grad, FP8_DTYPE, LORA, QUANTIZE, RECOMPUTE
+  from examples.mlperf.models.flat_llama import FlatTransformer, apply_grad, FP8_DTYPE, LORA
   from examples.llama3 import MODEL_PARAMS
   from examples.mlperf.lr_schedulers import CosineAnnealingLRWithWarmup
   from examples.mlperf.optim import GradAccClipAdamW
@@ -1421,12 +1421,6 @@ def train_llama3(llama2_70b_lora:bool=False):
 
   model.shard(device, is_mp, is_fsdp)
 
-  if llama2_70b_lora:
-    # anything not explicitly set is not trainable
-    for p in params:
-      if not p.requires_grad:
-        p.requires_grad_(False)
-
   # load the model
   if llama2_70b_lora and getenv("LOAD_MODEL", 1):
     from extra.huggingface_onnx.huggingface_manager import DOWNLOADS_DIR, snapshot_download_with_retry
@@ -1442,12 +1436,13 @@ def train_llama3(llama2_70b_lora:bool=False):
 
     load_state_dict(model, state_dict, strict=False, realize=True, consume=True)
     del state_dict # just in case
-    if QUANTIZE:
-      model.quantize(realize=True)
-      params = get_parameters(model)
-      for p in params:
-        if not p.requires_grad:
-          p.requires_grad_(False)
+    model.quantize(realize=True)
+
+  if llama2_70b_lora:
+    # anything not explicitly set is not trainable
+    for p in params:
+      if not p.requires_grad:
+        p.requires_grad_(False)
 
   if is_dp: vocab_mask.shard_(device, axis=None).realize()
   if is_mp: vocab_mask.shard_(device, axis=2).realize()
@@ -1461,7 +1456,10 @@ def train_llama3(llama2_70b_lora:bool=False):
 
   for p in optim.params:
     grad_dtype = dtypes.bfloat16 if p.dtype == FP8_DTYPE else p.dtype
-    p.grad = p.zeros_like(dtype=grad_dtype).contiguous()
+    if isinstance(p.device, tuple) and p.uop.axis is not None:
+      p.grad = Tensor.zeros(p.shape, dtype=grad_dtype, device=p.device[0]).shard_(p.device, axis=p.uop.axis).contiguous()
+    else:
+      p.grad = Tensor.zeros(p.shape, dtype=grad_dtype, device=p.device).contiguous()
   grads = [p.grad for p in optim.params]
 
   scheduler = CosineAnnealingLRWithWarmup(optim, opt_base_learning_rate, opt_end_learning_rate, opt_learning_rate_warmup_steps, opt_learning_rate_decay_steps)
@@ -1475,10 +1473,9 @@ def train_llama3(llama2_70b_lora:bool=False):
     print(f"loading optim checkpoint from {fn}")
     load_state_dict(scheduler, safe_load(fn), realize=False)
 
-  fp8_amax = [t for ts in model._fp8_amax.values() for t in ts] if hasattr(model, "_fp8_amax") else []
-  fp8_amax_next = [t for ts in model._fp8_amax_next.values() for t in ts] if hasattr(model, "_fp8_amax_next") else []
+  fp8_amax = [t for ts in model._fp8_amax.values() for t in ts]
   fp8_grad_amax = [t for ts in model._fp8_grad_amax.values() for t in ts] if hasattr(model, "_fp8_grad_amax") else []
-  fp8_inv_scales = list(model._fp8_inv_scale.values()) if hasattr(model, "_fp8_inv_scale") else []
+  fp8_inv_scales = list(model._fp8_inv_scale.values())
 
   if not llama2_70b_lora:
     model_state = get_state_dict(model)
@@ -1491,7 +1488,7 @@ def train_llama3(llama2_70b_lora:bool=False):
 
   # realize everything here
   if optim.master_params: Tensor.realize(*optim.master_params)
-  Tensor.realize(*optim.params, *fp8_inv_scales, *fp8_amax, *fp8_amax_next, *fp8_grad_amax)
+  Tensor.realize(*optim.params, *fp8_inv_scales, *fp8_amax, *fp8_grad_amax)
 
   @TinyJit
   @Tensor.train()
@@ -1511,7 +1508,7 @@ def train_llama3(llama2_70b_lora:bool=False):
       apply_grad(g, new_g.uop)
 
     loss_cpu = loss.flatten().float().to("CPU")
-    return loss_cpu.realize(*grads, *fp8_amax, *fp8_amax_next, *fp8_grad_amax)
+    return loss_cpu.realize(*grads, *fp8_amax, *fp8_grad_amax)
 
   @TinyJit
   def optim_step():
@@ -1551,25 +1548,6 @@ def train_llama3(llama2_70b_lora:bool=False):
     logits:Tensor = model(tokens[:, :-1])
     loss = vocab_mask.where(-1e9, logits).sparse_categorical_crossentropy(tokens[:, 1:])
     return loss.flatten().float().to("CPU")
-
-  @Tensor.train()
-  def lora_grad_diag(tokens:Tensor):
-    if is_dp: tokens = tokens.to(None).shard(device, 0)
-    if is_mp: tokens = tokens.to(None).shard(device)
-    if not is_sharding: tokens = tokens.to(None)
-    logits = model(tokens)[:, :-1] if llama2_70b_lora else model(tokens[:, :-1])
-    if getenv("FAST_CE", 0):
-      from extra.llama_kernels.fused_ce import fused_ce_loss
-      loss = fused_ce_loss(logits.cast(dtypes.bfloat16), tokens[:, 1:], label_smoothing=0.0)
-    else:
-      loss = vocab_mask.where(-1e9, logits).sparse_categorical_crossentropy(tokens[:, 1:])
-    diag_grads = loss.gradient(*optim.params)
-    grad_norms = [g.float().square().sum().sqrt().to("CPU") for g in diag_grads]
-    grad_maxes = [g.float().abs().max().to("CPU") for g in diag_grads]
-    total_grad_norm = Tensor.stack(*[g.float().square().sum() for g in diag_grads]).sum().sqrt().to("CPU")
-    loss_cpu = loss.flatten().float().to("CPU")
-    Tensor.realize(loss_cpu, total_grad_norm, *grad_norms, *grad_maxes, *fp8_amax, *fp8_amax_next, *fp8_grad_amax)
-    return loss_cpu, total_grad_norm, grad_norms, grad_maxes
 
   # ** data iters **
   def fake_data(bs, samples):
@@ -1634,7 +1612,6 @@ def train_llama3(llama2_70b_lora:bool=False):
         mst = time.perf_counter()
         data_time += mst - ist
         losses.append(minibatch(tokens).item())
-        model.commit_fp8_amax()
         dev_time += time.perf_counter() - mst
       if stopped: break
 
@@ -1892,8 +1869,6 @@ if __name__ == "__main__":
   if getenv("INITMLPERF"): bench_log_manager = WallTimeEvent(BenchEvent.MLPERF_INIT)
   elif getenv("RUNMLPERF"): bench_log_manager = WallTimeEvent(BenchEvent.MLPERF_RUN)
   else: bench_log_manager = contextlib.nullcontext()
-
-  from examples.mlperf.helpers import get_training_state, load_training_state
 
   with Tensor.train():
     for m in getenv("MODEL", "resnet,retinanet,unet3d,rnnt,bert,maskrcnn,stable_diffusion").split(","):
