@@ -291,6 +291,7 @@ class FlatTransformer:
         if not isinstance(v.device, tuple):
           v.shard_(device, axis=None)
     else:
+      assert not LORA, "MP + LORA unsupported"
       # flat per-layer weights: axis 0 is n_layers, so shard axes are +1 vs per-layer Transformer
       self.wqkv.shard_(device, axis=1).realize()          # (n_layers, out, dim) shard out
       self.wo.shard_(device, axis=2).realize()            # (n_layers, dim, in) shard in
