@@ -1,4 +1,5 @@
 from collections import OrderedDict
+from pathlib import Path
 import unicodedata
 from typing import Optional
 import math
@@ -365,3 +366,13 @@ class BoxCoder(object):
     h = pred_ctr_y + 0.5 * pred_h - 1
     pred_boxes = Tensor.stack(x, y, w, h).permute(1,2,0).reshape(rel_codes.shape[0], rel_codes.shape[1])
     return pred_boxes
+
+def clean_dir(dir_path: Path, allowed_suffix:str):
+  assert dir_path.is_dir()
+  for path in list(dir_path.iterdir()):
+    if path.is_file() and path.suffix == allowed_suffix: continue
+    if path.is_dir():
+      import shutil
+      shutil.rmtree(path)
+    else:
+      path.unlink()
