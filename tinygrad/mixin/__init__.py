@@ -644,7 +644,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
 
   def _split_cumalu(self, axis:int, op:Ops) -> Self:
     axis = self._resolve_dim(axis)
-    if self.ndim == 0 or 0 in self.shape: return self
+    if self.ndim == 0 or 0 in self.shape: return self.cast(self.sum().dtype) if op is Ops.ADD else self
     # TODO: someday the optimizer will find this on its own
     # for now this is a two stage cumsum
     SPLIT = 256
