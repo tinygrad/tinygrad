@@ -1,7 +1,8 @@
 from __future__ import annotations
-from typing import cast, Callable, TypeVar, Generic, Any
-import struct, functools
+from typing import cast, Callable, TypeVar, Generic, Any, TYPE_CHECKING
+import struct, functools, time
 from dataclasses import replace
+if TYPE_CHECKING: from tinygrad.engine.realize import ExecContext
 from tinygrad.helpers import DEV, getenv, select_first_inited, select_by_name, suppress_finalizing, wait_cond, mv_address
 from tinygrad.device import Device, Buffer, BufferSpec, Compiled, LRUAllocator
 from tinygrad.uop.ops import Ops, sint, UOp, UPat, PatternMatcher, KernelInfo, graph_rewrite, track_rewrites
@@ -10,7 +11,7 @@ from dataclasses import dataclass, field
 from tinygrad.runtime.support.memory import BumpAllocator
 from tinygrad.runtime.support.hcq import MMIOInterface
 from tinygrad.renderer import Renderer, Estimates
-from tinygrad.engine.realize import pm_flatten_linear, to_program
+from tinygrad.engine.realize import pm_flatten_linear, to_program, track_stats
 
 HCQDeviceType = TypeVar('HCQDeviceType', bound='HCQ2Compiled')
 
@@ -135,7 +136,7 @@ class HCQAllocator(HCQAllocatorBase, Generic[HCQDeviceType]):
   def _do_copy(self, dst:Buffer, src:Buffer):
     from tinygrad.engine.realize import run_linear
     ast = UOp(Ops.COPY, dtypes.uint8, (su:=UOp.from_buffer(src), UOp(Ops.DEVICE, arg=dst.device)))
-    run_linear(UOp(Ops.LINEAR, dtypes.void, (ast.call(UOp.from_buffer(dst), su),)), jit=True, do_update_stats=False)
+    run_linear(UOp(Ops.LINEAR, dtypes.void, (ast.call(UOp.from_buffer(dst), su),)), jit=True, update_stats=False)
 
   def _copyin(self, dest:HCQ2Buffer, src:memoryview):
     s = Buffer(self.dev.device, len(src), dtypes.uint8, options=BufferSpec(host=True), preallocate=True)
@@ -310,7 +311,7 @@ def _hcq_schedule(dev:HCQ2Compiled, ctx:HCQ2LowerCtx, linear:UOp, ast:UOp) -> UO
 
 _hcq_exec_cache: dict = {}
 
-def hcq_exec_program(ctx, call:UOp, ast:UOp) -> UOp|None:
+def hcq_exec_program(ctx:ExecContext, call:UOp, ast:UOp) -> float:
   from tinygrad.engine.realize import resolve_params, run_linear
   dev = Device[ast.src[1].arg]
   resolved_call = call.replace(src=(ast,) + tuple(resolve_params(call, ctx.input_uops)) + tuple(s for s in call.src[1:] if s.op is Ops.BIND))
@@ -332,11 +333,17 @@ def hcq_exec_program(ctx, call:UOp, ast:UOp) -> UOp|None:
   host_call = host_call.replace(src=tuple(new_src))
   addrs = bufaddrs.as_memoryview(force_zero_copy=True).cast('Q')
   addrs[0] = kernargs.get_buf(dev.device).va_addr
-  for gi in ast.arg.globals: addrs[1+gi] = resolved_call.src[1+gi].buffer.get_buf(dev.device).va_addr
-  run_linear(UOp(Ops.LINEAR, dtypes.void, (host_call,)), var_vals=ctx.var_vals, jit=True, do_update_stats=False)
-  return UOp(Ops.NOOP)
+  prg_bufs = [cast(Buffer, resolved_call.src[1+gi].buffer) for gi in ast.arg.globals]
+  for gi, b in zip(ast.arg.globals, prg_bufs): addrs[1+gi] = b.get_buf(dev.device).va_addr
+  with track_stats(ctx, call, dev.device, prg_bufs, ctx.var_vals) as tm:
+    st = time.perf_counter() if ctx.wait else None
+    run_linear(UOp(Ops.LINEAR, dtypes.void, (host_call,)), var_vals=ctx.var_vals, jit=True, update_stats=False)
+    if ctx.wait:
+      dev.synchronize()
+      tm[0] = time.perf_counter() - st
+  return tm[0] if tm[0] is not None else 0.0
 
-def hcq_exec_copy(ctx, call:UOp, ast:UOp) -> UOp|None:
+def hcq_exec_copy(ctx:ExecContext, call:UOp, ast:UOp) -> float:
   from tinygrad.engine.realize import resolve_params, run_linear
   dev = Device[ast.src[1].arg]
   resolved_call = call.replace(src=(ast,) + tuple(resolve_params(call, ctx.input_uops)) + tuple(s for s in call.src[1:] if s.op is Ops.BIND))
@@ -350,8 +357,14 @@ def hcq_exec_copy(ctx, call:UOp, ast:UOp) -> UOp|None:
       resolved_call = resolved_call.replace(src=resolved_call.src[:2] + (buf_uop,) + resolved_call.src[3:])
     host_call = _hcq_schedule(dev, hcq_ctx, UOp(Ops.LINEAR, dtypes.void, (resolved_call,), arg="COPY"), ast)
     _hcq_exec_cache[key] = cached = (host_call, hcq_ctx)
-  run_linear(UOp(Ops.LINEAR, dtypes.void, (cached[0],)), var_vals=ctx.var_vals, jit=True, do_update_stats=False)
-  return UOp(Ops.NOOP)
+  dst, src = cast(Buffer, resolved_call.src[1].buffer), cast(Buffer, resolved_call.src[2].buffer)
+  with track_stats(ctx, call, dev.device, [dst, src], ctx.var_vals) as tm:
+    st = time.perf_counter() if ctx.wait else None
+    run_linear(UOp(Ops.LINEAR, dtypes.void, (cached[0],)), var_vals=ctx.var_vals, jit=True, update_stats=False)
+    if ctx.wait:
+      dev.synchronize()
+      tm[0] = time.perf_counter() - st
+  return tm[0] if tm[0] is not None else 0.0
 
 pm_hcq_exec = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, name="ast"),), name="call", allow_any_len=True, device=("AMD",)), hcq_exec_program),

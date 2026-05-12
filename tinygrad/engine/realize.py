@@ -54,7 +54,7 @@ def track_stats(ctx:ExecContext, call:UOp, device:str, bufs:list[Buffer], var_va
   et: list[float|None] = [None]
   if DEBUG >= 2: st = time.perf_counter()
   yield et
-  if not ctx.do_update_stats: return
+  if not ctx.update_stats: return
 
   if DEBUG >= 2 and et[0] is None:
     Device[device].synchronize()
@@ -86,10 +86,11 @@ def optimize_local_size(call:UOp, prg:UOp) -> UOp|None:
   if prg.arg.local_size is not None or not Device[device].renderer.has_local or not all_int(prg.arg.global_size): return None
 
   if (local_size:=local_size_cache.get(prg.key)) is None:
-    bufs = [b._buf for b in (b.allocate() for b in bufs_from_ast(prg.src[0], device))]
-    rt = Device[device].runtime(prg.arg.function_name, prg.src[4].arg, *prg.arg.aux, runtimevars=prg.arg.runtimevars)
+    bufs = [b.allocate() for b in bufs_from_ast(prg.src[0], device)]
     def try_exec(local_size):
-      try: return rt(*bufs, global_size=[g//l if g%l == 0 else g/l for g,l in zip(prg.arg.global_size, local_size)], local_size=local_size, wait=True)
+      try:
+        new_gs = tuple(g//l if g%l == 0 else g/l for g,l in zip(prg.arg.global_size, local_size))
+        return time_call(prg.replace(arg=replace(prg.arg, global_size=new_gs, local_size=tuple(local_size))), bufs, {})
       except Exception: return float('inf')
 
     MAX_WORKGROUP = 1024
@@ -130,8 +131,9 @@ capturing: list = []  # put classes with an add_linear method in here
 class ExecContext:
   var_vals: dict[str, int] = field(default_factory=dict)
   input_uops: tuple[UOp, ...] = ()
-  do_update_stats: bool = True
+  update_stats: bool = True
   jit: bool = False
+  wait: bool = False
 
 def _resolve(b:UOp, inputs:tuple[UOp, ...]) -> UOp:
   if b.op in (Ops.BUFFER_VIEW, Ops.MSELECT) and b.src[0].op is Ops.PARAM: return b.replace(src=(inputs[b.src[0].arg], *b.src[1:]))
@@ -145,13 +147,13 @@ def unwrap_multi(call:UOp, resolved:list[UOp]) -> Iterator[tuple[list[Buffer], d
     dnum = next((x.expr for x in call.src[0].variables() if x.expr == '_device_num'), None)
     for j, per_dev in enumerate(zip(*[cast(MultiBuffer, b).bufs for b in bufs])): yield list(per_dev), {dnum: j} if dnum else {}
 
-def exec_view(ctx:ExecContext, call, ast):
+def exec_view(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
   resolved = resolve_params(call, ctx.input_uops)
   bufs = [cast(Buffer, b.buffer) for b in resolved]
   bv = bufs[1].view(resolved[0].arg, ast.dtype, ast.arg[1]*bufs[1].dtype.itemsize)
   with track_stats(ctx, call, bv.device, [bv, bufs[1]], ctx.var_vals): buffers[resolved[0]] = bv
 
-def exec_copy(ctx:ExecContext, call, ast):
+def exec_copy(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
   for bufs, device_vars in unwrap_multi(call, resolve_params(call, ctx.input_uops)):
     dest, src = bufs[0].ensure_allocated(), bufs[1].ensure_allocated()
     with track_stats(ctx, call, dest.device, [dest, src], ctx.var_vals):
@@ -164,16 +166,18 @@ def exec_copy(ctx:ExecContext, call, ast):
         src.allocator._copyout(dest.allocator._as_buffer(dest._buf), src._buf)
       else: dest.copyin(src.as_memoryview(allow_zero_copy=True))
 
-def exec_kernel(ctx:ExecContext, call, ast):
+def exec_kernel(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
+  et = None
   for bufs, device_vars in unwrap_multi(call, resolve_params(call, ctx.input_uops)):
     var_vals = {**ctx.var_vals, **device_vars}
     prg_bufs = [bufs[i].ensure_allocated() for i in ast.arg.globals]
     rt = get_runtime(device:=bufs[0].device, ast)
     global_size, local_size = ast.arg.launch_dims(var_vals)
     with track_stats(ctx, call, device, prg_bufs, var_vals) as tm:
-      tm[0] = rt(*[b._buf for b in prg_bufs], global_size=global_size, local_size=local_size, vals=ast.arg.vals(var_vals), wait=DEBUG>=2)
+      et = tm[0] = rt(*[b._buf for b in prg_bufs], global_size=global_size, local_size=local_size, vals=ast.arg.vals(var_vals), wait=ctx.wait)
+  return et
 
-def exec_validate(ctx:ExecContext, call, ast):
+def exec_validate(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
   import numpy as np
   for bufs, device_vars in unwrap_multi(call, resolve_params(call, ctx.input_uops)):
     bufs, dev_bufs = bufs[:len(bufs)//2], bufs[len(bufs)//2:]
@@ -183,15 +187,16 @@ def exec_validate(ctx:ExecContext, call, ast):
     cpu_rt(*[bufs[i].ensure_allocated()._buf for i in prg.arg.globals], global_size=global_size, local_size=local_size, vals=prg.arg.vals(var_vals))
     for i in prg.arg.outs: np.testing.assert_allclose(dev_bufs[i].ensure_allocated().numpy(), bufs[i].numpy(), rtol=1e-3, atol=1e-3)
 
-def exec_encdec(ctx:ExecContext, call, ast):
+def exec_encdec(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
   bufs = [cast(Buffer, b.buffer).ensure_allocated() for b in resolve_params(call, ctx.input_uops)]
   shape, pos_var = tuple(s.arg for s in ast.src if s.op is Ops.CONST), ast.variables()[0].expr
   with track_stats(ctx, call, bufs[0].device, bufs, ctx.var_vals):
     bufs[0].allocator._encode_decode(bufs[0]._buf, bufs[1]._buf, bufs[2]._buf, [x._buf for x in bufs[3:]], shape, ctx.var_vals[pos_var])
 
-def exec_graph(ctx:ExecContext, call, ast):
+def exec_graph(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
   rt = get_graph_runtime(ast, ctx.input_uops)
-  with track_stats(ctx, call, rt.device, [], ctx.var_vals) as t: t[0] = rt(ctx.input_uops, ctx.var_vals, wait=DEBUG>=2) # type: ignore[call-arg]
+  with track_stats(ctx, call, rt.device, [], ctx.var_vals) as t: t[0] = rt(ctx.input_uops, ctx.var_vals, wait=ctx.wait) # type: ignore[call-arg]
+  return t[0]
 
 # flatten LINEAR-in-LINEAR: any nested LINEAR child gets inlined into its parent's src
 pm_flatten_linear = PatternMatcher([
@@ -237,7 +242,11 @@ def compile_linear(linear:UOp, beam=0, validate=False) -> UOp:
   linear = graph_rewrite(linear, pm_compile, name="precompile kernels", walk=True)
   return graph_rewrite(linear, pm_optimize_local_size, name="optimize local size", walk=True)
 
-def run_linear(linear:UOp, var_vals:dict[str, int]|None=None, input_uops:tuple[UOp, ...]=(), do_update_stats=True, jit=False):
+def run_linear(linear:UOp, var_vals:dict[str, int]|None=None, input_uops:tuple[UOp, ...]=(), update_stats=True, jit=False, wait=False):
   if not jit: linear = compile_linear(linear, validate=VALIDATE_WITH_CPU)
-  ctx = ExecContext(var_vals or {}, input_uops, do_update_stats, jit)
+  ctx = ExecContext(var_vals or {}, input_uops, update_stats, jit, wait or DEBUG>=2)
   for call in linear.src: pm_exec.rewrite(call, ctx)
+
+def time_call(prg:UOp, bufs:list[Buffer], var_vals:dict[str, int]) -> float:
+  call = prg.call(*[UOp.from_buffer(b) for b in bufs])
+  return cast(float, pm_exec.rewrite(call, ExecContext(var_vals=var_vals, update_stats=False, wait=True)))

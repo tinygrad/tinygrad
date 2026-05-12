@@ -523,8 +523,6 @@ class AMDDevice(HCQ2Compiled):
         self.aql_desc.compute_tmpring_size = self.tmpring_size
         self.aql_gart.cpu_view()[:ctypes.sizeof(self.aql_desc)] = bytes(self.aql_desc)
 
-  def invalidate_caches(self): raise NotImplementedError("invalidate_caches not migrated to hcq2 yet")
-
   def on_device_hang(self): self.iface.on_device_hang()
 
   def device_props(self): return self.iface.props
