@@ -260,6 +260,10 @@ class TestTinygrad(unittest.TestCase):
     b = Tensor.randperm(1000).realize()
     np.testing.assert_equal(set(b.numpy()), set(range(1000)))
 
+  def test_randperm_requires_grad(self):
+    self.assertIs(Tensor.randperm(5, requires_grad=True).requires_grad, True)
+    self.assertIs(Tensor.randperm(5, requires_grad=False).requires_grad, False)
+
   def test_randn_isnt_inf_on_zero(self):
     # simulate failure case of rand handing a zero to randn
     original_rand, Tensor.rand = Tensor.rand, Tensor.zeros

@@ -618,7 +618,7 @@ class Tensor(OpMixin):
     if kwargs.get("device") is not None: raise RuntimeError("cannot specify `device` on `*_like` of a multi device tensor")
     if self.uop.axis is None: return fxn(self.shape, *args, dtype=dtype, **kwargs).shard(self.device)
     stacked = UOp.mstack(*[fxn(self.uop.shard_shape, *args, device=d, dtype=dtype, **kwargs).uop for d in self.device])
-    return Tensor(stacked.multi(self.uop.axis))
+    return Tensor(stacked.multi(self.uop.axis), requires_grad=kwargs.get("requires_grad"))
 
   def full_like(self, fill_value:ConstType, dtype=None, device=None, requires_grad=None) -> Tensor:
     """
@@ -816,7 +816,7 @@ class Tensor(OpMixin):
     print(Tensor.randperm(6).numpy())
     ```
     """
-    return Tensor.rand(n, device=device, **kwargs).argsort().cast(dtype)
+    return Tensor.rand(n, device=device, **kwargs).argsort().cast(dtype).requires_grad_(kwargs.get("requires_grad"))
 
   def multinomial(self:Tensor, num_samples:int = 1, replacement:bool = False) -> Tensor:
     """
