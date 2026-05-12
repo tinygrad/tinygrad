@@ -422,7 +422,7 @@ class TestFunctionTuple(unittest.TestCase):
       j = UOp.range(D.shape[0], 1)
       store_c = C[i].store(A[i] * 2.0).end(i)
       store_d = D[j].store(A[j]).end(j)
-      return UOp.group(store_c, store_d).sink(arg=KernelInfo(name="my_kernel"))
+      return UOp.sink(store_c, store_d, arg=KernelInfo(name="my_kernel"))
 
     def my_grad(d_c:UOp, call:UOp):
       a_input = call.src[3]

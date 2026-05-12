@@ -1,7 +1,7 @@
 import time, inspect
 from collections import deque
 from tinygrad.uop.ops import UOp, Ops, UOpMetaClass, track_rewrites, graph_rewrite, gate_kernel_sink, KernelInfo
-from tinygrad.uop.spec import type_verify, tensor_spec
+from tinygrad.uop.spec import type_verify, spec_tensor
 from tinygrad.helpers import DEBUG, cpu_profile, TracingKey, SPEC, pluralize, SCACHE, BASEDIR, partition
 
 # **** schedule linearizer
@@ -95,7 +95,7 @@ def lower_sink_to_linear(function:UOp) -> UOp|None:
   if isinstance(function.arg, KernelInfo): return None
   cache_key = function.key
   if not SCACHE or (sc_ret:=schedule_cache.get(cache_key, None)) is None:
-    if SPEC: type_verify(function, tensor_spec)
+    if SPEC: type_verify(function, spec_tensor)
     # support recursive CALLs
     linear = create_schedule(get_kernel_graph(function))
     if SCACHE: schedule_cache[cache_key] = linear

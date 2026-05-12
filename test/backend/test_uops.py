@@ -226,12 +226,14 @@ class TestLocalAccess(unittest.TestCase):
 class TestAssembly(unittest.TestCase):
   def test_bitshift_left(self):
     g1 = UOp(Ops.PARAM, dtypes.int32.ptr(), (), 0)
+    out = UOp(Ops.PARAM, dtypes.int32.ptr(), (), 1)
     c1 = UOp.const(dtypes.int, 2)
     c2 = UOp.const(dtypes.int, 3)
     l1 = g1.index(c1)
     a1 = UOp(Ops.MUL, dtypes.int, (l1, c1))
     a2 = UOp(Ops.MUL, dtypes.int, (l1, c2))
-    uops = to_uops_list([a1,a2], ren=Device[Device.DEFAULT].renderer)
+    uops = to_uops_list([out.index(UOp.const(dtypes.int, 0)).store(a1), out.index(UOp.const(dtypes.int, 1)).store(a2)],
+                        ren=Device[Device.DEFAULT].renderer)
     Device[Device.DEFAULT].renderer.render(uops)
     ops = [x.op for x in uops]
     self.assertIn(Ops.SHL, ops)
