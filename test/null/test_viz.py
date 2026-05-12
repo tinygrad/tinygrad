@@ -337,13 +337,13 @@ class TestVizIntegration(unittest.TestCase):
   # schedule graph CALL nodes have a link to jump to codegen
   def test_link_sched_codegen(self):
     with save_viz() as viz:
-      c1 = Tensor.empty(4).add(1)
-      c2 = Tensor.empty(8).add(1)
+      c1 = Tensor.empty(4, device="NULL").add(1)
+      c2 = Tensor.empty(8, device="NULL").add(1)
       sched = c1.schedule_linear(c2)
       from tinygrad.engine.realize import compile_linear
       sched = compile_linear(sched)
       with Context(NO_COLOR=0):
-        prgs = [to_program(si.src[0], Device[Device.DEFAULT].renderer).arg.name for si in sched.src]
+        prgs = [to_program(si.src[0], Device[c1.device].renderer).arg.name for si in sched.src]
     lst = viz.list_items()
     sched_idx = next(i for i,l in enumerate(lst) if l["name"].startswith("Schedule"))
     viz_kernel = next(i for i,s in enumerate(lst[sched_idx]["steps"]) if s["name"] == "View Kernel Graph")
