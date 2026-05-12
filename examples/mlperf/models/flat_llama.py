@@ -19,8 +19,6 @@ from extra.models.llama import apply_rotary_emb, precompute_freqs_cis
 from extra.llama_kernels.rmsnorm import rmsnorm
 from extra.llama_kernels import FP8_MAX, local_abs_max
 
-AGENTIC_OPT = getenv("AGENTIC_OPT", 0)
-
 LORA = getenv("LORA", 0)
 QUANTIZE = getenv("QUANTIZE", 1)
 RECOMPUTE = getenv("RECOMPUTE", 0)
@@ -52,9 +50,6 @@ def matmul(x:Tensor, w:Tensor, fp8:bool=QUANTIZE, amax_x:Tensor|None=None, w_inv
            x_fp8:Tensor|None=None, x_scale:Tensor|None=None, x_new_amax:Tensor|None=None,
            grad_amax_state:Tensor|None=None) -> tuple[Tensor,...]:
   if not fp8:
-    if AGENTIC_OPT:
-      from extra.agentic_opt.gemm import gemm
-      return (gemm(x, w.T),)
     if ASM_GEMM:
       from extra.gemm.cdna_asm_gemm import can_use_asm_gemm, asm_gemm
       if can_use_asm_gemm(x, w.T): return (asm_gemm(x, w.T),)
@@ -66,7 +61,7 @@ def matmul(x:Tensor, w:Tensor, fp8:bool=QUANTIZE, amax_x:Tensor|None=None, w_inv
       x_fp8, x_scale, x_new_amax, _ = quantize_fp8_delayed(x, amax_x, FP8_DTYPE)
     else:
       x_fp8, x_scale, x_new_amax = quantize_fp8(x, amax_state=amax_x)
-  if ASM_GEMM or AGENTIC_OPT:
+  if ASM_GEMM:
     from extra.gemm.cdna_asm_gemm import can_use_asm_gemm, asm_gemm
     if can_use_asm_gemm(x_fp8, w.T):
       return asm_gemm(x_fp8, w.T, x_scale=x_scale, w_scale=w_inv_scale, grad_amax_state=grad_amax_state), x_new_amax, x_fp8, w
@@ -218,11 +213,7 @@ class FlatTransformer:
 
     xq, xk = apply_rotary_emb(xq, xk, freqs_cis)
     xq, xk, xv = xq.cast(dtypes.bfloat16), xk.cast(dtypes.bfloat16), xv.cast(dtypes.bfloat16)
-    if AGENTIC_OPT:
-      from extra.agentic_opt.fa import flash_attention
-      attn, *save = flash_attention(xq, xk, xv, is_causal=True)
-      saves.extend(save)
-    elif getenv("HK_FLASH_ATTENTION"):
+    if getenv("HK_FLASH_ATTENTION"):
       from extra.thunder.amd.fa import flash_attention
       attn, *save = flash_attention(xq, xk, xv, is_causal=True)
       saves.extend(save)
@@ -253,7 +244,7 @@ class FlatTransformer:
     saves.extend(ret[1:] + [out])
     return (out, h, *new_amaxs, *saves)
 
-  @function(precompile=True, precompile_backward=True, allow_implicit=AGENTIC_OPT)
+  @function(precompile=True, precompile_backward=True)
   def run_layer(self, x:Tensor, freqs_cis:Tensor,
                 attention_norm:Tensor, wqkv:Tensor, wo:Tensor,
                 ffn_norm:Tensor, w13:Tensor, w2:Tensor,
