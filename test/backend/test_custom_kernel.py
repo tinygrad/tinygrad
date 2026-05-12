@@ -1,7 +1,7 @@
 import unittest
-from tinygrad import Tensor, UOp, GlobalCounters
+from tinygrad import Tensor, UOp, GlobalCounters, Context
 from tinygrad.dtype import AddrSpace, dtypes
-from tinygrad.uop.ops import KernelInfo, AxisType
+from tinygrad.uop.ops import KernelInfo, AxisType, Ops
 
 # **** kernels ****
 
@@ -339,6 +339,22 @@ class TestCustomKernel(unittest.TestCase):
     # it's copying the input and the output
     self.assertEqual(GlobalCounters.kernel_count, 1)
     self.assertEqual(y.tolist(), [1, 2, 3, 4])
+
+  @Context(DEV="CPU")
+  def test_simple_from_source(self):
+    a = Tensor([0., 1., 2.]).realize()
+
+    src = "void test_src(float* restrict a) { a[0] = 1.0; }"
+    # TODO: it currently requires a compiler for Ops.BINARY
+    from tinygrad.device import Device
+    binary = Device[a.device].renderer.compiler.compile(src)
+    def custom_src_kernel(A:UOp) -> UOp:
+      sink = UOp.sink(A, arg=KernelInfo(name="test_src"))
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg="CPU"), UOp(Ops.LINEAR, src=tuple(sink.toposort())),
+                                   UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=binary)))
+
+    a = Tensor.custom_kernel(a, fxn=custom_src_kernel)[0]
+    self.assertEqual(a.tolist(), [1., 1., 2.])
 
 class TestUOpReduce(unittest.TestCase):
   def test_uop_sum(self):
