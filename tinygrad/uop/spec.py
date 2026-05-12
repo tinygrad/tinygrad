@@ -104,6 +104,9 @@ spec_shared = PatternMatcher([
 
   # STORE in tensor graph: store a value into a target
   (UPat(Ops.STORE, dtypes.void, (UPat(name="x"), UPat())), lambda x: True),
+
+  # WMMA has a <a, b, acc>
+  (UPat(Ops.WMMA, src=(UPat(), UPat(), UPat()), name="x"), lambda x: isinstance(x.arg, tuple) and len(x.arg) == 8),
 ])
 
 # these ops can exist in tensor but not programs. example: movement
@@ -179,6 +182,10 @@ spec_tensor = PatternMatcher([
   # LINEAR
   (UPat(Ops.LINEAR, dtypes.void), lambda: True),
   (UPat(Ops.PROGRAM, dtypes.void, src=(UPat(Ops.SINK), UPat(Ops.DEVICE), UPat(Ops.LINEAR))), lambda: True),
+
+  # UNROLL/CONTRACT is used here for WMMA
+  (UPat(Ops.CONTRACT, name="x"), lambda x: x.dtype.count == prod(y[1] for y in x.arg)),
+  (UPat(Ops.UNROLL, name="x"), lambda x: x.src[0].dtype.count == prod(y[1] for y in x.arg)),
 ])+spec_shared
 
 # these ops can exist in programs but not the tensor spec. example: LOAD
@@ -190,9 +197,6 @@ spec_program = PatternMatcher([
   # if has a <gate, index_for_dedup>
   (UPat(Ops.IF, dtype=dtypes.void, src=(UPat(dtype=dtypes.bool), UPat((Ops.CAST, Ops.INDEX)))), lambda: True),
   (UPat(Ops.ENDIF, dtype=dtypes.void, src=(UPat(Ops.IF),)), lambda: True),
-
-  # WMMA has a <a, b, acc>
-  (UPat(Ops.WMMA, src=(UPat(), UPat(), UPat()), name="x"), lambda x: isinstance(x.arg, tuple) and len(x.arg) == 8),
 ])+spec_shared
 
 # these are intermediate ops. everything should be deleted from here
