@@ -278,7 +278,7 @@ class TestZeroRange(unittest.TestCase):
 
 class TestUOpPrograms(unittest.TestCase):
   def _run(self, prog:UOp, *tensors:Tensor):
-    run_linear(UOp(Ops.LINEAR, src=(prog.call(*[t.uop.buf_uop for t in tensors]),)), do_update_stats=False)
+    run_linear(UOp(Ops.LINEAR, src=(prog.call(*[t.uop.buf_uop for t in tensors]),)), update_stats=False)
 
   def test_simple(self):
     out = Tensor.empty(10,10,dtype=dtypes.int)

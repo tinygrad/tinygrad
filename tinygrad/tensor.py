@@ -242,7 +242,7 @@ class Tensor(OpMixin):
   def realize(self, *lst:Tensor, do_update_stats=True) -> Tensor:
     """Triggers the computation needed to create these Tensor(s)."""
     if len(to_realize:=[x for x in (self,)+lst if not x.uop.has_buffer_identity()]):
-      run_linear(*Tensor.linear_with_vars(*to_realize), do_update_stats=do_update_stats)
+      run_linear(*Tensor.linear_with_vars(*to_realize), update_stats=do_update_stats)
     return self
 
   def replace(self, x:Tensor) -> Tensor:

@@ -160,7 +160,7 @@ class HCQAllocator(HCQAllocatorBase, Generic[HCQDeviceType]):
 
   def _do_copy(self, dst:Buffer, src:Buffer):
     ast = UOp(Ops.COPY, dtypes.uint8, (su:=UOp.from_buffer(src), UOp(Ops.DEVICE, arg=dst.device)))
-    run_linear(UOp(Ops.LINEAR, dtypes.void, (hcq_schedule_copy(ast.call(UOp.from_buffer(dst), su), ast),)), jit=True, do_update_stats=False)
+    run_linear(UOp(Ops.LINEAR, dtypes.void, (hcq_schedule_copy(ast.call(UOp.from_buffer(dst), su), ast),)), jit=True, update_stats=False)
 
   def _copyin(self, dest:HCQ2Buffer, src:memoryview):
     s = Buffer(self.dev.device, len(src), dtypes.uint8, options=BufferSpec(host=True), preallocate=True)
