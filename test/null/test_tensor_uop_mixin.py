@@ -328,6 +328,18 @@ class TestTensorUOpSoftmax(unittest.TestCase):
   def test_log_softmax_default(self): _check(self, _t(2, 3).float(), lambda x: x.log_softmax())
   def test_log_softmax_axis0(self):   _check(self, _t(2, 3).float(), lambda x: x.log_softmax(axis=0))
 
+class TestTensorUOpQR(unittest.TestCase):
+  def _check(self, t):
+    qt, rt = t.qr()
+    qu, ru = t.uop.qr()
+    self.assertIs(_strip_unique(qt.uop), _strip_unique(qu))
+    self.assertIs(_strip_unique(rt.uop), _strip_unique(ru))
+  def test_qr_square(self):   self._check(_t(3, 3).float())
+  def test_qr_tall(self):     self._check(_t(4, 3).float())
+  def test_qr_wide(self):     self._check(_t(3, 4).float())
+  def test_qr_zero_col(self): self._check(Tensor([[0.0, 1.0], [0.0, 2.0]]))
+  def test_qr_batched(self):  self._check(_t(2, 3, 3).float())
+
 # UOp.empty / UOp.empty_like are the canonical buffer allocators; Tensor.empty / Tensor.empty_like just forward.
 class TestUOpEmpty(unittest.TestCase):
   def test_empty_dtype_string(self):

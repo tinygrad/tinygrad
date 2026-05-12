@@ -1441,6 +1441,24 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
 
   # ***** matrix ops *****
 
+  def qr(self) -> tuple[Self, Self]:
+    assert self.ndim > 1, f"expected two or more dimensions, got {self.ndim}"
+    b_shape, m, n = self.shape[:-2], int(self.shape[-2]), int(self.shape[-1])
+    R, Q = self, type(self).eye(m, dtype=self.dtype, device=self.device).expand(b_shape + (m, m))
+    idx = type(self).arange(m, device=self.device)
+    for i in range(min(m, n)):
+      # full-length Householder reflector v with zeros above row i; w = tau*v is the rank-1 update factor
+      at_i, x = idx.eq(i), (idx >= i).where(R[..., :, i], 0)
+      norm = x.square().sum(-1, keepdim=True).sqrt()
+      x0 = at_i.where(x, 0).sum(-1, keepdim=True)
+      sgn, active = x0.ne(0).where(x0.sign(), 1), norm.ne(0)
+      u0 = x0 + sgn * norm
+      v = (at_i.where(u0, x) / active.where(u0, 1)).unsqueeze(-1)
+      w = active.where(sgn * u0 / active.where(norm, 1), 0).unsqueeze(-1) * v
+      R = R - w @ (v.transpose(-2, -1) @ R)
+      Q = Q - (Q @ v) @ w.transpose(-2, -1)
+    return Q, R
+
   def newton_schulz(self, steps:int, params:tuple[int, ...], eps:float=1.0e-7) -> Self:
     """
     Performs the newton-schulz algorithm for odd polynomials. The degree of the odd polynomial depends on the number of params.

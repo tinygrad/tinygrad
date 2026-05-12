@@ -1408,24 +1408,6 @@ class Tensor(OpMixin):
       qk = qk + attn_mask
     return qk.cast(self.dtype).softmax(-1).dropout(dropout_p) @ value
 
-  def qr(self) -> tuple[Tensor, Tensor]:
-    assert self.ndim > 1, f"expected two or more dimensions, got {self.ndim}"
-    b_shape, m, n = self.shape[:-2], int(self.shape[-2]), int(self.shape[-1])
-    R, Q = self, Tensor.eye(m, dtype=self.dtype, device=self.device).expand(b_shape + (m, m))
-    idx = Tensor.arange(m, device=self.device)
-    for i in range(min(m, n)):
-      # full-length Householder reflector v with zeros above row i; w = tau*v is the rank-1 update factor
-      at_i, x = idx == i, (idx >= i).where(R[..., :, i], 0)
-      norm = x.square().sum(-1, keepdim=True).sqrt()
-      x0 = at_i.where(x, 0).sum(-1, keepdim=True)
-      sgn, active = (x0 != 0).where(x0.sign(), 1), norm != 0
-      u0 = x0 + sgn * norm
-      v = (at_i.where(u0, x) / active.where(u0, 1)).unsqueeze(-1)
-      w = active.where(sgn * u0 / active.where(norm, 1), 0).unsqueeze(-1) * v
-      R = R - w @ (v.transpose(-2, -1) @ R)
-      Q = Q - (Q @ v) @ w.transpose(-2, -1)
-    return Q, R
-
   def svd(self, full_matrices = True) -> tuple[Tensor, Tensor, Tensor]:
     #partial implementation of https://www.netlib.org/lapack/lawnspdf/lawn169.pdf , pg 26
     assert self.ndim > 1, f"expected two or more dimensions, got {self.ndim}"
