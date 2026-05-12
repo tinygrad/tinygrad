@@ -538,34 +538,35 @@ LLAMA2_70B_LORA_DATASET_MD5 = "682a5f40b790a56751bf8303554efc08"
 
 def download_llama2_70b_lora_dataset(base_dir: Path) -> Path:
   from huggingface_hub import snapshot_download
-  path = Path(snapshot_download(repo_id=LLAMA2_70B_LORA_DATASET_REPO, revision=LLAMA2_70B_LORA_DATASET_REVISION,
-                                repo_type="dataset", local_dir=base_dir, allow_patterns="*.parquet"))
-  _llama2_70b_lora_verify_dataset_hash(path)
+  base_dir = Path(snapshot_download(repo_id=LLAMA2_70B_LORA_DATASET_REPO, revision=LLAMA2_70B_LORA_DATASET_REVISION,
+                                    repo_type="dataset", local_dir=base_dir, allow_patterns="*.parquet"))
+  data_dir = base_dir / 'data'
+  _llama2_70b_lora_clean_dataset_dir(data_dir)
+  _llama2_70b_lora_verify_dataset_hash(data_dir)
   for split in ['train', 'validation']:
-    _llama2_70b_lora_verify_dataset_split(split, *_load_llama2_70b_lora_split(path, split))
-  return path
+    _llama2_70b_lora_verify_dataset_split(split, *_load_llama2_70b_lora_split(base_dir, split))
+  return base_dir
 
-def _llama2_70b_lora_hash_file(path: Path) -> str:
-  with open(path, "rb") as f:
-    return hashlib.md5(f.read()).hexdigest()
+def _llama2_70b_lora_clean_dataset_dir(data_dir: Path):
+  # Match MLPerf's effective hash input: keep only downloaded parquet files in the hashed directory.
+  # AMD: https://github.com/mlcommons/training_results_v5.1/blob/main/AMD/benchmarks/llama2_70b_lora/implementations/MI350X_EPYC_9575F_pytorch_llama2_70b/scripts/download_dataset.py#L34-L38
+  # Cisco: https://github.com/mlcommons/training_results_v5.1/blob/main/Cisco/benchmarks/llama2_70b_lora/implementations/pytorch/scripts/download_dataset.py#L34-L38
+  # QCT: https://github.com/mlcommons/training_results_v5.1/blob/main/Quanta_Cloud_Technology/benchmark/llama2_70b_lora/implementations/pytorch_D74H-7U/scripts/download_dataset.py#L34-L38
+  assert data_dir.is_dir()
+  for path in list(data_dir.iterdir()):
+    if path.is_file() and path.suffix == ".parquet": continue
+    if path.is_dir():
+      import shutil
+      shutil.rmtree(path)
+    else:
+      path.unlink()
 
-def _llama2_70b_lora_hash_dataset(base_dir: Path) -> str:
-  file_hashes = [_llama2_70b_lora_hash_file(path) for path in sorted(base_dir.rglob("*.parquet"))]
-  assert file_hashes, f"no parquet files found under {base_dir}"
-  md5 = hashlib.md5()
-  for h in sorted(file_hashes):
-    md5.update(h.encode())
-  return md5.hexdigest()
-
-def _llama2_70b_lora_verify_dataset_hash(base_dir: Path):
-  # MLPerf v5.1 uses this MD5-of-sorted-per-file-MD5s method here:
-  # https://github.com/mlcommons/training_results_v5.1/blob/main/AMD/benchmarks/llama2_70b_lora/implementations/MI350X_EPYC_9575F_pytorch_llama2_70b/scripts/hash.py#L18-L45
-  # Same dataset, revision, hash call, and 682a5f40... assert in these submissions:
+def _llama2_70b_lora_verify_dataset_hash(data_dir: Path):
   # AMD: https://github.com/mlcommons/training_results_v5.1/blob/main/AMD/benchmarks/llama2_70b_lora/implementations/MI350X_EPYC_9575F_pytorch_llama2_70b/scripts/download_dataset.py#L25-L41
   # Cisco: https://github.com/mlcommons/training_results_v5.1/blob/main/Cisco/benchmarks/llama2_70b_lora/implementations/pytorch/scripts/download_dataset.py#L25-L41
   # QCT: https://github.com/mlcommons/training_results_v5.1/blob/main/Quanta_Cloud_Technology/benchmark/llama2_70b_lora/implementations/pytorch_D74H-7U/scripts/download_dataset.py#L25-L41
-  digest = _llama2_70b_lora_hash_dataset(base_dir)
-  assert digest == LLAMA2_70B_LORA_DATASET_MD5, f"llama2 70b lora dataset hash {digest} != {LLAMA2_70B_LORA_DATASET_MD5}"
+  from examples.mlperf.hash import hash_directory
+  assert (digest:=hash_directory(data_dir)) == LLAMA2_70B_LORA_DATASET_MD5, f"llama2 70b lora dataset hash {digest} != {LLAMA2_70B_LORA_DATASET_MD5}"
 
 def _llama2_70b_lora_verify_dataset_split(split: str, input_ids: np.ndarray, labels: np.ndarray):
   assert input_ids.shape == labels.shape, f"{split} input_ids shape {input_ids.shape} != labels shape {labels.shape}"
@@ -578,7 +579,7 @@ def _load_llama2_70b_lora_split(base_dir:Path, split:str) -> tuple[np.ndarray, n
 
   ds = load_dataset(
     "parquet",
-    data_files={split: str(base_dir / "data" / f"{split}-00000-of-00001.parquet")},
+    data_files={split: str(base_dir / 'data' / f"{split}-00000-of-00001.parquet")},
     split=split,
     cache_dir=str(Path(cache_dir) / "llama2_70b_lora_dataset"),
   )
