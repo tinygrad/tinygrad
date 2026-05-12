@@ -546,11 +546,8 @@ def download_llama2_70b_lora_dataset(base_dir: Path) -> Path:
   return path
 
 def _llama2_70b_lora_hash_file(path: Path) -> str:
-  md5 = hashlib.md5()
   with open(path, "rb") as f:
-    for chunk in iter(lambda: f.read(1024 * 1024), b""):
-      md5.update(chunk)
-  return md5.hexdigest()
+    return hashlib.md5(f.read()).hexdigest()
 
 def _llama2_70b_lora_hash_dataset(base_dir: Path) -> str:
   file_hashes = [_llama2_70b_lora_hash_file(path) for path in sorted(base_dir.rglob("*.parquet"))]
