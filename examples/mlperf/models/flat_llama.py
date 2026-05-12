@@ -33,7 +33,8 @@ FP8_GRAD_DTYPE = dtypes.fp8e5m2
 def quantize_fp8_weight(w:Tensor) -> tuple[Tensor, Tensor]:
   amax = w.abs().flatten(1).max(1).detach()
   scale = FP8_MAX / (amax + 1e-8)
-  return (w * scale.reshape(-1, 1, 1)).clamp(-FP8_MAX, FP8_MAX).cast(FP8_DTYPE), (amax + 1e-8) / FP8_MAX
+  return (w * scale.reshape(-1, 1, 1)).clamp(-FP8_MAX, FP8_MAX).cast(FP8_DTYPE), \
+         ((amax + 1e-8) / FP8_MAX).float().contiguous().requires_grad_(False)
 
 def quantize_fp8(x:Tensor, amax_state:Tensor|None=None):
   new_amax = (local_abs_max(x) if isinstance(x.device, tuple) else x.abs().max()).detach().cast(dtypes.float32)
@@ -155,7 +156,6 @@ class FlatTransformer:
     self._fp8_inv_scale = {}
     for wname in w_names:
       fp8_weight, inv_scale = quantize_fp8_weight(getattr(self, wname))
-      inv_scale = inv_scale.float().contiguous().requires_grad_(False)
       getattr(self, wname).replace(fp8_weight)
       self._fp8_inv_scale[wname] = inv_scale
 
