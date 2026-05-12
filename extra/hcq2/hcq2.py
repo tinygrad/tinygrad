@@ -86,8 +86,7 @@ class HCQ2Compiled(Compiled):
     if hasattr(self, 'iface') and hasattr(self.iface, 'device_fini'): self.iface.device_fini()
 
 class HCQ2Buffer:
-  def __init__(self, va_addr:sint, size:int, meta:Any=None, _base:HCQ2Buffer|None=None, view:MMIOInterface|None=None,
-               owner:HCQ2Compiled|None=None):
+  def __init__(self, va_addr:sint, size:int, meta:Any=None, _base:HCQ2Buffer|None=None, view:MMIOInterface|None=None, owner:HCQ2Compiled|None=None):
     self.va_addr, self.size, self.meta, self._base, self.view, self.owner = va_addr, size, meta, _base, view, owner
 
   def offset(self, offset:int=0, size:int|None=None) -> HCQ2Buffer:
@@ -114,8 +113,8 @@ class HCQAllocator(LRUAllocator[HCQDeviceType], Generic[HCQDeviceType]):
   def _unmap(self, mb):
     self.dev.synchronize()
     self.dev.iface.dev_impl.mm.unmap_range(int(mb.va_addr), round_up(mb.size, 0x1000))
+
   def _offset(self, buf, size:int, offset:int) -> HCQ2Buffer: return buf.offset(offset=offset, size=size)
-  def _as_buffer(self, buf): return buf.cpu_view().mv
 
   def _wrap(self, dev:str, sz:int, opaque:HCQ2Buffer) -> Buffer:
     return Buffer(dev, sz, dtypes.uint8, opaque=opaque, options=BufferSpec(external_ptr=1))
@@ -136,9 +135,7 @@ class HCQAllocator(LRUAllocator[HCQDeviceType], Generic[HCQDeviceType]):
     self.dev.synchronize()
     dest[:] = d._buf.cpu_view()[:len(dest)]
 
-  def _transfer(self, dest:HCQ2Buffer, src:HCQ2Buffer, sz:int, src_dev:HCQDeviceType, dest_dev:HCQDeviceType):
-    cast(HCQAllocator, src_dev.allocator)._map(dest)
-    self._copy(self._wrap(dest_dev.device, sz, dest), self._wrap(src_dev.device, sz, src))
+  def _as_buffer(self, buf): return buf.cpu_view().mv
 
 # **************** lower context ****************
 
