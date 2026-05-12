@@ -142,7 +142,6 @@ def do_assemble(ctx:Renderer, prg:UOp, lin:UOp) -> UOp:
   return prg.replace(src=prg.src[:3]+(UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=binary)))
 
 def do_render(ctx:Renderer, prg:UOp, lin:UOp) -> UOp:
-  assert not ctx.has_aux
   src = ctx.render(list(lin.src))
   new_arg = replace(prg.arg, aux=tuple(ctx.aux(list(lin.src)))) if ctx.has_aux else prg.arg
   return prg.replace(src=prg.src + (UOp(Ops.SOURCE, arg=src),), arg=new_arg)
