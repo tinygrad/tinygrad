@@ -1282,7 +1282,6 @@ def train_bert():
         previous_step = i
 
 LLAMA2_70B_ARGS = {"dim": 8192, "n_heads": 64, "n_kv_heads": 8, "n_layers": 80, "norm_eps": 1e-5, "vocab_size": 32000, "hidden_dim": 28672}
-LLAMA2_70B_REPO_ID = "imaolo/llama2-70b-fused-qkv-flat-mlperf"
 def train_llama2_70b_lora():
   train_llama3(True)
 
@@ -1424,14 +1423,9 @@ def train_llama3(llama2_70b_lora:bool=False):
 
   # load the weights
   if llama2_70b_lora and getenv("LOAD_MODEL", 1):
-    from extra.huggingface_onnx.huggingface_manager import DOWNLOADS_DIR, snapshot_download_with_retry
+    MODEL_PATH = getenv("MODEL_PATH")
 
-    weights_path = DOWNLOADS_DIR/LLAMA2_70B_REPO_ID
-    print(f"downloading weights to {weights_path}")
-    weights_path.mkdir(parents=True, exist_ok=True)
-    snapshot_download_with_retry(repo_id=LLAMA2_70B_REPO_ID, local_dir=weights_path, allow_patterns=["*safetensors*", "*.json", "*.md"])
-
-    state_dict = {k:v for weight_file in weights_path.glob("*.safetensors") for k,v in safe_load(weight_file).items()}
+    state_dict = {k:v for weight_file in Path(MODEL_PATH).glob("*.safetensors") for k,v in safe_load(weight_file).items()}
 
     assert not (unused := (state_dict.keys() - get_state_dict(model).keys())), f"unused weights in state_dict: {sorted(unused)}"
 
