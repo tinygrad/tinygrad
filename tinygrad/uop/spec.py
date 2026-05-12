@@ -8,7 +8,7 @@ from tinygrad.helpers import DEBUG, Context, prod, SPEC, Metadata, panic, CHECK_
 # ***** uop helpers *****
 
 def validate_index(uidx:UOp, gate:UOp|None=None):
-  if len(uidx.src) == 3: return True  # skip for image
+  if len(uidx.src) != 2: return True  # skip for non final index. TODO: check more complex index with shape
   buf,idx = uidx.src
   if idx.op is Ops.CONST and idx.arg is Invalid: return True
   if gate is None: gate = UOp.const(dtypes.bool, True)
