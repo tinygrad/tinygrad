@@ -1492,11 +1492,9 @@ def train_llama3(llama2_70b_lora:bool=False):
   Tensor.realize(*optim.params, *fp8_inv_scales, *fp8_amax, *fp8_grad_amax)
 
   @TinyJit
-  @Tensor.train()
   def minibatch(tokens:Tensor):
     if is_dp: tokens = tokens.to(None).shard(device, 0)
-    # NOTE to(None) required here only when BS > 1
-    if is_mp: tokens = tokens.to(None).shard(device)
+    if is_mp: tokens = tokens.shard(device)
     if not is_sharding: tokens = tokens.to(None)
     logits = model(tokens)[:, :-1] if llama2_70b_lora else model(tokens[:, :-1])
     if getenv("FAST_CE", 0):
