@@ -50,7 +50,6 @@ class LinearScanRegallocContext:
       if v not in self.spills:
         dt = self.vdef(v).dtype
         sz = dt.scalar().itemsize * dt.count if not isinstance(dt, PtrDType) else 8
-        assert sz > 0
         offset = self.stack_size + (sz - self.stack_size % sz) % sz
         self.spills[v] = UOp.const(dtypes.int32, offset)
         self.stack_size = offset + sz
@@ -71,13 +70,13 @@ class LinearScanRegallocContext:
       # allocate defs
       if isinstance(u.tag, tuple):
         for j,v in enumerate(u.tag):
-          assert isinstance(v, Register) and v not in live
+          # register should only be defined once
+          assert isinstance(v, Register) and lr[v][0] == i
           cons = v.cons
           # two address instructions (src is reused by def) can only coalesce reused src. reused src goes first to get priority in case of a tiebreak
           if ren.is_two_address(u) and j == 0:
-            ins = tuple(live.get(s.reg) for s in u.src)
-            cons = ((ins[0],) if ins[0] in cons else ()) + tuple(r for r in cons if r not in ins)
-            assert cons
+            uses = tuple(live.get(s.reg) for s in u.src)
+            cons = ((uses[0],) if uses[0] in cons else ()) + tuple(r for r in cons if r not in uses)
           # HACK: cause the range is missing the comparison
           live[v] = alloc(cons, i+1 if u.op is not Ops.RANGE else i)
           self.reals.setdefault(i, {})[v] = live[v]
@@ -97,7 +96,6 @@ class LinearScanRegallocContext:
           # if all the possible registers are already in live_in there's no space for this var
           if set(v.cons).issubset(live_in.values()): continue
           if v not in live: live[v] = fill(v, i)
-          assert live[v] not in live_in.values()
           live_in[v] = live[v]
         live_ins.append(live_in)
 

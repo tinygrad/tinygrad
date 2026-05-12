@@ -617,14 +617,6 @@ post_regalloc_matcher = PatternMatcher([
    [ctx.ren.copy(x.src[0], x.reg), nx] if x.reg != x.src[0].reg else [nx]) if x.arg in X86GroupOp.TwoAddress else None),
 ])
 
-# ***** X86 spec *****
-# TODO: do we even want this?
-isa_spec = PatternMatcher([
-  # these are the only non X86Ops allowed
-  (UPat((Ops.CONST, Ops.NOOP, Ops.GROUP, Ops.AFTER, Ops.BARRIER, Ops.DEFINE_REG)), lambda: True),
-  (UPat(Ops.INS, name="x"), lambda x: x.arg in X86GroupOp.All),
-])
-
 # ***** X86 instruction encoding *****
 
 def encode(x:UOp, opc:int, reg:int|None=None, pp:int=0, sel:int=0, we:int=0) -> bytes|None:
@@ -836,7 +828,6 @@ class X86Renderer(ISARenderer):
   isel_matcher = isel_matcher
   pre_regalloc_matcher = pre_regalloc_matcher
   post_regalloc_matcher = post_regalloc_matcher
-  isa_spec = isa_spec
   code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.AND, Ops.OR, Ops.SHL, Ops.SHR, Ops.NEG, Ops.SUB, Ops.FDIV, Ops.CMPLT, Ops.CMPEQ)}
   def __init__(self, target:Target):
     super().__init__(target)

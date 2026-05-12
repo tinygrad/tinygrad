@@ -29,7 +29,6 @@ class PreRegAllocContext:
   clobbered: set[UOp] = field(default_factory=set)
 
 class ISARenderer(Renderer):
-  isa_spec: PatternMatcher
   pre_isel_matcher: PatternMatcher
   isel_matcher: PatternMatcher
   pre_regalloc_matcher: PatternMatcher|None = None
