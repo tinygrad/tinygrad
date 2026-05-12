@@ -339,7 +339,8 @@ class TestVizIntegration(unittest.TestCase):
     with save_viz() as viz:
       c1 = Tensor.empty(4, device="NULL").add(1)
       c2 = Tensor.empty(8, device="NULL").add(1)
-      sched = c1.schedule_linear(c2)
+      with Context(SCACHE=0):
+        sched = c1.schedule_linear(c2)
       from tinygrad.engine.realize import compile_linear
       sched = compile_linear(sched)
       with Context(NO_COLOR=0):
@@ -994,7 +995,7 @@ class TestCLI(unittest.TestCase):
     def f(x):
       r = x.sum(axis=1).reshape(32, 1).expand(32, 32).contiguous()
       return x + r
-    # turn of scache because this test requires a complete schedule rewrite
+    # turn off scache because this test requires a complete schedule rewrite
     with save_viz() as viz, Context(SCACHE=0):
       f(f(Tensor.empty(32, 32, device="NULL"))).realize()
     with write_files(viz) as files, Context(NO_COLOR=1):
