@@ -255,6 +255,8 @@ runs:
         sudo mkdir -p /usr/local/cuda/targets/x86_64-linux
         curl -fL https://developer.download.nvidia.com/compute/cuda/redist/cuda_nvrtc/linux-x86_64/cuda_nvrtc-linux-x86_64-11.5.119-archive.tar.xz \
           | sudo tar -xJ -C /usr/local/cuda/targets/x86_64-linux --strip-components=1
+        echo /usr/local/cuda/targets/x86_64-linux/lib | sudo tee /etc/ld.so.conf.d/cuda-nvrtc.conf
+        sudo ldconfig
 
     # **** gpuocelot ****
 
