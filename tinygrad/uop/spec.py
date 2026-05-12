@@ -43,6 +43,9 @@ def type_verify(ast:UOp|list[UOp], check_spec:PatternMatcher):
 spec_shared = PatternMatcher([
   (UPat(Ops.SINK, dtypes.void), lambda: True), # NOTE: for testing, we let sinks be anything
 
+  # NOOP. TODO: remove this
+  (UPat(Ops.NOOP), lambda: True),
+
   # CONST/DEFINE_VAR are everywhere
   (UPat(Ops.CONST, src=(), name="x"), lambda x: type(x.arg) is type(x.dtype.const(x.arg))),
   (UPat(Ops.DEFINE_VAR, name="x"), lambda x: len(x.arg) == 3 and isinstance(x.arg[0], str)),
@@ -68,8 +71,8 @@ spec_shared = PatternMatcher([
   # PARAM (that's really a DEFINE_GLOBAL)
   (UPat(Ops.PARAM, name="x"), lambda x: isinstance(x.dtype, (PtrDType, ImageDType)) and x.dtype.addrspace == AddrSpace.GLOBAL),
 
-  # GROUP of stores (or groups)
-  (UPat(Ops.GROUP, dtypes.void, src=UPat((Ops.GROUP, Ops.STORE))), lambda: True),
+  # GROUP of stores (or groups, or NOOPs)
+  (UPat(Ops.GROUP, dtypes.void, src=UPat((Ops.GROUP, Ops.STORE, Ops.NOOP))), lambda: True),
 
   # TOOD: these should be buffer with different addrspace
   (UPat(Ops.DEFINE_LOCAL, name="x"), lambda x: isinstance(x.dtype, PtrDType) and x.dtype.addrspace == AddrSpace.LOCAL),
@@ -78,9 +81,6 @@ spec_shared = PatternMatcher([
   # AFTER on Movement Op, PARAM, BUFFER, or another AFTER
   (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.PARAM, Ops.BUFFER, Ops.DEFINE_REG, Ops.DEFINE_LOCAL, Ops.AFTER, Ops.MULTI, Ops.BITCAST})),),
         allow_any_len=True), lambda: True),
-
-  # NOOP. TODO: remove this
-  (UPat(Ops.NOOP), lambda: True),
 
   # CUSTOM (inline and non inline)
   (UPat((Ops.CUSTOMI, Ops.CUSTOM)), lambda: True),
@@ -124,7 +124,7 @@ spec_tensor = PatternMatcher([
   (UPat(Ops.PARAM, src=(UPat(), UPat(), UPat(), UPat(), UPat()), name="x"), lambda x: True),
 
   # Tensor variable bindings
-  (UPat(Ops.BIND, (dtypes.int,dtypes.weakint,), (UPat(Ops.DEFINE_VAR), UPat.cvar(dtype=(dtypes.int,dtypes.weakint,))), arg=None), lambda: True),
+  (UPat(Ops.BIND, (dtypes.int, dtypes.weakint,), (UPat(Ops.DEFINE_VAR), UPat.cvar(dtype=(dtypes.int,dtypes.weakint,))), arg=None), lambda: True),
 
   # CALL
   (UPat(Ops.CALL, src=(UPat((Ops.SINK, Ops.LINEAR, Ops.PROGRAM, Ops.COPY)),), allow_any_len=True), lambda: True),
@@ -196,6 +196,13 @@ spec_full = PatternMatcher([
   # BUFFER_VIEW on BUFFER is allowed if BUFFER is
   (UPat(Ops.BUFFER_VIEW, src=(UPat((Ops.BUFFER, Ops.PARAM)),)), lambda: True),
 
+  # TODO: BUFFER_VIEW shouldn't go on INDEX. why is this allowed? remove these both
+  (UPat(Ops.BUFFER_VIEW, src=(UPat((Ops.INDEX,)),), allow_any_len=True), lambda: True),
+  (UPat(Ops.CALL, src=(UPat((Ops.BUFFER_VIEW, Ops.CUSTOM_FUNCTION)),), allow_any_len=True), lambda: True),
+
+  # custom function
+  (UPat(Ops.CUSTOM_FUNCTION, name="x"), lambda x: isinstance(x.arg, str)),
+
   # codegen may end ranges after gpudims has replaced RANGE with SPECIAL.
   (UPat(Ops.END, src=(UPat(), UPat()), allow_any_len=True), lambda: True),
 
@@ -217,6 +224,9 @@ spec_full = PatternMatcher([
 
   # all loads/stores
   (UPat((Ops.LOAD, Ops.STORE)), lambda: True),
+
+  # while BIND is being casted
+  (UPat(Ops.BIND, (dtypes.int, dtypes.weakint), (UPat(), UPat()), arg=None), lambda: True),
 
   # TODO: PTRCAT and VCAT need to be deleted
 
