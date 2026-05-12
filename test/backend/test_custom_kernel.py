@@ -341,7 +341,6 @@ class TestCustomKernel(unittest.TestCase):
     self.assertEqual(y.tolist(), [1, 2, 3, 4])
 
   @Context(DEV="CPU")
-  @unittest.expectedFailure
   def test_simple_from_source(self):
     a = Tensor([0., 1., 2.]).realize()
 
