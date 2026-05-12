@@ -117,6 +117,9 @@ class FFNBlock:
         if hasattr(self, 'ffn_gate_inp_shexp'): shexp = shexp * (x * self.ffn_gate_inp_shexp["weight"]).sum(axis=-1, keepdim=True).sigmoid()
         out = out + shexp
       return out
+    if getenv("CUSTOM_MLP") and x.device == "AMD" and self.config.dim == 1024 and self.config.hidden_dim == 3584:
+      from tinygrad.llm.amd_kernels import fused_gate_up
+      return self.ffn_down(fused_gate_up(x, self.ffn_gate.weight, self.ffn_up.weight))
     # TODO: remove the need for this contiguous
     return self.ffn_down(self.ffn_gate(x).silu().contiguous() * self.ffn_up(x))
 
