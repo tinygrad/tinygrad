@@ -260,6 +260,9 @@ class TestTinygrad(unittest.TestCase):
     b = Tensor.randperm(1000).realize()
     np.testing.assert_equal(set(b.numpy()), set(range(1000)))
 
+  def test_rand_rejects_unknown_kwargs(self):
+    with self.assertRaises(TypeError): Tensor.rand(5, generator="foo")
+
   def test_randperm_requires_grad(self):
     self.assertIs(Tensor.randperm(5, requires_grad=True).requires_grad, True)
     self.assertIs(Tensor.randperm(5, requires_grad=False).requires_grad, False)

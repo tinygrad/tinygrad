@@ -566,12 +566,11 @@ class Tensor(OpMixin):
     return Tensor._device_seeds[device], low.cat(high)
 
   @staticmethod
-  def rand(*shape, device:str|None=None, dtype:DTypeLike|None=None, contiguous:bool=True, **kwargs) -> Tensor:
+  def rand(*shape, device:str|None=None, dtype:DTypeLike|None=None, requires_grad:bool|None=None, contiguous:bool=True) -> Tensor:
     """
     Creates a tensor with the given shape, filled with random values from a uniform distribution over the interval `[0, 1)`.
 
     You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
-    Additionally, all other keyword arguments are passed to the constructor of the tensor.
 
     ```python exec="true" source="above" session="tensor" result="python"
     Tensor.manual_seed(42)
@@ -586,11 +585,11 @@ class Tensor(OpMixin):
     device = cast(str, canonicalize_device(device))
 
     # if shape has 0, return zero tensor
-    if (numel := prod(shape)) == 0: return Tensor.zeros(shape, device=device, dtype=dt, **kwargs)
+    if (numel := prod(shape)) == 0: return Tensor.zeros(shape, device=device, dtype=dt, requires_grad=requires_grad)
     num = ceildiv(numel * dt.itemsize, 4)
     key, counter = Tensor._next_counter(device, num)
     bits = Tensor.random_bits(key, counter, num)
-    out = Tensor._bits_to_rand(bits, shape, dt).requires_grad_(kwargs.get("requires_grad"))
+    out = Tensor._bits_to_rand(bits, shape, dt).requires_grad_(requires_grad)
     return out.contiguous() if contiguous else out
 
   # ***** creation helper functions *****
