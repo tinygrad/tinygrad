@@ -48,9 +48,9 @@ class TestValidateOOB(unittest.TestCase):
     with Context(CHECK_OOB=1, SPEC=2):
       buf = UOp(Ops.PARAM, dtypes.int.ptr(16), (), 0)
       v = Variable("v", 0, 20)
-      to_uops_list([buf.index(v.valid(v < 16)).store(0)])  # valid
+      to_uops_list([buf.index(v.valid(v < 16), ptr=True).store(0)])  # valid
       with self.assertRaises(RuntimeError):
-        to_uops_list([buf.index(v.valid(v < 20)).store(0)])  # oob
+        to_uops_list([buf.index(v.valid(v < 20), ptr=True).store(0)])  # oob
 
   # ALU ops in index
   def test_floordiv(self):

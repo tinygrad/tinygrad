@@ -68,7 +68,7 @@ class TestTK(unittest.TestCase):
 
     linear = UOp(Ops.LINEAR, src=(sink.call(*[t.uop.buf_uop for t in (c, a, b)]),))
 
-    for _ in range(5): run_linear(linear, do_update_stats=False)
+    for _ in range(5): run_linear(linear, update_stats=False)
     c = c.float()
 
     ref = a.matmul(b, dtype=dtypes.float32).float()
@@ -117,7 +117,7 @@ class TestTK(unittest.TestCase):
 
     linear = UOp(Ops.LINEAR, src=(sink.call(*[t.uop.buf_uop for t in (c, a, b)]),))
 
-    for _ in range(5): run_linear(linear, do_update_stats=False)
+    for _ in range(5): run_linear(linear, update_stats=False)
     c = c.float()
 
     ref = a.matmul(b.transpose(2, 3), dtype=dtypes.float32).float()
@@ -154,7 +154,7 @@ class TestTK(unittest.TestCase):
 
     linear = UOp(Ops.LINEAR, src=(sink.call(*[t.uop.buf_uop for t in (b, a)]),))
 
-    for _ in range(5): run_linear(linear, do_update_stats=False)
+    for _ in range(5): run_linear(linear, update_stats=False)
     b = b.float()
 
     ref = a.float()
@@ -194,7 +194,7 @@ class TestTK(unittest.TestCase):
 
     linear = UOp(Ops.LINEAR, src=(sink.call(*[t.uop.buf_uop for t in (b, a)]),))
 
-    for _ in range(5): run_linear(linear, do_update_stats=False)
+    for _ in range(5): run_linear(linear, update_stats=False)
     b = b.float()
 
     ref = a.float()
@@ -237,7 +237,7 @@ class TestTK(unittest.TestCase):
 
     linear = UOp(Ops.LINEAR, src=(sink.call(*[t.uop.buf_uop for t in (b, c, a)]),))
 
-    for _ in range(5): run_linear(linear, do_update_stats=False)
+    for _ in range(5): run_linear(linear, update_stats=False)
     b = b.float()
     c = c.float()
 
@@ -278,7 +278,7 @@ class TestTK(unittest.TestCase):
 
     linear = UOp(Ops.LINEAR, src=(sink.call(*[t.uop.buf_uop for t in (b, a)]),))
 
-    for _ in range(5): run_linear(linear, do_update_stats=False)
+    for _ in range(5): run_linear(linear, update_stats=False)
     b = b.float()
 
     ref = a.float()
@@ -316,7 +316,7 @@ class TestTK(unittest.TestCase):
 
       linear = UOp(Ops.LINEAR, src=(sink.call(*[t.uop.buf_uop for t in (b, a)]),))
 
-      for _ in range(5): run_linear(linear, do_update_stats=False)
+      for _ in range(5): run_linear(linear, update_stats=False)
       b = b.float()
 
       ref = a.float() + 1
@@ -362,7 +362,7 @@ class TestTK(unittest.TestCase):
 
     linear = UOp(Ops.LINEAR, src=(sink.call(*[t.uop.buf_uop for t in (b, a)]),))
 
-    for _ in range(5): run_linear(linear, do_update_stats=False)
+    for _ in range(5): run_linear(linear, update_stats=False)
     b = b.float()
 
     ref = a.float().max(axis=2, keepdim=True).expand(a.shape)
@@ -408,7 +408,7 @@ class TestTK(unittest.TestCase):
 
     linear = UOp(Ops.LINEAR, src=(sink.call(*[t.uop.buf_uop for t in (b, a)]),))
 
-    for _ in range(5): run_linear(linear, do_update_stats=False)
+    for _ in range(5): run_linear(linear, update_stats=False)
     b = b.float()
 
     ref = a.float().max(axis=2, keepdim=True).expand(a.shape)
@@ -454,7 +454,7 @@ class TestTK(unittest.TestCase):
 
     linear = UOp(Ops.LINEAR, src=(sink.call(*[t.uop.buf_uop for t in (b, a)]),))
 
-    for _ in range(5): run_linear(linear, do_update_stats=False)
+    for _ in range(5): run_linear(linear, update_stats=False)
     b = b.float()
 
     ref = a.float().sum(axis=2, keepdim=True).expand(a.shape)
@@ -500,7 +500,7 @@ class TestTK(unittest.TestCase):
 
     linear = UOp(Ops.LINEAR, src=(sink.call(*[t.uop.buf_uop for t in (b, a)]),))
 
-    for _ in range(5): run_linear(linear, do_update_stats=False)
+    for _ in range(5): run_linear(linear, update_stats=False)
     b = b.float()
 
     ref = a.float().sum(axis=2, keepdim=True).expand(a.shape)
@@ -561,7 +561,7 @@ class TestTK(unittest.TestCase):
 
     linear = UOp(Ops.LINEAR, src=(sink.call(*[t.uop.buf_uop for t in (b, a)]),))
 
-    for _ in range(5): run_linear(linear, do_update_stats=False)
+    for _ in range(5): run_linear(linear, update_stats=False)
     b = b.float()
 
     ref = a.float().softmax(axis=3)
@@ -622,7 +622,7 @@ class TestTK(unittest.TestCase):
 
     linear = UOp(Ops.LINEAR, src=(sink.call(*[t.uop.buf_uop for t in (b, a)]),))
 
-    for _ in range(5): run_linear(linear, do_update_stats=False)
+    for _ in range(5): run_linear(linear, update_stats=False)
     b = b.float()
 
     ref = a.float().softmax(axis=2)

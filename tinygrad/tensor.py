@@ -618,7 +618,7 @@ class Tensor(OpMixin):
     if kwargs.get("device") is not None: raise RuntimeError("cannot specify `device` on `*_like` of a multi device tensor")
     if self.uop.axis is None: return fxn(self.shape, *args, dtype=dtype, **kwargs).shard(self.device)
     stacked = UOp.mstack(*[fxn(self.uop.shard_shape, *args, device=d, dtype=dtype, **kwargs).uop for d in self.device])
-    return Tensor(stacked.multi(self.uop.axis))
+    return Tensor(stacked.multi(self.uop.axis), requires_grad=kwargs.get("requires_grad"))
 
   def full_like(self, fill_value:ConstType, dtype=None, device=None, requires_grad=None) -> Tensor:
     """
@@ -816,7 +816,7 @@ class Tensor(OpMixin):
     print(Tensor.randperm(6).numpy())
     ```
     """
-    return Tensor.rand(n, device=device, **kwargs).argsort().cast(dtype)
+    return Tensor.rand(n, device=device, **kwargs).argsort().cast(dtype).requires_grad_(kwargs.get("requires_grad"))
 
   def multinomial(self:Tensor, num_samples:int = 1, replacement:bool = False) -> Tensor:
     """
@@ -1075,7 +1075,7 @@ class Tensor(OpMixin):
     if not dtypes.is_bool(mask.dtype): raise RuntimeError(f"masked_select expects bool mask tensor, got {mask.dtype}")
     x, mask = self.flatten(), mask._broadcast_to(self.shape).flatten()
     mask_cumsum = mask.cumsum()
-    counts = Tensor.zeros(mask_cumsum[-1].item(), dtype=dtypes.int32)
+    counts = Tensor.zeros(mask_cumsum[-1].item(), dtype=dtypes.int32, device=self.device)
     idxs = counts.scatter(0, mask_cumsum, 1, reduce='add').cumsum()
     return x[idxs]
 
@@ -1398,35 +1398,36 @@ class Tensor(OpMixin):
     assert self.ndim > 1, f"expected two or more dimensions, got {self.ndim}"
     b_shape, m, n = self.shape[:-2], int(self.shape[-2]), int(self.shape[-1])
     R = self.clone()
-    Q = Tensor.eye(m, dtype=self.dtype).reshape((1,) * len(b_shape) + (m, m)).expand(b_shape + (m, m))
+    Q = Tensor.eye(m, dtype=self.dtype, device=self.device).expand(b_shape + (m, m))
     for i in range(min(m, n)):
       x = R[..., i:m, i]
       norm = x.square().sum(-1).sqrt()
+      mask = norm != 0
       s = (x[..., 0] != 0).where(-x[..., 0].sign(), -1)
       u1 = x[..., 0] - s * norm
-      w = x.unsqueeze(-1) / (norm != 0).where(u1, 1).reshape(b_shape + (1, 1))
+      w = x.unsqueeze(-1) / mask.where(u1, 1)[..., None, None]
       w[..., 0, 0] = 1
-      tau = (-s * u1 / (norm != 0).where(norm, 1)).reshape(b_shape + (1, 1))
-      tau = (norm != 0).reshape(b_shape + (1, 1)).where(tau, 0)
+      tau = (-s * u1 / mask.where(norm, 1))[..., None, None]
+      tau = mask[..., None, None].where(tau, 0)
       R[..., i:m, :] = R[..., i:m, :] - (w * tau) @ (w.transpose(-2, -1) @ R[..., i:m, :])
       Q[..., :, i:m] = Q[..., :, i:m] - (Q[..., :, i:m] @ w) @ (tau * w).transpose(-2, -1)
-    return Q,R
+    return Q, R
 
   def svd(self, full_matrices = True) -> tuple[Tensor, Tensor, Tensor]:
     #partial implementation of https://www.netlib.org/lapack/lawnspdf/lawn169.pdf , pg 26
     assert self.ndim > 1, f"expected two or more dimensions, got {self.ndim}"
     b_shape, m, n = self.shape[:-2], int(self.shape[-2]), int(self.shape[-1])
     #preprocess the matrix
-    Q, R = (self.qr() if m >= n else self.transpose(-2, -1).qr())
+    Q, R = (self if m >= n else self.transpose(-2, -1)).qr()
     num, q_num = min(m, n), max(m, n)
     # TODO: codegen infinite loop without contiguous
-    U = R.shrink(tuple([None] * len(b_shape) + [(0, num), (0, num)])).contiguous()
-    V = Tensor.eye(num, dtype=self.dtype).reshape((1,) * len(b_shape) + (num, num)).expand(b_shape + (num, num)).contiguous()
+    U = R[..., :num, :num].contiguous()
+    V = Tensor.eye(num, dtype=self.dtype, device=self.device).expand(b_shape + (num, num)).contiguous()
     #prepare round robin pairing
-    permute, inverse_permute = Tensor.arange(0, num, dtype=dtypes.int), Tensor.zeros(num, dtype=dtypes.int)
+    permute, inverse_permute = Tensor.arange(0, num, dtype=dtypes.int, device=self.device), Tensor.zeros(num, dtype=dtypes.int, device=self.device)
     permute[num//2:num] = permute[num//2:num].flip(0)
-    inverse_permute[permute] = Tensor.arange(num, dtype=dtypes.int)
-    def one_round_jacobi(U, V,permute,inverse_permute):
+    inverse_permute[permute] = Tensor.arange(num, dtype=dtypes.int, device=self.device)
+    def one_round_jacobi(U, V, permute, inverse_permute):
       #pair all the columns
       V_permuted, runoff_V = (V[..., permute].split(num - 1, -1)) if num % 2 == 1 else (V[..., permute], None)
       V_left, V_right = V_permuted.split(num//2, -1)
@@ -1443,27 +1444,26 @@ class Tensor(OpMixin):
       s = c * t
       #apply the rotations
       U_left, U_right = c * U_left - s * U_right, s * U_left + c * U_right
-      U = U_left.cat(U_right.cat(runoff_U, dim = -1) if num % 2 == 1 else U_right, dim = -1)[..., inverse_permute]
+      U = U_left.cat(U_right.cat(runoff_U, dim=-1) if num % 2 == 1 else U_right, dim=-1)[..., inverse_permute]
       V_left, V_right = c * V_left - s * V_right, s * V_left + c * V_right
-      V = V_left.cat(V_right.cat(runoff_V, dim = -1) if num % 2 == 1 else V_right, dim = -1)[..., inverse_permute]
+      V = V_left.cat(V_right.cat(runoff_V, dim=-1) if num % 2 == 1 else V_right, dim=-1)[..., inverse_permute]
       #prepare the next round robin pairings
-      if num % 2 == 1: permute = ((permute - 1) % num)
+      if num % 2 == 1: permute = (permute - 1) % num
       else: permute = permute[0].reshape(1).cat(((permute[1:num] - 2) % (num - 1)) + 1)
-      inverse_permute = inverse_permute.scatter(0,permute,Tensor.arange(num,dtype=dtypes.int32))
+      inverse_permute = inverse_permute.scatter(0, permute, Tensor.arange(num, dtype=dtypes.int32, device=self.device))
       return U, V, permute, inverse_permute
-    max_iterations, iterations_per_round = 1, int(num * math.log2(num) * 2 + 2)#sorta heuristic, most use num*log2(num)
-    for _ in range(max_iterations * iterations_per_round): U, V, permute, inverse_permute = one_round_jacobi(U, V, permute, inverse_permute)
+    #sorta heuristic, most use num*log2(num)
+    for _ in range(int(num * math.log2(num) * 2 + 2)): U, V, permute, inverse_permute = one_round_jacobi(U, V, permute, inverse_permute)
     #extract singular values and sort. construct U from Q
-    S, indices = U.square().sum(-2).sqrt().sort(dim = -1, descending=True)
-    new_indices = indices.reshape(b_shape + (1, num)).expand(b_shape + (num, num))
+    S, indices = U.square().sum(-2).sqrt().sort(dim=-1, descending=True)
+    new_indices = indices.unsqueeze(-2).expand(b_shape + (num, num))
     U = U.gather(-1, new_indices) / (S != 0).where(S, 1).unsqueeze(-2)
     V = V.gather(-1, new_indices)
-
-    padded_u = Tensor.eye(q_num, dtype=U.dtype).reshape((1,) * len(b_shape) + (q_num, q_num)).expand(b_shape + (q_num, q_num))
+    padded_u = Tensor.eye(q_num, dtype=U.dtype, device=U.device).expand(b_shape + (q_num, q_num))
     padded_u[..., 0:num, 0:num] = U
     U = Q @ padded_u
-    if not full_matrices: U, V = U[..., 0:num], V[..., 0:num]
-    return (U, S, V.transpose(-2,-1)) if m >= n else (V, S, U.transpose(-2, -1))
+    if not full_matrices: U = U[..., 0:num]
+    return (U, S, V.transpose(-2, -1)) if m >= n else (V, S, U.transpose(-2, -1))
 
   # ***** cast ops *****
 
@@ -1535,6 +1535,7 @@ class Tensor(OpMixin):
     dtsz = 2 if FLOAT16 else 4
 
     (bs,_,iy,ix), (cout,cin,H,W) = self.shape, weight.shape
+    assert isinstance(cin, int) and isinstance(cout, int)
     x, w = self, weight.reshape(groups, (rcout := cout//groups), cin, H, W)
 
     padding_neg, padding_pos = [min(0, p) for p in resolve_pool_pads(padding, 2)], [max(0, p) for p in resolve_pool_pads(padding, 2)]
@@ -1543,11 +1544,11 @@ class Tensor(OpMixin):
 
     # hack for non multiples of 4 on cin
     if cin % 4 != 0 and not (cin == 1 and groups%4 == 0):
-      x = x.reshape(bs, groups, cin, iy, ix)   # do this always?
-      added_input_channels = 4 - (cin % 4)
-      cin = cin + added_input_channels
-      w = w.pad_to(None, None, cin, None, None)
-      x = x.pad_to(None, None, cin, None, None).reshape(bs, groups*cin, iy, ix)
+      new_cin = round_up(cin, 4)
+      w = w.pad_to(None, None, new_cin, None, None)
+      x = x.reshape(bs, groups, cin, iy, ix)
+      x = x.pad_to(None, None, new_cin, None, None).reshape(bs, groups*new_cin, iy, ix)
+      cin = new_cin
 
     # hack for non multiples of 4 on rcout
     added_output_channels = 0
@@ -1564,7 +1565,6 @@ class Tensor(OpMixin):
     elif cin_last: w = w.reshape(cout//4,4,cin//4,4,H,W).permute(0,4,2,5,1,3)
     else: w = w.reshape(cout//4,4,cin//4,4,H,W).permute(0,4,2,5,3,1)
 
-    # contiguous creates the image, and early realize static weights (TODO: test for the static weight)
     def is_pow2(v): return v > 0 and v & (v - 1) == 0
     # pad dimension i to amt with invalids
     def ipad(t, i, amt):
@@ -1578,15 +1578,17 @@ class Tensor(OpMixin):
       return ipad(t, at:=at or dim, round_up(t.shape[at] + int(force), align // math.gcd(prod(t.shape[dim:]) // t.shape[at], align)))
 
     # bank conflicts
-    if cin >= 8 and is_pow2(cin // 4):
+    bank_conflict = cin >= 8 and is_pow2(cin // 4)
+    if bank_conflict:
       x, w = pad_align(x.reshape(bs, iy, ix, groups, cin // 4, 4), 2, at=4, force=True), pad_align(w, 1, at=2, force=True)
     else: x, w = pad_align(x, 2), pad_align(w, 1)
 
+    # contiguous creates the image, and early realize static weights (TODO: test for the static weight)
     if FLOAT16: x, w = x.cast(dtypes.half).contiguous().cast(dtypes.float), w.cast(dtypes.half).contiguous().cast(dtypes.float)
     else: x, w = x.contiguous(), w.contiguous()
 
     # undo alignment hacks
-    if cin >= 8 and is_pow2(cin // 4): x, w = x[:, :, :ix, :, :cin // 4, :], w[:, :H, :cin // 4, ...]
+    if bank_conflict: x, w = x[:, :, :ix, :, :cin // 4, :], w[:, :H, :cin // 4, ...]
     else: x, w = x[:, :, :ix, :], w[:, :H, ...]
 
     # expand out
@@ -1603,27 +1605,21 @@ class Tensor(OpMixin):
     # prepare weights
     w = w.permute(0,4,2,5,1,3).reshape((1, 1, 1, *group_shape, *rcout_expand, rcin_hi, rcin_lo, H, W))
 
-    added_ox = 0
-    assert isinstance(ox, int) and isinstance(cout, int)
-    if (ox * cout) % (64 // dtsz):
-      added_ox = round_up(ox, 64 // (dtsz * math.gcd(cout, 64 // dtsz))) - ox
-      ox = ox + added_ox
-      x = x.pad_to(None, None, ox, None, None, None, None, None, None, None, None)
+    added_ox = round_up(ox, math.lcm(cout, 64 // dtsz) // cout) - ox
+    if added_ox: x = x.pad_to(None, None, ox + added_ox, None, None, None, None, None, None, None, None)
 
     # the conv!
     ret = (x*w).cast(dtypes.float32).sum((-4, -3, -2, -1), dtype=dtype)
 
     if added_ox:
-      ret = ret.reshape(bs, oy, ox, groups, rcout)[:, :, :-added_ox, ...]
-      ox = ox - added_ox
+      ret = ret.reshape(bs, oy, ox + added_ox, groups, rcout)[:, :, :ox, ...]
 
     # undo hack for non multiples of 4 on C.rcout
-    if added_output_channels != 0:
+    if added_output_channels:
       ret = ret.reshape(bs, oy, ox, groups, rcout)[:, :, :, :, :-added_output_channels]
-      cout = groups * (rcout - added_output_channels)
 
     # NCHW output
-    ret = ret.reshape(bs, oy, ox, cout).permute(0,3,1,2)
+    ret = ret.reshape(bs, oy, ox, groups * (rcout - added_output_channels)).permute(0,3,1,2)
     return ret if bias is None else ret.add(bias.reshape(1, -1, 1, 1))
 
 P = ParamSpec("P")

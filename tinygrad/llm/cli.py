@@ -2,7 +2,7 @@ from __future__ import annotations
 import sys, argparse, codecs, typing, re, unicodedata, json, uuid, time, pathlib
 from tinygrad import nn
 from tinygrad.uop.ops import UOp, Ops
-from tinygrad.helpers import partition, DEBUG, Timing, GlobalCounters, stderr_log, colored, Context, fetch
+from tinygrad.helpers import partition, DEBUG, Timing, GlobalCounters, stderr_log, colored, Context, fetch, profile_marker
 from tinygrad.viz.serve import TCPServerWithReuse, HTTPRequestHandler
 from tinygrad.llm.model import Transformer
 
@@ -211,7 +211,8 @@ def main():
   # do benchmark
   if args.benchmark is not None:
     gen = model.generate(toks:=[tok.bos_id or 0])
-    for _ in range(args.benchmark):
+    for i in range(args.benchmark):
+      profile_marker(f"decode @ {i}")
       GlobalCounters.reset()
       with Timing(on_exit=lambda x: f", {1e9/x:6.2f} tok/s, {GlobalCounters.global_mem/x:7.2f} GB/s,"
                   f" {GlobalCounters.global_mem//1000000}/{GlobalCounters.mem_used//1000000} MB  --  "+\

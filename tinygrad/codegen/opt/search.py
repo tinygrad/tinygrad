@@ -6,7 +6,6 @@ from tinygrad.device import Device, Buffer
 from tinygrad.helpers import prod, flatten, DEBUG, CACHELEVEL, diskcache_get, diskcache_put, getenv, Context, colored, time_to_str
 from tinygrad.helpers import IGNORE_BEAM_CACHE
 from tinygrad.codegen.opt import Opt, OptOps, KernelOptError
-from tinygrad.tensor import Tensor
 from tinygrad.engine.realize import time_call
 from tinygrad.codegen import to_program
 from tinygrad.codegen.opt.postrange import Scheduler
@@ -42,13 +41,10 @@ def _time_program(prg:UOp, var_vals:dict[str, int], rawbufs:list[Buffer], early_
   if allow_test_size and max_global_size is not None:
     global_size, factor = get_test_global_size(prg.arg.global_size, max_global_size, var_vals)
     prg = prg.replace(arg=replace(prg.arg, global_size=tuple(global_size)))
+  call = prg.call(*[UOp.from_buffer(b) for b in rawbufs])
   tms = []
   for _ in range(cnt):
-    if clear_l2:
-      if hasattr(dev:=Device[prg.src[1].arg], 'invalidate_caches'): dev.invalidate_caches()
-      else:
-        with Context(DEBUG=0, BEAM=0, CAPTURING=0, TRACK_MATCH_STATS=0): Tensor.ones(1024,1024).contiguous().realize(do_update_stats=False)
-    try: tms.append(time_call(prg, rawbufs, var_vals)*factor)
+    try: tms.append(time_call(call, var_vals, timeout=timeout, clear_l2=clear_l2) * factor)
     except AssertionError: return [math.inf] * cnt
     if early_stop is not None and early_stop < min(tms): break
   return tms

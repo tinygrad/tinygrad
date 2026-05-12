@@ -90,13 +90,13 @@ class UOpMetaClass(type):
       assert op is Ops.BUFFER, f"trying to set Buffer {_buffer} for {op}"
       buffers[created] = _buffer
     if SPEC > 1:
-      from tinygrad.uop.spec import full_spec, test_pyrender
+      from tinygrad.uop.spec import spec_full, test_pyrender
       if SPEC > 2:
         # SPEC=3 checks the shape
         _ = created._shape
         if SPEC > 3:
           test_pyrender(created)
-      with Context(CHECK_OOB=0): fret = cast(bool|None, full_spec.rewrite(created))
+      with Context(CHECK_OOB=0): fret = cast(bool|None, spec_full.rewrite(created))
       if fret is not True: raise RuntimeError(f"SPEC ISSUE {fret}: {created}")
     return created
 
@@ -511,7 +511,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     return UOp(Ops.REDUCE, self.dtype, (self,), (op, axis)) if len(axis) else self
   @staticmethod
   def invalid(count=1): return UOp(Ops.CONST, dtypes.weakint.vec(count), src=(), arg=Invalid)
-  def valid(self, cond): return self if cond.op is Ops.WHERE and cond.arg else cond.where(self, UOp.invalid(self.dtype.count))
+  def valid(self, cond):
+    return self if cond.op is Ops.WHERE and cond.arg else cond.where(self.cast(dtypes.weakint), UOp.invalid(self.dtype.count))
   def get_idx(self) -> UOp:
     assert self.dtype.scalar() is dtypes.weakint, "Can only call get_idx on index dtype"
     return self.src[1] if self.op is Ops.WHERE and self.src[2].arg is Invalid else self

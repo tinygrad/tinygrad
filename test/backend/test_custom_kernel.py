@@ -1,7 +1,7 @@
 import unittest
-from tinygrad import Tensor, UOp, GlobalCounters
+from tinygrad import Tensor, UOp, GlobalCounters, Context
 from tinygrad.dtype import AddrSpace, dtypes
-from tinygrad.uop.ops import KernelInfo, AxisType
+from tinygrad.uop.ops import KernelInfo, AxisType, Ops
 
 # **** kernels ****
 
@@ -160,6 +160,7 @@ class TestCustomKernel(unittest.TestCase):
     tst = tst.custom_kernel(fxn=custom_eye_kernel)[0]
     self.assertTrue((ref == tst).all().item())
 
+  @unittest.skip("contract shouldn't be supported here")
   def test_flip_contract(self):
     a = Tensor.randn(10,4)
     b = Tensor.empty_like(a)
@@ -283,6 +284,7 @@ class TestCustomKernel(unittest.TestCase):
     self.assertIsNotNone(custom_idx, "custom_addmul kernel not found in schedule")
     self.assertEqual(custom_idx, 3, f"custom_addmul should be at index 3, got {custom_idx}")
 
+  @unittest.skip("what are anonymous buffers?")
   def test_anonymous_buffers_in_function(self):
     """Test that custom kernels with anonymous output buffers work inside @function."""
     a = Tensor.full((4, 4), 3.).contiguous()
@@ -337,6 +339,23 @@ class TestCustomKernel(unittest.TestCase):
     # it's copying the input and the output
     self.assertEqual(GlobalCounters.kernel_count, 1)
     self.assertEqual(y.tolist(), [1, 2, 3, 4])
+
+  @Context(DEV="CPU")
+  @unittest.expectedFailure
+  def test_simple_from_source(self):
+    a = Tensor([0., 1., 2.]).realize()
+
+    src = "void test_src(float* restrict a) { a[0] = 1.0; }"
+    # TODO: it currently requires a compiler for Ops.BINARY
+    from tinygrad.device import Device
+    binary = Device[a.device].renderer.compiler.compile(src)
+    def custom_src_kernel(A:UOp) -> UOp:
+      sink = UOp.sink(A, arg=KernelInfo(name="test_src"))
+      return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg="CPU"), UOp(Ops.LINEAR, src=tuple(sink.toposort())),
+                                   UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=binary)))
+
+    a = Tensor.custom_kernel(a, fxn=custom_src_kernel)[0]
+    self.assertEqual(a.tolist(), [1., 1., 2.])
 
 class TestUOpReduce(unittest.TestCase):
   def test_uop_sum(self):

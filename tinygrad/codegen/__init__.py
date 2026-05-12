@@ -5,7 +5,7 @@ from tinygrad.helpers import DISABLE_FAST_IDIV, DEVECTORIZE, TRANSCENDENTAL, SPE
 from tinygrad.helpers import ALLOW_TF32, TracingKey, Context, panic
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, pm_lower_index_dtype, Ops, UPat, track_rewrites, KernelInfo, ProgramInfo
 from tinygrad.uop.render import pyrender
-from tinygrad.uop.spec import type_verify, program_spec, kernel_spec
+from tinygrad.uop.spec import type_verify, spec_tensor, spec_program
 from tinygrad.renderer import Renderer, Estimates
 from tinygrad.dtype import dtypes
 
@@ -25,7 +25,7 @@ from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_c
 def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   if VIZ: graph_rewrite(ast, PatternMatcher([]), name="View Base AST")
   if DEBUG >= 5: print(pyrender(ast))
-  if SPEC: type_verify(ast, kernel_spec)
+  if SPEC: type_verify(ast, spec_tensor)
 
   # preprocess
   sink = graph_rewrite(ast, pm_mops+pm_syntactic_sugar+pm_store_ranges, ctx=itertools.count(1000), name="early movement ops", bottom_up=True)
@@ -104,6 +104,8 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   # this was the linearizer
   sink = graph_rewrite(sink, pm_add_control_flow, ctx=CFGContext(sink), name="add control flow", bottom_up=True)
 
+  if VIZ: graph_rewrite(sink, PatternMatcher([]), name="View Output AST")
+
   # return the rewritten sink
   return sink
 
@@ -129,7 +131,7 @@ def line_rewrite(lst:list[UOp], pm:PatternMatcher) -> list[UOp]:
 
 def do_linearize(prg:UOp, sink:UOp) -> UOp:
   lst = line_rewrite(linearize(sink), pm_linearize_cleanups)
-  if SPEC: type_verify(lst, program_spec)
+  if SPEC: type_verify(lst, spec_program)
   return prg.replace(src=prg.src + (UOp(Ops.LINEAR, src=tuple(lst)),))
 
 def do_estimates(prg:UOp, sink:UOp, lin:UOp) -> UOp|None:
