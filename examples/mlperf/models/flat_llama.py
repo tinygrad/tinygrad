@@ -144,7 +144,7 @@ class FlatTransformer:
     # quantize weights
     self.quantize() 
 
-  def quantize(self, realize:bool=False):
+  def quantize(self)
     def _amax():
       t = Tensor.full((), FP8_MAX, dtype=dtypes.float32).contiguous().requires_grad_(False)
       if isinstance(self.wqkv.device, tuple):
