@@ -56,6 +56,5 @@ export EVAL_TARGET="${EVAL_TARGET:-0.925}"
 export LOAD_MODEL="${LOAD_MODEL:-0}"
 export FAKEDATA="${FAKEDATA:-1}"
 export EVAL_SAMPLES=173
-export CPU_DISK_LOAD=1
 
 python3 -u examples/mlperf/model_train.py

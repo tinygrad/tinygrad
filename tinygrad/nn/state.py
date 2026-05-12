@@ -155,19 +155,12 @@ def load_state_dict(model, state_dict:dict[str, Tensor], strict=True, verbose=Tr
         else: raise ValueError(f'Shape mismatch in layer `{k}`: Expected shape {v.shape}, but found {state_dict[k].shape} in state dict.')
       if isinstance(v.device, tuple):
         if isinstance(state_dict[k].device, tuple): v.replace(state_dict[k])
-        elif isinstance(state_dict[k].device, str) and state_dict[k].device.startswith(("DISK", "TINYFS")) and v.uop.axis is not None:
-          v.replace(_direct_disk_shard(state_dict[k], v.device, v.uop.axis))
         else: v.replace(state_dict[k].shard(v.device, v.uop.axis))
       else: v.replace(state_dict[k].to(v.device))
       if realize: v.realize()
       if consume: del state_dict[k]
       ret.append(v)
   return ret
-
-def _direct_disk_shard(t:Tensor, devices:tuple[str, ...], axis:int) -> Tensor:
-  # prevents device:0 spike
-  if getenv("CPU_DISK_LOAD", 0): t = t.to("CPU").realize()
-  return t.shard(devices, axis)
 
 @accept_filename
 def zip_extract(t: Tensor) -> dict[str, Tensor]:
