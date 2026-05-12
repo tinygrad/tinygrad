@@ -40,6 +40,7 @@ class HTTPRequestHandler(BaseHTTPRequestHandler):
     except (BrokenPipeError, ConnectionResetError): return
 
 from tinygrad.uop.ops import TrackedGraphRewrite, RewriteTrace, UOp, Ops, GroupOp, srender, sint, sym_infer, range_str, range_start, multirange_str
+from tinygrad.uop.ops import KernelInfo
 from tinygrad.uop.render import print_uops, pyrender
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry, ProfileProgramEvent
 from tinygrad.dtype import dtypes
@@ -86,7 +87,7 @@ def load_rewrites(data:VizData) -> None:
         steps.append(create_step("View UOp List", ("/uops", i, len(steps))))
         steps.append(create_step("View Source", ("/code", i, len(steps)), p.src[3].arg))
         steps.append(create_step("View Disassembly", ("/asm", i, len(steps)), (k.ret, p.src[4].arg)))
-    for key in k.keys: data.ref_map[key] = i
+    for key in k.keys: data.ref_map[canonicalize_ast(key) if isinstance(key, UOp) else key] = i
     data.ctxs.append({"name":k.display_name, "steps":steps, "prg":p})
 
 # ** get the complete UOp graphs for one rewrite
@@ -106,6 +107,8 @@ def pystr(u:UOp) -> str:
   except Exception: return str(u)
 
 def fmt_colored(s:str) -> str: return ansistrip(s) if NO_COLOR else s
+
+def canonicalize_ast(u:UOp) -> UOp: return u.replace(arg=KernelInfo()) if u.op is Ops.SINK and isinstance(u.arg, KernelInfo) else u
 
 def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
   assert isinstance(x, UOp)
@@ -150,7 +153,7 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
         label += "\n"+' '.join([f"{range_str(s, color=True)}({s.vmax+1})" for s in trngs])
     except Exception:
       label += "\n<ISSUE GETTING LABEL>"
-    ref = data.ref_map.get(u.src[0]) if u.op in {Ops.CALL, Ops.FUNCTION} else None
+    ref = data.ref_map.get(canonicalize_ast(u.src[0])) if u.op in {Ops.CALL, Ops.FUNCTION} else None
     if ref is not None: label += f"\ncodegen@{fmt_colored(data.ctxs[ref]['name'])}"
     # NOTE: kernel already has metadata in arg
     if TRACEMETA >= 2 and u.metadata is not None and u.op not in {Ops.CALL, Ops.FUNCTION}: label += "\n"+str(u.metadata)
