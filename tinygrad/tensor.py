@@ -242,7 +242,7 @@ class Tensor(OpMixin):
   def realize(self, *lst:Tensor, do_update_stats=True) -> Tensor:
     """Triggers the computation needed to create these Tensor(s)."""
     if len(to_realize:=[x for x in (self,)+lst if not x.uop.has_buffer_identity()]):
-      run_linear(*Tensor.linear_with_vars(*to_realize), do_update_stats=do_update_stats)
+      run_linear(*Tensor.linear_with_vars(*to_realize), update_stats=do_update_stats)
     return self
 
   def replace(self, x:Tensor) -> Tensor:
@@ -566,12 +566,11 @@ class Tensor(OpMixin):
     return Tensor._device_seeds[device], low.cat(high)
 
   @staticmethod
-  def rand(*shape, device:str|None=None, dtype:DTypeLike|None=None, contiguous:bool=True, **kwargs) -> Tensor:
+  def rand(*shape, device:str|None=None, dtype:DTypeLike|None=None, requires_grad:bool|None=None, contiguous:bool=True) -> Tensor:
     """
     Creates a tensor with the given shape, filled with random values from a uniform distribution over the interval `[0, 1)`.
 
     You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
-    Additionally, all other keyword arguments are passed to the constructor of the tensor.
 
     ```python exec="true" source="above" session="tensor" result="python"
     Tensor.manual_seed(42)
@@ -586,11 +585,11 @@ class Tensor(OpMixin):
     device = cast(str, canonicalize_device(device))
 
     # if shape has 0, return zero tensor
-    if (numel := prod(shape)) == 0: return Tensor.zeros(shape, device=device, dtype=dt, **kwargs)
+    if (numel := prod(shape)) == 0: return Tensor.zeros(shape, device=device, dtype=dt, requires_grad=requires_grad)
     num = ceildiv(numel * dt.itemsize, 4)
     key, counter = Tensor._next_counter(device, num)
     bits = Tensor.random_bits(key, counter, num)
-    out = Tensor._bits_to_rand(bits, shape, dt).requires_grad_(kwargs.get("requires_grad"))
+    out = Tensor._bits_to_rand(bits, shape, dt).requires_grad_(requires_grad)
     return out.contiguous() if contiguous else out
 
   # ***** creation helper functions *****
@@ -618,7 +617,7 @@ class Tensor(OpMixin):
     if kwargs.get("device") is not None: raise RuntimeError("cannot specify `device` on `*_like` of a multi device tensor")
     if self.uop.axis is None: return fxn(self.shape, *args, dtype=dtype, **kwargs).shard(self.device)
     stacked = UOp.mstack(*[fxn(self.uop.shard_shape, *args, device=d, dtype=dtype, **kwargs).uop for d in self.device])
-    return Tensor(stacked.multi(self.uop.axis))
+    return Tensor(stacked.multi(self.uop.axis), requires_grad=kwargs.get("requires_grad"))
 
   def full_like(self, fill_value:ConstType, dtype=None, device=None, requires_grad=None) -> Tensor:
     """
@@ -816,7 +815,7 @@ class Tensor(OpMixin):
     print(Tensor.randperm(6).numpy())
     ```
     """
-    return Tensor.rand(n, device=device, **kwargs).argsort().cast(dtype)
+    return Tensor.rand(n, device=device, **kwargs).argsort().cast(dtype).requires_grad_(kwargs.get("requires_grad"))
 
   def multinomial(self:Tensor, num_samples:int = 1, replacement:bool = False) -> Tensor:
     """

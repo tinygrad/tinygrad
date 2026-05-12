@@ -165,7 +165,8 @@ def isin_tensor_tensor_out(x, y, *, assume_unique=False, invert=False, out=None)
 
 @torch.library.impl("aten::randperm.generator_out", "privateuseone")
 def randperm_generator(n, generator=None, out=None):
-  return out.copy_(wrap(Tensor.randperm(n, generator=generator, device=unwrap(out).device)))
+  if generator is not None: raise NotImplementedError("tinygrad torch backend does not support torch.Generator for randperm")
+  return out.copy_(wrap(Tensor.randperm(n, device=unwrap(out).device)))
 
 @torch.library.impl("aten::_linalg_eigh", "privateuseone")
 # TODO: move to tinygrad

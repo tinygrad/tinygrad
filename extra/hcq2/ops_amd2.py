@@ -3,7 +3,7 @@ from typing import cast
 import os, ctypes, struct, hashlib, functools, importlib, mmap, errno, array, contextlib, sys, weakref, itertools, collections, atexit
 assert sys.platform != 'win32'
 from dataclasses import dataclass
-from extra.hcq2.hcq2 import HCQ2Compiled, HCQAllocator, HCQ2Buffer, HCQEncoder, HCQProgram
+from extra.hcq2.hcq2 import HCQ2Compiled, HCQAllocator, HCQ2Buffer, HCQEncoder
 from tinygrad.uop.ops import sint, UOp
 from tinygrad.device import Compiled, BufferSpec, Buffer, Device
 from tinygrad.dtype import dtypes
@@ -95,6 +95,10 @@ class AMDComputeQueue(HCQEncoder):
     self.release_mem(self.get_dev_addr(x.src[0]), x.src[1], self.pm4.data_sel__mec_release_mem__send_32_bit_low,
                      self.pm4.int_sel__mec_release_mem__send_interrupt_after_write_confirm, cache_flush=True)
 
+  def timestamp(self, x):
+    self.release_mem(self.get_dev_addr(x.src[0]), 0, self.pm4.data_sel__mec_release_mem__send_gpu_clock_counter,
+                     self.pm4.int_sel__mec_release_mem__none)
+
   def program(self, x):
     data, info = x.arg
     lib_gpu, args = x.src
@@ -133,6 +137,7 @@ amd_inner_pm = PatternMatcher([
   (UPat(Ops.WAIT, name="x"),    lambda ctx, x: ctx.wait(x)),
   (UPat(Ops.BARRIER, name="x"), lambda ctx, x: ctx.barrier(x)),
   (UPat(Ops.PROGRAM, name="x"), lambda ctx, x: ctx.program(x)),
+  (UPat(Ops.CUSTOM_FUNCTION, arg="timestamp", name="x"), lambda ctx, x: ctx.timestamp(x)),
   (UPat(Ops.STORE, src=(UPat((Ops.BUFFER, Ops.PARAM)), UPat()), name="x"), lambda ctx, x: ctx.store(x)),
 ])
 
@@ -182,6 +187,10 @@ class AMDCopyQueue(HCQEncoder):
     self.q(self.sdma.SDMA_OP_FENCE | fence_flags, *data64_le(self.get_dev_addr(x.src[0])), x.src[1])
     self.q(self.sdma.SDMA_OP_TRAP, 0)
 
+  def timestamp(self, x):
+    self.q(self.sdma.SDMA_OP_TIMESTAMP | self.sdma.SDMA_PKT_TIMESTAMP_GET_HEADER_SUB_OP(self.sdma.SDMA_SUBOP_TIMESTAMP_GET_GLOBAL),
+           *data64_le(self.get_dev_addr(x.src[0])))
+
 def amd_lower_sdma(ctx, linear):
   enc = AMDCopyQueue(ctx)
   graph_rewrite(linear, amd_inner_sdma_pm, ctx=enc, name="amd: encode sdma")
@@ -191,6 +200,7 @@ amd_inner_sdma_pm = PatternMatcher([
   (UPat(Ops.WAIT,  name="x"), lambda ctx, x: ctx.wait(x)),
   (UPat(Ops.BARRIER, name="x"), lambda ctx, x: None),
   (UPat(Ops.COPY,  name="x"), lambda ctx, x: ctx.copy(x)),
+  (UPat(Ops.CUSTOM_FUNCTION, arg="timestamp", name="x"), lambda ctx, x: ctx.timestamp(x)),
   (UPat(Ops.STORE, src=(UPat((Ops.BUFFER, Ops.PARAM)), UPat()), name="x"), lambda ctx, x: ctx.store(x)),
 ])
 
@@ -370,6 +380,8 @@ class PCIIface(PCIIfaceBase):
 def _mock(iface, name=None): return type(name or f"MOCK{iface.__name__}", (iface,), {})
 
 class AMDDevice(HCQ2Compiled):
+  timestamp_divider = 100.0  # AMD GPU clock: ticks/us
+
   pm_lower = PatternMatcher([
     (UPat(Ops.PROGRAM, src=(UPat(), UPat(), UPat(), UPat(), UPat(Ops.BINARY)), name="prg"), amd_build_program),
     (UPat(Ops.LINEAR, arg="COMPUTE", name="linear"), amd_lower_pm4),
@@ -418,9 +430,8 @@ class AMDDevice(HCQ2Compiled):
     self.sdma_queues:dict = {}
     self.has_sdma_queue = self.sdma_queue(0) is not None
 
-    super().__init__(device, AMDAllocator(self), [HIPRenderer, AMDLLVMRenderer, HIPCCRenderer], functools.partial(HCQProgram, self),
-                     kernargs_size=16 << 20, sigalloc_size=0x1000,
-                     can_recover=self.is_am(), arch=self.arch)
+    super().__init__(device, AMDAllocator(self), [HIPRenderer, AMDLLVMRenderer, HIPCCRenderer], None,
+                     kernargs_size=16 << 20, can_recover=self.is_am(), arch=self.arch)
 
     # Scratch setup
     self.max_private_segment_size = 0
@@ -522,8 +533,6 @@ class AMDDevice(HCQ2Compiled):
           lo32(size_per_xcc), int.from_bytes(bytes(rsrc3_t(**rsrc)), 'little')]
         self.aql_desc.compute_tmpring_size = self.tmpring_size
         self.aql_gart.cpu_view()[:ctypes.sizeof(self.aql_desc)] = bytes(self.aql_desc)
-
-  def invalidate_caches(self): raise NotImplementedError("invalidate_caches not migrated to hcq2 yet")
 
   def on_device_hang(self): self.iface.on_device_hang()
 

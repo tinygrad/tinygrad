@@ -6,7 +6,7 @@ from tinygrad.helpers import Timing, Context
 from tinygrad.dtype import dtypes, ConstFloat  # noqa: F401
 from tinygrad.device import Device
 from tinygrad.uop.ops import Ops, UOp, UPat, exec_alu
-from tinygrad.uop.spec import shared_spec
+from tinygrad.uop.spec import spec_shared
 from tinygrad.uop.symbolic import sym
 from test.helpers import to_uops_list
 
@@ -318,7 +318,7 @@ class TestUOpStr(unittest.TestCase):
 class TestUPatHelpers(unittest.TestCase):
   def test_location(self):
     self.assertEqual(sym.patterns[-1][0].location[0].replace("\\", "/").split("/")[-1], "symbolic.py")
-    self.assertEqual(shared_spec.patterns[0][0].location[0].replace("\\", "/").split("/")[-1], "spec.py")
+    self.assertEqual(spec_shared.patterns[0][0].location[0].replace("\\", "/").split("/")[-1], "spec.py")
     test_upat = UPat(Ops.CONST, dtypes.bool)
     self.assertEqual(test_upat.location[0].replace("\\", "/").split("/")[-1], __file__.replace("\\", "/").split("/")[-1])
     test_upat_named = test_upat.named("test_name")

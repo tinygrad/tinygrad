@@ -21,8 +21,8 @@ class TestHCQUnit(unittest.TestCase):
     for _ in range(5): f(inp, inp_cpu)
 
     # construct minimal CALL UOps for supports_uop (graphs only see PROGRAMs after compile_linear)
-    gpu_call = UOp(Ops.PROGRAM).call(UOp.new_buffer(Device.DEFAULT, 1, dtypes.float))
-    cpu_call = UOp(Ops.PROGRAM).call(UOp.new_buffer("CPU", 1, dtypes.float))
+    gpu_call = UOp(Ops.PROGRAM, src=(UOp.sink(), UOp(Ops.DEVICE, arg=Device.DEFAULT))).call(UOp.new_buffer(Device.DEFAULT, 1, dtypes.float))
+    cpu_call = UOp(Ops.PROGRAM, src=(UOp.sink(), UOp(Ops.DEVICE, arg="CPU"))).call(UOp.new_buffer("CPU", 1, dtypes.float))
     gpu_devs = [d0]
 
     # local MMIO: GPU works alone and with CPU in batch (cpu_support=True)

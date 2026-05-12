@@ -746,6 +746,11 @@ class TestMultiTensor(unittest.TestCase):
     t2.realize()
   def test_rand_like_on_shard_axis(self): self.test_rand_like_on_shard(0)
 
+  def test_rand_like_on_shard_axis_requires_grad(self):
+    t = Tensor.empty((16, 16)).shard(devices_2, axis=0)
+    self.assertIs(t.rand_like(requires_grad=True).requires_grad, True)
+    self.assertIs(t.rand_like(requires_grad=False).requires_grad, False)
+
   def test_rand_like_from_alu(self):
     a = Tensor.ones(4, 4).shard(devices_4, axis=0)
     aa = a + a
