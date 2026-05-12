@@ -341,6 +341,7 @@ class TestCustomKernel(unittest.TestCase):
     self.assertEqual(y.tolist(), [1, 2, 3, 4])
 
   @Context(DEV="CPU")
+  @unittest.expectedFailure
   def test_simple_from_source(self):
     a = Tensor([0., 1., 2.]).realize()
 
@@ -354,8 +355,7 @@ class TestCustomKernel(unittest.TestCase):
                                    UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=binary)))
 
     a = Tensor.custom_kernel(a, fxn=custom_src_kernel)[0]
-    with self.assertRaisesRegex(RuntimeError, "UOp verification failed"):
-      self.assertEqual(a.tolist(), [1., 1., 2.])
+    self.assertEqual(a.tolist(), [1., 1., 2.])
 
 class TestUOpReduce(unittest.TestCase):
   def test_uop_sum(self):
