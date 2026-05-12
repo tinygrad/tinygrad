@@ -1535,6 +1535,7 @@ class Tensor(OpMixin):
     dtsz = 2 if FLOAT16 else 4
 
     (bs,_,iy,ix), (cout,cin,H,W) = self.shape, weight.shape
+    assert isinstance(cin, int) and isinstance(cout, int)
     x, w = self, weight.reshape(groups, (rcout := cout//groups), cin, H, W)
 
     padding_neg, padding_pos = [min(0, p) for p in resolve_pool_pads(padding, 2)], [max(0, p) for p in resolve_pool_pads(padding, 2)]
@@ -1543,11 +1544,11 @@ class Tensor(OpMixin):
 
     # hack for non multiples of 4 on cin
     if cin % 4 != 0 and not (cin == 1 and groups%4 == 0):
-      x = x.reshape(bs, groups, cin, iy, ix)   # do this always?
-      added_input_channels = 4 - (cin % 4)
-      cin = cin + added_input_channels
-      w = w.pad_to(None, None, cin, None, None)
-      x = x.pad_to(None, None, cin, None, None).reshape(bs, groups*cin, iy, ix)
+      new_cin = round_up(cin, 4)
+      w = w.pad_to(None, None, new_cin, None, None)
+      x = x.reshape(bs, groups, cin, iy, ix)
+      x = x.pad_to(None, None, new_cin, None, None).reshape(bs, groups*new_cin, iy, ix)
+      cin = new_cin
 
     # hack for non multiples of 4 on rcout
     added_output_channels = 0
@@ -1564,7 +1565,6 @@ class Tensor(OpMixin):
     elif cin_last: w = w.reshape(cout//4,4,cin//4,4,H,W).permute(0,4,2,5,1,3)
     else: w = w.reshape(cout//4,4,cin//4,4,H,W).permute(0,4,2,5,3,1)
 
-    # contiguous creates the image, and early realize static weights (TODO: test for the static weight)
     def is_pow2(v): return v > 0 and v & (v - 1) == 0
     # pad dimension i to amt with invalids
     def ipad(t, i, amt):
@@ -1578,15 +1578,17 @@ class Tensor(OpMixin):
       return ipad(t, at:=at or dim, round_up(t.shape[at] + int(force), align // math.gcd(prod(t.shape[dim:]) // t.shape[at], align)))
 
     # bank conflicts
-    if cin >= 8 and is_pow2(cin // 4):
+    bank_conflict = cin >= 8 and is_pow2(cin // 4)
+    if bank_conflict:
       x, w = pad_align(x.reshape(bs, iy, ix, groups, cin // 4, 4), 2, at=4, force=True), pad_align(w, 1, at=2, force=True)
     else: x, w = pad_align(x, 2), pad_align(w, 1)
 
+    # contiguous creates the image, and early realize static weights (TODO: test for the static weight)
     if FLOAT16: x, w = x.cast(dtypes.half).contiguous().cast(dtypes.float), w.cast(dtypes.half).contiguous().cast(dtypes.float)
     else: x, w = x.contiguous(), w.contiguous()
 
     # undo alignment hacks
-    if cin >= 8 and is_pow2(cin // 4): x, w = x[:, :, :ix, :, :cin // 4, :], w[:, :H, :cin // 4, ...]
+    if bank_conflict: x, w = x[:, :, :ix, :, :cin // 4, :], w[:, :H, :cin // 4, ...]
     else: x, w = x[:, :, :ix, :], w[:, :H, ...]
 
     # expand out
@@ -1603,27 +1605,21 @@ class Tensor(OpMixin):
     # prepare weights
     w = w.permute(0,4,2,5,1,3).reshape((1, 1, 1, *group_shape, *rcout_expand, rcin_hi, rcin_lo, H, W))
 
-    added_ox = 0
-    assert isinstance(ox, int) and isinstance(cout, int)
-    if (ox * cout) % (64 // dtsz):
-      added_ox = round_up(ox, 64 // (dtsz * math.gcd(cout, 64 // dtsz))) - ox
-      ox = ox + added_ox
-      x = x.pad_to(None, None, ox, None, None, None, None, None, None, None, None)
+    added_ox = round_up(ox, math.lcm(cout, 64 // dtsz) // cout) - ox
+    if added_ox: x = x.pad_to(None, None, ox + added_ox, None, None, None, None, None, None, None, None)
 
     # the conv!
     ret = (x*w).cast(dtypes.float32).sum((-4, -3, -2, -1), dtype=dtype)
 
     if added_ox:
-      ret = ret.reshape(bs, oy, ox, groups, rcout)[:, :, :-added_ox, ...]
-      ox = ox - added_ox
+      ret = ret.reshape(bs, oy, ox + added_ox, groups, rcout)[:, :, :ox, ...]
 
     # undo hack for non multiples of 4 on C.rcout
-    if added_output_channels != 0:
+    if added_output_channels:
       ret = ret.reshape(bs, oy, ox, groups, rcout)[:, :, :, :, :-added_output_channels]
-      cout = groups * (rcout - added_output_channels)
 
     # NCHW output
-    ret = ret.reshape(bs, oy, ox, cout).permute(0,3,1,2)
+    ret = ret.reshape(bs, oy, ox, groups * (rcout - added_output_channels)).permute(0,3,1,2)
     return ret if bias is None else ret.add(bias.reshape(1, -1, 1, 1))
 
 P = ParamSpec("P")
