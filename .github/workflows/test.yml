@@ -594,17 +594,7 @@ jobs:
         deps: testing_unit
         pydeps: "onnx==1.18.0 onnxruntime ml_dtypes"
         llvm: "true"
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v4
-    - name: Build QEMU Docker with cache
-      uses: docker/build-push-action@v7
-      with:
-        file: extra/dsp/Dockerfile
-        push: false
-        load: true
-        tags: qemu-hexagon:latest
-        cache-from: type=gha
-        cache-to: ${{ github.event_name != 'pull_request' && 'type=gha,mode=min' || '' }}
+        qemu: "true"
     - name: Set MOCKDSP env
       run: printf "MOCKDSP=1" >> $GITHUB_ENV
     - name: Run test_tiny on DSP
