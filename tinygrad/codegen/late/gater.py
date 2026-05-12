@@ -16,6 +16,10 @@ pm_move_gates_from_index = PatternMatcher([
    l.replace(src=(l.src[0], a.src[0] if a.op is Ops.CAST and a.src[0].dtype == l.dtype else a.cast(l.dtype), l.src[2])).cast(a.dtype)),
 
   # vectorized indexes (ie. images) must be int
-  (UPat(Ops.INDEX, src=(UPat(), UPat(Ops.STACK, dtypes.long, name="vec")), allow_any_len=True, name="idx"),
-   lambda idx,vec: idx.replace(src=(idx.src[0], UOp.vectorize(*(u.cast(dtypes.int) for u in vec.src)), *idx.src[2:])))
+  (UPat(Ops.INDEX, src=(UPat(), UPat(Ops.STACK, dtypes.long, name="vec")), name="idx"),
+   lambda idx,vec: idx.replace(src=(idx.src[0], UOp.vectorize(*(u.cast(dtypes.int) for u in vec.src))))),
+
+  # images use 2D INDEX now (y,x)
+  (UPat(Ops.INDEX, src=(UPat(), UPat(Ops.STACK, dtypes.int, name="vec")), name="idx"),
+   lambda idx,vec: idx.replace(src=(idx.src[0], vec.src[1], vec.src[0]))),
 ])
