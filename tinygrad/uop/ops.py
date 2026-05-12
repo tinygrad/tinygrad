@@ -258,7 +258,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       case Ops.WMMA | Ops.SHAPED_WMMA: return self.src[2]._shape
 
       # passthrough ops
-      case Ops.MSTACK | Ops.MSELECT | Ops.DETACH | Ops.CONTIGUOUS | Ops.CONTIGUOUS_BACKWARD | Ops.AFTER | Ops.LOAD:
+      case Ops.MSTACK | Ops.MSELECT | Ops.DETACH | Ops.CONTIGUOUS | Ops.CONTIGUOUS_BACKWARD | Ops.AFTER | Ops.PATCH | Ops.LOAD:
         return self.src[0]._shape
       # REDUCE with empty axis is passthrough (lowered form)
       case Ops.REDUCE if len(self.arg[1]) == 0:
@@ -466,6 +466,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   def store(self, src:UOp|ConstType, gate:UOp|None=None, **kwargs):
     srcs = (self, self.const_like(src) if not isinstance(src, UOp) else src) + ((gate,) if gate is not None else ())
     return UOp(Ops.STORE, dtypes.void, srcs, **kwargs)
+  def wait(self, src:UOp|ConstType, **kwargs):
+    return UOp(Ops.WAIT, dtypes.void, (self, self.const_like(src) if not isinstance(src, UOp) else src), **kwargs)
   def end(self, *src:UOp): return UOp(Ops.END, src=(self,)+src) if len(src) else self
   def after(self, *src:UOp, **kwargs): return UOp(Ops.AFTER, self.dtype, (self,)+src, **kwargs) if len(src) else self
   def barrier(self, *src:UOp): return UOp(Ops.BARRIER, src=(self,)+src)
@@ -660,6 +662,10 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   @staticmethod
   def new_buffer(device:str|tuple[str, ...], size:int, dtype:DType, num=None):
     return UOp(Ops.BUFFER, dtype, (UOp.unique(num), UOp(Ops.DEVICE, arg=device)), size)
+  @staticmethod
+  def from_buffer(opaque:Buffer, device:str|tuple[str, ...]|None=None):
+    buffers[uop:=UOp.new_buffer(device or opaque.device, opaque.size, opaque.dtype)] = opaque.ref(1)
+    return uop
   @staticmethod
   def empty(shape:tuple[sint, ...], dtype:DTypeLike|None=None, device:str|tuple[str, ...]|None=None, axis:int|None=None, num=None) -> UOp:
     dtype, device = to_dtype(dtype) if dtype is not None else dtypes.default_float, canonicalize_device(device)

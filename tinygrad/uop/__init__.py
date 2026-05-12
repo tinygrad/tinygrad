@@ -27,7 +27,7 @@ class Ops(FastEnum):
   # uops that aren't rendered
   NOOP = auto(); REWRITE_ERROR = auto()
   # FUNCTION has a TUPLE body and is gradient-able; CALL is an opaque kernel invocation
-  PARAM = auto(); FUNCTION = auto(); CALL = auto()
+  PARAM = auto(); FUNCTION = auto(); CALL = auto(); PATCH = auto()
 
   # renderer
   # LINEAR is a list of UOps, SOURCE has a str arg that's human readable, BINARY has bytes arg that's compiled
@@ -73,7 +73,7 @@ class Ops(FastEnum):
   # ** 5 -- control flow / consts / custom **
 
   # control flow ops
-  BARRIER = auto(); RANGE = auto(); IF = auto(); END = auto(); ENDIF = auto()
+  BARRIER = auto(); RANGE = auto(); IF = auto(); END = auto(); ENDIF = auto(); WAIT = auto()
 
   # consts. VCONST is a vectorized const
   VCONST = auto(); CONST = auto()

@@ -4,6 +4,7 @@ os.environ["VIZ"] = "0"
 if hasattr(signal, "SIGPIPE"): signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 from typing import Iterator
 from tinygrad.viz import serve as viz
+from tinygrad.viz.serve import fmt_colored
 from tinygrad.uop.ops import RewriteTrace
 from tinygrad.helpers import temp, ansistrip, colored, time_to_str, ansilen, ProfilePointEvent, ProfileRangeEvent, TracingKey, unwrap, NO_COLOR, DEBUG
 
@@ -45,8 +46,6 @@ def decode_profile(data:bytes) -> dict:
               for k,rep,num,mode in [u("<IIIB") for _ in range(u("<I")[0])]]}})
   return {"dur":total_dur, "peak":global_peak, "layout":layout, "markers":markers}
 
-def fmt_colored(s:str) -> str: return ansistrip(s) if NO_COLOR else s
-
 def to_str(k:str, v) -> str:
   if k == "FLOPS" or k.startswith("B/s"): return f"{v*1e-9:.0f} G{k}" if v < 1e13 else f"{v*1e-12:.0f} T{k}"
   if k == "B": return next((f"{v/s:.0f} {u}" for s,u in ((1e9,"GB"),(1e6,"MB"),(1e3,"KB")) if v>=s), f"{v:.0f} B")
@@ -65,11 +64,11 @@ def main(args) -> None:
 
   def emit(val, to_str=str) -> str: return json.dumps(val if isinstance(val, dict) else {"value":val}) if args.json else to_str(val)
 
-  def print_step(step:dict, reconstruct_matches=False) -> None:
+  def print_step(step:dict, print_graph=False, reconstruct_matches=False) -> None:
     data = viz.get_render(viz_data, step["query"])
     if isinstance(data.get("value"), Iterator):
       for m in data["value"]:
-        if m.get("uop"): print(emit(m["uop"]))
+        if "uop" in m: print(emit(m["graph"] if print_graph else m["uop"]))
         if not reconstruct_matches: return None
         if m.get("diff"):
           loc = pathlib.Path(m["upat"][0][0])
@@ -191,11 +190,11 @@ def main(args) -> None:
       print(emit(k, to_str=fmt_row))
       if k["ref"] is not None and k["ref"] not in seen_refs:
         seen_refs.add(k["ref"])
-        for s in viz_data.ctxs[k["ref"]]["steps"]:
+        for i,s in enumerate(viz_data.ctxs[k["ref"]]["steps"]):
           if DEBUG >= 3 and s["name"] == "View Base AST": print_step(s)
           if DEBUG >= 4 and s["name"] == "View Source": print_step(s)
           if DEBUG >= 5 or ls: print(emit(" "*s["depth"]+s["name"]+(f" - {s['match_count']}" if s.get('match_count', 0) else '')))
-          if DEBUG >= 6: print_step(s)
+          if DEBUG >= 6 or (DEBUG >= 5 and s["name"] == "View Kernel Graph"): print_step(s, print_graph=True)
           if DEBUG >= 7 or s["name"] in args.src: print_step(s, reconstruct_matches=True)
       elif DEBUG >= 3 and k.get("ext"): print(emit(k["ext"]))
     for k in (produce_top_kernels if args.t else produce_all_kernels)(): render_event(k)

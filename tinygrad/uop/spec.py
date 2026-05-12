@@ -277,9 +277,6 @@ shared_spec = PatternMatcher([
       all(isinstance(ra, int) for ra in rng.arg[0:-1]) and isinstance(rng.arg[-1], AxisType)),
   (UPat(Ops.INDEX, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(y.dtype == dtypes.weakint for y in x.src[1:]) or None),
 
-  # RANGE/SPECIAL define loops, END closes them
-  (UPat(Ops.END, src=(UPat(), UPat(Ops.RANGE))), lambda: True),
-
   # STORE in tensor graph: store a value into a target
   (UPat(Ops.STORE, dtypes.void, (UPat(), UPat())), lambda: True),
 
@@ -473,9 +470,6 @@ program_spec = PatternMatcher([
 # *** this spec should match all UOps ever created ***
 
 full_spec = PatternMatcher([
-  # NOOP in the full spec
-  (UPat(Ops.NOOP), lambda: True),
-
   # all rewrite error are okay
   (UPat(Ops.REWRITE_ERROR), lambda: True),
 
