@@ -7,6 +7,7 @@ import numpy as np
 from tinygrad import dtypes, Tensor
 from tinygrad.helpers import getenv, prod, Context, round_up, tqdm, OSX, cache_dir
 from tinygrad.nn.state import TensorIO
+from examples.mlperf.helpers import clean_dir
 
 ### ResNet
 
@@ -541,25 +542,11 @@ def download_llama2_70b_lora_dataset(base_dir: Path) -> Path:
   base_dir = Path(snapshot_download(repo_id=LLAMA2_70B_LORA_DATASET_REPO, revision=LLAMA2_70B_LORA_DATASET_REVISION,
                                     repo_type="dataset", local_dir=base_dir, allow_patterns="*.parquet"))
   data_dir = base_dir / 'data'
-  _llama2_70b_lora_clean_dataset_dir(data_dir)
+  clean_dir(data_dir, ".parquet")
   _llama2_70b_lora_verify_dataset_hash(data_dir)
   for split in ['train', 'validation']:
     _llama2_70b_lora_verify_dataset_split(split, *_load_llama2_70b_lora_split(base_dir, split))
   return base_dir
-
-def _llama2_70b_lora_clean_dataset_dir(data_dir: Path):
-  # Match MLPerf's effective hash input: keep only downloaded parquet files in the hashed directory.
-  # AMD: https://github.com/mlcommons/training_results_v5.1/blob/main/AMD/benchmarks/llama2_70b_lora/implementations/MI350X_EPYC_9575F_pytorch_llama2_70b/scripts/download_dataset.py#L34-L38
-  # Cisco: https://github.com/mlcommons/training_results_v5.1/blob/main/Cisco/benchmarks/llama2_70b_lora/implementations/pytorch/scripts/download_dataset.py#L34-L38
-  # QCT: https://github.com/mlcommons/training_results_v5.1/blob/main/Quanta_Cloud_Technology/benchmark/llama2_70b_lora/implementations/pytorch_D74H-7U/scripts/download_dataset.py#L34-L38
-  assert data_dir.is_dir()
-  for path in list(data_dir.iterdir()):
-    if path.is_file() and path.suffix == ".parquet": continue
-    if path.is_dir():
-      import shutil
-      shutil.rmtree(path)
-    else:
-      path.unlink()
 
 def _llama2_70b_lora_verify_dataset_hash(data_dir: Path):
   # AMD: https://github.com/mlcommons/training_results_v5.1/blob/main/AMD/benchmarks/llama2_70b_lora/implementations/MI350X_EPYC_9575F_pytorch_llama2_70b/scripts/download_dataset.py#L25-L41
