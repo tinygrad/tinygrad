@@ -3330,6 +3330,7 @@ class TestOps(unittest.TestCase):
     helper_test_op([(32, 10)], lambda x: x.masked_select(x>0.5), lambda x: x.masked_select(x>0.5), forward_only=True)
     helper_test_op([(32, 10)], lambda x: x.masked_select(torch.tensor(True)), lambda x: x.masked_select(Tensor(True)), forward_only=True)
 
+  @unittest.skipIf(COMPILE_ONLY, "test requires runtime")
   def test_masked_select_size(self):
     t = Tensor([0, 1, 2, 3, 4, 5, 6, 7, 8])
     mask = Tensor([True, False, True, False, True, False, False, False, True])
@@ -3347,6 +3348,7 @@ class TestOps(unittest.TestCase):
     for v in (0, 1, 0.0, 2.5, True, False):
       helper_test_op(None, lambda x: x.nonzero().int(), lambda x: x.nonzero(), vals=[v], forward_only=True)
 
+  @unittest.skipIf(COMPILE_ONLY, "test requires runtime")
   def test_nonzero_size(self):
     np.testing.assert_equal(Tensor([1, 0, 2, 0, 3]).nonzero(size=3).numpy(), [[0], [2], [4]])
     np.testing.assert_equal(Tensor([1, 0, 2, 0, 3]).nonzero(size=5, fill_value=-1).numpy(), [[0], [2], [4], [-1], [-1]])
