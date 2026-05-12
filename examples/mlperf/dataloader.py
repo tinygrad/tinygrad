@@ -532,20 +532,25 @@ def batch_load_train_stable_diffusion(urls:str, BS:int):
 
 # llama2 70b lora
 
-def _download_llama2_70b_lora_dataset(base_dir: Path) -> Path:
+def download_llama2_70b_lora_dataset(base_dir: Path) -> Path:
     from huggingface_hub import snapshot_download
-    return Path(snapshot_download(repo_id="regisss/scrolls_gov_report_preprocessed_mlperf_2", revision="21ff1233ee3e87bc780ab719c755170148aba1cb", repo_type="dataset", local_dir=base_dir))
+    path = Path(snapshot_download(repo_id="regisss/scrolls_gov_report_preprocessed_mlperf_2", revision="21ff1233ee3e87bc780ab719c755170148aba1cb", repo_type="dataset", local_dir=base_dir))
+    for split in ['train', 'validation']:
+      _llama2_70b_lora_verify_dataset(split, *_load_llama2_70b_lora_split(path, split))
+    return path
+
+def _llama2_70b_lora_verify_dataset(split: str, input_ids: np.ndarray, labels: np.ndarray):
+  assert input_ids.shape == labels.shape, f"{split} input_ids shape {input_ids.shape} != labels shape {labels.shape}"
+  assert not (input_ids == -100).any(), f"{split} input_ids contains -100"
+  if split == "train": assert np.array_equal(input_ids, labels), "train labels differ from input_ids"
+  else: assert (labels == -100).any(), "validation labels contain no -100 mask"
 
 def _load_llama2_70b_lora_split(base_dir:Path, split:str) -> tuple[np.ndarray, np.ndarray]:
   from datasets import load_dataset
 
-  data_dir = base_dir / "data"
-  if not data_dir.exists():
-    data_dir = _download_llama2_70b_lora_dataset(base_dir) / "data"
-
   ds = load_dataset(
     "parquet",
-    data_files={split: str(data_dir / f"{split}-00000-of-00001.parquet")},
+    data_files={split: str(base_dir / "data" / f"{split}-00000-of-00001.parquet")},
     split=split,
     cache_dir=str(Path(cache_dir) / "llama2_70b_lora_dataset"),
   )
