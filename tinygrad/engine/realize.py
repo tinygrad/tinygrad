@@ -106,14 +106,14 @@ def optimize_local_size(call:UOp, prg:UOp) -> UOp|None:
 # **************** runtime cache ****************
 
 runtime_cache: dict[tuple[bytes, str], Any] = {}
-def get_runtime(device:str, ast:UOp):
+def get_runtime(device:str, ast:UOp, cache=True):
   assert ast.op is Ops.PROGRAM and isinstance(ast.arg, ProgramInfo), "get_runtime should only be called with a PROGRAM ast"
   if (runtime:=runtime_cache.get(key:=(ast.key, device))) is None:
     if DEBUG >= 3 and ast.src[0].arg.applied_opts: print(ast.src[0].arg.applied_opts)
     if DEBUG >= 4: print(ast.src[3].arg)
     if DEBUG >= 7: Device[device].compiler.disassemble(ast.src[4].arg)
-    runtime = runtime_cache[key] = Device[device].runtime(ast.arg.function_name, ast.src[4].arg, *ast.arg.aux,
-                                                          runtimevars=ast.arg.runtimevars, prg=ast)
+    runtime = Device[device].runtime(ast.arg.function_name, ast.src[4].arg, *ast.arg.aux, runtimevars=ast.arg.runtimevars, prg=ast)
+    if cache: runtime_cache[key] = runtime
   return runtime
 
 graph_cache:weakref.WeakKeyDictionary[UOp, Any] = weakref.WeakKeyDictionary()
@@ -135,6 +135,7 @@ class ExecContext:
   jit: bool = False
   wait: bool = False
   timeout: int|None = None
+  cache: bool = True
 
 def _resolve(b:UOp, inputs:tuple[UOp, ...]) -> UOp:
   if b.op in (Ops.BUFFER_VIEW, Ops.MSELECT) and b.src[0].op is Ops.PARAM: return b.replace(src=(inputs[b.src[0].arg], *b.src[1:]))
@@ -174,7 +175,7 @@ def exec_kernel(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
   for bufs, device_vars in unwrap_multi(call, resolve_params(call, ctx.input_uops)):
     var_vals = {**ctx.var_vals, **device_vars}
     prg_bufs = [bufs[i].ensure_allocated() for i in ast.arg.globals]
-    rt = get_runtime(device:=bufs[0].device, ast)
+    rt = get_runtime(device:=bufs[0].device, ast, cache=ctx.cache)
     global_size, local_size = ast.arg.launch_dims(var_vals)
     with track_stats(ctx, call, device, prg_bufs, var_vals) as tm:
       et = tm[0] = rt(*[b._buf for b in prg_bufs], global_size=global_size, local_size=local_size, vals=ast.arg.vals(var_vals),
@@ -258,4 +259,4 @@ def time_call(call:UOp, var_vals:dict[str, int]|None=None, timeout:int|None=None
     else:
       from tinygrad.tensor import Tensor
       with Context(DEBUG=0, BEAM=0, CAPTURING=0, TRACK_MATCH_STATS=0): Tensor.ones(1024, 1024).contiguous().realize(do_update_stats=False)
-  return cast(float, pm_exec.rewrite(call, ExecContext(var_vals=var_vals or {}, update_stats=False, wait=True, timeout=timeout)))
+  return cast(float, pm_exec.rewrite(call, ExecContext(var_vals or {}, update_stats=False, wait=True, timeout=timeout, cache=False)))
