@@ -38,14 +38,6 @@ constexpr int THREADS = 256;
 constexpr int ROWS_PER_GROUP = 8;
 constexpr float RMS_EPS = 1.0e-6f;
 
-__device__ inline float half_bits_to_float(unsigned short h) {
-  unsigned int sign = h >> 15;
-  unsigned int exp = (h >> 10) & 31u;
-  unsigned int mant = h & 1023u;
-  float v = exp == 0 ? float(mant) * 5.960464477539063e-8f : (1.0f + float(mant) * 0.0009765625f) * exp2f(float(int(exp) - 15));
-  return sign ? -v : v;
-}
-
 extern "C" __global__ __launch_bounds__(THREADS) void fused_gate_up_q8(
     float* __restrict__ z,
     const float* __restrict__ x_norm,
@@ -65,10 +57,8 @@ extern "C" __global__ __launch_bounds__(THREADS) void fused_gate_up_q8(
   int base = (row * (DIM / 32) + block) * 34;
   const unsigned char* gb = gate_w + base;
   const unsigned char* ub = up_w + base;
-  unsigned short gh = (unsigned short)(gb[0]) | ((unsigned short)(gb[1]) << 8);
-  unsigned short uh = (unsigned short)(ub[0]) | ((unsigned short)(ub[1]) << 8);
-  float gs = half_bits_to_float(gh);
-  float us = half_bits_to_float(uh);
+  float gs = float(*reinterpret_cast<const _Float16*>(gb));
+  float us = float(*reinterpret_cast<const _Float16*>(ub));
   float gacc = 0.0f, uacc = 0.0f;
   #pragma unroll
   for (int offset = 0; offset < 32; offset++) {
