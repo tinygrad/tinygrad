@@ -303,7 +303,7 @@ def hcq_build_host_program(ctx:HCQ2LowerCtx, linear:UOp, ast:UOp) -> UOp:
 # **************** schedule ****************
 
 @track_rewrites(name=lambda dev,ctx,linear,ast,**kw: f"hcq schedule {getattr(ast.arg, 'name', ast.op.name.lower())}")
-def _hcq_schedule(dev:HCQ2Compiled, ctx:HCQ2LowerCtx, linear:UOp, ast:UOp) -> UOp:
+def hcq_schedule(dev:HCQ2Compiled, ctx:HCQ2LowerCtx, linear:UOp, ast:UOp) -> UOp:
   linear = graph_rewrite(linear, pm_prep_runtime, ctx=ctx, name="hcq: prepare runtime")
   linear = graph_rewrite(linear, pm_hcq_lower + pm_flatten_linear, ctx=ctx, name="hcq: lower to cmdbuf ops")
   linear = UOp(Ops.LINEAR, dtypes.void, (graph_rewrite(linear, dev.pm_lower, ctx=ctx, name="hcq: encode cmdbuf ops"),))
@@ -325,12 +325,12 @@ def _run_host_call(ctx:ExecContext, call:UOp, dev:HCQ2Compiled, host_call:UOp, b
 
 def hcq_exec_program(ctx:ExecContext, call:UOp, ast:UOp) -> float:
   dev, resolved_call = Device[ast.src[1].arg], _resolve_call(ctx, call, ast)
-  hcq_ctx = HCQ2LowerCtx(dev=dev, name=f"submit_{ast.arg.name}",
+  hcq_ctx = HCQ2LowerCtx(dev=dev, name="submit_program",
                          kernargs_host=UOp.from_buffer(dev.kernargs_buf, dev.device),
                          kernargs_gpu=UOp.const(dtypes.uint64, dev.kernargs_buf.get_buf(dev.device).va_addr),
                          kernargs_allocator=dev.kernargs_offset_allocator, # allocator is passed and it will rotate kernargs
                          timestamps_gpu=UOp.const(dtypes.uint64, dev.timestamps_buf.get_buf(dev.device).va_addr))
-  host_call = _hcq_schedule(dev, hcq_ctx, UOp(Ops.LINEAR, dtypes.void, (resolved_call,), arg="COMPUTE"), ast)
+  host_call = hcq_schedule(dev, hcq_ctx, UOp(Ops.LINEAR, dtypes.void, (resolved_call,), arg="COMPUTE"), ast)
   prg_bufs = [cast(Buffer, resolved_call.src[1+gi].buffer) for gi in ast.arg.globals]
   return _run_host_call(ctx, call, dev, host_call, prg_bufs, ts_buf=dev.timestamps_buf)
 
@@ -343,7 +343,7 @@ def hcq_exec_copy(ctx:ExecContext, call:UOp, ast:UOp) -> float:
     (cpubuf := Buffer("CPU", src_buf.nbytes, dtypes.uint8, preallocate=True)).copyin(src_buf.ensure_allocated().as_memoryview())
     hcq_ctx.holds.append(buf_uop:=UOp.from_buffer(cpubuf, dev.device))
     resolved_call = resolved_call.replace(src=resolved_call.src[:2] + (buf_uop,) + resolved_call.src[3:])
-  host_call = _hcq_schedule(dev, hcq_ctx, UOp(Ops.LINEAR, dtypes.void, (resolved_call,), arg="COPY"), ast)
+  host_call = hcq_schedule(dev, hcq_ctx, UOp(Ops.LINEAR, dtypes.void, (resolved_call,), arg="COPY"), ast)
   bufs = [cast(Buffer, resolved_call.src[1].buffer), cast(Buffer, resolved_call.src[2].buffer)]
   return _run_host_call(ctx, call, dev, host_call, bufs, ts_buf=dev.timestamps_buf)
 
