@@ -34,8 +34,8 @@ _GATE_UP_HIP_SRC = r"""
 
 constexpr int DIM = 1024;
 constexpr int HIDDEN = 3584;
-constexpr int THREADS = 256;
-constexpr int ROWS_PER_GROUP = 8;
+constexpr int THREADS = 32;
+constexpr int ROWS_PER_GROUP = 1;
 constexpr float RMS_EPS = 1.0e-6f;
 
 extern "C" __global__ __launch_bounds__(THREADS) void fused_gate_up_q8(
@@ -43,17 +43,10 @@ extern "C" __global__ __launch_bounds__(THREADS) void fused_gate_up_q8(
     const float* __restrict__ x_norm,
     const unsigned char* __restrict__ gate_w,
     const unsigned char* __restrict__ up_w) {
-  __shared__ float red_gate[THREADS];
-  __shared__ float red_up[THREADS];
-
   int tid = threadIdx.x;
-  int wave = tid >> 6;
-  int lane = tid & 63;
-  int half = lane >> 5;
-  int lane32 = lane & 31;
-  int row = blockIdx.x * ROWS_PER_GROUP + wave * 2 + half;
+  int row = blockIdx.x;
 
-  int block = lane32;
+  int block = tid;
   int base = (row * (DIM / 32) + block) * 34;
   const unsigned char* gb = gate_w + base;
   const unsigned char* ub = up_w + base;
@@ -63,25 +56,17 @@ extern "C" __global__ __launch_bounds__(THREADS) void fused_gate_up_q8(
   #pragma unroll
   for (int offset = 0; offset < 32; offset++) {
     int i = block * 32 + offset;
-    const unsigned char* gb = gate_w + base;
-    const unsigned char* ub = up_w + base;
     float x = x_norm[i];
     gacc += float(*reinterpret_cast<const int8_t*>(gb + 2 + offset)) * gs * x;
     uacc += float(*reinterpret_cast<const int8_t*>(ub + 2 + offset)) * us * x;
   }
-  red_gate[tid] = gacc;
-  red_up[tid] = uacc;
-  __syncthreads();
-
-  if (lane32 == 0) {
-    float g = 0.0f, u = 0.0f;
-    int base_tid = (tid >> 5) << 5;
-    #pragma unroll
-    for (int i = 0; i < 32; i++) {
-      g += red_gate[base_tid + i];
-      u += red_up[base_tid + i];
-    }
-    z[row] = (g / (1.0f + expf(-g))) * u;
+  #pragma unroll
+  for (int delta = 16; delta > 0; delta >>= 1) {
+    gacc += __shfl_down(gacc, delta, 32);
+    uacc += __shfl_down(uacc, delta, 32);
+  }
+  if (tid == 0) {
+    z[row] = (gacc / (1.0f + exp2f(-1.4426950408889634f * gacc))) * uacc;
   }
 }
 """
@@ -98,7 +83,7 @@ def _gate_up_kernel(z:UOp, x_norm:UOp, gate_w:UOp, up_w:UOp) -> UOp:
   ops = 4 * _HIDDEN * _DIM + 2 * _HIDDEN
   mem = (_DIM + _HIDDEN) * 4 + 2 * _q8_bytes(_HIDDEN * _DIM)
   sink = UOp.sink(
-    UOp.special(_HIDDEN//8, "gidx0"), UOp.special(256, "lidx0"),
+    UOp.special(_HIDDEN, "gidx0"), UOp.special(32, "lidx0"),
     z, x_norm, gate_w, up_w,
     arg=KernelInfo(name="fused_gate_up_q8", estimates=Estimates(ops=ops, mem=mem)))
   return UOp(Ops.PROGRAM, src=(
