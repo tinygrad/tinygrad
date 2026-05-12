@@ -340,6 +340,8 @@ class TestVizIntegration(unittest.TestCase):
       c1 = Tensor.empty(4).add(1)
       c2 = Tensor.empty(8).add(1)
       sched = c1.schedule_linear(c2)
+      from tinygrad.engine.realize import compile_linear
+      sched = compile_linear(sched)
       with Context(NO_COLOR=0):
         prgs = [to_program(si.src[0], Device[Device.DEFAULT].renderer).arg.name for si in sched.src]
     lst = viz.list_items()
@@ -352,6 +354,10 @@ class TestVizIntegration(unittest.TestCase):
       assert n["ref"] is not None
       self.assertEqual(lst[n["ref"]]["name"], prgs[i])
       assert ansistrip(prgs[i]) in n["label"], f"CALL must contain kernel name, got {n['label']}"
+
+  def test_link_sched_codegen_beam(self):
+    with Context(BEAM=2):
+      self.test_link_sched_codegen()
 
   @Context(TRACEMETA=2)
   def test_metadata_tracing(self):
