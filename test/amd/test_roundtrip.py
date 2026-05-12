@@ -78,7 +78,7 @@ def get_kernels_from_tinygrad(op_fn) -> tuple[list[KernelSnapshot], dict[int, in
           if dst_id not in buf_pool:
             buf_pool[dst_id] = dst_buf.nbytes
           # Get source data if it's from numpy/CPU
-          if hasattr(src_buf, 'base') and src_buf.base is not None and hasattr(src_buf.base, '_buf'):
+          if hasattr(src_buf, 'base') and src_buf.base is not None and src_buf.base.is_allocated():
             src_data = bytes(src_buf.base._buf)
             buf_data[dst_id] = src_data
       elif ast.op is Ops.PROGRAM:
