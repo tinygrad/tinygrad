@@ -825,7 +825,6 @@ jobs:
         deps: testing
         python-version: '3.12'
         amd: 'true'
-        cuda: 'true'
         ocelot: 'true'
         llvm: 'true'
     - name: Run unit tests
