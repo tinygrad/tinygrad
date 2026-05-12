@@ -354,7 +354,8 @@ class TestCustomKernel(unittest.TestCase):
                                    UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=binary)))
 
     a = Tensor.custom_kernel(a, fxn=custom_src_kernel)[0]
-    self.assertEqual(a.tolist(), [1., 1., 2.])
+    with self.assertRaisesRegex(RuntimeError, "UOp verification failed"):
+      self.assertEqual(a.tolist(), [1., 1., 2.])
 
 class TestUOpReduce(unittest.TestCase):
   def test_uop_sum(self):
