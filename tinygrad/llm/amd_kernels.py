@@ -224,31 +224,21 @@ def gdn_recurrent_update(state:Tensor, q:Tensor, k:Tensor, v:Tensor, alpha:Tenso
   return core.reshape(1, 1, _GDN_HV, _GDN_V)
 
 
-_GDN_RECURRENT_CONV_HIP_SRC = _GDN_RECURRENT_HIP_SRC.replace(
-"""extern "C" __global__ __launch_bounds__(THREADS) void gdn_recurrent_update(
-    float* __restrict__ core_out,
-    float* __restrict__ state,
-    const float* __restrict__ q,
-    const float* __restrict__ k,
-    const float* __restrict__ v,
-    const float* __restrict__ alpha,
-    const _Float16* __restrict__ beta) {
-  int tid = threadIdx.x;
-  int lane = tid & (LANES_PER_ROW - 1);
-  int group = tid >> 4;
-  int hv = blockIdx.x;
-  int row_base = blockIdx.y * ROWS_PER_BLOCK + group * ILP_ROWS;
-  int k_base = lane * ELEMS_PER_LANE;
+_GDN_RECURRENT_CONV_HIP_SRC = r"""
+#include <hip/hip_runtime.h>
+#include <stdint.h>
 
-  float qv[ELEMS_PER_LANE], kv[ELEMS_PER_LANE], h[ILP_ROWS][ELEMS_PER_LANE];
-  #pragma unroll
-  for (int i = 0; i < ELEMS_PER_LANE; i++) {
-    int kk = k_base + i;
-    qv[i] = q[hv * K + kk];
-    kv[i] = k[hv * K + kk];
-  }
-""",
-"""extern "C" __global__ __launch_bounds__(THREADS) void gdn_recurrent_update_conv(
+constexpr int HV = 16;
+constexpr int V = 128;
+constexpr int K = 128;
+constexpr int LANES_PER_ROW = 16;
+constexpr int ELEMS_PER_LANE = 8;
+constexpr int THREADS = 128;
+constexpr int GROUPS = THREADS / LANES_PER_ROW;
+constexpr int ILP_ROWS = 4;
+constexpr int ROWS_PER_BLOCK = GROUPS * ILP_ROWS;
+
+extern "C" __global__ __launch_bounds__(THREADS) void gdn_recurrent_update_conv(
     float* __restrict__ core_out,
     float* __restrict__ state,
     const float* __restrict__ conv_out,
@@ -285,7 +275,58 @@ _GDN_RECURRENT_CONV_HIP_SRC = _GDN_RECURRENT_HIP_SRC.replace(
     qv[i] *= qscale;
     kv[i] *= kscale;
   }
-""").replace("v[hv * V + row]", "conv_out[2 * HV * K + hv * V + row]")
+
+  float a = alpha[hv];
+  float b = float(beta[hv]);
+  float dot_hk[ILP_ROWS];
+  #pragma unroll
+  for (int r = 0; r < ILP_ROWS; r++) dot_hk[r] = 0.0f;
+
+  #pragma unroll
+  for (int r = 0; r < ILP_ROWS; r++) {
+    int row = row_base + r;
+    int base = (hv * V + row) * K + k_base;
+    #pragma unroll
+    for (int i = 0; i < ELEMS_PER_LANE; i++) {
+      float hvv = state[base + i] * a;
+      h[r][i] = hvv;
+      dot_hk[r] += hvv * kv[i];
+    }
+  }
+
+  #pragma unroll
+  for (int delta = 8; delta > 0; delta >>= 1) {
+    #pragma unroll
+    for (int r = 0; r < ILP_ROWS; r++) dot_hk[r] += __shfl_xor(dot_hk[r], delta, LANES_PER_ROW);
+  }
+
+  float dot_hq[ILP_ROWS];
+  #pragma unroll
+  for (int r = 0; r < ILP_ROWS; r++) {
+    int row = row_base + r;
+    float vn = (conv_out[2 * HV * K + hv * V + row] - dot_hk[r]) * b;
+    dot_hq[r] = 0.0f;
+    int base = (hv * V + row) * K + k_base;
+    #pragma unroll
+    for (int i = 0; i < ELEMS_PER_LANE; i++) {
+      float updated = h[r][i] + kv[i] * vn;
+      state[base + i] = updated;
+      dot_hq[r] += updated * qv[i];
+    }
+  }
+
+  #pragma unroll
+  for (int delta = 8; delta > 0; delta >>= 1) {
+    #pragma unroll
+    for (int r = 0; r < ILP_ROWS; r++) dot_hq[r] += __shfl_xor(dot_hq[r], delta, LANES_PER_ROW);
+  }
+
+  if (lane == 0) {
+    #pragma unroll
+    for (int r = 0; r < ILP_ROWS; r++) core_out[hv * V + row_base + r] = dot_hq[r];
+  }
+}
+"""
 
 
 @functools.cache
