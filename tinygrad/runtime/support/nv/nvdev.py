@@ -1,5 +1,5 @@
 from __future__ import annotations
-import ctypes, time, functools, tinygrad.runtime.autogen.nv_regs
+import time, functools, tinygrad.runtime.autogen.nv_regs
 from tinygrad.helpers import getenv, DEBUG, getbits, round_up
 from tinygrad.runtime.autogen import pci
 from tinygrad.runtime.support.memory import TLSFAllocator, MemoryManager, AddrSpace
@@ -147,7 +147,7 @@ class NVDev:
 
   def _alloc_boot_mem(self, size:int, data:bytes|None=None, contiguous:bool=False, sysmem:bool|None=None) -> tuple[MMIOInterface, int, list[int]]:
     sz = round_up(size, 0x1000)
-    if sysmem is True or (sysmem is None and not self.large_bar): view, paddrs = self.pci_dev.alloc_sysmem(size, vaddr, contiguous=contiguous)
+    if sysmem is True or (sysmem is None and not self.large_bar): view, paddrs = self.pci_dev.alloc_sysmem(size, 0, contiguous=contiguous)
     else:
       paddr = self.mm.palloc(sz, boot=False)
       view, paddrs = self.vram.view(paddr, sz), [self.pci_dev.bar_info(1)[0] + paddr + i * 0x1000 for i in range(sz // 0x1000)]
