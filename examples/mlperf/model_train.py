@@ -1423,7 +1423,7 @@ def train_llama3(llama2_70b_lora:bool=False):
 
   if llama2_70b_lora:
     if getenv("LOAD_MODEL", 1):
-      MODEL_PATH = getenv("MODEL_PATH")
+      MODEL_PATH = getenv("MODEL_PATH", "/raid/weights/c4-llama2-70b-lora/")
 
       state_dict = {k:v for weight_file in Path(MODEL_PATH).glob("*.safetensors") for k,v in safe_load(weight_file).items()}
 
