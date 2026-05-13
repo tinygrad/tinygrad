@@ -83,5 +83,12 @@ class TestHevc(unittest.TestCase):
       self.assertEqual(f.dtype, dtypes.uint8)
       self.assertEqual(f.device, "NV")
 
+    hist = [Tensor.empty(*out_image_size, dtype=dtypes.uint8, device="NV").contiguous().realize()]
+    output_pool = [Tensor.empty(*out_image_size, dtype=dtypes.uint8, device="NV").contiguous().realize() for _ in range(2)]
+    pooled_frames = list(hevc_decode(hevc_tensor, opaque_nv, frame_info, luma_h, luma_w, history=hist, preallocated_outputs=output_pool))
+    Device.default.synchronize()
+    self.assertEqual(len(pooled_frames), 4)
+    self.assertTrue(all(any(f is out for out in output_pool) for f in pooled_frames))
+
 if __name__ == "__main__":
   unittest.main()

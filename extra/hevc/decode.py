@@ -1,7 +1,7 @@
 import argparse, os, hashlib, functools
-from typing import Iterator, Callable
-from tinygrad.helpers import getenv, DEBUG, round_up, Timing, tqdm, fetch, ceildiv
-from extra.hevc.hevc import parse_hevc_file_headers, untile_nv12, to_bgr, nv_gpu
+from typing import Iterator
+from tinygrad.helpers import getenv, round_up, Timing, tqdm, fetch, ceildiv
+from extra.hevc.hevc import parse_hevc_file_headers, untile_nv12, to_bgr
 from tinygrad import Tensor, dtypes, Device, Variable, TinyJit
 
 # rounds up hevc input data to 32 bytes, so more optimal kernels can be generated
@@ -9,10 +9,10 @@ HEVC_ROUNDUP = getenv("DATA_ROUNDUP", 32)
 
 @functools.cache
 def _hevc_jitted_decoder(out_image_size:tuple[int, int], max_hist:int, inplace:bool):
-  def hevc_decode_frame(pos:Variable, hevc_tensor:Tensor, offset:Variable, sz:Variable, opaque:Tensor, i:Variable, *hist:Tensor, outbuf:Tensor|None=None):
+  def hevc_decode_frame(pos:Variable, hevc_tensor:Tensor, offset:Variable, sz:Variable, opaque:Tensor, i:Variable,
+                        *hist:Tensor, outbuf:Tensor|None=None):
     x = hevc_tensor[offset:offset+sz*HEVC_ROUNDUP].decode_hevc_frame(pos, out_image_size, opaque[i], hist).realize()
-    if outbuf is not None: outbuf.assign(x).realize()
-    return x
+    return outbuf.assign(x).realize() if outbuf is not None else x
   return TinyJit(hevc_decode_frame)
 
 def hevc_decode(hevc_tensor:Tensor, opaque:Tensor, frame_info:list, luma_h:int, luma_w:int,
@@ -25,15 +25,20 @@ def hevc_decode(hevc_tensor:Tensor, opaque:Tensor, frame_info:list, luma_h:int, 
   v_sz = Variable("sz", 1, ceildiv(hevc_tensor.numel(), HEVC_ROUNDUP))
   v_i = Variable("i", 0, len(frame_info)-1)
 
+  pooled_outputs = preallocated_outputs is not None and len(preallocated_outputs) < len(frame_info)
+  if pooled_outputs: assert len(preallocated_outputs) > max_hist, f"output pool length {len(preallocated_outputs)} must exceed {max_hist=}"
   decode_jit = _hevc_jitted_decoder(out_image_size, max_hist, preallocated_outputs is not None)
   history = history or [Tensor.empty(*out_image_size, dtype=dtypes.uint8, device="NV").contiguous().realize() for _ in range(max_hist)]
   assert len(history) == max_hist, f"history length {len(history)} does not match max_hist {max_hist}"
 
   for i, (offset, sz, frame_pos, _, is_hist) in enumerate(frame_info):
     history = history[-max_hist:] if max_hist > 0 else []
+    outbuf = None
+    if preallocated_outputs is not None:
+      outbuf = next(x for x in preallocated_outputs if all(x is not y for y in history)) if pooled_outputs else preallocated_outputs[i]
     img = decode_jit(v_pos.bind(frame_pos), hevc_tensor, v_offset.bind(offset), v_sz.bind(ceildiv(sz, HEVC_ROUNDUP)),
-                     opaque, v_i.bind(i), *history, outbuf=preallocated_outputs[i] if preallocated_outputs else None)
-    res = preallocated_outputs[i] if preallocated_outputs else img.clone().realize()
+                     opaque, v_i.bind(i), *history, outbuf=outbuf)
+    res = img if outbuf is not None else img.clone().realize()
     if is_hist: history.append(res)
     yield res
 
