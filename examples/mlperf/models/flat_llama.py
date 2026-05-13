@@ -150,13 +150,12 @@ class FlatTransformer:
                 amax_xqkv:Tensor, amax_xo:Tensor, s_qkv:Tensor, s_o:Tensor,
                 grad_amax_xqkv:Tensor, grad_amax_xo:Tensor):
     bsz, seqlen, _ = x.shape
-    new_amaxs, saves = [], []
+    amaxs, saves = [], []
 
-    xqkv, x_normed, rrms, ret = norm_quantize_matmul(x, attention_norm, wqkv, s_qkv, self.norm_eps,
-                                                     amax_x=amax_xqkv, grad_amax_state=grad_amax_xqkv)
-    saves.extend([x_normed, rrms])
-    new_amaxs.extend(ret[:1])
-    saves.extend(ret[1:] + [xqkv])
+    xqkv, x_normed, rrms, (new_amax, *s) = norm_quantize_matmul(x, attention_norm, wqkv, s_qkv, self.norm_eps,
+                                                                  amax_x=amax_xqkv, grad_amax_state=grad_amax_xqkv)
+    amaxs.append(new_amax)
+    saves.extend([x_normed, rrms, *s, xqkv])
     xqkv = xqkv.reshape(bsz, seqlen, self.n_kv_heads, self.n_rep + 2, self.head_dim)
     xq = xqkv[:, :, :, :self.n_rep].reshape(bsz, seqlen, self.n_heads, self.head_dim)
     xk = xqkv[:, :, :, self.n_rep].reshape(bsz, seqlen, self.n_kv_heads, self.head_dim)
@@ -173,48 +172,45 @@ class FlatTransformer:
       attn = xq.scaled_dot_product_attention(xk, xv, is_causal=True, enable_gqa=True).transpose(1, 2)
     attn = attn.reshape(bsz, seqlen, -1)
 
-    out, *ret = matmul(attn, wo, amax_x=amax_xo, w_inv_scale=s_o, grad_amax_state=grad_amax_xo)
-    new_amaxs.extend(ret[:1])
-    saves.extend(ret[1:] + [out])
-    return (out, *new_amaxs, *saves)
+    out, new_amax, *s = matmul(attn, wo, amax_x=amax_xo, w_inv_scale=s_o, grad_amax_state=grad_amax_xo)
+    amaxs.append(new_amax)
+    saves.extend([*s, out])
+    return out, amaxs, saves
 
   def feed_forward(self, x:Tensor, residual:Tensor, **kwargs):
-    new_amaxs, saves = [], []
+    amaxs, saves = [], []
 
     if SPLIT_W13:
       h = x + residual
       x_normed, rrms = rmsnorm(h, self.norm_eps)
       saves.extend([x_normed, rrms])
       inp = x_normed * kwargs["ffn_norm"]
-      x_w1, *ret1 = matmul(inp, kwargs["w1"], amax_x=kwargs["amax_x1"], w_inv_scale=kwargs["s_1"], grad_amax_state=kwargs["grad_amax_xw1"])
-      new_amaxs.extend(ret1[:1]);
-      saves.extend(ret1[1:] + [x_w1])
-      x_w3, *ret3 = matmul(inp, kwargs["w3"], amax_x=kwargs["amax_x3"], w_inv_scale=kwargs["s_3"], grad_amax_state=kwargs["grad_amax_xw3"])
-      new_amaxs.extend(ret3[:1]);
-      saves.extend(ret3[1:] + [x_w3])
-      out, *ret2 = matmul(x_w1.silu() * x_w3, kwargs["w2"], amax_x=kwargs["amax_x2"], w_inv_scale=kwargs["s_2"],
-                          grad_amax_state=kwargs["grad_amax_xout"])
-      new_amaxs.extend(ret2[:1]);
-      saves.extend(ret2[1:] + [out])
+      x_w1, new_amax, *s = matmul(inp, kwargs["w1"], amax_x=kwargs["amax_x1"], w_inv_scale=kwargs["s_1"], grad_amax_state=kwargs["grad_amax_xw1"])
+      amaxs.append(new_amax)
+      saves.extend([*s, x_w1])
+      x_w3, new_amax, *s = matmul(inp, kwargs["w3"], amax_x=kwargs["amax_x3"], w_inv_scale=kwargs["s_3"], grad_amax_state=kwargs["grad_amax_xw3"])
+      amaxs.append(new_amax)
+      saves.extend([*s, x_w3])
+      out, new_amax, *s = matmul(x_w1.silu() * x_w3, kwargs["w2"], amax_x=kwargs["amax_x2"], w_inv_scale=kwargs["s_2"],
+                                 grad_amax_state=kwargs["grad_amax_xout"])
+      amaxs.append(new_amax)
+      saves.extend([*s, out])
     else:
-      x_w13, h, x_normed, rrms, ret = add_norm_quantize_matmul(x, residual, kwargs["ffn_norm"], kwargs["w13"], kwargs["s_13"],
-                                                               self.norm_eps, amax_x=kwargs["amax_x13"],
-                                                               grad_amax_state=kwargs["grad_amax_xw13"])
-      saves.extend([x_normed, rrms])
-      new_amaxs.extend(ret[:1]);
-      saves.extend(ret[1:] + [x_w13])
-      out, ret = silu_w13_quantize_matmul(x_w13, kwargs["w2"], kwargs["s_2"], amax_x2=kwargs["amax_x2"],
-                                          grad_amax_xw13=kwargs["grad_amax_xw13"], grad_amax_xout=kwargs["grad_amax_xout"])
-      new_amaxs.extend(ret[:1]); saves.extend(ret[1:] + [out])
-    return (out, h, *new_amaxs, *saves)
+      x_w13, h, x_normed, rrms, (new_amax, *s) = add_norm_quantize_matmul(x, residual, kwargs["ffn_norm"], kwargs["w13"], kwargs["s_13"],
+                                                                          self.norm_eps, amax_x=kwargs["amax_x13"],
+                                                                          grad_amax_state=kwargs["grad_amax_xw13"])
+      amaxs.append(new_amax)
+      saves.extend([x_normed, rrms, *s, x_w13])
+      out, (new_amax, *s) = silu_w13_quantize_matmul(x_w13, kwargs["w2"], kwargs["s_2"], amax_x2=kwargs["amax_x2"],
+                                                     grad_amax_xw13=kwargs["grad_amax_xw13"], grad_amax_xout=kwargs["grad_amax_xout"])
+      amaxs.append(new_amax)
+      saves.extend([*s, out])
+    return out, h, amaxs, saves
 
   @function(precompile=True, precompile_backward=True)
   def run_layer(self, x:Tensor, freqs_cis:Tensor, attn_kwargs:dict, ffn_kwargs:dict):
-    attn, *attn_ret = self.attention(x, freqs_cis, **attn_kwargs)
-    attn_amaxs, attn_saves = attn_ret[:2], attn_ret[2:]
-    ffn, h, *ffn_ret = self.feed_forward(x, attn, **ffn_kwargs)
-    n_ffn_amaxs = 3 if SPLIT_W13 else 2
-    ffn_amaxs, ffn_saves = ffn_ret[:n_ffn_amaxs], ffn_ret[n_ffn_amaxs:]
+    attn, attn_amaxs, attn_saves = self.attention(x, freqs_cis, **attn_kwargs)
+    ffn, h, ffn_amaxs, ffn_saves = self.feed_forward(x, attn, **ffn_kwargs)
     h = h + ffn
     return (h, *attn_amaxs, *ffn_amaxs, *attn_saves, *ffn_saves)
 
