@@ -10,7 +10,7 @@ pm_move_gates_from_index = PatternMatcher([
    lambda buf,gate,idx,cast,data: buf.index(idx, ptr=True).cast(cast.dtype).store(data, gate)),
 
   # Where after gated load becomes alt value
-  (UPat.var("gate").where(UPat().load(UPat(), UPat.var("gate"), name="l").or_casted(), UPat.var("a")), lambda gate,l,a:
+  (UPat.var("gate").where(UPat().load(UPat(), UPat.var("gate", dtype=dtypes.bool), name="l").or_casted(), UPat.var("a")), lambda gate,l,a:
    l.replace(src=(l.src[0], a.src[0] if a.op is Ops.CAST and a.src[0].dtype == l.dtype else a.cast(l.dtype), l.src[2])).cast(a.dtype)),
   (UPat.var("gate").where(UPat.var("a"), UPat().load(UPat(), ~UPat.var("gate", dtype=dtypes.bool), name="l").or_casted()), lambda gate,l,a:
    l.replace(src=(l.src[0], a.src[0] if a.op is Ops.CAST and a.src[0].dtype == l.dtype else a.cast(l.dtype), l.src[2])).cast(a.dtype)),
@@ -20,6 +20,6 @@ pm_move_gates_from_index = PatternMatcher([
    lambda idx,vec: idx.replace(src=(idx.src[0], UOp.vectorize(*(u.cast(dtypes.int) for u in vec.src))))),
 
   # images use 2D INDEX now (y,x)
-  (UPat(Ops.INDEX, src=(UPat(), UPat(dtype=dtypes.int.vec(2), name="vec")), name="idx"),
+  (UPat(Ops.INDEX, src=(UPat(), UPat((Ops.VCONST, Ops.STACK), dtype=dtypes.int.vec(2), name="vec")), name="idx"),
    lambda idx,vec: idx.replace(src=(idx.src[0], vec.gep(1), vec.gep(0)))),
 ])
