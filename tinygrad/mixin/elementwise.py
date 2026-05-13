@@ -763,7 +763,7 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
     if approximate == "tanh":
       return 0.5 * self * (1 + (math.sqrt(2 / math.pi) * (self + 0.044715 * self ** 3)).tanh())
     elif approximate == "none":
-      return self * 0.5 * (1.0 + (self / 1.41421).erf())
+      return self * 0.5 * (1.0 + (self / math.sqrt(2)).erf())
     else:
       raise RuntimeError(f"{approximate=} is not supported")
 
