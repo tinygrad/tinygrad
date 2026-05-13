@@ -22,12 +22,6 @@ def download_dataset(base_dir: Path) -> Path:
   for split in ['train', 'validation']: verify_dataset_split(split, *_load_llama2_70b_lora_split(base_dir, split))
   return base_dir
 
-def verify_dataset_hash(data_dir: Path):
-  # AMD: https://github.com/mlcommons/training_results_v5.1/blob/main/AMD/benchmarks/llama2_70b_lora/implementations/MI350X_EPYC_9575F_pytorch_llama2_70b/scripts/download_dataset.py#L25-L41
-  # Cisco: https://github.com/mlcommons/training_results_v5.1/blob/main/Cisco/benchmarks/llama2_70b_lora/implementations/pytorch/scripts/download_dataset.py#L25-L41
-  # QCT: https://github.com/mlcommons/training_results_v5.1/blob/main/Quanta_Cloud_Technology/benchmark/llama2_70b_lora/implementations/pytorch_D74H-7U/scripts/download_dataset.py#L25-L41
-  assert (digest:=hash_directory(data_dir)) == HASH, f"llama2 70b lora dataset hash {digest} != {HASH}"
-
 def verify_dataset_split(split: str, input_ids: np.ndarray, labels: np.ndarray):
   assert input_ids.shape == labels.shape, f"{split} input_ids shape {input_ids.shape} != labels shape {labels.shape}"
   assert not (input_ids == -100).any(), f"{split} input_ids contains -100"
