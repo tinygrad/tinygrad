@@ -12,11 +12,11 @@ def _ggml_iq_grid(device: str, grid: tuple[int, ...], grid_shape: tuple[int, int
   values = [float((w >> (8*i)) & 0xFF) for w in grid for i in range(grid_shape[1])]
   return Tensor(values, dtype=dtypes.float32, device=device).reshape(grid_shape)
 
-# native types
+# native types {ggml_type: dtype}
 _GGML_NATIVE = {0: dtypes.float32, 1: dtypes.float16, 24: dtypes.int8, 25: dtypes.int16,
                 26: dtypes.int32, 27: dtypes.int64, 28: dtypes.float64, 30: dtypes.bfloat16}
 
-# map to (number of elements, number of bytes)
+# quant types {ggml_type: (number of elements, number of bytes)}
 _GGML_QUANT = {2:(32,18), 3:(32,20), 6:(32,22), 7:(32,24), 8:(32,34),
                12:(256,144), 13:(256,176), 14:(256,210), 18:(256,98), 21:(256,110), 22:(256,82), 23:(256,136), 39:(32,17), 41:(128,18)}
 
@@ -130,7 +130,7 @@ readers: dict[int, Callable[[io.BufferedIOBase], Any]] = { 8: read_str, 9: read_
     [ (0,"c",1), (1,"b",1), (2,"H",2), (3,"h",2), (4,"I",4), (5,"i",4), (6,"f",4), (7,"?",1), (10,"Q",8), (11,"q",8), (12,"d",8) ] } }
 read_uint32, read_int32, read_uint64, read_int64 = readers[4], readers[5], readers[10], readers[11]
 
-def _gguf_header(tensor: Tensor):
+def _gguf_parse(tensor: Tensor, devices:tuple[str,...]|None=None, n_blk:int=0) -> tuple[dict, dict[str, Tensor], int]:
   r = io.BufferedReader(TensorIO(tensor), 1_000_000)
   magic, version, n_tensors, n_kv = r.read(4), read_int32(r), read_int64(r), read_int64(r)
   if magic != b"GGUF" or version not in [2, 3]: raise ValueError("Invalid GGUF format!")
@@ -142,10 +142,8 @@ def _gguf_header(tensor: Tensor):
 
   t_infos = [ (read_str(r), tuple(read_uint64(r) for _ in range(read_uint32(r))), read_int32(r), read_uint64(r)) for _ in range(n_tensors) ]
   alignment, pos = kv_data.get("general.alignment", 32), r.tell()
-  return kv_data, t_infos, round_up(pos, alignment)
+  data_start = round_up(pos, alignment)
 
-def _gguf_parse(tensor: Tensor, devices:tuple[str,...]|None=None, n_blk:int=0) -> tuple[dict, dict[str, Tensor], int]:
-  kv_data, t_infos, data_start = _gguf_header(tensor)
   if devices and not n_blk: n_blk = kv_data[f'{kv_data["general.architecture"]}.block_count']
   # TODO: remove the need for copy to default device
   if not devices: tensor = tensor.to(None).realize()

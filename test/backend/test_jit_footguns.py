@@ -333,6 +333,25 @@ class TestJitFootguns(unittest.TestCase):
     with self.assertRaises(JitError):
       f(Tensor([1, 2, 3, 4]), Tensor([True, False, True, False]))  # capture - .item() raises
 
+  def test_masked_select_static_size_jittable(self):
+    @TinyJit
+    def f(x, mask): return x.masked_select(mask, size=4, fill_value=-1).realize()
+
+    for _ in range(3):
+      np.testing.assert_equal(f(Tensor([1, 2, 3, 4]), Tensor([True, False, True, False])).numpy(), [1, 3, -1, -1])
+      np.testing.assert_equal(f(Tensor([5, 6, 7, 8]), Tensor([False, True, True, True])).numpy(), [6, 7, 8, -1])
+      np.testing.assert_equal(f(Tensor([9, 8, 7, 6]), Tensor([True, True, True, True])).numpy(), [9, 8, 7, 6])
+      np.testing.assert_equal(f(Tensor([1, 1, 1, 1]), Tensor([False, False, False, False])).numpy(), [-1, -1, -1, -1])
+
+  def test_nonzero_static_size_jittable(self):
+    @TinyJit
+    def f(x): return x.nonzero(size=3, fill_value=-1).realize()
+
+    for _ in range(3):
+      np.testing.assert_equal(f(Tensor([1, 0, 2, 0, 3])).numpy(), [[0], [2], [4]])
+      np.testing.assert_equal(f(Tensor([0, 0, 5, 0, 0])).numpy(), [[2], [-1], [-1]])
+      np.testing.assert_equal(f(Tensor([0, 0, 0, 0, 0])).numpy(), [[-1], [-1], [-1]])
+
   def test_tolist_bakes_in_values(self):
     """.tolist() raises error during JIT capture (would bake in values)."""
     @TinyJit

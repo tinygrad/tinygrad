@@ -422,7 +422,7 @@ class TestFunctionTuple(unittest.TestCase):
       j = UOp.range(D.shape[0], 1)
       store_c = C[i].store(A[i] * 2.0).end(i)
       store_d = D[j].store(A[j]).end(j)
-      return UOp.group(store_c, store_d).sink(arg=KernelInfo(name="my_kernel"))
+      return UOp.sink(store_c, store_d, arg=KernelInfo(name="my_kernel"))
 
     def my_grad(d_c:UOp, call:UOp):
       a_input = call.src[3]
@@ -494,6 +494,20 @@ class TestFunctionTuple(unittest.TestCase):
     c.sum().backward()
     Tensor.realize(a.grad)
     np.testing.assert_allclose(a.grad.numpy(), [2., 2., 2., 2.])
+
+  def test_custom_kernel_precompile_further_compute(self):
+    def my_kernel(C:UOp, A:UOp) -> UOp:
+      i = UOp.range(A.shape[0], 0)
+      return C[i].store(A[i] * 2.0).end(i).sink(arg=KernelInfo(name="my_kernel"))
+
+    @function(precompile=True)
+    def f(a:Tensor):
+      c = Tensor.invalids(*a.shape, dtype=a.dtype, device=a.device)
+      c = Tensor.custom_kernel(c, a, fxn=my_kernel)[0]
+      return c + 1
+
+    a = Tensor([1., 2., 3., 4.]).contiguous().realize()
+    np.testing.assert_allclose(f(a).numpy(), [3., 5., 7., 9.])
 
 class TestFunctionGrad(unittest.TestCase):
   def test_function_grad_ops(self, precompile=False, precompile_backward=False):

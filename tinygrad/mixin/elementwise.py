@@ -121,6 +121,20 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
     """
     return self._binop(Ops.MUL, x, reverse)
 
+  def bitwise_not(self) -> Self:
+    """
+    Computes the bitwise NOT of `self`.
+    Equivalent to `~self`.
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([0, 2, 5, 255], dtype="int8").bitwise_not().numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor([True, False]).bitwise_not().numpy())
+    ```
+    """
+    self._check_dtype()
+    return self.logical_not() if self.dtype == dtypes.bool else self ^ -1
+
   def bitwise_and(self, x: Self | ConstType, reverse: bool = False) -> Self:
     """
     Computes the bitwise AND of `self` and `x`.
@@ -179,7 +193,7 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
     """
     a, b = self._broadcasted(x, reverse)
     if dtypes.is_int(a.dtype): return a.alu(Ops.FLOORMOD, b)
-    return a - (a // b) * b
+    return a - a.div(b, rounding_mode="floor") * b
 
   def fmod(self, x: Self | ConstType) -> Self:
     """
@@ -192,7 +206,7 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
     """
     a, b = self._broadcasted(x)
     if dtypes.is_int(a.dtype): return a.alu(Ops.CMOD, b)
-    return a - (a*b.reciprocal()).trunc() * b
+    return a - a.div(b, rounding_mode="trunc") * b
 
   def div(self, x: Self | ConstType, reverse: bool = False, rounding_mode: Literal["trunc", "floor"] | None = None) -> Self:
     """
@@ -214,12 +228,12 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
     print(Tensor([1, 4, 10]).div(Tensor([2, 3, 4])).numpy())
     ```
     """
-    lhs, rhs = self._broadcasted(x, reverse)
-    if rounding_mode is None: return lhs * rhs.reciprocal()
-    if dtypes.is_int(lhs.dtype):
-      if rounding_mode == "trunc": return lhs.alu(Ops.CDIV, rhs)
-      if rounding_mode == "floor": return lhs // rhs
-    d = lhs.cast(least_upper_float(lhs.dtype)) * rhs.cast(least_upper_float(rhs.dtype)).reciprocal()
+    a, b = self._broadcasted(x, reverse)
+    if dtypes.is_int(a.dtype):
+      if rounding_mode == "trunc": return a.alu(Ops.CDIV, b)
+      if rounding_mode == "floor": return a.alu(Ops.FLOORDIV, b)
+    d = a * b.reciprocal()
+    if rounding_mode is None: return d
     if rounding_mode == "trunc": return d.trunc()
     if rounding_mode == "floor": return d.floor()
     raise RuntimeError(f"{rounding_mode=} is not supported")
@@ -243,8 +257,7 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
     return self.div(x)
 
   def __floordiv__(self, x: Self | ConstType) -> Self:
-    a, b = self._broadcasted(x, reverse=False)
-    return a.alu(Ops.FLOORDIV, b) if dtypes.is_int(a.dtype) else (a*b.reciprocal()).floor()
+    return self.div(x, rounding_mode="floor")
 
   def __mod__(self, x: Self | ConstType) -> Self:
     return self.mod(x)
@@ -271,7 +284,7 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
     return self.div(x, True)
 
   def __rfloordiv__(self, x: Self | ConstType) -> Self:
-    return self.ufix(x) // self
+    return self.div(x, reverse=True, rounding_mode="floor")
 
   def __rand__(self, x: Self | ConstType) -> Self:
     return self.bitwise_and(x, True)
@@ -376,15 +389,16 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
     Returns a tensor of with the magnitude of `self` and the sign of `other`, elementwise.
     """
     # NOTE: torch always return in float, we return based on the broadcasting rule.
-    other = self._broadcasted(other)[1]
-    return self.abs() * ((other < 0) | (other.reciprocal() < 0)).where(-1, 1)
+    a, b = self._broadcasted(other)
+    return a.abs() * ((b < 0) | (b.reciprocal() < 0)).where(-1, 1)
 
   def logaddexp(self, other: Self | ConstType) -> Self:
     """
     Calculates (self.exp()+other.exp()).log(), elementwise.
     """
-    m = self.maximum(other)
-    return ((self-m).exp() + (self._broadcasted(other)[1]-m).exp()).log() + m
+    a, b = self._broadcasted(other)
+    m = a.maximum(b)
+    return ((a-m).exp() + (b-m).exp()).log() + m
 
   def where(self, x: Self | ConstType, y: Self | ConstType) -> Self:
     ref: Self = x if isinstance(x, type(self)) else y if isinstance(y, type(self)) else \
@@ -1032,20 +1046,6 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
     ```
     """
     return self / (1 + self.abs())
-
-  def bitwise_not(self) -> Self:
-    """
-    Computes the bitwise NOT of `self`.
-    Equivalent to `~self`.
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([0, 2, 5, 255], dtype="int8").bitwise_not().numpy())
-    ```
-    ```python exec="true" source="above" session="tensor" result="python"
-    print(Tensor([True, False]).bitwise_not().numpy())
-    ```
-    """
-    if self.dtype != dtypes.bool and not dtypes.is_int(self.dtype): raise RuntimeError(f"{self.dtype} is not supported")
-    return self.logical_not() if self.dtype == dtypes.bool else self ^ -1
 
   def lerp(self, end: Self, weight: Self | ConstType) -> Self:
     """

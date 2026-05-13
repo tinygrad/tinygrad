@@ -221,7 +221,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     float_one_bits = uint_bits.ones_like(dtype=dtype).bitcast(uint_dtype)
     return uint_bits.rshift(dtype.bitsize - nmant).bitwise_or(float_one_bits).bitcast(dtype)[:prod(shape)].sub(1).reshape(shape)
 
-  def _pad_constant(self, pX, value:float) -> Self:
+  def _pad_constant(self, pX, value:ConstType) -> Self:
     # shrink first for negative pads, then pad with only non-negative values
     pX = tuple((0, 0) if p is None else p for p in pX)
     has_neg = not all(resolve(p >= 0) for p in flatten(pX))
@@ -230,7 +230,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     base = MovementMixin.pad(X, pads)
     if value == 0: return base
     base = base.cast(least_upper_dtype(base.dtype, dtypes.from_py(value)))
-    return base + MovementMixin.pad(X.ones_like(), pads).cast(dtypes.bool).where(base.zeros_like(), base.full_like(value))
+    return MovementMixin.pad(X.ones_like(dtype=dtypes.bool), pads).where(base, base.full_like(value))
 
   def _pad_circular(self, pX:tuple[tuple[sint, sint], ...]) -> Self:
     if any(pB>sh or pA>sh for (pB,pA),sh in zip(pX, self.shape)): raise ValueError('Padding value causes wrapping around more than once.')
@@ -243,7 +243,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     for d,(pB,pA) in enumerate(pads):
       if mode == "reflect":
         if pB >= (s:=X.shape[d]) or pA>=s: raise ValueError(f"Padding ({pB}, {pA}) should be less than the input size={s} for dim={d}.")
-        slcB, slcA = slice(pB,0,-1), slice(s-2 if s-2>=0 else None, s-2-pA if s-2-pA>=0 else None, -1)
+        slcB, slcA = slice(pB,0,-1), slice(s-2, s-2-pA if s-2-pA>=0 else None, -1)
         xB, xA = (X[[slc if i == d else slice(None) for i in range(X.ndim)]] if p > 0 else None for slc, p in ((slcB, pB), (slcA, pA)))
       else:
         shrB, shrA = tuple((0,1) if i==d else None for i in range(X.ndim)), tuple((X.shape[i]-1,X.shape[i]) if i==d else None for i in range(X.ndim))
@@ -253,7 +253,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     # shrink after for negative pads (reflection/replication must see full data first)
     return X.shrink(tuple((-min(pB,0), min(pA+s,s)) for (pB,pA),s in zip(pX, X.shape)))
 
-  def pad(self, padding:Sequence[sint]|Sequence[tuple[sint, sint]|None], mode:str="constant", value:float=0.0) -> Self:
+  def pad(self, padding:Sequence[sint]|Sequence[tuple[sint, sint]|None], mode:str="constant", value:ConstType=0.0) -> Self:
     """
     Returns a tensor with padding applied based on the input `padding`.
 
@@ -644,7 +644,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
 
   def _split_cumalu(self, axis:int, op:Ops) -> Self:
     axis = self._resolve_dim(axis)
-    if self.ndim == 0 or 0 in self.shape: return self
+    if self.ndim == 0 or 0 in self.shape: return self.cast(self.sum().dtype) if op is Ops.ADD else self
     # TODO: someday the optimizer will find this on its own
     # for now this is a two stage cumsum
     SPLIT = 256
@@ -923,7 +923,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     ```
     """
     if index.device != self.device: raise RuntimeError(f"expected index and self on the same device, {index.device=}, {self.device=}")
-    assert index.ndim == self.ndim, f"self.ndim must equal index.ndim, {self.ndim=}, {index.ndim=}"
+    if index.ndim != self.ndim: raise RuntimeError(f"self.ndim must equal index.ndim, {self.ndim=}, {index.ndim=}")
     dim = self._resolve_dim(dim)
     assert all(s >= i for d,(s,i) in enumerate(zip(self.shape, index.shape)) if d != dim), "requires self.shape[d] >= index.shape[d] for all d != dim"
     x = self.shrink_to(tuple(i if d != dim else None for d,i in enumerate(index.shape))).unsqueeze(-1).transpose(-1, dim)
@@ -1144,16 +1144,16 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     ```
     """
     axis = tuple(range(-len(k_ := make_tuple(kernel_size, 2)), 0))
+    s_ = stride if stride is not None else k_
     def pool(x:Self, padding_:Sequence[int]) -> Self:
-      return x._pad_constant(((0,0),)*(x.ndim-len(k_)) + flat_to_grouped(padding_), 0.0)._pool(k_, stride if stride is not None else k_, dilation)
+      return x._pad_constant(((0,0),)*(x.ndim-len(k_)) + flat_to_grouped(padding_), 0.0)._pool(k_, s_, dilation)
     reg_pads = resolve_pool_pads(padding, len(k_))
-    ceil_pads = self._apply_ceil_mode(reg_pads, k_, stride if stride is not None else k_, dilation)
+    pads = self._apply_ceil_mode(reg_pads, k_, s_, dilation) if ceil_mode else reg_pads
     if not count_include_pad:
-      pads = ceil_pads if ceil_mode else reg_pads
       return pool(self, pads).sum(axis) / pool(self.ones_like(), pads).sum(axis)
-    if not ceil_mode: return pool(self, reg_pads).mean(axis)
-    return pool(self, ceil_pads).sum(axis) / pool(self._pad_constant(((0,0),)*(self.ndim-len(k_)) + flat_to_grouped(reg_pads), 0.0).ones_like(),
-                                                  tuple(cp-rp for cp,rp in zip(ceil_pads, reg_pads))).sum(axis)
+    if not ceil_mode: return pool(self, pads).mean(axis)
+    return pool(self, pads).sum(axis) / pool(self._pad_constant(((0,0),)*(self.ndim-len(k_)) + flat_to_grouped(reg_pads), 0.0).ones_like(),
+                                              tuple(cp-rp for cp,rp in zip(pads, reg_pads))).sum(axis)
 
   def max_pool2d(self, kernel_size:tuple[int, ...]=(2,2), stride=None, dilation=1, padding:int|tuple[int, ...]=0,
                  ceil_mode=False, return_indices=False) -> Self | tuple[Self, Self]:
@@ -1440,6 +1440,80 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     return nll.sum() / masked_weight.sum() if reduction == "mean" else nll._do_reduction(reduction)
 
   # ***** matrix ops *****
+
+  def qr(self) -> tuple[Self, Self]:
+    assert self.ndim > 1, f"expected two or more dimensions, got {self.ndim}"
+    b_shape, m, n = self.shape[:-2], int(self.shape[-2]), int(self.shape[-1])
+    R, Q = self, type(self).eye(m, dtype=self.dtype, device=self.device).expand(b_shape + (m, m))
+    idx = type(self).arange(m, device=self.device)
+    for i in range(min(m, n)):
+      # full-length Householder reflector v with zeros above row i; w = tau*v is the rank-1 update factor
+      at_i, x = idx.eq(i), (idx >= i).where(R[..., :, i], 0)
+      norm = x.square().sum(-1, keepdim=True).sqrt()
+      x0 = at_i.where(x, 0).sum(-1, keepdim=True)
+      sgn, active = x0.ne(0).where(x0.sign(), 1), norm.ne(0)
+      u0 = x0 + sgn * norm
+      v = (at_i.where(u0, x) / active.where(u0, 1)).unsqueeze(-1)
+      w = active.where(sgn * u0 / active.where(norm, 1), 0).unsqueeze(-1) * v
+      R = R - w @ (v.transpose(-2, -1) @ R)
+      Q = Q - (Q @ v) @ w.transpose(-2, -1)
+    return Q, R
+
+  def svd(self, full_matrices = True) -> tuple[Self, Self, Self]:
+    #partial implementation of https://www.netlib.org/lapack/lawnspdf/lawn169.pdf , pg 26
+    assert self.ndim > 1, f"expected two or more dimensions, got {self.ndim}"
+    b_shape, m, n = self.shape[:-2], int(self.shape[-2]), int(self.shape[-1])
+    #preprocess the matrix
+    Q, R = (self if m >= n else self.transpose(-2, -1)).qr()
+    num, q_num = min(m, n), max(m, n)
+    # TODO: codegen infinite loop without contiguous
+    U = R[..., :num, :num].contiguous()
+    V = type(self).eye(num, dtype=self.dtype, device=self.device).expand(b_shape + (num, num)).contiguous()
+    #prepare round robin pairing: identity on first half, reversed on second half
+    permute = type(self).arange(num//2, dtype=dtypes.int, device=self.device).cat(
+                type(self).arange(num//2, num, dtype=dtypes.int, device=self.device).flip(0))
+    cols, h = type(self).arange(num, dtype=dtypes.int, device=self.device), num // 2
+    eye_num = type(self).eye(num, dtype=self.dtype, device=self.device).expand(b_shape + (num, num))
+    def one_round_jacobi(U, V, permute):
+      # permutation matrix P with P[a,b] = (a == permute[b]); first 2h columns are paired-column selectors
+      P = cols.unsqueeze(1).eq(permute.unsqueeze(0)).cast(U.dtype)
+      P_pair = P[..., :2*h]  # drops the runoff column for odd num
+      # extract paired columns to compute Jacobi rotation params
+      U_pair = U @ P_pair
+      U_left, U_right = U_pair.split(h, -1)
+      gamma = (U_left * U_right).sum(-2).reshape(b_shape + (1, h))
+      alpha, beta = U_pair.square().sum(-2).unsqueeze(-2).split(h, -1)
+      rot = gamma.ne(0)
+      tau = (beta - alpha) / (2 * rot.where(gamma, 1))
+      t = tau.ne(0).where(tau.sign(), 1) / (tau.abs() + (1 + tau.square()).sqrt())
+      t = rot.where(t, 0)
+      c = 1 / (1 + t.square()).sqrt()
+      s = c * t
+      # build rotation matrix R: identity + sum over pairs of 2x2 rotation deltas at (i_k, j_k) positions
+      Mi, Mj = P_pair.transpose(-2, -1).split(h, -2)  # paired-column selectors, each shape (h, num)
+      Mi_a, Mi_b = Mi.unsqueeze(-1), Mi.unsqueeze(-2)
+      Mj_a, Mj_b = Mj.unsqueeze(-1), Mj.unsqueeze(-2)
+      cc, ss = (c - 1).reshape(b_shape + (h, 1, 1)), s.reshape(b_shape + (h, 1, 1))
+      R = eye_num + (cc * (Mi_a * Mi_b + Mj_a * Mj_b) + ss * (Mi_a * Mj_b - Mj_a * Mi_b)).sum(-3)
+      U, V = U @ R, V @ R
+      #prepare the next round robin pairings
+      if num % 2 == 1: permute = (permute - 1) % num
+      else: permute = permute[0].reshape(1).cat(((permute[1:num] - 2) % (num - 1)) + 1)
+      return U, V, permute
+    # classical Jacobi converges in ~4 sweeps; one full sweep is (num-1) rounds for even num
+    for _ in range(4 * num): U, V, permute = one_round_jacobi(U, V, permute)
+    #extract singular values and sort. construct U from Q
+    S, indices = U.square().sum(-2).sqrt().sort(dim=-1, descending=True)
+    new_indices = indices.unsqueeze(-2).expand(b_shape + (num, num))
+    U = U.gather(-1, new_indices) / S.ne(0).where(S, 1).unsqueeze(-2)
+    V = V.gather(-1, new_indices)
+    # place U into the top-left num×num block of a q_num×q_num identity matrix
+    pad_arg = (None,) * len(b_shape) + ((0, q_num - num), (0, q_num - num))
+    eye_q = type(self).eye(q_num, dtype=U.dtype, device=U.device).expand(b_shape + (q_num, q_num))
+    eye_n = type(self).eye(num, dtype=U.dtype, device=U.device).expand(b_shape + (num, num)).pad(pad_arg)
+    U = Q @ (U.pad(pad_arg) + eye_q - eye_n)
+    if not full_matrices: U = U[..., 0:num]
+    return (U, S, V.transpose(-2, -1)) if m >= n else (V, S, U.transpose(-2, -1))
 
   def newton_schulz(self, steps:int, params:tuple[int, ...], eps:float=1.0e-7) -> Self:
     """

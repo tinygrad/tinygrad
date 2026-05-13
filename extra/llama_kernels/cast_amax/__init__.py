@@ -53,8 +53,10 @@ def _fused_quantize_bwd_w13(gradient:UOp, kernel:UOp):
   inv_scale = (grad_amax_state_t.float() + 1e-8) / FP8_MAX
   new_grad_amax = scalar_amax(grad_amax_buf)
   store_effect = grad_amax_state_t.uop.store(new_grad_amax.uop)
-  # Stash fp8 companion + amax store for cdna_asm_gemm's bwd to attach to grad_a.
-  _grad_fp8_mailbox[grad_xw13.uop] = (grad_xw13_fp8.uop, inv_scale.uop, new_grad_amax.uop, store_effect)
+  assert grad_xw13_fp8.uop.op is Ops.AFTER, f"expected AFTER, got {grad_xw13_fp8.uop.op}"
+  grad_xw13_fp8_uop = grad_xw13_fp8.uop.replace(src=grad_xw13_fp8.uop.src + (store_effect,))
+  # Stash fp8 companion for cdna_asm_gemm's bwd to attach to grad_a.
+  _grad_fp8_mailbox[grad_xw13.uop] = (grad_xw13_fp8_uop, inv_scale.uop)
   return (None, None, grad_xw13.uop, None, None)
 
 def fused_quantize_fp8_w13(xw13:Tensor, amax_state:Tensor, fp8_dtype, grad_amax_state:Tensor) -> tuple[Tensor, Tensor, Tensor]:

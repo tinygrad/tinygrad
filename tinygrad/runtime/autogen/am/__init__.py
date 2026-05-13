@@ -2,13 +2,14 @@ import pathlib, hashlib, re, itertools
 from tinygrad.runtime.autogen import load, root
 
 __all__ = ["am", "pm4_soc15", "pm4_nv", "sdma_4_0_0", "sdma_5_0_0", "sdma_6_0_0", "smu_13_0_0", "smu_13_0_6", "smu_13_0_12", "smu_14_0_2",
-           "fw", "navi_offsets", "vega_offsets", "regs", "soc_9", "soc_11", "soc_12"]
+           "fw", "navi_offsets", "vega_offsets", "regs", "soc_9", "soc_11", "soc_12", "pmc"]
 
 am_src="https://github.com/ROCm/ROCK-Kernel-Driver/archive/33970e1351f5e511029602454979f3de7e22260f.tar.gz"
 rocm_src="https://github.com/ROCm/rocm-systems/archive/cccc350dc620e61ae2554978b62ab3532dc10bd9.tar.gz"
 AMD, AMDINC = "{}/drivers/gpu/drm/amd", "{}/drivers/gpu/drm/amd/include"
 inc, kern_rules = ["-include", "stdint.h"], [(r'le32_to_cpu', ''),]
 fw_src="https://gitlab.com/kernel-firmware/linux-firmware/-/archive/1e2c15348485939baf1b6d1f5a7a3b799d80703d/1e2c15348485939baf1b6d1f5a7a3b799d80703d.tar.gz"
+pmc_src="https://raw.githubusercontent.com/ROCm/rocm-systems/cccc350dc620e61ae2554978b62ab3532dc10bd9/projects/rocprofiler-compute/src/rocprof_compute_soc/profile_configs/counter_defs.yaml"
 
 reg_files = {
   "gc": [(9,4,3), (11,0,0), (11,0,3), (11,5,0), (12,0,0)],
@@ -88,4 +89,14 @@ def __getattr__(nm):
     case "soc_9" | "soc_11" | "soc_12":
       return load(f"am/{nm}", ["{}/projects/aqlprofile/linux/" + {9: "vega10", 11: "soc21", 12: "soc24"}[int(nm.split('_')[1])] + "_enum.h"],
                   srcs=rocm_src, patterns=soc_patterns, macros=False)
+    case "pmc":
+      def genpmc(_, files, **kwargs):
+        from yaml import safe_load # type: ignore
+        with open(files[0], "r") as f: data = safe_load(f)
+        out = ["counters = {"]
+        for counter in [c for c in data['rocprofiler-sdk']['counters'] if any('block' in d for d in c['definitions'])]:
+          out.extend([f"  {counter['name']!r}: {{",
+                      *[f"    {a!r}: ({d['block']!r}, {d['event']})," for d in counter['definitions'] for a in d['architectures']], "  },"])
+        return "\n".join(out + ["}"])
+      return load("am/pmc", ["{}/counter_defs.yaml"], srcs=pmc_src, gen=genpmc)
     case _: raise AttributeError(f"no such autogen: {nm}")
