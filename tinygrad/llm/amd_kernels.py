@@ -222,3 +222,93 @@ def gdn_recurrent_update(state:Tensor, q:Tensor, k:Tensor, v:Tensor, alpha:Tenso
   core = Tensor.empty(_GDN_HV, _GDN_V, dtype=dtypes.float, device=state.device)
   core, *_ = Tensor.custom_kernel(core, state, q.reshape(-1), k.reshape(-1), v.reshape(-1), alpha.reshape(-1), beta.reshape(-1), fxn=_gdn_recurrent_kernel)
   return core.reshape(1, 1, _GDN_HV, _GDN_V)
+
+
+_GDN_RECURRENT_CONV_HIP_SRC = _GDN_RECURRENT_HIP_SRC.replace(
+"""extern "C" __global__ __launch_bounds__(THREADS) void gdn_recurrent_update(
+    float* __restrict__ core_out,
+    float* __restrict__ state,
+    const float* __restrict__ q,
+    const float* __restrict__ k,
+    const float* __restrict__ v,
+    const float* __restrict__ alpha,
+    const _Float16* __restrict__ beta) {
+  int tid = threadIdx.x;
+  int lane = tid & (LANES_PER_ROW - 1);
+  int group = tid >> 4;
+  int hv = blockIdx.x;
+  int row_base = blockIdx.y * ROWS_PER_BLOCK + group * ILP_ROWS;
+  int k_base = lane * ELEMS_PER_LANE;
+
+  float qv[ELEMS_PER_LANE], kv[ELEMS_PER_LANE], h[ILP_ROWS][ELEMS_PER_LANE];
+  #pragma unroll
+  for (int i = 0; i < ELEMS_PER_LANE; i++) {
+    int kk = k_base + i;
+    qv[i] = q[hv * K + kk];
+    kv[i] = k[hv * K + kk];
+  }
+""",
+"""extern "C" __global__ __launch_bounds__(THREADS) void gdn_recurrent_update_conv(
+    float* __restrict__ core_out,
+    float* __restrict__ state,
+    const float* __restrict__ conv_out,
+    const float* __restrict__ alpha,
+    const _Float16* __restrict__ beta) {
+  int tid = threadIdx.x;
+  int lane = tid & (LANES_PER_ROW - 1);
+  int group = tid >> 4;
+  int hv = blockIdx.x;
+  int row_base = blockIdx.y * ROWS_PER_BLOCK + group * ILP_ROWS;
+  int k_base = lane * ELEMS_PER_LANE;
+
+  float qv[ELEMS_PER_LANE], kv[ELEMS_PER_LANE], h[ILP_ROWS][ELEMS_PER_LANE];
+  float qsum = 0.0f, ksum = 0.0f;
+  #pragma unroll
+  for (int i = 0; i < ELEMS_PER_LANE; i++) {
+    int kk = k_base + i;
+    float qraw = conv_out[hv * K + kk];
+    float kraw = conv_out[HV * K + hv * K + kk];
+    qv[i] = qraw;
+    kv[i] = kraw;
+    qsum += qraw * qraw;
+    ksum += kraw * kraw;
+  }
+  #pragma unroll
+  for (int delta = 8; delta > 0; delta >>= 1) {
+    qsum += __shfl_xor(qsum, delta, LANES_PER_ROW);
+    ksum += __shfl_xor(ksum, delta, LANES_PER_ROW);
+  }
+  float qscale = rsqrtf(qsum) * 0.08838834764831845f;
+  float kscale = rsqrtf(ksum);
+  #pragma unroll
+  for (int i = 0; i < ELEMS_PER_LANE; i++) {
+    qv[i] *= qscale;
+    kv[i] *= kscale;
+  }
+""").replace("v[hv * V + row]", "conv_out[2 * HV * K + hv * V + row]")
+
+
+@functools.cache
+def _compiled_gdn_recurrent_conv() -> bytes:
+  from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
+  return HIPCCCompiler(getenv("AMD_ARCH", "gfx1100"), ["-mno-wavefrontsize64"]).compile_cached(_GDN_RECURRENT_CONV_HIP_SRC)
+
+
+def _gdn_recurrent_conv_kernel(core:UOp, state:UOp, conv_out:UOp, alpha:UOp, beta:UOp) -> UOp:
+  assert core.numel() == _GDN_HV * _GDN_V and state.numel() == _GDN_HV * _GDN_V * _GDN_K and conv_out.numel() == 3 * _GDN_HV * _GDN_K
+  ops = _GDN_HV * _GDN_V * _GDN_K * 4
+  mem = (2 * _GDN_HV * _GDN_V * _GDN_K + 3 * _GDN_HV * _GDN_K + _GDN_HV * _GDN_V) * 4
+  sink = UOp.sink(
+    UOp.special(_GDN_HV, "gidx0"), UOp.special(_GDN_V // 32, "gidx1"), UOp.special(128, "lidx0"),
+    core, state, conv_out, alpha, beta,
+    arg=KernelInfo(name="gdn_recurrent_update_conv", estimates=Estimates(ops=ops, mem=mem)))
+  return UOp(Ops.PROGRAM, src=(
+    sink, UOp(Ops.DEVICE, arg=Device.DEFAULT), UOp(Ops.LINEAR, src=(*sink.src, sink)),
+    UOp(Ops.SOURCE, arg=_GDN_RECURRENT_CONV_HIP_SRC), UOp(Ops.BINARY, arg=_compiled_gdn_recurrent_conv())))
+
+
+def gdn_recurrent_update_conv(state:Tensor, conv_out:Tensor, alpha:Tensor, beta:Tensor) -> Tensor:
+  assert state.numel() == _GDN_HV * _GDN_V * _GDN_K and conv_out.numel() == 3 * _GDN_HV * _GDN_K
+  core = Tensor.empty(_GDN_HV, _GDN_V, dtype=dtypes.float, device=state.device)
+  core, *_ = Tensor.custom_kernel(core, state, conv_out.reshape(-1), alpha.reshape(-1), beta.reshape(-1), fxn=_gdn_recurrent_conv_kernel)
+  return core.reshape(1, 1, _GDN_HV, _GDN_V)

@@ -272,8 +272,8 @@ class GatedDeltaNetBlock(FFNBlock):
 
     # store the updated state
     if getenv("CUSTOM_GDN") and x.device == "AMD" and B == 1 and self.num_v_heads == 16 and self.head_v_dim == 128 and self.head_k_dim == 128:
-      from tinygrad.llm.amd_kernels import gdn_recurrent_update
-      core_attn_in = gdn_recurrent_update(self.recurrent_state, q, k, v, alpha, beta)
+      from tinygrad.llm.amd_kernels import gdn_recurrent_update_conv
+      core_attn_in = gdn_recurrent_update_conv(self.recurrent_state, conv_out, alpha, beta)
       conv_state_store = self.conv_state.uop.after(core_attn_in.uop).store(conv_window[:, 1:, :].cast(self.conv_state.dtype).uop)
       core_attn_in = Tensor(core_attn_in.uop.after(conv_state_store))
     else:
