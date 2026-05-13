@@ -1431,7 +1431,7 @@ def train_llama3(llama2_70b_lora:bool=False):
 
       load_state_dict(model, state_dict, strict=False, realize=True, consume=True)
       del state_dict # just in case
-      model.quantize(realize=True)
+      model.quantize()
 
     # convert nulls to not trainable
     for p in params:
