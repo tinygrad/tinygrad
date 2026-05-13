@@ -80,10 +80,10 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # lower the index dtype to a concrete int
   sink = graph_rewrite(sink, pm_lower_index_dtype+load_store_indexing+gep_pushing, name="lower all index dtypes")
-  sink = graph_rewrite(sink, symbolic, name="post index symbolic")
-
   # move gates from unrenderable INVALID where
   sink = graph_rewrite(sink, pm_move_gates_from_index, name="move gates from index")
+  # final symbolic
+  sink = graph_rewrite(sink, symbolic, name="post index symbolic")
 
   # optional pre matcher
   if ren.pre_matcher is not None: sink = graph_rewrite(sink, ren.pre_matcher, name="pre_matcher")
