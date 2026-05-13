@@ -1,6 +1,6 @@
 from __future__ import annotations
 import ctypes, time, functools, tinygrad.runtime.autogen.nv_regs
-from tinygrad.helpers import getenv, DEBUG, getbits
+from tinygrad.helpers import getenv, DEBUG, getbits, round_up
 from tinygrad.runtime.autogen import pci
 from tinygrad.runtime.support.memory import TLSFAllocator, MemoryManager, AddrSpace
 from tinygrad.runtime.support.nv.ip import NV_FLCN, NV_FLCN_COT, NV_GSP
@@ -78,11 +78,9 @@ class NVDev:
     self._early_ip_init()
     self._early_mmu_init()
 
-    # No booting state, gsp client is reinited every run.
-    self.is_booting = False
-
     for ip in [self.flcn, self.gsp]: ip.init_sw()
     for ip in [self.flcn, self.gsp]: ip.init_hw()
+    self.is_booting = False
 
   def fini(self):
     for ip in [self.gsp, self.flcn]: ip.fini_hw()
@@ -142,18 +140,19 @@ class NVDev:
     bits, shifts = (56, [12, 21, 29, 38, 47, 56]) if self.mmu_ver == 3 else (48, [12, 21, 29, 38, 47])
 
     # tail vram reserved for falcon structs
-    self.mm = NVMemoryManager(self, self.vram_size - (64 << 20), boot_size=(2 << 20), pt_t=NVPageTableEntry, va_bits=bits, va_shifts=shifts,
+    self.mm = NVMemoryManager(self, self.vram_size - (64 << 20), boot_size=(128 << 20), pt_t=NVPageTableEntry, va_bits=bits, va_shifts=shifts,
       va_base=0, palloc_ranges=[(x, x) for x in [512 << 20, 2 << 20, 4 << 10]], reserve_ptable=not self.large_bar)
+
+  def _alloc_vram(self, size:int, data:bytes|None=None) -> tuple[MMIOInterface, int, int]:
+    paddr = self.mm.palloc(sz:=round_up(size, 0x1000), boot=True)
+    view = self.vram.view(paddr, sz)
+    if data is not None: view[:size] = data
+    return view, paddr, self.pci_dev.bar_info(1)[0] + paddr
 
   def _alloc_sysmem(self, size:int, vaddr:int=0, contiguous:bool=False, data:bytes|None=None) -> tuple[MMIOInterface, list[int]]:
     view, paddrs = self.pci_dev.alloc_sysmem(size, vaddr, contiguous=contiguous)
     if data is not None: view[:size] = data
     return view, paddrs
-
-  def _alloc_boot_struct(self, struct:ctypes.Structure) -> tuple[MMIOInterface, int]:
-    view, paddrs = self._alloc_sysmem(sz:=ctypes.sizeof(type(struct)), contiguous=True)
-    view[:sz] = bytes(struct)
-    return view, paddrs[0]
 
   def include(self, name:str, arch:str):
     for k,v in getattr(getattr(tinygrad.runtime.autogen.nv_regs, name), arch or 'regs').items():
