@@ -109,6 +109,7 @@ if __name__ == "__main__":
   # save and upload
   weight_files = save_state_dict(flat_state_dict)
 
-  # TODO verify hash
+  # verify hash
   assert hash_directory(WEIGHTS_PATH) == HF_EXPECTED_HASH
+
   print(upload_files(weight_files))

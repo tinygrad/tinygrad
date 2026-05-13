@@ -1437,10 +1437,8 @@ def train_llama3(llama2_70b_lora:bool=False):
 
       state_dict = {k:v for weight_file in Path(MODEL_PATH).glob("*.safetensors") for k,v in safe_load(weight_file).items()}
 
-      assert not (unused := (state_dict.keys() - get_state_dict(model).keys())), f"unused weights in state_dict: {sorted(unused)}"
-
       load_state_dict(model, state_dict, strict=False, realize=True, consume=True)
-      del state_dict # just in case
+      assert not state_dict, "unconsumed weights"
       model.quantize()
 
     # convert nulls to not trainable
