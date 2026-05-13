@@ -30,6 +30,7 @@ export MODEL="llama2_70b_lora"
 export BASEDIR="/raid/datasets/c4-llama2-70b-lora/"
 export MODEL_PATH="/raid/weights/c4-llama2-70b-lora/"
 export EVAL_TARGET=0.925
+
 # CEIL(384 / global_batch_size) * global_batch_size
 export EVAL_FREQ=$((((384 + GBS - 1) / GBS) * GBS))
 
