@@ -13,7 +13,7 @@ from examples.mlperf.helpers import clean_dir
 from examples.mlperf.hash import hash_directory
 
 ## 1. download reference weights
-## 2. reshape them for flat_llamas
+## 2. reshape them for flat_llama
 ## 3. upload reshaped weights
 
 DEV.value = 'CPU'
@@ -73,7 +73,7 @@ def upload_files(files:list[Path]):
     api.create_commit(
       repo_id=HF_REPO_ID,
       operations=[(CommitOperationDelete(path_in_repo=path)) for path in remote_files],
-      commit_message="Delete existing repo contents before uploading rebuilt flat weights",
+    commit_message="Delete existing repo contents before uploading rebuilt flat weights",
     )
   return api.upload_folder(
     folder_path=WEIGHTS_PATH,

@@ -4,6 +4,7 @@ import unicodedata
 from typing import Optional
 import math
 import numpy as np
+import shutil
 from tinygrad.nn import state
 from tinygrad.tensor import Tensor, dtypes
 from tinygrad.helpers import getenv
@@ -372,7 +373,6 @@ def clean_dir(dir_path: Path, allowed_suffixes:list[str]):
   for path in list(dir_path.iterdir()):
     if path.is_file() and path.suffix in allowed_suffixes: continue
     if path.is_dir():
-      import shutil
       shutil.rmtree(path)
     else:
       path.unlink()
