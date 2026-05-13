@@ -7,7 +7,6 @@ import numpy as np
 from tinygrad import dtypes, Tensor
 from tinygrad.helpers import getenv, prod, Context, round_up, tqdm, OSX, cache_dir
 from tinygrad.nn.state import TensorIO
-from examples.mlperf.helpers import clean_dir
 
 ### ResNet
 
