@@ -1,5 +1,5 @@
 # this is a temporary intermediate step while we remove this index style
-from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp
+from tinygrad.uop.ops import PatternMatcher, UPat, Ops
 from tinygrad.dtype import Invalid, dtypes
 
 pm_move_gates_from_index = PatternMatcher([
@@ -15,11 +15,7 @@ pm_move_gates_from_index = PatternMatcher([
   (UPat.var("gate").where(UPat.var("a"), UPat().load(UPat(), ~UPat.var("gate", dtype=dtypes.bool), name="l").or_casted()), lambda gate,l,a:
    l.replace(src=(l.src[0], a.src[0] if a.op is Ops.CAST and a.src[0].dtype == l.dtype else a.cast(l.dtype), l.src[2])).cast(a.dtype)),
 
-  # vectorized indexes (ie. images) must be int
-  (UPat(Ops.INDEX, src=(UPat(), UPat(Ops.STACK, dtypes.long, name="vec")), name="idx"),
-   lambda idx,vec: idx.replace(src=(idx.src[0], UOp.vectorize(*(u.cast(dtypes.int) for u in vec.src))))),
-
   # images use 2D INDEX now (y,x)
-  (UPat(Ops.INDEX, src=(UPat(), UPat((Ops.VCONST, Ops.STACK), dtype=dtypes.int.vec(2), name="vec")), name="idx"),
-   lambda idx,vec: idx.replace(src=(idx.src[0], vec.gep(1), vec.gep(0)))),
+  (UPat(Ops.INDEX, src=(UPat(), UPat((Ops.VCONST, Ops.STACK), name="vec")), name="idx"),
+   lambda idx,vec: idx.replace(src=(idx.src[0], vec.gep(1).cast(dtypes.int), vec.gep(0).cast(dtypes.int)))),
 ])
