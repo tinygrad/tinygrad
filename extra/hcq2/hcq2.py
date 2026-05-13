@@ -25,7 +25,8 @@ class HCQ2Compiled(Compiled):
                kernargs_size=(16 << 20), can_recover:bool=False, arch=None):
     self.device_id:int = int(device.split(":")[1]) if ":" in device else 0
 
-    super().__init__(device, allocator, compilers, runtime, None, arch=arch)
+    from extra.hcq2.graph.hcq import HCQ2Graph
+    super().__init__(device, allocator, compilers, lambda *a, **kw: None, HCQ2Graph, arch=arch)
 
     self.kernargs_size = kernargs_size
     self.kernargs_offset_allocator:BumpAllocator = BumpAllocator(kernargs_size, wrap=True)
@@ -213,13 +214,13 @@ pm_lower_kernargs = PatternMatcher([
 # **************** lower ops ****************
 
 def lower_program(ctx:HCQ2LowerCtx, call:UOp, prg:UOp) -> UOp:
-  q = UOp(Ops.LINEAR, dtypes.void, (UOp(Ops.BARRIER, dtypes.void), prg), arg=(prg.src[0].buffer.device, "COMPUTE"))
-  return UOp(Ops.LINEAR, dtypes.void, (q,))
+  q = UOp(Ops.LINEAR, dtypes.void, (prg,), arg=(prg.src[0].buffer.device, "COMPUTE"))
+  return UOp(Ops.LINEAR, dtypes.void, (q,), tag=call.tag)
 
 def lower_copy(ctx:HCQ2LowerCtx, call:UOp, copy:UOp) -> UOp:
   dst, src = call.src[1], call.src[2]
   q = UOp(Ops.LINEAR, dtypes.void, (UOp(Ops.COPY, dtypes.void, src=(dst, src), arg=src.buffer.nbytes),), arg=(dst.buffer.device, "COPY"))
-  return UOp(Ops.LINEAR, dtypes.void, (q,))
+  return UOp(Ops.LINEAR, dtypes.void, (q,), tag=call.tag)
 
 pm_lower_ops = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, src=(UPat(Ops.BUFFER), UPat()), name="prg"),), name="call", allow_any_len=True), lower_program),
@@ -231,15 +232,25 @@ pm_lower_ops = PatternMatcher([
 def split_into_queues(ctx:HCQ2LowerCtx, outer:UOp) -> UOp:
   groups:dict[tuple, list[UOp]] = collections.defaultdict(list)
   for child in outer.src:
-    for q in child.src: groups[q.arg].extend(q.src)
+    wrapper = child.src[0] if child.op is Ops.AFTER else child
+    for q in wrapper.src: groups[q.arg].extend(q.src)
   return outer.replace(src=tuple(UOp(Ops.LINEAR, dtypes.void, tuple(cmds), arg=k) for k, cmds in groups.items()))
-pm_split_into_queues = PatternMatcher([(UPat(Ops.LINEAR, src=UPat(Ops.LINEAR, src=UPat(Ops.LINEAR)), name="outer"), split_into_queues)])
+pm_split_into_queues = PatternMatcher([(UPat(Ops.LINEAR, src=UPat(Ops.LINEAR, src=UPat(Ops.LINEAR)).or_after(), name="outer"), split_into_queues)])
+
+# **************** add barriers ****************
+
+def add_barriers(ctx:HCQ2LowerCtx, outer:UOp) -> UOp:
+  def maybe_barrier(q:UOp) -> UOp:
+    return q.replace(src=(UOp(Ops.BARRIER, dtypes.void), *q.src)) if q.arg[1] == "COMPUTE" else q
+  return outer.replace(src=tuple(maybe_barrier(q) for q in outer.src))
+pm_add_barriers = PatternMatcher([(UPat(Ops.LINEAR, src=UPat(Ops.LINEAR), name="outer"), add_barriers)])
 
 # **************** add signals (runtime) ****************
+
 def add_signals(ctx:HCQ2LowerCtx, outer:UOp) -> UOp:
   def wrap(q:UOp) -> UOp:
     (dev_name, qname), devs = q.arg, {q.arg[0]} | {u.buffer.device for u in q.toposort() if u.op in (Ops.BUFFER, Ops.BUFFER_VIEW)}
-    sigs_tls = [(UOp.from_buffer(Device[d].timeline_signal), ctx.host_param(Device[d].timeline_value)) for d in sorted(devs)]
+    sigs_tls = [(UOp.from_buffer(Device[d].timeline_signal), ctx.host_param(Device[d].timeline_value)) for d in sorted(devs) if d.startswith("AMD")]
     return q.replace(src=(*(s.wait(t[0]-1) for s,t in sigs_tls), *q.src, *(s.store(t[0]) for s,t in sigs_tls)), arg=qname)
   return outer.replace(src=tuple(wrap(q) for q in outer.src))
 pm_add_signals = PatternMatcher([(UPat(Ops.LINEAR, src=UPat(Ops.LINEAR), name="outer"), add_signals)])
@@ -314,6 +325,7 @@ def hcq_schedule(ctx:HCQ2LowerCtx, linear:UOp, ast:UOp, dev:HCQ2Compiled) -> UOp
   linear = graph_rewrite(linear, pm_prep_runtime, ctx=ctx, name="hcq: prepare runtime")
   linear = graph_rewrite(linear, pm_lower_kernargs + pm_lower_ops, ctx=ctx, name="hcq: lower ops")
   linear = graph_rewrite(linear, pm_split_into_queues, ctx=ctx, name="hcq: split into queues")
+  linear = graph_rewrite(linear, pm_add_barriers, ctx=ctx, name="hcq: add barriers", walk=True)
   linear = graph_rewrite(linear, pm_add_signals, ctx=ctx, name="hcq: add signals", walk=True)
   linear = graph_rewrite(linear, dev.pm_lower, ctx=ctx, name=f"hcq: encode cmdbuf {dev.device}", walk=True)
   return hcq_build_host_program(ctx, linear, ast, dev)
