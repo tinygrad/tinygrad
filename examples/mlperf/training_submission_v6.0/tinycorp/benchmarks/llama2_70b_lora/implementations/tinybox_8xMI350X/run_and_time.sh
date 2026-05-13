@@ -52,7 +52,7 @@ DATETIME=$(date "+%m%d%H%M")
 LOGFILE="llama31_70b_lora_8xMI350x_${DATETIME}_${SEED}.log"
 
 # beam
-FAKEDATA=1 BENCHMARK=10 INITMLPERF=1 LLAMA_LAYERS=2 python3 examples/mlperf/model_train.py | tee "$LOGFILE"
+LOAD_MODEL=0 FAKEDATA=1 BENCHMARK=10 INITMLPERF=1 LLAMA_LAYERS=2 python3 examples/mlperf/model_train.py | tee "$LOGFILE"
 
 # run
-RUNMLPERF=1 python3 examples/mlperf/model_train.py | tee -a "$LOGFILE"
+LOAD_MODEL=1 RUNMLPERF=1 python3 examples/mlperf/model_train.py | tee -a "$LOGFILE"
