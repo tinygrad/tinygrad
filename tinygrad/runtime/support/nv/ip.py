@@ -410,9 +410,8 @@ class NV_GSP(NV_IP):
 
     # Copy level and image pages.
     for i in range(0, 3):
-      cur_offset = sum(npages[:i+1])
-      radix_view.view(offsets[i], npages[i+1] * 8, fmt='Q')[:] = array.array('Q', [self.gsp_radix3_bar1 + j * 0x1000
-        for j in range(cur_offset, cur_offset + npages[i+1])])
+      radix_view.view(offsets[i], npages[i+1] * 8, fmt='Q')[:] = \
+        array.array('Q', [self.gsp_radix3_bar1 + j * 0x1000 for j in range(sum(npages[:i+1]), sum(npages[:i+1]) + npages[i+1])])
 
     # Copy signature
     _, _, self.gsp_signature_bar1 = self.nvdev._alloc_vram(len(signature), data=signature)

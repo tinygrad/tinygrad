@@ -78,6 +78,7 @@ class NVDev:
     self._early_ip_init()
     self._early_mmu_init()
 
+    # No booting state, gsp client is reinited every run.
     self.is_booting = False
 
     for ip in [self.flcn, self.gsp]: ip.init_sw()
