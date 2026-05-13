@@ -12,6 +12,6 @@ HF_FLAT_REVISION = ""
 if __name__ == '__main__':
   weights_path = Path(snapshot_download_with_retry(repo_id=LLAMA2_70B_REPO_ID, local_dir=MODEL_PATH, allow_patterns=["*safetensors*", "*.json", "*.md"]))
 
-  clean_dir(weights_path, '.safetensors')
+  clean_dir(weights_path, ['.safetensors'])
 
   assert hash_directory(weights_path) == HF_FLAT_EXPECTED_HASH

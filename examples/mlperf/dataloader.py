@@ -542,7 +542,7 @@ def download_llama2_70b_lora_dataset(base_dir: Path) -> Path:
   base_dir = Path(snapshot_download(repo_id=LLAMA2_70B_LORA_DATASET_REPO, revision=LLAMA2_70B_LORA_DATASET_REVISION,
                                     repo_type="dataset", local_dir=base_dir, allow_patterns="*.parquet"))
   data_dir = base_dir / 'data'
-  clean_dir(data_dir, ".parquet")
+  clean_dir(data_dir, [".parquet"])
   _llama2_70b_lora_verify_dataset_hash(data_dir)
   for split in ['train', 'validation']:
     _llama2_70b_lora_verify_dataset_split(split, *_load_llama2_70b_lora_split(base_dir, split))
