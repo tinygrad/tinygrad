@@ -1376,7 +1376,7 @@ def train_llama3(llama2_70b_lora:bool=False):
       MLLOGGER.event(key=mllog_constants.OPT_LR_DECAY_SCHEDULE, value="cosine with linear warmup")
       MLLOGGER.event(key=mllog_constants.OPT_GRADIENT_CLIP_NORM, value=MAX_GRAD_NORM)
       if llama2_70b_lora:
-        # MLLOGGER.event(key=mllog_constants.OPT_LR_TRAINING_STEPS, value=MAX_STEPS)
+        MLLOGGER.event(key=mllog_constants.OPT_LR_TRAINING_STEPS, value=MAX_STEPS)
         MLLOGGER.event(key=mllog_constants.LORA_ALPHA, value=LORA_ALPHA)
         MLLOGGER.event(key="lora_rank", value=LORA_RANK)
   else:
