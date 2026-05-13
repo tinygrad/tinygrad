@@ -12,7 +12,6 @@ def reconstruction_helper(A:list[Tensor],B:Tensor, tolerance=1e-5):
   np.testing.assert_allclose(reconstructed_tensor.numpy(),B.numpy(),atol=tolerance,rtol=tolerance)
 
 class TestLinAlg(unittest.TestCase):
-  @unittest.skip("TODO: reenable this")
   def test_svd_general(self):
     sizes = [(2,2),(5,3),(3,5),(3,4,4),(2,2,2,2,3)]
     for size in sizes:
@@ -43,6 +42,7 @@ class TestLinAlg(unittest.TestCase):
   def test_svd_nonfull_5_3(self): self._test_svd_nonfull((5,3))
   def test_svd_nonfull_3_5(self): self._test_svd_nonfull((3,5))
   def test_svd_nonfull_2_2_2_2_3(self): self._test_svd_nonfull((2,2,2,2,3))
+  def test_svd_nonfull_5_5(self): self._test_svd_nonfull((5,5))
 
   @unittest.skip("very big. recommend wrapping with TinyJit around inner function")
   def test_svd_large(self):

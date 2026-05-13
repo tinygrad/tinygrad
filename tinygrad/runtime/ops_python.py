@@ -6,7 +6,7 @@ from typing import Any, TYPE_CHECKING
 import pickle, base64, itertools, time, sys, functools
 from dataclasses import replace
 from tinygrad.dtype import DType, dtypes, ImageDType, PtrDType, truncate, storage_fmt_for_dtype, to_storage_scalar, from_storage_scalar
-from tinygrad.helpers import all_same, getenv, flatten, get_single_element, Target
+from tinygrad.helpers import all_same, getenv, flatten, get_single_element, Target, IMAGE
 from tinygrad.device import Compiled, Compiler, Allocator
 from tinygrad.codegen.opt import tc
 from tinygrad.uop.ops import exec_alu, python_alu, Ops, UOp, GroupOp, bitcast
@@ -92,14 +92,15 @@ class PythonProgram:
           elif arg[0] == 'l': values[i] = [x[2-int(arg[-1])] for x in warp]
         elif uop is Ops.CONST: values[i] = [arg] * warp_size
         elif uop is Ops.INDEX:
-          if len(src_values) != 2: raise RuntimeError("gates must be on LOAD/STORE, not INDEX")
           ret:list = []
           if isinstance(src_dtypes[0], ImageDType):
-            for m,ox,oy in zip(src_values[0], src_values[1][0], src_values[1][1]):
+            assert len(src_values) == 3, "image index must be 3 srcs"
+            for m,oy,ox in zip(*src_values):
               if ox < 0 or ox >= src_dtypes[0].shape[1] or oy < 0 or oy >= src_dtypes[0].shape[0]: ret.append((m, None))
               else: ret.append((m, ox*4 + oy*src_dtypes[0].shape[1]*4))
           else:
-            for m,o in zip(src_values[0], src_values[1]): ret.append((m,o))
+            assert len(src_values) == 2, "non-image index must be 2 srcs"
+            for m,o in zip(*src_values): ret.append((m,o))
           values[i] = ret
         elif uop is Ops.CAST and isinstance(dtype, PtrDType):
           values[i] = src_values[0]
@@ -220,8 +221,8 @@ class PythonRenderer(Renderer):
     elif target.arch.startswith("sm"):
       self.target = replace(target, device="CUDA")
       self.tensor_cores = tc.get_cuda(target.arch)
-    elif target.arch == "": self.target = target
-    else: raise RuntimeError(f"unsupported arch: {target.arch}")
+    elif IMAGE and not target.arch: self.target = replace(target, arch="IMAGE_PITCH_ALIGNMENT=1")
+    else: self.target = target
 
   def render(self, uops:list[UOp]) -> str:
     # the value of SPECIAL comes from local/global_size, not form its source

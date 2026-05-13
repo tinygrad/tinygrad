@@ -5,7 +5,11 @@ from tinygrad.uop.render import print_uops, pyrender
 from tinygrad.dtype import DType, ImageDType, dtypes, PtrDType, AddrSpace, Invalid, ConstFloat
 from tinygrad.helpers import DEBUG, Context, prod, SPEC, Metadata, panic, CHECK_OOB
 
-def validate_index(buf:UOp, idx:UOp, gate:UOp|None=None):
+# ***** uop helpers *****
+
+def validate_index(uidx:UOp, gate:UOp|None=None):
+  if len(uidx.src) != 2: return True  # skip for non final index. TODO: check more complex index with shape
+  buf,idx = uidx.src
   if idx.op is Ops.CONST and idx.arg is Invalid: return True
   if gate is None: gate = UOp.const(dtypes.bool, True)
   # TODO: check for overflow
@@ -24,21 +28,29 @@ def validate_index(buf:UOp, idx:UOp, gate:UOp|None=None):
   from tinygrad.uop.validate import validate_index_with_z3
   return validate_index_with_z3(sz, idx, gate)
 
-# four specs:
-#   shared_spec  -- usable anywhere
-#   tensor_spec  -- usable in tensor graph
-#   kernel_spec  -- usable in kernel passed into codegen
-#   program_spec -- usable in linearized program
-#   full_spec    -- all uops ever created
+def type_verify(ast:UOp|list[UOp], check_spec:PatternMatcher):
+  lst = list(ast.toposort()) if isinstance(ast, UOp) else ast
+  if SPEC > 1: test_pyrender(lst[-1])  # assume this is the sink
 
-# *** these uops work anywhere ***
+  with Context(TRACK_MATCH_STATS=0):
+    for i,u in enumerate(lst):
+      ret = check_spec.rewrite(u)
+      if cast(bool|None, ret) is not True:
+        if DEBUG >= 3: print_uops(lst)
+        raise RuntimeError(f"UOp verification failed at {i} on {u.op} {u.dtype} {len(u.src)} {[(x.op, x.dtype, x.arg) for x in u.src]} {u.arg}")
 
-shared_spec = PatternMatcher([
+# ***** new specs *****
+
+# these ops can be used in the tensor graph and programs
+spec_shared = PatternMatcher([
   (UPat(Ops.SINK, dtypes.void), lambda: True), # NOTE: for testing, we let sinks be anything
+
+  # NOOP. TODO: remove this
+  (UPat(Ops.NOOP), lambda: True),
 
   # CONST/DEFINE_VAR are everywhere
   (UPat(Ops.CONST, src=(), name="x"), lambda x: type(x.arg) is type(x.dtype.const(x.arg))),
-  (UPat(Ops.DEFINE_VAR, name="x"), lambda x: isinstance(x.arg[1], int) and isinstance(x.arg[2], int)),
+  (UPat(Ops.DEFINE_VAR, name="x"), lambda x: len(x.arg) == 3 and isinstance(x.arg[0], str)),
 
   # ALUs: most ALUs have all matching dtypes, except CMPLT, CMPNE, and WHERE
   (UPat(Ops.WHERE, name="w", src=(UPat(dtype=dtypes.bool), UPat.var("x"), UPat.var("y"))), lambda w,x,y: w.dtype == x.dtype == y.dtype),
@@ -55,266 +67,182 @@ shared_spec = PatternMatcher([
   (UPat(Ops.RANGE, src=(UPat.var("x"),), allow_any_len=True, name="rng"), lambda rng,x:
     rng.dtype == x.dtype and isinstance(rng.arg, tuple) and len(rng.arg) >= 2 and \
       all(isinstance(ra, int) for ra in rng.arg[0:-1]) and isinstance(rng.arg[-1], AxisType)),
-  (UPat(Ops.INDEX, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(y.dtype == dtypes.weakint for y in x.src[1:]) or None),
+  (UPat(Ops.INDEX, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(dtypes.is_int(y.dtype) for y in x.src[1:]) or None),
+  (UPat(Ops.END, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(u.op is Ops.RANGE for u in x.src[1:])),
 
-  # RANGE/SPECIAL define loops, END closes them
-  (UPat(Ops.END, src=(UPat(), UPat(Ops.RANGE))), lambda: True),
-
-  # STORE in tensor graph: store a value into a target
-  (UPat(Ops.STORE, dtypes.void, (UPat(), UPat())), lambda: True),
-
-  # NOOP
-  (UPat(Ops.NOOP), lambda: True)
-])
-
-# ***** UOp spec in the Tensor graph *****
-
-movement_ops = PatternMatcher([
-  (UPat((Ops.RESHAPE, Ops.EXPAND), src=(UPat(), UPat(dtype=dtypes.weakint))), lambda: True),
-  (UPat((Ops.PAD, Ops.SHRINK), src=(UPat(), UPat(dtype=dtypes.weakint), UPat(dtype=dtypes.weakint))), lambda: True),
-  (UPat((Ops.PERMUTE, Ops.FLIP), name="mv", src=(UPat(),)), lambda mv: isinstance(mv.arg, tuple)),
-
-  # inputs to movement ops
-  (UPat((Ops.STACK, Ops.VCONST), dtype=dtypes.weakint), lambda: True),
-  (UPat({Ops.ADD, Ops.MUL, Ops.CDIV, Ops.FLOORDIV}, dtype=dtypes.weakint), lambda: True),
-
-  # AFTER on Movement Op, INDEX, BUFFER, COPY, or BITCAST
-  (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.INDEX, Ops.MULTI, Ops.CONTIGUOUS, Ops.BUFFER, Ops.BITCAST, Ops.COPY})),),
-   allow_any_len=True), lambda: True),
-])
-
-_tensor_spec = PatternMatcher([
-  # buffer spec
-  (UPat(Ops.UNIQUE, dtypes.void, ()), lambda: True),
-  (UPat(Ops.LUNIQUE, dtypes.void, ()), lambda: True),
-  (UPat(Ops.DEVICE, dtypes.void, (), name="d"), lambda d:
-   isinstance(d.arg, str) or (isinstance(d.arg, tuple) and all(isinstance(s, str) for s in d.arg))),
-  (UPat(Ops.BUFFER, src=(UPat((Ops.LUNIQUE, Ops.UNIQUE)), UPat(Ops.DEVICE)), name="buf"),
-   lambda buf: isinstance(buf.arg, int) and isinstance(buf.dtype, DType)),
-
-  # BUFFER_VIEW on BUFFER is allowed if BUFFER is
-  (UPat(Ops.BUFFER_VIEW, src=(UPat((Ops.BUFFER, Ops.PARAM)),)), lambda: True),
-
-  # KERNEL can attach to an AFTER to describe the compute required to realize a BUFFER
-  (UPat((Ops.CALL, Ops.FUNCTION), src=UPat((Ops.BUFFER, Ops.AFTER, Ops.MSELECT, Ops.MSTACK, Ops.BIND))), lambda: True),
-
-  # MSELECT chooses one of the multi buffers
-  (UPat(Ops.MSELECT, name="x"), lambda x: isinstance(x.src[0].device, tuple) and x.arg < len(x.src[0].device)),
-
-  # MSTACK combines buffers into multi
-  (UPat(Ops.MSTACK, name="x"), lambda x: all(isinstance(x.device, str) for x in x.src)),
-
-  # Tensor variable bindings
-  (UPat(Ops.BIND, (dtypes.int,dtypes.weakint,), (UPat(Ops.DEFINE_VAR), UPat.cvar(dtype=(dtypes.int,dtypes.weakint,))), arg=None), lambda: True),
-  # single-src BIND used for schedule cache key normalization
-  (UPat(Ops.BIND, (dtypes.int,dtypes.weakint,), (UPat(Ops.DEFINE_VAR),), arg=None), lambda: True),
-
-  # device or unique
-  (UPat(Ops.CONST, src=(UPat(Ops.DEVICE),)), lambda: True),
-  (UPat(Ops.CONST, src=(UPat((Ops.LUNIQUE, Ops.UNIQUE)), UPat(Ops.DEVICE))), lambda: True),
-
-  # DETACH and CONTIGUOUS change how we interpret the source UOp
-  # CONTIGUOUS ensures the source UOp realizes
-  (UPat((Ops.DETACH, Ops.CONTIGUOUS, Ops.CONTIGUOUS_BACKWARD), name="root", src=(UPat.var("x"),), arg=None),
-   lambda root,x: root.dtype == x.dtype),
-
-  # CONTIGUOUS with a range
-  (UPat(Ops.CONTIGUOUS, name="root", src=(UPat.var("x"),), allow_any_len=True, arg=None),
-   lambda root,x: root.dtype == x.dtype and all(u.op is Ops.RANGE for u in root.src[1:])),
-
-  # COPY/ALLREDUCE/MULTI
-  (UPat(Ops.COPY, name="copy", src=(UPat.var("x"), UPat(Ops.DEVICE)), arg=None), lambda copy,x: copy.dtype == x.dtype),
-  (UPat(Ops.ALLREDUCE, name="red", src=(UPat.var("x"), UPat(Ops.DEVICE))), lambda red,x: red.dtype == x.dtype and isinstance(red.arg, Ops)),
-  (UPat(Ops.MULTI, name="multi"), lambda multi: all(x.dtype == multi.dtype for x in multi.src) and isinstance(multi.arg, int)),
-
-
-  # AFTER if things were kernelized
-  (UPat(Ops.AFTER, src=(UPat((Ops.BUFFER, Ops.AFTER)),), allow_any_len=True), lambda: True),
-
-  # allow CALL/FUNCTION/PARAM/CUSTOM_FUNCTION — both CALL and FUNCTION dtype is always void
-  # FUNCTION must have a TUPLE body in src[0] (invariant enforced by UOp.call); CALL bodies are opaque
-  (UPat(Ops.CALL, dtypes.void), lambda: True),
-  (UPat(Ops.FUNCTION, dtypes.void, src=(UPat(Ops.TUPLE),), allow_any_len=True), lambda: True),
-  (UPat(Ops.PARAM), lambda: True),
-  (UPat(Ops.CUSTOM_FUNCTION, name="x"), lambda x: isinstance(x.arg, str)),
-
-  # TUPLE must have void dtype, GETTUPLE can only appear on FUNCTION or TUPLE
-  (UPat(Ops.TUPLE, dtypes.void), lambda: True),
-  (UPat(Ops.GETTUPLE, src=(UPat((Ops.FUNCTION, Ops.TUPLE)),), name="g"), lambda g: isinstance(g.arg, int)),
-
-  # ** for custom kernels **
-
-  # codegen: PROGRAM with progressive sources through the pipeline (SINK, DEVICE, LINEAR?, SOURCE?, BINARY?)
-  (UPat(Ops.PROGRAM, dtypes.void, src=(UPat(Ops.SINK), UPat(Ops.DEVICE))), lambda: True),
-  (UPat(Ops.PROGRAM, dtypes.void, src=(UPat(Ops.SINK), UPat(Ops.DEVICE), UPat(Ops.LINEAR))), lambda: True),
-  (UPat(Ops.PROGRAM, dtypes.void, src=(UPat(Ops.SINK), UPat(Ops.DEVICE), UPat(Ops.LINEAR), UPat(Ops.SOURCE))), lambda: True),
-  (UPat(Ops.PROGRAM, dtypes.void, src=(UPat(Ops.SINK), UPat(Ops.DEVICE), UPat(Ops.LINEAR), UPat(Ops.SOURCE), UPat(Ops.BINARY))), lambda: True),
-  # codegen: standalone LINEAR/SOURCE/BINARY
-  (UPat(Ops.LINEAR, dtypes.void), lambda: True),
-  (UPat(Ops.SOURCE, dtypes.void, src=()), lambda: True),
-  (UPat(Ops.BINARY, dtypes.void, src=()), lambda: True),
-])+movement_ops+shared_spec
-
-# ***** UOp spec in codegen shared between kernel and program *****
-
-shared_codegen_spec = PatternMatcher([
-  # DEFINEs
+  # PARAM (that's really a DEFINE_GLOBAL)
   (UPat(Ops.PARAM, name="x"), lambda x: isinstance(x.dtype, (PtrDType, ImageDType)) and x.dtype.addrspace == AddrSpace.GLOBAL),
+
+  # GROUP of stores (or groups, or NOOPs)
+  # TODO: remove UNROLL here, it's for SPEC=2
+  (UPat(Ops.GROUP, dtypes.void, src=UPat((Ops.GROUP, Ops.STORE, Ops.NOOP, Ops.UNROLL))), lambda: True),
+
+  # TOOD: these should be buffer with different addrspace
   (UPat(Ops.DEFINE_LOCAL, name="x"), lambda x: isinstance(x.dtype, PtrDType) and x.dtype.addrspace == AddrSpace.LOCAL),
   (UPat(Ops.DEFINE_REG, src=(), name="x"), lambda x: isinstance(x.arg, int)),
 
-  # allow AFTER on buffers, GROUP anywhere
-  (UPat(Ops.AFTER, src=(UPat(GroupOp.Defines|{Ops.AFTER}),), allow_any_len=True), lambda: True),
-  (UPat(Ops.GROUP, dtypes.void), lambda: True),
-
-  # WMMA has a <a, b, acc>
-  (UPat(Ops.WMMA, src=(UPat(), UPat(), UPat()), name="x"), lambda x: isinstance(x.arg, tuple) and len(x.arg) == 8),
-
-  # VECTORIZE/GEP
-  (UPat(Ops.STACK, name="x"), lambda x: len(x.src)>1 and len(x.src) == x.dtype.vcount and all(x.dtype == y.dtype.vec(len(x.src)) for y in x.src)),
-  (UPat(Ops.GEP, src=(UPat.var("src"),), name="gep"), lambda gep,src: gep.dtype == src.dtype.scalar()),
-
-  # LOAD(idx) / STORE(idx, val) with gates on the LOAD/STORE
-  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))).or_casted().load(), validate_index),
-  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))).or_casted().load(UPat.var("alt"), UPat.var("gate", dtype=dtypes.bool), name="load"),
-   lambda buf,idx,gate,alt,load: validate_index(buf, idx, gate) if alt.dtype == load.dtype else False),
-  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))).or_casted().store(UPat()), validate_index),
-  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))).or_casted().store(UPat(), UPat.var("gate", dtype=dtypes.bool)), validate_index),
+  # AFTER on Movement Op, PARAM, BUFFER, CONTIGUOUS, or another AFTER
+  (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.PARAM, Ops.BUFFER, Ops.CONTIGUOUS, Ops.DEFINE_REG, Ops.DEFINE_LOCAL, Ops.AFTER, Ops.MULTI,
+                                                     Ops.BITCAST})),),
+        allow_any_len=True), lambda: True),
 
   # CUSTOM (inline and non inline)
   (UPat((Ops.CUSTOMI, Ops.CUSTOM)), lambda: True),
 
+  # BARRIER (on any length). TODO: this should only be in spec_program
+  (UPat(Ops.BARRIER, dtypes.void), lambda: True),
+
+  # SPECIAL. TODO: this should only be in spec_program
+  (UPat(Ops.SPECIAL, src=(UPat.var("x", (dtypes.weakint, dtypes.int32)),), name="s"), lambda s,x: s.dtype == x.dtype and isinstance(s.arg, str)),
+
   # assembly instruction
   (UPat(Ops.INS), lambda: True),
 
-  # INDEX is just address calculation. OOB validation is on LOAD/STORE where the gate is available.
-  (UPat(GroupOp.Defines|{Ops.AFTER}).index(UPat()), lambda: True),
+  # LOAD(idx) / STORE(idx, val) with gates on the LOAD/STORE
+  (UPat(Ops.INDEX, name="uidx").or_casted().load(), validate_index),
+  (UPat(Ops.INDEX, name="uidx").or_casted().load(UPat.var("alt"), UPat.var("gate", dtype=dtypes.bool), name="load"),
+   lambda uidx,gate,alt,load: validate_index(uidx, gate) if alt.dtype == load.dtype else False),
+  (UPat(Ops.INDEX, name="uidx").or_casted().store(UPat()), validate_index),
+  (UPat(Ops.INDEX, name="uidx").or_casted().store(UPat(), UPat.var("gate", dtype=dtypes.bool)), validate_index),
 
-  # SPECIAL
-  (UPat(Ops.SPECIAL, src=(UPat.var("x", (dtypes.weakint, dtypes.int32)),), name="s"), lambda s,x: s.dtype == x.dtype and isinstance(s.arg, str)),
+  # STORE in tensor graph: store a value into a target
+  (UPat(Ops.STORE, dtypes.void, (UPat(name="x"), UPat())), lambda x: True),
 
-  # BARRIER (on any length)
-  (UPat(Ops.BARRIER, dtypes.void), lambda: True),
+  # WMMA has a <a, b, acc>
+  (UPat(Ops.WMMA, src=(UPat(), UPat(), UPat()), name="x"), lambda x: isinstance(x.arg, tuple) and len(x.arg) == 8),
 ])
 
-# ***** UOp spec in kernel graph *****
+# these ops can exist in tensor but not programs. example: movement
+spec_tensor = PatternMatcher([
+  # DEVICE
+  (UPat(Ops.DEVICE, dtypes.void, (), name="d"), lambda d:
+   isinstance(d.arg, str) or (isinstance(d.arg, tuple) and all(isinstance(s, str) for s in d.arg))),
 
-kernel_spec = PatternMatcher([
-  # index is allowed here
-  (UPat(GroupOp.Elementwise|{Ops.CONST, Ops.RANGE, Ops.DEFINE_VAR}, dtype=dtypes.weakint), lambda: True),
+  # UNIQUE
+  (UPat(Ops.UNIQUE, dtypes.void, ()), lambda: True),
+  (UPat(Ops.LUNIQUE, dtypes.void, ()), lambda: True),
 
-  # UNROLL/CONTRACT is used here for WMMA
-  (UPat(Ops.CONTRACT, name="x"), lambda x: x.dtype.count == prod(y[1] for y in x.arg)),
-  (UPat(Ops.UNROLL, name="x"), lambda x: x.src[0].dtype.count == prod(y[1] for y in x.arg)),
+  # CONST with a UNIQUE or DEVICE
+  (UPat(Ops.CONST, src=(UPat(Ops.DEVICE),)), lambda: True),
+  (UPat(Ops.CONST, src=(UPat((Ops.UNIQUE, Ops.LUNIQUE)), UPat(Ops.DEVICE))), lambda: True),
 
-  # SHAPED_WMMA has <a, b, acc> with shaped inputs, arg=((M,N,K), device, threads), lowered to WMMA+CONTRACT later
-  (UPat(Ops.SHAPED_WMMA, src=(UPat(), UPat(), UPat()), name="x"),
-   lambda x: isinstance(x.arg, tuple) and len(x.arg) == 3 and isinstance(x.arg[0], tuple)),
+  # BUFFER
+  (UPat(Ops.BUFFER, src=(UPat((Ops.UNIQUE, Ops.LUNIQUE)), UPat(Ops.DEVICE)), name="buf"),
+   lambda buf: isinstance(buf.arg, int) and isinstance(buf.dtype, DType)),
 
-  # END can end multiple axes here
-  (UPat(Ops.END, src=(UPat(), UPat()), allow_any_len=True), lambda: True),
+  # PARAM (that's really a variable)
+  (UPat(Ops.PARAM, src=(UPat(), UPat(), UPat(), UPat(), UPat()), name="x"), lambda x: True),
 
-  # bufferize can be on anything
-  (UPat(Ops.BUFFERIZE, src=(UPat(),), allow_any_len=True), lambda: True),
+  # Tensor variable bindings
+  (UPat(Ops.BIND, (dtypes.int, dtypes.weakint,), (UPat(Ops.DEFINE_VAR), UPat.cvar(dtype=(dtypes.int,dtypes.weakint,))), arg=None), lambda: True),
+
+  # custom function
+  (UPat(Ops.CUSTOM_FUNCTION, name="x"), lambda x: isinstance(x.arg, str)),
+
+  # CALL
+  (UPat(Ops.CALL, src=(UPat((Ops.SINK, Ops.LINEAR, Ops.PROGRAM, Ops.COPY, Ops.CUSTOM_FUNCTION)),), allow_any_len=True), lambda: True),
+
+  # FUNCTION + TUPLE must have void dtype, GETTUPLE can only appear on FUNCTION or TUPLE
+  (UPat(Ops.FUNCTION, dtypes.void, src=(UPat(Ops.TUPLE),), allow_any_len=True), lambda: True),
+  (UPat(Ops.TUPLE, dtypes.void), lambda: True),
+  (UPat(Ops.GETTUPLE, src=(UPat((Ops.FUNCTION, Ops.TUPLE)),), name="g"), lambda g: isinstance(g.arg, int)),
+
+  # PARAM
+  (UPat(Ops.PARAM, src=(UPat(), UPat(Ops.NOOP)), name="x"), lambda x: True),  # TODO: why does this have NOOP?
+  (UPat(Ops.PARAM, src=(UPat(), UPat(Ops.DEVICE)), name="x"), lambda x: True),
+  (UPat(Ops.PARAM, src=(UPat(), UPat(Ops.DEVICE), UPat(Ops.MULTI)), name="x"), lambda x: True),
+
+  # inputs to movement ops
+  (UPat((Ops.STACK, Ops.VCONST)), lambda: True),
+  (UPat({Ops.ADD, Ops.MUL, Ops.CDIV, Ops.FLOORDIV}, dtype=dtypes.weakint), lambda: True),
+
+  # movement ops
+  (UPat((Ops.RESHAPE, Ops.EXPAND), src=(UPat(), UPat(dtype=dtypes.weakint))), lambda: True),
+  (UPat((Ops.PAD, Ops.SHRINK), src=(UPat(), UPat(dtype=dtypes.weakint), UPat(dtype=dtypes.weakint))), lambda: True),
+  (UPat((Ops.PERMUTE, Ops.FLIP), name="mv", src=(UPat(),)), lambda mv: isinstance(mv.arg, tuple)),
 
   # REDUCE has arg=(op, axis_tuple), src[1:] are ranges after lowering
   (UPat(Ops.REDUCE, src=(UPat(),), allow_any_len=True, name="x"),
    lambda x: isinstance(x.arg, tuple) and len(x.arg) == 2 and x.arg[0] in {Ops.ADD, Ops.MUL, Ops.MAX}
    and isinstance(x.arg[1], tuple) and all(y.dtype in (dtypes.weakint, dtypes.int) for y in x.src[1:])),
 
-  # COPY/BUFFER_VIEW can have ranges appended
-  (UPat(Ops.COPY, name="x", src=(UPat.var("s"), UPat(Ops.DEVICE)), allow_any_len=True, arg=None),
-   lambda x,s: x.dtype == s.dtype and all(u.op is Ops.RANGE for u in x.src[2:])),
-  (UPat(Ops.BUFFER_VIEW, src=(UPat((Ops.INDEX, Ops.LOAD)),), allow_any_len=True, name="x"),
-   lambda x: all(u.op is Ops.RANGE for u in x.src[1:])),
-])+movement_ops+shared_codegen_spec+shared_spec
+  # COPY. TODO: this should not have allow_any_len, but something is adding ranges
+  (UPat(Ops.COPY, name="copy", src=(UPat.var("x"), UPat(Ops.DEVICE)), allow_any_len=True, arg=None), lambda copy,x: copy.dtype == x.dtype),
+  (UPat(Ops.ALLREDUCE, name="red", src=(UPat.var("x"), UPat(Ops.DEVICE))), lambda red,x: red.dtype == x.dtype and isinstance(red.arg, Ops)),
 
-tensor_spec = PatternMatcher([
-  # no tags allowed in tensor graph
-  (UPat(GroupOp.All, name="x"), lambda x: None if x.tag is None else False),
-])+_tensor_spec+kernel_spec
+  # MULTI/MSELECT/MSTACK
+  (UPat(Ops.MULTI, name="multi"), lambda multi: all(x.dtype == multi.dtype for x in multi.src) and isinstance(multi.arg, int)),
+  (UPat(Ops.MSELECT, name="x"), lambda x: isinstance(x.src[0].device, tuple) and x.arg < len(x.src[0].device)),
+  (UPat(Ops.MSTACK, name="x"), lambda x: all(isinstance(x.device, str) for x in x.src)),
 
-# ***** UOp spec in linearized programs *****
+  # CONTIGUOUS ensures the source UOp realizes
+  (UPat((Ops.DETACH, Ops.CONTIGUOUS, Ops.CONTIGUOUS_BACKWARD), name="root", src=(UPat.var("x"),), arg=None),
+   lambda root,x: root.dtype == x.dtype),
 
-program_spec = PatternMatcher([
-  # END closes ranges
-  (UPat(Ops.END, src=(UPat(), UPat(Ops.RANGE)), dtype=dtypes.void), lambda: True),
+  # TODO: this should not be here. STAGE is transformed to DEFINE_LOCAL later
+  (UPat(Ops.STAGE, src=(UPat(),), allow_any_len=True), lambda: True),
 
-  # make sure all index dtypes have been lowered (except CONST/RANGE/DEFINE_VAR which are valid index-typed)
-  (UPat(GroupOp.All-{Ops.CONST, Ops.RANGE, Ops.DEFINE_VAR, Ops.VCONST, Ops.STACK}, dtype=dtypes.weakint), lambda: False),
-  (UPat(Ops.CONST, arg=Invalid), lambda: False),
-  (UPat(Ops.VCONST, name="x"), lambda x: all(v is not Invalid for v in x.arg) and len(x.arg)==x.dtype.vcount>1 and
-    type(x.arg) is type(x.dtype.const(x.arg))),
+  # codegen: PROGRAM with progressive sources through the pipeline (SINK, DEVICE, LINEAR?, SOURCE?, BINARY?)
+  (UPat(Ops.LINEAR, dtypes.void), lambda: True),
+  (UPat(Ops.SOURCE, dtypes.void, src=()), lambda: True),
+  (UPat(Ops.BINARY, dtypes.void, src=()), lambda: True),
+  (UPat(Ops.PROGRAM, dtypes.void, src=(UPat(Ops.SINK), UPat(Ops.DEVICE))), lambda: True),
+  (UPat(Ops.PROGRAM, dtypes.void, src=(UPat(Ops.SINK), UPat(Ops.DEVICE), UPat(Ops.LINEAR))), lambda: True),
+  (UPat(Ops.PROGRAM, dtypes.void, src=(UPat(Ops.SINK), UPat(Ops.DEVICE), UPat(Ops.LINEAR), UPat(Ops.SOURCE))), lambda: True),
+  (UPat(Ops.PROGRAM, dtypes.void, src=(UPat(Ops.SINK), UPat(Ops.DEVICE), UPat(Ops.LINEAR), UPat(Ops.SOURCE), UPat(Ops.BINARY))), lambda: True),
+
+  # UNROLL/CONTRACT is used here for WMMA
+  (UPat(Ops.CONTRACT, name="x"), lambda x: x.dtype.count == prod(y[1] for y in x.arg)),
+  (UPat(Ops.UNROLL, name="x"), lambda x: x.src[0].dtype.count == prod(y[1] for y in x.arg)),
+])+spec_shared
+
+# these ops can exist in programs but not the tensor spec. example: LOAD
+spec_program = PatternMatcher([
+  # STACK/GEP in program. TODO: this should match Tensor
+  (UPat(Ops.STACK, name="x"), lambda x: len(x.src)>1 and len(x.src) == x.dtype.vcount and all(x.dtype == y.dtype.vec(len(x.src)) for y in x.src)),
+  (UPat(Ops.GEP, src=(UPat.var("src"),), name="gep"), lambda gep,src: gep.dtype == src.dtype.scalar()),
 
   # if has a <gate, index_for_dedup>
   (UPat(Ops.IF, dtype=dtypes.void, src=(UPat(dtype=dtypes.bool), UPat((Ops.CAST, Ops.INDEX)))), lambda: True),
   (UPat(Ops.ENDIF, dtype=dtypes.void, src=(UPat(Ops.IF),)), lambda: True),
-])+shared_codegen_spec+shared_spec
+])+spec_shared
 
-# *** this spec should match all UOps ever created ***
+# these are intermediate ops. everything should be deleted from here
+spec_full = PatternMatcher([
+  # BUFFER_VIEW on BUFFER is allowed if BUFFER is
+  (UPat(Ops.BUFFER_VIEW, src=(UPat((Ops.BUFFER, Ops.PARAM)),)), lambda: True),
 
-full_spec = PatternMatcher([
-  # NOOP in the full spec
-  (UPat(Ops.NOOP), lambda: True),
+  # TODO: BUFFER_VIEW shouldn't go on INDEX. why is this allowed? remove these both
+  (UPat(Ops.BUFFER_VIEW, src=(UPat((Ops.INDEX,)),), allow_any_len=True), lambda: True),
+  (UPat(Ops.CALL, src=(UPat((Ops.BUFFER_VIEW,)),), allow_any_len=True), lambda: True),
 
-  # all rewrite error are okay
-  (UPat(Ops.REWRITE_ERROR), lambda: True),
+  # codegen may end ranges after gpudims has replaced RANGE with SPECIAL.
+  (UPat(Ops.END, src=(UPat(), UPat()), allow_any_len=True), lambda: True),
 
-  # rangeify: buffer view with index or load is okay
-  (UPat(Ops.BUFFER_VIEW, src=(UPat((Ops.INDEX, Ops.LOAD)),)), lambda: True),
+  # allow any AFTER
+  (UPat(Ops.AFTER, src=(UPat(),), allow_any_len=True), lambda: True),
 
   # expander: unroll/contract/gep/ptrcat/cat
   (UPat((Ops.UNROLL, Ops.CONTRACT), src=(UPat(),)), lambda: True),
+
   # GEP multi is supported here
   (UPat(Ops.GEP, name="gep"), lambda gep: gep.dtype is dtypes.void or gep.dtype.vcount == len(gep.arg)),
-  # PTRCAT is like VECTORIZE, but it functions on ptrs
-  (UPat(Ops.PTRCAT, name="x"), lambda x: x.dtype.vcount == sum([y.dtype.base.count for y in x.src])),
-  # CAT is like VECTORIZE, but the srcs can be vectors
-  (UPat(Ops.VCAT, name="x"), lambda x: x.dtype.vcount == sum([y.dtype.vcount for y in x.src])),
-  # vectorized index
-  (UPat(Ops.INDEX, src=(UPat((Ops.STACK, Ops.CAST)), UPat())), lambda: True),
 
-  # linearizer: outputs + intermediate KERNELs
-  (UPat((Ops.CALL, Ops.FUNCTION), dtype=dtypes.void), lambda: True),
-
-  # where on index in rhs position is fine
-  (UPat(Ops.WHERE, dtype=dtypes.weakint, src=(UPat(dtype=dtypes.bool), UPat(), UPat(dtype=dtypes.weakint))), lambda: True),
-  # allow index dtype on a restricted set of UOps
-  (UPat((Ops.ADD, Ops.MUL, Ops.CMOD, Ops.CDIV, Ops.FLOORDIV, Ops.FLOORMOD, Ops.MAX,
-         Ops.SPECIAL, Ops.CAST, Ops.RANGE, Ops.VCONST, Ops.STACK), dtype=dtypes.weakint), lambda: True),
+  # all loads/stores
+  (UPat((Ops.LOAD, Ops.STORE)), lambda: True),
 
   # while BIND is being casted
   (UPat(Ops.BIND, (dtypes.int, dtypes.weakint), (UPat(), UPat()), arg=None), lambda: True),
 
-  # in progress MSTACK may lose device
-  (UPat((Ops.MSELECT, Ops.MSTACK)), lambda: True),
+  # TODO: PTRCAT and VCAT need to be deleted
 
-  # temp VECTORIZE/INDEX during rewrite have the wrong dtype
-  (UPat(Ops.STACK), lambda: True),
+  # PTRCAT is like VECTORIZE, but it functions on ptrs
+  (UPat(Ops.PTRCAT, name="x"), lambda x: x.dtype.vcount == sum([y.dtype.base.count for y in x.src])),
+  # VCAT is like VECTORIZE, but the srcs can be vectors
+  (UPat(Ops.VCAT, name="x"), lambda x: x.dtype.vcount == sum([y.dtype.vcount for y in x.src])),
+])+spec_tensor+spec_program
 
-  # no more bool in index
-  (UPat(Ops.INDEX, name="idx"), lambda idx: not any([dtypes.is_bool(x.dtype) for x in idx.src[1:]])),
-
-  # all loads/stores
-  (UPat((Ops.LOAD, Ops.STORE)), lambda: True),
-  # DEFINE_VAR to deal with the floats used in reduce collapse
-  (UPat(Ops.DEFINE_VAR, dtype=dtypes.floats), lambda: True),
-  # allow any AFTER
-  (UPat(Ops.AFTER, src=(UPat(),), allow_any_len=True), lambda: True),
-])+_tensor_spec+kernel_spec+program_spec+shared_spec
-
-# ***** uop helpers *****
-
-def type_verify(ast:UOp|list[UOp], check_spec:PatternMatcher):
-  lst = list(ast.toposort()) if isinstance(ast, UOp) else ast
-  if SPEC > 1: test_pyrender(lst[-1])  # assume this is the sink
-
-  with Context(TRACK_MATCH_STATS=0):
-    for i,u in enumerate(lst):
-      ret = check_spec.rewrite(u)
-      if cast(bool|None, ret) is not True:
-        if DEBUG >= 3: print_uops(lst)
-        raise RuntimeError(f"UOp verification failed at {i} on {u.op} {u.dtype} {len(u.src)} {[(x.op, x.dtype, x.arg) for x in u.src]} {u.arg}")
+# **** pyrender (move this) ****
 
 # late imports to avoid circular import
 from tinygrad.codegen.opt import Opt, OptOps

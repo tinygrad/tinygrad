@@ -83,9 +83,6 @@ jobs:
 
   testmacbenchmark:
     name: Mac Benchmark
-    env:
-      # since sudo is required for usbgpu on macos, move the cache to a new location, as some of the files are owned by root
-      PYTHONPYCACHEPREFIX: /tmp/tiny_python_pycache
     runs-on: [self-hosted, macOS]
     timeout-minutes: 60
     defaults:
@@ -194,8 +191,6 @@ jobs:
 
   testusbgpu:
     name: UsbGPU Benchmark
-    env:
-      PYTHONPYCACHEPREFIX: /tmp/tiny_python_pycache
     runs-on: [self-hosted, macOS]
     timeout-minutes: 10
     defaults:
@@ -214,12 +209,13 @@ jobs:
       run: |
         PYTHONPATH=. ./extra/hcq/hcq_smi.py amd kill_pids
         PYTHONPATH=. ./extra/hcq/hcq_smi.py nv kill_pids
+    # since sudo is required for usbgpu on macos, do not write bytecode, as some of the files are owned by root
     - name: UsbGPU boot time
-      run: sudo -E PYTHONPATH=. GMMU=0 DEBUG=2 AM_RESET=1 DEV=USB+AMD time python3.11 test/test_tiny.py TestTiny.test_plus
+      run: sudo -E PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. GMMU=0 DEBUG=2 AM_RESET=1 DEV=USB+AMD time python3.11 test/test_tiny.py TestTiny.test_plus
     - name: UsbGPU tiny tests
-      run: sudo -E PYTHONPATH=. GMMU=0 DEV=USB+AMD python3.11 test/test_tiny.py
+      run: sudo -E PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. GMMU=0 DEV=USB+AMD python3.11 test/test_tiny.py
     - name: UsbGPU copy speeds
-      run: sudo -E PYTHONPATH=. GMMU=0 DEV=USB+AMD python3.11 test/external/external_test_usb_asm24.py TestDevCopySpeeds
+      run: sudo -E PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=. GMMU=0 DEV=USB+AMD python3.11 test/external/external_test_usb_asm24.py TestDevCopySpeeds
     #- name: UsbGPU openpilot test
     #  run: sudo -E PYTHONPATH=. GMMU=0 DEV=USB+AMD GRAPH_ONE_KERNEL=1 python3.11 examples/openpilot/compile3.py https://github.com/commaai/openpilot/raw/9118973ed03c1ae1d40cf69a29507ec2cc78efd7/selfdrive/modeld/models/supercombo.onnx
     - name: UsbGPU (USB4/TB) install script
