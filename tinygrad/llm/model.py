@@ -320,7 +320,11 @@ class Transformer:
   def forward(self, tokens:Tensor, start_pos:int|UOp, temperature:Tensor) -> Tensor:
     x = self.token_embd(tokens).float()                   # (B, T, D)
     for block in self.blk: x = block(x, start_pos)
-    logits = self.output(self.output_norm(x))[:, -1, :]
+    x = self.output_norm(x)
+    if getenv("CUSTOM_VOCAB_ARGMAX") and x.device == "AMD" and x.shape[0] == 1 and x.shape[-1] == 1024 and self.output.weight.shape[0] == 248320:
+      from tinygrad.llm.amd_kernels import q8_lmhead_gumbel_argmax
+      return q8_lmhead_gumbel_argmax(x[:, -1, :], self.output.weight, temperature)
+    logits = self.output(x)[:, -1, :]
     # Gumbel-max trick: argmax(logits/temp - log(-log(uniform))) is equivalent to sampling from softmax(logits/temp)
     return (logits / temperature.maximum(1e-12) - (Tensor.rand_like(logits).maximum(1e-12).log().neg()).log()).argmax(-1, keepdim=True)
 

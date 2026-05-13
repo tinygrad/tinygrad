@@ -7,6 +7,7 @@ from tinygrad.uop.ops import KernelInfo, Ops, UOp
 
 _DIM, _HIDDEN = 1024, 3584
 _GDN_HV, _GDN_V, _GDN_K = 16, 128, 128
+_VOCAB = 248320
 _Q8_BLOCK = 32
 _Q8_BLOCK_BYTES = 34
 
@@ -27,6 +28,15 @@ def _find_raw_q8_blocks(weight:Tensor) -> Tensor|None:
       return Tensor(u)
     stack.extend(u.src)
   return None
+
+
+def _base_buffer_with_offset(t:Tensor) -> tuple[Tensor, int]|None:
+  src = t.uop.src[0] if t.uop.op is Ops.CONTIGUOUS and len(t.uop.src) else t.uop
+  if (offset := src.contiguous_view_offset()) is None: return None
+  base = src.base
+  if base.op is Ops.BUFFER_VIEW: offset, base = offset + base.arg[1], base.src[0]
+  if base.op not in {Ops.BUFFER, Ops.PARAM}: return None
+  return Tensor(base), offset
 
 
 _GATE_UP_HIP_SRC = r"""
@@ -353,3 +363,181 @@ def gdn_recurrent_update_conv(state:Tensor, conv_out:Tensor, alpha:Tensor, beta:
   core = Tensor.empty(_GDN_HV, _GDN_V, dtype=dtypes.float, device=state.device)
   core, *_ = Tensor.custom_kernel(core, state, conv_out.reshape(-1), alpha.reshape(-1), beta.reshape(-1), fxn=_gdn_recurrent_conv_kernel)
   return core.reshape(1, 1, _GDN_HV, _GDN_V)
+
+
+_VOCAB_ROWS_PER_BLOCK = 32
+_VOCAB_PARTIALS = (_VOCAB + _VOCAB_ROWS_PER_BLOCK - 1) // _VOCAB_ROWS_PER_BLOCK
+
+_Q8_LMHEAD_PARTIAL_ARGMAX_HIP_SRC = r"""
+#include <hip/hip_runtime.h>
+#include <stdint.h>
+#include <math.h>
+
+constexpr int DIM = 1024;
+constexpr int VOCAB = 248320;
+constexpr int LANES_PER_ROW = 32;
+constexpr int ROWS_PER_BLOCK = 32;
+constexpr int THREADS = LANES_PER_ROW * ROWS_PER_BLOCK;
+constexpr long WEIGHT_OFFSET = __WEIGHT_OFFSET__;
+constexpr float NEG_INF = -3.4028234663852886e38f;
+constexpr float LOG2E_INV = 0.6931471805599453f;
+
+extern "C" __global__ __launch_bounds__(THREADS) void q8_lmhead_gumbel_partial_argmax(
+    float* __restrict__ partial_scores,
+    int* __restrict__ partial_tokens,
+    const float* __restrict__ hidden,
+    const unsigned char* __restrict__ weight,
+    const float* __restrict__ temperature,
+    const float* __restrict__ rnd) {
+  int tid = threadIdx.x;
+  int lane = tid & 31;
+  int row = tid >> 5;
+  int token = blockIdx.x * ROWS_PER_BLOCK + row;
+
+  float acc = 0.0f;
+  if (token < VOCAB) {
+    const unsigned char* wbase = weight + WEIGHT_OFFSET;
+    int base = (token * (DIM / 32) + lane) * 34;
+    float scale = float(*reinterpret_cast<const _Float16*>(wbase + base));
+    #pragma unroll
+    for (int i = 0; i < 32; i++) {
+      acc += hidden[lane * 32 + i] * scale * float(*reinterpret_cast<const int8_t*>(wbase + base + 2 + i));
+    }
+  }
+
+  #pragma unroll
+  for (int delta = 16; delta > 0; delta >>= 1) acc += __shfl_down(acc, delta, 32);
+
+  __shared__ float scores[ROWS_PER_BLOCK];
+  __shared__ int tokens[ROWS_PER_BLOCK];
+  if (lane == 0) {
+    float score = NEG_INF;
+    if (token < VOCAB) {
+      float u = fminf(fmaxf(rnd[token], 1.0e-12f), 0.9999999403953552f);
+      float gumbel = -LOG2E_INV * log2f(-LOG2E_INV * log2f(u));
+      score = acc / fmaxf(temperature[0], 1.0e-12f) + gumbel;
+    }
+    scores[row] = score;
+    tokens[row] = token;
+  }
+  __syncthreads();
+
+  if (tid == 0) {
+    float best_score = scores[0];
+    int best_token = tokens[0];
+    #pragma unroll
+    for (int i = 1; i < ROWS_PER_BLOCK; i++) {
+      float s = scores[i];
+      int t = tokens[i];
+      if (s > best_score || (s == best_score && t < best_token)) {
+        best_score = s;
+        best_token = t;
+      }
+    }
+    partial_scores[blockIdx.x] = best_score;
+    partial_tokens[blockIdx.x] = best_token;
+  }
+}
+"""
+
+
+_Q8_LMHEAD_FINAL_ARGMAX_HIP_SRC = r"""
+#include <hip/hip_runtime.h>
+#include <stdint.h>
+
+constexpr int PARTIALS = 7760;
+constexpr int THREADS = 256;
+constexpr float NEG_INF = -3.4028234663852886e38f;
+
+extern "C" __global__ __launch_bounds__(THREADS) void q8_lmhead_gumbel_final_argmax(
+    int* __restrict__ out,
+    const float* __restrict__ partial_scores,
+    const int* __restrict__ partial_tokens) {
+  int tid = threadIdx.x;
+  float best_score = NEG_INF;
+  int best_token = 0;
+  for (int i = tid; i < PARTIALS; i += THREADS) {
+    float s = partial_scores[i];
+    int t = partial_tokens[i];
+    if (s > best_score || (s == best_score && t < best_token)) {
+      best_score = s;
+      best_token = t;
+    }
+  }
+
+  __shared__ float scores[THREADS];
+  __shared__ int tokens[THREADS];
+  scores[tid] = best_score;
+  tokens[tid] = best_token;
+  __syncthreads();
+
+  for (int stride = THREADS / 2; stride > 0; stride >>= 1) {
+    if (tid < stride) {
+      float s = scores[tid + stride];
+      int t = tokens[tid + stride];
+      if (s > scores[tid] || (s == scores[tid] && t < tokens[tid])) {
+        scores[tid] = s;
+        tokens[tid] = t;
+      }
+    }
+    __syncthreads();
+  }
+  if (tid == 0) out[0] = tokens[0];
+}
+"""
+
+
+@functools.cache
+def _compiled_q8_lmhead_partial_argmax(weight_offset:int) -> bytes:
+  from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
+  return HIPCCCompiler(getenv("AMD_ARCH", "gfx1100"), ["-mno-wavefrontsize64"]).compile_cached(
+    _Q8_LMHEAD_PARTIAL_ARGMAX_HIP_SRC.replace("__WEIGHT_OFFSET__", str(weight_offset)))
+
+
+@functools.cache
+def _compiled_q8_lmhead_final_argmax() -> bytes:
+  from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
+  return HIPCCCompiler(getenv("AMD_ARCH", "gfx1100"), ["-mno-wavefrontsize64"]).compile_cached(_Q8_LMHEAD_FINAL_ARGMAX_HIP_SRC)
+
+
+def _q8_lmhead_partial_argmax_kernel(scores:UOp, tokens:UOp, hidden:UOp, weight:UOp, temperature:UOp, rnd:UOp, weight_offset:int=0) -> UOp:
+  assert scores.numel() == _VOCAB_PARTIALS and tokens.numel() == _VOCAB_PARTIALS and hidden.numel() == _DIM and weight.numel() >= weight_offset + _q8_bytes(_VOCAB * _DIM) and rnd.numel() == _VOCAB
+  ops = _VOCAB * _DIM * 2 + _VOCAB * 8
+  mem = _q8_bytes(_VOCAB * _DIM) + (_DIM + _VOCAB) * 4 + _VOCAB_PARTIALS * 8 + 4
+  sink = UOp.sink(
+    UOp.special(_VOCAB_PARTIALS, "gidx0"), UOp.special(_VOCAB_ROWS_PER_BLOCK * 32, "lidx0"),
+    scores, tokens, hidden, weight, temperature, rnd,
+    arg=KernelInfo(name="q8_lmhead_gumbel_partial_argmax", estimates=Estimates(ops=ops, mem=mem)))
+  return UOp(Ops.PROGRAM, src=(
+    sink, UOp(Ops.DEVICE, arg=Device.DEFAULT), UOp(Ops.LINEAR, src=(*sink.src, sink)),
+    UOp(Ops.SOURCE, arg=_Q8_LMHEAD_PARTIAL_ARGMAX_HIP_SRC.replace("__WEIGHT_OFFSET__", str(weight_offset))),
+    UOp(Ops.BINARY, arg=_compiled_q8_lmhead_partial_argmax(weight_offset))))
+
+
+def _q8_lmhead_final_argmax_kernel(out:UOp, scores:UOp, tokens:UOp) -> UOp:
+  assert out.numel() == 1 and scores.numel() == _VOCAB_PARTIALS and tokens.numel() == _VOCAB_PARTIALS
+  sink = UOp.sink(
+    UOp.special(1, "gidx0"), UOp.special(256, "lidx0"),
+    out, scores, tokens,
+    arg=KernelInfo(name="q8_lmhead_gumbel_final_argmax", estimates=Estimates(ops=_VOCAB_PARTIALS, mem=_VOCAB_PARTIALS * 8 + 4)))
+  return UOp(Ops.PROGRAM, src=(
+    sink, UOp(Ops.DEVICE, arg=Device.DEFAULT), UOp(Ops.LINEAR, src=(*sink.src, sink)),
+    UOp(Ops.SOURCE, arg=_Q8_LMHEAD_FINAL_ARGMAX_HIP_SRC), UOp(Ops.BINARY, arg=_compiled_q8_lmhead_final_argmax())))
+
+
+def q8_lmhead_gumbel_argmax(hidden:Tensor, weight:Tensor, temperature:Tensor) -> Tensor:
+  assert hidden.numel() == _DIM
+  weight_raw = _find_raw_q8_blocks(weight)
+  if weight_raw is None:
+    raise NotImplementedError("q8_lmhead_gumbel_argmax: weight must trace to a raw uchar buffer")
+  weight_offset = 0
+  if (base_and_offset := _base_buffer_with_offset(weight_raw)) is not None:
+    weight_raw, weight_offset = base_and_offset
+  scores = Tensor.empty(_VOCAB_PARTIALS, dtype=dtypes.float, device=hidden.device)
+  tokens = Tensor.empty(_VOCAB_PARTIALS, dtype=dtypes.int, device=hidden.device)
+  rnd = Tensor.rand(_VOCAB, dtype=dtypes.float, device=hidden.device, contiguous=False)
+  scores, tokens, *_ = Tensor.custom_kernel(scores, tokens, hidden.reshape(-1), weight_raw, temperature.reshape(-1), Tensor(rnd.uop.base),
+                                            fxn=functools.partial(_q8_lmhead_partial_argmax_kernel, weight_offset=weight_offset))
+  out = Tensor.empty(1, dtype=dtypes.int, device=hidden.device)
+  out, *_ = Tensor.custom_kernel(out, scores, tokens, fxn=_q8_lmhead_final_argmax_kernel)
+  return out.reshape(1, 1)
