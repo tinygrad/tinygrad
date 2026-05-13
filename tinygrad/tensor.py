@@ -1421,14 +1421,16 @@ class Tensor(OpMixin):
     #prepare round robin pairing: identity on first half, reversed on second half
     permute = Tensor.arange(num//2, dtype=dtypes.int, device=self.device).cat(
                 Tensor.arange(num//2, num, dtype=dtypes.int, device=self.device).flip(0))
-    inverse_permute = Tensor.zeros(num, dtype=dtypes.int, device=self.device).scatter(
-                        0, permute, Tensor.arange(num, dtype=dtypes.int, device=self.device))
-    def one_round_jacobi(U, V, permute, inverse_permute):
+    cols = Tensor.arange(num, dtype=dtypes.int, device=self.device)
+    def one_round_jacobi(U, V, permute):
+      # permutation matrix P such that X @ P == X[..., permute]; X @ P.T applies the inverse permutation
+      P = cols.unsqueeze(1).eq(permute.unsqueeze(0)).cast(U.dtype)
       #pair all the columns
-      V_permuted, runoff_V = (V[..., permute].split(num - 1, -1)) if num % 2 == 1 else (V[..., permute], None)
-      V_left, V_right = V_permuted.split(num//2, -1)
-      U_permuted, runoff_U = (U[..., permute].split(num - 1, -1)) if num % 2 == 1 else (U[..., permute], None)
+      U_perm, V_perm = U @ P, V @ P
+      U_permuted, runoff_U = U_perm.split(num - 1, -1) if num % 2 == 1 else (U_perm, None)
+      V_permuted, runoff_V = V_perm.split(num - 1, -1) if num % 2 == 1 else (V_perm, None)
       U_left, U_right = U_permuted.split(num//2, -1)
+      V_left, V_right = V_permuted.split(num//2, -1)
       #compute the jacobi rotations for each pairing
       gamma = (U_left * U_right).sum(-2).reshape(b_shape + (1, num//2))
       alpha, beta = U_permuted.square().sum(-2).unsqueeze(-2).split(num//2, -1)
@@ -1438,18 +1440,17 @@ class Tensor(OpMixin):
       t = rot.where(t, 0)
       c = 1 / (1 + t.square()).sqrt()
       s = c * t
-      #apply the rotations
+      #apply the rotations and unpermute via P.T
       U_left, U_right = c * U_left - s * U_right, s * U_left + c * U_right
-      U = U_left.cat(U_right.cat(runoff_U, dim=-1) if num % 2 == 1 else U_right, dim=-1)[..., inverse_permute]
+      U = U_left.cat(U_right.cat(runoff_U, dim=-1) if num % 2 == 1 else U_right, dim=-1) @ P.transpose(-2, -1)
       V_left, V_right = c * V_left - s * V_right, s * V_left + c * V_right
-      V = V_left.cat(V_right.cat(runoff_V, dim=-1) if num % 2 == 1 else V_right, dim=-1)[..., inverse_permute]
+      V = V_left.cat(V_right.cat(runoff_V, dim=-1) if num % 2 == 1 else V_right, dim=-1) @ P.transpose(-2, -1)
       #prepare the next round robin pairings
       if num % 2 == 1: permute = (permute - 1) % num
       else: permute = permute[0].reshape(1).cat(((permute[1:num] - 2) % (num - 1)) + 1)
-      inverse_permute = inverse_permute.scatter(0, permute, Tensor.arange(num, dtype=dtypes.int32, device=self.device))
-      return U, V, permute, inverse_permute
-    #sorta heuristic, most use num*log2(num)
-    for _ in range(int(num * math.log2(num) * 2 + 2)): U, V, permute, inverse_permute = one_round_jacobi(U, V, permute, inverse_permute)
+      return U, V, permute
+    # classical Jacobi converges in ~4 sweeps; one full sweep is (num-1) rounds for even num
+    for _ in range(4 * num): U, V, permute = one_round_jacobi(U, V, permute)
     #extract singular values and sort. construct U from Q
     S, indices = U.square().sum(-2).sqrt().sort(dim=-1, descending=True)
     new_indices = indices.unsqueeze(-2).expand(b_shape + (num, num))
