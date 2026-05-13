@@ -1010,7 +1010,7 @@ jobs:
           IMAGE: 1
           DEV: "NULL:IR3:a630,IMAGE_PITCH_ALIGNMENT=1"
         run: |
-          DEBUG=4 python3 test/backend/test_ops.py TestOps.test_gemm | grep -q image_load
+          DEBUG=4 python3 test/backend/test_ops.py TestOps.test_gemm | grep image_load
           python -m pytest -n=auto test/backend/test_ops.py --durations=20
   qcomclcompiletests:
     name: Compile-only (QCOM CL)
@@ -1041,5 +1041,5 @@ jobs:
           IMAGE: 1
           DEV: "NULL:QCOMCL:a630,IMAGE_PITCH_ALIGNMENT=64"
         run: |
-          DEBUG=4 python test/backend/test_ops.py TestOps.test_gemm | grep -q read_imagef
+          DEBUG=4 python test/backend/test_ops.py TestOps.test_gemm | grep read_imagef
           python -m pytest -n=auto test/backend/test_ops.py --durations=20
