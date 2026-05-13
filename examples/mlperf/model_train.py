@@ -1322,6 +1322,9 @@ def train_llama3(llama2_70b_lora:bool=False):
   ADAM_EPSILON       = config["ADAM_EPSILON"]           = getenv("ADAM_EPSILON", 1e-5)
   WEIGHT_DECAY       = config["WEIGHT_DECAY"]           = getenv("WEIGHT_DECAY", 0.1)
   MAX_GRAD_NORM      = config["MAX_GRAD_NORM"]          = getenv("MAX_GRAD_NORM", 1.0)
+  LORA_RANK          = config["LORA_RANK"]              = getenv("LORA_RANK", 16)
+  LORA_ALPHA         = config["LORA_ALPHA"]             = getenv("LORA_ALPHA", 32.0)
+  LORA_DROPOUT       = config["LORA_DROPOUT"]           = getenv("LORA_DROPOUT", 0.1)
 
   if LOGMLPERF:
     from mlperf_logging import mllog
@@ -1370,6 +1373,10 @@ def train_llama3(llama2_70b_lora:bool=False):
       MLLOGGER.event(key=mllog_constants.OPT_LR_DECAY_STEPS, value=MAX_STEPS - WARMUP_STEPS)
       MLLOGGER.event(key=mllog_constants.OPT_LR_DECAY_SCHEDULE, value="cosine with linear warmup")
       MLLOGGER.event(key=mllog_constants.OPT_GRADIENT_CLIP_NORM, value=MAX_GRAD_NORM)
+      if llama2_70b_lora:
+        MLLOGGER.event(key=mllog_constants.OPT_LR_TRAINING_STEPS, value=MAX_STEPS)
+        MLLOGGER.event(key=mllog_constants.LORA_ALPHA, value=LORA_ALPHA)
+        MLLOGGER.event(key="lora_rank", value=LORA_RANK)
   else:
     MLLOGGER = None
 
@@ -1393,7 +1400,8 @@ def train_llama3(llama2_70b_lora:bool=False):
     wandb_args = {"id": wandb_id, "resume": "must"} if (wandb_id := getenv("WANDB_RESUME", "")) else {}
     wandb.init(config=config, **wandb_args, project=getenv("WANDB_PROJ", "MLPerf-LLaMA3"))
 
-  model_params = MODEL_PARAMS[getenv("LLAMA3_SIZE", "8B")]["args"] if not llama2_70b_lora else LLAMA2_70B_ARGS
+  model_params = dict(MODEL_PARAMS[getenv("LLAMA3_SIZE", "8B")]["args"] if not llama2_70b_lora else LLAMA2_70B_ARGS)
+  if llama2_70b_lora: model_params |= {"lora_rank": LORA_RANK, "lora_alpha": LORA_ALPHA, "lora_dropout": LORA_DROPOUT}
   # vocab_size from the mixtral tokenizer
   if not SMALL: model_params |= {"vocab_size": 32000}
   real_vocab_size = model_params['vocab_size']
