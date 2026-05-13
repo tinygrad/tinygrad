@@ -8,7 +8,7 @@ MODEL_PATH = getenv("MODEL_PATH", "/raid/weights/c4-llama2-70b-lora/")
 LLAMA2_70B_REPO_ID = "imaolo/llama2-70b-fused-qkv-flat-mlperf"
 
 # TODO
-HF_FLAT_EXPECTED_HASH = ""
+HF_FLAT_EXPECTED_HASH = "9931046352d60e1687bef38094899e99"
 HF_FLAT_REVISION = ""
 
 if __name__ == '__main__':
