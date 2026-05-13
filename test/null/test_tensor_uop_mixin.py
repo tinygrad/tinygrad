@@ -340,6 +340,20 @@ class TestTensorUOpQR(unittest.TestCase):
   def test_qr_zero_col(self): self._check(Tensor([[0.0, 1.0], [0.0, 2.0]]))
   def test_qr_batched(self):  self._check(_t(2, 3, 3).float())
 
+class TestTensorUOpSVD(unittest.TestCase):
+  def _check(self, t, **kw):
+    ut, st, vt = t.svd(**kw)
+    uu, su, vu = t.uop.svd(**kw)
+    self.assertIs(_strip_unique(ut.uop), _strip_unique(uu))
+    self.assertIs(_strip_unique(st.uop), _strip_unique(su))
+    self.assertIs(_strip_unique(vt.uop), _strip_unique(vu))
+  def test_svd_square(self):    self._check(_t(2, 2).float())
+  def test_svd_tall(self):      self._check(_t(3, 2).float())
+  def test_svd_wide(self):      self._check(_t(2, 3).float())
+  def test_svd_odd_num(self):   self._check(_t(3, 3).float())  # exercises odd-num runoff path
+  def test_svd_batched(self):   self._check(_t(2, 2, 2).float())
+  def test_svd_nonfull(self):   self._check(_t(3, 2).float(), full_matrices=False)
+
 # UOp.empty / UOp.empty_like are the canonical buffer allocators; Tensor.empty / Tensor.empty_like just forward.
 class TestUOpEmpty(unittest.TestCase):
   def test_empty_dtype_string(self):

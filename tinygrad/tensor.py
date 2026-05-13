@@ -1408,62 +1408,6 @@ class Tensor(OpMixin):
       qk = qk + attn_mask
     return qk.cast(self.dtype).softmax(-1).dropout(dropout_p) @ value
 
-  def svd(self, full_matrices = True) -> tuple[Tensor, Tensor, Tensor]:
-    #partial implementation of https://www.netlib.org/lapack/lawnspdf/lawn169.pdf , pg 26
-    assert self.ndim > 1, f"expected two or more dimensions, got {self.ndim}"
-    b_shape, m, n = self.shape[:-2], int(self.shape[-2]), int(self.shape[-1])
-    #preprocess the matrix
-    Q, R = (self if m >= n else self.transpose(-2, -1)).qr()
-    num, q_num = min(m, n), max(m, n)
-    # TODO: codegen infinite loop without contiguous
-    U = R[..., :num, :num].contiguous()
-    V = Tensor.eye(num, dtype=self.dtype, device=self.device).expand(b_shape + (num, num)).contiguous()
-    #prepare round robin pairing: identity on first half, reversed on second half
-    permute = Tensor.arange(num//2, dtype=dtypes.int, device=self.device).cat(
-                Tensor.arange(num//2, num, dtype=dtypes.int, device=self.device).flip(0))
-    cols = Tensor.arange(num, dtype=dtypes.int, device=self.device)
-    def one_round_jacobi(U, V, permute):
-      # permutation matrix P such that X @ P == X[..., permute]; X @ P.T applies the inverse permutation
-      P = cols.unsqueeze(1).eq(permute.unsqueeze(0)).cast(U.dtype)
-      #pair all the columns
-      U_perm, V_perm = U @ P, V @ P
-      U_permuted, runoff_U = U_perm.split(num - 1, -1) if num % 2 == 1 else (U_perm, None)
-      V_permuted, runoff_V = V_perm.split(num - 1, -1) if num % 2 == 1 else (V_perm, None)
-      U_left, U_right = U_permuted.split(num//2, -1)
-      V_left, V_right = V_permuted.split(num//2, -1)
-      #compute the jacobi rotations for each pairing
-      gamma = (U_left * U_right).sum(-2).reshape(b_shape + (1, num//2))
-      alpha, beta = U_permuted.square().sum(-2).unsqueeze(-2).split(num//2, -1)
-      rot = gamma != 0
-      tau = (beta - alpha) / (2 * rot.where(gamma, 1))
-      t = (tau != 0).where(tau.sign(), 1) / (tau.abs() + (1 + tau.square()).sqrt())
-      t = rot.where(t, 0)
-      c = 1 / (1 + t.square()).sqrt()
-      s = c * t
-      #apply the rotations and unpermute via P.T
-      U_left, U_right = c * U_left - s * U_right, s * U_left + c * U_right
-      U = U_left.cat(U_right.cat(runoff_U, dim=-1) if num % 2 == 1 else U_right, dim=-1) @ P.transpose(-2, -1)
-      V_left, V_right = c * V_left - s * V_right, s * V_left + c * V_right
-      V = V_left.cat(V_right.cat(runoff_V, dim=-1) if num % 2 == 1 else V_right, dim=-1) @ P.transpose(-2, -1)
-      #prepare the next round robin pairings
-      if num % 2 == 1: permute = (permute - 1) % num
-      else: permute = permute[0].reshape(1).cat(((permute[1:num] - 2) % (num - 1)) + 1)
-      return U, V, permute
-    # classical Jacobi converges in ~4 sweeps; one full sweep is (num-1) rounds for even num
-    for _ in range(4 * num): U, V, permute = one_round_jacobi(U, V, permute)
-    #extract singular values and sort. construct U from Q
-    S, indices = U.square().sum(-2).sqrt().sort(dim=-1, descending=True)
-    new_indices = indices.unsqueeze(-2).expand(b_shape + (num, num))
-    U = U.gather(-1, new_indices) / (S != 0).where(S, 1).unsqueeze(-2)
-    V = V.gather(-1, new_indices)
-    # place U into the top-left num×num block of a q_num×q_num identity matrix
-    pad_arg = (None,) * len(b_shape) + ((0, q_num - num), (0, q_num - num))
-    eye_q = Tensor.eye(q_num, dtype=U.dtype, device=U.device).expand(b_shape + (q_num, q_num))
-    eye_n = Tensor.eye(num, dtype=U.dtype, device=U.device).expand(b_shape + (num, num)).pad(pad_arg)
-    U = Q @ (U.pad(pad_arg) + eye_q - eye_n)
-    if not full_matrices: U = U[..., 0:num]
-    return (U, S, V.transpose(-2, -1)) if m >= n else (V, S, U.transpose(-2, -1))
-
   # ***** cast ops *****
 
   def cast(self, dtype:DTypeLike) -> Tensor:
