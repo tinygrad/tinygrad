@@ -305,6 +305,11 @@ runs:
         if [[ "${{ runner.os }}" == "macOS" ]]; then
           sudo xcode-select -s /Applications/Xcode_16.2.app/Contents/Developer
           CMAKE_ARGS="$CMAKE_ARGS -DBoost_INCLUDE_DIR=$(brew --prefix boost)/include -DBoost_LIBRARY_DIR=$(brew --prefix boost)/lib"
+        else
+          curl -fL https://developer.download.nvidia.com/compute/cuda/redist/cuda_nvcc/linux-x86_64/cuda_nvcc-linux-x86_64-11.5.119-archive.tar.xz \
+            | sudo tar -xJ -C /usr/ --strip-components=1
+          curl -fL https://developer.download.nvidia.com/compute/cuda/redist/cuda_cudart/linux-x86_64/cuda_cudart-linux-x86_64-11.5.117-archive.tar.xz \
+            | sudo tar -xJ -C /usr/ --strip-components=1
         fi
 
         cmake .. $CMAKE_ARGS
