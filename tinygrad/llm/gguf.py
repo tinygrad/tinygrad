@@ -130,7 +130,10 @@ readers: dict[int, Callable[[io.BufferedIOBase], Any]] = { 8: read_str, 9: read_
     [ (0,"c",1), (1,"b",1), (2,"H",2), (3,"h",2), (4,"I",4), (5,"i",4), (6,"f",4), (7,"?",1), (10,"Q",8), (11,"q",8), (12,"d",8) ] } }
 read_uint32, read_int32, read_uint64, read_int64 = readers[4], readers[5], readers[10], readers[11]
 
-def _gguf_parse(tensor: Tensor, devices:tuple[str,...]|None=None, n_blk:int=0) -> tuple[dict, dict[str, Tensor], int]:
+def block_device(devices:tuple[str,...], i:int, n_blk:int) -> str:
+  return devices[min(i * len(devices) // n_blk, len(devices) - 1)]
+
+def _gguf_parse(tensor: Tensor, devices:tuple[str,...]|None=None, n_blk:int|None=None) -> tuple[dict, dict[str, Tensor]]:
   r = io.BufferedReader(TensorIO(tensor), 1_000_000)
   magic, version, n_tensors, n_kv = r.read(4), read_int32(r), read_int64(r), read_int64(r)
   if magic != b"GGUF" or version not in [2, 3]: raise ValueError("Invalid GGUF format!")
@@ -144,20 +147,20 @@ def _gguf_parse(tensor: Tensor, devices:tuple[str,...]|None=None, n_blk:int=0) -
   alignment, pos = kv_data.get("general.alignment", 32), r.tell()
   data_start = round_up(pos, alignment)
 
-  if devices and not n_blk: n_blk = kv_data[f'{kv_data["general.architecture"]}.block_count']
-  # TODO: remove the need for copy to default device
-  if not devices: tensor = tensor.to(None).realize()
-  state_dict = {}
-  for name, dims, typ, off in t_infos:
-    n = prod(dims)
-    if devices:
+  if devices:
+    if n_blk is None: n_blk = kv_data[f'{kv_data["general.architecture"]}.block_count']
+    state_dict = {}
+    for name, dims, typ, off in t_infos:
+      n = prod(dims)
       nbytes = n * _GGML_NATIVE[typ].itemsize if typ in _GGML_NATIVE else (n // _GGML_QUANT[typ][0]) * _GGML_QUANT[typ][1]
-      dev = devices[min(int(name.split('.')[1]) * len(devices) // n_blk, len(devices) - 1)] if name.startswith('blk.') else devices[0]
+      dev = block_device(devices, int(name.split('.')[1]), n_blk) if name.startswith('blk.') else devices[0]
       raw = tensor[data_start + off : data_start + off + nbytes].to(dev).realize()
-    else:
-      raw = tensor[data_start + off:]
-    state_dict[name] = ggml_data_to_tensor(raw, n, typ).reshape(*reversed(dims))
-  return kv_data, state_dict, n_blk
+      state_dict[name] = ggml_data_to_tensor(raw, n, typ).reshape(*reversed(dims))
+  else:
+    # TODO: remove the need for copy to default device
+    tensor = tensor.to(None).realize()
+    state_dict = {name: ggml_data_to_tensor(tensor[data_start + off:], prod(dims), typ).reshape(*reversed(dims)) for name, dims, typ, off in t_infos}
+  return kv_data, state_dict
 
 def _gguf_split_paths(path: pathlib.Path, kv: dict) -> list[pathlib.Path]:
   if (total := kv.get('split.count', 1)) <= 1: return [path]
@@ -180,8 +183,9 @@ def gguf_load(fn: Tensor|str|pathlib.Path, devices:tuple[str,...]|None=None) -> 
 
   NOTE: The provided tensor must be on a device that supports execution.
   """
-  kv, sd, n_blk = _gguf_parse(fn if isinstance(fn, Tensor) else Tensor(pathlib.Path(fn)), devices)
+  kv, sd = _gguf_parse(fn if isinstance(fn, Tensor) else Tensor(pathlib.Path(fn)), devices)
   if kv.get('split.count', 1) <= 1: return kv, sd
   if isinstance(fn, Tensor): raise ValueError("multi-part GGUF requires a path argument (got Tensor)")
+  n_blk = kv[f'{kv["general.architecture"]}.block_count']
   for pp in _gguf_split_paths(pathlib.Path(fn), kv)[1:]: sd.update(_gguf_parse(Tensor(pp), devices, n_blk)[1])
   return kv, sd

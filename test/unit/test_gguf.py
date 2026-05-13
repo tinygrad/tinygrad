@@ -142,7 +142,8 @@ class TestGGUF(unittest.TestCase):
     with tempfile.TemporaryDirectory() as d:
       d = pathlib.Path(d)
       a, b = np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32), np.array([5.0, 6.0], dtype=np.float32)
-      (d / "test-00001-of-00002.gguf").write_bytes(self._build_gguf([("a", (4,), 0, a.tobytes())], [("split.count", 2), ("split.no", 0)]))
+      (d / "test-00001-of-00002.gguf").write_bytes(self._build_gguf([("a", (4,), 0, a.tobytes())],
+        [("general.architecture", "llama"), ("llama.block_count", 0), ("split.count", 2), ("split.no", 0)]))
       (d / "test-00002-of-00002.gguf").write_bytes(self._build_gguf([("b", (2,), 0, b.tobytes())], [("split.count", 2), ("split.no", 1)]))
       kv, ts = gguf_load(d / "test-00001-of-00002.gguf")
       self.assertEqual(kv["split.count"], 2)

@@ -2,7 +2,7 @@ from __future__ import annotations
 import functools, itertools, pathlib
 from dataclasses import dataclass, replace
 from tinygrad import Device, Tensor, nn, UOp, TinyJit, getenv, function
-from tinygrad.llm.gguf import gguf_load
+from tinygrad.llm.gguf import gguf_load, block_device
 from tinygrad.uop.ops import resolve
 
 @functools.cache
@@ -382,7 +382,7 @@ class Transformer:
     model = Transformer(config)
     if devices:
       for i, blk in enumerate(model.blk):
-        for v in nn.state.get_parameters(blk): v.to_(devices[i * len(devices) // config.num_blocks])
+        for v in nn.state.get_parameters(blk): v.to_(block_device(devices, i, config.num_blocks))
     nn.state.load_state_dict(model, state_dict, verbose=False, consume=True, realize=False)  # NOTE: rope_freqs.weight (32,) is unused
     # NOTE: without this contiguous, it unpacks the weights from the model every time. we shouldn't need this, but for now it's faster
     if realize:
