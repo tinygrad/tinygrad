@@ -7,7 +7,9 @@ from tinygrad.helpers import DEBUG, Context, prod, SPEC, Metadata, panic, CHECK_
 
 # ***** uop helpers *****
 
-def validate_index(buf:UOp, idx:UOp, gate:UOp|None=None):
+def validate_index(uidx:UOp, gate:UOp|None=None):
+  if len(uidx.src) != 2: return True  # skip for non final index. TODO: check more complex index with shape
+  buf,idx = uidx.src
   if idx.op is Ops.CONST and idx.arg is Invalid: return True
   if gate is None: gate = UOp.const(dtypes.bool, True)
   # TODO: check for overflow
@@ -79,8 +81,9 @@ spec_shared = PatternMatcher([
   (UPat(Ops.DEFINE_LOCAL, name="x"), lambda x: isinstance(x.dtype, PtrDType) and x.dtype.addrspace == AddrSpace.LOCAL),
   (UPat(Ops.DEFINE_REG, src=(), name="x"), lambda x: isinstance(x.arg, int)),
 
-  # AFTER on Movement Op, PARAM, BUFFER, or another AFTER
-  (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.PARAM, Ops.BUFFER, Ops.DEFINE_REG, Ops.DEFINE_LOCAL, Ops.AFTER, Ops.MULTI, Ops.BITCAST})),),
+  # AFTER on Movement Op, PARAM, BUFFER, CONTIGUOUS, or another AFTER
+  (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.PARAM, Ops.BUFFER, Ops.CONTIGUOUS, Ops.DEFINE_REG, Ops.DEFINE_LOCAL, Ops.AFTER, Ops.MULTI,
+                                                     Ops.BITCAST})),),
         allow_any_len=True), lambda: True),
 
   # CUSTOM (inline and non inline)
@@ -96,11 +99,11 @@ spec_shared = PatternMatcher([
   (UPat(Ops.INS), lambda: True),
 
   # LOAD(idx) / STORE(idx, val) with gates on the LOAD/STORE
-  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))).or_casted().load(), validate_index),
-  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))).or_casted().load(UPat.var("alt"), UPat.var("gate", dtype=dtypes.bool), name="load"),
-   lambda buf,idx,gate,alt,load: validate_index(buf, idx, gate) if alt.dtype == load.dtype else False),
-  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))).or_casted().store(UPat()), validate_index),
-  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))).or_casted().store(UPat(), UPat.var("gate", dtype=dtypes.bool)), validate_index),
+  (UPat(Ops.INDEX, name="uidx").or_casted().load(), validate_index),
+  (UPat(Ops.INDEX, name="uidx").or_casted().load(UPat.var("alt"), UPat.var("gate", dtype=dtypes.bool), name="load"),
+   lambda uidx,gate,alt,load: validate_index(uidx, gate) if alt.dtype == load.dtype else False),
+  (UPat(Ops.INDEX, name="uidx").or_casted().store(UPat()), validate_index),
+  (UPat(Ops.INDEX, name="uidx").or_casted().store(UPat(), UPat.var("gate", dtype=dtypes.bool)), validate_index),
 
   # STORE in tensor graph: store a value into a target
   (UPat(Ops.STORE, dtypes.void, (UPat(name="x"), UPat())), lambda x: True),
