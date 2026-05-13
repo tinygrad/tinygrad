@@ -1332,7 +1332,7 @@ def train_llama3(llama2_70b_lora:bool=False):
     MLLOGGER = mllog.get_mllogger()
     MLLOGGER.logger.propagate = False
 
-    LLAMA_BENCHMARK = mllog_constants.LLAMA31_405B if getenv("LLAMA3_SIZE", "8B") == "405B" else mllog_constants.LLAMA31_8B
+    LLAMA_BENCHMARK = mllog_constants.LLAMA31_405B if getenv("LLAMA3_SIZE", "8B") == "405B" else mllog_constants.LLAMA31_8B if not llama2_70b_lora else mllog_constants.LLAMA2_70B_LORA
 
     if INITMLPERF:
       assert BENCHMARK, "BENCHMARK must be set for INITMLPERF"
