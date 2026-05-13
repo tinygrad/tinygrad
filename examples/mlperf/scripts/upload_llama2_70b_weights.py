@@ -23,6 +23,7 @@ HF_REF_REPO_ID = "regisss/llama2-70b-fused-qkv-mlperf"
 HF_REF_REVISION = "647cb0c8858ddefd10231a20ddfa68e4eb5e850e"
 HF_REF_ALLOW_PATTERNS = ["*.safetensors", "*.json", "*.py"]
 HF_REF_EXPECTED_HASH = "986e507271274d2a6563974787af9ac7"
+HF_EXPECTED_HASH = "9931046352d60e1687bef38094899e99"
 
 REF_WEIGHTS_PATH = DOWNLOADS_DIR/HF_REF_REPO_ID
 WEIGHTS_PATH = DOWNLOADS_DIR/HF_REPO_ID
@@ -109,5 +110,5 @@ if __name__ == "__main__":
   weight_files = save_state_dict(flat_state_dict)
 
   # TODO verify hash
-  print(f"{hash_directory(WEIGHTS_PATH)=}")
+  assert hash_directory(WEIGHTS_PATH) == HF_EXPECTED_HASH
   print(upload_files(weight_files))
