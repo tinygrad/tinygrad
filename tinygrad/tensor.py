@@ -1057,9 +1057,12 @@ class Tensor(OpMixin):
   def __delitem__(self, indices) -> None:
     raise TypeError("Tensor does not support deleting items")
 
-  def masked_select(self, mask):
+  def masked_select(self, mask, size:int|None=None, fill_value:ConstType=0):
     """
     Selects elements from `self` based on the boolean `mask`.
+
+    With `size=None` (default), output length equals the number of `True` values (not jittable).
+    With `size=N`, output length is `N`, padded with `fill_value` or truncated (jittable).
 
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor([[0, 1, 2], [3, 4, 5], [6, 7, 8]])
@@ -1070,19 +1073,25 @@ class Tensor(OpMixin):
     ```python exec="true" source="above" session="tensor" result="python"
     print(t.masked_select(mask).numpy())
     ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.masked_select(mask, size=6, fill_value=-1).numpy())
+    ```
     """
     if not dtypes.is_bool(mask.dtype): raise RuntimeError(f"masked_select expects bool mask tensor, got {mask.dtype}")
     x, mask = self.flatten(), mask._broadcast_to(self.shape).flatten()
     mask_cumsum = mask.cumsum()
-    counts = Tensor.zeros(mask_cumsum[-1].item(), dtype=dtypes.int32, device=self.device)
-    idxs = counts.scatter(0, mask_cumsum, 1, reduce='add').cumsum()
-    return x[idxs]
+    if size is None:
+      counts = Tensor.zeros(mask_cumsum[-1].item() if mask.numel() else 0, dtype=dtypes.int32, device=self.device)
+      return x[counts.scatter(0, mask_cumsum, 1, reduce='add').cumsum()]
+    counts = Tensor.zeros(size, dtype=dtypes.int32, device=self.device).scatter(0, mask_cumsum, 1, reduce='add')
+    return (Tensor.arange(size, device=self.device) < mask.sum()).where(x[counts.cumsum()], fill_value).cast(self.dtype)
 
-  def nonzero(self) -> Tensor:
+  def nonzero(self, size:int|None=None, fill_value:ConstType=0) -> Tensor:
     """
     Returns the indices of the elements that are non-zero.
 
-    Returns a 2D tensor where each row is the index of a non-zero element.
+    With `size=None` (default), output shape is `(n_nonzero, ndim)` (not jittable).
+    With `size=N`, output shape is `(N, ndim)`, padded with `fill_value` or truncated (jittable).
 
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor([1, 0, 2, 0, 3])
@@ -1098,11 +1107,17 @@ class Tensor(OpMixin):
     ```python exec="true" source="above" session="tensor" result="python"
     print(t.nonzero().numpy())
     ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.nonzero(size=3, fill_value=-1).numpy())
+    ```
     """
+    if self.ndim == 0:
+      return Tensor.zeros(size if size is not None else int((self != 0).item()), 0, dtype=dtypes.int32, device=self.device)
     mask = (self != 0).flatten()
     indices = Tensor.stack(*[Tensor.arange(s, device=self.device).reshape(*[1]*i, s, *[1]*(self.ndim-i-1)).expand(self.shape).flatten()
                              for i, s in enumerate(self.shape)], dim=-1)
-    return indices.masked_select(mask.unsqueeze(-1).expand(*mask.shape, self.ndim)).reshape(-1, self.ndim)
+    return indices.masked_select(mask.unsqueeze(-1).expand(*mask.shape, self.ndim),
+                                 size=size*self.ndim if size is not None else None, fill_value=fill_value).reshape(-1, self.ndim)
 
   # ***** reduce ops *****
 
@@ -1392,77 +1407,6 @@ class Tensor(OpMixin):
       if attn_mask.dtype == dtypes.bool: attn_mask = attn_mask.where(0, -float("inf"))
       qk = qk + attn_mask
     return qk.cast(self.dtype).softmax(-1).dropout(dropout_p) @ value
-
-  def qr(self) -> tuple[Tensor, Tensor]:
-    assert self.ndim > 1, f"expected two or more dimensions, got {self.ndim}"
-    b_shape, m, n = self.shape[:-2], int(self.shape[-2]), int(self.shape[-1])
-    R = self.clone()
-    Q = Tensor.eye(m, dtype=self.dtype, device=self.device).expand(b_shape + (m, m))
-    for i in range(min(m, n)):
-      x = R[..., i:m, i]
-      norm = x.square().sum(-1).sqrt()
-      mask = norm != 0
-      s = (x[..., 0] != 0).where(-x[..., 0].sign(), -1)
-      u1 = x[..., 0] - s * norm
-      w = x.unsqueeze(-1) / mask.where(u1, 1)[..., None, None]
-      w[..., 0, 0] = 1
-      tau = (-s * u1 / mask.where(norm, 1))[..., None, None]
-      tau = mask[..., None, None].where(tau, 0)
-      R[..., i:m, :] = R[..., i:m, :] - (w * tau) @ (w.transpose(-2, -1) @ R[..., i:m, :])
-      Q[..., :, i:m] = Q[..., :, i:m] - (Q[..., :, i:m] @ w) @ (tau * w).transpose(-2, -1)
-    return Q, R
-
-  def svd(self, full_matrices = True) -> tuple[Tensor, Tensor, Tensor]:
-    #partial implementation of https://www.netlib.org/lapack/lawnspdf/lawn169.pdf , pg 26
-    assert self.ndim > 1, f"expected two or more dimensions, got {self.ndim}"
-    b_shape, m, n = self.shape[:-2], int(self.shape[-2]), int(self.shape[-1])
-    #preprocess the matrix
-    Q, R = (self if m >= n else self.transpose(-2, -1)).qr()
-    num, q_num = min(m, n), max(m, n)
-    # TODO: codegen infinite loop without contiguous
-    U = R[..., :num, :num].contiguous()
-    V = Tensor.eye(num, dtype=self.dtype, device=self.device).expand(b_shape + (num, num)).contiguous()
-    #prepare round robin pairing
-    permute, inverse_permute = Tensor.arange(0, num, dtype=dtypes.int, device=self.device), Tensor.zeros(num, dtype=dtypes.int, device=self.device)
-    permute[num//2:num] = permute[num//2:num].flip(0)
-    inverse_permute[permute] = Tensor.arange(num, dtype=dtypes.int, device=self.device)
-    def one_round_jacobi(U, V, permute, inverse_permute):
-      #pair all the columns
-      V_permuted, runoff_V = (V[..., permute].split(num - 1, -1)) if num % 2 == 1 else (V[..., permute], None)
-      V_left, V_right = V_permuted.split(num//2, -1)
-      U_permuted, runoff_U = (U[..., permute].split(num - 1, -1)) if num % 2 == 1 else (U[..., permute], None)
-      U_left, U_right = U_permuted.split(num//2, -1)
-      #compute the jacobi rotations for each pairing
-      gamma = (U_left * U_right).sum(-2).reshape(b_shape + (1, num//2))
-      alpha, beta = U_permuted.square().sum(-2).unsqueeze(-2).split(num//2, -1)
-      rot = gamma != 0
-      tau = (beta - alpha) / (2 * rot.where(gamma, 1))
-      t = (tau != 0).where(tau.sign(), 1) / (tau.abs() + (1 + tau.square()).sqrt())
-      t = rot.where(t, 0)
-      c = 1 / (1 + t.square()).sqrt()
-      s = c * t
-      #apply the rotations
-      U_left, U_right = c * U_left - s * U_right, s * U_left + c * U_right
-      U = U_left.cat(U_right.cat(runoff_U, dim=-1) if num % 2 == 1 else U_right, dim=-1)[..., inverse_permute]
-      V_left, V_right = c * V_left - s * V_right, s * V_left + c * V_right
-      V = V_left.cat(V_right.cat(runoff_V, dim=-1) if num % 2 == 1 else V_right, dim=-1)[..., inverse_permute]
-      #prepare the next round robin pairings
-      if num % 2 == 1: permute = (permute - 1) % num
-      else: permute = permute[0].reshape(1).cat(((permute[1:num] - 2) % (num - 1)) + 1)
-      inverse_permute = inverse_permute.scatter(0, permute, Tensor.arange(num, dtype=dtypes.int32, device=self.device))
-      return U, V, permute, inverse_permute
-    #sorta heuristic, most use num*log2(num)
-    for _ in range(int(num * math.log2(num) * 2 + 2)): U, V, permute, inverse_permute = one_round_jacobi(U, V, permute, inverse_permute)
-    #extract singular values and sort. construct U from Q
-    S, indices = U.square().sum(-2).sqrt().sort(dim=-1, descending=True)
-    new_indices = indices.unsqueeze(-2).expand(b_shape + (num, num))
-    U = U.gather(-1, new_indices) / (S != 0).where(S, 1).unsqueeze(-2)
-    V = V.gather(-1, new_indices)
-    padded_u = Tensor.eye(q_num, dtype=U.dtype, device=U.device).expand(b_shape + (q_num, q_num))
-    padded_u[..., 0:num, 0:num] = U
-    U = Q @ padded_u
-    if not full_matrices: U = U[..., 0:num]
-    return (U, S, V.transpose(-2, -1)) if m >= n else (V, S, U.transpose(-2, -1))
 
   # ***** cast ops *****
 
