@@ -105,13 +105,12 @@ class FlatTransformer:
     scaled_std = 0.02 / math.sqrt(2 * n_layers)
 
     # Attention
-    self._init_inv_scales = []  # populated by lin_per_layer
-    self.wqkv = self.lin_per_layer(dim, self.n_heads * self.head_dim + self.n_kv_heads * self.head_dim * 2)
-    self.wo = self.lin_per_layer(self.n_heads * self.head_dim, dim, std=scaled_std)
+    self.wqkv, s_qkv = self.lin_per_layer(dim, self.n_heads * self.head_dim + self.n_kv_heads * self.head_dim * 2)
+    self.wo, s_o = self.lin_per_layer(self.n_heads * self.head_dim, dim, std=scaled_std)
 
     # FeedForward
-    self.w13 = self.lin_per_layer(dim, hidden_dim * 2)
-    self.w2 = self.lin_per_layer(hidden_dim, dim, std=scaled_std)
+    self.w13, s_13 = self.lin_per_layer(dim, hidden_dim * 2)
+    self.w2, s_2 = self.lin_per_layer(hidden_dim, dim, std=scaled_std)
 
     self.norm_eps = norm_eps
     self.attention_norm = Tensor.ones(n_layers, dim).contiguous()
@@ -131,17 +130,15 @@ class FlatTransformer:
     if SPLIT_W13: grad_names.append("xw3")
     self._fp8_grad_amax = {name: [_amax() for _ in range(n_layers)] for name in grad_names}
     w_names = ["wqkv", "wo", "w13", "w2"]
-    self._fp8_inv_scale = {wname: inv_scales.float().contiguous().requires_grad_(False)
-                           for wname, inv_scales in zip(w_names, self._init_inv_scales)}
-    del self._init_inv_scales
+    self._fp8_inv_scale = {name: s.float().contiguous().requires_grad_(False) for name, s in zip(w_names, [s_qkv, s_o, s_13, s_2])}
 
   def lin_per_layer(self, in_features:int, out_features:int, std:float=0.02):
     if getenv("ZEROS"): w = Tensor.zeros(self.n_layers, out_features, in_features)
     else: w = Tensor.normal(self.n_layers, out_features, in_features, mean=0.0, std=std)
     amax = w.abs().flatten(1).max(1).detach()
     scale = FP8_MAX / (amax + 1e-8)
-    self._init_inv_scales.append((amax + 1e-8) / FP8_MAX)
-    return (w * scale.reshape(-1, 1, 1)).clamp(-FP8_MAX, FP8_MAX).cast(FP8_DTYPE)
+    inv_scale = (amax + 1e-8) / FP8_MAX
+    return (w * scale.reshape(-1, 1, 1)).clamp(-FP8_MAX, FP8_MAX).cast(FP8_DTYPE), inv_scale
 
   def attention(self, x:Tensor, freqs_cis:Tensor, attention_norm:Tensor, wqkv:Tensor, wo:Tensor,
                 amax_xqkv:Tensor, amax_xo:Tensor, s_qkv:Tensor, s_o:Tensor,
