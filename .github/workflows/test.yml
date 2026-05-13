@@ -1003,6 +1003,10 @@ jobs:
           python -c "from tinygrad import Device; assert Device.DEFAULT == 'NULL'"
           DEBUG=4 python3 test/backend/test_ops.py TestOps.test_add
           python -m pytest -n=auto test/backend/test_ops.py --durations=20
+      - name: Run test_ops (IMAGE)
+        if: matrix.backend == 'ir3'
+        shell: bash
+        run: IMAGE=1 DEV="NULL:IR3:a630,IMAGE_PITCH_ALIGNMENT=64" python -m pytest -n=auto test/backend/test_ops.py --durations=20
   qcomclcompiletests:
     name: Compile-only (QCOM CL)
     runs-on: ubuntu-24.04-arm
@@ -1026,3 +1030,6 @@ jobs:
           python -c "from tinygrad import Device; assert Device.DEFAULT == 'NULL'"
           DEBUG=4 python3 test/backend/test_ops.py TestOps.test_add
           python -m pytest -n=auto test/backend/test_ops.py --durations=20
+      - name: Run test_ops (IMAGE)
+        shell: bash
+        run: IMAGE=1 DEV="NULL:QCOMCL:a630,IMAGE_PITCH_ALIGNMENT=64" python -m pytest -n=auto test/backend/test_ops.py --durations=20
