@@ -1472,30 +1472,30 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     #prepare round robin pairing: identity on first half, reversed on second half
     permute = type(self).arange(num//2, dtype=dtypes.int, device=self.device).cat(
                 type(self).arange(num//2, num, dtype=dtypes.int, device=self.device).flip(0))
-    cols = type(self).arange(num, dtype=dtypes.int, device=self.device)
+    cols, h = type(self).arange(num, dtype=dtypes.int, device=self.device), num // 2
+    eye_num = type(self).eye(num, dtype=self.dtype, device=self.device).expand(b_shape + (num, num))
     def one_round_jacobi(U, V, permute):
-      # permutation matrix P such that X @ P == X[..., permute]; X @ P.T applies the inverse permutation
+      # permutation matrix P with P[a,b] = (a == permute[b]); first 2h columns are paired-column selectors
       P = cols.unsqueeze(1).eq(permute.unsqueeze(0)).cast(U.dtype)
-      #pair all the columns
-      U_perm, V_perm = U @ P, V @ P
-      U_permuted, runoff_U = U_perm.split(num - 1, -1) if num % 2 == 1 else (U_perm, None)
-      V_permuted, runoff_V = V_perm.split(num - 1, -1) if num % 2 == 1 else (V_perm, None)
-      U_left, U_right = U_permuted.split(num//2, -1)
-      V_left, V_right = V_permuted.split(num//2, -1)
-      #compute the jacobi rotations for each pairing
-      gamma = (U_left * U_right).sum(-2).reshape(b_shape + (1, num//2))
-      alpha, beta = U_permuted.square().sum(-2).unsqueeze(-2).split(num//2, -1)
+      P_pair = P[..., :2*h]  # drops the runoff column for odd num
+      # extract paired columns to compute Jacobi rotation params
+      U_pair = U @ P_pair
+      U_left, U_right = U_pair.split(h, -1)
+      gamma = (U_left * U_right).sum(-2).reshape(b_shape + (1, h))
+      alpha, beta = U_pair.square().sum(-2).unsqueeze(-2).split(h, -1)
       rot = gamma.ne(0)
       tau = (beta - alpha) / (2 * rot.where(gamma, 1))
       t = tau.ne(0).where(tau.sign(), 1) / (tau.abs() + (1 + tau.square()).sqrt())
       t = rot.where(t, 0)
       c = 1 / (1 + t.square()).sqrt()
       s = c * t
-      #apply the rotations and unpermute via P.T
-      U_left, U_right = c * U_left - s * U_right, s * U_left + c * U_right
-      U = U_left.cat(U_right.cat(runoff_U, dim=-1) if num % 2 == 1 else U_right, dim=-1) @ P.transpose(-2, -1)
-      V_left, V_right = c * V_left - s * V_right, s * V_left + c * V_right
-      V = V_left.cat(V_right.cat(runoff_V, dim=-1) if num % 2 == 1 else V_right, dim=-1) @ P.transpose(-2, -1)
+      # build rotation matrix R: identity + sum over pairs of 2x2 rotation deltas at (i_k, j_k) positions
+      Mi, Mj = P_pair.transpose(-2, -1).split(h, -2)  # paired-column selectors, each shape (h, num)
+      Mi_a, Mi_b = Mi.unsqueeze(-1), Mi.unsqueeze(-2)
+      Mj_a, Mj_b = Mj.unsqueeze(-1), Mj.unsqueeze(-2)
+      cc, ss = (c - 1).reshape(b_shape + (h, 1, 1)), s.reshape(b_shape + (h, 1, 1))
+      R = eye_num + (cc * (Mi_a * Mi_b + Mj_a * Mj_b) + ss * (Mi_a * Mj_b - Mj_a * Mi_b)).sum(-3)
+      U, V = U @ R, V @ R
       #prepare the next round robin pairings
       if num % 2 == 1: permute = (permute - 1) % num
       else: permute = permute[0].reshape(1).cat(((permute[1:num] - 2) % (num - 1)) + 1)
