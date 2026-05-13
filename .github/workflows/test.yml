@@ -1008,7 +1008,7 @@ jobs:
         shell: bash
         env:
           IMAGE: 1
-          DEV: "NULL:IR3:a630,IMAGE_PITCH_ALIGNMENT=1"
+          DEV: "NULL:IR3:a630,IMAGE_PITCH_ALIGNMENT=64"
         run: |
           DEBUG=4 python3 test/backend/test_ops.py TestOps.test_gemm | grep image_load
           python -m pytest -n=auto test/backend/test_ops.py --durations=20
