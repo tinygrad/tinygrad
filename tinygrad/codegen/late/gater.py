@@ -20,6 +20,6 @@ pm_move_gates_from_index = PatternMatcher([
    lambda idx,vec: idx.replace(src=(idx.src[0], UOp.vectorize(*(u.cast(dtypes.int) for u in vec.src))))),
 
   # images use 2D INDEX now (y,x)
-  (UPat(Ops.INDEX, src=(UPat(), UPat(Ops.STACK, dtypes.int, name="vec")), name="idx"),
-   lambda idx,vec: idx.replace(src=(idx.src[0], vec.src[1], vec.src[0]))),
+  (UPat(Ops.INDEX, src=(UPat(), UPat(dtype=dtypes.int.vec(2), name="vec")), name="idx"),
+   lambda idx,vec: idx.replace(src=(idx.src[0], vec.gep(1), vec.gep(0)))),
 ])
