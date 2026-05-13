@@ -270,17 +270,23 @@ class GatedDeltaNetBlock(FFNBlock):
     v = v.reshape(B, self.num_v_heads, self.head_v_dim)
     q, k, v = q.mul(self.head_k_dim**-0.5).unsqueeze(-1), k.unsqueeze(-1), v.unsqueeze(-1)
 
-    # recurrent
-    recurrent_state = self.recurrent_state * alpha
-    recurrent_state = recurrent_state + ((v - recurrent_state@k) * beta)@k.transpose(-1, -2)
-
     # store the updated state
-    conv_state_store = self.conv_state.uop.store(conv_window[:, 1:, :].cast(self.conv_state.dtype).uop)
-    recurrent_state_store = self.recurrent_state.uop.store(recurrent_state.cast(self.recurrent_state.dtype).uop)
-    recurrent_state = Tensor(self.recurrent_state.uop.after(recurrent_state_store, conv_state_store))
+    if getenv("CUSTOM_GDN") and x.device == "AMD" and B == 1 and self.num_v_heads == 16 and self.head_v_dim == 128 and self.head_k_dim == 128:
+      from tinygrad.llm.amd_kernels import gdn_recurrent_update
+      core_attn_in = gdn_recurrent_update(self.recurrent_state, q, k, v, alpha, beta)
+      conv_state_store = self.conv_state.uop.after(core_attn_in.uop).store(conv_window[:, 1:, :].cast(self.conv_state.dtype).uop)
+      core_attn_in = Tensor(core_attn_in.uop.after(conv_state_store))
+    else:
+      conv_state_store = self.conv_state.uop.store(conv_window[:, 1:, :].cast(self.conv_state.dtype).uop)
+      # recurrent
+      recurrent_state = self.recurrent_state * alpha
+      recurrent_state = recurrent_state + ((v - recurrent_state@k) * beta)@k.transpose(-1, -2)
+      recurrent_state_store = self.recurrent_state.uop.store(recurrent_state.cast(self.recurrent_state.dtype).uop)
+      recurrent_state = Tensor(self.recurrent_state.uop.after(recurrent_state_store, conv_state_store))
+      core_attn_in = (recurrent_state@q).squeeze(-1).reshape(B, 1, self.num_v_heads, self.head_v_dim)
 
     # output
-    core_attn_out = self.ssm_norm((recurrent_state@q).squeeze(-1).reshape(B, 1, self.num_v_heads, self.head_v_dim))
+    core_attn_out = self.ssm_norm(core_attn_in)
     return self.ssm_out((core_attn_out * out_gate.silu()).reshape(B, 1, -1).cast(x.dtype))
 
   # recurrent state can't be partially reused after divergence, force a full rebuild
