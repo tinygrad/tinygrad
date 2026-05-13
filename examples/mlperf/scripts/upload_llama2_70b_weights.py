@@ -62,7 +62,7 @@ def build_flat_state_dict(ref_state_dict:dict[str, Tensor]) -> dict[str, Tensor]
 
 def save_state_dict(state_dict:dict[str, Tensor]) -> list[Path]:
   weight_files = [WEIGHTS_PATH / f"{name}.safetensors" for name in state_dict.keys()]
-  for file_name, (name, tensor) in tqdm(zip(weight_files, state_dict.items()), total=len(weight_files), desc="saving flat weight shards"):
+  for file_name, (name, tensor) in tqdm(zip(weight_files, state_dict.items()), total=len(weight_files), desc="saving flat weights"):
     safe_save({name: tensor}, file_name)
   return weight_files
 
