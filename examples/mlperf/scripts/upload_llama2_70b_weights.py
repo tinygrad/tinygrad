@@ -107,4 +107,5 @@ if __name__ == "__main__":
 
   # save and upload
   weight_files = save_state_dict(flat_state_dict)
+  print(f"{hash_directory(WEIGHTS_PATH)=}")
   print(upload_files(weight_files))
