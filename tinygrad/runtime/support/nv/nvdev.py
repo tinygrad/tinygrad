@@ -78,9 +78,10 @@ class NVDev:
     self._early_ip_init()
     self._early_mmu_init()
 
+    self.is_booting = False
+
     for ip in [self.flcn, self.gsp]: ip.init_sw()
     for ip in [self.flcn, self.gsp]: ip.init_hw()
-    self.is_booting = False
 
   def fini(self):
     for ip in [self.gsp, self.flcn]: ip.fini_hw()
@@ -140,11 +141,11 @@ class NVDev:
     bits, shifts = (56, [12, 21, 29, 38, 47, 56]) if self.mmu_ver == 3 else (48, [12, 21, 29, 38, 47])
 
     # tail vram reserved for falcon structs
-    self.mm = NVMemoryManager(self, self.vram_size - (64 << 20), boot_size=(128 << 20), pt_t=NVPageTableEntry, va_bits=bits, va_shifts=shifts,
+    self.mm = NVMemoryManager(self, self.vram_size - (64 << 20), boot_size=(2 << 20), pt_t=NVPageTableEntry, va_bits=bits, va_shifts=shifts,
       va_base=0, palloc_ranges=[(x, x) for x in [512 << 20, 2 << 20, 4 << 10]], reserve_ptable=not self.large_bar)
 
   def _alloc_vram(self, size:int, data:bytes|None=None) -> tuple[MMIOInterface, int, int]:
-    paddr = self.mm.palloc(sz:=round_up(size, 0x1000), boot=True)
+    paddr = self.mm.palloc(sz:=round_up(size, 0x1000), boot=False)
     view = self.vram.view(paddr, sz)
     if data is not None: view[:size] = data
     return view, paddr, self.pci_dev.bar_info(1)[0] + paddr
