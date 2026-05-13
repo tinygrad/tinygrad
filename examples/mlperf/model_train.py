@@ -1589,6 +1589,7 @@ def train_llama3(llama2_70b_lora:bool=False):
   train_iter = get_train_iter()
   i, sequences_seen = resume_ckpt, 0
   step_times = []
+  skip_evals = getenv("SKIP_EVALS", 0)
 
   if MLLOGGER and RUNMLPERF:
     MLLOGGER.start(key=mllog_constants.EPOCH_START, metadata={mllog_constants.SAMPLES_COUNT: sequences_seen})
@@ -1673,6 +1674,9 @@ def train_llama3(llama2_70b_lora:bool=False):
               f"epoch global_mem: {GlobalCounters.global_mem:_}")
 
     if (sequences_seen // EVAL_FREQ != (sequences_seen - actual_gbs) // EVAL_FREQ and (i != 1 or EVAL_FREQ == 1)) or (BENCHMARK and i == BENCHMARK):
+      if skip_evals > 0:
+        skip_evals -= 1
+        continue
       if EVAL_BS == 0: return
       tqdm.write(f"evaluating after {sequences_seen} sequences")
       profile_marker(f"eval @ {i}")

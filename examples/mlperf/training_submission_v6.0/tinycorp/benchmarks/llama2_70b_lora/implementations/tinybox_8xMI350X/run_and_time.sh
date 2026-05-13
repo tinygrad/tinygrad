@@ -33,6 +33,9 @@ export EVAL_TARGET=0.925
 # CEIL(384 / global_batch_size) * global_batch_size
 export EVAL_FREQ=$((((384 + GBS - 1) / GBS) * GBS))
 
+# skip_evals = FLOOR(0.125 * global_batch_size + 2)
+export SKIP_EVALS=$((GBS / 8 + 2))
+
 export EVAL_SAMPLES=173
 export LR="4e-4" END_LR=0
 
@@ -54,7 +57,8 @@ DATETIME=$(date "+%m%d%H%M")
 LOGFILE="llama31_70b_lora_8xMI350x_${DATETIME}_${SEED}.log"
 
 # beam
-LOAD_MODEL=0 FAKEDATA=1 BENCHMARK=10 INITMLPERF=1 LLAMA_LAYERS=2 python3 examples/mlperf/model_train.py | tee "$LOGFILE"
+LOAD_MODEL=0 SKIP_EVALS=0 FAKEDATA=1 BENCHMARK=10 INITMLPERF=1 LLAMA_LAYERS=2 python3 examples/mlperf/model_train.py | tee "$LOGFILE"
+
 
 # run
 LOAD_MODEL=1 RUNMLPERF=1 python3 examples/mlperf/model_train.py | tee -a "$LOGFILE"
