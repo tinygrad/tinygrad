@@ -1421,19 +1421,18 @@ def train_llama3(llama2_70b_lora:bool=False):
 
   model.shard(device, is_mp, is_fsdp)
 
-  # load the weights
-  if llama2_70b_lora and getenv("LOAD_MODEL", 1):
-    MODEL_PATH = getenv("MODEL_PATH")
-
-    state_dict = {k:v for weight_file in Path(MODEL_PATH).glob("*.safetensors") for k,v in safe_load(weight_file).items()}
-
-    assert not (unused := (state_dict.keys() - get_state_dict(model).keys())), f"unused weights in state_dict: {sorted(unused)}"
-
-    load_state_dict(model, state_dict, strict=False, realize=True, consume=True)
-    del state_dict # just in case
-    model.quantize(realize=True)
-
   if llama2_70b_lora:
+    if getenv("LOAD_MODEL", 1):
+      MODEL_PATH = getenv("MODEL_PATH")
+
+      state_dict = {k:v for weight_file in Path(MODEL_PATH).glob("*.safetensors") for k,v in safe_load(weight_file).items()}
+
+      assert not (unused := (state_dict.keys() - get_state_dict(model).keys())), f"unused weights in state_dict: {sorted(unused)}"
+
+      load_state_dict(model, state_dict, strict=False, realize=True, consume=True)
+      del state_dict # just in case
+      model.quantize(realize=True)
+
     # convert nulls to not trainable
     for p in params:
       if not p.requires_grad:
