@@ -1,3 +1,4 @@
+# CUSTOM_VOCAB_ARGMAX=1 CUSTOM_MLP=1 CUSTOM_GDN=1 JITBEAM=2 python -m tinygrad.llm.cli -m qwen3.5:0.8b --benchmark 16
 import functools
 
 from tinygrad import Device, Tensor, dtypes, Context
@@ -10,6 +11,7 @@ _VOCAB = 248320
 _Q8_BLOCK = 32
 _Q8_BLOCK_BYTES = 34
 
+# note: this is needed because standalone Ops.SOURCE (without Ops.BINARY) isn't supported
 @Context(ALLOW_DEVICE_USAGE=1)
 def get_arch() -> str: return Device[Device.DEFAULT].renderer.target.arch
 
