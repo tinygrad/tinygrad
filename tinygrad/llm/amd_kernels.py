@@ -17,7 +17,6 @@ def _q8_bytes(numel:int) -> int:
   assert numel % _Q8_BLOCK == 0
   return (numel // _Q8_BLOCK) * _Q8_BLOCK_BYTES
 
-
 def _find_raw_q8_blocks(weight:Tensor) -> Tensor|None:
   seen:set[int] = set()
   stack = [weight.uop]
@@ -30,7 +29,6 @@ def _find_raw_q8_blocks(weight:Tensor) -> Tensor|None:
     stack.extend(u.src)
   return None
 
-
 def _base_buffer_with_offset(t:Tensor) -> tuple[Tensor, int]|None:
   src = t.uop.src[0] if t.uop.op is Ops.CONTIGUOUS and len(t.uop.src) else t.uop
   if (offset := src.contiguous_view_offset()) is None: return None
@@ -38,7 +36,6 @@ def _base_buffer_with_offset(t:Tensor) -> tuple[Tensor, int]|None:
   if base.op is Ops.BUFFER_VIEW: offset, base = offset + base.arg[1], base.src[0]
   if base.op not in {Ops.BUFFER, Ops.PARAM}: return None
   return Tensor(base), offset
-
 
 _GATE_UP_HIP_SRC = r"""
 #include <hip/hip_runtime.h>
@@ -83,12 +80,10 @@ extern "C" __global__ __launch_bounds__(THREADS) void fused_gate_up_q8(
 }
 """
 
-
 @functools.cache
 def _compiled_gate_up(arch:str) -> bytes:
   from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
   return HIPCCCompiler(arch).compile_cached(_GATE_UP_HIP_SRC)
-
 
 def _gate_up_kernel(z:UOp, x_norm:UOp, gate_w:UOp, up_w:UOp, arch:str) -> UOp:
   assert z.numel() == _HIDDEN, f"fused_gate_up_q8 expects hidden={_HIDDEN}, got {z.numel()}"
@@ -102,7 +97,6 @@ def _gate_up_kernel(z:UOp, x_norm:UOp, gate_w:UOp, up_w:UOp, arch:str) -> UOp:
     sink, UOp(Ops.DEVICE, arg=Device.DEFAULT), UOp(Ops.LINEAR, src=(*sink.src, sink)),
     UOp(Ops.SOURCE, arg=_GATE_UP_HIP_SRC), UOp(Ops.BINARY, arg=_compiled_gate_up(arch))))
 
-
 def fused_gate_up(x_norm:Tensor, gate_w:Tensor, up_w:Tensor) -> Tensor:
   assert x_norm.numel() == _DIM, f"fused_gate_up only supports dim={_DIM}, got {x_norm.numel()}"
   gate_raw = _find_raw_q8_blocks(gate_w)
@@ -113,7 +107,6 @@ def fused_gate_up(x_norm:Tensor, gate_w:Tensor, up_w:Tensor) -> Tensor:
   z, *_ = Tensor.custom_kernel(z, x_norm.reshape(-1), gate_raw, up_raw,
                                fxn=functools.partial(_gate_up_kernel, arch=get_arch()))
   return z.reshape(*x_norm.shape[:-1], _HIDDEN)
-
 
 _GDN_RECURRENT_HIP_SRC = r"""
 #include <hip/hip_runtime.h>
@@ -204,12 +197,10 @@ extern "C" __global__ __launch_bounds__(THREADS) void gdn_recurrent_update(
 }
 """
 
-
 @functools.cache
 def _compiled_gdn_recurrent(arch:str) -> bytes:
   from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
   return HIPCCCompiler(arch).compile_cached(_GDN_RECURRENT_HIP_SRC)
-
 
 def _gdn_recurrent_kernel(core:UOp, state:UOp, q:UOp, k:UOp, v:UOp, alpha:UOp, beta:UOp, arch:str) -> UOp:
   assert core.numel() == _GDN_HV * _GDN_V, f"gdn_recurrent_update expects core size 2048, got {core.numel()}"
@@ -224,7 +215,6 @@ def _gdn_recurrent_kernel(core:UOp, state:UOp, q:UOp, k:UOp, v:UOp, alpha:UOp, b
     sink, UOp(Ops.DEVICE, arg=Device.DEFAULT), UOp(Ops.LINEAR, src=(*sink.src, sink)),
     UOp(Ops.SOURCE, arg=_GDN_RECURRENT_HIP_SRC), UOp(Ops.BINARY, arg=_compiled_gdn_recurrent(arch))))
 
-
 def gdn_recurrent_update(state:Tensor, q:Tensor, k:Tensor, v:Tensor, alpha:Tensor, beta:Tensor) -> Tensor:
   assert state.numel() == _GDN_HV * _GDN_V * _GDN_K, f"gdn_recurrent_update only supports state 16x128x128, got {state.shape}"
   assert q.numel() == _GDN_HV * _GDN_K and k.numel() == _GDN_HV * _GDN_K, f"gdn_recurrent_update q/k shape mismatch: {q.shape} {k.shape}"
@@ -233,7 +223,6 @@ def gdn_recurrent_update(state:Tensor, q:Tensor, k:Tensor, v:Tensor, alpha:Tenso
   core, *_ = Tensor.custom_kernel(core, state, q.reshape(-1), k.reshape(-1), v.reshape(-1), alpha.reshape(-1), beta.reshape(-1),
                                   fxn=functools.partial(_gdn_recurrent_kernel, arch=get_arch()))
   return core.reshape(1, 1, _GDN_HV, _GDN_V)
-
 
 _GDN_RECURRENT_CONV_HIP_SRC = r"""
 #include <hip/hip_runtime.h>
@@ -339,12 +328,10 @@ extern "C" __global__ __launch_bounds__(THREADS) void gdn_recurrent_update_conv(
 }
 """
 
-
 @functools.cache
 def _compiled_gdn_recurrent_conv(arch:str) -> bytes:
   from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
   return HIPCCCompiler(arch).compile_cached(_GDN_RECURRENT_CONV_HIP_SRC)
-
 
 def _gdn_recurrent_conv_kernel(core:UOp, state:UOp, conv_out:UOp, alpha:UOp, beta:UOp, arch:str) -> UOp:
   assert core.numel() == _GDN_HV * _GDN_V and state.numel() == _GDN_HV * _GDN_V * _GDN_K and conv_out.numel() == 3 * _GDN_HV * _GDN_K
@@ -358,14 +345,12 @@ def _gdn_recurrent_conv_kernel(core:UOp, state:UOp, conv_out:UOp, alpha:UOp, bet
     sink, UOp(Ops.DEVICE, arg=Device.DEFAULT), UOp(Ops.LINEAR, src=(*sink.src, sink)),
     UOp(Ops.SOURCE, arg=_GDN_RECURRENT_CONV_HIP_SRC), UOp(Ops.BINARY, arg=_compiled_gdn_recurrent_conv(arch))))
 
-
 def gdn_recurrent_update_conv(state:Tensor, conv_out:Tensor, alpha:Tensor, beta:Tensor) -> Tensor:
   assert state.numel() == _GDN_HV * _GDN_V * _GDN_K and conv_out.numel() == 3 * _GDN_HV * _GDN_K
   core = Tensor.empty(_GDN_HV, _GDN_V, dtype=dtypes.float, device=state.device)
   core, *_ = Tensor.custom_kernel(core, state, conv_out.reshape(-1), alpha.reshape(-1), beta.reshape(-1),
                                   fxn=functools.partial(_gdn_recurrent_conv_kernel, arch=get_arch()))
   return core.reshape(1, 1, _GDN_HV, _GDN_V)
-
 
 _VOCAB_ROWS_PER_BLOCK = 32
 _VOCAB_PARTIALS = (_VOCAB + _VOCAB_ROWS_PER_BLOCK - 1) // _VOCAB_ROWS_PER_BLOCK
@@ -442,7 +427,6 @@ extern "C" __global__ __launch_bounds__(THREADS) void q8_lmhead_gumbel_partial_a
 }
 """
 
-
 _Q8_LMHEAD_FINAL_ARGMAX_HIP_SRC = r"""
 #include <hip/hip_runtime.h>
 #include <stdint.h>
@@ -488,19 +472,16 @@ extern "C" __global__ __launch_bounds__(THREADS) void q8_lmhead_gumbel_final_arg
 }
 """
 
-
 @functools.cache
 def _compiled_q8_lmhead_partial_argmax(weight_offset:int, arch:str) -> bytes:
   from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
   return HIPCCCompiler(arch).compile_cached(
     _Q8_LMHEAD_PARTIAL_ARGMAX_HIP_SRC.replace("__WEIGHT_OFFSET__", str(weight_offset)))
 
-
 @functools.cache
 def _compiled_q8_lmhead_final_argmax(arch:str) -> bytes:
   from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
   return HIPCCCompiler(arch).compile_cached(_Q8_LMHEAD_FINAL_ARGMAX_HIP_SRC)
-
 
 def _q8_lmhead_partial_argmax_kernel(scores:UOp, tokens:UOp, hidden:UOp, weight:UOp, temperature:UOp, rnd:UOp, arch:str, weight_offset:int=0) -> UOp:
   assert scores.numel() == _VOCAB_PARTIALS and tokens.numel() == _VOCAB_PARTIALS and hidden.numel() == _DIM and weight.numel() >= weight_offset + _q8_bytes(_VOCAB * _DIM) and rnd.numel() == _VOCAB
@@ -515,7 +496,6 @@ def _q8_lmhead_partial_argmax_kernel(scores:UOp, tokens:UOp, hidden:UOp, weight:
     UOp(Ops.SOURCE, arg=_Q8_LMHEAD_PARTIAL_ARGMAX_HIP_SRC.replace("__WEIGHT_OFFSET__", str(weight_offset))),
     UOp(Ops.BINARY, arg=_compiled_q8_lmhead_partial_argmax(weight_offset, arch))))
 
-
 def _q8_lmhead_final_argmax_kernel(out:UOp, scores:UOp, tokens:UOp, arch:str) -> UOp:
   assert out.numel() == 1 and scores.numel() == _VOCAB_PARTIALS and tokens.numel() == _VOCAB_PARTIALS
   sink = UOp.sink(
@@ -525,7 +505,6 @@ def _q8_lmhead_final_argmax_kernel(out:UOp, scores:UOp, tokens:UOp, arch:str) ->
   return UOp(Ops.PROGRAM, src=(
     sink, UOp(Ops.DEVICE, arg=Device.DEFAULT), UOp(Ops.LINEAR, src=(*sink.src, sink)),
     UOp(Ops.SOURCE, arg=_Q8_LMHEAD_FINAL_ARGMAX_HIP_SRC), UOp(Ops.BINARY, arg=_compiled_q8_lmhead_final_argmax(arch))))
-
 
 def q8_lmhead_gumbel_argmax(hidden:Tensor, weight:Tensor, temperature:Tensor) -> Tensor:
   assert hidden.numel() == _DIM
