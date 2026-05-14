@@ -1,15 +1,13 @@
 from __future__ import annotations
-import collections, time
+import time
 from typing import cast
 from tinygrad.device import Buffer, BufferSpec, Compiled, Device, MultiBuffer
 from tinygrad.dtype import dtypes
 from tinygrad.engine.jit import GraphRunner
 from tinygrad.engine.realize import get_call_outs_ins, get_runtime
-from tinygrad.helpers import round_up
-from tinygrad.runtime.support.memory import BumpAllocator
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, graph_rewrite
-from extra.hcq2.hcq2 import HCQ2Compiled, HCQ2DeviceCtx, HCQ2LowerCtx, pm_prep_runtime, pm_lower_kernargs, pm_lower_ops
-from extra.hcq2.hcq2 import pm_split_into_queues, pm_add_barriers, pm_add_signals, hcq_build_host_program
+from extra.hcq2.hcq2 import HCQ2Compiled, HCQ2DeviceCtx, HCQ2LowerCtx, prep_runtime, pm_lower_kernargs, pm_lower_ops
+from extra.hcq2.hcq2 import pm_split_into_queues, pm_add_barriers, pm_add_signals, build_host_program
 
 # **************** insert deps ****************
 
@@ -37,9 +35,7 @@ def alloc_queue_sig(ctx:HCQ2Graph, q:UOp) -> None:
   ctx.queue_sig_bufs.append(buf)
   ctx.queue_sigs[q.arg] = UOp.from_buffer(buf, q.arg[0])
   return None
-pm_alloc_queue_sigs = PatternMatcher([
-  (UPat(Ops.LINEAR, src=UPat({Ops.PROGRAM, Ops.COPY}), name="q"), alloc_queue_sig),
-])
+pm_alloc_queue_sigs = PatternMatcher([(UPat(Ops.LINEAR, src=UPat({Ops.PROGRAM, Ops.COPY}), name="q"), alloc_queue_sig)])
 
 def lower_queue_deps(ctx:HCQ2Graph, after:UOp) -> UOp:
   wrapper, deps, call_idx = after.src[0], after.src[1:], after.tag
@@ -80,7 +76,6 @@ def add_queue_sig_resets(ctx:HCQ2Graph, outer:UOp) -> UOp|None:
   return outer.replace(src=tuple(c.replace(src=c.src + resets) if c.op is Ops.AFTER else c.after(*resets) for c in outer.src))
 pm_add_queue_sig_resets = PatternMatcher([(UPat(Ops.LINEAR, name="outer"), add_queue_sig_resets)])
 
-
 # **************** Graph ****************
 
 class HCQ2Graph(GraphRunner):
@@ -93,18 +88,10 @@ class HCQ2Graph(GraphRunner):
     self.input_addrs_uop = self.hcq_ctx.host_param(self.input_addrs)
 
     self.linear = graph_rewrite(self.linear, pm_insert_deps, ctx=self, name="hcq: insert deps", walk=True)
-    self.linear = graph_rewrite(self.linear, pm_prep_runtime, ctx=self.hcq_ctx, name="hcq: prepare runtime")
-
-    # allocate kernargs buffers, TODO: as pass?
-    sizes:dict[str, int] = collections.defaultdict(int)
-    for u in self.linear.toposort():
-      if u.op is Ops.PROGRAM: sizes[u.src[0].buffer.device] += round_up(u.arg[0].kernargs_alloc_size, 16)
-    for dev_name, size in sizes.items():
-      buf = Buffer(dev_name, size, dtypes.uint8, options=BufferSpec(cpu_access=True), preallocate=True)
-      self.hcq_ctx.devs[dev_name] = HCQ2DeviceCtx(device=dev_name,
-        kernargs_host=UOp.from_buffer(buf, dev_name),
-        kernargs_gpu=UOp.const(dtypes.uint64, buf._buf.va_addr),
-        kernargs_allocator=BumpAllocator(size, wrap=False))
+    self.linear, sizes = prep_runtime(self.hcq_ctx, self.linear)
+    for dev_name, sz in sizes.items():
+      buf = Buffer(dev_name, sz, dtypes.uint8, options=BufferSpec(cpu_access=True), preallocate=True)
+      self.hcq_ctx.devs[dev_name] = HCQ2DeviceCtx(dev_name, UOp.from_buffer(buf, dev_name), UOp.const(dtypes.uint64, buf._buf.va_addr))
 
     self.linear = graph_rewrite(self.linear, pm_replace_params, ctx=self, name="hcq: replace params", walk=True)
     self.linear = graph_rewrite(self.linear, pm_lower_kernargs + pm_lower_ops, ctx=self.hcq_ctx, name="hcq: lower ops")
@@ -122,16 +109,16 @@ class HCQ2Graph(GraphRunner):
     self.linear = graph_rewrite(self.linear, pm_add_signals, ctx=self.hcq_ctx, name="hcq: add signals", walk=True)
     self.linear = graph_rewrite(self.linear, self.dev.pm_lower, ctx=self.hcq_ctx, name=f"hcq: encode cmdbuf {self.dev.device}", walk=True)
     self.linear = graph_rewrite(self.linear, pm_add_queue_sig_resets, ctx=self, name="hcq: add queue sig resets", walk=True)
-    self.host_call = hcq_build_host_program(self.hcq_ctx, self.linear, None, self.dev)
+    self.host_call = build_host_program(self.hcq_ctx, self.linear, None, self.dev)
+
     self.host_rt, self.host_globals = get_runtime("CPU", self.host_call.src[0]), self.host_call.src[0].arg.globals
 
   def __call__(self, input_uops:tuple[UOp, ...], var_vals:dict[str, int], wait=False) -> float|None:
-    self.dev.synchronize()
     addrs = self.input_addrs.as_memoryview(force_zero_copy=True).cast('Q')
     for i, u in enumerate(input_uops):
       buf = next(b for b in u.buffer.bufs if b.device == self.dev.device) if isinstance(u.buffer, MultiBuffer) else u.buffer
       addrs[i] = buf._buf.va_addr
-    self.host_rt(*[self.hcq_ctx.inputs[i].get_buf("CPU") for i in self.host_globals], vals=self.host_call.src[0].arg.vals(var_vals))
+    self.host_rt(*[self.hcq_ctx.inputs[i].get_buf("CPU") for i in self.host_globals], vals=self.host_call.src[0].arg.vals(var_vals), wait=True)
     if wait:
       st = time.perf_counter()
       self.dev.synchronize()
