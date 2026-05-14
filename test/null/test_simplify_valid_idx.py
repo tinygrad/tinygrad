@@ -20,8 +20,10 @@ def get_gated_load_uop(valid:UOp, idx:UOp):
   ))
 
 def get_load_image_uop(image_shape:tuple[int, ...], valid:UOp, idx:tuple[UOp, UOp]):
+  # idx is (idx_x, idx_y) — INDEX uses (buf, y, x) order
+  idx_x, idx_y = idx
   return UOp(Ops.LOAD, dtypes.float.vec(4), (
-    UOp(Ops.PARAM, dtypes.imagef(image_shape), arg=0).index(UOp(Ops.STACK, dtypes.weakint.vec(2), idx).valid(valid), ptr=True),
+    UOp(Ops.PARAM, dtypes.imagef(image_shape), arg=0).index(idx_y.valid(valid), idx_x.valid(valid), ptr=True),
     UOp(Ops.STACK, dtypes.float.vec(4), src=(UOp.const(dtypes.float, 0.0),) * 4)
   ))
 
@@ -222,17 +224,18 @@ class TestValidIdxSimplification(unittest.TestCase):
 class TestImageSimplification(unittest.TestCase):
   def check(self, load, svalid, sidx0, sidx1):
     load = simplify_image_idx(load.sink()).src[0]
-    off = load.src[0].src[1]
-    idx = off.get_idx()
-    self.assertEqual(idx.op, Ops.STACK)
-    self.assertEqual(len(idx.src), 2)
-    idx0, idx1 = idx.src[0], idx.src[1]
+    index = load.src[0]
+    # INDEX has 3 srcs: (buf, y_with_valid, x_with_valid)
+    self.assertEqual(len(index.src), 3, f"expected 3-src image INDEX, got {len(index.src)}")
+    off_y, off_x = index.src[1], index.src[2]
+    idx0 = off_x.get_idx()  # sidx0 is x coordinate
+    idx1 = off_y.get_idx()  # sidx1 is y coordinate
     check_uop_against_string(self, idx0, sidx0)
     check_uop_against_string(self, idx1, sidx1)
     if svalid is not None:
-      check_uop_against_string(self, off.get_valid(), svalid)
+      check_uop_against_string(self, off_y.get_valid(), svalid)
     else:
-      self.assertEqual(off.get_valid(), UOp.const(dtypes.bool, True), "svalid is None but valid is not True")
+      self.assertEqual(off_y.get_valid(), UOp.const(dtypes.bool, True), "svalid is None but valid is not True")
 
   def test_idx_gt_c(self):
     # (idx1 < c+1).ne(True) ? (..., idx1-1+c) : 0 can drop the valid

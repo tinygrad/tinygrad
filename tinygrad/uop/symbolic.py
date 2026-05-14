@@ -445,9 +445,11 @@ sym = symbolic+pm_simplify_valid+PatternMatcher([
   (UPat.store(UPat(Ops.INDEX, name="index"), UPat.var("gate").where(UPat.var("alt"),
                                                                     UPat.load(UPat(Ops.INDEX, name="index")))),
    lambda index, gate, alt: UOp.store(index.src[0].index(gate.where(index.src[1], UOp.invalid())), alt)),
-  # fold gated LOAD/STORE
-  (UPat(Ops.STORE, src=(UPat().index(UPat.const(dtypes.weakint, Invalid)).or_casted(), UPat())), lambda: UOp(Ops.NOOP)),
-  (UPat(Ops.LOAD, src=(UPat().index(UPat.const(dtypes.weakint, Invalid)).or_casted(),), allow_any_len=True, name="x"),
+  # fold gated LOAD/STORE: any INDEX src being Invalid makes the whole access invalid
+  (UPat(Ops.INDEX, src=(UPat(),), allow_any_len=True, name="idx"),
+    lambda idx: idx.const_like(Invalid) if any(s.op is Ops.CONST and s.arg is Invalid for s in idx.src[1:]) else None),
+  (UPat(Ops.STORE, src=(UPat(Ops.CONST, arg=Invalid).or_casted(), UPat())), lambda: UOp(Ops.NOOP)),
+  (UPat(Ops.LOAD, src=(UPat(Ops.CONST, arg=Invalid).or_casted(),), allow_any_len=True, name="x"),
     lambda x: x.src[1] if len(x.src) > 1 else x.const_like(0)), # invalid load produces 0, or the alt value if we have one
   (UPat(Ops.STORE, src=(UPat(), invalid_pat)), lambda i: UOp(Ops.NOOP)),
   # store of where with invalid -> gated store
