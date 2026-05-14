@@ -86,9 +86,7 @@ extern "C" __global__ __launch_bounds__(THREADS) void fused_gate_up_q8(
 @functools.cache
 def _compiled_gate_up() -> bytes:
   from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
-  # RDNA3 supports wave32 and wave64. This kernel is one 32-lane reduction per
-  # output row, so forcing wave32 avoids issuing each VALU instruction twice.
-  return HIPCCCompiler(getenv("AMD_ARCH", "gfx1100"), ["-mno-wavefrontsize64"]).compile_cached(_GATE_UP_HIP_SRC)
+  return HIPCCCompiler(getenv("AMD_ARCH", "gfx1100")).compile_cached(_GATE_UP_HIP_SRC)
 
 
 def _gate_up_kernel(z:UOp, x_norm:UOp, gate_w:UOp, up_w:UOp) -> UOp:
@@ -208,7 +206,7 @@ extern "C" __global__ __launch_bounds__(THREADS) void gdn_recurrent_update(
 @functools.cache
 def _compiled_gdn_recurrent() -> bytes:
   from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
-  return HIPCCCompiler(getenv("AMD_ARCH", "gfx1100"), ["-mno-wavefrontsize64"]).compile_cached(_GDN_RECURRENT_HIP_SRC)
+  return HIPCCCompiler(getenv("AMD_ARCH", "gfx1100")).compile_cached(_GDN_RECURRENT_HIP_SRC)
 
 
 def _gdn_recurrent_kernel(core:UOp, state:UOp, q:UOp, k:UOp, v:UOp, alpha:UOp, beta:UOp) -> UOp:
@@ -342,7 +340,7 @@ extern "C" __global__ __launch_bounds__(THREADS) void gdn_recurrent_update_conv(
 @functools.cache
 def _compiled_gdn_recurrent_conv() -> bytes:
   from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
-  return HIPCCCompiler(getenv("AMD_ARCH", "gfx1100"), ["-mno-wavefrontsize64"]).compile_cached(_GDN_RECURRENT_CONV_HIP_SRC)
+  return HIPCCCompiler(getenv("AMD_ARCH", "gfx1100")).compile_cached(_GDN_RECURRENT_CONV_HIP_SRC)
 
 
 def _gdn_recurrent_conv_kernel(core:UOp, state:UOp, conv_out:UOp, alpha:UOp, beta:UOp) -> UOp:
@@ -490,14 +488,14 @@ extern "C" __global__ __launch_bounds__(THREADS) void q8_lmhead_gumbel_final_arg
 @functools.cache
 def _compiled_q8_lmhead_partial_argmax(weight_offset:int) -> bytes:
   from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
-  return HIPCCCompiler(getenv("AMD_ARCH", "gfx1100"), ["-mno-wavefrontsize64"]).compile_cached(
+  return HIPCCCompiler(getenv("AMD_ARCH", "gfx1100")).compile_cached(
     _Q8_LMHEAD_PARTIAL_ARGMAX_HIP_SRC.replace("__WEIGHT_OFFSET__", str(weight_offset)))
 
 
 @functools.cache
 def _compiled_q8_lmhead_final_argmax() -> bytes:
   from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
-  return HIPCCCompiler(getenv("AMD_ARCH", "gfx1100"), ["-mno-wavefrontsize64"]).compile_cached(_Q8_LMHEAD_FINAL_ARGMAX_HIP_SRC)
+  return HIPCCCompiler(getenv("AMD_ARCH", "gfx1100")).compile_cached(_Q8_LMHEAD_FINAL_ARGMAX_HIP_SRC)
 
 
 def _q8_lmhead_partial_argmax_kernel(scores:UOp, tokens:UOp, hidden:UOp, weight:UOp, temperature:UOp, rnd:UOp, weight_offset:int=0) -> UOp:
