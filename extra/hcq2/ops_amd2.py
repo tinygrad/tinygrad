@@ -16,10 +16,9 @@ from tinygrad.runtime.autogen.am import am
 from tinygrad.runtime.support.elf import elf_loader
 from tinygrad.runtime.support.am.amdev import AMDev, AMMemoryManager
 from tinygrad.runtime.support.amd import AMDReg, AMDIP, import_module, import_soc, import_pmc
-from tinygrad.runtime.support.system import System, PCIIfaceBase, PCIAllocationMeta, USBPCIDevice, MAP_FIXED, MAP_NORESERVE
+from tinygrad.runtime.support.system import PCIIfaceBase, PCIAllocationMeta, USBPCIDevice, MAP_FIXED, MAP_NORESERVE
 from tinygrad.runtime.support.usb import USB3
 from tinygrad.runtime.support.memory import AddrSpace, BumpAllocator
-from tinygrad.runtime.support.hcq import MMIOInterface
 from tinygrad.runtime.ops_amd import SQTT, SQTT_ITRACE_SE_MASK, SQTT_LIMIT_SE, SQTT_SIMD_SEL, SQTT_TOKEN_EXCLUDE, PMC
 from tinygrad.runtime.ops_amd import EVENT_INDEX_PARTIAL_FLUSH, WAIT_REG_MEM_FUNCTION_EQ, WAIT_REG_MEM_FUNCTION_NEQ, WAIT_REG_MEM_FUNCTION_GEQ
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint: disable=unused-import
@@ -291,29 +290,6 @@ class AMDQueueDesc:
   put_value: Buffer   # uint64[1]
   params: tuple|None = None  # setup_ring params for recovery
 
-  @property
-  def ring_mv(self) -> MMIOInterface: return self.ring._buf.view.view(fmt='I')
-  @property
-  def rptr_mv(self) -> MMIOInterface: return self.read_ptr._buf.view.view(fmt='Q')
-  @property
-  def wptr_mv(self) -> MMIOInterface: return self.write_ptr._buf.view.view(fmt='Q')
-  @property
-  def doorbell_mv(self) -> MMIOInterface: return self.doorbell._buf.view.view(fmt='Q')
-  @property
-  def put(self) -> int: return self.put_value._buf.view.view(fmt='Q')[0]
-  @put.setter
-  def put(self, v:int): self.put_value._buf.view.view(fmt='Q')[0] = v
-
-  def signal_doorbell(self, dev, doorbell_value:int|None=None):
-    try:
-      self.wptr_mv[0] = self.put
-      System.memory_barrier()
-      if dev.is_am() and not dev.is_usb(): dev.iface.dev_impl.gmc.flush_hdp()
-      self.doorbell_mv[0] = self.put if doorbell_value is None else doorbell_value
-    except Exception as e:
-      dev.error_state = e
-      raise
-
 class PCIIface(PCIIfaceBase):
   def __init__(self, dev, dev_id):
     super().__init__(dev, dev_id, vendor=0x1002, devices=((0xffff, (0x74a1,0x744c,0x7480,0x7550,0x7551,0x7590,0x75a0)),), vram_bar=0,
@@ -355,22 +331,22 @@ class PCIIface(PCIIfaceBase):
         eop_buffer.va_addr, eop_buffer.size, is_aql:=(queue_type==kfd.KFD_IOC_QUEUE_TYPE_COMPUTE_AQL), is_aql)))
 
     ext = lambda addr,n,dt: Buffer("CPU", n, dt, options=BufferSpec(external_ptr=addr), preallocate=True)
+    (put_value := Buffer("CPU", 1, dtypes.uint64, preallocate=True))._buf.view.view(fmt='Q')[0] = 0
     return AMDQueueDesc(ring=ext(ring.va_addr, ring.size//4, dtypes.uint32),
       doorbell=ext(self.dev_impl.doorbell64.addr + doorbell_index*8, 1, dtypes.uint64),
       read_ptr=ext(gart.va_addr+rptr, 1, dtypes.uint64), write_ptr=ext(gart.va_addr+wptr, 1, dtypes.uint64),
-      put_value=Buffer("CPU", 1, dtypes.uint64, preallocate=True), params=rcvr_params)
+      put_value=put_value, params=rcvr_params)
 
   def _collect_interrupts(self, reset=False, drain_only=False):
-    devs:list[AMDDevice] = [d for pg in HCQCompiled.peer_groups.values() for d in pg if isinstance(d, AMDDevice) and d.is_am()]
-    for d in devs:
-      if drain_only: d.iface.dev_impl.ih.drain()
-      else: d.iface.dev_impl.ih.interrupt_handler()
+    d = self.dev
+    if drain_only: d.iface.dev_impl.ih.drain()
+    else: d.iface.dev_impl.ih.interrupt_handler()
 
-      if reset and d.iface.dev_impl.recover(force=d.error_state is not None):
-        d.compute_queue.put = d.compute_queue.rptr_mv[0] = d.compute_queue.wptr_mv[0] = 0
-        d.iface.dev_impl.gfx.setup_ring(*d.compute_queue.params)
-        d.timeline_signal.value = d.timeline_value - 1
-        d.error_state = None
+    if reset and d.iface.dev_impl.recover():
+      cq = d.compute_queue
+      for b in (cq.put_value, cq.read_ptr, cq.write_ptr): b._buf.view.view(fmt='Q')[0] = 0
+      d.iface.dev_impl.gfx.setup_ring(*cq.params)
+      d.timeline_signal._buf.cpu_view().mv.cast('Q')[0] = d.timeline_value.as_memoryview(force_zero_copy=True).cast('Q')[0] - 1
 
   def sleep(self, timeout):
     if hasattr(self.pci_dev, 'irq_poller') and self.pci_dev.irq_poller is not None and (events_cnt:=len(self.pci_dev.irq_poller.poll(timeout))):
