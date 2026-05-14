@@ -750,7 +750,7 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
     """
     return self * (self * 1.702).sigmoid()
 
-  def gelu(self) -> Self:
+  def gelu(self, approximate:str="tanh") -> Self:
     """
     Applies the Gaussian Error Linear Unit (GELU) function element-wise.
 
@@ -760,7 +760,12 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
     print(Tensor([-3., -2., -1., 0., 1., 2., 3.]).gelu().numpy())
     ```
     """
-    return 0.5 * self * (1 + (math.sqrt(2 / math.pi) * (self + 0.044715 * self ** 3)).tanh())
+    if approximate == "tanh":
+      return 0.5 * self * (1 + (math.sqrt(2 / math.pi) * (self + 0.044715 * self ** 3)).tanh())
+    elif approximate == "none":
+      return self * 0.5 * (1.0 + (self / math.sqrt(2)).erf())
+    else:
+      raise RuntimeError(f"{approximate=} is not supported")
 
   def swish(self) -> Self:
     """

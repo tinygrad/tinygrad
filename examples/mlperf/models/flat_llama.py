@@ -105,13 +105,16 @@ class FlatTransformer:
     scaled_std = 0.02 / math.sqrt(2 * n_layers)
 
     # Attention
-    self._init_inv_scales = []  # populated by lin_per_layer
-    self.wqkv = self.lin_per_layer(dim, self.n_heads * self.head_dim + self.n_kv_heads * self.head_dim * 2)
-    self.wo = self.lin_per_layer(self.n_heads * self.head_dim, dim, std=scaled_std)
+    self.wqkv, s_qkv = self.lin_per_layer(dim, self.n_heads * self.head_dim + self.n_kv_heads * self.head_dim * 2)
+    self.wo, s_o = self.lin_per_layer(self.n_heads * self.head_dim, dim, std=scaled_std)
 
     # FeedForward
-    self.w13 = self.lin_per_layer(dim, hidden_dim * 2)
-    self.w2 = self.lin_per_layer(hidden_dim, dim, std=scaled_std)
+    if SPLIT_W13:
+      self.w1, s_1 = self.lin_per_layer(dim, hidden_dim)
+      self.w3, s_3 = self.lin_per_layer(dim, hidden_dim)
+    else:
+      self.w13, s_13 = self.lin_per_layer(dim, hidden_dim * 2)
+    self.w2, s_2 = self.lin_per_layer(hidden_dim, dim, std=scaled_std)
 
     self.norm_eps = norm_eps
     self.attention_norm = Tensor.ones(n_layers, dim).contiguous()
@@ -125,35 +128,34 @@ class FlatTransformer:
     self.freqs_cis = precompute_freqs_cis(dim // n_heads, max_context * 2, rope_theta).contiguous().requires_grad_(False)
 
     def _amax(): return Tensor.full((), FP8_MAX, dtype=dtypes.float32).contiguous().requires_grad_(False)
-    names = ["xqkv", "xo", "x13", "x2"]
+    names = ["xqkv", "xo", "x2"]
+    names += ["x1", "x3"] if SPLIT_W13 else ["x13"]
     self._fp8_amax = {name: [_amax() for _ in range(n_layers)] for name in names}
-    grad_names = ["xqkv", "xo", "xw13", "xout"]
-    if SPLIT_W13: grad_names.append("xw3")
+    grad_names = ["xqkv", "xo", "xout"]
+    grad_names += ["xw1", "xw3"] if SPLIT_W13 else ["xw13"]
     self._fp8_grad_amax = {name: [_amax() for _ in range(n_layers)] for name in grad_names}
-    w_names = ["wqkv", "wo", "w13", "w2"]
-    self._fp8_inv_scale = {wname: inv_scales.float().contiguous().requires_grad_(False)
-                           for wname, inv_scales in zip(w_names, self._init_inv_scales)}
-    del self._init_inv_scales
+    w_scales = [("wqkv", s_qkv), ("wo", s_o), ("w2", s_2)]
+    w_scales += [("w1", s_1), ("w3", s_3)] if SPLIT_W13 else [("w13", s_13)]
+    self._fp8_inv_scale = {name: s.float().contiguous().requires_grad_(False) for name, s in w_scales}
 
   def lin_per_layer(self, in_features:int, out_features:int, std:float=0.02):
     if getenv("ZEROS"): w = Tensor.zeros(self.n_layers, out_features, in_features)
     else: w = Tensor.normal(self.n_layers, out_features, in_features, mean=0.0, std=std)
     amax = w.abs().flatten(1).max(1).detach()
     scale = FP8_MAX / (amax + 1e-8)
-    self._init_inv_scales.append((amax + 1e-8) / FP8_MAX)
-    return (w * scale.reshape(-1, 1, 1)).clamp(-FP8_MAX, FP8_MAX).cast(FP8_DTYPE)
+    inv_scale = (amax + 1e-8) / FP8_MAX
+    return (w * scale.reshape(-1, 1, 1)).clamp(-FP8_MAX, FP8_MAX).cast(FP8_DTYPE), inv_scale
 
-  def attention(self, x:Tensor, freqs_cis:Tensor, attention_norm:Tensor, wqkv:Tensor, wo:Tensor,
+  def attention(self, x:Tensor, freqs_cis:Tensor, *, attention_norm:Tensor, wqkv:Tensor, wo:Tensor,
                 amax_xqkv:Tensor, amax_xo:Tensor, s_qkv:Tensor, s_o:Tensor,
                 grad_amax_xqkv:Tensor, grad_amax_xo:Tensor):
     bsz, seqlen, _ = x.shape
-    new_amaxs, saves = [], []
+    amaxs, saves = [], []
 
-    xqkv, x_normed, rrms, ret = norm_quantize_matmul(x, attention_norm, wqkv, s_qkv, self.norm_eps,
-                                                     amax_x=amax_xqkv, grad_amax_state=grad_amax_xqkv)
-    saves.extend([x_normed, rrms])
-    new_amaxs.extend(ret[:1])
-    saves.extend(ret[1:] + [xqkv])
+    xqkv, x_normed, rrms, (new_amax, *s) = norm_quantize_matmul(x, attention_norm, wqkv, s_qkv, self.norm_eps,
+                                                                  amax_x=amax_xqkv, grad_amax_state=grad_amax_xqkv)
+    amaxs.append(new_amax)
+    saves.extend([x_normed, rrms, *s, xqkv])
     xqkv = xqkv.reshape(bsz, seqlen, self.n_kv_heads, self.n_rep + 2, self.head_dim)
     xq = xqkv[:, :, :, :self.n_rep].reshape(bsz, seqlen, self.n_heads, self.head_dim)
     xk = xqkv[:, :, :, self.n_rep].reshape(bsz, seqlen, self.n_kv_heads, self.head_dim)
@@ -170,65 +172,45 @@ class FlatTransformer:
       attn = xq.scaled_dot_product_attention(xk, xv, is_causal=True, enable_gqa=True).transpose(1, 2)
     attn = attn.reshape(bsz, seqlen, -1)
 
-    out, *ret = matmul(attn, wo, amax_x=amax_xo, w_inv_scale=s_o, grad_amax_state=grad_amax_xo)
-    new_amaxs.extend(ret[:1])
-    saves.extend(ret[1:] + [out])
-    return (out, *new_amaxs, *saves)
+    out, new_amax, *s = matmul(attn, wo, amax_x=amax_xo, w_inv_scale=s_o, grad_amax_state=grad_amax_xo)
+    amaxs.append(new_amax)
+    saves.extend([*s, out])
+    return out, amaxs, saves
 
-  def feed_forward(self, x:Tensor, residual:Tensor, ffn_norm:Tensor, w13:Tensor, w2:Tensor,
-                   amax_x13:Tensor, amax_x2:Tensor, s_13:Tensor, s_2:Tensor,
-                   grad_amax_xw13:Tensor, grad_amax_xout:Tensor,
-                   w1:Tensor|None=None, w3:Tensor|None=None, grad_amax_xw3:Tensor|None=None):
-    new_amaxs, saves = [], []
+  def feed_forward(self, x:Tensor, residual:Tensor, **kwargs):
+    amaxs, saves = [], []
 
     if SPLIT_W13:
-      assert w1 is not None and w3 is not None and grad_amax_xw3 is not None
       h = x + residual
       x_normed, rrms = rmsnorm(h, self.norm_eps)
       saves.extend([x_normed, rrms])
-      inp = x_normed * ffn_norm
-      # separate w1 and w3 matmuls
-      x_w1, *ret1 = matmul(inp, w1, amax_x=amax_x13, w_inv_scale=s_13, grad_amax_state=grad_amax_xw13)
-      new_amaxs.extend(ret1[:1])
-      saves.extend(ret1[1:] + [x_w1])
-      x_w3, *ret3 = matmul(inp, w3, amax_x=amax_x13, w_inv_scale=s_13, grad_amax_state=grad_amax_xw3)
-      saves.extend(ret3[1:] + [x_w3])
-      # silu * mul + w2 matmul
-      out, *ret2 = matmul(x_w1.silu() * x_w3, w2, amax_x=amax_x2, w_inv_scale=s_2, grad_amax_state=grad_amax_xout)
-      new_amaxs.extend(ret2[:1])
-      saves.extend(ret2[1:] + [out])
-      return (out, h, *new_amaxs, *saves)
-
-    x_w13, h, x_normed, rrms, ret = add_norm_quantize_matmul(x, residual, ffn_norm, w13, s_13, self.norm_eps,
-                                                             amax_x=amax_x13, grad_amax_state=grad_amax_xw13)
-    saves.extend([x_normed, rrms])
-    new_amaxs.extend(ret[:1])
-    saves.extend(ret[1:] + [x_w13])
-
-    out, ret = silu_w13_quantize_matmul(x_w13, w2, s_2, amax_x2=amax_x2, grad_amax_xw13=grad_amax_xw13, grad_amax_xout=grad_amax_xout)
-    new_amaxs.extend(ret[:1])
-    saves.extend(ret[1:] + [out])
-    return (out, h, *new_amaxs, *saves)
+      inp = x_normed * kwargs["ffn_norm"]
+      x_w1, new_amax, *s = matmul(inp, kwargs["w1"], amax_x=kwargs["amax_x1"], w_inv_scale=kwargs["s_1"], grad_amax_state=kwargs["grad_amax_xw1"])
+      amaxs.append(new_amax)
+      saves.extend([*s, x_w1])
+      x_w3, new_amax, *s = matmul(inp, kwargs["w3"], amax_x=kwargs["amax_x3"], w_inv_scale=kwargs["s_3"], grad_amax_state=kwargs["grad_amax_xw3"])
+      amaxs.append(new_amax)
+      saves.extend([*s, x_w3])
+      out, new_amax, *s = matmul(x_w1.silu() * x_w3, kwargs["w2"], amax_x=kwargs["amax_x2"], w_inv_scale=kwargs["s_2"],
+                                 grad_amax_state=kwargs["grad_amax_xout"])
+      amaxs.append(new_amax)
+      saves.extend([*s, out])
+    else:
+      x_w13, h, x_normed, rrms, (new_amax, *s) = add_norm_quantize_matmul(x, residual, kwargs["ffn_norm"], kwargs["w13"], kwargs["s_13"],
+                                                                          self.norm_eps, amax_x=kwargs["amax_x13"],
+                                                                          grad_amax_state=kwargs["grad_amax_xw13"])
+      amaxs.append(new_amax)
+      saves.extend([x_normed, rrms, *s, x_w13])
+      out, (new_amax, *s) = silu_w13_quantize_matmul(x_w13, kwargs["w2"], kwargs["s_2"], amax_x2=kwargs["amax_x2"],
+                                                     grad_amax_xw13=kwargs["grad_amax_xw13"], grad_amax_xout=kwargs["grad_amax_xout"])
+      amaxs.append(new_amax)
+      saves.extend([*s, out])
+    return out, h, amaxs, saves
 
   @function(precompile=True, precompile_backward=True)
-  def run_layer(self, x:Tensor, freqs_cis:Tensor,
-                attention_norm:Tensor, wqkv:Tensor, wo:Tensor,
-                ffn_norm:Tensor, w13:Tensor, w2:Tensor,
-                amax_xqkv:Tensor, amax_xo:Tensor,
-                amax_x13:Tensor, amax_x2:Tensor,
-                s_qkv:Tensor, s_o:Tensor, s_13:Tensor, s_2:Tensor,
-                grad_amax_xqkv:Tensor, grad_amax_xo:Tensor,
-                grad_amax_xw13:Tensor, grad_amax_xout:Tensor,
-                w1:Tensor|None=None, w3:Tensor|None=None, grad_amax_xw3:Tensor|None=None):
-    attn, *attn_ret = self.attention(x, freqs_cis, attention_norm, wqkv, wo,
-                                     amax_xqkv=amax_xqkv, amax_xo=amax_xo, s_qkv=s_qkv, s_o=s_o,
-                                     grad_amax_xqkv=grad_amax_xqkv, grad_amax_xo=grad_amax_xo)
-    attn_amaxs, attn_saves = attn_ret[:2], attn_ret[2:]
-    ffn, h, *ffn_ret = self.feed_forward(x, attn, ffn_norm, w13, w2,
-                                                   amax_x13=amax_x13, amax_x2=amax_x2, s_13=s_13, s_2=s_2,
-                                                   grad_amax_xw13=grad_amax_xw13, grad_amax_xout=grad_amax_xout,
-                                                   w1=w1, w3=w3, grad_amax_xw3=grad_amax_xw3)
-    ffn_amaxs, ffn_saves = ffn_ret[:2], ffn_ret[2:]
+  def run_layer(self, x:Tensor, freqs_cis:Tensor, attn_kwargs:dict, ffn_kwargs:dict):
+    attn, attn_amaxs, attn_saves = self.attention(x, freqs_cis, **attn_kwargs)
+    ffn, h, ffn_amaxs, ffn_saves = self.feed_forward(x, attn, **ffn_kwargs)
     h = h + ffn
     return (h, *attn_amaxs, *ffn_amaxs, *attn_saves, *ffn_saves)
 
@@ -241,11 +223,10 @@ class FlatTransformer:
       self.wqkv.shard_(device, axis=1).realize()          # (n_layers, out, dim) shard out
       self.wo.shard_(device, axis=2).realize()            # (n_layers, dim, in) shard in
       if SPLIT_W13:
-        self.w1 = self.w13[:, :self.hidden_dim, :].contiguous()
-        self.w3 = self.w13[:, self.hidden_dim:, :].contiguous()
         self.w1.shard_(device, axis=1).realize()
         self.w3.shard_(device, axis=1).realize()
-      self.w13.shard_(device, axis=1).realize()           # (n_layers, hidden*2, dim) shard out
+      else:
+        self.w13.shard_(device, axis=1).realize()           # (n_layers, hidden*2, dim) shard out
       self.w2.shard_(device, axis=2).realize()            # (n_layers, dim, hidden) shard in
       self.attention_norm.shard_(device, axis=None).realize()
       self.ffn_norm.shard_(device, axis=None).realize()
@@ -265,18 +246,19 @@ class FlatTransformer:
     freqs_cis = self.freqs_cis.cast(h.dtype)[:, :tokens.shape[1], :, :, :]
     a, ga, s = self._fp8_amax, self._fp8_grad_amax, self._fp8_inv_scale
     for i in range(self.n_layers):
-      split_kwargs = dict(w1=self.w1[i], w3=self.w3[i], grad_amax_xw3=ga["xw3"][i]) if SPLIT_W13 else {}
-      h, *ret = self.run_layer(h, freqs_cis,
-                               self.attention_norm[i], self.wqkv[i], self.wo[i],
-                               self.ffn_norm[i], self.w13[i], self.w2[i],
-                               amax_xqkv=a["xqkv"][i], amax_xo=a["xo"][i],
-                               amax_x13=a["x13"][i], amax_x2=a["x2"][i],
-                               s_qkv=s["wqkv"][i], s_o=s["wo"][i],
-                               s_13=s["w13"][i], s_2=s["w2"][i],
-                               grad_amax_xqkv=ga["xqkv"][i], grad_amax_xo=ga["xo"][i],
-                               grad_amax_xw13=ga["xw13"][i], grad_amax_xout=ga["xout"][i],
-                               **split_kwargs)
-      for name, new_val in zip(["xqkv", "xo", "x13", "x2"], ret[:5]):
+      attn_kwargs = dict(attention_norm=self.attention_norm[i], wqkv=self.wqkv[i], wo=self.wo[i],
+                         amax_xqkv=a["xqkv"][i], amax_xo=a["xo"][i], s_qkv=s["wqkv"][i], s_o=s["wo"][i],
+                         grad_amax_xqkv=ga["xqkv"][i], grad_amax_xo=ga["xo"][i])
+      ffn_kwargs = dict(ffn_norm=self.ffn_norm[i], w2=self.w2[i],
+                        amax_x2=a["x2"][i], s_2=s["w2"][i], grad_amax_xout=ga["xout"][i])
+      if SPLIT_W13:
+        ffn_kwargs.update(w1=self.w1[i], w3=self.w3[i], amax_x1=a["x1"][i], amax_x3=a["x3"][i],
+                          s_1=s["w1"][i], s_3=s["w3"][i], grad_amax_xw1=ga["xw1"][i], grad_amax_xw3=ga["xw3"][i])
+      else:
+        ffn_kwargs.update(w13=self.w13[i], amax_x13=a["x13"][i], s_13=s["w13"][i], grad_amax_xw13=ga["xw13"][i])
+      h, *ret = self.run_layer(h, freqs_cis, attn_kwargs, ffn_kwargs)
+      amax_names = ["xqkv", "xo"] + (["x1", "x3"] if SPLIT_W13 else ["x13"]) + ["x2"]
+      for name, new_val in zip(amax_names, ret[:len(amax_names)]):
         a[name][i].assign(new_val)
 
     logits = matmul(self.norm(h), self.output[0], fp8=False)[0]
