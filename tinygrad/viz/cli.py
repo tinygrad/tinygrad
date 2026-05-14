@@ -68,11 +68,11 @@ def main(args) -> None:
     data = viz.get_render(viz_data, step["query"])
     if isinstance(data.get("value"), Iterator):
       for m in data["value"]:
-        if print_graph and "graph" in m:
+        if print_graph and "graph" in m and not args.json:
           for k,v in m["graph"].items():
-            print(f"[{k}] {v['label'].replace('\n', ' ')}"+(f"tag={v['tag']}" if v['tag'] else ''))
-            print("  src: " + ", ".join([f"{i}->[{x}]" for i,x in v["src"]]))
-        elif "uop" in m: print(emit(m["uop"]))
+            print(f"[{k}] {v['label'].replace(chr(10), ' ')}"+(f"tag={v['tag']}" if v['tag'] else ''))
+            if v["src"]: print("  src: " + ", ".join([f"{i}->[{x}]" for i,x in v["src"]]))
+        elif "uop" in m: print(emit(m["graph"] if print_graph else m["uop"]))
         if not reconstruct_matches: return None
         if m.get("diff"):
           loc = pathlib.Path(m["upat"][0][0])
