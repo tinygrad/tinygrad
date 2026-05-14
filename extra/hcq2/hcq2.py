@@ -342,7 +342,7 @@ def hcq_schedule(ctx:HCQ2LowerCtx, linear:UOp, ast:UOp, dev:HCQ2Compiled) -> UOp
   return build_host_program(ctx, linear, ast, dev)
 
 def ensure_accessible(ctx:HCQ2LowerCtx, call:UOp, copy:UOp) -> UOp|None:
-  src_buf = call.src[2].buffer
+  src_buf = call.src[2].buffer # TODO: cleanup
   dev = call.src[1].buffer.device
   try: src_buf.get_buf(dev)
   except Exception:
