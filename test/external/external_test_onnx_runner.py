@@ -1,6 +1,6 @@
 import unittest, onnx, tempfile, pathlib
 import numpy as np
-from tinygrad import dtypes, Tensor
+from tinygrad import Tensor
 from tinygrad.uop.ops import Ops
 from tinygrad.device import is_dtype_supported
 from typing import Any
