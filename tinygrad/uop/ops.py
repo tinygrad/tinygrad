@@ -258,7 +258,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       case Ops.WMMA | Ops.SHAPED_WMMA: return self.src[2]._shape
 
       # passthrough ops
-      case Ops.MSTACK | Ops.MSELECT | Ops.DETACH | Ops.CONTIGUOUS | Ops.CONTIGUOUS_BACKWARD | Ops.AFTER | Ops.PATCH | Ops.LOAD:
+      case Ops.MSTACK | Ops.MSELECT | Ops.DETACH | Ops.CONTIGUOUS | Ops.CONTIGUOUS_BACKWARD | Ops.AFTER | Ops.PATCH | Ops.LOAD | Ops.COPY:
         return self.src[0]._shape
       # REDUCE with empty axis is passthrough (lowered form)
       case Ops.REDUCE if len(self.arg[1]) == 0:
@@ -312,8 +312,9 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
           return tuple(1 if i in axis_arg else s for i,s in enumerate(ps))
 
     # elementwise ops keep the shape the same. all inputs with shape must match
-    if self.op in GroupOp.ALU.union({Ops.CAST, Ops.COPY, Ops.NOOP, Ops.GROUP, Ops.SINK, Ops.ALLREDUCE, Ops.STORE}):
-      input_shapes = [x._shape for x in self.src if x._shape is not None]
+    if self.op in GroupOp.ALU.union({Ops.CAST, Ops.NOOP, Ops.GROUP, Ops.ALLREDUCE, Ops.STORE}):
+      input_shapes = [x._shape for x in self.src]
+      assert all(x is not None for x in input_shapes), f"None input shape not supported for {self.op}"
       if len(input_shapes) == 0: return None
       if not all_same(input_shapes): raise RuntimeError(f"shape mismatch at {self.op}: {input_shapes} {[x.op for x in self.src]}")
       return input_shapes[0]
