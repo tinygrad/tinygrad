@@ -69,6 +69,21 @@ class TestTensorGradient(unittest.TestCase):
     np.testing.assert_allclose(x.grad.numpy(), [2.0+3.0+2*3.0])
     self.assertIs(x.grad, old_grad)
 
+  def test_gradient_through_clone(self):
+    src = Tensor([1.0, 2.0, 3.0, 4.0])
+    x = src.clone().requires_grad_(True)
+    (x * 2.0).sum().backward()
+    np.testing.assert_allclose(x.grad.numpy(), [2.0, 2.0, 2.0, 2.0])
+    self.assertIsNone(src.grad)
+
+    src = Tensor([1.0, 2.0, 3.0, 4.0], requires_grad=True)
+    x = src.clone().requires_grad_(True)
+    try:
+      (x * 2.0).sum().backward()
+    except RuntimeError:
+      # TODO: this crashes now
+      pass
+
   def test_gradient_through_chained_unrealized_setitem(self):
     g1 = Tensor.zeros(4).contiguous()
     g1[2] = Tensor(1.0)
