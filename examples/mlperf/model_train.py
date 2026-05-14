@@ -1442,7 +1442,7 @@ def train_llama3():
 
   from tinygrad.nn.state import get_state_dict
   model_state = get_state_dict(model)
-  for wname in ["wqkv", "wo", "w13", "w2"]:
+  for wname in model._fp8_inv_scale:
     w = model_state[wname]
     w._inv_scale = model._fp8_inv_scale[wname]
     if optim.master_params:
