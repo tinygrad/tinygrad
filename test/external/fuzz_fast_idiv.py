@@ -14,7 +14,7 @@ if __name__ == "__main__":
       print(f"Progress: {i}")
     dt = random.choice(dtypes.ints + tuple(dt.vec(4) for dt in dtypes.ints))
     u = UOp.variable('x', random.randint(dt.min, 0), random.randint(1, dt.max), dtype=dt)
-    d = random.randint(1, max(1, u.arg[2]))
+    d = random.randint(1, max(1, u.arg[2])*2)
     if d in powers_of_two: continue
     expr = fast_idiv(DEV.target(Device.DEFAULT), u, d)
     if expr is None: continue
