@@ -201,6 +201,7 @@ class TestFastIdiv(unittest.TestCase):
       self.assertNotIn(Ops.CDIV, ops, f"For dtype={dt} FLOORDIV by power of two did not simplify to shift")
       self.assertNotIn(Ops.FLOORDIV, ops, f"For dtype={dt} FLOORDIV survived past late rewrite")
 
+  @Context(DISABLE_FAST_IDIV=0)
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU doesn't support long")
   def test_fast_idiv_and_mod(self):
     g = UOp(Ops.PARAM, dtypes.uint32.ptr(), (), 0)
@@ -220,6 +221,7 @@ class TestFastIdiv(unittest.TestCase):
     self.assertIn(Ops.SHR, ops)
     self.assertNotIn(Ops.CMOD, ops)
 
+  @Context(DISABLE_FAST_IDIV=0)
   def test_fast_idiv_remove_powers_of_two(self):
     ridx = UOp.range(2**20, 0)
     uops = to_uops_list([ridx//(7*64)], ren=Device[Device.DEFAULT].renderer)
