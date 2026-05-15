@@ -49,12 +49,12 @@ All nodes in the tinygrad graph are \textbf{UOps}. A UOp is a tuple $(\mathrm{op
 \toprule
 \textbf{Op} & \textbf{src} & \textbf{arg} & \textbf{Semantics} \\
 \midrule
+\op{Param} & $(\mathbf{s})$ & slot, dtype, device?, addrspace? &
+  Placeholder with shape $\mathbf{s}$. Substituted in \op{Function}. \\[4pt]
 \op{Buffer} & () & size, dtype, device, addrspace &
   Shape $(n \cdot \textit{size},)$ if device is $n$-tuple, else $(\textit{size},)$. \\
 \op{BufferView} & (buf,) & size, dtype, offset &
   Typed access into a buffer. Zero-copy $(\textit{size},)$ slice at offset; inherits addrspace. \\
-\op{Param} & $(\mathbf{s})$ & slot, dtype, device?, addrspace? &
-  Placeholder with shape $\mathbf{s}$. Substituted in \op{Function}. \\[4pt]
 \op{Const} & () & value, dtype &
   A scalar constant with shape $(\ )$. \\
   & & & Form vector consts with \op{Stack} \\
@@ -110,7 +110,7 @@ A \op{Buffer}'s \textbf{addrspace} is \texttt{GLOBAL}, \texttt{LOCAL}, or \textt
 \end{tabular}
 
 %% ============================================================
-\subsection*{{\color{loadred}Load Ops} \normalfont\small--- change device or addrspace}
+\subsection*{{\color{loadred}Load Ops} \normalfont\small--- can change device or addrspace}
 
 \begin{tabular}{@{}l l l l@{}}
 \toprule
