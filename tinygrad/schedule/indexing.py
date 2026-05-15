@@ -144,10 +144,17 @@ def apply_movement_op(op:Ops, in_shape:tuple[sint,...], arg:tuple, rngs:tuple[UO
     case _: raise RuntimeError(f"{op} is not a MovementOp")
   return rngs
 
+pm_do_broadcast = PatternMatcher([
+  (UPat(GroupOp.Broadcastable, name="x"), lambda x: x.replace(src=tuple(y._broadcast_to(x.shape) for y in x.src))),
+])
+
 @profile_matches
 def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
   if debug: print("**************************")
   rctx = IndexingContext()
+
+  # run broadcasting
+  tsink = graph_rewrite(tsink, pm_do_broadcast, name="do broadcast")
 
   # get ops to realize
   graph_rewrite(tsink, pm_generate_realize_map, ctx=rctx.realize_map, name="get realize")

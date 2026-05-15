@@ -14,6 +14,13 @@ def reduce_gradient(ctx:UOp, ret:UOp, op:Ops):
     return ((mask/broadcast_to_input(count)) * broadcast_to_input(ctx),)
   if op == Ops.MUL: return (broadcast_to_input(ctx * ret) / ret.src[0],)
 
+def unbroadcast(ctx:UOp, shape:tuple|None) -> UOp:
+  if ctx._shape is None or shape is None or ctx.shape == shape: return ctx
+  if len(shape) > len(ctx.shape): raise RuntimeError(f"can't unbroadcast {ctx.shape} to {shape}")
+  aligned = (1,)*(len(ctx.shape)-len(shape)) + shape
+  axis = tuple(i for i,(s,n) in enumerate(zip(aligned, ctx.shape)) if s != n)
+  return ctx.cast(sum_acc_dtype(ctx.dtype))._rop(Ops.ADD, axis).cast(ctx.dtype).reshape(shape)
+
 def _compact_params(body:UOp, all_args:tuple[UOp, ...]) -> tuple[UOp, tuple[UOp, ...]]:
   """Remove unused PARAMs from body and return compacted (body, args)."""
   used = sorted({p.arg: p for p in body.toposort() if p.op is Ops.PARAM}.items())
@@ -66,9 +73,7 @@ pm_gradient = PatternMatcher([
   (UPat(Ops.CONTIGUOUS), lambda ctx: (ctx,)),
   (UPat(Ops.CONTIGUOUS_BACKWARD), lambda ctx: (ctx.contiguous(),)),
   (UPat(Ops.RESHAPE, name="ret"), lambda ctx, ret: (ctx.reshape(ret.src[0].shape), None)),
-  (UPat(Ops.EXPAND, name="ret"), lambda ctx, ret:
-    (ctx.cast(sum_acc_dtype(ctx.dtype))._rop(Ops.ADD, tuple(i for i,(s,n) in enumerate(zip(ret.src[0].shape, ret.shape)) if s!=n))
-     .cast(ctx.dtype), None)),
+  (UPat(Ops.EXPAND, name="ret"), lambda ctx, ret: (unbroadcast(ctx, ret.src[0]._shape), None)),
   (UPat(Ops.PAD, name="ret"), lambda ctx, ret: (ctx.shrink(tuple([(p[0], s+p[0]) for s,p in zip(ret.src[0].shape, ret.marg)])), None, None)),
   (UPat(Ops.SHRINK, name="ret"), lambda ctx, ret: (ctx.pad(tuple([(p[0], s-p[1]) for s,p in zip(ret.src[0].shape, ret.marg)])), None, None)),
   (UPat(Ops.PERMUTE, name="ret"), lambda ctx, ret: (ctx.permute(argsort(ret.marg)),)),
@@ -114,6 +119,7 @@ def compute_gradient(root:UOp, root_grad:UOp, targets:set[UOp]) -> dict[UOp, UOp
     assert len(lgrads) == len(t0.src), f"got {len(lgrads)} gradient, expected {len(t0.src)}"
     for k,v in zip(t0.src, lgrads):
       if v is None: continue
+      v = unbroadcast(v, k._shape)
       if k in grads and grads[k].op is not Ops.NOOP:
         if v.op is Ops.TUPLE and grads[k].op is Ops.TUPLE:
           grads[k] = UOp.maketuple(*(p + n if (p.op is not Ops.NOOP and n.op is not Ops.NOOP) else

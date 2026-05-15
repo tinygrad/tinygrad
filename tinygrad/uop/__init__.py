@@ -118,6 +118,9 @@ class GroupOp:
   # TODO: is BITCAST always Elementwise if it's shape changing?
   Elementwise = set.union(ALU, {Ops.CAST, Ops.BITCAST})
 
+  # all ops that support shape broadcasting
+  Broadcastable = set.union(Elementwise, {Ops.CAST, Ops.GROUP, Ops.STORE})
+
   Defines = {Ops.PARAM, Ops.DEFINE_LOCAL, Ops.DEFINE_REG}
 
   Irreducible = {Ops.CONST, Ops.DEFINE_VAR, Ops.SPECIAL, Ops.RANGE}
