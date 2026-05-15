@@ -307,7 +307,7 @@ if __name__ == "__main__":
 
   # preallocate all the grad buffers and zero them out
   grads = {x:Tensor.zeros(x.shape, dtype=x.dtype, device=x.device).contiguous()
-           for x in state.values() if x.requires_grad is None}
+           for x in state.values() if x.requires_grad}
 
   # print model size
   sz = 0

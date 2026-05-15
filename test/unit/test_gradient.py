@@ -70,7 +70,7 @@ class TestTensorGradient(unittest.TestCase):
     self.assertIs(x.grad, old_grad)
 
   def test_gradient_through_clone_from_non_grad_src(self):
-    src = Tensor([1.0, 2.0, 3.0, 4.0])
+    src = Tensor([1.0, 2.0, 3.0, 4.0], requires_grad=False)
     x = src.clone().requires_grad_(True)
     (x * 2.0).sum().backward()
     np.testing.assert_allclose(x.grad.numpy(), [2.0, 2.0, 2.0, 2.0])
