@@ -364,7 +364,7 @@ def is_dtype_supported(dtype:DType, target:Target|None=None) -> bool:
   # PYTHON supports half memoryview in 3.12+ https://github.com/python/cpython/issues/90751
   if dtype == dtypes.half:
     match target.device:
-      case "CL": return (not CI or BENCHMARKS) and not OSX
+      case "CL": return "cl_khr_fp16" in target.arch
       case "QCOM": return bool(IMAGE) and bool(FLOAT16) # QCOM compiler is flaky with half
       case "CUDA" | "NV": return not CI or BENCHMARKS or target.renderer == "PYTHON"
       case "CPU" if target.renderer == "LLVM": return OSX
