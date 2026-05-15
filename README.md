@@ -140,8 +140,8 @@ Documentation along with a quick start guide can be found on the [docs website](
 ```python
 from tinygrad import Tensor
 
-x = Tensor.eye(3, requires_grad=True)
-y = Tensor([[2.0,0,-2.0]], requires_grad=True)
+x = Tensor.eye(3)
+y = Tensor([[2.0,0,-2.0]])
 z = y.matmul(x).sum()
 z.backward()
 

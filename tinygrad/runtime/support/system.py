@@ -38,8 +38,6 @@ class _System:
       return vfio_fd
     except OSError: return None
 
-  def reserve_hugepages(self, cnt): os.system(f"sudo sh -c 'echo {cnt} > /proc/sys/vm/nr_hugepages'")
-
   @functools.cache
   def reserve_va(self, va_start, va_size):
     # cached, runs only once per range. used to not collide with other mappings.

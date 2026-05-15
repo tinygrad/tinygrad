@@ -136,6 +136,19 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
 
   @classmethod
   def eye(cls, n:int, m:int|None=None, dtype:DTypeLike|None=None, device:str|tuple[str, ...]|None=None) -> Self:
+    """
+    Returns a 2-D tensor with `n` rows and `m` columns, with ones on the diagonal and zeros elsewhere.
+
+    You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor.eye(3).numpy())
+    ```
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(Tensor.eye(2, 4).numpy())
+    ```
+    """
     m_ = n if m is None else m
     if n < 0 or m_ < 0: raise ValueError(f"cannot have negative {n=}, {m_=}")
     out_dtype = to_dtype(dtype) if dtype is not None else dtypes.default_float

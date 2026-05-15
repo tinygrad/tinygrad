@@ -417,7 +417,7 @@ jobs:
           llvm: 'true'
       - name: Test openpilot model kernel count and gate usage
         run: |
-          ALLOWED_KERNEL_COUNT=123 ALLOWED_READ_IMAGE=1486 ALLOWED_GATED_READ_IMAGE=18 FLOAT16=1 DEV=CL IMAGE=1 python examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/cf6376aa9a090f0da26c280ef69eabf9bbdd51d1faac9ed392919c3db69be916
+          ALLOWED_KERNEL_COUNT=123 ALLOWED_READ_IMAGE=1468 ALLOWED_GATED_READ_IMAGE=18 FLOAT16=1 DEV=CL IMAGE=1 python examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/cf6376aa9a090f0da26c280ef69eabf9bbdd51d1faac9ed392919c3db69be916
       - name: Test openpilot CL compile fp16
         run: FLOAT16=1 DEV=CL IMAGE=1 python examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/cf6376aa9a090f0da26c280ef69eabf9bbdd51d1faac9ed392919c3db69be916
       - name: Test openpilot CL compile fp32 (test correctness)
@@ -1006,7 +1006,12 @@ jobs:
       - name: Run test_ops (IMAGE)
         if: matrix.backend == 'ir3'
         shell: bash
-        run: IMAGE=1 DEV="NULL:IR3:a630,IMAGE_PITCH_ALIGNMENT=64" python -m pytest -n=auto test/backend/test_ops.py --durations=20
+        env:
+          IMAGE: 1
+          DEV: "NULL:IR3:a630,IMAGE_PITCH_ALIGNMENT=64"
+        run: |
+          DEBUG=4 python3 test/backend/test_ops.py TestOps.test_gemm | grep image_load
+          python -m pytest -n=auto test/backend/test_ops.py --durations=20
   qcomclcompiletests:
     name: Compile-only (QCOM CL)
     runs-on: ubuntu-24.04-arm
@@ -1032,4 +1037,9 @@ jobs:
           python -m pytest -n=auto test/backend/test_ops.py --durations=20
       - name: Run test_ops (IMAGE)
         shell: bash
-        run: IMAGE=1 DEV="NULL:QCOMCL:a630,IMAGE_PITCH_ALIGNMENT=64" python -m pytest -n=auto test/backend/test_ops.py --durations=20
+        env:
+          IMAGE: 1
+          DEV: "NULL:QCOMCL:a630,IMAGE_PITCH_ALIGNMENT=64"
+        run: |
+          DEBUG=4 python test/backend/test_ops.py TestOps.test_gemm | grep read_imagef
+          python -m pytest -n=auto test/backend/test_ops.py --durations=20

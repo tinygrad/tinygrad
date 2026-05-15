@@ -142,9 +142,9 @@ class TestFA(unittest.TestCase):
       base_do = Tensor.ones(B, N, H, D, dtype=dtypes.float32).contiguous()
 
     with Context(DEBUG=0):
-      q = base_q.clone().requires_grad_(True).shard(GPUS, axis=0)
-      k = base_k.clone().requires_grad_(True).shard(GPUS, axis=0)
-      v = base_v.clone().requires_grad_(True).shard(GPUS, axis=0)
+      q = base_q.clone().shard(GPUS, axis=0)
+      k = base_k.clone().shard(GPUS, axis=0)
+      v = base_v.clone().shard(GPUS, axis=0)
       Tensor.realize(q, k, v)
 
       do = base_do.clone().shard(GPUS, axis=0)
@@ -157,9 +157,9 @@ class TestFA(unittest.TestCase):
     Tensor.realize(q.grad, k.grad, v.grad)
 
     with Context(DEBUG=0):
-      q_ref = base_q.clone().requires_grad_(True)
-      k_ref = base_k.clone().requires_grad_(True)
-      v_ref = base_v.clone().requires_grad_(True)
+      q_ref = base_q.clone()
+      k_ref = base_k.clone()
+      v_ref = base_v.clone()
       Tensor.realize(q_ref, k_ref, v_ref)
 
       do_ref = base_do.clone()
@@ -189,9 +189,9 @@ class TestFA(unittest.TestCase):
       base_do = Tensor.ones(B, N, H, D, dtype=dtypes.float32).contiguous()
 
     with Context(DEBUG=0):
-      q = base_q.clone().requires_grad_(True).shard(GPUS, axis=2)
-      k = base_k.clone().requires_grad_(True).shard(GPUS, axis=2)
-      v = base_v.clone().requires_grad_(True).shard(GPUS, axis=2)
+      q = base_q.clone().shard(GPUS, axis=2)
+      k = base_k.clone().shard(GPUS, axis=2)
+      v = base_v.clone().shard(GPUS, axis=2)
       Tensor.realize(q, k, v)
 
       do = base_do.clone().shard(GPUS, axis=2)
@@ -204,9 +204,9 @@ class TestFA(unittest.TestCase):
     Tensor.realize(q.grad, k.grad, v.grad)
 
     with Context(DEBUG=0):
-      q_ref = base_q.clone().requires_grad_(True)
-      k_ref = base_k.clone().requires_grad_(True)
-      v_ref = base_v.clone().requires_grad_(True)
+      q_ref = base_q.clone()
+      k_ref = base_k.clone()
+      v_ref = base_v.clone()
       Tensor.realize(q_ref, k_ref, v_ref)
 
       do_ref = base_do.clone()
