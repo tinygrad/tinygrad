@@ -598,7 +598,7 @@ class TestMoveTensor(unittest.TestCase):
     assert x is y
 
   def test_to_grad(self):
-    x = Tensor.eye(3, requires_grad=True, device=self.d0)
+    x = Tensor.eye(3, device=self.d0)
     y = Tensor([[2.0,0,-2.0]], requires_grad=True, device=self.d0)
     z = y.matmul(x).to(self.d1).sum()
     z.backward()
