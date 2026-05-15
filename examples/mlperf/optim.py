@@ -85,6 +85,8 @@ class GradAccClipAdamW(Optimizer):
 
   def _apply_update(self, t:Tensor, up:Tensor, master:Tensor|None=None) -> Tensor:
     w = master if master is not None else t
+    offloaded = master is None and self.device is not None
+    if offloaded: w = t.detach().to(self.device)
     wd = self.wd if t.ndim >= 3 else 0.0
     up = up.float().shard_like(w) + self.lr.to(w.device) * wd * w.detach()
     new_w = w.detach() - up
@@ -95,8 +97,11 @@ class GradAccClipAdamW(Optimizer):
       from examples.mlperf.models.flat_llama import FP8_MAX
       amax = new_w.float().abs().max(axis=tuple(range(1, new_w.ndim))).detach()  # per-layer amax for (n_layers, out, in)
       scale = FP8_MAX / (amax + 1e-8)
-      fp8_w = (new_w * scale.reshape(-1, *([1]*(new_w.ndim-1)))).clamp(-FP8_MAX, FP8_MAX).cast(t.dtype)
+      scaled = (new_w * scale.reshape(-1, *([1]*(new_w.ndim-1)))).clamp(-FP8_MAX, FP8_MAX)
+      ret = stochastic_round_fp8(scaled, t.dtype) if STOCHASTIC_ROUND else scaled.cast(t.dtype)
       if hasattr(t, '_inv_scale'):
-        t._inv_scale.assign(((amax + 1e-8) / FP8_MAX).cast(t._inv_scale.dtype))
-      return fp8_w
-    return new_w.cast(t.dtype)
+        inv_scale = ((amax + 1e-8) / FP8_MAX).cast(t._inv_scale.dtype)
+        t._inv_scale.assign(inv_scale.shard_like(t._inv_scale) if offloaded else inv_scale)
+    else:
+      ret = new_w.cast(t.dtype)
+    return ret.shard_like(t) if offloaded else ret
