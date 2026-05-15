@@ -7,15 +7,26 @@ from tinygrad.uop.ops import UOp, Ops
 STOCHASTIC_ROUND = getenv("STOCHASTIC_ROUND", 0)
 MASTER_WEIGHTS = getenv("MASTER_WEIGHTS", 0)
 
-def stochastic_round_bf16(x:Tensor) -> Tensor:
-  bits = x.bitcast(dtypes.uint32)
+def _sr_noise(x:Tensor) -> Tensor:
   if isinstance(x.device, tuple):
     shape = x.uop.shard_shape if x.uop.axis is not None else x.shape
-    noise = Tensor(UOp(Ops.MSTACK, dtypes.default_float, tuple(Tensor.rand(*shape, device=d).uop for d in x.device)))
-  else:
-    noise = x.rand_like()
-  noise = (noise * 0xFFFF).cast(dtypes.uint32)
+    noise = UOp(Ops.MSTACK, dtypes.default_float, tuple(Tensor.rand(*shape, device=d).uop for d in x.device))
+    if x.uop.axis is not None: noise = noise.multi(x.uop.axis)
+    return Tensor(noise)
+  return x.rand_like()
+
+def stochastic_round_bf16(x:Tensor) -> Tensor:
+  bits = x.bitcast(dtypes.uint32)
+  noise = (_sr_noise(x) * 0xFFFF).cast(dtypes.uint32)
   return ((bits + noise) & 0xFFFF0000).bitcast(dtypes.float32).cast(dtypes.bfloat16)
+
+def stochastic_round_fp8(x:Tensor, fp8_dtype=dtypes.fp8e4m3) -> Tensor:
+  # FP8E4M3 has 3 mantissa bits → round lower 20 of float32's 23 mantissa bits
+  # FP8E5M2 has 2 mantissa bits → round lower 21
+  truncate_bits = 20 if fp8_dtype == dtypes.fp8e4m3 else 21
+  bits = x.bitcast(dtypes.uint32)
+  noise = (_sr_noise(x) * ((1 << truncate_bits) - 1)).cast(dtypes.uint32)
+  return ((bits + noise) & (0xFFFFFFFF << truncate_bits)).bitcast(dtypes.float32).cast(fp8_dtype)
 
 class GradAccClipAdamW(Optimizer):
   def __init__(self, params:list[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-6, weight_decay=0.0, grad_acc=1, clip_norm=1.0, device=None, fused=FUSE_OPTIM):
@@ -78,8 +89,9 @@ class GradAccClipAdamW(Optimizer):
     up = up.float().shard_like(w) + self.lr.to(w.device) * wd * w.detach()
     new_w = w.detach() - up
     if master is not None: master.assign(new_w)
-    if STOCHASTIC_ROUND and t.dtype == dtypes.bfloat16: return stochastic_round_bf16(new_w)
-    if t.dtype in dtypes.fp8s:
+    if STOCHASTIC_ROUND and t.dtype == dtypes.bfloat16:
+      ret = stochastic_round_bf16(new_w)
+    elif t.dtype in dtypes.fp8s:
       from examples.mlperf.models.flat_llama import FP8_MAX
       amax = new_w.float().abs().max(axis=tuple(range(1, new_w.ndim))).detach()  # per-layer amax for (n_layers, out, in)
       scale = FP8_MAX / (amax + 1e-8)
