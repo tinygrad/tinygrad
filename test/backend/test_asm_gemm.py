@@ -12,8 +12,8 @@ def is_cdna4(): return Device[Device.DEFAULT].renderer.target.arch.startswith("g
 
 def run_asm_gemm(a_shape, b_shape, dtype=dtypes.float16, a_shard=None, b_shard=None, gpus:int=1) -> None:
   Tensor.manual_seed(0)
-  a_rand = Tensor.randn(a_shape, dtype=dtypes.float).sub(0.5).cast(dtype)
-  b_rand = Tensor.randn(b_shape, dtype=dtypes.float).sub(0.5).cast(dtype)
+  a_rand = Tensor.randn(a_shape, dtype=dtypes.float, requires_grad=False).sub(0.5).cast(dtype)
+  b_rand = Tensor.randn(b_shape, dtype=dtypes.float, requires_grad=False).sub(0.5).cast(dtype)
   with Context(DEBUG=0):
     Tensor.realize(a_rand, b_rand)
 

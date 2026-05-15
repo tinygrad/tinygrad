@@ -1480,8 +1480,9 @@ def train_llama3(llama2_70b_lora:bool=False):
   fp8_inv_scales = list(model._fp8_inv_scale.values())
 
   if not llama2_70b_lora:
+    from tinygrad.nn.state import get_state_dict
     model_state = get_state_dict(model)
-    for wname in ["wqkv", "wo", "w13", "w2"]:
+    for wname in model._fp8_inv_scale:
       w = model_state[wname]
       w._inv_scale = model._fp8_inv_scale[wname]
       if optim.master_params:
@@ -1497,7 +1498,7 @@ def train_llama3(llama2_70b_lora:bool=False):
     if is_dp: tokens = tokens.to(None).shard(device, 0)
     if is_mp: tokens = tokens.shard(device)
     if not is_sharding: tokens = tokens.to(None)
-    logits = model(tokens)[:, :-1] if llama2_70b_lora else model(tokens[:, :-1])
+    logits = model(tokens, save=bool(SMALL))[:, :-1] if llama2_70b_lora else model(tokens[:, :-1], save=bool(SMALL))
     if getenv("FAST_CE", 0):
       from extra.llama_kernels.fused_ce import fused_ce_loss
       loss = fused_ce_loss(logits.cast(dtypes.bfloat16), tokens[:, 1:], label_smoothing=0.0)

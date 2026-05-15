@@ -68,7 +68,12 @@ def main(args) -> None:
     data = viz.get_render(viz_data, step["query"])
     if isinstance(data.get("value"), Iterator):
       for m in data["value"]:
-        if "uop" in m: print(emit(m["graph"] if print_graph else m["uop"]))
+        if print_graph and "graph" in m and not args.json:
+          for k,v in m["graph"].items():
+            print(f"[{k}] {' '.join((lines:=v['label'].splitlines())[:5])}{'...' if len(lines) > 5 else ''}"+(f" tag={v['tag']}" if v['tag'] else ''))
+            if v["src"]:
+              print("  src: "+", ".join([f"{i}->[{x}]" for i,x in v["src"][:5]])+(f", ... and {len(v['src'])-5} more" if len(v["src"]) > 5 else ""))
+        elif "uop" in m: print(emit(m["graph"] if print_graph else m["uop"]))
         if not reconstruct_matches: return None
         if m.get("diff"):
           loc = pathlib.Path(m["upat"][0][0])
@@ -194,8 +199,8 @@ def main(args) -> None:
           if DEBUG >= 3 and s["name"] == "View Base AST": print_step(s)
           if DEBUG >= 4 and s["name"] == "View Source": print_step(s)
           if DEBUG >= 5 or ls: print(emit(" "*s["depth"]+s["name"]+(f" - {s['match_count']}" if s.get('match_count', 0) else '')))
-          if DEBUG >= 6 or (DEBUG >= 5 and s["name"] == "View Kernel Graph"): print_step(s, print_graph=True)
-          if DEBUG >= 7 or s["name"] in args.src: print_step(s, reconstruct_matches=True)
+          if DEBUG >= 6 or (DEBUG >= 5 and s["name"] == "View Kernel Graph") or (s["name"] in args.src): print_step(s, print_graph=True)
+          if DEBUG >= 7: print_step(s, reconstruct_matches=True)
       elif DEBUG >= 3 and k.get("ext"): print(emit(k["ext"]))
     for k in (produce_top_kernels if args.t else produce_all_kernels)(): render_event(k)
 
