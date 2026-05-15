@@ -21,8 +21,6 @@ def stochastic_round_bf16(x:Tensor) -> Tensor:
   return ((bits + noise) & 0xFFFF0000).bitcast(dtypes.float32).cast(dtypes.bfloat16)
 
 def stochastic_round_fp8(x:Tensor, fp8_dtype=dtypes.fp8e4m3) -> Tensor:
-  # FP8E4M3 has 3 mantissa bits → round lower 20 of float32's 23 mantissa bits
-  # FP8E5M2 has 2 mantissa bits → round lower 21
   truncate_bits = 20 if fp8_dtype == dtypes.fp8e4m3 else 21
   bits = x.bitcast(dtypes.uint32)
   noise = (_sr_noise(x) * ((1 << truncate_bits) - 1)).cast(dtypes.uint32)
@@ -85,8 +83,6 @@ class GradAccClipAdamW(Optimizer):
 
   def _apply_update(self, t:Tensor, up:Tensor, master:Tensor|None=None) -> Tensor:
     w = master if master is not None else t
-    offloaded = master is None and self.device is not None
-    if offloaded: w = t.detach().to(self.device)
     wd = self.wd if t.ndim >= 3 else 0.0
     up = up.float().shard_like(w) + self.lr.to(w.device) * wd * w.detach()
     new_w = w.detach() - up
@@ -95,13 +91,13 @@ class GradAccClipAdamW(Optimizer):
       ret = stochastic_round_bf16(new_w)
     elif t.dtype in dtypes.fp8s:
       from examples.mlperf.models.flat_llama import FP8_MAX
-      amax = new_w.float().abs().max(axis=tuple(range(1, new_w.ndim))).detach()  # per-layer amax for (n_layers, out, in)
-      scale = FP8_MAX / (amax + 1e-8)
-      scaled = (new_w * scale.reshape(-1, *([1]*(new_w.ndim-1)))).clamp(-FP8_MAX, FP8_MAX)
+      # delayed scaling: reuse previous step's inv_scale
+      scale = t._inv_scale.reciprocal().reshape(-1, *([1]*(new_w.ndim-1)))
+      scaled = (new_w * scale).clamp(-FP8_MAX, FP8_MAX)
       ret = stochastic_round_fp8(scaled, t.dtype) if STOCHASTIC_ROUND else scaled.cast(t.dtype)
-      if hasattr(t, '_inv_scale'):
-        inv_scale = ((amax + 1e-8) / FP8_MAX).cast(t._inv_scale.dtype)
-        t._inv_scale.assign(inv_scale.shard_like(t._inv_scale) if offloaded else inv_scale)
+      # update inv_scale for next step from quantized result
+      new_amax = (ret.float().abs().max(axis=tuple(range(1, ret.ndim))) * t._inv_scale).detach()
+      t._inv_scale.assign(((new_amax + 1e-8) / FP8_MAX).cast(t._inv_scale.dtype))
     else:
       ret = new_w.cast(t.dtype)
-    return ret.shard_like(t) if offloaded else ret
+    return ret
