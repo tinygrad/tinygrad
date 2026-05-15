@@ -28,9 +28,10 @@ from tinygrad.engine.realize import get_runtime
 from tinygrad.uop.ops import Ops, UPat, PatternMatcher, graph_rewrite
 
 class AMDComputeQueue(HCQEncoder):
-  def __init__(self, ctx:HCQ2LowerCtx, dev:AMDDevice):
-    super().__init__(ctx, dev)
-    self.pm4, self.gc, self.nbio, self.soc = self.dev.pm4, self.dev.gc, self.dev.nbio, self.dev.soc
+  def __init__(self, dev:AMDDevice):
+    super().__init__(dev.device)
+    self.dev = dev
+    self.pm4, self.gc, self.nbio, self.soc = dev.pm4, dev.gc, dev.nbio, dev.soc
 
   def pkt3(self, cmd, *vals): self.q(self.pm4.PACKET3(cmd, len(vals) - 1), *vals)
 
@@ -142,10 +143,10 @@ amd_inner_pm = PatternMatcher([
 
 def amd_lower_pm4(ctx, linear):
   prg = next(s for s in linear.src if s.op is Ops.PROGRAM)
-  dev = Device[prg.src[1].arg]
-  enc = AMDComputeQueue(ctx, dev)
+  dev = Device[dev_name:=prg.src[0].src[0].arg]
+  enc = AMDComputeQueue(dev)
   graph_rewrite(linear, amd_inner_pm, ctx=enc, name="amd: encode")
-  return UOp(Ops.BINARY, dtypes.void, arg=enc.blob).rtag((dev.device, "COMPUTE")).after(*enc.src)
+  return UOp(Ops.BINARY, dtypes.void, src=(UOp(Ops.DEVICE, arg="CPU"), *enc.src), arg=enc.blob).rtag("compute")
 
 def amd_submit_pm4(ctx, cf):
   dev = Device[cf.tag]
@@ -166,9 +167,10 @@ def amd_submit_pm4(ctx, cf):
   return doorbell.after(flush)[0].store(next_put)
 
 class AMDCopyQueue(HCQEncoder):
-  def __init__(self, ctx:HCQ2LowerCtx, dev:AMDDevice, queue_idx=0):
-    super().__init__(ctx, dev)
-    self.sdma, self.queue_idx, self.max_copy_size = self.dev.sdma, queue_idx, self.dev.max_copy_size
+  def __init__(self, dev:AMDDevice, queue_idx=0):
+    super().__init__(dev.device)
+    self.dev = dev
+    self.sdma, self.queue_idx, self.max_copy_size = dev.sdma, queue_idx, dev.max_copy_size
 
   def copy(self, x):
     dest, src, copy_size = self.get_dev_addr(x.src[0]), self.get_dev_addr(x.src[1]), x.arg
@@ -195,10 +197,10 @@ class AMDCopyQueue(HCQEncoder):
 
 def amd_lower_sdma(ctx, linear):
   copy = next(s for s in linear.src if s.op is Ops.COPY)
-  dev = Device[copy.src[0].buffer.device]
-  enc = AMDCopyQueue(ctx, dev)
+  dev = Device[dev_name:=copy.src[0].buffer.device]
+  enc = AMDCopyQueue(dev)
   graph_rewrite(linear, amd_inner_sdma_pm, ctx=enc, name="amd: encode sdma")
-  return UOp(Ops.BINARY, dtypes.void, arg=enc.blob).rtag((dev.device, "COPY")).after(*enc.src)
+  return UOp(Ops.BINARY, dtypes.void, src=(UOp(Ops.DEVICE, arg="CPU"), *enc.src), arg=enc.blob).rtag("copy")
 
 amd_inner_sdma_pm = PatternMatcher([
   (UPat(Ops.WAIT,  name="x"), lambda ctx, x: ctx.wait(x)),
@@ -239,7 +241,7 @@ class AMDProgramData:
   kernargs_segment_size:int; kernargs_alloc_size:int
   enable_dispatch_ptr:int; enable_private_segment_sgpr:int
 
-_amd_program_cache:dict[tuple[bytes,str], tuple[AMDProgramData,Buffer]] = {}
+_amd_program_cache:dict[tuple[bytes,str], tuple[AMDProgramData,bytes]] = {}
 
 def amd_build_program(ctx:HCQ2LowerCtx, prg:UOp) -> UOp:
   dev = Device[prg.src[1].arg]
@@ -249,9 +251,6 @@ def amd_build_program(ctx:HCQ2LowerCtx, prg:UOp) -> UOp:
     for off, sym, typ, addent in relocs:
       assert typ == 5, f"unknown AMD reloc {typ}"  # R_AMDGPU_REL64
       image[off:off+8] = struct.pack('<q', sym - off + addent)
-    lib_gpu = Buffer(dev.device, round_up(image.nbytes, 0x1000), dtypes.uint8, options=BufferSpec(nolru=True), preallocate=True)
-    dev.allocator._copyin(lib_gpu._buf, image)
-    dev.synchronize()
     desc = amdgpu_kd.llvm_amdhsa_kernel_descriptor_t.from_buffer_copy(bytes(image[rodata:rodata+ctypes.sizeof(amdgpu_kd.llvm_amdhsa_kernel_descriptor_t)]))
     if (lds:=((desc.group_segment_fixed_size+511)//512)&0x1FF) > (dev.iface.props['lds_size_in_kb']*1024)//512:
       raise RuntimeError("Too many resources requested: group_segment_size")
