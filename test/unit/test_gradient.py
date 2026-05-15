@@ -84,6 +84,12 @@ class TestTensorGradient(unittest.TestCase):
     np.testing.assert_allclose(src.grad.numpy(), [2.0, 2.0, 2.0, 2.0])
     np.testing.assert_allclose(x.grad.numpy(), [2.0, 2.0, 2.0, 2.0])
 
+  def test_setitem_on_grad_used_tensor_raises(self):
+    x = Tensor([1.0, 2.0, 3.0, 4.0], requires_grad=True).realize()
+    _ = (x * 2.0).sum()
+    with self.assertRaises(RuntimeError):
+      x[0] = 99.0
+
   def test_gradient_through_chained_unrealized_setitem(self):
     g1 = Tensor.zeros(4).contiguous()
     g1[2] = Tensor(1.0)

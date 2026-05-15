@@ -344,6 +344,13 @@ class TestWithGrad(unittest.TestCase):
     with self.assertRaises(RuntimeError):
       z[:2] = Tensor([0.0, 0.0])
 
+  def test_setitem_mutates_buffer(self):
+    x = Tensor([1.0, 2.0, 3.0, 4.0]).realize()
+    y = x * 2.0
+    x[0] = 99.0
+    # TODO: either raise or match eager
+    np.testing.assert_allclose(y.numpy(), [198.0, 4.0, 6.0, 8.0])
+
 class TestSetitemLoop(unittest.TestCase):
   def test_arange(self):
     N = 10
