@@ -2,13 +2,13 @@
 import unittest
 import numpy as np
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import Timing, Context
+from tinygrad.helpers import Timing, Context, cdiv
 from tinygrad.dtype import dtypes, ConstFloat  # noqa: F401
 from tinygrad.device import Device
 from tinygrad.uop.ops import Ops, UOp, UPat, exec_alu
 from tinygrad.uop.spec import spec_shared
 from tinygrad.uop.symbolic import sym
-from test.helpers import to_uops_list
+from test.helpers import eval_uop, to_uops_list
 
 class TestSafeCast(unittest.TestCase):
   def test_cast_folds(self):
@@ -201,6 +201,7 @@ class TestFastIdiv(unittest.TestCase):
       self.assertNotIn(Ops.CDIV, ops, f"For dtype={dt} FLOORDIV by power of two did not simplify to shift")
       self.assertNotIn(Ops.FLOORDIV, ops, f"For dtype={dt} FLOORDIV survived past late rewrite")
 
+  @Context(DISABLE_FAST_IDIV=0)
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU doesn't support long")
   def test_fast_idiv_and_mod(self):
     g = UOp(Ops.PARAM, dtypes.uint32.ptr(), (), 0)
@@ -220,6 +221,13 @@ class TestFastIdiv(unittest.TestCase):
     self.assertIn(Ops.SHR, ops)
     self.assertNotIn(Ops.CMOD, ops)
 
+  @Context(DISABLE_FAST_IDIV=0)
+  def test_fast_idiv_bounded_numerator_zero(self):
+    x = UOp.variable("x", 0, 1, dtype=dtypes.int32)
+    for val in range(2):
+      self.assertEqual(eval_uop(x.alu(Ops.CDIV, x.const_like(3)), vals=(val,)), cdiv(val, 3))
+
+  @Context(DISABLE_FAST_IDIV=0)
   def test_fast_idiv_remove_powers_of_two(self):
     ridx = UOp.range(2**20, 0)
     uops = to_uops_list([ridx//(7*64)], ren=Device[Device.DEFAULT].renderer)

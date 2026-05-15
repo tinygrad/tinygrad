@@ -92,10 +92,6 @@ class TestRawDiskBuffer(unittest.TestCase):
       # should fail because 3 int8 is 3 bytes but float16 is two and 3 isn't a multiple of 2
       Tensor.empty((3,), dtype=dtypes.int8, device=f"DISK:{tmp}").bitcast(dtypes.float16)
 
-    with self.assertRaises(RuntimeError):
-      # should fail because backprop through bitcast is undefined
-      Tensor.empty((4,), dtype=dtypes.int8, requires_grad=True, device=f"DISK:{tmp}").bitcast(dtypes.float16)
-
     pathlib.Path(tmp).unlink()
 
 @unittest.skipUnless(is_dtype_supported(dtypes.uint8), "need uint8")

@@ -92,7 +92,7 @@ class Tensor(OpMixin):
   training: ClassVar[bool] = False
 
   def __init__(self, data:ConstType|bytes|list|tuple|UOp|'numpy.ndarray'|pathlib.Path|None,
-               device:str|tuple|list|None=None, dtype:DTypeLike|None=None, requires_grad:bool|None=None, _force_unique:bool=False):
+               device:str|tuple|list|None=None, dtype:DTypeLike|None=None, requires_grad:bool=True, _force_unique:bool=False):
     if device is None:
       if isinstance(data, pathlib.Path): device = f"DISK:{data.resolve()}"  # keep it on the disk if device is None
       elif isinstance(data, UOp): device = data._device
@@ -103,9 +103,7 @@ class Tensor(OpMixin):
     # tensors can have gradients if you have called .backward
     self.grad:Tensor|None = None
 
-    # NOTE: this can be in three states. False and None: no gradient, True: gradient
-    # None (the default) will be updated to True if it's put in an optimizer
-    self.requires_grad:bool|None = requires_grad
+    self.requires_grad:bool = requires_grad
 
     # create a UOp from the different types of inputs
     if isinstance(data, UOp):
@@ -115,8 +113,8 @@ class Tensor(OpMixin):
     elif data is None:
       data = UOp.const(_dtype or dtypes.default_float, 0, _device)
     elif isinstance(data, get_args(ConstType)):
-      if _force_unique or requires_grad: data = UOp.unique_const(data, _dtype, _device)
-      else: data = UOp.const(_dtype or dtypes.from_py(data), data, _device)
+      dt = _dtype or dtypes.from_py(data)
+      data = UOp.unique_const(data, dt, _device) if _force_unique or (requires_grad and dtypes.is_float(dt)) else UOp.const(dt, data, _device)
     elif isinstance(data, bytes): data = _frompy(data, _dtype or dtypes.uint8, _device)
     elif isinstance(data, (list, tuple)):
       if _dtype is None:
@@ -151,11 +149,10 @@ class Tensor(OpMixin):
     srcs = (self,)+x
     new_uop: UOp = fxn(*[t.uop for t in srcs], *extra_args, **kwargs)
     if TRACEMETA >= 1 and (metadata:=_METADATA.get()) is not None: all_metadata[new_uop] = (metadata,)
-    needs_input_grad = [t.requires_grad for t in srcs]
     # directly create the Tensor
     ret = Tensor.__new__(Tensor)
     ret.uop, ret.grad = new_uop, None
-    ret.requires_grad = True if any(needs_input_grad) else None if None in needs_input_grad else False
+    ret.requires_grad = any(t.requires_grad for t in srcs)
     # add to all_tensors after construction succeeds
     all_tensors[weakref.ref(ret)] = None
     return ret
@@ -166,7 +163,7 @@ class Tensor(OpMixin):
   @staticmethod
   def unique_const(fill_value:ConstType|UOp, **kwargs) -> Tensor: return Tensor(fill_value, _force_unique=True, **kwargs)
 
-  def requires_grad_(self, requires_grad=True) -> Tensor:
+  def requires_grad_(self, requires_grad:bool=True) -> Tensor:
     # make the UOp unique if it's a CONST to prevent gradient accumulation bugs with cached const UOps
     if requires_grad and self.uop.op is Ops.CONST: self.replace(Tensor(self.uop.arg, device=self.device, dtype=self.dtype, requires_grad=True))
     self.requires_grad = requires_grad
@@ -566,7 +563,7 @@ class Tensor(OpMixin):
     return Tensor._device_seeds[device], low.cat(high)
 
   @staticmethod
-  def rand(*shape, device:str|None=None, dtype:DTypeLike|None=None, requires_grad:bool|None=None, contiguous:bool=True) -> Tensor:
+  def rand(*shape, device:str|None=None, dtype:DTypeLike|None=None, requires_grad:bool=True, contiguous:bool=True) -> Tensor:
     """
     Creates a tensor with the given shape, filled with random values from a uniform distribution over the interval `[0, 1)`.
 
@@ -595,7 +592,7 @@ class Tensor(OpMixin):
   # ***** creation helper functions *****
 
   @classmethod
-  def eye(cls, n:int, m:int|None=None, dtype=None, device=None, requires_grad:bool|None=None) -> Tensor:
+  def eye(cls, n:int, m:int|None=None, dtype=None, device=None, requires_grad:bool=True) -> Tensor:
     """
     Returns a 2-D tensor with `n` rows and `m` columns, with ones on the diagonal and zeros elsewhere.
 
@@ -617,9 +614,9 @@ class Tensor(OpMixin):
     if kwargs.get("device") is not None: raise RuntimeError("cannot specify `device` on `*_like` of a multi device tensor")
     if self.uop.axis is None: return fxn(self.shape, *args, dtype=dtype, **kwargs).shard(self.device)
     stacked = UOp.mstack(*[fxn(self.uop.shard_shape, *args, device=d, dtype=dtype, **kwargs).uop for d in self.device])
-    return Tensor(stacked.multi(self.uop.axis), requires_grad=kwargs.get("requires_grad"))
+    return Tensor(stacked.multi(self.uop.axis), requires_grad=kwargs.get("requires_grad", True))
 
-  def full_like(self, fill_value:ConstType, dtype=None, device=None, requires_grad=None) -> Tensor:
+  def full_like(self, fill_value:ConstType, dtype=None, device=None, requires_grad:bool=False) -> Tensor:
     """
     Creates a tensor with the same shape as `self`, filled with the given value.
     If `dtype` is not specified, the dtype of `self` is used.
@@ -631,12 +628,9 @@ class Tensor(OpMixin):
     print(Tensor.full_like(t, 42).numpy())
     ```
     """
-    if device is not None:
-      if isinstance(self.device, tuple): raise RuntimeError("cannot specify `device` on `full_like` of a multi device tensor")
-      return Tensor.full(self.shape, fill_value, dtype=dtype or self.dtype, device=device).requires_grad_(requires_grad)
-    if requires_grad:
-      return Tensor.full(self.shape, fill_value, dtype=dtype or self.dtype, device=self.device).requires_grad_(requires_grad)
-    return super().full_like(fill_value, dtype)
+    if device is None: return super().full_like(fill_value, dtype).requires_grad_(requires_grad)
+    if isinstance(self.device, tuple): raise RuntimeError("cannot specify `device` on `full_like` of a multi device tensor")
+    return Tensor.full(self.shape, fill_value, dtype=dtype or self.dtype, device=device).requires_grad_(requires_grad)
 
   def rand_like(self, **kwargs) -> Tensor:
     """
@@ -655,7 +649,7 @@ class Tensor(OpMixin):
 
   # ***** random functions *****
 
-  def randn_like(self, dtype:DTypeLike|None=None, requires_grad:bool|None=None, **kwargs) -> Tensor:
+  def randn_like(self, dtype:DTypeLike|None=None, requires_grad:bool=True, **kwargs) -> Tensor:
     """
     Creates a tensor with the same shape and sharding as `self`, filled with random values from a normal distribution with mean 0 and variance 1.
 
@@ -672,7 +666,7 @@ class Tensor(OpMixin):
     return (src[0].mul(2*math.pi).cos().mul((1 - src[1]).log().mul(-2).sqrt()).cast(dtype or self.dtype)).requires_grad_(requires_grad)
 
   @staticmethod
-  def randn(*shape, dtype:DTypeLike|None=None, requires_grad:bool|None=None, **kwargs) -> Tensor:
+  def randn(*shape, dtype:DTypeLike|None=None, requires_grad:bool=True, **kwargs) -> Tensor:
     """
     Creates a tensor with the given shape, filled with random values from a normal distribution with mean `0` and standard deviation `1`.
     If `dtype` is not specified, the default type is used.
@@ -707,7 +701,7 @@ class Tensor(OpMixin):
     return Tensor.uniform(*shape, low=low, high=high, dtype=dtype, **kwargs)
 
   @staticmethod
-  def normal(*shape, mean=0.0, std=1.0, requires_grad:bool|None=None, **kwargs) -> Tensor:
+  def normal(*shape, mean=0.0, std=1.0, requires_grad:bool=True, **kwargs) -> Tensor:
     """
     Creates a tensor with the given shape, filled with random values from a normal distribution with the given `mean` and standard deviation `std`.
     Requires `std >= 0`.
@@ -724,7 +718,7 @@ class Tensor(OpMixin):
     return (std * Tensor.randn(*shape, **kwargs) + mean).requires_grad_(requires_grad)
 
   @staticmethod
-  def uniform(*shape, low=0.0, high=1.0, dtype:DTypeLike|None=None, requires_grad:bool|None=None, **kwargs) -> Tensor:
+  def uniform(*shape, low=0.0, high=1.0, dtype:DTypeLike|None=None, requires_grad:bool=True, **kwargs) -> Tensor:
     """
     Creates a tensor with the given shape, filled with random values from a uniform distribution over the interval `[low, high)`.
     Requires `low < high`.
@@ -815,7 +809,7 @@ class Tensor(OpMixin):
     print(Tensor.randperm(6).numpy())
     ```
     """
-    return Tensor.rand(n, device=device, **kwargs).argsort().cast(dtype).requires_grad_(kwargs.get("requires_grad"))
+    return Tensor.rand(n, device=device, **kwargs).argsort().cast(dtype).requires_grad_(kwargs.get("requires_grad", True))
 
   def multinomial(self:Tensor, num_samples:int = 1, replacement:bool = False) -> Tensor:
     """
@@ -883,7 +877,7 @@ class Tensor(OpMixin):
     """
     all_uops = self.uop.toposort()
     tensors_need_grad: list[Tensor] = [t for tref in all_tensors if (t:=tref()) is not None and \
-                                       t.uop in all_uops and t.requires_grad]
+                                       t.uop in all_uops and t.requires_grad and t.is_floating_point()]
     # clear contexts
     for t,g in zip(tensors_need_grad, self.gradient(*tensors_need_grad, gradient=gradient)):
       assert g.shape == t.shape, f"grad shape must match tensor shape, {g.shape!r} != {t.shape!r}"
@@ -1027,12 +1021,13 @@ class Tensor(OpMixin):
 
   def __setitem__(self, indices, v:Tensor|PyConst|list|tuple) -> None:
     if isinstance(v, Tensor) and v.dtype != self.dtype: raise RuntimeError(f"setitem dtype mismatch: {self.dtype=} != {v.dtype=}")
-    if self.requires_grad or (isinstance(v, Tensor) and v.requires_grad):
-      # for +=/-=, v's graph references self.uop through the view — exclude those from the stale-use check
-      v_uop, v_bw = (v.uop, v.uop.backward_slice) if isinstance(v, Tensor) else (None, {})
-      if any(self.uop in t.uop.backward_slice for tref in all_tensors
-             if (t:=tref()) is not None and t is not self and t.uop is not v_uop and t.uop not in v_bw):
-        raise RuntimeError("can't setitem on a tensor that already has other uses and requires grad")
+    # raise if mutation would diverge from eager (allow only pure views of a realized buffer; exclude +=/-= RHS via v_uop/v_bw)
+    v_uop, v_bw = (v.uop, v.uop.backward_slice) if isinstance(v, Tensor) else (None, {})
+    shared = self.uop.base if self.uop.base.is_realized else None
+    if any(self.uop in t.uop.backward_slice_with_self and t.uop.base is not shared for tref in all_tensors
+           if (t:=tref()) is not None and t is not self and t.uop is not v_uop and t.uop not in v_bw):
+      raise RuntimeError("can't setitem on a tensor with other uses")
+    if not self.uop.base.is_realized and self.is_floating_point() and (self.requires_grad or (isinstance(v, Tensor) and v.requires_grad)):
       if not isinstance(v, Tensor): v = Tensor(v, device=self.device, dtype=self.dtype)
       # __iadd__/__isub__ creates AFTER(view, STORE(view, computed)); unwrap to get the computed value
       if v.uop.op is Ops.AFTER and any(s.op is Ops.STORE for s in v.uop.src[1:]): v = v._apply_uop(lambda x: x.src[1].src[1])
@@ -1146,12 +1141,13 @@ class Tensor(OpMixin):
     0x8000000000008002, 0x8000000000000080, 0x800a, 0x800000008000000a, 0x8000000080008081, 0x8000000000008080, 0x80000001, 0x8000000080008008)]
 
     rate, dsbyte = {"sha3_224": (144, 6), "sha3_256": (136, 6), "shake_128": (168, 31)}[cfg] if isinstance(cfg, str) else cfg
-    data, data_pad = self.bitcast(dtypes.uint8).reshape(prod(self.shape[:-1]), self.shape[-1]), rate - (self.shape[-1] * self.dtype.itemsize % rate)
+    data = self.bitcast(dtypes.uint8).reshape(prod(self.shape[:-1]), self.shape[-1])
+    data_pad = rate - data.shape[-1] % rate
     # pad batches then pad blocks
-    data = data.pad((None, (0, data_pad))).reshape(bs := data.shape[0], -1, rate).pad((None, None, (0, 200 - rate)))
+    data = data.pad((None, (0, data_pad))).reshape(bs := data.shape[0], -1, rate).pad_to(None, None, 200)
 
     # create pad mask
-    lbe = prod(data.shape[1:]) + rate - data_pad - 200
+    lbe = (data.shape[1] - 1) * 200 + rate - data_pad
     if data_pad == 1: mb = [(lbe, 0), (1, dsbyte ^ 0x80), (200 - rate, 0)]
     else: mb = [(lbe, 0), (1, dsbyte), (data_pad - 2, 0), (1, 0x80), (200 - rate, 0)]
     pad_mask = Tensor.cat(*(Tensor(v, dtype=dtypes.uint8, device=data.device).expand(l) for l, v in mb if l > 0)).unsqueeze(0)
@@ -1160,7 +1156,7 @@ class Tensor(OpMixin):
 
     state = Tensor.zeros(bs, 25, device=self.device, dtype=dtypes.uint64)
     for k in range(int(data.shape[1])):
-      state = state ^ data.shrink((None, (k, k+1), None)).squeeze(1)
+      state = state ^ data[:, k]
       for i in range(24): # f1600
         # θ step
         p = state.reshape(bs, 5, 5).transpose(2, 1)
@@ -1179,11 +1175,7 @@ class Tensor(OpMixin):
     assert self.dtype == dtypes.uint8, "only support uint8 tensors for hashing"
     assert self.ndim == 2, "only support batched 1d tensors"
     assert self.shape[1] == 1024 * 1024, "only support messages of 1mb"
-
-    blocks = self.shape[0] * self.shape[1] // 4096
-    data = self.reshape(blocks, 4096)
-    block_hashes = data.keccak("shake_128").reshape(self.shape[0], 4096)
-    return block_hashes.keccak("shake_128").reshape(self.shape[0], 16)
+    return self.reshape(-1, 4096).keccak("shake_128").reshape(self.shape[0], -1).keccak("shake_128")
 
   def hash(self) -> Tensor:
     """
@@ -1193,19 +1185,14 @@ class Tensor(OpMixin):
     print(t.data().hex())
     ```
     """
-
     data = self.flatten().bitcast(dtypes.uint8)
-    if (tsize := data.shape[0]) % 2**20 != 0: data = data.pad((0, 2**20 - tsize % 2**20))
-    base_chunks = ceildiv(data.shape[0], 2**20)
-    tree_depth = math.ceil(math.log(base_chunks, 65536)) if base_chunks > 1 else 0
-
-    level_chunks = base_chunks
-    for _ in range(tree_depth + 1):
-      data = data.reshape(level_chunks, 2**20)._hash_1mb().flatten()
-      if (tsize := data.shape[0]) % 2**20 != 0: data = data.pad((0, 2**20 - tsize % 2**20))
-      level_chunks = ceildiv(data.shape[0], 2**20)
-
-    return data[:16]
+    n = data.shape[0]
+    assert isinstance(n, int), "hash requires concrete shape"
+    chunks = ceildiv(n, 2**20)
+    while chunks > 1:
+      data = data.pad_to(chunks * 2**20).reshape(chunks, 2**20)._hash_1mb().flatten()
+      chunks = ceildiv(chunks, 65536)
+    return data.pad_to(2**20).unsqueeze(0)._hash_1mb().flatten()[:16]
 
   # ***** processing ops *****
 
@@ -1433,8 +1420,6 @@ class Tensor(OpMixin):
     """
     Bitcasts `self` to the given `dtype` of the same itemsize.
 
-    `self` must not require a gradient.
-
     ```python exec="true" source="above" session="tensor" result="python"
     t = Tensor([-1, 2, 3], dtype=dtypes.int32)
     print(t.dtype, t.numpy())
@@ -1444,7 +1429,6 @@ class Tensor(OpMixin):
     print(t.dtype, t.numpy())
     ```
     """
-    if self.requires_grad: raise RuntimeError("can't backprop through bitcast")
     dt = to_dtype(dtype)
     if (ns:=dt.itemsize) != (os:=self.dtype.itemsize) and (self.shape[-1]*os) % ns != 0: raise RuntimeError("unsupported size in bitcast")
     if (not isinstance(self.device, str) or not self.device.startswith("DISK")) and ns != os:
@@ -1477,7 +1461,7 @@ class Tensor(OpMixin):
   def image_conv2d(self, weight:Tensor, bias:Tensor|None=None, groups=1, stride=1, dilation=1, padding=0, dtype=None) -> Tensor:
     dtsz = 2 if FLOAT16 else 4
 
-    (bs,_,iy,ix), (cout,cin,H,W) = self.shape, weight.shape
+    (bs,_,_,_), (cout,cin,H,W) = self.shape, weight.shape
     assert isinstance(cin, int) and isinstance(cout, int)
     x, w = self, weight.reshape(groups, (rcout := cout//groups), cin, H, W)
 
@@ -1513,7 +1497,6 @@ class Tensor(OpMixin):
     def ipad(t, i, amt):
       shape = (None,)*i + (amt,) + (None,)*(t.ndim-i-1)
       return Tensor(True, device=t.device).expand(t.shape).pad_to(shape).where(t.pad_to(shape), Invalid) if amt != t.shape[i] else t
-
     # align a dimension, use at to specify the dimension to pad in, defaults to first
     def pad_align(t, dim, at=None, force=False):
       # align to 64 pixels when height is real, otherwise 64 bytes is sufficient
@@ -1531,7 +1514,7 @@ class Tensor(OpMixin):
     else: x, w = x.contiguous(), w.contiguous()
 
     # undo alignment hacks
-    if bank_conflict: x, w = x[:, :, :ix, :, :cin // 4, :], w[:, :H, :cin // 4, ...]
+    if bank_conflict: x, w = x[:, :, :, :, :cin // 4, :], w[:, :, :cin // 4, ...]
     else: x, w = x[:, :, :ix, :], w[:, :H, ...]
 
     # expand out
@@ -1554,13 +1537,9 @@ class Tensor(OpMixin):
     # the conv!
     ret = (x*w).cast(dtypes.float32).sum((-4, -3, -2, -1), dtype=dtype)
 
-    if added_ox:
-      ret = ret.reshape(bs, oy, ox + added_ox, groups, rcout)[:, :, :ox, ...]
-
+    ret = ret.reshape(bs, oy, ox + added_ox, groups, rcout)[:, :, :ox, :, :]
     # undo hack for non multiples of 4 on C.rcout
-    if added_output_channels:
-      ret = ret.reshape(bs, oy, ox, groups, rcout)[:, :, :, :, :-added_output_channels]
-
+    if added_output_channels: ret = ret[:, :, :, :, :-added_output_channels]
     # NCHW output
     ret = ret.reshape(bs, oy, ox, groups * (rcout - added_output_channels)).permute(0,3,1,2)
     return ret if bias is None else ret.add(bias.reshape(1, -1, 1, 1))

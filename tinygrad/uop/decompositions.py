@@ -286,6 +286,7 @@ def fast_idiv(target: Target, x: UOp, d: int, dont_cast=False) -> UOp|None:
   is_unsigned = x.vmin>=0 or x.dtype in dtypes.uints
   assert d>0, "Sign should have been taken out of divisor"
   vmin,vmax = max(x.vmin, x.dtype.min), min(x.vmax, x.dtype.max)
+  if vmin > -d and vmax < d: return x.const_like(0)
   m,s = magicgu(max(vmax, abs(vmin)), d)
   if m*vmin >= x.dtype.min and m*vmax <= x.dtype.max:
     return ((x*m) >> s) if is_unsigned else ((x*m) >> s) + (x<0).where(x.ufix(1), 0)
