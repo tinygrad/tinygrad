@@ -1,4 +1,5 @@
 import math, os
+from typing import ClassVar
 if __name__ == "__main__":
   os.environ["DEFAULT_FLOAT"] = "bfloat16"
   os.environ["OPTIM_DTYPE"] = "bfloat16"
@@ -103,6 +104,8 @@ def allgather(x: Tensor) -> Tensor:
   return Tensor(x.uop.copy_to_device(x.device), device=x.device, dtype=x.dtype, requires_grad=x.requires_grad)
 
 class FlatTransformer:
+  fsdp_wnames: ClassVar[tuple[str,...]] = ("wqkv", "wo", "w13", "w2")
+
   def __init__(self, dim:int, hidden_dim:int, n_heads:int, n_layers:int, norm_eps:float, vocab_size:int, n_kv_heads:int|None=None, rope_theta:int=10000,
                max_context:int=1024, lora_rank:int=16, lora_alpha:float=32.0, lora_dropout:float=0.1):
     self.vocab_size = vocab_size
@@ -251,7 +254,9 @@ class FlatTransformer:
 
   @function(precompile=True, precompile_backward=True)
   def run_layer(self, x:Tensor, freqs_cis:Tensor, attn_kwargs:dict, ffn_kwargs:dict, lora_kwargs:dict, save:bool=True):
-    # TODO - FSDP
+    if self.fsdp:
+      for fsdp_wname in self.fsdp_wnames:
+        in_dict[fsdp_wname] = allgather((in_dict:=(attn_kwargs if fsdp_wname in attn_kwargs else ffn_kwargs))[fsdp_wname])
     attn, attn_amaxs, attn_saves = self.attention(x, freqs_cis, **attn_kwargs, **lora_kwargs)
     ffn, h, ffn_amaxs, ffn_saves = self.feed_forward(x, attn, **ffn_kwargs)
     h = h + ffn
@@ -263,6 +268,7 @@ class FlatTransformer:
     assert not (mp and fsdp)
     if not mp:
       if fsdp:
+        assert not SPLIT_W13, "fsdp + split w13 unsupported"
         self.wqkv.shard_(device, axis=1)
         self.wo.shard_(device, axis=1)
         self.w13.shard_(device, axis=1)
