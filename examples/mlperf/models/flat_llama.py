@@ -306,7 +306,11 @@ if __name__ == "__main__":
 
   # preallocate all the grad buffers and zero them out
   grad_dtype = lambda x: dtypes.bfloat16 if x.dtype in dtypes.fp8s else x.dtype
-  grads = {x:Tensor.zeros_like(x, dtype=grad_dtype(x)).contiguous() for x in state.values() if x.requires_grad is None}
+  def _make_grad(x):
+    if isinstance(x.device, tuple) and x.uop.axis is not None:
+      return Tensor.zeros(x.shape, dtype=grad_dtype(x), device=x.device[0]).shard_(x.device, axis=x.uop.axis).contiguous()
+    return Tensor.zeros(x.shape, dtype=grad_dtype(x), device=x.device).contiguous()
+  grads = {x:_make_grad(x) for x in state.values() if x.requires_grad is None}
 
   # print model size
   sz = 0
@@ -322,16 +326,22 @@ if __name__ == "__main__":
   if MP > 1: tokens = tokens.shard(tuple(f"{Device.DEFAULT}:{i}" for i in range(MP)))
 
   @TinyJit
-  def jit_step(tokens:Tensor):
+  def fwd_bwd(tokens:Tensor):
     with Timing("python forward: "): loss = model(tokens[:, :-1], save=llama_size=="8B").sparse_categorical_crossentropy(tokens[:, 1:])
     with Timing("python backward: "):
       for t,g in zip(grads, loss.gradient(*grads)):
         apply_grad(grads[t], g.uop)
-    with Timing("run step: "): loss.realize(*grads.values())
+    with Timing("run fwd_bwd: "): loss.realize(*grads.values())
+
+  @TinyJit
+  def optim_step():
+    for g in grads.values(): g.assign(g.zeros_like())
+    Tensor.realize(*grads.values())
 
   for i in range(6):
     GlobalCounters.reset()
     profile_marker(f"step {i}")
     with Timing(colored(f"*** step {i}: ", "red")):
-      jit_step(tokens)
+      fwd_bwd(tokens)
+      optim_step()
   print("mem per device: " + ', '.join(f"{dev}: {mem/1e9:.2f} GB" for dev, mem in sorted(GlobalCounters.mem_used_per_device.items())))
