@@ -342,7 +342,7 @@ def is_dtype_supported(dtype:DType, target:Target|None=None) -> bool:
   target = target or DEV.target(Device.DEFAULT)
   if dtype == dtypes.bfloat16:
     match target.device:
-      case "METAL": target.arch.startswith("Apple") and int(target.arch[:5]) >= 6
+      case "METAL": target.arch.startswith("Apple") and int(target.arch[5:]) >= 6
       case "CUDA": return (not CI or BENCHMARKS) and target.renderer != "PTX"
       case "NV": return (not CI or BENCHMARKS) and target.renderer not in ("PTX", "NAK")
       case "CPU": return (not CI or BENCHMARKS) and platform.machine() in {"arm", "arm64", "aarch64", "x86_64", "amd64"} and target.renderer != "LVP"
