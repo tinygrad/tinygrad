@@ -7,15 +7,15 @@ def get_node(graph:dict, key): return graph[str(key)]
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser(description="print CALL graph from DEBUG=5 tinygrad.viz.cli --json output")
-  parser.add_argument("kernel", type=str, default=None, help="Kernel name to stop at (default: print all kernels)")
+  parser.add_argument("kernel", type=str, nargs="?", default="ALL", metavar="NAME", help="Kernel name to stop at (default: print all kernels)")
   args = parser.parse_args()
   ref:int|None = None
   for line in sys.stdin:
     if not line.strip(): continue
     graph = json.loads(line)
-    if ref is not None and graph.get("ref") == ref:
+    if graph.get("ref") is not None and (args.kernel == "ALL" or graph["ref"] == ref):
       print(graph)
-      if (v:=json.loads(next(sys.stdin)).get("value")): print(v)
+      if (v:=json.loads(next(sys.stdin, "{}")).get("value")): print(v)
     if ref is not None or not isinstance(rec:=next(iter(graph.values()), {}), dict) or "label" not in rec: continue
     for v in graph.values():
       if not v["label"].startswith("CALL"): continue
@@ -39,6 +39,6 @@ if __name__ == "__main__":
           src_str = ["SRC"]+get_node(graph, get_node(graph, s)["src"][0][1])["label"].splitlines()[1:]
           print(" ".join(idx_str+src_str))
         ss += [x[1] for x in get_node(graph, s)["src"]]
-      if args.kernel is not None and args.kernel in ansistrip(v["label"]):
+      if args.kernel != "ALL" and args.kernel in ansistrip(v["label"]):
         ref = v["ref"]
         break
