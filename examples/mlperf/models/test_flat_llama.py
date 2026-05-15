@@ -3,7 +3,6 @@ os.environ["WQKV"] = "1"
 import unittest
 import numpy as np
 from tinygrad import Tensor, nn, dtypes
-from tinygrad.nn.state import get_parameters
 from tinygrad.device import is_dtype_supported, Device
 from examples.mlperf.models.llama import Transformer
 from examples.mlperf.models.flat_llama import FlatTransformer
@@ -45,8 +44,6 @@ class TestFlatLlama(unittest.TestCase):
     flat = FlatTransformer(**params)
     copy_weights(flat, ref)
 
-    for p in get_parameters(ref): p.requires_grad_(True)
-    for p in get_parameters(flat): p.requires_grad_(True)
     Tensor.realize(*nn.state.get_state_dict(flat).values())
 
     tokens = Tensor([[1, 50, 100, 999, 2, 10]])
