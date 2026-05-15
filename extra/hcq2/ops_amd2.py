@@ -265,9 +265,10 @@ def amd_build_program(ctx:HCQ2LowerCtx, prg:UOp) -> UOp:
       kernargs_alloc_size=desc.kernarg_size + (ctypes.sizeof(hsa.hsa_kernel_dispatch_packet_t) if edp else 0),
       enable_dispatch_ptr=edp,
       enable_private_segment_sgpr=desc.kernel_code_properties & hsa.AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER,
-    ), lib_gpu)
-  data, lib_gpu = cached
-  return prg.replace(src=(UOp.from_buffer(lib_gpu, dev.device),), arg=(data, prg.arg))
+    ), bytes(image))
+  data, image_bytes = cached
+  bin_uop = UOp(Ops.BINARY, dtypes.uint64, src=(UOp(Ops.DEVICE, arg=dev.device),), arg=image_bytes).rtag("program")
+  return prg.replace(src=(bin_uop,), arg=(data, prg.arg))
 
 class AMDAllocator(HCQAllocator['AMDDevice']):
   def __init__(self, dev:AMDDevice):
