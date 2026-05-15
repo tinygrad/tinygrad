@@ -306,11 +306,6 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
   def _broadcasted(self, y, reverse=False) -> tuple[Self, Self]:
     if not isinstance(y, type(self)): y = self.ufix(y)
     x, y = (self, y) if not reverse else (y, self)
-    # ValueError: unsized ptr has shape (-1,) which can't broadcast; RuntimeError: shape mismatch
-    #try:
-    #  out_shape = _broadcast_shape(x.shape, y.shape)
-    #  x, y = x._broadcast_to(out_shape), y._broadcast_to(out_shape)
-    #except (RuntimeError, ValueError): pass
     # ptr dtypes aren't in the promo lattice
     if x.dtype == y.dtype or any(isinstance(d, PtrDType) for d in (x.dtype, y.dtype)): return x, y
     return x.cast(out_dtype := least_upper_dtype(x.dtype, y.dtype)), y.cast(out_dtype)
