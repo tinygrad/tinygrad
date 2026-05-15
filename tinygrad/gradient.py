@@ -78,6 +78,9 @@ pm_gradient = PatternMatcher([
   (UPat(Ops.TUPLE), lambda ctx: ctx.src),
   (UPat(Ops.AFTER, src=(UPat.var("d"), UPat(Ops.CALL, name="k"))), lambda ctx, d, k:
     (ctx, UOp.maketuple(*(ctx if i == k.src.index(d)-1 else UOp(Ops.NOOP) for i in range(len(k.src)-1))))),
+  # clone/assign gradient passes through to val
+  (UPat(Ops.AFTER, src=(UPat(), UPat(Ops.STORE))), lambda ctx: (None, ctx)),
+  (UPat(Ops.STORE, src=(UPat(), UPat())), lambda ctx: (None, ctx)),
   # there's no gradient for bitcast
   (UPat(Ops.BITCAST), lambda: (None,)),
 ])

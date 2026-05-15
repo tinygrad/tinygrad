@@ -35,9 +35,8 @@ if __name__ == "__main__":
 
   params = nn.state.get_parameters(model)
 
-  # init params, set requires grad on the ones we need gradients of
+  # init params
   for x in params:
-    if x.requires_grad is None: x.requires_grad_()
     x.replace(x.contiguous())
   Tensor.realize(*params)
 

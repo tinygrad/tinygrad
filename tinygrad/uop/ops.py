@@ -213,6 +213,10 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
            Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE | Ops.BINARY | Ops.INS | Ops.TUPLE | Ops.CALL | Ops.FUNCTION:
         return None
 
+      # hacks for NOOP
+      case Ops.NOOP:
+        return self.src[0]._shape if len(self.src) >= 1 else None
+
       case Ops.GETTUPLE:
         # GETTUPLE extracts from a TUPLE (possibly through a FUNCTION)
         in_tuple = self.src[0].src[0] if self.src[0].op is Ops.FUNCTION else self.src[0]
@@ -258,7 +262,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       case Ops.WMMA | Ops.SHAPED_WMMA: return self.src[2]._shape
 
       # passthrough ops
-      case Ops.MSTACK | Ops.MSELECT | Ops.DETACH | Ops.CONTIGUOUS | Ops.CONTIGUOUS_BACKWARD | Ops.AFTER | Ops.PATCH | Ops.LOAD:
+      case Ops.MSTACK | Ops.MSELECT | Ops.DETACH | Ops.CONTIGUOUS | Ops.CONTIGUOUS_BACKWARD | Ops.AFTER | Ops.PATCH | Ops.LOAD | \
+           Ops.COPY | Ops.ALLREDUCE:
         return self.src[0]._shape
       # REDUCE with empty axis is passthrough (lowered form)
       case Ops.REDUCE if len(self.arg[1]) == 0:
@@ -312,10 +317,12 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
           return tuple(1 if i in axis_arg else s for i,s in enumerate(ps))
 
     # elementwise ops keep the shape the same. all inputs with shape must match
-    if self.op in GroupOp.ALU.union({Ops.CAST, Ops.COPY, Ops.NOOP, Ops.GROUP, Ops.SINK, Ops.ALLREDUCE, Ops.STORE}):
-      input_shapes = [x._shape for x in self.src if x._shape is not None]
-      if len(input_shapes) == 0: return None
-      if not all_same(input_shapes): raise RuntimeError(f"shape mismatch at {self.op}: {input_shapes} {[x.op for x in self.src]}")
+    if self.op in GroupOp.ALU.union({Ops.CAST, Ops.GROUP, Ops.STORE}):
+      input_shapes = [x._shape for x in self.src]
+      assert len(self.src) > 0 and all(x is not None for x in input_shapes), f"None input shape not supported for {self.op}"
+      # TODO: add broadcasting here
+      if not all_same(input_shapes):
+        raise RuntimeError(f"shape mismatch at {self.op}: {input_shapes} {[x.op for x in self.src]}")
       return input_shapes[0]
 
     # all Ops must be explicitly handled

@@ -190,7 +190,6 @@ class TestSoftmaxFusion(unittest.TestCase):
 
   def test_softmax_bw(self):
     print("*** softmax bw ***")
-    self.test.requires_grad_()
     with Context(NOOPT=1, DEBUG=max(DEBUG.value, 2)):
       self.test.softmax(-1).sum().backward()
       sg = self.test.grad.realize()
