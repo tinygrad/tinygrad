@@ -762,6 +762,47 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     ret = mask.where(x_unsqueezed - x_cummax.unsqueeze(-1), self.dtype.min).exp().sum(-1).log() + x_cummax
     return ret.transpose(-1, axis)
 
+  def associative_scan(self, fn: Callable[["Self", "Self"], "Self"], axis: int = 0, reverse: bool = False) -> Self:
+    """
+    Computes an inclusive prefix scan along the given axis using an arbitrary associative function.
+
+    This is similar to `jax.lax.associative_scan`. Given input ``[a, b, c, d]`` and function ``fn``,
+    produces ``[a, fn(a,b), fn(fn(a,b),c), fn(fn(fn(a,b),c),d)]``.
+
+    Uses the Kogge-Stone parallel algorithm: O(n log n) work, O(log n) depth.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([1., 2., 3., 4.])
+    print(t.associative_scan(lambda a, b: a + b).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([1., 2., 3., 4.])
+    print(t.associative_scan(lambda a, b: a + b, reverse=True).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([[1., 2., 3.], [4., 5., 6.]])
+    print(t.associative_scan(lambda a, b: a * b, axis=1).numpy())
+    ```
+    """
+    axis = self._resolve_dim(axis)
+    if self.ndim == 0 or 0 in self.shape: return self
+    if reverse:
+      return self.flip(axis).associative_scan(lambda a, b: fn(b, a), axis=axis).flip(axis)
+    n = self.shape[axis]
+    x = self
+    d = 1
+    while d < n:
+      # Pad d zeros on the left of the scan axis, then shrink to original size.
+      # Result: shifted[i] = x[i-d] for i >= d, 0 for i < d.
+      pads = tuple((d, 0) if i == axis else None for i in range(x.ndim))
+      slices = tuple(slice(None, n) if i == axis else slice(None) for i in range(x.ndim))
+      shifted = x._pad_constant(pads, 0).__getitem__(slices)
+      # Update positions i >= d with fn(x[i-d], x[i]); keep positions i < d unchanged.
+      mask = (type(self).arange(n, device=x.device) >= d).reshape(tuple(n if i == axis else 1 for i in range(x.ndim))).expand(x.shape)
+      x = mask.where(fn(shifted, x), x)
+      d <<= 1
+    return x
+
   def argmax(self, axis=None, keepdim=False) -> Self:
     """
     Returns the indices of the maximum value of the tensor along the specified axis.

@@ -1756,6 +1756,29 @@ class TestOps(unittest.TestCase):
   def test_logcumsumexp_numerical(self):
     helper_test_op(None, lambda x: torch.logcumsumexp(x, dim=0), lambda x: x.logcumsumexp(), atol=1e-7, grad_atol=1e-7, vals=[[0.0, 100.0]])
 
+  def test_associative_scan_add(self):
+    helper_test_op([(10,)], lambda x: torch.cumsum(x, dim=0), lambda x: x.associative_scan(lambda a, b: a + b, axis=0))
+    helper_test_op([(20, 30)], lambda x: torch.cumsum(x, dim=0), lambda x: x.associative_scan(lambda a, b: a + b, axis=0))
+    helper_test_op([(20, 30)], lambda x: torch.cumsum(x, dim=1), lambda x: x.associative_scan(lambda a, b: a + b, axis=1))
+    helper_test_op([(5, 6, 7)], lambda x: torch.cumsum(x, dim=2), lambda x: x.associative_scan(lambda a, b: a + b, axis=2))
+    helper_test_op([(5, 6, 7)], lambda x: torch.cumsum(x, dim=-1), lambda x: x.associative_scan(lambda a, b: a + b, axis=-1))
+  def test_associative_scan_mul(self):
+    helper_test_op([(10,)], lambda x: torch.cumprod(x, dim=0), lambda x: x.associative_scan(lambda a, b: a * b, axis=0), low=0.5, high=1.5)
+    helper_test_op([(20, 15)], lambda x: torch.cumprod(x, dim=1), lambda x: x.associative_scan(lambda a, b: a * b, axis=1), low=0.5, high=1.5)
+  def test_associative_scan_max(self):
+    helper_test_op([(10,)], lambda x: torch.cummax(x, dim=0).values, lambda x: x.associative_scan(lambda a, b: a.maximum(b), axis=0), forward_only=True)
+    helper_test_op([(8, 9)], lambda x: torch.cummax(x, dim=0).values, lambda x: x.associative_scan(lambda a, b: a.maximum(b), axis=0), forward_only=True)
+    helper_test_op([(8, 9)], lambda x: torch.cummax(x, dim=1).values, lambda x: x.associative_scan(lambda a, b: a.maximum(b), axis=1), forward_only=True)
+  def test_associative_scan_reverse(self):
+    # reverse cumsum: sum from right to left
+    helper_test_op([(10,)], lambda x: torch.cumsum(x.flip(0), dim=0).flip(0), lambda x: x.associative_scan(lambda a, b: a + b, axis=0, reverse=True))
+    helper_test_op([(8, 9)], lambda x: torch.cumsum(x.flip(1), dim=1).flip(1), lambda x: x.associative_scan(lambda a, b: a + b, axis=1, reverse=True))
+  def test_associative_scan_zero_dim(self):
+    helper_test_op([(2, 0, 4)], lambda x: torch.cumsum(x, dim=1), lambda x: x.associative_scan(lambda a, b: a + b, axis=1))
+    helper_test_op([(0, 3)], lambda x: torch.cumsum(x, dim=0), lambda x: x.associative_scan(lambda a, b: a + b, axis=0))
+  def test_associative_scan_scalar(self):
+    helper_test_op([()], lambda x: torch.cumsum(x, dim=0), lambda x: x.associative_scan(lambda a, b: a + b, axis=0))
+
   def test_sinh(self):
     helper_test_op([(45,65)], lambda x: x.sinh(), grad_atol=1e-6)
     # TODO: backward nan instead of inf
