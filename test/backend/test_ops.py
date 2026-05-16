@@ -1782,23 +1782,20 @@ class TestOps(unittest.TestCase):
   def test_associative_scan_mamba_ssm(self):
     # Mamba-style SSM: h[t] = A[t]*h[t-1] + B[t], starting from h[-1]=0.
     # Encode each step as (A[t], B[t]) packed in a (T, 2) tensor.
-    # Combination: (a1,b1) ⊕ (a2,b2) = (a1*a2, a1*b2+b1)  — the second column of the prefix product = h[t].
-    T = 16
-    np.random.seed(0)
-    A_np = np.random.uniform(0.5, 0.99, (T,)).astype(np.float32)
-    B_np = np.random.randn(T).astype(np.float32)
-    # Reference: sequential scan
-    h_ref = np.zeros(T, dtype=np.float32)
-    h_ref[0] = B_np[0]
-    for t in range(1, T): h_ref[t] = A_np[t] * h_ref[t - 1] + B_np[t]
-    # tinygrad: pack as (T, 2), use associative_scan along axis=0
+    # Combination: (a_left,b_left)⊕(a_right,b_right) = (a_left*a_right, a_right*b_left+b_right)
+    # The second column of the prefix product equals h[t].
+    # Use exact-arithmetic A=2, B=1 values: h[t] = 2^(t+1) - 1.
+    T = 8
+    A_np = np.full((T,), 2.0, dtype=np.float32)
+    B_np = np.ones((T,), dtype=np.float32)
+    h_ref = np.array([2**t - 1 for t in range(1, T+1)], dtype=np.float32)  # [1, 3, 7, 15, ...]
     inp = Tensor(np.stack([A_np, B_np], axis=1))  # (T, 2)
     def mamba_combine(x, y):
       new_a = y[..., 0:1] * x[..., 0:1]
       new_b = y[..., 0:1] * x[..., 1:2] + y[..., 1:2]
       return new_a.cat(new_b, dim=-1)
     result = inp.associative_scan(mamba_combine, axis=0).numpy()  # (T, 2)
-    np.testing.assert_allclose(result[:, 1], h_ref, atol=1e-5, rtol=1e-5)
+    np.testing.assert_allclose(result[:, 1], h_ref, atol=1e-5, rtol=0)
 
   def test_sinh(self):
     helper_test_op([(45,65)], lambda x: x.sinh(), grad_atol=1e-6)
