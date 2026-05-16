@@ -226,10 +226,14 @@ class NIRRenderer(Renderer):
 
     return ret
 
+  def supported_dtypes(self): return {d for d in super().supported_dtypes() if d not in dtypes.fp8s+(dtypes.bfloat16,)}
+
 class NAKRenderer(NIRRenderer):
   param = nir_instr(nc=1, num_components=1, bs=lambda sz:sz*8, also=lambda self,sz: setattr(self, "param_idx", self.param_idx + sz),
     intrins={"ALIGN_MUL":lambda sz:sz}, srcs=lambda self,b: [nsrc(nimm(b, 0, dtypes.int)), nsrc(nimm(b, self.param_idx, dtypes.int))])(
        lambda self, b, x, sz: mesa.nir_intrinsic_instr_create(b.shader, mesa.nir_intrinsic_ldc_nv))
+
+  def supported_dtypes(self): return {d for d in super().supported_dtypes() if (d != dtypes.half or int(self.target.arch[3:]) >= 53)}
 
 class LVPRenderer(NIRRenderer):
   has_local = False
@@ -294,3 +298,5 @@ class IR3Renderer(NIRRenderer, OpenCLRenderer):
 
     self.b.shader.contents.info.num_ubos = len([u for u in bufs if not isinstance(u.dtype, ImageDType)])
     self.b.shader.contents.info.num_images = texs() + imgs()
+
+  def supported_dtypes(self): return {d for d in super().supported_dtypes() if d != dtypes.double}
