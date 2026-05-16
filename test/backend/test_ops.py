@@ -1780,6 +1780,7 @@ class TestOps(unittest.TestCase):
   def test_associative_scan_scalar(self):
     helper_test_op([()], lambda x: torch.cumsum(x, dim=0), lambda x: x.associative_scan(lambda a, b: a + b, axis=0))
   def test_associative_scan_mamba_ssm(self):
+    if COMPILE_ONLY: return
     # Mamba-style SSM: h[t] = A[t]*h[t-1] + B[t], starting from h[-1]=0.
     # Encode each step as (A[t], B[t]) packed in a (T, 2) tensor.
     # Combination: (a_left,b_left)⊕(a_right,b_right) = (a_left*a_right, a_right*b_left+b_right)
