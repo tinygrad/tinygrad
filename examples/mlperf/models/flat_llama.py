@@ -211,8 +211,9 @@ class FlatTransformer:
     attn, attn_amaxs, attn_saves = self.attention(x, freqs_cis, **attn_kwargs)
     ffn, h, ffn_amaxs, ffn_saves = self.feed_forward(x, attn, **ffn_kwargs)
     h = h + ffn
-    if save: return (h, *attn_amaxs, *ffn_amaxs, *attn_saves, *ffn_saves)
-    else: return (h, *attn_amaxs, *ffn_amaxs)
+    amaxs = tuple(a.detach() for a in (*attn_amaxs, *ffn_amaxs))
+    if save: return (h, *amaxs, *attn_saves, *ffn_saves)
+    else: return (h, *amaxs)
 
   def shard(self, device:tuple[str, ...], mp:bool=False):
     from tinygrad.nn.state import get_parameters
