@@ -3,7 +3,7 @@ from tinygrad import Tensor, Device, dtypes
 from tinygrad.dtype import AddrSpace
 from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
 from tinygrad.renderer import Estimates
-from tinygrad.helpers import getenv, all_same, DEBUG
+from tinygrad.helpers import getenv, all_same, DEBUG, ContextVar
 from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
 from tinygrad.runtime.autogen.amd.cdna.ins import *
 from examples.mlperf.models.flat_llama import FP8_DTYPE, FP8_GRAD_DTYPE, quantize_fp8
@@ -11,6 +11,7 @@ from examples.mlperf.models.flat_llama import FP8_DTYPE, FP8_GRAD_DTYPE, quantiz
 # ** CDNA4 assembly gemm
 
 WORKGROUP_SIZE = 256
+ASM_GEMM_4WAVE = ContextVar("ASM_GEMM_4WAVE", 1)
 
 # M0 is encoded with 124 (NULL in RDNA) in CDNA
 M0 = NULL
@@ -2792,7 +2793,7 @@ def asm_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, w_scale:Tensor|None=N
       scales = tuple(s for s in (x_scale, w_scale) if s is not None)
       scale_mode = (1 if x_scale is not None else 0) | (2 if w_scale is not None else 0)
       extra = [grad_amax_state] if grad_amax_state is not None else []
-      fxn = functools.partial(custom_hk_fp8_gemm, dname=dname, scale_mode=scale_mode, use_4wave=getenv("ASM_GEMM_4WAVE", 1) == 1)
+      fxn = functools.partial(custom_hk_fp8_gemm, dname=dname, scale_mode=scale_mode, use_4wave=ASM_GEMM_4WAVE.value == 1)
       out = Tensor.custom_kernel(out, a, b.T, *scales, *extra, fxn=fxn, grad_fxn=custom_gemm_bw)[0]
     else:
       out = Tensor.custom_kernel(out, a, b, fxn=functools.partial(custom_asm_gemm, dname=dname), grad_fxn=custom_gemm_bw)[0]
