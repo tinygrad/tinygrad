@@ -4,7 +4,7 @@ from tinygrad.dtype import dtypes, Invalid
 from tinygrad.helpers import SPEC
 from tinygrad.renderer import Renderer
 from tinygrad.codegen.late.devectorizer import pm_add_loads, reduce_to_acc, ReduceContext
-from tinygrad.codegen.late.linearizer import pm_split_ends
+from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow
 from tinygrad.uop.decompositions import get_late_rewrite_patterns, get_transcendental_patterns
 
 pm_lower_weakint = PatternMatcher([
@@ -51,6 +51,9 @@ def minigen_to_sink(ast:UOp, ren:Renderer, optimize:bool) -> UOp:
   pm_decomp = get_late_rewrite_patterns(supported_ops, disable_fast_idiv=True) + \
               get_transcendental_patterns(supported_ops, force_transcendental=False)
   sink = graph_rewrite(sink, pm_decomp, ctx=ren.target, name="decompose ops to renderable")
+
+  # this was the linearizer, add control flow edges where they are needed
+  sink = graph_rewrite(sink, pm_add_control_flow, ctx=CFGContext(sink), name="add control flow", bottom_up=True)
 
   if SPEC: type_verify(sink, spec_program)
   return sink

@@ -153,7 +153,11 @@ def do_render(ctx:Renderer, prg:UOp, lin:UOp) -> UOp:
   return prg.replace(src=prg.src + (UOp(Ops.SOURCE, arg=src),), arg=new_arg)
 
 def do_compile(ctx:Renderer, prg:UOp, source:UOp) -> UOp|None:
-  lib = ctx.compiler.compile_cached(source.arg)
+  try: lib = ctx.compiler.compile_cached(source.arg)
+  except Exception as e:
+    print("**** FAILED TO COMPILE ****")
+    print(source.arg)
+    raise e
   return prg.replace(src=prg.src + (UOp(Ops.BINARY, arg=lib),))
 
 pm_to_program = PatternMatcher([
