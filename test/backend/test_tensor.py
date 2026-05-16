@@ -34,8 +34,8 @@ class TestTinygrad(unittest.TestCase):
 
   def test_backward_pass(self):
     def test_tinygrad():
-      x = Tensor(x_init, requires_grad=True)
-      W = Tensor(W_init, requires_grad=True)
+      x = Tensor(x_init)
+      W = Tensor(W_init)
       m = Tensor(m_init)
       out = x.dot(W).relu()
       out = out.log_softmax()
@@ -58,8 +58,8 @@ class TestTinygrad(unittest.TestCase):
 
   # A simple test is to check that we can accumulate gradients (run backward twice or more times)
   def test_accumulate_gradients(self):
-    x = Tensor(x_init, requires_grad=True)
-    W = Tensor(W_init, requires_grad=True)
+    x = Tensor(x_init)
+    W = Tensor(W_init)
     m = Tensor(m_init)
     out = x.dot(W).relu()
     out = out.log_softmax()
@@ -96,8 +96,8 @@ class TestTinygrad(unittest.TestCase):
   # passing `gradient` to backward
   def test_backward_pass_vjp(self):
     def test_tinygrad():
-      x = Tensor(x_init, requires_grad=True)
-      W = Tensor(W_init, requires_grad=True)
+      x = Tensor(x_init)
+      W = Tensor(W_init)
       m = Tensor(m_init)
       out = x.dot(W).relu()
       out = out.log_softmax()
@@ -120,9 +120,9 @@ class TestTinygrad(unittest.TestCase):
 
   def test_backward_pass_diamond_model(self):
     def test_tinygrad():
-      u = Tensor(U_init, requires_grad=True)
-      v = Tensor(V_init, requires_grad=True)
-      w = Tensor(W_init, requires_grad=True)
+      u = Tensor(U_init)
+      v = Tensor(V_init)
+      w = Tensor(W_init)
       x = u.mul(v).relu()
       y = u.mul(w).relu()
       out = x.add(y).mul(y).relu()
@@ -157,8 +157,8 @@ class TestTinygrad(unittest.TestCase):
       return w1.grad, w2.grad
 
     def test_tinygrad():
-      w1 = Tensor(init, requires_grad=True)
-      w2 = Tensor(init, requires_grad=True)
+      w1 = Tensor(init)
+      w2 = Tensor(init)
       out = w1.add(w2)
       out.backward()
       return w1.grad.numpy(), w2.grad.numpy()
@@ -206,8 +206,8 @@ class TestTinygrad(unittest.TestCase):
     def torch_func(x): return torch.nn.functional.log_softmax(x.matmul(torch_W).relu(), dim=1)
     PJ = torch.autograd.functional.jacobian(torch_func, torch_x).squeeze().numpy()
 
-    tiny_x = Tensor(x, requires_grad=True)
-    tiny_W = Tensor(W, requires_grad=True)
+    tiny_x = Tensor(x)
+    tiny_W = Tensor(W)
     def tiny_func(x): return x.dot(tiny_W).relu().log_softmax()
     J = jacobian(tiny_func, tiny_x)
     NJ = numerical_jacobian(tiny_func, tiny_x)
@@ -219,8 +219,8 @@ class TestTinygrad(unittest.TestCase):
     W = np.random.RandomState(1337).random((10, 5)).astype(np.float32)
     x = np.random.RandomState(7331).random((1, 10)).astype(np.float32)
 
-    tiny_x = Tensor(x, requires_grad=True)
-    tiny_W = Tensor(W, requires_grad=True)
+    tiny_x = Tensor(x)
+    tiny_W = Tensor(W)
     def tiny_func(x): return x.dot(tiny_W).relu().log_softmax()
 
     self.assertTrue(gradcheck(tiny_func, tiny_x, eps = 1e-3))
@@ -343,7 +343,7 @@ class TestTinygrad(unittest.TestCase):
       assert dtype.itemsize == Tensor.randn(3, dtype=dtype).element_size(), f"Tensor.element_size() not matching Tensor.dtype.itemsize for {dtype}"
 
   def test_deepwalk_ctx_check(self):
-    layer = Tensor.uniform(1, 1, requires_grad=True)
+    layer = Tensor.uniform(1, 1)
     x = Tensor.randn(1, 1, 1)
     x.dot(layer).mean().backward()
     x = Tensor.randn(1, 1, 1)
@@ -529,7 +529,7 @@ class TestTinygrad(unittest.TestCase):
       _a = Tensor([3]) in [Tensor([3]), Tensor([4]), Tensor([5])]
 
   def test_repr_with_grad(self):
-    a = Tensor([1.0], requires_grad=True)
+    a = Tensor([1.0])
     b = Tensor([1])
     c = (a + b).sum().backward()
     print(a)
@@ -584,7 +584,7 @@ class TestMoveTensor(unittest.TestCase):
 
   def test_to_grad(self):
     x = Tensor.eye(3, device=self.d0)
-    y = Tensor([[2.0,0,-2.0]], requires_grad=True, device=self.d0)
+    y = Tensor([[2.0,0,-2.0]], device=self.d0)
     z = y.matmul(x).to(self.d1).sum()
     z.backward()
     np.testing.assert_equal(x.grad.numpy(), [[2,2,2],[0,0,0],[-2,-2,-2]])
@@ -730,7 +730,7 @@ class TestZeroShapeTensor(unittest.TestCase):
     self.assertIsNot(a.uop.base.buffer, b.uop.base.buffer)
 
   def test_clone_with_grad(self):
-    a = Tensor.rand(16, 16, requires_grad=True)
+    a = Tensor.rand(16, 16)
     a.mul(5.0).add(5.0).mean().backward()
     b = a.clone()
     assert a.grad is not None

@@ -25,27 +25,27 @@ def two_plus_two_realize(): (Tensor([2])+Tensor([2])).realize()
 def two_plus_two_item(): (Tensor([2])+Tensor([2])).item()
 def gradient_test():
   x = Tensor.eye(3)
-  y = Tensor([[2.0,0,-2.0]], requires_grad=True)
+  y = Tensor([[2.0,0,-2.0]])
   z = y.matmul(x).sum()
   z.backward()
 def realized_eye():
   Tensor.eye(3).realize()
 def realized_list():
-  Tensor([[2.0,0,-2.0]], requires_grad=True).realize()
+  Tensor([[2.0,0,-2.0]]).realize()
 def kernel_matmul():
   x = Tensor.eye(3)
-  y = Tensor([[2.0,0,-2.0]], requires_grad=True)
+  y = Tensor([[2.0,0,-2.0]])
   z = y.matmul(x)
   linear = z.schedule_linear()
   to_program(linear.src[-1].src[0], Device.default.renderer)
 def realized_matmul():
   x = Tensor.eye(3)
-  y = Tensor([[2.0,0,-2.0]], requires_grad=True)
+  y = Tensor([[2.0,0,-2.0]])
   z = y.matmul(x)
   Tensor.realize(z)
 def realized_gradient():
   x = Tensor.eye(3)
-  y = Tensor([[2.0,0,-2.0]], requires_grad=True)
+  y = Tensor([[2.0,0,-2.0]])
   z = y.matmul(x).sum()
   z.backward()
   Tensor.realize(x, y, z, x.grad, y.grad)

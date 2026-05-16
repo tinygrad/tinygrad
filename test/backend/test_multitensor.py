@@ -372,7 +372,7 @@ class TestMultiTensor(unittest.TestCase):
 
   def test_backward_sum(self):
     x = Tensor([[1.,2,3,4], [5,6,7,8]]).shard(devices_2, axis=0)
-    w = Tensor([1.,2,3,4], requires_grad=True).shard(devices_2)
+    w = Tensor([1.,2,3,4]).shard(devices_2)
     out = x * w
     out.mean().backward()
     tst = w.grad.numpy()
@@ -404,7 +404,6 @@ class TestMultiTensor(unittest.TestCase):
     B, T, embed_size, vocab_size = 4, 10, 20, 28
 
     layer = nn.Embedding(vocab_size, embed_size)
-    layer.weight.requires_grad = True
     x = Tensor(np.random.randint(0, vocab_size, (B, T), dtype=np.int32))
     z = layer(x)
     z.sum().backward()
@@ -412,7 +411,6 @@ class TestMultiTensor(unittest.TestCase):
 
     layer_sharded = nn.Embedding(vocab_size, embed_size)
     layer_sharded.weight.replace(layer.weight.shard(devices_2, axis=shard_weight_axis)).realize()
-    layer_sharded.weight.requires_grad = True
     x_sharded = x.shard(devices_2, axis=None)
     z_shard = layer_sharded(x_sharded)
     z_shard.sum().backward()
@@ -475,7 +473,7 @@ class TestMultiTensor(unittest.TestCase):
 
   def _test_model_train_step(self, m, fake_image, labels):
     from tinygrad.nn.optim import LARS
-    optimizer = LARS(get_parameters(m), 0.1)  # set requires_grad for all params
+    optimizer = LARS(get_parameters(m), 0.1)
 
     optimizer.zero_grad()
     m.load_from_pretrained()
@@ -1088,8 +1086,6 @@ class TestBatchNorm(unittest.TestCase):
         bn = nn.BatchNorm2d(8)
         for p in get_parameters(bn):
           p.shard_(devices)
-        bn.weight.requires_grad = True
-        bn.bias.requires_grad = True
         bns.append(bn)
 
       bn_ts = []

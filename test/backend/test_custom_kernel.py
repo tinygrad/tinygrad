@@ -220,14 +220,14 @@ class TestCustomKernel(unittest.TestCase):
     b_rand = Tensor.randn(8, N)
     Tensor.realize(a_rand, b_rand)
 
-    a, b = Tensor(a_rand.numpy(), requires_grad=True), Tensor(b_rand.numpy(), requires_grad=True)
+    a, b = Tensor(a_rand.numpy()), Tensor(b_rand.numpy())
     c = Tensor.empty(N, N)
     tst = Tensor.custom_kernel(c, a, b, fxn=custom_gemm, grad_fxn=backward_gemm_custom if custom_backward_gemm else backward_gemm)[0]
     tst.sum().backward()
     grad_a, grad_b = a.grad, b.grad
     Tensor.realize(tst, grad_a, grad_b)
 
-    a, b = Tensor(a_rand.numpy(), requires_grad=True), Tensor(b_rand.numpy(), requires_grad=True)
+    a, b = Tensor(a_rand.numpy()), Tensor(b_rand.numpy())
     ref = (a@b)
     ref.sum().backward()
     real_grad_a, real_grad_b = a.grad, b.grad
