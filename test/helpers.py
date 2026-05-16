@@ -76,7 +76,7 @@ def timeit(fxn:Callable[..., T], *args, **kwargs) -> tuple[T, float]:
   ret = fxn(*args, **kwargs)
   return ret, (time.perf_counter_ns()-st)*1e-6
 
-def eval_uop(uop:UOp, inputs:list[tuple[DType, list[Any]]]|None=None):
+def eval_uop(uop:UOp, inputs:list[tuple[DType, list[Any]]]|None=None, vals:tuple[int, ...]=()):
   allocator = Device['PYTHON'].allocator
   bufs = []
   for buf_dt, data in inputs or []:
@@ -85,7 +85,7 @@ def eval_uop(uop:UOp, inputs:list[tuple[DType, list[Any]]]|None=None):
   g = UOp(Ops.PARAM, uop.dtype.ptr(), arg=0, src=())
   prg = to_program(UOp.store(g.index(UOp.const(dtypes.int, 0)), uop).sink(arg=KernelInfo()), PythonRenderer(Target("PYTHON")))
   prog = PythonProgram("run", PythonCompiler().compile(prg.src[3].arg))
-  prog(out_buf:=allocator.alloc(uop.dtype.itemsize), *bufs)
+  prog(out_buf:=allocator.alloc(uop.dtype.itemsize), *bufs, vals=vals)
   return out_buf.cast(uop.dtype.fmt or "").tolist()[0]
 
 def to_uops_list(u:list[UOp], ren=None) -> list[UOp]:

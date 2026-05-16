@@ -700,9 +700,12 @@ async function renderProfiler(path, opts) {
     // draw markers
     ctx.translate(0, -baseOffset);
     ctx.textBaseline = "top";
+    let prevX = null;
     for (let i=0; i<markers.length; i++) {
       const m = markers[i];
       const x = xscale(m.ts), tx = x+2;
+      if (tx-prevX < 2) continue;
+      prevX = tx;
       drawLine(ctx, [x, x], [0, canvas.clientHeight], { color:m.color });
       let maxWidth = canvasWidth-(tx);
       const nextMark = markers[i+1]?.ts;

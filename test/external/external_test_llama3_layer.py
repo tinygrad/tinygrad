@@ -14,7 +14,7 @@ if __name__ == "__main__":
   layer = TransformerBlock(dim, hidden_dim, n_heads, n_kv_heads, norm_eps, max_context=0)
   for x in nn.state.get_parameters(layer): x.replace(x.cast(dtypes.default_float)).realize()
 
-  freqs_cis = precompute_freqs_cis(dim // n_heads, SEQLEN, theta=500000.0).contiguous().requires_grad_(False).realize()
+  freqs_cis = precompute_freqs_cis(dim // n_heads, SEQLEN, theta=500000.0).contiguous().realize()
 
   @TinyJit
   def run(t): return layer(t, 0, freqs_cis, None)

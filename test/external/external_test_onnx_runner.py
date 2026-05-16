@@ -1,6 +1,6 @@
 import unittest, onnx, tempfile, pathlib
 import numpy as np
-from tinygrad import dtypes, Tensor
+from tinygrad import Tensor
 from tinygrad.uop.ops import Ops
 from tinygrad.device import is_dtype_supported
 from typing import Any
@@ -96,16 +96,7 @@ class TestOnnxRunnerDtypes(unittest.TestCase):
   Internal tensors (initializers, attributes) fallback to default dtype if unsupported by device.
   External tensors (inputs) preserve their original dtype - user must ensure compatibility with device.
   """
-  def _get_expected_dtype(self, onnx_dtype: int, is_input: bool):
-    true_dtype = OnnxDataType(onnx_dtype).to_dtype()
-    # inputs always preserve their true dtype.
-    if is_input:
-      return true_dtype
-    # supported types are always themselves.
-    if onnx_dtype in device_supported_dtypes:
-      return true_dtype
-    # otherwise it's an unsupported dtype that's internal to the ONNX model, which should fallback to default.
-    return dtypes.default_int if dtypes.is_int(true_dtype) else dtypes.default_float
+  def _get_expected_dtype(self, onnx_dtype: int, is_input: bool): return OnnxDataType(onnx_dtype).to_dtype()
 
   @given(onnx_dtype=st.sampled_from(all_dtypes))
   def test_input_dtype(self, onnx_dtype: int):
@@ -144,7 +135,7 @@ class MetadataOnnxPBParser(OnnxPBParser):
     for fid, wire_type in self._parse_message(self.reader.len):
       match fid:
         case 7: obj["graph"] = self._parse_GraphProto()
-        case 14: obj["metadata_props"].append(self._parse_proto(self._SIMPLE_PROTOS["StringStringEntryProto"]))
+        case 14: obj["metadata_props"].append(self._parse_StringStringEntryProto())
         case _: self.reader.skip_field(wire_type)
     return obj
 

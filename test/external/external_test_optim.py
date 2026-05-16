@@ -21,8 +21,8 @@ m_init = np.random.randn(1,4).astype(np.float32)
 
 class TinyNet:
   def __init__(self):
-    self.x = Tensor(x_init.copy(), requires_grad=True)
-    self.W = Tensor(W_init.copy(), requires_grad=True)
+    self.x = Tensor(x_init.copy())
+    self.W = Tensor(W_init.copy())
     self.m = Tensor(m_init.copy())
 
   def forward(self):

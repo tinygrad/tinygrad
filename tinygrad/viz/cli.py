@@ -4,9 +4,9 @@ os.environ["VIZ"] = "0"
 if hasattr(signal, "SIGPIPE"): signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 from typing import Iterator
 from tinygrad.viz import serve as viz
+from tinygrad.viz.serve import fmt_colored
 from tinygrad.uop.ops import RewriteTrace
-from tinygrad.helpers import temp, ansistrip, colored, time_to_str, ansilen, ProfilePointEvent, ProfileRangeEvent, TracingKey, unwrap, NO_COLOR
-from tinygrad.helpers import DEBUG, Context
+from tinygrad.helpers import temp, ansistrip, colored, time_to_str, ansilen, ProfilePointEvent, ProfileRangeEvent, TracingKey, unwrap, NO_COLOR, DEBUG
 
 # profile decoder used in CLI and tests
 def decode_profile(data:bytes) -> dict:
@@ -46,8 +46,6 @@ def decode_profile(data:bytes) -> dict:
               for k,rep,num,mode in [u("<IIIB") for _ in range(u("<I")[0])]]}})
   return {"dur":total_dur, "peak":global_peak, "layout":layout, "markers":markers}
 
-def fmt_colored(s:str) -> str: return ansistrip(s) if NO_COLOR else s
-
 def to_str(k:str, v) -> str:
   if k == "FLOPS" or k.startswith("B/s"): return f"{v*1e-9:.0f} G{k}" if v < 1e13 else f"{v*1e-12:.0f} T{k}"
   if k == "B": return next((f"{v/s:.0f} {u}" for s,u in ((1e9,"GB"),(1e6,"MB"),(1e3,"KB")) if v>=s), f"{v:.0f} B")
@@ -66,11 +64,16 @@ def main(args) -> None:
 
   def emit(val, to_str=str) -> str: return json.dumps(val if isinstance(val, dict) else {"value":val}) if args.json else to_str(val)
 
-  def print_step(step:dict, reconstruct_matches=False) -> None:
+  def print_step(step:dict, print_graph=False, reconstruct_matches=False) -> None:
     data = viz.get_render(viz_data, step["query"])
     if isinstance(data.get("value"), Iterator):
       for m in data["value"]:
-        if m.get("uop"): print(emit(m["uop"]))
+        if print_graph and "graph" in m and not args.json:
+          for k,v in m["graph"].items():
+            print(f"[{k}] {' '.join((lines:=v['label'].splitlines())[:5])}{'...' if len(lines) > 5 else ''}"+(f" tag={v['tag']}" if v['tag'] else ''))
+            if v["src"]:
+              print("  src: "+", ".join([f"{i}->[{x}]" for i,x in v["src"][:5]])+(f", ... and {len(v['src'])-5} more" if len(v["src"]) > 5 else ""))
+        elif "uop" in m: print(emit(m["graph"] if print_graph else m["uop"]))
         if not reconstruct_matches: return None
         if m.get("diff"):
           loc = pathlib.Path(m["upat"][0][0])
@@ -83,15 +86,15 @@ def main(args) -> None:
   profile = decode_profile(profile_bytes)
   profile["layout"].update([(f'{c["name"][5:]}{" SQTT" if s["name"].endswith("PKTS") else ""} {s["name"]}', s["data"]) for c in viz_data.ctxs
                             if c["name"].startswith("SQTT") for s in c["steps"] if s["name"].endswith(("PMC", "PKTS"))])
-  if args.list and not args.src: return print("ALL\n"+"\n".join(fmt_colored(k) for k in profile["layout"]))
+  if args.list and not args.src: return print("\n".join(emit(fmt_colored(k)) for k in ["ALL"]+list(profile["layout"])))
 
   # ** SQTT printer
   data = None if not args.src else get(profile["layout"], args.src[0])
   if args.src and "SQTT" in args.src[0]:
     # modern terminals support 24-bit color
     def hex_colored(st:str, color:str) -> str: return f"\x1b[38;2;{int(color[1:3],16)};{int(color[3:5],16)};{int(color[5:7],16)}m{st}\x1b[0m"
-    print(f"{'Clk':<12} {'Unit':<20} {'Op':<22} {'Dur':<4} {'Delay':<4} {'Info'}")
-    print("-" * 100)
+    print(emit(f"{'Clk':<12} {'Unit':<20} {'Op':<22} {'Dur':<4} {'Delay':<4} {'Info'}"))
+    print(emit("-" * 100))
     pc_map:dict[int, str] = {}
     pkt_idxs:dict[str, itertools.count] = {}
     dispatch_to_inst:dict[str, tuple[str, int]] = {}
@@ -188,22 +191,18 @@ def main(args) -> None:
     fmt_row = fmt_top if args.t else fmt_all
     seen_refs:set[int] = set()
     def render_event(k:dict, ls=args.list) -> None:
+      if len(args.src) > 1 and ansistrip(k["name"]) not in args.src: return None
       print(emit(k, to_str=fmt_row))
       if k["ref"] is not None and k["ref"] not in seen_refs:
         seen_refs.add(k["ref"])
-        for s in viz_data.ctxs[k["ref"]]["steps"]:
+        for i,s in enumerate(viz_data.ctxs[k["ref"]]["steps"]):
           if DEBUG >= 3 and s["name"] == "View Base AST": print_step(s)
           if DEBUG >= 4 and s["name"] == "View Source": print_step(s)
           if DEBUG >= 5 or ls: print(emit(" "*s["depth"]+s["name"]+(f" - {s['match_count']}" if s.get('match_count', 0) else '')))
-          if DEBUG >= 6: print_step(s)
-          if DEBUG >= 7 or (len(args.src) > 2 and s["name"] == args.src[2]): print_step(s, reconstruct_matches=True)
+          if DEBUG >= 6 or (DEBUG >= 5 and s["name"] == "View Kernel Graph") or (s["name"] in args.src): print_step(s, print_graph=True)
+          if DEBUG >= 7: print_step(s, reconstruct_matches=True)
       elif DEBUG >= 3 and k.get("ext"): print(emit(k["ext"]))
-    produce = produce_top_kernels if args.t else produce_all_kernels
-    if len(args.src) > 1:
-      k = get({r["name"]:r for r in produce()}, args.src[1])
-      with Context(DEBUG=max(DEBUG.value, 3)): render_event(k, ls=True)
-    else:
-      for k in produce(): render_event(k)
+    for k in (produce_top_kernels if args.t else produce_all_kernels)(): render_event(k)
 
 def get_arg_parser() -> argparse.ArgumentParser:
   parser = argparse.ArgumentParser(prog="python -m tinygrad.viz.cli")

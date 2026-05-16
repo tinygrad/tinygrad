@@ -1,6 +1,6 @@
 from __future__ import annotations
-import ctypes, time, functools, re
-from tinygrad.helpers import getenv, DEBUG, fetch, getbits
+import time, functools, tinygrad.runtime.autogen.nv_regs
+from tinygrad.helpers import getenv, DEBUG, getbits, round_up
 from tinygrad.runtime.autogen import pci
 from tinygrad.runtime.support.memory import TLSFAllocator, MemoryManager, AddrSpace
 from tinygrad.runtime.support.nv.ip import NV_FLCN, NV_FLCN_COT, NV_GSP
@@ -97,10 +97,9 @@ class NVDev:
     self.reg_names:set[str] = set()
     self.reg_offsets:dict[str, tuple[int, int]] = {}
 
-    self.include("src/common/inc/swref/published/nv_ref.h")
-    self.include("src/common/inc/swref/published/turing/tu102/dev_fb.h")
-    self.include("src/common/inc/swref/published/ampere/ga102/dev_gc6_island.h")
-    self.include("src/common/inc/swref/published/ampere/ga102/dev_gc6_island_addendum.h")
+    self.include("nv_ref", "")
+    self.include("dev_fb", "tu102")
+    self.include("dev_gc6_island", "ga102")
 
     if (needs_reset:=self.reg("NV_PFB_PRI_MMU_WPR2_ADDR_HI").read() != 0):
       self.pci_dev.write_config_flush(pci.PCI_COMMAND, self.pci_dev.read_config(pci.PCI_COMMAND, 2) & ~pci.PCI_COMMAND_MASTER, 2)
@@ -121,13 +120,12 @@ class NVDev:
     if needs_reset: self.flcn.wait_for_reset()
 
   def _early_mmu_init(self):
-    self.include("src/common/inc/swref/published/turing/tu102/dev_vm.h")
+    self.include("dev_vm", "tu102")
 
     # MMU Init
-    self.reg_names.update(mmu_pd_names:=[f'NV_MMU_VER{self.mmu_ver}_PTE', f'NV_MMU_VER{self.mmu_ver}_PDE', f'NV_MMU_VER{self.mmu_ver}_DUAL_PDE'])
-    for name in mmu_pd_names: self.__dict__[name] = NVReg(self, None, None, fields={})
-    self.include(f"kernel-open/nvidia-uvm/hwref/{'hopper/gh100' if self.mmu_ver == 3 else 'turing/tu102'}/dev_mmu.h")
-    self.pte_t, self.pde_t, self.dual_pde_t = tuple([self.__dict__[name] for name in mmu_pd_names])
+    self.include("dev_mmu", "gh100" if self.mmu_ver == 3 else "tu102")
+    self.pte_t, self.pde_t, self.dual_pde_t = [self.__dict__[name] for name in [f'NV_MMU_VER{self.mmu_ver}_PTE', f'NV_MMU_VER{self.mmu_ver}_PDE',
+                                                                                f'NV_MMU_VER{self.mmu_ver}_DUAL_PDE']]
 
     self.vram_size = self.reg("NV_PGC6_AON_SECURE_SCRATCH_GROUP_42").read() << 20
 
@@ -147,49 +145,15 @@ class NVDev:
     self.mm = NVMemoryManager(self, self.vram_size - (64 << 20), boot_size=(2 << 20), pt_t=NVPageTableEntry, va_bits=bits, va_shifts=shifts,
       va_base=0, palloc_ranges=[(x, x) for x in [512 << 20, 2 << 20, 4 << 10]], reserve_ptable=not self.large_bar)
 
-  def _alloc_sysmem(self, size:int, vaddr:int=0, contiguous:bool=False, data:bytes|None=None) -> tuple[MMIOInterface, list[int]]:
-    view, paddrs = self.pci_dev.alloc_sysmem(size, vaddr, contiguous=contiguous)
+  def _alloc_boot_mem(self, size:int, data:bytes|None=None, contiguous:bool=False, sysmem:bool|None=None) -> tuple[MMIOInterface, int, list[int]]:
+    sz = round_up(size, 0x1000)
+    if sysmem is True or (sysmem is None and not self.large_bar): view, paddrs = self.pci_dev.alloc_sysmem(size, 0, contiguous=contiguous)
+    else:
+      paddr = self.mm.palloc(sz, boot=False)
+      view, paddrs = self.vram.view(paddr, sz), [self.pci_dev.bar_info(1)[0] + paddr + i * 0x1000 for i in range(sz // 0x1000)]
     if data is not None: view[:size] = data
-    return view, paddrs
+    return view, paddrs[0], paddrs
 
-  def _alloc_boot_struct(self, struct:ctypes.Structure) -> tuple[MMIOInterface, int]:
-    view, paddrs = self._alloc_sysmem(sz:=ctypes.sizeof(type(struct)), contiguous=True)
-    view[:sz] = bytes(struct)
-    return view, paddrs[0]
-
-  def _download(self, file:str) -> str:
-    url = f"https://raw.githubusercontent.com/NVIDIA/open-gpu-kernel-modules/8ec351aeb96a93a4bb69ccc12a542bf8a8df2b6f/{file}"
-    return fetch(url, subdir="defines").read_text()
-
-  def include(self, file:str):
-    def _do_eval(s:str): return eval(s) # pylint: disable=eval-used
-
-    regs_off = {'NV_PFALCON_FALCON': 0x0, 'NV_PGSP_FALCON': 0x0, 'NV_PSEC_FALCON': 0x0, 'NV_PRISCV_RISCV': 0x1000, 'NV_PGC6_AON': 0x0, 'NV_PFSP': 0x0,
-      'NV_PGC6_BSI': 0x0, 'NV_PFALCON_FBIF': 0x600, 'NV_PFALCON2_FALCON': 0x1000, 'NV_PBUS': 0x0, 'NV_PFB': 0x0, 'NV_PMC': 0x0, 'NV_PGSP_QUEUE': 0x0,
-      'NV_VIRTUAL_FUNCTION':0xb80000, "NV_THERM": 0x0}
-
-    for raw in self._download(file).splitlines():
-      if not raw.startswith("#define "): continue
-
-      if m:=re.match(r'#define\s+(\w+)\s+([0-9\+\-\*\(\)]+):([0-9\+\-\*\(\)]+)', raw): # bitfields
-        name, hi, lo = m.groups()
-
-        reg = next((r for r in self.reg_names if name.startswith(r+"_")), None)
-        if reg is not None: self.__dict__[reg].add_field(name[len(reg)+1:].lower(), _do_eval(lo), _do_eval(hi))
-        else: self.reg_offsets[name] = (_do_eval(lo), _do_eval(hi))
-        continue
-
-      if m:=re.match(r'#define\s+(\w+)\s*\(\s*(\w+)\s*\)\s*(.+)', raw): # reg set
-        fn = m.groups()[2].strip().rstrip('\\').split('/*')[0].rstrip()
-        name, value = m.groups()[0], _do_eval(f"lambda {m.groups()[1]}: {fn}")
-      elif m:=re.match(r'#define\s+(\w+)\s+([0-9A-Fa-fx]+)(?![^\n]*:)', raw): name, value = m.groups()[0], int(m.groups()[1], 0) # reg value
-      else: continue
-
-      reg_pref = next((prefix for prefix in regs_off.keys() if name.startswith(prefix)), None)
-      not_already_reg = not any(name.startswith(r+"_") for r in self.reg_names)
-
-      if reg_pref is not None and not_already_reg:
-        fields = {k[len(name)+1:]: v for k, v in self.reg_offsets.items() if k.startswith(name+'_')}
-        self.__dict__[name] = NVReg(self, regs_off[reg_pref], value, fields=fields)
-        self.reg_names.add(name)
-      else: self.__dict__[name] = value
+  def include(self, name:str, arch:str):
+    for k,v in getattr(getattr(tinygrad.runtime.autogen.nv_regs, name), arch or 'regs').items():
+      self.__dict__[k] = NVReg(self, *v) if isinstance(v, tuple) else v

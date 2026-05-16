@@ -29,8 +29,8 @@ class TestGC(unittest.TestCase):
   def test_gc(self):
     Tensor.manual_seed(0)
     base = tensors_allocated()
-    a = Tensor.rand(4, 4, requires_grad=True)
-    b = Tensor.zeros(4, 4, requires_grad=True)
+    a = Tensor.rand(4, 4)
+    b = Tensor.zeros(4, 4)
     (a*b).mean().backward()
     assert (tensors_allocated()-base > 0)
     del a,b
@@ -40,14 +40,14 @@ class TestGC(unittest.TestCase):
   def test_gc_complex(self):
     Tensor.manual_seed(0)
     base = tensors_allocated()
-    a = Tensor(np.zeros((4, 4), dtype=np.float32), requires_grad=True)
-    b = Tensor.rand(4, 4, requires_grad=True)
+    a = Tensor(np.zeros((4, 4), dtype=np.float32))
+    b = Tensor.rand(4, 4)
     assert (tensors_allocated()-base == 4)
     (a*b).mean().backward()
     assert (tensors_allocated()-base == 6)
     del b
     assert (tensors_allocated()-base == 4)
-    b = Tensor(np.zeros((4, 4), dtype=np.float32), requires_grad=True)
+    b = Tensor(np.zeros((4, 4), dtype=np.float32))
     print(tensors_allocated())
     (a*b).mean().backward()
     print(tensors_allocated())

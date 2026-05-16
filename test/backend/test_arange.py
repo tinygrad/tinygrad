@@ -172,7 +172,7 @@ class TestIndexing(unittest.TestCase):
     bs, seqlen = 4, 256
     idx = Tensor.randint(bs, seqlen, high=vocab_size)
     emb = nn.Embedding(vocab_size, embed_size)
-    emb.weight = Tensor.ones(vocab_size, embed_size, requires_grad=True)
+    emb.weight = Tensor.ones(vocab_size, embed_size)
     gt = Tensor.zeros(bs, seqlen, embed_size)
     Tensor.realize(idx, emb.weight, gt)
     GlobalCounters.reset()
@@ -198,14 +198,14 @@ class TestIndexing(unittest.TestCase):
     bs, seqlen = 4, 256
     idx = Tensor.randint(bs, seqlen, high=vocab_size)
     emb = nn.Embedding(vocab_size, embed_size)
-    emb.weight = Tensor.ones(vocab_size, embed_size, requires_grad=True)
+    emb.weight = Tensor.ones(vocab_size, embed_size)
     gt = Tensor.zeros(bs, seqlen, embed_size)
     Tensor.realize(idx, emb.weight, gt)
     # compute expected grad on single device
     expected_grad = np.zeros((vocab_size, embed_size), dtype=np.float32)
     for i in idx.flatten().numpy(): expected_grad[i] += 2
     # now shard the embedding weight on vocab axis and recompute
-    emb.weight = Tensor.ones(vocab_size, embed_size, requires_grad=True)
+    emb.weight = Tensor.ones(vocab_size, embed_size)
     emb.weight.shard_(devices, axis=0)
     idx = idx.shard(devices, axis=None)
     gt = gt.shard(devices, axis=None)
@@ -220,7 +220,7 @@ class TestIndexing(unittest.TestCase):
     bs, seqlen, dim, n_heads = 1, 512, 256, 4
     head_dim = dim // n_heads
     x = Tensor.randn(bs, seqlen, dim, dtype=dtype)
-    wq = Tensor.randn(dim, dim, dtype=dtype, requires_grad=True)
+    wq = Tensor.randn(dim, dim, dtype=dtype)
     freqs_cis = precompute_freqs_cis(head_dim, seqlen).cast(dtype)
     Tensor.realize(x, wq, freqs_cis)
     xq = (x @ wq.T)

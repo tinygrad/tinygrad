@@ -2635,8 +2635,8 @@ def custom_hk_fp8_gemm(C:UOp, A:UOp, B:UOp, *args:UOp, dname:str, scale_mode:int
   M, K = A.shape[0]*A.shape[1], A.shape[2]
   N, K2 = B.shape[(1 if B.ndim == 3 else 0):]
   assert K == K2, f"{A.shape} {B.shape}"
-  block_size = 256
-  threads = UOp.special(64 * 8, "lidx0")
+  block_size = 128
+  threads = UOp.special(64 * 4, "lidx0")
   workgroups = UOp.special((M // block_size) * (N // block_size), "gidx0")
   sink_inputs = (C.base, A.base, B.base) + tuple(s.base for s in scales) + (threads, workgroups)
   sink = UOp.sink(*sink_inputs,
@@ -2713,12 +2713,20 @@ def custom_gemm_bw(gradient:UOp, kernel:UOp):
     gbase = gradient.base if hasattr(gradient, "base") else gradient
     mailbox_entry = _grad_fp8_mailbox.pop(gbase, None) or _grad_fp8_mailbox.pop(gradient, None)
     if mailbox_entry is not None:
-      g_fp8_u, inv_scale_u, _new_amax_u, store_effect = mailbox_entry
+      g_fp8_u, inv_scale_u = mailbox_entry
       g_fp8 = Tensor(g_fp8_u, device=a.device)[:a.shape[0]]
       g_scale = Tensor(inv_scale_u, device=a.device)
     else:
       assert grad_amax_state is not None, "fp8 matmul bwd needs either a mailbox entry or a grad_amax_state"
-      g_fp8, g_scale, _, store_effect = quantize_fp8_delayed(g_t, Tensor(grad_amax_state, device=a.device))
+      if getenv("FUSED_GRAD_QUANTIZE", 0):
+        g_fp8, g_scale, _, store_effect = quantize_fp8_delayed(g_t, Tensor(grad_amax_state, device=a.device))
+        assert g_fp8.uop.op is Ops.AFTER, f"expected AFTER, got {g_fp8.uop.op}"
+        g_fp8 = Tensor(g_fp8.uop.replace(src=g_fp8.uop.src + (store_effect,)), device=a.device)
+      else:
+        grad_amax_t = Tensor(grad_amax_state, device=a.device)
+        g_fp8, g_scale, new_grad_amax = quantize_fp8(g_t, amax_state=grad_amax_t)
+        store_effect = grad_amax_state.store(new_grad_amax.uop)
+        g_fp8 = Tensor(g_fp8.contiguous().uop.after(store_effect), device=a.device)
     # dgrad: uses g_scale * x_scale * w_scale
     grad_a = asm_gemm(g_fp8, b_t, x_scale=g_scale * s_x_t, w_scale=s_w_t)
     # wgrad: no w_scale
@@ -2729,8 +2737,7 @@ def custom_gemm_bw(gradient:UOp, kernel:UOp):
     else:
       g_fp8_T = g_fp8.permute(2, 0, 1).reshape(g_t.shape[-1], -1)
     grad_b = asm_gemm(g_fp8_T, a_t.reshape(-1, a_t.shape[-1]), x_scale=g_scale * s_x_t)
-    # Attach the delayed-amax store effect (if any) to grad_a so realizing grads commits the amax update.
-    ret = (None, grad_a.uop.after(store_effect), grad_b.uop, None, None)
+    ret = (None, grad_a.uop, grad_b.uop, None, None)
     if len(inputs) == 6: ret = ret + (None,)
     return ret
   else:

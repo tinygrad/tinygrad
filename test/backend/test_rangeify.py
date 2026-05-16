@@ -109,9 +109,9 @@ def fa():
 def fa_bw():
   Tensor.manual_seed(1337)
   with Context(DEBUG=0):
-    q,k,v = [Tensor.rand(BS, HEADS, SEQLEN, EMB).contiguous().realize().requires_grad_() for _ in range(3)]
+    q,k,v = [Tensor.rand(BS, HEADS, SEQLEN, EMB).contiguous().realize() for _ in range(3)]
     attn_output = nn.Linear(HEADS*EMB, HEADS*EMB, bias=False)
-    attn_output.weight.requires_grad_().realize()
+    attn_output.weight.realize()
     target = Tensor.rand(BS, SEQLEN, HEADS*EMB).contiguous().realize()
 
   GlobalCounters.reset()

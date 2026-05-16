@@ -363,6 +363,11 @@ class TestAutoCastType(unittest.TestCase):
     assert (Tensor([0, 1], dtype=dtypes.float32)).cumsum(0).dtype == dtypes.float32
     assert (Tensor([0, 1], dtype=dtypes.float64)).cumsum(0).dtype == dtypes.float64
 
+  def test_cumsum_empty(self):
+    # empty cumsum dtype must match non-empty
+    for d in (dtypes.bool, dtypes.int8, dtypes.uint8, dtypes.float16, dtypes.float32):
+      self.assertEqual(Tensor([], dtype=d).cumsum(0).dtype, Tensor([0, 1], dtype=d).cumsum(0).dtype)
+
   @given(strat.sampled_from(core_dtypes), strat.sampled_from(core_dtypes), strat.sampled_from(core_dtypes))
   def test_matmul(self, dt1, dt2, acc_dt):
     t1 = Tensor([0, 1], dtype=dt1)

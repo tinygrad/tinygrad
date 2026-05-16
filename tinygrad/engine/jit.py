@@ -209,7 +209,7 @@ class CapturedJit(Generic[ReturnType]):
     for u in self._written_uops:
       if (buf:=buffers.get(u)) is None: continue
       for b in (buf.bufs if isinstance(buf, MultiBuffer) else (buf,)):
-        if hasattr(b, '_buf'): b.deallocate()
+        if b.is_initialized(): b.deallocate()
         if (base:=b._base) is not None and base.allocated_views == 0 and base.is_allocated(): base.deallocate()
 
 def _prepare_jit_inputs(args, kwargs):

@@ -67,7 +67,7 @@ class Scheduler:
     ret = [r for r in self._output_rngs() if r.arg[-1] == AxisType.LOOP]
     # exclude any output ranges from global that don't appear in all BUFFERIZE
     for x in self.ast.toposort():
-      if x.op is Ops.BUFFERIZE:
+      if x.op is Ops.STAGE:
         ret = [r for r in ret if r in x.ranges]
     return ret
 
@@ -347,6 +347,6 @@ def apply_opts(ast:UOp, ren:Renderer, beam:int=0) -> UOp:
   elif not NOOPT and (ast.arg is None or ast.arg.applied_opts == ()):
     from tinygrad.codegen.opt.heuristic import hand_coded_optimizations
     # NOTE: hand_coded_optimizations doesn't support multiblock opts yet
-    if not any(u.op is Ops.BUFFERIZE for u in ast.backward_slice):
+    if not any(u.op is Ops.STAGE for u in ast.backward_slice):
       k = hand_coded_optimizations(k)
   return k.get_optimized_ast(name_override=ast.arg.name if ast.arg is not None and ast.arg.name != "test" else None)

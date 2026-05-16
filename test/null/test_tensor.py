@@ -24,9 +24,9 @@ class TestTrainMode(unittest.TestCase):
 
 class TestInferenceMode(unittest.TestCase):
   def test_inference(self):
-    x = Tensor(x_init, requires_grad=True)
-    m = Tensor(m_init, requires_grad=True)
-    W = Tensor(W_init, requires_grad=True)
+    x = Tensor(x_init)
+    m = Tensor(m_init)
+    W = Tensor(W_init)
     tmp = x.mul(m)
     mm = tmp.matmul(W)
     out = mm.relu()
@@ -40,9 +40,9 @@ class TestInferenceMode(unittest.TestCase):
     assert W.requires_grad
 
   def test_no_grad_mode_context_manager(self):
-    x = Tensor(x_init, requires_grad=True)
-    m = Tensor(m_init, requires_grad=True)
-    W = Tensor(W_init, requires_grad=True)
+    x = Tensor(x_init)
+    m = Tensor(m_init)
+    W = Tensor(W_init)
     def f(x, m, W):
       tmp = x.mul(m)
       mm = tmp.matmul(W)

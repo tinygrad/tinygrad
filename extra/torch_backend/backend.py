@@ -165,7 +165,8 @@ def isin_tensor_tensor_out(x, y, *, assume_unique=False, invert=False, out=None)
 
 @torch.library.impl("aten::randperm.generator_out", "privateuseone")
 def randperm_generator(n, generator=None, out=None):
-  return out.copy_(wrap(Tensor.randperm(n, generator=generator, device=unwrap(out).device)))
+  if generator is not None: raise NotImplementedError("tinygrad torch backend does not support torch.Generator for randperm")
+  return out.copy_(wrap(Tensor.randperm(n, device=unwrap(out).device)))
 
 @torch.library.impl("aten::_linalg_eigh", "privateuseone")
 # TODO: move to tinygrad
@@ -373,8 +374,12 @@ def copy_(self, src, non_blocking=False):
   return self
 
 @torch.library.impl("aten::cat.out", "privateuseone")
-def cat_out(tensors, dim=0, out=None):
-  _apply_inplace(unwrap(out), Tensor.cat(*[unwrap(x) for x in tensors], dim=dim))
+def cat_out(tensors: list[torch.Tensor], dim: int=0, *, out: torch.Tensor):
+  fixed_tensors = []
+  for wrapped in tensors:
+    if wrapped.shape == (0,): wrapped = wrapped.reshape([0 if i == (dim % out.ndim) else x for i, x in enumerate(out.shape)])
+    fixed_tensors.append(wrapped)
+  _apply_inplace(unwrap(out), Tensor.cat(*map(unwrap, fixed_tensors), dim=dim))
   return out
 
 @torch.library.impl("aten::topk.values", "privateuseone")

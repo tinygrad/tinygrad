@@ -69,7 +69,6 @@ class BatchNorm(nn.BatchNorm2d if getenv("SYNCBN") else UnsyncedBatchNorm):
   def __init__(self, num_features):
     super().__init__(num_features, track_running_stats=False, eps=1e-12, momentum=0.85, affine=True)
     self.weight.requires_grad = False
-    self.bias.requires_grad = True
 
 class ConvGroup:
   def __init__(self, channels_in, channels_out):
@@ -264,7 +263,6 @@ def train_cifar():
       # self.model_ema = copy.deepcopy(net) # won't work for opencl due to unpickeable pyopencl._cl.Buffer
       self.net_ema = SpeedyResNet(w)
       for net_ema_param, net_param in zip(get_state_dict(self.net_ema).values(), get_state_dict(net).values()):
-        net_ema_param.requires_grad = False
         net_ema_param.assign(net_param.numpy())
 
     @TinyJit

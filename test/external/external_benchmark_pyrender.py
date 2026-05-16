@@ -3,7 +3,7 @@ import functools, pickle
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.helpers import tqdm, temp, time_to_str, cpu_profile
 
-BENCHMARK_OPS = {Ops.INDEX, Ops.BUFFERIZE}
+BENCHMARK_OPS = {Ops.INDEX, Ops.STAGE}
 
 @functools.cache
 def create_uop(a:int) -> UOp:

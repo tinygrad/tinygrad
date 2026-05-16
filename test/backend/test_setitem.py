@@ -308,22 +308,22 @@ class TestWithGrad(unittest.TestCase):
 
   def test_set_with_requires_grad(self):
     z = Tensor.ones(8, 8)
-    x = Tensor.rand(8, 8, requires_grad=True)
+    x = Tensor.rand(8, 8)
     z[:] = x
     z.sum().backward()
     np.testing.assert_allclose(x.grad.numpy(), np.ones((8, 8)))
 
   def test_set_nonleaf_requires_grad(self):
-    x = Tensor([1.0, 2.0, 3.0, 4.0], requires_grad=True)
+    x = Tensor([1.0, 2.0, 3.0, 4.0])
     z = x * 2
     z[:2] = Tensor([10.0, 20.0])
     z.sum().backward()
     np.testing.assert_allclose(x.grad.numpy(), [0, 0, 2, 2])
 
   def test_set_overlapping_requires_grad(self):
-    z = Tensor.zeros(6, requires_grad=True)
-    x = Tensor.ones(4, requires_grad=True)
-    y = Tensor.ones(4, requires_grad=True) * 2
+    z = Tensor.zeros(6)
+    x = Tensor.ones(4)
+    y = Tensor.ones(4) * 2
     z[:4] = x
     z[2:] = y
     z.sum().backward()
@@ -331,18 +331,40 @@ class TestWithGrad(unittest.TestCase):
     np.testing.assert_allclose(y.grad.numpy(), np.ones(4))
 
   def test_set_iadd_requires_grad(self):
-    z = Tensor([1.0, 2.0, 3.0, 4.0], requires_grad=True)
-    x = Tensor([10.0, 20.0], requires_grad=True)
+    z = Tensor([1.0, 2.0, 3.0, 4.0])
+    x = Tensor([10.0, 20.0])
     z[:2] += x
     z.sum().backward()
     np.testing.assert_allclose(z.grad.numpy(), np.ones(4))
     np.testing.assert_allclose(x.grad.numpy(), np.ones(2))
 
   def test_set_used_before_setitem(self):
-    z = Tensor([1.0, 2.0, 3.0, 4.0], requires_grad=True)
+    z = Tensor([1.0, 2.0, 3.0, 4.0])
     _ = z.sum()
     with self.assertRaises(RuntimeError):
       z[:2] = Tensor([0.0, 0.0])
+
+  def test_setitem_raises_with_unrealized_downstream(self):
+    x = Tensor([1.0, 2.0, 3.0, 4.0]).realize()
+    _y = x * 2.0
+    with self.assertRaises(RuntimeError):
+      x[0] = 99.0
+
+  def test_setitem_raises_on_unrealized_compute_base(self):
+    # y has a compute (unrealized) base; tmp is a view of y. eager: tmp would follow y's mutation. lazy: tmp keeps the old MUL graph.
+    x = Tensor([1.0, 2.0, 3.0, 4.0]).realize()
+    y = x * 2.0
+    _tmp = y[:1]
+    with self.assertRaises(RuntimeError):
+      y[0] = 99.0
+
+  def test_setitem_raises_on_aliased_uop(self):
+    # two Tensor objects sharing the exact same unrealized uop. setitem on one updates its uop, the other keeps the stale graph reference.
+    x = Tensor([1.0, 2.0, 3.0, 4.0]).realize()
+    y = x * 2.0
+    _z = Tensor(y.uop)
+    with self.assertRaises(RuntimeError):
+      y[0] = 99.0
 
 class TestSetitemLoop(unittest.TestCase):
   def test_arange(self):

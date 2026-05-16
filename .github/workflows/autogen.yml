@@ -45,6 +45,7 @@ jobs:
         python3 -c "from tinygrad.runtime.autogen import cuda, nvrtc, nvjitlink, nv_570, nv_580, nv"
         python3 -c "from tinygrad.runtime.autogen import comgr_3, hsa, hip, amd_gpu, sqtt, rocprof, amdgpu_kd, amdgpu_drm"
         python3 -c "from tinygrad.runtime.autogen.am import *"
+        python3 -c "from tinygrad.runtime.autogen.nv_regs import *"
         python3 -c "from tinygrad.runtime.autogen import libc, kfd, io_uring, ib, pci, vfio"
         python3 -c "from tinygrad.runtime.autogen import llvm"
         python3 -c "from tinygrad.runtime.autogen import webgpu"
