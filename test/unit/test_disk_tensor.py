@@ -1,7 +1,6 @@
 import os, pathlib, tempfile, unittest
 import numpy as np
 from tinygrad import Tensor, Device, dtypes
-from tinygrad.device import is_dtype_supported
 from tinygrad.dtype import DType, DTYPES_DICT
 from tinygrad.nn.state import safe_load, safe_save, get_state_dict, torch_load
 from tinygrad.helpers import Timing, fetch, OSX, dedup
@@ -36,7 +35,7 @@ class TestTorchLoad(TempDirTestCase):
   # pytorch zip format
   def test_load_convnext(self): compare_weights_both('https://dl.fbaipublicfiles.com/convnext/convnext_tiny_1k_224_ema.pth')
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.float16), "need float16 support")
+  @unittest.skipUnless(dtypes.float16 in Device[Device.DEFAULT].renderer.supported_dtypes(), "need float16 support")
   def test_load_llama2bfloat(self): compare_weights_both("https://huggingface.co/qazalin/bf16-lightweight/resolve/main/consolidated.00.pth?download=true")
 
   # pytorch tar format
@@ -94,7 +93,7 @@ class TestRawDiskBuffer(unittest.TestCase):
 
     pathlib.Path(tmp).unlink()
 
-@unittest.skipUnless(is_dtype_supported(dtypes.uint8), "need uint8")
+@unittest.skipUnless(dtypes.uint8 in Device[Device.DEFAULT].renderer.supported_dtypes(), "need uint8")
 class TestSafetensors(TempDirTestCase):
   def test_real_safetensors(self):
     import torch
@@ -184,7 +183,7 @@ class TestSafetensors(TempDirTestCase):
   def test_save_all_dtypes(self):
     for dtype in dedup(DTYPES_DICT.values()):
       if dtype in [dtypes.bfloat16]: continue # not supported in numpy
-      if not is_dtype_supported(dtype): continue
+      if dtype not in Device[Device.DEFAULT].renderer.supported_dtypes(): continue
       path = self.tmp(f"ones.{dtype}.safetensors")
       ones = Tensor(np.random.rand(10,10), dtype=dtype)
       safe_save(get_state_dict(ones), path)
@@ -384,7 +383,7 @@ class TestDiskTensor(TempDirTestCase):
     assert ret.tolist() == [2827, 3341, 3855, 4369]
 
   @unittest.skipIf(OSX or Device.DEFAULT == "CL", "new LLVM has an issue on OSX, DEV=CL gives the wrong output")
-  @unittest.skipUnless(is_dtype_supported(dtypes.bfloat16), "bfloat16 not supported")
+  @unittest.skipUnless(dtypes.bfloat16 in Device[Device.DEFAULT].renderer.supported_dtypes(), "bfloat16 not supported")
   def test_bf16_disk_write_read(self):
     t = Tensor([10000, -1, -1000, -10000, 20], dtype=dtypes.float32)
     t.to(f"disk:{self.tmp('dt_bf16_disk_write_read_f32')}").realize()

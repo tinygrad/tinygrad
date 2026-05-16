@@ -1,9 +1,8 @@
 #!/usr/bin/env python
 import unittest
 import numpy as np
-from tinygrad import dtypes, Tensor, TinyJit, GlobalCounters, Variable
+from tinygrad import dtypes, Tensor, TinyJit, GlobalCounters, Variable, Device
 from tinygrad.uop.ops import Ops, UOp
-from tinygrad.device import is_dtype_supported
 from tinygrad.helpers import temp, CI, DEV, Context
 
 N = 200  # has to be bigger than the cache to fail
@@ -468,7 +467,7 @@ class TestAssign(unittest.TestCase):
     self.assertEqual(GlobalCounters.kernel_count, 2)  # currently conservative, forces contiguous
     np.testing.assert_allclose(a.numpy(), expected)
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
+  @unittest.skipUnless(dtypes.half in Device[Device.DEFAULT].renderer.supported_dtypes(), "need half")
   def test_setitem_half(self):
     a = Tensor.full((8,), 1.0, dtype=dtypes.half).contiguous().realize()
     b = Tensor.full((4,), 2.0, dtype=dtypes.half).contiguous().realize()
