@@ -130,9 +130,9 @@ def line_rewrite(lst:list[UOp], pm:PatternMatcher) -> list[UOp]:
   return newlst
 
 def do_linearize(prg:UOp, sink:UOp) -> UOp:
+  if DEBUG >= 3 and sink.arg.applied_opts: print(f"{sink.arg.function_name:<25} opts: {sink.arg.applied_opts}")
   lst = line_rewrite(linearize(sink), pm_linearize_cleanups)
   if SPEC: type_verify(lst, spec_program)
-  if DEBUG >= 3 and sink.arg.applied_opts: print(sink.arg.applied_opts)
   return prg.replace(src=prg.src + (UOp(Ops.LINEAR, src=tuple(lst)),))
 
 def do_estimates(prg:UOp, sink:UOp, lin:UOp) -> UOp|None:
