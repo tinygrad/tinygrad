@@ -65,14 +65,11 @@ extern "C" __global__ __launch_bounds__(THREADS) void fused_gate_up_q8(
   float us = float(*reinterpret_cast<const _Float16*>(ub));
   float gacc = 0.0f, uacc = 0.0f;
   #pragma unroll
-  for (int offset = 0; offset < 32; offset += 4) {
+  for (int offset = 0; offset < 32; offset++) {
     int i = block * 32 + offset;
-    int gq = *reinterpret_cast<const int*>(gb + 2 + offset);
-    int uq = *reinterpret_cast<const int*>(ub + 2 + offset);
-    gacc += float((gq << 24) >> 24) * x_norm[i+0] + float((gq << 16) >> 24) * x_norm[i+1] +
-            float((gq << 8) >> 24) * x_norm[i+2] + float(gq >> 24) * x_norm[i+3];
-    uacc += float((uq << 24) >> 24) * x_norm[i+0] + float((uq << 16) >> 24) * x_norm[i+1] +
-            float((uq << 8) >> 24) * x_norm[i+2] + float(uq >> 24) * x_norm[i+3];
+    float x = x_norm[i];
+    gacc += float(*reinterpret_cast<const int8_t*>(gb + 2 + offset)) * x;
+    uacc += float(*reinterpret_cast<const int8_t*>(ub + 2 + offset)) * x;
   }
   gacc *= gs;
   uacc *= us;
