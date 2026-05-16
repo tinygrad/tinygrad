@@ -68,9 +68,11 @@ extern "C" __global__ __launch_bounds__(THREADS) void fused_gate_up_q8(
   for (int offset = 0; offset < 32; offset++) {
     int i = block * 32 + offset;
     float x = x_norm[i];
-    gacc += float(*reinterpret_cast<const int8_t*>(gb + 2 + offset)) * gs * x;
-    uacc += float(*reinterpret_cast<const int8_t*>(ub + 2 + offset)) * us * x;
+    gacc += float(*reinterpret_cast<const int8_t*>(gb + 2 + offset)) * x;
+    uacc += float(*reinterpret_cast<const int8_t*>(ub + 2 + offset)) * x;
   }
+  gacc *= gs;
+  uacc *= us;
   #pragma unroll
   for (int delta = 16; delta > 0; delta >>= 1) {
     gacc += __shfl_down(gacc, delta, 32);
