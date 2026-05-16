@@ -1,5 +1,5 @@
 import unittest
-from tinygrad import Tensor, UOp, GlobalCounters, Context
+from tinygrad import Tensor, UOp, GlobalCounters, Context, Device
 from tinygrad.dtype import AddrSpace, dtypes
 from tinygrad.uop.ops import KernelInfo, AxisType, Ops
 
@@ -297,6 +297,7 @@ class TestCustomKernel(unittest.TestCase):
       if prg.op is not Ops.PROGRAM: continue
       self.assertTrue(len(prg.arg.globals) > 0, f"empty kernel compiled (no globals): name={prg.arg.name}")
 
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "kernel timing not supported")
   def test_invalids_into_custom_kernel_with_beam(self):
     a = Tensor.full((4, 4), 3.).contiguous()
     b = Tensor.full((4, 4), 2.).contiguous()
