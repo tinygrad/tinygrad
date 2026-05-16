@@ -12,8 +12,9 @@ constexpr int GEMM_N = 8192;
 constexpr int GEMM_K = 8192;
 #endif
 
+// scale_mode: 0=no scale, 1=x only, 2=w only, 3=both
 #ifndef SCALE_MODE
-#define SCALE_MODE 0
+#define SCALE_MODE 3
 #endif
 
 constexpr int NUM_WARPS = 4;
@@ -30,6 +31,7 @@ __global__ __launch_bounds__(256, 1) void hk_fp8_gemm(bf16 *C_ptr, fp8e4m3 *A_pt
 #endif
 ) {
     constexpr int M = GEMM_M, N = GEMM_N, K = GEMM_K;
+
     kittens::gl<fp8e4m3, 1, 1, M, K> A{A_ptr, nullptr, nullptr, nullptr, nullptr};
     kittens::gl<fp8e4m3, 1, 1, N, K> B{B_ptr, nullptr, nullptr, nullptr, nullptr};
     kittens::gl<bf16, 1, 1, M, N> C{C_ptr, nullptr, nullptr, nullptr, nullptr};
@@ -235,6 +237,7 @@ __global__ __launch_bounds__(256, 1) void hk_fp8_gemm(bf16 *C_ptr, fp8e4m3 *A_pt
     __builtin_amdgcn_sched_barrier(0);
     }
 
+   // apply x_scale * w_scale before bf16 store to prevent overflow
 #if SCALE_MODE == 1
     float scale = *x_scale_ptr;
     mul(c[0][0], c[0][0], scale);
