@@ -2,9 +2,10 @@ import unittest
 import numpy as np
 
 from tinygrad import Device, Tensor
-from tinygrad.llm.amd_kernels import fused_gate_up, q8_lmhead_gumbel_argmax
+from tinygrad.llm.amd_kernels import fused_gate_up, gdn_recurrent_update_conv, q8_lmhead_gumbel_argmax
 
 DIM, HIDDEN, VOCAB, Q8_BLOCK, Q8_BLOCK_BYTES = 1024, 3584, 248320, 32, 34
+GDN_HV, GDN_V, GDN_K = 16, 128, 128
 
 def make_q8_blocks(rng:np.random.Generator) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
   blocks = DIM // Q8_BLOCK
@@ -46,6 +47,33 @@ class TestLLMAMDKernels(unittest.TestCase):
     out = q8_lmhead_gumbel_argmax(Tensor(hidden, device="AMD"), Tensor(raw.reshape(-1), device="AMD").contiguous(),
                                   Tensor([0.0], device="AMD")).numpy()
     self.assertEqual(int(out.reshape(-1)[0]), target)
+
+  def test_gdn_recurrent_update_conv_correctness(self):
+    rng = np.random.default_rng(1)
+    state = rng.uniform(-0.1, 0.1, size=(GDN_HV, GDN_V, GDN_K)).astype(np.float32)
+    conv_out = rng.uniform(-0.5, 0.5, size=(3 * GDN_HV * GDN_K,)).astype(np.float32)
+    alpha = rng.uniform(0.8, 1.0, size=(GDN_HV,)).astype(np.float32)
+    beta = rng.uniform(0.1, 0.9, size=(GDN_HV,)).astype(np.float16)
+
+    expected_state = state.copy()
+    expected_core = np.empty((GDN_HV, GDN_V), dtype=np.float32)
+    for hv in range(GDN_HV):
+      q = conv_out[hv * GDN_K:(hv + 1) * GDN_K]
+      k = conv_out[GDN_HV * GDN_K + hv * GDN_K:GDN_HV * GDN_K + (hv + 1) * GDN_K]
+      q = q / np.sqrt((q * q).sum()) * (GDN_K ** -0.5)
+      k = k / np.sqrt((k * k).sum())
+      for row in range(GDN_V):
+        v = conv_out[2 * GDN_HV * GDN_K + hv * GDN_V + row]
+        h = expected_state[hv, row] * alpha[hv]
+        updated = h + k * ((v - (h * k).sum()) * float(beta[hv]))
+        expected_state[hv, row] = updated
+        expected_core[hv, row] = (updated * q).sum()
+
+    state_t = Tensor(state, device="AMD").contiguous()
+    out = gdn_recurrent_update_conv(state_t, Tensor(conv_out, device="AMD"), Tensor(alpha, device="AMD"),
+                                    Tensor(beta, device="AMD")).numpy().reshape(GDN_HV, GDN_V)
+    np.testing.assert_allclose(out, expected_core, rtol=2e-4, atol=2e-4)
+    np.testing.assert_allclose(state_t.numpy(), expected_state, rtol=2e-4, atol=2e-4)
 
 if __name__ == "__main__":
   unittest.main()
