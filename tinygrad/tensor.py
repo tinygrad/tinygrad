@@ -364,16 +364,17 @@ class Tensor(OpMixin):
     if self.grad is not None: ret.grad = self.grad.clone()
     return ret.assign(self)
 
-  def to(self, device:str|tuple[str, ...]|None) -> Tensor:
+  def to(self, device:str|tuple[str, ...]|list[str]|None) -> Tensor:
     """
     Moves the tensor to the given device.
     """
-    if (device:=canonicalize_device(device)) == self.device: return self
+    device = canonicalize_device(device)
+    if device == self.device: return self
     ret = Tensor(self.uop.copy_to_device(device), requires_grad=self.requires_grad)
     if self.grad is not None: ret.grad = self.grad.to(device)
     return ret
 
-  def to_(self, device:str|tuple[str, ...]|None) -> Tensor:
+  def to_(self, device:str|tuple[str, ...]|list[str]|None) -> Tensor:
     """
     Moves the tensor to the given device in place.
     """
