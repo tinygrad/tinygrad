@@ -69,20 +69,20 @@ class TestTensorGradient(unittest.TestCase):
     np.testing.assert_allclose(x.grad.numpy(), [2.0+3.0+2*3.0])
     self.assertIs(x.grad, old_grad)
 
-  def test_gradient_through_clone_from_non_grad_src(self):
-    src = Tensor([1.0, 2.0, 3.0, 4.0], requires_grad=False)
-    x = src.clone().requires_grad_(True)
-    (x * 2.0).sum().backward()
-    np.testing.assert_allclose(x.grad.numpy(), [2.0, 2.0, 2.0, 2.0])
-    self.assertIsNone(src.grad)
-
   def test_gradient_through_clone_from_grad_src(self):
-    # unlike torch, tinygrad accumulates grad on all requires_grad tensors, including non-leaf x
-    src = Tensor([1.0, 2.0, 3.0, 4.0], requires_grad=True)
+    # unlike torch, tinygrad accumulates grad on every tensor in the graph, including non-leaf x
+    src = Tensor([1.0, 2.0, 3.0, 4.0])
     x = src.clone()
     (x * 2.0).sum().backward()
     np.testing.assert_allclose(src.grad.numpy(), [2.0, 2.0, 2.0, 2.0])
     np.testing.assert_allclose(x.grad.numpy(), [2.0, 2.0, 2.0, 2.0])
+
+  def test_gradient_through_clone_from_detached_src(self):
+    base = Tensor([1.0, 2.0, 3.0, 4.0])
+    x = base.detach().clone()
+    (x * 2.0).sum().backward()
+    np.testing.assert_allclose(x.grad.numpy(), [2.0, 2.0, 2.0, 2.0])     # gradient flows through clone
+    np.testing.assert_allclose(base.grad.numpy(), [0.0, 0.0, 0.0, 0.0])  # ...but detach blocks it from base
 
   def test_setitem_on_grad_used_tensor_raises(self):
     x = Tensor([1.0, 2.0, 3.0, 4.0], requires_grad=True).realize()

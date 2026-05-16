@@ -852,14 +852,15 @@ class Tensor(OpMixin):
     Propagates the gradient of a tensor backwards through the computation graph.
     If the 'gradient' argument is not provided, the tensor must be a scalar, and the gradient is implicitly set to 1.0.
     ```python exec="true" source="above" session="tensor" result="python"
-    t = Tensor([1.0, 2.0, 3.0, 4.0], requires_grad=True)
+    t = Tensor([1.0, 2.0, 3.0, 4.0])
     t.sum().backward()
     print(t.grad.numpy())
     ```
     """
     all_uops = self.uop.toposort()
+    # backward fills .grad for every in-scope float tensor; .detach() only blocks gradient flow to the source
     tensors_need_grad: list[Tensor] = [t for tref in all_tensors if (t:=tref()) is not None and \
-                                       t.uop in all_uops and t.requires_grad and t.is_floating_point()]
+                                       t.uop in all_uops and t.is_floating_point()]
     # clear contexts
     for t,g in zip(tensors_need_grad, self.gradient(*tensors_need_grad, gradient=gradient)):
       assert g.shape == t.shape, f"grad shape must match tensor shape, {g.shape!r} != {t.shape!r}"

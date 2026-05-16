@@ -27,7 +27,12 @@ def run_asm_gemm(a_shape, b_shape, dtype=dtypes.float16, a_shard=None, b_shard=N
     with Context(DEBUG=0):
       Tensor.realize(a_rand, x_scale, b_rand, w_scale, grad_amax_state)
 
+  # clone all inputs before any backward: a clone copies the source's current .grad
   a, b = a_rand.clone(), b_rand.clone()
+  if dtype == FP8_DTYPE:
+    a_ref, b_ref = a_rand.detach().cast(dtypes.bfloat16).requires_grad_(), b_rand.detach().cast(dtypes.bfloat16).requires_grad_()
+  else:
+    a_ref, b_ref = a_rand.clone(), b_rand.clone()
   if multi: a, b = a.shard(devs, axis=a_shard), b.shard(devs, axis=b_shard)
   if dtype == FP8_DTYPE:
     tst = asm_gemm(a, b, x_scale=x_scale, w_scale=w_scale, grad_amax_state=grad_amax_state)
@@ -36,10 +41,6 @@ def run_asm_gemm(a_shape, b_shape, dtype=dtypes.float16, a_shard=None, b_shard=N
   tst.sum().backward()
   Tensor.realize(tst, a.grad, b.grad)
 
-  if dtype == FP8_DTYPE:
-    a_ref, b_ref = a_rand.detach().cast(dtypes.bfloat16).requires_grad_(), b_rand.detach().cast(dtypes.bfloat16).requires_grad_()
-  else:
-    a_ref, b_ref = a_rand.clone(), b_rand.clone()
   if multi: a_ref, b_ref = a_ref.shard(devs, axis=a_shard), b_ref.shard(devs, axis=b_shard)
   if dtype == FP8_DTYPE:
     ref = ((a_ref @ b_ref) * x_scale * w_scale).cast(dtypes.bfloat16)
