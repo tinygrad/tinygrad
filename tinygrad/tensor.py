@@ -279,12 +279,6 @@ class Tensor(OpMixin):
       self.uop = assign
     return self
 
-  def detach(self) -> Tensor:
-    """
-    Returns a new tensor with the same data as this tensor, but detached from the autograd graph.
-    """
-    return Tensor(self.uop.detach(), requires_grad=False)
-
   def _buffer(self) -> Buffer:
     from tinygrad.engine.realize import capturing
     if capturing and not getenv("UNSAFE_ALLOW_JIT_BUFFER"):
