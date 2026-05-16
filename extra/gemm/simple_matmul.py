@@ -36,10 +36,7 @@ if __name__ == "__main__":
   for i in range(CNT):
     if i > 0 and getenv("RAND", 0) != 0:
       a, b = init_matrix(M, K), init_matrix(K, N)
-    if getenv("ASM_GEMM"):
-      from extra.gemm.cdna_asm_gemm import asm_gemm
-      c = asm_gemm(a, b).realize()
-    else: c = a.matmul(b, dtype=acc_dtype).realize()
+    c = a.matmul(b, dtype=acc_dtype).realize()
 
   if getenv("SHOULD_USE_TC"):
     linear = compile_linear(a.matmul(b, dtype=acc_dtype).schedule_linear())
