@@ -79,7 +79,7 @@ class TestTensorGradient(unittest.TestCase):
   def test_gradient_through_clone_from_grad_src(self):
     # unlike torch, tinygrad accumulates grad on all requires_grad tensors, including non-leaf x
     src = Tensor([1.0, 2.0, 3.0, 4.0], requires_grad=True)
-    x = src.clone().requires_grad_(True)
+    x = src.clone()
     (x * 2.0).sum().backward()
     np.testing.assert_allclose(src.grad.numpy(), [2.0, 2.0, 2.0, 2.0])
     np.testing.assert_allclose(x.grad.numpy(), [2.0, 2.0, 2.0, 2.0])
