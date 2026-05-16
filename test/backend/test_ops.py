@@ -1766,9 +1766,10 @@ class TestOps(unittest.TestCase):
     helper_test_op([(10,)], lambda x: torch.cumprod(x, dim=0), lambda x: x.associative_scan(lambda a, b: a * b, axis=0), low=0.5, high=1.5)
     helper_test_op([(20, 15)], lambda x: torch.cumprod(x, dim=1), lambda x: x.associative_scan(lambda a, b: a * b, axis=1), low=0.5, high=1.5)
   def test_associative_scan_max(self):
-    helper_test_op([(10,)], lambda x: torch.cummax(x, dim=0).values, lambda x: x.associative_scan(lambda a, b: a.maximum(b), axis=0), forward_only=True)
-    helper_test_op([(8, 9)], lambda x: torch.cummax(x, dim=0).values, lambda x: x.associative_scan(lambda a, b: a.maximum(b), axis=0), forward_only=True)
-    helper_test_op([(8, 9)], lambda x: torch.cummax(x, dim=1).values, lambda x: x.associative_scan(lambda a, b: a.maximum(b), axis=1), forward_only=True)
+    def _max(a, b): return a.maximum(b)
+    helper_test_op([(10,)], lambda x: torch.cummax(x, dim=0).values, lambda x: x.associative_scan(_max, axis=0), forward_only=True)
+    helper_test_op([(8, 9)], lambda x: torch.cummax(x, dim=0).values, lambda x: x.associative_scan(_max, axis=0), forward_only=True)
+    helper_test_op([(8, 9)], lambda x: torch.cummax(x, dim=1).values, lambda x: x.associative_scan(_max, axis=1), forward_only=True)
   def test_associative_scan_reverse(self):
     # reverse cumsum: sum from right to left
     helper_test_op([(10,)], lambda x: torch.cumsum(x.flip(0), dim=0).flip(0), lambda x: x.associative_scan(lambda a, b: a + b, axis=0, reverse=True))
