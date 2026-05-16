@@ -311,7 +311,7 @@ if __name__ == "__main__":
     if isinstance(x.device, tuple) and x.uop.axis is not None:
       return Tensor.zeros(x.shape, dtype=grad_dtype(x), device=x.device[0]).shard_(x.device, axis=x.uop.axis).contiguous()
     return Tensor.zeros(x.shape, dtype=grad_dtype(x), device=x.device).contiguous()
-  grads = {x:_make_grad(x) for x in state.values() if x.requires_grad is None}
+  grads = {x:_make_grad(x) for x in state.values() if x.requires_grad}
 
   # print model size
   sz = 0

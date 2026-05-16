@@ -343,7 +343,7 @@ class MetalRenderer(CStyleLanguage):
   def __init__(self, target:Target):
     super().__init__(target)
     from tinygrad.runtime.ops_metal import MetalCompiler
-    self.compiler, self.tensor_cores = MetalCompiler(), tc.metal if target.arch == "arm64" else []
+    self.compiler, self.tensor_cores = MetalCompiler(), tc.metal if target.arch.startswith("Apple") and int(target.arch[5:]) >= 7 else []
 
   # language options
   kernel_typedef = "kernel void"

@@ -70,7 +70,7 @@ class TestTensorGradient(unittest.TestCase):
     self.assertIs(x.grad, old_grad)
 
   def test_gradient_through_clone_from_non_grad_src(self):
-    src = Tensor([1.0, 2.0, 3.0, 4.0])
+    src = Tensor([1.0, 2.0, 3.0, 4.0], requires_grad=False)
     x = src.clone().requires_grad_(True)
     (x * 2.0).sum().backward()
     np.testing.assert_allclose(x.grad.numpy(), [2.0, 2.0, 2.0, 2.0])
@@ -79,10 +79,16 @@ class TestTensorGradient(unittest.TestCase):
   def test_gradient_through_clone_from_grad_src(self):
     # unlike torch, tinygrad accumulates grad on all requires_grad tensors, including non-leaf x
     src = Tensor([1.0, 2.0, 3.0, 4.0], requires_grad=True)
-    x = src.clone().requires_grad_(True)
+    x = src.clone()
     (x * 2.0).sum().backward()
     np.testing.assert_allclose(src.grad.numpy(), [2.0, 2.0, 2.0, 2.0])
     np.testing.assert_allclose(x.grad.numpy(), [2.0, 2.0, 2.0, 2.0])
+
+  def test_setitem_on_grad_used_tensor_raises(self):
+    x = Tensor([1.0, 2.0, 3.0, 4.0], requires_grad=True).realize()
+    _ = (x * 2.0).sum()
+    with self.assertRaises(RuntimeError):
+      x[0] = 99.0
 
   def test_gradient_through_chained_unrealized_setitem(self):
     g1 = Tensor.zeros(4).contiguous()

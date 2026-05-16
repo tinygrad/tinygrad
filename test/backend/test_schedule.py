@@ -238,19 +238,9 @@ class TestSchedule(unittest.TestCase):
       run_linear(*check_schedule(out, 4))
     np.testing.assert_allclose(out.numpy(), (x.numpy() - x.numpy().max(keepdims=True)).max())
 
-  @unittest.skip("these two Tensors are the same")
-  def test_example_matmul(self):
-    x = Tensor.eye(64, requires_grad=True)
-    y = Tensor.eye(64, requires_grad=True)
-    z = y.matmul(x).sum()
-    z.backward()
-    out = x.grad.contiguous()
-    run_linear(*check_schedule(out, 1))
-    np.testing.assert_allclose(out.numpy(), np.ones((64,64)))
-
   def test_example_matmul_contig(self):
-    x = Tensor.eye(64, requires_grad=True).contiguous().realize()
-    y = Tensor.eye(64, requires_grad=True).contiguous().realize()
+    x = Tensor.eye(64).contiguous().realize()
+    y = Tensor.eye(64).contiguous().realize()
     z = y.matmul(x).sum()
     z.backward()
     out = x.grad.contiguous()
@@ -258,7 +248,7 @@ class TestSchedule(unittest.TestCase):
     np.testing.assert_allclose(out.numpy(), np.ones((64,64)))
 
   def test_example_matmul_same(self):
-    x = Tensor.eye(64, requires_grad=True)
+    x = Tensor.eye(64)
     z = x.matmul(x).sum()
     z.backward()
     out = x.grad.contiguous()
