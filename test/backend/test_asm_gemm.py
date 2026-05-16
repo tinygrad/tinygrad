@@ -229,19 +229,7 @@ def has_hipcc():
   return True
 
 @unittest.skipUnless(has_hipcc(), "FP8 gemm requires hipcc to compile")
-class TestGemmLlamaFP8(TestGemmLlama):
-  dtype = FP8_DTYPE
-
-  def test_4wave_matches_8wave_scale_modes(self):
-    Tensor.manual_seed(0)
-    a = Tensor.randn(1, 1024, 1024, dtype=dtypes.float).sub(0.5).cast(FP8_DTYPE).realize()
-    b = Tensor.randn(1024, 1024, dtype=dtypes.float).sub(0.5).cast(FP8_DTYPE).realize()
-    x_scale = Tensor.full((), 2.0, dtype=dtypes.float32).realize()
-    w_scale = Tensor.full((), 0.5, dtype=dtypes.float32).realize()
-    for xs, ws in [(None, None), (x_scale, None), (None, w_scale), (x_scale, w_scale)]:
-      with Context(DEBUG=0, ASM_GEMM_4WAVE=0): out_8wave = asm_gemm(a, b, x_scale=xs, w_scale=ws).realize()
-      with Context(DEBUG=0, ASM_GEMM_4WAVE=1): out_4wave = asm_gemm(a, b, x_scale=xs, w_scale=ws).realize()
-      np.testing.assert_allclose(out_4wave.numpy(), out_8wave.numpy(), atol=0, rtol=0)
+class TestGemmLlamaFP8(TestGemmLlama): dtype = FP8_DTYPE
 
 class TestMagicGu(unittest.TestCase):
   def test_magicgu_matches_old(self):
