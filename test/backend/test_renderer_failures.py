@@ -1,6 +1,6 @@
 import unittest
 import numpy as np
-from tinygrad.device import Device, is_dtype_supported
+from tinygrad.device import Device
 from tinygrad.dtype import dtypes, ConstType
 from tinygrad.engine.realize import run_linear
 from tinygrad.codegen import to_program
@@ -96,7 +96,7 @@ class TestPTXFailures(unittest.TestCase):
     ret = _test_uop_result([], sink, local_size=[4, 1, 1])[0]
     np.testing.assert_equal(ret, [0, 1, 1, 1])
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
+  @unittest.skipUnless(dtypes.half in Device[Device.DEFAULT].renderer.supported_dtypes(), "need half")
   def test_gated_define_acc_with_half_dtype(self):
     a = Tensor.randn(32, 32, dtype=dtypes.half).realize()
     b = Tensor.randn(34, 32, dtype=dtypes.half).realize()

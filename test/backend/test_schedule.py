@@ -8,11 +8,12 @@ from typing import cast
 from hypothesis import assume, given, strategies as strat
 
 from tinygrad import nn, dtypes, Device, Tensor, Variable
-from tinygrad.device import is_dtype_supported
 from tinygrad.dtype import DType
 from tinygrad.uop.ops import UOp, Ops, UPat
 from tinygrad.helpers import CI, DEBUG, OSX, GlobalCounters, Context, getenv, all_same, temp
 from tinygrad.engine.realize import compile_linear, run_linear
+
+supported_dtypes = Device[Device.DEFAULT].renderer.supported_dtypes()
 
 class KernelCountException(Exception): pass
 def check_schedule(t:Tensor|list[Tensor]|UOp, allowed:int, to_prerealize:list[Tensor]|None=None, filter_sink=True):
@@ -105,7 +106,7 @@ class TestSchedule(unittest.TestCase):
     run_linear(*check_schedule(a, 1))
     self.assertListEqual(a.tolist(), [[15]])
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
+  @unittest.skipUnless(dtypes.half in supported_dtypes, "need half")
   @unittest.skipIf(Device.DEFAULT == "WEBGPU" and OSX, "WEBGPU Metal backend is not accurate enough")
   def test_expand_buffer_before_cast(self):
     a = Tensor.randn(4, 2, 1).realize().permute((1, 0, 2))
@@ -715,7 +716,7 @@ class TestSchedule(unittest.TestCase):
     np.testing.assert_allclose(dx.numpy(), [[[[0.,3.,9.],[0,1.,3.],[0.,0.,0.]]]*3]*3)
 
   # TODO like openpilot with imagef
-  @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
+  @unittest.skipUnless(dtypes.half in supported_dtypes, "need half")
   def test_base_change_expand_expand(self):
     a = Tensor.ones(4, 4).contiguous().realize()
     b = a.cast(dtypes.half).expand(2, 4, 4)
@@ -761,9 +762,9 @@ class TestSchedule(unittest.TestCase):
   def test_conv2d(self): _test_conv2d(4)
   def test_conv2d_fused(self): _test_conv2d(4)
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
+  @unittest.skipUnless(dtypes.half in supported_dtypes, "need half")
   def test_conv2d_half(self): _test_conv2d(4, dtype=dtypes.half)
-  @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
+  @unittest.skipUnless(dtypes.half in supported_dtypes, "need half")
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "Causes other tests to fail")
   def test_conv2d_fused_half(self): _test_conv2d(4, dtype=dtypes.half)
 
@@ -870,7 +871,7 @@ class TestSchedule(unittest.TestCase):
   @given(strat.sampled_from(dtypes.all), strat.sampled_from(dtypes.all))
   @unittest.skip("kernel count depends on input")
   def test_cast_padded_const(self, dt1, dt2):
-    assume(is_dtype_supported(dt1) and is_dtype_supported(dt2))
+    assume(dt1 in supported_dtypes and dt2 in supported_dtypes)
     a = Tensor(1, dtype=dt1).reshape(1, 1).pad(((1, 1), None))
     casted_view = a.cast(dt2)
     run_linear(*check_schedule(casted_view, 0))
@@ -994,7 +995,7 @@ class TestSchedule(unittest.TestCase):
     self.assertIs(sched[1].ast.op, Ops.BUFFER_VIEW)
     np.testing.assert_equal(a.numpy(), [[4, 5]])
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
+  @unittest.skipUnless(dtypes.half in supported_dtypes, "need half")
   def test_precompute_freqs_cis(self):
     from extra.models.llama import precompute_freqs_cis
     args = {"dim":32, "end":2048, "theta":10000}

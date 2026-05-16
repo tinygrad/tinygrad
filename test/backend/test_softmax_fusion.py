@@ -4,7 +4,6 @@ from tinygrad import Tensor, GlobalCounters, Context, Device
 from tinygrad.dtype import DTypeLike, dtypes
 from tinygrad.engine.realize import run_linear
 from tinygrad.helpers import DEBUG, get_single_element
-from tinygrad.device import is_dtype_supported
 
 def single_kernel_softmax(x_in:Tensor, axis=-1, dtype:DTypeLike|None=None) -> Tensor:
   # only support axis =-1
@@ -62,7 +61,7 @@ class TestFuse(unittest.TestCase):
     b = Tensor.rand(50,50).realize()
     self._test_fuse(lambda a,b: ((a@b).relu()+a).contiguous().softmax(axis=-1), a,b, allow_multiple=True)
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.float16), f"no float16 on {Device.DEFAULT}")
+  @unittest.skipUnless(dtypes.float16 in Device[Device.DEFAULT].renderer.suppoted_dtypes(), f"no float16 on {Device.DEFAULT}")
   @unittest.skip("needs RANGEIFY>1")
   def test_fuse_softmax_dtype(self):
     a = Tensor.rand(50,50).realize()
