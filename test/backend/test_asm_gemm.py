@@ -38,7 +38,8 @@ def run_asm_gemm(a_shape, b_shape, dtype=dtypes.float16, a_shard=None, b_shard=N
   # no validation on the NULL device
   if a_rand.device.startswith("NULL"): return None
   atol, rtol = (2e-1, 1e-2) if dtype == dtypes.bfloat16 else (256, 1e-2) if dtype == FP8_DTYPE else (1e-2, 1e-3)
-  grad_atol, grad_rtol = (16895, 0.125) if dtype == FP8_DTYPE else (atol, rtol)
+  # allow more rtol for multi because of ALLREDUCE_CAST
+  grad_atol, grad_rtol = (16895, 0.125) if dtype == FP8_DTYPE else (atol, 2e-2 if multi and dtype == dtypes.bfloat16 else rtol)
   with Context(DEBUG=0):
     # enable for debugging, slow for larger gemms
     if getenv("USE_NPY"):
