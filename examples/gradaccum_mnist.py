@@ -48,8 +48,8 @@ if __name__ == "__main__":
   pos_params = list(itertools.accumulate(params, lambda x,y: x+y.numel(), initial=0))
   adam_m = Tensor.zeros(pos_params[-1], device="CPU").contiguous()
   adam_v = Tensor.zeros(pos_params[-1], device="CPU").contiguous()
-  adam_b1_t = Tensor.ones((1,), dtype=dtypes.float32, device="CPU", requires_grad=False).contiguous()
-  adam_b2_t = Tensor.ones((1,), dtype=dtypes.float32, device="CPU", requires_grad=False).contiguous()
+  adam_b1_t = Tensor.ones((1,), dtype=dtypes.float32, device="CPU").contiguous()
+  adam_b2_t = Tensor.ones((1,), dtype=dtypes.float32, device="CPU").contiguous()
   adam_params = [adam_m, adam_v, adam_b1_t, adam_b2_t]
 
   # create loss and grads. init all state so the JIT works on microbatch
