@@ -36,7 +36,10 @@ def run_asm_gemm(a_shape, b_shape, dtype=dtypes.float16, a_shard=None, b_shard=N
   tst.sum().backward()
   Tensor.realize(tst, a.grad, b.grad)
 
-  a_ref, b_ref = a_rand.clone(), b_rand.clone()
+  if dtype == FP8_DTYPE:
+    a_ref, b_ref = a_rand.detach().cast(dtypes.bfloat16).requires_grad_(), b_rand.detach().cast(dtypes.bfloat16).requires_grad_()
+  else:
+    a_ref, b_ref = a_rand.clone(), b_rand.clone()
   if multi: a_ref, b_ref = a_ref.shard(devs, axis=a_shard), b_ref.shard(devs, axis=b_shard)
   if dtype == FP8_DTYPE:
     ref = ((a_ref @ b_ref) * x_scale * w_scale).cast(dtypes.bfloat16)
