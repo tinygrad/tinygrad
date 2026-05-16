@@ -276,8 +276,9 @@ extern "C" __global__ __launch_bounds__(THREADS) void q8_lmhead_gumbel_partial_a
     float scale = float(*reinterpret_cast<const _Float16*>(wbase + base));
     #pragma unroll
     for (int i = 0; i < 32; i++) {
-      acc += hidden[lane * 32 + i] * scale * float(*reinterpret_cast<const int8_t*>(wbase + base + 2 + i));
+      acc += hidden[lane * 32 + i] * float(*reinterpret_cast<const int8_t*>(wbase + base + 2 + i));
     }
+    acc *= scale;
   }
 
   #pragma unroll

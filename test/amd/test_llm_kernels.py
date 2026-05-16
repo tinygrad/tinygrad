@@ -2,9 +2,9 @@ import unittest
 import numpy as np
 
 from tinygrad import Device, Tensor
-from tinygrad.llm.amd_kernels import fused_gate_up
+from tinygrad.llm.amd_kernels import fused_gate_up, q8_lmhead_gumbel_argmax
 
-DIM, HIDDEN, Q8_BLOCK, Q8_BLOCK_BYTES = 1024, 3584, 32, 34
+DIM, HIDDEN, VOCAB, Q8_BLOCK, Q8_BLOCK_BYTES = 1024, 3584, 248320, 32, 34
 
 def make_q8_blocks(rng:np.random.Generator) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
   blocks = DIM // Q8_BLOCK
@@ -34,6 +34,18 @@ class TestLLMAMDKernels(unittest.TestCase):
     out = fused_gate_up(Tensor(x, device="AMD"), Tensor(gate_raw, device="AMD").contiguous(),
                         Tensor(up_raw, device="AMD").contiguous()).numpy()
     np.testing.assert_allclose(out, expected, rtol=2e-4, atol=2e-4)
+
+  def test_q8_lmhead_gumbel_argmax_correctness(self):
+    blocks = DIM // Q8_BLOCK
+    target = 12345
+    raw = np.zeros((VOCAB, blocks, Q8_BLOCK_BYTES), dtype=np.uint8)
+    raw[target, :, :2] = np.array([1], dtype=np.float16).view(np.uint8)
+    raw[target, :, 2:] = 1
+
+    hidden = np.ones((DIM,), dtype=np.float32)
+    out = q8_lmhead_gumbel_argmax(Tensor(hidden, device="AMD"), Tensor(raw.reshape(-1), device="AMD").contiguous(),
+                                  Tensor([0.0], device="AMD")).numpy()
+    self.assertEqual(int(out.reshape(-1)[0]), target)
 
 if __name__ == "__main__":
   unittest.main()
