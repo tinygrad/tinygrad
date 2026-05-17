@@ -156,8 +156,7 @@ def amd_submit_pm4(ctx, cf):
   size, ring_dwords = UOp.const(dtypes.uint32, bb_param.dtype.size), q.ring.size
 
   put = put_ptr[0]
-  pre = (UOp.barrier(*stores),) if stores else ()
-  i = UOp.range(size, 0, dtype=dtypes.int, src=pre)
+  i = UOp.range(size, 0, dtype=dtypes.int, src=stores)
   next_put = put + size.cast(put.dtype)
   ring_idx = ((put + i.cast(put.dtype)) % ring_dwords).cast(dtypes.int)
 
@@ -224,11 +223,10 @@ def amd_submit_sdma(ctx, cf):
   start_dw = fits * tail_off_dw
   zero_amt_dw = (1 - fits) * (q.ring.size - tail_off_dw)
 
-  pre = (UOp.barrier(*stores),) if stores else ()
-  zi = UOp.range(zero_amt_dw, 0, dtype=dtypes.int, src=pre)
+  zi = UOp.range(zero_amt_dw, 0, dtype=dtypes.int, src=stores)
   zero_tail = ring[tail_off_dw + zi].store(UOp.const(dtypes.uint32, 0)).end(zi)
 
-  i = UOp.range(UOp.const(dtypes.int, size_dw), 0, dtype=dtypes.int, src=pre)
+  i = UOp.range(UOp.const(dtypes.int, size_dw), 0, dtype=dtypes.int, src=stores)
   copy_to_ring = ring[start_dw + i].store(bb_param[i]).end(i)
 
   next_put_b = put_b + ((zero_amt_dw + size_dw) * 4).cast(put_b.dtype)
