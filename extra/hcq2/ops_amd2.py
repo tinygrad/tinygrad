@@ -23,7 +23,7 @@ from tinygrad.runtime.ops_amd import SQTT, SQTT_ITRACE_SE_MASK, SQTT_LIMIT_SE, S
 from tinygrad.runtime.ops_amd import EVENT_INDEX_PARTIAL_FLUSH, WAIT_REG_MEM_FUNCTION_EQ, WAIT_REG_MEM_FUNCTION_NEQ, WAIT_REG_MEM_FUNCTION_GEQ
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint: disable=unused-import
 
-from extra.hcq2.hcq2 import HCQ2LowerCtx
+from extra.hcq2.hcq2 import HCQ2LowerCtx, unwrap_after
 from tinygrad.engine.realize import get_runtime
 from tinygrad.uop.ops import Ops, UPat, PatternMatcher, graph_rewrite
 
@@ -150,13 +150,14 @@ def amd_lower_pm4(ctx, linear):
 
 def amd_submit_pm4(ctx, cf):
   dev = Device['AMD']
-  bb_param = cf.src[0]
+  bb_param, stores = (cf.src[0].src[0], cf.src[0].src[1:]) if cf.src[0].op is Ops.AFTER else (cf.src[0], ())
   q = dev.compute_queue
   ring, wptr, doorbell, put_ptr = (ctx.host_param(b) for b in (q.ring, q.write_ptr, q.doorbell, q.put_value))
   size, ring_dwords = UOp.const(dtypes.uint32, bb_param.dtype.size), q.ring.size
 
   put = put_ptr[0]
-  i = UOp.range(size, 0, dtype=dtypes.int)
+  pre = (UOp.barrier(*stores),) if stores else ()
+  i = UOp.range(size, 0, dtype=dtypes.int, src=pre)
   next_put = put + size.cast(put.dtype)
   ring_idx = ((put + i.cast(put.dtype)) % ring_dwords).cast(dtypes.int)
 
@@ -212,7 +213,7 @@ amd_inner_sdma_pm = PatternMatcher([
 
 def amd_submit_sdma(ctx, cf):
   dev = Device['AMD']
-  bb_param = cf.src[0]
+  bb_param, stores = (cf.src[0].src[0], cf.src[0].src[1:]) if cf.src[0].op is Ops.AFTER else (cf.src[0], ())
   q = dev.sdma_queue(0)
   ring, wptr, doorbell, put_ptr = (ctx.host_param(b) for b in (q.ring, q.write_ptr, q.doorbell, q.put_value))
   size_dw, ring_bytes = bb_param.dtype.size, q.ring.size * 4
@@ -223,10 +224,11 @@ def amd_submit_sdma(ctx, cf):
   start_dw = fits * tail_off_dw
   zero_amt_dw = (1 - fits) * (q.ring.size - tail_off_dw)
 
-  zi = UOp.range(zero_amt_dw, 0, dtype=dtypes.int)
+  pre = (UOp.barrier(*stores),) if stores else ()
+  zi = UOp.range(zero_amt_dw, 0, dtype=dtypes.int, src=pre)
   zero_tail = ring[tail_off_dw + zi].store(UOp.const(dtypes.uint32, 0)).end(zi)
 
-  i = UOp.range(UOp.const(dtypes.int, size_dw), 0, dtype=dtypes.int)
+  i = UOp.range(UOp.const(dtypes.int, size_dw), 0, dtype=dtypes.int, src=pre)
   copy_to_ring = ring[start_dw + i].store(bb_param[i]).end(i)
 
   next_put_b = put_b + ((zero_amt_dw + size_dw) * 4).cast(put_b.dtype)

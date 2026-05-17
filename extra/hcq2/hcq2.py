@@ -5,7 +5,7 @@ from dataclasses import replace
 if TYPE_CHECKING: from tinygrad.engine.realize import ExecContext
 from tinygrad.helpers import DEV, getenv, select_first_inited, select_by_name, suppress_finalizing, mv_address, round_up, DEBUG, dedup
 from tinygrad.device import Device, Buffer, BufferSpec, Compiled, LRUAllocator
-from tinygrad.uop.ops import Ops, sint, UOp, UPat, PatternMatcher, KernelInfo, graph_rewrite, track_rewrites
+from tinygrad.uop.ops import Ops, sint, UOp, UPat, PatternMatcher, KernelInfo, graph_rewrite, track_rewrites, buffers
 from tinygrad.uop.symbolic import symbolic
 from tinygrad.dtype import dtypes, DType
 from dataclasses import dataclass, field
@@ -264,35 +264,29 @@ def _lower_stores(host_buf:UOp, stores_in:tuple[UOp, ...]) -> list[UOp]:
   mv = host_buf.buffer.ensure_allocated()._buf.cpu_view()
   stores = []
   for s in stores_in:
-    byte_off, dt = s.src[0].src[1].arg, s.src[1].dtype
+    byte_off = s.src[0].src[1].arg
     idx = UOp.const(dtypes.int, byte_off // host_buf.dtype.base.itemsize)
-    stores.append(host_buf.index(idx, ptr=True).cast(dt.ptr()).store(s.src[1].cast(dt)))
+    stores.append(host_buf.index(idx).store(s.src[1]))
   return stores
 
 def bufferize_binary(ctx:HCQ2LowerCtx, target:UOp) -> UOp|None:
   bin_node = target.src[0]
 
-  # TODO: move to pm_
   if bin_node.tag == "kernargs":
     dctx = ctx.devs[bin_node.src[0].arg]
     args_off = dctx.kernargs_allocator.alloc(len(bin_node.arg), 16)
     host_buf = UOp(Ops.BUFFER_VIEW, dtypes.uint8, src=(dctx.kernargs_host,), arg=(len(bin_node.arg), args_off))
+    host_buf.buffer.ensure_allocated()._buf.cpu_view()[:len(bin_node.arg)] = bin_node.arg
     dev_addr = dctx.kernargs_gpu + args_off
+    return dev_addr.after(*_lower_stores(host_buf, target.src[1:]))
   elif bin_node.tag in ("compute", "copy"):
     dev = bin_node.src[0].arg
     buf = Buffer(dev, len(bin_node.arg) // dtypes.uint32.itemsize, dtypes.uint32, options=BufferSpec(cpu_access=True), preallocate=True)
     host_buf = UOp.from_buffer(buf, dev)
-    dev_addr = host_buf
-    # host_buf.buffer.ensure_allocated()._buf.cpu_view()[:len(bin_node.arg)] = bin_node.arg
-    # bb = host_buf.after(*_lower_stores(host_buf, target.src[1:]))
-    # submit_cf = UOp(Ops.CUSTOM_FUNCTION, dtypes.void, src=(bb,), arg=f"submit_{bin_node.tag}")
-    # # TODO: this should go
-    # tl = ctx.host_param(Device["AMD"].timeline_value)
-    # return tl.after(UOp(Ops.BARRIER, dtypes.void, src=(submit_cf,))).index(UOp.const(dtypes.int, 0), ptr=True).store(tl[0] + 1)
-  else: return None
-
-  host_buf.buffer.ensure_allocated()._buf.cpu_view()[:len(bin_node.arg)] = bin_node.arg
-  return dev_addr.rtag(bin_node.tag).after(*_lower_stores(host_buf, target.src[1:]))
+    host_buf.buffer.ensure_allocated()._buf.cpu_view()[:len(bin_node.arg)] = bin_node.arg
+    patched = host_buf.after(*_lower_stores(host_buf, target.src[1:]))
+    return UOp(Ops.CUSTOM_FUNCTION, dtypes.void, src=(patched,), arg=f"submit_{bin_node.tag}")
+  return None
 
 _program_uop_cache:dict[tuple[bytes,str], tuple[UOp,UOp]] = {}
 def bufferize_program(ctx:HCQ2LowerCtx, target:UOp) -> UOp|None:
@@ -336,36 +330,25 @@ pm_resolve_patches = symbolic + PatternMatcher([
   (UPat(Ops.GETADDR, src=(UPat((Ops.BUFFER, Ops.BUFFER_VIEW)),), name="ga"), resolve_getaddr),
   (UPat(Ops.GETADDR, src=(UPat(Ops.CONST, name='const'),)), lambda ctx, const: const),
 
-  (UPat(Ops.STORE, src=(UPat(Ops.CAST, src=(UPat(Ops.INDEX, src=(UPat((Ops.BUFFER, Ops.BUFFER_VIEW), name="buf"),
-                                                                  UPat(Ops.CONST, name="off"))),)),
+  (UPat(Ops.STORE, src=(UPat(Ops.INDEX, src=(UPat((Ops.BUFFER, Ops.BUFFER_VIEW), name="buf"), UPat(Ops.CONST, name="off"))),
                        UPat(Ops.CONST, name="val"))), fold_const_store),
 ])
 
 pm_parametrize_host_buffers = PatternMatcher([
-  (UPat((Ops.BUFFER), name="buf"), lambda ctx, buf: ctx.host_param(buf.buffer).rtag(buf.tag)),
+  (UPat(Ops.INDEX, src=(UPat(Ops.BUFFER_VIEW, name="bv"), UPat.var("idx"))), lambda ctx, bv, idx: bv.src[0].index(idx + bv.arg[1])),
+  (UPat(Ops.BUFFER, name="buf"), lambda ctx, buf: ctx.host_param(buf.buffer)),
 ])
 
-def lower_submit(ctx:HCQ2LowerCtx, p:UOp) -> UOp|None:
-  param = p if p.op is Ops.PARAM else p.src[0]
-  if param.tag not in ("compute", "copy"): return None
-  dev = ctx.inputs[param.arg].device
-  deps = () if p.op is Ops.PARAM else p.src[1:]
-  submit_cf = UOp(Ops.CUSTOM_FUNCTION, dtypes.void, src=(param.rtag(None),), arg=f"submit_{param.tag}").rtag(dev)
+def lower_submit(ctx:HCQ2LowerCtx, cf:UOp) -> UOp|None:
+  if not cf.arg.startswith("submit_") or cf.tag is not None: return None
+  submit_cf = cf.rtag("AMD")
   tl = ctx.host_param(Device['AMD'].timeline_value)
-  return tl.after(UOp(Ops.BARRIER, dtypes.void, src=(*deps, submit_cf,))).index(UOp.const(dtypes.int, 0), ptr=True).store(tl[0] + 1)
-
-pm_lower_submits = PatternMatcher([
-  (UPat(Ops.AFTER, src=(UPat(Ops.PARAM),), allow_any_len=True, name="p"), lower_submit),
-  (UPat(Ops.PARAM, name="p"), lower_submit),
-])
+  return tl.after(UOp(Ops.BARRIER, dtypes.void, src=(submit_cf,))).index(UOp.const(dtypes.int, 0), ptr=True).store(tl[0] + 1)
+pm_lower_submits = PatternMatcher([(UPat(Ops.CUSTOM_FUNCTION, name="cf"), lower_submit)])
 
 def hcq_callify(ctx:HCQ2LowerCtx, l:UOp) -> UOp:
   sink = UOp.sink(*l.src, arg=KernelInfo(name=ctx.name, estimates=Estimates()), tag=1)
   call = to_program(sink, Device["CPU"].renderer).call(*[UOp.from_buffer(b, "CPU") if isinstance(b, Buffer) else b for b in ctx.inputs])
-
-  print(call.src[0].src[3].arg)
-  exit(0)
-
   return call.replace(src=call.src + (UOp(Ops.BIND, dtypes.void, src=tuple(ctx.holds)),)) if ctx.holds else call
 pm_callify = PatternMatcher([(UPat(Ops.LINEAR, name="l", allow_any_len=True), hcq_callify)])
 
@@ -428,7 +411,7 @@ def hcq_exec(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
   host_call = hcq_schedule(hcq_ctx, linear, ast, dev)
   with track_stats(ctx, call, dev.device, bufs, ctx.var_vals) as tm:
     st = time.perf_counter() if ctx.wait else 0.0
-    # run_linear(UOp(Ops.LINEAR, dtypes.void, (host_call,)), var_vals=ctx.var_vals, jit=True, update_stats=DEBUG>=3)
+    run_linear(UOp(Ops.LINEAR, dtypes.void, (host_call,)), var_vals=ctx.var_vals, jit=True, update_stats=DEBUG>=3)
     if ctx.wait:
       dev.synchronize()
       tm[0] = time.perf_counter() - st
