@@ -1831,23 +1831,21 @@ def train_flux():
 
     return model
 
-  def get_train_iter() -> Iterator[tuple[Tensor, Tensor, Tensor, Tensor, Tensor]]:
-    return batch_load_flux(BS, False, BASEDIR, empty_enc_dir=EMPTYENCDIR, seed=SEED)
+  def get_data_iter(val:bool) -> Iterator[tuple[Tensor, Tensor, Tensor, Tensor, Tensor]]:
+    return batch_load_flux(BS, val, BASEDIR, empty_enc_dir=EMPTYENCDIR, seed=SEED, is_infinite=(not val))
 
-  def get_val_iter() -> Iterator[tuple[Tensor, Tensor, Tensor, Tensor, Tensor]]:
-    return batch_load_flux(BS, True, BASEDIR, cfg_prob=0.0, is_infinite=False)
-
-  @TinyJit
-  def train_step(model:Flux, optim:AdamW, sample:dict[str, Tensor]) -> Tensor:
-    optim.zero_grad()
-
+  def prepare_inputs(sample:dict[str, Tensor], timesteps:Tensor|None = None) -> tuple[dict[str, Tensor], Tensor, Tensor, tuple[int, int]]:
     for k in sample: sample[k].shard_(GPUS, axis=None)
     labels = generate_labels(sample["mean"], sample["logvar"])
-    timesteps, clip_enc, t5_enc = Tensor.rand(BS).shard(GPUS, None), sample["clip_encodings"], sample["t5_encodings"]
+    clip_enc, t5_enc = sample["clip_encodings"], sample["t5_encodings"]
+
+    if timesteps is not None:
+      timesteps = timesteps / 8.0
+    else:
+      timesteps = Tensor.rand(BS).shard(GPUS, None)
 
     noise = Tensor.randn_like(labels)
-    timestep_values = timesteps / 8.0
-    sigmas = timestep_values.view(-1, 1, 1, 1)
+    sigmas = timesteps.view(-1, 1, 1, 1)
     latents = (1 - sigmas) * labels + sigmas * noise
 
     b, _, latent_h, latent_w = latents.shape
@@ -1856,12 +1854,24 @@ def train_flux():
 
     latents = pack_latents(latents)
 
-    latent_noise_pred = model(img=latents, img_ids=latent_pos_enc, txt=t5_enc, txt_ids=text_pos_enc, y=clip_enc, timesteps=timestep_values)
+    return (
+      {"img": latents, "img_ids": latent_pos_enc, "txt": t5_enc, "txt_ids": text_pos_enc, "y": clip_enc, "timesteps": timesteps},
+      noise,
+      labels,
+      latent_dims
+    )
+
+  @TinyJit
+  @Tensor.train(mode=True)
+  def train_step(model:Flux, optim:AdamW, sample:dict[str, Tensor]) -> Tensor:
+    optim.zero_grad()
+
+    inputs, noise, labels, latent_dims = prepare_inputs(sample)
+    latent_noise_pred = model(**inputs)
 
     pred = unpack_latents(latent_noise_pred, latent_dims)
     tgt = noise - labels
     loss = (pred - tgt).square().mean()
-    del pred, noise, tgt
 
     loss.backward()
     for p in optim.params:
@@ -1871,8 +1881,16 @@ def train_flux():
 
     return loss
 
+  @Tensor.train(mode=False)
   def eval_step(model:Flux, sample:dict[str, Tensor]) -> Tensor:
-    pass
+    inputs, noise, labels, latent_dims = prepare_inputs(sample)
+    latent_noise_pred = model(**inputs)
+
+    pred = unpack_latents(latent_noise_pred, latent_dims)
+    tgt = noise - labels
+    loss = (pred - tgt).square().mean(axis=[1, 2, 3]).sum()
+
+    return loss
 
   Tensor.manual_seed(SEED)
 
@@ -1902,8 +1920,7 @@ def train_flux():
   # optim
   optim = AdamW(get_parameters(model), lr=lr, eps=lr_eps)
 
-  train_iter = get_train_iter()
-  val_iter = get_val_iter()
+  train_iter, val_iter = get_data_iter(False), get_data_iter(True)
 
   # training loop
   i = 1
@@ -1914,9 +1931,12 @@ def train_flux():
 
     train_loss = train_step(model, optim, sample)
 
+    tqdm.write(f"train loss: {train_loss.float().item():.3f}")
+
     if i % eval_freq_step == 0:
       for sample in tqdm(val_iter, total=val_num_samples // BS):
-        eval_loss = eval_step(model, [])
+        eval_loss = eval_step(model, sample)
+        tqdm.write(f"eval loss: {eval_loss.float().item():.3f}")
 
       if eval_loss <= target_eval_loss:
         print(f"target eval loss reached: {eval_loss:.3f} (target: {target_eval_loss:.3f})")
