@@ -586,7 +586,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     raise ValueError(f"pixel_format={pixel_format!r} is not supported.")
 
   def EyeLike(x:Tensor, dtype:int|None=None, k:int=0):
-    ret = Tensor.eye(cast(int, min(x.shape)), dtype=OnnxDataType(dtype).to_dtype() if dtype is not None else x.dtype)
+    ret = Tensor.eye(cast(int, min(x.shape)), dtype=OnnxDataType(dtype).to_dtype() if dtype is not None else x.dtype, device=x.device)
     return ret if x.size(0) == x.size(1) else ret.pad(tuple(None if d == ret.size(0) else (k, d-ret.shape[0]-k) for d in x.shape))
 
   def OptionalHasElement(x:Tensor|None=None): return Tensor(x is not None and x.numel() > 0)
@@ -597,7 +597,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     return value.expand(shape)
 
   def Size(data:Tensor): return data.numel()
-  def Shape(data:Tensor, end:int|None=None, start:int=0): return Tensor(data.shape[start:end], dtype=dtypes.int64)
+  def Shape(data:Tensor, end:int|None=None, start:int=0): return Tensor(data.shape[start:end], dtype=dtypes.int64, device=data.device)
 
   # ***** Unary Ops (math) *****
   def Not(x:Tensor): return x.logical_not()
@@ -934,7 +934,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
       return x.unsqueeze(-1).expand(*x.shape, vocab_size)._one_hot_along_dim(vocab_size) @ weight
 
     # bert embedding layer
-    if position_ids is None: position_ids = Tensor.arange(seq_length).unsqueeze(0).expand(*input_shape)
+    if position_ids is None: position_ids = Tensor.arange(seq_length, device=input_ids.device).unsqueeze(0).expand(*input_shape)
     wrd_embedding_res = embedding(input_ids, vocab_size, word_embedding)
     pos_embedding_res = embedding(position_ids, max_position_embeddings, position_embedding)
 
@@ -1036,14 +1036,14 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
         elif mask_index.shape[0] == 2*batch_size:
           end_positions = mask_index[:batch_size]
           start_positions = mask_index[batch_size:]
-          arange = Tensor.arange(seq_len).unsqueeze(0)
+          arange = Tensor.arange(seq_len, device=mask_index.device).unsqueeze(0)
           mask = (arange < end_positions.unsqueeze(1)) & (arange >= start_positions.unsqueeze(1))
         else: raise NotImplementedError("mask_index with shape (3 * batch_size + 2) is not implemented")
       while mask.ndim < 4: mask = mask.unsqueeze(1)
       attn_scores = mask.where(attn_scores, mask_filter_value)
 
     if unidirectional:
-      causal_mask = Tensor.ones((seq_len, seq_len), dtype=dtypes.bool).tril()
+      causal_mask = Tensor.ones((seq_len, seq_len), dtype=dtypes.bool, device=attn_scores.device).tril()
       attn_scores = causal_mask.where(attn_scores, mask_filter_value)
 
     output = attn_scores.softmax(-1) @ v
@@ -1199,7 +1199,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
       inp = inp.flatten()
       axis = 0
     axis = inp._resolve_dim(axis)
-    con = Tensor([i for i,cond in enumerate(condition) if cond]) # compress in python
+    con = Tensor([i for i,cond in enumerate(condition) if cond], device=inp.device) # compress in python
     return inp[tuple(con if i == axis else slice(None) for i in range(inp.ndim))]
 
   # ***** Quantization Ops *****
