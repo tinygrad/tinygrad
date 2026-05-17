@@ -146,10 +146,10 @@ def amd_lower_pm4(ctx, linear):
   dev = Device[dev_name:=prg.src[0].src[0].arg]
   enc = AMDComputeQueue(dev)
   graph_rewrite(linear, amd_inner_pm, ctx=enc, name="amd: encode")
-  return UOp(Ops.BINARY, dtypes.void, src=(UOp(Ops.DEVICE, arg="CPU"), *enc.src), arg=enc.blob).rtag("compute")
+  return enc.build(dev="CPU", dtype=dtypes.void, tag="compute")
 
 def amd_submit_pm4(ctx, cf):
-  dev = Device[cf.tag]
+  dev = Device['AMD']
   bb_param = cf.src[0]
   q = dev.compute_queue
   ring, wptr, doorbell, put_ptr = (ctx.host_param(b) for b in (q.ring, q.write_ptr, q.doorbell, q.put_value))
@@ -200,7 +200,7 @@ def amd_lower_sdma(ctx, linear):
   dev = Device[dev_name:=copy.src[0].buffer.device]
   enc = AMDCopyQueue(dev)
   graph_rewrite(linear, amd_inner_sdma_pm, ctx=enc, name="amd: encode sdma")
-  return UOp(Ops.BINARY, dtypes.void, src=(UOp(Ops.DEVICE, arg="CPU"), *enc.src), arg=enc.blob).rtag("copy")
+  return enc.build(dev="CPU", dtype=dtypes.void, tag="copy")
 
 amd_inner_sdma_pm = PatternMatcher([
   (UPat(Ops.WAIT,  name="x"), lambda ctx, x: ctx.wait(x)),
@@ -211,7 +211,7 @@ amd_inner_sdma_pm = PatternMatcher([
 ])
 
 def amd_submit_sdma(ctx, cf):
-  dev = Device[cf.tag]
+  dev = Device['AMD']
   bb_param = cf.src[0]
   q = dev.sdma_queue(0)
   ring, wptr, doorbell, put_ptr = (ctx.host_param(b) for b in (q.ring, q.write_ptr, q.doorbell, q.put_value))

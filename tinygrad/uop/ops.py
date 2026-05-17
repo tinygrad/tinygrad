@@ -210,7 +210,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       # late ops don't have shape
       case Ops.UNIQUE | Ops.LUNIQUE | Ops.DEVICE | Ops.IF | Ops.BARRIER | Ops.CUSTOM | Ops.CUSTOMI | \
            Ops.CONTRACT | Ops.SINK | Ops.END | Ops.REWRITE_ERROR | Ops.PTRCAT | Ops.ENDIF | \
-           Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE | Ops.BINARY | Ops.INS | Ops.TUPLE | Ops.CALL | Ops.FUNCTION:
+           Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE | Ops.INS | Ops.TUPLE | Ops.CALL | Ops.FUNCTION:
         return None
 
       # hacks for NOOP
@@ -240,7 +240,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
       # TODO: these should have the shape of the dtype.count
       case Ops.CONST | Ops.DEFINE_VAR: return ()
-      case Ops.GEP | Ops.STACK | Ops.VCONST | Ops.VCAT | Ops.GETADDR: return ()
+      case Ops.GEP | Ops.STACK | Ops.VCONST | Ops.VCAT | Ops.GETADDR | Ops.BINARY: return ()
 
       # some ops init the shape
       case Ops.BIND | Ops.RANGE | Ops.SPECIAL | Ops.UNROLL: return ()
@@ -262,7 +262,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       case Ops.WMMA | Ops.SHAPED_WMMA: return self.src[2]._shape
 
       # passthrough ops
-      case Ops.MSTACK | Ops.MSELECT | Ops.DETACH | Ops.CONTIGUOUS | Ops.CONTIGUOUS_BACKWARD | Ops.AFTER | Ops.PATCH | Ops.LOAD | \
+      case Ops.MSTACK | Ops.MSELECT | Ops.DETACH | Ops.CONTIGUOUS | Ops.CONTIGUOUS_BACKWARD | Ops.AFTER | Ops.LOAD | \
            Ops.COPY | Ops.ALLREDUCE:
         return self.src[0]._shape
       # REDUCE with empty axis is passthrough (lowered form)
