@@ -180,11 +180,11 @@ def train_resnet():
   def fake_data_get(batch_size):
     x = Tensor.zeros(batch_size, 224, 224, 3, dtype=dtypes.uchar).contiguous()
     y = [0] * batch_size
-    return x.shard(GPUS, axis=0).realize(), Tensor(y, requires_grad=False).shard(GPUS, axis=0), y, None
+    return x.shard(GPUS, axis=0).realize(), Tensor(y).shard(GPUS, axis=0), y, None
 
   def data_get(it):
     x, y, cookie = next(it)
-    return x.shard(GPUS, axis=0).realize(), Tensor(y, requires_grad=False).shard(GPUS, axis=0), y, cookie
+    return x.shard(GPUS, axis=0).realize(), Tensor(y).shard(GPUS, axis=0), y, cookie
 
   # ** epoch loop **
   step_times = []
@@ -798,7 +798,7 @@ def train_unet3d():
   @Tensor.train(mode=False)
   def eval_step(model, x, y):
     y_hat, y = sliding_window_inference(model, x, y, gpus=GPUS)
-    y_hat, y = Tensor(y_hat), Tensor(y, requires_grad=False)
+    y_hat, y = Tensor(y_hat), Tensor(y)
     loss = dice_ce_loss(y_hat, y)
     score = dice_score(y_hat, y)
     return loss.realize(), score.realize()

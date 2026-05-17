@@ -34,9 +34,8 @@ class TestFP8Linear(unittest.TestCase):
     bias = Tensor.randn(out_features, dtype=dtypes.float32) * 0.2
     fp8_layer.weight, normal_layer.weight = weight.detach(), weight.detach()
     fp8_layer.bias, normal_layer.bias = bias.detach(), bias.detach()
-    fp8_layer.weight.requires_grad = normal_layer.weight.requires_grad = True
-    x_fp8 = Tensor.randn(*shape, dtype=dtypes.float32, requires_grad=True)  * 0.2
-    x_normal = x_fp8.detach().requires_grad_(True)
+    x_fp8 = Tensor.randn(*shape, dtype=dtypes.float32)  * 0.2
+    x_normal = x_fp8.detach()
     fp8_layer(x_fp8).sum().backward()
     normal_layer(x_normal).sum().backward()
     np.testing.assert_allclose(x_fp8.grad.numpy(), x_normal.grad.numpy(), rtol=1.0, atol=0.1)

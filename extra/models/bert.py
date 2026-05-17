@@ -52,7 +52,7 @@ class BertForPretraining:
   # Reference has residual on denominator: https://github.com/mlcommons/training/blob/master/language_model/tensorflow/bert/run_pretraining.py#L315
   def sparse_categorical_crossentropy(self, predictions:Tensor, labels:Tensor, ignore_index=-1):
     log_probs, loss_mask = predictions.log_softmax(dtype=dtypes.float), (labels != ignore_index)
-    y_counter = Tensor.arange(predictions.shape[-1], requires_grad=False, device=predictions.device).unsqueeze(0).expand(labels.numel(), predictions.shape[-1])
+    y_counter = Tensor.arange(predictions.shape[-1], device=predictions.device).unsqueeze(0).expand(labels.numel(), predictions.shape[-1])
     y = ((y_counter == labels.flatten().reshape(-1, 1)) * loss_mask.reshape(-1, 1)).reshape(*labels.shape, predictions.shape[-1])
     return -((log_probs * y).sum()) / (loss_mask.sum() + 1e-5) # Small constant to avoid division by zero
 
@@ -159,7 +159,7 @@ class BertPooler:
     return self.dense(hidden_states[:, 0]).tanh()
 
 def gather(prediction_logits:Tensor, masked_lm_positions:Tensor):
-  counter = Tensor.arange(prediction_logits.shape[1], device=prediction_logits.device, requires_grad=False).reshape(1, 1, prediction_logits.shape[1]).expand(*masked_lm_positions.shape, prediction_logits.shape[1])
+  counter = Tensor.arange(prediction_logits.shape[1], device=prediction_logits.device).reshape(1, 1, prediction_logits.shape[1]).expand(*masked_lm_positions.shape, prediction_logits.shape[1])
   onehot = counter == masked_lm_positions.unsqueeze(2).expand(*masked_lm_positions.shape, prediction_logits.shape[1])
   return onehot @ prediction_logits
 
@@ -189,7 +189,7 @@ class BertEmbeddings:
     input_shape = input_ids.shape
     seq_length = input_shape[1]
 
-    position_ids = Tensor.arange(seq_length, requires_grad=False, device=input_ids.device).unsqueeze(0).expand(*input_shape)
+    position_ids = Tensor.arange(seq_length, device=input_ids.device).unsqueeze(0).expand(*input_shape)
     words_embeddings = self.word_embeddings(input_ids)
     position_embeddings = self.position_embeddings(position_ids)
     token_type_embeddings = self.token_type_embeddings(token_type_ids)

@@ -16,6 +16,7 @@
 \definecolor{elwyellow}{HTML}{F9A825}
 \definecolor{callblue}{HTML}{1565C0}
 \definecolor{assignbrown}{HTML}{795548}
+\definecolor{loadred}{HTML}{c08080}
 \definecolor{multipurple}{HTML}{7B1FA2}
 \definecolor{markerorange}{HTML}{E65100}
 % AxisType colors (from tinygrad)
@@ -48,16 +49,16 @@ All nodes in the tinygrad graph are \textbf{UOps}. A UOp is a tuple $(\mathrm{op
 \toprule
 \textbf{Op} & \textbf{src} & \textbf{arg} & \textbf{Semantics} \\
 \midrule
+\op{Param} & $(\mathbf{s})$ & slot, dtype, device?, addrspace? &
+  Placeholder with shape $\mathbf{s}$. Substituted in \op{Function}. \\[4pt]
 \op{Buffer} & () & size, dtype, device, addrspace &
   Shape $(n \cdot \textit{size},)$ if device is $n$-tuple, else $(\textit{size},)$. \\
 \op{BufferView} & (buf,) & size, dtype, offset &
   Typed access into a buffer. Zero-copy $(\textit{size},)$ slice at offset; inherits addrspace. \\
-\op{Param} & $(\mathbf{s})$ or $(\mathbf{s}, \text{min}, \text{max})$ & slot, dtype, device? &
-  Placeholder with shape $\mathbf{s}$. Substituted in \op{Function}. \\[4pt]
 \op{Const} & () & value, dtype &
   A scalar constant with shape $(\ )$. \\
-\op{Vconst} & () & values, dtype &
-  A vector constant with shape $(n,)$. \\
+  & & & Form vector consts with \op{Stack} \\
+\op{Binary} & () & data & Raw binary data, has dtype uint8 and shape len($data$)  \\
 \bottomrule
 \end{tabular}
 
@@ -90,7 +91,7 @@ A \op{Buffer}'s \textbf{addrspace} is \texttt{GLOBAL}, \texttt{LOCAL}, or \textt
 \toprule
 \textbf{Op} & \textbf{src} & \textbf{arg} & \textbf{Semantics} \\
 \midrule
-\op{Reduce} & $(T,)$ & op, axes & Reduce $T$ along axes. Op is \op{Add}, \op{Max}, or \op{Mul}. \\
+\op{Reduce} & ($T$, $r_0$, $r_1$, \ldots) & op, axes & Reduce $T$ along axes or ranges. Op is \op{Add}, \op{Max}, or \op{Mul}. \\
 \bottomrule
 \end{tabular}
 
@@ -109,13 +110,25 @@ A \op{Buffer}'s \textbf{addrspace} is \texttt{GLOBAL}, \texttt{LOCAL}, or \textt
 \end{tabular}
 
 %% ============================================================
-\subsection*{{\color{multipurple}Store Ops} \normalfont\small--- side effects}
+\subsection*{{\color{loadred}Load Ops} \normalfont\small--- can change device or addrspace}
 
 \begin{tabular}{@{}l l l l@{}}
 \toprule
 \textbf{Op} & \textbf{src} & \textbf{arg} & \textbf{Semantics} \\
 \midrule
-\op{Store} & (buf, val, gate?) & --- & Write val into buf. buf.shape $=$ val.shape. \\
+\op{Load} & (buf, alt?, gate?) & device, addrspace & Read (pull) from buffer into a new anonymous buffer. \\
+  & & & Note: this replaces \op{Copy} and \op{Contiguous}. \\
+\bottomrule
+\end{tabular}
+
+%% ============================================================
+\subsection*{{\color{multipurple}Store Ops} \normalfont\small--- the only op with observable side effects}
+
+\begin{tabular}{@{}l l l l@{}}
+\toprule
+\textbf{Op} & \textbf{src} & \textbf{arg} & \textbf{Semantics} \\
+\midrule
+\op{Store} & (buf, val, gate?) & --- & Write (push) val into buf. buf.shape $=$ val.shape. \\
   & & & If gate is present, write only when gate is true. Output is void. \\
 \bottomrule
 \end{tabular}
@@ -205,7 +218,6 @@ Ternary & $(P, A, B)$
 \op{Contiguous} & $(T,)$ & --- & Force contiguous memory layout. \\
 \op{ContiguousBackward} & $(T,)$ & --- & Force contiguous in backward pass. \\
 \op{Detach} & $(T,)$ & --- & Stops gradient propagation. \\
-\op{Copy} & $(T,)$ & device & Copy to target device. \\
 \bottomrule
 \end{tabular}
 
@@ -216,8 +228,6 @@ Ternary & $(P, A, B)$
 \toprule
 \textbf{Op} & \textbf{src} & \textbf{arg} & \textbf{Semantics} \\
 \midrule
-\op{Load} & (idx,alt?,gate?) & --- & Dereference: read element at index from buffer. \\
- & & & All loads will be replaced by \op{Store}. \\
 \op{Barrier} & (deps\ldots) & --- & Synchronize threads within a workgroup. \\
 \op{Ins} & \ldots & \ldots & A single machine instruction (e.g.\ AMD ISA). \\
 \op{Special} & (bound,) & name & GPU thread/workgroup index (e.g.\ \texttt{gidx0}, \texttt{lidx1}). \\

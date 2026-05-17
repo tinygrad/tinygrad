@@ -44,8 +44,8 @@ def _test_conv2d(allowed:int, dtype:DType=dtypes.float):
   dtypes.default_float = dtype
   Tensor.manual_seed(0)
   BS, CIN = 2, 3
-  img = Tensor.randn(BS, CIN, 64, 64, requires_grad=True).realize()
-  w = Tensor.uniform(16, CIN, 3, 3, requires_grad=True).realize()
+  img = Tensor.randn(BS, CIN, 64, 64).realize()
+  w = Tensor.uniform(16, CIN, 3, 3).realize()
   ret = Tensor.conv2d(img, w).relu().mean().backward()
   dtypes.default_float = old_default_float
   linear, var_vals = Tensor.linear_with_vars(ret, img.grad, w.grad)
@@ -713,7 +713,7 @@ class TestSchedule(unittest.TestCase):
     np.testing.assert_equal(d.numpy(), np.pad(np.exp2(a.numpy())[:, None, :], ((0, 0), (1, 1), (0, 0)))*2)
 
   def test_fuse_arange_pad_replicate_mode(self):
-    x = Tensor.empty(3,3,3,3, requires_grad=True)
+    x = Tensor.empty(3,3,3,3)
     y = x.pad((-1,2,2,-1), mode="replicate")
     dx = y.sum().gradient(x)[0]
     sched = check_schedule(dx, 1)

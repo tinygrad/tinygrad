@@ -2635,8 +2635,8 @@ def custom_hk_fp8_gemm(C:UOp, A:UOp, B:UOp, *args:UOp, dname:str, scale_mode:int
   M, K = A.shape[0]*A.shape[1], A.shape[2]
   N, K2 = B.shape[(1 if B.ndim == 3 else 0):]
   assert K == K2, f"{A.shape} {B.shape}"
-  block_size = 256
-  threads = UOp.special(64 * 8, "lidx0")
+  block_size = 128
+  threads = UOp.special(64 * 4, "lidx0")
   workgroups = UOp.special((M // block_size) * (N // block_size), "gidx0")
   sink_inputs = (C.base, A.base, B.base) + tuple(s.base for s in scales) + (threads, workgroups)
   sink = UOp.sink(*sink_inputs,

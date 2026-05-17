@@ -41,7 +41,7 @@ class TestExample(unittest.TestCase):
   @multidevice_test
   def test_example_readme(self, device):
     x = Tensor.eye(3, device=device)
-    y = Tensor([[2.0,0,-2.0]], device=device, requires_grad=True)
+    y = Tensor([[2.0,0,-2.0]], device=device)
     z = y.matmul(x).sum()
     z.backward()
 

@@ -1,5 +1,5 @@
 import unittest
-from tinygrad import Tensor, UOp, GlobalCounters, Context
+from tinygrad import Tensor, UOp, GlobalCounters, Context, Device
 from tinygrad.dtype import AddrSpace, dtypes
 from tinygrad.uop.ops import KernelInfo, AxisType, Ops
 
@@ -220,14 +220,14 @@ class TestCustomKernel(unittest.TestCase):
     b_rand = Tensor.randn(8, N)
     Tensor.realize(a_rand, b_rand)
 
-    a, b = Tensor(a_rand.numpy(), requires_grad=True), Tensor(b_rand.numpy(), requires_grad=True)
+    a, b = Tensor(a_rand.numpy()), Tensor(b_rand.numpy())
     c = Tensor.empty(N, N)
     tst = Tensor.custom_kernel(c, a, b, fxn=custom_gemm, grad_fxn=backward_gemm_custom if custom_backward_gemm else backward_gemm)[0]
     tst.sum().backward()
     grad_a, grad_b = a.grad, b.grad
     Tensor.realize(tst, grad_a, grad_b)
 
-    a, b = Tensor(a_rand.numpy(), requires_grad=True), Tensor(b_rand.numpy(), requires_grad=True)
+    a, b = Tensor(a_rand.numpy()), Tensor(b_rand.numpy())
     ref = (a@b)
     ref.sum().backward()
     real_grad_a, real_grad_b = a.grad, b.grad
@@ -283,6 +283,30 @@ class TestCustomKernel(unittest.TestCase):
 
     self.assertIsNotNone(custom_idx, "custom_addmul kernel not found in schedule")
     self.assertEqual(custom_idx, 3, f"custom_addmul should be at index 3, got {custom_idx}")
+
+  def test_invalids_into_custom_kernel_no_empty_kernel(self):
+    from tinygrad.engine.realize import compile_linear
+    a = Tensor.full((4, 4), 3.).contiguous()
+    b = Tensor.full((4, 4), 2.).contiguous()
+    Tensor.realize(a, b)
+    out = Tensor.invalids(*a.shape, dtype=a.dtype)
+    out, *_ = Tensor.custom_kernel(out, a, b, fxn=custom_elementwise_add_kernel)
+    compiled = compile_linear(out.schedule_linear())
+    for call in compiled.src:
+      prg = call.src[0]
+      if prg.op is not Ops.PROGRAM: continue
+      self.assertTrue(len(prg.arg.globals) > 0, f"empty kernel compiled (no globals): name={prg.arg.name}")
+
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "kernel timing not supported")
+  def test_invalids_into_custom_kernel_with_beam(self):
+    a = Tensor.full((4, 4), 3.).contiguous()
+    b = Tensor.full((4, 4), 2.).contiguous()
+    Tensor.realize(a, b)
+    with Context(BEAM=1, IGNORE_BEAM_CACHE=1):
+      out = Tensor.invalids(*a.shape, dtype=a.dtype)
+      out, *_ = Tensor.custom_kernel(out, a, b, fxn=custom_elementwise_add_kernel)
+      result = out.flatten().tolist()
+    self.assertTrue(all(x == 5 for x in result), f"expected all 5.0, got {result}")
 
   @unittest.skip("what are anonymous buffers?")
   def test_anonymous_buffers_in_function(self):

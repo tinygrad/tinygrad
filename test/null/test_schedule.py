@@ -474,7 +474,6 @@ class TestSchedule(unittest.TestCase):
     with Tensor.train():
       x = Tensor.empty((2, 16, 8, 8)).contiguous()
       bn = nn.BatchNorm2d(16)
-      bn.weight.requires_grad = bn.bias.requires_grad = x.requires_grad = True
       fw = bn(x).contiguous_backward().relu().contiguous()
       fw.sum().backward()
       # TODO: this is too many
@@ -808,7 +807,7 @@ class TestSchedule(unittest.TestCase):
 
   def test_softmax_backward(self):
     Tensor.manual_seed(0)
-    x = Tensor.randn(4, 12, 64, 64, requires_grad=True).realize()
+    x = Tensor.randn(4, 12, 64, 64).realize()
     x.softmax().sum().backward()
     run_linear(*check_schedule(x.grad, 4))
 
