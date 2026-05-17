@@ -261,13 +261,7 @@ def calc_kernargs_sizes(ctx:dict[str,int], u:UOp) -> None:
 pm_calc_kernargs_sizes = PatternMatcher([(UPat(Ops.PROGRAM, name="u"), calc_kernargs_sizes)])
 
 def _lower_stores(host_buf:UOp, stores_in:tuple[UOp, ...]) -> list[UOp]:
-  mv = host_buf.buffer.ensure_allocated()._buf.cpu_view()
-  stores = []
-  for s in stores_in:
-    byte_off = s.src[0].src[1].arg
-    idx = UOp.const(dtypes.int, byte_off // host_buf.dtype.base.itemsize)
-    stores.append(host_buf.index(idx).store(s.src[1]))
-  return stores
+  return [host_buf.index(UOp.const(dtypes.int, s.src[0].src[1].arg // host_buf.dtype.base.itemsize)).store(s.src[1]) for s in stores_in]
 
 def bufferize_binary(ctx:HCQ2LowerCtx, target:UOp) -> UOp|None:
   bin_node = target.src[0]
@@ -307,35 +301,30 @@ pm_bufferize = PatternMatcher([
   (UPat(Ops.BINARY, src=(UPat(Ops.DEVICE),), name="target"), bufferize_program),
 ])
 
+# afters keep patches linked to their binaries. lift nested patches to root afters so symbolic can resolve them all.
 def lift_after(ctx:HCQ2LowerCtx, after:UOp) -> UOp|None:
   if not (inners:=[u for s in after.src[1:] for u in s.toposort() if u.op is Ops.AFTER]): return None
   subs = {i: i.src[0] for i in inners}
-  child_stores = tuple(p.substitute(subs) for i in inners for p in i.src[1:])
-  return after.replace(src=(after.src[0],) + child_stores + tuple(s.substitute(subs) for s in after.src[1:]))
+  return (s:=after.substitute(subs)).replace(src=s.src[:1] + tuple(d.substitute(subs) for i in inners for d in i.src[1:]) + s.src[1:])
 pm_lift_after = PatternMatcher([(UPat(Ops.AFTER, name="after", allow_any_len=True), lift_after)])
 
-def resolve_getaddr(ctx:HCQ2LowerCtx, ga:UOp) -> UOp:
-  target = ga.src[0]
-  addr = target.buffer.get_buf(target.buffer.device).va_addr
-  buf_uop = target if target.op is Ops.BUFFER else target.src[0]
-  if buf_uop not in ctx.holds: ctx.holds.append(buf_uop)
-  return UOp.const(dtypes.uint64, addr)
+def resolve_getaddr(ctx:HCQ2LowerCtx, ga:UOp, buf:UOp) -> UOp:
+  if (buf_uop:=buf if buf.op is Ops.BUFFER else buf.src[0]) not in ctx.holds: ctx.holds.append(buf_uop)
+  return UOp.const(dtypes.uint64, buf.buffer.get_buf(buf.device).va_addr)
 
 def fold_const_store(ctx:HCQ2LowerCtx, buf:UOp, off:UOp, val:UOp) -> UOp:
-  byte_off = off.arg * buf.dtype.base.itemsize
-  struct.pack_into(f'<{val.dtype.fmt}', buf.buffer.ensure_allocated()._buf.cpu_view().mv, byte_off, val.arg)
+  struct.pack_into(f'<{val.dtype.fmt}', buf.buffer.ensure_allocated()._buf.cpu_view().mv, off.arg * buf.dtype.base.itemsize, val.arg)
   return UOp(Ops.NOOP)
 
 pm_resolve_patches = symbolic + PatternMatcher([
-  (UPat(Ops.GETADDR, src=(UPat((Ops.BUFFER, Ops.BUFFER_VIEW)),), name="ga"), resolve_getaddr),
-  (UPat(Ops.GETADDR, src=(UPat(Ops.CONST, name='const'),)), lambda ctx, const: const),
+  (UPat(Ops.GETADDR, src=(UPat((Ops.BUFFER, Ops.BUFFER_VIEW), name="buf"),), name="ga"), resolve_getaddr),
+  (UPat(Ops.GETADDR, src=(UPat.cvar("const"),)), lambda ctx, const: const),
 
-  (UPat(Ops.STORE, src=(UPat(Ops.INDEX, src=(UPat((Ops.BUFFER, Ops.BUFFER_VIEW), name="buf"), UPat(Ops.CONST, name="off"))),
-                       UPat(Ops.CONST, name="val"))), fold_const_store),
+  (UPat((Ops.BUFFER, Ops.BUFFER_VIEW), name="buf").index(UPat.cvar("off")).store(UPat.cvar("val")), fold_const_store),
 ])
 
 pm_parametrize_host_buffers = PatternMatcher([
-  (UPat(Ops.INDEX, src=(UPat(Ops.BUFFER_VIEW, name="bv"), UPat.var("idx"))), lambda ctx, bv, idx: bv.src[0].index(idx + bv.arg[1])),
+  (UPat(Ops.BUFFER_VIEW, name="bv").index(UPat.var("idx")), lambda ctx, bv, idx: bv.src[0].index(idx + bv.arg[1])),
   (UPat(Ops.BUFFER, name="buf"), lambda ctx, buf: ctx.host_param(buf.buffer)),
 ])
 
@@ -370,9 +359,6 @@ def hcq_realize(ctx:HCQ2LowerCtx, linear:UOp, ast:UOp, dev:HCQ2Compiled, sizes:d
   linear = graph_rewrite(linear, pm_resolve_patches, ctx=ctx, bottom_up=False, name="simplify patches")
   linear = graph_rewrite(linear, pm_parametrize_host_buffers, ctx=ctx, bottom_up=False, name="parametrize host buffers")
   linear = graph_rewrite(linear, pm_lower_submits + dev.pm_lower, ctx=ctx, bottom_up=True, name="lower submits")
-
-  # exit(0)
-  # linear = graph_rewrite(linear, dev.pm_lower, ctx=ctx, bottom_up=False, name="hcq: realize")
   return graph_rewrite(linear, pm_callify, ctx=ctx, name="hcq: callify")
 
 @track_rewrites(name=lambda ctx,linear,ast,dev,**kw: f"hcq schedule {getattr(ast.arg, 'name', ast.op.name.lower())}")
