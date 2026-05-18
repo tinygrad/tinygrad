@@ -802,6 +802,7 @@ jobs:
         run: |
           python3 -c "from tinygrad import Device; assert Device.DEFAULT in ['CPU','CL'], Device.DEFAULT"
           DEBUG=5 FORWARD_ONLY=1 python3 test/test_tiny.py TestTiny.test_plus
+          clang --version
       - name: Run pytest (${{ matrix.backend }})
         run: python -m pytest -n=auto test/backend --durations=20
       - name: Run TRANSCENDENTAL math
