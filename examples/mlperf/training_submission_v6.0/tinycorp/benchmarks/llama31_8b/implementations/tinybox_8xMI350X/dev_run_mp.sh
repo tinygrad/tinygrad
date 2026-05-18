@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 export PYTHONPATH="."
+export PATH="/opt/rocm-7.1.1/bin:$PATH"
 export DEV=${DEV:-AMD}
 export EMULATE="AMD_CDNA4"
 export CHECK_OOB=0
