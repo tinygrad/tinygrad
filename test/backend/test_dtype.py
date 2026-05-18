@@ -2,7 +2,7 @@ import contextlib, unittest, math
 import numpy as np
 import torch
 from typing import Any, List
-from tinygrad.helpers import getenv, DEBUG, CI, EMULATED_DTYPES
+from tinygrad.helpers import getenv, DEBUG, CI, EMULATED_DTYPES, DEV
 from tinygrad.dtype import DType, DTYPES_DICT, least_upper_dtype, fp8_to_float, float_to_fp8, _to_np_dtype, _to_torch_dtype, truncate
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.nir import NIRRenderer
@@ -16,7 +16,8 @@ pytestmark = pytest.mark.filterwarnings("ignore")
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 settings.load_profile("my_profile")
 
-supported_dtypes = Device[Device.DEFAULT].renderer.supported_dtypes()
+# when emulating AMD, PythonRemu runs on CPU
+supported_dtypes = Device["CPU" if Device.DEFAULT == "AMD" and DEV.interface.startswith("MOCK") else Device.DEFAULT].renderer.supported_dtypes()
 
 def get_available_cast_dtypes(dtype: DType) -> List[DType]:
   dts = [v for k, v in DTYPES_DICT.items() if v != dtype and v in supported_dtypes or v in dtypes.fp8s+(dtypes.half,dtypes.bfloat16,dtypes.long)]
