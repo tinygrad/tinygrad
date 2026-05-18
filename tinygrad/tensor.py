@@ -13,7 +13,7 @@ from tinygrad.gradient import compute_gradient
 from tinygrad.mixin import OpMixin
 from tinygrad.uop.ops import UOp, Ops, sint, all_metadata, _index_to_concrete_int, Variable, _broadcast_shape
 from tinygrad.schedule import create_linear_with_vars
-from tinygrad.device import Buffer, canonicalize_device
+from tinygrad.device import Buffer, Device, canonicalize_device
 from tinygrad.engine.realize import run_linear
 from tinygrad.callify import transform_to_call
 
@@ -137,7 +137,7 @@ class Tensor(OpMixin):
     if not isinstance(data, UOp): raise RuntimeError(f"can't create Tensor from {data!r} with type {type(data)}")
 
     # data might be on a different device
-    self.uop:UOp = data if data.device == _device else data.copy_to_device(_device)
+    self.uop:UOp = data if data._device is None or data.device == _device else data.copy_to_device(_device)
 
     # add to all_tensors after construction succeeds
     all_tensors[weakref.ref(self)] = None
@@ -176,7 +176,7 @@ class Tensor(OpMixin):
 
   def __repr__(self):
     ld = self.uop
-    ld_repr = f"<UOp {ld.device} {ld.shape} {str(ld.dtype)[7:]}>"
+    ld_repr = f"<UOp {ld._device} {ld.shape} {str(ld.dtype)[7:]}>"
     return f"<Tensor {ld_repr} on {self.device} with grad {(self.grad.uop if self.grad is not None else None)!r}>"
 
   # Python has a non moving GC, so this should be okay
@@ -189,7 +189,7 @@ class Tensor(OpMixin):
     return self.shape[0]
 
   @property
-  def device(self) -> str|tuple[str, ...]: return self.uop.device
+  def device(self) -> str|tuple[str, ...]: return Device.DEFAULT if self.uop._device is None else self.uop.device
 
   @property
   def shape(self) -> tuple[sint, ...]: return self.uop.shape
@@ -225,6 +225,8 @@ class Tensor(OpMixin):
 
   def linear_with_vars(self, *lst:Tensor) -> tuple[UOp, dict[str, int]]:
     """Creates the LINEAR UOp needed to realize these Tensor(s), with Variables."""
+    for x in (self,)+lst:
+      if x.uop._device is None: x.replace(Tensor.empty(*x.shape, dtype=x.dtype, device=Device.DEFAULT).assign(x))
     big_sink, becomes_map = transform_to_call(UOp.sink(*[x.uop for x in (self,)+lst]))
     _apply_map_to_tensors(becomes_map, name="buffers")
     return create_linear_with_vars(big_sink)
@@ -492,7 +494,7 @@ class Tensor(OpMixin):
     Creates an empty tensor with the same shape as `self`.
     If `dtype` is not specified, the dtype of `self` is used.
     """
-    return Tensor(self.uop.empty_like(dtype, device), **kwargs)
+    return Tensor(self.uop.empty_like(dtype, self.device if device is None else device), **kwargs)
 
   @staticmethod
   def from_blob(ptr:int, shape:tuple[int, ...], **kwargs) -> Tensor:
