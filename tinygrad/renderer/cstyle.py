@@ -324,9 +324,9 @@ class OpenCLRenderer(CStyleLanguage):
       arg_dtypes[u.arg].append((i, u.dtype))
     return tuple(tuple(a) for a in arg_dtypes),
 
-  # FIXME: check cl_khr_fp64
   def supported_dtypes(self): return {d for d in super().supported_dtypes()
-                                      if (d != dtypes.half or "cl_khr_fp16" in self.target.arch) and d not in dtypes.fp8s}
+                                      if (d != dtypes.half or "cl_khr_fp16" in self.target.arch) and
+                                      (d != dtypes.double or "cl_khr_fp64" in self.target.arch) and d not in dtypes.fp8s}
 
 class IntelRenderer(OpenCLRenderer):
   suffix, kernel_typedef = "INTEL", "__attribute__((intel_reqd_sub_group_size(8)))\n" + "__kernel void"
@@ -588,4 +588,5 @@ class QCOMCLRenderer(OpenCLRenderer):
     self.compiler = QCOMCompiler(target.arch)
 
   # QCOM compiler is flaky with half
-  def supported_dtypes(self): return {d for d in super().supported_dtypes() if d != dtypes.float16 or bool(IMAGE) and bool(FLOAT16)}
+  def supported_dtypes(self):
+    return {d for d in super().supported_dtypes() if d != dtypes.float16 or bool(IMAGE) and bool(FLOAT16) and d != dtypes.double}
