@@ -6,6 +6,7 @@ from tinygrad.helpers import SPEC
 from tinygrad.renderer import Renderer
 from tinygrad.codegen.late.devectorizer import pm_add_loads, reduce_to_acc
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow
+from tinygrad.schedule.rangeify import pm_index_on_index, pm_mops
 from tinygrad.uop.decompositions import get_late_rewrite_patterns, get_transcendental_patterns, pm_dtype_decomps
 from tinygrad.uop.symbolic import sym
 
@@ -49,6 +50,10 @@ def minigen_to_sink(ast:UOp, ren:Renderer, optimize:bool) -> UOp:
   # STAGE is also not allowed in programs, this is similar to REDUCE
   sink = graph_rewrite(sink, pm_minimal_reduce, ctx=ReduceContext(), name="remove reduce/stage")
 
+  # if there's any movement ops left, we need to remove them. removing stage might add movement ops
+  # also handle INDEX on INDEX
+  sink = graph_rewrite(sink, pm_index_on_index+pm_mops, name="remove movement ops")
+
   # we need to add loads
   # this is really a store to DEFINE_REG, but load is simpler
   # LOAD(DATA) is anonymous store -> AFTER(anon_buf, STORE(anon_buf, DATA))
@@ -66,14 +71,15 @@ def minigen_to_sink(ast:UOp, ren:Renderer, optimize:bool) -> UOp:
 
   # **** enter decanonicalize *****
 
+  # decompose dtypes we don't support into renderable versions
+  # NOTE: this adds Ops.FLOORDIV, so it needs to come before decompose ops
+  sink = graph_rewrite(sink, pm_dtype_decomps, ctx=(set(), ren.target), name="decomp dtypes")
+
   # decompose ops like SIN/THREEFRY into renderable versions
   supported_ops = tuple(ren.code_for_op.keys())
   pm_decomp = get_late_rewrite_patterns(supported_ops, disable_fast_idiv=True) + \
               get_transcendental_patterns(supported_ops, force_transcendental=False)
   sink = graph_rewrite(sink, pm_decomp, ctx=ren.target, name="decompose ops to renderable")
-
-  # decompose dtypes we don't support into renderable versions
-  sink = graph_rewrite(sink, pm_dtype_decomps, ctx=(set(), ren.target), name="decomp dtypes")
 
   # this was the linearizer, add control flow edges where they are needed on RANGEs
   sink = graph_rewrite(sink, pm_add_control_flow, ctx=CFGContext(sink), name="add control flow", bottom_up=True)
