@@ -6,6 +6,7 @@ from tinygrad.renderer import Renderer
 from tinygrad.codegen.late.devectorizer import pm_add_loads, reduce_to_acc, ReduceContext
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow
 from tinygrad.uop.decompositions import get_late_rewrite_patterns, get_transcendental_patterns
+from tinygrad.uop.symbolic import sym
 
 pm_lower_weakint = PatternMatcher([
   (UPat(GroupOp.All, dtypes.weakint, name="x"), lambda x: x.replace(dtype=dtypes.int))
@@ -46,14 +47,19 @@ def minigen_to_sink(ast:UOp, ren:Renderer, optimize:bool) -> UOp:
   # split ENDs, renderable ENDs can only end one RANGE
   sink = graph_rewrite(sink, pm_split_ends, name="split ends")
 
+  # do single symbolic (this rewrites POW)
+  sink = graph_rewrite(sink, sym, name="symbolic")
+
+  # **** enter decanonicalize *****
+
+  # this was the linearizer, add control flow edges where they are needed on RANGEs
+  sink = graph_rewrite(sink, pm_add_control_flow, ctx=CFGContext(sink), name="add control flow", bottom_up=True)
+
   # decompose ops like SIN/THREEFRY into renderable versions
   supported_ops = tuple(ren.code_for_op.keys())
   pm_decomp = get_late_rewrite_patterns(supported_ops, disable_fast_idiv=True) + \
               get_transcendental_patterns(supported_ops, force_transcendental=False)
   sink = graph_rewrite(sink, pm_decomp, ctx=ren.target, name="decompose ops to renderable")
-
-  # this was the linearizer, add control flow edges where they are needed
-  sink = graph_rewrite(sink, pm_add_control_flow, ctx=CFGContext(sink), name="add control flow", bottom_up=True)
 
   if SPEC: type_verify(sink, spec_program)
   return sink
