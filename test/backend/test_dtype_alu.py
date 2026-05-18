@@ -7,6 +7,7 @@ from tinygrad.device import is_dtype_supported
 from tinygrad.runtime.ops_python import from_storage_scalar
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.nir import NIRRenderer
+from tinygrad.uop import Ops
 import numpy as np
 import pytest
 from hypothesis import assume, given, strategies as strat, settings
@@ -36,6 +37,9 @@ if ((DEV.interface.startswith("MOCK") and Device.DEFAULT in {"NV", "CUDA"})
     or Device.DEFAULT == "WEBGPU" or isinstance(Device[Device.DEFAULT].renderer, NIRRenderer)):
   unary_operations.remove((Tensor.sin, np.sin))
   unary_operations.remove((Tensor.cos, np.cos))
+
+# transcendental isn't accurate enough
+if Ops.SQRT not in Device[Device.DEFAULT].renderer.code_for_op: unary_operations.remove((Tensor.sqrt, np.sqrt))
 
 class ht:
   float64 = strat.floats(width=64, allow_subnormal=False)
