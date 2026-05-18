@@ -142,9 +142,7 @@ amd_inner_pm = PatternMatcher([
 ])
 
 def amd_lower_pm4(ctx, linear):
-  prg = next(s for s in linear.src if s.op is Ops.PROGRAM)
-  dev = Device[dev_name:=prg.src[0].src[0].arg]
-  enc = AMDComputeQueue(dev)
+  enc = AMDComputeQueue(Device["AMD"])
   graph_rewrite(linear, amd_inner_pm, ctx=enc, name="amd: encode")
   return enc.build(dev="CPU", dtype=dtypes.void, tag="compute")
 
@@ -267,8 +265,10 @@ def amd_build_program(ctx:HCQ2LowerCtx, prg:UOp) -> UOp:
       enable_private_segment_sgpr=desc.kernel_code_properties & hsa.AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER,
     ), bytes(image))
   data, image_bytes = cached
-  bin_uop = UOp(Ops.BINARY, dtypes.uint64, src=(UOp(Ops.DEVICE, arg=dev.device),), arg=image_bytes).rtag("program")
-  return prg.replace(src=(bin_uop,), arg=(data, prg.arg))
+  buf_uop = UOp.new_buffer(dev.device, len(image_bytes), dtypes.uint8).rtag("program")
+  blob_uop = UOp(Ops.BINARY, dtypes.void, src=(), arg=image_bytes)
+  init = buf_uop.index(UOp.const(dtypes.int, 0)).store(blob_uop)
+  return prg.replace(src=(buf_uop.after(init),), arg=(data, prg.arg))
 
 class AMDAllocator(HCQAllocator['AMDDevice']):
   def __init__(self, dev:AMDDevice):

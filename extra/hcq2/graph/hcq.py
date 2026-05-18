@@ -5,9 +5,13 @@ from tinygrad.device import Buffer, BufferSpec, Compiled, Device, MultiBuffer
 from tinygrad.dtype import dtypes
 from tinygrad.engine.jit import GraphRunner
 from tinygrad.engine.realize import get_call_outs_ins, get_runtime
+from tinygrad.helpers import round_up, ceildiv
+from tinygrad.runtime.support.memory import BumpAllocator
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, graph_rewrite
-from extra.hcq2.hcq2 import HCQ2Compiled, HCQ2DeviceCtx, HCQ2LowerCtx, prep_runtime, pm_lower_kernargs, pm_lower_ops
-from extra.hcq2.hcq2 import pm_split_into_queues, pm_add_barriers, pm_add_signals, build_host_program
+from extra.hcq2.hcq2 import HCQ2Compiled, HCQ2DeviceCtx, HCQ2LowerCtx, pm_prep_runtime, pm_lower_ops
+from extra.hcq2.hcq2 import pm_split_into_queues, pm_add_barriers, pm_add_signals
+from extra.hcq2.hcq2 import pm_bufferize, pm_lift_after, pm_resolve_patches, pm_parametrize_host_buffers
+from extra.hcq2.hcq2 import pm_lower_submits, pm_callify, pm_calc_kernargs_sizes
 
 # **************** insert deps ****************
 
@@ -69,12 +73,14 @@ def drop_dead_stores(ctx:HCQ2Graph, outer:UOp) -> UOp:
   return outer.replace(src=tuple(q.replace(src=tuple(x for x in q.src if x.op is not Ops.STORE or x in live)) for q in outer.src))
 pm_drop_dead_stores = PatternMatcher([(UPat(Ops.LINEAR, src=UPat(Ops.LINEAR), name="outer"), drop_dead_stores)])
 
-def add_queue_sig_resets(ctx:HCQ2Graph, outer:UOp) -> UOp|None:
-  if not ctx.queue_sig_bufs: return None
-  resets = tuple(ctx.hcq_ctx.host_param(sig).index(UOp.const(dtypes.int, 0), ptr=True).cast(dtypes.uint64.ptr())
-                 .store(UOp.const(dtypes.uint64, 0)) for sig in ctx.queue_sig_bufs)
-  return outer.replace(src=tuple(c.replace(src=c.src + resets) if c.op is Ops.AFTER else c.after(*resets) for c in outer.src))
-pm_add_queue_sig_resets = PatternMatcher([(UPat(Ops.LINEAR, name="outer"), add_queue_sig_resets)])
+def add_queue_sig_resets(ctx:HCQ2Graph, cf:UOp) -> UOp|None:
+  if not ctx.queue_sig_bufs or cf.arg not in ("submit_compute", "submit_copy"): return None
+  resets = tuple(UOp(Ops.INDEX, (b:=UOp.from_buffer(sig)).dtype.ptr(), (b, UOp.const(dtypes.int, 0)))
+                 .cast(dtypes.uint64.ptr()).store(UOp.const(dtypes.uint64, 0)) for sig in ctx.queue_sig_bufs)
+  patched = cf.src[0]
+  new_patched = patched.replace(src=patched.src + resets) if patched.op is Ops.AFTER else patched.after(*resets)
+  return cf.replace(src=(new_patched,))
+pm_add_queue_sig_resets = PatternMatcher([(UPat(Ops.CUSTOM_FUNCTION, name="cf"), add_queue_sig_resets)])
 
 # **************** Graph ****************
 
@@ -88,13 +94,9 @@ class HCQ2Graph(GraphRunner):
     self.input_addrs_uop = self.hcq_ctx.host_param(self.input_addrs)
 
     self.linear = graph_rewrite(self.linear, pm_insert_deps, ctx=self, name="hcq: insert deps", walk=True)
-    self.linear, sizes = prep_runtime(self.hcq_ctx, self.linear)
-    for dev_name, sz in sizes.items():
-      buf = Buffer(dev_name, sz, dtypes.uint8, options=BufferSpec(cpu_access=True), preallocate=True)
-      self.hcq_ctx.devs[dev_name] = HCQ2DeviceCtx(dev_name, UOp.from_buffer(buf, dev_name), UOp.const(dtypes.uint64, buf._buf.va_addr))
-
     self.linear = graph_rewrite(self.linear, pm_replace_params, ctx=self, name="hcq: replace params", walk=True)
-    self.linear = graph_rewrite(self.linear, pm_lower_kernargs + pm_lower_ops, ctx=self.hcq_ctx, name="hcq: lower ops")
+    self.linear = graph_rewrite(self.linear, pm_prep_runtime, ctx=self.hcq_ctx, name="hcq: prepare runtime")
+    self.linear = graph_rewrite(self.linear, pm_lower_ops, ctx=self.hcq_ctx, name="hcq: lower ops")
 
     # per-queue signal state — populated as a side-effect by pm_alloc_queue_sigs walking the lowered linear.
     self.queue_sig_bufs:list[Buffer] = []
@@ -108,8 +110,19 @@ class HCQ2Graph(GraphRunner):
     self.linear = graph_rewrite(self.linear, pm_drop_dead_stores, ctx=self, name="hcq: drop dead stores")
     self.linear = graph_rewrite(self.linear, pm_add_signals, ctx=self.hcq_ctx, name="hcq: add signals", walk=True)
     self.linear = graph_rewrite(self.linear, self.dev.pm_lower, ctx=self.hcq_ctx, name=f"hcq: encode cmdbuf {self.dev.device}", walk=True)
+
+    graph_rewrite(self.linear, pm_calc_kernargs_sizes, ctx=(sizes:={}), name=None)
+    for dev_name, sz in sizes.items():
+      buf = Buffer(dev_name, ceildiv(sz, 4), dtypes.uint32, options=BufferSpec(cpu_access=True), preallocate=True)
+      self.hcq_ctx.devs[dev_name] = HCQ2DeviceCtx(dev_name, UOp.from_buffer(buf, dev_name), UOp.const(dtypes.uint64, buf._buf.va_addr))
+
+    self.linear = graph_rewrite(self.linear, pm_bufferize, ctx=self.hcq_ctx, bottom_up=True, name="realize binaries")
+    self.linear = graph_rewrite(self.linear, pm_lift_after, ctx=self.hcq_ctx, bottom_up=False, name="lift patches to root")
+    self.linear = graph_rewrite(self.linear, pm_resolve_patches, ctx=self.hcq_ctx, bottom_up=False, name="simplify patches")
     self.linear = graph_rewrite(self.linear, pm_add_queue_sig_resets, ctx=self, name="hcq: add queue sig resets", walk=True)
-    self.host_call = build_host_program(self.hcq_ctx, self.linear, None, self.dev)
+    self.linear = graph_rewrite(self.linear, pm_parametrize_host_buffers, ctx=self.hcq_ctx, bottom_up=True, name="parametrize host buffers")
+    self.linear = graph_rewrite(self.linear, pm_lower_submits + self.dev.pm_lower, ctx=self.hcq_ctx, bottom_up=True, name="lower submits")
+    self.host_call = graph_rewrite(self.linear, pm_callify, ctx=self.hcq_ctx, name="hcq: callify")
 
     self.host_rt, self.host_globals = get_runtime("CPU", self.host_call.src[0]), self.host_call.src[0].arg.globals
 
