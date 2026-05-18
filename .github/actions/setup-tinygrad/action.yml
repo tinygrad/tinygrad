@@ -228,6 +228,12 @@ runs:
 
         sudo chown -R $USER:$USER /var/cache/apt/archives/
 
+    # **** LLVM ****
+    - name: Setup clang (linux)
+      if: inputs.llvm == 'true' && runner.os == 'Linux'
+      shell: bash
+      run: sudo update-alternatives --install /usr/bin/clang clang /usr/bin/clang-20 100
+
     # **** AMD ****
     - name: Setup AMD (Linux)
       if: inputs.amd == 'true' && runner.os == 'Linux'
