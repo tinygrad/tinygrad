@@ -7,6 +7,7 @@ from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
 from hypothesis import given, settings, strategies as strat
 from tinygrad.device import is_dtype_supported
 from tinygrad.dtype import DTYPES_DICT
+from tinygrad.uop.ops import UOp
 
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 settings.load_profile("my_profile")
@@ -22,6 +23,18 @@ class TestTinygrad(unittest.TestCase):
   def test_zerodim_initialization(self):
     self.assertEqual(Tensor(55).shape, ())
     self.assertEqual(Tensor(3.14).shape, ())
+
+  def test_deviceless_const_construct_device_repr(self):
+    t = Tensor(UOp.const(dtypes.float, 2.0))
+    self.assertIsNone(t.uop._device)
+    self.assertEqual(t.device, Device.DEFAULT)
+    self.assertIn("<UOp None", repr(t))
+
+  def test_deviceless_const_realize_materializes(self):
+    t = Tensor(UOp.const(dtypes.float, 2.0))
+    t.realize()
+    self.assertTrue(t.uop.has_buffer_identity())
+    np.testing.assert_equal(t.numpy(), 2.0)
 
   def test_plus_equals(self):
     a = Tensor.randn(10,10)
@@ -716,6 +729,11 @@ class TestZeroShapeTensor(unittest.TestCase):
     b = a.clone()
     np.testing.assert_allclose(a.numpy(), b.numpy())
     self.assertIsNot(a.uop.base.buffer, b.uop.base.buffer)
+
+  def test_clone_deviceless_const(self):
+    t = Tensor(UOp.const(dtypes.float, 2.0)).clone()
+    np.testing.assert_equal(t.numpy(), 2.0)
+    self.assertTrue(t.uop.has_buffer_identity())
 
   def test_clone_with_shrink(self):
     a = Tensor.rand(16, 16)
