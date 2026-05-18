@@ -206,7 +206,7 @@ class TestLinearizer(unittest.TestCase):
   def test_sum_acc_dtype(self):
     for tensor_dtype, acc_dtype in (
       (dtypes.bool, dtypes.int), (dtypes.int16, dtypes.int), (dtypes.float16, dtypes.float), (dtypes.bfloat16, dtypes.float)):
-      if tensor_dtype in (dts:=Device[Device.DEFAULT].renderer.supported_dtypes) and acc_dtype in dts:
+      if tensor_dtype in (dts:=Device[Device.DEFAULT].renderer.supported_dtypes()) and acc_dtype in dts:
         a = Tensor([1, 2, 3], dtype=tensor_dtype).sum()
         realized_ast = a.schedule_linear().src[-1].src[0]
         program = to_program(replace_opts(realized_ast, []), renderer=Device[Device.DEFAULT].renderer)
@@ -229,7 +229,7 @@ class TestLinearizer(unittest.TestCase):
       (dtypes.float, dtypes.float16, dtypes.float16),
     )
     for tensor_dtype, acc_dtype, expected_dtype in tests:
-      if tensor_dtype in (dts:=Device[Device.DEFAULT].renderer.supported_dtypes) and acc_dtype in dts and expected_dtype in dts:
+      if tensor_dtype in (dts:=Device[Device.DEFAULT].renderer.supported_dtypes()) and acc_dtype in dts and expected_dtype in dts:
         a, b = Tensor.rand(8, 8, dtype=tensor_dtype), Tensor.rand(8, 8, dtype=tensor_dtype)
         helper_arg_acc_dtype(a.sum(dtype=acc_dtype), expected_dtype)
         helper_arg_acc_dtype(a.matmul(b, dtype=acc_dtype), expected_dtype)
