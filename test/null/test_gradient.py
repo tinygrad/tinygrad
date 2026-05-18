@@ -64,18 +64,18 @@ class TestGradient(unittest.TestCase):
 
 class TestRealizeMeansRealize(unittest.TestCase):
   def test_randn_realizes(self):
-    x = Tensor.randn(2, 3, 64, 64, requires_grad=True).realize()
+    x = Tensor.randn(2, 3, 64, 64).realize()
     assert x.uop is not x.uop.base
     assert x.uop.is_realized
 
   def test_uniform_realizes(self):
-    x = Tensor.uniform(16, 3, 3, 3, requires_grad=True).realize()
+    x = Tensor.uniform(16, 3, 3, 3).realize()
     print(x.uop)
     assert x.uop is not x.uop.base
     assert x.uop.is_realized
 
   def test_uniform_gradient(self):
-    x = Tensor.uniform(16, 3, 3, 3, requires_grad=True).realize()
+    x = Tensor.uniform(16, 3, 3, 3).realize()
     y = x * 2
     y.sum().gradient(x)[0].realize()
 

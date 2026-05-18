@@ -109,9 +109,6 @@ runtime_cache: dict[tuple[bytes, str], Any] = {}
 def get_runtime(device:str, ast:UOp, cache=True):
   assert ast.op is Ops.PROGRAM and isinstance(ast.arg, ProgramInfo), "get_runtime should only be called with a PROGRAM ast"
   if (runtime:=runtime_cache.get(key:=(ast.key, device))) is None:
-    if DEBUG >= 3 and ast.src[0].arg.applied_opts: print(ast.src[0].arg.applied_opts)
-    if DEBUG >= 4: print(ast.src[3].arg)
-    if DEBUG >= 7: Device[device].compiler.disassemble(ast.src[4].arg)
     runtime = Device[device].runtime(ast.arg.function_name, ast.src[4].arg, *ast.arg.aux, runtimevars=ast.arg.runtimevars, prg=ast)
     if cache: runtime_cache[key] = runtime
   return runtime
@@ -246,9 +243,9 @@ if getenv("HCQ2"):
   from extra.hcq2.hcq2 import pm_hcq_exec
   pm_exec = pm_hcq_exec + pm_exec
 
-def compile_linear(linear:UOp, beam=0, validate=False) -> UOp:
+def compile_linear(linear:UOp, beam:int|None=None, validate=False) -> UOp:
   if validate: linear = graph_rewrite(linear, pm_validate, name="validate", walk=True)
-  if (beam_val:=(beam or BEAM.value)) >= 1: linear = graph_rewrite(linear, pm_beam, ctx=beam_val, walk=True)
+  if (beam_val:=BEAM.value if beam is None else beam) >= 1: linear = graph_rewrite(linear, pm_beam, ctx=beam_val, walk=True)
   linear = graph_rewrite(linear, pm_compile, name="precompile kernels", walk=True)
   return graph_rewrite(linear, pm_optimize_local_size, name="optimize local size", walk=True)
 
@@ -263,4 +260,5 @@ def time_call(call:UOp, var_vals:dict[str, int]|None=None, timeout:int|None=None
     else:
       from tinygrad.tensor import Tensor
       with Context(DEBUG=0, BEAM=0, CAPTURING=0, TRACK_MATCH_STATS=0): Tensor.ones(1024, 1024).contiguous().realize(do_update_stats=False)
+  call = compile_linear(UOp(Ops.LINEAR, src=(call,)), beam=0).src[0]
   return cast(float, pm_exec.rewrite(call, ExecContext(var_vals or {}, update_stats=False, wait=True, timeout=timeout, cache=False)))

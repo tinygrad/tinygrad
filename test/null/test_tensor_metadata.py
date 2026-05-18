@@ -29,8 +29,8 @@ class TestTensorMetadata(unittest.TestCase):
     self.assertEqual([m.name for m in sched.src[1].arg.metadata], ["contiguous"])
 
   def test_matmul(self):
-    x = Tensor.rand(3, requires_grad=True)
-    W = Tensor.rand(3, 3, requires_grad=True)
+    x = Tensor.rand(3)
+    W = Tensor.rand(3, 3)
     out = x.matmul(W)
     self.assertEqual(out.uop.metadata[0].name, "matmul")
     si = out.schedule_linear().src[-1]
@@ -38,7 +38,7 @@ class TestTensorMetadata(unittest.TestCase):
     self.assertEqual(si.arg.metadata[0].name, "matmul")
 
   def test_relu(self):
-    x = Tensor.rand(3, requires_grad=True)
+    x = Tensor.rand(3)
     out = x.relu()
     self.assertEqual(out.uop.metadata[0].name, "relu")
     si = out.schedule_linear().src[-1]
@@ -54,8 +54,8 @@ class TestTensorMetadata(unittest.TestCase):
     self.assertEqual(si.arg.metadata[0].name, "assign")
 
   def test_complex(self):
-    x = Tensor.rand(3, requires_grad=True)
-    y = Tensor.rand(3, requires_grad=True)
+    x = Tensor.rand(3)
+    y = Tensor.rand(3)
     out = x.relu() * y.sigmoid()
     self.assertEqual(out.uop.metadata[0].name, "__mul__")
     self.assertEqual(out.uop.src[0].metadata[0].name, "relu")
@@ -66,8 +66,8 @@ class TestTensorMetadata(unittest.TestCase):
 
   @unittest.skip("flaky")
   def test_complex_backward(self):
-    x = Tensor.rand(3, requires_grad=True).realize()
-    y = Tensor.rand(3, requires_grad=True).realize()
+    x = Tensor.rand(3).realize()
+    y = Tensor.rand(3).realize()
     out = (x.relu() * y.sigmoid()).sum()
     self.assertEqual(out.uop.metadata[0].name, "sum")
     out.backward()
@@ -85,8 +85,8 @@ class TestTensorMetadata(unittest.TestCase):
 
   def test_tracemeta_0(self):
     with Context(TRACEMETA=0):
-      x = Tensor.rand(3, requires_grad=True)
-      y = Tensor.rand(3, requires_grad=True)
+      x = Tensor.rand(3)
+      y = Tensor.rand(3)
       out = (x.relu() * y.sigmoid()).sum()
       self.assertIsNone(out.uop.metadata)
       self.assertIsNone(out.uop.src[0].metadata)

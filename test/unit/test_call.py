@@ -17,8 +17,8 @@ class TestCall(unittest.TestCase):
     np.testing.assert_equal(c.numpy(), (a+b).numpy())
 
   def test_call_plus_backward(self):
-    a = Tensor.ones(10, 10, requires_grad=True)
-    b = Tensor.ones(10, 10, requires_grad=True)
+    a = Tensor.ones(10, 10)
+    b = Tensor.ones(10, 10)
 
     (a+b).mean().backward()
     gt_a_grad = a.grad.numpy()
@@ -37,8 +37,8 @@ class TestCall(unittest.TestCase):
     np.testing.assert_allclose(b.grad.numpy(), gt_b_grad, rtol=1e-5)
 
   def test_call_plus_backward_auto(self):
-    a = Tensor.ones(10, 10, requires_grad=True)
-    b = Tensor.ones(10, 10, requires_grad=True)
+    a = Tensor.ones(10, 10)
+    b = Tensor.ones(10, 10)
 
     (a+b).mean().backward()
     gt_a_grad = a.grad.numpy()
@@ -75,8 +75,8 @@ class TestCall(unittest.TestCase):
 
   def test_call_complex_backward_auto(self):
     # complex chain: (a*b + a).exp2() * b.reciprocal() - tests mul, add, exp2, reciprocal, param reuse
-    a = Tensor.randn(10, 10, requires_grad=True)
-    b = Tensor.randn(10, 10, requires_grad=True) + 2  # avoid div by zero
+    a = Tensor.randn(10, 10)
+    b = Tensor.randn(10, 10) + 2  # avoid div by zero
     Tensor.realize(a, b)
 
     ((a*b + a).exp2() * b.reciprocal()).mean().backward()
@@ -162,9 +162,9 @@ class TestCallSchedule(unittest.TestCase):
     s(s(a).contiguous()).realize()
 
   def test_call_double_gemm(self):
-    a = Tensor.randn(4, 8, requires_grad=True)
-    b = Tensor.randn(8, 12, requires_grad=True)
-    c = Tensor.randn(12, 16, requires_grad=True)
+    a = Tensor.randn(4, 8)
+    b = Tensor.randn(8, 12)
+    c = Tensor.randn(12, 16)
     ref = Tensor.randn(4, 16)
     Tensor.realize(a,b,c,ref)
     @function(precompile=True)
@@ -333,8 +333,8 @@ class TestCallMultiSharded(unittest.TestCase):
 
   def test_call_reduce_sharded_backward(self):
     devs = ("CPU:0", "CPU:1")
-    a = Tensor.randn(10, 10, requires_grad=True).shard(devs, axis=0)
-    b = Tensor.randn(10, 10, requires_grad=True).shard(devs, axis=0)
+    a = Tensor.randn(10, 10).shard(devs, axis=0)
+    b = Tensor.randn(10, 10).shard(devs, axis=0)
     Tensor.realize(a, b)
 
     def grad_fxn(grad, call):

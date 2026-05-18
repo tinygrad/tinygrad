@@ -816,9 +816,9 @@ class TestTK(unittest.TestCase):
     B, N, H, H_KV, D = 1, 32, 2, 1, 32
 
     with Context(DEBUG=0):
-      q = Tensor.randn(B, N, H, D, dtype=dtypes.bfloat16, requires_grad=True).contiguous()
-      k = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16, requires_grad=True).contiguous()
-      v = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16, requires_grad=True).contiguous()
+      q = Tensor.randn(B, N, H, D, dtype=dtypes.bfloat16).contiguous()
+      k = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16).contiguous()
+      v = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16).contiguous()
       Tensor.realize(q, k, v)
 
       do = Tensor.ones(B, N, H, D, dtype=dtypes.float32).contiguous()
@@ -831,9 +831,9 @@ class TestTK(unittest.TestCase):
     Tensor.realize(q.grad, k.grad, v.grad)
 
     with Context(DEBUG=0):
-      q_ref = q.detach().clone().requires_grad_(True)
-      k_ref = k.detach().clone().requires_grad_(True)
-      v_ref = v.detach().clone().requires_grad_(True)
+      q_ref = q.detach().clone()
+      k_ref = k.detach().clone()
+      v_ref = v.detach().clone()
       Tensor.realize(q_ref, k_ref, v_ref)
 
     q_ref_, k_ref_, v_ref_ = q_ref.transpose(1, 2), k_ref.transpose(1, 2), v_ref.transpose(1, 2)
@@ -854,9 +854,9 @@ class TestTK(unittest.TestCase):
     B, N, H, H_KV, D = 1, 8192, 32, 32, 128
 
     with Context(DEBUG=0):
-      q = Tensor.randn(B, N, H, D, dtype=dtypes.bfloat16, requires_grad=True).contiguous()
-      k = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16, requires_grad=True).contiguous()
-      v = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16, requires_grad=True).contiguous()
+      q = Tensor.randn(B, N, H, D, dtype=dtypes.bfloat16).contiguous()
+      k = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16).contiguous()
+      v = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16).contiguous()
       Tensor.realize(q, k, v)
 
       do = Tensor.ones(B, N, H, D, dtype=dtypes.float32).contiguous()
@@ -869,9 +869,9 @@ class TestTK(unittest.TestCase):
     Tensor.realize(q.grad, k.grad, v.grad)
 
     with Context(DEBUG=0):
-      q_ref = q.detach().clone().requires_grad_(True)
-      k_ref = k.detach().clone().requires_grad_(True)
-      v_ref = v.detach().clone().requires_grad_(True)
+      q_ref = q.detach().clone()
+      k_ref = k.detach().clone()
+      v_ref = v.detach().clone()
       Tensor.realize(q_ref, k_ref, v_ref)
 
     q_ref_, k_ref_, v_ref_ = q_ref.transpose(1, 2), k_ref.transpose(1, 2), v_ref.transpose(1, 2)
@@ -892,9 +892,9 @@ class TestTK(unittest.TestCase):
     B, N, H, H_KV, D = 1, 8192, 32, 32, 128
 
     with Context(DEBUG=0):
-      q = Tensor.randn(B, N, H, D, dtype=dtypes.bfloat16, requires_grad=True).contiguous()
-      k = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16, requires_grad=True).contiguous()
-      v = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16, requires_grad=True).contiguous()
+      q = Tensor.randn(B, N, H, D, dtype=dtypes.bfloat16).contiguous()
+      k = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16).contiguous()
+      v = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16).contiguous()
       Tensor.realize(q, k, v)
 
       do = Tensor.ones(B, N, H, D, dtype=dtypes.float32).contiguous()
@@ -911,18 +911,18 @@ class TestTK(unittest.TestCase):
     fn_jitted = TinyJit(fn)
 
     for _ in range(10):
-      q = Tensor.randn(B, N, H, D, dtype=dtypes.bfloat16, requires_grad=True).contiguous()
-      k = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16, requires_grad=True).contiguous()
-      v = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16, requires_grad=True).contiguous()
+      q = Tensor.randn(B, N, H, D, dtype=dtypes.bfloat16).contiguous()
+      k = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16).contiguous()
+      v = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16).contiguous()
       Tensor.realize(q, k, v)
       do = Tensor.ones(B, N, H, D, dtype=dtypes.float32).contiguous()
       Tensor.realize(do)
       q.grad, k.grad, v.grad = fn_jitted(q, k, v, do)
 
     with Context(DEBUG=0):
-      q_ref = q.detach().clone().requires_grad_(True)
-      k_ref = k.detach().clone().requires_grad_(True)
-      v_ref = v.detach().clone().requires_grad_(True)
+      q_ref = q.detach().clone()
+      k_ref = k.detach().clone()
+      v_ref = v.detach().clone()
       Tensor.realize(q_ref, k_ref, v_ref)
 
     q_ref_, k_ref_, v_ref_ = q_ref.transpose(1, 2), k_ref.transpose(1, 2), v_ref.transpose(1, 2)
@@ -944,9 +944,9 @@ class TestTK(unittest.TestCase):
     GPUS = tuple(f"{Device.DEFAULT}:{i}" for i in range(B))
 
     with Context(DEBUG=0):
-      base_q = Tensor.randn(B, N, H, D, dtype=dtypes.bfloat16, requires_grad=True).contiguous()
-      base_k = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16, requires_grad=True).contiguous()
-      base_v = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16, requires_grad=True).contiguous()
+      base_q = Tensor.randn(B, N, H, D, dtype=dtypes.bfloat16).contiguous()
+      base_k = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16).contiguous()
+      base_v = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16).contiguous()
 
       base_do = Tensor.ones(B, N, H, D, dtype=dtypes.float32).contiguous()
 

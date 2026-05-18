@@ -152,7 +152,7 @@ class TestOptim(unittest.TestCase):
     dtypes.default_float = old_default_float
 
   def test_assert_tensor_train(self):
-    t = Tensor.ones((1,1), requires_grad=True)
+    t = Tensor.ones((1,1))
     optimizer = Adam([t])
     optimizer.zero_grad()
     old_state = Tensor.training
@@ -165,7 +165,7 @@ class TestOptim(unittest.TestCase):
 
   def test_lamb_cpu_offload(self):
     # test that LAMB works when optimizer params (m, v, b1_t, b2_t) are moved to CPU
-    t = Tensor(x_init.copy(), requires_grad=True)
+    t = Tensor(x_init.copy())
     opt = LAMB([t])
     # move optimizer state to CPU
     for p in opt.m + opt.v + [opt.b1_t, opt.b2_t]: p.to_("CPU")
@@ -178,7 +178,7 @@ class TestOptim(unittest.TestCase):
   @needs_second_gpu
   def test_lamb_cpu_offload_multi(self):
     ds = tuple(f"{Device.DEFAULT}:{i}" for i in range(2))
-    t = Tensor(x_init.copy(), requires_grad=True).shard(ds, axis=1)
+    t = Tensor(x_init.copy()).shard(ds, axis=1)
     ds = t.device
     opt = LAMB([t])
     # move optimizer state to CPU
