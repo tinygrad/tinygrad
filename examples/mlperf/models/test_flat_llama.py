@@ -3,7 +3,7 @@ os.environ["WQKV"] = "1"
 import unittest
 import numpy as np
 from tinygrad import Tensor, nn, dtypes
-from tinygrad.device import is_dtype_supported, Device
+from tinygrad.device import Device
 from examples.mlperf.models.llama import Transformer
 from examples.mlperf.models.flat_llama import FlatTransformer
 
@@ -111,7 +111,7 @@ class TestFlatLlama(unittest.TestCase):
     self.assertEqual(ref_logits.shape, flat_logits.shape)
     np.testing.assert_allclose(flat_logits, ref_logits, atol=1e-4, rtol=1e-4)
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.fp8e4m3), "fp8 not supported on this device")
+  @unittest.skipUnless(dtypes.fp8e4m3 in Device[Device.DEFAULT].renderer.supported_dtypes(), "fp8 not supported on this device")
   def test_forward_fp8(self):
     import examples.mlperf.models.flat_llama as flat_llama_mod
     old_fp8 = flat_llama_mod.FP8
