@@ -4,6 +4,7 @@ set -o pipefail  # Make pipeline fail if any command fails
 
 export PYTHONPATH="."
 export PATH="/opt/rocm-7.1.1/bin:$PATH"
+export ROCM_PATH="/opt/rocm-7.1.1"
 export DEV=AMD
 export CHECK_OOB=0
 export REWRITE_STACK_LIMIT=5000000 HCQDEV_WAIT_TIMEOUT_MS=240000
