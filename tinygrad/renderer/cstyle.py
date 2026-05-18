@@ -576,7 +576,7 @@ class HIPRenderer(CStyleLanguage):
     return super().render_kernel(function_name, kernel, bufs, uops, prefix)
 
   def supported_dtypes(self): return {d for d in super().supported_dtypes()
-                                      if d not in dtypes.fp8_ocp or self.target.arch == "gfx950" and d not in dtypes.fp8_fnuz}
+                                      if (d not in dtypes.fp8_ocp or self.target.arch == "gfx950") and d not in dtypes.fp8_fnuz}
 
 class HIPCCRenderer(HIPRenderer):
   def __init__(self, target:Target): super().__init__(target, use_hipcc=True)
