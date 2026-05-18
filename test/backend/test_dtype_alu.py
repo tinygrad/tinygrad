@@ -39,6 +39,7 @@ if ((DEV.interface.startswith("MOCK") and Device.DEFAULT in {"NV", "CUDA"})
 
 # transcendental isn't accurate enough
 if Ops.SQRT not in Device[Device.DEFAULT].renderer.code_for_op: unary_operations.remove((Tensor.sqrt, np.sqrt))
+
 supported_dtypes = Device[Device.DEFAULT].renderer.supported_dtypes()
 
 class ht:
