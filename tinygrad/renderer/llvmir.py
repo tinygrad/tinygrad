@@ -297,5 +297,5 @@ exit: %packed = phi i32 [%packed_bf8, %do_bf8], [%packed_fp8, %do_fp8]\n  %trunc
             x.src[2]), (*x.arg,)) if x.src[0].dtype == dtypes.bfloat16.vec(8) else None)
       ])
 
-  # FIXME: fp8_fnuz?
-  def supported_dtypes(self): return {d for d in super().supported_dtypes() if d not in dtypes.fp8_ocp or self.target.arch == "gfx950"}
+  def supported_dtypes(self): return {d for d in super().supported_dtypes()
+                                      if d not in dtypes.fp8_ocp or self.target.arch == "gfx950" and d not in dtypes.fp8_fnuz}
