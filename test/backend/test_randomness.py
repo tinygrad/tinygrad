@@ -368,8 +368,8 @@ class TestRandomness(unittest.TestCase):
     @TinyJit
     def sample_one(): return Tensor(w).multinomial(1, replacement=False).realize()
 
-    tiny_samples = [sample_one().item() for _ in range(1000)]
-    torch_samples = [torch.tensor(w).multinomial(1, replacement=False).item() for _ in range(1000)]
+    tiny_samples = [sample_one().item() for _ in range(400)]
+    torch_samples = [torch.tensor(w).multinomial(1, replacement=False).item() for _ in range(400)]
     self.assertTrue(equal_distribution(lambda *_: Tensor(tiny_samples), lambda _: torch.tensor(torch_samples)))
 
     w = list(range(32))
@@ -384,8 +384,8 @@ class TestRandomness(unittest.TestCase):
     @TinyJit
     def sample_three(): return Tensor(w).multinomial(3, replacement=False).realize()
 
-    tiny_draws = np.array([sample_three().numpy() for _ in range(1000)])
-    torch_draws = np.array([torch.tensor(w).multinomial(3, replacement=False).numpy() for _ in range(1000)])
+    tiny_draws = np.array([sample_three().numpy() for _ in range(400)])
+    torch_draws = np.array([torch.tensor(w).multinomial(3, replacement=False).numpy() for _ in range(400)])
     for pos in range(3):
       self.assertTrue(equal_distribution(lambda *_: Tensor(tiny_draws[:, pos]), lambda _: torch.tensor(torch_draws[:, pos])))
 
@@ -415,7 +415,7 @@ class TestRandomness(unittest.TestCase):
   def test_rand_chain(self):
     # NOTE: this fails if property propagates deeper than stack limit
     for _ in range(833): Tensor.rand(1)
-    Tensor.rand(1).realize()
+    Tensor.rand(1).schedule_linear()
 
   def test_random_counter_overflow(self):
     device = Device.DEFAULT

@@ -345,7 +345,7 @@ def is_dtype_supported(dtype:DType, target:Target|None=None) -> bool:
       case "METAL": target.arch.startswith("Apple") and int(target.arch[5:]) >= 6
       case "CUDA": return (not CI or BENCHMARKS) and target.renderer != "PTX"
       case "NV": return (not CI or BENCHMARKS) and target.renderer not in ("PTX", "NAK")
-      case "CPU": return (not CI or BENCHMARKS) and platform.machine() in {"arm", "arm64", "aarch64", "x86_64", "amd64"} and target.renderer != "LVP"
+      case "CPU": return platform.machine() in {"arm", "arm64", "aarch64", "x86_64", "amd64"} and target.renderer != "LVP"
       case "AMD" | "CL" | "PYTHON" | "NULL": return True
       case _: return False
   if dtype in dtypes.fp8_ocp:
@@ -372,7 +372,7 @@ def is_dtype_supported(dtype:DType, target:Target|None=None) -> bool:
   if dtype == dtypes.float64:
     match target.device:
       case _ if dtypes.long in EMULATED_DTYPES.tolist(dtypes): return False # double can't be bitcast to anything without long support
-      case "CL": return not OSX
+      case "CL": return "cl_khr_fp64" in target.arch
       case "NULL": return target.renderer not in ("IR3", "QCOMCL")
       case "METAL" | "QCOM": return False
   return True
