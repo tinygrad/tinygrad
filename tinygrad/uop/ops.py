@@ -533,6 +533,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
   def contiguous(self, *args, **kwargs):
     if self.op is Ops.CONTIGUOUS: return self
+    if self._device is None: return self
     if self.has_buffer_identity(): return self
     return UOp(Ops.CONTIGUOUS, dtype=self.dtype, src=(self,)+args, **kwargs)
   def bufferize(self, *args, **kwargs): return UOp(Ops.STAGE, dtype=self.dtype, src=(self,)+args, **kwargs)
