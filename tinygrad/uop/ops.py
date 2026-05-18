@@ -595,14 +595,13 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     dnum = UOp.variable("_device_num", 0, dcount-1)
     return self.pad(tuple((0,0) if a != axis else (bsz*dnum, bsz*(dcount-1) - bsz*dnum) for a in range(len(self.shape))))
 
-  def _shard(self, axis:int) -> UOp:
+  def _shard(self, axis:int, dcount:int) -> UOp:
     if len(self.shape) == 0: return self  # scalars broadcast, no sharding needed
-    dcount = len(self.device)
     dnum = UOp.variable("_device_num", 0, dcount-1)
     if self.shape[axis] % dcount != 0: raise RuntimeError(f"multi axis uneven: {self.shape[axis]=} {axis=} {dcount=}")
     sz = self.shape[axis] // dcount
     return self.shrink(tuple((0,s) if i != axis else (dnum*sz,dnum*sz+sz) for i,s in enumerate(self.shape)))
-  def shard(self, devices:tuple[str, ...], axis:int) -> UOp: return self.copy_to_device(devices)._shard(axis).multi(axis)
+  def shard(self, devices:tuple[str, ...], axis:int) -> UOp: return self.copy_to_device(devices)._shard(axis, len(devices)).multi(axis)
 
   def copy_to_device(self, device:str|tuple[str, ...]|UOp, arg=None):
     assert arg is None or isinstance(self.device, tuple)
