@@ -40,7 +40,8 @@ if ((DEV.interface.startswith("MOCK") and Device.DEFAULT in {"NV", "CUDA"})
 # transcendental isn't accurate enough
 if Ops.SQRT not in Device[Device.DEFAULT].renderer.code_for_op: unary_operations.remove((Tensor.sqrt, np.sqrt))
 
-supported_dtypes = Device[Device.DEFAULT].renderer.supported_dtypes()
+# when emulating AMD, PythonRemu runs on CPU
+supported_dtypes = Device["CPU" if Device.DEFAULT == "AMD" and DEV.interface.startswith("MOCK") else Device.DEFAULT].renderer.supported_dtypes()
 
 class ht:
   float64 = strat.floats(width=64, allow_subnormal=False)
