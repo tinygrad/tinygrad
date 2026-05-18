@@ -36,6 +36,16 @@ class TestTinygrad(unittest.TestCase):
     self.assertTrue(t.uop.has_buffer_identity())
     np.testing.assert_equal(t.numpy(), 2.0)
 
+  def test_to_deviceless_const(self):
+    t = Tensor(UOp.const(dtypes.float, 2.0))
+    self.assertIs(t.to(f"{Device.DEFAULT}:1"), t)
+    self.assertIs(t.to_(f"{Device.DEFAULT}:1"), t)
+
+  def test_shard_deviceless_const(self):
+    t = Tensor(UOp.const(dtypes.float, 2.0))
+    self.assertIs(t.shard((f"{Device.DEFAULT}:0", f"{Device.DEFAULT}:1")), t)
+    self.assertIs(t.shard_((f"{Device.DEFAULT}:0", f"{Device.DEFAULT}:1")), t)
+
   def test_plus_equals(self):
     a = Tensor.randn(10,10)
     b = Tensor.randn(10,10)
