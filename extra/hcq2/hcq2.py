@@ -6,7 +6,7 @@ if TYPE_CHECKING: from tinygrad.engine.realize import ExecContext
 from tinygrad.helpers import DEV, getenv, select_first_inited, select_by_name, suppress_finalizing, mv_address, round_up, DEBUG, dedup
 from tinygrad.device import Device, Buffer, BufferSpec, Compiled, LRUAllocator
 from tinygrad.uop.ops import Ops, sint, UOp, UPat, PatternMatcher, KernelInfo, graph_rewrite, track_rewrites, buffers
-from tinygrad.uop.symbolic import symbolic
+from tinygrad.uop.symbolic import symbolic, symbolic_simple
 from tinygrad.dtype import dtypes, DType
 from dataclasses import dataclass, field
 from tinygrad.runtime.support.memory import BumpAllocator
@@ -269,7 +269,7 @@ def bufferize_binary(ctx:HCQ2LowerCtx, target:UOp) -> UOp|None:
     dev = bin_node.src[0].arg
     buf = Buffer(dev, len(bin_node.arg) // dtypes.uint32.itemsize, dtypes.uint32, options=BufferSpec(cpu_access=True), preallocate=True)
     host_buf = UOp.from_buffer(buf, dev)
-    host_buf.buffer.ensure_allocated()._buf.cpu_view()[:len(bin_node.arg)] = bin_node.arg
+    host_buf.buffer.ensure_allocated().copyin(memoryview(bytearray(bin_node.arg)))
     patched = host_buf.after(*_lower_stores(host_buf, target.src[1:]))
     return UOp(Ops.CUSTOM_FUNCTION, dtypes.void, src=(patched,), arg=f"submit_{bin_node.tag}")
   return None
@@ -308,7 +308,7 @@ def fold_const_store(ctx:HCQ2LowerCtx, buf:UOp, off:UOp, val:UOp) -> UOp:
   struct.pack_into(f'<{val.dtype.fmt}', buf.buffer.ensure_allocated()._buf.cpu_view().mv, off.arg * buf.dtype.base.itemsize, val.arg)
   return UOp(Ops.NOOP)
 
-pm_resolve_patches = symbolic + PatternMatcher([
+pm_resolve_patches = symbolic_simple + PatternMatcher([
   (UPat(Ops.GETADDR, src=(UPat((Ops.BUFFER, Ops.BUFFER_VIEW), name="buf"),), name="ga"), resolve_getaddr),
   (UPat(Ops.GETADDR, src=(UPat.cvar("const"),)), lambda ctx, const: const),
 
@@ -316,11 +316,8 @@ pm_resolve_patches = symbolic + PatternMatcher([
 ])
 
 pm_parametrize_host_buffers = PatternMatcher([
-  # resolve buffer views, to parametrize only root buffers
-  (UPat(Ops.BUFFER_VIEW, name="bv").index(UPat.var("idx")), lambda ctx, bv, idx: bv.src[0].index(idx + bv.arg[1])),
-
   # parametrize host buffers
-  (UPat(Ops.BUFFER, name="buf"), lambda ctx, buf: ctx.host_param(buf.buffer)),
+  (UPat((Ops.BUFFER, Ops.BUFFER_VIEW), name="buf"), lambda ctx, buf: ctx.host_param(buf.buffer)),
 ])
 
 def lower_submit(ctx:HCQ2LowerCtx, cf:UOp) -> UOp|None:
@@ -359,7 +356,7 @@ def hcq_realize(ctx:HCQ2LowerCtx, linear:UOp, ast:UOp, dev:HCQ2Compiled) -> UOp:
   linear = graph_rewrite(linear, pm_bufferize, ctx=ctx, bottom_up=True, name="realize binaries")
   linear = graph_rewrite(linear, pm_lift_after, ctx=ctx, bottom_up=False, name="lift patches to root")
   linear = graph_rewrite(linear, pm_resolve_patches, ctx=ctx, bottom_up=False, name="simplify patches")
-  linear = graph_rewrite(linear, pm_parametrize_host_buffers, ctx=ctx, bottom_up=False, name="parametrize host buffers")
+  linear = graph_rewrite(linear, pm_parametrize_host_buffers, ctx=ctx, bottom_up=True, name="parametrize host buffers")
   linear = graph_rewrite(linear, pm_lower_submits + dev.pm_lower, ctx=ctx, bottom_up=True, name="lower submits")
   return graph_rewrite(linear, pm_callify, ctx=ctx, name="hcq: callify")
 
