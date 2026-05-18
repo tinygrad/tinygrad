@@ -364,6 +364,7 @@ class Tensor(OpMixin):
     """
     Moves the tensor to the given device.
     """
+    if self.uop._device is None: return self
     if (device:=canonicalize_device(device)) == self.device: return self
     ret = Tensor(self.uop.copy_to_device(device), requires_grad=self.requires_grad)
     if self.grad is not None: ret.grad = self.grad.to(device)
@@ -386,6 +387,7 @@ class Tensor(OpMixin):
     print(t.shard((t.device, t.device), axis=1).uop)
     ```
     """
+    if self.uop._device is None: return self
     if not isinstance(self.device, str): raise RuntimeError("can't shard a multi-device tensor")
     if len(devices) == 1: return self.to(devices[0])
     devices = cast(tuple[str, ...], canonicalize_device(devices))
