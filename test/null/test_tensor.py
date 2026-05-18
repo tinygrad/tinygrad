@@ -107,12 +107,12 @@ class TestIdxUpcast(unittest.TestCase):
     uops = self._schedule_render(a)
     assert all(uop.dtype is not dtypes.long for uop in uops)
 
-  @unittest.skipUnless(dtypes.long in Device[Device.DEFAULT].renderer.supported_dtypes(), "int64 is supported")
+  @unittest.skipIf(dtypes.long in Device[Device.DEFAULT].renderer.supported_dtypes(), "int64 is supported")
   def test_int64_unsupported_overflow_sym(self):
     with self.assertRaises((KeyError, RuntimeError)):
       self.do_op_then_assert(dtypes.long, 2048, 2048, UOp.variable("dim3", 1, 2048).bind(32))
 
-  @unittest.skipUnless(dtypes.long in Device[Device.DEFAULT].renderer.supported_dtypes(), "int64 is supported")
+  @unittest.skipIf(dtypes.long in Device[Device.DEFAULT].renderer.supported_dtypes(), "int64 is supported")
   @unittest.expectedFailure  # bug in gpu dims limiting
   def test_int64_unsupported_overflow(self):
     with self.assertRaises((KeyError, RuntimeError)):
