@@ -10,7 +10,7 @@ from tinygrad.engine.jit import TinyJit, JitError, graph_class
 from tinygrad.device import Device
 from tinygrad.helpers import Context, JIT, DEV, GlobalCounters
 from tinygrad.dtype import dtypes
-from tinygrad.uop.ops import Ops
+from tinygrad.uop.ops import Ops, UOp
 from extra.models.unet import ResBlock
 from tinygrad.renderer.isa.x86 import X86Renderer
 
@@ -534,6 +534,12 @@ class TestJit(unittest.TestCase):
     with self.assertRaises(JitError):
       f(Tensor(2.0)).item()
     # self.assertEqual(f(Tensor([2.0])).item(), 1.0) # TODO: wrong output, should be 3.0. currently depends on empty value
+
+  def test_jit_const_input(self):
+    @TinyJit
+    def f(x:Tensor) -> Tensor: return (x + 1).realize()
+    with self.assertRaises(JitError):
+      f(Tensor(UOp.const(dtypes.float, 2.0))).item()
 
   def test_jit_init_empty_alt(self):
     @TinyJit

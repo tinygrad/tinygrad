@@ -783,7 +783,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
         axes:list[int]|None=None, coordinate_transformation_mode:str='half_pixel', cubic_coeff_a:float=-0.75, exclude_outside:int=0,
         extrapolation_value:float=0.0, keep_aspect_ratio_policy:str='stretch', mode:str='nearest', nearest_mode:str='round_prefer_floor'):
     def _apply_transformation(input_sz, output_sz, scale_dim, mode):
-      index = Tensor.arange(output_sz, requires_grad=False, device=X.device)
+      index = Tensor.arange(output_sz, device=X.device)
       if mode == "half_pixel": return (index + 0.5) / scale_dim - 0.5
       if mode == "align_corners": return index * (input_sz - 1) / (output_sz - 1) if output_sz != 1 else Tensor.zeros_like(index)
       if mode == "asymmetric": return index / scale_dim
@@ -934,7 +934,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
       return x.unsqueeze(-1).expand(*x.shape, vocab_size)._one_hot_along_dim(vocab_size) @ weight
 
     # bert embedding layer
-    if position_ids is None: position_ids = Tensor.arange(seq_length, requires_grad=False).unsqueeze(0).expand(*input_shape)
+    if position_ids is None: position_ids = Tensor.arange(seq_length).unsqueeze(0).expand(*input_shape)
     wrd_embedding_res = embedding(input_ids, vocab_size, word_embedding)
     pos_embedding_res = embedding(position_ids, max_position_embeddings, position_embedding)
 
@@ -977,7 +977,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
 
   def _window(size, output_datatype, periodic, a):
     size = int(_resolve_const(size))
-    N, n = (size if periodic else size - 1), Tensor.arange(size, requires_grad=False)
+    N, n = (size if periodic else size - 1), Tensor.arange(size)
     w = a[0] - a[1] * (n * (2 * math.pi / N)).cos() + a[2] * (n * (4 * math.pi / N)).cos()
     return w.cast(OnnxDataType(output_datatype).to_dtype())
   def HannWindow(size, output_datatype:int=1, periodic:int=1): return _window(size, output_datatype, periodic, (0.5, 0.5, 0))
@@ -1032,7 +1032,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
       if mask_index.ndim != 1: mask = mask_index.bool()
       else:
         if mask_index.shape[0] == batch_size:
-          mask = Tensor.arange(attn_scores.shape[-1], requires_grad=False, device=mask_index.device).unsqueeze(0) < mask_index.unsqueeze(1)
+          mask = Tensor.arange(attn_scores.shape[-1], device=mask_index.device).unsqueeze(0) < mask_index.unsqueeze(1)
         elif mask_index.shape[0] == 2*batch_size:
           end_positions = mask_index[:batch_size]
           start_positions = mask_index[batch_size:]
@@ -1075,7 +1075,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     qk_matmul_return_val = scores
 
     if is_causal:
-      causal_mask = Tensor.ones(Q.shape[-2], K.shape[-2], device=Q.device, dtype=dtypes.bool, requires_grad=False).tril(0)
+      causal_mask = Tensor.ones(Q.shape[-2], K.shape[-2], device=Q.device, dtype=dtypes.bool).tril(0)
       scores = scores.masked_fill(causal_mask.logical_not(), -float("inf"))
 
     if attn_mask is not None:
@@ -1132,7 +1132,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     flat_idx = Tensor.arange(mask.numel(), dtype=dtypes.int64, device=x.device).masked_select(mask)
     if flat_idx.ndim == 0: flat_idx = flat_idx.reshape(1)
     if x.ndim == 0:
-      return Tensor.zeros((0, flat_idx.shape[0]), dtype=dtypes.int64, device=x.device, requires_grad=False)
+      return Tensor.zeros((0, flat_idx.shape[0]), dtype=dtypes.int64, device=x.device)
     strides = [prod(int(s) for s in x.shape[i+1:]) if i+1 < x.ndim else 1 for i in range(x.ndim)]
     coords = [((flat_idx // stride) % int(dim)) for stride, dim in zip(strides, x.shape)]
     return Tensor.stack(*coords, dim=0)
