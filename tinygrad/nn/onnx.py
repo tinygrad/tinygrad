@@ -902,6 +902,27 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
 
       return X.batchnorm(scale, B, current_mean, current_invstd).cast(X.dtype),running_mean.cast(input_mean.dtype),running_var.cast(input_var.dtype)
     return X.batchnorm(scale, B, input_mean, (input_var + epsilon).rsqrt())
+  def LSTM(X:Tensor, W:Tensor, R:Tensor, B:Tensor|None=None, sequence_lens:Tensor|None=None, initial_h:Tensor|None=None,
+           initial_c:Tensor|None=None, P:Tensor|None=None, hidden_size:int|None=None, activation_alpha:list|None=None,
+           activation_beta:list|None=None, activations:list|None=None, clip:float|None=None, direction:str="forward",
+           input_forget:int=0, layout:int=0):
+    if sequence_lens is not None or P is not None: raise NotImplementedError("LSTM sequence_lens / peephole weights (P) not supported")
+    if direction != "forward": raise NotImplementedError(f"LSTM direction={direction!r} not supported")
+    if activations is not None or activation_alpha is not None or activation_beta is not None: raise NotImplementedError("LSTM custom activations not supported")
+    if clip is not None: raise NotImplementedError("LSTM clip not supported")
+    if input_forget: raise NotImplementedError("LSTM input_forget=1 not supported")
+    if layout: raise NotImplementedError("LSTM layout=1 (batchwise) not supported")
+    if hidden_size is None: hidden_size = cast(int, W.shape[1] // 4)
+    if initial_h is None: initial_h = Tensor.zeros(1, X.shape[1], hidden_size, dtype=X.dtype, device=X.device, requires_grad=False)
+    if initial_c is None: initial_c = Tensor.zeros(1, X.shape[1], hidden_size, dtype=X.dtype, device=X.device, requires_grad=False)
+    bias = B[0, :hidden_size*4] + B[0, hidden_size*4:] if B is not None else 0
+    h_t, c_t, outs = initial_h[0], initial_c[0], []
+    for step in range(cast(int, X.shape[0])):
+      i, o, f, c = (X[step] @ W[0].T + h_t @ R[0].T + bias).chunk(4, dim=-1)
+      c_t = f.sigmoid() * c_t + i.sigmoid() * c.tanh()
+      h_t = o.sigmoid() * c_t.tanh()
+      outs.append(h_t)
+    return Tensor.stack(*outs, dim=0).unsqueeze(1), h_t.unsqueeze(0), c_t.unsqueeze(0)
   def GroupNormalization(x:Tensor, scale:Tensor, bias:Tensor, num_groups:int, epsilon:float=1e-05, stash_type:int=1):
     assert stash_type == 1, "only float32 is supported"
     x = x.reshape(x.shape[0], num_groups, -1).cast(dtypes.float).layernorm(eps=epsilon).cast(x.dtype).reshape(x.shape)

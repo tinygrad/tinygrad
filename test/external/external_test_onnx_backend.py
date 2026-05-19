@@ -126,8 +126,11 @@ backend_test.exclude('test_regex_*')
 # no rnn
 backend_test.exclude('test_gru_*')
 backend_test.exclude('test_rnn_*')
-backend_test.exclude('test_lstm_*')
 backend_test.exclude('test_simple_rnn_*')
+
+# lstm: forward direction with default activations only; peephole and layout=1 raise
+backend_test.exclude('test_lstm_with_peepholes_cpu')
+backend_test.exclude('test_lstm_batchwise_cpu')
 
 # no control flow
 # control flow uses AttributeProto.GRAPH
