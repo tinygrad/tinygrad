@@ -54,7 +54,7 @@ def _broadcast_shape(*shapes:tuple[sint, ...]) -> tuple[sint, ...]:
   shaped_aligned_left = _align_left(*shapes)
   ret = tuple(0 if 0 in nth_dim_sizes else smax(nth_dim_sizes) for nth_dim_sizes in zip(*shaped_aligned_left))
   if not all(resolve(s == ns) or resolve(s == 1) for shape in shaped_aligned_left for s,ns in zip(shape, ret)):
-    raise ValueError(f"shape mismatch: objects cannot be broadcast to a single shape {shapes}")
+    raise IndexError(f"shape mismatch: objects cannot be broadcast to a single shape {shapes}")
   return ret
 
 def ssimplify(uop:sint): return uop.ssimplify() if isinstance(uop, UOp) else uop
