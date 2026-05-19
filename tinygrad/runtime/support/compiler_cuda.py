@@ -80,7 +80,7 @@ class PTXCompiler(Compiler):
 
 class NVPTXCompiler(PTXCompiler):
   def __init__(self, arch:str):
-    nvrtc_check(jitlink.nvJitLinkVersion(ctypes.byref(ctypes.c_uint()), ctypes.byref(ctypes.c_uint())))
+    jitlink_check(jitlink.nvJitLinkVersion(ctypes.byref(ctypes.c_uint()), ctypes.byref(ctypes.c_uint())))
     super().__init__(arch, cache_key="nv_ptx")
   def compile(self, src:str) -> bytes:
     jitlink_check(jitlink.nvJitLinkCreate(handle := jitlink.nvJitLinkHandle(), 1, to_char_p_p([f'-arch={self.arch}'.encode()])), handle)
