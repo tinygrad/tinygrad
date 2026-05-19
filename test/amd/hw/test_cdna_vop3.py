@@ -110,3 +110,21 @@ class TestCDNAVOP3(unittest.TestCase):
       cdna.v_cvt_pk_fp8_f32(cdna.v[2], cdna.v[0], cdna.v[1]),
     ])
     self.assertEqual(out, 0xdead4038)
+
+  def test_cvt_pk_bf8_f32_overflow_and_inf(self):
+    """V_CVT_PK_BF8_F32 converts finite overflow and infinities to E5M2 infinities."""
+    for name, bits, expected in [
+      ("finite_overflow", 0x47700000, 0x7c),
+      ("pos_inf", 0x7f800000, 0x7c),
+      ("neg_inf", 0xff800000, 0xfc),
+    ]:
+      with self.subTest(name=name):
+        out = run_cdna([
+          cdna.s_mov_b32(cdna.s[0], 0xdeadbeef),
+          cdna.v_mov_b32_e32(cdna.v[2], cdna.s[0]),
+          cdna.s_mov_b32(cdna.s[0], bits),
+          cdna.v_mov_b32_e32(cdna.v[0], cdna.s[0]),
+          cdna.v_mov_b32_e32(cdna.v[1], 1.0),
+          cdna.v_cvt_pk_bf8_f32(cdna.v[2], cdna.v[0], cdna.v[1]),
+        ])
+        self.assertEqual(out, 0xdead3c00 | expected)
