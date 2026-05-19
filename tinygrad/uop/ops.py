@@ -51,7 +51,11 @@ def _align_left(*shapes:tuple[sint, ...]) -> tuple[tuple[sint, ...], ...]:
   max_dim = max(len(s) for s in shapes)
   return tuple((1,)*(max_dim-len(s))+s for s in shapes)
 def _broadcast_shape(*shapes:tuple[sint, ...]) -> tuple[sint, ...]:
-  return tuple(0 if 0 in nth_dim_sizes else smax(nth_dim_sizes) for nth_dim_sizes in zip(*_align_left(*shapes)))
+  shaped_aligned_left = _align_left(*shapes)
+  ret = tuple(0 if 0 in nth_dim_sizes else smax(nth_dim_sizes) for nth_dim_sizes in zip(*shaped_aligned_left))
+  if not all(resolve(s == ns) or resolve(s == 1) for shape in shaped_aligned_left for s,ns in zip(shape, ret)):
+    raise IndexError(f"shape mismatch: objects cannot be broadcast to a single shape {shapes}")
+  return ret
 
 def ssimplify(uop:sint): return uop.ssimplify() if isinstance(uop, UOp) else uop
 def sym_infer(uop: UOp|int, var_vals: dict[str, int]) -> int: return uop.sym_infer(var_vals) if isinstance(uop, UOp) else uop
@@ -213,6 +217,13 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
            Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE | Ops.BINARY | Ops.INS | Ops.TUPLE | Ops.CALL | Ops.FUNCTION:
         return None
 
+      # these must all have matching shapes
+      case Ops.GROUP | Ops.STORE:
+        input_shapes = [x.shape for x in self.src]
+        if not all_same(input_shapes):
+          raise RuntimeError(f"shape mismatch at {self.op}: {input_shapes} {[x.op for x in self.src]}")
+        return input_shapes[0]
+
       # hacks for NOOP
       case Ops.NOOP:
         return self.src[0]._shape if len(self.src) >= 1 else None
@@ -316,8 +327,12 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
             raise ValueError(f"invalid type for axis: {axis_arg}")
           return tuple(1 if i in axis_arg else s for i,s in enumerate(ps))
 
+    if self.op in GroupOp.Unary.union({Ops.CAST}):
+      assert len(self.src) == 1, "unary ops must have 1 src"
+      return self.src[0]._shape
+
     # elementwise ops keep the shape the same. all inputs with shape must match
-    if self.op in GroupOp.ALU.union({Ops.CAST, Ops.GROUP, Ops.STORE}):
+    if self.op in GroupOp.Broadcastable:
       input_shapes = [x._shape for x in self.src]
       assert len(self.src) > 0 and all(x is not None for x in input_shapes), f"None input shape not supported for {self.op}"
       # TODO: add broadcasting here
