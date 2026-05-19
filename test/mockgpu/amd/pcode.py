@@ -845,10 +845,10 @@ class Parser:
         val = _u32(0)
         for i in range(4): val = val | (mindex(idx + _const(dtypes.int, i), ptr=True).load().cast(dtypes.uint32) << _u32(i * 8))
     else:
-      idx = (addr >> _const(addr.dtype, 2)).cast(dtypes.int)
+      idx = (addr >> _const(addr.dtype, 2))
       val = mindex(idx)
       if dt in (dtypes.uint64, dtypes.int64, dtypes.float64):
-        idx2 = ((addr + _const(adt, 4)) >> _const(adt, 2)).cast(dtypes.int)
+        idx2 = ((addr + _const(adt, 4)) >> _const(adt, 2))
         val = val.cast(dtypes.uint64) | (mindex(idx2).cast(dtypes.uint64) << _u64(32))
       elif dt in (dtypes.uint8, dtypes.int8): val = (val >> ((addr & _const(adt, 3)).cast(dtypes.uint32) * _u32(8))) & _u32(0xFF)
       elif dt in (dtypes.uint16, dtypes.int16):

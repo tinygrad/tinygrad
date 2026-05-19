@@ -94,6 +94,10 @@ def minigen_to_sink(ast:UOp, ren:Renderer, optimize:bool) -> UOp:
               get_transcendental_patterns(supported_ops, force_transcendental=False)
   sink = graph_rewrite(sink, pm_decomp, ctx=ren.target, name="decompose ops to renderable")
 
+  # extra matcher from the renderer
+  extra_matcher = ren.extra_matcher if ren.extra_matcher is not None else PatternMatcher([])
+  sink = graph_rewrite(sink, extra_matcher, ctx=ren.target, name="final rewrite")
+
   # this was the linearizer, add control flow edges where they are needed on RANGEs
   sink = graph_rewrite(sink, pm_add_control_flow, ctx=CFGContext(sink), name="add control flow", bottom_up=True)
 
