@@ -28,6 +28,7 @@ packages = [
   'tinygrad.nn',
   'tinygrad.renderer',
   'tinygrad.renderer.amd',
+  'tinygrad.renderer.isa',
   'tinygrad.runtime',
   'tinygrad.runtime.autogen',
   'tinygrad.runtime.autogen.am',
