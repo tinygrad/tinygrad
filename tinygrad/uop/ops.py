@@ -514,9 +514,11 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     if isinstance(b, tuple) and all_same(b):
       assert len(b) > 0, "can't create const from empty tuple"
       b = b[0]  # doesn't have to be a VCONST if they are all the same
-    ret = UOp(Ops.VCONST if isinstance(b, tuple) else Ops.CONST, dtype,
-              arg=dtype.const(b),
-              src=(UOp(Ops.DEVICE, arg=device),) if device is not None else ())
+    if isinstance(b, tuple):
+      stk = [UOp(Ops.CONST, dtype.scalar(), arg=dtype.const(c), src=(UOp(Ops.DEVICE, arg=device),) if device is not None else ()) for c in b]
+      ret = UOp.vectorize(*stk)
+    else:
+      ret = UOp(Ops.CONST, dtype, arg=dtype.const(b), src=(UOp(Ops.DEVICE, arg=device),) if device is not None else ())
     return ret.reshape((1,)*len(shape)).expand(shape) if shape is not None and ret.shape != shape else ret
   @staticmethod
   def unique_const(fill_value:ConstType, dtype:DTypeLike|None=None, device:str|tuple[str, ...]|None=None,  # type: ignore[override]
