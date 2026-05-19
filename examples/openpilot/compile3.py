@@ -21,6 +21,8 @@ def compile(onnx_file):
   # TODO this seems dumb
   input_types = {k:(dtypes.float32 if v is dtypes.float16 else v) for k,v in input_types.items()}
   Tensor.manual_seed(100)
+  # replace symbolic dimensions (e.g. 'b' for dynamic batch) with 1
+  input_shapes = {k:tuple(s if isinstance(s, int) else 1 for s in shp) for k,shp in input_shapes.items()}
   inputs = {k:Tensor(Tensor.randn(*shp, dtype=input_types[k]).mul(8).realize().numpy(), device='NPY') for k,shp in sorted(input_shapes.items())}
   if not getenv("NPY_IMG"):
     inputs = {k:Tensor(v.numpy(), device=Device.DEFAULT).realize() if 'img' in k else v for k,v in inputs.items()}

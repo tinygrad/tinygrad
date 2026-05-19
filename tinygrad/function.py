@@ -84,7 +84,7 @@ class _function(Generic[ReturnType]):
                      precompile_backward=self.precompile_backward)
 
     if DEBUG >= 2:
-      #signature = [(x._shape, x.dtype, x._device) for x in call_uops]
+      #signature = [(x._shape, x.dtype, x.device) for x in call_uops]
       print("  "*_function.depth+f"function {uret.key.hex()[:8]} in {(time.perf_counter()-st)*1000:8.2f} ms: {name}") # with sig {signature}")
 
     if isinstance(ret, tuple):

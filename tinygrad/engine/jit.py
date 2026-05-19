@@ -1,12 +1,12 @@
 from typing import TypeVar, Generic, Callable, Any
 import functools, collections
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, colored, JIT, JIT_BATCH_SIZE, dedup, pluralize, VIZ
+from tinygrad.helpers import flatten, merge_dicts, DEBUG, Context, BEAM, getenv, JIT, JIT_BATCH_SIZE, dedup, pluralize, VIZ
 from tinygrad.device import Buffer, Compiled, Device, MultiBuffer
 from tinygrad.dtype import DType, dtypes
 from tinygrad.uop.ops import UOp, PatternMatcher, Variable, sym_infer, Ops, buffers, track_rewrites, graph_rewrite
-from tinygrad.engine.realize import capturing, Runner, Estimates, compile_linear, run_linear, graph_cache, estimate_uop, get_runtime
-from tinygrad.engine.realize import unwrap_multi, resolve_params
+from tinygrad.engine.realize import capturing, Estimates, compile_linear, run_linear, graph_cache, estimate_uop, get_runtime
+from tinygrad.engine.realize import unwrap_multi, resolve_params, get_call_arg_uops, get_call_outs_ins
 from tinygrad.schedule.memory import memory_plan_rewrite, _collect_bufs
 from tinygrad.nn.state import get_parameters
 from tinygrad.schedule.rangeify import mop_cleanup
@@ -25,7 +25,7 @@ def prune_linear(linear:UOp, needed:set[UOp]) -> tuple[UOp, UOp]:
 def create_graph_call(batch:list[UOp]) -> UOp:
   # all external inputs are PARAMs
   input_list = dedup(u for si in batch for b in si.src[1:] for u in b.toposort() if u.op is Ops.PARAM)
-  cf = UOp(Ops.CUSTOM_FUNCTION, dtypes.void, src=(UOp(Ops.LINEAR, src=tuple(batch)), *input_list), arg="graph")
+  cf = UOp(Ops.CUSTOM_FUNCTION, dtypes.void, src=(UOp(Ops.LINEAR, src=tuple(batch)),), arg="graph")
   return cf.call(*input_list, metadata=tuple(m for si in batch for m in si.arg.metadata))
 
 def graph_split_rewrite(linear:UOp, max_batch_size:int=0) -> UOp:
@@ -48,8 +48,8 @@ def graph_split_rewrite(linear:UOp, max_batch_size:int=0) -> UOp:
     devs = dedup([Device[x] for b in si.src[1:] if b.op is not Ops.BIND for x in (b.device if isinstance(b.device, tuple) else (b.device,))])
     graph_t = graph_class(devs[0]) if devs[0].graph is not None else None
 
-    can_graph = graph_t is not None and graph_t.supports_exec_item(devs, si)
-    can_extend = can_graph and graph_t is not None and (not current_batch_devs or graph_t.supports_exec_item(current_batch_devs, si)) \
+    can_graph = graph_t is not None and graph_t.supports_uop(devs, si)
+    can_extend = can_graph and graph_t is not None and (not current_batch_devs or graph_t.supports_uop(current_batch_devs, si)) \
       and (max_batch_size == 0 or len(current_batch) < max_batch_size)
     if not can_extend and current_batch: flush_batch()
 
@@ -58,14 +58,6 @@ def graph_split_rewrite(linear:UOp, max_batch_size:int=0) -> UOp:
     current_batch_devs = dedup(current_batch_devs + devs) if can_graph else []
   if current_batch: flush_batch()
   return linear.replace(src=tuple(new_src))
-
-def _call_outs_ins(call:UOp) -> tuple[set[int], set[int]]:
-  non_bind = [s for s in call.src[1:] if s.op is not Ops.BIND]
-  ast = call.src[0]
-  if ast.op is Ops.PROGRAM: return set(ast.arg.outs), set(ast.arg.ins)
-  if ast.op in (Ops.COPY, Ops.BUFFER_VIEW): return {0}, {1}
-  if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "encdec": return {0}, set(range(1, len(non_bind)))
-  return set(), set()
 
 def _copy_input(u:UOp) -> UOp:
   run_linear(UOp(Ops.LINEAR, src=(u.copy_to_device(u.device).call(new:=UOp.new_buffer(u.device, u.arg, u.dtype), u, metadata=()),)))
@@ -95,14 +87,14 @@ def _check_no_non_tensor_return(ret):
 
 def graph_class(dev): return dev.graph.func if isinstance(dev.graph, functools.partial) else dev.graph
 
-class GraphRunner(Runner):
+class GraphRunner:
   def __init__(self, linear:UOp, input_uops:tuple[UOp, ...]=()):
     self.linear = linear.src[0]
     self.calls: list[tuple[int, UOp, list[Buffer], dict[str, int]]] = []
     self.runtimes: list[Any|None] = []
     self.uop_replace: list[list[tuple[int, int]]] = []
     for call in self.linear.src:
-      replace = [(p, b.arg) for p, b in enumerate(b for b in call.src[1:] if b.op is not Ops.BIND) if b.op is Ops.PARAM]
+      replace = [(p, b.arg) for p, b in enumerate(get_call_arg_uops(call)) if b.op is Ops.PARAM]
       for dev_idx, (bufs, device_vars) in enumerate(unwrap_multi(call, resolve_params(call, input_uops))):
         self.calls.append((dev_idx, call.src[0], [b.ensure_allocated() for b in bufs], device_vars))
         self.runtimes.append(get_runtime(bufs[0].device, call.src[0]) if call.src[0].op is Ops.PROGRAM else None)
@@ -135,7 +127,9 @@ class GraphRunner(Runner):
     self.w_dependency_map: dict[int, list[tuple[int, int, Any]]] = collections.defaultdict(list)
     self.r_dependency_map: dict[int, list[tuple[int, int, Any]]] = collections.defaultdict(list)
 
-    super().__init__(colored(f"<batched {len(self.calls)}>", "cyan"), self.calls[0][2][0].device.split(":")[0], estimates.simplify())
+    self.device, self.estimates = self.calls[0][2][0].device.split(":")[0], estimates.simplify()
+
+  def __call__(self, input_uops:tuple[UOp, ...], var_vals:dict[str, int], wait=False) -> float|None: raise NotImplementedError("override this")
 
   def updated_vars(self, var_vals: dict[str, int]):
     vals = [var_vals[v] for v in self.vars]
@@ -168,17 +162,17 @@ class GraphRunner(Runner):
 
   @staticmethod
   def _all_devs(batch_devs:list[Compiled], new_call:UOp) -> list[Compiled]:
-    return dedup(batch_devs + [Device[x] for b in new_call.src[1:] if b.op is not Ops.BIND
+    return dedup(batch_devs + [Device[x] for b in get_call_arg_uops(new_call)
                  for x in (b.device if isinstance(b.device, tuple) else (b.device,))])
 
   @staticmethod
-  def supports_exec_item(batch_devs:list[Compiled], new_call:UOp) -> bool:
+  def supports_uop(batch_devs:list[Compiled], new_call:UOp) -> bool:
     return new_call.src[0].op is Ops.PROGRAM and len(GraphRunner._all_devs(batch_devs, new_call)) == 1
 
 # a marker for your graph supporting multiple devices of the same type
 class MultiGraphRunner(GraphRunner):
   @staticmethod
-  def supports_exec_item(batch_devs:list[Compiled], new_call:UOp) -> bool:
+  def supports_uop(batch_devs:list[Compiled], new_call:UOp) -> bool:
     # Devices must be the same type
     return new_call.src[0].op in (Ops.PROGRAM, Ops.COPY) and len(dedup([type(d) for d in GraphRunner._all_devs(batch_devs, new_call)])) == 1
 
@@ -197,9 +191,9 @@ class CapturedJit(Generic[ReturnType]):
     out: set[UOp] = set()
     for call in self.linear.toposort():
       if call.op is not Ops.CALL: continue
-      non_bind = [s for s in call.src[1:] if s.op is not Ops.BIND]
-      outs, ins = _call_outs_ins(call)
-      out |= {non_bind[k] for k in outs - ins if non_bind[k].op in (Ops.BUFFER, Ops.BUFFER_VIEW)}
+      arg_uops = get_call_arg_uops(call)
+      outs, ins = get_call_outs_ins(call)
+      out |= {arg_uops[k] for k in set(outs) - set(ins) if arg_uops[k].op in (Ops.BUFFER, Ops.BUFFER_VIEW)}
     return out
 
   def __call__(self, input_uops:list[UOp], var_vals:dict[str, int]) -> ReturnType:
@@ -212,15 +206,11 @@ class CapturedJit(Generic[ReturnType]):
     # drop graph runners
     for call in self.linear.src:
       if call.src[0].op is Ops.CUSTOM_FUNCTION and call.src[0].arg == "graph": graph_cache.pop(call.src[0], None)
-    bases: set[Buffer] = set()
     for u in self._written_uops:
-      try: buf = u.buffer
-      except Exception: continue
-      for b in (buf.bufs if isinstance(buf, MultiBuffer) else [buf]):
-        if hasattr(b, '_buf'): b.deallocate()
-        if b._base is not None: bases.add(b._base)
-    for a in bases:
-      if a.is_allocated() and a.allocated_views == 0: a.deallocate()
+      if (buf:=buffers.get(u)) is None: continue
+      for b in (buf.bufs if isinstance(buf, MultiBuffer) else (buf,)):
+        if b.is_initialized(): b.deallocate()
+        if (base:=b._base) is not None and base.allocated_views == 0 and base.is_allocated(): base.deallocate()
 
 def _prepare_jit_inputs(args, kwargs):
   input_tensors: list[tuple[int|str, Tensor]] = [(name,t) for name,t in list(enumerate(args))+sorted(kwargs.items()) if t.__class__ is Tensor]
@@ -229,10 +219,10 @@ def _prepare_jit_inputs(args, kwargs):
   for x in args + tuple(kwargs.values()):
     it = x if isinstance(x, (tuple,list)) else x.values() if isinstance(x, dict) else []
     tensors += [t for t in it if t.__class__ is Tensor and not any(t is y for y in tensors)]
+  def get_input_uops() -> list[UOp]: return flatten([t.uop.src if t.uop.op is Ops.MULTI else [t.uop] for t in tensors])
+  if any(u.base.op is Ops.CONST for u in get_input_uops()): raise JitError("JIT inputs cannot be const, create a buffer with .clone()")
   if len(unrealized_tensors := [x for x in tensors if not x.uop.is_realized]): Tensor.realize(*unrealized_tensors)
-  input_uops: list[UOp] = flatten([t.uop.src if t.uop.op is Ops.MULTI else [t.uop] for t in tensors])
-  if any(u.base.op is Ops.CONST for u in input_uops):
-    raise JitError("JIT inputs cannot be const, create a buffer with .contiguous()")
+  input_uops = get_input_uops()
   # collect buffer UOps (including MultiBuffer)
   input_buf_uops: list[UOp] = [u.base for u in input_uops if u.base.realized is not None]
   if len(set(input_buf_uops)) != len(input_buf_uops): raise JitError("duplicate inputs to JIT")

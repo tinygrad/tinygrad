@@ -2628,21 +2628,24 @@ def custom_asm_gemm(C:UOp, A:UOp, B:UOp, dname:str) -> UOp:
 # ** FP8 GEMM custom kernel
 
 @functools.cache
-def custom_hk_fp8_gemm(C:UOp, A:UOp, B:UOp, X_s:UOp, W_s:UOp, *extra:UOp, dname:str) -> UOp:
-  # A is (batch, M, K), B is (N, K) transposed, X_s is x_scale, W_s is w_scale — kernel multiplies by both.
-  # extra is unused fwd inputs (e.g. grad_amax_state) plumbed through so the bwd can read them via kernel.src.
+def custom_hk_fp8_gemm(C:UOp, A:UOp, B:UOp, *args:UOp, dname:str, scale_mode:int=3) -> UOp:
+  # scale_mode: 0=no scale, 1=x only, 2=w only, 3=both
+  n_scales = (1 if scale_mode & 1 else 0) + (1 if scale_mode & 2 else 0)
+  scales, extra = args[:n_scales], args[n_scales:]
   M, K = A.shape[0]*A.shape[1], A.shape[2]
   N, K2 = B.shape[(1 if B.ndim == 3 else 0):]
   assert K == K2, f"{A.shape} {B.shape}"
   block_size = 256
   threads = UOp.special(64 * 8, "lidx0")
   workgroups = UOp.special((M // block_size) * (N // block_size), "gidx0")
-  sink = UOp.sink(C.base, A.base, B.base, X_s.base, W_s.base, threads, workgroups,
+  sink_inputs = (C.base, A.base, B.base) + tuple(s.base for s in scales) + (threads, workgroups)
+  sink = UOp.sink(*sink_inputs,
                   arg=KernelInfo(f"hk_fp8_gemm_{M}_{N}_{K}", estimates=Estimates(ops=2*M*N*K, mem=(M*K+N*K)*A.dtype.itemsize+M*N*C.dtype.itemsize)))
   kittens_path = pathlib.Path(__file__).parent.parent/"thunder"/"amd"
   src = (kittens_path/"gemm_fp8.cpp").read_text()
   lib = HIPCCCompiler("gfx950", [f"-I{(kittens_path/'include').as_posix()}", "-std=c++20", "-DKITTENS_CDNA4", "-ffast-math",
-                                 "-DHIP_ENABLE_WARP_SYNC_BUILTINS", f"-DGEMM_M={M}", f"-DGEMM_N={N}", f"-DGEMM_K={K}"]).compile_cached(src)
+                                 "-DHIP_ENABLE_WARP_SYNC_BUILTINS", f"-DGEMM_M={M}", f"-DGEMM_N={N}", f"-DGEMM_K={K}",
+                                 f"-DSCALE_MODE={scale_mode}"]).compile_cached(src)
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dname), UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src),
                                UOp(Ops.BINARY, arg=lib)))
 
@@ -2699,8 +2702,7 @@ def custom_uop_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
 
 def custom_gemm_bw(gradient:UOp, kernel:UOp):
   inputs = kernel.src[1:]
-  # fp8 scaled gemm has 5 inputs (out, a, b, x_scale, w_scale) optionally plus grad_amax_state (6 total); plain gemm has 3
-  if len(inputs) >= 5:
+  if inputs[1].dtype == FP8_DTYPE:
     grad_amax_state = inputs[5] if len(inputs) == 6 else None
     out, a, b, s_x, s_w = inputs[:5]
     a_t, b_t, g_t = Tensor(a, device=a.device), Tensor(b, device=a.device), Tensor(gradient, device=a.device)
@@ -2711,19 +2713,31 @@ def custom_gemm_bw(gradient:UOp, kernel:UOp):
     gbase = gradient.base if hasattr(gradient, "base") else gradient
     mailbox_entry = _grad_fp8_mailbox.pop(gbase, None) or _grad_fp8_mailbox.pop(gradient, None)
     if mailbox_entry is not None:
-      g_fp8_u, inv_scale_u, _new_amax_u, store_effect = mailbox_entry
+      g_fp8_u, inv_scale_u = mailbox_entry
       g_fp8 = Tensor(g_fp8_u, device=a.device)[:a.shape[0]]
       g_scale = Tensor(inv_scale_u, device=a.device)
     else:
       assert grad_amax_state is not None, "fp8 matmul bwd needs either a mailbox entry or a grad_amax_state"
-      g_fp8, g_scale, _, store_effect = quantize_fp8_delayed(g_t, Tensor(grad_amax_state, device=a.device))
+      if getenv("FUSED_GRAD_QUANTIZE", 0):
+        g_fp8, g_scale, _, store_effect = quantize_fp8_delayed(g_t, Tensor(grad_amax_state, device=a.device))
+        assert g_fp8.uop.op is Ops.AFTER, f"expected AFTER, got {g_fp8.uop.op}"
+        g_fp8 = Tensor(g_fp8.uop.replace(src=g_fp8.uop.src + (store_effect,)), device=a.device)
+      else:
+        grad_amax_t = Tensor(grad_amax_state, device=a.device)
+        g_fp8, g_scale, new_grad_amax = quantize_fp8(g_t, amax_state=grad_amax_t)
+        store_effect = grad_amax_state.store(new_grad_amax.uop)
+        g_fp8 = Tensor(g_fp8.contiguous().uop.after(store_effect), device=a.device)
     # dgrad: uses g_scale * x_scale * w_scale
     grad_a = asm_gemm(g_fp8, b_t, x_scale=g_scale * s_x_t, w_scale=s_w_t)
     # wgrad: no w_scale
-    _one = Tensor(1.0, dtype=dtypes.float, device=a.device)
-    grad_b = asm_gemm(g_fp8.permute(2, 0, 1).reshape(g_t.shape[-1], -1), a_t.reshape(-1, a_t.shape[-1]), x_scale=g_scale * s_x_t, w_scale=_one)
-    # Attach the delayed-amax store effect (if any) to grad_a so realizing grads commits the amax update.
-    ret = (None, grad_a.uop.after(store_effect), grad_b.uop, None, None)
+    g_fp8_2d = g_fp8.reshape(-1, g_fp8.shape[-1])
+    if getenv("FAST_FP8_TRANSPOSE", 0) and g_fp8_2d.shape[0] % 64 == 0 and g_fp8_2d.shape[1] % 64 == 0:
+      from extra.llama_kernels.fp8_transpose import fast_fp8_transpose
+      g_fp8_T = fast_fp8_transpose(g_fp8_2d)
+    else:
+      g_fp8_T = g_fp8.permute(2, 0, 1).reshape(g_t.shape[-1], -1)
+    grad_b = asm_gemm(g_fp8_T, a_t.reshape(-1, a_t.shape[-1]), x_scale=g_scale * s_x_t)
+    ret = (None, grad_a.uop, grad_b.uop, None, None)
     if len(inputs) == 6: ret = ret + (None,)
     return ret
   else:
@@ -2774,11 +2788,11 @@ def asm_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, w_scale:Tensor|None=N
   if arch.startswith("gfx950") and getenv("USE_ASM", 1):
     # fp8 gemm computes a@b.T, kernel multiplies output by x_scale * w_scale before bf16 store
     if a.dtype == FP8_DTYPE:
-      _one = lambda: Tensor(1.0, dtype=dtypes.float, device=a.device)
-      xs = x_scale if x_scale is not None else _one()
-      ws = w_scale if w_scale is not None else _one()
+      scales = tuple(s for s in (x_scale, w_scale) if s is not None)
+      scale_mode = (1 if x_scale is not None else 0) | (2 if w_scale is not None else 0)
       extra = [grad_amax_state] if grad_amax_state is not None else []
-      out = Tensor.custom_kernel(out, a, b.T, xs, ws, *extra, fxn=functools.partial(custom_hk_fp8_gemm, dname=dname), grad_fxn=custom_gemm_bw)[0]
+      fxn = functools.partial(custom_hk_fp8_gemm, dname=dname, scale_mode=scale_mode)
+      out = Tensor.custom_kernel(out, a, b.T, *scales, *extra, fxn=fxn, grad_fxn=custom_gemm_bw)[0]
     else:
       out = Tensor.custom_kernel(out, a, b, fxn=functools.partial(custom_asm_gemm, dname=dname), grad_fxn=custom_gemm_bw)[0]
   else:

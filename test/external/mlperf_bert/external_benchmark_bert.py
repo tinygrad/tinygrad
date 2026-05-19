@@ -59,7 +59,7 @@ class BenchmarkBertTrain(unittest.TestCase):
     best_tm = None
     flops, mem_used, mem, kernels = None, None, None, None
     for _ in range(CNT):
-      with Context(TRACK_MATCH_STATS=0): inputs = [Tensor.randn(*shape, requires_grad=False).realize() for shape in input_shapes]
+      with Context(TRACK_MATCH_STATS=0): inputs = [Tensor.randn(*shape).realize() for shape in input_shapes]
       GlobalCounters.reset()
 
       st = time.perf_counter()

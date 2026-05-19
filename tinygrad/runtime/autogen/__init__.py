@@ -10,6 +10,9 @@ linux_headers_deb = "https://snapshot.debian.org/archive/debian/20260207T145350Z
 linux_headers_kern_deb = "https://snapshot.debian.org/archive/debian/20260207T145350Z/pool/main/l/linux/linux-headers-6.18.9+deb14-common_6.18.9-1_all.deb"
 liburing_src = "https://raw.githubusercontent.com/axboe/liburing/refs/tags/liburing-2.14/src/include/liburing.h"
 ggml_common_src = "https://raw.githubusercontent.com/ggml-org/ggml/d4fcfe88a8bcf5c9840be14be6c2fbf1f5b3b2db/src/ggml-common.h"
+cudart_src = "https://developer.download.nvidia.com/compute/cuda/redist/cuda_cudart/linux-x86_64/cuda_cudart-linux-x86_64-12.0.146-archive.tar.xz"
+nvrtc_src = "https://developer.download.nvidia.com/compute/cuda/redist/cuda_nvrtc/linux-x86_64/cuda_nvrtc-linux-x86_64-12.0.140-archive.tar.xz"
+opencl_src = "https://github.com/KhronosGroup/OpenCL-Headers/archive/2e30669d48718fd460f085b4b35b160dad51ce9d.tar.gz"
 macossdk = "/var/db/xcode_select_link/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk"
 
 llvm_lib = (
@@ -50,9 +53,9 @@ def __getattr__(nm):
       [i for i in system("dpkg -L libc6-dev").split() if 'sys/mman.h' in i or 'sys/syscall.h' in i] +
       ["/usr/include/string.h", "/usr/include/elf.h", "/usr/include/unistd.h", "/usr/include/asm-generic/mman-common.h"]), dll="'c'", errno=True)
     case "avcodec": return load("avcodec", ["{}/libavcodec/hevc/hevc.h", "{}/libavcodec/cbs_h265.h"], srcs=ffmpeg_src)
-    case "opencl": return load("opencl", ["/usr/include/CL/cl.h"], dll="'OpenCL'")
-    case "cuda": return load("cuda", ["/usr/include/cuda.h"], dll="'cuda'", args=["-D__CUDA_API_VERSION_INTERNAL"], macros=False)
-    case "nvrtc": return load("nvrtc", ["/usr/include/nvrtc.h"], dll="'nvrtc'", paths=nv_lib_path, prolog=["import sysconfig"])
+    case "opencl": return load("opencl", ["{}/CL/cl.h"], dll="'OpenCL'", args=["-I{}"], srcs=opencl_src)
+    case "cuda": return load("cuda", ["{}/include/cuda.h"], dll="'cuda'", args=["-D__CUDA_API_VERSION_INTERNAL"], srcs=cudart_src, macros=False)
+    case "nvrtc": return load("nvrtc", ["{}/include/nvrtc.h"], dll="'nvrtc'", paths=nv_lib_path, srcs=nvrtc_src, prolog=["import sysconfig"])
     case "nvjitlink": load("nvjitlink", [root/"extra/nvJitLink.h"], dll="'nvJitLink'", paths=nv_lib_path, prolog=["import sysconfig"])
     case "kfd": return load("kfd", [root/"extra/hip_gpu_driver/kfd_ioctl.h"])
     case "nv_570" | "nv_580":
@@ -78,7 +81,7 @@ def __getattr__(nm):
       *[f"{{}}/src/nvidia/inc/kernel/vgpu/{s}.h" for s in ["rpc_headers", "rpc_global_enums"]],
       "{}/src/common/uproc/os/common/include/libos_init_args.h", "{}/src/common/shared/msgq/inc/msgq/msgq_priv.h",
       "{}/src/nvidia/generated/g_rpc-structures.h", root/"extra/nv_gpu_driver/g_rpc-message-header.h", root/"extra/nv_gpu_driver/gsp_static_config.h",
-      root/"extra/nv_gpu_driver/vbios.h", root/"extra/nv_gpu_driver/pci_exp_table.h"
+      *[root/f"extra/nv_gpu_driver/{s}.h" for s in ["vbios", "pci_exp_table", "fw", "hs"]]
     ], args=[
       "-DRPC_MESSAGE_STRUCTURES", "-DRPC_STRUCTURES", "-include", "{}/src/common/sdk/nvidia/inc/nvtypes.h", "-I{}/src/nvidia/generated",
       "-I{}/src/common/inc", "-I{}/src/nvidia/inc", "-I{}/src/nvidia/interface/", "-I{}/src/nvidia/inc/kernel", "-I{}/src/nvidia/inc/libraries",
@@ -152,8 +155,10 @@ def __getattr__(nm):
           *[f"python3 src/compiler/{s}_h.py > gen/{s.split('/')[-1]}.h" for s in ["nir/nir_opcodes", "nir/nir_builder_opcodes"]],
           *[f"python3 src/compiler/nir/nir_{s}_h.py --outdir gen" for s in ["intrinsics", "intrinsics_indices"]]]), cwd=path, shell=True, check=True),
   srcs="https://gitlab.freedesktop.org/mesa/mesa/-/archive/mesa-25.2.7/mesa-25.2.7.tar.gz",
-  dll="([] if DEV.renderer == 'LVP' else ['tinymesa']) + ['tinymesa_cpu']",
-  prolog=["from tinygrad.helpers import DEV", "import gzip, base64"],
+  dll="([] if (_cpu:=DEV.renderer == 'LVP') else ['tinymesa']) + ['tinymesa_cpu'], " \
+      'emsg="not available on this platform" if WIN or (OSX and (platform.machine() != "arm64" or (_mv:=platform.mac_ver()[0][:2]) not in {"14","15","26"})) or (platform.system() == "Linux" and platform.machine() not in {"x86_64", "aarch64"}) else ' \
+      'f"run `sudo curl -fL https://github.com/sirhcm/tinymesa/releases/download/v1/libtinymesa{\'_cpu\'*_cpu}-mesa-25.2.7-{\'macos-\'+_mv if OSX else \'linux\'}-{\'amd64\' if ARCH_X86 else \'arm64\'}.{\'dylib\' if OSX else \'so\'} -o /usr/local/lib/libtinymesa{\'_cpu\'*_cpu}.{\'dylib\' if OSX else \'so\'}`"',
+  prolog=["from tinygrad.helpers import DEV, ARCH_X86, WIN, OSX", "import gzip, base64, platform"],
   epilog=lambda path: [system(f"{root}/extra/mesa/lvp_nir_options.sh {path}")])
     case "libclang":
       return load("libclang",

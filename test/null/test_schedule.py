@@ -474,7 +474,6 @@ class TestSchedule(unittest.TestCase):
     with Tensor.train():
       x = Tensor.empty((2, 16, 8, 8)).contiguous()
       bn = nn.BatchNorm2d(16)
-      bn.weight.requires_grad = bn.bias.requires_grad = x.requires_grad = True
       fw = bn(x).contiguous_backward().relu().contiguous()
       fw.sum().backward()
       # TODO: this is too many
@@ -808,7 +807,7 @@ class TestSchedule(unittest.TestCase):
 
   def test_softmax_backward(self):
     Tensor.manual_seed(0)
-    x = Tensor.randn(4, 12, 64, 64, requires_grad=True).realize()
+    x = Tensor.randn(4, 12, 64, 64).realize()
     x.softmax().sum().backward()
     run_linear(*check_schedule(x.grad, 4))
 
@@ -1217,17 +1216,17 @@ class TestFusionOp(unittest.TestCase):
 class TestBufferView(unittest.TestCase):
   def test_shrink_contiguous_is_buffer_view(self):
     # simple 1D shrink of a realized buffer should be BUFFER_VIEW, not a copy kernel
-    a = Tensor.arange(100).contiguous().realize()
+    a = Tensor.arange(100).clone().realize()
     b = a.shrink(((10, 50),)).contiguous()
     run_linear(*check_schedule(b, 0))
 
   def test_shrink_2d_contiguous_is_buffer_view(self):
-    a = Tensor.arange(100).reshape(10,10).contiguous().realize()
+    a = Tensor.arange(100).reshape(10,10).clone().realize()
     b = a.shrink(((1, 5),None)).contiguous()
     run_linear(*check_schedule(b, 0))
 
   def test_chained_shrink_is_buffer_view(self):
-    a = Tensor.arange(1000).contiguous().realize()
+    a = Tensor.arange(1000).clone().realize()
     b = a.shrink(((200, 800),)).shrink(((0, 300),)).reshape((30, 10)).shrink(((20, 25), (0, 10))).contiguous()
     run_linear(*check_schedule(b, 0))
 
@@ -1235,55 +1234,96 @@ class TestBufferView(unittest.TestCase):
     # indexing a non-shard axis of a realized sharded tensor should be BUFFER_VIEW on each device, not copy kernels
     # this is the flat_llama pattern: weight[layer_idx] where weight is (n_layers, out, dim) sharded on axis=1
     devices = ("NULL:1", "NULL:2")
-    a = Tensor.arange(8*4*10).reshape(8, 4, 10).contiguous().shard(devices, axis=1).realize()
+    a = Tensor.arange(8*4*10).reshape(8, 4, 10).clone().shard(devices, axis=1).realize()
     run_linear(*check_schedule(a[3].contiguous(), 0))
 
   def test_shrink_2d_non_shard_axis_multi(self):
     devices = ("NULL:1", "NULL:2")
-    a = Tensor.arange(6*4).reshape(6, 4).contiguous().shard(devices, axis=1).realize()
+    a = Tensor.arange(6*4).reshape(6, 4).clone().shard(devices, axis=1).realize()
     run_linear(*check_schedule(a.shrink(((1, 4), None)).contiguous(), 0))
 
   def test_shrink_shard_axis_0_multi(self):
     # shrinking a middle dim is not contiguous per shard, so this needs copy kernels
     devices = ("NULL:1", "NULL:2")
-    a = Tensor.arange(4*6*2).reshape(4, 6, 2).contiguous().shard(devices, axis=0).realize()
+    a = Tensor.arange(4*6*2).reshape(4, 6, 2).clone().shard(devices, axis=0).realize()
     run_linear(*check_schedule(a.shrink((None, (2, 5), None)).contiguous(), 2))
 
   def test_reshape_then_shrink_multi(self):
     devices = ("NULL:1", "NULL:2")
-    a = Tensor.arange(8*6).reshape(8, 6).contiguous().shard(devices, axis=1).realize()
+    a = Tensor.arange(8*6).reshape(8, 6).clone().shard(devices, axis=1).realize()
     run_linear(*check_schedule(a.reshape(4, 2, 6)[1].contiguous(), 0))
 
   def test_permute_then_shrink_multi(self):
     # permute makes per-shard view non-contiguous, needs copy kernels
     devices = ("NULL:1", "NULL:2")
-    a = Tensor.arange(4*6*2).reshape(4, 6, 2).contiguous().shard(devices, axis=1).realize()
+    a = Tensor.arange(4*6*2).reshape(4, 6, 2).clone().shard(devices, axis=1).realize()
     run_linear(*check_schedule(a.permute(1, 0, 2).shrink(((0, 6), (1, 3), None)).contiguous(), 2))
 
   def test_multi_buffer_view_4_devices(self):
     devices = tuple(f"NULL:{i}" for i in range(4))
-    a = Tensor.arange(8*12).reshape(8, 12).contiguous().shard(devices, axis=1).realize()
+    a = Tensor.arange(8*12).reshape(8, 12).clone().shard(devices, axis=1).realize()
     run_linear(*check_schedule(a[5].contiguous(), 0))
 
   def test_chained_shrink_multi(self):
     devices = ("NULL:1", "NULL:2")
-    a = Tensor.arange(10*8).reshape(10, 8).contiguous().shard(devices, axis=1).realize()
+    a = Tensor.arange(10*8).reshape(10, 8).clone().shard(devices, axis=1).realize()
     run_linear(*check_schedule(a.shrink(((2, 8), None)).shrink(((1, 4), None)).contiguous(), 0))
 
   # negative tests: these should NOT become BUFFER_VIEW (non-contiguous per shard)
   def test_expand_multi_not_buffer_view(self):
     devices = ("NULL:1", "NULL:2")
-    a = Tensor.arange(4*2).reshape(4, 1, 2).contiguous().shard(devices, axis=2).realize()
+    a = Tensor.arange(4*2).reshape(4, 1, 2).clone().shard(devices, axis=2).realize()
     run_linear(*check_schedule(a.expand(4, 3, 2).contiguous(), 2))
 
   def test_pad_multi_not_buffer_view(self):
     devices = ("NULL:1", "NULL:2")
-    a = Tensor.arange(4*2).reshape(4, 2).contiguous().shard(devices, axis=1).realize()
+    a = Tensor.arange(4*2).reshape(4, 2).clone().shard(devices, axis=1).realize()
     run_linear(*check_schedule(a.pad(((1, 1), (0, 0))).contiguous(), 2))
 
   def test_flip_multi_not_buffer_view(self):
     devices = ("NULL:1", "NULL:2")
-    a = Tensor.arange(4*2).reshape(4, 2).contiguous().shard(devices, axis=1).realize()
+    a = Tensor.arange(4*2).reshape(4, 2).clone().shard(devices, axis=1).realize()
+    run_linear(*check_schedule(a.flip(0).contiguous(), 2))
+
+  def test_replicated_reshape_is_buffer_view(self):
+    devices = ("NULL:1", "NULL:2")
+    a = Tensor.arange(24).clone().to(devices).realize()
+    run_linear(*check_schedule(a.reshape(4, 6).contiguous(), 0))
+
+  def test_replicated_shrink_is_buffer_view(self):
+    # DP pattern: replicated weight[layer_idx]
+    devices = ("NULL:1", "NULL:2")
+    a = Tensor.arange(8*10).reshape(8, 10).clone().to(devices).realize()
+    run_linear(*check_schedule(a[3].contiguous(), 0))
+
+  def test_replicated_chained_mops_is_buffer_view(self):
+    devices = ("NULL:1", "NULL:2")
+    a = Tensor.arange(100).clone().to(devices).realize()
+    run_linear(*check_schedule(a.reshape(10, 10).shrink(((2, 7), None)).contiguous(), 0))
+
+  def test_replicated_shard_none_is_buffer_view(self):
+    devices = ("NULL:1", "NULL:2")
+    a = Tensor.arange(24).clone().shard(devices, axis=None).realize()
+    run_linear(*check_schedule(a.reshape(4, 6).contiguous(), 0))
+
+  def test_replicated_4_devices_is_buffer_view(self):
+    devices = tuple(f"NULL:{i}" for i in range(4))
+    a = Tensor.arange(8*10).reshape(8, 10).clone().to(devices).realize()
+    run_linear(*check_schedule(a[3].contiguous(), 0))
+
+  def test_replicated_expand_not_buffer_view(self):
+    devices = ("NULL:1", "NULL:2")
+    a = Tensor.arange(12).reshape(4, 1, 3).clone().to(devices).realize()
+    run_linear(*check_schedule(a.expand(4, 3, 3).contiguous(), 2))
+
+  def test_replicated_permute_not_buffer_view(self):
+    devices = ("NULL:1", "NULL:2")
+    a = Tensor.arange(24).reshape(4, 6).clone().to(devices).realize()
+    run_linear(*check_schedule(a.permute(1, 0).contiguous(), 2))
+
+  def test_replicated_flip_not_buffer_view(self):
+    devices = ("NULL:1", "NULL:2")
+    a = Tensor.arange(24).reshape(4, 6).clone().to(devices).realize()
     run_linear(*check_schedule(a.flip(0).contiguous(), 2))
 
 class TestInvalidTensor(unittest.TestCase):

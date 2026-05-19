@@ -91,7 +91,6 @@ class TestEmptyTensorEdgeCases(unittest.TestCase):
     with self.assertRaises(RuntimeError):
       Tensor([]).argmax()
 
-  @unittest.expectedFailure
   def test_masked_select_empty(self):
     # Masked select on empty tensors should return an empty tensor.
     torch_out = torch.tensor([], dtype=torch.float32).masked_select(torch.tensor([], dtype=torch.bool))
@@ -128,19 +127,19 @@ class TestInputValidation(unittest.TestCase):
     with self.assertRaises(ValueError):
       torch.optim.AdamW([torch.tensor([1.], requires_grad=True)], lr=0.1, weight_decay=-0.1)
     with self.assertRaises(ValueError):
-      nn.optim.AdamW([Tensor([1.], requires_grad=True)], lr=0.1, weight_decay=-0.1)
+      nn.optim.AdamW([Tensor([1.])], lr=0.1, weight_decay=-0.1)
 
   def test_negative_lr(self):
     with self.assertRaises(ValueError):
       torch.optim.SGD([torch.tensor([1.], requires_grad=True)], lr=-0.1)
     with self.assertRaises(ValueError):
-      nn.optim.SGD([Tensor([1.], requires_grad=True)], lr=-0.1)
+      nn.optim.SGD([Tensor([1.])], lr=-0.1)
 
   def test_negative_momentum(self):
     with self.assertRaises(ValueError):
       torch.optim.SGD([torch.tensor([1.], requires_grad=True)], lr=0.1, momentum=-0.1)
     with self.assertRaises(ValueError):
-      nn.optim.SGD([Tensor([1.], requires_grad=True)], lr=0.1, momentum=-0.1)
+      nn.optim.SGD([Tensor([1.])], lr=0.1, momentum=-0.1)
 
 class TestZeroFolding(unittest.TestCase):
   # we don't need more of these

@@ -17,10 +17,10 @@ def tag_uop(ctx:AllocCtx, x:UOp):
 
 def disk_copy_is_buffer(ctx:AllocCtx, u:UOp):
   # copies to disk are replaced with the disk buffer
-  to_disk = isinstance(u._device, str) and u._device.startswith(("DISK", "TINYFS"))
+  to_disk = isinstance(u.device, str) and u.device.startswith(("DISK", "TINYFS"))
   if to_disk: ctx.buffer_map[u] = u.empty_like()
   # all copies from disk/numpy are realized into a real buffer
-  from_creation = isinstance(u.src[0]._device, str) and any(u.src[0]._device.startswith(x) for x in ["NPY", "DISK", "PYTHON", "TINYFS"])
+  from_creation = isinstance(u.src[0].device, str) and any(u.src[0].device.startswith(x) for x in ["NPY", "DISK", "PYTHON", "TINYFS"])
   if from_creation: return tag_uop(ctx, u)
 
 def apply_after(ctx:AllocCtx, u:UOp):
@@ -42,11 +42,11 @@ add_tags = PatternMatcher([
 
 def replace_contig_with_store_after(u:UOp):
   # can't allocate a buffer without a device (e.g., inside a CALL function body with only PARAMs)
-  if u._device is None: return None
+  if u.device is None: return None
   # if size is 0, remove the contig
   if 0 in u.shape: return u.src[0]
   # no real contig for DISK/TINYFS tensors, they are left alone
-  if isinstance(u._device, str) and u._device.startswith(("DISK", "TINYFS")): return u.rtag(None)
+  if isinstance(u.device, str) and u.device.startswith(("DISK", "TINYFS")): return u.rtag(None)
   buf = u.empty_like()
   return buf.after(buf.store(u.src[0])).rtag(u.tag)
 
@@ -77,6 +77,12 @@ def contiguous_mops_to_view(c:UOp, src:UOp):
     if not hasattr(Device[c.device].allocator, "_offset"): return None
   elif not all(hasattr(Device[d].allocator, "_offset") for d in c.device): return None
 
+  x = src
+  while x.op in GroupOp.Movement: x = x.src[0]
+  # NOTE: this contiguous is removed because this BUFFER_VIEW/RESHAPE has_buffer_identity
+  if x.op is not Ops.MULTI and (view := _make_buffer_view(src)) is not None:
+    return view.contiguous(tag=c.tag)
+
   # for MULTI tensors, use multi_pm to resolve per-shard movement ops, then create BUFFER_VIEW on the resolved result
   if not isinstance(c.device, str):
     from tinygrad.schedule.multi import multi_pm
@@ -85,9 +91,7 @@ def contiguous_mops_to_view(c:UOp, src:UOp):
     if (view := _make_buffer_view(resolved.src[0])) is None: return None
     return view.multi(resolved.arg).contiguous(tag=c.tag)
 
-  # NOTE: this contiguous is removed because this BUFFER_VIEW/RESHAPE has_buffer_identity
-  if (view := _make_buffer_view(src)) is None: return None
-  return view.contiguous(tag=c.tag)
+  return None
 
 def transform_precompiled_call(c:UOp) -> UOp|None:
   if not c.arg.precompile: return None
@@ -99,7 +103,21 @@ def transform_precompiled_call(c:UOp) -> UOp|None:
   resolved = [c.gettuple(i) for i in range(len(srcs))]
   outs = tuple(r.empty_like() for r in resolved)
   targets = [o.param_like(len(c.src)-1+i).shrink_to(s.shape) for i,(o,s) in enumerate(zip(outs, srcs))]
-  fxn = UOp.sink(*[t.after(t.store(s)) for t,s in zip(targets, srcs)])
+
+  subs:dict[UOp, UOp] = {}
+  items:list[UOp] = []
+  for s, t in zip(srcs, targets):
+    after_deps:list[UOp] = []
+    while s.op is Ops.AFTER:
+      after_deps.extend(s.src[1:])
+      s = s.src[0]
+    base = s.base
+    if base.op in {Ops.CONTIGUOUS, Ops.BUFFER} and base.shape == t.shape and base not in subs:
+      subs[base] = t.after(t.store(base.src[0])) if base.op is Ops.CONTIGUOUS else t
+      items.append(s.after(*after_deps) if after_deps else s)
+    else:
+      items.append(t.after(t.store(s), *after_deps))
+  fxn = UOp.sink(*(x.substitute(subs) for x in items))
 
   # body switches from TUPLE to SINK, so the node becomes an opaque CALL (not FUNCTION)
   new_call = UOp(Ops.CALL, c.dtype, (fxn, *input_buffers, *outs), c.arg)
@@ -152,7 +170,7 @@ def finalize_after(ctx:AllocCtx, x:UOp):
 
 def replace_input_buffer(ctx:AllocCtx, b:UOp):
   ctx.replacements.append(b)
-  return UOp.param(len(ctx.replacements)-1, b.dtype, b.shape, b._device,
+  return UOp.param(len(ctx.replacements)-1, b.dtype, b.shape, b.device,
                    b._min_max if b.op is Ops.BIND else None, b.src[0].arg[0] if b.op is Ops.BIND else None)
 
 pm_finalize_call = PatternMatcher([

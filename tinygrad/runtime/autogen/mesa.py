@@ -4,9 +4,9 @@ import ctypes
 from typing import Literal, TypeAlias
 from tinygrad.runtime.support.c import _IO, _IOW, _IOR, _IOWR
 from tinygrad.runtime.support import c
-from tinygrad.helpers import DEV
-import gzip, base64
-dll = c.DLL('mesa', ([] if DEV.renderer == 'LVP' else ['tinymesa']) + ['tinymesa_cpu'])
+from tinygrad.helpers import DEV, ARCH_X86, WIN, OSX
+import gzip, base64, platform
+dll = c.DLL('mesa', ([] if (_cpu:=DEV.renderer == 'LVP') else ['tinymesa']) + ['tinymesa_cpu'], emsg="not available on this platform" if WIN or (OSX and (platform.machine() != "arm64" or (_mv:=platform.mac_ver()[0][:2]) not in {"14","15","26"})) or (platform.system() == "Linux" and platform.machine() not in {"x86_64", "aarch64"}) else f"run `sudo curl -fL https://github.com/sirhcm/tinymesa/releases/download/v1/libtinymesa{'_cpu'*_cpu}-mesa-25.2.7-{'macos-'+_mv if OSX else 'linux'}-{'amd64' if ARCH_X86 else 'arm64'}.{'dylib' if OSX else 'so'} -o /usr/local/lib/libtinymesa{'_cpu'*_cpu}.{'dylib' if OSX else 'so'}`")
 class struct_u_printf_info(c.Struct): pass
 u_printf_info: TypeAlias = struct_u_printf_info
 uint32_t: TypeAlias = ctypes.c_uint32

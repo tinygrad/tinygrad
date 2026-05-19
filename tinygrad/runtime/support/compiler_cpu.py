@@ -6,8 +6,8 @@ from tinygrad.runtime.autogen import llvm
 
 class ClangJITCompiler(Compiler):
   def __init__(self, arch:list[str], cachekey="compile_clang_jit"):
+    assert len(arch) >= 2, f"invalid arch string: {','.join(arch)!r}, expected '<arch>,<cpu>,[<feats>]' (eg. 'x86_64,znver2')"
     self.arch, cpu, *feats = arch
-    assert self.arch and cpu, f"invalid arch string: {arch!r}, expected '<arch>,<cpu>,[<feats>]' (eg. 'x86_64,znver2')"
     match self.arch:
       case "x86_64": self.args = [f"-march={cpu}"] + [f"-mno{f}" if f.startswith("-") else f"-m{f}" for f in feats]
       # on arm march means "runs on this arch and superset" instead of "optimize for this arch". x86 march == arm mcpu
@@ -92,8 +92,8 @@ class LLVMCompiler(Compiler):
 
 class CPULLVMCompiler(LLVMCompiler):
   def __init__(self, arch:list[str], cache_key=None):
+    assert len(arch) >= 2, f"invalid arch string: {','.join(arch)!r}, expected '<arch>,<cpu>,[<feats>]' (eg. 'x86_64,znver2')"
     self.arch, cpu, *feats = arch
-    assert self.arch and cpu, f"invalid arch string: {arch!r}, expected '<arch>,<cpu>,[<feats>]' (eg. 'x86_64,znver2')"
     featstr = ','.join(f if f.startswith('-') else '+'+f for f in feats)
     if cpu == "native":
       cpu = ctypes.string_at(llvm.LLVMGetHostCPUName()).decode()

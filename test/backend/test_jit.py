@@ -4,12 +4,13 @@ import numpy as np
 
 from hypothesis import given, settings, strategies as strat
 from test.helpers import assert_jit_cache_len, call_is_graph, not_support_multi_device, needs_second_gpu
+from tinygrad import Variable
 from tinygrad.tensor import Tensor
 from tinygrad.engine.jit import TinyJit, JitError, graph_class
 from tinygrad.device import Device
 from tinygrad.helpers import Context, JIT, DEV, GlobalCounters
 from tinygrad.dtype import dtypes
-from tinygrad.uop.ops import Ops
+from tinygrad.uop.ops import Ops, UOp
 from extra.models.unet import ResBlock
 
 def _simple_test(add, extract=lambda x: x, N=10):
@@ -38,6 +39,19 @@ class TestJit(unittest.TestCase):
     @TinyJit
     def add(a, b): return (a+b).realize()
     _simple_test(add)
+
+  @unittest.skipUnless(Device.DEFAULT == "CPU", "core_id is a CPU runtimevar")
+  def test_hcq_core_id_runtimevar_merge(self):
+    N = 262144
+    @TinyJit
+    def f(x, st):
+      y = (x + 1).contiguous().realize()
+      z = x.shrink(((st, st + N),)).contiguous().realize()
+      return y, z
+    x = Tensor.arange(2*N).contiguous().realize()
+    for _ in range(3): y, z = f(x, Variable("a", 0, N).bind(0))
+    self.assertEqual(y.shape, (2*N,))
+    self.assertEqual(z.shape, (N,))
 
   def test_jitbeam_triggers_beam(self):
     from unittest.mock import patch
@@ -518,6 +532,12 @@ class TestJit(unittest.TestCase):
     with self.assertRaises(JitError):
       f(Tensor(2.0)).item()
     # self.assertEqual(f(Tensor([2.0])).item(), 1.0) # TODO: wrong output, should be 3.0. currently depends on empty value
+
+  def test_jit_const_input(self):
+    @TinyJit
+    def f(x:Tensor) -> Tensor: return (x + 1).realize()
+    with self.assertRaises(JitError):
+      f(Tensor(UOp.const(dtypes.float, 2.0))).item()
 
   def test_jit_init_empty_alt(self):
     @TinyJit

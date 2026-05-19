@@ -21,7 +21,7 @@ class GradAccClipAdamW(Optimizer):
   def __init__(self, params:list[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-6, weight_decay=0.0, grad_acc=1, clip_norm=1.0, device=None, fused=FUSE_OPTIM):
     super().__init__(params, lr, device, fused)
     self.b1, self.b2, self.eps, self.wd = b1, b2, eps, weight_decay
-    self.b1_t, self.b2_t = (Tensor.ones((1,), dtype=dtypes.float32, device=self.device, requires_grad=False) for _ in [b1, b2])
+    self.b1_t, self.b2_t = (Tensor.ones((1,), dtype=dtypes.float32, device=self.device) for _ in [b1, b2])
     self.m = self._new_optim_param()
     self.v = self._new_optim_param()
     self.grad_acc, self.clip_norm = grad_acc, clip_norm
@@ -81,7 +81,7 @@ class GradAccClipAdamW(Optimizer):
     if STOCHASTIC_ROUND and t.dtype == dtypes.bfloat16: return stochastic_round_bf16(new_w)
     if t.dtype in dtypes.fp8s:
       from examples.mlperf.models.flat_llama import FP8_MAX
-      amax = new_w.float().abs().flatten(1).max(1).detach()  # per-layer amax for (n_layers, out, in)
+      amax = new_w.float().abs().max(axis=tuple(range(1, new_w.ndim))).detach()  # per-layer amax for (n_layers, out, in)
       scale = FP8_MAX / (amax + 1e-8)
       fp8_w = (new_w * scale.reshape(-1, *([1]*(new_w.ndim-1)))).clamp(-FP8_MAX, FP8_MAX).cast(t.dtype)
       if hasattr(t, '_inv_scale'):

@@ -2,13 +2,13 @@
 import unittest
 import numpy as np
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import Timing, Context
+from tinygrad.helpers import Timing, Context, cdiv
 from tinygrad.dtype import dtypes, ConstFloat  # noqa: F401
 from tinygrad.device import Device
 from tinygrad.uop.ops import Ops, UOp, UPat, exec_alu
-from tinygrad.uop.spec import shared_spec
+from tinygrad.uop.spec import spec_shared
 from tinygrad.uop.symbolic import sym
-from test.helpers import to_uops_list
+from test.helpers import eval_uop, to_uops_list
 
 class TestSafeCast(unittest.TestCase):
   def test_cast_folds(self):
@@ -41,10 +41,24 @@ class TestExecALU(unittest.TestCase):
     self.assertEqual(exec_alu(Ops.SQRT, dtypes.float, (0.0,)), 0.0)
 
   def test_div(self):
-    self.assertEqual(exec_alu(Ops.IDIV, dtypes.int8, (8, 2)), 4)
-    self.assertEqual(exec_alu(Ops.IDIV, dtypes.int8, (7, 3)), 2)
-    self.assertEqual(exec_alu(Ops.IDIV, dtypes.int8, (7, -3)), -2)
-    self.assertEqual(exec_alu(Ops.IDIV, dtypes.int8, (-50, 6)), -8)
+    self.assertEqual(exec_alu(Ops.CDIV, dtypes.int8, (8, 2)), 4)
+    self.assertEqual(exec_alu(Ops.CDIV, dtypes.int8, (7, 3)), 2)
+    self.assertEqual(exec_alu(Ops.CDIV, dtypes.int8, (7, -3)), -2)
+    self.assertEqual(exec_alu(Ops.CDIV, dtypes.int8, (-50, 6)), -8)
+
+  def test_floordiv(self):
+    self.assertEqual(exec_alu(Ops.FLOORDIV, dtypes.int8, (8, 2)), 4)
+    self.assertEqual(exec_alu(Ops.FLOORDIV, dtypes.int8, (7, 3)), 2)
+    self.assertEqual(exec_alu(Ops.FLOORDIV, dtypes.int8, (7, -3)), -3)
+    self.assertEqual(exec_alu(Ops.FLOORDIV, dtypes.int8, (-7, 3)), -3)
+    self.assertEqual(exec_alu(Ops.FLOORDIV, dtypes.int8, (-50, 6)), -9)
+
+  def test_floormod(self):
+    self.assertEqual(exec_alu(Ops.FLOORMOD, dtypes.int8, (8, 2)), 0)
+    self.assertEqual(exec_alu(Ops.FLOORMOD, dtypes.int8, (7, 3)), 1)
+    self.assertEqual(exec_alu(Ops.FLOORMOD, dtypes.int8, (7, -3)), -2)
+    self.assertEqual(exec_alu(Ops.FLOORMOD, dtypes.int8, (-7, 3)), 2)
+    self.assertEqual(exec_alu(Ops.FLOORMOD, dtypes.int8, (-50, 6)), 4)
 
     np.testing.assert_allclose(exec_alu(Ops.MUL, dtypes.float32, (7.0, exec_alu(Ops.RECIPROCAL, dtypes.float32, (3.0,)))), 2+(1.0/3.0))
     np.testing.assert_allclose(exec_alu(Ops.MUL, dtypes.float32, (7.0, exec_alu(Ops.RECIPROCAL, dtypes.float32, (-3.0,)))), -2-(1.0/3.0))
@@ -135,8 +149,8 @@ class TestGatedStoreRewrite(unittest.TestCase):
     gidx0 = UOp(Ops.SPECIAL, dtypes.int, (UOp.const(dtypes.int, 4),), 'gidx0')
     idx = gidx0*UOp.const(dtypes.int, 2)
     gate = gidx0<UOp.const(dtypes.int, 1)
-    idx0 = UOp(Ops.INDEX, dtypes.float.ptr(), (gmem0, idx, gate))
-    idx1 = UOp(Ops.INDEX, dtypes.float.ptr(), (gmem1, idx, gate))
+    idx0 = UOp(Ops.INDEX, dtypes.float.ptr(), (gmem0, idx.valid(gate)))
+    idx1 = UOp(Ops.INDEX, dtypes.float.ptr(), (gmem1, idx.valid(gate)))
     val = UOp.const(dtypes.float, 42.0)
     stores = [UOp.store(idx0, val), UOp.store(idx1, val)]
     uops = to_uops_list(stores)
@@ -156,32 +170,64 @@ class TestFastIdiv(unittest.TestCase):
       g = UOp(Ops.PARAM, dt.ptr(), (), 0)
       c = UOp.const(dt, 2)
       l = g.index(c)
-      a = UOp(Ops.IDIV, dt, (l, c))
+      a = UOp(Ops.CDIV, dt, (l, c))
       uops = to_uops_list([a], ren=Device[Device.DEFAULT].renderer)
       Device[Device.DEFAULT].renderer.render(uops)
       ops = [x.op for x in uops]
       self.assertIn(Ops.SHR, ops, f"For dtype={dt} divison by power of two did not simplify to shift")
-      self.assertNotIn(Ops.IDIV, ops, f"For dtype={dt} divison by power of two did not simplify to shift")
+      self.assertNotIn(Ops.CDIV, ops, f"For dtype={dt} divison by power of two did not simplify to shift")
 
+  def test_floormod_power_of_two(self):
+    # FLOORMOD by a power of two lowers to AND (correct floor mod for any sign in two's complement)
+    for dt in (dtypes.int32, dtypes.uint32):
+      g = UOp(Ops.PARAM, dt.ptr(), (), 0)
+      c = UOp.const(dt, 8)
+      a = UOp(Ops.FLOORMOD, dt, (g.index(c), c))
+      uops = to_uops_list([a], ren=Device[Device.DEFAULT].renderer)
+      ops = [x.op for x in uops]
+      self.assertIn(Ops.AND, ops, f"For dtype={dt} FLOORMOD by pow2 did not simplify to AND")
+      self.assertNotIn(Ops.CMOD, ops, f"For dtype={dt} FLOORMOD by pow2 left a MOD")
+      self.assertNotIn(Ops.FLOORMOD, ops, f"For dtype={dt} FLOORMOD survived past late rewrite")
+
+  def test_floordiv_power_of_two_uint(self):
+    # uint FLOORDIV by a power of two lowers to a shift, leaving no IDIV/FLOORDIV in the kernel
+    for dt in (dtypes.uint32, dtypes.uint64):
+      g = UOp(Ops.PARAM, dt.ptr(), (), 0)
+      c = UOp.const(dt, 2)
+      a = UOp(Ops.FLOORDIV, dt, (g.index(c), c))
+      uops = to_uops_list([a], ren=Device[Device.DEFAULT].renderer)
+      ops = [x.op for x in uops]
+      self.assertIn(Ops.SHR, ops, f"For dtype={dt} FLOORDIV by power of two did not simplify to shift")
+      self.assertNotIn(Ops.CDIV, ops, f"For dtype={dt} FLOORDIV by power of two did not simplify to shift")
+      self.assertNotIn(Ops.FLOORDIV, ops, f"For dtype={dt} FLOORDIV survived past late rewrite")
+
+  @Context(DISABLE_FAST_IDIV=0)
   @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU doesn't support long")
   def test_fast_idiv_and_mod(self):
     g = UOp(Ops.PARAM, dtypes.uint32.ptr(), (), 0)
     c = UOp.const(dtypes.uint, 3)
     l = g.index(c)
-    a = UOp(Ops.IDIV, dtypes.uint, (l, c))
+    a = UOp(Ops.CDIV, dtypes.uint, (l, c))
     uops = to_uops_list([a], ren=Device[Device.DEFAULT].renderer)
     Device[Device.DEFAULT].renderer.render(uops)
     ops = [x.op for x in uops]
     self.assertIn(Ops.SHR, ops)
-    self.assertNotIn(Ops.IDIV, ops)
+    self.assertNotIn(Ops.CDIV, ops)
 
-    b = UOp(Ops.MOD, dtypes.uint, (l, c))
+    b = UOp(Ops.CMOD, dtypes.uint, (l, c))
     uops = to_uops_list([b], ren=Device[Device.DEFAULT].renderer)
     Device[Device.DEFAULT].renderer.render(uops)
     ops = [x.op for x in uops]
     self.assertIn(Ops.SHR, ops)
-    self.assertNotIn(Ops.MOD, ops)
+    self.assertNotIn(Ops.CMOD, ops)
 
+  @Context(DISABLE_FAST_IDIV=0)
+  def test_fast_idiv_bounded_numerator_zero(self):
+    x = UOp.variable("x", 0, 1, dtype=dtypes.int32)
+    for val in range(2):
+      self.assertEqual(eval_uop(x.alu(Ops.CDIV, x.const_like(3)), vals=(val,)), cdiv(val, 3))
+
+  @Context(DISABLE_FAST_IDIV=0)
   def test_fast_idiv_remove_powers_of_two(self):
     ridx = UOp.range(2**20, 0)
     uops = to_uops_list([ridx//(7*64)], ren=Device[Device.DEFAULT].renderer)
@@ -196,23 +242,23 @@ class TestFastIdiv(unittest.TestCase):
     g = UOp(Ops.PARAM, dtypes.uint32.ptr(), (), 0)
     c = UOp.const(dtypes.uint, 7)
     l = UOp(Ops.LOAD, dtypes.uint, (g.index(c),))
-    a = UOp(Ops.IDIV, dtypes.uint, (l, c))
+    a = UOp(Ops.CDIV, dtypes.uint, (l, c))
     uops = to_uops_list([a], ren=Device[Device.DEFAULT].renderer)
     Device[Device.DEFAULT].renderer.render(uops)
     ops = [x.op for x in uops]
     self.assertIn(Ops.SHR, ops)
-    self.assertNotIn(Ops.IDIV, ops)
+    self.assertNotIn(Ops.CDIV, ops)
 
   def test_disable_fast_idiv(self):
     g = UOp(Ops.PARAM, dtypes.uint32.ptr(), (), 0)
     c = UOp.const(dtypes.uint, 3)
     l = g.index(c)
-    a = UOp(Ops.IDIV, dtypes.uint, (l, c))
+    a = UOp(Ops.CDIV, dtypes.uint, (l, c))
     with Context(DISABLE_FAST_IDIV=1):
       uops = to_uops_list([a], ren=Device[Device.DEFAULT].renderer)
     ops = [x.op for x in uops]
     self.assertNotIn(Ops.SHR, ops)
-    self.assertIn(Ops.IDIV, ops)
+    self.assertIn(Ops.CDIV, ops)
 
 class TestUOpMethod(unittest.TestCase):
   @unittest.skip("uops lt no longer ordered")
@@ -280,7 +326,7 @@ class TestUOpStr(unittest.TestCase):
 class TestUPatHelpers(unittest.TestCase):
   def test_location(self):
     self.assertEqual(sym.patterns[-1][0].location[0].replace("\\", "/").split("/")[-1], "symbolic.py")
-    self.assertEqual(shared_spec.patterns[0][0].location[0].replace("\\", "/").split("/")[-1], "spec.py")
+    self.assertEqual(spec_shared.patterns[0][0].location[0].replace("\\", "/").split("/")[-1], "spec.py")
     test_upat = UPat(Ops.CONST, dtypes.bool)
     self.assertEqual(test_upat.location[0].replace("\\", "/").split("/")[-1], __file__.replace("\\", "/").split("/")[-1])
     test_upat_named = test_upat.named("test_name")

@@ -99,7 +99,8 @@ arc_families = ['alloc', 'copy', 'mutableCopy', 'new']
 
 def normalize(a): return ("_" + n if keyword.iskeyword(n:=nm(a)) else n)
 
-def gen(name, files, dll="", args=[], prolog=[], rules=[], epilog=[], recsym=False, errno=False, anon_names={}, types={}, macros=True, paths=[]):
+def gen(name, files, dll="", args=[], prolog=[], rules=[], epilog=[], recsym=False, errno=False, anon_names={}, types={}, macros=True, paths=[],
+        patterns=[]):
   extras, lines, anoncnt, types, objc, fns = [], [], itertools.count().__next__, {k:(v,True) for k,v in types.items()}, False, set()
 
   # ctypes automatically "unboxes" simple types
@@ -227,6 +228,7 @@ def gen(name, files, dll="", args=[], prolog=[], rules=[], epilog=[], recsym=Fal
     while q:
       c = q.pop()
       if loc_file(loc(c)) != str(f) and (not recsym or c.kind not in (clang.CXCursor_FunctionDecl,)): continue
+      if patterns and not any(re.match(p, nm(c)) for p in patterns): continue
       rollback = lines, types
       try:
         match c.kind:

@@ -37,12 +37,8 @@ class MetalDevice(Compiled):
     self.timeline_signal = self.sysdevice.newSharedEvent()
     self.timeline_value = 0
 
-    # probe GPU family: Apple9=M3/M4, Apple8=M2, Apple7=M1, etc. values are 1000+N.
-    self.gpu_family = 0
-    for i in range(15, 0, -1):
-      if self.sysdevice.supportsFamily(1000 + i):
-        self.gpu_family = i
-        break
+    # https://developer.apple.com/documentation/metal/mtlgpufamily
+    def check_family(f): return next(filter(self.sysdevice.supportsFamily, reversed([v for v, nm in metal.enum_MTLGPUFamily.items() if f in nm])), 0)
 
     Compiled.profile_events += [ProfileDeviceEvent(device)]
 
@@ -51,7 +47,7 @@ class MetalDevice(Compiled):
     # This can be reproduced locally with any virtualization software (like utm) that can create macOS VMs with apple's own virtualization framework.
     super().__init__(device, MetalAllocator(self), [MetalRenderer],
       functools.partial(MetalProgram, self), MetalGraph if 'virtual' not in from_ns_str(self.sysdevice.name()).lower() else None,
-      arch=platform.machine())
+      arch=metal.enum_MTLGPUFamily[check_family("Apple") or check_family("Mac")][12:])
 
   def synchronize(self):
     for cbuf in self.mtl_buffers_in_flight:
@@ -147,10 +143,10 @@ class MetalProgram:
     encoder.endEncoding()
     command_buffer.setLabel(to_ns_str(self.name)) # TODO: is this always needed?
     command_buffer.commit()
+    self.dev.mtl_buffers_in_flight.append(command_buffer)
     if wait:
       wait_check(command_buffer)
       return command_buffer.GPUEndTime() - command_buffer.GPUStartTime()
-    self.dev.mtl_buffers_in_flight.append(command_buffer)
 
 class MetalBuffer:
   def __init__(self, buf:metal.MTLBuffer, size:int, offset=0): self.buf, self.size, self.offset = buf, size, offset
