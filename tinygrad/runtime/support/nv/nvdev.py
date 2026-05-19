@@ -147,6 +147,9 @@ class NVDev:
 
   def _alloc_boot_mem(self, size:int, data:bytes|None=None, contiguous:bool=False, sysmem:bool|None=None) -> tuple[MMIOInterface, int, list[int]]:
     sz = round_up(size, 0x1000)
+    # Small-BAR systems can't safely DMA with target=FB from BAR1-windowed VRAM (the host-side PCIe paddr
+    # is not what the GPU's FB controller sees). Force sysmem for boot allocations in that case.
+    if sysmem is False and not self.large_bar: sysmem = True
     if sysmem is True or (sysmem is None and not self.large_bar): view, paddrs = self.pci_dev.alloc_sysmem(size, 0, contiguous=contiguous)
     else:
       paddr = self.mm.palloc(sz, boot=False)
