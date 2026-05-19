@@ -18,7 +18,7 @@ class TestMovedConstFolding(unittest.TestCase):
   def test_contiguous_deviceless_const(self):
     t = Tensor(UOp.const(dtypes.float, 2.0)).contiguous()
     self.assertIs(t.uop.op, Ops.CONST)
-    self.assertIsNone(t.uop._device)
+    self.assertIsNone(t.uop.device)
 
   def test_add_shrunk_zero(self):
     _check_ast_count(0, Tensor([1.0, 2, 3, 4]) + Tensor.zeros(6).shrink(((1, 5),)))

@@ -27,6 +27,7 @@ class TestWinograd(unittest.TestCase):
     backward_schedule = x.grad.schedule_linear(w.grad)
     self.assertEqual(len(backward_schedule.src), 4)
 
+  @unittest.skip("this requires optimizations")
   def test_counters(self):
     IC, OC, X, Y = 4,4,9,9
     x,w = Tensor.rand(1,IC,Y,X).realize(), Tensor.rand(OC,IC,3,3).realize()

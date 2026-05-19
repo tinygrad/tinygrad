@@ -935,7 +935,8 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     print(t.gather(1, Tensor([[0, 0], [1, 0]])).numpy())
     ```
     """
-    if index.device != self.device: raise RuntimeError(f"expected index and self on the same device, {index.device=}, {self.device=}")
+    if index.device is not None and self.device is not None and index.device != self.device:
+      raise RuntimeError(f"expected index and self on the same device, {index.device=}, {self.device=}")
     if index.ndim != self.ndim: raise RuntimeError(f"self.ndim must equal index.ndim, {self.ndim=}, {index.ndim=}")
     dim = self._resolve_dim(dim)
     assert all(s >= i for d,(s,i) in enumerate(zip(self.shape, index.shape)) if d != dim), "requires self.shape[d] >= index.shape[d] for all d != dim"
@@ -975,8 +976,10 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     return x.cast(self.dtype)
 
   def _pre_scatter(self, dim:int, index:Self, src:Self) -> tuple[Self, Self]:
-    if index.device != self.device: raise RuntimeError(f"expected index and self on the same device, {index.device=}, {self.device=}")
-    if src.device != self.device: raise RuntimeError(f"expected src and self on the same device, {src.device=}, {self.device=}")
+    if index.device is not None and self.device is not None and index.device != self.device:
+      raise RuntimeError(f"expected index and self on the same device, {index.device=}, {self.device=}")
+    if src.device is not None and self.device is not None and src.device != self.device:
+      raise RuntimeError(f"expected src and self on the same device, {src.device=}, {self.device=}")
     dim = self._resolve_dim(dim)
     assert index.ndim == self.ndim == src.ndim, f"self.ndim, index.ndim and src.ndim must all equal, {self.ndim=} {index.ndim=} {src.ndim=}"
     assert all((d == dim or self_ >= index_) and src_ >= index_ for d,(self_,index_,src_) in enumerate(zip(self.shape, index.shape, src.shape))), \
@@ -1393,7 +1396,8 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     ```
     """
     assert 0.0 <= label_smoothing <= 1.0, "label_smoothing must be in [0.0, 1.0]"
-    if Y.device != self.device: raise RuntimeError(f"expected Y and self on the same device, {Y.device=}, {self.device=}")
+    if Y.device is not None and self.device is not None and Y.device != self.device:
+      raise RuntimeError(f"expected Y and self on the same device, {Y.device=}, {self.device=}")
     log_probs = self.log_softmax()
     loss_mask = Y.ne(ignore_index) if ignore_index != -1 else Y.ones_like(dtype=dtypes.bool)
     y = Y.unsqueeze(-1)._one_hot_along_dim(self.shape[-1], dim=-1) * loss_mask.unsqueeze(-1)

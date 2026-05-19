@@ -2,7 +2,7 @@
 import unittest
 import numpy as np
 from tinygrad import dtypes, Tensor, TinyJit, GlobalCounters, Variable
-from tinygrad.uop.ops import Ops
+from tinygrad.uop.ops import Ops, UOp
 from tinygrad.device import is_dtype_supported
 from tinygrad.helpers import temp, CI, DEV, Context
 
@@ -614,6 +614,11 @@ class TestAssign(unittest.TestCase):
     a.realize()
     self.assertEqual(GlobalCounters.kernel_count, 1)
     self.assertEqual(a.tolist(), [1.,1.])
+
+  def test_assign_deviceless_const(self):
+    s = Tensor.empty(4, device="CPU:1", dtype=dtypes.float)
+    s.assign(Tensor(UOp.const(dtypes.float, 2.0)))
+    np.testing.assert_equal(s.numpy(), [2, 2, 2, 2])
 
   def test_nested_after_contiguous_store(self):
     # Mirrors the nested contiguous-write-then-assign-back shape from torch backend view updates.
