@@ -230,7 +230,7 @@ class TestCallSchedule(unittest.TestCase):
     @function(precompile=True)
     def f(x:Tensor) -> Tensor: return x * 2 + 1
     sz = UOp.variable("sz", 1, 16)
-    a = Tensor.arange(16*4).reshape(16, 4).float()[:sz.bind(5)]
+    a = Tensor.arange(16*4).reshape(16, 4).float().clone()[:sz.bind(5)]
     out = f(a)
     # result shape should have the symbolic dim, not the max
     self.assertIsInstance(out.shape[0], UOp)
@@ -240,7 +240,7 @@ class TestCallSchedule(unittest.TestCase):
     @function(precompile=True)
     def f(x:Tensor) -> Tensor: return x + 1
     devs = ("CPU:0", "CPU:1")
-    a = Tensor.arange(8).reshape(4, 2).float().shard(devs, axis=0)
+    a = Tensor.arange(8).reshape(4, 2).float().clone().shard(devs, axis=0)
     out = f(a) + 2
     np.testing.assert_allclose(out.numpy(), np.arange(8, dtype=np.float32).reshape(4, 2) + 3)
 
@@ -251,7 +251,7 @@ class TestCallMultiSharded(unittest.TestCase):
     devs = ("CPU:0", "CPU:1")
     @function
     def f(x:Tensor): return (x + 1, x * 2)
-    a = Tensor.arange(8).reshape(4, 2).float().shard(devs, axis=0)
+    a = Tensor.arange(8).reshape(4, 2).float().clone().shard(devs, axis=0)
     t1, t2 = f(a)
     ref = np.arange(8, dtype=np.float32).reshape(4, 2)
     np.testing.assert_allclose(t1.numpy(), ref + 1)
@@ -262,7 +262,7 @@ class TestCallMultiSharded(unittest.TestCase):
     devs = ("CPU:0", "CPU:1")
     @function(precompile=True)
     def f(x:Tensor): return (x + 1, x * 2)
-    a = Tensor.arange(8).reshape(4, 2).float().shard(devs, axis=0)
+    a = Tensor.arange(8).reshape(4, 2).float().clone().shard(devs, axis=0)
     t1, t2 = f(a)
     ref = np.arange(8, dtype=np.float32).reshape(4, 2)
     np.testing.assert_allclose(t1.numpy(), ref + 1)
@@ -273,7 +273,7 @@ class TestCallMultiSharded(unittest.TestCase):
     devs = ("CPU:0", "CPU:1")
     @function
     def f(x:Tensor): return (x.sum(axis=0), x.sum(axis=1))
-    a = Tensor.arange(8).reshape(4, 2).float().shard(devs, axis=0)
+    a = Tensor.arange(8).reshape(4, 2).float().clone().shard(devs, axis=0)
     t1, t2 = f(a)
     ref = np.arange(8, dtype=np.float32).reshape(4, 2)
     np.testing.assert_allclose(t1.numpy(), ref.sum(axis=0))
@@ -284,8 +284,8 @@ class TestCallMultiSharded(unittest.TestCase):
     devs = ("CPU:0", "CPU:1")
     @function
     def f(x:Tensor, y:Tensor): return (x + y, x * y)
-    a = Tensor.arange(8).reshape(4, 2).float().shard(devs, axis=0)
-    b = Tensor.arange(8).reshape(4, 2).float().shard(devs, axis=0) + 1
+    a = Tensor.arange(8).reshape(4, 2).float().clone().shard(devs, axis=0)
+    b = Tensor.arange(8).reshape(4, 2).float().clone().shard(devs, axis=0) + 1
     t1, t2 = f(a, b)
     ref_a = np.arange(8, dtype=np.float32).reshape(4, 2)
     ref_b = ref_a + 1
@@ -297,7 +297,7 @@ class TestCallMultiSharded(unittest.TestCase):
     devs = ("CPU:0", "CPU:1")
     @function
     def f(x:Tensor): return (x + 1, x * 2)
-    a = Tensor.arange(8).reshape(4, 2).float().shard(devs, axis=0)
+    a = Tensor.arange(8).reshape(4, 2).float().clone().shard(devs, axis=0)
     t1, t2 = f(a)
     out = (t1 + t2).sum()
     ref = np.arange(8, dtype=np.float32).reshape(4, 2)
@@ -308,8 +308,8 @@ class TestCallMultiSharded(unittest.TestCase):
     devs = ("CPU:0", "CPU:1")
     @function
     def f(x:Tensor, y:Tensor): return (x + 1, y + 2)
-    a = Tensor.arange(8).reshape(4, 2).float().shard(devs, axis=0)
-    b = Tensor.arange(8).reshape(4, 2).float().shard(devs, axis=1)
+    a = Tensor.arange(8).reshape(4, 2).float().clone().shard(devs, axis=0)
+    b = Tensor.arange(8).reshape(4, 2).float().clone().shard(devs, axis=1)
     t1, t2 = f(a, b)
     ref_a = np.arange(8, dtype=np.float32).reshape(4, 2)
     ref_b = np.arange(8, dtype=np.float32).reshape(4, 2)
