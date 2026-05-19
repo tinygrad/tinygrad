@@ -117,7 +117,7 @@ class GroupOp:
             Ops.XOR, Ops.SHL, Ops.SHR, Ops.OR, Ops.AND, Ops.THREEFRY, Ops.SUB, Ops.FDIV, Ops.POW, Ops.FLOORDIV, Ops.FLOORMOD}
   Ternary = {Ops.WHERE, Ops.MULACC}
   ALU = set.union(Unary, Binary, Ternary)
-  Broadcastable = set.union(Binary, Ternary)
+  Broadcastable = set.union(Binary, Ternary, {Ops.GROUP, Ops.STORE})
 
   # TODO: is BITCAST always Elementwise if it's shape changing?
   Elementwise = set.union(ALU, {Ops.CAST, Ops.BITCAST})

@@ -1,10 +1,10 @@
 from dataclasses import dataclass
-from tinygrad.uop.ops import UOp, graph_rewrite, PatternMatcher, GroupOp, UPat, Ops
+from tinygrad.uop.ops import UOp, graph_rewrite, PatternMatcher, GroupOp, UPat, Ops, AxisType
 from tinygrad.uop.spec import type_verify, spec_program
 from tinygrad.dtype import dtypes, Invalid, AddrSpace, least_upper_dtype
 from tinygrad.helpers import SPEC
 from tinygrad.renderer import Renderer
-from tinygrad.codegen.late.devectorizer import pm_add_loads, reduce_to_acc, merge_reduce_ends
+from tinygrad.codegen.late.devectorizer import pm_add_loads, reduce_to_acc, merge_reduce_ends, pm_render
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow
 from tinygrad.schedule.rangeify import pm_index_on_index, pm_mops
 from tinygrad.uop.decompositions import get_late_rewrite_patterns, get_transcendental_patterns, pm_dtype_decomps
@@ -50,6 +50,22 @@ pm_minimal_move_gates_from_index = PatternMatcher([
    lambda buf,gate,idx,cast,data: buf.index(idx, ptr=True).cast(cast.dtype).store(data, gate)),
 ])
 
+@dataclass
+class ExpanderState:
+  total_dim: int
+  current_dim: int = 0
+
+def expand_range(ctx:ExpanderState, r:UOp):
+  if r.arg[-1] not in {AxisType.UPCAST, AxisType.UNROLL}: return None
+  ret = UOp.const(r.dtype, tuple(range(r.vmax+1)))
+  ret = ret.reshape([-1 if x == ctx.current_dim else 1 for x in range(ctx.total_dim)])
+  ctx.current_dim += 1
+  return ret
+
+pm_mini_expander = PatternMatcher([
+  (UPat(Ops.RANGE, name="r"), expand_range),
+])
+
 def minigen_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   sink = ast
 
@@ -70,7 +86,8 @@ def minigen_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
     sink = apply_opts(sink, ren, beam=ast.arg.beam)
 
   # expanded
-  sink = graph_rewrite(sink, pm_group_for_reduce, name="expander 2.0")
+  rcount = sum([1 for u in sink.toposort() if u.op is Ops.RANGE and u.arg[-1] in {AxisType.UPCAST, AxisType.UNROLL}])
+  sink = graph_rewrite(sink, pm_mini_expander+pm_group_for_reduce, ctx=ExpanderState(rcount), name="expander 2.0")
 
   # REDUCE is not allowed in programs, we need to do that REDUCE somewhere
   # this creates a register where the reduce happens
@@ -116,7 +133,7 @@ def minigen_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # extra matcher from the renderer
   extra_matcher = ren.extra_matcher if ren.extra_matcher is not None else PatternMatcher([])
-  sink = graph_rewrite(sink, extra_matcher, ctx=ren.target, name="final rewrite")
+  sink = graph_rewrite(sink, pm_render+extra_matcher, ctx=ren.target, name="final rewrite")
 
   # this was the linearizer, add control flow edges where they are needed on RANGEs
   sink = graph_rewrite(sink, pm_add_control_flow, ctx=CFGContext(sink), name="add control flow", bottom_up=True)

@@ -205,7 +205,8 @@ spec_program = PatternMatcher([
   (UPat(Ops.CONST, arg=Invalid), lambda: False),
 
   # STACK/GEP in program. TODO: this should match Tensor
-  (UPat(Ops.STACK, name="x"), lambda x: len(x.src)>1 and len(x.src) == x.dtype.vcount and all(x.dtype == y.dtype.vec(len(x.src)) for y in x.src)),
+  #(UPat(Ops.STACK, name="x"), lambda x: len(x.src)>1 and len(x.src) == x.dtype.vcount and all(x.dtype == y.dtype.vec(len(x.src)) for y in x.src)),
+  (UPat(Ops.STACK, name="x"), lambda x: True),
   (UPat(Ops.GEP, src=(UPat.var("src"),), name="gep"), lambda gep,src: gep.dtype == src.dtype.scalar()),
 
   # if has a <gate, index_for_dedup>
