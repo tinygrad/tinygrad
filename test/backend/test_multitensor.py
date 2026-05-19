@@ -122,7 +122,7 @@ class TestMultiTensor(unittest.TestCase):
       _ = Tensor(X.uop, dtype=dtypes.float)
 
   def test_sharded_arange(self):
-    sharded_arange = Tensor.arange(1000).shard(devices_2, 0)
+    sharded_arange = Tensor.arange(1000).clone().shard(devices_2, 0)
     sharded_arange.realize()
     np.testing.assert_equal(sharded_arange.numpy(), np.arange(1000))
 
@@ -235,7 +235,7 @@ class TestMultiTensor(unittest.TestCase):
     for ring in (0, 2):
       GlobalCounters.reset()
       with Context(RING=ring, SCACHE=0):
-        t = Tensor.arange(32).contiguous().shard(devices_4, 0).to(Device.DEFAULT)
+        t = Tensor.arange(32).clone().shard(devices_4, 0).to(Device.DEFAULT)
         t.realize()
       kernel_counts[ring] = GlobalCounters.kernel_count
       self.assertEqual(t.device, Device.DEFAULT)
@@ -557,7 +557,7 @@ class TestMultiTensor(unittest.TestCase):
   def test_multi_tensor_jit_graph_assign_updates_each_shard(self):
     @TinyJit
     def jf(out: Tensor) -> Tensor:
-      tmp = (Tensor.arange(4, dtype=dtypes.float).shard(devices_2, 0) + 1).contiguous().realize()
+      tmp = (Tensor.arange(4, dtype=dtypes.float).clone().shard(devices_2, 0) + 1).contiguous().realize()
       out.assign((tmp + 1).contiguous()).realize()
       return out
 
@@ -839,7 +839,7 @@ class TestMultiTensor(unittest.TestCase):
 
   def test_clone(self):
     for axis in (None, 0):
-      t = Tensor.arange(16).reshape(4, 4).shard(devices_2, axis=axis).contiguous().realize()
+      t = Tensor.arange(16).reshape(4, 4).clone().shard(devices_2, axis=axis).contiguous().realize()
       t_clone = t.clone().realize()
       self.assertEqual(t_clone.device, t.device)
       self.assertEqual(t_clone.uop.axis, axis)
@@ -1170,7 +1170,7 @@ class TestMultiBufferView(unittest.TestCase):
   @unittest.skip("flaky on LLVM")
   def test_shrink_non_shard_axis(self):
     ref = Tensor.arange(8*4*10).reshape(8, 4, 10).contiguous().realize()
-    a = Tensor.arange(8*4*10).reshape(8, 4, 10).contiguous().shard(devices_2, axis=1).realize()
+    a = Tensor.arange(8*4*10).reshape(8, 4, 10).clone().shard(devices_2, axis=1).realize()
     self._check(ref, a, lambda t: t[3])
 
   def test_shrink_2d(self):

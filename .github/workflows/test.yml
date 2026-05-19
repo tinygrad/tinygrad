@@ -312,8 +312,8 @@ jobs:
         python extra/optimization/extract_dataset.py
         gzip -c /tmp/sops > extra/datasets/sops.gz
         #DEBUG=1 MIN_ASTS=1 python extra/optimization/get_action_space.py
-    - name: Repo line count < 24000 lines
-      run: MAX_LINE_COUNT=24000 python sz.py
+    - name: Repo line count < 25000 lines
+      run: MAX_LINE_COUNT=25000 python sz.py
 
   spec:
     strategy:
@@ -780,7 +780,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        backend: [llvm, cpu, opencl, lvp]
+        backend: [llvm, cpu, opencl, lvp, x86]
 
     name: Linux (${{ matrix.backend }})
     runs-on: ubuntu-22.04
@@ -797,7 +797,7 @@ jobs:
           llvm: ${{ matrix.backend != 'opencl' }}
           mesa: ${{ matrix.backend == 'lvp' && 'true' }}
       - name: Set env
-        run: printf "${{ matrix.backend == 'llvm' && 'DEV=CPU:LLVM' || matrix.backend == 'cpu' && 'CC=clang-20\nDEV=CPU\nCPU_COUNT=2' || matrix.backend == 'opencl' && 'DEV=CL' || matrix.backend == 'lvp' && 'DEV=CPU:LVP' }}" >> $GITHUB_ENV
+        run: printf "${{ matrix.backend == 'llvm' && 'DEV=CPU:LLVM' || matrix.backend == 'cpu' && 'CC=clang-20\nDEV=CPU\nCPU_COUNT=2' || matrix.backend == 'opencl' && 'DEV=CL' || matrix.backend == 'lvp' && 'DEV=CPU:LVP' || matrix.backend == 'x86' && 'DEV=CPU:X86' }}" >> $GITHUB_ENV
       - name: Check Device.DEFAULT and print some source
         run: |
           python3 -c "from tinygrad import Device; assert Device.DEFAULT in ['CPU','CL'], Device.DEFAULT"
@@ -943,7 +943,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        backend: [llvm, cpu, webgpu]
+        backend: [llvm, cpu, webgpu, x86]
 
     name: Windows (${{ matrix.backend }})
     runs-on: windows-latest
@@ -959,7 +959,7 @@ jobs:
           pydeps: ${{ matrix.backend == 'webgpu' && 'dawn-python' || '' }}
       - name: Set env
         shell: bash
-        run:  printf "${{ matrix.backend == 'llvm' && 'DEV=CPU:LLVM' || matrix.backend == 'cpu' && 'DEV=CPU\nCPU_COUNT=2' || matrix.backend == 'webgpu' && 'DEV=WEBGPU'}}" >> $GITHUB_ENV
+        run:  printf "${{ matrix.backend == 'llvm' && 'DEV=CPU:LLVM' || matrix.backend == 'cpu' && 'DEV=CPU\nCPU_COUNT=2' || matrix.backend == 'webgpu' && 'DEV=WEBGPU' || matrix.backend == 'x86' && 'DEV=CPU:X86' }}" >> $GITHUB_ENV
       - name: Run unit tests
         if: matrix.backend=='llvm'
         # test_newton_schulz hits RecursionError
@@ -971,7 +971,7 @@ jobs:
       - name: Run pytest (${{ matrix.backend }})
         shell: bash
         run: |
-          python -c "from tinygrad import Device; assert Device.DEFAULT == {'LLVM':'CPU'}.get(x:='${{ matrix.backend }}'.upper(), x), Device.DEFAULT"
+          python -c "from tinygrad import Device; assert Device.DEFAULT == {'LLVM':'CPU', 'X86':'CPU'}.get(x:='${{ matrix.backend }}'.upper(), x), Device.DEFAULT"
           python -m pytest -n=auto test/test_tiny.py test/backend/test_ops.py --durations=20
 
 # ****** Compile-only Tests ******
