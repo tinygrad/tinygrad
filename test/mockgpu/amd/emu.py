@@ -69,7 +69,7 @@ from tinygrad.runtime.autogen.amd.cdna import ins as irc
 from tinygrad.renderer.amd.dsl import VCC_LO, EXEC_LO, SCC, ttmp
 from tinygrad.runtime.autogen.amd.common import Fmt, OpType
 from test.amd.helpers import decode_dpp16
-from test.mockgpu.amd.pcode import parse_block, _FUNCS, _set_bits, _val_to_bits
+from test.mockgpu.amd.pcode import parse_block, _FUNCS, _set_bits, _to_bool, _val_to_bits
 
 MASK32 = 0xFFFFFFFF
 
@@ -713,6 +713,7 @@ class _Ctx:
         old = self.vgpr.index(val[0].cast(dtypes.int), ptr=True).load()
         new_val = _set_bits(old, _val_to_bits(val[1]), width, lo_bit).cast(dtypes.uint32)
         active = _lane_active(exec_mask, lane)
+        if len(val) > 4: active = active & _to_bool(val[4])
         raw_stores.append(('vgpr_direct', self.vgpr.index(val[0].cast(dtypes.int).valid(active)).store(new_val)))
         continue
       if 'D0' in dest and '[laneId]' in dest:
