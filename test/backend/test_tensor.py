@@ -26,8 +26,8 @@ class TestTinygrad(unittest.TestCase):
 
   def test_deviceless_const_construct_device_repr(self):
     t = Tensor(UOp.const(dtypes.float, 2.0))
-    self.assertIsNone(t.uop._device)
-    self.assertEqual(t.device, Device.DEFAULT)
+    self.assertIsNone(t.uop.device)
+    self.assertIsNone(t.device)
     self.assertIn("<UOp None", repr(t))
 
   def test_deviceless_const_realize_materializes(self):

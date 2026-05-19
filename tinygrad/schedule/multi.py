@@ -43,7 +43,7 @@ if not getenv("LATE_ALLREDUCE", 1): replace_allreduce = _early_allreduce + repla
 
 def alu_multi(root:UOp):
   msrcs = root.src
-  devices = [x._device for x in msrcs if x._device is not None]
+  devices = [x.device for x in msrcs if x.device is not None]
   assert all_same(devices), f"all buffers must have the same device {devices}"
   dcount = len(devices[0])
   axis = root.axis
@@ -131,7 +131,7 @@ def rewrite_into_function(call:UOp):
 
 def param_to_multi(p:UOp):
   if p.axis is None: return None
-  return UOp.param(p.arg, p.dtype, p.shard_shape, p._device).multi(p.axis)
+  return UOp.param(p.arg, p.dtype, p.shard_shape, p.device).multi(p.axis)
 
 # NOTE: this is the same pattern as Ops.UNROLL
 multi_pm = PatternMatcher([

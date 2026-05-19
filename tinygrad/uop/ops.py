@@ -445,7 +445,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     return self.index(*[UOp.const(dtypes.weakint, x) if isinstance(x, int) else x for x in idx])
   def const_like(self, b:ConstLike, dtype:DType|None=None):
     # constants can optionally have a DEVICE source
-    ret = UOp.const(dtype or self.dtype.base, b, device=self._device, shape=self.shard_shape if self.axis is not None else self._shape)
+    ret = UOp.const(dtype or self.dtype.base, b, device=self.device, shape=self.shard_shape if self.axis is not None else self._shape)
     return ret.multi(self.axis) if self.axis is not None else ret
   def ufix(self, x):
     if isinstance(x, UOp): return x
@@ -533,7 +533,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
   def contiguous(self, *args, **kwargs):
     if self.op is Ops.CONTIGUOUS: return self
-    if self._device is None: return self
+    if self.device is None: return self
     if self.has_buffer_identity(): return self
     return UOp(Ops.CONTIGUOUS, dtype=self.dtype, src=(self,)+args, **kwargs)
   def bufferize(self, *args, **kwargs): return UOp(Ops.STAGE, dtype=self.dtype, src=(self,)+args, **kwargs)
@@ -683,20 +683,18 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     device = canonicalize_device(self.device if device is None else device)
     axis = self.axis if isinstance(device, tuple) else None
     return UOp.empty(self.shard_shape if axis is not None else self.shape, self.dtype if dtype is None else dtype, device, axis)
-  @property
-  def device(self) -> str|tuple[str, ...]: return unwrap(self._device)
   @recursive_property
-  def _device(self) -> str|tuple[str, ...]|None:
+  def device(self) -> str|tuple[str, ...]|None:
     if self.op is Ops.DEVICE: return self.arg
     if self.op is Ops.STAGE: return self.arg.device
-    if self.op is Ops.AFTER: return self.src[0]._device
+    if self.op is Ops.AFTER: return self.src[0].device
     if self.op is Ops.MSELECT:
       assert isinstance(self.src[0].device, tuple), f"mselect must be on tuple device, getting {self.src[0].device}"
       return self.src[0].device[self.arg]
     if self.op is Ops.MSTACK: return tuple(cast(str, x.device) for x in self.src)
     if self.op in {Ops.COPY, Ops.BUFFER, Ops.ALLREDUCE}: return self.src[1].device
     for x in self.src:
-      if x._device is not None: return x._device
+      if x.device is not None: return x.device
     return None
   @property
   def buf_uop(self) -> UOp:
@@ -969,8 +967,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     return UOp(Ops.PARAM, dtype, src, arg=slot)
   def param_like(self, slot:int):
     if self.op is Ops.BIND:
-      return UOp.param(slot, self.dtype, self._shape, self._device, self._min_max, self.src[0].arg[0])
-    p = UOp.param(slot, self.dtype, self._shape, self._device)
+      return UOp.param(slot, self.dtype, self._shape, self.device, self._min_max, self.src[0].arg[0])
+    p = UOp.param(slot, self.dtype, self._shape, self.device)
     if self.axis is not None: p = p.replace(src=p.src + (UOp(Ops.MULTI, arg=self.axis),))
     return p
 
