@@ -966,7 +966,7 @@ class TestSchedule(unittest.TestCase):
   def test_arange_index_contiguous(self):
     Tensor.manual_seed(0)
     x = Tensor.randn(5, 2).realize()
-    a = Tensor.arange(10).contiguous()
+    a = Tensor.arange(10).clone()
     out = (x + a[2]).sum()
     run_linear(*check_schedule(out, 2))
     np.testing.assert_allclose(out.numpy(), (x.numpy()+np.arange(10)[2]).sum(), atol=1e-5, rtol=1e-6)
@@ -982,7 +982,7 @@ class TestSchedule(unittest.TestCase):
   def test_user_contiguous(self):
     Tensor.manual_seed(0)
     x = Tensor.randn(5, 2).realize()
-    a = (Tensor.arange(10)+1).contiguous()
+    a = (Tensor.arange(10)+1).clone()
     out = (x + a[2]).sum()
     run_linear(*check_schedule(out, 2))
     np.testing.assert_allclose(out.numpy(), (x.numpy()+(np.arange(10)+1)[2]).sum(), atol=1e-5, rtol=1e-6)
@@ -1008,7 +1008,7 @@ class TestSchedule(unittest.TestCase):
   def test_fuse_assign_contiguous(self):
     x = Tensor.zeros(4, 4, dtype=dtypes.int).contiguous().realize()
     a = Tensor.arange(8).reshape(4, 2)
-    run_linear(*check_schedule(x.shrink((None, (0, 2))).assign(a.contiguous()), 2))
+    run_linear(*check_schedule(x.shrink((None, (0, 2))).assign(a.clone()), 2))
     np.testing.assert_equal(x.numpy(), [[0, 1, 0, 0], [2, 3, 0, 0], [4, 5, 0, 0], [6, 7, 0, 0]])
 
   def test_assign_non_contiguous_alt(self): self.test_assign_non_contiguous(alt=True)
@@ -1053,7 +1053,7 @@ class TestSchedule(unittest.TestCase):
 
   def test_no_extra_contiguous_on_setitem_assign_back(self):
     # pattern: contiguous copy, advanced setitem, assign back (e.g. torch backend _view_write)
-    base = Tensor.arange(16).reshape(4, 4).contiguous()
+    base = Tensor.arange(16).reshape(4, 4).clone()
     flat_base = base.reshape(16).contiguous()
     idx = Tensor([1,2,5,6], dtype=dtypes.int32)
     flat_base[idx] = Tensor([99,99,99,99])
@@ -1253,7 +1253,7 @@ class TestView(unittest.TestCase):
   # x collapses along with its children
   def test_parent_view_collapses(self):
     a = Tensor([1, 2])
-    b = Tensor.arange(3).contiguous()
+    b = Tensor.arange(3).clone()
     bv = b.pad(((0, 2),))[-2:]
     # this becomes a late a*0
     late_mul = a*bv
@@ -1270,7 +1270,7 @@ class TestView(unittest.TestCase):
   # as long as one child realizes, x does not collapse
   def test_parent_multiple_children_no_collapse(self):
     a = Tensor([1, 2])
-    b = Tensor.arange(3).contiguous()
+    b = Tensor.arange(3).clone()
     bv = b.pad(((0, 2),))[-2:]
     late_mul = a*bv
     other_child = b+2

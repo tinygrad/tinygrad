@@ -1174,23 +1174,23 @@ class TestMultiBufferView(unittest.TestCase):
     self._check(ref, a, lambda t: t[3])
 
   def test_shrink_2d(self):
-    ref = Tensor.arange(6*4).reshape(6, 4).contiguous().realize()
-    a = Tensor.arange(6*4).reshape(6, 4).contiguous().shard(devices_2, axis=1).realize()
+    ref = Tensor.arange(6*4).reshape(6, 4).clone().realize()
+    a = Tensor.arange(6*4).reshape(6, 4).clone().shard(devices_2, axis=1).realize()
     self._check(ref, a, lambda t: t.shrink(((1, 4), None)))
 
   def test_reshape_then_shrink(self):
-    ref = Tensor.arange(8*6).reshape(8, 6).contiguous().realize()
-    a = Tensor.arange(8*6).reshape(8, 6).contiguous().shard(devices_2, axis=1).realize()
+    ref = Tensor.arange(8*6).reshape(8, 6).clone().realize()
+    a = Tensor.arange(8*6).reshape(8, 6).clone().shard(devices_2, axis=1).realize()
     self._check(ref, a, lambda t: t.reshape(4, 2, 6)[1])
 
   def test_chained_shrink(self):
-    ref = Tensor.arange(10*8).reshape(10, 8).contiguous().realize()
-    a = Tensor.arange(10*8).reshape(10, 8).contiguous().shard(devices_2, axis=1).realize()
+    ref = Tensor.arange(10*8).reshape(10, 8).clone().realize()
+    a = Tensor.arange(10*8).reshape(10, 8).clone().shard(devices_2, axis=1).realize()
     self._check(ref, a, lambda t: t.shrink(((2, 8), None)).shrink(((1, 4), None)))
 
   def test_4_devices(self):
-    ref = Tensor.arange(8*12).reshape(8, 12).contiguous().realize()
-    a = Tensor.arange(8*12).reshape(8, 12).contiguous().shard(devices_4, axis=1).realize()
+    ref = Tensor.arange(8*12).reshape(8, 12).clone().realize()
+    a = Tensor.arange(8*12).reshape(8, 12).clone().shard(devices_4, axis=1).realize()
     out = a[5].contiguous()
     linear, var_vals = out.linear_with_vars()
     if all(hasattr(Device[d].allocator, "_offset") for d in out.device):
