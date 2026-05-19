@@ -26,10 +26,11 @@ def insert_deps(ctx:HCQ2Graph, linear:UOp) -> UOp:
   return linear.replace(src=tuple(src))
 pm_insert_deps = PatternMatcher([(UPat(Ops.LINEAR, name="linear"), insert_deps)])
 
-def replace_params(ctx:HCQ2Graph, call:UOp) -> UOp|None:
-  if not any(x.op is Ops.PARAM for x in call.src[1:]): return None
-  return call.replace(src=tuple(ctx.input_addrs_uop[x.arg] if x.op is Ops.PARAM else x for x in call.src))
-pm_replace_params = PatternMatcher([(UPat(Ops.CALL, name="call", allow_any_len=True), replace_params)])
+pm_replace_params = PatternMatcher([
+  (UPat(Ops.PARAM, name="p"), lambda ctx, p: ctx.input_addrs_uop[p.arg]),
+  (UPat(Ops.BUFFER_VIEW, src=(UPat(Ops.INDEX, name="addr"),), name="bv"),
+    lambda ctx, bv, addr: addr.cast(dtypes.uint64) + UOp.const(dtypes.uint64, bv.arg[1] * bv.dtype.itemsize)),
+])
 
 # **************** graph-only passes ****************
 
@@ -113,7 +114,7 @@ class HCQ2Graph(GraphRunner):
 
     graph_rewrite(self.linear, pm_calc_kernargs_sizes, ctx=(sizes:={}), name=None)
     for dev_name, sz in sizes.items():
-      buf = Buffer(dev_name, ceildiv(sz, 4), dtypes.uint32, options=BufferSpec(cpu_access=True), preallocate=True)
+      buf = Buffer(dev_name, sz, dtypes.uint8, options=BufferSpec(cpu_access=True), preallocate=True)
       self.hcq_ctx.devs[dev_name] = HCQ2DeviceCtx(dev_name, UOp.from_buffer(buf, dev_name), UOp.const(dtypes.uint64, buf._buf.va_addr))
 
     self.linear = graph_rewrite(self.linear, pm_bufferize, ctx=self.hcq_ctx, bottom_up=True, name="realize binaries")

@@ -180,13 +180,12 @@ class HCQEncoder:
 
   def q(self, *values): self.append(*values)
 
-  def build(self, dev:str|None=None, dtype=dtypes.uint64, tag:str|None=None) -> UOp:
+  def uop(self, dev:str|None=None, dtype=dtypes.uint64, tag:str|None=None) -> UOp:
     buf = UOp.new_buffer(dev or self.device, len(self.blob), dtypes.uint8)
     if tag: buf = buf.rtag(tag)
     blob_uop = UOp(Ops.BINARY, dtypes.void, src=(), arg=self.blob)
-    init = buf.index(UOp.const(dtypes.int, 0)).store(blob_uop)
-    stores = [buf.index(UOp.const(dtypes.int, off)).store(val.cast(dt)) for off, val, dt in self.patches]
-    return buf.after(init, *stores)
+    stores = [buf.index(UOp.const(dtypes.int, off)).cast(dt.ptr()).store(val.cast(dt)) for off, val, dt in self.patches]
+    return buf.after(buf.store(blob_uop), *stores)
 
 # **************** prepare runtime ****************
 
@@ -198,9 +197,8 @@ def lower_kernargs(ctx:HCQ2LowerCtx, call:UOp, prg:UOp) -> UOp:
   for gi in info.globals: enc.append(call.src[1+gi], dtype=dtypes.uint64)
   for v in info.vars: enc.append(v, dtype=dtypes.uint32)
 
-  enc.blob += b'\x00' * (data.kernargs_alloc_size - len(enc.blob))
-  kernargs_bin = enc.build(tag="kernargs")
-  return call.replace(src=(prg.replace(src=prg.src + (kernargs_bin,), arg=(data, info)),) + call.src[1:])
+  enc.blob += b'\x00' * (data.kernargs_alloc_size - len(enc.blob)) # pad blob
+  return call.replace(src=(prg.replace(src=prg.src + (enc.uop(tag="kernargs"),), arg=(data, info)),) + call.src[1:])
 
 pm_prep_runtime = PatternMatcher([
   # device-specific lowering of the program
@@ -254,47 +252,48 @@ def calc_kernargs_sizes(ctx:dict[str,int], u:UOp) -> None:
   ctx[dev_name] = ctx.get(dev_name, 0) + round_up(u.arg, 16)
 pm_calc_kernargs_sizes = PatternMatcher([(UPat(Ops.BUFFER, name="u"), calc_kernargs_sizes)])
 
-def _lower_stores(host_buf:UOp, stores_in:tuple[UOp, ...], base_off:int=0) -> list[UOp]:
-  isz = host_buf.dtype.base.itemsize
-  return [host_buf.index(UOp.const(dtypes.int, (base_off + s.src[0].src[1].arg) // isz), dtype=host_buf.dtype.ptr())
-          .cast(s.src[1].dtype.ptr()).store(s.src[1]) for s in stores_in]
-
-def bufferize_binary(ctx:HCQ2LowerCtx, target:UOp) -> UOp|None:
-  buf_node = target.src[0]
-  if buf_node.op is not Ops.BUFFER or buf_node.tag is None: return None
-  dev_name = buf_node.src[1].arg
-
-  if buf_node.tag == "kernargs":
-    dctx = ctx.devs[dev_name]
-    args_off = dctx.kernargs_allocator.alloc(buf_node.arg, 16)
-    dev_addr = dctx.kernargs_gpu + args_off
-    return dev_addr.after(*_lower_stores(dctx.kernargs_host, target.src[1:], base_off=args_off))
-  elif buf_node.tag in ("compute", "copy"):
-    buf = Buffer(dev_name, buf_node.arg // dtypes.uint32.itemsize, dtypes.uint32, options=BufferSpec(cpu_access=True), preallocate=True)
-    host_buf = UOp.from_buffer(buf, dev_name)
-    patched = host_buf.after(*_lower_stores(host_buf, target.src[1:]))
-    return UOp(Ops.CUSTOM_FUNCTION, dtypes.void, src=(patched,), arg=f"submit_{buf_node.tag}")
-  return None
+def _lower_stores(host_buf:UOp, buf_node:UOp, stores:tuple[UOp, ...]) -> list[UOp]:
+  # blob stores substitute buf_node directly; indexed patches re-target the INDEX onto host_buf with byte→element offset conversion.
+  def lower(s:UOp) -> UOp:
+    if s.src[1].op is Ops.BINARY: return s.substitute({buf_node: host_buf})
+    idx = s.src[0].src[0]
+    return s.substitute({idx: host_buf.index(UOp.const(dtypes.int, idx.src[1].arg // host_buf.dtype.base.itemsize), dtype=host_buf.dtype.ptr())})
+  return [lower(s) for s in stores]
 
 _program_uop_cache:dict[bytes, tuple[UOp,UOp]] = {}
-def bufferize_program(ctx:HCQ2LowerCtx, target:UOp) -> UOp|None:
-  buf_node = target.src[0]
-  if buf_node.op is not Ops.BUFFER or buf_node.tag != "program": return None
-  blob = next(s.src[1].arg for s in target.src[1:] if s.src[1].op is Ops.BINARY)
-  dev_name = buf_node.src[1].arg
-  if (cached:=_program_uop_cache.get(blob)) is None:
-    lib_gpu = Buffer(dev_name, round_up(len(blob), 0x1000), dtypes.uint8, options=BufferSpec(nolru=True), preallocate=True)
-    Device[dev_name].allocator._copyin(lib_gpu._buf, memoryview(bytearray(blob)))
-    Device[dev_name].synchronize()
-    lib_uop = UOp.from_buffer(lib_gpu, dev_name)
-    cached = _program_uop_cache[blob] = (lib_uop, UOp.const(dtypes.uint64, lib_gpu._buf.va_addr))
-  lib_uop, result = cached
-  if lib_uop not in ctx.holds: ctx.holds.append(lib_uop)
-  return result
+def bufferize_binary(ctx:HCQ2LowerCtx, target:UOp, buf_node:UOp) -> UOp|None:
+  dev_name, stores = buf_node.src[1].arg, target.src[1:]
+
+  # program
+  if buf_node.tag == "program":
+    blob = target.src[1].src[1].arg
+    if (cached:=_program_uop_cache.get(blob)) is None:
+      lib_gpu = Buffer(dev_name, round_up(len(blob), 0x1000), dtypes.uint8, options=BufferSpec(nolru=True), preallocate=True)
+      Device[dev_name].allocator._copyin(lib_gpu._buf, memoryview(bytearray(blob)))
+      Device[dev_name].synchronize()
+      cached = _program_uop_cache[blob] = (UOp.from_buffer(lib_gpu, dev_name), UOp.const(dtypes.uint64, lib_gpu._buf.va_addr))
+    lib_uop, result = cached
+    if lib_uop not in ctx.holds: ctx.holds.append(lib_uop)
+    return result
+
+  # kernargs
+  if buf_node.tag == "kernargs":
+    dctx = ctx.devs[dev_name]
+    isz = dctx.kernargs_host.dtype.base.itemsize
+    off = dctx.kernargs_allocator.alloc(buf_node.arg, 16)
+    host_buf = UOp(Ops.BUFFER_VIEW, dctx.kernargs_host.dtype, src=(dctx.kernargs_host,), arg=(buf_node.arg // isz, off // isz))
+    return (dctx.kernargs_gpu + off).after(*_lower_stores(host_buf, buf_node, stores))
+
+  # compute/copy cmdbufs
+  if buf_node.tag in ("compute", "copy"):
+    host_buf = UOp.from_buffer(Buffer(dev_name, buf_node.arg // dtypes.uint32.itemsize, dtypes.uint32,
+                                      options=BufferSpec(cpu_access=True, nolru=True), preallocate=True), dev_name)
+    return UOp(Ops.CUSTOM_FUNCTION, dtypes.void, src=(host_buf.after(*_lower_stores(host_buf, buf_node, stores)),), arg=f"submit_{buf_node.tag}")
+
+  return None
 
 pm_bufferize = PatternMatcher([
-  (UPat(Ops.AFTER, src=(UPat(Ops.BUFFER),), allow_any_len=True, name="target"), bufferize_program),
-  (UPat(Ops.AFTER, src=(UPat(Ops.BUFFER),), allow_any_len=True, name="target"), bufferize_binary),
+  (UPat(Ops.AFTER, src=(UPat(Ops.BUFFER, name="buf_node"),), allow_any_len=True, name="target"), bufferize_binary),
 ])
 
 # afters keep patches linked to their binaries. lift nested patches to root afters so symbolic can resolve them all.
@@ -305,24 +304,27 @@ def lift_after(ctx:HCQ2LowerCtx, after:UOp) -> UOp|None:
 pm_lift_after = PatternMatcher([(UPat(Ops.AFTER, name="after", allow_any_len=True), lift_after)])
 
 def resolve_getaddr(ctx:HCQ2LowerCtx, ga:UOp, buf:UOp) -> UOp:
-  if (buf_uop:=buf if buf.op is Ops.BUFFER else buf.src[0]) not in ctx.holds: ctx.holds.append(buf_uop)
+  if buf not in ctx.holds: ctx.holds.append(buf)
   return UOp.const(dtypes.uint64, buf.buffer.get_buf(buf.device).va_addr)
 
 def fold_const_store(ctx:HCQ2LowerCtx, buf:UOp, off:UOp, val:UOp) -> UOp:
   struct.pack_into(f'<{val.dtype.fmt}', buf.buffer.ensure_allocated()._buf.cpu_view().mv.cast('B'), off.arg * buf.dtype.base.itemsize, val.arg)
   return UOp(Ops.NOOP)
 
-def fold_blob_store(ctx:HCQ2LowerCtx, buf:UOp, off:UOp, blob:UOp) -> UOp:
-  byte_off = off.arg * buf.dtype.base.itemsize
-  buf.buffer.ensure_allocated()._buf.cpu_view().mv.cast('B')[byte_off:byte_off+len(blob.arg)] = blob.arg
+def fold_blob_store(ctx:HCQ2LowerCtx, buf:UOp, blob:UOp) -> UOp:
+  buf.buffer.ensure_allocated()._buf.cpu_view().mv.cast('B')[:len(blob.arg)] = blob.arg
   return UOp(Ops.NOOP)
 
 pm_resolve_patches = symbolic_simple + PatternMatcher([
-  (UPat(Ops.GETADDR, src=(UPat((Ops.BUFFER, Ops.BUFFER_VIEW), name="buf"),), name="ga"), resolve_getaddr),
-  (UPat(Ops.GETADDR, src=(UPat.cvar("const"),)), lambda ctx, const: const),
+  # resolve getaddrs
+  (UPat(Ops.GETADDR, src=(UPat(Ops.BUFFER_VIEW, name="bv"),)), # getaddr(buffer_view(x)) -> offset+getaddr(x)
+    lambda ctx, bv: UOp(Ops.GETADDR, dtypes.uint64, src=(bv.src[0],)) + UOp.const(dtypes.uint64, bv.arg[1] * bv.dtype.itemsize)),
+  (UPat(Ops.GETADDR, src=(UPat(Ops.BUFFER, name="buf"),), name="ga"), resolve_getaddr), # getaddr(buffer) -> const(va_addr)
+  (UPat(Ops.GETADDR, src=(UPat.cvar("const"),)), lambda ctx, const: const), # getaddr(const) -> const
 
+  # write consts and binaries directly into the buffer
+  (UPat((Ops.BUFFER, Ops.BUFFER_VIEW), name="buf").store(UPat(Ops.BINARY, name="blob")), fold_blob_store),
   (UPat((Ops.BUFFER, Ops.BUFFER_VIEW), name="buf").index(UPat.cvar("off")).or_casted().store(UPat.cvar("val")), fold_const_store),
-  (UPat((Ops.BUFFER, Ops.BUFFER_VIEW), name="buf").index(UPat.cvar("off")).or_casted().store(UPat(Ops.BINARY, name="blob")), fold_blob_store),
 ])
 
 pm_parametrize_host_buffers = PatternMatcher([
@@ -351,15 +353,25 @@ pm_callify = PatternMatcher([(UPat(Ops.LINEAR, name="l", allow_any_len=True), hc
 
 @track_rewrites(name=lambda ctx,linear,ast,dev,**kw: f"hcq schedule {getattr(ast.arg, 'name', ast.op.name.lower())}")
 def hcq_schedule(ctx:HCQ2LowerCtx, linear:UOp, ast:UOp, dev:HCQ2Compiled) -> UOp:
+  # runtime preparation: device-specific program, kernargs for each program
   linear = graph_rewrite(linear, pm_prep_runtime, ctx=ctx, name="hcq: prepare runtime")
+
+  # lower ops into hcq style per-device operations
   linear = graph_rewrite(linear, pm_lower_ops, ctx=ctx, name="hcq: lower ops")
+
+  # split ops into logical queues
   linear = graph_rewrite(linear, pm_split_into_queues, ctx=ctx, name="hcq: split into queues")
+
+  # runtime-specific lowering
   linear = graph_rewrite(linear, pm_add_barriers, ctx=ctx, name="hcq: add barriers", walk=True)
   linear = graph_rewrite(linear, pm_add_signals, ctx=ctx, name="hcq: add signals", walk=True)
+
+  # encode cmdbuffers
   linear = graph_rewrite(linear, dev.pm_lower, ctx=ctx, name=f"hcq: encode cmdbuf {dev.device}", walk=True)
   return hcq_realize(ctx, linear, ast, dev)
 
 def hcq_realize(ctx:HCQ2LowerCtx, linear:UOp, ast:UOp, dev:HCQ2Compiled) -> UOp:
+  # allocate lowering structs
   graph_rewrite(linear, pm_calc_kernargs_sizes, ctx=(sizes:={}), name=None)
 
   for dev_name, sz in sizes.items():

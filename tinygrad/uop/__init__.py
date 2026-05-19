@@ -44,7 +44,7 @@ class Ops(FastEnum):
   TUPLE = auto(); GETTUPLE = auto()
 
   # hcq specific
-  GETADDR = auto(); PATCH = auto()
+  GETADDR = auto()
 
   # ** 3 -- load/store **
 

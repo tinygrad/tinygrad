@@ -240,10 +240,11 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
       # TODO: these should have the shape of the dtype.count
       case Ops.CONST | Ops.DEFINE_VAR: return ()
-      case Ops.GEP | Ops.STACK | Ops.VCONST | Ops.VCAT | Ops.GETADDR | Ops.BINARY: return ()
+      case Ops.GEP | Ops.STACK | Ops.VCONST | Ops.VCAT | Ops.GETADDR: return ()
 
       # some ops init the shape
       case Ops.BIND | Ops.RANGE | Ops.SPECIAL | Ops.UNROLL: return ()
+      case Ops.BINARY: return (len(self.arg),)
       case Ops.BUFFER: return (self.arg,)
       case Ops.BUFFER_VIEW:
         # HACK: BUFFER_VIEW is used inside kernels, so we set the shape to () if it's on an INDEX

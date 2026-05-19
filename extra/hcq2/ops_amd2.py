@@ -134,17 +134,17 @@ class AMDComputeQueue(HCQEncoder):
     self.pkt3(self.pm4.PACKET3_EVENT_WRITE, self.pm4.EVENT_TYPE(self.soc.CS_PARTIAL_FLUSH) | self.pm4.EVENT_INDEX(EVENT_INDEX_PARTIAL_FLUSH))
 
 amd_inner_pm = PatternMatcher([
-  (UPat(Ops.WAIT, name="x"),    lambda ctx, x: ctx.wait(x)),
-  (UPat(Ops.BARRIER, name="x"), lambda ctx, x: ctx.barrier(x)),
-  (UPat(Ops.PROGRAM, name="x"), lambda ctx, x: ctx.program(x)),
-  (UPat(Ops.CUSTOM_FUNCTION, arg="timestamp", name="x"), lambda ctx, x: ctx.timestamp(x)),
-  (UPat(Ops.STORE, src=(UPat((Ops.BUFFER, Ops.PARAM)), UPat()), name="x"), lambda ctx, x: ctx.store(x)),
+  (UPat(Ops.LINEAR, src=(UPat(Ops.WAIT, name="x"),)),    lambda ctx, x: ctx.wait(x)),
+  (UPat(Ops.LINEAR, src=(UPat(Ops.BARRIER, name="x"),)), lambda ctx, x: ctx.barrier(x)),
+  (UPat(Ops.LINEAR, src=(UPat(Ops.PROGRAM, name="x"),)), lambda ctx, x: ctx.program(x)),
+  (UPat(Ops.LINEAR, src=(UPat(Ops.CUSTOM_FUNCTION, arg="timestamp", name="x"),)), lambda ctx, x: ctx.timestamp(x)),
+  (UPat(Ops.LINEAR, src=(UPat(Ops.STORE, src=(UPat((Ops.BUFFER, Ops.PARAM)), UPat()), name="x"),)), lambda ctx, x: ctx.store(x)),
 ])
 
 def amd_lower_pm4(ctx, linear):
   enc = AMDComputeQueue(Device["AMD"])
-  graph_rewrite(linear, amd_inner_pm, ctx=enc, name="amd: encode")
-  return enc.build(dev="CPU", dtype=dtypes.void, tag="compute")
+  graph_rewrite(linear.replace(src=tuple(UOp(Ops.LINEAR, dtypes.void, (cmd,)) for cmd in linear.src)), amd_inner_pm, ctx=enc, name="amd: encode")
+  return enc.uop(dev="CPU", dtype=dtypes.void, tag="compute")
 
 def amd_submit_pm4(ctx, cf):
   dev = Device['AMD']
@@ -197,15 +197,15 @@ def amd_lower_sdma(ctx, linear):
   copy = next(s for s in linear.src if s.op is Ops.COPY)
   dev = Device[dev_name:=copy.src[0].buffer.device]
   enc = AMDCopyQueue(dev)
-  graph_rewrite(linear, amd_inner_sdma_pm, ctx=enc, name="amd: encode sdma")
-  return enc.build(dev="CPU", dtype=dtypes.void, tag="copy")
+  graph_rewrite(linear.replace(src=tuple(UOp(Ops.LINEAR, dtypes.void, (cmd,)) for cmd in linear.src)), amd_inner_sdma_pm, ctx=enc, name="amd: encode sdma")
+  return enc.uop(dev="CPU", dtype=dtypes.void, tag="copy")
 
 amd_inner_sdma_pm = PatternMatcher([
-  (UPat(Ops.WAIT,  name="x"), lambda ctx, x: ctx.wait(x)),
-  (UPat(Ops.BARRIER, name="x"), lambda ctx, x: None),
-  (UPat(Ops.COPY,  name="x"), lambda ctx, x: ctx.copy(x)),
-  (UPat(Ops.CUSTOM_FUNCTION, arg="timestamp", name="x"), lambda ctx, x: ctx.timestamp(x)),
-  (UPat(Ops.STORE, src=(UPat((Ops.BUFFER, Ops.PARAM)), UPat()), name="x"), lambda ctx, x: ctx.store(x)),
+  (UPat(Ops.LINEAR, src=(UPat(Ops.WAIT, name="x"),)), lambda ctx, x: ctx.wait(x)),
+  (UPat(Ops.LINEAR, src=(UPat(Ops.BARRIER, name="x"),)), lambda ctx, x: None),
+  (UPat(Ops.LINEAR, src=(UPat(Ops.COPY, name="x"),)), lambda ctx, x: ctx.copy(x)),
+  (UPat(Ops.LINEAR, src=(UPat(Ops.CUSTOM_FUNCTION, arg="timestamp", name="x"),)), lambda ctx, x: ctx.timestamp(x)),
+  (UPat(Ops.LINEAR, src=(UPat(Ops.STORE, src=(UPat((Ops.BUFFER, Ops.PARAM)), UPat()), name="x"),)), lambda ctx, x: ctx.store(x)),
 ])
 
 def amd_submit_sdma(ctx, cf):
@@ -267,8 +267,7 @@ def amd_build_program(ctx:HCQ2LowerCtx, prg:UOp) -> UOp:
   data, image_bytes = cached
   buf_uop = UOp.new_buffer(dev.device, len(image_bytes), dtypes.uint8).rtag("program")
   blob_uop = UOp(Ops.BINARY, dtypes.void, src=(), arg=image_bytes)
-  init = buf_uop.index(UOp.const(dtypes.int, 0)).store(blob_uop)
-  return prg.replace(src=(buf_uop.after(init),), arg=(data, prg.arg))
+  return prg.replace(src=(buf_uop.after(buf_uop.store(blob_uop)),), arg=(data, prg.arg))
 
 class AMDAllocator(HCQAllocator['AMDDevice']):
   def __init__(self, dev:AMDDevice):
