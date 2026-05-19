@@ -76,7 +76,7 @@ pm_drop_dead_stores = PatternMatcher([(UPat(Ops.LINEAR, src=UPat(Ops.LINEAR), na
 
 def add_queue_sig_resets(ctx:HCQ2Graph, cf:UOp) -> UOp|None:
   if not ctx.queue_sig_bufs or cf.arg not in ("submit_compute", "submit_copy"): return None
-  resets = tuple(UOp(Ops.INDEX, (b:=UOp.from_buffer(sig)).dtype.ptr(), (b, UOp.const(dtypes.int, 0)))
+  resets = tuple((b:=UOp.from_buffer(sig)).index(UOp.const(dtypes.int, 0), dtype=b.dtype.ptr())
                  .cast(dtypes.uint64.ptr()).store(UOp.const(dtypes.uint64, 0)) for sig in ctx.queue_sig_bufs)
   patched = cf.src[0]
   new_patched = patched.replace(src=patched.src + resets) if patched.op is Ops.AFTER else patched.after(*resets)
