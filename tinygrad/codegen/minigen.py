@@ -14,7 +14,7 @@ from tinygrad.uop.symbolic import sym
 def lower_weakint(x:UOp):
   # no sources, it's an int
   if len(x.src) == 0: return x.replace(dtype=dtypes.int)
-  return x.replace(dtype=least_upper_dtype(*[u.dtype for u in x.src]))
+  return x.replace(dtype=least_upper_dtype(dtypes.int, *[u.dtype for u in x.src]))
 
 pm_lower_weakint = PatternMatcher([
   (UPat(GroupOp.All, dtypes.weakint, name="x"), lower_weakint),
