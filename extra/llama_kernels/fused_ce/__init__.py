@@ -1,4 +1,3 @@
-from __future__ import annotations
 import functools
 from tinygrad import Tensor, dtypes
 from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
@@ -7,18 +6,19 @@ from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
 def _custom_fused_ce_loss_fwd(loss_out:UOp, max_out:UOp, lse_out:UOp, logits:UOp, targets:UOp,
                               vocab:int, rows:int, label_smoothing:float) -> UOp:
   row = UOp.range(rows, 0)
-  target = targets[row].cast(dtypes.weakint)
+
   v_max = UOp.range(vocab, 1, axis_type=AxisType.REDUCE)
   row_max = logits[row, v_max].cast(dtypes.float).reduce(v_max, arg=Ops.MAX)
-  v_sum = UOp.range(vocab, 2, axis_type=AxisType.REDUCE)
-  x_sum = logits[row, v_sum].cast(dtypes.float)
-  sum_exp = (x_sum - row_max).exp().reduce(v_sum, arg=Ops.ADD)
-  v_x = UOp.range(vocab, 3, axis_type=AxisType.REDUCE)
-  sum_x = logits[row, v_x].cast(dtypes.float).reduce(v_x, arg=Ops.ADD)
-  target_logit = logits[row, target].cast(dtypes.float)
-  row_lse = sum_exp.log() + row_max
-  loss = row_lse - (1.0 - label_smoothing) * target_logit - label_smoothing * (sum_x / vocab)
+
+  v_lse = UOp.range(vocab, 2, axis_type=AxisType.REDUCE)
+  row_lse = (logits[row, v_lse].cast(dtypes.float) - row_max).exp().reduce(v_lse, arg=Ops.ADD).log() + row_max
+
+  v_smooth = UOp.range(vocab, 3, axis_type=AxisType.REDUCE)
+  target = logits[row, targets[row].cast(dtypes.weakint)].cast(dtypes.float)
+  mean_logits = logits[row, v_smooth].cast(dtypes.float).reduce(v_smooth, arg=Ops.ADD) / vocab
+  loss = row_lse - (1.0 - label_smoothing) * target - label_smoothing * mean_logits
   stores = UOp.group(loss_out[row].store(loss), max_out[row].store(row_max), lse_out[row].store(row_lse))
+
   return stores.end(row).sink(arg=KernelInfo(f"fused_ce_loss_fwd_{rows}_{vocab}"))
 
 @functools.cache
@@ -26,10 +26,12 @@ def _custom_fused_ce_loss_bwd(d_logits:UOp, logits:UOp, lse:UOp, targets:UOp, sc
                               vocab:int, rows:int, label_smoothing:float) -> UOp:
   row = UOp.range(rows, 0)
   v = UOp.range(vocab, 1)
-  x = logits[row, v].cast(dtypes.float)
-  prob = (x - lse[row]).exp()
-  target_term = v.eq(targets[row].cast(dtypes.weakint)).where(1.0 - label_smoothing, 0.0)
-  grad = (prob - target_term - label_smoothing / vocab) * scale[0]
+
+  prob = (logits[row, v].cast(dtypes.float) - lse[row]).exp()
+  target = v.eq(targets[row].cast(dtypes.weakint)).where(1.0 - label_smoothing, 0.0)
+  smooth = label_smoothing / vocab
+  grad = (prob - target - smooth) * scale[0]
+
   return d_logits[row, v].store(grad.cast(d_logits.dtype.base)).end(v, row).sink(arg=KernelInfo(f"fused_ce_loss_bwd_{rows}_{vocab}"))
 
 def _fused_ce_loss_bwd(gradient:UOp, kernel:UOp, label_smoothing:float):
