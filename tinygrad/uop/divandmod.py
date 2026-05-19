@@ -65,7 +65,7 @@ def fold_divmod_general(d: UOp) -> UOp|None:
     # nest_by_factor: x//c -> (x//f)//(c//f), x%c -> (x//f%(c//f))*f + b where b=x%f
     # FLOORDIV identity holds for any sign of x; FLOORMOD reconstruction needs x.vmin>=0
     results = []
-    for div in {abs(f) for u, f in zip(uops_no_const, factors) if u.op is Ops.CONST and 1 < abs(f) < c and (c%f)==0}:
+    for div in {abs(f) for u, f in zip(uops_no_const, factors) if u.op is not Ops.CONST and 1 < abs(f) < c and (c%f)==0}:
       if (newxs := fold_divmod_general(x//div)) is not None:
         if d.op is Ops.FLOORDIV:
           results.append((len(newxs.backward_slice), newxs // (c // div)))
