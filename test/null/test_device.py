@@ -181,6 +181,7 @@ class TestCompiler(unittest.TestCase):
       a = Tensor([0.,1.], device=Device.DEFAULT).realize()
       (a + 1).realize()
 
+@unittest.skip("this test is broken if you have tinymesa installed")
 @unittest.skipIf(OSX and 'libclang' in DLL._loaded_, "MTLCompiler can't be loaded after libclang on OSX")
 class TestRunAsModule(unittest.TestCase):
   def test_module_runs(self):

@@ -130,6 +130,7 @@ def line_rewrite(lst:list[UOp], pm:PatternMatcher) -> list[UOp]:
   return newlst
 
 def do_linearize(prg:UOp, sink:UOp) -> UOp:
+  if DEBUG >= 3 and sink.arg.applied_opts: print(f"{sink.arg.function_name:<25} opts: {sink.arg.applied_opts}")
   lst = line_rewrite(linearize(sink), pm_linearize_cleanups)
   if SPEC: type_verify(lst, spec_program)
   return prg.replace(src=prg.src + (UOp(Ops.LINEAR, src=tuple(lst)),))
@@ -139,8 +140,9 @@ def do_estimates(prg:UOp, sink:UOp, lin:UOp) -> UOp|None:
   return prg.replace(src=(sink.replace(arg=replace(sink.arg, estimates=Estimates.from_uops(lin.src, ignore_indexing=True))),)+prg.src[1:])
 
 def do_assemble(ctx:Renderer, prg:UOp, lin:UOp) -> UOp:
-  binary = ctx.asm(prg, lin)
   src = "\n".join(str(u.arg) for u in lin.src)
+  if DEBUG >= 4: print(src)
+  binary = ctx.asm(prg, lin)
   return prg.replace(src=prg.src[:3]+(UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=binary)))
 
 def do_render(ctx:Renderer, prg:UOp, lin:UOp) -> UOp:
@@ -149,7 +151,9 @@ def do_render(ctx:Renderer, prg:UOp, lin:UOp) -> UOp:
   return prg.replace(src=prg.src + (UOp(Ops.SOURCE, arg=src),), arg=new_arg)
 
 def do_compile(ctx:Renderer, prg:UOp, source:UOp) -> UOp|None:
+  if DEBUG >= 4: print(source.arg)
   lib = ctx.compiler.compile_cached(source.arg)
+  if DEBUG >= 7: ctx.compiler.disassemble(lib)
   return prg.replace(src=prg.src + (UOp(Ops.BINARY, arg=lib),))
 
 pm_to_program = PatternMatcher([

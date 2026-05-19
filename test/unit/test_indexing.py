@@ -153,7 +153,7 @@ class TestIndexing(unittest.TestCase):
     n = random.randint(1, 10)
     z = Tensor.randn([m, n])
     a = 1.0
-    w = Tensor(a, requires_grad=True)
+    w = Tensor(a)
     z[:, 0] = w
     z.sum().backward()
     numpy_testing_assert_equal_helper(w.grad, m * a)
@@ -952,11 +952,9 @@ def assert_set_eq(tensor: Tensor, indexer, val):
 # NOTE: torch initiates the gradients using g0cpu (rand as gradients)
 def assert_backward_eq(tensor: Tensor, indexer):
   cpu = clone(tensor.float())
-  cpu.requires_grad = True
   outcpu = cpu[indexer].sum()
   outcpu.backward()
   dev = cpu.detach()
-  dev.requires_grad = True
   outdev = dev[indexer].sum()
   outdev.backward()
   numpy_testing_assert_equal_helper(cpu.grad, dev.grad)

@@ -17,10 +17,10 @@ def tag_uop(ctx:AllocCtx, x:UOp):
 
 def disk_copy_is_buffer(ctx:AllocCtx, u:UOp):
   # copies to disk are replaced with the disk buffer
-  to_disk = isinstance(u._device, str) and u._device.startswith(("DISK", "TINYFS"))
+  to_disk = isinstance(u.device, str) and u.device.startswith(("DISK", "TINYFS"))
   if to_disk: ctx.buffer_map[u] = u.empty_like()
   # all copies from disk/numpy are realized into a real buffer
-  from_creation = isinstance(u.src[0]._device, str) and any(u.src[0]._device.startswith(x) for x in ["NPY", "DISK", "PYTHON", "TINYFS"])
+  from_creation = isinstance(u.src[0].device, str) and any(u.src[0].device.startswith(x) for x in ["NPY", "DISK", "PYTHON", "TINYFS"])
   if from_creation: return tag_uop(ctx, u)
 
 def apply_after(ctx:AllocCtx, u:UOp):
@@ -42,11 +42,11 @@ add_tags = PatternMatcher([
 
 def replace_contig_with_store_after(u:UOp):
   # can't allocate a buffer without a device (e.g., inside a CALL function body with only PARAMs)
-  if u._device is None: return None
+  if u.device is None: return None
   # if size is 0, remove the contig
   if 0 in u.shape: return u.src[0]
   # no real contig for DISK/TINYFS tensors, they are left alone
-  if isinstance(u._device, str) and u._device.startswith(("DISK", "TINYFS")): return u.rtag(None)
+  if isinstance(u.device, str) and u.device.startswith(("DISK", "TINYFS")): return u.rtag(None)
   buf = u.empty_like()
   return buf.after(buf.store(u.src[0])).rtag(u.tag)
 
@@ -107,13 +107,16 @@ def transform_precompiled_call(c:UOp) -> UOp|None:
   subs:dict[UOp, UOp] = {}
   items:list[UOp] = []
   for s, t in zip(srcs, targets):
-    while s.op is Ops.AFTER: s = s.src[0]
+    after_deps:list[UOp] = []
+    while s.op is Ops.AFTER:
+      after_deps.extend(s.src[1:])
+      s = s.src[0]
     base = s.base
     if base.op in {Ops.CONTIGUOUS, Ops.BUFFER} and base.shape == t.shape and base not in subs:
       subs[base] = t.after(t.store(base.src[0])) if base.op is Ops.CONTIGUOUS else t
-      items.append(s)
+      items.append(s.after(*after_deps) if after_deps else s)
     else:
-      items.append(t.after(t.store(s)))
+      items.append(t.after(t.store(s), *after_deps))
   fxn = UOp.sink(*(x.substitute(subs) for x in items))
 
   # body switches from TUPLE to SINK, so the node becomes an opaque CALL (not FUNCTION)
@@ -167,7 +170,7 @@ def finalize_after(ctx:AllocCtx, x:UOp):
 
 def replace_input_buffer(ctx:AllocCtx, b:UOp):
   ctx.replacements.append(b)
-  return UOp.param(len(ctx.replacements)-1, b.dtype, b.shape, b._device,
+  return UOp.param(len(ctx.replacements)-1, b.dtype, b.shape, b.device,
                    b._min_max if b.op is Ops.BIND else None, b.src[0].arg[0] if b.op is Ops.BIND else None)
 
 pm_finalize_call = PatternMatcher([

@@ -2,9 +2,8 @@ import math, os
 if __name__ == "__main__":
   os.environ["DEFAULT_FLOAT"] = "bfloat16"
   os.environ["OPTIM_DTYPE"] = "bfloat16"
-  if "DEV" not in os.environ: os.environ["DEV"] = "NULL"
+  if "DEV" not in os.environ: os.environ["DEV"] = "NULL::gfx950"
   # CDNA
-  os.environ["EMULATE"] = "AMD_CDNA4"
   os.environ["DEVICE_IN_FUNCTION_BUG"] = "1"
   os.environ["ALL2ALL"] = "1"
   os.environ["USE_ATOMICS"] = "1"
@@ -23,7 +22,7 @@ ASM_GEMM = getenv("ASM_GEMM", 0)
 FUSED_INPUT_QUANTIZE = getenv("FUSED_INPUT_QUANTIZE", 0)
 FUSED_ADD_NORM_MUL_QUANTIZE = getenv("FUSED_ADD_NORM_MUL_QUANTIZE", 0)
 FUSED_SILU_W13 = getenv("FUSED_SILU_W13", 0)
-SPLIT_W13 = getenv("SPLIT_W13", 0)
+SPLIT_W13 = getenv("SPLIT_W13", 1)
 
 FP8_DTYPE = dtypes.fp8e4m3
 FP8_GRAD_DTYPE = dtypes.fp8e5m2
@@ -53,8 +52,8 @@ def matmul(x:Tensor, w:Tensor, fp8:bool=True, amax_x:Tensor|None=None, w_inv_sca
   if ASM_GEMM:
     from extra.gemm.cdna_asm_gemm import can_use_asm_gemm, asm_gemm
     if can_use_asm_gemm(x_fp8, w.T):
-      return asm_gemm(x_fp8, w.T, x_scale=x_scale, w_scale=w_inv_scale, grad_amax_state=grad_amax_state), x_new_amax, x_fp8, w
-  return (x_fp8.dot(w.T, dtype=dtypes.float) * x_scale * w_inv_scale).cast(dtypes.bfloat16), x_new_amax, x_fp8, w
+      return asm_gemm(x_fp8, w.T, x_scale=x_scale, w_scale=w_inv_scale, grad_amax_state=grad_amax_state), x_new_amax, x_fp8
+  return (x_fp8.dot(w.T, dtype=dtypes.float) * x_scale * w_inv_scale).cast(dtypes.bfloat16), x_new_amax, x_fp8
 
 def norm_quantize_matmul(x:Tensor, norm:Tensor, w:Tensor, w_inv_scale:Tensor, eps:float, amax_x:Tensor, grad_amax_state:Tensor):
   if FUSED_ADD_NORM_MUL_QUANTIZE:
@@ -208,11 +207,13 @@ class FlatTransformer:
     return out, h, amaxs, saves
 
   @function(precompile=True, precompile_backward=True)
-  def run_layer(self, x:Tensor, freqs_cis:Tensor, attn_kwargs:dict, ffn_kwargs:dict):
+  def run_layer(self, x:Tensor, freqs_cis:Tensor, attn_kwargs:dict, ffn_kwargs:dict, save:bool=True):
     attn, attn_amaxs, attn_saves = self.attention(x, freqs_cis, **attn_kwargs)
     ffn, h, ffn_amaxs, ffn_saves = self.feed_forward(x, attn, **ffn_kwargs)
     h = h + ffn
-    return (h, *attn_amaxs, *ffn_amaxs, *attn_saves, *ffn_saves)
+    amaxs = tuple(a.detach() for a in (*attn_amaxs, *ffn_amaxs))
+    if save: return (h, *amaxs, *attn_saves, *ffn_saves)
+    else: return (h, *amaxs)
 
   def shard(self, device:tuple[str, ...], mp:bool=False):
     from tinygrad.nn.state import get_parameters
@@ -241,7 +242,7 @@ class FlatTransformer:
       for name in self._fp8_inv_scale:
         self._fp8_inv_scale[name] = self._fp8_inv_scale[name].to(device).contiguous().requires_grad_(False)
 
-  def __call__(self, tokens:Tensor):
+  def __call__(self, tokens:Tensor, save:bool=True):
     h = self.tok_embeddings(tokens)
     freqs_cis = self.freqs_cis.cast(h.dtype)[:, :tokens.shape[1], :, :, :]
     a, ga, s = self._fp8_amax, self._fp8_grad_amax, self._fp8_inv_scale
@@ -256,7 +257,7 @@ class FlatTransformer:
                           s_1=s["w1"][i], s_3=s["w3"][i], grad_amax_xw1=ga["xw1"][i], grad_amax_xw3=ga["xw3"][i])
       else:
         ffn_kwargs.update(w13=self.w13[i], amax_x13=a["x13"][i], s_13=s["w13"][i], grad_amax_xw13=ga["xw13"][i])
-      h, *ret = self.run_layer(h, freqs_cis, attn_kwargs, ffn_kwargs)
+      h, *ret = self.run_layer(h, freqs_cis, attn_kwargs, ffn_kwargs, save=save)
       amax_names = ["xqkv", "xo"] + (["x1", "x3"] if SPLIT_W13 else ["x13"]) + ["x2"]
       for name, new_val in zip(amax_names, ret[:len(amax_names)]):
         a[name][i].assign(new_val)
@@ -291,7 +292,7 @@ if __name__ == "__main__":
   SEQLEN             = config["SEQLEN"]                 = getenv("SEQLEN", 8192)
 
   from examples.llama3 import MODEL_PARAMS
-  model_params = MODEL_PARAMS[getenv("LLAMA3_SIZE", "8B")]["args"]
+  model_params = MODEL_PARAMS[llama_size:=getenv("LLAMA3_SIZE", "8B")]["args"]
   if (llama_layers:=getenv("LLAMA_LAYERS")) != 0: model_params['n_layers'] = llama_layers
   model = FlatTransformer(**model_params, max_context=SEQLEN)
   state = nn.state.get_state_dict(model)
@@ -305,8 +306,12 @@ if __name__ == "__main__":
     model.shard(tuple(f"{Device.DEFAULT}:{i}" for i in range(MP)), mp=True)
 
   # preallocate all the grad buffers and zero them out
-  grads = {x:Tensor.zeros(x.shape, dtype=x.dtype, device=x.device).contiguous()
-           for x in state.values() if x.requires_grad is None}
+  grad_dtype = lambda x: dtypes.bfloat16 if x.dtype in dtypes.fp8s else x.dtype
+  def _make_grad(x):
+    if isinstance(x.device, tuple) and x.uop.axis is not None:
+      return Tensor.zeros(x.shape, dtype=grad_dtype(x), device=x.device[0]).shard_(x.device, axis=x.uop.axis).contiguous()
+    return Tensor.zeros(x.shape, dtype=grad_dtype(x), device=x.device).contiguous()
+  grads = {x:_make_grad(x) for x in state.values() if x.requires_grad}
 
   # print model size
   sz = 0
@@ -322,16 +327,22 @@ if __name__ == "__main__":
   if MP > 1: tokens = tokens.shard(tuple(f"{Device.DEFAULT}:{i}" for i in range(MP)))
 
   @TinyJit
-  def jit_step(tokens:Tensor):
-    with Timing("python forward: "): loss = model(tokens[:, :-1]).sparse_categorical_crossentropy(tokens[:, 1:])
+  def fwd_bwd(tokens:Tensor):
+    with Timing("python forward: "): loss = model(tokens[:, :-1], save=llama_size=="8B").sparse_categorical_crossentropy(tokens[:, 1:])
     with Timing("python backward: "):
       for t,g in zip(grads, loss.gradient(*grads)):
         apply_grad(grads[t], g.uop)
-    with Timing("run step: "): loss.realize(*grads.values())
+    with Timing("run fwd_bwd: "): loss.realize(*grads.values())
+
+  @TinyJit
+  def optim_step():
+    for g in grads.values(): g.assign(g.zeros_like())
+    Tensor.realize(*grads.values())
 
   for i in range(6):
     GlobalCounters.reset()
     profile_marker(f"step {i}")
     with Timing(colored(f"*** step {i}: ", "red")):
-      jit_step(tokens)
+      fwd_bwd(tokens)
+      optim_step()
   print("mem per device: " + ', '.join(f"{dev}: {mem/1e9:.2f} GB" for dev, mem in sorted(GlobalCounters.mem_used_per_device.items())))

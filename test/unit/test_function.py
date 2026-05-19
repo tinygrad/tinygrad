@@ -91,8 +91,8 @@ class TestFunction(unittest.TestCase):
     @function
     def f(a:Tensor, b:Tensor) -> Tensor: return a @ b
 
-    a = Tensor([[1.,2.],[3.,4.]], requires_grad=True)
-    b = Tensor([[5.,6.],[7.,8.]], requires_grad=True)
+    a = Tensor([[1.,2.],[3.,4.]])
+    b = Tensor([[5.,6.],[7.,8.]])
     (f(a, b).contiguous() * b).sum().backward()
     Tensor.realize(a, b, a.grad, b.grad)
     # L = sum((a@b) * b), dL/d(a@b) = b, dL/da = b @ b^T, dL/db = a^T @ b + (a@b)
@@ -101,7 +101,7 @@ class TestFunction(unittest.TestCase):
     np.testing.assert_allclose(b.grad.numpy(), na.T @ nb + na @ nb)
 
   def test_grad_implicit(self):
-    w = Tensor([1., 2., 3.], requires_grad=True)
+    w = Tensor([1., 2., 3.])
     w.realize() # TODO: this is required
     @function(allow_implicit=True)
     def f(x:Tensor) -> Tensor: return x * w
@@ -144,8 +144,8 @@ class TestFunction(unittest.TestCase):
     @function(allow_implicit=True)
     def outer(a:Tensor, b:Tensor) -> Tensor: return inner(a.reshape(1,2) + b.reshape(1,2))
 
-    a = Tensor([1., 2.], requires_grad=True)
-    b = Tensor([3., 4.], requires_grad=True)
+    a = Tensor([1., 2.])
+    b = Tensor([3., 4.])
     outer(a, b).sum().backward()
     np.testing.assert_allclose(a.grad.numpy(), [2., 2.])
     np.testing.assert_allclose(b.grad.numpy(), [2., 2.])
@@ -154,9 +154,9 @@ class TestFunction(unittest.TestCase):
     @function
     def f(a:Tensor, b:Tensor, c:Tensor) -> Tensor: return a + c  # b is unused
 
-    a = Tensor([1., 2., 3.], requires_grad=True)
-    b = Tensor([4., 5., 6.], requires_grad=True)
-    c = Tensor([7., 8., 9.], requires_grad=True)
+    a = Tensor([1., 2., 3.])
+    b = Tensor([4., 5., 6.])
+    c = Tensor([7., 8., 9.])
     f(a, b, c).sum().backward()
     np.testing.assert_allclose(a.grad.numpy(), [1., 1., 1.])
     np.testing.assert_allclose(b.grad.numpy(), [0., 0., 0.])
@@ -279,7 +279,7 @@ class TestFunctionMulti(unittest.TestCase):
     np.testing.assert_allclose(f(x, w).numpy(), [[1.,2.],[3.,4.],[5.,6.],[7.,8.]])
 
   def test_grad_implicit_multi(self):
-    w = Tensor([1., 2., 3., 4.], requires_grad=True).shard(self.devices_2, axis=None)
+    w = Tensor([1., 2., 3., 4.]).shard(self.devices_2, axis=None)
     w.realize()
     @function(allow_implicit=True)
     def f(x:Tensor) -> Tensor: return x * w
@@ -315,8 +315,8 @@ class TestFunctionMulti(unittest.TestCase):
     @function
     def f(x:Tensor, w:Tensor) -> Tensor: return x @ w
 
-    x = Tensor([[1.,0.],[0.,1.],[1.,1.],[0.,0.]], requires_grad=True).shard(self.devices_2, axis=0)
-    w = Tensor([[1.,2.],[3.,4.]], requires_grad=True).shard(self.devices_2, axis=None)
+    x = Tensor([[1.,0.],[0.,1.],[1.,1.],[0.,0.]]).shard(self.devices_2, axis=0)
+    w = Tensor([[1.,2.],[3.,4.]]).shard(self.devices_2, axis=None)
     w.realize()
     f(x, w).sum().backward()
     # d/dx = ones @ w^T = [[1,3],[1,3],[1,3],[1,3]], but sum so ones(4,2) @ w^T? no:
@@ -328,26 +328,26 @@ class TestFunctionMulti(unittest.TestCase):
     @function
     def f(x:Tensor, w:Tensor) -> Tensor: return x @ w
 
-    x = Tensor(np.arange(16).reshape(8,2).astype(np.float32), requires_grad=True).shard(devices_4, axis=0)
-    w = Tensor([[1.,2.],[3.,4.]], requires_grad=True).shard(devices_4, axis=None)
+    x = Tensor(np.arange(16).reshape(8,2).astype(np.float32)).shard(devices_4, axis=0)
+    w = Tensor([[1.,2.],[3.,4.]]).shard(devices_4, axis=None)
     w.realize()
     f(x, w).sum().backward()
     np.testing.assert_allclose(x.grad.numpy(), np.ones((8,2)) @ np.array([[1,3],[2,4]]))
 
   def test_data_parallel_backward_implicit(self):
     devices_4 = tuple(f"CPU:{i}" for i in range(4))
-    w = Tensor([[1.,2.],[3.,4.]], requires_grad=True).shard(devices_4, axis=None)
+    w = Tensor([[1.,2.],[3.,4.]]).shard(devices_4, axis=None)
     w.realize()
     @function(allow_implicit=True)
     def f(x:Tensor) -> Tensor: return x @ w
 
-    x = Tensor(np.arange(16).reshape(8,2).astype(np.float32), requires_grad=True).shard(devices_4, axis=0)
+    x = Tensor(np.arange(16).reshape(8,2).astype(np.float32)).shard(devices_4, axis=0)
     f(x).sum().backward()
     np.testing.assert_allclose(x.grad.numpy(), np.ones((8,2)) @ np.array([[1,3],[2,4]]))
 
   def test_data_parallel_backward_twice(self):
     devices_4 = tuple(f"CPU:{i}" for i in range(4))
-    w = Tensor([[1.,2.],[3.,4.]], requires_grad=True).shard(devices_4, axis=None)
+    w = Tensor([[1.,2.],[3.,4.]]).shard(devices_4, axis=None)
     w.realize()
     # pre-init grads like the training loop does
     w.grad = w.zeros_like().contiguous().realize()
@@ -356,7 +356,7 @@ class TestFunctionMulti(unittest.TestCase):
 
     expected = np.ones((8,2)) @ np.array([[1,3],[2,4]])
     for _ in range(2):
-      x = Tensor(np.arange(16).reshape(8,2).astype(np.float32), requires_grad=True).shard(devices_4, axis=0)
+      x = Tensor(np.arange(16).reshape(8,2).astype(np.float32)).shard(devices_4, axis=0)
       f(x).sum().backward()
       np.testing.assert_allclose(x.grad.numpy(), expected)
 
@@ -373,8 +373,8 @@ class TestFunctionTuple(unittest.TestCase):
   def test_tuple_precompile(self): self.test_tuple(True)
 
   def test_grad_tuple(self, precompile=False):
-    x = Tensor.ones(3, requires_grad=True).contiguous()
-    y = Tensor.ones(3, requires_grad=True).contiguous()
+    x = Tensor.ones(3).contiguous()
+    y = Tensor.ones(3).contiguous()
     @function(precompile=precompile)
     def f(u1:Tensor, u2:Tensor): return (u1+1, u2+2)
     t1, t2 = f(x,y)
@@ -389,8 +389,8 @@ class TestFunctionTuple(unittest.TestCase):
       # df/du1 = d_out0, df/du2 = d_out1
       return (d_out0, d_out1)
 
-    x = Tensor.ones(3, requires_grad=True).contiguous()
-    y = Tensor.ones(3, requires_grad=True).contiguous()
+    x = Tensor.ones(3).contiguous()
+    y = Tensor.ones(3).contiguous()
     @function(grad_fxn=grad_fxn)
     def f(u1:Tensor, u2:Tensor): return (u1+1, u2+2)
     t1, t2 = f(x, y)
@@ -406,8 +406,8 @@ class TestFunctionTuple(unittest.TestCase):
       b = (x @ w) * 2  # shares x@w with a
       return (a, b)
 
-    x = Tensor([[1., 2.], [3., 4.]], requires_grad=True).contiguous()
-    w = Tensor([[1., 0.], [0., 1.]], requires_grad=True).contiguous()
+    x = Tensor([[1., 2.], [3., 4.]]).contiguous()
+    w = Tensor([[1., 0.], [0., 1.]]).contiguous()
     Tensor.realize(x, w)
     t1, _ = f(x, w)
     t1.sum().backward()
@@ -435,7 +435,7 @@ class TestFunctionTuple(unittest.TestCase):
       c, d = Tensor.custom_kernel(c, d, a, fxn=my_kernel, grad_fxn=my_grad)[:2]
       return c, d
 
-    a = Tensor([1., 2., 3., 4.], requires_grad=True).contiguous()
+    a = Tensor([1., 2., 3., 4.]).contiguous()
     Tensor.realize(a)
     c, _ = f(a)
     c.sum().backward()
@@ -459,7 +459,7 @@ class TestFunctionTuple(unittest.TestCase):
       c, d = Tensor.custom_kernel(c, d, a, fxn=my_kernel, grad_fxn=my_grad)[:2]
       return (c, d)
 
-    a = Tensor([1., 2., 3., 4.], requires_grad=True).contiguous()
+    a = Tensor([1., 2., 3., 4.]).contiguous()
     Tensor.realize(a)
     c, d = f(a)
     (c.sum() + d.sum()).backward()  # dL/da = (1 + 1) since grad_fxn passes d_combined through
@@ -485,7 +485,7 @@ class TestFunctionTuple(unittest.TestCase):
       return sum((len(call.device) if isinstance(call.device, tuple) else 1)
                  for call in linear.src if call.src[0].op is Ops.SINK)
 
-    a = Tensor([1., 2., 3., 4.], requires_grad=True).contiguous()
+    a = Tensor([1., 2., 3., 4.]).contiguous()
     Tensor.realize(a)
     c = f(a)
 
@@ -513,9 +513,9 @@ class TestFunctionGrad(unittest.TestCase):
   def test_function_grad_ops(self, precompile=False, precompile_backward=False):
     N = 64
     x = Tensor.ones(N,N).contiguous()
-    w1 = Tensor.ones(N,N, requires_grad=True).contiguous()
-    w2 = Tensor.ones(N,N, requires_grad=True).contiguous()
-    w3 = Tensor.ones(N,N, requires_grad=True).contiguous()
+    w1 = Tensor.ones(N,N).contiguous()
+    w2 = Tensor.ones(N,N).contiguous()
+    w3 = Tensor.ones(N,N).contiguous()
     ref = Tensor.ones(N,N).contiguous()
     Tensor.realize(x, w1, w2, w3, ref)
     @function(precompile=precompile, precompile_backward=precompile_backward)

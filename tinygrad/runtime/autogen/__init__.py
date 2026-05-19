@@ -155,8 +155,10 @@ def __getattr__(nm):
           *[f"python3 src/compiler/{s}_h.py > gen/{s.split('/')[-1]}.h" for s in ["nir/nir_opcodes", "nir/nir_builder_opcodes"]],
           *[f"python3 src/compiler/nir/nir_{s}_h.py --outdir gen" for s in ["intrinsics", "intrinsics_indices"]]]), cwd=path, shell=True, check=True),
   srcs="https://gitlab.freedesktop.org/mesa/mesa/-/archive/mesa-25.2.7/mesa-25.2.7.tar.gz",
-  dll="([] if DEV.renderer == 'LVP' else ['tinymesa']) + ['tinymesa_cpu']",
-  prolog=["from tinygrad.helpers import DEV", "import gzip, base64"],
+  dll="([] if (_cpu:=DEV.renderer == 'LVP') else ['tinymesa']) + ['tinymesa_cpu'], " \
+      'emsg="not available on this platform" if WIN or (OSX and (platform.machine() != "arm64" or (_mv:=platform.mac_ver()[0][:2]) not in {"14","15","26"})) or (platform.system() == "Linux" and platform.machine() not in {"x86_64", "aarch64"}) else ' \
+      'f"run `sudo curl -fL https://github.com/sirhcm/tinymesa/releases/download/v1/libtinymesa{\'_cpu\'*_cpu}-mesa-25.2.7-{\'macos-\'+_mv if OSX else \'linux\'}-{\'amd64\' if ARCH_X86 else \'arm64\'}.{\'dylib\' if OSX else \'so\'} -o /usr/local/lib/libtinymesa{\'_cpu\'*_cpu}.{\'dylib\' if OSX else \'so\'}`"',
+  prolog=["from tinygrad.helpers import DEV, ARCH_X86, WIN, OSX", "import gzip, base64, platform"],
   epilog=lambda path: [system(f"{root}/extra/mesa/lvp_nir_options.sh {path}")])
     case "libclang":
       return load("libclang",

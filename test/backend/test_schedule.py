@@ -5,7 +5,7 @@
 import gc, unittest, functools
 import numpy as np
 from typing import cast
-from hypothesis import assume, given, settings, strategies as strat
+from hypothesis import assume, given, strategies as strat
 
 from tinygrad import nn, dtypes, Device, Tensor, Variable
 from tinygrad.device import is_dtype_supported
@@ -44,8 +44,8 @@ def _test_conv2d(allowed:int, dtype:DType=dtypes.float):
   dtypes.default_float = dtype
   Tensor.manual_seed(0)
   BS, CIN = 2, 3
-  img = Tensor.randn(BS, CIN, 64, 64, requires_grad=True).realize()
-  w = Tensor.uniform(16, CIN, 3, 3, requires_grad=True).realize()
+  img = Tensor.randn(BS, CIN, 64, 64).realize()
+  w = Tensor.uniform(16, CIN, 3, 3).realize()
   ret = Tensor.conv2d(img, w).relu().mean().backward()
   dtypes.default_float = old_default_float
   linear, var_vals = Tensor.linear_with_vars(ret, img.grad, w.grad)
@@ -113,12 +113,6 @@ class TestSchedule(unittest.TestCase):
     run_linear(*check_schedule(b, 1))
     np.testing.assert_allclose(b.numpy(), np.broadcast_to(a.numpy().astype(np.float16), (2, 4, 4))+2, rtol=1e-3)
 
-  def test_indexing_scalars_simple(self):
-    X = Tensor.randn(2, 2).realize()
-    xt = X[Tensor(1)][Tensor(0)]
-    run_linear(*check_schedule(xt, 1))
-    np.testing.assert_equal(xt.numpy(), X.numpy()[1][0])
-
   @unittest.skipIf(CI and Device.DEFAULT == "NV", "crashes on NV CI")
   def test_add_chain_buffers(self):
     N = 31
@@ -130,14 +124,14 @@ class TestSchedule(unittest.TestCase):
         root = root + functools.reduce(lambda a,b:a+b, bufs[i:i+X])
       self.assertEqual(root.item(), sum(range(N)))
 
-  @given(strat.sampled_from(range(2,4)), strat.sampled_from(range(2,4)), strat.sampled_from(range(0,4)), strat.sampled_from(range(0,4)))
-  @settings(deadline=None)
-  def test_indexing_scalars(self, x, y, a, b):
-    assume(a<x and b<y)
-    X = Tensor.randn(x, y).realize()
-    xt = X[Tensor(a)][Tensor(b)]
-    run_linear(*check_schedule(xt, 1))
-    np.testing.assert_equal(xt.numpy(), X.numpy()[a][b])
+  def test_indexing_scalars(self):
+    # cover each shape at all index corners
+    for x, y in [(2,2), (2,3), (3,2), (3,3)]:
+      for a, b in [(0,0), (0,y-1), (x-1,0), (x-1,y-1)]:
+        X = Tensor.randn(x, y).realize()
+        xt = X[Tensor(a)][Tensor(b)]
+        run_linear(*check_schedule(xt, 1))
+        np.testing.assert_equal(xt.numpy(), X.numpy()[a][b])
 
   def test_push_pads_elementwise(self):
     x = Tensor.full((4,4), 2.).contiguous().realize()
@@ -238,19 +232,9 @@ class TestSchedule(unittest.TestCase):
       run_linear(*check_schedule(out, 4))
     np.testing.assert_allclose(out.numpy(), (x.numpy() - x.numpy().max(keepdims=True)).max())
 
-  @unittest.skip("these two Tensors are the same")
-  def test_example_matmul(self):
-    x = Tensor.eye(64, requires_grad=True)
-    y = Tensor.eye(64, requires_grad=True)
-    z = y.matmul(x).sum()
-    z.backward()
-    out = x.grad.contiguous()
-    run_linear(*check_schedule(out, 1))
-    np.testing.assert_allclose(out.numpy(), np.ones((64,64)))
-
   def test_example_matmul_contig(self):
-    x = Tensor.eye(64, requires_grad=True).contiguous().realize()
-    y = Tensor.eye(64, requires_grad=True).contiguous().realize()
+    x = Tensor.eye(64).contiguous().realize()
+    y = Tensor.eye(64).contiguous().realize()
     z = y.matmul(x).sum()
     z.backward()
     out = x.grad.contiguous()
@@ -258,7 +242,7 @@ class TestSchedule(unittest.TestCase):
     np.testing.assert_allclose(out.numpy(), np.ones((64,64)))
 
   def test_example_matmul_same(self):
-    x = Tensor.eye(64, requires_grad=True)
+    x = Tensor.eye(64)
     z = x.matmul(x).sum()
     z.backward()
     out = x.grad.contiguous()
@@ -723,7 +707,7 @@ class TestSchedule(unittest.TestCase):
     np.testing.assert_equal(d.numpy(), np.pad(np.exp2(a.numpy())[:, None, :], ((0, 0), (1, 1), (0, 0)))*2)
 
   def test_fuse_arange_pad_replicate_mode(self):
-    x = Tensor.empty(3,3,3,3, requires_grad=True)
+    x = Tensor.empty(3,3,3,3)
     y = x.pad((-1,2,2,-1), mode="replicate")
     dx = y.sum().gradient(x)[0]
     sched = check_schedule(dx, 1)
@@ -982,7 +966,7 @@ class TestSchedule(unittest.TestCase):
   def test_arange_index_contiguous(self):
     Tensor.manual_seed(0)
     x = Tensor.randn(5, 2).realize()
-    a = Tensor.arange(10).contiguous()
+    a = Tensor.arange(10).clone()
     out = (x + a[2]).sum()
     run_linear(*check_schedule(out, 2))
     np.testing.assert_allclose(out.numpy(), (x.numpy()+np.arange(10)[2]).sum(), atol=1e-5, rtol=1e-6)
@@ -998,7 +982,7 @@ class TestSchedule(unittest.TestCase):
   def test_user_contiguous(self):
     Tensor.manual_seed(0)
     x = Tensor.randn(5, 2).realize()
-    a = (Tensor.arange(10)+1).contiguous()
+    a = (Tensor.arange(10)+1).clone()
     out = (x + a[2]).sum()
     run_linear(*check_schedule(out, 2))
     np.testing.assert_allclose(out.numpy(), (x.numpy()+(np.arange(10)+1)[2]).sum(), atol=1e-5, rtol=1e-6)
@@ -1024,7 +1008,7 @@ class TestSchedule(unittest.TestCase):
   def test_fuse_assign_contiguous(self):
     x = Tensor.zeros(4, 4, dtype=dtypes.int).contiguous().realize()
     a = Tensor.arange(8).reshape(4, 2)
-    run_linear(*check_schedule(x.shrink((None, (0, 2))).assign(a.contiguous()), 2))
+    run_linear(*check_schedule(x.shrink((None, (0, 2))).assign(a.clone()), 2))
     np.testing.assert_equal(x.numpy(), [[0, 1, 0, 0], [2, 3, 0, 0], [4, 5, 0, 0], [6, 7, 0, 0]])
 
   def test_assign_non_contiguous_alt(self): self.test_assign_non_contiguous(alt=True)
@@ -1069,7 +1053,7 @@ class TestSchedule(unittest.TestCase):
 
   def test_no_extra_contiguous_on_setitem_assign_back(self):
     # pattern: contiguous copy, advanced setitem, assign back (e.g. torch backend _view_write)
-    base = Tensor.arange(16).reshape(4, 4).contiguous()
+    base = Tensor.arange(16).reshape(4, 4).clone()
     flat_base = base.reshape(16).contiguous()
     idx = Tensor([1,2,5,6], dtype=dtypes.int32)
     flat_base[idx] = Tensor([99,99,99,99])
@@ -1269,7 +1253,7 @@ class TestView(unittest.TestCase):
   # x collapses along with its children
   def test_parent_view_collapses(self):
     a = Tensor([1, 2])
-    b = Tensor.arange(3).contiguous()
+    b = Tensor.arange(3).clone()
     bv = b.pad(((0, 2),))[-2:]
     # this becomes a late a*0
     late_mul = a*bv
@@ -1286,7 +1270,7 @@ class TestView(unittest.TestCase):
   # as long as one child realizes, x does not collapse
   def test_parent_multiple_children_no_collapse(self):
     a = Tensor([1, 2])
-    b = Tensor.arange(3).contiguous()
+    b = Tensor.arange(3).clone()
     bv = b.pad(((0, 2),))[-2:]
     late_mul = a*bv
     other_child = b+2

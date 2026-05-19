@@ -19,7 +19,7 @@ class MovementMixin:
     raise NotImplementedError
 
   @property
-  def device(self) -> str|tuple[str, ...]:
+  def device(self) -> str|tuple[str, ...]|None:
     raise NotImplementedError
 
   # great functions you get!

@@ -71,7 +71,7 @@ def train_generator(optimizer, data_fake):
 if __name__ == "__main__":
   # data for training and validation
   X_train, _, _, _ = mnist()
-  ds_noise = Tensor.randn(64, 128, requires_grad=False)
+  ds_noise = Tensor.randn(64, 128)
   # parameters
   epochs, batch_size, k = 300, 512, 1
   sample_interval = epochs // 10
