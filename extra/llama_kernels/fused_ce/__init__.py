@@ -31,6 +31,7 @@ def _fused_ce_loss_fwd(loss_out:UOp, max_out:UOp, lse_out:UOp, logits:UOp, targe
   row_lse = sum_exp[0].log() + row_max
   loss = row_lse - (1.0 - label_smoothing) * target_logit - label_smoothing * (sum_x[0] / vocab)
   stores = UOp.group(loss_out[row].store(loss), max_out[row].store(row_max), lse_out[row].store(row_lse))
+  # TODO: remove the need for this.
   return stores.end(row).sink(arg=KernelInfo(f"fused_ce_loss_fwd_{rows}_{vocab}", opts_to_apply=()))
 
 @functools.cache
