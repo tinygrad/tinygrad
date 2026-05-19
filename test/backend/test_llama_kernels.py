@@ -25,17 +25,17 @@ def run_fused_ce(bs:int, seqlen:int, vocab:int, label_smoothing:float=0.0) -> No
     assert logits.grad.float().allclose(logits_ref.grad, atol=2e-3, rtol=2e-3).item(), "grad mismatch"
 
 class TestFusedCE(unittest.TestCase):
-  def test_fused_ce_fw_bw_1_2_16(self): run_fused_ce(1, 2, 16)
-  def test_fused_ce_fw_bw_2_16_128(self): run_fused_ce(2, 16, 128)
-  def test_fused_ce_fw_bw_4_128_1024(self): run_fused_ce(4, 128, 1024)
-  def test_fused_ce_fw_bw_4_1024_8192(self): run_fused_ce(4, 1024, 8192)
+  def test_fused_ce_1_2_16(self): run_fused_ce(1, 2, 16)
+  def test_fused_ce_2_16_128(self): run_fused_ce(2, 16, 128)
+  def test_fused_ce_4_128_1024(self): run_fused_ce(4, 128, 1024)
+  def test_fused_ce_4_1024_8192(self): run_fused_ce(4, 1024, 8192)
 
-  #def test_fused_ce_fw_bw_16_8192_128256(self): run_fused_ce(16, 8192, 128256)
+  def test_fused_ce_smoothing_16_1024_128256(self): run_fused_ce(16, 1024, 128256, label_smoothing=0.2)
 
-  def test_fused_ce_fw_bw_smoothing_1_2_16(self): run_fused_ce(1, 2, 16, label_smoothing=0.2)
-  def test_fused_ce_fw_bw_smoothing_2_16_128(self): run_fused_ce(2, 16, 128, label_smoothing=0.2)
-  def test_fused_ce_fw_bw_smoothing_4_128_1024(self): run_fused_ce(4, 128, 1024, label_smoothing=0.2)
-  def test_fused_ce_fw_bw_smoothing_4_1024_8192(self): run_fused_ce(4, 1024, 8192, label_smoothing=0.2)
+  def test_fused_ce_smoothing_1_2_16(self): run_fused_ce(1, 2, 16, label_smoothing=0.2)
+  def test_fused_ce_smoothing_2_16_128(self): run_fused_ce(2, 16, 128, label_smoothing=0.2)
+  def test_fused_ce_smoothing_4_128_1024(self): run_fused_ce(4, 128, 1024, label_smoothing=0.2)
+  def test_fused_ce_smoothing_4_1024_8192(self): run_fused_ce(4, 1024, 8192, label_smoothing=0.2)
 
 if __name__ == '__main__':
   unittest.main()
