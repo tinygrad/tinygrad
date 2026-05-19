@@ -1,17 +1,23 @@
 from dataclasses import dataclass
 from tinygrad.uop.ops import UOp, graph_rewrite, PatternMatcher, GroupOp, UPat, Ops
 from tinygrad.uop.spec import type_verify, spec_program
-from tinygrad.dtype import dtypes, Invalid, AddrSpace
+from tinygrad.dtype import dtypes, Invalid, AddrSpace, least_upper_dtype
 from tinygrad.helpers import SPEC
 from tinygrad.renderer import Renderer
-from tinygrad.codegen.late.devectorizer import pm_add_loads, reduce_to_acc
+from tinygrad.codegen.simplify import pm_load_collapse
+from tinygrad.codegen.late.devectorizer import pm_add_loads, reduce_to_acc, merge_reduce_ends
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow
 from tinygrad.schedule.rangeify import pm_index_on_index, pm_mops
 from tinygrad.uop.decompositions import get_late_rewrite_patterns, get_transcendental_patterns, pm_dtype_decomps
 from tinygrad.uop.symbolic import sym
 
+def lower_weakint(x:UOp):
+  # no sources, it's an int
+  if len(x.src) == 0: return x.replace(dtype=dtypes.int)
+  return x.replace(dtype=least_upper_dtype(*[u.dtype for u in x.src]))
+
 pm_lower_weakint = PatternMatcher([
-  (UPat(GroupOp.All, dtypes.weakint, name="x"), lambda x: x.replace(dtype=dtypes.int))
+  (UPat(GroupOp.All, dtypes.weakint, name="x"), lower_weakint),
 ])
 
 @dataclass
@@ -28,6 +34,9 @@ def stage_to_local(ctx:ReduceContext, x:UOp):
 pm_minimal_reduce = PatternMatcher([
   (UPat(Ops.REDUCE, name="red"), reduce_to_acc),
   (UPat(Ops.STAGE, name="x"), stage_to_local),
+
+  # TODO: this should not be here! this is caused by pm_load_collapse
+  (UPat(Ops.SINK, name="sink"), merge_reduce_ends),
 ])
 
 pm_minimal_move_gates_from_index = PatternMatcher([
@@ -42,8 +51,9 @@ pm_minimal_move_gates_from_index = PatternMatcher([
 def minigen_to_sink(ast:UOp, ren:Renderer, optimize:bool) -> UOp:
   sink = ast
 
-  # do single symbolic (this rewrites POW)
-  sink = graph_rewrite(sink, sym, name="symbolic")
+  # collapse loads reduce (indexing by a tensor)
+  # must run while REDUCE is still in the graph
+  sink = graph_rewrite(sink, pm_load_collapse, name="load collapse")
 
   # REDUCE is not allowed in programs, we need to do that REDUCE somewhere
   # this creates a register where the reduce happens
@@ -53,6 +63,9 @@ def minigen_to_sink(ast:UOp, ren:Renderer, optimize:bool) -> UOp:
   # if there's any movement ops left, we need to remove them. removing stage might add movement ops
   # also handle INDEX on INDEX
   sink = graph_rewrite(sink, pm_index_on_index+pm_mops, name="remove movement ops")
+
+  # do single symbolic (this rewrites POW)
+  sink = graph_rewrite(sink, sym, name="symbolic")
 
   # we need to add loads
   # this is really a store to DEFINE_REG, but load is simpler
