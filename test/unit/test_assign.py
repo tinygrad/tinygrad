@@ -3,7 +3,7 @@ import unittest
 import numpy as np
 from tinygrad import dtypes, Tensor, TinyJit, GlobalCounters, Variable
 from tinygrad.uop.ops import Ops, UOp
-from tinygrad.device import is_dtype_supported, Device
+from tinygrad.device import is_dtype_supported
 from tinygrad.helpers import temp, CI, DEV, Context
 
 N = 200  # has to be bigger than the cache to fail
@@ -616,7 +616,7 @@ class TestAssign(unittest.TestCase):
     self.assertEqual(a.tolist(), [1.,1.])
 
   def test_assign_deviceless_const(self):
-    s = Tensor.empty(4, device=f"{Device.DEFAULT}:1", dtype=dtypes.float)
+    s = Tensor.empty(4, device="CPU:1", dtype=dtypes.float)
     s.assign(Tensor(UOp.const(dtypes.float, 2.0)))
     np.testing.assert_equal(s.numpy(), [2, 2, 2, 2])
 
