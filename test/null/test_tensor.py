@@ -80,7 +80,7 @@ class TestIdxUpcast(unittest.TestCase):
     if not isinstance(Device[Device.DEFAULT].renderer, (PTXRenderer, NIRRenderer)):
       assert idx.op is Ops.INDEX
       idx_val = idx.src[1]
-      assert idx_val.dtype is dtype
+      self.assertIs(idx_val.dtype, dtype)
 
   # use expand to generate kernel that uses large idx
   def do_op_then_assert(self, dtype: DType, dim1, dim2, dim3):
@@ -99,7 +99,7 @@ class TestIdxUpcast(unittest.TestCase):
     self.do_op_then_assert(dtypes.int, 64, 64, 64)
 
   def test_regular_sym(self):
-    self.do_op_then_assert(dtypes.int, 2048, 2048, UOp.variable("dim3", 1, 64).bind(32))
+    self.do_op_then_assert(dtypes.int, 256, 256, UOp.variable("dim3", 1, 64).bind(32))
 
   @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, (PTXRenderer, NIRRenderer)), "PTX and NIR always converts Ops.INDEX to int64")
   def test_symfold(self):

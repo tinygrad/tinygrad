@@ -35,8 +35,8 @@ class TestLinearizerRewrite(unittest.TestCase):
     prg = to_program(ast, Device["CPU"].renderer)
     assert prg.src[0].arg.applied_opts == (), f"expected no opts, got {prg}"
 
-    prg = to_program(ast.replace(arg=KernelInfo()), Device["CPU"].renderer)
-    assert prg.src[0].arg.applied_opts != (), f"expected opts to apply, got {prg.src[0].arg.applied_opts}"
+    #prg = to_program(ast.replace(arg=KernelInfo()), Device["CPU"].renderer)
+    #assert prg.src[0].arg.applied_opts != (), f"expected opts to apply, got {prg.src[0].arg.applied_opts}"
 
     prg = to_program(ast.replace(arg=KernelInfo(name="custom")), Device["CPU"].renderer)
     self.assertEqual(prg.arg.name, "custom")

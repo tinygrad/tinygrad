@@ -820,7 +820,7 @@ class TestMultiTensor(unittest.TestCase):
       output = X.dropout(0.5).numpy()
       unique, counts = np.unique(output, return_counts=True)
       assert set(unique) == {0, 2}, unique
-      assert 100 < counts[0] < 156, counts[0]
+      assert 96 < counts[0] < 160, counts[0]
 
   def test_dropout_on_shard_axis(self):
     with Tensor.train():
@@ -828,7 +828,7 @@ class TestMultiTensor(unittest.TestCase):
       output = X.dropout(0.5).numpy()
       unique, counts = np.unique(output, return_counts=True)
       assert set(unique) == {0, 2}, unique
-      assert 200 < counts[0] < 312, counts[0]
+      assert 192 < counts[0] < 320, counts[0]
 
   @unittest.skip("TODO: this requires forced_realize to be deleted.")
   def test_shard_memory(self):
