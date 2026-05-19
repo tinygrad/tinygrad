@@ -4,12 +4,15 @@ from tinygrad.uop.spec import type_verify, spec_program
 from tinygrad.dtype import dtypes, Invalid, AddrSpace, least_upper_dtype
 from tinygrad.helpers import SPEC
 from tinygrad.renderer import Renderer
-from tinygrad.codegen.simplify import pm_load_collapse
 from tinygrad.codegen.late.devectorizer import pm_add_loads, reduce_to_acc, merge_reduce_ends
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow
 from tinygrad.schedule.rangeify import pm_index_on_index, pm_mops
 from tinygrad.uop.decompositions import get_late_rewrite_patterns, get_transcendental_patterns, pm_dtype_decomps
 from tinygrad.uop.symbolic import sym
+from tinygrad.codegen.simplify import pm_simplify_ranges, pm_flatten_range, pm_split_ranges, pm_load_collapse
+from tinygrad.codegen.opt.postrange import apply_opts
+from tinygrad.codegen.gpudims import pm_add_gpudims
+from tinygrad.codegen.late.expander import pm_group_for_reduce
 
 def lower_weakint(x:UOp):
   # no sources, it's an int
@@ -27,9 +30,9 @@ class ReduceContext:
 
 def stage_to_local(ctx:ReduceContext, x:UOp):
   # TODO: addrspace shouldn't be on dtype
-  ret = UOp(Ops.DEFINE_LOCAL, x.dtype.ptr(size=x.numel(), addrspace=AddrSpace.LOCAL), (), arg=ctx.local_num)
+  ret = UOp(Ops.DEFINE_LOCAL, x.dtype.ptr(size=x.numel(), addrspace=AddrSpace.LOCAL), (), arg=ctx.local_num).reshape(*[u.vmax+1 for u in x.src[1:]])
   ctx.local_num += 1
-  return ret.after(ret.reshape(*[u.vmax+1 for u in x.src[1:]]).index(*x.src[1:]).store(x.src[0]).end(*x.src[1:]))
+  return ret.after(ret.index(*x.src[1:]).store(x.src[0]).end(*x.src[1:]))
 
 pm_minimal_reduce = PatternMatcher([
   (UPat(Ops.REDUCE, name="red"), reduce_to_acc),
@@ -47,13 +50,27 @@ pm_minimal_move_gates_from_index = PatternMatcher([
    lambda buf,gate,idx,cast,data: buf.index(idx, ptr=True).cast(cast.dtype).store(data, gate)),
 ])
 
-
-def minigen_to_sink(ast:UOp, ren:Renderer, optimize:bool) -> UOp:
+def minigen_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   sink = ast
 
-  # collapse loads reduce (indexing by a tensor)
-  # must run while REDUCE is still in the graph
-  sink = graph_rewrite(sink, pm_load_collapse, name="load collapse")
+  if optimize:
+    # collapse loads reduce (indexing by a tensor), must run while REDUCE is still in the graph
+    sink = graph_rewrite(sink, pm_load_collapse, name="load collapse")
+
+    # split ranges
+    sink = graph_rewrite(sink, pm_split_ranges+pm_flatten_range, ctx={}, name="split ranges")
+
+    # symbolic (NOTE: this is a requirement for pm_simplify_ranges to be correct)
+    sink = graph_rewrite(sink, sym+pm_flatten_range, name="initial symbolic")
+
+    # optimize (schedule) the AST
+    sink = graph_rewrite(sink, pm_flatten_range+pm_simplify_ranges, ctx={}, name="simplify ranges")
+
+    # do postrange optimization, BEAM or hand_coded_optimizations
+    sink = apply_opts(sink, ren, beam=ast.arg.beam)
+
+  # expanded
+  sink = graph_rewrite(sink, pm_group_for_reduce, name="expander 2.0")
 
   # REDUCE is not allowed in programs, we need to do that REDUCE somewhere
   # this creates a register where the reduce happens
@@ -67,10 +84,13 @@ def minigen_to_sink(ast:UOp, ren:Renderer, optimize:bool) -> UOp:
   # do single symbolic (this rewrites POW)
   sink = graph_rewrite(sink, sym, name="symbolic")
 
+  # add gpu dims (late). this works after devectorize, but it's faster here
+  sink = graph_rewrite(sink, pm_add_gpudims, ctx=ren, name="add gpudims")
+
   # we need to add loads
   # this is really a store to DEFINE_REG, but load is simpler
   # LOAD(DATA) is anonymous store -> AFTER(anon_buf, STORE(anon_buf, DATA))
-  sink = graph_rewrite(sink, pm_add_loads, name="add loads")
+  sink = graph_rewrite(sink, pm_add_loads, name="** add loads (code)")
 
   # we need to lower weakint for the program
   # this will be simpler when we have implicit dtype
