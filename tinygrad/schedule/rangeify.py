@@ -350,7 +350,7 @@ to_bufferview = PatternMatcher([
 
 DEVICE_MAX_BUFS = {"METAL": 31, "WEBGPU": 8} # TODO: get from device?
 def limit_bufs(ctx:IndexingContext, root:UOp):
-  if (device:=root._device) is None: return None # no device, index related calculations
+  if (device:=root.device) is None: return None # no device, index related calculations
   device = device if isinstance(device, str) else device[0].split(":")[0]
   if not (MAX_BUFS:=MAX_KERNEL_BUFFERS.value or DEVICE_MAX_BUFS.get(device, 0)): return None
 
@@ -364,7 +364,7 @@ def limit_bufs(ctx:IndexingContext, root:UOp):
   if len(bufs) > MAX_BUFS - 1: # NOTE: this -1 is for the output buffer
     srcs = []
     for s in root.src:
-      if s.op in GroupOp.Elementwise and s._device is not None:
+      if s.op in GroupOp.Elementwise and s.device is not None:
         # Insert bufferize: all AxisType.REDUCE before bufferize are AxisType.LOOP
         orig_ranges, end_ranges = s.ranges, [x.replace(arg=(next(ctx.range_idx), AxisType.LOOP)) if x.op is Ops.RANGE else x for x in s.ranges]
         s = s.substitute(dict(zip(orig_ranges, end_ranges))).bufferize(*end_ranges, arg=BufferizeOpts(device=s.device)).index(*orig_ranges)

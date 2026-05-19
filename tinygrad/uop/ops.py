@@ -51,7 +51,11 @@ def _align_left(*shapes:tuple[sint, ...]) -> tuple[tuple[sint, ...], ...]:
   max_dim = max(len(s) for s in shapes)
   return tuple((1,)*(max_dim-len(s))+s for s in shapes)
 def _broadcast_shape(*shapes:tuple[sint, ...]) -> tuple[sint, ...]:
-  return tuple(0 if 0 in nth_dim_sizes else smax(nth_dim_sizes) for nth_dim_sizes in zip(*_align_left(*shapes)))
+  shaped_aligned_left = _align_left(*shapes)
+  ret = tuple(0 if 0 in nth_dim_sizes else smax(nth_dim_sizes) for nth_dim_sizes in zip(*shaped_aligned_left))
+  if not all(resolve(s == ns) or resolve(s == 1) for shape in shaped_aligned_left for s,ns in zip(shape, ret)):
+    raise IndexError(f"shape mismatch: objects cannot be broadcast to a single shape {shapes}")
+  return ret
 
 def ssimplify(uop:sint): return uop.ssimplify() if isinstance(uop, UOp) else uop
 def sym_infer(uop: UOp|int, var_vals: dict[str, int]) -> int: return uop.sym_infer(var_vals) if isinstance(uop, UOp) else uop
@@ -210,8 +214,15 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       # late ops don't have shape
       case Ops.UNIQUE | Ops.LUNIQUE | Ops.DEVICE | Ops.IF | Ops.BARRIER | Ops.CUSTOM | Ops.CUSTOMI | \
            Ops.CONTRACT | Ops.SINK | Ops.END | Ops.REWRITE_ERROR | Ops.PTRCAT | Ops.ENDIF | \
-           Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE | Ops.BINARY | Ops.INS | Ops.TUPLE | Ops.CALL | Ops.FUNCTION:
+           Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE | Ops.INS | Ops.TUPLE | Ops.CALL | Ops.FUNCTION:
         return None
+
+      # these must all have matching shapes
+      case Ops.GROUP | Ops.STORE:
+        input_shapes = [x.shape for x in self.src]
+        if not all_same(input_shapes):
+          raise RuntimeError(f"shape mismatch at {self.op}: {input_shapes} {[x.op for x in self.src]}")
+        return input_shapes[0]
 
       # hacks for NOOP
       case Ops.NOOP:
@@ -240,10 +251,11 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
       # TODO: these should have the shape of the dtype.count
       case Ops.CONST | Ops.DEFINE_VAR: return ()
-      case Ops.GEP | Ops.STACK | Ops.VCONST | Ops.VCAT: return ()
+      case Ops.GEP | Ops.STACK | Ops.VCONST | Ops.VCAT | Ops.GETADDR: return ()
 
       # some ops init the shape
       case Ops.BIND | Ops.RANGE | Ops.SPECIAL | Ops.UNROLL: return ()
+      case Ops.BINARY: return (len(self.arg),)
       case Ops.BUFFER: return (self.arg,)
       case Ops.BUFFER_VIEW:
         # HACK: BUFFER_VIEW is used inside kernels, so we set the shape to () if it's on an INDEX
@@ -263,7 +275,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       case Ops.WMMA | Ops.SHAPED_WMMA: return self.src[2]._shape
 
       # passthrough ops
-      case Ops.MSTACK | Ops.MSELECT | Ops.DETACH | Ops.CONTIGUOUS | Ops.CONTIGUOUS_BACKWARD | Ops.AFTER | Ops.PATCH | Ops.LOAD | \
+      case Ops.MSTACK | Ops.MSELECT | Ops.DETACH | Ops.CONTIGUOUS | Ops.CONTIGUOUS_BACKWARD | Ops.AFTER | Ops.LOAD | \
            Ops.COPY | Ops.ALLREDUCE:
         return self.src[0]._shape
       # REDUCE with empty axis is passthrough (lowered form)
@@ -317,8 +329,12 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
             raise ValueError(f"invalid type for axis: {axis_arg}")
           return tuple(1 if i in axis_arg else s for i,s in enumerate(ps))
 
+    if self.op in GroupOp.Unary.union({Ops.CAST}):
+      assert len(self.src) == 1, "unary ops must have 1 src"
+      return self.src[0]._shape
+
     # elementwise ops keep the shape the same. all inputs with shape must match
-    if self.op in GroupOp.ALU.union({Ops.CAST, Ops.GROUP, Ops.STORE}):
+    if self.op in GroupOp.Broadcastable:
       input_shapes = [x._shape for x in self.src]
       assert len(self.src) > 0 and all(x is not None for x in input_shapes), f"None input shape not supported for {self.op}"
       # TODO: add broadcasting here
@@ -446,7 +462,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     return self.index(*[UOp.const(dtypes.weakint, x) if isinstance(x, int) else x for x in idx])
   def const_like(self, b:ConstLike, dtype:DType|None=None):
     # constants can optionally have a DEVICE source
-    ret = UOp.const(dtype or self.dtype.base, b, device=self._device, shape=self.shard_shape if self.axis is not None else self._shape)
+    ret = UOp.const(dtype or self.dtype.base, b, device=self.device, shape=self.shard_shape if self.axis is not None else self._shape)
     return ret.multi(self.axis) if self.axis is not None else ret
   def ufix(self, x):
     if isinstance(x, UOp): return x
@@ -535,7 +551,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
   def contiguous(self, *args, **kwargs):
     if self.op is Ops.CONTIGUOUS: return self
-    if self._device is None: return self
+    if self.device is None: return self
     if self.has_buffer_identity(): return self
     return UOp(Ops.CONTIGUOUS, dtype=self.dtype, src=(self,)+args, **kwargs)
   def bufferize(self, *args, **kwargs): return UOp(Ops.STAGE, dtype=self.dtype, src=(self,)+args, **kwargs)
@@ -604,14 +620,13 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     dnum = UOp.variable("_device_num", 0, dcount-1)
     return self.pad(tuple((0,0) if a != axis else (bsz*dnum, bsz*(dcount-1) - bsz*dnum) for a in range(len(self.shape))))
 
-  def _shard(self, axis:int) -> UOp:
+  def _shard(self, axis:int, dcount:int) -> UOp:
     if len(self.shape) == 0: return self  # scalars broadcast, no sharding needed
-    dcount = len(self.device)
     dnum = UOp.variable("_device_num", 0, dcount-1)
     if self.shape[axis] % dcount != 0: raise RuntimeError(f"multi axis uneven: {self.shape[axis]=} {axis=} {dcount=}")
     sz = self.shape[axis] // dcount
     return self.shrink(tuple((0,s) if i != axis else (dnum*sz,dnum*sz+sz) for i,s in enumerate(self.shape)))
-  def shard(self, devices:tuple[str, ...], axis:int) -> UOp: return self.copy_to_device(devices)._shard(axis).multi(axis)
+  def shard(self, devices:tuple[str, ...], axis:int) -> UOp: return self.copy_to_device(devices)._shard(axis, len(devices)).multi(axis)
 
   def copy_to_device(self, device:str|tuple[str, ...]|UOp, arg=None):
     assert arg is None or isinstance(self.device, tuple)
@@ -693,20 +708,18 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     device = canonicalize_device(self.device if device is None else device)
     axis = self.axis if isinstance(device, tuple) else None
     return UOp.empty(self.shard_shape if axis is not None else self.shape, self.dtype if dtype is None else dtype, device, axis)
-  @property
-  def device(self) -> str|tuple[str, ...]: return unwrap(self._device)
   @recursive_property
-  def _device(self) -> str|tuple[str, ...]|None:
+  def device(self) -> str|tuple[str, ...]|None:
     if self.op is Ops.DEVICE: return self.arg
     if self.op is Ops.STAGE: return self.arg.device
-    if self.op is Ops.AFTER: return self.src[0]._device
+    if self.op is Ops.AFTER: return self.src[0].device
     if self.op is Ops.MSELECT:
       assert isinstance(self.src[0].device, tuple), f"mselect must be on tuple device, getting {self.src[0].device}"
       return self.src[0].device[self.arg]
     if self.op is Ops.MSTACK: return tuple(cast(str, x.device) for x in self.src)
     if self.op in {Ops.COPY, Ops.BUFFER, Ops.ALLREDUCE}: return self.src[1].device
     for x in self.src:
-      if x._device is not None: return x._device
+      if x.device is not None: return x.device
     return None
   @property
   def buf_uop(self) -> UOp:
@@ -979,8 +992,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     return UOp(Ops.PARAM, dtype, src, arg=slot)
   def param_like(self, slot:int):
     if self.op is Ops.BIND:
-      return UOp.param(slot, self.dtype, self._shape, self._device, self._min_max, self.src[0].arg[0])
-    p = UOp.param(slot, self.dtype, self._shape, self._device)
+      return UOp.param(slot, self.dtype, self._shape, self.device, self._min_max, self.src[0].arg[0])
+    p = UOp.param(slot, self.dtype, self._shape, self.device)
     if self.axis is not None: p = p.replace(src=p.src + (UOp(Ops.MULTI, arg=self.axis),))
     return p
 

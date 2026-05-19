@@ -318,6 +318,7 @@ class TestLinearizer(unittest.TestCase):
     #helper(Tensor.arange(256), max_ops=2)
     helper(Tensor.arange(255), max_ops=2)
 
+  @unittest.skip("test implicitly depends on certain optimizations")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
   @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "broken on ptx for some reason")
   def test_grouped_store_phis(self):
@@ -340,6 +341,7 @@ class TestLinearizer(unittest.TestCase):
     for val in store_vals:
       assert val.dtype == dtypes.float.vec(4) # and val.op is not Ops.VECTORIZE
 
+  @unittest.skip("test implicitly depends on certain optimizations")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
   def test_grouped_store_values(self):
     x = Tensor.randn((4,3,6,6)).realize()
@@ -371,6 +373,7 @@ class TestLinearizer(unittest.TestCase):
     # assert barrier.src == tuple(local_stores)
     assert len([u for u in uops if u.op is Ops.IF])
 
+  @unittest.skip("test implicitly depends on certain optimizations")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")

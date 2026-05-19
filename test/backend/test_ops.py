@@ -3186,7 +3186,7 @@ class TestOps(unittest.TestCase):
     self.helper_test_exception([(32,31,16,64), (32,8,16,64), (32,8,16,64)],
       lambda x,y,z: torch.nn.functional.scaled_dot_product_attention(x,y,z),
       lambda x,y,z: Tensor.scaled_dot_product_attention(x,y,z,enable_gqa=True),
-      expected=(AssertionError, RuntimeError, ValueError))
+      expected=(AssertionError, RuntimeError, ValueError, IndexError))
 
   def test_binary_crossentropy(self):
     helper_test_op([(32,10), (32,10)], lambda x,y: torch.nn.functional.binary_cross_entropy(x.sigmoid(),y.clip(0,1)),

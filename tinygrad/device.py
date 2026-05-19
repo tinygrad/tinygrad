@@ -345,8 +345,7 @@ def is_dtype_supported(dtype:DType, target:Target|None=None) -> bool:
       case "METAL": target.arch.startswith("Apple") and int(target.arch[5:]) >= 6
       case "CUDA": return (not CI or BENCHMARKS) and target.renderer != "PTX"
       case "NV": return (not CI or BENCHMARKS) and target.renderer not in ("PTX", "NAK")
-      case "CPU": return (not CI or BENCHMARKS) and platform.machine() in {"arm", "arm64", "aarch64", "x86_64", "amd64"} and \
-          target.renderer not in ("LVP", "X86")
+      case "CPU": return platform.machine() in {"arm", "arm64", "aarch64", "x86_64", "amd64"} and target.renderer not in ("LVP", "X86")
       case "AMD" | "CL" | "PYTHON" | "NULL": return True
       case _: return False
   if dtype in dtypes.fp8_ocp:
