@@ -102,3 +102,8 @@ class CPULLVMCompiler(LLVMCompiler):
     super().__init__(self.arch, cpu, ('+reserve-x18,' if self.arch == "arm64" else '') + featstr, cache_key)
 
   def disassemble(self, lib:bytes): capstone_flatdump(lib, self.arch)
+
+class X86Compiler(Compiler):
+  def __init__(self): super().__init__(None)
+  def compile(self, src:str) -> bytes: return bytes.fromhex(src)
+  def disassemble(self, lib:bytes): return capstone_flatdump(lib, "x86_64")

@@ -28,6 +28,7 @@ packages = [
   'tinygrad.nn',
   'tinygrad.renderer',
   'tinygrad.renderer.amd',
+  'tinygrad.renderer.isa',
   'tinygrad.runtime',
   'tinygrad.runtime.autogen',
   'tinygrad.runtime.autogen.am',
@@ -133,7 +134,7 @@ debug = true
 
 [tool.mypy]
 warn_unused_configs = true
-files = ["tinygrad"]
+files = ["tinygrad", "test/mockgpu"]
 ignore_missing_imports = true
 check_untyped_defs = true
 explicit_package_bases = true
