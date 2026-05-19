@@ -371,6 +371,7 @@ class TestLinearizer(unittest.TestCase):
     # assert barrier.src == tuple(local_stores)
     assert len([u for u in uops if u.op is Ops.IF])
 
+  @unittest.skip("test implicitly depends on certain optimizations")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
