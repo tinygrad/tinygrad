@@ -1,11 +1,15 @@
 from __future__ import annotations
 import functools, pathlib
-from tinygrad import Tensor, dtypes
+from tinygrad import Tensor, dtypes, Device
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.renderer import Estimates
 from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
 
 THREADS_PER_WG = 256
+
+def _metal_compile(src:str, vocab:int, label_smoothing:float) -> bytes:
+  defines = f"#define VOCAB {vocab}\n#define THREADS_PER_WG {THREADS_PER_WG}\n#define LABEL_SMOOTHING {label_smoothing}f\n"
+  return Device["METAL"].renderer.compiler.compile(defines + src)
 
 @functools.cache
 def _custom_fused_ce_loss_fwd(loss_out:UOp, max_out:UOp, lse_out:UOp, logits:UOp, targets:UOp,
@@ -35,7 +39,31 @@ def _custom_fused_ce_loss_bwd(d_logits:UOp, logits:UOp, lse:UOp, targets:UOp, sc
              f"-DLABEL_SMOOTHING={label_smoothing}f"]
   lib = HIPCCCompiler("gfx950", ["-std=c++20", "-ffast-math", *defines]).compile_cached(src)
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dname), UOp(Ops.LINEAR, src=(*sink.src, sink)),
-                               UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=lib)))
+                                UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=lib)))
+
+@functools.cache
+def _custom_fused_ce_loss_fwd_metal(loss_out:UOp, max_out:UOp, lse_out:UOp, logits:UOp, targets:UOp,
+                                    vocab:int, rows:int, label_smoothing:float) -> UOp:
+  threads, workgroups = UOp.special(THREADS_PER_WG, "lidx0"), UOp.special(rows, "gidx0")
+  mem = rows * vocab * 2 + rows * 12 + rows * 4
+  sink = UOp.sink(loss_out.base, max_out.base, lse_out.base, logits.base, targets.base,
+                  threads, workgroups,
+                  arg=KernelInfo(f"fused_ce_loss_fwd_metal", estimates=Estimates(ops=6*rows*vocab, mem=mem)))
+  src = (pathlib.Path(__file__).parent/"fused_ce_loss.metal").read_text()
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg="METAL"), UOp(Ops.LINEAR, src=(*sink.src, sink)),
+                                UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=_metal_compile(src, vocab, label_smoothing))))
+
+@functools.cache
+def _custom_fused_ce_loss_bwd_metal(d_logits:UOp, logits:UOp, lse:UOp, targets:UOp, scale:UOp,
+                                    vocab:int, rows:int, label_smoothing:float) -> UOp:
+  threads, workgroups = UOp.special(THREADS_PER_WG, "lidx0"), UOp.special(rows, "gidx0")
+  mem = rows * vocab * 4 + rows * 8 + 4
+  sink = UOp.sink(d_logits.base, logits.base, lse.base, targets.base, scale.base,
+                  threads, workgroups,
+                  arg=KernelInfo(f"fused_ce_loss_bwd_metal", estimates=Estimates(ops=4*rows*vocab, mem=mem)))
+  src = (pathlib.Path(__file__).parent/"fused_ce_loss_bwd.metal").read_text()
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg="METAL"), UOp(Ops.LINEAR, src=(*sink.src, sink)),
+                                UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=_metal_compile(src, vocab, label_smoothing))))
 
 def _fused_ce_loss_bwd(gradient:UOp, kernel:UOp, label_smoothing:float):
   # NOTE: forward inputs are (loss_out, max_out, lse_out, logits, targets)
@@ -58,7 +86,8 @@ def _fused_ce_loss_bwd(gradient:UOp, kernel:UOp, label_smoothing:float):
   logits_t = Tensor(logits_u.after(kernel), device=device)
   lse_t = Tensor(lse_u.after(kernel), device=device)
   targets_t = Tensor(targets_u, device=device)
-  fxn = functools.partial(_custom_fused_ce_loss_bwd, dname=dname, vocab=VOCAB, rows=rows_per_dev, label_smoothing=label_smoothing)
+  fxn = functools.partial(_custom_fused_ce_loss_bwd_metal if dname == "METAL" else _custom_fused_ce_loss_bwd,
+                          **({} if dname == "METAL" else {"dname": dname}), vocab=VOCAB, rows=rows_per_dev, label_smoothing=label_smoothing)
   d_logits, *_ = Tensor.custom_kernel(d_logits, logits_t, lse_t, targets_t, scale, fxn=fxn)
   return (None, None, None, d_logits.uop, None)
 
@@ -88,7 +117,8 @@ def fused_ce_loss(logits:Tensor, targets:Tensor, label_smoothing:float=0.1) -> T
     rows_per_dev = rows
   logits_flat = logits.reshape(rows, VOCAB)
   targets_flat = targets.reshape(-1).cast(dtypes.int32)
-  fxn = functools.partial(_custom_fused_ce_loss_fwd, dname=dname, vocab=VOCAB, rows=rows_per_dev,
+  fxn = functools.partial(_custom_fused_ce_loss_fwd_metal if dname == "METAL" else _custom_fused_ce_loss_fwd,
+                          **({} if dname == "METAL" else {"dname": dname}), vocab=VOCAB, rows=rows_per_dev,
                           label_smoothing=label_smoothing)
   loss_out, max_out, lse_out, *_ = Tensor.custom_kernel(
     loss_out, max_out, lse_out, logits_flat, targets_flat,
