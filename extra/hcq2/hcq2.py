@@ -161,10 +161,6 @@ class HCQ2LowerCtx:
   holds:list[UOp] = field(default_factory=list)
   devs:dict[str, HCQ2DeviceCtx] = field(default_factory=dict)
 
-  def host_param(self, buf:Buffer) -> UOp:
-    if buf not in self.inputs: self.inputs.append(buf)
-    return UOp.placeholder((buf.size,), buf.dtype, self.inputs.index(buf))
-
 class HCQEncoder:
   def __init__(self, device:str): self.device, self.blob, self.patches = device, b'', []
 
@@ -189,7 +185,7 @@ class HCQEncoder:
 
 # **************** prepare runtime ****************
 
-def lower_kernargs(ctx:HCQ2LowerCtx, call:UOp, prg:UOp) -> UOp:
+def lower_kernargs(call:UOp, prg:UOp) -> UOp:
   data, info = prg.arg
   dev_name = unwrap_after(prg.src[0]).src[1].arg
 
@@ -203,7 +199,7 @@ def lower_kernargs(ctx:HCQ2LowerCtx, call:UOp, prg:UOp) -> UOp:
 pm_prep_runtime = PatternMatcher([
   # device-specific lowering of the program
   (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, src=(UPat(), UPat(Ops.DEVICE), UPat(), UPat(), UPat(Ops.BINARY)), name="p"),), name="c", allow_any_len=True),
-    lambda ctx, c, p: c.replace(src=(Device[p.src[1].arg].pm_lower.rewrite(p, ctx),) + c.src[1:])),
+    lambda c, p: c.replace(src=(Device[p.src[1].arg].pm_lower.rewrite(p),) + c.src[1:])),
 
   # lower kernargs (PROGRAM.src[0] is now AFTER(BUFFER, COPY) — the lowered program image)
   (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, src=(UPat(Ops.AFTER),), name="prg"),), name="call", allow_any_len=True), lower_kernargs),
@@ -211,11 +207,11 @@ pm_prep_runtime = PatternMatcher([
 
 # **************** lower ops ****************
 
-def lower_program(ctx:HCQ2LowerCtx, call:UOp, prg:UOp) -> UOp:
+def lower_program(call:UOp, prg:UOp) -> UOp:
   q = UOp(Ops.LINEAR, dtypes.void, (prg,), arg=(unwrap_after(prg.src[0]).src[1].arg, "COMPUTE"))
   return UOp(Ops.LINEAR, dtypes.void, (q,), tag=call.tag)
 
-def lower_copy(ctx:HCQ2LowerCtx, call:UOp, copy:UOp) -> UOp:
+def lower_copy(call:UOp, copy:UOp) -> UOp:
   dst, src = call.src[1], call.src[2]
   q = UOp(Ops.LINEAR, dtypes.void, (UOp(Ops.COPY, dtypes.void, src=(dst, src), arg=src.buffer.nbytes),), arg=(dst.buffer.device, "COPY"))
   return UOp(Ops.LINEAR, dtypes.void, (q,), tag=call.tag)
@@ -225,7 +221,7 @@ pm_lower_ops = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.COPY, name="copy"),), name="call", allow_any_len=True), lower_copy),
 ])
 
-def split_into_queues(ctx:HCQ2LowerCtx, outer:UOp) -> UOp:
+def split_into_queues(outer:UOp) -> UOp:
   groups:dict[tuple, list[UOp]] = collections.defaultdict(list)
   for child in outer.src:
     wrapper = child.src[0] if child.op is Ops.AFTER else child
@@ -233,16 +229,17 @@ def split_into_queues(ctx:HCQ2LowerCtx, outer:UOp) -> UOp:
   return outer.replace(src=tuple(UOp(Ops.LINEAR, dtypes.void, tuple(cmds), arg=k) for k, cmds in groups.items()))
 pm_split_into_queues = PatternMatcher([(UPat(Ops.LINEAR, src=UPat(Ops.LINEAR, src=UPat(Ops.LINEAR)).or_after(), name="outer"), split_into_queues)])
 
-def add_signals(ctx:HCQ2LowerCtx, outer:UOp) -> UOp:
+def add_signals(outer:UOp) -> UOp:
   def wrap(q:UOp) -> UOp:
     (dev_name, qname), devs = q.arg, {q.arg[0]} | {u.buffer.device for u in q.toposort() if u.op in (Ops.BUFFER, Ops.BUFFER_VIEW)}
-    sigs_tls = [(UOp.from_buffer(Device[d].timeline_signal), ctx.host_param(Device[d].timeline_value)) for d in sorted(devs) if d.startswith("AMD")]
-    return q.replace(src=(*(s.wait(t[0]-1) for s,t in sigs_tls), *q.src, *(s.store(t[0]) for s,t in sigs_tls)), arg=qname)
+    sigs_tls = [(UOp.from_buffer(Device[d].timeline_signal), UOp.from_buffer(Device[d].timeline_value, "CPU").index(UOp.const(dtypes.int, 0)))
+                for d in sorted(devs) if d.startswith("AMD")]
+    return q.replace(src=(*(s.wait(t-1) for s,t in sigs_tls), *q.src, *(s.store(t) for s,t in sigs_tls)), arg=qname)
   return outer.replace(src=tuple(wrap(q) for q in outer.src))
 pm_add_signals = PatternMatcher([(UPat(Ops.LINEAR, src=UPat(Ops.LINEAR), name="outer"), add_signals)])
 
 pm_add_barriers = PatternMatcher([(UPat(Ops.LINEAR, src=UPat(Ops.LINEAR), name="outer"),
-  lambda ctx, outer: outer.replace(src=tuple(q.replace(src=(UOp(Ops.BARRIER, dtypes.void), *q.src)) for q in outer.src)))])
+  lambda outer: outer.replace(src=tuple(q.replace(src=(UOp(Ops.BARRIER, dtypes.void), *q.src)) for q in outer.src)))])
 
 # **************** build host program ****************
 
@@ -327,21 +324,29 @@ pm_resolve_patches = symbolic_simple + PatternMatcher([
   (UPat((Ops.BUFFER, Ops.BUFFER_VIEW), name="buf").index(UPat.cvar("off")).or_casted().store(UPat.cvar("val")), fold_const_store),
 ])
 
+def parametrize_host_buffer(ctx:HCQ2LowerCtx, buf:UOp) -> UOp:
+  # register a host buffer as a launcher input and return its placeholder
+  if (b:=buf.buffer) not in ctx.inputs: ctx.inputs.append(b)
+  return UOp.placeholder((b.size,), b.dtype, ctx.inputs.index(b))
+
 pm_parametrize_host_buffers = PatternMatcher([
   # resolve buffer views to parametrize only root buffers
   (UPat(Ops.INDEX, src=(UPat(Ops.BUFFER_VIEW, name="bv"), UPat.var("idx")), name="bi"),
-    lambda ctx, bv, idx, bi: bi.replace(src=(bv.src[0], idx + bv.arg[1]))),
+    lambda bv, idx, bi: bi.replace(src=(bv.src[0], idx + bv.arg[1]))),
 
   # parametrize host buffers
-  (UPat((Ops.BUFFER, Ops.BUFFER_VIEW), name="buf"), lambda ctx, buf: ctx.host_param(buf.buffer)),
+  (UPat((Ops.BUFFER, Ops.BUFFER_VIEW), name="buf"), parametrize_host_buffer),
+
+  # remove UNIQUE/DEVICE to dedup CONST
+  (UPat(Ops.CONST, name="c"), lambda c: c.replace(src=()) if len(c.src) else None),
 ])
 
-def lower_submit(ctx:HCQ2LowerCtx, cf:UOp) -> UOp|None:
+def finalize_submit(cf:UOp) -> UOp|None:
   if not cf.arg.startswith("submit_") or cf.tag is not None: return None
-  submit_cf = cf.rtag("AMD")
-  tl = ctx.host_param(Device['AMD'].timeline_value)
-  return tl.after(UOp(Ops.BARRIER, dtypes.void, src=(submit_cf,))).index(UOp.const(dtypes.int, 0), ptr=True).store(tl[0] + 1)
-pm_lower_submits = PatternMatcher([(UPat(Ops.CUSTOM_FUNCTION, name="cf"), lower_submit)])
+  tl = UOp.from_buffer(Device['AMD'].timeline_value, "CPU")
+  done = tl.after(UOp(Ops.BARRIER, dtypes.void, src=(cf.rtag("AMD"),)))
+  return done.index(UOp.const(dtypes.int, 0), dtype=tl.dtype.ptr()).store(tl.index(UOp.const(dtypes.int, 0)) + 1)
+pm_finalize_submit = PatternMatcher([(UPat(Ops.CUSTOM_FUNCTION, name="cf"), finalize_submit)])
 
 def hcq_callify(ctx:HCQ2LowerCtx, l:UOp) -> UOp:
   sink = UOp.sink(*l.src, arg=KernelInfo(name=ctx.name, estimates=Estimates()), tag=1)
@@ -382,8 +387,8 @@ def hcq_realize(ctx:HCQ2LowerCtx, linear:UOp, ast:UOp, dev:HCQ2Compiled) -> UOp:
   linear = graph_rewrite(linear, pm_bufferize, ctx=ctx, bottom_up=True, name="realize binaries")
   linear = graph_rewrite(linear, pm_lift_after, ctx=ctx, bottom_up=False, name="lift patches to root")
   linear = graph_rewrite(linear, pm_resolve_patches, ctx=ctx, bottom_up=False, name="simplify patches")
+  linear = graph_rewrite(linear, pm_finalize_submit + dev.pm_lower, ctx=ctx, bottom_up=True, name="lower submits")
   linear = graph_rewrite(linear, pm_parametrize_host_buffers, ctx=ctx, bottom_up=True, name="parametrize host buffers")
-  linear = graph_rewrite(linear, pm_lower_submits + dev.pm_lower, ctx=ctx, bottom_up=True, name="lower submits")
   return graph_rewrite(linear, pm_callify, ctx=ctx, name="hcq: callify")
 
 def ensure_accessible(ctx:HCQ2LowerCtx, call:UOp, copy:UOp) -> UOp|None:

@@ -1229,6 +1229,9 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
 
   def QLinearConv(x:Tensor, x_scale:Tensor, x_zero_point:Tensor, w:Tensor, w_scale:Tensor, w_zero_point:Tensor, y_scale:Tensor,
                   y_zero_point:Tensor, B:Tensor|None=None, **opts):
+    # align quant params for non-scalars based on https://onnx.ai/onnx/operators/onnx__QLinearConv.html
+    w_zero_point = w_zero_point.reshape(-1, 1, 1, 1)
+    w_scale = w_scale.reshape(1, -1, 1, 1)
     return _qlinearop_quantized(Conv, [x,w], [x_zero_point,w_zero_point], [x_scale,w_scale], y_scale, y_zero_point, **{"B":B, **opts})
 
   def QLinearMatMul(a:Tensor, a_scale:Tensor, a_zero_point:Tensor, b:Tensor, b_scale:Tensor, b_zero_point:Tensor, y_scale:Tensor,
@@ -1295,8 +1298,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     return [X, V]
 
   def Gradient(*inputs:Tensor, y:str, intermediate_tensors:dict[str, Tensor], **_):
-    intermediate_tensors[y].backward()
-    return tuple([t.grad for t in inputs])
+    return tuple(intermediate_tensors[y].gradient(*inputs))
 
   return {
     # Tensor ops
