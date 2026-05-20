@@ -72,7 +72,8 @@ def handle(conn, cmd, dev_id, bar, arg0, arg1, arg2):
 def serve(conn:socket.socket):
   REQ = '<BIIQQQ'
   while True:
-    hdr = conn.recv(struct.calcsize(REQ), socket.MSG_WAITALL)
+    hdr = b''
+    while len(hdr) < struct.calcsize(REQ) and (c:=conn.recv(struct.calcsize(REQ)-len(hdr))): hdr += c
     if len(hdr) < struct.calcsize(REQ): raise ConnectionError("client disconnected")
     cmd, dev_id, bar, arg0, arg1, arg2 = struct.unpack(REQ, hdr)
     if DEBUG >= 4: print(f"cmd={RemoteCmd(cmd).name} dev={dev_id} bar={bar} arg0={arg0:#x} arg1={arg1:#x} arg2={arg2:#x}")
@@ -99,3 +100,4 @@ if __name__ == "__main__":
     for bt in [socket.SO_SNDBUF, socket.SO_RCVBUF]: conn.setsockopt(socket.SOL_SOCKET, bt, 64 << 20)
     try: serve(conn)
     except ConnectionError: print("disconnected")
+    finally: conn.close()
