@@ -74,11 +74,9 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   if IMAGE and ren.target.device in {"QCOM", "CL", "PYTHON", "NULL"}:
     sink = graph_rewrite(sink, pm_make_images, name="create image buffers", bottom_up=True, ctx=ren.target.arch)
 
-  # devectorize (TODO: does this need opts?)
-  if DEVECTORIZE >= 2: pm_devectorize = sym+load_store_folding+load_store_indexing
-  elif DEVECTORIZE: pm_devectorize = sym+devectorize+load_store_folding+correct_load_store+load_store_indexing
-  else: pm_devectorize = sym+load_store_folding+correct_load_store+load_store_indexing
-  if DEVECTORIZE >= 0: sink = graph_rewrite(sink, pm_devectorize, ctx=ren, name="devectorize")
+  # devectorize
+  pm_devectorize = sym+devectorize+load_store_folding+correct_load_store+load_store_indexing
+  sink = graph_rewrite(sink, pm_devectorize, ctx=ren, name="devectorize")
 
   # lower the index dtype to a concrete int
   sink = graph_rewrite(sink, pm_lower_index_dtype+load_store_indexing+gep_pushing, name="lower all index dtypes")
