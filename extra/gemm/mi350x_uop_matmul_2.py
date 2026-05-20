@@ -127,7 +127,7 @@ if __name__ == "__main__":
 
 
   GlobalCounters.reset()
-  with Context(DEBUG=max(2, DEBUG.value), DEVECTORIZE=2):
+  with Context(DEBUG=max(2, DEBUG.value)):
     tst = Tensor.custom_kernel(c, a, b, fxn=custom_gemm)[0]
     tst.realize()
   print(f"{(N*M*K*2 / GlobalCounters.time_sum_s)*1e-12:.2f} REAL TFLOPS")
