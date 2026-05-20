@@ -122,7 +122,7 @@ def eval_custom_matmul(fxn, dt=dtypes.float):
   with Context(DEBUG=0): Tensor.realize(a, b)
 
   ets = []
-  with Context(DEBUG=max(2, DEBUG.value), DEVECTORIZE=2 if dt == dtypes.half else 0):
+  with Context(DEBUG=max(2, DEBUG.value)):
     for _ in range(NUM_RUNS):
       GlobalCounters.reset()
       tst = Tensor.custom_kernel(c, a, b, fxn=fxn)[0].realize()
