@@ -204,6 +204,9 @@ spec_program = PatternMatcher([
   # Invalid is not allowed in program
   (UPat(Ops.CONST, arg=Invalid), lambda: False),
 
+  # shape of uop must match dtype.count in program
+  (UPat(GroupOp.All, name="x"), lambda x: False if x.dtype.count > 1 and (x.dtype.count,) != x.shape else None),
+
   # STACK/GEP in program. TODO: this should match Tensor
   (UPat(Ops.STACK, name="x"), lambda x: len(x.src)>1 and len(x.src) == x.dtype.vcount and all(x.dtype == y.dtype.vec(len(x.src)) for y in x.src)),
   (UPat(Ops.GEP, src=(UPat.var("src"),), name="gep"), lambda gep,src: gep.dtype == src.dtype.scalar()),

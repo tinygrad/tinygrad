@@ -93,8 +93,6 @@ class UOpMetaClass(type):
     if _buffer is not None:
       assert op is Ops.BUFFER, f"trying to set Buffer {_buffer} for {op}"
       buffers[created] = _buffer
-    if created.dtype.count > 1 and created.shape != (created.dtype.count,):
-      print(f"WARNING: mismatch at {created.op} {created.shape} != {created.dtype}")
     if SPEC > 1:
       from tinygrad.uop.spec import spec_full, test_pyrender
       if SPEC > 2:
@@ -254,8 +252,14 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       # TODO: contract and unroll should be deleted
       case Ops.GEP:
         return (len(self.arg),) if len(self.arg) > 1 else ()
-
-      case Ops.CONST | Ops.DEFINE_VAR | Ops.STACK | Ops.CONTRACT | Ops.UNROLL | Ops.VCAT:
+      case Ops.STACK:
+        if len(self.src) == 0: return ()
+        if isinstance(self.dtype, PtrDType):
+          # TODO: this is broken
+          return self.src[0].shape
+        else:
+          return (len(self.src),) + self.src[0].shape
+      case Ops.CONST | Ops.DEFINE_VAR | Ops.CONTRACT | Ops.UNROLL | Ops.VCAT:
         return (self.dtype.count,) if self.dtype.count > 1 else ()
 
       # some ops init the shape
