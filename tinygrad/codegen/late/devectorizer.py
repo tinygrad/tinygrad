@@ -195,7 +195,8 @@ def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
 def get_image_idx(idx:UOp, width:int):
   x, valid = idx.src[1].get_idx(), idx.src[1].get_valid()
   idx_x, idx_y = (x // 4) % width, x // (4*width)
-  return idx.replace(src=(idx.src[0], UOp.vectorize(idx_x, idx_y).valid(valid)))
+  gated_buf = valid.where(idx.src[0], UOp(Ops.CONST, dtype=idx.src[0].dtype, arg=Invalid))
+  return idx.replace(src=(gated_buf, idx_y, idx_x))
 
 def image_fixup(ls:UOp):
   # normal image load or store, with the CAST from expand_index
@@ -204,7 +205,8 @@ def image_fixup(ls:UOp):
     return ls.replace(src=(get_image_idx(ls.src[0].src[0], dt.shape[1]),)+ls.src[1:])
 
   # this is an unprocessed image without a cast, we should just make it a buffer
-  if isinstance(dt, ImageDType) and (off:=ls.src[0].src[1]).get_idx().dtype != dtypes.weakint.vec(2):
+  if isinstance(dt, ImageDType) and len(ls.src[0].src) == 2:
+    off = ls.src[0].src[1]
     idx = ls.src[0].src[0].replace(dtype=(new_dt:=dtypes.half if dt.itemsize == 2 else dtypes.float).ptr(dt.size)).index(off)
     return ls.replace(src=(idx,), dtype=new_dt).cast(dtypes.float) if ls.op is Ops.LOAD else ls.replace(src=(idx, ls.src[1].cast(new_dt)))
 
