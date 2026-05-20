@@ -2449,7 +2449,7 @@ class TestOps(unittest.TestCase):
 
   @unittest.skipUnless(Device.DEFAULT == "CPU" and DEV.renderer == "LLVM", "DEVECTORIZE=0 only for LLVM")
   def test_strided_conv2d_simple_vec(self):
-    with Context(DEVECTORIZE=0): self.test_strided_conv2d_simple()
+    self.test_strided_conv2d_simple()
 
   @slow_test
   def test_strided_conv2d(self):

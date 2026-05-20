@@ -1,4 +1,5 @@
 import itertools
+from tinygrad.helpers import dedup
 from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat
 from tinygrad.renderer.isa import ISARenderer, Register
 from tinygrad.dtype import dtypes, PtrDType
@@ -22,7 +23,7 @@ class LinearScanRegallocContext:
     for i,u in enumerate(reversed(uops)):
       if u.op in PSEUDO_OPS: continue
       defs = u.tag if isinstance(u.tag, tuple) else ()
-      for v in defs + tuple(s.reg for s in set(u.src)):
+      for v in defs + tuple(s.reg for s in dedup(u.src)):
         if isinstance(v, Register): lr.setdefault(v, []).insert(0, len(uops) - 1 - i)
       for v in defs:
         if v in lr and (n:=max((lr[rng][-1] for rng in ranges if lr[rng][0] <= lr[v][-1] < lr[rng][-1]), default=None)): lr[v].append(n)
@@ -90,7 +91,7 @@ class LinearScanRegallocContext:
       if u.op is Ops.RANGE:
         # we move to registers vars used in the loop sorted by next use, vars not used in the loop will not be reloaded in the epilogue
         used_in_loop = [v for v in live.keys() | self.spills.keys() if any(i <= l < lr[u.reg][-1] for l in lr[v])]
-        sorted_uses = sorted(used_in_loop, key=lambda k: next(l-i for l in lr[k] if l >= i))
+        sorted_uses = sorted(used_in_loop, key=lambda k: (next(l-i for l in lr[k] if l >= i), lr[k][0], k.name, k.index))
         live_in: dict[Register, Register] = {}
         for v in sorted_uses:
           # if all the possible registers are already in live_in there's no space for this var
