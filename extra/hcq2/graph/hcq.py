@@ -11,7 +11,7 @@ from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, graph_rewrite
 from extra.hcq2.hcq2 import HCQ2Compiled, HCQ2DeviceCtx, HCQ2LowerCtx, pm_prep_runtime, pm_lower_ops
 from extra.hcq2.hcq2 import pm_split_into_queues, pm_add_barriers, pm_add_signals
 from extra.hcq2.hcq2 import pm_bufferize, pm_lift_after, pm_resolve_patches, pm_parametrize_host_buffers
-from extra.hcq2.hcq2 import pm_lower_submits, pm_callify, pm_calc_kernargs_sizes
+from extra.hcq2.hcq2 import pm_finalize_submit, pm_callify, pm_calc_kernargs_sizes
 
 # **************** insert deps ****************
 
@@ -121,8 +121,9 @@ class HCQ2Graph(GraphRunner):
     self.linear = graph_rewrite(self.linear, pm_lift_after, ctx=self.hcq_ctx, bottom_up=False, name="lift patches to root")
     self.linear = graph_rewrite(self.linear, pm_resolve_patches, ctx=self.hcq_ctx, bottom_up=False, name="simplify patches")
     self.linear = graph_rewrite(self.linear, pm_add_queue_sig_resets, ctx=self, name="hcq: add queue sig resets", walk=True)
+    self.linear = graph_rewrite(self.linear, pm_finalize_submit, ctx=self.hcq_ctx, name="finalize submit")
     self.linear = graph_rewrite(self.linear, pm_parametrize_host_buffers, ctx=self.hcq_ctx, bottom_up=True, name="parametrize host buffers")
-    self.linear = graph_rewrite(self.linear, pm_lower_submits + self.dev.pm_lower, ctx=self.hcq_ctx, bottom_up=True, name="lower submits")
+    self.linear = graph_rewrite(self.linear, self.dev.pm_lower, ctx=self.hcq_ctx, bottom_up=True, name="lower submits")
     self.host_call = graph_rewrite(self.linear, pm_callify, ctx=self.hcq_ctx, name="hcq: callify")
 
     self.host_rt, self.host_globals = get_runtime("CPU", self.host_call.src[0]), self.host_call.src[0].arg.globals

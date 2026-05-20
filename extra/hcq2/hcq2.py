@@ -340,12 +340,13 @@ pm_parametrize_host_buffers = PatternMatcher([
   (UPat(Ops.CONST, name="c"), lambda c: c.replace(src=()) if len(c.src) else None),
 ])
 
-def lower_submit(ctx:HCQ2LowerCtx, cf:UOp) -> UOp|None:
+def finalize_submit(cf:UOp) -> UOp|None:
   if not cf.arg.startswith("submit_") or cf.tag is not None: return None
-  submit_cf = cf.rtag("AMD")
-  tl = ctx.host_param(Device['AMD'].timeline_value)
-  return tl.after(UOp(Ops.BARRIER, dtypes.void, src=(submit_cf,))).index(UOp.const(dtypes.int, 0), ptr=True).store(tl[0] + 1)
-pm_lower_submits = PatternMatcher([(UPat(Ops.CUSTOM_FUNCTION, name="cf"), lower_submit)])
+  tl = UOp.from_buffer(Device['AMD'].timeline_value, "CPU")
+  done = tl.after(UOp(Ops.BARRIER, dtypes.void, src=(cf.rtag("AMD"),)))
+  return done.index(UOp.const(dtypes.int, 0), dtype=tl.dtype.ptr()).store(tl.index(UOp.const(dtypes.int, 0)) + 1)
+
+pm_finalize_submit = PatternMatcher([(UPat(Ops.CUSTOM_FUNCTION, name="cf"), finalize_submit)])
 
 def hcq_callify(ctx:HCQ2LowerCtx, l:UOp) -> UOp:
   sink = UOp.sink(*l.src, arg=KernelInfo(name=ctx.name, estimates=Estimates()), tag=1)
@@ -386,8 +387,9 @@ def hcq_realize(ctx:HCQ2LowerCtx, linear:UOp, ast:UOp, dev:HCQ2Compiled) -> UOp:
   linear = graph_rewrite(linear, pm_bufferize, ctx=ctx, bottom_up=True, name="realize binaries")
   linear = graph_rewrite(linear, pm_lift_after, ctx=ctx, bottom_up=False, name="lift patches to root")
   linear = graph_rewrite(linear, pm_resolve_patches, ctx=ctx, bottom_up=False, name="simplify patches")
+  linear = graph_rewrite(linear, pm_finalize_submit, ctx=ctx, name="finalize submit")
   linear = graph_rewrite(linear, pm_parametrize_host_buffers, ctx=ctx, bottom_up=True, name="parametrize host buffers")
-  linear = graph_rewrite(linear, pm_lower_submits + dev.pm_lower, ctx=ctx, bottom_up=True, name="lower submits")
+  linear = graph_rewrite(linear, dev.pm_lower, ctx=ctx, bottom_up=True, name="lower submits")
   return graph_rewrite(linear, pm_callify, ctx=ctx, name="hcq: callify")
 
 def ensure_accessible(ctx:HCQ2LowerCtx, call:UOp, copy:UOp) -> UOp|None:
