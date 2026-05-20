@@ -176,6 +176,40 @@ class Linear:
 
   def __call__(self, x:Tensor) -> Tensor: return x.linear(self.weight.transpose(), self.bias)
 
+class TernaryLinear:
+  """
+  Applies a linear transformation using weights quantized to {-1, 0, +1}.
+
+  Drop-in replacement for `Linear` for ternary-weight models (BitNet b1.58, et al.).
+  Weights are quantized at construction time and remain fixed as {-1, 0, +1} thereafter.
+  The forward pass is numerically identical to `Linear`; the sparsity benefit is realized
+  by backends that specialize the matrix multiply for ternary-valued weight tensors.
+
+  Quantization rule (BitNet b1.58, https://arxiv.org/abs/2402.17764 §3.1):
+
+  ```
+  w_ternary = sign(w)  if |w| > threshold
+              0        otherwise
+  ```
+
+  where `threshold` defaults to `mean(|w|)` across the weight matrix.
+
+  ```python exec="true" source="above" session="tensor" result="python"
+  lin = nn.TernaryLinear(4, 8)
+  t = Tensor.rand(2, 4)
+  print(lin(t).shape)
+  ```
+  """
+  def __init__(self, in_features:int, out_features:int, bias=True, threshold:float|None=None):
+    bound = 1 / math.sqrt(in_features)
+    w = Tensor.uniform(out_features, in_features, low=-bound, high=bound)
+    # threshold=None: use mean(|w|) per BitNet b1.58 §3.1 — kept as a tensor op so it stays lazy
+    t = w.abs().mean() if threshold is None else threshold
+    self.weight = w.sign() * (w.abs() > t)
+    self.bias = Tensor.uniform(out_features, low=-bound, high=bound) if bias else None
+
+  def __call__(self, x:Tensor) -> Tensor: return x.linear(self.weight.transpose(), self.bias)
+
 class GroupNorm:
   """
   Applies Group Normalization over a mini-batch of inputs.
