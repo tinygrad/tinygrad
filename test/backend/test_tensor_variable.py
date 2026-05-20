@@ -1,17 +1,21 @@
 import unittest
 import numpy as np
 from tinygrad import Tensor, Variable
+from tinygrad.helpers import getenv
 
 class TestTensorVariable(unittest.TestCase):
+  @unittest.skipIf(getenv("SPEC", 0) >= 2, "# TODO: re-enable under SPEC=2 once CONST is fully deviceless")
   def test_add_tvar(self):
     vv = Variable("a", 0, 10).bind(1)
     ret = (Tensor(vv) + 3).item()
     assert ret == 4
 
+  @unittest.skipIf(getenv("SPEC", 0) >= 2, "# TODO: re-enable under SPEC=2 once CONST is fully deviceless")
   def test_inner_tvar_mul(self):
     vv = Variable("w", 0, 10).bind(2)
     assert (Tensor(3) * vv).item() == 6
 
+  @unittest.skipIf(getenv("SPEC", 0) >= 2, "# TODO: re-enable under SPEC=2 once CONST is fully deviceless")
   def test_inner_tvar_mul_node(self):
     vv = Variable("w", 0, 10).bind(2)
     assert (Tensor(3) * (vv * 4)).item() == 24

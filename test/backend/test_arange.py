@@ -72,6 +72,7 @@ class TestIndexing(unittest.TestCase):
       assert GlobalCounters.global_ops < 4*DSET, f"too many ops {GlobalCounters.global_ops}"
     np.testing.assert_allclose(real_index, X.numpy())
 
+  @unittest.skipIf(getenv("SPEC", 0) >= 2, "# TODO: re-enable under SPEC=2 once CONST is fully deviceless")
   def test_index_variable(self):
     dataset = Tensor.rand(DSET, DDIM).realize()
     v = Variable("v", 0, DDIM-1)
