@@ -589,4 +589,5 @@ class QCOMCLRenderer(OpenCLRenderer):
 
   # QCOM compiler is flaky with half
   def supported_dtypes(self):
-    return {d for d in super().supported_dtypes() if d != dtypes.float16 or bool(IMAGE) and bool(FLOAT16) and d != dtypes.double}
+    return {d for d in Renderer.supported_dtypes(self)
+            if (d != dtypes.float16 or (bool(IMAGE) and bool(FLOAT16))) and d not in dtypes.fp8s+(dtypes.bfloat16,dtypes.double)}
