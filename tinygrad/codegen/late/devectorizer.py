@@ -261,13 +261,13 @@ devectorize_buf_and_index = PatternMatcher([
    no_vectorized_index),
 ])
 
-devectorize = PatternMatcher([
+devectorize_alu = PatternMatcher([
   # CAST after AFTER
   (UPat(Ops.CAST, name="c").f(Ops.AFTER, allow_any_len=True, name="a"), lambda c,a: c.src[0].after(*a.src[1:]).cast(c.dtype)),
   # no ALU on vectorized dtypes
   (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST), name="alu"), no_vectorized_alu),
   (UPat(Ops.WMMA, name="wmma"), no_vectorized_wmma),
-])+devectorize_buf_and_index
+])
 
 pm_render = PatternMatcher([
   # for rendering, we use explicit VECTORIZE

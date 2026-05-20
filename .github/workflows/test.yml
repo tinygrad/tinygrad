@@ -561,27 +561,6 @@ jobs:
 
 # ****** Feature Tests ******
 
-  testdevectorize:
-    name: Linux (devectorize)
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    steps:
-    - name: Checkout Code
-      uses: actions/checkout@v6
-    - name: Setup Environment
-      uses: ./.github/actions/setup-tinygrad
-      with:
-        key: devectorize-minimal
-        deps: testing_unit
-        pydeps: "pillow"
-        llvm: "true"
-    - name: Test LLVM=1 DEVECTORIZE=0
-      run: DEV=CPU:LLVM DEVECTORIZE=0 python3 -m pytest -n auto test/test_tiny.py test/backend/test_ops.py
-    - name: Test LLVM=1 DEVECTORIZE=0 for model
-      run: DEV=CPU:LLVM DEVECTORIZE=0 python3 test/models/test_efficientnet.py
-    - name: Test DEV=CPU DEVECTORIZE=0
-      run: DEV=CPU DEVECTORIZE=0 python3 -m pytest -n auto test/test_tiny.py test/backend/test_ops.py
-
   testdsp:
     name: Linux (DSP)
     runs-on: ubuntu-24.04
