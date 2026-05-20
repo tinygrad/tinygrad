@@ -195,8 +195,7 @@ def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
 def get_image_idx(idx:UOp, width:int):
   x, valid = idx.src[1].get_idx(), idx.src[1].get_valid()
   idx_x, idx_y = (x // 4) % width, x // (4*width)
-  gated_buf = valid.where(idx.src[0], UOp(Ops.CONST, dtype=idx.src[0].dtype, arg=Invalid))
-  return idx.replace(src=(gated_buf, idx_y, idx_x))
+  return idx.replace(src=(idx.src[0], idx_y.valid(valid), idx_x.valid(valid)))
 
 def image_fixup(ls:UOp):
   # normal image load or store, with the CAST from expand_index
