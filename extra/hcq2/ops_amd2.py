@@ -23,7 +23,6 @@ from tinygrad.runtime.ops_amd import SQTT, SQTT_ITRACE_SE_MASK, SQTT_LIMIT_SE, S
 from tinygrad.runtime.ops_amd import EVENT_INDEX_PARTIAL_FLUSH, WAIT_REG_MEM_FUNCTION_EQ, WAIT_REG_MEM_FUNCTION_NEQ, WAIT_REG_MEM_FUNCTION_GEQ
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint: disable=unused-import
 
-from extra.hcq2.hcq2 import HCQ2LowerCtx, unwrap_after
 from tinygrad.engine.realize import get_runtime
 from tinygrad.uop.ops import Ops, UPat, PatternMatcher, graph_rewrite
 
@@ -141,7 +140,7 @@ amd_inner_pm = PatternMatcher([
   (UPat(Ops.LINEAR, src=(UPat(Ops.STORE, src=(UPat((Ops.BUFFER, Ops.PARAM)), UPat()), name="x"),)), lambda ctx, x: ctx.store(x)),
 ])
 
-def amd_lower_pm4(ctx, linear):
+def amd_lower_pm4(linear):
   enc = AMDComputeQueue(Device["AMD"])
   graph_rewrite(linear.replace(src=tuple(UOp(Ops.LINEAR, dtypes.void, (cmd,)) for cmd in linear.src)), amd_inner_pm, ctx=enc, name="amd: encode")
   return enc.uop(dev="CPU", dtype=dtypes.void, tag="compute")
@@ -193,7 +192,7 @@ class AMDCopyQueue(HCQEncoder):
     self.q(self.sdma.SDMA_OP_TIMESTAMP | self.sdma.SDMA_PKT_TIMESTAMP_GET_HEADER_SUB_OP(self.sdma.SDMA_SUBOP_TIMESTAMP_GET_GLOBAL),
            *data64_le(self.get_dev_addr(x.src[0])))
 
-def amd_lower_sdma(ctx, linear):
+def amd_lower_sdma(linear):
   copy = next(s for s in linear.src if s.op is Ops.COPY)
   dev = Device[dev_name:=copy.src[0].buffer.device]
   enc = AMDCopyQueue(dev)
@@ -241,7 +240,7 @@ class AMDProgramData:
 
 _amd_program_cache:dict[tuple[bytes,str], tuple[AMDProgramData,bytes]] = {}
 
-def amd_build_program(ctx:HCQ2LowerCtx, prg:UOp) -> UOp:
+def amd_build_program(prg:UOp) -> UOp:
   dev = Device[prg.src[1].arg]
   if (cached:=_amd_program_cache.get(key:=(lib:=prg.src[4].arg, dev.device))) is None:
     image, sections, relocs = elf_loader(lib)
