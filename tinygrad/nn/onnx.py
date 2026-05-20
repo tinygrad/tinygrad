@@ -1295,8 +1295,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     return [X, V]
 
   def Gradient(*inputs:Tensor, y:str, intermediate_tensors:dict[str, Tensor], **_):
-    intermediate_tensors[y].backward()
-    return tuple([t.grad for t in inputs])
+    return tuple(intermediate_tensors[y].gradient(*inputs))
 
   return {
     # Tensor ops
