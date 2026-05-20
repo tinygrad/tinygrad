@@ -284,22 +284,23 @@ class TestMainOnnxOps(TestOnnxOps):
   def test_qlinear_conv(self):
     for dtype, zero_point in [(np.uint8, 128), (np.int8, 0)]:
       for b in (np.ones([32], dtype=np.int32), np.zeros([32], dtype=np.int32)):
-        with self.subTest(dtype=dtype, zero_point=zero_point):
-          dtype_min, dtype_max = np.iinfo(dtype).min, np.iinfo(dtype).max
-          inputs = {
-            "x": np.random.randint(dtype_min, dtype_max + 1, [1, 3, 224, 224], dtype=dtype),
-            "x_scale": np.array(np.random.uniform(0.01, 0.1), dtype=np.float32),
-            "x_zero_point": np.array(zero_point, dtype=dtype),
-            "w": np.random.randint(dtype_min, dtype_max + 1, [32, 3, 3, 3], dtype=dtype),
-            "w_scale": np.array(np.random.uniform(0.01, 0.1), dtype=np.float32),
-            "w_zero_point": np.array(zero_point, dtype=dtype),
-            "y_scale": np.array(np.random.uniform(0.01, 0.1), dtype=np.float32),
-            "y_zero_point": np.array(zero_point, dtype=dtype),
-            "b": b
-          }
-          attributes = {'auto_pad': 'NOTSET', 'dilations': (1, 1), 'group': 1, 'kernel_shape': (3, 3), 'pads': (1, 1, 1, 1), 'strides': (2, 2)}
-          outputs = ["out"]
-          self.helper_test_single_op("QLinearConv", inputs, attributes, outputs, atol=1) # occasionally inaccurate
+        for channel_shape in [(), (32,)]:
+          with self.subTest(dtype=dtype, zero_point=zero_point, channel_shape=channel_shape):
+            dtype_min, dtype_max = np.iinfo(dtype).min, np.iinfo(dtype).max
+            inputs = {
+              "x": np.random.randint(dtype_min, dtype_max + 1, [1, 3, 224, 224], dtype=dtype),
+              "x_scale": np.array(np.random.uniform(0.01, 0.1), dtype=np.float32),
+              "x_zero_point": np.array(zero_point, dtype=dtype),
+              "w": np.random.randint(dtype_min, dtype_max + 1, [32, 3, 3, 3], dtype=dtype),
+              "w_scale": np.random.uniform(0.01, 0.1, channel_shape).astype(np.float32),
+              "w_zero_point": np.full(channel_shape, zero_point, dtype=dtype),
+              "y_scale": np.array(np.random.uniform(0.01, 0.1), dtype=np.float32),
+              "y_zero_point": np.array(zero_point, dtype=dtype),
+              "b": b
+            }
+            attributes = {'auto_pad': 'NOTSET', 'dilations': (1, 1), 'group': 1, 'kernel_shape': (3, 3), 'pads': (1, 1, 1, 1), 'strides': (2, 2)}
+            outputs = ["out"]
+            self.helper_test_single_op("QLinearConv", inputs, attributes, outputs, atol=1) # occasionally inaccurate
 
   def test_qlinear_matmul(self):
     for dtype, zero_point in [(np.uint8, 128), (np.int8, 0)]:
