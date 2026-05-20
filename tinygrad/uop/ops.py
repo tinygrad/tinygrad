@@ -93,6 +93,8 @@ class UOpMetaClass(type):
     if _buffer is not None:
       assert op is Ops.BUFFER, f"trying to set Buffer {_buffer} for {op}"
       buffers[created] = _buffer
+    if created.dtype.count > 1 and created.shape != (created.dtype.count,):
+      print(f"WARNING: mismatch at {created.op} {created.shape} != {created.dtype}")
     if SPEC > 1:
       from tinygrad.uop.spec import spec_full, test_pyrender
       if SPEC > 2:
@@ -213,7 +215,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     match self.op:
       # late ops don't have shape
       case Ops.UNIQUE | Ops.LUNIQUE | Ops.DEVICE | Ops.IF | Ops.BARRIER | Ops.CUSTOM | Ops.CUSTOMI | \
-           Ops.CONTRACT | Ops.SINK | Ops.END | Ops.REWRITE_ERROR | Ops.PTRCAT | Ops.ENDIF | \
+           Ops.SINK | Ops.END | Ops.REWRITE_ERROR | Ops.PTRCAT | Ops.ENDIF | \
            Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE | Ops.INS | Ops.TUPLE | Ops.CALL | Ops.FUNCTION:
         return None
 
@@ -237,6 +239,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
         return inner_shape
 
       case Ops.CAST:
+        # if it has a vec dtype, set the shape
+        if self.dtype.count > 1: return (self.dtype.count,)
         # when PTX casts from ptr to non ptr, remove the shape of the buffer
         if isinstance(self.src[0].dtype, PtrDType) and not isinstance(self.src[0].dtype, ImageDType) and not isinstance(self.dtype, PtrDType):
           return ()
@@ -247,12 +251,13 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
         return tuple(shp) + self.src[0].shape[len(self.src[1:]):]
 
       # TODO: these should have the shape of the dtype.count
-      case Ops.CONST | Ops.DEFINE_VAR | Ops.STACK | Ops.GEP:
+      # TODO: contract and unroll should be deleted
+      case Ops.CONST | Ops.DEFINE_VAR | Ops.STACK | Ops.GEP | Ops.CONTRACT | Ops.UNROLL | Ops.VCAT:
         return (self.dtype.count,) if self.dtype.count > 1 else ()
-      case Ops.VCAT | Ops.GETADDR: return ()
 
       # some ops init the shape
-      case Ops.BIND | Ops.RANGE | Ops.SPECIAL | Ops.UNROLL: return ()
+      case Ops.GETADDR: return ()
+      case Ops.BIND | Ops.RANGE | Ops.SPECIAL: return ()
       case Ops.BINARY: return (len(self.arg),)
       case Ops.BUFFER: return (self.arg,)
       case Ops.BUFFER_VIEW:
@@ -278,6 +283,10 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
         return self.src[0]._shape
       # REDUCE with empty axis is passthrough (lowered form)
       case Ops.REDUCE if len(self.arg[1]) == 0:
+        # these can mismatch if there's a horizonal reduce
+        if self.src[0].dtype.count > 1:
+          assert self.src[0]._shape is not None and len(self.src[0]._shape) == 1, f"bad reduce shape on {self.src[0].op} {self.src[0]._shape}"
+          return () if self.dtype.count == 1 else (self.dtype.count,)
         return self.src[0]._shape
 
       # TODO: disallow shape changing bitcast
