@@ -145,23 +145,29 @@ def amd_lower_pm4(linear):
   graph_rewrite(linear.replace(src=tuple(UOp(Ops.LINEAR, dtypes.void, (cmd,)) for cmd in linear.src)), amd_inner_pm, ctx=enc, name="amd: encode")
   return enc.uop(dev="CPU", dtype=dtypes.void, tag="compute")
 
-def amd_submit_pm4(ctx, cf):
-  dev = Device['AMD']
-  bb_param, stores = (cf.src[0].src[0], cf.src[0].src[1:]) if cf.src[0].op is Ops.AFTER else (cf.src[0], ())
-  q = dev.compute_queue
-  ring, wptr, doorbell, put_ptr = (ctx.host_param(b) for b in (q.ring, q.write_ptr, q.doorbell, q.put_value))
-  size, ring_dwords = UOp.const(dtypes.uint32, bb_param.dtype.size), q.ring.size
+def amd_submit_pm4(cf):
+  # the cmdbuf to submit + the patch writes that fill it
+  cmdbuf, stores = cf.src[0].src[0], cf.src[0].src[1:]
+  size, zero = UOp.const(dtypes.uint32, cmdbuf.arg), UOp.const(dtypes.int, 0)
 
-  put = put_ptr[0]
-  i = UOp.range(size, 0, dtype=dtypes.int, src=stores)
+  # the compute queue's ring and its host-side ring/write/put pointers
+  q = Device['AMD'].compute_queue
+  ring, wptr, doorbell, put_ptr = (UOp.from_buffer(b, "CPU") for b in (q.ring, q.write_ptr, q.doorbell, q.put_value))
+
+  # place the cmdbuf at the ring's write offset, wrapping the ring
+  put = put_ptr.index(zero)
   next_put = put + size.cast(put.dtype)
-  ring_idx = ((put + i.cast(put.dtype)) % ring_dwords).cast(dtypes.int)
+  i = UOp.range(size, 0, dtype=dtypes.int, src=stores)
+  ring_idx = ((put + i.cast(put.dtype)) % q.ring.size).cast(dtypes.int)
 
-  copy_to_ring = ring[ring_idx].store(bb_param[i]).end(i)
-  bump_put_ptr = put_ptr[0].store(next_put)
-  bump_wptr = wptr[0].store(next_put)
+  # copy the cmdbuf into the ring and advance the put/write pointers
+  copy_to_ring = ring.index(ring_idx, dtype=ring.dtype.ptr()).store(cmdbuf.index(i)).end(i)
+  bump_put_ptr = put_ptr.index(zero, dtype=put_ptr.dtype.ptr()).store(next_put)
+  bump_wptr = wptr.index(zero, dtype=wptr.dtype.ptr()).store(next_put)
+
+  # ring the doorbell once the copy and pointer bumps have landed
   flush = UOp.barrier(copy_to_ring, bump_put_ptr, bump_wptr)
-  return doorbell.after(flush)[0].store(next_put)
+  return doorbell.after(flush).index(zero, dtype=doorbell.dtype.ptr()).store(next_put)
 
 class AMDCopyQueue(HCQEncoder):
   def __init__(self, dev:AMDDevice, queue_idx=0):
@@ -207,30 +213,36 @@ amd_inner_sdma_pm = PatternMatcher([
   (UPat(Ops.LINEAR, src=(UPat(Ops.STORE, src=(UPat((Ops.BUFFER, Ops.PARAM)), UPat()), name="x"),)), lambda ctx, x: ctx.store(x)),
 ])
 
-def amd_submit_sdma(ctx, cf):
-  dev = Device['AMD']
-  bb_param, stores = (cf.src[0].src[0], cf.src[0].src[1:]) if cf.src[0].op is Ops.AFTER else (cf.src[0], ())
-  q = dev.sdma_queue(0)
-  ring, wptr, doorbell, put_ptr = (ctx.host_param(b) for b in (q.ring, q.write_ptr, q.doorbell, q.put_value))
-  size_dw, ring_bytes = bb_param.dtype.size, q.ring.size * 4
+def amd_submit_sdma(cf):
+  # the cmdbuf to submit + the patch writes that fill it
+  cmdbuf, stores = cf.src[0].src[0], cf.src[0].src[1:]
+  size_dw, zero = cmdbuf.arg, UOp.const(dtypes.int, 0)
 
-  put_b = put_ptr[0]
-  tail_off_dw = ((put_b % ring_bytes) // 4).cast(dtypes.int)
+  # the sdma queue's ring and its host-side ring/write/put pointers
+  q = Device['AMD'].sdma_queue(0)
+  ring, wptr, doorbell, put_ptr = (UOp.from_buffer(b, "CPU") for b in (q.ring, q.write_ptr, q.doorbell, q.put_value))
+
+  # sdma needs the cmdbuf contiguous: if it won't fit before the ring end, restart at 0 and zero the tail
+  put_b = put_ptr.index(zero)
+  tail_off_dw = ((put_b % (q.ring.size * 4)) // 4).cast(dtypes.int)
   fits = (size_dw <= q.ring.size - tail_off_dw).cast(dtypes.int)
   start_dw = fits * tail_off_dw
   zero_amt_dw = (1 - fits) * (q.ring.size - tail_off_dw)
 
+  # zero the wrapped tail, then copy the cmdbuf into the ring
   zi = UOp.range(zero_amt_dw, 0, dtype=dtypes.int, src=stores)
-  zero_tail = ring[tail_off_dw + zi].store(UOp.const(dtypes.uint32, 0)).end(zi)
-
+  zero_tail = ring.index(tail_off_dw + zi, dtype=ring.dtype.ptr()).store(UOp.const(dtypes.uint32, 0)).end(zi)
   i = UOp.range(UOp.const(dtypes.int, size_dw), 0, dtype=dtypes.int, src=stores)
-  copy_to_ring = ring[start_dw + i].store(bb_param[i]).end(i)
+  copy_to_ring = ring.index(start_dw + i, dtype=ring.dtype.ptr()).store(cmdbuf.index(i)).end(i)
 
+  # advance the put/write pointers past the zeroed tail and the cmdbuf
   next_put_b = put_b + ((zero_amt_dw + size_dw) * 4).cast(put_b.dtype)
-  bump_put_ptr = put_ptr[0].store(next_put_b)
-  bump_wptr = wptr[0].store(next_put_b)
+  bump_put_ptr = put_ptr.index(zero, dtype=put_ptr.dtype.ptr()).store(next_put_b)
+  bump_wptr = wptr.index(zero, dtype=wptr.dtype.ptr()).store(next_put_b)
+
+  # ring the doorbell once the writes have landed
   flush = UOp.barrier(zero_tail, copy_to_ring, bump_put_ptr, bump_wptr)
-  return doorbell.after(flush)[0].store(next_put_b)
+  return doorbell.after(flush).index(zero, dtype=doorbell.dtype.ptr()).store(next_put_b)
 
 @dataclass(frozen=True)
 class AMDProgramData:

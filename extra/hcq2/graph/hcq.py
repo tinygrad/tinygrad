@@ -27,7 +27,7 @@ def insert_deps(ctx:HCQ2Graph, linear:UOp) -> UOp:
 pm_insert_deps = PatternMatcher([(UPat(Ops.LINEAR, name="linear"), insert_deps)])
 
 pm_replace_params = PatternMatcher([
-  (UPat(Ops.PARAM, name="p"), lambda ctx, p: ctx.input_addrs_uop[p.arg]),
+  (UPat(Ops.PARAM, name="p"), lambda ctx, p: ctx.input_addrs_uop.index(UOp.const(dtypes.int, p.arg))),
   (UPat(Ops.BUFFER_VIEW, src=(UPat(Ops.INDEX, name="addr"),), name="bv"),
     lambda ctx, bv, addr: addr.cast(dtypes.uint64) + UOp.const(dtypes.uint64, bv.arg[1] * bv.dtype.itemsize)),
 ])
@@ -92,7 +92,7 @@ class HCQ2Graph(GraphRunner):
     self.hcq_ctx = HCQ2LowerCtx(name="hcq_graph")
 
     self.input_addrs = Buffer("CPU", max(len(input_uops), 1), dtypes.uint64, preallocate=True)
-    self.input_addrs_uop = self.hcq_ctx.host_param(self.input_addrs)
+    self.input_addrs_uop = UOp.from_buffer(self.input_addrs, "CPU")
 
     self.linear = graph_rewrite(self.linear, pm_insert_deps, ctx=self, name="hcq: insert deps", walk=True)
     self.linear = graph_rewrite(self.linear, pm_replace_params, ctx=self, name="hcq: replace params", walk=True)
@@ -121,9 +121,8 @@ class HCQ2Graph(GraphRunner):
     self.linear = graph_rewrite(self.linear, pm_lift_after, ctx=self.hcq_ctx, bottom_up=False, name="lift patches to root")
     self.linear = graph_rewrite(self.linear, pm_resolve_patches, ctx=self.hcq_ctx, bottom_up=False, name="simplify patches")
     self.linear = graph_rewrite(self.linear, pm_add_queue_sig_resets, ctx=self, name="hcq: add queue sig resets", walk=True)
-    self.linear = graph_rewrite(self.linear, pm_finalize_submit, ctx=self.hcq_ctx, name="finalize submit")
+    self.linear = graph_rewrite(self.linear, pm_finalize_submit + self.dev.pm_lower, ctx=self.hcq_ctx, bottom_up=True, name="lower submits")
     self.linear = graph_rewrite(self.linear, pm_parametrize_host_buffers, ctx=self.hcq_ctx, bottom_up=True, name="parametrize host buffers")
-    self.linear = graph_rewrite(self.linear, self.dev.pm_lower, ctx=self.hcq_ctx, bottom_up=True, name="lower submits")
     self.host_call = graph_rewrite(self.linear, pm_callify, ctx=self.hcq_ctx, name="hcq: callify")
 
     self.host_rt, self.host_globals = get_runtime("CPU", self.host_call.src[0]), self.host_call.src[0].arg.globals

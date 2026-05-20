@@ -161,10 +161,6 @@ class HCQ2LowerCtx:
   holds:list[UOp] = field(default_factory=list)
   devs:dict[str, HCQ2DeviceCtx] = field(default_factory=dict)
 
-  def host_param(self, buf:Buffer) -> UOp:
-    if buf not in self.inputs: self.inputs.append(buf)
-    return UOp.placeholder((buf.size,), buf.dtype, self.inputs.index(buf))
-
 class HCQEncoder:
   def __init__(self, device:str): self.device, self.blob, self.patches = device, b'', []
 
@@ -328,13 +324,18 @@ pm_resolve_patches = symbolic_simple + PatternMatcher([
   (UPat((Ops.BUFFER, Ops.BUFFER_VIEW), name="buf").index(UPat.cvar("off")).or_casted().store(UPat.cvar("val")), fold_const_store),
 ])
 
+def parametrize_host_buffer(ctx:HCQ2LowerCtx, buf:UOp) -> UOp:
+  # register a host buffer as a launcher input and return its placeholder
+  if (b:=buf.buffer) not in ctx.inputs: ctx.inputs.append(b)
+  return UOp.placeholder((b.size,), b.dtype, ctx.inputs.index(b))
+
 pm_parametrize_host_buffers = PatternMatcher([
   # resolve buffer views to parametrize only root buffers
   (UPat(Ops.INDEX, src=(UPat(Ops.BUFFER_VIEW, name="bv"), UPat.var("idx")), name="bi"),
-    lambda ctx, bv, idx, bi: bi.replace(src=(bv.src[0], idx + bv.arg[1]))),
+    lambda bv, idx, bi: bi.replace(src=(bv.src[0], idx + bv.arg[1]))),
 
   # parametrize host buffers
-  (UPat((Ops.BUFFER, Ops.BUFFER_VIEW), name="buf"), lambda ctx, buf: ctx.host_param(buf.buffer)),
+  (UPat((Ops.BUFFER, Ops.BUFFER_VIEW), name="buf"), parametrize_host_buffer),
 
   # remove UNIQUE/DEVICE to dedup CONST
   (UPat(Ops.CONST, name="c"), lambda c: c.replace(src=()) if len(c.src) else None),
@@ -345,7 +346,6 @@ def finalize_submit(cf:UOp) -> UOp|None:
   tl = UOp.from_buffer(Device['AMD'].timeline_value, "CPU")
   done = tl.after(UOp(Ops.BARRIER, dtypes.void, src=(cf.rtag("AMD"),)))
   return done.index(UOp.const(dtypes.int, 0), dtype=tl.dtype.ptr()).store(tl.index(UOp.const(dtypes.int, 0)) + 1)
-
 pm_finalize_submit = PatternMatcher([(UPat(Ops.CUSTOM_FUNCTION, name="cf"), finalize_submit)])
 
 def hcq_callify(ctx:HCQ2LowerCtx, l:UOp) -> UOp:
@@ -387,9 +387,8 @@ def hcq_realize(ctx:HCQ2LowerCtx, linear:UOp, ast:UOp, dev:HCQ2Compiled) -> UOp:
   linear = graph_rewrite(linear, pm_bufferize, ctx=ctx, bottom_up=True, name="realize binaries")
   linear = graph_rewrite(linear, pm_lift_after, ctx=ctx, bottom_up=False, name="lift patches to root")
   linear = graph_rewrite(linear, pm_resolve_patches, ctx=ctx, bottom_up=False, name="simplify patches")
-  linear = graph_rewrite(linear, pm_finalize_submit, ctx=ctx, name="finalize submit")
+  linear = graph_rewrite(linear, pm_finalize_submit + dev.pm_lower, ctx=ctx, bottom_up=True, name="lower submits")
   linear = graph_rewrite(linear, pm_parametrize_host_buffers, ctx=ctx, bottom_up=True, name="parametrize host buffers")
-  linear = graph_rewrite(linear, dev.pm_lower, ctx=ctx, bottom_up=True, name="lower submits")
   return graph_rewrite(linear, pm_callify, ctx=ctx, name="hcq: callify")
 
 def ensure_accessible(ctx:HCQ2LowerCtx, call:UOp, copy:UOp) -> UOp|None:
