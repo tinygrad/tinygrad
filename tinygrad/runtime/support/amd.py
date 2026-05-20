@@ -15,7 +15,7 @@ class AMDReg:
 
 @dataclass
 class AMDIP:
-  name:str; version:tuple[int, ...]; bases:dict[int, tuple[int, ...]] # noqa: E702
+  name:str; version:tuple[int, int, int]; bases:dict[int, tuple[int, ...]] # noqa: E702
 
   @functools.cached_property
   def regs(self): return import_asic_regs(self.name, self.version, cls=functools.partial(AMDReg, bases=self.bases))
@@ -28,7 +28,7 @@ class AMDIP:
 # load the greatest module with matching major version that's less than or equal to the target version
 # this is not universally correct, see below for an example, but appears reliable for most recent gpus
 # https://github.com/torvalds/linux/blob/9207d47f966be9f4d52e7e0119ac2b7a7e366f3e/drivers/gpu/drm/amd/amdgpu/amdgpu_discovery.c#L3163
-def import_module(name:str, target:tuple[int, ...], submod=""):
+def import_module(name:str, target:tuple[int, int, int], submod=""):
   # version overrides
   target = {("smu", (13, 0, 7)): (13, 0, 0)}.get((name, target), target)
   mod = getattr(tinygrad.runtime.autogen.am, submod) if submod else tinygrad.runtime.autogen.am
@@ -43,5 +43,5 @@ def import_pmc(ip) -> dict[str, tuple[str, int]]:
   # NOTE: precise arch for mi300+, generic for others, since rocm headers lack some archs
   return {k:x for k,v in pmc.counters.items() if (x:=v.get(f"gfx{ip[0]}{ip[1]:x}{ip[2]:x}" if ip[0] == 9 else f"gfx{ip[0]}", None)) is not None}
 
-def import_asic_regs(prefix:str, version:tuple[int, ...], cls=AMDReg) -> dict[str, AMDReg]:
+def import_asic_regs(prefix:str, version:tuple[int, int, int], cls=AMDReg) -> dict[str, AMDReg]:
   return {reg:cls(name=reg, offset=off, segment=seg, fields=fields) for reg,(off,seg,fields) in import_module(prefix, version, submod="regs").items()}
