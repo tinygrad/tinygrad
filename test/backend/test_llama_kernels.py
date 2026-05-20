@@ -65,6 +65,8 @@ def run_quantize_fp8_scalar(shape:tuple[int, ...]) -> None:
     assert fp8.cast(dtypes.float).allclose(ref_fp8.cast(dtypes.float), atol=0, rtol=0).item(), "fp8 mismatch"
 
 @unittest.skipUnless(is_dtype_supported(dtypes.bfloat16), "need bfloat16")
+@unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
+@unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
 class TestQuantizeFP8(unittest.TestCase):
   def test_scalar(self): run_quantize_fp8_scalar((32, getenv("N", 1024)))
   def test_delayed(self): run_quantize_fp8_delayed((2048, getenv("N", 1024)))
