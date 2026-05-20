@@ -1,7 +1,10 @@
 import unittest
-from tinygrad import Tensor, dtypes, Context
+from tinygrad import Tensor, Device, dtypes, Context
 from tinygrad.device import is_dtype_supported
+from tinygrad.helpers import getenv
+from examples.mlperf.models.flat_llama import FP8_DTYPE, quantize_fp8
 from extra.llama_kernels.fused_ce import fused_ce_loss
+from extra.llama_kernels.quantize_fp8_delayed import quantize_fp8_delayed, quantize_fp8_scalar
 
 def run_fused_ce(bs:int, seqlen:int, vocab:int, label_smoothing:float=0.0) -> None:
   Tensor.manual_seed(0)
@@ -32,6 +35,39 @@ class TestFusedCE(unittest.TestCase):
 
   # note: this is the shape used in llama 8b
   #def test_fused_ce_smoothing_16_1024_128256(self): run_fused_ce(16, 1024, 128256, label_smoothing=0.2)
+
+def run_quantize_fp8_delayed(shape:tuple[int, ...]) -> None:
+  Tensor.manual_seed(0)
+  x = Tensor.randn(*shape).cast(dtypes.bfloat16).contiguous()
+  amax_state = Tensor.full((), 2.0, dtype=dtypes.float32).contiguous()
+  with Context(DEBUG=0): Tensor.realize(x, amax_state)
+
+  fp8, inv_scale, new_amax, _ = quantize_fp8_delayed(x, amax_state, FP8_DTYPE)
+  ref_fp8, ref_inv_scale, ref_new_amax = quantize_fp8(x, amax_state=amax_state)
+  Tensor.realize(fp8, inv_scale, new_amax, ref_fp8, ref_inv_scale, ref_new_amax)
+
+  with Context(DEBUG=0):
+    assert fp8.cast(dtypes.float).allclose(ref_fp8.cast(dtypes.float), atol=0, rtol=0).item(), "fp8 mismatch"
+    assert inv_scale.allclose(ref_inv_scale, atol=0, rtol=0).item(), "inv_scale mismatch"
+    assert new_amax.allclose(ref_new_amax, atol=0, rtol=0).item(), "amax mismatch"
+
+def run_quantize_fp8_scalar(shape:tuple[int, ...]) -> None:
+  Tensor.manual_seed(0)
+  x = (Tensor.randn(*shape).cast(dtypes.float) * 3).cast(dtypes.bfloat16).contiguous()
+  amax_state = Tensor.full((), 2.0, dtype=dtypes.float32).contiguous()
+  with Context(DEBUG=0): Tensor.realize(x, amax_state)
+
+  fp8 = quantize_fp8_scalar(x, amax_state, FP8_DTYPE)
+  ref_fp8, _, _ = quantize_fp8(x, amax_state=amax_state)
+  Tensor.realize(fp8, ref_fp8)
+
+  with Context(DEBUG=0):
+    assert fp8.cast(dtypes.float).allclose(ref_fp8.cast(dtypes.float), atol=0, rtol=0).item(), "fp8 mismatch"
+
+@unittest.skipUnless(is_dtype_supported(dtypes.bfloat16), "need bfloat16")
+class TestQuantizeFP8(unittest.TestCase):
+  def test_scalar(self): run_quantize_fp8_scalar((32, getenv("N", 1024)))
+  def test_delayed(self): run_quantize_fp8_delayed((2048, getenv("N", 1024)))
 
 if __name__ == '__main__':
   unittest.main()
