@@ -93,8 +93,8 @@ class UOpMetaClass(type):
     if _buffer is not None:
       assert op is Ops.BUFFER, f"trying to set Buffer {_buffer} for {op}"
       buffers[created] = _buffer
-    #if created.dtype.count > 1 and created.shape != (created.dtype.count,):
-    #  print(f"WARNING: mismatch at {created.op} {created.shape} != {created.dtype}")
+    if created.dtype.count > 1 and created.shape != (created.dtype.count,):
+      print(f"WARNING: mismatch at {created.op} {created.shape} != {created.dtype}")
     if SPEC > 1:
       from tinygrad.uop.spec import spec_full, test_pyrender
       if SPEC > 2:
@@ -291,9 +291,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       # REDUCE with empty axis is passthrough (lowered form)
       case Ops.REDUCE if len(self.arg[1]) == 0:
         # these can mismatch if there's a horizonal reduce
-        #if self.src[0].dtype.count > 1:
-        #  assert self.src[0]._shape is not None and len(self.src[0]._shape) == 1, f"bad reduce shape on {self.src[0].op} {self.src[0]._shape}"
-        #  return () if self.dtype.count == 1 else (self.dtype.count,)
+        if self.dtype.count > 1: return (self.dtype.count,)
         return self.src[0]._shape
 
       # TODO: disallow shape changing bitcast

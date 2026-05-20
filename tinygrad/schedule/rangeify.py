@@ -64,10 +64,19 @@ pm_fold_moved_after = PatternMatcher([
 ])
 
 # movement op on INDEX as a PatternMatcher
+def _mop_index(r:UOp, idx:UOp):
+  idxs = idx.src[1:]
+  if len(idxs) == len(r.shape):
+    return r.src[0].index(*apply_movement_op(r.op, r.src[0].shape, r.marg, idxs), dtype=idx.dtype, arg=idx.arg)
+  if r.op is Ops.RESHAPE:
+    src_prefix = len(r.src[0].shape) - len(r.shape[len(idxs):])
+    if src_prefix >= 0 and r.src[0].shape[src_prefix:] == r.shape[len(idxs):]:
+      if src_prefix == 0: return r.src[0] if r.src[0].dtype == idx.dtype else None
+      ret = r.src[0].index(*apply_movement_op(r.op, r.src[0].shape[:src_prefix], r.shape[:len(idxs)], idxs), dtype=idx.dtype, arg=idx.arg)
+      return ret if ret.shape == idx.shape else None
+
 pm_mops = PatternMatcher([
-  (UPat(GroupOp.Movement, name="r").f(Ops.INDEX, allow_any_len=True, name="idx"),
-   lambda r,idx: r.src[0].index(*apply_movement_op(r.op, r.src[0].shape, r.marg, idx.src[1:]), dtype=idx.dtype, arg=idx.arg)
-     if len(idx.src[1:]) == len(r.shape) else None),
+  (UPat(GroupOp.Movement, name="r").f(Ops.INDEX, allow_any_len=True, name="idx"), _mop_index),
   # move movement ops and INDEX after AFTER (but not when AFTER has a raw STORE with shaped children — from replace_contig_with_store_after)
   (UPat(GroupOp.Movement|{Ops.INDEX}, name="r").after(name="a", allow_any_len=True),
    lambda r,a: UOp(r.op, r.dtype, (a.replace(src=(r.src[0],)+a.src[1:]),)+r.src[1:], r.arg)),
