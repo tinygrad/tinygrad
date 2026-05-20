@@ -375,7 +375,7 @@ def _mem_store(mem: UOp, addr: UOp, val: UOp, active: UOp, addr_bits: int = 32, 
   """Conditional memory store with sub-word support. Returns list of store UOps."""
   adt = dtypes.uint64 if addr_bits == 64 else dtypes.uint32
   word_addr = addr >> UOp.const(adt, 2)
-  idx = mem.index(word_addr.cast(dtypes.int).valid(active))
+  idx = mem.index(word_addr.valid(active))
   if data_bits == 32: return [idx.store(active.where(_to_u32(val), idx))]
   # Sub-word store: read-modify-write with mask
   byte_pos = addr.cast(dtypes.uint32) & _c(3)
@@ -388,7 +388,7 @@ def _mem_store(mem: UOp, addr: UOp, val: UOp, active: UOp, addr_bits: int = 32, 
   is_cross = byte_pos.eq(_c(3))
   cross_word0 = (idx & _c(0x00FFFFFF)) | ((val_u32 & _c(0xFF)) << _c(24))
   store0 = idx.store(active.where(is_cross.where(cross_word0, new_word), idx))
-  next_idx = mem.index((word_addr + UOp.const(adt, 1)).cast(dtypes.int).valid(active & is_cross))
+  next_idx = mem.index((word_addr + UOp.const(adt, 1)).valid(active & is_cross))
   cross_word1 = (next_idx & _c(0xFFFFFF00)) | ((val_u32 >> _c(8)) & _c(0xFF))
   return [store0, next_idx.store((active & is_cross).where(cross_word1, next_idx))]
 
@@ -398,7 +398,7 @@ def _mem_store_bytes(mem: UOp, addr: UOp, val: UOp, active: UOp, data_bits: int 
   val_u32 = val.cast(dtypes.uint32) if val.dtype != dtypes.uint32 else val
   for i in range(data_bits // 8):
     byte_val = (val_u32 >> UOp.const(dtypes.uint32, i * 8)) & UOp.const(dtypes.uint32, 0xFF)
-    stores.append(mem.index((addr + UOp.const(dtypes.uint64, i)).cast(dtypes.int).valid(active)).store(byte_val.cast(dtypes.uint8)))
+    stores.append(mem.index((addr + UOp.const(dtypes.uint64, i)).valid(active)).store(byte_val.cast(dtypes.uint8)))
   return stores
 
 def _collect_data_slices(assigns: list[tuple[str, UOp]], data_prefix: str, pcode_vars: dict | None = None, op_name: str = "") -> dict[int, UOp]:
@@ -463,7 +463,7 @@ class _Ctx:
     """Read instruction dword from vmem at PC + dword_idx*4."""
     pc = self.rpc()
     addr = pc if dword_idx == 0 else pc + UOp.const(dtypes.uint64, dword_idx * 4)
-    return self.vmem.index((addr >> UOp.const(dtypes.uint64, 2)).cast(dtypes.int), ptr=True).load()
+    return self.vmem.index(addr >> UOp.const(dtypes.uint64, 2), ptr=True).load()
 
   def inst_field(self, field) -> UOp:
     """Extract field bits from instruction encoding. Tracks field for canonical key computation."""
@@ -516,8 +516,8 @@ class _Ctx:
   # Dynamic register access (takes UOp index instead of int)
   def rsgpr_dyn(self, reg: UOp, valid: UOp | None = None) -> UOp:
     """Read SGPR with dynamic register index."""
-    if valid is not None: return self.sgpr.index(reg.cast(dtypes.int).valid(valid), ptr=True).load()
-    return self.sgpr.index(reg.cast(dtypes.int), ptr=True).load()
+    if valid is not None: return self.sgpr.index(reg.valid(valid), ptr=True).load()
+    return self.sgpr.index(reg, ptr=True).load()
 
   def wsgpr_dyn(self, reg: UOp, val: UOp) -> UOp:
     """Write SGPR with dynamic register index. On RDNA, index 124 = NULL (writes discarded). On CDNA, index 124 = M0 (read/write)."""
@@ -833,7 +833,7 @@ def _compile_smem(inst: ir3.SMEM | ir4.SMEM, ctx: _Ctx) -> UOp:
   nval = int(part.removeprefix('DWORD').removeprefix('X') or '1') if 'DWORD' in part else int(part[1:]) / 32 * (-1 if part[0] == 'I' else 1)
   ndwords = max(1, int(abs(nval)))
   dword_base = addr >> UOp.const(dtypes.uint64, 2)
-  vals = [ctx.vmem.index((dword_base + UOp.const(dtypes.uint64, i)).cast(dtypes.int)) for i in range(ndwords)]
+  vals = [ctx.vmem.index(dword_base + UOp.const(dtypes.uint64, i)) for i in range(ndwords)]
   if abs(nval) < 1:
     nbits = int(abs(nval) * 32)
     byte_off = (addr & UOp.const(dtypes.uint64, 3)).cast(dtypes.uint32) * UOp.const(dtypes.uint32, 8)
@@ -1847,7 +1847,7 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
   def wmem(addr: UOp, val: UOp, active: UOp, data_bits: int = 32) -> UOp:
     if data_bits < 32:
       # Sub-dword LDS write: read-modify-write within the uint32 slot
-      word_addr = (addr >> addr_shift).cast(dtypes.int)
+      word_addr = addr >> addr_shift
       idx = mem.index(word_addr.valid(active))
       byte_pos = addr.cast(dtypes.uint32) & _c(3)
       byte_shift = byte_pos * _c(8)
@@ -1855,7 +1855,7 @@ def _compile_mem_op(inst: ir3.DS|ir3.FLAT|ir3.GLOBAL|ir3.SCRATCH|ir4.DS|ir4.VFLA
       mask = size_mask << byte_shift
       new_word = (idx & (mask ^ _c(0xFFFFFFFF))) | ((val.cast(dtypes.uint32) & size_mask) << byte_shift)
       return idx.store(active.where(new_word, idx))
-    idx = mem.index((addr >> addr_shift).cast(dtypes.int))
+    idx = mem.index(addr >> addr_shift)
     return idx.store(active.where(val, idx.load()))
 
   def make_srcs(lane: UOp) -> dict:
@@ -2005,7 +2005,7 @@ def _compile_mubuf(inst: irc.MUBUF, ctx: _Ctx) -> UOp:
     for i in range(n_dwords):
       word_addr = (addr + UOp.const(dtypes.uint64, i * 4)) >> UOp.const(dtypes.uint64, 2)
       val = in_bounds.where(mem.index(word_addr.cast(dtypes.int64), ptr=True).load(), _c(0))
-      lds_idx = ((lds_addr + _c(i * 4)) >> _c(2)).cast(dtypes.int)
+      lds_idx = (lds_addr + _c(i * 4)) >> _c(2)
       lds_slot = ctx.lds.index(lds_idx.valid(active))
       stores.append(lds_slot.store(active.where(val, lds_slot)))
   elif is_store:

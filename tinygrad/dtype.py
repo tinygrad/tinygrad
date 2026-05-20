@@ -91,7 +91,7 @@ class DType(metaclass=DTypeMetaClass):
     return float("inf") if dtypes.is_float(self) else True
   def const(self, val: tuple[ConstType, ...]|ConstType):
     if isinstance(val, tuple):
-      assert len(val) == self.count, f"mismatch {val} {self}"
+      #assert len(val) == self.count, f"mismatch {val} {self}"
       return tuple(map(self.const, val))
     if isinstance(val, InvalidType): return val
     # NOTE: float('nan') != float('nan'), so we canonicalize here

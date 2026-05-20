@@ -247,6 +247,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
         return tuple(shp) + self.src[0].shape[len(self.src[1:]):]
 
       # TODO: these should have the shape of the dtype.count
+      case Ops.VCONST: return (len(self.arg),)
       case Ops.CONST | Ops.DEFINE_VAR: return ()
       case Ops.GEP | Ops.STACK | Ops.VCAT | Ops.GETADDR: return ()
 
