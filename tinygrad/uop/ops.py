@@ -217,6 +217,10 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
            Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE | Ops.INS | Ops.TUPLE | Ops.CALL | Ops.FUNCTION:
         return None
 
+      # special (terrible) case for RESHAPE on NOOP
+      case Ops.RESHAPE:
+        if self.src[0].op is Ops.NOOP: return self.marg
+
       # these must all have matching shapes
       case Ops.GROUP | Ops.STORE:
         input_shapes = [x.shape for x in self.src]
@@ -251,7 +255,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
       # TODO: these should have the shape of the dtype.count
       case Ops.CONST | Ops.DEFINE_VAR: return ()
-      case Ops.GEP | Ops.STACK | Ops.VCONST | Ops.VCAT | Ops.GETADDR: return ()
+      case Ops.GEP | Ops.STACK | Ops.VCAT | Ops.GETADDR: return ()
 
       # some ops init the shape
       case Ops.BIND | Ops.RANGE | Ops.SPECIAL | Ops.UNROLL: return ()
@@ -395,8 +399,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   # *** uop evaluation ***
 
   def simplify(self, tracked=False):
-    if self.op in {Ops.CONST, Ops.VCONST}: return self
-    if self.op is Ops.SINK and all(s.op in {Ops.CONST, Ops.VCONST} or (s.op is Ops.STACK and len(s.src) == 0) for s in self.src): return self
+    if self.op is Ops.CONST: return self
+    if self.op is Ops.SINK and all(s.op is Ops.CONST or (s.op is Ops.STACK and len(s.src) == 0) for s in self.src): return self
     # late import!
     from tinygrad.uop.symbolic import symbolic
     with Context(TRACK_MATCH_STATS=0 if not tracked else TRACK_MATCH_STATS.value):
@@ -482,7 +486,6 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     if isinstance(i, int):
       # NOTE: these are just shortcuts to not have to create and fold later
       if self.op is Ops.STACK: return self.src[i]
-      if self.op is Ops.VCONST: return UOp.const(self.dtype.scalar(), self.arg[i])
       if self.op is Ops.CONST: return UOp.const(self.dtype.scalar(), self.arg)
       i = (i,)
     return UOp(Ops.GEP, self.dtype.scalar().vec(len(i)) if len(i) > 1 else self.dtype.scalar(), (self,), i)
@@ -513,10 +516,12 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     if isinstance(b, UOp): return b.unbind()[0] if b.op is Ops.BIND else b
     if isinstance(b, tuple) and all_same(b):
       assert len(b) > 0, "can't create const from empty tuple"
-      b = b[0]  # doesn't have to be a VCONST if they are all the same
-    ret = UOp(Ops.VCONST if isinstance(b, tuple) else Ops.CONST, dtype,
-              arg=dtype.const(b),
-              src=(UOp(Ops.DEVICE, arg=device),) if device is not None else ())
+      b = b[0]  # doesn't have to be a STACK if they are all the same
+    if isinstance(b, tuple):
+      stk = [UOp(Ops.CONST, dtype.scalar(), arg=dtype.const(c), src=(UOp(Ops.DEVICE, arg=device),) if device is not None else ()) for c in b]
+      ret = UOp.vectorize(*stk)
+    else:
+      ret = UOp(Ops.CONST, dtype, arg=dtype.const(b), src=(UOp(Ops.DEVICE, arg=device),) if device is not None else ())
     return ret.reshape((1,)*len(shape)).expand(shape) if shape is not None and ret.shape != shape else ret
   @staticmethod
   def unique_const(fill_value:ConstType, dtype:DTypeLike|None=None, device:str|tuple[str, ...]|None=None,  # type: ignore[override]
@@ -656,7 +661,6 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   def sgep(self, i:int) -> sint:
     match self.op:
       case Ops.CONST: return self.arg
-      case Ops.VCONST: return self.arg[i]
       case Ops.STACK: return self.src[i].sintify()
       case _: raise RuntimeError(f"no sgep on {self.op}")
 
@@ -850,14 +854,16 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     """largest known int that divides self"""
     # TODO: for negatives it's not the largest
     if self.op is Ops.CONST: return self.arg
-    if self.op is Ops.VCONST: return math.gcd(*self.arg)
+    if self.op is Ops.STACK: return math.gcd(*[x.const_factor() for x in self.src])
     if self.op is Ops.ADD: return math.gcd(self.src[0].const_factor(), self.src[1].const_factor())
     if self.op is Ops.MUL: return self.src[0].arg if self.src[0].op is Ops.CONST else self.src[1].arg if self.src[1].op is Ops.CONST else 1
     return 1
   def divides(self, v:int) -> UOp|None:
     if v==1: return self
     if self.op is Ops.CONST: return self.const_like(self.arg//v) if self.arg%v == 0 else None
-    if self.op is Ops.VCONST: return self.const_like(tuple(x//v for x in self.arg)) if all(x%v == 0 for x in self.arg) else None
+    if self.op is Ops.STACK:
+      srcs = tuple(s.divides(v) for s in self.src)
+      return None if any(s is None for s in srcs) else UOp(Ops.STACK, self.dtype, cast(tuple[UOp, ...], srcs))
     if self.op is Ops.ADD: return d0+d1 if (d0:=self.src[0].divides(v)) is not None and (d1:=self.src[1].divides(v)) is not None else None
     if self.op is Ops.MUL:
       if (d0:=self.src[0].divides(v)) is not None: return d0 * self.src[1]
@@ -931,7 +937,6 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     if self.op is Ops.BIND: return self.src[0]._min_max # ignore the bound value
     if self.op in {Ops.UNROLL, Ops.STACK}: return min(x.vmin for x in self.src), max(x.vmax for x in self.src)
     if self.op is Ops.CONST and self.arg is not Invalid: return self.arg, self.arg
-    if self.op is Ops.VCONST and Invalid not in self.arg: return (min(self.arg), max(self.arg))
     if self.op is Ops.GEP: return self.src[0]._min_max
     # TODO: CAST to bool/unsigned is not monotone, still some case can be simplified
     if self.op is Ops.CAST and self.dtype in dtypes.floats+dtypes.sints+(dtypes.weakint,):
@@ -1185,7 +1190,7 @@ class UPat(OpMixin):
   @staticmethod
   @functools.cache
   def cvar(name:str|None=None, dtype:DType|tuple[DType, ...]|None=None, vec=True, arg=None):
-    return UPat((Ops.CONST,Ops.VCONST) if vec else Ops.CONST, dtype, name=name, arg=arg)
+    return UPat(Ops.CONST, dtype, name=name, arg=arg)
   @staticmethod
   def const(dtype:DType|tuple[DType, ...]|None, b:ConstType): return UPat(Ops.CONST, dtype=dtype, arg=b)
 
@@ -1572,8 +1577,7 @@ pm_lower_index_dtype = PatternMatcher([
   # There are no Unary ops at this point in symbolic, those are introduced later
   (UPat(GroupOp.Binary, name="u", src=(UPat.var("x").cast(dtypes.weakint), UPat.var("y").cast(dtypes.weakint))), lambda u,x,y:
     x.cast(dt:=least_upper_dtype(select_dtype(u), x.dtype, y.dtype)).alu(u.op, y.cast(dt)).cast(u.dtype)),
-  (UPat((Ops.CONST, Ops.VCONST), dtype=dtypes.weakint, name="u"),
-    lambda u: u.replace(dtype=select_dtype(u)).cast(u.dtype) if u.arg!=Invalid else None),
+  (UPat(Ops.CONST, dtype=dtypes.weakint, name="u"), lambda u: u.replace(dtype=select_dtype(u)).cast(u.dtype) if u.arg!=Invalid else None),
   (UPat(Ops.WHERE, dtypes.weakint, src=(UPat.var("cond"), UPat.var("x").cast(dtypes.weakint), UPat.var("y").cast(dtypes.weakint))), lambda cond,x,y:
     cond.where(x.cast(dt:=least_upper_dtype(x.dtype, y.dtype)), y.cast(dt)).cast(dtypes.weakint)),
   (UPat(Ops.RANGE, src=(UPat.var("end").cast(dtypes.weakint)), name="r"), lambda r,end: r.replace(dtype=end.dtype, src=(end,)).cast(dtypes.weakint)),

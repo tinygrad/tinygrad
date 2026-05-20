@@ -13,7 +13,7 @@ from tinygrad.gradient import compute_gradient
 from tinygrad.mixin import OpMixin
 from tinygrad.uop.ops import UOp, Ops, sint, all_metadata, _index_to_concrete_int, Variable, _broadcast_shape
 from tinygrad.schedule import create_linear_with_vars
-from tinygrad.device import Buffer, Device, canonicalize_device
+from tinygrad.device import Buffer, canonicalize_device
 from tinygrad.engine.realize import run_linear
 from tinygrad.callify import transform_to_call
 
@@ -225,8 +225,6 @@ class Tensor(OpMixin):
 
   def linear_with_vars(self, *lst:Tensor) -> tuple[UOp, dict[str, int]]:
     """Creates the LINEAR UOp needed to realize these Tensor(s), with Variables."""
-    for x in (self,)+lst:
-      if x.uop.device is None: x.replace(Tensor.empty(*x.shape, dtype=x.dtype, device=Device.DEFAULT).assign(x))
     big_sink, becomes_map = transform_to_call(UOp.sink(*[x.uop for x in (self,)+lst]))
     _apply_map_to_tensors(becomes_map, name="buffers")
     return create_linear_with_vars(big_sink)
@@ -240,7 +238,7 @@ class Tensor(OpMixin):
   @disable_gc()
   def realize(self, *lst:Tensor, do_update_stats=True) -> Tensor:
     """Triggers the computation needed to create these Tensor(s)."""
-    if len(to_realize:=[x for x in (self,)+lst if not x.uop.has_buffer_identity()]):
+    if len(to_realize:=[x for x in (self,)+lst if x.uop.device is not None and not x.uop.has_buffer_identity()]):
       run_linear(*Tensor.linear_with_vars(*to_realize), update_stats=do_update_stats)
     return self
 
@@ -288,7 +286,7 @@ class Tensor(OpMixin):
       from tinygrad.engine.jit import JitError
       raise JitError("cannot access tensor data during JIT capture, the value will be baked in")
     x = self.cast(self.dtype.base).contiguous()
-    if isinstance(self.device, tuple): x = x.to("CPU")
+    if self.uop.device is None or isinstance(self.device, tuple): x = x.clone("CPU")
     return cast(Buffer, x.realize().uop.buffer).ensure_allocated()
   def _data(self) -> memoryview: return self._buffer().as_memoryview()
 
@@ -353,13 +351,15 @@ class Tensor(OpMixin):
     if 0 in self.shape: return np.empty(self.shape, dtype=_to_np_dtype(self.dtype.base))
     return self._buffer().numpy().reshape(self.shape)
 
-  def clone(self) -> Tensor:
+  def clone(self, device:str|tuple[str, ...]|None=None) -> Tensor:
     """
     Creates a clone of this tensor allocating a separate buffer for the data.
+    If `device` is specified, the clone is placed on that device.
     """
-    ret = self.empty_like()
-    if self.grad is not None: ret.grad = self.grad.clone()
-    return ret.assign(self)
+    device = device or self.device
+    ret = self.empty_like(device=device)
+    if self.grad is not None: ret.grad = self.grad.clone(device=device)
+    return ret.assign(self.to(device))
 
   def to(self, device:str|tuple[str, ...]|None) -> Tensor:
     """
