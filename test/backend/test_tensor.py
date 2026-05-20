@@ -99,10 +99,10 @@ class TestTinygrad(unittest.TestCase):
       return second_derivative.numpy()
 
     def test_tinygrad():
-      x_val = Tensor(2.0)
+      x_val = Tensor([2.0])
       f = x_val**3
-      first_derivative = f.gradient(x_val)[0]
-      second_derivative = first_derivative.gradient(x_val)[0]
+      first_derivative = f.sum().gradient(x_val)[0]
+      second_derivative = first_derivative.sum().gradient(x_val)[0]
       return second_derivative.numpy()
 
     np.testing.assert_allclose(test_tinygrad(), test_pytorch(), atol=1e-5)
@@ -171,8 +171,8 @@ class TestTinygrad(unittest.TestCase):
       return w1.grad, w2.grad
 
     def test_tinygrad():
-      w1 = Tensor(init)
-      w2 = Tensor(init)
+      w1 = Tensor(init).clone()
+      w2 = Tensor(init).clone()
       out = w1.add(w2)
       out.backward()
       return w1.grad.numpy(), w2.grad.numpy()
@@ -191,8 +191,8 @@ class TestTinygrad(unittest.TestCase):
       return w1.grad.numpy(), w2.grad.numpy()
 
     def test_tinygrad():
-      w1 = Tensor(init)
-      w2 = Tensor(init)
+      w1 = Tensor(init).clone()
+      w2 = Tensor(init).clone()
       assert w1.requires_grad is True and w2.requires_grad is True
       nn.optim.SGD([w1, w2], lr=0.01)
       assert w1.requires_grad is True and w2.requires_grad is True
