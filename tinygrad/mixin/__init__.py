@@ -715,6 +715,52 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     idx = (-(match * type(self).arange(n, 0, -1, device=self.device).reshape(n, 1)).max(-2) + n).cast(dtypes.int32)
     return values, idx.transpose(-1, axis)
 
+  def associative_scan(self, fn:Callable, axis:int=0, reverse:bool=False) -> Self:
+    """
+    Performs an associative scan (parallel prefix) along `axis` using the binary
+    associative function `fn`. Equivalent to ``jax.lax.associative_scan``.
+
+    Uses the Hillis-Steele algorithm: O(n log n) work, O(log n) depth.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([1, 2, 3, 4])
+    print(t.associative_scan(lambda a, b: a + b, axis=0).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.associative_scan(lambda a, b: a * b, axis=0).numpy())
+    ```
+    ```python exec="true" source="above" session="tensor" result="python"
+    print(t.associative_scan(lambda a, b: a + b, axis=0, reverse=True).numpy())
+    ```
+    """
+    axis = self._resolve_dim(axis)
+    if self.ndim == 0 or 0 in self.shape: return self.clone()
+    n = int(self.shape[axis])
+    if n <= 1: return self.clone()
+
+    x = self
+    if reverse: x = x.flip(axis)
+
+    # Build index slices helper
+    def _make_idx(axis:int, start:int|None, end:int|None):
+      return tuple(slice(None) if i != axis else slice(start, end) for i in range(x.ndim))
+
+    # Hillis-Steele: at each step d, combine element i with element i - 2^d
+    # NOTE: must .contiguous() after cat to prevent tinygrad lazy eval aliasing issues
+    d = 1
+    while d < n:
+      # elements from index d onwards get combined with elements from 0..n-d-1
+      shifted = x[_make_idx(axis, 0, n - d)]     # elements [0, 1, ..., n-d-1]
+      orig = x[_make_idx(axis, d, n)]             # elements [d, d+1, ..., n-1]
+      combined = fn(orig, shifted)
+      # stitch: first d elements unchanged, rest are the combined result
+      head = x[_make_idx(axis, 0, d)]
+      x = head.cat(combined, dim=axis).contiguous()
+      d *= 2
+
+    if reverse: x = x.flip(axis)
+    return x
+
   def cummin(self, axis:int=0) -> tuple[Self, Self]:
     """
     Computes the cumulative min of the tensor along `axis`, returning (values, indices).
