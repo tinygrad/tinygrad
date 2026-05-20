@@ -3379,7 +3379,6 @@ class TestOps(unittest.TestCase):
     t = (Tensor([0], dtype='int') | 0xFFFFFFFF).item()
     if not COMPILE_ONLY: assert t == -1
 
-@unittest.skipUnless(dtypes.uchar in Device[Device.DEFAULT].renderer.supported_dtypes(), f"no uint8 on {Device.DEFAULT}")
 class TestOpsUint8(unittest.TestCase):
   def test_cast(self):
     helper_test_op([(2,3,64,64)], lambda x: x.type(torch.uint8), lambda x: x.cast('uint8'), forward_only=True, low=0, high=255)

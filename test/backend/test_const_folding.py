@@ -38,12 +38,10 @@ class TestMovedConstFolding(unittest.TestCase):
 
   def test_cast_padded(self):
     # NOTE: it's always 1 kernel when calling .numpy, limitation of _check_ast_count
-    if dtypes.int16 in Device[Device.DEFAULT].renderer.supported_dtypes():
-      _check_ast_count(1, Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int16))
-      np.testing.assert_equal(Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int16).numpy(), [0, 1, 1, 1, 1, 0])
-    if dtypes.uint16 in Device[Device.DEFAULT].renderer.supported_dtypes():
-      _check_ast_count(1, Tensor.full(4, fill_value=-1).pad(((1, 1),)).cast(dtypes.uint16))
-      np.testing.assert_equal(Tensor.full(4, fill_value=-1).pad(((1, 1),)).cast(dtypes.uint16).numpy(), [0, 65535, 65535, 65535, 65535, 0])
+    _check_ast_count(1, Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int16))
+    np.testing.assert_equal(Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int16).numpy(), [0, 1, 1, 1, 1, 0])
+    _check_ast_count(1, Tensor.full(4, fill_value=-1).pad(((1, 1),)).cast(dtypes.uint16))
+    np.testing.assert_equal(Tensor.full(4, fill_value=-1).pad(((1, 1),)).cast(dtypes.uint16).numpy(), [0, 65535, 65535, 65535, 65535, 0])
     # folded
     _check_ast_count(1, Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int64))
     np.testing.assert_equal(Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int64).numpy(), [0, 1, 1, 1, 1, 0])
