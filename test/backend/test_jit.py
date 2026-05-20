@@ -541,6 +541,12 @@ class TestJit(unittest.TestCase):
     with self.assertRaises(JitError):
       f(Tensor(UOp.const(dtypes.float, 2.0))).item()
 
+  def test_jit_deviceless_compute_input(self):
+    @TinyJit
+    def f(x:Tensor) -> Tensor: return (x + 1).realize()
+    with self.assertRaises(JitError):
+      f(Tensor(UOp.const(dtypes.float, 2.0) + UOp.const(dtypes.float, 1.0))).item()
+
   def test_jit_init_empty_alt(self):
     @TinyJit
     def f(a:Tensor, b:Tensor) -> Tensor: return b.assign(a+1)
