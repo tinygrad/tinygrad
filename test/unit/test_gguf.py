@@ -115,33 +115,35 @@ class TestGGUF(unittest.TestCase):
     with self.assertRaises(ValueError):
       ggml_data_to_tensor(Tensor.empty(512, dtype=dtypes.uint8), 256, 1337)
 
-  def test_multi_part_load(self):
-    def build(n_total, part_no, tensors):
-      # [header] [kv_data] [tensor_infos] [padding] [tensor_data_blob]
-      buf = bytearray()
-      # Header: magic "GGUF" + version=3 + n_tensors + n_kv=2
-      buf += struct.pack("<4siqq", b"GGUF", 3, len(tensors), 2)
-      # KV entries: [key_len: uint64][key bytes][type: int32][value]
-      for k, v in [("split.count", n_total), ("split.no", part_no)]:
-        kb = k.encode()
-        buf += struct.pack("<Q", len(kb)) + kb + struct.pack("<i", 4) + struct.pack("<I", v)
-      data_off = 0
-      # Tensor infos: [name_len][name][ndims][dims reversed][qtype][offset_into_data_blob]
-      for name, dims, qtype, data in tensors:
-        nb = name.encode()
-        buf += struct.pack("<Q", len(nb)) + nb + struct.pack("<I", len(dims))
-        for d in reversed(dims): buf += struct.pack("<Q", d)
-        buf += struct.pack("<i", qtype) + struct.pack("<Q", data_off)
-        data_off += len(data)
-      buf += b"\x00" * ((32 - len(buf) % 32) % 32)
-      for _, _, _, data in tensors: buf += data
-      return bytes(buf)
+  @staticmethod
+  def _build_gguf(tensors, kvs):
+    # [header] [kv_data] [tensor_infos] [padding] [tensor_data_blob]
+    buf = bytearray()
+    # Header: magic "GGUF" + version=3 + n_tensors + n_kv
+    buf += struct.pack("<4siqq", b"GGUF", 3, len(tensors), len(kvs))
+    # KV entries: [key_len: uint64][key bytes][type: int32][value]
+    for k, v in kvs:
+      kb = k.encode()
+      if isinstance(v, str): buf += struct.pack("<Q", len(kb)) + kb + struct.pack("<i", 8) + struct.pack("<Q", len(v)) + v.encode()
+      else: buf += struct.pack("<Q", len(kb)) + kb + struct.pack("<i", 4) + struct.pack("<I", v)
+    data_off = 0
+    # Tensor infos: [name_len][name][ndims][dims reversed][qtype][offset_into_data_blob]
+    for name, dims, qtype, data in tensors:
+      nb = name.encode()
+      buf += struct.pack("<Q", len(nb)) + nb + struct.pack("<I", len(dims))
+      for d in reversed(dims): buf += struct.pack("<Q", d)
+      buf += struct.pack("<i", qtype) + struct.pack("<Q", data_off)
+      data_off += len(data)
+    buf += b"\x00" * ((32 - len(buf) % 32) % 32)
+    for _, _, _, data in tensors: buf += data
+    return bytes(buf)
 
+  def test_multi_part_load(self):
     with tempfile.TemporaryDirectory() as d:
       d = pathlib.Path(d)
       a, b = np.array([1.0, 2.0, 3.0, 4.0], dtype=np.float32), np.array([5.0, 6.0], dtype=np.float32)
-      (d / "test-00001-of-00002.gguf").write_bytes(build(2, 0, [("a", (4,), 0, a.tobytes())]))
-      (d / "test-00002-of-00002.gguf").write_bytes(build(2, 1, [("b", (2,), 0, b.tobytes())]))
+      (d / "test-00001-of-00002.gguf").write_bytes(self._build_gguf([("a", (4,), 0, a.tobytes())], [("split.count", 2), ("split.no", 0)]))
+      (d / "test-00002-of-00002.gguf").write_bytes(self._build_gguf([("b", (2,), 0, b.tobytes())], [("split.count", 2), ("split.no", 1)]))
       kv, ts = gguf_load(d / "test-00001-of-00002.gguf")
       self.assertEqual(kv["split.count"], 2)
       np.testing.assert_equal(ts["a"].numpy(), a)

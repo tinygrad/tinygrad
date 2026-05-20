@@ -48,12 +48,12 @@ class TestValidateOOB(unittest.TestCase):
     with Context(CHECK_OOB=1, SPEC=2):
       buf = UOp(Ops.PARAM, dtypes.int.ptr(16), (), 0)
       v = Variable("v", 0, 20)
-      to_uops_list([buf.index(v.valid(v < 16)).store(0)])  # valid
+      to_uops_list([buf.index(v.valid(v < 16), ptr=True).store(0)])  # valid
       with self.assertRaises(RuntimeError):
-        to_uops_list([buf.index(v.valid(v < 20)).store(0)])  # oob
+        to_uops_list([buf.index(v.valid(v < 20), ptr=True).store(0)])  # oob
 
   # ALU ops in index
-  def test_idiv(self):
+  def test_floordiv(self):
     with Context(CHECK_OOB=1, SPEC=2):
       buf = UOp(Ops.PARAM, dtypes.int.ptr(16), (), 0)
       to_uops_list([buf.index(UOp.range(32, 0, AxisType.GLOBAL) // 2, ptr=True).load(dtype=dtypes.int)])  # 0..15 valid
@@ -154,7 +154,7 @@ class TestValidateOOB(unittest.TestCase):
 
       gate = (gidx<400) & (lidx<8)
 
-      local_store = UOp(Ops.STORE, dtypes.void, (sbuf.index(lidx, lidx<8), UOp.const(dtypes.uint, 1)))
+      local_store = sbuf.index(lidx.valid(lidx<8)).store(UOp.const(dtypes.uint, 1))
 
       barrier = UOp(Ops.BARRIER, dtypes.void, (local_store,))
       if_barrier = UOp(Ops.IF, dtypes.void, (gate, barrier))

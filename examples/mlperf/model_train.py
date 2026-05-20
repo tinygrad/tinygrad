@@ -180,11 +180,11 @@ def train_resnet():
   def fake_data_get(batch_size):
     x = Tensor.zeros(batch_size, 224, 224, 3, dtype=dtypes.uchar).contiguous()
     y = [0] * batch_size
-    return x.shard(GPUS, axis=0).realize(), Tensor(y, requires_grad=False).shard(GPUS, axis=0), y, None
+    return x.shard(GPUS, axis=0).realize(), Tensor(y).shard(GPUS, axis=0), y, None
 
   def data_get(it):
     x, y, cookie = next(it)
-    return x.shard(GPUS, axis=0).realize(), Tensor(y, requires_grad=False).shard(GPUS, axis=0), y, cookie
+    return x.shard(GPUS, axis=0).realize(), Tensor(y).shard(GPUS, axis=0), y, cookie
 
   # ** epoch loop **
   step_times = []
@@ -798,7 +798,7 @@ def train_unet3d():
   @Tensor.train(mode=False)
   def eval_step(model, x, y):
     y_hat, y = sliding_window_inference(model, x, y, gpus=GPUS)
-    y_hat, y = Tensor(y_hat), Tensor(y, requires_grad=False)
+    y_hat, y = Tensor(y_hat), Tensor(y)
     loss = dice_ce_loss(y_hat, y)
     score = dice_score(y_hat, y)
     return loss.realize(), score.realize()
@@ -1419,7 +1419,10 @@ def train_llama3():
 
   for p in optim.params:
     grad_dtype = dtypes.bfloat16 if p.dtype == FP8_DTYPE else p.dtype
-    p.grad = Tensor.zeros(p.shape, dtype=grad_dtype, device=p.device).contiguous()
+    if isinstance(p.device, tuple) and p.uop.axis is not None:
+      p.grad = Tensor.zeros(p.shape, dtype=grad_dtype, device=p.device[0]).shard_(p.device, axis=p.uop.axis).contiguous()
+    else:
+      p.grad = Tensor.zeros(p.shape, dtype=grad_dtype, device=p.device).contiguous()
   grads = [p.grad for p in optim.params]
 
   scheduler = CosineAnnealingLRWithWarmup(optim, opt_base_learning_rate, opt_end_learning_rate, opt_learning_rate_warmup_steps, opt_learning_rate_decay_steps)
@@ -1439,7 +1442,7 @@ def train_llama3():
 
   from tinygrad.nn.state import get_state_dict
   model_state = get_state_dict(model)
-  for wname in ["wqkv", "wo", "w13", "w2"]:
+  for wname in model._fp8_inv_scale:
     w = model_state[wname]
     w._inv_scale = model._fp8_inv_scale[wname]
     if optim.master_params:
@@ -1455,7 +1458,7 @@ def train_llama3():
     if is_dp: tokens = tokens.to(None).shard(device, 0)
     if is_mp: tokens = tokens.shard(device)
     if not is_sharding: tokens = tokens.to(None)
-    logits:Tensor = model(tokens[:, :-1])
+    logits:Tensor = model(tokens[:, :-1], save=bool(SMALL))
     if getenv("FAST_CE", 0):
       from extra.llama_kernels.fused_ce import fused_ce_loss
       loss = fused_ce_loss(logits.cast(dtypes.bfloat16), tokens[:, 1:], label_smoothing=0.0)

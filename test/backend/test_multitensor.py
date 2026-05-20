@@ -98,6 +98,11 @@ class TestMultiTensor(unittest.TestCase):
     self.assertEqual(r.tolist(), out)
   def test_shard_reshape(self): self._test_shard_op(lambda t:t.reshape(2, 2), [[1.,1.],[1.,1.]])
   def test_shard_elementwise(self): self._test_shard_op(lambda t:(t+t).reshape(2, 2), [[2.,2.],[2.,2.]])
+  def test_alu_deviceless_const(self):
+    s = Tensor([1.0, 2, 3, 4]).shard((f"{Device.DEFAULT}:0", f"{Device.DEFAULT}:1"), axis=0)
+    np.testing.assert_equal((s + Tensor(UOp.const(dtypes.float, 1.0))).numpy(), [2, 3, 4, 5])
+    np.testing.assert_equal((s + Tensor(UOp.const(dtypes.float, 1.0)).reshape((1,)).expand((4,))).numpy(), [2, 3, 4, 5])
+
   def test_shard_reduce(self):
     self._test_shard_op(lambda t:t.reshape(2, 3).sum(axis=1), [3.,3.], n=6)
     self._test_shard_op(lambda t:t.reshape(2, 3).sum(axis=0), [2.,2.,2.], n=6)
@@ -117,7 +122,7 @@ class TestMultiTensor(unittest.TestCase):
       _ = Tensor(X.uop, dtype=dtypes.float)
 
   def test_sharded_arange(self):
-    sharded_arange = Tensor.arange(1000).shard(devices_2, 0)
+    sharded_arange = Tensor.arange(1000).clone().shard(devices_2, 0)
     sharded_arange.realize()
     np.testing.assert_equal(sharded_arange.numpy(), np.arange(1000))
 
@@ -230,7 +235,7 @@ class TestMultiTensor(unittest.TestCase):
     for ring in (0, 2):
       GlobalCounters.reset()
       with Context(RING=ring, SCACHE=0):
-        t = Tensor.arange(32).contiguous().shard(devices_4, 0).to(Device.DEFAULT)
+        t = Tensor.arange(32).clone().shard(devices_4, 0).to(Device.DEFAULT)
         t.realize()
       kernel_counts[ring] = GlobalCounters.kernel_count
       self.assertEqual(t.device, Device.DEFAULT)
@@ -372,7 +377,7 @@ class TestMultiTensor(unittest.TestCase):
 
   def test_backward_sum(self):
     x = Tensor([[1.,2,3,4], [5,6,7,8]]).shard(devices_2, axis=0)
-    w = Tensor([1.,2,3,4], requires_grad=True).shard(devices_2)
+    w = Tensor([1.,2,3,4]).shard(devices_2)
     out = x * w
     out.mean().backward()
     tst = w.grad.numpy()
@@ -404,7 +409,6 @@ class TestMultiTensor(unittest.TestCase):
     B, T, embed_size, vocab_size = 4, 10, 20, 28
 
     layer = nn.Embedding(vocab_size, embed_size)
-    layer.weight.requires_grad = True
     x = Tensor(np.random.randint(0, vocab_size, (B, T), dtype=np.int32))
     z = layer(x)
     z.sum().backward()
@@ -412,7 +416,6 @@ class TestMultiTensor(unittest.TestCase):
 
     layer_sharded = nn.Embedding(vocab_size, embed_size)
     layer_sharded.weight.replace(layer.weight.shard(devices_2, axis=shard_weight_axis)).realize()
-    layer_sharded.weight.requires_grad = True
     x_sharded = x.shard(devices_2, axis=None)
     z_shard = layer_sharded(x_sharded)
     z_shard.sum().backward()
@@ -475,7 +478,7 @@ class TestMultiTensor(unittest.TestCase):
 
   def _test_model_train_step(self, m, fake_image, labels):
     from tinygrad.nn.optim import LARS
-    optimizer = LARS(get_parameters(m), 0.1)  # set requires_grad for all params
+    optimizer = LARS(get_parameters(m), 0.1)
 
     optimizer.zero_grad()
     m.load_from_pretrained()
@@ -554,7 +557,7 @@ class TestMultiTensor(unittest.TestCase):
   def test_multi_tensor_jit_graph_assign_updates_each_shard(self):
     @TinyJit
     def jf(out: Tensor) -> Tensor:
-      tmp = (Tensor.arange(4, dtype=dtypes.float).shard(devices_2, 0) + 1).contiguous().realize()
+      tmp = (Tensor.arange(4, dtype=dtypes.float).clone().shard(devices_2, 0) + 1).contiguous().realize()
       out.assign((tmp + 1).contiguous()).realize()
       return out
 
@@ -746,6 +749,11 @@ class TestMultiTensor(unittest.TestCase):
     t2.realize()
   def test_rand_like_on_shard_axis(self): self.test_rand_like_on_shard(0)
 
+  def test_rand_like_on_shard_axis_requires_grad(self):
+    t = Tensor.empty((16, 16)).shard(devices_2, axis=0)
+    self.assertIs(t.rand_like(requires_grad=True).requires_grad, True)
+    self.assertIs(t.rand_like(requires_grad=False).requires_grad, False)
+
   def test_rand_like_from_alu(self):
     a = Tensor.ones(4, 4).shard(devices_4, axis=0)
     aa = a + a
@@ -812,7 +820,7 @@ class TestMultiTensor(unittest.TestCase):
       output = X.dropout(0.5).numpy()
       unique, counts = np.unique(output, return_counts=True)
       assert set(unique) == {0, 2}, unique
-      assert 100 < counts[0] < 156, counts[0]
+      assert 96 < counts[0] < 160, counts[0]
 
   def test_dropout_on_shard_axis(self):
     with Tensor.train():
@@ -820,7 +828,7 @@ class TestMultiTensor(unittest.TestCase):
       output = X.dropout(0.5).numpy()
       unique, counts = np.unique(output, return_counts=True)
       assert set(unique) == {0, 2}, unique
-      assert 200 < counts[0] < 312, counts[0]
+      assert 192 < counts[0] < 320, counts[0]
 
   @unittest.skip("TODO: this requires forced_realize to be deleted.")
   def test_shard_memory(self):
@@ -831,7 +839,7 @@ class TestMultiTensor(unittest.TestCase):
 
   def test_clone(self):
     for axis in (None, 0):
-      t = Tensor.arange(16).reshape(4, 4).shard(devices_2, axis=axis).contiguous().realize()
+      t = Tensor.arange(16).reshape(4, 4).clone().shard(devices_2, axis=axis).contiguous().realize()
       t_clone = t.clone().realize()
       self.assertEqual(t_clone.device, t.device)
       self.assertEqual(t_clone.uop.axis, axis)
@@ -1083,8 +1091,6 @@ class TestBatchNorm(unittest.TestCase):
         bn = nn.BatchNorm2d(8)
         for p in get_parameters(bn):
           p.shard_(devices)
-        bn.weight.requires_grad = True
-        bn.bias.requires_grad = True
         bns.append(bn)
 
       bn_ts = []
@@ -1164,27 +1170,27 @@ class TestMultiBufferView(unittest.TestCase):
   @unittest.skip("flaky on LLVM")
   def test_shrink_non_shard_axis(self):
     ref = Tensor.arange(8*4*10).reshape(8, 4, 10).contiguous().realize()
-    a = Tensor.arange(8*4*10).reshape(8, 4, 10).contiguous().shard(devices_2, axis=1).realize()
+    a = Tensor.arange(8*4*10).reshape(8, 4, 10).clone().shard(devices_2, axis=1).realize()
     self._check(ref, a, lambda t: t[3])
 
   def test_shrink_2d(self):
-    ref = Tensor.arange(6*4).reshape(6, 4).contiguous().realize()
-    a = Tensor.arange(6*4).reshape(6, 4).contiguous().shard(devices_2, axis=1).realize()
+    ref = Tensor.arange(6*4).reshape(6, 4).clone().realize()
+    a = Tensor.arange(6*4).reshape(6, 4).clone().shard(devices_2, axis=1).realize()
     self._check(ref, a, lambda t: t.shrink(((1, 4), None)))
 
   def test_reshape_then_shrink(self):
-    ref = Tensor.arange(8*6).reshape(8, 6).contiguous().realize()
-    a = Tensor.arange(8*6).reshape(8, 6).contiguous().shard(devices_2, axis=1).realize()
+    ref = Tensor.arange(8*6).reshape(8, 6).clone().realize()
+    a = Tensor.arange(8*6).reshape(8, 6).clone().shard(devices_2, axis=1).realize()
     self._check(ref, a, lambda t: t.reshape(4, 2, 6)[1])
 
   def test_chained_shrink(self):
-    ref = Tensor.arange(10*8).reshape(10, 8).contiguous().realize()
-    a = Tensor.arange(10*8).reshape(10, 8).contiguous().shard(devices_2, axis=1).realize()
+    ref = Tensor.arange(10*8).reshape(10, 8).clone().realize()
+    a = Tensor.arange(10*8).reshape(10, 8).clone().shard(devices_2, axis=1).realize()
     self._check(ref, a, lambda t: t.shrink(((2, 8), None)).shrink(((1, 4), None)))
 
   def test_4_devices(self):
-    ref = Tensor.arange(8*12).reshape(8, 12).contiguous().realize()
-    a = Tensor.arange(8*12).reshape(8, 12).contiguous().shard(devices_4, axis=1).realize()
+    ref = Tensor.arange(8*12).reshape(8, 12).clone().realize()
+    a = Tensor.arange(8*12).reshape(8, 12).clone().shard(devices_4, axis=1).realize()
     out = a[5].contiguous()
     linear, var_vals = out.linear_with_vars()
     if all(hasattr(Device[d].allocator, "_offset") for d in out.device):

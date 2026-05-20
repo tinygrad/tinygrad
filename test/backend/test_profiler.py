@@ -51,17 +51,20 @@ class TestProfiler(unittest.TestCase):
     TestProfiler.runtime = get_runtime(TestProfiler.d0.device, TestProfiler.prg)
     TestProfiler.b.uop.buffer.allocate()
 
-  def test_profile_kernel_run(self):
+  def test_profile_kernel_run(self, wait=False):
     runner_name = TestProfiler.runtime.name
     with helper_collect_profile(TestProfiler.d0) as profile:
       gs, ls = TestProfiler.prg.arg.launch_dims({})
-      TestProfiler.runtime(TestProfiler.b.uop.buffer._buf, TestProfiler.a.uop.buffer._buf, global_size=gs, local_size=ls)
+      TestProfiler.runtime(TestProfiler.b.uop.buffer._buf, TestProfiler.a.uop.buffer._buf, global_size=gs, local_size=ls, wait=wait)
 
     profile, _ = helper_profile_filter_device(profile, TestProfiler.d0.device)
     kernel_runs = [x for x in profile if isinstance(x, ProfileRangeEvent)]
     assert len(kernel_runs) == 1, "one kernel run is expected"
     assert kernel_runs[0].name == runner_name, "kernel name is not correct"
     assert _dev_base(kernel_runs[0].device) == kernel_runs[0].device, "kernel should not be on a sub-device"
+
+  def test_profile_kernel_run_wait(self):
+    self.test_profile_kernel_run(wait=True)
 
   def test_profile_copyin(self):
     buf1 = Buffer(Device.DEFAULT, 2, dtypes.float, options=BufferSpec(nolru=True)).ensure_allocated()

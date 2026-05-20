@@ -105,7 +105,7 @@ class TestKernelFusionRegression(unittest.TestCase):
       view = x[1:3]
       view += 1.0
       return x.sum()
-    self._check_kernel_count(fn, 8)
+    self._check_kernel_count(fn, 7)
 
   def test_batchnorm_running_stats_update(self):
     def fn():

@@ -2,13 +2,21 @@ import unittest, math
 from tinygrad import dtypes
 from tinygrad.helpers import all_same, Context
 from tinygrad.uop.ops import GroupOp, UOp, Ops, exec_alu, PatternMatcher, TrackedPatternMatcher, UPat
-from tinygrad.codegen import full_rewrite_to_sink
+from test.helpers import full_rewrite
 from hypothesis import given, strategies as strat
 
 # Helper function to apply the graph rewrite
 @Context(SPEC=0)
 def apply_rewrite(expr):
-  return full_rewrite_to_sink(expr.sink()).src[0]
+  return full_rewrite(expr.sink()).src[0]
+
+@Context(SPEC=0)
+def apply_rewrite_values(expr):
+  srcs = full_rewrite(expr.sink()).src
+  if len(srcs) == 1:
+    if srcs[0].op is Ops.CONST: return (srcs[0].arg,)*srcs[0].dtype.count
+    if srcs[0].op is Ops.STACK: return tuple(s.arg for s in srcs[0].src)
+  return tuple(s.arg for s in srcs)
 
 def evaluate_uop(uop, variables):
   if uop.op == Ops.CONST:
@@ -121,7 +129,7 @@ class TestModuloAndDivisionFolding(unittest.TestCase):
   def test_graph_rewrite_div_folding_bug(self):
     lhs = UOp(Ops.ADD, dtypes.int.vec(4), src=(
       UOp(Ops.STACK, dtypes.int.vec(4), arg=None, src=(UOp(Ops.SPECIAL, dtypes.int, arg='lidx0', src=(UOp.const(dtypes.int, 32),)),)*4),
-      UOp(Ops.VCONST, dtypes.int.vec(4), arg=(0, 256, 512, 768), src=())))
+      UOp.const(dtypes.int.vec(4), (0, 256, 512, 768))))
     rhs = UOp.const(dtypes.int.vec(4), 2)
     unopt = lhs<rhs
     opt = apply_rewrite(unopt)
@@ -151,7 +159,7 @@ class TestModuloAndDivisionFolding(unittest.TestCase):
 
 class TestEdgeCasesAndSpecialOperations(unittest.TestCase):
   def test_full_graph_rewrite_transcendental_edge_cases(self):
-    optimized_sink = full_rewrite_to_sink(UOp.const(dtypes.float32, -1.0).log2().sink(UOp.const(dtypes.float32, 0.0).reciprocal()))
+    optimized_sink = full_rewrite(UOp.const(dtypes.float32, -1.0).log2().sink(UOp.const(dtypes.float32, 0.0).reciprocal()))
     optimized_log2_neg, optimized_recip_zero = optimized_sink.src
     self.assertTrue(math.isnan(optimized_log2_neg.arg), f"Expected NaN for log2(-1.0), got {optimized_log2_neg.arg}")
     self.assertTrue(math.isinf(optimized_recip_zero.arg) and optimized_recip_zero.arg > 0,
@@ -160,14 +168,14 @@ class TestEdgeCasesAndSpecialOperations(unittest.TestCase):
   @unittest.skip("broken")
   def test_full_graph_rewrite_modulo_negative_dividend(self):
     x_var_uop = UOp.variable('x', -5, -1)
-    optimized_sink = full_rewrite_to_sink((x_var_uop % 3).sink())
+    optimized_sink = full_rewrite((x_var_uop % 3).sink())
     for x_value in range(-5, 0):
       self.assertEqual(x_value % 3, evaluate_uop(optimized_sink.src[0], {'x': x_value}))
 
   @unittest.skip("broken")
   def test_full_graph_rewrite_division_negative_divisor(self):
     x_var_uop = UOp.variable('x', 1, 5)
-    optimized_sink = full_rewrite_to_sink((x_var_uop // -2).sink())
+    optimized_sink = full_rewrite((x_var_uop // -2).sink())
     for x_value in range(1, 6):
       self.assertEqual(x_value // -2, evaluate_uop(optimized_sink.src[0], {'x': x_value}))
 
@@ -180,19 +188,17 @@ class TestGEPAndVectorizeRewrite(unittest.TestCase):
   def test_gep_tuple_extraction(self):
     # GEP on a vector dtype to extract multiple elements as a vector
     base_vector = UOp.const(dtypes.float32.vec(4), (1.0, 2.0, 3.0, 4.0))
-    optimized_uop = apply_rewrite(base_vector.gep((2, 3)))
-    self.assertEqual([sub_uop.arg for sub_uop in optimized_uop.src], [3.0, 4.0])
+    self.assertEqual(list(apply_rewrite_values(base_vector.gep((2, 3)))), [3.0, 4.0])
 
-  def test_gep_on_vconst(self):
-    # GEP on a VCONST to extract a single element
-    vconst = UOp(Ops.VCONST, dtypes.float32.vec(4), arg=(1.0, 2.0, 3.0, 4.0))
-    self.assertEqual(apply_rewrite(vconst.gep(2)).arg, 3.0)
+  def test_gep_on_const_stack(self):
+    # GEP on a const STACK to extract a single element
+    const_stack = UOp.const(dtypes.float32.vec(4), (1.0, 2.0, 3.0, 4.0))
+    self.assertEqual(apply_rewrite(const_stack.gep(2)).arg, 3.0)
 
-  def test_gep_tuple_on_vconst(self):
-    # GEP on a VCONST using a tuple to extract multiple elements
-    vconst = UOp(Ops.VCONST, dtypes.float32.vec(4), arg=(7.0, 8.0, 9.0, 10.0))
-    optimized_uop = apply_rewrite(vconst.gep((1, 3)))
-    self.assertEqual([sub_uop.arg for sub_uop in optimized_uop.src], [8.0, 10.0])
+  def test_gep_tuple_on_const_stack(self):
+    # GEP on a const STACK using a tuple to extract multiple elements
+    const_stack = UOp.const(dtypes.float32.vec(4), (7.0, 8.0, 9.0, 10.0))
+    self.assertEqual(list(apply_rewrite_values(const_stack.gep((1, 3)))), [8.0, 10.0])
 
   def test_gep_gep_simplification(self):
     # Nested GEP simplification on a vector dtype
@@ -204,8 +210,7 @@ class TestGEPAndVectorizeRewrite(unittest.TestCase):
     # Vectorizing multiple elements using GEP
     base_vector = UOp.const(dtypes.float32.vec(4), (5.0, 10.0, 15.0, 20.0))
     vectorized_uop = UOp(Ops.STACK, dtypes.float32.vec(4), src=(base_vector.gep(0), base_vector.gep(1), base_vector.gep(2), base_vector.gep(3)))
-    optimized_uop = apply_rewrite(vectorized_uop)
-    self.assertEqual([sub_uop.arg for sub_uop in optimized_uop.src], [5.0, 10.0, 15.0, 20.0])
+    self.assertEqual(list(apply_rewrite_values(vectorized_uop)), [5.0, 10.0, 15.0, 20.0])
 
 
 import inspect

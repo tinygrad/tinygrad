@@ -41,10 +41,9 @@ def _fused_quantize_bwd_w13(gradient:UOp, kernel:UOp):
   _, _, xw13, amax_state, grad_amax_state = kernel.src[1:]
   device = xw13.device
   axis = xw13.axis if isinstance(device, tuple) else None
-  if isinstance(device, tuple): assert axis in (0, 1), f"unsupported sharding axis={axis}"
   grad_xw13     = alloc_like(xw13.shape, dtypes.bfloat16, device, axis)
   grad_xw13_fp8 = alloc_like(xw13.shape, dtypes.fp8e4m3,  device, axis)
-  grad_amax_buf = alloc_local((NUM_WG,), dtypes.float32,  device)
+  grad_amax_buf = alloc_local((NUM_WG,), dtypes.float32,  device, axis)
   grad_amax_state_t = Tensor(grad_amax_state, device=device)
   fxn = functools.partial(_custom_fused_bwd_w13, dname=dname_of(device))
   grad_xw13, grad_xw13_fp8, grad_amax_buf, *_ = Tensor.custom_kernel(
@@ -54,8 +53,10 @@ def _fused_quantize_bwd_w13(gradient:UOp, kernel:UOp):
   inv_scale = (grad_amax_state_t.float() + 1e-8) / FP8_MAX
   new_grad_amax = scalar_amax(grad_amax_buf)
   store_effect = grad_amax_state_t.uop.store(new_grad_amax.uop)
-  # Stash fp8 companion + amax store for cdna_asm_gemm's bwd to attach to grad_a.
-  _grad_fp8_mailbox[grad_xw13.uop] = (grad_xw13_fp8.uop, inv_scale.uop, new_grad_amax.uop, store_effect)
+  assert grad_xw13_fp8.uop.op is Ops.AFTER, f"expected AFTER, got {grad_xw13_fp8.uop.op}"
+  grad_xw13_fp8_uop = grad_xw13_fp8.uop.replace(src=grad_xw13_fp8.uop.src + (store_effect,))
+  # Stash fp8 companion for cdna_asm_gemm's bwd to attach to grad_a.
+  _grad_fp8_mailbox[grad_xw13.uop] = (grad_xw13_fp8_uop, inv_scale.uop)
   return (None, None, grad_xw13.uop, None, None)
 
 def fused_quantize_fp8_w13(xw13:Tensor, amax_state:Tensor, fp8_dtype, grad_amax_state:Tensor) -> tuple[Tensor, Tensor, Tensor]:
@@ -66,9 +67,8 @@ def fused_quantize_fp8_w13(xw13:Tensor, amax_state:Tensor, fp8_dtype, grad_amax_
   assert H2 % 2 == 0, f"w13 last-axis must be even, got {H2}"
   HIDDEN = H2 // 2
   axis = xw13.uop.axis if isinstance(xw13.device, tuple) else None
-  if isinstance(xw13.device, tuple): assert axis in (0, 1), f"unsupported sharding axis={axis}"
   fp8_out  = alloc_like((MBS, SEQ, HIDDEN), fp8_dtype,      xw13.device, axis)
-  amax_buf = alloc_local((NUM_WG,),         dtypes.float32, xw13.device)
+  amax_buf = alloc_local((NUM_WG,),         dtypes.float32, xw13.device, axis)
   fxn = functools.partial(_custom_fused_cast_amax_w13, dname=dname_of(xw13.device))
   fp8_out, amax_buf, *_ = Tensor.custom_kernel(fp8_out, amax_buf, xw13, amax_state, grad_amax_state,
                                                 fxn=fxn, grad_fxn=_fused_quantize_bwd_w13)

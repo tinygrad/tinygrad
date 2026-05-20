@@ -28,6 +28,7 @@ packages = [
   'tinygrad.nn',
   'tinygrad.renderer',
   'tinygrad.renderer.amd',
+  'tinygrad.renderer.isa',
   'tinygrad.runtime',
   'tinygrad.runtime.autogen',
   'tinygrad.runtime.autogen.am',
@@ -133,7 +134,7 @@ debug = true
 
 [tool.mypy]
 warn_unused_configs = true
-files = ["tinygrad"]
+files = ["tinygrad", "test/mockgpu"]
 ignore_missing_imports = true
 check_untyped_defs = true
 explicit_package_bases = true
@@ -251,8 +252,7 @@ select = [
   "F541",
   "F841",
 ]
-"tinygrad/runtime/autogen/**/*.py" = ["E501", "F401", "E722", "E731", "F821", "A006", "A002", "F811"]
-"tinygrad/runtime/autogen/amd/**/*.py" = ["E501"]
+"tinygrad/runtime/autogen/**/*.py" = ["E501", "F401", "E731", "F821", "A006", "A002", "F811", "F822"]
 "test/amd/**/*.py" = ["F403", "F405"]
 
 [tool.ruff.format]

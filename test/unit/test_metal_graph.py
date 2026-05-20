@@ -27,18 +27,18 @@ class TestMetalGraph(unittest.TestCase):
     c.src = (MagicMock(op=Ops.PROGRAM),) + tuple(bufs)
     return c
 
-  def test_supports_exec_item_normal_offset(self):
-    assert self.MetalGraph.supports_exec_item([self.dev], self.call(self.metal_buf(0), self.metal_buf(100), self.metal_buf(0xFFFFFFFF))) is True
+  def test_supports_uop_normal_offset(self):
+    assert self.MetalGraph.supports_uop([self.dev], self.call(self.metal_buf(0), self.metal_buf(100), self.metal_buf(0xFFFFFFFF))) is True
 
-  def test_supports_exec_item_overflow_offset(self):
-    assert self.MetalGraph.supports_exec_item([self.dev], self.call(self.metal_buf(0), self.metal_buf(0x100000000))) is False
+  def test_supports_uop_overflow_offset(self):
+    assert self.MetalGraph.supports_uop([self.dev], self.call(self.metal_buf(0), self.metal_buf(0x100000000))) is False
 
-  def test_supports_exec_item_nonmetal_buf(self):
+  def test_supports_uop_nonmetal_buf(self):
     # non-BUFFER_VIEW ops should not be checked for offset
     buf = MagicMock()
     buf.op = Ops.BUFFER
     buf.device = Device.DEFAULT
-    self.MetalGraph.supports_exec_item([self.dev], self.call(buf))
+    self.MetalGraph.supports_uop([self.dev], self.call(buf))
 
 if __name__ == "__main__":
   unittest.main()

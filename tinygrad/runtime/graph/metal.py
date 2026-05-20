@@ -23,7 +23,7 @@ class MetalGraph(GraphRunner):
     self.icb = self.dev.sysdevice.newIndirectCommandBufferWithDescriptor_maxCommandCount_options(icb_descriptor, len(self.calls),
                                                                                                  metal.MTLResourceCPUCacheModeDefaultCache)
     if self.icb.value is None: raise GraphException("create indirect command buffer failed, does your system support this?")
-    self.needs_icb_fix = int(self.dev.gpu_family < 9)  # ICB fix not required on M3+ (Apple9+)
+    self.needs_icb_fix = int(not self.dev.arch.startswith("Apple") or int(self.dev.arch[5:]) < 9)  # ICB fix not required on M3+ (Apple9+)
 
     if len(self.vars): self.int_buf = self.dev.allocator.alloc(len(self.vars)*dtypes.int32.itemsize)
 
@@ -107,7 +107,7 @@ class MetalGraph(GraphRunner):
       self.collect_timestamps()
 
   @staticmethod
-  def supports_exec_item(batch_devs, new_call:UOp) -> bool:
+  def supports_uop(batch_devs, new_call:UOp) -> bool:
     # Metal ICB replay encodes offsets as uint32; reject if any Metal buffer offset exceeds 32-bit range.
     if any(b.op is Ops.BUFFER_VIEW and b.arg[1] * b.dtype.itemsize > 0xFFFFFFFF for b in new_call.src[1:]): return False
-    return GraphRunner.supports_exec_item(batch_devs, new_call)
+    return GraphRunner.supports_uop(batch_devs, new_call)

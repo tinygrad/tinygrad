@@ -92,10 +92,6 @@ class TestRawDiskBuffer(unittest.TestCase):
       # should fail because 3 int8 is 3 bytes but float16 is two and 3 isn't a multiple of 2
       Tensor.empty((3,), dtype=dtypes.int8, device=f"DISK:{tmp}").bitcast(dtypes.float16)
 
-    with self.assertRaises(RuntimeError):
-      # should fail because backprop through bitcast is undefined
-      Tensor.empty((4,), dtype=dtypes.int8, requires_grad=True, device=f"DISK:{tmp}").bitcast(dtypes.float16)
-
     pathlib.Path(tmp).unlink()
 
 @unittest.skipUnless(is_dtype_supported(dtypes.uint8), "need uint8")
@@ -310,7 +306,7 @@ class TestDiskTensor(TempDirTestCase):
       dt[::2] = Tensor([10, 20, 30])
 
   def test_advanced_setitem_not_supported(self):
-    dt = Tensor.arange(12).reshape(3, 4).to(f"disk:{self.tmp('dt_advanced_setitem')}")
+    dt = Tensor.arange(12).reshape(3, 4).clone().to(f"disk:{self.tmp('dt_advanced_setitem')}")
     with self.assertRaises(RuntimeError, msg="advanced setitem is not supported for DISK tensors"):
       dt[Tensor([0, 2]), Tensor([1, 3])] = 99
 
@@ -553,7 +549,7 @@ class TestDiskTensorMovement(TempDirTestCase):
   def setUp(self):
     super().setUp()
     self.fn = pathlib.Path(self.tmp("custom_disk_range"))
-    Tensor.arange(100, dtype=dtypes.uint8).to(f"disk:{str(self.fn)}").realize()
+    Tensor.arange(100, dtype=dtypes.uint8).clone().to(f"disk:{str(self.fn)}").realize()
 
   def test_simple_read(self):
     t = Tensor(self.fn)

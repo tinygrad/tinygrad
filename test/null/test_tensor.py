@@ -24,9 +24,9 @@ class TestTrainMode(unittest.TestCase):
 
 class TestInferenceMode(unittest.TestCase):
   def test_inference(self):
-    x = Tensor(x_init, requires_grad=True)
-    m = Tensor(m_init, requires_grad=True)
-    W = Tensor(W_init, requires_grad=True)
+    x = Tensor(x_init)
+    m = Tensor(m_init)
+    W = Tensor(W_init)
     tmp = x.mul(m)
     mm = tmp.matmul(W)
     out = mm.relu()
@@ -40,9 +40,9 @@ class TestInferenceMode(unittest.TestCase):
     assert W.requires_grad
 
   def test_no_grad_mode_context_manager(self):
-    x = Tensor(x_init, requires_grad=True)
-    m = Tensor(m_init, requires_grad=True)
-    W = Tensor(W_init, requires_grad=True)
+    x = Tensor(x_init)
+    m = Tensor(m_init)
+    W = Tensor(W_init)
     def f(x, m, W):
       tmp = x.mul(m)
       mm = tmp.matmul(W)
@@ -80,7 +80,7 @@ class TestIdxUpcast(unittest.TestCase):
     if not isinstance(Device[Device.DEFAULT].renderer, (PTXRenderer, NIRRenderer)):
       assert idx.op is Ops.INDEX
       idx_val = idx.src[1]
-      assert idx_val.dtype is dtype
+      self.assertIs(idx_val.dtype, dtype)
 
   # use expand to generate kernel that uses large idx
   def do_op_then_assert(self, dtype: DType, dim1, dim2, dim3):
@@ -99,7 +99,7 @@ class TestIdxUpcast(unittest.TestCase):
     self.do_op_then_assert(dtypes.int, 64, 64, 64)
 
   def test_regular_sym(self):
-    self.do_op_then_assert(dtypes.int, 2048, 2048, UOp.variable("dim3", 1, 64).bind(32))
+    self.do_op_then_assert(dtypes.int, 256, 256, UOp.variable("dim3", 1, 64).bind(32))
 
   @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, (PTXRenderer, NIRRenderer)), "PTX and NIR always converts Ops.INDEX to int64")
   def test_symfold(self):

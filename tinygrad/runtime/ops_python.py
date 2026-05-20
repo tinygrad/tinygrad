@@ -6,7 +6,7 @@ from typing import Any, TYPE_CHECKING
 import pickle, base64, itertools, time, sys, functools
 from dataclasses import replace
 from tinygrad.dtype import DType, dtypes, ImageDType, PtrDType, truncate, storage_fmt_for_dtype, to_storage_scalar, from_storage_scalar
-from tinygrad.helpers import all_same, getenv, flatten, get_single_element, Target
+from tinygrad.helpers import all_same, getenv, flatten, get_single_element, Target, IMAGE
 from tinygrad.device import Compiled, Compiler, Allocator
 from tinygrad.codegen.opt import tc
 from tinygrad.uop.ops import exec_alu, python_alu, Ops, UOp, GroupOp, bitcast
@@ -18,8 +18,8 @@ def _load(m, i, dtype: DType):
   return from_storage_scalar(m[i], dtype)
 
 def load(inp, j, dtype: DType):
-  if len(inp) == 2: return [_load(m, x+j if x is not None else None, dtype) if gate else default for (m,x,gate),default in zip(*inp)]
-  return [_load(m, x+j if x is not None else None, dtype) for m,x,_ in inp[0]]
+  if len(inp) >= 3: return [_load(m, x+j if x is not None else None, dtype) if gate else default for (m,x),default,gate in zip(*inp[:3])]
+  return [_load(m, x+j if x is not None else None, dtype) for m,x in inp[0]]
 
 def _store(m, i, v, dtype: DType):
   if i < 0 or i >= len(m): raise IndexError(f"store out of bounds, size is {len(m)}, access is {i}, value is {v}")
@@ -67,8 +67,9 @@ class PythonProgram:
           continue
         assert dtype is not None, f"{uop} is missing a dtype"
         if uop is Ops.STORE:
+          store_gate = src_values[2] if len(src_values) >= 3 else [True] * warp_size
           for j,val in enumerate(src_values[1] if src_dtypes[1].count > 1 else [src_values[1]]):
-            for (m,o,g),v in zip(src_values[0], val):
+            for (m,o),v,g in zip(src_values[0], val, store_gate):
               if g: _store(m, o+j, v, src_dtypes[1].scalar())
           i += 1
           continue
@@ -93,12 +94,14 @@ class PythonProgram:
         elif uop is Ops.INDEX:
           ret:list = []
           if isinstance(src_dtypes[0], ImageDType):
-            for m,ox,oy in zip(src_values[0], src_values[1][0], src_values[1][1]):
+            assert len(src_values) == 3, "image index must be 3 srcs"
+            for m,oy,ox in zip(*src_values):
               if ox < 0 or ox >= src_dtypes[0].shape[1] or oy < 0 or oy >= src_dtypes[0].shape[0]: ret.append((m, None))
               else: ret.append((m, ox*4 + oy*src_dtypes[0].shape[1]*4))
           else:
-            for m,o in zip(src_values[0], src_values[1]): ret.append((m,o))
-          values[i] = [(m,o,g) for (m,o),g in zip(ret, src_values[2] if len(src_values) == 3 else [True]*len(ret))] # set the gate last
+            assert len(src_values) == 2, "non-image index must be 2 srcs"
+            for m,o in zip(*src_values): ret.append((m,o))
+          values[i] = ret
         elif uop is Ops.CAST and isinstance(dtype, PtrDType):
           values[i] = src_values[0]
         elif uop is Ops.RANGE:
@@ -218,8 +221,8 @@ class PythonRenderer(Renderer):
     elif target.arch.startswith("sm"):
       self.target = replace(target, device="CUDA")
       self.tensor_cores = tc.get_cuda(target.arch)
-    elif target.arch == "": self.target = target
-    else: raise RuntimeError(f"unsupported arch: {target.arch}")
+    elif IMAGE and not target.arch: self.target = replace(target, arch="IMAGE_PITCH_ALIGNMENT=1")
+    else: self.target = target
 
   def render(self, uops:list[UOp]) -> str:
     # the value of SPECIAL comes from local/global_size, not form its source

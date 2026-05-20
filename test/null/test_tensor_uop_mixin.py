@@ -35,6 +35,19 @@ class TestTensorUOpBinop(unittest.TestCase):
   def test_isclose(self):
     t = _t(4).float()
     self.assertIs(_strip_unique(t.isclose(t).uop), _strip_unique(t.uop.isclose(t.uop)))
+  # __floordiv__/mod/fmod and div(rounding_mode=...) dispatch on dtype in mixin
+  def test_floordiv_int(self):   _check(self, _t(4), lambda x: x // 3)
+  def test_floordiv_float(self): _check(self, _t(4).float() + 1.5, lambda x: x // 2.0)
+  def test_rfloordiv_int(self):  _check(self, _t(4)+1, lambda x: 7 // x)
+  def test_mod_int(self):        _check(self, _t(4), lambda x: x % 3)
+  def test_mod_float(self):      _check(self, _t(4).float() + 1.5, lambda x: x % 2.0)
+  def test_div_trunc_int(self):  _check(self, _t(4), lambda x: x.div(3, rounding_mode="trunc"))
+  def test_div_trunc_float(self):_check(self, _t(4).float() + 1.5, lambda x: x.div(2.0, rounding_mode="trunc"))
+  def test_fmod_int(self):       _check(self, _t(4), lambda x: x.fmod(3))
+  def test_fmod_float(self):     _check(self, _t(4).float() + 1.5, lambda x: x.fmod(2.0))
+  def test_floordiv_bool(self):  _check(self, _t(4).cast(dtypes.bool), lambda x: x // True)
+  def test_mod_bool(self):       _check(self, _t(4).cast(dtypes.bool), lambda x: x % True)
+  def test_fmod_bool(self):      _check(self, _t(4).cast(dtypes.bool), lambda x: x.fmod(True))
 
 class TestTensorUOpGetitem(unittest.TestCase):
   # ---- pure slice patterns ----
@@ -314,6 +327,32 @@ class TestTensorUOpSoftmax(unittest.TestCase):
   def test_softmax_axis0(self):       _check(self, _t(2, 3).float(), lambda x: x.softmax(axis=0))
   def test_log_softmax_default(self): _check(self, _t(2, 3).float(), lambda x: x.log_softmax())
   def test_log_softmax_axis0(self):   _check(self, _t(2, 3).float(), lambda x: x.log_softmax(axis=0))
+
+class TestTensorUOpQR(unittest.TestCase):
+  def _check(self, t):
+    qt, rt = t.qr()
+    qu, ru = t.uop.qr()
+    self.assertIs(_strip_unique(qt.uop), _strip_unique(qu))
+    self.assertIs(_strip_unique(rt.uop), _strip_unique(ru))
+  def test_qr_square(self):   self._check(_t(3, 3).float())
+  def test_qr_tall(self):     self._check(_t(4, 3).float())
+  def test_qr_wide(self):     self._check(_t(3, 4).float())
+  def test_qr_zero_col(self): self._check(Tensor([[0.0, 1.0], [0.0, 2.0]]))
+  def test_qr_batched(self):  self._check(_t(2, 3, 3).float())
+
+class TestTensorUOpSVD(unittest.TestCase):
+  def _check(self, t, **kw):
+    ut, st, vt = t.svd(**kw)
+    uu, su, vu = t.uop.svd(**kw)
+    self.assertIs(_strip_unique(ut.uop), _strip_unique(uu))
+    self.assertIs(_strip_unique(st.uop), _strip_unique(su))
+    self.assertIs(_strip_unique(vt.uop), _strip_unique(vu))
+  def test_svd_square(self):    self._check(_t(2, 2).float())
+  def test_svd_tall(self):      self._check(_t(3, 2).float())
+  def test_svd_wide(self):      self._check(_t(2, 3).float())
+  def test_svd_odd_num(self):   self._check(_t(3, 3).float())  # exercises odd-num runoff path
+  def test_svd_batched(self):   self._check(_t(2, 2, 2).float())
+  def test_svd_nonfull(self):   self._check(_t(3, 2).float(), full_matrices=False)
 
 # UOp.empty / UOp.empty_like are the canonical buffer allocators; Tensor.empty / Tensor.empty_like just forward.
 class TestUOpEmpty(unittest.TestCase):

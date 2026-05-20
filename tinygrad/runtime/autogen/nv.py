@@ -4683,6 +4683,80 @@ class struct__NV_PCI_DATA_EXT_STRUCT(c.Struct):
 struct__NV_PCI_DATA_EXT_STRUCT.register_fields([('signature', NvU32, 0), ('nvPciDataExtRev', NvU16, 4), ('nvPciDataExtLen', NvU16, 6), ('subimageLen', NvU16, 8), ('privLastImage', NvU8, 10), ('flags', NvU8, 11)])
 NV_PCI_DATA_EXT_STRUCT: TypeAlias = struct__NV_PCI_DATA_EXT_STRUCT
 PNV_PCI_DATA_EXT_STRUCT: TypeAlias = c.POINTER[struct__NV_PCI_DATA_EXT_STRUCT]
+u32: TypeAlias = ctypes.c_uint32
+@c.record
+class struct_nvfw_bin_hdr(c.Struct):
+  SIZE = 24
+  bin_magic: int
+  bin_ver: int
+  bin_size: int
+  header_offset: int
+  data_offset: int
+  data_size: int
+struct_nvfw_bin_hdr.register_fields([('bin_magic', u32, 0), ('bin_ver', u32, 4), ('bin_size', u32, 8), ('header_offset', u32, 12), ('data_offset', u32, 16), ('data_size', u32, 20)])
+@c.record
+class struct_nvfw_bl_desc(c.Struct):
+  SIZE = 24
+  start_tag: int
+  dmem_load_off: int
+  code_off: int
+  code_size: int
+  data_off: int
+  data_size: int
+struct_nvfw_bl_desc.register_fields([('start_tag', u32, 0), ('dmem_load_off', u32, 4), ('code_off', u32, 8), ('code_size', u32, 12), ('data_off', u32, 16), ('data_size', u32, 20)])
+@c.record
+class struct_nvfw_hs_header(c.Struct):
+  SIZE = 32
+  sig_dbg_offset: int
+  sig_dbg_size: int
+  sig_prod_offset: int
+  sig_prod_size: int
+  patch_loc: int
+  patch_sig: int
+  hdr_offset: int
+  hdr_size: int
+struct_nvfw_hs_header.register_fields([('sig_dbg_offset', u32, 0), ('sig_dbg_size', u32, 4), ('sig_prod_offset', u32, 8), ('sig_prod_size', u32, 12), ('patch_loc', u32, 16), ('patch_sig', u32, 20), ('hdr_offset', u32, 24), ('hdr_size', u32, 28)])
+@c.record
+class struct_nvfw_hs_header_v2(c.Struct):
+  SIZE = 36
+  sig_prod_offset: int
+  sig_prod_size: int
+  patch_loc: int
+  patch_sig: int
+  meta_data_offset: int
+  meta_data_size: int
+  num_sig: int
+  header_offset: int
+  header_size: int
+struct_nvfw_hs_header_v2.register_fields([('sig_prod_offset', u32, 0), ('sig_prod_size', u32, 4), ('patch_loc', u32, 8), ('patch_sig', u32, 12), ('meta_data_offset', u32, 16), ('meta_data_size', u32, 20), ('num_sig', u32, 24), ('header_offset', u32, 28), ('header_size', u32, 32)])
+@c.record
+class struct_nvfw_hs_load_header(c.Struct):
+  SIZE = 20
+  non_sec_code_off: int
+  non_sec_code_size: int
+  data_dma_base: int
+  data_size: int
+  num_apps: int
+  apps: c.Array[ctypes.c_uint32, Literal[0]]
+struct_nvfw_hs_load_header.register_fields([('non_sec_code_off', u32, 0), ('non_sec_code_size', u32, 4), ('data_dma_base', u32, 8), ('data_size', u32, 12), ('num_apps', u32, 16), ('apps', c.Array[u32, Literal[0]], 20)])
+@c.record
+class struct_nvfw_hs_load_header_v2(c.Struct):
+  SIZE = 20
+  os_code_offset: int
+  os_code_size: int
+  os_data_offset: int
+  os_data_size: int
+  num_apps: int
+  app: c.Array[struct_nvfw_hs_load_header_v2_app, Literal[0]]
+@c.record
+class struct_nvfw_hs_load_header_v2_app(c.Struct):
+  SIZE = 16
+  offset: int
+  size: int
+  data_offset: int
+  data_size: int
+struct_nvfw_hs_load_header_v2_app.register_fields([('offset', u32, 0), ('size', u32, 4), ('data_offset', u32, 8), ('data_size', u32, 12)])
+struct_nvfw_hs_load_header_v2.register_fields([('os_code_offset', u32, 0), ('os_code_size', u32, 4), ('os_data_offset', u32, 8), ('os_data_size', u32, 12), ('num_apps', u32, 16), ('app', c.Array[struct_nvfw_hs_load_header_v2_app, Literal[0]], 20)])
 GSP_FW_WPR_META_VERIFIED = 0xa0a0a0a0a0a0a0a0
 GSP_FW_WPR_META_REVISION = 1
 GSP_FW_WPR_META_MAGIC = 0xdc3aae21371a60b3

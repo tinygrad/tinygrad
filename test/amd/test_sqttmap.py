@@ -1,5 +1,5 @@
 # test to compare every packet with the rocprof decoder
-import unittest, pickle, functools
+import unittest, pickle, functools, json
 from typing import Iterator
 from pathlib import Path
 from tinygrad.helpers import DEBUG, getenv, temp, ansistrip, Context
@@ -130,16 +130,14 @@ class TestSQTTMapBase(unittest.TestCase):
   def test_sqtt_cli(self):
     for pkl_path in sorted((EXAMPLES_DIR/self.target).glob("*.pkl")):
       out = run_cli("--profile-path", str(pkl_path), "--ls")
-      sqtt_traces = [l.strip() for l in out.split("\n") if "SQTT" in l]
+      sqtt_traces = [l["value"].strip() for l in out if "SQTT" in l["value"]]
       for name in sqtt_traces:
-        out = run_cli("--profile-path", str(pkl_path), "-s", ansistrip(name))
-        lines = out.split("\n")
-        self.assertIn("Clk", lines[0])
-        for r in lines[2:]:
-          parts = r.split()
-          self.assertTrue(parts[0].isdigit(), f"expected clock timestamp, got {parts[0]}")
+        lines = run_cli("--profile-path", str(pkl_path), "-s", ansistrip(name))
+        self.assertIn("Clk", lines[0]["value"])
+        waves = [r["clk"] for r in lines[2:] if "WAVE" in r["unit"]]
+        self.assertEqual(waves, sorted(waves), f"wave timestamps not monotonic in {name}")
       with Context(DEBUG=2):
-        kernels = run_cli("--profile-path", str(pkl_path), "-s", "AMD").split("\n")
+        kernels = run_cli("--profile-path", str(pkl_path), "-s", "AMD")
       self.assertEqual(len(kernels), len(self.examples[pkl_path.stem][1]))
 
 class TestSQTTMapRDNA3(TestSQTTMapBase): target = "gfx1100"
@@ -156,7 +154,7 @@ class TestSQTTMapRDNA4(TestSQTTMapBase):
     row_counts:dict[str, int] = {}
     for e in sqtt_timeline(events[1].blob, lib, target):
       if type(e).__name__ != "ProfileRangeEvent": continue
-      info = e.name.ret or ""
+      info = json.loads(e.name.ret) if e.name.ret else {}
       if e.device.startswith("WAVE"):
         idx = row_counts.get(e.device, 0)
         dispatch_st[f"{e.device}-{idx}"] = int(e.st)

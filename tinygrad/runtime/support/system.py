@@ -38,8 +38,6 @@ class _System:
       return vfio_fd
     except OSError: return None
 
-  def reserve_hugepages(self, cnt): os.system(f"sudo sh -c 'echo {cnt} > /proc/sys/vm/nr_hugepages'")
-
   @functools.cache
   def reserve_va(self, va_start, va_size):
     # cached, runs only once per range. used to not collide with other mappings.
@@ -64,7 +62,9 @@ class _System:
         return int.from_bytes(bytes(buf), "little")
 
       iokit.IOServiceGetMatchingServices(0, iokit.IOServiceMatching(b"IOPCIDevice"), ctypes.byref(iterator:=ctypes.c_uint()))
-      while svc:=iokit.IOIteratorNext(iterator): all_devs.append((v:=read_prop(svc, "vendor-id"), d:=read_prop(svc, "device-id"), f"{v:x}:{d:x}"))
+      while svc:=iokit.IOIteratorNext(iterator):
+        if base_class is not None and read_prop(svc, "class-code") >> 16 != base_class: continue
+        all_devs.append((v:=read_prop(svc, "vendor-id"), d:=read_prop(svc, "device-id"), f"{v:x}:{d:x}"))
     else:
       try: devs = FileIOInterface("/sys/bus/pci/devices")
       except FileNotFoundError: raise RuntimeError("no pcie")
@@ -196,6 +196,9 @@ class PCIDevice:
   def reset(self): os.system(f"sudo sh -c 'echo 1 > /sys/bus/pci/devices/{self.pcibus}/reset'")
   def read_config(self, offset:int, size:int): return int.from_bytes(self.cfg_fd.read(size, binary=True, offset=offset), byteorder='little')
   def write_config(self, offset:int, value:int, size:int): self.cfg_fd.write(value.to_bytes(size, byteorder='little'), binary=True, offset=offset)
+  def write_config_flush(self, offset:int, value:int, size:int):
+    self.write_config(offset, value, size)
+    self.read_config(offset, size)
 
   @functools.cache
   def bar_fd(self, bar_idx:int) -> FileIOInterface:

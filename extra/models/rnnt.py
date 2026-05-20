@@ -15,7 +15,7 @@ class RNNT:
   @TinyJit
   def __call__(self, x, y, hc=None):
     f, _ = self.encoder(x, None)
-    g, _ = self.prediction(y, hc, Tensor.ones(1, requires_grad=False))
+    g, _ = self.prediction(y, hc, Tensor.ones(1))
     out = self.joint(f, g)
     return out.realize()
 
@@ -30,10 +30,10 @@ class RNNT:
     return outputs
 
   def _greedy_decode(self, logits, logit_len):
-    hc = Tensor.zeros(self.prediction.rnn.layers, 2, self.prediction.hidden_size, requires_grad=False)
+    hc = Tensor.zeros(self.prediction.rnn.layers, 2, self.prediction.hidden_size)
     labels = []
-    label = Tensor.zeros(1, 1, requires_grad=False)
-    mask = Tensor.zeros(1, requires_grad=False)
+    label = Tensor.zeros(1, 1)
+    mask = Tensor.zeros(1)
     for time_idx in range(logit_len):
       logit = logits[time_idx, :, :].unsqueeze(0)
       not_blank = True
@@ -41,7 +41,7 @@ class RNNT:
       while not_blank and added < 30:
         if len(labels) > 0:
           mask = (mask + 1).clip(0, 1)
-          label = Tensor([[labels[-1] if labels[-1] <= 28 else labels[-1] - 1]], requires_grad=False) + 1 - 1
+          label = Tensor([[labels[-1] if labels[-1] <= 28 else labels[-1] - 1]]) + 1 - 1
         jhc = self._pred_joint(Tensor(logit.numpy()), label, hc, mask)
         k = jhc[0, 0, :29].argmax(axis=0).numpy()
         not_blank = k != 28
@@ -129,7 +129,7 @@ class LSTM:
       return self.do_step(x_, hc_)
 
     if hc is None:
-      hc = Tensor.zeros(self.layers, 2 * x.shape[1], self.hidden_size, requires_grad=False).contiguous().realize()
+      hc = Tensor.zeros(self.layers, 2 * x.shape[1], self.hidden_size).contiguous().realize()
 
     output = None
     for t in range(x.shape[0]):

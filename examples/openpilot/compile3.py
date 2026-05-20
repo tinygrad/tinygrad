@@ -21,6 +21,8 @@ def compile(onnx_file):
   # TODO this seems dumb
   input_types = {k:(dtypes.float32 if v is dtypes.float16 else v) for k,v in input_types.items()}
   Tensor.manual_seed(100)
+  # replace symbolic dimensions (e.g. 'b' for dynamic batch) with 1
+  input_shapes = {k:tuple(s if isinstance(s, int) else 1 for s in shp) for k,shp in input_shapes.items()}
   inputs = {k:Tensor(Tensor.randn(*shp, dtype=input_types[k]).mul(8).realize().numpy(), device='NPY') for k,shp in sorted(input_shapes.items())}
   if not getenv("NPY_IMG"):
     inputs = {k:Tensor(v.numpy(), device=Device.DEFAULT).realize() if 'img' in k else v for k,v in inputs.items()}
@@ -85,7 +87,7 @@ def test_vs_compile(run, inputs, test_val=None):
     step_times.append((et-st)*1e3)
     print(f"enqueue {(mt-st)*1e3:6.2f} ms -- total run {step_times[-1]:6.2f} ms")
 
-  if (assert_time:=getenv("ASSERT_MIN_STEP_TIME")):
+  if (assert_time:=getenv("ASSERT_MIN_STEP_TIME", 0.0)):
     min_time = min(step_times)
     assert min_time < assert_time, f"Speed regression, expected min step time of < {assert_time} ms but took: {min_time} ms"
 
@@ -102,7 +104,7 @@ def test_vs_compile(run, inputs, test_val=None):
 def test_vs_onnx(new_inputs, test_val, onnx_file, tol):
   import onnx
   import onnxruntime as ort
-  
+
   onnx_inputs = {k:v.numpy() for k,v in new_inputs.items()}
   onnx_model = onnx.load(onnx_file)
 
@@ -135,7 +137,7 @@ def bench(run, inputs):
 if __name__ == "__main__":
   if getenv("RUN_PICKLE"):
     with open(OUTPUT, "rb") as f: pickle_loaded = pickle.load(f)
-    inputs = {name: Tensor(Tensor.randn(*[int(s) for s in view.src[1].arg], dtype=dtype).numpy(), device=device)
+    inputs = {name: Tensor(Tensor.randn(*view.shape, dtype=dtype).numpy(), device=device)
               for name, (view, _vars, dtype, device) in zip(pickle_loaded.captured.expected_names, pickle_loaded.captured.expected_input_info)}
     test_vs_compile(pickle_loaded, inputs)
   else:
