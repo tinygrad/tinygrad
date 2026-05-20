@@ -176,6 +176,33 @@ class Linear:
 
   def __call__(self, x:Tensor) -> Tensor: return x.linear(self.weight.transpose(), self.bias)
 
+class TernaryLinear:
+  """
+  Linear layer with weights quantized to {-1, 0, +1} at construction time.
+
+  Implements the ternary weight scheme from the BitNet b1.58 paper
+  (arxiv.org/abs/2402.17764). Weights whose absolute value exceeds *threshold*
+  become ±1; those within the threshold become 0. The default threshold is the
+  mean absolute weight value, matching the paper's prescription.
+
+  Quantized weights are stored as a float ``Tensor`` so the forward pass works
+  on any tinygrad backend unchanged.
+
+  ```python exec="true" source="above" session="tensor" result="python"
+  lin = nn.TernaryLinear(8, 4, threshold=0.0)
+  import numpy as np
+  print(np.unique(lin.weight.numpy()))
+  ```
+  """
+  def __init__(self, in_features:int, out_features:int, bias=True, threshold:float|None=None):
+    bound = 1 / math.sqrt(in_features)
+    w = Tensor.uniform(out_features, in_features, low=-bound, high=bound)
+    t = w.abs().mean() if threshold is None else threshold
+    self.weight = (w.abs() > t).where(w.sign(), 0).cast(dtypes.float32)
+    self.bias: Tensor|None = Tensor.zeros(out_features) if bias else None
+
+  def __call__(self, x:Tensor) -> Tensor: return x.linear(self.weight.transpose(), self.bias)
+
 class GroupNorm:
   """
   Applies Group Normalization over a mini-batch of inputs.
