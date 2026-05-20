@@ -5,7 +5,6 @@ import math
 # allow for monkeypatching
 Linear, Conv2d, GroupNorm, LayerNorm = nn.Linear, nn.Conv2d, nn.GroupNorm, nn.LayerNorm
 attention, gelu, mixed_precision_dtype = Tensor.scaled_dot_product_attention, Tensor.gelu, dtypes.float16
-supports_mixed = mixed_precision_dtype in Device[Device.DEFAULT].renderer.supported_dtypes()
 
 # https://github.com/Stability-AI/generative-models/blob/fbdc58cab9f4ee2be7a5e1f2e2787ecd9311942f/sgm/modules/diffusionmodules/util.py#L207
 def timestep_embedding(timesteps:Tensor, dim:int, max_period=10000):
@@ -13,7 +12,7 @@ def timestep_embedding(timesteps:Tensor, dim:int, max_period=10000):
   freqs = (-math.log(max_period) * Tensor.arange(half, device=timesteps.device) / half).exp()
   args = timesteps.unsqueeze(1) * freqs.unsqueeze(0)
   out = Tensor.cat(args.cos(), args.sin(), dim=-1)
-  return out.cast(mixed_precision_dtype) if supports_mixed else out
+  return out.cast(mixed_precision_dtype) if mixed_precision_dtype in Device[Device.DEFAULT].renderer.supported_dtypes() else out
 
 class ResBlock:
   def __init__(self, channels:int, emb_channels:int, out_channels:int, num_groups:int=32):
@@ -238,7 +237,7 @@ class UNetModel:
       assert y.shape[0] == x.shape[0]
       emb = emb + y.sequential(self.label_emb[0])
 
-    if supports_mixed:
+    if mixed_precision_dtype in Device[Device.DEFAULT].renderer.supported_dtypes():
       emb = emb.cast(mixed_precision_dtype)
       ctx = ctx.cast(mixed_precision_dtype)
       x   = x  .cast(mixed_precision_dtype)
