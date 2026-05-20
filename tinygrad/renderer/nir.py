@@ -226,7 +226,7 @@ class NIRRenderer(Renderer):
 
     return ret
 
-  def supported_dtypes(self): return {d for d in super().supported_dtypes() if d not in dtypes.fp8s+(dtypes.bfloat16,)}
+  def supported_dtypes(self): return {d for d in Renderer.supported_dtypes(self) if d not in dtypes.fp8s+(dtypes.bfloat16,)}
 
 class NAKRenderer(NIRRenderer):
   param = nir_instr(nc=1, num_components=1, bs=lambda sz:sz*8, also=lambda self,sz: setattr(self, "param_idx", self.param_idx + sz),
@@ -299,4 +299,4 @@ class IR3Renderer(NIRRenderer, OpenCLRenderer):
     self.b.shader.contents.info.num_ubos = len([u for u in bufs if not isinstance(u.dtype, ImageDType)])
     self.b.shader.contents.info.num_images = texs() + imgs()
 
-  def supported_dtypes(self): return {d for d in super().supported_dtypes() if d != dtypes.double}
+  def supported_dtypes(self): return {d for d in NIRRenderer.supported_dtypes(self) if d != dtypes.double}
