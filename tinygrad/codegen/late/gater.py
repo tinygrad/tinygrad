@@ -10,12 +10,12 @@ pm_move_gates_from_index = PatternMatcher([
    lambda buf,gate,idx,cast,data: buf.index(idx, ptr=True).cast(cast.dtype).store(data, gate)),
 
   # for image idx
-  (UPat.var("buf").index(UPat.var("gate").where(UPat.var("idx_x"), UPat(arg=Invalid)),
-                         UPat.var("gate").where(UPat.var("idx_y"), UPat(arg=Invalid))).or_casted(name="cast").load(name="l"),
-   lambda buf,gate,idx_x,idx_y,cast,l: buf.index(idx_x, idx_y, ptr=True).cast(cast.dtype).load(l.const_like(0), gate, dtype=l.dtype)),
-  (UPat.var("buf").index(UPat.var("gate").where(UPat.var("idx_x"), UPat(arg=Invalid)),
-                         UPat.var("gate").where(UPat.var("idx_y"), UPat(arg=Invalid))).or_casted(name="cast").store(UPat.var("data")),
-   lambda buf,gate,idx_x,idx_y,cast,data: buf.index(idx_x, idx_y, ptr=True).cast(cast.dtype).store(data, gate)),
+  (UPat.var("buf").index(UPat.var("gate").where(UPat.var("idx_y"), UPat(arg=Invalid)),
+                         UPat.var("gate").where(UPat.var("idx_x"), UPat(arg=Invalid))).or_casted(name="cast").load(name="l"),
+   lambda buf,gate,idx_y,idx_x,cast,l: buf.index(idx_y, idx_x, ptr=True).cast(cast.dtype).load(l.const_like(0), gate, dtype=l.dtype)),
+  (UPat.var("buf").index(UPat.var("gate").where(UPat.var("idx_y"), UPat(arg=Invalid)),
+                         UPat.var("gate").where(UPat.var("idx_x"), UPat(arg=Invalid))).or_casted(name="cast").store(UPat.var("data")),
+   lambda buf,gate,idx_y,idx_x,cast,data: buf.index(idx_y, idx_x, ptr=True).cast(cast.dtype).store(data, gate)),
 
   # Where after gated load becomes alt value
   (UPat.var("gate").where(UPat().load(UPat(), UPat.var("gate", dtype=dtypes.bool), name="l").or_casted(), UPat.var("a")), lambda gate,l,a:
