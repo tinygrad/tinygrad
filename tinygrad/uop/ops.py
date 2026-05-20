@@ -221,13 +221,6 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       case Ops.RESHAPE:
         if self.src[0].op is Ops.NOOP: return self.marg
 
-      # these must all have matching shapes
-      case Ops.GROUP | Ops.STORE:
-        input_shapes = [x.shape for x in self.src]
-        if not all_same(input_shapes):
-          raise RuntimeError(f"shape mismatch at {self.op}: {input_shapes} {[x.op for x in self.src]}")
-        return input_shapes[0]
-
       # hacks for NOOP
       case Ops.NOOP:
         return self.src[0]._shape if len(self.src) >= 1 else None
@@ -341,10 +334,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     if self.op in GroupOp.Broadcastable:
       input_shapes = [x._shape for x in self.src]
       assert len(self.src) > 0 and all(x is not None for x in input_shapes), f"None input shape not supported for {self.op}"
-      # TODO: add broadcasting here
-      if not all_same(input_shapes):
-        raise RuntimeError(f"shape mismatch at {self.op}: {input_shapes} {[x.op for x in self.src]}")
-      return input_shapes[0]
+      # broadcasting lives in _shape property now
+      return _broadcast_shape(*input_shapes)
 
     # all Ops must be explicitly handled
     raise NotImplementedError(f"no shape handling for {self.op} with {self.dtype}")
