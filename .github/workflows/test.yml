@@ -781,7 +781,7 @@ jobs:
         run: printf "${{ matrix.backend == 'llvm' && 'DEV=CPU:LLVM' || matrix.backend == 'cpu' && 'CC=clang-20\nDEV=CPU\nCPU_COUNT=2' || matrix.backend == 'opencl' && 'DEV=CL' || matrix.backend == 'lvp' && 'DEV=CPU:LVP' || matrix.backend == 'x86' && 'DEV=CPU:X86' }}" >> $GITHUB_ENV
       - name: Check Device.DEFAULT and print some source
         run: |
-          sudo sysctl -w vm.overcommit_memory=2 vm.overcommit_ratio=100
+          sysctl vm.overcommit_memory vm.overcommit_ratio
           cat /proc/meminfo
           python3 -c "from tinygrad import Device; assert Device.DEFAULT in ['CPU','CL'], Device.DEFAULT"
           DEBUG=5 FORWARD_ONLY=1 python3 test/test_tiny.py TestTiny.test_plus
