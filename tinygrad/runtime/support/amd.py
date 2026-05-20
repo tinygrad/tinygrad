@@ -26,9 +26,11 @@ class AMDIP:
     raise AttributeError(f"{self.name.upper()} has no register {name}")
 
 # load the greatest module with matching major version that's less than or equal to the target version
-# this is not universally correct, see below for an example, but appears reliable for recent gpus
+# this is not universally correct, see below for an example, but appears reliable for most recent gpus
 # https://github.com/torvalds/linux/blob/9207d47f966be9f4d52e7e0119ac2b7a7e366f3e/drivers/gpu/drm/amd/amdgpu/amdgpu_discovery.c#L3163
 def import_module(name:str, target:tuple[int, ...], submod=""):
+  # version overrides
+  target = {("smu", (13, 0, 7)): (13, 0, 0)}.get((name, target), target)
   mod = getattr(tinygrad.runtime.autogen.am, submod) if submod else tinygrad.runtime.autogen.am
   if (children:=[c for c in mod.__all__ if c.startswith(name) and (v:=tuple(map(int, c.split('_')[1:])))[0] == target[0] and v <= target]):
     return getattr(mod, children[-1])
