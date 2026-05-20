@@ -9,7 +9,7 @@ from tinygrad.dtype import ConstFloat, PyConst, storage_fmt_for_dtype, to_storag
 from tinygrad.device import Buffer, MultiBuffer, canonicalize_device
 from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, flatten, TRACEMETA
 from tinygrad.helpers import PROFILE, dedup, cdiv, cmod, floordiv, floormod, diskcache_put, to_function_name, cpu_profile, TracingKey
-from tinygrad.helpers import VIZ, SPEC, CAPTURE_PROCESS_REPLAY
+from tinygrad.helpers import VIZ, SPEC, CAPTURE_PROCESS_REPLAY, DISALLOW_BROADCAST
 from tinygrad.helpers import colored, ansilen, printable
 if TYPE_CHECKING:
   from tinygrad.renderer import Estimates
@@ -93,8 +93,8 @@ class UOpMetaClass(type):
     if _buffer is not None:
       assert op is Ops.BUFFER, f"trying to set Buffer {_buffer} for {op}"
       buffers[created] = _buffer
-    if created.dtype.count > 1 and created.shape != (created.dtype.count,):
-      print(f"WARNING: mismatch at {created.op} {created.shape} != {created.dtype}")
+    #if created.dtype.count > 1 and created.shape != (created.dtype.count,):
+    #  print(f"WARNING: mismatch at {created.op} {created.shape} != {created.dtype}")
     if SPEC > 1:
       from tinygrad.uop.spec import spec_full, test_pyrender
       if SPEC > 2:
@@ -252,7 +252,10 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
       # TODO: these should have the shape of the dtype.count
       # TODO: contract and unroll should be deleted
-      case Ops.CONST | Ops.DEFINE_VAR | Ops.STACK | Ops.GEP | Ops.CONTRACT | Ops.UNROLL | Ops.VCAT:
+      case Ops.GEP:
+        return (len(self.arg),) if len(self.arg) > 1 else ()
+
+      case Ops.CONST | Ops.DEFINE_VAR | Ops.STACK | Ops.CONTRACT | Ops.UNROLL | Ops.VCAT:
         return (self.dtype.count,) if self.dtype.count > 1 else ()
 
       # some ops init the shape
@@ -265,9 +268,13 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
         if self.src[0].op is Ops.INDEX: return ()
         return (self.arg[0],)
       case Ops.CUSTOM_FUNCTION: return None
-      case Ops.STAGE: return tuple([int(r.vmax+1) for r in self.src[1:]])
-      case Ops.DEFINE_LOCAL: return (self.ptrdtype.size,)
-      case Ops.DEFINE_REG: return (self.ptrdtype.size,) if isinstance(self.dtype, PtrDType) else ()
+      case Ops.STAGE:
+        # STAGE adds the existing shape to the front, opposite of INDEX
+        return tuple([int(r.vmax+1) for r in self.src[1:]])+self.src[0].shape
+      case Ops.DEFINE_LOCAL | Ops.DEFINE_REG:
+        if isinstance(self.dtype, PtrDType):
+          return (self.ptrdtype.size, self.dtype.count) if self.dtype.count > 1 else (self.ptrdtype.size,)
+        return ()
       case Ops.PARAM:
         if isinstance(self.dtype, PtrDType): return (self.ptrdtype.size,)
         # NOTE: copied from marg
@@ -284,9 +291,9 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       # REDUCE with empty axis is passthrough (lowered form)
       case Ops.REDUCE if len(self.arg[1]) == 0:
         # these can mismatch if there's a horizonal reduce
-        if self.src[0].dtype.count > 1:
-          assert self.src[0]._shape is not None and len(self.src[0]._shape) == 1, f"bad reduce shape on {self.src[0].op} {self.src[0]._shape}"
-          return () if self.dtype.count == 1 else (self.dtype.count,)
+        #if self.src[0].dtype.count > 1:
+        #  assert self.src[0]._shape is not None and len(self.src[0]._shape) == 1, f"bad reduce shape on {self.src[0].op} {self.src[0]._shape}"
+        #  return () if self.dtype.count == 1 else (self.dtype.count,)
         return self.src[0]._shape
 
       # TODO: disallow shape changing bitcast
@@ -344,6 +351,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     if self.op in GroupOp.Broadcastable:
       input_shapes = [x._shape for x in self.src]
       assert len(self.src) > 0 and all(x is not None for x in input_shapes), f"None input shape not supported for {self.op}"
+      if DISALLOW_BROADCAST and not all_same(input_shapes):
+        raise RuntimeError(f"shape mismatch at {self.op}: {input_shapes} {[x.op for x in self.src]}")
       # broadcasting lives in _shape property now
       return _broadcast_shape(*input_shapes)
 
