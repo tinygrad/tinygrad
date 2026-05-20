@@ -217,6 +217,10 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
            Ops.LINEAR | Ops.PROGRAM | Ops.SOURCE | Ops.INS | Ops.TUPLE | Ops.CALL | Ops.FUNCTION:
         return None
 
+      # special (terrible) case for RESHAPE on NOOP
+      case Ops.RESHAPE:
+        if self.src[0].op is Ops.NOOP: return self.marg
+
       # these must all have matching shapes
       case Ops.GROUP | Ops.STORE:
         input_shapes = [x.shape for x in self.src]

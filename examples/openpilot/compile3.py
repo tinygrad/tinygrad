@@ -104,7 +104,7 @@ def test_vs_compile(run, inputs, test_val=None):
 def test_vs_onnx(new_inputs, test_val, onnx_file, tol):
   import onnx
   import onnxruntime as ort
-  
+
   onnx_inputs = {k:v.numpy() for k,v in new_inputs.items()}
   onnx_model = onnx.load(onnx_file)
 
@@ -137,7 +137,7 @@ def bench(run, inputs):
 if __name__ == "__main__":
   if getenv("RUN_PICKLE"):
     with open(OUTPUT, "rb") as f: pickle_loaded = pickle.load(f)
-    inputs = {name: Tensor(Tensor.randn(*[int(s) for s in view.src[1].arg], dtype=dtype).numpy(), device=device)
+    inputs = {name: Tensor(Tensor.randn(*view.shape, dtype=dtype).numpy(), device=device)
               for name, (view, _vars, dtype, device) in zip(pickle_loaded.captured.expected_names, pickle_loaded.captured.expected_input_info)}
     test_vs_compile(pickle_loaded, inputs)
   else:
