@@ -247,8 +247,9 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
         return tuple(shp) + self.src[0].shape[len(self.src[1:]):]
 
       # TODO: these should have the shape of the dtype.count
-      case Ops.CONST | Ops.DEFINE_VAR: return ()
-      case Ops.GEP | Ops.STACK | Ops.VCAT | Ops.GETADDR: return ()
+      case Ops.CONST | Ops.DEFINE_VAR | Ops.STACK | Ops.GEP:
+        return (self.dtype.count,) if self.dtype.count > 1 else ()
+      case Ops.VCAT | Ops.GETADDR: return ()
 
       # some ops init the shape
       case Ops.BIND | Ops.RANGE | Ops.SPECIAL | Ops.UNROLL: return ()
@@ -513,7 +514,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       ret = UOp.vectorize(*stk)
     else:
       ret = UOp(Ops.CONST, dtype, arg=dtype.const(b), src=(UOp(Ops.DEVICE, arg=device),) if device is not None else ())
-    return ret.reshape((1,)*len(shape)).expand(shape) if shape is not None and ret.shape != shape else ret
+    return ret.reshape((1,)*len(shape)).expand(shape) if shape is not None and shape != () and ret.shape != shape else ret
   @staticmethod
   def unique_const(fill_value:ConstType, dtype:DTypeLike|None=None, device:str|tuple[str, ...]|None=None,  # type: ignore[override]
                    shape:tuple[sint, ...]|None=None, unique=True):
