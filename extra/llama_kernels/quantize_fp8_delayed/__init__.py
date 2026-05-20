@@ -1,35 +1,35 @@
 from __future__ import annotations
-import functools, pathlib
+import functools
 from tinygrad import Tensor, dtypes
-from tinygrad.uop.ops import UOp, Ops, KernelInfo
-from tinygrad.renderer import Estimates
-from extra.llama_kernels import FP8_MAX, NUM_WG, THREADS_PER_WG, alloc_like, alloc_local, scalar_amax, dname_of, compile_hip
+from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
+from extra.llama_kernels import FP8_MAX, alloc_like, alloc_local, scalar_amax
 
 @functools.cache
-def _custom_quantize_fp8_with_amax(fp8_out:UOp, amax_partial:UOp, x:UOp, amax_state:UOp, dname:str) -> UOp:
+def _custom_quantize_fp8_with_amax(fp8_out:UOp, amax_partial:UOp, x:UOp, amax_state:UOp) -> UOp:
   n_elems = 1
   for d in x.shape: n_elems *= d
-  threads, workgroups = UOp.special(THREADS_PER_WG, "lidx0"), UOp.special(NUM_WG, "gidx0")
-  mem = n_elems * 2 + n_elems + 4 + NUM_WG * 4
-  sink = UOp.sink(fp8_out.base, amax_partial.base, x.base, amax_state.base, threads, workgroups,
-                  arg=KernelInfo(f"quantize_fp8_with_amax_{n_elems}", estimates=Estimates(ops=3*n_elems, mem=mem)))
-  src = (pathlib.Path(__file__).parent/"quantize_fp8_with_amax.cpp").read_text()
-  defines = [f"-DN_ELEMS={n_elems}", f"-DNUM_WG={NUM_WG}", f"-DTHREADS_PER_WG={THREADS_PER_WG}"]
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dname), UOp(Ops.LINEAR, src=(*sink.src, sink)),
-                               UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=compile_hip(src, defines))))
+  scale = FP8_MAX / (amax_state[0].cast(dtypes.float) + 1e-8)
+
+  i = UOp.range(n_elems, 0)
+  scaled = x.reshape(n_elems)[i].cast(dtypes.float) * scale
+  fp8_store = fp8_out.reshape(n_elems)[i].store(scaled.maximum(-FP8_MAX).minimum(FP8_MAX).cast(fp8_out.dtype.base)).end(i)
+
+  r = UOp.range(n_elems, 1, axis_type=AxisType.REDUCE)
+  xr = x.reshape(n_elems)[r].cast(dtypes.float)
+  abs_xr = (xr < 0).where(-xr, xr)
+  amax_store = amax_partial[0].store(abs_xr.reduce(r, arg=Ops.MAX))
+  return UOp.sink(fp8_store, amax_store, arg=KernelInfo(f"quantize_fp8_with_amax_{n_elems}"))
 
 @functools.cache
-def _custom_quantize_fp8_scalar(fp8_out:UOp, x:UOp, amax_state:UOp, dname:str) -> UOp:
+def _custom_quantize_fp8_scalar(fp8_out:UOp, x:UOp, amax_state:UOp) -> UOp:
   n_elems = 1
   for d in x.shape: n_elems *= d
-  threads, workgroups = UOp.special(THREADS_PER_WG, "lidx0"), UOp.special(NUM_WG, "gidx0")
-  mem = n_elems * 2 + n_elems
-  sink = UOp.sink(fp8_out.base, x.base, amax_state.base, threads, workgroups,
-                  arg=KernelInfo(f"quantize_fp8_scalar_{n_elems}", estimates=Estimates(ops=2*n_elems, mem=mem)))
-  src = (pathlib.Path(__file__).parent/"quantize_fp8_scalar.cpp").read_text()
-  defines = [f"-DN_ELEMS={n_elems}", f"-DNUM_WG={NUM_WG}", f"-DTHREADS_PER_WG={THREADS_PER_WG}"]
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dname), UOp(Ops.LINEAR, src=(*sink.src, sink)),
-                               UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=compile_hip(src, defines))))
+  scale = FP8_MAX / (amax_state[0].cast(dtypes.float) + 1e-8)
+
+  i = UOp.range(n_elems, 0)
+  scaled = x.reshape(n_elems)[i].cast(dtypes.float) * scale
+  store = fp8_out.reshape(n_elems)[i].store(scaled.maximum(-FP8_MAX).minimum(FP8_MAX).cast(fp8_out.dtype.base)).end(i)
+  return UOp.sink(store, arg=KernelInfo(f"quantize_fp8_scalar_{n_elems}"))
 
 def _quantize_fp8_delayed_bwd(gradient:UOp, kernel:UOp):
   # NOTE: STE-equivalent backward — grad_x = grad_fp8 * scale, scale = FP8_MAX / amax_state.
@@ -49,10 +49,9 @@ def quantize_fp8_delayed(x:Tensor, amax_state:Tensor, fp8_dtype=dtypes.fp8e4m3) 
   assert x.dtype == dtypes.bfloat16, f"expected bf16, got {x.dtype}"
   axis = x.uop.axis if isinstance(x.device, tuple) else None
   fp8_out      = alloc_like(x.shape,  fp8_dtype,      x.device, axis)
-  amax_partial = alloc_local((NUM_WG,), dtypes.float32, x.device, axis)
-  fxn = functools.partial(_custom_quantize_fp8_with_amax, dname=dname_of(x.device))
+  amax_partial = alloc_local((1,), dtypes.float32, x.device, axis)
   fp8_out, amax_partial, *_ = Tensor.custom_kernel(fp8_out, amax_partial, x, amax_state,
-                                                    fxn=fxn, grad_fxn=_quantize_fp8_delayed_bwd)
+                                                    fxn=_custom_quantize_fp8_with_amax, grad_fxn=_quantize_fp8_delayed_bwd)
   new_amax = scalar_amax(amax_partial)
   inv_scale = (amax_state.float() + 1e-8) / FP8_MAX
   store_effect = amax_state.uop.store(new_amax.uop)
@@ -62,6 +61,5 @@ def quantize_fp8_scalar(x:Tensor, amax_state:Tensor, fp8_dtype=dtypes.fp8e4m3) -
   # NOTE: pure one-pass bf16 -> fp8 quantize with delayed scalar scale. No amax computation.
   axis = x.uop.axis if isinstance(x.device, tuple) else None
   fp8_out = alloc_like(x.shape, fp8_dtype, x.device, axis)
-  fxn = functools.partial(_custom_quantize_fp8_scalar, dname=dname_of(x.device))
-  fp8_out, *_ = Tensor.custom_kernel(fp8_out, x, amax_state, fxn=fxn)
+  fp8_out, *_ = Tensor.custom_kernel(fp8_out, x, amax_state, fxn=_custom_quantize_fp8_scalar)
   return fp8_out
