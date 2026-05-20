@@ -703,6 +703,11 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     device = canonicalize_device(self.device if device is None else device)
     axis = self.axis if isinstance(device, tuple) else None
     return UOp.empty(self.shard_shape if axis is not None else self.shape, self.dtype if dtype is None else dtype, device, axis)
+  def clone(self, device=None) -> UOp:
+    device = device or self.device
+    ret = self.empty_like(device=device)
+    src = self if self.device is None or self.device == device else self.copy_to_device(device)
+    return ret.after(ret.store(src))
   @recursive_property
   def device(self) -> str|tuple[str, ...]|None:
     if self.op is Ops.DEVICE: return self.arg

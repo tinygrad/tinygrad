@@ -357,10 +357,9 @@ class Tensor(OpMixin):
     Creates a clone of this tensor allocating a separate buffer for the data.
     If `device` is specified, the clone is placed on that device.
     """
-    device = device or self.device
-    ret = self.empty_like(device=device)
+    ret = Tensor(self.uop.clone(device=device))
     if self.grad is not None: ret.grad = self.grad.clone(device=device)
-    return ret.assign(self.to(device))
+    return ret
 
   def to(self, device:str|tuple[str, ...]|None) -> Tensor:
     """
