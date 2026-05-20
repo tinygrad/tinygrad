@@ -98,6 +98,12 @@ class TestTensorGradient(unittest.TestCase):
     x = Tensor.randn(4, 4)
     np.testing.assert_allclose(x.pad(((1,0),(0,0))).gradient(x, gradient=g2)[0].numpy(), np.zeros((4, 4)))
 
+  def test_bare_const_skipped_by_backward(self):
+    Tensor.manual_seed(0)
+    w = Tensor(1.0)
+    (Tensor.rand(()) + w).backward()
+    self.assertIsNone(w.grad)
+
 class TestMultiOutputGradient(unittest.TestCase):
   @staticmethod
   def addmul_kernel(C:UOp, D:UOp, A:UOp, B:UOp) -> UOp:

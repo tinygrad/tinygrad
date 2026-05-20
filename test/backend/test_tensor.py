@@ -30,11 +30,12 @@ class TestTinygrad(unittest.TestCase):
     self.assertIsNone(t.device)
     self.assertIn("<UOp None", repr(t))
 
-  def test_deviceless_const_realize_materializes(self):
+  def test_deviceless_const_realize_noop(self):
     t = Tensor(UOp.const(dtypes.float, 2.0))
+    uop = t.uop
     t.realize()
-    self.assertTrue(t.uop.has_buffer_identity())
-    np.testing.assert_equal(t.numpy(), 2.0)
+    self.assertIs(t.uop, uop)
+    self.assertIsNone(t.uop.device)
 
   def test_plus_equals(self):
     a = Tensor.randn(10,10)
@@ -98,10 +99,10 @@ class TestTinygrad(unittest.TestCase):
       return second_derivative.numpy()
 
     def test_tinygrad():
-      x_val = Tensor(2.0)
+      x_val = Tensor([2.0])
       f = x_val**3
-      first_derivative = f.gradient(x_val)[0]
-      second_derivative = first_derivative.gradient(x_val)[0]
+      first_derivative = f.sum().gradient(x_val)[0]
+      second_derivative = first_derivative.sum().gradient(x_val)[0]
       return second_derivative.numpy()
 
     np.testing.assert_allclose(test_tinygrad(), test_pytorch(), atol=1e-5)
@@ -170,8 +171,8 @@ class TestTinygrad(unittest.TestCase):
       return w1.grad, w2.grad
 
     def test_tinygrad():
-      w1 = Tensor(init)
-      w2 = Tensor(init)
+      w1 = Tensor(init).clone()
+      w2 = Tensor(init).clone()
       out = w1.add(w2)
       out.backward()
       return w1.grad.numpy(), w2.grad.numpy()
@@ -190,8 +191,8 @@ class TestTinygrad(unittest.TestCase):
       return w1.grad.numpy(), w2.grad.numpy()
 
     def test_tinygrad():
-      w1 = Tensor(init)
-      w2 = Tensor(init)
+      w1 = Tensor(init).clone()
+      w2 = Tensor(init).clone()
       assert w1.requires_grad is True and w2.requires_grad is True
       nn.optim.SGD([w1, w2], lr=0.01)
       assert w1.requires_grad is True and w2.requires_grad is True
@@ -735,6 +736,9 @@ class TestZeroShapeTensor(unittest.TestCase):
     np.testing.assert_equal(t.numpy(), 2.0)
     self.assertTrue(t.uop.has_buffer_identity())
 
+  def test_numpy_deviceless_const(self):
+    np.testing.assert_equal(Tensor(UOp.const(dtypes.float, 2.0)).numpy(), 2.0)
+
   def test_clone_with_shrink(self):
     a = Tensor.rand(16, 16)
     b = a.shrink(((2, 10), None)).clone()
@@ -754,6 +758,11 @@ class TestZeroShapeTensor(unittest.TestCase):
     assert a.grad is not None
     assert b.grad is not None
     np.testing.assert_allclose(a.grad.numpy(), b.grad.numpy())
+
+  def test_clone_deviceless_const_to_cpu(self):
+    t = Tensor(UOp.const(dtypes.float, 2.0)).clone(device="CPU")
+    self.assertEqual(t.device, "CPU")
+    np.testing.assert_equal(t.numpy(), 2.0)
 
   def test_reduce_default(self):
     np.testing.assert_equal(Tensor([]).max().numpy(), -float("inf"))

@@ -78,8 +78,8 @@ class Ops(FastEnum):
   # control flow ops
   BARRIER = auto(); RANGE = auto(); IF = auto(); END = auto(); ENDIF = auto(); WAIT = auto()
 
-  # consts. VCONST is a vectorized const
-  VCONST = auto(); CONST = auto()
+  # const.
+  CONST = auto()
 
   # CUSTOM/CUSTOMI are used to output strings into codegen. the I makes the string inline
   CUSTOM = auto(); CUSTOMI = auto()

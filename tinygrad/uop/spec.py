@@ -153,7 +153,7 @@ spec_tensor = PatternMatcher([
   (UPat(Ops.PARAM, src=(UPat(), UPat(Ops.DEVICE), UPat(Ops.MULTI)), name="x"), lambda x: True),
 
   # inputs to movement ops
-  (UPat((Ops.STACK, Ops.VCONST)), lambda: True),
+  (UPat(Ops.STACK), lambda: True),
   (UPat({Ops.ADD, Ops.MUL, Ops.CDIV, Ops.FLOORDIV}, dtype=dtypes.weakint), lambda: True),
 
   # movement ops
