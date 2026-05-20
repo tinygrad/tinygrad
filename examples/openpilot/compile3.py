@@ -87,7 +87,7 @@ def test_vs_compile(run, inputs, test_val=None):
     step_times.append((et-st)*1e3)
     print(f"enqueue {(mt-st)*1e3:6.2f} ms -- total run {step_times[-1]:6.2f} ms")
 
-  if (assert_time:=getenv("ASSERT_MIN_STEP_TIME")):
+  if (assert_time:=getenv("ASSERT_MIN_STEP_TIME", 0.0)):
     min_time = min(step_times)
     assert min_time < assert_time, f"Speed regression, expected min step time of < {assert_time} ms but took: {min_time} ms"
 
