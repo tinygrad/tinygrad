@@ -72,7 +72,8 @@ def expand_index(ctx, buf:UOp, vec:UOp):
       elif dropped == best_drop: cands.append((ch, cw, cidx))
     # and tiebreak with indexing complexity (ie. number of nodes)
     h, w, _ = cands[0] if len(cands) == 1 else min(cands, key=lambda cand: len(cand[2].gep(1).simplify().backward_slice))
-    buf = buf.replace(dtype=(dtypes.imageh if dt.itemsize == 2 else dtypes.imagef)((h, w, 4)))
+    assert buf.op is Ops.RESHAPE
+    buf = buf.src[0].replace(dtype=(dtypes.imageh if dt.itemsize == 2 else dtypes.imagef)((h, w, 4))).flatten()
   if getenv("UNSAFE_DISABLE_MASK", 0): vec = vec.get_idx()
   # generate the individual indexes
   return UOp(Ops.STACK, buf.dtype, tuple(buf.index(vec.gep(i), ptr=True) for i in range(vec.dtype.count)))
@@ -133,7 +134,7 @@ def gep_on_store(gep:UOp, st:UOp):
   return gep.src[0].store(st.gep(new_arg))
 
 load_store_folding = PatternMatcher([
-  (UPat(Ops.INDEX, src=(UPat(Ops.STACK, src=UPat(GroupOp.Defines).or_after(name="buf")), UPat.var("vec"))), expand_index),
+  (UPat(Ops.INDEX, src=(UPat(Ops.STACK, src=UPat(name="buf")), UPat.var("vec"))), expand_index),
   (UPat(Ops.STACK, src=UPat(Ops.INDEX), name="midx"), fold_expanded_index),
   # GEP after LOAD
   (UPat(Ops.LOAD, src=(UPat(Ops.GEP, name="gep"),), name="ld", allow_any_len=True),
@@ -198,7 +199,8 @@ def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
 def get_image_idx(idx:UOp, width:int):
   x, valid = idx.src[1].get_idx(), idx.src[1].get_valid()
   idx_x, idx_y = (x // 4) % width, x // (4*width)
-  return idx.replace(src=(idx.src[0], idx_y.valid(valid), idx_x.valid(valid)))
+  assert idx.src[0].op is Ops.RESHAPE, "image idx must be on reshape"
+  return idx.replace(src=(idx.src[0].src[0], idx_y.valid(valid), idx_x.valid(valid)))
 
 def image_fixup(ls:UOp):
   # normal image load or store, with the CAST from expand_index
@@ -209,7 +211,8 @@ def image_fixup(ls:UOp):
   # this is an unprocessed image without a cast, we should just make it a buffer
   if isinstance(dt, ImageDType) and len(ls.src[0].src) == 2:
     off = ls.src[0].src[1]
-    idx = ls.src[0].src[0].replace(dtype=(new_dt:=dtypes.half if dt.itemsize == 2 else dtypes.float).ptr(dt.size)).index(off)
+    assert ls.src[0].src[0].op is Ops.RESHAPE, "image idx must be on reshape"
+    idx = ls.src[0].src[0].src[0].replace(dtype=(new_dt:=dtypes.half if dt.itemsize == 2 else dtypes.float).ptr(dt.size)).index(off)
     return ls.replace(src=(idx,), dtype=new_dt).cast(dtypes.float) if ls.op is Ops.LOAD else ls.replace(src=(idx, ls.src[1].cast(new_dt)))
 
 correct_load_store = PatternMatcher([
@@ -372,7 +375,7 @@ pm_imageh_store = PatternMatcher([
 def make_image(ctx, ls, buf, off):
   if (vcount:=buf.dtype.vcount) != 1: buf = buf.src[0]
   if buf.op == Ops.PARAM and not isinstance(dt:=buf.dtype, ImageDType) and (dims:=ImageDType.valid_dims(dt, ctx)):
-    buf = buf.replace(dtype=(dtypes.imageh if dt.base == dtypes.half else dtypes.imagef)((*dims[0], 4)))
+    buf = buf.replace(dtype=(dtypes.imageh if dt.base == dtypes.half else dtypes.imagef)((*dims[0], 4))).flatten()
     if vcount != 1: buf = UOp.vectorize(*([buf] * vcount))
     if ls.op is Ops.LOAD: return ls.replace(src=(buf.index(off, ptr=True),), dtype=dtypes.float.vec(ls.dtype.vcount)).cast(dt.base)
     return buf.index(off, ptr=True).store(pm_imageh_store.rewrite(ls.src[1]) if dt.base == dtypes.half else ls.src[1])
