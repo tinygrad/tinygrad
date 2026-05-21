@@ -368,6 +368,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   @property
   def max_shape(self) -> tuple[int, ...]: return to_max_shape(self.shape)
 
+  def max_numel(self) -> int: return prod(self.max_shape)
+
   @property
   def shard_shape(self) -> tuple[sint, ...]:
     if not isinstance(self.device, tuple) or self.axis is None: return self.shape
