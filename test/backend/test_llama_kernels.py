@@ -73,5 +73,15 @@ class TestQuantizeFP8(unittest.TestCase):
   def test_scalar(self): run_quantize_fp8_scalar((32, getenv("N", 1024)))
   def test_delayed(self): run_quantize_fp8_delayed((2048, getenv("N", 1024)))
 
+  def test_multi(self):
+    devs = tuple(f"NULL:{i}" for i in range(8))
+    x = Tensor.empty(4, 8, dtype=dtypes.bfloat16, device=devs).uop.multi(0)
+    x = Tensor(x, device=devs)
+    amax_state = Tensor.full((), 2.0, dtype=dtypes.float32, device=devs).contiguous()
+    fp8, _, new_amax, _ = quantize_fp8_delayed(x, amax_state, FP8_DTYPE)
+    Tensor.realize(fp8, new_amax)
+    assert fp8.uop.shape == x.uop.shape
+    assert new_amax.shape == ()
+
 if __name__ == '__main__':
   unittest.main()
