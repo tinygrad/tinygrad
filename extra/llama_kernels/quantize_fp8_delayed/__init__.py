@@ -1,26 +1,54 @@
 import functools
 from tinygrad import Tensor, dtypes
 from tinygrad.helpers import prod
-from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
+from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType, AddrSpace
 from extra.llama_kernels import FP8_MAX, NUM_WG, THREADS_PER_WG, alloc_like, alloc_local, scalar_amax
 
 @functools.cache
 def _custom_quantize_fp8_with_amax(fp8_out:UOp, amax_partial:UOp, x:UOp, amax_state:UOp) -> UOp:
+  VEC = 8
   n_elems = prod(x.shape)
-  num_wg = amax_partial.shape[0]
-  elems_per_wg = n_elems // num_wg
-  assert n_elems == num_wg * elems_per_wg, f"{n_elems=} must divide over {num_wg=}"
-  wg = UOp.range(num_wg, 0)
-  i = UOp.range(elems_per_wg, 1)
-  idx = wg * elems_per_wg + i
+  assert n_elems % (NUM_WG * THREADS_PER_WG * VEC) == 0
+  assert amax_partial.shape[0] == NUM_WG
+
+  x = x.reshape(n_elems)
+  fp8_out = fp8_out.reshape(n_elems)
+
+  wg = UOp.range(NUM_WG, 0, AxisType.GLOBAL)
+  tid = UOp.range(THREADS_PER_WG, 1, AxisType.LOCAL)
+  it = UOp.range((n_elems // VEC) // (NUM_WG * THREADS_PER_WG), 2, AxisType.LOOP)
+  lane = UOp.range(VEC, 3, AxisType.UNROLL)
+
+  idx = (((it * NUM_WG + wg) * THREADS_PER_WG + tid) * VEC) + lane
 
   scale = FP8_MAX / (amax_state[0].cast(dtypes.float) + 1e-8)
-  x_f = x.reshape(n_elems)[idx].cast(dtypes.float)
-  abs_x = (x_f < 0).where(-x_f, x_f)
+  x_f = x[idx].cast(dtypes.float)
+  abs_x = (x_f < 0.0).where(-x_f, x_f)
+  scaled = (x_f * scale).maximum(-FP8_MAX).minimum(FP8_MAX)
 
-  fp8_store = fp8_out.reshape(n_elems)[idx].store((x_f * scale).cast(fp8_out.dtype.base)).end(i)
-  amax_store = amax_partial.after(fp8_store)[wg].store(abs_x.reduce(i, arg=Ops.MAX))
-  return amax_store.end(wg).sink(arg=KernelInfo(f"quantize_fp8_with_amax_{n_elems}"))
+  fp8_store = fp8_out.index(idx, ptr=True).store(scaled.cast(fp8_out.dtype.base)).end(lane)
+  lane_max = abs_x.reduce(lane, arg=Ops.MAX)
+
+  zero = UOp.const(dtypes.weakint, 0)
+  lmax = UOp.placeholder((1,), dtypes.float, slot=1, addrspace=AddrSpace.REG)
+
+  lmax_init = lmax.after(wg, tid).index(zero, ptr=True).store(0.0)
+  lmax_prev = lmax.after(lmax_init, it).index(zero)
+  lmax_store = lmax.after(fp8_store).index(zero, ptr=True).store(lmax_prev.maximum(lane_max))
+  lmax_val = lmax.after(lmax_store.end(it)).index(zero)
+
+  lds = UOp.placeholder((THREADS_PER_WG,), dtypes.float, slot=0, addrspace=AddrSpace.LOCAL)
+  lds = lds.after(lds.index(tid, ptr=True).store(lmax_val).barrier())
+
+  step = THREADS_PER_WG // 2
+  while step:
+    active = tid < step
+    other = lds.index(tid + step, ptr=True).load(UOp.const(dtypes.float, 0.0), active)
+    lds = lds.after(lds.index(tid, ptr=True).store(lds[tid].maximum(other), gate=active).barrier())
+    step //= 2
+
+  amax_store = amax_partial.index(tid.eq(0).where(wg, UOp.invalid()), ptr=True).store(lds[0])
+  return amax_store.end(tid, wg).sink(arg=KernelInfo(f"quantize_fp8_with_amax_{n_elems}", opts_to_apply=()))
 
 @functools.cache
 def _custom_quantize_fp8_scalar(fp8_out:UOp, x:UOp, amax_state:UOp) -> UOp:
@@ -51,10 +79,7 @@ def quantize_fp8_delayed(x:Tensor, amax_state:Tensor, fp8_dtype=dtypes.fp8e4m3) 
   assert x.dtype == dtypes.bfloat16, f"expected bf16, got {x.dtype}"
   axis = x.uop.axis if isinstance(x.device, tuple) else None
   fp8_out      = alloc_like(x.shape,  fp8_dtype,      x.device, axis)
-  n_elems = prod(x.uop.shard_shape)
-  num_partials = n_elems // 4
-  while n_elems % num_partials != 0: num_partials -= NUM_WG
-  amax_partial = alloc_local((num_partials,), dtypes.float32, x.device, axis)
+  amax_partial = alloc_local((NUM_WG,), dtypes.float32, x.device, axis)
   fxn = _custom_quantize_fp8_with_amax
   fp8_out, amax_partial, *_ = Tensor.custom_kernel(fp8_out, amax_partial, x, amax_state,
                                                     fxn=fxn, grad_fxn=_quantize_fp8_delayed_bwd)
