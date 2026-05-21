@@ -36,7 +36,6 @@ class TestInferenceMode(unittest.TestCase):
     assert tmp.grad is None
     assert mm.grad is None
     assert W.grad is None
-    assert W.requires_grad
 
   def test_no_grad_mode_context_manager(self):
     x = Tensor(x_init)

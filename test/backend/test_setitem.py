@@ -301,26 +301,26 @@ class TestSetitem(unittest.TestCase):
     self.assertListEqual(z[6:7].tolist(), [3])
 
 class TestWithGrad(unittest.TestCase):
-  def test_no_requires_grad_works(self):
+  def test_basic_setitem_works(self):
     z = Tensor.rand(8, 8)
     x = Tensor.rand(8)
     z[:3] = x
 
-  def test_set_with_requires_grad(self):
+  def test_set_backward(self):
     z = Tensor.ones(8, 8)
     x = Tensor.rand(8, 8)
     z[:] = x
     z.sum().backward()
     np.testing.assert_allclose(x.grad.numpy(), np.ones((8, 8)))
 
-  def test_set_nonleaf_requires_grad(self):
+  def test_set_nonleaf_backward(self):
     x = Tensor([1.0, 2.0, 3.0, 4.0])
     z = x * 2
     z[:2] = Tensor([10.0, 20.0])
     z.sum().backward()
     np.testing.assert_allclose(x.grad.numpy(), [0, 0, 2, 2])
 
-  def test_set_overlapping_requires_grad(self):
+  def test_set_overlapping_backward(self):
     z = Tensor.zeros(6)
     x = Tensor.ones(4)
     y = Tensor.ones(4) * 2
@@ -330,7 +330,7 @@ class TestWithGrad(unittest.TestCase):
     np.testing.assert_allclose(x.grad.numpy(), [1, 1, 0, 0])
     np.testing.assert_allclose(y.grad.numpy(), np.ones(4))
 
-  def test_set_iadd_requires_grad(self):
+  def test_set_iadd_backward(self):
     z = Tensor([1.0, 2.0, 3.0, 4.0])
     x = Tensor([10.0, 20.0])
     z[:2] += x
