@@ -413,7 +413,7 @@ def train_retinanet():
     layers_to_train = ["layer4", "layer3", "layer2", "layer1", "conv1"][:trainable_layers]
     for k, v in get_state_dict(backbone).items():
       if all([not k.startswith(layer) for layer in layers_to_train]):
-        v.requires_grad = False
+        v.is_param_(False)
 
   def _data_get(it:Iterator[tuple[Tensor, ...]], val:bool=False):
     if val:

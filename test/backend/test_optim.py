@@ -10,17 +10,20 @@ x_init = np.random.randn(1,4).astype(np.float32)
 W_init = np.random.randn(4,4).astype(np.float32)
 m_init = np.random.randn(1,4).astype(np.float32)
 
+def _param(tensor, val):
+  return tensor(val, requires_grad=True) if tensor is torch.tensor else tensor(val)
+
 class TeenyNet:
   def __init__(self, tensor):
-    self.x = tensor(x_init.copy(), requires_grad=True)
-    self.W = tensor(W_init.copy(), requires_grad=True)
+    self.x = _param(tensor, x_init.copy())
+    self.W = _param(tensor, W_init.copy())
   def forward(self):
     return (self.x * self.W).sum()
 
 class TinyNet:
   def __init__(self, tensor):
-    self.x = tensor(x_init.copy(), requires_grad=True)
-    self.W = tensor(W_init.copy(), requires_grad=True)
+    self.x = _param(tensor, x_init.copy())
+    self.W = _param(tensor, W_init.copy())
     self.m = tensor(m_init.copy())
 
   def forward(self):

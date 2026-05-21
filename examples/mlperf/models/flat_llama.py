@@ -124,9 +124,9 @@ class FlatTransformer:
     self.tok_embeddings = nn.Embedding(vocab_size, dim)
     self.tok_embeddings.weight = Tensor.normal(vocab_size, dim, mean=0.0, std=0.02, dtype=dtypes.bfloat16)
     self.output = Tensor.normal(1, vocab_size, dim, mean=0.0, std=0.02, dtype=dtypes.bfloat16)
-    self.freqs_cis = precompute_freqs_cis(dim // n_heads, max_context * 2, rope_theta).contiguous().requires_grad_(False)
+    self.freqs_cis = precompute_freqs_cis(dim // n_heads, max_context * 2, rope_theta).contiguous().is_param_(False)
 
-    def _amax(): return Tensor.full((), FP8_MAX, dtype=dtypes.float32).contiguous().requires_grad_(False)
+    def _amax(): return Tensor.full((), FP8_MAX, dtype=dtypes.float32).contiguous().is_param_(False)
     names = ["xqkv", "xo", "x2"]
     names += ["x1", "x3"] if SPLIT_W13 else ["x13"]
     self._fp8_amax = {name: [_amax() for _ in range(n_layers)] for name in names}
@@ -135,7 +135,7 @@ class FlatTransformer:
     self._fp8_grad_amax = {name: [_amax() for _ in range(n_layers)] for name in grad_names}
     w_scales = [("wqkv", s_qkv), ("wo", s_o), ("w2", s_2)]
     w_scales += [("w1", s_1), ("w3", s_3)] if SPLIT_W13 else [("w13", s_13)]
-    self._fp8_inv_scale = {name: s.float().contiguous().requires_grad_(False) for name, s in w_scales}
+    self._fp8_inv_scale = {name: s.float().contiguous().is_param_(False) for name, s in w_scales}
 
   def lin_per_layer(self, in_features:int, out_features:int, std:float=0.02):
     if getenv("ZEROS"): w = Tensor.zeros(self.n_layers, out_features, in_features)
@@ -238,9 +238,9 @@ class FlatTransformer:
       for amax_dict in (self._fp8_amax, self._fp8_grad_amax):
         for name in amax_dict:
           for i in range(len(amax_dict[name])):
-            amax_dict[name][i] = amax_dict[name][i].to(device).contiguous().requires_grad_(False)
+            amax_dict[name][i] = amax_dict[name][i].to(device).contiguous().is_param_(False)
       for name in self._fp8_inv_scale:
-        self._fp8_inv_scale[name] = self._fp8_inv_scale[name].to(device).contiguous().requires_grad_(False)
+        self._fp8_inv_scale[name] = self._fp8_inv_scale[name].to(device).contiguous().is_param_(False)
 
   def __call__(self, tokens:Tensor, save:bool=True):
     h = self.tok_embeddings(tokens)
@@ -326,7 +326,7 @@ if __name__ == "__main__":
     if isinstance(x.device, tuple) and x.uop.axis is not None:
       return Tensor.zeros(x.shape, dtype=grad_dtype(x), device=x.device[0]).shard_(x.device, axis=x.uop.axis).contiguous()
     return Tensor.zeros(x.shape, dtype=grad_dtype(x), device=x.device).contiguous()
-  grads = {x:_make_grad(x) for x in state.values() if x.requires_grad}
+  grads = {x:_make_grad(x) for x in state.values() if x.is_param}
 
   fp8_amax = [t for ts in model._fp8_amax.values() for t in ts]
   fp8_grad_amax = [t for ts in model._fp8_grad_amax.values() for t in ts]
