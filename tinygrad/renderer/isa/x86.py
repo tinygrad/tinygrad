@@ -175,7 +175,8 @@ extra_matcher = PatternMatcher([
 
 def gated_load(ctx, base:UOp, idx:UOp, cast:UOp, alt:UOp, gate:UOp, x:UOp):
   local = UOp(Ops.DEFINE_LOCAL, base.dtype.base.ptr(x.dtype.count, AddrSpace.LOCAL), arg=next(ctx))
-  ptr = gate.where(base.index(idx, ptr=True), local.index(UOp.const(dtypes.int32, 0), ptr=True)).after(local.store(alt))
+  local_idx = local.index(UOp.const(dtypes.int32, 0), ptr=True)
+  ptr = gate.where(base.index(idx, ptr=True), local_idx).after((local_idx if x.dtype.count == 1 else local).store(alt))
   return ptr.cast(cast.dtype).load(dtype=x.dtype)
 
 def gated_store(base:UOp, idx:UOp, cast:UOp, gate:UOp, val:UOp):
