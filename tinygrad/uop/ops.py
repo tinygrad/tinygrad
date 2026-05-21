@@ -277,7 +277,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       case Ops.DEFINE_LOCAL | Ops.DEFINE_REG:
         if isinstance(self.dtype, PtrDType):
           return (self.ptrdtype.size, self.dtype.count) if self.dtype.count > 1 else (self.ptrdtype.size,)
-        return ()
+        return (self.dtype.count,) if self.dtype.count > 1 else ()
       case Ops.PARAM:
         if isinstance(self.dtype, ImageDType): return self.dtype.shape
         if isinstance(self.dtype, PtrDType): return (self.ptrdtype.size,)
