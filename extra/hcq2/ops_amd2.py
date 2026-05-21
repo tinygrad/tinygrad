@@ -372,13 +372,15 @@ class PCIIface(PCIIfaceBase):
 
 def _mock(iface, name=None): return type(name or f"MOCK{iface.__name__}", (iface,), {})
 
+def encode_queues(outer:UOp) -> UOp:
+  return outer.replace(src=tuple(amd_lower_pm4(q) if q.arg[1] == "COMPUTE" else amd_lower_sdma(q) for q in outer.src))
+
 class AMDDevice(HCQ2Compiled):
   timestamp_divider = 100.0  # AMD GPU clock: ticks/us
 
   pm_lower = PatternMatcher([
     (UPat(Ops.PROGRAM, src=(UPat(), UPat(), UPat(), UPat(), UPat(Ops.BINARY)), name="prg"), amd_build_program),
-    (UPat(Ops.LINEAR, arg="COMPUTE", name="linear"), amd_lower_pm4),
-    (UPat(Ops.LINEAR, arg="COPY", name="linear"), amd_lower_sdma),
+    (UPat(Ops.LINEAR, src=UPat(Ops.LINEAR), name="outer"), encode_queues),
     (UPat(Ops.CUSTOM_FUNCTION, arg="submit_compute", name="cf"), amd_submit_pm4),
     (UPat(Ops.CUSTOM_FUNCTION, arg="submit_copy", name="cf"), amd_submit_sdma),
   ])
