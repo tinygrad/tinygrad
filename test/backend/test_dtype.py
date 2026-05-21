@@ -2,7 +2,6 @@ import contextlib, unittest, math
 import numpy as np
 import torch
 from typing import Any, List
-from tinygrad.device import is_dtype_supported
 from tinygrad.helpers import getenv, DEBUG, CI, EMULATED_DTYPES
 from tinygrad.dtype import DType, DTYPES_DICT, least_upper_dtype, fp8_to_float, float_to_fp8, _to_np_dtype, _to_torch_dtype, truncate
 from tinygrad.renderer.ptx import PTXRenderer
@@ -17,11 +16,13 @@ pytestmark = pytest.mark.filterwarnings("ignore")
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 settings.load_profile("my_profile")
 
+supported_dtypes = Device[Device.DEFAULT].renderer.supported_dtypes()
+
 def get_available_cast_dtypes(dtype: DType) -> List[DType]:
-  dts = [v for k, v in DTYPES_DICT.items() if v != dtype and is_dtype_supported(v) or v in dtypes.fp8s+(dtypes.half,dtypes.bfloat16,dtypes.long)]
-  if dtype in (dtypes.long, dtypes.ulong) and (not is_dtype_supported(dtype) or dtypes.long in EMULATED_DTYPES.tolist(dtypes)):
+  dts = [v for k, v in DTYPES_DICT.items() if v != dtype and v in supported_dtypes or v in dtypes.fp8s+(dtypes.half,dtypes.bfloat16,dtypes.long)]
+  if dtype in (dtypes.long, dtypes.ulong) and (dtype not in supported_dtypes or dtypes.long in EMULATED_DTYPES.tolist(dtypes)):
     return [dt for dt in dts if dt != dtypes.double] # can't bitcast with no 64-bit support
-  if not is_dtype_supported(dtype) and dtype not in dtypes.fp8s+(dtypes.half,dtypes.bfloat16): return []
+  if dtype not in supported_dtypes and dtype not in dtypes.fp8s+(dtypes.half,dtypes.bfloat16): return []
   return dts
 
 def _to_torch_storage_type(dtype:DType):
@@ -60,7 +61,7 @@ class TestDType(unittest.TestCase):
   @classmethod
   def setUpClass(cls):
     if cls.DTYPE is None: raise unittest.SkipTest("base class")
-    cls.DATA = rand_for_dtype(cls.DTYPE, 0x10, allow_subnormal=is_dtype_supported(cls.DTYPE))
+    cls.DATA = rand_for_dtype(cls.DTYPE, 0x10, allow_subnormal=cls.DTYPE in supported_dtypes)
 
   def test_to_np(self):
     _test_to_np(Tensor(self.DATA, dtype=self.DTYPE), _to_np_dtype(self.DTYPE), np.array(self.DATA, dtype=_to_np_dtype(self.DTYPE)))
@@ -115,7 +116,7 @@ class TestDType(unittest.TestCase):
     for dt in dtypes:
       arr = np.asarray(data).astype(dt)
       tensor = Tensor(arr)
-      if not is_dtype_supported(tensor.dtype): continue
+      if tensor.dtype not in supported_dtypes: continue
       tin = tensor.numpy()
       tor = torch.as_tensor(arr).detach().numpy()
       assert dt == tin.dtype == tor.dtype, f"dtype mismatch: expected={dt} | tinygrad={tin.dtype} | torch={tor.dtype}"
@@ -271,7 +272,7 @@ class TestFloatDType(TestDType):
     _test_op(lambda: Tensor([-0.9, -0.3, 1.2], dtype=dtypes.float32).cast(dtypes.uint32), dtypes.uint32,
              [0, 0, 1])
 
-@unittest.skipUnless(is_dtype_supported(dtypes.double), f"no double on {Device.DEFAULT}")
+@unittest.skipUnless(dtypes.double in supported_dtypes, f"no double on {Device.DEFAULT}")
 class TestDoubleDType(TestDType):
   DTYPE = dtypes.double
   @unittest.skipIf((CI and Device.DEFAULT in {"CUDA", "NV"}) or \
@@ -478,7 +479,7 @@ class TestImplicitFunctionTypeChange(unittest.TestCase):
 class TestTensorMethod(unittest.TestCase):
   @given(strat.sampled_from(core_dtypes))
   def test_abs_diff(self, dt):
-    if dt == dtypes.bool or not is_dtype_supported(dt): return
+    if dt == dtypes.bool or dt not in supported_dtypes: return
     a, b = Tensor([2], dtype=dt), Tensor([1], dtype=dt)
     ret = (a - b).abs()
     np.testing.assert_allclose(ret.numpy(), np.abs(a.numpy()-b.numpy()))
@@ -486,11 +487,11 @@ class TestTensorMethod(unittest.TestCase):
 class TestDtypeUsage(unittest.TestCase):
   def test_max_w_alu(self):
     for d in dtypes.ints:
-      if is_dtype_supported(d):
+      if d in supported_dtypes:
         t = Tensor([[1, 2], [3, 4]], dtype=d)
         (t*t).max().item()
 
-@unittest.skipUnless(is_dtype_supported(dtypes.bfloat16), f"no bfloat16 on {Device.DEFAULT}")
+@unittest.skipUnless(dtypes.bfloat16 in supported_dtypes, f"no bfloat16 on {Device.DEFAULT}")
 class TestOpsBFloat16(unittest.TestCase):
   def test_cast(self):
     # TODO: helper_test_op breaks in unrelated part
