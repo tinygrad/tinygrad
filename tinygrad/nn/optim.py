@@ -17,14 +17,14 @@ class Optimizer:
     self.param_dtype = to_dtype(getenv("OPTIM_DTYPE", "float32"))
     self.fused = fused
     # store lr in at least float32 precision
-    self.lr = Tensor(lr if getenv("CONST_LR") else [lr], requires_grad=False, device=self.device,
+    self.lr = Tensor(lr if getenv("CONST_LR") else [lr], device=self.device,
                      dtype=least_upper_dtype(dtypes.default_float, dtypes.float32))
     if self.fused: self.pos_params = list(itertools.accumulate(self.params, lambda x,y: x+y.numel(), initial=0))
 
   def _new_optim_param(self) -> list[Tensor]:
-    if self.fused: return [Tensor.zeros(self.pos_params[-1], dtype=self.param_dtype, device=self.device, requires_grad=False)]
-    if isinstance(self.device, tuple): return [Tensor.zeros_like(t, dtype=self.param_dtype, requires_grad=False) for t in self.params]
-    else: return [Tensor.zeros(t.shape, dtype=self.param_dtype, device=self.device, requires_grad=False) for t in self.params]
+    if self.fused: return [Tensor.zeros(self.pos_params[-1], dtype=self.param_dtype, device=self.device)]
+    if isinstance(self.device, tuple): return [Tensor.zeros_like(t, dtype=self.param_dtype) for t in self.params]
+    else: return [Tensor.zeros(t.shape, dtype=self.param_dtype, device=self.device) for t in self.params]
 
   def zero_grad(self):
     """
