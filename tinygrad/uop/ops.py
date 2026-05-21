@@ -1589,6 +1589,14 @@ pm_lower_index_dtype = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx", dtypes.ints).cast()),), lambda buf,idx: buf.index(idx, ptr=True)),
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("gate").where(UPat.var("idx", dtypes.ints).cast(), UPat(Ops.CONST, arg=Invalid)))),
    lambda buf,idx,gate: buf.index(gate.where(idx, idx.const_like(Invalid)), ptr=True)),
+  # remove hanging casts for images
+  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx_y", dtypes.ints).cast(), UPat.var("idx_x", dtypes.ints).cast()),),
+   lambda buf,idx_x,idx_y: buf.index(idx_y, idx_x, ptr=True)),
+  (UPat(Ops.INDEX, src=(UPat.var("buf"),
+                        UPat.var("gate").where(UPat.var("idx_y", dtypes.ints).cast(), UPat(Ops.CONST, arg=Invalid)),
+                        UPat.var("gate").where(UPat.var("idx_x", dtypes.ints).cast(), UPat(Ops.CONST, arg=Invalid)))),
+   lambda buf,idx_x,idx_y,gate: buf.index(gate.where(idx_y, idx_y.const_like(Invalid)),
+                                          gate.where(idx_x, idx_x.const_like(Invalid)), ptr=True)),
   (UPat((Ops.SINK, Ops.NOOP, Ops.END), name="n"),
    lambda n: n.replace(src=tuple(s.src[0] if s.op is Ops.CAST and s.dtype == dtypes.weakint else s for s in n.src))),
 ])
