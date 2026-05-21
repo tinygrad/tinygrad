@@ -110,7 +110,9 @@ class TestSetitemInto(unittest.TestCase):
   def test_setitem_into_arange(self):
     # NOTE: arange has no real buffer, but assigning to it is fine
     GlobalCounters.reset()
+    other = Tensor.arange(4, dtype=dtypes.int32)
     t = Tensor.arange(4, dtype=dtypes.int32)
+    self.assertIs(other.uop, t.uop)
     t[1] = 5
     self.assertEqual(GlobalCounters.kernel_count, 0)
     t.realize()

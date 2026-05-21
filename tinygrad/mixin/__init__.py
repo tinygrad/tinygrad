@@ -1,11 +1,12 @@
 from __future__ import annotations
 import functools, itertools
-from typing import TYPE_CHECKING, Callable, Self, Sequence, Literal, get_args
+from typing import TYPE_CHECKING, Callable, Self, Sequence, Literal, cast, get_args
 from tinygrad.mixin.elementwise import ElementwiseMixin
 from tinygrad.mixin.movement import MovementMixin
 from tinygrad.mixin.reduce import ReduceMixin
 from tinygrad.uop import Ops
 from tinygrad.uop.ops import _broadcast_shape, resolve, smax, smin, identity_element
+from tinygrad.device import canonicalize_device
 from tinygrad.dtype import ConstType, DType, DTypeLike, Invalid, InvalidType, PtrDType, PyConst, dtypes, least_upper_dtype, sum_acc_dtype, to_dtype
 from tinygrad.helpers import all_int, argfix, ceildiv, flatten, flat_to_grouped, make_tuple, prod, resolve_pool_pads, round_up
 
@@ -18,6 +19,8 @@ ReductionStr = Literal["mean", "sum", "none"]
 class OpMixin(ElementwiseMixin, ReduceMixin):
   @staticmethod
   def unique_const(fill_value:ConstType, **kwargs): raise NotImplementedError("creation helpers are only supported on Tensor and UOp")
+  @staticmethod
+  def const(dtype, b, device=None): raise NotImplementedError("creation helpers are only supported on Tensor and UOp")
 
   @classmethod
   def full(cls, shape:tuple[sint, ...], fill_value:ConstType, **kwargs) -> Self:
@@ -108,11 +111,12 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     """
     if stop is None: stop, start = start, 0
     dtype = kwargs.pop("dtype", dtypes.default_float if any(isinstance(x, float) for x in (start, stop, step)) else dtypes.default_int)
+    device = canonicalize_device(kwargs.pop("device", None))
     lo, hi = (start, stop-step) if step > 0 else (stop-step, start)
     if lo < (dt:=to_dtype(dtype)).min or dt.max < hi: raise OverflowError(f"arange [{start}, {stop}) is not representable in dtype {dtype}")
     # NOTE: this matches numpy, torch raises RuntimeError if stop-start and step have different signs
-    if (output_len:=ceildiv(stop-start, step)) <= 0: return cls.full((0,), 0, dtype=dtype, **kwargs)
-    return (cls.full((output_len,), step, dtype=dtype, **kwargs)._cumalu(0, Ops.ADD) + (start - step)).cast(dtype)
+    if (output_len:=ceildiv(stop-start, step)) <= 0: return cls.full((0,), 0, dtype=dtype, device=device, **kwargs)
+    return (cls.const(dt, step, device).reshape((1,)).expand((output_len,))._cumalu(0, Ops.ADD) + (start - step)).cast(dtype)
 
   @classmethod
   def linspace(cls, start:int|float, stop:int|float, steps:int, **kwargs) -> Self:
@@ -131,7 +135,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     """
     if steps < 0: raise ValueError("number of steps must be non-negative")
     if (dtype := to_dtype(kwargs.pop("dtype", dtypes.default_float))) == dtypes.bool: raise ValueError("linspace with bool dtype is not supported")
-    if steps == 1: return cls.full((1,), start, dtype=dtype, **kwargs)
+    if steps == 1: return cls.const(dtype, start, canonicalize_device(kwargs.pop("device", None))).reshape((1,)).expand((1,))
     return (start + cls.arange(steps, dtype=dtypes.default_float, **kwargs) * ((stop - start) / (steps - 1))).cast(dtype)
 
   @classmethod
@@ -711,7 +715,8 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     if self.ndim == 0: return self._split_cumalu(axis, Ops.MAX), type(self).zeros(self.shape, dtype=dtypes.int32, device=self.device)
     values, n = self._split_cumalu(axis, Ops.MAX), int(self.shape[axis])
     x, values_t = self.transpose(axis, -1), values.transpose(axis, -1)
-    match = x.unsqueeze(-1).eq(values_t.unsqueeze(-2)) * type(self).ones(n, n, device=self.device).triu()
+    tri = type(self).const(dtypes.default_float, 1.0, self.device).reshape((1, 1)).expand((n, n)).triu()
+    match = x.unsqueeze(-1).eq(values_t.unsqueeze(-2)) * tri
     idx = (-(match * type(self).arange(n, 0, -1, device=self.device).reshape(n, 1)).max(-2) + n).cast(dtypes.int32)
     return values, idx.transpose(-1, axis)
 
@@ -758,7 +763,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     last_dim_size = x.shape[-1]
     x_unsqueezed = x.unsqueeze(-2).expand((None,)*(self.ndim-1)+(last_dim_size, None))
     x_cummax, _ = x.cummax(-1)
-    mask = type(self).ones(last_dim_size, last_dim_size, device=self.device).tril()
+    mask = type(self).const(dtypes.default_float, 1.0, self.device).reshape((1, 1)).expand((last_dim_size, last_dim_size)).tril()
     ret = mask.where(x_unsqueezed - x_cummax.unsqueeze(-1), self.dtype.min).exp().sum(-1).log() + x_cummax
     return ret.transpose(-1, axis)
 
@@ -855,7 +860,8 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
         x = blue_box.cat(flipped_green_box.flip(flip_dims), dim=crossover_dim)
     x = x.flatten(dim, dim+n_stages-1).shrink_to(self.shape)
     # compute indices for sorted values
-    mask = type(self).ones(orig_len, orig_len, dtype=dtypes.bool, device=self.device).tril().reshape((None, None) + (1,)*(self.ndim-dim-1))
+    mask = type(self).const(dtypes.bool, True, self.device).reshape((1, 1)).expand((orig_len, orig_len)).tril()
+    mask = mask.reshape((None, None) + (1,)*(self.ndim-dim-1))
     def compute_counts(t:Self): return (mask & t.unsqueeze(dim).eq(t.unsqueeze(dim+1))).sum(dim+1)
     count_orig, count_sorted = compute_counts(self), compute_counts(x)
     cond = self.unsqueeze(dim+1).eq(x.unsqueeze(dim)) & count_orig.unsqueeze(dim+1).eq(count_sorted.unsqueeze(dim))
@@ -1061,7 +1067,8 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     ```
     """
     if reduce not in {None, "add", "multiply"}: raise TypeError(f"{reduce=} must be one of None, 'multiply', or 'add'")
-    if isinstance(src, (int, float, bool)): src = type(self).full(index.shape, src, dtype=self.dtype, device=self.device)
+    if isinstance(src, (int, float, bool)):
+      src = cast(Self, type(self).const(self.dtype, src, self.device).reshape((1,)*index.ndim).expand(index.shape))
     elif reduce: raise TypeError("non-scalar src is not supported with reduce arg. use scatter_reduce")
     if reduce == "add": return self.scatter_reduce(dim, index, src, "sum", include_self=True)
     if reduce == "multiply": return self.scatter_reduce(dim, index, src, "prod", include_self=True)

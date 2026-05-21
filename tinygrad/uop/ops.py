@@ -505,6 +505,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   @staticmethod
   def const(dtype:DType, b:ConstLike, device:str|tuple[str, ...]|None=None, shape:tuple[sint, ...]|None=None):
     if isinstance(b, UOp): return b.unbind()[0] if b.op is Ops.BIND else b
+    if device is not None: device = canonicalize_device(device)
     if isinstance(b, tuple) and all_same(b):
       assert len(b) > 0, "can't create const from empty tuple"
       b = b[0]  # doesn't have to be a STACK if they are all the same
@@ -1188,7 +1189,7 @@ class UPat(OpMixin):
   def cvar(name:str|None=None, dtype:DType|tuple[DType, ...]|None=None, vec=True, arg=None):
     return UPat(Ops.CONST, dtype, name=name, arg=arg)
   @staticmethod
-  def const(dtype:DType|tuple[DType, ...]|None, b:ConstType): return UPat(Ops.CONST, dtype=dtype, arg=b)
+  def const(dtype:DType|tuple[DType, ...]|None, b:ConstType, device=None): return UPat(Ops.CONST, dtype=dtype, arg=b)
 
   # lil helper
   def f(self, op, **kwargs): return UPat(op, src=(self,), **kwargs)
