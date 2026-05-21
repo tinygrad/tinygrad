@@ -139,6 +139,9 @@ class NIRRenderer(Renderer):
     (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("off")), name="x"), lambda x,buf,off: x.replace(
       src=(buf,off.cast(dtypes.long))) if buf.dtype.addrspace != AddrSpace.REG and off.op not in (Ops.CAST, Ops.STACK) else None),
     (UPat(Ops.CAST, name="x"), lambda x: x.src[0] if isinstance(x.dtype, PtrDType) or x.src[0].dtype == dtypes.void else None),
+    # images need index to be int for nir
+    (UPat.var("buf").index(UPat.var("idx_y"), UPat.var("idx_x")),
+     lambda buf,idx_y,idx_x: buf.index(idx_y.cast(dtypes.int), idx_x.cast(dtypes.int))),
   ])
 
   def_rewrite = PatternMatcher([
