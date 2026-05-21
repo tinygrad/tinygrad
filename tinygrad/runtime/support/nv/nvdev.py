@@ -150,7 +150,7 @@ class NVDev:
     if sysmem is True or (sysmem is None and not self.large_bar): view, paddrs = self.pci_dev.alloc_sysmem(size, 0, contiguous=contiguous)
     else:
       paddr = self.mm.palloc(sz, boot=False)
-      view, paddrs = self.vram.view(paddr, sz), [self.pci_dev.bar_info(1)[0] + paddr + i * 0x1000 for i in range(sz // 0x1000)]
+      view, paddrs = self.vram.view(paddr, sz), [paddr + i * 0x1000 for i in range(sz // 0x1000)]
     if data is not None: view[:size] = data
     return view, paddrs[0], paddrs
 
