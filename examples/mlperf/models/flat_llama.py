@@ -22,7 +22,7 @@ ASM_GEMM = getenv("ASM_GEMM", 0)
 FUSED_INPUT_QUANTIZE = getenv("FUSED_INPUT_QUANTIZE", 0)
 FUSED_ADD_NORM_MUL_QUANTIZE = getenv("FUSED_ADD_NORM_MUL_QUANTIZE", 0)
 FUSED_SILU_W13 = getenv("FUSED_SILU_W13", 0)
-SPLIT_W13 = getenv("SPLIT_W13", 1)
+SPLIT_W13 = getenv("SPLIT_W13", 0)
 
 FP8_DTYPE = dtypes.fp8e4m3
 FP8_GRAD_DTYPE = dtypes.fp8e5m2
@@ -275,15 +275,8 @@ def apply_grad(grad_buf:Tensor, new_grad:UOp):
     new_grad = new_grad.cast(grad_buf.dtype)
     grad_buf.uop = grad_buf.uop.after(grad_buf.uop.store(grad_buf.uop + new_grad))
     return
-  sorted_pads = sorted(pads, key=lambda p: p.marg[0][0] if p.op == Ops.PAD else 0)
-  if getenv("FUSED_PAD_GRAD_ACCUM", 0):
-    inners_raw = [Tensor(p.src[0] if p.op == Ops.PAD else p, device=grad_buf.device) for p in sorted_pads]
-    from extra.llama_kernels.fused_pad_grad_accum import fused_pad_grad_accum, can_fused_pad_grad_accum
-    if can_fused_pad_grad_accum(grad_buf, inners_raw):
-      grad_buf.uop = fused_pad_grad_accum(grad_buf, inners_raw).uop
-      return
   cur = grad_buf.uop
-  for pad in reversed(sorted_pads):
+  for pad in sorted(pads, key=lambda p: p.marg[0][0] if p.op == Ops.PAD else 0, reverse=True):
     if pad.op == Ops.PAD:
       grad_shrink = tuple([(p[0], s+p[0]) for s,p in zip(pad.src[0].shape, pad.marg)])
       buf_slice = cur.shrink(grad_shrink)
