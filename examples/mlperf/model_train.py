@@ -1281,11 +1281,17 @@ def train_bert():
         MLLOGGER.start(key=mllog_constants.BLOCK_START, value=None, metadata={"first_epoch_num": 1, "epoch_num": 1, "epoch_count": 1, "samples_count": i * GBS, "step_num": i, "first_step_num": i+1})
         previous_step = i
 
-def train_llama3():
-  from examples.mlperf.models.flat_llama import FlatTransformer, apply_grad, FP8_DTYPE
+LLAMA2_70B_ARGS = {"dim": 8192, "n_heads": 64, "n_kv_heads": 8, "n_layers": 80, "norm_eps": 1e-5, "vocab_size": 32000, "hidden_dim": 28672}
+def train_llama2_70b_lora():
+  train_llama3(True)
+
+def train_llama3(llama2_70b_lora:bool=False):
+  from examples.mlperf.models.flat_llama import FlatTransformer, apply_grad, FP8_DTYPE, LORA
   from examples.llama3 import MODEL_PARAMS
   from examples.mlperf.lr_schedulers import CosineAnnealingLRWithWarmup
   from examples.mlperf.optim import GradAccClipAdamW
+
+  if llama2_70b_lora: assert LORA
 
   INITMLPERF = getenv("INITMLPERF")
   RUNMLPERF = getenv("RUNMLPERF")
@@ -1311,6 +1317,13 @@ def train_llama3():
   EVAL_FREQ          = config["EVAL_FREQ"]              = getenv("EVAL_FREQ", 46080)
   EVAL_BS            = config["EVAL_BS"]                = getenv("EVAL_BS", 16)
   EVAL_TARGET        = config["EVAL_TARGET"]            = getenv("EVAL_TARGET", 5.6)
+  ADAM_BETA_1        = config["ADAM_BETA_1"]            = getenv("ADAM_BETA_1", 0.9)
+  ADAM_BETA_2        = config["ADAM_BETA_2"]            = getenv("ADAM_BETA_2", 0.95)
+  ADAM_EPSILON       = config["ADAM_EPSILON"]           = getenv("ADAM_EPSILON", 1e-5)
+  WEIGHT_DECAY       = config["WEIGHT_DECAY"]           = getenv("WEIGHT_DECAY", 0.1)
+  MAX_GRAD_NORM      = config["MAX_GRAD_NORM"]          = getenv("MAX_GRAD_NORM", 1.0)
+  LORA_RANK          = config["LORA_RANK"]              = getenv("LORA_RANK", 16)
+  LORA_ALPHA         = config["LORA_ALPHA"]             = getenv("LORA_ALPHA", 32.0)
 
   if LOGMLPERF:
     from mlperf_logging import mllog
@@ -1321,7 +1334,10 @@ def train_llama3():
     MLLOGGER = mllog.get_mllogger()
     MLLOGGER.logger.propagate = False
 
-    LLAMA_BENCHMARK = mllog_constants.LLAMA31_405B if getenv("LLAMA3_SIZE", "8B") == "405B" else mllog_constants.LLAMA31_8B
+    if llama2_70b_lora:
+      LLAMA_BENCHMARK = mllog_constants.LLAMA2_70B_LORA
+    else:
+      LLAMA_BENCHMARK = mllog_constants.LLAMA31_405B if getenv("LLAMA3_SIZE", "8B") == "405B" else mllog_constants.LLAMA31_8B
 
     if INITMLPERF:
       assert BENCHMARK, "BENCHMARK must be set for INITMLPERF"
@@ -1350,23 +1366,28 @@ def train_llama3():
       MLLOGGER.event(key=mllog_constants.OPT_NAME, value=mllog_constants.ADAMW)
       MLLOGGER.event(key=mllog_constants.OPT_BASE_LR, value=LR)
       MLLOGGER.event(key=mllog_constants.OPT_END_LR, value=END_LR)
-      MLLOGGER.event(key=mllog_constants.OPT_ADAMW_BETA_1, value=0.9)
-      MLLOGGER.event(key=mllog_constants.OPT_ADAMW_BETA_2, value=0.95)
-      MLLOGGER.event(key=mllog_constants.OPT_ADAMW_EPSILON, value=1e-5)
-      MLLOGGER.event(key=mllog_constants.OPT_ADAMW_WEIGHT_DECAY, value=0.1)
+      MLLOGGER.event(key=mllog_constants.OPT_ADAMW_BETA_1, value=ADAM_BETA_1)
+      MLLOGGER.event(key=mllog_constants.OPT_ADAMW_BETA_2, value=ADAM_BETA_2)
+      MLLOGGER.event(key=mllog_constants.OPT_ADAMW_EPSILON, value=ADAM_EPSILON)
+      MLLOGGER.event(key=mllog_constants.OPT_ADAMW_WEIGHT_DECAY, value=WEIGHT_DECAY)
       MLLOGGER.event(key=mllog_constants.OPT_LR_WARMUP_STEPS, value=WARMUP_STEPS)
       MLLOGGER.event(key=mllog_constants.NUM_WARMUP_STEPS, value=WARMUP_STEPS)
       MLLOGGER.event(key=mllog_constants.OPT_LR_DECAY_STEPS, value=MAX_STEPS - WARMUP_STEPS)
       MLLOGGER.event(key=mllog_constants.OPT_LR_DECAY_SCHEDULE, value="cosine with linear warmup")
-      MLLOGGER.event(key=mllog_constants.OPT_GRADIENT_CLIP_NORM, value=1.0)
+      MLLOGGER.event(key=mllog_constants.OPT_GRADIENT_CLIP_NORM, value=MAX_GRAD_NORM)
+      if llama2_70b_lora:
+        MLLOGGER.event(key=mllog_constants.OPT_LR_TRAINING_STEPS, value=MAX_STEPS)
+        MLLOGGER.event(key=mllog_constants.LORA_ALPHA, value=LORA_ALPHA)
+        MLLOGGER.event(key="lora_rank", value=LORA_RANK)
   else:
     MLLOGGER = None
 
-  opt_adamw_beta_1 = 0.9
-  opt_adamw_beta_2 = 0.95
-  opt_adamw_epsilon = 1e-5
-  opt_adamw_weight_decay = 0.1
+  opt_adamw_beta_1 = ADAM_BETA_1
+  opt_adamw_beta_2 = ADAM_BETA_2
+  opt_adamw_epsilon = ADAM_EPSILON
+  opt_adamw_weight_decay = WEIGHT_DECAY
 
+  opt_gradient_clip_norm = MAX_GRAD_NORM
   opt_learning_rate_warmup_steps = WARMUP_STEPS
   opt_learning_rate_decay_steps = MAX_STEPS - opt_learning_rate_warmup_steps
   opt_base_learning_rate = LR
@@ -1379,9 +1400,10 @@ def train_llama3():
   if WANDB:
     import wandb
     wandb_args = {"id": wandb_id, "resume": "must"} if (wandb_id := getenv("WANDB_RESUME", "")) else {}
-    wandb.init(config=config, **wandb_args, project="MLPerf-LLaMA3")
+    wandb.init(config=config, **wandb_args, project=getenv("WANDB_PROJ", "MLPerf-LLaMA3"))
 
-  model_params = MODEL_PARAMS[getenv("LLAMA3_SIZE", "8B")]["args"]
+  model_params = dict(MODEL_PARAMS[getenv("LLAMA3_SIZE", "8B")]["args"] if not llama2_70b_lora else LLAMA2_70B_ARGS)
+  if llama2_70b_lora: model_params |= {"lora_rank": LORA_RANK, "lora_alpha": LORA_ALPHA}
   # vocab_size from the mixtral tokenizer
   if not SMALL: model_params |= {"vocab_size": 32000}
   real_vocab_size = model_params['vocab_size']
@@ -1400,13 +1422,29 @@ def train_llama3():
     for v in get_parameters(model):
       v = v.assign(Tensor.empty(v.shape, dtype=v.dtype))
 
-  is_dp = (DP := getenv("DP", 1)) > 1
+  is_fsdp = (FSDP := getenv("FSDP", 1)) > 1
+  is_dp = (DP := getenv("DP", 1)) > 1 or is_fsdp
   is_mp = (MP := getenv("MP", 1)) > 1
   is_sharding = is_dp or is_mp
-  device_count = max(DP, MP)
+  device_count = max(DP, MP, FSDP)
   device = tuple(f"{Device.DEFAULT}:{i}" for i in range(device_count))
 
-  model.shard(device, is_mp)
+  model.shard(device, is_mp, is_fsdp)
+
+  if llama2_70b_lora:
+    if getenv("LOAD_MODEL", 1):
+      MODEL_PATH = getenv("MODEL_PATH", "/raid/weights/c4-llama2-70b-lora/")
+
+      state_dict = {k:v for weight_file in Path(MODEL_PATH).glob("*.safetensors") for k,v in safe_load(weight_file).items()}
+
+      load_state_dict(model, state_dict, strict=False, realize=True, consume=True)
+      assert not state_dict, "unconsumed weights"
+      model.quantize()
+
+    # convert nulls to not trainable
+    for p in params:
+      if not p.requires_grad:
+        p.requires_grad_(False)
 
   if is_dp: vocab_mask.shard_(device, axis=None).realize()
   if is_mp: vocab_mask.shard_(device, axis=2).realize()
@@ -1415,7 +1453,8 @@ def train_llama3():
   is_fake_offload = Device.DEFAULT == "NULL"
   optim_device = ("CPU" if not is_fake_offload else "NULL:99") if is_offload_optim else None
   optim = GradAccClipAdamW(params, lr=0.0, b1=opt_adamw_beta_1, b2=opt_adamw_beta_2,
-                           eps=opt_adamw_epsilon, weight_decay=opt_adamw_weight_decay, grad_acc=grad_acc, device=optim_device)
+                           eps=opt_adamw_epsilon, weight_decay=opt_adamw_weight_decay, grad_acc=grad_acc,
+                           clip_norm=opt_gradient_clip_norm, device=optim_device)
 
   for p in optim.params:
     grad_dtype = dtypes.bfloat16 if p.dtype == FP8_DTYPE else p.dtype
@@ -1440,14 +1479,15 @@ def train_llama3():
   fp8_grad_amax = [t for ts in model._fp8_grad_amax.values() for t in ts] if hasattr(model, "_fp8_grad_amax") else []
   fp8_inv_scales = list(model._fp8_inv_scale.values())
 
-  from tinygrad.nn.state import get_state_dict
-  model_state = get_state_dict(model)
-  for wname in model._fp8_inv_scale:
-    w = model_state[wname]
-    w._inv_scale = model._fp8_inv_scale[wname]
-    if optim.master_params:
-      idx = next(j for j, p in enumerate(optim.params) if p is w)
-      optim.master_params[idx].assign((optim.master_params[idx] * w._inv_scale.reshape(-1, *([1]*(w.ndim-1)))).contiguous())
+  if not llama2_70b_lora:
+    from tinygrad.nn.state import get_state_dict
+    model_state = get_state_dict(model)
+    for wname in model._fp8_inv_scale:
+      w = model_state[wname]
+      w._inv_scale = model._fp8_inv_scale[wname]
+      if optim.master_params:
+        idx = next(j for j, p in enumerate(optim.params) if p is w)
+        optim.master_params[idx].assign((optim.master_params[idx] * w._inv_scale.reshape(-1, *([1]*(w.ndim-1)))).contiguous())
 
   # realize everything here
   if optim.master_params: Tensor.realize(*optim.master_params)
@@ -1458,7 +1498,7 @@ def train_llama3():
     if is_dp: tokens = tokens.to(None).shard(device, 0)
     if is_mp: tokens = tokens.shard(device)
     if not is_sharding: tokens = tokens.to(None)
-    logits:Tensor = model(tokens[:, :-1], save=bool(SMALL))
+    logits = model(tokens, save=bool(SMALL))[:, :-1] if llama2_70b_lora else model(tokens[:, :-1], save=bool(SMALL))
     if getenv("FAST_CE", 0):
       from extra.llama_kernels.fused_ce import fused_ce_loss
       loss = fused_ce_loss(logits.cast(dtypes.bfloat16), tokens[:, 1:], label_smoothing=0.0)
@@ -1486,6 +1526,22 @@ def train_llama3():
 
   @TinyJit
   @Tensor.train(False)
+  def eval_step_llama2_70b_lora(tokens: Tensor, labels:Tensor):
+    if is_dp:
+      tokens = tokens.to(None).shard(device, 0)
+      labels = labels.to(None).shard(device, 0)
+    if is_mp:
+      tokens = tokens.to(None).shard(device)
+      labels = labels.to(None).shard(device)
+    if not is_sharding:
+      tokens = tokens.to(None)
+      labels = labels.to(None)
+    logits:Tensor = model(tokens)[:, :-1]
+    loss = vocab_mask.where(-1e9, logits).sparse_categorical_crossentropy(labels[:, 1:], ignore_index=-100)
+    return loss.flatten().float().to("CPU")
+
+  @TinyJit
+  @Tensor.train(False)
   def eval_step(tokens:Tensor):
     if is_dp: tokens = tokens.to(None).shard(device, 0)
     if is_mp: tokens = tokens.shard(device)
@@ -1498,18 +1554,24 @@ def train_llama3():
   def fake_data(bs, samples):
     import numpy as np
     for _ in range(samples // bs):
-      fake_data_np = np.random.randint(0, model_params["vocab_size"], size=(bs, SEQLEN + 1), dtype=np.int32)
+      fake_data_np = np.random.randint(0, model_params["vocab_size"], size=(bs, SEQLEN if llama2_70b_lora else SEQLEN + 1), dtype=np.int32)
       yield Tensor(fake_data_np, device="NPY")
 
   def get_train_iter():
     if getenv("FAKEDATA", 0):
       return fake_data(BS, SAMPLES)
+    elif llama2_70b_lora:
+      from examples.mlperf.dataloader import batch_load_llama2_70b_lora
+      return batch_load_llama2_70b_lora(BS, SAMPLES, BASEDIR, seed=DATA_SEED, val=bool(TRAIN_ON_VAL))
     else:
       from examples.mlperf.dataloader import batch_load_llama3
       return batch_load_llama3(BS, SAMPLES, SEQLEN, BASEDIR, seed=DATA_SEED, val=bool(TRAIN_ON_VAL), small=bool(SMALL))
 
   if getenv("FAKEDATA", 0):
     eval_dataset = None
+  elif llama2_70b_lora:
+    from examples.mlperf.dataloader import get_llama2_70b_lora_dataset
+    eval_dataset = get_llama2_70b_lora_dataset(BASEDIR, val=True)
   else:
     from examples.mlperf.dataloader import get_llama3_dataset
     eval_dataset = get_llama3_dataset(EVAL_SAMPLES, SEQLEN, BASEDIR, val=True, small=bool(SMALL))
@@ -1517,13 +1579,18 @@ def train_llama3():
   def get_eval_iter():
     if eval_dataset is None:
       return fake_data(EVAL_BS, EVAL_SAMPLES)
-    from examples.mlperf.dataloader import iterate_llama3_dataset
-    return iterate_llama3_dataset(eval_dataset, EVAL_BS)
+    elif llama2_70b_lora:
+      from examples.mlperf.dataloader import iterate_llama2_70b_lora_dataset
+      return iterate_llama2_70b_lora_dataset(eval_dataset, EVAL_BS)
+    else:
+      from examples.mlperf.dataloader import iterate_llama3_dataset
+      return iterate_llama3_dataset(eval_dataset, EVAL_BS)
 
   num_params = sum(p.numel() for p in params) - model_params["vocab_size"]*model_params["dim"]
   train_iter = get_train_iter()
   i, sequences_seen = resume_ckpt, 0
   step_times = []
+  skip_evals = getenv("SKIP_EVALS", 0)
 
   if MLLOGGER and RUNMLPERF:
     MLLOGGER.start(key=mllog_constants.EPOCH_START, metadata={mllog_constants.SAMPLES_COUNT: sequences_seen})
@@ -1608,6 +1675,9 @@ def train_llama3():
               f"epoch global_mem: {GlobalCounters.global_mem:_}")
 
     if (sequences_seen // EVAL_FREQ != (sequences_seen - actual_gbs) // EVAL_FREQ and (i != 1 or EVAL_FREQ == 1)) or (BENCHMARK and i == BENCHMARK):
+      if skip_evals > 0:
+        skip_evals -= 1
+        continue
       if EVAL_BS == 0: return
       tqdm.write(f"evaluating after {sequences_seen} sequences")
       profile_marker(f"eval @ {i}")
@@ -1622,14 +1692,21 @@ def train_llama3():
       tqdm.write(f"evaluating {EVAL_SAMPLES//EVAL_BS} batches of {EVAL_BS} sequences")
 
       for j,tokens in tqdm(enumerate(eval_iter), total=EVAL_SAMPLES//EVAL_BS):
-        eval_losses += eval_step(tokens).tolist()
+        if not llama2_70b_lora:
+          eval_losses += eval_step(tokens).tolist()
+        else:
+          eval_losses += eval_step_llama2_70b_lora(*tokens).tolist()
 
         if BENCHMARK and (j+1) == min(BENCHMARK, EVAL_SAMPLES//EVAL_BS):
           if MLLOGGER and INITMLPERF:
             MLLOGGER.end(key=mllog_constants.INIT_STOP, value=None)
           return
 
-      log_perplexity = sum(eval_losses) / len(eval_losses)
+      # if the final batch is padded, weigh that loss appropriately
+      if llama2_70b_lora and (tail := (EVAL_SAMPLES % EVAL_BS)) != 0:
+        log_perplexity = ((EVAL_BS * sum(eval_losses[:-1])) + (tail * eval_losses[-1])) / ((EVAL_BS * (len(eval_losses) -1)) + tail)
+      else:
+        log_perplexity = sum(eval_losses) / len(eval_losses)
 
       tqdm.write(f"eval log perplexity: {log_perplexity:.4f}")
 

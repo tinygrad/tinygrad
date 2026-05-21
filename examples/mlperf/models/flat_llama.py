@@ -1,4 +1,5 @@
 import math, os
+from typing import ClassVar
 if __name__ == "__main__":
   os.environ["DEFAULT_FLOAT"] = "bfloat16"
   os.environ["OPTIM_DTYPE"] = "bfloat16"
@@ -18,6 +19,8 @@ from extra.models.llama import apply_rotary_emb, precompute_freqs_cis
 from extra.llama_kernels.rmsnorm import rmsnorm
 from extra.llama_kernels import FP8_MAX, local_abs_max
 
+LORA = getenv("LORA", 0)
+
 ASM_GEMM = getenv("ASM_GEMM", 0)
 FUSED_INPUT_QUANTIZE = getenv("FUSED_INPUT_QUANTIZE", 0)
 FUSED_ADD_NORM_MUL_QUANTIZE = getenv("FUSED_ADD_NORM_MUL_QUANTIZE", 0)
@@ -26,6 +29,12 @@ SPLIT_W13 = getenv("SPLIT_W13", 1)
 
 FP8_DTYPE = dtypes.fp8e4m3
 FP8_GRAD_DTYPE = dtypes.fp8e5m2
+
+def quantize_fp8_weight(w:Tensor) -> tuple[Tensor, Tensor]:
+  amax = w.abs().flatten(1).max(1).detach()
+  scale = FP8_MAX / (amax + 1e-8)
+  return (w * scale.reshape(-1, 1, 1)).clamp(-FP8_MAX, FP8_MAX).cast(FP8_DTYPE), \
+         ((amax + 1e-8) / FP8_MAX).float().contiguous().requires_grad_(False)
 
 def quantize_fp8(x:Tensor, amax_state:Tensor|None=None):
   new_amax = (local_abs_max(x) if isinstance(x.device, tuple) else x.abs().max()).detach().cast(dtypes.float32)
@@ -90,9 +99,14 @@ def silu_w13_quantize_matmul(x_w13:Tensor, w2:Tensor, s_2:Tensor,
   out, *ret = matmul(x_w1.silu() * x_w3, w2, amax_x=amax_x2, w_inv_scale=s_2, grad_amax_state=grad_amax_xout)
   return out, ret
 
+def allgather(x: Tensor) -> Tensor:
+  return Tensor(x.uop.copy_to_device(x.device), device=x.device, dtype=x.dtype, requires_grad=x.requires_grad)
+
 class FlatTransformer:
-  def __init__(self, dim:int, hidden_dim:int, n_heads:int, n_layers:int, norm_eps:float, vocab_size:int, n_kv_heads:int|None=None,
-               rope_theta:int=10000, max_context:int=1024):
+  fsdp_wnames: ClassVar[tuple[str,...]] = ("wqkv", "wo", "w13", "w2")
+
+  def __init__(self, dim:int, hidden_dim:int, n_heads:int, n_layers:int, norm_eps:float, vocab_size:int, n_kv_heads:int|None=None, rope_theta:int=10000,
+               max_context:int=1024, lora_rank:int=16, lora_alpha:float=32.0, lora_dropout:float=0.1):
     self.vocab_size = vocab_size
     self.n_layers = n_layers
     self.n_heads = n_heads
@@ -100,20 +114,28 @@ class FlatTransformer:
     self.head_dim = dim // n_heads
     self.n_rep = self.n_heads // self.n_kv_heads
     self.hidden_dim = hidden_dim
+    self.lora_scale = lora_alpha / lora_rank
+    self.lora_dropout = lora_dropout
+    self.fsdp = False
 
     scaled_std = 0.02 / math.sqrt(2 * n_layers)
 
     # Attention
-    self.wqkv, s_qkv = self.lin_per_layer(dim, self.n_heads * self.head_dim + self.n_kv_heads * self.head_dim * 2)
-    self.wo, s_o = self.lin_per_layer(self.n_heads * self.head_dim, dim, std=scaled_std)
+    self.wqkv = self.lin_per_layer(dim, wqkv_dim:=(self.n_heads * self.head_dim + self.n_kv_heads * self.head_dim * 2))
+    self.wo = self.lin_per_layer(wo_dim:=(self.n_heads * self.head_dim), dim, std=scaled_std)
+
+    # LoRA
+    if LORA:
+      self.lora_a, self.lora_b = self.create_lora_params(dim, wqkv_dim, lora_rank)
+      self.lora_a_wo, self.lora_b_wo = self.create_lora_params(dim, wo_dim, lora_rank)
 
     # FeedForward
     if SPLIT_W13:
-      self.w1, s_1 = self.lin_per_layer(dim, hidden_dim)
-      self.w3, s_3 = self.lin_per_layer(dim, hidden_dim)
+      self.w1 = self.lin_per_layer(dim, hidden_dim)
+      self.w3 = self.lin_per_layer(dim, hidden_dim)
     else:
-      self.w13, s_13 = self.lin_per_layer(dim, hidden_dim * 2)
-    self.w2, s_2 = self.lin_per_layer(hidden_dim, dim, std=scaled_std)
+      self.w13 = self.lin_per_layer(dim, hidden_dim * 2)
+    self.w2 = self.lin_per_layer(hidden_dim, dim, std=scaled_std)
 
     self.norm_eps = norm_eps
     self.attention_norm = Tensor.ones(n_layers, dim).contiguous()
@@ -126,33 +148,55 @@ class FlatTransformer:
     self.output = Tensor.normal(1, vocab_size, dim, mean=0.0, std=0.02, dtype=dtypes.bfloat16)
     self.freqs_cis = precompute_freqs_cis(dim // n_heads, max_context * 2, rope_theta).contiguous().requires_grad_(False)
 
-    def _amax(): return Tensor.full((), FP8_MAX, dtype=dtypes.float32).contiguous().requires_grad_(False)
+    # quantize weights
+    self.quantize() 
+
+  def quantize(self):
+    def _amax(): return Tensor.full((), FP8_MAX, dtype=dtypes.float32, device=self.wqkv.device).contiguous().requires_grad_(False)
     names = ["xqkv", "xo", "x2"]
     names += ["x1", "x3"] if SPLIT_W13 else ["x13"]
-    self._fp8_amax = {name: [_amax() for _ in range(n_layers)] for name in names}
+    self._fp8_amax = {name: [_amax() for _ in range(self.n_layers)] for name in names}
     grad_names = ["xqkv", "xo", "xout"]
     grad_names += ["xw1", "xw3"] if SPLIT_W13 else ["xw13"]
-    self._fp8_grad_amax = {name: [_amax() for _ in range(n_layers)] for name in grad_names}
-    w_scales = [("wqkv", s_qkv), ("wo", s_o), ("w2", s_2)]
-    w_scales += [("w1", s_1), ("w3", s_3)] if SPLIT_W13 else [("w13", s_13)]
-    self._fp8_inv_scale = {name: s.float().contiguous().requires_grad_(False) for name, s in w_scales}
+    self._fp8_grad_amax = {name: [_amax() for _ in range(self.n_layers)] for name in grad_names}
+    w_names = ["wqkv", "wo", "w2"]
+    w_names += ["w1", "w3"] if SPLIT_W13 else ["w13"]
+    self._fp8_inv_scale = {}
+    for wname in w_names:
+      fp8_weight, inv_scale = quantize_fp8_weight(getattr(self, wname))
+      getattr(self, wname).replace(fp8_weight)
+      self._fp8_inv_scale[wname] = inv_scale
 
-  def lin_per_layer(self, in_features:int, out_features:int, std:float=0.02):
-    if getenv("ZEROS"): w = Tensor.zeros(self.n_layers, out_features, in_features)
-    else: w = Tensor.normal(self.n_layers, out_features, in_features, mean=0.0, std=std)
-    amax = w.abs().flatten(1).max(1).detach()
-    scale = FP8_MAX / (amax + 1e-8)
-    inv_scale = (amax + 1e-8) / FP8_MAX
-    return (w * scale.reshape(-1, 1, 1)).clamp(-FP8_MAX, FP8_MAX).cast(FP8_DTYPE), inv_scale
+  def create_lora_params(self, in_dim:int, out_dim:float, rank:int) -> tuple[Tensor, Tensor]:
+    a = self.lin_per_layer(in_dim, rank, requires_grad=True, use_kaiming=True)
+    b = self.lin_per_layer(rank, out_dim, requires_grad=True, zeros=True)
+    return a, b
+
+  def run_lora(self, lora_a: Tensor, lora_b: Tensor, x: Tensor) -> Tensor:
+    out, *_ = matmul(x.dropout(self.lora_dropout), lora_a, fp8=False)
+    out, *_ = matmul(out, lora_b, fp8=False)
+    return out * self.lora_scale
+
+  def lin_per_layer(self, in_features:int, out_features:int, std:float=0.02, zeros:bool=False, use_kaiming:bool=False, **kwargs):
+    if zeros or getenv("ZEROS"):
+      return Tensor.zeros(self.n_layers, out_features, in_features, **kwargs)
+    else:
+      if use_kaiming:
+        return Tensor.kaiming_uniform(self.n_layers, out_features, in_features, a=math.sqrt(5), **kwargs)
+      else:
+        return Tensor.normal(self.n_layers, out_features, in_features, mean=0.0, std=std, **kwargs)
 
   def attention(self, x:Tensor, freqs_cis:Tensor, *, attention_norm:Tensor, wqkv:Tensor, wo:Tensor,
                 amax_xqkv:Tensor, amax_xo:Tensor, s_qkv:Tensor, s_o:Tensor,
-                grad_amax_xqkv:Tensor, grad_amax_xo:Tensor):
+                grad_amax_xqkv:Tensor, grad_amax_xo:Tensor,
+                lora_a:Tensor|None=None, lora_a_wo:Tensor|None=None,
+                lora_b:Tensor|None=None, lora_b_wo:Tensor|None=None):
     bsz, seqlen, _ = x.shape
     amaxs, saves = [], []
 
     xqkv, x_normed, rrms, (new_amax, *s) = norm_quantize_matmul(x, attention_norm, wqkv, s_qkv, self.norm_eps,
                                                                   amax_x=amax_xqkv, grad_amax_state=grad_amax_xqkv)
+    if LORA: xqkv = xqkv + self.run_lora(lora_a, lora_b, x_normed * attention_norm)
     amaxs.append(new_amax)
     saves.extend([x_normed, rrms, *s, xqkv])
     xqkv = xqkv.reshape(bsz, seqlen, self.n_kv_heads, self.n_rep + 2, self.head_dim)
@@ -172,6 +216,7 @@ class FlatTransformer:
     attn = attn.reshape(bsz, seqlen, -1)
 
     out, new_amax, *s = matmul(attn, wo, amax_x=amax_xo, w_inv_scale=s_o, grad_amax_state=grad_amax_xo)
+    if LORA: out = out + self.run_lora(lora_a_wo, lora_b_wo, attn)
     amaxs.append(new_amax)
     saves.extend([*s, out])
     return out, amaxs, saves
@@ -207,19 +252,33 @@ class FlatTransformer:
     return out, h, amaxs, saves
 
   @function(precompile=True, precompile_backward=True)
-  def run_layer(self, x:Tensor, freqs_cis:Tensor, attn_kwargs:dict, ffn_kwargs:dict, save:bool=True):
-    attn, attn_amaxs, attn_saves = self.attention(x, freqs_cis, **attn_kwargs)
+  def run_layer(self, x:Tensor, freqs_cis:Tensor, attn_kwargs:dict, ffn_kwargs:dict, lora_kwargs:dict, save:bool=True):
+    if self.fsdp:
+      for fsdp_wname in self.fsdp_wnames:
+        in_dict[fsdp_wname] = allgather((in_dict:=(attn_kwargs if fsdp_wname in attn_kwargs else ffn_kwargs))[fsdp_wname])
+    attn, attn_amaxs, attn_saves = self.attention(x, freqs_cis, **attn_kwargs, **lora_kwargs)
     ffn, h, ffn_amaxs, ffn_saves = self.feed_forward(x, attn, **ffn_kwargs)
     h = h + ffn
     amaxs = tuple(a.detach() for a in (*attn_amaxs, *ffn_amaxs))
     if save: return (h, *amaxs, *attn_saves, *ffn_saves)
     else: return (h, *amaxs)
 
-  def shard(self, device:tuple[str, ...], mp:bool=False):
+  def shard(self, device:tuple[str, ...], mp:bool=False, fsdp:bool=False):
     from tinygrad.nn.state import get_parameters
+    assert not (mp and fsdp)
     if not mp:
-      for v in get_parameters(self): v.shard_(device, axis=None)
+      if fsdp:
+        assert not SPLIT_W13, "fsdp + split w13 unsupported"
+        self.wqkv.shard_(device, axis=1)
+        self.wo.shard_(device, axis=1)
+        self.w13.shard_(device, axis=1)
+        self.w2.shard_(device, axis=1)
+        self.fsdp = True
+      for v in get_parameters(self):
+        if not isinstance(v.device, tuple):
+          v.shard_(device, axis=None)
     else:
+      assert not LORA, "MP + LORA unsupported"
       # flat per-layer weights: axis 0 is n_layers, so shard axes are +1 vs per-layer Transformer
       self.wqkv.shard_(device, axis=1).realize()          # (n_layers, out, dim) shard out
       self.wo.shard_(device, axis=2).realize()            # (n_layers, dim, in) shard in
@@ -247,6 +306,8 @@ class FlatTransformer:
     freqs_cis = self.freqs_cis.cast(h.dtype)[:, :tokens.shape[1], :, :, :]
     a, ga, s = self._fp8_amax, self._fp8_grad_amax, self._fp8_inv_scale
     for i in range(self.n_layers):
+      lora_kwargs = dict(lora_a=self.lora_a[i], lora_a_wo=self.lora_a_wo[i],
+                         lora_b=self.lora_b[i], lora_b_wo=self.lora_b_wo[i]) if LORA else {}
       attn_kwargs = dict(attention_norm=self.attention_norm[i], wqkv=self.wqkv[i], wo=self.wo[i],
                          amax_xqkv=a["xqkv"][i], amax_xo=a["xo"][i], s_qkv=s["wqkv"][i], s_o=s["wo"][i],
                          grad_amax_xqkv=ga["xqkv"][i], grad_amax_xo=ga["xo"][i])
@@ -257,7 +318,7 @@ class FlatTransformer:
                           s_1=s["w1"][i], s_3=s["w3"][i], grad_amax_xw1=ga["xw1"][i], grad_amax_xw3=ga["xw3"][i])
       else:
         ffn_kwargs.update(w13=self.w13[i], amax_x13=a["x13"][i], s_13=s["w13"][i], grad_amax_xw13=ga["xw13"][i])
-      h, *ret = self.run_layer(h, freqs_cis, attn_kwargs, ffn_kwargs, save=save)
+      h, *ret = self.run_layer(h, freqs_cis, attn_kwargs, ffn_kwargs, lora_kwargs, save=save)
       amax_names = ["xqkv", "xo"] + (["x1", "x3"] if SPLIT_W13 else ["x13"]) + ["x2"]
       for name, new_val in zip(amax_names, ret[:len(amax_names)]):
         a[name][i].assign(new_val)

@@ -5,7 +5,7 @@ from multiprocessing import Queue, Process, shared_memory, connection, Lock, cpu
 
 import numpy as np
 from tinygrad import dtypes, Tensor
-from tinygrad.helpers import getenv, prod, Context, round_up, tqdm, OSX
+from tinygrad.helpers import getenv, prod, Context, round_up, tqdm, OSX, cache_dir
 from tinygrad.nn.state import TensorIO
 
 ### ResNet
@@ -529,6 +529,59 @@ def batch_load_train_stable_diffusion(urls:str, BS:int):
     assert all(isinstance(moment_mean_logvar, np.ndarray) and moment_mean_logvar.shape==(1,8,64,64) for moment_mean_logvar in x["npy"])
     assert all(isinstance(caption, str) for caption in x["txt"])
     yield x
+
+# llama2 70b lora
+
+def _load_llama2_70b_lora_split(base_dir:Path, split:str) -> tuple[np.ndarray, np.ndarray]:
+  from datasets import load_dataset
+
+  ds = load_dataset(
+    "parquet",
+    data_files={split: str(base_dir / 'data' / f"{split}-00000-of-00001.parquet")},
+    split=split,
+    cache_dir=str(Path(cache_dir) / "llama2_70b_lora_dataset"),
+  )
+  return np.asarray(ds["input_ids"], dtype=np.int32), np.asarray(ds["labels"], dtype=np.int64)
+
+class Llama2LoRAParquetDataset:
+  def __init__(self, base_dir:Path, val:bool=False):
+    self.input_ids, self.labels = _load_llama2_70b_lora_split(base_dir, "validation" if val else "train")
+    self.val = val
+    self.count = self.input_ids.shape[0]
+    self.seqlen = self.input_ids.shape[1]
+
+def get_llama2_70b_lora_dataset(base_dir:Path, val:bool=False) -> Llama2LoRAParquetDataset:
+  return Llama2LoRAParquetDataset(base_dir, val=val)
+
+def iterate_llama2_70b_lora_dataset(dataset:Llama2LoRAParquetDataset, bs:int, samples:int|None=None, seed:int=0):
+  if dataset.val:
+    total = dataset.count if samples is None else min(samples, dataset.count)
+    full_batch_count = total // bs
+
+    for start in range(0, full_batch_count * bs, bs):
+      yield Tensor(dataset.input_ids[start:start + bs]), Tensor(dataset.labels[start:start + bs])
+
+    if (tail := total % bs) != 0:
+      start = full_batch_count * bs
+      toks = np.pad(dataset.input_ids[start:start + bs], ((0, bs - tail), (0, 0)), constant_values=0)
+      labels = np.pad(dataset.labels[start:start + bs], ((0, bs - tail), (0, 0)), constant_values=-100)
+      yield Tensor(toks), Tensor(labels)
+  else:
+    total = dataset.count if samples is None else samples
+    sample_count = (total // bs) * bs
+    if sample_count == 0: return
+    rng = np.random.RandomState(seed)
+    idx = np.arange(dataset.count, dtype=np.int32)
+
+    # each epoch sees the full dataset
+    idx = idx.reshape(1, -1).repeat(math.ceil(sample_count / dataset.count), axis=0)
+    for epoch_idx in idx: rng.shuffle(epoch_idx)
+    idx = idx.flatten()[:sample_count]
+
+    yield from (Tensor(dataset.input_ids[idx[start:start + bs]]) for start in range(0, sample_count, bs))
+
+def batch_load_llama2_70b_lora(bs:int, samples:int, base_dir:Path, seed:int=0, val:bool=False):
+  return iterate_llama2_70b_lora_dataset(get_llama2_70b_lora_dataset(base_dir, val=val),bs, samples=samples, seed=seed,)
 
 # llama3
 

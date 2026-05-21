@@ -1,8 +1,10 @@
 from collections import OrderedDict
+from pathlib import Path
 import unicodedata
 from typing import Optional
 import math
 import numpy as np
+import shutil
 from tinygrad.nn import state
 from tinygrad.tensor import Tensor, dtypes
 from tinygrad.helpers import getenv
@@ -365,3 +367,12 @@ class BoxCoder(object):
     h = pred_ctr_y + 0.5 * pred_h - 1
     pred_boxes = Tensor.stack(x, y, w, h).permute(1,2,0).reshape(rel_codes.shape[0], rel_codes.shape[1])
     return pred_boxes
+
+def clean_dir(dir_path: Path, allowed_suffixes:list[str]):
+  assert dir_path.is_dir()
+  for path in list(dir_path.iterdir()):
+    if path.is_file() and path.suffix in allowed_suffixes: continue
+    if path.is_dir():
+      shutil.rmtree(path)
+    else:
+      path.unlink()
