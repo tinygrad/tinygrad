@@ -36,9 +36,10 @@ pm_replace_params = PatternMatcher([
 
 def alloc_queue_sig(ctx:HCQ2Graph, q:UOp) -> None:
   if q.arg in ctx.queue_sigs: return None
-  buf = Buffer(q.arg[0], 0x100, dtypes.uint8, options=BufferSpec(host=True, uncached=True, cpu_access=True), preallocate=True)
+  dev = q.arg[0][0]  # TODO: multi device
+  buf = Buffer(dev, 0x100, dtypes.uint8, options=BufferSpec(host=True, uncached=True, cpu_access=True), preallocate=True)
   ctx.queue_sig_bufs.append(buf)
-  ctx.queue_sigs[q.arg] = UOp.from_buffer(buf, q.arg[0])
+  ctx.queue_sigs[q.arg] = UOp.from_buffer(buf, dev)
   return None
 pm_alloc_queue_sigs = PatternMatcher([(UPat(Ops.LINEAR, src=UPat({Ops.PROGRAM, Ops.COPY}), name="q"), alloc_queue_sig)])
 
