@@ -201,6 +201,9 @@ spec_program = PatternMatcher([
   # weakint is not allowed in programs
   (UPat(GroupOp.All, dtypes.weakint), lambda: False),
 
+  # movement ops are not allowed in programs
+  (UPat(GroupOp.Movement), lambda: False),
+
   # Invalid is not allowed in program
   (UPat(Ops.CONST, arg=Invalid), lambda: False),
 
