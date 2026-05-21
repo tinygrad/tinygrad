@@ -50,13 +50,14 @@ def quantize_fp8_delayed(x:Tensor, amax_state:Tensor, fp8_dtype=dtypes.fp8e4m3) 
   # NOT work because .assign mutates only the temp Tensor's .uop, not the original layer-owned buffer.
   assert x.dtype == dtypes.bfloat16, f"expected bf16, got {x.dtype}"
   axis = x.uop.axis if isinstance(x.device, tuple) else None
-  fp8_out = alloc_like(x.shape, fp8_dtype, x.device, axis)
+  fp8_out      = alloc_like(x.shape,  fp8_dtype,      x.device, axis)
   n_elems = prod(x.uop.shard_shape)
   num_partials = n_elems // 4
   while n_elems % num_partials != 0: num_partials -= NUM_WG
   amax_partial = alloc_local((num_partials,), dtypes.float32, x.device, axis)
+  fxn = _custom_quantize_fp8_with_amax
   fp8_out, amax_partial, *_ = Tensor.custom_kernel(fp8_out, amax_partial, x, amax_state,
-                                                    fxn=_custom_quantize_fp8_with_amax, grad_fxn=_quantize_fp8_delayed_bwd)
+                                                    fxn=fxn, grad_fxn=_quantize_fp8_delayed_bwd)
   new_amax = scalar_amax(amax_partial)
   inv_scale = (amax_state.float() + 1e-8) / FP8_MAX
   store_effect = amax_state.uop.store(new_amax.uop)
@@ -66,5 +67,6 @@ def quantize_fp8_scalar(x:Tensor, amax_state:Tensor, fp8_dtype=dtypes.fp8e4m3) -
   # NOTE: pure one-pass bf16 -> fp8 quantize with delayed scalar scale. No amax computation.
   axis = x.uop.axis if isinstance(x.device, tuple) else None
   fp8_out = alloc_like(x.shape, fp8_dtype, x.device, axis)
-  fp8_out, *_ = Tensor.custom_kernel(fp8_out, x, amax_state, fxn=_custom_quantize_fp8_scalar)
+  fxn = _custom_quantize_fp8_scalar
+  fp8_out, *_ = Tensor.custom_kernel(fp8_out, x, amax_state, fxn=fxn)
   return fp8_out
