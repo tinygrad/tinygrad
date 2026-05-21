@@ -1,6 +1,5 @@
 import unittest
 from tinygrad import Tensor, Device, dtypes, Context
-from tinygrad.device import is_dtype_supported
 from tinygrad.helpers import getenv, system, DEV
 from extra.gemm.cdna_asm_gemm import asm_gemm
 from test.helpers import needs_second_gpu
@@ -85,7 +84,7 @@ def verify_asm_gemm_k_sharded_3d(batch:int, M:int, N:int, K:int, dtype=dtypes.fl
 
 # 128x smaller than usual
 # uses the UOp GEMM, runs on non CDNA4 and CI
-@unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
+@unittest.skipUnless(dtypes.half in Device[Device.DEFAULT].renderer.supported_dtypes(), "need half")
 class TestGemm(unittest.TestCase):
   def setUp(self):
     if is_cdna4(): self.skipTest("shapes are too small for the assembly GEMM")

@@ -81,9 +81,9 @@ propagate_invalid = PatternMatcher([
   (UPat(Ops.BITCAST, src=(invalid_pat,), name="bc"), lambda bc,i: i.cast(bc.dtype)),
   (UPat(Ops.BITCAST, src=(invalid_gate,), name="bc"), lambda bc,cond,x,i: cond.where(x.bitcast(bc.dtype), i.bitcast(bc.dtype))),
   # fold gated LOAD/STORE
-  (UPat(Ops.STORE, src=(UPat().index(invalid_pat).or_casted(), UPat())), lambda i: UOp(Ops.NOOP)),
-  (UPat(Ops.LOAD, src=(UPat().index(invalid_pat).or_casted(),), allow_any_len=True, name="x"),
-    lambda x,i: x.src[1] if len(x.src) > 1 else x.const_like(0)), # invalid load produces 0, or the alt value if we have one
+  (UPat(Ops.STORE, src=(UPat(Ops.INDEX, src=(UPat(), invalid_pat), allow_any_len=True).or_casted(), UPat())), lambda i: UOp(Ops.NOOP)),
+  (UPat(Ops.LOAD, src=(UPat(Ops.INDEX, src=(UPat(), invalid_pat), allow_any_len=True).or_casted(),), allow_any_len=True, name="x"),
+    lambda x,i: x.src[1] if len(x.src) > 1 else x.const_like(0)),
 ])
 
 symbolic_simple = propagate_invalid + PatternMatcher([

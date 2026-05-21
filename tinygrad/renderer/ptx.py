@@ -239,3 +239,6 @@ class PTXRenderer(Renderer):
 
       if u.op is Ops.SPECIAL: kernel = [f".reg .u32 %{u.arg};"] + kernel
     return self.render_kernel(kernel, name, bufs, c.items(), uops)
+
+  def supported_dtypes(self): return {d for d in super().supported_dtypes()
+                                      if (d != dtypes.half or int(self.target.arch[3:]) >= 53) and d not in dtypes.fp8s+(dtypes.bfloat16,)}

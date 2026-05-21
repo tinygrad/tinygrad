@@ -2,7 +2,10 @@ import math, unittest
 from tinygrad import Tensor, dtypes
 from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, graph_rewrite
 
-_strip_unique_pm = PatternMatcher([(UPat(Ops.CONST, src=(UPat(Ops.UNIQUE), UPat(Ops.DEVICE, name="d")), name="b"), lambda b,d: b.replace(src=(d,))),])
+_strip_unique_pm = PatternMatcher([
+  (UPat(Ops.CONST, src=(UPat(Ops.UNIQUE), UPat(Ops.DEVICE, name="d")), name="b"), lambda b,d: b.replace(src=(d,))),
+  (UPat(Ops.BUFFER, src=(UPat(Ops.UNIQUE), UPat(Ops.DEVICE, name="d")), name="b"), lambda b,d: b.replace(src=(UOp.unique(0), d))),
+])
 def _strip_unique(u: UOp) -> UOp: return graph_rewrite(u, _strip_unique_pm)
 
 def _t(*shape):
@@ -48,6 +51,14 @@ class TestTensorUOpBinop(unittest.TestCase):
   def test_floordiv_bool(self):  _check(self, _t(4).cast(dtypes.bool), lambda x: x // True)
   def test_mod_bool(self):       _check(self, _t(4).cast(dtypes.bool), lambda x: x % True)
   def test_fmod_bool(self):      _check(self, _t(4).cast(dtypes.bool), lambda x: x.fmod(True))
+
+class TestTensorUOpClone(unittest.TestCase):
+  def test_clone(self):
+    t = _t(3, 4).float()
+    self.assertIs(_strip_unique(t.clone().uop), _strip_unique(t.uop.clone()))
+  def test_clone_deviceless_const(self):
+    u = UOp.const(dtypes.float, 2.0)
+    self.assertIs(_strip_unique(Tensor(u).clone().uop), _strip_unique(u.clone()))
 
 class TestTensorUOpGetitem(unittest.TestCase):
   # ---- pure slice patterns ----

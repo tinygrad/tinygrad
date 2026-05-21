@@ -3,7 +3,6 @@ import torch
 import unittest
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.nn.optim import Adam, SGD, AdamW, Muon, LAMB
-from tinygrad.device import is_dtype_supported
 from test.helpers import needs_second_gpu, slow
 
 np.random.seed(1337)
@@ -142,7 +141,7 @@ class TestOptim(unittest.TestCase):
 
       np.testing.assert_allclose(losses[0], losses[1], atol=1e-4, rtol=0)
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
+  @unittest.skipUnless(dtypes.half in Device[Device.DEFAULT].renderer.supported_dtypes(), "need half")
   def test_mixed_precision(self):
     old_default_float, dtypes.default_float = dtypes.default_float, dtypes.half
     # weight update would overflow without upcasting

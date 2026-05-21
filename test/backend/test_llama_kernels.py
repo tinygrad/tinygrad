@@ -1,6 +1,5 @@
 import unittest
-from tinygrad import Tensor, dtypes, Context
-from tinygrad.device import is_dtype_supported
+from tinygrad import Tensor, Device, dtypes, Context
 from extra.llama_kernels.fused_ce import fused_ce_loss
 
 def run_fused_ce(bs:int, seqlen:int, vocab:int, label_smoothing:float=0.0) -> None:
@@ -24,7 +23,7 @@ def run_fused_ce(bs:int, seqlen:int, vocab:int, label_smoothing:float=0.0) -> No
     assert loss.allclose(ref, atol=2e-3, rtol=2e-3).item(), "forward mismatch"
     assert logits.grad.allclose(logits_ref.grad, atol=2e-3, rtol=2e-3).item(), "grad mismatch"
 
-@unittest.skipUnless(is_dtype_supported(dtypes.bfloat16), "need bfloat16")
+@unittest.skipUnless(dtypes.bfloat16 in Device[Device.DEFAULT].renderer.supported_dtypes(), "need bfloat16")
 class TestFusedCE(unittest.TestCase):
   def test_fused_ce_1_2_16(self): run_fused_ce(1, 2, 16, label_smoothing=0.2)
   def test_fused_ce_2_16_128(self): run_fused_ce(2, 16, 128)

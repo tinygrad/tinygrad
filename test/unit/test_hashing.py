@@ -3,11 +3,12 @@ import hashlib, random, unittest
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.helpers import DEV
 from test.helpers import slow
-from tinygrad.device import is_dtype_supported
 from tinygrad.uop.ops import UOp
 from tinygrad.engine.jit import TinyJit
 
-@unittest.skipUnless(is_dtype_supported(dtypes.uint8) and is_dtype_supported(dtypes.uint64), "Device must support uint8 and uint64")
+supported_dtypes = Device[Device.DEFAULT].renderer.supported_dtypes()
+
+@unittest.skipUnless(dtypes.uint8 in supported_dtypes and dtypes.uint64 in supported_dtypes, "Device must support uint8 and uint64")
 @unittest.skipIf(DEV.interface.startswith("MOCK") and Device.DEFAULT == "NV", "crashes in NV CI")
 class TestHashing(unittest.TestCase):
   def _python_hash_1mb(self, data:bytes):
@@ -21,7 +22,7 @@ class TestHashing(unittest.TestCase):
     out = Tensor(b"abc").hash()
     self.assertEqual(bytes(out.data()), expected)
 
-@unittest.skipUnless(is_dtype_supported(dtypes.uint8) and is_dtype_supported(dtypes.uint64), "Device must support uint8 and uint64")
+@unittest.skipUnless(dtypes.uint8 in supported_dtypes and dtypes.uint64 in supported_dtypes, "Device must support uint8 and uint64")
 @unittest.skipIf(DEV.interface.startswith("MOCK") and Device.DEFAULT == "NV", "crashes in NV CI")
 class TestKeccak(unittest.TestCase):
   def setUp(self) -> None: random.seed(1337)

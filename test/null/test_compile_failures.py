@@ -2,7 +2,6 @@ import unittest, io
 from contextlib import redirect_stdout
 from tinygrad import Tensor, dtypes, Device
 from tinygrad.helpers import OSX, DEV
-from tinygrad.device import is_dtype_supported
 from tinygrad.engine.realize import compile_linear
 from tinygrad.codegen import to_program
 
@@ -10,7 +9,6 @@ class TestCompileFailures(unittest.TestCase):
   def compile(self, out:Tensor):
     compile_linear(out.schedule_linear())
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.uchar), f"no uint8 on {Device.DEFAULT}")
   def test_interpolate_atari(self):
     self.compile(Tensor.empty(210, 160, dtype='uint8').interpolate((64, 64)))
 

@@ -174,7 +174,7 @@ if __name__ == "__main__":
   # *** render to device ***
 
   from tinygrad.codegen import to_program
-  with Context(PCONTIG=2, DEVECTORIZE=2, SPEC=0):
+  with Context(PCONTIG=2, SPEC=0):
     out = tree_traversal(forest_t, val_t, height, rounds)
     sink = out.schedule_linear().src[-1].src[0]
     prg = to_program(sink, VLIWRenderer())

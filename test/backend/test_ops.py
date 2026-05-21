@@ -5,7 +5,6 @@ import torch
 from tinygrad.helpers import getenv, CI, DEBUG, DEV, IMAGE, Context
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _to_np_dtype
-from tinygrad.device import is_dtype_supported
 from tinygrad.renderer.cstyle import QCOMCLRenderer
 from tinygrad.renderer.nir import NIRRenderer
 
@@ -1508,7 +1507,8 @@ class TestOps(unittest.TestCase):
 
   def test_sum_dtype_arg(self):
     helper_test_op([(45,3)], lambda x: x.sum(), lambda x: x.sum(dtype=dtypes.float32))
-    if is_dtype_supported(dtypes.float64): helper_test_op([(45,3)], lambda x: x.sum(dtype=torch.float64), lambda x: x.sum(dtype=dtypes.float64))
+    if dtypes.float64 in Device[Device.DEFAULT].renderer.supported_dtypes():
+      helper_test_op([(45,3)], lambda x: x.sum(dtype=torch.float64), lambda x: x.sum(dtype=dtypes.float64))
 
     with self.assertRaises(AttributeError): Tensor([1.0, 2.0]).sum(dtype="")
 
@@ -2449,7 +2449,7 @@ class TestOps(unittest.TestCase):
 
   @unittest.skipUnless(Device.DEFAULT == "CPU" and DEV.renderer == "LLVM", "DEVECTORIZE=0 only for LLVM")
   def test_strided_conv2d_simple_vec(self):
-    with Context(DEVECTORIZE=0): self.test_strided_conv2d_simple()
+    self.test_strided_conv2d_simple()
 
   @slow_test
   def test_strided_conv2d(self):
@@ -3379,7 +3379,6 @@ class TestOps(unittest.TestCase):
     t = (Tensor([0], dtype='int') | 0xFFFFFFFF).item()
     if not COMPILE_ONLY: assert t == -1
 
-@unittest.skipUnless(is_dtype_supported(dtypes.uchar), f"no uint8 on {Device.DEFAULT}")
 class TestOpsUint8(unittest.TestCase):
   def test_cast(self):
     helper_test_op([(2,3,64,64)], lambda x: x.type(torch.uint8), lambda x: x.cast('uint8'), forward_only=True, low=0, high=255)
