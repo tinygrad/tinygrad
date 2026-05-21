@@ -4,7 +4,6 @@ from tinygrad.tensor import _to_np_dtype
 from tinygrad.helpers import Context, getenv, CI, DEV, OSX
 from test.backend.test_schedule import check_schedule
 from test.backend.test_dtype_alu import ht, dtypes_float
-from tinygrad.device import is_dtype_supported
 import numpy as np
 import math
 from hypothesis import given, settings, strategies as strat
@@ -12,8 +11,10 @@ from hypothesis import given, settings, strategies as strat
 settings.register_profile("my_profile", max_examples=200, deadline=None, derandomize=getenv("DERANDOMIZE_CI", False))
 settings.load_profile("my_profile")
 
+supported_dtypes = Device[Device.DEFAULT].renderer.supported_dtypes()
+
 class TestTranscendentalMath(unittest.TestCase):
-  @unittest.skipUnless(is_dtype_supported(dtypes.float64), f"no float64 on {Device.DEFAULT}")
+  @unittest.skipUnless(dtypes.float64 in supported_dtypes, f"no float64 on {Device.DEFAULT}")
   @unittest.skipIf(DEV.interface.startswith("MOCK") and Device.DEFAULT in {"NV", "CUDA"}, "crashed")
   @given(ht.float64, strat.sampled_from([(Tensor.exp, np.exp), (Tensor.log, np.log), (Tensor.sin, np.sin)]))
   def test_float64(self, x, op):
@@ -27,7 +28,7 @@ class TestTranscendentalMath(unittest.TestCase):
 
   @unittest.skipIf(DEV.interface.startswith("MOCK") and Device.DEFAULT in {"NV", "CUDA"}, "crashed")
   @given(ht.float32, strat.sampled_from([(Tensor.exp, np.exp),(Tensor.log, np.log)] +
-    ([(Tensor.sin, np.sin)] if is_dtype_supported(dtypes.ulong) else [])))
+    ([(Tensor.sin, np.sin)] if dtypes.ulong in supported_dtypes else [])))
   def test_float32(self, x, op):
     # wrong nan behavior on Vulkan
     if (math.isnan(x) or (x < 0 and op[0] == Tensor.log)) and CI and Device.DEFAULT == "WEBGPU" and not OSX: return
@@ -36,9 +37,9 @@ class TestTranscendentalMath(unittest.TestCase):
                                  op[1](np.array([x], dtype=_to_np_dtype(dtypes.float32))),
                                  atol=2e-5, rtol=1e-5)
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.float16), f"no float16 on {Device.DEFAULT}")
+  @unittest.skipUnless(dtypes.float16 in supported_dtypes, f"no float16 on {Device.DEFAULT}")
   @given(ht.float16, strat.sampled_from([(Tensor.exp, np.exp),(Tensor.log, np.log)] +
-    ([(Tensor.sin, np.sin)] if is_dtype_supported(dtypes.ulong) else [])))
+    ([(Tensor.sin, np.sin)] if dtypes.ulong in supported_dtypes else [])))
   def test_float16(self, x, op):
     # wrong nan behavior on Vulkan
     if (math.isnan(x) or (x < 0 and op[0] == Tensor.log)) and CI and Device.DEFAULT == "WEBGPU" and not OSX: return
@@ -53,7 +54,7 @@ class TestTranscendentalMath(unittest.TestCase):
   def test_exp_near_inf(self, dtype_x):
     # reordering compute might return inf
     dtype, x = dtype_x
-    if not is_dtype_supported(dtype): return
+    if dtype not in supported_dtypes: return
     with Context(TRANSCENDENTAL=2):
       y = Tensor([x], dtype=dtype).exp().numpy()
       expected = np.exp(np.array([x], dtype=_to_np_dtype(dtype)))
@@ -61,9 +62,9 @@ class TestTranscendentalMath(unittest.TestCase):
 
 class TestFromFuzzer(unittest.TestCase):
   @given(strat.sampled_from(dtypes_float))
-  @unittest.skipUnless(is_dtype_supported(dtypes.ulong), "Needs ulong")
+  @unittest.skipUnless(dtypes.ulong in supported_dtypes, "Needs ulong")
   def test_sin(self, dtype):
-    if not is_dtype_supported(dtype): return
+    if dtype not in supported_dtypes: return
     if dtype == dtypes.float64:
       # crashes in CI CUDA
       if DEV.interface.startswith("MOCK") and Device.DEFAULT in {"NV", "CUDA"}: return
@@ -85,7 +86,7 @@ class TestFromFuzzer(unittest.TestCase):
 
   @given(strat.sampled_from(dtypes_float))
   def test_log2(self, dtype):
-    if not is_dtype_supported(dtype): return
+    if dtype not in supported_dtypes: return
     if dtype == dtypes.float64:
       # crashes in CI CUDA
       if DEV.interface.startswith("MOCK") and Device.DEFAULT in {"NV", "CUDA"}: return
@@ -104,7 +105,7 @@ class TestFromFuzzer(unittest.TestCase):
 
 class TestFloat16Log2(unittest.TestCase):
   """Tests for native float16 log2 implementation (no float32 cast)"""
-  @unittest.skipUnless(is_dtype_supported(dtypes.float16), f"no float16 on {Device.DEFAULT}")
+  @unittest.skipUnless(dtypes.float16 in supported_dtypes, f"no float16 on {Device.DEFAULT}")
   def test_float16_log2_basic(self):
     # basic values
     test_values = [1.0, 2.0, 4.0, 0.5, 0.25, 10.0, 100.0, 1000.0]
@@ -114,7 +115,7 @@ class TestFloat16Log2(unittest.TestCase):
         expected = np.log2(np.float16(val))
         np.testing.assert_allclose(result, expected, rtol=1e-3, err_msg=f"log2({val})")
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.float16), f"no float16 on {Device.DEFAULT}")
+  @unittest.skipUnless(dtypes.float16 in supported_dtypes, f"no float16 on {Device.DEFAULT}")
   @unittest.skipIf(Device.DEFAULT == "WEBGPU" and CI, "Nan handling differs on Vulkan")
   def test_float16_log2_special(self):
     # special values: inf, -inf, nan, 0, negative
@@ -128,7 +129,7 @@ class TestFloat16Log2(unittest.TestCase):
       # log2(nan) = nan
       assert np.isnan(Tensor([np.nan], dtype=dtypes.float16).log2().numpy()[0])
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.float16), f"no float16 on {Device.DEFAULT}")
+  @unittest.skipUnless(dtypes.float16 in supported_dtypes, f"no float16 on {Device.DEFAULT}")
   def test_float16_log2_denormal(self):
     # test values near and below float16 min normal (6.1e-5)
     # these exercise the denormal handling path with 2^10 scaling
@@ -141,7 +142,7 @@ class TestFloat16Log2(unittest.TestCase):
         np.testing.assert_allclose(result, expected, rtol=5e-2, err_msg=f"log2({val})")
 
 class TestTranscendentalSchedule(unittest.TestCase):
-  @unittest.skipUnless(is_dtype_supported(dtypes.ulong), "Needs ulong")
+  @unittest.skipUnless(dtypes.ulong in supported_dtypes, "Needs ulong")
   def test_transcendental_sin_fusion(self):
     with Context(TRANSCENDENTAL=2):
       a = Tensor.empty(10)

@@ -5,7 +5,6 @@ from tinygrad import Tensor, Device, dtypes, nn
 from tinygrad.helpers import getenv, temp, mv_address
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
 from hypothesis import given, settings, strategies as strat
-from tinygrad.device import is_dtype_supported
 from tinygrad.dtype import DTYPES_DICT
 from tinygrad.uop.ops import UOp
 
@@ -454,7 +453,7 @@ class TestTinygrad(unittest.TestCase):
     np.testing.assert_equal(Tensor(data, dtype=dtypes.float).numpy(), torch.tensor(data, dtype=torch.float).numpy())
 
   def test_tensor_list_special_values(self):
-    if is_dtype_supported(dtypes.float16):
+    if dtypes.float16 in Device[Device.DEFAULT].renderer.supported_dtypes():
       data = [math.nan, -math.inf, 65504, 65519, 65519.999, 65520, 65520.1]
       data = data + [-x for x in data]
       with np.errstate(over='ignore'): np.testing.assert_allclose(Tensor(data, dtype=dtypes.float16).numpy(), np.array(data).astype(np.float16))
@@ -571,7 +570,7 @@ class TestMoveTensor(unittest.TestCase):
   @given(strat.sampled_from([d0, d1]), strat.sampled_from([d0, d1]),
          strat.sampled_from([dtypes.float16, dtypes.float32]), strat.sampled_from([True, False, None]))
   def test_to_preserves(self, src, dest, dtype, requires_grad):
-    if not is_dtype_supported(dtype):
+    if dtype not in Device[Device.DEFAULT].renderer.supported_dtypes():
       return
     s = Tensor([1, 2, 3], device=src, dtype=dtype, requires_grad=requires_grad)
     if requires_grad: s.sum().backward()

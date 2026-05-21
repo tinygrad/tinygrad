@@ -21,7 +21,7 @@ def get_gated_load_uop(valid:UOp, idx:UOp):
 
 def get_load_image_uop(image_shape:tuple[int, ...], valid:UOp, idx:tuple[UOp, UOp]):
   return UOp(Ops.LOAD, dtypes.float.vec(4), (
-    UOp(Ops.PARAM, dtypes.imagef(image_shape), arg=0).index(UOp(Ops.STACK, dtypes.weakint.vec(2), idx).valid(valid), ptr=True),
+    UOp(Ops.PARAM, dtypes.imagef(image_shape), arg=0).index(idx[1].valid(valid), idx[0].valid(valid), ptr=True),
     UOp(Ops.STACK, dtypes.float.vec(4), src=(UOp.const(dtypes.float, 0.0),) * 4)
   ))
 
@@ -222,17 +222,16 @@ class TestValidIdxSimplification(unittest.TestCase):
 class TestImageSimplification(unittest.TestCase):
   def check(self, load, svalid, sidx0, sidx1):
     load = simplify_image_idx(load.sink()).src[0]
-    off = load.src[0].src[1]
-    idx = off.get_idx()
-    self.assertEqual(idx.op, Ops.STACK)
-    self.assertEqual(len(idx.src), 2)
-    idx0, idx1 = idx.src[0], idx.src[1]
+    off = load.src[0]
+    self.assertEqual(len(off.src), 3)
+    idx0, idx1 = off.src[2].get_idx(), off.src[1].get_idx()
     check_uop_against_string(self, idx0, sidx0)
     check_uop_against_string(self, idx1, sidx1)
+    self.assertEqual(off.src[1].get_valid(), off.src[2].get_valid())
     if svalid is not None:
-      check_uop_against_string(self, off.get_valid(), svalid)
+      check_uop_against_string(self, off.src[1].get_valid(), svalid)
     else:
-      self.assertEqual(off.get_valid(), UOp.const(dtypes.bool, True), "svalid is None but valid is not True")
+      self.assertEqual(off.src[1].get_valid(), UOp.const(dtypes.bool, True), "svalid is None but valid is not True")
 
   def test_idx_gt_c(self):
     # (idx1 < c+1).ne(True) ? (..., idx1-1+c) : 0 can drop the valid
