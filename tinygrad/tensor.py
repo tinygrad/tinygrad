@@ -61,7 +61,7 @@ def _frompy(x:list|tuple|bytes, dtype:DType, device:str|tuple[str,...]) -> UOp:
   ret.buffer.allocate(memoryview(data if device != "PYTHON" else bytearray(data)))
   return ret
 
-def _get_winograd_matcols(mat, dims:int, shp:tuple[sint, ...], device:str|tuple[str, ...], dtype:DType) -> list[list[Tensor]]:
+def _get_winograd_matcols(mat, dims:int, shp:tuple[sint, ...], device:str|tuple[str, ...]|None, dtype:DType) -> list[list[Tensor]]:
   return [[Tensor.cat(*[Tensor.full(shp[:dim] + (1,) + shp[dim+1:], float(m[k]), device=device, dtype=dtype) for m in mat], dim=dim)
            for k in range(len(mat[0]))] for dim in range(dims)]
 
@@ -92,10 +92,10 @@ class Tensor(OpMixin):
   training: ClassVar[bool] = False
 
   def __init__(self, data:ConstType|bytes|list|tuple|UOp|'numpy.ndarray'|pathlib.Path|None,
-               device:str|tuple|list|None=None, dtype:DTypeLike|None=None, requires_grad:bool=True, _force_unique:bool=False):
+               device:str|tuple|list|None=None, dtype:DTypeLike|None=None, requires_grad:bool=True):
     if device is None:
       if isinstance(data, pathlib.Path): device = f"DISK:{data.resolve()}"  # keep it on the disk if device is None
-      elif isinstance(data, UOp): device = data._device
+      elif isinstance(data, UOp): device = data.device
     _dtype:DType|None = to_dtype(dtype) if dtype is not None else None
     _device:str|tuple[str, ...] = canonicalize_device(device)
     del device, dtype
@@ -113,8 +113,7 @@ class Tensor(OpMixin):
     elif data is None:
       data = UOp.const(_dtype or dtypes.default_float, 0, _device)
     elif isinstance(data, get_args(ConstType)):
-      dt = _dtype or dtypes.from_py(data)
-      data = UOp.unique_const(data, dt, _device) if _force_unique or (requires_grad and dtypes.is_float(dt)) else UOp.const(dt, data, _device)
+      data = UOp.const(_dtype or dtypes.from_py(data), data, _device)
     elif isinstance(data, bytes): data = _frompy(data, _dtype or dtypes.uint8, _device)
     elif isinstance(data, (list, tuple)):
       if _dtype is None:
@@ -137,7 +136,7 @@ class Tensor(OpMixin):
     if not isinstance(data, UOp): raise RuntimeError(f"can't create Tensor from {data!r} with type {type(data)}")
 
     # data might be on a different device
-    self.uop:UOp = data if data.device == _device else data.copy_to_device(_device)
+    self.uop:UOp = data if data.device is None or data.device == _device else data.copy_to_device(_device)
 
     # add to all_tensors after construction succeeds
     all_tensors[weakref.ref(self)] = None
@@ -161,11 +160,13 @@ class Tensor(OpMixin):
   def alu(self, op: Ops, *src: Tensor) -> Tensor: return self._apply_uop(lambda *u: u[0].alu(op, *u[1:]), *src)
   def const_like(self, b:ConstType) -> Tensor: return Tensor(self.uop.const_like(b), requires_grad=False)
   @staticmethod
-  def unique_const(fill_value:ConstType|UOp, **kwargs) -> Tensor: return Tensor(fill_value, _force_unique=True, **kwargs)
+  def unique_const(fill_value:ConstType|UOp, **kwargs) -> Tensor:
+    if isinstance(fill_value, UOp): return Tensor(fill_value, **kwargs)
+    dtype, device = kwargs.pop("dtype", None), kwargs.pop("device", None)
+    return Tensor(UOp.unique_const(fill_value, dtype, device), **kwargs)
 
   def requires_grad_(self, requires_grad:bool=True) -> Tensor:
-    # make the UOp unique if it's a CONST to prevent gradient accumulation bugs with cached const UOps
-    if requires_grad and self.uop.op is Ops.CONST: self.replace(Tensor(self.uop.arg, device=self.device, dtype=self.dtype, requires_grad=True))
+    if requires_grad and self.uop.op is Ops.CONST: self.replace(self.clone())
     self.requires_grad = requires_grad
     return self
 
@@ -189,7 +190,7 @@ class Tensor(OpMixin):
     return self.shape[0]
 
   @property
-  def device(self) -> str|tuple[str, ...]: return self.uop.device
+  def device(self) -> str|tuple[str, ...]|None: return self.uop.device
 
   @property
   def shape(self) -> tuple[sint, ...]: return self.uop.shape
@@ -238,7 +239,7 @@ class Tensor(OpMixin):
   @disable_gc()
   def realize(self, *lst:Tensor, do_update_stats=True) -> Tensor:
     """Triggers the computation needed to create these Tensor(s)."""
-    if len(to_realize:=[x for x in (self,)+lst if not x.uop.has_buffer_identity()]):
+    if len(to_realize:=[x for x in (self,)+lst if x.uop.device is not None and not x.uop.has_buffer_identity()]):
       run_linear(*Tensor.linear_with_vars(*to_realize), update_stats=do_update_stats)
     return self
 
@@ -258,7 +259,8 @@ class Tensor(OpMixin):
     # broadcast x (shape only, dtype must match)
     if self.shape != x.shape: x = x._broadcast_to(self.shape)
     if self.shape != x.shape: raise RuntimeError(f"assign shape mismatch {self.shape} != {x.shape}")
-    if not is_disk and self.device != x.device: raise RuntimeError(f"assign device mismatch {self.device} != {x.device}")
+    if not is_disk and x.uop.device is not None and self.device != x.device:
+      raise RuntimeError(f"assign device mismatch {self.device} != {x.device}")
     if not is_disk and self.dtype != x.dtype: raise RuntimeError(f"assign dtype mismatch {self.dtype} != {x.dtype}")
     if isinstance(self.device, tuple) and self.uop.axis != x.uop.axis: raise RuntimeError(f"multi axis mismatch {self.uop.axis} != {x.uop.axis}")
 
@@ -279,19 +281,13 @@ class Tensor(OpMixin):
       self.uop = assign
     return self
 
-  def detach(self) -> Tensor:
-    """
-    Returns a new tensor with the same data as this tensor, but detached from the autograd graph.
-    """
-    return Tensor(self.uop.detach(), requires_grad=False)
-
   def _buffer(self) -> Buffer:
     from tinygrad.engine.realize import capturing
     if capturing and not getenv("UNSAFE_ALLOW_JIT_BUFFER"):
       from tinygrad.engine.jit import JitError
       raise JitError("cannot access tensor data during JIT capture, the value will be baked in")
     x = self.cast(self.dtype.base).contiguous()
-    if isinstance(self.device, tuple): x = x.to("CPU")
+    if self.uop.device is None or isinstance(self.device, tuple): x = x.clone("CPU")
     return cast(Buffer, x.realize().uop.buffer).ensure_allocated()
   def _data(self) -> memoryview: return self._buffer().as_memoryview()
 
@@ -356,18 +352,20 @@ class Tensor(OpMixin):
     if 0 in self.shape: return np.empty(self.shape, dtype=_to_np_dtype(self.dtype.base))
     return self._buffer().numpy().reshape(self.shape)
 
-  def clone(self) -> Tensor:
+  def clone(self, device:str|tuple[str, ...]|None=None) -> Tensor:
     """
     Creates a clone of this tensor allocating a separate buffer for the data.
+    If `device` is specified, the clone is placed on that device.
     """
-    ret = self.empty_like()
-    if self.grad is not None: ret.grad = self.grad.clone()
-    return ret.assign(self)
+    ret = Tensor(self.uop.clone(device=device))
+    if self.grad is not None: ret.grad = self.grad.clone(device=device)
+    return ret
 
   def to(self, device:str|tuple[str, ...]|None) -> Tensor:
     """
     Moves the tensor to the given device.
     """
+    if self.uop.device is None: return self
     if (device:=canonicalize_device(device)) == self.device: return self
     ret = Tensor(self.uop.copy_to_device(device), requires_grad=self.requires_grad)
     if self.grad is not None: ret.grad = self.grad.to(device)
@@ -390,6 +388,7 @@ class Tensor(OpMixin):
     print(t.shard((t.device, t.device), axis=1).uop)
     ```
     """
+    if self.uop.device is None: return self
     if not isinstance(self.device, str): raise RuntimeError("can't shard a multi-device tensor")
     if len(devices) == 1: return self.to(devices[0])
     devices = cast(tuple[str, ...], canonicalize_device(devices))
@@ -406,6 +405,7 @@ class Tensor(OpMixin):
     """
     Shards the tensor the same way as `y` (same devices and axis).
     """
+    if y.device is None: return self
     if isinstance(y.device, str): return self.to(y.device)
     return self if isinstance(self.device, tuple) and (y.device, y.uop.axis) == (self.device, self.uop.axis) else self.shard(y.device, y.uop.axis)
 
@@ -498,7 +498,7 @@ class Tensor(OpMixin):
     Creates an empty tensor with the same shape as `self`.
     If `dtype` is not specified, the dtype of `self` is used.
     """
-    return Tensor(self.uop.empty_like(dtype, device), **kwargs)
+    return Tensor(self.uop.empty_like(dtype, self.device if device is None else device), **kwargs)
 
   @staticmethod
   def from_blob(ptr:int, shape:tuple[int, ...], **kwargs) -> Tensor:
@@ -594,6 +594,7 @@ class Tensor(OpMixin):
   def _multi_like(self, fxn, *args, **kwargs) -> Tensor:
     dtype = kwargs.pop("dtype", self.dtype)
     if kwargs.get("device") is not None: raise RuntimeError("cannot specify `device` on `*_like` of a multi device tensor")
+    assert isinstance(self.device, tuple), f"_multi_like needs a multi device tensor, got {self.device}"
     if self.uop.axis is None: return fxn(self.shape, *args, dtype=dtype, **kwargs).shard(self.device)
     stacked = UOp.mstack(*[fxn(self.uop.shard_shape, *args, device=d, dtype=dtype, **kwargs).uop for d in self.device])
     return Tensor(stacked.multi(self.uop.axis), requires_grad=kwargs.get("requires_grad", True))
@@ -858,9 +859,9 @@ class Tensor(OpMixin):
     ```
     """
     all_uops = self.uop.toposort()
-    # backward fills .grad for every in-scope float tensor; .detach() only blocks gradient flow to the source
+    # backward fills .grad for every in-scope non-CONST float tensor
     tensors_need_grad: list[Tensor] = [t for tref in all_tensors if (t:=tref()) is not None and \
-                                       t.uop in all_uops and t.is_floating_point()]
+                                       t.uop in all_uops and t.is_floating_point() and t.uop.op is not Ops.CONST]
     # clear contexts
     for t,g in zip(tensors_need_grad, self.gradient(*tensors_need_grad, gradient=gradient)):
       assert g.shape == t.shape, f"grad shape must match tensor shape, {g.shape!r} != {t.shape!r}"
@@ -886,7 +887,8 @@ class Tensor(OpMixin):
       match index:
         case Tensor():
           if not dtypes.is_int(index.dtype): raise IndexError(f"index dtype {index.dtype} is not supported")
-          if index.device != self.device: raise RuntimeError(f"expected index and self on the same device, {index.device=}, {self.device=}")
+          if index.device is not None and self.device is not None and index.device != self.device:
+            raise RuntimeError(f"expected index and self on the same device, {index.device=}, {self.device=}")
           assert isinstance(size, int), "size must be an int"
           index = (index < 0).where(index+size, index)  # treat negative index values
         case list() | tuple():
@@ -1372,7 +1374,7 @@ class Tensor(OpMixin):
     # handle attention mask
     if is_causal:
       if attn_mask is not None: raise RuntimeError("cannot set attn_mask when is_causal=True")
-      attn_mask = qk.ones_like(requires_grad=False, dtype=dtypes.bool).tril()
+      attn_mask = qk.ones_like(dtype=dtypes.bool).tril()
     if attn_mask is not None:
       if attn_mask.dtype == dtypes.bool: attn_mask = attn_mask.where(0, -float("inf"))
       qk = qk + attn_mask

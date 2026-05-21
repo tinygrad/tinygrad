@@ -366,7 +366,7 @@ def _embedding_bwd(grad_emb:UOp, call:UOp) -> tuple:
   return (grad_weight_uop.cast(weight.dtype), None)
 
 def _embedding_fwd(weight:Tensor, idx:Tensor) -> Tensor:
-  arange = Tensor.arange(weight.shape[0], requires_grad=False, device=weight.device)
+  arange = Tensor.arange(weight.shape[0], device=weight.device)
   return (arange == idx.unsqueeze(-1)).unsqueeze(-1).where(weight, 0).sum(-2, dtype=weight.dtype)
 
 @functools.cache

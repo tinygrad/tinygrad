@@ -261,19 +261,18 @@ devectorize_buf_and_index = PatternMatcher([
    no_vectorized_index),
 ])
 
-devectorize = PatternMatcher([
+devectorize_alu = PatternMatcher([
   # CAST after AFTER
   (UPat(Ops.CAST, name="c").f(Ops.AFTER, allow_any_len=True, name="a"), lambda c,a: c.src[0].after(*a.src[1:]).cast(c.dtype)),
   # no ALU on vectorized dtypes
   (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST), name="alu"), no_vectorized_alu),
   (UPat(Ops.WMMA, name="wmma"), no_vectorized_wmma),
-])+devectorize_buf_and_index
+])
 
 pm_render = PatternMatcher([
   # for rendering, we use explicit VECTORIZE
   (UPat(Ops.CONST, name='c'),
    lambda c: UOp(Ops.STACK, c.dtype, (UOp.const(c.dtype.scalar(), c.arg),)*c.dtype.vcount) if c.dtype.vcount > 1 else None),
-  (UPat(Ops.VCONST, name='c'), lambda c: UOp(Ops.STACK, c.dtype, tuple(UOp.const(c.dtype.scalar(), x) for x in c.arg))),
   (UPat(Ops.GEP, name='gep'), lambda gep: UOp(Ops.STACK, gep.dtype, tuple(gep.src[0].gep(x) for x in gep.arg)) if len(gep.arg) > 1 else None),
   (UPat(Ops.GEP, name='gep'), lambda gep: gep.src[0] if gep.src[0].dtype.vcount == 1 and gep.arg == (0,) else None),
   (UPat(Ops.STACK, src=(UPat(name='x'),)), lambda x: x),

@@ -1,12 +1,13 @@
 from typing import cast
 from dataclasses import replace
 import itertools
-from tinygrad.helpers import DISABLE_FAST_IDIV, DEVECTORIZE, TRANSCENDENTAL, SPEC, DEBUG, VIZ, IMAGE, NOOPT, EMULATED_DTYPES, NOLOCALS, USE_TC
+from tinygrad.helpers import DISABLE_FAST_IDIV, TRANSCENDENTAL, SPEC, DEBUG, VIZ, IMAGE, NOOPT, EMULATED_DTYPES, NOLOCALS, USE_TC
 from tinygrad.helpers import ALLOW_TF32, TracingKey, Context, panic
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, pm_lower_index_dtype, Ops, UPat, track_rewrites, KernelInfo, ProgramInfo
 from tinygrad.uop.render import pyrender
 from tinygrad.uop.spec import type_verify, spec_tensor, spec_program
 from tinygrad.renderer import Renderer, Estimates
+from tinygrad.renderer.isa import ISARenderer, IselContext, PreRegAllocContext
 from tinygrad.dtype import dtypes
 
 # import all pattern matchers here
@@ -14,13 +15,14 @@ from tinygrad.codegen.gpudims import pm_add_gpudims
 from tinygrad.uop.symbolic import sym, symbolic_simple, gep_pushing, symbolic, pm_move_where_on_load
 from tinygrad.uop.decompositions import get_late_rewrite_patterns, get_transcendental_patterns, pm_dtype_decomps
 from tinygrad.codegen.late.expander import expander, pm_pre_expander, pm_group_for_reduce
-from tinygrad.codegen.late.devectorizer import load_store_folding, load_store_indexing, devectorize, pm_reduce, \
+from tinygrad.codegen.late.devectorizer import load_store_folding, load_store_indexing, devectorize_buf_and_index, devectorize_alu, pm_reduce, \
   ReduceContext, correct_load_store, pm_render, pm_add_loads, pm_make_images
 from tinygrad.codegen.opt.postrange import apply_opts
 from tinygrad.codegen.late.gater import pm_move_gates_from_index
 from tinygrad.codegen.simplify import pm_simplify_ranges, pm_flatten_range, pm_split_ranges, pm_load_collapse
 from tinygrad.schedule.rangeify import pm_add_buffers_local, rangeify_codegen, pm_mops, pm_syntactic_sugar, pm_store_ranges
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
+from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite
 
 def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   if VIZ: graph_rewrite(ast, PatternMatcher([]), name="View Base AST")
@@ -72,11 +74,9 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   if IMAGE and ren.target.device in {"QCOM", "CL", "PYTHON", "NULL"}:
     sink = graph_rewrite(sink, pm_make_images, name="create image buffers", bottom_up=True, ctx=ren.target.arch)
 
-  # devectorize (TODO: does this need opts?)
-  if DEVECTORIZE >= 2: pm_devectorize = sym+load_store_folding+load_store_indexing
-  elif DEVECTORIZE: pm_devectorize = sym+devectorize+load_store_folding+correct_load_store+load_store_indexing
-  else: pm_devectorize = sym+load_store_folding+correct_load_store+load_store_indexing
-  if DEVECTORIZE >= 0: sink = graph_rewrite(sink, pm_devectorize, ctx=ren, name="devectorize")
+  # devectorize
+  sink = graph_rewrite(sink, sym+devectorize_alu+devectorize_buf_and_index+load_store_folding+correct_load_store+load_store_indexing,
+                       ctx=ren, name="devectorize")
 
   # lower the index dtype to a concrete int
   sink = graph_rewrite(sink, pm_lower_index_dtype+load_store_indexing+gep_pushing, name="lower all index dtypes")
@@ -119,20 +119,27 @@ pm_linearize_cleanups = PatternMatcher([
 ])
 
 # requires lst be toposorted. like graph rewrite, but for lines
-def line_rewrite(lst:list[UOp], pm:PatternMatcher) -> list[UOp]:
+def line_rewrite(lst:list[UOp], pm:PatternMatcher, ctx=None) -> list[UOp]:
   newlst = []
   replaced: dict[UOp, UOp] = {}
   for u in lst:
-    nu = u.replace(src=tuple([replaced[x] for x in u.src]))
-    ret: tuple[UOp, list[UOp]] = cast(tuple[UOp, list[UOp]]|None, pm.rewrite(nu)) or (nu, [nu])
+    nu = u.replace(src=tuple([replaced.get(x, x) for x in u.src]))
+    ret: tuple[UOp, list[UOp]] = cast(tuple[UOp, list[UOp]]|None, pm.rewrite(nu, ctx)) or (nu, [nu])
     replaced[u] = ret[0]
     newlst.extend(ret[1])
   return newlst
 
-def do_linearize(prg:UOp, sink:UOp) -> UOp:
+def do_linearize(ctx:Renderer, prg:UOp, sink:UOp) -> UOp:
   if DEBUG >= 3 and sink.arg.applied_opts: print(f"{sink.arg.function_name:<25} opts: {sink.arg.applied_opts}")
   lst = line_rewrite(linearize(sink), pm_linearize_cleanups)
   if SPEC: type_verify(lst, spec_program)
+  # isa renderers need to allocate registers
+  if isinstance(ctx, ISARenderer):
+    if ctx.pre_regalloc_matcher is not None: lst = line_rewrite(lst, ctx.pre_regalloc_matcher, PreRegAllocContext())
+    regalloc_ctx = LinearScanRegallocContext(lst, ctx)
+    lst = line_rewrite(lst, pm_regalloc_rewrite, regalloc_ctx)
+    lst = line_rewrite(lst, ctx.post_regalloc_matcher, regalloc_ctx)
+    if DEBUG >= 4: print(ctx.asm_str(lst, sink.arg.function_name))
   return prg.replace(src=prg.src + (UOp(Ops.LINEAR, src=tuple(lst)),))
 
 def do_estimates(prg:UOp, sink:UOp, lin:UOp) -> UOp|None:
@@ -181,7 +188,12 @@ def do_to_program(ast:UOp, renderer:Renderer) -> UOp:
   elif ast.op is Ops.SINK:
     assert isinstance(ast.arg, KernelInfo), "requires KernelInfo on arg to to_program"
     full_sink = full_rewrite_to_sink(ast, renderer, optimize=ast.tag is None)
-    prg = UOp(Ops.PROGRAM, src=(full_sink, UOp(Ops.DEVICE, arg=renderer.target.device)), arg=ProgramInfo.from_sink(full_sink))
+    prog_info = ProgramInfo.from_sink(full_sink)
+    # instruction selection
+    if isinstance(renderer, ISARenderer):
+      full_sink = graph_rewrite(full_sink, renderer.pre_isel_matcher, ctx=itertools.count(-1, -1), name="pre instruction selection", bottom_up=True)
+      full_sink = graph_rewrite(full_sink, renderer.isel_matcher, ctx=IselContext(full_sink), name="instruction selection", bottom_up=True)
+    prg = UOp(Ops.PROGRAM, src=(full_sink, UOp(Ops.DEVICE, arg=renderer.target.device)), arg=prog_info)
   else: raise RuntimeError(f"can't call to_program on {ast.op}")
   if not isinstance(prg.arg, ProgramInfo): prg = prg.replace(arg=ProgramInfo.from_sink(prg.src[0]))
   prg = graph_rewrite(prg, pm_to_program, ctx=renderer, name="linearize/render")
@@ -190,7 +202,7 @@ def do_to_program(ast:UOp, renderer:Renderer) -> UOp:
 
 to_program_cache: dict[tuple, UOp] = {}
 def to_program(ast:UOp, renderer:Renderer) -> UOp:
-  config = (NOOPT, DEVECTORIZE, EMULATED_DTYPES, NOLOCALS, USE_TC, IMAGE, DISABLE_FAST_IDIV, TRANSCENDENTAL, ALLOW_TF32)
+  config = (NOOPT, EMULATED_DTYPES, NOLOCALS, USE_TC, IMAGE, DISABLE_FAST_IDIV, TRANSCENDENTAL, ALLOW_TF32)
   key = (ast.key, type(renderer), renderer.target, *[x.value for x in config])
   if (prg:=to_program_cache.get(key)) is None: to_program_cache[key] = prg = do_to_program(ast, renderer)
   return prg

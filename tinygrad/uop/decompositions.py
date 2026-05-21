@@ -384,7 +384,7 @@ f2f_dt = { f:getattr(dtypes, f"uint{f.bitsize}") for f in dtypes.floats }
 
 def rne(v: UOp, s) -> UOp: return shr(v, s) + ((shr(v, s - 1) & 1) & ((v & ((1 << (s - 1)) - 1)).ne(0).cast(v.dtype) | (shr(v, s) & 1)))
 
-def f2f(v, fr:DType, to:DType):
+def f2f(v, fr:DType, to:DType, sat=True):
   fs, fb, (fe, fm), ts, tb, (te, tm) = fr.bitsize, exponent_bias(fr), dtypes.finfo(fr), to.bitsize, exponent_bias(to), dtypes.finfo(to)
   # NB: denormals are zero!
   if fe <= te and fm < tm:
@@ -399,7 +399,7 @@ def f2f(v, fr:DType, to:DType):
     is_nan = (nosign.eq(shl(1, fm + fe) - 1) if fr == dtypes.fp8e4m3 else exp.eq(shl(1, fe) - 1))
     return (sign | exp.eq(0).where(0, is_nan.where(nan, norm))).bitcast(to)
   elif fe >= te and fm > tm:
-    v = f2f_clamp(v.bitcast(fr), to).bitcast(f2f_dt[fr])
+    v = f2f_clamp(v.bitcast(fr), to, sat).bitcast(f2f_dt[fr])
     sign, nosign = shr(v, fs - ts) & shl(1, ts - 1), v & (shl(1, fs - 1) - 1)
     norm = (rne(nosign, fm - tm) - shl(fb - tb, tm)).cast(f2f_dt[to])
     underflow = (shr(v, fm) & (shl(1, fe) - 1)) < (1 + fb - tb)
@@ -410,12 +410,12 @@ def f2f(v, fr:DType, to:DType):
     return is_nan.where(nan, sign.cast(f2f_dt[to]) | underflow.where(0, norm))
   else: raise NotImplementedError(f"unsupported decomp {fr} -> {to}")
 
-def f2f_clamp(val:UOp, dt:DType) -> UOp:
+def f2f_clamp(val:UOp, dt:DType, sat=True) -> UOp:
   e, m = dtypes.finfo(dt)
   if dt in dtypes.fp8_fnuz: max_exp, max_man = (1 << e) - 1, (1 << m) - 1
   else: max_exp, max_man = ((1 << e) - 1, (1 << m) - 2) if dt == dtypes.fp8e4m3 else ((1 << e) - 2, (1 << m) - 1)
   mx = val.const_like(2.0**(max_exp - exponent_bias(dt)) * (1.0 + max_man / (1 << m)))
-  sat = mx if dt in dtypes.fp8s else val.const_like(float('inf'))
+  sat = mx if dt in dtypes.fp8s and sat else val.const_like(float('inf'))
   # FIXME: CMPLT of nan is undefined
   return val.ne(val).where(val, (val < -mx).where(-sat, (mx < val).where(sat, val)))
 

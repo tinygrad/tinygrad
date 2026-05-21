@@ -37,7 +37,7 @@ renderer = PatternMatcher([
   (UPat(Ops.PARAM, src=(UPat(), UPat(), UPat(), UPat(), UPat(Ops.NOOP, name="x"))), lambda x: x.arg),
   (UPat((Ops.SPECIAL), name="x"), lambda x: x.arg),
   (UPat(Ops.RANGE, name="x"), lambda x: f"r{range_str(x)}"),
-  (UPat((Ops.CONST, Ops.VCONST), name="x"), lambda x: str(x.arg)),
+  (UPat(Ops.CONST, name="x"), lambda x: str(x.arg)),
   (UPat(Ops.UNROLL, name="x"), lambda ctx,x,u: f"UNROLL({ctx[x.src[0]]}, {u.arg})"),
   (UPat(Ops.CAST, name="x"), lambda ctx,x: f"({str(x.dtype)[7:]})({ctx[x.src[0]]})"),
   (UPat(Ops.BIND, name="x"), lambda ctx,x: ctx[x.src[0]]),
@@ -146,7 +146,7 @@ def pyrender(ast:UOp) -> str:
   lst = list(ast.toposort())
 
   cmap = consumer_map_from_toposort(lst)
-  not_rendered = {Ops.CONST, Ops.VCONST, Ops.DEVICE}
+  not_rendered = {Ops.CONST, Ops.DEVICE}
   always_rendered = {Ops.PARAM, Ops.LOAD, Ops.SPECIAL, Ops.RANGE, Ops.CONTIGUOUS, Ops.STACK,
                      Ops.BUFFER, Ops.COPY, Ops.CALL, Ops.FUNCTION, Ops.WHERE, Ops.END}
 

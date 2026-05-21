@@ -120,7 +120,7 @@ def strides_for_shape(shape:tuple[T, ...]) -> tuple[T, ...]:
 # returns the axes to create new_shape if new_shape can be created by combining axis from old_shape
 def get_contraction(old_shape:tuple[T, ...], new_shape:tuple[T, ...]) -> list[list[int]]|None: # T is sint
   acc_old, acc_new = list(itertools.accumulate(old_shape, operator.mul)), list(itertools.accumulate(new_shape, operator.mul))
-  try: split = [acc_old.index(acc)+1 if acc != 1 else 0 for acc in acc_new]
+  try: split = [0 if isinstance(acc, int) and acc == 1 else acc_old.index(acc)+1 for acc in acc_new]
   except ValueError: return None
   return [list(range(st,ed)) for st,ed in zip([0]+split[:-1], split[:-1]+[len(old_shape)])]
 
@@ -239,7 +239,7 @@ USE_TC, TC_SELECT, TC_OPT = ContextVar("TC", 1), ContextVar("TC_SELECT", -1), Co
 TRANSCENDENTAL, NOLOCALS = ContextVar("TRANSCENDENTAL", 1), ContextVar("NOLOCALS", 0)
 SPLIT_REDUCEOP, NO_MEMORY_PLANNER, LRU = ContextVar("SPLIT_REDUCEOP", 1), ContextVar("NO_MEMORY_PLANNER", 0), ContextVar("LRU", 1)
 RING, ALL2ALL, ALLREDUCE_CAST = ContextVar("RING", 1), ContextVar("ALL2ALL", 0), ContextVar("ALLREDUCE_CAST", 1)
-CACHELEVEL, IGNORE_BEAM_CACHE, DEVECTORIZE = ContextVar("CACHELEVEL", 2), ContextVar("IGNORE_BEAM_CACHE", 0), ContextVar("DEVECTORIZE", 1)
+CACHELEVEL, IGNORE_BEAM_CACHE = ContextVar("CACHELEVEL", 2), ContextVar("IGNORE_BEAM_CACHE", 0)
 VALIDATE_WITH_CPU = ContextVar("VALIDATE_WITH_CPU", 0)
 # TODO: this is broken for some indexing
 DISABLE_FAST_IDIV = ContextVar("DISABLE_FAST_IDIV", 1)

@@ -25,8 +25,10 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
   def usum(self, *uops) -> Self: return functools.reduce(operator.or_ if self.dtype is dtypes.bool else operator.add, argfix(*uops), self)
   def uprod(self, *uops) -> Self: return functools.reduce(operator.and_ if self.dtype is dtypes.bool else operator.mul, argfix(*uops), self)
 
-  # NOTE: Tensor overrides this to also set requires_grad=False
   def detach(self) -> Self:
+    """
+    Returns a new tensor with the same data as this tensor, but detached from the autograd graph.
+    """
     return self.alu(Ops.DETACH)
 
   def logical_not(self) -> Self:
@@ -133,7 +135,8 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
     ```
     """
     self._check_dtype()
-    return self.logical_not() if self.dtype == dtypes.bool else self ^ -1
+    if self.dtype == dtypes.bool: return self.logical_not()
+    return (self ^ self.dtype.max) if dtypes.is_unsigned(self.dtype) else (self ^ -1)
 
   def bitwise_and(self, x: Self | ConstType, reverse: bool = False) -> Self:
     """

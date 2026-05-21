@@ -40,7 +40,7 @@ class TestExample(unittest.TestCase):
 
   @multidevice_test
   def test_example_readme(self, device):
-    x = Tensor.eye(3, device=device)
+    x = Tensor.eye(3).clone().to(device)
     y = Tensor([[2.0,0,-2.0]], device=device)
     z = y.matmul(x).sum()
     z.backward()
@@ -59,8 +59,8 @@ class TestExample(unittest.TestCase):
       print(f"WARNING: {device} test isn't running")
       return
 
-    x = Tensor.eye(8, device=device)
-    y = Tensor.eye(8, device=device)
+    x = Tensor.eye(8).clone().to(device)
+    y = Tensor.eye(8).clone().to(device)
     z = y.matmul(x).sum()
     z.backward()
 

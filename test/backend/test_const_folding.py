@@ -15,6 +15,11 @@ def _check_ast_count(desired_count:int, t:Tensor):
   #assert len(asts) == desired_count, f"{len(asts)} != {desired_count}"
 
 class TestMovedConstFolding(unittest.TestCase):
+  def test_contiguous_deviceless_const(self):
+    t = Tensor(UOp.const(dtypes.float, 2.0)).contiguous()
+    self.assertIs(t.uop.op, Ops.CONST)
+    self.assertIsNone(t.uop.device)
+
   def test_add_shrunk_zero(self):
     _check_ast_count(0, Tensor([1.0, 2, 3, 4]) + Tensor.zeros(6).shrink(((1, 5),)))
 
@@ -117,7 +122,7 @@ class TestReduceOpsConstFolding(unittest.TestCase):
 class TestMultiConstFolding(unittest.TestCase):
   def test_multi_const_folding_literal(self):
     ds = tuple(f"{Device.DEFAULT}:{i}" for i in range(4))
-    t = Tensor.arange(16).float().to(ds).realize()
+    t = Tensor.arange(16).float().clone().to(ds).realize()
 
     # non const folding case creates one ast on each shard
     _check_ast_count(4, t + 1)
@@ -142,7 +147,7 @@ class TestMultiConstFolding(unittest.TestCase):
 
   def test_multi_const_folding_tensor(self):
     ds = tuple(f"{Device.DEFAULT}:{i}" for i in range(4))
-    t = Tensor.arange(16).float().to(ds).realize()
+    t = Tensor.arange(16).float().clone().to(ds).realize()
     zero = Tensor.zeros(16).to(ds).realize()
     one = Tensor.ones(16).to(ds).realize()
 
