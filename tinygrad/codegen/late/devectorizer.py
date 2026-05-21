@@ -47,12 +47,16 @@ def simplify_valid_load(buf:UOp, start_idx:UOp, valid:UOp) -> UOp|None:
 
   if not drop_stmt and idx is start_idx: return None
   new_valid = UOp.uprod(*ss) if (ss:=[s for s in valid.split_uop(Ops.AND) if s not in drop_stmt]) else None
-  return buf.index(idx.valid(new_valid) if new_valid is not None else idx, ptr=True)
+  idx_y, idx_x = idx.gep(1), idx.gep(0)
+  return buf.index(idx_y.valid(new_valid), idx_x.valid(new_valid), ptr=True) if new_valid is not None else buf.index(idx_y, idx_x, ptr=True)
 
 
 load_store_indexing = PatternMatcher([
   # image load valid idx simplification
   (UPat(Ops.INDEX, src=(UPat.var("buf"), invalid_gate)), lambda buf,x,i,cond: simplify_valid_load(buf, x, cond)),
+  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("cond").where(UPat.var("idx_y"), UPat(arg=Invalid)),
+                                         UPat.var("cond").where(UPat.var("idx_x"), UPat(arg=Invalid)))),
+   lambda buf,cond,idx_y,idx_x: simplify_valid_load(buf, UOp.vectorize(idx_x, idx_y), cond) if isinstance(buf.dtype, ImageDType) else None),
 ])
 
 # ***** load/store grouping *****
