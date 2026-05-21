@@ -3,7 +3,7 @@ from tinygrad import Tensor, Device, dtypes, Context
 from tinygrad.helpers import getenv
 from examples.mlperf.models.flat_llama import FP8_DTYPE, quantize_fp8
 from extra.llama_kernels.fused_ce import fused_ce_loss
-from extra.llama_kernels.quantize_fp8_delayed import quantize_fp8_delayed, quantize_fp8_scalar, NUM_WG, THREADS_PER_WG
+from extra.llama_kernels.quantize_fp8_delayed import quantize_fp8_delayed, quantize_fp8_scalar
 
 def run_fused_ce(bs:int, seqlen:int, vocab:int, label_smoothing:float=0.0) -> None:
   Tensor.manual_seed(0)
@@ -26,10 +26,8 @@ def run_fused_ce(bs:int, seqlen:int, vocab:int, label_smoothing:float=0.0) -> No
     assert loss.allclose(ref, atol=2e-3, rtol=2e-3).item(), "forward mismatch"
     assert logits.grad.allclose(logits_ref.grad, atol=2e-3, rtol=2e-3).item(), "grad mismatch"
 
+@unittest.skipUnless(dtypes.bfloat16 in Device[Device.DEFAULT].renderer.supported_dtypes(), "need bfloat16")
 class TestFusedCE(unittest.TestCase):
-  def setUp(self):
-    if dtypes.bfloat16 not in Device[Device.DEFAULT].renderer.supported_dtypes(): self.skipTest("need bfloat16")
-
   def test_fused_ce_1_2_16(self): run_fused_ce(1, 2, 16, label_smoothing=0.2)
   def test_fused_ce_2_16_128(self): run_fused_ce(2, 16, 128)
   def test_fused_ce_4_128_1024(self): run_fused_ce(4, 128, 1024, label_smoothing=0.2)
@@ -61,19 +59,14 @@ def run_quantize_fp8(shape:tuple[int, ...], delayed:bool=True) -> None:
       assert new_amax.allclose(ref_new_amax, atol=0, rtol=0).item(), \
         f"amax mismatch: got={new_amax.item()} ref={ref_new_amax.item()} diff={abs(new_amax.item()-ref_new_amax.item())}"
 
+@unittest.skipUnless(dtypes.bfloat16 in Device[Device.DEFAULT].renderer.supported_dtypes(), "need bfloat16")
 class TestQuantizeFP8(unittest.TestCase):
-  def setUp(self):
-    ren = Device[Device.DEFAULT].renderer
-    if dtypes.bfloat16 not in ren.supported_dtypes(): self.skipTest("need bfloat16")
-    if not ren.has_local or not ren.has_shared: self.skipTest("need local/shared")
-
   def test_scalar(self): run_quantize_fp8((32, getenv("N", 1024)), delayed=False)
   def test_delayed(self): run_quantize_fp8((2048, getenv("N", 1024)))
 
-  @Context(DEV="NULL:HIP:gfx950")
   def test_multi(self):
     devs = tuple(f"NULL:{i}" for i in range(8))
-    x = Tensor.empty(len(devs), NUM_WG*THREADS_PER_WG*8, dtype=dtypes.bfloat16, device=devs).uop.multi(0)
+    x = Tensor.empty(4, 8, dtype=dtypes.bfloat16, device=devs).uop.multi(0)
     x = Tensor(x, device=devs)
     amax_state = Tensor.full((), 2.0, dtype=dtypes.float32, device=devs).contiguous()
     fp8, _, new_amax, _ = quantize_fp8_delayed(x, amax_state, FP8_DTYPE)
