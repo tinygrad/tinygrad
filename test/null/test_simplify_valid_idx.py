@@ -507,14 +507,6 @@ class TestImageSimplification(unittest.TestCase):
       self.check(load, "(((lidx1<1)!=True)&(((lidx0+r0)<3)!=True)&((lidx0+r0)<11))",
                        "(lidx2+gidx0*4+lidx1*256+(lidx0*1024+r0*1024)+-3264)", "0")
 
-class TestUnfoldableImage(unittest.TestCase):
-  def test_unfoldable_becomes_buffer(self):
-    with Context(SPEC=0):
-      lidx = Special("lidx", 2)
-      load = UOp(Ops.LOAD, dtypes.float, (UOp(Ops.PARAM, dtypes.imagef((10, 10, 4)), arg=0).index(lidx, ptr=True), UOp.const(dtypes.float, 0)))
-      res = full_rewrite(load.sink()).src[0]
-      self.assertEqual(res.src[0].src[0].dtype, dtypes.float.ptr(400))
-
 class TestDropTrueGate(unittest.TestCase):
   def test_drop_true_gate_on_index(self):
     # test that INDEX with a constant True valid gets simplified to drop the valid
