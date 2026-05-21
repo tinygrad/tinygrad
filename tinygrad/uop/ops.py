@@ -248,8 +248,6 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
         for s in self.src[1:]: shp.extend(list(s.shape))
         return tuple(shp) + self.src[0].shape[len(self.src[1:]):]
 
-      # TODO: these should have the shape of the dtype.count
-      # TODO: contract and unroll should be deleted
       case Ops.GEP:
         return (len(self.arg),) if len(self.arg) > 1 else ()
       case Ops.STACK:
@@ -259,6 +257,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
           return self.src[0].shape
         else:
           return (len(self.src),) + self.src[0].shape
+      # TODO: contract and unroll should be deleted
       case Ops.CONST | Ops.DEFINE_VAR | Ops.CONTRACT | Ops.UNROLL | Ops.VCAT:
         return (self.dtype.count,) if self.dtype.count > 1 else ()
 
