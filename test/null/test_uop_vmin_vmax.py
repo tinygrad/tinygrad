@@ -328,6 +328,8 @@ class TestConstFactor(unittest.TestCase):
     # const_factor for a constant
     uop = UOp.const(dtypes.int32, 42)
     self.assertEqual(uop.const_factor(), 42)
+    uop = UOp.const(dtypes.int32, -6)
+    self.assertEqual(uop.const_factor(), 6)
 
   def test_const_factor_addition(self):
     # const_factor for an addition of constants
