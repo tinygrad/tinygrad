@@ -86,6 +86,18 @@ def init_c_struct_t(sz:int, fields: tuple[tuple, ...]):
   return CStruct
 def init_c_var(ty, creat_cb): return (creat_cb(v:=ty()), v)[1]
 
+def _host_elf_class() -> int:
+  return 2 if sys.maxsize > 2**32 else 1
+
+def _is_compatible_elf(path:pathlib.Path) -> bool:
+  try:
+    with open(path, 'rb') as f:
+      hdr = f.read(5)
+  except OSError:
+    return False
+  if len(hdr) < 5 or hdr[:4] != b'\x7FELF': return False
+  return hdr[4] == _host_elf_class()
+
 class DLL(ctypes.CDLL):
   _loaded_: set[str] = set()
 
@@ -95,7 +107,7 @@ class DLL(ctypes.CDLL):
     if pathlib.Path(path:=getenv(nm.replace('-', '_').upper()+"_PATH", '')).is_file(): return path
     for p in paths:
       libpaths = {"posix": [d for d in os.environ.get('LD_LIBRARY_PATH', '').split(os.pathsep) if d] + ["/usr/lib64", "/usr/lib", "/usr/local/lib"],
-                  "nt": os.environ['PATH'].split(os.pathsep),
+                  "nt": [d for d in os.environ.get('PATH', '').split(os.pathsep) if d],
                   "darwin": ["/opt/homebrew/lib", f"/System/Library/Frameworks/{p}.framework", f"/System/Library/PrivateFrameworks/{p}.framework"],
                   'linux': ['/lib', '/lib64', f"/lib/{sysconfig.get_config_var('MULTIARCH')}", "/usr/lib/wsl/lib/"]}
       if (pth:=pathlib.Path(p)).is_absolute():
@@ -108,9 +120,8 @@ class DLL(ctypes.CDLL):
             if (l:=pre / base).is_file() or (OSX and 'framework' in str(l) and l.is_symlink()): return str(l)
         else:
           for l in (l for l in pre.iterdir() if l.is_file() and re.fullmatch(f"lib{p}\\.so\\.?[0-9]*", l.name)):
-            # filter out linker scripts
-            with open(l, 'rb') as f:
-              if f.read(4) == b'\x7FELF': return str(l)
+            # filter out linker scripts and wrong-arch ELF candidates
+            if _is_compatible_elf(l): return str(l)
 
   def __init__(self, nm:str, paths:str|list[str], extra_paths=[], emsg="", **kwargs):
     self.nm, self.emsg = nm, emsg or f"try setting {nm.upper()+'_PATH'}?"
