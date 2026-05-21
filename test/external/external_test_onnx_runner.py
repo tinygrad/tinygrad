@@ -2,7 +2,6 @@ import unittest, onnx, tempfile, pathlib
 import numpy as np
 from tinygrad import Tensor
 from tinygrad.uop.ops import Ops
-from tinygrad.device import is_dtype_supported
 from typing import Any
 from tinygrad.nn.onnx import OnnxRunner, OnnxPBParser, OnnxDataType
 from hypothesis import given, strategies as st
@@ -89,7 +88,6 @@ class TestOnnxRunner(unittest.TestCase):
       np.testing.assert_equal(output.numpy(), weights + 1)
 
 all_dtypes = list(OnnxDataType)
-device_supported_dtypes = {odt for odt in OnnxDataType if is_dtype_supported(odt.to_dtype())}
 
 class TestOnnxRunnerDtypes(unittest.TestCase):
   """

@@ -3,12 +3,12 @@ from tinygrad import dtypes, Tensor, fetch, Device
 from tinygrad.helpers import disable_gc
 from tinygrad.llm.gguf import _ggml_iq_grid, ggml_data_to_tensor, gguf_load
 from tinygrad.runtime.autogen import ggml_common as _ggml
-from tinygrad.device import is_dtype_supported
 import numpy as np
 from gguf import GGUFReader, GGUFValueType, GGMLQuantizationType, GGML_QUANT_SIZES, dequantize, quantize
 from gguf.quants import IQ2_S, IQ3_S, IQ3_XXS
 
 ggml_test_block_count = 4
+supported_dtypes = Device[Device.DEFAULT].renderer.supported_dtypes()
 
 class TestGGUFTables(unittest.TestCase):
   def test_iq2_s_grid_matches_gguf_py(self):
@@ -26,7 +26,7 @@ class TestGGUFTables(unittest.TestCase):
     grid = _ggml_iq_grid(Device.DEFAULT, _ggml.iq3s_grid, (512, 4)).numpy()
     np.testing.assert_equal(grid, IQ3_S.grid.reshape(512, 4))
 
-@unittest.skipIf(any(not is_dtype_supported(t) for t in [ dtypes.uint8, dtypes.half ]), "Backend must support uint8 and half")
+@unittest.skipUnless(dtypes.uint8 in supported_dtypes and dtypes.half in supported_dtypes, "Backend must support uint8 and half")
 class TestGGUF(unittest.TestCase):
   def test_load_tinyllama_q8_0(self): self._test_gguf_load("https://huggingface.co/ggml-org/models/resolve/main/tinyllamas/stories15M-q8_0.gguf?download=true")
   def test_load_tinyllama_q4_0(self): self._test_gguf_load("https://huggingface.co/ggml-org/models/resolve/main/tinyllamas/stories15M-q4_0.gguf?download=true")
@@ -60,7 +60,7 @@ class TestGGUF(unittest.TestCase):
   def test_dequantization_iq2_s(self): self._test_dequantization(GGMLQuantizationType.IQ2_S)
   def test_dequantization_iq4_xs(self): self._test_dequantization(GGMLQuantizationType.IQ4_XS)
   def test_dequantization_mxfp4(self): self._test_dequantization(GGMLQuantizationType.MXFP4)
-  @unittest.skipUnless(is_dtype_supported(dtypes.bfloat16), "Backend must support bfloat16")
+  @unittest.skipUnless(dtypes.bfloat16 in supported_dtypes, "Backend must support bfloat16")
   def test_dequantization_bf16(self): self._test_dequantization(GGMLQuantizationType.BF16)
   def test_dequantization_mxfp4_old(self):
     def encode(nibbles, E):
@@ -229,7 +229,7 @@ class TestGGUFGEMV(unittest.TestCase):
     x = rng.standard_normal(cols).astype(np.float32)
     with np.errstate(all='ignore'):
       np.testing.assert_allclose((tensors["weight"] @ Tensor(x)).numpy(), ref @ x, atol=1e-2, rtol=1e-2)
-    if qtype == GGMLQuantizationType.BF16 or is_dtype_supported(dtypes.half): np.testing.assert_equal(tensors["weight"].numpy(), ref)
+    if qtype == GGMLQuantizationType.BF16 or dtypes.half in supported_dtypes: np.testing.assert_equal(tensors["weight"].numpy(), ref)
     assert np.isfinite(ref).all() and np.isfinite(tensors["weight"].numpy()).all(), f"{qtype.name} has NaN/Inf"
 
   def test_gguf_gemv_q8_0(self): self._test_gguf_gemv(GGMLQuantizationType.Q8_0)
@@ -243,7 +243,7 @@ class TestGGUFGEMV(unittest.TestCase):
   def test_gguf_gemv_iq2_s(self): self._test_gguf_gemv(GGMLQuantizationType.IQ2_S)
   def test_gguf_gemv_iq4_xs(self): self._test_gguf_gemv(GGMLQuantizationType.IQ4_XS)
   def test_gguf_gemv_mxfp4(self): self._test_gguf_gemv(GGMLQuantizationType.MXFP4)
-  @unittest.skipUnless(is_dtype_supported(dtypes.bfloat16), "Backend must support bfloat16")
+  @unittest.skipUnless(dtypes.bfloat16 in supported_dtypes, "Backend must support bfloat16")
   def test_gguf_gemv_bf16(self): self._test_gguf_gemv(GGMLQuantizationType.BF16)
 
 class TestGGUFGC(unittest.TestCase):
