@@ -1,5 +1,5 @@
 import unittest
-from tinygrad import Tensor, Device, dtypes, Context
+from tinygrad import Tensor, dtypes, Context
 from tinygrad.device import is_dtype_supported
 from tinygrad.helpers import getenv
 from examples.mlperf.models.flat_llama import FP8_DTYPE, quantize_fp8
@@ -67,12 +67,9 @@ def run_quantize_fp8_scalar(shape:tuple[int, ...]) -> None:
   with Context(DEBUG=0):
     assert fp8.cast(dtypes.float).allclose(ref_fp8.cast(dtypes.float), atol=0, rtol=0).item(), "fp8 mismatch"
 
-class TestQuantizeFP8(unittest.TestCase):
-  def setUp(self):
-    if not is_dtype_supported(dtypes.bfloat16): self.skipTest("need bfloat16")
-    if not Device[Device.DEFAULT].renderer.has_local: self.skipTest("test requires locals")
-    if not Device[Device.DEFAULT].renderer.has_shared: self.skipTest("test requires shared")
 
+@unittest.skipIf(not is_dtype_supported(dtypes.bfloat16), "need bfloat16")
+class TestQuantizeFP8(unittest.TestCase):
   def test_scalar(self): run_quantize_fp8_scalar((32, getenv("N", 1024)))
   def test_delayed(self): run_quantize_fp8_delayed((2048, getenv("N", 1024)))
 

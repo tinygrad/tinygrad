@@ -12,14 +12,14 @@ def _custom_quantize_fp8_with_amax(fp8_out:UOp, amax_partial:UOp, x:UOp, amax_st
   assert n_elems == num_wg * elems_per_wg, f"{n_elems=} must divide over {num_wg=}"
   scale = FP8_MAX / (amax_state[0].cast(dtypes.float) + 1e-8)
 
-  wg = UOp.range(num_wg, 0, axis_type=AxisType.GLOBAL)
+  wg = UOp.range(num_wg, 0)
   i = UOp.range(elems_per_wg, 1)
   idx = wg * elems_per_wg + i
   x_f = x.reshape(n_elems)[idx].cast(dtypes.float)
   abs_x = (x_f < 0).where(-x_f, x_f)
   fp8_store = fp8_out.reshape(n_elems)[idx].store((x_f * scale).cast(fp8_out.dtype.base)).end(i)
-  amax_store = amax_partial[wg].store(abs_x.reduce(i, arg=Ops.MAX))
-  return UOp.sink(fp8_store.end(wg), amax_store.end(wg), arg=KernelInfo(f"quantize_fp8_with_amax_{n_elems}"))
+  amax_store = amax_partial.after(fp8_store)[wg].store(abs_x.reduce(i, arg=Ops.MAX))
+  return amax_store.end(wg).sink(arg=KernelInfo(f"quantize_fp8_with_amax_{n_elems}"))
 
 @functools.cache
 def _custom_quantize_fp8_scalar(fp8_out:UOp, x:UOp, amax_state:UOp) -> UOp:
