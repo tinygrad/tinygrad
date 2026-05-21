@@ -61,8 +61,8 @@ def run_quantize_fp8(shape:tuple[int, ...], delayed:bool=True) -> None:
 
 @unittest.skipUnless(dtypes.bfloat16 in Device[Device.DEFAULT].renderer.supported_dtypes(), "need bfloat16")
 class TestQuantizeFP8(unittest.TestCase):
-  def test_scalar(self): run_quantize_fp8((32, getenv("N", 1024)), delayed=False)
-  def test_delayed(self): run_quantize_fp8((2048, getenv("N", 1024)))
+  def test_scalar(self): run_quantize_fp8((getenv("N", 1024), 32), delayed=False)
+  def test_delayed(self): run_quantize_fp8((getenv("N", 1024), 1024))
 
   def test_multi(self):
     devs = tuple(f"NULL:{i}" for i in range(8))
