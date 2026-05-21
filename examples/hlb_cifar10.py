@@ -171,7 +171,7 @@ def train_cifar():
     Λ, V = _eigens(_patches(X.float().numpy()))
     W = V/np.sqrt(Λ+1e-2)[:,None,None,None]
 
-    return Tensor(W.astype(np.float32)).cast(dtypes.default_float)
+    return Tensor(W.astype(np.float32), requires_grad=False).cast(dtypes.default_float)
 
   # ========== Loss ==========
   def cross_entropy(x:Tensor, y:Tensor, reduction:str='mean', label_smoothing:float=0.0) -> Tensor:
