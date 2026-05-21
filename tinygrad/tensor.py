@@ -160,6 +160,9 @@ class Tensor(OpMixin):
   def alu(self, op: Ops, *src: Tensor) -> Tensor: return self._apply_uop(lambda *u: u[0].alu(op, *u[1:]), *src)
   def const_like(self, b:ConstType) -> Tensor: return Tensor(self.uop.const_like(b), requires_grad=False)
   @staticmethod
+  def const(dtype:DType, b:ConstType|UOp, device:str|tuple[str, ...]|None=None) -> Tensor:
+    return Tensor(b if isinstance(b, UOp) else UOp.const(dtype, b, device))
+  @staticmethod
   def unique_const(fill_value:ConstType|UOp, **kwargs) -> Tensor:
     if isinstance(fill_value, UOp): return Tensor(fill_value, **kwargs)
     dtype, device = kwargs.pop("dtype", None), kwargs.pop("device", None)
@@ -1008,10 +1011,11 @@ class Tensor(OpMixin):
     if isinstance(v, Tensor) and v.dtype != self.dtype: raise RuntimeError(f"setitem dtype mismatch: {self.dtype=} != {v.dtype=}")
     # raise if mutation would diverge from eager (allow only pure views of a realized buffer; exclude +=/-= RHS via v_uop/v_bw)
     v_uop, v_bw = (v.uop, v.uop.backward_slice) if isinstance(v, Tensor) else (None, {})
-    shared = self.uop.base if self.uop.base.is_realized else None
-    if any(self.uop in t.uop.backward_slice_with_self and t.uop.base is not shared for tref in all_tensors
-           if (t:=tref()) is not None and t is not self and t.uop is not v_uop and t.uop not in v_bw):
-      raise RuntimeError("can't setitem on a tensor with other uses")
+    if self.uop.op_in_backward_slice_with_self(Ops.BUFFER):
+      shared = self.uop.base if self.uop.base.is_realized else None
+      if any(self.uop in t.uop.backward_slice_with_self and t.uop.base is not shared for tref in all_tensors
+             if (t:=tref()) is not None and t is not self and t.uop is not v_uop and t.uop not in v_bw):
+        raise RuntimeError("can't setitem on a tensor with other uses")
     if not self.uop.base.is_realized and self.is_floating_point() and (self.requires_grad or (isinstance(v, Tensor) and v.requires_grad)):
       if not isinstance(v, Tensor): v = Tensor(v, device=self.device, dtype=self.dtype)
       # __iadd__/__isub__ creates AFTER(view, STORE(view, computed)); unwrap to get the computed value
