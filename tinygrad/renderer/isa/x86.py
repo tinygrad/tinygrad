@@ -155,8 +155,8 @@ extra_matcher = PatternMatcher([
   (UPat.var("m").where(UPat.var("a", (dtypes.bool,)+dtypes.int8s), UPat.var("b")),
    lambda m,a,b: m.where(a.cast(dtypes.int16), b.cast(dtypes.int16)).cast(a.dtype) if a.max_numel() == 1 else None),
   # float16 alus are done in float32
-  (UPat(GroupOp.ALU, dtypes.float16, name="x"), lambda x: UOp(x.op, dtypes.float.vec(x.max_numel()),
-   tuple(s.cast(dtypes.float) if s.dtype != dtypes.bool else s for s in x.src)).cast(x.dtype)),
+  (UPat(GroupOp.ALU, dtypes.float16, name="x"), lambda x: UOp(Ops.CAST, x.dtype.scalar(), (UOp(x.op, dtypes.float,
+   tuple(UOp(Ops.CAST, dtypes.float, (s,)) if s.dtype != dtypes.bool else s for s in x.src)),))),
   (UPat(GroupOp.Comparison, src=(UPat.var("a", dtypes.float16), UPat.var("b")), name="x"),
    lambda x,a,b: UOp(x.op, x.dtype, (a.cast(dtypes.float32), b.cast(dtypes.float32))).cast(x.dtype)),
   # no cmpne for packed ints, y != x => !(y==x)
@@ -296,7 +296,7 @@ def vpbroadcast(ctx:IselContext, x:UOp, y:UOp) -> UOp:
   n = x.ins({1: X86Ops.VPBROADCASTB, 2: X86Ops.VPBROADCASTW, 4: X86Ops.VPBROADCASTD, 8: X86Ops.VPBROADCASTQ}[y.dtype.itemsize], src=(y,))
   if y.op is Ops.LOAD and len(y.src) == 1 and is_foldable(ctx, n, y): return n
   # if there isn't a load we can fold we need to move y from gpr to xmm
-  # this is hacky but required because int.vec(1) isn't supported
+  # this is hacky but required because scalar int bitcasts need a float register type
   y = y if y.dtype.itemsize > 1 else y.cast(dtypes.int16)
   return n.replace(src=(y.bitcast({2:dtypes.float16, 4:dtypes.float32, 8:dtypes.float64}[y.dtype.itemsize]),))
 
@@ -357,12 +357,6 @@ def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
   # if x.arg in X86GroupOp.WriteFlags: defs.append(ctx.vreg(RFLAGS))
   return x.replace(tag=tuple(defs))
 
-dts = dtypes.ints + (dtypes.bool, dtypes.float16, dtypes.float32, dtypes.float64)
-dt_16bit = tuple(dt.vec(l) for dt in dts for l in [2,1] if l*dt.itemsize == 2 and dt not in dtypes.int16s)
-dt_32bit = tuple(dt.vec(l) for dt in dts for l in [4,2,1] if l*dt.itemsize == 4 and dt not in dtypes.int32s)
-dt_64bit = tuple(dt.vec(l) for dt in dts for l in [8,4,2,1] if l*dt.itemsize == 8 and dt not in dtypes.int64s)
-dt_128bit = tuple(dt.vec(l) for dt in dts for l in [16,8,4,2,1] if l*dt.itemsize == 16)
-
 isel_matcher = PatternMatcher([
   # **** Op -> Op ****
   # cast to pointer is a noop
@@ -377,7 +371,7 @@ isel_matcher = PatternMatcher([
   # add callee saved registers to the RET, these will be scheduled at the top of the kernel and will be saved/restored if they are used in regalloc
   # so regalloc builds the prologue/epilogue naturally
   (UPat(Ops.SINK, name="x"), lambda x:
-   x.replace(src=(x.ins(X86Ops.RET, src=x.src + tuple(def_reg(dtypes.uint64 if r in GPR else dtypes.float64.vec(2), r) for r in CALLEE_SAVED)),)) \
+   x.replace(src=(x.ins(X86Ops.RET, src=x.src + tuple(def_reg(dtypes.uint64 if r in GPR else dtypes.float64, r) for r in CALLEE_SAVED)),)) \
     if not x.src or x.src[0].arg is not X86Ops.RET else None),
   # function abi constraints
   (UPat((Ops.PARAM, Ops.DEFINE_VAR, Ops.SPECIAL), name="x"), abi),
@@ -446,8 +440,8 @@ isel_matcher = PatternMatcher([
   # for float16 we route the srcs through gprs unless we can fold them, this is suboptimal for values in xmms, in that case we want vpunpcklwd
   (UPat(Ops.STACK, dtypes.float16, name="x"), lambda ctx,x:
    vpins(x.replace(src=tuple(s if s.op is Ops.LOAD and is_foldable(ctx, x, s) else s.bitcast(dtypes.int16) for s in x.src)))),
-  (UPat(Ops.STACK, (dtypes.float32.vec(4), dtypes.float32.vec(8)), name="x"), vshufps),
-  (UPat(Ops.STACK, (dtypes.float64.vec(2), dtypes.float64.vec(4)), name="x"), vshufpd),
+  (UPat(Ops.STACK, dtypes.float32, name="x"), lambda x: vshufps(x) if x.max_numel() in (4, 8) else None),
+  (UPat(Ops.STACK, dtypes.float64, name="x"), lambda x: vshufpd(x) if x.max_numel() in (2, 4) else None),
   (UPat(Ops.STACK, dtypes.float32, name="x"), vinsertps),
   (UPat.var("y", dtypes.ints+(dtypes.bool,)).broadcast(name="x"), vpbroadcast),
   (UPat(Ops.STACK, dtypes.ints+(dtypes.bool,), name="x"), vpins),
@@ -555,20 +549,32 @@ isel_matcher = PatternMatcher([
   # TODO: fuse stores, very few cases -- store cmp becomes setcc, store gep int becomes vpextr, store bitcast to int becomes vmovd/q
   # copy, load, store
   # NOTE: copy here violates the spec, it only happens post register allocation when a reg to reg move needs to be inserted
-  (UPat(Ops.COPY, dt_128bit, name="x"), lambda x: x.ins(X86Ops.VMOVUPS)),
-  (UPat(Ops.COPY, dt_64bit, name="x"), lambda x: x.ins(X86Ops.VMOVSD)),
-  (UPat(Ops.COPY, dt_32bit+dt_16bit, name="x"), lambda x: x.ins(X86Ops.VMOVSS)),
+  (UPat(Ops.COPY, name="x"), lambda x: x.ins(X86Ops.VMOVUPS) if x.dtype.itemsize == 16 else None),
+  (UPat(Ops.COPY, name="x"), lambda x: x.ins(X86Ops.VMOVSD) if x.dtype.itemsize == 8 and x.dtype.scalar() not in dtypes.int64s else None),
+  (UPat(Ops.COPY, name="x"), lambda x:
+   x.ins(X86Ops.VMOVSS) if x.dtype.itemsize in (2, 4) and
+   (x.dtype.scalar() in dtypes.floats or (x._shape is not None and x.max_numel() > 1)) else None),
   (UPat(Ops.COPY, dtypes.ints+(dtypes.bool,), name="x"), lambda x: x.ins(X86Ops.MOV)),
-  (UPat(Ops.LOAD, dt_128bit, src=(UPat(name="a"),), name="x"), lambda x,a: x.ins(X86Ops.VMOVUPS, src=fold_address(a))),
-  (UPat(Ops.LOAD, dt_64bit, src=(UPat(name="a"),), name="x"), lambda x,a: x.ins(X86Ops.VMOVSD, src=fold_address(a))),
-  (UPat(Ops.LOAD, dt_32bit, src=(UPat(name="a"),), name="x"), lambda x,a: x.ins(X86Ops.VMOVSS, src=fold_address(a))),
-  (UPat(Ops.LOAD, dt_16bit, src=(UPat(name="a"),), name="x"), lambda x,a:
-   x.ins(X86Ops.VPINSRW, src=(def_reg(x.dtype, x.tag),) + fold_address(a) + (imm(dtypes.uint8, 0),))),
+  (UPat(Ops.LOAD, src=(UPat(name="a"),), name="x"), lambda x,a: x.ins(X86Ops.VMOVUPS, src=fold_address(a)) if x.dtype.itemsize == 16 else None),
+  (UPat(Ops.LOAD, src=(UPat(name="a"),), name="x"), lambda x,a:
+   x.ins(X86Ops.VMOVSD, src=fold_address(a)) if x.dtype.itemsize == 8 and x.dtype.scalar() not in dtypes.int64s else None),
+  (UPat(Ops.LOAD, src=(UPat(name="a"),), name="x"), lambda x,a:
+   x.ins(X86Ops.VMOVSS, src=fold_address(a))
+   if x.dtype.itemsize == 4 and (x.dtype.scalar() in dtypes.floats or (x._shape is not None and x.max_numel() > 1)) else None),
+  (UPat(Ops.LOAD, src=(UPat(name="a"),), name="x"), lambda x,a:
+   x.ins(X86Ops.VPINSRW, src=(def_reg(x.dtype, x.tag),) + fold_address(a) + (imm(dtypes.uint8, 0),))
+   if x.dtype.itemsize == 2 and (x.dtype.scalar() in dtypes.floats or (x._shape is not None and x.max_numel() > 1)) else None),
   (UPat(Ops.LOAD, dtypes.ints+(dtypes.bool,), src=(UPat(name="a"),), name="x"), lambda x,a: x.ins(X86Ops.MOV, src=fold_address(a))),
-  (UPat.var("a").store(UPat.var("b", dt_128bit), name="x"), lambda a,b,x: x.ins(X86Ops.VMOVUPSm, src=fold_address(a) + (b,))),
-  (UPat.var("a").store(UPat.var("b", dt_64bit), name="x"), lambda a,b,x: x.ins(X86Ops.VMOVSDm, src=fold_address(a) + (b,))),
-  (UPat.var("a").store(UPat.var("b", dt_32bit), name="x"), lambda a,b,x: x.ins(X86Ops.VMOVSSm, src=fold_address(a) + (b,))),
-  (UPat.var("a").store(UPat.var("b", dt_16bit), name="x"), lambda a,b,x: x.ins(X86Ops.VPEXTRW, src=fold_address(a) + (b, imm(dtypes.uint8, 0)))),
+  (UPat.var("a").store(UPat.var("b"), name="x"), lambda a,b,x:
+   x.ins(X86Ops.VMOVUPSm, src=fold_address(a) + (b,)) if b.dtype.itemsize == 16 else None),
+  (UPat.var("a").store(UPat.var("b"), name="x"), lambda a,b,x:
+   x.ins(X86Ops.VMOVSDm, src=fold_address(a) + (b,)) if b.dtype.itemsize == 8 and b.dtype.scalar() not in dtypes.int64s else None),
+  (UPat.var("a").store(UPat.var("b"), name="x"), lambda a,b,x:
+   x.ins(X86Ops.VMOVSSm, src=fold_address(a) + (b,))
+   if b.dtype.itemsize == 4 and (b.dtype.scalar() in dtypes.floats or (b._shape is not None and b.max_numel() > 1)) else None),
+  (UPat.var("a").store(UPat.var("b"), name="x"), lambda a,b,x:
+   x.ins(X86Ops.VPEXTRW, src=fold_address(a) + (b, imm(dtypes.uint8, 0)))
+   if b.dtype.itemsize == 2 and (b.dtype.scalar() in dtypes.floats or (b._shape is not None and b.max_numel() > 1)) else None),
   (UPat.var("a").store(UPat.var("b", dtypes.ints+(dtypes.bool,)), name="x"), lambda a,b,x:
    x.ins(X86Ops.MOVm, src=fold_address(a) + (b,)) if (i:=to_imm(b)) is None else x.ins(X86Ops.MOVi, src=fold_address(a) + (i,))),
   # **** X86Op -> X86Op ****

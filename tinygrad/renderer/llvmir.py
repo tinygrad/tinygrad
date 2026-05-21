@@ -253,10 +253,11 @@ class AMDLLVMRenderer(LLVMRenderer):
       f"  {ctx[x]} = call float @llvm.amdgcn.cvt.f32.{'bf8' if y.dtype == dtypes.fp8e5m2 else 'fp8'}(i32 {ctx[x.src[0]]}_i32, i32 0)"),
   ]) + base_rewrite
   extra_matcher = LLVMRenderer.extra_matcher + create_non_native_float_pats(dtypes.fp8s) + PatternMatcher([
-    (UPat(Ops.CAST, dtype=dtypes.half.vec(16), src=UPat.var("y", dtypes.half.vec(8))),
-      lambda y: UOp(Ops.STACK, dtypes.half.vec(16), tuple(y.gep(i // 2) if i % 2 == 0 else UOp.const(dtypes.half, 0.0) for i in range(16)))),
-    (UPat(Ops.CAST, dtype=dtypes.half.vec(8), src=UPat.var("y", dtypes.half.vec(16))),
-      lambda y: UOp(Ops.STACK, dtypes.half.vec(8), tuple(y.gep(i * 2) for i in range(8)))),
+    (UPat(Ops.CAST, dtype=dtypes.half, src=UPat.var("y", dtypes.half), name="x"),
+      lambda x,y: UOp(Ops.STACK, dtypes.half, tuple(y.gep(i // 2) if i % 2 == 0 else UOp.const(dtypes.half, 0.0) for i in range(16)))
+        if x.max_numel() == 16 and y.max_numel() == 8 else None),
+    (UPat(Ops.CAST, dtype=dtypes.half, src=UPat.var("y", dtypes.half), name="x"),
+      lambda x,y: UOp(Ops.STACK, dtypes.half, tuple(y.gep(i * 2) for i in range(8))) if x.max_numel() == 8 and y.max_numel() == 16 else None),
     # amd llvm intrinsics llvm.log2/llvm.exp2 don't support double
     (UPat(Ops.LOG2, dtype=dtypes.double, src=(UPat.var("d"),)), xlog2),
     (UPat(Ops.EXP2, dtype=dtypes.double, src=(UPat.var("d"),)), xexp2),
@@ -291,28 +292,37 @@ exit: %packed = phi i32 [%packed_bf8, %do_bf8], [%packed_fp8, %do_fp8]\n  %trunc
     self.string_rewrite += PatternMatcher([(UPat(Ops.WMMA, name="wmma"), lambda ctx, wmma, cdna=self.is_cdna: render_wmma_amd(ctx, wmma, cdna))])
     if self.is_cdna:
       self.extra_matcher += PatternMatcher([
-        (UPat(Ops.WMMA, name="x", dtype=dtypes.float.vec(4)),
-          lambda x: UOp(Ops.WMMA, dtypes.float.vec(4), (x.src[0].bitcast(dtypes.uint16.vec(4)), x.src[1].bitcast(dtypes.uint16.vec(4)),
-            x.src[2]), (*x.arg,)) if x.src[0].dtype == dtypes.bfloat16.vec(4) else None),
-        (UPat(Ops.WMMA, name="x", dtype=dtypes.float.vec(4)),
-          lambda x: UOp(Ops.WMMA, dtypes.float.vec(4), (x.src[0].bitcast(dtypes.uint64), x.src[1].bitcast(dtypes.uint64),
-            x.src[2]), (*x.arg,)) if x.src[0].dtype in (dtypes.fp8e4m3.vec(8), dtypes.fp8e5m2.vec(8)) else None),
+        (UPat(Ops.WMMA, name="x", dtype=dtypes.float),
+          lambda x: UOp(Ops.WMMA, dtypes.float, (x.src[0].replace(dtype=x.src[0].dtype.scalar()).bitcast(dtypes.uint16),
+            x.src[1].replace(dtype=x.src[1].dtype.scalar()).bitcast(dtypes.uint16), x.src[2]), (*x.arg,))
+            if x.max_numel() == 4 and x.src[0].dtype.scalar() == dtypes.bfloat16 and x.src[0].max_numel() == 4 else None),
+        (UPat(Ops.WMMA, name="x", dtype=dtypes.float),
+          lambda x: UOp(Ops.WMMA, dtypes.float, (x.src[0].replace(dtype=x.src[0].dtype.scalar()).bitcast(dtypes.uint64),
+            x.src[1].replace(dtype=x.src[1].dtype.scalar()).bitcast(dtypes.uint64), x.src[2]), (*x.arg,))
+            if x.max_numel() == 4 and x.src[0].dtype.scalar() in dtypes.fp8_ocp and x.src[0].max_numel() == 8 else None),
       ])
     if target.arch in {"gfx1100", "gfx1151"}:
       self.extra_matcher += PatternMatcher([
-        (UPat(Ops.WMMA, name="x", dtype=dtypes.half.vec(8)),
-          lambda x: UOp(Ops.WMMA, dtypes.half.vec(16), (x.src[0], x.src[1], x.src[2].cast(dtypes.half.vec(16))), (*x.arg,)).cast(dtypes.half.vec(8))),
-        (UPat(Ops.WMMA, name="x"), lambda x: UOp(Ops.WMMA, x.dtype, (x.src[0].bitcast(dtypes.uint16.vec(16)), x.src[1].bitcast(dtypes.uint16.vec(16)),
-          x.src[2]), x.arg) if x.src[0].dtype == dtypes.bfloat16.vec(16) else None),
+        (UPat(Ops.WMMA, name="x", dtype=dtypes.half),
+          lambda x: UOp(Ops.STACK, dtypes.half, tuple(UOp(Ops.WMMA, dtypes.half, (x.src[0], x.src[1],
+            UOp(Ops.STACK, dtypes.half, tuple(x.src[2].gep(i // 2) if i % 2 == 0 else UOp.const(dtypes.half, 0.0) for i in range(16)))),
+            (*x.arg,)).gep(i * 2) for i in range(8))) if x.max_numel() == 8 else None),
+        (UPat(Ops.WMMA, name="x"), lambda x: UOp(Ops.WMMA, x.dtype.scalar(),
+          (x.src[0].replace(dtype=x.src[0].dtype.scalar()).bitcast(dtypes.uint16),
+           x.src[1].replace(dtype=x.src[1].dtype.scalar()).bitcast(dtypes.uint16), x.src[2]), x.arg)
+          if x.src[0].dtype.scalar() == dtypes.bfloat16 and x.src[0].max_numel() == 16 else None),
       ])
     if target.arch in {"gfx1200", "gfx1201"}:
       self.extra_matcher += PatternMatcher([
-        (UPat(Ops.WMMA, name="x", dtype=dtypes.bfloat16.vec(8)), lambda x: UOp(Ops.WMMA, dtypes.uint16.vec(8),
-          (x.src[0].bitcast(dtypes.uint16.vec(8)), x.src[1].bitcast(dtypes.uint16.vec(8)), x.src[2].bitcast(dtypes.uint16.vec(8))), (*x.arg,))
-            .bitcast(dtypes.bfloat16.vec(8)) if x.src[0].dtype == dtypes.bfloat16.vec(8) else None),
-        (UPat(Ops.WMMA, name="x", dtype=dtypes.float.vec(8)),
-          lambda x: UOp(Ops.WMMA, dtypes.float.vec(8), (x.src[0].bitcast(dtypes.uint16.vec(8)), x.src[1].bitcast(dtypes.uint16.vec(8)),
-            x.src[2]), (*x.arg,)) if x.src[0].dtype == dtypes.bfloat16.vec(8) else None)
+        (UPat(Ops.WMMA, name="x", dtype=dtypes.bfloat16), lambda x: UOp(Ops.WMMA, dtypes.uint16,
+          (x.src[0].replace(dtype=x.src[0].dtype.scalar()).bitcast(dtypes.uint16),
+           x.src[1].replace(dtype=x.src[1].dtype.scalar()).bitcast(dtypes.uint16),
+           x.src[2].replace(dtype=x.src[2].dtype.scalar()).bitcast(dtypes.uint16)), (*x.arg,))
+            .bitcast(dtypes.bfloat16) if x.max_numel() == 8 and x.src[0].dtype.scalar() == dtypes.bfloat16 and x.src[0].max_numel() == 8 else None),
+        (UPat(Ops.WMMA, name="x", dtype=dtypes.float),
+          lambda x: UOp(Ops.WMMA, dtypes.float, (x.src[0].replace(dtype=x.src[0].dtype.scalar()).bitcast(dtypes.uint16),
+            x.src[1].replace(dtype=x.src[1].dtype.scalar()).bitcast(dtypes.uint16), x.src[2]), (*x.arg,))
+            if x.max_numel() == 8 and x.src[0].dtype.scalar() == dtypes.bfloat16 and x.src[0].max_numel() == 8 else None)
       ])
 
   def supported_dtypes(self): return {d for d in super().supported_dtypes()
