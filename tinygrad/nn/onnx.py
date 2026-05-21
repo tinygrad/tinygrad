@@ -403,12 +403,12 @@ class OnnxRunner:
     if spec.is_optional and value is None: return None
     if spec.is_sequence:
       if not isinstance(value, Sequence): raise RuntimeError(f"input {name} received {value}, expected a sequence type")
-      sequence = [Tensor(v, dtype=spec.dtype, requires_grad=self.is_training) if not isinstance(v, Tensor) else v for v in value]
+      sequence = [Tensor(v, dtype=spec.dtype) if not isinstance(v, Tensor) else v for v in value]
       if not all_same(tuple(t.shape for t in sequence)): raise RuntimeError(f"Shapes for input {name} sequence must be homogeneous")
       if not all(t.dtype is spec.dtype for t in sequence): warnings.warn(f"Dtypes for input {name} sequence aren't all {spec.dtype}")
       return sequence
     dtype = _from_np_dtype(value.dtype) if is_numpy_ndarray(value) else spec.dtype
-    tensor = Tensor(value, dtype=dtype, requires_grad=self.is_training) if not isinstance(value, Tensor) else value
+    tensor = Tensor(value, dtype=dtype) if not isinstance(value, Tensor) else value
     if tensor.dtype is not spec.dtype: warnings.warn(f"input {name} has mismatch on dtype. Expected {spec.dtype}, received {tensor.dtype}.")
     for dim, (onnx_dim, user_dim_input) in enumerate(zip(spec.shape, tensor.shape, strict=True)):
       if isinstance(onnx_dim, str):
@@ -566,10 +566,10 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
   def Constant(sparse_value:Tensor|None=None, value:Tensor|None=None, value_float:float|None=None, value_floats:list[float]|None=None,
               value_int:int|None=None, value_ints:list[int]|None=None, value_string:str|None=None, value_strings:list[str]|None=None):
     if value is not None: return value
-    if value_float is not None: return Tensor(value_float, dtype=dtypes.float32, requires_grad=False)
-    if value_floats is not None: return Tensor(list(value_floats), dtype=dtypes.float32, requires_grad=False)
-    if value_int is not None: return Tensor(value_int, dtype=dtypes.int64, requires_grad=False)
-    if value_ints is not None: return Tensor(list(value_ints), dtype=dtypes.int64, requires_grad=False)
+    if value_float is not None: return Tensor(value_float, dtype=dtypes.float32)
+    if value_floats is not None: return Tensor(list(value_floats), dtype=dtypes.float32)
+    if value_int is not None: return Tensor(value_int, dtype=dtypes.int64)
+    if value_ints is not None: return Tensor(list(value_ints), dtype=dtypes.int64)
     if value_string is not None or value_strings is not None or sparse_value is not None:
       raise NotImplementedError('Constant OP not implemented for value_string, value_strings and sparse_value')
 
@@ -966,9 +966,9 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     import numpy as np
     if not training_mode: return data, data.full_like(True, dtype=dtypes.bool)
     if seed is not None:
-      rand = Tensor(np.random.RandomState(seed).random(cast(tuple[int,...], data.shape)), requires_grad=False, dtype=data.dtype, device=data.device)
+      rand = Tensor(np.random.RandomState(seed).random(cast(tuple[int,...], data.shape)), dtype=data.dtype, device=data.device)
     else:
-      rand = data.rand_like(requires_grad=False)
+      rand = data.rand_like()
     mask = rand >= ratio
     return data * mask / (1.0 - ratio), mask
   # 6 with 'is_test' needed for https://github.com/MTlab/onnx2caffe/raw/refs/heads/master/model/MobileNetV2.onnx
@@ -1281,8 +1281,8 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     if T == 0: opt.b1_t, opt.b2_t = opt.b1_t.zeros_like(), opt.b2_t.zeros_like()
     else:
       # `T-1` since it's applied again at the start of `_step`
-      opt.b1_t = Tensor([alpha**(T-1)], dtype=dtypes.float32, device=X.device, requires_grad=False)
-      opt.b2_t = Tensor([beta**(T-1)], dtype=dtypes.float32, device=X.device, requires_grad=False)
+      opt.b1_t = Tensor([alpha**(T-1)], dtype=dtypes.float32, device=X.device)
+      opt.b2_t = Tensor([beta**(T-1)], dtype=dtypes.float32, device=X.device)
     opt.step()
     X = (1 - norm_coefficient_post) * X
     return [X, V, H]

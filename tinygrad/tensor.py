@@ -370,7 +370,7 @@ class Tensor(OpMixin):
     """
     if self.uop.device is None: return self
     if (device:=canonicalize_device(device)) == self.device: return self
-    ret = Tensor(self.uop.copy_to_device(device), requires_grad=self.requires_grad)
+    ret = Tensor(self.uop.copy_to_device(device))
     if self.grad is not None: ret.grad = self.grad.to(device)
     return ret
 
@@ -396,7 +396,7 @@ class Tensor(OpMixin):
     if len(devices) == 1: return self.to(devices[0])
     devices = cast(tuple[str, ...], canonicalize_device(devices))
     uop = self.uop.shard(devices, self._resolve_dim(axis)) if axis is not None else self.uop.copy_to_device(devices)
-    return Tensor(uop, requires_grad=self.requires_grad)
+    return Tensor(uop)
 
   def shard_(self, devices:tuple[str, ...], axis:int|None=None) -> Tensor:
     """
@@ -473,8 +473,8 @@ class Tensor(OpMixin):
       var, val = y.unbind()
       _device = canonicalize_device(kwargs.get("device"))
       const = UOp.const(var.dtype, val, _device, ())
-      return Tensor(y.replace(src=(var.replace(src=const.src), const)), **kwargs, requires_grad=False)
-    if y.op is Ops.CONST: return Tensor(y.arg, **kwargs, requires_grad=False)
+      return Tensor(y.replace(src=(var.replace(src=const.src), const)), **kwargs)
+    if y.op is Ops.CONST: return Tensor(y.arg, **kwargs)
     if y.op is Ops.MUL: return Tensor.from_uop(y.src[0]) * Tensor.from_uop(y.src[1])
     if y.op is Ops.ADD: return Tensor.from_uop(y.src[0]) + Tensor.from_uop(y.src[1])
     raise RuntimeError(f"unhandled UOp {y}")
@@ -555,8 +555,8 @@ class Tensor(OpMixin):
   def _next_counter(device:str, num:int) -> tuple[Tensor, Tensor]:
     if device not in Tensor._device_seeds:
       seed = [int.from_bytes(hashlib.sha256(len(Tensor._device_seeds).to_bytes(4, "big")).digest(), "big"), Tensor._seed]
-      Tensor._device_seeds[device] = Tensor(seed, device=device, dtype=dtypes.uint32, requires_grad=False)
-      Tensor._device_rng_counters[device] = Tensor([0, 0], device=device, dtype=dtypes.uint32, requires_grad=False)
+      Tensor._device_seeds[device] = Tensor(seed, device=device, dtype=dtypes.uint32)
+      Tensor._device_rng_counters[device] = Tensor([0, 0], device=device, dtype=dtypes.uint32)
     counter = Tensor._device_rng_counters[device]
     new_low = counter[0:1] + (num & 0xffffffff)
     new_high = counter[1:2] + (num >> 32) + (new_low < counter[0])
@@ -585,7 +585,7 @@ class Tensor(OpMixin):
     device = cast(str, canonicalize_device(device))
 
     # if shape has 0, return zero tensor
-    if (numel := prod(shape)) == 0: return Tensor.zeros(shape, device=device, dtype=dt, requires_grad=requires_grad)
+    if (numel := prod(shape)) == 0: return Tensor.zeros(shape, device=device, dtype=dt)
     num = ceildiv(numel * dt.itemsize, 4)
     key, counter = Tensor._next_counter(device, num)
     bits = Tensor.random_bits(key, counter, num)
@@ -665,7 +665,7 @@ class Tensor(OpMixin):
     print(Tensor.randn(2, 3).numpy())
     ```
     """
-    return Tensor.empty(*shape, **kwargs).randn_like(dtype=dtype, requires_grad=requires_grad)
+    return Tensor.empty(*shape, **kwargs).randn_like(dtype=dtype)
 
   @staticmethod
   def randint(*shape, low=0, high=10, dtype=dtypes.int32, **kwargs) -> Tensor:
@@ -842,7 +842,7 @@ class Tensor(OpMixin):
     """
     assert gradient is not None or self.shape == tuple(), "when no gradient is provided, backward must be called on a scalar tensor"
     if not (self.is_floating_point() and all(t.is_floating_point() for t in targets)): raise RuntimeError("only float Tensors have gradient")
-    if gradient is None: gradient = Tensor(1.0, dtype=self.dtype, device=self.device, requires_grad=False)
+    if gradient is None: gradient = Tensor(1.0, dtype=self.dtype, device=self.device)
     target_uops = [x.uop for x in targets]
     grads = compute_gradient(self.uop, gradient.uop, set(target_uops))
     ret:list[Tensor] = []
@@ -896,7 +896,7 @@ class Tensor(OpMixin):
           index = (index < 0).where(index+size, index)  # treat negative index values
         case list() | tuple():
           if not dtypes.is_int((ti:=Tensor(index)).dtype): raise IndexError(f"{index=} contains non-int element")
-          index = Tensor([i+size if i<0 else i for i in fully_flatten(index)], self.device, requires_grad=False).reshape(ti.shape)
+          index = Tensor([i+size if i<0 else i for i in fully_flatten(index)], self.device).reshape(ti.shape)
         case _: parsed = self._parse_view_index(index, size)
       indices_parsed.append({**parsed, "index":index})
       if index is not None: dim += 1
@@ -1272,7 +1272,7 @@ class Tensor(OpMixin):
   def ufix(self, x) -> Tensor:
     # TODO: x:ConstType|UOp does not work because mixin only accepts Self | ConstType
     assert isinstance(x, (*get_args(ConstType), UOp)), f"{type(x)=}, {x=}"
-    return Tensor(x, self.device, self.dtype if self._ufix_keep_dtype(x) else None, requires_grad=False)
+    return Tensor(x, self.device, self.dtype if self._ufix_keep_dtype(x) else None)
 
   def where(self:Tensor, x:Tensor|ConstType|sint, y:Tensor|ConstType|sint) -> Tensor:
     """
@@ -1294,7 +1294,7 @@ class Tensor(OpMixin):
     """
     if isinstance(x, Tensor): x, y = x._broadcasted(y)
     elif isinstance(y, Tensor): y, x = y._broadcasted(x)
-    else: x, y = Tensor(x, self.device, requires_grad=False)._broadcasted(y)
+    else: x, y = Tensor(x, self.device)._broadcasted(y)
     out_shape = _broadcast_shape(self.shape, x.shape)
     return self.cast(dtypes.bool)._broadcast_to(out_shape)._apply_uop(UOp.where, x._broadcast_to(out_shape), y._broadcast_to(out_shape))
 
@@ -1351,7 +1351,7 @@ class Tensor(OpMixin):
     if not 0 <= p <= 1: raise ValueError(f"{p=} is out of range [0, 1]")
     if not Tensor.training or p == 0: return self
     if p == 1: return self.zeros_like()
-    return (Tensor.rand_like(self, requires_grad=False, dtype=dtypes.default_float, contiguous=False) >= p).contiguous().where(self, 0) / (1.0 - p)
+    return (Tensor.rand_like(self, dtype=dtypes.default_float, contiguous=False) >= p).contiguous().where(self, 0) / (1.0 - p)
 
   def scaled_dot_product_attention(self, key:Tensor, value:Tensor, attn_mask:Tensor|None=None, dropout_p:float=0.0,
                                    is_causal:bool=False, enable_gqa:bool=False) -> Tensor:
