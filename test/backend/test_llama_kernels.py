@@ -26,8 +26,10 @@ def run_fused_ce(bs:int, seqlen:int, vocab:int, label_smoothing:float=0.0) -> No
     assert loss.allclose(ref, atol=2e-3, rtol=2e-3).item(), "forward mismatch"
     assert logits.grad.allclose(logits_ref.grad, atol=2e-3, rtol=2e-3).item(), "grad mismatch"
 
-@unittest.skipUnless(dtypes.bfloat16 in Device[Device.DEFAULT].renderer.supported_dtypes(), "need bfloat16")
 class TestFusedCE(unittest.TestCase):
+  def setUp(self):
+    if dtypes.bfloat16 not in Device[Device.DEFAULT].renderer.supported_dtypes(): self.skipTest("need bfloat16")
+
   def test_fused_ce_1_2_16(self): run_fused_ce(1, 2, 16, label_smoothing=0.2)
   def test_fused_ce_2_16_128(self): run_fused_ce(2, 16, 128)
   def test_fused_ce_4_128_1024(self): run_fused_ce(4, 128, 1024, label_smoothing=0.2)
@@ -61,12 +63,17 @@ def run_quantize_fp8(shape:tuple[int, ...], delayed:bool=True) -> None:
 
 @unittest.skipUnless(dtypes.bfloat16 in Device[Device.DEFAULT].renderer.supported_dtypes(), "need bfloat16")
 class TestQuantizeFP8(unittest.TestCase):
+  def setUp(self):
+    ren = Device[Device.DEFAULT].renderer
+    if dtypes.bfloat16 not in ren.supported_dtypes(): self.skipTest("need bfloat16")
+    if not ren.has_local or not ren.has_shared: self.skipTest("need local/shared")
+
   def test_scalar(self): run_quantize_fp8((getenv("N", 1024), 32), delayed=False)
-  def test_delayed(self): run_quantize_fp8((getenv("N", 1024), 1024))
+  def test_delayed(self): run_quantize_fp8((getenv("N", 2048), 1024))
 
   def test_multi(self):
-    devs = tuple(f"NULL:{i}" for i in range(8))
-    x = Tensor.empty(4, 8, dtype=dtypes.bfloat16, device=devs).uop.multi(0)
+    devs = tuple(f"{Device.DEFAULT}:{i}" for i in range(8))
+    x = Tensor.empty(2048*8, 1024, dtype=dtypes.bfloat16, device=devs).uop.multi(0)
     x = Tensor(x, device=devs)
     amax_state = Tensor.full((), 2.0, dtype=dtypes.float32, device=devs).contiguous()
     fp8, _, new_amax, _ = quantize_fp8_delayed(x, amax_state, FP8_DTYPE)
