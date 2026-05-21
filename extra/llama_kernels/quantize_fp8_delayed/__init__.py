@@ -1,13 +1,12 @@
-from __future__ import annotations
 import functools
 from tinygrad import Tensor, dtypes
+from tinygrad.helpers import prod
 from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
 from extra.llama_kernels import FP8_MAX, NUM_WG, THREADS_PER_WG, alloc_like, alloc_local, scalar_amax
 
 @functools.cache
 def _custom_quantize_fp8_with_amax(fp8_out:UOp, amax_partial:UOp, x:UOp, amax_state:UOp) -> UOp:
-  n_elems = 1
-  for d in x.shape: n_elems *= d
+  n_elems = prod(x.shape)
   num_wg = amax_partial.shape[0]
   elems_per_wg = n_elems // num_wg
   assert n_elems == num_wg * elems_per_wg, f"{n_elems=} must divide over {num_wg=}"
@@ -17,18 +16,14 @@ def _custom_quantize_fp8_with_amax(fp8_out:UOp, amax_partial:UOp, x:UOp, amax_st
   i = UOp.range(elems_per_wg, 1)
   idx = wg * elems_per_wg + i
   x_f = x.reshape(n_elems)[idx].cast(dtypes.float)
+  abs_x = (x_f < 0).where(-x_f, x_f)
   fp8_store = fp8_out.reshape(n_elems)[idx].store((x_f * scale).cast(fp8_out.dtype.base)).end(i)
-
-  r = UOp.range(elems_per_wg, 2, axis_type=AxisType.REDUCE)
-  xr = x.reshape(n_elems)[wg * elems_per_wg + r].cast(dtypes.float)
-  abs_x = (xr < 0).where(-xr, xr)
-  amax_store = amax_partial.after(fp8_store)[wg].store(abs_x.reduce(r, arg=Ops.MAX))
-  return amax_store.end(wg).sink(arg=KernelInfo(f"quantize_fp8_with_amax_{n_elems}"))
+  amax_store = amax_partial[wg].store(abs_x.reduce(i, arg=Ops.MAX))
+  return UOp.sink(fp8_store.end(wg), amax_store.end(wg), arg=KernelInfo(f"quantize_fp8_with_amax_{n_elems}"))
 
 @functools.cache
 def _custom_quantize_fp8_scalar(fp8_out:UOp, x:UOp, amax_state:UOp) -> UOp:
-  n_elems = 1
-  for d in x.shape: n_elems *= d
+  n_elems = prod(x.shape)
   scale = FP8_MAX / (amax_state[0].cast(dtypes.float) + 1e-8)
 
   i = UOp.range(n_elems, 0)
@@ -54,8 +49,8 @@ def quantize_fp8_delayed(x:Tensor, amax_state:Tensor, fp8_dtype=dtypes.fp8e4m3) 
   assert x.dtype == dtypes.bfloat16, f"expected bf16, got {x.dtype}"
   axis = x.uop.axis if isinstance(x.device, tuple) else None
   fp8_out = alloc_like(x.shape, fp8_dtype, x.device, axis)
-  n_elems = functools.reduce(lambda a,b: a*b, x.shape, 1)
-  num_partials = min(48 * NUM_WG, n_elems // THREADS_PER_WG)
+  n_elems = prod(x.shape)
+  num_partials = n_elems // 4
   while n_elems % num_partials != 0: num_partials -= NUM_WG
   amax_partial = alloc_local((num_partials,), dtypes.float32, x.device, axis)
   fp8_out, amax_partial, *_ = Tensor.custom_kernel(fp8_out, amax_partial, x, amax_state,

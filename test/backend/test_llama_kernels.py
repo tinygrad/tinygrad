@@ -44,12 +44,14 @@ def run_quantize_fp8_delayed(shape:tuple[int, ...]) -> None:
 
   fp8, inv_scale, new_amax, _ = quantize_fp8_delayed(x, amax_state, FP8_DTYPE)
   ref_fp8, ref_inv_scale, ref_new_amax = quantize_fp8(x, amax_state=amax_state)
-  Tensor.realize(fp8, inv_scale, new_amax, ref_fp8, ref_inv_scale, ref_new_amax)
+  Tensor.realize(fp8, inv_scale, new_amax)
+  Tensor.realize(ref_fp8, ref_inv_scale, ref_new_amax)
 
   with Context(DEBUG=0):
     assert fp8.cast(dtypes.float).allclose(ref_fp8.cast(dtypes.float), atol=0, rtol=0).item(), "fp8 mismatch"
     assert inv_scale.allclose(ref_inv_scale, atol=0, rtol=0).item(), "inv_scale mismatch"
-    assert new_amax.allclose(ref_new_amax, atol=0, rtol=0).item(), "amax mismatch"
+    assert new_amax.allclose(ref_new_amax, atol=0, rtol=0).item(), \
+      f"amax mismatch: got={new_amax.item()} ref={ref_new_amax.item()} diff={abs(new_amax.item()-ref_new_amax.item())}"
 
 def run_quantize_fp8_scalar(shape:tuple[int, ...]) -> None:
   Tensor.manual_seed(0)
@@ -59,15 +61,18 @@ def run_quantize_fp8_scalar(shape:tuple[int, ...]) -> None:
 
   fp8 = quantize_fp8_scalar(x, amax_state, FP8_DTYPE)
   ref_fp8, _, _ = quantize_fp8(x, amax_state=amax_state)
-  Tensor.realize(fp8, ref_fp8)
+  Tensor.realize(fp8)
+  Tensor.realize(ref_fp8)
 
   with Context(DEBUG=0):
     assert fp8.cast(dtypes.float).allclose(ref_fp8.cast(dtypes.float), atol=0, rtol=0).item(), "fp8 mismatch"
 
-@unittest.skipUnless(is_dtype_supported(dtypes.bfloat16), "need bfloat16")
-@unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
-@unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
 class TestQuantizeFP8(unittest.TestCase):
+  def setUp(self):
+    if not is_dtype_supported(dtypes.bfloat16): self.skipTest("need bfloat16")
+    if not Device[Device.DEFAULT].renderer.has_local: self.skipTest("test requires locals")
+    if not Device[Device.DEFAULT].renderer.has_shared: self.skipTest("test requires shared")
+
   def test_scalar(self): run_quantize_fp8_scalar((32, getenv("N", 1024)))
   def test_delayed(self): run_quantize_fp8_delayed((2048, getenv("N", 1024)))
 
