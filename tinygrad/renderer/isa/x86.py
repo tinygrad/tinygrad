@@ -351,7 +351,8 @@ def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
   defs = []
   if isinstance(x.tag, tuple): defs = [ctx.vreg(x.tag)]
   elif x.dtype in dtypes.ints+(dtypes.bool,) or isinstance(x.dtype, PtrDType): defs = [ctx.vreg(WGPR)]
-  elif x.dtype.scalar() in dtypes.floats or x.max_numel() > 1: defs = [ctx.vreg(XMM)]
+  elif x.dtype.scalar() in dtypes.floats or (x._shape is not None and x.max_numel() > 1) or (x.op is Ops.INS and x.arg.name.startswith("V")):
+    defs = [ctx.vreg(XMM)]
   # TODO: add this once the scheduler can track register pressure
   # if x.arg in X86GroupOp.WriteFlags: defs.append(ctx.vreg(RFLAGS))
   return x.replace(tag=tuple(defs))
