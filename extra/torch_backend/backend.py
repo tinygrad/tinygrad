@@ -559,8 +559,10 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.remainder.Scalar_Tensor": lambda x,y: x%y,
   "aten.floor_divide": lambda x,y: x//y,
   "aten.floor_divide_.Tensor": lambda x,y: x//y,
+  "aten.__lshift__.Tensor": lambda x,y: x<<y,
   "aten.__lshift__.Scalar": lambda x,y: x<<y,
   "aten.__ilshift__.Scalar": lambda x,y: x<<y,
+  "aten.__rshift__.Tensor": lambda x,y: x>>y,
   "aten.__rshift__.Scalar": lambda x,y: x>>y,
   "aten.__irshift__.Scalar": lambda x,y: x>>y,
   # inplace ops using replace for fusion
