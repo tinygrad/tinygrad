@@ -21,7 +21,7 @@ def get_gated_load_uop(valid:UOp, idx:UOp):
 
 def get_load_image_uop(image_shape:tuple[int, ...], valid:UOp, idx:tuple[UOp, UOp]):
   return UOp(Ops.LOAD, dtypes.float.vec(4), (
-    UOp(Ops.PARAM, dtypes.imagef(image_shape), arg=0).index(UOp(Ops.STACK, dtypes.weakint.vec(2), idx).valid(valid), ptr=True),
+    UOp(Ops.PARAM, dtypes.imagef(image_shape), arg=0).index(idx[1].valid(valid), idx[0].valid(valid), ptr=True),
     UOp(Ops.STACK, dtypes.float.vec(4), src=(UOp.const(dtypes.float, 0.0),) * 4)
   ))
 
@@ -222,17 +222,16 @@ class TestValidIdxSimplification(unittest.TestCase):
 class TestImageSimplification(unittest.TestCase):
   def check(self, load, svalid, sidx0, sidx1):
     load = simplify_image_idx(load.sink()).src[0]
-    off = load.src[0].src[1]
-    idx = off.get_idx()
-    self.assertEqual(idx.op, Ops.STACK)
-    self.assertEqual(len(idx.src), 2)
-    idx0, idx1 = idx.src[0], idx.src[1]
+    off = load.src[0]
+    self.assertEqual(len(off.src), 3)
+    idx0, idx1 = off.src[2].get_idx(), off.src[1].get_idx()
     check_uop_against_string(self, idx0, sidx0)
     check_uop_against_string(self, idx1, sidx1)
+    self.assertEqual(off.src[1].get_valid(), off.src[2].get_valid())
     if svalid is not None:
-      check_uop_against_string(self, off.get_valid(), svalid)
+      check_uop_against_string(self, off.src[1].get_valid(), svalid)
     else:
-      self.assertEqual(off.get_valid(), UOp.const(dtypes.bool, True), "svalid is None but valid is not True")
+      self.assertEqual(off.src[1].get_valid(), UOp.const(dtypes.bool, True), "svalid is None but valid is not True")
 
   def test_idx_gt_c(self):
     # (idx1 < c+1).ne(True) ? (..., idx1-1+c) : 0 can drop the valid
@@ -507,14 +506,6 @@ class TestImageSimplification(unittest.TestCase):
       # TODO: fold valid
       self.check(load, "(((lidx1<1)!=True)&(((lidx0+r0)<3)!=True)&((lidx0+r0)<11))",
                        "(lidx2+gidx0*4+lidx1*256+(lidx0*1024+r0*1024)+-3264)", "0")
-
-class TestUnfoldableImage(unittest.TestCase):
-  def test_unfoldable_becomes_buffer(self):
-    with Context(SPEC=0):
-      lidx = Special("lidx", 2)
-      load = UOp(Ops.LOAD, dtypes.float, (UOp(Ops.PARAM, dtypes.imagef((10, 10, 4)), arg=0).index(lidx, ptr=True), UOp.const(dtypes.float, 0)))
-      res = full_rewrite(load.sink()).src[0]
-      self.assertEqual(res.src[0].src[0].dtype, dtypes.float.ptr(400))
 
 class TestDropTrueGate(unittest.TestCase):
   def test_drop_true_gate_on_index(self):

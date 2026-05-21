@@ -6,7 +6,6 @@ import examples.mlperf.metrics as metrics
 from tinygrad.helpers import fetch
 from test.helpers import slow
 from tinygrad import Tensor, Device, dtypes
-from tinygrad.device import is_dtype_supported
 import numpy as np
 
 # Audio generated with the command on MacOS:
@@ -53,7 +52,6 @@ def wer_helper(result: str, reference: str)->float:
   return wer
 
 @unittest.skipIf(Device.DEFAULT in ["CPU"], "slow")
-@unittest.skipUnless(is_dtype_supported(dtypes.float16), "need float16 support")
 # TODO: WEBGPU GPU dispatch dimensions limit
 @unittest.skipIf(Device.DEFAULT == "WEBGPU", "WEBGPU GPU dispatch dimensions limit")
 class TestWhisper(unittest.TestCase):

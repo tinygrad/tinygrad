@@ -2,7 +2,6 @@
 import numpy as np
 import unittest
 from tinygrad import Tensor, Device, dtypes
-from tinygrad.device import is_dtype_supported
 from tinygrad.uop.ops import Ops, UOp
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.nir import NIRRenderer
@@ -86,12 +85,12 @@ class TestIdxUpcast(unittest.TestCase):
   def do_op_then_assert(self, dtype: DType, dim1, dim2, dim3):
     self._assert(dtype, Tensor.empty(dim1, dim2, 1).expand(-1, -1, dim3).contiguous())
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.long), "int64 is supported")
+  @unittest.skipUnless(dtypes.long in Device[Device.DEFAULT].renderer.supported_dtypes(), "int64 is supported")
   def test_overflow(self):
     # 2**11, 2**11, 2**11 -> 2**33 will overflow when indexed
     self.do_op_then_assert(dtypes.long, 2048, 2048, 2048)
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.long), "int64 is supported")
+  @unittest.skipUnless(dtypes.long in Device[Device.DEFAULT].renderer.supported_dtypes(), "int64 is supported")
   def test_overflow_sym(self):
     self.do_op_then_assert(dtypes.long, 2048, 2048, UOp.variable("dim3", 1, 2048).bind(32))
 
@@ -108,12 +107,12 @@ class TestIdxUpcast(unittest.TestCase):
     uops = self._schedule_render(a)
     assert all(uop.dtype is not dtypes.long for uop in uops)
 
-  @unittest.skipIf(is_dtype_supported(dtypes.long), "int64 is supported")
+  @unittest.skipIf(dtypes.long in Device[Device.DEFAULT].renderer.supported_dtypes(), "int64 is supported")
   def test_int64_unsupported_overflow_sym(self):
     with self.assertRaises((KeyError, RuntimeError)):
       self.do_op_then_assert(dtypes.long, 2048, 2048, UOp.variable("dim3", 1, 2048).bind(32))
 
-  @unittest.skipIf(is_dtype_supported(dtypes.long), "int64 is supported")
+  @unittest.skipIf(dtypes.long in Device[Device.DEFAULT].renderer.supported_dtypes(), "int64 is supported")
   @unittest.expectedFailure  # bug in gpu dims limiting
   def test_int64_unsupported_overflow(self):
     with self.assertRaises((KeyError, RuntimeError)):
@@ -143,12 +142,6 @@ class TestTensorUnique(unittest.TestCase):
   def test_zeros_bufs_unique(self):
     a = Tensor.zeros(10, 10).contiguous()
     b = Tensor.zeros(10, 10).contiguous()
-    Tensor.realize(a,b)
-    self.assertIsNot(a.uop.buffer, b.uop.buffer)
-
-  def test_eye_bufs_unique(self):
-    a = Tensor.eye(10).contiguous()
-    b = Tensor.eye(10).contiguous()
     Tensor.realize(a,b)
     self.assertIsNot(a.uop.buffer, b.uop.buffer)
 

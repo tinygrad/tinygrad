@@ -22,7 +22,7 @@ ASM_GEMM = getenv("ASM_GEMM", 0)
 FUSED_INPUT_QUANTIZE = getenv("FUSED_INPUT_QUANTIZE", 0)
 FUSED_ADD_NORM_MUL_QUANTIZE = getenv("FUSED_ADD_NORM_MUL_QUANTIZE", 0)
 FUSED_SILU_W13 = getenv("FUSED_SILU_W13", 0)
-SPLIT_W13 = getenv("SPLIT_W13", 1)
+SPLIT_W13 = getenv("SPLIT_W13", 0)
 
 FP8_DTYPE = dtypes.fp8e4m3
 FP8_GRAD_DTYPE = dtypes.fp8e5m2
@@ -273,18 +273,17 @@ def apply_grad(grad_buf:Tensor, new_grad:UOp):
   pads = _get_pads(new_grad)
   if len(pads) <= 1:
     new_grad = new_grad.cast(grad_buf.dtype)
-    store = grad_buf.uop.store(grad_buf.uop + new_grad)
-    grad_buf.uop = grad_buf.uop.after(store)
+    grad_buf.uop = grad_buf.uop.after(grad_buf.uop.store(grad_buf.uop + new_grad))
     return
-  sorted_pads = sorted(pads, key=lambda p: p.marg[0][0] if p.op == Ops.PAD else 0)
-  inners_raw = [Tensor(p.src[0] if p.op == Ops.PAD else p, device=grad_buf.device) for p in sorted_pads]
-  if getenv("FUSED_PAD_GRAD_ACCUM", 0):
-    from extra.llama_kernels.fused_pad_grad_accum import fused_pad_grad_accum, can_fused_pad_grad_accum
-    if can_fused_pad_grad_accum(grad_buf, inners_raw):
-      grad_buf.uop = fused_pad_grad_accum(grad_buf, inners_raw).uop
-      return
-  inners = [t.cast(grad_buf.dtype) for t in inners_raw]
-  grad_buf.assign(grad_buf + inners[0].cat(*inners[1:], dim=0))
+  cur = grad_buf.uop
+  for pad in sorted(pads, key=lambda p: p.marg[0][0] if p.op == Ops.PAD else 0, reverse=True):
+    if pad.op == Ops.PAD:
+      grad_shrink = tuple([(p[0], s+p[0]) for s,p in zip(pad.src[0].shape, pad.marg)])
+      buf_slice = cur.shrink(grad_shrink)
+      cur = cur.after(buf_slice.store(buf_slice + pad.src[0].cast(cur.dtype)))
+    else:
+      cur = cur.after(cur.store(cur + pad.cast(cur.dtype)))
+  grad_buf.uop = cur
 
 if __name__ == "__main__":
   config = {}
@@ -329,6 +328,9 @@ if __name__ == "__main__":
     return Tensor.zeros(x.shape, dtype=grad_dtype(x), device=x.device).contiguous()
   grads = {x:_make_grad(x) for x in state.values() if x.requires_grad}
 
+  fp8_amax = [t for ts in model._fp8_amax.values() for t in ts]
+  fp8_grad_amax = [t for ts in model._fp8_grad_amax.values() for t in ts]
+
   # print model size
   sz = 0
   for k,v in state.items():
@@ -350,7 +352,7 @@ if __name__ == "__main__":
     with Timing("python backward: "):
       for t,g in zip(grads, loss.gradient(*grads)):
         apply_grad(grads[t], g.uop)
-    with Timing("run fwd_bwd: "): loss.realize(*grads.values())
+    with Timing("run fwd_bwd: "): loss.realize(*grads.values(), *fp8_amax, *fp8_grad_amax)
 
   @TinyJit
   def optim_step():

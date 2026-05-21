@@ -13,7 +13,7 @@ from tinygrad.gradient import compute_gradient
 from tinygrad.mixin import OpMixin
 from tinygrad.uop.ops import UOp, Ops, sint, all_metadata, _index_to_concrete_int, Variable, _broadcast_shape
 from tinygrad.schedule import create_linear_with_vars
-from tinygrad.device import Buffer, Device, canonicalize_device
+from tinygrad.device import Buffer, canonicalize_device
 from tinygrad.engine.realize import run_linear
 from tinygrad.callify import transform_to_call
 
@@ -92,7 +92,7 @@ class Tensor(OpMixin):
   training: ClassVar[bool] = False
 
   def __init__(self, data:ConstType|bytes|list|tuple|UOp|'numpy.ndarray'|pathlib.Path|None,
-               device:str|tuple|list|None=None, dtype:DTypeLike|None=None, requires_grad:bool=True, _force_unique:bool=False):
+               device:str|tuple|list|None=None, dtype:DTypeLike|None=None, requires_grad:bool=True):
     if device is None:
       if isinstance(data, pathlib.Path): device = f"DISK:{data.resolve()}"  # keep it on the disk if device is None
       elif isinstance(data, UOp): device = data.device
@@ -113,8 +113,7 @@ class Tensor(OpMixin):
     elif data is None:
       data = UOp.const(_dtype or dtypes.default_float, 0, _device)
     elif isinstance(data, get_args(ConstType)):
-      dt = _dtype or dtypes.from_py(data)
-      data = UOp.unique_const(data, dt, _device) if _force_unique or (requires_grad and dtypes.is_float(dt)) else UOp.const(dt, data, _device)
+      data = UOp.const(_dtype or dtypes.from_py(data), data, _device)
     elif isinstance(data, bytes): data = _frompy(data, _dtype or dtypes.uint8, _device)
     elif isinstance(data, (list, tuple)):
       if _dtype is None:
@@ -161,11 +160,16 @@ class Tensor(OpMixin):
   def alu(self, op: Ops, *src: Tensor) -> Tensor: return self._apply_uop(lambda *u: u[0].alu(op, *u[1:]), *src)
   def const_like(self, b:ConstType) -> Tensor: return Tensor(self.uop.const_like(b), requires_grad=False)
   @staticmethod
-  def unique_const(fill_value:ConstType|UOp, **kwargs) -> Tensor: return Tensor(fill_value, _force_unique=True, **kwargs)
+  def const(dtype:DType, b:ConstType|UOp, device:str|tuple[str, ...]|None=None) -> Tensor:
+    return Tensor(b if isinstance(b, UOp) else UOp.const(dtype, b, device))
+  @staticmethod
+  def unique_const(fill_value:ConstType|UOp, **kwargs) -> Tensor:
+    if isinstance(fill_value, UOp): return Tensor(fill_value, **kwargs)
+    dtype, device = kwargs.pop("dtype", None), kwargs.pop("device", None)
+    return Tensor(UOp.unique_const(fill_value, dtype, device), **kwargs)
 
   def requires_grad_(self, requires_grad:bool=True) -> Tensor:
-    # make the UOp unique if it's a CONST to prevent gradient accumulation bugs with cached const UOps
-    if requires_grad and self.uop.op is Ops.CONST: self.replace(Tensor(self.uop.arg, device=self.device, dtype=self.dtype, requires_grad=True))
+    if requires_grad and self.uop.op is Ops.CONST: self.replace(self.clone())
     self.requires_grad = requires_grad
     return self
 
@@ -225,8 +229,6 @@ class Tensor(OpMixin):
 
   def linear_with_vars(self, *lst:Tensor) -> tuple[UOp, dict[str, int]]:
     """Creates the LINEAR UOp needed to realize these Tensor(s), with Variables."""
-    for x in (self,)+lst:
-      if x.uop.device is None: x.replace(Tensor.empty(*x.shape, dtype=x.dtype, device=Device.DEFAULT).assign(x))
     big_sink, becomes_map = transform_to_call(UOp.sink(*[x.uop for x in (self,)+lst]))
     _apply_map_to_tensors(becomes_map, name="buffers")
     return create_linear_with_vars(big_sink)
@@ -240,7 +242,7 @@ class Tensor(OpMixin):
   @disable_gc()
   def realize(self, *lst:Tensor, do_update_stats=True) -> Tensor:
     """Triggers the computation needed to create these Tensor(s)."""
-    if len(to_realize:=[x for x in (self,)+lst if not x.uop.has_buffer_identity()]):
+    if len(to_realize:=[x for x in (self,)+lst if x.uop.device is not None and not x.uop.has_buffer_identity()]):
       run_linear(*Tensor.linear_with_vars(*to_realize), update_stats=do_update_stats)
     return self
 
@@ -288,7 +290,7 @@ class Tensor(OpMixin):
       from tinygrad.engine.jit import JitError
       raise JitError("cannot access tensor data during JIT capture, the value will be baked in")
     x = self.cast(self.dtype.base).contiguous()
-    if isinstance(self.device, tuple): x = x.to("CPU")
+    if self.uop.device is None or isinstance(self.device, tuple): x = x.clone("CPU")
     return cast(Buffer, x.realize().uop.buffer).ensure_allocated()
   def _data(self) -> memoryview: return self._buffer().as_memoryview()
 
@@ -353,13 +355,14 @@ class Tensor(OpMixin):
     if 0 in self.shape: return np.empty(self.shape, dtype=_to_np_dtype(self.dtype.base))
     return self._buffer().numpy().reshape(self.shape)
 
-  def clone(self) -> Tensor:
+  def clone(self, device:str|tuple[str, ...]|None=None) -> Tensor:
     """
     Creates a clone of this tensor allocating a separate buffer for the data.
+    If `device` is specified, the clone is placed on that device.
     """
-    ret = self.empty_like()
-    if self.grad is not None: ret.grad = self.grad.clone()
-    return ret.assign(self)
+    ret = Tensor(self.uop.clone(device=device))
+    if self.grad is not None: ret.grad = self.grad.clone(device=device)
+    return ret
 
   def to(self, device:str|tuple[str, ...]|None) -> Tensor:
     """
@@ -859,9 +862,9 @@ class Tensor(OpMixin):
     ```
     """
     all_uops = self.uop.toposort()
-    # backward fills .grad for every in-scope float tensor; .detach() only blocks gradient flow to the source
+    # backward fills .grad for every in-scope non-CONST float tensor
     tensors_need_grad: list[Tensor] = [t for tref in all_tensors if (t:=tref()) is not None and \
-                                       t.uop in all_uops and t.is_floating_point()]
+                                       t.uop in all_uops and t.is_floating_point() and t.uop.op is not Ops.CONST]
     # clear contexts
     for t,g in zip(tensors_need_grad, self.gradient(*tensors_need_grad, gradient=gradient)):
       assert g.shape == t.shape, f"grad shape must match tensor shape, {g.shape!r} != {t.shape!r}"
@@ -1008,10 +1011,11 @@ class Tensor(OpMixin):
     if isinstance(v, Tensor) and v.dtype != self.dtype: raise RuntimeError(f"setitem dtype mismatch: {self.dtype=} != {v.dtype=}")
     # raise if mutation would diverge from eager (allow only pure views of a realized buffer; exclude +=/-= RHS via v_uop/v_bw)
     v_uop, v_bw = (v.uop, v.uop.backward_slice) if isinstance(v, Tensor) else (None, {})
-    shared = self.uop.base if self.uop.base.is_realized else None
-    if any(self.uop in t.uop.backward_slice_with_self and t.uop.base is not shared for tref in all_tensors
-           if (t:=tref()) is not None and t is not self and t.uop is not v_uop and t.uop not in v_bw):
-      raise RuntimeError("can't setitem on a tensor with other uses")
+    if self.uop.op_in_backward_slice_with_self(Ops.BUFFER):
+      shared = self.uop.base if self.uop.base.is_realized else None
+      if any(self.uop in t.uop.backward_slice_with_self and t.uop.base is not shared for tref in all_tensors
+             if (t:=tref()) is not None and t is not self and t.uop is not v_uop and t.uop not in v_bw):
+        raise RuntimeError("can't setitem on a tensor with other uses")
     if not self.uop.base.is_realized and self.is_floating_point() and (self.requires_grad or (isinstance(v, Tensor) and v.requires_grad)):
       if not isinstance(v, Tensor): v = Tensor(v, device=self.device, dtype=self.dtype)
       # __iadd__/__isub__ creates AFTER(view, STORE(view, computed)); unwrap to get the computed value
