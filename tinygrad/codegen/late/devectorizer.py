@@ -38,11 +38,12 @@ def _drop_valid_stmts(valid:UOp, idx:UOp, height:int, width:int) -> list[UOp]:
 
 def simplify_valid_load(buf:UOp, start_idx:UOp, valid:UOp) -> UOp|None:
   idx = uop_given_valid(valid, start_idx)
-  if not isinstance(buf.dtype, ImageDType): return None if idx is start_idx else buf.index(idx.valid(valid), ptr=True)
+  return None if idx is start_idx else buf.index(idx.valid(valid), ptr=True)
 
-  # wait for it to be image indexed before running simplification
-  if start_idx.dtype.count != 2: return None
-
+def simplify_valid_image_load(buf:UOp, idx_y:UOp, idx_x:UOp, valid:UOp) -> UOp|None:
+  if not isinstance(buf.dtype, ImageDType): return None
+  start_idx = UOp.vectorize(idx_x, idx_y)
+  idx = uop_given_valid(valid, start_idx)
   drop_stmt = _drop_valid_stmts(valid, idx, buf.dtype.shape[0], buf.dtype.shape[1])
 
   if not drop_stmt and idx is start_idx: return None
@@ -50,13 +51,11 @@ def simplify_valid_load(buf:UOp, start_idx:UOp, valid:UOp) -> UOp|None:
   idx_y, idx_x = idx.gep(1), idx.gep(0)
   return buf.index(idx_y.valid(new_valid), idx_x.valid(new_valid), ptr=True) if new_valid is not None else buf.index(idx_y, idx_x, ptr=True)
 
-
 load_store_indexing = PatternMatcher([
   # image load valid idx simplification
   (UPat(Ops.INDEX, src=(UPat.var("buf"), invalid_gate)), lambda buf,x,i,cond: simplify_valid_load(buf, x, cond)),
-  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("cond").where(UPat.var("idx_y"), UPat(arg=Invalid)),
-                                         UPat.var("cond").where(UPat.var("idx_x"), UPat(arg=Invalid)))),
-   lambda buf,cond,idx_y,idx_x: simplify_valid_load(buf, UOp.vectorize(idx_x, idx_y), cond) if isinstance(buf.dtype, ImageDType) else None),
+  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("valid").where(UPat.var("idx_y"), UPat(arg=Invalid)),
+                                         UPat.var("valid").where(UPat.var("idx_x"), UPat(arg=Invalid)))), simplify_valid_image_load),
 ])
 
 # ***** load/store grouping *****
