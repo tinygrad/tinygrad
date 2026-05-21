@@ -3,8 +3,9 @@ import unittest, os, subprocess
 from unittest.mock import patch
 from tinygrad import Tensor
 from tinygrad.device import Device, Compiler, enumerate_devices_str
-from tinygrad.helpers import diskcache_get, diskcache_put, getenv, Context, Target, WIN, CI, OSX, DEV
+from tinygrad.helpers import diskcache_get, diskcache_put, getenv, Context, Target, WIN, OSX, DEV
 from tinygrad.runtime.support.c import DLL
+from test.helpers import CI
 
 class TestDevice(unittest.TestCase):
   def test_canonicalize(self):

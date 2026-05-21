@@ -2,14 +2,14 @@ import unittest, math
 from functools import partial
 
 from tinygrad import nn, dtypes, Tensor, Device, TinyJit, Variable
-from tinygrad.helpers import getenv, CI, OSX
+from tinygrad.helpers import getenv, OSX
 from tinygrad.codegen import to_program
 
 from tinygrad.uop.ops import Ops
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.nir import NIRRenderer
 from tinygrad.renderer.isa.x86 import X86Renderer
-from test.helpers import not_support_multi_device, needs_second_gpu
+from test.helpers import not_support_multi_device, needs_second_gpu, CI
 
 import numpy as np
 import torch

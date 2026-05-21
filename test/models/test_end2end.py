@@ -6,7 +6,7 @@ from tinygrad.nn.state import get_parameters, get_state_dict
 from tinygrad.nn import optim, Linear, Conv2d, BatchNorm2d
 from tinygrad.tensor import Tensor
 from extra.datasets import fetch_mnist
-from tinygrad.helpers import CI
+from test.helpers import CI
 
 def compare_tiny_torch(model, model_torch, X, Y):
   with Tensor.train():

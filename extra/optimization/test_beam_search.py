@@ -1,7 +1,8 @@
 import unittest
 import numpy as np
 
-from tinygrad.helpers import BEAM, Timing, CI, prod
+from test.helpers import CI
+from tinygrad.helpers import BEAM, Timing, prod
 from tinygrad import Variable, Device, Tensor
 from tinygrad.nn import Conv2d
 from tinygrad.uop.ops import AxisType, Ops

@@ -1,12 +1,13 @@
 import unittest, operator, math
 from tinygrad import Context, Tensor, dtypes, Device
 from tinygrad.dtype import DType, truncate, fp8_to_float
-from tinygrad.helpers import CI, EMULATED_DTYPES, DEV, getenv
+from tinygrad.helpers import EMULATED_DTYPES, DEV, getenv
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.runtime.ops_python import from_storage_scalar
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.nir import NIRRenderer
 from tinygrad.uop import Ops
+from test.helpers import CI
 import numpy as np
 import pytest
 from hypothesis import assume, given, strategies as strat, settings
