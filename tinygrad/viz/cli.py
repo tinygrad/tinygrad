@@ -199,7 +199,8 @@ def main(args) -> None:
           if DEBUG >= 3 and s["name"] == "View Base AST": print_step(s)
           if DEBUG >= 4 and s["name"] == "View Source": print_step(s)
           if DEBUG >= 5 or ls: print(emit(" "*s["depth"]+s["name"]+(f" - {s['match_count']}" if s.get('match_count', 0) else '')))
-          if DEBUG >= 6 or (DEBUG >= 5 and s["name"] == "View Kernel Graph") or (s["name"] in args.src): print_step(s, print_graph=True, reconstruct_matches=s["name"] in args.src)
+          if DEBUG >= 6 or (DEBUG >= 5 and s["name"] == "View Kernel Graph") or (s["name"] in args.src):
+            print_step(s, print_graph=True, reconstruct_matches=s["name"] in args.src)
           if DEBUG >= 7: print_step(s, reconstruct_matches=True)
       elif DEBUG >= 3 and k.get("ext"): print(emit(k["ext"]))
     for k in (produce_top_kernels if args.t else produce_all_kernels)(): render_event(k)

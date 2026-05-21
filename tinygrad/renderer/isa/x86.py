@@ -894,3 +894,5 @@ class X86Renderer(ISARenderer):
     for u in uops:
       if (t:=jumps.get(u)) is not None: binary[t-4:t] = (targets[u.tag] - t).to_bytes(4, 'little', signed=True)
     return binary.hex()
+
+  def supported_dtypes(self): return {d for d in super().supported_dtypes() if d not in dtypes.fp8s+(dtypes.bfloat16,)}
