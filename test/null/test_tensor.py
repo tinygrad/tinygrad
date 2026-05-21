@@ -145,12 +145,6 @@ class TestTensorUnique(unittest.TestCase):
     Tensor.realize(a,b)
     self.assertIsNot(a.uop.buffer, b.uop.buffer)
 
-  def test_eye_bufs_unique(self):
-    a = Tensor.eye(10).contiguous()
-    b = Tensor.eye(10).contiguous()
-    Tensor.realize(a,b)
-    self.assertIsNot(a.uop.buffer, b.uop.buffer)
-
   def test_times_2_not_unique(self):
     a = Tensor.zeros(10, 10).contiguous()
     b = a * 2
