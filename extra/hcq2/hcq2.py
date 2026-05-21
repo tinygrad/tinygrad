@@ -3,8 +3,8 @@ from typing import cast, Callable, TypeVar, Generic, Any, TYPE_CHECKING
 import struct, functools, time, collections
 from dataclasses import replace
 if TYPE_CHECKING: from tinygrad.engine.realize import ExecContext
-from tinygrad.helpers import DEV, getenv, select_first_inited, select_by_name, suppress_finalizing, mv_address, round_up, DEBUG, dedup
-from tinygrad.device import Device, Buffer, BufferSpec, Compiled, LRUAllocator
+from tinygrad.helpers import DEV, getenv, select_first_inited, select_by_name, suppress_finalizing, mv_address, round_up, DEBUG, dedup, all_same
+from tinygrad.device import Device, Buffer, BufferSpec, Compiled, LRUAllocator, MultiBuffer
 from tinygrad.uop.ops import Ops, sint, UOp, UPat, PatternMatcher, KernelInfo, graph_rewrite, track_rewrites, buffers
 from tinygrad.uop.symbolic import symbolic, symbolic_simple
 from tinygrad.dtype import dtypes, DType
@@ -207,13 +207,15 @@ pm_prep_runtime = PatternMatcher([
 
 # **************** lower ops ****************
 
+def _devices(buf) -> tuple[str, ...]: return tuple(b.device for b in buf.bufs) if isinstance(buf, MultiBuffer) else (buf.device,)
+
 def lower_program(call:UOp, prg:UOp) -> UOp:
-  q = UOp(Ops.LINEAR, dtypes.void, (prg,), arg=(unwrap_after(prg.src[0]).src[1].arg, "COMPUTE"))
+  q = UOp(Ops.LINEAR, dtypes.void, (prg,), arg=(_devices(call.src[1].buffer), "COMPUTE"))
   return UOp(Ops.LINEAR, dtypes.void, (q,), tag=call.tag)
 
 def lower_copy(call:UOp, copy:UOp) -> UOp:
   dst, src = call.src[1], call.src[2]
-  q = UOp(Ops.LINEAR, dtypes.void, (UOp(Ops.COPY, dtypes.void, src=(dst, src), arg=src.buffer.nbytes),), arg=(dst.buffer.device, "COPY"))
+  q = UOp(Ops.LINEAR, dtypes.void, (UOp(Ops.COPY, dtypes.void, src=(dst, src), arg=src.buffer.nbytes),), arg=(_devices(dst.buffer), "COPY"))
   return UOp(Ops.LINEAR, dtypes.void, (q,), tag=call.tag)
 
 pm_lower_ops = PatternMatcher([
@@ -229,14 +231,12 @@ def split_into_queues(outer:UOp) -> UOp:
   return outer.replace(src=tuple(UOp(Ops.LINEAR, dtypes.void, tuple(cmds), arg=k) for k, cmds in groups.items()))
 pm_split_into_queues = PatternMatcher([(UPat(Ops.LINEAR, src=UPat(Ops.LINEAR, src=UPat(Ops.LINEAR)).or_after(), name="outer"), split_into_queues)])
 
-def add_signals(outer:UOp) -> UOp:
-  def wrap(q:UOp) -> UOp:
-    (dev_name, qname), devs = q.arg, {q.arg[0]} | {u.buffer.device for u in q.toposort() if u.op in (Ops.BUFFER, Ops.BUFFER_VIEW)}
-    sigs_tls = [(UOp.from_buffer(Device[d].timeline_signal), UOp.from_buffer(Device[d].timeline_value, "CPU").index(UOp.const(dtypes.int, 0)))
-                for d in sorted(devs) if d.startswith("AMD")]
-    return q.replace(src=(*(s.wait(t-1) for s,t in sigs_tls), *q.src, *(s.store(t) for s,t in sigs_tls)), arg=qname)
-  return outer.replace(src=tuple(wrap(q) for q in outer.src))
-pm_add_signals = PatternMatcher([(UPat(Ops.LINEAR, src=UPat(Ops.LINEAR), name="outer"), add_signals)])
+def add_signals(q:UOp) -> UOp:
+  sig = UOp.new_buffer(q.arg[0], 0x100, dtypes.uint8).rtag("timeline_signal")
+  tl = UOp.new_buffer(q.arg[0], 1, dtypes.uint64).rtag("timeline_value").index(UOp.const(dtypes.int, 0))
+  return q.replace(src=(sig.wait(tl-1), *q.src, sig.store(tl)), arg=q.arg)
+pm_add_signals = PatternMatcher([(UPat(Ops.LINEAR, src=UPat(Ops.LINEAR), name="outer"),
+  lambda outer: outer.replace(src=tuple(add_signals(q) for q in outer.src)))])
 
 pm_add_barriers = PatternMatcher([(UPat(Ops.LINEAR, src=UPat(Ops.LINEAR), name="outer"),
   lambda outer: outer.replace(src=tuple(q.replace(src=(UOp(Ops.BARRIER, dtypes.void), *q.src)) for q in outer.src)))])
@@ -289,8 +289,15 @@ def bufferize_binary(ctx:HCQ2LowerCtx, target:UOp, buf_node:UOp) -> UOp|None:
 
   return None
 
+# resolve timeline_signal/timeline_value placeholders to the real device buffers
+def resolve_timeline(b:UOp) -> UOp|None:  # TODO: multi device
+  if b.tag == "timeline_signal": return UOp.from_buffer(Device[b.src[1].arg[0]].timeline_signal)
+  if b.tag == "timeline_value": return UOp.from_buffer(Device[b.src[1].arg[0]].timeline_value)
+  return None
+
 pm_bufferize = PatternMatcher([
   (UPat(Ops.AFTER, src=(UPat(Ops.BUFFER, name="buf_node"),), allow_any_len=True, name="target"), bufferize_binary),
+  (UPat(Ops.BUFFER, name="b"), resolve_timeline),
 ])
 
 # afters keep patches linked to their binaries. lift nested patches to root afters so symbolic can resolve them all.
@@ -356,34 +363,38 @@ pm_callify = PatternMatcher([(UPat(Ops.LINEAR, name="l", allow_any_len=True), hc
 
 # **************** schedule ****************
 
-@track_rewrites(name=lambda ctx,linear,ast,dev,**kw: f"hcq schedule {getattr(ast.arg, 'name', ast.op.name.lower())}")
-def hcq_schedule(ctx:HCQ2LowerCtx, linear:UOp, ast:UOp, dev:HCQ2Compiled) -> UOp:
+@track_rewrites(name=lambda linear,ast,**kw: f"hcq schedule {getattr(ast.arg, 'name', ast.op.name.lower())}")
+def hcq_schedule(linear:UOp, ast:UOp) -> UOp:
   # runtime preparation: device-specific program, kernargs for each program
-  linear = graph_rewrite(linear, pm_prep_runtime, ctx=ctx, name="hcq: prepare runtime")
+  linear = graph_rewrite(linear, pm_prep_runtime, name="hcq: prepare runtime")
 
   # lower ops into hcq style per-device operations
-  linear = graph_rewrite(linear, pm_lower_ops, ctx=ctx, name="hcq: lower ops")
+  linear = graph_rewrite(linear, pm_lower_ops, name="hcq: lower ops")
 
   # split ops into logical queues
-  linear = graph_rewrite(linear, pm_split_into_queues, ctx=ctx, name="hcq: split into queues")
+  linear = graph_rewrite(linear, pm_split_into_queues, name="hcq: split into queues")
 
   # runtime-specific lowering
-  linear = graph_rewrite(linear, pm_add_barriers, ctx=ctx, name="hcq: add barriers", walk=True)
-  linear = graph_rewrite(linear, pm_add_signals, ctx=ctx, name="hcq: add signals", walk=True)
+  linear = graph_rewrite(linear, pm_add_barriers, walk=True, name="hcq: add barriers")
+  linear = graph_rewrite(linear, pm_add_signals, walk=True, name="hcq: add signals")
 
   # encode cmdbuffers
-  linear = graph_rewrite(linear, dev.pm_lower, ctx=ctx, name=f"hcq: encode cmdbuf {dev.device}", walk=True)
-  return hcq_realize(ctx, linear, ast, dev)
+  # TODO: remove dev
+  dev = Device["AMD"]
+  return graph_rewrite(linear, dev.pm_lower, walk=True, name="hcq: encode cmdbuf")
 
-def hcq_realize(ctx:HCQ2LowerCtx, linear:UOp, ast:UOp, dev:HCQ2Compiled) -> UOp:
+@track_rewrites(name=lambda ctx,linear,ast,**kw: f"hcq realize {getattr(ast.arg, 'name', ast.op.name.lower())}")
+def hcq_realize(ctx:HCQ2LowerCtx, linear:UOp, ast:UOp) -> UOp:
   # allocate lowering structs
   graph_rewrite(linear, pm_calc_kernargs_sizes, ctx=(sizes:={}), name=None)
 
   for dev_name, sz in sizes.items():
+    dev = Device[dev_name]
     off = dev.kernargs_offset_allocator.alloc(sz, 16)
     ctx.devs[dev_name] = HCQ2DeviceCtx(dev_name, UOp.from_buffer(dev.kernargs_buf.view(sz, dtypes.uint8, off), dev_name),
                                        UOp.const(dtypes.uint64, dev.kernargs_buf.get_buf(dev_name).va_addr + off))
 
+  dev = Device['AMD']
   linear = graph_rewrite(linear, pm_bufferize, ctx=ctx, bottom_up=True, name="realize binaries")
   linear = graph_rewrite(linear, pm_lift_after, ctx=ctx, bottom_up=False, name="lift patches to root")
   linear = graph_rewrite(linear, pm_resolve_patches, ctx=ctx, bottom_up=False, name="simplify patches")
@@ -410,10 +421,14 @@ def hcq_exec(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
   resolved_call = call.replace(src=(ast,) + tuple(resolve_params(call, ctx.input_uops)) + tuple(s for s in call.src[1:] if s.op is Ops.BIND))
   bufs = [cast(Buffer, resolved_call.src[1+gi].buffer) for gi in ast.arg.globals] if ast.op is Ops.PROGRAM \
     else [cast(Buffer, resolved_call.src[i].buffer) for i in range(1, len(resolved_call.src))]
-  dev = cast(HCQ2Compiled, Device[bufs[0].device])
   hcq_ctx = HCQ2LowerCtx(name="submit")
   linear = graph_rewrite(UOp(Ops.LINEAR, dtypes.void, (resolved_call,)), pm_ensure_bufs_accessible, ctx=hcq_ctx)
-  host_call = hcq_schedule(hcq_ctx, linear, ast, dev)
+
+  linear = hcq_schedule(linear, ast)
+
+  dev = Device["AMD"]
+  host_call = hcq_realize(hcq_ctx, linear, ast)
+
   with track_stats(ctx, call, dev.device, bufs, ctx.var_vals) as tm:
     st = time.perf_counter() if ctx.wait else 0.0
     run_linear(UOp(Ops.LINEAR, dtypes.void, (host_call,)), var_vals=ctx.var_vals, jit=True, update_stats=DEBUG>=3)
