@@ -1,9 +1,10 @@
 import unittest, ctypes, struct, time, array
 from tinygrad import Device, Tensor, dtypes
-from tinygrad.helpers import to_mv, CI
+from tinygrad.helpers import to_mv
 from tinygrad.device import Buffer, BufferSpec
 from tinygrad.engine.realize import get_runtime
 from tinygrad.codegen import to_program
+from test.helpers import CI
 
 def _time_queue(q, d):
   st = time.perf_counter()
