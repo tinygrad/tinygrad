@@ -4,6 +4,7 @@ from tinygrad.helpers import getenv
 from examples.mlperf.models.flat_llama import FP8_DTYPE, quantize_fp8
 from extra.llama_kernels.fused_ce import fused_ce_loss
 from extra.llama_kernels.quantize_fp8_delayed import quantize_fp8_delayed, quantize_fp8_scalar
+from test.helpers import needs_second_gpu
 
 def run_fused_ce(bs:int, seqlen:int, vocab:int, label_smoothing:float=0.0) -> None:
   Tensor.manual_seed(0)
@@ -71,6 +72,7 @@ class TestQuantizeFP8(unittest.TestCase):
   def test_scalar(self): run_quantize_fp8((getenv("N", 1024), 32), delayed=False)
   def test_delayed(self): run_quantize_fp8((getenv("N", 2048), 1024))
 
+  @needs_second_gpu
   def test_multi(self):
     devs = tuple(f"{Device.DEFAULT}:{i}" for i in range(8))
     x = Tensor.empty(2048*8, 1024, dtype=dtypes.bfloat16, device=devs).uop.multi(0)
