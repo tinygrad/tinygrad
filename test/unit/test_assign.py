@@ -577,7 +577,7 @@ class TestAssign(unittest.TestCase):
     """Chained pending assigns must not produce excessive kernels (tests recursive transitive processing)."""
     D, N = 4, 5
     caches = [Tensor.zeros(8, D).contiguous().realize() for _ in range(N)]
-    caches[0][0:1].assign(Tensor.ones(1, D) * 10)
+    caches[0][0:1].assign(Tensor.ones(1, D, buffer=False) * 10)
     x = caches[0][:1].sum(0, keepdim=True)
     for i in range(1, N):
       caches[i][0:1].assign(x)
@@ -607,8 +607,8 @@ class TestAssign(unittest.TestCase):
 
   def test_double_assign_from_const(self):
     a = Tensor.empty(2)
-    a.assign(Tensor.ones(2))
-    a.assign(Tensor.ones(2))
+    a.assign(Tensor.ones(2, buffer=False))
+    a.assign(Tensor.ones(2, buffer=False))
     GlobalCounters.reset()
     a.realize()
     self.assertEqual(GlobalCounters.kernel_count, 1)
