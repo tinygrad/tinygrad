@@ -5,7 +5,7 @@ from dataclasses import replace
 if TYPE_CHECKING: from tinygrad.engine.realize import ExecContext
 from tinygrad.helpers import DEV, getenv, select_first_inited, select_by_name, suppress_finalizing, mv_address, round_up, DEBUG, dedup, all_same
 from tinygrad.device import Device, Buffer, BufferSpec, Compiled, LRUAllocator, MultiBuffer
-from tinygrad.uop.ops import Ops, sint, UOp, UPat, PatternMatcher, KernelInfo, graph_rewrite, track_rewrites, buffers
+from tinygrad.uop.ops import Ops, sint, UOp, UPat, PatternMatcher, KernelInfo, graph_rewrite, track_rewrites
 from tinygrad.uop.symbolic import symbolic, symbolic_simple
 from tinygrad.dtype import dtypes, DType
 from dataclasses import dataclass, field
@@ -176,7 +176,7 @@ class HCQEncoder:
 
   def q(self, *values): self.append(*values)
 
-  def uop(self, dev:str|None=None, dtype=dtypes.uint64, tag:str|None=None) -> UOp:
+  def uop(self, dev:str|None=None, tag:str|None=None) -> UOp:
     buf = UOp.new_buffer(dev or self.device, len(self.blob), dtypes.uint8)
     if tag: buf = buf.rtag(tag)
     blob_uop = UOp(Ops.BINARY, dtypes.void, src=(), arg=self.blob)
@@ -241,6 +241,13 @@ pm_add_signals = PatternMatcher([(UPat(Ops.LINEAR, src=UPat(Ops.LINEAR), name="o
 pm_add_barriers = PatternMatcher([(UPat(Ops.LINEAR, src=UPat(Ops.LINEAR), name="outer"),
   lambda outer: outer.replace(src=tuple(q.replace(src=(UOp(Ops.BARRIER, dtypes.void), *q.src)) for q in outer.src)))])
 
+def add_timeline_inc(q:UOp) -> UOp:
+  tl = UOp.new_buffer(q.arg[0], 1, dtypes.uint64).rtag("timeline_value")
+  done = tl.after(UOp(Ops.BARRIER, dtypes.void, src=(q,)))
+  return done.index(UOp.const(dtypes.int, 0), dtype=tl.dtype.ptr()).store(tl.index(UOp.const(dtypes.int, 0)) + 1)
+pm_add_timeline_inc = PatternMatcher([(UPat(Ops.LINEAR, src=UPat(Ops.LINEAR), name="outer"),
+  lambda outer: outer.replace(src=tuple(add_timeline_inc(q) for q in outer.src)))])
+
 # **************** build host program ****************
 
 def calc_kernargs_sizes(ctx:dict[str,int], u:UOp) -> None:
@@ -285,26 +292,28 @@ def bufferize_binary(ctx:HCQ2LowerCtx, target:UOp, buf_node:UOp) -> UOp|None:
   if buf_node.tag in ("compute", "copy"):
     host_buf = UOp.from_buffer(Buffer(dev_name, buf_node.arg // dtypes.uint32.itemsize, dtypes.uint32,
                                       options=BufferSpec(cpu_access=True, nolru=True), preallocate=True), dev_name)
-    return UOp(Ops.CUSTOM_FUNCTION, dtypes.void, src=(host_buf.after(*_lower_stores(host_buf, buf_node, stores)),), arg=f"submit_{buf_node.tag}")
+    return host_buf.after(*_lower_stores(host_buf, buf_node, stores))
 
   return None
 
-# resolve timeline_signal/timeline_value placeholders to the real device buffers
+# resolve placeholder buffers (timeline signals, queue rings, ...) to the real device buffers
 def resolve_timeline(b:UOp) -> UOp|None:  # TODO: multi device
-  if b.tag == "timeline_signal": return UOp.from_buffer(Device[b.src[1].arg[0]].timeline_signal)
-  if b.tag == "timeline_value": return UOp.from_buffer(Device[b.src[1].arg[0]].timeline_value)
+  if b.tag in ("timeline_signal", "timeline_value"): return UOp.from_buffer(getattr(Device[b.src[1].arg[0]], b.tag))
+  if isinstance(b.tag, tuple): # (compute_queue|sdma_queue, ring|write_ptr|doorbell|put_value)
+    dev = Device[b.src[1].arg[0]]
+    return UOp.from_buffer(getattr(dev.compute_queue if b.tag[0] == "compute_queue" else dev.sdma_queue(0), b.tag[1]))
   return None
 
 pm_bufferize = PatternMatcher([
   (UPat(Ops.AFTER, src=(UPat(Ops.BUFFER, name="buf_node"),), allow_any_len=True, name="target"), bufferize_binary),
-  (UPat(Ops.BUFFER, name="b"), resolve_timeline),
+  (UPat(Ops.BUFFER, name="b"), resolve_timeline), # TODO: cleanup
 ])
 
-# afters keep patches linked to their binaries. lift nested patches to root afters so symbolic can resolve them all.
+# pull every nested address-binary's patches onto this after and strip its wrapper, so symbolic can resolve the getaddrs
 def lift_after(ctx:HCQ2LowerCtx, after:UOp) -> UOp|None:
-  if not (inners:=[u for s in after.src[1:] for u in s.toposort() if u.op is Ops.AFTER]): return None
-  subs = {i: i.src[0] for i in inners}
-  return (s:=after.substitute(subs)).replace(src=s.src[:1] + tuple(d.substitute(subs) for i in inners for d in i.src[1:]) + s.src[1:])
+  gate = lambda n: not (n.op is Ops.AFTER and n.src[0].op is Ops.BUFFER)
+  if not (inners:=dedup([u for s in after.src[1:] for u in s.toposort(gate=gate) if u.op is Ops.AFTER])): return None
+  return after.replace(src=after.src + tuple(d for i in inners for d in i.src[1:])).substitute({i: i.src[0] for i in inners})
 pm_lift_after = PatternMatcher([(UPat(Ops.AFTER, name="after", allow_any_len=True), lift_after)])
 
 def resolve_getaddr(ctx:HCQ2LowerCtx, ga:UOp, buf:UOp) -> UOp:
@@ -333,6 +342,7 @@ pm_resolve_patches = symbolic_simple + PatternMatcher([
 
 def parametrize_host_buffer(ctx:HCQ2LowerCtx, buf:UOp) -> UOp:
   # register a host buffer as a launcher input and return its placeholder
+  if buf.op is Ops.AFTER: return buf.replace(src=(p:=parametrize_host_buffer(ctx, buf.src[0]),) + buf.src[1:], dtype=p.dtype)
   if (b:=buf.buffer) not in ctx.inputs: ctx.inputs.append(b)
   return UOp.placeholder((b.size,), b.dtype, ctx.inputs.index(b))
 
@@ -342,18 +352,12 @@ pm_parametrize_host_buffers = PatternMatcher([
     lambda bv, idx, bi: bi.replace(src=(bv.src[0], idx + bv.arg[1]))),
 
   # parametrize host buffers
+  (UPat(Ops.AFTER, src=(UPat((Ops.BUFFER, Ops.BUFFER_VIEW)),), allow_any_len=True, name="buf"), parametrize_host_buffer),
   (UPat((Ops.BUFFER, Ops.BUFFER_VIEW), name="buf"), parametrize_host_buffer),
 
   # remove UNIQUE/DEVICE to dedup CONST
   (UPat(Ops.CONST, name="c"), lambda c: c.replace(src=()) if len(c.src) else None),
 ])
-
-def finalize_submit(cf:UOp) -> UOp|None:
-  if not cf.arg.startswith("submit_") or cf.tag is not None: return None
-  tl = UOp.from_buffer(Device['AMD'].timeline_value, "CPU")
-  done = tl.after(UOp(Ops.BARRIER, dtypes.void, src=(cf.rtag("AMD"),)))
-  return done.index(UOp.const(dtypes.int, 0), dtype=tl.dtype.ptr()).store(tl.index(UOp.const(dtypes.int, 0)) + 1)
-pm_finalize_submit = PatternMatcher([(UPat(Ops.CUSTOM_FUNCTION, name="cf"), finalize_submit)])
 
 def hcq_callify(ctx:HCQ2LowerCtx, l:UOp) -> UOp:
   sink = UOp.sink(*l.src, arg=KernelInfo(name=ctx.name, estimates=Estimates()), tag=1)
@@ -377,8 +381,9 @@ def hcq_schedule(linear:UOp, ast:UOp) -> UOp:
   # runtime-specific lowering
   linear = graph_rewrite(linear, pm_add_barriers, walk=True, name="hcq: add barriers")
   linear = graph_rewrite(linear, pm_add_signals, walk=True, name="hcq: add signals")
+  linear = graph_rewrite(linear, pm_add_timeline_inc, walk=True, name="hcq: add submit")
 
-  # encode cmdbuffers
+  # encode cmdbuffers + submits
   # TODO: remove dev
   dev = Device["AMD"]
   return graph_rewrite(linear, dev.pm_lower, walk=True, name="hcq: encode cmdbuf")
@@ -394,11 +399,9 @@ def hcq_realize(ctx:HCQ2LowerCtx, linear:UOp, ast:UOp) -> UOp:
     ctx.devs[dev_name] = HCQ2DeviceCtx(dev_name, UOp.from_buffer(dev.kernargs_buf.view(sz, dtypes.uint8, off), dev_name),
                                        UOp.const(dtypes.uint64, dev.kernargs_buf.get_buf(dev_name).va_addr + off))
 
-  dev = Device['AMD']
   linear = graph_rewrite(linear, pm_bufferize, ctx=ctx, bottom_up=True, name="realize binaries")
   linear = graph_rewrite(linear, pm_lift_after, ctx=ctx, bottom_up=False, name="lift patches to root")
   linear = graph_rewrite(linear, pm_resolve_patches, ctx=ctx, bottom_up=False, name="simplify patches")
-  linear = graph_rewrite(linear, pm_finalize_submit + dev.pm_lower, ctx=ctx, bottom_up=True, name="lower submits")
   linear = graph_rewrite(linear, pm_parametrize_host_buffers, ctx=ctx, bottom_up=True, name="parametrize host buffers")
   return graph_rewrite(linear, pm_callify, ctx=ctx, name="hcq: callify")
 

@@ -143,25 +143,24 @@ amd_inner_pm = PatternMatcher([
 def amd_lower_pm4(linear):
   enc = AMDComputeQueue(Device["AMD"])
   graph_rewrite(linear.replace(src=tuple(UOp(Ops.LINEAR, dtypes.void, (cmd,)) for cmd in linear.src)), amd_inner_pm, ctx=enc, name="amd: encode")
-  return enc.uop(dev="CPU", dtype=dtypes.void, tag="compute")
+  return enc.uop(dev="CPU", tag="compute")
 
-def amd_submit_pm4(cf):
-  # the cmdbuf to submit + the patch writes that fill it
-  cmdbuf, stores = cf.src[0].src[0], cf.src[0].src[1:]
-  size, zero = UOp.const(dtypes.uint32, cmdbuf.arg), UOp.const(dtypes.int, 0)
+def amd_submit_pm4(cmdbuf):
+  size, zero = UOp.const(dtypes.uint32, cmdbuf.src[0].arg // dtypes.uint32.itemsize), UOp.const(dtypes.int, 0)
 
-  # the compute queue's ring and its host-side ring/write/put pointers
+  # the compute queue's ring and its host-side ring/write/put pointers (placeholders, resolved in pm_bufferize)
   q = Device['AMD'].compute_queue
-  ring, wptr, doorbell, put_ptr = (UOp.from_buffer(b, "CPU") for b in (q.ring, q.write_ptr, q.doorbell, q.put_value))
+  ring, wptr, doorbell, put_ptr = (UOp.new_buffer(("AMD",), b.size, b.dtype).rtag(("compute_queue", name))
+    for name, b in (("ring", q.ring), ("write_ptr", q.write_ptr), ("doorbell", q.doorbell), ("put_value", q.put_value)))
 
   # place the cmdbuf at the ring's write offset, wrapping the ring
   put = put_ptr.index(zero)
   next_put = put + size.cast(put.dtype)
-  i = UOp.range(size, 0, dtype=dtypes.int, src=stores)
+  i = UOp.range(size, 0, dtype=dtypes.int, src=(cmdbuf,))
   ring_idx = ((put + i.cast(put.dtype)) % q.ring.size).cast(dtypes.int)
 
   # copy the cmdbuf into the ring and advance the put/write pointers
-  copy_to_ring = ring.index(ring_idx, dtype=ring.dtype.ptr()).store(cmdbuf.index(i)).end(i)
+  copy_to_ring = ring.index(ring_idx, dtype=ring.dtype.ptr()).store(cmdbuf.index(i, dtype=dtypes.uint32)).end(i)
   bump_put_ptr = put_ptr.index(zero, dtype=put_ptr.dtype.ptr()).store(next_put)
   bump_wptr = wptr.index(zero, dtype=wptr.dtype.ptr()).store(next_put)
 
@@ -203,7 +202,7 @@ def amd_lower_sdma(linear):
   dev = Device[dev_name:=copy.src[0].buffer.device]
   enc = AMDCopyQueue(dev)
   graph_rewrite(linear.replace(src=tuple(UOp(Ops.LINEAR, dtypes.void, (cmd,)) for cmd in linear.src)), amd_inner_sdma_pm, ctx=enc, name="amd: encode sdma")
-  return enc.uop(dev="CPU", dtype=dtypes.void, tag="copy")
+  return enc.uop(dev="CPU", tag="copy")
 
 amd_inner_sdma_pm = PatternMatcher([
   (UPat(Ops.LINEAR, src=(UPat(Ops.WAIT, name="x"),)), lambda ctx, x: ctx.wait(x)),
@@ -213,14 +212,14 @@ amd_inner_sdma_pm = PatternMatcher([
   (UPat(Ops.LINEAR, src=(UPat(Ops.STORE, src=(UPat((Ops.BUFFER, Ops.PARAM)), UPat()), name="x"),)), lambda ctx, x: ctx.store(x)),
 ])
 
-def amd_submit_sdma(cf):
+def amd_submit_sdma(cmdbuf):
   # the cmdbuf to submit + the patch writes that fill it
-  cmdbuf, stores = cf.src[0].src[0], cf.src[0].src[1:]
-  size_dw, zero = cmdbuf.arg, UOp.const(dtypes.int, 0)
+  size_dw, zero = cmdbuf.src[0].arg // dtypes.uint32.itemsize, UOp.const(dtypes.int, 0)
 
   # the sdma queue's ring and its host-side ring/write/put pointers
   q = Device['AMD'].sdma_queue(0)
-  ring, wptr, doorbell, put_ptr = (UOp.from_buffer(b, "CPU") for b in (q.ring, q.write_ptr, q.doorbell, q.put_value))
+  ring, wptr, doorbell, put_ptr = (UOp.new_buffer(("AMD",), b.size, b.dtype).rtag(("sdma_queue", name))
+    for name, b in (("ring", q.ring), ("write_ptr", q.write_ptr), ("doorbell", q.doorbell), ("put_value", q.put_value)))
 
   # sdma needs the cmdbuf contiguous: if it won't fit before the ring end, restart at 0 and zero the tail
   put_b = put_ptr.index(zero)
@@ -230,10 +229,10 @@ def amd_submit_sdma(cf):
   zero_amt_dw = (1 - fits) * (q.ring.size - tail_off_dw)
 
   # zero the wrapped tail, then copy the cmdbuf into the ring
-  zi = UOp.range(zero_amt_dw, 0, dtype=dtypes.int, src=stores)
+  zi = UOp.range(zero_amt_dw, 0, dtype=dtypes.int, src=(cmdbuf,))
   zero_tail = ring.index(tail_off_dw + zi, dtype=ring.dtype.ptr()).store(UOp.const(dtypes.uint32, 0)).end(zi)
-  i = UOp.range(UOp.const(dtypes.int, size_dw), 0, dtype=dtypes.int, src=stores)
-  copy_to_ring = ring.index(start_dw + i, dtype=ring.dtype.ptr()).store(cmdbuf.index(i)).end(i)
+  i = UOp.range(UOp.const(dtypes.int, size_dw), 0, dtype=dtypes.int, src=(cmdbuf,))
+  copy_to_ring = ring.index(start_dw + i, dtype=ring.dtype.ptr()).store(cmdbuf.index(i, dtype=dtypes.uint32)).end(i)
 
   # advance the put/write pointers past the zeroed tail and the cmdbuf
   next_put_b = put_b + ((zero_amt_dw + size_dw) * 4).cast(put_b.dtype)
@@ -372,17 +371,16 @@ class PCIIface(PCIIfaceBase):
 
 def _mock(iface, name=None): return type(name or f"MOCK{iface.__name__}", (iface,), {})
 
-def encode_queues(outer:UOp) -> UOp:
-  return outer.replace(src=tuple(amd_lower_pm4(q) if q.arg[1] == "COMPUTE" else amd_lower_sdma(q) for q in outer.src))
+def encode_queue(q:UOp) -> UOp|None:
+  if not (isinstance(q.arg, tuple) and len(q.arg) == 2 and q.arg[1] in ("COMPUTE", "COPY")): return None
+  return amd_submit_pm4(amd_lower_pm4(q)) if q.arg[1] == "COMPUTE" else amd_submit_sdma(amd_lower_sdma(q))
 
 class AMDDevice(HCQ2Compiled):
   timestamp_divider = 100.0  # AMD GPU clock: ticks/us
 
   pm_lower = PatternMatcher([
     (UPat(Ops.PROGRAM, src=(UPat(), UPat(), UPat(), UPat(), UPat(Ops.BINARY)), name="prg"), amd_build_program),
-    (UPat(Ops.LINEAR, src=UPat(Ops.LINEAR), name="outer"), encode_queues),
-    (UPat(Ops.CUSTOM_FUNCTION, arg="submit_compute", name="cf"), amd_submit_pm4),
-    (UPat(Ops.CUSTOM_FUNCTION, arg="submit_copy", name="cf"), amd_submit_sdma),
+    (UPat(Ops.LINEAR, name="q"), encode_queue),
   ])
 
   ifaces = [PCIIface]
