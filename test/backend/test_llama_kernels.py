@@ -4,6 +4,7 @@ from tinygrad.helpers import getenv
 from examples.mlperf.models.flat_llama import FP8_DTYPE, quantize_fp8
 from extra.llama_kernels.fused_ce import fused_ce_loss
 from extra.llama_kernels.quantize_fp8_delayed import quantize_fp8_delayed, quantize_fp8_scalar
+from extra.llama_kernels.cast_amax import fused_quantize_fp8_w13
 from test.helpers import needs_second_gpu
 
 def run_fused_ce(bs:int, seqlen:int, vocab:int, label_smoothing:float=0.0) -> None:
@@ -81,6 +82,40 @@ class TestQuantizeFP8(unittest.TestCase):
     Tensor.realize(fp8, new_amax)
     assert fp8.uop.shape == x.uop.shape
     assert new_amax.shape == ()
+
+def run_cast_amax_w13(shape:tuple[int, int, int]) -> None:
+  Tensor.manual_seed(0)
+  xw13 = Tensor.randn(*shape).cast(dtypes.bfloat16)
+  xw13_ref = xw13.clone()
+  amax_state = Tensor.full((), 2.0, dtype=dtypes.float32).contiguous()
+  grad_amax_state = Tensor.full((), 2.0, dtype=dtypes.float32).contiguous()
+  with Context(DEBUG=0): Tensor.realize(xw13, xw13_ref, amax_state, grad_amax_state)
+
+  fp8, inv_scale, new_amax = fused_quantize_fp8_w13(xw13, amax_state, FP8_DTYPE, grad_amax_state)
+  fp8.cast(dtypes.float).sum().backward()
+  Tensor.realize(fp8, inv_scale, new_amax, xw13.grad)
+
+  hidden = shape[-1] // 2
+  x2_ref = xw13_ref[..., :hidden].float().silu() * xw13_ref[..., hidden:].float()
+  ref_fp8, ref_inv_scale, ref_new_amax = quantize_fp8(x2_ref, amax_state=amax_state)
+  ref_fp8.cast(dtypes.float).sum().backward()
+  Tensor.realize(ref_fp8, ref_inv_scale, ref_new_amax, xw13_ref.grad)
+
+  with Context(DEBUG=0):
+    assert fp8.cast(dtypes.float).allclose(ref_fp8.cast(dtypes.float), atol=0, rtol=0).item(), "fp8 mismatch"
+    assert inv_scale.allclose(ref_inv_scale, atol=0, rtol=0).item(), "inv_scale mismatch"
+    assert new_amax.allclose(ref_new_amax, atol=0, rtol=0).item(), \
+      f"amax mismatch: got={new_amax.item()} ref={ref_new_amax.item()} diff={abs(new_amax.item()-ref_new_amax.item())}"
+    assert xw13.grad.float().allclose(xw13_ref.grad.float(), atol=2.0, rtol=0).item(), "grad mismatch"
+
+class TestCastAmax(unittest.TestCase):
+  def setUp(self):
+    ren = Device[Device.DEFAULT].renderer
+    if dtypes.bfloat16 not in ren.supported_dtypes(): self.skipTest("need bfloat16")
+    if not ren.has_local or not ren.has_shared: self.skipTest("need local/shared")
+
+  def test_w13(self):
+    run_cast_amax_w13((2, 8192, 14336*2))
 
 if __name__ == '__main__':
   unittest.main()
