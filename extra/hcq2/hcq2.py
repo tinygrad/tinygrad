@@ -288,7 +288,7 @@ def bufferize_binary(ctx:HCQ2LowerCtx, target:UOp, buf_node:UOp) -> UOp|None:
     host_buf = UOp(Ops.BUFFER_VIEW, dctx.kernargs_host.dtype, src=(dctx.kernargs_host,), arg=(buf_node.arg // isz, off // isz))
     return (dctx.kernargs_gpu + off).after(*_lower_stores(host_buf, buf_node, stores))
 
-  # compute/copy cmdbufs — uint8 binary realized as a uint32 buffer
+  # compute/copy cmdbufs
   if buf_node.tag in ("compute", "copy"):
     host_buf = UOp.from_buffer(Buffer(dev_name, buf_node.arg // dtypes.uint32.itemsize, dtypes.uint32,
                                       options=BufferSpec(cpu_access=True, nolru=True), preallocate=True), dev_name)
@@ -341,7 +341,7 @@ pm_resolve_patches = symbolic_simple + PatternMatcher([
 ])
 
 def parametrize_host_buffer(ctx:HCQ2LowerCtx, buf:UOp) -> UOp:
-  # register a host buffer as a launcher input and return its placeholder; an after wrapping one re-derives its passthrough dtype
+  # register a host buffer as a launcher input and return its placeholder
   if buf.op is Ops.AFTER: return buf.replace(src=(p:=parametrize_host_buffer(ctx, buf.src[0]),) + buf.src[1:], dtype=p.dtype)
   if (b:=buf.buffer) not in ctx.inputs: ctx.inputs.append(b)
   return UOp.placeholder((b.size,), b.dtype, ctx.inputs.index(b))
@@ -351,7 +351,7 @@ pm_parametrize_host_buffers = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(Ops.BUFFER_VIEW, name="bv"), UPat.var("idx")), name="bi"),
     lambda bv, idx, bi: bi.replace(src=(bv.src[0], idx + bv.arg[1]))),
 
-  # parametrize host buffers, and afters wrapping them (so the after's passthrough dtype follows the param)
+  # parametrize host buffers
   (UPat(Ops.AFTER, src=(UPat((Ops.BUFFER, Ops.BUFFER_VIEW)),), allow_any_len=True, name="buf"), parametrize_host_buffer),
   (UPat((Ops.BUFFER, Ops.BUFFER_VIEW), name="buf"), parametrize_host_buffer),
 

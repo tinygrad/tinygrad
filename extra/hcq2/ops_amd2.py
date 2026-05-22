@@ -146,7 +146,6 @@ def amd_lower_pm4(linear):
   return enc.uop(dev="CPU", tag="compute")
 
 def amd_submit_pm4(cmdbuf):
-  # cmdbuf is the cmdbuffer binary after(buffer, *patches), realized as a uint32 buffer for the dword-wise ring copy
   size, zero = UOp.const(dtypes.uint32, cmdbuf.src[0].arg // dtypes.uint32.itemsize), UOp.const(dtypes.int, 0)
 
   # the compute queue's ring and its host-side ring/write/put pointers (placeholders, resolved in pm_bufferize)
@@ -214,10 +213,10 @@ amd_inner_sdma_pm = PatternMatcher([
 ])
 
 def amd_submit_sdma(cmdbuf):
-  # cmdbuf is the cmdbuffer binary after(buffer, *patches), realized as a uint32 buffer for the dword-wise ring copy
+  # the cmdbuf to submit + the patch writes that fill it
   size_dw, zero = cmdbuf.src[0].arg // dtypes.uint32.itemsize, UOp.const(dtypes.int, 0)
 
-  # the sdma queue's ring and its host-side ring/write/put pointers (placeholders, resolved in pm_bufferize)
+  # the sdma queue's ring and its host-side ring/write/put pointers
   q = Device['AMD'].sdma_queue(0)
   ring, wptr, doorbell, put_ptr = (UOp.new_buffer(("AMD",), b.size, b.dtype).rtag(("sdma_queue", name))
     for name, b in (("ring", q.ring), ("write_ptr", q.write_ptr), ("doorbell", q.doorbell), ("put_value", q.put_value)))
@@ -372,7 +371,6 @@ class PCIIface(PCIIfaceBase):
 
 def _mock(iface, name=None): return type(name or f"MOCK{iface.__name__}", (iface,), {})
 
-# encode a queue into its cmdbuffer and build the submit on top of it
 def encode_queue(q:UOp) -> UOp|None:
   if not (isinstance(q.arg, tuple) and len(q.arg) == 2 and q.arg[1] in ("COMPUTE", "COPY")): return None
   return amd_submit_pm4(amd_lower_pm4(q)) if q.arg[1] == "COMPUTE" else amd_submit_sdma(amd_lower_sdma(q))
