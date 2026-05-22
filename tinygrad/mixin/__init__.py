@@ -118,7 +118,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     lo, hi = (start, stop-step) if step > 0 else (stop-step, start)
     if lo < (dt:=to_dtype(dtype)).min or dt.max < hi: raise OverflowError(f"arange [{start}, {stop}) is not representable in dtype {dtype}")
     # NOTE: this matches numpy, torch raises RuntimeError if stop-start and step have different signs
-    if (output_len:=ceildiv(stop-start, step)) <= 0: return cls.full((0,), 0, dtype=dtype, **kwargs)
+    if (output_len:=ceildiv(stop-start, step)) <= 0: return cls.full((0,), 0, dtype=dtype, buffer=False, **kwargs)
     return (cls.full((output_len,), step, dtype=dtype, buffer=False, **kwargs)._cumalu(0, Ops.ADD) + (start - step)).cast(dtype)
 
   @classmethod
@@ -138,7 +138,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     """
     if steps < 0: raise ValueError("number of steps must be non-negative")
     if (dtype := to_dtype(kwargs.pop("dtype", dtypes.default_float))) == dtypes.bool: raise ValueError("linspace with bool dtype is not supported")
-    if steps == 1: return cls.full((1,), start, dtype=dtype, **kwargs)
+    if steps == 1: return cls.full((1,), start, dtype=dtype, buffer=False, **kwargs)
     return (start + cls.arange(steps, dtype=dtypes.default_float, **kwargs) * ((stop - start) / (steps - 1))).cast(dtype)
 
   @classmethod
@@ -186,7 +186,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     print(t.triu(diagonal=-1).numpy())
     ```
     """
-    return self._tri(self.shape[-2], self.shape[-1], diagonal, self.device).where(self, self.zeros_like())
+    return self._tri(self.shape[-2], self.shape[-1], diagonal, self.device).where(self, self.const_like(0))
 
   def tril(self, diagonal:sint=0) -> Self:
     """
@@ -209,7 +209,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     print(t.tril(diagonal=-1).numpy())
     ```
     """
-    return self._tri(self.shape[-2], self.shape[-1], diagonal+1, self.device).where(self.zeros_like(), self)
+    return self._tri(self.shape[-2], self.shape[-1], diagonal+1, self.device).where(self.const_like(0), self)
 
   # ***** random *****
 
@@ -238,7 +238,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     _, nmant = dtypes.finfo(dtype)
     uint_dtype = {1: dtypes.uint8, 2: dtypes.uint16, 4: dtypes.uint32, 8: dtypes.uint64}[dtype.itemsize]
     uint_bits = bits.bitcast(uint_dtype)
-    float_one_bits = uint_bits.ones_like(dtype=dtype).bitcast(uint_dtype)
+    float_one_bits = uint_bits.const_like(1).cast(dtype).bitcast(uint_dtype)
     return uint_bits.rshift(dtype.bitsize - nmant).bitwise_or(float_one_bits).bitcast(dtype)[:prod(shape)].sub(1).reshape(shape)
 
   def _pad_constant(self, pX, value:ConstType) -> Self:
@@ -250,7 +250,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     base = MovementMixin.pad(X, pads)
     if value == 0: return base
     base = base.cast(least_upper_dtype(base.dtype, dtypes.from_py(value)))
-    return MovementMixin.pad(X.ones_like(dtype=dtypes.bool), pads).where(base, base.full_like(value))
+    return MovementMixin.pad(X.const_like(1).cast(dtypes.bool), pads).where(base, base.const_like(value))
 
   def _pad_circular(self, pX:tuple[tuple[sint, sint], ...]) -> Self:
     if any(pB>sh or pA>sh for (pB,pA),sh in zip(pX, self.shape)): raise ValueError('Padding value causes wrapping around more than once.')
@@ -715,7 +715,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     print(indices.numpy())
     ```
     """
-    if self.ndim == 0: return self._split_cumalu(axis, Ops.MAX), type(self).zeros(self.shape, dtype=dtypes.int32, device=self.device)
+    if self.ndim == 0: return self._split_cumalu(axis, Ops.MAX), type(self).zeros(self.shape, dtype=dtypes.int32, device=self.device, buffer=False)
     values, n = self._split_cumalu(axis, Ops.MAX), int(self.shape[axis])
     x, values_t = self.transpose(axis, -1), values.transpose(axis, -1)
     match = x.unsqueeze(-1).eq(values_t.unsqueeze(-2)) * type(self).ones(n, n, device=self.device, buffer=False).triu()
@@ -838,7 +838,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     ```
     """
     x, dim = self, self._resolve_dim(dim)
-    if (orig_len := int(x.shape[dim])) <= 1: return x, x.zeros_like(dtype=dtypes.default_int)
+    if (orig_len := int(x.shape[dim])) <= 1: return x, x.const_like(0).cast(dtypes.default_int)
     # pad to power of 2
     n_stages = (orig_len-1).bit_length()
     pads = tuple((0, 2**n_stages - orig_len) if i == dim else None for i in range(x.ndim))
@@ -1174,9 +1174,9 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     reg_pads = resolve_pool_pads(padding, len(k_))
     pads = self._apply_ceil_mode(reg_pads, k_, s_, dilation) if ceil_mode else reg_pads
     if not count_include_pad:
-      return pool(self, pads).sum(axis) / pool(self.ones_like(), pads).sum(axis)
+      return pool(self, pads).sum(axis) / pool(self.const_like(1), pads).sum(axis)
     if not ceil_mode: return pool(self, pads).mean(axis)
-    return pool(self, pads).sum(axis) / pool(self._pad_constant(((0,0),)*(self.ndim-len(k_)) + flat_to_grouped(reg_pads), 0.0).ones_like(),
+    return pool(self, pads).sum(axis) / pool(self._pad_constant(((0,0),)*(self.ndim-len(k_)) + flat_to_grouped(reg_pads), 0.0).const_like(1),
                                               tuple(cp-rp for cp,rp in zip(pads, reg_pads))).sum(axis)
 
   def max_pool2d(self, kernel_size:tuple[int, ...]=(2,2), stride=None, dilation=1, padding:int|tuple[int, ...]=0,
@@ -1407,7 +1407,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     if Y.device is not None and self.device is not None and Y.device != self.device:
       raise RuntimeError(f"expected Y and self on the same device, {Y.device=}, {self.device=}")
     log_probs = self.log_softmax()
-    loss_mask = Y.ne(ignore_index) if ignore_index != -1 else Y.ones_like(dtype=dtypes.bool)
+    loss_mask = Y.ne(ignore_index) if ignore_index != -1 else Y.const_like(1).cast(dtypes.bool)
     y = Y.unsqueeze(-1)._one_hot_along_dim(self.shape[-1], dim=-1) * loss_mask.unsqueeze(-1)
     smoothing = label_smoothing * (log_probs.mean(-1) * loss_mask)
     unreduced = ((1 - label_smoothing) * (log_probs * y).sum(-1) + smoothing)
@@ -1459,7 +1459,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     print(t.log_softmax().nll_loss(Y, reduction='none').numpy())
     ```
     """
-    weight = Y.ones_like() if weight is None else weight.gather(0, Y.flatten()).reshape(Y.shape)
+    weight = Y.const_like(1) if weight is None else weight.gather(0, Y.flatten()).reshape(Y.shape)
     masked_weight = weight if ignore_index is None else weight * Y.ne(ignore_index)
     nll = -self.gather(1, Y.unsqueeze(1)).squeeze(1) * masked_weight
     return nll.sum() / masked_weight.sum() if reduction == "mean" else nll._do_reduction(reduction)

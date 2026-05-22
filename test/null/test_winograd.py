@@ -1,6 +1,7 @@
 import unittest, sys
 from tinygrad import Tensor, GlobalCounters, dtypes, Context
-from tinygrad.helpers import CI, Profiling, WINO
+from tinygrad.helpers import Profiling, WINO
+from test.helpers import CI
 
 @unittest.skipIf(sys.platform.startswith("win"), "flaky on Windows")
 class TestWinograd(unittest.TestCase):

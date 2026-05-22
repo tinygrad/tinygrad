@@ -178,6 +178,12 @@ class TestHelpers(unittest.TestCase):
     elif x < -FP8E5M2_MAX: np.testing.assert_equal(truncate[dtypes.fp8e5m2](x), -FP8E5M2_MAX)
     else: np.testing.assert_equal(truncate[dtypes.fp8e5m2](x), torch.tensor(x, dtype=torch.float8_e5m2).float().item())
 
+  def test_finfo(self):
+    for dt in [dtypes.float16, dtypes.float32, dtypes.float64]:
+      info = np.finfo(_to_np_dtype(dt))
+      self.assertEqual(info.bits, dt.bitsize)
+      self.assertEqual((info.nexp, info.nmant), dtypes.finfo(dt))
+
 class TestTypePromotion(unittest.TestCase):
   @given(strat.sampled_from(core_dtypes))
   def test_self_promo_to_self(self, dtype):
