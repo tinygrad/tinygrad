@@ -10,21 +10,21 @@ class Optimizer:
   """
   def __init__(self, params: list[Tensor], lr: float, device=None, fused=FUSE_OPTIM):
     if lr < 0: raise ValueError(f"Invalid learning rate: {lr}")
-    self.params: list[Tensor] = dedup([x for x in params if x.requires_grad])
+    self.params: list[Tensor] = dedup([x for x in params if x.is_param])
     assert len(self.params) != 0, "optimizer must have at least one param"
-    self.buffers: list[Tensor] = dedup([x for x in params if not x.requires_grad])   # buffers are still realized
+    self.buffers: list[Tensor] = dedup([x for x in params if not x.is_param])   # buffers are still realized
     self.device = device or self.params[0].device
     self.param_dtype = to_dtype(getenv("OPTIM_DTYPE", "float32"))
     self.fused = fused
     # store lr in at least float32 precision
-    self.lr = Tensor(lr if getenv("CONST_LR") else [lr], requires_grad=False, device=self.device,
+    self.lr = Tensor(lr if getenv("CONST_LR") else [lr], device=self.device,
                      dtype=least_upper_dtype(dtypes.default_float, dtypes.float32))
     if self.fused: self.pos_params = list(itertools.accumulate(self.params, lambda x,y: x+y.numel(), initial=0))
 
   def _new_optim_param(self) -> list[Tensor]:
-    if self.fused: return [Tensor.zeros(self.pos_params[-1], dtype=self.param_dtype, device=self.device, requires_grad=False)]
-    if isinstance(self.device, tuple): return [Tensor.zeros_like(t, dtype=self.param_dtype, requires_grad=False) for t in self.params]
-    else: return [Tensor.zeros(t.shape, dtype=self.param_dtype, device=self.device, requires_grad=False) for t in self.params]
+    if self.fused: return [Tensor.zeros(self.pos_params[-1], dtype=self.param_dtype, device=self.device)]
+    if isinstance(self.device, tuple): return [Tensor.zeros_like(t, dtype=self.param_dtype) for t in self.params]
+    else: return [Tensor.zeros(t.shape, dtype=self.param_dtype, device=self.device) for t in self.params]
 
   def zero_grad(self):
     """
@@ -154,7 +154,7 @@ class LAMB(Optimizer):
     if weight_decay < 0: raise ValueError(f"Invalid weight_decay value: {weight_decay}")
     super().__init__(params, lr, device, fused)
     self.b1, self.b2, self.eps, self.wd, self.adam = b1, b2, eps, weight_decay, adam
-    self.b1_t, self.b2_t = (Tensor.ones((1,), dtype=dtypes.float32, device=self.device, requires_grad=False) for _ in [b1, b2])
+    self.b1_t, self.b2_t = (Tensor.ones((1,), dtype=dtypes.float32, device=self.device).is_param_(False) for _ in [b1, b2])
     self.m = self._new_optim_param()
     self.v = self._new_optim_param()
 

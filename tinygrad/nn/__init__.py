@@ -35,8 +35,8 @@ class BatchNorm:
     self.weight: Tensor|None = Tensor.ones(sz) if affine else None
     self.bias: Tensor|None = Tensor.zeros(sz) if affine else None
 
-    self.num_batches_tracked = Tensor.zeros(dtype='long', requires_grad=False)
-    if track_running_stats: self.running_mean, self.running_var = Tensor.zeros(sz, requires_grad=False), Tensor.ones(sz, requires_grad=False)
+    self.num_batches_tracked = Tensor.zeros(dtype='long').is_param_(False)
+    if track_running_stats: self.running_mean, self.running_var = Tensor.zeros(sz).is_param_(False), Tensor.ones(sz).is_param_(False)
 
   def calc_stats(self, x:Tensor) -> tuple[Tensor, Tensor]:
     shape_mask: list[int] = [1, -1, *([1]*(x.ndim-2))]

@@ -757,6 +757,24 @@ class TestReduceCollapse(unittest.TestCase):
     # Should become add of two separate reduces
     self.assertEqual(result.op, Ops.ADD)
 
+class TestMovementOps(unittest.TestCase):
+  def test_pm_mops_partial_reshape_index_removes_reshape(self):
+    from tinygrad.schedule.rangeify import pm_mops
+    src = UOp.param(0, dtypes.float, shape=(32, 4))
+    r0, r1 = UOp.range(4, 0), UOp.range(8, 1)
+    result = graph_rewrite(src.reshape((4, 8, 4)).index(r0, r1), pm_mops, name="test")
+    self.assertEqual(result.op, Ops.INDEX)
+    self.assertIs(result.src[0], src)
+    self.assertEqual(result.shape, (4,))
+    self.assertNotIn(Ops.RESHAPE, [u.op for u in result.toposort()])
+
+  def test_pm_mops_partial_reshape_index_suffix_mismatch_does_nothing(self):
+    from tinygrad.schedule.rangeify import pm_mops
+    src = UOp.param(0, dtypes.float, shape=(2, 6))
+    result = graph_rewrite(src.reshape((2, 3, 2)).index(UOp.range(2, 0)), pm_mops, name="test")
+    self.assertEqual(result.op, Ops.INDEX)
+    self.assertEqual(result.src[0].op, Ops.RESHAPE)
+
 class TestLoadStoreFolding(unittest.TestCase):
   def test_gated_load_gep_preserves_alt(self):
     """Test that LOAD(GEP, alt) preserves alt value after rewrite"""
