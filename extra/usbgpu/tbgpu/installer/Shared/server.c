@@ -242,9 +242,9 @@ static void handle_client(int fd) {
 
     case CMD_MMIO_WRITE:
       recvall(fd, g_bulk_buf, req.arg1);
-      if (!validate_bar(req.bar, req.arg0, req.arg1))
-        mmio_copy((void*)(g_bars[req.bar].addr + req.arg0), g_bulk_buf, req.arg1);
-      continue;
+      if (validate_bar(req.bar, req.arg0, req.arg1)) { resp.status = 1; break; }
+      mmio_copy((void*)(g_bars[req.bar].addr + req.arg0), g_bulk_buf, req.arg1);
+      break;
 
     default:
       resp.status = 1;
