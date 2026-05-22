@@ -290,7 +290,6 @@ jobs:
         pydeps: "pillow ftfy regex pre-commit"
         deps: testing_unit
         llvm: 'true'
-        amd: 'true'
     - name: Run pre-commit test hooks
       run: SKIP=ruff,mypy pre-commit run --all-files
     - name: Check Device.DEFAULT
@@ -775,7 +774,7 @@ jobs:
           key: ${{ matrix.backend }}-minimal
           deps: testing_unit
           opencl: ${{ matrix.backend == 'opencl' && 'true' }}
-          llvm: ${{ matrix.backend != 'opencl' }}
+          llvm: ${{ matrix.backend == 'llvm' || matrix.backend == 'cpu' || matrix.backend == 'lvp' }}
           mesa: ${{ matrix.backend == 'lvp' && 'cpu' }}
       - name: Set env
         run: printf "${{ matrix.backend == 'llvm' && 'DEV=CPU:LLVM' || matrix.backend == 'cpu' && 'CC=clang-20\nDEV=CPU\nCPU_COUNT=2' || matrix.backend == 'opencl' && 'DEV=CL' || matrix.backend == 'lvp' && 'DEV=CPU:LVP' || matrix.backend == 'x86' && 'DEV=CPU:X86' }}" >> $GITHUB_ENV
