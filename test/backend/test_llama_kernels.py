@@ -115,7 +115,8 @@ class TestCastAmax(unittest.TestCase):
     if not ren.has_local or not ren.has_shared: self.skipTest("need local/shared")
 
   def test_w13(self):
-    run_cast_amax_w13((2, 8192, 14336*2))
+    # SEQ=8192 H2=28672 for llama 8b
+    run_cast_amax_w13((2, getenv("SEQ", 8192), getenv("H2", 256)))
 
 if __name__ == '__main__':
   unittest.main()
