@@ -62,7 +62,6 @@ def run_quantize_fp8(shape:tuple[int, ...], delayed:bool=True) -> None:
       assert new_amax.allclose(ref_new_amax, atol=0, rtol=0).item(), \
         f"amax mismatch: got={new_amax.item()} ref={ref_new_amax.item()} diff={abs(new_amax.item()-ref_new_amax.item())}"
 
-@unittest.skipUnless(dtypes.bfloat16 in Device[Device.DEFAULT].renderer.supported_dtypes(), "need bfloat16")
 class TestQuantizeFP8(unittest.TestCase):
   def setUp(self):
     ren = Device[Device.DEFAULT].renderer
