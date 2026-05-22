@@ -5,7 +5,6 @@ from tinygrad import Tensor, Device, dtypes, nn
 from tinygrad.helpers import getenv, temp, mv_address
 from extra.gradcheck import numerical_jacobian, jacobian, gradcheck
 from hypothesis import given, settings, strategies as strat
-from tinygrad.device import is_dtype_supported
 from tinygrad.dtype import DTYPES_DICT
 from tinygrad.uop.ops import UOp
 
@@ -99,10 +98,10 @@ class TestTinygrad(unittest.TestCase):
       return second_derivative.numpy()
 
     def test_tinygrad():
-      x_val = Tensor(2.0)
+      x_val = Tensor([2.0])
       f = x_val**3
-      first_derivative = f.gradient(x_val)[0]
-      second_derivative = first_derivative.gradient(x_val)[0]
+      first_derivative = f.sum().gradient(x_val)[0]
+      second_derivative = first_derivative.sum().gradient(x_val)[0]
       return second_derivative.numpy()
 
     np.testing.assert_allclose(test_tinygrad(), test_pytorch(), atol=1e-5)
@@ -171,8 +170,8 @@ class TestTinygrad(unittest.TestCase):
       return w1.grad, w2.grad
 
     def test_tinygrad():
-      w1 = Tensor(init)
-      w2 = Tensor(init)
+      w1 = Tensor(init).clone()
+      w2 = Tensor(init).clone()
       out = w1.add(w2)
       out.backward()
       return w1.grad.numpy(), w2.grad.numpy()
@@ -191,11 +190,11 @@ class TestTinygrad(unittest.TestCase):
       return w1.grad.numpy(), w2.grad.numpy()
 
     def test_tinygrad():
-      w1 = Tensor(init)
-      w2 = Tensor(init)
-      assert w1.requires_grad is True and w2.requires_grad is True
+      w1 = Tensor(init).clone()
+      w2 = Tensor(init).clone()
+      assert w1.is_param is True and w2.is_param is True
       nn.optim.SGD([w1, w2], lr=0.01)
-      assert w1.requires_grad is True and w2.requires_grad is True
+      assert w1.is_param is True and w2.is_param is True
       out = w1.add(w2)
       out.backward()
       return w1.grad.numpy(), w2.grad.numpy()
@@ -260,10 +259,6 @@ class TestTinygrad(unittest.TestCase):
 
   def test_rand_rejects_unknown_kwargs(self):
     with self.assertRaises(TypeError): Tensor.rand(5, generator="foo")
-
-  def test_randperm_requires_grad(self):
-    self.assertIs(Tensor.randperm(5, requires_grad=True).requires_grad, True)
-    self.assertIs(Tensor.randperm(5, requires_grad=False).requires_grad, False)
 
   def test_randn_isnt_inf_on_zero(self):
     # simulate failure case of rand handing a zero to randn
@@ -454,7 +449,7 @@ class TestTinygrad(unittest.TestCase):
     np.testing.assert_equal(Tensor(data, dtype=dtypes.float).numpy(), torch.tensor(data, dtype=torch.float).numpy())
 
   def test_tensor_list_special_values(self):
-    if is_dtype_supported(dtypes.float16):
+    if dtypes.float16 in Device[Device.DEFAULT].renderer.supported_dtypes():
       data = [math.nan, -math.inf, 65504, 65519, 65519.999, 65520, 65520.1]
       data = data + [-x for x in data]
       with np.errstate(over='ignore'): np.testing.assert_allclose(Tensor(data, dtype=dtypes.float16).numpy(), np.array(data).astype(np.float16))
@@ -569,26 +564,26 @@ class TestTinygrad(unittest.TestCase):
 class TestMoveTensor(unittest.TestCase):
   d0, d1 = f"{Device.DEFAULT}:0", f"{Device.DEFAULT}:1"
   @given(strat.sampled_from([d0, d1]), strat.sampled_from([d0, d1]),
-         strat.sampled_from([dtypes.float16, dtypes.float32]), strat.sampled_from([True, False, None]))
-  def test_to_preserves(self, src, dest, dtype, requires_grad):
-    if not is_dtype_supported(dtype):
+         strat.sampled_from([dtypes.float16, dtypes.float32]), strat.sampled_from([True, False]))
+  def test_to_preserves(self, src, dest, dtype, is_param):
+    if dtype not in Device[Device.DEFAULT].renderer.supported_dtypes():
       return
-    s = Tensor([1, 2, 3], device=src, dtype=dtype, requires_grad=requires_grad)
-    if requires_grad: s.sum().backward()
+    s = Tensor([1, 2, 3], device=src, dtype=dtype).is_param_(is_param)
+    if is_param: s.sum().backward()
     t = s.to(dest)
     np.testing.assert_equal(s.numpy(), t.numpy())
     assert s.dtype == t.dtype
-    assert s.requires_grad == t.requires_grad
-    if requires_grad:
+    assert s.is_param == t.is_param
+    if is_param:
       np.testing.assert_equal(s.grad.numpy(), t.grad.numpy())
 
-  @given(strat.sampled_from([dtypes.float16, dtypes.float32]), strat.sampled_from([True, False, None]))
-  def test_shard_preserves(self, dtype, requires_grad):
-    s = Tensor([1, 2, 3], dtype=dtype, requires_grad=requires_grad)
+  @given(strat.sampled_from([dtypes.float16, dtypes.float32]), strat.sampled_from([True, False]))
+  def test_shard_preserves(self, dtype, is_param):
+    s = Tensor([1, 2, 3], dtype=dtype).is_param_(is_param)
     t = s.shard((f"{Device.DEFAULT}:0", f"{Device.DEFAULT}:1"))
     np.testing.assert_equal(s.numpy(), t.numpy())
     assert s.dtype == t.dtype
-    assert s.requires_grad == t.requires_grad
+    assert s.is_param == t.is_param
 
   @given(strat.sampled_from([d0, d1]))
   def test_same_dev(self, dev):

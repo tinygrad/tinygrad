@@ -1,13 +1,13 @@
 import unittest, operator, math
 from tinygrad import Context, Tensor, dtypes, Device
 from tinygrad.dtype import DType, truncate, fp8_to_float
-from tinygrad.helpers import CI, EMULATED_DTYPES, DEV, getenv
+from tinygrad.helpers import EMULATED_DTYPES, DEV, getenv
 from tinygrad.tensor import _to_np_dtype
-from tinygrad.device import is_dtype_supported
 from tinygrad.runtime.ops_python import from_storage_scalar
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.nir import NIRRenderer
 from tinygrad.uop import Ops
+from test.helpers import CI
 import numpy as np
 import pytest
 from hypothesis import assume, given, strategies as strat, settings
@@ -41,6 +41,8 @@ if ((DEV.interface.startswith("MOCK") and Device.DEFAULT in {"NV", "CUDA"})
 # transcendental isn't accurate enough
 if Ops.SQRT not in Device[Device.DEFAULT].renderer.code_for_op: unary_operations.remove((Tensor.sqrt, np.sqrt))
 
+supported_dtypes = Device[Device.DEFAULT].renderer.supported_dtypes()
+
 class ht:
   float64 = strat.floats(width=64, allow_subnormal=False)
   float32 = strat.floats(width=32, allow_subnormal=False)
@@ -71,7 +73,7 @@ def universal_test(a, b, dtype, op):
     numpy_value = truncate[dtype](op[1](ta.numpy(), tb.numpy()).item())
   else: tensor_value, numpy_value = (op[0](ta, tb)).numpy(), op[1](ta.numpy(), tb.numpy())
   if dtype in dtypes.floats:
-    if not is_dtype_supported(dtype) or dtype in EMULATED_DTYPES.tolist(dtypes): # denormals are zero
+    if dtype not in supported_dtypes or dtype in EMULATED_DTYPES.tolist(dtypes): # denormals are zero
       fe, fm = dtypes.finfo(dtype)
       atol, rtol = 2 ** (2 - (1 << (fe - 1))), 2 ** (-fm)
     else: atol, rtol = {dtypes.bfloat16:(1e-3, 1e-2), dtypes.fp8e4m3:(1e-1, 1e-1), dtypes.fp8e5m2:(1.0, 5e-1),
@@ -87,7 +89,8 @@ def universal_test_unary(a, dtype, op):
   if op[0] == Tensor.log and a <= 0: return
   if dtype in dtypes.fp8s:
     # denormals are zero
-    if dtype in EMULATED_DTYPES.tolist(dtypes) or not is_dtype_supported(dtype) and abs(ta.numpy().item()) < 0.015625: return
+    if (dtype in EMULATED_DTYPES.tolist(dtypes) or dtype not in supported_dtypes
+        and abs(ta.numpy().item()) < 0.015625): return
     tensor_value = fp8_to_float(op[0](ta.realize()).bitcast(dtypes.uint8).item(), dtype)
     numpy_value = truncate[dtype](v:=op[1](ta.numpy()).item())
     # cuda cast f32 inf to f8 MAX, amd cast it to nan(E4M3)/inf(E5M2)
@@ -119,14 +122,14 @@ def universal_test_midcast(a, b, c, op1, op2, d1:DType, d2:DType):
   np.testing.assert_allclose(tensor_value, numpy_value, rtol=1e-6 if isinstance(Device[Device.DEFAULT].renderer, PTXRenderer) else 1e-7)
 
 class TestDTypeALU(unittest.TestCase):
-  @unittest.skipUnless(is_dtype_supported(dtypes.float64), f"no float64 on {Device.DEFAULT}")
+  @unittest.skipUnless(dtypes.float64 in supported_dtypes, f"no float64 on {Device.DEFAULT}")
   @given(ht.float64, ht.float64, strat.sampled_from(binary_operations))
   def test_float64(self, a, b, op): universal_test(a, b, dtypes.float64, op)
 
   @given(ht.float32, ht.float32, strat.sampled_from(binary_operations))
   def test_float32(self, a, b, op): universal_test(a, b, dtypes.float32, op)
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.float16), f"no float16 on {Device.DEFAULT}")
+  @unittest.skipUnless(dtypes.float16 in supported_dtypes, f"no float16 on {Device.DEFAULT}")
   @given(ht.float16, ht.float16, strat.sampled_from(binary_operations))
   def test_float16(self, a, b, op): universal_test(a, b, dtypes.float16, op)
 
@@ -134,17 +137,17 @@ class TestDTypeALU(unittest.TestCase):
   @Context(EMULATED_DTYPES="half")
   def test_emulated_float16(self, a, b, op): universal_test(a, b, dtypes.float16, op)
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.bfloat16), f"no bfloat16 on {Device.DEFAULT}")
+  @unittest.skipUnless(dtypes.bfloat16 in supported_dtypes, f"no bfloat16 on {Device.DEFAULT}")
   @given(ht.bfloat16, ht.bfloat16, strat.sampled_from(binary_operations))
   def test_bfloat16(self, a, b, op):
-    universal_test(from_storage_scalar(a, dtypes.bfloat16), from_storage_scalar(a, dtypes.bfloat16), dtypes.bfloat16, op)
+    universal_test(from_storage_scalar(a, dtypes.bfloat16), from_storage_scalar(b, dtypes.bfloat16), dtypes.bfloat16, op)
 
   @given(ht.bfloat16, ht.bfloat16, strat.sampled_from(binary_operations))
   @Context(EMULATED_DTYPES="bfloat16")
   def test_emulated_bfloat16(self, a, b, op):
-    universal_test(from_storage_scalar(a, dtypes.bfloat16), from_storage_scalar(a, dtypes.bfloat16), dtypes.bfloat16, op)
+    universal_test(from_storage_scalar(a, dtypes.bfloat16), from_storage_scalar(b, dtypes.bfloat16), dtypes.bfloat16, op)
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.fp8e4m3), f"no fp8e4m3 on {Device.DEFAULT}")
+  @unittest.skipUnless(dtypes.fp8e4m3 in supported_dtypes, f"no fp8e4m3 on {Device.DEFAULT}")
   @given(ht.fp8e4m3, ht.fp8e4m3, strat.sampled_from(binary_operations))
   def test_fp8e4m3(self, a, b, op):
     universal_test(from_storage_scalar(a, dtypes.fp8e4m3), from_storage_scalar(b, dtypes.fp8e4m3), dtypes.fp8e4m3, op)
@@ -154,7 +157,7 @@ class TestDTypeALU(unittest.TestCase):
   def test_emulated_fp8e4m3(self, a, b, op):
     universal_test(from_storage_scalar(a, dtypes.fp8e4m3), from_storage_scalar(b, dtypes.fp8e4m3), dtypes.fp8e4m3, op)
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.fp8e5m2), f"no fp8e5m2 on {Device.DEFAULT}")
+  @unittest.skipUnless(dtypes.fp8e5m2 in supported_dtypes, f"no fp8e5m2 on {Device.DEFAULT}")
   @given(ht.fp8e5m2, ht.fp8e5m2, strat.sampled_from(binary_operations))
   def test_fp8e5m2(self, a, b, op):
     universal_test(from_storage_scalar(a, dtypes.fp8e5m2), from_storage_scalar(b, dtypes.fp8e5m2), dtypes.fp8e5m2, op)
@@ -164,12 +167,12 @@ class TestDTypeALU(unittest.TestCase):
   def test_emulated_fp8e5m2(self, a, b, op):
     universal_test(from_storage_scalar(a, dtypes.fp8e5m2), from_storage_scalar(b, dtypes.fp8e5m2), dtypes.fp8e5m2, op)
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.fp8e4m3fnuz), f"no fp8e4m3fnuz on {Device.DEFAULT}")
+  @unittest.skipUnless(dtypes.fp8e4m3fnuz in supported_dtypes, f"no fp8e4m3fnuz on {Device.DEFAULT}")
   @given(ht.fp8e4m3fnuz, ht.fp8e4m3fnuz, strat.sampled_from(binary_operations))
   def test_fp8e4m3fnuz(self, a, b, op):
     universal_test(from_storage_scalar(a, dtypes.fp8e4m3fnuz), from_storage_scalar(b, dtypes.fp8e4m3fnuz), dtypes.fp8e4m3fnuz, op)
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.fp8e5m2fnuz), f"no fp8e5m2fnuz on {Device.DEFAULT}")
+  @unittest.skipUnless(dtypes.fp8e5m2fnuz in supported_dtypes, f"no fp8e5m2fnuz on {Device.DEFAULT}")
   @given(ht.fp8e5m2fnuz, ht.fp8e5m2fnuz, strat.sampled_from(binary_operations))
   def test_fp8e5m2fnuz(self, a, b, op):
     universal_test(from_storage_scalar(a, dtypes.fp8e5m2fnuz), from_storage_scalar(b, dtypes.fp8e5m2fnuz), dtypes.fp8e5m2fnuz, op)
@@ -187,7 +190,7 @@ class TestDTypeALU(unittest.TestCase):
   @given(ht.float32, strat.sampled_from(unary_operations))
   def test_float32_unary(self, a, op): universal_test_unary(a, dtypes.float32, op)
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.float16), f"no float16 on {Device.DEFAULT}")
+  @unittest.skipUnless(dtypes.float16 in supported_dtypes, f"no float16 on {Device.DEFAULT}")
   @given(ht.float16, strat.sampled_from(unary_operations))
   def test_float16_unary(self, a, op): universal_test_unary(a, dtypes.float16, op)
 
@@ -195,7 +198,7 @@ class TestDTypeALU(unittest.TestCase):
   @Context(EMULATED_DTYPES="half")
   def test_emulated_float16_unary(self, a, op): universal_test_unary(a, dtypes.float16, op)
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.bfloat16), f"no bfloat16 on {Device.DEFAULT}")
+  @unittest.skipUnless(dtypes.bfloat16 in supported_dtypes, f"no bfloat16 on {Device.DEFAULT}")
   @given(ht.bfloat16, strat.sampled_from(unary_operations))
   def test_bfloat16_unary(self, a, op): universal_test_unary(from_storage_scalar(a, dtypes.bfloat16), dtypes.bfloat16, op)
 
@@ -203,7 +206,7 @@ class TestDTypeALU(unittest.TestCase):
   @Context(EMULATED_DTYPES="bfloat16")
   def test_emulated_bfloat16_unary(self, a, op): universal_test_unary(from_storage_scalar(a, dtypes.bfloat16), dtypes.bfloat16, op)
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.fp8e4m3), f"no fp8e4m3 on {Device.DEFAULT}")
+  @unittest.skipUnless(dtypes.fp8e4m3 in supported_dtypes, f"no fp8e4m3 on {Device.DEFAULT}")
   @given(ht.fp8e4m3, strat.sampled_from(unary_operations))
   def test_fp8e4m3_unary(self, a, op):
     if op[1] == np.reciprocal: assume(from_storage_scalar(a, dtype=dtypes.fp8e4m3) != 0.0)
@@ -215,7 +218,7 @@ class TestDTypeALU(unittest.TestCase):
     if op[1] == np.reciprocal: assume(from_storage_scalar(a, dtype=dtypes.fp8e4m3) != 0.0)
     universal_test_unary(from_storage_scalar(a, dtype=dtypes.fp8e4m3), dtypes.fp8e4m3, op)
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.fp8e5m2), f"no fp8e5m2 on {Device.DEFAULT}")
+  @unittest.skipUnless(dtypes.fp8e5m2 in supported_dtypes, f"no fp8e5m2 on {Device.DEFAULT}")
   @given(ht.fp8e5m2, strat.sampled_from(unary_operations))
   def test_fp8e5m2_unary(self, a, op):
     if op[1] == np.reciprocal: assume(from_storage_scalar(a, dtype=dtypes.fp8e5m2) != 0.0)
@@ -227,13 +230,13 @@ class TestDTypeALU(unittest.TestCase):
     if op[1] == np.reciprocal: assume(from_storage_scalar(a, dtype=dtypes.fp8e5m2) != 0.0)
     universal_test_unary(from_storage_scalar(a, dtype=dtypes.fp8e5m2), dtypes.fp8e5m2, op)
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.fp8e4m3fnuz), f"no fp8e4m3fnuz on {Device.DEFAULT}")
+  @unittest.skipUnless(dtypes.fp8e4m3fnuz in supported_dtypes, f"no fp8e4m3fnuz on {Device.DEFAULT}")
   @given(ht.fp8e4m3fnuz, strat.sampled_from(unary_operations))
   def test_fp8e4m3fnuz_unary(self, a, op):
     if op[1] == np.reciprocal: assume(from_storage_scalar(a, dtype=dtypes.fp8e4m3fnuz) != 0.0)
     universal_test_unary(from_storage_scalar(a, dtype=dtypes.fp8e4m3fnuz), dtypes.fp8e4m3fnuz, op)
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.fp8e5m2fnuz), f"no fp8e5m2fnuz on {Device.DEFAULT}")
+  @unittest.skipUnless(dtypes.fp8e5m2fnuz in supported_dtypes, f"no fp8e5m2fnuz on {Device.DEFAULT}")
   @given(ht.fp8e5m2fnuz, strat.sampled_from(unary_operations))
   def test_fp8e5m2fnuz_unary(self, a, op):
     if op[1] == np.reciprocal: assume(from_storage_scalar(a, dtype=dtypes.fp8e5m2fnuz) != 0.0)
@@ -254,15 +257,15 @@ class TestDTypeALU(unittest.TestCase):
   @given(ht.uint8, ht.uint8, strat.sampled_from(integer_binary_operations))
   def test_uint8(self, a, b, op): universal_test(a, b, dtypes.uint8, op)
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.uint16), f"no uint16 on {Device.DEFAULT}")
+  @unittest.skipUnless(dtypes.uint16 in supported_dtypes, f"no uint16 on {Device.DEFAULT}")
   @given(ht.uint16, ht.uint16, strat.sampled_from(integer_binary_operations))
   def test_uint16(self, a, b, op): universal_test(a, b, dtypes.uint16, op)
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.uint32), f"no uint32 on {Device.DEFAULT}")
+  @unittest.skipUnless(dtypes.uint32 in supported_dtypes, f"no uint32 on {Device.DEFAULT}")
   @given(ht.uint32, ht.uint32, strat.sampled_from(integer_binary_operations))
   def test_uint32(self, a, b, op): universal_test(a, b, dtypes.uint32, op)
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.uint64), f"no uint64 on {Device.DEFAULT}")
+  @unittest.skipUnless(dtypes.uint64 in supported_dtypes, f"no uint64 on {Device.DEFAULT}")
   @given(ht.uint64, ht.uint64, strat.sampled_from(integer_binary_operations))
   def test_uint64(self, a, b, op): universal_test(a, b, dtypes.uint64, op)
 
@@ -291,15 +294,15 @@ class TestDTypeALU(unittest.TestCase):
   @given(ht.uint8, strat.sampled_from(integer_unary_operations))
   def test_uint8_unary(self, a, op): universal_test_unary(a, dtypes.uint8, op)
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.uint16), f"no uint16 on {Device.DEFAULT}")
+  @unittest.skipUnless(dtypes.uint16 in supported_dtypes, f"no uint16 on {Device.DEFAULT}")
   @given(ht.uint16, strat.sampled_from(integer_unary_operations))
   def test_uint16_unary(self, a, op): universal_test_unary(a, dtypes.uint16, op)
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.uint32), f"no uint32 on {Device.DEFAULT}")
+  @unittest.skipUnless(dtypes.uint32 in supported_dtypes, f"no uint32 on {Device.DEFAULT}")
   @given(ht.uint32, strat.sampled_from(integer_unary_operations))
   def test_uint32_unary(self, a, op): universal_test_unary(a, dtypes.uint32, op)
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.uint64), f"no uint64 on {Device.DEFAULT}")
+  @unittest.skipUnless(dtypes.uint64 in supported_dtypes, f"no uint64 on {Device.DEFAULT}")
   @given(ht.uint64, strat.sampled_from(integer_unary_operations))
   def test_uint64_unary(self, a, op): universal_test_unary(a, dtypes.uint64, op)
 
@@ -352,21 +355,21 @@ class TestDTypeALU(unittest.TestCase):
   @given(strat.floats(width=32, min_value=1.0, max_value=254.0, allow_subnormal=False),
          strat.sampled_from(dtypes_float), strat.sampled_from((dtypes.uint8, dtypes.uint16)))
   def test_float_cast_to_unsigned(self, a, float_dtype, unsigned_dtype):
-    if not is_dtype_supported(float_dtype): float_dtype = dtypes.float32
+    if float_dtype not in supported_dtypes: float_dtype = dtypes.float32
     universal_test_cast(a, float_dtype, unsigned_dtype)
 
   @unittest.skip("relied on hacks")
   @given(strat.floats(width=32, min_value=256.0, max_value=65000.0, allow_subnormal=False),
          strat.sampled_from(dtypes_float), strat.sampled_from((dtypes.uint8, dtypes.uint16)))
   def test_float_cast_to_unsigned_overflow(self, a, float_dtype, unsigned_dtype):
-    if not is_dtype_supported(float_dtype): float_dtype = dtypes.float32
+    if float_dtype not in supported_dtypes: float_dtype = dtypes.float32
     universal_test_cast(a, float_dtype, unsigned_dtype)
 
   @unittest.skip("relied on hacks")
   @given(strat.floats(width=32, min_value=-65000.0, max_value=-1.0, allow_subnormal=False),
          strat.sampled_from(dtypes_float), strat.sampled_from((dtypes.uint8, dtypes.uint16)))
   def test_float_cast_to_unsigned_underflow(self, a, float_dtype, unsigned_dtype):
-    if not is_dtype_supported(float_dtype): float_dtype = dtypes.float32
+    if float_dtype not in supported_dtypes: float_dtype = dtypes.float32
     universal_test_cast(a, float_dtype, unsigned_dtype)
 
   @unittest.expectedFailure

@@ -1,6 +1,5 @@
 import unittest, random
 from tinygrad import Tensor, Device, nn, GlobalCounters, TinyJit, dtypes, Variable
-from tinygrad.device import is_dtype_supported
 from tinygrad.uop.ops import Ops, UOp
 from tinygrad.helpers import getenv, prod, Context
 from tinygrad.nn.state import get_parameters, get_state_dict
@@ -749,11 +748,6 @@ class TestMultiTensor(unittest.TestCase):
     t2.realize()
   def test_rand_like_on_shard_axis(self): self.test_rand_like_on_shard(0)
 
-  def test_rand_like_on_shard_axis_requires_grad(self):
-    t = Tensor.empty((16, 16)).shard(devices_2, axis=0)
-    self.assertIs(t.rand_like(requires_grad=True).requires_grad, True)
-    self.assertIs(t.rand_like(requires_grad=False).requires_grad, False)
-
   def test_rand_like_from_alu(self):
     a = Tensor.ones(4, 4).shard(devices_4, axis=0)
     aa = a + a
@@ -911,7 +905,7 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
 
   @given(strat.sampled_from([dtypes.float, dtypes.int, dtypes.int64, dtypes.int16]))
   def test_ops(self, dtype):
-    if not is_dtype_supported(dtype): return
+    if dtype not in Device[Device.DEFAULT].renderer.supported_dtypes(): return
     t = Tensor.arange(64).reshape(8, 8).contiguous().realize()
     t.shard_([f"{Device.DEFAULT}:{i}" for i in range(4)], axis=0)
     for i in range(4):

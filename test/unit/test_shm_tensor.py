@@ -1,7 +1,8 @@
 import unittest
 import multiprocessing.shared_memory as shared_memory
-from tinygrad.helpers import CI, WIN
+from tinygrad.helpers import WIN
 from tinygrad import Tensor, Device
+from test.helpers import CI
 import numpy as np
 
 class TestRawShmBuffer(unittest.TestCase):

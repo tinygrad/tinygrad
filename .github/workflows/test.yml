@@ -561,27 +561,6 @@ jobs:
 
 # ****** Feature Tests ******
 
-  testdevectorize:
-    name: Linux (devectorize)
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    steps:
-    - name: Checkout Code
-      uses: actions/checkout@v6
-    - name: Setup Environment
-      uses: ./.github/actions/setup-tinygrad
-      with:
-        key: devectorize-minimal
-        deps: testing_unit
-        pydeps: "pillow"
-        llvm: "true"
-    - name: Test LLVM=1 DEVECTORIZE=0
-      run: DEV=CPU:LLVM DEVECTORIZE=0 python3 -m pytest -n auto test/test_tiny.py test/backend/test_ops.py
-    - name: Test LLVM=1 DEVECTORIZE=0 for model
-      run: DEV=CPU:LLVM DEVECTORIZE=0 python3 test/models/test_efficientnet.py
-    - name: Test DEV=CPU DEVECTORIZE=0
-      run: DEV=CPU DEVECTORIZE=0 python3 -m pytest -n auto test/test_tiny.py test/backend/test_ops.py
-
   testdsp:
     name: Linux (DSP)
     runs-on: ubuntu-24.04
@@ -797,7 +776,7 @@ jobs:
           deps: testing_unit
           opencl: ${{ matrix.backend == 'opencl' && 'true' }}
           llvm: ${{ matrix.backend != 'opencl' }}
-          mesa: ${{ matrix.backend == 'lvp' && 'true' }}
+          mesa: ${{ matrix.backend == 'lvp' && 'cpu' }}
       - name: Set env
         run: printf "${{ matrix.backend == 'llvm' && 'DEV=CPU:LLVM' || matrix.backend == 'cpu' && 'CC=clang-20\nDEV=CPU\nCPU_COUNT=2' || matrix.backend == 'opencl' && 'DEV=CL' || matrix.backend == 'lvp' && 'DEV=CPU:LVP' || matrix.backend == 'x86' && 'DEV=CPU:X86' }}" >> $GITHUB_ENV
       - name: Check Device.DEFAULT and print some source
@@ -924,7 +903,7 @@ jobs:
           key: macos-${{ matrix.backend }}-minimal
           deps: testing_unit
           llvm: ${{ matrix.backend == 'llvm' || matrix.backend == 'lvp' }}
-          mesa: ${{ matrix.backend == 'lvp' && 'true' }}
+          mesa: ${{ matrix.backend == 'lvp' && 'cpu' }}
       - name: Set env
         run: printf "${{ matrix.backend == 'llvm' && 'DEV=CPU:LLVM' || matrix.backend == 'cpu' && 'DEV=CPU\nCPU_COUNT=2' || matrix.backend == 'metal' && 'DEV=METAL' || matrix.backend == 'lvp' && 'DEV=CPU:LVP' }}" >> $GITHUB_ENV
       - name: Check Device.DEFAULT and print some source

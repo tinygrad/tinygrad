@@ -229,6 +229,8 @@ class PythonRenderer(Renderer):
     lops = [(u.op, u.dtype, [uops.index(v) for v in u.src if u.op is not Ops.SPECIAL], u.arg) for u in uops]
     return base64.b64encode(pickle.dumps(lops)).decode()
 
+  def supported_dtypes(self): return {d for d in super().supported_dtypes() if d != dtypes.half or sys.version_info >= (3, 12)}
+
 class PythonAllocator(Allocator['PythonDevice']):
   def _alloc(self, size, options): return memoryview(bytearray(size))
   def _copyin(self, dest, src:memoryview): dest[:] = src

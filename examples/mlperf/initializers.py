@@ -77,11 +77,11 @@ class FrozenBatchNorm2dRetinaNet(nn.BatchNorm2d):
   def __init__(self, sz:int, eps=1e-5, affine=True, track_running_stats=True, momentum=0.1):
     self.eps, self.track_running_stats, self.momentum = eps, track_running_stats, momentum
 
-    self.weight = Tensor.ones(sz, dtype=dtypes.float32, requires_grad=False) if affine else None
-    self.bias = Tensor.zeros(sz, dtype=dtypes.float32, requires_grad=False) if affine else None
+    self.weight = Tensor.ones(sz, dtype=dtypes.float32).is_param_(False) if affine else None
+    self.bias = Tensor.zeros(sz, dtype=dtypes.float32).is_param_(False) if affine else None
 
-    if track_running_stats: self.running_mean, self.running_var = Tensor.zeros(sz, dtype=dtypes.float32, requires_grad=False), Tensor.ones(sz, dtype=dtypes.float32, requires_grad=False)
-    self.num_batches_tracked = Tensor.zeros(1, dtype=dtypes.long, requires_grad=False)
+    if track_running_stats: self.running_mean, self.running_var = Tensor.zeros(sz, dtype=dtypes.float32).is_param_(False), Tensor.ones(sz, dtype=dtypes.float32).is_param_(False)
+    self.num_batches_tracked = Tensor.zeros(1, dtype=dtypes.long).is_param_(False)
 
   def __call__(self, x:Tensor) -> Tensor:
     batch_mean, batch_var = super().calc_stats(x.cast(dtypes.float32))

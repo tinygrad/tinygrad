@@ -1,6 +1,7 @@
 import unittest, numpy as np
 from tinygrad import Tensor, Device, TinyJit
-from tinygrad.helpers import Timing, CI, OSX, getenv
+from tinygrad.helpers import Timing, OSX, getenv
+from test.helpers import CI
 import multiprocessing.shared_memory as shared_memory
 
 N = getenv("NSZ", 256)

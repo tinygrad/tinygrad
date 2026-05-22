@@ -2,9 +2,10 @@ import unittest, time
 from unittest.case import skipIf
 
 from extra.bench_log import BenchEvent, InstantBenchEvent, WallTimeEvent, KernelTimeEvent, log_event_instant, _events, clear_events
-from tinygrad.helpers import Context, CI
+from tinygrad.helpers import Context
 from tinygrad.tensor import Tensor
 from tinygrad.device import Device
+from test.helpers import CI
 
 _SKIP_KERNEL_TIMING = Device.DEFAULT == "WEBGPU"  # WEBGPU kernel timing not supported
 

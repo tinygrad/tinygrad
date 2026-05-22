@@ -1,6 +1,6 @@
 import functools, argparse, pathlib
 from tinygrad import Tensor, nn, Device, GlobalCounters, Variable
-from tinygrad.helpers import Timing, Profiling, CI, tqdm
+from tinygrad.helpers import Timing, Profiling, tqdm
 from tinygrad.nn.state import torch_load, get_state_dict
 from extra.models.llama import FeedForward, Transformer
 from extra.bench_log import BenchEvent, WallTimeEvent
@@ -36,7 +36,7 @@ if __name__ == "__main__":
     model = Transformer(n_layers=32, dim=4096, hidden_dim=14336, n_heads=32, n_kv_heads=8, norm_eps=1e-5, vocab_size=32000, feed_forward=functools.partial(MixtureFeedForward, 8), jit=False)
     model_state_dict = get_state_dict(model)
 
-    for k in (t := tqdm(state, disable=CI)):
+    for k in (t := tqdm(state, disable=None)):
       if 'feed_forward.experts.' in k:
         expert_no = int(k.split('feed_forward.experts.')[1].split('.')[0])
         device = Device.DEFAULT + ":" + str((expert_no//2)+1)
@@ -44,7 +44,7 @@ if __name__ == "__main__":
         device = Device.DEFAULT
       t.set_description(f"ram used: {GlobalCounters.mem_used/1e9:5.2f} GB, loading {k} to {device}")
       model_state_dict[k].replace(state[k].to(device).half()).realize()
-  if CI: print(f"ram used: {GlobalCounters.mem_used/1e9:5.2f} GB")
+  if t.disable: print(f"ram used: {GlobalCounters.mem_used/1e9:5.2f} GB")
 
   from sentencepiece import SentencePieceProcessor
   spp = SentencePieceProcessor(model_file=args.weights + "/tokenizer.model")

@@ -153,7 +153,7 @@ class TestIndexing(unittest.TestCase):
     n = random.randint(1, 10)
     z = Tensor.randn([m, n])
     a = 1.0
-    w = Tensor(a)
+    w = Tensor([a])
     z[:, 0] = w
     z.sum().backward()
     numpy_testing_assert_equal_helper(w.grad, m * a)

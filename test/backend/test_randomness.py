@@ -2,15 +2,14 @@ import unittest, math
 from functools import partial
 
 from tinygrad import nn, dtypes, Tensor, Device, TinyJit, Variable
-from tinygrad.helpers import getenv, CI, OSX
-from tinygrad.device import is_dtype_supported
+from tinygrad.helpers import getenv, OSX
 from tinygrad.codegen import to_program
 
 from tinygrad.uop.ops import Ops
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.nir import NIRRenderer
 from tinygrad.renderer.isa.x86 import X86Renderer
-from test.helpers import not_support_multi_device, needs_second_gpu
+from test.helpers import not_support_multi_device, needs_second_gpu, CI
 
 import numpy as np
 import torch
@@ -86,7 +85,7 @@ class TestRandomness(unittest.TestCase):
     self.assertTrue(r1.uop.is_realized, "tensor should be realized after .realize()")
     self.assertTrue(r2.uop.is_realized, "tensor should be realized after .realize()")
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.float16), "need float16 support")
+  @unittest.skipUnless(dtypes.float16 in Device[Device.DEFAULT].renderer.supported_dtypes(), "need float16 support")
   def test_rand_float16(self):
     N = 128
     x = Tensor.rand((2, N, N), dtype=dtypes.float16)
@@ -211,7 +210,7 @@ class TestRandomness(unittest.TestCase):
       if not (x.src[0] == y.src[0]):
         print(f"{x.src[0]} != {y.src[0]}")
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.bfloat16), "need bfloat16 support")
+  @unittest.skipUnless(dtypes.bfloat16 in Device[Device.DEFAULT].renderer.supported_dtypes(), "need bfloat16 support")
   def test_rand_bfloat16(self):
     N = 128
     x = Tensor.rand((2, N, N), dtype=dtypes.bfloat16)
@@ -285,7 +284,7 @@ class TestRandomness(unittest.TestCase):
 
   @given(strat.sampled_from([dtypes.float, dtypes.float16, dtypes.bfloat16]))
   def test_randn_finite(self, default_float):
-    if not is_dtype_supported(default_float): return
+    if default_float not in Device[Device.DEFAULT].renderer.supported_dtypes(): return
     old_default_float = dtypes.default_float
     # low precision can result in inf from randn
     dtypes.default_float = default_float

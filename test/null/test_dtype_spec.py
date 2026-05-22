@@ -1,7 +1,6 @@
 import unittest, math, struct, operator
-from tinygrad.tensor import Tensor, dtypes
-from tinygrad.dtype import DTYPES_DICT, truncate, float_to_fp16, float_to_bf16, _to_np_dtype, least_upper_dtype, least_upper_float
-from tinygrad.device import is_dtype_supported
+from tinygrad import Tensor, Device
+from tinygrad.dtype import DTYPES_DICT, dtypes, truncate, float_to_fp16, float_to_bf16, _to_np_dtype, least_upper_dtype, least_upper_float
 
 from tinygrad.helpers import getenv
 from hypothesis import given, settings, strategies as strat
@@ -12,8 +11,8 @@ settings.register_profile("my_profile", max_examples=50, deadline=None, derandom
 settings.load_profile("my_profile")
 
 core_dtypes = list(DTYPES_DICT.values())
-dtype_ints = [dt for dt in core_dtypes if dtypes.is_int(dt) and is_dtype_supported(dt)]
-dtype_floats = [dt for dt in core_dtypes if dtypes.is_float(dt) and is_dtype_supported(dt)]
+dtype_ints = [dt for dt in core_dtypes if dtypes.is_int(dt) and dt in Device[Device.DEFAULT].renderer.supported_dtypes()]
+dtype_floats = [dt for dt in core_dtypes if dtypes.is_float(dt) and dt in Device[Device.DEFAULT].renderer.supported_dtypes()]
 
 FP8E4M3_MAX = 448.0
 FP8E5M2_MAX = 57344.0
@@ -178,6 +177,12 @@ class TestHelpers(unittest.TestCase):
     elif x > FP8E5M2_MAX: np.testing.assert_equal(truncate[dtypes.fp8e5m2](x), FP8E5M2_MAX)
     elif x < -FP8E5M2_MAX: np.testing.assert_equal(truncate[dtypes.fp8e5m2](x), -FP8E5M2_MAX)
     else: np.testing.assert_equal(truncate[dtypes.fp8e5m2](x), torch.tensor(x, dtype=torch.float8_e5m2).float().item())
+
+  def test_finfo(self):
+    for dt in [dtypes.float16, dtypes.float32, dtypes.float64]:
+      info = np.finfo(_to_np_dtype(dt))
+      self.assertEqual(info.bits, dt.bitsize)
+      self.assertEqual((info.nexp, info.nmant), dtypes.finfo(dt))
 
 class TestTypePromotion(unittest.TestCase):
   @given(strat.sampled_from(core_dtypes))

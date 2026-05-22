@@ -3,10 +3,11 @@ import unittest
 import torch
 import numpy as np
 
-from tinygrad.helpers import CI, DEV
+from tinygrad.helpers import DEV
 from tinygrad.tensor import Tensor
 from tinygrad.device import Device
 from tinygrad.dtype import _from_torch_dtype, _to_torch_dtype
+from test.helpers import CI
 
 MOCKGPU = DEV.interface.startswith("MOCK")
 
