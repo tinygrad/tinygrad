@@ -8,10 +8,13 @@ from tinygrad.tensor import _to_np_dtype
 from tinygrad.codegen import to_program
 from tinygrad.dtype import DType
 from tinygrad.nn.state import get_parameters
-from tinygrad.helpers import T, CI, Target
+from tinygrad.helpers import T, Target
 from tinygrad.renderer import Renderer
 from tinygrad.codegen import full_rewrite_to_sink, line_rewrite, pm_linearize_cleanups
 from tinygrad.codegen.late.linearizer import linearize
+
+# TODO: remove this everywhere!
+CI = os.getenv("CI", "") != ""
 
 # decorator to skip slow tests by default, run with RUN_SLOW=1 to include them
 slow = unittest.skipUnless(os.getenv("RUN_SLOW"), "slow test, set RUN_SLOW=1 to run")

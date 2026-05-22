@@ -10,8 +10,9 @@ from hypothesis import assume, given, strategies as strat
 from tinygrad import nn, dtypes, Device, Tensor, Variable
 from tinygrad.dtype import DType
 from tinygrad.uop.ops import UOp, Ops, UPat
-from tinygrad.helpers import CI, DEBUG, OSX, GlobalCounters, Context, getenv, all_same, temp
+from tinygrad.helpers import DEBUG, OSX, GlobalCounters, Context, getenv, all_same, temp
 from tinygrad.engine.realize import compile_linear, run_linear
+from test.helpers import CI
 
 supported_dtypes = Device[Device.DEFAULT].renderer.supported_dtypes()
 
