@@ -36,7 +36,7 @@ packages = [
   'tinygrad.runtime.autogen.amd.rdna3',
   'tinygrad.runtime.autogen.amd.rdna4',
   'tinygrad.runtime.autogen.amd.cdna',
-  "tinygrad.runtime.autogen.nv_regs",
+  'tinygrad.runtime.autogen.nv_regs',
   'tinygrad.runtime.graph',
   'tinygrad.runtime.support',
   'tinygrad.runtime.support.am',
@@ -49,6 +49,7 @@ packages = [
 
 [tool.setuptools.package-data]
 tinygrad = ["py.typed"]
+"tinygrad.llm" = ["chat.html"]
 "tinygrad.viz" = ["index.html", "assets/**/*", "js/*"]
 
 
