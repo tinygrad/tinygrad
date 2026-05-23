@@ -1270,7 +1270,7 @@ class Tensor(OpMixin):
   def ufix(self, x) -> Tensor:
     # TODO: x:ConstType|UOp does not work because mixin only accepts Self | ConstType
     assert isinstance(x, (*get_args(ConstType), UOp)), f"{type(x)=}, {x=}"
-    return Tensor(x, self.device, self.dtype if self._ufix_keep_dtype(x) else None)
+    return Tensor(self.uop.ufix(x))
 
   def where(self:Tensor, x:Tensor|ConstType|sint, y:Tensor|ConstType|sint) -> Tensor:
     """
@@ -1292,7 +1292,7 @@ class Tensor(OpMixin):
     """
     if isinstance(x, Tensor): x, y = x._broadcasted(y)
     elif isinstance(y, Tensor): y, x = y._broadcasted(x)
-    else: x, y = Tensor(x, self.device)._broadcasted(y)
+    else: x, y = self.ufix(x)._broadcasted(y)
     out_shape = _broadcast_shape(self.shape, x.shape)
     return self.cast(dtypes.bool)._broadcast_to(out_shape)._apply_uop(UOp.where, x._broadcast_to(out_shape), y._broadcast_to(out_shape))
 

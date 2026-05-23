@@ -2848,6 +2848,7 @@ class TestOps(unittest.TestCase):
     for dim in range(-1, 2):
       helper_test_op([(45,65), (45,65), (45,65)], lambda x,y,z: torch.cat((x,y,z), dim), lambda x,y,z: x.cat(y, z, dim=dim))
 
+  @unittest.skipIf(COMPILE_ONLY, "test requires runtime")
   def test_stack(self):
     for dim in range(-1, 3):
       helper_test_op([(5,6,3), (5,6,3), (5,6,3)], lambda x, y, z: torch.stack((x, y, z), dim), lambda x, y, z: Tensor.stack(x, y, z, dim=dim))
@@ -2858,8 +2859,7 @@ class TestOps(unittest.TestCase):
     with self.assertRaises(ValueError):
       Tensor.stack((Tensor([1, 2]), Tensor([3, 4])), Tensor([5, 6]))
 
-    a = Tensor(3.14)
-    np.testing.assert_allclose(Tensor.stack(a, a).numpy(), Tensor([3.14, 3.14]).numpy())
+    np.testing.assert_allclose(Tensor.stack(Tensor(3.14), Tensor(3.14)).numpy(), np.array([3.14, 3.14]))
 
   def test_stack_max(self):
     helper_test_op(None, lambda x, y: torch.stack((x, y)).max(axis=0)[0], lambda x, y: Tensor.stack(x, y).max(axis=0), vals=[[1.], [2.]])
@@ -3349,6 +3349,7 @@ class TestOps(unittest.TestCase):
     # fill_value must not alter output dtype
     self.assertEqual(Tensor([1.0, 2.0]).masked_select(Tensor([True, False]), size=3, fill_value=-1).dtype, dtypes.default_float)
 
+  @slow_test
   def test_nonzero(self):
     helper_test_op([(32, 10)], lambda x: (x>0.5).nonzero().int(), lambda x: (x>0.5).nonzero(), forward_only=True)
     helper_test_op([(20,)], lambda x: (x>0.5).nonzero().int(), lambda x: (x>0.5).nonzero(), forward_only=True)

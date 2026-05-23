@@ -140,7 +140,7 @@ class TestAssign(unittest.TestCase):
   def test_assign_changes_realized_alt(self): return self.test_assign_changes_alt(realize=True)
 
   def test_assign_changes_buffer_alt(self):
-    a, b = [Tensor(Tensor(0).contiguous().realize().uop.buf_uop) for _ in range(2)]
+    a, b = [Tensor(Tensor([0]).realize().uop.buf_uop) for _ in range(2)]
     Tensor.realize(a.contiguous().assign(1), b.contiguous().assign(2))
     self.assertEqual((a + b).item(), 3)
 
