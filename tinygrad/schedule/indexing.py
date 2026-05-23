@@ -53,6 +53,13 @@ class IndexingContext:
     # if a range has a 1 src, it's the same as UOp.const(dtypes.weakint, 0)
     return UOp.range(s, next(self.range_idx), axistype) if resolve(s!=1) else UOp.const(dtypes.weakint, 0)
 
+def tag_reduce_scope(ctx:IndexingContext, x:UOp, ret:UOp|None) -> UOp|None:
+  if ret is None or x not in ctx.range_map: return ret
+  if scope:=tuple(r.arg[0] for r in ctx.range_map[x][0] if r.op is Ops.RANGE and r.arg[-1] is AxisType.REDUCE):
+    ret = ret.replace(tag=scope)
+    ctx.range_map[ret] = ctx.range_map[x]
+  return ret
+
 def create_bufferize_and_index_based_on_ranges(ctx:IndexingContext, x:UOp):
   if x.op in {Ops.STAGE, Ops.INDEX}: return None
   new_srcs = []
@@ -78,14 +85,14 @@ def create_bufferize_and_index_based_on_ranges(ctx:IndexingContext, x:UOp):
         if x in ctx.range_map: new_src = new_src.index(*[r for i,r in enumerate(ctx.range_map[x][0]) if i in realized_ranges])
     new_srcs.append(new_src)
   # NOTE: do we need this?
-  return x.replace(src=tns) if x.src != (tns:=tuple(new_srcs)) else None
+  return tag_reduce_scope(ctx, x, x.replace(src=tns) if x.src != (tns:=tuple(new_srcs)) else None)
 
 def convert_pad_to_where_to_keep_behavior_local(ctx:IndexingContext, x:UOp):
   if x not in ctx.range_map: return None
   valid: UOp = UOp.const(dtypes.bool, True).uprod([r.get_valid() for r in ctx.range_map[x][0]])
   ret = valid.where(x.src[0], UOp.const(x.dtype, 0))
   ctx.range_map[ret] = ctx.range_map[x]
-  return ret
+  return tag_reduce_scope(ctx, x, ret)
 
 def convert_reduce_to_reduce_with_ranges(ctx:IndexingContext, x:UOp):
   if len(x.arg[1]) == 0: return None
@@ -93,7 +100,7 @@ def convert_reduce_to_reduce_with_ranges(ctx:IndexingContext, x:UOp):
   new_ranges = [r for i,r in enumerate(ctx.range_map[x][0]) if i in x.arg[1]]
   ret = UOp(Ops.REDUCE, x.dtype, src=(x.src[0],)+tuple(new_ranges), arg=(x.arg[0], ()))
   ctx.range_map[ret] = ctx.range_map[x]
-  return ret
+  return tag_reduce_scope(ctx, x, ret)
 
 def remove_movement_op_after_rangeify(ctx:IndexingContext, x:UOp):
   if x in ctx.range_map or x.src[0].op is Ops.INDEX: return x.src[0]
