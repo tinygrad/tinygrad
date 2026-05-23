@@ -5,7 +5,7 @@ from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, graph_rewrite, sint, AxisType, profile_matches
 from tinygrad.uop.ops import consumer_map_from_toposort, gate_kernel_sink
 from tinygrad.uop.symbolic import symbolic, pm_simplify_valid, pm_drop_and_clauses
-from tinygrad.helpers import argsort, all_same, cpu_profile, PCONTIG, colored, Context, SPEC
+from tinygrad.helpers import argsort, all_same, cpu_profile, PCONTIG, colored, Context, SPEC, IMAGE
 
 ALWAYS_CONTIGUOUS: set[Ops] = {Ops.CONTIGUOUS, Ops.AFTER, Ops.COPY, Ops.BUFFER, Ops.SLICE,
                      Ops.CONST, Ops.BIND, Ops.DEVICE, Ops.MSELECT, Ops.MSTACK, Ops.PARAM,
@@ -163,6 +163,7 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
 
   # explicit rangeify
   ending_ranges: dict[UOp, list[UOp]] = {}
+  reduce_bodies = {u:set(u.src[0].toposort()) for u in tsink_toposort if u.op is Ops.REDUCE and len(u.arg[1])} if IMAGE else {}
   for x in reversed(tsink_toposort):
     if x.op in {Ops.DEVICE, Ops.UNIQUE}: continue
 
@@ -256,6 +257,12 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
 
     # REDUCE creates ranges for the axes it is reducing
     if x.op is Ops.REDUCE and len(x.arg[1]):
+      if IMAGE:
+        reduce_body = reduce_bodies[x]
+        if any(other.arg[1] != x.arg[1] and x not in body and other not in reduce_body and
+               any(u.op not in ALWAYS_CONTIGUOUS for u in reduce_body & body)
+               for other,body in reduce_bodies.items() if other is not x):
+          rctx.realize_map[x.src[0]] = None
       rngs = tuple(rctx.new_range(s, axistype=AxisType.REDUCE) if i in x.arg[1] else r for i,(r,s) in enumerate(zip(rngs, x.src[0].shape)))
 
     if debug:
