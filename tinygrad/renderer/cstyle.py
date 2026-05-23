@@ -200,7 +200,7 @@ class CStyleLanguage(Renderer):
       if (u.op is not Ops.CAST or u.dtype.vcount == 1) and (u.op in {Ops.CONST, Ops.GEP, Ops.INDEX, Ops.CUSTOMI} or \
         (u.op is Ops.LOAD and u.src[0].ptrdtype.addrspace == AddrSpace.REG) or \
         (u.op is Ops.CAST and isinstance(u.dtype, PtrDType)) or \
-        (u.op in {Ops.STACK, *(GroupOp.ALU-{Ops.WHERE, Ops.MAX}), Ops.CAST, Ops.BITCAST} and child_count[u] == 1 and not getenv("EXPAND_SSA"))):
+        (u.op in {Ops.STACK, *(GroupOp.ALU-{Ops.WHERE}), Ops.CAST, Ops.BITCAST} and child_count[u] == 1 and not getenv("EXPAND_SSA"))):
         r[u] = l
       else:
         if u.op not in {Ops.RANGE, Ops.DEFINE_LOCAL, Ops.STORE, Ops.DEFINE_REG} and u.dtype != dtypes.void:
@@ -515,9 +515,8 @@ class HIPRenderer(CStyleLanguage):
                        "i": lambda x: f"(__ockl_get_group_id({x})*__ockl_get_local_size({x})+__ockl_get_local_id({x}))"}
   code_for_op = {**CStyleLanguage.code_for_op, Ops.TRUNC: _ocml("trunc"), Ops.SIN: _ocml("sin"),
                  Ops.LOG2: _ocml("log2"), Ops.EXP2:lambda x,dtype: f"__builtin_amdgcn_exp2f({x})" if dtype==dtypes.float else _ocml("exp2")(x,dtype),
-                 Ops.SQRT: _ocml("sqrt"), Ops.RECIPROCAL: lambda x,dtype: f"__builtin_amdgcn_rcpf({x})" if dtype == dtypes.float else f"(1/{x})",
-                 Ops.MAX: lambda a,b,dtype: f"__builtin_fmaxf({a},{b})" if dtype == dtypes.float else f"(({a}>{b})?{a}:{b})"
-                 }
+                 Ops.SQRT: _ocml("sqrt"), Ops.RECIPROCAL: lambda x,dtype: f"__builtin_amdgcn_rcpf({x})" if dtype == dtypes.float else None,
+                 Ops.MAX: lambda a,b,dtype: f"__builtin_fmaxf({a},{b})" if dtype == dtypes.float else None}
   smem_prefix = "__attribute__((shared, aligned(16)))"
   smem_prefix_for_cast: bool = False
   barrier = '__builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");' + '__builtin_amdgcn_s_barrier();' + \
