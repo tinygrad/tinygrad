@@ -627,7 +627,7 @@ class _Ctx:
     """Compile a scalar instruction with dynamic destination register."""
     pcode = get_pcode(op)
     srcs.update({'VCC': self.rmask(_c(VCC_LO.offset)), 'EXEC': self.rexec(), 'SCC': self.rsgpr_dyn(_c(SCC.offset)),
-                 '_wave_size': self.wave_size})
+                 '_wave_size': self.wave_size, 'PC': self.rpc().cast(dtypes.int64)})
     if 'D0' not in srcs: srcs['D0'] = self.rsgpr_dyn(sdst_reg)  # D0 is current dest value for read-modify-write ops
     _, assigns = parse_pcode(pcode, srcs)
     return UOp.sink(*self.scalar_stores(assigns, sdst_reg, sdst_size), *self.inc_pc())
