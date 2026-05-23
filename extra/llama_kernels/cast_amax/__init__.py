@@ -1,11 +1,11 @@
 from __future__ import annotations
 import functools, pathlib
 from tinygrad import Tensor, dtypes
-from tinygrad.dtype import AddrSpace
 from tinygrad.helpers import ContextVar, prod
-from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
+from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.renderer import Estimates
 from extra.llama_kernels import FP8_MAX, NUM_WG, THREADS_PER_WG, compile_cpp, alloc_like, alloc_local, scalar_amax, dname_of
+from extra.llama_kernels.quantize_fp8_delayed import wg_vec_axes, store_wg_amax
 
 # module-level mailbox: grad_xw13 UOp -> (grad_xw13_fp8 UOp, inv_scale UOp, new_amax UOp, store_effect)
 # lets cdna_asm_gemm's bwd reuse the fp8 companion produced by the fused silu_mul bwd kernel
@@ -35,10 +35,8 @@ def _custom_fused_bwd_w13(grad_xw13:UOp, grad_xw13_fp8_out:UOp, grad_amax_buf:UO
   xw13 = xw13.reshape(rows, 2, HIDDEN)
   grad_x2 = grad_x2.reshape(rows, HIDDEN)
 
-  wg = UOp.range(NUM_WG, 0, AxisType.GLOBAL)
-  tid = UOp.range(THREADS_PER_WG, 1, AxisType.LOCAL)
-  it = UOp.range((n_elems // VEC) // (NUM_WG * THREADS_PER_WG), 2, AxisType.LOOP)
-  lane = UOp.range(VEC, 3, AxisType.UNROLL)
+  axes = wg_vec_axes(n_elems, VEC)
+  wg, tid, it, lane = axes
 
   vec = (it * NUM_WG + wg) * THREADS_PER_WG + tid
   row = vec // hidden_vec
@@ -69,25 +67,7 @@ def _custom_fused_bwd_w13(grad_xw13:UOp, grad_xw13_fp8_out:UOp, grad_amax_buf:UO
   stores = grad_xw13_fp8_out.after(stores)[row, 1, col].store(scaled_g3.cast(grad_xw13_fp8_out.dtype.base))
   stores = stores.end(lane)
 
-  lane_max = abs_g.reduce(lane, arg=Ops.MAX)
-
-  lmax = UOp.placeholder((1,), dtypes.float, slot=1, addrspace=AddrSpace.REG)
-  lmax_init = lmax.after(wg, tid)[0].store(0.0)
-  lmax_prev = lmax.after(lmax_init, it)[0]
-  lmax_store = lmax.after(stores)[0].store(lmax_prev.maximum(lane_max))
-  lmax_val = lmax.after(lmax_store.end(it))[0]
-
-  lds = UOp.placeholder((THREADS_PER_WG,), dtypes.float, slot=0, addrspace=AddrSpace.LOCAL)
-  lds = lds.after(lds[tid].store(lmax_val).barrier())
-
-  step = THREADS_PER_WG // 2
-  while step:
-    active = tid < step
-    other = lds[tid + step].load(UOp.const(dtypes.float, 0.0), active)
-    lds = lds.after(lds[tid].store(lds[tid].maximum(other), gate=active).barrier())
-    step //= 2
-
-  amax_store = grad_amax_buf[tid.eq(0).where(wg, UOp.invalid())].store(lds[0])
+  amax_store = store_wg_amax(grad_amax_buf, abs_g, stores, axes)
   return amax_store.end(tid, wg).sink(arg=KernelInfo(f"fused_silu_mul_bwd_w13_{n_elems}", opts_to_apply=()))
 
 @functools.cache
@@ -105,10 +85,8 @@ def _custom_fused_cast_amax_w13_uop(fp8_out:UOp, amax_buf:UOp, xw13:UOp, amax_st
   fp8_out = fp8_out.reshape(n_elems)
   xw13 = xw13.reshape(n_elems // hidden, 2, hidden)
 
-  wg = UOp.range(NUM_WG, 0, AxisType.GLOBAL)
-  tid = UOp.range(THREADS_PER_WG, 1, AxisType.LOCAL)
-  it = UOp.range((n_elems // VEC) // (NUM_WG * THREADS_PER_WG), 2, AxisType.LOOP)
-  lane = UOp.range(VEC, 3, AxisType.UNROLL)
+  axes = wg_vec_axes(n_elems, VEC)
+  wg, tid, it, lane = axes
 
   vec = (it * NUM_WG + wg) * THREADS_PER_WG + tid
   idx = vec * VEC + lane
@@ -125,25 +103,7 @@ def _custom_fused_cast_amax_w13_uop(fp8_out:UOp, amax_buf:UOp, xw13:UOp, amax_st
   scaled = (x2 * scale).maximum(-FP8_MAX).minimum(FP8_MAX)
 
   fp8_store = fp8_out[idx].store(scaled.cast(fp8_out.dtype.base)).end(lane)
-  lane_max = abs_x2.reduce(lane, arg=Ops.MAX)
-
-  lmax = UOp.placeholder((1,), dtypes.float, slot=1, addrspace=AddrSpace.REG)
-  lmax_init = lmax.after(wg, tid)[0].store(0.0)
-  lmax_prev = lmax.after(lmax_init, it)[0]
-  lmax_store = lmax.after(fp8_store)[0].store(lmax_prev.maximum(lane_max))
-  lmax_val = lmax.after(lmax_store.end(it))[0]
-
-  lds = UOp.placeholder((THREADS_PER_WG,), dtypes.float, slot=0, addrspace=AddrSpace.LOCAL)
-  lds = lds.after(lds[tid].store(lmax_val).barrier())
-
-  step = THREADS_PER_WG // 2
-  while step:
-    active = tid < step
-    other = lds[tid + step].load(UOp.const(dtypes.float, 0.0), active)
-    lds = lds.after(lds[tid].store(lds[tid].maximum(other), gate=active).barrier())
-    step //= 2
-
-  amax_store = amax_buf[tid.eq(0).where(wg, UOp.invalid())].store(lds[0])
+  amax_store = store_wg_amax(amax_buf, abs_x2, fp8_store, axes)
   return amax_store.end(tid, wg).sink(arg=KernelInfo(f"fused_silu_mul_cast_amax_w13_{n_elems}", opts_to_apply=()))
 
 def _fused_quantize_bwd_w13(gradient:UOp, kernel:UOp):

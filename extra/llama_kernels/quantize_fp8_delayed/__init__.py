@@ -5,35 +5,22 @@ from tinygrad.helpers import prod
 from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
 from extra.llama_kernels import FP8_MAX, NUM_WG, THREADS_PER_WG, alloc_like, alloc_local, scalar_amax
 
-@functools.cache
-def _custom_quantize_fp8_with_amax(fp8_out:UOp, amax_partial:UOp, x:UOp, amax_state:UOp) -> UOp:
-  VEC = 8
-  n_elems = prod(x.shape)
-  assert n_elems % (NUM_WG * THREADS_PER_WG * VEC) == 0
-  assert amax_partial.shape[0] == NUM_WG
+def wg_vec_axes(n_elems:int, vec:int=8) -> tuple[UOp, UOp, UOp, UOp]:
+  return (UOp.range(NUM_WG, 0, AxisType.GLOBAL),
+          UOp.range(THREADS_PER_WG, 1, AxisType.LOCAL),
+          UOp.range((n_elems // vec) // (NUM_WG * THREADS_PER_WG), 2, AxisType.LOOP),
+          UOp.range(vec, 3, AxisType.UNROLL))
 
-  x = x.reshape(n_elems)
-  fp8_out = fp8_out.reshape(n_elems)
+# calculate per wg amax with a tree reduction
 
-  wg = UOp.range(NUM_WG, 0, AxisType.GLOBAL)
-  tid = UOp.range(THREADS_PER_WG, 1, AxisType.LOCAL)
-  it = UOp.range((n_elems // VEC) // (NUM_WG * THREADS_PER_WG), 2, AxisType.LOOP)
-  lane = UOp.range(VEC, 3, AxisType.UNROLL)
-
-  idx = (((it * NUM_WG + wg) * THREADS_PER_WG + tid) * VEC) + lane
-
-  scale = FP8_MAX / (amax_state[0].cast(dtypes.float) + 1e-8)
-  x_f = x[idx].cast(dtypes.float)
-  abs_x = (x_f < 0.0).where(-x_f, x_f)
-  scaled = (x_f * scale).maximum(-FP8_MAX).minimum(FP8_MAX)
-
-  fp8_store = fp8_out[idx].store(scaled.cast(fp8_out.dtype.base)).end(lane)
-  lane_max = abs_x.reduce(lane, arg=Ops.MAX)
+def store_wg_amax(partial:UOp, value:UOp, after:UOp, axes:tuple[UOp, UOp, UOp, UOp]) -> UOp:
+  wg, tid, it, lane = axes
+  lane_max = value.reduce(lane, arg=Ops.MAX)
 
   lmax = UOp.placeholder((1,), dtypes.float, slot=1, addrspace=AddrSpace.REG)
   lmax_init = lmax.after(wg, tid)[0].store(0.0)
   lmax_prev = lmax.after(lmax_init, it)[0]
-  lmax_store = lmax.after(fp8_store)[0].store(lmax_prev.maximum(lane_max))
+  lmax_store = lmax.after(after)[0].store(lmax_prev.maximum(lane_max))
   lmax_val = lmax.after(lmax_store.end(it))[0]
 
   lds = UOp.placeholder((THREADS_PER_WG,), dtypes.float, slot=0, addrspace=AddrSpace.LOCAL)
@@ -46,7 +33,30 @@ def _custom_quantize_fp8_with_amax(fp8_out:UOp, amax_partial:UOp, x:UOp, amax_st
     lds = lds.after(lds[tid].store(lds[tid].maximum(other), gate=active).barrier())
     step //= 2
 
-  amax_store = amax_partial[tid.eq(0).where(wg, UOp.invalid())].store(lds[0])
+  return partial[tid.eq(0).where(wg, UOp.invalid())].store(lds[0])
+
+@functools.cache
+def _custom_quantize_fp8_with_amax(fp8_out:UOp, amax_partial:UOp, x:UOp, amax_state:UOp) -> UOp:
+  VEC = 8
+  n_elems = prod(x.shape)
+  assert n_elems % (NUM_WG * THREADS_PER_WG * VEC) == 0
+  assert amax_partial.shape[0] == NUM_WG
+
+  x = x.reshape(n_elems)
+  fp8_out = fp8_out.reshape(n_elems)
+
+  axes = wg_vec_axes(n_elems, VEC)
+  wg, tid, it, lane = axes
+
+  idx = (((it * NUM_WG + wg) * THREADS_PER_WG + tid) * VEC) + lane
+
+  scale = FP8_MAX / (amax_state[0].cast(dtypes.float) + 1e-8)
+  x_f = x[idx].cast(dtypes.float)
+  abs_x = (x_f < 0.0).where(-x_f, x_f)
+  scaled = (x_f * scale).maximum(-FP8_MAX).minimum(FP8_MAX)
+
+  fp8_store = fp8_out[idx].store(scaled.cast(fp8_out.dtype.base)).end(lane)
+  amax_store = store_wg_amax(amax_partial, abs_x, fp8_store, axes)
   return amax_store.end(tid, wg).sink(arg=KernelInfo(f"quantize_fp8_with_amax_{n_elems}", opts_to_apply=()))
 
 @functools.cache
