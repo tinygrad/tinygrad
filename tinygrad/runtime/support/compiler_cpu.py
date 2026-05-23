@@ -69,9 +69,9 @@ class LLVMCompiler(Compiler):
     super().__init__(cache_key or f"compile_llvm_{processor}_{feats}{'_jit' if self.jit else ''}{'_opt' if opt else ''}")
 
   def __del__(self):
-    if(hasattr(self, "pbo")):
+    if hasattr(self, "pbo"):
         llvm.LLVMDisposePassBuilderOptions(self.pbo)
-    if(hasattr(self, "context")):
+    if hasattr(self, "context"):
         llvm.LLVMContextDispose(self.context)
 
   def compile_to_obj(self, src:str) -> bytes:
