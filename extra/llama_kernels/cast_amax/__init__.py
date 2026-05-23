@@ -1,7 +1,7 @@
 from __future__ import annotations
 import functools, pathlib
 from tinygrad import Tensor, dtypes
-from tinygrad.helpers import ContextVar, prod
+from tinygrad.helpers import prod
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.renderer import Estimates
 from extra.llama_kernels import FP8_MAX, NUM_WG, THREADS_PER_WG, compile_cpp, alloc_like, alloc_local, scalar_amax, dname_of
