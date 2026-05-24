@@ -109,6 +109,14 @@ class TestTensorUOpCumalu(unittest.TestCase):
   def test_cumsum_non_last(self): _check(self, _t(3, 4), lambda x: x.cumsum(0))
   def test_cumsum_large(self):    _check(self, _t(600), lambda x: x.cumsum())  # exercises _split_cumalu
   def test_cumprod(self):         _check(self, _t(4), lambda x: x.cumprod(0))
+  def test_associative_scan(self): _check(self, _t(5), lambda x: x.associative_scan(lambda a,b: a+b))
+  def test_associative_scan_2d(self): _check(self, _t(3, 4), lambda x: x.associative_scan(lambda a,b: a.maximum(b), axis=1))
+  def test_associative_scan_tuple(self):
+    t, u = _t(5).float() + 1, _t(5).float()
+    vt, vu = t.associative_scan(lambda x,y: (y[0]*x[0], y[0]*x[1]+y[1]), u)
+    ut, uu = t.uop.associative_scan(lambda x,y: (y[0]*x[0], y[0]*x[1]+y[1]), u.uop)
+    self.assertIs(_strip_unique(vt.uop), _strip_unique(ut))
+    self.assertIs(_strip_unique(vu.uop), _strip_unique(uu))
 
 class TestTensorUOpCumMinMax(unittest.TestCase):
   def _check_pair(self, t, fn):

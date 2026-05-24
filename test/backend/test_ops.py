@@ -1114,6 +1114,33 @@ class TestOps(unittest.TestCase):
     helper_test_op([(0,3)], lambda x: torch.cumsum(x, dim=0), lambda x: Tensor.cumsum(x, axis=0))
     helper_test_op([(2,3,0)], lambda x: torch.cumsum(x, dim=2), lambda x: Tensor.cumsum(x, axis=2))
 
+  def test_associative_scan(self):
+    if COMPILE_ONLY: self.skipTest("requires execution")
+    x = Tensor.arange(12).reshape(3, 4)
+    xn = np.arange(12).reshape(3, 4)
+    np.testing.assert_equal(x.associative_scan(lambda a,b: a+b, axis=1).numpy(), np.cumsum(xn, axis=1))
+    m = Tensor([[2, 5, 1], [1, 7, 0], [3, 4, 9]])
+    mn = np.array([[2, 5, 1], [1, 7, 0], [3, 4, 9]])
+    np.testing.assert_equal(m.associative_scan(lambda a,b: a.maximum(b), axis=0).numpy(), np.maximum.accumulate(mn, axis=0))
+
+    y = Tensor.arange(1, 7).reshape(2, 3)
+    yn = np.arange(1, 7).reshape(2, 3)
+    expected = np.flip(np.cumprod(np.flip(yn, axis=1), axis=1), axis=1)
+    np.testing.assert_equal(y.associative_scan(lambda a,b: a*b, axis=-1, reverse=True).numpy(), expected)
+    self.assertEqual(Tensor.zeros(2, 0, 3).associative_scan(lambda a,b: a+b, axis=1).shape, (2, 0, 3))
+
+  def test_associative_scan_tuple(self):
+    if COMPILE_ONLY: self.skipTest("requires execution")
+    a, b = Tensor([2.0, 3.0, 4.0, 5.0]), Tensor([1.0, -1.0, 2.0, 0.5])
+    got_a, got_b = a.associative_scan(lambda x,y: (y[0]*x[0], y[0]*x[1]+y[1]), b)
+    exp_a, exp_b, cur_a, cur_b = [], [], 1.0, 0.0
+    for ai, bi in zip([2.0, 3.0, 4.0, 5.0], [1.0, -1.0, 2.0, 0.5]):
+      cur_a, cur_b = ai * cur_a, ai * cur_b + bi
+      exp_a.append(cur_a)
+      exp_b.append(cur_b)
+    np.testing.assert_allclose(got_a.numpy(), exp_a)
+    np.testing.assert_allclose(got_b.numpy(), exp_b)
+
   def test_small_cumprod(self):
     helper_test_op([(10)],lambda x: torch.cumprod(x, dim=0),lambda x: Tensor.cumprod(x, axis=0))
   @slow_test

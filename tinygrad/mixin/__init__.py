@@ -704,6 +704,45 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     """
     return self._split_cumalu(axis, Ops.MUL)
 
+  def associative_scan(self, fn:Callable, *others:Self, axis:int=0, reverse:bool=False) -> Self|tuple[Self, ...]:
+    """
+    Computes an inclusive scan along `axis` with associative binary function `fn`.
+
+    `fn` is called with either two tensors or, when `others` are supplied, two tuples of tensors.
+    It must return the same structure it receives.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.arange(1, 7).reshape(2, 3)
+    print(t.associative_scan(lambda a, b: a + b, axis=1).numpy())
+    ```
+    """
+    tensors = (self, *others)
+    axis = self._resolve_dim(axis)
+    assert all(t.shape == self.shape for t in tensors), "associative_scan tensors must have the same shape"
+    if self.ndim == 0 or 0 in self.shape: return tensors if others else tensors[0]
+    if reverse: tensors = tuple(t.flip(axis) for t in tensors)
+    n = self.shape[axis]
+    assert isinstance(n, int), "associative_scan requires a static axis length"
+
+    def s(t:Self, start:int|None, end:int|None) -> Self:
+      idx = [slice(None)] * t.ndim
+      idx[axis] = slice(start, end)
+      return t[tuple(idx)]
+    def structure(x) -> tuple[Self, ...]:
+      if len(tensors) == 1: return (x,)
+      assert isinstance(x, (tuple, list)) and len(x) == len(tensors), "associative_scan fn must return one tensor per input tensor"
+      return tuple(x)
+
+    out, step = tensors, 1
+    while step < n:
+      left, right = tuple(s(t, 0, n-step) for t in out), tuple(s(t, step, n) for t in out)
+      combined: tuple[Self, ...] = structure(fn(left, right) if len(tensors) != 1 else fn(left[0], right[0]))
+      out = tuple(s(t, 0, step).cat(c, dim=axis) for t,c in zip(out, combined))
+      step *= 2
+
+    if reverse: out = tuple(t.flip(axis) for t in out)
+    return out if others else out[0]
+
   def cummax(self, axis:int=0) -> tuple[Self, Self]:
     """
     Computes the cumulative max of the tensor along `axis`, returning (values, indices).
