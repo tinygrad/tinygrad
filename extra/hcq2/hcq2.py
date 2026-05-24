@@ -299,7 +299,8 @@ def bufferize_cmdbuf(ctx:HCQ2LowerCtx, target:UOp, buf_node:UOp) -> UOp:
   hbufs = tuple(UOp.from_buffer(Buffer("CPU", buf_node.arg // dtypes.uint32.itemsize, dtypes.uint32,
                                        options=BufferSpec(cpu_access=True, nolru=True), preallocate=True), dev)
                 for dev in _devices(buf_node.src[1].arg))
-  return _maybe_mstack(tuple(hbuf.after(*_lower_stores(hbuf, buf_node, target.src[1:])) for hbuf in hbufs))
+  hbuf = _maybe_mstack(hbufs)
+  return hbuf.after(*_lower_stores(hbuf, buf_node, target.src[1:]), tag=buf_node.tag)
 
 def bufferize_binary(ctx:HCQ2LowerCtx, target:UOp, buf_node:UOp) -> UOp|None:
   if buf_node.tag == "program": return bufferize_program(ctx, target, buf_node)
@@ -326,13 +327,12 @@ pm_bufferize = PatternMatcher([
   (UPat(Ops.BUFFER, name="b"), resolve_buffer), # TODO: cleanup
 ])
 
-# lift_after: pull every nested address-binary's patches onto this after and strip its wrapper, so symbolic can resolve the getaddrs
-
-def lift_after(ctx:HCQ2LowerCtx, after:UOp) -> UOp|None:
-  gate = lambda n: not (n.op is Ops.AFTER and n.src[0].op is Ops.BUFFER)
-  if not (inners:=dedup([u for s in after.src[1:] for u in s.toposort(gate=gate) if u.op is Ops.AFTER])): return None
-  return after.replace(src=after.src + tuple(d for i in inners for d in i.src[1:])).substitute({i: i.src[0] for i in inners})
-pm_lift_after = PatternMatcher([(UPat(Ops.AFTER, name="after", allow_any_len=True), lift_after)])
+def lift_patches_to_cmdbuf(ctx:HCQ2LowerCtx, cmdbuf:UOp) -> UOp|None:
+  if cmdbuf.tag not in ("compute", "copy"): return None
+  patches = dedup(u for store in cmdbuf.src[1:] for u in store.toposort() if u.op is Ops.AFTER)
+  deps = tuple(d for p in patches for d in p.src[1:])
+  return cmdbuf.replace(src=cmdbuf.src+deps, tag=None).substitute({p:p.src[0] for p in patches})
+pm_lift_patches_to_cmdbuf = PatternMatcher([(UPat(Ops.AFTER, name="cmdbuf", allow_any_len=True), lift_patches_to_cmdbuf)])
 
 # resolve patches
 
@@ -382,10 +382,9 @@ pm_resolve_patches = symbolic + PatternMatcher([
 
 def parametrize_host_buffer(ctx:HCQ2LowerCtx, buf:UOp) -> UOp:
   # register a host buffer as a launcher input and return its placeholder
-  if buf.op is Ops.AFTER: return buf.replace(src=(p:=parametrize_host_buffer(ctx, buf.src[0]),) + buf.src[1:], dtype=p.dtype)
-  if buf.op is Ops.MSTACK and any(x.op is Ops.AFTER for x in buf.src):
-    p = parametrize_host_buffer(ctx, base:=UOp(Ops.MSTACK, buf.dtype, tuple(unwrap_after(x) for x in buf.src), tag=buf.tag))
-    return p.after(*(s.substitute({x.src[0]: p}) for x in buf.src if x.op is Ops.AFTER for s in x.src[1:]))
+  if buf.op is Ops.AFTER:
+    p = parametrize_host_buffer(ctx, buf.src[0])
+    return p.after(*(s.substitute({buf.src[0]: p}) for s in buf.src[1:]))
   if (b:=buf.buffer) not in ctx.inputs: ctx.inputs.append(b)
   return UOp.placeholder((b.size,), b.dtype, ctx.inputs.index(b))
 
@@ -444,7 +443,7 @@ def hcq_realize(ctx:HCQ2LowerCtx, linear:UOp, ast:UOp) -> UOp:
                                           UOp.const(dtypes.uint64, dev.kernargs_buf.get_buf(dev_name).va_addr + off, device=dev_name))
 
   linear = graph_rewrite(linear, pm_bufferize, ctx=ctx, bottom_up=True, name="realize binaries")
-  linear = graph_rewrite(linear, pm_lift_after, ctx=ctx, bottom_up=False, name="lift patches to root")
+  linear = graph_rewrite(linear, pm_lift_patches_to_cmdbuf, ctx=ctx, bottom_up=False, name="lift patches to cmdbuf")
   linear = graph_rewrite(linear, pm_resolve_patches, ctx=ctx, bottom_up=False, name="simplify patches")
   linear = graph_rewrite(linear, pm_parametrize_host_buffers, ctx=ctx, bottom_up=True, name="parametrize host buffers")
   return graph_rewrite(linear, pm_callify, ctx=ctx, name="hcq: callify")
