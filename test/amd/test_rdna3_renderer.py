@@ -20,18 +20,18 @@ class TestRDNA3Isel(unittest.TestCase):
     rewritten = graph_rewrite(uop, self.renderer.pre_isel_matcher, IselContext(uop), bottom_up=True) if self.renderer.pre_isel_matcher else uop
     return graph_rewrite(rewritten, self.renderer.isel_matcher, IselContext(rewritten), bottom_up=True)
 
-  def test_const_float(self):
-    """Ops.CONST float32 → v_mov_b32_e32 (or inline constant)"""
-    c = UOp.const(dtypes.float, 1.0)
-    result = self.isel(c)
-    self.assertEqual(result.op, Ops.INS)
-    # TODO: check result.arg is the right instruction
-
-  def test_const_int(self):
-    """Ops.CONST int32 → s_mov_b32 (scalar constant)"""
-    c = UOp.const(dtypes.int, 42)
-    result = self.isel(c)
-    self.assertEqual(result.op, Ops.INS)
+  def test_add_f32(self):
+    from tinygrad.runtime.autogen.amd.rdna3.ins import v_add_f32_e32
+    a = UOp.variable("a", 0, 0, dtypes.float)
+    b = UOp.variable("b", 0, 0, dtypes.float)
+    c = a + b
+    n = self.isel(c)
+    print(n)
+    self.assertEqual(n.src[0].arg, ("a", 0, 0))
+    self.assertEqual(n.src[1].arg, ("b", 0, 0))
+    self.assertEqual(n.arg, v_add_f32_e32())
+    self.assertEqual(n.op, Ops.INS)
+    self.assertEqual(n.src[0].op, Ops.DEFINE_VAR)
 
   def test_sink(self):
     from tinygrad.runtime.autogen.amd.rdna3.ins import s_endpgm
@@ -41,7 +41,6 @@ class TestRDNA3Isel(unittest.TestCase):
     print(n.src[0].arg)
     self.assertEqual(n.src[0].arg, s_endpgm())
 
-  
   def test_full_add_one_kernel(self):
     from tinygrad.codegen import full_rewrite_to_sink
     from tinygrad.uop.ops import KernelInfo

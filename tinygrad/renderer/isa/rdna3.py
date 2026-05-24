@@ -5,11 +5,12 @@ from tinygrad.uop.ops import UOp, UPat, PatternMatcher
 from tinygrad.dtype import dtypes, PtrDType, DType, truncate, AddrSpace
 from tinygrad.uop import FastEnum, auto, Ops, GroupOp
 
-from tinygrad.runtime.autogen.amd.rdna3.ins import s_endpgm
+from tinygrad.runtime.autogen.amd.rdna3 import ins as RDNA3Ins
 
 pre_isel_matcher = PatternMatcher([])
 isel_matcher = PatternMatcher([
-  (UPat(Ops.SINK, name="x"), lambda x: x.replace(src=(x.ins(s_endpgm(), src=x.src),)) if not x.src or x.src[0].op is not Ops.INS else None),
+  (UPat.var("a", dtypes.float32) + UPat.var("b", dtype=dtypes.float32), lambda a, b: a.ins(RDNA3Ins.v_add_f32_e32(), src = (a,b))),
+  (UPat(Ops.SINK, name="x"), lambda x: x.replace(src=(x.ins(RDNA3Ins.s_endpgm(), src=x.src),)) if not x.src or x.src[0].op is not Ops.INS else None),
 ])
 post_regalloc_matcher = PatternMatcher([])
 
