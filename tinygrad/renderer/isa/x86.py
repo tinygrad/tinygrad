@@ -374,7 +374,7 @@ isel_matcher = PatternMatcher([
   (UPat(Ops.RANGE, name="x"), lambda ctx,x: x.replace(tag=(ctx.vreg(WGPR),)) if not isinstance(x.tag, tuple) else None),
   # **** Op -> X86Op ****
   # add callee saved registers to the RET, these will be scheduled at the top of the kernel and will be saved/restored if they are used in regalloc
-  # so regalloc builds the prologue/epilogue naturally
+  # so jloc builds the prologue/epilogue naturally
   (UPat(Ops.SINK, name="x"), lambda x:
    x.replace(src=(x.ins(X86Ops.RET, src=x.src + tuple(def_reg(dtypes.uint64 if r in GPR else dtypes.float64.vec(2), r) for r in CALLEE_SAVED)),)) \
     if not x.src or x.src[0].arg is not X86Ops.RET else None),
