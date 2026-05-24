@@ -462,8 +462,9 @@ def get_late_rewrite_patterns(ops:tuple[Ops, ...], disable_fast_idiv:bool) -> Pa
   # no real hardware supports THREEFRY, but NullRenderer does
   if Ops.THREEFRY not in ops: pat.append((UPat(Ops.THREEFRY, dtype=dtypes.uint64, src=(UPat.var("x"), UPat.var("key"))), threefry2x32))
   # MAX can be rewritten as CMPLT + WHERE (max function is annoying on many cstyle backends)
-  if Ops.CMPLT in ops: pat.append((UPat(Ops.MAX, name="m"), lambda ctx,m:
-    (m.src[0] < m.src[1]).where(m.src[1], m.src[0]) if Ops.MAX not in ops or ctx.code_for_op[Ops.MAX](*([""]*len(m.src)), m.dtype) is None else None))
+  if Ops.CMPLT in ops:
+    pat.append((UPat(Ops.MAX, name="m"), lambda ctx,m: (m.src[0] < m.src[1]).where(m.src[1], m.src[0])
+                if Ops.MAX not in ctx.code_for_op or ctx.code_for_op[Ops.MAX](*([""]*len(m.src)), m.dtype) is None else None))
   if Ops.OR in ops: pat += [(UPat.var("x", dtypes.bool).logical_not()&UPat.var("y", dtypes.bool).logical_not(),
     lambda x,y: (x | y).logical_not())]
   # rewrite MUL/CDIV to SHL+SHR: x*(2**y) -> shl(x,y) and x//(2**y) -> shr(x,y)

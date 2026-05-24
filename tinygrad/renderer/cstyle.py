@@ -515,7 +515,9 @@ class HIPRenderer(CStyleLanguage):
                        "i": lambda x: f"(__ockl_get_group_id({x})*__ockl_get_local_size({x})+__ockl_get_local_id({x}))"}
   code_for_op = {**CStyleLanguage.code_for_op, Ops.TRUNC: _ocml("trunc"), Ops.SIN: _ocml("sin"),
                  Ops.LOG2: _ocml("log2"), Ops.EXP2:lambda x,dtype: f"__builtin_amdgcn_exp2f({x})" if dtype==dtypes.float else _ocml("exp2")(x,dtype),
-                 Ops.SQRT: _ocml("sqrt"), Ops.RECIPROCAL: lambda x,dtype: f"__builtin_amdgcn_rcpf({x})" if dtype == dtypes.float else None,
+                 Ops.SQRT: _ocml("sqrt"),
+                 # TODO: add this
+                 # Ops.RECIPROCAL: lambda x,dtype: f"__builtin_amdgcn_rcpf({x})" if dtype == dtypes.float else None,
                  Ops.MAX: lambda a,b,dtype: f"__builtin_fmaxf({a},{b})" if dtype == dtypes.float else None}
   smem_prefix = "__attribute__((shared, aligned(16)))"
   smem_prefix_for_cast: bool = False
