@@ -17,12 +17,14 @@ from tinygrad.uop.decompositions import get_late_rewrite_patterns, get_transcend
 from tinygrad.codegen.late.expander import expander, pm_pre_expander, pm_group_for_reduce
 from tinygrad.codegen.late.devectorizer import load_store_folding, load_store_indexing, devectorize_buf_and_index, devectorize_alu, pm_reduce, \
   ReduceContext, correct_load_store, pm_render, pm_add_loads, pm_make_images
+from tinygrad.codegen.late.reduce import bind_coupled_reduce_descriptors, rewrite_coupled_reduce_descriptors
 from tinygrad.codegen.opt.postrange import apply_opts
 from tinygrad.codegen.late.gater import pm_move_gates_from_index
 from tinygrad.codegen.simplify import pm_simplify_ranges, pm_flatten_range, pm_split_ranges, pm_load_collapse
 from tinygrad.schedule.rangeify import pm_add_buffers_local, rangeify_codegen, pm_mops, pm_syntactic_sugar, pm_store_ranges
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
 from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite
+from tinygrad.uop.coupled_reduce import CoupledReduceDescriptor, validate_coupled_reduce_plan, rewrite_normalized_weighted_add_reduces
 
 def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   if VIZ: graph_rewrite(ast, PatternMatcher([]), name="View Base AST")
@@ -30,7 +32,17 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   if SPEC: type_verify(ast, spec_tensor)
 
   # preprocess
-  sink = graph_rewrite(ast, pm_mops+pm_syntactic_sugar+pm_store_ranges, ctx=itertools.count(1000), name="early movement ops", bottom_up=True)
+  def _descriptors_through(s:UOp, pm, **kw) -> UOp:
+    if not (isinstance(s.arg, KernelInfo) and s.arg.coupled_reduce): return s
+    return s.replace(arg=replace(s.arg, coupled_reduce=rewrite_coupled_reduce_descriptors(
+      s.arg.coupled_reduce, lambda u: graph_rewrite(u, pm, **kw))))
+  early_pm = pm_mops+pm_syntactic_sugar+pm_store_ranges
+  sink = graph_rewrite(ast, early_pm, ctx=itertools.count(1000), name="early movement ops", bottom_up=True)
+  sink = _descriptors_through(sink, early_pm, ctx=itertools.count(1000), name="early movement ops descriptors", bottom_up=True)
+  if isinstance(sink.arg, KernelInfo) and sink.arg.coupled_reduce:
+    for descriptor in sink.arg.coupled_reduce:
+      if isinstance(descriptor, CoupledReduceDescriptor) and (rejection:=validate_coupled_reduce_plan(descriptor.plan, descriptor.target)):
+        raise AssertionError(f"invalid coupled reduce descriptor: {rejection.reason.name}: {rejection.detail}")
 
   # first we optimize
   if optimize:
@@ -48,19 +60,38 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
     # do postrange optimization, BEAM or hand_coded_optimizations
     sink = apply_opts(sink, ren, beam=ast.arg.beam)
+    if isinstance(sink.arg, KernelInfo) and not sink.arg.coupled_reduce:
+      sink, auto_coupled = rewrite_normalized_weighted_add_reduces(sink)
+      if auto_coupled:
+        # the discovered coupled reduce is single-block (no staged buffers); re-optimize so its outer axes parallelize
+        sink = sink.replace(arg=replace(sink.arg, coupled_reduce=auto_coupled, applied_opts=()), tag=None)
+        sink = apply_opts(sink, ren, beam=ast.arg.beam)
 
   # ** expander (expand_rewrite) **
   sink = graph_rewrite(sink, sym+pm_move_where_on_load, name="postopt symbolic")
 
-  # expand
+  # expand. also expand inside coupled-reduce descriptors so UNROLL/UPCAST ranges baked into the plan (e.g. the
+  # QK D-dim split inside `logits`) get rewritten to UOp.UNROLL and vectorized before pm_reduce materializes
+  # the plan. (no `sym` for the descriptor pass — sym can simplify a descriptor's target away if its body has
+  # invariant ranges, leaving the descriptor un-bindable; expander alone suffices.)
   sink = graph_rewrite(sink, sym+pm_pre_expander+pm_group_for_reduce+expander, name="expander")
+  sink = _descriptors_through(sink, pm_pre_expander+expander, name="expander descriptors")
 
   # add locals
   sink = graph_rewrite(sink, pm_add_buffers_local+rangeify_codegen, ctx=itertools.count(0), name="add local buffers")
 
   # ** devectorizer (full_graph_rewrite) **
   # remove reduce
-  sink = graph_rewrite(sink, pm_reduce+gep_pushing, ctx=ReduceContext(), name="remove_reduce")
+  coupled = bind_coupled_reduce_descriptors(sink, sink.arg.coupled_reduce) if isinstance(sink.arg, KernelInfo) else {}
+  if coupled:
+    sink = sink.replace(arg=replace(sink.arg, coupled_reduce=()))
+    sink = graph_rewrite(sink, pm_reduce, ctx=ReduceContext(coupled=coupled), name="remove_reduce")
+    # the GROUP_REDUCE-aware coupled lowering emits new STAGEs for the per-thread→cross-thread partial buffer
+    if any(u.op is Ops.STAGE for u in sink.toposort()):
+      sink = graph_rewrite(sink, pm_add_buffers_local+rangeify_codegen, ctx=itertools.count(10000), name="coupled local buffers")
+    sink = graph_rewrite(sink, gep_pushing, name="gep_pushing after reduce")
+  else:
+    sink = graph_rewrite(sink, pm_reduce+gep_pushing, ctx=ReduceContext(), name="remove_reduce")
 
   # add gpu dims (late). this works after devectorize, but it's faster here
   sink = graph_rewrite(sink, pm_add_gpudims, ctx=ren, name="add gpudims")

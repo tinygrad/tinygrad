@@ -7,6 +7,8 @@ from tinygrad.uop.ops import UOp, Ops, UPat, PatternMatcher, GroupOp, identity_e
 from tinygrad.uop.symbolic import uop_given_valid, parse_valid, invalid_gate
 from tinygrad.helpers import getenv, flatten, prod
 from tinygrad.renderer import Renderer
+from tinygrad.codegen.late.reduce import CoupledReduceLowered, lower_coupled_reduce_plan
+from tinygrad.uop.coupled_reduce import CoupledReducePlan
 
 # ***** image load valid simplification *****
 
@@ -290,6 +292,7 @@ pm_render = PatternMatcher([
 @dataclass
 class ReduceContext:
   acc_num: int = 0
+  coupled: dict[UOp, CoupledReducePlan]|None = None
 
 def horizontal_reduce(inp:UOp, out_dtype:DType) -> list[UOp]:
   # if this has a horizontal reduction component, do that first
@@ -300,14 +303,26 @@ def horizontal_reduce(inp:UOp, out_dtype:DType) -> list[UOp]:
   return [inp]
 
 def reduce_to_acc(ctx:ReduceContext, red:UOp):
+  if ctx.coupled is not None:
+    # match by identity, falling back to the target tag (a nested reduce in the body may already have been
+    # lowered bottom-up, changing red's key while the tag survives through .replace())
+    from tinygrad.codegen.late.reduce import _is_target_tag
+    plan = ctx.coupled.get(red)
+    vt: UOp|None = red
+    if plan is None and _is_target_tag(red.tag):
+      plan, vt = next(((p, None) for t, p in ctx.coupled.items() if t.tag == red.tag), (None, None))
+    if plan is not None:
+      lowered = lower_coupled_reduce_plan(plan, ctx.acc_num, vt)
+      assert isinstance(lowered, CoupledReduceLowered), f"invalid coupled reduce descriptor: {lowered.reason.name}: {lowered.detail}"
+      ctx.acc_num += lowered.accumulator_slots
+      return lowered.final
   inp, reduce_range = red.src[0], red.src[1:]
   lst = horizontal_reduce(inp, red.dtype)
   assert all(x.dtype == red.dtype for x in lst), f"horizontal reduction mismatch {lst[0].dtype} != {red.dtype}"
   # if we have a range
   if len(reduce_range) != 0:
-    topo = inp.toposort()
-    ended_ranges = flatten([x.ended_ranges for x in topo if x.op is Ops.END])
-    input_ranges = tuple([x for x in topo if x.op is Ops.RANGE and x not in reduce_range and x not in ended_ranges])
+    from tinygrad.codegen.late.reduce import _input_ranges_for
+    input_ranges = _input_ranges_for(inp.toposort(), reduce_range)
     identity = red.const(red.dtype, identity_element(red.arg[0], red.dtype.scalar()))
     acc = UOp.placeholder((1,), red.dtype, ctx.acc_num, AddrSpace.REG)
     acc_init = acc.after(*input_ranges).index(UOp.const(dtypes.weakint, 0)).store(identity)

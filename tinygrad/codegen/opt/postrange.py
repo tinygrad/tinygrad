@@ -1,9 +1,11 @@
 from __future__ import annotations
 import math, itertools
 from collections import defaultdict
+from dataclasses import replace
 from typing import cast, Final
 from tinygrad.uop.ops import Ops, UOp, KernelInfo, graph_rewrite, AxisType, ssimplify, GroupOp, remove_all_tags
 from tinygrad.uop.ops import axis_letters, axis_colors, axis_to_pos
+from tinygrad.uop.coupled_reduce import check_coupled_reduce_descriptor
 from tinygrad.device import Buffer
 from tinygrad.dtype import dtypes
 from tinygrad.helpers import colored, getenv, DEBUG, to_function_name, NOOPT, argsort, round_up, prod, merge_dicts, get_single_element, flatten
@@ -59,7 +61,9 @@ class Scheduler:
       num = f"n{Scheduler.kernel_cnt[function_name]-1}" if Scheduler.kernel_cnt[function_name] > 1 else ""
       name += colored(num, 'BLACK')
     self.ast = graph_rewrite(self.ast, pm_flatten_range, name="flatten range")
-    return self.ast.replace(arg=KernelInfo(name=name, applied_opts=tuple(self.applied_opts), dont_use_locals=self.dont_use_locals), tag=1)
+    ki = self.ast.arg if isinstance(self.ast.arg, KernelInfo) else KernelInfo()
+    return self.ast.replace(arg=replace(ki, name=name, axis_types=(), applied_opts=tuple(self.applied_opts),
+                                       dont_use_locals=self.dont_use_locals, opts_to_apply=None, estimates=None, beam=0), tag=1)
 
   def _output_rngs(self) -> list[UOp]:
     return flatten([[r for r in UOp.sink(*s.src[1:]).ranges if r.arg[-1] != AxisType.REDUCE] for s in self.ast.src if s.op is Ops.END])
@@ -77,7 +81,7 @@ class Scheduler:
     globalizible_rngs = self._globalizable_rngs()
     rng = [x.replace(arg=x.arg[0:-1]+(AxisType.GLOBAL,)) if x in globalizible_rngs else x for x in self.rngs]
 
-    self.ast = self.ast.substitute(dict(zip(self.rngs, rng)))
+    self._substitute_ast(dict(zip(self.rngs, rng)))
 
   def colors(self) -> list[str]:
     output_rngs = self._output_rngs()
@@ -91,17 +95,31 @@ class Scheduler:
     return ret
   def colored_shape(self) -> str: return ' '.join([colored(f'{x.src[0].render():>4s}', color) for x,color in zip(self.rngs, self.colors())])
 
+  def _substitute_ast(self, subs:dict[UOp, UOp], **kwargs):
+    # rewrite the ast and keep any coupled reduce descriptors (carried in KernelInfo, outside the graph) in sync
+    self.ast = self.ast.substitute(subs, **kwargs)
+    if isinstance(self.ast.arg, KernelInfo) and self.ast.arg.coupled_reduce:
+      from tinygrad.codegen.late.reduce import rewrite_coupled_reduce_descriptors
+      synced = rewrite_coupled_reduce_descriptors(self.ast.arg.coupled_reduce, lambda u: u.substitute(subs))
+      self.ast = self.ast.replace(arg=replace(self.ast.arg, coupled_reduce=synced))
+
   def shift_to(self, rng:UOp, amount:int, new_type:AxisType, top:bool=False, input_new_rng:UOp|None=None):
     if (old_sz:=rng.src[0].divides(amount)) is None:
       raise KernelOptError(f"{amount} can't divide {rng.src[0]} in {self.colored_shape()}")
     new_rng = UOp.range(amount, next(self.opt_range), new_type) if input_new_rng is None else input_new_rng
     replaced_rng = rng.replace(src=(UOp.const(dtypes.int, old_sz),))
     sub_axis = (new_rng * old_sz + replaced_rng) if top else (replaced_rng * amount + new_rng)
-    self.ast = self.ast.substitute({rng:sub_axis}, name=f"shift {rng.arg[:-1]} {amount} {str(new_type).split('.')[1].lower()}")
+    self._substitute_ast({rng:sub_axis}, name=f"shift {rng.arg[:-1]} {amount} {str(new_type).split('.')[1].lower()}")
     return replaced_rng, new_rng
 
   def ranges_of(self, *axis_type:AxisType) -> list[UOp]: return [r for r in self.rngs if r.arg[-1] in axis_type]
   def axes_of(self, *axis_type:AxisType) -> list[int]: return [i for i,t in enumerate(self.axis_types) if t in axis_type]
+
+  def _coupled_reduce_uses_range(self, rng:UOp) -> bool:
+    # only the descriptor's own reduce ranges are off-limits to opts; outer ranges may be split/parallelized
+    # (the descriptor is kept in sync by _substitute_ast)
+    if not isinstance(self.ast.arg, KernelInfo) or not self.ast.arg.coupled_reduce: return False
+    return any(rng in check_coupled_reduce_descriptor(d).plan.reduce_ranges for d in self.ast.arg.coupled_reduce)
 
   def upcast_size(self): return prod(self.full_shape[a] for a in self.axes_of(AxisType.UPCAST, AxisType.UNROLL))
 
@@ -133,6 +151,21 @@ class Scheduler:
       check(self.ren.has_local, "locals needed for opt")
 
     rng = self.rngs[real_axis] if (real_axis:=self.real_axis(opt.op, opt.axis)) >= 0 else UOp(Ops.NOOP)
+    if isinstance(self.ast.arg, KernelInfo) and self.ast.arg.coupled_reduce:
+      # TC opt targets a nested matmul-shaped REDUCE (the descriptor's inner Q@K or P@V), not the
+      # descriptor's own outer reduce. _apply_tc_opt picks reduceops[0]; for FA-shaped sinks that is
+      # the Q@K dot product whose reduce range is the D-axis, scope-local to the descriptor's update
+      # touches_reduce: opt rewrites a descriptor's own reduce range. only GROUP/GROUPTOP+has_merge allowed there
+      # (parallelizes the j-axis across threads with the field's associative merge). otherwise only LOCAL/NOLOCALS
+      # are safe — except UNROLL on an inner REDUCE/GROUP_REDUCE (not in the descriptor's reduce_ranges), which
+      # collapses through the inner REDUCE via fix_reduce_unroll's horizontal CONTRACT.
+      touches_reduce = rng.op is not Ops.NOOP and self._coupled_reduce_uses_range(rng)
+      has_merge = all(f.merge is not None for d in self.ast.arg.coupled_reduce
+                      for f in check_coupled_reduce_descriptor(d).plan.fields)
+      ok = ((touches_reduce and opt.op in {OptOps.GROUP, OptOps.GROUPTOP} and has_merge) or
+            (not touches_reduce and (opt.op in {OptOps.LOCAL, OptOps.NOLOCALS} or
+             (opt.op is OptOps.UNROLL and rng.arg[-1] in {AxisType.REDUCE, AxisType.GROUP_REDUCE}))))
+      if not ok: raise KernelOptError("coupled reduce descriptors do not support postrange opts that rewrite descriptor ranges")
 
     opt_to_at = {
       OptOps.LOCAL: AxisType.LOCAL, OptOps.UPCAST: AxisType.UPCAST,
@@ -199,7 +232,7 @@ class Scheduler:
       for b in self.bufs:
         if rng in (i:=b.src[1].get_idx()).backward_slice_with_self:
           replaces[b] = b.replace(src=(b.src[0],(valid&b.src[1].get_valid()).where(i, UOp.invalid())))
-      self.ast = self.ast.substitute(replaces, f"padto {rng.arg[:-1]} {opt.arg}")
+      self._substitute_ast(replaces, name=f"padto {rng.arg[:-1]} {opt.arg}")
     elif opt.op is OptOps.SWAP:
       try:
         altrng:UOp = self.rngs[opt.arg]
@@ -245,8 +278,8 @@ class Scheduler:
           if not (axis < len(axis_choices)): continue
           axes = list(axis_choices[axis])
 
-          # tag the reduceop
-          self.ast = self.ast.substitute({reduceop: reduceop.replace(tag="TC")})
+          # tag the reduceop (use _substitute_ast so any coupled-reduce descriptors stay in sync)
+          self._substitute_ast({reduceop: reduceop.replace(tag="TC")})
 
           # do optimizations and save the ranges
           try:
@@ -297,16 +330,23 @@ class Scheduler:
             # do the reduce_axes always disappear? i think they don't
             # they need to be moved into the WMMA srcs
             wmma_arg = (str(tc), tc.dims, tc.dtype_in, tc.dtype_out, self.ren.target.device, tc.threads, tc_upcast_axes, ()) #, tc_reduce_axes)
+            # TC↔descriptor metadata bridge: stash the layout info that downstream consumers (e.g.
+            # coupled-reduce descriptor binding) need to interpret the WMMA's vec-dtype output. The vec
+            # elements are distinct per-thread output positions (not partial-sum fragments), so any
+            # consumer that needs scalars must extract specific positions per the swizzle/EPT layout
+            # rather than blind-fold via ADD/MAX. Use a tuple tag (str-discriminator, payload) so the
+            # _is_*_tag helpers in late/reduce.py can dispatch on the discriminator without import loops.
+            tc_meta = ("tc_wmma", tc.elements_per_thread, tc.swizzle, tc.dims, tc.threads)
             wmma = UOp(Ops.WMMA, dtype=tc.dtype_out.vec(tc.elements_per_thread[2]), src=(
               UOp(Ops.CONTRACT, dtype=srcs[0].dtype.vec(tc.elements_per_thread[0]), src=(srcs[0],), arg=tc_upcast_axes[0], tag=1),
               UOp(Ops.CONTRACT, dtype=srcs[1].dtype.vec(tc.elements_per_thread[1]), src=(srcs[1],), arg=tc_upcast_axes[1], tag=1),
-              UOp.const(tc.dtype_out.vec(tc.elements_per_thread[2]), 0.0)), arg=wmma_arg, tag=1)
-            tc_uop = UOp(Ops.UNROLL, tc.dtype_out, (wmma,), arg=tc_upcast_axes[2], tag=1)
+              UOp.const(tc.dtype_out.vec(tc.elements_per_thread[2]), 0.0)), arg=wmma_arg, tag=tc_meta)
+            tc_uop = UOp(Ops.UNROLL, tc.dtype_out, (wmma,), arg=tc_upcast_axes[2], tag=tc_meta)
 
             # preserve extra reduces
             reduce_ranges = [x for x in UOp.sink(*reduceop.src[1:]).toposort() if x.op is Ops.RANGE and x.arg[0] not in tc_reduce_axes]
             if len(reduce_ranges): tc_uop = UOp(Ops.REDUCE, tc_uop.dtype, (tc_uop,)+tuple(reduce_ranges), (Ops.ADD, ()))
-            self.ast = self.ast.substitute({reduceop: tc_uop})
+            self._substitute_ast({reduceop: tc_uop})
           self.tensor_core = tc
           return axes
     return None
@@ -332,19 +372,88 @@ def bufs_from_ast(ast:UOp, dname:str) -> list[Buffer]:
   glbls = sorted([x for x in ast.backward_slice if x.op is Ops.PARAM], key=lambda x: x.arg)
   return [Buffer(dname, x.ptrdtype.size, x.dtype.base) for x in glbls]
 
+def _pow2_split(s:int, room:int, keep_remainder:bool=True) -> int:
+  # largest power-of-2 amt where amt <= room, amt divides s, and (if keep_remainder) s//amt >= 2
+  cap = min(s//2, room) if keep_remainder else min(s, room)
+  amt = 1
+  while amt*2 <= cap and s % (amt*2) == 0: amt *= 2
+  return amt
+
+def _desc_reduce_set(k:Scheduler) -> set[UOp]:
+  if not (isinstance(k.ast.arg, KernelInfo) and k.ast.arg.coupled_reduce): return set()
+  return {r for d in k.ast.arg.coupled_reduce for r in d.plan.reduce_ranges}
+
+def optimize_coupled_reduce(k:Scheduler, local_target:int=getenv("CR_LOCAL", 256),
+                            group_target:int=getenv("CR_GROUP", 1), unroll_target:int=getenv("CR_UNROLL", 16)) -> None:
+  # parallelize a coupled-reduce kernel's outer axes across a threadgroup. LOCAL/GROUP_REDUCE splits are safe
+  # (not expanded later, descriptor stays in sync). LOCAL keeps a >=2 GLOBAL remainder so the residual range
+  # doesn't fold away in the graph while still being present in the descriptor. Cap the total threadgroup
+  # size (LOCAL × WARP × GROUP_REDUCE product) so we don't exceed the device's max_total_threads (Metal: 1024,
+  # CUDA: 1024, etc.) — TC opt may have already added WARP threads; account for them in the running product.
+  # The renderer's local_max is per-dimension; the actual total-threads limit is conservatively 1024 across
+  # the common GPU targets we care about (Metal, CUDA, AMD), so use min(per-dim, 1024) as the joint cap.
+  tg_max = min(k.ren.local_max[0] if k.ren.local_max else 1024, 1024)
+  def _tg_size() -> int:
+    return prod([k.full_shape[i] for i in k.axes_of(AxisType.LOCAL, AxisType.WARP, AxisType.GROUP_REDUCE)])
+  while (cur := prod([k.full_shape[i] for i in k.axes_of(AxisType.LOCAL)])) < local_target and _tg_size() < tg_max:
+    room = min(local_target // cur, tg_max // _tg_size())
+    cands = [(i, s, _pow2_split(s, room)) for i in k.axes_of(AxisType.GLOBAL)
+             if isinstance(s := k.full_shape[i], int) and _pow2_split(s, room) > 1]
+    if not cands: break
+    i, _, amt = max(cands, key=lambda c: c[1])
+    try: k.apply_opt(Opt(OptOps.LOCAL, i, amt))
+    except KernelOptError: break
+  desc_reduce = _desc_reduce_set(k)
+  # cooperative key-axis reduction: split the descriptor's own reduce range into GROUP_REDUCE threads.
+  # Also capped by the device's max_total_threads (combined with the LOCAL/WARP product from above).
+  if group_target > 1 and desc_reduce:
+    while (cur := prod([k.full_shape[a] for a in k.axes_of(AxisType.GROUP_REDUCE)])) < group_target and _tg_size() < tg_max:
+      reduce_axes = k.axes_of(AxisType.REDUCE)
+      g = next((g for g, a in enumerate(reduce_axes) if k.rngs[a] in desc_reduce), None)
+      if g is None or not isinstance(s := k.full_shape[reduce_axes[g]], int): break
+      amt = _pow2_split(s, min(group_target // cur, tg_max // _tg_size()))
+      if amt <= 1: break
+      try: k.apply_opt(Opt(OptOps.GROUPTOP, g, amt))
+      except KernelOptError: break
+  # vectorize inner reduces (e.g. QK's D-dim inside FA): UNROLL collapses through the inner REDUCE via
+  # fix_reduce_unroll's horizontal CONTRACT, so the descriptor still sees a scalar reduce result.
+  while unroll_target > 1:
+    cands = [(a, s, _pow2_split(s, unroll_target, keep_remainder=False)) for a in k.unrollable_dims
+             if k.rngs[a] not in desc_reduce and isinstance(s := k.full_shape[a], int) and s > 1]
+    cands = [c for c in cands if c[2] > 1]
+    if not cands: break
+    a, _, amt = max(cands, key=lambda c: c[1])
+    try: k.apply_opt(Opt(OptOps.UNROLL, k.unrollable_dims.index(a), amt))
+    except KernelOptError: break
+  # cooperative K/V threadgroup tile precondition: split a per-thread descriptor REDUCE so its tail extent
+  # equals the LOCAL extent. _lower_phase's CR_COOP_KV gate detects this matching pair and emits the bufferize.
+  if getenv("CR_COOP_KV", 0) and (desc_reduce := _desc_reduce_set(k)):
+    local_axes = [k.rngs[a] for a in k.axes_of(AxisType.LOCAL)]
+    if local_axes:
+      L = int(local_axes[0].vmax + 1)
+      for a in list(k.axes_of(AxisType.REDUCE)):
+        rng = k.rngs[a]
+        if rng not in desc_reduce or not isinstance(s := k.full_shape[a], int) or s % L != 0 or s == L: continue
+        try: k.shift_to(rng, L, AxisType.REDUCE)
+        except KernelOptError: continue
+        break
+
 def apply_opts(ast:UOp, ren:Renderer, beam:int=0) -> UOp:
   if ast.tag is not None: return ast
   k = Scheduler(ast, ren)
   k.convert_loop_to_global()
+  has_coupled_reduce = isinstance(ast.arg, KernelInfo) and bool(ast.arg.coupled_reduce)
   if ast.arg is not None and ast.arg.opts_to_apply is not None:
     for opt in ast.arg.opts_to_apply: k.apply_opt(opt)
-  elif beam >= 1:
+  elif beam >= 1 and not has_coupled_reduce:
     from tinygrad.codegen.opt.search import beam_search
     rawbufs = bufs_from_ast(ast, ren.target.device)
     # beam search may open devices
     with Context(ALLOW_DEVICE_USAGE=1):
       k = beam_search(k, rawbufs, beam, bool(getenv("BEAM_ESTIMATE", 1)))
-  elif not NOOPT and (ast.arg is None or ast.arg.applied_opts == ()):
+  elif has_coupled_reduce and not NOOPT and ren.has_local:
+    optimize_coupled_reduce(k)
+  elif not has_coupled_reduce and not NOOPT and (ast.arg is None or ast.arg.applied_opts == ()):
     from tinygrad.codegen.opt.heuristic import hand_coded_optimizations
     # NOTE: hand_coded_optimizations doesn't support multiblock opts yet
     if not any(u.op is Ops.STAGE for u in ast.backward_slice):

@@ -39,11 +39,23 @@ def type_verify(ast:UOp|list[UOp], check_spec:PatternMatcher):
         if DEBUG >= 3: print_uops(lst)
         raise RuntimeError(f"UOp verification failed at {i} on {u.op} {u.dtype} {len(u.src)} {[(x.op, x.dtype, x.arg) for x in u.src]} {u.arg}")
 
+def _valid_coupled_reduce_payload(coupled_reduce:tuple) -> bool:
+  from tinygrad.uop.coupled_reduce import check_coupled_reduce_descriptor, validate_coupled_reduce_plan
+  for descriptor in coupled_reduce:
+    try: descriptor = check_coupled_reduce_descriptor(descriptor)
+    except TypeError: return False
+    if validate_coupled_reduce_plan(descriptor.plan, descriptor.target) is not None: return False
+  return True
+
+def _valid_sink_arg(sink:UOp) -> bool:
+  if not isinstance(sink.arg, KernelInfo): return True
+  return isinstance(sink.arg.coupled_reduce, tuple) and _valid_coupled_reduce_payload(sink.arg.coupled_reduce)
+
 # ***** new specs *****
 
 # these ops can be used in the tensor graph and programs
 spec_shared = PatternMatcher([
-  (UPat(Ops.SINK, dtypes.void), lambda: True), # NOTE: for testing, we let sinks be anything
+  (UPat(Ops.SINK, dtypes.void, name="sink"), _valid_sink_arg),
 
   # NOOP. TODO: remove this
   (UPat(Ops.NOOP), lambda: True),
@@ -260,10 +272,12 @@ spec_full = PatternMatcher([
 # late imports to avoid circular import
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.schedule.rangeify import BufferizeOpts
+from tinygrad.uop.coupled_reduce import CoupledReduceDescriptor, CoupledReduceField, CoupledReducePlan
 glbls:dict[str, Any] = {"inf": math.inf, "nan": math.nan, "KernelInfo": KernelInfo, "Metadata": Metadata,
                         "UOp": UOp, "dtypes": dtypes, "Ops": Ops, "AxisType": AxisType, "Invalid": Invalid,
                         "Opt": Opt, "OptOps": OptOps, "BufferizeOpts": BufferizeOpts, "AddrSpace": AddrSpace, "panic": panic,
-                        "ConstFloat": ConstFloat}
+                        "ConstFloat": ConstFloat, "CoupledReduceDescriptor": CoupledReduceDescriptor,
+                        "CoupledReduceField": CoupledReduceField, "CoupledReducePlan": CoupledReducePlan}
 def eval_pyrender(code:str) -> UOp:
   lcls:dict[str, Any] = {}
   exec(code, glbls, lcls)

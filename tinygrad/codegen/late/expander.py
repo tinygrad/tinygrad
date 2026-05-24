@@ -71,8 +71,17 @@ def do_expand(root:UOp):
     assert root.dtype.count == 1
     # is this right?
     new_arg = tuple(range(root.arg[0], new_srcs[0].dtype.count, new_srcs[0].dtype.count // expand_sz))
-  nsrc = UOp(root.op, root.dtype.scalar().vec(root.dtype.count*expand_sz), tuple(new_srcs), new_arg)
-  return UOp(Ops.UNROLL, root.dtype, (nsrc,), expand_args)
+  # preserve tag on the vectorized inner so coupled-reduce descriptor targets stay tag-findable after expansion.
+  # also propagate any tc_wmma-discriminated tag from an expanded src onto the outer UNROLL, so downstream
+  # passes (e.g. coupled-reduce consume side) can detect TC-derived vec UNROLLs even after multi-layer expand.
+  propagated_tag = root.tag
+  if propagated_tag is None:
+    for s in expands:
+      if isinstance(s.tag, tuple) and len(s.tag) >= 1 and s.tag[0] == "tc_wmma":
+        propagated_tag = s.tag
+        break
+  nsrc = UOp(root.op, root.dtype.scalar().vec(root.dtype.count*expand_sz), tuple(new_srcs), new_arg, tag=propagated_tag)
+  return UOp(Ops.UNROLL, root.dtype, (nsrc,), expand_args, tag=propagated_tag)
 
 def do_contract(con:UOp):
   ex = con.src[0]
@@ -132,6 +141,10 @@ def fix_store_unroll(x:UOp):
 def fix_group_for_reduce(x:UOp):
   reduce_gfr, reduce_r = partition(x.src[1:], lambda u: u.op is Ops.RANGE and u.arg[1] == AxisType.GROUP_REDUCE)
   if len(reduce_gfr) == 0: return None
+  # coupled-reduce targets are lowered by pm_reduce with their descriptor's own GROUP_REDUCE handling (merge
+  # across threads); don't pre-transform them here, the descriptor lowering needs the tag + merge structure.
+  from tinygrad.codegen.late.reduce import _is_target_tag
+  if _is_target_tag(x.tag): return None
 
   # NOTE: if there's other locals here, we need them in the buffer too
   upstream_locals = [u for u in x.toposort() if u.op is Ops.RANGE and u.arg[1] == AxisType.LOCAL]
@@ -158,3 +171,4 @@ pm_group_for_reduce = PatternMatcher([
   # fix group for reduce
   (UPat(Ops.REDUCE, name="x"), fix_group_for_reduce),
 ])
+
