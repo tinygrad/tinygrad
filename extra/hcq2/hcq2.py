@@ -471,10 +471,9 @@ def hcq_exec(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
   linear = graph_rewrite(UOp(Ops.LINEAR, dtypes.void, (resolved_call,)), pm_ensure_bufs_accessible, ctx=hcq_ctx)
 
   linear = hcq_schedule(linear, ast)
-
-  dev = Device["AMD"]
   host_call = hcq_realize(hcq_ctx, linear, ast)
 
+  dev = Device["AMD"]
   with track_stats(ctx, call, dev.device, bufs, ctx.var_vals) as tm:
     st = time.perf_counter() if ctx.wait else 0.0
     run_linear(UOp(Ops.LINEAR, dtypes.void, (host_call,)), var_vals=ctx.var_vals, jit=True, update_stats=DEBUG>=3)
