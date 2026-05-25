@@ -21,15 +21,13 @@ constexpr float FP8_MAX = 448.0f;
 static_assert(N_ELEMS % VEC == 0, "N_ELEMS must be divisible by VEC");
 static_assert(HIDDEN % VEC == 0, "HIDDEN must be divisible by VEC");
 
-// fused silu*mul backward, three outputs in a single HBM pass:
-//   1) bf16 grad_xw13      — consumed by downstream bf16 autograd chain
-//   2) fp8  grad_xw13_fp8  — delayed-scale quantize using grad_amax_state (mailbox to matmul bwd)
-//   3) fp32 grad_amax_buf  — per-WG partial |grad_xw13|, reduced into next step's grad_amax_state
+// fused silu*mul backward, two outputs in a single HBM pass:
+//   1) fp8  grad_xw13_fp8  — delayed-scale quantize using grad_amax_state (mailbox to matmul bwd)
+//   2) fp32 grad_amax_buf  — per-WG partial |grad_xw13|, reduced into next step's grad_amax_state
 // grad_amax_state is read for the fp8 scale. The store of new_grad_amax into grad_amax_state's
 // buffer is built in Python as a separate effect and threaded into grad_a via .after(store).
 extern "C" __global__ __launch_bounds__(THREADS_PER_WG) void
 fused_silu_mul_bwd_w13(
-    __hip_bfloat16*       __restrict__ grad_xw13_out,        // bf16, 2*N_ELEMS
     __hip_fp8_storage_t*  __restrict__ grad_xw13_fp8_out,    // fp8,  2*N_ELEMS
     float*                __restrict__ grad_amax_buf,        // fp32, NUM_WG per-WG partials
     const __hip_bfloat16* __restrict__ xw13,                 // bf16, 2*N_ELEMS
@@ -62,7 +60,6 @@ fused_silu_mul_bwd_w13(
     const __hip_bfloat16 *x3 = reinterpret_cast<const __hip_bfloat16*>(&x3_raw);
     const __hip_bfloat16 *gv = reinterpret_cast<const __hip_bfloat16*>(&g_raw);
 
-    __hip_bfloat16 out1[VEC], out3[VEC];
     __hip_fp8_storage_t fp8_1[VEC], fp8_3[VEC];
     #pragma unroll
     for (int i = 0; i < VEC; i++) {
@@ -75,15 +72,11 @@ fused_silu_mul_bwd_w13(
       const float gs = fg * scale;
       const float g1 = gs * silu_prime * f3;
       const float g3 = gs * silu;
-      out1[i] = static_cast<__hip_bfloat16>(g1);
-      out3[i] = static_cast<__hip_bfloat16>(g3);
       local_max = fmaxf(local_max, fmaxf(fabsf(g1), fabsf(g3)));
       fp8_1[i] = __hip_cvt_float_to_fp8(fmaxf(-FP8_MAX, fminf(FP8_MAX, g1 * g_scale)), __HIP_SATFINITE, __HIP_E4M3);
       fp8_3[i] = __hip_cvt_float_to_fp8(fmaxf(-FP8_MAX, fminf(FP8_MAX, g3 * g_scale)), __HIP_SATFINITE, __HIP_E4M3);
     }
 
-    *reinterpret_cast<float4*>(&grad_xw13_out[xw1_off]) = *reinterpret_cast<float4*>(out1);
-    *reinterpret_cast<float4*>(&grad_xw13_out[xw3_off]) = *reinterpret_cast<float4*>(out3);
     *reinterpret_cast<uint64_t*>(&grad_xw13_fp8_out[xw1_off]) = *reinterpret_cast<uint64_t*>(fp8_1);
     *reinterpret_cast<uint64_t*>(&grad_xw13_fp8_out[xw3_off]) = *reinterpret_cast<uint64_t*>(fp8_3);
   }
