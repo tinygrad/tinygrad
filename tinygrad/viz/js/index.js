@@ -62,6 +62,7 @@ function addTags(root, path) {
   else root.selectAll("text").data(d => [d]).join("text").text(d => d).attr("dy", "0.35em");
 }
 
+anchor = null;
 const drawGraph = (data) => {
   const g = dagre.graphlib.json.read(data);
   // draw nodes
@@ -70,6 +71,9 @@ const drawGraph = (data) => {
   const nodes = d3.select("#nodes").selectAll("g").data(g.nodes().map(id => g.node(id)), d => d).join("g").attr("class", d => d.className ?? "node")
     .attr("transform", d => `translate(${d.x},${d.y})`).on("click", (e,d) => {
       if (d.callNode) {
+        const t = d3.zoomTransform(document.getElementById("graph-svg"));
+        const [x, y] = t.apply([d.x, d.y]);
+        anchor = {id:d.id, x, y, k:t.k};
         if (state.callSrcMask.has(d.id)) state.callSrcMask.delete(d.id); else state.callSrcMask.add(d.id);
         if (state.callSrcMask.size >= callCount) { showCallSrc.toggle.checked = !showCallSrc.toggle.checked; state.callSrcMask.clear(); }
         return setState({});
@@ -131,6 +135,7 @@ const drawGraph = (data) => {
     points.push(intersectRect(g.node(e.w), points[points.length-1]));
     return line(points);
   }).attr("marker-end", "url(#arrowhead)").attr("stroke", e => g.edge(e).color || "#4a4b57");
+  return g;
 }
 
 // ** UOp graph
@@ -155,7 +160,7 @@ function renderDag(layoutSpec, { recenter }) {
     const data = e.data.result;
     displaySelection("#graph");
     updateProgress(Status.COMPLETE);
-    drawGraph(data);
+    const g = drawGraph(data);
     addTags(d3.select("#edge-labels").selectAll("g").data(data.edges).join("g").attr("transform", (e) => {
       // get a point near the end
       const [p1, p2] = e.value.points.slice(-2);
@@ -171,7 +176,11 @@ function renderDag(layoutSpec, { recenter }) {
       const y = p2.y - uy * offset;
       return `translate(${x}, ${y})`
     }).attr("class", e => e.value.label.type).attr("id", e => `${e.v}-${e.w}`).datum(e => e.value.label.text));
-    if (recenter) document.getElementById("zoom-to-fit-btn").click();
+    if (anchor != null) {
+      const n = g.node(anchor.id);
+      d3.select("#graph-svg").call(svgZoom.transform, d3.zoomIdentity.translate(anchor.x-n.x*anchor.k, anchor.y-n.y*anchor.k).scale(anchor.k));
+    } else if (recenter) document.getElementById("zoom-to-fit-btn").click();
+    anchor = null;
   };
   worker.onerror = (e) => {
     e.preventDefault();
@@ -1054,12 +1063,12 @@ async function main() {
   if (ret.length === 0) return;
   // ** center graph
   const data = ret[currentRewrite];
-  const render = (opts) => renderDag({ data, opts }, { recenter:currentRewrite === 0 });
+  const render = (layoutOpts, renderOpts) => renderDag({ data, opts:layoutOpts }, renderOpts);
   const getOpts = () => ({ showIndexing:showIndexing.toggle.checked, showCallSrc:showCallSrc.toggle.checked, showSink:showSink.toggle.checked, callSrcMask:state.callSrcMask });
-  render(getOpts());
-  showIndexing.toggle.onchange = () => render(getOpts());
-  showCallSrc.toggle.onchange = () => { state.callSrcMask.clear(); render(getOpts()); }
-  showSink.toggle.onchange = () => render(getOpts());
+  render(getOpts(), { recenter:currentRewrite === 0 });
+  showIndexing.toggle.onchange = () => render(getOpts(), { recenter:true });
+  showCallSrc.toggle.onchange = () => { state.callSrcMask.clear(); render(getOpts(), { recenter:true }); }
+  showSink.toggle.onchange = () => render(getOpts(), { recenter:true });
   // ** right sidebar metadata
   metadata.innerHTML = "";
   if (ckey.includes("rewrites")) metadata.append(showIndexing.label, showCallSrc.label, showSink.label);
