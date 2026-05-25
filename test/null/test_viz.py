@@ -224,8 +224,8 @@ class TestViz(unittest.TestCase):
     lst = viz.list_items()
     self.assertEqual(len(lst), 1)
     graphs = [x["graph"] for x in viz.get_details(0, 0)]
-    # embed const in the parent node when possible
-    self.assertEqual(list(graphs[0]), [id(a), id(alu)])
+    # const is always in the graph, client side hides it by default
+    self.assertEqual(list(graphs[0]), [id(a), id(z), id(alu)])
     self.assertEqual(list(graphs[1]), [id(z)])
 
   # TODO: DEFINE_VAR (shape ()) now gets wrapped in RESHAPE+EXPAND when broadcast against a shaped operand
@@ -406,9 +406,9 @@ class TestVizIntegration(unittest.TestCase):
       default_test(c+2)
     ls = viz.list_items()
     self.assertEqual(len(ls), 2)
-    self.assertEqual(list(next(viz.get_details(0, 0))["graph"]), [id(c+1)])
+    self.assertEqual(list(next(viz.get_details(0, 0))["graph"]), [id(c), id(c+1)])
     self.assertEqual(list(next(viz.get_details(1, 0))["graph"]), [id(c)])
-    self.assertEqual(list(next(viz.get_details(1, 1))["graph"]), [id(c+2)])
+    self.assertEqual(list(next(viz.get_details(1, 1))["graph"]), [id(c), id(c.const_like(2)), id(c+2)])
 
   def test_recurse(self):
     with save_viz() as viz:
