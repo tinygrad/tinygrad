@@ -109,11 +109,11 @@ class Tensor(OpMixin):
     if isinstance(data, UOp):
       assert _dtype is None or _dtype==data.dtype or data.dtype==dtypes.weakint, f"dtype mismatch: {_dtype} vs {data.dtype}"
       # if data is dtype.weakint that means that this is a symbolic int and we need to lower it to something we can make a Tensor out of
-      if data.dtype == dtypes.weakint: data = Tensor.from_uop(data, device=_device).uop
+      if data.dtype == dtypes.weakint: data = _index_to_concrete_int(data)
     elif data is None:
-      data = UOp.const(_dtype or dtypes.default_float, 0, _device)
+      data = UOp.const(_dtype or dtypes.default_float, 0)
     elif isinstance(data, get_args(ConstType)):
-      data = UOp.const(_dtype or dtypes.from_py(data), data, _device)
+      data = UOp.const(_dtype or dtypes.from_py(data), data)
     elif isinstance(data, bytes): data = _frompy(data, _dtype or dtypes.uint8, _device)
     elif isinstance(data, (list, tuple)):
       if _dtype is None:
@@ -125,7 +125,7 @@ class Tensor(OpMixin):
       import numpy as np
       assert isinstance(data, np.ndarray), f"expected np.ndarray, got {data}"
       if data.shape == ():
-        data = UOp.const(_dtype or _from_np_dtype(data.dtype), data.item(), _device)
+        data = UOp.const(_dtype or _from_np_dtype(data.dtype), data.item())
       else:
         data = _fromnp(data.astype(npdtype) if _dtype is not None and (npdtype:=_to_np_dtype(_dtype)) is not None else data)
     elif isinstance(data, pathlib.Path):
@@ -260,7 +260,7 @@ class Tensor(OpMixin):
     # broadcast x (shape only, dtype must match)
     if self.shape != x.shape: x = x._broadcast_to(self.shape)
     if self.shape != x.shape: raise RuntimeError(f"assign shape mismatch {self.shape} != {x.shape}")
-    if not is_disk and x.uop.device is not None and self.device != x.device:
+    if not is_disk and x.uop.device is not None and self.device is not None and self.device != x.device:
       raise RuntimeError(f"assign device mismatch {self.device} != {x.device}")
     if not is_disk and self.dtype != x.dtype: raise RuntimeError(f"assign dtype mismatch {self.dtype} != {x.dtype}")
     if isinstance(self.device, tuple) and self.uop.axis != x.uop.axis: raise RuntimeError(f"multi axis mismatch {self.uop.axis} != {x.uop.axis}")
@@ -462,20 +462,6 @@ class Tensor(OpMixin):
       level_chunks = math.ceil(data.shape[0] / Tensor.CHUNK_SIZE)
 
     return data[:16].contiguous()
-
-  @staticmethod
-  def from_uop(y:UOp, **kwargs) -> Tensor:
-    # TODO: remove this and stay in weakint
-    if y.dtype == dtypes.weakint: y = _index_to_concrete_int(y)
-    if y.op is Ops.BIND:
-      var, val = y.unbind()
-      _device = canonicalize_device(kwargs.get("device"))
-      const = UOp.const(var.dtype, val, _device, ())
-      return Tensor(y.replace(src=(var.replace(src=const.src), const)), **kwargs)
-    if y.op is Ops.CONST: return Tensor(y.arg, **kwargs)
-    if y.op is Ops.MUL: return Tensor.from_uop(y.src[0]) * Tensor.from_uop(y.src[1])
-    if y.op is Ops.ADD: return Tensor.from_uop(y.src[0]) + Tensor.from_uop(y.src[1])
-    raise RuntimeError(f"unhandled UOp {y}")
 
   # ***** creation entrypoint *****
 

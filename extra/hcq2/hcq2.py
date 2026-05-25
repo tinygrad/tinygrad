@@ -3,10 +3,10 @@ from typing import cast, Callable, TypeVar, Generic, Any, TYPE_CHECKING
 import struct, functools, time, collections
 from dataclasses import replace
 if TYPE_CHECKING: from tinygrad.engine.realize import ExecContext
-from tinygrad.helpers import DEV, getenv, select_first_inited, select_by_name, suppress_finalizing, mv_address, round_up, DEBUG, dedup, all_same
+from tinygrad.helpers import DEV, getenv, select_first_inited, select_by_name, suppress_finalizing, mv_address, round_up, DEBUG, dedup
 from tinygrad.device import Device, Buffer, BufferSpec, Compiled, LRUAllocator, MultiBuffer
 from tinygrad.uop.ops import Ops, sint, UOp, UPat, PatternMatcher, KernelInfo, graph_rewrite, track_rewrites
-from tinygrad.uop.symbolic import symbolic, symbolic_simple
+from tinygrad.uop.symbolic import symbolic_simple, symbolic
 from tinygrad.dtype import dtypes, DType
 from dataclasses import dataclass, field
 from tinygrad.runtime.support.memory import BumpAllocator
@@ -139,7 +139,7 @@ class HCQAllocator(LRUAllocator[HCQDeviceType], Generic[HCQDeviceType]):
     self.dev.synchronize()
     dest[:] = d._buf.cpu_view()[:len(dest)]
 
-  def _as_buffer(self, buf): return buf.cpu_view().mv
+  # def _as_buffer(self, buf): return buf.cpu_view().mv
 
 # **************** lower context ****************
 
@@ -157,15 +157,17 @@ class HCQ2DeviceCtx:
 @dataclass
 class HCQ2LowerCtx:
   name:str
-  inputs:list[Buffer] = field(default_factory=list)
+  inputs:list[Buffer|MultiBuffer] = field(default_factory=list)
   holds:list[UOp] = field(default_factory=list)
-  devs:dict[str, HCQ2DeviceCtx] = field(default_factory=dict)
+  dev_ctx:dict[str, HCQ2DeviceCtx] = field(default_factory=dict)
+  addr_table:UOp|None = None
+  next_slot:int = 0
 
 class HCQEncoder:
-  def __init__(self, device:str): self.device, self.blob, self.patches = device, b'', []
+  def __init__(self): self.blob, self.patches = b'', []
 
   def get_dev_addr(self, uop:UOp) -> UOp:
-    return UOp(Ops.GETADDR, dtypes.uint64, src=(uop,)) if unwrap_after(uop).op in (Ops.BUFFER, Ops.BUFFER_VIEW, Ops.BINARY) else uop
+    return UOp(Ops.GETADDR, dtypes.uint64, src=(uop,)) if unwrap_after(uop).op in (Ops.BUFFER, Ops.BUFFER_VIEW, Ops.BINARY, Ops.MSTACK, Ops.MSELECT) else uop
 
   def append(self, *data, dtype=dtypes.uint32):
     for d in data:
@@ -176,8 +178,8 @@ class HCQEncoder:
 
   def q(self, *values): self.append(*values)
 
-  def uop(self, dev:str|None=None, tag:str|None=None) -> UOp:
-    buf = UOp.new_buffer(dev or self.device, len(self.blob), dtypes.uint8)
+  def uop(self, dev:str|tuple[str, ...], tag:str|None=None) -> UOp:
+    buf = UOp.new_buffer(dev, len(self.blob), dtypes.uint8)
     if tag: buf = buf.rtag(tag)
     blob_uop = UOp(Ops.BINARY, dtypes.void, src=(), arg=self.blob)
     stores = [buf.index(UOp.const(dtypes.int, off)).cast(dt.ptr()).store(val.cast(dt)) for off, val, dt in self.patches]
@@ -185,29 +187,34 @@ class HCQEncoder:
 
 # **************** prepare runtime ****************
 
+def _devices(x) -> tuple[str, ...]:
+  return tuple(b.device for b in x.bufs) if isinstance(x, MultiBuffer) else (x.device,) if isinstance(x, Buffer) else x if isinstance(x, tuple) else (x,)
+
+def rebind_program_dev(c:UOp, p:UOp) -> UOp:
+  devs = _devices(c.src[1].buffer)
+  p = p.replace(src=p.src[:1] + (UOp(Ops.DEVICE, arg=devs),) + p.src[2:])
+  return c.replace(src=(Device[devs[0]].pm_lower.rewrite(p),) + c.src[1:])
+
 def lower_kernargs(call:UOp, prg:UOp) -> UOp:
   data, info = prg.arg
-  dev_name = unwrap_after(prg.src[0]).src[1].arg
-
-  enc = HCQEncoder(dev_name)
+  enc = HCQEncoder()
   for gi in info.globals: enc.append(call.src[1+gi], dtype=dtypes.uint64)
   for v in info.vars: enc.append(v, dtype=dtypes.uint32)
 
   enc.blob += b'\x00' * (data.kernargs_alloc_size - len(enc.blob)) # pad blob
-  return call.replace(src=(prg.replace(src=prg.src + (enc.uop(tag="kernargs"),), arg=(data, info)),) + call.src[1:])
+  kernargs = enc.uop(_devices(call.src[1].buffer), tag="kernargs")
+  return call.replace(src=(prg.replace(src=prg.src + (kernargs,), arg=(data, info)),) + call.src[1:])
 
 pm_prep_runtime = PatternMatcher([
-  # device-specific lowering of the program
+  # bind generic PROGRAM device to the call's actual dev(s), then run device-specific lowering
   (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, src=(UPat(), UPat(Ops.DEVICE), UPat(), UPat(), UPat(Ops.BINARY)), name="p"),), name="c", allow_any_len=True),
-    lambda c, p: c.replace(src=(Device[p.src[1].arg].pm_lower.rewrite(p),) + c.src[1:])),
+    rebind_program_dev),
 
   # lower kernargs (PROGRAM.src[0] is now AFTER(BUFFER, COPY) — the lowered program image)
   (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, src=(UPat(Ops.AFTER),), name="prg"),), name="call", allow_any_len=True), lower_kernargs),
 ])
 
 # **************** lower ops ****************
-
-def _devices(buf) -> tuple[str, ...]: return tuple(b.device for b in buf.bufs) if isinstance(buf, MultiBuffer) else (buf.device,)
 
 def lower_program(call:UOp, prg:UOp) -> UOp:
   q = UOp(Ops.LINEAR, dtypes.void, (prg,), arg=(_devices(call.src[1].buffer), "COMPUTE"))
@@ -252,97 +259,132 @@ pm_add_timeline_inc = PatternMatcher([(UPat(Ops.LINEAR, src=UPat(Ops.LINEAR), na
 
 def calc_kernargs_sizes(ctx:dict[str,int], u:UOp) -> None:
   if u.tag != "kernargs": return
-  dev_name = u.src[1].arg
-  ctx[dev_name] = ctx.get(dev_name, 0) + round_up(u.arg, 16)
+  for d in _devices(u.src[1].arg): ctx[d] = ctx.get(d, 0) + round_up(u.arg, 16)
 pm_calc_kernargs_sizes = PatternMatcher([(UPat(Ops.BUFFER, name="u"), calc_kernargs_sizes)])
 
+# bufferize
+
+def _maybe_mstack(srcs:tuple[UOp, ...], tag=None) -> UOp: return srcs[0] if len(srcs) == 1 else UOp(Ops.MSTACK, srcs[0].dtype, srcs, tag=tag)
+
 def _lower_stores(host_buf:UOp, buf_node:UOp, stores:tuple[UOp, ...]) -> list[UOp]:
-  # blob stores substitute buf_node directly; indexed patches re-target the INDEX onto host_buf with byte→element offset conversion.
   def lower(s:UOp) -> UOp:
     if s.src[1].op is Ops.BINARY: return s.substitute({buf_node: host_buf})
     idx = s.src[0].src[0]
     return s.substitute({idx: host_buf.index(UOp.const(dtypes.int, idx.src[1].arg // host_buf.dtype.base.itemsize), dtype=host_buf.dtype.ptr())})
   return [lower(s) for s in stores]
 
-_program_uop_cache:dict[bytes, tuple[UOp,UOp]] = {}
-def bufferize_binary(ctx:HCQ2LowerCtx, target:UOp, buf_node:UOp) -> UOp|None:
-  dev_name, stores = buf_node.src[1].arg, target.src[1:]
+_program_uop_cache:dict[tuple[bytes,str], tuple[UOp,UOp]] = {}
+def bufferize_program(ctx:HCQ2LowerCtx, target:UOp, buf_node:UOp) -> UOp:
+  blob, addrs = target.src[1].src[1].arg, []
+  for dev in _devices(buf_node.src[1].arg):
+    if (cached:=_program_uop_cache.get((blob, dev))) is None:
+      lib_gpu = Buffer(dev, round_up(len(blob), 0x1000), dtypes.uint8, options=BufferSpec(nolru=True, cpu_access=True), preallocate=True)
+      lib_gpu._buf.cpu_view()[:len(blob)] = memoryview(blob)
+      cached = _program_uop_cache[(blob, dev)] = (UOp.from_buffer(lib_gpu, dev), UOp.const(dtypes.uint64, lib_gpu._buf.va_addr, device=dev))
+    if cached[0] not in ctx.holds: ctx.holds.append(cached[0])
+    addrs.append(cached[1])
+  return _maybe_mstack(tuple(addrs))
 
-  # program
-  if buf_node.tag == "program":
-    blob = target.src[1].src[1].arg
-    if (cached:=_program_uop_cache.get(blob)) is None:
-      lib_gpu = Buffer(dev_name, round_up(len(blob), 0x1000), dtypes.uint8, options=BufferSpec(nolru=True), preallocate=True)
-      Device[dev_name].allocator._copyin(lib_gpu._buf, memoryview(bytearray(blob)))
-      Device[dev_name].synchronize()
-      cached = _program_uop_cache[blob] = (UOp.from_buffer(lib_gpu, dev_name), UOp.const(dtypes.uint64, lib_gpu._buf.va_addr))
-    lib_uop, result = cached
-    if lib_uop not in ctx.holds: ctx.holds.append(lib_uop)
-    return result
-
-  # kernargs
-  if buf_node.tag == "kernargs":
-    dctx = ctx.devs[dev_name]
+def bufferize_kernargs(ctx:HCQ2LowerCtx, target:UOp, buf_node:UOp) -> UOp:
+  hbufs, addrs = [], []
+  for dev in _devices(buf_node.src[1].arg):
+    dctx = ctx.dev_ctx[dev]
     isz = dctx.kernargs_host.dtype.base.itemsize
     off = dctx.kernargs_allocator.alloc(buf_node.arg, 16)
-    host_buf = UOp(Ops.BUFFER_VIEW, dctx.kernargs_host.dtype, src=(dctx.kernargs_host,), arg=(buf_node.arg // isz, off // isz))
-    return (dctx.kernargs_gpu + off).after(*_lower_stores(host_buf, buf_node, stores))
+    hbufs.append(UOp(Ops.BUFFER_VIEW, dctx.kernargs_host.dtype, src=(dctx.kernargs_host,), arg=(buf_node.arg // isz, off // isz)))
+    addrs.append(dctx.kernargs_gpu + off)
+  return _maybe_mstack(tuple(addrs)).after(*_lower_stores(_maybe_mstack(tuple(hbufs)), buf_node, target.src[1:]))
 
-  # compute/copy cmdbufs
-  if buf_node.tag in ("compute", "copy"):
-    host_buf = UOp.from_buffer(Buffer(dev_name, buf_node.arg // dtypes.uint32.itemsize, dtypes.uint32,
-                                      options=BufferSpec(cpu_access=True, nolru=True), preallocate=True), dev_name)
-    return host_buf.after(*_lower_stores(host_buf, buf_node, stores))
+def bufferize_cmdbuf(ctx:HCQ2LowerCtx, target:UOp, buf_node:UOp) -> UOp:
+  hbufs = tuple(UOp.from_buffer(Buffer("CPU", buf_node.arg // dtypes.uint32.itemsize, dtypes.uint32,
+                                       options=BufferSpec(cpu_access=True, nolru=True), preallocate=True), dev)
+                for dev in _devices(buf_node.src[1].arg))
+  hbuf = _maybe_mstack(hbufs)
+  return hbuf.after(*_lower_stores(hbuf, buf_node, target.src[1:]), tag=buf_node.tag)
 
+def bufferize_binary(ctx:HCQ2LowerCtx, target:UOp, buf_node:UOp) -> UOp|None:
+  if buf_node.tag == "program": return bufferize_program(ctx, target, buf_node)
+  if buf_node.tag == "kernargs": return bufferize_kernargs(ctx, target, buf_node)
+  if buf_node.tag in ("compute", "copy"): return bufferize_cmdbuf(ctx, target, buf_node)
   return None
 
-# resolve placeholder buffers (timeline signals, queue rings, ...) to the real device buffers
-def resolve_timeline(b:UOp) -> UOp|None:  # TODO: multi device
-  if b.tag in ("timeline_signal", "timeline_value"): return UOp.from_buffer(getattr(Device[b.src[1].arg[0]], b.tag))
+# TODO: merge with bufferize_binary
+def resolve_buffer(b:UOp) -> UOp|None:
+  devs = _devices(b.src[1].arg)
+  if b.tag in ("timeline_signal", "timeline_value"):
+    return _maybe_mstack(tuple(UOp.from_buffer(getattr(Device[d], b.tag), d) for d in devs), b.tag)
+  if b.tag == "scratch":
+    return _maybe_mstack(tuple(UOp.from_buffer(Buffer(d, (s:=Device[d].scratch).size, dtypes.uint8, opaque=s, options=BufferSpec(external_ptr=1)), d)
+                               for d in devs), b.tag)
   if isinstance(b.tag, tuple): # (compute_queue|sdma_queue, ring|write_ptr|doorbell|put_value)
-    dev = Device[b.src[1].arg[0]]
-    return UOp.from_buffer(getattr(dev.compute_queue if b.tag[0] == "compute_queue" else dev.sdma_queue(0), b.tag[1]))
+    return _maybe_mstack(tuple(UOp.from_buffer(getattr(Device[d].compute_queue if b.tag[0] == "compute_queue" else Device[d].sdma_queue(0), b.tag[1]), d)
+                            for d in devs), b.tag)
+  if isinstance(b.device, tuple): return _maybe_mstack(tuple(UOp.from_buffer(buf, buf.device) for buf in b.buffer.bufs))
   return None
 
 pm_bufferize = PatternMatcher([
   (UPat(Ops.AFTER, src=(UPat(Ops.BUFFER, name="buf_node"),), allow_any_len=True, name="target"), bufferize_binary),
-  (UPat(Ops.BUFFER, name="b"), resolve_timeline), # TODO: cleanup
+  (UPat(Ops.BUFFER, name="b"), resolve_buffer), # TODO: cleanup
 ])
 
-# pull every nested address-binary's patches onto this after and strip its wrapper, so symbolic can resolve the getaddrs
-def lift_after(ctx:HCQ2LowerCtx, after:UOp) -> UOp|None:
-  gate = lambda n: not (n.op is Ops.AFTER and n.src[0].op is Ops.BUFFER)
-  if not (inners:=dedup([u for s in after.src[1:] for u in s.toposort(gate=gate) if u.op is Ops.AFTER])): return None
-  return after.replace(src=after.src + tuple(d for i in inners for d in i.src[1:])).substitute({i: i.src[0] for i in inners})
-pm_lift_after = PatternMatcher([(UPat(Ops.AFTER, name="after", allow_any_len=True), lift_after)])
+def lift_patches_to_cmdbuf(ctx:HCQ2LowerCtx, cmdbuf:UOp) -> UOp|None:
+  if cmdbuf.tag not in ("compute", "copy"): return None
+  patches = dedup(u for store in cmdbuf.src[1:] for u in store.toposort() if u.op is Ops.AFTER)
+  deps = tuple(d for p in patches for d in p.src[1:])
+  return cmdbuf.replace(src=cmdbuf.src+deps, tag=None).substitute({p:p.src[0] for p in patches})
+pm_lift_patches_to_cmdbuf = PatternMatcher([(UPat(Ops.AFTER, name="cmdbuf", allow_any_len=True), lift_patches_to_cmdbuf)])
 
-def resolve_getaddr(ctx:HCQ2LowerCtx, ga:UOp, buf:UOp) -> UOp:
-  if buf not in ctx.holds: ctx.holds.append(buf)
-  return UOp.const(dtypes.uint64, buf.buffer.get_buf(buf.device).va_addr)
+# resolve patches
 
 def fold_const_store(ctx:HCQ2LowerCtx, buf:UOp, off:UOp, val:UOp) -> UOp:
-  struct.pack_into(f'<{val.dtype.fmt}', buf.buffer.ensure_allocated()._buf.cpu_view().mv.cast('B'), off.arg * buf.dtype.base.itemsize, val.arg)
+  bufs = buf.src if buf.op is Ops.MSTACK else (buf,)
+  vals = val.src if val.op is Ops.MSTACK else (val,) * len(bufs)
+  for b, v in zip(bufs, vals):
+    struct.pack_into(f'<{v.dtype.fmt}', b.buffer.ensure_allocated()._buf.cpu_view().mv.cast('B'), off.arg * b.dtype.base.itemsize, v.arg)
   return UOp(Ops.NOOP)
 
 def fold_blob_store(ctx:HCQ2LowerCtx, buf:UOp, blob:UOp) -> UOp:
-  buf.buffer.ensure_allocated()._buf.cpu_view().mv.cast('B')[:len(blob.arg)] = blob.arg
+  for b in (buf.src if buf.op is Ops.MSTACK else (buf,)):
+    b.buffer.ensure_allocated()._buf.cpu_view().mv.cast('B')[:len(blob.arg)] = blob.arg
   return UOp(Ops.NOOP)
 
-pm_resolve_patches = symbolic_simple + PatternMatcher([
+def _new_addr_table(n:int) -> UOp:
+  return _maybe_mstack(tuple(UOp.from_buffer(Buffer("CPU", 256, dtypes.uint64, preallocate=True), "CPU") for _ in range(n)))
+
+def resolve_getaddr(ctx:HCQ2LowerCtx, m:UOp) -> UOp:
+  srcs = m.src if m.op is Ops.MSTACK else (m,)
+  for s in srcs:
+    if s.op in (Ops.BUFFER, Ops.BUFFER_VIEW) and s not in ctx.holds: ctx.holds.append(s)
+  addrs = [s.arg if s.op is Ops.CONST else s.buffer.get_buf(s.device).va_addr for s in srcs]
+
+  # fast-path: all per-dev VAs equal -> just a const
+  if all(v == addrs[0] for v in addrs): return UOp.const(dtypes.uint64, addrs[0])
+
+  if ctx.addr_table is None: ctx.addr_table = _new_addr_table(len(srcs)) # TODO: move
+  table, slot_const = ctx.addr_table, UOp.const(dtypes.int, (slot:=ctx.next_slot))
+  ctx.next_slot = slot + 1
+
+  patch = table.index(slot_const, dtype=table.dtype.ptr()).store(_maybe_mstack(tuple(UOp.const(dtypes.uint64, va) for va in addrs)))
+  return table.after(patch).index(slot_const, dtype=table.dtype.ptr()).load(dtype=dtypes.uint64)
+
+pm_resolve_patches = symbolic + PatternMatcher([
   # resolve getaddrs
   (UPat(Ops.GETADDR, src=(UPat(Ops.BUFFER_VIEW, name="bv"),)), # getaddr(buffer_view(x)) -> offset+getaddr(x)
     lambda ctx, bv: UOp(Ops.GETADDR, dtypes.uint64, src=(bv.src[0],)) + UOp.const(dtypes.uint64, bv.arg[1] * bv.dtype.itemsize)),
-  (UPat(Ops.GETADDR, src=(UPat(Ops.BUFFER, name="buf"),), name="ga"), resolve_getaddr), # getaddr(buffer) -> const(va_addr)
+  (UPat(Ops.GETADDR, src=(UPat((Ops.BUFFER, Ops.MSTACK), name="m"),)), resolve_getaddr), # getaddr(buffer|mstack) -> addr_table load|const
   (UPat(Ops.GETADDR, src=(UPat.cvar("const"),)), lambda ctx, const: const), # getaddr(const) -> const
 
-  # write consts and binaries directly into the buffer
-  (UPat((Ops.BUFFER, Ops.BUFFER_VIEW), name="buf").store(UPat(Ops.BINARY, name="blob")), fold_blob_store),
-  (UPat((Ops.BUFFER, Ops.BUFFER_VIEW), name="buf").index(UPat.cvar("off")).or_casted().store(UPat.cvar("val")), fold_const_store),
+  # write consts and binaries directly into the buffer (BUFFER or MSTACK of BUFFERs)
+  (UPat((Ops.BUFFER, Ops.BUFFER_VIEW, Ops.MSTACK), name="buf").store(UPat(Ops.BINARY, name="blob")), fold_blob_store),
+  (UPat((Ops.BUFFER, Ops.BUFFER_VIEW, Ops.MSTACK), name="buf").index(UPat.cvar("off")).or_casted()
+    .store(UPat.any(UPat.cvar("val"), UPat(Ops.MSTACK, src=UPat.cvar(), name="val"))), fold_const_store),
 ])
 
 def parametrize_host_buffer(ctx:HCQ2LowerCtx, buf:UOp) -> UOp:
   # register a host buffer as a launcher input and return its placeholder
-  if buf.op is Ops.AFTER: return buf.replace(src=(p:=parametrize_host_buffer(ctx, buf.src[0]),) + buf.src[1:], dtype=p.dtype)
+  if buf.op is Ops.AFTER:
+    p = parametrize_host_buffer(ctx, buf.src[0])
+    return p.after(*(s.substitute({buf.src[0]: p}) for s in buf.src[1:]))
   if (b:=buf.buffer) not in ctx.inputs: ctx.inputs.append(b)
   return UOp.placeholder((b.size,), b.dtype, ctx.inputs.index(b))
 
@@ -352,8 +394,8 @@ pm_parametrize_host_buffers = PatternMatcher([
     lambda bv, idx, bi: bi.replace(src=(bv.src[0], idx + bv.arg[1]))),
 
   # parametrize host buffers
-  (UPat(Ops.AFTER, src=(UPat((Ops.BUFFER, Ops.BUFFER_VIEW)),), allow_any_len=True, name="buf"), parametrize_host_buffer),
-  (UPat((Ops.BUFFER, Ops.BUFFER_VIEW), name="buf"), parametrize_host_buffer),
+  (UPat(Ops.AFTER, src=(UPat((Ops.BUFFER, Ops.BUFFER_VIEW, Ops.MSTACK)),), allow_any_len=True, name="buf"), parametrize_host_buffer),
+  (UPat((Ops.BUFFER, Ops.BUFFER_VIEW, Ops.MSTACK), name="buf"), parametrize_host_buffer),
 
   # remove UNIQUE/DEVICE to dedup CONST
   (UPat(Ops.CONST, name="c"), lambda c: c.replace(src=()) if len(c.src) else None),
@@ -361,7 +403,8 @@ pm_parametrize_host_buffers = PatternMatcher([
 
 def hcq_callify(ctx:HCQ2LowerCtx, l:UOp) -> UOp:
   sink = UOp.sink(*l.src, arg=KernelInfo(name=ctx.name, estimates=Estimates()), tag=1)
-  call = to_program(sink, Device["CPU"].renderer).call(*[UOp.from_buffer(b, "CPU") if isinstance(b, Buffer) else b for b in ctx.inputs])
+  inputs = [UOp.from_buffer(b, tuple(x.device for x in b.bufs) if isinstance(b, MultiBuffer) else "CPU") for b in ctx.inputs]
+  call = to_program(sink, Device["CPU"].renderer).call(*inputs)
   return call.replace(src=call.src + (UOp(Ops.BIND, dtypes.void, src=tuple(ctx.holds)),)) if ctx.holds else call
 pm_callify = PatternMatcher([(UPat(Ops.LINEAR, name="l", allow_any_len=True), hcq_callify)])
 
@@ -396,11 +439,11 @@ def hcq_realize(ctx:HCQ2LowerCtx, linear:UOp, ast:UOp) -> UOp:
   for dev_name, sz in sizes.items():
     dev = Device[dev_name]
     off = dev.kernargs_offset_allocator.alloc(sz, 16)
-    ctx.devs[dev_name] = HCQ2DeviceCtx(dev_name, UOp.from_buffer(dev.kernargs_buf.view(sz, dtypes.uint8, off), dev_name),
-                                       UOp.const(dtypes.uint64, dev.kernargs_buf.get_buf(dev_name).va_addr + off))
+    ctx.dev_ctx[dev_name] = HCQ2DeviceCtx(dev_name, UOp.from_buffer(dev.kernargs_buf.view(sz, dtypes.uint8, off), dev_name),
+                                          UOp.const(dtypes.uint64, dev.kernargs_buf.get_buf(dev_name).va_addr + off, device=dev_name))
 
   linear = graph_rewrite(linear, pm_bufferize, ctx=ctx, bottom_up=True, name="realize binaries")
-  linear = graph_rewrite(linear, pm_lift_after, ctx=ctx, bottom_up=False, name="lift patches to root")
+  linear = graph_rewrite(linear, pm_lift_patches_to_cmdbuf, ctx=ctx, bottom_up=False, name="lift patches to cmdbuf")
   linear = graph_rewrite(linear, pm_resolve_patches, ctx=ctx, bottom_up=False, name="simplify patches")
   linear = graph_rewrite(linear, pm_parametrize_host_buffers, ctx=ctx, bottom_up=True, name="parametrize host buffers")
   return graph_rewrite(linear, pm_callify, ctx=ctx, name="hcq: callify")
@@ -428,10 +471,9 @@ def hcq_exec(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
   linear = graph_rewrite(UOp(Ops.LINEAR, dtypes.void, (resolved_call,)), pm_ensure_bufs_accessible, ctx=hcq_ctx)
 
   linear = hcq_schedule(linear, ast)
-
-  dev = Device["AMD"]
   host_call = hcq_realize(hcq_ctx, linear, ast)
 
+  dev = Device["AMD"]
   with track_stats(ctx, call, dev.device, bufs, ctx.var_vals) as tm:
     st = time.perf_counter() if ctx.wait else 0.0
     run_linear(UOp(Ops.LINEAR, dtypes.void, (host_call,)), var_vals=ctx.var_vals, jit=True, update_stats=DEBUG>=3)
