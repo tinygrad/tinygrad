@@ -11,7 +11,7 @@ from tinygrad.engine.realize import run_linear
 from tinygrad.codegen import to_program
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.renderer.ptx import PTXRenderer
-from test.helpers import to_uops_list, CI
+from test.helpers import to_uops_list
 
 def run_uops(uops_list:list[UOp], bufs:list[Buffer]):
   buf_uops = [UOp.new_buffer(b.device, b.size, b.dtype) for b in bufs]
@@ -174,7 +174,6 @@ class TestBoolUOps(TestUOps):
 
 class TestLocalAccess(unittest.TestCase):
   # NOTE: this is failing on METAL CI, no idea why. Works locally.
-  @unittest.skipIf(Device.DEFAULT == "METAL" and CI, "failing only in CI")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared memory")
   def test_local_basic(self):
     uops = []

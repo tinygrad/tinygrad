@@ -10,9 +10,8 @@ from hypothesis import assume, given, strategies as strat
 from tinygrad import nn, dtypes, Device, Tensor, Variable
 from tinygrad.dtype import DType
 from tinygrad.uop.ops import UOp, Ops, UPat
-from tinygrad.helpers import DEBUG, OSX, GlobalCounters, Context, getenv, all_same, temp
+from tinygrad.helpers import DEBUG, DEV, OSX, GlobalCounters, Context, getenv, all_same, temp
 from tinygrad.engine.realize import compile_linear, run_linear
-from test.helpers import CI
 
 supported_dtypes = Device[Device.DEFAULT].renderer.supported_dtypes()
 
@@ -115,7 +114,6 @@ class TestSchedule(unittest.TestCase):
     run_linear(*check_schedule(b, 1))
     np.testing.assert_allclose(b.numpy(), np.broadcast_to(a.numpy().astype(np.float16), (2, 4, 4))+2, rtol=1e-3)
 
-  @unittest.skipIf(CI and Device.DEFAULT == "NV", "crashes on NV CI")
   def test_add_chain_buffers(self):
     N = 31
     with Context(TRACK_MATCH_STATS=0, DEBUG=0):
@@ -504,7 +502,6 @@ class TestSchedule(unittest.TestCase):
     expected = (expected * np.array([1,0,0,1,0,0,0,0,1,0]).reshape(num_steps, 1)).flatten()
     np.testing.assert_allclose(out.numpy(), expected, atol=1e-4, rtol=1e-4)
 
-  @unittest.skipIf(Device.DEFAULT == "CL", "TODO: fails on CI CL")
   def test_reduce_different_nesting_depth(self):
     # two REDUCEs sharing the same RANGE at different nesting depths must NOT merge
     x = Tensor.arange(768).reshape(3, 256).float()
@@ -1114,7 +1111,7 @@ class TestSchedule(unittest.TestCase):
       self.assertListEqual(a.tolist(), [[1.]*shape[1]]*shape[0])
 
 class TestLimitBufs(unittest.TestCase):
-  @unittest.skipIf(CI and Device.DEFAULT == "NV", "crashes on NV CI")
+  @unittest.skipIf(DEV.interface.startswith("MOCK") and Device.DEFAULT == "NV", "crashes in ocelot")
   def test_limit_bufs_with_var(self):
     N = 31
     with Context(TRACK_MATCH_STATS=0, DEBUG=0):

@@ -5,7 +5,6 @@ from tinygrad.device import Buffer, BufferSpec, Compiled, ProfileDeviceEvent, Pr
 from tinygrad.runtime.support.hcq import HCQCompiled
 from tinygrad.engine.realize import get_runtime
 from tinygrad.codegen import to_program
-from test.helpers import CI
 
 MOCKGPU = DEV.interface.startswith("MOCK")
 def _dev_base(d):
@@ -145,7 +144,8 @@ class TestProfiler(unittest.TestCase):
     assert len(graph_evs) == 2, "2 graph events are expected"
     assert len(graph_evs[0].ents) == 2, "two entities are expected"
 
-  @unittest.skipIf(CI or not issubclass(type(Device[Device.DEFAULT]), HCQCompiled), "skip CI")
+  @unittest.skipIf(MOCKGPU, "skip MOCKGPU")
+  @unittest.skipUnless(issubclass(type(Device[Device.DEFAULT]), HCQCompiled), "must be HCQ")
   def test_dev_jitter_matrix(self):
     dev_cnt = 6
     try: devs = [Device[f"{Device.DEFAULT}:{i}"] for i in range(dev_cnt)]

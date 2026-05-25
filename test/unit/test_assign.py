@@ -4,7 +4,6 @@ import numpy as np
 from tinygrad import dtypes, Tensor, TinyJit, GlobalCounters, Variable
 from tinygrad.uop.ops import Ops, UOp
 from tinygrad.helpers import temp, DEV, Context
-from test.helpers import CI
 
 N = 200  # has to be bigger than the cache to fail
 
@@ -189,7 +188,7 @@ class TestAssign(unittest.TestCase):
     new = a + times_a
     np.testing.assert_allclose(new.numpy(), 8)
 
-  @unittest.skipIf(CI and DEV.renderer == "LVP", "flaky in CI")
+  @unittest.skipIf(DEV.renderer == "LVP", "flaky in CI")
   def test_double_assign(self):
     a = Tensor.ones(4).contiguous().realize()
     a += 1

@@ -1,4 +1,4 @@
-import time, math, unittest, functools, platform, warnings
+import time, math, unittest, functools, platform, warnings, sys
 import numpy as np
 from typing import List, Callable
 import torch
@@ -7,7 +7,6 @@ from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.renderer.cstyle import QCOMCLRenderer
 from tinygrad.renderer.nir import NIRRenderer
-from test.helpers import CI
 
 TINY_BACKEND = getenv("TINY_BACKEND")
 if TINY_BACKEND:
@@ -74,7 +73,7 @@ def helper_test_op(shps, torch_fxn, tinygrad_fxn=None, atol=1e-6, rtol=1e-3, gra
     for i, (t, torch_grad) in enumerate(zip(tiny_grads, torch_grads)):
       compare(f"backward pass tensor {i}", t.numpy(), torch_grad.detach().cpu().numpy(), atol=grad_atol, rtol=grad_rtol)
 
-  if not CI:
+  if sys.stdout.isatty():
     print("\ntesting %40r   torch/tinygrad fp: %.2f / %.2f ms  bp: %.2f / %.2f ms " % \
           (shps, torch_fp*1000, tinygrad_fp*1000, torch_fbp*1000, tinygrad_fbp*1000), end="")
 
@@ -103,7 +102,7 @@ class TestOps(unittest.TestCase):
     with self.assertRaises(expected) as tinygrad_cm:
       tinygrad_fxn(*tst)
     if exact: self.assertEqual(str(torch_cm.exception), str(tinygrad_cm.exception))
-    if not CI: print("\ntesting %40r   torch/tinygrad exception: %s / %s" % (shps, torch_cm.exception, tinygrad_cm.exception), end="")
+    if sys.stdout.isatty(): print("\ntesting %40r   torch/tinygrad exception: %s / %s" % (shps, torch_cm.exception, tinygrad_cm.exception), end="")
 
   def test_full_like(self):
     a = Tensor([[1,2,3],[4,5,6]], dtype=dtypes.float32)
