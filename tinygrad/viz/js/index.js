@@ -1054,12 +1054,12 @@ async function main() {
   if (ret.length === 0) return;
   // ** center graph
   const data = ret[currentRewrite];
-  const render = (opts) => renderDag({ data, opts }, { recenter:currentRewrite === 0 });
+  const render = (layoutOpts, renderOpts) => renderDag({ data, opts:layoutOpts }, renderOpts);
   const getOpts = () => ({ showIndexing:showIndexing.toggle.checked, showCallSrc:showCallSrc.toggle.checked, showSink:showSink.toggle.checked, callSrcMask:state.callSrcMask });
-  render(getOpts());
-  showIndexing.toggle.onchange = () => render(getOpts());
-  showCallSrc.toggle.onchange = () => { state.callSrcMask.clear(); render(getOpts()); }
-  showSink.toggle.onchange = () => render(getOpts());
+  render(getOpts(), { recenter:currentRewrite == 0 });
+  showIndexing.toggle.onchange = () => render(getOpts(), { recenter:true });
+  showCallSrc.toggle.onchange = () => { state.callSrcMask.clear(); render(getOpts(), { recenter:true }); }
+  showSink.toggle.onchange = () => render(getOpts(), { recenter:true });
   // ** right sidebar metadata
   metadata.innerHTML = "";
   if (ckey.includes("rewrites")) metadata.append(showIndexing.label, showCallSrc.label, showSink.label);
