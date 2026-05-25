@@ -94,7 +94,8 @@ const layoutUOp = (g, { graph, change }, opts) => {
       if (!collapsible) continue;
       consumer.collapsible = true;
       // make sources invisible if UI has toggled it off
-      const collapsed = (consumer.callSrc && (opts.showCallSrc ? opts.callSrcMask.has(consumerId) : !opts.callSrcMask.has(consumerId))) || (collapsible && !opts.nodeSrcMask.has(consumerId));
+      const collapsed = (consumer.callSrc && (opts.showCallSrc ? opts.callSrcMask.has(consumerId) : !opts.callSrcMask.has(consumerId)))
+        || (collapsible && !opts.nodeSrcMask.has(consumerId));
       if (!collapsed) continue;
       consumer.collapsed = collapsed;
       g.removeEdge(n, consumerId);
