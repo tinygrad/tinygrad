@@ -77,33 +77,40 @@ const layoutUOp = (g, { graph, change }, opts) => {
       if (node.label.includes("dtypes.weakint")) g.removeNode(n);
     }
   }
-  if (!opts.showCallSrc || opts.callSrcMask.size > 0) {
-    // remove edges from src[0] to CALL nodes, track affected nodes
-    const disconnected = new Set();
-    for (const n of g.nodes()) {
-      const node = g.node(n);
-      if (node.callNode && (opts.showCallSrc ? opts.callSrcMask.has(n) : !opts.callSrcMask.has(n))) {
-        node.collapsed = true;
-        for (const pred of (g.predecessors(n) || [])) {
-          const edge = g.edge(pred, n);
-          if (edge?.label?.text === 0) {
-            g.removeEdge(pred, n);
-            disconnected.add(pred);
-          }
-        }
-      }
+  // optionally remove node srcs, track affected nodes
+  const disconnected = new Set();
+  // node op comes from label
+  const nodeOp = (n) => g.node(n)?.label.split("\n", 1)[0];
+  // TODO: can this check be better?
+  const movementOps = new Set(["RESHAPE", "EXPAND", "PERMUTE", "PAD", "SHRINK", "FLIP"]);
+  for (const n of g.nodes()) {
+    const op = nodeOp(n), src = g.predecessors(n) || [];
+    const excludeOp = ["DEVICE", "UNIQUE", "LUNIQUE"].includes(op) || (op === "STACK" && src.length === 0) ||
+      (op === "CONST" && !["UNIQUE", "LUNIQUE"].includes(nodeOp(src[0])));
+    for (const consumerId of (g.successors(n) || [])) {
+      const edge = g.edge(n, consumerId), consumer = g.node(consumerId);
+      const collapsible = consumer.callNode || excludeOp || (op === "STACK" && movementOps.has(nodeOp(consumerId)));
+      // add +- toggle if this consumer has collapsible sources
+      if (!collapsible) continue;
+      consumer.collapsible = true;
+      // make sources invisible if UI has toggled it off
+      const collapsed = (consumer.callSrc && (opts.showCallSrc ? opts.callSrcMask.has(consumerId) : !opts.callSrcMask.has(consumerId))) || (collapsible && !opts.nodeSrcMask.has(consumerId));
+      if (!collapsed) continue;
+      consumer.collapsed = collapsed;
+      g.removeEdge(n, consumerId);
+      disconnected.add(n);
     }
-    // remove nodes that are now disconnected (no successors), only from affected subtree
-    let changed = true;
-    while (changed) {
-      changed = false;
-      for (const n of disconnected) {
-        if (!g.hasNode(n)) continue;
-        if ((g.successors(n) || []).length === 0) {
-          for (const pred of (g.predecessors(n) || [])) disconnected.add(pred);
-          g.removeNode(n);
-          changed = true;
-        }
+  }
+  // remove nodes that are now disconnected (no successors), only from affected subtree
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const n of disconnected) {
+      if (!g.hasNode(n)) continue;
+      if ((g.successors(n) || []).length === 0) {
+        for (const pred of (g.predecessors(n) || [])) disconnected.add(pred);
+        g.removeNode(n);
+        changed = true;
       }
     }
   }
