@@ -370,7 +370,7 @@ class BoxCoder(object):
 
 def generate_labels(mean:Tensor, logvar:Tensor, ae_shift_factor:float=0.1159, ae_scale_factor:float=0.3611) -> Tensor:
   std = (0.5 * logvar).exp()
-  eps = Tensor.rand_like(mean)
+  eps = Tensor.randn_like(mean)
   z_sampled = mean + std * eps
   return (z_sampled - ae_shift_factor) * ae_scale_factor
 

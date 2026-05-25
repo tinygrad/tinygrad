@@ -1931,15 +1931,15 @@ def train_flux():
 
     train_loss = train_step(model, optim, sample)
 
-    tqdm.write(f"train loss: {train_loss.float().item():.3f}")
+    tqdm.write(f"train loss: {train_loss.float().item():.6f}")
 
     if i % eval_freq_step == 0:
       for sample in tqdm(val_iter, total=val_num_samples // BS):
         eval_loss = eval_step(model, sample)
-        tqdm.write(f"eval loss: {eval_loss.float().item():.3f}")
+        tqdm.write(f"eval loss: {eval_loss.float().item():.6f}")
 
       if eval_loss <= target_eval_loss:
-        print(f"target eval loss reached: {eval_loss:.3f} (target: {target_eval_loss:.3f})")
+        print(f"target eval loss reached: {eval_loss:.6f} (target: {target_eval_loss:.6f})")
         break
 
     i += 1
