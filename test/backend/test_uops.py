@@ -173,7 +173,6 @@ class TestBoolUOps(TestUOps):
   def test_where_bool(self): self._test_top_bool_fxn(Ops.WHERE, lambda a,b,c: b if a else c)
 
 class TestLocalAccess(unittest.TestCase):
-  # NOTE: this is failing on METAL CI, no idea why. Works locally.
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared memory")
   def test_local_basic(self):
     uops = []
