@@ -1056,7 +1056,7 @@ async function main() {
   const data = ret[currentRewrite];
   const render = (layoutOpts, renderOpts) => renderDag({ data, opts:layoutOpts }, renderOpts);
   const getOpts = () => ({ showIndexing:showIndexing.toggle.checked, showCallSrc:showCallSrc.toggle.checked, showSink:showSink.toggle.checked, callSrcMask:state.callSrcMask });
-  render(getOpts(), { recenter:currentRewrite == 0 });
+  render(getOpts(), { recenter:currentRewrite === 0 });
   showIndexing.toggle.onchange = () => render(getOpts(), { recenter:true });
   showCallSrc.toggle.onchange = () => { state.callSrcMask.clear(); render(getOpts(), { recenter:true }); }
   showSink.toggle.onchange = () => render(getOpts(), { recenter:true });
