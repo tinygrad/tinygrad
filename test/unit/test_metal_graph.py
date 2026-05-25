@@ -40,6 +40,22 @@ class TestMetalGraph(unittest.TestCase):
     assert isinstance(rt, self.MetalGraph)
     return rt
 
+  def require_graph(self):
+    if self.dev.graph is None: self.skipTest("Metal graph not supported")
+
+  def static_step(self):
+    from tinygrad import Tensor, TinyJit
+
+    w = Tensor.zeros(16, device=Device.DEFAULT).contiguous().realize()
+    g = Tensor.ones(16, device=Device.DEFAULT).contiguous().realize()
+
+    @TinyJit
+    def step():
+      w.assign(w + g).realize()
+      w.assign(w + g).realize()
+
+    return step, w
+
   def test_supports_uop_normal_offset(self):
     assert self.MetalGraph.supports_uop([self.dev], self.call(self.metal_buf(0), self.metal_buf(100), self.metal_buf(0xFFFFFFFF))) is True
 
@@ -54,20 +70,12 @@ class TestMetalGraph(unittest.TestCase):
     self.MetalGraph.supports_uop([self.dev], self.call(buf))
 
   def test_static_graph_replay_does_not_wait_for_previous_command_buffer(self):
-    from tinygrad import Tensor, TinyJit
     from tinygrad.runtime.graph import metal as metal_graph
 
-    if self.dev.graph is None: self.skipTest("Metal graph not supported")
+    self.require_graph()
 
     with Context(DEBUG=0, JIT=1, JIT_BATCH_SIZE=32, PROFILE=0):
-      w = Tensor.zeros(16, device=Device.DEFAULT).contiguous().realize()
-      g = Tensor.ones(16, device=Device.DEFAULT).contiguous().realize()
-
-      @TinyJit
-      def step():
-        w.assign(w + g).realize()
-        w.assign(w + g).realize()
-
+      step, w = self.static_step()
       for _ in range(3): step()
       self.dev.synchronize()
       rt = self.graph_runtime(step)
@@ -85,7 +93,7 @@ class TestMetalGraph(unittest.TestCase):
     from tinygrad import Tensor, TinyJit
     from tinygrad.runtime.graph import metal as metal_graph
 
-    if self.dev.graph is None: self.skipTest("Metal graph not supported")
+    self.require_graph()
 
     with Context(DEBUG=0, JIT=1, JIT_BATCH_SIZE=32, PROFILE=0):
       @TinyJit
@@ -112,20 +120,12 @@ class TestMetalGraph(unittest.TestCase):
       assert out[0].item() == 15
 
   def test_static_graph_replay_waits_when_profiling(self):
-    from tinygrad import Tensor, TinyJit
     from tinygrad.runtime.graph import metal as metal_graph
 
-    if self.dev.graph is None: self.skipTest("Metal graph not supported")
+    self.require_graph()
 
     with Context(DEBUG=0, JIT=1, JIT_BATCH_SIZE=32, PROFILE=1):
-      w = Tensor.zeros(16, device=Device.DEFAULT).contiguous().realize()
-      g = Tensor.ones(16, device=Device.DEFAULT).contiguous().realize()
-
-      @TinyJit
-      def step():
-        w.assign(w + g).realize()
-        w.assign(w + g).realize()
-
+      step, w = self.static_step()
       for _ in range(3): step()
       self.dev.synchronize()
       rt = self.graph_runtime(step)
