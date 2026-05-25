@@ -348,9 +348,6 @@ def fold_blob_store(ctx:HCQ2LowerCtx, buf:UOp, blob:UOp) -> UOp:
     b.buffer.ensure_allocated()._buf.cpu_view().mv.cast('B')[:len(blob.arg)] = blob.arg
   return UOp(Ops.NOOP)
 
-def _new_addr_table(n:int) -> UOp:
-  return _maybe_mstack(tuple(UOp.from_buffer(Buffer("CPU", 256, dtypes.uint64, preallocate=True), "CPU") for _ in range(n)))
-
 def resolve_getaddr(ctx:HCQ2LowerCtx, m:UOp) -> UOp:
   srcs = m.src if m.op is Ops.MSTACK else (m,)
   for s in srcs:
@@ -360,11 +357,9 @@ def resolve_getaddr(ctx:HCQ2LowerCtx, m:UOp) -> UOp:
   # fast-path: all per-dev VAs equal -> just a const
   if all(v == addrs[0] for v in addrs): return UOp.const(dtypes.uint64, addrs[0])
 
-  if ctx.addr_table is None: ctx.addr_table = _new_addr_table(len(srcs)) # TODO: move
-  table, slot_const = ctx.addr_table, UOp.const(dtypes.int, (slot:=ctx.next_slot))
-  ctx.next_slot = slot + 1
-
-  patch = table.index(slot_const, dtype=table.dtype.ptr()).store(_maybe_mstack(tuple(UOp.const(dtypes.uint64, va) for va in addrs)))
+  table = _maybe_mstack(tuple(UOp.from_buffer(Buffer("CPU", 1, dtypes.uint64, preallocate=True), "CPU") for _ in range(len(srcs))))
+  vas = _maybe_mstack(tuple(UOp.const(dtypes.uint64, va) for va in addrs))
+  patch = table.index(slot_const:=UOp.const(dtypes.int, 0), dtype=table.dtype.ptr()).store(vas)
   return table.after(patch).index(slot_const, dtype=table.dtype.ptr()).load(dtype=dtypes.uint64)
 
 pm_resolve_patches = symbolic + PatternMatcher([
