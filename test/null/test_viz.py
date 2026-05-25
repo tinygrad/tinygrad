@@ -1008,5 +1008,22 @@ class TestCLI(unittest.TestCase):
     for i,n in enumerate(call_nodes):
       assert prgs[i] in n["label"], f"CALL must contain kernel name, got {n['label']}"
 
+  def test_interval(self):
+    def emit_kernel(name:str): Tensor.custom_kernel(Tensor.empty(1, device="NULL"), fxn=lambda _: UOp.sink(arg=KernelInfo(name=name)))[0].realize()
+    with save_viz() as viz:
+      emit_kernel("pre_1")
+      emit_kernel("pre_2")
+      profile_marker("interval_start")
+      emit_kernel("target_1")
+      emit_kernel("target_2")
+      profile_marker("interval_end")
+      emit_kernel("post_1")
+      emit_kernel("post_2")
+    with write_files(viz) as files, Context(NO_COLOR=1):
+      flat = run_cli(*files, "-s", "NULL", "--interval", "interval_start", "interval_end")
+      aggregate = run_cli(*files, "-s", "NULL", "--interval", "interval_start", "interval_end", "-t")
+    self.assertEqual([s["name"] for s in flat], ["interval_start", "target_1", "target_2", "interval_end"])
+    self.assertEqual(sorted(s["name"] for s in aggregate), ["target_1", "target_2"])
+
 if __name__ == "__main__":
   unittest.main()
