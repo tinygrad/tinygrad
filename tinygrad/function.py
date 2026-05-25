@@ -17,7 +17,9 @@ pm_transform_unique_const = PatternMatcher([
 ])
 
 pm_ctx = PatternMatcher([
-  (UPat((Ops.BUFFER, Ops.BIND), name="x"), add_to_ctx),
+  (UPat(Ops.BUFFER, src=(UPat(Ops.UNIQUE), UPat(Ops.DEVICE)), name="x"),
+   lambda ctx,x: x.replace(src=(UOp(Ops.LUNIQUE, arg=next(ctx[1])), x.src[1])) if x.src[0].arg > ctx[2] else add_to_ctx(ctx,x)),
+  (UPat(Ops.BIND, name="x"), add_to_ctx),
   (UPat((Ops.AFTER, Ops.CONTIGUOUS), name="x"),
    lambda ctx,x: add_to_ctx(ctx,x) if not x.op_in_backward_slice_with_self(Ops.PARAM) and x.op_in_backward_slice_with_self(Ops.BUFFER) else None),
 ])+pm_transform_unique_const
@@ -46,6 +48,7 @@ class _function(Generic[ReturnType]):
     # run it and do surgery later
     with Context(ALLOW_DEVICE_USAGE=getenv("DEVICE_IN_FUNCTION_BUG", 0)):
       _function.depth += 1
+      unique_start = next(UOp.unique_num)
       ret = self.fxn(*args, **kwargs)
       _function.depth -= 1
     if isinstance(ret, Tensor):
@@ -65,7 +68,7 @@ class _function(Generic[ReturnType]):
 
     # the BUFFERs that are left are the implicit inputs
     num_explicit = len(call_uops)
-    uret = graph_rewrite(uret, pm_ctx, (call_uops, itertools.count(0)), bottom_up=True, name="get_implicit_inputs")
+    uret = graph_rewrite(uret, pm_ctx, (call_uops, itertools.count(0), unique_start), bottom_up=True, name="get_implicit_inputs")
     name = getattr(self.fxn, '__qualname__', None) or type(self.fxn).__qualname__
     if not self.allow_implicit:
       implicit_buffers = [x for x in call_uops[num_explicit:] if x.op is Ops.BUFFER]

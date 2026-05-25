@@ -7,7 +7,7 @@ from tinygrad.mixin.reduce import ReduceMixin
 from tinygrad.uop import Ops
 from tinygrad.uop.ops import _broadcast_shape, resolve, smax, smin, identity_element
 from tinygrad.device import canonicalize_device
-from tinygrad.dtype import ConstType, DType, DTypeLike, Invalid, InvalidType, PtrDType, PyConst, dtypes, least_upper_dtype, sum_acc_dtype, to_dtype
+from tinygrad.dtype import ConstType, DType, DTypeLike, InvalidType, PtrDType, PyConst, dtypes, least_upper_dtype, sum_acc_dtype, to_dtype
 from tinygrad.helpers import all_int, argfix, ceildiv, flatten, flat_to_grouped, make_tuple, prod, resolve_pool_pads, round_up
 
 if TYPE_CHECKING:
@@ -19,6 +19,8 @@ ReductionStr = Literal["mean", "sum", "none"]
 class OpMixin(ElementwiseMixin, ReduceMixin):
   @staticmethod
   def unique_const(fill_value:ConstType, **kwargs): raise NotImplementedError("creation helpers are only supported on Tensor and UOp")
+  @staticmethod
+  def empty(*shape, **kwargs): raise NotImplementedError("creation helpers are only supported on Tensor and UOp")
   @staticmethod
   def const(dtype, b, device=None): raise NotImplementedError("creation helpers are only supported on Tensor and UOp")
 
@@ -46,13 +48,11 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
   @classmethod
   def invalids(cls, *shape, **kwargs) -> Self:
     """
-    Creates a tensor with the given shape, filled with Invalid.
+    Creates an anonymous uninitialized buffer with the given shape.
 
-    This is an alternative to Tensor.empty when you want an "anonymous" buffer.
-
-    Eventually Tensor.empty will be replaced by this.
+    You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
     """
-    return cls.full(argfix(*shape), Invalid, **kwargs)
+    return cls.empty(argfix(*shape), **kwargs)
 
   @classmethod
   def zeros(cls, *shape, **kwargs) -> Self:
