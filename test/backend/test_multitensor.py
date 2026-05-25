@@ -239,7 +239,28 @@ class TestMultiTensor(unittest.TestCase):
       kernel_counts[ring] = GlobalCounters.kernel_count
       self.assertEqual(t.device, Device.DEFAULT)
       np.testing.assert_equal(t.numpy(), np.arange(32))
-    self.assertNotEqual(kernel_counts[0], kernel_counts[2])
+    self.assertEqual(kernel_counts[0], kernel_counts[2])
+
+  def test_to_single_device_gather_memory(self):
+    nrows, ncols = 64, 1024
+    nbytes = nrows*ncols*4
+    for devs in (devices_2, devices_4):
+      ndev = len(devs)
+      for axis in (0, 1):
+        sh = Tensor.arange(nrows*ncols).reshape(nrows, ncols).clone().shard(devs, axis).realize()
+        kernels, mem = {}, {}
+        for ring in (0, 2):
+          GlobalCounters.reset()
+          with Context(RING=ring, SCACHE=0):
+            t = sh.to(Device.DEFAULT)
+            t.realize()
+          kernels[ring], mem[ring] = GlobalCounters.kernel_count, GlobalCounters.global_mem
+          self.assertEqual(t.device, Device.DEFAULT)
+          np.testing.assert_equal(t.numpy(), np.arange(nrows*ncols).reshape(nrows, ncols))
+        self.assertEqual(kernels[0], kernels[2])
+        self.assertEqual(mem[0], mem[2])
+        self.assertLess(kernels[0], 2*ndev)
+        self.assertLessEqual(mem[0], 4*nbytes)
 
   def test_allreduce_all2all(self):
     with Context(ALL2ALL=2):
