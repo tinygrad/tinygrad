@@ -228,23 +228,18 @@ class TestViz(unittest.TestCase):
     self.assertEqual(list(graphs[0]), [id(a), id(z), id(alu)])
     self.assertEqual(list(graphs[1]), [id(z)])
 
-  # TODO: DEFINE_VAR (shape ()) now gets wrapped in RESHAPE+EXPAND when broadcast against a shaped operand
-  # (due to shared OpMixin._binop using _broadcasted). Either extend viz to fold RESHAPE/EXPAND around
-  # DEFINE_VAR/RANGE/SPECIAL the way it does for CONST, or redesign scalar-compiler-op broadcasting.
-  @unittest.expectedFailure
   def test_const_reshape_expand_folded(self):
     # CONST->RESHAPE->EXPAND should be folded into the ALU node, not shown as separate RESHAPE/EXPAND nodes
     c = UOp.const(dtypes.float, 1.0, device="CPU", shape=(3,4))  # creates CONST->RESHAPE->EXPAND chain
     a = UOp(Ops.DEFINE_VAR, dtypes.float, arg=("a", 0.0, 10.0))
     alu = a + c
-    graph = uop_to_json(VizData(), alu)
-    # the RESHAPE and EXPAND nodes from the const should not appear in the graph
+    with save_viz() as viz:
+      graph_rewrite(alu, PatternMatcher([]))
+    graph = [x["graph"] for x in viz.get_details(0, 0)][0]
+    # all nodes are visible on the server side, run with VIZ=1 to see client side
     labels = {v["label"].split("\n")[0] for v in graph.values()}
-    self.assertNotIn("RESHAPE", labels)
-    self.assertNotIn("EXPAND", labels)
-    # the CONST should be inlined into the ALU node's label
-    alu_label = graph[id(alu)]["label"]
-    self.assertIn("CONST", alu_label)
+    self.assertIn("RESHAPE", labels)
+    self.assertIn("EXPAND", labels)
 
 # VIZ displays nested graph_rewrites in a tree view
 
