@@ -81,9 +81,9 @@ class TestSetitemInto(unittest.TestCase):
     self.assertEqual(GlobalCounters.kernel_count, 1)
     self.assertListEqual(t.tolist(), [2, 5, 4, 5])
 
-  def test_setitem_into_cont(self):
+  def test_setitem_into_const(self):
     GlobalCounters.reset()
-    t = Tensor.ones(4, dtype=dtypes.int32)
+    t = Tensor.ones(4, dtype=dtypes.int32, buffer=False)
     t[1] = 5
     self.assertEqual(GlobalCounters.kernel_count, 0)
     t.realize()
@@ -96,7 +96,7 @@ class TestSetitemInto(unittest.TestCase):
 
   def test_setitem_into_const_alu(self):
     GlobalCounters.reset()
-    t = Tensor.ones(4, dtype=dtypes.int32) + 1
+    t = Tensor.ones(4, dtype=dtypes.int32, buffer=False) + 1
     t[1] = 5
     self.assertEqual(GlobalCounters.kernel_count, 0)
     t.realize()
@@ -110,7 +110,9 @@ class TestSetitemInto(unittest.TestCase):
   def test_setitem_into_arange(self):
     # NOTE: arange has no real buffer, but assigning to it is fine
     GlobalCounters.reset()
+    other = Tensor.arange(4, dtype=dtypes.int32)
     t = Tensor.arange(4, dtype=dtypes.int32)
+    self.assertIs(other.uop, t.uop)
     t[1] = 5
     self.assertEqual(GlobalCounters.kernel_count, 0)
     t.realize()

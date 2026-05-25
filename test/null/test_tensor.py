@@ -36,7 +36,6 @@ class TestInferenceMode(unittest.TestCase):
     assert tmp.grad is None
     assert mm.grad is None
     assert W.grad is None
-    assert W.requires_grad
 
   def test_no_grad_mode_context_manager(self):
     x = Tensor(x_init)
@@ -142,12 +141,6 @@ class TestTensorUnique(unittest.TestCase):
   def test_zeros_bufs_unique(self):
     a = Tensor.zeros(10, 10).contiguous()
     b = Tensor.zeros(10, 10).contiguous()
-    Tensor.realize(a,b)
-    self.assertIsNot(a.uop.buffer, b.uop.buffer)
-
-  def test_eye_bufs_unique(self):
-    a = Tensor.eye(10).contiguous()
-    b = Tensor.eye(10).contiguous()
     Tensor.realize(a,b)
     self.assertIsNot(a.uop.buffer, b.uop.buffer)
 

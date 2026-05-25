@@ -35,8 +35,8 @@ class BatchNorm:
     self.weight: Tensor|None = Tensor.ones(sz) if affine else None
     self.bias: Tensor|None = Tensor.zeros(sz) if affine else None
 
-    self.num_batches_tracked = Tensor.zeros(dtype='long', requires_grad=False)
-    if track_running_stats: self.running_mean, self.running_var = Tensor.zeros(sz, requires_grad=False), Tensor.ones(sz, requires_grad=False)
+    self.num_batches_tracked = Tensor.zeros(dtype='long').is_param_(False)
+    if track_running_stats: self.running_mean, self.running_var = Tensor.zeros(sz).is_param_(False), Tensor.ones(sz).is_param_(False)
 
   def calc_stats(self, x:Tensor) -> tuple[Tensor, Tensor]:
     shape_mask: list[int] = [1, -1, *([1]*(x.ndim-2))]
@@ -411,7 +411,7 @@ class LSTMCell:
     self.bias_hh: Tensor|None = Tensor.zeros(hidden_size*4) if bias else None
 
   def __call__(self, x:Tensor, hc:tuple[Tensor, Tensor]|None=None) -> tuple[Tensor, Tensor]:
-    if hc is None: hc = (Tensor.zeros(x.size(0), self.weight_hh.size(1), dtype=x.dtype, device=x.device),)*2
+    if hc is None: hc = (Tensor.zeros(x.size(0), self.weight_hh.size(1), dtype=x.dtype, device=x.device, buffer=False),)*2
     gates = x.linear(self.weight_ih.T, self.bias_ih) + hc[0].linear(self.weight_hh.T, self.bias_hh)
     i, f, g, o = gates.chunk(4, dim=1)
     i, f, g, o = i.sigmoid(), f.sigmoid(), g.tanh(), o.sigmoid()

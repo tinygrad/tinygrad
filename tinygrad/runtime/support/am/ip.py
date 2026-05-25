@@ -304,7 +304,7 @@ class AM_GFX(AM_IP):
   def reset_mec(self):
     self._dequeue_hqds()
 
-    if self.adev.ip_ver[am.GC_HWIP] < (10,0,0): # gfx10+ uses mec_pipe0_reset
+    if self.adev.ip_ver[am.GC_HWIP] < (12,0,0): # gfx12+ uses mec_pipe0_reset
       for xcc in range(self.xccs): self.adev.regGRBM_SOFT_RESET.write(soft_reset_cp=1, soft_reset_cpc=1, inst=xcc)
       time.sleep(0.05)
       for xcc in range(self.xccs): self.adev.regGRBM_SOFT_RESET.write(0x0, inst=xcc)

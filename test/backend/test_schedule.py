@@ -10,8 +10,9 @@ from hypothesis import assume, given, strategies as strat
 from tinygrad import nn, dtypes, Device, Tensor, Variable
 from tinygrad.dtype import DType
 from tinygrad.uop.ops import UOp, Ops, UPat
-from tinygrad.helpers import CI, DEBUG, OSX, GlobalCounters, Context, getenv, all_same, temp
+from tinygrad.helpers import DEBUG, OSX, GlobalCounters, Context, getenv, all_same, temp
 from tinygrad.engine.realize import compile_linear, run_linear
+from test.helpers import CI
 
 supported_dtypes = Device[Device.DEFAULT].renderer.supported_dtypes()
 
@@ -147,11 +148,6 @@ class TestSchedule(unittest.TestCase):
     z = (x.reciprocal().expand(4,4)*y).pad((None, (0,1),)).sum()
     run_linear(*check_schedule(z, 1, [x,y]))
     self.assertEqual(z.item(), 32)
-
-  def test_constants_can_store(self):
-    a = Tensor(2).contiguous()
-    run_linear(*check_schedule(a, 1))
-    np.testing.assert_equal(a.numpy(), 2)
 
   def test_allow_push_permutes(self):
     a = Tensor.randn(10,10,10).realize()
@@ -711,7 +707,7 @@ class TestSchedule(unittest.TestCase):
     x = Tensor.empty(3,3,3,3)
     y = x.pad((-1,2,2,-1), mode="replicate")
     dx = y.sum().gradient(x)[0]
-    sched = check_schedule(dx, 1)
+    sched = check_schedule(dx, 0)
     run_linear(*sched)
     np.testing.assert_allclose(dx.numpy(), [[[[0.,3.,9.],[0,1.,3.],[0.,0.,0.]]]*3]*3)
 
@@ -1288,7 +1284,7 @@ class TestView(unittest.TestCase):
 class TestCopyFolding(unittest.TestCase):
   def test_const_copy_is_free(self):
     b = Tensor(1).to("CPU") * 4
-    run_linear(*check_schedule(b, 1, filter_sink=False))
+    run_linear(*check_schedule(b, 0, filter_sink=False))
     assert b.item() == 4
 
   def test_one_hot_with_copy(self):

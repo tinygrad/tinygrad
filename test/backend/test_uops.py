@@ -2,7 +2,7 @@ from typing import Optional, Any
 import unittest, math
 import numpy as np
 from tinygrad.tensor import Tensor, _to_np_dtype
-from tinygrad.helpers import CI, Context
+from tinygrad.helpers import Context
 from tinygrad.dtype import dtypes, DType, AddrSpace, ConstFloat  # noqa: F401
 from tinygrad.device import Buffer, Device
 from tinygrad.uop.ops import Ops, UOp, KernelInfo, AxisType, buffers
@@ -11,7 +11,7 @@ from tinygrad.engine.realize import run_linear
 from tinygrad.codegen import to_program
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.renderer.ptx import PTXRenderer
-from test.helpers import to_uops_list
+from test.helpers import to_uops_list, CI
 
 def run_uops(uops_list:list[UOp], bufs:list[Buffer]):
   buf_uops = [UOp.new_buffer(b.device, b.size, b.dtype) for b in bufs]

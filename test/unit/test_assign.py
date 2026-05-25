@@ -3,7 +3,8 @@ import unittest
 import numpy as np
 from tinygrad import dtypes, Tensor, TinyJit, GlobalCounters, Variable
 from tinygrad.uop.ops import Ops, UOp
-from tinygrad.helpers import temp, CI, DEV, Context
+from tinygrad.helpers import temp, DEV, Context
+from test.helpers import CI
 
 N = 200  # has to be bigger than the cache to fail
 
@@ -139,7 +140,7 @@ class TestAssign(unittest.TestCase):
   def test_assign_changes_realized_alt(self): return self.test_assign_changes_alt(realize=True)
 
   def test_assign_changes_buffer_alt(self):
-    a, b = [Tensor(Tensor(0).contiguous().realize().uop.buf_uop) for _ in range(2)]
+    a, b = [Tensor(Tensor([0]).realize().uop.buf_uop) for _ in range(2)]
     Tensor.realize(a.contiguous().assign(1), b.contiguous().assign(2))
     self.assertEqual((a + b).item(), 3)
 
@@ -576,7 +577,7 @@ class TestAssign(unittest.TestCase):
     """Chained pending assigns must not produce excessive kernels (tests recursive transitive processing)."""
     D, N = 4, 5
     caches = [Tensor.zeros(8, D).contiguous().realize() for _ in range(N)]
-    caches[0][0:1].assign(Tensor.ones(1, D) * 10)
+    caches[0][0:1].assign(Tensor.ones(1, D, buffer=False) * 10)
     x = caches[0][:1].sum(0, keepdim=True)
     for i in range(1, N):
       caches[i][0:1].assign(x)
@@ -606,8 +607,8 @@ class TestAssign(unittest.TestCase):
 
   def test_double_assign_from_const(self):
     a = Tensor.empty(2)
-    a.assign(Tensor.ones(2))
-    a.assign(Tensor.ones(2))
+    a.assign(Tensor.ones(2, buffer=False))
+    a.assign(Tensor.ones(2, buffer=False))
     GlobalCounters.reset()
     a.realize()
     self.assertEqual(GlobalCounters.kernel_count, 1)

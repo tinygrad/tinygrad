@@ -133,7 +133,7 @@ For our loss function we will be using sparse categorical cross entropy loss. Th
 ```python
 def sparse_categorical_crossentropy(self, Y, ignore_index=-1) -> Tensor:
     loss_mask = Y != ignore_index
-    y_counter = Tensor.arange(self.shape[-1], dtype=dtypes.int32, requires_grad=False, device=self.device).unsqueeze(0).expand(Y.numel(), self.shape[-1])
+    y_counter = Tensor.arange(self.shape[-1], dtype=dtypes.int32, device=self.device).unsqueeze(0).expand(Y.numel(), self.shape[-1])
     y = ((y_counter == Y.flatten().reshape(-1, 1)).where(-1.0, 0) * loss_mask.reshape(-1, 1)).reshape(*Y.shape, self.shape[-1])
     return self.log_softmax().mul(y).sum() / loss_mask.sum()
 ```
@@ -175,7 +175,7 @@ with Tensor.train():
   for step in range(1000):
     # random sample a batch
     samp = np.random.randint(0, X_train.shape[0], size=(64))
-    batch = Tensor(X_train[samp], requires_grad=False)
+    batch = Tensor(X_train[samp])
     # get the corresponding labels
     labels = Tensor(Y_train[samp])
 
@@ -213,7 +213,7 @@ with Timing("Time: "):
   for step in range(1000):
     # random sample a batch
     samp = np.random.randint(0, X_test.shape[0], size=(64))
-    batch = Tensor(X_test[samp], requires_grad=False)
+    batch = Tensor(X_test[samp])
     # get the corresponding labels
     labels = Y_test[samp]
 
@@ -257,7 +257,7 @@ with Timing("Time: "):
   for step in range(1000):
     # random sample a batch
     samp = np.random.randint(0, X_test.shape[0], size=(64))
-    batch = Tensor(X_test[samp], requires_grad=False)
+    batch = Tensor(X_test[samp])
     # get the corresponding labels
     labels = Y_test[samp]
 

@@ -41,7 +41,7 @@ if __name__ == "__main__":
   Tensor.realize(*params)
 
   # split params (with grads) and buffers (without)
-  params, buffers = partition(params, lambda x: x.requires_grad)
+  params, buffers = partition(params, lambda x: x.is_param)
   print(f"params: {len(params)} buffers: {len(buffers)}")
 
   # optim params
