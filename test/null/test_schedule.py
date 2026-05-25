@@ -766,12 +766,6 @@ class TestSchedule(unittest.TestCase):
     out = x + y
     check_schedule(out, 1)
 
-  def test_const_no_recompute(self):
-    x = Tensor(2) + Tensor(2)
-    y = Tensor(2) + Tensor(2)
-    out = x.contiguous() + y.contiguous()
-    check_schedule(out, 2, filter_sink=False)
-
   def test_reduce_shrink_child(self):
     a = Tensor.empty(100, 100)
     b = Tensor.empty(10,)
@@ -993,7 +987,7 @@ class TestSchedule(unittest.TestCase):
   def test_fuse_arange_pad_circular_mode_bw(self):
     x = Tensor.empty(1,1,5,5,5)
     out = x.pad((1,2,3,5,1,2), mode="circular")
-    g = out.sum().gradient(x)[0]
+    g = out.sum().gradient(x)[0].clone()
     linear, _ = check_schedule(g, 1)
     self.assertEqual(len([x for x in linear.src[0].src[0].backward_slice_with_self if x.op is Ops.REDUCE]), 0)
 

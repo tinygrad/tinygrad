@@ -175,7 +175,7 @@ def exec_kernel(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
     rt = get_runtime(device:=bufs[0].device, ast, cache=ctx.cache)
     global_size, local_size = ast.arg.launch_dims(var_vals)
     with track_stats(ctx, call, device, prg_bufs, var_vals) as tm:
-      et = tm[0] = rt(*[b._buf for b in prg_bufs], global_size=global_size, local_size=local_size, vals=ast.arg.vals(var_vals),
+      et = tm[0] = rt(*[b.get_buf(device) for b in prg_bufs], global_size=global_size, local_size=local_size, vals=ast.arg.vals(var_vals),
                        wait=ctx.wait, timeout=ctx.timeout)
   return et
 

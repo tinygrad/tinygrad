@@ -25,7 +25,10 @@ class GradAccClipAdamW(Optimizer):
     self.m = self._new_optim_param()
     self.v = self._new_optim_param()
     self.grad_acc, self.clip_norm = grad_acc, clip_norm
-    self.master_params:list[Tensor]|None = [p.float().contiguous() for p in self.params] if MASTER_WEIGHTS and self.params[0].dtype != dtypes.float32 else None
+    if MASTER_WEIGHTS and self.params[0].dtype != dtypes.float32:
+      self.master_params:list[Tensor]|None = [p.to(self.device).float().contiguous() for p in self.params]
+    else:
+      self.master_params = None
 
   def fstep(self, grads:list[Tensor]):
     if self.fused:
@@ -78,13 +81,19 @@ class GradAccClipAdamW(Optimizer):
     up = up.float().shard_like(w) + self.lr.to(w.device) * wd * w.detach()
     new_w = w.detach() - up
     if master is not None: master.assign(new_w)
-    if STOCHASTIC_ROUND and t.dtype == dtypes.bfloat16: return stochastic_round_bf16(new_w)
+    # when master is offloaded to a different device than the param, results are resharded back onto the param's (sharded) device
+    offloaded = master is not None and master.device != t.device
+    if STOCHASTIC_ROUND and t.dtype == dtypes.bfloat16:
+      out = stochastic_round_bf16(new_w)
+      return out.shard_like(t) if offloaded else out
     if t.dtype in dtypes.fp8s:
       from examples.mlperf.models.flat_llama import FP8_MAX
       amax = new_w.float().abs().max(axis=tuple(range(1, new_w.ndim))).detach()  # per-layer amax for (n_layers, out, in)
       scale = FP8_MAX / (amax + 1e-8)
       fp8_w = (new_w * scale.reshape(-1, *([1]*(new_w.ndim-1)))).clamp(-FP8_MAX, FP8_MAX).cast(t.dtype)
       if hasattr(t, '_inv_scale'):
-        t._inv_scale.assign(((amax + 1e-8) / FP8_MAX).cast(t._inv_scale.dtype))
-      return fp8_w
-    return new_w.cast(t.dtype)
+        inv = ((amax + 1e-8) / FP8_MAX).cast(t._inv_scale.dtype)
+        t._inv_scale.assign(inv.shard_like(t._inv_scale) if offloaded else inv)
+      return fp8_w.shard_like(t) if offloaded else fp8_w
+    out = new_w.cast(t.dtype)
+    return out.shard_like(t) if offloaded else out
