@@ -1807,7 +1807,6 @@ def train_flux():
   GPUS = config["GPUS"] = [f"{Device.DEFAULT}:{i}" for i in range(getenv("GPUS", 6))]
   SEED = config["SEED"] = getenv("SEED")
   NUM_STEPS = config["NUM_STEPS"] = getenv("NUM_STEPS", 30000)
-  SEQ_LEN = config["seq_len"] = getenv("SEQ_LEN", 256)
   BS = config["BS"] = getenv("BS", 16)
   BASEDIR = getenv("BASEDIR", "/raid/datasets/flux/")
   EMPTYENCDIR = getenv("EMPTYENCDIR", "/raid/datasets/flux/empty_encodings")
@@ -1816,10 +1815,7 @@ def train_flux():
   target_eval_loss = 0.586
   gbs = BS
   eval_freq_step = math.ceil(262144 / gbs)
-  lr = 1e-4
-  lr_eps = 1e-8
-  lr_warmup_steps = 0
-  lr_decay_ratio = 0.0
+  lr, lr_eps = 1e-4, 1e-8
 
   for x in GPUS: Device[x]
 
