@@ -29,7 +29,19 @@ class TestRDNA3Isel(unittest.TestCase):
     print(n)
     self.assertEqual(n.src[0].arg, ("a", 0, 0))
     self.assertEqual(n.src[1].arg, ("b", 0, 0))
-    self.assertEqual(n.arg, v_add_f32_e32())
+    self.assertEqual(n.arg, v_add_f32_e32)
+    self.assertEqual(n.op, Ops.INS)
+    self.assertEqual(n.src[0].op, Ops.DEFINE_VAR)
+
+  def test_mul_f32(self):
+    from tinygrad.runtime.autogen.amd.rdna3.ins import v_mul_f32_e32
+    a = UOp.variable("a", 0, 0, dtypes.float)
+    b = UOp.variable("b", 0, 0, dtypes.float)
+    c = a * b
+    n = self.isel(c)
+    self.assertEqual(n.src[0].arg, ("a", 0, 0))
+    self.assertEqual(n.src[1].arg, ("b", 0, 0))
+    self.assertEqual(n.arg, v_mul_f32_e32)
     self.assertEqual(n.op, Ops.INS)
     self.assertEqual(n.src[0].op, Ops.DEFINE_VAR)
 
@@ -39,7 +51,33 @@ class TestRDNA3Isel(unittest.TestCase):
     n = self.isel(a)
     print(n.src[0])
     print(n.src[0].arg)
-    self.assertEqual(n.src[0].arg, s_endpgm())
+    self.assertEqual(n.src[0].arg, s_endpgm)
+
+  def test_global_store_b32(self):
+    from tinygrad.runtime.autogen.amd.rdna3.ins import global_store_b32
+    base = UOp(Ops.PARAM, dtypes.float.ptr(256), (), 0)
+    offset = UOp.variable("offset", 0, 255, dtypes.int)
+    val = UOp.variable("val", 0, 0, dtypes.float)
+    store = base.index(offset, ptr=True).store(val)
+
+    n = self.isel(store)
+    print(n.src[0])
+    print(n.src[1])
+    print(n.src[2])
+
+    self.assertEqual(n.src[0].arg, ("offset", 0, 255))
+    self.assertEqual(n.src[0].dtype, dtypes.int)
+    self.assertEqual(n.src[1].arg, ("val", 0, 0))
+    self.assertEqual(n.src[1].dtype, dtypes.float)
+    self.assertEqual(n.src[2].arg, 0)
+    self.assertEqual(n.src[2].dtype, dtypes.float.ptr(256))
+
+
+    self.assertEqual(n.src[0].op, Ops.DEFINE_VAR)
+    self.assertEqual(n.src[1].op, Ops.DEFINE_VAR)
+    self.assertEqual(n.src[2].op, Ops.PARAM)
+
+
 
   def test_full_add_one_kernel(self):
     from tinygrad.codegen import full_rewrite_to_sink
