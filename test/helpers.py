@@ -8,7 +8,7 @@ from tinygrad.tensor import _to_np_dtype
 from tinygrad.codegen import to_program
 from tinygrad.dtype import DType
 from tinygrad.nn.state import get_parameters
-from tinygrad.helpers import T, Target
+from tinygrad.helpers import T, Target, DEV
 from tinygrad.renderer import Renderer
 from tinygrad.codegen import full_rewrite_to_sink, line_rewrite, pm_linearize_cleanups
 from tinygrad.codegen.late.linearizer import linearize
@@ -97,7 +97,7 @@ def to_uops_list(u:list[UOp], ren=None) -> list[UOp]:
 
 def not_support_multi_device():
   # CL and CUDA don't support multi device if in CI
-  return CI and Device.DEFAULT in ("CL", "CUDA")
+  return (Device.DEFAULT == "CL" and Device[Device.DEFAULT].count() < 2) or (Device.DEFAULT == "CUDA" and DEV.interface.startswith("MOCK"))
 
 def needs_second_gpu(fn):
   @functools.wraps(fn)
