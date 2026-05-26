@@ -9,6 +9,7 @@ def get_insts(t:Tensor) -> list[Inst]:
   prg_uop = to_program(t.schedule_linear().src[-1].src[0], Device[t.device].renderer)
   return list(amd_decode(prg_uop.src[4].arg, Device[t.device].renderer.target.arch).values())
 
+@unittest.skipUnless(Device.DEFAULT == "AMD", "requires AMD device")
 class TestIsel(unittest.TestCase):
   @Context(NOOPT=1)
   def test_v_max(self):
