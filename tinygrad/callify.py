@@ -60,8 +60,11 @@ def _make_buffer_view(src:UOp) -> UOp|None:
   """If movement ops on src collapse to a contiguous range, return BUFFER_VIEW.reshape(src.shape). Otherwise None."""
   if (offset := src.contiguous_view_offset()) is None: return None
   buf = src.base
-  offset *= src.dtype.itemsize
-  if buf.op is Ops.BUFFER_VIEW: offset, buf = offset + buf.src[1].arg, buf.src[0]
+  if buf.op is Ops.BUFFER_VIEW:
+    byte_offset = buf.src[1].arg * buf.src[0].dtype.itemsize + offset * src.dtype.itemsize
+    buf = buf.src[0]
+    if byte_offset % buf.dtype.itemsize != 0: return None
+    offset = byte_offset // buf.dtype.itemsize
   return UOp(Ops.BUFFER_VIEW, src.dtype, (buf, UOp.const(dtypes.weakint, offset)), src.numel()).reshape(src.shape)
 
 def contiguous_mops_to_view(c:UOp, src:UOp):

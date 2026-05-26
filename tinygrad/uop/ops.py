@@ -799,11 +799,11 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       offset = self.src[1].arg
       if isinstance(buf, MultiBuffer):
         mbuf = MultiBuffer.__new__(MultiBuffer)
-        mbuf.bufs = [b.view(self.arg, self.dtype, offset) for b in buf.bufs]
+        mbuf.bufs = [b.view(self.arg, self.dtype, offset * self.src[0].dtype.itemsize) for b in buf.bufs]
         buffers[self] = mbuf
         return mbuf
       assert isinstance(buf, Buffer), "must be a Buffer for BUFFER_VIEW"
-      buffers[self] = bv = buf.view(self.arg, self.dtype, offset)
+      buffers[self] = bv = buf.view(self.arg, self.dtype, offset * self.src[0].dtype.itemsize)
       return bv
     if self.op is Ops.MSELECT:
       ret = self.src[0].buffer
