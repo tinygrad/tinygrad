@@ -81,22 +81,22 @@ const layoutUOp = (g, { graph, change }, opts) => {
   const disconnected = new Set();
   // node op comes from label
   const nodeOp = (n) => g.node(n)?.label.split("\n", 1)[0];
-  // TODO: can this check be better?
+  // TODO: can we detect movement op nodes in a better way?
   const movementOps = new Set(["RESHAPE", "EXPAND", "PERMUTE", "PAD", "SHRINK", "FLIP"]);
   for (const n of g.nodes()) {
     const op = nodeOp(n), src = g.predecessors(n) || [];
-    const excludeOp = ["DEVICE", "UNIQUE", "LUNIQUE"].includes(op) || (op === "STACK" && src.length === 0) ||
+    const collapsibleSrc = ["DEVICE", "UNIQUE", "LUNIQUE"].includes(op) || (op === "STACK" && src.length === 0) ||
       (op === "CONST" && !["UNIQUE", "LUNIQUE"].includes(nodeOp(src[0])));
     for (const consumerId of (g.successors(n) || [])) {
-      const edge = g.edge(n, consumerId), consumer = g.node(consumerId);
-      const collapsible = consumer.callNode || excludeOp || (op === "STACK" && movementOps.has(nodeOp(consumerId)));
+      const consumer = g.node(consumerId);
       // add +- toggle if this consumer has collapsible sources
+      const collapsible = consumer.callNode || collapsibleSrc || (op === "STACK" && movementOps.has(nodeOp(consumerId)));
       if (!collapsible) continue;
       consumer.collapsible = true;
       // make sources invisible if UI has toggled it off
-      const collapseCallSrc = consumer.callNode && (opts.showCallSrc ? opts.callSrcMask.has(consumerId) : !opts.callSrcMask.has(consumerId));
-      if (!collapseCallSrc && !(!consumer.callNode && collapsible && !opts.nodeSrcMask.has(consumerId))) continue;
-      consumer.collapsed = collapseCallSrc || !consumer.callNode;
+      const collapsed = consumer.callNode ? opts.showCallSrc === opts.callSrcMask.has(consumerId) : !opts.nodeSrcMask.has(consumerId);
+      if (!collapsed) continue;
+      consumer.collapsed = true;
       g.removeEdge(n, consumerId);
       disconnected.add(n);
     }
