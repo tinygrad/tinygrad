@@ -114,7 +114,7 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
   assert isinstance(x, UOp)
   graph: dict[int, dict] = {}
   for u in x.toposort():
-    argst = codecs.decode(str(u.arg), "unicode_escape")
+    argst = f"{u.arg:g}" if u.op is Ops.CONST and dtypes.is_float(u.dtype) else codecs.decode(str(u.arg), "unicode_escape")
     if u.op in GroupOp.Movement: argst = (mask_to_str if u.op in {Ops.SHRINK, Ops.PAD} else shape_to_str)(u.marg)
     if u.op is Ops.BINARY: argst = f"<{len(u.arg)} bytes>"
     wrap_len = 200 if u.op is Ops.SOURCE else 80

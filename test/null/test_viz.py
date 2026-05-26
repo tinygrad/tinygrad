@@ -1,4 +1,4 @@
-import unittest, decimal, sys, json, contextlib, tempfile, pickle, io
+import unittest, decimal, sys, json, contextlib, tempfile, pickle, io, math
 from pathlib import Path
 from dataclasses import dataclass
 from typing import Generator
@@ -219,14 +219,16 @@ class TestViz(unittest.TestCase):
     with save_viz() as viz:
       a = UOp.variable("a", 0, 10, dtype=dtypes.int)
       z = UOp.const(a.dtype, 0)
+      y = UOp.const(dtypes.float, math.pi)
       alu = a*z
-      exec_rewrite(alu, [sym])
+      ret = exec_rewrite(sink:=UOp.sink(alu, y), [sym])
     lst = viz.list_items()
     self.assertEqual(len(lst), 1)
     graphs = [x["graph"] for x in viz.get_details(0, 0)]
     # const is always in the graph, client side hides it by default
-    self.assertEqual(list(graphs[0]), [id(a), id(z), id(alu)])
-    self.assertEqual(list(graphs[1]), [id(z)])
+    self.assertEqual(list(graphs[0]), [id(a), id(z), id(alu), id(y), id(sink)])
+    self.assertEqual(graphs[0][id(y)]["label"].split("\n")[:2], ["CONST", "3.14159"])
+    self.assertEqual(list(graphs[1]), [id(z), id(y), id(ret)])
 
   def test_const_reshape_expand_folded(self):
     # CONST->RESHAPE->EXPAND should be folded into the ALU node, not shown as separate RESHAPE/EXPAND nodes
