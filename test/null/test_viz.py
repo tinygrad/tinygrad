@@ -1,4 +1,4 @@
-import unittest, decimal, sys, json, contextlib, tempfile, pickle, io
+import unittest, decimal, sys, json, contextlib, tempfile, pickle, io, math
 from pathlib import Path
 from dataclasses import dataclass
 from typing import Generator
@@ -219,32 +219,34 @@ class TestViz(unittest.TestCase):
     with save_viz() as viz:
       a = UOp.variable("a", 0, 10, dtype=dtypes.int)
       z = UOp.const(a.dtype, 0)
+      y = UOp.const(dtypes.float, math.pi)
       alu = a*z
-      exec_rewrite(alu, [sym])
+      ret = exec_rewrite(sink:=UOp.sink(alu, y), [sym])
     lst = viz.list_items()
     self.assertEqual(len(lst), 1)
     graphs = [x["graph"] for x in viz.get_details(0, 0)]
-    # embed const in the parent node when possible
-    self.assertEqual(list(graphs[0]), [id(a), id(alu)])
-    self.assertEqual(list(graphs[1]), [id(z)])
+    # const is always in the graph, client side hides exclude=True nodes by default
+    self.assertEqual(list(graphs[0]), [id(a), id(z), id(alu), id(y), id(sink)])
+    self.assertTrue(graphs[0][id(z)]["exclude"])
+    self.assertTrue(graphs[0][id(y)]["exclude"])
+    self.assertFalse(graphs[0][id(alu)]["exclude"])
+    self.assertEqual(graphs[0][id(y)]["label"].split("\n")[:2], ["CONST", "3.14159"])
+    self.assertEqual(list(graphs[1]), [id(z), id(y), id(ret)])
 
-  # TODO: DEFINE_VAR (shape ()) now gets wrapped in RESHAPE+EXPAND when broadcast against a shaped operand
-  # (due to shared OpMixin._binop using _broadcasted). Either extend viz to fold RESHAPE/EXPAND around
-  # DEFINE_VAR/RANGE/SPECIAL the way it does for CONST, or redesign scalar-compiler-op broadcasting.
-  @unittest.expectedFailure
   def test_const_reshape_expand_folded(self):
     # CONST->RESHAPE->EXPAND should be folded into the ALU node, not shown as separate RESHAPE/EXPAND nodes
     c = UOp.const(dtypes.float, 1.0, device="CPU", shape=(3,4))  # creates CONST->RESHAPE->EXPAND chain
     a = UOp(Ops.DEFINE_VAR, dtypes.float, arg=("a", 0.0, 10.0))
     alu = a + c
-    graph = uop_to_json(VizData(), alu)
-    # the RESHAPE and EXPAND nodes from the const should not appear in the graph
-    labels = {v["label"].split("\n")[0] for v in graph.values()}
-    self.assertNotIn("RESHAPE", labels)
-    self.assertNotIn("EXPAND", labels)
-    # the CONST should be inlined into the ALU node's label
-    alu_label = graph[id(alu)]["label"]
-    self.assertIn("CONST", alu_label)
+    with save_viz() as viz:
+      graph_rewrite(alu, PatternMatcher([]))
+    graph = [x["graph"] for x in viz.get_details(0, 0)][0]
+    excluded_nodes = {v["label"].split("\n")[0] for v in graph.values() if v["exclude"]}
+    self.assertIn("CONST", excluded_nodes)
+    self.assertIn("STACK", excluded_nodes)
+    self.assertIn("RESHAPE", excluded_nodes)
+    self.assertIn("EXPAND", excluded_nodes)
+    self.assertIn("CONST1 1 Ops.DEVICE", graph[id(alu)]["label"])
 
 # VIZ displays nested graph_rewrites in a tree view
 
@@ -406,9 +408,16 @@ class TestVizIntegration(unittest.TestCase):
       default_test(c+2)
     ls = viz.list_items()
     self.assertEqual(len(ls), 2)
-    self.assertEqual(list(next(viz.get_details(0, 0))["graph"]), [id(c+1)])
+    graph = next(viz.get_details(0, 0))["graph"]
+    self.assertEqual(list(graph), [id(c), id(c+1)])
+    self.assertTrue(graph[id(c)]["exclude"])
+    self.assertFalse(graph[id(c+1)]["exclude"])
     self.assertEqual(list(next(viz.get_details(1, 0))["graph"]), [id(c)])
-    self.assertEqual(list(next(viz.get_details(1, 1))["graph"]), [id(c+2)])
+    graph = next(viz.get_details(1, 1))["graph"]
+    self.assertEqual(list(graph), [id(c), id(c.const_like(2)), id(c+2)])
+    self.assertTrue(graph[id(c)]["exclude"])
+    self.assertTrue(graph[id(c.const_like(2))]["exclude"])
+    self.assertFalse(graph[id(c+2)]["exclude"])
 
   def test_recurse(self):
     with save_viz() as viz:
