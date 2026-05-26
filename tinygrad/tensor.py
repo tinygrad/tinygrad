@@ -161,11 +161,6 @@ class Tensor(OpMixin):
   @staticmethod
   def const(dtype:DType, b:ConstType|UOp, device:str|tuple[str, ...]|None=None) -> Tensor:
     return Tensor(b if isinstance(b, UOp) else UOp.const(dtype, b, device))
-  @staticmethod
-  def unique_const(fill_value:ConstType|UOp, **kwargs) -> Tensor:
-    if isinstance(fill_value, UOp): return Tensor(fill_value, **kwargs)
-    dtype, device = kwargs.pop("dtype", None), kwargs.pop("device", None)
-    return Tensor(UOp.unique_const(fill_value, dtype, device), **kwargs)
 
   def is_param_(self, is_param:bool=True) -> Tensor:
     self.is_param = is_param
@@ -598,9 +593,10 @@ class Tensor(OpMixin):
     print(Tensor.full_like(t, 42).numpy())
     ```
     """
-    if device is None: return super().full_like(fill_value, dtype)
-    if isinstance(self.device, tuple): raise RuntimeError("cannot specify `device` on `full_like` of a multi device tensor")
-    return Tensor.full(self.shape, fill_value, dtype=dtype or self.dtype, device=device)
+    if isinstance(self.device, tuple):
+      if device is not None: raise RuntimeError("cannot specify `device` on `full_like` of a multi device tensor")
+      return self._multi_like(Tensor.full, fill_value, dtype=dtype or self.dtype)
+    return Tensor.full(self.shape, fill_value, dtype=dtype or self.dtype, device=self.device if device is None else device)
 
   def rand_like(self, **kwargs) -> Tensor:
     """
