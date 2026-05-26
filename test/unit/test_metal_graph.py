@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import MagicMock
 from tinygrad import Device
-from tinygrad.uop.ops import Ops
+from tinygrad.uop.ops import Ops, UOp
 from tinygrad.dtype import dtypes
 
 @unittest.skipUnless(Device.DEFAULT == "METAL", "Metal device required to run")
@@ -15,7 +15,7 @@ class TestMetalGraph(unittest.TestCase):
     buf = MagicMock()
     if offset > 0:
       buf.op = Ops.BUFFER_VIEW
-      buf.arg = (None, offset)
+      buf.src = (None, UOp.const(dtypes.weakint, offset))
       buf.dtype = dtypes.uint8
     else:
       buf.op = Ops.BUFFER
