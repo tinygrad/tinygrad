@@ -13,13 +13,13 @@ class TestIsel(unittest.TestCase):
   @Context(NOOPT=1)
   def test_v_max(self):
     insts = get_insts(Tensor(np.arange(2, dtype=np.uint32)).max())
-    assert any("MAX" in (op:=getattr(i, "op_name", "")) for i in insts)
+    assert any("MAX" in getattr(i, "op_name", "") for i in insts)
 
   # there's no native u64 max
   @Context(NOOPT=1)
   def test_v_max_long(self):
     insts = get_insts(Tensor(np.arange(2, dtype=np.uint64)).max())
-    assert not any("MAX" in (op:=getattr(i, "op_name", "")) for i in insts)
+    assert not any("MAX" in getattr(i, "op_name", "") for i in insts)
 
 if __name__ == "__main__":
   unittest.main()
