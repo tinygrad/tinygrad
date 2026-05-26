@@ -855,7 +855,7 @@ class TestSchedule(unittest.TestCase):
     self.assertListEqual(realized_view.tolist(), [[0, 1]])
 
   def test_cast_const_view(self):
-    a = Tensor.ones((4, 4), dtype=dtypes.float32)
+    a = Tensor.ones((4, 4), dtype=dtypes.float32, buffer=False)
     casted_view = a.cast(dtypes.int32)
     run_linear(*check_schedule(casted_view, 1))
     realized_const_view = casted_view.contiguous()
@@ -935,7 +935,7 @@ class TestSchedule(unittest.TestCase):
     np.testing.assert_equal(a.numpy(), (np.arange(4)*x.numpy()).T.sum())
 
   def test_div_padded_arange(self):
-    x = Tensor.full((2,2), 16)
+    x = Tensor.full((2,2), 16, buffer=False)
     y = x.div(Tensor.linspace(2, 8, steps=4, dtype=dtypes.int).reshape(2,2), rounding_mode="trunc").pad(((1,1), (1,1)))
     out = y.sum(axis=1)
     run_linear(*check_schedule(out, 1))
@@ -1291,13 +1291,13 @@ class TestCopyFolding(unittest.TestCase):
     check_schedule(x, 3, filter_sink=False)
 
   def test_const_copy_multi(self):
-    x = Tensor.ones(1, device="CPU").to_(["CPU", "CPU:1"]) * 2
+    x = Tensor.ones(1, device="CPU", buffer=False).to_(["CPU", "CPU:1"]) * 2
     run_linear(*check_schedule(x, 2, filter_sink=False))
     self.assertEqual(x.item(), 2.0)
 
   def test_late_const_copy_folding(self):
     a = Tensor.arange(3).realize()
-    zeros = Tensor.zeros(3).realize()
+    zeros = Tensor.zeros(3, buffer=False).realize()
     b = (a*zeros).to("CPU") + 1
     run_linear(*check_schedule(b, 1, filter_sink=False))
     self.assertListEqual(b.tolist(), [1, 1, 1])
