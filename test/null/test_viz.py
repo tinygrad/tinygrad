@@ -225,8 +225,11 @@ class TestViz(unittest.TestCase):
     lst = viz.list_items()
     self.assertEqual(len(lst), 1)
     graphs = [x["graph"] for x in viz.get_details(0, 0)]
-    # const is always in the graph, client side hides it by default
+    # const is always in the graph, client side hides exclude=True nodes by default
     self.assertEqual(list(graphs[0]), [id(a), id(z), id(alu), id(y), id(sink)])
+    self.assertTrue(graphs[0][id(z)]["exclude"])
+    self.assertTrue(graphs[0][id(y)]["exclude"])
+    self.assertFalse(graphs[0][id(alu)]["exclude"])
     self.assertEqual(graphs[0][id(y)]["label"].split("\n")[:2], ["CONST", "3.14159"])
     self.assertEqual(list(graphs[1]), [id(z), id(y), id(ret)])
 
@@ -238,10 +241,12 @@ class TestViz(unittest.TestCase):
     with save_viz() as viz:
       graph_rewrite(alu, PatternMatcher([]))
     graph = [x["graph"] for x in viz.get_details(0, 0)][0]
-    # all nodes are visible on the server side, run with VIZ=1 to see client side
-    labels = {v["label"].split("\n")[0] for v in graph.values()}
-    self.assertIn("RESHAPE", labels)
-    self.assertIn("EXPAND", labels)
+    # all nodes are visible on the server side, client side hides exclude=True nodes by default
+    excluded_nodes = {v["label"].split("\n")[0] for v in graph.values() if v["exclude"]}
+    self.assertIn("CONST", excluded_nodes)
+    self.assertIn("STACK", excluded_nodes)
+    self.assertIn("RESHAPE", excluded_nodes)
+    self.assertIn("EXPAND", excluded_nodes)
 
 # VIZ displays nested graph_rewrites in a tree view
 
@@ -403,9 +408,16 @@ class TestVizIntegration(unittest.TestCase):
       default_test(c+2)
     ls = viz.list_items()
     self.assertEqual(len(ls), 2)
-    self.assertEqual(list(next(viz.get_details(0, 0))["graph"]), [id(c), id(c+1)])
+    graph = next(viz.get_details(0, 0))["graph"]
+    self.assertEqual(list(graph), [id(c), id(c+1)])
+    self.assertTrue(graph[id(c)]["exclude"])
+    self.assertFalse(graph[id(c+1)]["exclude"])
     self.assertEqual(list(next(viz.get_details(1, 0))["graph"]), [id(c)])
-    self.assertEqual(list(next(viz.get_details(1, 1))["graph"]), [id(c), id(c.const_like(2)), id(c+2)])
+    graph = next(viz.get_details(1, 1))["graph"]
+    self.assertEqual(list(graph), [id(c), id(c.const_like(2)), id(c+2)])
+    self.assertTrue(graph[id(c)]["exclude"])
+    self.assertTrue(graph[id(c.const_like(2))]["exclude"])
+    self.assertFalse(graph[id(c+2)]["exclude"])
 
   def test_recurse(self):
     with save_viz() as viz:

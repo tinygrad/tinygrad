@@ -119,6 +119,8 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
     if u.op in {Ops.DEVICE, Ops.CONST, Ops.UNIQUE, Ops.LUNIQUE} and u is not x: excluded.add(u)
     if u.op is Ops.CONST and len(u.src) and u.src[0].op in {Ops.UNIQUE, Ops.LUNIQUE}: excluded.remove(u)
     if u.op is Ops.STACK and len(u.src) == 0: excluded.add(u)
+    # exclude RESHAPE/EXPAND that only serve to broadcast a CONST
+    if u.op in {Ops.RESHAPE, Ops.EXPAND} and len(u.src) >= 1 and u.src[0] in excluded and u is not x: excluded.add(u)
     if u.op in GroupOp.Movement: excluded.update(s for s in u.src if s.op is Ops.STACK)
   for u in toposort:
     argst = codecs.decode(str(u.arg), "unicode_escape")
