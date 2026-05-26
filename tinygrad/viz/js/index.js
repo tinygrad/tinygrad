@@ -77,7 +77,7 @@ const drawGraph = (data) => {
         if (d.callNode) {
           if (state.callSrcMask.has(d.id)) state.callSrcMask.delete(d.id); else state.callSrcMask.add(d.id);
           if (state.callSrcMask.size >= callCount) { showCallSrc.toggle.checked = !showCallSrc.toggle.checked; state.callSrcMask.clear(); }
-        } else if (state.nodeSrcMask.has(d.id)) state.nodeSrcMask.delete(d.id); else state.nodeSrcMask.add(d.id);
+        } else if (state.expandedNodes.has(d.id)) state.expandedNodes.delete(d.id); else state.expandedNodes.add(d.id);
         return setState({});
       }
       const parents = g.predecessors(d.id);
@@ -870,7 +870,7 @@ const evtSources = [];
 // rewrite: a single UOp transformation
 // step: collection of rewrites
 // context: collection of steps
-const state = {currentCtx:-1, currentStep:0, currentRewrite:0, expandSteps:false, callSrcMask:new Set(), nodeSrcMask:new Set()};
+const state = {currentCtx:-1, currentStep:0, currentRewrite:0, expandSteps:false, callSrcMask:new Set(), expandedNodes:new Set()};
 function setState(ns) {
   saveToHistory(state);
   const { ctx:prevCtx, step:prevStep } = select(state.currentCtx, state.currentStep);
@@ -1067,7 +1067,7 @@ async function main() {
   const data = ret[currentRewrite];
   const render = (layoutOpts, renderOpts) => renderDag({ data, opts:layoutOpts }, renderOpts);
   const getOpts = () => ({ showIndexing:showIndexing.toggle.checked, showCallSrc:showCallSrc.toggle.checked, showSink:showSink.toggle.checked,
-    callSrcMask:state.callSrcMask, nodeSrcMask:state.nodeSrcMask });
+    callSrcMask:state.callSrcMask, expandedNodes:state.expandedNodes });
   render(getOpts(), { recenter:currentRewrite === 0 });
   showIndexing.toggle.onchange = () => render(getOpts(), { recenter:true });
   showCallSrc.toggle.onchange = () => { state.callSrcMask.clear(); render(getOpts(), { recenter:true }); }
