@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Final, ClassVar, Callable, Literal
+from typing import Final, ClassVar, Callable, Literal, Any
 import math, struct, ctypes, functools
 from dataclasses import dataclass, fields
 from tinygrad.helpers import ceildiv, getenv, prod, round_up, OSX
@@ -360,7 +360,7 @@ def _to_np_dtype(dtype:DType) -> type|None:
   import numpy as np
   if dtype in { dtypes.bfloat16, *dtypes.fp8s }: return np.float32
   return np.dtype(dtype.fmt).type if dtype.fmt is not None else None
-def _from_np_dtype(npdtype:'np.dtype') -> DType: # type: ignore [name-defined] # noqa: F821
+def _from_np_dtype(npdtype:Any) -> DType:
   import numpy as np
   return DTYPES_DICT[np.dtype(npdtype).name]
 
