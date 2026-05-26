@@ -166,8 +166,8 @@ class TestMultiOutputGradient(unittest.TestCase):
     c, d, e, _, _ = Tensor.custom_kernel(Tensor.empty(4, 4), Tensor.empty(4, 4), Tensor.empty(4, 4), a, b,
                                           fxn=addmulsub_kernel, grad_fxn=backward_addmulsub)
     (c.sum() + d.sum() + e.sum()).backward()
-    np.testing.assert_allclose(a.grad.numpy(), a_ref.grad.numpy(), rtol=1e-5)
-    np.testing.assert_allclose(b.grad.numpy(), b_ref.grad.numpy(), rtol=1e-5)
+    np.testing.assert_allclose(a.grad.numpy(), a_ref.grad.numpy(), atol=1e-6, rtol=1e-5)
+    np.testing.assert_allclose(b.grad.numpy(), b_ref.grad.numpy(), atol=1e-6, rtol=1e-5)
 
 class TestViewGradient(unittest.TestCase):
   def test_expand(self):

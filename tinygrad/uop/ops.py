@@ -28,7 +28,7 @@ axis_to_pos = {AxisType.LOOP: -1, AxisType.THREAD: 0, AxisType.GLOBAL: 0, AxisTy
                AxisType.GROUP_REDUCE: 2, AxisType.REDUCE: 4, AxisType.UNROLL: 5}
 
 range_start = {Ops.STAGE: 1, Ops.REDUCE: 1, Ops.WMMA: 3, Ops.END: 1, Ops.CALL: 1, Ops.FUNCTION: 1,
-               Ops.COPY: 2, Ops.BUFFER_VIEW: 1, Ops.LINEAR: 0}
+               Ops.COPY: 2, Ops.BUFFER_VIEW: 2, Ops.LINEAR: 0}
 
 # https://en.wikipedia.org/wiki/Identity_element
 def identity_element(op:Ops, dt:DType) -> PyConst: return dt.const({Ops.ADD:0, Ops.MUL:1, Ops.MAX:dt.min}[op])
@@ -269,7 +269,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       case Ops.BUFFER_VIEW:
         # HACK: BUFFER_VIEW is used inside kernels, so we set the shape to () if it's on an INDEX
         if self.src[0].op is Ops.INDEX: return ()
-        return (self.arg[0],)
+        return (self.arg,)
       case Ops.CUSTOM_FUNCTION: return None
       case Ops.STAGE:
         # STAGE adds the existing shape to the front, opposite of INDEX
@@ -796,13 +796,14 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     if self.op is Ops.BUFFER_VIEW:
       if (cret:=buffers.get(self)) is not None: return cret
       buf = self.src[0].buffer
+      offset = self.src[1].arg
       if isinstance(buf, MultiBuffer):
         mbuf = MultiBuffer.__new__(MultiBuffer)
-        mbuf.bufs = [b.view(self.arg[0], self.dtype, self.arg[1] * self.dtype.itemsize) for b in buf.bufs]
+        mbuf.bufs = [b.view(self.arg, self.dtype, offset) for b in buf.bufs]
         buffers[self] = mbuf
         return mbuf
       assert isinstance(buf, Buffer), "must be a Buffer for BUFFER_VIEW"
-      buffers[self] = bv = buf.view(self.arg[0], self.dtype, self.arg[1] * self.dtype.itemsize)
+      buffers[self] = bv = buf.view(self.arg, self.dtype, offset)
       return bv
     if self.op is Ops.MSELECT:
       ret = self.src[0].buffer
