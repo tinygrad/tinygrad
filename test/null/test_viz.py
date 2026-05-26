@@ -241,12 +241,12 @@ class TestViz(unittest.TestCase):
     with save_viz() as viz:
       graph_rewrite(alu, PatternMatcher([]))
     graph = [x["graph"] for x in viz.get_details(0, 0)][0]
-    # all nodes are visible on the server side, client side hides exclude=True nodes by default
     excluded_nodes = {v["label"].split("\n")[0] for v in graph.values() if v["exclude"]}
     self.assertIn("CONST", excluded_nodes)
     self.assertIn("STACK", excluded_nodes)
     self.assertIn("RESHAPE", excluded_nodes)
     self.assertIn("EXPAND", excluded_nodes)
+    self.assertIn("CONST1 1 Ops.DEVICE", graph[id(alu)]["label"])
 
 # VIZ displays nested graph_rewrites in a tree view
 
