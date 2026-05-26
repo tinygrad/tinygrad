@@ -82,13 +82,6 @@ class TestSchedule(unittest.TestCase):
   def test_arange_avgpool2d_fused_noopt(self):
     with Context(NOOPT=1): self.test_arange_avgpool2d(kcount=1)
 
-  # linearizer error
-  @unittest.skip("recursion error no longer raised")
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "needs supports_float4 to fail")
-  def test_arange_avgpool2d_fused(self):
-    with self.assertRaises(RecursionError):
-      with Context(NOOPT=0): self.test_arange_avgpool2d(kcount=1)
-
   # when we're fusing a reduce, all ReduceOps must have the same N in the dimensions
   # all permutes, reshapes, expands and shrinks push through the reduce
   def test_arange_sum(self):
@@ -770,7 +763,6 @@ class TestSchedule(unittest.TestCase):
     gc.collect()
     self.assertEqual(GlobalCounters.mem_used-base, 1024)
 
-  @unittest.skipIf(Device.DEFAULT != "CL", "image only supported on CL")
   def test_image_dot_f16_fusion(self):
     with Context(FLOAT16=1, OPENPILOT_HACKS=1):
       def cnt():
@@ -782,7 +774,6 @@ class TestSchedule(unittest.TestCase):
       with Context(IMAGE=1):
         self.assertEqual(cnt(), 5)
 
-  @unittest.skipIf(Device.DEFAULT != "CL", "image only supported on CL")
   def test_image_f16_residual_fusion(self):
     with Context(FLOAT16=1, OPENPILOT_HACKS=1):
       def cnt():
@@ -798,7 +789,6 @@ class TestSchedule(unittest.TestCase):
       with Context(IMAGE=1):
         self.assertEqual(cnt(), 9)
 
-  @unittest.skipIf(Device.DEFAULT != "CL", "image only supported on CL")
   def test_image_conv_fusion(self):
     with Context(OPENPILOT_HACKS=1):
       def cnt():
@@ -1075,7 +1065,6 @@ class TestSchedule(unittest.TestCase):
     self.assertEqual(a.tolist(), [0., 0.])
     self.assertEqual(b.tolist(), [False, False])
 
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "Validation error on WebGPU")
   def test_mnist_val(self):
     from tinygrad.nn.datasets import mnist
     import torch
