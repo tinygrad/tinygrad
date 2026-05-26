@@ -395,8 +395,10 @@ class TestTensorUOpCreation(unittest.TestCase):
     self.assertIs(_strip_unique(Tensor.full((2, 3), 42, dtype=dtypes.int8, device="NULL").uop),
                   _strip_unique(UOp.full((2, 3), 42, dtype=dtypes.int8, device="NULL")))
   def test_full_symbolic_fill(self):
+    # bound symbolic variable — flows through Tensor.__init__'s UOp branch, no UNIQUE added
     t = Tensor.full((2, 3), UOp.variable("x", 1, 10).bind(5))
     self.assertEqual(t.shape, (2, 3))
+    self.assertFalse(t.uop.op_in_backward_slice_with_self(Ops.UNIQUE))
   def test_zeros(self):
     self.assertIs(_strip_unique(Tensor.zeros(2, 3).uop), _strip_unique(UOp.zeros(2, 3)))
   def test_ones(self):
