@@ -111,6 +111,9 @@ def flip_multi(root:UOp, multi:UOp):
 
 def copy_multi(multi:UOp, device:str | tuple[str, ...] | UOp):
   assert multi.axis is not None, "all multi ops have axis"
+  if isinstance(device, UOp) and isinstance(device.arg, str):
+    pieces = [multi.src[0].mselect(i).copy_to_device(device) for i in range(len(multi.device))]
+    return pieces[0].cat(*pieces[1:], dim=multi.axis)
   return multi.src[0]._unshard(multi.axis).allreduce(Ops.ADD, device)
 
 def store_after_multi(dest:UOp, src:UOp): return dest.after(dest.store(src.src[0])).multi(src.axis)
