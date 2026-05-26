@@ -121,9 +121,10 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
     if u.op is Ops.STACK and len(u.src) == 0: excluded.add(u)
     if u.op in GroupOp.Movement: excluded.update(s for s in u.src if s.op is Ops.STACK)
   for u in toposort:
-    argst = f"{u.arg:g}" if u.op is Ops.CONST and dtypes.is_float(u.dtype) else codecs.decode(str(u.arg), "unicode_escape")
+    argst = codecs.decode(str(u.arg), "unicode_escape")
     if u.op in GroupOp.Movement: argst = (mask_to_str if u.op in {Ops.SHRINK, Ops.PAD} else shape_to_str)(u.marg)
     if u.op is Ops.BINARY: argst = f"<{len(u.arg)} bytes>"
+    if u.op is Ops.CONST and dtypes.is_float(u.dtype): argst = f"{u.arg:g}"
     wrap_len = 200 if u.op is Ops.SOURCE else 80
     label = f"{str(u.op).split('.')[1]}{(chr(10)+word_wrap(argst.replace(':', ''), wrap=wrap_len)) if u.arg is not None else ''}"
     if u.dtype != dtypes.void: label += f"\n{u.dtype}"
