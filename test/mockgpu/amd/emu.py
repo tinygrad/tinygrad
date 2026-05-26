@@ -1038,13 +1038,10 @@ def _compile_sdwa(inst: irc.VOP1_SDWA | irc.VOP2_SDWA | irc.VOP2_SDWA_SDST | irc
         result = _sdwa_write(old, result, dst_sel, dst_unused)
       stores.append(ctx.wvgpr_dyn(vdst_reg, lane, result, exec_mask))
     elif dest.startswith('VCC'):
-      old_vcc = ctx.rmask(_c(VCC_LO.offset))
-      stores.extend(ctx.wmask(_c(VCC_LO.offset), _set_lane_bit(old_vcc, lane, val, exec_mask)))
+      vcc_val = val
   if vcc_val is not None:
-    # Initialize sdst to 0 before lane loop (old value may be unrelated data), then set lane bits in loop
-    init_stores = [ctx.wsgpr_dyn(sdst_off, _c(0)), ctx.wsgpr_dyn(sdst_off + _c(1), _c(0))]
-    old_sdst = ctx.rmask(sdst_off)
-    stores.extend(ctx.wmask(sdst_off, _set_lane_bit(old_sdst, lane, vcc_val, exec_mask)))
+    def get_bit(l, v=vcc_val): return (_to_u32(v.substitute({lane: l})) & _c(1)).cast(dtypes.uint32)
+    init_stores = ctx.wmask(sdst_off, ctx.unroll_lanes(get_bit, exec_mask, apply_exec=False) & exec_mask)
     if stores:
       return UOp.sink(*init_stores, UOp.sink(*stores).end(lane), *ctx.inc_pc())
     return UOp.sink(*init_stores, *ctx.inc_pc())
