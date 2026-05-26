@@ -11,6 +11,10 @@ class TestTiny(unittest.TestCase):
     const = Tensor(2.0)
     self.assertEqual(const.item(), 2.0)
 
+  def test_item_multi_element(self):
+    with self.assertRaisesRegex(AssertionError, "must have one element for item"):
+      Tensor([1.,2,3]).item()
+
   def test_copy(self):
     out = Tensor([1.,2,3])
     self.assertListEqual(out.tolist(), [1.0, 2.0, 3.0])
