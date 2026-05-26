@@ -90,7 +90,8 @@ const layoutUOp = (g, { graph, change }, opts) => {
     for (const consumerId of (g.successors(n) || [])) {
       const consumer = g.node(consumerId);
       // add +- toggle if this consumer has collapsible sources
-      const collapsible = consumer.callNode || collapsibleSrc || (op === "STACK" && movementOps.has(nodeOp(consumerId)));
+      const edge = g.edge(n, consumerId);
+      const collapsible = consumer.callNode ? edge?.label?.text === 0 : collapsibleSrc || (op === "STACK" && movementOps.has(nodeOp(consumerId)));
       if (!collapsible) continue;
       consumer.collapsible = true;
       // make sources invisible if UI has toggled it off
