@@ -285,8 +285,7 @@ pm_render = PatternMatcher([
   (UPat(Ops.STACK, src=(UPat(name='x'),)), lambda x: x),
   # rewrite INDEX to SLICE
   (UPat(Ops.INDEX, name="x"), lambda x:
-   UOp(Ops.SLICE, dtype=x.dtype, src=(x.src[0], x.src[1]*x.src[0].dtype.itemsize),
-       arg=0 if x.dtype.vcount == 1 else x.dtype.vcount)),
+   UOp(Ops.SLICE, dtype=x.dtype, src=(x.src[0], x.src[1]), arg=0 if x.dtype.vcount == 1 else x.dtype.vcount)),
 ])
 
 # *** Ops.REDUCE -> Ops.DEFINE_ACC ***
