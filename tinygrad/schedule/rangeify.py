@@ -350,7 +350,6 @@ def late_buffer_view(t:UOp, b:UOp):
 
   if len(shape) == 0: offset = x.src[1].arg
   else: offset = max(sum(idx.vmin for idx in x.src[1:]), 0)
-  offset *= x.base.dtype.itemsize
 
   return b.replace(src=(UOp(Ops.BUFFER_VIEW, t.dtype, (x.base, UOp.const(dtypes.weakint, offset)), size), b.src[1]))
 

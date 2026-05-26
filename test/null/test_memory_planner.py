@@ -38,7 +38,7 @@ def check_assign(buffer_lists, copies=None):
   for orig_si, new_si in zip(linear.src, result.src):
     for orig, new in zip(orig_si.src[1:], new_si.src[1:]):
       if new.op is Ops.BUFFER_VIEW and id(orig) not in replace_map:
-        replace_map[id(orig)] = (new.src[0], new.src[1].arg, new.arg * new.dtype.itemsize)
+        replace_map[id(orig)] = (new.src[0], new.src[1].arg * new.src[0].dtype.itemsize, new.arg * new.dtype.itemsize)
 
   # verify pinned buffers are not planned
   for buf in held_bufs:
