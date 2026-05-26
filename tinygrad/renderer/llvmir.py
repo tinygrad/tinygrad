@@ -8,12 +8,12 @@ from tinygrad.uop.ops import UOp, PatternMatcher, UPat, Ops, GroupOp, range_str
 from tinygrad.dtype import dtypes, float_to_fp8, DType, PtrDType, truncate
 from tinygrad.helpers import prod, Target, CPU_COUNT, getenv, OSX
 
-def ldt(dt:DType):
-  if dt.vcount > 1: return f"<{dt.vcount} x {ldt(dt.scalar())}>"
-  if isinstance(dt, PtrDType): return ldt(dt.base) + "*"
+def ldt(dt:DType, lanes:int=1):
+  if isinstance(dt, PtrDType): return ldt(dt.base.scalar()) + "*"
+  if lanes > 1: return f"<{lanes} x {ldt(dt.scalar())}>"
   return {dtypes.void: "void", dtypes.bool: "i1", dtypes.int8: "i8", dtypes.int16: "i16", dtypes.int32: "i32", dtypes.int64: "i64",
           dtypes.uint8: "i8", dtypes.uint16: "i16", dtypes.uint32: "i32", dtypes.uint64: "i64", dtypes.fp8e4m3: "i8", dtypes.fp8e5m2: "i8",
-          dtypes.float16: "half", dtypes.bfloat16: "bfloat", dtypes.float32: "float", dtypes.float64: "double"}[dt]
+          dtypes.float16: "half", dtypes.bfloat16: "bfloat", dtypes.float32: "float", dtypes.float64: "double"}[dt.scalar()]
 
 def lconst(x, dtype:DType):
   if dtype in dtypes.floats:
@@ -39,13 +39,14 @@ def render_wmma_amx(ctx, wmma: UOp) -> str:
   def AMX(op, gpr): return f'call void asm sideeffect ".word (0x201000+($0<<5)+0$1-((0$1>>4)*6))", "i,r,~{{memory}}"(i32 {op}, i64 {gpr}) #0; AMX'
 
   return "\n".join([
-    *[f'  store {ldt(src.dtype)} {ctx[src]}, {ldt(src.dtype.ptr())} {ctx[wmma]}_amx{i}, align {src.dtype.itemsize}' for i,src in enumerate(wmma.src)],
+    *[f'  store {ldt(src.dtype, src.max_numel())} {ctx[src]}, '
+      f'{ldt(src.dtype, src.max_numel())}* {ctx[wmma]}_amx{i}, align {src.dtype.itemsize}' for i,src in enumerate(wmma.src)],
       f'  call void asm sideeffect "nop\\0Anop\\0Anop\\0A.word ({0x201000 + (17 << 5) + 0})", "~{{memory}}"() #0; AMX set',             # set
     *[f'  {ctx[wmma]}_ld{i} = add i64 {ctx[wmma]}_ptr_amx2, {i*4<<56 | i*64}\n  {AMX(4,f"{ctx[wmma]}_ld{i}")} ldz' for i in range(16)], # ldz
       f'  {AMX(0, f"{ctx[wmma]}_ptr_amx1")} ldx\n  {AMX(1, f"{ctx[wmma]}_ptr_amx0")} ldy\n  {AMX(12, 0)} fma32',                        # ldx ldy fma
     *[f'  {ctx[wmma]}_st{i} = add i64 {ctx[wmma]}_ptr_amx2, {i*4<<56 | i*64}\n  {AMX(5,f"{ctx[wmma]}_st{i}")} stz' for i in range(16)], # stz
       f'  call void asm sideeffect "nop\\0Anop\\0Anop\\0A.word ({0x201000 + (17 << 5) + 1})", "~{{memory}}"() #0; AMX clr',             # clr
-      f'  {ctx[wmma]} = load {ldt(wmma.dtype)}, ptr {ctx[wmma]}_amx2, align {wmma.dtype.itemsize}'])
+      f'  {ctx[wmma]} = load {ldt(wmma.dtype, wmma.max_numel())}, ptr {ctx[wmma]}_amx2, align {wmma.dtype.itemsize}'])
 
 def render_wmma_amd(ctx, wmma: UOp, cdna=False) -> str:
   dt_map = {dtypes.half: "f16", dtypes.float: "f32", dtypes.ushort: "bf16.1k" if cdna else "bf16", dtypes.bfloat16: "bf16.1k" if cdna else "bf16",
@@ -54,12 +55,12 @@ def render_wmma_amd(ctx, wmma: UOp, cdna=False) -> str:
   N,M,K = wmma.arg[1]
   if cdna:
     if K == 32: dt_map.update({dtypes.half: ".f16", dtypes.bfloat16: ".bf16"})
-    return f"  {ctx[wmma]} = call {ldt(wmma.dtype)} @llvm.amdgcn.mfma.{dt_map[wmma.src[-1].dtype.scalar()]}" + \
-           f".{N}x{M}x{K}{dt_map[wmma.arg[2]]}(" + ", ".join([f"{ldt(w.dtype)} {ctx[w]}" for w in wmma.src]) + ", i32 0, i32 0, i32 0)"
+    return f"  {ctx[wmma]} = call {ldt(wmma.dtype, wmma.max_numel())} @llvm.amdgcn.mfma.{dt_map[wmma.src[-1].dtype.scalar()]}" + \
+           f".{N}x{M}x{K}{dt_map[wmma.arg[2]]}(" + ", ".join([f"{ldt(w.dtype, w.max_numel())} {ctx[w]}" for w in wmma.src]) + ", i32 0, i32 0, i32 0)"
   # https://github.com/llvm/llvm-project/blob/main/llvm/test/CodeGen/AMDGPU/GlobalISel/llvm.amdgcn.wmma_32.ll
   # example: %wmma0 = call <8 x float> @llvm.amdgcn.wmma.f32.16x16x16.f16(<16 x half> %v99,<16 x half> %v100,<8 x float> %v101)
-  return f"  {ctx[wmma]} = call {ldt(wmma.dtype)} @llvm.amdgcn.wmma.{dt_map[wmma.src[-1].dtype.scalar()]}.16x16x16." + \
-    f"{dt_map[wmma.src[0].dtype.scalar()]}(" + ", ".join([f"{ldt(w.dtype)} {ctx[w]}" for w in wmma.src]) + (", i1 false)" \
+  return f"  {ctx[wmma]} = call {ldt(wmma.dtype, wmma.max_numel())} @llvm.amdgcn.wmma.{dt_map[wmma.src[-1].dtype.scalar()]}.16x16x16." + \
+    f"{dt_map[wmma.src[0].dtype.scalar()]}(" + ", ".join([f"{ldt(w.dtype, w.max_numel())} {ctx[w]}" for w in wmma.src]) + (", i1 false)" \
       if wmma.dtype.scalar() != dtypes.float else ")")
 
 # llvm ops, lop[<dtype>][<op>]
@@ -75,35 +76,47 @@ lop = {**{x:unsigned_lop for x in (dtypes.bool,)+dtypes.uints}, **{x:signed_lop 
 base_rewrite = PatternMatcher([
   # memory load/store
   (UPat(Ops.INDEX, name="x"), lambda ctx,x:
-   f"  {ctx[x]} = getelementptr inbounds {ldt(x.dtype.base)}, {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, {ldt(x.src[1].dtype)} {ctx[x.src[1]]}"),
+   f"  {ctx[x]} = getelementptr inbounds {ldt(x.dtype.base)}, {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, "
+   f"{ldt(x.src[1].dtype, x.src[1].max_numel())} {ctx[x.src[1]]}"),
   (UPat(Ops.LOAD, src=(UPat.var("idx"), UPat.var("alt"), UPat.var("mask")), name="x"),
    lambda ctx,x,idx,alt,mask:
    f"  br label {ctx[x]}_entry\n{ctx[x][1:]}_entry:\n"
    f"  br i1 {ctx[mask]}, label {ctx[x]}_load, label {ctx[x]}_exit\n{ctx[x][1:]}_load:\n"
-   f"  {ctx[x]}_yes = load {ldt(x.dtype)}, {ldt(idx.dtype)} {ctx[idx]}\n"
+   f"  {ctx[x]}_yes = load {ldt(x.dtype, x.max_numel())}, {ldt(idx.dtype)} {ctx[idx]}\n"
    f"  br label {ctx[x]}_exit\n{ctx[x][1:]}_exit:\n"
-   f"  {ctx[x]} = phi {ldt(x.dtype)} [{ctx[x]}_yes, {ctx[x]}_load], [{ctx[alt]}, {ctx[x]}_entry]"),
+   f"  {ctx[x]} = phi {ldt(x.dtype, x.max_numel())} [{ctx[x]}_yes, {ctx[x]}_load], [{ctx[alt]}, {ctx[x]}_entry]"),
   (UPat(Ops.LOAD, src=(UPat.var('idx'),), name="x"),
-   lambda ctx,x,idx: f"  {ctx[x]} = load {ldt(x.dtype)}, {ldt(idx.dtype)} {ctx[idx]}"),
-  (UPat(Ops.STORE, name="x"), lambda ctx,x: f"  store {ldt(x.src[1].dtype)} {ctx[x.src[1]]}, {ldt(x.src[0].dtype)} {ctx[x.src[0]]}"),
+   lambda ctx,x,idx: f"  {ctx[x]} = load {ldt(x.dtype, x.max_numel())}, {ldt(idx.dtype)} {ctx[idx]}"),
+  (UPat(Ops.STORE, name="x"), lambda ctx,x:
+   f"  store {ldt(x.src[1].dtype, x.src[1].max_numel())} {ctx[x.src[1]]}, "
+   f"{ldt(x.src[0].dtype)} {ctx[x.src[0]]}"),
 
   # GEP/VECTORIZE/CAST for float4 support
-  (UPat(Ops.GEP, name="x"), lambda ctx,x: f"  {ctx[x]} = extractelement {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, i32 {x.arg[0]}"),
+  (UPat(Ops.GEP, name="x"), lambda ctx,x: f"  {ctx[x]} = extractelement {ldt(x.src[0].dtype, x.src[0].max_numel())} {ctx[x.src[0]]}, i32 {x.arg[0]}"),
   (UPat(Ops.STACK, src=UPat.var('y'), name="x"), lambda ctx,x,y:
-   f"  {ctx[x]}_z = insertelement <1 x {ldt(y.dtype)}> poison, {ldt(y.dtype)} {ctx[y]}, i32 0\n"
-   f"  {ctx[x]} = shufflevector <1 x {ldt(y.dtype)}> {ctx[x]}_z, <1 x {ldt(y.dtype)}> poison, <{x.dtype.count} x i32> zeroinitializer"),
+   f"  {ctx[x]}_z = insertelement <1 x {ldt(y.dtype, y.max_numel())}> poison, {ldt(y.dtype, y.max_numel())} {ctx[y]}, i32 0\n"
+   f"  {ctx[x]} = shufflevector <1 x {ldt(y.dtype, y.max_numel())}> {ctx[x]}_z, "
+   f"<1 x {ldt(y.dtype, y.max_numel())}> poison, <{x.max_numel()} x i32> zeroinitializer"),
   (UPat(Ops.STACK, name="x"), lambda ctx,x: "\n".join([(f"  {ctx[x]}_{i}" if i+1 != len(x.src) else f"  {ctx[x]}")+
-                                                            f" = insertelement {ldt(x.dtype)} "+(f"{ctx[x]}_{i-1}" if i != 0 else "poison")+
-                                                            f", {ldt(u.dtype)} {ctx[u]}, i32 {i}" for i,u in enumerate(x.src)])),
+                                                            f" = insertelement {ldt(x.dtype, x.max_numel())} "+
+                                                            (f"{ctx[x]}_{i-1}" if i != 0 else "poison")+
+                                                            f", {ldt(u.dtype, u.max_numel())} {ctx[u]}, i32 {i}" for i,u in enumerate(x.src)])),
   # unary/binary/ternary ops
-  (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"  {ctx[x]} = bitcast {ldt(x.src[0].dtype)} {ctx[x.src[0]]} to {ldt(x.dtype)}"),
-  (UPat(Ops.CAST, name="x"), lambda ctx,x: f"  {ctx[x]} = {lcast(x.src[0].dtype, x.dtype)} {ldt(x.src[0].dtype)} {ctx[x.src[0]]} to {ldt(x.dtype)}"),
+  (UPat(Ops.BITCAST, name="x"), lambda ctx,x:
+   f"  {ctx[x]} = bitcast {ldt(x.src[0].dtype, x.src[0].max_numel())} {ctx[x.src[0]]} "
+   f"to {ldt(x.dtype, x.max_numel())}"),
+  (UPat(Ops.CAST, name="x"), lambda ctx,x:
+   f"  {ctx[x]} = {lcast(x.src[0].dtype, x.dtype)} {ldt(x.src[0].dtype, x.src[0].max_numel())} {ctx[x.src[0]]} "
+   f"to {ldt(x.dtype, x.max_numel())}"),
   (UPat(Ops.TRUNC, name="x"),
-   lambda ctx,x: f"  {ctx[x]} = call {ldt(x.dtype)} @llvm.trunc.{ldt(x.dtype.scalar())}({ldt(x.src[0].dtype)} {ctx[x.src[0]]})"),
+   lambda ctx,x: f"  {ctx[x]} = call {ldt(x.dtype, x.max_numel())} @llvm.trunc.{ldt(x.dtype.scalar())}"
+   f"({ldt(x.src[0].dtype, x.src[0].max_numel())} {ctx[x.src[0]]})"),
   (UPat(GroupOp.Binary, name="x"), lambda ctx,x:
-   f"  {ctx[x]} = {lop[x.src[0].dtype.scalar()][x.op]} {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, {ctx[x.src[1]]}"),
+   f"  {ctx[x]} = {lop[x.src[0].dtype.scalar()][x.op]} {ldt(x.src[0].dtype, x.src[0].max_numel())} {ctx[x.src[0]]}, {ctx[x.src[1]]}"),
   (UPat(Ops.WHERE, name="x"), lambda ctx,x:
-   f"  {ctx[x]} = select {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, {ldt(x.src[1].dtype)} {ctx[x.src[1]]}, {ldt(x.src[2].dtype)} {ctx[x.src[2]]}"),
+   f"  {ctx[x]} = select {ldt(x.src[0].dtype, x.src[0].max_numel())} {ctx[x.src[0]]}, "
+   f"{ldt(x.src[1].dtype, x.src[1].max_numel())} {ctx[x.src[1]]}, "
+   f"{ldt(x.src[2].dtype, x.src[2].max_numel())} {ctx[x.src[2]]}"),
 
   # range
   (UPat(Ops.RANGE, name="r"), lambda ctx,r:
@@ -111,9 +124,9 @@ base_rewrite = PatternMatcher([
    f"loop_entry_{range_str(r)}:\n"
    f"  br label %loop_latch_{range_str(r)}\n"
    f"loop_latch_{range_str(r)}:\n"
-   f"  {ctx[r]} = phi {ldt(r.dtype)} [ 0, %loop_entry_{range_str(r)} ], [ {ctx[r]}phi, %loop_footer_{range_str(r)} ]\n"
-   f"  {ctx[r]}phi = add {ldt(r.dtype)} {ctx[r]}, 1\n"
-   f"  {ctx[r]}cmp = icmp ult {ldt(r.dtype)} {ctx[r]}, {ctx[r.src[0]]}\n"
+   f"  {ctx[r]} = phi {ldt(r.dtype, r.max_numel())} [ 0, %loop_entry_{range_str(r)} ], [ {ctx[r]}phi, %loop_footer_{range_str(r)} ]\n"
+   f"  {ctx[r]}phi = add {ldt(r.dtype, r.max_numel())} {ctx[r]}, 1\n"
+   f"  {ctx[r]}cmp = icmp ult {ldt(r.dtype, r.max_numel())} {ctx[r]}, {ctx[r.src[0]]}\n"
    f"  br i1 {ctx[r]}cmp, label %loop_body_{range_str(r)}, label %loop_exit_{range_str(r)}\n"
    f"loop_body_{range_str(r)}:"),
   (UPat(Ops.END, src=(UPat(), UPat(Ops.RANGE, name="r"))), lambda r:
@@ -151,9 +164,10 @@ class LLVMRenderer(Renderer):
       if self.tensor_cores == tc.amx and u.op is Ops.WMMA: # prealloc aux buffers as AMX can only load from memory
         vc += 1
         r[u] = f"%wmma{vc}"
-        for i, dtype in enumerate(u.arg[2].vec(sz) for sz in [prod(size for _, size in upcast) for upcast in u.arg[6]]):
-          kernel += [f"  {r[u]}_amx{i} = alloca {ldt(dtype)}, align {dtype.itemsize}",
-                     f"  {r[u]}_ptr_amx{i} = ptrtoint {ldt(dtype.ptr())} {r[u]}_amx{i} to i64"]
+        for i, sz in enumerate(prod(size for _, size in upcast) for upcast in u.arg[6]):
+          dtype = u.arg[2]
+          kernel += [f"  {r[u]}_amx{i} = alloca {ldt(dtype, sz)}, align {dtype.itemsize*sz}",
+                     f"  {r[u]}_ptr_amx{i} = ptrtoint {ldt(dtype, sz)}* {r[u]}_amx{i} to i64"]
 
     name = "test"
     for u in uops:
@@ -170,15 +184,17 @@ class LLVMRenderer(Renderer):
       elif u.op in (Ops.DEFINE_LOCAL, Ops.DEFINE_REG):
         r[u] = f"%{'local' if u.op is Ops.DEFINE_LOCAL else 'reg'}_{str(u.arg).replace('(', '').replace(')', '').replace(',', '_').replace(' ', '')}"
         assert isinstance(u.dtype, PtrDType)
+        lanes = u.max_shape[-1] if len(u.max_shape) > 1 else 1
+        etype = ldt(u.dtype.base.scalar(), lanes)
         if u.op is Ops.DEFINE_REG:
-          kernel.append(f"  {r[u]} = alloca [{u.dtype.size} x {ldt(u.dtype.base)}]")
+          kernel.append(f"  {r[u]} = alloca [{u.dtype.size} x {etype}]")
         elif self.has_local:
-          local_args.append(f"@{r[u][1:]} = internal unnamed_addr addrspace(3) global [{u.dtype.size} x {ldt(u.dtype)}] undef, align 16")
-          kernel.append(f"  {r[u]} = addrspacecast [{u.dtype.size} x {ldt(u.dtype)}] addrspace(3)* @{r[u][1:]} to [{u.dtype.size} x {ldt(u.dtype)}]*")
+          local_args.append(f"@{r[u][1:]} = internal unnamed_addr addrspace(3) global [{u.dtype.size} x {etype}] undef, align 16")
+          kernel.append(f"  {r[u]} = addrspacecast [{u.dtype.size} x {etype}] addrspace(3)* @{r[u][1:]} to [{u.dtype.size} x {etype}]*")
         else:
-          kernel.append(f"  {r[u]} = alloca [{u.dtype.size} x {ldt(u.dtype.base)}], align 16")
+          kernel.append(f"  {r[u]} = alloca [{u.dtype.size} x {etype}], align 16")
       elif u.op is Ops.CONST: r[u] = lconst(u.arg, u.dtype)
-      elif u.op is Ops.CAST and (ldt(u.dtype) == ldt(u.src[0].dtype) or isinstance(u.dtype, PtrDType)):
+      elif u.op is Ops.CAST and (ldt(u.dtype, u.max_numel()) == ldt(u.src[0].dtype, u.src[0].max_numel()) or isinstance(u.dtype, PtrDType)):
         r[u] = r[u.src[0]] # cast from signed to unsigned of the same size is a noop, or pointer cast
       else:
         # if it's an assign target, it's already preallocated
@@ -226,19 +242,22 @@ class AMDLLVMRenderer(LLVMRenderer):
   string_rewrite = PatternMatcher([
     (UPat(Ops.SPECIAL, name="x"), lambda ctx, x: f"  {ctx[x]} = " + f"{ code_for_workitem[x.arg[0]](x.arg[-1])}; "),
     (UPat(tuple(llvm_intrinsics), name="x"),
-    lambda ctx, x: f"  {ctx[x]} = call {ldt(x.dtype)} @llvm.{llvm_intrinsics[x.op]}.{ldt(x.dtype.scalar())}({ldt(x.src[0].dtype)} {ctx[x.src[0]]})"),
+    lambda ctx, x: f"  {ctx[x]} = call {ldt(x.dtype, x.max_numel())} @llvm.{llvm_intrinsics[x.op]}.{ldt(x.dtype.scalar())}"
+    f"({ldt(x.src[0].dtype, x.src[0].max_numel())} {ctx[x.src[0]]})"),
     (UPat(Ops.BARRIER), lambda ctx: barrier),
     (UPat(Ops.CAST, dtypes.fp8s, (UPat(dtype=dtypes.float),), name="x",), lambda ctx,x:
-      f"  {ctx[x]} = call i8 @f32_to_fp8({ldt(x.src[0].dtype)}  {ctx[x.src[0]]}, i1 {'1' if x.dtype == dtypes.fp8e5m2 else '0'})"),
+      f"  {ctx[x]} = call i8 @f32_to_fp8({ldt(x.src[0].dtype, x.src[0].max_numel())}  {ctx[x.src[0]]}, "
+      f"i1 {'1' if x.dtype == dtypes.fp8e5m2 else '0'})"),
     (UPat(Ops.CAST, dtypes.float, (UPat.var("y", dtypes.fp8s),), name="x",), lambda ctx,x,y:
       f"  {ctx[x.src[0]]}_i32 = zext i8 {ctx[x.src[0]]} to i32\n"
       f"  {ctx[x]} = call float @llvm.amdgcn.cvt.f32.{'bf8' if y.dtype == dtypes.fp8e5m2 else 'fp8'}(i32 {ctx[x.src[0]]}_i32, i32 0)"),
   ]) + base_rewrite
   extra_matcher = LLVMRenderer.extra_matcher + create_non_native_float_pats(dtypes.fp8s) + PatternMatcher([
-    (UPat(Ops.CAST, dtype=dtypes.half.vec(16), src=UPat.var("y", dtypes.half.vec(8))),
-      lambda y: UOp(Ops.STACK, dtypes.half.vec(16), tuple(y.gep(i // 2) if i % 2 == 0 else UOp.const(dtypes.half, 0.0) for i in range(16)))),
-    (UPat(Ops.CAST, dtype=dtypes.half.vec(8), src=UPat.var("y", dtypes.half.vec(16))),
-      lambda y: UOp(Ops.STACK, dtypes.half.vec(8), tuple(y.gep(i * 2) for i in range(8)))),
+    (UPat(Ops.CAST, dtype=dtypes.half, src=UPat.var("y", dtypes.half), name="x"),
+      lambda x,y: UOp(Ops.STACK, dtypes.half, tuple(y.gep(i // 2) if i % 2 == 0 else UOp.const(dtypes.half, 0.0) for i in range(16)))
+        if x.max_numel() == 16 and y.max_numel() == 8 else None),
+    (UPat(Ops.CAST, dtype=dtypes.half, src=UPat.var("y", dtypes.half), name="x"),
+      lambda x,y: UOp(Ops.STACK, dtypes.half, tuple(y.gep(i * 2) for i in range(8))) if x.max_numel() == 8 and y.max_numel() == 16 else None),
     # amd llvm intrinsics llvm.log2/llvm.exp2 don't support double
     (UPat(Ops.LOG2, dtype=dtypes.double, src=(UPat.var("d"),)), xlog2),
     (UPat(Ops.EXP2, dtype=dtypes.double, src=(UPat.var("d"),)), xexp2),
@@ -273,28 +292,37 @@ exit: %packed = phi i32 [%packed_bf8, %do_bf8], [%packed_fp8, %do_fp8]\n  %trunc
     self.string_rewrite += PatternMatcher([(UPat(Ops.WMMA, name="wmma"), lambda ctx, wmma, cdna=self.is_cdna: render_wmma_amd(ctx, wmma, cdna))])
     if self.is_cdna:
       self.extra_matcher += PatternMatcher([
-        (UPat(Ops.WMMA, name="x", dtype=dtypes.float.vec(4)),
-          lambda x: UOp(Ops.WMMA, dtypes.float.vec(4), (x.src[0].bitcast(dtypes.uint16.vec(4)), x.src[1].bitcast(dtypes.uint16.vec(4)),
-            x.src[2]), (*x.arg,)) if x.src[0].dtype == dtypes.bfloat16.vec(4) else None),
-        (UPat(Ops.WMMA, name="x", dtype=dtypes.float.vec(4)),
-          lambda x: UOp(Ops.WMMA, dtypes.float.vec(4), (x.src[0].bitcast(dtypes.uint64), x.src[1].bitcast(dtypes.uint64),
-            x.src[2]), (*x.arg,)) if x.src[0].dtype in (dtypes.fp8e4m3.vec(8), dtypes.fp8e5m2.vec(8)) else None),
+        (UPat(Ops.WMMA, name="x", dtype=dtypes.float),
+          lambda x: UOp(Ops.WMMA, dtypes.float, (x.src[0].replace(dtype=x.src[0].dtype.scalar()).bitcast(dtypes.uint16),
+            x.src[1].replace(dtype=x.src[1].dtype.scalar()).bitcast(dtypes.uint16), x.src[2]), (*x.arg,))
+            if x.max_numel() == 4 and x.src[0].dtype.scalar() == dtypes.bfloat16 and x.src[0].max_numel() == 4 else None),
+        (UPat(Ops.WMMA, name="x", dtype=dtypes.float),
+          lambda x: UOp(Ops.WMMA, dtypes.float, (x.src[0].replace(dtype=x.src[0].dtype.scalar()).bitcast(dtypes.uint64),
+            x.src[1].replace(dtype=x.src[1].dtype.scalar()).bitcast(dtypes.uint64), x.src[2]), (*x.arg,))
+            if x.max_numel() == 4 and x.src[0].dtype.scalar() in dtypes.fp8_ocp and x.src[0].max_numel() == 8 else None),
       ])
     if target.arch in {"gfx1100", "gfx1151"}:
       self.extra_matcher += PatternMatcher([
-        (UPat(Ops.WMMA, name="x", dtype=dtypes.half.vec(8)),
-          lambda x: UOp(Ops.WMMA, dtypes.half.vec(16), (x.src[0], x.src[1], x.src[2].cast(dtypes.half.vec(16))), (*x.arg,)).cast(dtypes.half.vec(8))),
-        (UPat(Ops.WMMA, name="x"), lambda x: UOp(Ops.WMMA, x.dtype, (x.src[0].bitcast(dtypes.uint16.vec(16)), x.src[1].bitcast(dtypes.uint16.vec(16)),
-          x.src[2]), x.arg) if x.src[0].dtype == dtypes.bfloat16.vec(16) else None),
+        (UPat(Ops.WMMA, name="x", dtype=dtypes.half),
+          lambda x: UOp(Ops.STACK, dtypes.half, tuple(UOp(Ops.WMMA, dtypes.half, (x.src[0], x.src[1],
+            UOp(Ops.STACK, dtypes.half, tuple(x.src[2].gep(i // 2) if i % 2 == 0 else UOp.const(dtypes.half, 0.0) for i in range(16)))),
+            (*x.arg,)).gep(i * 2) for i in range(8))) if x.max_numel() == 8 else None),
+        (UPat(Ops.WMMA, name="x"), lambda x: UOp(Ops.WMMA, x.dtype.scalar(),
+          (x.src[0].replace(dtype=x.src[0].dtype.scalar()).bitcast(dtypes.uint16),
+           x.src[1].replace(dtype=x.src[1].dtype.scalar()).bitcast(dtypes.uint16), x.src[2]), x.arg)
+          if x.src[0].dtype.scalar() == dtypes.bfloat16 and x.src[0].max_numel() == 16 else None),
       ])
     if target.arch in {"gfx1200", "gfx1201"}:
       self.extra_matcher += PatternMatcher([
-        (UPat(Ops.WMMA, name="x", dtype=dtypes.bfloat16.vec(8)), lambda x: UOp(Ops.WMMA, dtypes.uint16.vec(8),
-          (x.src[0].bitcast(dtypes.uint16.vec(8)), x.src[1].bitcast(dtypes.uint16.vec(8)), x.src[2].bitcast(dtypes.uint16.vec(8))), (*x.arg,))
-            .bitcast(dtypes.bfloat16.vec(8)) if x.src[0].dtype == dtypes.bfloat16.vec(8) else None),
-        (UPat(Ops.WMMA, name="x", dtype=dtypes.float.vec(8)),
-          lambda x: UOp(Ops.WMMA, dtypes.float.vec(8), (x.src[0].bitcast(dtypes.uint16.vec(8)), x.src[1].bitcast(dtypes.uint16.vec(8)),
-            x.src[2]), (*x.arg,)) if x.src[0].dtype == dtypes.bfloat16.vec(8) else None)
+        (UPat(Ops.WMMA, name="x", dtype=dtypes.bfloat16), lambda x: UOp(Ops.WMMA, dtypes.uint16,
+          (x.src[0].replace(dtype=x.src[0].dtype.scalar()).bitcast(dtypes.uint16),
+           x.src[1].replace(dtype=x.src[1].dtype.scalar()).bitcast(dtypes.uint16),
+           x.src[2].replace(dtype=x.src[2].dtype.scalar()).bitcast(dtypes.uint16)), (*x.arg,))
+            .bitcast(dtypes.bfloat16) if x.max_numel() == 8 and x.src[0].dtype.scalar() == dtypes.bfloat16 and x.src[0].max_numel() == 8 else None),
+        (UPat(Ops.WMMA, name="x", dtype=dtypes.float),
+          lambda x: UOp(Ops.WMMA, dtypes.float, (x.src[0].replace(dtype=x.src[0].dtype.scalar()).bitcast(dtypes.uint16),
+            x.src[1].replace(dtype=x.src[1].dtype.scalar()).bitcast(dtypes.uint16), x.src[2]), (*x.arg,))
+            if x.max_numel() == 8 and x.src[0].dtype.scalar() == dtypes.bfloat16 and x.src[0].max_numel() == 8 else None)
       ])
 
   def supported_dtypes(self): return {d for d in super().supported_dtypes()
