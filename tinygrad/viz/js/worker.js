@@ -45,18 +45,21 @@ const layoutUOp = (g, { graph, change }, opts) => {
   const lineHeight = 14;
   g.setGraph({ rankdir: "LR", font:"sans-serif", lh:lineHeight });
   ctx.font = `350 ${lineHeight}px ${g.graph().font}`;
-  if (change?.length) g.setNode("overlay", {label:"", labelWidth:0, labelHeight:0, className:"overlay"});
-  let callCount = 0;
-  for (const [k, {label, src, ref, color, tag }] of Object.entries(graph)) {
-    // adjust node dims by label size (excluding escape codes) + add padding
+  const labelDims = (label) => {
     let [width, height] = [0, 0];
     for (line of label.replace(/\u001B\[(?:K|.*?m)/g, "").split("\n")) {
       width = Math.max(width, ctx.measureText(line).width);
       height += lineHeight;
     }
+    return rectDims(width, height);
+  }
+  if (change?.length) g.setNode("overlay", {label:"", labelWidth:0, labelHeight:0, className:"overlay"});
+  let callCount = 0;
+  for (const [k, {label, src, ref, color, tag }] of Object.entries(graph)) {
+    // adjust node dims by label size (excluding escape codes) + add padding
     const callNode = label.startsWith("CALL\n") || label.startsWith("FUNCTION\n");
     if (callNode) callCount++;
-    g.setNode(k, {...rectDims(width, height), label, ref, id:k, color, tag, callNode});
+    g.setNode(k, {...labelDims(label), label, ref, id:k, color, tag, callNode});
     // add edges
     const edgeCounts = {};
     for (const [_, s] of src) edgeCounts[s] = (edgeCounts[s] || 0)+1;
@@ -94,6 +97,13 @@ const layoutUOp = (g, { graph, change }, opts) => {
       const collapsible = consumer.callNode ? edge?.label?.text === 0 : collapsibleSrc || (op === "STACK" && movementOps.has(nodeOp(consumerId)));
       if (!collapsible) continue;
       consumer.collapsible = true;
+      const consumerOp = nodeOp(consumerId);
+      if (!consumer.callNode && consumerOp !== "END") for (const [port, s] of graph[consumerId].src) {
+        if (String(s) !== String(n) || (port !== 0 && ["STAGE", "INDEX"].includes(consumerOp))) continue;
+        const [op, arg=""] = g.node(n).label.split("\n"), extra = src.length ? ` ${nodeOp(src[0])}` : "";
+        consumer.label += `\n${op}${port} ${arg}${extra}`;
+        ({width:consumer.width, height:consumer.height, labelWidth:consumer.labelWidth, labelHeight:consumer.labelHeight} = labelDims(consumer.label));
+      }
       // make sources invisible if UI has toggled it off
       const collapsed = consumer.callNode ? opts.showCallSrc === opts.callSrcMask.has(consumerId) : !opts.nodeSrcMask.has(consumerId);
       if (!collapsed) continue;
