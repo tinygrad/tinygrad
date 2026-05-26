@@ -222,7 +222,7 @@ class TestCallSchedule(unittest.TestCase):
     # find the FUNCTION nodes
     c0 = next(u for u in r0.uop.toposort() if u.op is Ops.FUNCTION)
     c1 = next(u for u in r1.uop.toposort() if u.op is Ops.FUNCTION)
-    # the function bodies (src[0]) should have identical keys — unique consts must not leak through
+    # the function bodies (src[0]) should have identical keys — local buffer identity must not leak through
     self.assertEqual(c0.src[0].key, c1.src[0].key)
 
   def test_precompile_symbolic_2d(self):
