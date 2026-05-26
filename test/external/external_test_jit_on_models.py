@@ -3,7 +3,7 @@ import unittest
 import numpy as np
 from tinygrad import Tensor, dtypes
 from tinygrad.engine.jit import TinyJit
-from test.helpers import derandomize_model, CI
+from test.helpers import derandomize_model
 
 from examples.llama import Transformer
 
@@ -27,7 +27,6 @@ class TestJittedModels(unittest.TestCase):
     helper_test_jitted_correctness(lambda: (Tensor([[1,]]),), test, test_jit)
     dtypes.default_float = old_float
 
-  @unittest.skipUnless(not CI, "huge for CI")
   def test_jitted_stable_diffusion(self):
     from examples.stable_diffusion import UNetModel, unet_params
     model = UNetModel(**unet_params)

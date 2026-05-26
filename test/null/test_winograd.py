@@ -1,7 +1,6 @@
 import unittest, sys
 from tinygrad import Tensor, GlobalCounters, dtypes, Context
-from tinygrad.helpers import Profiling, WINO
-from test.helpers import CI
+from tinygrad.helpers import WINO
 
 @unittest.skipIf(sys.platform.startswith("win"), "flaky on Windows")
 class TestWinograd(unittest.TestCase):
@@ -10,11 +9,6 @@ class TestWinograd(unittest.TestCase):
     WINO.value = 1
   def tearDown(self):
     WINO.value = self.old
-
-  def test_profile(self):
-    x,w = Tensor.rand(1,4,9,9).realize(), Tensor.rand(4,4,3,3).realize()
-    with Profiling(enabled=not CI, sort='time'):
-      Tensor.conv2d(x,w).realize()
 
   def test_forward_kernels(self):
     x,w = Tensor.rand(1,4,9,9).realize(), Tensor.rand(4,4,3,3).realize()
