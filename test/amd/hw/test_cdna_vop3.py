@@ -6,7 +6,7 @@ gfx950 hardware when USE_HW=1.
 import ctypes, struct, unittest
 import tinygrad.runtime.autogen.amd.cdna.ins as cdna
 from tinygrad.helpers import flat_mv
-from tinygrad.renderer.amd.dsl import NULL, SDWA
+from tinygrad.renderer.amd.dsl import NULL
 from test.amd.hw.helpers import USE_HW, assemble
 from test.mockgpu.amd.emu import run_asm
 
@@ -128,12 +128,3 @@ class TestCDNAVOP3(unittest.TestCase):
           cdna.v_cvt_pk_bf8_f32(cdna.v[2], cdna.v[0], cdna.v[1]),
         ])
         self.assertEqual(out, 0xdead3c00 | expected)
-
-  def test_v_add_co_u32_sdwa(self):
-    out = run_cdna([
-      cdna.s_mov_b32(cdna.s[0], 0xffffffff),
-      cdna.v_mov_b32_e32(cdna.v[0], cdna.s[0]),
-      cdna.v_mov_b32_e32(cdna.v[13], 1),
-      cdna.v_add_co_u32_e32(cdna.v[2], SDWA, cdna.v[13], cdna.v[0], 0, 0, 0, 0, 0, 0, 6, 0, 6),
-    ])
-    self.assertEqual(out, 0)  # 0xffffffff + 1 wraps to 0

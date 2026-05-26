@@ -535,6 +535,14 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       ret = UOp(Ops.CONST, dtype, arg=dtype.const(b), src=(UOp(Ops.DEVICE, arg=device),) if device is not None else ())
     return ret.reshape((1,)*len(shape)).expand(shape) if shape is not None and shape != () and ret.shape != shape else ret
   @staticmethod
+  def unique_const(fill_value:ConstType, dtype:DTypeLike|None=None, device:str|tuple[str, ...]|None=None,  # type: ignore[override]
+                   shape:tuple[sint, ...]|None=None, unique=True):
+    # NOTE: fill_value is ConstType, not ConstLike, so UOps and tuples aren't allowed
+    assert not isinstance(fill_value, (UOp, tuple)), "unique const only works on numbers"
+    ret = UOp.const(to_dtype(dtype) if dtype is not None else dtypes.from_py(fill_value), fill_value, canonicalize_device(device))
+    ret = ret.replace(src=(UOp.unique(None if unique is True else unique),) + ret.src)
+    return ret.reshape((1,)*len(shape)).expand(shape) if shape is not None and ret.shape != shape else ret
+  @staticmethod
   def range(end:sint, axis_id, axis_type=AxisType.LOOP, *arg, dtype=dtypes.weakint, src=(), **kwargs):
     return UOp(Ops.RANGE, dtype=dtype, src=(sint_to_uop(end, dtype),)+src, arg=(axis_id, axis_type)+arg, **kwargs)
   @staticmethod
