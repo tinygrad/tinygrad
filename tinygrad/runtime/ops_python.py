@@ -108,7 +108,7 @@ class PythonProgram:
           values[i] = ret
         elif uop is Ops.INDEX:
           assert isinstance(src_dtypes[0], ImageDType), "only image INDEX is supported"
-          ret:list = []
+          ret = []
           assert len(src_values) == 3, "image index must be 3 srcs"
           for m,oy,ox in zip(*src_values):
             if ox < 0 or ox >= src_dtypes[0].shape[1] or oy < 0 or oy >= src_dtypes[0].shape[0]: ret.append((m, None))

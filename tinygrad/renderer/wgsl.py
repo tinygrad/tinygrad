@@ -90,7 +90,7 @@ class WGSLRenderer(CStyleLanguage):
      # (load & mask) | var -> mask = v.src[0].src[1], var = v.src[1]
      f"atomicAnd(&{ctx[b]},{ctx[v.src[0].src[1]]});\n  atomicAdd(&{ctx[b]},{ctx[v.src[1]]});" if is_packed(b.src[0].dtype) \
       else f"{ctx[b]} = {ctx[v]};"),
-    (UPat(Ops.INDEX, src=(UPat.var("b"), UPat.var("idx"))),
+    (UPat(Ops.SLICE, src=(UPat.var("b"), UPat.var("idx"))),
      lambda ctx,b,idx: f"{ctx[b]}[{strip_parens(ctx[idx]) if idx.arg is Ops.ADD else ctx[idx]}]"),
   ]) + base_rewrite
 
