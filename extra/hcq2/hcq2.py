@@ -3,7 +3,7 @@ from typing import cast, Callable, TypeVar, Generic, Any, TYPE_CHECKING
 import struct, functools, time, collections, importlib, itertools
 from dataclasses import replace
 if TYPE_CHECKING: from tinygrad.engine.realize import ExecContext
-from tinygrad.helpers import DEV, getenv, select_first_inited, select_by_name, suppress_finalizing, mv_address, round_up, DEBUG, dedup
+from tinygrad.helpers import DEV, getenv, select_first_inited, select_by_name, suppress_finalizing, mv_address, round_up, DEBUG, dedup, pluralize
 from tinygrad.device import Device, Buffer, BufferSpec, Compiled, LRUAllocator, MultiBuffer
 from tinygrad.uop.ops import Ops, sint, UOp, UPat, PatternMatcher, KernelInfo, graph_rewrite, track_rewrites
 from tinygrad.uop.symbolic import symbolic_simple, symbolic
@@ -354,7 +354,7 @@ def callify_hcq(call:UOp) -> UOp:
   return to_program(sink, Device["CPU"].renderer).call(*bufs, UOp(Ops.BIND, dtypes.void, src=call.src[1:]))
 pm_callify_hcq = PatternMatcher([(UPat(Ops.CALL, tag="hcq", name="call"), callify_hcq)])
 
-@track_rewrites(name=lambda **k: "Schedule HCQ")
+@track_rewrites(lambda _,ret: f"HCQ Schedule {pluralize('Kernel', len(ret.src))}")
 def hcq_schedule(linear:UOp) -> UOp:
   linear = graph_rewrite(linear, pm_insert_copy_staging + pm_flatten_linear, name="insert copy staging")
   linear = graph_rewrite(linear, pm_prep_runtime, name="prepare runtime")
