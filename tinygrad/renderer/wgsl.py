@@ -14,7 +14,7 @@ def packed_store(bidx:UOp, var:UOp, gate:UOp|None=None):
   elems, mask = 4//var.dtype.itemsize, _mask(var.dtype)
   shift_am, div_idx = (bidx.src[1].cast(dtypes.uint32) % elems) * (8*var.dtype.itemsize), bidx.src[1] // elems
   new_v, wmask = (var & mask).cast(dtypes.uint32) << shift_am, ((mask << shift_am) ^ 0xFFFFFFFF).cast(dtypes.uint32)
-  idx = UOp(Ops.INDEX, bidx.dtype, (bidx.src[0], div_idx))
+  idx = UOp(Ops.SLICE, bidx.dtype, (bidx.src[0], div_idx), bidx.arg)
   buf = UOp.load(idx, *((UOp.const(dtypes.uint32, 0), gate) if gate is not None else ()), dtype=dtypes.uint32)
   return UOp.store(idx, (buf & wmask) | new_v, *((gate,) if gate is not None else ()))
 
@@ -22,7 +22,7 @@ def packed_store(bidx:UOp, var:UOp, gate:UOp|None=None):
 def packed_load(root:UOp, bidx:UOp, dtype:DType, var:UOp|None=None, gate:UOp|None=None):
   elems, mask = 4//dtype.itemsize, _mask(dtype)
   shift_am, div_idx = (bidx.src[1].cast(dtypes.uint32) % elems) * (8*dtype.itemsize), bidx.src[1] // elems
-  idx = UOp(Ops.INDEX, bidx.dtype, (bidx.src[0], div_idx))
+  idx = UOp(Ops.SLICE, bidx.dtype, (bidx.src[0], div_idx), bidx.arg)
   load = UOp.load(idx, *((var, gate) if var is not None and gate is not None else root.src[1:]), dtype=dtypes.uint32, arg=root.arg)
   val = (load.cast(dtypes.uint32) >> shift_am) & mask
   return sign_extend(val, 8*dtype.itemsize).cast(dtype) if dtype in [dtypes.char, dtypes.short] else val.cast(dtype)
@@ -90,7 +90,7 @@ class WGSLRenderer(CStyleLanguage):
      # (load & mask) | var -> mask = v.src[0].src[1], var = v.src[1]
      f"atomicAnd(&{ctx[b]},{ctx[v.src[0].src[1]]});\n  atomicAdd(&{ctx[b]},{ctx[v.src[1]]});" if is_packed(b.src[0].dtype) \
       else f"{ctx[b]} = {ctx[v]};"),
-    (UPat(Ops.INDEX, src=(UPat.var("b"), UPat.var("idx"))),
+    (UPat(Ops.SLICE, src=(UPat.var("b"), UPat.var("idx"))),
      lambda ctx,b,idx: f"{ctx[b]}[{strip_parens(ctx[idx]) if idx.arg is Ops.ADD else ctx[idx]}]"),
   ]) + base_rewrite
 

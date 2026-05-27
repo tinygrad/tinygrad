@@ -1267,7 +1267,7 @@ class TestBufferView(unittest.TestCase):
     a = Tensor.arange(10*8).reshape(10, 8).clone().shard(devices, axis=1).realize()
     run_linear(*check_schedule(a.shrink(((2, 8), None)).shrink(((1, 4), None)).contiguous(), 0))
 
-  # negative tests: these should NOT become BUFFER_VIEW (non-contiguous per shard)
+  # negative tests: these should NOT become SLICE (non-contiguous per shard)
   def test_expand_multi_not_buffer_view(self):
     devices = ("NULL:1", "NULL:2")
     a = Tensor.arange(4*2).reshape(4, 1, 2).clone().shard(devices, axis=2).realize()

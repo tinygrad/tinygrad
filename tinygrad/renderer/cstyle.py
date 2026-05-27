@@ -62,7 +62,7 @@ base_rewrite = PatternMatcher([
 
 extra_pm = PatternMatcher([
   # devectorize any bools
-  (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.INDEX), dtype=dtypes.bool, name="alu"), no_vectorized_alu),
+  (UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.SLICE), dtype=dtypes.bool, name="alu"), no_vectorized_alu),
   # CAST (from bool) can't be vectorized
   (UPat(Ops.CAST, src=(UPat(dtype=dtypes.bool),), name="alu"), no_vectorized_alu),
   # WHERE can't be vectorized
@@ -192,14 +192,15 @@ class CStyleLanguage(Renderer):
       else:
         prefix = {Ops.WMMA: "wmma", Ops.DEFINE_LOCAL: "temp", Ops.CONST: "const",
                   Ops.CAST: "cast", Ops.BITCAST: "cast", Ops.GEP: "gep", Ops.STACK: "cast",
-                  Ops.INDEX: "bidx", Ops.DEFINE_REG: "acc", Ops.LOAD: "val"}.get(u.op, "alu")
+                  Ops.DEFINE_REG: "acc", Ops.LOAD: "val"}.get(u.op, "alu")
         r[u] = f"{prefix}{c[prefix]}"
 
       l = cast(str, self.string_rewrite.rewrite(u, ctx=self))
       assert l is not None, f"failed to render {u.op} {u.dtype} {[(x.op,x.dtype) for x in u.src]} {u.arg}"
 
       if u.op in {Ops.ENDIF, Ops.END}: depth -= 1
-      if (u.op is not Ops.CAST or u.dtype.vcount == 1) and (u.op in {Ops.CONST, Ops.GEP, Ops.INDEX, Ops.CUSTOMI, Ops.SLICE} or \
+      if (u.op is not Ops.CAST or u.dtype.vcount == 1) and (u.op in {Ops.CONST, Ops.GEP, Ops.CUSTOMI, Ops.SLICE} or \
+        (u.op is Ops.INDEX and isinstance(u.src[0].dtype, ImageDType)) or \
         (u.op is Ops.LOAD and u.src[0].ptrdtype.addrspace == AddrSpace.REG) or \
         (u.op is Ops.CAST and isinstance(u.dtype, PtrDType)) or \
         (u.op in {Ops.STACK, *(GroupOp.ALU-{Ops.WHERE}), Ops.CAST, Ops.BITCAST} and child_count[u] == 1 and not getenv("EXPAND_SSA"))):
@@ -305,7 +306,8 @@ class OpenCLRenderer(CStyleLanguage):
     (UPat(Ops.CONST, dtypes.bfloat16, name="x"),
       lambda ctx,x: f"{(struct.unpack('I', struct.pack('f', float_to_bf16(x.arg)))[0] >> 16)}u"),
     # load/store image (OpenCL)
-    (UPat.var('buf').index(UPat.var('idx_y'), UPat.var('idx_x')), lambda ctx,buf,idx_y,idx_x: f"IMAGE<{ctx[buf]}, {ctx[idx_y]}, {ctx[idx_x]}>"),
+    (UPat.var('buf').index(UPat.var('idx_y'), UPat.var('idx_x')),
+      lambda ctx,buf,idx_y,idx_x: f"IMAGE<{ctx[buf]}, {ctx[idx_y]}, {ctx[idx_x]}>"),
     (UPat(Ops.LOAD, dtype=dtypes.float.vec(4), src=(UPat.var('buf').index(UPat.var('idx_y'), UPat.var('idx_x')), UPat.var("var"), UPat.var("gate"))),
       lambda ctx,buf,idx_y,idx_x,var,gate: f"({ctx[gate]}?read_imagef({ctx[buf]}, smp, (int2)({ctx[idx_x]},{ctx[idx_y]})):{ctx[var]})"),
     (UPat(Ops.LOAD, dtype=dtypes.float.vec(4), src=(UPat.var('buf').index(UPat.var('idx_y'), UPat.var('idx_x')),)),

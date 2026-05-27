@@ -8,7 +8,7 @@ from tinygrad.uop.render import pyrender
 from tinygrad.uop.spec import type_verify, spec_tensor, spec_program
 from tinygrad.renderer import Renderer, Estimates
 from tinygrad.renderer.isa import ISARenderer, IselContext, PreRegAllocContext
-from tinygrad.dtype import dtypes
+from tinygrad.dtype import dtypes, ImageDType
 
 # import all pattern matchers here
 from tinygrad.codegen.gpudims import pm_add_gpudims
@@ -111,12 +111,16 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   return sink
 
 # inject IF/ENDIF. only needed if device doesn't support gated stores
+def _gate_store(u:UOp, gate:UOp):
+  return (st:=u.replace(src=u.src[0:2])), [mif:=UOp(Ops.IF, src=(gate, u.src[0])), st, UOp(Ops.ENDIF, src=(mif,))]
+
 pm_linearize_cleanups = PatternMatcher([
   # if statements are not allowed in the graph
   (UPat((Ops.IF, Ops.ENDIF)), lambda: panic(RuntimeError, "if not allowed in graph")),
   # gated STORE becomes IF-STORE-ENDIF. this is the only use of IF-ENDIF
+  (UPat(Ops.STORE, name="u", src=(UPat(Ops.SLICE).or_casted(), UPat(), UPat(name="gate", dtype=dtypes.bool))), _gate_store),
   (UPat(Ops.STORE, name="u", src=(UPat(Ops.INDEX).or_casted(), UPat(), UPat(name="gate", dtype=dtypes.bool))),
-   lambda u, gate: ((st:=u.replace(src=u.src[0:2])), [mif:=UOp(Ops.IF, src=(gate, u.src[0])), st, UOp(Ops.ENDIF, src=(mif,))]))
+   lambda u, gate: _gate_store(u, gate) if isinstance((u.src[0].src[0] if u.src[0].op is Ops.CAST else u.src[0]).src[0].dtype, ImageDType) else None),
 ])
 
 # requires lst be toposorted. like graph rewrite, but for lines

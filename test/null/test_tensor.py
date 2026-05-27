@@ -70,13 +70,13 @@ class TestIdxUpcast(unittest.TestCase):
 
   def _assert(self, dtype: DType, a: Tensor):
     uops = self._schedule_render(a)
-    # Assert the dtype of the INDEX value, This will need be updated if UOp spec changes
+    # Assert the dtype of the buffer index value.
     store = next(uop for uop in uops if uop.op is Ops.STORE)
     assert store.op is Ops.STORE
-    idx = self._find_op(store, Ops.INDEX)
-    # PTX and NIR turn Ops.INDEX into pointer arithmetic earlier than cstyle, plus it's already cast to int64
+    idx = self._find_op(store, Ops.SLICE)
+    # PTX and NIR turn buffer indexing into pointer arithmetic earlier than cstyle, plus it's already cast to int64
     if not isinstance(Device[Device.DEFAULT].renderer, (PTXRenderer, NIRRenderer)):
-      assert idx.op is Ops.INDEX
+      assert idx.op is Ops.SLICE
       idx_val = idx.src[1]
       self.assertIs(idx_val.dtype, dtype)
 

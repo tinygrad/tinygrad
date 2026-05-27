@@ -3,7 +3,7 @@ from typing import Callable, cast
 from dataclasses import dataclass
 from tinygrad.helpers import prod, Target, EMULATED_DTYPES
 from tinygrad.uop.ops import Ops, UOp, sint, ssimplify, smin, GroupOp, PatternMatcher
-from tinygrad.dtype import AddrSpace, PtrDType, DType, dtypes
+from tinygrad.dtype import AddrSpace, PtrDType, DType, ImageDType, dtypes
 from tinygrad.codegen.opt.tc import TensorCore
 from tinygrad.device import Compiler
 
@@ -29,8 +29,10 @@ class Estimates:
       def range_gate(x): return x.op is not Ops.RANGE
       for u in uops:
         if u.op in {Ops.LOAD, Ops.STORE}:
-          # if u.src[0] is INDEX, we have to include the buffer since it might be an AFTER
-          dont_count = dont_count.union((UOp.sink(*u.src[0].src[1:]) if u.src[0].op is Ops.INDEX else u.src[0]).toposort(range_gate))
+          idx = u.src[0].src[0] if u.src[0].op is Ops.CAST else u.src[0]
+          # if u.src[0] is a buffer index/view, include only index arithmetic since the buffer might be an AFTER
+          is_image_index = idx.op is Ops.INDEX and isinstance(idx.src[0].dtype, ImageDType)
+          dont_count = dont_count.union((UOp.sink(*idx.src[1:]) if idx.op is Ops.SLICE or is_image_index else idx).toposort(range_gate))
           # TODO: is this correct? this all needs to be cleaned up
           if len(u.src) > 2: dont_count = dont_count.union(u.src[2].toposort())
         elif u.op is Ops.IF:

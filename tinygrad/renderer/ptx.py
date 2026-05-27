@@ -51,8 +51,8 @@ ptx_matcher = PatternMatcher([
   (UPat(Ops.STORE, src=(UPat(dtype=dtypes.int64), UPat(dtype=dtypes.bool)), name="x", allow_any_len=True),
    lambda x: UOp(x.op, dtypes.void, (x.src[0], x.src[1].cast(dtypes.uint8))+x.src[2:])),
   # indexing on PTX is in uint64, we do the math while it's still in the graph
-  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx")), name="op"), lambda buf,idx,op:
-    UOp(Ops.INDEX, dtype=dtypes.int64, src=(buf, buf.cast(dtypes.int64)+idx.cast(dtypes.int64)*buf.dtype.itemsize)+op.src[2:]) \
+  (UPat(Ops.SLICE, src=(UPat.var("buf"), UPat.var("idx")), name="op"), lambda buf,idx,op:
+    UOp(op.op, dtype=dtypes.int64, src=(buf, buf.cast(dtypes.int64)+idx.cast(dtypes.int64)*buf.dtype.itemsize)+op.src[2:]) \
       if op.dtype != dtypes.int64 and buf.dtype.addrspace != AddrSpace.REG else None),
   # ptx shr and shl instructions require y to be uint
   (UPat.var("x") << UPat.var("y"), lambda x,y: UOp(Ops.SHL, x.dtype, (x,y.cast(dtypes.uint))) if y.dtype != dtypes.uint else None),
@@ -100,18 +100,19 @@ string_rewrite = PatternMatcher([
   (UPat(Ops.CAST, name="x", src=(UPat.var("a"),)),
    lambda ctx, x, a: f"cvt{modifier(x.dtype, a.dtype)}.{ctx.cast_types[x.dtype]}.{ctx.cast_types[a.dtype]} {ctx.r[x]}, {ctx.r[a]};"),
   # store / gated load / load
-  (UPat(Ops.STORE, src=(UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("loc"))).or_casted(), UPat.var("var"))),
+  (UPat(Ops.STORE, src=(UPat(Ops.SLICE, src=(UPat.var("buf"), UPat.var("loc"))).or_casted(), UPat.var("var"))),
    lambda ctx, loc, var, buf: f"st.{mem_type(buf)}" + \
     f"{f'.v{cnt}' if ((cnt:=var.dtype.count)>1) else ''}.{ctx.mem_types[var.dtype.scalar()]} " + \
     f"[{ctx.r[loc]}+0], {('{' + ', '.join(ctx.r[var]) + '}') if var.dtype.count > 1 else ctx.r[var]};"),
-  (UPat(Ops.LOAD, name="x", src=(UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("loc"))).or_casted(), UPat.var("alt"), UPat.var("gate"))),
+  (UPat(Ops.LOAD, name="x", src=(UPat(Ops.SLICE, src=(UPat.var("buf"), UPat.var("loc"))).or_casted(),
+                                      UPat.var("alt"), UPat.var("gate"))),
     lambda ctx, x, loc, alt, gate, buf: flatten([
     [f"mov.{ctx.mem_types[x.dtype.scalar()]} {v}, {render_val(0, x.dtype.scalar())};" for v in ctx.r[x]],
     [f"@{ctx.r[gate]} ld.{mem_type(buf)}.v{x.dtype.count}.{ctx.mem_types[x.dtype.scalar()]} {{{', '.join(ctx.r[x])}}}, [{ctx.r[loc]}+0];"]
   ]) if alt.dtype.count > 1 else [
     f"@{ctx.r[gate]} ld.{mem_type(buf)}.{ctx.mem_types[x.dtype.scalar()]} {ctx.r[x]}, [{ctx.r[loc]}+0];",
     f"@!{ctx.r[gate]} mov.b{ctx.types[x.dtype.scalar()][1:]} {ctx.r[x]}, {ctx.r[alt]};"]),
-  (UPat(Ops.LOAD, name="x", src=(UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("loc"))).or_casted(),)),
+  (UPat(Ops.LOAD, name="x", src=(UPat(Ops.SLICE, src=(UPat.var("buf"), UPat.var("loc"))).or_casted(),)),
     lambda ctx, x, loc, buf: f"ld.{mem_type(buf)}.v{x.dtype.count}.{ctx.mem_types[x.dtype.scalar()]} {{{', '.join(ctx.r[x])}}}, [{ctx.r[loc]}+0];" \
      if x.dtype.count > 1 else f"ld.{mem_type(buf)}.{ctx.mem_types[x.dtype]} {ctx.r[x]}, [{ctx.r[loc]}+0];"),
   # simple
@@ -204,8 +205,9 @@ class PTXRenderer(Renderer):
       if u.op is Ops.DEFINE_REG:
         r[u] = [ssa("reg", u, self.types[u.dtype.base.scalar()]) for _ in range(u.ptrdtype.size)]
         continue
-      if u.op in {Ops.INDEX, Ops.LOAD, Ops.STORE} and isinstance(u.src[0].dtype, PtrDType) and u.src[0].dtype.addrspace == AddrSpace.REG:
-        if u.op is Ops.INDEX:
+      if u.op in {Ops.SLICE, Ops.LOAD, Ops.STORE} and isinstance(u.src[0].dtype, PtrDType) and \
+         u.src[0].dtype.addrspace == AddrSpace.REG:
+        if u.op is Ops.SLICE:
           assert u.src[1].op == Ops.CONST, f"index on REG in ptx only supported on CONST, not {u.src[1].op}"
           r[u] = r[u.src[0]][u.src[1].arg]
         else:
@@ -214,7 +216,7 @@ class PTXRenderer(Renderer):
             typ = "pred" if u.src[1].dtype == dtypes.bool else ("b"+self.types[u.src[1].dtype][1:])
             kernel.append(f"mov.{typ} {self.r[u.src[0]]}, {self.r[u.src[1]]};")
         continue
-      if u.op is Ops.INDEX: continue  # other index we can skip
+      if u.op is Ops.SLICE: continue
       if u.op is Ops.SPECIAL: r[u] = "%" + u.arg
       elif u.op is Ops.DEFINE_VAR: bufs.append((u.expr, u.dtype))
       elif u.op is Ops.LOAD:

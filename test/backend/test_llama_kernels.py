@@ -74,6 +74,9 @@ class TestQuantizeFP8(unittest.TestCase):
   @needs_second_gpu
   def test_multi(self):
     devs = tuple(f"{Device.DEFAULT}:{i}" for i in range(8))
+    try:
+      for dev in devs: Device[dev]
+    except Exception as e: self.skipTest(f"8 devices not available: {e}")
     x = Tensor.empty(2048*8, 1024, dtype=dtypes.bfloat16, device=devs).uop.multi(0)
     x = Tensor(x, device=devs)
     amax_state = Tensor.full((), 2.0, dtype=dtypes.float32, device=devs).contiguous()

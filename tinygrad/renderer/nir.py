@@ -136,11 +136,11 @@ class NIRRenderer(Renderer):
     # ref: https://registry.khronos.org/SPIR-V/specs/unified1/SPIRV.html#OpConvertFToU
     (UPat(Ops.CAST, (dtypes.uchar, dtypes.ushort), src=(UPat.var("x", dtypes.floats),), name="c"), lambda x,c: x.cast(dtypes.int32).cast(c.dtype)),
     # load/store use pointer arithmetic, and the cast does nothing. NOTE: this doesn't apply to image indexing cause it's 1-D
-    (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("off")), name="x"), lambda x,buf,off: x.replace(
+    (UPat(Ops.SLICE, src=(UPat.var("buf"), UPat.var("off")), name="x"), lambda x,buf,off: x.replace(
       src=(buf,off.cast(dtypes.long))) if buf.dtype.addrspace != AddrSpace.REG and off.op not in (Ops.CAST, Ops.STACK) else None),
     # images need index to be int for nir
     (UPat.var("buf").index(UPat.var("idx_y"), UPat.var("idx_x")),
-     lambda buf,idx_y,idx_x: buf.index(idx_y.cast(dtypes.int), idx_x.cast(dtypes.int))),
+     lambda buf,idx_y,idx_x: buf.index(idx_y.cast(dtypes.int), idx_x.cast(dtypes.int)) if isinstance(buf.dtype, ImageDType) else None),
   ])
 
   def_rewrite = PatternMatcher([
@@ -148,12 +148,12 @@ class NIRRenderer(Renderer):
     (UPat(Ops.PARAM, name="x"), lambda ctx,x: ctx.param(ctx.b, x, 8)),
     (UPat(Ops.DEFINE_VAR, name="x"), lambda ctx,x: ctx.param(ctx.b, x, 4)),
     (UPat(Ops.SPECIAL, name="x"), lambda ctx,x: nchannel(ctx.b, {'g':ngid, 'l':nlid, 'i': nid}[x.arg[0]](ctx.b), int(x.arg[-1]))),
-    (UPat(Ops.STORE, src=(UPat(Ops.INDEX, src=(UPat.var("buf"),UPat.var("off"))).or_casted(), UPat.var("val"))),
+    (UPat(Ops.STORE, src=(UPat(Ops.SLICE, src=(UPat.var("buf"),UPat.var("off"))).or_casted(), UPat.var("val"))),
      lambda ctx,buf,off,val: nstore(ctx.b, buf.ptrdtype.addrspace, nidx(ctx.b, ctx.r[buf], ctx.r[off], buf.dtype), ctx.r[val], val.dtype)),
-    (UPat(Ops.LOAD, src=(UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("off"))).or_casted(), UPat.var("alt"), UPat.var("gate")), name="x"),
+    (UPat(Ops.LOAD, src=(UPat(Ops.SLICE, src=(UPat.var("buf"), UPat.var("off"))).or_casted(), UPat.var("alt"), UPat.var("gate")), name="x"),
      lambda ctx,x,buf,off,alt,gate: if_phi(ctx.b, ctx.r[gate],
       lambda: nload(ctx.b, buf.ptrdtype.addrspace, nidx(ctx.b, ctx.r[buf], ctx.r[off], buf.dtype, ctx.r[gate]), x.dtype), lambda: ctx.r[alt])),
-    (UPat(Ops.LOAD, src=(UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("off"))).or_casted(),), name="x"),
+    (UPat(Ops.LOAD, src=(UPat(Ops.SLICE, src=(UPat.var("buf"), UPat.var("off"))).or_casted(),), name="x"),
      lambda ctx,x,buf,off: nload(ctx.b, buf.ptrdtype.addrspace, nidx(ctx.b, ctx.r[buf], ctx.r[off], buf.dtype), x.dtype)),
     (UPat(Ops.STACK, name="x"), lambda ctx,x: nalu(ctx.b, f"vec{x.dtype.count}", *[ctx.r[src] for src in x.src])),
     (UPat(GroupOp.ALU, name="x"), lambda ctx,x: nalu(ctx.b, aop[x.src[0].dtype.scalar()][x.op], *[ctx.r[src] for src in x.src])),
@@ -189,7 +189,7 @@ class NIRRenderer(Renderer):
     self.param_idx, ranges = 0, []
 
     for u in uops:
-      if u.op in {Ops.NOOP, Ops.GROUP, Ops.INDEX}: pass
+      if u.op in {Ops.NOOP, Ops.GROUP, Ops.SLICE} or (u.op is Ops.INDEX and isinstance(u.src[0].dtype, ImageDType)): pass
       elif u.op is Ops.CAST and isinstance(u.dtype, PtrDType): pass
       elif u.op is Ops.AFTER:
         self.r[u] = self.r[u.src[0]]

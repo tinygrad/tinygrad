@@ -538,7 +538,7 @@ class TestUOpGraph(unittest.TestCase):
     uops = to_uops_list([UOp(Ops.STORE, dtypes.void, (glbl0.index(idx), ld1+ld0))])
     ld0 = uops[-2].src[-1]  # -2 to skip SINK
     # the gate and invalid value are deleted from ld1
-    self.assertEqual(ld0, UOp.load(glbl2.index(idx, ptr=True), dtype=dtypes.int))
+    self.assertEqual(ld0, UOp.load(glbl2.index(idx, ptr=True).replace(op=Ops.SLICE, arg=0), dtype=dtypes.int))
 
   def test_fold_gated_load_local(self):
     glbl0 = UOp(Ops.PARAM, dtypes.int.ptr(), (), 0)
@@ -552,7 +552,8 @@ class TestUOpGraph(unittest.TestCase):
 
     ld0 = uops[-2].src[-1]  # -2 to skip SINK
     # the gate and invalid value are deleted from ld1
-    self.assertEqual(ld0.src[0], smem.after(barrier).index(lidx+2, ptr=True))
+    self.assertIs(ld0.src[0].op, Ops.SLICE)
+    self.assertEqual(ld0.src[0].src[1], lidx+2)
 
   def test_fold_gated_store(self):
     glbl = UOp(Ops.PARAM, dtypes.int.ptr(), (), 0)
@@ -564,7 +565,7 @@ class TestUOpGraph(unittest.TestCase):
     uops = to_uops_list([st0, st1])
     # only the second store happens
     self.assertEqual(len(uops), 6)  # +1 for SINK
-    self.assertEqual(uops[-2], glbl.index(idx1, ptr=True).store(val))  # -2 to skip SINK
+    self.assertEqual(uops[-2], glbl.index(idx1, ptr=True).replace(op=Ops.SLICE, arg=0).store(val))  # -2 to skip SINK
 
   @unittest.skip("this is a uop type error")
   def test_asserts_bad_gate(self):

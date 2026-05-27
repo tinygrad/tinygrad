@@ -129,15 +129,16 @@ class TestSQTTMapBase(unittest.TestCase):
 
   def test_sqtt_cli(self):
     for pkl_path in sorted((EXAMPLES_DIR/self.target).glob("*.pkl")):
-      out = run_cli("--profile-path", str(pkl_path), "--ls")
+      no_rewrites = ("--rewrites-path", "")
+      out = run_cli(*no_rewrites, "--profile-path", str(pkl_path), "--ls")
       sqtt_traces = [l["value"].strip() for l in out if "SQTT" in l["value"]]
       for name in sqtt_traces:
-        lines = run_cli("--profile-path", str(pkl_path), "-s", ansistrip(name))
+        lines = run_cli(*no_rewrites, "--profile-path", str(pkl_path), "-s", ansistrip(name))
         self.assertIn("Clk", lines[0]["value"])
         waves = [r["clk"] for r in lines[2:] if "WAVE" in r["unit"]]
         self.assertEqual(waves, sorted(waves), f"wave timestamps not monotonic in {name}")
       with Context(DEBUG=2):
-        kernels = run_cli("--profile-path", str(pkl_path), "-s", "AMD")
+        kernels = run_cli(*no_rewrites, "--profile-path", str(pkl_path), "-s", "AMD")
       self.assertEqual(len(kernels), len(self.examples[pkl_path.stem][1]))
 
 class TestSQTTMapRDNA3(TestSQTTMapBase): target = "gfx1100"
