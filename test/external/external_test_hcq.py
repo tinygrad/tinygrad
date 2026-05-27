@@ -1,6 +1,6 @@
 import unittest, ctypes, struct, time, array
 from tinygrad import Device, Tensor, dtypes
-from tinygrad.helpers import to_mv, CI
+from tinygrad.helpers import to_mv, DEV
 from tinygrad.device import Buffer, BufferSpec
 from tinygrad.engine.realize import get_runtime
 from tinygrad.codegen import to_program
@@ -148,7 +148,7 @@ class TestHCQ(unittest.TestCase):
     val = TestHCQ.b.uop.buffer.as_memoryview().cast("f")[1]
     assert val == 0.0, f"got val {val}, should not be updated"
 
-  @unittest.skipIf(CI, "Can't handle async update on CPU")
+  @unittest.skipIf(DEV.interface.startswith("MOCK"), "Can't handle async update on CPU")
   def test_wait_signal(self):
     temp_signal = TestHCQ.d0._alloc_signal(value=0)
     TestHCQ.compute_queue().wait(temp_signal, value=1).signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value).submit(TestHCQ.d0)
@@ -159,7 +159,7 @@ class TestHCQ(unittest.TestCase):
     TestHCQ.d0._wait_signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value, timeout=100)
     TestHCQ.d0.timeline_value += 1
 
-  @unittest.skipIf(CI, "Can't handle async update on CPU")
+  @unittest.skipIf(DEV.interface.startswith("MOCK"), "Can't handle async update on CPU")
   def test_wait_copy_signal(self):
     temp_signal = TestHCQ.d0._alloc_signal(value=0)
     TestHCQ.copy_queue().wait(temp_signal, value=1).signal(TestHCQ.d0.timeline_signal, TestHCQ.d0.timeline_value).submit(TestHCQ.d0)

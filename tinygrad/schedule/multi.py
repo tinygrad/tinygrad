@@ -43,7 +43,9 @@ if not getenv("LATE_ALLREDUCE", 1): replace_allreduce = _early_allreduce + repla
 
 def alu_multi(root:UOp):
   msrcs = root.src
-  assert all_same([x.device for x in msrcs]), f"all buffers must have the same device {[x.device for x in msrcs]}"
+  devices = [x.device for x in msrcs if x.device is not None]
+  assert all_same(devices), f"all buffers must have the same device {devices}"
+  dcount = len(devices[0])
   axis = root.axis
   assert axis is not None
 
@@ -52,7 +54,7 @@ def alu_multi(root:UOp):
     if mlb.axis is None:
       # no axis, shard it
       assert mlb.op is not Ops.MULTI
-      srcs.append(mlb._shard(axis))
+      srcs.append(mlb._shard(axis, dcount))
     else:
       assert mlb.op is Ops.MULTI
       if mlb.axis == axis:
@@ -60,7 +62,7 @@ def alu_multi(root:UOp):
         srcs.append(mlb.src[0])
       else:
         # axis mismatch, copy to all devices, and shard it correctly
-        srcs.append(copy_multi(mlb, mlb.device)._shard(axis))
+        srcs.append(copy_multi(mlb, mlb.device)._shard(axis, dcount))
   return srcs[0].alu(root.op, *srcs[1:]).multi(axis)
 
 def reduce_multi(root:UOp, multi:UOp):
@@ -109,6 +111,9 @@ def flip_multi(root:UOp, multi:UOp):
 
 def copy_multi(multi:UOp, device:str | tuple[str, ...] | UOp):
   assert multi.axis is not None, "all multi ops have axis"
+  if isinstance(device, UOp) and isinstance(device.arg, str):
+    pieces = [multi.src[0].mselect(i).copy_to_device(device) for i in range(len(multi.device))]
+    return pieces[0].cat(*pieces[1:], dim=multi.axis)
   return multi.src[0]._unshard(multi.axis).allreduce(Ops.ADD, device)
 
 def store_after_multi(dest:UOp, src:UOp): return dest.after(dest.store(src.src[0])).multi(src.axis)
@@ -129,7 +134,7 @@ def rewrite_into_function(call:UOp):
 
 def param_to_multi(p:UOp):
   if p.axis is None: return None
-  return UOp.param(p.arg, p.dtype, p.shard_shape, p._device).multi(p.axis)
+  return UOp.param(p.arg, p.dtype, p.shard_shape, p.device).multi(p.axis)
 
 # NOTE: this is the same pattern as Ops.UNROLL
 multi_pm = PatternMatcher([

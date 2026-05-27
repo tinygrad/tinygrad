@@ -3,7 +3,6 @@ import torch
 import unittest
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.nn.optim import Adam, SGD, AdamW, Muon, LAMB
-from tinygrad.device import is_dtype_supported
 from test.helpers import needs_second_gpu, slow
 
 np.random.seed(1337)
@@ -11,17 +10,20 @@ x_init = np.random.randn(1,4).astype(np.float32)
 W_init = np.random.randn(4,4).astype(np.float32)
 m_init = np.random.randn(1,4).astype(np.float32)
 
+def _param(tensor, val):
+  return tensor(val, requires_grad=True) if tensor is torch.tensor else tensor(val)
+
 class TeenyNet:
   def __init__(self, tensor):
-    self.x = tensor(x_init.copy(), requires_grad=True)
-    self.W = tensor(W_init.copy(), requires_grad=True)
+    self.x = _param(tensor, x_init.copy())
+    self.W = _param(tensor, W_init.copy())
   def forward(self):
     return (self.x * self.W).sum()
 
 class TinyNet:
   def __init__(self, tensor):
-    self.x = tensor(x_init.copy(), requires_grad=True)
-    self.W = tensor(W_init.copy(), requires_grad=True)
+    self.x = _param(tensor, x_init.copy())
+    self.W = _param(tensor, W_init.copy())
     self.m = tensor(m_init.copy())
 
   def forward(self):
@@ -142,7 +144,7 @@ class TestOptim(unittest.TestCase):
 
       np.testing.assert_allclose(losses[0], losses[1], atol=1e-4, rtol=0)
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
+  @unittest.skipUnless(dtypes.half in Device[Device.DEFAULT].renderer.supported_dtypes(), "need half")
   def test_mixed_precision(self):
     old_default_float, dtypes.default_float = dtypes.default_float, dtypes.half
     # weight update would overflow without upcasting
@@ -152,7 +154,7 @@ class TestOptim(unittest.TestCase):
     dtypes.default_float = old_default_float
 
   def test_assert_tensor_train(self):
-    t = Tensor.ones((1,1), requires_grad=True)
+    t = Tensor.ones((1,1))
     optimizer = Adam([t])
     optimizer.zero_grad()
     old_state = Tensor.training
@@ -165,7 +167,7 @@ class TestOptim(unittest.TestCase):
 
   def test_lamb_cpu_offload(self):
     # test that LAMB works when optimizer params (m, v, b1_t, b2_t) are moved to CPU
-    t = Tensor(x_init.copy(), requires_grad=True)
+    t = Tensor(x_init.copy())
     opt = LAMB([t])
     # move optimizer state to CPU
     for p in opt.m + opt.v + [opt.b1_t, opt.b2_t]: p.to_("CPU")
@@ -178,7 +180,7 @@ class TestOptim(unittest.TestCase):
   @needs_second_gpu
   def test_lamb_cpu_offload_multi(self):
     ds = tuple(f"{Device.DEFAULT}:{i}" for i in range(2))
-    t = Tensor(x_init.copy(), requires_grad=True).shard(ds, axis=1)
+    t = Tensor(x_init.copy()).shard(ds, axis=1)
     ds = t.device
     opt = LAMB([t])
     # move optimizer state to CPU

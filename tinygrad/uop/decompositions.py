@@ -1,10 +1,10 @@
 from typing import Callable
 import math, functools
 from tinygrad.dtype import dtypes, DType, promo_lattice, truncate
-from tinygrad.device import is_dtype_supported
-from tinygrad.helpers import flatten, polyN, Target, EMULATED_DTYPES
+from tinygrad.helpers import flatten, polyN, DEBUG, EMULATED_DTYPES
 from tinygrad.uop import GroupOp
 from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, graph_rewrite
+from tinygrad.renderer import Renderer
 
 TRANSCENDENTAL_DTYPES = (dtypes.float16, dtypes.float32, dtypes.float64)
 
@@ -279,9 +279,10 @@ def magicgu(vmax:int, d:int) -> tuple[int,int]:
       return m, s
   assert False
 
-def fast_idiv(target: Target, x: UOp, d: int, dont_cast=False) -> UOp|None:
+def fast_idiv(ren: Renderer, x: UOp, d: int, dont_cast=False) -> UOp|None:
+  from tinygrad.renderer.cstyle import MetalRenderer
   # NOTE: disable for METAL due to compiler bug. keccak with -O0 works but not with optimization
-  if target.device.startswith("METAL"): return None
+  if isinstance(ren, MetalRenderer): return None
   # If d is a power of two this is not valid for signed ints!
   is_unsigned = x.vmin>=0 or x.dtype in dtypes.uints
   assert d>0, "Sign should have been taken out of divisor"
@@ -293,11 +294,11 @@ def fast_idiv(target: Target, x: UOp, d: int, dont_cast=False) -> UOp|None:
   # before we try casting to a larger dtype (slow), we see if there are powers of two in d we can shift to make x smaller
   # use explicit Ops.CDIV (trunc) since the recursion assumes trunc semantics throughout
   if (largest_factor_of_two_in_d := (d & -d)) > 1:
-    if (ret:=fast_idiv(target, x.alu(Ops.CDIV, x.const_like(largest_factor_of_two_in_d)),
+    if (ret:=fast_idiv(ren, x.alu(Ops.CDIV, x.const_like(largest_factor_of_two_in_d)),
                        d//largest_factor_of_two_in_d, dont_cast=True)) is not None: return ret
   if dont_cast: return None
   # promo_lattice needs to return an unsigned type if the type is unsigned
-  if dtypes.is_int(next_dtype := promo_lattice[x.dtype.scalar()][-1]) and is_dtype_supported(next_dtype, target):
+  if dtypes.is_int(next_dtype := promo_lattice[x.dtype.scalar()][-1]) and next_dtype in ren.supported_dtypes():
     if m*vmin >= next_dtype.min and m*vmax <= next_dtype.max:
       return ((x.cast(next_dtype)*m) >> s).cast(x.dtype) if is_unsigned else ((x.cast(next_dtype)*m) >> s).cast(x.dtype) + (x<0).where(x.ufix(1), 0)
   return None
@@ -384,7 +385,7 @@ f2f_dt = { f:getattr(dtypes, f"uint{f.bitsize}") for f in dtypes.floats }
 
 def rne(v: UOp, s) -> UOp: return shr(v, s) + ((shr(v, s - 1) & 1) & ((v & ((1 << (s - 1)) - 1)).ne(0).cast(v.dtype) | (shr(v, s) & 1)))
 
-def f2f(v, fr:DType, to:DType):
+def f2f(v, fr:DType, to:DType, sat=True):
   fs, fb, (fe, fm), ts, tb, (te, tm) = fr.bitsize, exponent_bias(fr), dtypes.finfo(fr), to.bitsize, exponent_bias(to), dtypes.finfo(to)
   # NB: denormals are zero!
   if fe <= te and fm < tm:
@@ -399,7 +400,7 @@ def f2f(v, fr:DType, to:DType):
     is_nan = (nosign.eq(shl(1, fm + fe) - 1) if fr == dtypes.fp8e4m3 else exp.eq(shl(1, fe) - 1))
     return (sign | exp.eq(0).where(0, is_nan.where(nan, norm))).bitcast(to)
   elif fe >= te and fm > tm:
-    v = f2f_clamp(v.bitcast(fr), to).bitcast(f2f_dt[fr])
+    v = f2f_clamp(v.bitcast(fr), to, sat).bitcast(f2f_dt[fr])
     sign, nosign = shr(v, fs - ts) & shl(1, ts - 1), v & (shl(1, fs - 1) - 1)
     norm = (rne(nosign, fm - tm) - shl(fb - tb, tm)).cast(f2f_dt[to])
     underflow = (shr(v, fm) & (shl(1, fe) - 1)) < (1 + fb - tb)
@@ -410,12 +411,12 @@ def f2f(v, fr:DType, to:DType):
     return is_nan.where(nan, sign.cast(f2f_dt[to]) | underflow.where(0, norm))
   else: raise NotImplementedError(f"unsupported decomp {fr} -> {to}")
 
-def f2f_clamp(val:UOp, dt:DType) -> UOp:
+def f2f_clamp(val:UOp, dt:DType, sat=True) -> UOp:
   e, m = dtypes.finfo(dt)
   if dt in dtypes.fp8_fnuz: max_exp, max_man = (1 << e) - 1, (1 << m) - 1
   else: max_exp, max_man = ((1 << e) - 1, (1 << m) - 2) if dt == dtypes.fp8e4m3 else ((1 << e) - 2, (1 << m) - 1)
   mx = val.const_like(2.0**(max_exp - exponent_bias(dt)) * (1.0 + max_man / (1 << m)))
-  sat = mx if dt in dtypes.fp8s else val.const_like(float('inf'))
+  sat = mx if dt in dtypes.fp8s and sat else val.const_like(float('inf'))
   # FIXME: CMPLT of nan is undefined
   return val.ne(val).where(val, (val < -mx).where(-sat, (mx < val).where(sat, val)))
 
@@ -553,13 +554,13 @@ pm_float_decomp = PatternMatcher([
    f2f_store(st, idx, val, *ctx) if val.dtype.scalar() == ctx[1] and (idx:=idx.src[0] if idx.op == Ops.CAST else idx).tag == ctx[0] else None),
 ])
 
-def do_dtype_decomps(sink:UOp, ctx:tuple[set[DType], Target]) -> UOp:
-  def _should_emulate(dt): return dt in EMULATED_DTYPES.tolist(dtypes) or not is_dtype_supported(dt, ctx[1])
+def do_dtype_decomps(sink:UOp, ctx:tuple[set[DType], Renderer]) -> UOp:
+  def _should_emulate(dt): return dt in EMULATED_DTYPES.tolist(dtypes) or dt not in ctx[1].supported_dtypes()
   for fr in sorted(filter(_should_emulate, ctx[0])):
-    if fr in dtypes.floats:
-      to = dtypes.half if not _should_emulate(dtypes.half) and fr in dtypes.fp8s else dtypes.float
-      sink = graph_rewrite(sink, pm_float_decomp, name=f"decomp {fr} -> {to}", ctx=(fr, to), bottom_up=True)
-    else: sink = graph_rewrite(sink, pm_long_decomp, name="decomp long -> int", bottom_up=True)
+    to = dtypes.int if fr == dtypes.long else dtypes.half if not _should_emulate(dtypes.half) and fr in dtypes.fp8s else dtypes.float
+    if DEBUG >= 2: print(f"emulating {fr} as {to}")
+    sink = graph_rewrite(sink, pm_float_decomp if fr in dtypes.floats else pm_long_decomp, name=f"decomp {fr} -> {to}", ctx=(fr, to), bottom_up=True)
+  ctx[0].clear()
   return sink
 
 pm_dtype_decomps = PatternMatcher([

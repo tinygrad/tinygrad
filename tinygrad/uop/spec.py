@@ -75,15 +75,15 @@ spec_shared = PatternMatcher([
 
   # GROUP of stores (or groups, or NOOPs)
   # TODO: remove UNROLL here, it's for SPEC=2
-  (UPat(Ops.GROUP, dtypes.void, src=UPat((Ops.GROUP, Ops.STORE, Ops.NOOP, Ops.UNROLL))), lambda: True),
+  (UPat(Ops.GROUP, dtypes.void, src=UPat((Ops.GROUP, Ops.STORE, Ops.NOOP, Ops.UNROLL, Ops.INS))), lambda: True),
 
   # TOOD: these should be buffer with different addrspace
   (UPat(Ops.DEFINE_LOCAL, name="x"), lambda x: isinstance(x.dtype, PtrDType) and x.dtype.addrspace == AddrSpace.LOCAL),
-  (UPat(Ops.DEFINE_REG, src=(), name="x"), lambda x: isinstance(x.arg, int)),
+  (UPat(Ops.DEFINE_REG, src=()), lambda: True),
 
   # AFTER on Movement Op, PARAM, BUFFER, CONTIGUOUS, or another AFTER
   (UPat(Ops.AFTER, src=(UPat(GroupOp.Movement.union({Ops.PARAM, Ops.BUFFER, Ops.CONTIGUOUS, Ops.DEFINE_REG, Ops.DEFINE_LOCAL, Ops.AFTER, Ops.MULTI,
-                                                     Ops.BITCAST})),),
+                                                     Ops.BITCAST, Ops.INS})),),
         allow_any_len=True), lambda: True),
 
   # CUSTOM (inline and non inline)
@@ -153,7 +153,7 @@ spec_tensor = PatternMatcher([
   (UPat(Ops.PARAM, src=(UPat(), UPat(Ops.DEVICE), UPat(Ops.MULTI)), name="x"), lambda x: True),
 
   # inputs to movement ops
-  (UPat((Ops.STACK, Ops.VCONST)), lambda: True),
+  (UPat(Ops.STACK), lambda: True),
   (UPat({Ops.ADD, Ops.MUL, Ops.CDIV, Ops.FLOORDIV}, dtype=dtypes.weakint), lambda: True),
 
   # movement ops
@@ -198,6 +198,19 @@ spec_tensor = PatternMatcher([
 
 # these ops can exist in programs but not the tensor spec. example: LOAD
 spec_program = PatternMatcher([
+  # weakint is not allowed in programs
+  (UPat(GroupOp.All, dtypes.weakint), lambda: False),
+
+  # movement ops are not allowed in programs
+  (UPat(GroupOp.Movement), lambda: False),
+
+  # Invalid is not allowed in program
+  (UPat(Ops.CONST, arg=Invalid), lambda: False),
+
+  # shape of uop must match dtype.count in program
+  (UPat(GroupOp.All-{Ops.INS, Ops.NOOP}, name="x"),
+   lambda x: False if x.dtype.count > 1 and (x.dtype.count,) != x.shape else None),
+
   # STACK/GEP in program. TODO: this should match Tensor
   (UPat(Ops.STACK, name="x"), lambda x: len(x.src)>1 and len(x.src) == x.dtype.vcount and all(x.dtype == y.dtype.vec(len(x.src)) for y in x.src)),
   (UPat(Ops.GEP, src=(UPat.var("src"),), name="gep"), lambda gep,src: gep.dtype == src.dtype.scalar()),
@@ -209,12 +222,14 @@ spec_program = PatternMatcher([
 
 # these are intermediate ops. everything should be deleted from here
 spec_full = PatternMatcher([
-  # BUFFER_VIEW on BUFFER is allowed if BUFFER is
-  (UPat(Ops.BUFFER_VIEW, src=(UPat((Ops.BUFFER, Ops.PARAM)),)), lambda: True),
+  # SLICE on BUFFER is allowed if BUFFER is
+  (UPat(Ops.SLICE, src=(UPat((Ops.BUFFER, Ops.PARAM)), UPat(Ops.CONST, dtype=dtypes.weakint)), allow_any_len=True, name="bv"),
+   lambda bv: isinstance(bv.arg, int)),
 
-  # TODO: BUFFER_VIEW shouldn't go on INDEX. why is this allowed? remove these both
-  (UPat(Ops.BUFFER_VIEW, src=(UPat((Ops.INDEX,)),), allow_any_len=True), lambda: True),
-  (UPat(Ops.CALL, src=(UPat((Ops.BUFFER_VIEW,)),), allow_any_len=True), lambda: True),
+  # TODO: SLICE shouldn't go on INDEX. why is this allowed? remove these both
+  (UPat(Ops.SLICE, src=(UPat((Ops.INDEX,)), UPat(Ops.CONST, dtype=dtypes.weakint)), allow_any_len=True, name="bv"),
+   lambda bv: isinstance(bv.arg, int)),
+  (UPat(Ops.CALL, src=(UPat((Ops.SLICE,)),), allow_any_len=True), lambda: True),
 
   # codegen may end ranges after gpudims has replaced RANGE with SPECIAL.
   (UPat(Ops.END, src=(UPat(), UPat()), allow_any_len=True), lambda: True),

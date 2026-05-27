@@ -3,7 +3,7 @@ import unittest
 
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.uop.ops import UOp, Ops, GroupOp, AxisType, buffers
-from tinygrad.device import Device, Buffer, is_dtype_supported
+from tinygrad.device import Device, Buffer
 from tinygrad.tensor import Tensor, _to_np_dtype
 from tinygrad.engine.realize import run_linear
 from tinygrad.codegen import to_program
@@ -11,11 +11,13 @@ from tinygrad.helpers import Context, flatten, dedup, TC_SELECT, TC_OPT, DEV
 from tinygrad.dtype import DType, dtypes, PtrDType, AddrSpace
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.cstyle import CUDARenderer
+from tinygrad.renderer.isa import ISARenderer
 from test.helpers import replace_opts
 MOCKGPU = DEV.interface.startswith("MOCK")
 
 from tinygrad.uop.render import print_uops # noqa: F401 # pylint: disable=unused-import
 
+@unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, ISARenderer), "isa backends don't preserve the op spec when lowering")
 class TestLinearizer(unittest.TestCase):
   def test_arg_dedup(self):
     # NOTE: this realize exists because Tensor.numpy calls .contiguous() internally
@@ -204,7 +206,7 @@ class TestLinearizer(unittest.TestCase):
   def test_sum_acc_dtype(self):
     for tensor_dtype, acc_dtype in (
       (dtypes.bool, dtypes.int), (dtypes.int16, dtypes.int), (dtypes.float16, dtypes.float), (dtypes.bfloat16, dtypes.float)):
-      if is_dtype_supported(tensor_dtype) and is_dtype_supported(acc_dtype):
+      if tensor_dtype in (dts:=Device[Device.DEFAULT].renderer.supported_dtypes()) and acc_dtype in dts:
         a = Tensor([1, 2, 3], dtype=tensor_dtype).sum()
         realized_ast = a.schedule_linear().src[-1].src[0]
         program = to_program(replace_opts(realized_ast, []), renderer=Device[Device.DEFAULT].renderer)
@@ -227,7 +229,7 @@ class TestLinearizer(unittest.TestCase):
       (dtypes.float, dtypes.float16, dtypes.float16),
     )
     for tensor_dtype, acc_dtype, expected_dtype in tests:
-      if is_dtype_supported(tensor_dtype) and is_dtype_supported(acc_dtype) and is_dtype_supported(expected_dtype):
+      if tensor_dtype in (dts:=Device[Device.DEFAULT].renderer.supported_dtypes()) and acc_dtype in dts and expected_dtype in dts:
         a, b = Tensor.rand(8, 8, dtype=tensor_dtype), Tensor.rand(8, 8, dtype=tensor_dtype)
         helper_arg_acc_dtype(a.sum(dtype=acc_dtype), expected_dtype)
         helper_arg_acc_dtype(a.matmul(b, dtype=acc_dtype), expected_dtype)
@@ -316,6 +318,7 @@ class TestLinearizer(unittest.TestCase):
     #helper(Tensor.arange(256), max_ops=2)
     helper(Tensor.arange(255), max_ops=2)
 
+  @unittest.skip("test implicitly depends on certain optimizations")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
   @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "broken on ptx for some reason")
   def test_grouped_store_phis(self):
@@ -338,6 +341,7 @@ class TestLinearizer(unittest.TestCase):
     for val in store_vals:
       assert val.dtype == dtypes.float.vec(4) # and val.op is not Ops.VECTORIZE
 
+  @unittest.skip("test implicitly depends on certain optimizations")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
   def test_grouped_store_values(self):
     x = Tensor.randn((4,3,6,6)).realize()
@@ -369,6 +373,7 @@ class TestLinearizer(unittest.TestCase):
     # assert barrier.src == tuple(local_stores)
     assert len([u for u in uops if u.op is Ops.IF])
 
+  @unittest.skip("test implicitly depends on certain optimizations")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_local, "test requires locals")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")

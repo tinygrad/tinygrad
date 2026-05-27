@@ -57,11 +57,12 @@ function intersectRect(r1, r2) {
 }
 
 function addTags(root, path) {
-  root.selectAll("circle").data(d => [d]).join("circle").attr("r", 5);
+  root.selectAll("circle").data(d => [d]).join("circle").attr("r", 5).style("fill", d => d.fill ?? null);
   if (path != null) root.selectAll("path").data(d => [d]).join("path").attr("d", path);
-  else root.selectAll("text").data(d => [d]).join("text").text(d => d).attr("dy", "0.35em");
+  else root.selectAll("text").data(d => [d]).join("text").text(d => d.text).attr("dy", "0.35em");
 }
 
+anchor = null;
 const drawGraph = (data) => {
   const g = dagre.graphlib.json.read(data);
   // draw nodes
@@ -69,9 +70,14 @@ const drawGraph = (data) => {
   const callCount = g.graph().callCount;
   const nodes = d3.select("#nodes").selectAll("g").data(g.nodes().map(id => g.node(id)), d => d).join("g").attr("class", d => d.className ?? "node")
     .attr("transform", d => `translate(${d.x},${d.y})`).on("click", (e,d) => {
-      if (d.callNode) {
-        if (state.callSrcMask.has(d.id)) state.callSrcMask.delete(d.id); else state.callSrcMask.add(d.id);
-        if (state.callSrcMask.size >= callCount) { showCallSrc.toggle.checked = !showCallSrc.toggle.checked; state.callSrcMask.clear(); }
+      if (d.callNode || d.collapsible) {
+        const t = d3.zoomTransform(document.getElementById("graph-svg"));
+        const [x, y] = t.apply([d.x, d.y]);
+        anchor = {id:d.id, x, y, k:t.k};
+        if (d.callNode) {
+          if (state.callSrcMask.has(d.id)) state.callSrcMask.delete(d.id); else state.callSrcMask.add(d.id);
+          if (state.callSrcMask.size >= callCount) { showCallSrc.toggle.checked = !showCallSrc.toggle.checked; state.callSrcMask.clear(); }
+        } else if (state.expandedNodes.has(d.id)) state.expandedNodes.delete(d.id); else state.expandedNodes.add(d.id);
         return setState({});
       }
       const parents = g.predecessors(d.id);
@@ -116,11 +122,11 @@ const drawGraph = (data) => {
     tokensBg.classed("highlight", (d, i, nodes) => !nodes[i].classList.contains("highlight") && d.keys.some(k => keys?.includes(k)));
   });
   addTags(nodes.selectAll("g.tag").data(d => d.tag != null ? [d] : []).join("g").attr("class", "tag")
-    .attr("transform", d => `translate(${-d.width/2+8}, ${-d.height/2+8})`).datum(e => e.tag));
-  addTags(nodes.selectAll("g.type").data(d => d.callNode ? [d] : []).join("g").attr("class", d => `tag ${d.collapsed ? 'collapsed' : 'expanded'}`)
-    .attr("transform", d => `translate(${-d.width/2}, ${0})`).datum(d => d.collapsed ? "+" : "−"));
+    .attr("transform", d => `translate(${-d.width/2+8}, ${-d.height/2+8})`).datum(e => ({ text:e.tag })));
+  addTags(nodes.selectAll("g.type").data(d => d.collapsible ? [d] : []).join("g").attr("class", d => `tag ${d.collapsed ? 'collapsed' : 'expanded'}`)
+    .attr("transform", d => `translate(${-d.width/2}, ${0})`).datum(d => ({ text:d.collapsed ? "+" : "−", fill:d.callNode ? null : d.color })));
   addTags(nodes.selectAll("g.ref").data(d => d.ref != null ? [d] : []).join("g").attr("class", "tag ref")
-    .attr("transform", d => `translate(${d.width/2-2}, ${-d.height/2+2})`).on("click", (e,d) => { e.stopPropagation(); switchCtx(d.ref); }),
+    .attr("transform", d => `translate(${d.width/2-2}, ${-d.height/2+2})`).on("click", (e,d) => { e.stopPropagation(); switchCtx(d.ref); }).datum(d => ({ref:d.ref})),
     "M-1.7 1.7 L1.7 -1.7 M-0.55 -1.7 H1.7 V0.55");
   // draw edges
   const line = d3.line().x(d => d.x).y(d => d.y).curve(d3.curveBasis), edges = g.edges();
@@ -131,6 +137,7 @@ const drawGraph = (data) => {
     points.push(intersectRect(g.node(e.w), points[points.length-1]));
     return line(points);
   }).attr("marker-end", "url(#arrowhead)").attr("stroke", e => g.edge(e).color || "#4a4b57");
+  return g;
 }
 
 // ** UOp graph
@@ -155,7 +162,7 @@ function renderDag(layoutSpec, { recenter }) {
     const data = e.data.result;
     displaySelection("#graph");
     updateProgress(Status.COMPLETE);
-    drawGraph(data);
+    const g = drawGraph(data);
     addTags(d3.select("#edge-labels").selectAll("g").data(data.edges).join("g").attr("transform", (e) => {
       // get a point near the end
       const [p1, p2] = e.value.points.slice(-2);
@@ -170,8 +177,12 @@ function renderDag(layoutSpec, { recenter }) {
       const x = p2.x - ux * offset;
       const y = p2.y - uy * offset;
       return `translate(${x}, ${y})`
-    }).attr("class", e => e.value.label.type).attr("id", e => `${e.v}-${e.w}`).datum(e => e.value.label.text));
-    if (recenter) document.getElementById("zoom-to-fit-btn").click();
+    }).attr("class", e => e.value.label.type).attr("id", e => `${e.v}-${e.w}`).datum(e => ({ text:e.value.label.text })));
+    if (anchor != null) {
+      const n = g.node(anchor.id);
+      d3.select("#graph-svg").call(svgZoom.transform, d3.zoomIdentity.translate(anchor.x-n.x*anchor.k, anchor.y-n.y*anchor.k).scale(anchor.k));
+    } else if (recenter) document.getElementById("zoom-to-fit-btn").click();
+    anchor = null;
   };
   worker.onerror = (e) => {
     e.preventDefault();
@@ -859,7 +870,7 @@ const evtSources = [];
 // rewrite: a single UOp transformation
 // step: collection of rewrites
 // context: collection of steps
-const state = {currentCtx:-1, currentStep:0, currentRewrite:0, expandSteps:false, callSrcMask:new Set()};
+const state = {currentCtx:-1, currentStep:0, currentRewrite:0, expandSteps:false, callSrcMask:new Set(), expandedNodes:new Set()};
 function setState(ns) {
   saveToHistory(state);
   const { ctx:prevCtx, step:prevStep } = select(state.currentCtx, state.currentStep);
@@ -1054,12 +1065,13 @@ async function main() {
   if (ret.length === 0) return;
   // ** center graph
   const data = ret[currentRewrite];
-  const render = (opts) => renderDag({ data, opts }, { recenter:currentRewrite === 0 });
-  const getOpts = () => ({ showIndexing:showIndexing.toggle.checked, showCallSrc:showCallSrc.toggle.checked, showSink:showSink.toggle.checked, callSrcMask:state.callSrcMask });
-  render(getOpts());
-  showIndexing.toggle.onchange = () => render(getOpts());
-  showCallSrc.toggle.onchange = () => { state.callSrcMask.clear(); render(getOpts()); }
-  showSink.toggle.onchange = () => render(getOpts());
+  const render = (layoutOpts, renderOpts) => renderDag({ data, opts:layoutOpts }, renderOpts);
+  const getOpts = () => ({ showIndexing:showIndexing.toggle.checked, showCallSrc:showCallSrc.toggle.checked, showSink:showSink.toggle.checked,
+    callSrcMask:state.callSrcMask, expandedNodes:state.expandedNodes });
+  render(getOpts(), { recenter:currentRewrite === 0 });
+  showIndexing.toggle.onchange = () => render(getOpts(), { recenter:true });
+  showCallSrc.toggle.onchange = () => { state.callSrcMask.clear(); render(getOpts(), { recenter:true }); }
+  showSink.toggle.onchange = () => render(getOpts(), { recenter:true });
   // ** right sidebar metadata
   metadata.innerHTML = "";
   if (ckey.includes("rewrites")) metadata.append(showIndexing.label, showCallSrc.label, showSink.label);

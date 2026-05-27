@@ -4,12 +4,11 @@ import numpy as np
 from tinygrad import Tensor, dtypes, Device
 from tinygrad.nn import Linear
 from extra.fp8.fp8_linear import FP8Linear, convert_to_float8_training
-from tinygrad.device import is_dtype_supported
 from test.helpers import not_support_multi_device, needs_second_gpu
 
 BS, T, in_dim, out_dim = 16, 4, 128, 128
 
-@unittest.skipUnless(is_dtype_supported(dtypes.fp8e4m3), f"no fp8e4m3 on {Device.DEFAULT}")
+@unittest.skipUnless(dtypes.fp8e4m3 in Device[Device.DEFAULT].renderer.supported_dtypes(), f"no fp8e4m3 on {Device.DEFAULT}")
 class TestFP8Linear(unittest.TestCase):
   def setUp(self):
     Tensor.manual_seed(42)
@@ -34,9 +33,8 @@ class TestFP8Linear(unittest.TestCase):
     bias = Tensor.randn(out_features, dtype=dtypes.float32) * 0.2
     fp8_layer.weight, normal_layer.weight = weight.detach(), weight.detach()
     fp8_layer.bias, normal_layer.bias = bias.detach(), bias.detach()
-    fp8_layer.weight.requires_grad = normal_layer.weight.requires_grad = True
-    x_fp8 = Tensor.randn(*shape, dtype=dtypes.float32, requires_grad=True)  * 0.2
-    x_normal = x_fp8.detach().requires_grad_(True)
+    x_fp8 = Tensor.randn(*shape, dtype=dtypes.float32)  * 0.2
+    x_normal = x_fp8.detach()
     fp8_layer(x_fp8).sum().backward()
     normal_layer(x_normal).sum().backward()
     np.testing.assert_allclose(x_fp8.grad.numpy(), x_normal.grad.numpy(), rtol=1.0, atol=0.1)

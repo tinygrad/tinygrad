@@ -35,7 +35,7 @@ jobs:
 
   docs:
     name: Docs
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     env:
       CHECK_OOB: 0
@@ -89,7 +89,7 @@ jobs:
 
   torchbackend:
     name: Torch Backend Tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
     - name: Checkout Code
@@ -125,7 +125,7 @@ jobs:
 
   torchbackendmore:
     name: Torch Backend Tests More
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
     - name: Checkout Code
@@ -147,7 +147,7 @@ jobs:
 
   bepython:
     name: Python Backend
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
     - name: Checkout Code
@@ -215,7 +215,7 @@ jobs:
 
   linter:
     name: Linters
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
 
     steps:
@@ -246,7 +246,7 @@ jobs:
 
   nulltest:
     name: Null Tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
 
     steps:
@@ -277,7 +277,7 @@ jobs:
 
   unittest:
     name: Unit Tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
 
     steps:
@@ -290,7 +290,6 @@ jobs:
         pydeps: "pillow ftfy regex pre-commit"
         deps: testing_unit
         llvm: 'true'
-        amd: 'true'
     - name: Run pre-commit test hooks
       run: SKIP=ruff,mypy pre-commit run --all-files
     - name: Check Device.DEFAULT
@@ -312,8 +311,8 @@ jobs:
         python extra/optimization/extract_dataset.py
         gzip -c /tmp/sops > extra/datasets/sops.gz
         #DEBUG=1 MIN_ASTS=1 python extra/optimization/get_action_space.py
-    - name: Repo line count < 24000 lines
-      run: MAX_LINE_COUNT=24000 python sz.py
+    - name: Repo line count < 25000 lines
+      run: MAX_LINE_COUNT=25000 python sz.py
 
   spec:
     strategy:
@@ -321,7 +320,7 @@ jobs:
       matrix:
         group: [1, 2]
     name: SPEC=2 (${{ matrix.group }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
     - name: Checkout Code
@@ -337,7 +336,7 @@ jobs:
 
   fuzzing:
     name: Fuzzing
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
     - name: Checkout Code
@@ -358,7 +357,7 @@ jobs:
 
   testopenclimage:
     name: CL IMAGE Tests
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - name: Checkout Code
@@ -378,7 +377,7 @@ jobs:
 
   testgpumisc:
     name: CL Misc tests
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - name: Checkout Code
@@ -403,7 +402,7 @@ jobs:
 
   testopenpilot:
     name: openpilot Compile Tests
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - name: Checkout Code
@@ -417,11 +416,13 @@ jobs:
           llvm: 'true'
       - name: Test openpilot model kernel count and gate usage
         run: |
-          ALLOWED_KERNEL_COUNT=123 ALLOWED_READ_IMAGE=1486 ALLOWED_GATED_READ_IMAGE=18 FLOAT16=1 DEV=CL IMAGE=1 python examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/cf6376aa9a090f0da26c280ef69eabf9bbdd51d1faac9ed392919c3db69be916
+          ALLOWED_KERNEL_COUNT=123 ALLOWED_READ_IMAGE=1468 ALLOWED_GATED_READ_IMAGE=18 FLOAT16=1 DEV=CL IMAGE=1 python examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/cf6376aa9a090f0da26c280ef69eabf9bbdd51d1faac9ed392919c3db69be916
       - name: Test openpilot CL compile fp16
         run: FLOAT16=1 DEV=CL IMAGE=1 python examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/cf6376aa9a090f0da26c280ef69eabf9bbdd51d1faac9ed392919c3db69be916
       - name: Test openpilot CL compile fp32 (test correctness)
-        run: DEV=CL IMAGE=1 SELFTEST=1 python examples/openpilot/compile3.py https://github.com/haraschax/filedump/raw/refs/heads/master/driving_vision_fp32.onnx
+        run: |
+          DEV=CL IMAGE=1 SELFTEST=1 python examples/openpilot/compile3.py https://github.com/haraschax/filedump/raw/refs/heads/master/driving_vision_fp32.onnx
+          DEV=CL IMAGE=1 SELFTEST=1 RUN_PICKLE=1 python examples/openpilot/compile3.py https://github.com/haraschax/filedump/raw/refs/heads/master/driving_vision_fp32.onnx
       - name: Test openpilot LLVM compile fp16
         run: IMAGE=1 FLOAT16=1 DEV=CPU:LLVM python examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/cf6376aa9a090f0da26c280ef69eabf9bbdd51d1faac9ed392919c3db69be916
       - name: Run process replay tests
@@ -431,7 +432,7 @@ jobs:
 
   testonnxcpu:
     name: ONNX (CPU) Tests
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
 
     steps:
@@ -459,7 +460,7 @@ jobs:
 
   testopencl:
     name: ONNX (CL)+Optimization Tests
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - name: Checkout Code
@@ -518,7 +519,7 @@ jobs:
 
   testmodels:
     name: Models (llvm+cpu+gpu)
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - name: Checkout Code
@@ -559,27 +560,6 @@ jobs:
 
 # ****** Feature Tests ******
 
-  testdevectorize:
-    name: Linux (devectorize)
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    steps:
-    - name: Checkout Code
-      uses: actions/checkout@v6
-    - name: Setup Environment
-      uses: ./.github/actions/setup-tinygrad
-      with:
-        key: devectorize-minimal
-        deps: testing_unit
-        pydeps: "pillow"
-        llvm: "true"
-    - name: Test LLVM=1 DEVECTORIZE=0
-      run: DEV=CPU:LLVM DEVECTORIZE=0 python3 -m pytest -n auto test/test_tiny.py test/backend/test_ops.py
-    - name: Test LLVM=1 DEVECTORIZE=0 for model
-      run: DEV=CPU:LLVM DEVECTORIZE=0 python3 test/models/test_efficientnet.py
-    - name: Test DEV=CPU DEVECTORIZE=0
-      run: DEV=CPU DEVECTORIZE=0 python3 -m pytest -n auto test/test_tiny.py test/backend/test_ops.py
-
   testdsp:
     name: Linux (DSP)
     runs-on: ubuntu-24.04
@@ -606,7 +586,7 @@ jobs:
 
   testwebgpu:
     name: Linux (WebGPU)
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
     - name: Checkout Code
@@ -713,7 +693,7 @@ jobs:
         arch: [gfx1100, gfx1201, gfx950]
 
     name: Linux (${{ matrix.backend }} ${{ matrix.arch }})
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
       DEV: MOCKKFD+AMD:${{ matrix.backend == 'amdllvm' && 'LLVM' || '' }}:${{ matrix.arch }}
@@ -748,7 +728,7 @@ jobs:
         backend: [ptx, nv]
 
     name: Linux (${{ matrix.backend }})
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
       FORWARD_ONLY: 1
@@ -780,10 +760,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        backend: [llvm, cpu, opencl, lvp]
+        backend: [llvm, cpu, opencl, lvp, x86]
 
     name: Linux (${{ matrix.backend }})
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - name: Checkout Code
@@ -794,10 +774,10 @@ jobs:
           key: ${{ matrix.backend }}-minimal
           deps: testing_unit
           opencl: ${{ matrix.backend == 'opencl' && 'true' }}
-          llvm: ${{ matrix.backend == 'llvm' || matrix.backend == 'lvp' }}
-          mesa: ${{ matrix.backend == 'lvp' && 'true' }}
+          llvm: ${{ matrix.backend == 'llvm' || matrix.backend == 'cpu' || matrix.backend == 'lvp' }}
+          mesa: ${{ matrix.backend == 'lvp' && 'cpu' }}
       - name: Set env
-        run: printf "${{ matrix.backend == 'llvm' && 'DEV=CPU:LLVM' || matrix.backend == 'cpu' && 'DEV=CPU\nCPU_COUNT=2' || matrix.backend == 'opencl' && 'DEV=CL' || matrix.backend == 'lvp' && 'DEV=CPU:LVP' }}" >> $GITHUB_ENV
+        run: printf "${{ matrix.backend == 'llvm' && 'DEV=CPU:LLVM' || matrix.backend == 'cpu' && 'CC=clang-20\nDEV=CPU\nCPU_COUNT=2' || matrix.backend == 'opencl' && 'DEV=CL' || matrix.backend == 'lvp' && 'DEV=CPU:LVP' || matrix.backend == 'x86' && 'DEV=CPU:X86' }}" >> $GITHUB_ENV
       - name: Check Device.DEFAULT and print some source
         run: |
           python3 -c "from tinygrad import Device; assert Device.DEFAULT in ['CPU','CL'], Device.DEFAULT"
@@ -922,7 +902,7 @@ jobs:
           key: macos-${{ matrix.backend }}-minimal
           deps: testing_unit
           llvm: ${{ matrix.backend == 'llvm' || matrix.backend == 'lvp' }}
-          mesa: ${{ matrix.backend == 'lvp' && 'true' }}
+          mesa: ${{ matrix.backend == 'lvp' && 'cpu' }}
       - name: Set env
         run: printf "${{ matrix.backend == 'llvm' && 'DEV=CPU:LLVM' || matrix.backend == 'cpu' && 'DEV=CPU\nCPU_COUNT=2' || matrix.backend == 'metal' && 'DEV=METAL' || matrix.backend == 'lvp' && 'DEV=CPU:LVP' }}" >> $GITHUB_ENV
       - name: Check Device.DEFAULT and print some source
@@ -943,7 +923,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        backend: [llvm, cpu, webgpu]
+        backend: [llvm, cpu, webgpu, x86]
 
     name: Windows (${{ matrix.backend }})
     runs-on: windows-latest
@@ -959,7 +939,7 @@ jobs:
           pydeps: ${{ matrix.backend == 'webgpu' && 'dawn-python' || '' }}
       - name: Set env
         shell: bash
-        run:  printf "${{ matrix.backend == 'llvm' && 'DEV=CPU:LLVM' || matrix.backend == 'cpu' && 'DEV=CPU\nCPU_COUNT=2' || matrix.backend == 'webgpu' && 'DEV=WEBGPU'}}" >> $GITHUB_ENV
+        run:  printf "${{ matrix.backend == 'llvm' && 'DEV=CPU:LLVM' || matrix.backend == 'cpu' && 'DEV=CPU\nCPU_COUNT=2' || matrix.backend == 'webgpu' && 'DEV=WEBGPU' || matrix.backend == 'x86' && 'DEV=CPU:X86' }}" >> $GITHUB_ENV
       - name: Run unit tests
         if: matrix.backend=='llvm'
         # test_newton_schulz hits RecursionError
@@ -971,7 +951,7 @@ jobs:
       - name: Run pytest (${{ matrix.backend }})
         shell: bash
         run: |
-          python -c "from tinygrad import Device; assert Device.DEFAULT == {'LLVM':'CPU'}.get(x:='${{ matrix.backend }}'.upper(), x), Device.DEFAULT"
+          python -c "from tinygrad import Device; assert Device.DEFAULT == {'LLVM':'CPU', 'X86':'CPU'}.get(x:='${{ matrix.backend }}'.upper(), x), Device.DEFAULT"
           python -m pytest -n=auto test/test_tiny.py test/backend/test_ops.py --durations=20
 
 # ****** Compile-only Tests ******

@@ -138,7 +138,9 @@ class NIRRenderer(Renderer):
     # load/store use pointer arithmetic, and the cast does nothing. NOTE: this doesn't apply to image indexing cause it's 1-D
     (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("off")), name="x"), lambda x,buf,off: x.replace(
       src=(buf,off.cast(dtypes.long))) if buf.dtype.addrspace != AddrSpace.REG and off.op not in (Ops.CAST, Ops.STACK) else None),
-    (UPat(Ops.CAST, name="x"), lambda x: x.src[0] if isinstance(x.dtype, PtrDType) or x.src[0].dtype == dtypes.void else None),
+    # images need index to be int for nir
+    (UPat.var("buf").index(UPat.var("idx_y"), UPat.var("idx_x")),
+     lambda buf,idx_y,idx_x: buf.index(idx_y.cast(dtypes.int), idx_x.cast(dtypes.int))),
   ])
 
   def_rewrite = PatternMatcher([
@@ -146,12 +148,12 @@ class NIRRenderer(Renderer):
     (UPat(Ops.PARAM, name="x"), lambda ctx,x: ctx.param(ctx.b, x, 8)),
     (UPat(Ops.DEFINE_VAR, name="x"), lambda ctx,x: ctx.param(ctx.b, x, 4)),
     (UPat(Ops.SPECIAL, name="x"), lambda ctx,x: nchannel(ctx.b, {'g':ngid, 'l':nlid, 'i': nid}[x.arg[0]](ctx.b), int(x.arg[-1]))),
-    (UPat(Ops.STORE, src=(UPat(Ops.INDEX, src=(UPat.var("buf"),UPat.var("off"))), UPat.var("val")), allow_any_len=True),
+    (UPat(Ops.STORE, src=(UPat(Ops.INDEX, src=(UPat.var("buf"),UPat.var("off"))).or_casted(), UPat.var("val"))),
      lambda ctx,buf,off,val: nstore(ctx.b, buf.ptrdtype.addrspace, nidx(ctx.b, ctx.r[buf], ctx.r[off], buf.dtype), ctx.r[val], val.dtype)),
-    (UPat(Ops.LOAD, src=(UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("off"))), UPat.var("alt"), UPat.var("gate")), name="x"),
+    (UPat(Ops.LOAD, src=(UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("off"))).or_casted(), UPat.var("alt"), UPat.var("gate")), name="x"),
      lambda ctx,x,buf,off,alt,gate: if_phi(ctx.b, ctx.r[gate],
       lambda: nload(ctx.b, buf.ptrdtype.addrspace, nidx(ctx.b, ctx.r[buf], ctx.r[off], buf.dtype, ctx.r[gate]), x.dtype), lambda: ctx.r[alt])),
-    (UPat(Ops.LOAD, src=(UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("off"))),), name="x"),
+    (UPat(Ops.LOAD, src=(UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("off"))).or_casted(),), name="x"),
      lambda ctx,x,buf,off: nload(ctx.b, buf.ptrdtype.addrspace, nidx(ctx.b, ctx.r[buf], ctx.r[off], buf.dtype), x.dtype)),
     (UPat(Ops.STACK, name="x"), lambda ctx,x: nalu(ctx.b, f"vec{x.dtype.count}", *[ctx.r[src] for src in x.src])),
     (UPat(GroupOp.ALU, name="x"), lambda ctx,x: nalu(ctx.b, aop[x.src[0].dtype.scalar()][x.op], *[ctx.r[src] for src in x.src])),
@@ -188,6 +190,7 @@ class NIRRenderer(Renderer):
 
     for u in uops:
       if u.op in {Ops.NOOP, Ops.GROUP, Ops.INDEX}: pass
+      elif u.op is Ops.CAST and isinstance(u.dtype, PtrDType): pass
       elif u.op is Ops.AFTER:
         self.r[u] = self.r[u.src[0]]
       elif u.op == Ops.SINK:
@@ -226,10 +229,14 @@ class NIRRenderer(Renderer):
 
     return ret
 
+  def supported_dtypes(self): return {d for d in Renderer.supported_dtypes(self) if d not in dtypes.fp8s+(dtypes.bfloat16,)}
+
 class NAKRenderer(NIRRenderer):
   param = nir_instr(nc=1, num_components=1, bs=lambda sz:sz*8, also=lambda self,sz: setattr(self, "param_idx", self.param_idx + sz),
     intrins={"ALIGN_MUL":lambda sz:sz}, srcs=lambda self,b: [nsrc(nimm(b, 0, dtypes.int)), nsrc(nimm(b, self.param_idx, dtypes.int))])(
        lambda self, b, x, sz: mesa.nir_intrinsic_instr_create(b.shader, mesa.nir_intrinsic_ldc_nv))
+
+  def supported_dtypes(self): return {d for d in super().supported_dtypes() if (d != dtypes.half or int(self.target.arch[3:]) >= 53)}
 
 class LVPRenderer(NIRRenderer):
   has_local = False
@@ -294,3 +301,5 @@ class IR3Renderer(NIRRenderer, OpenCLRenderer):
 
     self.b.shader.contents.info.num_ubos = len([u for u in bufs if not isinstance(u.dtype, ImageDType)])
     self.b.shader.contents.info.num_images = texs() + imgs()
+
+  def supported_dtypes(self): return {d for d in NIRRenderer.supported_dtypes(self) if d != dtypes.double}

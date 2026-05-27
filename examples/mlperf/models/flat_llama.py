@@ -2,9 +2,8 @@ import math, os
 if __name__ == "__main__":
   os.environ["DEFAULT_FLOAT"] = "bfloat16"
   os.environ["OPTIM_DTYPE"] = "bfloat16"
-  if "DEV" not in os.environ: os.environ["DEV"] = "NULL"
+  if "DEV" not in os.environ: os.environ["DEV"] = "NULL::gfx950"
   # CDNA
-  os.environ["EMULATE"] = "AMD_CDNA4"
   os.environ["DEVICE_IN_FUNCTION_BUG"] = "1"
   os.environ["ALL2ALL"] = "1"
   os.environ["USE_ATOMICS"] = "1"
@@ -13,7 +12,7 @@ if __name__ == "__main__":
     if "ASM_GEMM" not in os.environ:
       os.environ["ASM_GEMM"] = "1"
 from tinygrad import Tensor, nn, function, getenv, dtypes, TinyJit
-from tinygrad.helpers import Timing, colored, GlobalCounters, profile_marker
+from tinygrad.helpers import Timing, colored, GlobalCounters, profile_marker, round_up
 from tinygrad.uop.ops import Ops, UOp
 from extra.models.llama import apply_rotary_emb, precompute_freqs_cis
 from extra.llama_kernels.rmsnorm import rmsnorm
@@ -53,8 +52,8 @@ def matmul(x:Tensor, w:Tensor, fp8:bool=True, amax_x:Tensor|None=None, w_inv_sca
   if ASM_GEMM:
     from extra.gemm.cdna_asm_gemm import can_use_asm_gemm, asm_gemm
     if can_use_asm_gemm(x_fp8, w.T):
-      return asm_gemm(x_fp8, w.T, x_scale=x_scale, w_scale=w_inv_scale, grad_amax_state=grad_amax_state), x_new_amax, x_fp8, w
-  return (x_fp8.dot(w.T, dtype=dtypes.float) * x_scale * w_inv_scale).cast(dtypes.bfloat16), x_new_amax, x_fp8, w
+      return asm_gemm(x_fp8, w.T, x_scale=x_scale, w_scale=w_inv_scale, grad_amax_state=grad_amax_state), x_new_amax, x_fp8
+  return (x_fp8.dot(w.T, dtype=dtypes.float) * x_scale * w_inv_scale).cast(dtypes.bfloat16), x_new_amax, x_fp8
 
 def norm_quantize_matmul(x:Tensor, norm:Tensor, w:Tensor, w_inv_scale:Tensor, eps:float, amax_x:Tensor, grad_amax_state:Tensor):
   if FUSED_ADD_NORM_MUL_QUANTIZE:
@@ -125,9 +124,9 @@ class FlatTransformer:
     self.tok_embeddings = nn.Embedding(vocab_size, dim)
     self.tok_embeddings.weight = Tensor.normal(vocab_size, dim, mean=0.0, std=0.02, dtype=dtypes.bfloat16)
     self.output = Tensor.normal(1, vocab_size, dim, mean=0.0, std=0.02, dtype=dtypes.bfloat16)
-    self.freqs_cis = precompute_freqs_cis(dim // n_heads, max_context * 2, rope_theta).contiguous().requires_grad_(False)
+    self.freqs_cis = precompute_freqs_cis(dim // n_heads, max_context * 2, rope_theta).contiguous().is_param_(False)
 
-    def _amax(): return Tensor.full((), FP8_MAX, dtype=dtypes.float32).contiguous().requires_grad_(False)
+    def _amax(): return Tensor.full((), FP8_MAX, dtype=dtypes.float32).contiguous().is_param_(False)
     names = ["xqkv", "xo", "x2"]
     names += ["x1", "x3"] if SPLIT_W13 else ["x13"]
     self._fp8_amax = {name: [_amax() for _ in range(n_layers)] for name in names}
@@ -136,7 +135,7 @@ class FlatTransformer:
     self._fp8_grad_amax = {name: [_amax() for _ in range(n_layers)] for name in grad_names}
     w_scales = [("wqkv", s_qkv), ("wo", s_o), ("w2", s_2)]
     w_scales += [("w1", s_1), ("w3", s_3)] if SPLIT_W13 else [("w13", s_13)]
-    self._fp8_inv_scale = {name: s.float().contiguous().requires_grad_(False) for name, s in w_scales}
+    self._fp8_inv_scale = {name: s.float().contiguous().is_param_(False) for name, s in w_scales}
 
   def lin_per_layer(self, in_features:int, out_features:int, std:float=0.02):
     if getenv("ZEROS"): w = Tensor.zeros(self.n_layers, out_features, in_features)
@@ -212,8 +211,9 @@ class FlatTransformer:
     attn, attn_amaxs, attn_saves = self.attention(x, freqs_cis, **attn_kwargs)
     ffn, h, ffn_amaxs, ffn_saves = self.feed_forward(x, attn, **ffn_kwargs)
     h = h + ffn
-    if save: return (h, *attn_amaxs, *ffn_amaxs, *attn_saves, *ffn_saves)
-    else: return (h, *attn_amaxs, *ffn_amaxs)
+    amaxs = tuple(a.detach() for a in (*attn_amaxs, *ffn_amaxs))
+    if save: return (h, *amaxs, *attn_saves, *ffn_saves)
+    else: return (h, *amaxs)
 
   def shard(self, device:tuple[str, ...], mp:bool=False):
     from tinygrad.nn.state import get_parameters
@@ -238,9 +238,9 @@ class FlatTransformer:
       for amax_dict in (self._fp8_amax, self._fp8_grad_amax):
         for name in amax_dict:
           for i in range(len(amax_dict[name])):
-            amax_dict[name][i] = amax_dict[name][i].to(device).contiguous().requires_grad_(False)
+            amax_dict[name][i] = amax_dict[name][i].to(device).contiguous().is_param_(False)
       for name in self._fp8_inv_scale:
-        self._fp8_inv_scale[name] = self._fp8_inv_scale[name].to(device).contiguous().requires_grad_(False)
+        self._fp8_inv_scale[name] = self._fp8_inv_scale[name].to(device).contiguous().is_param_(False)
 
   def __call__(self, tokens:Tensor, save:bool=True):
     h = self.tok_embeddings(tokens)
@@ -273,41 +273,63 @@ def apply_grad(grad_buf:Tensor, new_grad:UOp):
   pads = _get_pads(new_grad)
   if len(pads) <= 1:
     new_grad = new_grad.cast(grad_buf.dtype)
-    store = grad_buf.uop.store(grad_buf.uop + new_grad)
-    grad_buf.uop = grad_buf.uop.after(store)
+    grad_buf.uop = grad_buf.uop.after(grad_buf.uop.store(grad_buf.uop + new_grad))
     return
-  sorted_pads = sorted(pads, key=lambda p: p.marg[0][0] if p.op == Ops.PAD else 0)
-  inners_raw = [Tensor(p.src[0] if p.op == Ops.PAD else p, device=grad_buf.device) for p in sorted_pads]
-  if getenv("FUSED_PAD_GRAD_ACCUM", 0):
-    from extra.llama_kernels.fused_pad_grad_accum import fused_pad_grad_accum, can_fused_pad_grad_accum
-    if can_fused_pad_grad_accum(grad_buf, inners_raw):
-      grad_buf.uop = fused_pad_grad_accum(grad_buf, inners_raw).uop
-      return
-  inners = [t.cast(grad_buf.dtype) for t in inners_raw]
-  grad_buf.assign(grad_buf + inners[0].cat(*inners[1:], dim=0))
+  cur = grad_buf.uop
+  for pad in sorted(pads, key=lambda p: p.marg[0][0] if p.op == Ops.PAD else 0, reverse=True):
+    if pad.op == Ops.PAD:
+      grad_shrink = tuple([(p[0], s+p[0]) for s,p in zip(pad.src[0].shape, pad.marg)])
+      buf_slice = cur.shrink(grad_shrink)
+      cur = cur.after(buf_slice.store(buf_slice + pad.src[0].cast(cur.dtype)))
+    else:
+      cur = cur.after(cur.store(cur + pad.cast(cur.dtype)))
+  grad_buf.uop = cur
 
 if __name__ == "__main__":
   config = {}
   BS                 = config["BS"]                     = getenv("BS", 16)
   SEQLEN             = config["SEQLEN"]                 = getenv("SEQLEN", 8192)
+  SMALL              = config["SMALL"]                  = getenv("SMALL", 0)
 
   from examples.llama3 import MODEL_PARAMS
-  model_params = MODEL_PARAMS[getenv("LLAMA3_SIZE", "8B")]["args"]
-  if (llama_layers:=getenv("LLAMA_LAYERS")) != 0: model_params['n_layers'] = llama_layers
+  model_params = MODEL_PARAMS[llama_size:=getenv("LLAMA3_SIZE", "8B")]["args"]
+  # vocab_size from mixtral tokenizer
+  if not SMALL: model_params |= {"vocab_size": 32000}
+  real_vocab_size = model_params['vocab_size']
+  if (llama_layers:=getenv("LLAMA_LAYERS")) != 0: model_params["n_layers"] = llama_layers
+
+  # pad vocab
+  if (MP := getenv("MP", 1)) > 1: model_params["vocab_size"] = round_up(model_params["vocab_size"], 256 * MP)
+  vocab_mask:Tensor = Tensor.arange(model_params["vocab_size"]).reshape(1, 1, -1) >= real_vocab_size
+
   model = FlatTransformer(**model_params, max_context=SEQLEN)
+
   state = nn.state.get_state_dict(model)
   print("tensor count:", len(state))
 
   # shard the model
   from tinygrad import Device
-  if (DP := getenv("DP", 1)) > 1:
-    model.shard(tuple(f"{Device.DEFAULT}:{i}" for i in range(DP)))
-  if (MP := getenv("MP", 1)) > 1:
-    model.shard(tuple(f"{Device.DEFAULT}:{i}" for i in range(MP)), mp=True)
+  is_dp = (DP := getenv("DP", 1)) > 1
+  is_mp = (MP := getenv("MP", 1)) > 1
+  is_sharding = is_dp or is_mp
+  device_count = max(DP, MP)
+  device = tuple(f"{Device.DEFAULT}:{i}" for i in range(device_count))
+
+  model.shard(device, is_mp)
+
+  if is_dp: vocab_mask.shard_(device, axis=None).realize()
+  if is_mp: vocab_mask.shard_(device, axis=2).realize()
 
   # preallocate all the grad buffers and zero them out
-  grads = {x:Tensor.zeros(x.shape, dtype=x.dtype, device=x.device).contiguous()
-           for x in state.values() if x.requires_grad is None}
+  grad_dtype = lambda x: dtypes.bfloat16 if x.dtype in dtypes.fp8s else x.dtype
+  def _make_grad(x):
+    if isinstance(x.device, tuple) and x.uop.axis is not None:
+      return Tensor.zeros(x.shape, dtype=grad_dtype(x), device=x.device[0]).shard_(x.device, axis=x.uop.axis).contiguous()
+    return Tensor.zeros(x.shape, dtype=grad_dtype(x), device=x.device).contiguous()
+  grads = {x:_make_grad(x) for x in state.values() if x.is_param}
+
+  fp8_amax = [t for ts in model._fp8_amax.values() for t in ts]
+  fp8_grad_amax = [t for ts in model._fp8_grad_amax.values() for t in ts]
 
   # print model size
   sz = 0
@@ -316,23 +338,31 @@ if __name__ == "__main__":
     sz += v.nbytes()
   print(f"total sz: {sz/1e9:.2f} GB")
 
-  with Timing("fake data: "): tokens = Tensor.randint(BS, SEQLEN+1, low=0, high=model.vocab_size, dtype=dtypes.int)
+  with Timing("fake data: "): tokens = Tensor.randint(BS, SEQLEN+1, low=0, high=real_vocab_size, dtype=dtypes.int)
   with Timing("realize weights/grads/data: "): Tensor.realize(*state.values(), *grads.values(), tokens)
   print("mem per device: " + ', '.join(f"{dev}: {mem/1e9:.2f} GB" for dev, mem in sorted(GlobalCounters.mem_used_per_device.items())))
   if DP > 1: tokens = tokens.shard(tuple(f"{Device.DEFAULT}:{i}" for i in range(DP)), axis=0)
   if MP > 1: tokens = tokens.shard(tuple(f"{Device.DEFAULT}:{i}" for i in range(MP)))
 
   @TinyJit
-  def jit_step(tokens:Tensor):
-    with Timing("python forward: "): loss = model(tokens[:, :-1]).sparse_categorical_crossentropy(tokens[:, 1:])
+  def fwd_bwd(tokens:Tensor):
+    with Timing("python forward: "):
+      logits = model(tokens[:, :-1], save=llama_size=="8B")
+      loss = vocab_mask.where(-1e9, logits).sparse_categorical_crossentropy(tokens[:, 1:])
     with Timing("python backward: "):
       for t,g in zip(grads, loss.gradient(*grads)):
         apply_grad(grads[t], g.uop)
-    with Timing("run step: "): loss.realize(*grads.values())
+    with Timing("run fwd_bwd: "): loss.realize(*grads.values(), *fp8_amax, *fp8_grad_amax)
+
+  @TinyJit
+  def optim_step():
+    for g in grads.values(): g.assign(g.zeros_like())
+    Tensor.realize(*grads.values())
 
   for i in range(6):
     GlobalCounters.reset()
     profile_marker(f"step {i}")
     with Timing(colored(f"*** step {i}: ", "red")):
-      jit_step(tokens)
+      fwd_bwd(tokens)
+      optim_step()
   print("mem per device: " + ', '.join(f"{dev}: {mem/1e9:.2f} GB" for dev, mem in sorted(GlobalCounters.mem_used_per_device.items())))

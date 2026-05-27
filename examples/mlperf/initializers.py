@@ -57,7 +57,7 @@ class EmbeddingBert(nn.Embedding):
   def __call__(self, idx:Tensor) -> Tensor:
     if idx.numel() == 0: return Tensor.empty(idx.shape+(self.embed_sz,), dtype=self.weight.dtype, device=self.weight.device)
     arange_shp, weight_shp, big_shp = (1, 1, self.vocab_sz, 1), (1, 1, self.vocab_sz, self.embed_sz), idx.shape+(self.vocab_sz, self.embed_sz,)
-    if not hasattr(self, 'arange'): self.arange = Tensor.arange(self.vocab_sz, requires_grad=False, device=self.weight.device).reshape(arange_shp)
+    if not hasattr(self, 'arange'): self.arange = Tensor.arange(self.vocab_sz, device=self.weight.device).reshape(arange_shp)
     arange, idx, vals = self.arange.expand(big_shp), idx.reshape(idx.shape+(1, 1,)).expand(big_shp), self.weight.cast(dtypes.default_float).reshape(weight_shp).expand(big_shp)
     return (arange == idx).where(vals, 0).sum(2, dtype=vals.dtype)
 
@@ -77,11 +77,11 @@ class FrozenBatchNorm2dRetinaNet(nn.BatchNorm2d):
   def __init__(self, sz:int, eps=1e-5, affine=True, track_running_stats=True, momentum=0.1):
     self.eps, self.track_running_stats, self.momentum = eps, track_running_stats, momentum
 
-    self.weight = Tensor.ones(sz, dtype=dtypes.float32, requires_grad=False) if affine else None
-    self.bias = Tensor.zeros(sz, dtype=dtypes.float32, requires_grad=False) if affine else None
+    self.weight = Tensor.ones(sz, dtype=dtypes.float32).is_param_(False) if affine else None
+    self.bias = Tensor.zeros(sz, dtype=dtypes.float32).is_param_(False) if affine else None
 
-    if track_running_stats: self.running_mean, self.running_var = Tensor.zeros(sz, dtype=dtypes.float32, requires_grad=False), Tensor.ones(sz, dtype=dtypes.float32, requires_grad=False)
-    self.num_batches_tracked = Tensor.zeros(1, dtype=dtypes.long, requires_grad=False)
+    if track_running_stats: self.running_mean, self.running_var = Tensor.zeros(sz, dtype=dtypes.float32).is_param_(False), Tensor.ones(sz, dtype=dtypes.float32).is_param_(False)
+    self.num_batches_tracked = Tensor.zeros(1, dtype=dtypes.long).is_param_(False)
 
   def __call__(self, x:Tensor) -> Tensor:
     batch_mean, batch_var = super().calc_stats(x.cast(dtypes.float32))

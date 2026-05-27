@@ -709,7 +709,7 @@ def wrap_inplace_view_op(k,f):
       views = derived_views(base)
       if views:
         old_base = Tensor(base.uop, device=base.device)
-        old_base.requires_grad = base.requires_grad
+        old_base.is_param = base.is_param
         old_base._views = getattr(base, "_views", set())
         for v in views: v._view_base = old_base
         base._views = set()

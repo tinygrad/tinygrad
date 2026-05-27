@@ -1,5 +1,4 @@
-from tinygrad import Tensor, dtypes, nn
-from tinygrad.device import is_dtype_supported
+from tinygrad import Tensor, Device, dtypes, nn
 from typing import Optional, Union, List, Any, Tuple, Callable
 import math
 
@@ -13,7 +12,7 @@ def timestep_embedding(timesteps:Tensor, dim:int, max_period=10000):
   freqs = (-math.log(max_period) * Tensor.arange(half, device=timesteps.device) / half).exp()
   args = timesteps.unsqueeze(1) * freqs.unsqueeze(0)
   out = Tensor.cat(args.cos(), args.sin(), dim=-1)
-  return out.cast(mixed_precision_dtype) if is_dtype_supported(mixed_precision_dtype) else out
+  return out.cast(mixed_precision_dtype) if mixed_precision_dtype in Device[Device.DEFAULT].renderer.supported_dtypes() else out
 
 class ResBlock:
   def __init__(self, channels:int, emb_channels:int, out_channels:int, num_groups:int=32):
@@ -238,7 +237,7 @@ class UNetModel:
       assert y.shape[0] == x.shape[0]
       emb = emb + y.sequential(self.label_emb[0])
 
-    if is_dtype_supported(mixed_precision_dtype):
+    if mixed_precision_dtype in Device[Device.DEFAULT].renderer.supported_dtypes():
       emb = emb.cast(mixed_precision_dtype)
       ctx = ctx.cast(mixed_precision_dtype)
       x   = x  .cast(mixed_precision_dtype)

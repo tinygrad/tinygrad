@@ -40,7 +40,7 @@ class _function(Generic[ReturnType]):
     params = get_state_dict((args, kwargs), tensor_type=(Tensor, UOp)).values()
 
     # deduplicate input_uops, keeping the first occurrence index for each unique uop
-    call_uops: list[UOp] = dedup([(t.uop if isinstance(t, Tensor) else t) for t in params])
+    call_uops: list[UOp] = dedup([u for t in params if not ((u:=(t.uop if isinstance(t, Tensor) else t)).base.op is Ops.CONST and u.device is None)])
 
     # disable realize/schedule while this is running
     # run it and do surgery later
@@ -84,7 +84,7 @@ class _function(Generic[ReturnType]):
                      precompile_backward=self.precompile_backward)
 
     if DEBUG >= 2:
-      #signature = [(x._shape, x.dtype, x._device) for x in call_uops]
+      #signature = [(x._shape, x.dtype, x.device) for x in call_uops]
       print("  "*_function.depth+f"function {uret.key.hex()[:8]} in {(time.perf_counter()-st)*1000:8.2f} ms: {name}") # with sig {signature}")
 
     if isinstance(ret, tuple):

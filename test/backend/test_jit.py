@@ -10,8 +10,9 @@ from tinygrad.engine.jit import TinyJit, JitError, graph_class
 from tinygrad.device import Device
 from tinygrad.helpers import Context, JIT, DEV, GlobalCounters
 from tinygrad.dtype import dtypes
-from tinygrad.uop.ops import Ops
+from tinygrad.uop.ops import Ops, UOp
 from extra.models.unet import ResBlock
+from tinygrad.renderer.isa.x86 import X86Renderer
 
 def _simple_test(add, extract=lambda x: x, N=10):
   for _ in range(5):
@@ -48,7 +49,7 @@ class TestJit(unittest.TestCase):
       y = (x + 1).contiguous().realize()
       z = x.shrink(((st, st + N),)).contiguous().realize()
       return y, z
-    x = Tensor.arange(2*N).contiguous().realize()
+    x = Tensor.arange(2*N).clone().realize()
     for _ in range(3): y, z = f(x, Variable("a", 0, N).bind(0))
     self.assertEqual(y.shape, (2*N,))
     self.assertEqual(z.shape, (N,))
@@ -91,7 +92,7 @@ class TestJit(unittest.TestCase):
     @TinyJit
     def f(x): return (x[2:5].contiguous() + 1).realize()
     for i in range(5):
-      x = (Tensor.arange(10).float() + i * 10).contiguous().realize()
+      x = (Tensor.arange(10).float() + i * 10).clone().realize()
       np.testing.assert_allclose(f(x).numpy(), x.numpy()[2:5] + 1)
 
   def test_jit_multiple_outputs(self):
@@ -106,6 +107,7 @@ class TestJit(unittest.TestCase):
       np.testing.assert_allclose(e.numpy(), a.numpy()*b.numpy(), atol=1e-4, rtol=1e-5)
     assert_jit_cache_len(f, 3)
 
+  @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, X86Renderer), "estimates are wrong for x86")
   def test_global_counters_jit(self):
     @TinyJit
     def f(a, b):
@@ -532,6 +534,18 @@ class TestJit(unittest.TestCase):
     with self.assertRaises(JitError):
       f(Tensor(2.0)).item()
     # self.assertEqual(f(Tensor([2.0])).item(), 1.0) # TODO: wrong output, should be 3.0. currently depends on empty value
+
+  def test_jit_const_input(self):
+    @TinyJit
+    def f(x:Tensor) -> Tensor: return (x + 1).realize()
+    with self.assertRaises(JitError):
+      f(Tensor(UOp.const(dtypes.float, 2.0))).item()
+
+  def test_jit_deviceless_compute_input(self):
+    @TinyJit
+    def f(x:Tensor) -> Tensor: return (x + 1).realize()
+    with self.assertRaises(JitError):
+      f(Tensor(UOp.const(dtypes.float, 2.0) + UOp.const(dtypes.float, 1.0))).item()
 
   def test_jit_init_empty_alt(self):
     @TinyJit

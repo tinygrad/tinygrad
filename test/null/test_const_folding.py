@@ -127,22 +127,21 @@ class TestBitcastConstFolding(unittest.TestCase):
 
   def test_vec_bitcast(self):
     with Context(SPEC=0):
-      r = full_rewrite(UOp.const(dtypes.int32.vec(3), (-1, -2**31, 75)).bitcast(dtypes.uint32.vec(3)).sink()).src[0]
-    self.assertEqual(r.op, Ops.STACK)
-    self.assertEqual(r.dtype, dtypes.uint32.vec(3))
-    self.assertEqual(tuple(x.arg for x in r.src), (2**32-1, 2**31, 75))
+      srcs = full_rewrite(UOp.const(dtypes.int32.vec(3), (-1, -2**31, 75)).bitcast(dtypes.uint32.vec(3)).sink()).src
+    self.assertTrue(all(r.op is Ops.CONST and r.dtype == dtypes.uint32 for r in srcs))
+    self.assertEqual(tuple(x.arg for x in srcs), (2**32-1, 2**31, 75))
 
 # folds advance indexing into basic indexing
 class TestIndexingConstFolding(unittest.TestCase):
   def test_scalar_index(self):
-    t = Tensor.arange(16).float().reshape(1,1,4,4).realize()
+    t = Tensor.arange(16).float().reshape(1,1,4,4).clone().realize()
     _check_ast_count(1, t[:,:,Tensor(1),:])
     _check_ast_count(1, t[:,:,Tensor(1)+2,:])
     _check_ast_count(1, t[:,:,Tensor(1),Tensor(0)])
 
   def test_const_tensor_index(self):
     # TODO: these can be 0, implement const tensor folded indexing
-    t = Tensor.arange(16).float().reshape(1,1,4,4).realize()
+    t = Tensor.arange(16).float().reshape(1,1,4,4).clone().realize()
     _check_ast_count(1, t[:,:,Tensor.ones(2,1,dtype=dtypes.int),:])
     _check_ast_count(1, t[:,:,Tensor.ones(1,2,dtype=dtypes.int)+2,:])
     _check_ast_count(1, t[:,:,Tensor.ones(1,1,dtype=dtypes.int),Tensor.zeros(2,1,2,dtype=dtypes.int)])

@@ -25,7 +25,7 @@ class CausalSelfAttention:
     self.n_embd = config.n_embd
     # not really a 'bias', more of a mask, but following the OpenAI/HF naming though
     self.bias = Tensor.ones(1, 1, config.block_size, config.block_size).tril()
-    self.bias.requires_grad = False
+    self.bias.is_param_(False)
 
   def __call__(self, x:Tensor):
     B, T, C = x.shape

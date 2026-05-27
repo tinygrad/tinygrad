@@ -52,12 +52,11 @@ def memory_plan_rewrite(linear:UOp, held_bufs:set[UOp]|None=None) -> UOp:
     peaks[_key(buf)] = (max(peaks[_key(buf)][0], offsets[buf] + buf.arg * buf.dtype.itemsize), peaks[_key(buf)][1])
   arena_sizes = {key: round_up(peak, block_size) for key, (peak, _) in peaks.items()}
 
-  # build replace_map: each buffer becomes a BUFFER_VIEW into a shared per-device-lane arena
+  # build replace_map: each buffer becomes a SLICE into a shared per-device-lane arena
   arenas = {key: UOp.new_buffer(key[0], sz, dtypes.int8) for key, sz in arena_sizes.items()}
   replace_map:dict[UOp, UOp] = {}
   for buf_uop, offset in offsets.items():
-    assert offset % buf_uop.dtype.itemsize == 0, f"offset {offset} not aligned to {buf_uop.dtype.itemsize}"
-    replace_map[buf_uop] = UOp(Ops.BUFFER_VIEW, buf_uop.dtype, (arenas[_key(buf_uop)],), (buf_uop.arg, offset // buf_uop.dtype.itemsize))
+    replace_map[buf_uop] = UOp(Ops.SLICE, buf_uop.dtype, (arenas[_key(buf_uop)], UOp.const(dtypes.weakint, offset)), buf_uop.arg)
 
   if DEBUG >= 1 and (omem:=sum(nbytes.values()) / 1e6) != (nmem:=sum(arena_sizes.values()) / 1e6):
     print(f"memory reduced from {omem:.2f} MB -> {nmem:.2f} MB, {len(first_appearance)} -> {len(arenas)} bufs")

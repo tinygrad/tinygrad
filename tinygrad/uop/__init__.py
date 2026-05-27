@@ -27,7 +27,7 @@ class Ops(FastEnum):
   # uops that aren't rendered
   NOOP = auto(); REWRITE_ERROR = auto()
   # FUNCTION has a TUPLE body and is gradient-able; CALL is an opaque kernel invocation
-  PARAM = auto(); FUNCTION = auto(); CALL = auto(); PATCH = auto()
+  PARAM = auto(); FUNCTION = auto(); CALL = auto()
 
   # renderer
   # LINEAR is a list of UOps, SOURCE has a str arg that's human readable, BINARY has bytes arg that's compiled
@@ -42,6 +42,9 @@ class Ops(FastEnum):
 
   # tuple/gettuple for function with multiple returns
   TUPLE = auto(); GETTUPLE = auto()
+
+  # hcq specific
+  GETADDR = auto()
 
   # ** 3 -- load/store **
 
@@ -75,8 +78,8 @@ class Ops(FastEnum):
   # control flow ops
   BARRIER = auto(); RANGE = auto(); IF = auto(); END = auto(); ENDIF = auto(); WAIT = auto()
 
-  # consts. VCONST is a vectorized const
-  VCONST = auto(); CONST = auto()
+  # const.
+  CONST = auto()
 
   # CUSTOM/CUSTOMI are used to output strings into codegen. the I makes the string inline
   CUSTOM = auto(); CUSTOMI = auto()
@@ -96,7 +99,7 @@ class Ops(FastEnum):
   CONTIGUOUS = auto(); CONTIGUOUS_BACKWARD = auto(); DETACH = auto()
 
   # buffer ops
-  STAGE = auto(); COPY = auto(); BUFFER = auto(); BUFFER_VIEW = auto(); MSELECT = auto(); MSTACK = auto(); CUSTOM_FUNCTION = auto()
+  STAGE = auto(); COPY = auto(); BUFFER = auto(); SLICE = auto(); MSELECT = auto(); MSTACK = auto(); CUSTOM_FUNCTION = auto()
 
   # the core 6 movement ops! these only exist in the tensor graph
   RESHAPE = auto(); PERMUTE = auto(); EXPAND = auto(); PAD = auto(); SHRINK = auto(); FLIP = auto()
@@ -114,6 +117,7 @@ class GroupOp:
             Ops.XOR, Ops.SHL, Ops.SHR, Ops.OR, Ops.AND, Ops.THREEFRY, Ops.SUB, Ops.FDIV, Ops.POW, Ops.FLOORDIV, Ops.FLOORMOD}
   Ternary = {Ops.WHERE, Ops.MULACC}
   ALU = set.union(Unary, Binary, Ternary)
+  Broadcastable = set.union(Binary, Ternary, {Ops.GROUP, Ops.STORE})
 
   # TODO: is BITCAST always Elementwise if it's shape changing?
   Elementwise = set.union(ALU, {Ops.CAST, Ops.BITCAST})

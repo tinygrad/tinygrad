@@ -3,6 +3,8 @@ set -e  # Exit on any error
 set -o pipefail  # Make pipeline fail if any command fails
 
 export PYTHONPATH="."
+export PATH="/opt/rocm-7.1.1/bin:$PATH"
+export ROCM_PATH="/opt/rocm-7.1.1"
 export DEV=AMD
 export CHECK_OOB=0
 export REWRITE_STACK_LIMIT=5000000 HCQDEV_WAIT_TIMEOUT_MS=240000
@@ -22,7 +24,7 @@ export FUSED_INPUT_QUANTIZE=1
 export FUSED_GRAD_QUANTIZE=1
 export FUSED_ADD_NORM_MUL_QUANTIZE=1
 export FUSED_SILU_W13=1
-export FUSED_PAD_GRAD_ACCUM=1
+export SPLIT_W13=0
 
 export DEFAULT_FLOAT="bfloat16" OPTIM_DTYPE="bfloat16"
 export DP=8 MP=1 BS=16 EVAL_BS=8 GRADIENT_ACC_STEPS=2

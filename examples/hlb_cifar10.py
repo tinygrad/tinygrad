@@ -30,9 +30,9 @@ class UnsyncedBatchNorm:
     if affine: self.weight, self.bias = Tensor.ones(sz, dtype=dtypes.float32), Tensor.zeros(sz, dtype=dtypes.float32)
     else: self.weight, self.bias = None, None
 
-    self.running_mean = Tensor.zeros(num_devices, sz, dtype=dtypes.float32, requires_grad=False)
-    self.running_var = Tensor.ones(num_devices, sz, dtype=dtypes.float32, requires_grad=False)
-    self.num_batches_tracked = Tensor.zeros(1, dtype=dtypes.int, requires_grad=False)
+    self.running_mean = Tensor.zeros(num_devices, sz, dtype=dtypes.float32).is_param_(False)
+    self.running_var = Tensor.ones(num_devices, sz, dtype=dtypes.float32).is_param_(False)
+    self.num_batches_tracked = Tensor.zeros(1, dtype=dtypes.int).is_param_(False)
 
   def __call__(self, x:Tensor):
     xr = x.reshape(self.num_devices, -1, *x.shape[1:]).cast(dtypes.float32)
@@ -68,8 +68,7 @@ class UnsyncedBatchNorm:
 class BatchNorm(nn.BatchNorm2d if getenv("SYNCBN") else UnsyncedBatchNorm):
   def __init__(self, num_features):
     super().__init__(num_features, track_running_stats=False, eps=1e-12, momentum=0.85, affine=True)
-    self.weight.requires_grad = False
-    self.bias.requires_grad = True
+    self.weight.is_param_(False)
 
 class ConvGroup:
   def __init__(self, channels_in, channels_out):
@@ -172,7 +171,7 @@ def train_cifar():
     Λ, V = _eigens(_patches(X.float().numpy()))
     W = V/np.sqrt(Λ+1e-2)[:,None,None,None]
 
-    return Tensor(W.astype(np.float32), requires_grad=False).cast(dtypes.default_float)
+    return Tensor(W.astype(np.float32)).cast(dtypes.default_float).is_param_(False)
 
   # ========== Loss ==========
   def cross_entropy(x:Tensor, y:Tensor, reduction:str='mean', label_smoothing:float=0.0) -> Tensor:
@@ -264,7 +263,6 @@ def train_cifar():
       # self.model_ema = copy.deepcopy(net) # won't work for opencl due to unpickeable pyopencl._cl.Buffer
       self.net_ema = SpeedyResNet(w)
       for net_ema_param, net_param in zip(get_state_dict(self.net_ema).values(), get_state_dict(net).values()):
-        net_ema_param.requires_grad = False
         net_ema_param.assign(net_param.numpy())
 
     @TinyJit
@@ -307,7 +305,7 @@ def train_cifar():
   params_bias = []
   params_non_bias = []
   for params in params_dict:
-    if params_dict[params].requires_grad is not False:
+    if params_dict[params].is_param:
       if 'bias' in params:
         params_bias.append(params_dict[params])
       else:

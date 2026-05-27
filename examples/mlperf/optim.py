@@ -30,11 +30,14 @@ class GradAccClipAdamW(Optimizer):
   def __init__(self, params:list[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-6, weight_decay=0.0, grad_acc=1, clip_norm=1.0, device=None, fused=FUSE_OPTIM):
     super().__init__(params, lr, device, fused)
     self.b1, self.b2, self.eps, self.wd = b1, b2, eps, weight_decay
-    self.b1_t, self.b2_t = (Tensor.ones((1,), dtype=dtypes.float32, device=self.device, requires_grad=False) for _ in [b1, b2])
+    self.b1_t, self.b2_t = (Tensor.ones((1,), dtype=dtypes.float32, device=self.device) for _ in [b1, b2])
     self.m = self._new_optim_param()
     self.v = self._new_optim_param()
     self.grad_acc, self.clip_norm = grad_acc, clip_norm
-    self.master_params:list[Tensor]|None = [p.float().contiguous() for p in self.params] if MASTER_WEIGHTS and self.params[0].dtype != dtypes.float32 else None
+    if MASTER_WEIGHTS and self.params[0].dtype != dtypes.float32:
+      self.master_params:list[Tensor]|None = [p.to(self.device).float().contiguous() for p in self.params]
+    else:
+      self.master_params = None
 
   def fstep(self, grads:list[Tensor]):
     if self.fused:
@@ -87,9 +90,12 @@ class GradAccClipAdamW(Optimizer):
     up = up.float().shard_like(w) + self.lr.to(w.device) * wd * w.detach()
     new_w = w.detach() - up
     if master is not None: master.assign(new_w)
+    # when master is offloaded to a different device than the param, results are resharded back onto the param's (sharded) device
+    offloaded = master is not None and master.device != t.device
     if STOCHASTIC_ROUND and t.dtype == dtypes.bfloat16:
-      ret = stochastic_round_bf16(new_w)
-    elif t.dtype in dtypes.fp8s:
+      out = stochastic_round_bf16(new_w)
+      return out.shard_like(t) if offloaded else out
+    if t.dtype in dtypes.fp8s:
       from examples.mlperf.models.flat_llama import FP8_MAX
       # delayed scaling: reuse previous step's inv_scale
       scale = t._inv_scale.reciprocal().reshape(-1, *([1]*(new_w.ndim-1)))
@@ -97,7 +103,8 @@ class GradAccClipAdamW(Optimizer):
       ret = stochastic_round_fp8(scaled, t.dtype) if STOCHASTIC_ROUND else scaled.cast(t.dtype)
       # update inv_scale for next step from quantized result
       new_amax = (ret.float().abs().max(axis=tuple(range(1, ret.ndim))) * t._inv_scale).detach()
-      t._inv_scale.assign(((new_amax + 1e-8) / FP8_MAX).cast(t._inv_scale.dtype))
-    else:
-      ret = new_w.cast(t.dtype)
-    return ret
+      inv = ((new_amax + 1e-8) / FP8_MAX).cast(t._inv_scale.dtype)
+      t._inv_scale.assign(inv.shard_like(t._inv_scale) if offloaded else inv)
+      return ret.shard_like(t) if offloaded else ret
+    out = new_w.cast(t.dtype)
+    return out.shard_like(t) if offloaded else out

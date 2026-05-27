@@ -22,14 +22,17 @@ def _compact_params(body:UOp, all_args:tuple[UOp, ...]) -> tuple[UOp, tuple[UOp,
 def call_gradient(ctx:UOp, k:UOp, needed:set[int]) -> tuple[UOp|None, ...]:
   fxn, args = k.src[0], k.src[1:]
   if k.arg.grad_fxn is not None:
+    # put const on a device, also TODO why do we still have NOOP...
+    def on_dev(g, i): return g.clone(device=args[i].device if k.op is Ops.CALL else k.device) if g.device is None else g
     if ctx.op is Ops.TUPLE:
-      real = [g for g in ctx.src if g.op is not Ops.NOOP]
+      real = [on_dev(g, i) for i,g in enumerate(ctx.src) if g.op is not Ops.NOOP]
       return (None,) + (k.arg.grad_fxn(*real, call=k) if len(real) > 1 else k.arg.grad_fxn(real[0], k))
-    return (None,) + k.arg.grad_fxn(ctx, k)
+    return (None,) + k.arg.grad_fxn(on_dev(ctx, 0), k)
   assert fxn.op is Ops.TUPLE, f"expected TUPLE body for gradient, got {fxn.op}"
   params = {x.arg:x for x in fxn.toposort(enter_calls=False) if x.op == Ops.PARAM}
   grad_args = ctx.src
-  root_grad = UOp(Ops.TUPLE, src=tuple(UOp(Ops.NOOP) if g.op is Ops.NOOP else g.param_like(len(args)+i) for i,g in enumerate(grad_args)))
+  root_grad = UOp(Ops.TUPLE, src=tuple(UOp(Ops.NOOP) if g.op is Ops.NOOP else
+    g if g.base.op is Ops.CONST and g.device is None else g.param_like(len(args)+i) for i,g in enumerate(grad_args)))
   grads = compute_gradient(fxn, root_grad, set(params.values()))
   # for precompiled calls, substitute forward outputs with params so intermediates aren't recomputed
   fwd_subs = {src: src.param_like(len(args)+len(grad_args)+i) for i, src in enumerate(fxn.src)} if k.arg.precompile else {}

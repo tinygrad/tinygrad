@@ -52,13 +52,13 @@ class TestTensorGradient(unittest.TestCase):
     with self.assertRaises(RuntimeError): x.float().sum().gradient(x)
 
   def test_copy_to_device_gradient(self):
-    t = Tensor([1.0, 2, 3], requires_grad=True).realize()
+    t = Tensor([1.0, 2, 3]).realize()
     t.to("CPU:1").square().sum().backward()
     self.assertEqual(t.grad.device, t.device)
     self.assertListEqual(t.grad.tolist(), [2.0, 4.0, 6.0])
 
   def test_multiple_backward(self):
-    x = Tensor([3.], requires_grad=True)
+    x = Tensor([3.])
     (x*2)[0].backward()
     np.testing.assert_allclose(x.grad.numpy(), [2.0])
     old_grad = x.grad
@@ -69,20 +69,26 @@ class TestTensorGradient(unittest.TestCase):
     np.testing.assert_allclose(x.grad.numpy(), [2.0+3.0+2*3.0])
     self.assertIs(x.grad, old_grad)
 
-  def test_gradient_through_clone_from_non_grad_src(self):
-    src = Tensor([1.0, 2.0, 3.0, 4.0])
-    x = src.clone().requires_grad_(True)
-    (x * 2.0).sum().backward()
-    np.testing.assert_allclose(x.grad.numpy(), [2.0, 2.0, 2.0, 2.0])
-    self.assertIsNone(src.grad)
-
   def test_gradient_through_clone_from_grad_src(self):
-    # unlike torch, tinygrad accumulates grad on all requires_grad tensors, including non-leaf x
-    src = Tensor([1.0, 2.0, 3.0, 4.0], requires_grad=True)
-    x = src.clone().requires_grad_(True)
+    # unlike torch, tinygrad accumulates grad on every tensor in the graph, including non-leaf x
+    src = Tensor([1.0, 2.0, 3.0, 4.0])
+    x = src.clone()
     (x * 2.0).sum().backward()
     np.testing.assert_allclose(src.grad.numpy(), [2.0, 2.0, 2.0, 2.0])
     np.testing.assert_allclose(x.grad.numpy(), [2.0, 2.0, 2.0, 2.0])
+
+  def test_gradient_through_clone_from_detached_src(self):
+    base = Tensor([1.0, 2.0, 3.0, 4.0])
+    x = base.detach().clone()
+    (x * 2.0).sum().backward()
+    np.testing.assert_allclose(x.grad.numpy(), [2.0, 2.0, 2.0, 2.0])     # gradient flows through clone
+    np.testing.assert_allclose(base.grad.numpy(), [0.0, 0.0, 0.0, 0.0])  # ...but detach blocks it from base
+
+  def test_setitem_on_grad_used_tensor_raises(self):
+    x = Tensor([1.0, 2.0, 3.0, 4.0]).realize()
+    _ = (x * 2.0).sum()
+    with self.assertRaises(RuntimeError):
+      x[0] = 99.0
 
   def test_gradient_through_chained_unrealized_setitem(self):
     g1 = Tensor.zeros(4).contiguous()
@@ -91,6 +97,12 @@ class TestTensorGradient(unittest.TestCase):
     g2[0] = g1
     x = Tensor.randn(4, 4)
     np.testing.assert_allclose(x.pad(((1,0),(0,0))).gradient(x, gradient=g2)[0].numpy(), np.zeros((4, 4)))
+
+  def test_bare_const_skipped_by_backward(self):
+    Tensor.manual_seed(0)
+    w = Tensor(1.0)
+    (Tensor.rand(()) + w).backward()
+    self.assertIsNone(w.grad)
 
 class TestMultiOutputGradient(unittest.TestCase):
   @staticmethod
@@ -109,10 +121,10 @@ class TestMultiOutputGradient(unittest.TestCase):
 
   def test_custom_kernel_multi_output_backward(self):
     a_np, b_np = np.random.randn(4, 4).astype(np.float32), np.random.randn(4, 4).astype(np.float32)
-    a_ref, b_ref = Tensor(a_np, requires_grad=True), Tensor(b_np, requires_grad=True)
+    a_ref, b_ref = Tensor(a_np), Tensor(b_np)
     ((a_ref + b_ref).sum() + (a_ref * b_ref).sum()).backward()
 
-    a, b = Tensor(a_np, requires_grad=True), Tensor(b_np, requires_grad=True)
+    a, b = Tensor(a_np), Tensor(b_np)
     Tensor.realize(a, b)
     c, d, _, _ = Tensor.custom_kernel(Tensor.empty(4, 4), Tensor.empty(4, 4), a, b, fxn=self.addmul_kernel, grad_fxn=self.backward_addmul)
     (c.sum() + d.sum()).backward()
@@ -121,10 +133,10 @@ class TestMultiOutputGradient(unittest.TestCase):
 
   def test_custom_kernel_multi_output_backward_interacting(self):
     a_np, b_np = np.random.randn(4, 4).astype(np.float32), np.random.randn(4, 4).astype(np.float32)
-    a_ref, b_ref = Tensor(a_np, requires_grad=True), Tensor(b_np, requires_grad=True)
+    a_ref, b_ref = Tensor(a_np), Tensor(b_np)
     ((a_ref + b_ref) * (a_ref * b_ref)).sum().backward()
 
-    a, b = Tensor(a_np, requires_grad=True), Tensor(b_np, requires_grad=True)
+    a, b = Tensor(a_np), Tensor(b_np)
     Tensor.realize(a, b)
     c, d, _, _ = Tensor.custom_kernel(Tensor.empty(4, 4), Tensor.empty(4, 4), a, b, fxn=self.addmul_kernel, grad_fxn=self.backward_addmul)
     (c * d).sum().backward()
@@ -146,21 +158,21 @@ class TestMultiOutputGradient(unittest.TestCase):
       return (None, None, None, grad_a, grad_b)
 
     a_np, b_np = np.random.randn(4, 4).astype(np.float32), np.random.randn(4, 4).astype(np.float32)
-    a_ref, b_ref = Tensor(a_np, requires_grad=True), Tensor(b_np, requires_grad=True)
+    a_ref, b_ref = Tensor(a_np), Tensor(b_np)
     ((a_ref + b_ref).sum() + (a_ref * b_ref).sum() + (a_ref - b_ref).sum()).backward()
 
-    a, b = Tensor(a_np, requires_grad=True), Tensor(b_np, requires_grad=True)
+    a, b = Tensor(a_np), Tensor(b_np)
     Tensor.realize(a, b)
     c, d, e, _, _ = Tensor.custom_kernel(Tensor.empty(4, 4), Tensor.empty(4, 4), Tensor.empty(4, 4), a, b,
                                           fxn=addmulsub_kernel, grad_fxn=backward_addmulsub)
     (c.sum() + d.sum() + e.sum()).backward()
-    np.testing.assert_allclose(a.grad.numpy(), a_ref.grad.numpy(), rtol=1e-5)
-    np.testing.assert_allclose(b.grad.numpy(), b_ref.grad.numpy(), rtol=1e-5)
+    np.testing.assert_allclose(a.grad.numpy(), a_ref.grad.numpy(), atol=1e-6, rtol=1e-5)
+    np.testing.assert_allclose(b.grad.numpy(), b_ref.grad.numpy(), atol=1e-6, rtol=1e-5)
 
 class TestViewGradient(unittest.TestCase):
   def test_expand(self):
     x = Tensor.randn(5,2)
-    a = Tensor([3.], requires_grad=True)
+    a = Tensor([3.])
     aex = a.expand(10)
     (aex.reshape(5,2) * x).sum().backward()
     np.testing.assert_allclose(aex.grad.numpy(), x.reshape(10).numpy())

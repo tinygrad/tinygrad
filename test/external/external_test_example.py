@@ -1,7 +1,7 @@
-import unittest
+import unittest, sys
 from tinygrad import Device
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import getenv, CI, OSX
+from tinygrad.helpers import getenv, OSX
 
 def multidevice_test(fxn):
   exclude_devices = getenv("EXCLUDE_DEVICES", "").split(",")
@@ -9,15 +9,15 @@ def multidevice_test(fxn):
     for device in Device._devices:
       # broken on OSX USB AMD, why?
       if device in ["DISK", "NPY", "FAKE", "DSP", "NULL"] or (OSX and device in ["AMD"]): continue
-      if not CI: print(device)
+      if sys.stdout.isatty(): print(device)
       if device in exclude_devices:
-        if not CI: print(f"WARNING: {device} test is excluded")
+        if sys.stdout.isatty(): print(f"WARNING: {device} test is excluded")
         continue
       with self.subTest(device=device):
         try:
           Device[device]
         except Exception:
-          if not CI: print(f"WARNING: {device} test isn't running")
+          if sys.stdout.isatty(): print(f"WARNING: {device} test isn't running")
           continue
         fxn(self, device)
   return ret
@@ -40,8 +40,8 @@ class TestExample(unittest.TestCase):
 
   @multidevice_test
   def test_example_readme(self, device):
-    x = Tensor.eye(3, device=device, requires_grad=True)
-    y = Tensor([[2.0,0,-2.0]], device=device, requires_grad=True)
+    x = Tensor.eye(3).clone().to(device)
+    y = Tensor([[2.0,0,-2.0]], device=device)
     z = y.matmul(x).sum()
     z.backward()
 
@@ -59,8 +59,8 @@ class TestExample(unittest.TestCase):
       print(f"WARNING: {device} test isn't running")
       return
 
-    x = Tensor.eye(8, device=device, requires_grad=True)
-    y = Tensor.eye(8, device=device, requires_grad=True)
+    x = Tensor.eye(8).clone().to(device)
+    y = Tensor.eye(8).clone().to(device)
     z = y.matmul(x).sum()
     z.backward()
 

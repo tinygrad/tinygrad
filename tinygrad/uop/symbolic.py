@@ -22,6 +22,15 @@ def fold_bitcast(root:UOp, c:UOp) -> UOp|None:
   def convert(v:ConstType) -> ConstType: return struct.unpack(to_fmt, struct.pack(from_fmt, v))[0]
   return root.const_like(convert(c.arg) if root.dtype.count == 1 else tuple(map(convert, c.arg)))
 
+def const_arg(u:UOp) -> ConstType|tuple[ConstType, ...]|None:
+  if u.op is Ops.CONST: return u.arg
+  if u.op is Ops.STACK and all(s.op is Ops.CONST for s in u.src): return tuple(s.arg for s in u.src)
+  return None
+
+def fold_const_alu(a:UOp) -> UOp|None:
+  vals = [const_arg(s) for s in a.src]
+  return None if any(v is None for v in vals) else a.const_like(exec_alu(a.op, a.dtype, vals, False))
+
 invalid_pat = UPat(Ops.CONST, arg=Invalid, name="i")
 invalid_gate = UPat.var("cond").where(UPat.var("x"), invalid_pat)
 
@@ -71,6 +80,10 @@ propagate_invalid = PatternMatcher([
   (UPat.var("a").where(UPat.var("b"), invalid_gate), lambda cond,i,x,a,b: (a|cond).where(a.where(b, x), i) if b.arg != Invalid else None),
   (UPat(Ops.BITCAST, src=(invalid_pat,), name="bc"), lambda bc,i: i.cast(bc.dtype)),
   (UPat(Ops.BITCAST, src=(invalid_gate,), name="bc"), lambda bc,cond,x,i: cond.where(x.bitcast(bc.dtype), i.bitcast(bc.dtype))),
+  # fold gated LOAD/STORE
+  (UPat(Ops.STORE, src=(UPat(Ops.INDEX, src=(UPat(), invalid_pat), allow_any_len=True).or_casted(), UPat())), lambda i: UOp(Ops.NOOP)),
+  (UPat(Ops.LOAD, src=(UPat(Ops.INDEX, src=(UPat(), invalid_pat), allow_any_len=True).or_casted(),), allow_any_len=True, name="x"),
+    lambda x,i: x.src[1] if len(x.src) > 1 else x.const_like(0)),
 ])
 
 symbolic_simple = propagate_invalid + PatternMatcher([
@@ -107,13 +120,11 @@ symbolic_simple = propagate_invalid + PatternMatcher([
   (UPat.var("x", dtype=dtypes.ints+(dtypes.bool, dtypes.weakint)) != UPat.var("x"),
    lambda x: x.const_like(False).cast(dtypes.bool.vec(x.dtype.count))), # x != x -> False (only ints)
   # ** constant folding **
-  (UPat(GroupOp.Unary, src=(UPat((Ops.VCONST, Ops.CONST)),), name="a"), lambda a: a.const_like(exec_alu(a.op, a.dtype, [a.src[0].arg], False))),
-  (UPat(GroupOp.Binary-{Ops.THREEFRY}, src=(UPat((Ops.VCONST, Ops.CONST)),)*2, name="a"),
-   lambda a: a.const_like(exec_alu(a.op, a.dtype, [a.src[0].arg, a.src[1].arg], False))),
+  (UPat(GroupOp.Unary, src=(UPat((Ops.CONST, Ops.STACK)),), name="a"), fold_const_alu),
+  (UPat(GroupOp.Binary-{Ops.THREEFRY}, src=(UPat((Ops.CONST, Ops.STACK)),)*2, name="a"), fold_const_alu),
   (UPat(Ops.THREEFRY, src=(UPat.cvar("x"), UPat.cvar("key")), name="a"),
    lambda a, x, key: a.const_like(threefry2x32(x, key).simplify().arg)),
-  (UPat(GroupOp.Ternary, src=(UPat((Ops.VCONST, Ops.CONST)),)*3, name="a"),
-   lambda a: a.const_like(exec_alu(a.op, a.dtype, [a.src[0].arg, a.src[1].arg, a.src[2].arg], False))),
+  (UPat(GroupOp.Ternary, src=(UPat((Ops.CONST, Ops.STACK)),)*3, name="a"), fold_const_alu),
   # bool MUL is AND, ADD/MAX is OR. prevents other rules to rewrite bool ADD/MUL incorrectly
   (UPat.var('x', dtype=dtypes.bool) * UPat.var('y', dtype=dtypes.bool), lambda x,y: x&y),
   (UPat.var('x', dtype=dtypes.bool) + UPat.var('y', dtype=dtypes.bool), lambda x,y: x|y),
@@ -189,13 +200,12 @@ def gep_through_wmma(gep:UOp, wmma:UOp) -> UOp|None:
   return UOp(Ops.WMMA, gep.dtype, tuple(tsrcs), wmma.arg)
 
 gep_pushing = PatternMatcher([
-  # GEP/VECTORIZE, GEP/GEP, GEP/CONST, GEP/VCONST
+  # GEP/VECTORIZE, GEP/GEP, GEP/CONST
   (UPat(Ops.GEP, name='g2').f(Ops.GEP, name='g1'),
    lambda g1, g2: g2.src[0].gep(tuple(g2.arg[g1.arg[i]] for i in range(len(g1.arg))))),
   (UPat(Ops.STACK, name='vec').f(Ops.GEP, name='gep'),
    lambda gep, vec: UOp(Ops.STACK, gep.dtype, tuple(vec.src[i] for i in gep.arg)) if len(gep.arg) > 1 else vec.src[gep.arg[0]]),
   (UPat.cvar("c", vec=False).f(Ops.GEP, name="gep"), lambda gep, c: gep.const_like(c.arg)),
-  (UPat(Ops.VCONST, name="c").f(Ops.GEP, name="gep"), lambda gep, c: gep.const_like(tuple(c.arg[x] for x in gep.arg))),
   # GEP on void is skipped
   (UPat(Ops.GEP, src=(UPat(dtype=dtypes.void, name="x"),)), lambda x: x),
   # GEP in order is removed
@@ -216,7 +226,8 @@ gep_pushing = PatternMatcher([
 commutative = PatternMatcher([
   # ** COMMUTATIVE flipping (only for index) **
   # NOTE: this can break merging vector math by only flipping some of them
-  (UPat(GroupOp.Commutative, dtype=dtypes.weakint, name='x'), lambda x: x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize else None),
+  (UPat(GroupOp.Commutative, dtype=dtypes.weakint, name='x'), lambda x:
+    x.replace(src=x.src[::-1]) if x.src[1].tuplize < x.src[0].tuplize and not x.src[0].tuplize < x.src[1].tuplize else None),
 ])
 
 symbolic = symbolic_simple+commutative+PatternMatcher([
@@ -311,7 +322,6 @@ def parse_valid(v:UOp) -> tuple[UOp, bool, int]|None:
   if v.op is Ops.CMPLT and dtypes.is_int(v.src[0].dtype):
     # X < c -> X <= c-1
     return v.src[0], True, int((v.src[1]).vmax)-1
-    # NOTE: v.src[1].op can be Ops.VCONST
   return None
 
 def uop_given_valid(valid:UOp, uop:UOp, try_simplex=True) -> UOp:
@@ -446,9 +456,6 @@ sym = symbolic+pm_simplify_valid+PatternMatcher([
                                                                     UPat.load(UPat(Ops.INDEX, name="index")))),
    lambda index, gate, alt: UOp.store(index.src[0].index(gate.where(index.src[1], UOp.invalid())), alt)),
   # fold gated LOAD/STORE
-  (UPat(Ops.STORE, src=(UPat().index(UPat.const(dtypes.weakint, Invalid)).or_casted(), UPat())), lambda: UOp(Ops.NOOP)),
-  (UPat(Ops.LOAD, src=(UPat().index(UPat.const(dtypes.weakint, Invalid)).or_casted(),), allow_any_len=True, name="x"),
-    lambda x: x.src[1] if len(x.src) > 1 else x.const_like(0)), # invalid load produces 0, or the alt value if we have one
   (UPat(Ops.STORE, src=(UPat(), invalid_pat)), lambda i: UOp(Ops.NOOP)),
   # store of where with invalid -> gated store
   (UPat(Ops.STORE, src=(UPat(Ops.INDEX, name="index"), UPat.var("cond").where(UPat.var("val"), invalid_pat))),

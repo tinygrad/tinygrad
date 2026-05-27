@@ -18,7 +18,7 @@ def get_call_arg_uops(call:UOp) -> tuple[UOp, ...]: return tuple(s for s in call
 def get_call_outs_ins(call:UOp) -> tuple[tuple[int, ...], tuple[int, ...]]:
   ast = call.src[0]
   if ast.op is Ops.PROGRAM: return tuple(ast.arg.outs), tuple(ast.arg.ins)
-  if ast.op in (Ops.COPY, Ops.BUFFER_VIEW): return (0,), (1,)
+  if ast.op in (Ops.COPY, Ops.SLICE): return (0,), (1,)
   if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "encdec": return (0,), tuple(range(1, len(get_call_arg_uops(call))))
   return (), ()
 
@@ -27,7 +27,9 @@ def get_call_name(call:UOp, bufs:list[Buffer], var_vals:dict[str, int]|None=None
 
   ast, arg_uops = call.src[0], get_call_arg_uops(call)
   if ast.op is Ops.PROGRAM: return ast.arg.name
-  if ast.op is Ops.BUFFER_VIEW: return colored(f"view {_uop_sz_to_str(arg_uops[0]):>10} @ {ast.arg[1] * arg_uops[1].dtype.itemsize:<10d}", "yellow")
+  if ast.op is Ops.SLICE:
+    offset = ast.src[1].arg * arg_uops[1].dtype.itemsize
+    return colored(f"view {_uop_sz_to_str(arg_uops[0]):>10} @ {offset:<10d}", "yellow")
   if ast.op is Ops.COPY: return colored(f"copy {_uop_sz_to_str(arg_uops[0]):>10}, {bufs[0].device[:7]:>7s} <- {bufs[1].device[:7]:7s}", "yellow")
   if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "encdec": return colored(f"enc/dec {_uop_sz_to_str(arg_uops[0])}", "yellow")
   if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "graph": return colored(f"batched {len(ast.src[0].src)}", "cyan")
@@ -109,9 +111,6 @@ runtime_cache: dict[tuple[bytes, str], Any] = {}
 def get_runtime(device:str, ast:UOp, cache=True):
   assert ast.op is Ops.PROGRAM and isinstance(ast.arg, ProgramInfo), "get_runtime should only be called with a PROGRAM ast"
   if (runtime:=runtime_cache.get(key:=(ast.key, device))) is None:
-    if DEBUG >= 3 and ast.src[0].arg.applied_opts: print(ast.src[0].arg.applied_opts)
-    if DEBUG >= 4: print(ast.src[3].arg)
-    if DEBUG >= 7: Device[device].compiler.disassemble(ast.src[4].arg)
     runtime = Device[device].runtime(ast.arg.function_name, ast.src[4].arg, *ast.arg.aux, runtimevars=ast.arg.runtimevars, prg=ast)
     if cache: runtime_cache[key] = runtime
   return runtime
@@ -138,7 +137,7 @@ class ExecContext:
   cache: bool = True
 
 def _resolve(b:UOp, inputs:tuple[UOp, ...]) -> UOp:
-  if b.op in (Ops.BUFFER_VIEW, Ops.MSELECT) and b.src[0].op is Ops.PARAM: return b.replace(src=(inputs[b.src[0].arg], *b.src[1:]))
+  if b.op in (Ops.SLICE, Ops.MSELECT) and b.src[0].op is Ops.PARAM: return b.replace(src=(inputs[b.src[0].arg], *b.src[1:]))
   return inputs[b.arg] if b.op is Ops.PARAM else b
 def resolve_params(call:UOp, inputs:tuple[UOp, ...]) -> list[UOp]: return [_resolve(b, inputs) for b in get_call_arg_uops(call)]
 
@@ -152,7 +151,7 @@ def unwrap_multi(call:UOp, resolved:list[UOp]) -> Iterator[tuple[list[Buffer], d
 def exec_view(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
   resolved = resolve_params(call, ctx.input_uops)
   bufs = [cast(Buffer, b.buffer) for b in resolved]
-  bv = bufs[1].view(resolved[0].arg, ast.dtype, ast.arg[1]*bufs[1].dtype.itemsize)
+  bv = bufs[1].view(resolved[0].arg, ast.dtype, ast.src[1].arg*bufs[1].dtype.itemsize)
   with track_stats(ctx, call, bv.device, [bv, bufs[1]], ctx.var_vals): buffers[resolved[0]] = bv
   return None
 
@@ -178,7 +177,7 @@ def exec_kernel(ctx:ExecContext, call:UOp, ast:UOp) -> float|None:
     rt = get_runtime(device:=bufs[0].device, ast, cache=ctx.cache)
     global_size, local_size = ast.arg.launch_dims(var_vals)
     with track_stats(ctx, call, device, prg_bufs, var_vals) as tm:
-      et = tm[0] = rt(*[b._buf for b in prg_bufs], global_size=global_size, local_size=local_size, vals=ast.arg.vals(var_vals),
+      et = tm[0] = rt(*[b.get_buf(device) for b in prg_bufs], global_size=global_size, local_size=local_size, vals=ast.arg.vals(var_vals),
                        wait=ctx.wait, timeout=ctx.timeout)
   return et
 
@@ -234,7 +233,7 @@ pm_optimize_local_size = PatternMatcher([
 ])
 
 pm_exec = PatternMatcher([
-  (UPat(Ops.CALL, src=(UPat(Ops.BUFFER_VIEW, name="ast"),), name="call", allow_any_len=True), exec_view),
+  (UPat(Ops.CALL, src=(UPat(Ops.SLICE, name="ast"),), name="call", allow_any_len=True), exec_view),
   (UPat(Ops.CALL, src=(UPat(Ops.COPY, name="ast"),), name="call", allow_any_len=True), exec_copy),
   (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, name="ast"),), name="call", allow_any_len=True), exec_kernel),
   (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="encdec", name="ast"),), name="call", allow_any_len=True), exec_encdec),
@@ -246,9 +245,9 @@ if getenv("HCQ2"):
   from extra.hcq2.hcq2 import pm_hcq_exec
   pm_exec = pm_hcq_exec + pm_exec
 
-def compile_linear(linear:UOp, beam=0, validate=False) -> UOp:
+def compile_linear(linear:UOp, beam:int|None=None, validate=False) -> UOp:
   if validate: linear = graph_rewrite(linear, pm_validate, name="validate", walk=True)
-  if (beam_val:=(beam or BEAM.value)) >= 1: linear = graph_rewrite(linear, pm_beam, ctx=beam_val, walk=True)
+  if (beam_val:=BEAM.value if beam is None else beam) >= 1: linear = graph_rewrite(linear, pm_beam, ctx=beam_val, walk=True)
   linear = graph_rewrite(linear, pm_compile, name="precompile kernels", walk=True)
   return graph_rewrite(linear, pm_optimize_local_size, name="optimize local size", walk=True)
 
@@ -263,4 +262,5 @@ def time_call(call:UOp, var_vals:dict[str, int]|None=None, timeout:int|None=None
     else:
       from tinygrad.tensor import Tensor
       with Context(DEBUG=0, BEAM=0, CAPTURING=0, TRACK_MATCH_STATS=0): Tensor.ones(1024, 1024).contiguous().realize(do_update_stats=False)
+  call = compile_linear(UOp(Ops.LINEAR, src=(call,)), beam=0).src[0]
   return cast(float, pm_exec.rewrite(call, ExecContext(var_vals or {}, update_stats=False, wait=True, timeout=timeout, cache=False)))

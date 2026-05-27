@@ -180,11 +180,11 @@ def train_resnet():
   def fake_data_get(batch_size):
     x = Tensor.zeros(batch_size, 224, 224, 3, dtype=dtypes.uchar).contiguous()
     y = [0] * batch_size
-    return x.shard(GPUS, axis=0).realize(), Tensor(y, requires_grad=False).shard(GPUS, axis=0), y, None
+    return x.shard(GPUS, axis=0).realize(), Tensor(y).shard(GPUS, axis=0), y, None
 
   def data_get(it):
     x, y, cookie = next(it)
-    return x.shard(GPUS, axis=0).realize(), Tensor(y, requires_grad=False).shard(GPUS, axis=0), y, cookie
+    return x.shard(GPUS, axis=0).realize(), Tensor(y).shard(GPUS, axis=0), y, cookie
 
   # ** epoch loop **
   step_times = []
@@ -413,7 +413,7 @@ def train_retinanet():
     layers_to_train = ["layer4", "layer3", "layer2", "layer1", "conv1"][:trainable_layers]
     for k, v in get_state_dict(backbone).items():
       if all([not k.startswith(layer) for layer in layers_to_train]):
-        v.requires_grad = False
+        v.is_param_(False)
 
   def _data_get(it:Iterator[tuple[Tensor, ...]], val:bool=False):
     if val:
@@ -798,7 +798,7 @@ def train_unet3d():
   @Tensor.train(mode=False)
   def eval_step(model, x, y):
     y_hat, y = sliding_window_inference(model, x, y, gpus=GPUS)
-    y_hat, y = Tensor(y_hat), Tensor(y, requires_grad=False)
+    y_hat, y = Tensor(y_hat), Tensor(y)
     loss = dice_ce_loss(y_hat, y)
     score = dice_score(y_hat, y)
     return loss.realize(), score.realize()
@@ -1447,7 +1447,9 @@ def train_llama3():
     w._inv_scale = model._fp8_inv_scale[wname]
     if optim.master_params:
       idx = next(j for j, p in enumerate(optim.params) if p is w)
-      optim.master_params[idx].assign((optim.master_params[idx] * w._inv_scale.reshape(-1, *([1]*(w.ndim-1)))).contiguous())
+      master = optim.master_params[idx]
+      inv = w._inv_scale if w._inv_scale.device == master.device else w._inv_scale.to(master.device)
+      master.assign((master * inv.reshape(-1, *([1]*(w.ndim-1)))).contiguous())
 
   # realize everything here
   if optim.master_params: Tensor.realize(*optim.master_params)
@@ -1498,7 +1500,7 @@ def train_llama3():
   def fake_data(bs, samples):
     import numpy as np
     for _ in range(samples // bs):
-      fake_data_np = np.random.randint(0, model_params["vocab_size"], size=(bs, SEQLEN + 1), dtype=np.int32)
+      fake_data_np = np.random.randint(0, real_vocab_size, size=(bs, SEQLEN + 1), dtype=np.int32)
       yield Tensor(fake_data_np, device="NPY")
 
   def get_train_iter():

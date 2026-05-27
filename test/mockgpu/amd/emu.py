@@ -69,7 +69,7 @@ from tinygrad.runtime.autogen.amd.cdna import ins as irc
 from tinygrad.renderer.amd.dsl import VCC_LO, EXEC_LO, SCC, ttmp
 from tinygrad.runtime.autogen.amd.common import Fmt, OpType
 from test.amd.helpers import decode_dpp16
-from test.mockgpu.amd.pcode import parse_block, _FUNCS, _set_bits, _val_to_bits
+from test.mockgpu.amd.pcode import parse_block, _FUNCS, _set_bits, _to_bool, _val_to_bits
 
 MASK32 = 0xFFFFFFFF
 
@@ -340,7 +340,7 @@ def get_pcode(op) -> str:
     pcode = pcode.replace('VCC = 0x0LL', 'VCC.u64[laneId] = 0').replace('VCC = 0x1LL', 'VCC.u64[laneId] = 1')
   return pcode
 
-def parse_pcode(pcode: str, srcs: dict[str, UOp | int] | None = None) -> tuple[dict, list[tuple[str, UOp]]]:
+def parse_pcode(pcode: str, srcs: dict[str, UOp | int] | None = None) -> tuple[dict, list]:
   env: dict = srcs.copy() if srcs else {}
   assigns: list[tuple[str, UOp]] = []
   raw_lines = [l.strip().rstrip(';') for l in pcode.split('\n') if l.strip() and not l.strip().startswith('//')]
@@ -523,7 +523,7 @@ class _Ctx:
     """Write SGPR with dynamic register index. On RDNA, index 124 = NULL (writes discarded). On CDNA, index 124 = M0 (read/write)."""
     # RDNA: NULL (124) discards writes. CDNA: M0 (124) is writable.
     valid = None if self.wave_size == 64 else reg.ne(_c(124))
-    return self.sgpr.index(reg.cast(dtypes.int).valid(valid) if valid is not None else reg.cast(dtypes.int)).store(val.cast(dtypes.uint32))
+    return self.sgpr.index(reg.cast(dtypes.int).valid(valid) if valid is not None else reg.cast(dtypes.int), ptr=True).store(val.cast(dtypes.uint32))
 
   def wmask(self, reg: UOp, val: UOp) -> list[UOp]:
     """Write a lane mask (VCC/EXEC). Splits into lo/hi for wave64."""
@@ -713,6 +713,7 @@ class _Ctx:
         old = self.vgpr.index(val[0].cast(dtypes.int), ptr=True).load()
         new_val = _set_bits(old, _val_to_bits(val[1]), width, lo_bit).cast(dtypes.uint32)
         active = _lane_active(exec_mask, lane)
+        if len(val) > 4: active = active & _to_bool(val[4])
         raw_stores.append(('vgpr_direct', self.vgpr.index(val[0].cast(dtypes.int).valid(active)).store(new_val)))
         continue
       if 'D0' in dest and '[laneId]' in dest:

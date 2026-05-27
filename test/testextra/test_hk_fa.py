@@ -49,9 +49,9 @@ class TestFA(unittest.TestCase):
     B, N, H, H_KV, D = 1, 8192, 32, 8, 128
 
     with Context(DEBUG=0):
-      q = Tensor.randn(B, N, H, D, dtype=dtypes.bfloat16, requires_grad=True).contiguous()
-      k = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16, requires_grad=True).contiguous()
-      v = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16, requires_grad=True).contiguous()
+      q = Tensor.randn(B, N, H, D, dtype=dtypes.bfloat16).contiguous()
+      k = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16).contiguous()
+      v = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16).contiguous()
       Tensor.realize(q, k, v)
 
       do = Tensor.ones(B, N, H, D, dtype=dtypes.float32).contiguous()
@@ -64,9 +64,9 @@ class TestFA(unittest.TestCase):
     Tensor.realize(q.grad, k.grad, v.grad)
 
     with Context(DEBUG=0):
-      q_ref = q.detach().clone().requires_grad_(True)
-      k_ref = k.detach().clone().requires_grad_(True)
-      v_ref = v.detach().clone().requires_grad_(True)
+      q_ref = q.detach().clone()
+      k_ref = k.detach().clone()
+      v_ref = v.detach().clone()
       Tensor.realize(q_ref, k_ref, v_ref)
 
     q_ref_, k_ref_, v_ref_ = q_ref.transpose(1, 2), k_ref.transpose(1, 2), v_ref.transpose(1, 2)
@@ -85,9 +85,9 @@ class TestFA(unittest.TestCase):
     B, N, H, H_KV, D = 1, 8192, 32, 8, 128
 
     with Context(DEBUG=0):
-      q = Tensor.randn(B, N, H, D, dtype=dtypes.bfloat16, requires_grad=True).contiguous()
-      k = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16, requires_grad=True).contiguous()
-      v = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16, requires_grad=True).contiguous()
+      q = Tensor.randn(B, N, H, D, dtype=dtypes.bfloat16).contiguous()
+      k = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16).contiguous()
+      v = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16).contiguous()
       Tensor.realize(q, k, v)
 
       do = Tensor.ones(B, N, H, D, dtype=dtypes.float32).contiguous()
@@ -104,18 +104,18 @@ class TestFA(unittest.TestCase):
     fn_jitted = TinyJit(fn)
 
     for _ in range(10):
-      q = Tensor.randn(B, N, H, D, dtype=dtypes.bfloat16, requires_grad=True).contiguous()
-      k = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16, requires_grad=True).contiguous()
-      v = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16, requires_grad=True).contiguous()
+      q = Tensor.randn(B, N, H, D, dtype=dtypes.bfloat16).contiguous()
+      k = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16).contiguous()
+      v = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16).contiguous()
       Tensor.realize(q, k, v)
       do = Tensor.ones(B, N, H, D, dtype=dtypes.float32).contiguous()
       Tensor.realize(do)
       q.grad, k.grad, v.grad = fn_jitted(q, k, v, do)
 
     with Context(DEBUG=0):
-      q_ref = q.detach().clone().requires_grad_(True)
-      k_ref = k.detach().clone().requires_grad_(True)
-      v_ref = v.detach().clone().requires_grad_(True)
+      q_ref = q.detach().clone()
+      k_ref = k.detach().clone()
+      v_ref = v.detach().clone()
       Tensor.realize(q_ref, k_ref, v_ref)
 
     q_ref_, k_ref_, v_ref_ = q_ref.transpose(1, 2), k_ref.transpose(1, 2), v_ref.transpose(1, 2)
@@ -135,16 +135,16 @@ class TestFA(unittest.TestCase):
     GPUS = tuple(f"AMD:{i}" for i in range(B))
 
     with Context(DEBUG=0):
-      base_q = Tensor.randn(B, N, H, D, dtype=dtypes.bfloat16, requires_grad=True).contiguous()
-      base_k = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16, requires_grad=True).contiguous()
-      base_v = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16, requires_grad=True).contiguous()
+      base_q = Tensor.randn(B, N, H, D, dtype=dtypes.bfloat16).contiguous()
+      base_k = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16).contiguous()
+      base_v = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16).contiguous()
 
       base_do = Tensor.ones(B, N, H, D, dtype=dtypes.float32).contiguous()
 
     with Context(DEBUG=0):
-      q = base_q.clone().requires_grad_(True).shard(GPUS, axis=0)
-      k = base_k.clone().requires_grad_(True).shard(GPUS, axis=0)
-      v = base_v.clone().requires_grad_(True).shard(GPUS, axis=0)
+      q = base_q.clone().shard(GPUS, axis=0)
+      k = base_k.clone().shard(GPUS, axis=0)
+      v = base_v.clone().shard(GPUS, axis=0)
       Tensor.realize(q, k, v)
 
       do = base_do.clone().shard(GPUS, axis=0)
@@ -157,9 +157,9 @@ class TestFA(unittest.TestCase):
     Tensor.realize(q.grad, k.grad, v.grad)
 
     with Context(DEBUG=0):
-      q_ref = base_q.clone().requires_grad_(True)
-      k_ref = base_k.clone().requires_grad_(True)
-      v_ref = base_v.clone().requires_grad_(True)
+      q_ref = base_q.clone()
+      k_ref = base_k.clone()
+      v_ref = base_v.clone()
       Tensor.realize(q_ref, k_ref, v_ref)
 
       do_ref = base_do.clone()
@@ -182,16 +182,16 @@ class TestFA(unittest.TestCase):
     GPUS = tuple(f"AMD:{i}" for i in range(B))
 
     with Context(DEBUG=0):
-      base_q = Tensor.randn(B, N, H, D, dtype=dtypes.bfloat16, requires_grad=True).contiguous()
-      base_k = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16, requires_grad=True).contiguous()
-      base_v = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16, requires_grad=True).contiguous()
+      base_q = Tensor.randn(B, N, H, D, dtype=dtypes.bfloat16).contiguous()
+      base_k = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16).contiguous()
+      base_v = Tensor.randn(B, N, H_KV, D, dtype=dtypes.bfloat16).contiguous()
 
       base_do = Tensor.ones(B, N, H, D, dtype=dtypes.float32).contiguous()
 
     with Context(DEBUG=0):
-      q = base_q.clone().requires_grad_(True).shard(GPUS, axis=2)
-      k = base_k.clone().requires_grad_(True).shard(GPUS, axis=2)
-      v = base_v.clone().requires_grad_(True).shard(GPUS, axis=2)
+      q = base_q.clone().shard(GPUS, axis=2)
+      k = base_k.clone().shard(GPUS, axis=2)
+      v = base_v.clone().shard(GPUS, axis=2)
       Tensor.realize(q, k, v)
 
       do = base_do.clone().shard(GPUS, axis=2)
@@ -204,9 +204,9 @@ class TestFA(unittest.TestCase):
     Tensor.realize(q.grad, k.grad, v.grad)
 
     with Context(DEBUG=0):
-      q_ref = base_q.clone().requires_grad_(True)
-      k_ref = base_k.clone().requires_grad_(True)
-      v_ref = base_v.clone().requires_grad_(True)
+      q_ref = base_q.clone()
+      k_ref = base_k.clone()
+      v_ref = base_v.clone()
       Tensor.realize(q_ref, k_ref, v_ref)
 
       do_ref = base_do.clone()
