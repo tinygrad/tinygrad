@@ -46,8 +46,7 @@ class HCQ2Compiled(Compiled):
     return PatternMatcher([
       (UPat(Ops.BUFFER, tag="timeline_signal"), lambda ctx: ctx.timeline_signal),
       (UPat(Ops.BUFFER, tag="timeline_value"), lambda ctx: ctx.timeline_value),
-      (UPat(Ops.BUFFER, name="b"),
-        lambda ctx, b: Buffer(ctx.device, b.arg, b.dtype, options=BufferSpec(host=True, uncached=True, cpu_access=True, nolru=True), preallocate=True)),
+      (UPat(Ops.BUFFER, name="b"), lambda ctx, b: Buffer(ctx.device, b.arg, b.dtype, options=BufferSpec(host=True, uncached=True, cpu_access=True))),
     ])
 
   def synchronize(self, timeout:int|None=None):
@@ -301,7 +300,7 @@ pm_lift_patches_to_cmdbuf = PatternMatcher([
 ])
 
 # *****************
-# 4. bufferize placeholders: replace placeholders with real debuve buffers.
+# 4. bufferize placeholders: replace placeholders with real buffers.
 
 def bufferize_buf(buf:UOp) -> UOp|None:
   if buf.tag is None: return None
