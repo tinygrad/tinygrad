@@ -331,9 +331,9 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
           return tuple(ssimplify(s+b+e) for s,(b,e) in zip(ps, self.marg))
         case Ops.SHRINK:
           # TODO: why do i need resolve here?
-          if len(ps) != len(self.marg) or not all(resolve(0<=b) and resolve(b<=e) and resolve(e<=s) for s,(b,e) in zip(ps, self.marg)):
+          if len(ps) != len(self.marg) or not all(resolve(0<=b) and resolve(sz>=0) and resolve(b+sz<=s) for s,(sz,b) in zip(ps, self.marg)):
             raise ValueError(f"invalid shrink {self.marg} for {ps}")
-          return tuple(ssimplify(e-s) for s,e in self.marg)
+          return tuple(ssimplify(sz) for sz,_ in self.marg)
         case Ops.FLIP:
           if len(ps) != len(self.marg) or not all(isinstance(x, bool) for x in self.marg): raise ValueError(f"bad flip on {ps}, {self.marg}")
           return ps
@@ -618,7 +618,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     if self.op in GroupOp.ALU: return axes[-1] if (axes := dedup([x.axis for x in self.src if x.axis is not None])) else None
     if len(self.src) == 0: return None
     src_axis = self.src[0].axis
-    if self.op is Ops.SHRINK and src_axis is not None and self.marg[src_axis] != (0, self.src[0].shape[src_axis]):
+    if self.op is Ops.SHRINK and src_axis is not None and self.marg[src_axis] != (self.src[0].shape[src_axis], 0):
       return None # SHRINK will remove the sharding if it's on axis
     if self.op is Ops.REDUCE: return None if src_axis is not None and src_axis in self.arg[1] else src_axis
     if self.op is Ops.RESHAPE:
@@ -679,7 +679,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   def marg(self):
     match self.op:
       case Ops.RESHAPE | Ops.EXPAND: return tuple(ssimplify(self.src[1].sgep(i)) for i in range(self.src[1].dtype.count))
-      case Ops.PAD | Ops.SHRINK: return tuple((self.src[1].sgep(i), self.src[2].sgep(i)) for i in range(self.src[1].dtype.count))
+      case Ops.PAD: return tuple((self.src[1].sgep(i), self.src[2].sgep(i)) for i in range(self.src[1].dtype.count))
+      case Ops.SHRINK: return tuple((self.src[1].sgep(i), self.src[2].sgep(i)) for i in range(self.src[1].dtype.count))
       case Ops.PERMUTE | Ops.FLIP: return self.arg
       case _: raise RuntimeError(f"{self.op} is not a MovementOp")
 
@@ -690,7 +691,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       return self
     match op:
       case Ops.RESHAPE | Ops.EXPAND: src_args = [arg]
-      case Ops.PAD | Ops.SHRINK: src_args = list(zip(*arg))
+      case Ops.PAD: src_args = list(zip(*arg))
+      case Ops.SHRINK: src_args = list(zip(*arg))
       case Ops.PERMUTE | Ops.FLIP: src_args = []
       case _: raise RuntimeError(f"{op} is not a MovementOp")
     usrcs = [shape_to_shape_arg(arg) for arg in src_args]

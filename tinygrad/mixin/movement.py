@@ -200,7 +200,7 @@ class MovementMixin:
     """
     if self.ndim != len(arg):
       raise ValueError(f"{self.ndim=} != {len(arg)=}")
-    ret = self._mop(Ops.SHRINK, arg=[x if x is not None else (0, s) for x, s in zip(arg, self.shape)])
+    ret = self._mop(Ops.SHRINK, arg=[(x[1]-x[0], x[0]) if x is not None else (s, 0) for x, s in zip(arg, self.shape)])
     return self if ret.shape == self.shape else ret
 
   def permute(self, order, *args) -> Self:
