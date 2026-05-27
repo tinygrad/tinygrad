@@ -23,7 +23,7 @@ The tensor class can be imported like so:
 from tinygrad import Tensor
 ```
 
-Tensors can be created from an existing data structure like a python list or numpy ndarray:
+Tensors can be created from an existing data structure like a Python list or NumPy `ndarray`:
 
 ```python
 t1 = Tensor([1, 2, 3, 4, 5])
@@ -291,7 +291,7 @@ state_dict = safe_load("model.safetensors")
 load_state_dict(net, state_dict)
 ```
 
-Many of the models in the [models/](https://github.com/tinygrad/tinygrad/tree/master/extra/models) folder have a `load_from_pretrained` method that will download and load the weights for you. These usually are pytorch weights meaning that you would need pytorch installed to load them.
+Many of the models in the [models/](https://github.com/tinygrad/tinygrad/tree/master/extra/models) folder have a `load_from_pretrained` method that will download and load the weights for you. These usually are PyTorch weights meaning that you would need PyTorch installed to load them.
 
 ### Environment Variables
 
