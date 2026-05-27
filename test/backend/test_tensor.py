@@ -551,7 +551,7 @@ class TestTinygrad(unittest.TestCase):
       Tensor.zeros(2, 2).realize()
 
   def test_shrink(self):
-    t = Tensor.arange(32).contiguous().realize()
+    t = Tensor.arange(32).clone().realize()
     self.assertListEqual(t[16:20].tolist(), [16,17,18,19])
     self.assertListEqual(t.shrink_to(16).tolist(), list(range(16)))
     t = t.reshape(4, 8).contiguous().realize()
