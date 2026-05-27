@@ -155,7 +155,7 @@ class TestCustomKernel(unittest.TestCase):
     self.assertTrue((ref == tst).all().item())
 
   def test_eye(self):
-    ref = Tensor.eye(1024).contiguous().realize()
+    ref = Tensor.eye(1024).clone().realize()
     tst = Tensor.empty_like(ref)
     tst = tst.custom_kernel(fxn=custom_eye_kernel)[0]
     self.assertTrue((ref == tst).all().item())
@@ -335,7 +335,7 @@ class TestCustomKernel(unittest.TestCase):
     assert all(x == expected for x in result), f"expected all {expected}, got {result}"
 
   def test_custom_kernel_sched(self, use_custom=False):
-    x = Tensor.arange(32).reshape(8, 4).realize()
+    x = Tensor.arange(32).reshape(8, 4).clone().realize()
     y = Tensor.empty_like(x)
     y = Tensor.custom_kernel(y, x, fxn=custom_add_one_kernel)[0]
     if use_custom:
@@ -352,7 +352,7 @@ class TestCustomKernel(unittest.TestCase):
 
   @unittest.expectedFailure
   def test_sliced_buffer_function(self):
-    x = Tensor.arange(32).reshape(8, 4).realize()
+    x = Tensor.arange(32).reshape(8, 4).clone().realize()
     from tinygrad import function
     @function(precompile=True)
     def run(x:Tensor) -> Tensor:

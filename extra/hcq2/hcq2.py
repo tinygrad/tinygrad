@@ -152,7 +152,7 @@ class HCQEncoder:
   def __init__(self): self.blob, self.patches = b'', []
 
   def get_dev_addr(self, uop:UOp) -> UOp:
-    return UOp(Ops.GETADDR, dtypes.uint64, src=(uop,)) if unwrap_after(uop).op in (Ops.BUFFER, Ops.BUFFER_VIEW, Ops.BINARY, Ops.MSTACK, Ops.MSELECT) else uop
+    return UOp(Ops.GETADDR, dtypes.uint64, src=(uop,)) if unwrap_after(uop).op in (Ops.BUFFER, Ops.SLICE, Ops.BINARY, Ops.MSTACK, Ops.MSELECT) else uop
 
   def append(self, *data, dtype=dtypes.uint32):
     for d in data:
