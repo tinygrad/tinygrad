@@ -146,7 +146,7 @@ class WebGPUProgram:
 
     if wait:
       time = ((timestamps:=self.dev.read_buffer(query_buf).cast("Q").tolist())[1] - timestamps[0]) / 1e9
-      webgpu.wgpuBufferDestroy(query_buf)
+      self.dev.allocator._do_free(query_buf)
       webgpu.wgpuQuerySetDestroy(query_set)
       return time
     return None
@@ -162,8 +162,14 @@ class WebGpuAllocator(Allocator['WebGpuDevice']):
       padded_src[:src.nbytes] = src
     write_buffer(self.dev.queue, dest, 0, padded_src if src.nbytes % 4 else src)
   def _copyout(self, dest:memoryview, src:WGPUBufPtr): dest[:] = self.dev.read_buffer(src)[:dest.nbytes]
+
   @suppress_finalizing
-  def _free(self, opaque:WGPUBufPtr, options:BufferSpec): webgpu.wgpuBufferDestroy(opaque)
+  def _do_free(self, buf:WGPUBufPtr):
+    if webgpu.wgpuBufferGetMapState(buf) == webgpu.WGPUBufferMapState_Mapped: webgpu.wgpuBufferUnmap(buf)
+    webgpu.wgpuBufferDestroy(buf)
+    webgpu.wgpuBufferRelease(buf)
+
+  def _free(self, opaque:WGPUBufPtr, options:BufferSpec): self._do_free(opaque)
 
 class WebGpuDevice(Compiled):
   def __init__(self, device:str):
@@ -208,6 +214,5 @@ class WebGpuDevice(Compiled):
     BufferMapAsync(tmp_buffer, webgpu.WGPUMapMode_Read, 0, size)
     void_ptr = ctypes.cast(webgpu.wgpuBufferGetConstMappedRange(tmp_buffer, 0, size), ctypes.c_void_p)
     buf_copy = bytearray((ctypes.c_uint8 * size).from_address(void_ptr.value))
-    webgpu.wgpuBufferUnmap(tmp_buffer)
-    webgpu.wgpuBufferDestroy(tmp_buffer)
+    self.allocator._do_free(tmp_buffer)
     return memoryview(buf_copy).cast("B")
