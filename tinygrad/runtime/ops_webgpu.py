@@ -35,7 +35,8 @@ def synchronous(status_enum:dict[int, str], has_emsg:bool=False):
       @next(ty for nm, ty, *_ in fn.argtypes[-1]._real_fields_ if nm == "callback") # type: ignore
       def cb(*args):
         nonlocal status, payload, emsg
-        status, *payload, emsg = args[:-2] if has_emsg else (*args[:-2], None) # the last two arguments are "userdata1" and "userdata2", which we drop
+        # the last two arguments are "userdata1" and "userdata2", which we drop
+        status, *payload, emsg = [from_wgpu_str(a) if type(a) is webgpu.WGPUStringView else a for a in args[:-2]] + ([] if has_emsg else [None])
 
       future = fn(*args, fn.argtypes[-1](mode=webgpu.WGPUCallbackMode_WaitAnyOnly, callback=cb)) # type: ignore
       if (future_status:=webgpu.wgpuInstanceWaitAny(instance, 1, webgpu.WGPUFutureWaitInfo(future), 2**64-1)) != webgpu.WGPUWaitStatus_Success:
@@ -200,7 +201,7 @@ class WebGpuDevice(Compiled):
 
   def synchronize(self): QueueOnSubmittedWorkDone(self.queue)
 
-  def pop_error(self) -> str: return from_wgpu_str(DevicePopErrorScope(self.device_res)[1])
+  def pop_error(self) -> str: return DevicePopErrorScope(self.device_res)[1]
   def create_uniform(self, val:int|float) -> WGPUBufPtr:
     buf = webgpu.wgpuDeviceCreateBuffer(self.device_res,
                                         webgpu.WGPUBufferDescriptor(size=4, usage=webgpu.WGPUBufferUsage_Uniform | webgpu.WGPUBufferUsage_CopyDst))
