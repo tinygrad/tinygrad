@@ -29,8 +29,8 @@ class Estimates:
       def range_gate(x): return x.op is not Ops.RANGE
       for u in uops:
         if u.op in {Ops.LOAD, Ops.STORE}:
-          # if u.src[0] is INDEX, we have to include the buffer since it might be an AFTER
-          dont_count = dont_count.union((UOp.sink(*u.src[0].src[1:]) if u.src[0].op is Ops.INDEX else u.src[0]).toposort(range_gate))
+          # if u.src[0] is SLICE, we have to include the buffer since it might be an AFTER
+          dont_count = dont_count.union((UOp.sink(*u.src[0].src[1:]) if u.src[0].op is Ops.SLICE else u.src[0]).toposort(range_gate))
           # TODO: is this correct? this all needs to be cleaned up
           if len(u.src) > 2: dont_count = dont_count.union(u.src[2].toposort())
         elif u.op is Ops.IF:
@@ -40,7 +40,7 @@ class Estimates:
         buf = u
         while len(buf.src): buf = buf.src[0]
         if buf.op is Ops.PARAM:
-          # u.src[0] is INDEX, cap at buffer size for re-reads (e.g. matmul)
+          # u.src[0] is SLICE, cap at buffer size for re-reads (e.g. matmul)
           accessed = mem.get((buf, u.op), 0) + u.src[0].dtype.base.itemsize * mults
           mem[(buf, u.op)] = smin(accessed, buf.ptrdtype.nbytes()) if buf.ptrdtype.size != -1 else accessed
       if u.op is Ops.RANGE:
