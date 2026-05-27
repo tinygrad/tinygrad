@@ -75,7 +75,8 @@ lop = {**{x:unsigned_lop for x in (dtypes.bool,)+dtypes.uints}, **{x:signed_lop 
 base_rewrite = PatternMatcher([
   # memory load/store
   (UPat(Ops.SLICE, name="x"), lambda ctx,x:
-   f"  {ctx[x]} = getelementptr inbounds {ldt(x.dtype.base)}, {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, {ldt(x.src[1].dtype)} {ctx[x.src[1]]}"),
+   f"  {ctx[x]}_o = getelementptr inbounds {ldt(x.src[0].dtype.base)}, {ldt(x.src[0].dtype)} {ctx[x.src[0]]}, {ldt(x.src[1].dtype)} {ctx[x.src[1]]}\n"
+   f"  {ctx[x]} = bitcast {ldt(x.src[0].dtype)} {ctx[x]}_o to {ldt(x.dtype)}"),
   (UPat(Ops.LOAD, src=(UPat.var("idx"), UPat.var("alt"), UPat.var("mask")), name="x"),
    lambda ctx,x,idx,alt,mask:
    f"  br label {ctx[x]}_entry\n{ctx[x][1:]}_entry:\n"

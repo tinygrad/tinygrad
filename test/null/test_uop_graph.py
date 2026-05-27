@@ -538,7 +538,7 @@ class TestUOpGraph(unittest.TestCase):
     uops = to_uops_list([UOp(Ops.STORE, dtypes.void, (glbl0.index(idx), ld1+ld0))])
     ld0 = uops[-2].src[-1]  # -2 to skip SINK
     # the gate and invalid value are deleted from ld1
-    self.assertEqual(ld0, UOp.load(glbl2.index(idx, ptr=True), dtype=dtypes.int))
+    self.assertEqual(ld0, UOp.load(glbl2.slice(idx), dtype=dtypes.int))
 
   def test_fold_gated_load_local(self):
     glbl0 = UOp(Ops.PARAM, dtypes.int.ptr(), (), 0)
