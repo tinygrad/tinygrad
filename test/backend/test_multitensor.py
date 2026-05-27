@@ -821,9 +821,9 @@ class TestMultiTensor(unittest.TestCase):
     t2.realize()
   def test_full_like_on_shard_axis(self): self.test_full_like_on_shard(0)
 
-  def test_const_like_shrink_on_shard_axis(self):
+  def test_full_like_shrink_on_shard_axis(self):
     t = Tensor.ones(16, 16, dtype=dtypes.int).shard(devices_2, axis=0)
-    out = t.const_like(2)[:, :8]
+    out = Tensor.full_like(t, 2)[:, :8]
     linear, var_vals = out.linear_with_vars()
     self.assertEqual(len(linear.src), 0)
     run_linear(linear, var_vals)
