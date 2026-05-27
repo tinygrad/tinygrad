@@ -94,22 +94,13 @@ class WebGPUProgram:
   def __call__(self, *bufs:WGPUBufPtr, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1),
                vals:tuple[int, ...]=(), wait=False, **kw) -> float|None:
     wait = wait and webgpu.WGPUFeatureName_TimestampQuery in self.dev.features
-    tmp_bufs = [*bufs]
-    buf_patch = False
-
-    # WebGPU does not allow using the same buffer for input and output
-    for i in range(1, len(bufs)):
-      if ctypes.addressof(bufs[i]) == ctypes.addressof(bufs[0]):
-        tmp_bufs[0] = webgpu.wgpuDeviceCreateBuffer(self.dev.device_res,
-          webgpu.WGPUBufferDescriptor(size=webgpu.wgpuBufferGetSize(bufs[0]), usage=webgpu.wgpuBufferGetUsage(bufs[0])))
-        buf_patch = True
 
     # Creating bind group layout
     binding_layouts = [webgpu.WGPUBindGroupLayoutEntry(binding=0, visibility= webgpu.WGPUShaderStage_Compute,
       buffer=webgpu.WGPUBufferBindingLayout(type=webgpu.WGPUBufferBindingType_Uniform))]
     binding_layouts += [webgpu.WGPUBindGroupLayoutEntry(binding=i+1, visibility=webgpu.WGPUShaderStage_Compute,
-      buffer=webgpu.WGPUBufferBindingLayout(type=webgpu.WGPUBufferBindingType_Uniform if i >= len(tmp_bufs)
-      else webgpu.WGPUBufferBindingType_Storage)) for i in range(len(tmp_bufs)+len(vals))]
+      buffer=webgpu.WGPUBufferBindingLayout(type=webgpu.WGPUBufferBindingType_Uniform if i >= len(bufs)
+      else webgpu.WGPUBufferBindingType_Storage)) for i in range(len(bufs)+len(vals))]
 
     bl_arr_type = webgpu.WGPUBindGroupLayoutEntry * len(binding_layouts)
     webgpu.wgpuDevicePushErrorScope(self.dev.device_res, webgpu.WGPUErrorFilter_Validation)
@@ -129,8 +120,8 @@ class WebGPUProgram:
 
     # Creating bind group
     bindings = [webgpu.WGPUBindGroupEntry(binding=0, buffer=self.dev.create_uniform(float('inf')), offset=0, size=4)]
-    bindings += [webgpu.WGPUBindGroupEntry(binding=i+1, buffer=self.dev.create_uniform(cast(int, x)) if i >= len(tmp_bufs) else x, offset=0,
-      size=4 if i >= len(tmp_bufs) else webgpu.wgpuBufferGetSize(x)) for i,x in enumerate(tuple(tmp_bufs)+vals)]
+    bindings += [webgpu.WGPUBindGroupEntry(binding=i+1, buffer=self.dev.create_uniform(cast(int, x)) if i >= len(bufs) else x, offset=0,
+      size=4 if i >= len(bufs) else webgpu.wgpuBufferGetSize(x)) for i,x in enumerate(tuple(bufs)+vals)]
 
     bg_arr_type = webgpu.WGPUBindGroupEntry * len(bindings)
     bind_group_desc = webgpu.WGPUBindGroupDescriptor(layout=bind_group_layouts[0], entryCount=len(bindings), entries=bg_arr_type(*bindings))
@@ -165,10 +156,6 @@ class WebGPUProgram:
 
     cmd_buf = webgpu.wgpuCommandEncoderFinish(command_encoder, webgpu.WGPUCommandBufferDescriptor())
     webgpu.wgpuQueueSubmit(webgpu.wgpuDeviceGetQueue(self.dev.device_res), 1, (webgpu.WGPUCommandBuffer*1)(cmd_buf))
-
-    if buf_patch:
-      copy_buffer_to_buffer(self.dev.device_res, tmp_bufs[0], 0, bufs[0], 0, webgpu.wgpuBufferGetSize(bufs[0]))
-      webgpu.wgpuBufferDestroy(tmp_bufs[0])
 
     if wait:
       time = ((timestamps:=read_buffer(self.dev.device_res, query_buf).cast("Q").tolist())[1] - timestamps[0]) / 1e9
