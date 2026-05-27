@@ -105,7 +105,7 @@ class UOpMetaClass(type):
     return created
 
 # some uops map to other stuff
-buffers:weakref.WeakKeyDictionary[UOp, Buffer|MultiBuffer] = weakref.WeakKeyDictionary() # this maps BUFFER/BUFFER_VIEW uops to their device Buffers
+buffers:weakref.WeakKeyDictionary[UOp, Buffer|MultiBuffer] = weakref.WeakKeyDictionary() # this maps BUFFER/SLICE uops to their device Buffers
 all_metadata:weakref.WeakKeyDictionary[UOp, tuple[Metadata, ...]] = weakref.WeakKeyDictionary() # TODO: should this be here?
 
 # recursive_property replaces functools.cached_property in recursive UOp functions to prevent RecursionError
@@ -267,7 +267,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       case Ops.BINARY: return (len(self.arg),)
       case Ops.BUFFER: return (self.arg,)
       case Ops.SLICE:
-        # HACK: BUFFER_VIEW is used inside kernels, so we set the shape to () if it's on an INDEX
+        # HACK: SLICE is used inside kernels, so we set the shape to () if it's on an INDEX
         if self.src[0].op is Ops.INDEX: return ()
         return (self.arg,)
       case Ops.CUSTOM_FUNCTION: return None
@@ -794,7 +794,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
         mbuf.bufs = [b.view(self.arg, self.dtype, offset * self.src[0].dtype.itemsize) for b in buf.bufs]
         buffers[self] = mbuf
         return mbuf
-      assert isinstance(buf, Buffer), "must be a Buffer for BUFFER_VIEW"
+      assert isinstance(buf, Buffer), "must be a Buffer for SLICE"
       buffers[self] = bv = buf.view(self.arg, self.dtype, offset * self.src[0].dtype.itemsize)
       return bv
     if self.op is Ops.MSELECT:

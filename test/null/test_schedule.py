@@ -118,7 +118,7 @@ class TestContiguous(unittest.TestCase):
   def test_size_change_buffer_view(self):
     a = Tensor.empty(4)
     b = a.reshape((1, 1, 4)).shrink(((0, 1), (0, 1), (0, 3))).contiguous()
-    check_schedule(b, 0)  # contiguous shrink of a realized buffer is a zero-copy BUFFER_VIEW
+    check_schedule(b, 0)  # contiguous shrink of a realized buffer is a zero-copy SLICE
 
   def test_double_contiguous_realizes_once(self):
     a = Tensor.empty(4, 1)
@@ -1210,10 +1210,10 @@ class TestFusionOp(unittest.TestCase):
     self.assertEqual(len(linear.src), 1)
     self.assertLess(time.perf_counter()-st, 2.0)
 
-# NOTE: the NULL backend supports BUFFER_VIEW
+# NOTE: the NULL backend supports SLICE
 class TestBufferView(unittest.TestCase):
   def test_shrink_contiguous_is_buffer_view(self):
-    # simple 1D shrink of a realized buffer should be BUFFER_VIEW, not a copy kernel
+    # simple 1D shrink of a realized buffer should be SLICE, not a copy kernel
     a = Tensor.arange(100).clone().realize()
     b = a.shrink(((10, 50),)).contiguous()
     run_linear(*check_schedule(b, 0))
@@ -1229,7 +1229,7 @@ class TestBufferView(unittest.TestCase):
     run_linear(*check_schedule(b, 0))
 
   def test_shrink_non_shard_axis_is_buffer_view_multi(self):
-    # indexing a non-shard axis of a realized sharded tensor should be BUFFER_VIEW on each device, not copy kernels
+    # indexing a non-shard axis of a realized sharded tensor should be SLICE on each device, not copy kernels
     # this is the flat_llama pattern: weight[layer_idx] where weight is (n_layers, out, dim) sharded on axis=1
     devices = ("NULL:1", "NULL:2")
     a = Tensor.arange(8*4*10).reshape(8, 4, 10).clone().shard(devices, axis=1).realize()

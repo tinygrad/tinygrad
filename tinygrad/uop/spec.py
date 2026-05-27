@@ -221,11 +221,11 @@ spec_program = PatternMatcher([
 
 # these are intermediate ops. everything should be deleted from here
 spec_full = PatternMatcher([
-  # BUFFER_VIEW on BUFFER is allowed if BUFFER is
+  # SLICE on BUFFER is allowed if BUFFER is
   (UPat(Ops.SLICE, src=(UPat((Ops.BUFFER, Ops.PARAM)), UPat(Ops.CONST, dtype=dtypes.weakint)), allow_any_len=True, name="bv"),
    lambda bv: isinstance(bv.arg, int)),
 
-  # TODO: BUFFER_VIEW shouldn't go on INDEX. why is this allowed? remove these both
+  # TODO: SLICE shouldn't go on INDEX. why is this allowed? remove these both
   (UPat(Ops.SLICE, src=(UPat((Ops.INDEX,)), UPat(Ops.CONST, dtype=dtypes.weakint)), allow_any_len=True, name="bv"),
    lambda bv: isinstance(bv.arg, int)),
   (UPat(Ops.CALL, src=(UPat((Ops.SLICE,)),), allow_any_len=True), lambda: True),

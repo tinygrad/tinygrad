@@ -18,7 +18,7 @@ def realize_srcs(ctx:dict[UOp, None], rb:UOp) -> None:
     if s.base.op not in ALWAYS_CONTIGUOUS: ctx[s] = None
 
 def realize_store_after_src(ctx:dict[UOp, None], dest:UOp, src:UOp):
-  # don't realize COPY/BUFFER_VIEW when they are the direct source of STORE+AFTER — the target buffer is the output
+  # don't realize COPY/SLICE when they are the direct source of STORE+AFTER — the target buffer is the output
   if src.op in {Ops.COPY, Ops.SLICE} and src in ctx \
      and not dest.op_in_backward_slice_with_self(Ops.SHRINK, Ops.PERMUTE, Ops.FLIP, Ops.PAD):
     del ctx[src]

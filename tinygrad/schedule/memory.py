@@ -52,7 +52,7 @@ def memory_plan_rewrite(linear:UOp, held_bufs:set[UOp]|None=None) -> UOp:
     peaks[_key(buf)] = (max(peaks[_key(buf)][0], offsets[buf] + buf.arg * buf.dtype.itemsize), peaks[_key(buf)][1])
   arena_sizes = {key: round_up(peak, block_size) for key, (peak, _) in peaks.items()}
 
-  # build replace_map: each buffer becomes a BUFFER_VIEW into a shared per-device-lane arena
+  # build replace_map: each buffer becomes a SLICE into a shared per-device-lane arena
   arenas = {key: UOp.new_buffer(key[0], sz, dtypes.int8) for key, sz in arena_sizes.items()}
   replace_map:dict[UOp, UOp] = {}
   for buf_uop, offset in offsets.items():

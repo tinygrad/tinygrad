@@ -36,7 +36,7 @@ class TestMetalGraph(unittest.TestCase):
     assert self.MetalGraph.supports_uop([self.dev], self.call(self.metal_buf(0), self.metal_buf(0x100000000))) is False
 
   def test_supports_uop_nonmetal_buf(self):
-    # non-BUFFER_VIEW ops should not be checked for offset
+    # non-SLICE ops should not be checked for offset
     buf = MagicMock()
     buf.op = Ops.BUFFER
     buf.device = Device.DEFAULT
