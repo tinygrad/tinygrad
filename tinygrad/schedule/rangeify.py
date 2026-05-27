@@ -52,7 +52,7 @@ def found_after(ctx:dict[UOp, UOp], after:UOp, src:UOp):
     if x.op is Ops.PERMUTE: x, after = x.src[0], after.permute(argsort(x.marg))
     elif x.op is Ops.RESHAPE: x, after = x.src[0], after.reshape(x.src[0].shape)
     elif x.op is Ops.WHERE and x.src[2].base.arg == Invalid and x.src[1].op is Ops.PAD:
-      x, after = x.src[1].src[0], after.shrink(tuple((l, s-r) for (l,r),s in zip(x.src[1].marg, x.shape)))
+      x, after = x.src[1].src[0], after.shrink(tuple((o, s+o) for (_,o),s in zip(x.src[1].marg, x.src[1].src[0].shape)))
     else: break
   ctx[x] = after
 
