@@ -29,7 +29,7 @@ def gradient_test():
   z = y.matmul(x).sum()
   z.backward()
 def realized_eye():
-  Tensor.eye(3).realize()
+  Tensor.eye(3).clone().realize()
 def realized_list():
   Tensor([[2.0,0,-2.0]]).realize()
 def kernel_matmul():

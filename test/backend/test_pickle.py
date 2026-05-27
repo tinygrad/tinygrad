@@ -67,7 +67,7 @@ class TestPickle(unittest.TestCase):
 
   # NOTE: currently Buffer exists on the uop, not tensor
   def test_pickle_buffer_uop(self):
-    t = Tensor.arange(4).realize()
+    t = Tensor.arange(4).clone().realize()
     a = t.uop
     assert a.is_realized
     self.assertIsNotNone(buffer:=a.base.realized)
@@ -95,7 +95,7 @@ class TestPickle(unittest.TestCase):
     np.testing.assert_equal(vt2.numpy(), 20)
 
   def test_pickle_buffer_view(self):
-    t = Tensor.arange(10, device="CPU").contiguous().realize()
+    t = Tensor.arange(10).clone(device="CPU").realize()
     vt = t[3:5].contiguous().realize()
     assert hasattr(vt.uop.buffer, 'base')
     ref_value = vt.tolist()
