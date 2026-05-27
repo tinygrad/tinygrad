@@ -972,13 +972,6 @@ class TestSchedule(unittest.TestCase):
     run_linear(*check_schedule(out, 2))
     np.testing.assert_allclose(out.numpy(), (x.numpy()+(np.arange(10)+1)[2]).sum(), atol=1e-5, rtol=1e-6)
 
-  @unittest.skip("BUFFER_VIEW no longer supported on non-disk devices")
-  def test_arange_view_op(self):
-    a = Tensor.arange(12).reshape(4, 3).shrink(((1, 2), (1, 3))).contiguous()
-    sched = run_linear(*check_schedule(a, 1))
-    self.assertIs(sched[1].ast.op, Ops.BUFFER_VIEW)
-    np.testing.assert_equal(a.numpy(), [[4, 5]])
-
   @unittest.skipUnless(dtypes.half in supported_dtypes, "need half")
   def test_precompute_freqs_cis(self):
     from extra.models.llama import precompute_freqs_cis
