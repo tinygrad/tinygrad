@@ -281,7 +281,7 @@ runs:
         cache-name: cache-gpuocelot-build-1
       with:
         path: ${{ github.workspace }}/gpuocelot/ocelot
-        key: ${{ runner.os }}-gpuocelot-b16039dc940dc6bc4ea0a98380495769ff35ed99-rebuild-${{ env.CACHE_VERSION }}
+        key: ${{ runner.os }}-gpuocelot-f463259669c69abce7b3a0567b6c284f348d0f32-rebuild-${{ env.CACHE_VERSION }}
     - name: Cache gpuocelot
       if: inputs.ocelot == 'true' && github.event_name != 'pull_request'
       id: cache-build
