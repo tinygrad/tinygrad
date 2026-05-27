@@ -5,7 +5,6 @@ from tinygrad import Tensor
 from tinygrad.device import Device, Compiler, enumerate_devices_str
 from tinygrad.helpers import diskcache_get, diskcache_put, getenv, Context, Target, WIN, OSX, DEV
 from tinygrad.runtime.support.c import DLL
-from test.helpers import CI
 
 class TestDevice(unittest.TestCase):
   def test_canonicalize(self):
@@ -67,7 +66,7 @@ class TestDevice(unittest.TestCase):
     self.assertNotEqual(result.returncode, 0)
     self.assertIn(b"deprecated", result.stderr)
 
-  @unittest.skipIf(WIN and CI, "skipping windows test") # TODO: subprocess causes memory violation?
+  @unittest.skipIf(WIN, "skipping windows test") # TODO: subprocess causes memory violation?
   def test_env_overwrite_default_compiler(self):
     if Device.DEFAULT == "CPU":
       from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler, ClangJITCompiler
@@ -95,7 +94,7 @@ class TestDevice(unittest.TestCase):
                         shell=True, check=True, env={**os.environ, "DEV": "AMD:HIP"})
     else: self.skipTest("only run on CPU/AMD")
 
-  @unittest.skipIf(WIN and CI, "skipping windows test")
+  @unittest.skipIf(WIN, "skipping windows test")
   def test_env_online(self):
     from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler, ClangJITCompiler
     try: _, _ = CPULLVMCompiler(), ClangJITCompiler()

@@ -222,12 +222,14 @@ spec_program = PatternMatcher([
 
 # these are intermediate ops. everything should be deleted from here
 spec_full = PatternMatcher([
-  # BUFFER_VIEW on BUFFER is allowed if BUFFER is
-  (UPat(Ops.BUFFER_VIEW, src=(UPat((Ops.BUFFER, Ops.PARAM)),)), lambda: True),
+  # SLICE on BUFFER is allowed if BUFFER is
+  (UPat(Ops.SLICE, src=(UPat((Ops.BUFFER, Ops.PARAM)), UPat(Ops.CONST, dtype=dtypes.weakint)), allow_any_len=True, name="bv"),
+   lambda bv: isinstance(bv.arg, int)),
 
-  # TODO: BUFFER_VIEW shouldn't go on INDEX. why is this allowed? remove these both
-  (UPat(Ops.BUFFER_VIEW, src=(UPat((Ops.INDEX,)),), allow_any_len=True), lambda: True),
-  (UPat(Ops.CALL, src=(UPat((Ops.BUFFER_VIEW,)),), allow_any_len=True), lambda: True),
+  # TODO: SLICE shouldn't go on INDEX. why is this allowed? remove these both
+  (UPat(Ops.SLICE, src=(UPat((Ops.INDEX,)), UPat(Ops.CONST, dtype=dtypes.weakint)), allow_any_len=True, name="bv"),
+   lambda bv: isinstance(bv.arg, int)),
+  (UPat(Ops.CALL, src=(UPat((Ops.SLICE,)),), allow_any_len=True), lambda: True),
 
   # codegen may end ranges after gpudims has replaced RANGE with SPECIAL.
   (UPat(Ops.END, src=(UPat(), UPat()), allow_any_len=True), lambda: True),

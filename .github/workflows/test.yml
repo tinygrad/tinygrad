@@ -35,7 +35,7 @@ jobs:
 
   docs:
     name: Docs
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     env:
       CHECK_OOB: 0
@@ -89,7 +89,7 @@ jobs:
 
   torchbackend:
     name: Torch Backend Tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
     - name: Checkout Code
@@ -125,7 +125,7 @@ jobs:
 
   torchbackendmore:
     name: Torch Backend Tests More
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
     - name: Checkout Code
@@ -147,7 +147,7 @@ jobs:
 
   bepython:
     name: Python Backend
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
     - name: Checkout Code
@@ -215,7 +215,7 @@ jobs:
 
   linter:
     name: Linters
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
 
     steps:
@@ -246,7 +246,7 @@ jobs:
 
   nulltest:
     name: Null Tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
 
     steps:
@@ -277,7 +277,7 @@ jobs:
 
   unittest:
     name: Unit Tests
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
 
     steps:
@@ -320,7 +320,7 @@ jobs:
       matrix:
         group: [1, 2]
     name: SPEC=2 (${{ matrix.group }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
     - name: Checkout Code
@@ -336,7 +336,7 @@ jobs:
 
   fuzzing:
     name: Fuzzing
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
     - name: Checkout Code
@@ -357,7 +357,7 @@ jobs:
 
   testopenclimage:
     name: CL IMAGE Tests
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - name: Checkout Code
@@ -377,7 +377,7 @@ jobs:
 
   testgpumisc:
     name: CL Misc tests
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - name: Checkout Code
@@ -402,7 +402,7 @@ jobs:
 
   testopenpilot:
     name: openpilot Compile Tests
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - name: Checkout Code
@@ -432,7 +432,7 @@ jobs:
 
   testonnxcpu:
     name: ONNX (CPU) Tests
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
 
     steps:
@@ -460,7 +460,7 @@ jobs:
 
   testopencl:
     name: ONNX (CL)+Optimization Tests
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - name: Checkout Code
@@ -519,7 +519,7 @@ jobs:
 
   testmodels:
     name: Models (llvm+cpu+gpu)
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - name: Checkout Code
@@ -586,7 +586,7 @@ jobs:
 
   testwebgpu:
     name: Linux (WebGPU)
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
     - name: Checkout Code
@@ -693,7 +693,7 @@ jobs:
         arch: [gfx1100, gfx1201, gfx950]
 
     name: Linux (${{ matrix.backend }} ${{ matrix.arch }})
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
       DEV: MOCKKFD+AMD:${{ matrix.backend == 'amdllvm' && 'LLVM' || '' }}:${{ matrix.arch }}
@@ -728,7 +728,7 @@ jobs:
         backend: [ptx, nv]
 
     name: Linux (${{ matrix.backend }})
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
       FORWARD_ONLY: 1
@@ -763,7 +763,7 @@ jobs:
         backend: [llvm, cpu, opencl, lvp, x86]
 
     name: Linux (${{ matrix.backend }})
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - name: Checkout Code

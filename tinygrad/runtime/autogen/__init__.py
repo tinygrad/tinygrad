@@ -54,7 +54,7 @@ def __getattr__(nm):
       ["/usr/include/string.h", "/usr/include/elf.h", "/usr/include/unistd.h", "/usr/include/asm-generic/mman-common.h"]), dll="'c'", errno=True)
     case "avcodec": return load("avcodec", ["{}/libavcodec/hevc/hevc.h", "{}/libavcodec/cbs_h265.h"], srcs=ffmpeg_src)
     case "opencl": return load("opencl", ["{}/CL/cl.h"], dll="'OpenCL'", args=["-I{}"], srcs=opencl_src)
-    case "cuda": return load("cuda", ["{}/include/cuda.h"], dll="'cuda'", args=["-D__CUDA_API_VERSION_INTERNAL"], srcs=cudart_src, macros=False)
+    case "cuda": return load("cuda", ["{}/include/cuda.h"], dll="'nvcuda' if WIN else 'cuda'", args=["-D__CUDA_API_VERSION_INTERNAL"], srcs=cudart_src, macros=False, prolog=["from tinygrad.helpers import WIN"])
     case "nvrtc": return load("nvrtc", ["{}/include/nvrtc.h"], dll="'nvrtc'", paths=nv_lib_path, srcs=nvrtc_src, prolog=["import sysconfig"])
     case "nvjitlink": load("nvjitlink", [root/"extra/nvJitLink.h"], dll="'nvJitLink'", paths=nv_lib_path, prolog=["import sysconfig"])
     case "kfd": return load("kfd", [root/"extra/hip_gpu_driver/kfd_ioctl.h"])

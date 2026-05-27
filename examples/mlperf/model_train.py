@@ -1447,7 +1447,9 @@ def train_llama3():
     w._inv_scale = model._fp8_inv_scale[wname]
     if optim.master_params:
       idx = next(j for j, p in enumerate(optim.params) if p is w)
-      optim.master_params[idx].assign((optim.master_params[idx] * w._inv_scale.reshape(-1, *([1]*(w.ndim-1)))).contiguous())
+      master = optim.master_params[idx]
+      inv = w._inv_scale if w._inv_scale.device == master.device else w._inv_scale.to(master.device)
+      master.assign((master * inv.reshape(-1, *([1]*(w.ndim-1)))).contiguous())
 
   # realize everything here
   if optim.master_params: Tensor.realize(*optim.master_params)
@@ -1498,7 +1500,7 @@ def train_llama3():
   def fake_data(bs, samples):
     import numpy as np
     for _ in range(samples // bs):
-      fake_data_np = np.random.randint(0, model_params["vocab_size"], size=(bs, SEQLEN + 1), dtype=np.int32)
+      fake_data_np = np.random.randint(0, real_vocab_size, size=(bs, SEQLEN + 1), dtype=np.int32)
       yield Tensor(fake_data_np, device="NPY")
 
   def get_train_iter():
