@@ -283,6 +283,12 @@ pm_render = PatternMatcher([
   (UPat(Ops.GEP, name='gep'), lambda gep: UOp(Ops.STACK, gep.dtype, tuple(gep.src[0].gep(x) for x in gep.arg)) if len(gep.arg) > 1 else None),
   (UPat(Ops.GEP, name='gep'), lambda gep: gep.src[0] if gep.src[0].dtype.vcount == 1 and gep.arg == (0,) else None),
   (UPat(Ops.STACK, src=(UPat(name='x'),)), lambda x: x),
+  # rewrite non-image INDEX to SLICE
+  (UPat(Ops.INDEX, name="x"), lambda x: None if isinstance(x.src[0].dtype, ImageDType) else \
+    UOp(Ops.SLICE, dtype=x.dtype, src=x.src, arg=0 if x.dtype.count == 1 else x.dtype.count)),
+  # rewrite CAST on SLICE to just SLICE
+  (UPat(Ops.SLICE, name="bv").cast(name="x"),
+   lambda bv,x: bv.replace(dtype=x.dtype, arg=0 if x.dtype.count == 1 else x.dtype.count))
 ])
 
 # *** Ops.REDUCE -> Ops.DEFINE_ACC ***

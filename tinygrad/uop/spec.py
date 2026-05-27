@@ -99,11 +99,11 @@ spec_shared = PatternMatcher([
   (UPat(Ops.INS), lambda: True),
 
   # LOAD(idx) / STORE(idx, val) with gates on the LOAD/STORE
-  (UPat(Ops.INDEX, name="uidx").or_casted().load(), validate_index),
-  (UPat(Ops.INDEX, name="uidx").or_casted().load(UPat.var("alt"), UPat.var("gate", dtype=dtypes.bool), name="load"),
+  (UPat((Ops.INDEX, Ops.SLICE), name="uidx").or_casted().load(), validate_index),
+  (UPat((Ops.INDEX, Ops.SLICE), name="uidx").or_casted().load(UPat.var("alt"), UPat.var("gate", dtype=dtypes.bool), name="load"),
    lambda uidx,gate,alt,load: validate_index(uidx, gate) if alt.dtype == load.dtype else False),
-  (UPat(Ops.INDEX, name="uidx").or_casted().store(UPat()), validate_index),
-  (UPat(Ops.INDEX, name="uidx").or_casted().store(UPat(), UPat.var("gate", dtype=dtypes.bool)), validate_index),
+  (UPat((Ops.INDEX, Ops.SLICE), name="uidx").or_casted().store(UPat()), validate_index),
+  (UPat((Ops.INDEX, Ops.SLICE), name="uidx").or_casted().store(UPat(), UPat.var("gate", dtype=dtypes.bool)), validate_index),
 
   # STORE in tensor graph: store a value into a target
   (UPat(Ops.STORE, dtypes.void, (UPat(name="x"), UPat())), lambda x: True),
@@ -199,6 +199,10 @@ spec_tensor = PatternMatcher([
 spec_program = PatternMatcher([
   # weakint is not allowed in programs
   (UPat(GroupOp.All, dtypes.weakint), lambda: False),
+
+  # buffer view in program, Image only for ImageDType
+  (UPat(Ops.SLICE), lambda: True),
+  (UPat(Ops.INDEX, name="idx"), lambda idx: isinstance(idx.src[0].dtype, ImageDType)),
 
   # movement ops are not allowed in programs
   (UPat(GroupOp.Movement), lambda: False),

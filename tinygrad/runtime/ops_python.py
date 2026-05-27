@@ -101,16 +101,18 @@ class PythonProgram:
           if arg[0] == 'g': values[i] = [idxs[2-int(arg[-1])]] * warp_size
           elif arg[0] == 'l': values[i] = [x[2-int(arg[-1])] for x in warp]
         elif uop is Ops.CONST: values[i] = [arg] * warp_size
-        elif uop is Ops.INDEX:
+        elif uop is Ops.SLICE:
+          assert len(src_values) == 2, "non-image index must be 2 srcs"
           ret:list = []
-          if isinstance(src_dtypes[0], ImageDType):
-            assert len(src_values) == 3, "image index must be 3 srcs"
-            for m,oy,ox in zip(*src_values):
-              if ox < 0 or ox >= src_dtypes[0].shape[1] or oy < 0 or oy >= src_dtypes[0].shape[0]: ret.append((m, None))
-              else: ret.append((m, ox*4 + oy*src_dtypes[0].shape[1]*4))
-          else:
-            assert len(src_values) == 2, "non-image index must be 2 srcs"
-            for m,o in zip(*src_values): ret.append((m,o))
+          for m,o in zip(*src_values): ret.append((m,o))
+          values[i] = ret
+        elif uop is Ops.INDEX:
+          assert isinstance(src_dtypes[0], ImageDType), "only image INDEX is supported"
+          ret:list = []
+          assert len(src_values) == 3, "image index must be 3 srcs"
+          for m,oy,ox in zip(*src_values):
+            if ox < 0 or ox >= src_dtypes[0].shape[1] or oy < 0 or oy >= src_dtypes[0].shape[0]: ret.append((m, None))
+            else: ret.append((m, ox*4 + oy*src_dtypes[0].shape[1]*4))
           values[i] = ret
         elif uop is Ops.CAST and isinstance(dtype, PtrDType):
           values[i] = src_values[0]
