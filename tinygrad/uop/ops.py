@@ -692,8 +692,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       return self
     match op:
       case Ops.RESHAPE | Ops.EXPAND: src_args = [arg]
-      case Ops.PAD: src_args = list(zip(*arg))
-      case Ops.SHRINK: src_args = list(zip(*arg))
+      case Ops.PAD | Ops.SHRINK: src_args = list(zip(*arg))
       case Ops.PERMUTE | Ops.FLIP: src_args = []
       case _: raise RuntimeError(f"{op} is not a MovementOp")
     usrcs = [shape_to_shape_arg(arg) for arg in src_args]
