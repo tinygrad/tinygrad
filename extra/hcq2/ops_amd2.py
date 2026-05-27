@@ -163,7 +163,8 @@ def amd_submit_pm4(cmdbuf, devs):
   ring_idx = ((put + i.cast(put.dtype)) % q.ring.size).cast(dtypes.int)
 
   # copy the cmdbuf into the ring and advance the put/write pointers
-  copy_to_ring = ring.index(ring_idx, dtype=ring.dtype.ptr()).store(cmdbuf.index(i, dtype=dtypes.uint32)).end(i)
+  copy_to_ring = ring.index(ring_idx, dtype=ring.dtype.ptr()).store(
+    cmdbuf.index(i*4, dtype=cmdbuf.dtype.ptr()).cast(dtypes.uint32.ptr()).load()).end(i)
   bump_put_ptr = put_ptr.index(zero, dtype=put_ptr.dtype.ptr()).store(next_put)
   bump_wptr = wptr.index(zero, dtype=wptr.dtype.ptr()).store(next_put)
 
@@ -233,7 +234,8 @@ def amd_submit_sdma(cmdbuf, devs):
   zi = UOp.range(zero_amt_dw, 0, dtype=dtypes.int, src=(cmdbuf,))
   zero_tail = ring.index(tail_off_dw + zi, dtype=ring.dtype.ptr()).store(UOp.const(dtypes.uint32, 0)).end(zi)
   i = UOp.range(UOp.const(dtypes.int, size_dw), 0, dtype=dtypes.int, src=(cmdbuf,))
-  copy_to_ring = ring.index(start_dw + i, dtype=ring.dtype.ptr()).store(cmdbuf.index(i, dtype=dtypes.uint32)).end(i)
+  copy_to_ring = ring.index(start_dw + i, dtype=ring.dtype.ptr()).store(
+    cmdbuf.index(i*4, dtype=cmdbuf.dtype.ptr()).cast(dtypes.uint32.ptr()).load()).end(i)
 
   # advance the put/write pointers past the zeroed tail and the cmdbuf
   next_put_b = put_b + ((zero_amt_dw + size_dw) * 4).cast(put_b.dtype)
@@ -531,12 +533,12 @@ class AMDDevice(HCQ2Compiled):
   @functools.cached_property
   def pm_bufferize(self) -> PatternMatcher:
     return PatternMatcher([
-      (UPat(Ops.BUFFER, tag="scratch"), lambda ctx: (UOp.from_buffer(buf:=Buffer(ctx.device, ctx.scratch.size, dtypes.uint8, opaque=ctx.scratch,
-                                                    options=BufferSpec(external_ptr=1)), "CPU"), UOp.from_buffer(buf, ctx.device))),
+      (UPat(Ops.BUFFER, tag="scratch"),
+        lambda ctx: Buffer(ctx.device, ctx.scratch.size, dtypes.uint8, opaque=ctx.scratch, options=BufferSpec(external_ptr=1))),
       (UPat(Ops.BUFFER, tag={("compute_queue", n) for n in ("ring", "write_ptr", "doorbell", "put_value")}, name="b"),
-        lambda ctx, b: (UOp.from_buffer(getattr(ctx.compute_queue, b.tag[1]), "CPU"), UOp.from_buffer(getattr(ctx.compute_queue, b.tag[1]), ctx.device))),
+        lambda ctx, b: getattr(ctx.compute_queue, b.tag[1])),
       (UPat(Ops.BUFFER, tag={("sdma_queue", n) for n in ("ring", "write_ptr", "doorbell", "put_value")}, name="b"),
-        lambda ctx, b: (UOp.from_buffer(getattr(ctx.sdma_queue(0), b.tag[1]), "CPU"), UOp.from_buffer(getattr(ctx.sdma_queue(0), b.tag[1]), ctx.device))),
+        lambda ctx, b: getattr(ctx.sdma_queue(0), b.tag[1])),
     ]) + super().pm_bufferize
 
   def device_props(self): return self.iface.props
