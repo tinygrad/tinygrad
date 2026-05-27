@@ -8,10 +8,10 @@ class TestKernelCache(unittest.TestCase):
     if Device.DEFAULT not in ["CPU"]:
       self.skipTest("No custom kernel cache is implemented")
 
-    unique_const = 0.6765677269
+    const_value = 0.6765677269
     a = Tensor.rand(4,4).realize()
     b = Tensor.rand(4,4).realize()
-    x = a + b + unique_const
+    x = a + b + const_value
     x.realize()
 
     a1 = Tensor.rand(4,4).realize()
@@ -20,7 +20,7 @@ class TestKernelCache(unittest.TestCase):
     Device['CPU'].compiler.compile_cached = None # making it not callable
 
     try:
-      x1 = a1 + b1 + unique_const
+      x1 = a1 + b1 + const_value
       x1.realize() # Same kernel should be from cache.
     finally:
       Device['CPU'].compiler.compile_cached = orig_compile_func
