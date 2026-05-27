@@ -70,16 +70,6 @@ const drawGraph = (data) => {
   const callCount = g.graph().callCount;
   const nodes = d3.select("#nodes").selectAll("g").data(g.nodes().map(id => g.node(id)), d => d).join("g").attr("class", d => d.className ?? "node")
     .attr("transform", d => `translate(${d.x},${d.y})`).on("click", (e,d) => {
-      if (d.callNode || d.collapsible) {
-        const t = d3.zoomTransform(document.getElementById("graph-svg"));
-        const [x, y] = t.apply([d.x, d.y]);
-        anchor = {id:d.id, x, y, k:t.k};
-        if (d.callNode) {
-          if (state.callSrcMask.has(d.id)) state.callSrcMask.delete(d.id); else state.callSrcMask.add(d.id);
-          if (state.callSrcMask.size >= callCount) { showCallSrc.toggle.checked = !showCallSrc.toggle.checked; state.callSrcMask.clear(); }
-        } else if (state.expandedNodes.has(d.id)) state.expandedNodes.delete(d.id); else state.expandedNodes.add(d.id);
-        return setState({});
-      }
       const parents = g.predecessors(d.id);
       const children = g.successors(d.id);
       if (parents == null && children == null) return;
@@ -124,7 +114,17 @@ const drawGraph = (data) => {
   addTags(nodes.selectAll("g.tag").data(d => d.tag != null ? [d] : []).join("g").attr("class", "tag")
     .attr("transform", d => `translate(${-d.width/2+8}, ${-d.height/2+8})`).datum(e => ({ text:e.tag })));
   addTags(nodes.selectAll("g.type").data(d => d.collapsible ? [d] : []).join("g").attr("class", d => `tag ${d.collapsed ? 'collapsed' : 'expanded'}`)
-    .attr("transform", d => `translate(${-d.width/2}, ${0})`).datum(d => ({ text:d.collapsed ? "+" : "−", fill:d.callNode ? null : d.color })));
+    .attr("transform", d => `translate(${-d.width/2}, ${0})`).datum(d => ({ ...d, text:d.collapsed ? "+" : "−", fill:d.callNode ? null : d.color })).on("click", (e,d) => {
+      e.stopPropagation();
+      const t = d3.zoomTransform(document.getElementById("graph-svg"));
+      const [x, y] = t.apply([d.x, d.y]);
+      anchor = {id:d.id, x, y, k:t.k};
+      if (d.callNode) {
+        if (state.callSrcMask.has(d.id)) state.callSrcMask.delete(d.id); else state.callSrcMask.add(d.id);
+        if (state.callSrcMask.size >= callCount) { showCallSrc.toggle.checked = !showCallSrc.toggle.checked; state.callSrcMask.clear(); }
+      } else { if (state.expandedNodes.has(d.id)) state.expandedNodes.delete(d.id); else state.expandedNodes.add(d.id); }
+      return setState({});
+    }));
   addTags(nodes.selectAll("g.ref").data(d => d.ref != null ? [d] : []).join("g").attr("class", "tag ref")
     .attr("transform", d => `translate(${d.width/2-2}, ${-d.height/2+2})`).on("click", (e,d) => { e.stopPropagation(); switchCtx(d.ref); }).datum(d => ({ref:d.ref})),
     "M-1.7 1.7 L1.7 -1.7 M-0.55 -1.7 H1.7 V0.55");
