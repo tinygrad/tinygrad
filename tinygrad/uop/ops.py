@@ -327,8 +327,9 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
           return tuple(ps[i] for i in self.marg)
         case Ops.PAD:
           # TODO: why do i need resolve here?
-          if len(ps) != len(self.marg) or not all(resolve(b>=0) and resolve(e>=0) for b,e in self.marg): raise ValueError(f"invalid pad {self.marg}")
-          return tuple(ssimplify(s+b+e) for s,(b,e) in zip(ps, self.marg))
+          if len(ps) != len(self.marg) or not all(resolve(sz>=0) and resolve(0<=o) and resolve(o+s<=sz) for s,(sz,o) in zip(ps, self.marg)):
+            raise ValueError(f"invalid pad {self.marg} for {ps}")
+          return tuple(ssimplify(sz) for sz,_ in self.marg)
         case Ops.SHRINK:
           # TODO: why do i need resolve here?
           if len(ps) != len(self.marg) or not all(resolve(0<=b) and resolve(sz>=0) and resolve(b+sz<=s) for s,(sz,b) in zip(ps, self.marg)):
