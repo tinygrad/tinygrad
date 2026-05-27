@@ -56,7 +56,7 @@ def memory_plan_rewrite(linear:UOp, held_bufs:set[UOp]|None=None) -> UOp:
   arenas = {key: UOp.new_buffer(key[0], sz, dtypes.int8) for key, sz in arena_sizes.items()}
   replace_map:dict[UOp, UOp] = {}
   for buf_uop, offset in offsets.items():
-    replace_map[buf_uop] = UOp(Ops.BUFFER_VIEW, buf_uop.dtype, (arenas[_key(buf_uop)], UOp.const(dtypes.weakint, offset)), buf_uop.arg)
+    replace_map[buf_uop] = UOp(Ops.SLICE, buf_uop.dtype, (arenas[_key(buf_uop)], UOp.const(dtypes.weakint, offset)), buf_uop.arg)
 
   if DEBUG >= 1 and (omem:=sum(nbytes.values()) / 1e6) != (nmem:=sum(arena_sizes.values()) / 1e6):
     print(f"memory reduced from {omem:.2f} MB -> {nmem:.2f} MB, {len(first_appearance)} -> {len(arenas)} bufs")

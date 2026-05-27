@@ -14,7 +14,7 @@ class TestMetalGraph(unittest.TestCase):
   def metal_buf(self, offset):
     buf = MagicMock()
     if offset > 0:
-      buf.op = Ops.BUFFER_VIEW
+      buf.op = Ops.SLICE
       src = MagicMock()
       src.dtype = dtypes.uint8
       buf.src = (src, UOp.const(dtypes.weakint, offset))

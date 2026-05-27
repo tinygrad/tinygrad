@@ -167,7 +167,7 @@ class HCQEncoder:
   def __init__(self): self.blob, self.patches = b'', []
 
   def get_dev_addr(self, uop:UOp) -> UOp:
-    return UOp(Ops.GETADDR, dtypes.uint64, src=(uop,)) if unwrap_after(uop).op in (Ops.BUFFER, Ops.BUFFER_VIEW, Ops.BINARY, Ops.MSTACK, Ops.MSELECT) else uop
+    return UOp(Ops.GETADDR, dtypes.uint64, src=(uop,)) if unwrap_after(uop).op in (Ops.BUFFER, Ops.SLICE, Ops.BINARY, Ops.MSTACK, Ops.MSELECT) else uop
 
   def append(self, *data, dtype=dtypes.uint32):
     for d in data:
@@ -291,7 +291,7 @@ def bufferize_kernargs(ctx:HCQ2LowerCtx, target:UOp, buf_node:UOp) -> UOp:
     dctx = ctx.dev_ctx[dev]
     isz = dctx.kernargs_host.dtype.base.itemsize
     off = dctx.kernargs_allocator.alloc(buf_node.arg, 16)
-    hbufs.append(UOp(Ops.BUFFER_VIEW, dctx.kernargs_host.dtype,
+    hbufs.append(UOp(Ops.SLICE, dctx.kernargs_host.dtype,
                      src=(dctx.kernargs_host, UOp.const(dtypes.weakint, off // isz)), arg=buf_node.arg // isz))
     addrs.append(dctx.kernargs_gpu + off)
   return _maybe_mstack(tuple(addrs)).after(*_lower_stores(_maybe_mstack(tuple(hbufs)), buf_node, target.src[1:]))
@@ -352,7 +352,7 @@ def fold_blob_store(ctx:HCQ2LowerCtx, buf:UOp, blob:UOp) -> UOp:
 def resolve_getaddr(ctx:HCQ2LowerCtx, m:UOp) -> UOp:
   srcs = m.src if m.op is Ops.MSTACK else (m,)
   for s in srcs:
-    if s.op in (Ops.BUFFER, Ops.BUFFER_VIEW) and s not in ctx.holds: ctx.holds.append(s)
+    if s.op in (Ops.BUFFER, Ops.SLICE) and s not in ctx.holds: ctx.holds.append(s)
   addrs = [s.arg if s.op is Ops.CONST else s.buffer.get_buf(s.device).va_addr for s in srcs]
 
   # fast-path: all per-dev VAs equal -> just a const
@@ -365,14 +365,14 @@ def resolve_getaddr(ctx:HCQ2LowerCtx, m:UOp) -> UOp:
 
 pm_resolve_patches = symbolic + PatternMatcher([
   # resolve getaddrs
-  (UPat(Ops.GETADDR, src=(UPat(Ops.BUFFER_VIEW, name="bv"),)), # getaddr(buffer_view(x)) -> offset+getaddr(x)
+  (UPat(Ops.GETADDR, src=(UPat(Ops.SLICE, name="bv"),)), # getaddr(buffer_view(x)) -> offset+getaddr(x)
     lambda ctx, bv: UOp(Ops.GETADDR, dtypes.uint64, src=(bv.src[0],)) + UOp.const(dtypes.uint64, bv.src[1].arg * bv.src[0].dtype.itemsize)),
   (UPat(Ops.GETADDR, src=(UPat((Ops.BUFFER, Ops.MSTACK), name="m"),)), resolve_getaddr), # getaddr(buffer|mstack) -> addr_table load|const
   (UPat(Ops.GETADDR, src=(UPat.cvar("const"),)), lambda ctx, const: const), # getaddr(const) -> const
 
   # write consts and binaries directly into the buffer (BUFFER or MSTACK of BUFFERs)
-  (UPat((Ops.BUFFER, Ops.BUFFER_VIEW, Ops.MSTACK), name="buf").store(UPat(Ops.BINARY, name="blob")), fold_blob_store),
-  (UPat((Ops.BUFFER, Ops.BUFFER_VIEW, Ops.MSTACK), name="buf").index(UPat.cvar("off")).or_casted()
+  (UPat((Ops.BUFFER, Ops.SLICE, Ops.MSTACK), name="buf").store(UPat(Ops.BINARY, name="blob")), fold_blob_store),
+  (UPat((Ops.BUFFER, Ops.SLICE, Ops.MSTACK), name="buf").index(UPat.cvar("off")).or_casted()
     .store(UPat.any(UPat.cvar("val"), UPat(Ops.MSTACK, src=UPat.cvar(), name="val"))), fold_const_store),
 ])
 
@@ -386,12 +386,12 @@ def parametrize_host_buffer(ctx:HCQ2LowerCtx, buf:UOp) -> UOp:
 
 pm_parametrize_host_buffers = PatternMatcher([
   # resolve buffer views to parametrize only root buffers
-  (UPat(Ops.INDEX, src=(UPat(Ops.BUFFER_VIEW, name="bv"), UPat.var("idx")), name="bi"),
+  (UPat(Ops.INDEX, src=(UPat(Ops.SLICE, name="bv"), UPat.var("idx")), name="bi"),
     lambda bv, idx, bi: bi.replace(src=(bv.src[0], idx * bv.dtype.itemsize // bv.src[0].dtype.itemsize + bv.src[1].arg))),
 
   # parametrize host buffers
-  (UPat(Ops.AFTER, src=(UPat((Ops.BUFFER, Ops.BUFFER_VIEW, Ops.MSTACK)),), allow_any_len=True, name="buf"), parametrize_host_buffer),
-  (UPat((Ops.BUFFER, Ops.BUFFER_VIEW, Ops.MSTACK), name="buf"), parametrize_host_buffer),
+  (UPat(Ops.AFTER, src=(UPat((Ops.BUFFER, Ops.SLICE, Ops.MSTACK)),), allow_any_len=True, name="buf"), parametrize_host_buffer),
+  (UPat((Ops.BUFFER, Ops.SLICE, Ops.MSTACK), name="buf"), parametrize_host_buffer),
 
   # remove UNIQUE/DEVICE to dedup CONST
   (UPat(Ops.CONST, name="c"), lambda c: c.replace(src=()) if len(c.src) else None),

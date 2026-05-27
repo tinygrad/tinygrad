@@ -976,7 +976,7 @@ class TestSchedule(unittest.TestCase):
   def test_arange_view_op(self):
     a = Tensor.arange(12).reshape(4, 3).shrink(((1, 2), (1, 3))).contiguous()
     sched = run_linear(*check_schedule(a, 1))
-    self.assertIs(sched[1].ast.op, Ops.BUFFER_VIEW)
+    self.assertIs(sched[1].ast.op, Ops.SLICE)
     np.testing.assert_equal(a.numpy(), [[4, 5]])
 
   @unittest.skipUnless(dtypes.half in supported_dtypes, "need half")
