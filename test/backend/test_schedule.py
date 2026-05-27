@@ -221,8 +221,8 @@ class TestSchedule(unittest.TestCase):
     np.testing.assert_allclose(out.numpy(), (x.numpy() - x.numpy().max(keepdims=True)).max())
 
   def test_example_matmul_contig(self):
-    x = Tensor.eye(64).contiguous().realize()
-    y = Tensor.eye(64).contiguous().realize()
+    x = Tensor.eye(64).clone().realize()
+    y = Tensor.eye(64).clone().realize()
     z = y.matmul(x).sum()
     z.backward()
     out = x.grad.contiguous()
@@ -826,7 +826,7 @@ class TestSchedule(unittest.TestCase):
     self._test_fusion([(32, 32)], lambda a:a-a.sum(1), 2)
 
   def test_cast_padded_view(self):
-    a = Tensor.arange(4).reshape(1, 4)
+    a = Tensor.arange(4).reshape(1, 4).clone().realize()
     casted_view = a.pad(((0, 1), (0, 0))).cast(dtypes.float)
     casted_view.realize()
     self.assertEqual(casted_view.uop.base.realized.size, 8)
@@ -836,7 +836,7 @@ class TestSchedule(unittest.TestCase):
 
   # NOTE: we only reorder CAST if it's an EXPAND
   def test_cast_after_shrink(self):
-    a = Tensor.arange(4).reshape(1, 4)
+    a = Tensor.arange(4).reshape(1, 4).clone().realize()
     casted_view = a.shrink(((0, 1), (0, 2))).cast(dtypes.float)
     casted_view.realize()
     self.assertEqual(casted_view.uop.base.realized.size, 2)
@@ -991,7 +991,7 @@ class TestSchedule(unittest.TestCase):
 
   def test_assign_non_contiguous_alt(self): self.test_assign_non_contiguous(alt=True)
   def test_assign_non_contiguous(self, alt=False):
-    x = (Tensor.arange(16)-100).reshape(4,4).contiguous().realize()
+    x = (Tensor.arange(16)-100).reshape(4,4).clone().realize()
     xref = x.numpy()
     if alt:
       y = Tensor.randint(2, 4).contiguous().realize()
@@ -1007,7 +1007,7 @@ class TestSchedule(unittest.TestCase):
     np.testing.assert_equal(tst.numpy(), a.numpy())
 
   def test_setitem_sched(self, mop=lambda x:x, expected_kcount=1):
-    a = Tensor.arange(16, device="CPU").reshape(4, 4).contiguous().realize()
+    a = Tensor.arange(16).reshape(4, 4).clone(device="CPU").realize()
     a2 = mop(a)
     expected = (a+a2).tolist()
     a.assign(a+a2)
@@ -1021,7 +1021,7 @@ class TestSchedule(unittest.TestCase):
 
   def test_setitem_const_fused(self):
     # https://github.com/tinygrad/tinygrad/issues/10690
-    a = Tensor.arange(16).contiguous().realize()
+    a = Tensor.arange(16).clone().realize()
     GlobalCounters.reset()
     a[4] = 3
     self.assertEqual(GlobalCounters.kernel_count, 0)
@@ -1278,7 +1278,7 @@ class TestCopyFolding(unittest.TestCase):
     self.assertEqual(x.item(), 2.0)
 
   def test_late_const_copy_folding(self):
-    a = Tensor.arange(3).realize()
+    a = Tensor.arange(3).clone().realize()
     zeros = Tensor.zeros(3, buffer=False).realize()
     b = (a*zeros).to("CPU") + 1
     run_linear(*check_schedule(b, 1, filter_sink=False))
@@ -1353,14 +1353,14 @@ class TestCopyFolding(unittest.TestCase):
     self.assertListEqual(b.tolist(), [[0, 2], [1, 3]])
 
   def test_permute_on_disk(self):
-    with open(temp('dt_arange_4_permute'), "wb") as f: f.write(Tensor.arange(4).realize().uop.base.buffer.as_memoryview())
+    with open(temp('dt_arange_4_permute'), "wb") as f: f.write(Tensor.arange(4).clone().realize().uop.base.buffer.as_memoryview())
     a = Tensor.empty(4, dtype=dtypes.int32, device=f"disk:{temp('dt_arange_4_permute')}")
     b = a.reshape(2, 2).permute(1, 0).to("CPU")
     b.realize()
     self.assertListEqual(b.tolist(), [[0, 2], [1, 3]])
 
   def test_permute_on_disk_contiguous(self):
-    with open(temp('dt_arange_4_permute_contig'), "wb") as f: f.write(Tensor.arange(4).realize().uop.base.buffer.as_memoryview())
+    with open(temp('dt_arange_4_permute_contig'), "wb") as f: f.write(Tensor.arange(4).clone().realize().uop.base.buffer.as_memoryview())
     a = Tensor.empty(4, dtype=dtypes.int32, device=f"disk:{temp('dt_arange_4_permute_contig')}")
     b = a.reshape(2, 2).permute(1, 0).contiguous().to("CPU")
     b.realize()
@@ -1374,7 +1374,7 @@ class TestCopyFolding(unittest.TestCase):
 
   # NOTE: disk permute must come after COPY
   def test_permute_after_shrink_on_disk(self):
-    with open(temp('dt_arange_5_permute'), "wb") as f: f.write(Tensor.arange(5).realize().uop.base.buffer.as_memoryview())
+    with open(temp('dt_arange_5_permute'), "wb") as f: f.write(Tensor.arange(5).clone().realize().uop.base.buffer.as_memoryview())
     a = Tensor.empty(5, dtype=dtypes.int32, device=f"disk:{temp('dt_arange_5_permute')}")
     b = a.shrink(((0, 4),)).reshape(2, 2).permute(1, 0).to("CPU")
     b.realize()
