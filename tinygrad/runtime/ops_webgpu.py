@@ -21,9 +21,8 @@ def from_wgpu_str(string_view:webgpu.struct_WGPUStringView) -> str: return ctype
 def to_wgpu_str(_str:str) -> webgpu.struct_WGPUStringView:
   return webgpu.WGPUStringView(data=ctypes.cast(ctypes.pointer(to_c_string(_str)), ctypes.POINTER(ctypes.c_char)), length=len(_str))
 
-def write_buffer(device:WGPUDevPtr, buf:WGPUBufPtr, offset:int, src:memoryview|bytearray|bytes):
-  src = bytearray(src)
-  webgpu.wgpuQueueWriteBuffer(webgpu.wgpuDeviceGetQueue(device), buf, offset, (ctypes.c_uint8 * len(src)).from_buffer(src), len(src))
+def write_buffer(queue:webgpu.WGPUQueue, buf:WGPUBufPtr, offset:int, src:memoryview|bytearray|bytes):
+  webgpu.wgpuQueueWriteBuffer(queue, buf, offset, (ctypes.c_uint8 * len(src)).from_buffer_copy(src), len(src))
 
 # turns a webgpu function returning a future into python-synchronous function
 # the new function handles the status code and optional error message, returning the other callback arguments
@@ -54,25 +53,13 @@ InstanceRequestAdapter = synchronous(webgpu.enum_WGPURequestAdapterStatus, True)
 AdapterRequestDevice = synchronous(webgpu.enum_WGPURequestDeviceStatus, True)(webgpu.wgpuAdapterRequestDevice2)
 QueueOnSubmittedWorkDone = synchronous(webgpu.enum_WGPUQueueWorkDoneStatus)(webgpu.wgpuQueueOnSubmittedWorkDone2)
 
-def copy_buffer_to_buffer(dev:WGPUDevPtr, src:WGPUBufPtr, src_offset:int, dst:WGPUBufPtr, dst_offset:int, size:int):
+def copy_buffer_to_buffer(dev:WGPUDevPtr, queue:webgpu.WGPUQueue, src:WGPUBufPtr, src_offset:int, dst:WGPUBufPtr, dst_offset:int, size:int):
   encoder = webgpu.wgpuDeviceCreateCommandEncoder(dev, webgpu.WGPUCommandEncoderDescriptor())
   webgpu.wgpuCommandEncoderCopyBufferToBuffer(encoder, src, src_offset, dst, dst_offset, size)
   cb = webgpu.wgpuCommandEncoderFinish(encoder, webgpu.WGPUCommandBufferDescriptor())
-  webgpu.wgpuQueueSubmit(webgpu.wgpuDeviceGetQueue(dev), 1, (webgpu.WGPUCommandBuffer*1)(cb))
+  webgpu.wgpuQueueSubmit(queue, 1, (webgpu.WGPUCommandBuffer*1)(cb))
   webgpu.wgpuCommandBufferRelease(cb)
   webgpu.wgpuCommandEncoderRelease(encoder)
-
-def read_buffer(dev:WGPUDevPtr, buf:WGPUBufPtr) -> memoryview:
-  size = webgpu.wgpuBufferGetSize(buf)
-  tmp_buffer = webgpu.wgpuDeviceCreateBuffer(dev, webgpu.WGPUBufferDescriptor(size=size,
-    usage=webgpu.WGPUBufferUsage_CopyDst | webgpu.WGPUBufferUsage_MapRead, mappedAtCreation=False))
-  copy_buffer_to_buffer(dev, buf, 0, tmp_buffer, 0, size)
-  BufferMapAsync(tmp_buffer, webgpu.WGPUMapMode_Read, 0, size)
-  void_ptr = ctypes.cast(webgpu.wgpuBufferGetConstMappedRange(tmp_buffer, 0, size), ctypes.c_void_p)
-  buf_copy = bytearray((ctypes.c_uint8 * size).from_address(void_ptr.value))
-  webgpu.wgpuBufferUnmap(tmp_buffer)
-  webgpu.wgpuBufferDestroy(tmp_buffer)
-  return memoryview(buf_copy).cast("B")
 
 class WebGPUProgram:
   def __init__(self, dev:'WebGpuDevice', name:str, lib:bytes, **kwargs):
@@ -155,10 +142,10 @@ class WebGPUProgram:
     if wait: webgpu.wgpuCommandEncoderResolveQuerySet(command_encoder, query_set, 0, 2, query_buf, 0)
 
     cmd_buf = webgpu.wgpuCommandEncoderFinish(command_encoder, webgpu.WGPUCommandBufferDescriptor())
-    webgpu.wgpuQueueSubmit(webgpu.wgpuDeviceGetQueue(self.dev.device_res), 1, (webgpu.WGPUCommandBuffer*1)(cmd_buf))
+    webgpu.wgpuQueueSubmit(self.dev.queue, 1, (webgpu.WGPUCommandBuffer*1)(cmd_buf))
 
     if wait:
-      time = ((timestamps:=read_buffer(self.dev.device_res, query_buf).cast("Q").tolist())[1] - timestamps[0]) / 1e9
+      time = ((timestamps:=self.dev.read_buffer(query_buf).cast("Q").tolist())[1] - timestamps[0]) / 1e9
       webgpu.wgpuBufferDestroy(query_buf)
       webgpu.wgpuQuerySetDestroy(query_set)
       return time
@@ -173,10 +160,8 @@ class WebGpuAllocator(Allocator['WebGpuDevice']):
     if src.nbytes % 4:
       padded_src = bytearray(round_up(src.nbytes, 4))
       padded_src[:src.nbytes] = src
-    write_buffer(self.dev.device_res, dest, 0, padded_src if src.nbytes % 4 else src)
-  def _copyout(self, dest:memoryview, src:WGPUBufPtr):
-    buffer_data = read_buffer(self.dev.device_res, src)
-    dest[:] = buffer_data[:dest.nbytes] if webgpu.wgpuBufferGetSize(src)  > dest.nbytes else buffer_data
+    write_buffer(self.dev.queue, dest, 0, padded_src if src.nbytes % 4 else src)
+  def _copyout(self, dest:memoryview, src:WGPUBufPtr): dest[:] = self.dev.read_buffer(src)[:dest.nbytes]
   @suppress_finalizing
   def _free(self, opaque:WGPUBufPtr, options:BufferSpec): webgpu.wgpuBufferDestroy(opaque)
 
@@ -202,14 +187,27 @@ class WebGpuDevice(Compiled):
 
     # Requesting a device
     self.device_res = AdapterRequestDevice(adapter_res, dev_desc)
+    self.queue = webgpu.wgpuDeviceGetQueue(self.device_res)
 
     super().__init__(device, WebGpuAllocator(self), [WGSLRenderer], functools.partial(WebGPUProgram, self),
                      arch="shader-f16" * (webgpu.WGPUFeatureName_ShaderF16 in self.features))
 
-  def synchronize(self): QueueOnSubmittedWorkDone(webgpu.wgpuDeviceGetQueue(self.device_res))
+  def synchronize(self): QueueOnSubmittedWorkDone(self.queue)
+
   def pop_error(self) -> str: return from_wgpu_str(DevicePopErrorScope(self.device_res)[1])
   def create_uniform(self, val:int|float) -> WGPUBufPtr:
     buf = webgpu.wgpuDeviceCreateBuffer(self.device_res,
                                         webgpu.WGPUBufferDescriptor(size=4, usage=webgpu.WGPUBufferUsage_Uniform | webgpu.WGPUBufferUsage_CopyDst))
-    write_buffer(self.device_res, buf, 0, val.to_bytes(4, "little") if isinstance(val, int) else struct.pack('<f', val))
+    write_buffer(self.queue, buf, 0, val.to_bytes(4, "little") if isinstance(val, int) else struct.pack('<f', val))
     return buf
+  def read_buffer(self, buf:WGPUBufPtr) -> memoryview:
+    size = webgpu.wgpuBufferGetSize(buf)
+    tmp_buffer = webgpu.wgpuDeviceCreateBuffer(self.device_res,
+      webgpu.WGPUBufferDescriptor(size=size, usage=webgpu.WGPUBufferUsage_CopyDst | webgpu.WGPUBufferUsage_MapRead, mappedAtCreation=False))
+    copy_buffer_to_buffer(self.device_res, self.queue, buf, 0, tmp_buffer, 0, size)
+    BufferMapAsync(tmp_buffer, webgpu.WGPUMapMode_Read, 0, size)
+    void_ptr = ctypes.cast(webgpu.wgpuBufferGetConstMappedRange(tmp_buffer, 0, size), ctypes.c_void_p)
+    buf_copy = bytearray((ctypes.c_uint8 * size).from_address(void_ptr.value))
+    webgpu.wgpuBufferUnmap(tmp_buffer)
+    webgpu.wgpuBufferDestroy(tmp_buffer)
+    return memoryview(buf_copy).cast("B")
