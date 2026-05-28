@@ -28,7 +28,9 @@ from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regallo
 pm_index_is_shrink = PatternMatcher([
   # rewrite non-image INDEX to SHRINK
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))), lambda buf,idx:
-    UOp(Ops.SHRINK, dtype=buf.dtype, src=(buf, idx, UOp.const(dtypes.int, 1)))),
+    UOp(Ops.SHRINK, dtype=buf.dtype.base,
+        src=(buf.replace(src=(UOp.const(dtypes.int, buf.ptrdtype.size),),
+                         dtype=buf.dtype.base), idx, UOp.const(dtypes.int, 1)))),
   # rewrite CAST on SHRINK to just SHRINK
   #(UPat(Ops.SHRINK, name="bv").cast(name="x"),
   # lambda bv,x: bv.replace(dtype=x.dtype, src=(bv.src[0], bv.src[1], UOp.const(dtypes.int, x.dtype.count)))),

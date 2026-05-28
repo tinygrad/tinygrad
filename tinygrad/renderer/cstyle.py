@@ -180,7 +180,7 @@ class CStyleLanguage(Renderer):
       if u.op in (Ops.PARAM, Ops.DEFINE_VAR):
         if u.op is not Ops.PARAM: r[u] = u.arg[0]
         elif isinstance(u.dtype, ImageDType): r[u] = f"data{u.arg}_{u.dtype.shape[0]}x{u.dtype.shape[1]}"
-        else: r[u] = f"data{u.arg}_{sz}" if (sz:=u.ptrdtype.size) > 0 else f"data{u.arg}"
+        else: r[u] = f"data{u.arg}_{sz}" if (sz:=u.max_numel()) > 0 else f"data{u.arg}"
         bufs[u] = (r[u], (u.dtype, u in writable_params))
         continue
 
@@ -199,7 +199,7 @@ class CStyleLanguage(Renderer):
 
       if u.op in {Ops.ENDIF, Ops.END}: depth -= 1
       if (u.op is not Ops.CAST or u.dtype.vcount == 1) and (u.op in {Ops.CONST, Ops.GEP, Ops.SHRINK, Ops.CUSTOMI} or \
-        (u.op is Ops.LOAD and u.src[0].ptrdtype.addrspace == AddrSpace.REG) or \
+        (u.op is Ops.LOAD and isinstance(u.src[0].dtype, PtrDType) and u.src[0].ptrdtype.addrspace == AddrSpace.REG) or \
         (u.op is Ops.CAST and isinstance(u.dtype, PtrDType)) or \
         (u.op in {Ops.STACK, *(GroupOp.ALU-{Ops.WHERE}), Ops.CAST, Ops.BITCAST} and child_count[u] == 1 and not getenv("EXPAND_SSA"))):
         r[u] = l
