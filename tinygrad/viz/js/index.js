@@ -58,8 +58,8 @@ function intersectRect(r1, r2) {
 
 function addTags(root, path) {
   root.selectAll("circle").data(d => d.rect ? [] : [d]).join("circle").attr("r", 5).style("fill", d => d.fill ?? null);
-  root.selectAll("rect").data(d => d.rect ? [d] : []).join("rect").attr("x", d => -d.width/2).attr("y", d => -d.tagHeight/2)
-    .attr("width", d => d.width).attr("height", d => d.tagHeight).style("fill", d => d.fill ?? null);
+  root.selectAll("rect").data(d => d.rect ? [d] : []).join("rect").attr("x", d => -d.width/2).attr("y", d => -d.height/2)
+    .attr("width", d => d.width).attr("height", d => d.height).style("fill", d => d.fill ?? null);
   if (path != null) root.selectAll("path").data(d => [d]).join("path").attr("d", path);
   else root.selectAll("text").data(d => [d]).join("text").text(d => d.text).attr("dy", "0.35em");
 }
@@ -119,7 +119,7 @@ const drawGraph = (data) => {
   addTags(nodes.selectAll("g.type").data(d => d.collapsible ? [d] : []).join("g").attr("class", d => `tag clickable ${d.collapsed ? 'collapsed' : 'expanded'}`)
     .attr("transform", d => d.callNode ? `translate(${CALL_TAG_WIDTH/2-d.width/2}, ${0})` : `translate(${-d.width/2}, ${0})`)
     .datum(d => ({ ...d, text:d.collapsed ? "+" : "−", fill:d.callNode ? null : d.color,
-      ...(d.callNode && { rect:true, width:CALL_TAG_WIDTH, tagHeight:d.height }) })).on("click", (e,d) => {
+      ...(d.callNode && { rect:true, width:CALL_TAG_WIDTH }) })).on("click", (e,d) => {
       e.stopPropagation();
       const t = d3.zoomTransform(document.getElementById("graph-svg"));
       const [x, y] = t.apply([d.x, d.y]);

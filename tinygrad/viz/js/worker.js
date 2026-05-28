@@ -89,7 +89,7 @@ const layoutUOp = (g, { graph, change }, opts) => {
       const collapsible = consumer.callNode ? edge?.label?.text === 0 : node.exclude;
       if (!collapsible) continue;
       consumer.collapsible = true;
-      // adjust shape of call/function nodes to make space for a rect tag
+      // increase width of call/function nodes to make space for a toggle
       if (consumer.callNode) { consumer.width = consumer.labelWidth+NODE_PADDING*2+CALL_TAG_WIDTH; consumer.labelX = CALL_TAG_WIDTH/2; }
       // make sources invisible if UI has toggled it off
       const collapsed = consumer.callNode ? opts.showCallSrc === opts.callSrcMask.has(consumerId) : !opts.expandedNodes.has(consumerId);
