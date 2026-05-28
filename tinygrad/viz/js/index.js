@@ -116,7 +116,7 @@ const drawGraph = (data) => {
   addTags(nodes.selectAll("g.tag").data(d => d.tag != null ? [d] : []).join("g").attr("class", "tag")
     .attr("transform", d => `translate(${-d.width/2+8}, ${-d.height/2+8})`).datum(e => ({ text:e.tag })));
   const CALL_TAG_WIDTH = 14;
-  addTags(nodes.selectAll("g.type").data(d => d.collapsible ? [d] : []).join("g").attr("class", d => `tag  ${d.collapsed ? 'collapsed' : 'expanded'}`)
+  addTags(nodes.selectAll("g.type").data(d => d.collapsible ? [d] : []).join("g").attr("class", d => `tag clickable ${d.collapsed ? 'collapsed' : 'expanded'}`)
     .attr("transform", d => d.callNode ? `translate(${CALL_TAG_WIDTH/2-d.width/2}, ${0})` : `translate(${-d.width/2}, ${0})`)
     .datum(d => ({ ...d, text:d.collapsed ? "+" : "−", fill:d.callNode ? null : d.color,
       ...(d.callNode && { rect:true, width:CALL_TAG_WIDTH, tagHeight:d.height }) })).on("click", (e,d) => {
