@@ -613,7 +613,7 @@ jobs:
         llvm: ${{ contains(fromJSON('["LLVM", "LVP", "CLANGJIT"]'), matrix.dev) }}
         mesa: ${{ contains('LVP', matrix.dev) && 'cpu' }}
     - name: Set env
-      run: printf "DEV=${{ matrix.dev }}${{ matrix.dev == 'CPU:CLANGJIT' && '\nCPU_COUNT=2' }}" >> $GITHUB_ENV
+      run: printf "DEV=${{ matrix.dev }}${{ matrix.dev == 'CPU:CLANGJIT' && '\nCPU_COUNT=2' || '' }}" >> $GITHUB_ENV
     - name: Check Device.DEFAULT and print some source
       run: |
         python -c "from tinygrad import Device; from tinygrad.helpers import Target; assert Device.DEFAULT == Target('${{ matrix.dev }}').device"
