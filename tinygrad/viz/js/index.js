@@ -57,7 +57,9 @@ function intersectRect(r1, r2) {
 }
 
 function addTags(root, path) {
-  root.selectAll("circle").data(d => [d]).join("circle").attr("r", 5).style("fill", d => d.fill ?? null);
+  root.selectAll("circle").data(d => d.rect ? [] : [d]).join("circle").attr("r", 5).style("fill", d => d.fill ?? null);
+  root.selectAll("rect").data(d => d.rect ? [d] : []).join("rect").attr("x", d => -d.width/2).attr("y", d => -d.height/2)
+    .attr("width", d => d.width).attr("height", d => d.height).style("fill", d => d.fill ?? null);
   if (path != null) root.selectAll("path").data(d => [d]).join("path").attr("d", path);
   else root.selectAll("text").data(d => [d]).join("text").text(d => d.text).attr("dy", "0.35em");
 }
@@ -85,7 +87,7 @@ const drawGraph = (data) => {
     .attr("x", d => -d.width/2).attr("y", d => -d.height/2).classed("node", true);
   const STROKE_WIDTH = 1.4, textSpace = g.graph().textSpace;
   const labels = nodes.selectAll("g.label").data(d => [d]).join("g").attr("class", "label");
-  labels.attr("transform", d => `translate(-${d.labelWidth/2}, -${d.labelHeight/2+STROKE_WIDTH*2})`);
+  labels.attr("transform", d => `translate(${d.labelX-d.labelWidth/2}, -${d.labelHeight/2+STROKE_WIDTH*2})`);
   const rectGroup = labels.selectAll("g.rect-group").data(d => [d]).join("g").attr("class", "rect-group");
   const tokens = labels.selectAll("g.text-group").data(d => [d]).join("g").attr("class", "text-group").selectAll("text").data(d => {
     if (Array.isArray(d.label)) return [d.label];
@@ -113,8 +115,11 @@ const drawGraph = (data) => {
   });
   addTags(nodes.selectAll("g.tag").data(d => d.tag != null ? [d] : []).join("g").attr("class", "tag")
     .attr("transform", d => `translate(${-d.width/2+8}, ${-d.height/2+8})`).datum(e => ({ text:e.tag })));
-  addTags(nodes.selectAll("g.type").data(d => d.collapsible ? [d] : []).join("g").attr("class", d => `tag ${d.collapsed ? 'collapsed' : 'expanded'}`)
-    .attr("transform", d => `translate(${-d.width/2}, ${0})`).datum(d => ({ ...d, text:d.collapsed ? "+" : "−", fill:d.callNode ? null : d.color })).on("click", (e,d) => {
+  const CALL_TAG_WIDTH = 14;
+  addTags(nodes.selectAll("g.type").data(d => d.collapsible ? [d] : []).join("g").attr("class", d => `tag clickable ${d.collapsed ? 'collapsed' : 'expanded'}`)
+    .attr("transform", d => d.callNode ? `translate(${CALL_TAG_WIDTH/2-d.width/2}, ${0})` : `translate(${-d.width/2}, ${0})`)
+    .datum(d => ({ ...d, text:d.collapsed ? "+" : "−", fill:d.callNode ? null : d.color,
+      ...(d.callNode && { rect:true, width:CALL_TAG_WIDTH }) })).on("click", (e,d) => {
       e.stopPropagation();
       const t = d3.zoomTransform(document.getElementById("graph-svg"));
       const [x, y] = t.apply([d.x, d.y]);
