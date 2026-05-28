@@ -123,6 +123,7 @@ class TestGatedStoreRewrite(unittest.TestCase):
     gated_uops = tuple(uops[uops.index(if_uop)+1:uops.index(endif)])
     self.assertEqual(len(gated_uops), 1)
     self.assertIs(gated_uops[-1].op, Ops.STORE)
+    self.assertEqual(len(gated_uops[-1].src), 2)
 
   def test_gate_some_stores(self):
     gmem0 = UOp(Ops.PARAM, dtypes.float.ptr(), (), 0)
@@ -140,6 +141,7 @@ class TestGatedStoreRewrite(unittest.TestCase):
     gated_uops = tuple(uops[uops.index(if_uop)+1:uops.index(endif)])
     self.assertEqual(len(gated_uops), 1)
     self.assertIs(gated_uops[-1].op, Ops.STORE)
+    self.assertEqual(len(gated_uops[-1].src), 2)
 
   # scaled down version of TestLinearizerDumb.test_unmerged_ifs
   @unittest.skip("we don't merge ifs anymore")
@@ -161,6 +163,7 @@ class TestGatedStoreRewrite(unittest.TestCase):
     gated_uops = tuple(uops[uops.index(ifs[0])+1:uops.index(endifs[0])])
     self.assertEqual(len(gated_uops), 2)
     for x in gated_uops: self.assertIs(x.op, Ops.STORE)
+    for x in gated_uops: self.assertEqual(len(x.src), 2)
 
 @unittest.skipIf(Device.DEFAULT == "METAL", "compiler bug")
 @unittest.skipUnless(Ops.SHR in Device[Device.DEFAULT].renderer.code_for_op, "fast_idiv requires SHR")

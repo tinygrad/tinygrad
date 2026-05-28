@@ -118,7 +118,7 @@ class TestContiguous(unittest.TestCase):
   def test_size_change_buffer_view(self):
     a = Tensor.empty(4)
     b = a.reshape((1, 1, 4)).shrink(((0, 1), (0, 1), (0, 3))).contiguous()
-    check_schedule(b, 0)  # contiguous shrink of a realized buffer is a zero-copy BUFFER_VIEW
+    check_schedule(b, 0)  # contiguous shrink of a realized buffer is a zero-copy SLICE
 
   def test_double_contiguous_realizes_once(self):
     a = Tensor.empty(4, 1)
@@ -414,7 +414,7 @@ class TestSchedule(unittest.TestCase):
     check_schedule([a+b, a+b], 1)
 
   def test_const_realize(self):
-    t = Tensor.ones(2)
+    t = Tensor.ones(2, buffer=False)
     check_schedule(t[0], 0)
     check_schedule(t[1], 0)
 
@@ -429,7 +429,7 @@ class TestSchedule(unittest.TestCase):
       img = Tensor.empty(1,32,4,4)
       bn = nn.BatchNorm2d(32, track_running_stats=False)
       out = bn(img)
-      check_schedule(out, 3)
+      check_schedule(out, 3, nn.state.get_parameters(bn))
 
   def test_fold_conv_batchnorm_notrain(self):
     with Tensor.train(False):
@@ -437,7 +437,7 @@ class TestSchedule(unittest.TestCase):
       c1 = nn.Conv2d(3,32,3)
       bn = nn.BatchNorm2d(32, track_running_stats=True)
       out = bn(c1(img)).relu()
-      check_schedule(out, 1, [c1.weight, c1.bias])
+      check_schedule(out, 1, [c1.weight, c1.bias, *nn.state.get_parameters(bn)])
 
   def test_fold_conv_batchnorm_notrain_no_running_stats(self):
     with Tensor.train(False):
@@ -445,7 +445,7 @@ class TestSchedule(unittest.TestCase):
       c1 = nn.Conv2d(3,32,3)
       bn = nn.BatchNorm2d(32, track_running_stats=False)
       out = bn(c1(img)).relu()
-      check_schedule(out, 4, [c1.weight, c1.bias])
+      check_schedule(out, 4, [c1.weight, c1.bias, *nn.state.get_parameters(bn)])
 
   def test_fold_conv_batchnorm(self):
     with Tensor.train():
@@ -453,7 +453,7 @@ class TestSchedule(unittest.TestCase):
       c1 = nn.Conv2d(3,32,3)
       bn = nn.BatchNorm2d(32, track_running_stats=False)
       out = bn(c1(img)).relu()
-      check_schedule(out, 4, [c1.weight, c1.bias])
+      check_schedule(out, 4, [c1.weight, c1.bias, *nn.state.get_parameters(bn)])
 
   def test_fold_conv_batchnorm_optim(self, adam=False):
     # 2 is too low?
@@ -484,7 +484,7 @@ class TestSchedule(unittest.TestCase):
     # run
     img = Tensor.ones(2,3,64,64)
     out = c1(img).relu()
-    check_schedule(out, 1, [c1.weight, c1.bias])
+    check_schedule(out, 1, [c1.weight, c1.bias, img])
 
   def test_fold_conv_relu_alt(self):
     img = Tensor.ones(1,4,8,8)
@@ -766,12 +766,6 @@ class TestSchedule(unittest.TestCase):
     out = x + y
     check_schedule(out, 1)
 
-  def test_const_no_recompute(self):
-    x = Tensor(2) + Tensor(2)
-    y = Tensor(2) + Tensor(2)
-    out = x.contiguous() + y.contiguous()
-    check_schedule(out, 2, filter_sink=False)
-
   def test_reduce_shrink_child(self):
     a = Tensor.empty(100, 100)
     b = Tensor.empty(10,)
@@ -827,6 +821,7 @@ class TestSchedule(unittest.TestCase):
       layer = nn.Linear(32, 32*4)
       _realize_weights(layer)
       opt = nn.optim.Adam(nn.state.get_parameters(layer), lr=1e-4)
+      Tensor.realize(*nn.state.get_parameters(opt))
       layer(x).relu().sum().backward()
       check_schedule(opt.schedule_step(), 13)
 
@@ -836,6 +831,7 @@ class TestSchedule(unittest.TestCase):
       c1 = nn.Conv2d(3,32,3)
       _realize_weights(c1)
       opt = nn.optim.Adam(nn.state.get_parameters(c1), lr=1e-4)
+      Tensor.realize(*nn.state.get_parameters(opt))
       opt.zero_grad()
       c1(img).relu().sum().backward()
       check_schedule(opt.schedule_step(), 13)
@@ -847,6 +843,7 @@ class TestSchedule(unittest.TestCase):
       c2 = nn.Conv2d(16,32,2,bias=False)
       _realize_weights([c1, c2])
       opt = nn.optim.Adam(nn.state.get_parameters([c1, c2]), lr=1e-4)
+      Tensor.realize(*nn.state.get_parameters(opt))
       opt.zero_grad()
       c2(c1(img).relu()).relu().sum().backward()
       check_schedule(opt.schedule_step(), 15)
@@ -879,6 +876,7 @@ class TestSchedule(unittest.TestCase):
       c2 = nn.Conv2d(16,32,2,bias=False)
       _realize_weights([c1, c2])
       opt = nn.optim.SGD(nn.state.get_parameters([c1, c2]), nesterov=True, momentum=0.9, weight_decay=0.1)
+      Tensor.realize(*nn.state.get_parameters(opt))
       opt.zero_grad()
       c2(c1(img).relu()).relu().sum().backward()
       check_schedule(opt.schedule_step(), 11)
@@ -993,7 +991,7 @@ class TestSchedule(unittest.TestCase):
   def test_fuse_arange_pad_circular_mode_bw(self):
     x = Tensor.empty(1,1,5,5,5)
     out = x.pad((1,2,3,5,1,2), mode="circular")
-    g = out.sum().gradient(x)[0]
+    g = out.sum().gradient(x)[0].clone()
     linear, _ = check_schedule(g, 1)
     self.assertEqual(len([x for x in linear.src[0].src[0].backward_slice_with_self if x.op is Ops.REDUCE]), 0)
 
@@ -1008,7 +1006,7 @@ class TestSchedule(unittest.TestCase):
       out = bn1(conv1(x)).relu()
       out = bn2(conv2(out))
       out = (out + x).relu()
-      run_linear(*check_schedule(out, 2, [conv1.weight, conv2.weight]))
+      run_linear(*check_schedule(out, 2, [conv1.weight, conv2.weight, *nn.state.get_parameters(bn1), *nn.state.get_parameters(bn2)]))
 
 class TestSwizzle(unittest.TestCase):
   def test_softmax_one_kernel(self):
@@ -1212,10 +1210,10 @@ class TestFusionOp(unittest.TestCase):
     self.assertEqual(len(linear.src), 1)
     self.assertLess(time.perf_counter()-st, 2.0)
 
-# NOTE: the NULL backend supports BUFFER_VIEW
+# NOTE: the NULL backend supports SLICE
 class TestBufferView(unittest.TestCase):
   def test_shrink_contiguous_is_buffer_view(self):
-    # simple 1D shrink of a realized buffer should be BUFFER_VIEW, not a copy kernel
+    # simple 1D shrink of a realized buffer should be SLICE, not a copy kernel
     a = Tensor.arange(100).clone().realize()
     b = a.shrink(((10, 50),)).contiguous()
     run_linear(*check_schedule(b, 0))
@@ -1231,7 +1229,7 @@ class TestBufferView(unittest.TestCase):
     run_linear(*check_schedule(b, 0))
 
   def test_shrink_non_shard_axis_is_buffer_view_multi(self):
-    # indexing a non-shard axis of a realized sharded tensor should be BUFFER_VIEW on each device, not copy kernels
+    # indexing a non-shard axis of a realized sharded tensor should be SLICE on each device, not copy kernels
     # this is the flat_llama pattern: weight[layer_idx] where weight is (n_layers, out, dim) sharded on axis=1
     devices = ("NULL:1", "NULL:2")
     a = Tensor.arange(8*4*10).reshape(8, 4, 10).clone().shard(devices, axis=1).realize()

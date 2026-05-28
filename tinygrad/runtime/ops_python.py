@@ -52,6 +52,7 @@ class PythonProgram:
       values: dict[int, Any] = {}
       pbufs: list[memoryview] = list(bufs)
       pvals: list[int] = list(vals)
+      exec_masks = [[True] * warp_size]
       i = 0
       while i < len(self.uops):
         uop, dtype, srcs, arg = self.uops[i]
@@ -61,13 +62,22 @@ class PythonProgram:
         if uop is Ops.END:
           i = srcs[1]
           continue
-        if uop in (Ops.BARRIER, Ops.IF, Ops.ENDIF, Ops.SINK, Ops.NOOP, Ops.GROUP):
+        if uop is Ops.IF:
+          exec_masks.append([x and y for x,y in zip(exec_masks[-1], src_values[0])])
+          i += 1
+          continue
+        if uop is Ops.ENDIF:
+          exec_masks.pop()
+          i += 1
+          continue
+        if uop in (Ops.BARRIER, Ops.SINK, Ops.NOOP, Ops.GROUP):
           # in the python emulator, the warp is always in sync
           i += 1
           continue
         assert dtype is not None, f"{uop} is missing a dtype"
         if uop is Ops.STORE:
-          store_gate = src_values[2] if len(src_values) >= 3 else [True] * warp_size
+          assert len(src_values) == 2, f"STORE must be lowered to 2 srcs, got {len(src_values)}"
+          store_gate = exec_masks[-1]
           for j,val in enumerate(src_values[1] if src_dtypes[1].count > 1 else [src_values[1]]):
             for (m,o),v,g in zip(src_values[0], val, store_gate):
               if g: _store(m, o+j, v, src_dtypes[1].scalar())
@@ -228,6 +238,8 @@ class PythonRenderer(Renderer):
     # the value of SPECIAL comes from local/global_size, not form its source
     lops = [(u.op, u.dtype, [uops.index(v) for v in u.src if u.op is not Ops.SPECIAL], u.arg) for u in uops]
     return base64.b64encode(pickle.dumps(lops)).decode()
+
+  def supported_dtypes(self): return {d for d in super().supported_dtypes() if d != dtypes.half or sys.version_info >= (3, 12)}
 
 class PythonAllocator(Allocator['PythonDevice']):
   def _alloc(self, size, options): return memoryview(bytearray(size))

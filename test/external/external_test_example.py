@@ -1,7 +1,7 @@
-import unittest
+import unittest, sys
 from tinygrad import Device
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import getenv, CI, OSX
+from tinygrad.helpers import getenv, OSX
 
 def multidevice_test(fxn):
   exclude_devices = getenv("EXCLUDE_DEVICES", "").split(",")
@@ -9,15 +9,15 @@ def multidevice_test(fxn):
     for device in Device._devices:
       # broken on OSX USB AMD, why?
       if device in ["DISK", "NPY", "FAKE", "DSP", "NULL"] or (OSX and device in ["AMD"]): continue
-      if not CI: print(device)
+      if sys.stdout.isatty(): print(device)
       if device in exclude_devices:
-        if not CI: print(f"WARNING: {device} test is excluded")
+        if sys.stdout.isatty(): print(f"WARNING: {device} test is excluded")
         continue
       with self.subTest(device=device):
         try:
           Device[device]
         except Exception:
-          if not CI: print(f"WARNING: {device} test isn't running")
+          if sys.stdout.isatty(): print(f"WARNING: {device} test isn't running")
           continue
         fxn(self, device)
   return ret

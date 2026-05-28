@@ -55,14 +55,14 @@ class TestMultiRamUsage(unittest.TestCase):
 
   def test_sharded_memory_replicated_const(self):
     devices_4 = tuple(f"NULL:{i+1}" for i in range(4))
-    X = Tensor.ones(256).realize()
+    X = Tensor.ones(256, buffer=False).realize()
     self.assertUsed(0)
     X.shard_(devices_4).realize()
     self.assertUsed(256 * 4 * 4)  # TODO: can be zero
 
   def test_sharded_memory_axis_const(self):
     devices_4 = tuple(f"NULL:{i+1}" for i in range(4))
-    X = Tensor.ones(256).realize()
+    X = Tensor.ones(256, buffer=False).realize()
     self.assertUsed(0)
     X.shard_(devices_4, axis=0).realize()
     self.assertUsed(256 * 4)  # TODO: can be zero

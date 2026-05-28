@@ -403,12 +403,12 @@ class OnnxRunner:
     if spec.is_optional and value is None: return None
     if spec.is_sequence:
       if not isinstance(value, Sequence): raise RuntimeError(f"input {name} received {value}, expected a sequence type")
-      sequence = [Tensor(v, dtype=spec.dtype, requires_grad=self.is_training) if not isinstance(v, Tensor) else v for v in value]
+      sequence = [Tensor(v, dtype=spec.dtype) if not isinstance(v, Tensor) else v for v in value]
       if not all_same(tuple(t.shape for t in sequence)): raise RuntimeError(f"Shapes for input {name} sequence must be homogeneous")
       if not all(t.dtype is spec.dtype for t in sequence): warnings.warn(f"Dtypes for input {name} sequence aren't all {spec.dtype}")
       return sequence
     dtype = _from_np_dtype(value.dtype) if is_numpy_ndarray(value) else spec.dtype
-    tensor = Tensor(value, dtype=dtype, requires_grad=self.is_training) if not isinstance(value, Tensor) else value
+    tensor = Tensor(value, dtype=dtype) if not isinstance(value, Tensor) else value
     if tensor.dtype is not spec.dtype: warnings.warn(f"input {name} has mismatch on dtype. Expected {spec.dtype}, received {tensor.dtype}.")
     for dim, (onnx_dim, user_dim_input) in enumerate(zip(spec.shape, tensor.shape, strict=True)):
       if isinstance(onnx_dim, str):
@@ -566,10 +566,10 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
   def Constant(sparse_value:Tensor|None=None, value:Tensor|None=None, value_float:float|None=None, value_floats:list[float]|None=None,
               value_int:int|None=None, value_ints:list[int]|None=None, value_string:str|None=None, value_strings:list[str]|None=None):
     if value is not None: return value
-    if value_float is not None: return Tensor(value_float, dtype=dtypes.float32, requires_grad=False)
-    if value_floats is not None: return Tensor(list(value_floats), dtype=dtypes.float32, requires_grad=False)
-    if value_int is not None: return Tensor(value_int, dtype=dtypes.int64, requires_grad=False)
-    if value_ints is not None: return Tensor(list(value_ints), dtype=dtypes.int64, requires_grad=False)
+    if value_float is not None: return Tensor(value_float, dtype=dtypes.float32)
+    if value_floats is not None: return Tensor(list(value_floats), dtype=dtypes.float32)
+    if value_int is not None: return Tensor(value_int, dtype=dtypes.int64)
+    if value_ints is not None: return Tensor(list(value_ints), dtype=dtypes.int64)
     if value_string is not None or value_strings is not None or sparse_value is not None:
       raise NotImplementedError('Constant OP not implemented for value_string, value_strings and sparse_value')
 
@@ -785,9 +785,9 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     def _apply_transformation(input_sz, output_sz, scale_dim, mode):
       index = Tensor.arange(output_sz, device=X.device)
       if mode == "half_pixel": return (index + 0.5) / scale_dim - 0.5
-      if mode == "align_corners": return index * (input_sz - 1) / (output_sz - 1) if output_sz != 1 else Tensor.zeros_like(index)
+      if mode == "align_corners": return index * (input_sz - 1) / (output_sz - 1) if output_sz != 1 else index.const_like(0)
       if mode == "asymmetric": return index / scale_dim
-      if mode == "pytorch_half_pixel": return ((index + 0.5) / scale_dim - 0.5) if output_sz != 1 else Tensor.zeros_like(index)
+      if mode == "pytorch_half_pixel": return ((index + 0.5) / scale_dim - 0.5) if output_sz != 1 else index.const_like(0)
       if mode == "half_pixel_symmetric":
         output_dim_scaled = input_sz * scale_dim
         return (input_sz / 2) * (1 - (output_sz / output_dim_scaled)) + (index + 0.5) / scale_dim - 0.5
@@ -964,11 +964,11 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
   # Reimplemented here because you need legacy RNG for passing ONNX tests.
   def dropout_7(data:Tensor, ratio:float=0.5, training_mode:bool=False, seed:int|None=None):
     import numpy as np
-    if not training_mode: return data, data.full_like(True, dtype=dtypes.bool)
+    if not training_mode: return data, data.const_like(True).cast(dtypes.bool)
     if seed is not None:
-      rand = Tensor(np.random.RandomState(seed).random(cast(tuple[int,...], data.shape)), requires_grad=False, dtype=data.dtype, device=data.device)
+      rand = Tensor(np.random.RandomState(seed).random(cast(tuple[int,...], data.shape)), dtype=data.dtype, device=data.device)
     else:
-      rand = data.rand_like(requires_grad=False)
+      rand = data.rand_like()
     mask = rand >= ratio
     return data * mask / (1.0 - ratio), mask
   # 6 with 'is_test' needed for https://github.com/MTlab/onnx2caffe/raw/refs/heads/master/model/MobileNetV2.onnx
@@ -1043,7 +1043,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
       attn_scores = mask.where(attn_scores, mask_filter_value)
 
     if unidirectional:
-      causal_mask = Tensor.ones((seq_len, seq_len), dtype=dtypes.bool, device=attn_scores.device).tril()
+      causal_mask = Tensor.ones((seq_len, seq_len), dtype=dtypes.bool, device=attn_scores.device, buffer=False).tril()
       attn_scores = causal_mask.where(attn_scores, mask_filter_value)
 
     output = attn_scores.softmax(-1) @ v
@@ -1075,7 +1075,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     qk_matmul_return_val = scores
 
     if is_causal:
-      causal_mask = Tensor.ones(Q.shape[-2], K.shape[-2], device=Q.device, dtype=dtypes.bool).tril(0)
+      causal_mask = Tensor.ones(Q.shape[-2], K.shape[-2], device=Q.device, dtype=dtypes.bool, buffer=False).tril(0)
       scores = scores.masked_fill(causal_mask.logical_not(), -float("inf"))
 
     if attn_mask is not None:
@@ -1281,8 +1281,8 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     if T == 0: opt.b1_t, opt.b2_t = opt.b1_t.zeros_like(), opt.b2_t.zeros_like()
     else:
       # `T-1` since it's applied again at the start of `_step`
-      opt.b1_t = Tensor([alpha**(T-1)], dtype=dtypes.float32, device=X.device, requires_grad=False)
-      opt.b2_t = Tensor([beta**(T-1)], dtype=dtypes.float32, device=X.device, requires_grad=False)
+      opt.b1_t = Tensor([alpha**(T-1)], dtype=dtypes.float32, device=X.device)
+      opt.b2_t = Tensor([beta**(T-1)], dtype=dtypes.float32, device=X.device)
     opt.step()
     X = (1 - norm_coefficient_post) * X
     return [X, V, H]

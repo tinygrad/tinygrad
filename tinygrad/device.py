@@ -2,12 +2,11 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from collections import defaultdict
 from typing import Any, Generic, TypeVar, Iterator, Generator, TYPE_CHECKING
-import importlib, inspect, functools, pathlib, os, platform, contextlib, sys, re, atexit, pickle, decimal
-from tinygrad.helpers import BENCHMARKS, CI, OSX, LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, PROFILE, temp, colored
+import importlib, inspect, functools, pathlib, os, contextlib, re, atexit, pickle, decimal
+from tinygrad.helpers import LRU, getenv, diskcache_get, diskcache_put, DEBUG, GlobalCounters, flat_mv, PROFILE, temp, colored
 from tinygrad.helpers import Context, CCACHE, ALLOW_DEVICE_USAGE, MAX_BUFFER_SIZE, cpu_events, ProfileEvent, ProfilePointEvent, suppress_finalizing
-from tinygrad.helpers import select_by_name, select_first_inited, DEV, EMULATED_DTYPES, IMAGE, FLOAT16, TracingKey, size_to_str, Target
-from tinygrad.helpers import pluralize
-from tinygrad.dtype import DType, PtrDType, dtypes, _to_np_dtype
+from tinygrad.helpers import select_by_name, select_first_inited, DEV, TracingKey, size_to_str, pluralize
+from tinygrad.dtype import DType, PtrDType, _to_np_dtype
 if TYPE_CHECKING: from tinygrad.renderer import Renderer
 
 # **************** Device ****************
@@ -335,47 +334,6 @@ class Compiled:
     Called at the end of process lifetime to allow the device to finalize.
     """
     # override this in your device implementation
-
-# TODO: move this to each Device
-# this only tracks if the dtype is natively supported, it may be supported in the frontend using decomps
-def is_dtype_supported(dtype:DType, target:Target|None=None) -> bool:
-  target = target or DEV.target(Device.DEFAULT)
-  if dtype == dtypes.bfloat16:
-    match target.device:
-      case "METAL": target.arch.startswith("Apple") and int(target.arch[5:]) >= 6
-      case "CUDA": return (not CI or BENCHMARKS) and target.renderer != "PTX"
-      case "NV": return (not CI or BENCHMARKS) and target.renderer not in ("PTX", "NAK")
-      case "CPU": return platform.machine() in {"arm", "arm64", "aarch64", "x86_64", "amd64"} and target.renderer not in ("LVP", "X86")
-      case "AMD" | "CL" | "PYTHON" | "NULL": return True
-      case _: return False
-  if dtype in dtypes.fp8_ocp:
-    match target.device:
-      case "CUDA": return (not CI or BENCHMARKS) and target.renderer != "PTX"
-      case "NV": return (not CI or BENCHMARKS) and target.renderer not in ("PTX", "NAK")
-      case "AMD": return (not CI or BENCHMARKS) and target.arch == "gfx950"
-      case "PYTHON" | "NULL": return True
-      case _: return False
-  if dtype in dtypes.fp8_fnuz: return target.device in {"PYTHON", "NULL"}
-  if target.device == "WEBGPU": return dtype in [dtypes.bool, dtypes.char, dtypes.uchar, dtypes.short,
-                                                 dtypes.ushort, dtypes.float, dtypes.int32, dtypes.uint32, dtypes.half]
-  # for CI GPU and OSX, cl_khr_fp16 isn't supported
-  # for CI LLVM, it segfaults because it can't link to the casting function
-  # CI CUDA architecture is sm_35 but we need at least sm_70 to run fp16 ALUs
-  # PYTHON supports half memoryview in 3.12+ https://github.com/python/cpython/issues/90751
-  if dtype == dtypes.half:
-    match target.device:
-      case "CL": return "cl_khr_fp16" in target.arch
-      case "QCOM": return bool(IMAGE) and bool(FLOAT16) # QCOM compiler is flaky with half
-      case "CUDA" | "NV": return not CI or BENCHMARKS or target.renderer == "PYTHON"
-      case "CPU" if target.renderer == "LLVM": return OSX
-      case "PYTHON": return sys.version_info >= (3, 12)
-  if dtype == dtypes.float64:
-    match target.device:
-      case _ if dtypes.long in EMULATED_DTYPES.tolist(dtypes): return False # double can't be bitcast to anything without long support
-      case "CL": return "cl_khr_fp64" in target.arch
-      case "NULL": return target.renderer not in ("IR3", "QCOMCL")
-      case "METAL" | "QCOM": return False
-  return True
 
 if PROFILE:
   @atexit.register

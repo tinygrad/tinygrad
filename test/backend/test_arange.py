@@ -19,7 +19,7 @@ class TestArange(unittest.TestCase):
     self.assertEqual(self._get_flops(Tensor.arange(256), np.arange(256)), 0)
     self.assertEqual(self._get_flops(Tensor.arange(2560), np.arange(2560)), 0)
 
-  @unittest.skipIf(Device.DEFAULT == "CL", "TODO: fails on CI CL")
+  @unittest.skipIf(Device.DEFAULT == "CL", "flaky in CI")
   def test_arange_cumsum(self):
     np.testing.assert_equal(Tensor.arange(513).cumsum(0).numpy(), np.arange(513).cumsum())
 
@@ -64,7 +64,7 @@ class TestIndexing(unittest.TestCase):
       rng = Tensor.arange(DSET, dtype=dtypes.int).reshape(1, 1, DSET, 1).expand(4, DDIM, DSET, 1)
       idxs = idxs.reshape(4,1,1,1).expand(4, DDIM, DSET, 1)
       reshape_dataset = dataset.T.reshape(1, DDIM, DSET, 1).expand(4, DDIM, DSET, 1)
-      full = (rng==idxs).where(reshape_dataset, Tensor.zeros(4, DDIM, DSET, 1))
+      full = (rng==idxs).where(reshape_dataset, Tensor.zeros(4, DDIM, DSET, 1, buffer=False))
       X = full.sum(axis=(2,3))
       linear, var_vals = X.linear_with_vars()
       self.assertEqual(len(linear.src), 1)

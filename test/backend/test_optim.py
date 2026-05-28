@@ -3,7 +3,6 @@ import torch
 import unittest
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.nn.optim import Adam, SGD, AdamW, Muon, LAMB
-from tinygrad.device import is_dtype_supported
 from test.helpers import needs_second_gpu, slow
 
 np.random.seed(1337)
@@ -11,17 +10,20 @@ x_init = np.random.randn(1,4).astype(np.float32)
 W_init = np.random.randn(4,4).astype(np.float32)
 m_init = np.random.randn(1,4).astype(np.float32)
 
+def _param(tensor, val):
+  return tensor(val, requires_grad=True) if tensor is torch.tensor else tensor(val)
+
 class TeenyNet:
   def __init__(self, tensor):
-    self.x = tensor(x_init.copy(), requires_grad=True)
-    self.W = tensor(W_init.copy(), requires_grad=True)
+    self.x = _param(tensor, x_init.copy())
+    self.W = _param(tensor, W_init.copy())
   def forward(self):
     return (self.x * self.W).sum()
 
 class TinyNet:
   def __init__(self, tensor):
-    self.x = tensor(x_init.copy(), requires_grad=True)
-    self.W = tensor(W_init.copy(), requires_grad=True)
+    self.x = _param(tensor, x_init.copy())
+    self.W = _param(tensor, W_init.copy())
     self.m = tensor(m_init.copy())
 
   def forward(self):
@@ -142,7 +144,7 @@ class TestOptim(unittest.TestCase):
 
       np.testing.assert_allclose(losses[0], losses[1], atol=1e-4, rtol=0)
 
-  @unittest.skipUnless(is_dtype_supported(dtypes.half), "need half")
+  @unittest.skipUnless(dtypes.half in Device[Device.DEFAULT].renderer.supported_dtypes(), "need half")
   def test_mixed_precision(self):
     old_default_float, dtypes.default_float = dtypes.default_float, dtypes.half
     # weight update would overflow without upcasting

@@ -23,7 +23,7 @@ def calculate_storage_offset(x: Tensor) -> int:
   for u in x.uop.toposort():
     if u.op == Ops.SHRINK:
       u_strides = strides_for_shape(u.src[0].shape)
-      for i, (start, _) in enumerate(u.marg): offset += start * u_strides[i]
+      for i, (_, start) in enumerate(u.marg): offset += start * u_strides[i]
   return offset
 def wrap(x: Tensor) -> torch.Tensor:
   x._strides = strides_for_shape(x.shape) # always recalculate
@@ -564,8 +564,8 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.__rshift__.Scalar": lambda x,y: x>>y,
   "aten.__irshift__.Scalar": lambda x,y: x>>y,
   # inplace ops using replace for fusion
-  "aten.zero_": lambda x: x.zeros_like(),
-  "aten.fill_.Scalar": lambda x, y: x.full_like(y),
+  "aten.zero_": lambda x: x.const_like(0),
+  "aten.fill_.Scalar": lambda x, y: x.const_like(y),
   "aten.add_.Tensor": lambda self, other, alpha=1.0: self + other * alpha,
   "aten.add_.Scalar": lambda self, other, alpha=1.0: self + other * alpha,
   "aten.mul_.Tensor": lambda self, other: self * other,
@@ -617,7 +617,7 @@ tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
   "aten.asinh": Tensor.asinh,
   "aten.mul": Tensor.mul,
   "aten.atanh": Tensor.atanh,
-  "aten.fill_.Tensor": lambda self, value: Tensor.full(self.shape, value.reshape(()).item(), device=self.device, dtype=self.dtype),
+  "aten.fill_.Tensor": lambda self, value: self.const_like(value.reshape(()).item()),
   "aten.flip": Tensor.flip,
   "aten.scatter_reduce.two": Tensor.scatter_reduce,
   "aten.squeeze_.dim": Tensor.squeeze,
@@ -709,7 +709,7 @@ def wrap_inplace_view_op(k,f):
       views = derived_views(base)
       if views:
         old_base = Tensor(base.uop, device=base.device)
-        old_base.requires_grad = base.requires_grad
+        old_base.is_param = base.is_param
         old_base._views = getattr(base, "_views", set())
         for v in views: v._view_base = old_base
         base._views = set()

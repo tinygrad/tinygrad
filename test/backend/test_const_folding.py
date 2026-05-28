@@ -2,7 +2,6 @@ import unittest, math
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.dtype import DTYPES_DICT
 from tinygrad.uop.ops import Ops, UOp
-from tinygrad.device import is_dtype_supported
 import numpy as np
 from test.helpers import not_support_multi_device
 
@@ -33,18 +32,16 @@ class TestMovedConstFolding(unittest.TestCase):
     _check_ast_count(1, Tensor([1.0, 2, 3, 4]) * Tensor.ones(2).pad(((1, 1),)))
 
   def test_copy_padded_const(self):
-    schedule = Tensor.ones(4, device="CPU:0").pad(((1, 1),)).to("CPU:1").schedule_linear()
+    schedule = Tensor.ones(4, device="CPU:0", buffer=False).pad(((1, 1),)).to("CPU:1").schedule_linear()
     assert not any(si.src[0].op is Ops.COPY for si in schedule.src), "const copy should be folded"
-    np.testing.assert_equal(Tensor.ones(4, device="CPU:0").pad(((1, 1),)).to("CPU:1").numpy(), [0, 1, 1, 1, 1, 0])
+    np.testing.assert_equal(Tensor.ones(4, device="CPU:0", buffer=False).pad(((1, 1),)).to("CPU:1").numpy(), [0, 1, 1, 1, 1, 0])
 
   def test_cast_padded(self):
     # NOTE: it's always 1 kernel when calling .numpy, limitation of _check_ast_count
-    if is_dtype_supported(dtypes.int16):
-      _check_ast_count(1, Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int16))
-      np.testing.assert_equal(Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int16).numpy(), [0, 1, 1, 1, 1, 0])
-    if is_dtype_supported(dtypes.uint16):
-      _check_ast_count(1, Tensor.full(4, fill_value=-1).pad(((1, 1),)).cast(dtypes.uint16))
-      np.testing.assert_equal(Tensor.full(4, fill_value=-1).pad(((1, 1),)).cast(dtypes.uint16).numpy(), [0, 65535, 65535, 65535, 65535, 0])
+    _check_ast_count(1, Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int16))
+    np.testing.assert_equal(Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int16).numpy(), [0, 1, 1, 1, 1, 0])
+    _check_ast_count(1, Tensor.full(4, fill_value=-1).pad(((1, 1),)).cast(dtypes.uint16))
+    np.testing.assert_equal(Tensor.full(4, fill_value=-1).pad(((1, 1),)).cast(dtypes.uint16).numpy(), [0, 65535, 65535, 65535, 65535, 0])
     # folded
     _check_ast_count(1, Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int64))
     np.testing.assert_equal(Tensor.ones(4).pad(((1, 1),)).cast(dtypes.int64).numpy(), [0, 1, 1, 1, 1, 0])
@@ -114,7 +111,7 @@ class TestReduceOpsConstFolding(unittest.TestCase):
   def test_sum_output_dtype(self):
     # sum output dtype can be different from input
     for dt in DTYPES_DICT.values():
-      if is_dtype_supported(dt):
+      if dt in Device[Device.DEFAULT].renderer.supported_dtypes():
         t = Tensor.ones(16, dtype=dt).reshape(4, 4)
         assert t.sum().dtype == t.contiguous().sum().dtype
 
