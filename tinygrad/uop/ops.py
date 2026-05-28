@@ -327,13 +327,14 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
           return tuple(ps[i] for i in self.marg)
         case Ops.PAD:
           # TODO: why do i need resolve here?
-          if len(ps) != len(self.marg) or not all(resolve(b>=0) and resolve(e>=0) for b,e in self.marg): raise ValueError(f"invalid pad {self.marg}")
-          return tuple(ssimplify(s+b+e) for s,(b,e) in zip(ps, self.marg))
+          if len(ps) != len(self.marg) or not all(resolve(sz>=0) and resolve(0<=o) and resolve(o+s<=sz) for s,(sz,o) in zip(ps, self.marg)):
+            raise ValueError(f"invalid pad {self.marg} for {ps}")
+          return tuple(ssimplify(sz) for sz,_ in self.marg)
         case Ops.SHRINK:
           # TODO: why do i need resolve here?
-          if len(ps) != len(self.marg) or not all(resolve(0<=b) and resolve(b<=e) and resolve(e<=s) for s,(b,e) in zip(ps, self.marg)):
+          if len(ps) != len(self.marg) or not all(resolve(0<=b) and resolve(sz>=0) and resolve(b+sz<=s) for s,(sz,b) in zip(ps, self.marg)):
             raise ValueError(f"invalid shrink {self.marg} for {ps}")
-          return tuple(ssimplify(e-s) for s,e in self.marg)
+          return tuple(ssimplify(sz) for sz,_ in self.marg)
         case Ops.FLIP:
           if len(ps) != len(self.marg) or not all(isinstance(x, bool) for x in self.marg): raise ValueError(f"bad flip on {ps}, {self.marg}")
           return ps
@@ -535,6 +536,14 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       ret = UOp(Ops.CONST, dtype, arg=dtype.const(b), src=(UOp(Ops.DEVICE, arg=device),) if device is not None else ())
     return ret.reshape((1,)*len(shape)).expand(shape) if shape is not None and shape != () and ret.shape != shape else ret
   @staticmethod
+  def unique_const(fill_value:ConstType, dtype:DTypeLike|None=None, device:str|tuple[str, ...]|None=None,  # type: ignore[override]
+                   shape:tuple[sint, ...]|None=None, unique=True):
+    # NOTE: fill_value is ConstType, not ConstLike, so UOps and tuples aren't allowed
+    assert not isinstance(fill_value, (UOp, tuple)), "unique const only works on numbers"
+    ret = UOp.const(to_dtype(dtype) if dtype is not None else dtypes.from_py(fill_value), fill_value, canonicalize_device(device))
+    ret = ret.replace(src=(UOp.unique(None if unique is True else unique),) + ret.src)
+    return ret.reshape((1,)*len(shape)).expand(shape) if shape is not None and ret.shape != shape else ret
+  @staticmethod
   def range(end:sint, axis_id, axis_type=AxisType.LOOP, *arg, dtype=dtypes.weakint, src=(), **kwargs):
     return UOp(Ops.RANGE, dtype=dtype, src=(sint_to_uop(end, dtype),)+src, arg=(axis_id, axis_type)+arg, **kwargs)
   @staticmethod
@@ -610,7 +619,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     if self.op in GroupOp.ALU: return axes[-1] if (axes := dedup([x.axis for x in self.src if x.axis is not None])) else None
     if len(self.src) == 0: return None
     src_axis = self.src[0].axis
-    if self.op is Ops.SHRINK and src_axis is not None and self.marg[src_axis] != (0, self.src[0].shape[src_axis]):
+    if self.op is Ops.SHRINK and src_axis is not None and self.marg[src_axis] != (self.src[0].shape[src_axis], 0):
       return None # SHRINK will remove the sharding if it's on axis
     if self.op is Ops.REDUCE: return None if src_axis is not None and src_axis in self.arg[1] else src_axis
     if self.op is Ops.RESHAPE:
@@ -1148,13 +1157,15 @@ def get_location() -> tuple[str, int]:
   return frm.f_code.co_filename, frm.f_lineno
 
 class UPat(OpMixin):
-  __slots__ = ("op", "match_dtype", "arg", "name", "src", "is_any")
+  __slots__ = ("op", "match_dtype", "match_tag", "arg", "name", "src", "is_any")
   def __init__(self, op:Ops|tuple[Ops, ...]|set[Ops]|None=None, dtype:DType|tuple[DType, ...]|set[DType]|None=None,
                src:tuple[UPat, ...]|list[UPat]|UPat|None=None, arg:Any=None,
-               name:str|None=None, allow_any_len:bool=False, custom_early_reject:set[Ops]|None=None, location=None, is_any:bool=False):
+               name:str|None=None, allow_any_len:bool=False, custom_early_reject:set[Ops]|None=None, location=None, is_any:bool=False,
+               tag:Any=None):
     assert op is None or isinstance(op, (Ops, tuple, set)), f"op must be Ops or tuple of Ops, not {op!r}"
     self.op: tuple[Ops, ...]|None = (op,) if isinstance(op, Ops) else (tuple(op) if isinstance(op, set) else op)
     self.match_dtype: tuple[DType, ...]|None = (dtype,) if isinstance(dtype, DType) else (tuple(dtype) if isinstance(dtype, set) else dtype)
+    self.match_tag: tuple[Any, ...]|None = (tag,) if isinstance(tag, str) else (tuple(tag) if isinstance(tag, set) else tag)
     self.arg, self.name, self._in_src, self.custom_early_reject = arg, name, src, custom_early_reject
     self.src: Any = None
     self.is_any = is_any
@@ -1184,8 +1195,10 @@ class UPat(OpMixin):
   def _ensure_float(self) -> UPat: return self
 
   def __reduce__(self):
-    return UPat, (self.op, self.match_dtype, self._in_src, self.arg, self.name, not self.strict_length, self.custom_early_reject, self.location)
-  def named(self, name:str): return UPat(self.op, self.match_dtype, self._in_src, self.arg, name, not self.strict_length, self.custom_early_reject)
+    return UPat, (self.op, self.match_dtype, self._in_src, self.arg, self.name, not self.strict_length, self.custom_early_reject, self.location,
+                  self.is_any, self.match_tag)
+  def named(self, name:str):
+    return UPat(self.op, self.match_dtype, self._in_src, self.arg, name, not self.strict_length, self.custom_early_reject, tag=self.match_tag)
 
   @staticmethod
   def any(*src): return UPat(src=src, is_any=True)
@@ -1246,6 +1259,7 @@ class UPat(OpMixin):
        (self.name is not None and store.setdefault(self.name, uop) is not uop) or \
        (self.match_dtype is not None and uop.dtype not in self.match_dtype and uop.dtype.scalar() not in self.match_dtype) or \
        (self.arg is not None and self.arg != uop.arg) or \
+       (self.match_tag is not None and uop.tag not in self.match_tag) or \
        (len(uop.src) < self.required_len) or \
        (self.strict_length and len(uop.src) != self.required_len): return []
     if self.src is None: return [store]

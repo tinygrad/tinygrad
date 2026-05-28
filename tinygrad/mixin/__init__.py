@@ -7,29 +7,28 @@ from tinygrad.mixin.reduce import ReduceMixin
 from tinygrad.uop import Ops
 from tinygrad.uop.ops import _broadcast_shape, resolve, smax, smin, identity_element
 from tinygrad.device import canonicalize_device
-from tinygrad.dtype import ConstType, DType, DTypeLike, InvalidType, PtrDType, PyConst, dtypes, least_upper_dtype, sum_acc_dtype, to_dtype
+from tinygrad.dtype import ConstType, DType, DTypeLike, Invalid, InvalidType, PtrDType, PyConst, dtypes, least_upper_dtype, sum_acc_dtype, to_dtype
 from tinygrad.helpers import all_int, argfix, ceildiv, flatten, flat_to_grouped, make_tuple, prod, resolve_pool_pads, round_up
 
 if TYPE_CHECKING:
-  from tinygrad.uop.ops import sint, UOp
+  from tinygrad.uop.ops import sint
 
 ReductionStr = Literal["mean", "sum", "none"]
 
 
 class OpMixin(ElementwiseMixin, ReduceMixin):
   @staticmethod
-  def empty(*shape, **kwargs): raise NotImplementedError("creation helpers are only supported on Tensor and UOp")
+  def unique_const(fill_value:ConstType, **kwargs): raise NotImplementedError("creation helpers are only supported on Tensor and UOp")
   @staticmethod
   def const(dtype, b, device=None): raise NotImplementedError("creation helpers are only supported on Tensor and UOp")
 
   @classmethod
-  def full(cls, shape:tuple[sint, ...], fill_value:ConstType|UOp, dtype:DTypeLike|None=None,
-           device:str|tuple[str, ...]|None=None, buffer=True) -> Self:
+  def full(cls, shape:tuple[sint, ...], fill_value:ConstType, **kwargs) -> Self:
     """
     Creates a tensor with the given shape, filled with the given value.
 
     You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
-    Pass `buffer=False` to get a broadcast const value instead of a materialized buffer.
+    Additionally, all other keyword arguments are passed to the constructor of the tensor.
 
     ```python exec="true" source="above" session="tensor" result="python"
     print(Tensor.full((2, 3), 42).numpy())
@@ -39,24 +38,21 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     ```
     """
     new_shape = argfix(shape)
-    dt = to_dtype(dtype) if dtype is not None else None
-    # build the broadcast const value (deviceless for a buffer, device-placed for a value), then clone into storage iff buffer
-    if isinstance(fill_value, get_args(ConstType)):
-      val = cls.const(dt or dtypes.from_py(fill_value), fill_value, None if buffer else canonicalize_device(device))
-    else:  # symbolic UOp fill: keep the value's own dtype, cast only when one is requested
-      val = cls.const(dt, fill_value)
-      if dt is not None: val = val.cast(dt)
-    val = val.reshape((1,)*len(new_shape)).expand(new_shape)
-    return val.clone(device=device) if buffer else val
+    if not kwargs.pop("buffer", True):
+      dt = to_dtype(kwargs.pop("dtype", None) or dtypes.from_py(fill_value))
+      return cls.const(dt, fill_value, canonicalize_device(kwargs.pop("device", None))).reshape((1,)*len(new_shape)).expand(new_shape)
+    return cls.unique_const(fill_value, **kwargs).reshape((1,)*len(new_shape)).expand(new_shape)
 
   @classmethod
   def invalids(cls, *shape, **kwargs) -> Self:
     """
-    Creates an anonymous uninitialized buffer with the given shape.
+    Creates a tensor with the given shape, filled with Invalid.
 
-    You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
+    This is an alternative to Tensor.empty when you want an "anonymous" buffer.
+
+    Eventually Tensor.empty will be replaced by this.
     """
-    return cls.empty(argfix(*shape), **kwargs)
+    return cls.full(argfix(*shape), Invalid, **kwargs)
 
   @classmethod
   def zeros(cls, *shape, **kwargs) -> Self:

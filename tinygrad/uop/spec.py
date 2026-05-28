@@ -122,8 +122,9 @@ spec_tensor = PatternMatcher([
   (UPat(Ops.UNIQUE, dtypes.void, ()), lambda: True),
   (UPat(Ops.LUNIQUE, dtypes.void, ()), lambda: True),
 
-  # CONST with a DEVICE
+  # CONST with a UNIQUE or DEVICE
   (UPat(Ops.CONST, src=(UPat(Ops.DEVICE),)), lambda: True),
+  (UPat(Ops.CONST, src=(UPat((Ops.UNIQUE, Ops.LUNIQUE)), UPat(Ops.DEVICE))), lambda: True),
 
   # BUFFER
   (UPat(Ops.BUFFER, src=(UPat((Ops.UNIQUE, Ops.LUNIQUE)), UPat(Ops.DEVICE)), name="buf"),
@@ -157,7 +158,8 @@ spec_tensor = PatternMatcher([
 
   # movement ops
   (UPat((Ops.RESHAPE, Ops.EXPAND), src=(UPat(), UPat(dtype=dtypes.weakint))), lambda: True),
-  (UPat((Ops.PAD, Ops.SHRINK), src=(UPat(), UPat(dtype=dtypes.weakint), UPat(dtype=dtypes.weakint))), lambda: True),
+  (UPat((Ops.PAD, Ops.SHRINK), src=(UPat(), UPat(dtype=dtypes.weakint), UPat(dtype=dtypes.weakint)), name="x"),
+   lambda x: x.src[1].dtype.count == x.src[2].dtype.count),
   (UPat((Ops.PERMUTE, Ops.FLIP), name="mv", src=(UPat(),)), lambda mv: isinstance(mv.arg, tuple)),
 
   # REDUCE has arg=(op, axis_tuple), src[1:] are ranges after lowering
@@ -222,12 +224,10 @@ spec_program = PatternMatcher([
 # these are intermediate ops. everything should be deleted from here
 spec_full = PatternMatcher([
   # SLICE on BUFFER is allowed if BUFFER is
-  (UPat(Ops.SLICE, src=(UPat((Ops.BUFFER, Ops.PARAM)), UPat(Ops.CONST, dtype=dtypes.weakint)), allow_any_len=True, name="bv"),
+  (UPat(Ops.SLICE, src=(UPat(GroupOp.Movement.union({Ops.BUFFER, Ops.PARAM, Ops.STAGE, Ops.AFTER})),
+                        UPat(Ops.CONST, dtype=dtypes.weakint)), allow_any_len=True, name="bv"),
    lambda bv: isinstance(bv.arg, int)),
 
-  # TODO: SLICE shouldn't go on INDEX. why is this allowed? remove these both
-  (UPat(Ops.SLICE, src=(UPat((Ops.INDEX,)), UPat(Ops.CONST, dtype=dtypes.weakint)), allow_any_len=True, name="bv"),
-   lambda bv: isinstance(bv.arg, int)),
   (UPat(Ops.CALL, src=(UPat((Ops.SLICE,)),), allow_any_len=True), lambda: True),
 
   # codegen may end ranges after gpudims has replaced RANGE with SPECIAL.

@@ -88,12 +88,14 @@ class GradAccClipAdamW(Optimizer):
       return out.shard_like(t) if offloaded else out
     if t.dtype in dtypes.fp8s:
       from examples.mlperf.models.flat_llama import FP8_MAX
-      amax = new_w.float().abs().max(axis=tuple(range(1, new_w.ndim))).detach()  # per-layer amax for (n_layers, out, in)
-      scale = FP8_MAX / (amax + 1e-8)
-      fp8_w = (new_w * scale.reshape(-1, *([1]*(new_w.ndim-1)))).clamp(-FP8_MAX, FP8_MAX).cast(t.dtype)
-      if hasattr(t, '_inv_scale'):
-        inv = ((amax + 1e-8) / FP8_MAX).cast(t._inv_scale.dtype)
-        t._inv_scale.assign(inv.shard_like(t._inv_scale) if offloaded else inv)
-      return fp8_w.shard_like(t) if offloaded else fp8_w
+      # delayed scaling: reuse previous step's inv_scale
+      scale = t._inv_scale.reciprocal().reshape(-1, *([1]*(new_w.ndim-1)))
+      scaled = (new_w * scale).clamp(-FP8_MAX, FP8_MAX)
+      ret = scaled.cast(t.dtype)
+      # update inv_scale for next step from quantized result
+      new_amax = (ret.float().abs().max(axis=tuple(range(1, ret.ndim))) * t._inv_scale).detach()
+      inv = ((new_amax + 1e-8) / FP8_MAX).cast(t._inv_scale.dtype)
+      t._inv_scale.assign(inv.shard_like(t._inv_scale) if offloaded else inv)
+      return ret.shard_like(t) if offloaded else ret
     out = new_w.cast(t.dtype)
     return out.shard_like(t) if offloaded else out

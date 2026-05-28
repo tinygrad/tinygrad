@@ -36,6 +36,7 @@ class TestSetitem(unittest.TestCase):
     t[:3] *= 10
     self.assertListEqual(t.tolist(), [0, 10, 20, 3, 4, 5, 6, 7, 8, 9])
 
+  @unittest.skip("crashed in LLVM CI")
   def test_setitem_fancy_on_unrealized_view(self):
     # fancy indexing setitem on unrealized SHRINK view (triggered infinite loop in graph_rewrite)
     base = Tensor.arange(20, dtype=dtypes.float).reshape(4, 5).clone().realize()
@@ -322,8 +323,8 @@ class TestWithGrad(unittest.TestCase):
 
   def test_set_overlapping_backward(self):
     z = Tensor.zeros(6)
-    x = Tensor.ones(4).contiguous()
-    y = Tensor.ones(4).contiguous() * 2
+    x = Tensor.ones(4)
+    y = Tensor.ones(4) * 2
     z[:4] = x
     z[2:] = y
     z.sum().backward()

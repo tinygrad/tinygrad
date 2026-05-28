@@ -56,7 +56,7 @@ const layoutUOp = (g, { graph, change }, opts) => {
     }
     const callNode = label.startsWith("CALL\n") || label.startsWith("FUNCTION\n");
     if (callNode) callCount++;
-    g.setNode(k, {...rectDims(width, height), label, ref, id:k, color, tag, callNode, exclude});
+    g.setNode(k, {...rectDims(width, height), label, labelX:0, ref, id:k, color, tag, callNode, exclude});
     // add edges
     const edgeCounts = {};
     for (const [_, s] of src) edgeCounts[s] = (edgeCounts[s] || 0)+1;
@@ -79,6 +79,7 @@ const layoutUOp = (g, { graph, change }, opts) => {
   }
   // optionally remove node srcs, track affected nodes
   const disconnected = new Set();
+  const CALL_TAG_WIDTH = 14;
   for (const n of g.nodes()) {
     const node = g.node(n);
     for (const consumerId of (g.successors(n) || [])) {
@@ -88,6 +89,8 @@ const layoutUOp = (g, { graph, change }, opts) => {
       const collapsible = consumer.callNode ? edge?.label?.text === 0 : node.exclude;
       if (!collapsible) continue;
       consumer.collapsible = true;
+      // increase width of call/function nodes to make space for a toggle
+      if (consumer.callNode) { consumer.width = consumer.labelWidth+NODE_PADDING*2+CALL_TAG_WIDTH; consumer.labelX = CALL_TAG_WIDTH/2; }
       // make sources invisible if UI has toggled it off
       const collapsed = consumer.callNode ? opts.showCallSrc === opts.callSrcMask.has(consumerId) : !opts.expandedNodes.has(consumerId);
       if (!collapsed) continue;

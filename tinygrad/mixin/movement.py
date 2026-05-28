@@ -178,7 +178,7 @@ class MovementMixin:
   def pad(self, arg:tuple[tuple[sint, sint] | None, ...]) -> Self:
     if self.ndim != len(arg):
       raise ValueError(f"{self.ndim=} != {len(arg)=}")
-    ret = self._mop(Ops.PAD, tuple(x if x is not None else (0, 0) for x in arg))
+    ret = self._mop(Ops.PAD, tuple((s+x[0]+x[1], x[0]) if x is not None else (s, 0) for x, s in zip(arg, self.shape)))
     return self if ret.shape == self.shape else ret
 
   def shrink(self, arg: tuple[tuple[sint, sint] | None, ...]) -> Self:
@@ -200,7 +200,7 @@ class MovementMixin:
     """
     if self.ndim != len(arg):
       raise ValueError(f"{self.ndim=} != {len(arg)=}")
-    ret = self._mop(Ops.SHRINK, arg=[x if x is not None else (0, s) for x, s in zip(arg, self.shape)])
+    ret = self._mop(Ops.SHRINK, arg=[(x[1]-x[0], x[0]) if x is not None else (s, 0) for x, s in zip(arg, self.shape)])
     return self if ret.shape == self.shape else ret
 
   def permute(self, order, *args) -> Self:
@@ -251,7 +251,7 @@ class MovementMixin:
     return self.shrink(tuple([None if ns is None else (0, ns) for ns in argfix(shape, *args)]))
 
   def pad_to(self, shape, *args) -> Self:
-    return self._mop(Ops.PAD, tuple([(0, 0 if ns is None else ns-s) for s,ns in zip(self.shape, argfix(shape, *args), strict=True)]))
+    return self._mop(Ops.PAD, tuple((s if ns is None else ns, 0) for s,ns in zip(self.shape, argfix(shape, *args), strict=True)))
 
   def view(self, shape, *args) -> Self:
     """`.view` is an alias for `.reshape`."""

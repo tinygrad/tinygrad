@@ -163,7 +163,8 @@ def amd_submit_pm4(cmdbuf, devs):
   ring_idx = ((put + i.cast(put.dtype)) % q.ring.size).cast(dtypes.int)
 
   # copy the cmdbuf into the ring and advance the put/write pointers
-  copy_to_ring = ring.index(ring_idx, dtype=ring.dtype.ptr()).store(cmdbuf.index(i, dtype=dtypes.uint32)).end(i)
+  copy_to_ring = ring.index(ring_idx, dtype=ring.dtype.ptr()).store(
+    cmdbuf.index(i*4, dtype=cmdbuf.dtype.ptr()).cast(dtypes.uint32.ptr()).load()).end(i)
   bump_put_ptr = put_ptr.index(zero, dtype=put_ptr.dtype.ptr()).store(next_put)
   bump_wptr = wptr.index(zero, dtype=wptr.dtype.ptr()).store(next_put)
 
@@ -233,7 +234,8 @@ def amd_submit_sdma(cmdbuf, devs):
   zi = UOp.range(zero_amt_dw, 0, dtype=dtypes.int, src=(cmdbuf,))
   zero_tail = ring.index(tail_off_dw + zi, dtype=ring.dtype.ptr()).store(UOp.const(dtypes.uint32, 0)).end(zi)
   i = UOp.range(UOp.const(dtypes.int, size_dw), 0, dtype=dtypes.int, src=(cmdbuf,))
-  copy_to_ring = ring.index(start_dw + i, dtype=ring.dtype.ptr()).store(cmdbuf.index(i, dtype=dtypes.uint32)).end(i)
+  copy_to_ring = ring.index(start_dw + i, dtype=ring.dtype.ptr()).store(
+    cmdbuf.index(i*4, dtype=cmdbuf.dtype.ptr()).cast(dtypes.uint32.ptr()).load()).end(i)
 
   # advance the put/write pointers past the zeroed tail and the cmdbuf
   next_put_b = put_b + ((zero_amt_dw + size_dw) * 4).cast(put_b.dtype)
@@ -253,8 +255,7 @@ class AMDProgramData:
 _amd_program_cache:dict[tuple[bytes,str], tuple[AMDProgramData,bytes]] = {}
 
 def amd_build_program(prg:UOp) -> UOp:
-  devs = prg.src[1].arg  # tuple[str, ...] from rebind_program_dev
-  dev = Device[devs[0]]
+  dev = Device[prg.src[1].arg] # TODO: rm this
   if (cached:=_amd_program_cache.get(key:=(lib:=prg.src[4].arg, dev.device))) is None:
     image, sections, relocs = elf_loader(lib)
     rodata = next(sh.header.sh_addr for sh in sections if sh.name == ".rodata")
@@ -274,10 +275,11 @@ def amd_build_program(prg:UOp) -> UOp:
       kernargs_alloc_size=desc.kernarg_size + (ctypes.sizeof(hsa.hsa_kernel_dispatch_packet_t) if edp else 0),
       enable_dispatch_ptr=edp,
       enable_private_segment_sgpr=desc.kernel_code_properties & hsa.AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_PRIVATE_SEGMENT_BUFFER), bytes(image))
-  data, image_bytes = cached
-  buf_uop = UOp.new_buffer(devs, len(image_bytes), dtypes.uint8).rtag("program")
-  blob_uop = UOp(Ops.BINARY, dtypes.void, src=(), arg=image_bytes)
-  return prg.replace(src=(buf_uop.after(buf_uop.store(blob_uop)),), arg=(data, prg.arg))
+  return cached
+
+pm_prep_program = PatternMatcher([
+  (UPat(Ops.PROGRAM, src=(UPat(), UPat(Ops.DEVICE, arg="AMD"), UPat(), UPat(), UPat(Ops.BINARY)), name="prg"), amd_build_program),
+])
 
 class AMDAllocator(HCQAllocator['AMDDevice']):
   def __init__(self, dev:AMDDevice):
@@ -373,16 +375,15 @@ def _mock(iface, name=None): return type(name or f"MOCK{iface.__name__}", (iface
 
 def encode_queue(q:UOp) -> UOp|None:
   if not (isinstance(q.arg, tuple) and len(q.arg) == 2 and q.arg[1] in ("COMPUTE", "COPY")): return None
-  devs = q.arg[0]
+  devs = (q.arg[0],) if isinstance(q.arg[0], str) else q.arg[0]  # TODO: make this prettier
   return amd_submit_pm4(amd_lower_pm4(q, devs), devs) if q.arg[1] == "COMPUTE" else amd_submit_sdma(amd_lower_sdma(q, devs), devs)
+
+pm_lower = PatternMatcher([
+  (UPat(Ops.LINEAR, name="q"), encode_queue),
+])
 
 class AMDDevice(HCQ2Compiled):
   timestamp_divider = 100.0  # AMD GPU clock: ticks/us
-
-  pm_lower = PatternMatcher([
-    (UPat(Ops.PROGRAM, src=(UPat(), UPat(), UPat(), UPat(), UPat(Ops.BINARY)), name="prg"), amd_build_program),
-    (UPat(Ops.LINEAR, name="q"), encode_queue),
-  ])
 
   ifaces = [PCIIface]
 
@@ -424,8 +425,7 @@ class AMDDevice(HCQ2Compiled):
     self.sdma_queues:dict = {}
     self.has_sdma_queue = self.sdma_queue(0) is not None
 
-    super().__init__(device, AMDAllocator(self), [HIPRenderer, AMDLLVMRenderer, HIPCCRenderer], None,
-                     kernargs_size=16 << 20, can_recover=self.is_am(), arch=self.arch)
+    super().__init__(device, AMDAllocator(self), [HIPRenderer, AMDLLVMRenderer, HIPCCRenderer], None, can_recover=self.is_am(), arch=self.arch)
 
     # Scratch setup
     self.max_private_segment_size = 0
@@ -529,5 +529,16 @@ class AMDDevice(HCQ2Compiled):
         self.aql_gart.cpu_view()[:ctypes.sizeof(self.aql_desc)] = bytes(self.aql_desc)
 
   def on_device_hang(self): self.iface.on_device_hang()
+
+  @functools.cached_property
+  def pm_bufferize(self) -> PatternMatcher:
+    return PatternMatcher([
+      (UPat(Ops.BUFFER, tag="scratch"),
+        lambda ctx: Buffer(ctx.device, ctx.scratch.size, dtypes.uint8, opaque=ctx.scratch, options=BufferSpec(external_ptr=1))),
+      (UPat(Ops.BUFFER, tag={("compute_queue", n) for n in ("ring", "write_ptr", "doorbell", "put_value")}, name="b"),
+        lambda ctx, b: getattr(ctx.compute_queue, b.tag[1])),
+      (UPat(Ops.BUFFER, tag={("sdma_queue", n) for n in ("ring", "write_ptr", "doorbell", "put_value")}, name="b"),
+        lambda ctx, b: getattr(ctx.sdma_queue(0), b.tag[1])),
+    ]) + super().pm_bufferize
 
   def device_props(self): return self.iface.props
