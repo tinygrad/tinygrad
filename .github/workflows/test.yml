@@ -609,9 +609,10 @@ jobs:
         key: linux-${{ matrix.dev }}
         deps: testing_unit
         python-version: '3.12'
-        webgpu: ${{ contains('WEBGPU', matrix.dev) }}
         llvm: ${{ contains(fromJSON('["LLVM", "LVP", "CLANGJIT"]'), matrix.dev) }}
         mesa: ${{ contains('LVP', matrix.dev) && 'cpu' }}
+        webgpu: ${{ matrix.dev == 'WEBGPU' }}
+        opencl: ${{ matrix.dev == 'CL' }}
     - name: Set env
       run: printf "DEV=${{ matrix.dev }}${{ matrix.dev == 'CPU:CLANGJIT' && '\nCPU_COUNT=2' || '' }}" >> $GITHUB_ENV
     - name: Check Device.DEFAULT and print some source
