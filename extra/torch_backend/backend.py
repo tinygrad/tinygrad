@@ -23,7 +23,7 @@ def calculate_storage_offset(x: Tensor) -> int:
   for u in x.uop.toposort():
     if u.op == Ops.SHRINK:
       u_strides = strides_for_shape(u.src[0].shape)
-      for i, (_, start) in enumerate(u.marg): offset += start * u_strides[i]
+      for i, (start, _) in enumerate(u.marg): offset += start * u_strides[i]
   return offset
 def wrap(x: Tensor) -> torch.Tensor:
   x._strides = strides_for_shape(x.shape) # always recalculate

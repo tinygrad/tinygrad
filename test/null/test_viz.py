@@ -248,6 +248,19 @@ class TestViz(unittest.TestCase):
     self.assertIn("EXPAND", excluded_nodes)
     self.assertIn("CONST1 1 Ops.DEVICE", graph[id(alu)]["label"])
 
+  def test_stack_movement_not_folded_unless_all_const(self):
+    a = UOp.variable("a", 0, 10, dtype=dtypes.int)
+    c = UOp.const(dtypes.int, 1)
+    stack = a.vectorize(c)
+    reshaped = stack.reshape((1, 2))
+    graph = uop_to_json(VizData(), reshaped)
+    self.assertFalse(graph[id(stack)]["exclude"])
+
+    const_stack = c.vectorize(UOp.const(dtypes.int, 2))
+    const_reshaped = const_stack.reshape((1, 2))
+    const_graph = uop_to_json(VizData(), const_reshaped)
+    self.assertTrue(const_graph[id(const_stack)]["exclude"])
+
 # VIZ displays nested graph_rewrites in a tree view
 
 def leaf_rewrite(x:UOp): return x.rtag(1) if x.tag is None else None
