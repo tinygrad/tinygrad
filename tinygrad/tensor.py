@@ -160,7 +160,7 @@ class Tensor(OpMixin):
   def const_like(self, b:ConstType) -> Tensor: return Tensor(self.uop.const_like(b))
   @staticmethod
   def const(dtype:DType, b:ConstType|UOp, device:str|tuple[str, ...]|None=None) -> Tensor:
-    return Tensor(b if isinstance(b, UOp) else UOp.const(dtype, b, device))
+    return Tensor(UOp.const(dtype, b, device))
   @staticmethod
   def unique_const(fill_value:ConstType|UOp, **kwargs) -> Tensor:
     if isinstance(fill_value, UOp): return Tensor(fill_value, **kwargs)
