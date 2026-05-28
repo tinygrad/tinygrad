@@ -137,7 +137,8 @@ def rewrite_into_function(call:UOp):
 
 def param_to_multi(p:UOp):
   if p.axis is None: return None
-  return UOp.param(p.arg, p.dtype, p.shard_shape, p.device).multi(p.axis)
+  vmin_vmax = (p.arg.vmin, p.arg.vmax) if p.arg.vmin is not None and p.arg.vmax is not None else None
+  return UOp.param(p.arg.slot, p.dtype, p.shard_shape, p.device, vmin_vmax, p.arg.name, p.arg.addrspace).multi(p.axis)
 
 # NOTE: this is the same pattern as Ops.UNROLL
 multi_pm = PatternMatcher([

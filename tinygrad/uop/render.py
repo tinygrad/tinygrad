@@ -34,7 +34,7 @@ def strip_binary_parens(x:UOp, left:str, right:str, code_for_op) -> str:
 
 renderer = PatternMatcher([
   (UPat((Ops.DEFINE_VAR,), name="x"), lambda x: x.expr),
-  (UPat(Ops.PARAM, src=(UPat(), UPat(), UPat(), UPat(), UPat(Ops.NOOP, name="x"))), lambda x: x.arg),
+  (UPat(Ops.PARAM, name="x"), lambda x: x.arg.name if x.arg.name is not None else f"p{x.arg.slot}"),
   (UPat((Ops.SPECIAL), name="x"), lambda x: x.arg),
   (UPat(Ops.RANGE, name="x"), lambda x: f"r{range_str(x)}"),
   (UPat(Ops.CONST, name="x"), lambda x: str(x.arg)),

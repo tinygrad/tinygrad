@@ -5,7 +5,7 @@ from tinygrad.tensor import Tensor
 from tinygrad.helpers import Timing, Context, cdiv
 from tinygrad.dtype import dtypes, ConstFloat  # noqa: F401
 from tinygrad.device import Device
-from tinygrad.uop.ops import Ops, UOp, UPat, exec_alu
+from tinygrad.uop.ops import Ops, UOp, UPat, exec_alu, ParamArg
 from tinygrad.uop.spec import spec_shared
 from tinygrad.uop.symbolic import sym
 from test.helpers import eval_uop, to_uops_list
@@ -291,7 +291,7 @@ class TestUOpMethod(unittest.TestCase):
 
   def test_replace(self):
     x = UOp(Ops.PARAM, dtypes.int.ptr(), (), 0)
-    self.assertIs(x.replace(arg=None).arg, None)
+    self.assertEqual(x.replace(arg=ParamArg(1)).arg.slot, 1)
     with self.assertRaises(AssertionError): x.replace(field="a")
 
   def test_const_zero_neg_zero_different(self):
