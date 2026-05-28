@@ -17,7 +17,7 @@ on:
 jobs:
   llvmspeed:
     name: LLVM Speed
-    runs-on: &linux ${{ github.repository == 'tinygrad/tinygrad' && github.event_name == 'pull_request' && github.event.pull_request.author_association == 'MEMBER' && 'namespace-profile-tinygrad' || 'ubuntu-24.04' }}
+    runs-on: &linux ${{ github.repository == 'tinygrad/tinygrad' && github.event_name == 'pull_request' && github.event.pull_request.author_association == 'COLLABORATOR' && 'namespace-profile-tinygrad' || 'ubuntu-24.04' }}
     timeout-minutes: 20
     steps:
     - name: Checkout Code
