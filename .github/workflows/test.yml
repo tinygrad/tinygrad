@@ -616,7 +616,7 @@ jobs:
       run: printf "DEV=${{ matrix.dev }}${{ matrix.dev == 'CPU:CLANGJIT' && '\nCPU_COUNT=2' || '' }}" >> $GITHUB_ENV
     - name: Check Device.DEFAULT and print some source
       run: |
-        python -c "from tinygrad import Device; from tinygrad.helpers import Target; assert Device.DEFAULT == Target('${{ matrix.dev }}').device"
+        python -c "from tinygrad import Device; from tinygrad.helpers import Target; assert Device.DEFAULT == Target.parse('${{ matrix.dev }}').device"
         DEBUG=4 python test/test_tiny.py TestTiny.test_plus
     - name: Run backend tests
       run: python -m pytest -n=auto test/backend --durations=20
