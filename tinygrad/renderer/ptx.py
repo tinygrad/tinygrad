@@ -202,7 +202,7 @@ class PTXRenderer(Renderer):
         r[u] = r[u.src[0]]
         continue
       if u.op is Ops.DEFINE_REG:
-        r[u] = [ssa("reg", u, self.types[u.dtype.base.scalar()]) for _ in range(u.ptrdtype.size)]
+        r[u] = [ssa("reg", u, self.types[u.dtype.base.scalar()]) for _ in range(u.max_numel())]
         continue
       if u.op in {Ops.INDEX, Ops.LOAD, Ops.STORE} and isinstance(u.src[0].dtype, PtrDType) and u.src[0].dtype.addrspace == AddrSpace.REG:
         if u.op is Ops.INDEX:

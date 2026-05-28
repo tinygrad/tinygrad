@@ -368,6 +368,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
   @property
   def max_shape(self) -> tuple[int, ...]: return to_max_shape(self.shape)
+  def max_numel(self) -> int: return prod(self.max_shape)
 
   @property
   def shard_shape(self) -> tuple[sint, ...]:
@@ -751,6 +752,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       assert all_same([x.addrspace for x in self.src]), "addrspace mismatch"
       return self.src[0].addrspace
     if self.op in {Ops.INDEX, Ops.CAST, Ops.AFTER}: return self.src[0].addrspace
+    if self.op in GroupOp.Movement: return self.src[0].addrspace
     raise Exception(f"{self.op} doesn't have addrspace")
   @property
   def buf_uop(self) -> UOp:
