@@ -489,7 +489,7 @@ def unbind_kernel(ctx:LocalAddBufferContext, b:UOp):
   return b.src[0]
 
 def handle_after(ctx:LocalAddBufferContext, after:UOp):
-  if isinstance(after.dtype, PtrDType) and after.ptrdtype.addrspace == AddrSpace.LOCAL: return None
+  if isinstance(after.dtype, PtrDType) and after.addrspace == AddrSpace.LOCAL: return None
   buf = after.buf_uop
   # HACK to put the buffer in the MAP instead of MSTACK/MSELECT
   if buf.op in {Ops.MSTACK, Ops.MSELECT}: buf = buf.src[0]

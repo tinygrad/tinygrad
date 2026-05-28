@@ -104,7 +104,7 @@ def fold_expanded_index(midx:UOp):
     for grp in grouped_offsets:
       # get the index offset for this element. using [0] is okay, because they are the same
       lidx = midx.src[offsets[grp[0]][0]]
-      if len(grp) > 1: lidx = lidx.cast(buf.ptrdtype.base.vec(len(grp)).ptr(size=buf.ptrdtype.size, addrspace=buf.ptrdtype.addrspace))
+      if len(grp) > 1: lidx = lidx.cast(buf.ptrdtype.base.vec(len(grp)).ptr(size=buf.ptrdtype.size, addrspace=buf.addrspace))
       # set the idxs of the output
       for i,g in enumerate(grp):
         for oo in offsets[g]: idxs[oo] = global_offset+i
@@ -113,7 +113,7 @@ def fold_expanded_index(midx:UOp):
       global_offset += len(grp)
   assert None not in idxs, f"some idxs are missing {idxs}"
   # this base thing is for image, we want the CAT to be a normal pointer
-  post_cat = UOp(Ops.PTRCAT, buf.ptrdtype.base.ptr(size=buf.ptrdtype.size, addrspace=buf.ptrdtype.addrspace).vec(global_offset), tuple(ret))
+  post_cat = UOp(Ops.PTRCAT, buf.ptrdtype.base.ptr(size=buf.ptrdtype.size, addrspace=buf.addrspace).vec(global_offset), tuple(ret))
   return post_cat.gep(tuple(cast(list[int], idxs)))
 
 def cat_after_store(cat:UOp, data:UOp):
@@ -165,7 +165,7 @@ def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
     must_divide = False
   elif buf.dtype.base not in (dtypes.float, dtypes.half, *dtypes.fp8s) and not isinstance(buf.dtype, ImageDType):
     pass
-  elif buf.ptrdtype.addrspace == AddrSpace.REG:
+  elif buf.addrspace == AddrSpace.REG:
     pass
   elif isinstance(buf.dtype, ImageDType):
     lengths = [4]
@@ -186,7 +186,7 @@ def split_load_store(ctx:Renderer|None, ls:UOp, idx:UOp):
     for fold_length in lengths:
       if global_offset+fold_length > sz: continue
       lidx = buf.index((offset + global_offset).valid(mask), ptr=True)
-      if fold_length > 1: lidx = lidx.cast(buf.ptrdtype.base.vec(fold_length).ptr(size=buf.ptrdtype.size, addrspace=buf.ptrdtype.addrspace))
+      if fold_length > 1: lidx = lidx.cast(buf.ptrdtype.base.vec(fold_length).ptr(size=buf.ptrdtype.size, addrspace=buf.addrspace))
       if ls.op is Ops.STORE: ret.append(ls.replace(src=(lidx,ls.src[1].gep(tuple(range(global_offset, global_offset+fold_length))))))
       else: ret.append(ls.replace(src=(lidx,)+ls.src[1:], dtype=ls.dtype.scalar().vec(fold_length)))
       global_offset += fold_length
@@ -243,7 +243,7 @@ def no_vectorized_alu(alu:UOp):
   return UOp(Ops.STACK, alu.dtype, alus)
 
 def no_vectorized_buf(buf:UOp):
-  return buf.replace(dtype=buf.ptrdtype.base.scalar().ptr(buf.ptrdtype.size*buf.ptrdtype.count, buf.ptrdtype.addrspace)).cast(buf.dtype)
+  return buf.replace(dtype=buf.ptrdtype.base.scalar().ptr(buf.ptrdtype.size*buf.ptrdtype.count, buf.addrspace)).cast(buf.dtype)
 
 def no_vectorized_index(buf:UOp, cast:UOp, idx:UOp, bcast:UOp|None=None):
   cnt = cast.dtype.count
