@@ -243,7 +243,9 @@ def no_vectorized_alu(alu:UOp):
   return UOp(Ops.STACK, alu.dtype, alus)
 
 def no_vectorized_buf(buf:UOp):
-  return buf.replace(dtype=buf.ptrdtype.base.scalar().ptr(buf.max_numel()*buf.ptrdtype.count, buf.addrspace)).cast(buf.dtype)
+  # TODO: this fails on regs
+  #assert buf.max_numel() == buf.ptrdtype.size
+  return buf.replace(dtype=buf.ptrdtype.base.scalar().ptr(buf.ptrdtype.size*buf.ptrdtype.count, buf.addrspace)).cast(buf.dtype)
 
 def no_vectorized_index(buf:UOp, cast:UOp, idx:UOp, bcast:UOp|None=None):
   cnt = cast.dtype.count
