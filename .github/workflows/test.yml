@@ -601,7 +601,6 @@ jobs:
         webgpu: 'true'
     - name: Check Device.DEFAULT (WEBGPU) and print some source
       run: |
-        sudo sysctl -w vm.overcommit_memory=2 vm.overcommit_ratio=100
         DEV=WEBGPU python -c "from tinygrad import Device; assert Device.DEFAULT == 'WEBGPU', Device.DEFAULT"
         DEV=WEBGPU DEBUG=4 FORWARD_ONLY=1 python3 test/test_tiny.py TestTiny.test_plus
     - name: Run selected webgpu tests
