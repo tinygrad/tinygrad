@@ -98,22 +98,22 @@
     cursor: pointer;
     user-select: auto;
   }
-  g.tag circle {
+  g.tag circle, g.tag rect {
     fill: #FFD700;
     stroke: #B8860B;
   }
-  g.tag.collapsed circle {
-    fill: #5CD68D;
+  g.tag.collapsed circle, g.tag.collapsed rect {
+    fill: #73988C;
     stroke: #4a4b57;
   }
-  g.tag.expanded circle {
-    fill: #9FDDE6;
+  g.tag.expanded circle, g.tag.expanded rect {
+    fill: #74809A;
     stroke: #4a4b57;
   }
   g.port circle {
     fill: #b3dcc2;
   }
-  g.tag circle, #edge-labels circle {
+  g.tag circle, g.tag rect, #edge-labels circle {
     stroke-width: 0.8;
   }
   g.tag text, #edge-labels text {
