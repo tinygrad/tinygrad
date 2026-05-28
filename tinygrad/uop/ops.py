@@ -748,6 +748,17 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       if x.device is not None: return x.device
     return None
   @property
+  def addrspace(self) -> AddrSpace:
+    if self.op in {Ops.PARAM, Ops.BUFFER}: return AddrSpace.GLOBAL
+    if self.op is Ops.DEFINE_LOCAL: return AddrSpace.LOCAL
+    if self.op is Ops.DEFINE_REG: return AddrSpace.REG
+    if self.op is Ops.STACK:
+      assert all_same([x.addrspace for x in self.src]), "addrspace mismatch"
+      return self.src[0].addrspace
+    if self.op in {Ops.INDEX, Ops.CAST, Ops.AFTER}: return self.src[0].addrspace
+    if self.op in GroupOp.Movement: return self.src[0].addrspace
+    raise Exception(f"{self.op} doesn't have addrspace")
+  @property
   def buf_uop(self) -> UOp:
     if self.op in {Ops.BUFFER, Ops.PARAM}: return self
     if self.op is Ops.MSELECT: return self.src[0].buf_uop.mselect(self.arg)
