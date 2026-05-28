@@ -65,6 +65,10 @@ class TestTensorData(unittest.TestCase):
     assert dat.tolist() == 3
     assert dat.shape == ()
 
+  def test_const_dtype_for_uop(self):
+    self.assertEqual(Tensor.const(dtypes.int8, UOp.const(dtypes.float32, 1.0)).dtype, dtypes.int8)
+    self.assertEqual(Tensor.const(dtypes.int32, UOp.variable("x", 1, 10).bind(5)).item(), 5)
+
   def test_data_float32(self):
     a = Tensor([[1,2.5],[3,4]], dtype=dtypes.float32)
     dat = a.data()
