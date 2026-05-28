@@ -8,16 +8,12 @@ from typing import Callable
 import ctypes
 
 backend_types = {v: k for k, v in webgpu.enum_WGPUBackendType.items()}
-instance = webgpu.wgpuCreateInstance(webgpu.WGPUInstanceDescriptor(features = webgpu.WGPUInstanceFeatures(timedWaitAnyEnable = True)))
+instance = webgpu.wgpuCreateInstance(webgpu.WGPUInstanceDescriptor(features=webgpu.WGPUInstanceFeatures(timedWaitAnyEnable=True)))
 
-def to_c_string(_str:str) -> ctypes.Array: return ctypes.create_string_buffer(_str.encode('utf-8'))
+def from_wgpu_str(string_view:webgpu.WGPUStringView) -> str: return ctypes.string_at(string_view.data, string_view.length).decode()
+def to_wgpu_str(_str:str) -> webgpu.WGPUStringView: return webgpu.WGPUStringView(data=ctypes.create_string_buffer(_str.encode()), length=len(_str))
 
-def from_wgpu_str(string_view:webgpu.struct_WGPUStringView) -> str: return ctypes.string_at(string_view.data, string_view.length).decode("utf-8")
-
-def to_wgpu_str(_str:str) -> webgpu.struct_WGPUStringView:
-  return webgpu.WGPUStringView(data=ctypes.cast(ctypes.pointer(to_c_string(_str)), ctypes.POINTER(ctypes.c_char)), length=len(_str))
-
-# getas a memoryview from a buffer, which is assumed to have MAP_READ (see _readable_buffer)
+# gets a memoryview from a buffer, which is assumed to have MAP_READ (see _readable_buffer)
 def buf_to_mv(buf:webgpu.WGPUBuffer) -> memoryview:
   BufferMapAsync(buf, webgpu.WGPUMapMode_Read, 0, size:=webgpu.wgpuBufferGetSize(buf))
   return to_mv(webgpu.wgpuBufferGetConstMappedRange(buf, 0, size), size)
@@ -34,6 +30,7 @@ def synchronous(status_enum:dict[int, str], has_emsg:bool=False):
       def cb(s:int, *args):
         nonlocal status, payload, emsg
         # the last two arguments are "userdata1" and "userdata2", which we drop
+        # we must process wgpu strings in this callback, as they will be freed after we return
         status, (*payload, emsg) = s, [from_wgpu_str(a) if type(a) is webgpu.WGPUStringView else a for a in args[:-2]] + ([] if has_emsg else [None])
 
       future = fn(*args, fn.argtypes[-1](mode=webgpu.WGPUCallbackMode_WaitAnyOnly, callback=cb)) # type: ignore
@@ -81,8 +78,8 @@ class WebGPUProgram:
       bgl_entry(0, 'Uniform'), *(bgl_entry(i+1, 'Uniform' if i >= len(bufs) else 'Storage') for i in range(len(bufs)+len(vals))))
 
     webgpu.wgpuDevicePushErrorScope(self.dev.device_res, webgpu.WGPUErrorFilter_Validation)
-    bind_layout = webgpu.wgpuDeviceCreateBindGroupLayout(self.dev.device_res, webgpu.WGPUBindGroupLayoutDescriptor(
-      entryCount=len(bind_entries), entries=ctypes.cast(bind_entries, ctypes.POINTER(webgpu.WGPUBindGroupLayoutEntry))))
+    bind_layout = webgpu.wgpuDeviceCreateBindGroupLayout(self.dev.device_res,
+                                                         webgpu.WGPUBindGroupLayoutDescriptor(entryCount=len(bind_entries), entries=bind_entries))
 
     if err := self.dev.pop_error(): raise RuntimeError(f"Error creating bind group layout: {err}")
 
@@ -180,10 +177,8 @@ class WebGpuDevice(Compiled):
                                            requiredFeatures=(webgpu.WGPUFeatureName * len(self.features))(*self.features))
 
     # Limits
-    supported_limits = webgpu.WGPUSupportedLimits()
-    webgpu.wgpuAdapterGetLimits(adapter_res, ctypes.cast(ctypes.pointer(supported_limits),ctypes.POINTER(webgpu.struct_WGPUSupportedLimits)))
-    limits = webgpu.WGPURequiredLimits(limits=supported_limits.limits)
-    dev_desc.requiredLimits = c.pointer(limits)
+    webgpu.wgpuAdapterGetLimits(adapter_res, supported_limits:=webgpu.WGPUSupportedLimits())
+    dev_desc.requiredLimits = c.pointer(webgpu.WGPURequiredLimits(limits=supported_limits.limits))
 
     # Requesting a device
     self.device_res = AdapterRequestDevice(adapter_res, dev_desc)
