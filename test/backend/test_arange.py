@@ -30,7 +30,7 @@ class TestArange(unittest.TestCase):
   def test_eye_complexity(self):
     with Context(NOOPT=1):
       # NOTE: not every backend supports CMPEQ
-      self.assertLessEqual(self._get_flops(Tensor.eye(256).contiguous(), np.eye(256)), 2*256*256)
+      self.assertLessEqual(self._get_flops(Tensor.eye(2560).contiguous(), np.eye(2560)), 2*2560*2560)
 
   @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "PTX indexing is weird")
   def test_tri_complexity(self):
