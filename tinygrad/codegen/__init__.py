@@ -24,6 +24,16 @@ from tinygrad.schedule.rangeify import pm_add_buffers_local, rangeify_codegen, p
 from tinygrad.codegen.late.linearizer import CFGContext, pm_split_ends, pm_add_control_flow, linearize
 from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regalloc_rewrite
 
+# NOTE: this is temporary until we fix the devectorizer
+pm_index_is_shrink = PatternMatcher([
+  # rewrite non-image INDEX to SHRINK
+  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))), lambda buf,idx:
+    UOp(Ops.SHRINK, dtype=buf.dtype, src=(buf, idx, UOp.const(dtypes.int, 1)))),
+  # rewrite CAST on SHRINK to just SHRINK
+  #(UPat(Ops.SHRINK, name="bv").cast(name="x"),
+  # lambda bv,x: bv.replace(dtype=x.dtype, src=(bv.src[0], bv.src[1], UOp.const(dtypes.int, x.dtype.count)))),
+])
+
 def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   if VIZ: graph_rewrite(ast, PatternMatcher([]), name="View Base AST")
   if DEBUG >= 5: print(pyrender(ast))
@@ -100,6 +110,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   extra_matcher = ren.extra_matcher if ren.extra_matcher is not None else PatternMatcher([])
   pm_final_rewrite = pm_decomp+pm_render+extra_matcher+pm_split_ends
   sink = graph_rewrite(sink, pm_final_rewrite, ctx=ren, name="final rewrite")
+  sink = graph_rewrite(sink, pm_index_is_shrink, name="index is shrink")
 
   # this was the linearizer
   sink = graph_rewrite(sink, pm_add_control_flow, ctx=CFGContext(sink), name="add control flow", bottom_up=True)
