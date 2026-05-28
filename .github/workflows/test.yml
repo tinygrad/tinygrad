@@ -609,8 +609,8 @@ jobs:
         key: linux-${{ matrix.dev }}
         deps: testing_unit
         python-version: '3.12'
-        llvm: ${{ contains(fromJSON('["LLVM", "LVP", "CLANGJIT"]'), matrix.dev) }}
-        mesa: ${{ contains('LVP', matrix.dev) && 'cpu' }}
+        llvm: ${{ contains(matrix.dev, 'LLVM') || contains(matrix.dev, 'LVP') || contains(matrix.dev, 'CLANGJIT') }}
+        mesa: ${{ contains(matrix.dev, 'LVP') && 'cpu' || 'false' }}
         webgpu: ${{ matrix.dev == 'WEBGPU' }}
         opencl: ${{ matrix.dev == 'CL' }}
     - name: Set env
