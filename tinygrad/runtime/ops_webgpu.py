@@ -3,6 +3,7 @@ from tinygrad.device import Compiled, Allocator, BufferSpec
 from tinygrad.renderer.wgsl import WGSLRenderer
 from tinygrad.helpers import round_up, suppress_finalizing, getenv, to_mv
 from tinygrad.runtime.autogen import webgpu
+from tinygrad.runtime.support import c
 from typing import Callable
 import ctypes
 
@@ -30,10 +31,10 @@ def synchronous(status_enum:dict[int, str], has_emsg:bool=False):
       status, payload, emsg = 0, [], None
 
       @next(ty for nm, ty, *_ in fn.argtypes[-1]._real_fields_ if nm == "callback") # type: ignore
-      def cb(*args):
+      def cb(s:int, *args):
         nonlocal status, payload, emsg
         # the last two arguments are "userdata1" and "userdata2", which we drop
-        status, *payload, emsg = [from_wgpu_str(a) if type(a) is webgpu.WGPUStringView else a for a in args[:-2]] + ([] if has_emsg else [None])
+        status, (*payload, emsg) = s, [from_wgpu_str(a) if type(a) is webgpu.WGPUStringView else a for a in args[:-2]] + ([] if has_emsg else [None])
 
       future = fn(*args, fn.argtypes[-1](mode=webgpu.WGPUCallbackMode_WaitAnyOnly, callback=cb)) # type: ignore
       if (future_status:=webgpu.wgpuInstanceWaitAny(instance, 1, webgpu.WGPUFutureWaitInfo(future), 2**64-1)) != webgpu.WGPUWaitStatus_Success:
@@ -104,7 +105,8 @@ class WebGPUProgram:
     if err := self.dev.pop_error(): raise RuntimeError(f"Error creating bind group: {err}")
 
     # Creating compute pipeline
-    compute_desc = webgpu.WGPUComputePipelineDescriptor(layout=pipeline_layout, compute=webgpu.WGPUComputeState(module=self.prg, entryPoint=self.name))
+    compute_desc = webgpu.WGPUComputePipelineDescriptor(layout=pipeline_layout,
+                                                        compute=webgpu.WGPUComputeState(module=self.prg, entryPoint=self.name))
     pipeline_result = DeviceCreateComputePipeline(self.dev.device_res, compute_desc)
 
     command_encoder = webgpu.wgpuDeviceCreateCommandEncoder(self.dev.device_res, webgpu.WGPUCommandEncoderDescriptor())
@@ -114,8 +116,8 @@ class WebGPUProgram:
       query_set = webgpu.wgpuDeviceCreateQuerySet(self.dev.device_res, webgpu.WGPUQuerySetDescriptor(type=webgpu.WGPUQueryType_Timestamp, count=2))
       query_buf = webgpu.wgpuDeviceCreateBuffer(
         self.dev.device_res, webgpu.WGPUBufferDescriptor(size=16, usage=webgpu.WGPUBufferUsage_QueryResolve | webgpu.WGPUBufferUsage_CopySrc))
-      comp_pass_desc.timestampWrites = ctypes.pointer(webgpu.WGPUComputePassTimestampWrites(querySet=query_set, beginningOfPassWriteIndex=0,
-                                                                                            endOfPassWriteIndex=1))
+      comp_pass_desc.timestampWrites = c.pointer(webgpu.WGPUComputePassTimestampWrites(querySet=query_set, beginningOfPassWriteIndex=0,
+                                                                                       endOfPassWriteIndex=1))
 
     # Begin compute pass
     compute_pass = webgpu.wgpuCommandEncoderBeginComputePass(command_encoder, comp_pass_desc)
@@ -181,7 +183,7 @@ class WebGpuDevice(Compiled):
     supported_limits = webgpu.WGPUSupportedLimits()
     webgpu.wgpuAdapterGetLimits(adapter_res, ctypes.cast(ctypes.pointer(supported_limits),ctypes.POINTER(webgpu.struct_WGPUSupportedLimits)))
     limits = webgpu.WGPURequiredLimits(limits=supported_limits.limits)
-    dev_desc.requiredLimits = ctypes.pointer(limits)
+    dev_desc.requiredLimits = c.pointer(limits)
 
     # Requesting a device
     self.device_res = AdapterRequestDevice(adapter_res, dev_desc)
