@@ -330,7 +330,7 @@ def fold_const_store(buf:UOp, off:UOp, val:UOp) -> UOp:
 
 pm_resolve_patches = symbolic + PatternMatcher([
   (UPat(Ops.GETADDR, src=(UPat(Ops.SLICE, name="bv"), UPat(Ops.DEVICE, name="dev"))), # getaddr(slice(x)) -> offset+getaddr(x)
-    lambda bv, dev: UOp(Ops.GETADDR, dtypes.uint64, src=(bv.src[0], dev)) + UOp.const(dtypes.uint64, bv.src[1].arg * bv.src[0].dtype.itemsize)),
+    lambda bv, dev: UOp(Ops.GETADDR, dtypes.uint64, src=(bv.src[0], dev)) + UOp.const(dtypes.uint64, bv.slice_offset() * bv.src[0].dtype.itemsize)),
   (UPat(Ops.GETADDR, src=(UPat(Ops.BUFFER, name="buf"), UPat(Ops.DEVICE)), name="g"),
     lambda buf, g: UOp.const(dtypes.uint64, buf.buffer.get_buf(g.src[1].arg).va_addr)),
   (UPat(Ops.GETADDR, src=(UPat.cvar("const"), UPat())), lambda const: const),

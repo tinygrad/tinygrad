@@ -9,7 +9,7 @@ from tinygrad.dtype import ConstFloat, PyConst, storage_fmt_for_dtype, to_storag
 from tinygrad.device import Buffer, MultiBuffer, canonicalize_device
 from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, flatten, TRACEMETA
 from tinygrad.helpers import PROFILE, dedup, cdiv, cmod, floordiv, floormod, diskcache_put, to_function_name, cpu_profile, TracingKey
-from tinygrad.helpers import VIZ, SPEC, CAPTURE_PROCESS_REPLAY, DISALLOW_BROADCAST
+from tinygrad.helpers import VIZ, SPEC, CAPTURE_PROCESS_REPLAY, DISALLOW_BROADCAST, strides_for_shape
 from tinygrad.helpers import colored, ansilen, printable
 if TYPE_CHECKING:
   from tinygrad.renderer import Estimates
@@ -28,7 +28,7 @@ axis_to_pos = {AxisType.LOOP: -1, AxisType.THREAD: 0, AxisType.GLOBAL: 0, AxisTy
                AxisType.GROUP_REDUCE: 2, AxisType.REDUCE: 4, AxisType.UNROLL: 5}
 
 range_start = {Ops.STAGE: 1, Ops.REDUCE: 1, Ops.WMMA: 3, Ops.END: 1, Ops.CALL: 1, Ops.FUNCTION: 1,
-               Ops.COPY: 2, Ops.SLICE: 2, Ops.LINEAR: 0}
+               Ops.COPY: 2, Ops.SLICE: 3, Ops.LINEAR: 0}
 
 # https://en.wikipedia.org/wiki/Identity_element
 def identity_element(op:Ops, dt:DType) -> PyConst: return dt.const({Ops.ADD:0, Ops.MUL:1, Ops.MAX:dt.min}[op])
@@ -267,9 +267,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       case Ops.BINARY: return (len(self.arg),)
       case Ops.BUFFER: return (self.arg,)
       case Ops.SLICE:
-        # HACK: SLICE is used inside kernels, so we set the shape to () if it's on an INDEX
-        if self.src[0].op is Ops.INDEX: return ()
-        return (self.arg,)
+        return tuple(self.src[1].sgep(i) for i in range(self.src[1].dtype.count))
       case Ops.CUSTOM_FUNCTION: return None
       case Ops.STAGE:
         # STAGE adds the existing shape to the front, opposite of INDEX
@@ -774,6 +772,13 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     if self.op is Ops.GETTUPLE and self.src[0].op is Ops.TUPLE: return self.src[0].src[self.arg].has_buffer_identity()
     return self.op in {Ops.BUFFER, Ops.SLICE, Ops.PARAM}
 
+  def slice_offset(self) -> sint:
+    assert self.op is Ops.SLICE
+    offs = tuple(self.src[2].sgep(i) for i in range(self.src[2].dtype.count))
+    if len(offs) == 1: return offs[0]
+    assert len(offs) == len(self.src[0].shape), "multi-axis SLICE offset must match source rank"
+    return UOp.const(dtypes.weakint, 0).usum(*(off*st for off,st in zip(offs, strides_for_shape(self.src[0].shape))))
+
   def _base_buffer_is_realized(self) -> bool:
     """Walk through AFTER chain to find if the underlying buffer is realized (has allocated memory)."""
     u = self.base
@@ -797,14 +802,16 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     if self.op is Ops.SLICE:
       if (cret:=buffers.get(self)) is not None: return cret
       buf = self.src[0].buffer
-      offset = self.src[1].arg
+      slice_off = self.slice_offset()
+      assert isinstance(slice_off, int), "SLICE offset must be concrete for realized buffers"
+      size = prod(self.max_shape)
       if isinstance(buf, MultiBuffer):
         mbuf = MultiBuffer.__new__(MultiBuffer)
-        mbuf.bufs = [b.view(self.arg, self.dtype, offset * self.src[0].dtype.itemsize) for b in buf.bufs]
+        mbuf.bufs = [b.view(size, self.dtype, slice_off * self.src[0].dtype.itemsize) for b in buf.bufs]
         buffers[self] = mbuf
         return mbuf
       assert isinstance(buf, Buffer), "must be a Buffer for SLICE"
-      buffers[self] = bv = buf.view(self.arg, self.dtype, offset * self.src[0].dtype.itemsize)
+      buffers[self] = bv = buf.view(size, self.dtype, slice_off * self.src[0].dtype.itemsize)
       return bv
     if self.op is Ops.MSELECT:
       ret = self.src[0].buffer

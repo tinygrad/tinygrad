@@ -109,5 +109,5 @@ class MetalGraph(GraphRunner):
   @staticmethod
   def supports_uop(batch_devs, new_call:UOp) -> bool:
     # Metal ICB replay encodes offsets as uint32; reject if any Metal buffer offset exceeds 32-bit range.
-    if any(b.op is Ops.SLICE and b.src[1].arg * b.src[0].dtype.itemsize > 0xFFFFFFFF for b in new_call.src[1:]): return False
+    if any(b.op is Ops.SLICE and b.slice_offset() * b.src[0].dtype.itemsize > 0xFFFFFFFF for b in new_call.src[1:]): return False
     return GraphRunner.supports_uop(batch_devs, new_call)
