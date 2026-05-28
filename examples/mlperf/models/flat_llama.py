@@ -276,9 +276,9 @@ def apply_grad(grad_buf:Tensor, new_grad:UOp):
     grad_buf.uop = grad_buf.uop.after(grad_buf.uop.store(grad_buf.uop + new_grad))
     return
   cur = grad_buf.uop
-  for pad in sorted(pads, key=lambda p: p.marg[0][1] if p.op == Ops.PAD else 0, reverse=True):
+  for pad in sorted(pads, key=lambda p: p.marg[0][0] if p.op == Ops.PAD else 0, reverse=True):
     if pad.op == Ops.PAD:
-      grad_shrink = tuple([(p[1], s+p[1]) for s,p in zip(pad.src[0].shape, pad.marg)])
+      grad_shrink = tuple([(p[0], s+p[0]) for s,p in zip(pad.src[0].shape, pad.marg)])
       buf_slice = cur.shrink(grad_shrink)
       cur = cur.after(buf_slice.store(buf_slice + pad.src[0].cast(cur.dtype)))
     else:

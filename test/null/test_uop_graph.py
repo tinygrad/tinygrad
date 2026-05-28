@@ -50,6 +50,15 @@ class TestGraphRewriteConst(unittest.TestCase):
     self.assertEqual(ret.dtype, dtypes.int.vec(3))
     self.assertEqual(ret.arg, 2)
 
+  def test_pad_shrink_source_order(self):
+    x = UOp.const(dtypes.float, 1.0, shape=(4,))
+    pad = x.pad(((2, 3),))
+    shrink = x.shrink(((1, 3),))
+    self.assertEqual((pad.src[1].arg, pad.src[2].arg), (2, 9))
+    self.assertEqual((shrink.src[1].arg, shrink.src[2].arg), (1, 2))
+    self.assertEqual(tuple((o.arg, s.arg) for o,s in pad.marg), ((2, 9),))
+    self.assertEqual(tuple((o.arg, s.arg) for o,s in shrink.marg), ((1, 2),))
+
 def xfail_broken_const_wraparound(fn):
   fn = pytest.mark.xfail(reason="const folding does not properly implement modular arithmetic")(fn)
   return unittest.expectedFailure(fn)
