@@ -347,11 +347,12 @@ def late_buffer_view(t:UOp, b:UOp):
     assert x.op not in GroupOp.Elementwise, "can't buffer view elementwise"
     x = x.src[0]
   x = next(u for u in x.src if u.op is Ops.INDEX)
+  assert x.op is Ops.INDEX, "must be INDEX"
 
   if len(shape) == 0: offset = x.src[1].arg
   else: offset = max(sum(idx.vmin for idx in x.src[1:]), 0)
 
-  return b.replace(src=(UOp(Ops.SLICE, t.dtype, (x.base, UOp.const(dtypes.weakint, offset)), size), b.src[1]))
+  return b.replace(src=(UOp(Ops.SLICE, t.dtype, (x.src[0], UOp.const(dtypes.weakint, offset)), size),))
 
 to_bufferview = PatternMatcher([
   (UPat(Ops.STAGE, src=(UPat((Ops.BITCAST, Ops.CONTIGUOUS), name="t"), UPat()), name="b"), late_buffer_view),
@@ -413,7 +414,11 @@ def bufferize_to_store(ctx:itertools.count, x:UOp, idx:UOp, allow_locals=True):
   # NOTE: the DEFINE_LOCAL needs to be disambiguated here
   if sdtype.addrspace == AddrSpace.GLOBAL:
     buf = UOp(Ops.BUFFER, x.dtype, (UOp(Ops.LUNIQUE, arg=next(ctx)), UOp(Ops.DEVICE, arg=x.arg.device)), size)
-    do_store = buf.index(idx, dtype=sdtype).store(x.src[0]).end(*rngs)
+    if x.src[0].op is Ops.SLICE:
+      # no INDEX on SLICE, this could be cleaner
+      do_store = buf.store(x.src[0]).end(*rngs)
+    else:
+      do_store = buf.index(idx, dtype=sdtype).store(x.src[0]).end(*rngs)
     return buf.after(do_store)
 
   if allow_locals:
