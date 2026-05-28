@@ -28,6 +28,11 @@ jobs:
         key: llvm-speed
         deps: testing_unit
         llvm: 'true'
+    - name: debug
+      run: |
+        echo "repo: ${{ github.repository }}"
+        echo "event_name: ${{ github.event_name }}"
+        echo "author_association: ${{ github.event.pull_request.author_association }}"
     - name: Speed Test
       run: DEV=CPU:LLVM THREADS=0 python3 test/speed/external_test_speed_v_torch.py
     - name: Speed Test (BEAM=2)
