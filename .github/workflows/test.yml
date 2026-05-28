@@ -17,7 +17,7 @@ on:
 jobs:
   llvmspeed:
     name: LLVM Speed
-    runs-on: namespace-profile-tinygrad
+    runs-on: &linux ${{ github.repository == 'tinygrad/tinygrad' && github.event_name == 'pull_request' && github.event.pull_request.author_association == 'MEMBER' && 'namespace-profile-tinygrad' || 'ubuntu-24.04' }}
     timeout-minutes: 20
     steps:
     - name: Checkout Code
@@ -35,7 +35,7 @@ jobs:
 
   docs:
     name: Docs
-    runs-on: namespace-profile-tinygrad
+    runs-on: *linux
     timeout-minutes: 10
     env:
       CHECK_OOB: 0
@@ -89,7 +89,7 @@ jobs:
 
   torchbackend:
     name: Torch Backend Tests
-    runs-on: namespace-profile-tinygrad
+    runs-on: *linux
     timeout-minutes: 15
     steps:
     - name: Checkout Code
@@ -125,7 +125,7 @@ jobs:
 
   torchbackendmore:
     name: Torch Backend Tests More
-    runs-on: namespace-profile-tinygrad
+    runs-on: *linux
     timeout-minutes: 15
     steps:
     - name: Checkout Code
@@ -147,7 +147,7 @@ jobs:
 
   bepython:
     name: Python Backend
-    runs-on: namespace-profile-tinygrad
+    runs-on: *linux
     timeout-minutes: 15
     steps:
     - name: Checkout Code
@@ -215,7 +215,7 @@ jobs:
 
   linter:
     name: Linters
-    runs-on: namespace-profile-tinygrad
+    runs-on: *linux
     timeout-minutes: 10
 
     steps:
@@ -246,7 +246,7 @@ jobs:
 
   nulltest:
     name: Null Tests
-    runs-on: namespace-profile-tinygrad
+    runs-on: *linux
     timeout-minutes: 15
 
     steps:
@@ -277,7 +277,7 @@ jobs:
 
   unittest:
     name: Unit Tests
-    runs-on: namespace-profile-tinygrad
+    runs-on: *linux
     timeout-minutes: 15
 
     steps:
@@ -320,7 +320,7 @@ jobs:
       matrix:
         group: [1, 2]
     name: SPEC=2 (${{ matrix.group }})
-    runs-on: namespace-profile-tinygrad
+    runs-on: *linux
     timeout-minutes: 15
     steps:
     - name: Checkout Code
@@ -337,7 +337,7 @@ jobs:
 
   fuzzing:
     name: Fuzzing
-    runs-on: namespace-profile-tinygrad
+    runs-on: *linux
     timeout-minutes: 10
     steps:
     - name: Checkout Code
@@ -358,7 +358,7 @@ jobs:
 
   testopenclimage:
     name: CL IMAGE Tests
-    runs-on: namespace-profile-tinygrad
+    runs-on: *linux
     timeout-minutes: 15
     steps:
       - name: Checkout Code
@@ -378,7 +378,7 @@ jobs:
 
   testgpumisc:
     name: CL Misc tests
-    runs-on: namespace-profile-tinygrad
+    runs-on: *linux
     timeout-minutes: 10
     steps:
       - name: Checkout Code
@@ -403,7 +403,7 @@ jobs:
 
   testopenpilot:
     name: openpilot Compile Tests
-    runs-on: namespace-profile-tinygrad
+    runs-on: *linux
     timeout-minutes: 15
     steps:
       - name: Checkout Code
@@ -433,7 +433,7 @@ jobs:
 
   testonnxcpu:
     name: ONNX (CPU) Tests
-    runs-on: namespace-profile-tinygrad
+    runs-on: *linux
     timeout-minutes: 20
 
     steps:
@@ -461,7 +461,7 @@ jobs:
 
   testopencl:
     name: ONNX (CL)+Optimization Tests
-    runs-on: namespace-profile-tinygrad
+    runs-on: *linux
     timeout-minutes: 20
     steps:
       - name: Checkout Code
@@ -495,7 +495,7 @@ jobs:
 
   testllm:
     name: Test LLM
-    runs-on: namespace-profile-tinygrad
+    runs-on: *linux
     timeout-minutes: 15
     env:
       CHECK_OOB: 0
@@ -520,7 +520,7 @@ jobs:
 
   testmodels:
     name: Models (llvm+cpu+gpu)
-    runs-on: namespace-profile-tinygrad
+    runs-on: *linux
     timeout-minutes: 15
     steps:
       - name: Checkout Code
@@ -563,7 +563,7 @@ jobs:
 
   testdsp:
     name: Linux (DSP)
-    runs-on: namespace-profile-tinygrad
+    runs-on: *linux
     timeout-minutes: 15
     steps:
     - name: Checkout Code
@@ -587,7 +587,7 @@ jobs:
 
   testwebgpu:
     name: Linux (WebGPU)
-    runs-on: namespace-profile-tinygrad
+    runs-on: *linux
     timeout-minutes: 20
     steps:
     - name: Checkout Code
@@ -612,7 +612,7 @@ jobs:
 
   testamdasm:
     name: AMD ASM IDE
-    runs-on: namespace-profile-tinygrad
+    runs-on: *linux
     timeout-minutes: 20
     env:
       DEV: MOCKKFD+AMD
@@ -659,7 +659,7 @@ jobs:
 
   testmockam:
     name: Linux (am)
-    runs-on: namespace-profile-tinygrad
+    runs-on: *linux
     timeout-minutes: 15
     env:
       DEV: MOCKPCI+AMD
@@ -695,7 +695,7 @@ jobs:
         arch: [gfx1100, gfx1201, gfx950]
 
     name: Linux (${{ matrix.backend }} ${{ matrix.arch }})
-    runs-on: namespace-profile-tinygrad
+    runs-on: *linux
     timeout-minutes: 15
     env:
       DEV: MOCKKFD+AMD:${{ matrix.backend == 'amdllvm' && 'LLVM' || '' }}:${{ matrix.arch }}
@@ -730,7 +730,7 @@ jobs:
         backend: [ptx, nv]
 
     name: Linux (${{ matrix.backend }})
-    runs-on: namespace-profile-tinygrad
+    runs-on: *linux
     timeout-minutes: 20
     env:
       FORWARD_ONLY: 1
@@ -765,7 +765,7 @@ jobs:
         backend: [llvm, cpu, opencl, lvp, x86]
 
     name: Linux (${{ matrix.backend }})
-    runs-on: namespace-profile-tinygrad
+    runs-on: *linux
     timeout-minutes: 20
     steps:
       - name: Checkout Code
@@ -964,7 +964,7 @@ jobs:
       matrix:
         backend: [ir3, nak]
     name: Compile-only (${{ matrix.backend }})
-    runs-on: namespace-profile-tinygrad
+    runs-on: *linux
     timeout-minutes: 15
     steps:
       - name: Checkout Code
@@ -996,7 +996,7 @@ jobs:
           python -m pytest -n=auto test/backend/test_ops.py --durations=20
   qcomclcompiletests:
     name: Compile-only (QCOM CL)
-    runs-on: namespace-profile-tinygrad-arm64
+    runs-on: ${{ github.repository == 'tinygrad/tinygrad' && github.event_name == 'pull_request' && github.event.pull_request.author_association == 'MEMBER' && 'namespace-profile-tinygrad-arm64' || 'ubuntu-24.04-arm' }}
     timeout-minutes: 15
     steps:
       - name: Checkout Code
