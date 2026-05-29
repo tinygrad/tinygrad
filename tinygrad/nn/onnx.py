@@ -1164,15 +1164,34 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     return ret.reshape(*x_shape[:batch_dims], *i_shape[batch_dims:-1], *ret.shape[indices.ndim-1:])
   def ScatterND(x:Tensor, indices:Tensor, updates:Tensor, reduction:Literal["none", "add", "mul", "max", "min"]='none'):
     assert updates.shape == indices.shape[:-1] + x.shape[cast(int, indices.shape[-1]):]
-    for index, u in zip(indices.split(1, 0), updates.split(1, 0)):
-      i = tuple(idx.squeeze(-1) for idx in index.squeeze(0).split(1, -1))
-      u = u.squeeze(0)
-      if reduction == "none": x[i] = u
-      elif reduction == "add": x[i] += u
-      elif reduction == "mul": x[i] *= u
-      elif reduction == "max": x[i] = x[i].maximum(u)
-      elif reduction == "min": x[i] = x[i].minimum(u)
-    return x
+    x_shape = x.shape
+    K = cast(int, indices.shape[-1])
+    if 0 in indices.shape[:-1]: return x
+    # compute flat linear indices from multi-dimensional indices
+    strides = [math.prod(x_shape[k+1:]) for k in range(K)]
+    flat_idx = functools.reduce(lambda a, b: a + b, [(indices[..., k].cast(dtypes.int64) % x_shape[k]) * strides[k] for k in range(K)])
+    # handle trailing dimensions (when K < len(x_shape))
+    trailing_shape = x_shape[K:]
+    if trailing_shape:
+      trailing_strides = [math.prod(trailing_shape[i+1:]) for i in range(len(trailing_shape))]
+      offsets = functools.reduce(lambda a, b: a + b, [
+        Tensor.arange(s, device=x.device).reshape(*([1]*flat_idx.ndim), *([1]*i), s, *([1]*(len(trailing_shape)-i-1))) * ts
+        for i, (s, ts) in enumerate(zip(trailing_shape, trailing_strides))])
+      flat_idx = (flat_idx.reshape(*flat_idx.shape, *([1]*len(trailing_shape))) + offsets).flatten()
+      updates_flat = updates.flatten()
+    else:
+      flat_idx, updates_flat = flat_idx.flatten(), updates.flatten()
+    x_flat = x.flatten()
+    N, M = prod(x_shape), flat_idx.shape[0]
+    reduce_map: dict[str, str] = {"add": "sum", "mul": "prod", "max": "amax", "min": "amin"}
+    if reduction in reduce_map:
+      return x_flat.scatter_reduce(0, flat_idx, updates_flat, cast(Literal["sum","prod","amax","amin"], reduce_map[reduction])).reshape(x_shape)
+    # reduction == "none": use priorities to find winning update index per position, then gather the value
+    priorities = Tensor.arange(M, dtype=dtypes.int64, device=x.device) + 1
+    winner = Tensor.zeros(N, dtype=dtypes.int64, device=x.device).scatter_reduce(0, flat_idx, priorities, "amax", include_self=True)
+    has_update = winner > 0
+    gathered = updates_flat[(winner - 1).maximum(0)]
+    return has_update.where(gathered, x_flat).reshape(x_shape)
 
   def TensorScatter(data: Tensor, updates: Tensor, indices: Tensor, mode: str = 'default'):
     # scatter updates along axis -2 at positions given by indices, for each batch
