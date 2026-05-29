@@ -16,8 +16,9 @@ def reduce_gradient(ctx:UOp, ret:UOp, op:Ops):
 
 def _compact_params(body:UOp, all_args:tuple[UOp, ...]) -> tuple[UOp, tuple[UOp, ...]]:
   """Remove unused PARAMs from body and return compacted (body, args)."""
-  used = sorted({p.arg: p for p in body.toposort() if p.op is Ops.PARAM}.items())
-  return body.substitute({p: p.replace(arg=j) for j,(_, p) in enumerate(used)}, walk=True), tuple(all_args[i] for i,_ in used)
+  used = sorted({p.arg.slot: p for p in body.toposort() if p.op is Ops.PARAM}.items())
+  body = body.substitute({p: p.replace(arg=dataclasses.replace(p.arg, slot=j)) for j,(_, p) in enumerate(used)}, walk=True)
+  return body, tuple(all_args[i] for i,_ in used)
 
 def call_gradient(ctx:UOp, k:UOp, needed:set[int]) -> tuple[UOp|None, ...]:
   fxn, args = k.src[0], k.src[1:]
@@ -29,7 +30,7 @@ def call_gradient(ctx:UOp, k:UOp, needed:set[int]) -> tuple[UOp|None, ...]:
       return (None,) + (k.arg.grad_fxn(*real, call=k) if len(real) > 1 else k.arg.grad_fxn(real[0], k))
     return (None,) + k.arg.grad_fxn(on_dev(ctx, 0), k)
   assert fxn.op is Ops.TUPLE, f"expected TUPLE body for gradient, got {fxn.op}"
-  params = {x.arg:x for x in fxn.toposort(enter_calls=False) if x.op == Ops.PARAM}
+  params = {x.arg.slot:x for x in fxn.toposort(enter_calls=False) if x.op == Ops.PARAM}
   grad_args = ctx.src
   root_grad = UOp(Ops.TUPLE, src=tuple(UOp(Ops.NOOP) if g.op is Ops.NOOP else
     g if g.base.op is Ops.CONST and g.device is None else g.param_like(len(args)+i) for i,g in enumerate(grad_args)))

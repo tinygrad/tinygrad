@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field, replace
 import itertools
 from tinygrad.dtype import dtypes, PtrDType, AddrSpace, Invalid
-from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, _substitute, KernelInfo
+from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, _substitute, KernelInfo, ParamArg
 from tinygrad.uop.ops import graph_rewrite, sint, AxisType, BottomUpGate, profile_matches, identity_element
 from tinygrad.uop.symbolic import symbolic
 from tinygrad.helpers import prod, all_same, getenv, dedup, all_int, DEBUG, SPLIT_REDUCEOP, DEBUG_RANGEIFY, VIZ, MAX_KERNEL_BUFFERS
@@ -130,15 +130,15 @@ def resolve_function(c:UOp, allow_param_mismatch=True) -> UOp|None:
   if c.arg.precompile: return None
   params: list[UOp] = []
   graph_rewrite(c.src[0], pm_gather_params, bottom_up=True, ctx=params, name="gather params")
-  params = sorted(params, key=lambda x: x.arg)
+  params = sorted(params, key=lambda x: x.arg.slot)
   args = c.src[1:]
 
   # NOTE: this isn't really needed. it's okay if there's unused args in the function
   if not allow_param_mismatch:
-    if [x.arg for x in params] != list(range(len(params))): raise RuntimeError(f"params not in order: {[x.arg for x in params]}")
+    if [x.arg.slot for x in params] != list(range(len(params))): raise RuntimeError(f"params not in order: {[x.arg.slot for x in params]}")
     if len(params) != len(args): raise TypeError(f"expected {len(params)} args, got {len(args)}")
 
-  dict_map = {x:args[x.arg] for x in params}
+  dict_map = {x:args[x.arg.slot] for x in params}
   for i, (p, a) in enumerate(dict_map.items()):
     if p.axis != a.axis: raise TypeError(f"arg {i} axis mismatch: expected {p.axis}, got {a.axis}")
     if p.max_shape != a.max_shape: raise TypeError(f"arg {i} shape mismatch: expected {p.shape}, got {a.shape}")
@@ -477,7 +477,7 @@ class LocalAddBufferContext:
   opts:tuple|None = None
 
 def debuf(ctx:LocalAddBufferContext, buf:UOp):
-  ret = UOp(Ops.PARAM, buf.dtype.ptr(prod(buf.max_shape)), arg=ctx.dg).reshape(buf.max_shape)
+  ret = UOp(Ops.PARAM, buf.dtype.ptr(prod(buf.max_shape), buf.addrspace), arg=ParamArg(ctx.dg, addrspace=buf.addrspace)).reshape(buf.max_shape)
   # if the buffer has symbolic shape, shrink the max-sized view to the actual shape
   if buf.max_shape != buf.shape: ret = ret.shrink(tuple((0, s) for s in buf.shape))
   if buf not in ctx.map: ctx.map[buf] = buf
@@ -512,9 +512,11 @@ def find_bufs(x:UOp):
 to_define_global = PatternMatcher([
   (UPat(Ops.STORE, name="x"), find_bufs),
   (UPat(Ops.BUFFER, name="buf"), debuf),
-  (UPat(Ops.PARAM, src=(UPat(), UPat(Ops.DEVICE)), name="buf"), debuf),
-  (UPat(Ops.PARAM, src=(UPat(), UPat(), UPat.cvar('vmin'), UPat.cvar('vmax'), UPat.var("nm")), name="v"),
-   lambda v, vmin, vmax, nm: UOp.variable(nm.arg, vmin.arg, vmax.arg, v.dtype)),
+  (UPat(Ops.PARAM, name="v"), lambda v:
+   UOp.variable(v.arg.name, v.arg.vmin_vmax[0], v.arg.vmin_vmax[1], v.dtype)
+   if v.arg.name is not None and v.arg.vmin_vmax is not None else None),
+  (UPat(Ops.PARAM, name="buf"), lambda ctx, buf:
+   None if isinstance(buf.dtype, PtrDType) or buf.arg.name is not None or buf._shape is None else debuf(ctx, buf)),
   (UPat(Ops.INDEX, src=(UPat(Ops.DEFINE_VAR, name="v"),)), lambda v: v),
 
   (UPat(Ops.BIND, name="b"), unbind_kernel),

@@ -1,6 +1,6 @@
 import math
 from typing import cast, Any
-from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, AxisType, KernelInfo
+from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, AxisType, KernelInfo, ParamArg
 from tinygrad.uop.render import print_uops, pyrender
 from tinygrad.dtype import DType, ImageDType, dtypes, PtrDType, AddrSpace, Invalid, ConstFloat
 from tinygrad.helpers import DEBUG, Context, prod, SPEC, Metadata, panic, CHECK_OOB
@@ -71,7 +71,8 @@ spec_shared = PatternMatcher([
   (UPat(Ops.END, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(u.op is Ops.RANGE for u in x.src[1:])),
 
   # PARAM (that's really a DEFINE_GLOBAL)
-  (UPat(Ops.PARAM, name="x"), lambda x: isinstance(x.dtype, (PtrDType, ImageDType)) and x.dtype.addrspace == AddrSpace.GLOBAL),
+  (UPat(Ops.PARAM, name="x"), lambda x: isinstance(x.arg, ParamArg) and isinstance(x.dtype, (PtrDType, ImageDType)) and
+   x.addrspace == x.dtype.addrspace),
 
   # GROUP of stores (or groups, or NOOPs)
   # TODO: remove UNROLL here, it's for SPEC=2
@@ -130,9 +131,6 @@ spec_tensor = PatternMatcher([
   (UPat(Ops.BUFFER, src=(UPat((Ops.UNIQUE, Ops.LUNIQUE)), UPat(Ops.DEVICE)), name="buf"),
    lambda buf: isinstance(buf.arg, int) and isinstance(buf.dtype, DType)),
 
-  # PARAM (that's really a variable)
-  (UPat(Ops.PARAM, src=(UPat(), UPat(), UPat(), UPat(), UPat()), name="x"), lambda x: True),
-
   # Tensor variable bindings
   (UPat(Ops.BIND, (dtypes.int, dtypes.weakint,), (UPat(Ops.DEFINE_VAR), UPat.cvar(dtype=(dtypes.int,dtypes.weakint,))), arg=None), lambda: True),
 
@@ -148,9 +146,7 @@ spec_tensor = PatternMatcher([
   (UPat(Ops.GETTUPLE, src=(UPat((Ops.FUNCTION, Ops.TUPLE)),), name="g"), lambda g: isinstance(g.arg, int)),
 
   # PARAM
-  (UPat(Ops.PARAM, src=(UPat(), UPat(Ops.NOOP)), name="x"), lambda x: True),  # TODO: why does this have NOOP?
-  (UPat(Ops.PARAM, src=(UPat(), UPat(Ops.DEVICE)), name="x"), lambda x: True),
-  (UPat(Ops.PARAM, src=(UPat(), UPat(Ops.DEVICE), UPat(Ops.MULTI)), name="x"), lambda x: True),
+  (UPat(Ops.PARAM, src=(UPat(),), name="x"), lambda x: isinstance(x.arg, ParamArg)),
 
   # inputs to movement ops
   (UPat(Ops.STACK), lambda: True),
@@ -264,7 +260,7 @@ from tinygrad.schedule.rangeify import BufferizeOpts
 glbls:dict[str, Any] = {"inf": math.inf, "nan": math.nan, "KernelInfo": KernelInfo, "Metadata": Metadata,
                         "UOp": UOp, "dtypes": dtypes, "Ops": Ops, "AxisType": AxisType, "Invalid": Invalid,
                         "Opt": Opt, "OptOps": OptOps, "BufferizeOpts": BufferizeOpts, "AddrSpace": AddrSpace, "panic": panic,
-                        "ConstFloat": ConstFloat}
+                        "ConstFloat": ConstFloat, "ParamArg": ParamArg}
 def eval_pyrender(code:str) -> UOp:
   lcls:dict[str, Any] = {}
   exec(code, glbls, lcls)
