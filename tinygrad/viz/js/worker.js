@@ -45,7 +45,7 @@ const layoutUOp = (g, { graph, change }, opts) => {
   const lineHeight = 14;
   g.setGraph({ rankdir: "LR", font:"sans-serif", lh:lineHeight });
   ctx.font = `350 ${lineHeight}px ${g.graph().font}`;
-  if (change?.length) g.setNode("overlay", {label:"", labelWidth:0, labelHeight:0, className:"overlay"});
+  if (change?.length) g.setNode("overlay", {label:"", labelWidth:0, labelHeight:0, labelX:0, className:"overlay"});
   let callCount = 0;
   for (const [k, {label, src, ref, color, tag, exclude, addrspace}] of Object.entries(graph)) {
     // adjust node dims by label size (excluding escape codes) + add padding
