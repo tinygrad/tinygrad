@@ -912,7 +912,7 @@ jobs:
           - 'CPU:X86'
           - 'WEBGPU'
 
-    name: Windows (DEV=${{ matrix.backend }})
+    name: Windows (DEV=${{ matrix.dev }})
     runs-on: windows-latest
     timeout-minutes: 15
     steps:
@@ -921,10 +921,11 @@ jobs:
       - name: Setup Environment
         uses: ./.github/actions/setup-tinygrad
         with:
-          key: windows-${{ matrix.backend }}-minimal
+          key: windows-${{ matrix.dev }}-minimal
           deps: testing_unit
           pydeps: ${{ matrix.dev == 'WEBGPU' && 'dawn-python' || '' }}
       - name: Set env
+        shell: bash
         run: printf "DEV=${{ matrix.dev }}${{ matrix.dev == 'CPU:CLANGJIT' && '\nCPU_COUNT=2' || '' }}" >> $GITHUB_ENV
       - name: Check Device.DEFAULT and print some source
         shell: bash
