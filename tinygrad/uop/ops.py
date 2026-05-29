@@ -751,18 +751,22 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     for x in self.src:
       if x.device is not None: return x.device
     return None
-  @property
-  def addrspace(self) -> AddrSpace:
+  @recursive_property
+  def addrspace(self) -> AddrSpace|None:
     if self.op is Ops.PARAM: return self.arg.addrspace
     if self.op is Ops.BUFFER: return AddrSpace.GLOBAL
     if self.op is Ops.DEFINE_LOCAL: return AddrSpace.LOCAL
     if self.op is Ops.DEFINE_REG: return AddrSpace.REG
-    if self.op is Ops.STACK:
-      assert all_same([x.addrspace for x in self.src]), "addrspace mismatch"
+    # LOAD brings things into registers
+    if self.op is Ops.LOAD: return AddrSpace.REG
+    if self.op in {Ops.INDEX, Ops.CAST, Ops.AFTER, Ops.REDUCE, Ops.GEP}:
       return self.src[0].addrspace
-    if self.op in {Ops.INDEX, Ops.CAST, Ops.AFTER}: return self.src[0].addrspace
     if self.op in GroupOp.Movement: return self.src[0].addrspace
-    raise Exception(f"{self.op} doesn't have addrspace")
+    if self.op is Ops.STACK or self.op in GroupOp.Elementwise:
+      ad = [x.addrspace for x in self.src if x.addrspace is not None]
+      assert all_same(ad), f"addrspace mismatch in {self.op} -- {ad}"
+      return ad[0] if len(ad) else None
+    return None
   @property
   def buf_uop(self) -> UOp:
     if self.op in {Ops.BUFFER, Ops.PARAM}: return self
