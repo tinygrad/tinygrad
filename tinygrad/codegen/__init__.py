@@ -3,7 +3,7 @@ from dataclasses import replace
 import itertools
 from tinygrad.helpers import DISABLE_FAST_IDIV, TRANSCENDENTAL, SPEC, DEBUG, VIZ, IMAGE, NOOPT, EMULATED_DTYPES, NOLOCALS, USE_TC
 from tinygrad.helpers import ALLOW_TF32, TracingKey, Context, panic
-from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, pm_lower_index_dtype, Ops, UPat, track_rewrites, KernelInfo, ProgramInfo
+from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, pm_lower_index_dtype, Ops, UPat, track_rewrites, KernelInfo, ProgramInfo, GroupOp
 from tinygrad.uop.render import pyrender
 from tinygrad.uop.spec import type_verify, spec_tensor, spec_program
 from tinygrad.renderer import Renderer, Estimates
@@ -32,8 +32,10 @@ pm_index_is_shrink = PatternMatcher([
         src=(buf.replace(src=(UOp.const(dtypes.int, buf.ptrdtype.size),),
                          dtype=buf.dtype.base), idx, UOp.const(dtypes.int, 1)))),
   # rewrite CAST on SHRINK to just SHRINK
-  #(UPat(Ops.SHRINK, name="bv").cast(name="x"),
-  # lambda bv,x: bv.replace(dtype=x.dtype, src=(bv.src[0], bv.src[1], UOp.const(dtypes.int, x.dtype.count)))),
+  (UPat(Ops.SHRINK, name="bv").cast(name="x"),
+   lambda bv,x: bv.replace(src=(bv.src[0], bv.src[1], UOp.const(dtypes.int, x.dtype.count)))),
+  # remove all vec dtypes
+  (UPat(GroupOp.All, name="x"), lambda x: x.replace(dtype=x.dtype.scalar())),
 ])
 
 def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
