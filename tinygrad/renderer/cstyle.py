@@ -11,7 +11,7 @@ from tinygrad.codegen.late.devectorizer import no_vectorized_alu
 def render_index(ctx,buf,idx):
   if buf.addrspace == AddrSpace.REG:
     assert idx.op is Ops.CONST
-    return ctx[buf] + (f"[{idx.arg}]" if buf.max_numel() > ctx.gep_arr_threshold else f".{'xyzwabcd'[idx.arg]}")
+    return f"{ctx[buf]}[{idx.arg}]"
   else:
     return f"({ctx[buf]}+{strip_parens(ctx[idx]) if idx.arg == Ops.ADD else ctx[idx]})"
 
@@ -158,6 +158,7 @@ class CStyleLanguage(Renderer):
   def render_cast(self, dt:DType, val: str) -> str: return f"({self.render_dtype(dt)})({val})"
   def render_dtype_with_shape(self, u:UOp) -> DType: return dtype_with_shape(u.dtype, u.shape)
   def render_access(self, bidx:UOp, dtype:DType) -> str:
+    if bidx.addrspace == AddrSpace.REG: return self[bidx]
     return f"(*(({self.render_dtype(dtype)}*)({self[bidx]})))" if dtype.count > 1 else f"(*{self[bidx]})"
   def render_dtype(self, dt:DType, mutable=True) -> str:
     if isinstance(dt, ImageDType): return f"{'write_only' if mutable else 'read_only'} image2d_t"
@@ -219,7 +220,7 @@ class CStyleLanguage(Renderer):
         (u.op in {Ops.STACK, *(GroupOp.ALU-{Ops.WHERE}), Ops.CAST, Ops.BITCAST} and child_count[u] == 1 and not getenv("EXPAND_SSA"))):
         r[u] = l
       else:
-        if u.op is Ops.SHRINK: u_dtype = u.src[0].dtype
+        if u.op is Ops.SHRINK or u._shape == None: u_dtype = u.src[0].dtype
         else: u_dtype = self.render_dtype_with_shape(u)
         if u.op not in {Ops.RANGE, Ops.DEFINE_LOCAL, Ops.STORE, Ops.DEFINE_REG} and u.dtype != dtypes.void:
           l = f"{self.render_dtype(u_dtype)} {r[u]} = {l}" + (";" if u.op is not Ops.SPECIAL else "")
