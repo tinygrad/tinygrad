@@ -351,7 +351,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
           return ps
         case Ops.MULTI: return tuple(s*len(self.device) if a == self.axis else s for a,s in enumerate(ps))
         case Ops.REDUCE:
-          axis_arg = self.arg[1] if self.op is Ops.REDUCE else self.arg[7]
+          axis_arg = self.arg[1]
           if not isinstance(axis_arg, tuple) or not all(isinstance(x, int) and x>=0 and x<len(ps) for x in axis_arg):
             raise ValueError(f"invalid type for axis: {axis_arg}")
           return tuple(1 if i in axis_arg else s for i,s in enumerate(ps))
@@ -566,7 +566,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   @staticmethod
   def invalid(count=1): return UOp(Ops.CONST, dtypes.weakint.vec(count), src=(), arg=Invalid)
   def valid(self, cond):
-    return self if cond.op is Ops.WHERE and cond.arg else cond.where(self.cast(dtypes.weakint), UOp.invalid(self.dtype.count))
+    return cond.where(self.cast(dtypes.weakint), UOp.invalid(self.dtype.count))
   def get_idx(self) -> UOp:
     assert self.dtype.scalar() is dtypes.weakint, "Can only call get_idx on index dtype"
     return self.src[1] if self.op is Ops.WHERE and self.src[2].arg is Invalid else self
@@ -755,18 +755,22 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     for x in self.src:
       if x.device is not None: return x.device
     return None
-  @property
-  def addrspace(self) -> AddrSpace:
+  @recursive_property
+  def addrspace(self) -> AddrSpace|None:
     if self.op is Ops.PARAM: return self.arg.addrspace
     if self.op is Ops.BUFFER: return AddrSpace.GLOBAL
     if self.op is Ops.DEFINE_LOCAL: return AddrSpace.LOCAL
     if self.op is Ops.DEFINE_REG: return AddrSpace.REG
-    if self.op is Ops.STACK:
-      assert all_same([x.addrspace for x in self.src]), "addrspace mismatch"
+    # LOAD brings things into registers
+    if self.op is Ops.LOAD: return AddrSpace.REG
+    if self.op in {Ops.INDEX, Ops.CAST, Ops.AFTER, Ops.REDUCE, Ops.GEP}:
       return self.src[0].addrspace
-    if self.op in {Ops.INDEX, Ops.CAST, Ops.AFTER}: return self.src[0].addrspace
     if self.op in GroupOp.Movement: return self.src[0].addrspace
-    raise Exception(f"{self.op} doesn't have addrspace")
+    if self.op is Ops.STACK or self.op in GroupOp.Elementwise:
+      ad = [x.addrspace for x in self.src if x.addrspace is not None]
+      assert all_same(ad), f"addrspace mismatch in {self.op} -- {ad}"
+      return ad[0] if len(ad) else None
+    return None
   @property
   def buf_uop(self) -> UOp:
     if self.op in {Ops.BUFFER, Ops.PARAM}: return self
@@ -1236,8 +1240,7 @@ class UPat(OpMixin):
   def var(name:str|None=None, dtype:DType|tuple[DType, ...]|None=None): return UPat(dtype=dtype, name=name)
   @staticmethod
   @functools.cache
-  def cvar(name:str|None=None, dtype:DType|tuple[DType, ...]|None=None, vec=True, arg=None):
-    return UPat(Ops.CONST, dtype, name=name, arg=arg)
+  def cvar(name:str|None=None, dtype:DType|tuple[DType, ...]|None=None, arg=None): return UPat(Ops.CONST, dtype, name=name, arg=arg)
   @staticmethod
   def const(dtype:DType|tuple[DType, ...]|None, b:ConstType, device=None): return UPat(Ops.CONST, dtype=dtype, arg=b)
 
