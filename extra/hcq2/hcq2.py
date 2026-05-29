@@ -17,13 +17,17 @@ from tinygrad.engine.realize import to_program, track_stats, get_call_arg_uops, 
 HCQDeviceType = TypeVar('HCQDeviceType', bound='HCQ2Compiled')
 
 class HCQ2Compiled(Compiled):
-  """
-  A base class for devices compatible with the HCQ (Hardware Command Queue) API.
-  """
-  timestamp_divider: float = 1000.0  # GPU timestamp counter ticks per microsecond; override per device
+  timestamp_divider: float = 1000.0 # GPU timestamp counter ticks per microsecond; override per device
 
   def __init__(self, device:str, allocator:'HCQAllocator', compilers:list[type[Renderer]], runtime, can_recover:bool=False, arch=None):
     self.device_id:int = int(device.split(":")[1]) if ":" in device else 0
+
+    # default pm bufferize
+    self.pm_bufferize = PatternMatcher([
+      (UPat(Ops.BUFFER, tag="timeline_signal"), lambda ctx: ctx.timeline_signal),
+      (UPat(Ops.BUFFER, tag="timeline_value"), lambda ctx: ctx.timeline_value),
+      (UPat(Ops.BUFFER, name="b"), lambda ctx, b: Buffer(ctx.device, b.arg, b.dtype, options=BufferSpec(host=True, uncached=True, cpu_access=True))),
+    ])
 
     super().__init__(device, allocator, compilers, lambda *a, **kw: None, None, arch=arch)
 
@@ -41,14 +45,6 @@ class HCQ2Compiled(Compiled):
     buf.as_memoryview(force_zero_copy=True).cast('Q')[0] = 1
     return buf
 
-  @functools.cached_property
-  def pm_bufferize(self) -> PatternMatcher:
-    return PatternMatcher([
-      (UPat(Ops.BUFFER, tag="timeline_signal"), lambda ctx: ctx.timeline_signal),
-      (UPat(Ops.BUFFER, tag="timeline_value"), lambda ctx: ctx.timeline_value),
-      (UPat(Ops.BUFFER, name="b"), lambda ctx, b: Buffer(ctx.device, b.arg, b.dtype, options=BufferSpec(host=True, uncached=True, cpu_access=True))),
-    ])
-
   def synchronize(self, timeout:int|None=None):
     if not hasattr(self, 'iface'): return
     sig = self.timeline_signal._buf.cpu_view().mv.cast('Q')
@@ -58,14 +54,6 @@ class HCQ2Compiled(Compiled):
       if time.perf_counter() - st > (timeout or 3000) / 1000: self.on_device_hang()
 
   def device_props(self) -> dict[str,Any]: return {} # to be overridden if needed. dict keys are backend dependent.
-
-  def _realloc(self, oldbuf:HCQ2Buffer|None, new_size:int, options:BufferSpec|None=None, force=False) -> tuple[HCQ2Buffer, bool]:
-    if oldbuf is not None: self.allocator.free(oldbuf, oldbuf.size, options=options)
-    try: buf, realloced = self.allocator.alloc(new_size, options=options), True
-    except MemoryError:
-      if force: raise
-      buf, realloced = self.allocator.alloc(oldbuf.size if oldbuf is not None else new_size, options=options), False
-    return buf, realloced
 
   def count(self) -> int: return self.iface.count if hasattr(self, 'iface') else 1
 

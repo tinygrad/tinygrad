@@ -1059,9 +1059,9 @@ class TestSchedule(unittest.TestCase):
     self.assertEqual(b.tolist(), [False, False])
 
   def test_mnist_val(self):
-    from tinygrad.nn.datasets import mnist
+    # from tinygrad.nn.datasets import mnist
     import torch
-    _, Y_train, _, _ = mnist()
+    Y_train = Tensor.randint(60000, dtype='uchar').realize()
     samples = Tensor.randint(BS:=getenv("BS", 512), high=cast(int,Y_train.shape[-1])).realize()
     yt = Tensor.randn(BS, 10).realize()
     loss = yt.sparse_categorical_crossentropy(Y_train[samples])
