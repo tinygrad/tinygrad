@@ -28,8 +28,8 @@ class TestDevice(unittest.TestCase):
   def test_nonexistent_renderer(self):
     with self.assertRaisesRegex(RuntimeError, "has no renderer"):
       with Context(DEV="CPU:TYPO"): Device[Device.DEFAULT].renderer
-    with self.assertRaisesRegex(RuntimeError, "did you mean: 'CLANGJIT'"):
-      with Context(DEV="CPU:CLANG"): Device[Device.DEFAULT].renderer
+    with self.assertRaisesRegex(RuntimeError, "did you mean: 'CLANG'"):
+      with Context(DEV="CPU:CLANGJIT"): Device[Device.DEFAULT].renderer
 
   @unittest.skipIf(Device.DEFAULT != "AMD", "only run on AMD")
   def test_nonexistent_iface(self):
@@ -69,17 +69,17 @@ class TestDevice(unittest.TestCase):
   @unittest.skipIf(WIN, "skipping windows test") # TODO: subprocess causes memory violation?
   def test_env_overwrite_default_compiler(self):
     if Device.DEFAULT == "CPU":
-      from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler, ClangJITCompiler
-      try: _, _ = CPULLVMCompiler(), ClangJITCompiler()
+      from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler, ClangCompiler
+      try: _, _ = CPULLVMCompiler(), ClangCompiler()
       except Exception as e: self.skipTest(f"skipping compiler test: not all compilers: {e}")
 
-      imports = "from tinygrad import Device; from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler, ClangJITCompiler"
+      imports = "from tinygrad import Device; from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler, ClangCompiler"
       subprocess.run([f'python3 -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, CPULLVMCompiler)"'],
                         shell=True, check=True, env={**os.environ, "DEV": "CPU:LLVM"})
-      subprocess.run([f'python3 -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, ClangJITCompiler)"'],
+      subprocess.run([f'python3 -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, ClangCompiler)"'],
                         shell=True, check=True, env={**os.environ, "DEV": "CPU"})
-      subprocess.run([f'python3 -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, ClangJITCompiler)"'],
-                        shell=True, check=True, env={**os.environ, "DEV": "CPU:CLANGJIT"})
+      subprocess.run([f'python3 -c "{imports}; assert isinstance(Device[Device.DEFAULT].compiler, ClangCompiler)"'],
+                        shell=True, check=True, env={**os.environ, "DEV": "CPU:CLANG"})
     elif Device.DEFAULT == "AMD":
       from tinygrad.runtime.support.compiler_amd import HIPCompiler, AMDLLVMCompiler
       try: _, _ = HIPCompiler(Device[Device.DEFAULT].arch), AMDLLVMCompiler(Device[Device.DEFAULT].arch)
@@ -96,15 +96,15 @@ class TestDevice(unittest.TestCase):
 
   @unittest.skipIf(WIN, "skipping windows test")
   def test_env_online(self):
-    from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler, ClangJITCompiler
-    try: _, _ = CPULLVMCompiler(), ClangJITCompiler()
+    from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler, ClangCompiler
+    try: _, _ = CPULLVMCompiler(), ClangCompiler()
     except Exception as e: self.skipTest(f"skipping compiler test: not all compilers: {e}")
 
     with Context(DEV="CPU:LLVM"):
       inst = Device["CPU"].compiler
       self.assertIsInstance(Device["CPU"].compiler, CPULLVMCompiler)
     with Context(DEV="CPU"):
-      self.assertIsInstance(Device["CPU"].compiler, ClangJITCompiler)
+      self.assertIsInstance(Device["CPU"].compiler, ClangCompiler)
     with Context(DEV="CPU:LLVM"):
       self.assertIsInstance(Device["CPU"].compiler, CPULLVMCompiler)
       assert inst is Device["CPU"].compiler  # cached
@@ -118,7 +118,7 @@ class TestDevice(unittest.TestCase):
 
     dev = Device["CPU"]
     dev.cached_renderer.clear()
-    with patch("tinygrad.renderer.cstyle.ClangJITRenderer.__init__", side_effect=RuntimeError("broken")):
+    with patch("tinygrad.renderer.cstyle.ClangRenderer.__init__", side_effect=RuntimeError("broken")):
       self.assertIsInstance(dev.renderer.compiler, CPULLVMCompiler)
 
   def test_dev_contextvar(self):
