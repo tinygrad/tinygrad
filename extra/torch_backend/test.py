@@ -241,8 +241,8 @@ class TestTorchBackend(unittest.TestCase):
 
   def test_mnist_index(self):
     GlobalCounters.reset()
-    from tinygrad.nn.datasets import mnist
-    X_train, Y_train, _, _ = mnist()
+    # from tinygrad.nn.datasets import mnist
+    X_train, Y_train = Tensor.randint(60000, 1, 28, 28, dtype='uchar').realize(), Tensor.randint(60000, dtype='uchar').realize()
     X_train = torch.tensor(X_train.float().numpy(), device=device)
     Y_train = torch.tensor(Y_train.cast('int64').numpy(), device=device)
     samples = torch.randint(0, X_train.shape[0], (32,))
