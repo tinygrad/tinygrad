@@ -1164,7 +1164,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     return ret.reshape(*x_shape[:batch_dims], *i_shape[batch_dims:-1], *ret.shape[indices.ndim-1:])
   def ScatterND(x:Tensor, indices:Tensor, updates:Tensor, reduction:Literal["none", "add", "mul", "max", "min"]='none'):
     assert updates.shape == indices.shape[:-1] + x.shape[cast(int, indices.shape[-1]):]
-    x_shape = x.shape
+    x_shape = tuple(cast(int, s) for s in x.shape)
     K = cast(int, indices.shape[-1])
     if 0 in indices.shape[:-1]: return x
     # compute flat linear indices from multi-dimensional indices
