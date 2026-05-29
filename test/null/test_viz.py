@@ -1004,8 +1004,9 @@ class TestCLI(unittest.TestCase):
   def test_dedup(self):
     with save_viz() as viz:
       for _ in range(CNT:=4):
-        Tensor.empty(4, device="NULL").add(1).realize()
-        Tensor.empty(8, device="NULL").add(1).realize()
+        # use kernel names unique to this test
+        Tensor.custom_kernel(Tensor.empty(4, device="NULL"), fxn=lambda _: UOp.sink(arg=KernelInfo("k1_test_viz_dedup")))[0].realize()
+        Tensor.custom_kernel(Tensor.empty(8, device="NULL"), fxn=lambda _: UOp.sink(arg=KernelInfo("k2_test_viz_dedup")))[0].realize()
     with write_files(viz) as files, Context(NO_COLOR=1):
       name = run_cli(*files, "-s", "NULL")[0]["name"]
       with Context(DEBUG=3):
