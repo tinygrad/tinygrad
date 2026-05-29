@@ -70,9 +70,8 @@ spec_shared = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(dtypes.is_int(y.dtype) for y in x.src[1:]) or None),
   (UPat(Ops.END, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(u.op is Ops.RANGE for u in x.src[1:])),
 
-  # PARAM (that's really a DEFINE_GLOBAL)
-  (UPat(Ops.PARAM, name="x"), lambda x: isinstance(x.arg, ParamArg) and isinstance(x.dtype, (PtrDType, ImageDType)) and
-   x.addrspace == x.dtype.addrspace),
+  # PARAM
+  (UPat(Ops.PARAM, name="x"), lambda x: isinstance(x.arg, ParamArg)),
 
   # GROUP of stores (or groups, or NOOPs)
   # TODO: remove UNROLL here, it's for SPEC=2
@@ -100,11 +99,11 @@ spec_shared = PatternMatcher([
   (UPat(Ops.INS), lambda: True),
 
   # LOAD(idx) / STORE(idx, val) with gates on the LOAD/STORE
-  (UPat(Ops.INDEX, name="uidx").or_casted().load(), validate_index),
-  (UPat(Ops.INDEX, name="uidx").or_casted().load(UPat.var("alt"), UPat.var("gate", dtype=dtypes.bool), name="load"),
+  (UPat((Ops.INDEX, Ops.SHRINK), name="uidx").or_casted().load(), validate_index),
+  (UPat((Ops.INDEX, Ops.SHRINK), name="uidx").or_casted().load(UPat.var("alt"), UPat.var("gate", dtype=dtypes.bool), name="load"),
    lambda uidx,gate,alt,load: validate_index(uidx, gate) if alt.dtype == load.dtype else False),
-  (UPat(Ops.INDEX, name="uidx").or_casted().store(UPat()), validate_index),
-  (UPat(Ops.INDEX, name="uidx").or_casted().store(UPat(), UPat.var("gate", dtype=dtypes.bool)), validate_index),
+  (UPat((Ops.INDEX, Ops.SHRINK), name="uidx").or_casted().store(UPat()), validate_index),
+  (UPat((Ops.INDEX, Ops.SHRINK), name="uidx").or_casted().store(UPat(), UPat.var("gate", dtype=dtypes.bool)), validate_index),
 
   # STORE in tensor graph: store a value into a target
   (UPat(Ops.STORE, dtypes.void, (UPat(name="x"), UPat())), lambda x: True),
@@ -144,9 +143,6 @@ spec_tensor = PatternMatcher([
   (UPat(Ops.FUNCTION, dtypes.void, src=(UPat(Ops.TUPLE),), allow_any_len=True), lambda: True),
   (UPat(Ops.TUPLE, dtypes.void), lambda: True),
   (UPat(Ops.GETTUPLE, src=(UPat((Ops.FUNCTION, Ops.TUPLE)),), name="g"), lambda g: isinstance(g.arg, int)),
-
-  # PARAM
-  (UPat(Ops.PARAM, src=(UPat(),), name="x"), lambda x: isinstance(x.arg, ParamArg)),
 
   # inputs to movement ops
   (UPat(Ops.STACK), lambda: True),
@@ -197,6 +193,9 @@ spec_tensor = PatternMatcher([
 spec_program = PatternMatcher([
   # weakint is not allowed in programs
   (UPat(GroupOp.All, dtypes.weakint), lambda: False),
+
+  # allow special SHRINK
+  (UPat(Ops.SHRINK, src=(UPat(Ops.PARAM), UPat(), UPat(Ops.CONST))), lambda: True),
 
   # movement ops are not allowed in programs
   (UPat(GroupOp.Movement), lambda: False),

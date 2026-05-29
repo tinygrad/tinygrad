@@ -181,7 +181,8 @@ class CStyleLanguage(Renderer):
         if u.op is not Ops.PARAM: r[u] = u.arg[0]
         elif isinstance(u.dtype, ImageDType): r[u] = f"data{u.arg.slot}_{u.dtype.shape[0]}x{u.dtype.shape[1]}"
         else: r[u] = f"data{u.arg.slot}_{sz}" if (sz:=u.max_numel()) > 0 else f"data{u.arg.slot}"
-        bufs[u] = (r[u], (u.dtype, u in writable_params))
+        bufs[u] = (r[u], ((u.dtype if isinstance(u.dtype, (ImageDType, PtrDType)) else u.dtype.ptr(u.max_numel(), u.addrspace))
+                          if u.op is Ops.PARAM else u.dtype, u in writable_params))
         continue
 
       # naming
