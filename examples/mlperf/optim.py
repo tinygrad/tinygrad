@@ -47,12 +47,21 @@ class GradAccClipAdamW(Optimizer):
     else:
       updates, extra = self._step([], grads)
     for i, tt in enumerate(self.params): tt.assign(self._apply_update(tt, updates[i], self.master_params[i] if self.master_params else None))
-    # collect inv_scale tensors attached to fp8 params (set by _apply_update)
-    fp8_inv_scales = [tt._inv_scale for tt in self.params if hasattr(tt, '_inv_scale')]
-    fp8_next_inv_scales = [tt._next_inv_scale for tt in self.params if hasattr(tt, '_next_inv_scale')]
-    to_realize = extra+self.params+self.buffers+(self.master_params or [])+fp8_inv_scales+fp8_next_inv_scales
 
-    Tensor.realize(*to_realize)
+    offloaded = not self.fused and self.device is not None and any(self.device != p.device for p in self.params)
+    if offloaded:
+      Tensor.realize(*extra, *self.buffers)
+      for i, tt in enumerate(self.params):
+        to_realize = [tt, self.m[i], self.v[i]]
+        if hasattr(tt, '_inv_scale'): to_realize.append(tt._inv_scale)
+        if hasattr(tt, '_next_inv_scale'): to_realize.append(tt._next_inv_scale)
+        if self.master_params: to_realize.append(self.master_params[i])
+        Tensor.realize(*to_realize)
+    else:
+      # collect inv_scale tensors attached to fp8 params (set by _apply_update)
+      fp8_inv_scales = [tt._inv_scale for tt in self.params if hasattr(tt, '_inv_scale')]
+      fp8_next_inv_scales = [tt._next_inv_scale for tt in self.params if hasattr(tt, '_next_inv_scale')]
+      Tensor.realize(*(extra+self.params+self.buffers+(self.master_params or [])+fp8_inv_scales+fp8_next_inv_scales))
     return extra[-1]
 
   def _step(self, params:list[Tensor], grads:list[Tensor]) -> tuple[list[Tensor], list[Tensor]]:
