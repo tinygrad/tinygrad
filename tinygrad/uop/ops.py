@@ -351,7 +351,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
           return ps
         case Ops.MULTI: return tuple(s*len(self.device) if a == self.axis else s for a,s in enumerate(ps))
         case Ops.REDUCE:
-          axis_arg = self.arg[1] if self.op is Ops.REDUCE else self.arg[7]
+          axis_arg = self.arg[1]
           if not isinstance(axis_arg, tuple) or not all(isinstance(x, int) and x>=0 and x<len(ps) for x in axis_arg):
             raise ValueError(f"invalid type for axis: {axis_arg}")
           return tuple(1 if i in axis_arg else s for i,s in enumerate(ps))
@@ -566,7 +566,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   @staticmethod
   def invalid(count=1): return UOp(Ops.CONST, dtypes.weakint.vec(count), src=(), arg=Invalid)
   def valid(self, cond):
-    return self if cond.op is Ops.WHERE and cond.arg else cond.where(self.cast(dtypes.weakint), UOp.invalid(self.dtype.count))
+    return cond.where(self.cast(dtypes.weakint), UOp.invalid(self.dtype.count))
   def get_idx(self) -> UOp:
     assert self.dtype.scalar() is dtypes.weakint, "Can only call get_idx on index dtype"
     return self.src[1] if self.op is Ops.WHERE and self.src[2].arg is Invalid else self
