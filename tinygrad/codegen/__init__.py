@@ -8,7 +8,7 @@ from tinygrad.uop.render import pyrender
 from tinygrad.uop.spec import type_verify, spec_tensor, spec_program
 from tinygrad.renderer import Renderer, Estimates
 from tinygrad.renderer.isa import ISARenderer, IselContext, PreRegAllocContext
-from tinygrad.dtype import dtypes
+from tinygrad.dtype import dtypes, PtrDType
 
 # import all pattern matchers here
 from tinygrad.codegen.gpudims import pm_add_gpudims
@@ -26,16 +26,14 @@ from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regallo
 
 # NOTE: this is temporary until we fix the devectorizer
 pm_index_is_shrink = PatternMatcher([
+  # rewrite PARAM to non pointer
+  (UPat(Ops.PARAM, name="buf"), lambda buf:
+   buf.replace(dtype=buf.dtype.base, src=(UOp.const(dtypes.int, buf.ptrdtype.size),)) if isinstance(buf.dtype, PtrDType) else None),
   # rewrite non-image INDEX to SHRINK
-  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))), lambda buf,idx:
-    UOp(Ops.SHRINK, dtype=buf.dtype.base,
-        src=(buf.replace(src=(UOp.const(dtypes.int, buf.ptrdtype.size),),
-                         dtype=buf.dtype.base), idx, UOp.const(dtypes.int, 1)))),
-  # rewrite CAST on SHRINK to just SHRINK
-  (UPat(Ops.SHRINK, name="bv").cast(name="x"),
-   lambda bv,x: bv.replace(src=(bv.src[0], bv.src[1], UOp.const(dtypes.int, x.dtype.count)))),
+  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))).cast(name="x"), lambda buf,idx,x:
+    UOp(Ops.SHRINK, dtype=buf.dtype.base, src=(buf, idx, UOp.const(dtypes.int, x.dtype.count)))),
   # remove all vec dtypes
-  (UPat(GroupOp.All, name="x"), lambda x: x.replace(dtype=x.dtype.scalar())),
+  (UPat(GroupOp.All, name="x"), lambda x: x.replace(dtype=x.dtype.base.scalar().base)),
 ])
 
 def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
