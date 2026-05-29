@@ -11,10 +11,10 @@ FP8_AMAX_MARGIN = getenv("FP8_AMAX_MARGIN", 1.1)
 def _sr_noise(x:Tensor) -> Tensor:
   if isinstance(x.device, tuple):
     shape = x.uop.shard_shape if x.uop.axis is not None else x.shape
-    noise = UOp(Ops.MSTACK, dtypes.default_float, tuple(Tensor.rand(*shape, device=d).uop for d in x.device))
+    noise = UOp(Ops.MSTACK, dtypes.default_float, tuple(Tensor.rand(*shape, device=d, contiguous=False).uop for d in x.device))
     if x.uop.axis is not None: noise = noise.multi(x.uop.axis)
     return Tensor(noise)
-  return x.rand_like()
+  return x.rand_like(contiguous=False)
 
 def stochastic_round_bf16(x:Tensor) -> Tensor:
   bits = x.bitcast(dtypes.uint32)
