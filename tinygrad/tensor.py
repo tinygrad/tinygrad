@@ -160,7 +160,7 @@ class Tensor(OpMixin):
   def const_like(self, b:ConstType) -> Tensor: return Tensor(self.uop.const_like(b))
   @staticmethod
   def const(dtype:DType, b:ConstType|UOp, device:str|tuple[str, ...]|None=None) -> Tensor:
-    return Tensor(b if isinstance(b, UOp) else UOp.const(dtype, b, device))
+    return Tensor(UOp.const(dtype, b, device))
   @staticmethod
   def unique_const(fill_value:ConstType|UOp, **kwargs) -> Tensor:
     if isinstance(fill_value, UOp): return Tensor(fill_value, **kwargs)
@@ -203,7 +203,7 @@ class Tensor(OpMixin):
 
   def as_param(self, slot:int):
     if self.uop.axis is not None:
-      param = UOp.param(slot, self.dtype, self.uop.shard_shape, self.device).multi(self.uop.axis)
+      param = UOp.param(slot, self.dtype, self.uop.shard_shape, self.device, axis=self.uop.axis)
     else:
       param = UOp.param(slot, self.dtype, self.shape, self.device)
     return Tensor(param)

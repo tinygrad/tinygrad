@@ -228,6 +228,11 @@ runs:
 
         sudo chown -R $USER:$USER /var/cache/apt/archives/
 
+    - name: Add clang to PATH (Linux)
+      if: inputs.llvm == 'true' && runner.os == 'Linux'
+      shell: bash
+      run: echo "/usr/lib/llvm-20/bin" >> "$GITHUB_PATH"
+
     # **** AMD ****
     - name: Setup AMD (Linux)
       if: inputs.amd == 'true' && runner.os == 'Linux'
@@ -281,7 +286,7 @@ runs:
         cache-name: cache-gpuocelot-build-1
       with:
         path: ${{ github.workspace }}/gpuocelot/ocelot
-        key: ${{ runner.os }}-gpuocelot-b16039dc940dc6bc4ea0a98380495769ff35ed99-rebuild-${{ env.CACHE_VERSION }}
+        key: ${{ runner.os }}-gpuocelot-f463259669c69abce7b3a0567b6c284f348d0f32-rebuild-${{ env.CACHE_VERSION }}
     - name: Cache gpuocelot
       if: inputs.ocelot == 'true' && github.event_name != 'pull_request'
       id: cache-build
@@ -290,14 +295,14 @@ runs:
         cache-name: cache-gpuocelot-build-1
       with:
         path: ${{ github.workspace }}/gpuocelot/ocelot
-        key: ${{ runner.os }}-gpuocelot-b16039dc940dc6bc4ea0a98380495769ff35ed99-rebuild-${{ env.CACHE_VERSION }}
+        key: ${{ runner.os }}-gpuocelot-f463259669c69abce7b3a0567b6c284f348d0f32-rebuild-${{ env.CACHE_VERSION }}
     - name: Clone/compile gpuocelot
       if: inputs.ocelot == 'true' && steps.cache-build-pr.outputs.cache-hit != 'true' && steps.cache-build.outputs.cache-hit != 'true'
       shell: bash
       run: |
-        git clone --recurse-submodules https://github.com/gpuocelot/gpuocelot.git ${{ github.workspace }}/gpuocelot
+        git clone --recurse-submodules https://github.com/tinygrad/gpuocelot.git ${{ github.workspace }}/gpuocelot
         cd ${{ github.workspace }}/gpuocelot/ocelot
-        git checkout b16039dc940dc6bc4ea0a98380495769ff35ed99
+        git checkout f463259669c69abce7b3a0567b6c284f348d0f32
         mkdir build
         cd build
 
@@ -306,10 +311,7 @@ runs:
           sudo xcode-select -s /Applications/Xcode_16.2.app/Contents/Developer
           CMAKE_ARGS="$CMAKE_ARGS -DBoost_INCLUDE_DIR=$(brew --prefix boost)/include -DBoost_LIBRARY_DIR=$(brew --prefix boost)/lib"
         else
-          curl -fL https://developer.download.nvidia.com/compute/cuda/redist/cuda_nvcc/linux-x86_64/cuda_nvcc-linux-x86_64-11.5.119-archive.tar.xz \
-            | sudo tar -xJ -C /usr/ --strip-components=1
-          curl -fL https://developer.download.nvidia.com/compute/cuda/redist/cuda_cudart/linux-x86_64/cuda_cudart-linux-x86_64-11.5.117-archive.tar.xz \
-            | sudo tar -xJ -C /usr/ --strip-components=1
+          CMAKE_ARGS="$CMAKE_ARGS -DLLVM_DIR=$(llvm-config-15 --cmakedir)"
         fi
 
         cmake .. $CMAKE_ARGS

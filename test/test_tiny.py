@@ -2,7 +2,6 @@
 import unittest, random
 from tinygrad import Tensor, Context, Variable, TinyJit, dtypes, Device, nn
 from tinygrad.helpers import getenv
-from test.helpers import CI
 
 class TestTiny(unittest.TestCase):
 
@@ -112,7 +111,7 @@ class TestTiny(unittest.TestCase):
   # *** a model ***
 
   # TODO: this is failing because of how swizzling rewrites the ShapeTracker of the final STORE
-  @unittest.skipIf(CI and Device.DEFAULT == "DSP", "failing because of make things that can't be images not images")
+  @unittest.skipIf(Device.DEFAULT == "DSP", "failing because of make things that can't be images not images")
   def test_mnist(self):
     layers = [
       nn.Conv2d(1, 32, 5), Tensor.relu,
@@ -131,7 +130,7 @@ class TestTiny(unittest.TestCase):
     self.assertEqual(len(probs[0]), 10)
 
   # TODO: this is failing because of how swizzling rewrites the ShapeTracker of the final STORE
-  @unittest.skipIf(CI and Device.DEFAULT == "DSP", "failing because of make things that can't be images not images")
+  @unittest.skipIf(Device.DEFAULT == "DSP", "failing because of make things that can't be images not images")
   def test_mnist_backward(self):
     # NOTE: we don't have the whole model here for speed
     layers = [

@@ -495,6 +495,25 @@ class TestFunctionTuple(unittest.TestCase):
     Tensor.realize(a.grad)
     np.testing.assert_allclose(a.grad.numpy(), [2., 2., 2., 2.])
 
+  def test_custom_kernel_precompile_multidevice(self):
+    # a custom_kernel output placeholder (invalids) under multi-device @function(precompile=True) must return the
+    # kernel's computed result. read it back through .numpy() so the cross-device gather reads the output buffer
+    devs = ("CPU:0", "CPU:1")
+    def double_kernel(C:UOp, A:UOp) -> UOp:
+      C, A = C.flatten(), A.flatten()
+      i = UOp.range(A.numel(), 0)
+      return C[i].store(A[i] * 2.0).end(i).sink(arg=KernelInfo(name="double_kernel"))
+    def double_grad(d_c:UOp, call:UOp): return (None, (Tensor(d_c) * 2.0).uop)
+
+    @function(precompile=True, precompile_backward=True)
+    def f(a:Tensor):
+      c = Tensor(Tensor.invalids(a.shape[0]//len(devs), a.shape[1], dtype=a.dtype, device=devs).uop.multi(0), device=devs)
+      return Tensor.custom_kernel(c, a, fxn=double_kernel, grad_fxn=double_grad)[0]
+
+    a = Tensor.full((4, 4), 7.0).contiguous().shard(devs, axis=0)
+    Tensor.realize(a)
+    np.testing.assert_allclose(f(a).numpy(), 14.0)
+
   def test_custom_kernel_precompile_further_compute(self):
     def my_kernel(C:UOp, A:UOp) -> UOp:
       i = UOp.range(A.shape[0], 0)

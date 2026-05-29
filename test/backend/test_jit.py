@@ -49,7 +49,7 @@ class TestJit(unittest.TestCase):
       y = (x + 1).contiguous().realize()
       z = x.shrink(((st, st + N),)).contiguous().realize()
       return y, z
-    x = Tensor.arange(2*N).contiguous().realize()
+    x = Tensor.arange(2*N).clone().realize()
     for _ in range(3): y, z = f(x, Variable("a", 0, N).bind(0))
     self.assertEqual(y.shape, (2*N,))
     self.assertEqual(z.shape, (N,))
@@ -92,7 +92,7 @@ class TestJit(unittest.TestCase):
     @TinyJit
     def f(x): return (x[2:5].contiguous() + 1).realize()
     for i in range(5):
-      x = (Tensor.arange(10).float() + i * 10).contiguous().realize()
+      x = (Tensor.arange(10).float() + i * 10).clone().realize()
       np.testing.assert_allclose(f(x).numpy(), x.numpy()[2:5] + 1)
 
   def test_jit_multiple_outputs(self):

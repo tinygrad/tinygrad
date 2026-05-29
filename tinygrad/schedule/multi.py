@@ -10,7 +10,7 @@ def mstack_early_shrink(ms:UOp, shrink:UOp):
   def apply_shrink(s:UOp, i:int) -> UOp:
     new_arg = [tuple([x.substitute({dvar[0]:dvar[0].const_like(i)}) if isinstance(x, UOp) and
                       (dvar:=[v for v in x.variables() if v.expr=='_device_num']) else x for x in ss]) for ss in shrink.marg]
-    return s.shrink(tuple(new_arg))
+    return s._mop(Ops.SHRINK, tuple(new_arg))
   for i, x in enumerate(ms.src):
     if x.op is Ops.COPY:
       ret.append(apply_shrink(x.src[0], i).copy_to_device(x.device))
@@ -88,22 +88,25 @@ def expand_multi(root:UOp, multi:UOp):
   return multi.src[0].expand(new_shape).multi(multi.axis)
 
 def pad_multi(root:UOp, multi:UOp):
-  assert multi.axis is None or root.marg[multi.axis] == (0,0), f"padding not supported for {root.marg=}"
-  return multi.src[0].pad(root.marg).multi(multi.axis)
+  assert multi.axis is None or root.marg[multi.axis] == (0, multi.shape[multi.axis]), f"padding not supported for {root.marg=}"
+  local_pad = tuple((0, multi.src[0].shape[multi.axis]) if a == multi.axis else s for a,s in enumerate(root.marg))
+  return multi.src[0]._mop(Ops.PAD, local_pad).multi(multi.axis)
 
 def permute_multi(root:UOp, multi:UOp):
   # all permutes supported!
   return multi.src[0].permute(root.marg).multi(root.axis)
 
 def shrink_multi(root:UOp, multi:UOp):
-  assert multi.axis is None or root.marg[multi.axis] == (0, multi.shape[multi.axis]) or root.marg[multi.axis] in multi.bounds, \
+  shard_bounds = tuple((s,e-s) for s,e in multi.bounds) if multi.axis is not None else ()
+  assert multi.axis is None or root.marg[multi.axis] == (0, multi.shape[multi.axis]) or root.marg[multi.axis] in shard_bounds, \
     f"shrinking not supported for {root.marg=}"
-  if multi.axis is not None and root.marg[multi.axis] in multi.bounds and root.marg[multi.axis] != (0, multi.shape[multi.axis]):
+  if multi.axis is not None and root.marg[multi.axis] in shard_bounds and root.marg[multi.axis] != (0, multi.shape[multi.axis]):
     # NOTE: shrink on the shard axis is only allowed when result is a single partition, denoted by the new real
     # we just copy it to all the devices, no real. this will be optimized out later
     non_shard_shrink = tuple((0, multi.src[0].shape[i]) if i == multi.axis else s for i, s in enumerate(root.marg))
-    return multi.src[0].copy_to_device(multi.device, arg=multi.bounds.index(root.marg[multi.axis])).shrink(non_shard_shrink)
-  return multi.src[0].shrink(tuple((0, multi.src[0].shape[multi.axis]) if a == multi.axis else s for a,s in enumerate(root.marg))).multi(multi.axis)
+    return multi.src[0].copy_to_device(multi.device, arg=shard_bounds.index(root.marg[multi.axis]))._mop(Ops.SHRINK, non_shard_shrink)
+  local_shrink = tuple((0, multi.src[0].shape[multi.axis]) if a == multi.axis else s for a,s in enumerate(root.marg))
+  return multi.src[0]._mop(Ops.SHRINK, local_shrink).multi(multi.axis)
 
 def flip_multi(root:UOp, multi:UOp):
   assert multi.axis is None or not root.marg[multi.axis], "flipping not supported on sharded axis"
@@ -111,6 +114,9 @@ def flip_multi(root:UOp, multi:UOp):
 
 def copy_multi(multi:UOp, device:str | tuple[str, ...] | UOp):
   assert multi.axis is not None, "all multi ops have axis"
+  if isinstance(device, UOp) and isinstance(device.arg, str):
+    pieces = [multi.src[0].mselect(i).copy_to_device(device) for i in range(len(multi.device))]
+    return pieces[0].cat(*pieces[1:], dim=multi.axis)
   return multi.src[0]._unshard(multi.axis).allreduce(Ops.ADD, device)
 
 def store_after_multi(dest:UOp, src:UOp): return dest.after(dest.store(src.src[0])).multi(src.axis)
@@ -131,7 +137,7 @@ def rewrite_into_function(call:UOp):
 
 def param_to_multi(p:UOp):
   if p.axis is None: return None
-  return UOp.param(p.arg, p.dtype, p.shard_shape, p.device).multi(p.axis)
+  return UOp.param(p.arg.slot, p.dtype, p.shard_shape, p.device, p.arg.vmin_vmax, p.arg.name, p.arg.addrspace).multi(p.axis)
 
 # NOTE: this is the same pattern as Ops.UNROLL
 multi_pm = PatternMatcher([

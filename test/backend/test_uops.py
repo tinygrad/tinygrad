@@ -11,7 +11,7 @@ from tinygrad.engine.realize import run_linear
 from tinygrad.codegen import to_program
 from tinygrad.codegen.opt import Opt, OptOps
 from tinygrad.renderer.ptx import PTXRenderer
-from test.helpers import to_uops_list, CI
+from test.helpers import to_uops_list
 
 def run_uops(uops_list:list[UOp], bufs:list[Buffer]):
   buf_uops = [UOp.new_buffer(b.device, b.size, b.dtype) for b in bufs]
@@ -20,6 +20,7 @@ def run_uops(uops_list:list[UOp], bufs:list[Buffer]):
 
 def uop(uops:list[UOp], op:Ops, dtype:Optional[DType], src:tuple[UOp, ...], arg:Any=None) -> UOp:
   if op is Ops.CONST: uops.append(UOp.const(dtype, arg))
+  elif op is Ops.PARAM: uops.append(UOp.param(arg, dtype).replace(src=()))
   else: uops.append(UOp(op, dtype, tuple(src), arg))
   return uops[-1]
 
@@ -173,8 +174,6 @@ class TestBoolUOps(TestUOps):
   def test_where_bool(self): self._test_top_bool_fxn(Ops.WHERE, lambda a,b,c: b if a else c)
 
 class TestLocalAccess(unittest.TestCase):
-  # NOTE: this is failing on METAL CI, no idea why. Works locally.
-  @unittest.skipIf(Device.DEFAULT == "METAL" and CI, "failing only in CI")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared memory")
   def test_local_basic(self):
     uops = []
@@ -222,8 +221,8 @@ class TestLocalAccess(unittest.TestCase):
 @unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "This only tests assembly backends")
 class TestAssembly(unittest.TestCase):
   def test_bitshift_left(self):
-    g1 = UOp(Ops.PARAM, dtypes.int32.ptr(), (), 0)
-    out = UOp(Ops.PARAM, dtypes.int32.ptr(), (), 1)
+    g1 = UOp.param(0, dtypes.int32.ptr())
+    out = UOp.param(1, dtypes.int32.ptr())
     c1 = UOp.const(dtypes.int, 2)
     c2 = UOp.const(dtypes.int, 3)
     l1 = g1.index(c1)
@@ -250,7 +249,7 @@ class TestAssembly(unittest.TestCase):
     self.assertGreaterEqual(len([x.op for x in uops if x.op is Ops.MULACC]), 4)
 
   def test_mulacc_shl(self):
-    g1 = UOp(Ops.PARAM, dtypes.int32.ptr(), (), 0)
+    g1 = UOp.param(0, dtypes.int32.ptr())
     c1 = UOp.const(dtypes.int, 0)
     c2 = UOp.const(dtypes.int, 1)
     expr = g1.index(c1) * UOp.const(dtypes.int, 4096) + g1.index(c2)
@@ -259,7 +258,7 @@ class TestAssembly(unittest.TestCase):
     self.assertIn(Ops.MULACC, [x.op for x in uops])
 
   def test_use_cmpeq(self):
-    g = UOp(Ops.PARAM, dtypes.uint32.ptr(), (), 0)
+    g = UOp.param(0, dtypes.uint32.ptr())
     c = UOp.const(dtypes.uint, 7)
     comp = g.index(c).ne(c).ne(True)
     uops = to_uops_list([comp], ren=Device[Device.DEFAULT].renderer)

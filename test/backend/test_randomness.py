@@ -1,14 +1,14 @@
 import unittest, math
 
 from tinygrad import dtypes, Tensor, Device
-from tinygrad.helpers import getenv
+from tinygrad.helpers import getenv, DEV
 from tinygrad.codegen import to_program
 
 from tinygrad.uop.ops import Ops
 from tinygrad.renderer.ptx import PTXRenderer
 from tinygrad.renderer.nir import NIRRenderer
 from tinygrad.renderer.isa.x86 import X86Renderer
-from test.helpers import not_support_multi_device, needs_second_gpu, CI
+from test.helpers import not_support_multi_device, needs_second_gpu
 from test.unit.test_randomness import equal_distribution, normal_test
 
 import numpy as np
@@ -48,7 +48,7 @@ class TestRandomness(unittest.TestCase):
     assert nx[nx == 0].size > 0
     equal_distribution(lambda *x: Tensor.rand(*x, dtype=dtypes.float16), torch.rand, lambda x: np.random.rand(*x), shape=(2, N, N))
 
-  @unittest.skipIf(CI and Device.DEFAULT in {"NV", "CUDA"}, "gpuocelot doesn't support certain ops needed for threefry")
+  @unittest.skipIf(DEV.interface.startswith("MOCK") and Device.DEFAULT in {"NV", "CUDA"}, "gpuocelot doesn't support certain ops needed for threefry")
   def test_threefry_against_reference(self):
     Tensor.manual_seed(1337)
 

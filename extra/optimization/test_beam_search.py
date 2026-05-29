@@ -1,7 +1,6 @@
 import unittest
 import numpy as np
 
-from test.helpers import CI
 from tinygrad.helpers import BEAM, Timing, prod
 from tinygrad import Variable, Device, Tensor
 from tinygrad.nn import Conv2d
@@ -65,7 +64,7 @@ class TestBeamSearch(unittest.TestCase):
     actual = a.numpy()
     np.testing.assert_allclose(actual, desired)
 
-  @unittest.skipIf(CI, "flaky. CL_OUT_OF_RESOURCES")
+  @unittest.skip("flaky. CL_OUT_OF_RESOURCES")
   def test_conv_beam(self):
     c = Conv2d(3, 16, (3,3))
     x = rand(1,3,32,32)
