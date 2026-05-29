@@ -294,13 +294,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       case Ops.PARAM:
         if isinstance(self.dtype, ImageDType): return self.dtype.shape
         if isinstance(self.dtype, PtrDType): return (self.ptrdtype.size,)
-        # NOTE: copied from marg
-        if len(self.src) >= 1:
-          shape = tuple(self.src[0].sgep(i) for i in range(self.src[0].dtype.count))
-          if self.axis is not None and isinstance(self.device, tuple):
-            shape = tuple(s*len(self.device) if i == self.axis else s for i,s in enumerate(shape))
-          return shape
-        return None
+        return tuple(self.src[0].sgep(i) for i in range(self.src[0].dtype.count)) if len(self.src) >= 1 else None
 
       # wmma output shape = accumulator shape (src[2])
       case Ops.WMMA | Ops.SHAPED_WMMA: return self.src[2]._shape
@@ -1037,6 +1031,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   @staticmethod
   def param(slot:int, dtype:DType, shape:tuple[sint, ...]|None=None, device=None, vmin_vmax:tuple[PyConst, PyConst]|None=None, name=None,
             addrspace=AddrSpace.GLOBAL, axis:int|None=None):
+    if shape is not None and axis is not None and isinstance(device, tuple):
+      shape = tuple(s*len(device) if i == axis else s for i,s in enumerate(shape))
     src: tuple[UOp, ...] = (UOp(Ops.NOOP) if shape is None else shape_to_shape_arg(shape),)
     return UOp(Ops.PARAM, dtype, src, arg=ParamArg(slot, vmin_vmax, name, addrspace, axis, device))
   def param_like(self, slot:int):
