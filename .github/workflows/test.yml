@@ -15,27 +15,9 @@ on:
   workflow_dispatch:
 
 jobs:
-  llvmspeed:
-    name: LLVM Speed
-    runs-on: &linux ${{ github.repository == 'tinygrad/tinygrad' && github.event_name == 'pull_request' && github.event.pull_request.author_association == 'COLLABORATOR' && 'namespace-profile-tinygrad' || 'ubuntu-24.04' }}
-    timeout-minutes: 20
-    steps:
-    - name: Checkout Code
-      uses: actions/checkout@v6
-    - name: Setup Environment
-      uses: ./.github/actions/setup-tinygrad
-      with:
-        key: llvm-speed
-        deps: testing_unit
-        llvm: 'true'
-    - name: Speed Test
-      run: DEV=CPU:LLVM THREADS=0 python3 test/speed/external_test_speed_v_torch.py
-    - name: Speed Test (BEAM=2)
-      run: BEAM=2 DEV=CPU:LLVM THREADS=0 python3 test/speed/external_test_speed_v_torch.py
-
   docs:
     name: Docs
-    runs-on: *linux
+    runs-on: &linux ${{ github.repository == 'tinygrad/tinygrad' && github.event_name == 'pull_request' && github.event.pull_request.author_association == 'COLLABORATOR' && 'namespace-profile-tinygrad' || 'ubuntu-24.04' }}
     timeout-minutes: 10
     env:
       CHECK_OOB: 0
