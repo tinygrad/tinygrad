@@ -19,25 +19,18 @@ class AxisType(Enum):
   GLOBAL = auto(); WARP = auto(); LOCAL = auto(); LOOP = auto(); GROUP_REDUCE = auto(); REDUCE = auto(); UPCAST = auto(); UNROLL = auto() # noqa: E702
   THREAD = auto(); PLACEHOLDER = auto() # noqa: E702
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, order=True)
 class ParamArg:
   slot: int
-  vmin: PyConst|None = None
-  vmax: PyConst|None = None
+  vmin_vmax: tuple[PyConst, PyConst]|None = None
   name: str|None = None
   addrspace: AddrSpace = AddrSpace.GLOBAL
   axis: int|None = None
   device: str|tuple[str, ...]|None = None
   def __repr__(self):
-    fields = (("vmin", None), ("vmax", None), ("name", None), ("addrspace", AddrSpace.GLOBAL), ("axis", None), ("device", None))
+    fields = (("vmin_vmax", None), ("name", None), ("addrspace", AddrSpace.GLOBAL), ("axis", None), ("device", None))
     args = [str(self.slot)] + [f"{k}={v!r}" for k,default in fields if (v:=getattr(self, k)) != default]
     return f"ParamArg({', '.join(args)})"
-  def __lt__(self, other):
-    if not isinstance(other, ParamArg): return NotImplemented
-    return (self.slot, self.vmin if self.vmin is not None else -math.inf, self.vmax if self.vmax is not None else math.inf,
-            self.name or "", self.addrspace.value, self.axis if self.axis is not None else -1, str(self.device)) < \
-           (other.slot, other.vmin if other.vmin is not None else -math.inf, other.vmax if other.vmax is not None else math.inf,
-            other.name or "", other.addrspace.value, other.axis if other.axis is not None else -1, str(other.device))
 axis_letters = {AxisType.GLOBAL: "g", AxisType.THREAD: "t", AxisType.LOCAL: "l", AxisType.WARP: "w", AxisType.LOOP: "L", AxisType.UPCAST: "u",
                 AxisType.GROUP_REDUCE: "G", AxisType.REDUCE: "R", AxisType.UNROLL: "r"}
 axis_colors = {AxisType.GLOBAL: "blue", AxisType.THREAD: "BLUE", AxisType.LOCAL: "cyan", AxisType.WARP: "CYAN", AxisType.LOOP: "WHITE",
@@ -106,8 +99,7 @@ class UOpMetaClass(type):
   ucache:dict[tuple, weakref.ReferenceType[UOp]] = {}
   def __call__(cls, op:Ops, dtype:DType=dtypes.void, src:tuple[UOp,...]=tuple(), arg:Any=None, tag:Any=None,
                metadata:tuple[Metadata,...]|None=None, _buffer:Buffer|None=None):
-    if op is Ops.PARAM and not isinstance(arg, ParamArg):
-      arg = ParamArg(cast(int, arg), addrspace=dtype.addrspace if isinstance(dtype, (PtrDType, ImageDType)) else AddrSpace.GLOBAL)
+    if op is Ops.PARAM: assert isinstance(arg, ParamArg), f"PARAM arg must be ParamArg, got {arg!r}"
     if op is Ops.PARAM and isinstance(dtype, PtrDType) and not isinstance(dtype, ImageDType) and dtype.addrspace != arg.addrspace:
       dtype = dtype.base.ptr(dtype.size, arg.addrspace).vec(dtype.v) if dtype.v != 1 else dtype.base.ptr(dtype.size, arg.addrspace)
     if (wret:=UOpMetaClass.ucache.get(key:=(op, dtype, src, arg, tag), None)) is not None and (ret:=wret()) is not None: return ret
@@ -987,7 +979,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     # float has NAN issue and we use explicit NAN in transcendental
     if self.op is Ops.WHERE and dtypes.is_int(self.dtype): return min(self.src[1].vmin, self.src[2].vmin), max(self.src[1].vmax, self.src[2].vmax)
     # NOTE: returned UOp is assumed to be CONST
-    if self.op is Ops.PARAM and self.arg.vmin is not None and self.arg.vmax is not None: return self.arg.vmin, self.arg.vmax
+    if self.op is Ops.PARAM and self.arg.vmin_vmax is not None: return self.arg.vmin_vmax
     if self.op is Ops.DEFINE_VAR and self.arg: return self.arg[1], self.arg[2]
     if self.op in (Ops.RANGE, Ops.SPECIAL): return 0, (self.src[0]-1).vmax
     if self.op is Ops.BIND: return self.src[0]._min_max # ignore the bound value
@@ -1032,7 +1024,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   @staticmethod
   def placeholder(shape:tuple[int, ...], dtype:DType, slot:int, addrspace=AddrSpace.GLOBAL):
     lookup = {AddrSpace.GLOBAL: Ops.PARAM, AddrSpace.LOCAL: Ops.DEFINE_LOCAL, AddrSpace.REG: Ops.DEFINE_REG}
-    ret = UOp(lookup[addrspace], dtype.ptr(prod(shape), addrspace), arg=slot)
+    arg = ParamArg(slot, addrspace=addrspace) if addrspace is AddrSpace.GLOBAL else slot
+    ret = UOp(lookup[addrspace], dtype.ptr(prod(shape), addrspace), arg=arg)
     if len(shape) > 1: ret = ret.reshape(shape)
     return ret
   def placeholder_like(self, slot:int):
@@ -1048,8 +1041,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   def param(slot:int, dtype:DType, shape:tuple[sint, ...]|None=None, device=None, vmin_vmax:tuple[PyConst, PyConst]|None=None, name=None,
             addrspace=AddrSpace.GLOBAL, axis:int|None=None):
     src: tuple[UOp, ...] = (UOp(Ops.NOOP) if shape is None else shape_to_shape_arg(shape),)
-    vmin, vmax = (None, None) if vmin_vmax is None else vmin_vmax
-    return UOp(Ops.PARAM, dtype, src, arg=ParamArg(slot, vmin, vmax, name, addrspace, axis, device))
+    return UOp(Ops.PARAM, dtype, src, arg=ParamArg(slot, vmin_vmax, name, addrspace, axis, device))
   def param_like(self, slot:int):
     addrspace = self.addrspace if isinstance(self.dtype, (PtrDType, ImageDType)) else AddrSpace.GLOBAL
     if self.op is Ops.BIND:

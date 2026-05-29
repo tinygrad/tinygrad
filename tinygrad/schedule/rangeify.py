@@ -513,8 +513,8 @@ to_define_global = PatternMatcher([
   (UPat(Ops.STORE, name="x"), find_bufs),
   (UPat(Ops.BUFFER, name="buf"), debuf),
   (UPat(Ops.PARAM, name="v"), lambda v:
-   UOp.variable(v.arg.name, v.arg.vmin, v.arg.vmax, v.dtype)
-   if v.arg.name is not None and v.arg.vmin is not None and v.arg.vmax is not None else None),
+   UOp.variable(v.arg.name, v.arg.vmin_vmax[0], v.arg.vmin_vmax[1], v.dtype)
+   if v.arg.name is not None and v.arg.vmin_vmax is not None else None),
   (UPat(Ops.PARAM, name="buf"), lambda ctx, buf:
    None if isinstance(buf.dtype, PtrDType) or buf.arg.name is not None or buf._shape is None else debuf(ctx, buf)),
   (UPat(Ops.INDEX, src=(UPat(Ops.DEFINE_VAR, name="v"),)), lambda v: v),

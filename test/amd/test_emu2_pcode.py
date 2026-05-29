@@ -167,7 +167,7 @@ class TestDSPcodePatterns(unittest.TestCase):
 
   def test_global_atomic_add_f32_parsing(self):
     """Test GLOBAL_ATOMIC_ADD_F32 keeps memory values in float dtype."""
-    vmem = UOp(Ops.PARAM, dtypes.uint32.ptr(1024), arg=2)
+    vmem = UOp.param(2, dtypes.uint32.ptr(1024))
     srcs = {
       'ADDR': UOp.const(dtypes.uint64, 0),
       'DATA': UOp.const(dtypes.uint32, 0x3f800000),
@@ -198,7 +198,7 @@ class TestDSPcodePatterns(unittest.TestCase):
   def test_mem_read_parsing(self):
     """Test MEM[addr].type read expression parsing."""
     # Create a mock LDS buffer
-    lds = UOp(Ops.PARAM, dtypes.uint32.ptr(16384), arg=3)
+    lds = UOp.param(3, dtypes.uint32.ptr(16384))
     addr = UOp.const(dtypes.uint32, 0)
     vrs = {'_lds': lds, 'ADDR': addr, 'OFFSET': UOp.const(dtypes.uint32, 0)}
 
@@ -233,7 +233,7 @@ class TestDSPcodePatterns(unittest.TestCase):
     pcode = PCODE.get(DSOp.DS_LOAD_2ADDR_B32)
     self.assertIsNotNone(pcode)
     assert pcode is not None
-    lds = UOp(Ops.PARAM, dtypes.uint32.ptr(16384), arg=3)
+    lds = UOp.param(3, dtypes.uint32.ptr(16384))
     srcs = {
       'ADDR': UOp.const(dtypes.uint32, 0),
       'OFFSET0': UOp.const(dtypes.uint32, 0),
@@ -314,7 +314,7 @@ class TestConcatWidthParsing(unittest.TestCase):
       self.assertEqual(parsed.simplify().arg, expected)
 
   def test_permlane64_wave64_pcode_indices(self):
-    vgpr = UOp(Ops.PARAM, dtypes.uint32.ptr(256), arg=0)
+    vgpr = UOp.param(0, dtypes.uint32.ptr(256))
     srcs = {
       'SRC0': UOp.const(dtypes.uint32, 0),
       'VDST': UOp.const(dtypes.uint32, 1),
@@ -347,7 +347,7 @@ class TestAllPcode(unittest.TestCase):
   def _make_srcs(self):
     """Create dummy source variables for pcode parsing."""
     u32, u64 = lambda v=0: UOp.const(dtypes.uint32, v), lambda v=0: UOp.const(dtypes.uint64, v)
-    lds = UOp(Ops.PARAM, dtypes.uint32.ptr(16384), arg=3)
+    lds = UOp.param(3, dtypes.uint32.ptr(16384))
     return {'laneId': u32(), 'laneID': u32(), 'S0': u32(), 'S1': u32(), 'S2': u32(), 'S3': u32(), 'SRC0': u32(),
             'D0': u32(), 'D1': u32(), 'DST': u32(), 'VDST': u32(), 'SDST': u32(),
             'VCC': u64(), 'VCCZ': u32(), 'EXEC': u64(), 'EXEC_LO': u32(), 'EXECZ': u32(), 'SCC': u32(),
