@@ -165,7 +165,8 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
     try: addrspace = u.addrspace
     except Exception: addrspace = None
     graph[id(u)] = {"label":label, "src":[(i,id(x)) for i,x in enumerate(u.src)], "exclude":u in excluded, "color":uops_colors.get(u.op, "#ffffff"),
-                    "ref":ref, "tag":repr(u.tag) if u.tag is not None else None, "addrspace":addrspace_colors.get(addrspace, None)}
+                    "ref":ref, "tag":repr(u.tag) if u.tag is not None else None,
+                    "addrspace":addrspace_colors.get(addrspace, None) if addrspace is not None else None}
   return graph
 
 def _reconstruct(data:VizData, a:int, depth:int|None=None):
