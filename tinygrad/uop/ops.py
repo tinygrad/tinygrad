@@ -688,7 +688,11 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   def marg(self):
     match self.op:
       case Ops.RESHAPE | Ops.EXPAND: return tuple(ssimplify(self.src[1].sgep(i)) for i in range(self.src[1].dtype.count))
-      case Ops.PAD | Ops.SHRINK: return tuple((self.src[1].sgep(i), self.src[2].sgep(i)) for i in range(self.src[1].dtype.count))
+      case Ops.PAD | Ops.SHRINK:
+        # this is like broadcasting for shapes
+        return tuple(((self.src[1] if self.src[1].shape == () else self.src[1].sgep(i)),
+                      (self.src[2] if self.src[2].shape == () else self.src[2].sgep(i)))
+                     for i in range(max(self.src[1].dtype.count, self.src[2].dtype.count)))
       case Ops.PERMUTE | Ops.FLIP: return self.arg
       case _: raise RuntimeError(f"{self.op} is not a MovementOp")
 
@@ -764,8 +768,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     if self.op in GroupOp.Movement: return self.src[0].addrspace
     if self.op is Ops.STACK or self.op in GroupOp.Elementwise:
       ad = [x.addrspace for x in self.src if x.addrspace is not None]
-      assert all_same(ad), f"addrspace mismatch in {self.op} -- {ad}"
-      return ad[0] if len(ad) else None
+      if not len(ad) or not all_same(ad): return None
+      return ad[0]
     return None
   @property
   def buf_uop(self) -> UOp:
