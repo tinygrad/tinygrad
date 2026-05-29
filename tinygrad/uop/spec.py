@@ -125,7 +125,7 @@ spec_tensor = PatternMatcher([
 
   # CONST with a UNIQUE or DEVICE
   (UPat(Ops.CONST, src=(UPat(Ops.DEVICE),)), lambda: True),
-  (UPat(Ops.CONST, src=(UPat((Ops.UNIQUE, Ops.LUNIQUE)), UPat(Ops.DEVICE))), lambda: True),
+  (UPat(Ops.CONST, src=(UPat((Ops.UNIQUE, Ops.LUNIQUE)), UPat(Ops.DEVICE)), name="c"), lambda c: c.arg is Invalid),
 
   # BUFFER
   (UPat(Ops.BUFFER, src=(UPat((Ops.UNIQUE, Ops.LUNIQUE)), UPat(Ops.DEVICE)), name="buf"),
