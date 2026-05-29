@@ -225,7 +225,8 @@ class FlatTransformer:
       def _shard_fp8(name:str, axis:int):
         getattr(self, name).shard_(device, axis=axis)
         self._fp8_inv_scale[name] = self._fp8_inv_scale[name].to(device).contiguous().is_param_(False)
-        Tensor.realize(getattr(self, name), self._fp8_inv_scale[name])
+        self._fp8_next_inv_scale[name] = self._fp8_next_inv_scale[name].to(device).contiguous().is_param_(False)
+        Tensor.realize(getattr(self, name), self._fp8_inv_scale[name], self._fp8_next_inv_scale[name])
       _shard_fp8("wqkv", 1)          # (n_layers, out, dim) shard out
       _shard_fp8("wo", 2)            # (n_layers, dim, in) shard in
       if SPLIT_W13:
@@ -244,10 +245,6 @@ class FlatTransformer:
         for name in amax_dict:
           for i in range(len(amax_dict[name])):
             amax_dict[name][i] = amax_dict[name][i].to(device).contiguous().is_param_(False)
-      for name in self._fp8_inv_scale:
-        self._fp8_inv_scale[name] = self._fp8_inv_scale[name].to(device).contiguous().is_param_(False)
-      for name in self._fp8_next_inv_scale:
-        self._fp8_next_inv_scale[name] = self._fp8_next_inv_scale[name].to(device).contiguous().is_param_(False)
 
   def __call__(self, tokens:Tensor, save:bool=True):
     h = self.tok_embeddings(tokens)
