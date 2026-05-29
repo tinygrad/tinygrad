@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from tinygrad.dtype import dtypes
+from tinygrad.dtype import dtypes, AddrSpace, PtrDType, ImageDType
 from tinygrad.uop.ops import UOp, UPat, PatternMatcher, Ops, GroupOp, graph_rewrite, track_rewrites
 from tinygrad.helpers import VIZ, pluralize, all_int
 
@@ -176,7 +176,8 @@ def finalize_after(ctx:AllocCtx, x:UOp):
 def replace_input_buffer(ctx:AllocCtx, b:UOp):
   ctx.replacements.append(b)
   return UOp.param(len(ctx.replacements)-1, b.dtype, b.shape, b.device,
-                   b._min_max if b.op is Ops.BIND else None, b.src[0].arg[0] if b.op is Ops.BIND else None)
+                   b._min_max if b.op is Ops.BIND else None, b.src[0].arg[0] if b.op is Ops.BIND else None,
+                   b.addrspace if isinstance(b.dtype, (PtrDType, ImageDType)) else AddrSpace.GLOBAL)
 
 pm_finalize_call = PatternMatcher([
   (UPat(Ops.AFTER, name="x"), finalize_after),

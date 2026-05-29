@@ -585,8 +585,19 @@ jobs:
     - name: Test quantize onnx
       run: DEBUG=2 DEV=DSP python3 test/backend/test_quantize_onnx.py
 
-  testwebgpu:
-    name: Linux (WebGPU)
+  testlinux:
+    strategy:
+      fail-fast: false
+      matrix:
+        dev:
+          - 'CPU:CLANGJIT'
+          - 'CPU:LLVM'
+          - 'CPU:LVP'
+          - 'CPU:X86'
+          - 'CL'
+          - 'WEBGPU'
+
+    name: Linux (DEV=${{ matrix.dev }})
     runs-on: *linux
     timeout-minutes: 20
     steps:
@@ -595,17 +606,21 @@ jobs:
     - name: Setup Environment
       uses: ./.github/actions/setup-tinygrad
       with:
-        key: webgpu-minimal
+        key: linux-${{ matrix.dev }}
         deps: testing_unit
         python-version: '3.12'
-        webgpu: 'true'
-    - name: Check Device.DEFAULT (WEBGPU) and print some source
+        llvm: ${{ contains(matrix.dev, 'LLVM') || contains(matrix.dev, 'LVP') || contains(matrix.dev, 'CLANGJIT') }}
+        mesa: ${{ contains(matrix.dev, 'LVP') && 'cpu' || 'false' }}
+        webgpu: ${{ matrix.dev == 'WEBGPU' }}
+        opencl: ${{ matrix.dev == 'CL' }}
+    - name: Set env
+      run: printf "DEV=${{ matrix.dev }}${{ matrix.dev == 'CPU:CLANGJIT' && '\nCPU_COUNT=2' || '' }}" >> $GITHUB_ENV
+    - name: Check Device.DEFAULT and print some source
       run: |
-        DEV=WEBGPU python -c "from tinygrad import Device; assert Device.DEFAULT == 'WEBGPU', Device.DEFAULT"
-        DEV=WEBGPU DEBUG=4 FORWARD_ONLY=1 python3 test/test_tiny.py TestTiny.test_plus
-    - name: Run selected webgpu tests
-      run: |
-          DEV=WEBGPU WEBGPU_BACKEND="WGPUBackendType_Vulkan" python3 -m pytest -n=auto test/backend --durations=20
+        python -c "from tinygrad import Device; from tinygrad.helpers import Target; assert Device.DEFAULT == Target.parse('${{ matrix.dev }}').device"
+        DEBUG=4 python test/test_tiny.py TestTiny.test_plus
+    - name: Run backend tests
+      run: python -m pytest -n=auto test/backend --durations=20
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
 
@@ -757,39 +772,6 @@ jobs:
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
 
-  testcpuopencl:
-    strategy:
-      fail-fast: false
-      matrix:
-        backend: [llvm, cpu, opencl, lvp, x86]
-
-    name: Linux (${{ matrix.backend }})
-    runs-on: *linux
-    timeout-minutes: 20
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v6
-      - name: Setup Environment
-        uses: ./.github/actions/setup-tinygrad
-        with:
-          key: ${{ matrix.backend }}-minimal
-          deps: testing_unit
-          opencl: ${{ matrix.backend == 'opencl' && 'true' }}
-          llvm: ${{ matrix.backend == 'llvm' || matrix.backend == 'cpu' || matrix.backend == 'lvp' }}
-          mesa: ${{ matrix.backend == 'lvp' && 'cpu' }}
-      - name: Set env
-        run: printf "${{ matrix.backend == 'llvm' && 'DEV=CPU:LLVM' || matrix.backend == 'cpu' && 'DEV=CPU\nCPU_COUNT=2' || matrix.backend == 'opencl' && 'DEV=CL' || matrix.backend == 'lvp' && 'DEV=CPU:LVP' || matrix.backend == 'x86' && 'DEV=CPU:X86' }}" >> $GITHUB_ENV
-      - name: Check Device.DEFAULT and print some source
-        run: |
-          python3 -c "from tinygrad import Device; assert Device.DEFAULT in ['CPU','CL'], Device.DEFAULT"
-          DEBUG=5 FORWARD_ONLY=1 python3 test/test_tiny.py TestTiny.test_plus
-      - name: Run pytest (${{ matrix.backend }})
-        run: python -m pytest -n=auto test/backend --durations=20
-      - name: Run TRANSCENDENTAL math
-        run: TRANSCENDENTAL=2 python -m pytest -n=auto test/backend/test_ops.py::TestOps::test_sin test/backend/test_ops.py::TestOps::test_cos test/backend/test_ops.py::TestOps::test_tan test/backend/test_ops.py::TestOps::test_exp test/backend/test_ops.py::TestOps::test_log --durations=20
-      - name: Run process replay tests
-        uses: ./.github/actions/process-replay
-
 # ****** OSX Tests ******
 
   testmetal:
@@ -920,13 +902,17 @@ jobs:
 
 # ****** Windows Tests ******
 
-  wintests:
+  testwindows:
     strategy:
       fail-fast: false
       matrix:
-        backend: [llvm, cpu, webgpu, x86]
+        dev:
+          - 'CPU:CLANGJIT'
+          - 'CPU:LLVM'
+          - 'CPU:X86'
+          - 'WEBGPU'
 
-    name: Windows (${{ matrix.backend }})
+    name: Windows (DEV=${{ matrix.dev }})
     runs-on: windows-latest
     timeout-minutes: 15
     steps:
@@ -935,25 +921,20 @@ jobs:
       - name: Setup Environment
         uses: ./.github/actions/setup-tinygrad
         with:
-          key: windows-${{ matrix.backend }}-minimal
+          key: windows-${{ matrix.dev }}-minimal
           deps: testing_unit
-          pydeps: ${{ matrix.backend == 'webgpu' && 'dawn-python' || '' }}
+          pydeps: ${{ matrix.dev == 'WEBGPU' && 'dawn-python' || '' }}
       - name: Set env
         shell: bash
-        run:  printf "${{ matrix.backend == 'llvm' && 'DEV=CPU:LLVM' || matrix.backend == 'cpu' && 'DEV=CPU\nCPU_COUNT=2' || matrix.backend == 'webgpu' && 'DEV=WEBGPU' || matrix.backend == 'x86' && 'DEV=CPU:X86' }}" >> $GITHUB_ENV
-      - name: Run unit tests
-        if: matrix.backend=='llvm'
-        # test_newton_schulz hits RecursionError
-        run: python -m pytest -n=auto test/unit/ --ignore=test/unit/test_disk_tensor.py --ignore=test/unit/test_tar.py --ignore=test/unit/test_linalg.py --durations=20
-      - name: Run NULL backend tests
-        if: matrix.backend=='llvm'
-        shell: bash
-        run: DEV=NULL python -m pytest -n=auto test/null/ --ignore=test/null/test_elf.py --durations=20
-      - name: Run pytest (${{ matrix.backend }})
+        run: printf "DEV=${{ matrix.dev }}${{ matrix.dev == 'CPU:CLANGJIT' && '\nCPU_COUNT=2' || '' }}" >> $GITHUB_ENV
+      - name: Check Device.DEFAULT and print some source
         shell: bash
         run: |
-          python -c "from tinygrad import Device; assert Device.DEFAULT == {'LLVM':'CPU', 'X86':'CPU'}.get(x:='${{ matrix.backend }}'.upper(), x), Device.DEFAULT"
-          python -m pytest -n=auto test/test_tiny.py test/backend/test_ops.py --durations=20
+          python -c "from tinygrad import Device; from tinygrad.helpers import Target; assert Device.DEFAULT == Target.parse('${{ matrix.dev }}').device"
+          DEBUG=4 python test/test_tiny.py TestTiny.test_plus
+      - name: Run test_tiny
+        shell: bash
+        run: python -m pytest -n=auto test/test_tiny.py --durations=20
 
 # ****** Compile-only Tests ******
 

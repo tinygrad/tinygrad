@@ -20,7 +20,7 @@ BUFTYPE_BUF, BUFTYPE_TEX, BUFTYPE_IBO = 0, 1, 2
 def dcache_flush():
   from tinygrad.uop.ops import UOp, Ops, KernelInfo
   from tinygrad.codegen import to_program
-  buf, n = UOp(Ops.PARAM, dtypes.uint8.ptr(), arg=0), UOp(Ops.PARAM, dtypes.uint8.ptr(), arg=1)
+  buf, n = UOp.param(0, dtypes.uint8.ptr()), UOp.param(1, dtypes.uint8.ptr())
   i = UOp.range(n.cast(dtypes.int), 0, dtype=dtypes.int)
   flush = UOp(Ops.CUSTOM, dtypes.void, (buf.cast(dtypes.ulong) + i.cast(dtypes.ulong) * UOp.const(dtypes.ulong, 64),),
               arg='__asm__ volatile("dc cvac, %0" :: "r"({0}) : "memory");')

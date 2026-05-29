@@ -203,7 +203,7 @@ class Tensor(OpMixin):
 
   def as_param(self, slot:int):
     if self.uop.axis is not None:
-      param = UOp.param(slot, self.dtype, self.uop.shard_shape, self.device).multi(self.uop.axis)
+      param = UOp.param(slot, self.dtype, self.uop.shard_shape, self.device, axis=self.uop.axis)
     else:
       param = UOp.param(slot, self.dtype, self.shape, self.device)
     return Tensor(param)

@@ -179,8 +179,8 @@ class CStyleLanguage(Renderer):
         continue
       if u.op in (Ops.PARAM, Ops.DEFINE_VAR):
         if u.op is not Ops.PARAM: r[u] = u.arg[0]
-        elif isinstance(u.dtype, ImageDType): r[u] = f"data{u.arg}_{u.dtype.shape[0]}x{u.dtype.shape[1]}"
-        else: r[u] = f"data{u.arg}_{sz}" if (sz:=u.max_numel()) > 0 else f"data{u.arg}"
+        elif isinstance(u.dtype, ImageDType): r[u] = f"data{u.arg.slot}_{u.dtype.shape[0]}x{u.dtype.shape[1]}"
+        else: r[u] = f"data{u.arg.slot}_{sz}" if (sz:=u.max_numel()) > 0 else f"data{u.arg.slot}"
         bufs[u] = (r[u], (u.dtype, u in writable_params))
         continue
 
@@ -321,8 +321,8 @@ class OpenCLRenderer(CStyleLanguage):
   def aux(self, uops:list[UOp]):
     arg_dtypes:list[list[tuple[int, DType]]] = []
     for i,u in enumerate(u for u in uops if u.op is Ops.PARAM):
-      if len(arg_dtypes) >= u.arg: arg_dtypes.append([])
-      arg_dtypes[u.arg].append((i, u.dtype))
+      while len(arg_dtypes) <= u.arg.slot: arg_dtypes.append([])
+      arg_dtypes[u.arg.slot].append((i, u.dtype))
     return tuple(tuple(a) for a in arg_dtypes),
 
   def supported_dtypes(self): return {d for d in super().supported_dtypes()
