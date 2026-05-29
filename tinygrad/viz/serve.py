@@ -43,7 +43,7 @@ from tinygrad.uop.ops import TrackedGraphRewrite, RewriteTrace, UOp, Ops, GroupO
 from tinygrad.uop.ops import KernelInfo
 from tinygrad.uop.render import print_uops, pyrender
 from tinygrad.device import ProfileDeviceEvent, ProfileGraphEvent, ProfileGraphEntry, ProfileProgramEvent
-from tinygrad.dtype import dtypes
+from tinygrad.dtype import dtypes, AddrSpace
 
 uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", Ops.REDUCE: "#FF5B5B",
                **{x:"#f2cb91" for x in {Ops.DEFINE_LOCAL, Ops.DEFINE_REG}}, Ops.SHAPED_WMMA: "#FF5B5B",
@@ -55,6 +55,8 @@ uops_colors = {Ops.LOAD: "#ffc0c0", Ops.STORE: "#87CEEB", Ops.CONST: "#e0e0e0", 
                Ops.LINEAR: "#7DF4FF",
                Ops.ALLREDUCE: "#ff40a0", Ops.MSELECT: "#d040a0", Ops.MSTACK: "#d040a0", Ops.CONTIGUOUS: "#FFC14D",
                Ops.STAGE: "#AC640D", Ops.REWRITE_ERROR: "#ff2e2e", Ops.AFTER: "#8A7866", Ops.END: "#524C46"}
+
+addrspace_colors = {AddrSpace.REG:"#e68181", AddrSpace.LOCAL:"#e7c86a", AddrSpace.GLOBAL:"#75bd7b"}
 
 # VIZ API
 
@@ -121,7 +123,7 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
     if u.op is Ops.STACK and len(u.src) == 0: excluded.add(u)
     # exclude RESHAPE/EXPAND that only serve to broadcast a CONST
     if u.op in {Ops.RESHAPE, Ops.EXPAND} and len(u.src) >= 1 and u.src[0] in excluded and u is not x: excluded.add(u)
-    if u.op in GroupOp.Movement: excluded.update(s for s in u.src if s.op is Ops.STACK)
+    if u.op in GroupOp.Movement: excluded.update(s for s in u.src if s.op is Ops.STACK and all(x.op is Ops.CONST for x in s.src))
   for u in toposort:
     argst = codecs.decode(str(u.arg), "unicode_escape")
     if u.op in GroupOp.Movement: argst = (mask_to_str if u.op in {Ops.SHRINK, Ops.PAD} else shape_to_str)(u.marg)
@@ -160,8 +162,11 @@ def uop_to_json(data:VizData, x:UOp) -> dict[int, dict]:
     # limit SOURCE labels line count
     if u.op is Ops.SOURCE and len(lines:=label.split("\n")) > 40:
       label = "\n".join(lines[:30]) + "\n..."
+    try: addrspace = u.addrspace
+    except Exception: addrspace = None
     graph[id(u)] = {"label":label, "src":[(i,id(x)) for i,x in enumerate(u.src)], "exclude":u in excluded, "color":uops_colors.get(u.op, "#ffffff"),
-                    "ref":ref, "tag":repr(u.tag) if u.tag is not None else None}
+                    "ref":ref, "tag":repr(u.tag) if u.tag is not None else None,
+                    "addrspace":addrspace_colors.get(addrspace, None) if addrspace is not None else None}
   return graph
 
 def _reconstruct(data:VizData, a:int, depth:int|None=None):

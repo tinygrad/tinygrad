@@ -18,6 +18,19 @@ class AxisType(Enum):
   def __repr__(self): return str(self)
   GLOBAL = auto(); WARP = auto(); LOCAL = auto(); LOOP = auto(); GROUP_REDUCE = auto(); REDUCE = auto(); UPCAST = auto(); UNROLL = auto() # noqa: E702
   THREAD = auto(); PLACEHOLDER = auto() # noqa: E702
+
+@dataclass(frozen=True, order=True)
+class ParamArg:
+  slot: int
+  vmin_vmax: tuple[PyConst, PyConst]|None = None
+  name: str|None = None
+  addrspace: AddrSpace = AddrSpace.GLOBAL
+  axis: int|None = None
+  device: str|tuple[str, ...]|None = None
+  def __repr__(self):
+    fields = (("vmin_vmax", None), ("name", None), ("addrspace", AddrSpace.GLOBAL), ("axis", None), ("device", None))
+    args = [str(self.slot)] + [f"{k}={v!r}" for k,default in fields if (v:=getattr(self, k)) != default]
+    return f"ParamArg({', '.join(args)})"
 axis_letters = {AxisType.GLOBAL: "g", AxisType.THREAD: "t", AxisType.LOCAL: "l", AxisType.WARP: "w", AxisType.LOOP: "L", AxisType.UPCAST: "u",
                 AxisType.GROUP_REDUCE: "G", AxisType.REDUCE: "R", AxisType.UNROLL: "r"}
 axis_colors = {AxisType.GLOBAL: "blue", AxisType.THREAD: "BLUE", AxisType.LOCAL: "cyan", AxisType.WARP: "CYAN", AxisType.LOOP: "WHITE",
@@ -281,9 +294,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       case Ops.PARAM:
         if isinstance(self.dtype, ImageDType): return self.dtype.shape
         if isinstance(self.dtype, PtrDType): return (self.ptrdtype.size,)
-        # NOTE: copied from marg
-        if len(self.src) >= 1: return tuple(self.src[0].sgep(i) for i in range(self.src[0].dtype.count))
-        return None
+        return tuple(self.src[0].sgep(i) for i in range(self.src[0].dtype.count)) if len(self.src) >= 1 else None
 
       # wmma output shape = accumulator shape (src[2])
       case Ops.WMMA | Ops.SHAPED_WMMA: return self.src[2]._shape
@@ -305,7 +316,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
           return ps[:-1]+(ssimplify((ps[-1]*input_sz) // output_sz),) if len(ps) > 0 else ps
         return ps
 
-      # MULTI marker (axis info in PARAM sources) has no shape
+      # MULTI marker has no shape
       case Ops.MULTI if len(self.src) == 0: return None
 
     # movement ops change the shape
@@ -327,19 +338,20 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
           return tuple(ps[i] for i in self.marg)
         case Ops.PAD:
           # TODO: why do i need resolve here?
-          if len(ps) != len(self.marg) or not all(resolve(b>=0) and resolve(e>=0) for b,e in self.marg): raise ValueError(f"invalid pad {self.marg}")
-          return tuple(ssimplify(s+b+e) for s,(b,e) in zip(ps, self.marg))
+          if len(ps) != len(self.marg) or not all(resolve(sz>=0) and resolve(0<=o) and resolve(o+s<=sz) for s,(o,sz) in zip(ps, self.marg)):
+            raise ValueError(f"invalid pad {self.marg} for {ps}")
+          return tuple(ssimplify(sz) for _,sz in self.marg)
         case Ops.SHRINK:
           # TODO: why do i need resolve here?
-          if len(ps) != len(self.marg) or not all(resolve(0<=b) and resolve(b<=e) and resolve(e<=s) for s,(b,e) in zip(ps, self.marg)):
+          if len(ps) != len(self.marg) or not all(resolve(0<=o) and resolve(sz>=0) and resolve(o+sz<=s) for s,(o,sz) in zip(ps, self.marg)):
             raise ValueError(f"invalid shrink {self.marg} for {ps}")
-          return tuple(ssimplify(e-s) for s,e in self.marg)
+          return tuple(ssimplify(sz) for _,sz in self.marg)
         case Ops.FLIP:
           if len(ps) != len(self.marg) or not all(isinstance(x, bool) for x in self.marg): raise ValueError(f"bad flip on {ps}, {self.marg}")
           return ps
         case Ops.MULTI: return tuple(s*len(self.device) if a == self.axis else s for a,s in enumerate(ps))
         case Ops.REDUCE:
-          axis_arg = self.arg[1] if self.op is Ops.REDUCE else self.arg[7]
+          axis_arg = self.arg[1]
           if not isinstance(axis_arg, tuple) or not all(isinstance(x, int) and x>=0 and x<len(ps) for x in axis_arg):
             raise ValueError(f"invalid type for axis: {axis_arg}")
           return tuple(1 if i in axis_arg else s for i,s in enumerate(ps))
@@ -367,6 +379,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
   @property
   def max_shape(self) -> tuple[int, ...]: return to_max_shape(self.shape)
+  def max_numel(self) -> int: return prod(self.max_shape)
 
   @property
   def shard_shape(self) -> tuple[sint, ...]:
@@ -524,7 +537,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     return UOp(op, out_dtype, all_srcs, **kwargs)
   @staticmethod
   def const(dtype:DType, b:ConstLike, device:str|tuple[str, ...]|None=None, shape:tuple[sint, ...]|None=None):
-    if isinstance(b, UOp): return b.unbind()[0] if b.op is Ops.BIND else b
+    if isinstance(b, UOp): return b.cast(dtype)
     if isinstance(b, tuple) and all_same(b):
       assert len(b) > 0, "can't create const from empty tuple"
       b = b[0]  # doesn't have to be a STACK if they are all the same
@@ -553,7 +566,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   @staticmethod
   def invalid(count=1): return UOp(Ops.CONST, dtypes.weakint.vec(count), src=(), arg=Invalid)
   def valid(self, cond):
-    return self if cond.op is Ops.WHERE and cond.arg else cond.where(self.cast(dtypes.weakint), UOp.invalid(self.dtype.count))
+    return cond.where(self.cast(dtypes.weakint), UOp.invalid(self.dtype.count))
   def get_idx(self) -> UOp:
     assert self.dtype.scalar() is dtypes.weakint, "Can only call get_idx on index dtype"
     return self.src[1] if self.op is Ops.WHERE and self.src[2].arg is Invalid else self
@@ -609,11 +622,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     if self.op is Ops.GETTUPLE:
       in_tuple = self.src[0].src[0] if self.src[0].op is Ops.FUNCTION else self.src[0]
       return in_tuple.src[self.arg].axis if in_tuple.op is Ops.TUPLE else None
-    # PARAM: axis is stored as a MULTI source
-    if self.op is Ops.PARAM:
-      for s in self.src:
-        if s.op is Ops.MULTI: return s.arg
-      return None
+    if self.op is Ops.PARAM: return self.arg.axis
     # NOTE: they all have to share an axis, we always choose [-1]
     if self.op in GroupOp.ALU: return axes[-1] if (axes := dedup([x.axis for x in self.src if x.axis is not None])) else None
     if len(self.src) == 0: return None
@@ -730,6 +739,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     return ret.after(ret.store(src))
   @recursive_property
   def device(self) -> str|tuple[str, ...]|None:
+    if self.op is Ops.PARAM: return self.arg.device
     if self.op is Ops.DEVICE: return self.arg
     if self.op is Ops.STAGE: return self.arg.device
     if self.op is Ops.AFTER: return self.src[0].device
@@ -741,6 +751,18 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     for x in self.src:
       if x.device is not None: return x.device
     return None
+  @property
+  def addrspace(self) -> AddrSpace:
+    if self.op is Ops.PARAM: return self.arg.addrspace
+    if self.op is Ops.BUFFER: return AddrSpace.GLOBAL
+    if self.op is Ops.DEFINE_LOCAL: return AddrSpace.LOCAL
+    if self.op is Ops.DEFINE_REG: return AddrSpace.REG
+    if self.op is Ops.STACK:
+      assert all_same([x.addrspace for x in self.src]), "addrspace mismatch"
+      return self.src[0].addrspace
+    if self.op in {Ops.INDEX, Ops.CAST, Ops.AFTER}: return self.src[0].addrspace
+    if self.op in GroupOp.Movement: return self.src[0].addrspace
+    raise Exception(f"{self.op} doesn't have addrspace")
   @property
   def buf_uop(self) -> UOp:
     if self.op in {Ops.BUFFER, Ops.PARAM}: return self
@@ -948,7 +970,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     # float has NAN issue and we use explicit NAN in transcendental
     if self.op is Ops.WHERE and dtypes.is_int(self.dtype): return min(self.src[1].vmin, self.src[2].vmin), max(self.src[1].vmax, self.src[2].vmax)
     # NOTE: returned UOp is assumed to be CONST
-    if self.op is Ops.PARAM and len(self.src) >= 4: return self.src[2].arg, self.src[3].arg
+    if self.op is Ops.PARAM and self.arg.vmin_vmax is not None: return self.arg.vmin_vmax
     if self.op is Ops.DEFINE_VAR and self.arg: return self.arg[1], self.arg[2]
     if self.op in (Ops.RANGE, Ops.SPECIAL): return 0, (self.src[0]-1).vmax
     if self.op is Ops.BIND: return self.src[0]._min_max # ignore the bound value
@@ -993,7 +1015,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   @staticmethod
   def placeholder(shape:tuple[int, ...], dtype:DType, slot:int, addrspace=AddrSpace.GLOBAL):
     lookup = {AddrSpace.GLOBAL: Ops.PARAM, AddrSpace.LOCAL: Ops.DEFINE_LOCAL, AddrSpace.REG: Ops.DEFINE_REG}
-    ret = UOp(lookup[addrspace], dtype.ptr(prod(shape), addrspace), arg=slot)
+    arg = ParamArg(slot, addrspace=addrspace) if addrspace is AddrSpace.GLOBAL else slot
+    ret = UOp(lookup[addrspace], dtype.ptr(prod(shape), addrspace), arg=arg)
     if len(shape) > 1: ret = ret.reshape(shape)
     return ret
   def placeholder_like(self, slot:int):
@@ -1006,18 +1029,17 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
   # TODO: this should replace placeholder
   @staticmethod
-  def param(slot:int, dtype:DType, shape:tuple[sint, ...]|None=None, device=None, vmin_vmax:tuple[PyConst, PyConst]|None=None, name=None):
-    src: tuple[UOp, ...] = (UOp(Ops.NOOP) if shape is None else shape_to_shape_arg(shape),) + \
-                           (UOp(Ops.NOOP) if device is None else UOp(Ops.DEVICE, arg=device),)
-    if vmin_vmax is not None: src += (UOp.const(dtype, vmin_vmax[0]), UOp.const(dtype.scalar(), vmin_vmax[1]))
-    if name is not None: src += (UOp(Ops.NOOP, arg=name),)
-    return UOp(Ops.PARAM, dtype, src, arg=slot)
+  def param(slot:int, dtype:DType, shape:tuple[sint, ...]|None=None, device=None, vmin_vmax:tuple[PyConst, PyConst]|None=None, name=None,
+            addrspace=AddrSpace.GLOBAL, axis:int|None=None):
+    if shape is not None and axis is not None and isinstance(device, tuple):
+      shape = tuple(s*len(device) if i == axis else s for i,s in enumerate(shape))
+    src: tuple[UOp, ...] = (UOp(Ops.NOOP) if shape is None else shape_to_shape_arg(shape),)
+    return UOp(Ops.PARAM, dtype, src, arg=ParamArg(slot, vmin_vmax, name, addrspace, axis, device))
   def param_like(self, slot:int):
+    addrspace = self.addrspace if isinstance(self.dtype, (PtrDType, ImageDType)) else AddrSpace.GLOBAL
     if self.op is Ops.BIND:
-      return UOp.param(slot, self.dtype, self._shape, self.device, self._min_max, self.src[0].arg[0])
-    p = UOp.param(slot, self.dtype, self._shape, self.device)
-    if self.axis is not None: p = p.replace(src=p.src + (UOp(Ops.MULTI, arg=self.axis),))
-    return p
+      return UOp.param(slot, self.dtype, self._shape, self.device, cast(tuple[int, int], self._min_max), self.src[0].arg[0], addrspace)
+    return UOp.param(slot, self.dtype, self.shard_shape if self.axis is not None else self._shape, self.device, addrspace=addrspace, axis=self.axis)
 
   # opaque bodies stay as Ops.CALL; value-producing bodies become Ops.FUNCTION (wrapped in TUPLE)
   _OPAQUE_CALL_BODIES = {Ops.SINK, Ops.PROGRAM, Ops.LINEAR, Ops.COPY, Ops.SLICE, Ops.CUSTOM_FUNCTION}
@@ -1081,10 +1103,10 @@ class ProgramInfo:
     local_size: list[int]|None = [1, 1, 1]
     for u in sink.toposort():
       if u.op is Ops.DEFINE_VAR: _vars.append(u)
-      if u.op is Ops.PARAM: _globals.append(u.arg)
+      if u.op is Ops.PARAM: _globals.append(u.arg.slot)
       if u.op in (Ops.STORE, Ops.LOAD):
         if (idx:=u.src[0]).op is Ops.INDEX or (u.src[0].op is Ops.CAST and (idx:=u.src[0].src[0]).op is Ops.INDEX):
-          if (buf:=idx.src[0]).op is Ops.PARAM: (outs if u.op is Ops.STORE else ins).append(buf.arg)
+          if (buf:=idx.src[0]).op is Ops.PARAM: (outs if u.op is Ops.STORE else ins).append(buf.arg.slot)
       if u.op is Ops.SPECIAL:
         if u.arg[0] == 'i': local_size = None
         special_size = local_size if u.arg[0] == 'l' else global_size
@@ -1156,13 +1178,15 @@ def get_location() -> tuple[str, int]:
   return frm.f_code.co_filename, frm.f_lineno
 
 class UPat(OpMixin):
-  __slots__ = ("op", "match_dtype", "arg", "name", "src", "is_any")
+  __slots__ = ("op", "match_dtype", "match_tag", "arg", "name", "src", "is_any")
   def __init__(self, op:Ops|tuple[Ops, ...]|set[Ops]|None=None, dtype:DType|tuple[DType, ...]|set[DType]|None=None,
                src:tuple[UPat, ...]|list[UPat]|UPat|None=None, arg:Any=None,
-               name:str|None=None, allow_any_len:bool=False, custom_early_reject:set[Ops]|None=None, location=None, is_any:bool=False):
+               name:str|None=None, allow_any_len:bool=False, custom_early_reject:set[Ops]|None=None, location=None, is_any:bool=False,
+               tag:Any=None):
     assert op is None or isinstance(op, (Ops, tuple, set)), f"op must be Ops or tuple of Ops, not {op!r}"
     self.op: tuple[Ops, ...]|None = (op,) if isinstance(op, Ops) else (tuple(op) if isinstance(op, set) else op)
     self.match_dtype: tuple[DType, ...]|None = (dtype,) if isinstance(dtype, DType) else (tuple(dtype) if isinstance(dtype, set) else dtype)
+    self.match_tag: tuple[Any, ...]|None = (tag,) if isinstance(tag, str) else (tuple(tag) if isinstance(tag, set) else tag)
     self.arg, self.name, self._in_src, self.custom_early_reject = arg, name, src, custom_early_reject
     self.src: Any = None
     self.is_any = is_any
@@ -1192,8 +1216,10 @@ class UPat(OpMixin):
   def _ensure_float(self) -> UPat: return self
 
   def __reduce__(self):
-    return UPat, (self.op, self.match_dtype, self._in_src, self.arg, self.name, not self.strict_length, self.custom_early_reject, self.location)
-  def named(self, name:str): return UPat(self.op, self.match_dtype, self._in_src, self.arg, name, not self.strict_length, self.custom_early_reject)
+    return UPat, (self.op, self.match_dtype, self._in_src, self.arg, self.name, not self.strict_length, self.custom_early_reject, self.location,
+                  self.is_any, self.match_tag)
+  def named(self, name:str):
+    return UPat(self.op, self.match_dtype, self._in_src, self.arg, name, not self.strict_length, self.custom_early_reject, tag=self.match_tag)
 
   @staticmethod
   def any(*src): return UPat(src=src, is_any=True)
@@ -1206,8 +1232,7 @@ class UPat(OpMixin):
   def var(name:str|None=None, dtype:DType|tuple[DType, ...]|None=None): return UPat(dtype=dtype, name=name)
   @staticmethod
   @functools.cache
-  def cvar(name:str|None=None, dtype:DType|tuple[DType, ...]|None=None, vec=True, arg=None):
-    return UPat(Ops.CONST, dtype, name=name, arg=arg)
+  def cvar(name:str|None=None, dtype:DType|tuple[DType, ...]|None=None, arg=None): return UPat(Ops.CONST, dtype, name=name, arg=arg)
   @staticmethod
   def const(dtype:DType|tuple[DType, ...]|None, b:ConstType, device=None): return UPat(Ops.CONST, dtype=dtype, arg=b)
 
@@ -1254,6 +1279,7 @@ class UPat(OpMixin):
        (self.name is not None and store.setdefault(self.name, uop) is not uop) or \
        (self.match_dtype is not None and uop.dtype not in self.match_dtype and uop.dtype.scalar() not in self.match_dtype) or \
        (self.arg is not None and self.arg != uop.arg) or \
+       (self.match_tag is not None and uop.tag not in self.match_tag) or \
        (len(uop.src) < self.required_len) or \
        (self.strict_length and len(uop.src) != self.required_len): return []
     if self.src is None: return [store]
@@ -1624,7 +1650,7 @@ pm_lower_index_dtype = PatternMatcher([
 def _index_to_concrete_int(u:UOp) -> UOp: return graph_rewrite(u.sink(), pm_lower_index_dtype).src[0]
 
 _substitute = PatternMatcher([(UPat(tuple(Ops), name="x"), lambda ctx,x: ctx.get(x,None))])
-_pm_resolve_params = PatternMatcher([(UPat(Ops.PARAM, name="p"), lambda ctx,p: ctx[p.arg])])
+_pm_resolve_params = PatternMatcher([(UPat(Ops.PARAM, name="p"), lambda ctx,p: ctx[p.arg.slot])])
 remove_all_tags = PatternMatcher([(UPat(GroupOp.All, name="x"), lambda x: x.replace(tag=None) if x.tag is not None else None)])
 
 def gate_kernel_sink(x:UOp) -> bool:

@@ -63,7 +63,7 @@ def mem_type(x:UOp) -> str:
   match x.op:
     case Ops.AFTER: return mem_type(x.src[0])
     case Ops.DEFINE_LOCAL: return 'shared'
-    case Ops.PARAM: return 'global'
+    case Ops.PARAM: return 'shared' if x.addrspace == AddrSpace.LOCAL else 'global'
     case _: raise RuntimeError(f"{x.op} needs to be memory")
 
 def render_wmma(ctx: "PTXRenderer", wmma: UOp):
@@ -90,7 +90,7 @@ string_rewrite = PatternMatcher([
   (UPat.cvar("x", dtypes.bool), lambda ctx, x: f"setp.ne.s16 {ctx.r[x]}, {render_val(x.arg, x.dtype)}, 0;"),
   (UPat.cvar("x"), lambda ctx, x: f"mov.b{ctx.types[x.dtype][1:]} {ctx.r[x]}, {render_val(x.arg, x.dtype)};"),
   (UPat(Ops.SPECIAL, name="x"), lambda ctx,x: f"mov.u32 %{x.arg}, %{'ctaid' if x.arg[0] == 'g' else 'tid'}.{chr(120+int(x.arg[-1]))};"),
-  (UPat(Ops.PARAM, name="x"), lambda ctx, x: f"ld.param.{ctx.types[dtypes.ulong]} {ctx.r[x]}, [data{x.arg}+0];"),
+  (UPat(Ops.PARAM, name="x"), lambda ctx, x: f"ld.param.{ctx.types[dtypes.ulong]} {ctx.r[x]}, [data{x.arg.slot}+0];"),
   (UPat((Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ), name="x", allow_any_len=True, src=(UPat.var("src0"),)),
     lambda ctx, x, src0: ctx.code_for_op[x.op](ctx.r[x], *[ctx.r[v] for v in x.src], src0.dtype, ctx.types[src0.dtype])),
   (UPat(GroupOp.ALU, name="x"), lambda ctx, x: ctx.code_for_op[x.op](ctx.r[x], *[ctx.r[v] for v in x.src], x.dtype, ctx.types[x.dtype])),
@@ -202,7 +202,7 @@ class PTXRenderer(Renderer):
         r[u] = r[u.src[0]]
         continue
       if u.op is Ops.DEFINE_REG:
-        r[u] = [ssa("reg", u, self.types[u.dtype.base.scalar()]) for _ in range(u.ptrdtype.size)]
+        r[u] = [ssa("reg", u, self.types[u.dtype.base.scalar()]) for _ in range(u.max_numel())]
         continue
       if u.op in {Ops.INDEX, Ops.LOAD, Ops.STORE} and isinstance(u.src[0].dtype, PtrDType) and u.src[0].dtype.addrspace == AddrSpace.REG:
         if u.op is Ops.INDEX:
@@ -219,7 +219,7 @@ class PTXRenderer(Renderer):
       elif u.op is Ops.DEFINE_VAR: bufs.append((u.expr, u.dtype))
       elif u.op is Ops.LOAD:
         r[u] = [ssa('val', dtype=self.types[u.dtype.scalar()]) for _ in range(u.dtype.count)] if u.dtype.count > 1 else ssa('val', u)
-      elif u.op is Ops.PARAM: bufs.append((f"data{u.arg}", u.dtype))
+      elif u.op is Ops.PARAM: bufs.append((f"data{u.arg.slot}", u.dtype))
       elif u.op is Ops.WMMA:
         # registers for packing/unpacking input and acc
         self.wmma_r = [[ssa("wmma_in", dtype="b32") for _ in range(0, len(r[u.src[0]]), 4 // u.src[0].dtype.scalar().itemsize)],

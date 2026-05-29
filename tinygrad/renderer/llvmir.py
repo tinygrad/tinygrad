@@ -164,7 +164,7 @@ class LLVMRenderer(Renderer):
         if u.arg is not None: name = u.arg.function_name
         continue
       if u.op in (Ops.PARAM, Ops.DEFINE_VAR):
-        r[u] = f"%data{u.arg}" if u.op is Ops.PARAM else f"%{u.expr}"
+        r[u] = f"%data{u.arg.slot}" if u.op is Ops.PARAM else f"%{u.expr}"
         args.append((r[u], u.dtype))
       elif u.op in (Ops.DEFINE_LOCAL, Ops.DEFINE_REG):
         r[u] = f"%{'local' if u.op is Ops.DEFINE_LOCAL else 'reg'}_{str(u.arg).replace('(', '').replace(')', '').replace(',', '_').replace(' ', '')}"

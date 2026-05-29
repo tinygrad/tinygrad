@@ -91,7 +91,7 @@ def add_gpudims(ctx:Renderer, s:UOp):
   subs = {}
   for r in s_topo:
     # look for local INDEXes that are not used in the GLOBAL store, then add them as an INVALID
-    if r.op is Ops.STORE and (idx := r.src[0]).src[0].ptrdtype.addrspace == AddrSpace.GLOBAL:
+    if r.op is Ops.STORE and (idx := r.src[0]).src[0].addrspace == AddrSpace.GLOBAL:
       missing_locals = [all_ranges[rng] for rng in local_dims if all_ranges[rng] not in idx.ranges]
       if len(missing_locals):
         assert len(idx.src) == 2, "index has 2 sources"

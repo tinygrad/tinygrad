@@ -6,6 +6,7 @@ from tinygrad.uop.ops import UOp, Ops
 
 STOCHASTIC_ROUND = getenv("STOCHASTIC_ROUND", 0)
 MASTER_WEIGHTS = getenv("MASTER_WEIGHTS", 0)
+FP8_AMAX_MARGIN = getenv("FP8_AMAX_MARGIN", 1.1)
 
 def _sr_noise(x:Tensor) -> Tensor:
   if isinstance(x.device, tuple):
@@ -48,7 +49,8 @@ class GradAccClipAdamW(Optimizer):
     for i, tt in enumerate(self.params): tt.assign(self._apply_update(tt, updates[i], self.master_params[i] if self.master_params else None))
     # collect inv_scale tensors attached to fp8 params (set by _apply_update)
     fp8_inv_scales = [tt._inv_scale for tt in self.params if hasattr(tt, '_inv_scale')]
-    to_realize = extra+self.params+self.buffers+(self.master_params or [])+fp8_inv_scales
+    fp8_next_inv_scales = [tt._next_inv_scale for tt in self.params if hasattr(tt, '_next_inv_scale')]
+    to_realize = extra+self.params+self.buffers+(self.master_params or [])+fp8_inv_scales+fp8_next_inv_scales
 
     Tensor.realize(*to_realize)
     return extra[-1]
@@ -98,13 +100,14 @@ class GradAccClipAdamW(Optimizer):
     if t.dtype in dtypes.fp8s:
       from examples.mlperf.models.flat_llama import FP8_MAX
       # delayed scaling: reuse previous step's inv_scale
+      t._inv_scale.assign(t._next_inv_scale)
       scale = t._inv_scale.reciprocal().reshape(-1, *([1]*(new_w.ndim-1)))
       scaled = (new_w * scale).clamp(-FP8_MAX, FP8_MAX)
       ret = stochastic_round_fp8(scaled, t.dtype) if STOCHASTIC_ROUND else scaled.cast(t.dtype)
       # update inv_scale for next step from quantized result
-      new_amax = (ret.float().abs().max(axis=tuple(range(1, ret.ndim))) * t._inv_scale).detach()
-      inv = ((new_amax + 1e-8) / FP8_MAX).cast(t._inv_scale.dtype)
-      t._inv_scale.assign(inv.shard_like(t._inv_scale) if offloaded else inv)
+      new_amax = (ret.float().abs().max(axis=tuple(range(1, ret.ndim))) * t._inv_scale * FP8_AMAX_MARGIN).detach()
+      new_inv = ((new_amax + 1e-8) / FP8_MAX).cast(t._inv_scale.dtype)
+      t._next_inv_scale.assign(new_inv.shard_like(t._next_inv_scale) if offloaded else new_inv)
       return ret.shard_like(t) if offloaded else ret
     out = new_w.cast(t.dtype)
     return out.shard_like(t) if offloaded else out

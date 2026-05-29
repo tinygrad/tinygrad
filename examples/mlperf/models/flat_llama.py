@@ -136,6 +136,7 @@ class FlatTransformer:
     w_scales = [("wqkv", s_qkv), ("wo", s_o), ("w2", s_2)]
     w_scales += [("w1", s_1), ("w3", s_3)] if SPLIT_W13 else [("w13", s_13)]
     self._fp8_inv_scale = {name: s.float().contiguous().is_param_(False) for name, s in w_scales}
+    self._fp8_next_inv_scale = {name: s.float().contiguous().is_param_(False) for name, s in w_scales}
 
   def lin_per_layer(self, in_features:int, out_features:int, std:float=0.02):
     if getenv("ZEROS"): w = Tensor.zeros(self.n_layers, out_features, in_features)
@@ -227,7 +228,7 @@ class FlatTransformer:
         self.w1.shard_(device, axis=1).realize()
         self.w3.shard_(device, axis=1).realize()
       else:
-        self.w13.shard_(device, axis=1).realize()           # (n_layers, hidden*2, dim) shard out
+        self.w13.shard_(device, axis=1).realize()         # (n_layers, hidden*2, dim) shard out
       self.w2.shard_(device, axis=2).realize()            # (n_layers, dim, hidden) shard in
       self.attention_norm.shard_(device, axis=None).realize()
       self.ffn_norm.shard_(device, axis=None).realize()
@@ -241,6 +242,8 @@ class FlatTransformer:
             amax_dict[name][i] = amax_dict[name][i].to(device).contiguous().is_param_(False)
       for name in self._fp8_inv_scale:
         self._fp8_inv_scale[name] = self._fp8_inv_scale[name].to(device).contiguous().is_param_(False)
+      for name in self._fp8_next_inv_scale:
+        self._fp8_next_inv_scale[name] = self._fp8_next_inv_scale[name].to(device).contiguous().is_param_(False)
 
   def __call__(self, tokens:Tensor, save:bool=True):
     h = self.tok_embeddings(tokens)

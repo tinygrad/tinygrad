@@ -137,8 +137,8 @@ class ExecContext:
   cache: bool = True
 
 def _resolve(b:UOp, inputs:tuple[UOp, ...]) -> UOp:
-  if b.op in (Ops.SLICE, Ops.MSELECT) and b.src[0].op is Ops.PARAM: return b.replace(src=(inputs[b.src[0].arg], *b.src[1:]))
-  return inputs[b.arg] if b.op is Ops.PARAM else b
+  if b.op in (Ops.SLICE, Ops.MSELECT) and b.src[0].op is Ops.PARAM: return b.replace(src=(inputs[b.src[0].arg.slot], *b.src[1:]))
+  return inputs[b.arg.slot] if b.op is Ops.PARAM else b
 def resolve_params(call:UOp, inputs:tuple[UOp, ...]) -> list[UOp]: return [_resolve(b, inputs) for b in get_call_arg_uops(call)]
 
 def unwrap_multi(call:UOp, resolved:list[UOp]) -> Iterator[tuple[list[Buffer], dict[str, int]]]:
@@ -241,14 +241,13 @@ pm_exec = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="validate", name="ast"),), name="call", allow_any_len=True), exec_validate),
 ])
 
-if getenv("HCQ2"):
-  from extra.hcq2.hcq2 import pm_hcq_exec
-  pm_exec = pm_hcq_exec + pm_exec
-
 def compile_linear(linear:UOp, beam:int|None=None, validate=False) -> UOp:
   if validate: linear = graph_rewrite(linear, pm_validate, name="validate", walk=True)
   if (beam_val:=BEAM.value if beam is None else beam) >= 1: linear = graph_rewrite(linear, pm_beam, ctx=beam_val, walk=True)
   linear = graph_rewrite(linear, pm_compile, name="precompile kernels", walk=True)
+  if getenv("HCQ2"):
+    from extra.hcq2.hcq2 import hcq_schedule
+    linear = hcq_schedule(linear)
   return graph_rewrite(linear, pm_optimize_local_size, name="optimize local size", walk=True)
 
 def run_linear(linear:UOp, var_vals:dict[str, int]|None=None, input_uops:tuple[UOp, ...]=(), update_stats=True, jit=False, wait=False):
