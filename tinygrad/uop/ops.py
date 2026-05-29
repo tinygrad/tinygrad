@@ -99,9 +99,6 @@ class UOpMetaClass(type):
   ucache:dict[tuple, weakref.ReferenceType[UOp]] = {}
   def __call__(cls, op:Ops, dtype:DType=dtypes.void, src:tuple[UOp,...]=tuple(), arg:Any=None, tag:Any=None,
                metadata:tuple[Metadata,...]|None=None, _buffer:Buffer|None=None):
-    if op is Ops.PARAM: assert isinstance(arg, ParamArg), f"PARAM arg must be ParamArg, got {arg!r}"
-    if op is Ops.PARAM and isinstance(dtype, PtrDType) and not isinstance(dtype, ImageDType) and dtype.addrspace != arg.addrspace:
-      dtype = dtype.base.ptr(dtype.size, arg.addrspace).vec(dtype.v) if dtype.v != 1 else dtype.base.ptr(dtype.size, arg.addrspace)
     if (wret:=UOpMetaClass.ucache.get(key:=(op, dtype, src, arg, tag), None)) is not None and (ret:=wret()) is not None: return ret
     UOpMetaClass.ucache[key] = weakref.ref(created:=super().__call__(*key))
     if metadata is not None: all_metadata[created] = metadata

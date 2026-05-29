@@ -20,7 +20,7 @@ def run_uops(uops_list:list[UOp], bufs:list[Buffer]):
 
 def uop(uops:list[UOp], op:Ops, dtype:Optional[DType], src:tuple[UOp, ...], arg:Any=None) -> UOp:
   if op is Ops.CONST: uops.append(UOp.const(dtype, arg))
-  elif op is Ops.PARAM: uops.append(UOp.param(arg, dtype))
+  elif op is Ops.PARAM: uops.append(UOp.param(arg, dtype).replace(src=()))
   else: uops.append(UOp(op, dtype, tuple(src), arg))
   return uops[-1]
 
