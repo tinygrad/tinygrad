@@ -126,7 +126,7 @@ class TestIndexing(unittest.TestCase):
     # WEBGPU generates more ops due to bitpacking of < 4-byte dtypes
     if Device.DEFAULT == "WEBGPU": op_limit *= 15
     # from tinygrad.nn.datasets import mnist
-    X_train, Y_train = Tensor.randn(60000, 1, 28, 28).realize(), Tensor.randn(60000).realize()
+    X_train, Y_train = Tensor.randint(60000, 1, 28, 28, dtype='uchar').realize(), Tensor.randint(60000, dtype='uchar').realize()
     with Context(NOOPT=noopt, SPLIT_REDUCEOP=split_reduceop):
       samples = Tensor.randint(getenv("BS", 512), high=X_train.shape[0]).realize()
       GlobalCounters.reset()
