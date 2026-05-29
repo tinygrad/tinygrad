@@ -268,7 +268,7 @@ SCACHE = ContextVar("SCACHE", 1)
 # allow use of atomics for embedding backward
 USE_ATOMICS = ContextVar("USE_ATOMICS", 0)
 # don't allow broadcast
-DISALLOW_BROADCAST = ContextVar("DISALLOW_BROADCAST", 1)
+DISALLOW_BROADCAST = ContextVar("DISALLOW_BROADCAST", 0)
 
 @dataclass(frozen=True)
 class Metadata:
