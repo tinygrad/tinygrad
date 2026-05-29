@@ -88,12 +88,13 @@ class GradAccClipAdamW(Optimizer):
 
   def _apply_update(self, t:Tensor, up:Tensor, master:Tensor|None=None) -> Tensor:
     w = master if master is not None else t
+    if master is None and self.device is not None and self.device != t.device:
+      w = t.detach().to(self.device)
     wd = self.wd if t.ndim >= 3 else 0.0
     up = up.float().shard_like(w) + self.lr.to(w.device) * wd * w.detach()
     new_w = w.detach() - up
     if master is not None: master.assign(new_w)
-    # when master is offloaded to a different device than the param, results are resharded back onto the param's (sharded) device
-    offloaded = master is not None and master.device != t.device
+    offloaded = w.device != t.device
     if STOCHASTIC_ROUND and t.dtype == dtypes.bfloat16:
       out = stochastic_round_bf16(new_w)
       return out.shard_like(t) if offloaded else out
