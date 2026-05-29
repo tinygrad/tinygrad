@@ -764,7 +764,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     if self.op in GroupOp.Movement: return self.src[0].addrspace
     if self.op is Ops.STACK or self.op in GroupOp.Elementwise:
       ad = [x.addrspace for x in self.src if x.addrspace is not None]
-      assert all_same(ad), f"addrspace mismatch in {self.op}"
+      assert all_same(ad), f"addrspace mismatch in {self.op} -- {ad}"
       return ad[0] if len(ad) else None
     return None
   @property
