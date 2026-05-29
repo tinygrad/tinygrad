@@ -32,6 +32,8 @@ pm_index_is_shrink = PatternMatcher([
   # rewrite non-image INDEX to SHRINK
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))).cast(name="x"), lambda buf,idx,x:
     UOp(Ops.SHRINK, dtype=buf.dtype.base, src=(buf, idx, UOp.const(dtypes.int, x.dtype.count)))),
+  # rewrite GEP to INDEX
+  (UPat(Ops.GEP, name="x"), lambda x: x.replace(op=Ops.INDEX, src=x.src+(UOp.const(dtypes.int, x.arg),), arg=None)),
   # remove all vec dtypes
   (UPat(GroupOp.All, name="x"), lambda x: x.replace(dtype=x.dtype.base.scalar().base)),
 ])
