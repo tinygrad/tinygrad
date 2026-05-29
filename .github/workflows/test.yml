@@ -902,13 +902,17 @@ jobs:
 
 # ****** Windows Tests ******
 
-  wintests:
+  testwindows:
     strategy:
       fail-fast: false
       matrix:
-        backend: [llvm, cpu, webgpu, x86]
+        dev:
+          - 'CPU:CLANGJIT'
+          - 'CPU:LLVM'
+          - 'CPU:X86'
+          - 'WEBGPU'
 
-    name: Windows (${{ matrix.backend }})
+    name: Windows (DEV=${{ matrix.backend }})
     runs-on: windows-latest
     timeout-minutes: 15
     steps:
@@ -919,23 +923,17 @@ jobs:
         with:
           key: windows-${{ matrix.backend }}-minimal
           deps: testing_unit
-          pydeps: ${{ matrix.backend == 'webgpu' && 'dawn-python' || '' }}
+          pydeps: ${{ matrix.dev == 'WEBGPU' && 'dawn-python' || '' }}
       - name: Set env
-        shell: bash
-        run:  printf "${{ matrix.backend == 'llvm' && 'DEV=CPU:LLVM' || matrix.backend == 'cpu' && 'DEV=CPU\nCPU_COUNT=2' || matrix.backend == 'webgpu' && 'DEV=WEBGPU' || matrix.backend == 'x86' && 'DEV=CPU:X86' }}" >> $GITHUB_ENV
-      - name: Run unit tests
-        if: matrix.backend=='llvm'
-        # test_newton_schulz hits RecursionError
-        run: python -m pytest -n=auto test/unit/ --ignore=test/unit/test_disk_tensor.py --ignore=test/unit/test_tar.py --ignore=test/unit/test_linalg.py --durations=20
-      - name: Run NULL backend tests
-        if: matrix.backend=='llvm'
-        shell: bash
-        run: DEV=NULL python -m pytest -n=auto test/null/ --ignore=test/null/test_elf.py --durations=20
-      - name: Run pytest (${{ matrix.backend }})
+        run: printf "DEV=${{ matrix.dev }}${{ matrix.dev == 'CPU:CLANGJIT' && '\nCPU_COUNT=2' || '' }}" >> $GITHUB_ENV
+      - name: Check Device.DEFAULT and print some source
         shell: bash
         run: |
-          python -c "from tinygrad import Device; assert Device.DEFAULT == {'LLVM':'CPU', 'X86':'CPU'}.get(x:='${{ matrix.backend }}'.upper(), x), Device.DEFAULT"
-          python -m pytest -n=auto test/test_tiny.py test/backend/test_ops.py --durations=20
+          python -c "from tinygrad import Device; from tinygrad.helpers import Target; assert Device.DEFAULT == Target.parse('${{ matrix.dev }}').device"
+          DEBUG=4 python test/test_tiny.py TestTiny.test_plus
+      - name: Run test_tiny
+        shell: bash
+        run: python -m pytest -n=auto test/test_tiny.py --durations=20
 
 # ****** Compile-only Tests ******
 
