@@ -31,7 +31,7 @@ const layoutCfg = (g, { blocks, paths, pc_tokens }) => {
       width = Math.max(width, ctx.measureText(tokens.map((t) => t.st).join("")).width);
       height += lineHeight;
     }
-    g.setNode(lead, { ...rectDims(width, height), label, id:lead, color:"#1a1b26" });
+    g.setNode(lead, { ...rectDims(width, height), label, labelX:0, id:lead, color:"#1a1b26" });
   }
   // paths become edges between basic blocks
   const pathColors = {0:"#3f7564", 1:"#7a4540", 2:"#3b5f7e"};
