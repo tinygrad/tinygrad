@@ -5,13 +5,13 @@ from typing import Generator
 
 from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, TrackedPatternMatcher, graph_rewrite, track_rewrites, profile_matches
 from tinygrad.uop.symbolic import sym
-from tinygrad.dtype import dtypes
+from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.helpers import colored, ansistrip, flatten, TracingKey, ProfileRangeEvent, ProfileEvent, Context, cpu_events, profile_marker
 from tinygrad.helpers import cpu_profile, ProfilePointEvent, unwrap
 from tinygrad.device import Buffer
 
 from tinygrad.uop.ops import tracked_keys, tracked_ctxs, uop_fields, active_rewrites, active_group, _name_cnt, RewriteTrace
-from tinygrad.viz.serve import load_rewrites, get_full_rewrite, uop_to_json, VizData, get_render
+from tinygrad.viz.serve import load_rewrites, get_full_rewrite, uop_to_json, VizData, get_render, addrspace_colors
 from tinygrad.codegen import to_program_cache
 from tinygrad.codegen import to_program
 
@@ -348,6 +348,9 @@ class TestVizIntegration(unittest.TestCase):
     self.assertEqual(lst[0]["name"], "Callify 1 Buffer n1")
     self.assertEqual(lst[1]["name"], "Schedule 1 Kernel n1")
     self.assertEqual(lst[2]["name"], prg.arg.name)
+    input_ast = next(viz.get_details(2, 0))["graph"].values()
+    for u in input_ast:
+      if u["label"].startswith("PARAM\n"): self.assertEqual(u["addrspace"], addrspace_colors[AddrSpace.GLOBAL])
 
   # schedule graph CALL nodes have a link to jump to codegen
   def test_link_sched_codegen(self):

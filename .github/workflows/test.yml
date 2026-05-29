@@ -14,6 +14,10 @@ on:
   pull_request:
   workflow_dispatch:
 
+concurrency:
+  group: test-${{ github.event_name }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   docs:
     name: Docs
@@ -572,7 +576,7 @@ jobs:
       fail-fast: false
       matrix:
         dev:
-          - 'CPU:CLANGJIT'
+          - 'CPU:CLANG'
           - 'CPU:LLVM'
           - 'CPU:LVP'
           - 'CPU:X86'
@@ -591,12 +595,12 @@ jobs:
         key: linux-${{ matrix.dev }}
         deps: testing_unit
         python-version: '3.12'
-        llvm: ${{ contains(matrix.dev, 'LLVM') || contains(matrix.dev, 'LVP') || contains(matrix.dev, 'CLANGJIT') }}
+        llvm: ${{ contains(matrix.dev, 'LLVM') || contains(matrix.dev, 'LVP') || contains(matrix.dev, 'CLANG') }}
         mesa: ${{ contains(matrix.dev, 'LVP') && 'cpu' || 'false' }}
         webgpu: ${{ matrix.dev == 'WEBGPU' }}
         opencl: ${{ matrix.dev == 'CL' }}
     - name: Set env
-      run: printf "DEV=${{ matrix.dev }}${{ matrix.dev == 'CPU:CLANGJIT' && '\nCPU_COUNT=2' || '' }}" >> $GITHUB_ENV
+      run: printf "DEV=${{ matrix.dev }}${{ matrix.dev == 'CPU:CLANG' && '\nCPU_COUNT=2' || '' }}" >> $GITHUB_ENV
     - name: Check Device.DEFAULT and print some source
       run: |
         python -c "from tinygrad import Device; from tinygrad.helpers import Target; assert Device.DEFAULT == Target.parse('${{ matrix.dev }}').device"
@@ -889,7 +893,7 @@ jobs:
       fail-fast: false
       matrix:
         dev:
-          - 'CPU:CLANGJIT'
+          - 'CPU:CLANG'
           - 'CPU:LLVM'
           - 'CPU:X86'
           - 'WEBGPU'
@@ -908,7 +912,7 @@ jobs:
           pydeps: ${{ matrix.dev == 'WEBGPU' && 'dawn-python' || '' }}
       - name: Set env
         shell: bash
-        run: printf "DEV=${{ matrix.dev }}${{ matrix.dev == 'CPU:CLANGJIT' && '\nCPU_COUNT=2' || '' }}" >> $GITHUB_ENV
+        run: printf "DEV=${{ matrix.dev }}${{ matrix.dev == 'CPU:CLANG' && '\nCPU_COUNT=2' || '' }}" >> $GITHUB_ENV
       - name: Check Device.DEFAULT and print some source
         shell: bash
         run: |

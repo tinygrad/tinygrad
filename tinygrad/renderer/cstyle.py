@@ -276,12 +276,11 @@ class ClangRenderer(CStyleLanguage):
   def supported_dtypes(self):
     return {d for d in super().supported_dtypes() if (d != dtypes.bfloat16 or self.target.arch.startswith(("x86", "arm"))) and d not in dtypes.fp8s}
 
-class ClangJITRenderer(ClangRenderer):
   def __init__(self, target:Target):
     super().__init__(target)
-    from tinygrad.runtime.support.compiler_cpu import ClangJITCompiler
+    from tinygrad.runtime.support.compiler_cpu import ClangCompiler
     if "AMX" in target.arch: self.tensor_cores = tc.amx
-    self.compiler = ClangJITCompiler([x for x in target.arch.split(",") if x != "AMX"])
+    self.compiler = ClangCompiler([x for x in target.arch.split(",") if x != "AMX"])
 
 class OpenCLRenderer(CStyleLanguage):
   has_aux = True

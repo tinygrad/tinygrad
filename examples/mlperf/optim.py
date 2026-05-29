@@ -6,6 +6,7 @@ from tinygrad.uop.ops import UOp, Ops
 
 STOCHASTIC_ROUND = getenv("STOCHASTIC_ROUND", 0)
 MASTER_WEIGHTS = getenv("MASTER_WEIGHTS", 0)
+FP8_AMAX_MARGIN = getenv("FP8_AMAX_MARGIN", 1.1)
 
 def stochastic_round_bf16(x:Tensor) -> Tensor:
   bits = x.bitcast(dtypes.uint32)
@@ -95,7 +96,7 @@ class GradAccClipAdamW(Optimizer):
       scaled = (new_w * scale).clamp(-FP8_MAX, FP8_MAX)
       ret = scaled.cast(t.dtype)
       # update inv_scale for next step from quantized result
-      new_amax = (ret.float().abs().max(axis=tuple(range(1, ret.ndim))) * t._inv_scale).detach()
+      new_amax = (ret.float().abs().max(axis=tuple(range(1, ret.ndim))) * t._inv_scale * FP8_AMAX_MARGIN).detach()
       new_inv = ((new_amax + 1e-8) / FP8_MAX).cast(t._inv_scale.dtype)
       t._next_inv_scale.assign(new_inv.shard_like(t._next_inv_scale) if offloaded else new_inv)
       return ret.shard_like(t) if offloaded else ret
