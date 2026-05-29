@@ -77,7 +77,7 @@ def create_new_buffer(ctx:tuple[dict[UOp, UOp], tuple[UOp, ...]], b:UOp):
   return ret
 
 pm_post_sched_cache = PatternMatcher([
-  (UPat(Ops.PARAM, name="x"), lambda ctx,x: ctx[1][x.arg]),
+  (UPat(Ops.PARAM, name="x"), lambda ctx,x: ctx[1][x.arg.slot]),
   # create new BUFFERs for LUNIQUE BUFFERs from rangeify
   (UPat(Ops.BUFFER, src=(UPat(Ops.LUNIQUE), UPat(Ops.DEVICE)), name="b"), create_new_buffer),
 ])

@@ -1438,13 +1438,14 @@ def train_llama3():
 
   fp8_amax = [t for ts in model._fp8_amax.values() for t in ts]
   fp8_grad_amax = [t for ts in model._fp8_grad_amax.values() for t in ts] if hasattr(model, "_fp8_grad_amax") else []
-  fp8_inv_scales = list(model._fp8_inv_scale.values())
+  fp8_inv_scales = list(model._fp8_inv_scale.values()) + list(model._fp8_next_inv_scale.values())
 
   from tinygrad.nn.state import get_state_dict
   model_state = get_state_dict(model)
   for wname in model._fp8_inv_scale:
     w = model_state[wname]
     w._inv_scale = model._fp8_inv_scale[wname]
+    w._next_inv_scale = model._fp8_next_inv_scale[wname]
     if optim.master_params:
       idx = next(j for j, p in enumerate(optim.params) if p is w)
       master = optim.master_params[idx]
@@ -1500,7 +1501,7 @@ def train_llama3():
   def fake_data(bs, samples):
     import numpy as np
     for _ in range(samples // bs):
-      fake_data_np = np.random.randint(0, model_params["vocab_size"], size=(bs, SEQLEN + 1), dtype=np.int32)
+      fake_data_np = np.random.randint(0, real_vocab_size, size=(bs, SEQLEN + 1), dtype=np.int32)
       yield Tensor(fake_data_np, device="NPY")
 
   def get_train_iter():

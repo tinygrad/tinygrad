@@ -53,8 +53,6 @@ All nodes in the tinygrad graph are \textbf{UOps}. A UOp is a tuple $(\mathrm{op
   Placeholder with shape $\mathbf{s}$. Substituted in \op{Function}. \\[4pt]
 \op{Buffer} & () & size, dtype, device, addrspace &
   Shape $(n \cdot \textit{size},)$ if device is $n$-tuple, else $(\textit{size},)$. \\
-\op{BufferView} & (buf,) & size, dtype, offset &
-  Typed access into a buffer. Zero-copy $(\textit{size},)$ slice at offset; inherits addrspace. \\
 \op{Const} & () & value, dtype &
   A scalar constant with shape $(\ )$. \\
   & & & Form vector consts with \op{Stack} \\
@@ -66,7 +64,7 @@ All nodes in the tinygrad graph are \textbf{UOps}. A UOp is a tuple $(\mathrm{op
 A \op{Buffer}'s \textbf{addrspace} is \texttt{GLOBAL}, \texttt{LOCAL}, or \texttt{REG}.
 
 %% ============================================================
-\subsection*{{\color{movgreen}Movement Ops} \normalfont\small--- no arithmetic, shapes are $(k,)$-shaped UOps with dtype \texttt{index} in src}
+\subsection*{{\color{movgreen}Movement Ops} \normalfont\small--- no arithmetic; view, indexing, and reinterpretation only}
 
 \begin{tabular}{@{}l l l l@{}}
 \toprule
@@ -76,11 +74,13 @@ A \op{Buffer}'s \textbf{addrspace} is \texttt{GLOBAL}, \texttt{LOCAL}, or \textt
 \op{Flip} & $(T,)$ & bools $\mathbf{f}$ & Reverse along flagged axes. \\
 \op{Reshape} & $(T, \mathbf{s'})$ & --- & Reinterpret in row-major order. $\prod s_k = \prod s'_k$. \\
 \op{Expand} & $(T, \mathbf{s'})$ & --- & Broadcast size-1 axes. $s_k \in \{1, s'_k\}$. \\
-\op{Pad} & $(T, \mathbf{b}, \mathbf{e})$ & --- & Pad with $0$s: $b_k$ before, $e_k$ after each axis. \\
-\op{Shrink} & $(T, \mathbf{b}, \mathbf{e})$ & --- & Keep $[b_k, e_k)$ per axis. Inverse of \op{Pad}. \\
+\op{Pad} & $(T, \mathbf{o}, \mathbf{s'})$ & --- & Place $T$ at offset $o_k$ in a zero-filled output of shape $s'_k$. \\
+\op{Shrink} & $(T, \mathbf{o}, \mathbf{s'})$ & --- & Keep $s'_k$ elements starting at offset $o_k$ per axis. Inverse of \op{Pad}. \\
 \op{Index} & $(T, i_0, i_1, \ldots)$ & --- & Index from left. $()$-shaped $i$ removes dim; $(k,)$-shaped makes it $k$. \\
 \op{Stack} & $(T_0, T_1, \ldots)$ & --- & Join along a newly created leading axis. All shapes must match. \\
 \op{Replicated} & $(T,)$ & axes & Mark $T$ as replicated along axes. Collapse axes to $1$. \\
+\op{Slice} & $(T, \mathrm{offset})$ & size, dtype & Zero-copy \textit{size} elems of dtype; offset is elems of $T$ dtype. \\
+\op{Bitcast} & $(T,)$ & dtype & Reinterpret storage as target dtype; preserve total bytes. \\
 \bottomrule
 \end{tabular}
 
@@ -166,8 +166,7 @@ Unary & $(T,)$
   & $\mathrm{trunc}(x)$: round toward zero. \\
 & & \op{Cast}
   & Convert to target dtype (specified in arg). \\
-& & \op{Bitcast}
-  & Reinterpret bits as target dtype. Must be same size. \\[4pt]
+  \\[4pt]
 Binary & $(A, B)$
   & \op{Add}, \op{Mul}, \op{Max}, \op{Mod}, \op{Idiv}
   & $a+b$, $a \cdot b$, $\max(a,b)$, $a \bmod b$, $\lfloor a/b \rfloor$ \\

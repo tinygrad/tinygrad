@@ -1,5 +1,5 @@
 import unittest, subprocess, platform
-from tinygrad.runtime.support.compiler_cpu import ClangJITCompiler
+from tinygrad.runtime.support.compiler_cpu import ClangCompiler
 from tinygrad.runtime.support.elf import elf_loader
 
 class TestElfLoader(unittest.TestCase):
@@ -23,7 +23,7 @@ class TestElfLoader(unittest.TestCase):
       }
     '''
     with self.assertRaisesRegex(RuntimeError, 'evil_external_function'):
-      ClangJITCompiler([{'AMD64':'x86_64', 'aarch64':'arm64'}.get(m:=platform.machine(), m), "native"]).compile(src)
+      ClangCompiler([{'AMD64':'x86_64', 'aarch64':'arm64'}.get(m:=platform.machine(), m), "native"]).compile(src)
   def test_link(self):
     src = '''
       float powf(float, float); // from libm

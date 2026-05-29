@@ -47,7 +47,7 @@ base_rewrite = PatternMatcher([
   (UPat.var("buf").index(UPat.var('idx')), lambda ctx,buf,idx: f"({ctx[buf]}+{strip_parens(ctx[idx]) if idx.arg == Ops.ADD else ctx[idx]})"),
   (UPat(Ops.LOAD, src=(UPat.var('bidx'),)), lambda ctx,bidx: f"(*{ctx[bidx]})"),
   (UPat(Ops.LOAD, src=(UPat.var("bidx"), UPat.var("var"), UPat.var("gate"))), lambda ctx,bidx,var,gate: f"({ctx[gate]}?*{ctx[bidx]}:{ctx[var]})"),
-  (UPat(Ops.STORE, src=(UPat.var('bidx'), UPat.var("var")), allow_any_len=True), lambda ctx,bidx,var: f"*{ctx[bidx]} = {ctx[var]};"),
+  (UPat(Ops.STORE, src=(UPat.var('bidx'), UPat.var("var"))), lambda ctx,bidx,var: f"*{ctx[bidx]} = {ctx[var]};"),
   # alu/gep
   # TODO: look for left-associative
   (UPat(GroupOp.ALU, name="x"), lambda ctx,x: ctx.code_for_op[x.op](
@@ -178,8 +178,8 @@ class CStyleLanguage(Renderer):
         continue
       if u.op in (Ops.PARAM, Ops.DEFINE_VAR):
         if u.op is not Ops.PARAM: r[u] = u.arg[0]
-        elif isinstance(u.dtype, ImageDType): r[u] = f"data{u.arg}_{u.dtype.shape[0]}x{u.dtype.shape[1]}"
-        else: r[u] = f"data{u.arg}_{sz}" if (sz:=u.ptrdtype.size) > 0 else f"data{u.arg}"
+        elif isinstance(u.dtype, ImageDType): r[u] = f"data{u.arg.slot}_{u.dtype.shape[0]}x{u.dtype.shape[1]}"
+        else: r[u] = f"data{u.arg.slot}_{sz}" if (sz:=u.max_numel()) > 0 else f"data{u.arg.slot}"
         bufs[u] = (r[u], (u.dtype, u in writable_params))
         continue
 
@@ -198,7 +198,7 @@ class CStyleLanguage(Renderer):
 
       if u.op in {Ops.ENDIF, Ops.END}: depth -= 1
       if (u.op is not Ops.CAST or u.dtype.vcount == 1) and (u.op in {Ops.CONST, Ops.GEP, Ops.INDEX, Ops.CUSTOMI} or \
-        (u.op is Ops.LOAD and u.src[0].ptrdtype.addrspace == AddrSpace.REG) or \
+        (u.op is Ops.LOAD and u.src[0].addrspace == AddrSpace.REG) or \
         (u.op is Ops.CAST and isinstance(u.dtype, PtrDType)) or \
         (u.op in {Ops.STACK, *(GroupOp.ALU-{Ops.WHERE}), Ops.CAST, Ops.BITCAST} and child_count[u] == 1 and not getenv("EXPAND_SSA"))):
         r[u] = l
@@ -275,12 +275,11 @@ class ClangRenderer(CStyleLanguage):
   def supported_dtypes(self):
     return {d for d in super().supported_dtypes() if (d != dtypes.bfloat16 or self.target.arch.startswith(("x86", "arm"))) and d not in dtypes.fp8s}
 
-class ClangJITRenderer(ClangRenderer):
   def __init__(self, target:Target):
     super().__init__(target)
-    from tinygrad.runtime.support.compiler_cpu import ClangJITCompiler
+    from tinygrad.runtime.support.compiler_cpu import ClangCompiler
     if "AMX" in target.arch: self.tensor_cores = tc.amx
-    self.compiler = ClangJITCompiler([x for x in target.arch.split(",") if x != "AMX"])
+    self.compiler = ClangCompiler([x for x in target.arch.split(",") if x != "AMX"])
 
 class OpenCLRenderer(CStyleLanguage):
   has_aux = True
@@ -309,7 +308,7 @@ class OpenCLRenderer(CStyleLanguage):
     (UPat(Ops.LOAD, dtype=dtypes.float.vec(4), src=(UPat.var('buf').index(UPat.var('idx_y'), UPat.var('idx_x')),)),
       lambda ctx,buf,idx_y,idx_x: f"read_imagef({ctx[buf]}, smp, (int2)({ctx[idx_x]},{ctx[idx_y]}))"),
     (UPat(Ops.STORE, src=(UPat.var('buf').index(UPat.var('idx_y'), UPat.var('idx_x')),
-                          UPat.var("var", dtypes.float.vec(4))), allow_any_len=True),
+                          UPat.var("var", dtypes.float.vec(4)))),
       lambda ctx,buf,idx_y,idx_x,var: f"write_imagef({ctx[buf]}, (int2)({ctx[idx_x]},{ctx[idx_y]}), {ctx[var]});"),
   ]) + base_rewrite
 
@@ -320,8 +319,8 @@ class OpenCLRenderer(CStyleLanguage):
   def aux(self, uops:list[UOp]):
     arg_dtypes:list[list[tuple[int, DType]]] = []
     for i,u in enumerate(u for u in uops if u.op is Ops.PARAM):
-      if len(arg_dtypes) >= u.arg: arg_dtypes.append([])
-      arg_dtypes[u.arg].append((i, u.dtype))
+      while len(arg_dtypes) <= u.arg.slot: arg_dtypes.append([])
+      arg_dtypes[u.arg.slot].append((i, u.dtype))
     return tuple(tuple(a) for a in arg_dtypes),
 
   def supported_dtypes(self): return {d for d in super().supported_dtypes()
@@ -501,6 +500,10 @@ class HIPRenderer(CStyleLanguage):
         (UPat(Ops.WMMA, name="x"), lambda ctx,x: f"__{x.arg[0]}({ctx[x.src[0]]}, {ctx[x.src[1]]}, {ctx[x.src[2]]},"
           f" {fp8_index(x.src[0].dtype)}, {fp8_index(x.src[0].dtype)}, 0, 0, 0, 0)" if x.arg[1][2] == 128 else None),
         (UPat(Ops.WMMA, name="x"), lambda ctx,x: f"__{x.arg[0]}({ctx[x.src[0]]}, {ctx[x.src[1]]}, {ctx[x.src[2]]}, 0, 0, 0)"),
+        (UPat(Ops.CONST, dtypes.fp8s, name="x"), lambda ctx,x: f"f32_to_fp8({ctx.nan}, {fp8_index(x.dtype)})" if math.isnan(x.arg) else None),
+        (UPat(Ops.CONST, dtypes.fp8s, arg=math.inf, name="x"), lambda ctx,x: f"f32_to_fp8({ctx.infinity}, {fp8_index(x.dtype)})"),
+        (UPat(Ops.CONST, dtypes.fp8s, arg=-math.inf, name="x"), lambda ctx,x: f"f32_to_fp8(-{ctx.infinity}, {fp8_index(x.dtype)})"),
+        (UPat(Ops.CONST, dtypes.fp8s, name="x"), lambda ctx,x: f"f32_to_fp8({x.arg}f, {fp8_index(x.dtype)})"),
         (UPat(Ops.CAST, dtypes.fp8s, (UPat(dtype=dtypes.float),), name="x",),
           lambda ctx,x: f"f32_to_fp8({ctx[x.src[0]]}, {fp8_index(x.dtype)})"),
         (UPat(Ops.CAST, dtypes.float, (UPat.var("y", dtypes.fp8s),), name="x",),
@@ -554,7 +557,8 @@ class HIPRenderer(CStyleLanguage):
     if any(dt.scalar() == dtypes.half for dt in used_dtypes): prefix.append("#define half _Float16")
     if any(dt.scalar() in dtypes.fp8s for dt in used_dtypes):
       prefix += ["typedef unsigned char hip_bf8;", "typedef unsigned char hip_fp8;"]
-    if any(u.op is Ops.CAST and u.dtype in dtypes.fp8s and u.src[0].dtype == dtypes.float for u in uops):
+    if any((u.op is Ops.CAST and u.dtype in dtypes.fp8s and u.src[0].dtype == dtypes.float) or
+           (u.op is Ops.CONST and u.dtype in dtypes.fp8s) for u in uops):
       prefix.append("""static inline __attribute__((device)) unsigned char f32_to_fp8(float v, int is_bf8) {
   v = (((*(unsigned*)&v)&0x7F800000)!=0x7F800000)?__builtin_amdgcn_fmed3f(v,is_bf8?57344.0f:448.0f,is_bf8?-57344.0f:-448.0f) : v;
   return (unsigned char)(is_bf8?__builtin_amdgcn_cvt_pk_bf8_f32(v,v,0,false):__builtin_amdgcn_cvt_pk_fp8_f32(v,v,0,false));\n}""")

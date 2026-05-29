@@ -10,9 +10,8 @@ from hypothesis import assume, given, strategies as strat
 from tinygrad import nn, dtypes, Device, Tensor, Variable
 from tinygrad.dtype import DType
 from tinygrad.uop.ops import UOp, Ops, UPat
-from tinygrad.helpers import DEBUG, OSX, GlobalCounters, Context, getenv, all_same, temp
+from tinygrad.helpers import DEBUG, DEV, OSX, GlobalCounters, Context, getenv, all_same, temp
 from tinygrad.engine.realize import compile_linear, run_linear
-from test.helpers import CI
 
 supported_dtypes = Device[Device.DEFAULT].renderer.supported_dtypes()
 
@@ -83,13 +82,6 @@ class TestSchedule(unittest.TestCase):
   def test_arange_avgpool2d_fused_noopt(self):
     with Context(NOOPT=1): self.test_arange_avgpool2d(kcount=1)
 
-  # linearizer error
-  @unittest.skip("recursion error no longer raised")
-  @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "needs supports_float4 to fail")
-  def test_arange_avgpool2d_fused(self):
-    with self.assertRaises(RecursionError):
-      with Context(NOOPT=0): self.test_arange_avgpool2d(kcount=1)
-
   # when we're fusing a reduce, all ReduceOps must have the same N in the dimensions
   # all permutes, reshapes, expands and shrinks push through the reduce
   def test_arange_sum(self):
@@ -115,7 +107,6 @@ class TestSchedule(unittest.TestCase):
     run_linear(*check_schedule(b, 1))
     np.testing.assert_allclose(b.numpy(), np.broadcast_to(a.numpy().astype(np.float16), (2, 4, 4))+2, rtol=1e-3)
 
-  @unittest.skipIf(CI and Device.DEFAULT == "NV", "crashes on NV CI")
   def test_add_chain_buffers(self):
     N = 31
     with Context(TRACK_MATCH_STATS=0, DEBUG=0):
@@ -230,8 +221,8 @@ class TestSchedule(unittest.TestCase):
     np.testing.assert_allclose(out.numpy(), (x.numpy() - x.numpy().max(keepdims=True)).max())
 
   def test_example_matmul_contig(self):
-    x = Tensor.eye(64).contiguous().realize()
-    y = Tensor.eye(64).contiguous().realize()
+    x = Tensor.eye(64).clone().realize()
+    y = Tensor.eye(64).clone().realize()
     z = y.matmul(x).sum()
     z.backward()
     out = x.grad.contiguous()
@@ -772,7 +763,6 @@ class TestSchedule(unittest.TestCase):
     gc.collect()
     self.assertEqual(GlobalCounters.mem_used-base, 1024)
 
-  @unittest.skipIf(Device.DEFAULT != "CL", "image only supported on CL")
   def test_image_dot_f16_fusion(self):
     with Context(FLOAT16=1, OPENPILOT_HACKS=1):
       def cnt():
@@ -784,7 +774,6 @@ class TestSchedule(unittest.TestCase):
       with Context(IMAGE=1):
         self.assertEqual(cnt(), 5)
 
-  @unittest.skipIf(Device.DEFAULT != "CL", "image only supported on CL")
   def test_image_f16_residual_fusion(self):
     with Context(FLOAT16=1, OPENPILOT_HACKS=1):
       def cnt():
@@ -800,7 +789,6 @@ class TestSchedule(unittest.TestCase):
       with Context(IMAGE=1):
         self.assertEqual(cnt(), 9)
 
-  @unittest.skipIf(Device.DEFAULT != "CL", "image only supported on CL")
   def test_image_conv_fusion(self):
     with Context(OPENPILOT_HACKS=1):
       def cnt():
@@ -838,7 +826,7 @@ class TestSchedule(unittest.TestCase):
     self._test_fusion([(32, 32)], lambda a:a-a.sum(1), 2)
 
   def test_cast_padded_view(self):
-    a = Tensor.arange(4).reshape(1, 4)
+    a = Tensor.arange(4).reshape(1, 4).clone().realize()
     casted_view = a.pad(((0, 1), (0, 0))).cast(dtypes.float)
     casted_view.realize()
     self.assertEqual(casted_view.uop.base.realized.size, 8)
@@ -848,7 +836,7 @@ class TestSchedule(unittest.TestCase):
 
   # NOTE: we only reorder CAST if it's an EXPAND
   def test_cast_after_shrink(self):
-    a = Tensor.arange(4).reshape(1, 4)
+    a = Tensor.arange(4).reshape(1, 4).clone().realize()
     casted_view = a.shrink(((0, 1), (0, 2))).cast(dtypes.float)
     casted_view.realize()
     self.assertEqual(casted_view.uop.base.realized.size, 2)
@@ -857,7 +845,7 @@ class TestSchedule(unittest.TestCase):
     self.assertListEqual(realized_view.tolist(), [[0, 1]])
 
   def test_cast_const_view(self):
-    a = Tensor.ones((4, 4), dtype=dtypes.float32)
+    a = Tensor.ones((4, 4), dtype=dtypes.float32, buffer=False)
     casted_view = a.cast(dtypes.int32)
     run_linear(*check_schedule(casted_view, 1))
     realized_const_view = casted_view.contiguous()
@@ -937,7 +925,7 @@ class TestSchedule(unittest.TestCase):
     np.testing.assert_equal(a.numpy(), (np.arange(4)*x.numpy()).T.sum())
 
   def test_div_padded_arange(self):
-    x = Tensor.full((2,2), 16)
+    x = Tensor.full((2,2), 16, buffer=False)
     y = x.div(Tensor.linspace(2, 8, steps=4, dtype=dtypes.int).reshape(2,2), rounding_mode="trunc").pad(((1,1), (1,1)))
     out = y.sum(axis=1)
     run_linear(*check_schedule(out, 1))
@@ -984,13 +972,6 @@ class TestSchedule(unittest.TestCase):
     run_linear(*check_schedule(out, 2))
     np.testing.assert_allclose(out.numpy(), (x.numpy()+(np.arange(10)+1)[2]).sum(), atol=1e-5, rtol=1e-6)
 
-  @unittest.skip("BUFFER_VIEW no longer supported on non-disk devices")
-  def test_arange_view_op(self):
-    a = Tensor.arange(12).reshape(4, 3).shrink(((1, 2), (1, 3))).contiguous()
-    sched = run_linear(*check_schedule(a, 1))
-    self.assertIs(sched[1].ast.op, Ops.BUFFER_VIEW)
-    np.testing.assert_equal(a.numpy(), [[4, 5]])
-
   @unittest.skipUnless(dtypes.half in supported_dtypes, "need half")
   def test_precompute_freqs_cis(self):
     from extra.models.llama import precompute_freqs_cis
@@ -1010,7 +991,7 @@ class TestSchedule(unittest.TestCase):
 
   def test_assign_non_contiguous_alt(self): self.test_assign_non_contiguous(alt=True)
   def test_assign_non_contiguous(self, alt=False):
-    x = (Tensor.arange(16)-100).reshape(4,4).contiguous().realize()
+    x = (Tensor.arange(16)-100).reshape(4,4).clone().realize()
     xref = x.numpy()
     if alt:
       y = Tensor.randint(2, 4).contiguous().realize()
@@ -1026,7 +1007,7 @@ class TestSchedule(unittest.TestCase):
     np.testing.assert_equal(tst.numpy(), a.numpy())
 
   def test_setitem_sched(self, mop=lambda x:x, expected_kcount=1):
-    a = Tensor.arange(16, device="CPU").reshape(4, 4).contiguous().realize()
+    a = Tensor.arange(16).reshape(4, 4).clone(device="CPU").realize()
     a2 = mop(a)
     expected = (a+a2).tolist()
     a.assign(a+a2)
@@ -1040,7 +1021,7 @@ class TestSchedule(unittest.TestCase):
 
   def test_setitem_const_fused(self):
     # https://github.com/tinygrad/tinygrad/issues/10690
-    a = Tensor.arange(16).contiguous().realize()
+    a = Tensor.arange(16).clone().realize()
     GlobalCounters.reset()
     a[4] = 3
     self.assertEqual(GlobalCounters.kernel_count, 0)
@@ -1077,7 +1058,6 @@ class TestSchedule(unittest.TestCase):
     self.assertEqual(a.tolist(), [0., 0.])
     self.assertEqual(b.tolist(), [False, False])
 
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU", "Validation error on WebGPU")
   def test_mnist_val(self):
     from tinygrad.nn.datasets import mnist
     import torch
@@ -1114,7 +1094,7 @@ class TestSchedule(unittest.TestCase):
       self.assertListEqual(a.tolist(), [[1.]*shape[1]]*shape[0])
 
 class TestLimitBufs(unittest.TestCase):
-  @unittest.skipIf(CI and Device.DEFAULT == "NV", "crashes on NV CI")
+  @unittest.skipIf(DEV.interface.startswith("MOCK") and Device.DEFAULT == "NV", "crashes in ocelot")
   def test_limit_bufs_with_var(self):
     N = 31
     with Context(TRACK_MATCH_STATS=0, DEBUG=0):
@@ -1293,13 +1273,13 @@ class TestCopyFolding(unittest.TestCase):
     check_schedule(x, 3, filter_sink=False)
 
   def test_const_copy_multi(self):
-    x = Tensor.ones(1, device="CPU").to_(["CPU", "CPU:1"]) * 2
+    x = Tensor.ones(1, device="CPU", buffer=False).to_(["CPU", "CPU:1"]) * 2
     run_linear(*check_schedule(x, 2, filter_sink=False))
     self.assertEqual(x.item(), 2.0)
 
   def test_late_const_copy_folding(self):
-    a = Tensor.arange(3).realize()
-    zeros = Tensor.zeros(3).realize()
+    a = Tensor.arange(3).clone().realize()
+    zeros = Tensor.zeros(3, buffer=False).realize()
     b = (a*zeros).to("CPU") + 1
     run_linear(*check_schedule(b, 1, filter_sink=False))
     self.assertListEqual(b.tolist(), [1, 1, 1])
@@ -1373,14 +1353,14 @@ class TestCopyFolding(unittest.TestCase):
     self.assertListEqual(b.tolist(), [[0, 2], [1, 3]])
 
   def test_permute_on_disk(self):
-    with open(temp('dt_arange_4_permute'), "wb") as f: f.write(Tensor.arange(4).realize().uop.base.buffer.as_memoryview())
+    with open(temp('dt_arange_4_permute'), "wb") as f: f.write(Tensor.arange(4).clone().realize().uop.base.buffer.as_memoryview())
     a = Tensor.empty(4, dtype=dtypes.int32, device=f"disk:{temp('dt_arange_4_permute')}")
     b = a.reshape(2, 2).permute(1, 0).to("CPU")
     b.realize()
     self.assertListEqual(b.tolist(), [[0, 2], [1, 3]])
 
   def test_permute_on_disk_contiguous(self):
-    with open(temp('dt_arange_4_permute_contig'), "wb") as f: f.write(Tensor.arange(4).realize().uop.base.buffer.as_memoryview())
+    with open(temp('dt_arange_4_permute_contig'), "wb") as f: f.write(Tensor.arange(4).clone().realize().uop.base.buffer.as_memoryview())
     a = Tensor.empty(4, dtype=dtypes.int32, device=f"disk:{temp('dt_arange_4_permute_contig')}")
     b = a.reshape(2, 2).permute(1, 0).contiguous().to("CPU")
     b.realize()
@@ -1394,7 +1374,7 @@ class TestCopyFolding(unittest.TestCase):
 
   # NOTE: disk permute must come after COPY
   def test_permute_after_shrink_on_disk(self):
-    with open(temp('dt_arange_5_permute'), "wb") as f: f.write(Tensor.arange(5).realize().uop.base.buffer.as_memoryview())
+    with open(temp('dt_arange_5_permute'), "wb") as f: f.write(Tensor.arange(5).clone().realize().uop.base.buffer.as_memoryview())
     a = Tensor.empty(5, dtype=dtypes.int32, device=f"disk:{temp('dt_arange_5_permute')}")
     b = a.shrink(((0, 4),)).reshape(2, 2).permute(1, 0).to("CPU")
     b.realize()
