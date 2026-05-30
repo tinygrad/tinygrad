@@ -270,7 +270,7 @@ class Tensor(OpMixin):
       return self
     # STORE+AFTER: STORE is the write effect (void), AFTER wraps the view for correct shape/ranging
     assign = self.uop.after(self.uop.store(x.uop))
-    if (base := self.uop.base).op in {Ops.BUFFER, Ops.AFTER} and self.uop is not base and not self.uop.has_buffer_identity():
+    if (base := self.uop.base).op in {Ops.BUFFER, Ops.AFTER, Ops.CONTIGUOUS} and self.uop is not base and not self.uop.has_buffer_identity():
       # view assign: replace at the buffer-identity level (e.g. RESHAPE(BUFFER)) so @function's substitution catches it
       ib = self.uop
       while not ib.has_buffer_identity() and ib is not base: ib = ib.src[0]
