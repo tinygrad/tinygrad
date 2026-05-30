@@ -41,7 +41,10 @@ def generic_wmma_helper(inp, warp_size, WARP_THREADS, K, NUM_A, NUM_B, NUM_C, a_
 
 class PythonProgram:
   def __init__(self, name:str, lib:bytes, **kwargs):
-    self.uops: list[tuple[Ops, DType, list[int], Any]] = pickle.loads(lib)
+    self.prg: list[UOp] = pickle.loads(lib)
+    # the value of SPECIAL comes from local/global_size, not form its source
+    self.uops: list[tuple[Ops, DType, list[int], Any]] = \
+      [(u.op, u.dtype, [self.prg.index(v) for v in u.src if u.op is not Ops.SPECIAL], u.arg) for u in self.prg]
   def __call__(self, *bufs, global_size:tuple[int,int,int]=(1,1,1), local_size:tuple[int,int,int]=(1,1,1), vals:tuple[int, ...]=(), wait=False, **kw):
     st = time.perf_counter()
     warp = list(itertools.product(*[range(x) for x in local_size[::-1]]))
@@ -234,10 +237,7 @@ class PythonRenderer(Renderer):
     elif IMAGE and not target.arch: self.target = replace(target, arch="IMAGE_PITCH_ALIGNMENT=1")
     else: self.target = target
 
-  def render(self, uops:list[UOp]) -> str:
-    # the value of SPECIAL comes from local/global_size, not form its source
-    lops = [(u.op, u.dtype, [uops.index(v) for v in u.src if u.op is not Ops.SPECIAL], u.arg) for u in uops]
-    return base64.b64encode(pickle.dumps(lops)).decode()
+  def render(self, uops:list[UOp]) -> str: return base64.b64encode(pickle.dumps(uops)).decode()
 
   def supported_dtypes(self): return {d for d in super().supported_dtypes() if d != dtypes.half or sys.version_info >= (3, 12)}
 
