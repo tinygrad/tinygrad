@@ -220,7 +220,7 @@ class CStyleLanguage(Renderer):
         (u.op in {Ops.STACK, *(GroupOp.ALU-{Ops.WHERE}), Ops.CAST, Ops.BITCAST} and child_count[u] == 1 and not getenv("EXPAND_SSA"))):
         r[u] = l
       else:
-        if u.op is Ops.SHRINK or u._shape == None: u_dtype = u.src[0].dtype
+        if u.op is Ops.SHRINK or u._shape is None: u_dtype = u.src[0].dtype
         else: u_dtype = self.render_dtype_with_shape(u)
         if u.op not in {Ops.RANGE, Ops.DEFINE_LOCAL, Ops.STORE, Ops.DEFINE_REG} and u.dtype != dtypes.void:
           l = f"{self.render_dtype(u_dtype)} {r[u]} = {l}" + (";" if u.op is not Ops.SPECIAL else "")
