@@ -773,6 +773,52 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     ret = mask.where(x_unsqueezed - x_cummax.unsqueeze(-1), self.dtype.min).exp().sum(-1).log() + x_cummax
     return ret.transpose(-1, axis)
 
+  def associative_scan(self, combine_fn: Callable[[Self, Self], Self], axis: int = 0, reverse: bool = False) -> Self:
+    """
+    Computes a parallel prefix scan (associative scan) along the given axis using the Hillis-Steele algorithm.
+
+    ``combine_fn`` must be an associative binary function ``f(a, b) -> result``.
+
+    Args:
+        combine_fn: An associative binary function that takes two tensors and returns one.
+        axis: The axis to scan along.
+        reverse: If True, performs a suffix (right-to-left) scan.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([1, 2, 3, 4])
+    print(t.associative_scan(lambda a, b: a + b, axis=0).numpy())
+    ```
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor([1, 2, 3, 4])
+    print(t.associative_scan(lambda a, b: a * b, axis=0).numpy())
+    ```
+    """
+    axis = self._resolve_dim(axis)
+    if self.ndim == 0 or self.shape[axis] <= 1: return self
+    n = int(self.shape[axis])
+
+    x = self.transpose(axis, -1)
+    if reverse: x = x.flip(-1)
+    ret = x
+
+    log2n = (n - 1).bit_length()
+    for d in range(log2n):
+      stride = 1 << d
+      if stride >= n: break
+
+      pad_shape = [(0, 0)] * (ret.ndim - 1) + [(stride, 0)]
+      shifted = ret.pad(pad_shape)
+
+      # position i < stride unchanged; i >= stride: result[i] = fn(ret[i-stride], ret[i])
+      left, right = ret[..., :stride], combine_fn(shifted[..., stride:n], ret[..., stride:])
+      if left.shape[-1] and right.shape[-1]: ret = left.cat(right, dim=-1)
+      elif left.shape[-1]: ret = left
+      else: ret = right
+
+    if reverse: ret = ret.flip(-1)
+    return ret.transpose(-1, axis)
+
   def argmax(self, axis=None, keepdim=False) -> Self:
     """
     Returns the indices of the maximum value of the tensor along the specified axis.
