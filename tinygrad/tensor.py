@@ -268,6 +268,8 @@ class Tensor(OpMixin):
     if is_disk:
       self._buffer().copyin(x._data())
       return self
+    if (base := self.uop.base).op is Ops.COPY and not self.uop.has_buffer_identity() and base not in x.uop.backward_slice_with_self:
+      _apply_map_to_tensors({base: base.contiguous()}, name="Materialize Copy", walk=True)
     # STORE+AFTER: STORE is the write effect (void), AFTER wraps the view for correct shape/ranging
     assign = self.uop.after(self.uop.store(x.uop))
     if (base := self.uop.base).op in {Ops.BUFFER, Ops.AFTER, Ops.CONTIGUOUS} and self.uop is not base and not self.uop.has_buffer_identity():
