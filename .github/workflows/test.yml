@@ -556,8 +556,7 @@ jobs:
       uses: ./.github/actions/setup-tinygrad
       with:
         key: dsp-minimal
-        deps: testing_unit
-        pydeps: "onnx==1.18.0 onnxruntime ml_dtypes"
+        deps: testing
         llvm: "true"
         qemu: "true"
     - name: Set MOCKDSP env
