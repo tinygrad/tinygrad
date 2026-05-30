@@ -9,10 +9,11 @@ import torch
 torch.set_num_threads(1)
 import time
 import numpy as np
+import sys
 np.set_printoptions(linewidth=160)
 from tinygrad import Tensor, Device, GlobalCounters, TinyJit
 from tinygrad.nn import Conv2d
-from tinygrad.helpers import colorize_float, getenv, CI, DEV
+from tinygrad.helpers import colorize_float, getenv, DEV
 
 IN_CHANS = [int(x) for x in getenv("IN_CHANS", "4,16,64").split(",")]
 
@@ -95,7 +96,7 @@ def helper_test_generic(name, f1, f1_args, f2, f2_args):
   desc = "faster" if et_torch > et_tinygrad else "slower"
   flops = save_ops*1e-6
   mem = save_mem*1e-6
-  print(("\r" if not CI else "")+f"{name:42s} {et_torch:7.2f} ms ({flops/et_torch:9.2f} GFLOPS {mem/et_torch:7.2f} GB/s) in torch, {et_tinygrad:7.2f} ms ({flops/et_tinygrad:9.2f} GFLOPS {mem/et_tinygrad:7.2f} GB/s) in tinygrad, {colorize_float(et_tinygrad/et_torch)} {desc} {flops:10.2f} MOPS {mem:8.2f} MB")  # noqa: E501
+  print(("\r" if sys.stdout.isatty() else "")+f"{name:42s} {et_torch:7.2f} ms ({flops/et_torch:9.2f} GFLOPS {mem/et_torch:7.2f} GB/s) in torch, {et_tinygrad:7.2f} ms ({flops/et_tinygrad:9.2f} GFLOPS {mem/et_tinygrad:7.2f} GB/s) in tinygrad, {colorize_float(et_tinygrad/et_torch)} {desc} {flops:10.2f} MOPS {mem:8.2f} MB")  # noqa: E501
   atol, rtol = (1e-2, 1e-2) if torch_dt == torch.float16 else (1e-3, 1e-3)
   np.testing.assert_allclose(val_tinygrad, val_torch, atol=atol, rtol=rtol)
 

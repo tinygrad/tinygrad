@@ -6,6 +6,7 @@ from tinygrad.uop.ops import UOp, Ops
 
 STOCHASTIC_ROUND = getenv("STOCHASTIC_ROUND", 0)
 MASTER_WEIGHTS = getenv("MASTER_WEIGHTS", 0)
+FP8_AMAX_MARGIN = getenv("FP8_AMAX_MARGIN", 1.1)
 
 def stochastic_round_bf16(x:Tensor) -> Tensor:
   bits = x.bitcast(dtypes.uint32)
@@ -25,7 +26,10 @@ class GradAccClipAdamW(Optimizer):
     self.m = self._new_optim_param()
     self.v = self._new_optim_param()
     self.grad_acc, self.clip_norm = grad_acc, clip_norm
-    self.master_params:list[Tensor]|None = [p.float().contiguous() for p in self.params] if MASTER_WEIGHTS and self.params[0].dtype != dtypes.float32 else None
+    if MASTER_WEIGHTS and self.params[0].dtype != dtypes.float32:
+      self.master_params:list[Tensor]|None = [p.to(self.device).float().contiguous() for p in self.params]
+    else:
+      self.master_params = None
 
   def fstep(self, grads:list[Tensor]):
     if self.fused:
@@ -36,7 +40,8 @@ class GradAccClipAdamW(Optimizer):
     for i, tt in enumerate(self.params): tt.assign(self._apply_update(tt, updates[i], self.master_params[i] if self.master_params else None))
     # collect inv_scale tensors attached to fp8 params (set by _apply_update)
     fp8_inv_scales = [tt._inv_scale for tt in self.params if hasattr(tt, '_inv_scale')]
-    to_realize = extra+self.params+self.buffers+(self.master_params or [])+fp8_inv_scales
+    fp8_next_inv_scales = [tt._next_inv_scale for tt in self.params if hasattr(tt, '_next_inv_scale')]
+    to_realize = extra+self.params+self.buffers+(self.master_params or [])+fp8_inv_scales+fp8_next_inv_scales
 
     Tensor.realize(*to_realize)
     return extra[-1]
@@ -78,13 +83,23 @@ class GradAccClipAdamW(Optimizer):
     up = up.float().shard_like(w) + self.lr.to(w.device) * wd * w.detach()
     new_w = w.detach() - up
     if master is not None: master.assign(new_w)
-    if STOCHASTIC_ROUND and t.dtype == dtypes.bfloat16: return stochastic_round_bf16(new_w)
+    # when master is offloaded to a different device than the param, results are resharded back onto the param's (sharded) device
+    offloaded = master is not None and master.device != t.device
+    if STOCHASTIC_ROUND and t.dtype == dtypes.bfloat16:
+      out = stochastic_round_bf16(new_w)
+      return out.shard_like(t) if offloaded else out
     if t.dtype in dtypes.fp8s:
       from examples.mlperf.models.flat_llama import FP8_MAX
-      amax = new_w.float().abs().max(axis=tuple(range(1, new_w.ndim))).detach()  # per-layer amax for (n_layers, out, in)
-      scale = FP8_MAX / (amax + 1e-8)
-      fp8_w = (new_w * scale.reshape(-1, *([1]*(new_w.ndim-1)))).clamp(-FP8_MAX, FP8_MAX).cast(t.dtype)
-      if hasattr(t, '_inv_scale'):
-        t._inv_scale.assign(((amax + 1e-8) / FP8_MAX).cast(t._inv_scale.dtype))
-      return fp8_w
-    return new_w.cast(t.dtype)
+      # delayed scaling: reuse previous step's inv_scale
+      t._inv_scale.assign(t._next_inv_scale)
+      inv_scale = t._inv_scale.to(new_w.device) if offloaded else t._inv_scale
+      scale = inv_scale.reciprocal().reshape(-1, *([1]*(new_w.ndim-1)))
+      scaled = (new_w * scale).clamp(-FP8_MAX, FP8_MAX)
+      ret = scaled.cast(t.dtype)
+      # update inv_scale for next step from quantized result
+      new_amax = (ret.float().abs().max(axis=tuple(range(1, ret.ndim))) * inv_scale * FP8_AMAX_MARGIN).detach()
+      new_inv = ((new_amax + 1e-8) / FP8_MAX).cast(t._inv_scale.dtype)
+      t._next_inv_scale.assign(new_inv.shard_like(t._next_inv_scale) if offloaded else new_inv)
+      return ret.shard_like(t) if offloaded else ret
+    out = new_w.cast(t.dtype)
+    return out.shard_like(t) if offloaded else out

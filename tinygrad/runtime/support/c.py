@@ -132,6 +132,7 @@ class DLL(ctypes.CDLL):
         nonlocal cfunc
         if cfunc is None: (cfunc:=getattr(self, fn.__name__)).argtypes, cfunc.restype = argtypes, restype
         return cfunc(*args)
+      wrapper.restype, wrapper.argtypes = restype, argtypes # type: ignore
       return wrapper
     return wrap
 

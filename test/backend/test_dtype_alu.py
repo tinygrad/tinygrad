@@ -1,7 +1,7 @@
 import unittest, operator, math
 from tinygrad import Context, Tensor, dtypes, Device
 from tinygrad.dtype import DType, truncate, fp8_to_float
-from tinygrad.helpers import CI, EMULATED_DTYPES, DEV, getenv
+from tinygrad.helpers import EMULATED_DTYPES, DEV, getenv
 from tinygrad.tensor import _to_np_dtype
 from tinygrad.runtime.ops_python import from_storage_scalar
 from tinygrad.renderer.ptx import PTXRenderer
@@ -111,6 +111,7 @@ def universal_test_cast(a, in_dtype, dtype):
 def universal_test_midcast(a, b, c, op1, op2, d1:DType, d2:DType):
   if not isinstance(op1, tuple): op1 = (op1, op1)
   if not isinstance(op2, tuple): op2 = (op2, op2)
+  if op1[0] == operator.mod and b == 0: return
   # lt and max with nan is undefined in tinygrad
   if op1[0] in (operator.lt, Tensor.maximum) and (math.isnan(a) or math.isnan(b)): return
   if op2[0] in (operator.lt, Tensor.maximum) and math.isnan(c): return
@@ -139,12 +140,12 @@ class TestDTypeALU(unittest.TestCase):
   @unittest.skipUnless(dtypes.bfloat16 in supported_dtypes, f"no bfloat16 on {Device.DEFAULT}")
   @given(ht.bfloat16, ht.bfloat16, strat.sampled_from(binary_operations))
   def test_bfloat16(self, a, b, op):
-    universal_test(from_storage_scalar(a, dtypes.bfloat16), from_storage_scalar(a, dtypes.bfloat16), dtypes.bfloat16, op)
+    universal_test(from_storage_scalar(a, dtypes.bfloat16), from_storage_scalar(b, dtypes.bfloat16), dtypes.bfloat16, op)
 
   @given(ht.bfloat16, ht.bfloat16, strat.sampled_from(binary_operations))
   @Context(EMULATED_DTYPES="bfloat16")
   def test_emulated_bfloat16(self, a, b, op):
-    universal_test(from_storage_scalar(a, dtypes.bfloat16), from_storage_scalar(a, dtypes.bfloat16), dtypes.bfloat16, op)
+    universal_test(from_storage_scalar(a, dtypes.bfloat16), from_storage_scalar(b, dtypes.bfloat16), dtypes.bfloat16, op)
 
   @unittest.skipUnless(dtypes.fp8e4m3 in supported_dtypes, f"no fp8e4m3 on {Device.DEFAULT}")
   @given(ht.fp8e4m3, ht.fp8e4m3, strat.sampled_from(binary_operations))
@@ -330,12 +331,12 @@ class TestDTypeALU(unittest.TestCase):
   @given(ht.bool, ht.bool, strat.sampled_from(((operator.add, operator.add), (operator.mul, operator.mul))))
   def test_bool(self, a, b, op): universal_test(a, b, dtypes.bool, op)
 
-  @unittest.skipIf(not CI and Device.DEFAULT == "METAL", "broken on local M3")
   @given(ht.int32, ht.int32, ht.float32, strat.sampled_from(integer_binary_operations), strat.sampled_from(binary_operations))
   def test_int32_midcast_float(self, a, b, c, op1, op2): universal_test_midcast(a, b, c, op1, op2, dtypes.int32, dtypes.float32)
 
-  # Metal and CUDA and HIP and NIR behave differently than numpy in CI for overflows
-  skip_overflow = (CI and Device.DEFAULT in {"AMD", "NV", "CUDA"}) or isinstance(Device[Device.DEFAULT].renderer, NIRRenderer)
+  # Metal and (MOCK)CUDA and HIP and NIR behave differently than numpy for overflows
+  skip_overflow = ((DEV.interface.startswith("MOCK") and Device.DEFAULT in {"AMD", "NV", "CUDA"})
+                   or isinstance(Device[Device.DEFAULT].renderer, NIRRenderer))
   @given(strat.floats(width=32, min_value=0, max_value=10.0) if skip_overflow else ht.float32,
          strat.floats(width=32, min_value=0, max_value=10.0) if skip_overflow else ht.float32,
          ht.int32, strat.sampled_from(binary_operations), strat.sampled_from(integer_binary_operations))

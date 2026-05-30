@@ -22,7 +22,7 @@ ASM_GEMM = getenv("ASM_GEMM", 0)
 FUSED_INPUT_QUANTIZE = getenv("FUSED_INPUT_QUANTIZE", 0)
 FUSED_ADD_NORM_MUL_QUANTIZE = getenv("FUSED_ADD_NORM_MUL_QUANTIZE", 0)
 FUSED_SILU_W13 = getenv("FUSED_SILU_W13", 0)
-SPLIT_W13 = getenv("SPLIT_W13", 1)
+SPLIT_W13 = getenv("SPLIT_W13", 0)
 
 FP8_DTYPE = dtypes.fp8e4m3
 FP8_GRAD_DTYPE = dtypes.fp8e5m2
@@ -124,9 +124,9 @@ class FlatTransformer:
     self.tok_embeddings = nn.Embedding(vocab_size, dim)
     self.tok_embeddings.weight = Tensor.normal(vocab_size, dim, mean=0.0, std=0.02, dtype=dtypes.bfloat16)
     self.output = Tensor.normal(1, vocab_size, dim, mean=0.0, std=0.02, dtype=dtypes.bfloat16)
-    self.freqs_cis = precompute_freqs_cis(dim // n_heads, max_context * 2, rope_theta).contiguous().requires_grad_(False)
+    self.freqs_cis = precompute_freqs_cis(dim // n_heads, max_context * 2, rope_theta).contiguous().is_param_(False)
 
-    def _amax(): return Tensor.full((), FP8_MAX, dtype=dtypes.float32).contiguous().requires_grad_(False)
+    def _amax(): return Tensor.full((), FP8_MAX, dtype=dtypes.float32).contiguous().is_param_(False)
     names = ["xqkv", "xo", "x2"]
     names += ["x1", "x3"] if SPLIT_W13 else ["x13"]
     self._fp8_amax = {name: [_amax() for _ in range(n_layers)] for name in names}
@@ -135,7 +135,8 @@ class FlatTransformer:
     self._fp8_grad_amax = {name: [_amax() for _ in range(n_layers)] for name in grad_names}
     w_scales = [("wqkv", s_qkv), ("wo", s_o), ("w2", s_2)]
     w_scales += [("w1", s_1), ("w3", s_3)] if SPLIT_W13 else [("w13", s_13)]
-    self._fp8_inv_scale = {name: s.float().contiguous().requires_grad_(False) for name, s in w_scales}
+    self._fp8_inv_scale = {name: s.float().contiguous().is_param_(False) for name, s in w_scales}
+    self._fp8_next_inv_scale = {name: s.float().contiguous().is_param_(False) for name, s in w_scales}
 
   def lin_per_layer(self, in_features:int, out_features:int, std:float=0.02):
     if getenv("ZEROS"): w = Tensor.zeros(self.n_layers, out_features, in_features)
@@ -221,14 +222,19 @@ class FlatTransformer:
       for v in get_parameters(self): v.shard_(device, axis=None)
     else:
       # flat per-layer weights: axis 0 is n_layers, so shard axes are +1 vs per-layer Transformer
-      self.wqkv.shard_(device, axis=1).realize()          # (n_layers, out, dim) shard out
-      self.wo.shard_(device, axis=2).realize()            # (n_layers, dim, in) shard in
+      def _shard_fp8(name:str, axis:int):
+        getattr(self, name).shard_(device, axis=axis)
+        self._fp8_inv_scale[name] = self._fp8_inv_scale[name].to(device).contiguous().is_param_(False)
+        self._fp8_next_inv_scale[name] = self._fp8_next_inv_scale[name].to(device).contiguous().is_param_(False)
+        Tensor.realize(getattr(self, name), self._fp8_inv_scale[name], self._fp8_next_inv_scale[name])
+      _shard_fp8("wqkv", 1)          # (n_layers, out, dim) shard out
+      _shard_fp8("wo", 2)            # (n_layers, dim, in) shard in
       if SPLIT_W13:
-        self.w1.shard_(device, axis=1).realize()
-        self.w3.shard_(device, axis=1).realize()
+        _shard_fp8("w1", 1)
+        _shard_fp8("w3", 1)
       else:
-        self.w13.shard_(device, axis=1).realize()           # (n_layers, hidden*2, dim) shard out
-      self.w2.shard_(device, axis=2).realize()            # (n_layers, dim, hidden) shard in
+        _shard_fp8("w13", 1)         # (n_layers, hidden*2, dim) shard out
+      _shard_fp8("w2", 2)            # (n_layers, dim, hidden) shard in
       self.attention_norm.shard_(device, axis=None).realize()
       self.ffn_norm.shard_(device, axis=None).realize()
       self.norm.weight.shard_(device, axis=None).realize()
@@ -238,9 +244,7 @@ class FlatTransformer:
       for amax_dict in (self._fp8_amax, self._fp8_grad_amax):
         for name in amax_dict:
           for i in range(len(amax_dict[name])):
-            amax_dict[name][i] = amax_dict[name][i].to(device).contiguous().requires_grad_(False)
-      for name in self._fp8_inv_scale:
-        self._fp8_inv_scale[name] = self._fp8_inv_scale[name].to(device).contiguous().requires_grad_(False)
+            amax_dict[name][i] = amax_dict[name][i].to(device).contiguous().is_param_(False)
 
   def __call__(self, tokens:Tensor, save:bool=True):
     h = self.tok_embeddings(tokens)
@@ -275,15 +279,8 @@ def apply_grad(grad_buf:Tensor, new_grad:UOp):
     new_grad = new_grad.cast(grad_buf.dtype)
     grad_buf.uop = grad_buf.uop.after(grad_buf.uop.store(grad_buf.uop + new_grad))
     return
-  sorted_pads = sorted(pads, key=lambda p: p.marg[0][0] if p.op == Ops.PAD else 0)
-  if getenv("FUSED_PAD_GRAD_ACCUM", 0):
-    inners_raw = [Tensor(p.src[0] if p.op == Ops.PAD else p, device=grad_buf.device) for p in sorted_pads]
-    from extra.llama_kernels.fused_pad_grad_accum import fused_pad_grad_accum, can_fused_pad_grad_accum
-    if can_fused_pad_grad_accum(grad_buf, inners_raw):
-      grad_buf.uop = fused_pad_grad_accum(grad_buf, inners_raw).uop
-      return
   cur = grad_buf.uop
-  for pad in reversed(sorted_pads):
+  for pad in sorted(pads, key=lambda p: p.marg[0][0] if p.op == Ops.PAD else 0, reverse=True):
     if pad.op == Ops.PAD:
       grad_shrink = tuple([(p[0], s+p[0]) for s,p in zip(pad.src[0].shape, pad.marg)])
       buf_slice = cur.shrink(grad_shrink)
@@ -329,11 +326,10 @@ if __name__ == "__main__":
 
   # preallocate all the grad buffers and zero them out
   grad_dtype = lambda x: dtypes.bfloat16 if x.dtype in dtypes.fp8s else x.dtype
-  def _make_grad(x):
-    if isinstance(x.device, tuple) and x.uop.axis is not None:
-      return Tensor.zeros(x.shape, dtype=grad_dtype(x), device=x.device[0]).shard_(x.device, axis=x.uop.axis).contiguous()
-    return Tensor.zeros(x.shape, dtype=grad_dtype(x), device=x.device).contiguous()
-  grads = {x:_make_grad(x) for x in state.values() if x.requires_grad}
+  grads = {x:x.zeros_like(dtype=grad_dtype(x)).contiguous() for x in state.values() if x.is_param}
+
+  fp8_amax = [t for ts in model._fp8_amax.values() for t in ts]
+  fp8_grad_amax = [t for ts in model._fp8_grad_amax.values() for t in ts]
 
   # print model size
   sz = 0
@@ -356,7 +352,7 @@ if __name__ == "__main__":
     with Timing("python backward: "):
       for t,g in zip(grads, loss.gradient(*grads)):
         apply_grad(grads[t], g.uop)
-    with Timing("run fwd_bwd: "): loss.realize(*grads.values())
+    with Timing("run fwd_bwd: "): loss.realize(*grads.values(), *fp8_amax, *fp8_grad_amax)
 
   @TinyJit
   def optim_step():

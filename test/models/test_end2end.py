@@ -1,19 +1,18 @@
 import torch
 from torch import nn
-import unittest
+import unittest, sys
 import numpy as np
 from tinygrad.nn.state import get_parameters, get_state_dict
 from tinygrad.nn import optim, Linear, Conv2d, BatchNorm2d
 from tinygrad.tensor import Tensor
 from extra.datasets import fetch_mnist
-from tinygrad.helpers import CI
 
 def compare_tiny_torch(model, model_torch, X, Y):
   with Tensor.train():
     model_torch.train()
     model_state_dict = get_state_dict(model)
     for k,v in model_torch.named_parameters():
-      if not CI: print(f"initting {k} from torch")
+      if sys.stdout.isatty(): print(f"initting {k} from torch")
       model_state_dict[k].assign(Tensor(v.detach().numpy())).realize()
 
     optimizer = optim.SGD(get_parameters(model), lr=0.001)
@@ -35,14 +34,14 @@ def compare_tiny_torch(model, model_torch, X, Y):
     loss_torch.backward()
 
     # assert losses match
-    if not CI: print(loss.realize().numpy())
-    if not CI: print(loss_torch.detach().numpy())
+    if sys.stdout.isatty(): print(loss.realize().numpy())
+    if sys.stdout.isatty(): print(loss_torch.detach().numpy())
     np.testing.assert_allclose(loss.realize().numpy(), loss_torch.detach().numpy(), atol=1e-4)
 
     for k,v in list(model_torch.named_parameters())[::-1]:
       g = model_state_dict[k].grad.numpy()
       gt = v.grad.detach().numpy()
-      if not CI: print("testing grads", k, model_state_dict[k].grad.dtype)
+      if sys.stdout.isatty(): print("testing grads", k, model_state_dict[k].grad.dtype)
       np.testing.assert_allclose(g, gt, atol=1e-3, err_msg=f'grad mismatch {k}')
 
     # take the steps
@@ -51,7 +50,7 @@ def compare_tiny_torch(model, model_torch, X, Y):
 
     # assert weights match
     for k,v in model_torch.named_parameters():
-      if not CI: print("testing weight", k, model_state_dict[k].dtype)
+      if sys.stdout.isatty(): print("testing weight", k, model_state_dict[k].dtype)
       np.testing.assert_allclose(model_state_dict[k].numpy(), v.detach().numpy(), atol=1e-3, err_msg=f'weight mismatch {k}')
 
 def get_mnist_data():

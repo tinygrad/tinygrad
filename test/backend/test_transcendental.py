@@ -1,7 +1,7 @@
 import unittest
 from tinygrad import Tensor, Device, dtypes
 from tinygrad.tensor import _to_np_dtype
-from tinygrad.helpers import Context, getenv, CI, DEV, OSX
+from tinygrad.helpers import Context, getenv, DEV, OSX
 from test.backend.test_schedule import check_schedule
 from test.backend.test_dtype_alu import ht, dtypes_float
 import numpy as np
@@ -31,7 +31,7 @@ class TestTranscendentalMath(unittest.TestCase):
     ([(Tensor.sin, np.sin)] if dtypes.ulong in supported_dtypes else [])))
   def test_float32(self, x, op):
     # wrong nan behavior on Vulkan
-    if (math.isnan(x) or (x < 0 and op[0] == Tensor.log)) and CI and Device.DEFAULT == "WEBGPU" and not OSX: return
+    if (math.isnan(x) or (x < 0 and op[0] == Tensor.log)) and Device.DEFAULT == "WEBGPU" and not OSX: return
     with Context(TRANSCENDENTAL=2), np.errstate(all='ignore'):
       np.testing.assert_allclose(op[0](Tensor([x], dtype=dtypes.float32)).numpy(),
                                  op[1](np.array([x], dtype=_to_np_dtype(dtypes.float32))),
@@ -42,7 +42,7 @@ class TestTranscendentalMath(unittest.TestCase):
     ([(Tensor.sin, np.sin)] if dtypes.ulong in supported_dtypes else [])))
   def test_float16(self, x, op):
     # wrong nan behavior on Vulkan
-    if (math.isnan(x) or (x < 0 and op[0] == Tensor.log)) and CI and Device.DEFAULT == "WEBGPU" and not OSX: return
+    if (math.isnan(x) or (x < 0 and op[0] == Tensor.log)) and Device.DEFAULT == "WEBGPU" and not OSX: return
     with Context(TRANSCENDENTAL=2), np.errstate(all='ignore'):
       np.testing.assert_allclose(op[0](Tensor([x], dtype=dtypes.float16)).numpy(),
                                  op[1](np.array([x], dtype=_to_np_dtype(dtypes.float16))),
@@ -116,7 +116,7 @@ class TestFloat16Log2(unittest.TestCase):
         np.testing.assert_allclose(result, expected, rtol=1e-3, err_msg=f"log2({val})")
 
   @unittest.skipUnless(dtypes.float16 in supported_dtypes, f"no float16 on {Device.DEFAULT}")
-  @unittest.skipIf(Device.DEFAULT == "WEBGPU" and CI, "Nan handling differs on Vulkan")
+  @unittest.skipIf(Device.DEFAULT == "WEBGPU" and not OSX, "Nan handling differs on Vulkan")
   def test_float16_log2_special(self):
     # special values: inf, -inf, nan, 0, negative
     with Context(TRANSCENDENTAL=2), np.errstate(all='ignore'):
