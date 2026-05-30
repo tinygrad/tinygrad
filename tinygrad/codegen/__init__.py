@@ -26,14 +26,17 @@ from tinygrad.codegen.late.regalloc import LinearScanRegallocContext, pm_regallo
 
 # NOTE: this is temporary until we fix the devectorizer
 pm_index_is_shrink = PatternMatcher([
+  # rewrite non-image INDEX to SHRINK
+  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))).cast(name="x"), lambda buf,idx,x:
+    UOp(Ops.SHRINK, dtype=buf.dtype.base, src=(buf, idx, UOp.const(dtypes.int, x.dtype.count))) if isinstance(buf.dtype, PtrDType) else None),
+  # rewrite GEP to INDEX
+  (UPat(Ops.GEP, name="x"), lambda x: x.replace(op=Ops.INDEX, src=x.src+(UOp.const(dtypes.int, x.arg),), arg=None)),
+])
+
+pm_remove_vec_dtypes = PatternMatcher([
   # rewrite PARAM to non pointer
   (UPat(Ops.PARAM, name="buf"), lambda buf:
    buf.replace(dtype=buf.dtype.base, src=(UOp.const(dtypes.int, buf.ptrdtype.size),)) if isinstance(buf.dtype, PtrDType) else None),
-  # rewrite non-image INDEX to SHRINK
-  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var("idx"))).cast(name="x"), lambda buf,idx,x:
-    UOp(Ops.SHRINK, dtype=buf.dtype.base, src=(buf, idx, UOp.const(dtypes.int, x.dtype.count)))),
-  # rewrite GEP to INDEX
-  (UPat(Ops.GEP, name="x"), lambda x: x.replace(op=Ops.INDEX, src=x.src+(UOp.const(dtypes.int, x.arg),), arg=None)),
   # remove all vec dtypes
   (UPat(GroupOp.All-{Ops.DEFINE_LOCAL, Ops.DEFINE_REG}, name="x"),
    lambda x: x.replace(dtype=x.dtype.base.scalar().base)),
@@ -116,6 +119,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
   pm_final_rewrite = pm_decomp+pm_render+extra_matcher+pm_split_ends
   sink = graph_rewrite(sink, pm_final_rewrite, ctx=ren, name="final rewrite")
   sink = graph_rewrite(sink, pm_index_is_shrink, name="index is shrink")
+  sink = graph_rewrite(sink, pm_remove_vec_dtypes, name="remove vec dtypes")
 
   # this was the linearizer
   sink = graph_rewrite(sink, pm_add_control_flow, ctx=CFGContext(sink), name="add control flow", bottom_up=True)
