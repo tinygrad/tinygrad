@@ -106,7 +106,8 @@ pm_manual_bf16_cast = PatternMatcher([
 def dtype_with_shape(dtype:DType, shape:tuple) -> DType:
   return dtype.scalar().vec(prod(shape)) if dtype.count == 1 and len(shape) == 1 and isinstance(shape[0], int) and shape[0] > 1 else dtype
 def uops_to_dtypes(uops:list[UOp]) -> list[DType]:
-  return dedup(dtype_with_shape(u.dtype, u._shape or ()) for u in uops if not isinstance(u.dtype, (ImageDType, PtrDType)))
+  return dedup(dtype_with_shape(u.dtype, u._shape or ()) if u.addrspace not in {AddrSpace.GLOBAL, AddrSpace.LOCAL} else u.dtype
+               for u in uops if not isinstance(u.dtype, (ImageDType, PtrDType)))
 
 # (name, dims, dtype_in, dtype_out, device, threads, upcast_axes, reduce_axes)
 def wmma_args(uops:list[UOp]):
