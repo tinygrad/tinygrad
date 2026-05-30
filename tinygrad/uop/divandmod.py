@@ -108,7 +108,7 @@ div_and_mod_symbolic = PatternMatcher([
   # (x//c+a)//d -> (x+a*c)//(c*d) for c>0, d>0
   ((UPat.var("x")//UPat.cvar("c") + UPat.cvar("a"))//UPat.cvar("d"), lambda x,c,a,d: (x+a*c)//(c*d) if c.vmin>0 and d.vmin>0 else None),
   # (x+c)//d -> (x+c%d)//d + c//d for d>0 (split out the multiple of d in the constant)
-  ((UPat.var("x", dtypes.weakint)+UPat.cvar("c", vec=False))//UPat.cvar("d", vec=False),
+  ((UPat.var("x", dtypes.weakint)+UPat.cvar("c"))//UPat.cvar("d"),
     lambda x,c,d: (x+c.arg%d.arg)//d + c.arg//d.arg if c.arg%d.arg!=c.arg and d.arg>0 else None),
 
   # ** 2. Slow Rules **

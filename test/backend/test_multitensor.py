@@ -187,7 +187,7 @@ class TestMultiTensor(unittest.TestCase):
     np.testing.assert_allclose(O.numpy(), X.numpy()[0:2]*W.numpy()[0:2] < 2)
 
   def test_shrink_on_shard_axis(self):
-    X = Tensor.arange(4*4).reshape(4,4).realize()
+    X = Tensor.arange(4*4).reshape(4,4).clone().realize()
     X_np = X.numpy()
     X.shard_(devices_2, 0)
     # only shrink on the device that owns the shard, this is enabled by the mselect simplifier
@@ -293,7 +293,7 @@ class TestMultiTensor(unittest.TestCase):
     @TinyJit
     def f(x): return (x+1).contiguous().sum()
     for _ in range(5):
-      tt = Tensor.arange(0, 4).contiguous().realize().shard((d1,d2), 0).realize()
+      tt = Tensor.arange(0, 4).clone().realize().shard((d1,d2), 0).realize()
       out = f(tt)
       assert out.item() == 1+2+3+4
 
@@ -309,7 +309,7 @@ class TestMultiTensor(unittest.TestCase):
     @TinyJit
     def f(x): return (x.shard((d1,d2), 0)+1).contiguous().sum()
     for _ in range(5):
-      tt = Tensor.arange(0, 4).contiguous().realize()
+      tt = Tensor.arange(0, 4).clone().realize()
       out = f(tt)
       assert out.item() == 1+2+3+4
 
@@ -821,9 +821,9 @@ class TestMultiTensor(unittest.TestCase):
     t2.realize()
   def test_full_like_on_shard_axis(self): self.test_full_like_on_shard(0)
 
-  def test_full_like_shrink_on_shard_axis(self):
+  def test_const_like_shrink_on_shard_axis(self):
     t = Tensor.ones(16, 16, dtype=dtypes.int).shard(devices_2, axis=0)
-    out = Tensor.full_like(t, 2)[:, :8]
+    out = t.const_like(2)[:, :8]
     linear, var_vals = out.linear_with_vars()
     self.assertEqual(len(linear.src), 0)
     run_linear(linear, var_vals)
@@ -865,7 +865,7 @@ class TestMultiTensor(unittest.TestCase):
   @unittest.skip("RANGEIFY doesn't support multi const folding")
   def test_multi_const_folding(self):
     with Context(TRACK_MATCH_STATS=0):
-      a = Tensor.arange(3).realize()
+      a = Tensor.arange(3).clone().realize()
       zeros = Tensor.zeros(3).realize()
     b = a.to(devices_2)*zeros.to(devices_2)
     sched = b.schedule_linear().src
@@ -904,7 +904,7 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
 
   # shrink a multitensor on sharded axis
   def test_shrink_bad_args(self):
-    t = Tensor.arange(64).reshape(8, 8).contiguous().realize()
+    t = Tensor.arange(64).reshape(8, 8).clone().realize()
     t.shard_([f"{Device.DEFAULT}:{i}" for i in range(4)], axis=0)
 
     with self.assertRaises(AssertionError):
@@ -927,7 +927,7 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
   @given(strat.sampled_from([dtypes.float, dtypes.int, dtypes.int64, dtypes.int16]))
   def test_ops(self, dtype):
     if dtype not in Device[Device.DEFAULT].renderer.supported_dtypes(): return
-    t = Tensor.arange(64).reshape(8, 8).contiguous().realize()
+    t = Tensor.arange(64).reshape(8, 8).clone().realize()
     t.shard_([f"{Device.DEFAULT}:{i}" for i in range(4)], axis=0)
     for i in range(4):
       print(f"{i=}")
@@ -971,7 +971,7 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
       np.testing.assert_allclose(a.flip(-1).numpy(), b.flip(-1).numpy(), rtol=1e-7, atol=1e-3)
 
   def test_add_two_partitions(self):
-    t = Tensor.arange(64).reshape(8, 8).contiguous().realize()
+    t = Tensor.arange(64).reshape(8, 8).clone().realize()
     t.shard_([f"{Device.DEFAULT}:{i}" for i in range(4)], axis=0)
 
     a = t.shrink(((2, 4), None))
@@ -988,7 +988,7 @@ class TestShrinkMultiTensorShardedAxis(unittest.TestCase):
 
   def test_add_different_tensors(self):
     devices = [f"{Device.DEFAULT}:{i}" for i in range(4)]
-    x = Tensor.arange(64).reshape(8, 8).contiguous().realize().shard(devices, axis=0)
+    x = Tensor.arange(64).reshape(8, 8).clone().realize().shard(devices, axis=0)
 
     to_add = []
     for i in range(len(devices)):
@@ -1098,7 +1098,7 @@ class TestBatchNorm(unittest.TestCase):
   @given(strat.sampled_from((False, True)))
   def test_batchnorm(self, is_training):
     devices = [f"{Device.DEFAULT}:{i}" for i in range(4)]
-    x = Tensor.arange(4096).reshape(8, 8, 8, 8).contiguous().realize().shard(devices, axis=0)
+    x = Tensor.arange(4096).reshape(8, 8, 8, 8).clone().realize().shard(devices, axis=0)
 
     with Tensor.train(is_training):
       bns = []
@@ -1184,7 +1184,7 @@ class TestMultiBufferView(unittest.TestCase):
 
   @unittest.skip("flaky on LLVM")
   def test_shrink_non_shard_axis(self):
-    ref = Tensor.arange(8*4*10).reshape(8, 4, 10).contiguous().realize()
+    ref = Tensor.arange(8*4*10).reshape(8, 4, 10).clone().realize()
     a = Tensor.arange(8*4*10).reshape(8, 4, 10).clone().shard(devices_2, axis=1).realize()
     self._check(ref, a, lambda t: t[3])
 
@@ -1296,7 +1296,7 @@ class TestMultiSetitem(unittest.TestCase):
   @needs_second_gpu
   def setUp(self): pass
 
-  def _t(self, axis): return Tensor.arange(16).contiguous().realize().shard(self.device, axis=axis)
+  def _t(self, axis): return Tensor.arange(16).clone().realize().shard(self.device, axis=axis)
 
   def test_setitem_scalar_axis0(self):
     t = self._t(0)

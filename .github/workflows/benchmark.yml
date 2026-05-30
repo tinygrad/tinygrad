@@ -806,3 +806,16 @@ jobs:
         pkill -f 'extra/remote/serve.py' || true
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
+
+  llvmspeed:
+    name: LLVM Speed
+    runs-on: [self-hosted, Linux, tinyboxrandom]
+    timeout-minutes: 20
+    if: github.repository_owner == 'tinygrad'
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v6
+    - name: Speed Test
+      run: DEV=CPU:LLVM THREADS=0 python3 test/speed/external_test_speed_v_torch.py
+    - name: Speed Test (BEAM=2)
+      run: BEAM=2 DEV=CPU:LLVM THREADS=0 python3 test/speed/external_test_speed_v_torch.py

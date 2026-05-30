@@ -1,7 +1,7 @@
 import unittest, io
 from contextlib import redirect_stdout
 from tinygrad import Tensor, dtypes, Device
-from tinygrad.helpers import OSX, DEV
+from tinygrad.helpers import OSX
 from tinygrad.engine.realize import compile_linear
 from tinygrad.codegen import to_program
 
@@ -16,8 +16,7 @@ class TestCompileFailures(unittest.TestCase):
     self.compile((Tensor.empty(1024, dtype='uint8') + Tensor.empty(1024, dtype='uint8')).max())
 
 class TestDisassembly(unittest.TestCase):
-  # TODO: fails on llvm. llvm.LLVMGetHostCPUName() returns "generic"
-  @unittest.skipUnless(Device.DEFAULT in ("CPU",) and DEV.renderer not in ("LLVM", "LVP") and OSX, "m series cpus support fp16 arithmetic")
+  @unittest.skipUnless(Device.DEFAULT == "CPU" and OSX, "m series cpus support fp16 arithmetic")
   def test_float16_alu(self):
     c = Tensor([1], dtype=dtypes.float16) + Tensor([1], dtype=dtypes.float16)
     s = c.schedule_linear().src[-1]
