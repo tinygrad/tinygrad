@@ -98,8 +98,8 @@ def get_child(obj, key):
 def word_wrap(x, wrap=80):
   if len(ansistrip(x)) <= wrap: return x
   if len(lines:=x.splitlines()) > 1: return "\n".join(word_wrap(line, wrap) for line in lines)
-  i = 0
-  while len(ansistrip(x[:i])) < wrap and i < len(x): i += 1
+  i = vis = 0
+  while vis < wrap and i < len(x): i, vis = (i + m.end(), vis) if (m:=re.match('\x1b\\[(K|.*?m)', x[i:])) is not None else (i+1, vis+1)
   return x[:i] + "\n" + word_wrap(x[i:], wrap)
 def pad_bytes(b:bytes, align:int) -> bytes: return b + b'\x00' * ((align - (len(b) % align)) % align)
 
