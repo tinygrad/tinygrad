@@ -26,7 +26,8 @@ class HCQ2Compiled(Compiled):
     self.pm_bufferize = PatternMatcher([
       (UPat(Ops.BUFFER, tag="timeline_signal"), lambda ctx: ctx.timeline_signal),
       (UPat(Ops.BUFFER, tag="timeline_value"), lambda ctx: ctx.timeline_value),
-      (UPat(Ops.BUFFER, name="b"), lambda ctx, b: Buffer(ctx.device, b.arg, b.dtype, options=BufferSpec(host=True, uncached=True, cpu_access=True))),
+      (UPat(Ops.BUFFER, name="b"),
+        lambda ctx, b: Buffer(ctx.device, b.arg, b.dtype, options=BufferSpec(host=True, uncached=True, cpu_access=True, nolru=True))),
     ])
 
     super().__init__(device, allocator, compilers, lambda *a, **kw: None, None, arch=arch)
@@ -236,32 +237,45 @@ pm_lower_ops = PatternMatcher([
 ])
 
 # *****************
-# 2.2. queue split
+# 2.2. deps tracking
+# device.timeline_signal/value are the per-device schedule epoch. Before a schedule queue accesses memory owned by device N for the first time,
+# it waits for device[N].timeline_signal >= device[N].timeline_value - 1. This orders the schedule after all prior schedules that touched device N.
+#
+# queue.timeline_signal/value are per-queue progress counters used only inside a schedule.
+# Only the owner queue signals its queue.timeline_signal. Values are monotonic.
+#
+# At schedule end, one finalizer queue per touched device[N] waits for every active queue on device[N] to reach its schedule-local
+# final queue.timeline value, then signals device[N].timeline_signal with the schedule's reserved device epoch. After that, buffers/transients
+# for device N from this schedule are safe for the next schedule
+#
+# C programs reserve and bump timeline values, then patch command buffers with the concrete wait/signal values.
 
-# def split_into_queues(linear:UOp) -> UOp:
-#   out = []
-#   for k, grp in itertools.groupby(linear.src, lambda c: c.src[0].arg if c.op is Ops.CALL and c.src[0].op is Ops.LINEAR else None):
-#     if k is None: out.extend(grp)
-#     else:
-#       calls = list(grp)
-#       items = tuple(x for c in calls for x in c.src[0].src)
-#       args = tuple(a for c in calls for a in c.src[1:])
-#       out.append(calls[0].replace(src=(UOp(Ops.LINEAR, dtypes.void, items, arg=k),) + args))
-#   return linear.replace(src=tuple(out))
-# pm_split_into_queues = PatternMatcher([(UPat(Ops.LINEAR, name="linear"), split_into_queues)])
-
-# *****************
-# 2.3. barriers / signals / timeline inc
-
-def add_barriers(call:UOp, q:UOp) -> UOp:
-  return call.replace(src=(q.replace(src=(UOp(Ops.BARRIER, dtypes.void), *q.src)),) + call.src[1:])
-pm_add_barriers = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.LINEAR, name="q"),), name="call", allow_any_len=True), add_barriers)])
+# class DepsCtx:
+#   pass
 
 def add_signals(call:UOp, q:UOp) -> UOp:
   sig = UOp.new_buffer(q.arg[0], 0x100, dtypes.uint8).rtag("timeline_signal")
   tl = UOp.new_buffer(q.arg[0], 1, dtypes.uint64).rtag("timeline_value").index(UOp.const(dtypes.int, 0))
   return call.replace(src=(q.replace(src=(sig.wait(tl-1), *q.src, sig.store(tl)), arg=q.arg),) + call.src[1:])
-pm_add_signals = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.LINEAR, name="q"),), name="call", allow_any_len=True), add_signals)])
+pm_add_signals = PatternMatcher([(UPat(Ops.CALL, tag="hcq", src=(UPat(Ops.LINEAR, name="q"),), name="call", allow_any_len=True), add_signals)])
+
+# *****************
+# 2.3. group into queues
+
+# def group_into_queues(linear:UOp) -> UOp:
+#   open_qs:dict[Any, list[UOp]] = {}
+#   for el in linear.src:
+#     if el.op is Ops.LINEAR and el.tag != "hcq": flush(open_qs.keys(), add=el)
+#     devs = el.arg[0]
+#     if devs in open_qs: 
+# pm_group_into_queues = PatternMatcher([(UPat(Ops.LINEAR, name="linear"), group_into_queues)])
+
+# *****************
+# 2.4. barriers
+
+def add_barriers(call:UOp, q:UOp) -> UOp:
+  return call.replace(src=(q.replace(src=(UOp(Ops.BARRIER, dtypes.void), *q.src)),) + call.src[1:])
+pm_add_barriers = PatternMatcher([(UPat(Ops.CALL, tag="hcq", src=(UPat(Ops.LINEAR, name="q"),), name="call", allow_any_len=True), add_barriers)])
 
 # *****************
 # 3.1. encode cmdbufs
@@ -276,7 +290,7 @@ def get_pm_lower(name:str) -> PatternMatcher|None:
 def encode_cmdbuf(call:UOp, q:UOp) -> UOp|None:
   if (pm:=get_pm_lower(to_tuple(q.arg[0])[0].split(":")[0])) is None or (encoded:=pm.rewrite(q)) is None: return None
   return call.replace(src=(encoded,) + call.src[1:])
-pm_encode_cmdbufs = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.LINEAR, name="q"),), name="call", allow_any_len=True), encode_cmdbuf)])
+pm_encode_cmdbufs = PatternMatcher([(UPat(Ops.CALL, tag="hcq", src=(UPat(Ops.LINEAR, name="q"),), name="call", allow_any_len=True), encode_cmdbuf)])
 
 # *****************
 # 3.2. add timeline inc
@@ -363,33 +377,32 @@ pm_to_param = PatternMatcher([(UPat({Ops.MSELECT, Ops.MSTACK, Ops.BUFFER}, name=
 
 def parametrize_host_buffers(call:UOp) -> UOp:
   body = graph_rewrite(call.src[0], pm_to_param, ctx=(bufs:=[]), bottom_up=True, name="parametrize host buffers")
-  return call.replace(src=(body, *bufs) + call.src[1:], tag="hcq_param")
+  return call.replace(src=(body, *bufs) + call.src[1:], tag="hcq")
 pm_parametrize_host_buffers = PatternMatcher([(UPat(Ops.CALL, tag="hcq", name="call"), parametrize_host_buffers)])
 
 def callify_hcq(call:UOp) -> UOp:
   sink = UOp.sink(call.src[0], arg=KernelInfo(name="hcq_submit", estimates=Estimates()), tag=1)
   return to_program(sink, Device["CPU"].renderer).call(*call.src[1:])
-pm_callify_hcq = PatternMatcher([(UPat(Ops.CALL, tag="hcq_param", name="call"), callify_hcq)])
+pm_callify_hcq = PatternMatcher([(UPat(Ops.CALL, tag="hcq", name="call"), callify_hcq)])
 
 @track_rewrites(lambda _,ret: f"HCQ Schedule {pluralize('Kernel', len(ret.src))}")
 def hcq_schedule(linear:UOp) -> UOp:
   linear = graph_rewrite(linear, pm_insert_copy_staging + pm_flatten_linear, name="insert copy staging")
-  linear = graph_rewrite(linear, pm_prep_runtime, name="prepare runtime")
+  linear = graph_rewrite(linear, pm_prep_runtime, name="prepare runtime", enter_calls=True)
 
-  linear = graph_rewrite(linear, pm_lower_ops, name="lower ops into hcq ir")
-  # linear = graph_rewrite(linear, pm_split_into_queues, name="split into queues")
-  linear = graph_rewrite(linear, pm_add_barriers, walk=True, name="add barriers")
-  linear = graph_rewrite(linear, pm_add_signals, walk=True, name="add signals")
-  linear = graph_rewrite(linear, pm_encode_cmdbufs, walk=True, name="encode cmdbufs")
-  linear = graph_rewrite(linear, pm_add_timeline_inc, walk=True, name="add timeline inc")
-  linear = graph_rewrite(linear, pm_lift_patches_to_cmdbuf, name="lift patches to cmdbuf", enter_calls=True)
+  linear = graph_rewrite(linear, pm_lower_ops + pm_flatten_linear, walk=True, name="lower ops into hcq ir", enter_calls=True)
+  linear = graph_rewrite(linear, pm_add_signals, walk=True, name="add signals", enter_calls=True)
+  linear = graph_rewrite(linear, pm_add_barriers, walk=True, name="add barriers", enter_calls=True)
+  # linear = graph_rewrite(linear, pm_group_into_queues, name="group into queues")
+  linear = graph_rewrite(linear, pm_encode_cmdbufs, walk=True, name="encode cmdbufs", enter_calls=True)
+  linear = graph_rewrite(linear, pm_add_timeline_inc, walk=True, name="add timeline inc", enter_calls=True)
+  return graph_rewrite(linear, pm_lift_patches_to_cmdbuf, name="lift patches to cmdbuf", enter_calls=True)
 
-  # realize starts from here
+@track_rewrites(lambda _,ret: f"HCQ Realize {pluralize('Kernel', len(ret.src))}")
+def hcq_realize(linear:UOp) -> UOp:
   linear = graph_rewrite(linear, pm_bufferize, bottom_up=True, name="bufferize placeholders", enter_calls=True)
   linear = graph_rewrite(linear, pm_hold_call_buffers, walk=True, name="hold call buffers")
   linear = graph_rewrite(linear, pm_resolve_patches, bottom_up=False, name="simplify patches", enter_calls=True)
   linear = graph_rewrite(linear, pm_fixup, bottom_up=False, name="fixup", enter_calls=True)
-  linear = graph_rewrite(linear, pm_parametrize_host_buffers, name="parametrize host buffers")
-  linear = graph_rewrite(linear, pm_callify_hcq, name="callify hcq")
-
-  return linear
+  linear = graph_rewrite(linear, pm_parametrize_host_buffers, walk=True, name="parametrize host buffers", enter_calls=True)
+  return graph_rewrite(linear, pm_callify_hcq, name="callify hcq", enter_calls=True)
