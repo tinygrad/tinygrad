@@ -437,6 +437,7 @@ pm_simplify_valid = PatternMatcher([
   (invalid_gate, gated_given_valid),
 ])
 
+# this is symbolic 2.0
 REMOVE_FROM_SINK_LIKE = {Ops.UNROLL, Ops.NOOP, Ops.STACK, Ops.SINK, Ops.GROUP}
 pm_clean_up_group_sink = PatternMatcher([
   # clean up GROUP/SINK
@@ -446,7 +447,6 @@ pm_clean_up_group_sink = PatternMatcher([
       if any(x.op in REMOVE_FROM_SINK_LIKE for x in root.src) else None),
 ])
 
-# this is symbolic 2.0
 sym = symbolic+pm_simplify_valid+PatternMatcher([
   # reorder ALU/VECTORIZE
   (UPat(GroupOp.ALU, src=(UPat(Ops.STACK, src=UPat(name='x')), UPat(Ops.STACK, src=UPat(name='y'))), name='alu'),
@@ -483,4 +483,3 @@ sym = symbolic+pm_simplify_valid+PatternMatcher([
   # (x+y)*c -> x*c+y*c. only for int, float has inf*0=nan issue
   ((UPat.var("x", dtypes.weakint) + UPat.var("y")) * UPat.cvar("c"), lambda x,y,c: x*c+y*c),
 ])+pm_clean_up_group_sink
-
