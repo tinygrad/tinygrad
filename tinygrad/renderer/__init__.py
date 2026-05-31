@@ -38,7 +38,7 @@ class Estimates:
     for u in uops:
       if u.op in {Ops.LOAD, Ops.STORE}:
         buf = u
-        while len(buf.src): buf = buf.src[0]
+        while len(buf.src) and buf.op is not Ops.PARAM: buf = buf.src[0]
         if buf.op is Ops.PARAM:
           # u.src[0] is INDEX, cap at buffer size for re-reads (e.g. matmul)
           accessed = mem.get((buf, u.op), 0) + u.src[0].dtype.base.itemsize * mults
