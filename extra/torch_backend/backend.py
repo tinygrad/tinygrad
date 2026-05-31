@@ -547,14 +547,17 @@ def wrap_out(f):
     assigned = f(*args, **kwargs)
     if getenv("ALLOW_DTYPE_MISMATCH", 1): assigned = assigned.cast(out.dtype)
     assert out.shape == assigned.shape, f"shape mismatch: {assigned.shape} -> {out.shape}"
-    assert out.device == assigned.device, f"device mismatch: {assigned.device} -> {out.device}"
+    assert out.device == assigned.device or out.device is None or assigned.device is None, f"device mismatch: {assigned.device} -> {out.device}"
     assert out.dtype == assigned.dtype, f"dtype mismatch: {assigned.dtype} -> {out.dtype}"
+    if out.device is None and assigned.device is not None: out.replace(out.empty_like(device=assigned.device))
     return out.assign(assigned)
   return _wrap_out
 
 def _inplace_op(t, new_value):
   if not hasattr(t, "_view_base") and not getattr(canonical_base(t), "_views", set()): t.replace(new_value)
-  else: _apply_inplace(t, new_value)
+  else:
+    if (base:=canonical_base(t)).device is None and new_value.device is not None: base.replace(base.empty_like(device=new_value.device))
+    _apply_inplace(t, new_value)
   return t
 
 tiny_backend = {**{k:wrap_out(v) for k,v in tiny_backend_out.items()}, **{
