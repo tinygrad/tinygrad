@@ -680,6 +680,21 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     def fix(x: Self) -> Self: return x.flatten(start_dim=-2)[..., -s:].transpose(axis,-1)
     return getattr(fix(ret), {Ops.ADD: "add", Ops.MAX: "maximum", Ops.MUL: "mul"}[op])(fix(base))
 
+  def associative_scan(self, fxn:Callable[[Self, Self], Self], axis:int=0, reverse:bool=False) -> Self:
+    axis = self._resolve_dim(axis)
+    if self.ndim == 0 or 0 in self.shape: return self
+    x, n = (self.flip(axis) if reverse else self), self.shape[axis]
+    assert isinstance(n, int), f"does not support symbolic shape in associative_scan axis {axis}: {self.shape}"
+    step = 1
+    scan_fxn = (lambda a,b: fxn(b, a)) if reverse else fxn
+    while step < n:
+      leading = tuple((0, step) if i == axis else None for i in range(x.ndim))
+      left = tuple((0, s-step) if i == axis else None for i,s in enumerate(x.shape))
+      right = tuple((step, s) if i == axis else None for i,s in enumerate(x.shape))
+      x = x.shrink(leading).cat(scan_fxn(x.shrink(left), x.shrink(right)), dim=axis)
+      step *= 2
+    return x.flip(axis) if reverse else x
+
   def cumsum(self, axis:int=0) -> Self:
     """
     Computes the cumulative sum of the tensor along the specified `axis`.

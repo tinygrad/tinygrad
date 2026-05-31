@@ -1113,6 +1113,25 @@ class TestOps(unittest.TestCase):
     helper_test_op([(0,3)], lambda x: torch.cumsum(x, dim=0), lambda x: Tensor.cumsum(x, axis=0))
     helper_test_op([(2,3,0)], lambda x: torch.cumsum(x, dim=2), lambda x: Tensor.cumsum(x, axis=2))
 
+  def test_associative_scan_sum(self):
+    helper_test_op([(17,)], lambda x: torch.cumsum(x, dim=0), lambda x: x.associative_scan(lambda a,b: a+b, axis=0))
+    helper_test_op([(4,5)], lambda x: torch.cumsum(x, dim=1), lambda x: x.associative_scan(lambda a,b: a+b, axis=1))
+
+  def test_associative_scan_reverse(self):
+    helper_test_op([(4,5)], lambda x: torch.flip(torch.cumsum(torch.flip(x, dims=(1,)), dim=1), dims=(1,)),
+                   lambda x: x.associative_scan(lambda a,b: a+b, axis=1, reverse=True))
+
+  def test_associative_scan_noncommutative(self):
+    x = Tensor([[2, 1], [3, 4], [5, 6]], dtype=dtypes.float32)
+    def compose(a, b):
+      return (a[..., 0] * b[..., 0]).unsqueeze(-1).cat((a[..., 0] * b[..., 1] + a[..., 1]).unsqueeze(-1), dim=-1)
+    fwd, rev = x.associative_scan(compose, axis=0), x.associative_scan(compose, axis=0, reverse=True)
+    if COMPILE_ONLY:
+      Tensor.realize(fwd, rev)
+      return
+    np.testing.assert_allclose(fwd.numpy(), np.array([[2, 1], [6, 9], [30, 45]], dtype=np.float32))
+    np.testing.assert_allclose(rev.numpy(), np.array([[30, 45], [15, 22], [5, 6]], dtype=np.float32))
+
   def test_small_cumprod(self):
     helper_test_op([(10)],lambda x: torch.cumprod(x, dim=0),lambda x: Tensor.cumprod(x, axis=0))
   @slow_test
