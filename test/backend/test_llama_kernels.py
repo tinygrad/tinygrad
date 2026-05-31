@@ -1,8 +1,9 @@
 import unittest
-from tinygrad import Tensor, Device, dtypes, Context
+from tinygrad import Tensor, Device, dtypes, Context, GlobalCounters
 from tinygrad.helpers import getenv
 from examples.mlperf.models.flat_llama import FP8_DTYPE, quantize_fp8
 from extra.llama_kernels.fused_ce import fused_ce_loss
+from extra.llama_kernels import local_abs_max
 from extra.llama_kernels.quantize_fp8_delayed import quantize_fp8_delayed, quantize_fp8_scalar
 from test.helpers import needs_second_gpu
 
@@ -81,6 +82,15 @@ class TestQuantizeFP8(unittest.TestCase):
     Tensor.realize(fp8, new_amax)
     assert fp8.uop.shape == x.uop.shape
     assert new_amax.shape == ()
+
+class TestLocalAmax(unittest.TestCase):
+  def test_multi_tensor_local_shard_amax(self):
+    devices = ("CPU:0", "CPU:1")
+    x = Tensor.arange(16, device=devices[0]).reshape(4, 4).cast(dtypes.float).contiguous().realize().shard(devices, axis=0).realize()
+    GlobalCounters.reset()
+    out = (x * local_abs_max(x)).contiguous().realize()
+    self.assertEqual(GlobalCounters.kernel_count, 4)
+    self.assertEqual(out.tolist(), [[0., 7., 14., 21.], [28., 35., 42., 49.], [120., 135., 150., 165.], [180., 195., 210., 225.]])
 
 if __name__ == '__main__':
   unittest.main()
