@@ -1989,9 +1989,7 @@ class TestOps(unittest.TestCase):
     self.helper_test_exception([(1,1,5,5)],
                                 lambda x: torch.nn.functional.pad(x, (3,6,0,0), mode="circular"), lambda x: x.pad((3,6,0,0), mode="circular"),
                                 expected=(RuntimeError, ValueError))
-    with self.assertRaises(NotImplementedError):
-      # negative pads with circular pads is not supported
-      Tensor.randn(1,1,5,5).pad((3,-5,1,-5), mode="circular")
+    helper_test_op([(1,1,5,5)], lambda x: torch.nn.functional.pad(x, (1,-2,2,-1), mode="circular"), lambda x: x.pad((1,-2,2,-1), mode="circular"))
 
   def test_pad_reshape(self):
     helper_test_op([(1, 2)],
