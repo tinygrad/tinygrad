@@ -153,5 +153,110 @@ class TestTiny(unittest.TestCase):
   def test_beam_image(self):
     with Context(BEAM=1, IGNORE_BEAM_CACHE=1): self.test_image()
 
+class TestAssociativeScan(unittest.TestCase):
+  def test_cumsum(self):
+    t = Tensor([1, 2, 3, 4, 5, 6, 7, 8])
+    result = t.associative_scan(lambda a, b: a + b, axis=0)
+    self.assertListEqual(result.tolist(), [1, 3, 6, 10, 15, 21, 28, 36])
+
+  def test_cumprod(self):
+    t = Tensor([1.0, 2.0, 3.0, 4.0])
+    result = t.associative_scan(lambda a, b: a * b, axis=0)
+    self.assertListEqual(result.tolist(), [1.0, 2.0, 6.0, 24.0])
+
+  def test_cummax(self):
+    t = Tensor([1, 5, 2, 7, 3])
+    result = t.associative_scan(lambda a, b: a.maximum(b), axis=0)
+    self.assertListEqual(result.tolist(), [1, 5, 5, 7, 7])
+
+  def test_cummin(self):
+    t = Tensor([3, 1, 4, 1, 5, 9])
+    result = t.associative_scan(lambda a, b: a.minimum(b), axis=0)
+    self.assertListEqual(result.tolist(), [3, 1, 1, 1, 1, 1])
+
+  def test_2d_axis0(self):
+    t = Tensor([[1, 2, 3], [4, 5, 6]])
+    result = t.associative_scan(lambda a, b: a + b, axis=0)
+    self.assertListEqual(result.tolist(), [[1, 2, 3], [5, 7, 9]])
+
+  def test_2d_axis1(self):
+    t = Tensor([[1, 2, 3], [4, 5, 6]])
+    result = t.associative_scan(lambda a, b: a + b, axis=1)
+    self.assertListEqual(result.tolist(), [[1, 3, 6], [4, 9, 15]])
+
+  def test_3d(self):
+    t = Tensor.arange(24).reshape(2, 3, 4)
+    for axis in range(3):
+      result = t.associative_scan(lambda a, b: a + b, axis=axis)
+      expected = t.numpy().cumsum(axis=axis)
+      self.assertListEqual(result.tolist(), expected.tolist())
+
+  def test_reverse_cumsum(self):
+    t = Tensor([1, 2, 3, 4, 5, 6, 7, 8])
+    result = t.associative_scan(lambda a, b: a + b, axis=0, reverse=True)
+    self.assertListEqual(result.tolist(), [36, 35, 33, 30, 26, 21, 15, 8])
+
+  def test_reverse_cumprod(self):
+    t = Tensor([2.0, 3.0, 4.0])
+    result = t.associative_scan(lambda a, b: a * b, axis=0, reverse=True)
+    self.assertListEqual(result.tolist(), [24.0, 12.0, 4.0])
+
+  def test_single_element(self):
+    t = Tensor([42])
+    result = t.associative_scan(lambda a, b: a + b, axis=0)
+    self.assertListEqual(result.tolist(), [42])
+
+  def test_two_elements(self):
+    t = Tensor([3, 7])
+    result = t.associative_scan(lambda a, b: a + b, axis=0)
+    self.assertListEqual(result.tolist(), [3, 10])
+
+  def test_power_of_two(self):
+    t = Tensor.ones(16)
+    result = t.associative_scan(lambda a, b: a + b, axis=0)
+    self.assertAlmostEqual(result.tolist()[-1], 16.0, places=5)
+
+  def test_non_power_of_two(self):
+    t = Tensor.ones(7)
+    result = t.associative_scan(lambda a, b: a + b, axis=0)
+    self.assertListEqual(result.tolist(), [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0])
+
+  def test_negative_numbers(self):
+    t = Tensor([1, -2, 3, -4, 5])
+    result = t.associative_scan(lambda a, b: a + b, axis=0)
+    self.assertListEqual(result.tolist(), [1, -1, 2, -2, 3])
+
+  def test_float_precision(self):
+    t = Tensor([0.1, 0.2, 0.3, 0.4])
+    result = t.associative_scan(lambda a, b: a + b, axis=0).tolist()
+    for v, e in zip(result, [0.1, 0.3, 0.6, 1.0]):
+      self.assertAlmostEqual(v, e, places=5)
+
+  def test_mamba_ssm_linear_recurrence(self):
+    n = 4
+    a = Tensor([0.5] * n)
+    b = Tensor([1.0] * n)
+    pairs = Tensor.stack(a, b, dim=0)
+    def ssm_step(x, y):
+      ax, bx = x[0], x[1]
+      ay, by = y[0], y[1]
+      return Tensor.stack(ax * ay, ax * by + bx, dim=0)
+    result = pairs.associative_scan(ssm_step, axis=-1)
+    h = result[1].tolist()
+    self.assertAlmostEqual(h[0], 1.0, places=5)
+    self.assertAlmostEqual(h[1], 1.5, places=5)
+    self.assertAlmostEqual(h[2], 1.75, places=5)
+    self.assertAlmostEqual(h[3], 1.875, places=5)
+
+  def test_boolean_and(self):
+    t = Tensor([True, True, False, True])
+    result = t.associative_scan(lambda a, b: a.bitwise_and(b), axis=0)
+    self.assertListEqual(result.tolist(), [True, True, False, False])
+
+  def test_boolean_or(self):
+    t = Tensor([False, False, True, False])
+    result = t.associative_scan(lambda a, b: a.bitwise_or(b), axis=0)
+    self.assertListEqual(result.tolist(), [False, False, True, True])
+
 if __name__ == '__main__':
   unittest.main()
