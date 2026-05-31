@@ -1565,3 +1565,57 @@ if TRACEMETA >= 1:
   for name, fn in inspect.getmembers(Tensor, inspect.isfunction):
     if name in ["__class__", "__del__", "__init__", "__new__", "__repr__", "backward", "sequential", "gradient"]: continue
     setattr(Tensor, name, functools.wraps(fn)(_metadata_wrapper(fn)))
+
+    def associative_scan(self, fn, axis=-1, reverse=False):
+        from tinygrad.ops import BinaryOps
+        if axis < 0:
+            axis = len(self.shape) + axis
+        x = self.flip(axis) if reverse else self
+        scan_size = x.shape[axis]
+        if scan_size <= 1:
+            return x.flip(axis) if reverse else x
+        
+        # Reduce by pair
+        pairs = []
+        for i in range(0, scan_size - 1, 2):
+            a = x.slice([(0, s) if j != axis else (i, i+1) for j, s in enumerate(x.shape)])
+            b = x.slice([(0, s) if j != axis else (i+1, i+2) for j, s in enumerate(x.shape)])
+            pairs.append(fn(a, b))
+        
+        # Recursive scan on reduced set
+        if scan_size % 2 == 0:
+            reduced = x.slice([(0, s) if j != axis else (0, scan_size//2) for j, s in enumerate(x.shape)])
+            reduced = reduced._replace_elements(pairs, axis)
+        else:
+            last = x.slice([(0, s) if j != axis else (scan_size-1, scan_size) for j, s in enumerate(x.shape)])
+            reduced_rest = x.slice([(0, s) if j != axis else (0, scan_size-1) for j, s in enumerate(x.shape)])
+            pairs_rest = []
+            scan_rest = scan_size - 1
+            for i in range(0, scan_rest - 1, 2):
+                a = reduced_rest.slice([(0, s) if j != axis else (i, i+1) for j, s in enumerate(reduced_rest.shape)])
+                b = reduced_rest.slice([(0, s) if j != axis else (i+1, i+2) for j, s in enumerate(reduced_rest.shape)])
+                pairs_rest.append(fn(a, b))
+            reduced_scan = reduced_rest if scan_rest <= 1 else None  
+            reduced = x.slice([(0, s) if j != axis else (0, scan_size//2) for j, s in enumerate(x.shape)])
+        
+        scanned_reduced = reduced.associative_scan(fn, axis, False)
+        
+        # Interleave results
+        result_parts = []
+        for i in range(scan_size):
+            if i == 0:
+                result_parts.append(x.slice([(0, s) if j != axis else (0, 1) for j, s in enumerate(x.shape)]))
+            elif i % 2 == 1:
+                idx = i // 2
+                val = scanned_reduced.slice([(0, s) if j != axis else (idx, idx+1) for j, s in enumerate(scanned_reduced.shape)])
+                result_parts.append(val)
+            else:
+                prev = result_parts[-1]
+                curr = x.slice([(0, s) if j != axis else (i, i+1) for j, s in enumerate(x.shape)])
+                val = fn(prev, curr)
+                isolated_shape = val.shape[:axis] + (1,) + val.shape[axis+1:]
+                result_parts.append(val.reshape(isolated_shape))
+        
+        result = x.slice([(0, s) if j != axis else (0, 0) for j, s in enumerate(x.shape)])
+        result = result._replace_elements(result_parts, axis)
+        return result.flip(axis) if reverse else result
