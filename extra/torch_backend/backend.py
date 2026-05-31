@@ -25,10 +25,12 @@ def calculate_storage_offset(x: Tensor) -> int:
       u_strides = strides_for_shape(u.src[0].shape)
       for i, (start, _) in enumerate(u.marg): offset += start * u_strides[i]
   return offset
-def wrap(x: Tensor) -> torch.Tensor:
+def wrap(x: Tensor, dev: torch.device|None=None) -> torch.Tensor:
   x._strides = strides_for_shape(x.shape) # always recalculate
   if (not hasattr(x, '_storage_offset')) or (not x.uop.is_realized): x._storage_offset = calculate_storage_offset(x)
-  return mod.wrap(x, _to_torch_dtype(x.dtype), _to_torch_device(x.device).index)
+  # a deviceless tinygrad value takes the device from the op context
+  idx = _to_torch_device(x.device).index if x.device is not None else (dev.index if dev is not None else 0)
+  return mod.wrap(x, _to_torch_dtype(x.dtype), idx)
 def _update_torch_metadata(tensor: torch.Tensor, tiny: Tensor) -> None:
   tiny._strides = strides_for_shape(tiny.shape)
   tiny._storage_offset = calculate_storage_offset(tiny)
@@ -679,10 +681,11 @@ def wrap_fxn(k,f):
     if TORCH_DEBUG:
       print(k, len(args), [x.shape if isinstance(x, torch.Tensor) else x for x in args],
                           {k:v.shape if isinstance(v, torch.Tensor) else v for k,v in kwargs.items()})
+    dev = next((a.device for a in args if isinstance(a, torch.Tensor) and a.device.type == "tiny"), None)
     args, kwargs = unwrap_args(args, kwargs)
     out = f(*args, **kwargs)
-    if isinstance(out, Tensor): return wrap(out)
-    elif isinstance(out, tuple): return tuple(wrap(x) for x in out)
+    if isinstance(out, Tensor): return wrap(out, dev)
+    elif isinstance(out, tuple): return tuple(wrap(x, dev) for x in out)
     else: raise RuntimeError(f"unknown output type {type(out)}")
   return nf
 
