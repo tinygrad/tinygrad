@@ -31,7 +31,7 @@ const layoutCfg = (g, { blocks, paths, pc_tokens }) => {
       width = Math.max(width, ctx.measureText(tokens.map((t) => t.st).join("")).width);
       height += lineHeight;
     }
-    g.setNode(lead, { ...rectDims(width, height), label, labelX:0, id:lead, color:"#1a1b26" });
+    g.setNode(lead, { ...rectDims(width, height), label, labelX:0, id:lead, color:"#1a1b26", addrspace:null });
   }
   // paths become edges between basic blocks
   const pathColors = {0:"#3f7564", 1:"#7a4540", 2:"#3b5f7e"};
@@ -45,9 +45,9 @@ const layoutUOp = (g, { graph, change }, opts) => {
   const lineHeight = 14;
   g.setGraph({ rankdir: "LR", font:"sans-serif", lh:lineHeight });
   ctx.font = `350 ${lineHeight}px ${g.graph().font}`;
-  if (change?.length) g.setNode("overlay", {label:"", labelWidth:0, labelHeight:0, className:"overlay"});
+  if (change?.length) g.setNode("overlay", {label:"", labelWidth:0, labelHeight:0, labelX:0, className:"overlay"});
   let callCount = 0;
-  for (const [k, {label, src, ref, color, tag, exclude }] of Object.entries(graph)) {
+  for (const [k, {label, src, ref, color, tag, exclude, addrspace}] of Object.entries(graph)) {
     // adjust node dims by label size (excluding escape codes) + add padding
     let [width, height] = [0, 0];
     for (line of label.replace(/\u001B\[(?:K|.*?m)/g, "").split("\n")) {
@@ -56,7 +56,7 @@ const layoutUOp = (g, { graph, change }, opts) => {
     }
     const callNode = label.startsWith("CALL\n") || label.startsWith("FUNCTION\n");
     if (callNode) callCount++;
-    g.setNode(k, {...rectDims(width, height), label, labelX:0, ref, id:k, color, tag, callNode, exclude});
+    g.setNode(k, {...rectDims(width, height), label, labelX:0, ref, id:k, color, tag, callNode, exclude, addrspace});
     // add edges
     const edgeCounts = {};
     for (const [_, s] of src) edgeCounts[s] = (edgeCounts[s] || 0)+1;

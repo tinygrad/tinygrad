@@ -5,15 +5,14 @@ from typing import Generator
 
 from tinygrad.uop.ops import UOp, UPat, Ops, PatternMatcher, TrackedPatternMatcher, graph_rewrite, track_rewrites, profile_matches
 from tinygrad.uop.symbolic import sym
-from tinygrad.dtype import dtypes
+from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.helpers import colored, ansistrip, flatten, TracingKey, ProfileRangeEvent, ProfileEvent, Context, cpu_events, profile_marker
 from tinygrad.helpers import cpu_profile, ProfilePointEvent, unwrap
 from tinygrad.device import Buffer
 
 from tinygrad.uop.ops import tracked_keys, tracked_ctxs, uop_fields, active_rewrites, active_group, _name_cnt, RewriteTrace
-from tinygrad.viz.serve import load_rewrites, get_full_rewrite, uop_to_json, VizData, get_render
-from tinygrad.codegen import to_program_cache
-from tinygrad.codegen import to_program
+from tinygrad.viz.serve import load_rewrites, get_full_rewrite, uop_to_json, VizData, get_render, addrspace_colors
+from tinygrad.codegen import do_to_program
 
 @track_rewrites(name=True)
 def exec_rewrite(sink:UOp, pm_lst:list[PatternMatcher], names:None|list[str]=None) -> UOp:
@@ -41,7 +40,6 @@ class VizTrace:
 @contextlib.contextmanager
 def save_viz():
   for lst in [tracked_keys, tracked_ctxs, active_rewrites, active_group, _name_cnt]: lst.clear()
-  to_program_cache.clear()
   Buffer.profile_events.clear()
   cpu_events.clear()
   viz = VizTrace()
@@ -342,12 +340,15 @@ class TestVizIntegration(unittest.TestCase):
   def test_codegen_tracing(self):
     with save_viz() as viz:
       ast = (Tensor.empty(4)+Tensor.empty(4)).schedule_linear().src[0].src[0]
-      prg = to_program(ast, Device[Device.DEFAULT].renderer)
+      prg = do_to_program(ast, Device[Device.DEFAULT].renderer)
     lst = viz.list_items()
     self.assertEqual(len(lst), 3)
     self.assertEqual(lst[0]["name"], "Callify 1 Buffer n1")
     self.assertEqual(lst[1]["name"], "Schedule 1 Kernel n1")
     self.assertEqual(lst[2]["name"], prg.arg.name)
+    input_ast = next(viz.get_details(2, 0))["graph"].values()
+    for u in input_ast:
+      if u["label"].startswith("PARAM\n"): self.assertEqual(u["addrspace"], addrspace_colors[AddrSpace.GLOBAL])
 
   # schedule graph CALL nodes have a link to jump to codegen
   def test_link_sched_codegen(self):
@@ -359,7 +360,7 @@ class TestVizIntegration(unittest.TestCase):
       from tinygrad.engine.realize import compile_linear
       sched = compile_linear(sched)
       with Context(NO_COLOR=0):
-        prgs = [to_program(si.src[0], Device[c1.device].renderer).arg.name for si in sched.src]
+        prgs = [do_to_program(si.src[0], Device[c1.device].renderer).arg.name for si in sched.src]
     lst = viz.list_items()
     sched_idx = next(i for i,l in enumerate(lst) if l["name"].startswith("Schedule"))
     viz_kernel = next(i for i,s in enumerate(lst[sched_idx]["steps"]) if s["name"] == "View Kernel Graph")
@@ -766,7 +767,7 @@ class TestCfg(unittest.TestCase):
     with save_viz() as viz:
       with Context(DEV=f"NULL::{self.arch}"):
         out = Tensor.custom_kernel(Tensor.empty(1), fxn=fxn)[0]
-        _ = to_program(out.schedule_linear().src[-1].src[0], Device[out.device].renderer)
+        _ = do_to_program(out.schedule_linear().src[-1].src[0], Device[out.device].renderer)
     codegen_rewrites = next(s for s in viz.list_items() if s["name"] == name)
     disasm = next(s for s in codegen_rewrites["steps"] if s["name"] == "View Disassembly")
     return get_render(viz.data, disasm["query"])
@@ -1003,8 +1004,9 @@ class TestCLI(unittest.TestCase):
   def test_dedup(self):
     with save_viz() as viz:
       for _ in range(CNT:=4):
-        Tensor.empty(4, device="NULL").add(1).realize()
-        Tensor.empty(8, device="NULL").add(1).realize()
+        # use kernel names unique to this test
+        Tensor.custom_kernel(Tensor.empty(4, device="NULL"), fxn=lambda _: UOp.sink(arg=KernelInfo("k1_test_viz_dedup")))[0].realize()
+        Tensor.custom_kernel(Tensor.empty(8, device="NULL"), fxn=lambda _: UOp.sink(arg=KernelInfo("k2_test_viz_dedup")))[0].realize()
     with write_files(viz) as files, Context(NO_COLOR=1):
       name = run_cli(*files, "-s", "NULL")[0]["name"]
       with Context(DEBUG=3):

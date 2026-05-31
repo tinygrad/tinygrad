@@ -323,7 +323,7 @@ class TestWithGrad(unittest.TestCase):
 
   def test_set_overlapping_backward(self):
     z = Tensor.zeros(6)
-    x = Tensor.ones(4)
+    x = Tensor.ones(4).contiguous()
     y = Tensor.ones(4) * 2
     z[:4] = x
     z[2:] = y

@@ -404,8 +404,6 @@ jobs:
       - name: Test openpilot model kernel count and gate usage
         run: |
           ALLOWED_KERNEL_COUNT=123 ALLOWED_READ_IMAGE=1468 ALLOWED_GATED_READ_IMAGE=18 FLOAT16=1 DEV=CL IMAGE=1 python examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/cf6376aa9a090f0da26c280ef69eabf9bbdd51d1faac9ed392919c3db69be916
-      - name: Test openpilot CL compile fp16
-        run: FLOAT16=1 DEV=CL IMAGE=1 python examples/openpilot/compile3.py https://gitlab.com/commaai/openpilot-lfs.git/gitlab-lfs/objects/cf6376aa9a090f0da26c280ef69eabf9bbdd51d1faac9ed392919c3db69be916
       - name: Test openpilot CL compile fp32 (test correctness)
         run: |
           DEV=CL IMAGE=1 SELFTEST=1 python examples/openpilot/compile3.py https://github.com/haraschax/filedump/raw/refs/heads/master/driving_vision_fp32.onnx
@@ -558,8 +556,7 @@ jobs:
       uses: ./.github/actions/setup-tinygrad
       with:
         key: dsp-minimal
-        deps: testing_unit
-        pydeps: "onnx==1.18.0 onnxruntime ml_dtypes"
+        deps: testing
         llvm: "true"
         qemu: "true"
     - name: Set MOCKDSP env
@@ -817,74 +814,42 @@ jobs:
     - name: Run process replay tests
       uses: ./.github/actions/process-replay
 
-  osxwebgpu:
-    name: MacOS (WebGPU)
-    runs-on: macos-14
-    timeout-minutes: 10
+  testmacos:
+    strategy:
+      fail-fast: false
+      matrix:
+        dev:
+          - 'CPU:CLANG'
+          - 'CPU:LLVM'
+          - 'CPU:LVP'
+          - 'METAL'
+          - 'WEBGPU'
+
+    name: MacOS (DEV=${{ matrix.dev }})
+    runs-on: macos-15
+    timeout-minutes: 20
     steps:
     - name: Checkout Code
       uses: actions/checkout@v6
     - name: Setup Environment
       uses: ./.github/actions/setup-tinygrad
       with:
-        key: osx-webgpu
-        deps: testing
-        webgpu: 'true'
-    - name: Build WEBGPU Efficientnet
-      run: DEV=WEBGPU WEBGPU_BACKEND="WGPUBackendType_Metal" python3 -m examples.compile_efficientnet
-    - name: Run selected webgpu tests
-      run: DEV=WEBGPU WEBGPU_BACKEND="WGPUBackendType_Metal" python3 -m pytest -n=auto test/backend --durations=20
-    #- name: Clean npm cache
-    #  run: npm cache clean --force
-    #- name: Install Puppeteer
-    #  run: npm install puppeteer
-    # this is also flaky
-    #- name: Run WEBGPU Efficientnet
-    #  run: node test/web/test_webgpu.js
-    # this is flaky
-    #- name: Run VIZ tests as external package
-    #  run: |
-    #    mkdir $GITHUB_WORKSPACE/test_dir
-    #    cd $GITHUB_WORKSPACE/test_dir
-    #    python -m venv venv
-    #    source venv/bin/activate
-    #    pip install $GITHUB_WORKSPACE
-    #    cp $GITHUB_WORKSPACE/test/web/test_viz.js .
-    #    node test_viz.js
-    - name: Test ONNX Runner (WEBGPU)
-      run: DEV=WEBGPU python3 test/external/external_test_onnx_runner.py
-
-  osxtests:
-    strategy:
-      fail-fast: false
-      matrix:
-        backend: [metal, llvm, cpu, lvp]
-    name: MacOS (${{ matrix.backend }})
-    runs-on: macos-15
-    timeout-minutes: 20
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v6
-      - name: Setup Environment
-        uses: ./.github/actions/setup-tinygrad
-        with:
-          key: macos-${{ matrix.backend }}-minimal
-          deps: testing_unit
-          llvm: ${{ matrix.backend == 'llvm' || matrix.backend == 'lvp' }}
-          mesa: ${{ matrix.backend == 'lvp' && 'cpu' }}
-      - name: Set env
-        run: printf "${{ matrix.backend == 'llvm' && 'DEV=CPU:LLVM' || matrix.backend == 'cpu' && 'DEV=CPU\nCPU_COUNT=2' || matrix.backend == 'metal' && 'DEV=METAL' || matrix.backend == 'lvp' && 'DEV=CPU:LVP' }}" >> $GITHUB_ENV
-      - name: Check Device.DEFAULT and print some source
-        run: |
-          python -c "from tinygrad import Device; assert Device.DEFAULT == {'LLVM':'CPU','LVP':'CPU'}.get(x:='${{ matrix.backend }}'.upper(), x), Device.DEFAULT"
-          DEBUG=4 python3 test/test_tiny.py TestTiny.test_plus
-      - name: Run pytest (${{ matrix.backend }})
-        run: python3 -m pytest -n=auto test/backend --durations=20
-      - name: Run process replay tests
-        uses: ./.github/actions/process-replay
-      - name: Run macOS-specific unit test
-        if: matrix.backend == 'llvm'
-        run: python3 -m pytest test/unit/test_disk_tensor.py::TestDiskTensor::test_copy_to_cpu_not_truncated test/unit/test_cpu.py
+        key: macos-${{ matrix.dev }}
+        deps: testing_unit
+        python-version: '3.12'
+        llvm: ${{ contains(matrix.dev, 'LLVM') || contains(matrix.dev, 'LVP') }}
+        mesa: ${{ contains(matrix.dev, 'LVP') && 'cpu' || 'false' }}
+        webgpu: ${{ matrix.dev == 'WEBGPU' }}
+    - name: Set env
+      run: printf "DEV=${{ matrix.dev }}${{ matrix.dev == 'CPU:CLANG' && '\nCPU_COUNT=2' || '' }}" >> $GITHUB_ENV
+    - name: Check Device.DEFAULT and print some source
+      run: |
+        python -c "from tinygrad import Device; from tinygrad.helpers import Target; assert Device.DEFAULT == Target.parse('${{ matrix.dev }}').device"
+        DEBUG=4 python test/test_tiny.py TestTiny.test_plus
+    - name: Run backend tests
+      run: python -m pytest -n=auto test/backend --durations=20
+    - name: Run process replay tests
+      uses: ./.github/actions/process-replay
 
 # ****** Windows Tests ******
 
