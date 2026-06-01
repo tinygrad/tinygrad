@@ -162,6 +162,21 @@ class TestJit(unittest.TestCase):
       np.testing.assert_allclose(c.numpy(), fun.a.numpy()+b.numpy(), atol=1e-4, rtol=1e-5)
     assert_jit_cache_len(fun.__call__.func.__self__, 1)
 
+  def test_jit_instance_method_isolation(self):
+    class Model:
+      def __init__(self, scale):
+        self.scale = Tensor([scale])
+      @TinyJit
+      def forward(self, x):
+        return (x * self.scale).realize()
+
+    m1, m2 = Model(2), Model(3)
+
+    # each instance must warm up, capture, and replay with its own state
+    for _ in range(4):
+      self.assertEqual(m1.forward(Tensor([5])).item(), 10)
+      self.assertEqual(m2.forward(Tensor([5])).item(), 15)
+
   def test_jit_size1_input(self):
     @TinyJit
     def f(a, b): return (a+b).realize()
