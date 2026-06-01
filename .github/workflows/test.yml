@@ -152,7 +152,7 @@ jobs:
         DEV: 'PYTHON::METAL'
       run: |
         DEBUG=2 python3 test/backend/test_ops.py TestOps.test_big_gemm
-        DEBUG=2 python3 -m pytest -nauto test/opt/test_tensor_cores.py
+        python3 -m pytest -nauto test/opt/test_tensor_cores.py
     - name: Test emulated AMD tensor cores
       env:
         DEV: 'PYTHON::gfx1100'
