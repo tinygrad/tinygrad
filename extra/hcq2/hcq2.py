@@ -47,6 +47,16 @@ class HCQ2Compiled(Compiled):
     buf.as_memoryview(force_zero_copy=True).cast('Q')[0] = 1
     return buf
 
+  @functools.cache
+  def queue_timeline_signal(self, queue:str) -> Buffer:
+    return Buffer(self.device, 0x100, dtypes.uint8, options=BufferSpec(host=True, uncached=True, cpu_access=True), preallocate=True)
+
+  @functools.cache
+  def queue_timeline_value(self, queue:str) -> Buffer:
+    buf = Buffer("CPU", 1, dtypes.uint64, preallocate=True)
+    buf.as_memoryview(force_zero_copy=True).cast('Q')[0] = 1
+    return buf
+
   def synchronize(self, timeout:int|None=None):
     if not hasattr(self, 'iface'): return
     sig = self.timeline_signal._buf.cpu_view().mv.cast('Q')
@@ -224,14 +234,14 @@ pm_prep_runtime = PatternMatcher([
 # 2.1. lowering to hcq ir
 
 def lower_program(call:UOp, prg:UOp) -> UOp:
-  q = UOp(Ops.LINEAR, dtypes.void, (prg,), arg=(call.src[1].device, "COMPUTE"))
+  q = UOp(Ops.LINEAR, dtypes.void, (prg,), arg=(call.src[1].device, "COMPUTE:0"))
   return call.replace(src=(q,) + call.src[1:]).rtag('hcq')
 
 def lower_copy(call:UOp, copy:UOp) -> UOp|None:
   dst, src = call.src[1], call.src[2]
   if (hcq_dev:=next((b.device for b in (dst, src) if b.device.split(":")[0] in HCQ_DEVS), None)) is None: return None
 
-  q = UOp(Ops.LINEAR, dtypes.void, (UOp(Ops.COPY, dtypes.void, src=(dst, src), arg=src.buffer.nbytes),), arg=(hcq_dev, "COPY"))
+  q = UOp(Ops.LINEAR, dtypes.void, (UOp(Ops.COPY, dtypes.void, src=(dst, src), arg=src.buffer.nbytes),), arg=(hcq_dev, "COPY:0"))
   return call.replace(src=(q,) + call.src[1:]).rtag('hcq')
 
 pm_lower_ops = PatternMatcher([
@@ -279,7 +289,7 @@ pm_insert_deps = PatternMatcher([(UPat(Ops.CALL, tag="hcq", name="call", allow_a
 def make_finalizer(devs:tuple[str, ...], queues:list[UOp], nbump:int) -> UOp:
   sig = UOp.new_buffer(devs, 0x100, dtypes.uint8).rtag("timeline_signal")
   tl = UOp.new_buffer(devs, 1, dtypes.uint64).rtag("timeline_value")
-  q = UOp(Ops.LINEAR, dtypes.void, (sig.store(tl.index(UOp.const(dtypes.int, 0))),), arg=(devs, "COMPUTE"), tag="finalizer")
+  q = UOp(Ops.LINEAR, dtypes.void, (sig.store(tl.index(UOp.const(dtypes.int, 0))),), arg=(devs, "COMPUTE:0"), tag="finalizer")
 
   def bump(b, by): return b.index(UOp.const(dtypes.int, 0), dtype=b.dtype.ptr()).store(b.index(UOp.const(dtypes.int, 0)) + by)
   bumps = (bump(tl, 1),) + tuple(bump(UOp.new_buffer(devs, 1, dtypes.uint64).rtag((ty, "timeline_value")), nbump) for ty in dedup([q.arg[1] for q in queues]))
@@ -335,10 +345,16 @@ def get_pm_lower(name:str) -> PatternMatcher|None:
     return importlib.import_module(f'extra.hcq2.ops_{name.lower()}2').pm_lower
   except ImportError: return None
 
-def encode_cmdbuf(call:UOp, q:UOp) -> UOp|None:
-  if (pm:=get_pm_lower(to_tuple(q.arg[0])[0].split(":")[0])) is None or (encoded:=pm.rewrite(q)) is None: return None
+def encode_cmdbuf(call:UOp) -> UOp|None:
+  if (q:=unwrap_after(call.src[0])).op is not Ops.LINEAR: return None
+  if (pm:=get_pm_lower(to_tuple(q.arg[0])[0].split(":")[0])) is None or (encoded:=pm.rewrite(call.src[0])) is None: return None
   return call.replace(src=(encoded,) + call.src[1:])
-pm_encode_cmdbufs = PatternMatcher([(UPat(Ops.CALL, src=(UPat(Ops.LINEAR, name="q"),), name="call", allow_any_len=True), encode_cmdbuf)])
+pm_encode_cmdbufs = PatternMatcher([(UPat(Ops.CALL, tag="hcq", name="call", allow_any_len=True), encode_cmdbuf)])
+
+pm_compose_submit = PatternMatcher([
+  (UPat(Ops.CALL, tag="hcq", src=(UPat(Ops.CUSTOM_FUNCTION, arg="submit", name="sub"),), allow_any_len=True, name="call"),
+    call.replace(src=(UOp.group(*sub.src),) + call.src[1:])),
+])
 
 # *****************
 # 3.2. add timeline inc
@@ -445,8 +461,8 @@ def hcq_schedule(linear:UOp) -> UOp:
   linear = graph_rewrite(linear, pm_add_stores, ctx=waited, walk=True, name="add stores")
   linear = graph_rewrite(linear, pm_add_barriers, walk=True, name="add barriers")
   linear = graph_rewrite(linear, pm_encode_cmdbufs, walk=True, name="encode cmdbufs")
+  linear = graph_rewrite(linear, pm_compose_submit, walk=True, name="compose submit")
   linear = graph_rewrite(linear, pm_lift_patches_to_cmdbuf, name="lift patches to cmdbuf", enter_calls=True)
-  exit(0)
 
   # realize starts from here
   linear = graph_rewrite(linear, pm_bufferize, bottom_up=True, name="bufferize placeholders", enter_calls=True)
