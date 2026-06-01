@@ -1,9 +1,9 @@
 import math
 from typing import cast, Any
-from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, AxisType, KernelInfo
+from tinygrad.uop.ops import PatternMatcher, UPat, GroupOp, Ops, UOp, AxisType, KernelInfo, ParamArg
 from tinygrad.uop.render import print_uops, pyrender
 from tinygrad.dtype import DType, ImageDType, dtypes, PtrDType, AddrSpace, Invalid, ConstFloat
-from tinygrad.helpers import DEBUG, Context, prod, SPEC, Metadata, panic, CHECK_OOB
+from tinygrad.helpers import DEBUG, Context, prod, SPEC, Metadata, panic, CHECK_OOB, all_same
 
 # ***** uop helpers *****
 
@@ -70,8 +70,8 @@ spec_shared = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(dtypes.is_int(y.dtype) for y in x.src[1:]) or None),
   (UPat(Ops.END, src=(UPat(),), allow_any_len=True, name="x"), lambda x: all(u.op is Ops.RANGE for u in x.src[1:])),
 
-  # PARAM (that's really a DEFINE_GLOBAL)
-  (UPat(Ops.PARAM, name="x"), lambda x: isinstance(x.dtype, (PtrDType, ImageDType)) and x.dtype.addrspace == AddrSpace.GLOBAL),
+  # PARAM
+  (UPat(Ops.PARAM, name="x"), lambda x: isinstance(x.arg, ParamArg)),
 
   # GROUP of stores (or groups, or NOOPs)
   # TODO: remove UNROLL here, it's for SPEC=2
@@ -124,14 +124,11 @@ spec_tensor = PatternMatcher([
 
   # CONST with a UNIQUE or DEVICE
   (UPat(Ops.CONST, src=(UPat(Ops.DEVICE),)), lambda: True),
-  (UPat(Ops.CONST, src=(UPat((Ops.UNIQUE, Ops.LUNIQUE)), UPat(Ops.DEVICE))), lambda: True),
+  (UPat(Ops.CONST, src=(UPat((Ops.UNIQUE, Ops.LUNIQUE)), UPat(Ops.DEVICE)), name="c"), lambda c: c.arg is Invalid),
 
   # BUFFER
   (UPat(Ops.BUFFER, src=(UPat((Ops.UNIQUE, Ops.LUNIQUE)), UPat(Ops.DEVICE)), name="buf"),
    lambda buf: isinstance(buf.arg, int) and isinstance(buf.dtype, DType)),
-
-  # PARAM (that's really a variable)
-  (UPat(Ops.PARAM, src=(UPat(), UPat(), UPat(), UPat(), UPat()), name="x"), lambda x: True),
 
   # Tensor variable bindings
   (UPat(Ops.BIND, (dtypes.int, dtypes.weakint,), (UPat(Ops.DEFINE_VAR), UPat.cvar(dtype=(dtypes.int,dtypes.weakint,))), arg=None), lambda: True),
@@ -146,11 +143,6 @@ spec_tensor = PatternMatcher([
   (UPat(Ops.FUNCTION, dtypes.void, src=(UPat(Ops.TUPLE),), allow_any_len=True), lambda: True),
   (UPat(Ops.TUPLE, dtypes.void), lambda: True),
   (UPat(Ops.GETTUPLE, src=(UPat((Ops.FUNCTION, Ops.TUPLE)),), name="g"), lambda g: isinstance(g.arg, int)),
-
-  # PARAM
-  (UPat(Ops.PARAM, src=(UPat(), UPat(Ops.NOOP)), name="x"), lambda x: True),  # TODO: why does this have NOOP?
-  (UPat(Ops.PARAM, src=(UPat(), UPat(Ops.DEVICE)), name="x"), lambda x: True),
-  (UPat(Ops.PARAM, src=(UPat(), UPat(Ops.DEVICE), UPat(Ops.MULTI)), name="x"), lambda x: True),
 
   # inputs to movement ops
   (UPat(Ops.STACK), lambda: True),
@@ -174,7 +166,7 @@ spec_tensor = PatternMatcher([
   # MULTI/MSELECT/MSTACK
   (UPat(Ops.MULTI, name="multi"), lambda multi: all(x.dtype == multi.dtype for x in multi.src) and isinstance(multi.arg, int)),
   (UPat(Ops.MSELECT, name="x"), lambda x: isinstance(x.src[0].device, tuple) and x.arg < len(x.src[0].device)),
-  (UPat(Ops.MSTACK, name="x"), lambda x: all(isinstance(x.device, str) for x in x.src)),
+  (UPat(Ops.MSTACK, name="x"), lambda x: all(isinstance(s.device, str) for s in x.src) or (all_same(x.src) and x.src[0].device is None)),
 
   # CONTIGUOUS ensures the source UOp realizes
   (UPat((Ops.DETACH, Ops.CONTIGUOUS, Ops.CONTIGUOUS_BACKWARD), name="root", src=(UPat.var("x"),), arg=None),
@@ -224,12 +216,10 @@ spec_program = PatternMatcher([
 # these are intermediate ops. everything should be deleted from here
 spec_full = PatternMatcher([
   # SLICE on BUFFER is allowed if BUFFER is
-  (UPat(Ops.SLICE, src=(UPat((Ops.BUFFER, Ops.PARAM)), UPat(Ops.CONST, dtype=dtypes.weakint)), allow_any_len=True, name="bv"),
+  (UPat(Ops.SLICE, src=(UPat(GroupOp.Movement.union({Ops.BUFFER, Ops.PARAM, Ops.STAGE, Ops.AFTER})),
+                        UPat(Ops.CONST, dtype=dtypes.weakint)), allow_any_len=True, name="bv"),
    lambda bv: isinstance(bv.arg, int)),
 
-  # TODO: SLICE shouldn't go on INDEX. why is this allowed? remove these both
-  (UPat(Ops.SLICE, src=(UPat((Ops.INDEX,)), UPat(Ops.CONST, dtype=dtypes.weakint)), allow_any_len=True, name="bv"),
-   lambda bv: isinstance(bv.arg, int)),
   (UPat(Ops.CALL, src=(UPat((Ops.SLICE,)),), allow_any_len=True), lambda: True),
 
   # codegen may end ranges after gpudims has replaced RANGE with SPECIAL.
@@ -266,7 +256,7 @@ from tinygrad.schedule.rangeify import BufferizeOpts
 glbls:dict[str, Any] = {"inf": math.inf, "nan": math.nan, "KernelInfo": KernelInfo, "Metadata": Metadata,
                         "UOp": UOp, "dtypes": dtypes, "Ops": Ops, "AxisType": AxisType, "Invalid": Invalid,
                         "Opt": Opt, "OptOps": OptOps, "BufferizeOpts": BufferizeOpts, "AddrSpace": AddrSpace, "panic": panic,
-                        "ConstFloat": ConstFloat}
+                        "ConstFloat": ConstFloat, "ParamArg": ParamArg}
 def eval_pyrender(code:str) -> UOp:
   lcls:dict[str, Any] = {}
   exec(code, glbls, lcls)

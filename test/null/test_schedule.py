@@ -456,14 +456,14 @@ class TestSchedule(unittest.TestCase):
       check_schedule(out, 4, [c1.weight, c1.bias, *nn.state.get_parameters(bn)])
 
   def test_fold_conv_batchnorm_optim(self, adam=False):
-    # 2 is too low?
-    optim, cnt = (nn.optim.Adam, 16) if adam else (nn.optim.SGD, 2)
+    optim, cnt = (nn.optim.Adam, 29) if adam else (nn.optim.SGD, 15)
     with Tensor.train():
       img = Tensor.ones(1,3,4,4)
       c1 = nn.Conv2d(3,32,3)
       bn = nn.BatchNorm2d(32, track_running_stats=False)
       _realize_weights([c1, bn])
       opt = optim(nn.state.get_parameters([c1, bn]))
+      Tensor.realize(img, *nn.state.get_parameters(opt))
       img_bn = bn(c1(img)).elu().sum()
       opt.zero_grad()
       img_bn.backward()
@@ -477,7 +477,7 @@ class TestSchedule(unittest.TestCase):
       fw = bn(x).contiguous_backward().relu().contiguous()
       fw.sum().backward()
       # TODO: this is too many
-      check_schedule([x.grad, bn.weight.grad, bn.bias.grad, fw], 9)
+      check_schedule([x.grad, bn.weight.grad, bn.bias.grad, fw], 10, nn.state.get_parameters(bn))
 
   def test_fold_conv_relu(self):
     c1 = nn.Conv2d(3,16,3)
@@ -968,7 +968,7 @@ class TestSchedule(unittest.TestCase):
 
   def test_const_schedule_contig(self):
     constv = Tensor.empty(2, 2).uop.const_like(10).contiguous()
-    check_schedule(constv, 1)
+    check_schedule(constv, 0)
 
   def test_advanced_simple_indexing_combined(self):
     X = Tensor.arange(16).reshape(4, 4)

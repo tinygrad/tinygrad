@@ -95,7 +95,7 @@ class Scheduler:
     if (old_sz:=rng.src[0].divides(amount)) is None:
       raise KernelOptError(f"{amount} can't divide {rng.src[0]} in {self.colored_shape()}")
     new_rng = UOp.range(amount, next(self.opt_range), new_type) if input_new_rng is None else input_new_rng
-    replaced_rng = rng.replace(src=(UOp.const(dtypes.int, old_sz),))
+    replaced_rng = rng.replace(src=(old_sz,))
     sub_axis = (new_rng * old_sz + replaced_rng) if top else (replaced_rng * amount + new_rng)
     self.ast = self.ast.substitute({rng:sub_axis}, name=f"shift {rng.arg[:-1]} {amount} {str(new_type).split('.')[1].lower()}")
     return replaced_rng, new_rng
@@ -329,8 +329,8 @@ class Scheduler:
   def group_for_reduces(self) -> int: return len(self.axes_of(AxisType.GROUP_REDUCE))
 
 def bufs_from_ast(ast:UOp, dname:str) -> list[Buffer]:
-  glbls = sorted([x for x in ast.backward_slice if x.op is Ops.PARAM], key=lambda x: x.arg)
-  return [Buffer(dname, x.ptrdtype.size, x.dtype.base) for x in glbls]
+  glbls = sorted([x for x in ast.backward_slice if x.op is Ops.PARAM], key=lambda x: x.arg.slot)
+  return [Buffer(dname, x.max_numel(), x.dtype.base) for x in glbls]
 
 def apply_opts(ast:UOp, ren:Renderer, beam:int=0) -> UOp:
   if ast.tag is not None: return ast

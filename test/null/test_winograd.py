@@ -20,7 +20,7 @@ class TestWinograd(unittest.TestCase):
     out = Tensor.conv2d(x,w, padding=1)
     out.mean().backward()
     backward_schedule = x.grad.schedule_linear(w.grad)
-    self.assertEqual(len(backward_schedule.src), 4)
+    self.assertEqual(len(backward_schedule.src), 2)
 
   @unittest.skip("this requires optimizations")
   def test_counters(self):

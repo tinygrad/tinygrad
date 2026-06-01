@@ -23,7 +23,7 @@ def compile_net(linear:UOp, output_bufs:List[Buffer]) -> Tuple[Dict[str,str], Li
 
   def name_of(bu:UOp, is_out:bool) -> str:
     nonlocal n
-    if bu.op is Ops.PARAM: key, name, size = ("in", bu.arg), f"input{bu.arg}", prod(bu.shape)*bu.dtype.itemsize
+    if bu.op is Ops.PARAM: key, name, size = ("in", bu.arg.slot), f"input{bu.arg.slot}", prod(bu.shape)*bu.dtype.itemsize
     else:
       b = bu.buffer
       key, size = (id(b.base), b.offset, b.size, b.dtype), b.size*b.dtype.itemsize

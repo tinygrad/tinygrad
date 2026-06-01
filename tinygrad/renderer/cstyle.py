@@ -178,8 +178,8 @@ class CStyleLanguage(Renderer):
         continue
       if u.op in (Ops.PARAM, Ops.DEFINE_VAR):
         if u.op is not Ops.PARAM: r[u] = u.arg[0]
-        elif isinstance(u.dtype, ImageDType): r[u] = f"data{u.arg}_{u.dtype.shape[0]}x{u.dtype.shape[1]}"
-        else: r[u] = f"data{u.arg}_{sz}" if (sz:=u.ptrdtype.size) > 0 else f"data{u.arg}"
+        elif isinstance(u.dtype, ImageDType): r[u] = f"data{u.arg.slot}_{u.dtype.shape[0]}x{u.dtype.shape[1]}"
+        else: r[u] = f"data{u.arg.slot}_{sz}" if (sz:=u.max_numel()) > 0 else f"data{u.arg.slot}"
         bufs[u] = (r[u], (u.dtype, u in writable_params))
         continue
 
@@ -198,7 +198,7 @@ class CStyleLanguage(Renderer):
 
       if u.op in {Ops.ENDIF, Ops.END}: depth -= 1
       if (u.op is not Ops.CAST or u.dtype.vcount == 1) and (u.op in {Ops.CONST, Ops.GEP, Ops.INDEX, Ops.CUSTOMI} or \
-        (u.op is Ops.LOAD and u.src[0].ptrdtype.addrspace == AddrSpace.REG) or \
+        (u.op is Ops.LOAD and u.src[0].addrspace == AddrSpace.REG) or \
         (u.op is Ops.CAST and isinstance(u.dtype, PtrDType)) or \
         (u.op in {Ops.STACK, *(GroupOp.ALU-{Ops.WHERE}), Ops.CAST, Ops.BITCAST} and child_count[u] == 1 and not getenv("EXPAND_SSA"))):
         r[u] = l
@@ -275,12 +275,11 @@ class ClangRenderer(CStyleLanguage):
   def supported_dtypes(self):
     return {d for d in super().supported_dtypes() if (d != dtypes.bfloat16 or self.target.arch.startswith(("x86", "arm"))) and d not in dtypes.fp8s}
 
-class ClangJITRenderer(ClangRenderer):
   def __init__(self, target:Target):
     super().__init__(target)
-    from tinygrad.runtime.support.compiler_cpu import ClangJITCompiler
+    from tinygrad.runtime.support.compiler_cpu import ClangCompiler
     if "AMX" in target.arch: self.tensor_cores = tc.amx
-    self.compiler = ClangJITCompiler([x for x in target.arch.split(",") if x != "AMX"])
+    self.compiler = ClangCompiler([x for x in target.arch.split(",") if x != "AMX"])
 
 class OpenCLRenderer(CStyleLanguage):
   has_aux = True
@@ -320,8 +319,8 @@ class OpenCLRenderer(CStyleLanguage):
   def aux(self, uops:list[UOp]):
     arg_dtypes:list[list[tuple[int, DType]]] = []
     for i,u in enumerate(u for u in uops if u.op is Ops.PARAM):
-      if len(arg_dtypes) >= u.arg: arg_dtypes.append([])
-      arg_dtypes[u.arg].append((i, u.dtype))
+      while len(arg_dtypes) <= u.arg.slot: arg_dtypes.append([])
+      arg_dtypes[u.arg.slot].append((i, u.dtype))
     return tuple(tuple(a) for a in arg_dtypes),
 
   def supported_dtypes(self): return {d for d in super().supported_dtypes()

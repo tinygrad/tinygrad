@@ -11,7 +11,7 @@ from tinygrad.dtype import ConstType, DType, DTypeLike, Invalid, InvalidType, Pt
 from tinygrad.helpers import all_int, argfix, ceildiv, flatten, flat_to_grouped, make_tuple, prod, resolve_pool_pads, round_up
 
 if TYPE_CHECKING:
-  from tinygrad.uop.ops import sint
+  from tinygrad.uop.ops import sint, UOp
 
 ReductionStr = Literal["mean", "sum", "none"]
 
@@ -23,12 +23,13 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
   def const(dtype, b, device=None): raise NotImplementedError("creation helpers are only supported on Tensor and UOp")
 
   @classmethod
-  def full(cls, shape:tuple[sint, ...], fill_value:ConstType, **kwargs) -> Self:
+  def full(cls, shape:tuple[sint, ...], fill_value:ConstType|UOp, dtype:DTypeLike|None=None,
+           device:str|tuple[str, ...]|None=None, buffer=True) -> Self:
     """
     Creates a tensor with the given shape, filled with the given value.
 
     You can pass in `dtype` and `device` keyword arguments to control the data type and device of the tensor.
-    Additionally, all other keyword arguments are passed to the constructor of the tensor.
+    Pass `buffer=False` to get a broadcast const value instead of a materialized buffer.
 
     ```python exec="true" source="above" session="tensor" result="python"
     print(Tensor.full((2, 3), 42).numpy())
@@ -37,11 +38,13 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     print(Tensor.full((2, 3), False).numpy())
     ```
     """
+    from tinygrad.uop.ops import UOp
     new_shape = argfix(shape)
-    if not kwargs.pop("buffer", True):
-      dt = to_dtype(kwargs.pop("dtype", None) or dtypes.from_py(fill_value))
-      return cls.const(dt, fill_value, canonicalize_device(kwargs.pop("device", None))).reshape((1,)*len(new_shape)).expand(new_shape)
-    return cls.unique_const(fill_value, **kwargs).reshape((1,)*len(new_shape)).expand(new_shape)
+    dt = to_dtype(dtype) if dtype is not None else None
+    if isinstance(fill_value, UOp): val = cls.const(dt or fill_value.dtype, fill_value)
+    else: val = cls.const(dt or dtypes.from_py(fill_value), fill_value, None if buffer else canonicalize_device(device))
+    val = val.reshape((1,)*len(new_shape)).expand(new_shape)
+    return val.clone(device=device) if buffer else val
 
   @classmethod
   def invalids(cls, *shape, **kwargs) -> Self:
@@ -52,7 +55,8 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
 
     Eventually Tensor.empty will be replaced by this.
     """
-    return cls.full(argfix(*shape), Invalid, **kwargs)
+    new_shape = argfix(*shape)
+    return cls.unique_const(Invalid, **kwargs).reshape((1,)*len(new_shape)).expand(new_shape)
 
   @classmethod
   def zeros(cls, *shape, **kwargs) -> Self:
@@ -253,9 +257,11 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     return MovementMixin.pad(X.const_like(1).cast(dtypes.bool), pads).where(base, base.const_like(value))
 
   def _pad_circular(self, pX:tuple[tuple[sint, sint], ...]) -> Self:
-    if any(pB>sh or pA>sh for (pB,pA),sh in zip(pX, self.shape)): raise ValueError('Padding value causes wrapping around more than once.')
-    if any(pB<0 or pA<0 for pB,pA in pX): raise NotImplementedError("Negative pads with circular pads is not supported")
-    orig_shape, X = self.shape, self.repeat(tuple(1 + bool(pB) + bool(pA) for pB,pA in pX))
+    # shrink first for negative pads, then wrap the non-negative remainder
+    X = self.shrink(tuple((-smin(pB,0), smin(pA+sh,sh)) for (pB,pA),sh in zip(pX, self.shape)))
+    pX = tuple((smax(pB,0), smax(pA,0)) for pB,pA in pX)
+    if any(pB>sh or pA>sh for (pB,pA),sh in zip(pX, X.shape)): raise ValueError('Padding value causes wrapping around more than once.')
+    orig_shape, X = X.shape, X.repeat(tuple(1 + bool(pB) + bool(pA) for pB,pA in pX))
     return X.shrink(tuple((0 if pB == 0 else osh-pB, xsh if pA == 0 else xsh-osh+pA) for (pB,pA),osh,xsh in zip(pX, orig_shape, X.shape)))
 
   def _pad_reflect_replicate(self, pX:tuple[tuple[sint, sint], ...], mode:str) -> Self:

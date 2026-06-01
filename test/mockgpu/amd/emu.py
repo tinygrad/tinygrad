@@ -423,10 +423,10 @@ def _collect_data_slices(assigns: list[tuple[str, UOp]], data_prefix: str, pcode
 class _Ctx:
   """Context for instruction compilation - holds buffers and helpers."""
   __slots__ = ('inst_size', 'dyn_fields', '_axis_id', 'wave_size', 'vgpr', 'accvgpr')
-  sgpr = UOp(Ops.PARAM, dtypes.uint32.ptr(SGPR_COUNT), arg=0)
-  vmem = UOp(Ops.PARAM, dtypes.uint32.ptr(1 << 46), arg=2)
-  lds = UOp(Ops.PARAM, dtypes.uint32.ptr(16384), arg=3)
-  scratch = UOp(Ops.PARAM, dtypes.uint8.ptr(1 << 30), arg=4)
+  sgpr = UOp.param(0, dtypes.uint32.ptr(SGPR_COUNT))
+  vmem = UOp.param(2, dtypes.uint32.ptr(1 << 46))
+  lds = UOp.param(3, dtypes.uint32.ptr(16384))
+  scratch = UOp.param(4, dtypes.uint8.ptr(1 << 30))
   # Cache PARAM UOps by wave_size so all _Ctx instances with same wave_size share identical UOp references
   _vgpr_cache: dict[int, UOp] = {}
   _accvgpr_cache: dict[int, UOp] = {}
@@ -434,10 +434,10 @@ class _Ctx:
   def __init__(self, inst_size: int, wave_size: int = 32):
     self.inst_size, self._axis_id, self.wave_size = inst_size, 0, wave_size
     self.dyn_fields: list[tuple[int, int]] = []  # (lo, hi) of fields read dynamically
-    if wave_size not in _Ctx._vgpr_cache: _Ctx._vgpr_cache[wave_size] = UOp(Ops.PARAM, dtypes.uint32.ptr(256 * wave_size), arg=1)
+    if wave_size not in _Ctx._vgpr_cache: _Ctx._vgpr_cache[wave_size] = UOp.param(1, dtypes.uint32.ptr(256 * wave_size))
     self.vgpr = _Ctx._vgpr_cache[wave_size]
     if wave_size == 64:
-      if wave_size not in _Ctx._accvgpr_cache: _Ctx._accvgpr_cache[wave_size] = UOp(Ops.PARAM, dtypes.uint32.ptr(256 * wave_size), arg=5)
+      if wave_size not in _Ctx._accvgpr_cache: _Ctx._accvgpr_cache[wave_size] = UOp.param(5, dtypes.uint32.ptr(256 * wave_size))
       self.accvgpr = _Ctx._accvgpr_cache[wave_size]
     else:
       self.accvgpr = self.vgpr
@@ -598,12 +598,13 @@ class _Ctx:
   def rpc(self) -> UOp:
     """Read PC as 64-bit byte address."""
     # Index at PC_LO, then cast to uint64 ptr and load
-    return self.sgpr.index(_c(PC_LO_IDX, dtypes.int), ptr=True).cast(dtypes.uint64.ptr(SGPR_COUNT // 2)).load()
+    return _u64(self.rsgpr_dyn(_c(PC_LO_IDX)), self.rsgpr_dyn(_c(PC_HI_IDX)))
 
   def inc_pc(self) -> list[UOp]:
     """Increment PC by instruction size in bytes. Returns [store]."""
     new_pc = self.rpc() + UOp.const(dtypes.uint64, self.inst_size)
-    return [self.sgpr.index(_c(PC_LO_IDX, dtypes.int), ptr=True).cast(dtypes.uint64.ptr(SGPR_COUNT // 2)).store(new_pc)]
+    lo, hi = _split64(new_pc)
+    return [self.wsgpr_dyn(_c(PC_LO_IDX), lo), self.wsgpr_dyn(_c(PC_HI_IDX), hi)]
 
   def scalar_stores(self, assigns: list[tuple[str, UOp]], sdst_reg: UOp, sdst_size: int = 1) -> list[UOp]:
     """Generate stores for scalar assigns with dynamic destination register (D0, SCC, EXEC, VCC)."""

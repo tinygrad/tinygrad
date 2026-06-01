@@ -88,8 +88,8 @@ def expand_multi(root:UOp, multi:UOp):
   return multi.src[0].expand(new_shape).multi(multi.axis)
 
 def pad_multi(root:UOp, multi:UOp):
-  assert multi.axis is None or root.marg[multi.axis] == (multi.shape[multi.axis], 0), f"padding not supported for {root.marg=}"
-  local_pad = tuple((multi.src[0].shape[multi.axis], 0) if a == multi.axis else s for a,s in enumerate(root.marg))
+  assert multi.axis is None or root.marg[multi.axis] == (0, multi.shape[multi.axis]), f"padding not supported for {root.marg=}"
+  local_pad = tuple((0, multi.src[0].shape[multi.axis]) if a == multi.axis else s for a,s in enumerate(root.marg))
   return multi.src[0]._mop(Ops.PAD, local_pad).multi(multi.axis)
 
 def permute_multi(root:UOp, multi:UOp):
@@ -97,15 +97,15 @@ def permute_multi(root:UOp, multi:UOp):
   return multi.src[0].permute(root.marg).multi(root.axis)
 
 def shrink_multi(root:UOp, multi:UOp):
-  shard_bounds = tuple((e-s,s) for s,e in multi.bounds) if multi.axis is not None else ()
-  assert multi.axis is None or root.marg[multi.axis] == (multi.shape[multi.axis], 0) or root.marg[multi.axis] in shard_bounds, \
+  shard_bounds = tuple((s,e-s) for s,e in multi.bounds) if multi.axis is not None else ()
+  assert multi.axis is None or root.marg[multi.axis] == (0, multi.shape[multi.axis]) or root.marg[multi.axis] in shard_bounds, \
     f"shrinking not supported for {root.marg=}"
-  if multi.axis is not None and root.marg[multi.axis] in shard_bounds and root.marg[multi.axis] != (multi.shape[multi.axis], 0):
+  if multi.axis is not None and root.marg[multi.axis] in shard_bounds and root.marg[multi.axis] != (0, multi.shape[multi.axis]):
     # NOTE: shrink on the shard axis is only allowed when result is a single partition, denoted by the new real
     # we just copy it to all the devices, no real. this will be optimized out later
-    non_shard_shrink = tuple((multi.src[0].shape[i], 0) if i == multi.axis else s for i, s in enumerate(root.marg))
+    non_shard_shrink = tuple((0, multi.src[0].shape[i]) if i == multi.axis else s for i, s in enumerate(root.marg))
     return multi.src[0].copy_to_device(multi.device, arg=shard_bounds.index(root.marg[multi.axis]))._mop(Ops.SHRINK, non_shard_shrink)
-  local_shrink = tuple((multi.src[0].shape[multi.axis], 0) if a == multi.axis else s for a,s in enumerate(root.marg))
+  local_shrink = tuple((0, multi.src[0].shape[multi.axis]) if a == multi.axis else s for a,s in enumerate(root.marg))
   return multi.src[0]._mop(Ops.SHRINK, local_shrink).multi(multi.axis)
 
 def flip_multi(root:UOp, multi:UOp):
@@ -137,7 +137,7 @@ def rewrite_into_function(call:UOp):
 
 def param_to_multi(p:UOp):
   if p.axis is None: return None
-  return UOp.param(p.arg, p.dtype, p.shard_shape, p.device).multi(p.axis)
+  return UOp.param(p.arg.slot, p.dtype, p.shard_shape, p.device, p.arg.vmin_vmax, p.arg.name, p.arg.addrspace).multi(p.axis)
 
 # NOTE: this is the same pattern as Ops.UNROLL
 multi_pm = PatternMatcher([

@@ -136,6 +136,7 @@ class FlatTransformer:
     w_scales = [("wqkv", s_qkv), ("wo", s_o), ("w2", s_2)]
     w_scales += [("w1", s_1), ("w3", s_3)] if SPLIT_W13 else [("w13", s_13)]
     self._fp8_inv_scale = {name: s.float().contiguous().is_param_(False) for name, s in w_scales}
+    self._fp8_next_inv_scale = {name: s.float().contiguous().is_param_(False) for name, s in w_scales}
 
   def lin_per_layer(self, in_features:int, out_features:int, std:float=0.02):
     if getenv("ZEROS"): w = Tensor.zeros(self.n_layers, out_features, in_features)
@@ -221,14 +222,19 @@ class FlatTransformer:
       for v in get_parameters(self): v.shard_(device, axis=None)
     else:
       # flat per-layer weights: axis 0 is n_layers, so shard axes are +1 vs per-layer Transformer
-      self.wqkv.shard_(device, axis=1).realize()          # (n_layers, out, dim) shard out
-      self.wo.shard_(device, axis=2).realize()            # (n_layers, dim, in) shard in
+      def _shard_fp8(name:str, axis:int):
+        getattr(self, name).shard_(device, axis=axis)
+        self._fp8_inv_scale[name] = self._fp8_inv_scale[name].to(device).contiguous().is_param_(False)
+        self._fp8_next_inv_scale[name] = self._fp8_next_inv_scale[name].to(device).contiguous().is_param_(False)
+        Tensor.realize(getattr(self, name), self._fp8_inv_scale[name], self._fp8_next_inv_scale[name])
+      _shard_fp8("wqkv", 1)          # (n_layers, out, dim) shard out
+      _shard_fp8("wo", 2)            # (n_layers, dim, in) shard in
       if SPLIT_W13:
-        self.w1.shard_(device, axis=1).realize()
-        self.w3.shard_(device, axis=1).realize()
+        _shard_fp8("w1", 1)
+        _shard_fp8("w3", 1)
       else:
-        self.w13.shard_(device, axis=1).realize()           # (n_layers, hidden*2, dim) shard out
-      self.w2.shard_(device, axis=2).realize()            # (n_layers, dim, hidden) shard in
+        _shard_fp8("w13", 1)         # (n_layers, hidden*2, dim) shard out
+      _shard_fp8("w2", 2)            # (n_layers, dim, hidden) shard in
       self.attention_norm.shard_(device, axis=None).realize()
       self.ffn_norm.shard_(device, axis=None).realize()
       self.norm.weight.shard_(device, axis=None).realize()
@@ -239,8 +245,6 @@ class FlatTransformer:
         for name in amax_dict:
           for i in range(len(amax_dict[name])):
             amax_dict[name][i] = amax_dict[name][i].to(device).contiguous().is_param_(False)
-      for name in self._fp8_inv_scale:
-        self._fp8_inv_scale[name] = self._fp8_inv_scale[name].to(device).contiguous().is_param_(False)
 
   def __call__(self, tokens:Tensor, save:bool=True):
     h = self.tok_embeddings(tokens)
@@ -276,9 +280,9 @@ def apply_grad(grad_buf:Tensor, new_grad:UOp):
     grad_buf.uop = grad_buf.uop.after(grad_buf.uop.store(grad_buf.uop + new_grad))
     return
   cur = grad_buf.uop
-  for pad in sorted(pads, key=lambda p: p.marg[0][1] if p.op == Ops.PAD else 0, reverse=True):
+  for pad in sorted(pads, key=lambda p: p.marg[0][0] if p.op == Ops.PAD else 0, reverse=True):
     if pad.op == Ops.PAD:
-      grad_shrink = tuple([(p[1], s+p[1]) for s,p in zip(pad.src[0].shape, pad.marg)])
+      grad_shrink = tuple([(p[0], s+p[0]) for s,p in zip(pad.src[0].shape, pad.marg)])
       buf_slice = cur.shrink(grad_shrink)
       cur = cur.after(buf_slice.store(buf_slice + pad.src[0].cast(cur.dtype)))
     else:
@@ -322,11 +326,7 @@ if __name__ == "__main__":
 
   # preallocate all the grad buffers and zero them out
   grad_dtype = lambda x: dtypes.bfloat16 if x.dtype in dtypes.fp8s else x.dtype
-  def _make_grad(x):
-    if isinstance(x.device, tuple) and x.uop.axis is not None:
-      return Tensor.zeros(x.shape, dtype=grad_dtype(x), device=x.device[0]).shard_(x.device, axis=x.uop.axis).contiguous()
-    return Tensor.zeros(x.shape, dtype=grad_dtype(x), device=x.device).contiguous()
-  grads = {x:_make_grad(x) for x in state.values() if x.is_param}
+  grads = {x:x.zeros_like(dtype=grad_dtype(x)).contiguous() for x in state.values() if x.is_param}
 
   fp8_amax = [t for ts in model._fp8_amax.values() for t in ts]
   fp8_grad_amax = [t for ts in model._fp8_grad_amax.values() for t in ts]
