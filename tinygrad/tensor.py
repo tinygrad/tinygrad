@@ -11,7 +11,7 @@ from tinygrad.helpers import resolve_pool_pads, IMAGE, FLOAT16, WINO, Metadata, 
 from tinygrad.helpers import suppress_finalizing, disable_gc
 from tinygrad.gradient import compute_gradient
 from tinygrad.mixin import OpMixin
-from tinygrad.uop.ops import UOp, Ops, sint, all_metadata, _index_to_concrete_int, Variable, _broadcast_shape
+from tinygrad.uop.ops import UOp, Ops, GroupOp, sint, all_metadata, _index_to_concrete_int, Variable, _broadcast_shape
 from tinygrad.schedule import create_linear_with_vars
 from tinygrad.device import Buffer, canonicalize_device
 from tinygrad.engine.realize import run_linear
@@ -269,8 +269,12 @@ class Tensor(OpMixin):
     if is_disk:
       self._buffer().copyin(x._data())
       return self
-    if (base := self.uop.base).op is Ops.COPY and not self.uop.has_buffer_identity() and base not in x.uop.backward_slice_with_self:
-      _apply_map_to_tensors({base: base.contiguous()}, name="Materialize Copy", walk=True)
+    base, target = self.uop.base, self.uop
+    # only allow movement ops between base and target
+    while target is not base and target.op in GroupOp.Movement: target = target.src[0]
+    if base.op is Ops.COPY and target is base and not self.uop.has_buffer_identity() and base not in x.uop.backward_slice_with_self:
+      _apply_map_to_tensors({base: base.after(self.uop.store(x.uop))}, name="Copy View Assign", walk=True)
+      return self
     # STORE+AFTER: STORE is the write effect (void), AFTER wraps the view for correct shape/ranging
     assign = self.uop.after(self.uop.store(x.uop))
     if (base := self.uop.base).op in {Ops.BUFFER, Ops.AFTER, Ops.CONTIGUOUS} and self.uop is not base and not self.uop.has_buffer_identity():
