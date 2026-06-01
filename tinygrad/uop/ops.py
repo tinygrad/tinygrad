@@ -288,6 +288,9 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
         # STAGE adds the existing shape to the front, opposite of INDEX
         return tuple([int(r.vmax+1) for r in self.src[1:]])+self.src[0].shape
       case Ops.DEFINE_LOCAL | Ops.DEFINE_REG:
+        if len(self.src) >= 1:
+          # NOTE: this is the same as PARAM
+          return tuple(self.src[0].sgep(i) for i in range(self.src[0].dtype.count))
         if isinstance(self.dtype, PtrDType):
           return (self.ptrdtype.size, self.dtype.count) if self.dtype.count > 1 else (self.ptrdtype.size,)
         return (self.dtype.count,) if self.dtype.count > 1 else ()
