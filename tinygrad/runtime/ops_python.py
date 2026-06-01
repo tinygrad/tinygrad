@@ -108,12 +108,10 @@ class PythonProgram:
             values[u] = src_values[0][src_values[1][0]]
           else:
             # normal index
-            ret:list = []
-            for m,o in zip(src_values[0], src_values[1]): ret.append((m,o))
-            values[u] = ret
+            values[u] = [(m,o) for m,o in zip(src_values[0], src_values[1])]
         elif u.op is Ops.INDEX and len(src_values) == 3:
           assert isinstance(src_dtypes[0], ImageDType), "3 src index is only for Image"
-          ret = []
+          ret:list = []
           for m,oy,ox in zip(*src_values):
             if ox < 0 or ox >= src_dtypes[0].shape[1] or oy < 0 or oy >= src_dtypes[0].shape[0]: ret.append((m, None))
             else: ret.append((m, ox*4 + oy*src_dtypes[0].shape[1]*4))
