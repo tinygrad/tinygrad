@@ -148,46 +148,55 @@ jobs:
     - name: Test IMAGE support
       run: IMAGE=1 DEV=PYTHON python3 test/backend/test_ops.py TestOps.test_gemm TestOps.test_simple_conv2d
     - name: Test emulated METAL tensor cores
+      env:
+        DEV: 'PYTHON::METAL'
       run: |
-        DEBUG=2 DEV=PYTHON::METAL python3 test/backend/test_ops.py TestOps.test_big_gemm
-        DEBUG=2 DEV=PYTHON::METAL python3 test/opt/test_tensor_cores.py
-    - name: Test emulated AMX tensor cores
-      run: DEBUG=2 AMX=1 DEV=PYTHON::AMX python3 test/backend/test_ops.py TestOps.test_gemm
+        DEBUG=2 python3 test/backend/test_ops.py TestOps.test_big_gemm
+        DEBUG=2 python3 -m pytest -nauto test/opt/test_tensor_cores.py
     - name: Test emulated AMD tensor cores
+      env:
+        DEV: 'PYTHON::gfx1100'
       run: |
-        DEBUG=2 DEV=PYTHON::gfx1100 N=16 HALF=1 ACC_HALF=0 python3 ./extra/gemm/simple_matmul.py
-        DEBUG=2 DEV=PYTHON::gfx1100 N=64 HALF=1 ACC_HALF=0 python3 ./extra/gemm/simple_matmul.py
-        DEBUG=2 DEV=PYTHON::gfx1100 N=16 HALF=1 ACC_HALF=1 ATOL=1e-3 python3 ./extra/gemm/simple_matmul.py
-        DEBUG=2 DEV=PYTHON::gfx1100 N=64 HALF=1 ACC_HALF=1 ATOL=1e-3 python3 ./extra/gemm/simple_matmul.py
-        DEBUG=2 DEV=PYTHON::gfx1100 python3 test/opt/test_tensor_cores.py
+        DEBUG=2 N=16 HALF=1 ACC_HALF=0 python3 ./extra/gemm/simple_matmul.py
+        DEBUG=2 N=64 HALF=1 ACC_HALF=0 python3 ./extra/gemm/simple_matmul.py
+        DEBUG=2 N=16 HALF=1 ACC_HALF=1 ATOL=1e-3 python3 ./extra/gemm/simple_matmul.py
+        DEBUG=2 N=64 HALF=1 ACC_HALF=1 ATOL=1e-3 python3 ./extra/gemm/simple_matmul.py
+        python3 -m pytest -nauto test/opt/test_tensor_cores.py
     - name: Test emulated AMD MFMA tensor cores
+      env: 'PYTHON::gfx950'
       run: |
-        DEBUG=2 FORWARD_ONLY=1 DEV=PYTHON::gfx950 N=64 HALF=1 ACC_HALF=0 python3 ./extra/gemm/simple_matmul.py
-        DEBUG=2 FORWARD_ONLY=1 DEV=PYTHON::gfx950 python3 test/opt/test_tensor_cores.py
+        DEBUG=2 N=64 HALF=1 ACC_HALF=0 python3 ./extra/gemm/simple_matmul.py
+        python3 -m pytest -nauto test/opt/test_tensor_cores.py
     - name: Test emulated AMD RDNA4 tensor cores
+      env:
+        DEV: 'PYTHON::gfx1201'
       run: |
-        DEBUG=2 FORWARD_ONLY=1 DEV=PYTHON::gfx1201 N=16 HALF=1 ACC_HALF=0 python3 ./extra/gemm/simple_matmul.py
-        DEBUG=2 FORWARD_ONLY=1 DEV=PYTHON::gfx1201 N=64 HALF=1 ACC_HALF=0 python3 ./extra/gemm/simple_matmul.py
-        DEBUG=2 FORWARD_ONLY=1 DEV=PYTHON::gfx1201 N=16 HALF=1 ACC_HALF=1 ATOL=1e-3 python3 ./extra/gemm/simple_matmul.py
-        DEBUG=2 FORWARD_ONLY=1 DEV=PYTHON::gfx1201 N=64 HALF=1 ACC_HALF=1 ATOL=1e-3 python3 ./extra/gemm/simple_matmul.py
-        DEBUG=2 FORWARD_ONLY=1 DEV=PYTHON::gfx1201 python3 test/opt/test_tensor_cores.py
+        DEBUG=2 N=16 HALF=1 ACC_HALF=0 python3 ./extra/gemm/simple_matmul.py
+        DEBUG=2 N=64 HALF=1 ACC_HALF=0 python3 ./extra/gemm/simple_matmul.py
+        DEBUG=2 N=16 HALF=1 ACC_HALF=1 ATOL=1e-3 python3 ./extra/gemm/simple_matmul.py
+        DEBUG=2 N=64 HALF=1 ACC_HALF=1 ATOL=1e-3 python3 ./extra/gemm/simple_matmul.py
+        python3 -m pytest -nauto test/opt/test_tensor_cores.py
     - name: Test emulated CUDA tensor cores
       run: |
-        DEBUG=2 FORWARD_ONLY=1 DEV=PYTHON::sm_80 python3 test/backend/test_ops.py TestOps.test_gemm_fp16
-        DEBUG=2 ALLOW_TF32=1 FORWARD_ONLY=1 DEV=PYTHON::sm_80 python3 test/backend/test_ops.py TestOps.test_gemm
-        DEBUG=2 FORWARD_ONLY=1 DEV=PYTHON::sm_75 python3 test/backend/test_ops.py TestOps.test_gemm_fp16
-        DEBUG=2 ALLOW_TF32=1 FORWARD_ONLY=1 DEV=PYTHON::sm_89 python3 test/opt/test_tensor_cores.py
+        DEBUG=2 DEV=PYTHON::sm_80 python3 test/backend/test_ops.py TestOps.test_gemm_fp16
+        DEBUG=2 ALLOW_TF32=1 DEV=PYTHON::sm_80 python3 test/backend/test_ops.py TestOps.test_gemm
+        DEBUG=2 DEV=PYTHON::sm_75 python3 test/backend/test_ops.py TestOps.test_gemm_fp16
+        ALLOW_TF32=1 DEV=PYTHON::sm_89 python3 -m pytest -nauto test/opt/test_tensor_cores.py
     - name: Test emulated INTEL OpenCL tensor cores
-      run: DEBUG=2 FORWARD_ONLY=1 DEV=PYTHON::INTEL HALF=1 N=64 python3 ./extra/gemm/simple_matmul.py
+      run: DEBUG=2 DEV=PYTHON::INTEL HALF=1 N=64 python3 ./extra/gemm/simple_matmul.py
     - name: Test emulated AMX tensor cores
-      run: DEBUG=2 AMX=1 FORWARD_ONLY=1 DEV=PYTHON::AMX python3 test/opt/test_tensor_cores.py
+      env:
+        DEV: 'PYTHON::AMX'
+      run: |
+        DEBUG=2 python3 test/backend/test_ops.py TestOps.test_gemm
+        python3 -m pytest -nauto test/opt/test_tensor_cores.py
     - name: Test device flop counts
       run: |
         DEBUG=2 DEV=PYTHON::METAL python3 ./test/null/test_uops_stats.py TestUOpsStatsMatmulHalf
         DEBUG=2 DEV=PYTHON::gfx1100 python3 ./test/null/test_uops_stats.py TestUOpsStatsMatmulHalf
         DEBUG=2 DEV=PYTHON::sm_80 python3 ./test/null/test_uops_stats.py TestUOpsStatsMatmulHalf
         DEBUG=2 DEV=PYTHON::INTEL python3 ./test/null/test_uops_stats.py TestUOpsStatsMatmulHalf
-        DEBUG=2 AMX=1 DEV=PYTHON::AMX python3 ./test/null/test_uops_stats.py TestUOpsStats.test_simple_matmul
+        DEBUG=2 DEV=PYTHON::AMX python3 ./test/null/test_uops_stats.py TestUOpsStats.test_simple_matmul
 
   linter:
     name: Linters
