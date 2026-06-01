@@ -35,7 +35,7 @@ pm_index_is_shrink = PatternMatcher([
 
 pm_remove_vec_dtypes = PatternMatcher([
   # rewrite PARAM to non pointer
-  (UPat(Ops.PARAM, name="buf"), lambda buf:
+  (UPat((Ops.PARAM, Ops.DEFINE_LOCAL, Ops.DEFINE_REG), name="buf"), lambda buf:
    buf.replace(dtype=buf.dtype.base, src=(UOp.const(dtypes.int, buf.ptrdtype.size),)) if isinstance(buf.dtype, PtrDType) else None),
   # remove all vec dtypes
   (UPat(GroupOp.All-{Ops.DEFINE_LOCAL, Ops.DEFINE_REG}, name="x"),
