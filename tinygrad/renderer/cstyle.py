@@ -162,7 +162,7 @@ class CStyleLanguage(Renderer):
   def render_dtype_with_shape(self, u:UOp) -> DType: return dtype_with_shape(u.dtype, u.shape)
   def render_access(self, bidx:UOp, dtype:DType) -> str:
     if bidx.addrspace == AddrSpace.REG: return self[bidx]
-    return f"(*(({self.render_dtype(dtype)}*)({self[bidx]})))" if dtype.count > 1 else f"(*{self[bidx]})"
+    return f"(*(({self.render_dtype(dtype.ptr(addrspace=bidx.addrspace))})({self[bidx]})))" if dtype.count > 1 else f"(*{self[bidx]})"
   def render_dtype(self, dt:DType, mutable=True) -> str:
     if isinstance(dt, ImageDType): return f"{'write_only' if mutable else 'read_only'} image2d_t"
     if isinstance(dt, PtrDType):
