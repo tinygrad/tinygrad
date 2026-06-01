@@ -769,7 +769,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     if self.op in {Ops.INDEX, Ops.CAST, Ops.AFTER, Ops.REDUCE, Ops.GEP}:
       return self.src[0].addrspace
     if self.op in GroupOp.Movement: return self.src[0].addrspace
-    if self.op is Ops.STACK or self.op in GroupOp.Elementwise:
+    if self.op in {Ops.STACK, Ops.WMMA} or self.op in GroupOp.Elementwise:
       ad = [x.addrspace for x in self.src if x.addrspace is not None]
       if not len(ad) or not all_same(ad): return None
       return ad[0]
@@ -1116,7 +1116,7 @@ class ProgramInfo:
       if u.op is Ops.DEFINE_VAR: _vars.append(u)
       if u.op is Ops.PARAM: _globals.append(u.arg.slot)
       if u.op in (Ops.STORE, Ops.LOAD):
-        if (idx:=u.src[0]).op is Ops.INDEX or (u.src[0].op is Ops.CAST and (idx:=u.src[0].src[0]).op is Ops.INDEX):
+        if (idx:=u.src[0]).op in (Ops.INDEX, Ops.SHRINK):
           if (buf:=idx.src[0]).op is Ops.PARAM: (outs if u.op is Ops.STORE else ins).append(buf.arg.slot)
       if u.op is Ops.SPECIAL:
         if u.arg[0] == 'i': local_size = None

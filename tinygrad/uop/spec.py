@@ -81,8 +81,6 @@ spec_shared = PatternMatcher([
   (UPat(Ops.GROUP, dtypes.void, src=UPat((Ops.GROUP, Ops.STORE, Ops.NOOP, Ops.UNROLL, Ops.INS))), lambda: True),
 
   # TOOD: these should be buffer with different addrspace
-  #(UPat(Ops.DEFINE_LOCAL, name="x"), lambda x: isinstance(x.dtype, PtrDType) and x.dtype.addrspace == AddrSpace.LOCAL),
-  #(UPat(Ops.DEFINE_REG, src=()), lambda: True),
   (UPat((Ops.DEFINE_LOCAL, Ops.DEFINE_REG)), lambda: True),
 
   # AFTER on Movement Op, PARAM, BUFFER, CONTIGUOUS, or another AFTER

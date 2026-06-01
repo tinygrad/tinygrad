@@ -176,7 +176,6 @@ class LLVMRenderer(Renderer):
         args.append((r[u], u.dtype))
       elif u.op in (Ops.DEFINE_LOCAL, Ops.DEFINE_REG):
         r[u] = f"%{'local' if u.op is Ops.DEFINE_LOCAL else 'reg'}_{str(u.arg).replace('(', '').replace(')', '').replace(',', '_').replace(' ', '')}"
-        #assert isinstance(u.dtype, PtrDType)
         size = u.max_numel()
         if u.op is Ops.DEFINE_REG:
           kernel.append(f"  {r[u]} = alloca [{size} x {ldt(u.dtype)}]")
