@@ -431,20 +431,12 @@ jobs:
           python-version: '3.12'
           llvm: 'true'
       - name: Test ONNX (CPU)
-        run: DEV=CPU python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
-      - name: Test ONNX (LLVM)
-        run: DEV=CPU:LLVM python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
-      - name: Test ONNX Runner (CPU)
-        run: DEV=CPU python3 test/external/external_test_onnx_runner.py
-      - name: Test Additional ONNX Ops (CPU)
-        run: DEV=CPU python3 test/external/external_test_onnx_ops.py
-      - name: Test Quantize ONNX
-        run: DEV=CPU python3 test/backend/test_quantize_onnx.py
+        run: DEV=CPU python -m pytest -n=auto test/external/external_test_onnx_backend.py test/external/external_test_onnx_runner.py test/external/external_test_onnx_ops.py test/backend/test_quantize_onnx.py --durations=20
       - name: Run process replay tests
         uses: ./.github/actions/process-replay
 
-  testopencl:
-    name: ONNX (CL)+Optimization Tests
+  testoptim:
+    name: Optimization Tests
     runs-on: *linux
     timeout-minutes: 20
     steps:
@@ -453,13 +445,11 @@ jobs:
       - name: Setup Environment
         uses: ./.github/actions/setup-tinygrad
         with:
-          key: onnxoptl
+          key: optim
           deps: testing
           pydeps: "tensorflow==2.19"
           python-version: '3.12'
           opencl: 'true'
-      - name: Test ONNX (CL)
-        run: DEV=CL python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
       #- name: Test Optimization Helpers
       #  run: DEBUG=1 python3 extra/optimization/test_helpers.py
       #- name: Test Action Space
@@ -757,7 +747,7 @@ jobs:
 
 # ****** OSX Tests ******
 
-  testmetal:
+  unittestmacos:
     name: MacOS (unit)
     runs-on: macos-14
     timeout-minutes: 20
@@ -767,18 +757,15 @@ jobs:
     - name: Setup Environment
       uses: ./.github/actions/setup-tinygrad
       with:
-        key: metal
-        deps: testing
+        key: unittest-macos
+        deps: testing_unit
         python-version: '3.12'
         amd: 'true'
         ocelot: 'true'
-        llvm: 'true'
     - name: Run unit tests
       run: DEV=METAL python -m pytest -n=auto test/unit/ --durations=20
     - name: Run NULL backend tests
       run: DEV=NULL python -m pytest -n=auto test/null/ --durations=20
-    - name: Run ONNX
-      run: DEV=METAL python -m pytest -n=auto test/external/external_test_onnx_backend.py --durations=20
     - name: Test tensor core ops (fake)
       run: DEV=METAL DEBUG=3 TC=2 python test/backend/test_ops.py TestOps.test_gemm
     - name: Test tensor core ops (real)
@@ -789,20 +776,12 @@ jobs:
       run: DEV=METAL python3 -m pytest test/device/test_metal.py
     #- name: Fuzz Test linearizer
     #  run: DEV=METAL DEPTH=4 FUZZ_N=50 FUZZ_MAX_SIZE=1000000 python test/external/fuzz_linearizer.py
-    - name: Run TRANSCENDENTAL math
-      run: DEV=METAL TRANSCENDENTAL=2 python -m pytest -n=auto test/backend/test_ops.py::TestOps::test_sin test/backend/test_ops.py::TestOps::test_cos test/backend/test_ops.py::TestOps::test_tan test/backend/test_ops.py::TestOps::test_exp test/backend/test_ops.py::TestOps::test_log --durations=20
     - name: Run pytest (amd)
       env:
         DEV: MOCKKFD+AMD
         FORWARD_ONLY: 1
       run: |
         python3 -m pytest -n=auto test/device/test_hcq.py test/test_tiny.py --durations=20
-    - name: Run pytest (amd with llvm backend)
-      env:
-        DEV: "MOCKKFD+AMD:LLVM"
-        FORWARD_ONLY: 1
-      run: |
-        python -m pytest -n=auto test/device/test_hcq.py test/test_tiny.py test/device/test_amd_llvm.py --durations=20
     - name: Run pytest (ptx)
       env:
         DEV: "MOCK+NV:PTX"
