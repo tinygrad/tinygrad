@@ -163,7 +163,8 @@ jobs:
         DEBUG=2 N=64 HALF=1 ACC_HALF=1 ATOL=1e-3 python3 ./extra/gemm/simple_matmul.py
         python3 -m pytest -nauto test/opt/test_tensor_cores.py
     - name: Test emulated AMD MFMA tensor cores
-      env: 'PYTHON::gfx950'
+      env:
+        DEV: 'PYTHON::gfx950'
       run: |
         DEBUG=2 N=64 HALF=1 ACC_HALF=0 python3 ./extra/gemm/simple_matmul.py
         python3 -m pytest -nauto test/opt/test_tensor_cores.py
