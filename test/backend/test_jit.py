@@ -73,6 +73,21 @@ class TestJit(unittest.TestCase):
     add.reset()
     _simple_test(add, N=20)
 
+  def test_jit_instance_method_isolation(self):
+    class Model:
+      def __init__(self, scale):
+        self.scale = Tensor([scale])
+      @TinyJit
+      def forward(self, x):
+        return (x * self.scale).realize()
+
+    m1, m2 = Model(2), Model(3)
+
+    # each instance must warm up, capture, and replay with its own state
+    for _ in range(4):
+      self.assertEqual(m1.forward(Tensor([5])).item(), 10)
+      self.assertEqual(m2.forward(Tensor([5])).item(), 15)
+
   def test_simple_jit_norealize(self):
     @TinyJit
     def add(a, b): return (a+b)

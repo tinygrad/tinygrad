@@ -252,7 +252,13 @@ class TinyJit(Generic[ReturnType]):
     assert self.captured is not None, "can't pickle an uncaptured JIT"
     return self.__class__, (None, self.captured)
 
-  def __get__(self, obj, objtype): return functools.partial(self.__call__, obj) # add support for instance methods
+  def __get__(self, obj, objtype=None):
+    if obj is None or self.fxn is None: return self
+    # cache on obj, not self: the bound JIT holds obj, so caching on self would keep every instance alive
+    try: cache = obj.__dict__.setdefault("_jit_bound", {})
+    except AttributeError: cache = {}
+    if self not in cache: cache[self] = type(self)(self.fxn.__get__(obj, objtype), prune=self.prune)
+    return functools.partial(cache[self].__call__)
 
   def __call__(self, *args, **kwargs) -> ReturnType:
     input_buf_uops, var_vals, names, expected_input_info = _prepare_jit_inputs(args, kwargs)
