@@ -13,7 +13,10 @@ def validate_index(uidx:UOp, gate:UOp|None=None):
   if idx.op is Ops.CONST and idx.arg is Invalid: return True
   if gate is None: gate = UOp.const(dtypes.bool, True)
   # TODO: check for overflow
-  if not CHECK_OOB or isinstance(buf.dtype, ImageDType) or (sz := buf.ptrdtype.size) == -1: return True
+  if not CHECK_OOB or isinstance(buf.dtype, ImageDType): return True
+
+  # buffer size
+  sz = buf.max_numel()
 
   # We can use UOp min/max to do a faster check, but it can give false positive since its not an exact bound and doesn't consider the mask
   if 0<=idx.vmin and idx.vmax<sz: return True
