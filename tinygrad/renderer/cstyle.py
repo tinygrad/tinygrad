@@ -9,7 +9,9 @@ from tinygrad.renderer import Renderer
 from tinygrad.codegen.late.devectorizer import no_vectorized_alu
 
 def render_index(ctx,buf,idx):
-  if buf.addrspace == AddrSpace.REG:
+  base = buf
+  while base.op is Ops.AFTER: base = base.src[0]
+  if base.addrspace == AddrSpace.REG or base.op not in {Ops.PARAM, Ops.DEFINE_LOCAL}:
     assert idx.op is Ops.CONST
     return f"{ctx[buf]}[{idx.arg}]"
   else:
