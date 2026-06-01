@@ -968,7 +968,7 @@ class TestSchedule(unittest.TestCase):
 
   def test_const_schedule_contig(self):
     constv = Tensor.empty(2, 2).uop.const_like(10).contiguous()
-    check_schedule(constv, 1)
+    check_schedule(constv, 0)
 
   def test_advanced_simple_indexing_combined(self):
     X = Tensor.arange(16).reshape(4, 4)
