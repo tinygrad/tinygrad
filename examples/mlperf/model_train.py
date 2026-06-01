@@ -1872,12 +1872,13 @@ def train_flux():
     loss = (pred - tgt).square().mean()
 
     loss.backward()
+
     for p in optim.params:
       if p.grad is not None and isinstance(p.device, tuple) and p.grad.uop.axis != p.uop.axis:
         p.grad = p.grad.to(p.device[0]).shard(p.device, p.uop.axis)
-    optim.step()
 
-    return loss
+    grads = [p.grad for p in optim.params if p.grad is not None]
+    return loss.float().to("CPU").realize(*grads)
 
   @Tensor.train(mode=False)
   def eval_step(model:Flux, sample:dict[str, Tensor]) -> Tensor:
@@ -1921,26 +1922,45 @@ def train_flux():
   train_iter, val_iter = get_data_iter(False), get_data_iter(True)
 
   # training loop
-  i = 1
+  i = 0
 
-  for sample in tqdm(train_iter, total=train_num_samples // BS):
-    if i >= NUM_STEPS:
-      break
+  while i < NUM_STEPS:
+    GlobalCounters.reset()
 
-    train_loss = train_step(model, optim, sample)
+    st = time.perf_counter()
+    sample = next(train_iter)
+    mst = time.perf_counter()
+    data_time = mst - st
 
-    tqdm.write(f"train loss: {train_loss.float().item():.6f}")
+    loss = train_step(model, optim, sample).item()
+    dev_time = time.perf_counter() - mst
 
+    gt = time.perf_counter()
+    optim.step()
+    et = time.perf_counter()
+
+    optim_time = et - gt
+    dev_time += optim_time
+    step_time = et - st
+    gbs_time = gt - st
+
+    i += 1
+
+    mem_gb = GlobalCounters.mem_used / 1e9
+    gflops = GlobalCounters.global_ops / 1e9 / dev_time
+    tqdm.write(
+        f"{i:5} {step_time:.3f} s step, {gbs_time:.3f} s gbs, {optim_time:.3f} s optim, {data_time:.3f} s data, {loss:.4f} loss, " \
+        f"{lr:.12f} LR, {mem_gb:.2f} GB used, {gflops:9.2f} GFLOPS")
+
+    # eval loop
     if i % eval_freq_step == 0:
       for sample in tqdm(val_iter, total=val_num_samples // BS):
         eval_loss = eval_step(model, sample)
         tqdm.write(f"eval loss: {eval_loss.float().item():.6f}")
 
       if eval_loss <= target_eval_loss:
-        print(f"target eval loss reached: {eval_loss:.6f} (target: {target_eval_loss:.6f})")
+        tqdm.write(f"target eval loss reached: {eval_loss:.6f} (target: {target_eval_loss:.6f})")
         break
-
-    i += 1
 
 if __name__ == "__main__":
   multiprocessing.set_start_method('spawn')
