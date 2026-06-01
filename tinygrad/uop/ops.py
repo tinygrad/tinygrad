@@ -694,8 +694,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       case Ops.RESHAPE | Ops.EXPAND: return tuple(ssimplify(self.src[1].sgep(i)) for i in range(self.src[1].dtype.count))
       case Ops.PAD | Ops.SHRINK:
         # this is like broadcasting for shapes
-        return tuple(((self.src[1] if self.src[1].shape == () else self.src[1].sgep(i)),
-                      (self.src[2] if self.src[2].shape == () else self.src[2].sgep(i)))
+        return tuple(((ssimplify(self.src[1]) if self.src[1].shape == () else self.src[1].sgep(i)),
+                      (ssimplify(self.src[2]) if self.src[2].shape == () else self.src[2].sgep(i)))
                      for i in range(max(self.src[1].dtype.count, self.src[2].dtype.count)))
       case Ops.PERMUTE | Ops.FLIP: return self.arg
       case _: raise RuntimeError(f"{self.op} is not a MovementOp")

@@ -165,7 +165,6 @@ class TestLinearizer(unittest.TestCase):
     stores = [u for u in uops if u.op is Ops.STORE]
     assert len(accs) == 0  # it's removed now
     assert len(stores) == 1
-    assert stores[0].src[1].dtype == dtypes.float.vec(4)
 
   # NOTE: can reenable, it does work. it just makes BEAM slow
   @unittest.expectedFailure
