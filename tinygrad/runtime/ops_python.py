@@ -129,7 +129,7 @@ class PythonProgram:
           values[u] = [truncate.get(u.dtype, lambda dt: dt)(u.dtype.const(x)) for x in src_values[0]]
         elif u.op is Ops.LOAD:
           if (load_sz := u.max_numel()) > 1:
-            values[u] = [load([src_values[k][j] if k != 0 and src_dtypes[k].count > 1 else src_values[k] \
+            values[u] = [load([src_values[k][j] if k != 0 else src_values[k] \
                                for k in range(len(src_values))], j, u.dtype.scalar()) for j in range(load_sz)]
           else:
             values[u] = load(src_values, 0, u.dtype)
