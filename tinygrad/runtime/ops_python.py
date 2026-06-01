@@ -102,7 +102,7 @@ class PythonProgram:
           elif u.arg[0] == 'l': values[u] = [x[2-int(u.arg[-1])] for x in warp]
         elif u.op is Ops.CONST: values[u] = [u.arg] * warp_size
         elif u.op is Ops.SHRINK or (u.op is Ops.INDEX and len(src_values) == 2):
-          if u.addrspace == AddrSpace.REG:
+          if u.addrspace == AddrSpace.ANON:
             # old GEP
             assert all_same(src_values[1]), "all index must be the same"
             values[u] = src_values[0][src_values[1][0]]
