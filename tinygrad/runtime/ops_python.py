@@ -129,7 +129,8 @@ class PythonProgram:
           values[u] = [truncate.get(u.dtype, lambda dt: dt)(u.dtype.const(x)) for x in src_values[0]]
         elif u.op is Ops.LOAD:
           if (load_sz := u.max_numel()) > 1:
-            values[u] = [load([src_values[k][j] if k != 0 else src_values[k] \
+            # buf and gate are not vecs
+            values[u] = [load([src_values[k] if k in [0,2] else src_values[k][j] \
                                for k in range(len(src_values))], j, u.dtype.scalar()) for j in range(load_sz)]
           else:
             values[u] = load(src_values, 0, u.dtype)
