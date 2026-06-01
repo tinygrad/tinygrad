@@ -143,9 +143,11 @@ amd_inner_pm = PatternMatcher([
 ])
 
 def amd_lower_pm4(linear, devs):
+  linear, patches = (linear.src[0], linear.src[1:]) if linear.op is Ops.AFTER else (linear, ())
   enc = AMDComputeQueue(Device[devs[0]], devs)
   graph_rewrite(linear.replace(src=tuple(UOp(Ops.LINEAR, dtypes.void, (cmd,)) for cmd in linear.src)), amd_inner_pm, ctx=enc, name="amd: encode")
-  return enc.uop(dev=devs if len(devs) > 1 else devs[0], tag="compute")
+  cmdbuf = enc.uop(dev=devs if len(devs) > 1 else devs[0], tag="compute")
+  return cmdbuf.replace(src=cmdbuf.src + patches) if patches else cmdbuf
 
 def amd_submit_pm4(cmdbuf, devs):
   size, zero = UOp.const(dtypes.uint32, cmdbuf.src[0].arg // dtypes.uint32.itemsize), UOp.const(dtypes.int, 0)
@@ -201,9 +203,11 @@ class AMDCopyQueue(HCQEncoder):
            *data64_le(self.get_dev_addr(x.src[0])))
 
 def amd_lower_sdma(linear, devs):
+  linear, patches = (linear.src[0], linear.src[1:]) if linear.op is Ops.AFTER else (linear, ())
   enc = AMDCopyQueue(Device[devs[0]])
   graph_rewrite(linear.replace(src=tuple(UOp(Ops.LINEAR, dtypes.void, (cmd,)) for cmd in linear.src)), amd_inner_sdma_pm, ctx=enc, name="amd: encode sdma")
-  return enc.uop(dev=devs if len(devs) > 1 else devs[0], tag="copy")
+  cmdbuf = enc.uop(dev=devs if len(devs) > 1 else devs[0], tag="copy")
+  return cmdbuf.replace(src=cmdbuf.src + patches) if patches else cmdbuf
 
 amd_inner_sdma_pm = PatternMatcher([
   (UPat(Ops.LINEAR, src=(UPat(Ops.WAIT, name="x"),)), lambda ctx, x: ctx.wait(x)),
@@ -374,12 +378,14 @@ class PCIIface(PCIIfaceBase):
 def _mock(iface, name=None): return type(name or f"MOCK{iface.__name__}", (iface,), {})
 
 def encode_queue(q:UOp) -> UOp|None:
-  if not (isinstance(q.arg, tuple) and len(q.arg) == 2 and q.arg[1] in ("COMPUTE", "COPY")): return None
-  devs = (q.arg[0],) if isinstance(q.arg[0], str) else q.arg[0]  # TODO: make this prettier
-  return amd_submit_pm4(amd_lower_pm4(q, devs), devs) if q.arg[1] == "COMPUTE" else amd_submit_sdma(amd_lower_sdma(q, devs), devs)
+  linear = q.src[0] if q.op is Ops.AFTER else q
+  if not (isinstance(linear.arg, tuple) and len(linear.arg) == 2 and linear.arg[1] in ("COMPUTE", "COPY")): return None
+  devs = (linear.arg[0],) if isinstance(linear.arg[0], str) else linear.arg[0]  # TODO: make this prettier
+  return amd_submit_pm4(amd_lower_pm4(q, devs), devs) if linear.arg[1] == "COMPUTE" else amd_submit_sdma(amd_lower_sdma(q, devs), devs)
 
 pm_lower = PatternMatcher([
   (UPat(Ops.LINEAR, name="q"), encode_queue),
+  (UPat(Ops.AFTER, src=(UPat(Ops.LINEAR),), allow_any_len=True, name="q"), encode_queue),
 ])
 
 class AMDDevice(HCQ2Compiled):
@@ -475,9 +481,13 @@ class AMDDevice(HCQ2Compiled):
              wptr=getattr(hsa.amd_queue_t, 'write_dispatch_id').offset, eop_buffer=eop_buffer, cwsr_buffer=cwsr_buffer,
              ctx_save_restore_size=ctx_save_restore_size, ctl_stack_size=ctl_stack_size, idx=idx))
 
+    qtype = "COPY" if queue_type == kfd.KFD_IOC_QUEUE_TYPE_SDMA else "COMPUTE"
     qname = f"{'SDMA' if queue_type == kfd.KFD_IOC_QUEUE_TYPE_SDMA else 'COMPUTE'}:{idx}"
     self.pm_bufferize = PatternMatcher([
       (UPat(Ops.BUFFER, tag={(qname, name)}), lambda ctx, b=getattr(queue, name): b) for name in ["ring", "write_ptr", "doorbell", "put_value"]
+    ] + [
+      (UPat(Ops.BUFFER, tag={(qtype, "timeline_signal")}), lambda ctx, q=qtype: ctx.queue_timeline_signal(q)),
+      (UPat(Ops.BUFFER, tag={(qtype, "timeline_value")}), lambda ctx, q=qtype: ctx.queue_timeline_value(q)),
     ]) + self.pm_bufferize
 
     return queue

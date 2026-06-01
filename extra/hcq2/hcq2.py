@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import cast, Callable, TypeVar, Generic, Any, TYPE_CHECKING
+from typing import cast, Callable, TypeVar, Generic, Any, Iterator, TYPE_CHECKING
 import struct, functools, time, collections, importlib, itertools
 from dataclasses import replace
 if TYPE_CHECKING: from tinygrad.engine.realize import ExecContext
@@ -12,7 +12,8 @@ from dataclasses import dataclass, field
 from tinygrad.runtime.support.memory import BumpAllocator
 from tinygrad.runtime.support.hcq import MMIOInterface
 from tinygrad.renderer import Renderer, Estimates
-from tinygrad.engine.realize import to_program, track_stats, get_call_arg_uops, resolve_params, pm_flatten_linear
+from tinygrad.engine.jit import DepsTracker
+from tinygrad.engine.realize import to_program, track_stats, get_call_arg_uops, get_call_outs_ins, resolve_params, pm_flatten_linear
 
 HCQDeviceType = TypeVar('HCQDeviceType', bound='HCQ2Compiled')
 
@@ -30,6 +31,7 @@ class HCQ2Compiled(Compiled):
         lambda ctx, b: Buffer(ctx.device, b.arg, b.dtype, options=BufferSpec(host=True, uncached=True, cpu_access=True, nolru=True))),
     ])
 
+    # from extra.hcq2.graph.hcq import HCQ2Graph
     super().__init__(device, allocator, compilers, lambda *a, **kw: None, None, arch=arch)
 
   @functools.cached_property
@@ -42,6 +44,16 @@ class HCQ2Compiled(Compiled):
 
   @functools.cached_property
   def timeline_value(self) -> Buffer:
+    buf = Buffer("CPU", 1, dtypes.uint64, preallocate=True)
+    buf.as_memoryview(force_zero_copy=True).cast('Q')[0] = 1
+    return buf
+
+  @functools.cache
+  def queue_timeline_signal(self, queue:str) -> Buffer:
+    return Buffer(self.device, 0x100, dtypes.uint8, options=BufferSpec(host=True, uncached=True, cpu_access=True), preallocate=True)
+
+  @functools.cache
+  def queue_timeline_value(self, queue:str) -> Buffer:
     buf = Buffer("CPU", 1, dtypes.uint64, preallocate=True)
     buf.as_memoryview(force_zero_copy=True).cast('Q')[0] = 1
     return buf
@@ -250,14 +262,71 @@ pm_lower_ops = PatternMatcher([
 #
 # C programs reserve and bump timeline values, then patch command buffers with the concrete wait/signal values.
 
-# class DepsCtx:
-#   pass
+@dataclass
+class DepsCtx:
+  deps:DepsTracker = field(default_factory=DepsTracker)
+  evid:itertools.count = field(default_factory=lambda: itertools.count(0))
 
-def add_signals(call:UOp, q:UOp) -> UOp:
-  sig = UOp.new_buffer(q.arg[0], 0x100, dtypes.uint8).rtag("timeline_signal")
-  tl = UOp.new_buffer(q.arg[0], 1, dtypes.uint64).rtag("timeline_value").index(UOp.const(dtypes.int, 0))
-  return call.replace(src=(q.replace(src=(sig.wait(tl-1), *q.src, sig.store(tl)), arg=q.arg),) + call.src[1:])
-pm_add_signals = PatternMatcher([(UPat(Ops.CALL, tag="hcq", src=(UPat(Ops.LINEAR, name="q"),), name="call", allow_any_len=True), add_signals)])
+def get_writes_ids(call:UOp) -> tuple[int, ...]:
+  ast, writes = call.src[0].src[0], set()
+  for ast in call.src[0].src:
+    if ast.op is Ops.PROGRAM: writes.update(ast.arg[1].outs)
+    elif ast.op in (Ops.COPY, Ops.SLICE, Ops.CUSTOM_FUNCTION): writes.add(0)
+  return tuple(writes)
+
+def insert_deps(ctx:DepsCtx, call:UOp) -> UOp|None:
+  q, refs, write = call.src[0].rtag(next(ctx.evid)), [b.buffer for b in get_call_arg_uops(call)], get_writes_ids(call)
+
+  deps = []
+  for lane in range(len(refs[0].bufs) if isinstance(refs[0], MultiBuffer) else 1):
+    deps += ctx.deps.access_resources([b.bufs[lane] if isinstance(b, MultiBuffer) else b for b in refs], write, q)
+  return call.replace(src=(q.after(*dps).rtag("deps") if (dps:=dedup(deps)) else q,) + call.src[1:])
+pm_insert_deps = PatternMatcher([(UPat(Ops.CALL, tag="hcq", name="call", allow_any_len=True), insert_deps)])
+
+def add_finalizer(linear:UOp) -> UOp|None:
+  if not (calls:=[u for u in linear.src if u.op is Ops.CALL and u.tag == "hcq"]) or \
+     any(unwrap_after(c.src[0]).tag == "finalizer" for c in calls): return None
+
+  # last op's queue per ring (devs, type), the event count E, and every touched device — all read off the queues' event-id tags
+  last:dict[Any, UOp] = {(q:=unwrap_after(c.src[0])).arg: q for c in sorted(calls, key=lambda c: unwrap_after(c.src[0]).tag)}
+  E, devs = 212, tuple(dedup(d for ds, _ in last for d in to_tuple(ds)))
+
+  # one compute kernel over every touched device: run after each ring's last op, then signal the device epoch
+  sig = UOp.new_buffer(devs, 0x100, dtypes.uint8).rtag("timeline_signal")
+  tl = UOp.new_buffer(devs, 1, dtypes.uint64).rtag("timeline_value")
+  q = UOp(Ops.LINEAR, dtypes.void, (sig.store(tl.index(UOp.const(dtypes.int, 0))),), arg=(devs, "COMPUTE"), tag="finalizer")
+
+  # C bumps for the next run (device timeline +1, every queue base +E) on the inner after; the outer "deps" after waits on the rings.
+  bump = lambda b, by: b.index(UOp.const(dtypes.int, 0), dtype=b.dtype.ptr()).store(b.index(UOp.const(dtypes.int, 0)) + by)
+  bumps = (bump(tl, 1),) + tuple(bump(UOp.new_buffer(ds, 1, dtypes.uint64).rtag((ty, "timeline_value")), E) for ds, ty in last)
+  return linear.replace(src=linear.src + (UOp(Ops.CALL, dtypes.void, (q.after(*bumps).after(*last.values()).rtag("deps"),), tag="hcq"),))
+pm_add_finalizer = PatternMatcher([(UPat(Ops.LINEAR, name="linear"), add_finalizer)])
+
+# add_loads records every producer it waits on into ctx; add_stores then signals exactly those queues. ctx threads the links between them.
+def add_loads(ctx:set[int], call:UOp) -> UOp|None:
+  if call.src[0].tag != "deps": return None  # outermost deps-after; the inner bumps-after (finalizer only) is left untouched
+  inner, deps = call.src[0].src[0], call.src[0].src[1:]
+  q, waits = unwrap_after(inner), []
+  cur_devs = to_tuple(q.arg[0])
+  for dep in deps:
+    dq = unwrap_after(dep)  # producer queue (may sit behind its own deps-after)
+    ctx.add(dq.tag)  # this producer's event id is waited on -> add_stores signals it
+    # poll the producer queue's signal on the lanes it runs on; lanes outside its devices poll a max sentinel (always satisfied)
+    sigs = [UOp.new_buffer(d, 0x100, dtypes.uint8).rtag((dq.arg[1], "timeline_signal") if d in to_tuple(dq.arg[0]) else "max_sentinel_signal")
+            for d in cur_devs]
+    val = UOp.new_buffer(cur_devs, 1, dtypes.uint64).rtag((dq.arg[1], "timeline_value")).index(UOp.const(dtypes.int, 0))
+    waits.append((sigs[0] if len(sigs) == 1 else UOp(Ops.MSTACK, sigs[0].dtype, tuple(sigs))).wait(val + dq.tag))
+  return call.replace(src=(inner.substitute({q: q.replace(src=(*waits, *q.src))}),) + call.src[1:])
+pm_add_loads = PatternMatcher([(UPat(Ops.CALL, tag="hcq", name="call", allow_any_len=True), add_loads)])
+
+def add_stores(ctx:set[int], call:UOp) -> UOp|None:
+  if (q:=unwrap_after(call.src[0])).tag not in ctx: return None
+  store = UOp.new_buffer(q.arg[0], 0x100, dtypes.uint8).rtag((q.arg[1], "timeline_signal")).store(
+          UOp.new_buffer(q.arg[0], 1, dtypes.uint64).rtag((q.arg[1], "timeline_value")).index(UOp.const(dtypes.int, 0)) + q.tag)
+  newq = q.replace(src=q.src + (store,))
+  body = call.src[0].replace(src=(newq,) + call.src[0].src[1:]) if call.src[0].op is Ops.AFTER else newq
+  return call.replace(src=(body,) + call.src[1:])
+pm_add_stores = PatternMatcher([(UPat(Ops.CALL, tag="hcq", name="call", allow_any_len=True), add_stores)])
 
 # *****************
 # 2.3. group into queues
@@ -267,15 +336,16 @@ pm_add_signals = PatternMatcher([(UPat(Ops.CALL, tag="hcq", src=(UPat(Ops.LINEAR
 #   for el in linear.src:
 #     if el.op is Ops.LINEAR and el.tag != "hcq": flush(open_qs.keys(), add=el)
 #     devs = el.arg[0]
-#     if devs in open_qs: 
+#     if devs in open_qs:
 # pm_group_into_queues = PatternMatcher([(UPat(Ops.LINEAR, name="linear"), group_into_queues)])
 
 # *****************
 # 2.4. barriers
 
-def add_barriers(call:UOp, q:UOp) -> UOp:
-  return call.replace(src=(q.replace(src=(UOp(Ops.BARRIER, dtypes.void), *q.src)),) + call.src[1:])
-pm_add_barriers = PatternMatcher([(UPat(Ops.CALL, tag="hcq", src=(UPat(Ops.LINEAR, name="q"),), name="call", allow_any_len=True), add_barriers)])
+def add_barriers(call:UOp) -> UOp:
+  q = unwrap_after(call.src[0])  # the queue, behind the finalizer's bumps-after if present
+  return call.replace(src=(call.src[0].substitute({q: q.replace(src=(UOp(Ops.BARRIER, dtypes.void), *q.src))}),) + call.src[1:])
+pm_add_barriers = PatternMatcher([(UPat(Ops.CALL, tag="hcq", name="call", allow_any_len=True), add_barriers)])
 
 # *****************
 # 3.1. encode cmdbufs
@@ -288,17 +358,9 @@ def get_pm_lower(name:str) -> PatternMatcher|None:
   except ImportError: return None
 
 def encode_cmdbuf(call:UOp, q:UOp) -> UOp|None:
-  if (pm:=get_pm_lower(to_tuple(q.arg[0])[0].split(":")[0])) is None or (encoded:=pm.rewrite(q)) is None: return None
+  if (pm:=get_pm_lower(to_tuple(unwrap_after(q).arg[0])[0].split(":")[0])) is None or (encoded:=pm.rewrite(q)) is None: return None
   return call.replace(src=(encoded,) + call.src[1:])
-pm_encode_cmdbufs = PatternMatcher([(UPat(Ops.CALL, tag="hcq", src=(UPat(Ops.LINEAR, name="q"),), name="call", allow_any_len=True), encode_cmdbuf)])
-
-# *****************
-# 3.2. add timeline inc
-
-def add_timeline_inc(call:UOp, s:UOp) -> UOp:
-  tl = UOp.new_buffer(s.device, 1, dtypes.uint64).rtag("timeline_value")
-  return call.replace(src=(tl.after(s).index(UOp.const(dtypes.int, 0), dtype=tl.dtype.ptr()).store(tl.index(UOp.const(dtypes.int, 0)) + 1),) + call.src[1:])
-pm_add_timeline_inc = PatternMatcher([(UPat(Ops.CALL, tag="hcq", src=(UPat(name="s"),), name="call", allow_any_len=True), add_timeline_inc)])
+pm_encode_cmdbufs = PatternMatcher([(UPat(Ops.CALL, tag="hcq", src=(UPat(Ops.LINEAR).or_after(name="q"),), name="call", allow_any_len=True), encode_cmdbuf)])
 
 # *****************
 # 3.3. lift patches to the command buffer (root)
@@ -391,11 +453,16 @@ def hcq_schedule(linear:UOp) -> UOp:
   linear = graph_rewrite(linear, pm_prep_runtime, name="prepare runtime", enter_calls=True)
 
   linear = graph_rewrite(linear, pm_lower_ops + pm_flatten_linear, walk=True, name="lower ops into hcq ir", enter_calls=True)
-  linear = graph_rewrite(linear, pm_add_signals, walk=True, name="add signals", enter_calls=True)
+
+  # deps scheduling
+  linear = graph_rewrite(linear, pm_insert_deps, ctx=DepsCtx(), walk=True, name="insert deps", enter_calls=True)
+  linear = graph_rewrite(linear, pm_add_finalizer, name="add finalizer")
+  linear = graph_rewrite(linear, pm_add_loads, ctx=(waited:=set()), walk=True, name="add loads", enter_calls=True)
+  linear = graph_rewrite(linear, pm_add_stores, ctx=waited, walk=True, name="add stores", enter_calls=True)
   linear = graph_rewrite(linear, pm_add_barriers, walk=True, name="add barriers", enter_calls=True)
   # linear = graph_rewrite(linear, pm_group_into_queues, name="group into queues")
+
   linear = graph_rewrite(linear, pm_encode_cmdbufs, walk=True, name="encode cmdbufs", enter_calls=True)
-  linear = graph_rewrite(linear, pm_add_timeline_inc, walk=True, name="add timeline inc", enter_calls=True)
   return graph_rewrite(linear, pm_lift_patches_to_cmdbuf, name="lift patches to cmdbuf", enter_calls=True)
 
 @track_rewrites(lambda _,ret: f"HCQ Realize {pluralize('Kernel', len(ret.src))}")
@@ -405,4 +472,7 @@ def hcq_realize(linear:UOp) -> UOp:
   linear = graph_rewrite(linear, pm_resolve_patches, bottom_up=False, name="simplify patches", enter_calls=True)
   linear = graph_rewrite(linear, pm_fixup, bottom_up=False, name="fixup", enter_calls=True)
   linear = graph_rewrite(linear, pm_parametrize_host_buffers, walk=True, name="parametrize host buffers", enter_calls=True)
-  return graph_rewrite(linear, pm_callify_hcq, name="callify hcq", enter_calls=True)
+  linear = graph_rewrite(linear, pm_callify_hcq, name="callify hcq", enter_calls=True)
+
+  # exit(0)
+  return linear

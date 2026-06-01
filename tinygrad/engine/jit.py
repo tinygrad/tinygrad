@@ -22,43 +22,6 @@ def prune_linear(linear:UOp, needed:set[UOp]) -> tuple[UOp, UOp]:
     else: onetime.append(si)
   return linear.replace(src=tuple(kept)), linear.replace(src=tuple(onetime))
 
-def create_graph_call(batch:list[UOp]) -> UOp:
-  # all external inputs are PARAMs
-  input_list = dedup(u for si in batch for b in si.src[1:] for u in b.toposort() if u.op is Ops.PARAM)
-  cf = UOp(Ops.CUSTOM_FUNCTION, dtypes.void, src=(UOp(Ops.LINEAR, src=tuple(batch)),), arg="graph")
-  return cf.call(*input_list, metadata=tuple(m for si in batch for m in si.arg.metadata))
-
-def graph_split_rewrite(linear:UOp, max_batch_size:int=0) -> UOp:
-  new_src: list[UOp] = []
-  current_batch: list[UOp] = []
-  current_batch_devs: list[Compiled] = []
-
-  def flush_batch():
-    nonlocal current_batch, current_batch_devs, max_batch_size, new_src
-    if len(current_batch) <= 1 and not getenv("GRAPH_ONE_KERNEL"): new_src.extend(current_batch)
-    else:
-      new_src.append(create_graph_call(current_batch))
-      max_batch_size *= 2
-      if DEBUG >= 2: print(f"JIT GRAPHing batch with {len(current_batch)} kernels")
-    current_batch, current_batch_devs = [], []
-
-  for si in linear.src:
-    if si.src[0].op is Ops.SLICE: continue
-
-    devs = dedup([Device[x] for b in si.src[1:] if b.op is not Ops.BIND for x in (b.device if isinstance(b.device, tuple) else (b.device,))])
-    graph_t = graph_class(devs[0]) if devs[0].graph is not None else None
-
-    can_graph = graph_t is not None and graph_t.supports_uop(devs, si)
-    can_extend = can_graph and graph_t is not None and (not current_batch_devs or graph_t.supports_uop(current_batch_devs, si)) \
-      and (max_batch_size == 0 or len(current_batch) < max_batch_size)
-    if not can_extend and current_batch: flush_batch()
-
-    # append this si and update devs
-    (current_batch if can_graph else new_src).append(si)
-    current_batch_devs = dedup(current_batch_devs + devs) if can_graph else []
-  if current_batch: flush_batch()
-  return linear.replace(src=tuple(new_src))
-
 def _copy_input(u:UOp) -> UOp:
   run_linear(UOp(Ops.LINEAR, src=(u.copy_to_device(u.device).call(new:=UOp.new_buffer(u.device, u.arg, u.dtype), u, metadata=()),)))
   return new
@@ -69,9 +32,8 @@ def jit_lower(linear:UOp, held_bufs:set[UOp], input_uops:list[UOp]) -> UOp:
 
   # parametrize input buffers: map each input buffer UOp to a PARAM with the correct slot index
   linear = linear.substitute({u: UOp.param(i, u.dtype, u.shape, u.device) for i,u in enumerate(input_uops)}, walk=True)
-  linear = compile_linear(linear, beam=getenv("JITBEAM", BEAM.value))
   linear = memory_plan_rewrite(linear, held_bufs)
-  if JIT < 2: linear = graph_split_rewrite(linear, max_batch_size=JIT_BATCH_SIZE.value)
+  linear = compile_linear(linear, beam=getenv("JITBEAM", BEAM.value), batch_size=JIT_BATCH_SIZE.value if JIT < 2 else None)
   if VIZ: graph_rewrite(linear, PatternMatcher([]), name="View graphed linear")
   return linear
 
@@ -85,7 +47,32 @@ def _check_no_non_tensor_return(ret):
     return
   raise JitError(f"JIT return contains non-Tensor value of type {type(ret).__name__}")
 
-def graph_class(dev): return dev.graph.func if isinstance(dev.graph, functools.partial) else dev.graph
+class DepsTracker:
+  def __init__(self):
+    self.w_dependency_map: dict[int, list[tuple[int, int, Any]]] = collections.defaultdict(list)
+    self.r_dependency_map: dict[int, list[tuple[int, int, Any]]] = collections.defaultdict(list)
+
+  @staticmethod
+  def _buf_key(buf:Buffer) -> int: return id(buf.base)
+
+  def access_resources(self, bufs:list[Buffer], write:list[int], new_dependency:Any):
+    wait_nodes = []
+    for i,buf in enumerate(bufs):
+      key, s, e = self._buf_key(buf), buf.offset, buf.offset + buf.nbytes
+      wait_nodes += [dep for st,en,dep in self.w_dependency_map[key] if st < e and s < en]
+      if i in write: wait_nodes += [dep for st,en,dep in self.r_dependency_map[key] if st < e and s < en]
+    for i,buf in enumerate(bufs):
+      key, s, e = self._buf_key(buf), buf.offset, buf.offset + buf.nbytes
+      if i in write:
+        for dmap in [self.w_dependency_map, self.r_dependency_map]:
+          kept = []
+          for st,en,dep in dmap[key]:
+            if st < min(s, en): kept.append((st, min(s, en), dep))
+            if max(e, st) < en: kept.append((max(e, st), en, dep))
+          dmap[key] = kept
+        self.w_dependency_map[key].append((s, e, new_dependency))
+      else: self.r_dependency_map[key].append((s, e, new_dependency))
+    return list({id(x):x for x in wait_nodes}.values())
 
 class GraphRunner:
   def __init__(self, linear:UOp, input_uops:tuple[UOp, ...]=()):
@@ -123,9 +110,7 @@ class GraphRunner:
 
     estimates = sum((estimate_uop(call) for call in self.linear.src), Estimates())
 
-    # used in MultiGraphRunner. tracks (offset, end, dep) ranges per base buffer id to handle suballocated buffers correctly.
-    self.w_dependency_map: dict[int, list[tuple[int, int, Any]]] = collections.defaultdict(list)
-    self.r_dependency_map: dict[int, list[tuple[int, int, Any]]] = collections.defaultdict(list)
+    self.deps = DepsTracker()
 
     self.device, self.estimates = self.calls[0][2][0].device.split(":")[0], estimates.simplify()
 
@@ -142,23 +127,7 @@ class GraphRunner:
       yield j, (dims[gl] if gl is not None else self.launch_dims_base[j][0]), (dims[lc] if lc is not None else self.launch_dims_base[j][1])
 
   def _access_resources(self, bufs:list[Buffer], write:list[int], new_dependency:Any):
-    wait_nodes = []
-    for i,buf in enumerate(bufs):
-      key, s, e = id(buf.base._buf), buf.offset, buf.offset + buf.nbytes
-      wait_nodes += [dep for st,en,dep in self.w_dependency_map[key] if st < e and s < en]
-      if i in write: wait_nodes += [dep for st,en,dep in self.r_dependency_map[key] if st < e and s < en]
-    for i,buf in enumerate(bufs):
-      key, s, e = id(buf.base._buf), buf.offset, buf.offset + buf.nbytes
-      if i in write:
-        for dmap in [self.w_dependency_map, self.r_dependency_map]:
-          kept = []
-          for st,en,dep in dmap[key]:
-            if st < min(s, en): kept.append((st, min(s, en), dep))
-            if max(e, st) < en: kept.append((max(e, st), en, dep))
-          dmap[key] = kept
-        self.w_dependency_map[key].append((s, e, new_dependency))
-      else: self.r_dependency_map[key].append((s, e, new_dependency))
-    return list({id(x):x for x in wait_nodes}.values())
+    return self.deps.access_resources(bufs, write, new_dependency)
 
   @staticmethod
   def _all_devs(batch_devs:list[Compiled], new_call:UOp) -> list[Compiled]:

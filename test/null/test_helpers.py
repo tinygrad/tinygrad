@@ -2,7 +2,7 @@ import ctypes, gzip, unittest, timeit, pickle
 from tinygrad import Variable
 from tinygrad.helpers import Context, ContextVar, argfix, colored, word_wrap, is_numpy_ndarray, mv_address, get_contraction, count, all_same
 from tinygrad.helpers import merge_dicts, strip_parens, prod, round_up, fetch, fully_flatten, from_mv, to_mv, polyN, time_to_str, cdiv, cmod, getbits
-from tinygrad.helpers import ceildiv
+from tinygrad.helpers import ceildiv, ansistrip
 from tinygrad.tensor import Tensor, get_shape
 import numpy as np
 
@@ -444,6 +444,13 @@ class TestWordWrap(unittest.TestCase):
     st = colored("x"*wrap*2, "red")
     st2 = word_wrap(st, wrap=wrap)
     self.assertEqual(len(st2.splitlines()), 2)
+
+  def test_wrap_colored_at_boundary(self):
+    wrap = 10
+    st = "x"*(wrap-2) + colored("yyy", "red")
+    st2 = word_wrap(st, wrap=wrap)
+    self.assertEqual(ansistrip(st2), "x"*(wrap-2)+"yy\ny")
+    self.assertNotIn("\x1b[\n", st2)
 
   def test_wrap_explicit_newline(self):
     wrap = 10

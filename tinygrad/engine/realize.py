@@ -1,8 +1,8 @@
 from __future__ import annotations
 from typing import cast, Iterator, Any
-import time, random, itertools, math, contextlib, weakref
+import time, random, itertools, math, contextlib, weakref, functools
 from dataclasses import dataclass, replace, field
-from tinygrad.helpers import colored, DEBUG, GlobalCounters, ansilen, all_int, TRACEMETA, prod, flatten, Context, getenv
+from tinygrad.helpers import colored, DEBUG, GlobalCounters, ansilen, all_int, TRACEMETA, prod, flatten, Context, getenv, dedup
 from tinygrad.helpers import BEAM, size_to_str, time_to_str, VALIDATE_WITH_CPU, PROFILE, ProfilePointEvent, cpu_events
 from tinygrad.dtype import dtypes
 from tinygrad.uop.ops import Ops, PatternMatcher, UOp, UPat, sym_infer, buffers, graph_rewrite, ProgramInfo
@@ -241,17 +241,64 @@ pm_exec = PatternMatcher([
   (UPat(Ops.CALL, src=(UPat(Ops.CUSTOM_FUNCTION, arg="validate", name="ast"),), name="call", allow_any_len=True), exec_validate),
 ])
 
-def compile_linear(linear:UOp, beam:int|None=None, validate=False) -> UOp:
+def create_graph_call(batch:list[UOp]) -> UOp:
+  # all external inputs are PARAMs
+  input_list = dedup(u for si in batch for b in si.src[1:] for u in b.toposort() if u.op is Ops.PARAM)
+  cf = UOp(Ops.CUSTOM_FUNCTION, dtypes.void, src=(UOp(Ops.LINEAR, src=tuple(batch)),), arg="graph")
+  return cf.call(*input_list, metadata=tuple(m for si in batch for m in si.arg.metadata))
+
+def graph_class(dev): return dev.graph.func if isinstance(dev.graph, functools.partial) else dev.graph
+
+def graph_split_rewrite(linear:UOp, max_batch_size:int=0) -> UOp:
+  new_src: list[UOp] = []
+  current_batch: list[UOp] = []
+  current_batch_devs: list[Compiled] = []
+
+  def flush_batch():
+    nonlocal current_batch, current_batch_devs, max_batch_size, new_src
+    if len(current_batch) <= 1 and not getenv("GRAPH_ONE_KERNEL"): new_src.extend(current_batch)
+    else:
+      new_src.append(create_graph_call(current_batch))
+      max_batch_size *= 2
+      if DEBUG >= 2: print(f"JIT GRAPHing batch with {len(current_batch)} kernels")
+    current_batch, current_batch_devs = [], []
+
+  for si in linear.src:
+    if si.src[0].op is Ops.SLICE: continue
+
+    devs = dedup([Device[x] for b in si.src[1:] if b.op is not Ops.BIND for x in (b.device if isinstance(b.device, tuple) else (b.device,))])
+    graph_t = graph_class(devs[0]) if devs[0].graph is not None else None
+
+    can_graph = graph_t is not None and graph_t.supports_uop(devs, si)
+    can_extend = can_graph and graph_t is not None and (not current_batch_devs or graph_t.supports_uop(current_batch_devs, si)) \
+      and (max_batch_size == 0 or len(current_batch) < max_batch_size)
+    if not can_extend and current_batch: flush_batch()
+
+    # append this si and update devs
+    (current_batch if can_graph else new_src).append(si)
+    current_batch_devs = dedup(current_batch_devs + devs) if can_graph else []
+  if current_batch: flush_batch()
+  return linear.replace(src=tuple(new_src))
+
+def compile_linear(linear:UOp, beam:int|None=None, validate=False, batch_size:int|None=None) -> UOp:
   if validate: linear = graph_rewrite(linear, pm_validate, name="validate", walk=True)
   if (beam_val:=BEAM.value if beam is None else beam) >= 1: linear = graph_rewrite(linear, pm_beam, ctx=beam_val, walk=True)
   linear = graph_rewrite(linear, pm_compile, name="precompile kernels", walk=True)
+  linear = graph_rewrite(linear, pm_optimize_local_size, name="optimize local size", walk=True)
+  if batch_size is not None: linear = graph_split_rewrite(linear, max_batch_size=batch_size)
   if getenv("HCQ2"):
     from extra.hcq2.hcq2 import hcq_schedule
     linear = hcq_schedule(linear)
-  return graph_rewrite(linear, pm_optimize_local_size, name="optimize local size", walk=True)
+  return linear
+
+def realize_linear(linear:UOp) -> UOp:
+  if getenv("HCQ2"):
+    from extra.hcq2.hcq2 import hcq_realize
+    linear = hcq_realize(linear)
+  return linear
 
 def run_linear(linear:UOp, var_vals:dict[str, int]|None=None, input_uops:tuple[UOp, ...]=(), update_stats=True, jit=False, wait=False):
-  if not jit: linear = compile_linear(linear, validate=VALIDATE_WITH_CPU)
+  if not jit: linear = realize_linear(compile_linear(linear, validate=VALIDATE_WITH_CPU))
   ctx = ExecContext(var_vals or {}, input_uops, update_stats, jit, wait or DEBUG>=2)
   for call in linear.src: pm_exec.rewrite(call, ctx)
 
@@ -261,5 +308,5 @@ def time_call(call:UOp, var_vals:dict[str, int]|None=None, timeout:int|None=None
     else:
       from tinygrad.tensor import Tensor
       with Context(DEBUG=0, BEAM=0, CAPTURING=0, TRACK_MATCH_STATS=0): Tensor.ones(1024, 1024).contiguous().realize(do_update_stats=False)
-  call = compile_linear(UOp(Ops.LINEAR, src=(call,)), beam=0).src[0]
+  call = realize_linear(compile_linear(UOp(Ops.LINEAR, src=(call,)), beam=0).src[0])
   return cast(float, pm_exec.rewrite(call, ExecContext(var_vals or {}, update_stats=False, wait=True, timeout=timeout, cache=False)))

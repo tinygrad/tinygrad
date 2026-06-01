@@ -75,14 +75,14 @@ class TestTiny(unittest.TestCase):
     def fxn(a,b) -> Tensor:
       nonlocal cnt
       cnt += 1
-      return a+b
+      return a+b+((a*2).realize())
 
     for _ in range(3):
       la,lb = new_rand_list(), new_rand_list()
       fa,fb = Tensor(la), Tensor(lb)
       ret = fxn(fa, fb)
       # math is correct
-      self.assertListEqual(ret.tolist(), [a+b for a,b in zip(la, lb)])
+      self.assertListEqual(ret.tolist(), [a+b+(a*2) for a,b in zip(la, lb)])
 
     # function is only called twice
     self.assertEqual(cnt, 2)
