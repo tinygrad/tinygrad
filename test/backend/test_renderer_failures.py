@@ -22,12 +22,12 @@ def _test_uop_result(inputs:list[Tensor], sink:UOp, local_size=None):
 
 def _setup_and_test_alu(alu_op:Ops, input_val:ConstType, *alu_src_uops:UOp):
   dtype = alu_src_uops[0].dtype
-  a = UOp.param(0, dtype.ptr())
-  b = UOp.param(1, dtype.ptr())
+  a = UOp.param(0, dtype.ptr(1))
+  b = UOp.param(1, dtype.ptr(1))
   idx = UOp.const(dtypes.int, 0)
-  ld = b.index(idx)
+  ld = b.index(idx, ptr=True).load()
   alu = ld.alu(alu_op, *alu_src_uops)
-  store = UOp.store(a.index(idx), alu)
+  store = UOp.store(a.index(idx, ptr=True), alu)
   return _test_uop_result([Tensor([input_val])], UOp(Ops.SINK, dtypes.void, (store,), arg=KernelInfo()))[0]
 
 class TestRendererFailures(unittest.TestCase):
