@@ -85,9 +85,9 @@ base_rewrite = PatternMatcher([
    lambda ctx,x,idx,alt,mask:
    f"  br label {ctx[x]}_entry\n{ctx[x][1:]}_entry:\n"
    f"  br i1 {ctx[mask]}, label {ctx[x]}_load, label {ctx[x]}_exit\n{ctx[x][1:]}_load:\n"
-   f"  {ctx[x]}_yes = load {ldt(x.dtype)}, {ldt(idx.dtype, x.max_numel(), True)} {ctx[idx]}\n"
+   f"  {ctx[x]}_yes = load {ldt(x.dtype, idx.max_numel())}, {ldt(idx.dtype, x.max_numel(), True)} {ctx[idx]}\n"
    f"  br label {ctx[x]}_exit\n{ctx[x][1:]}_exit:\n"
-   f"  {ctx[x]} = phi {ldt(x.dtype)} [{ctx[x]}_yes, {ctx[x]}_load], [{ctx[alt]}, {ctx[x]}_entry]"),
+   f"  {ctx[x]} = phi {ldt(x.dtype, idx.max_numel())} [{ctx[x]}_yes, {ctx[x]}_load], [{ctx[alt]}, {ctx[x]}_entry]"),
   (UPat.var('idx').load(name="x"),
    lambda ctx,x,idx: f"  {ctx[x]} = load {ldt(idx.dtype, idx.max_numel())}, {ldt(idx.dtype, idx.max_numel(), True)} {ctx[idx]}"),
   (UPat.var('idx').store(UPat.var("var")),
@@ -143,13 +143,14 @@ class LLVMRenderer(Renderer):
   code_for_op = {k:lambda:None for v in lop.values() for k in v.keys()}
 
   extra_matcher = create_non_native_float_pats((dtypes.bfloat16,)) + pm_manual_bf16_cast
-  def _render_fn(self, name:str, args:list[tuple[str,DType]], kernel:list[str], prefix:list[str]|None=None) -> str:
+  def _render_fn(self, name:str, args:list[tuple[str,UOp]], kernel:list[str], prefix:list[str]|None=None) -> str:
     # NOTE: CPUAllocator promises 0x20 alignment
-    sargs = ", ".join([f"{ldt(dt, ptr=True)}{' noalias align 32' if isinstance(dt, PtrDType) else ''} {name}" for name,dt in args])
+    sargs = ", ".join([f"{ldt(u.dtype, ptr=u.addrspace == AddrSpace.GLOBAL)}{' noalias align 32' if u.addrspace == AddrSpace.GLOBAL else ''} {name}"
+                       for name,u in args])
     return "\n".join((prefix or []) + [f"define{' ' + self.abi if self.abi else ''} void @{name}({sargs}) #0", "{"] + kernel + ["  ret void\n}"])
   def _render_kernel(self, uops: list[UOp], prefix:list[str]|None=None) -> tuple[tuple[str, ...], str]:
     r: dict[UOp, str] = {}
-    args: list[tuple[str, DType]] = []
+    args: list[tuple[str, UOp]] = []
     kernel: list[str] = []
     vc = -1
 
@@ -173,7 +174,7 @@ class LLVMRenderer(Renderer):
         continue
       if u.op in (Ops.PARAM, Ops.DEFINE_VAR):
         r[u] = f"%data{u.arg.slot}" if u.op is Ops.PARAM else f"%{u.expr}"
-        args.append((r[u], u.dtype))
+        args.append((r[u], u))
       elif u.op in (Ops.DEFINE_LOCAL, Ops.DEFINE_REG):
         r[u] = f"%{'local' if u.op is Ops.DEFINE_LOCAL else 'reg'}_{str(u.arg).replace('(', '').replace(')', '').replace(',', '_').replace(' ', '')}"
         size = u.max_numel()
