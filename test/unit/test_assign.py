@@ -55,7 +55,7 @@ class TestAssign(unittest.TestCase):
       assert x.uop.base.realized is buf
 
   def test_assign_slice_add(self):
-    for T in (1, 2, 10):#, 100): # this crashes in CI, not sure why
+    for T in (1, 2, 10, 100):
       x = Tensor([0, 0]).realize()
       buf = x.uop.base.realized
       for _ in range(T):
@@ -874,11 +874,7 @@ class TestAssignToUnrealizedView(unittest.TestCase):
     d = t.to("CPU:1").detach()  # DETACH(unrealized COPY)
     self.assertIs(d.uop.base.op, Ops.COPY)
     d[:, 1:2].assign(Tensor.ones(2,1, dtype=dtypes.int).to("CPU:1").contiguous().realize())
-    try:
-      self.assertEqual(d.tolist(), [[0,1],[0,1]])
-    except AssertionError:
-      # TODO: broken now
-      self.assertEqual(d.tolist(), [[0,0],[0,0]])
+    self.assertEqual(d.tolist(), [[0,1],[0,1]])
 
   def test_detach_contiguous(self):
     t = Tensor([[1,2],[3,4]]).contiguous().realize()

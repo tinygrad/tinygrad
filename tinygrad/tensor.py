@@ -270,8 +270,8 @@ class Tensor(OpMixin):
       self._buffer().copyin(x._data())
       return self
     base, target = self.uop.base, self.uop
-    # only allow movement ops between base and target
-    while target is not base and target.op in GroupOp.Movement: target = target.src[0]
+    # only allow movement ops + detach between base and target
+    while target is not base and target.op in GroupOp.Movement.union({Ops.DETACH}): target = target.src[0]
     if base.op is Ops.COPY and target is base and not self.uop.has_buffer_identity() and base not in x.uop.backward_slice_with_self:
       _apply_map_to_tensors({base: base.after(self.uop.store(x.uop))}, name="Copy View Assign", walk=True)
       return self

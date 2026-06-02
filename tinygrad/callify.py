@@ -54,7 +54,7 @@ def replace_contig_with_store_after(u:UOp):
 def replace_store_after_with_contig(u:UOp, src:UOp):
   assigned_to = u
   while assigned_to.op in {Ops.BITCAST, Ops.AFTER}: assigned_to = assigned_to.src[0].base
-  if assigned_to.op not in {Ops.BUFFER, Ops.COPY}: return src.contiguous(tag=u.tag)
+  if assigned_to.op is not Ops.BUFFER and u.src[0].op is not Ops.COPY: return src.contiguous(tag=u.tag)
 
 def _make_buffer_view(src:UOp) -> UOp|None:
   """If movement ops on src collapse to a contiguous range, return SLICE.reshape(src.shape). Otherwise None."""
