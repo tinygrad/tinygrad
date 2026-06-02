@@ -28,10 +28,10 @@ def packed_load(root:UOp, bidx:UOp, dtype:DType, var:UOp|None=None, gate:UOp|Non
   return sign_extend(val, 8*dtype.itemsize).cast(dtype) if dtype in [dtypes.char, dtypes.short] else val.cast(dtype)
 
 def is_packed(x:UOp) -> bool:
-  if x.op is Ops.LOAD: dt = x.dtype
-  elif x.op is Ops.STORE: dt = x.src[1].dtype
-  else: dt = x.dtype.base
-  return dt.itemsize < 4 and dt.base != dtypes.half
+  if x.op is Ops.LOAD: dt, addrspace = x.dtype, x.src[0].addrspace
+  elif x.op is Ops.STORE: dt, addrspace = x.src[1].dtype, x.src[0].addrspace
+  else: dt, addrspace = x.dtype.base, x.dtype.addrspace if isinstance(x.dtype, PtrDType) else x.addrspace
+  return dt.itemsize < 4 and dt.base != dtypes.half and addrspace != AddrSpace.REG
 
 def _packed_size(ctx, x:UOp):
   size = ctx[x.src[0]]
@@ -39,7 +39,7 @@ def _packed_size(ctx, x:UOp):
   elems = 4 // x.dtype.base.itemsize
   return str((x.src[0].arg + elems - 1) // elems) if x.src[0].op is Ops.CONST else f"(({size}+{elems-1})/{elems})"
 
-def _buf_map(ctx, x:UOp): return "u32" if is_packed(x) and x.addrspace == AddrSpace.REG else ctx.buf_map(x.dtype.base)
+def _buf_map(ctx, x:UOp): return ctx.type_map[x.dtype.base] if x.addrspace == AddrSpace.REG else ctx.buf_map(x.dtype.base)
 
 def is_nan(a):
   bs, (exp, mant) = a.dtype.bitsize, dtypes.finfo(a.dtype)
