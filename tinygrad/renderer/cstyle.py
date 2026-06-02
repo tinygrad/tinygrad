@@ -11,8 +11,8 @@ from tinygrad.codegen.late.devectorizer import no_vectorized_alu
 def render_index(ctx,buf,idx):
   base = buf
   while base.op is Ops.AFTER: base = base.src[0]
-  if base.addrspace == AddrSpace.REG or base.op not in {Ops.PARAM, Ops.DEFINE_LOCAL}:
-    assert idx.op is Ops.CONST
+  if base.addrspace == AddrSpace.ANON:
+    assert idx.op is Ops.CONST, f"{idx.op} must be CONST"
     return f"{ctx[buf]}[{idx.arg}]"
   else:
     return f"({ctx[buf]}+{strip_parens(ctx[idx]) if idx.arg == Ops.ADD else ctx[idx]})"
@@ -161,7 +161,6 @@ class CStyleLanguage(Renderer):
   def render_cast(self, dt:DType, val: str) -> str: return f"({self.render_dtype(dt)})({val})"
   def render_dtype_with_shape(self, u:UOp) -> DType: return dtype_with_shape(u.dtype, u.shape)
   def render_access(self, bidx:UOp, dtype:DType) -> str:
-    if bidx.addrspace == AddrSpace.REG: return self[bidx]
     return f"(*(({self.render_dtype(dtype.ptr(addrspace=bidx.addrspace))})({self[bidx]})))" if dtype.count > 1 else f"(*{self[bidx]})"
   def render_dtype(self, dt:DType, mutable=True) -> str:
     if isinstance(dt, ImageDType): return f"{'write_only' if mutable else 'read_only'} image2d_t"
