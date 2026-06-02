@@ -18,17 +18,10 @@ concurrency:
   group: test-${{ github.event_name }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-# runs-on definitions, all jobs should use one of these
-_runners:
-  linux: &linux ${{ github.repository == 'tinygrad/tinygrad' && github.event_name == 'pull_request' && github.event.pull_request.author_association == 'COLLABORATOR' && 'namespace-profile-tinygrad' || 'ubuntu-24.04' }}
-  linux-arm: &linux-arm ${{ github.repository == 'tinygrad/tinygrad' && github.event_name == 'pull_request' && github.event.pull_request.author_association == 'COLLABORATOR' && 'namespace-profile-tinygrad-arm64' || 'ubuntu-24.04-arm' }}
-  macos: &macos macos-26
-  windows: &windows windows-2025
-
 jobs:
   docs:
     name: Docs
-    runs-on: *linux
+    runs-on: &linux ${{ github.repository == 'tinygrad/tinygrad' && github.event_name == 'pull_request' && github.event.pull_request.author_association == 'COLLABORATOR' && 'namespace-profile-tinygrad' || 'ubuntu-24.04' }}
     timeout-minutes: 10
     env:
       CHECK_OOB: 0
@@ -524,7 +517,7 @@ jobs:
 
   testmetalmodels:
     name: Models (metal)
-    runs-on: *macos
+    runs-on: &macos macos-26
     timeout-minutes: 20
     steps:
     - name: Checkout Code
@@ -850,7 +843,7 @@ jobs:
           - 'WEBGPU'
 
     name: Windows (DEV=${{ matrix.dev }})
-    runs-on: *windows
+    runs-on: windows-2025
     timeout-minutes: 15
     steps:
       - name: Checkout Code
@@ -913,7 +906,7 @@ jobs:
           python -m pytest -n=auto test/backend/test_ops.py --durations=20
   qcomclcompiletests:
     name: Compile-only (QCOM CL)
-    runs-on: *linux-arm
+    runs-on: ${{ github.repository == 'tinygrad/tinygrad' && github.event_name == 'pull_request' && github.event.pull_request.author_association == 'COLLABORATOR' && 'namespace-profile-tinygrad-arm64' || 'ubuntu-24.04-arm' }}
     timeout-minutes: 15
     steps:
       - name: Checkout Code
