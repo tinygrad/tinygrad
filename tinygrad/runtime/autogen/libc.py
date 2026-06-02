@@ -896,7 +896,6 @@ def getentropy(__buffer:ctypes.c_void_p, __length:size_t) -> int: ...
 def close_range(__fd:int, __max_fd:int, __flags:int) -> int: ...
 @dll.bind(ctypes.c_int32)
 def gettid() -> ctypes.c_int32: ...
-_SYS_MMAN_H = 1
 MREMAP_MAYMOVE = 1
 MREMAP_FIXED = 2
 MREMAP_DONTUNMAP = 4
@@ -908,6 +907,7 @@ MFD_EXEC = 0x10
 MLOCK_ONFAULT = 1
 PKEY_DISABLE_ACCESS = 0x1
 PKEY_DISABLE_WRITE = 0x2
+_SYS_MMAN_H = 1
 _STRING_H = 1
 _ELF_H = 1
 EI_NIDENT = (16)
