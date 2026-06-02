@@ -114,6 +114,8 @@ class DLL(ctypes.CDLL):
 
   def __init__(self, nm:str, paths:str|list[str], extra_paths=[], emsg="", **kwargs):
     self.nm, self.emsg = nm, emsg or f"try setting {nm.upper()+'_PATH'}?"
+    if nm == 'llvm' and (ver:=getenv("LLVM_VERSION", "")):
+      paths = ([f"/opt/homebrew/opt/llvm@{ver}/lib/libLLVM.dylib"] if OSX else [f"LLVM-{ver}"]) + (paths if isinstance(paths, list) else [paths])
     if (path:= DLL.findlib(nm, paths if isinstance(paths, list) else [paths], extra_paths if isinstance(extra_paths, list) else [extra_paths])):
       if DEBUG >= 3: print(f"loading {nm} from {path}")
       try:
