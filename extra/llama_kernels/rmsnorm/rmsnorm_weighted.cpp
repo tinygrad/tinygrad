@@ -27,7 +27,6 @@ constexpr int VECS_PER_THREAD = ELEMS_PER_THREAD / VEC;
 
 extern "C" __global__ __launch_bounds__(THREADS_PER_WG) void rmsnorm_weighted_fwd(
     __hip_bfloat16*       __restrict__ out,
-    __hip_bfloat16*       __restrict__ x_normed_out,
     float*                __restrict__ rrms_out,
     const __hip_bfloat16* __restrict__ x,
     const __hip_bfloat16* __restrict__ weight) {
@@ -69,15 +68,12 @@ extern "C" __global__ __launch_bounds__(THREADS_PER_WG) void rmsnorm_weighted_fw
       const int h_base = tid * VEC + v * THREADS_PER_WG * VEC;
       float4 w_raw = *reinterpret_cast<const float4*>(&weight[h_base]);
       const __hip_bfloat16 *wi = reinterpret_cast<const __hip_bfloat16*>(&w_raw);
-      __hip_bfloat16 yn[VEC];
       __hip_bfloat16 yo[VEC];
       #pragma unroll
       for (int i = 0; i < VEC; i++) {
         const float x_normed = regs[v * VEC + i] * rrms;
-        yn[i] = static_cast<__hip_bfloat16>(x_normed);
         yo[i] = static_cast<__hip_bfloat16>(x_normed * static_cast<float>(wi[i]));
       }
-      *reinterpret_cast<float4*>(&x_normed_out[row_off + h_base]) = *reinterpret_cast<float4*>(yn);
       *reinterpret_cast<float4*>(&out[row_off + h_base]) = *reinterpret_cast<float4*>(yo);
     }
     __syncthreads();
