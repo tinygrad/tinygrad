@@ -71,12 +71,12 @@ def nimm_set(imm:mesa.nir_def, x, dtype:DType):
   instr = ctypes.cast(imm.parent_instr, ctypes.POINTER(mesa.nir_load_const_instr))
   struct.pack_into(unwrap(dtype.fmt), (ctypes.c_ubyte * dtype.itemsize).from_address(ctypes.addressof(instr.contents.value)), 0, truncate[dtype](x))
 
-@nir_instr(nc=1, bs=lambda dtype: dtype.bitsize)
+@nir_instr(nc=1, bs=lambda dtype: dtype.bitsize*dtype.count)
 def nimm(b:mesa.nir_builder, x, dtype:DType) -> mesa.nir_def:
-  nimm_set((instr:=mesa.nir_load_const_instr_create(b.shader, 1, dtype.bitsize)).contents._def, x, dtype)
+  nimm_set((instr:=mesa.nir_load_const_instr_create(b.shader, 1, dtype.bitsize*dtype.count)).contents._def, x, dtype)
   return instr
-@nir_instr(nc=1, bs=lambda dtype: dtype.bitsize)
-def nundef(b, dtype): return mesa.nir_undef_instr_create(b.shader, 1, dtype.bitsize)
+@nir_instr(nc=1, bs=lambda dtype: dtype.bitsize*dtype.count)
+def nundef(b, dtype): return mesa.nir_undef_instr_create(b.shader, 1, dtype.bitsize*dtype.count)
 
 deref_var = nir_instr(nc=1, bs=32, modes=lambda var:var.data.mode, type=lambda var:var.type, var=lambda var:ctypes.pointer(var))( # pylint: disable=W0108
   lambda b, var: mesa.nir_deref_instr_create(b.shader, mesa.nir_deref_type_var))
@@ -86,7 +86,7 @@ def scope(space): return 'global' if space == AddrSpace.GLOBAL else ('shared' if
 nstore = nir_instr(has_def=False, df=lambda addr:addr, intrins=lambda space,val: {"WRITE_MASK":(1<<val.num_components)-1, **iointr(space)},
   num_components=lambda val:val.num_components, srcs=lambda space, addr, val: [nsrc(val), nsrc(addr)][::1 if space != AddrSpace.REG else -1])(
     lambda b, space, addr, val, dtype: mesa.nir_intrinsic_instr_create(b.shader, g(f"nir_intrinsic_store_{scope(space)}")))
-nload = nir_instr(nc=lambda dtype:dtype.count, bs=lambda dtype:dtype.bitsize//dtype.count, num_components=lambda dtype:dtype.count,
+nload = nir_instr(nc=lambda dtype:dtype.count, bs=lambda dtype:dtype.bitsize, num_components=lambda dtype:dtype.count,
   intrins=lambda space:{**({"ACCESS":mesa.ACCESS_CAN_REORDER} if space==AddrSpace.GLOBAL else {}), **iointr(space)}, srcs=lambda addr: [nsrc(addr)])(
     lambda b, space, addr, dtype: mesa.nir_intrinsic_instr_create(b.shader, g(f"nir_intrinsic_load_{scope(space)}")))
 
