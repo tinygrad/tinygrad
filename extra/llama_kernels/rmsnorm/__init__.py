@@ -1,11 +1,9 @@
 from __future__ import annotations
-import functools, pathlib
+import functools
 from tinygrad import Tensor, dtypes
-from tinygrad.uop.ops import UOp, Ops, KernelInfo
-from tinygrad.renderer import Estimates
-from extra.llama_kernels import NUM_WG, THREADS_PER_WG, alloc_like, dname_of, compile_hip
-
-def _src_weighted() -> str: return (pathlib.Path(__file__).parent/"rmsnorm_weighted.cpp").read_text()
+from tinygrad.helpers import prod
+from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType
+from extra.llama_kernels import alloc_like
 
 def rmsnorm_fwd(x_in:Tensor, eps:float) -> tuple[Tensor, Tensor]:
   x = x_in.float()
@@ -28,32 +26,37 @@ def rmsnorm(x_in:Tensor, eps:float) -> tuple[Tensor, Tensor]:
   return Tensor(call.gettuple(0)), Tensor(call.gettuple(1))
 
 @functools.cache
-def _rmsnorm_weighted_fwd(out:UOp, rrms_out:UOp, x:UOp, weight:UOp, dname:str, eps_val:float) -> UOp:
+def _rmsnorm_weighted_fwd(out:UOp, x:UOp, weight:UOp, eps_val:float) -> UOp:
   MBS, SEQ, HIDDEN = x.shape
-  n_elems = MBS * SEQ * HIDDEN
-  threads, workgroups = UOp.special(THREADS_PER_WG, "lidx0"), UOp.special(NUM_WG, "gidx0")
-  mem = n_elems * 2 + n_elems * 2 + HIDDEN * 2 + MBS * SEQ * 4
-  sink = UOp.sink(out.base, rrms_out.base, x.base, weight.base, threads, workgroups,
-                  arg=KernelInfo(f"rmsnorm_weighted_fwd_{n_elems}_h{HIDDEN}_eps{eps_val:.0e}",
-                                 estimates=Estimates(ops=6*n_elems, mem=mem)))
-  defines = [f"-DN_ELEMS={n_elems}", f"-DHIDDEN={HIDDEN}", f"-DNUM_WG={NUM_WG}",
-             f"-DTHREADS_PER_WG={THREADS_PER_WG}", f"-DEPS_LITERAL={eps_val}f"]
-  src = _src_weighted()
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dname), UOp(Ops.LINEAR, src=(*sink.src, sink)),
-                               UOp(Ops.SOURCE, arg=src), UOp(Ops.BINARY, arg=compile_hip(src, defines))))
+  ROWS, n_elems = MBS * SEQ, prod(x.shape)
+  assert n_elems % HIDDEN == 0
 
-def _rmsnorm_weighted_bwd(gradient:UOp, kernel:UOp) -> tuple:
-  # fwd inputs: (out, rrms_out, x, weight). Recompute x_normed to avoid a full forward save.
-  _, rrms_u, x_u, weight_u = kernel.src[1:]
+  mem = n_elems * 2 + n_elems * 2 + HIDDEN * 2
+  out, x = out.reshape(n_elems), x.reshape(n_elems)
+
+  row = UOp.range(ROWS, 0)
+  h_reduce = UOp.range(HIDDEN, 1, AxisType.REDUCE)
+  x_reduce = x[row * HIDDEN + h_reduce].cast(dtypes.float)
+  rrms = ((x_reduce * x_reduce).reduce(h_reduce, arg=Ops.ADD) * (1.0 / HIDDEN) + eps_val).sqrt().reciprocal()
+  h = UOp.range(HIDDEN, 2)
+  idx = row * HIDDEN + h
+  y = x[idx].cast(dtypes.float) * rrms * weight[h].cast(dtypes.float)
+  store = out[idx].store(y.cast(out.dtype.base))
+
+  return store.end(h, row).sink(arg=KernelInfo(f"rmsnorm_weighted_fwd_{n_elems}_h{HIDDEN}_eps{eps_val:.0e}"))
+
+def _rmsnorm_weighted_bwd(gradient:UOp, kernel:UOp, eps_val:float) -> tuple:
+  # fwd inputs: (out, x, weight). Recompute rrms/x_normed to avoid a full forward save.
+  _, x_u, weight_u = kernel.src[1:]
   grad = Tensor(gradient).float()
   x = Tensor(x_u).float()
-  rrms = Tensor(rrms_u.after(kernel)).reshape(*x.shape[:-1], 1)
+  rrms = (x.square().mean(-1, keepdim=True) + eps_val).rsqrt()
   x_normed = x * rrms
   weight = Tensor(weight_u).float()
   grad_normed = grad * weight
   grad_x = rrms * (grad_normed - x_normed * (grad_normed * x_normed).mean(-1, keepdim=True))
   grad_w = (grad * x_normed).sum(axis=tuple(range(grad.ndim-1))).cast(weight_u.dtype)
-  return (None, None, grad_x.cast(x_u.dtype).uop, grad_w.uop)
+  return (None, grad_x.cast(x_u.dtype).uop, grad_w.uop)
 
 def rmsnorm_weighted(x:Tensor, weight:Tensor, eps:float) -> Tensor:
   assert x.dtype == dtypes.bfloat16 and weight.dtype == dtypes.bfloat16
@@ -62,7 +65,6 @@ def rmsnorm_weighted(x:Tensor, weight:Tensor, eps:float) -> Tensor:
   axis = x.uop.axis if isinstance(x.device, tuple) else None
   if isinstance(x.device, tuple): assert axis in (None, 0, 1), f"unsupported sharding axis={axis}"
   out = alloc_like((MBS, SEQ, HIDDEN), dtypes.bfloat16, x.device, axis)
-  rrms_out = alloc_like((MBS, SEQ), dtypes.float32, x.device, axis)
-  fxn = functools.partial(_rmsnorm_weighted_fwd, dname=dname_of(x.device), eps_val=eps)
-  out, *_ = Tensor.custom_kernel(out, rrms_out, x, weight, fxn=fxn, grad_fxn=_rmsnorm_weighted_bwd)
+  fxn = functools.partial(_rmsnorm_weighted_fwd, eps_val=eps)
+  out, *_ = Tensor.custom_kernel(out, x, weight, fxn=fxn, grad_fxn=functools.partial(_rmsnorm_weighted_bwd, eps_val=eps))
   return out
