@@ -140,7 +140,8 @@ class DSPCompiler(Compiler):
   def compile(self, src:str) -> bytes:
     # TODO: remove file write. sadly clang doesn't like the use of /dev/stdout here
     with tempfile.NamedTemporaryFile(delete=True) as f:
-      system(f"{getenv('CC','clang')} {self.args} -O2 -Wall -Werror -x c -fPIC -ffreestanding -nostdlib - -o {f.name}", input=src.encode())
+      system(f"{getenv('CC','clang')} {self.args} -O2 -Wall -Werror -fno-stack-protector -x c -fPIC " +
+             f"-ffreestanding -nostdlib - -o {f.name}", input=src.encode())
       return pathlib.Path(f.name).read_bytes()
 
   def disassemble(self, lib:bytes): return cpu_objdump(lib, "llvm-objdump")
