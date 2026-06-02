@@ -27,8 +27,8 @@ def uop(uops:list[UOp], op:Ops, dtype:Optional[DType], src:tuple[UOp, ...], arg:
 def _test_single_value(vals, op, dts):
   uops = []
   output_dtype = dtypes.bool if op in (Ops.CMPLT, Ops.CMPNE) else dts[-1]
-  buf_store = uop(uops, Ops.PARAM, output_dtype.ptr(), (), 0)
-  buf_loads = [uop(uops, Ops.PARAM, dtype.ptr(), (), i+1) for i,dtype in enumerate(dts)]
+  buf_store = uop(uops, Ops.PARAM, output_dtype.ptr(1), (), 0)
+  buf_loads = [uop(uops, Ops.PARAM, dtype.ptr(1), (), i+1) for i,dtype in enumerate(dts)]
   loads = (buf_loads[i].index(uop(uops, Ops.CONST, dtypes.int32, (), 0)) for i, dtype in enumerate(dts))
   alu = uop(uops, op, output_dtype, loads)
   out = uop(uops, Ops.STORE, dtypes.void, (buf_store.index(uop(uops, Ops.CONST, dtypes.int32, (), 0), ptr=True), alu))
@@ -42,7 +42,7 @@ def _test_single_value(vals, op, dts):
 def _test_single_value_const(vals, op, dts):
   uops = []
   output_dtype = dtypes.bool if op in (Ops.CMPLT, Ops.CMPNE) else dts[-1]
-  buf_store = uop(uops, Ops.PARAM, output_dtype.ptr(), (), 0)
+  buf_store = uop(uops, Ops.PARAM, output_dtype.ptr(1), (), 0)
   loads = (uop(uops, Ops.CONST, dtype, [], a) for a,dtype in zip(vals, dts))
   alu = uop(uops, op, output_dtype, loads)
   out = buf_store[UOp.const(dtypes.int32, 0)].store(alu)
@@ -54,7 +54,7 @@ def _test_single_value_const(vals, op, dts):
 
 def _test_uops_result(output_dtype, uops, res):
   # uops = []
-  buf_store = uop(uops, Ops.PARAM, output_dtype.ptr(), (), 0)
+  buf_store = uop(uops, Ops.PARAM, output_dtype.ptr(1), (), 0)
   # res = output_fn(uops)
   out = uop(uops, Ops.STORE, dtypes.void, (buf_store.index(uop(uops, Ops.CONST, dtypes.int32, (), 0)), res))
   buf = Buffer(Device.DEFAULT, 1, output_dtype).allocate()
@@ -221,8 +221,8 @@ class TestLocalAccess(unittest.TestCase):
 @unittest.skipUnless(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "This only tests assembly backends")
 class TestAssembly(unittest.TestCase):
   def test_bitshift_left(self):
-    g1 = UOp.param(0, dtypes.int32.ptr())
-    out = UOp.param(1, dtypes.int32.ptr())
+    g1 = UOp.param(0, dtypes.int32.ptr(3))
+    out = UOp.param(1, dtypes.int32.ptr(2))
     c1 = UOp.const(dtypes.int, 2)
     c2 = UOp.const(dtypes.int, 3)
     l1 = g1.index(c1)
@@ -249,7 +249,7 @@ class TestAssembly(unittest.TestCase):
     self.assertGreaterEqual(len([x.op for x in uops if x.op is Ops.MULACC]), 4)
 
   def test_mulacc_shl(self):
-    g1 = UOp.param(0, dtypes.int32.ptr())
+    g1 = UOp.param(0, dtypes.int32.ptr(2))
     c1 = UOp.const(dtypes.int, 0)
     c2 = UOp.const(dtypes.int, 1)
     expr = g1.index(c1) * UOp.const(dtypes.int, 4096) + g1.index(c2)
@@ -258,7 +258,7 @@ class TestAssembly(unittest.TestCase):
     self.assertIn(Ops.MULACC, [x.op for x in uops])
 
   def test_use_cmpeq(self):
-    g = UOp.param(0, dtypes.uint32.ptr())
+    g = UOp.param(0, dtypes.uint32.ptr(8))
     c = UOp.const(dtypes.uint, 7)
     comp = g.index(c).ne(c).ne(True)
     uops = to_uops_list([comp], ren=Device[Device.DEFAULT].renderer)
