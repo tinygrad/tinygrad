@@ -285,7 +285,7 @@ class TestMainOnnxOps(TestOnnxOps):
     for dtype, zero_point in [(np.uint8, 128), (np.int8, 0)]:
       for b in (np.ones([32], dtype=np.int32), np.zeros([32], dtype=np.int32)):
         for channel_shape in [(), (32,)]:
-          with self.subTest(dtype=dtype, zero_point=zero_point, channel_shape=channel_shape):
+          with self.subTest(dtype=dtype.__name__, zero_point=zero_point, channel_shape=channel_shape):
             dtype_min, dtype_max = np.iinfo(dtype).min, np.iinfo(dtype).max
             inputs = {
               "x": np.random.randint(dtype_min, dtype_max + 1, [1, 3, 224, 224], dtype=dtype),
@@ -304,7 +304,7 @@ class TestMainOnnxOps(TestOnnxOps):
 
   def test_qlinear_matmul(self):
     for dtype, zero_point in [(np.uint8, 128), (np.int8, 0)]:
-      with self.subTest(dtype=dtype, zero_point=zero_point):
+      with self.subTest(dtype=dtype.__name__, zero_point=zero_point):
         dtype_min, dtype_max = np.iinfo(dtype).min, np.iinfo(dtype).max
         inputs = {
           "A": np.random.randint(dtype_min, dtype_max + 1, [10, 10], dtype=dtype),
@@ -512,7 +512,7 @@ class TestContribOnnxOps(TestOnnxOps):
 
   def test_qlinear_add(self):
     for dtype, zero_point in [(np.uint8, 128), (np.int8, 0)]:
-      with self.subTest(dtype=dtype, zero_point=zero_point):
+      with self.subTest(dtype=dtype.__name__, zero_point=zero_point):
         dtype_min, dtype_max = np.iinfo(dtype).min, np.iinfo(dtype).max
         inputs = {
           "A": np.random.randint(dtype_min, dtype_max + 1, [10, 10], dtype=dtype),
@@ -546,7 +546,7 @@ class TestContribOnnxOps(TestOnnxOps):
 
   def test_qlinear_mul(self):
     for dtype, zero_point in [(np.uint8, 128), (np.int8, 0)]:
-      with self.subTest(dtype=dtype, zero_point=zero_point):
+      with self.subTest(dtype=dtype.__name__, zero_point=zero_point):
         dtype_min, dtype_max = np.iinfo(dtype).min, np.iinfo(dtype).max
         inputs = {
           "A": np.random.randint(dtype_min, dtype_max + 1, [10, 10], dtype=dtype),
@@ -580,7 +580,7 @@ class TestContribOnnxOps(TestOnnxOps):
   def test_qlinear_global_average_pool(self):
     for dtype, zero_point in [(np.uint8, 128), (np.int8, 0)]:
       for channels_last in [0, 1]:
-        with self.subTest(dtype=dtype, zero_point=zero_point, channels_last=channels_last):
+        with self.subTest(dtype=dtype.__name__, zero_point=zero_point, channels_last=channels_last):
           dtype_min, dtype_max = np.iinfo(dtype).min, np.iinfo(dtype).max
           # NCHW for channels_last=0, NHWC for channels_last=1
           shape = [1, 3, 32, 32] if channels_last == 0 else [1, 32, 32, 3]
