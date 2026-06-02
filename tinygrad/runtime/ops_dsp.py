@@ -286,8 +286,8 @@ class MockDSPRenderer(DSPRenderer):
       else:
         msrc.append(f"unsigned int val{i}; read(0, &val{i}, 4);")
     msrc.append("unsigned int st = inscount();")
-    msrc.append(f"{function_name}({', '.join([(f'(void*)buf{i}' if isinstance(b[1][0].dtype, PtrDType)
-                                               else f'val{i}') for i,b in enumerate(bufs)])});")
+    params = [(f'(void*)buf{i}' if isinstance(b[1][0].dtype, PtrDType) else f'val{i}') for i,b in enumerate(bufs)]
+    msrc.append(f"{function_name}({', '.join(params)});")
     msrc.append("unsigned int et = inscount() - st; write(1, &et, sizeof(et));")
     for i,b in enumerate(bufs):
       if isinstance(b[1][0].dtype, PtrDType): msrc.append(f"write(1, buf{i}, {b[1][0].dtype.size*b[1][0].dtype.itemsize});")
