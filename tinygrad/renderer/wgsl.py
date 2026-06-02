@@ -27,10 +27,19 @@ def packed_load(root:UOp, bidx:UOp, dtype:DType, var:UOp|None=None, gate:UOp|Non
   val = (load.cast(dtypes.uint32) >> shift_am) & mask
   return sign_extend(val, 8*dtype.itemsize).cast(dtype) if dtype in [dtypes.char, dtypes.short] else val.cast(dtype)
 
-def is_packed(dt:DType, odt:DType|None = None) -> bool:
-  if odt is None: odt = dt
-  return dt.itemsize < 4 and dt.base != dtypes.half and (not isinstance(odt, PtrDType) or odt.addrspace != AddrSpace.REG)
-def _packed_size(dt:PtrDType): return dt.size // (4//dt.itemsize) if is_packed(dt) else dt.size
+def is_packed(x:UOp) -> bool:
+  if x.op is Ops.LOAD: dt = x.dtype
+  elif x.op is Ops.STORE: dt = x.src[1].dtype
+  else: dt = x.dtype.base
+  return dt.itemsize < 4 and dt.base != dtypes.half
+
+def _packed_size(ctx, x:UOp):
+  size = ctx[x.src[0]]
+  if not is_packed(x): return size
+  elems = 4 // x.dtype.base.itemsize
+  return str((x.src[0].arg + elems - 1) // elems) if x.src[0].op is Ops.CONST else f"(({size}+{elems-1})/{elems})"
+
+def _buf_map(ctx, x:UOp): return "u32" if is_packed(x) and x.addrspace == AddrSpace.REG else ctx.buf_map(x.dtype.base)
 
 def is_nan(a):
   bs, (exp, mant) = a.dtype.bitsize, dtypes.finfo(a.dtype)
@@ -41,12 +50,12 @@ wgsl_matcher = PatternMatcher([
    lambda a,b,c: a.cast(dtypes.int).alu(c.op, b.cast(dtypes.int)).cast(dtypes.bool)),
   # TODO: load alt value doesnt have to be a const
   (UPat.load(UPat.var("b"), UPat.cvar("c"), UPat.var("gate"), name="l"),
-   lambda l,b,c,gate: packed_load(l,b,l.dtype,c.cast(dtypes.uint32),gate) if is_packed(l.dtype, b.dtype) else None),
-  (UPat.load(UPat.var("b"), name='l'), lambda l,b: packed_load(l, b, l.dtype) if is_packed(l.dtype, b.dtype) else None),
-  (UPat.store(UPat.var("bidx"), UPat.var("var"), UPat.var("gate")),
-   lambda bidx,var,gate: packed_store(bidx,var,gate) if is_packed(var.dtype, bidx.dtype) else None),
-  (UPat.store(UPat.var("bidx"), UPat.var("var")),
-   lambda bidx,var: packed_store(bidx,var) if is_packed(var.dtype, bidx.dtype) else None),
+   lambda l,b,c,gate: packed_load(l,b,l.dtype,c.cast(dtypes.uint32),gate) if is_packed(l) else None),
+  (UPat.load(UPat.var("b"), name='l'), lambda l,b: packed_load(l, b, l.dtype) if is_packed(l) else None),
+  (UPat.store(UPat.var("bidx"), UPat.var("var"), UPat.var("gate"), name="s"),
+   lambda s,bidx,var,gate: packed_store(bidx,var,gate) if is_packed(s) else None),
+  (UPat.store(UPat.var("bidx"), UPat.var("var"), name="s"),
+   lambda s,bidx,var: packed_store(bidx,var) if is_packed(s) else None),
   (UPat.var("a") << UPat.var("b"),lambda a,b:(a.bitcast(dtypes.uint32)<<b.cast(dtypes.uint32)).bitcast(a.dtype) if b.dtype!=dtypes.uint32 else None),
   (UPat.var("x") >> UPat.var("y"), lambda x,y: UOp(Ops.SHR, x.dtype, (x,y.cast(dtypes.uint))) if y.dtype != dtypes.uint else None),
   # fix nan check: 'a != a -> is_nan()'
@@ -71,8 +80,8 @@ class WGSLRenderer(CStyleLanguage):
     (UPat(Ops.CONST, dtype=(dtypes.uchar, dtypes.ushort, dtypes.uint32), name="x"),
      lambda x: f"bitcast<u32>({x.arg})" if x.arg < 0 else f"{x.arg&0xFFFFFFFF}u"),
     (UPat(Ops.CONST, dtype=dtypes.int32, name="x"), lambda ctx,x: f"{truncate[x.dtype](x.arg)}"),
-    (UPat(Ops.DEFINE_LOCAL, name="x"), lambda ctx,x: f"var<workgroup> {ctx[x]}: array<{ctx.buf_map(x.dtype.base)},{_packed_size(x.dtype)}>;"),
-    (UPat(Ops.DEFINE_REG, name="x"), lambda ctx,x: f"var {ctx[x]}: array<{ctx.buf_map(x.dtype)},{_packed_size(x.dtype)}>;"),
+    (UPat(Ops.DEFINE_LOCAL, name="x"), lambda ctx,x: f"var<workgroup> {ctx[x]}: array<{_buf_map(ctx,x)},{_packed_size(ctx,x)}>;"),
+    (UPat(Ops.DEFINE_REG, name="x"), lambda ctx,x: f"var {ctx[x]}: array<{_buf_map(ctx,x)},{_packed_size(ctx,x)}>;"),
     (UPat(Ops.BITCAST, dtype=dtypes.half, name="x", src=(UPat(dtype=(dtypes.short, dtypes.ushort, dtypes.uint32),),)),
      lambda ctx,x: f"bitcast<vec2<f16>>({ctx[x.src[0]]})[0]"),
     (UPat(Ops.BITCAST, dtype=dtypes.uchar, name="x"), lambda ctx,x: f"bitcast<u32>({ctx[x.src[0]]}&0xFF)"),
@@ -83,12 +92,12 @@ class WGSLRenderer(CStyleLanguage):
      if x.src[0].dtype == dtypes.half else f"((i32({ctx[x.src[0]]}&0xFFFF)<<16)>>16)"),
     (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"bitcast<{ctx.type_map[x.dtype]}>({ctx[x.src[0]]})"),
     # TODO: load alt value doesnt have to be a const
-    (UPat.load(UPat.var("b"), UPat.cvar("v"), UPat.var("gate")),
-      lambda ctx,b,v,gate: f"select({ctx[v]}, {ctx.render_load(ctx[b],b.src[0].dtype)}, {ctx[gate]})"),
-    (UPat.load(UPat.var("b")), lambda ctx, b: ctx.render_load(ctx[b], b.dtype)),
-    (UPat.store(UPat.var("b"), UPat.var("v")), lambda ctx,b,v:\
+    (UPat.load(UPat.var("b"), UPat.cvar("v"), UPat.var("gate"), name="l"),
+      lambda ctx,l,b,v,gate: f"select({ctx[v]}, {ctx.render_load(ctx[b],b)}, {ctx[gate]})"),
+    (UPat.load(UPat.var("b"), name="l"), lambda ctx,l,b: ctx.render_load(ctx[b], b)),
+    (UPat.store(UPat.var("b"), UPat.var("v"), name="s"), lambda ctx,s,b,v:\
      # (load & mask) | var -> mask = v.src[0].src[1], var = v.src[1]
-     f"atomicAnd(&{ctx[b]},{ctx[v.src[0].src[1]]});\n  atomicAdd(&{ctx[b]},{ctx[v.src[1]]});" if is_packed(b.src[0].dtype) \
+     f"atomicAnd(&{ctx[b]},{ctx[v.src[0].src[1]]});\n  atomicAdd(&{ctx[b]},{ctx[v.src[1]]});" if is_packed(b) and b.addrspace != AddrSpace.REG \
       else f"{ctx[b]} = {ctx[v]};"),
     (UPat(Ops.INDEX, src=(UPat.var("b"), UPat.var("idx"))),
      lambda ctx,b,idx: f"{ctx[b]}[{strip_parens(ctx[idx]) if idx.arg is Ops.ADD else ctx[idx]}]"),
@@ -96,8 +105,8 @@ class WGSLRenderer(CStyleLanguage):
 
   def render_cast(self, dt:DType, val: str) -> str: return f"{self.type_map[dt]}({val})"
   def render_dtype(self, dt:DType, mutable=True) -> str: return "var"
-  def render_load(self, x:str, dt:DType) -> str: return f"atomicLoad(&{x})" if is_packed(dt) else x
-  def buf_map(self, dt:DType) -> str: return "atomic<u32>" if is_packed(dt) else self.type_map[dt.base]
+  def render_load(self, x:str, uop:UOp) -> str: return f"atomicLoad(&{x})" if is_packed(uop) and uop.addrspace != AddrSpace.REG else x
+  def buf_map(self, dt:DType) -> str: return "atomic<u32>" if dt.itemsize < 4 and dt != dtypes.half else self.type_map[dt.base]
   def render_kernel(self, function_name:str, kernel:list[str], bufs:list[tuple[str,tuple[DType,bool]]], uops:list[UOp], prefix=None) -> str:
     local_size = [u.src[0].ssimplify() for u in sorted([u for u in uops if u.op is Ops.SPECIAL and u.arg[0] == 'l'], key=lambda u: u.arg)]
     if not local_size: local_size = [1]
