@@ -145,12 +145,12 @@ class CStyleLanguage(Renderer):
   string_rewrite = base_rewrite
   extra_matcher = extra_pm
 
-  def render_kernel(self, function_name:str, kernel:list[str], bufs:list[tuple[str,tuple[DType,bool]]], uops:list[UOp], prefix=None) -> str:
+  def render_kernel(self, function_name:str, kernel:list[str], bufs:list[tuple[str,tuple[UOp,bool]]], uops:list[UOp], prefix=None) -> str:
     tmp = ""
-    if any(isinstance(dtype, ImageDType) for _,(dtype,_) in bufs):
+    if any(isinstance(u.dtype, ImageDType) for _,(u,_) in bufs):
       tmp = "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n"
-    buftypes = [(name, self.render_dtype(dtype, mutable)+self.buffer_suffix if isinstance(dtype, (ImageDType, PtrDType)) else
-                self.arg_int_prefix if dtype == dtypes.int else None) for name,(dtype,mutable) in bufs]
+    buftypes = [(name, self.render_dtype(u.dtype, mutable)+self.buffer_suffix if isinstance(u.dtype, (ImageDType, PtrDType)) else
+                self.arg_int_prefix if u.dtype == dtypes.int else None) for name,(u,mutable) in bufs]
     local_dims = [u.src[0] for u in uops if u.op is Ops.SPECIAL and u.arg[0] == "l"]
     launch_bounds = prod([d.vmax for d in local_dims])
     prg = ''.join([f"{self.kernel_typedef.format(launch_bounds=launch_bounds)} {function_name}(",] +
@@ -173,14 +173,14 @@ class CStyleLanguage(Renderer):
     return self.type_map.get(scalar:=dt.scalar(), scalar.name)
 
   def __getitem__(self, key): return self.r[key]  # hacky helper
-  def _render(self, uops:list[UOp]) -> tuple[str, list[str], list[tuple[str,tuple[DType,bool]]]]:
+  def _render(self, uops:list[UOp]) -> tuple[str, list[str], list[tuple[str,tuple[UOp,bool]]]]:
     r: dict[UOp, str] = {}
     self.r = r
 
     child_count = Counter(v for ru in uops for v in ru.src)
     # find which PARAMs are stored to with a single toposort
     writable_params = {u for u in UOp.sink(*[u.src[0] for u in uops if u.op is Ops.STORE]).toposort(lambda u: u.op != Ops.END) if u.op is Ops.PARAM}
-    bufs: dict[UOp, tuple[str, tuple[DType, bool]]] = {}
+    bufs: dict[UOp, tuple[str, tuple[UOp, bool]]] = {}
     kernel = []
     depth = 1
     c: defaultdict[str, int] = defaultdict(int)
@@ -197,8 +197,7 @@ class CStyleLanguage(Renderer):
         if u.op is not Ops.PARAM: r[u] = u.arg[0]
         elif isinstance(u.dtype, ImageDType): r[u] = f"data{u.arg.slot}_{u.dtype.shape[0]}x{u.dtype.shape[1]}"
         else: r[u] = f"data{u.arg.slot}_{sz}" if (sz:=u.max_numel()) > 0 else f"data{u.arg.slot}"
-        bufs[u] = (r[u], ((u.dtype if isinstance(u.dtype, (ImageDType, PtrDType)) else u.dtype.ptr(u.max_numel(), u.addrspace))
-                          if u.op is Ops.PARAM else u.dtype, u in writable_params))
+        bufs[u] = (r[u], (u, u in writable_params))
         continue
 
       # naming
@@ -287,7 +286,7 @@ class ClangRenderer(CStyleLanguage):
   AMX_SET(1);\n  return data0;\n}}"""]
     return prefix
   def _render_body(self, function_name, kernel, bufs, uops, pref=None) -> str: return super().render_kernel(function_name, kernel, bufs, uops, pref)
-  def _render_entry(self, function_name:str, bufs:list[tuple[str,tuple[DType,bool]]]) -> str: return ""
+  def _render_entry(self, function_name:str, bufs:list[tuple[str,tuple[UOp,bool]]]) -> str: return ""
 
   def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
     defines = '\n'.join(self._render_defines(uops))
