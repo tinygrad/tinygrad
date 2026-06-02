@@ -56,11 +56,11 @@ inputs:
 runs:
   using: "composite"
   steps:
-    - name: Set up Python ${{ inputs.python-version }}
-      id: setup-python
-      uses: actions/setup-python@v6
-      with:
-        python-version: ${{ inputs.python-version }}
+    #- name: Set up Python ${{ inputs.python-version }}
+    #  id: setup-python
+    #  uses: actions/setup-python@v6
+    #  with:
+    #    python-version: ${{ inputs.python-version }}
 
     # **** Caching packages ****
 
