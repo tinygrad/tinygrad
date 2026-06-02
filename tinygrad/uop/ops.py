@@ -1116,7 +1116,11 @@ class ProgramInfo:
       if u.op is Ops.DEFINE_VAR: _vars.append(u)
       if u.op is Ops.PARAM: _globals.append(u.arg.slot)
       if u.op in (Ops.STORE, Ops.LOAD):
+<<<<<<< shrink_in_render
         if (idx:=u.src[0]).op in (Ops.INDEX, Ops.SHRINK):
+=======
+        if (idx:=u.src[0]).op in (Ops.INDEX, Ops.SHRINK) or (u.src[0].op is Ops.CAST and (idx:=u.src[0].src[0]).op is Ops.INDEX):
+>>>>>>> master
           if (buf:=idx.src[0]).op is Ops.PARAM: (outs if u.op is Ops.STORE else ins).append(buf.arg.slot)
       if u.op is Ops.SPECIAL:
         if u.arg[0] == 'i': local_size = None
