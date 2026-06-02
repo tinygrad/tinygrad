@@ -288,6 +288,9 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
         # STAGE adds the existing shape to the front, opposite of INDEX
         return tuple([int(r.vmax+1) for r in self.src[1:]])+self.src[0].shape
       case Ops.DEFINE_LOCAL | Ops.DEFINE_REG:
+        if len(self.src) >= 1:
+          # NOTE: this is the same as PARAM
+          return tuple(self.src[0].sgep(i) for i in range(self.src[0].dtype.count))
         if isinstance(self.dtype, PtrDType):
           return (self.ptrdtype.size, self.dtype.count) if self.dtype.count > 1 else (self.ptrdtype.size,)
         return (self.dtype.count,) if self.dtype.count > 1 else ()
@@ -301,7 +304,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
       # passthrough ops
       case Ops.MSTACK | Ops.MSELECT | Ops.DETACH | Ops.CONTIGUOUS | Ops.CONTIGUOUS_BACKWARD | Ops.AFTER | Ops.LOAD | \
-           Ops.COPY | Ops.ALLREDUCE:
+           Ops.COPY | Ops.ALLREDUCE | Ops.STORE:
         return self.src[0]._shape
       # REDUCE with empty axis is passthrough (lowered form)
       case Ops.REDUCE if len(self.arg[1]) == 0:
@@ -689,7 +692,11 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   def marg(self):
     match self.op:
       case Ops.RESHAPE | Ops.EXPAND: return tuple(ssimplify(self.src[1].sgep(i)) for i in range(self.src[1].dtype.count))
-      case Ops.PAD | Ops.SHRINK: return tuple((self.src[1].sgep(i), self.src[2].sgep(i)) for i in range(self.src[1].dtype.count))
+      case Ops.PAD | Ops.SHRINK:
+        # this is like broadcasting for shapes
+        return tuple(((ssimplify(self.src[1]) if self.src[1].shape == () else self.src[1].sgep(i)),
+                      (ssimplify(self.src[2]) if self.src[2].shape == () else self.src[2].sgep(i)))
+                     for i in range(max(self.src[1].dtype.count, self.src[2].dtype.count)))
       case Ops.PERMUTE | Ops.FLIP: return self.arg
       case _: raise RuntimeError(f"{self.op} is not a MovementOp")
 
@@ -762,7 +769,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     if self.op in {Ops.INDEX, Ops.CAST, Ops.AFTER, Ops.REDUCE, Ops.GEP}:
       return self.src[0].addrspace
     if self.op in GroupOp.Movement: return self.src[0].addrspace
-    if self.op is Ops.STACK or self.op in GroupOp.Elementwise:
+    if self.op in {Ops.STACK, Ops.WMMA} or self.op in GroupOp.Elementwise:
       ad = [x.addrspace for x in self.src if x.addrspace is not None]
       if not len(ad) or not all_same(ad): return None
       return ad[0]
@@ -1109,7 +1116,7 @@ class ProgramInfo:
       if u.op is Ops.DEFINE_VAR: _vars.append(u)
       if u.op is Ops.PARAM: _globals.append(u.arg.slot)
       if u.op in (Ops.STORE, Ops.LOAD):
-        if (idx:=u.src[0]).op is Ops.INDEX or (u.src[0].op is Ops.CAST and (idx:=u.src[0].src[0]).op is Ops.INDEX):
+        if (idx:=u.src[0]).op in (Ops.INDEX, Ops.SHRINK):
           if (buf:=idx.src[0]).op is Ops.PARAM: (outs if u.op is Ops.STORE else ins).append(buf.arg.slot)
       if u.op is Ops.SPECIAL:
         if u.arg[0] == 'i': local_size = None
