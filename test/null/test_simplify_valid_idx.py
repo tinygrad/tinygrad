@@ -292,8 +292,7 @@ class TestImageSimplification(unittest.TestCase):
     load = get_load_image_uop(shape, (gidx0<8) & (gidx0<8).ne(True), idx)
     with Context(NOOPT=1, SPEC=0):
       load = full_rewrite(load.sink()).src[0]
-    self.assertEqual(load.op, Ops.STACK)
-    self.assertEqual(load.dtype.count, 4)
+    self.assertFalse(load.op_in_backward_slice_with_self(Ops.LOAD))
 
   def test_openpilot_conv1(self):
     # first conv in openpilot
