@@ -105,8 +105,8 @@ class TestModularWraparound(unittest.TestCase):
 
 class TestGraphRewrite(unittest.TestCase):
   def test_dedup(self):
-    v1 = UOp(Ops.DEFINE_VAR, dtypes.float)
-    v2 = UOp(Ops.DEFINE_VAR, dtypes.float)
+    v1 = UOp.variable("v", 0, 1, dtypes.float)
+    v2 = UOp.variable("v", 0, 1, dtypes.float)
     nout = graph_rewrite(v1+v2, PatternMatcher([]))
     self.assertIs(nout.src[0], nout.src[1])
 
@@ -166,7 +166,7 @@ class TestGraphRewrite(unittest.TestCase):
     self.assertEqual(nout.arg, 3.0)
 
   def test_depth_2_fold(self):
-    v = UOp(Ops.DEFINE_VAR, dtypes.float)
+    v = UOp.variable("v", 0, 1, dtypes.float)
     c1 = UOp.const(dtypes.float, 1.0)
     c2 = UOp.const(dtypes.float, 2.0)
     nout = graph_rewrite(v+c1+c2, simple_pm)
@@ -191,7 +191,7 @@ class TestGraphRewrite(unittest.TestCase):
     b = UOp.variable('b', 0, 1)
     c = UOp.variable('c', 0, 1)
     d = UOp.variable('d', 0, 1)
-    outs = [2+a, 2+a+d+3+b+c+4, UOp(Ops.ADD, a.dtype, src=(a.const_like(2), a)), (4+d)+c+(2+a)+b]
+    outs = [2+a, 2+a+d+3+b+c+4, a.const_like(2)+a, (4+d)+c+(2+a)+b]
     for out in outs:
       sink = graph_rewrite(out, sym)
       print(sink.render())
@@ -203,7 +203,7 @@ class TestUOpGraph(unittest.TestCase):
   def test_add_constant_fold(self):
     c1 = UOp.const(dtypes.float, 1.0)
     c2 = UOp.const(dtypes.float, 2.0)
-    out = UOp(Ops.ADD, dtypes.float, (c1, c2))
+    out = c1+c2
     uops = to_uops_list([out])
     self.assertEqual(len(uops), 2)  # +1 for SINK
     out = uops[-2]
@@ -213,9 +213,9 @@ class TestUOpGraph(unittest.TestCase):
   def test_where_same_fold(self):
     v = UOp.variable('tmp', 0, 1)
     c0 = UOp.const(dtypes.weakint, 0)
-    vc = UOp(Ops.CMPNE, dtypes.bool, (v, c0))
+    vc = v != c0
     c1 = UOp.const(dtypes.float, 1.0)
-    out = UOp(Ops.WHERE, dtypes.float, (vc, c1, c1))
+    out = vc.where(c1, c1)
     uops = to_uops_list([out])
     self.assertEqual(len(uops), 2)  # +1 for SINK
     out = uops[-2]
@@ -226,7 +226,7 @@ class TestUOpGraph(unittest.TestCase):
     bf = UOp.const(dtypes.bool, False)
     c1 = UOp.const(dtypes.float, 1.0)
     c2 = UOp.const(dtypes.float, 2.0)
-    out = UOp(Ops.WHERE, dtypes.float, (bf, c1, c2))
+    out = bf.where(c1, c2)
     uops = to_uops_list([out])
     self.assertEqual(len(uops), 2)  # +1 for SINK
     out = uops[-2]
@@ -235,7 +235,7 @@ class TestUOpGraph(unittest.TestCase):
 
   def test_const_cast(self):
     bf = UOp.const(dtypes.bool, False)
-    out = UOp(Ops.CAST, dtypes.int, (bf,))
+    out = bf.cast(dtypes.int)
     uops = to_uops_list([out])
     self.assertEqual(len(uops), 2)  # +1 for SINK
     out = uops[-2]
@@ -244,7 +244,7 @@ class TestUOpGraph(unittest.TestCase):
 
   def test_const_bitcast(self):
     bf = UOp.const(dtypes.float, 1.0)
-    out = UOp(Ops.BITCAST, dtypes.uint32, (bf,))
+    out = bf.bitcast(dtypes.uint32)
     uops = to_uops_list([out])
     self.assertEqual(len(uops), 2)  # +1 for SINK
     out = uops[-2]
@@ -254,7 +254,7 @@ class TestUOpGraph(unittest.TestCase):
   @unittest.expectedFailure
   def test_const_shape_change_bitcast(self):
     bf = UOp.const(dtypes.uint8, 0x3F)
-    out = UOp(Ops.BITCAST, dtypes.half, (bf,))
+    out = bf.bitcast(dtypes.half)
     uops = to_uops_list([out])
     self.assertEqual(len(uops), 2)  # +1 for SINK
 
@@ -262,7 +262,7 @@ class TestUOpGraph(unittest.TestCase):
   def test_noop_vectorize_fold(self):
     d0 = UOp.param(0, dtypes.float.ptr())
     idx = UOp.const(dtypes.int, 0)
-    ld = UOp(Ops.LOAD, dtypes.float.vec(2), (d0, idx))
+    ld = d0.load(idx, dtype=dtypes.float.vec(2))
     vec = UOp(Ops.STACK, dtypes.float.vec(2), (ld,))
     x = UOp(Ops.GEP, dtypes.float, (vec, ), arg=0)
     alu = UOp(Ops.SQRT, dtypes.float, (x, ))
@@ -278,7 +278,7 @@ class TestUOpGraph(unittest.TestCase):
     idx = UOp.const(dtypes.int, 0)
     def _test_vec(geps, count=4):
       vec = UOp(Ops.STACK, dtypes.float.vec(count), geps)
-      out = UOp(Ops.STORE, dtypes.void, (d0.index(idx), vec))
+      out = d0.index(idx).store(vec)
       uops = to_uops_list([out])
       if DEBUG >= 4:
         from tinygrad import Device
@@ -286,28 +286,28 @@ class TestUOpGraph(unittest.TestCase):
       return uops[-2].src[-1]  # -2 to skip SINK
 
     # possible
-    val = UOp(Ops.LOAD, dtypes.float.vec(4), (d1.index(idx),))
-    xyzw = tuple(UOp(Ops.GEP, dtypes.float, (val,), (i,)) for i in range(4))
+    val = d1.index(idx).load(dtype=dtypes.float.vec(4))
+    xyzw = tuple(val.gep(i) for i in range(4))
     self.assertIs(_test_vec(xyzw).op, Ops.LOAD)
 
     # unaligned
-    val = UOp(Ops.LOAD, dtypes.float.vec(4), (d1.index(idx),))
-    wzyx = tuple(UOp(Ops.GEP, dtypes.float, (val,), (i,)) for i in reversed(range(4)))
+    val = d1.index(idx).load(dtype=dtypes.float.vec(4))
+    wzyx = tuple(val.gep(i) for i in reversed(range(4)))
     self.assertIs(_test_vec(wzyx).op, Ops.STACK)
 
     # different_size
-    val = UOp(Ops.LOAD, dtypes.float.vec(2), (d1.index(idx),))
-    xy = tuple(UOp(Ops.GEP, dtypes.float, (val, ), (i,)) for i in range(2))
+    val = d1.index(idx).load(dtype=dtypes.float.vec(2))
+    xy = tuple(val.gep(i) for i in range(2))
     self.assertIs(_test_vec(xy+xy).op, Ops.STACK)
-    val = UOp(Ops.LOAD, dtypes.float.vec(4), (d1.index(idx),))
-    xy = tuple(UOp(Ops.GEP, dtypes.float, (val, ), (i,)) for i in range(2))
+    val = d1.index(idx).load(dtype=dtypes.float.vec(4))
+    xy = tuple(val.gep(i) for i in range(2))
     self.assertIs(_test_vec(xy, count=2).op, Ops.STACK)
 
     # different vals
-    val1 = UOp(Ops.LOAD, dtypes.float.vec(2), (d1.index(idx),))
-    val2 = UOp(Ops.LOAD, dtypes.float.vec(2), (d2.index(idx),))
-    xy1 = tuple(UOp(Ops.GEP, dtypes.float, (val1, ), (i,)) for i in range(2))
-    xy2 = tuple(UOp(Ops.GEP, dtypes.float, (val2, ), (i,)) for i in range(2))
+    val1 = d1.index(idx).load(dtype=dtypes.float.vec(2))
+    val2 = d2.index(idx).load(dtype=dtypes.float.vec(2))
+    xy1 = tuple(val1.gep(i) for i in range(2))
+    xy2 = tuple(val2.gep(i) for i in range(2))
     self.assertIs(_test_vec(xy1+xy2).op, Ops.STACK)
 
   def test_gep_vec_const_fold(self):
@@ -323,7 +323,7 @@ class TestUOpGraph(unittest.TestCase):
   def test_wmma_vectorize_fold(self):
     for i in [2, 4, 8]:
       vec = UOp(Ops.STACK, dtypes.half.vec(i), tuple(UOp.const(dtypes.half, 0.0) for _ in range(i)))
-      var = UOp(Ops.DEFINE_VAR, dtypes.half.vec(i))
+      var = UOp.variable("var", 0, 1, dtypes.half.vec(i))
       acc = UOp.variable('acc', 0, 1, dtypes.half.vec(i))
       wmma = UOp(Ops.WMMA, dtypes.half.vec(i), (vec, var, acc))
       uops = to_uops_list([wmma])
@@ -331,7 +331,7 @@ class TestUOpGraph(unittest.TestCase):
       self.assertEqual(len(uops), 2)  # +1 for SINK
 
     for i in [2, 4, 8]:
-      var = UOp(Ops.DEFINE_VAR, dtypes.half.vec(i))
+      var = UOp.variable("var", 0, 1, dtypes.half.vec(i))
       vec = UOp(Ops.STACK, dtypes.half.vec(i), tuple(UOp.const(dtypes.half, 0.0) for _ in range(i)))
       acc = UOp.variable('acc', 0, 1, dtypes.half.vec(i))
       wmma = UOp(Ops.WMMA, dtypes.half.vec(i), (var, vec, acc))
@@ -385,7 +385,7 @@ class TestUOpGraph(unittest.TestCase):
     idx = UOp.const(dtypes.int, 0)
     ld = d1.index(idx)
     alu = (ld<1).cast(dtypes.bool)
-    out = UOp(Ops.STORE, dtypes.void, (d0.index(idx, ptr=True), alu))
+    out = d0.index(idx, ptr=True).store(alu)
     uops = to_uops_list([out])
     self.assertEqual(len([x for x in uops if x.op is Ops.CAST]), 0)
 
@@ -395,7 +395,7 @@ class TestUOpGraph(unittest.TestCase):
     idx = UOp.const(dtypes.int, 0)
     ld = d1.index(idx)
     alu = ld.cast(dtypes.float).cast(dtypes.float)
-    out = UOp(Ops.STORE, dtypes.void, (d0.index(idx, ptr=True), alu))
+    out = d0.index(idx, ptr=True).store(alu)
     uops = to_uops_list([out])
     self.assertEqual(len([x for x in uops if x.op is Ops.CAST]), 1)
 
@@ -403,8 +403,8 @@ class TestUOpGraph(unittest.TestCase):
     v = UOp.variable("tmp", 0, 1, dtypes.int)
     c2 = UOp.const(dtypes.int, 2)
     c4 = UOp.const(dtypes.int, 4)
-    vc = UOp(Ops.ADD, dtypes.int, (v, c2))
-    out = UOp(Ops.ADD, dtypes.int, (vc, c4))
+    vc = v+c2
+    out = vc+c4
     uops = to_uops_list([out])
     self.assertEqual(len(uops), 4)  # +1 for SINK
     out = uops[-2]  # -2 to skip SINK
@@ -535,19 +535,19 @@ class TestUOpGraph(unittest.TestCase):
     idx = UOp.const(dtypes.int, 0)
     ld0 = glbl1.index(UOp.invalid())
     ld1 = glbl2.index(idx.valid(UOp.const(dtypes.bool, True)))
-    uops = to_uops_list([UOp(Ops.STORE, dtypes.void, (glbl0.index(idx, ptr=True), ld1+ld0))])
+    uops = to_uops_list([glbl0.index(idx, ptr=True).store(ld1+ld0)])
     # the gate and invalid value are deleted from ld1
     self.assertEqual(len([u for u in uops if u.op is Ops.LOAD]), 1)
 
   def test_fold_gated_load_local(self):
     glbl0 = UOp.param(0, dtypes.int.ptr(16))
     smem = UOp(Ops.DEFINE_LOCAL, dtypes.int.ptr(size=18, addrspace=AddrSpace.LOCAL), (), "temp")
-    lidx = UOp(Ops.SPECIAL, dtypes.int, (UOp.const(dtypes.int, 16),), "lidx0")
-    st = UOp(Ops.STORE, dtypes.void, (smem.index(lidx, ptr=True), glbl0.index(lidx, ptr=True).load()))
-    barrier = UOp(Ops.BARRIER, dtypes.void, (st, ))
+    lidx = UOp.special(16, "lidx0", dtypes.int)
+    st = smem.index(lidx, ptr=True).store(glbl0.index(lidx, ptr=True).load())
+    barrier = st.barrier()
     ld0 = smem.after(barrier).index(UOp.invalid())
     ld1 = smem.after(barrier).index((lidx+2).valid(UOp.const(dtypes.bool, True)))
-    uops = to_uops_list([UOp(Ops.STORE, dtypes.void, (glbl0.index(lidx, ptr=True), ld1+ld0))])
+    uops = to_uops_list([glbl0.index(lidx, ptr=True).store(ld1+ld0)])
 
     # the gate and invalid value are deleted from ld1
     self.assertEqual(len([u for u in uops if u.op is Ops.LOAD]), 2)
