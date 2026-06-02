@@ -951,8 +951,8 @@ class TestSymbolic(unittest.TestCase):
     expr = cond.where(a, b).cast(dtypes.half)
 
     # TODO: copied from render, render does not support cast
-    glbl = UOp.param(0, dtypes.int.ptr())
-    uops = get_uops(UOp(Ops.STORE, dtypes.void, (glbl.index(UOp.const(dtypes.int, 0)), expr)).sink())
+    glbl = UOp.param(0, dtypes.int.ptr(1))
+    uops = get_uops(UOp(Ops.STORE, dtypes.void, (glbl.index(UOp.const(dtypes.int, 0), ptr=True), expr)).sink())
     rewritten_uop = [uop for uop in uops if uop.op is Ops.STORE][0].src[1]
 
     self.assertEqual(rewritten_uop, cond.where(a.cast(dtypes.half), b.cast(dtypes.half)))

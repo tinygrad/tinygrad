@@ -79,22 +79,21 @@ class PythonProgram:
         if u.op is Ops.STORE:
           assert len(src_values) == 2, f"STORE must be lowered to 2 srcs, got {len(src_values)}"
           store_gate = exec_masks[-1]
-          for j,val in enumerate(src_values[1] if src_dtypes[1].count > 1 else [src_values[1]]):
+          for j,val in enumerate(src_values[1] if u.max_numel() > 1 else [src_values[1]]):
             for (m,o),v,g in zip(src_values[0], val, store_gate):
               if g: _store(m, o+j, v, src_dtypes[1].scalar())
           i += 1
           continue
         if u.op is Ops.AFTER: values[u] = src_values[0]
         elif u.op in {Ops.PARAM, Ops.DEFINE_LOCAL, Ops.DEFINE_REG}:
-          assert isinstance(u.dtype, PtrDType), u.dtype
           storage_fmt = storage_fmt_for_dtype(u.dtype.base.scalar())
           if storage_fmt is None: raise RuntimeError(f"dtype={u.dtype} is not supported")
           if TYPE_CHECKING or sys.version_info < (3, 12): assert storage_fmt != "e"
           if u.op is Ops.DEFINE_REG:
             # REGs are per thread
-            values[u] = [memoryview(bytearray(u.dtype.size*u.dtype.itemsize)).cast(storage_fmt) for _ in range(warp_size)]
+            values[u] = [memoryview(bytearray(u.max_numel()*u.dtype.itemsize)).cast(storage_fmt) for _ in range(warp_size)]
           else:
-            buf = memoryview(bytearray(u.dtype.size*u.dtype.itemsize)) if u.op is not Ops.PARAM else pbufs.pop(0)
+            buf = memoryview(bytearray(u.max_numel()*u.dtype.itemsize)) if u.op is not Ops.PARAM else pbufs.pop(0)
             values[u] = [buf.cast(storage_fmt)] * warp_size
         elif u.op is Ops.DEFINE_VAR:
           values[u] = [pvals.pop(0)] * warp_size
@@ -129,9 +128,10 @@ class PythonProgram:
         elif u.op is Ops.CAST:
           values[u] = [truncate.get(u.dtype, lambda dt: dt)(u.dtype.const(x)) for x in src_values[0]]
         elif u.op is Ops.LOAD:
-          if u.dtype.count > 1:
-            values[u] = [load([src_values[k][j] if k != 0 and src_dtypes[k].count > 1 else src_values[k] \
-                               for k in range(len(src_values))], j, u.dtype.scalar()) for j in range(u.dtype.count)]
+          if (load_sz := u.max_numel()) > 1:
+            # buf and gate are not vecs
+            values[u] = [load([src_values[k] if k in [0,2] else src_values[k][j] \
+                               for k in range(len(src_values))], j, u.dtype.scalar()) for j in range(load_sz)]
           else:
             values[u] = load(src_values, 0, u.dtype)
         elif u.op is Ops.GEP: values[u] = src_values[0][get_single_element(u.arg)]
