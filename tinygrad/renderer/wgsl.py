@@ -29,7 +29,9 @@ def packed_load(root:UOp, bidx:UOp, dtype:DType, var:UOp|None=None, gate:UOp|Non
 
 def is_packed(dt:DType, odt:DType|None = None) -> bool:
   if odt is None: odt = dt
-  return dt.itemsize < 4 and dt.base != dtypes.half and (not isinstance(odt, PtrDType) or odt.addrspace != AddrSpace.REG)
+  # registers aren't packed
+  if isinstance(odt, PtrDType) and odt.addrspace == AddrSpace.REG: return False
+  return dt.itemsize < 4 and dt.base != dtypes.half
 def _packed_size(dt:PtrDType): return dt.size // (4//dt.itemsize) if is_packed(dt) else dt.size
 
 def is_nan(a):
