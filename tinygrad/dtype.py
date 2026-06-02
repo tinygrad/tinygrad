@@ -56,7 +56,7 @@ class AddrSpace(Enum):
 @dataclass(frozen=True, eq=False)
 class DType(metaclass=DTypeMetaClass):
   priority: int  # this determines when things get upcasted
-  bitsize: int
+  bitsize: int   # this is the bitsize of the base dtype
   name: str
   fmt: FmtStr|None
   count: int
@@ -76,7 +76,7 @@ class DType(metaclass=DTypeMetaClass):
   def vec(self, sz:int) -> DType:
     assert self.count == 1, f"can't vectorize {self} with size {sz}"
     if sz == 1 or self == dtypes.void: return self  # void doesn't vectorize, and sz=1 is scalar
-    return DType(self.priority, self.bitsize*sz, f"{INVERSE_DTYPES_DICT[self.name]}{sz}", None, sz, self)
+    return DType(self.priority, self.bitsize, f"{INVERSE_DTYPES_DICT[self.name]}{sz}", None, sz, self)
   def ptr(self, size=-1, addrspace=AddrSpace.GLOBAL) -> PtrDType:
     return PtrDType(self.priority, self.bitsize, self.name, self.fmt, self.count, None, self, addrspace, 1, size)
   def scalar(self) -> DType: return self._scalar if self._scalar is not None else self
