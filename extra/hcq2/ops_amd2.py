@@ -3,7 +3,7 @@ from typing import cast
 import os, ctypes, struct, hashlib, functools, importlib, mmap, errno, array, contextlib, sys, weakref, itertools, collections, atexit
 assert sys.platform != 'win32'
 from dataclasses import dataclass
-from extra.hcq2.hcq2 import HCQ2Compiled, HCQAllocator, HCQ2Buffer, HCQEncoder
+from extra.hcq2.hcq2 import HCQ2Compiled, HCQAllocator, HCQ2Buffer, HCQEncoder, to_tuple
 from tinygrad.uop.ops import sint, UOp
 from tinygrad.device import Compiled, BufferSpec, Buffer, Device
 from tinygrad.dtype import dtypes
@@ -219,7 +219,7 @@ def amd_submit_sdma(cmdbuf, devs):
 
   # the sdma queue's ring and its host-side ring/write/put pointers
   q = Device['AMD'].sdma_queue(0)
-  ring, wptr, doorbell, put_ptr = (UOp.new_buffer(devs, b.size, b.dtype).rtag(("SDMA:0", name))
+  ring, wptr, doorbell, put_ptr = (UOp.new_buffer(devs, b.size, b.dtype).rtag(("COPY:0", name))
     for name, b in (("ring", q.ring), ("write_ptr", q.write_ptr), ("doorbell", q.doorbell), ("put_value", q.put_value)))
 
   # sdma needs the cmdbuf contiguous: if it won't fit before the ring end, restart at 0 and zero the tail
@@ -374,12 +374,14 @@ class PCIIface(PCIIfaceBase):
 def _mock(iface, name=None): return type(name or f"MOCK{iface.__name__}", (iface,), {})
 
 def encode_queue(q:UOp) -> UOp|None:
-  if not (isinstance(q.arg, tuple) and len(q.arg) == 2 and q.arg[1] in ("COMPUTE", "COPY")): return None
-  devs = (q.arg[0],) if isinstance(q.arg[0], str) else q.arg[0]  # TODO: make this prettier
-  return amd_submit_pm4(amd_lower_pm4(q, devs), devs) if q.arg[1] == "COMPUTE" else amd_submit_sdma(amd_lower_sdma(q, devs), devs)
+  q, post = (q.src[0], q.src[1:]) if q.op is Ops.AFTER else (q, ())
+  if not (isinstance(q.arg, tuple) and len(q.arg) == 2 and isinstance(q.arg[1], str) and q.arg[1].startswith(("COMPUTE", "COPY"))): return None
+  devs = to_tuple(q.arg[0])
+  ring = amd_submit_pm4(amd_lower_pm4(q, devs), devs) if q.arg[1].startswith("COMPUTE") else amd_submit_sdma(amd_lower_sdma(q, devs), devs)
+  return UOp(Ops.CUSTOM_FUNCTION, dtypes.void, src=(ring, *post), arg="submit")
 
 pm_lower = PatternMatcher([
-  (UPat(Ops.LINEAR, name="q"), encode_queue),
+  (UPat({Ops.LINEAR, Ops.AFTER}, name="q"), encode_queue),
 ])
 
 class AMDDevice(HCQ2Compiled):
@@ -475,9 +477,12 @@ class AMDDevice(HCQ2Compiled):
              wptr=getattr(hsa.amd_queue_t, 'write_dispatch_id').offset, eop_buffer=eop_buffer, cwsr_buffer=cwsr_buffer,
              ctx_save_restore_size=ctx_save_restore_size, ctl_stack_size=ctl_stack_size, idx=idx))
 
-    qname = f"{'SDMA' if queue_type == kfd.KFD_IOC_QUEUE_TYPE_SDMA else 'COMPUTE'}:{idx}"
+    qname = f"{'COPY' if queue_type == kfd.KFD_IOC_QUEUE_TYPE_SDMA else 'COMPUTE'}:{idx}"
     self.pm_bufferize = PatternMatcher([
       (UPat(Ops.BUFFER, tag={(qname, name)}), lambda ctx, b=getattr(queue, name): b) for name in ["ring", "write_ptr", "doorbell", "put_value"]
+    ] + [
+      (UPat(Ops.BUFFER, tag={(qname, "timeline_signal")}), lambda ctx, q=qname: ctx.queue_timeline_signal(q)),
+      (UPat(Ops.BUFFER, tag={(qname, "timeline_value")}), lambda ctx, q=qname: ctx.queue_timeline_value(q)),
     ]) + self.pm_bufferize
 
     return queue
