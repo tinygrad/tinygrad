@@ -147,10 +147,12 @@ class CStyleLanguage(Renderer):
 
   def render_kernel(self, function_name:str, kernel:list[str], bufs:list[tuple[str,tuple[UOp,bool]]], uops:list[UOp], prefix=None) -> str:
     tmp = ""
-    if any(isinstance(u.dtype, ImageDType) for _,(u,_) in bufs):
+    def arg_dtype(u:UOp) -> DType:
+      return u.dtype if isinstance(u.dtype, (ImageDType, PtrDType)) or u.op is not Ops.PARAM else u.dtype.ptr(u.max_numel(), u.addrspace)
+    if any(isinstance(arg_dtype(u), ImageDType) for _,(u,_) in bufs):
       tmp = "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n"
-    buftypes = [(name, self.render_dtype(u.dtype, mutable)+self.buffer_suffix if isinstance(u.dtype, (ImageDType, PtrDType)) else
-                self.arg_int_prefix if u.dtype == dtypes.int else None) for name,(u,mutable) in bufs]
+    buftypes = [(name, self.render_dtype(dt, mutable)+self.buffer_suffix if isinstance(dt, (ImageDType, PtrDType)) else
+                self.arg_int_prefix if dt == dtypes.int else None) for name,(u,mutable) in bufs for dt in (arg_dtype(u),)]
     local_dims = [u.src[0] for u in uops if u.op is Ops.SPECIAL and u.arg[0] == "l"]
     launch_bounds = prod([d.vmax for d in local_dims])
     prg = ''.join([f"{self.kernel_typedef.format(launch_bounds=launch_bounds)} {function_name}(",] +
