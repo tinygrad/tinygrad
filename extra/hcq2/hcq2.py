@@ -110,6 +110,7 @@ class HCQAllocator(LRUAllocator[HCQDeviceType], Generic[HCQDeviceType]):
 
   @suppress_finalizing
   def _free(self, buf:HCQ2Buffer, options:BufferSpec|None=None):
+    self.dev.synchronize()
     if options is not None and options.external_ptr is not None: return
     if hasattr(self, '_do_free'): self._do_free(buf, options)
 
@@ -278,6 +279,10 @@ def get_writes_ids(call:UOp) -> tuple[int, ...]:
 
 def insert_deps(ctx:DepsCtx, call:UOp) -> UOp|None:
   q, refs, write = call.src[0].rtag(next(ctx.evid)), [b.buffer for b in get_call_arg_uops(call)], get_writes_ids(call)
+  if q.arg not in ctx.last_per_queue:
+    sig = UOp.new_buffer(q.arg[0], 0x100, dtypes.uint8).rtag("timeline_signal")
+    tl = UOp.new_buffer(q.arg[0], 1, dtypes.uint64).rtag("timeline_value").index(UOp.const(dtypes.int, 0))
+    q = q.replace(src=(sig.wait(tl - 1), *q.src))
   ctx.last_per_queue[q.arg] = q
 
   deps = []
@@ -353,7 +358,7 @@ pm_encode_cmdbufs = PatternMatcher([(UPat(Ops.CALL, tag="hcq", name="call", allo
 
 pm_compose_submit = PatternMatcher([
   (UPat(Ops.CALL, tag="hcq", src=(UPat(Ops.CUSTOM_FUNCTION, arg="submit", name="sub"),), allow_any_len=True, name="call"),
-    call.replace(src=(UOp.group(*sub.src),) + call.src[1:])),
+    lambda call, sub: call.replace(src=(UOp.group(*sub.src),) + call.src[1:])),
 ])
 
 # *****************
