@@ -633,8 +633,8 @@ def encode(x:UOp, opc:int, reg:int|None=None, pp:int=0, sel:int=0, we:int=0) -> 
     reg = cast(int, cast(Register, reg_uop.reg).index if reg_uop is not None else reg)
     rm = cast(Register, rm_uop.reg).index
     idx = cast(Register, idx_uop.reg).index if idx_uop is not None and idx_uop.reg is not None else 4
-    rm_sz = 8 if isinstance(rm_uop.dtype, PtrDType) and disp_uop is None else rm_uop.dtype.itemsize
-    reg_sz = (reg_uop.dtype.itemsize if not isinstance(reg_uop.dtype, PtrDType) else 8) if reg_uop is not None else 0
+    rm_sz = 8 if isinstance(rm_uop.dtype, PtrDType) and disp_uop is None else (rm_uop.dtype.itemsize*rm_uop.dtype.count)
+    reg_sz = ((reg_uop.dtype.itemsize*reg_uop.dtype.count) if not isinstance(reg_uop.dtype, PtrDType) else 8) if reg_uop is not None else 0
     sz = reg_sz or rm_sz
 
     # encode instruction
