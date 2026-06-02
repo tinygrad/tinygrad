@@ -54,18 +54,20 @@ class DSPRenderer(ClangRenderer):
       'unsigned long long HAP_perf_get_time_us(void);'] + super()._render_defines(uops)
 
   def _render_entry(self, function_name:str, bufs:list[tuple[str,tuple[UOp,bool]]]) -> str:
+    def arg_dtype(u:UOp): return u.dtype if isinstance(u.dtype, PtrDType) or u.op is not Ops.PARAM else u.dtype.ptr(u.max_numel(), u.addrspace)
     msrc = ['int entry(unsigned long long handle, unsigned int sc, remote_arg* pra) {',
             'struct dcvs_v2_req req = {.type=7, .dcvs_enable=0, .set_latency=1, .latency=100, .set_dcvs_params=1, .target_corner = 6 /* TURBO */};',
             'HAP_power_set((void*)handle, (void*)&req);']
     msrc += ['if ((sc>>24) != 2) return 0;']
     msrc += [f'int sz_or_val_{i} = ((int*)pra[0].buf.pv)[{i}];' for i,b in enumerate(bufs)]
-    msrc += [f'int off{i} = ((int*)pra[1].buf.pv)[{i}];' for i,b in enumerate(bufs) if isinstance(b[1][0].dtype, PtrDType)]
+    msrc += [f'int off{i} = ((int*)pra[1].buf.pv)[{i}];' for i,b in enumerate(bufs) if isinstance(arg_dtype(b[1][0]), PtrDType)]
     msrc += [f'void *buf_{i} = HAP_mmap(0,sz_or_val_{i},3,0,pra[{i+3}].dma.fd,0)+off{i};' for i,b in enumerate(bufs)
-             if isinstance(b[1][0].dtype, PtrDType)]
+             if isinstance(arg_dtype(b[1][0]), PtrDType)]
     msrc += ["unsigned long long start = HAP_perf_get_time_us();"]
-    msrc += [f"{function_name}({', '.join([(f'buf_{i}' if isinstance(b[1][0].dtype, PtrDType) else f'sz_or_val_{i}') for i,b in enumerate(bufs)])});"]
+    params = [(f'buf_{i}' if isinstance(arg_dtype(b[1][0]), PtrDType) else f'sz_or_val_{i}') for i,b in enumerate(bufs)]
+    msrc += [f"{function_name}({', '.join(params)});"]
     msrc += ["*(unsigned long long *)(pra[2].buf.pv) = HAP_perf_get_time_us() - start;"]
-    msrc += [f'HAP_munmap(buf_{i}, sz_or_val_{i});' for i,b in enumerate(bufs) if isinstance(b[1][0].dtype, PtrDType)]
+    msrc += [f'HAP_munmap(buf_{i}, sz_or_val_{i});' for i,b in enumerate(bufs) if isinstance(arg_dtype(b[1][0]), PtrDType)]
     msrc += ["return 0; }"]
     return '\n'.join(msrc)
 
@@ -275,22 +277,23 @@ class MockDSPRenderer(DSPRenderer):
   def __init__(self, target:Target): self.target, self.compiler = target, DSPCompiler(mock=True)
   def _render_defines(self, uops) -> list[str]: return ClangRenderer._render_defines(self, uops)
   def _render_entry(self, function_name:str, bufs:list[tuple[str,tuple[UOp,bool]]]) -> str:
+    def arg_dtype(u:UOp): return u.dtype if isinstance(u.dtype, PtrDType) or u.op is not Ops.PARAM else u.dtype.ptr(u.max_numel(), u.addrspace)
     # https://gpages.juszkiewicz.com.pl/syscalls-table/syscalls.html
     # control register 21 is HEX_REG_QEMU_INSN_CNT, 0x6a15c000 loads it
     msrc = [mockdsp_boilerplate, 'void _start(void) {']
     for i,b in enumerate(bufs):
-      if isinstance(b[1][0].dtype, PtrDType):
-        sz = b[1][0].dtype.size*b[1][0].dtype.itemsize
+      if isinstance(dt:=arg_dtype(b[1][0]), PtrDType):
+        sz = dt.size*dt.itemsize
         # for loop for big reads
         msrc.append(f"void *buf{i} = mmap2(0, {sz}, 3, 0x21, -1, 0); for(int rd = 0; rd < {sz}; rd += read(0, buf{i}+rd, {sz}-rd));")
       else:
         msrc.append(f"unsigned int val{i}; read(0, &val{i}, 4);")
     msrc.append("unsigned int st = inscount();")
-    params = [(f'(void*)buf{i}' if isinstance(b[1][0].dtype, PtrDType) else f'val{i}') for i,b in enumerate(bufs)]
+    params = [(f'(void*)buf{i}' if isinstance(arg_dtype(b[1][0]), PtrDType) else f'val{i}') for i,b in enumerate(bufs)]
     msrc.append(f"{function_name}({', '.join(params)});")
     msrc.append("unsigned int et = inscount() - st; write(1, &et, sizeof(et));")
     for i,b in enumerate(bufs):
-      if isinstance(b[1][0].dtype, PtrDType): msrc.append(f"write(1, buf{i}, {b[1][0].dtype.size*b[1][0].dtype.itemsize});")
+      if isinstance(dt:=arg_dtype(b[1][0]), PtrDType): msrc.append(f"write(1, buf{i}, {dt.size*dt.itemsize});")
     msrc.append('exit(0); }')
     return '\n'.join(msrc)
 
