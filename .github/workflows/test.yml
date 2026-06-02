@@ -428,7 +428,6 @@ jobs:
         with:
           key: onnxoptc
           deps: testing
-          python-version: '3.12'
           llvm: 'true'
       - name: Test ONNX (CPU)
         run: DEV=CPU python -m pytest -n=auto test/external/external_test_onnx_backend.py test/external/external_test_onnx_runner.py test/external/external_test_onnx_ops.py test/backend/test_quantize_onnx.py --durations=20
@@ -448,7 +447,6 @@ jobs:
           key: optim
           deps: testing
           pydeps: "tensorflow==2.19"
-          python-version: '3.12'
           opencl: 'true'
       #- name: Test Optimization Helpers
       #  run: DEBUG=1 python3 extra/optimization/test_helpers.py
@@ -527,7 +525,6 @@ jobs:
       with:
         key: metal
         deps: testing
-        python-version: '3.12'
     - name: Test models (Metal)
       run: DEV=METAL python -m pytest -n=auto test/models --durations=20
     - name: Test LLaMA compile speed
@@ -581,7 +578,6 @@ jobs:
       with:
         key: linux-${{ matrix.dev }}
         deps: testing_unit
-        python-version: '3.12'
         llvm: ${{ contains(matrix.dev, 'LLVM') || contains(matrix.dev, 'LVP') || contains(matrix.dev, 'CLANG') }}
         mesa: ${{ contains(matrix.dev, 'LVP') && 'cpu' || 'false' }}
         webgpu: ${{ matrix.dev == 'WEBGPU' }}
@@ -759,7 +755,6 @@ jobs:
       with:
         key: unittest-macos
         deps: testing_unit
-        python-version: '3.12'
         amd: 'true'
         ocelot: 'true'
     - name: Run unit tests
@@ -815,7 +810,6 @@ jobs:
       with:
         key: macos-${{ matrix.dev }}
         deps: testing_unit
-        python-version: '3.12'
         llvm: ${{ contains(matrix.dev, 'LLVM') || contains(matrix.dev, 'LVP') }}
         mesa: ${{ contains(matrix.dev, 'LVP') && 'cpu' || 'false' }}
         webgpu: ${{ matrix.dev == 'WEBGPU' }}
@@ -885,7 +879,6 @@ jobs:
           key: compile-${{ matrix.backend }}
           deps: testing_unit
           mesa: ${{ (matrix.backend == 'ir3' || matrix.backend == 'nak') && 'true' }}
-          python-version: '3.12'
       - name: Set env
         shell: bash
         run: printf "NULL_ALLOW_COPYOUT=1\n${{ matrix.backend == 'ir3' && 'DEV=NULL:IR3:a630' || matrix.backend == 'nak' && 'DEV=NULL:NAK:sm_120' }}" >> $GITHUB_ENV
@@ -917,7 +910,6 @@ jobs:
           key: compile-qcomcl
           deps: testing_unit
           tinydreno: 'true'
-          python-version: '3.12'
       - name: Set env
         shell: bash
         run: printf "DEV=NULL:QCOMCL:a630\nNULL_ALLOW_COPYOUT=1" >> $GITHUB_ENV

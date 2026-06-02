@@ -4,7 +4,7 @@ inputs:
   python-version:
     description: 'Python version to use'
     required: false
-    default: '3.12'
+    default: '' # if you don't set a version, the native python version will be used
   key:
     description: 'Key for the python cache'
     required: false
@@ -56,11 +56,11 @@ inputs:
 runs:
   using: "composite"
   steps:
-    #- name: Set up Python ${{ inputs.python-version }}
-    #  id: setup-python
-    #  uses: actions/setup-python@v6
-    #  with:
-    #    python-version: ${{ inputs.python-version }}
+    - name: Set up Python ${{ inputs.python-version }}
+      uses: actions/setup-python@v6
+      if: inputs.python-version != ''
+      with:
+        python-version: ${{ inputs.python-version }}
 
     # **** Caching packages ****
 
@@ -70,14 +70,14 @@ runs:
       uses: actions/cache/restore@v4
       with:
         path: ${{ github.workspace }}/.venv
-        key: venv-${{ runner.os }}-${{ runner.arch }}-python-${{ steps.setup-python.outputs.python-version }}-${{ inputs.deps }}-${{ inputs.pydeps }}-${{ env.CACHE_VERSION }}
+        key: venv-${{ runner.os }}-${{ runner.arch }}-python-${{ inputs.python-version }}-${{ inputs.deps }}-${{ inputs.pydeps }}-${{ env.CACHE_VERSION }}
     - name: Cache Python packages
       if: github.event_name != 'pull_request'
       id: restore-venv
       uses: actions/cache@v5
       with:
         path: ${{ github.workspace }}/.venv
-        key: venv-${{ runner.os }}-${{ runner.arch }}-python-${{ steps.setup-python.outputs.python-version }}-${{ inputs.deps }}-${{ inputs.pydeps }}-${{ env.CACHE_VERSION }}
+        key: venv-${{ runner.os }}-${{ runner.arch }}-python-${{ inputs.python-version }}-${{ inputs.deps }}-${{ inputs.pydeps }}-${{ env.CACHE_VERSION }}
 
     # **** Caching downloads ****
 
