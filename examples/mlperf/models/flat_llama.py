@@ -15,7 +15,7 @@ from tinygrad import Tensor, nn, function, getenv, dtypes, TinyJit
 from tinygrad.helpers import Timing, colored, GlobalCounters, profile_marker, round_up
 from tinygrad.uop.ops import Ops, UOp
 from extra.models.llama import apply_rotary_emb, precompute_freqs_cis
-from extra.llama_kernels.rmsnorm import rmsnorm
+from extra.llama_kernels.rmsnorm import rmsnorm, rmsnorm_weighted
 from extra.llama_kernels import FP8_MAX, local_abs_max
 
 ASM_GEMM = getenv("ASM_GEMM", 0)
@@ -266,7 +266,7 @@ class FlatTransformer:
       for name, new_val in zip(amax_names, ret[:len(amax_names)]):
         a[name][i].assign(new_val)
 
-    logits = matmul(self.norm(h), self.output[0], fp8=False)[0]
+    logits = matmul(rmsnorm_weighted(h, self.norm.weight, self.norm.eps), self.output[0], fp8=False)[0]
     return logits
 
 def _get_pads(uop:UOp) -> list[UOp]:
