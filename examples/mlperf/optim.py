@@ -8,15 +8,24 @@ STOCHASTIC_ROUND = getenv("STOCHASTIC_ROUND", 0)
 MASTER_WEIGHTS = getenv("MASTER_WEIGHTS", 0)
 FP8_AMAX_MARGIN = getenv("FP8_AMAX_MARGIN", 1.1)
 
-def stochastic_round_bf16(x:Tensor) -> Tensor:
-  bits = x.bitcast(dtypes.uint32)
+def _sr_noise(x:Tensor) -> Tensor:
   if isinstance(x.device, tuple):
     shape = x.uop.shard_shape if x.uop.axis is not None else x.shape
-    noise = Tensor(UOp(Ops.MSTACK, dtypes.default_float, tuple(Tensor.rand(*shape, device=d).uop for d in x.device)))
-  else:
-    noise = x.rand_like()
-  noise = (noise * 0xFFFF).cast(dtypes.uint32)
+    noise = UOp(Ops.MSTACK, dtypes.default_float, tuple(Tensor.rand(*shape, device=d, contiguous=False).uop for d in x.device))
+    if x.uop.axis is not None: noise = noise.multi(x.uop.axis)
+    return Tensor(noise)
+  return x.rand_like(contiguous=False)
+
+def stochastic_round_bf16(x:Tensor) -> Tensor:
+  bits = x.bitcast(dtypes.uint32)
+  noise = (_sr_noise(x) * 0xFFFF).cast(dtypes.uint32)
   return ((bits + noise) & 0xFFFF0000).bitcast(dtypes.float32).cast(dtypes.bfloat16)
+
+def stochastic_round_fp8(x:Tensor, fp8_dtype=dtypes.fp8e4m3) -> Tensor:
+  truncate_bits = 20 if fp8_dtype == dtypes.fp8e4m3 else 21
+  bits = x.bitcast(dtypes.uint32)
+  noise = (_sr_noise(x) * ((1 << truncate_bits) - 1)).cast(dtypes.uint32)
+  return ((bits + noise) & (0xFFFFFFFF << truncate_bits)).bitcast(dtypes.float32).cast(fp8_dtype)
 
 class GradAccClipAdamW(Optimizer):
   def __init__(self, params:list[Tensor], lr=0.001, b1=0.9, b2=0.999, eps=1e-6, weight_decay=0.0, grad_acc=1, clip_norm=1.0, device=None, fused=FUSE_OPTIM):
@@ -38,12 +47,21 @@ class GradAccClipAdamW(Optimizer):
     else:
       updates, extra = self._step([], grads)
     for i, tt in enumerate(self.params): tt.assign(self._apply_update(tt, updates[i], self.master_params[i] if self.master_params else None))
-    # collect inv_scale tensors attached to fp8 params (set by _apply_update)
-    fp8_inv_scales = [tt._inv_scale for tt in self.params if hasattr(tt, '_inv_scale')]
-    fp8_next_inv_scales = [tt._next_inv_scale for tt in self.params if hasattr(tt, '_next_inv_scale')]
-    to_realize = extra+self.params+self.buffers+(self.master_params or [])+fp8_inv_scales+fp8_next_inv_scales
 
-    Tensor.realize(*to_realize)
+    offloaded = not self.fused and self.device is not None and any(self.device != p.device for p in self.params)
+    if offloaded:
+      Tensor.realize(*extra, *self.buffers)
+      for i, tt in enumerate(self.params):
+        to_realize = [tt, self.m[i], self.v[i]]
+        if hasattr(tt, '_inv_scale'): to_realize.append(tt._inv_scale)
+        if hasattr(tt, '_next_inv_scale'): to_realize.append(tt._next_inv_scale)
+        if self.master_params: to_realize.append(self.master_params[i])
+        Tensor.realize(*to_realize)
+    else:
+      # collect inv_scale tensors attached to fp8 params (set by _apply_update)
+      fp8_inv_scales = [tt._inv_scale for tt in self.params if hasattr(tt, '_inv_scale')]
+      fp8_next_inv_scales = [tt._next_inv_scale for tt in self.params if hasattr(tt, '_next_inv_scale')]
+      Tensor.realize(*(extra+self.params+self.buffers+(self.master_params or [])+fp8_inv_scales+fp8_next_inv_scales))
     return extra[-1]
 
   def _step(self, params:list[Tensor], grads:list[Tensor]) -> tuple[list[Tensor], list[Tensor]]:
@@ -79,12 +97,13 @@ class GradAccClipAdamW(Optimizer):
 
   def _apply_update(self, t:Tensor, up:Tensor, master:Tensor|None=None) -> Tensor:
     w = master if master is not None else t
+    if master is None and self.device is not None and self.device != t.device:
+      w = t.detach().to(self.device)
     wd = self.wd if t.ndim >= 3 else 0.0
     up = up.float().shard_like(w) + self.lr.to(w.device) * wd * w.detach()
     new_w = w.detach() - up
     if master is not None: master.assign(new_w)
-    # when master is offloaded to a different device than the param, results are resharded back onto the param's (sharded) device
-    offloaded = master is not None and master.device != t.device
+    offloaded = w.device != t.device
     if STOCHASTIC_ROUND and t.dtype == dtypes.bfloat16:
       out = stochastic_round_bf16(new_w)
       return out.shard_like(t) if offloaded else out
@@ -95,7 +114,7 @@ class GradAccClipAdamW(Optimizer):
       inv_scale = t._inv_scale.to(new_w.device) if offloaded else t._inv_scale
       scale = inv_scale.reciprocal().reshape(-1, *([1]*(new_w.ndim-1)))
       scaled = (new_w * scale).clamp(-FP8_MAX, FP8_MAX)
-      ret = scaled.cast(t.dtype)
+      ret = stochastic_round_fp8(scaled, t.dtype) if STOCHASTIC_ROUND else scaled.cast(t.dtype)
       # update inv_scale for next step from quantized result
       new_amax = (ret.float().abs().max(axis=tuple(range(1, ret.ndim))) * inv_scale * FP8_AMAX_MARGIN).detach()
       new_inv = ((new_amax + 1e-8) / FP8_MAX).cast(t._inv_scale.dtype)
