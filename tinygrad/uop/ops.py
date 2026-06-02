@@ -766,7 +766,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     if self.op is Ops.DEFINE_LOCAL: return AddrSpace.LOCAL
     if self.op is Ops.DEFINE_REG: return AddrSpace.REG
     if self.op is Ops.LOAD: return AddrSpace.ANON # LOAD brings things into anonymous registers
-    if self.op in {Ops.INDEX, Ops.CAST, Ops.AFTER, Ops.REDUCE, Ops.GEP}:
+    if self.op in {Ops.INDEX, Ops.CAST, Ops.AFTER, Ops.REDUCE, Ops.GEP, Ops.STORE}:
       return self.src[0].addrspace
     if self.op in GroupOp.Movement: return self.src[0].addrspace
     if self.op in {Ops.STACK, Ops.WMMA} or self.op in GroupOp.Elementwise:
