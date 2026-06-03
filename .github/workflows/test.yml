@@ -35,28 +35,24 @@ jobs:
         pydeps: "capstone torch"
     - name: Build wheel and show size
       run: |
-        pip install build
-        python -m build --wheel --outdir dist
+        uv build --wheel
         ls -lh dist/*.whl
     - name: Use as an external package
       run: |
         mkdir $HOME/test_external_dir
         cd $HOME/test_external_dir
-        python -m venv venv
-        source venv/bin/activate
-        pip install $GITHUB_WORKSPACE
-        python -c "from tinygrad.tensor import Tensor; print(Tensor([1,2,3,4,5]))"
-        pip install mypy
-        mypy -c "from tinygrad.tensor import Tensor; print(Tensor([1,2,3,4,5]))"
+        uv venv venv
+        uv pip install --python venv $GITHUB_WORKSPACE mypy
+        venv/bin/python -c "from tinygrad.tensor import Tensor; print(Tensor([1,2,3,4,5]))"
+        venv/bin/mypy -c "from tinygrad.tensor import Tensor; print(Tensor([1,2,3,4,5]))"
     - name: Run beautiful_mnist with tinygrad only
       run: |
         mkdir $GITHUB_WORKSPACE/test_dir
         cd $GITHUB_WORKSPACE/test_dir
-        python -m venv venv
-        source venv/bin/activate
-        pip install $GITHUB_WORKSPACE
+        uv venv venv
+        uv pip install --python venv $GITHUB_WORKSPACE
         cp $GITHUB_WORKSPACE/examples/beautiful_mnist.py .
-        BS=2 STEPS=10 MAX_BUFFER_SIZE=0 python beautiful_mnist.py
+        BS=2 STEPS=10 MAX_BUFFER_SIZE=0 venv/bin/python beautiful_mnist.py
     - name: Test Docs Build
       run: python -m mkdocs build --strict
     - name: Test Docs
