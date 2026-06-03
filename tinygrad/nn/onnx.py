@@ -1075,7 +1075,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     qk_matmul_return_val = scores
 
     if is_causal:
-      causal_mask = Tensor.ones(Q.shape[-2], K.shape[-2], device=Q.device, dtype=dtypes.bool, buffer=False).tril(0)
+      causal_mask = Tensor.ones(Q.shape[-2], K.shape[-2], dtype=dtypes.bool, buffer=False).tril(0)
       scores = scores.masked_fill(causal_mask.logical_not(), -float("inf"))
 
     if attn_mask is not None:
