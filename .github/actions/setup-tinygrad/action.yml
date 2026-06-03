@@ -56,6 +56,20 @@ inputs:
 runs:
   using: "composite"
   steps:
+    - name: Setup environment
+      shell: bash
+      run: |
+        echo "UV_CACHE_DIR=/tmp/.uv-cache" >> "$GITHUB_ENV"
+        echo "VIRTUAL_ENV=${{ github.workspace }}/.venv" >> "$GITHUB_ENV"
+        echo "OMP_NUM_THREADS=1" >> "$GITHUB_ENV"
+        # no buffers should be over 300MB in CI
+        echo "MAX_BUFFER_SIZE=300000000" >> "$GITHUB_ENV"
+        if [[ "$RUNNER_OS" == "Windows" ]]; then
+          echo "${{ github.workspace }}/.venv/Scripts" >> "$GITHUB_PATH"
+        else
+          echo "${{ github.workspace }}/.venv/bin" >> "$GITHUB_PATH"
+        fi
+
     - name: Set up uv
       uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b
       with:
@@ -117,18 +131,6 @@ runs:
       if: github.event_name != 'pull_request'
       shell: bash
       run: uv cache prune --ci
-    - name: Set up venv environment
-      shell: bash
-      run: |
-        echo "VIRTUAL_ENV=${{ github.workspace }}/.venv" >> "$GITHUB_ENV"
-        echo "OMP_NUM_THREADS=1" >> "$GITHUB_ENV"
-        # no buffers should be over 300MB in CI
-        echo "MAX_BUFFER_SIZE=300000000" >> "$GITHUB_ENV"
-        if [[ "$RUNNER_OS" == "Windows" ]]; then
-          echo "${{ github.workspace }}/.venv/Scripts" >> "$GITHUB_PATH"
-        else
-          echo "${{ github.workspace }}/.venv/bin" >> "$GITHUB_PATH"
-        fi
 
     # ******************* apt *******************
     - name: Setup apt
