@@ -77,6 +77,7 @@ class Renderer:
   pre_matcher: PatternMatcher|None = None
   extra_matcher: PatternMatcher|None = None
   code_for_op: dict[Ops, Callable] = {}
+  new_style: bool = False
 
   compiler: Compiler = Compiler()
 
