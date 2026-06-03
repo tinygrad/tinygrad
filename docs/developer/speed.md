@@ -62,7 +62,7 @@ A lot of work can still be done here. For example, we never copy the inputs to o
 
 Many accelerators have Tensor Cores / MAC arrays / systolic arrays. The main value of these is that, since they are 2-D, they create an n^2 ratio between the compute and the input data.
 
-GPUs use Tensor Cores instead of MAC arrays to fit better in the GPU warp paradigm. This is because the output of Tensor Cores is O(n) wrt the input, while the output of MAC arrays like the AMX is O(n^2)
+GPUs use Tensor Cores instead of MAC arrays to fit better in the GPU warp paradigm. This is because the output of Tensor Cores is O(n) wrt the input, while the output of MAC arrays is O(n^2)
 
 We have a simple framework in tinygrad for adding these ALU blocks and achieving good performance from them.
 

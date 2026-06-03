@@ -34,19 +34,6 @@ def lcast(input_type:DType, output_type:DType):
     if dtypes.is_int(output_type): return 'trunc' if output_type.itemsize < input_type.itemsize else 'sext'
   raise NotImplementedError(f"cast from {input_type} -> {output_type} not implemented")
 
-# https://github.com/corsix/amx
-def render_wmma_amx(ctx, wmma: UOp) -> str:
-  def AMX(op, gpr): return f'call void asm sideeffect ".word (0x201000+($0<<5)+0$1-((0$1>>4)*6))", "i,r,~{{memory}}"(i32 {op}, i64 {gpr}) #0; AMX'
-
-  return "\n".join([
-    *[f'  store {ldt(src.dtype)} {ctx[src]}, {ldt(src.dtype.ptr())} {ctx[wmma]}_amx{i}, align {src.dtype.itemsize}' for i,src in enumerate(wmma.src)],
-      f'  call void asm sideeffect "nop\\0Anop\\0Anop\\0A.word ({0x201000 + (17 << 5) + 0})", "~{{memory}}"() #0; AMX set',             # set
-    *[f'  {ctx[wmma]}_ld{i} = add i64 {ctx[wmma]}_ptr_amx2, {i*4<<56 | i*64}\n  {AMX(4,f"{ctx[wmma]}_ld{i}")} ldz' for i in range(16)], # ldz
-      f'  {AMX(0, f"{ctx[wmma]}_ptr_amx1")} ldx\n  {AMX(1, f"{ctx[wmma]}_ptr_amx0")} ldy\n  {AMX(12, 0)} fma32',                        # ldx ldy fma
-    *[f'  {ctx[wmma]}_st{i} = add i64 {ctx[wmma]}_ptr_amx2, {i*4<<56 | i*64}\n  {AMX(5,f"{ctx[wmma]}_st{i}")} stz' for i in range(16)], # stz
-      f'  call void asm sideeffect "nop\\0Anop\\0Anop\\0A.word ({0x201000 + (17 << 5) + 1})", "~{{memory}}"() #0; AMX clr',             # clr
-      f'  {ctx[wmma]} = load {ldt(wmma.dtype)}, ptr {ctx[wmma]}_amx2, align {wmma.dtype.itemsize}'])
-
 def render_wmma_amd(ctx, wmma: UOp, cdna=False) -> str:
   dt_map = {dtypes.half: "f16", dtypes.float: "f32", dtypes.ushort: "bf16.1k" if cdna else "bf16", dtypes.bfloat16: "bf16.1k" if cdna else "bf16",
             dtypes.fp8e4m3: ".fp8.fp8", dtypes.fp8e5m2: ".bf8.bf8"}
@@ -147,14 +134,6 @@ class LLVMRenderer(Renderer):
     vc = -1
 
     local_args: list[str] = []
-    for u in uops:
-      if self.tensor_cores == tc.amx and u.op is Ops.WMMA: # prealloc aux buffers as AMX can only load from memory
-        vc += 1
-        r[u] = f"%wmma{vc}"
-        for i, dtype in enumerate(u.arg[2].vec(sz) for sz in [prod(size for _, size in upcast) for upcast in u.arg[6]]):
-          kernel += [f"  {r[u]}_amx{i} = alloca {ldt(dtype)}, align {dtype.itemsize}",
-                     f"  {r[u]}_ptr_amx{i} = ptrtoint {ldt(dtype.ptr())} {r[u]}_amx{i} to i64"]
-
     name = "test"
     for u in uops:
       if u.op in {Ops.NOOP, Ops.GROUP}: continue
@@ -197,14 +176,13 @@ class CPULLVMRenderer(LLVMRenderer):
   has_threads = bool(getenv("THREADS", 1))
   global_max = (CPU_COUNT.value, 0, 0)
   abi = 'win64cc' if sys.platform == 'win32' else None
-  string_rewrite = base_rewrite + PatternMatcher([(UPat(Ops.WMMA, name="wmma"), render_wmma_amx)])
+  string_rewrite = base_rewrite
   def render(self, uops: list[UOp]) -> str: return "\n".join((k:=self._render_kernel(uops))[0] + (k[1], self._render_footer(uops)))
   def _render_footer(self, uops: list[UOp]) -> str: return 'attributes #0 = { alwaysinline nounwind "no-builtins" "no-trapping-math"="true" }'
   def __init__(self, target:Target):
     super().__init__(target)
     from tinygrad.runtime.support.compiler_cpu import CPULLVMCompiler
-    if "AMX" in target.arch: self.tensor_cores = tc.amx
-    self.compiler = CPULLVMCompiler([x for x in target.arch.split(",") if x != "AMX"])
+    self.compiler = CPULLVMCompiler(target.arch.split(","))
 
   # FIXME: fp16 works on non-osx, but only if the cpu supports it
   def supported_dtypes(self):

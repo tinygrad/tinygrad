@@ -191,18 +191,6 @@ class PythonProgram:
               values[u] = wmma_helper(32, 8, 4, 2, 4, a_elem, b_elem, c_map)
 
             else: raise NotImplementedError(f"unimplemented tensor core {u.arg}")
-          elif device == "INTEL":
-            # A (16 elements on 8 threads)
-            def a_elem(x, k, row, goff): return x[k%2+row*2][goff+k//2]
-            # B (16 elements on 8 threads)
-            def b_elem(x, col, k, goff): return x[k][goff+col]
-            # C, D (8 elements on 8 threads)
-            def c_map(lane, elem): return (lane, elem)
-            values[u] = wmma_helper(8, 16, 16, 16, 8, a_elem, b_elem, c_map)
-          elif device == "CPU":
-            def elem(x, col, row, _): return x[col+row][0] # k is always 0
-            def c_map(lane, elem): return (elem%16, elem//16)
-            values[u] = wmma_helper(1, 1, 16, 16, 256, elem, elem, c_map)
           else: raise NotImplementedError(f"unimplemented tensor core {u.arg}")
         elif u.op in GroupOp.ALU:
           assert all_same([len(x) for x in src_values]), f"{[len(x) for x in src_values]} doesn't match on {u.op}"
@@ -224,8 +212,6 @@ class PythonRenderer(Renderer):
       {"AMD":"gfx1100", "AMD_RDNA4":"gfx1201", "AMD_MFMA":"gfx950", "CUDA":"sm_80", "CUDA_SM75":"sm_75", "CUDA_SM89":"sm_89"}.get(emu, emu))
     target = replace(target, renderer="PYTHON")
     if target.arch == "METAL": self.target, self.tensor_cores = replace(target, device="METAL"), tc.metal
-    elif target.arch == "INTEL": self.target, self.suffix, self.tensor_cores = replace(target, device="INTEL"), "INTEL", tc.intel
-    elif target.arch == "AMX": self.target, self.tensor_cores = replace(target, device="CPU"), tc.amx
     elif target.arch.startswith("gfx"):
       self.target = replace(target, device="AMD")
       self.tensor_cores = tc.get_amd(target.arch)
