@@ -15,7 +15,7 @@ if __name__ == "__main__":
     if not line.strip(): continue
     graph = json.loads(line)
     if graph.get("ref") is not None and (args.kernel == "ALL" or graph["ref"] == ref):
-      print(fmt_all(graph))
+      print(fmt_all(graph), f"ref={graph.get('ref')}")
       if (v:=json.loads(next(sys.stdin, "{}")).get("value")): print(v)
     if ref is not None or not isinstance(rec:=next(iter(graph.values()), {}), dict) or "label" not in rec: continue
     for v in graph.values():
