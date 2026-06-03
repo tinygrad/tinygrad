@@ -155,16 +155,20 @@ class Handler(HTTPRequestHandler):
 
       # img hack for now
       ids: list[int] = []
-      if "img" in body:
-        image = cv2.cvtColor(cv2.imread("images/micra.jpg"), cv2.COLOR_BGR2RGB)
-        prefill_img(vis=self.server.vis, lang=self.server.model, image=image, start_pos=len(self.server.model._cached_tokens), res=(640, 640))
-        tokens = [0] * (((640 * 640) // (32*32)) + 8)
-        self.server.model._cached_tokens.extend(tokens)
-        ids.extend(tokens)
 
       # extract tokens, last assistant message is treated as prefill
       ids.extend(tok.prefix())
       for i, msg in enumerate(body["messages"]):
+        if "image" in msg:
+
+          if i == len(body["messages"]) - 2: # only process once, it'll be second last behind text
+            image = cv2.cvtColor(cv2.imread("images/micra.jpg"), cv2.COLOR_BGR2RGB)
+            prefill_img(vis=self.server.vis, lang=self.server.model, image=image, start_pos=len(self.server.model._cached_tokens), res=(640, 640))
+          tokens = [0] * (((640 * 640) // (32*32)) + 8)
+          self.server.model._cached_tokens.extend(ids[-2:]) # todo remove hack, end token gets added to only one
+          self.server.model._cached_tokens.extend(tokens)
+          ids.extend(tokens)
+          continue
         ids += tok.role(msg["role"])
         content = msg["content"]
         if isinstance(content, str): ids += tok.encode(content)

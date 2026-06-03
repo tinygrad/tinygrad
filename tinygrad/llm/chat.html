@@ -15,14 +15,15 @@
 <script>
   input.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); send() } }
   const msgs = [];
-  async function send(extra = {}) {
+  async function send(image=false) {
     if (!input.value.trim()) return;
+    if (image) msgs.push({role: 'user', image: true});
     msgs.push({role: 'user', content: input.value.trim()});
     chat.innerHTML += '<div class="msg user">' + input.value.trim().replace(/</g, '&lt;') + '</div>';
     input.value = '';
     const d = document.createElement('div'); d.className = 'msg'; chat.appendChild(d);
     const r = await fetch('/v1/chat/completions', {method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({model: 'llama', messages: msgs, stream: true, temperature: 0.7, ...extra})});
+      body: JSON.stringify({model: 'llama', messages: msgs, stream: true, temperature: 0.7})});
     let buf = '';
     for (const rd = r.body.getReader(), dec = new TextDecoder();;) {
       const {done, value} = await rd.read();
