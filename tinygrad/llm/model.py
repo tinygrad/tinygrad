@@ -400,6 +400,7 @@ class Transformer:
     # TODO: use UOp.variable for temperature once float variables are supported
     temp = Tensor([temperature])
     # assign all input tokens once, then slice from start_pos for the model call
+    tokens = self._cached_tokens + tokens
     t = Tensor(tokens + [0] * (self.max_context - len(tokens)), dtype="int32").reshape(1, self.max_context)
     # recompute start_pos from what's currently valid in the caches
     start_pos = self.get_start_pos(tokens)
