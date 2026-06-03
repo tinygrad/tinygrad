@@ -30,10 +30,7 @@ def _rmsnorm_weighted_fwd(out:UOp, x:UOp, weight:UOp, eps_val:float) -> UOp:
   MBS, SEQ, HIDDEN = x.shape
   ROWS, n_elems = MBS * SEQ, prod(x.shape)
   assert n_elems % HIDDEN == 0
-
-  mem = n_elems * 2 + n_elems * 2 + HIDDEN * 2
   out, x = out.reshape(n_elems), x.reshape(n_elems)
-
   row = UOp.range(ROWS, 0)
   h_reduce = UOp.range(HIDDEN, 1, AxisType.REDUCE)
   x_reduce = x[row * HIDDEN + h_reduce].cast(dtypes.float)
@@ -42,7 +39,6 @@ def _rmsnorm_weighted_fwd(out:UOp, x:UOp, weight:UOp, eps_val:float) -> UOp:
   idx = row * HIDDEN + h
   y = x[idx].cast(dtypes.float) * rrms * weight[h].cast(dtypes.float)
   store = out[idx].store(y.cast(out.dtype.base))
-
   return store.end(h, row).sink(arg=KernelInfo(f"rmsnorm_weighted_fwd_{n_elems}_h{HIDDEN}_eps{eps_val:.0e}"))
 
 def _rmsnorm_weighted_bwd(gradient:UOp, kernel:UOp, eps_val:float) -> tuple:
