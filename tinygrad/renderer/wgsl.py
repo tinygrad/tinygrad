@@ -27,7 +27,11 @@ def packed_load(root:UOp, bidx:UOp, dtype:DType, var:UOp|None=None, gate:UOp|Non
   val = (load.cast(dtypes.uint32) >> shift_am) & mask
   return sign_extend(val, 8*dtype.itemsize).cast(dtype) if dtype in [dtypes.char, dtypes.short] else val.cast(dtype)
 
-def is_packed(u:UOp): return u.dtype.itemsize < 4 and u.dtype != dtypes.half and u.addrspace != AddrSpace.REG
+def is_packed(x:UOp):
+  if x.op is Ops.LOAD: dt, addrspace = x.dtype, x.src[0].addrspace
+  elif x.op is Ops.STORE: dt, addrspace = x.src[1].dtype, x.src[0].addrspace
+  else: dt, addrspace = x.dtype, x.addrspace
+  return dt.itemsize < 4 and dt != dtypes.half and addrspace != AddrSpace.REG
 def _packed_size(u:UOp): return u.max_numel() // (4//u.dtype.itemsize) if is_packed(u) else u.max_numel()
 def is_nan(a):
   bs, (exp, mant) = a.dtype.bitsize, dtypes.finfo(a.dtype)
@@ -38,10 +42,11 @@ wgsl_matcher = PatternMatcher([
    lambda a,b,c: a.cast(dtypes.int).alu(c.op, b.cast(dtypes.int)).cast(dtypes.bool)),
   # TODO: load alt value doesnt have to be a const
   (UPat.load(UPat.var("b"), UPat.cvar("c"), UPat.var("gate"), name="l"),
-   lambda l,b,c,gate: packed_load(l,b,l.dtype,c.cast(dtypes.uint32),gate) if is_packed(b) else None),
-  (UPat.load(UPat.var("b"), name='l'), lambda l,b: packed_load(l, b, l.dtype) if is_packed(b) else None),
-  (UPat.store(UPat.var("b"), UPat.var("var"), UPat.var("gate")), lambda b,var,gate: packed_store(b,var,gate) if is_packed(b) else None),
-  (UPat.store(UPat.var("b"), UPat.var("var")), lambda b,var: packed_store(b,var) if is_packed(b) else None),
+   lambda l,b,c,gate: packed_load(l,b,l.dtype,c.cast(dtypes.uint32),gate) if is_packed(l) else None),
+  (UPat.load(UPat.var("b"), name='l'), lambda l,b: packed_load(l,b,l.dtype) if is_packed(l) else None),
+  (UPat.store(UPat.var("b"), UPat.var("var"), UPat.var("gate"), name="s"),
+   lambda b,var,gate,s: packed_store(b,var,gate) if is_packed(s) else None),
+  (UPat.store(UPat.var("b"), UPat.var("var"), name="s"), lambda b,var,s: packed_store(b,var) if is_packed(s) else None),
   (UPat.var("a") << UPat.var("b"),lambda a,b:(a.bitcast(dtypes.uint32)<<b.cast(dtypes.uint32)).bitcast(a.dtype) if b.dtype!=dtypes.uint32 else None),
   (UPat.var("x") >> UPat.var("y"), lambda x,y: UOp(Ops.SHR, x.dtype, (x,y.cast(dtypes.uint))) if y.dtype != dtypes.uint else None),
   # fix nan check: 'a != a -> is_nan()'
