@@ -164,9 +164,12 @@ class CStyleLanguage(Renderer):
     return prg if prefix is None else "\n".join(prefix)+f"\n{prg}"
 
   def render_index(self, buf:UOp, idx:UOp):
-    if buf.addrspace in (AddrSpace.ANON, AddrSpace.REG):
+    if buf.addrspace == AddrSpace.ANON:
       assert idx.op is Ops.CONST, f"{idx.op} must be CONST"
-      return self[buf]+(f"[{idx.arg}]" if buf.addrspace is AddrSpace.REG or buf.max_numel() > self.gep_arr_threshold else f".{'xyzwabcd'[idx.arg]}")
+      return self[buf]+(f"[{idx.arg}]" if buf.max_numel() > self.gep_arr_threshold else f".{'xyzwabcd'[idx.arg]}")
+    elif buf.addrspace == AddrSpace.REG:
+      # in C this doesn't have to be const
+      return f"{self[buf]}[{self[idx]}]"
     else:
       return f"({self[buf]}+{strip_parens(self[idx]) if idx.arg == Ops.ADD else self[idx]})"
 
