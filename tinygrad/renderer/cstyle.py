@@ -185,7 +185,11 @@ class CStyleLanguage(Renderer):
     return prefix + self.type_map.get(scalar:=dtype.scalar(), scalar.name) + suffix
 
   def render_type(self, u:UOp): return self._render_dtype(u.dtype, u.max_numel(), u.addrspace)
-  def render_access(self, u:UOp): return f"*({self.render_type(u)}){self[u]}" if u.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL) else self[u]
+  def render_access(self, u:UOp):
+    if u.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL):
+      if u.max_numel() > 1: return f"*({self.render_type(u)}){self[u]}"
+      else: return f"*{self[u]}"
+    return self[u]
   def render_cast(self, u:UOp, val:str) -> str: return f"({self.render_type(u)})({val})"
 
   # LEGACY
