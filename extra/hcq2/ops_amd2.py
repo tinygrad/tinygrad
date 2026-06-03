@@ -374,14 +374,12 @@ class PCIIface(PCIIfaceBase):
 def _mock(iface, name=None): return type(name or f"MOCK{iface.__name__}", (iface,), {})
 
 def encode_queue(q:UOp) -> UOp|None:
-  q, post = (q.src[0], q.src[1:]) if q.op is Ops.AFTER else (q, ())
   if not (isinstance(q.arg, tuple) and len(q.arg) == 2 and isinstance(q.arg[1], str) and q.arg[1].startswith(("COMPUTE", "COPY"))): return None
   devs = to_tuple(q.arg[0])
-  ring = amd_submit_pm4(amd_lower_pm4(q, devs), devs) if q.arg[1].startswith("COMPUTE") else amd_submit_sdma(amd_lower_sdma(q, devs), devs)
-  return UOp(Ops.CUSTOM_FUNCTION, dtypes.void, src=(ring, *post), arg="submit")
+  return amd_submit_pm4(amd_lower_pm4(q, devs), devs) if q.arg[1].startswith("COMPUTE") else amd_submit_sdma(amd_lower_sdma(q, devs), devs)
 
 pm_lower = PatternMatcher([
-  (UPat({Ops.LINEAR, Ops.AFTER}, name="q"), encode_queue),
+  (UPat(Ops.CUSTOM_FUNCTION, arg="submit", src=(UPat(Ops.LINEAR, name="q"),)), encode_queue),
 ])
 
 class AMDDevice(HCQ2Compiled):
