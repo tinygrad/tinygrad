@@ -258,24 +258,7 @@ class ClangRenderer(CStyleLanguage):
     alignment = 2**int(math.log2(dt.itemsize)) if getenv("ALIGNED", 1) and not dtypes.is_bool(dt) else 1
     return f"typedef {self.render_dtype(dt.scalar())} {self.render_dtype(dt)} __attribute__((aligned({alignment}),ext_vector_type({dt.count})));"
 
-  def _render_defines(self, uops) -> list[str]:
-    prefix = [self.render_vector_prefix(dt) for dt in uops_to_dtypes(uops) if dt.count > 1]
-    # https://github.com/corsix/amx
-    for name, (N, M, _), dtype_in, _, _, _, _, _ in wmma_args(uops):
-      prefix += [
-        '#define AMX_SET(imm5) __asm("nop\\nnop\\nnop\\n.word (0x201000+(%0<<5)+%1)" : : "i"(17), "i"(imm5) : "memory")',
-        '#define AMX(op, gpr, btf) __asm(".word (0x201000+(%0 << 5)+0%1-((0%1>>4)*6))" : : "i"(op), "r"((unsigned long long)(gpr)+(btf)) : "memory")',
-      ]
-      # 'static' in C roughly means that function symbol isn't exported. LLVM puts those symbols at the end of object file which allows Clang JIT
-      # to just jump at the start of a shellcode without having to deal with symbols or trampolines at all. This is better than having to inline
-      # wmma function every time it is called or wasting complexity on a symbol parsing and a memory page on trampoline.
-      out, dt1, dt2 = self.render_dtype(dtype_in.vec(N*N)), self.render_dtype(dtype_in.vec(N)), self.render_dtype(dtype_in.vec(M))
-      prefix += [f"""static {out} __{name}({dt1} data1, {dt2} data2, {out} data0){{
-  AMX_SET(0);\n  for(int ridx0 = 0; ridx0 < 16; ridx0++){{ AMX(4, (int *)(&data0), 0ull<<62 | (ridx0*4ull)<<56 | ridx0*64ull); }}
-  AMX(0, (int *)(&data2), 0ull<<62); AMX(1, (int *)(&data1), 0ull<<62); AMX(12, 0, 0ull);
-  for(int ridx0 = 0; ridx0 < 16; ridx0++){{ AMX(5, (int *)(&data0), 0ull<<62 | (ridx0*4ull)<<56 | ridx0*64ull); }}
-  AMX_SET(1);\n  return data0;\n}}"""]
-    return prefix
+  def _render_defines(self, uops) -> list[str]: return [self.render_vector_prefix(dt) for dt in uops_to_dtypes(uops) if dt.count > 1]
   def _render_body(self, function_name, kernel, bufs, uops, pref=None) -> str: return super().render_kernel(function_name, kernel, bufs, uops, pref)
   def _render_entry(self, function_name:str, bufs:list[tuple[str,tuple[UOp,bool]]]) -> str: return ""
 
@@ -289,8 +272,7 @@ class ClangRenderer(CStyleLanguage):
   def __init__(self, target:Target):
     super().__init__(target)
     from tinygrad.runtime.support.compiler_cpu import ClangCompiler
-    if "AMX" in target.arch: self.tensor_cores = tc.amx
-    self.compiler = ClangCompiler([x for x in target.arch.split(",") if x != "AMX"])
+    self.compiler = ClangCompiler(target.arch.split(","))
 
 class OpenCLRenderer(CStyleLanguage):
   has_aux = True
@@ -336,23 +318,6 @@ class OpenCLRenderer(CStyleLanguage):
   def supported_dtypes(self): return {d for d in super().supported_dtypes()
                                       if (d != dtypes.half or "cl_khr_fp16" in self.target.arch) and
                                       (d != dtypes.double or "cl_khr_fp64" in self.target.arch) and d not in dtypes.fp8s}
-
-class IntelRenderer(OpenCLRenderer):
-  suffix, kernel_typedef = "INTEL", "__attribute__((intel_reqd_sub_group_size(8)))\n" + "__kernel void"
-  tensor_cores = tc.intel
-
-  string_rewrite = PatternMatcher([
-    (UPat(Ops.CAST, dtype=dtypes.bfloat16, src=(UPat.var('x', dtype=dtypes.float),)), lambda ctx,x: f"intel_convert_bfloat16_as_ushort({ctx[x]})"),
-    (UPat(Ops.CAST, dtype=dtypes.float, src=(UPat.var('x', dtype=dtypes.bfloat16),)), lambda ctx,x: f"intel_convert_as_bfloat16_float({ctx[x]})"),
-  ]) + OpenCLRenderer.string_rewrite
-
-  def render_kernel(self, function_name, kernel, bufs, uops, prefix=None) -> str:
-    prefix = []
-    for name, _, dtype_in, dtype_out, _, _, _, _ in wmma_args(uops):
-      dt_in = ("ushort", "bf16") if dtype_in == dtypes.bfloat16 else (dtype_in.name, "f16")
-      prefix.append(f"""{dtype_out.name}8 __{name}({dt_in[0]}16 a, {dt_in[0]}16 b, {dtype_out.name}8 c) {{
-    return intel_sub_group_{dt_in[1]}_{dt_in[1]}_matrix_mad_k16(as_int8(a), as_int8(b), c);\n}}""")
-    return super().render_kernel(function_name, kernel, bufs, uops, prefix or None)
 
 class MetalRenderer(CStyleLanguage):
   shared_max = 32768
