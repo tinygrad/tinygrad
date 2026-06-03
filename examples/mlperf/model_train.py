@@ -1874,9 +1874,9 @@ def train_flux():
     for p in optim.params:
       if p.grad is not None and isinstance(p.device, tuple) and p.grad.uop.axis != p.uop.axis:
         p.grad = p.grad.to(p.device[0]).shard(p.device, p.uop.axis)
+    optim.step()
 
-    grads = [p.grad for p in optim.params if p.grad is not None]
-    return loss.float().to("CPU").realize(*grads)
+    return loss.float().to("CPU")
 
   @Tensor.train(mode=False)
   def eval_step(model:Flux, sample:dict[str, Tensor]) -> Tensor:
@@ -1931,23 +1931,17 @@ def train_flux():
     data_time = mst - st
 
     loss = train_step(model, optim, sample).item()
-    dev_time = time.perf_counter() - mst
-
-    gt = time.perf_counter()
-    optim.step()
     et = time.perf_counter()
 
-    optim_time = et - gt
-    dev_time += optim_time
+    dev_time = et - mst
     step_time = et - st
-    gbs_time = gt - st
 
     i += 1
 
     mem_gb = GlobalCounters.mem_used / 1e9
     gflops = GlobalCounters.global_ops / 1e9 / dev_time
     tqdm.write(
-        f"{i:5} {step_time:.3f} s step, {gbs_time:.3f} s gbs, {optim_time:.3f} s optim, {data_time:.3f} s data, {loss:.4f} loss, " \
+        f"{i:5} {step_time:.3f} s step, {dev_time:.3f} s dev, {data_time:.3f} s data, {loss:.4f} loss, " \
         f"{lr:.12f} LR, {mem_gb:.2f} GB used, {gflops:9.2f} GFLOPS")
 
     # eval loop
