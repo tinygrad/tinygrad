@@ -68,7 +68,7 @@ class TestFuse(unittest.TestCase):
     self._test_fuse(lambda a: a.softmax(axis=-1, dtype='half'), a, atol=3e-4)
 
   def test_fuse_arange_eye(self):
-    self._test_fuse(lambda: Tensor.arange(10).reshape(10,1).expand(10,10) == Tensor.arange(10).reshape(1,10).expand(10,10))
+    self._test_fuse(lambda: (Tensor.arange(10).reshape(10,1).expand(10,10) == Tensor.arange(10).reshape(1,10).expand(10,10)).clone())
 
   @unittest.skip("needs RANGEIFY>1")
   def test_double_gemm(self):
