@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Usage: DEBUG=5 python -m tinygrad.viz.cli --json | ./extra/viz/kernel_graph.py E_8_8_16_4
+# Usage: DEBUG=5 python -m tinygrad.viz.cli --json | ./extra/viz/kernel_graph.py > /tmp/kernel_graph.txt
 import argparse, json, sys
 from tinygrad.helpers import ansistrip
 
