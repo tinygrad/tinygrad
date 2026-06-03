@@ -2649,25 +2649,6 @@ def custom_hk_fp8_gemm(C:UOp, A:UOp, B:UOp, *args:UOp, dname:str, scale_mode:int
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dname), UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src),
                                UOp(Ops.BINARY, arg=lib)))
 
-# ** BF16 ThunderKittens GEMM custom kernel
-
-@functools.cache
-def custom_hk_bf16_gemm(C:UOp, A:UOp, B:UOp, *args:UOp, dname:str) -> UOp:
-  M, K = A.shape[0]*A.shape[1], A.shape[2]
-  N, K2 = B.shape[(1 if B.ndim == 3 else 0):]
-  assert K == K2, f"{A.shape} {B.shape}"
-  block_size = 256
-  threads = UOp.special(64 * 8, "lidx0")
-  workgroups = UOp.special((M // block_size) * (N // block_size), "gidx0")
-  sink = UOp.sink(C.base, A.base, B.base, threads, workgroups,
-                  arg=KernelInfo(f"hk_bf16_gemm_{M}_{N}_{K}", estimates=Estimates(ops=2*M*N*K, mem=(M*K+N*K+M*N)*A.dtype.itemsize)))
-  kittens_path = pathlib.Path(__file__).parent.parent/"thunder"/"amd"
-  src = (kittens_path/"gemm_bf16.cpp").read_text()
-  lib = HIPCCCompiler("gfx950", [f"-I{(kittens_path/'include').as_posix()}", "-std=c++20", "-DKITTENS_CDNA4", "-ffast-math",
-                                 "-DHIP_ENABLE_WARP_SYNC_BUILTINS", f"-DGEMM_M={M}", f"-DGEMM_N={N}", f"-DGEMM_K={K}"]).compile_cached(src)
-  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dname), UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src),
-                               UOp(Ops.BINARY, arg=lib)))
-
 counters = {"used":0, "todos":[]}
 def todo(msg:str) -> bool: counters["todos"].append(msg); return False
 def _asm_gemm_report():
@@ -2716,6 +2697,28 @@ def custom_uop_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
   red = mul.reduce(k, arg=Ops.ADD, dtype=dtypes.float32).cast(C.dtype.base)
   store = C.flatten().index((m*UOp.const(dtypes.weakint, N)+n), ptr=True).store(red).end(m, n)
   return store.sink(arg=KernelInfo(name=f'uop_gemm_{M}_{N}_{K}'))
+
+# ** bf16 A @ B.T kernel in C
+
+USE_HK_BF16 = getenv("USE_HK_BF16", 0)
+
+@functools.cache
+def custom_hk_bf16_gemm(C:UOp, A:UOp, B:UOp, *args:UOp, dname:str) -> UOp:
+  M, K = A.shape[0]*A.shape[1], A.shape[2]
+  N, K2 = B.shape[(1 if B.ndim == 3 else 0):]
+  assert K == K2, f"{A.shape} {B.shape}"
+  block_size = 256
+  threads = UOp.special(64 * 8, "lidx0")
+  workgroups = UOp.special((M // block_size) * (N // block_size), "gidx0")
+  sink = UOp.sink(C.base, A.base, B.base, threads, workgroups,
+                  arg=KernelInfo(f"hk_bf16_gemm_{M}_{N}_{K}", estimates=Estimates(ops=2*M*N*K, mem=(M*K+N*K+M*N)*A.dtype.itemsize)))
+  kittens_path = pathlib.Path(__file__).parent.parent/"thunder"/"amd"
+  src = (kittens_path/"gemm_bf16.cpp").read_text()
+  lib = HIPCCCompiler("gfx950", [f"-I{(kittens_path/'include').as_posix()}", "-std=c++20", "-DKITTENS_CDNA4", "-ffast-math",
+                                 "-DHIP_ENABLE_WARP_SYNC_BUILTINS", f"-DGEMM_M={M}", f"-DGEMM_N={N}", f"-DGEMM_K={K}"]).compile_cached(src)
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dname), UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src),
+                               UOp(Ops.BINARY, arg=lib)))
+
 
 # ** backward gemm, might use the asm gemm
 
@@ -2835,7 +2838,7 @@ def asm_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, w_scale:Tensor|None=N
       fxn = functools.partial(custom_hk_fp8_gemm, dname=dname, scale_mode=scale_mode)
       bw = functools.partial(custom_gemm_bw, n_scales=len(scales), has_grad_amax=grad_amax_state is not None, has_w_post=w_post_scale is not None)
       out = Tensor.custom_kernel(out, a, b.T, *scales, *extra, fxn=fxn, grad_fxn=bw)[0]
-    elif a.dtype == dtypes.bfloat16 and getenv("USE_HK_BF16", 0):
+    elif a.dtype == dtypes.bfloat16 and USE_HK_BF16:
       out = Tensor.custom_kernel(out, a, b.T, b, fxn=functools.partial(custom_hk_bf16_gemm, dname=dname), grad_fxn=custom_hk_bf16_gemm_bw)[0]
     else:
       out = Tensor.custom_kernel(out, a, b, fxn=functools.partial(custom_asm_gemm, dname=dname), grad_fxn=custom_gemm_bw)[0]

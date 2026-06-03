@@ -2,8 +2,6 @@
 
 using namespace kittens;
 
-// BF16 output stores rely on rounded float->bf16 conversion in ThunderKittens.
-
 #ifndef GEMM_M
 constexpr int GEMM_M = 8192;
 #endif
