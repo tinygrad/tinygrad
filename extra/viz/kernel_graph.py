@@ -2,6 +2,7 @@
 # Usage: DEBUG=5 python -m tinygrad.viz.cli --json | ./extra/viz/kernel_graph.py > /tmp/kernel_graph.txt
 import argparse, json, sys
 from tinygrad.helpers import ansistrip
+from tinygrad.viz.cli import fmt_all
 
 def get_node(graph:dict, key): return graph[str(key)]
 
@@ -14,7 +15,7 @@ if __name__ == "__main__":
     if not line.strip(): continue
     graph = json.loads(line)
     if graph.get("ref") is not None and (args.kernel == "ALL" or graph["ref"] == ref):
-      print(graph)
+      print(fmt_all(graph))
       if (v:=json.loads(next(sys.stdin, "{}")).get("value")): print(v)
     if ref is not None or not isinstance(rec:=next(iter(graph.values()), {}), dict) or "label" not in rec: continue
     for v in graph.values():
