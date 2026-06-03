@@ -16,8 +16,8 @@ class TestArange(unittest.TestCase):
     return estimate_uop(linear.src[-1]).ops
 
   def test_arange_complexity(self):
-    self.assertEqual(self._get_flops(Tensor.arange(256), np.arange(256)), 0)
-    self.assertEqual(self._get_flops(Tensor.arange(2560), np.arange(2560)), 0)
+    self.assertEqual(self._get_flops(Tensor.arange(256).clone(), np.arange(256)), 0)
+    self.assertEqual(self._get_flops(Tensor.arange(2560).clone(), np.arange(2560)), 0)
 
   @unittest.skipIf(Device.DEFAULT == "CL", "flaky in CI")
   def test_arange_cumsum(self):
@@ -30,7 +30,7 @@ class TestArange(unittest.TestCase):
   def test_eye_complexity(self):
     with Context(NOOPT=1):
       # NOTE: not every backend supports CMPEQ
-      self.assertLessEqual(self._get_flops(Tensor.eye(2560).contiguous(), np.eye(2560)), 2*2560*2560)
+      self.assertLessEqual(self._get_flops(Tensor.eye(2560).clone(), np.eye(2560)), 2*2560*2560)
 
   @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, PTXRenderer), "PTX indexing is weird")
   def test_tri_complexity(self):
