@@ -86,9 +86,9 @@ class TestQuantizeFP8(unittest.TestCase):
 class TestLocalAmax(unittest.TestCase):
   def test_multi_tensor_local_shard_amax(self):
     devices = ("CPU:0", "CPU:1")
-    x = Tensor.arange(16, device=devices[0]).reshape(4, 4).cast(dtypes.float).contiguous().realize().shard(devices, axis=0).realize()
+    x = Tensor.arange(16).reshape(4, 4).cast(dtypes.float).clone(devices[0]).realize().shard(devices, axis=0).realize()
     GlobalCounters.reset()
-    out = (x * local_abs_max(x)).contiguous().realize()
+    out = (x * local_abs_max(x)).clone().realize()
     self.assertEqual(GlobalCounters.kernel_count, 4)
     self.assertEqual(out.tolist(), [[0., 7., 14., 21.], [28., 35., 42., 49.], [120., 135., 150., 165.], [180., 195., 210., 225.]])
 
