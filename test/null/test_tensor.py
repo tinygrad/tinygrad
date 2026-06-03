@@ -102,7 +102,7 @@ class TestIdxUpcast(unittest.TestCase):
   @unittest.skipIf(isinstance(Device[Device.DEFAULT].renderer, (PTXRenderer, NIRRenderer)), "PTX and NIR always converts Ops.INDEX to int64")
   def test_symfold(self):
     # This would cause an overflow, but after sym fold it's within int32
-    a = Tensor.arange(65535)
+    a = Tensor.arange(65535).clone()
     uops = self._schedule_render(a)
     assert all(uop.dtype is not dtypes.long for uop in uops)
 

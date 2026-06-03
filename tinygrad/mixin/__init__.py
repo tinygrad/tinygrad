@@ -42,7 +42,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     new_shape = argfix(shape)
     dt = to_dtype(dtype) if dtype is not None else None
     if isinstance(fill_value, UOp): val = cls.const(dt or fill_value.dtype, fill_value)
-    else: val = cls.const(dt or dtypes.from_py(fill_value), fill_value, None if buffer else canonicalize_device(device))
+    else: val = cls.const(dt or dtypes.from_py(fill_value), fill_value, canonicalize_device(device) if device is not None else None)
     val = val.reshape((1,)*len(new_shape)).expand(new_shape)
     return val.clone(device=device) if buffer else val
 

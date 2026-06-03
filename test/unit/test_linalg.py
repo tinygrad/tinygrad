@@ -83,7 +83,7 @@ class TestLinAlg(unittest.TestCase):
       reconstruction_helper([U, s_diag, V], a)
 
   def test_svd_identity_4x4(self):
-    a = Tensor.eye(4)
+    a = Tensor.eye(4).clone()
     U,S,V = a.svd()
     assert not np.isnan(U.numpy()).any()
     assert not np.isnan(S.numpy()).any()
