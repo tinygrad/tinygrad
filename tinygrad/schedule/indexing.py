@@ -1,12 +1,11 @@
 from typing import Iterator
 import functools, itertools
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from tinygrad.dtype import dtypes, AddrSpace
 from tinygrad.uop.ops import PatternMatcher, UPat, Ops, UOp, resolve, GroupOp, graph_rewrite, sint, AxisType, profile_matches
 from tinygrad.uop.ops import consumer_map_from_toposort, gate_kernel_sink
 from tinygrad.uop.symbolic import symbolic, pm_simplify_valid, pm_drop_and_clauses
 from tinygrad.helpers import argsort, all_same, cpu_profile, PCONTIG, colored, Context, SPEC
-from tinygrad.device import canonicalize_device
 
 ALWAYS_CONTIGUOUS: set[Ops] = {Ops.CONTIGUOUS, Ops.AFTER, Ops.COPY, Ops.BUFFER, Ops.SLICE,
                      Ops.CONST, Ops.BIND, Ops.DEVICE, Ops.MSELECT, Ops.MSTACK, Ops.PARAM,
@@ -73,7 +72,7 @@ def create_bufferize_and_index_based_on_ranges(ctx:IndexingContext, x:UOp):
         # the Bufferize before a COPY is not removable. there should be a better way to do this
         removable = x.op is not Ops.COPY and s.op not in ALWAYS_CONTIGUOUS
         # LOCAL: None in the device assigns it a number later
-        opts = BufferizeOpts(device=canonicalize_device(s.device), removable=removable) if len(ctx.range_map[s][1]) == len(realized_ranges) else \
+        opts = BufferizeOpts(device=s.device, removable=removable) if len(ctx.range_map[s][1]) == len(realized_ranges) else \
                BufferizeOpts(device=s.device, addrspace=AddrSpace.LOCAL, removable=removable)
         new_src = UOp(Ops.STAGE, s.dtype, src=(new_src,)+closed_ranges, arg=opts)
         if x in ctx.range_map: new_src = new_src.index(*[r for i,r in enumerate(ctx.range_map[x][0]) if i in realized_ranges])
@@ -108,6 +107,11 @@ pm_apply_rangeify = PatternMatcher([
   (UPat(GroupOp.All, name="x"), create_bufferize_and_index_based_on_ranges),
   # remove movement op
   (UPat(GroupOp.Movement, name="x"), remove_movement_op_after_rangeify),
+])
+
+pm_fix_deviceless = PatternMatcher([
+  (UPat(Ops.STAGE, name="b"),
+    lambda ctx,b: b.replace(arg=replace(b.arg, device=ctx)) if b.arg.addrspace is AddrSpace.GLOBAL and b.arg.device is None else None),
 ])
 
 @functools.cache
@@ -269,6 +273,8 @@ def run_rangeify(tsink:UOp, debug:bool=False) -> tuple[UOp, IndexingContext]:
   # NOTE: SPEC=3 is broken here with shape
   with Context(SPEC=min(SPEC.value, 2)):
     tsink = graph_rewrite(tsink, pm_apply_rangeify, ctx=rctx, bottom_up=True, name="apply rangeify")
+  # if a deviceless value must materialize, place it on the sink device
+  tsink = graph_rewrite(tsink, pm_fix_deviceless, ctx=tsink.device, name="add device to deviceless")
   return tsink, rctx
 
 def render_ranges(*rngs_list, realized) -> str:
