@@ -166,7 +166,7 @@ class CStyleLanguage(Renderer):
   def render_index(self, buf:UOp, idx:UOp):
     if buf.addrspace in (AddrSpace.ANON, AddrSpace.REG):
       assert idx.op is Ops.CONST, f"{idx.op} must be CONST"
-      return f"{self[buf]}[{idx.arg}]"  # TODO: is this syntax okay?
+      return self[buf]+(f"[{idx.arg}]" if buf.addrspace is AddrSpace.REG or buf.max_numel() > self.gep_arr_threshold else f".{'xyzwabcd'[idx.arg]}")
     else:
       return f"({self[buf]}+{strip_parens(self[idx]) if idx.arg == Ops.ADD else self[idx]})"
 
