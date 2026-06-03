@@ -40,7 +40,7 @@ class _function(Generic[ReturnType]):
     params = get_state_dict((args, kwargs), tensor_type=(Tensor, UOp)).values()
 
     # deduplicate input_uops, keeping the first occurrence index for each unique uop
-    call_uops: list[UOp] = dedup([u for t in params if not ((u:=(t.uop if isinstance(t, Tensor) else t)).base.op is Ops.CONST and u.device is None)])
+    call_uops: list[UOp] = dedup([u for t in params if (u:=(t.uop if isinstance(t, Tensor) else t)).device is not None])
 
     # disable realize/schedule while this is running
     # run it and do surgery later

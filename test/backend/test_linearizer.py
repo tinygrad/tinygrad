@@ -311,12 +311,12 @@ class TestLinearizer(unittest.TestCase):
       assert len(reg_stores) == 0, "STORE to reg should have been simplified"
       assert len([u for u in uops if u.op is Ops.MAX]) <= max_ops, "no unnecessary MAX ops"
 
-    helper(Tensor.arange(5.5, (3.5*300), 3.5), max_ops=2)
-    helper(Tensor.arange(-1, -100, -5), max_ops=2)
+    helper(Tensor.arange(5.5, (3.5*300), 3.5).clone(), max_ops=2)
+    helper(Tensor.arange(-1, -100, -5).clone(), max_ops=2)
     # NOTE: both of these split the reduce (this just wasn't tracked before)
     #helper(Tensor.arange(-3.2, 6.7, 0.64), max_ops=2)
     #helper(Tensor.arange(256), max_ops=2)
-    helper(Tensor.arange(255), max_ops=2)
+    helper(Tensor.arange(255).clone(), max_ops=2)
 
   @unittest.skip("test implicitly depends on certain optimizations")
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.supports_float4, "test requires float4")
