@@ -109,7 +109,7 @@ def uops_to_dtypes(uops:list[UOp]) -> list[DType]:
   ret = []
   seen = set()
   for u in uops:
-    if u.addrspace in (AddrSpace.ANON, None) and u.dtype != dtypes.void and u._shape is not None and (key:=(u.dtype, u.max_numel())) not in seen:
+    if u.addrspace in (AddrSpace.REG, None) and u.dtype != dtypes.void and u._shape is not None and (key:=(u.dtype, u.max_numel())) not in seen:
       # TODO: this eventually needs to be removed
       ret.append(u.dtype.vec(u.max_numel()))
       seen.add(key)
@@ -164,7 +164,7 @@ class CStyleLanguage(Renderer):
     return prg if prefix is None else "\n".join(prefix)+f"\n{prg}"
 
   def render_index(self, buf:UOp, idx:UOp):
-    if buf.addrspace == AddrSpace.ANON:
+    if buf.addrspace == AddrSpace.REG:
       assert idx.op is Ops.CONST, f"{idx.op} must be CONST"
       return self[buf]+(f"[{idx.arg}]" if buf.max_numel() > self.gep_arr_threshold else f".{'xyzwabcd'[idx.arg]}")
     elif buf.addrspace == AddrSpace.REG:
@@ -173,7 +173,7 @@ class CStyleLanguage(Renderer):
     else:
       return f"({self[buf]}+{strip_parens(self[idx]) if idx.arg == Ops.ADD else self[idx]})"
 
-  def _render_dtype(self, dtype:DType, sz:int=1, addrspace=AddrSpace.ANON, mutable=True):
+  def _render_dtype(self, dtype:DType, sz:int=1, addrspace=AddrSpace.REG, mutable=True):
     if isinstance(dtype, ImageDType): return f"{'write_only' if mutable else 'read_only'} image2d_t"
     prefix, suffix = "", ""
     if addrspace in (AddrSpace.LOCAL, AddrSpace.GLOBAL):
@@ -194,7 +194,7 @@ class CStyleLanguage(Renderer):
 
   # LEGACY
   def render_dtype(self, dt:DType, mutable=True) -> str:
-    return self._render_dtype(dt, dt.count, dt.addrspace if isinstance(dt, PtrDType) else AddrSpace.ANON)
+    return self._render_dtype(dt, dt.count, dt.addrspace if isinstance(dt, PtrDType) else AddrSpace.REG)
 
   def __getitem__(self, key): return self.r[key]  # hacky helper
   def _render(self, uops:list[UOp]) -> tuple[str, list[str], list[tuple[str,tuple[UOp,bool]]]]:

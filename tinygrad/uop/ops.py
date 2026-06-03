@@ -290,7 +290,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       case Ops.DEFINE_LOCAL | Ops.DEFINE_REG:
         if len(self.src) >= 1:
           # NOTE: this is the same as PARAM
-          return tuple(self.src[0].sgep(i) for i in range(self.src[0].dtype.count))
+          return tuple(self.src[0].sgep(i) for i in range(self.src[0].dtype.count)) if len(self.src[0].src) else ()
         if isinstance(self.dtype, PtrDType):
           return (self.ptrdtype.size, self.dtype.count) if self.dtype.count > 1 else (self.ptrdtype.size,)
         return (self.dtype.count,) if self.dtype.count > 1 else ()

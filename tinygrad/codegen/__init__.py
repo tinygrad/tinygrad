@@ -8,7 +8,7 @@ from tinygrad.uop.render import pyrender
 from tinygrad.uop.spec import type_verify, spec_tensor, spec_program
 from tinygrad.renderer import Renderer, Estimates
 from tinygrad.renderer.isa import ISARenderer, IselContext, PreRegAllocContext
-from tinygrad.dtype import dtypes, PtrDType, ImageDType
+from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace
 
 # import all pattern matchers here
 from tinygrad.codegen.gpudims import pm_add_gpudims
@@ -35,8 +35,13 @@ pm_index_is_shrink = PatternMatcher([
 pm_remove_vec_dtypes = PatternMatcher([
   # rewrite PARAM to non pointer
   (UPat((Ops.PARAM, Ops.DEFINE_LOCAL, Ops.DEFINE_REG), name="buf"), lambda buf:
-   buf.replace(dtype=buf.dtype.base, src=(UOp.const(dtypes.int, buf.ptrdtype.size),)) \
+   buf.replace(dtype=buf.dtype.base, src=(UOp.const(dtypes.int, buf.ptrdtype.size) \
+                                          if buf.op is not Ops.DEFINE_REG or buf.ptrdtype.size != 1 else UOp(Ops.STACK),)) \
     if isinstance(buf.dtype, PtrDType) and not isinstance(buf.dtype, ImageDType) else None),
+  # no LOADs on register dtypes
+  (UPat(Ops.LOAD, name="x"), lambda x: x.src[0] if x.src[0].addrspace == AddrSpace.REG else None),
+  # don't index on DEFINE_REG with () shape
+  (UPat(Ops.INDEX, name="x"), lambda x: x.src[0] if x.src[0].shape == () else None),
   # remove all vec dtypes
   (UPat(GroupOp.All-{Ops.PARAM, Ops.DEFINE_LOCAL, Ops.DEFINE_REG}, name="x"),
    lambda x: x.replace(dtype=x.dtype.base.scalar().base)),
