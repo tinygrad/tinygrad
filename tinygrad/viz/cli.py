@@ -63,6 +63,16 @@ def get(data:dict, key:str):
   match = difflib.get_close_matches(key, [ansistrip(k) for k in data], n=1, cutoff=0.6)
   raise RuntimeError(f'item "{key}" not found in list'+(f", did you mean {match[0]!r}?" if match else ''))
 
+def fmt_top(k:dict) -> str:
+  return f"{fmt_colored(k['name'])}{' ' * max(0, 38-ansilen(k['name']))} {time_to_str(k['dur_ms']*1e-3, w=9)} {k['count']:7d} {k['pct']:6.2f}%"+\
+      (" "*4+fmt_data(k['fmt']) if k['fmt'] else "")
+
+def fmt_all(k:dict) -> str:
+  if k["device"] in {"MARKER", "SOURCE"}: return f"--- {k['device']} {k['name']}"+(f"/{k['st_ms']:9.2f}ms" if k['st_ms'] else "")
+  ptm = colored(time_to_str(k["dur_ms"]*1e-3, w=9), "yellow" if k["dur_ms"] > 10 else None)
+  name = f"*** {k['device'][:7]:7s} "+k["name"]+" "*(46-ansilen(k["name"]))
+  return f"{name} tm {ptm}/{k['st_ms']:9.2f}ms"+(f" ({fmt_data(k['fmt'])})" if k["fmt"] else "")
+
 def main(args) -> None:
   viz.load_rewrites(viz_data:=viz.VizData(viz.load_pickle(args.rewrites_path, default=RewriteTrace([], [], {}))))
 
@@ -188,14 +198,6 @@ def main(args) -> None:
             elif not file.startswith("<") and not fxn.startswith("<"): fmt["loc"] = line
         yield {"device":dev, "name":fmt_colored(e["name"]), "dur_ms":e["dur"]*1e-3, "st_ms":e["st"]*1e-3, "fmt":fmt, "ref":e["ref"],
                "ext":"\n".join(ext)}
-    def fmt_top(k:dict) -> str:
-      return f"{fmt_colored(k['name'])}{' ' * max(0, 38-ansilen(k['name']))} {time_to_str(k['dur_ms']*1e-3, w=9)} {k['count']:7d} {k['pct']:6.2f}%"+\
-          (" "*4+fmt_data(k['fmt']) if k['fmt'] else "")
-    def fmt_all(k:dict) -> str:
-      if k["device"] in {"MARKER", "SOURCE"}: return f"--- {k['device']} {k['name']}"+(f"/{k['st_ms']:9.2f}ms" if k['st_ms'] else "")
-      ptm = colored(time_to_str(k["dur_ms"]*1e-3, w=9), "yellow" if k["dur_ms"] > 10 else None)
-      name = f"*** {k['device'][:7]:7s} "+k["name"]+" "*(46-ansilen(k["name"]))
-      return f"{name} tm {ptm}/{k['st_ms']:9.2f}ms"+(f" ({fmt_data(k['fmt'])})" if k["fmt"] else "")
     fmt_row = fmt_top if args.t else fmt_all
     seen_refs:set[int] = set()
     def render_event(k:dict, ls=args.list) -> None:

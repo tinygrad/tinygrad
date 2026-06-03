@@ -38,11 +38,13 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     print(Tensor.full((2, 3), False).numpy())
     ```
     """
+    # TODO: enable this check
+    # if not buffer: assert device is None, "buffer=False does not support device specification"
     from tinygrad.uop.ops import UOp
     new_shape = argfix(shape)
     dt = to_dtype(dtype) if dtype is not None else None
     if isinstance(fill_value, UOp): val = cls.const(dt or fill_value.dtype, fill_value)
-    else: val = cls.const(dt or dtypes.from_py(fill_value), fill_value, None if buffer else canonicalize_device(device))
+    else: val = cls.const(dt or dtypes.from_py(fill_value), fill_value, canonicalize_device(device) if device is not None else None)
     val = val.reshape((1,)*len(new_shape)).expand(new_shape)
     return val.clone(device=device) if buffer else val
 
@@ -724,8 +726,8 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     if self.ndim == 0: return self._split_cumalu(axis, Ops.MAX), type(self).zeros(self.shape, dtype=dtypes.int32, device=self.device, buffer=False)
     values, n = self._split_cumalu(axis, Ops.MAX), int(self.shape[axis])
     x, values_t = self.transpose(axis, -1), values.transpose(axis, -1)
-    match = x.unsqueeze(-1).eq(values_t.unsqueeze(-2)) * type(self).ones(n, n, device=self.device, buffer=False).triu()
-    idx = (-(match * type(self).arange(n, 0, -1, device=self.device).reshape(n, 1)).max(-2) + n).cast(dtypes.int32)
+    match = x.unsqueeze(-1).eq(values_t.unsqueeze(-2)) * type(self).ones(n, n, buffer=False).triu()
+    idx = (-(match * type(self).arange(n, 0, -1).reshape(n, 1)).max(-2) + n).cast(dtypes.int32)
     return values, idx.transpose(-1, axis)
 
   def cummin(self, axis:int=0) -> tuple[Self, Self]:
@@ -771,7 +773,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     last_dim_size = x.shape[-1]
     x_unsqueezed = x.unsqueeze(-2).expand((None,)*(self.ndim-1)+(last_dim_size, None))
     x_cummax, _ = x.cummax(-1)
-    mask = type(self).ones(last_dim_size, last_dim_size, device=self.device, buffer=False).tril()
+    mask = type(self).ones(last_dim_size, last_dim_size, buffer=False).tril()
     ret = mask.where(x_unsqueezed - x_cummax.unsqueeze(-1), self.dtype.min).exp().sum(-1).log() + x_cummax
     return ret.transpose(-1, axis)
 
@@ -868,7 +870,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
         x = blue_box.cat(flipped_green_box.flip(flip_dims), dim=crossover_dim)
     x = x.flatten(dim, dim+n_stages-1).shrink_to(self.shape)
     # compute indices for sorted values
-    mask = type(self).ones(orig_len, orig_len, dtype=dtypes.bool, device=self.device, buffer=False).tril()
+    mask = type(self).ones(orig_len, orig_len, dtype=dtypes.bool, buffer=False).tril()
     mask = mask.reshape((None, None) + (1,)*(self.ndim-dim-1))
     def compute_counts(t:Self): return (mask & t.unsqueeze(dim).eq(t.unsqueeze(dim+1))).sum(dim+1)
     count_orig, count_sorted = compute_counts(self), compute_counts(x)
@@ -1075,7 +1077,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     ```
     """
     if reduce not in {None, "add", "multiply"}: raise TypeError(f"{reduce=} must be one of None, 'multiply', or 'add'")
-    if isinstance(src, (int, float, bool)): src = type(self).full(index.shape, src, dtype=self.dtype, device=self.device, buffer=False)
+    if isinstance(src, (int, float, bool)): src = type(self).full(index.shape, src, dtype=self.dtype, buffer=False)
     elif reduce: raise TypeError("non-scalar src is not supported with reduce arg. use scatter_reduce")
     if reduce == "add": return self.scatter_reduce(dim, index, src, "sum", include_self=True)
     if reduce == "multiply": return self.scatter_reduce(dim, index, src, "prod", include_self=True)

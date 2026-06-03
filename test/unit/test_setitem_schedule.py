@@ -9,11 +9,8 @@ class TestSetitemInto(unittest.TestCase):
     t[1] = 5
     self.assertEqual(GlobalCounters.kernel_count, 0)
     t.realize()
-    self.assertEqual(GlobalCounters.kernel_count, 1)
-    self.assertEqual(GlobalCounters.global_mem, 16)
-    t[1].realize()
-    t.realize()
-    self.assertEqual(GlobalCounters.kernel_count, 1)
+    self.assertEqual(GlobalCounters.kernel_count, 0)
+    self.assertEqual(GlobalCounters.global_mem, 0)
     self.assertListEqual(t.tolist(), [[0, 1], [5, 5]])
 
   def test_setitem_into_unrealized_sliced_compute(self):
@@ -25,8 +22,8 @@ class TestSetitemInto(unittest.TestCase):
     w[1] = 99
     self.assertEqual(GlobalCounters.kernel_count, 0)
     w.realize()
-    self.assertEqual(GlobalCounters.kernel_count, 1)
-    self.assertEqual(GlobalCounters.global_mem, 4*4)
+    self.assertEqual(GlobalCounters.kernel_count, 0)
+    self.assertEqual(GlobalCounters.global_mem, 0)
     self.assertListEqual(w.tolist(), [4, 99, 8, 10])
 
   def test_setitem_into_empty(self):
@@ -87,11 +84,8 @@ class TestSetitemInto(unittest.TestCase):
     t[1] = 5
     self.assertEqual(GlobalCounters.kernel_count, 0)
     t.realize()
-    self.assertEqual(GlobalCounters.kernel_count, 1)
-    self.assertEqual(GlobalCounters.global_mem, 4*4)
-    t[1].realize()
-    t.realize()
-    self.assertEqual(GlobalCounters.kernel_count, 1)
+    self.assertEqual(GlobalCounters.kernel_count, 0)
+    self.assertEqual(GlobalCounters.global_mem, 0)
     self.assertListEqual(t.tolist(), [1, 5, 1, 1])
 
   def test_setitem_into_const_alu(self):
@@ -100,11 +94,8 @@ class TestSetitemInto(unittest.TestCase):
     t[1] = 5
     self.assertEqual(GlobalCounters.kernel_count, 0)
     t.realize()
-    self.assertEqual(GlobalCounters.kernel_count, 1)
-    self.assertEqual(GlobalCounters.global_mem, 4*4)
-    t[1].realize()
-    t.realize()
-    self.assertEqual(GlobalCounters.kernel_count, 1)
+    self.assertEqual(GlobalCounters.kernel_count, 0)
+    self.assertEqual(GlobalCounters.global_mem, 0)
     self.assertListEqual(t.tolist(), [2, 5, 2, 2])
 
   def test_setitem_into_arange(self):
@@ -116,7 +107,7 @@ class TestSetitemInto(unittest.TestCase):
     t[1] = 5
     self.assertEqual(GlobalCounters.kernel_count, 0)
     t.realize()
-    self.assertEqual(GlobalCounters.kernel_count, 1)
+    self.assertEqual(GlobalCounters.kernel_count, 0)
     self.assertListEqual(t.tolist(), [0, 5, 2, 3])
 
   def test_setitem_slice_const(self):
