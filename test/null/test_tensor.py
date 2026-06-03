@@ -171,8 +171,10 @@ class TestTensorConstLike(unittest.TestCase):
     t = Tensor.ones(8, 4).shard(devs, axis=0)
     c = t.const_like(5)
     self.assertEqual(c.shape, (8, 4))
-    self.assertEqual(c.device, t.device)
-    self.assertEqual(c.uop.axis, 0)
+    self.assertIsNone(c.device)
+    out = t+c
+    self.assertEqual(out.device, t.device)
+    self.assertEqual(out.uop.axis, 0)
 
   def test_full_like_device_on_multi_raises(self):
     t = Tensor.ones(8, 4).shard(("NULL:0", "NULL:1"), axis=0)
