@@ -4,7 +4,7 @@ inputs:
   python-version:
     description: 'Python version to use'
     required: false
-    default: '3.12'
+    default: '' # if you don't set a version, the native python version will be used
   key:
     description: 'Key for the python cache'
     required: false
@@ -57,8 +57,8 @@ runs:
   using: "composite"
   steps:
     - name: Set up Python ${{ inputs.python-version }}
-      id: setup-python
       uses: actions/setup-python@v6
+      if: inputs.python-version != ''
       with:
         python-version: ${{ inputs.python-version }}
 
@@ -70,14 +70,14 @@ runs:
       uses: actions/cache/restore@v4
       with:
         path: ${{ github.workspace }}/.venv
-        key: venv-${{ runner.os }}-${{ runner.arch }}-python-${{ steps.setup-python.outputs.python-version }}-${{ inputs.deps }}-${{ inputs.pydeps }}-${{ env.CACHE_VERSION }}
+        key: venv-${{ runner.os }}-${{ runner.arch }}-python-${{ inputs.python-version }}-${{ inputs.deps }}-${{ inputs.pydeps }}-${{ env.CACHE_VERSION }}
     - name: Cache Python packages
       if: github.event_name != 'pull_request'
       id: restore-venv
       uses: actions/cache@v5
       with:
         path: ${{ github.workspace }}/.venv
-        key: venv-${{ runner.os }}-${{ runner.arch }}-python-${{ steps.setup-python.outputs.python-version }}-${{ inputs.deps }}-${{ inputs.pydeps }}-${{ env.CACHE_VERSION }}
+        key: venv-${{ runner.os }}-${{ runner.arch }}-python-${{ inputs.python-version }}-${{ inputs.deps }}-${{ inputs.pydeps }}-${{ env.CACHE_VERSION }}
 
     # **** Caching downloads ****
 
@@ -308,7 +308,6 @@ runs:
 
         CMAKE_ARGS="-Wno-dev -G Ninja -DOCELOT_BUILD_TOOLS=OFF -DCMAKE_BUILD_ALWAYS=0 -DBUILD_TESTS_CUDA=OFF -DCMAKE_POLICY_VERSION_MINIMUM=3.5"
         if [[ "${{ runner.os }}" == "macOS" ]]; then
-          sudo xcode-select -s /Applications/Xcode_16.2.app/Contents/Developer
           CMAKE_ARGS="$CMAKE_ARGS -DBoost_INCLUDE_DIR=$(brew --prefix boost)/include -DBoost_LIBRARY_DIR=$(brew --prefix boost)/lib"
         else
           CMAKE_ARGS="$CMAKE_ARGS -DLLVM_DIR=$(llvm-config-15 --cmakedir)"

@@ -183,21 +183,11 @@ jobs:
         DEBUG=2 ALLOW_TF32=1 DEV=PYTHON::sm_80 python3 test/backend/test_ops.py TestOps.test_gemm
         DEBUG=2 DEV=PYTHON::sm_75 python3 test/backend/test_ops.py TestOps.test_gemm_fp16
         ALLOW_TF32=1 DEV=PYTHON::sm_89 python3 -m pytest -nauto test/opt/test_tensor_cores.py
-    - name: Test emulated INTEL OpenCL tensor cores
-      run: DEBUG=2 DEV=PYTHON::INTEL HALF=1 N=64 python3 ./extra/gemm/simple_matmul.py
-    - name: Test emulated AMX tensor cores
-      env:
-        DEV: 'PYTHON::AMX'
-      run: |
-        DEBUG=2 python3 test/backend/test_ops.py TestOps.test_gemm
-        python3 -m pytest -nauto test/opt/test_tensor_cores.py
     - name: Test device flop counts
       run: |
         DEBUG=2 DEV=PYTHON::METAL python3 ./test/null/test_uops_stats.py TestUOpsStatsMatmulHalf
         DEBUG=2 DEV=PYTHON::gfx1100 python3 ./test/null/test_uops_stats.py TestUOpsStatsMatmulHalf
         DEBUG=2 DEV=PYTHON::sm_80 python3 ./test/null/test_uops_stats.py TestUOpsStatsMatmulHalf
-        DEBUG=2 DEV=PYTHON::INTEL python3 ./test/null/test_uops_stats.py TestUOpsStatsMatmulHalf
-        DEBUG=2 DEV=PYTHON::AMX python3 ./test/null/test_uops_stats.py TestUOpsStats.test_simple_matmul
 
   linter:
     name: Linters
@@ -316,7 +306,6 @@ jobs:
       with:
         key: spec-unit
         deps: testing_unit
-        python-version: '3.14'
         llvm: 'true'
     - name: Test SPEC=2
       run: SPEC=2 pytest --maxfail=10 -n auto --durations=30 test/unit test/backend test/opt --ignore test/backend/test_custom_kernel.py --ignore test/unit/test_hashing.py --timeout 60 -k "not test_setitem_big" -k "not test_conv2d_ceildiv_edge_case" --splits 2 --group ${{ matrix.group }}
@@ -428,7 +417,6 @@ jobs:
         with:
           key: onnxoptc
           deps: testing
-          python-version: '3.12'
           llvm: 'true'
       - name: Test ONNX (CPU)
         run: DEV=CPU python -m pytest -n=auto test/external/external_test_onnx_backend.py test/external/external_test_onnx_runner.py test/external/external_test_onnx_ops.py test/backend/test_quantize_onnx.py --durations=20
@@ -448,7 +436,6 @@ jobs:
           key: optim
           deps: testing
           pydeps: "tensorflow==2.19"
-          python-version: '3.12'
           opencl: 'true'
       #- name: Test Optimization Helpers
       #  run: DEBUG=1 python3 extra/optimization/test_helpers.py
@@ -527,7 +514,6 @@ jobs:
       with:
         key: metal
         deps: testing
-        python-version: '3.12'
     - name: Test models (Metal)
       run: DEV=METAL python -m pytest -n=auto test/models --durations=20
     - name: Test LLaMA compile speed
@@ -581,7 +567,6 @@ jobs:
       with:
         key: linux-${{ matrix.dev }}
         deps: testing_unit
-        python-version: '3.12'
         llvm: ${{ contains(matrix.dev, 'LLVM') || contains(matrix.dev, 'LVP') || contains(matrix.dev, 'CLANG') }}
         mesa: ${{ contains(matrix.dev, 'LVP') && 'cpu' || 'false' }}
         webgpu: ${{ matrix.dev == 'WEBGPU' }}
@@ -612,7 +597,6 @@ jobs:
           key: rdna3-emu
           deps: testing_unit
           amd: 'true'
-          python-version: '3.14'
       - name: Verify AMD autogen is up to date
         run: |
           python -m tinygrad.renderer.amd.generate
@@ -759,7 +743,6 @@ jobs:
       with:
         key: unittest-macos
         deps: testing_unit
-        python-version: '3.12'
         amd: 'true'
         ocelot: 'true'
     - name: Run unit tests
@@ -815,7 +798,6 @@ jobs:
       with:
         key: macos-${{ matrix.dev }}
         deps: testing_unit
-        python-version: '3.12'
         llvm: ${{ contains(matrix.dev, 'LLVM') || contains(matrix.dev, 'LVP') }}
         mesa: ${{ contains(matrix.dev, 'LVP') && 'cpu' || 'false' }}
         webgpu: ${{ matrix.dev == 'WEBGPU' }}
@@ -885,7 +867,6 @@ jobs:
           key: compile-${{ matrix.backend }}
           deps: testing_unit
           mesa: ${{ (matrix.backend == 'ir3' || matrix.backend == 'nak') && 'true' }}
-          python-version: '3.12'
       - name: Set env
         shell: bash
         run: printf "NULL_ALLOW_COPYOUT=1\n${{ matrix.backend == 'ir3' && 'DEV=NULL:IR3:a630' || matrix.backend == 'nak' && 'DEV=NULL:NAK:sm_120' }}" >> $GITHUB_ENV
@@ -917,7 +898,6 @@ jobs:
           key: compile-qcomcl
           deps: testing_unit
           tinydreno: 'true'
-          python-version: '3.12'
       - name: Set env
         shell: bash
         run: printf "DEV=NULL:QCOMCL:a630\nNULL_ALLOW_COPYOUT=1" >> $GITHUB_ENV
