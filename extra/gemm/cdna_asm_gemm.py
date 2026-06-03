@@ -2773,27 +2773,25 @@ def custom_gemm_bw(gradient:UOp, kernel:UOp, n_scales:int=2, has_grad_amax:bool=
     ret = (None, grad_a.uop, grad_b.uop) + tuple(None for _ in inputs[3:])
     return ret
   else:
-    out, a, b = inputs
-    assert all_same([gradient.device, a.device, b.device, out.device])
+    hk_bf16 = len(inputs) == 4 and inputs[1].dtype == dtypes.bfloat16
+    if hk_bf16:
+      out, a, b_t, b = inputs
+      assert all_same([gradient.device, a.device, b_t.device, b.device, out.device])
+      # hk bf16 forward consumes b.T, but backward returns the gradient for original b.
+    else:
+      assert len(inputs) == 3, f"regular gemm must have exactly 3 sources, got: {len(inputs)}"
+      out, a, b = inputs
+      assert all_same([gradient.device, a.device, b.device, out.device])
     a_t, b_t, g_t = Tensor(a, device=a.device), Tensor(b, device=a.device), Tensor(gradient, device=a.device)
     g_t = g_t[:a.shape[0]]
+    if hk_bf16 and g_t.dtype != b_t.dtype: g_t = g_t.cast(b_t.dtype)
     if can_use_asm_gemm(g_t, b_t.T): grad_a = asm_gemm(g_t, b_t.T).uop
     else: grad_a = (g_t @ b_t.T).uop
     a_t_flat, g_t_flat = a_t.permute(2, 0, 1).reshape(a_t.shape[2], -1), g_t.reshape(-1, g_t.shape[-1])
     if can_use_asm_gemm(a_t_flat, g_t_flat): grad_b = asm_gemm(a_t_flat, g_t_flat).uop
     else: grad_b = (a_t_flat @ g_t_flat).uop
-    return (None, grad_a, grad_b)
-
-def custom_hk_bf16_gemm_bw(gradient:UOp, kernel:UOp):
-  out, a, b_t, b_orig = kernel.src[1:]
-  assert all_same([gradient.device, a.device, b_t.device, b_orig.device, out.device])
-  a_t, bt_t, g_t = Tensor(a, device=a.device), Tensor(b_t, device=a.device), Tensor(gradient, device=a.device)
-  g_t = g_t[:a.shape[0]]
-  if g_t.dtype != bt_t.dtype: g_t = g_t.cast(bt_t.dtype)
-  grad_a = asm_gemm(g_t, bt_t).uop if can_use_asm_gemm(g_t, bt_t) else (g_t @ bt_t).uop
-  a_t_flat, g_t_flat = a_t.permute(2, 0, 1).reshape(a_t.shape[2], -1), g_t.reshape(-1, g_t.shape[-1])
-  grad_b = asm_gemm(a_t_flat, g_t_flat).uop if can_use_asm_gemm(a_t_flat, g_t_flat) else (a_t_flat @ g_t_flat).uop
-  return (None, grad_a, None, grad_b)
+    # hk_bf16 uses b.T, writes gradients only for a and b
+    return (None, grad_a, None, grad_b) if hk_bf16 else (None, grad_a, grad_b)
 
 # ** main gemm function
 
@@ -2839,7 +2837,7 @@ def asm_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, w_scale:Tensor|None=N
       bw = functools.partial(custom_gemm_bw, n_scales=len(scales), has_grad_amax=grad_amax_state is not None, has_w_post=w_post_scale is not None)
       out = Tensor.custom_kernel(out, a, b.T, *scales, *extra, fxn=fxn, grad_fxn=bw)[0]
     elif a.dtype == dtypes.bfloat16 and USE_HK_BF16:
-      out = Tensor.custom_kernel(out, a, b.T, b, fxn=functools.partial(custom_hk_bf16_gemm, dname=dname), grad_fxn=custom_hk_bf16_gemm_bw)[0]
+      out = Tensor.custom_kernel(out, a, b.T, b, fxn=functools.partial(custom_hk_bf16_gemm, dname=dname), grad_fxn=custom_gemm_bw)[0]
     else:
       out = Tensor.custom_kernel(out, a, b, fxn=functools.partial(custom_asm_gemm, dname=dname), grad_fxn=custom_gemm_bw)[0]
   else:
