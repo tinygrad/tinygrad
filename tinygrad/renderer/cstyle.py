@@ -21,7 +21,7 @@ base_rewrite = PatternMatcher([
 
   # casting
   (UPat(Ops.CAST, name="x"), lambda ctx,x: f"__builtin_convertvector({ctx[x.src[0]]}, {ctx.render_type(x)})" \
-                                              if x.max_numel() > 1 and x.addrspace is AddrSpace.ANON else None),
+    if x.max_numel() > 1 and x.addrspace is AddrSpace.ANON else None),
   (UPat(Ops.CAST, name="x"), lambda ctx,x: f"({ctx.render_cast(x, ctx[x.src[0]])})"),
   (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"__builtin_bit_cast({ctx.render_type(x)}, ({ctx.render_type(x.src[0])})({ctx[x.src[0]]}))"),
 
@@ -105,7 +105,14 @@ pm_manual_bf16_cast = PatternMatcher([
 ])
 
 def uops_to_dtypes(uops:list[UOp]) -> list[DType]:
-  return dedup(u.dtype for u in uops if u.addrspace is AddrSpace.ANON)
+  ret = []
+  seen = set()
+  for u in uops:
+    if u.addrspace in (AddrSpace.ANON, None) and u.dtype != dtypes.void and u._shape is not None and (key:=(u.dtype, u.max_numel())) not in seen:
+      # TODO: this eventually needs to be removed
+      ret.append(u.dtype.vec(u.max_numel()))
+      seen.add(key)
+  return ret
 
 # (name, dims, dtype_in, dtype_out, device, threads, upcast_axes, reduce_axes)
 def wmma_args(uops:list[UOp]):
@@ -266,20 +273,11 @@ class ClangRenderer(CStyleLanguage):
 
   if sys.platform == 'win32':
     kernel_typedef = "__attribute__((ms_abi)) void"
-  def render_vector_prefix(self, u:UOp) -> str:
+  def render_vector_prefix(self, dt:DType) -> str:
     # round (down) to power of two (this is actually the default clang behavior)
-    dt, sz = u.dtype, u.max_numel()
-    alignment = 2**int(math.log2(sz*dt.scalar().itemsize)) if getenv("ALIGNED", 1) and not dtypes.is_bool(dt) else 1
-    return f"typedef {self.render_dtype(dt.scalar())} {self.render_type(u)} __attribute__((aligned({alignment}),ext_vector_type({sz})));"
-  def _render_defines(self, uops:list[UOp]) -> list[str]:
-    ret = []
-    seen = set()
-    for u in uops:
-      if u._shape is not None and u.dtype is not dtypes.void and (sz:=u.max_numel()) > 1 and \
-         u.addrspace in (AddrSpace.ANON, None) and (key:=(u.dtype, sz)) not in seen:
-        ret.append(self.render_vector_prefix(u))
-        seen.add(key)
-    return ret
+    alignment = 2**int(math.log2(dt.itemsize)) if getenv("ALIGNED", 1) and not dtypes.is_bool(dt) else 1
+    return f"typedef {self.render_dtype(dt.scalar())} {self.render_dtype(dt)} __attribute__((aligned({alignment}),ext_vector_type({dt.count})));"
+  def _render_defines(self, uops) -> list[str]: return [self.render_vector_prefix(dt) for dt in uops_to_dtypes(uops) if dt.count > 1]
   def _render_body(self, function_name, kernel, bufs, uops, pref=None) -> str: return super().render_kernel(function_name, kernel, bufs, uops, pref)
   def _render_entry(self, function_name:str, bufs:list[tuple[str,tuple[UOp,bool]]]) -> str: return ""
 
