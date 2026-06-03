@@ -10,8 +10,15 @@ from tinygrad.codegen.late.devectorizer import no_vectorized_alu
 
 
 base_rewrite = PatternMatcher([
-  # defines
-  (UPat(Ops.DEFINE_REG, name="x"), lambda ctx,x: f"{ctx._render_dtype(x.dtype, sz=x.max_numel())} {ctx[x]};"),
+  # define reg as lanes
+  (UPat(Ops.DEFINE_REG, name="x"),
+   lambda ctx,x: f"{ctx._render_dtype(x.dtype, sz=x.max_numel())} {ctx[x]};" if ctx.register_shape_is_lanes else None),
+
+  # define reg as array
+  (UPat(Ops.DEFINE_REG, src=(UPat(Ops.STACK),), name="x"), lambda ctx,x: f"{ctx._render_dtype(x.dtype)} {ctx[x]};"),
+  (UPat(Ops.DEFINE_REG, name="x"), lambda ctx,x: f"{ctx._render_dtype(x.dtype)} {ctx[x]}[{x.max_numel()}];"),
+
+  # define local
   (UPat(Ops.DEFINE_LOCAL, name="x"), lambda ctx,x: f"{ctx.smem_align}{ctx.smem_prefix}{ctx.render_dtype(x.dtype.base)} {ctx[x]}[{x.max_numel()}];"),
 
   # range/if/endif
@@ -121,6 +128,7 @@ def wmma_args(uops:list[UOp]):
 
 class CStyleLanguage(Renderer):
   new_style = True
+  register_shape_is_lanes = False
   kernel_typedef: str = "void"
   buffer_prefix: str = ""
   buffer_suffix: str = ""
@@ -165,11 +173,12 @@ class CStyleLanguage(Renderer):
 
   def render_index(self, buf:UOp, idx:UOp):
     if buf.addrspace == AddrSpace.REG:
-      assert idx.op is Ops.CONST, f"{idx.op} must be CONST"
-      return self[buf]+(f"[{idx.arg}]" if buf.max_numel() > self.gep_arr_threshold else f".{'xyzwabcd'[idx.arg]}")
-    elif buf.addrspace == AddrSpace.REG:
-      # in C this doesn't have to be const
-      return f"{self[buf]}[{self[idx]}]"
+      if self.register_shape_is_lanes:
+        assert idx.op is Ops.CONST, f"{idx.op} must be CONST"
+        return self[buf]+(f"[{idx.arg}]" if buf.max_numel() > self.gep_arr_threshold else f".{'xyzwabcd'[idx.arg]}")
+      else:
+        # in C this doesn't have to be const
+        return f"{self[buf]}[{self[idx]}]"
     else:
       return f"({self[buf]}+{strip_parens(self[idx]) if idx.arg == Ops.ADD else self[idx]})"
 
