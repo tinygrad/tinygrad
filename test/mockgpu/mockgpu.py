@@ -1,15 +1,11 @@
-import ctypes, ctypes.util, time, os, builtins, fcntl
+import ctypes, time, os, builtins, fcntl
 from tinygrad.helpers import DEV
 from tinygrad.runtime.support.hcq import FileIOInterface
+from tinygrad.runtime.autogen import libc
 from test.mockgpu.nv.nvdriver import NVDriver
 from test.mockgpu.amd.amddriver import AMDDriver
 from test.mockgpu.am.amdriver import AMDriver, AMUSBDriver
 start = time.perf_counter()
-
-# *** ioctl lib ***
-libc = ctypes.CDLL(ctypes.util.find_library("c"))
-libc.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long]
-libc.mmap.restype = ctypes.c_void_p
 
 drivers = [cls() for t in DEV.value if (cls:={"MOCKPCI+AMD": AMDriver, "MOCKKFD+AMD": AMDDriver, "MOCK+AMD": AMDDriver, "MOCKUSB+AMD": AMUSBDriver,
                                               "MOCK+NV": NVDriver}.get(f"{t.interface}+{t.device}"))]

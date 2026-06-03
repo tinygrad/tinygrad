@@ -1058,6 +1058,12 @@ class TestSchedule(unittest.TestCase):
     self.assertEqual(a.tolist(), [0., 0.])
     self.assertEqual(b.tolist(), [False, False])
 
+  def test_const_mul(self):
+    b = Tensor(2) * 4
+    self.assertIsNone(b.uop.device)
+    run_linear(*check_schedule(b, 0, filter_sink=False))
+    assert b.item() == 8
+
   def test_mnist_val(self):
     # from tinygrad.nn.datasets import mnist
     import torch
