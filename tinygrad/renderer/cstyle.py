@@ -20,11 +20,10 @@ base_rewrite = PatternMatcher([
   (UPat((Ops.ENDIF, Ops.END)), lambda ctx: "}"),
 
   # casting
-  (UPat(Ops.CAST, name="x"), lambda ctx,x: f"__builtin_convertvector({ctx[x.src[0]]}, {ctx.render_dtype(x.dtype)})" \
-    if x.max_numel() > 1 and x.addrspace is AddrSpace.ANON else None),
+  (UPat(Ops.CAST, name="x"), lambda ctx,x: f"__builtin_convertvector({ctx[x.src[0]]}, {ctx.render_type(x)})" \
+                                              if x.max_numel() > 1 and x.addrspace is AddrSpace.ANON else None),
   (UPat(Ops.CAST, name="x"), lambda ctx,x: f"({ctx.render_cast(x, ctx[x.src[0]])})"),
-  (UPat(Ops.BITCAST, name="x"), lambda ctx,x:
-    f"__builtin_bit_cast({ctx.render_dtype(x.dtype)}, ({ctx.render_dtype(x.src[0].dtype)})({ctx[x.src[0]]}))"),
+  (UPat(Ops.BITCAST, name="x"), lambda ctx,x: f"__builtin_bit_cast({ctx.render_type(x)}, ({ctx.render_type(x.src[0])})({ctx[x.src[0]]}))"),
 
   # GPU stuff
   (UPat(Ops.BARRIER), lambda ctx: ctx.barrier),
@@ -50,15 +49,14 @@ base_rewrite = PatternMatcher([
   (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var('idx'))), lambda ctx,**kwargs: ctx.render_index(**kwargs)),
   (UPat(Ops.SHRINK, src=(UPat.var("buf"), UPat.var('idx'), UPat.cvar())), lambda ctx,**kwargs: ctx.render_index(**kwargs)),
   (UPat(Ops.STACK, name="x"),
-   lambda ctx,x: f"{ctx.float4.replace('float4', ctx.render_dtype(x.dtype))}" + \
-    f"{ctx.float4_style[0]}{','.join([ctx[y] for y in x.src])}{ctx.float4_style[1]}"),
-  (UPat(Ops.GEP, name="x"), lambda ctx,x: ctx[x.src[0]] + \
-    (f"[{x.arg[0]}]" if x.src[0].max_numel() > ctx.gep_arr_threshold else f".{'xyzwabcd'[x.arg[0]]}")),
+   lambda ctx,x: f"{ctx.float4.replace('float4', ctx.render_type(x))}" + \
+                 f"{ctx.float4_style[0]}{','.join([ctx[y] for y in x.src])}{ctx.float4_style[1]}"),
 
   # load/store
-  (UPat(Ops.LOAD, src=(UPat.var('bidx'),)), lambda ctx,bidx: f"(*{ctx[bidx]})"),
-  (UPat(Ops.LOAD, src=(UPat.var("bidx"), UPat.var("var"), UPat.var("gate"))), lambda ctx,bidx,var,gate: f"({ctx[gate]}?*{ctx[bidx]}:{ctx[var]})"),
-  (UPat(Ops.STORE, src=(UPat.var('bidx'), UPat.var("var"))), lambda ctx,bidx,var: f"*{ctx[bidx]} = {ctx[var]};"),
+  (UPat(Ops.LOAD, src=(UPat.var('bidx'),)), lambda ctx,bidx: f"({ctx.render_access(bidx)})"),
+  (UPat(Ops.LOAD, src=(UPat.var("bidx"), UPat.var("var"), UPat.var("gate"))),
+   lambda ctx,bidx,var,gate: f"({ctx[gate]}?{ctx.render_access(bidx)}:{ctx[var]})"),
+  (UPat(Ops.STORE, src=(UPat.var('bidx'), UPat.var("var"))), lambda ctx,bidx,var: f"{ctx.render_access(bidx)} = {ctx[var]};"),
 
   # alu/gep
   (UPat(Ops.WMMA, name="x"), lambda ctx,x: f"__{x.arg[0]}({ctx[x.src[0]]}, {ctx[x.src[1]]}, {ctx[x.src[2]]})"),
@@ -106,8 +104,8 @@ pm_manual_bf16_cast = PatternMatcher([
   (UPat(Ops.CAST, dtype=dtypes.bfloat16, src=(UPat.var("x", dtype=dtypes.float),)), cast_float_to_bf16),
 ])
 
-def uops_to_dtypes(uops:list[UOp]) -> list[tuple[DType, int]]:
-  return dedup((u.dtype, u.max_numel()) for u in uops if u.addrspace is AddrSpace.ANON)
+def uops_to_dtypes(uops:list[UOp]) -> list[DType]:
+  return dedup(u.dtype for u in uops if u.addrspace is AddrSpace.ANON)
 
 # (name, dims, dtype_in, dtype_out, device, threads, upcast_axes, reduce_axes)
 def wmma_args(uops:list[UOp]):
@@ -148,8 +146,8 @@ class CStyleLanguage(Renderer):
     tmp = ""
     if any(isinstance(u.dtype, ImageDType) for _,(u,_) in bufs):
       tmp = "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n"
-    buftypes = [(name, self.render_type(u, mutable)+self.buffer_suffix if u.addrspace == AddrSpace.GLOBAL else
-                self.arg_int_prefix if u.dtype == dtypes.int else None) for name,(u,mutable) in bufs]
+    buftypes = [(name, self._render_dtype(u.dtype, sz=1, addrspace=u.addrspace, mutable=mutable)+self.buffer_suffix \
+                 if u.addrspace == AddrSpace.GLOBAL else self.arg_int_prefix if u.dtype == dtypes.int else None) for name,(u,mutable) in bufs]
     local_dims = [u.src[0] for u in uops if u.op is Ops.SPECIAL and u.arg[0] == "l"]
     launch_bounds = prod([d.vmax for d in local_dims])
     prg = ''.join([f"{self.kernel_typedef.format(launch_bounds=launch_bounds)} {function_name}(",] +
@@ -158,35 +156,28 @@ class CStyleLanguage(Renderer):
     return prg if prefix is None else "\n".join(prefix)+f"\n{prg}"
 
   def render_index(self, buf:UOp, idx:UOp):
-    if buf.addrspace == AddrSpace.ANON:
+    if buf.addrspace in (AddrSpace.ANON, AddrSpace.REG):
       assert idx.op is Ops.CONST, f"{idx.op} must be CONST"
       return f"{self[buf]}[{idx.arg}]"  # TODO: is this syntax okay?
     else:
       return f"({self[buf]}+{strip_parens(self[idx]) if idx.arg == Ops.ADD else self[idx]})"
 
-  def render_type(self, u:UOp, mutable=True):
-    # TODO: get this from the shape
-    if isinstance(u.dtype, ImageDType): return f"{'write_only' if mutable else 'read_only'} image2d_t"
-    if u.addrspace in (AddrSpace.LOCAL, AddrSpace.GLOBAL):
-      prefix = ""
-      if u.addrspace == AddrSpace.LOCAL and self.smem_prefix_for_cast: prefix = self.smem_prefix
-      if u.addrspace == AddrSpace.GLOBAL: prefix = self.buffer_prefix
-      return prefix + self.type_map.get(scalar:=u.dtype.scalar(), scalar.name) + "*"
-    elif (sz:=u.max_numel()) > 1:
-      # pointers
-      return self.type_map.get(scalar:=u.dtype.scalar(), scalar.name).replace(" ", "_") + str(sz)
-    return self.type_map.get(scalar:=u.dtype.scalar(), scalar.name)
+  def _render_dtype(self, dtype:DType, sz:int=1, addrspace=AddrSpace.ANON, mutable=True):
+    if isinstance(dtype, ImageDType): return f"{'write_only' if mutable else 'read_only'} image2d_t"
+    prefix, suffix = "", ""
+    if addrspace in (AddrSpace.LOCAL, AddrSpace.GLOBAL):
+      if addrspace == AddrSpace.LOCAL and self.smem_prefix_for_cast: prefix = self.smem_prefix
+      if addrspace == AddrSpace.GLOBAL: prefix = self.buffer_prefix
+      suffix = "*"
+    if sz > 1:
+      return prefix + self.type_map.get(scalar:=dtype.scalar(), scalar.name).replace(" ", "_") + str(sz) + suffix
+    return prefix + self.type_map.get(scalar:=dtype.scalar(), scalar.name) + suffix
 
-  def render_cast(self, u:UOp, val:str) -> str: return f"({self.render_dtype(u.dtype)})({val})"
+  def render_type(self, u:UOp): return self._render_dtype(u.dtype, u.max_numel(), u.addrspace)
+  def render_access(self, u:UOp): return f"*({self.render_type(u)}){self[u]}" if u.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL) else self[u]
   def render_dtype(self, dt:DType, mutable=True) -> str:
-    if isinstance(dt, ImageDType): return f"{'write_only' if mutable else 'read_only'} image2d_t"
-    if isinstance(dt, PtrDType):
-      prefix = ""
-      if dt.addrspace == AddrSpace.LOCAL and self.smem_prefix_for_cast: prefix = self.smem_prefix
-      if dt.addrspace == AddrSpace.GLOBAL: prefix = self.buffer_prefix
-      return prefix + self.render_dtype(dt.base) + "*"
-    if dt.count > 1: return self.type_map.get(scalar:=dt.scalar(), scalar.name).replace(" ", "_") + str(dt.count)
-    return self.type_map.get(scalar:=dt.scalar(), scalar.name)
+    return self._render_dtype(dt, dt.count, dt.addrspace if isinstance(dt, PtrDType) else AddrSpace.ANON)
+  def render_cast(self, u:UOp, val:str) -> str: return f"({self.render_dtype(u.dtype)})({val})"
 
   def __getitem__(self, key): return self.r[key]  # hacky helper
   def _render(self, uops:list[UOp]) -> tuple[str, list[str], list[tuple[str,tuple[UOp,bool]]]]:
@@ -237,7 +228,7 @@ class CStyleLanguage(Renderer):
         r[u] = l
       else:
         if u.op not in {Ops.RANGE, Ops.DEFINE_LOCAL, Ops.STORE, Ops.DEFINE_REG} and u.dtype != dtypes.void:
-          l = f"{self.render_dtype(u.dtype)} {r[u]} = {l}" + (";" if u.op is not Ops.SPECIAL else "")
+          l = f"{self.render_type(u)} {r[u]} = {l}" + (";" if u.op is not Ops.SPECIAL else "")
         kernel.append("  "*depth + l)
         if prefix: c[prefix] += 1  # if it was used, increment
       if u.op in {Ops.IF, Ops.RANGE}: depth += 1
@@ -275,12 +266,20 @@ class ClangRenderer(CStyleLanguage):
 
   if sys.platform == 'win32':
     kernel_typedef = "__attribute__((ms_abi)) void"
-  def render_vector_prefix(self, dt:DType, sz:int) -> str:
+  def render_vector_prefix(self, u:UOp) -> str:
     # round (down) to power of two (this is actually the default clang behavior)
-    alignment = 2**int(math.log2(dt.itemsize)) if getenv("ALIGNED", 1) and not dtypes.is_bool(dt) else 1
-    return f"typedef {self.render_dtype(dt.scalar())} {self.render_dtype(dt)} __attribute__((aligned({alignment}),ext_vector_type({dt.count})));"
-
-  def _render_defines(self, uops) -> list[str]: return [self.render_vector_prefix(dt) for dt in uops_to_dtypes(uops) if dt.count > 1]
+    dt, sz = u.dtype, u.max_numel()
+    alignment = 2**int(math.log2(sz*dt.scalar().itemsize)) if getenv("ALIGNED", 1) and not dtypes.is_bool(dt) else 1
+    return f"typedef {self.render_dtype(dt.scalar())} {self.render_type(u)} __attribute__((aligned({alignment}),ext_vector_type({sz})));"
+  def _render_defines(self, uops:list[UOp]) -> list[str]:
+    ret = []
+    seen = set()
+    for u in uops:
+      if u._shape is not None and u.dtype is not dtypes.void and (sz:=u.max_numel()) > 1 and \
+         u.addrspace in (AddrSpace.ANON, None) and (key:=(u.dtype, sz)) not in seen:
+        ret.append(self.render_vector_prefix(u))
+        seen.add(key)
+    return ret
   def _render_body(self, function_name, kernel, bufs, uops, pref=None) -> str: return super().render_kernel(function_name, kernel, bufs, uops, pref)
   def _render_entry(self, function_name:str, bufs:list[tuple[str,tuple[UOp,bool]]]) -> str: return ""
 
