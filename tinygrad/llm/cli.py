@@ -149,19 +149,20 @@ class Handler(HTTPRequestHandler):
     raw_body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
     body: dict[str, typing.Any] = json.loads(raw_body.decode("utf-8"))
 
-    # img hack for now
-    if "img" in body:
-      image = cv2.cvtColor(cv2.imread("images/micra.jpg"), cv2.COLOR_BGR2RGB)
-      prefill_img(vis=self.server.vis, lang=self.server.model, image=image, start_pos=len(self.server.model._cached_tokens), res=(640, 640))
-      tokens = [0] * (((640 * 640) // (32*32)) + 8)
-      self.server.model._cached_tokens.extend(tokens)
-      self.send_data(json.dumps({}).encode())
-      return
-
     if DEBUG >= 1: print(json.dumps(body, indent=2))
     if self.path == "/v1/chat/completions":
+
+      # img hack for now
+      ids: list[int] = []
+      if "img" in body:
+        image = cv2.cvtColor(cv2.imread("images/micra.jpg"), cv2.COLOR_BGR2RGB)
+        prefill_img(vis=self.server.vis, lang=self.server.model, image=image, start_pos=len(self.server.model._cached_tokens), res=(640, 640))
+        tokens = [0] * (((640 * 640) // (32*32)) + 8)
+        self.server.model._cached_tokens.extend(tokens)
+        ids.extend(tokens)
+
       # extract tokens, last assistant message is treated as prefill
-      ids: list[int] = tok.prefix()
+      ids.extend(tok.prefix())
       for i, msg in enumerate(body["messages"]):
         ids += tok.role(msg["role"])
         content = msg["content"]
@@ -450,11 +451,11 @@ def main():
   # get tokenizer
   tok = SimpleTokenizer.from_gguf_kv(kv)
 
-  # warmup the JIT
-  if args.warmup or args.serve:
+  # warmup the JIT...removed for now, adds tokens to cache
+  #if args.warmup or args.serve:
     # run 2 tokens through the model twice to capture the JIT before serving
-    with Context(DEBUG=max(DEBUG.value, 1)):
-      for _ in range(2): list(zip(range(2), model.generate([0])))
+    #with Context(DEBUG=max(DEBUG.value, 1)):
+    #  for _ in range(2): list(zip(range(2), model.generate([0])))
 
   # start server
   if args.serve:
