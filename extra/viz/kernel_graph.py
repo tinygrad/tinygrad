@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-# Usage: DEBUG=5 python -m tinygrad.viz.cli --json | ./extra/viz/kernel_graph.py E_8_8_16_4
-import argparse, json, sys
+# Usage: DEBUG=5 python -m tinygrad.viz.cli --json | ./extra/viz/kernel_graph.py > /tmp/kernel_graph.txt
+import argparse, json, sys, itertools
 from tinygrad.helpers import ansistrip
+from tinygrad.viz.cli import fmt_all
 
 def get_node(graph:dict, key): return graph[str(key)]
 
@@ -10,13 +11,15 @@ if __name__ == "__main__":
   parser.add_argument("kernel", type=str, nargs="?", default="ALL", metavar="NAME", help="Kernel name to stop at (default: print all kernels)")
   args = parser.parse_args()
   ref:int|None = None
+  sched_counter = itertools.count(0)
   for line in sys.stdin:
     if not line.strip(): continue
     graph = json.loads(line)
     if graph.get("ref") is not None and (args.kernel == "ALL" or graph["ref"] == ref):
-      print(graph)
+      print(fmt_all(graph), f"ref={graph.get('ref')}")
       if (v:=json.loads(next(sys.stdin, "{}")).get("value")): print(v)
     if ref is not None or not isinstance(rec:=next(iter(graph.values()), {}), dict) or "label" not in rec: continue
+    sched_num = next(sched_counter)
     for v in graph.values():
       if not v["label"].startswith("CALL"): continue
       lines = v["label"].splitlines()
@@ -27,7 +30,7 @@ if __name__ == "__main__":
       for i,(_,s) in enumerate(v["src"][1:]):
         while get_node(graph, s)["label"].startswith("AFTER"): s = get_node(graph, s)["src"][0][1]
         if (num:=unique.get(str(s))) is None: unique[str(s)] = num = len(unique)
-        print(f"SRC {i} {' '.join(get_node(graph, s)['label'].splitlines())} g{num}")
+        print(f"SRC {i} {' '.join(get_node(graph, s)['label'].splitlines())} g{num}-{sched_num}")
       # print access patterns
       ss = [v["src"][0][1]]
       seen:set[str] = set()
