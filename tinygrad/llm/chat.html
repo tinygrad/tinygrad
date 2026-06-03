@@ -10,6 +10,8 @@
            border: none; outline: none; resize: none; border-radius: 24px; field-sizing: content }
 </style></head><body><div id="chat"></div>
 <textarea id="input" rows="1" placeholder="Ask anything" autofocus></textarea>
+  <button style="width:44px;border:none;border-radius:24px;background:#2f2f2f;color:#e3e3e3;cursor:pointer"
+    onclick="fetch('/completions',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({img:true})})">img
 <script>
   input.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); send() } }
   const msgs = [];

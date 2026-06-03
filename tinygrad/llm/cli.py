@@ -148,6 +148,16 @@ class Handler(HTTPRequestHandler):
     tok = self.server.tok
     raw_body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
     body: dict[str, typing.Any] = json.loads(raw_body.decode("utf-8"))
+
+    # img hack for now
+    if "img" in body:
+      image = cv2.cvtColor(cv2.imread("images/micra.jpg"), cv2.COLOR_BGR2RGB)
+      prefill_img(vis=self.server.vis, lang=self.server.model, image=image, start_pos=len(self.server.model._cached_tokens), res=(640, 640))
+      tokens = [0] * (((640 * 640) // (32*32)) + 8)
+      self.server.model._cached_tokens.extend(tokens)
+      self.send_data(json.dumps({}).encode())
+      return
+
     if DEBUG >= 1: print(json.dumps(body, indent=2))
     if self.path == "/v1/chat/completions":
       # extract tokens, last assistant message is treated as prefill
@@ -181,8 +191,8 @@ class Handler(HTTPRequestHandler):
       raise RuntimeError(f"unhandled path {self.path}")
 
 class LLMServer(TCPServerWithReuse):
-  def __init__(self, server_address:tuple, model:Transformer, model_name:str, tok:SimpleTokenizer):
-    self.model, self.model_name, self.tok = model, model_name, tok
+  def __init__(self, server_address:tuple, model:Transformer, model_name:str, tok:SimpleTokenizer, vis=None):
+    self.model, self.model_name, self.tok, self.vis = model, model_name, tok, vis
     super().__init__(server_address, Handler)
 
   
@@ -449,11 +459,7 @@ def main():
   # start server
   if args.serve:
     vis = Qwen3VLVis(size="2B")
-    image = cv2.cvtColor(cv2.imread("images/micra.jpg"), cv2.COLOR_BGR2RGB)
-    prefill_img(vis=vis, lang=model, image=image, start_pos=len(model._cached_tokens), res=(640, 640))
-    tokens = [0] * (((640 * 640) // (32*32)) + 8) # will this work lol
-    model._cached_tokens.extend(tokens)
-    LLMServer(('', args.serve), model, model_name, tok).serve_forever()
+    LLMServer(('', args.serve), model, model_name, tok, vis).serve_forever()
 
   # do benchmark
   if args.benchmark is not None:
