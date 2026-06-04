@@ -8,27 +8,46 @@ import tinygrad.runtime.autogen.amd.rdna3.ins as RDNA3Ops
 pre_isel_matcher = PatternMatcher([
 ])
 
+def imm(dt:DType, v:int) -> UOp: return UOp.const(dt, truncate[dt](v)).rtag()
+def fold_address(x:UOp) -> tuple[UOp, UOp, UOp]:
+  def _disp(v:int) -> UOp: return imm(dtypes.int32 if abs(v) > dtypes.int8.max else dtypes.int8, v)
+  def _cast(v:UOp) -> UOp: return v.cast(dtypes.int64) if v.vmin < 0 else v
+  if x.op is not Ops.INDEX: return (x, UOp(Ops.NOOP), _disp(0))
+  base, idx = x.src
+  disp_scale = base.dtype.itemsize if isinstance(base.dtype, PtrDType) else 1
+  if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: return (base, _cast(idx.src[0]), _disp(idx.src[1].arg * disp_scale))
+  if idx.op is Ops.CONST: return (base, UOp(Ops.NOOP), _disp(idx.arg * disp_scale))
+  return (base, _cast(idx), _disp(0))
+
 isel_matcher = PatternMatcher([
     # SALU Ops
 
     # --- VALU Ops ---
+    # NOTE: VALU-only baseline. SALU (s_*) is an optimization for wave-uniform values; there's no uniformity
+    #       analysis yet, so emitting per-lane VALU is always correct. Don't gate on dtype.count -- that's
+    #       vector *width* within a lane (packed math, v_pk_*), not the SALU/VALU axis.
     # TODO: when to use 64 vs 32 bit embedding? e32/e64
-    # - when we need to pass extra info? 
+    # - when we need to pass extra info?
     # - check spec
-    # unary alu
-    (UPat(Ops.NOOP, name="x"), lambda x: x.ins(RDNA3Ops.v_nop_e32)),
+    # TODO: NOOP is an identity/copy that must forward its source value -- lower to a register copy, not v_nop.
+    #       v_nop produces no result and would drop the value. Needs copy() infra first.
+    # (UPat(Ops.NOOP, name="x"), lambda x: ...),
 
-    (UPat(name="x", dtype=dtypes.float32).sqrt(), lambda x: x.ins(RDNA3Ops.v_sqrt_f32_e32)),
-    (UPat(name="x", dtype=dtypes.float16).sqrt(), lambda x: x.ins(RDNA3Ops.v_sqrt_f16_e32)),
-    (UPat(name="x", dtype=dtypes.float32).sin(), lambda x: x.ins(RDNA3Ops.v_sin_f32_e32)),
-    (UPat(name="x", dtype=dtypes.float16).sin(), lambda x: x.ins(RDNA3Ops.v_sin_f16_e32)),
+    # unary alu -- name the *result* so .ins() inherits the result dtype and default src=(operand,)
+    (UPat(dtype=dtypes.float32).sqrt().named("x"), lambda x: x.ins(RDNA3Ops.v_sqrt_f32_e32)),
+    (UPat(dtype=dtypes.float16).sqrt().named("x"), lambda x: x.ins(RDNA3Ops.v_sqrt_f16_e32)),
+    (UPat(dtype=dtypes.float32).sin().named("x"), lambda x: x.ins(RDNA3Ops.v_sin_f32_e32)),
+    (UPat(dtype=dtypes.float16).sin().named("x"), lambda x: x.ins(RDNA3Ops.v_sin_f16_e32)),
+    (UPat(dtype=dtypes.float64).reciprocal().named("x"), lambda x: x.ins(RDNA3Ops.v_rcp_f64_e32)),
+    (UPat(dtype=dtypes.float32).reciprocal().named("x"), lambda x: x.ins(RDNA3Ops.v_rcp_f32_e32)),
+    (UPat(dtype=dtypes.float16).reciprocal().named("x"), lambda x: x.ins(RDNA3Ops.v_rcp_f16_e32)),
     # Do these decomposed cos expressions get detected in rewrite?
-    (UPat(name="x", dtype=dtypes.float16).cos(), lambda x: x.ins(RDNA3Ops.v_cos_f16_e32)),
-    (UPat(name="x", dtype=dtypes.float32).cos(), lambda x: x.ins(RDNA3Ops.v_cos_f32_e32)),
-    (UPat(name="x", dtype=dtypes.float16).log2(), lambda x: x.ins(RDNA3Ops.v_log_f16_e32)),
-    (UPat(name="x", dtype=dtypes.float32).log2(), lambda x: x.ins(RDNA3Ops.v_log_f32_e32)),
-    (UPat(name="x", dtype=dtypes.float16).exp2(), lambda x: x.ins(RDNA3Ops.v_exp_f16_e32)),
-    (UPat(name="x", dtype=dtypes.float32).exp2(), lambda x: x.ins(RDNA3Ops.v_exp_f32_e32)),
+    (UPat(dtype=dtypes.float16).cos().named("x"), lambda x: x.ins(RDNA3Ops.v_cos_f16_e32)),
+    (UPat(dtype=dtypes.float32).cos().named("x"), lambda x: x.ins(RDNA3Ops.v_cos_f32_e32)),
+    (UPat(dtype=dtypes.float16).log2().named("x"), lambda x: x.ins(RDNA3Ops.v_log_f16_e32)),
+    (UPat(dtype=dtypes.float32).log2().named("x"), lambda x: x.ins(RDNA3Ops.v_log_f32_e32)),
+    (UPat(dtype=dtypes.float16).exp2().named("x"), lambda x: x.ins(RDNA3Ops.v_exp_f16_e32)),
+    (UPat(dtype=dtypes.float32).exp2().named("x"), lambda x: x.ins(RDNA3Ops.v_exp_f32_e32)),
 
     # binary alu
     (UPat(Ops.MAX, dtype=dtypes.float16, name="x"), lambda x: x.ins(RDNA3Ops.v_max_f16_e32 if x.dtype.count > 1 else RDNA3Ops.s_max_f16)),
@@ -101,6 +120,10 @@ isel_matcher = PatternMatcher([
     (UPat(dtype=dtypes.float32).cast(dtypes.float64, name="x"), lambda x: x.ins(RDNA3Ops.v_cvt_f32_f64_e32 if x.dtype.count > 1 else None)),
     (UPat(dtype=dtypes.float32).cast(dtypes.int32, name="x"), lambda x: x.ins(RDNA3Ops.v_cvt_f32_i32_e32 if x.dtype.count > 1 else RDNA3Ops.s_cvt_f32_i32)),
     (UPat(dtype=dtypes.float32).cast(dtypes.uint32, name="x"), lambda x: x.ins(RDNA3Ops.v_cvt_f32_u32_e32 if x.dtype.count > 1 else RDNA3Ops.s_cvt_f32_u32)),
+
+
+    # Memory ops
+    (UPat(Ops.STORE))
 ])
 
 # **** RDNA3 Instruction encoding ****
@@ -112,7 +135,7 @@ encodings = {
 
 class RDNA3Renderer(ISARenderer):
     isel_matcher = isel_matcher
-    code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.SIN, Ops.LOG2, Ops.EXP2, Ops.CMPEQ, Ops.CMPNE)}
+    code_for_op = {x: lambda: None for x in (Ops.SQRT, Ops.SIN, Ops.LOG2, Ops.EXP2, Ops.CMPEQ, Ops.CMPNE, Ops.RECIPROCAL)}
 
     def __init__(self, target:Target):
         super().__init__(target)
