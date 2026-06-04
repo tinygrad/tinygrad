@@ -6,7 +6,6 @@ Each test shows behavior that works without JIT but changes with JIT.
 Comments marked "should be X!" indicate the intuitively expected value.
 
 SILENT MISMATCHES (highest priority - wrong results, no error):
-  class_method_shared_across_instances EASY could check if first arg is self and warn
   slice_assign_requires_realize      MED    assign graph not connected to read during JIT replay
   output_buffer_reuse                MED    performance tradeoff, could add option or better docs
   symbolic_pad_view_frozen           MED    pad view BIND values baked in at capture time
@@ -270,23 +269,6 @@ class TestJitFootguns(unittest.TestCase):
 
     with self.assertRaises(JitError):
       f(a=Tensor([3]), b=Tensor([4]))  # kwargs fail
-
-  def test_class_method_shared_across_instances(self):
-    """JIT on instance methods is shared at class level."""
-    class Model:
-      def __init__(self, scale):
-        self.scale = Tensor([scale])
-      @TinyJit
-      def forward(self, x):
-        return (x * self.scale).realize()
-
-    m1, m2 = Model(2), Model(3)
-
-    m1.forward(Tensor([5]))  # warmup
-    m1.forward(Tensor([5]))  # capture with m1.scale=2
-
-    self.assertEqual(m1.forward(Tensor([5])).item(), 10)
-    self.assertEqual(m2.forward(Tensor([5])).item(), 10)  # should be 15!
 
   def test_side_effects_only_during_capture(self):
     """Function body not executed during JIT replay."""
