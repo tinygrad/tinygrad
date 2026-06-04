@@ -1247,6 +1247,16 @@ class TestMultiAssign(unittest.TestCase):
     out.assign(ones).realize()
     self.assertListEqual(out.tolist(), [1,1,1,1])
 
+  def test_multi_assign_scalar(self):
+    out = Tensor.ones(4).shard(self.device, 0).contiguous().realize()
+    out.assign(0).realize()
+    self.assertListEqual(out.tolist(), [0,0,0,0])
+
+  def test_multi_assign_const_like(self):
+    out = Tensor.ones(4).shard(self.device, 0).contiguous().realize()
+    out.assign(out.const_like(7)).realize()
+    self.assertListEqual(out.tolist(), [7,7,7,7])
+
   def test_multi_assign_piece(self):
     out = Tensor.zeros(4,4).shard(self.device, 0).contiguous().realize()
     ones = Tensor.ones(4,1).shard(self.device, 0).contiguous().realize()
