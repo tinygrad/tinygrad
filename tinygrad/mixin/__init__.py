@@ -19,7 +19,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
   @staticmethod
   def unique_const(fill_value:ConstType, **kwargs): raise NotImplementedError("creation helpers are only supported on Tensor and UOp")
   @staticmethod
-  def const(dtype, b, device=None): raise NotImplementedError("creation helpers are only supported on Tensor and UOp")
+  def const(dtype, b): raise NotImplementedError("creation helpers are only supported on Tensor and UOp")
 
   @classmethod
   def full(cls, shape:tuple[sint, ...], fill_value:ConstType|UOp, dtype:DTypeLike|None=None,
