@@ -159,8 +159,8 @@ class Tensor(OpMixin):
   def alu(self, op: Ops, *src: Tensor) -> Tensor: return self._apply_uop(lambda *u: u[0].alu(op, *u[1:]), *src)
   def const_like(self, b:ConstType) -> Tensor: return Tensor(self.uop.const_like(b))
   @staticmethod
-  def const(dtype:DType, b:ConstType|UOp, device:str|tuple[str, ...]|None=None) -> Tensor:
-    return Tensor(UOp.const(dtype, b, device))
+  def const(dtype:DType, b:ConstType|UOp) -> Tensor:
+    return Tensor(UOp.const(dtype, b))
   @staticmethod
   def unique_const(fill_value:ConstType|UOp, **kwargs) -> Tensor:
     if isinstance(fill_value, UOp): return Tensor(fill_value, **kwargs)
