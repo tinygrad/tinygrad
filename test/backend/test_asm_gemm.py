@@ -82,6 +82,29 @@ def verify_asm_gemm_n_sharded_2d(M:int, N:int, K:int, dtype=dtypes.float16, gpus
 def verify_asm_gemm_k_sharded_3d(batch:int, M:int, N:int, K:int, dtype=dtypes.float16, gpus:int=2) -> None:
   run_asm_gemm((batch, M, K), (K, N), dtype=dtype, a_shard=2, b_shard=0, gpus=gpus)
 
+def run_llama_final_logits_gemm(gpus:int=1) -> None:
+  Tensor.manual_seed(0)
+  batch, seqlen, dim, vocab = 2*gpus, 8192, 4096, 128256
+  x = Tensor.randn(batch, seqlen, dim, dtype=dtypes.float).sub(0.5).cast(dtypes.bfloat16)
+  w = Tensor.randn(vocab, dim, dtype=dtypes.float).sub(0.5).cast(dtypes.bfloat16)
+  dy = Tensor.randn(batch, seqlen, vocab, dtype=dtypes.float).sub(0.5).cast(dtypes.bfloat16)
+  if gpus > 1:
+    devs = tuple(f"{Device.DEFAULT}:{i}" for i in range(gpus))
+    x, w, dy = x.shard(devs, axis=0), w.shard(devs, axis=None), dy.shard(devs, axis=0)
+  with Context(DEBUG=0): Tensor.realize(x, w, dy)
+  logits = asm_gemm(x, w.T)
+  (logits * dy).sum().backward()
+  Tensor.realize(logits, x.grad, w.grad)
+  dname = x.device[0] if isinstance(x.device, tuple) else x.device
+  if dname.startswith("NULL"): return None
+  x_ref, w_ref, dy_ref = x.detach(), w.detach(), dy.detach()
+  ref = x_ref @ w_ref.T
+  (ref * dy_ref).sum().backward()
+  Tensor.realize(ref, x_ref.grad, w_ref.grad)
+  assert logits.allclose(ref, atol=2e-1, rtol=1e-2).item(), "forward mismatch"
+  assert x.grad.allclose(x_ref.grad, atol=2e-1, rtol=2e-2 if gpus > 1 else 1e-2).item(), "grad_x mismatch"
+  assert w.grad.allclose(w_ref.grad, atol=2e-1, rtol=2.5e-2 if gpus > 1 else 1e-2).item(), "grad_w mismatch"
+
 # 128x smaller than usual
 # uses the UOp GEMM, runs on non CDNA4 and CI
 @unittest.skipUnless(dtypes.half in Device[Device.DEFAULT].renderer.supported_dtypes(), "need half")
@@ -221,6 +244,19 @@ class TestGemmLlama(unittest.TestCase):
   def test_llama3_out1(self): verify_asm_gemm(1, 8192, 128256, 4096, dtype=self.dtype)
   def test_llama3_out2(self): verify_asm_gemm(1, 8192, 4096, 128256, dtype=self.dtype)
   def test_llama3_out3(self): verify_asm_gemm(1, 4096, 128256, 8192, dtype=self.dtype)
+
+  def test_llama3_final_logits_bw_hk_bf16_single(self):
+    if self.dtype != dtypes.bfloat16: self.skipTest("final logits HK bf16 test is bf16-only")
+    if not has_hipcc(): self.skipTest("HK bf16 gemm requires hipcc to compile")
+    if not getenv("USE_HK_BF16_GEMM", 0): self.skipTest("set USE_HK_BF16_GEMM=1 to test HK bf16 final logits")
+    run_llama_final_logits_gemm(gpus=1)
+
+  @needs_second_gpu
+  def test_llama3_final_logits_bw_hk_bf16_multi(self):
+    if self.dtype != dtypes.bfloat16: self.skipTest("final logits HK bf16 test is bf16-only")
+    if not has_hipcc(): self.skipTest("HK bf16 gemm requires hipcc to compile")
+    if not getenv("USE_HK_BF16_GEMM", 0): self.skipTest("set USE_HK_BF16_GEMM=1 to test HK bf16 final logits")
+    run_llama_final_logits_gemm(gpus=getenv("GPUS", 8))
 
 def has_hipcc():
   try: system("hipcc --version")
