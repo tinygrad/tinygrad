@@ -79,30 +79,33 @@ isel_matcher = PatternMatcher([
     # ((UPat(Ops.MUL, dtype=dtypes.float32, name="a") + UPat.var("b")).named("c"), lambda ctx,a,b,c: a.ins(RDNA3Ops.v_fma_f32, src=(*a.src, b))),
 
     # comparisons
-    # Notes: 
-    # - No VALU CMPNE for ints?, does that need to be decomposed?
-    # - Do I need to automatically downscale scalar f64?
-    # - figure out EXEC mask protocol, when to emit cmpx ins?
-    (UPat(Ops.CMPEQ, dtypes.int32, (UPat.var("a"), UPat.var("b"))), lambda a,b: a.ins(RDNA3Ops.s_cmp_eq_i32 if a.dtype.count == 1 else RDNA3Ops.v_cmp_eq_i32_e32, src=(a, b))),
-    (UPat(Ops.CMPEQ, dtypes.uint32, (UPat.var("a"), UPat.var("b"))), lambda a,b: a.ins(RDNA3Ops.s_cmp_eq_u32 if a.dtype.count == 1 else RDNA3Ops.v_cmp_eq_u32_e32, src=(a, b))),
-    (UPat(Ops.CMPEQ, src=(UPat(dtype=dtypes.float16), UPat()), name="x"), lambda x: x.ins(RDNA3Ops.v_cmp_eq_f16_e32 if x.dtype.count > 1 else RDNA3Ops.s_cmp_eq_f16)),
-    (UPat(Ops.CMPEQ, src=(UPat(dtype=dtypes.float32), UPat()), name="x"), lambda x: x.ins(RDNA3Ops.v_cmp_eq_f32_e32 if x.dtype.count > 1 else RDNA3Ops.s_cmp_eq_f32)),
-    (UPat(Ops.CMPEQ, src=(UPat(dtype=dtypes.float64), UPat()), name="x"), lambda x: x.ins(RDNA3Ops.v_cmp_eq_f64_e32 if x.dtype.count > 1 else None)),
-    (UPat(Ops.CMPNE, dtypes.int32, (UPat.var("a"), UPat.var("b"))), lambda a,b: a.ins(RDNA3Ops.s_cmp_lg_i32, src=(a, b)) if a.dtype.count == 1 else None),
-    (UPat(Ops.CMPNE, dtypes.uint32, (UPat.var("a"), UPat.var("b"))), lambda a,b: a.ins(RDNA3Ops.s_cmp_lg_u32, src=(a, b)) if a.dtype.count == 1 else None),
-    (UPat(Ops.CMPNE, src=(UPat(dtype=dtypes.float16), UPat()), name="x"), lambda x: x.ins(RDNA3Ops.v_cmp_lg_f16_e32 if x.dtype.count > 1 else RDNA3Ops.s_cmp_lg_f16)),
-    (UPat(Ops.CMPNE, src=(UPat(dtype=dtypes.float32), UPat()), name="x"), lambda x: x.ins(RDNA3Ops.v_cmp_lg_f32_e32 if x.dtype.count > 1 else RDNA3Ops.s_cmp_lg_f32)),
-    (UPat(Ops.CMPNE, src=(UPat(dtype=dtypes.float64), UPat()), name="x"), lambda x: x.ins(RDNA3Ops.v_cmp_lg_f64_e32 if x.dtype.count > 1 else None)),
-    (UPat.var("a", dtypes.int32) < UPat.var("b"), lambda a, b: a.ins(RDNA3Ops.s_cmp_lt_i32 if a.dtype.count == 1 else RDNA3Ops.v_cmp_lt_i32_e32, src=(a,b))),
-    (UPat.var("a", dtypes.uint32) < UPat.var("b"), lambda a, b: a.ins(RDNA3Ops.s_cmp_lt_u32 if a.dtype.count == 1 else RDNA3Ops.v_cmp_lt_u32_e32, src=(a, b))),
-    (UPat.var("a", dtypes.float16) < UPat.var("b"), lambda a, b: a.ins(RDNA3Ops.s_cmp_lt_f16 if a.dtype.count == 1 else RDNA3Ops.v_cmp_lt_f16_e32, src=(a, b))),
-    (UPat.var("a", dtypes.float32) < UPat.var("b"), lambda a, b: a.ins(RDNA3Ops.s_cmp_lt_f32 if a.dtype.count == 1 else RDNA3Ops.v_cmp_lt_f32_e32, src=(a, b))),
-    (UPat.var("a", dtypes.int32) > UPat.var("b"), lambda a, b: a.ins(RDNA3Ops.s_cmp_gt_i32 if a.dtype.count == 1 else RDNA3Ops.v_cmp_gt_i32_e32, src=(a,b))),
-    (UPat.var("a", dtypes.uint32) > UPat.var("b"), lambda a, b: a.ins(RDNA3Ops.s_cmp_gt_u32 if a.dtype.count == 1 else RDNA3Ops.v_cmp_gt_u32_e32, src=(a, b))),
-    (UPat.var("a", dtypes.int32) <= UPat.var("b"), lambda a, b: a.ins(RDNA3Ops.s_cmp_le_i32 if a.dtype.count == 1 else RDNA3Ops.v_cmp_le_i32_e32, src=(a,b))),
-    (UPat.var("a", dtypes.uint32) <= UPat.var("b"), lambda a, b: a.ins(RDNA3Ops.s_cmp_le_u32 if a.dtype.count == 1 else RDNA3Ops.v_cmp_le_u32_e32, src=(a, b))),
-    (UPat.var("a", dtypes.int32) >= UPat.var("b"), lambda a, b: a.ins(RDNA3Ops.s_cmp_ge_i32 if a.dtype.count == 1 else RDNA3Ops.v_cmp_ge_i32_e32, src=(a,b))),
-    (UPat.var("a", dtypes.uint32) >= UPat.var("b"), lambda a, b: a.ins(RDNA3Ops.s_cmp_ge_u32 if a.dtype.count == 1 else RDNA3Ops.v_cmp_ge_u32_e32, src=(a, b))),
+    # Notes:
+    # - VALU CMPNE for ints does exist: v_cmp_ne_{i,u}32_e32 (the s_cmp scalar form is s_cmp_lg_*).
+    # - operand dtype goes in src=(...); the compare node's own dtype is bool (the result), so filtering on
+    #   the second positional UPat arg (== result dtype) never matches an int/float operand.
+    # - name the *result* so the INS replaces the compare and inherits its dtype; default src is already (a,b).
+    # - result dtype is left as bool for now -- TODO: VALU compares write a VCC/EXEC mask, sort out that protocol.
+    (UPat(Ops.CMPEQ, src=(UPat(dtype=dtypes.int32), UPat()), name="x"), lambda x: x.ins(RDNA3Ops.v_cmp_eq_i32_e32)),
+    (UPat(Ops.CMPEQ, src=(UPat(dtype=dtypes.uint32), UPat()), name="x"), lambda x: x.ins(RDNA3Ops.v_cmp_eq_u32_e32)),
+    (UPat(Ops.CMPEQ, src=(UPat(dtype=dtypes.float16), UPat()), name="x"), lambda x: x.ins(RDNA3Ops.v_cmp_eq_f16_e32)),
+    (UPat(Ops.CMPEQ, src=(UPat(dtype=dtypes.float32), UPat()), name="x"), lambda x: x.ins(RDNA3Ops.v_cmp_eq_f32_e32)),
+    (UPat(Ops.CMPEQ, src=(UPat(dtype=dtypes.float64), UPat()), name="x"), lambda x: x.ins(RDNA3Ops.v_cmp_eq_f64_e32)),
+    (UPat(Ops.CMPNE, src=(UPat(dtype=dtypes.int32), UPat()), name="x"), lambda x: x.ins(RDNA3Ops.v_cmp_ne_i32_e32)),
+    (UPat(Ops.CMPNE, src=(UPat(dtype=dtypes.uint32), UPat()), name="x"), lambda x: x.ins(RDNA3Ops.v_cmp_ne_u32_e32)),
+    (UPat(Ops.CMPNE, src=(UPat(dtype=dtypes.float16), UPat()), name="x"), lambda x: x.ins(RDNA3Ops.v_cmp_lg_f16_e32)),
+    (UPat(Ops.CMPNE, src=(UPat(dtype=dtypes.float32), UPat()), name="x"), lambda x: x.ins(RDNA3Ops.v_cmp_lg_f32_e32)),
+    (UPat(Ops.CMPNE, src=(UPat(dtype=dtypes.float64), UPat()), name="x"), lambda x: x.ins(RDNA3Ops.v_cmp_lg_f64_e32)),
+    ((UPat(dtype=dtypes.int32) < UPat()).named("x"), lambda x: x.ins(RDNA3Ops.v_cmp_lt_i32_e32)),
+    ((UPat(dtype=dtypes.uint32) < UPat()).named("x"), lambda x: x.ins(RDNA3Ops.v_cmp_lt_u32_e32)),
+    ((UPat(dtype=dtypes.float16) < UPat()).named("x"), lambda x: x.ins(RDNA3Ops.v_cmp_lt_f16_e32)),
+    ((UPat(dtype=dtypes.float32) < UPat()).named("x"), lambda x: x.ins(RDNA3Ops.v_cmp_lt_f32_e32)),
+    ((UPat(dtype=dtypes.float64) < UPat()).named("x"), lambda x: x.ins(RDNA3Ops.v_cmp_lt_f64_e32)),
+    ((UPat(dtype=dtypes.int32) > UPat()).named("x"), lambda x: x.ins(RDNA3Ops.v_cmp_gt_i32_e32)),
+    ((UPat(dtype=dtypes.uint32) > UPat()).named("x"), lambda x: x.ins(RDNA3Ops.v_cmp_gt_u32_e32)),
+    ((UPat(dtype=dtypes.int32) <= UPat()).named("x"), lambda x: x.ins(RDNA3Ops.v_cmp_le_i32_e32)),
+    ((UPat(dtype=dtypes.uint32) <= UPat()).named("x"), lambda x: x.ins(RDNA3Ops.v_cmp_le_u32_e32)),
+    ((UPat(dtype=dtypes.int32) >= UPat()).named("x"), lambda x: x.ins(RDNA3Ops.v_cmp_ge_i32_e32)),
+    ((UPat(dtype=dtypes.uint32) >= UPat()).named("x"), lambda x: x.ins(RDNA3Ops.v_cmp_ge_u32_e32)),
 
     # casts
     # - whats the difference between:
