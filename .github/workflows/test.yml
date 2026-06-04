@@ -43,15 +43,9 @@ jobs:
         cd $HOME/test_external_dir
         uv venv venv
         uv pip install --python venv $GITHUB_WORKSPACE mypy
+        cp $GITHUB_WORKSPACE/examples/beautiful_mnist.py .
         venv/bin/python -c "from tinygrad.tensor import Tensor; print(Tensor([1,2,3,4,5]))"
         venv/bin/mypy -c "from tinygrad.tensor import Tensor; print(Tensor([1,2,3,4,5]))"
-    - name: Run beautiful_mnist with tinygrad only
-      run: |
-        mkdir $GITHUB_WORKSPACE/test_dir
-        cd $GITHUB_WORKSPACE/test_dir
-        uv venv venv
-        uv pip install --python venv $GITHUB_WORKSPACE
-        cp $GITHUB_WORKSPACE/examples/beautiful_mnist.py .
         BS=2 STEPS=10 MAX_BUFFER_SIZE=0 venv/bin/python beautiful_mnist.py
     - name: Test Docs Build
       run: python -m mkdocs build --strict
