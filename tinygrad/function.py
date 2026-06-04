@@ -22,6 +22,10 @@ pm_ctx = PatternMatcher([
    lambda ctx,x: add_to_ctx(ctx,x) if not x.op_in_backward_slice_with_self(Ops.PARAM) and x.op_in_backward_slice_with_self(Ops.BUFFER) else None),
 ])+pm_transform_unique_const
 
+pm_functionalize_param_assign = PatternMatcher([
+  (UPat(Ops.AFTER, src=(UPat(Ops.PARAM, name="x"), UPat(Ops.STORE, src=(UPat.var("x"), UPat.var("val"))))), lambda x,val: val),
+])
+
 ReturnType = TypeVar('ReturnType')
 class _function(Generic[ReturnType]):
   depth = 0
@@ -41,24 +45,29 @@ class _function(Generic[ReturnType]):
 
     # deduplicate input_uops, keeping the first occurrence index for each unique uop
     call_uops: list[UOp] = dedup([u for t in params if (u:=(t.uop if isinstance(t, Tensor) else t)).device is not None])
+    saved_uops = {t:t.uop for t in params if isinstance(t, Tensor)}
 
     # disable realize/schedule while this is running
     # run it and do surgery later
-    with Context(ALLOW_DEVICE_USAGE=getenv("DEVICE_IN_FUNCTION_BUG", 0)):
-      _function.depth += 1
-      ret = self.fxn(*args, **kwargs)
-      _function.depth -= 1
-    if isinstance(ret, Tensor):
-      uret = ret.uop
-    elif isinstance(ret, tuple) and all(isinstance(x, Tensor) for x in ret):
-      uret = UOp.maketuple(*[x.uop for x in ret])
-    else:
-      raise RuntimeError(f"function return type {type(ret)} not supported")
+    try:
+      with Context(ALLOW_DEVICE_USAGE=getenv("DEVICE_IN_FUNCTION_BUG", 0)):
+        _function.depth += 1
+        try: ret = self.fxn(*args, **kwargs)
+        finally: _function.depth -= 1
+      if isinstance(ret, Tensor):
+        uret = ret.uop
+      elif isinstance(ret, tuple) and all(isinstance(x, Tensor) for x in ret):
+        uret = UOp.maketuple(*[x.uop for x in ret])
+      else:
+        raise RuntimeError(f"function return type {type(ret)} not supported")
+    finally:
+      for t,u in saved_uops.items(): t.uop = u
 
     # replace the known inputs with params (using deduplicated slots)
     subs = {}
     for i,x in enumerate(call_uops): subs[x] = x.param_like(i)
     uret = uret.substitute(subs)
+    uret = graph_rewrite(uret, pm_functionalize_param_assign, name="functionalize_param_assign")
 
     # add contiguous to call_uops
     #call_uops = [x.contiguous() for x in call_uops]
