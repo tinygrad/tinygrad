@@ -35,10 +35,13 @@ __global__ __launch_bounds__(NUM_THREADS, 2) void hk_bf16_atb_gemm(bf16 *C_ptr, 
     kittens::gl<bf16, 1, 1, K, N> B{B_ptr, nullptr, nullptr, nullptr, nullptr};
     kittens::gl<bf16, 1, 1, M, N> C{C_ptr, nullptr, nullptr, nullptr, nullptr};
 
-    using ST_A = st_bf<K_STEP, HALF_BLOCK_SIZE, st_16x32_s>;
-    using ST_B = st_bf<K_STEP, HALF_BLOCK_SIZE, st_16x32_s>;
-    __shared__ ST_A As[2][2];
-    __shared__ ST_B Bs[2][2];
+    __shared__ alignment_dummy __shm[MAX_SHARED_MEMORY / sizeof(alignment_dummy)];
+    shared_allocator al((int*)&__shm[0]);
+
+    using ST_A = st_bf<K_STEP, HALF_BLOCK_SIZE, st_32x16_s>;
+    using ST_B = st_bf<K_STEP, HALF_BLOCK_SIZE, st_32x16_s>;
+    ST_A (&As)[2][2] = al.allocate<ST_A, 2, 2>();
+    ST_B (&Bs)[2][2] = al.allocate<ST_B, 2, 2>();
 
     rt_bf<K_STEP, HALF_REG_BLOCK_M, col_l, rt_32x16_s> A_tile;
     rt_bf<K_STEP, HALF_REG_BLOCK_N, col_l, rt_32x16_s> B_tile_0;
