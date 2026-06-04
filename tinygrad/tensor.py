@@ -263,7 +263,7 @@ class Tensor(OpMixin):
     if not is_disk and x.uop.device is not None and self.device is not None and self.device != x.device:
       raise RuntimeError(f"assign device mismatch {self.device} != {x.device}")
     if not is_disk and self.dtype != x.dtype: raise RuntimeError(f"assign dtype mismatch {self.dtype} != {x.dtype}")
-    if isinstance(self.device, tuple) and self.uop.axis != x.uop.axis: raise RuntimeError(f"multi axis mismatch {self.uop.axis} != {x.uop.axis}")
+    if isinstance(self.device, tuple) and x.uop.device is not None and self.uop.axis != x.uop.axis: raise RuntimeError(f"multi axis mismatch {self.uop.axis} != {x.uop.axis}")
 
     # TODO: this is a hack for writing to DISK. remove with working assign
     if is_disk:
