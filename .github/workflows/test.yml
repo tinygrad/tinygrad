@@ -50,18 +50,15 @@ jobs:
     - name: Test Docs Build
       run: python -m mkdocs build --strict
     - name: Test Docs
-      run: python docs/abstractions3.py
-    - name: Test README
-      run: awk '/```python/{flag=1;next}/```/{flag=0}flag' README.md > README.py &&  python README.py
-    - name: Test Quickstart
-      run: awk '/```python/{flag=1;next}/```/{flag=0}flag' docs/quickstart.md > quickstart.py &&  python quickstart.py
+      run: |
+        parallel --keep-order --link --tagstring '[{1}]' '{2}' \
+          ::: abstractions3 readme quickstart export \
+          ::: 'python docs/abstractions3.py' \
+              $'awk \'/```python/{flag=1;next}/```/{flag=0}flag\' README.md | python' \
+              $'awk \'/```python/{flag=1;next}/```/{flag=0}flag\' docs/quickstart.md | python' \
+              'DEV=CPU python examples/compile_efficientnet.py > recognize.c && clang -O2 recognize.c -lm -o recognize && cat test/models/efficientnet/Chicken.jpg | ./recognize | grep cock'
     - name: Test DEBUG
       run: DEBUG=100 python3 -c "from tinygrad import Tensor; N = 1024; a, b = Tensor.rand(N, N), Tensor.rand(N, N); c = (a.reshape(N, 1, N) * b.T.reshape(1, N, N)).sum(axis=2); print((c.numpy() - (a.numpy() @ b.numpy())).mean())"
-    - name: Compile EfficientNet to C and test it
-      run: |
-        DEV=CPU python examples/compile_efficientnet.py > recognize.c
-        clang -O2 recognize.c -lm -o recognize
-        cat test/models/efficientnet/Chicken.jpg | ./recognize | grep cock
 
   torchbackend:
     name: Torch Backend Tests
