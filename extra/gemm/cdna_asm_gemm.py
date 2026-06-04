@@ -2822,7 +2822,7 @@ def custom_gemm_bw(gradient:UOp, kernel:UOp, n_scales:int=2, has_grad_amax:bool=
     if hk_bf16 and g_t.dtype != b_t.dtype: g_t = g_t.cast(b_t.dtype)
     if can_use_asm_gemm(g_t, b_t.T): grad_a = asm_gemm(g_t, b_t.T).uop
     else: grad_a = (g_t @ b_t.T).uop
-    if hk_bf16 and getenv("USE_HK_BF16_ATB", 0):
+    if hk_bf16 and getenv("USE_HK_BF16_ATB", 1):
       grad_b = hk_bf16_atb_gemm(a_t, g_t).uop
     else:
       a_t_flat, g_t_flat = a_t.permute(2, 0, 1).reshape(a_t.shape[2], -1), g_t.reshape(-1, g_t.shape[-1])
