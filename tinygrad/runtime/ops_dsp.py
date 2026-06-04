@@ -33,6 +33,7 @@ dsp_string = PatternMatcher([
 ])
 
 class DSPRenderer(ClangRenderer):
+  register_shape_is_lanes = True
   supports_float4 = True
   has_threads = False
   buffer_suffix = " restrict __attribute__((align_value(128)))"

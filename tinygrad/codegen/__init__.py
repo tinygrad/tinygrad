@@ -30,6 +30,8 @@ pm_index_is_shrink = PatternMatcher([
     UOp(Ops.SHRINK, dtype=buf.dtype.base, src=(buf, idx, UOp.const(dtypes.int, x.dtype.count))) if isinstance(buf.dtype, PtrDType) else None),
   # rewrite GEP to INDEX
   (UPat(Ops.GEP, name="x"), lambda x: x.replace(op=Ops.INDEX, src=x.src+(UOp.const(dtypes.int, x.arg),), arg=None)),
+  # rewrite full SHRINK to nothing
+  (UPat(Ops.SHRINK, name="x"), lambda x: x.src[0] if x.src[0].shape == x.shape else None),
 ])
 
 pm_remove_vec_dtypes = PatternMatcher([
