@@ -30,7 +30,7 @@ if __name__ == "__main__":
       for i,(_,s) in enumerate(v["src"][1:]):
         while get_node(graph, s)["label"].startswith("AFTER"): s = get_node(graph, s)["src"][0][1]
         if (num:=unique.get(str(s))) is None: unique[str(s)] = num = len(unique)
-        print(f"SRC {i} {' '.join(get_node(graph, s)['label'].splitlines())} id={num}-{sched_num}")
+        print(f"SRC {i} id={num}-{sched_num} {' '.join(get_node(graph, s)['label'].splitlines())}")
       # print access patterns
       ss = [v["src"][0][1]]
       seen:set[str] = set()
