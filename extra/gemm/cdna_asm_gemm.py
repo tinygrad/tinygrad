@@ -2705,32 +2705,48 @@ def custom_hk_bf16_gemm(C:UOp, A:UOp, B:UOp, *args:UOp, dname:str) -> UOp:
   M, K = A.shape[0]*A.shape[1], A.shape[2]
   N, K2 = B.shape[(1 if B.ndim == 3 else 0):]
   assert K == K2, f"{A.shape} {B.shape}"
-  block_size = 256
-  threads = UOp.special(64 * 8, "lidx0")
-  workgroups = UOp.special((M // block_size) * (N // block_size), "gidx0")
+  default_block_m, default_block_n = (512, 128) if N >= 32768 and M % 512 == 0 else (256, 256)
+  block_m, block_n, block_k = getenv("HK_BF16_BLOCK_M", default_block_m), getenv("HK_BF16_BLOCK_N", default_block_n), getenv("HK_BF16_BLOCK_K", 64)
+  warps_row, warps_col = getenv("HK_BF16_WARPS_ROW", 4 if block_m == 512 and block_n == 128 else 2), getenv("HK_BF16_WARPS_COL", 2 if block_m == 512 and block_n == 128 else 4)
+  num_warps = getenv("HK_BF16_NUM_WARPS", warps_row * warps_col)
+  assert M % block_m == 0 and N % block_n == 0 and K % block_k == 0, f"invalid bf16 tile {(block_m, block_n, block_k)} for {(M, N, K)}"
+  assert num_warps == warps_row * warps_col and num_warps in {4, 8}, f"invalid bf16 warp split {(num_warps, warps_row, warps_col)}"
+  threads = UOp.special(64 * num_warps, "lidx0")
+  workgroups = UOp.special((M // block_m) * (N // block_n), "gidx0")
   sink = UOp.sink(C.base, A.base, B.base, threads, workgroups,
                   arg=KernelInfo(f"hk_bf16_gemm_{M}_{N}_{K}", estimates=Estimates(ops=2*M*N*K, mem=(M*K+N*K+M*N)*A.dtype.itemsize)))
   kittens_path = pathlib.Path(__file__).parent.parent/"thunder"/"amd"
   src = (kittens_path/"gemm_bf16.cpp").read_text()
   lib = HIPCCCompiler("gfx950", [f"-I{(kittens_path/'include').as_posix()}", "-std=c++20", "-DKITTENS_CDNA4", "-ffast-math",
-                                 "-DHIP_ENABLE_WARP_SYNC_BUILTINS", f"-DGEMM_M={M}", f"-DGEMM_N={N}", f"-DGEMM_K={K}"]).compile_cached(src)
+                                 "-DHIP_ENABLE_WARP_SYNC_BUILTINS", f"-DGEMM_M={M}", f"-DGEMM_N={N}", f"-DGEMM_K={K}",
+                                 f"-DGEMM_BLOCK_M={block_m}", f"-DGEMM_BLOCK_N={block_n}", f"-DGEMM_BLOCK_K={block_k}",
+                                 f"-DGEMM_NUM_WARPS={num_warps}",
+                                 f"-DGEMM_WARPS_ROW={warps_row}", f"-DGEMM_WARPS_COL={warps_col}"]).compile_cached(src)
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dname), UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src),
-                               UOp(Ops.BINARY, arg=lib)))
+                                UOp(Ops.BINARY, arg=lib)))
 
 @functools.cache
 def custom_hk_bf16_atb_gemm(C:UOp, A:UOp, B:UOp, dname:str) -> UOp:
   K, M = A.shape[0]*A.shape[1], A.shape[2]
   K2, N = B.shape[0]*B.shape[1], B.shape[2]
   assert K == K2, f"{A.shape} {B.shape}"
-  block_size = 256
-  threads = UOp.special(64 * 8, "lidx0")
-  workgroups = UOp.special((M // block_size) * (N // block_size), "gidx0")
+  default_block_m, default_block_n = (512, 128) if N >= 32768 and M % 512 == 0 else (256, 256)
+  block_m, block_n, block_k = getenv("HK_BF16_ATB_BLOCK_M", getenv("HK_BF16_BLOCK_M", default_block_m)), getenv("HK_BF16_ATB_BLOCK_N", getenv("HK_BF16_BLOCK_N", default_block_n)), getenv("HK_BF16_ATB_BLOCK_K", getenv("HK_BF16_BLOCK_K", 64))
+  warps_row, warps_col = getenv("HK_BF16_ATB_WARPS_ROW", getenv("HK_BF16_WARPS_ROW", 4 if block_m == 512 and block_n == 128 else 2)), getenv("HK_BF16_ATB_WARPS_COL", getenv("HK_BF16_WARPS_COL", 2 if block_m == 512 and block_n == 128 else 4))
+  num_warps = getenv("HK_BF16_ATB_NUM_WARPS", getenv("HK_BF16_NUM_WARPS", warps_row * warps_col))
+  assert M % block_m == 0 and N % block_n == 0 and K % block_k == 0, f"invalid bf16 atb tile {(block_m, block_n, block_k)} for {(M, N, K)}"
+  assert num_warps == warps_row * warps_col and num_warps in {4, 8}, f"invalid bf16 atb warp split {(num_warps, warps_row, warps_col)}"
+  threads = UOp.special(64 * num_warps, "lidx0")
+  workgroups = UOp.special((M // block_m) * (N // block_n), "gidx0")
   sink = UOp.sink(C.base, A.base, B.base, threads, workgroups,
                   arg=KernelInfo(f"hk_bf16_atb_gemm_{M}_{N}_{K}", estimates=Estimates(ops=2*M*N*K, mem=(M*K+N*K+M*N)*A.dtype.itemsize)))
   kittens_path = pathlib.Path(__file__).parent.parent/"thunder"/"amd"
   src = (kittens_path/"gemm_bf16_atb.cpp").read_text()
   lib = HIPCCCompiler("gfx950", [f"-I{(kittens_path/'include').as_posix()}", "-std=c++20", "-DKITTENS_CDNA4", "-ffast-math",
-                                 "-DHIP_ENABLE_WARP_SYNC_BUILTINS", f"-DGEMM_M={M}", f"-DGEMM_N={N}", f"-DGEMM_K={K}"]).compile_cached(src)
+                                 "-DHIP_ENABLE_WARP_SYNC_BUILTINS", f"-DGEMM_M={M}", f"-DGEMM_N={N}", f"-DGEMM_K={K}",
+                                 f"-DGEMM_BLOCK_M={block_m}", f"-DGEMM_BLOCK_N={block_n}", f"-DGEMM_BLOCK_K={block_k}",
+                                 f"-DGEMM_NUM_WARPS={num_warps}",
+                                 f"-DGEMM_WARPS_ROW={warps_row}", f"-DGEMM_WARPS_COL={warps_col}"]).compile_cached(src)
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dname), UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src),
                                 UOp(Ops.BINARY, arg=lib)))
 

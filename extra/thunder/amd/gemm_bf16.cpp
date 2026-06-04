@@ -12,21 +12,21 @@ constexpr int GEMM_N = 8192;
 constexpr int GEMM_K = 8192;
 #endif
 
-constexpr int NUM_WARPS = 8;
+constexpr int NUM_WARPS = GEMM_NUM_WARPS;
 using G = kittens::group<NUM_WARPS>;
 
-__global__ __launch_bounds__(512, 2) void hk_bf16_gemm(bf16 *C_ptr, bf16 *A_ptr, bf16 *B_ptr) {
+__global__ __launch_bounds__(GEMM_NUM_WARPS * WARP_THREADS, 2) void hk_bf16_gemm(bf16 *C_ptr, bf16 *A_ptr, bf16 *B_ptr) {
     constexpr int M = GEMM_M, N = GEMM_N, K = GEMM_K;
 
     kittens::gl<bf16, 1, 1, M, K> A{A_ptr, nullptr, nullptr, nullptr, nullptr};
     kittens::gl<bf16, 1, 1, N, K> B{B_ptr, nullptr, nullptr, nullptr, nullptr};
     kittens::gl<bf16, 1, 1, M, N> C{C_ptr, nullptr, nullptr, nullptr, nullptr};
 
-    constexpr int WARPS_COL = 4;
-    constexpr int WARPS_ROW = 2;
-    constexpr int BLOCK_SIZE_ROW = 256;
-    constexpr int BLOCK_SIZE_COL = 256;
-    constexpr int BLOCK_K = 64;
+    constexpr int WARPS_COL = GEMM_WARPS_COL;
+    constexpr int WARPS_ROW = GEMM_WARPS_ROW;
+    constexpr int BLOCK_SIZE_ROW = GEMM_BLOCK_M;
+    constexpr int BLOCK_SIZE_COL = GEMM_BLOCK_N;
+    constexpr int BLOCK_K = GEMM_BLOCK_K;
     constexpr int blocks_per_col = N / BLOCK_SIZE_COL;
     constexpr int k_iters = K / BLOCK_K;
     constexpr int NUM_THREADS = NUM_WARPS * WARP_THREADS;
@@ -97,7 +97,6 @@ __global__ __launch_bounds__(512, 2) void hk_bf16_gemm(bf16 *C_ptr, bf16 *A_ptr,
         __builtin_amdgcn_s_setprio(1);
         mma_ABt(cA, a, b0, cA);
         __builtin_amdgcn_s_setprio(0);
-        __builtin_amdgcn_s_barrier();
 
         auto bs_subtile1 = kittens::subtile_inplace<REG_BLOCK_N, BLOCK_K>(Bs[tic][1], {warp_n, 0});
         load(b1, bs_subtile1);
@@ -105,7 +104,6 @@ __global__ __launch_bounds__(512, 2) void hk_bf16_gemm(bf16 *C_ptr, bf16 *A_ptr,
         __builtin_amdgcn_s_setprio(1);
         mma_ABt(cB, a, b1, cB);
         __builtin_amdgcn_s_setprio(0);
-        __builtin_amdgcn_s_barrier();
 
         auto as_subtile1 = kittens::subtile_inplace<REG_BLOCK_M, BLOCK_K>(As[tic][1], {warp_m, 0});
         load(a, as_subtile1);
@@ -113,9 +111,7 @@ __global__ __launch_bounds__(512, 2) void hk_bf16_gemm(bf16 *C_ptr, bf16 *A_ptr,
         __builtin_amdgcn_s_setprio(1);
         mma_ABt(cC, a, b0, cC);
         __builtin_amdgcn_s_setprio(0);
-        __builtin_amdgcn_s_barrier();
 
-        asm volatile("s_waitcnt lgkmcnt(0)");
         __builtin_amdgcn_s_setprio(1);
         mma_ABt(cD, a, b1, cD);
         __builtin_amdgcn_s_setprio(0);
