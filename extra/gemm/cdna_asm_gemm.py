@@ -2700,8 +2700,6 @@ def custom_uop_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
 
 # ** bf16 A @ B.T kernel in C
 
-USE_HK_BF16_GEMM = getenv("USE_HK_BF16_GEMM", 0)
-
 @functools.cache
 def custom_hk_bf16_gemm(C:UOp, A:UOp, B:UOp, *args:UOp, dname:str) -> UOp:
   M, K = A.shape[0]*A.shape[1], A.shape[2]
@@ -2777,7 +2775,6 @@ def custom_gemm_bw(gradient:UOp, kernel:UOp, n_scales:int=2, has_grad_amax:bool=
     if hk_bf16:
       out, a, b_t, b = inputs
       assert all_same([gradient.device, a.device, b_t.device, b.device, out.device])
-      # hk bf16 forward consumes b.T, but backward returns the gradient for original b.
     else:
       assert len(inputs) == 3, f"regular gemm must have exactly 3 sources, got: {len(inputs)}"
       out, a, b = inputs
@@ -2836,7 +2833,7 @@ def asm_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, w_scale:Tensor|None=N
       fxn = functools.partial(custom_hk_fp8_gemm, dname=dname, scale_mode=scale_mode)
       bw = functools.partial(custom_gemm_bw, n_scales=len(scales), has_grad_amax=grad_amax_state is not None, has_w_post=w_post_scale is not None)
       out = Tensor.custom_kernel(out, a, b.T, *scales, *extra, fxn=fxn, grad_fxn=bw)[0]
-    elif a.dtype == dtypes.bfloat16 and USE_HK_BF16_GEMM:
+    elif a.dtype == dtypes.bfloat16 and getenv("USE_HK_BF16_GEMM"):
       out = Tensor.custom_kernel(out, a, b.T, b, fxn=functools.partial(custom_hk_bf16_gemm, dname=dname), grad_fxn=custom_gemm_bw)[0]
     else:
       out = Tensor.custom_kernel(out, a, b, fxn=functools.partial(custom_asm_gemm, dname=dname), grad_fxn=custom_gemm_bw)[0]
