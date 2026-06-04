@@ -198,7 +198,7 @@ class PTXRenderer(Renderer):
       if u.op is Ops.GEP:
         r[u] = r[u.src[0]][get_single_element(u.arg)]
         continue
-      if u.op in {Ops.CAST, Ops.BITCAST} and (u.src[0].dtype == u.dtype or u.src[0].addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL, AddrSpace.REG)):
+      if u.op in {Ops.CAST, Ops.BITCAST} and (u.src[0].dtype == u.dtype or u.src[0].addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL)):
         r[u] = r[u.src[0]]
         continue
       if u.op is Ops.DEFINE_REG:

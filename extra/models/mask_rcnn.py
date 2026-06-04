@@ -776,7 +776,7 @@ def _bilinear_interpolate(
       y = Tensor.where(ymask[:, None, :], y, 0)
       x = Tensor.where(xmask[:, None, :], x, 0)
     key1 = roi_batch_ind[:, None, None, None, None, None]
-    key2 = Tensor.arange(channels, device=input.device)[None, :, None, None, None, None]
+    key2 = Tensor.arange(channels)[None, :, None, None, None, None]
     key3 = y[:, None, :, None, :, None]
     key4 = x[:, None, None, :, None, :]
     return tensor_getitem(input,key1,key2,key3,key4)  # [K, C, PH, PW, IY, IX]
@@ -802,8 +802,8 @@ def _bilinear_interpolate(
 def _roi_align(input, rois, spatial_scale, pooled_height, pooled_width, sampling_ratio, aligned):
   orig_dtype = input.dtype
   _, _, height, width = input.shape
-  ph = Tensor.arange(pooled_height, device=input.device)
-  pw = Tensor.arange(pooled_width, device=input.device)
+  ph = Tensor.arange(pooled_height)
+  pw = Tensor.arange(pooled_width)
 
   roi_batch_ind = rois[:, 0].cast(dtypes.int32).contiguous()
   offset = 0.5 if aligned else 0.0
@@ -827,14 +827,14 @@ def _roi_align(input, rois, spatial_scale, pooled_height, pooled_width, sampling
 
   if exact_sampling:
     count = max(roi_bin_grid_h * roi_bin_grid_w, 1)
-    iy = Tensor.arange(roi_bin_grid_h, device=input.device)
-    ix = Tensor.arange(roi_bin_grid_w, device=input.device)
+    iy = Tensor.arange(roi_bin_grid_h)
+    ix = Tensor.arange(roi_bin_grid_w)
     ymask = None
     xmask = None
   else:
     count = (roi_bin_grid_h * roi_bin_grid_w).maximum(1)
-    iy = Tensor.arange(height, device=input.device)
-    ix = Tensor.arange(width, device=input.device)
+    iy = Tensor.arange(height)
+    ix = Tensor.arange(width)
     ymask = iy[None, :] < roi_bin_grid_h[:, None]
     xmask = ix[None, :] < roi_bin_grid_w[:, None]
 

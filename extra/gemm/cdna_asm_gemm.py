@@ -2698,6 +2698,64 @@ def custom_uop_gemm(C:UOp, A:UOp, B:UOp) -> UOp:
   store = C.flatten().index((m*UOp.const(dtypes.weakint, N)+n), ptr=True).store(red).end(m, n)
   return store.sink(arg=KernelInfo(name=f'uop_gemm_{M}_{N}_{K}'))
 
+# ** bf16 A @ B.T kernel in C
+
+@functools.cache
+def custom_hk_bf16_gemm(C:UOp, A:UOp, B:UOp, *args:UOp, dname:str) -> UOp:
+  M, K = A.shape[0]*A.shape[1], A.shape[2]
+  N, K2 = B.shape[(1 if B.ndim == 3 else 0):]
+  assert K == K2, f"{A.shape} {B.shape}"
+  block_m, block_n, block_k, num_warps = 256, 256, 64, 8
+  assert M % block_m == 0 and N % block_n == 0 and K % block_k == 0, f"invalid bf16 tile {(block_m, block_n, block_k)} for {(M, N, K)}"
+  threads = UOp.special(64 * num_warps, "lidx0")
+  workgroups = UOp.special((M // block_m) * (N // block_n), "gidx0")
+  sink = UOp.sink(C.base, A.base, B.base, threads, workgroups,
+                  arg=KernelInfo(f"hk_bf16_gemm_{M}_{N}_{K}", estimates=Estimates(ops=2*M*N*K, mem=(M*K+N*K+M*N)*A.dtype.itemsize)))
+  kittens_path = pathlib.Path(__file__).parent.parent/"thunder"/"amd"
+  src = (kittens_path/"gemm_bf16.cpp").read_text()
+  lib = HIPCCCompiler("gfx950", [f"-I{(kittens_path/'include').as_posix()}", "-std=c++20", "-DKITTENS_CDNA4", "-ffast-math",
+                                 "-DHIP_ENABLE_WARP_SYNC_BUILTINS", f"-DGEMM_M={M}", f"-DGEMM_N={N}", f"-DGEMM_K={K}"]).compile_cached(src)
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dname), UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src),
+                                UOp(Ops.BINARY, arg=lib)))
+
+@functools.cache
+def custom_hk_bf16_atb_gemm(C:UOp, A:UOp, B:UOp, dname:str) -> UOp:
+  K, M = A.shape[0]*A.shape[1], A.shape[2]
+  K2, N = B.shape[0]*B.shape[1], B.shape[2]
+  assert K == K2, f"{A.shape} {B.shape}"
+  block_m, block_n, block_k, num_warps = 256, 256, 64, 8
+  assert M % block_m == 0 and N % block_n == 0 and K % block_k == 0, f"invalid bf16 atb tile {(block_m, block_n, block_k)} for {(M, N, K)}"
+  threads = UOp.special(64 * num_warps, "lidx0")
+  workgroups = UOp.special((M // block_m) * (N // block_n), "gidx0")
+  sink = UOp.sink(C.base, A.base, B.base, threads, workgroups,
+                  arg=KernelInfo(f"hk_bf16_atb_gemm_{M}_{N}_{K}", estimates=Estimates(ops=2*M*N*K, mem=(M*K+N*K+M*N)*A.dtype.itemsize)))
+  kittens_path = pathlib.Path(__file__).parent.parent/"thunder"/"amd"
+  src = (kittens_path/"gemm_bf16_atb.cpp").read_text()
+  lib = HIPCCCompiler("gfx950", [f"-I{(kittens_path/'include').as_posix()}", "-std=c++20", "-DKITTENS_CDNA4", "-ffast-math",
+                                 "-DHIP_ENABLE_WARP_SYNC_BUILTINS", f"-DGEMM_M={M}", f"-DGEMM_N={N}", f"-DGEMM_K={K}"]).compile_cached(src)
+  return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dname), UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src),
+                                UOp(Ops.BINARY, arg=lib)))
+
+def hk_bf16_atb_gemm(a:Tensor, b:Tensor) -> Tensor:
+  assert a.dtype == b.dtype == dtypes.bfloat16, f"expected bf16, got {a.dtype} {b.dtype}"
+  assert a.ndim == b.ndim == 3 and a.shape[:2] == b.shape[:2], f"{a.shape} {b.shape}"
+  batch, rows, M = a.shape
+  N = b.shape[2]
+  assert M % TILE_M == 0 and N % TILE_N == 0 and (batch * rows) % TILE_K == 0, \
+    f"atb shape {a.shape} {b.shape} must produce (M,N,K) multiples of ({TILE_M},{TILE_N},{TILE_K})"
+  is_multi = isinstance(a.device, tuple)
+  if is_multi:
+    out = Tensor(Tensor.invalids(1, M, N, dtype=a.dtype, device=a.device).uop.multi(0), device=a.device)
+    dname = a.device[0]
+  else:
+    out = Tensor.invalids(1, M, N, dtype=a.dtype, device=a.device)
+    dname = a.device
+  dname = dname.split(":")[0]
+  out = Tensor.custom_kernel(out, a, b, fxn=functools.partial(custom_hk_bf16_atb_gemm, dname=dname))[0]
+  if is_multi: out = out.sum(0)
+  return out.squeeze(0) if out.ndim == 3 else out
+
+
 # ** backward gemm, might use the asm gemm
 
 def custom_gemm_bw(gradient:UOp, kernel:UOp, n_scales:int=2, has_grad_amax:bool=False, has_w_post:bool=False):
@@ -2751,16 +2809,27 @@ def custom_gemm_bw(gradient:UOp, kernel:UOp, n_scales:int=2, has_grad_amax:bool=
     ret = (None, grad_a.uop, grad_b.uop) + tuple(None for _ in inputs[3:])
     return ret
   else:
-    out, a, b = inputs
-    assert all_same([gradient.device, a.device, b.device, out.device])
+    hk_bf16 = len(inputs) == 4 and inputs[1].dtype == dtypes.bfloat16
+    if hk_bf16:
+      out, a, b_t, b = inputs
+      assert all_same([gradient.device, a.device, b_t.device, b.device, out.device])
+    else:
+      assert len(inputs) == 3, f"regular gemm must have exactly 3 sources, got: {len(inputs)}"
+      out, a, b = inputs
+      assert all_same([gradient.device, a.device, b.device, out.device])
     a_t, b_t, g_t = Tensor(a, device=a.device), Tensor(b, device=a.device), Tensor(gradient, device=a.device)
     g_t = g_t[:a.shape[0]]
+    if hk_bf16 and g_t.dtype != b_t.dtype: g_t = g_t.cast(b_t.dtype)
     if can_use_asm_gemm(g_t, b_t.T): grad_a = asm_gemm(g_t, b_t.T).uop
     else: grad_a = (g_t @ b_t.T).uop
-    a_t_flat, g_t_flat = a_t.permute(2, 0, 1).reshape(a_t.shape[2], -1), g_t.reshape(-1, g_t.shape[-1])
-    if can_use_asm_gemm(a_t_flat, g_t_flat): grad_b = asm_gemm(a_t_flat, g_t_flat).uop
-    else: grad_b = (a_t_flat @ g_t_flat).uop
-    return (None, grad_a, grad_b)
+    if hk_bf16 and getenv("USE_HK_BF16_ATB", 1):
+      grad_b = hk_bf16_atb_gemm(a_t, g_t).uop
+    else:
+      a_t_flat, g_t_flat = a_t.permute(2, 0, 1).reshape(a_t.shape[2], -1), g_t.reshape(-1, g_t.shape[-1])
+      if can_use_asm_gemm(a_t_flat, g_t_flat): grad_b = asm_gemm(a_t_flat, g_t_flat).uop
+      else: grad_b = (a_t_flat @ g_t_flat).uop
+    # hk_bf16 uses b.T, writes gradients only for a and b
+    return (None, grad_a, None, grad_b) if hk_bf16 else (None, grad_a, grad_b)
 
 # ** main gemm function
 
@@ -2805,6 +2874,8 @@ def asm_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, w_scale:Tensor|None=N
       fxn = functools.partial(custom_hk_fp8_gemm, dname=dname, scale_mode=scale_mode)
       bw = functools.partial(custom_gemm_bw, n_scales=len(scales), has_grad_amax=grad_amax_state is not None, has_w_post=w_post_scale is not None)
       out = Tensor.custom_kernel(out, a, b.T, *scales, *extra, fxn=fxn, grad_fxn=bw)[0]
+    elif a.dtype == dtypes.bfloat16 and getenv("USE_HK_BF16_GEMM"):
+      out = Tensor.custom_kernel(out, a, b.T, b, fxn=functools.partial(custom_hk_bf16_gemm, dname=dname), grad_fxn=custom_gemm_bw)[0]
     else:
       out = Tensor.custom_kernel(out, a, b, fxn=functools.partial(custom_asm_gemm, dname=dname), grad_fxn=custom_gemm_bw)[0]
   else:
