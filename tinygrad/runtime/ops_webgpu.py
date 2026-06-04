@@ -7,8 +7,20 @@ from tinygrad.runtime.support import c
 from typing import Callable
 import ctypes
 
-backend_types = {v: k for k, v in webgpu.enum_WGPUBackendType.items()}
-instance = webgpu.wgpuCreateInstance(webgpu.WGPUInstanceDescriptor(features=webgpu.WGPUInstanceFeatures(timedWaitAnyEnable=True)))
+_WEBGPU_DAWN_ERROR = (
+  "WEBGPU requires Dawn (webgpu_dawn), but the Dawn library was not found or is missing required symbols. "
+  "Install pydawn from https://github.com/wpmed92/pydawn/releases/tag/v0.3.0 or set WEBGPU_PATH to your Dawn library."
+)
+
+def _initialize_webgpu():
+  try:
+    backend_types = {v: k for k, v in webgpu.enum_WGPUBackendType.items()}
+    instance = webgpu.wgpuCreateInstance(webgpu.WGPUInstanceDescriptor(features=webgpu.WGPUInstanceFeatures(timedWaitAnyEnable=True)))
+  except (AttributeError, OSError):
+    raise RuntimeError(_WEBGPU_DAWN_ERROR) from None
+  return backend_types, instance
+
+backend_types, instance = _initialize_webgpu()
 
 def from_wgpu_str(string_view:webgpu.WGPUStringView) -> str: return ctypes.string_at(string_view.data, string_view.length).decode()
 def to_wgpu_str(_str:str) -> webgpu.WGPUStringView: return webgpu.WGPUStringView(data=ctypes.create_string_buffer(_str.encode()), length=len(_str))
