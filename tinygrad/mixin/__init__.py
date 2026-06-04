@@ -94,7 +94,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     return cls.full(argfix(*shape), 1.0, **kwargs)
 
   @classmethod
-  def arange(cls, start, stop=None, step=1, **kwargs) -> Self:
+  def arange(cls, start, stop=None, step=1, dtype:DTypeLike|None=None) -> Self:
     """
     Returns a 1-D tensor of size `ceil((stop - start) / step)` with values from `[start, stop)`, with spacing between values given by `step`.
 
@@ -116,15 +116,15 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     ```
     """
     if stop is None: stop, start = start, 0
-    dtype = kwargs.pop("dtype", dtypes.default_float if any(isinstance(x, float) for x in (start, stop, step)) else dtypes.default_int)
+    if dtype is None: dtype = dtypes.default_float if any(isinstance(x, float) for x in (start, stop, step)) else dtypes.default_int
     lo, hi = (start, stop-step) if step > 0 else (stop-step, start)
     if lo < (dt:=to_dtype(dtype)).min or dt.max < hi: raise OverflowError(f"arange [{start}, {stop}) is not representable in dtype {dtype}")
     # NOTE: this matches numpy, torch raises RuntimeError if stop-start and step have different signs
-    if (output_len:=ceildiv(stop-start, step)) <= 0: return cls.full((0,), 0, dtype=dtype, buffer=False, **kwargs)
-    return (cls.full((output_len,), step, dtype=dtype, buffer=False, **kwargs)._cumalu(0, Ops.ADD) + (start - step)).cast(dtype)
+    if (output_len:=ceildiv(stop-start, step)) <= 0: return cls.full((0,), 0, dtype=dtype, buffer=False)
+    return (cls.full((output_len,), step, dtype=dtype, buffer=False)._cumalu(0, Ops.ADD) + (start - step)).cast(dtype)
 
   @classmethod
-  def linspace(cls, start:int|float, stop:int|float, steps:int, **kwargs) -> Self:
+  def linspace(cls, start:int|float, stop:int|float, steps:int, dtype:DTypeLike|None=None) -> Self:
     """
     Returns a 1-D tensor of `steps` evenly spaced values from `start` to `stop`, inclusive.
 
@@ -136,9 +136,9 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     ```
     """
     if steps < 0: raise ValueError("number of steps must be non-negative")
-    if (dtype := to_dtype(kwargs.pop("dtype", dtypes.default_float))) == dtypes.bool: raise ValueError("linspace with bool dtype is not supported")
-    if steps == 1: return cls.full((1,), start, dtype=dtype, buffer=False, **kwargs)
-    return (start + cls.arange(steps, dtype=dtypes.default_float, **kwargs) * ((stop - start) / (steps - 1))).cast(dtype)
+    if (dtype := to_dtype(dtype or dtypes.default_float)) == dtypes.bool: raise ValueError("linspace with bool dtype is not supported")
+    if steps == 1: return cls.full((1,), start, dtype=dtype, buffer=False)
+    return (start + cls.arange(steps, dtype=dtypes.default_float) * ((stop - start) / (steps - 1))).cast(dtype)
 
   @classmethod
   def eye(cls, n:int, m:int|None=None, dtype:DTypeLike|None=None) -> Self:
