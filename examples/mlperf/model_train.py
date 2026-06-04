@@ -1476,7 +1476,7 @@ def train_llama3():
     grad_norm = optim.fstep(grads)
     scheduler.step()
 
-    for g in grads: g.assign(g.const_like(0))
+    for g in grads: g.assign(0)
 
     lr_cpu = optim.lr.float().to("CPU")
     grad_norm_cpu = grad_norm.float().to("CPU")
