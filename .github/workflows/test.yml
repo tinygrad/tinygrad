@@ -525,14 +525,8 @@ jobs:
         deps: testing
         llvm: "true"
         qemu: "true"
-    - name: Set MOCKDSP env
-      run: printf "MOCKDSP=1" >> $GITHUB_ENV
-    - name: Run test_tiny on DSP
-      run: DEBUG=2 DEV=DSP python test/test_tiny.py
-    - name: Test transcendentals
-      run: DEBUG=2 DEV=DSP python test/backend/test_transcendental.py TestTranscendentalVectorized
-    - name: Test quantize onnx
-      run: DEBUG=2 DEV=DSP python3 test/backend/test_quantize_onnx.py
+    - name: Run tests
+      run: MOCKDSP=1 DEV=DSP python -m pytest -n=auto test/test_tiny.py test/backend/test_transcendental.py::TestTranscendentalVectorized test/backend/test_quantize_onnx.py
 
   testlinux:
     strategy:
