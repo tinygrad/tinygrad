@@ -189,6 +189,24 @@ def run_llama_final_logits_gemm(gpus:int=1) -> None:
   _assert_allclose("final logits grad_x", x.grad, x_ref.grad, atol=2e-1, rtol=2e-2 if gpus > 1 else 1e-2)
   _assert_allclose("final logits grad_w", w.grad, w_ref.grad, atol=2e-1, rtol=2.5e-2 if gpus > 1 else 1e-2)
 
+def run_llama_w13_fp8_gemm() -> None:
+  Tensor.manual_seed(0)
+  batch, seqlen, dim, hidden2 = 2, 8192, 4096, 28672
+  x = Tensor.randn(batch, seqlen, dim, dtype=dtypes.float).sub(0.5).cast(dtypes.bfloat16)
+  w = Tensor.randn(hidden2, dim, dtype=dtypes.float).sub(0.5).cast(dtypes.bfloat16)
+  dy = Tensor.randn(batch, seqlen, hidden2, dtype=dtypes.float).sub(0.5).cast(dtypes.bfloat16)
+  with Context(DEBUG=0): Tensor.realize(x, w, dy)
+  x_fp8, x_scale, _ = quantize_fp8(x)
+  w_fp8, w_scale, _ = quantize_fp8(w)
+  grad_amax_state = Tensor.full((), FP8_MAX, dtype=dtypes.float32).contiguous()
+  with Context(DEBUG=0): Tensor.realize(x_fp8, x_scale, w_fp8, w_scale, grad_amax_state)
+  out = asm_gemm(x_fp8, w_fp8.T, x_scale=x_scale, w_scale=w_scale, grad_amax_state=grad_amax_state)
+  (out * dy).sum().backward()
+  Tensor.realize(out, x_fp8.grad, w_fp8.grad)
+  assert out.shape == (batch, seqlen, hidden2)
+  assert x_fp8.grad.shape == x_fp8.shape
+  assert w_fp8.grad.shape == w_fp8.shape
+
 # 128x smaller than usual
 # uses the UOp GEMM, runs on non CDNA4 and CI
 @unittest.skipUnless(dtypes.half in Device[Device.DEFAULT].renderer.supported_dtypes(), "need half")
@@ -334,6 +352,12 @@ class TestGemmLlama(unittest.TestCase):
     if not has_hipcc(): self.skipTest("HK bf16 gemm requires hipcc to compile")
     if not getenv("USE_HK_BF16_GEMM", 0): self.skipTest("set USE_HK_BF16_GEMM=1 to test HK bf16 final logits")
     run_llama_final_logits_gemm(gpus=1)
+
+  def test_llama3_w13_bw_fp8_null(self):
+    if self.dtype != FP8_DTYPE: self.skipTest("w13 FP8 bw test is fp8-only")
+    if not str(Device.DEFAULT).startswith("NULL"): self.skipTest("w13 FP8 bw kernel-shape test is NULL-only")
+    if getenv("FAST_FP8_TRANSPOSE", 0): self.skipTest("expects the regular fp8 permute+reshape transpose kernel")
+    run_llama_w13_fp8_gemm()
 
   @needs_second_gpu
   def test_llama3_final_logits_bw_hk_bf16_multi(self):
