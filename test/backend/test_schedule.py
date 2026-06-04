@@ -1099,6 +1099,12 @@ class TestSchedule(unittest.TestCase):
       run_linear(*check_schedule(a, 0, filter_sink=False))
       self.assertListEqual(a.tolist(), [[1.]*shape[1]]*shape[0])
 
+  def test_deviceless_materialize_localizes_to_target(self):
+    dev = "CPU" if Device.DEFAULT != "CPU" else "CPU:1"
+    t = Tensor.arange(Variable("s", 1, 128).bind(64)).cumsum().clone(dev)
+    self.assertEqual(t.device, dev)
+    np.testing.assert_equal(t[:64].numpy(), np.arange(64).cumsum())
+
 class TestLimitBufs(unittest.TestCase):
   @unittest.skipIf(DEV.interface.startswith("MOCK") and Device.DEFAULT == "NV", "crashes in ocelot")
   def test_limit_bufs_with_var(self):
