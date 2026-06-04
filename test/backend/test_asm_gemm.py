@@ -5,6 +5,90 @@ from extra.gemm.cdna_asm_gemm import asm_gemm
 from test.helpers import needs_second_gpu
 from examples.mlperf.models.flat_llama import FP8_DTYPE, quantize_fp8, FP8_MAX
 
+def _assert_allclose(name:str, got:Tensor, expected:Tensor, atol:float, rtol:float) -> None:
+  if got.allclose(expected, atol=atol, rtol=rtol).item(): return
+  raise AssertionError(_allclose_mismatch_message(name, got, expected, atol, rtol))
+
+def _allclose_mismatch_message(name:str, got:Tensor, expected:Tensor, atol:float, rtol:float) -> str:
+  import numpy as np
+  got_np, expected_np = got.numpy(), expected.numpy()
+  got_flat, expected_flat = got_np.reshape(-1), expected_np.reshape(-1)
+  total, chunk_size = got_flat.size, 1_000_000
+  mismatch_count = first_bad = max_abs_idx = max_rel_idx = max_margin_idx = None
+  max_abs = max_rel = max_margin = -1.0
+  top:list[tuple[float, int]] = []
+  for start in range(0, total, chunk_size):
+    end = min(start+chunk_size, total)
+    g, e = got_flat[start:end].astype(np.float32), expected_flat[start:end].astype(np.float32)
+    diff = np.abs(g-e)
+    tol = atol + rtol*np.abs(e)
+    bad = ~(diff <= tol)
+    bad_count = int(bad.sum())
+    if bad_count:
+      mismatch_count = (mismatch_count or 0) + bad_count
+      if first_bad is None: first_bad = start + int(np.argmax(bad))
+      bad_idxs = np.nonzero(bad)[0]
+      take = bad_idxs[np.argsort(diff[bad_idxs])[-8:]]
+      top.extend((float(diff[i]), start+int(i)) for i in take)
+      top = sorted(top, reverse=True)[:8]
+    local_abs_idx = int(np.argmax(diff))
+    if float(diff[local_abs_idx]) > max_abs:
+      max_abs, max_abs_idx = float(diff[local_abs_idx]), start+local_abs_idx
+    rel = diff / np.maximum(np.abs(e), 1e-30)
+    local_rel_idx = int(np.argmax(rel))
+    if float(rel[local_rel_idx]) > max_rel:
+      max_rel, max_rel_idx = float(rel[local_rel_idx]), start+local_rel_idx
+    margin = diff - tol
+    local_margin_idx = int(np.argmax(margin))
+    if float(margin[local_margin_idx]) > max_margin:
+      max_margin, max_margin_idx = float(margin[local_margin_idx]), start+local_margin_idx
+
+  def fmt_idx(idx:int) -> str: return f"flat={idx} idx={tuple(int(x) for x in np.unravel_index(idx, got_np.shape))}"
+  def fmt_val(idx:int) -> str:
+    g, e = float(got_flat[idx]), float(expected_flat[idx])
+    diff, tol = abs(g-e), atol + rtol*abs(e)
+    return f"{fmt_idx(idx)} got={g:.9g} expected={e:.9g} diff={diff:.9g} tol={tol:.9g} rel={diff/max(abs(e), 1e-30):.9g}"
+
+  lines = [
+    f"{name} mismatch",
+    f"shape={got_np.shape} dtype(got)={got.dtype} dtype(expected)={expected.dtype} atol={atol} rtol={rtol}",
+    f"mismatches={mismatch_count}/{total} ({(mismatch_count or 0)/total:.6%})",
+    f"first mismatch: {fmt_val(first_bad)}" if first_bad is not None else "first mismatch: none found after numpy conversion",
+    f"max abs diff: {fmt_val(max_abs_idx)}",
+    f"max rel diff: {fmt_val(max_rel_idx)}",
+    f"max tol overrun: {fmt_val(max_margin_idx)}",
+  ]
+  if top:
+    lines.append("top mismatches by abs diff:")
+    lines += [f"  {i+1}. {fmt_val(idx)}" for i, (_, idx) in enumerate(top)]
+  if got_np.ndim and max_margin_idx is not None:
+    def row_summary(label:str, flat_idx:int) -> str:
+      idx = tuple(int(x) for x in np.unravel_index(flat_idx, got_np.shape))
+      row_sl = idx[:-1] + (slice(None),)
+      g, e = got_np[row_sl].astype(np.float32), expected_np[row_sl].astype(np.float32)
+      diff, tol = np.abs(g-e), atol + rtol*np.abs(e)
+      bad = ~(diff <= tol)
+      bad_cols = np.nonzero(bad)[0]
+      worst_col = int(np.argmax(diff - tol))
+      if bad_cols.size == 0: return f"{label} row prefix={idx[:-1]} has no mismatches after numpy conversion"
+      return (f"{label} row prefix={idx[:-1]} mismatches={bad_cols.size}/{g.size} "
+              f"first_col={int(bad_cols[0])} last_col={int(bad_cols[-1])} "
+              f"worst_col={worst_col} got={float(g[worst_col]):.9g} expected={float(e[worst_col]):.9g} "
+              f"diff={float(diff[worst_col]):.9g} tol={float(tol[worst_col]):.9g}")
+    if first_bad is not None: lines.append(row_summary("first mismatch", first_bad))
+    lines.append(row_summary("max tol overrun", max_margin_idx))
+    idx = tuple(int(x) for x in np.unravel_index(max_margin_idx, got_np.shape))
+    axis, center = got_np.ndim-1, idx[-1]
+    lo, hi = max(0, center-3), min(got_np.shape[-1], center+4)
+    sl = tuple(idx[i] if i != axis else slice(lo, hi) for i in range(got_np.ndim))
+    lines += [
+      f"local slice around max tol overrun on last axis [{lo}:{hi}] at prefix={idx[:-1]}:",
+      f"  got={got_np[sl].astype(np.float32)}",
+      f"  expected={expected_np[sl].astype(np.float32)}",
+      f"  diff={np.abs(got_np[sl].astype(np.float32)-expected_np[sl].astype(np.float32))}",
+    ]
+  return "\n".join(lines)
+
 # On non CDNA4 it will only validate the Tensor.custom_kernel integration
 # Use DEV=NULL:HIP:gfx950 to also test the assembly
 def is_cdna4(): return Device[Device.DEFAULT].renderer.target.arch.startswith("gfx950")
@@ -60,9 +144,9 @@ def run_asm_gemm(a_shape, b_shape, dtype=dtypes.float16, a_shard=None, b_shard=N
       np.testing.assert_allclose(tst.numpy(), ref.numpy(), atol=atol, rtol=rtol)
       np.testing.assert_allclose(a.grad.numpy(), a_ref.grad.numpy(), atol=grad_atol, rtol=grad_rtol)
       np.testing.assert_allclose(b.grad.numpy(), b_ref.grad.numpy(), atol=grad_atol, rtol=grad_rtol)
-    assert tst.allclose(ref, atol=atol, rtol=rtol).item(), "forward mismatch"
-    assert a.grad.allclose(a_ref.grad, atol=grad_atol, rtol=grad_rtol).item(), "grad_a mismatch"
-    assert b.grad.allclose(b_ref.grad, atol=grad_atol, rtol=grad_rtol).item(), "grad_b mismatch"
+    _assert_allclose("forward", tst, ref, atol=atol, rtol=rtol)
+    _assert_allclose("grad_a", a.grad, a_ref.grad, atol=grad_atol, rtol=grad_rtol)
+    _assert_allclose("grad_b", b.grad, b_ref.grad, atol=grad_atol, rtol=grad_rtol)
 
 def verify_asm_gemm(batch:int, M:int, N:int, K:int, dtype=dtypes.float16, gpus:int=1) -> None:
   run_asm_gemm((batch, M, K), (K, N), dtype=dtype, a_shard=0, b_shard=None, gpus=gpus)
@@ -101,9 +185,9 @@ def run_llama_final_logits_gemm(gpus:int=1) -> None:
   ref = x_ref @ w_ref.T
   (ref * dy_ref).sum().backward()
   Tensor.realize(ref, x_ref.grad, w_ref.grad)
-  assert logits.allclose(ref, atol=2e-1, rtol=1e-2).item(), "forward mismatch"
-  assert x.grad.allclose(x_ref.grad, atol=2e-1, rtol=2e-2 if gpus > 1 else 1e-2).item(), "grad_x mismatch"
-  assert w.grad.allclose(w_ref.grad, atol=2e-1, rtol=2.5e-2 if gpus > 1 else 1e-2).item(), "grad_w mismatch"
+  _assert_allclose("final logits forward", logits, ref, atol=2e-1, rtol=1e-2)
+  _assert_allclose("final logits grad_x", x.grad, x_ref.grad, atol=2e-1, rtol=2e-2 if gpus > 1 else 1e-2)
+  _assert_allclose("final logits grad_w", w.grad, w_ref.grad, atol=2e-1, rtol=2.5e-2 if gpus > 1 else 1e-2)
 
 # 128x smaller than usual
 # uses the UOp GEMM, runs on non CDNA4 and CI
