@@ -8,6 +8,7 @@ import tinygrad.runtime.autogen.amd.rdna3.ins as RDNA3Ops
 pre_isel_matcher = PatternMatcher([
 ])
 
+"""
 def imm(dt:DType, v:int) -> UOp: return UOp.const(dt, truncate[dt](v)).rtag()
 def fold_address(x:UOp) -> tuple[UOp, UOp, UOp]:
   def _disp(v:int) -> UOp: return imm(dtypes.int32 if abs(v) > dtypes.int8.max else dtypes.int8, v)
@@ -18,6 +19,20 @@ def fold_address(x:UOp) -> tuple[UOp, UOp, UOp]:
   if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: return (base, _cast(idx.src[0]), _disp(idx.src[1].arg * disp_scale))
   if idx.op is Ops.CONST: return (base, UOp(Ops.NOOP), _disp(idx.arg * disp_scale))
   return (base, _cast(idx), _disp(0))
+"""
+
+dts = dtypes.ints + (dtypes.bool, dtypes.float16, dtypes.float32, dtypes.float64)
+dt_16bit = tuple(dt.vec(l) for dt in dts for l in [2,1] if l*dt.itemsize == 2 and dt not in dtypes.int16s)
+dt_32bit = tuple(dt.vec(l) for dt in dts for l in [4,2,1] if l*dt.itemsize == 4 and dt not in dtypes.int32s)
+dt_64bit = tuple(dt.vec(l) for dt in dts for l in [8,4,2,1] if l*dt.itemsize == 8 and dt not in dtypes.int64s)
+dt_128bit = tuple(dt.vec(l) for dt in dts for l in [16,8,4,2,1] if l*dt.itemsize == 16)
+
+def fold_address(x:UOp) -> tuple[UOp, UOp, UOp]: # (offset, base, val)
+    pass
+def handle_memspace(x:UOp, lins, gins):
+    if x.src[0].addrspace == AddrSpace.LOCAL: return lins
+    if x.src[0].addrspace == AddrSpace.GLOBAL: return gins
+    return None
 
 isel_matcher = PatternMatcher([
     # SALU Ops
@@ -50,29 +65,29 @@ isel_matcher = PatternMatcher([
     (UPat(dtype=dtypes.float32).exp2().named("x"), lambda x: x.ins(RDNA3Ops.v_exp_f32_e32)),
 
     # binary alu
-    (UPat(Ops.MAX, dtype=dtypes.float16, name="x"), lambda x: x.ins(RDNA3Ops.v_max_f16_e32 if x.dtype.count > 1 else RDNA3Ops.s_max_f16)),
-    (UPat(Ops.MAX, dtype=dtypes.float32, name="x"), lambda x: x.ins(RDNA3Ops.v_max_f32_e32 if x.dtype.count > 1 else RDNA3Ops.s_max_f32)),
-    (UPat(Ops.MAX, dtype=dtypes.float64, name="x"), lambda x: x.ins(RDNA3Ops.v_max_f64 if x.dtype.count > 1 else None)),
-    (UPat(Ops.MAX, dtype=dtypes.int16, name="x"), lambda x: x.ins(RDNA3Ops.v_max_i16 if x.dtype.count > 1 else None)),
-    (UPat(Ops.MAX, dtype=dtypes.int32, name="x"), lambda x: x.ins(RDNA3Ops.v_max_i32_e32 if x.dtype.count > 1 else RDNA3Ops.s_max_i32)),
-    (UPat(Ops.MAX, dtype=dtypes.uint32, name="x"), lambda x: x.ins(RDNA3Ops.v_max_u32_e32 if x.dtype.count > 1 else RDNA3Ops.s_max_u32)),
-    (UPat(Ops.SUB, dtype=dtypes.float16, name="x"), lambda x: x.ins(RDNA3Ops.v_sub_f16_e32 if x.dtype.count > 1 else RDNA3Ops.s_sub_f16)),
-    (UPat(Ops.SUB, dtype=dtypes.float32, name="x"), lambda x: x.ins(RDNA3Ops.v_sub_f32_e32 if x.dtype.count > 1 else RDNA3Ops.s_sub_f32)),
-    (UPat(Ops.SUB, dtype=dtypes.uint32, name="x"), lambda x: x.ins(None if x.dtype.count > 1 else RDNA3Ops.s_sub_u32)), # v_sub_co_u32??
-    (UPat(Ops.SUB, dtype=dtypes.int16, name="x"), lambda x: x.ins(RDNA3Ops.v_sub_nc_i16 if x.dtype.count > 1 else None)),
-    (UPat(Ops.SUB, dtype=dtypes.int32, name="x"), lambda x: x.ins(RDNA3Ops.v_sub_nc_i32 if x.dtype.count > 1 else RDNA3Ops.s_sub_i32)),
-    ((UPat(dtype=dtypes.int16) + UPat()).named("x"), lambda x: x.ins(RDNA3Ops.v_add_nc_i16 if x.dtype.count > 1 else None)),
-    ((UPat(dtype=dtypes.int32) + UPat()).named("x"), lambda x: x.ins(RDNA3Ops.v_add_nc_i32 if x.dtype.count > 1 else RDNA3Ops.s_add_i32)),
-    ((UPat(dtype=dtypes.uint16) + UPat()).named("x"), lambda x: x.ins(RDNA3Ops.v_add_nc_u16 if x.dtype.count > 1 else None)),
-    ((UPat(dtype=dtypes.uint32) + UPat()).named("x"), lambda x: x.ins(RDNA3Ops.v_add_nc_u32_e32 if x.dtype.count > 1 else RDNA3Ops.s_add_u32)),
-    ((UPat(dtype=dtypes.float16) + UPat()).named("x"), lambda x: x.ins(RDNA3Ops.v_add_f16_e32 if x.dtype.count > 1 else RDNA3Ops.s_add_f16)),
-    ((UPat(dtype=dtypes.float32) + UPat()).named("x"), lambda x: x.ins(RDNA3Ops.v_add_f32_e32 if x.dtype.count > 1 else RDNA3Ops.s_add_f32)),
-    ((UPat(dtype=dtypes.float64) + UPat()).named("x"), lambda x: x.ins(RDNA3Ops.v_add_f64 if x.dtype.count > 1 else None)),
+    (UPat(Ops.MAX, dtype=dtypes.float16, name="x"), lambda x: x.ins(RDNA3Ops.v_max_f16_e32)),
+    (UPat(Ops.MAX, dtype=dtypes.float32, name="x"), lambda x: x.ins(RDNA3Ops.v_max_f32_e32)),
+    (UPat(Ops.MAX, dtype=dtypes.float64, name="x"), lambda x: x.ins(RDNA3Ops.v_max_f64)),
+    (UPat(Ops.MAX, dtype=dtypes.int16, name="x"), lambda x: x.ins(RDNA3Ops.v_max_i16)),
+    (UPat(Ops.MAX, dtype=dtypes.int32, name="x"), lambda x: x.ins(RDNA3Ops.v_max_i32_e32)),
+    (UPat(Ops.MAX, dtype=dtypes.uint32, name="x"), lambda x: x.ins(RDNA3Ops.v_max_u32_e32)),
+    (UPat(Ops.SUB, dtype=dtypes.float16, name="x"), lambda x: x.ins(RDNA3Ops.v_sub_f16_e32)),
+    (UPat(Ops.SUB, dtype=dtypes.float32, name="x"), lambda x: x.ins(RDNA3Ops.v_sub_f32_e32)),
+    # (UPat(Ops.SUB, dtype=dtypes.uint32, name="x"), lambda x: x.ins(None if x.dtype.count > 1 else RDNA3Ops.s_sub_u32)), # v_sub_co_u32??
+    (UPat(Ops.SUB, dtype=dtypes.int16, name="x"), lambda x: x.ins(RDNA3Ops.v_sub_nc_i16)),
+    (UPat(Ops.SUB, dtype=dtypes.int32, name="x"), lambda x: x.ins(RDNA3Ops.v_sub_nc_i32)),
+    ((UPat(dtype=dtypes.int16) + UPat()).named("x"), lambda x: x.ins(RDNA3Ops.v_add_nc_i16)),
+    ((UPat(dtype=dtypes.int32) + UPat()).named("x"), lambda x: x.ins(RDNA3Ops.v_add_nc_i32)),
+    ((UPat(dtype=dtypes.uint16) + UPat()).named("x"), lambda x: x.ins(RDNA3Ops.v_add_nc_u16)),
+    ((UPat(dtype=dtypes.uint32) + UPat()).named("x"), lambda x: x.ins(RDNA3Ops.v_add_nc_u32_e32)),
+    ((UPat(dtype=dtypes.float16) + UPat()).named("x"), lambda x: x.ins(RDNA3Ops.v_add_f16_e32)),
+    ((UPat(dtype=dtypes.float32) + UPat()).named("x"), lambda x: x.ins(RDNA3Ops.v_add_f32_e32)),
+    ((UPat(dtype=dtypes.float64) + UPat()).named("x"), lambda x: x.ins(RDNA3Ops.v_add_f64)),
 
     # TODO: figure out muls, hi, i24??
-    ((UPat(dtype=dtypes.float16) * UPat()).named("x"), lambda x: x.ins(RDNA3Ops.v_mul_f16_e32 if x.dtype.count > 1 else RDNA3Ops.s_mul_f16)),
-    ((UPat(dtype=dtypes.float32) * UPat()).named("x"), lambda x: x.ins(RDNA3Ops.v_mul_f32_e32 if x.dtype.count > 1 else RDNA3Ops.s_mul_f32)),
-    ((UPat(dtype=dtypes.float64) * UPat()).named("x"), lambda x: x.ins(RDNA3Ops.v_mul_f64 if x.dtype.count > 1 else None)),
+    ((UPat(dtype=dtypes.float16) * UPat()).named("x"), lambda x: x.ins(RDNA3Ops.v_mul_f16_e32)),
+    ((UPat(dtype=dtypes.float32) * UPat()).named("x"), lambda x: x.ins(RDNA3Ops.v_mul_f32_e32)),
+    ((UPat(dtype=dtypes.float64) * UPat()).named("x"), lambda x: x.ins(RDNA3Ops.v_mul_f64)),
 
     # fused multiply add
     # TODO: check foldable? is that to reduce to fmac? one variable used twice ig
@@ -111,22 +126,23 @@ isel_matcher = PatternMatcher([
     # - whats the difference between:
     # UPat(...).cast(..., name="x") and UPat(.., name="y").cast(..., name="x")
     (UPat(dtype=dtypes.int32).cast(dtypes.int16, name="x"), lambda x: x.ins(RDNA3Ops.v_cvt_i32_i16_e32)),
-    (UPat(dtype=dtypes.int32).cast(dtypes.float32, name="x"), lambda x: x.ins(RDNA3Ops.v_cvt_i32_f32_e32 if x.dtype.count > 1 else RDNA3Ops.s_cvt_i32_f32)),
-    (UPat(dtype=dtypes.int32).cast(dtypes.float64, name="x"), lambda x: x.ins(RDNA3Ops.v_cvt_i32_f64_e32 if x.dtype.count > 1 else None)),
-    (UPat(dtype=dtypes.uint32).cast(dtypes.uint16, name="x"), lambda x: x.ins(RDNA3Ops.v_cvt_u32_u16_e32 if x.dtype.count > 1 else None)),
-    (UPat(dtype=dtypes.uint32).cast(dtypes.float32, name="x"), lambda x: x.ins(RDNA3Ops.v_cvt_u32_f32_e32 if x.dtype.count > 1 else RDNA3Ops.s_cvt_u32_f32)),
-    (UPat(dtype=dtypes.uint32).cast(dtypes.float64, name="x"), lambda x: x.ins(RDNA3Ops.v_cvt_u32_f64_e32 if x.dtype.count > 1 else None)),
-    (UPat(dtype=dtypes.float16).cast(dtypes.float32, name="x"), lambda x: x.ins(RDNA3Ops.v_cvt_f16_f32_e32 if x.dtype.count > 1 else RDNA3Ops.s_cvt_f16_f32)),
-    (UPat(dtype=dtypes.float16).cast(dtypes.int16, name="x"), lambda x: x.ins(RDNA3Ops.v_cvt_f16_i16_e32 if x.dtype.count > 1 else None)),
-    (UPat(dtype=dtypes.float16).cast(dtypes.uint16, name="x"), lambda x: x.ins(RDNA3Ops.v_cvt_f16_u16_e32 if x.dtype.count > 1 else None)),
-    (UPat(dtype=dtypes.float32).cast(dtypes.float16, name="x"), lambda x: x.ins(RDNA3Ops.v_cvt_f32_f16_e32 if x.dtype.count > 1 else RDNA3Ops.s_cvt_f32_f16)),
-    (UPat(dtype=dtypes.float32).cast(dtypes.float64, name="x"), lambda x: x.ins(RDNA3Ops.v_cvt_f32_f64_e32 if x.dtype.count > 1 else None)),
-    (UPat(dtype=dtypes.float32).cast(dtypes.int32, name="x"), lambda x: x.ins(RDNA3Ops.v_cvt_f32_i32_e32 if x.dtype.count > 1 else RDNA3Ops.s_cvt_f32_i32)),
-    (UPat(dtype=dtypes.float32).cast(dtypes.uint32, name="x"), lambda x: x.ins(RDNA3Ops.v_cvt_f32_u32_e32 if x.dtype.count > 1 else RDNA3Ops.s_cvt_f32_u32)),
+    (UPat(dtype=dtypes.int32).cast(dtypes.float32, name="x"), lambda x: x.ins(RDNA3Ops.v_cvt_i32_f32_e32)),
+    (UPat(dtype=dtypes.int32).cast(dtypes.float64, name="x"), lambda x: x.ins(RDNA3Ops.v_cvt_i32_f64_e32)),
+    (UPat(dtype=dtypes.uint32).cast(dtypes.uint16, name="x"), lambda x: x.ins(RDNA3Ops.v_cvt_u32_u16_e32)),
+    (UPat(dtype=dtypes.uint32).cast(dtypes.float32, name="x"), lambda x: x.ins(RDNA3Ops.v_cvt_u32_f32_e32)),
+    (UPat(dtype=dtypes.uint32).cast(dtypes.float64, name="x"), lambda x: x.ins(RDNA3Ops.v_cvt_u32_f64_e32)),
+    (UPat(dtype=dtypes.float16).cast(dtypes.float32, name="x"), lambda x: x.ins(RDNA3Ops.v_cvt_f16_f32_e32)),
+    (UPat(dtype=dtypes.float16).cast(dtypes.int16, name="x"), lambda x: x.ins(RDNA3Ops.v_cvt_f16_i16_e32)),
+    (UPat(dtype=dtypes.float16).cast(dtypes.uint16, name="x"), lambda x: x.ins(RDNA3Ops.v_cvt_f16_u16_e32)),
+    (UPat(dtype=dtypes.float32).cast(dtypes.float16, name="x"), lambda x: x.ins(RDNA3Ops.v_cvt_f32_f16_e32)),
+    (UPat(dtype=dtypes.float32).cast(dtypes.float64, name="x"), lambda x: x.ins(RDNA3Ops.v_cvt_f32_f64_e32)),
+    (UPat(dtype=dtypes.float32).cast(dtypes.int32, name="x"), lambda x: x.ins(RDNA3Ops.v_cvt_f32_i32_e32)),
+    (UPat(dtype=dtypes.float32).cast(dtypes.uint32, name="x"), lambda x: x.ins(RDNA3Ops.v_cvt_f32_u32_e32)),
 
 
     # Memory ops
-    (UPat(Ops.STORE))
+    # (UPat(Ops.LOAD, dtypes.int32, src=(UPat(name="a"),), name="x"), lambda x,a: x.ins(RDNA3Ops.ds_load_)),
+    (UPat(Ops.LOAD, dt_32bit, src=(UPat(name="a"),), name="x"), lambda x,a: x.ins(handle_memspace(x, RDNA3Ops.ds_load_b32, RDNA3Ops.global_load_b32), src=())),
 ])
 
 # **** RDNA3 Instruction encoding ****
