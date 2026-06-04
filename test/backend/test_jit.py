@@ -6,7 +6,7 @@ from test.helpers import assert_jit_cache_len, call_is_graph, not_support_multi_
 from test.unit.test_jit import _simple_test
 from tinygrad import Tensor, Variable, TinyJit, Device, dtypes
 from tinygrad.engine.jit import graph_class
-from tinygrad.helpers import Context, JIT, DEV, GlobalCounters
+from tinygrad.helpers import JIT, DEV, GlobalCounters
 from tinygrad.uop.ops import Ops
 from tinygrad.renderer.isa.x86 import X86Renderer
 
