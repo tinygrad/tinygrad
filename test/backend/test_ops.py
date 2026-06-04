@@ -1113,6 +1113,24 @@ class TestOps(unittest.TestCase):
     helper_test_op([(0,3)], lambda x: torch.cumsum(x, dim=0), lambda x: Tensor.cumsum(x, axis=0))
     helper_test_op([(2,3,0)], lambda x: torch.cumsum(x, dim=2), lambda x: Tensor.cumsum(x, axis=2))
 
+  def test_associative_scan_add(self):
+    data = np.arange(12, dtype=np.float32).reshape(3, 4)
+    np.testing.assert_allclose(Tensor(data).associative_scan(lambda a, b: a + b, axis=1).numpy(), np.cumsum(data, axis=1))
+
+  def test_associative_scan_matmul(self):
+    data = (np.arange(1, 33, dtype=np.float32) / 10).reshape(2, 4, 2, 2)
+    expected = np.empty_like(data)
+    for batch in range(data.shape[0]):
+      acc = np.eye(2, dtype=np.float32)
+      for i in range(data.shape[1]):
+        acc = acc @ data[batch, i]
+        expected[batch, i] = acc
+    np.testing.assert_allclose(Tensor(data).associative_scan(lambda a, b: a @ b, axis=1).numpy(), expected, rtol=1e-5)
+
+  def test_associative_scan_shape_check(self):
+    with self.assertRaises(ValueError):
+      Tensor.arange(4).associative_scan(lambda a, b: (a + b).sum(), axis=0)
+
   def test_small_cumprod(self):
     helper_test_op([(10)],lambda x: torch.cumprod(x, dim=0),lambda x: Tensor.cumprod(x, axis=0))
   @slow_test

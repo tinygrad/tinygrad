@@ -684,6 +684,38 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     def fix(x: Self) -> Self: return x.flatten(start_dim=-2)[..., -s:].transpose(axis,-1)
     return getattr(fix(ret), {Ops.ADD: "add", Ops.MAX: "maximum", Ops.MUL: "mul"}[op])(fix(base))
 
+  def associative_scan(self, fn:Callable[[Self, Self], Self], axis:int=0) -> Self:
+    """
+    Computes an inclusive associative scan along `axis` using `fn`.
+
+    `fn(prefix, current)` must be associative and return the same shape as its inputs.
+    This supports non-commutative scans such as batched matrix products.
+
+    ```python exec="true" source="above" session="tensor" result="python"
+    t = Tensor.arange(1, 5)
+    print(t.associative_scan(lambda a, b: a + b).numpy())
+    ```
+    """
+    if self.ndim == 0: return self
+    axis = self._resolve_dim(axis)
+    if self.shape[axis] == 0: return self
+    if not isinstance(n:=self.shape[axis], int): raise RuntimeError("associative_scan requires a concrete scan axis")
+
+    ret = self
+    mask_shape = tuple(n if i == axis else 1 for i in range(self.ndim))
+    idx = type(self).arange(n, device=self.device).reshape(mask_shape)
+    for offset in (1 << i for i in itertools.count()):
+      if offset >= n: break
+      head = ret[tuple(slice(0, 1) if i == axis else slice(None) for i in range(ret.ndim))]
+      head = head.expand(tuple(offset if i == axis else s for i, s in enumerate(ret.shape)))
+      tail = ret[tuple(slice(0, n - offset) if i == axis else slice(None) for i in range(ret.ndim))]
+      shifted = head.cat(tail, dim=axis)
+      combined = fn(shifted, ret)
+      if combined.shape != ret.shape:
+        raise ValueError(f"associative_scan fn must preserve shape, got {combined.shape} != {ret.shape}")
+      ret = (idx >= offset).where(combined, ret)
+    return ret
+
   def cumsum(self, axis:int=0) -> Self:
     """
     Computes the cumulative sum of the tensor along the specified `axis`.
@@ -696,7 +728,10 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     print(t.cumsum(1).numpy())
     ```
     """
-    return self._split_cumalu(axis, Ops.ADD)
+    axis = self._resolve_dim(axis)
+    if self.ndim == 0 or 0 in self.shape or not isinstance(self.shape[axis], int): return self._split_cumalu(axis, Ops.ADD)
+    ret = self.cast(sum_acc_dtype(self.dtype)).associative_scan(lambda a, b: a + b, axis)
+    return ret.cast(self.dtype) if self.dtype in (dtypes.float16, dtypes.bfloat16, *dtypes.fp8s) else ret
 
   def cumprod(self, axis:int) -> Self:
     """
@@ -710,7 +745,9 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     print(t.cumprod(axis=0).numpy())
     ```
     """
-    return self._split_cumalu(axis, Ops.MUL)
+    axis = self._resolve_dim(axis)
+    if self.ndim == 0 or 0 in self.shape or not isinstance(self.shape[axis], int): return self._split_cumalu(axis, Ops.MUL)
+    return self.associative_scan(lambda a, b: a * b, axis)
 
   def cummax(self, axis:int=0) -> tuple[Self, Self]:
     """
