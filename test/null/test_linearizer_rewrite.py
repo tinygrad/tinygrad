@@ -18,7 +18,7 @@ class TestLinearizerRewrite(unittest.TestCase):
       print(prg.src[3].arg)
 
   def test_arange(self):
-    out = Tensor.arange(32, device="NULL")
+    out = Tensor.arange(32).clone("NULL")
     with Context(SPLIT_REDUCEOP=0):
       si = out.schedule_linear().src[-1]
       opts_to_apply = []
@@ -28,7 +28,7 @@ class TestLinearizerRewrite(unittest.TestCase):
       print(prg.src[3].arg)
 
   def test_kernel_info(self):
-    out = Tensor.arange(4, device="NULL")
+    out = Tensor.arange(4).clone("NULL")
     si = out.schedule_linear().src[-1]
 
     ast = si.src[0].replace(arg=KernelInfo(opts_to_apply=()))

@@ -1099,6 +1099,12 @@ class TestSchedule(unittest.TestCase):
       run_linear(*check_schedule(a, 0, filter_sink=False))
       self.assertListEqual(a.tolist(), [[1.]*shape[1]]*shape[0])
 
+  def test_deviceless_materialize_localizes_to_target(self):
+    dev = "CPU" if Device.DEFAULT != "CPU" else "CPU:1"
+    t = Tensor.arange(Variable("s", 1, 128).bind(64)).cumsum().clone(dev)
+    self.assertEqual(t.device, dev)
+    np.testing.assert_equal(t[:64].numpy(), np.arange(64).cumsum())
+
 class TestLimitBufs(unittest.TestCase):
   @unittest.skipIf(DEV.interface.startswith("MOCK") and Device.DEFAULT == "NV", "crashes in ocelot")
   def test_limit_bufs_with_var(self):
@@ -1277,11 +1283,6 @@ class TestCopyFolding(unittest.TestCase):
     y = Tensor([1, 2, 3]).to("CPU")
     x = y.one_hot(10)
     check_schedule(x, 3, filter_sink=False)
-
-  def test_const_copy_multi(self):
-    x = Tensor.ones(1, device="CPU", buffer=False).to_(["CPU", "CPU:1"]) * 2
-    run_linear(*check_schedule(x, 2, filter_sink=False))
-    self.assertEqual(x.item(), 2.0)
 
   def test_late_const_copy_folding(self):
     a = Tensor.arange(3).clone().realize()

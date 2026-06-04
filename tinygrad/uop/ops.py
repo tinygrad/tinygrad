@@ -492,10 +492,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       return perm.index(*non_slice_args, ptr=True)
     return self.index(*[UOp.const(dtypes.weakint, x) if isinstance(x, int) else x for x in idx])
   def const_like(self, b:ConstLike, dtype:DType|None=None):
-    # multi constants can optionally have a DEVICE source  # TODO: no const with DEVICE
-    dev = self.device if isinstance(self.device, tuple) else None
-    ret = UOp.const(dtype or self.dtype.base, b, device=dev, shape=self.shard_shape if self.axis is not None else self._shape)
-    return ret.multi(self.axis) if self.axis is not None else ret
+    return UOp.const(dtype or self.dtype.base, b, shape=self._shape)
   def ufix(self, x):
     if isinstance(x, UOp): return x
     return self.const_like(x, None if self._ufix_keep_dtype(x) else dtypes.from_py(x).vec(self.dtype.vcount))
@@ -765,7 +762,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     if self.op is Ops.BUFFER: return AddrSpace.GLOBAL
     if self.op is Ops.DEFINE_LOCAL: return AddrSpace.LOCAL
     if self.op is Ops.DEFINE_REG: return AddrSpace.REG
-    if self.op is Ops.LOAD: return AddrSpace.ANON # LOAD brings things into anonymous registers
+    if self.op is Ops.LOAD: return AddrSpace.REG # LOAD brings things into registers
     if self.op in {Ops.INDEX, Ops.CAST, Ops.AFTER, Ops.REDUCE, Ops.GEP, Ops.STORE}:
       return self.src[0].addrspace
     if self.op in GroupOp.Movement: return self.src[0].addrspace
