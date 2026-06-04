@@ -47,13 +47,12 @@ jobs:
         venv/bin/python -c "from tinygrad.tensor import Tensor; print(Tensor([1,2,3,4,5]))"
         venv/bin/mypy -c "from tinygrad.tensor import Tensor; print(Tensor([1,2,3,4,5]))"
         BS=2 STEPS=10 MAX_BUFFER_SIZE=0 venv/bin/python beautiful_mnist.py
-    - name: Test Docs Build
-      run: python -m mkdocs build --strict
     - name: Test Docs
       run: |
-        parallel --keep-order --link --tagstring '[{1}]' '{2}' \
-          ::: abstractions3 readme quickstart export \
-          ::: 'python docs/abstractions3.py' \
+        parallel --link --tagstring '[{1}]' '{2}' \
+          ::: mkdocs abstractions3 readme quickstart export \
+          ::: 'mkdocs build --strict' \
+              'python docs/abstractions3.py' \
               $'awk \'/```python/{flag=1;next}/```/{flag=0}flag\' README.md | python' \
               $'awk \'/```python/{flag=1;next}/```/{flag=0}flag\' docs/quickstart.md | python' \
               'DEV=CPU python examples/compile_efficientnet.py > recognize.c && clang -O2 recognize.c -lm -o recognize && cat test/models/efficientnet/Chicken.jpg | ./recognize | grep cock'
