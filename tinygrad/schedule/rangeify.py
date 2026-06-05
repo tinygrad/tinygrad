@@ -146,10 +146,6 @@ def resolve_function(c:UOp, allow_param_mismatch=True) -> UOp|None:
   return c.src[0].substitute(dict_map, walk=True)
 
 earliest_rewrites = mop_cleanup+PatternMatcher([
-  # early fixup const copy
-  (UPat(Ops.COPY, src=(UPat.var("s"), UPat.var("d"))),
-   lambda s,d: s.substitute({UOp(Ops.DEVICE, arg=s.device):d}) if s.base.op is Ops.CONST else None),
-
   # resolve FUNCTION calls (inline the body)
   (UPat(Ops.FUNCTION, name="c"), resolve_function),
 
