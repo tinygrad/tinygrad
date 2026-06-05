@@ -453,15 +453,17 @@ jobs:
         uses: ./.github/actions/setup-tinygrad
         with:
           key: apps_llm
-      - name: Test 1B LLM (llama)
-        run: echo "What's a male chicken called? Answer with only one word." | MAX_BUFFER_SIZE=0 python3 -m tinygrad.llm --model llama3.2:1b | tee /dev/stderr | grep -i rooster
-      - name: Test 1B LLM (llama q4)
-        run: echo "What's a male chicken called? Answer with only one word." | MAX_BUFFER_SIZE=0 python3 -m tinygrad.llm --model llama3.2:1b-q4 | tee /dev/stderr | grep -i rooster
-      - name: Test 1B LLM (qwen3.5)
-        run: echo "What's a male chicken called? Answer with only one word." | MAX_BUFFER_SIZE=0 python3 -m tinygrad.llm --model qwen3.5:0.8b | tee /dev/stderr | grep -i rooster
-      - name: Test 1B LLM (qwen)
-        # NOTE: qwen is dumb and only knows about female chickens
-        run: echo "What's a female chicken called? Answer with only one word." | MAX_BUFFER_SIZE=0 python3 -m tinygrad.llm --model qwen3:0.6b | tee /dev/stderr | grep -i hen
+      - name: Test LLMs
+        env:
+          MAX_BUFFER_SIZE: 0
+        run: |
+          # NOTE: qwen is dumb and only knows about female chickens
+          parallel --link --tagstring '[{1}]' '{2}' \
+            ::: llama 'llama q4' qwen3.5 qwen \
+            ::: 'echo "What's a male chicken called? Answer with only one word." | python3 -m tinygrad.llm --model llama3.2:1b | tee /dev/stderr | grep -i rooster' \
+                'echo "What's a male chicken called? Answer with only one word." | python3 -m tinygrad.llm --model llama3.2:1b-q4 | tee /dev/stderr | grep -i rooster' \
+                'echo "What's a male chicken called? Answer with only one word." | python3 -m tinygrad.llm --model qwen3.5:0.8b | tee /dev/stderr | grep -i rooster' \
+                'echo "What's a female chicken called? Answer with only one word." | python3 -m tinygrad.llm --model qwen3:0.6b | tee /dev/stderr | grep -i hen'
 
 # ****** Models Tests ******
 
