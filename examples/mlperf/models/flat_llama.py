@@ -171,7 +171,7 @@ class FlatTransformer:
     xq, xk, xv = xq.cast(dtypes.bfloat16), xk.cast(dtypes.bfloat16), xv.cast(dtypes.bfloat16)
     if getenv("HK_FLASH_ATTENTION"):
       from extra.thunder.amd.fa import flash_attention
-      attn, *save = flash_attention(xq, xk, xv, is_causal=True)
+      attn, *save = flash_attention(xq, xk, xv, is_causal=True, flatten_output=True)
       saves.extend(save)
     else:
       xq, xk, xv = xq.transpose(1, 2), xk.transpose(1, 2), xv.transpose(1, 2)
