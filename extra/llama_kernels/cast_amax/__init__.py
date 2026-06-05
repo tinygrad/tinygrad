@@ -3,7 +3,7 @@ import functools, pathlib
 from tinygrad import Tensor, dtypes
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.renderer import Estimates
-from extra.llama_kernels import FP8_MAX, NUM_WG, THREADS_PER_WG, compile_cpp, alloc_like, alloc_local, scalar_amax, dname_of
+from extra.llama_kernels import FP8_MAX, NUM_WG, THREADS_PER_WG, compile_cpp, alloc_like, alloc_local, scalar_amax, store_scalar_amax, dname_of
 
 # module-level mailbox: grad_xw13 UOp -> (grad_xw13_fp8 UOp, inv_scale UOp)
 # lets cdna_asm_gemm's bwd reuse the fp8 companion produced by the fused silu_mul bwd kernel
@@ -59,7 +59,8 @@ def _fused_quantize_bwd_w13(gradient:UOp, kernel:UOp):
   _grad_fp8_mailbox[grad_xw13_uop] = (grad_xw13_fp8_uop, inv_scale.uop)
   return (None, None, grad_xw13_uop, None, None)
 
-def fused_quantize_fp8_w13(xw13:Tensor, amax_state:Tensor, fp8_dtype, grad_amax_state:Tensor) -> tuple[Tensor, Tensor, Tensor]:
+def fused_quantize_fp8_w13(xw13:Tensor, amax_state:Tensor, fp8_dtype, grad_amax_state:Tensor,
+                           store_amax:bool=False) -> tuple[Tensor, Tensor, Tensor|None]:
   # NOTE: silu(xw1)*xw3 -> fp8 + amax over fused xw13 layout. Returns (fp8, inv_scale, new_amax)
   # grad_amax_state: delayed amax for grad_xw13 fp8 quantization in the backward.
   assert xw13.dtype == dtypes.bfloat16, f"expected bf16, got {xw13.dtype}"
@@ -73,4 +74,7 @@ def fused_quantize_fp8_w13(xw13:Tensor, amax_state:Tensor, fp8_dtype, grad_amax_
   fp8_out, amax_buf, *_ = Tensor.custom_kernel(fp8_out, amax_buf, xw13, amax_state, grad_amax_state,
                                                 fxn=fxn, grad_fxn=_fused_quantize_bwd_w13)
   inv_scale = (amax_state.float() + 1e-8) / FP8_MAX
+  if store_amax:
+    fp8_out = Tensor(fp8_out.uop.after(store_scalar_amax(amax_buf, amax_state).uop), device=fp8_out.device)
+    return fp8_out, inv_scale, None
   return fp8_out, inv_scale, scalar_amax(amax_buf)
