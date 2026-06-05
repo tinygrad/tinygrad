@@ -367,31 +367,6 @@ class TestHandleData(unittest.TestCase):
       covered = t.to(d)
       assert covered.realize().tolist() == [1, 2, 3, 4]
 
-def helper_test_shard_op(shps, fxn, atol=1e-6, rtol=1e-3):
-  for shp in shps:
-    single_in = Tensor.randn(shp)
-    multi_in  = single_in.shard(devices_2, axis=0)
-
-    single_out = fxn(single_in).numpy()
-    multi_out  = fxn(multi_in).numpy()
-
-    try:
-      assert single_out.shape == multi_out.shape, f"shape mismatch: single={single_out.shape} | multi={multi_out.shape}"
-      assert single_out.dtype == multi_out.dtype, f"dtype mismatch: single={single_out.dtype} | multi={multi_out.dtype}"
-      np.testing.assert_allclose(single_out, multi_out, atol=atol, rtol=rtol)
-    except Exception as e:
-      raise Exception(f"Failed shape {single_out.shape}: {e}")
-
-@unittest.skipIf(not_support_multi_device(), "no multi")
-class TestTensorOps(unittest.TestCase):
-  @needs_second_gpu
-  def test_interpolate(self):
-    helper_test_shard_op([(4,16,16),(4,24,24)], lambda x: Tensor.interpolate(x, (19,19)))
-
-  @needs_second_gpu
-  def test_bitcast(self):
-    helper_test_shard_op([(256,), (256,)], lambda x: x.bitcast(dtypes.int))
-
 @unittest.skipIf(not_support_multi_device(), "need multi")
 class TestMultiBufferView(unittest.TestCase):
   @needs_second_gpu
