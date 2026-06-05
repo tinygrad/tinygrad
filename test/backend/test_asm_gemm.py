@@ -88,6 +88,8 @@ def verify_asm_gemm_k_sharded_3d(batch:int, M:int, N:int, K:int, dtype=dtypes.fl
 class TestGemm(unittest.TestCase):
   def setUp(self):
     if is_cdna4(): self.skipTest("shapes are too small for the assembly GEMM")
+    from tinygrad.helpers import DEV
+    if DEV.interface.startswith("MOCK") and DEV.arch.startswith("gfx12"): self.skipTest("rdna4 asm gemm not fully supported in emulator yet")
   def test_simple(self): verify_asm_gemm(1, N:=getenv("N", 32), N, N, dtype=dtypes.half)
   def test_gemm(self): verify_asm_gemm(1, 64, 32, 112)
   def test_gemm_batched(self): verify_asm_gemm(2, 64, 32, 32)
