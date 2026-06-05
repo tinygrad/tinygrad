@@ -379,10 +379,10 @@ def create_pos_enc_for_latents(batch_size:int, latent_dims:tuple[int, int], devi
 
   pos_enc = Tensor.zeros(height, width, pos_dim, device=devices).contiguous()
 
-  row_idxs = Tensor.arange(height, dtype=pos_enc.dtype, device=devices)
+  row_idxs = Tensor.arange(height, dtype=pos_enc.dtype)
   pos_enc[:, :, 1] = row_idxs.unsqueeze(1)
 
-  col_idxs = Tensor.arange(width, dtype=pos_enc.dtype, device=devices)
+  col_idxs = Tensor.arange(width, dtype=pos_enc.dtype)
   pos_enc[:, :, 2] = col_idxs.unsqueeze(0)
 
   return pos_enc.view(1, height * width, pos_dim).repeat(batch_size, 1, 1)

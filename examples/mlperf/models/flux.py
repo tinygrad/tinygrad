@@ -47,7 +47,7 @@ def split_qkv(qkv:Tensor, num_heads:int) -> tuple[Tensor, Tensor, Tensor]:
 
 def rope(pos:Tensor, dim:int, theta:int) -> Tensor:
   assert dim % 2 == 0
-  scale = Tensor.arange(0, dim, 2, dtype=dtypes.float32, device=pos.device) / dim # NOTE: this is torch.float64 in reference implementation
+  scale = Tensor.arange(0, dim, 2, dtype=dtypes.float32) / dim # NOTE: this is torch.float64 in reference implementation
   omega = 1.0 / (theta**scale)
   out = Tensor.einsum("...n,d->...nd", pos, omega)
   out = Tensor.stack(Tensor.cos(out), -Tensor.sin(out), Tensor.sin(out), Tensor.cos(out), dim=-1)
