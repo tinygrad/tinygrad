@@ -68,6 +68,8 @@ class TestQuantizeFP8(unittest.TestCase):
     ren = Device[Device.DEFAULT].renderer
     if dtypes.bfloat16 not in ren.supported_dtypes(): self.skipTest("need bfloat16")
     if not ren.has_local or not ren.has_shared: self.skipTest("need local/shared")
+    from tinygrad.helpers import DEV
+    if DEV.interface.startswith("MOCK") and DEV.arch.startswith("gfx12"): self.skipTest("rdna4 emu timeouts on large quantize multi")
 
   def test_scalar(self): run_quantize_fp8((getenv("N", 1024), 32), delayed=False)
   def test_delayed(self): run_quantize_fp8((getenv("N", 2048), 1024))
