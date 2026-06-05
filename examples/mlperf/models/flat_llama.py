@@ -121,8 +121,8 @@ class FlatTransformer:
     self.w2, s_2 = self.lin_per_layer(hidden_dim, dim, std=scaled_std)
 
     self.norm_eps = norm_eps
-    self.attention_norm = Tensor.ones(n_layers, dim).contiguous()
-    self.ffn_norm = Tensor.ones(n_layers, dim).contiguous()
+    self.attention_norm = [Tensor.ones(dim).contiguous() for _ in range(n_layers)]
+    self.ffn_norm = [Tensor.ones(dim).contiguous() for _ in range(n_layers)]
 
     # output
     self.norm = nn.RMSNorm(dim, norm_eps)
@@ -245,8 +245,8 @@ class FlatTransformer:
       else:
         _shard_fp8("w13", 1)         # (n_layers, hidden*2, dim) shard out
       _shard_fp8("w2", 2)            # (n_layers, dim, hidden) shard in
-      self.attention_norm.shard_(device, axis=None).realize()
-      self.ffn_norm.shard_(device, axis=None).realize()
+      for i,n in enumerate(self.attention_norm): self.attention_norm[i] = n.shard(device, axis=None).contiguous().realize()
+      for i,n in enumerate(self.ffn_norm): self.ffn_norm[i] = n.shard(device, axis=None).contiguous().realize()
       self.norm.weight.shard_(device, axis=None).realize()
       self.tok_embeddings.weight.shard_(device, axis=0).realize()
       self.output.shard_(device, axis=1).realize()
