@@ -347,22 +347,22 @@ def merge_sinks(old_sink:UOp, new_sink:UOp) -> UOp:
 
 def merge_queues(linear:UOp) -> UOp:
   new_src:list[UOp] = []
-  active:dict[tuple[tuple[str, ...], str], UOp] = {} # (devs, queue) -> sink, kept in submit order
+  opened_qs:dict[tuple[tuple[str, ...], str], UOp] = {} # (devs, queue) -> sink, kept in submit order
 
   for call in linear.src:
     if call.tag != "hcq":
-      new_src += [sink.call().rtag('hcq') for sink in active.values()] + [call]
+      new_src += [opened_qs.pop(k).call().rtag('hcq') for k in list(opened_qs)] + [call]
       continue
 
     devs, queue = get_submit(new_sink:=call.src[0]).src[0].arg
-    if (old_sink:=active.pop((devs, queue), None)) is not None:
+    if (old_sink:=opened_qs.pop((devs, queue), None)) is not None:
       new_sink = merge_sinks(old_sink, new_sink) # exact same queue: merge, and re-insert at the end
     else:
-      # no exact match: close every open submit on this queue that shares a device, so submit order is kept
-      for k in [k for k in active if k[1] == queue and set(k[0]) & set(devs)]: new_src.append(active.pop(k).call().rtag('hcq'))
-    active[(devs, queue)] = new_sink
+      # no such queue opened: close every open submit on this queue that shares a device, so submit order is kept
+      new_src += [opened_qs.pop(k).call().rtag('hcq') for k in [k for k in opened_qs if k[1] == queue and set(k[0]) & set(devs)]]
+    opened_qs[(devs, queue)] = new_sink
 
-  return linear.replace(src=tuple(new_src + [sink.call().rtag('hcq') for sink in active.values()]))
+  return linear.replace(src=tuple(new_src + [sink.call().rtag('hcq') for sink in opened_qs.values()]))
 pm_merge_queues = PatternMatcher([(UPat(Ops.LINEAR, name="linear"), merge_queues)])
 
 # *****************
