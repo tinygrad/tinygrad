@@ -20,13 +20,13 @@ if __name__ == "__main__":
       if (v:=json.loads(next(sys.stdin, "{}")).get("value")): print(v)
     if ref is not None or not isinstance(rec:=next(iter(graph.values()), {}), dict) or "label" not in rec: continue
     sched_num = next(sched_counter)
+    unique:dict[int, int] = {}
     for v in graph.values():
       if not v["label"].startswith("CALL"): continue
       lines = v["label"].splitlines()
       # print the CALL and its kernel name from codegen
       print(f"{lines[0]:<12} {lines[-1]}")
       # print sources (buffer, param, multi)
-      unique:dict[int, int] = {}
       for i,(_,s) in enumerate(v["src"][1:]):
         while get_node(graph, s)["label"].startswith("AFTER"): s = get_node(graph, s)["src"][0][1]
         if (num:=unique.get(s)) is None: unique[s] = num = len(unique)
