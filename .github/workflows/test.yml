@@ -625,20 +625,16 @@ jobs:
           key: mockam
           deps: testing_unit
           amd: 'true'
-      - name: Run test_tiny on MOCKAM
-        run: python test/test_tiny.py
+      - name: Run tests on MOCKPCI
+        run: python -m pytest -nauto test/test_tiny.py test/device/test_hcq.py test/unit/test_disk_tensor.py::TestDiskTensor::test_copy_from_disk test/unit/test_disk_tensor.py::TestDiskTensor::test_copy_from_disk_offset
       - name: Run test_tiny on MOCKUSB
-        run: GMMU=0 DEV=MOCKUSB+AMD python test/test_tiny.py
-      - name: Run test_hcq on MOCKPCI
-        run: python -m pytest test/device/test_hcq.py
-      - name: Run disk copy tests on MOCKPCI
-        run: python -m pytest test/unit/test_disk_tensor.py -k test_copy_from_disk
+        run: GMMU=0 DEV=MOCKUSB+AMD python -m pytest -nauto test/test_tiny.py
       - name: Run test_tiny on MOCKPCI Remote
         run: |
           python extra/remote/serve.py 6667 &
           sleep 2
-          REMOTE=127.0.0.1:6667 python test/test_tiny.py
-          REMOTE=127.0.0.1:6667 python -m pytest test/unit/test_disk_tensor.py -k test_copy_from_disk; kill %1
+          REMOTE=127.0.0.1:6667 python -m pytest -nauto test/test_tiny.py test/unit/test_disk_tensor.py::TestDiskTensor::test_copy_from_disk test/unit/test_disk_tensor.py::TestDiskTensor::test_copy_from_disk_offset
+          kill %1
 
   testamd:
     strategy:
