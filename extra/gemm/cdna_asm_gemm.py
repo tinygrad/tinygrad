@@ -6,7 +6,7 @@ from tinygrad.renderer import Estimates
 from tinygrad.helpers import getenv, all_same, DEBUG
 from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
 from tinygrad.runtime.autogen.amd.cdna.ins import *
-from examples.mlperf.models.flat_llama import FP8_DTYPE, FP8_GRAD_DTYPE, quantize_fp8
+from examples.mlperf.models.flat_llama import FP8_MAX, FP8_DTYPE, FP8_GRAD_DTYPE, quantize_fp8
 
 # ** CDNA4 assembly gemm
 
@@ -2628,7 +2628,7 @@ def custom_asm_gemm(C:UOp, A:UOp, B:UOp, dname:str) -> UOp:
 # ** FP8 GEMM custom kernel
 
 @functools.cache
-def custom_hk_fp8_gemm(C:UOp, A:UOp, B:UOp, *args:UOp, dname:str, scale_mode:int=3) -> UOp:
+def custom_hk_fp8_gemm(C:UOp, A:UOp, B:UOp, *args:UOp, dname:str, scale_mode:int=3, x_scale_is_amax:bool=False) -> UOp:
   # scale_mode: 0=no scale, 1=x only, 2=w only, 3=both
   n_scales = (1 if scale_mode & 1 else 0) + (1 if scale_mode & 2 else 0)
   scales, extra = args[:n_scales], args[n_scales:]
@@ -2644,8 +2644,8 @@ def custom_hk_fp8_gemm(C:UOp, A:UOp, B:UOp, *args:UOp, dname:str, scale_mode:int
   kittens_path = pathlib.Path(__file__).parent.parent/"thunder"/"amd"
   src = (kittens_path/"gemm_fp8.cpp").read_text()
   lib = HIPCCCompiler("gfx950", [f"-I{(kittens_path/'include').as_posix()}", "-std=c++20", "-DKITTENS_CDNA4", "-ffast-math",
-                                 "-DHIP_ENABLE_WARP_SYNC_BUILTINS", f"-DGEMM_M={M}", f"-DGEMM_N={N}", f"-DGEMM_K={K}",
-                                 f"-DSCALE_MODE={scale_mode}"]).compile_cached(src)
+                                  "-DHIP_ENABLE_WARP_SYNC_BUILTINS", f"-DGEMM_M={M}", f"-DGEMM_N={N}", f"-DGEMM_K={K}",
+                                  f"-DSCALE_MODE={scale_mode}", f"-DX_SCALE_IS_AMAX={int(x_scale_is_amax)}"]).compile_cached(src)
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dname), UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src),
                                UOp(Ops.BINARY, arg=lib)))
 
@@ -2758,7 +2758,7 @@ def hk_bf16_atb_gemm(a:Tensor, b:Tensor) -> Tensor:
 
 # ** backward gemm, might use the asm gemm
 
-def custom_gemm_bw(gradient:UOp, kernel:UOp, n_scales:int=2, has_grad_amax:bool=False, has_w_post:bool=False):
+def custom_gemm_bw(gradient:UOp, kernel:UOp, n_scales:int=2, has_grad_amax:bool=False, has_w_post:bool=False, x_scale_is_amax:bool=False):
   inputs = kernel.src[1:]
   if inputs[1].dtype == FP8_DTYPE:
     out, a, b = inputs[:3]
@@ -2770,6 +2770,7 @@ def custom_gemm_bw(gradient:UOp, kernel:UOp, n_scales:int=2, has_grad_amax:bool=
     w_post = inputs[i] if has_w_post else None
     a_t, b_t, g_t = Tensor(a, device=a.device), Tensor(b, device=a.device), Tensor(gradient, device=a.device)
     s_x_t = Tensor(s_x, device=a.device)
+    if x_scale_is_amax: s_x_t = ((s_x_t + 1e-8) / FP8_MAX).contiguous()
     s_w_t = Tensor(s_w, device=a.device) if has_w else None
     w_post_t = Tensor(w_post, device=a.device) if has_w_post else None
     g_t = g_t[:a.shape[0]]
@@ -2834,7 +2835,7 @@ def custom_gemm_bw(gradient:UOp, kernel:UOp, n_scales:int=2, has_grad_amax:bool=
 # ** main gemm function
 
 def asm_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, w_scale:Tensor|None=None, grad_amax_state:Tensor|None=None,
-             w_post_scale:Tensor|None=None, b_is_weight:bool=False) -> Tensor:
+             w_post_scale:Tensor|None=None, b_is_weight:bool=False, x_scale_is_amax:bool=False) -> Tensor:
   b_for_shape = b.T if b_is_weight else b
   assert can_use_asm_gemm(a, b_for_shape), f"{counters['todos'][-1]}"
   counters["used"] += 1
@@ -2872,8 +2873,9 @@ def asm_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, w_scale:Tensor|None=N
       scales = tuple(s for s in (x_scale, w_scale) if s is not None)
       scale_mode = (1 if x_scale is not None else 0) | (2 if w_scale is not None else 0)
       extra = ([grad_amax_state] if grad_amax_state is not None else []) + ([w_post_scale] if w_post_scale is not None else [])
-      fxn = functools.partial(custom_hk_fp8_gemm, dname=dname, scale_mode=scale_mode)
-      bw = functools.partial(custom_gemm_bw, n_scales=len(scales), has_grad_amax=grad_amax_state is not None, has_w_post=w_post_scale is not None)
+      fxn = functools.partial(custom_hk_fp8_gemm, dname=dname, scale_mode=scale_mode, x_scale_is_amax=x_scale_is_amax)
+      bw = functools.partial(custom_gemm_bw, n_scales=len(scales), has_grad_amax=grad_amax_state is not None,
+                             has_w_post=w_post_scale is not None, x_scale_is_amax=x_scale_is_amax)
       out = Tensor.custom_kernel(out, a, b if b_is_weight else b.T, *scales, *extra, fxn=fxn, grad_fxn=bw)[0]
     elif a.dtype == dtypes.bfloat16 and getenv("USE_HK_BF16_GEMM"):
       out = Tensor.custom_kernel(out, a, b.T, b, fxn=functools.partial(custom_hk_bf16_gemm, dname=dname), grad_fxn=custom_gemm_bw)[0]
