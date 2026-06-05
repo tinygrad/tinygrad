@@ -1435,19 +1435,23 @@ def train_llama3():
 
   fp8_amax = [t for ts in model._fp8_amax.values() for t in ts]
   fp8_grad_amax = [t for ts in model._fp8_grad_amax.values() for t in ts] if hasattr(model, "_fp8_grad_amax") else []
-  fp8_inv_scales = list(model._fp8_inv_scale.values()) + list(model._fp8_next_inv_scale.values())
+  fp8_inv_scales = [s for scales in list(model._fp8_inv_scale.values()) + list(model._fp8_next_inv_scale.values())
+                    for s in (scales if isinstance(scales, list) else [scales])]
 
   from tinygrad.nn.state import get_state_dict
   model_state = get_state_dict(model)
   for wname in model._fp8_inv_scale:
-    w = model_state[wname]
-    w._inv_scale = model._fp8_inv_scale[wname]
-    w._next_inv_scale = model._fp8_next_inv_scale[wname]
-    if optim.master_params:
-      idx = next(j for j, p in enumerate(optim.params) if p is w)
-      master = optim.master_params[idx]
-      inv = w._inv_scale if w._inv_scale.device == master.device else w._inv_scale.to(master.device)
-      master.assign((master * inv.reshape(*inv.shape, *([1]*(w.ndim-inv.ndim)))).contiguous())
+    weights = model_state[wname] if wname in model_state else getattr(model, wname)
+    inv_scales, next_inv_scales = model._fp8_inv_scale[wname], model._fp8_next_inv_scale[wname]
+    if not isinstance(weights, list): weights, inv_scales, next_inv_scales = [weights], [inv_scales], [next_inv_scales]
+    for w, inv_scale, next_inv_scale in zip(weights, inv_scales, next_inv_scales):
+      w._inv_scale = inv_scale
+      w._next_inv_scale = next_inv_scale
+      if optim.master_params:
+        idx = next(j for j, p in enumerate(optim.params) if p is w)
+        master = optim.master_params[idx]
+        inv = w._inv_scale if w._inv_scale.device == master.device else w._inv_scale.to(master.device)
+        master.assign((master * inv.reshape(*inv.shape, *([1]*(w.ndim-inv.ndim)))).contiguous())
 
   # realize everything here
   if optim.master_params: Tensor.realize(*optim.master_params)

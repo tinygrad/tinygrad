@@ -2834,10 +2834,11 @@ def custom_gemm_bw(gradient:UOp, kernel:UOp, n_scales:int=2, has_grad_amax:bool=
 # ** main gemm function
 
 def asm_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, w_scale:Tensor|None=None, grad_amax_state:Tensor|None=None,
-             w_post_scale:Tensor|None=None) -> Tensor:
-  assert can_use_asm_gemm(a, b), f"{counters['todos'][-1]}"
+             w_post_scale:Tensor|None=None, b_is_weight:bool=False) -> Tensor:
+  b_for_shape = b.T if b_is_weight else b
+  assert can_use_asm_gemm(a, b_for_shape), f"{counters['todos'][-1]}"
   counters["used"] += 1
-  unfold_batch = a.ndim == 3 and isinstance(a.device, tuple) and a.uop.axis == 2 and b.uop.axis == 0
+  unfold_batch = a.ndim == 3 and isinstance(a.device, tuple) and a.uop.axis == 2 and b_for_shape.uop.axis == 0
   if unfold_batch:
     orig_batch = a.shape[0]
     a = a.reshape(a.shape[0]*a.shape[1], a.shape[2])
@@ -2846,11 +2847,11 @@ def asm_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, w_scale:Tensor|None=N
   out_dtype = dtypes.bfloat16 if a.dtype == FP8_DTYPE else a.dtype
 
   batch, M, K = a.shape
-  N = b.shape[1]
+  N = b_for_shape.shape[1]
   is_multi = isinstance(a.device, tuple)
   if (k_sharded:=is_multi and a.uop.axis == 2): K //= len(a.device)
   if (m_sharded:=is_multi and a.uop.axis == 1): M //= len(a.device)
-  n_sharded = is_multi and b.uop.axis == 1
+  n_sharded = is_multi and b_for_shape.uop.axis == 1
 
   if is_multi:
     if n_sharded:
@@ -2873,7 +2874,7 @@ def asm_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, w_scale:Tensor|None=N
       extra = ([grad_amax_state] if grad_amax_state is not None else []) + ([w_post_scale] if w_post_scale is not None else [])
       fxn = functools.partial(custom_hk_fp8_gemm, dname=dname, scale_mode=scale_mode)
       bw = functools.partial(custom_gemm_bw, n_scales=len(scales), has_grad_amax=grad_amax_state is not None, has_w_post=w_post_scale is not None)
-      out = Tensor.custom_kernel(out, a, b.T, *scales, *extra, fxn=fxn, grad_fxn=bw)[0]
+      out = Tensor.custom_kernel(out, a, b if b_is_weight else b.T, *scales, *extra, fxn=fxn, grad_fxn=bw)[0]
     elif a.dtype == dtypes.bfloat16 and getenv("USE_HK_BF16_GEMM"):
       out = Tensor.custom_kernel(out, a, b.T, b, fxn=functools.partial(custom_hk_bf16_gemm, dname=dname), grad_fxn=custom_gemm_bw)[0]
     else:
