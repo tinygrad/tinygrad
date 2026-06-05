@@ -36,8 +36,8 @@ def quantize_fp8(x:Tensor, amax_state:Tensor|None=None):
   return x_clamped.cast(FP8_DTYPE), scale.float().reciprocal(), new_amax
 
 def matmul(x:Tensor, w:Tensor, fp8:bool=True, amax_x:Tensor|None=None, w_inv_scale:Tensor|None=None,
-            x_fp8:Tensor|None=None, x_scale:Tensor|None=None, x_new_amax:Tensor|None=None,
-            grad_amax_state:Tensor|None=None) -> tuple[Tensor,...]:
+           x_fp8:Tensor|None=None, x_scale:Tensor|None=None, x_new_amax:Tensor|None=None,
+           grad_amax_state:Tensor|None=None) -> tuple[Tensor,...]:
   if not fp8:
     if ASM_GEMM:
       from extra.gemm.cdna_asm_gemm import can_use_asm_gemm, asm_gemm
@@ -88,8 +88,8 @@ def add_norm_quantize_matmul(x:Tensor, residual:Tensor, norm:Tensor, w:Tensor, w
   return out, h, x_normed, rrms, ret
 
 def silu_w13_quantize_matmul(x_w13:Tensor, w2:Tensor, s_2:Tensor,
-                              amax_x2:Tensor,
-                              grad_amax_xw13:Tensor, grad_amax_xout:Tensor):
+                             amax_x2:Tensor,
+                             grad_amax_xw13:Tensor, grad_amax_xout:Tensor):
   if FUSED_SILU_W13:
     from extra.llama_kernels.cast_amax import fused_quantize_fp8_w13
     x2_fp8, x2_inv_scale, new_amax_x2 = fused_quantize_fp8_w13(x_w13, amax_x2, FP8_DTYPE, grad_amax_state=grad_amax_xw13)
@@ -210,7 +210,7 @@ class FlatTransformer:
       saves.extend([*s, out])
     else:
       x_w13, h, x_normed, rrms, (new_amax, *s) = add_norm_quantize_matmul(x, residual, kwargs["ffn_norm"], kwargs["w13"], kwargs["s_13"],
-                                                                           self.norm_eps, amax_x=kwargs["amax_x13"],
+                                                                          self.norm_eps, amax_x=kwargs["amax_x13"],
                                                                           grad_amax_state=kwargs["grad_amax_xw13"])
       amaxs.append(new_amax)
       saves.extend([x_normed, rrms, *s, x_w13])
