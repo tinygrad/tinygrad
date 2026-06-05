@@ -227,11 +227,7 @@ class FlatTransformer:
     h = h + ffn
     amaxs = tuple(a.detach() for a in (*attn_amaxs, *ffn_amaxs))
     if save: return (h, *amaxs, *attn_saves, *ffn_saves)
-    amax_targets = [attn_kwargs["amax_xqkv"], attn_kwargs["amax_xo"]]
-    amax_targets += [ffn_kwargs["amax_x1"], ffn_kwargs["amax_x3"]] if SPLIT_W13 else [ffn_kwargs["amax_x13"]]
-    amax_targets.append(ffn_kwargs["amax_x2"])
-    for target, new_val in zip(amax_targets, amaxs): target.assign(new_val)
-    return h
+    else: return (h, *amaxs)
 
   def shard(self, device:tuple[str, ...], mp:bool=False):
     from tinygrad.nn.state import get_parameters
@@ -282,12 +278,9 @@ class FlatTransformer:
       else:
         ffn_kwargs.update(w13=self.w13[i], amax_x13=a["x13"][i], s_13=s["w13"][i], grad_amax_xw13=ga["xw13"][i])
       amax_names = ["xqkv", "xo"] + (["x1", "x3"] if SPLIT_W13 else ["x13"]) + ["x2"]
-      if save:
-        h, *ret = self.run_layer(h, freqs_cis, attn_kwargs, ffn_kwargs, save=save)
-        for name, new_val in zip(amax_names, ret[:len(amax_names)]):
-          a[name][i].assign(new_val)
-      else:
-        h = self.run_layer(h, freqs_cis, attn_kwargs, ffn_kwargs, save=save)
+      h, *ret = self.run_layer(h, freqs_cis, attn_kwargs, ffn_kwargs, save=save)
+      for name, new_val in zip(amax_names, ret[:len(amax_names)]):
+        a[name][i].assign(new_val)
 
     logits = matmul(self.norm(h), self.output[0], fp8=False)[0]
     return logits
