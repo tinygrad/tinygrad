@@ -215,10 +215,11 @@ def main():
   tok = SimpleTokenizer.from_gguf_kv(kv)
 
   # warmup the JIT...removed for now, adds tokens to cache
-  #if args.warmup or args.serve:
+  if args.warmup or args.serve:
     # run 2 tokens through the model twice to capture the JIT before serving
-    #with Context(DEBUG=max(DEBUG.value, 1)):
-    #  for _ in range(2): list(zip(range(2), model.generate([0])))
+    with Context(DEBUG=max(DEBUG.value, 1)):
+      for _ in range(2): list(zip(range(2), model.generate([0])))
+      model._cached_tokens = [] # warmup adds two toks
 
   # start server
   if args.serve:
