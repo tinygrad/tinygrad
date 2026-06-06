@@ -206,6 +206,9 @@ spec_program = PatternMatcher([
   # movement ops are not allowed in programs
   (UPat(GroupOp.Movement), lambda: False),
 
+  # REG/LOCAL buffer
+  (UPat(Ops.BUFFER, name="x"), lambda x: isinstance(x.arg, ParamArg) and x.addrspace in (AddrSpace.REG, AddrSpace.LOCAL)),
+
   # Invalid is not allowed in program
   (UPat(Ops.CONST, arg=Invalid), lambda: False),
 

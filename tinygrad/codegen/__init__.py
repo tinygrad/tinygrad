@@ -4,6 +4,7 @@ import itertools
 from tinygrad.helpers import DISABLE_FAST_IDIV, TRANSCENDENTAL, SPEC, DEBUG, VIZ, IMAGE, NOOPT, EMULATED_DTYPES, NOLOCALS, USE_TC
 from tinygrad.helpers import ALLOW_TF32, TracingKey, Context, panic
 from tinygrad.uop.ops import PatternMatcher, graph_rewrite, UOp, pm_lower_index_dtype, Ops, UPat, track_rewrites, KernelInfo, ProgramInfo, GroupOp
+from tinygrad.uop.ops import ParamArg
 from tinygrad.uop.render import pyrender
 from tinygrad.uop.spec import type_verify, spec_tensor, spec_program
 from tinygrad.renderer import Renderer, Estimates
@@ -36,17 +37,20 @@ pm_index_is_shrink = PatternMatcher([
 
 pm_remove_vec_dtypes = PatternMatcher([
   # rewrite PARAM to non pointer
-  (UPat((Ops.PARAM, Ops.DEFINE_LOCAL, Ops.DEFINE_REG), name="buf"), lambda buf:
+  (UPat((Ops.PARAM, Ops.BUFFER, Ops.DEFINE_LOCAL, Ops.DEFINE_REG), name="buf"), lambda buf:
    buf.replace(dtype=buf.dtype.base, src=(UOp.const(dtypes.int, buf.ptrdtype.size) \
-                                          if buf.op is not Ops.DEFINE_REG or buf.ptrdtype.size != 1 else UOp(Ops.STACK),)) \
+                                          if buf.addrspace is not AddrSpace.REG or buf.ptrdtype.size != 1 else UOp(Ops.STACK),)) \
     if isinstance(buf.dtype, PtrDType) and not isinstance(buf.dtype, ImageDType) else None),
   # no LOADs on register dtypes
   (UPat(Ops.LOAD, name="x"), lambda x: x.src[0] if x.src[0].addrspace == AddrSpace.REG else None),
   # don't index on DEFINE_REG with () shape
   (UPat(Ops.INDEX, name="x"), lambda x: x.src[0] if x.src[0].shape == () else None),
   # remove all vec dtypes
-  (UPat(GroupOp.All-{Ops.PARAM, Ops.DEFINE_LOCAL, Ops.DEFINE_REG}, name="x"),
+  (UPat(GroupOp.All-{Ops.PARAM, Ops.BUFFER, Ops.DEFINE_LOCAL, Ops.DEFINE_REG}, name="x"),
    lambda x: x.replace(dtype=x.dtype.base.scalar().base)),
+  # replace DEFINE_LOCAL/DEFINE_REG with BUFFER
+  (UPat((Ops.DEFINE_LOCAL, Ops.DEFINE_REG), name="x"), lambda x:
+   x.replace(op=Ops.BUFFER, arg=ParamArg(x.arg, addrspace=AddrSpace.LOCAL if x.op == Ops.DEFINE_LOCAL else AddrSpace.REG))),
 ])+pm_clean_up_group_sink
 
 def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:

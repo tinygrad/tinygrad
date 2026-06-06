@@ -8,18 +8,18 @@ from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType, AddrSpace, trunc
 from tinygrad.renderer import Renderer
 from tinygrad.codegen.late.devectorizer import no_vectorized_alu
 
-
 base_rewrite = PatternMatcher([
+  (UPat(Ops.BUFFER, name="x"), lambda ctx,x: ctx.render_buffer(x)),
   # define reg as lanes
-  (UPat(Ops.DEFINE_REG, name="x"),
-   lambda ctx,x: f"{ctx._render_dtype(x.dtype, sz=x.max_numel())} {ctx[x]};" if ctx.register_shape_is_lanes else None),
+  #(UPat(Ops.DEFINE_REG, name="x"),
+  # lambda ctx,x: f"{ctx._render_dtype(x.dtype, sz=x.max_numel())} {ctx[x]};" if ctx.register_shape_is_lanes else None),
 
   # define reg as array
-  (UPat(Ops.DEFINE_REG, src=(UPat(Ops.STACK),), name="x"), lambda ctx,x: f"{ctx._render_dtype(x.dtype)} {ctx[x]};"),
-  (UPat(Ops.DEFINE_REG, name="x"), lambda ctx,x: f"{ctx._render_dtype(x.dtype)} {ctx[x]}[{x.max_numel()}];"),
+  #(UPat(Ops.DEFINE_REG, src=(UPat(Ops.STACK),), name="x"), lambda ctx,x: f"{ctx._render_dtype(x.dtype)} {ctx[x]};"),
+  #(UPat(Ops.DEFINE_REG, name="x"), lambda ctx,x: f"{ctx._render_dtype(x.dtype)} {ctx[x]}[{x.max_numel()}];"),
 
   # define local
-  (UPat(Ops.DEFINE_LOCAL, name="x"), lambda ctx,x: f"{ctx.smem_align}{ctx.smem_prefix}{ctx.render_dtype(x.dtype.base)} {ctx[x]}[{x.max_numel()}];"),
+  #(UPat(Ops.DEFINE_LOCAL, name="x"), lambda ctx,x: f"{ctx.smem_align}{ctx.smem_prefix}{ctx.render_dtype(x.dtype.base)} {ctx[x]}[{x.max_numel()}];"),
 
   # range/if/endif
   (UPat(Ops.RANGE, name="x"),
@@ -182,6 +182,17 @@ class CStyleLanguage(Renderer):
     else:
       return f"({self[buf]}+{strip_parens(self[idx]) if idx.arg == Ops.ADD else self[idx]})"
 
+  def render_buffer(self, x:UOp):
+    shp = x.src[0].as_shape()
+    lanes = 1
+    prefix = f"{self.smem_align}{self.smem_prefix}" if x.addrspace == AddrSpace.LOCAL else ""
+    suffix = f"[{shp[0]}]" if len(shp) else ""
+    if len(shp) > 1:
+      # for DEFINE_REG, if it's a 2-D shape it's the number of lanes
+      assert isinstance(shp[1], int)
+      lanes = shp[1]
+    return f"{prefix}{self._render_dtype(x.dtype, sz=lanes)} {self[x]}{suffix};"
+
   def _render_dtype(self, dtype:DType, sz:int=1, addrspace=AddrSpace.REG, mutable=True):
     if isinstance(dtype, ImageDType): return f"{'write_only' if mutable else 'read_only'} image2d_t"
     prefix, suffix = "", ""
@@ -239,7 +250,7 @@ class CStyleLanguage(Renderer):
       if u.op is Ops.SPECIAL: r[u] = u.arg
       elif u.op is Ops.RANGE: r[u] = f"{axis_letters[u.arg[-1]]}idx"+range_str(u)
       else:
-        prefix = {Ops.WMMA: "wmma", Ops.DEFINE_LOCAL: "temp", Ops.CONST: "const",
+        prefix = {Ops.WMMA: "wmma", Ops.DEFINE_LOCAL: "temp", Ops.CONST: "const", Ops.BUFFER: "buf",
                   Ops.CAST: "cast", Ops.BITCAST: "cast", Ops.GEP: "gep", Ops.STACK: "cast",
                   Ops.INDEX: "bidx", Ops.DEFINE_REG: "acc", Ops.LOAD: "val"}.get(u.op, "alu")
         r[u] = f"{prefix}{c[prefix]}"
@@ -254,7 +265,7 @@ class CStyleLanguage(Renderer):
         (u.op in {Ops.STACK, *(GroupOp.ALU-{Ops.WHERE}), Ops.CAST, Ops.BITCAST} and child_count[u] == 1 and not getenv("EXPAND_SSA"))):
         r[u] = l
       else:
-        if u.op not in {Ops.RANGE, Ops.DEFINE_LOCAL, Ops.STORE, Ops.DEFINE_REG} and u.dtype != dtypes.void:
+        if u.op not in {Ops.RANGE, Ops.DEFINE_LOCAL, Ops.STORE, Ops.DEFINE_REG, Ops.BUFFER} and u.dtype != dtypes.void:
           l = f"{self.render_type(u)} {r[u]} = {l}" + (";" if u.op is not Ops.SPECIAL else "")
         kernel.append("  "*depth + l)
         if prefix: c[prefix] += 1  # if it was used, increment

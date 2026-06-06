@@ -3,7 +3,7 @@ from typing import Final, ClassVar, Callable, Literal
 import math, struct, ctypes, functools
 from dataclasses import dataclass, fields
 from tinygrad.helpers import ceildiv, getenv, prod, round_up, OSX
-from enum import Enum, auto
+from enum import IntEnum, auto
 
 class ConstFloat(float):
   """Float subclass that distinguishes -0.0 from 0.0 and where nan == nan."""
@@ -49,7 +49,7 @@ class DTypeMetaClass(type):
     DTypeMetaClass.dcache[args] = ret = super().__call__(*args)
     return ret
 
-class AddrSpace(Enum):
+class AddrSpace(IntEnum):
   def __repr__(self): return str(self)
   GLOBAL = auto(); LOCAL = auto(); REG = auto()  # noqa: E702
 
