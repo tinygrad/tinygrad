@@ -20,22 +20,22 @@ if __name__ == "__main__":
       if (v:=json.loads(next(sys.stdin, "{}")).get("value")): print(v)
     if ref is not None or not isinstance(rec:=next(iter(graph.values()), {}), dict) or "label" not in rec: continue
     sched_num = next(sched_counter)
+    unique:dict[int, int] = {}
     for v in graph.values():
       if not v["label"].startswith("CALL"): continue
       lines = v["label"].splitlines()
       # print the CALL and its kernel name from codegen
       print(f"{lines[0]:<12} {lines[-1]}")
       # print sources (buffer, param, multi)
-      unique:dict[str, int] = {}
       for i,(_,s) in enumerate(v["src"][1:]):
         while get_node(graph, s)["label"].startswith("AFTER"): s = get_node(graph, s)["src"][0][1]
-        if (num:=unique.get(str(s))) is None: unique[str(s)] = num = len(unique)
-        print(f"SRC {i} {' '.join(get_node(graph, s)['label'].splitlines())} g{num}-{sched_num}")
+        if (num:=unique.get(s)) is None: unique[s] = num = len(unique)
+        print(f"SRC {i} id={num}-{sched_num} {' '.join(get_node(graph, s)['label'].splitlines())}")
       # print access patterns
       ss = [v["src"][0][1]]
-      seen:set[str] = set()
+      seen:set[int] = set()
       while ss:
-        if (s:=str(ss.pop())) in seen: continue
+        if (s:=ss.pop()) in seen: continue
         seen.add(s)
         if get_node(graph, s)["label"].startswith("INDEX"):
           idx_str = get_node(graph, s)["label"].splitlines()

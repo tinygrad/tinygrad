@@ -492,10 +492,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       return perm.index(*non_slice_args, ptr=True)
     return self.index(*[UOp.const(dtypes.weakint, x) if isinstance(x, int) else x for x in idx])
   def const_like(self, b:ConstLike, dtype:DType|None=None):
-    # multi constants can optionally have a DEVICE source  # TODO: no const with DEVICE
-    dev = self.device if isinstance(self.device, tuple) else None
-    ret = UOp.const(dtype or self.dtype.base, b, device=dev, shape=self.shard_shape if self.axis is not None else self._shape)
-    return ret.multi(self.axis) if self.axis is not None else ret
+    return UOp.const(dtype or self.dtype.base, b, shape=self._shape)
   def ufix(self, x):
     if isinstance(x, UOp): return x
     return self.const_like(x, None if self._ufix_keep_dtype(x) else dtypes.from_py(x).vec(self.dtype.vcount))
@@ -540,24 +537,25 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     if op in {Ops.CMPLT, Ops.CMPNE, Ops.CMPEQ}: out_dtype = dtypes.bool.vec(out_dtype.count) if out_dtype.count > 1 else dtypes.bool
     return UOp(op, out_dtype, all_srcs, **kwargs)
   @staticmethod
-  def const(dtype:DType, b:ConstLike, device:str|tuple[str, ...]|None=None, shape:tuple[sint, ...]|None=None):
+  def const(dtype:DType, b:ConstLike, shape:tuple[sint, ...]|None=None):
     if isinstance(b, UOp): return b.cast(dtype)
     if isinstance(b, tuple) and all_same(b):
       assert len(b) > 0, "can't create const from empty tuple"
       b = b[0]  # doesn't have to be a STACK if they are all the same
     if isinstance(b, tuple):
-      stk = [UOp(Ops.CONST, dtype.scalar(), arg=dtype.const(c), src=(UOp(Ops.DEVICE, arg=device),) if device is not None else ()) for c in b]
+      stk = [UOp(Ops.CONST, dtype.scalar(), arg=dtype.const(c), src=()) for c in b]
       ret = UOp.vectorize(*stk)
     else:
-      ret = UOp(Ops.CONST, dtype, arg=dtype.const(b), src=(UOp(Ops.DEVICE, arg=device),) if device is not None else ())
+      ret = UOp(Ops.CONST, dtype, arg=dtype.const(b), src=())
     return ret.reshape((1,)*len(shape)).expand(shape) if shape is not None and shape != () and ret.shape != shape else ret
   @staticmethod
   def unique_const(fill_value:ConstType, dtype:DTypeLike|None=None, device:str|tuple[str, ...]|None=None,  # type: ignore[override]
                    shape:tuple[sint, ...]|None=None, unique=True):
     # NOTE: fill_value is ConstType, not ConstLike, so UOps and tuples aren't allowed
     assert not isinstance(fill_value, (UOp, tuple)), "unique const only works on numbers"
-    ret = UOp.const(to_dtype(dtype) if dtype is not None else dtypes.from_py(fill_value), fill_value, canonicalize_device(device))
-    ret = ret.replace(src=(UOp.unique(None if unique is True else unique),) + ret.src)
+    dt = to_dtype(dtype) if dtype is not None else dtypes.from_py(fill_value)
+    ret = UOp(Ops.CONST, dt, arg=dt.const(fill_value),
+              src=(UOp.unique(None if unique is True else unique), UOp(Ops.DEVICE, arg=canonicalize_device(device))))
     return ret.reshape((1,)*len(shape)).expand(shape) if shape is not None and ret.shape != shape else ret
   @staticmethod
   def range(end:sint, axis_id, axis_type=AxisType.LOOP, *arg, dtype=dtypes.weakint, src=(), **kwargs):
@@ -765,7 +763,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     if self.op is Ops.BUFFER: return AddrSpace.GLOBAL
     if self.op is Ops.DEFINE_LOCAL: return AddrSpace.LOCAL
     if self.op is Ops.DEFINE_REG: return AddrSpace.REG
-    if self.op is Ops.LOAD: return AddrSpace.ANON # LOAD brings things into anonymous registers
+    if self.op is Ops.LOAD: return AddrSpace.REG # LOAD brings things into registers
     if self.op in {Ops.INDEX, Ops.CAST, Ops.AFTER, Ops.REDUCE, Ops.GEP, Ops.STORE}:
       return self.src[0].addrspace
     if self.op in GroupOp.Movement: return self.src[0].addrspace
@@ -972,7 +970,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
         if (c:=s1_vmin) == s1_vmax < 0: return (s0_vmin%c, s0_vmax%c) if s0_vmin//c == s0_vmax//c else (c+1, 0)
         if s1_vmin > 0: return (0, s1_vmax-1)
         if s1_vmax < 0: return (s1_vmin+1, 0)
-      if self.op is Ops.XOR and s1_vmin == s1_vmax == -1 and isinstance(s0_vmin, int) and isinstance(s0_vmax, int): return ~s0_vmax, ~s0_vmin
+      if self.op is Ops.XOR and s1_vmin == s1_vmax == -1 and isinstance(s0_vmin, int) and isinstance(s0_vmax, int):
+        return ~int(s0_vmax), ~int(s0_vmin)
       if self.op is Ops.MAX: return max(s0_vmin, s1_vmin), max(s0_vmax, s1_vmax)
       if self.op is Ops.CMPLT: return (s0_vmax<s1_vmin, s0_vmin<s1_vmax)
       if self.op is Ops.CMPNE: return ((s0_vmax < s1_vmin) or (s1_vmax < s0_vmin), not (s0_vmin == s0_vmax == s1_vmin == s1_vmax))

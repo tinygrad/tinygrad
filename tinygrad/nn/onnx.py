@@ -586,7 +586,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     raise ValueError(f"pixel_format={pixel_format!r} is not supported.")
 
   def EyeLike(x:Tensor, dtype:int|None=None, k:int=0):
-    ret = Tensor.eye(cast(int, min(x.shape)), dtype=OnnxDataType(dtype).to_dtype() if dtype is not None else x.dtype, device=x.device)
+    ret = Tensor.eye(cast(int, min(x.shape)), dtype=OnnxDataType(dtype).to_dtype() if dtype is not None else x.dtype)
     return ret if x.size(0) == x.size(1) else ret.pad(tuple(None if d == ret.size(0) else (k, d-ret.shape[0]-k) for d in x.shape))
 
   def OptionalHasElement(x:Tensor|None=None): return Tensor(x is not None and x.numel() > 0)
@@ -783,7 +783,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
         axes:list[int]|None=None, coordinate_transformation_mode:str='half_pixel', cubic_coeff_a:float=-0.75, exclude_outside:int=0,
         extrapolation_value:float=0.0, keep_aspect_ratio_policy:str='stretch', mode:str='nearest', nearest_mode:str='round_prefer_floor'):
     def _apply_transformation(input_sz, output_sz, scale_dim, mode):
-      index = Tensor.arange(output_sz, device=X.device)
+      index = Tensor.arange(output_sz)
       if mode == "half_pixel": return (index + 0.5) / scale_dim - 0.5
       if mode == "align_corners": return index * (input_sz - 1) / (output_sz - 1) if output_sz != 1 else index.const_like(0)
       if mode == "asymmetric": return index / scale_dim
@@ -934,7 +934,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
       return x.unsqueeze(-1).expand(*x.shape, vocab_size)._one_hot_along_dim(vocab_size) @ weight
 
     # bert embedding layer
-    if position_ids is None: position_ids = Tensor.arange(seq_length, device=input_ids.device).unsqueeze(0).expand(*input_shape)
+    if position_ids is None: position_ids = Tensor.arange(seq_length).unsqueeze(0).expand(*input_shape)
     wrd_embedding_res = embedding(input_ids, vocab_size, word_embedding)
     pos_embedding_res = embedding(position_ids, max_position_embeddings, position_embedding)
 
@@ -997,8 +997,8 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
   def AffineGrid(theta:Tensor, size:list[int], align_corners:int=0):
     N, _, *spatial_dims = size
     def generate_grid(steps):
-      if align_corners: return Tensor.linspace(-1, 1, steps, device=theta.device)
-      return Tensor.linspace(-1+1/steps, 1-1/steps, steps, device=theta.device)
+      if align_corners: return Tensor.linspace(-1, 1, steps)
+      return Tensor.linspace(-1+1/steps, 1-1/steps, steps)
     grids = Tensor.meshgrid(*(generate_grid(d) for d in spatial_dims))
     base_grid = Tensor.stack(*reversed(grids), grids[0].const_like(1), dim=-1)
     base_grid = base_grid.reshape(1, prod(spatial_dims), len(grids)+1).expand(N, -1, -1)
@@ -1032,18 +1032,18 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
       if mask_index.ndim != 1: mask = mask_index.bool()
       else:
         if mask_index.shape[0] == batch_size:
-          mask = Tensor.arange(attn_scores.shape[-1], device=mask_index.device).unsqueeze(0) < mask_index.unsqueeze(1)
+          mask = Tensor.arange(attn_scores.shape[-1]).unsqueeze(0) < mask_index.unsqueeze(1)
         elif mask_index.shape[0] == 2*batch_size:
           end_positions = mask_index[:batch_size]
           start_positions = mask_index[batch_size:]
-          arange = Tensor.arange(seq_len, device=mask_index.device).unsqueeze(0)
+          arange = Tensor.arange(seq_len).unsqueeze(0)
           mask = (arange < end_positions.unsqueeze(1)) & (arange >= start_positions.unsqueeze(1))
         else: raise NotImplementedError("mask_index with shape (3 * batch_size + 2) is not implemented")
       while mask.ndim < 4: mask = mask.unsqueeze(1)
       attn_scores = mask.where(attn_scores, mask_filter_value)
 
     if unidirectional:
-      causal_mask = Tensor.ones((seq_len, seq_len), dtype=dtypes.bool, device=attn_scores.device, buffer=False).tril()
+      causal_mask = Tensor.ones((seq_len, seq_len), dtype=dtypes.bool, buffer=False).tril()
       attn_scores = causal_mask.where(attn_scores, mask_filter_value)
 
     output = attn_scores.softmax(-1) @ v
@@ -1075,7 +1075,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     qk_matmul_return_val = scores
 
     if is_causal:
-      causal_mask = Tensor.ones(Q.shape[-2], K.shape[-2], device=Q.device, dtype=dtypes.bool, buffer=False).tril(0)
+      causal_mask = Tensor.ones(Q.shape[-2], K.shape[-2], dtype=dtypes.bool, buffer=False).tril(0)
       scores = scores.masked_fill(causal_mask.logical_not(), -float("inf"))
 
     if attn_mask is not None:
@@ -1129,7 +1129,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
   # ***** Indexing Ops *****
   def NonZero(x:Tensor):
     mask = (x!=0).flatten()
-    flat_idx = Tensor.arange(mask.numel(), dtype=dtypes.int64, device=x.device).masked_select(mask)
+    flat_idx = Tensor.arange(mask.numel(), dtype=dtypes.int64).masked_select(mask)
     if flat_idx.ndim == 0: flat_idx = flat_idx.reshape(1)
     if x.ndim == 0:
       return Tensor.zeros((0, flat_idx.shape[0]), dtype=dtypes.int64, device=x.device)
@@ -1159,7 +1159,7 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     # NOTE: each batched dim of both input and indices are equal
     x = x.reshape(b, *x.shape[batch_dims:])
     indices = indices.reshape(b, *indices.shape[batch_dims:])
-    b_idx = Tensor.arange(b, device=x.device).reshape(b, *(1,)*(indices.ndim - 2)).expand(*indices.shape[:-1])
+    b_idx = Tensor.arange(b).reshape(b, *(1,)*(indices.ndim - 2)).expand(*indices.shape[:-1])
     ret = x[(b_idx,) + tuple(i.squeeze(-1) for i in indices.split(1, -1))]
     return ret.reshape(*x_shape[:batch_dims], *i_shape[batch_dims:-1], *ret.shape[indices.ndim-1:])
   def ScatterND(x:Tensor, indices:Tensor, updates:Tensor, reduction:Literal["none", "add", "mul", "max", "min"]='none'):
@@ -1179,9 +1179,9 @@ def get_onnx_ops() -> dict[str, types.FunctionType|dict[OpSetId, types.FunctionT
     B, U, D = indices.shape[0], updates.shape[-2], int(data.shape[-2])
     orig_shape, data_flat, updates_flat = data.shape, data.reshape(-1, D, data.shape[-1]), updates.reshape(-1, U, updates.shape[-1])
     B_total = data_flat.shape[0]
-    batch_idx = Tensor.arange(B_total, device=data.device).reshape(B_total, 1).expand(B_total, U)
+    batch_idx = Tensor.arange(B_total).reshape(B_total, 1).expand(B_total, U)
     indices_expanded = indices.reshape(B, *([1] * (data.ndim - 3))).expand(*orig_shape[:-2]).reshape(B_total)
-    row_idx = indices_expanded.reshape(B_total, 1).expand(B_total, U) + Tensor.arange(U, device=data.device).reshape(1, U).expand(B_total, U)
+    row_idx = indices_expanded.reshape(B_total, 1).expand(B_total, U) + Tensor.arange(U).reshape(1, U).expand(B_total, U)
     if mode == 'circular': row_idx = row_idx % D
     return ScatterND(data_flat, batch_idx.unsqueeze(-1).cat(row_idx.unsqueeze(-1), dim=-1), updates_flat).reshape(orig_shape)
 

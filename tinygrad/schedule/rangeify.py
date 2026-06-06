@@ -146,10 +146,6 @@ def resolve_function(c:UOp, allow_param_mismatch=True) -> UOp|None:
   return c.src[0].substitute(dict_map, walk=True)
 
 earliest_rewrites = mop_cleanup+PatternMatcher([
-  # early fixup const copy
-  (UPat(Ops.COPY, src=(UPat.var("s"), UPat.var("d"))),
-   lambda s,d: s.substitute({UOp(Ops.DEVICE, arg=s.device):d}) if s.base.op is Ops.CONST else None),
-
   # resolve FUNCTION calls (inline the body)
   (UPat(Ops.FUNCTION, name="c"), resolve_function),
 
@@ -448,11 +444,6 @@ pm_add_buffers = pm_mops+pm_flatten_bufferize+to_bufferview+PatternMatcher([
 
   # remove any RESHAPEs on KERNEL
   (UPat(Ops.CALL, name="k"), lambda k: k.replace(src=tuple(x.src[0] if x.op is Ops.RESHAPE else x for x in k.src))),
-
-  # remove MOP on AFTER
-  (UPat(Ops.AFTER, src=(UPat.var("x"), UPat(GroupOp.Movement, name="y"))), lambda x,y: x.after(y.src[0])),
-  # remove double AFTER
-  (UPat(Ops.AFTER, src=(UPat.var("x"), UPat(Ops.AFTER, name="y"))), lambda x,y: x.after(*y.src[1:])),
 
   # remove invalid writes
   (UPat(Ops.STORE, src=(UPat(), UPat(Ops.CONTIGUOUS, src=(UPat(Ops.CONST, arg=Invalid),)))), lambda: UOp(Ops.NOOP)),

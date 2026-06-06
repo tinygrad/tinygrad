@@ -233,7 +233,7 @@ class TestViz(unittest.TestCase):
 
   def test_const_reshape_expand_folded(self):
     # CONST->RESHAPE->EXPAND should be folded into the ALU node, not shown as separate RESHAPE/EXPAND nodes
-    c = UOp.const(dtypes.float, 1.0, device="CPU", shape=(3,4))  # creates CONST->RESHAPE->EXPAND chain
+    c = UOp.const(dtypes.float, 1.0, shape=(3,4))  # creates CONST->RESHAPE->EXPAND chain
     a = UOp(Ops.DEFINE_VAR, dtypes.float, arg=("a", 0.0, 10.0))
     alu = a + c
     with save_viz() as viz:
@@ -244,7 +244,7 @@ class TestViz(unittest.TestCase):
     self.assertIn("STACK", excluded_nodes)
     self.assertIn("RESHAPE", excluded_nodes)
     self.assertIn("EXPAND", excluded_nodes)
-    self.assertIn("CONST1 1 Ops.DEVICE", graph[id(alu)]["label"])
+    self.assertIn("CONST1 1", graph[id(alu)]["label"])
 
   def test_stack_movement_not_folded_unless_all_const(self):
     a = UOp.variable("a", 0, 10, dtype=dtypes.int)

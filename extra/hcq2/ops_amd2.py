@@ -151,7 +151,7 @@ def amd_submit_pm4(cmdbuf, devs):
   size, zero = UOp.const(dtypes.uint32, cmdbuf.src[0].arg // dtypes.uint32.itemsize), UOp.const(dtypes.int, 0)
 
   # the compute queue's ring and its host-side ring/write/put pointers (placeholders, resolved in pm_bufferize)
-  q = Device['AMD'].compute_queue
+  for d in devs: q = Device[d].compute_queue
   ring, wptr, doorbell, put_ptr = (UOp.new_buffer(devs, b.size, b.dtype).rtag(("COMPUTE:0", name))
     for name, b in (("ring", q.ring), ("write_ptr", q.write_ptr), ("doorbell", q.doorbell), ("put_value", q.put_value)))
 
@@ -218,7 +218,7 @@ def amd_submit_sdma(cmdbuf, devs):
   size_dw, zero = cmdbuf.src[0].arg // dtypes.uint32.itemsize, UOp.const(dtypes.int, 0)
 
   # the sdma queue's ring and its host-side ring/write/put pointers
-  q = Device['AMD'].sdma_queue(0)
+  for d in devs: q = Device[d].sdma_queue(0)
   ring, wptr, doorbell, put_ptr = (UOp.new_buffer(devs, b.size, b.dtype).rtag(("COPY:0", name))
     for name, b in (("ring", q.ring), ("write_ptr", q.write_ptr), ("doorbell", q.doorbell), ("put_value", q.put_value)))
 
@@ -357,7 +357,7 @@ class PCIIface(PCIIfaceBase):
       cq = d.compute_queue
       for b in (cq.put_value, cq.read_ptr, cq.write_ptr): b._buf.view.view(fmt='Q')[0] = 0
       d.iface.dev_impl.gfx.setup_ring(*cq.params)
-      d.timeline_signal._buf.cpu_view().mv.cast('Q')[0] = d.timeline_value.as_memoryview(force_zero_copy=True).cast('Q')[0] - 1
+      d.timeline_signal()._buf.cpu_view().mv.cast('Q')[0] = d.timeline_value().as_memoryview(force_zero_copy=True).cast('Q')[0] - 1
 
   def sleep(self, timeout):
     if hasattr(self.pci_dev, 'irq_poller') and self.pci_dev.irq_poller is not None and (events_cnt:=len(self.pci_dev.irq_poller.poll(timeout))):
@@ -374,14 +374,12 @@ class PCIIface(PCIIfaceBase):
 def _mock(iface, name=None): return type(name or f"MOCK{iface.__name__}", (iface,), {})
 
 def encode_queue(q:UOp) -> UOp|None:
-  q, post = (q.src[0], q.src[1:]) if q.op is Ops.AFTER else (q, ())
   if not (isinstance(q.arg, tuple) and len(q.arg) == 2 and isinstance(q.arg[1], str) and q.arg[1].startswith(("COMPUTE", "COPY"))): return None
   devs = to_tuple(q.arg[0])
-  ring = amd_submit_pm4(amd_lower_pm4(q, devs), devs) if q.arg[1].startswith("COMPUTE") else amd_submit_sdma(amd_lower_sdma(q, devs), devs)
-  return UOp(Ops.CUSTOM_FUNCTION, dtypes.void, src=(ring, *post), arg="submit")
+  return amd_submit_pm4(amd_lower_pm4(q, devs), devs) if q.arg[1].startswith("COMPUTE") else amd_submit_sdma(amd_lower_sdma(q, devs), devs)
 
 pm_lower = PatternMatcher([
-  (UPat({Ops.LINEAR, Ops.AFTER}, name="q"), encode_queue),
+  (UPat(Ops.CUSTOM_FUNCTION, arg="submit", src=(UPat(Ops.LINEAR, name="q"),)), encode_queue),
 ])
 
 class AMDDevice(HCQ2Compiled):
@@ -481,8 +479,8 @@ class AMDDevice(HCQ2Compiled):
     self.pm_bufferize = PatternMatcher([
       (UPat(Ops.BUFFER, tag={(qname, name)}), lambda ctx, b=getattr(queue, name): b) for name in ["ring", "write_ptr", "doorbell", "put_value"]
     ] + [
-      (UPat(Ops.BUFFER, tag={(qname, "timeline_signal")}), lambda ctx, q=qname: ctx.queue_timeline_signal(q)),
-      (UPat(Ops.BUFFER, tag={(qname, "timeline_value")}), lambda ctx, q=qname: ctx.queue_timeline_value(q)),
+      (UPat(Ops.BUFFER, tag={(qname, "timeline_signal")}), lambda ctx, q=qname: ctx.timeline_signal(q)),
+      (UPat(Ops.BUFFER, tag={(qname, "timeline_value")}), lambda ctx, q=qname: ctx.timeline_value(q)),
     ]) + self.pm_bufferize
 
     return queue

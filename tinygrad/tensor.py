@@ -62,7 +62,7 @@ def _frompy(x:list|tuple|bytes, dtype:DType, device:str|tuple[str,...]) -> UOp:
   return ret
 
 def _get_winograd_matcols(mat, dims:int, shp:tuple[sint, ...], device:str|tuple[str, ...]|None, dtype:DType) -> list[list[Tensor]]:
-  return [[Tensor.cat(*[Tensor.full(shp[:dim] + (1,) + shp[dim+1:], float(m[k]), device=device, dtype=dtype, buffer=False) for m in mat], dim=dim)
+  return [[Tensor.cat(*[Tensor.full(shp[:dim] + (1,) + shp[dim+1:], float(m[k]), dtype=dtype, buffer=False) for m in mat], dim=dim)
            for k in range(len(mat[0]))] for dim in range(dims)]
 
 # winograd conv 3 kernel f(4x4,3x3) see: http://arxiv.org/abs/1509.09308
@@ -159,8 +159,8 @@ class Tensor(OpMixin):
   def alu(self, op: Ops, *src: Tensor) -> Tensor: return self._apply_uop(lambda *u: u[0].alu(op, *u[1:]), *src)
   def const_like(self, b:ConstType) -> Tensor: return Tensor(self.uop.const_like(b))
   @staticmethod
-  def const(dtype:DType, b:ConstType|UOp, device:str|tuple[str, ...]|None=None) -> Tensor:
-    return Tensor(UOp.const(dtype, b, device))
+  def const(dtype:DType, b:ConstType|UOp) -> Tensor:
+    return Tensor(UOp.const(dtype, b))
   @staticmethod
   def unique_const(fill_value:ConstType|UOp, **kwargs) -> Tensor:
     if isinstance(fill_value, UOp): return Tensor(fill_value, **kwargs)
@@ -263,7 +263,8 @@ class Tensor(OpMixin):
     if not is_disk and x.uop.device is not None and self.device is not None and self.device != x.device:
       raise RuntimeError(f"assign device mismatch {self.device} != {x.device}")
     if not is_disk and self.dtype != x.dtype: raise RuntimeError(f"assign dtype mismatch {self.dtype} != {x.dtype}")
-    if isinstance(self.device, tuple) and self.uop.axis != x.uop.axis: raise RuntimeError(f"multi axis mismatch {self.uop.axis} != {x.uop.axis}")
+    if isinstance(self.device, tuple) and x.uop.device is not None and self.uop.axis != x.uop.axis:
+      raise RuntimeError(f"multi axis mismatch {self.uop.axis} != {x.uop.axis}")
 
     # TODO: this is a hack for writing to DISK. remove with working assign
     if is_disk:
@@ -945,7 +946,7 @@ class Tensor(OpMixin):
         vb = vb.pad_to(tuple(st if j == d+1 else None for j in range(vb.ndim)))
         vb = vb.reshape(vb.shape[:d] + (vb.shape[d]*vb.shape[d+1],) + vb.shape[d+2:])
         vb = vb.shrink_to(tuple(e-s if j == d else None for j in range(self.ndim)))
-      idx = Tensor.arange(self.shape[d], device=self.device).reshape([1]*d + [self.shape[d]] + [1]*(self.ndim - d - 1))
+      idx = Tensor.arange(self.shape[d]).reshape([1]*d + [self.shape[d]] + [1]*(self.ndim - d - 1))
       per_dim.append((idx >= s) & (idx < e) & (((e-1-idx) if m['stride'] < 0 else (idx-s)) % st == 0))
     vb = vb.flip(tuple(d for d, m in enumerate(mops) if m['stride'] < 0))
     vb = vb.pad(tuple((m['boundary'][0], self.shape[d] - m['boundary'][1]) for d, m in enumerate(mops)))
@@ -1049,10 +1050,10 @@ class Tensor(OpMixin):
     x, mask = self.flatten(), mask._broadcast_to(self.shape).flatten()
     mask_cumsum = mask.cumsum()
     if size is None:
-      counts = Tensor.zeros(mask_cumsum[-1].item() if mask.numel() else 0, dtype=dtypes.int32, device=self.device, buffer=False)
+      counts = Tensor.zeros(mask_cumsum[-1].item() if mask.numel() else 0, dtype=dtypes.int32, buffer=False)
       return x[counts.scatter(0, mask_cumsum, 1, reduce='add').cumsum()]
-    counts = Tensor.zeros(size, dtype=dtypes.int32, device=self.device, buffer=False).scatter(0, mask_cumsum, 1, reduce='add')
-    return (Tensor.arange(size, device=self.device) < mask.sum()).where(x[counts.cumsum()], fill_value).cast(self.dtype)
+    counts = Tensor.zeros(size, dtype=dtypes.int32, buffer=False).scatter(0, mask_cumsum, 1, reduce='add')
+    return (Tensor.arange(size) < mask.sum()).where(x[counts.cumsum()], fill_value).cast(self.dtype)
 
   def nonzero(self, size:int|None=None, fill_value:ConstType=0) -> Tensor:
     """
@@ -1082,7 +1083,7 @@ class Tensor(OpMixin):
     if self.ndim == 0:
       return Tensor.zeros(size if size is not None else int((self != 0).item()), 0, dtype=dtypes.int32, device=self.device)
     mask = (self != 0).flatten()
-    indices = Tensor.stack(*[Tensor.arange(s, device=self.device).reshape(*[1]*i, s, *[1]*(self.ndim-i-1)).expand(self.shape).flatten()
+    indices = Tensor.stack(*[Tensor.arange(s).reshape(*[1]*i, s, *[1]*(self.ndim-i-1)).expand(self.shape).flatten()
                              for i, s in enumerate(self.shape)], dim=-1)
     return indices.masked_select(mask.unsqueeze(-1).expand(*mask.shape, self.ndim),
                                  size=size*self.ndim if size is not None else None, fill_value=fill_value).reshape(-1, self.ndim)
@@ -1127,7 +1128,7 @@ class Tensor(OpMixin):
 
     data = (data.flatten(1) ^ pad_mask).reshape(*data.shape[:2], 200).bitcast(dtypes.uint64)
 
-    state = Tensor.zeros(bs, 25, device=self.device, dtype=dtypes.uint64, buffer=False)
+    state = Tensor.zeros(bs, 25, dtype=dtypes.uint64, buffer=False)
     for k in range(int(data.shape[1])):
       state = state ^ data[:, k]
       for i in range(24): # f1600
