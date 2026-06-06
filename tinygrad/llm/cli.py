@@ -1,6 +1,6 @@
 from __future__ import annotations
 import sys, argparse, codecs, typing, re, unicodedata, json, uuid, time, pathlib, cv2, math, numpy as np, base64
-from tinygrad import nn
+from tinygrad import nn, Variable
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.helpers import partition, DEBUG, Timing, GlobalCounters, stderr_log, colored, Context, fetch, profile_marker
 from tinygrad.viz.serve import TCPServerWithReuse, HTTPRequestHandler
@@ -158,7 +158,8 @@ class Handler(HTTPRequestHandler):
             img_data = base64.b64decode(msg["image"].split(',')[1])
             image = cv2.imdecode(np.frombuffer(img_data, np.uint8), cv2.IMREAD_COLOR)
             image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-            prefill_img(vis=self.server.vis, lang=self.server.model, image=image, start_pos=len(self.server.model._cached_tokens), res=(640, 640))
+            prefill_img(vis=self.server.vis, lang=self.server.model, image=image, start_pos=\
+            Variable("pos", 0, self.server.model.max_context).bind(len(self.server.model._cached_tokens)), res=(640, 640))
             self.server.model._cached_tokens.extend(ids[-2:]) # todo remove hack, end token gets added to only one
             self.server.model._cached_tokens.extend(tokens)
           ids.extend(tokens)
