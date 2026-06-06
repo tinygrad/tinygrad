@@ -150,7 +150,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     except AttributeError: pass
   def __reduce__(self):
     args = [self.op, self.dtype, self.src, self.arg, self.tag, self.metadata]
-    if self.op is Ops.BUFFER and self.realized is not None: args.append(self.realized)
+    if self.op is Ops.BUFFER and not isinstance(self.arg, ParamArg) and self.realized is not None: args.append(self.realized)
     return UOp, tuple(args)
   def replace(self, **kwargs) -> UOp:
     new_args = (kwargs.pop("op", self.op), kwargs.pop("dtype", self.dtype), kwargs.pop("src", self.src),
@@ -692,10 +692,9 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
   @functools.cached_property
   def as_shape(self) -> tuple[sint, ...]:
-    if self.op is Ops.STACK and len(self.src) == 0: return ()
     if self.op is Ops.CONST: return (self.arg,)*self.dtype.count # NOTE: this will break
     if self.op is not Ops.STACK: return (ssimplify(self),)
-    return tuple(ssimplify(self.sgep(i)) for i in range(max(self.dtype.count, len(self.src))))
+    return tuple(ssimplify(self.sgep(i)) for i in range(len(self.src)))
 
   @functools.cached_property
   def marg(self):
@@ -760,6 +759,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       assert isinstance(self.src[0].device, tuple), f"mselect must be on tuple device, getting {self.src[0].device}"
       return self.src[0].device[self.arg]
     if self.op is Ops.MSTACK: return tuple(cast(str, x.device) for x in self.src)
+    if self.op is Ops.BUFFER and isinstance(self.arg, ParamArg): return self.arg.device
     if self.op in {Ops.COPY, Ops.BUFFER, Ops.ALLREDUCE}: return self.src[1].device
     for x in self.src:
       if x.device is not None: return x.device
@@ -1124,7 +1124,8 @@ class ProgramInfo:
       if u.op is Ops.DEFINE_VAR: _vars.append(u)
       if u.op is Ops.PARAM: _globals.append(u.arg.slot)
       if u.op in (Ops.STORE, Ops.LOAD):
-        if (idx:=u.src[0]).op in (Ops.INDEX, Ops.SHRINK) or (u.src[0].op is Ops.CAST and (idx:=u.src[0].src[0]).op is Ops.INDEX):
+        if (idx:=u.src[0]).op is Ops.PARAM: (outs if u.op is Ops.STORE else ins).append(idx.arg.slot)
+        elif idx.op in (Ops.INDEX, Ops.SHRINK) or (idx.op is Ops.CAST and (idx:=idx.src[0]).op is Ops.INDEX):
           if (buf:=idx.src[0]).op is Ops.PARAM: (outs if u.op is Ops.STORE else ins).append(buf.arg.slot)
       if u.op is Ops.SPECIAL:
         if u.arg[0] == 'i': local_size = None

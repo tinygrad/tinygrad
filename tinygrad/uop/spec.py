@@ -102,6 +102,7 @@ spec_shared = PatternMatcher([
 
   # LOAD/STORE without INDEX
   (UPat(Ops.PARAM).load(), lambda: True),
+  (UPat(Ops.PARAM).load(UPat.var("alt"), UPat.var("gate", dtype=dtypes.bool)), lambda alt,gate: True),
   (UPat(Ops.PARAM).store(UPat()), lambda: True),
   (UPat(Ops.PARAM).store(UPat(), UPat.var("gate", dtype=dtypes.bool)), lambda: True),
 

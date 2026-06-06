@@ -132,7 +132,7 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   if ren.new_style:
     sink = graph_rewrite(sink, pm_index_is_shrink, name="index is shrink")
-    sink = graph_rewrite(sink, pm_remove_vec_dtypes, name="remove vec dtypes")
+    sink = graph_rewrite(sink, pm_remove_vec_dtypes, name="transform to new style")
 
   # this was the linearizer
   sink = graph_rewrite(sink, pm_add_control_flow, ctx=CFGContext(sink), name="add control flow", bottom_up=True)

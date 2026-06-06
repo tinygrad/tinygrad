@@ -189,7 +189,7 @@ class TestLinearizer(unittest.TestCase):
 
     # the first store is to lds and can be upcasted
     assert stores[0].src[1].max_numel() == 4
-    assert any(x.op is Ops.DEFINE_LOCAL for x in stores[0].toposort())
+    assert any(x.addrspace is AddrSpace.LOCAL for x in stores[0].toposort())
     # the second store is to gds with no upcasts
     assert stores[1].src[1].max_numel() == 1
     assert stores[1].src[1].dtype == dtypes.float
@@ -210,14 +210,14 @@ class TestLinearizer(unittest.TestCase):
         a = Tensor([1, 2, 3], dtype=tensor_dtype).sum()
         realized_ast = a.schedule_linear().src[-1].src[0]
         program = to_program(replace_opts(realized_ast, []), renderer=Device[Device.DEFAULT].renderer)
-        local = [uop for uop in tuple(program.src[2].src) if uop.op is Ops.DEFINE_REG]
+        local = [uop for uop in tuple(program.src[2].src) if uop.op in (Ops.BUFFER, Ops.DEFINE_REG)]
         assert local[0].dtype.base == acc_dtype
 
   def test_arg_acc_dtype(self):
     def helper_arg_acc_dtype(c: Tensor, expected_dtype:DType):
       realized_ast = c.schedule_linear().src[-1].src[0]
       program = to_program(replace_opts(realized_ast, []), renderer=Device[Device.DEFAULT].renderer)
-      local = [uop for uop in tuple(program.src[2].src) if uop.op is Ops.DEFINE_REG]
+      local = [uop for uop in tuple(program.src[2].src) if uop.op in (Ops.BUFFER, Ops.DEFINE_REG)]
       self.assertEqual(local[0].dtype.base, expected_dtype)
 
     tests = (
