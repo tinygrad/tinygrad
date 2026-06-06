@@ -152,15 +152,9 @@ class Handler(HTTPRequestHandler):
 
     if DEBUG >= 1: print(json.dumps(body, indent=2))
     if self.path == "/v1/chat/completions":
-
-      # img hack for now
-      ids: list[int] = []
-
-      # extract tokens, last assistant message is treated as prefill
-      ids.extend(tok.prefix())
+      ids: list[int] = tok.prefix()
       for i, msg in enumerate(body["messages"]):
         if "image" in msg:
-
           if i == len(body["messages"]) - 2: # only process once, it'll be second last behind text
             image = cv2.cvtColor(cv2.imread("images/micra.jpg"), cv2.COLOR_BGR2RGB)
             prefill_img(vis=self.server.vis, lang=self.server.model, image=image, start_pos=len(self.server.model._cached_tokens), res=(640, 640))
