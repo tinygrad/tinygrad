@@ -155,12 +155,17 @@ class Handler(HTTPRequestHandler):
       ids: list[int] = tok.prefix()
       for i, msg in enumerate(body["messages"]):
         if "image" in msg:
-          if i == len(body["messages"]) - 2: # only process once, it'll be second last behind text
-            image = cv2.cvtColor(cv2.imread("images/micra.jpg"), cv2.COLOR_BGR2RGB)
-            prefill_img(vis=self.server.vis, lang=self.server.model, image=image, start_pos=len(self.server.model._cached_tokens), res=(640, 640))
+          print("rory img at",i,len(body["messages"]))
           tokens = [0] * (((640 * 640) // (32*32)) + 8)
-          self.server.model._cached_tokens.extend(ids[-2:]) # todo remove hack, end token gets added to only one
-          self.server.model._cached_tokens.extend(tokens)
+          if i == len(body["messages"]) - 2:
+            import base64
+            import numpy as np # todo, shouldn't need?
+            img_data = base64.b64decode(msg["image"].split(',')[1])
+            image = cv2.imdecode(np.frombuffer(img_data, np.uint8), cv2.IMREAD_COLOR)
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            prefill_img(vis=self.server.vis, lang=self.server.model, image=image, start_pos=len(self.server.model._cached_tokens), res=(640, 640))
+            self.server.model._cached_tokens.extend(ids[-2:]) # todo remove hack, end token gets added to only one
+            self.server.model._cached_tokens.extend(tokens)
           ids.extend(tokens)
           continue
         ids += tok.role(msg["role"])

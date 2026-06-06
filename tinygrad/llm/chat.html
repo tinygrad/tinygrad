@@ -10,14 +10,24 @@
            border: none; outline: none; resize: none; border-radius: 24px; field-sizing: content }
 </style></head><body><div id="chat"></div>
 <textarea id="input" rows="1" placeholder="Ask anything" autofocus></textarea>
+  <input type="file" id="fileInput" style="display:none" accept="image/*" onchange="handleFile(event)">
   <button style="width:44px;border:none;border-radius:24px;background:#2f2f2f;color:#e3e3e3;cursor:pointer"
-    onclick="send({img:true})">img
+    onclick="document.getElementById('fileInput').click()">img
 <script>
+  async function handleFile(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      msgs.push({role: 'user', image: reader.result});
+      send(true);
+    };
+    reader.readAsDataURL(file);
+  }
   input.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); send() } }
   const msgs = [];
   async function send(image=false) {
     if (!input.value.trim()) return;
-    if (image) msgs.push({role: 'user', image: true});
     msgs.push({role: 'user', content: input.value.trim()});
     chat.innerHTML += '<div class="msg user">' + input.value.trim().replace(/</g, '&lt;') + '</div>';
     input.value = '';
