@@ -3,6 +3,16 @@ from tinygrad.llm.gguf import gguf_load
 from tinygrad.helpers import fetch
 from tinygrad.nn.state import load_state_dict
 import cv2 # todo resize in UI instead?
+
+#https://github.com/huggingface/transformers/blob/1316cd76c0ce328228e08d55dc257484961b074c/src/transformers/models/qwen3_vl/modeling_qwen3_vl.py#L129
+def rotate_half(x):
+  x1 = x[..., : x.shape[-1] // 2]
+  x2 = x[..., x.shape[-1] // 2 :]
+  ret = Tensor.cat(-x2, x1, dim=-1)
+  return ret
+
+def apply_rotary_pos_emb_vision(query, key, cos, sin): return (query * cos) + (rotate_half(query) * sin), (key * cos) + (rotate_half(key) * sin)
+  
 def prefill_img(vis, lang, image, start_pos, res=(640, 640)):
   if image.shape[:2] != res:
     target_h, target_w = res[:2]
@@ -18,7 +28,7 @@ def prefill(vis, lang, image, start_pos):
   image = image.unsqueeze(0).float()
   image = image.interpolate(size=(height, width))
   resized_height, resized_width = image.shape[-2:]
-  patches = (image - 127.5) / 127.5
+  patches = (image - 127.5) / 127.5 # todo use mean and std
   batch_size, channel = 1, 3
   # https://github.com/huggingface/transformers/blob/4ae05b0fba41860adaaeb708774fc1f48c92c049/src/transformers/models/qwen2_vl/image_processing_qwen2_vl.py#L195
   grid_h, grid_w = resized_height // vis.patch_size, resized_width // vis.patch_size
@@ -35,11 +45,11 @@ def prefill(vis, lang, image, start_pos):
   patches = patches.permute(0, 2, 5, 3, 6, 1, 4, 7)
   pixel_values = (
       patches.unsqueeze(6)
-      .expand(-1, -1, -1, -1, -1, -1, vis.temporal_patch_size, -1, -1)
+      .expand(-1, -1, -1, -1, -1, -1, vis.merge_size, -1, -1)
       .reshape(
           batch_size,
           grid_h * grid_w,
-          channel * vis.temporal_patch_size * vis.patch_size * vis.patch_size, # 1536
+          channel * vis.merge_size * vis.patch_size * vis.patch_size,
       )
   )[0]
   pixel_values = pixel_values.cast(dtypes.bfloat16)
@@ -64,94 +74,84 @@ def prefill(vis, lang, image, start_pos):
       hidden_states[:, 4:-4, :] += deepstack_feature_lists[vis.v.deepstack_idx.index(i)]
   hidden_states.realize()
 
-def rotate_half(x):
-    x1 = x[..., : x.shape[-1] // 2]
-    x2 = x[..., x.shape[-1] // 2 :]
-    ret = Tensor.cat(-x2, x1, dim=-1)
-    return ret
+def meshgrid(x, y):
+  grid_x = Tensor.cat(*[x[idx:idx+1].expand(y.shape).unsqueeze(0) for idx in range(x.shape[0])])
+  grid_y = Tensor.cat(*[y.unsqueeze(0)]*x.shape[0])
+  return grid_x.reshape(-1, 1), grid_y.reshape(-1, 1)
+
+def get_vision_bilinear_indices_and_weights(h: int, w: int, num_grid_per_side: int, merge_size: int ) -> tuple[Tensor, Tensor]:
+  side = num_grid_per_side
+
+  h_grid = Tensor.linspace(0, side - 1, h)
+  w_grid = Tensor.linspace(0, side - 1, w)
+  h_floor = h_grid.cast(dtypes.int)
+  w_floor = w_grid.cast(dtypes.int)
+
+  h_ceil = (h_floor + 1).clamp(max_=side - 1)
+  w_ceil = (w_floor + 1).clamp(max_=side - 1)
+
+  h_frac = h_grid - h_floor
+  w_frac = w_grid - w_floor
+
+  h_floor_offset = h_floor * side
+  h_ceil_offset = h_ceil * side
+
+  corner_indices = Tensor.stack(
+    (h_floor_offset[:, None] + w_floor[None, :]).flatten(),
+    (h_floor_offset[:, None] + w_ceil[None, :]).flatten(),
+    (h_ceil_offset[:, None] + w_floor[None, :]).flatten(),
+    (h_ceil_offset[:, None] + w_ceil[None, :]).flatten(),
+  )
+  corner_weights = Tensor.stack(
+    ((1 - h_frac)[:, None] * (1 - w_frac)[None, :]).flatten(),
+    ((1 - h_frac)[:, None] * w_frac[None, :]).flatten(),
+    (h_frac[:, None] * (1 - w_frac)[None, :]).flatten(),
+    (h_frac[:, None] * w_frac[None, :]).flatten(),
+  )
+
+  h_idx = Tensor.arange(h).view(h // merge_size, merge_size)
+  w_idx = Tensor.arange(w).view(w // merge_size, merge_size)
+  reorder = (h_idx[:, :, None, None] * w + w_idx[None, None, :, :]).transpose(1, 2).flatten()
+  bilinear_indices = corner_indices[:, reorder].reshape(4, -1)
+  bilinear_weights = corner_weights[:, reorder].reshape(4, -1)
+  return bilinear_indices, bilinear_weights
+
+def get_vision_position_ids(h: int, w:int, merge_size: int):
+  hpos_ids = Tensor.arange(h).unsqueeze(1).expand(-1, w)
+  hpos_ids = hpos_ids.reshape(h // merge_size, merge_size, w // merge_size, merge_size).transpose(1, 2).flatten()
+  wpos_ids = Tensor.arange(w).unsqueeze(0).expand(h, -1)
+  wpos_ids = wpos_ids.reshape(h // merge_size, merge_size, w // merge_size, merge_size).transpose(1, 2).flatten()
+  pos_ids = Tensor.stack(hpos_ids, wpos_ids, dim=-1).repeat(1, 1)
+  return pos_ids
 
 class Qwen3VLVis():
   def __init__(self, size="2B"):
     kv, state_dict = gguf_load(fetch(f"https://huggingface.co/Qwen/Qwen3-VL-{size}-Instruct-GGUF/resolve/main/mmproj-Qwen3VL-{size}-Instruct-F16.gguf"))
     self.merge_size = kv["clip.vision.spatial_merge_size"]
     self.patch_size = kv["clip.vision.patch_size"]
-    self.temporal_patch_size = 2
     self.v = Qwen3VisBlocks(kv=kv, weights=state_dict)
     self.mm = [nn.Linear(*state_dict["mm.0.weight"].shape[::-1], bias=True), None, nn.Linear(*state_dict["mm.2.weight"].shape[::-1], bias=True)]
     state_dict["v.patch_embd.weight1"] = state_dict["v.patch_embd.weight.1"]
     load_state_dict(self, state_dict)
+    #https://github.com/huggingface/transformers/blob/15bb519bd4277f4ab5309154aedf3c231e8b4ca8/src/transformers/models/qwen3_vl/modeling_qwen3_vl.py#L98
     self.inv_freq = 1.0 / (10000.0 ** (Tensor.arange(0, 32, 2, dtype=dtypes.float) / 32))
 
   # https://github.com/huggingface/transformers/blob/15bb519bd4277f4ab5309154aedf3c231e8b4ca8/src/transformers/models/qwen3_vl/modeling_qwen3_vl.py#L679
-  def __call__(self, pixel_values, image_grid_size):        
-    grid_hs = image_grid_size[0]
-    grid_ws = image_grid_size[1]
+  def __call__(self, pixel_values, image_grid_size):
+    grid_hs, grid_ws = image_grid_size    
+    idx_tensor, weight_tensor = get_vision_bilinear_indices_and_weights(h=grid_hs, w=grid_ws, num_grid_per_side=self.v.num_grid_per_side, merge_size=self.merge_size)
+    pos_ids = get_vision_position_ids(h=grid_hs, w=grid_ws, merge_size=self.merge_size)
 
-    h_idxs = Tensor.linspace(0, self.v.num_grid_per_side - 1, grid_hs)
-    w_idxs = Tensor.linspace(0, self.v.num_grid_per_side - 1, grid_ws)
+    pos_embeds = (self.v.position_embd(idx_tensor) * weight_tensor[:, :, None]).sum(axis=0)
 
-    h_idxs_floor = h_idxs.cast(dtypes.int32)
-    w_idxs_floor = w_idxs.cast(dtypes.int32)
-    h_idxs_ceil = (h_idxs_floor.int() + 1).clip(self.v.num_grid_per_side - 1)
-    w_idxs_ceil = (w_idxs_floor.int() + 1).clip(self.v.num_grid_per_side - 1)
-    dh = h_idxs - h_idxs_floor
-    dw = w_idxs - w_idxs_floor
-
-    base_h = h_idxs_floor * self.v.num_grid_per_side
-    base_h_ceil = h_idxs_ceil * self.v.num_grid_per_side
-
-    idx_tensor = Tensor.stack(
-        (base_h[None].T + w_idxs_floor[None]).flatten(),
-        (base_h[None].T + w_idxs_ceil[None]).flatten(),
-        (base_h_ceil[None].T + w_idxs_floor[None]).flatten(),
-        (base_h_ceil[None].T + w_idxs_ceil[None]).flatten(),
-    ).cast(dtypes.int32)
-
-    weight_tensor = Tensor.stack(
-        ((1 - dh)[None].T * (1 - dw)[None]).flatten(),
-        ((1 - dh)[None].T * dw[None]).flatten(),
-        (dh[None].T * (1 - dw)[None]).flatten(),
-        (dh[None].T * dw[None]).flatten(),
-    ).cast(dtypes.bfloat16)
-
-    pos_embeds = self.v.position_embd(idx_tensor)
-    pos_embeds *= weight_tensor[:, :, None]
-    pos_embeds = pos_embeds[0] + pos_embeds[1] + pos_embeds[2] + pos_embeds[3]
-
-    merge_size = 2
-    pos_embeds = (pos_embeds.view(1, grid_hs // merge_size, merge_size, grid_ws // merge_size, merge_size, -1).permute(0, 1, 3, 2, 4, 5).flatten(0, 4))
-    
-    hpos_ids = Tensor.arange(grid_hs).unsqueeze(1).expand(-1, grid_ws)
-    hpos_ids = hpos_ids.reshape(grid_hs // merge_size, merge_size, grid_ws // merge_size, merge_size).transpose(1, 2).flatten()
-
-    wpos_ids = Tensor.arange(grid_ws).unsqueeze(0).expand(grid_hs, -1)
-    wpos_ids = wpos_ids.reshape(grid_hs // merge_size, merge_size, grid_ws // merge_size, merge_size).transpose(1, 2).flatten()
-
-    pos_ids = Tensor.stack(hpos_ids, wpos_ids, dim=-1).repeat(1, 1)
+    w = Tensor.stack(self.v.patch_embd.weight, self.v.patch_embd.weight1, dim=2)
+    w = w.reshape(w.shape[0], w.shape[1] * w.shape[2], w.shape[3], w.shape[4])
+    hidden_states = pixel_values.reshape(-1, *w.shape[1:])
+    hidden_states = hidden_states.conv2d(weight=w, bias=self.v.patch_embd.bias, stride=(self.patch_size, self.patch_size), padding=(0, 0), dilation=(1, 1), groups=1)
+    hidden_states = hidden_states.view(hidden_states.shape[0], -1)
+    hidden_states += pos_embeds
 
     rotary_pos_emb = (pos_ids.unsqueeze(-1) * self.inv_freq).flatten(1)
-
-    hidden_states = pixel_values.view(-1, 3, 2, 16, 16)
-    hidden_states = hidden_states.flatten(1, 2)
-    w = Tensor.stack(self.v.patch_embd.weight, self.v.patch_embd.weight1, dim=2)
-    out_C, in_C, kD, kH, kW = w.shape
-    w2d = w.reshape(out_C, in_C * kD, kH, kW)
-
-    hidden_states = hidden_states.conv2d(
-        weight=w2d,
-        bias=self.v.patch_embd.bias,
-        stride=(16, 16),
-        padding=(0, 0),
-        dilation=(1, 1),
-        groups=1
-    )
-
-    hidden_states = hidden_states.view(-1, 1024)
-    hidden_states = hidden_states + pos_embeds
-
-    sqlen, _ = hidden_states.size()
-    hidden_states = hidden_states.reshape(sqlen, -1)
-    rotary_pos_emb = rotary_pos_emb.reshape(sqlen, -1)
     emb = Tensor.cat(rotary_pos_emb, rotary_pos_emb, dim=-1)
     cos, sin = emb.cos(), emb.sin()
     cos, sin = cos.unsqueeze(-2), sin.unsqueeze(-2)
@@ -168,18 +168,19 @@ class Qwen3VLVis():
     image_embeds = self.mm[2](image_embeds)
     return image_embeds, hidden_states, deepstack_feature_lists
 
-class Qwen3PatchEmbed():
-  def __init__(self, kv=None):
-    self.weight = Tensor.zeros(kv["clip.vision.embedding_length"], 3, 16, 16)
-    self.weight1 = Tensor.zeros(kv["clip.vision.embedding_length"], 3, 16, 16)
+class Qwen3PatchEmbed:
+  def __init__(self, kv=None, weights=None):
+    self.weight = Tensor.zeros(weights["v.patch_embd.weight"].shape)
+    self.weight1 = Tensor.zeros(weights["v.patch_embd.weight.1"].shape)
     self.bias = Tensor.zeros(kv["clip.vision.embedding_length"])
     
-class Qwen3VisBlocks():
+class Qwen3VisBlocks:
   def __init__(self, kv=None, weights=None):
     self.blk = []
     for _ in range(kv["clip.vision.block_count"]): self.blk.append(Qwen3VisBlock(kv, weights=weights))
-    self.patch_embd = Qwen3PatchEmbed(kv=kv)
-    self.num_grid_per_side = 48 # todo unhardcode
+    self.patch_embd = Qwen3PatchEmbed(kv=kv, weights=weights)
+    #https://github.com/huggingface/transformers/blob/effde20942e3f82a1b97449f60b3a48c5ff96145/src/transformers/models/qwen3_vl/modeling_qwen3_vl.py#L628
+    self.num_grid_per_side = int(weights["v.position_embd.weight"].shape[0]**0.5)
     self.deepstack_layers = kv["clip.vision.is_deepstack_layers"]
     self.deepstack_idx = [i for i, val in enumerate(self.deepstack_layers) if val]
     self.deepstack = []
@@ -200,11 +201,12 @@ class DeepstackLayer:
 
   #https://github.com/huggingface/transformers/blob/027d1a97025295a1346c2eb5c361259e69eedfe7/src/transformers/models/qwen3_vl/modeling_qwen3_vl.py#L112
   def __call__(self, hidden_states):
-      deepstack_feature = (hidden_states.view(-1, self.hidden_size)).view(-1, self.hidden_size)
-      return self.fc2(Tensor.gelu(self.fc1(deepstack_feature)))
+    deepstack_feature = (hidden_states.view(-1, self.hidden_size)).view(-1, self.hidden_size)
+    return self.fc2(Tensor.gelu(self.fc1(deepstack_feature)))
 
-class Qwen3VisBlock():
+class Qwen3VisBlock:
   def __init__(self, kv=None, weights=None):
+    self.num_heads = kv["clip.vision.attention.head_count"]
     self.ffn_up = nn.Linear(kv["clip.vision.embedding_length"], kv["clip.vision.feed_forward_length"])
     self.ffn_down = nn.Linear(kv["clip.vision.feed_forward_length"], kv["clip.vision.embedding_length"])
     self.ln1 = nn.LayerNorm(kv["clip.vision.embedding_length"], eps=1e-6, elementwise_affine=True)
@@ -214,25 +216,21 @@ class Qwen3VisBlock():
   
   def __call__(self, hidden_states, cos, sin):
     hidden_states_input = self.ln1(hidden_states)
-    seq_length = hidden_states_input.shape[0]
     qkv = self.attn_qkv(hidden_states_input)
-    qkv = qkv.reshape(seq_length, 3, 16, -1).permute(1, 0, 2, 3)
-    query, key, value = qkv.chunk(3, dim=0)
-    query = query.squeeze(0)
-    key   = key.squeeze(0)
-    value = value.squeeze(0)
-    query = (query * cos) + (rotate_half(query) * sin)
-    key = (key * cos) + (rotate_half(key) * sin)
-
+    # https://github.com/huggingface/transformers/blob/1316cd76c0ce328228e08d55dc257484961b074c/src/transformers/models/qwen3_vl/modeling_qwen3_vl.py#L186
+    qkv = qkv.reshape(qkv.shape[0], 3, self.num_heads, -1).permute(1, 0, 2, 3)
+    query, key, value = qkv[0], qkv[1], qkv[2]
+    query, key = apply_rotary_pos_emb_vision(query, key, cos, sin)
     query = query.transpose(0, 1).unsqueeze(0)
     value = value.transpose(0, 1).unsqueeze(0)
+    key = key.transpose(0, 1).unsqueeze(0)
 
-    attn_weight = query @ key.transpose(0, 1).unsqueeze(0).transpose(-2, -1) * 0.125
-    attn_weight = Tensor.softmax(attn_weight)
-    attn_output = attn_weight @ value
+    attn_output = query.scaled_dot_product_attention(key, value)
+
     attn_output = attn_output.transpose(1, 2)
-    attn_output = attn_output.reshape(seq_length, -1)
+    attn_output = attn_output.reshape(attn_output.shape[1], -1)
     attn_output = self.attn_out(attn_output)
+
     hidden_states += attn_output
     norm = self.ln2(hidden_states)
     norm = self.ffn_up(norm).gelu()
