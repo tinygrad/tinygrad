@@ -5,7 +5,7 @@ from tinygrad.uop.ops import UOp, Ops
 from tinygrad.helpers import partition, DEBUG, Timing, GlobalCounters, stderr_log, colored, Context, fetch, profile_marker
 from tinygrad.viz.serve import TCPServerWithReuse, HTTPRequestHandler
 from tinygrad.llm.model import Transformer
-from examples.Qwen3VL import Qwen3VLVis, prefill_img
+from examples.Qwen3VL import Qwen3VLVis, prefill_img, prewarm
 
 class SimpleTokenizer:
   def __init__(self, normal_tokens:dict[str, int], special_tokens:dict[str, int], preset:str="llama3",
@@ -224,6 +224,7 @@ def main():
   # start server
   if args.serve:
     vis = Qwen3VLVis(size="2B")
+    prewarm(vis=vis, lang=model)
     LLMServer(('', args.serve), model, model_name, tok, vis).serve_forever()
 
   # do benchmark

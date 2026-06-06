@@ -1,8 +1,13 @@
-from tinygrad import Tensor, TinyJit, dtypes, nn
+from tinygrad import Tensor, TinyJit, dtypes, nn, Variable
 from tinygrad.llm.gguf import gguf_load
 from tinygrad.helpers import fetch
 from tinygrad.nn.state import load_state_dict
 import cv2 # todo resize in UI instead?
+
+def prewarm(vis, lang):
+  for _ in range(2):
+    # todo unhardcode res
+    prefill(vis=vis, lang=lang, image=Tensor.rand(640, 640, 3).cast(dtypes.uint8), start_pos=Variable("pos", 0, lang.max_context).bind(42))
 
 #https://github.com/huggingface/transformers/blob/1316cd76c0ce328228e08d55dc257484961b074c/src/transformers/models/qwen3_vl/modeling_qwen3_vl.py#L129
 def rotate_half(x):
