@@ -134,6 +134,7 @@ class Qwen3VLVis():
     kv, state_dict = gguf_load(fetch(f"https://huggingface.co/Qwen/Qwen3-VL-{size}-Instruct-GGUF/resolve/main/mmproj-Qwen3VL-{size}-Instruct-F16.gguf"))
     self.merge_size = kv["clip.vision.spatial_merge_size"]
     self.patch_size = kv["clip.vision.patch_size"]
+    self.feed_forward_length = kv["clip.vision.feed_forward_length"]
     self.v = Qwen3VisBlocks(kv=kv, weights=state_dict)
     self.mm = [nn.Linear(*state_dict["mm.0.weight"].shape[::-1], bias=True), None, nn.Linear(*state_dict["mm.2.weight"].shape[::-1], bias=True)]
     state_dict["v.patch_embd.weight1"] = state_dict["v.patch_embd.weight.1"]
@@ -167,7 +168,7 @@ class Qwen3VLVis():
       if i in self.v.deepstack_idx: deepstack_feature_lists.append(self.v.deepstack[i](hidden_states))
 
     image_embeds = self.v.post_ln(hidden_states)
-    image_embeds = image_embeds.view(-1, 4096)
+    image_embeds = image_embeds.view(-1, self.feed_forward_length)
     image_embeds = self.mm[0](image_embeds)
     image_embeds = Tensor.gelu(image_embeds)
     image_embeds = self.mm[2](image_embeds)
