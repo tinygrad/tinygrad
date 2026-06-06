@@ -686,14 +686,15 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       case Ops.STACK: return self.src[i].sintify()
       case _: raise RuntimeError(f"no sgep on {self.op}")
 
+  @functools.cached_property
   def as_shape(self) -> tuple[sint, ...]:
-    return tuple(self.sgep(i) for i in range(max(self.dtype.count, len(self.src))))
+    return tuple(ssimplify(self.sgep(i)) for i in range(max(self.dtype.count, len(self.src))))
 
   @functools.cached_property
   def marg(self):
     match self.op:
-      case Ops.RESHAPE | Ops.EXPAND: return self.src[1].as_shape()
-      case Ops.PAD | Ops.SHRINK: return tuple(zip(self.src[1].as_shape(), self.src[2].as_shape()))
+      case Ops.RESHAPE | Ops.EXPAND: return self.src[1].as_shape
+      case Ops.PAD | Ops.SHRINK: return tuple(zip(self.src[1].as_shape, self.src[2].as_shape))
       case Ops.PERMUTE | Ops.FLIP: return self.arg
       case _: raise RuntimeError(f"{self.op} is not a MovementOp")
 
