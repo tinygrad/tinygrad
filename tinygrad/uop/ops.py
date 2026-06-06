@@ -221,12 +221,6 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
   # *** uop shape stuff ***
 
-  def as_shape(self) -> tuple[sint, ...]:
-    # TODO: marg should use this
-    if self.op is Ops.CONST: return (self.arg,)
-    assert self.op is Ops.STACK, f"must be stack, not {self.op}"
-    return tuple(self.sgep(i) for i in range(len(self.src)))
-
   @recursive_property
   def _shape(self) -> tuple[sint, ...]|None:
     match self.op:
@@ -285,7 +279,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       case Ops.BIND | Ops.RANGE | Ops.SPECIAL: return ()
       case Ops.BINARY: return (len(self.arg),)
       case Ops.BUFFER:
-        if isinstance(self.arg, ParamArg): return self.src[0].as_shape()
+        if isinstance(self.arg, ParamArg): return self.src[0].as_shape
         return (self.arg,)
       case Ops.SLICE:
         # HACK: SLICE is used inside kernels, so we set the shape to () if it's on an INDEX
@@ -698,6 +692,9 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
 
   @functools.cached_property
   def as_shape(self) -> tuple[sint, ...]:
+    if self.op is Ops.STACK and len(self.src) == 0: return ()
+    if self.op is Ops.CONST: return (self.arg,)*self.dtype.count # NOTE: this will break
+    if self.op is not Ops.STACK: return (ssimplify(self),)
     return tuple(ssimplify(self.sgep(i)) for i in range(max(self.dtype.count, len(self.src))))
 
   @functools.cached_property
