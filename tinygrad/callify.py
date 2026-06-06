@@ -98,6 +98,14 @@ def contiguous_mops_to_view(c:UOp, src:UOp):
 
   return None
 
+def _precompiled_output_redirect(s:UOp, t:UOp) -> UOp|None:
+  # how output s lands in the caller's buffer t, or None if it must be copied into t
+  # materialize straight into t
+  if s.op is Ops.CONTIGUOUS: return t.after(t.store(s.src[0]))
+  # rebind output storage to t
+  if s.op in {Ops.BUFFER, Ops.MULTI} and s.has_buffer_identity(): return t
+  return None
+
 def transform_precompiled_call(c:UOp) -> UOp|None:
   if not c.arg.precompile: return None
   assert c.src[0].op is Ops.TUPLE, f"expected TUPLE body for precompiled FUNCTION, got {c.src[0].op}"
@@ -116,9 +124,8 @@ def transform_precompiled_call(c:UOp) -> UOp|None:
     while s.op is Ops.AFTER:
       after_deps.extend(s.src[1:])
       s = s.src[0]
-    base = s.base
-    if base.op in {Ops.CONTIGUOUS, Ops.BUFFER} and base.shape == t.shape and base not in subs:
-      subs[base] = t.after(t.store(base.src[0])) if base.op is Ops.CONTIGUOUS else t
+    if (placed := _precompiled_output_redirect(s, t)) is not None and s not in subs:
+      subs[s] = placed
       items.append(s.after(*after_deps) if after_deps else s)
     else:
       items.append(t.after(t.store(s), *after_deps))
@@ -182,8 +189,6 @@ def replace_input_buffer(ctx:AllocCtx, b:UOp):
 pm_finalize_call = PatternMatcher([
   (UPat(Ops.AFTER, name="x"), finalize_after),
   (UPat(Ops.COPY, name="x"), lambda ctx,x: ctx.assigns.append(x) if isinstance(x.device, str) and x.device.startswith(("DISK", "TINYFS")) else None),
-  # remove unique from const. TODO: this is copied in function.py
-  (UPat(Ops.CONST, src=(UPat(Ops.UNIQUE), UPat(Ops.DEVICE, name="d")), name="b"), lambda b,d: b.replace(src=(d,))),
 ])
 
 pm_replace_buf = PatternMatcher([

@@ -99,7 +99,7 @@ class GPT:
 
   def __call__(self, idx:Tensor, targets=None):
     b, t = idx.shape
-    pos = Tensor.arange(0, t, device=idx.device)
+    pos = Tensor.arange(0, t)
 
     tok_emb = self.wte(idx) # token embeddings of shape (b, t, n_embd)
     pos_emb = self.wpe(pos) # position embeddings of shape (t, n_embd)
