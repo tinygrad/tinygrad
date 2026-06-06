@@ -2,7 +2,7 @@ from __future__ import annotations
 import functools, pathlib
 from dataclasses import replace
 from tinygrad import Tensor, dtypes
-from tinygrad.uop.ops import UOp, Ops, KernelInfo, AxisType, shape_to_shape_arg
+from tinygrad.uop.ops import shape_to_shape_arg
 from tinygrad.runtime.support.compiler_amd import HIPCCCompiler
 
 FP8_MAX = 448.0
@@ -24,19 +24,6 @@ def scalar_amax(amax_buf:Tensor) -> Tensor:
   if isinstance(amax_buf.device, tuple):
     return local_abs_max(amax_buf).detach()
   return amax_buf.max().detach()
-
-@functools.cache
-def _store_scalar_amax_fxn(amax_state_p, amax_buf_p):
-  assert amax_buf_p.shape == (NUM_WG,), f"expected {(NUM_WG,)}, got {amax_buf_p.shape}"
-  r = UOp.range(NUM_WG, 0, AxisType.REDUCE)
-  max_val = amax_buf_p.reshape(NUM_WG)[r].reduce(r, arg=Ops.MAX)
-  store = amax_state_p.reshape(1)[0].store(max_val)
-  return store.sink(arg=KernelInfo(f"store_scalar_amax_{NUM_WG}"))
-
-def store_scalar_amax(amax_buf:Tensor, amax_state:Tensor) -> Tensor:
-  assert amax_state.shape == (), f"expected scalar amax_state, got {amax_state.shape}"
-  updated_state, _ = Tensor.custom_kernel(amax_state, amax_buf, fxn=_store_scalar_amax_fxn)
-  return updated_state
 
 def shard_shape(shape:tuple, axis:int, ndev:int) -> list:
   s = list(shape)

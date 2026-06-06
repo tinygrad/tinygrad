@@ -3,7 +3,7 @@ import functools, pathlib
 from tinygrad import Tensor, dtypes
 from tinygrad.uop.ops import UOp, Ops, KernelInfo
 from tinygrad.renderer import Estimates
-from extra.llama_kernels import FP8_MAX, NUM_WG, THREADS_PER_WG, alloc_like, alloc_local, scalar_amax, store_scalar_amax, dname_of, compile_hip
+from extra.llama_kernels import FP8_MAX, NUM_WG, THREADS_PER_WG, alloc_like, alloc_local, scalar_amax, dname_of, compile_hip
 
 def _src() -> str: return (pathlib.Path(__file__).parent/"fused_rmsnorm_mul_quantize_fp8.cpp").read_text()
 def _src_bwd() -> str: return (pathlib.Path(__file__).parent/"fused_rmsnorm_mul_quantize_fp8_bwd.cpp").read_text()
@@ -112,8 +112,7 @@ def _fused_add_bwd(*args, **kwargs):
   grad_h, grad_w = _bwd_common(fp8_grad_u, h_grad_u, x_u, x_normed_u, rrms_u, weight_u, amax_state_u, kernel)
   return (None, None, None, None, None, grad_h, grad_h, grad_w, None)
 
-def fused_rmsnorm_mul_quantize_fp8(x:Tensor, weight:Tensor, amax_state:Tensor, eps:float, fp8_dtype,
-                                   store_amax:bool=False) -> tuple[Tensor, Tensor, Tensor|None, Tensor, Tensor]:
+def fused_rmsnorm_mul_quantize_fp8(x:Tensor, weight:Tensor, amax_state:Tensor, eps:float, fp8_dtype) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
   # NOTE: rmsnorm(x) * weight -> fp8 + amax. Returns (fp8, inv_scale, new_amax, x_normed, rrms).
   # x_normed + rrms are saved for the rmsnorm backward (also recomputed here from x regs).
   assert x.dtype == dtypes.bfloat16 and weight.dtype == dtypes.bfloat16
@@ -129,13 +128,10 @@ def fused_rmsnorm_mul_quantize_fp8(x:Tensor, weight:Tensor, amax_state:Tensor, e
   fp8_out, x_normed_out, rrms_out, amax_buf, *_ = Tensor.custom_kernel(
     fp8_out, x_normed_out, rrms_out, amax_buf, x, weight, amax_state, fxn=fxn, grad_fxn=_fused_bwd)
   inv_scale = (amax_state.float() + 1e-8) / FP8_MAX
-  if store_amax:
-    fp8_out = Tensor(fp8_out.uop.after(store_scalar_amax(amax_buf, amax_state).uop), device=fp8_out.device)
-    return fp8_out, inv_scale, None, x_normed_out, rrms_out
   return fp8_out, inv_scale, scalar_amax(amax_buf), x_normed_out, rrms_out
 
 def fused_add_rmsnorm_mul_quantize_fp8(x:Tensor, residual:Tensor, weight:Tensor, amax_state:Tensor,
-                                       eps:float, fp8_dtype, store_amax:bool=False) -> tuple[Tensor, Tensor, Tensor|None, Tensor, Tensor, Tensor]:
+                                       eps:float, fp8_dtype) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
   # NOTE: h = x + residual; y_normed = rmsnorm(h); fp8 = quantize(y_normed * weight).
   # Returns (fp8, inv_scale, new_amax, h, x_normed, rrms). h is also written so downstream can
   # reuse it without recomputing x+residual — eliminates the separate residual-add kernel.
@@ -154,7 +150,4 @@ def fused_add_rmsnorm_mul_quantize_fp8(x:Tensor, residual:Tensor, weight:Tensor,
     fp8_out, h_out, x_normed_out, rrms_out, amax_buf, x, residual, weight, amax_state,
     fxn=fxn, grad_fxn=_fused_add_bwd)
   inv_scale = (amax_state.float() + 1e-8) / FP8_MAX
-  if store_amax:
-    fp8_out = Tensor(fp8_out.uop.after(store_scalar_amax(amax_buf, amax_state).uop), device=fp8_out.device)
-    return fp8_out, inv_scale, None, h_out, x_normed_out, rrms_out
   return fp8_out, inv_scale, scalar_amax(amax_buf), h_out, x_normed_out, rrms_out
