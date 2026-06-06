@@ -1,12 +1,10 @@
 from __future__ import annotations
-import sys, argparse, codecs, typing, re, unicodedata, json, uuid, time, pathlib, cv2, math
-from tinygrad import nn, Tensor, TinyJit, dtypes
+import sys, argparse, codecs, typing, re, unicodedata, json, uuid, time, pathlib, cv2, math, numpy as np, base64
+from tinygrad import nn
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.helpers import partition, DEBUG, Timing, GlobalCounters, stderr_log, colored, Context, fetch, profile_marker
 from tinygrad.viz.serve import TCPServerWithReuse, HTTPRequestHandler
 from tinygrad.llm.model import Transformer
-from gguf import gguf_load
-from tinygrad.nn.state import load_state_dict
 from examples.Qwen3VL import Qwen3VLVis, prefill_img
 
 class SimpleTokenizer:
@@ -155,11 +153,8 @@ class Handler(HTTPRequestHandler):
       ids: list[int] = tok.prefix()
       for i, msg in enumerate(body["messages"]):
         if "image" in msg:
-          print("rory img at",i,len(body["messages"]))
           tokens = [0] * (((640 * 640) // (32*32)) + 8)
           if i == len(body["messages"]) - 2:
-            import base64
-            import numpy as np # todo, shouldn't need?
             img_data = base64.b64decode(msg["image"].split(',')[1])
             image = cv2.imdecode(np.frombuffer(img_data, np.uint8), cv2.IMREAD_COLOR)
             image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
