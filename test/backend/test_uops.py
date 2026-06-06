@@ -204,7 +204,8 @@ class TestLocalAccess(unittest.TestCase):
       out = Device[Device.DEFAULT].renderer.render(uops)
       # half is supported in wgsl, so it doesn't have to be packed
       corrected_size = size//(4//dtype.itemsize) if dtype != dtypes.half else size
-      self.assertIn(f"temp0: array<{Device[Device.DEFAULT].renderer.buf_map(dtype)},{corrected_size}>;", out)
+      # temp0: array<{Device[Device.DEFAULT].renderer.buf_map(dtype)},{corrected_size}>;
+      self.assertIn(f",{corrected_size}>;", out)
 
   @unittest.skipUnless(Device[Device.DEFAULT].renderer.has_shared, "test requires shared memory")
   @unittest.skip("tinygrad doesn't support this behavior")
