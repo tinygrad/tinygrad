@@ -689,9 +689,12 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       case Ops.STACK: return self.src[i].sintify()
       case _: raise RuntimeError(f"no sgep on {self.op}")
 
-  @functools.cached_property
+  # cached property here makes external_uop_gc fail, why?
+  @property
   def as_shape(self) -> tuple[sint, ...]:
-    return tuple(ssimplify(self.sgep(i)) for i in range(max(self.dtype.count, len(self.src))))
+    if self.op is Ops.CONST: return (self.arg,)*self.dtype.count # NOTE: this will break
+    if self.op is not Ops.STACK: return (ssimplify(self),)
+    return tuple(ssimplify(self.sgep(i)) for i in range(len(self.src)))
 
   @functools.cached_property
   def marg(self):
@@ -763,7 +766,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   @recursive_property
   def addrspace(self) -> AddrSpace|None:
     if self.op is Ops.PARAM: return self.arg.addrspace
-    if self.op is Ops.BUFFER: return AddrSpace.GLOBAL
+    if self.op is Ops.BUFFER: return self.arg.addrspace if isinstance(self.arg, ParamArg) else AddrSpace.GLOBAL
     if self.op is Ops.DEFINE_LOCAL: return AddrSpace.LOCAL
     if self.op is Ops.DEFINE_REG: return AddrSpace.REG
     if self.op is Ops.LOAD: return AddrSpace.REG # LOAD brings things into registers
@@ -860,6 +863,8 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   def realized(self) -> Buffer|MultiBuffer|None:
     # only these can be realized
     if self.op not in (Ops.BUFFER, Ops.MSTACK): return None
+    # ParamArg is LOCAL/REG and never realized
+    if self.op is Ops.BUFFER and isinstance(self.arg, ParamArg): return None
     # LUNIQUEs are never realized
     if self.op_in_backward_slice_with_self(Ops.LUNIQUE): return None
     # NOTE: this is used by the JIT to determine which inputs we capture
