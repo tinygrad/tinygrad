@@ -153,7 +153,7 @@ class Handler(HTTPRequestHandler):
       ids: list[int] = tok.prefix()
       for i, msg in enumerate(body["messages"]):
         if "image" in msg:
-          ids.extend(tok.role(msg["role"]) + [0] * self.server.vis.toks_per_img + tok.end_turn())
+          ids.extend([0] * (self.server.vis.toks_per_img + 8))
           if i == len(body["messages"]) - 2:
             img_data = base64.b64decode(msg["image"].split(',')[1])
             image = cv2.imdecode(np.frombuffer(img_data, np.uint8), cv2.IMREAD_COLOR)
@@ -161,7 +161,8 @@ class Handler(HTTPRequestHandler):
             # todo, use vis.prefill_img?
             prefill_img(vis=self.server.vis, lang=self.server.model, image=image, start_pos=\
             Variable("pos", 0, self.server.model.max_context).bind(len(self.server.model._cached_tokens)))
-            self.server.model._cached_tokens.extend(tok.end_turn() + tok.role(msg["role"]) + [0] * self.server.vis.toks_per_img + tok.end_turn())
+            if i > 0: self.server.model._cached_tokens.extend(tok.end_turn()) # todo!
+            self.server.model._cached_tokens.extend([0] * (self.server.vis.toks_per_img + 8))
           continue
         ids += tok.role(msg["role"])
         content = msg["content"]
