@@ -59,6 +59,14 @@ class TestTensorUOpClone(unittest.TestCase):
     u = UOp.const(dtypes.float, 2.0)
     self.assertIs(_strip_unique(Tensor(u).clone().uop), _strip_unique(u.clone()))
 
+class TestTensorUOpGradient(unittest.TestCase):
+  def test_gradient(self):
+    x = _t(3, 3).float()
+    z = (x * 2).sum()
+    (tg,) = z.gradient(x)
+    (ug,) = z.uop.gradient(x.uop)
+    self.assertIs(tg.uop, ug)
+
 class TestTensorUOpGetitem(unittest.TestCase):
   # ---- pure slice patterns ----
   def test_slice_full(self):           _check(self, _t(4), lambda x: x[slice(None)])
