@@ -108,8 +108,8 @@ class WGSLRenderer(CStyleLanguage):
     prg += "fn nan() -> f32 { let bits = 0xffffffffu; return bitcast<f32>(bits); }\n"
     prg += "@group(0) @binding(0)\nvar<uniform> INFINITY : f32;\n"
     prg += "\n".join((external_local_bufs or [])+[f"@group(0) @binding({next(bind_it)+1})" +
-      f"{'var<storage,read_write>' if u.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL) else 'var<uniform>'}" +
-      f"{name}:{f'array<{self.buf_map(u)}>' if u.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL) else self.buf_map(u)};" for name,(u,_) in bufs])
+      f"{'var<storage,read_write>' if u.addrspace == AddrSpace.GLOBAL else 'var<uniform>'}" +
+      f"{name}:{f'array<{self.buf_map(u.dtype.base)}>' if u.addrspace == AddrSpace.GLOBAL else self.buf_map(u.dtype)};" for name,(u,_) in bufs])
     prg += f"\n@compute @workgroup_size({','.join([str(x) for x in local_size])}) fn {function_name}(@builtin(workgroup_id) gindex: vec3<u32>,"
     return prg + "@builtin(local_invocation_id) lindex: vec3<u32>) {\n" + "\n".join(kernel) + "\n}"
 
