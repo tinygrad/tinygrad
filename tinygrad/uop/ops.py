@@ -495,6 +495,9 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       perm = src.permute(tuple([i for i in range(src.ndim) if i not in slice_idx] + slice_idx))
       return perm.index(*non_slice_args, ptr=True)
     return self.index(*[UOp.const(dtypes.weakint, x) if isinstance(x, int) else x for x in idx])
+  @property
+  def _uop(self) -> UOp: return self
+  def _wrap_uop(self, u:UOp) -> UOp: return u
   def const_like(self, b:ConstLike, dtype:DType|None=None):
     return UOp.const(dtype or self.dtype.base, b, shape=self._shape)
   def ufix(self, x):

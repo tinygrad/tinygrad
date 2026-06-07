@@ -9,9 +9,8 @@ from tinygrad.dtype import _from_np_dtype, _to_np_dtype, PyConst, Invalid
 from tinygrad.helpers import argfix, flatten, prod, all_int, round_up, getenv, all_same, fully_flatten, ceildiv, fetch, flat_to_grouped
 from tinygrad.helpers import resolve_pool_pads, IMAGE, FLOAT16, WINO, Metadata, TRACEMETA, is_numpy_ndarray, TracingKey, cpu_profile
 from tinygrad.helpers import suppress_finalizing, disable_gc
-from tinygrad.gradient import compute_gradient
-from tinygrad.mixin import OpMixin
 from tinygrad.uop.ops import UOp, Ops, sint, all_metadata, _index_to_concrete_int, Variable, _broadcast_shape
+from tinygrad.mixin import OpMixin
 from tinygrad.schedule import create_linear_with_vars
 from tinygrad.device import Buffer, canonicalize_device
 from tinygrad.engine.realize import run_linear
@@ -61,7 +60,7 @@ def _frompy(x:list|tuple|bytes, dtype:DType, device:str|tuple[str,...]) -> UOp:
   ret.buffer.allocate(memoryview(data if device != "PYTHON" else bytearray(data)))
   return ret
 
-def _get_winograd_matcols(mat, dims:int, shp:tuple[sint, ...], device:str|tuple[str, ...]|None, dtype:DType) -> list[list[Tensor]]:
+def _get_winograd_matcols(mat, dims:int, shp:tuple[sint, ...], dtype:DType) -> list[list[Tensor]]:
   return [[Tensor.cat(*[Tensor.full(shp[:dim] + (1,) + shp[dim+1:], float(m[k]), dtype=dtype, buffer=False) for m in mat], dim=dim)
            for k in range(len(mat[0]))] for dim in range(dims)]
 
@@ -71,7 +70,7 @@ def _apply_winograd_matrix(mat, t:Tensor, dims:int) -> Tensor:
   # due to realize-before-expand rule in lazy.py, we must operate in this order: reshape -> expand -> arithmetic
   t_ = t.reshape(t.shape[:dims] + (1,) * dims + t.shape[dims:]).expand(t.shape[:dims] + (len(mat),) * dims + t.shape[dims:])  # add output dims
   # precalculate mat columns for each dim; prod(itertools.product(matcols)) gives the columns of kron(mat, mat, ...)
-  matcols = _get_winograd_matcols(mat, dims, t_.shape[dims:], t_.device, t_.dtype)
+  matcols = _get_winograd_matcols(mat, dims, t_.shape[dims:], t_.dtype)
   # multiply each element of t_ by the corresponding stacked column of kron(mat, mat), producing only one view for each element of t
   ret = sum(prod(col[idx] for col, idx in zip(matcols, mat_is)) * t_[mat_is] for mat_is in itertools.product(range(len(mat[0])), repeat=dims))
   assert isinstance(ret, Tensor), "sum didn't return a Tensor"
@@ -157,6 +156,9 @@ class Tensor(OpMixin):
 
   # alu and const_like are used by the mixins
   def alu(self, op: Ops, *src: Tensor) -> Tensor: return self._apply_uop(lambda *u: u[0].alu(op, *u[1:]), *src)
+  @property
+  def _uop(self) -> UOp: return self.uop
+  def _wrap_uop(self, u:UOp) -> Tensor: return Tensor(u)
   def const_like(self, b:ConstType) -> Tensor: return Tensor(self.uop.const_like(b))
   @staticmethod
   def const(dtype:DType, b:ConstType|UOp) -> Tensor:
@@ -809,31 +811,6 @@ class Tensor(OpMixin):
     return (indices.squeeze(0) if self.ndim == 1 else indices).cast(dtypes.int32)
 
   # ***** toposort and backward pass *****
-
-  def gradient(self, *targets:Tensor, gradient:Tensor|None=None) -> list[Tensor]:
-    """
-    Computes the gradient of the targets with respect to self.
-
-    ```python exec="true" source="above" session="tensor" result="python"
-    x = Tensor.eye(3)
-    y = Tensor([[2.0,0,-2.0]])
-    z = y.matmul(x).sum()
-    dx, dy = z.gradient(x, y)
-
-    print(dx.tolist())  # dz/dx
-    print(dy.tolist())  # dz/dy
-    ```
-    """
-    assert gradient is not None or self.shape == tuple(), "when no gradient is provided, backward must be called on a scalar tensor"
-    if not (self.is_floating_point() and all(t.is_floating_point() for t in targets)): raise RuntimeError("only float Tensors have gradient")
-    if gradient is None: gradient = Tensor(1.0, dtype=self.dtype, device=self.device)
-    target_uops = [x.uop for x in targets]
-    grads = compute_gradient(self.uop, gradient.uop, set(target_uops))
-    ret:list[Tensor] = []
-    for x in target_uops:
-      if (y:=grads.get(x)) is None: y = x.const_like(0)
-      ret.append(Tensor(y))
-    return ret
 
   def backward(self, gradient:Tensor|None=None) -> Tensor:
     """
