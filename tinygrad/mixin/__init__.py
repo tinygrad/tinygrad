@@ -17,9 +17,9 @@ ReductionStr = Literal["mean", "sum", "none"]
 
 class OpMixin(ElementwiseMixin, ReduceMixin):
   @staticmethod
-  def unique_const(fill_value:ConstType, **kwargs): raise NotImplementedError("creation helpers are only supported on Tensor and UOp")
+  def unique_const(fill_value:ConstType, **kwargs): raise NotImplementedError
   @staticmethod
-  def const(dtype, b): raise NotImplementedError("creation helpers are only supported on Tensor and UOp")
+  def const(dtype, b): raise NotImplementedError
   @property
   def _uop(self) -> UOp: raise NotImplementedError
   def _wrap_uop(self, u:UOp) -> Self: raise NotImplementedError
