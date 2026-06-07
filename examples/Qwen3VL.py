@@ -246,13 +246,16 @@ class Qwen3VisBlock:
     return hidden_states + norm
 
 
-import argparse, json, typing, base64
+import argparse, json, typing, base64, pathlib
 from tinygrad.llm.cli import models, SimpleTokenizer, LLMServer, Handler
 from tinygrad.helpers import Context, DEBUG
 from tinygrad.llm.model import Transformer
 from tinygrad.uop.ops import UOp, Ops
 import numpy as np
 
+def DO_GET(self):
+  if self.path == "/v1/models": self.send_data(json.dumps({"object":"list","data":[{"id":self.server.model_name,"object":"model"}]}).encode())
+  else: self.send_data((pathlib.Path(__file__).parent / "vl_chat.html").read_bytes(), content_type="text/html")
 def DO_POST(self):
   tok = self.server.tok
   raw_body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
@@ -322,6 +325,7 @@ if __name__ == "__main__":
     model._cached_tokens = [] # warmup adds two toks
 
   Handler.do_POST = DO_POST
+  Handler.do_GET = DO_GET
   server = LLMServer(('', 8000), model, model_name, tok)
   server.vis = vis
   server.serve_forever()
