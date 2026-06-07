@@ -22,19 +22,22 @@
   </button>
 </div>
 <script>
+  let pendingImage = null;
   fetch('/v1/models').then(r=>r.json()).then(m => { if (!m.data[0].id.includes('Qwen3Vl')) { imgBtn.style.display = 'none'; input.style.marginRight = '0'; }});
   async function handleFile(e) {
     const file = e.target.files[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = () => { msgs.push({role: 'user', image: reader.result});};
+    reader.onload = () => { pendingImage = reader.result; };
     reader.readAsDataURL(file);
   }
   input.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); send() } }
   const msgs = [];
   async function send() {
     if (!input.value.trim()) return;
-    msgs.push({role: 'user', content: input.value.trim()});
+    const msg = {role: 'user', content: input.value.trim()};
+    if (pendingImage) { msg.image = pendingImage; pendingImage = null; }
+    msgs.push(msg);
     chat.innerHTML += '<div class="msg user">' + input.value.trim().replace(/</g, '&lt;') + '</div>';
     input.value = '';
     const d = document.createElement('div'); d.className = 'msg'; chat.appendChild(d);

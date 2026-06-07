@@ -154,7 +154,7 @@ class Handler(HTTPRequestHandler):
       for i, msg in enumerate(body["messages"]):
         if "image" in msg:
           ids.extend([0] * (self.server.vis.toks_per_img + 8))
-          if i == len(body["messages"]) - 2:
+          if i == len(body["messages"]) - 1:
             img_data = base64.b64decode(msg["image"].split(',')[1])
             image = cv2.imdecode(np.frombuffer(img_data, np.uint8), cv2.IMREAD_COLOR)
             image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
@@ -163,7 +163,6 @@ class Handler(HTTPRequestHandler):
             Variable("pos", 0, self.server.model.max_context).bind(len(self.server.model._cached_tokens)))
             if i > 0: self.server.model._cached_tokens.extend(tok.end_turn()) # todo!
             self.server.model._cached_tokens.extend([0] * (self.server.vis.toks_per_img + 8))
-          continue
         ids += tok.role(msg["role"])
         content = msg["content"]
         if isinstance(content, str): ids += tok.encode(content)
