@@ -9,17 +9,8 @@ from tinygrad.renderer import Renderer
 from tinygrad.codegen.late.devectorizer import no_vectorized_alu
 
 base_rewrite = PatternMatcher([
+  # local/reg buffers
   (UPat(Ops.BUFFER, name="x"), lambda ctx,x: ctx.render_buffer(x)),
-  # define reg as lanes
-  #(UPat(Ops.DEFINE_REG, name="x"),
-  # lambda ctx,x: f"{ctx._render_dtype(x.dtype, sz=x.max_numel())} {ctx[x]};" if ctx.register_shape_is_lanes else None),
-
-  # define reg as array
-  #(UPat(Ops.DEFINE_REG, src=(UPat(Ops.STACK),), name="x"), lambda ctx,x: f"{ctx._render_dtype(x.dtype)} {ctx[x]};"),
-  #(UPat(Ops.DEFINE_REG, name="x"), lambda ctx,x: f"{ctx._render_dtype(x.dtype)} {ctx[x]}[{x.max_numel()}];"),
-
-  # define local
-  #(UPat(Ops.DEFINE_LOCAL, name="x"), lambda ctx,x: f"{ctx.smem_align}{ctx.smem_prefix}{ctx.render_dtype(x.dtype.base)} {ctx[x]}[{x.max_numel()}];"),
 
   # range/if/endif
   (UPat(Ops.RANGE, name="x"),
