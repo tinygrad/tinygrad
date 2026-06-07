@@ -161,8 +161,7 @@ class Tensor(OpMixin):
   def _wrap_uop(self, u:UOp) -> Tensor: return Tensor(u)
   def const_like(self, b:ConstType) -> Tensor: return Tensor(self.uop.const_like(b))
   @staticmethod
-  def const(dtype:DType, b:ConstType|UOp) -> Tensor:
-    return Tensor(UOp.const(dtype, b))
+  def const(dtype:DType, b:ConstType|UOp) -> Tensor: return Tensor(UOp.const(dtype, b))
   @staticmethod
   def unique_const(fill_value:ConstType|UOp, **kwargs) -> Tensor:
     if isinstance(fill_value, UOp): return Tensor(fill_value, **kwargs)
