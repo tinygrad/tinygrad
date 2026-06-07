@@ -290,9 +290,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
       case Ops.DEFINE_LOCAL | Ops.DEFINE_REG:
         if len(self.src) >= 1:
           # NOTE: this is the same as PARAM
-          if self.src[0].op is Ops.STACK and len(self.src[0].src) == 0: return ()
-          if self.src[0].op is Ops.CONST: return (self.src[0].arg,)
-          if self.src[0].op is Ops.STACK: return tuple([x.arg for x in self.src[0].src])
+          return tuple(self.src[0].sgep(i) for i in range(self.src[0].dtype.count))
         if isinstance(self.dtype, PtrDType):
           return (self.ptrdtype.size, self.dtype.count) if self.dtype.count > 1 else (self.ptrdtype.size,)
         return (self.dtype.count,) if self.dtype.count > 1 else ()
@@ -1126,8 +1124,7 @@ class ProgramInfo:
       if u.op is Ops.DEFINE_VAR: _vars.append(u)
       if u.op is Ops.PARAM: _globals.append(u.arg.slot)
       if u.op in (Ops.STORE, Ops.LOAD):
-        if (idx:=u.src[0]).op is Ops.PARAM: (outs if u.op is Ops.STORE else ins).append(idx.arg.slot)
-        elif idx.op in (Ops.INDEX, Ops.SHRINK) or (idx.op is Ops.CAST and (idx:=idx.src[0]).op is Ops.INDEX):
+        if (idx:=u.src[0]).op in (Ops.INDEX, Ops.SHRINK) or (u.src[0].op is Ops.CAST and (idx:=u.src[0].src[0]).op is Ops.INDEX):
           if (buf:=idx.src[0]).op is Ops.PARAM: (outs if u.op is Ops.STORE else ins).append(buf.arg.slot)
       if u.op is Ops.SPECIAL:
         if u.arg[0] == 'i': local_size = None
@@ -1256,7 +1253,7 @@ class UPat(OpMixin):
   @functools.cache
   def cvar(name:str|None=None, dtype:DType|tuple[DType, ...]|None=None, arg=None): return UPat(Ops.CONST, dtype, name=name, arg=arg)
   @staticmethod
-  def const(dtype:DType|tuple[DType, ...]|None, b:ConstType, device=None): return UPat(Ops.CONST, dtype=dtype, arg=b)
+  def const(dtype:DType|tuple[DType, ...]|None, b:ConstType): return UPat(Ops.CONST, dtype=dtype, arg=b)
 
   # lil helper
   def f(self, op, **kwargs): return UPat(op, src=(self,), **kwargs)

@@ -100,12 +100,6 @@ spec_shared = PatternMatcher([
   # assembly instruction
   (UPat(Ops.INS), lambda: True),
 
-  # LOAD/STORE without INDEX
-  (UPat(Ops.PARAM).load(), lambda: True),
-  (UPat(Ops.PARAM).load(UPat.var("alt"), UPat.var("gate", dtype=dtypes.bool)), lambda alt,gate: True),
-  (UPat(Ops.PARAM).store(UPat()), lambda: True),
-  (UPat(Ops.PARAM).store(UPat(), UPat.var("gate", dtype=dtypes.bool)), lambda: True),
-
   # LOAD(idx) / STORE(idx, val) with gates on the LOAD/STORE
   (UPat((Ops.INDEX, Ops.SHRINK), name="uidx").or_casted().load(), validate_index),
   (UPat((Ops.INDEX, Ops.SHRINK), name="uidx").or_casted().load(UPat.var("alt"), UPat.var("gate", dtype=dtypes.bool), name="load"),
