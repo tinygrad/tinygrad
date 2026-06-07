@@ -23,7 +23,7 @@
 </div>
 <script>
   let image = null, origSvg = imgBtn.innerHTML;
-  fetch('/v1/models').then(r=>r.json()).then(m => { if (!m.data[0].id.includes('Qwen3Vl')) { imgBtn.style.display = 'none'; input.style.marginRight = '0'; }});
+  fetch('/v1/models').then(r=>r.json()).then(m => { if (!m.data[0].id.includes('Qwen3-VL')) { imgBtn.style.display = 'none'; input.style.marginRight = '0'; }});
   async function handleFile(e) {
     const file = e.target.files[0];
     if (!file) return;

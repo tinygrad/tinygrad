@@ -244,3 +244,84 @@ class Qwen3VisBlock:
     norm = self.ffn_up(norm).gelu()
     norm = self.ffn_down(norm)
     return hidden_states + norm
+
+
+import argparse, json, typing, base64
+from tinygrad.llm.cli import models, SimpleTokenizer, LLMServer, Handler
+from tinygrad.helpers import Context, DEBUG
+from tinygrad.llm.model import Transformer
+from tinygrad.uop.ops import UOp, Ops
+import numpy as np
+
+def DO_POST(self):
+  tok = self.server.tok
+  raw_body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
+  body: dict[str, typing.Any] = json.loads(raw_body.decode("utf-8"))
+
+  if DEBUG >= 1: print(json.dumps(body, indent=2))
+  if self.path == "/v1/chat/completions":
+    ids: list[int] = tok.prefix()
+    for i, msg in enumerate(body["messages"]):
+      if "image" in msg:
+        ids.extend([0] * (self.server.vis.toks_per_img + 8))
+        if i == len(body["messages"]) - 1:
+          img_data = base64.b64decode(msg["image"].split(',')[1])
+          image = cv2.imdecode(np.frombuffer(img_data, np.uint8), cv2.IMREAD_COLOR)
+          image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+          # todo, use vis.prefill_img?
+          prefill_img(vis=self.server.vis, lang=self.server.model, image=image, start_pos=\
+          Variable("pos", 0, self.server.model.max_context).bind(len(self.server.model._cached_tokens)))
+          if i > 0: self.server.model._cached_tokens.extend(tok.end_turn()) # todo!
+          self.server.model._cached_tokens.extend([0] * (self.server.vis.toks_per_img + 8))
+      ids += tok.role(msg["role"])
+      content = msg["content"]
+      if isinstance(content, str): ids += tok.encode(content)
+      elif isinstance(content, list):
+        for c in content:
+          if c["type"] == "text": ids += tok.encode(c["text"])
+          else: raise RuntimeError(f"unhandled type: {c['type']}")
+      else: raise RuntimeError(f"unknown content type: {type(content)}")
+      if msg["role"] == "assistant" and i == len(body["messages"]) - 1: break
+      ids += tok.end_turn()
+    else: ids += tok.role("assistant")
+
+    # reply
+    max_tokens = body.get("max_completion_tokens") or body.get("max_tokens")
+    chunks = self.run_model(ids, body["model"], not body.get("stream") or body.get("stream_options",{}).get("include_usage", False),
+                            max_tokens=max_tokens, temperature=float(body.get("temperature", 0.0)))
+    if body.get("stream"): self.stream_json(chunks)
+    else:
+      out, finish_reason = [], "stop"
+      for c in chunks:
+        if c["choices"] and c["choices"][0].get("delta", {}).get("content"): out.append(c["choices"][0]["delta"]["content"])
+        if c["choices"] and c["choices"][0].get("finish_reason"): finish_reason = c["choices"][0]["finish_reason"]
+      self.send_data(json.dumps({**c, "object":"chat.completion",
+        "choices":[{"index":0, "message":{"role":"assistant","content":"".join(out)}, "finish_reason":finish_reason}]}).encode())
+  else:
+    raise RuntimeError(f"unhandled path {self.path}")
+
+if __name__ == "__main__":
+  parser = argparse.ArgumentParser()
+  parser.add_argument("--max_context", type=int, default=4096, help="Max Context Length")
+  parser.add_argument("--size", type=str, default="2B", help="Model Size")
+  args = parser.parse_args()
+
+  # load the model
+  model, kv = Transformer.from_gguf(fetch(f"https://huggingface.co/Qwen/Qwen3-VL-{args.size}-Instruct-GGUF/resolve/main/Qwen3VL-{args.size}-Instruct-F16.gguf"), args.max_context)
+  model_name = "Qwen3-VL"
+  file_sizes = [y.nbytes() for y in UOp.sink(*[x.uop for x in nn.state.get_parameters(model)]).toposort() if y.op is Ops.BUFFER]
+  print(f"using model \"{model_name}\" with {sum(file_sizes):,} bytes and {sum(x.numel() for x in nn.state.get_parameters(model)):,} params")
+
+  tok = SimpleTokenizer.from_gguf_kv(kv)
+
+  # warmup the JIT
+  with Context(DEBUG=max(DEBUG.value, 1)):
+    for _ in range(2): list(zip(range(2), model.generate([0])))
+    vis = Qwen3VLVis(size=args.size)
+    prewarm(vis=vis, lang=model)
+    model._cached_tokens = [] # warmup adds two toks
+
+  Handler.do_POST = DO_POST
+  server = LLMServer(('', 8000), model, model_name, tok)
+  server.vis = vis
+  server.serve_forever()

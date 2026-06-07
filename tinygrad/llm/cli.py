@@ -1,11 +1,10 @@
 from __future__ import annotations
-import sys, argparse, codecs, typing, re, unicodedata, json, uuid, time, pathlib, cv2, math, numpy as np, base64
-from tinygrad import nn, Variable
+import sys, argparse, codecs, typing, re, unicodedata, json, uuid, time, pathlib
+from tinygrad import nn
 from tinygrad.uop.ops import UOp, Ops
 from tinygrad.helpers import partition, DEBUG, Timing, GlobalCounters, stderr_log, colored, Context, fetch, profile_marker
 from tinygrad.viz.serve import TCPServerWithReuse, HTTPRequestHandler
 from tinygrad.llm.model import Transformer
-from examples.Qwen3VL import Qwen3VLVis, prefill_img, prewarm
 
 class SimpleTokenizer:
   def __init__(self, normal_tokens:dict[str, int], special_tokens:dict[str, int], preset:str="llama3",
@@ -104,8 +103,6 @@ models = {
   "olmoe": "https://huggingface.co/allenai/OLMoE-1B-7B-0924-Instruct-GGUF/resolve/main/olmoe-1b-7b-0924-instruct-q4_k_m.gguf",
   "moonlight": "https://huggingface.co/gabriellarson/Moonlight-16B-A3B-Instruct-GGUF/resolve/main/Moonlight-16B-A3B-Instruct-Q4_K_M.gguf",
   "glm-4.7-flash": "https://huggingface.co/unsloth/GLM-4.7-Flash-GGUF/resolve/main/GLM-4.7-Flash-Q4_K_M.gguf",
-  "qwen3vl:2b":"https://huggingface.co/Qwen/Qwen3-VL-2B-Instruct-GGUF/resolve/main/Qwen3VL-2B-Instruct-F16.gguf",
-  "qwen3vl:4b":"https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct-GGUF/resolve/main/Qwen3VL-4B-Instruct-F16.gguf"
 }
 
 # *** simple OpenAI API compatible server with web interface on http://localhost:8000/ ***
@@ -147,22 +144,11 @@ class Handler(HTTPRequestHandler):
     tok = self.server.tok
     raw_body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
     body: dict[str, typing.Any] = json.loads(raw_body.decode("utf-8"))
-
     if DEBUG >= 1: print(json.dumps(body, indent=2))
     if self.path == "/v1/chat/completions":
+      # extract tokens, last assistant message is treated as prefill
       ids: list[int] = tok.prefix()
       for i, msg in enumerate(body["messages"]):
-        if "image" in msg:
-          ids.extend([0] * (self.server.vis.toks_per_img + 8))
-          if i == len(body["messages"]) - 1:
-            img_data = base64.b64decode(msg["image"].split(',')[1])
-            image = cv2.imdecode(np.frombuffer(img_data, np.uint8), cv2.IMREAD_COLOR)
-            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-            # todo, use vis.prefill_img?
-            prefill_img(vis=self.server.vis, lang=self.server.model, image=image, start_pos=\
-            Variable("pos", 0, self.server.model.max_context).bind(len(self.server.model._cached_tokens)))
-            if i > 0: self.server.model._cached_tokens.extend(tok.end_turn()) # todo!
-            self.server.model._cached_tokens.extend([0] * (self.server.vis.toks_per_img + 8))
         ids += tok.role(msg["role"])
         content = msg["content"]
         if isinstance(content, str): ids += tok.encode(content)
@@ -191,8 +177,8 @@ class Handler(HTTPRequestHandler):
       raise RuntimeError(f"unhandled path {self.path}")
 
 class LLMServer(TCPServerWithReuse):
-  def __init__(self, server_address:tuple, model:Transformer, model_name:str, tok:SimpleTokenizer, vis=None):
-    self.model, self.model_name, self.tok, self.vis = model, model_name, tok, vis
+  def __init__(self, server_address:tuple, model:Transformer, model_name:str, tok:SimpleTokenizer):
+    self.model, self.model_name, self.tok = model, model_name, tok
     super().__init__(server_address, Handler)
 
 def main():
@@ -213,21 +199,14 @@ def main():
   # get tokenizer
   tok = SimpleTokenizer.from_gguf_kv(kv)
 
-  # warmup the JIT...removed for now, adds tokens to cache
+  # warmup the JIT
   if args.warmup or args.serve:
     # run 2 tokens through the model twice to capture the JIT before serving
     with Context(DEBUG=max(DEBUG.value, 1)):
       for _ in range(2): list(zip(range(2), model.generate([0])))
-      model._cached_tokens = [] # warmup adds two toks
 
   # start server
-  if args.serve:
-    print(args.model)
-    vis = None
-    if "qwen3vl" in args.model:
-      vis = Qwen3VLVis(size="2B")
-      prewarm(vis=vis, lang=model)
-    LLMServer(('', args.serve), model, model_name, tok, vis).serve_forever()
+  if args.serve: LLMServer(('', args.serve), model, model_name, tok).serve_forever()
 
   # do benchmark
   if args.benchmark is not None:
