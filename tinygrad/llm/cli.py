@@ -160,7 +160,7 @@ class Handler(HTTPRequestHandler):
             image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
             # todo, use vis.prefill_img?
             prefill_img(vis=self.server.vis, lang=self.server.model, image=image, start_pos=\
-            Variable("pos", 0, self.server.model.max_context).bind(len(self.server.model._cached_tokens)), res=(640, 640))
+            Variable("pos", 0, self.server.model.max_context).bind(len(self.server.model._cached_tokens)))
             self.server.model._cached_tokens.extend(tok.end_turn() + tok.role(msg["role"]) + [0] * ((640 * 640) // (32*32)) + tok.end_turn())
           continue
         ids += tok.role(msg["role"])

@@ -7,7 +7,7 @@ import cv2 # todo resize in UI instead?
 def prewarm(vis, lang):
   for _ in range(2):
     # todo unhardcode res
-    prefill(vis=vis, lang=lang, image=Tensor.rand(640, 640, 3).cast(dtypes.uint8), start_pos=Variable("pos", 0, lang.max_context).bind(42))
+    prefill(vis=vis, lang=lang, image=Tensor.rand(*vis.res, 3).cast(dtypes.uint8), start_pos=Variable("pos", 0, lang.max_context).bind(42))
 
 #https://github.com/huggingface/transformers/blob/1316cd76c0ce328228e08d55dc257484961b074c/src/transformers/models/qwen3_vl/modeling_qwen3_vl.py#L129
 def rotate_half(x):
@@ -18,9 +18,9 @@ def rotate_half(x):
 
 def apply_rotary_pos_emb_vision(query, key, cos, sin): return (query * cos) + (rotate_half(query) * sin), (key * cos) + (rotate_half(key) * sin)
   
-def prefill_img(vis, lang, image, start_pos, res=(640, 640)):
-  if image.shape[:2] != res:
-    target_h, target_w = res[:2]
+def prefill_img(vis, lang, image, start_pos):
+  if image.shape[:2] != vis.res:
+    target_h, target_w = vis.res[:2]
     s = min(target_w / image.shape[1], target_h / image.shape[0])
     r = cv2.resize(image, (int(image.shape[1] * s), int(image.shape[0] * s)))
     image = cv2.copyMakeBorder(r, (target_h - r.shape[0]) // 2, target_h - r.shape[0] - (target_h - r.shape[0]) // 2, (target_w - r.shape[1]) // 2, target_w - r.shape[1] - (target_w - r.shape[1]) // 2, cv2.BORDER_CONSTANT, value=0)
@@ -130,7 +130,8 @@ def get_vision_position_ids(h: int, w:int, merge_size: int):
   return pos_ids
 
 class Qwen3VLVis():
-  def __init__(self, size="2B"):
+  def __init__(self, size="2B", res=[640, 640]):
+    self.res = res
     kv, state_dict = gguf_load(fetch(f"https://huggingface.co/Qwen/Qwen3-VL-{size}-Instruct-GGUF/resolve/main/mmproj-Qwen3VL-{size}-Instruct-F16.gguf"))
     self.merge_size = kv["clip.vision.spatial_merge_size"]
     self.patch_size = kv["clip.vision.patch_size"]
