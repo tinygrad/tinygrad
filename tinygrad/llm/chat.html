@@ -12,7 +12,7 @@
 <div style="display:flex;align-items:center;width:calc(100% - 40px);max-width:768px;margin:20px auto">
   <textarea id="input" rows="1" placeholder="Ask anything" autofocus></textarea>
   <input type="file" id="fileInput" style="display:none" accept="image/*" onchange="handleFile(event)">
-<button style="width:44px;height:44px;display:flex;justify-content:center;align-items:center;border:none;border-radius:24px;background:#2f2f2f;color:#e3e3e3;cursor:pointer"
+<button id="imgBtn" style="width:44px;height:44px;display:flex;justify-content:center;align-items:center;border:none;border-radius:24px;background:#2f2f2f;color:#e3e3e3;cursor:pointer"
     onclick="document.getElementById('fileInput').click()">
     <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
       <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
@@ -22,6 +22,7 @@
   </button>
 </div>
 <script>
+  fetch('/v1/models').then(r=>r.json()).then(m => { if (!m.data[0].id.includes('Qwen3Vl')) { imgBtn.style.display = 'none'; input.style.marginRight = '0'; }});
   async function handleFile(e) {
     const file = e.target.files[0];
     if (!file) return;
