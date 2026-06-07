@@ -771,9 +771,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   @recursive_property
   def addrspace(self) -> AddrSpace|None:
     if self.op is Ops.PARAM: return self.arg.addrspace
-    if self.op is Ops.BUFFER:
-      if isinstance(self.arg, ParamArg): return self.arg.addrspace
-      return AddrSpace.GLOBAL
+    if self.op is Ops.BUFFER: return self.arg.addrspace if isinstance(self.arg, ParamArg) else AddrSpace.GLOBAL
     if self.op is Ops.DEFINE_LOCAL: return AddrSpace.LOCAL
     if self.op is Ops.DEFINE_REG: return AddrSpace.REG
     if self.op is Ops.LOAD: return AddrSpace.REG # LOAD brings things into registers
@@ -870,6 +868,7 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
   def realized(self) -> Buffer|MultiBuffer|None:
     # only these can be realized
     if self.op not in (Ops.BUFFER, Ops.MSTACK): return None
+    # ParamArg is LOCAL/REG and never realized
     if self.op is Ops.BUFFER and isinstance(self.arg, ParamArg): return None
     # LUNIQUEs are never realized
     if self.op_in_backward_slice_with_self(Ops.LUNIQUE): return None
