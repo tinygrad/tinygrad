@@ -104,8 +104,8 @@ models = {
   "olmoe": "https://huggingface.co/allenai/OLMoE-1B-7B-0924-Instruct-GGUF/resolve/main/olmoe-1b-7b-0924-instruct-q4_k_m.gguf",
   "moonlight": "https://huggingface.co/gabriellarson/Moonlight-16B-A3B-Instruct-GGUF/resolve/main/Moonlight-16B-A3B-Instruct-Q4_K_M.gguf",
   "glm-4.7-flash": "https://huggingface.co/unsloth/GLM-4.7-Flash-GGUF/resolve/main/GLM-4.7-Flash-Q4_K_M.gguf",
-  "qwen3:vl2b":"https://huggingface.co/Qwen/Qwen3-VL-2B-Instruct-GGUF/resolve/main/Qwen3VL-2B-Instruct-F16.gguf",
-  "qwen3:vl4b":"https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct-GGUF/resolve/main/Qwen3VL-4B-Instruct-F16.gguf"
+  "qwen3vl:2b":"https://huggingface.co/Qwen/Qwen3-VL-2B-Instruct-GGUF/resolve/main/Qwen3VL-2B-Instruct-F16.gguf",
+  "qwen3vl:4b":"https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct-GGUF/resolve/main/Qwen3VL-4B-Instruct-F16.gguf"
 }
 
 # *** simple OpenAI API compatible server with web interface on http://localhost:8000/ ***
@@ -158,6 +158,7 @@ class Handler(HTTPRequestHandler):
             img_data = base64.b64decode(msg["image"].split(',')[1])
             image = cv2.imdecode(np.frombuffer(img_data, np.uint8), cv2.IMREAD_COLOR)
             image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            # todo, use vis.prefill_img?
             prefill_img(vis=self.server.vis, lang=self.server.model, image=image, start_pos=\
             Variable("pos", 0, self.server.model.max_context).bind(len(self.server.model._cached_tokens)), res=(640, 640))
             self.server.model._cached_tokens.extend(ids[-2:]) # todo remove hack, end token gets added to only one
@@ -223,8 +224,11 @@ def main():
 
   # start server
   if args.serve:
-    vis = Qwen3VLVis(size="2B")
-    prewarm(vis=vis, lang=model)
+    print(args.model)
+    vis = None
+    if "qwen3vl" in args.model:
+      vis = Qwen3VLVis(size="2B")
+      prewarm(vis=vis, lang=model)
     LLMServer(('', args.serve), model, model_name, tok, vis).serve_forever()
 
   # do benchmark
