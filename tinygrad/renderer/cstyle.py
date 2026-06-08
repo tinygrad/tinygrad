@@ -8,6 +8,7 @@ from tinygrad.dtype import ImageDType, dtypes, DType, PtrDType, AddrSpace, trunc
 from tinygrad.renderer import Renderer
 from tinygrad.codegen.late.devectorizer import no_vectorized_alu
 
+
 base_rewrite = PatternMatcher([
   # local/reg buffers
   (UPat(Ops.BUFFER, name="x"), lambda ctx,x: ctx.render_buffer(x)),
@@ -119,7 +120,6 @@ def wmma_args(uops:list[UOp]):
 
 class CStyleLanguage(Renderer):
   new_style = True
-  register_shape_is_lanes = False
   kernel_typedef: str = "void"
   buffer_prefix: str = ""
   buffer_suffix: str = ""
@@ -164,7 +164,8 @@ class CStyleLanguage(Renderer):
 
   def render_index(self, buf:UOp, idx:UOp):
     if buf.addrspace == AddrSpace.REG:
-      if self.register_shape_is_lanes:
+      if buf.op not in {Ops.AFTER, Ops.BUFFER}:
+        # this is lane access in C
         assert idx.op is Ops.CONST, f"{idx.op} must be CONST"
         return self[buf]+(f"[{idx.arg}]" if buf.max_numel() > self.gep_arr_threshold else f".{'xyzwabcd'[idx.arg]}")
       else:
