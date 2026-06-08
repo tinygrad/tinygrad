@@ -145,11 +145,11 @@ def make_getaddr(u, dev=None):
 def make_ins(op, *srcs):
   return UOp(Ops.INS, dtypes.void, tuple(UOp.const(dtypes.uint32, s) if isinstance(s, int) else s.cast(dtypes.uint32) for s in srcs), op)
 
-def assembly(lin, devs, tag):
+def make_cmdbuf(lin, devs, tag):
   blob, patches = b'', []
   for s in (s for ins in lin.src for s in ins.src):
-    if s.op is Ops.CONST: blob += struct.pack(f'<{s.dtype.fmt}', s.arg)
-    else: patches.append((len(blob), s)); blob += bytes(s.dtype.itemsize)
+    if s.op is not Ops.CONST: patches.append((len(blob), s))
+    blob += struct.pack(f'<{s.dtype.fmt}', s.arg if s.op is Ops.CONST else 0x0)
   buf = UOp.new_buffer(devs if len(devs) > 1 else devs[0], len(blob), dtypes.uint8).rtag(tag)
   stores = [buf.index(UOp.const(dtypes.int, off), dtype=buf.dtype.ptr()).cast(s.dtype.ptr()).store(s) for off, s in patches]
   return buf.after(buf.store(UOp(Ops.BINARY, dtypes.void, src=(), arg=blob)), *stores)

@@ -3,7 +3,7 @@ from typing import cast
 import os, ctypes, struct, hashlib, functools, importlib, mmap, errno, array, contextlib, sys, weakref, itertools, collections, atexit
 assert sys.platform != 'win32'
 from dataclasses import dataclass
-from extra.hcq2.hcq2 import HCQ2Compiled, HCQAllocator, HCQ2Buffer, to_tuple, make_getaddr, make_ins, assembly
+from extra.hcq2.hcq2 import HCQ2Compiled, HCQAllocator, HCQ2Buffer, to_tuple, make_getaddr, make_ins, make_cmdbuf
 from tinygrad.uop.ops import sint, UOp
 from tinygrad.device import Compiled, BufferSpec, Buffer, Device
 from tinygrad.dtype import dtypes
@@ -166,7 +166,7 @@ def pm4_submit(cmdbuf, devs):
   return doorbell.after(flush).index(zero, dtype=doorbell.dtype.ptr()).store(next_put)
 
 pm_pm4_submit = PatternMatcher([(UPat(Ops.LINEAR, name="lin"),
-  lambda lin: pm4_submit(assembly(lin, to_tuple(lin.arg[0]), "compute"), to_tuple(lin.arg[0])))])
+  lambda lin: pm4_submit(make_cmdbuf(lin, to_tuple(lin.arg[0]), "compute"), to_tuple(lin.arg[0])))])
 
 # *****************
 # SDMA
@@ -236,7 +236,7 @@ def sdma_submit(cmdbuf, devs):
   return doorbell.after(flush).index(zero, dtype=doorbell.dtype.ptr()).store(next_put_b)
 
 pm_sdma_submit = PatternMatcher([(UPat(Ops.LINEAR, name="lin"),
-  lambda lin: sdma_submit(assembly(lin, to_tuple(lin.arg[0]), "copy"), to_tuple(lin.arg[0])))])
+  lambda lin: sdma_submit(make_cmdbuf(lin, to_tuple(lin.arg[0]), "copy"), to_tuple(lin.arg[0])))])
 
 @dataclass(frozen=True)
 class AMDProgramData:
