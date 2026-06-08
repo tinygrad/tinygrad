@@ -204,6 +204,12 @@ class TestMultiAxis(unittest.TestCase):
     self.assertEqual(t.reshape(2, 16).uop.axis, 0)
     self.assertEqual(t.reshape(2, 2, 8).uop.axis, 0)
 
+  def test_uop_shard_axis_none(self):
+    devices = ("NULL:0", "NULL:1")
+    u = Tensor.ones(8).contiguous().realize().uop
+    self.assertIsNone(u.shard(devices).axis)
+    self.assertEqual(u.shard(devices, 0).axis, 0)
+
   def test_empty_like_sharded(self):
     t = Tensor.ones(4, 8).shard(("NULL:0", "NULL:1"), axis=0)
     e = t.empty_like()

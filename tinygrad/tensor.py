@@ -1,12 +1,12 @@
 # inspired by https://github.com/karpathy/micrograd/blob/master/micrograd/engine.py
 from __future__ import annotations
-import time, math, itertools, functools, struct, sys, inspect, pathlib, hashlib, weakref
+import time, math, itertools, functools, sys, inspect, pathlib, hashlib, weakref
 from contextlib import ContextDecorator
 from typing import Any, Callable, ClassVar, Sequence, cast, get_args, ParamSpec, TypeVar, Generic, TYPE_CHECKING
 if TYPE_CHECKING: import numpy
-from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_dtype, to_dtype, truncate
+from tinygrad.dtype import DType, DTypeLike, dtypes, ConstType, least_upper_dtype, to_dtype
 from tinygrad.dtype import _from_np_dtype, _to_np_dtype, PyConst, Invalid
-from tinygrad.helpers import argfix, flatten, prod, all_int, round_up, getenv, all_same, fully_flatten, ceildiv, fetch, flat_to_grouped
+from tinygrad.helpers import argfix, flatten, prod, all_int, round_up, getenv, fully_flatten, ceildiv, fetch, flat_to_grouped
 from tinygrad.helpers import resolve_pool_pads, IMAGE, FLOAT16, WINO, Metadata, TRACEMETA, is_numpy_ndarray, TracingKey, cpu_profile
 from tinygrad.helpers import suppress_finalizing, disable_gc
 from tinygrad.uop.ops import UOp, Ops, sint, all_metadata, _index_to_concrete_int, Variable, _broadcast_shape
@@ -42,23 +42,6 @@ def _fromnp(x: 'numpy.ndarray') -> UOp:
   # fake realize
   ret.buffer.allocate(x)
   return ret.reshape(x.shape)
-
-def get_shape(x) -> tuple[int, ...]:
-  # NOTE: str is special because iterating it still yields strs
-  if not hasattr(x, "__len__") or isinstance(x, str) or getattr(x, "shape", None) == (): return ()
-  if not all_same(subs:=[get_shape(xi) for xi in x]): raise ValueError(f"inhomogeneous shape from {x}")
-  return (len(subs),) + (subs[0] if subs else ())
-
-def _frompy(x:list|tuple|bytes, dtype:DType, device:str|tuple[str,...]) -> UOp:
-  if isinstance(x, bytes): ret, data = UOp.new_buffer("PYTHON", len(x)//dtype.itemsize, dtype), x
-  else:
-    ret = UOp.empty(shape:=get_shape(x), dtype, "PYTHON")
-    assert dtype.fmt is not None, f"{dtype=} has None fmt"
-    truncate_function = truncate[dtype]
-    data = struct.pack(f"{prod(shape)}{dtype.fmt}", *[truncate_function(dtype.const(xi)) for xi in fully_flatten(x)])
-  # fake realize. if target device is PYTHON it needs bytearray to be writable
-  ret.buffer.allocate(memoryview(data if device != "PYTHON" else bytearray(data)))
-  return ret
 
 def _get_winograd_matcols(mat, dims:int, shp:tuple[sint, ...], dtype:DType) -> list[list[Tensor]]:
   return [[Tensor.cat(*[Tensor.full(shp[:dim] + (1,) + shp[dim+1:], float(m[k]), dtype=dtype, buffer=False) for m in mat], dim=dim)
@@ -113,13 +96,12 @@ class Tensor(OpMixin):
       data = UOp.const(_dtype or dtypes.default_float, 0)
     elif isinstance(data, get_args(ConstType)):
       data = UOp.const(_dtype or dtypes.from_py(data), data)
-    elif isinstance(data, bytes): data = _frompy(data, _dtype or dtypes.uint8, _device)
+    elif isinstance(data, bytes): data = UOp._frompy(data, _dtype or dtypes.uint8, _device)
     elif isinstance(data, (list, tuple)):
       if _dtype is None:
         if (d := fully_flatten(data)) and all(isinstance(s, bool) for s in d): _dtype = dtypes.bool
         else: _dtype = dtypes.default_int if d and all_int(d) else dtypes.default_float  # NOTE: this works because all_int([True, False]) is True
-      if _dtype in [dtypes.bfloat16, *dtypes.fp8s]: data = _frompy(data, dtypes.float32, _device).cast(_dtype)
-      else: data = _frompy(data, _dtype, _device)
+      data = UOp._frompy(data, _dtype, _device)
     elif is_numpy_ndarray(data):
       import numpy as np
       assert isinstance(data, np.ndarray), f"expected np.ndarray, got {data}"
@@ -161,8 +143,7 @@ class Tensor(OpMixin):
   def _wrap_uop(self, u:UOp) -> Tensor: return Tensor(u)
   def const_like(self, b:ConstType) -> Tensor: return Tensor(self.uop.const_like(b))
   @staticmethod
-  def const(dtype:DType, b:ConstType|UOp) -> Tensor:
-    return Tensor(UOp.const(dtype, b))
+  def const(dtype:DType, b:ConstType|UOp) -> Tensor: return Tensor(UOp.const(dtype, b))
   @staticmethod
   def unique_const(fill_value:ConstType|UOp, **kwargs) -> Tensor:
     if isinstance(fill_value, UOp): return Tensor(fill_value, **kwargs)
@@ -210,7 +191,7 @@ class Tensor(OpMixin):
       param = UOp.param(slot, self.dtype, self.shape, self.device)
     return Tensor(param)
   def call(self, *lst:Tensor, fxn:Tensor|UOp, grad_fxn:Callable|None=None) -> Tensor:
-    fret = (fxn.uop if isinstance(fxn, Tensor) else fxn).call(*[t.uop for t in (self,)+lst], grad_fxn=grad_fxn)
+    fret = fxn._uop.call(*[t.uop for t in (self,)+lst], grad_fxn=grad_fxn)
     return Tensor(fret.gettuple(0))
 
   def custom_kernel(self, *lst:Tensor, fxn:Callable, grad_fxn:Callable|None=None) -> list[Tensor]:
@@ -396,7 +377,7 @@ class Tensor(OpMixin):
     if not isinstance(self.device, str): raise RuntimeError("can't shard a multi-device tensor")
     if len(devices) == 1: return self.to(devices[0])
     devices = cast(tuple[str, ...], canonicalize_device(devices))
-    uop = self.uop.shard(devices, self._resolve_dim(axis)) if axis is not None else self.uop.copy_to_device(devices)
+    uop = self.uop.shard(devices, None if axis is None else self._resolve_dim(axis))
     return Tensor(uop).is_param_(self.is_param)
 
   def shard_(self, devices:tuple[str, ...], axis:int|None=None) -> Tensor:
@@ -839,96 +820,6 @@ class Tensor(OpMixin):
   def _mop(self, op:Ops, arg) -> Tensor: return self._apply_uop(UOp._mop, extra_args=(op,), arg=arg)
   def _rop(self, op:Ops, axis:tuple[int, ...]) -> Tensor: return self._apply_uop(UOp._rop, op=op, axis=axis)
 
-  def _getitem(self, indices, v: Tensor|None = None) -> Tensor:
-    # view-only indexing (no Tensor/list indices, no setitem) is handled by MovementMixin.__getitem__
-    if v is None and not any(isinstance(i, (Tensor, list, tuple)) for i in (indices if isinstance(indices, tuple) else (indices,))):
-      return super().__getitem__(indices)
-    # wrap single index into a list
-    if (isinstance(indices, list) and all_int(indices)) or not isinstance(indices, (tuple, list)): indices = [indices]
-    indices_parsed, dim = [], 0
-    for index in self._normalize_indices(list(indices)):
-      size = 1 if index is None else self.shape[dim]
-      parsed = {"size":size, "boundary":(0, size), "stride":1, "collapse_dim":False}
-      match index:
-        case Tensor():
-          if not dtypes.is_int(index.dtype): raise IndexError(f"index dtype {index.dtype} is not supported")
-          if index.device is not None and self.device is not None and index.device != self.device:
-            raise RuntimeError(f"expected index and self on the same device, {index.device=}, {self.device=}")
-          assert isinstance(size, int), "size must be an int"
-          index = (index < 0).where(index+size, index)  # treat negative index values
-        case list() | tuple():
-          if not dtypes.is_int((ti:=Tensor(index)).dtype): raise IndexError(f"{index=} contains non-int element")
-          index = Tensor([i+size if i<0 else i for i in fully_flatten(index)], self.device).reshape(ti.shape)
-        case _: parsed = self._parse_view_index(index, size)
-      indices_parsed.append({**parsed, "index":index})
-      if index is not None: dim += 1
-
-    # apply view ops then dim injection (None) and collapse (int)
-    x = self._apply_view_ops(mops) if (mops := [p for p in indices_parsed if p["index"] is not None]) else self
-    x_dims = [p for p in indices_parsed if not p["collapse_dim"]]
-    x = x.reshape(tuple(p["size"] for p in x_dims))
-
-    # tensor indexing
-    if tops := [(d, p) for d, p in enumerate(x_dims) if isinstance(p['index'], Tensor)]:
-      dims, tensors, masks = [d for d, _ in tops], cast(list[Tensor], [p['index'] for _, p in tops]), []
-      big_shape = _broadcast_shape(*(t.shape for t in tensors))
-
-      # consecutive tensor indices with int shapes: use linear indexing instead of one-hot masks
-      consecutive = dims == list(range(dims[0], dims[0] + len(dims)))
-      if v is None and len(dims) > 1 and consecutive and all_int(ishp := tuple(x.shape[d] for d in dims)):
-        strides = tuple(prod(ishp[i+1:]) for i in range(len(dims)))
-        try: linear_idx = Tensor.usum(*[t._broadcast_to(big_shape) * s for t, s in zip(tensors, strides)])
-        except ValueError as err: raise IndexError(f"cannot broadcast indices: {err}") from err
-        valid = Tensor.uprod(*[(t >= 0) & (t < s) for t, s in zip(tensors, ishp)])
-        pre, post = x.shape[:dims[0]], x.shape[dims[-1]+1:]
-        x = x.reshape(pre + (prod(ishp),) + post)[tuple([slice(None)] * len(pre)) + (valid.where(linear_idx, 0),)]
-        return valid.reshape((1,) * len(pre) + big_shape + (1,) * len(post)).where(x, 0)
-
-      pre_reduce_shape = x.shape[:dims[0]] + big_shape + x.shape[dims[0]:]
-
-      # create index masks
-      for dim, tensor in zip(dims, tensors):
-        try: i = tensor.reshape(tensor.shape + (1,)*(x.ndim - dims[0])).expand(pre_reduce_shape)
-        except ValueError as err: raise IndexError(f"cannot broadcast indices: {err}") from err
-        masks.append(i._one_hot_along_dim(num_classes=x.shape[dim], dim=(dim - x.ndim)))
-
-      # reduce masks to 1 mask
-      mask: Tensor = Tensor.uprod(*masks)
-
-      # inject 1's for the extra dims added in create masks
-      reshape_arg = x.shape[:dims[0]] + (1,) * len(big_shape) + x.shape[dims[0]:]
-      # sum reduce the extra dims introduced in create masks
-      x_pre = x  # save collapsed shape for advanced setitem
-      x = (mask.where(x.reshape(reshape_arg), 0)).sum(sum_axis:=tuple(d + len(big_shape) for d in dims), dtype=x.dtype)
-
-      # special permute case
-      if (permuted := dims[0] != 0 and len(dims) != 1 and tuple(dims) != tuple(range(dims[0], dims[-1]+1))):
-        mask, x = (y.permute(*range(dims[0], dims[0]+len(big_shape)), *range(0, dims[0]), *range(dims[0]+len(big_shape), y.ndim)) for y in (mask, x))
-
-      if v is None: return x  # advanced getitem
-      # advanced setitem: resolve tensor dims in collapsed space, then fall through to basic setitem path
-      vb = v.cast(self.dtype)._broadcast_to(_broadcast_shape(x.shape, v.shape))
-      for dim in sum_axis: vb = vb.unsqueeze(dim)  # add back reduced dims from sum
-      start = dims[0] if not permuted else 0
-      vb = x_pre._masked_merge(vb, mask, tuple(range(start, start + len(big_shape))))
-    elif v is None: return x  # basic getitem
-    # basic setitem: broadcast v, reshape to self.ndim (unsqueeze int dims, squeeze None dims)
-    else: vb = v.cast(self.dtype)._broadcast_to(x.shape)
-    vb = vb.reshape(tuple(1 if isinstance(p['index'], sint) else p['size'] for p in indices_parsed if p['index'] is not None))
-    per_dim = []
-    for d, m in enumerate(mops):
-      (s, e), st = m['boundary'], abs(m['stride'])
-      if st != 1 and vb.shape[d] > 1:  # un-stride: interleave with zeros
-        vb = vb.unsqueeze(d+1)
-        vb = vb.pad_to(tuple(st if j == d+1 else None for j in range(vb.ndim)))
-        vb = vb.reshape(vb.shape[:d] + (vb.shape[d]*vb.shape[d+1],) + vb.shape[d+2:])
-        vb = vb.shrink_to(tuple(e-s if j == d else None for j in range(self.ndim)))
-      idx = Tensor.arange(self.shape[d]).reshape([1]*d + [self.shape[d]] + [1]*(self.ndim - d - 1))
-      per_dim.append((idx >= s) & (idx < e) & (((e-1-idx) if m['stride'] < 0 else (idx-s)) % st == 0))
-    vb = vb.flip(tuple(d for d, m in enumerate(mops) if m['stride'] < 0))
-    vb = vb.pad(tuple((m['boundary'][0], self.shape[d] - m['boundary'][1]) for d, m in enumerate(mops)))
-    return (Tensor.uprod(*per_dim) if per_dim else Tensor(True, dtype=dtypes.bool, device=self.device)).where(vb, self)
-
   def __getitem__(self, indices) -> Tensor:
     """
     Retrieves a sub-tensor using indexing.
@@ -967,7 +858,7 @@ class Tensor(OpMixin):
     print(t[Tensor([4, 3, 2])].numpy())
     ```
     """
-    return self._getitem(indices)
+    return super().__getitem__(indices)
 
   def __setitem__(self, indices, v:Tensor|PyConst|list|tuple) -> None:
     if isinstance(v, Tensor) and v.dtype != self.dtype: raise RuntimeError(f"setitem dtype mismatch: {self.dtype=} != {v.dtype=}")
