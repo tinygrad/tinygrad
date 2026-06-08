@@ -37,12 +37,12 @@ using rt_16x32_4 = rt_shape<16, 32, 4>;
 using rt_16x128 = rt_shape<16, 128, 16>;
 
 template<typename T>
-concept all = std::is_same_v<T, rt_16x16> || 
-              std::is_same_v<T, rt_32x32> || 
-              std::is_same_v<T, rt_32x32_8> || 
-              std::is_same_v<T, rt_16x32> || 
-              std::is_same_v<T, rt_32x16> || 
-              std::is_same_v<T, rt_32x16_4> || 
+concept all = std::is_same_v<T, rt_16x16> ||
+              std::is_same_v<T, rt_32x32> ||
+              std::is_same_v<T, rt_32x32_8> ||
+              std::is_same_v<T, rt_16x32> ||
+              std::is_same_v<T, rt_32x16> ||
+              std::is_same_v<T, rt_32x16_4> ||
               std::is_same_v<T, rt_16x32_4> ||
               std::is_same_v<T, rt_16x128>;
 
