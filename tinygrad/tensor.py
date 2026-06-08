@@ -161,8 +161,7 @@ class Tensor(OpMixin):
   def _wrap_uop(self, u:UOp) -> Tensor: return Tensor(u)
   def const_like(self, b:ConstType) -> Tensor: return Tensor(self.uop.const_like(b))
   @staticmethod
-  def const(dtype:DType, b:ConstType|UOp) -> Tensor:
-    return Tensor(UOp.const(dtype, b))
+  def const(dtype:DType, b:ConstType|UOp) -> Tensor: return Tensor(UOp.const(dtype, b))
   @staticmethod
   def unique_const(fill_value:ConstType|UOp, **kwargs) -> Tensor:
     if isinstance(fill_value, UOp): return Tensor(fill_value, **kwargs)
@@ -210,7 +209,7 @@ class Tensor(OpMixin):
       param = UOp.param(slot, self.dtype, self.shape, self.device)
     return Tensor(param)
   def call(self, *lst:Tensor, fxn:Tensor|UOp, grad_fxn:Callable|None=None) -> Tensor:
-    fret = (fxn.uop if isinstance(fxn, Tensor) else fxn).call(*[t.uop for t in (self,)+lst], grad_fxn=grad_fxn)
+    fret = fxn._uop.call(*[t.uop for t in (self,)+lst], grad_fxn=grad_fxn)
     return Tensor(fret.gettuple(0))
 
   def custom_kernel(self, *lst:Tensor, fxn:Callable, grad_fxn:Callable|None=None) -> list[Tensor]:
