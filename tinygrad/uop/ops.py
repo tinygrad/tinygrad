@@ -9,7 +9,7 @@ from tinygrad.dtype import ConstFloat, PyConst, storage_fmt_for_dtype, to_storag
 from tinygrad.device import Buffer, MultiBuffer, canonicalize_device
 from tinygrad.helpers import ContextVar, all_int, prod, getenv, all_same, Context, partition, temp, unwrap, T, argfix, Metadata, flatten, TRACEMETA
 from tinygrad.helpers import PROFILE, dedup, cdiv, cmod, floordiv, floormod, diskcache_put, to_function_name, cpu_profile, TracingKey
-from tinygrad.helpers import VIZ, SPEC, CAPTURE_PROCESS_REPLAY, DISALLOW_BROADCAST
+from tinygrad.helpers import VIZ, SPEC, CAPTURE_PROCESS_REPLAY, DISALLOW_BROADCAST, get_shape, fully_flatten
 from tinygrad.helpers import colored, ansilen, printable
 if TYPE_CHECKING:
   from tinygrad.renderer import Estimates
@@ -744,6 +744,20 @@ class UOp(OpMixin, metaclass=UOpMetaClass):
     device = canonicalize_device(self.device if device is None else device)
     axis = self.axis if isinstance(device, tuple) else None
     return UOp.empty(self.shard_shape if axis is not None else self.shape, self.dtype if dtype is None else dtype, device, axis)
+  @staticmethod
+  def _frompy(x:list|tuple|bytes, dtype:DType, device:str|tuple[str, ...]|None=None) -> UOp:
+    device = canonicalize_device(device)
+    if isinstance(x, bytes): ret, data = UOp.new_buffer("PYTHON", len(x)//dtype.itemsize, dtype), x
+    else:
+      # bfloat16 and fp8 have no struct format, so pack a float32 buffer and cast
+      bdtype = dtypes.float32 if dtype in [dtypes.bfloat16, *dtypes.fp8s] else dtype
+      assert bdtype.fmt is not None, f"{bdtype=} has None fmt"
+      ret = UOp.empty(shape:=get_shape(x), bdtype, "PYTHON")
+      data = struct.pack(f"{prod(shape)}{bdtype.fmt}", *[truncate[bdtype](bdtype.const(xi)) for xi in fully_flatten(x)])
+    # fake realize. if target device is PYTHON it needs bytearray to be writable
+    ret.buffer.allocate(memoryview(data if device != "PYTHON" else bytearray(data)))
+    if ret.dtype != dtype: ret = ret.cast(dtype)
+    return ret if ret.device == device else ret.copy_to_device(device)
   def clone(self, device=None) -> UOp:
     device = device or self.device
     ret = self.empty_like(device=device)
