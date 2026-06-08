@@ -6,7 +6,15 @@
 
 using namespace kittens;
 
-#define SIZE 8192
+#ifndef GEMM_M
+constexpr int GEMM_M = 8192;
+#endif
+#ifndef GEMM_N
+constexpr int GEMM_N = 8192;
+#endif
+#ifndef GEMM_K
+constexpr int GEMM_K = 8192;
+#endif
 
 #define HipCheckError() do { \
     hipError_t err = hipGetLastError(); \
@@ -34,14 +42,15 @@ constexpr int REG_N      = BLOCK_COL / WARPS_COL / 2;
 
 using G = kittens::group<NUM_WARPS>;
 
-template <int M, int N, int K>
-__global__ __launch_bounds__(512, 2)
-void mxfp8_gemm_kernel(
-    const gl<fp8e4m3, 1, 1, M, K> A,
-    const gl<fp8e4m3, 1, 1, N, K> B,
-    const gl<float,   1, 1, M, N> C,
+__global__ __launch_bounds__(512, 2) void mxfp8_gemm_kernel(bf16 *C_ptr, fp8e4m3 *A_ptr, fp8e4m3 *B_ptr,
     const uint32_t *__restrict__ scale_A_iter,
     const uint32_t *__restrict__ scale_B_iter) {
+    constexpr int M = GEMM_M, N = GEMM_N, K = GEMM_K;
+
+    kittens::gl<fp8e4m3, 1, 1, M, K> A{A_ptr, nullptr, nullptr, nullptr, nullptr};
+    kittens::gl<fp8e4m3, 1, 1, N, K> B{B_ptr, nullptr, nullptr, nullptr, nullptr};
+    kittens::gl<bf16, 1, 1, M, N>    C{C_ptr, nullptr, nullptr, nullptr, nullptr};
+
     constexpr int k_iters      = K / BLOCK_K;
     constexpr int NUM_THREADS  = NUM_WARPS * WARP_THREADS;
 
