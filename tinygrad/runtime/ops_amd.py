@@ -908,7 +908,12 @@ class PCIIface(PCIIfaceBase):
     self._collect_interrupts(reset=True)
     raise RuntimeError("Device hang detected")
 
-  def device_fini(self): self.dev_impl.fini()
+  def device_fini(self): 
+    self.dev_impl.fini()
+    #bit2: BusMaster → off
+    #bit10: Interrupt Disable → on
+    cmd = (self.pci_dev.read_config(pci.PCI_COMMAND, 2) & ~pci.PCI_COMMAND_MASTER) | pci.PCI_COMMAND_INTX_DISABLE
+    self.pci_dev.write_config(pci.PCI_COMMAND, cmd, 2)
 
 class USBIface(PCIIface):
   def __init__(self, dev, dev_id): # pylint: disable=super-init-not-called
@@ -943,6 +948,8 @@ class USBIface(PCIIface):
     return super().create_queue(queue_type, ring, gart, rptr, wptr, eop_buffer, cwsr_buffer, ctl_stack_size, ctx_save_restore_size, xcc_id, idx)
 
   def sleep(self, timeout): pass
+
+  def device_fini(self): self.dev_impl.fini()
 
 def _mock(iface, name=None): return type(name or f"MOCK{iface.__name__}", (iface,), {})
 
