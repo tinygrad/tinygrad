@@ -222,6 +222,12 @@ class TestTensorUOpRand(unittest.TestCase):
     bits_uop = UOp.empty((8,), dtype=dtypes.uint32)
     for shape in ((8,), (2, 4), (5,)):
       self.assertIs(Tensor._bits_to_rand(Tensor(bits_uop), shape, dtypes.float32).uop, UOp._bits_to_rand(bits_uop, shape, dtypes.float32))
+  def test_threefry(self):
+    t = _t(4).cast(dtypes.uint64)
+    self.assertIs(t.threefry(t).uop, t.uop.threefry(t.uop))
+  def test_threefry_random_bits(self):
+    key, c0, c1 = UOp.empty((2,), dtype=dtypes.uint32), UOp.arange(4, dtype=dtypes.uint32), UOp.arange(4, dtype=dtypes.uint32)
+    self.assertIs(Tensor._threefry_random_bits(Tensor(key), Tensor(c0), Tensor(c1)).uop, UOp._threefry_random_bits(key, c0, c1))
 
 class TestTensorUOpGather(unittest.TestCase):
   def _check(self, t, dim, idx):
