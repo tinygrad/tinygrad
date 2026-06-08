@@ -160,29 +160,6 @@ def make_signal(devs, queue=None, sentinel=False):
   return UOp.new_buffer(devs, 1, dtypes.uint64).rtag("sentinel_signal" if sentinel else (queue, "timeline_signal") if queue else "timeline_signal")
 def make_signal_value(devs, queue=None): return UOp.new_buffer(devs, 1, dtypes.uint64).rtag((queue, "timeline_value") if queue else "timeline_value")
 
-class HCQEncoder:
-  def __init__(self): self.blob, self.patches = b'', []
-
-  def get_dev_addr(self, uop:UOp) -> UOp:
-    if unwrap_after(uop).op not in (Ops.BUFFER, Ops.SLICE, Ops.BINARY, Ops.MSTACK, Ops.MSELECT): return uop
-    return UOp(Ops.GETADDR, dtypes.uint64, src=(uop, UOp(Ops.DEVICE, arg=self.dev.device)))
-
-  def append(self, *data, dtype=dtypes.uint32):
-    for d in data:
-      if isinstance(d, int): self.blob += struct.pack(f'<{dtype.fmt}', d)
-      else:
-        self.patches.append((len(self.blob), self.get_dev_addr(d), dtype))
-        self.blob += struct.pack(f'<{dtype.fmt}', 0)
-
-  def q(self, *values): self.append(*values)
-
-  def uop(self, dev:str|tuple[str, ...], tag:str|None=None) -> UOp:
-    buf = UOp.new_buffer(dev, len(self.blob), dtypes.uint8)
-    if tag: buf = buf.rtag(tag)
-    blob_uop = UOp(Ops.BINARY, dtypes.void, src=(), arg=self.blob)
-    stores = [buf.index(UOp.const(dtypes.int, off), dtype=buf.dtype.ptr()).cast(dt.ptr()).store(val.cast(dt)) for off, val, dt in self.patches]
-    return buf.after(buf.store(blob_uop), *stores)
-
 # *****************
 # 0. helpers
 
