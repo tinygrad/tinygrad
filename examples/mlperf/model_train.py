@@ -1817,15 +1817,30 @@ def train_flux():
   eval_freq_step = math.ceil(262144 / gbs)
   lr, lr_eps = 1e-4, 1e-8
 
-  for x in GPUS: Device[x]
+  Tensor.manual_seed(SEED)
 
-  def load_model(model_params:dict[str, list|bool|int|float]) -> Flux:
-    model = Flux(**model_params)
+  # model
+  model = Flux(
+    guidance_embed=False,
+    in_channels=64,
+    vec_in_dim=768,
+    context_in_dim=4096,
+    hidden_size=3072,
+    mlp_ratio=4.0,
+    num_heads=24,
+    depth=19,
+    depth_single_blocks=38,
+    axes_dim=[16, 56, 56],
+    theta=10000,
+    qkv_bias=True
+  )
+  model.init_weights()
+  model.shard(GPUS)
 
-    model.init_weights()
-    model.shard(GPUS)
-
-    return model
+  # optim
+  optim = AdamW(get_parameters(model), lr=lr, eps=lr_eps)
+  for p in optim.params: p.grad = Tensor.zeros_like(p, dtype=optim.param_dtype)
+  grads = [p.grad for p in optim.params]
 
   def get_data_iter(val:bool) -> Iterator[tuple[Tensor, Tensor, Tensor, Tensor, Tensor]]:
     return batch_load_flux(BS, val, BASEDIR, empty_enc_dir=EMPTYENCDIR, seed=SEED, is_infinite=(not val))
@@ -1859,9 +1874,7 @@ def train_flux():
 
   @TinyJit
   @Tensor.train(mode=True)
-  def train_step(model:Flux, optim:AdamW, sample:dict[str, Tensor]) -> Tensor:
-    optim.zero_grad()
-
+  def minibatch(model:Flux, optim:AdamW, sample:dict[str, Tensor]) -> Tensor:
     inputs, noise, labels, latent_dims = prepare_inputs(sample)
     latent_noise_pred = model(**inputs)
 
@@ -1869,14 +1882,16 @@ def train_flux():
     tgt = noise - labels
     loss = (pred - tgt).square().mean()
 
-    loss.backward()
+    for p, g in zip(optim.params, loss.gradient(*optim.params)):
+      if isinstance(p.device, tuple) and g.uop.axis != p.uop.axis:
+        g = g.to(p.device[0]).shard(p.device, p.uop.axis)
+      p.grad.assign(g)
 
-    for p in optim.params:
-      if p.grad is not None and isinstance(p.device, tuple) and p.grad.uop.axis != p.uop.axis:
-        p.grad = p.grad.to(p.device[0]).shard(p.device, p.uop.axis)
+    return loss.float().to("CPU").realize(*grads)
+
+  @TinyJit
+  def optim_step(optim:AdamW):
     optim.step()
-
-    return loss.float().to("CPU")
 
   @Tensor.train(mode=False)
   def eval_step(model:Flux, sample:dict[str, Tensor]) -> Tensor:
@@ -1889,33 +1904,11 @@ def train_flux():
 
     return loss
 
-  Tensor.manual_seed(SEED)
-
   # wandb
   wandb = getenv("WANDB")
   if wandb:
     import wandb
     wandb.init(config=config, project="MLPerf-flux.1")
-
-  # model
-  model_params = {
-    "guidance_embed": False,
-    "in_channels": 64,
-    "vec_in_dim": 768,
-    "context_in_dim": 4096,
-    "hidden_size": 3072,
-    "mlp_ratio": 4.0,
-    "num_heads": 24,
-    "depth": 19,
-    "depth_single_blocks": 38,
-    "axes_dim": [16, 56, 56],
-    "theta": 10000,
-    "qkv_bias": True
-  }
-  model = load_model(model_params)
-
-  # optim
-  optim = AdamW(get_parameters(model), lr=lr, eps=lr_eps)
 
   train_iter, val_iter = get_data_iter(False), get_data_iter(True)
 
@@ -1930,10 +1923,14 @@ def train_flux():
     mst = time.perf_counter()
     data_time = mst - st
 
-    loss = train_step(model, optim, sample).item()
+    loss = minibatch(model, optim, sample).item()
+
+    gt = time.perf_counter()
+    optim_step(optim)
     et = time.perf_counter()
 
-    dev_time = et - mst
+    optim_time = et - gt
+    dev_time = (gt - mst) + optim_time
     step_time = et - st
 
     i += 1
@@ -1941,7 +1938,7 @@ def train_flux():
     mem_gb = GlobalCounters.mem_used / 1e9
     gflops = GlobalCounters.global_ops / 1e9 / dev_time
     tqdm.write(
-        f"{i:5} {step_time:.3f} s step, {dev_time:.3f} s dev, {data_time:.3f} s data, {loss:.4f} loss, " \
+        f"{i:5} {step_time:.3f} s step, {optim_time:.3f} s optim, {data_time:.3f} s data, {loss:.4f} loss, " \
         f"{lr:.12f} LR, {mem_gb:.2f} GB used, {gflops:9.2f} GFLOPS")
 
     # eval loop

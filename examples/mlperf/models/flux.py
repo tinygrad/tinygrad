@@ -1,5 +1,5 @@
 from examples.sdxl import FirstStage
-from tinygrad import Tensor, nn, dtypes
+from tinygrad import Tensor, nn, dtypes, function
 from extra.models.clip import FrozenClosedClipEmbedder
 
 import math
@@ -345,10 +345,17 @@ class Flux:
     ids = Tensor.cat(txt_ids, img_ids, dim=1)
     pe = self.pe_embedder(ids)
     for block in self.double_blocks:
-      img, txt = block(img=img, txt=txt, vec=vec, pe=pe)
+      @function(precompile=True, allow_implicit=True)
+      def run_double(img:Tensor, txt:Tensor, vec:Tensor, pe:Tensor, _block=block) -> tuple[Tensor, Tensor]:
+        img, txt = _block(img=img, txt=txt, vec=vec, pe=pe)
+        return img.contiguous(), txt.contiguous()
+      img, txt = run_double(img, txt, vec, pe)
     img = Tensor.cat(txt, img, dim=1)
     for block in self.single_blocks:
-      img = block(img, vec=vec, pe=pe)
+      @function(precompile=True, allow_implicit=True)
+      def run_single(img:Tensor, vec:Tensor, pe:Tensor, _block=block) -> Tensor:
+        return _block(img, vec=vec, pe=pe).contiguous()
+      img = run_single(img, vec, pe)
 
     img = img[:, txt.shape[1] :, ...]
 
