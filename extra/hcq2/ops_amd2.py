@@ -3,7 +3,7 @@ from typing import cast
 import os, ctypes, struct, hashlib, functools, importlib, mmap, errno, array, contextlib, sys, weakref, itertools, collections, atexit
 assert sys.platform != 'win32'
 from dataclasses import dataclass
-from extra.hcq2.hcq2 import HCQ2Compiled, HCQAllocator, HCQ2Buffer, HCQEncoder, to_tuple
+from extra.hcq2.hcq2 import HCQ2Compiled, HCQAllocator, HCQ2Buffer, HCQEncoder, to_tuple, make_getaddr, make_ins, assembly
 from tinygrad.uop.ops import sint, UOp
 from tinygrad.device import Compiled, BufferSpec, Buffer, Device
 from tinygrad.dtype import dtypes
@@ -23,7 +23,8 @@ from tinygrad.runtime.ops_amd import SQTT, SQTT_ITRACE_SE_MASK, SQTT_LIMIT_SE, S
 from tinygrad.runtime.ops_amd import EVENT_INDEX_PARTIAL_FLUSH, WAIT_REG_MEM_FUNCTION_EQ, WAIT_REG_MEM_FUNCTION_NEQ, WAIT_REG_MEM_FUNCTION_GEQ
 if getenv("IOCTL"): import extra.hip_gpu_driver.hip_ioctl  # noqa: F401 # pylint: disable=unused-import
 
-from tinygrad.engine.realize import get_runtime
+from tinygrad.engine.realize import get_runtime, pm_flatten_linear
+from tinygrad.uop import FastEnum, auto
 from tinygrad.uop.ops import Ops, UPat, PatternMatcher, graph_rewrite
 
 class AMDComputeQueue(HCQEncoder):
@@ -171,49 +172,42 @@ def amd_submit_pm4(cmdbuf, devs):
   flush = UOp.barrier(copy_to_ring, bump_put_ptr, bump_wptr)
   return doorbell.after(flush).index(zero, dtype=doorbell.dtype.ptr()).store(next_put)
 
-class AMDCopyQueue(HCQEncoder):
-  def __init__(self, dev:AMDDevice, queue_idx=0):
-    super().__init__()
-    self.dev = dev
-    self.sdma, self.queue_idx, self.max_copy_size = dev.sdma, queue_idx, dev.max_copy_size
+# *****************
+# SDMA
 
-  def copy(self, x):
-    dest, src, copy_size = self.get_dev_addr(x.src[0]), self.get_dev_addr(x.src[1]), x.arg
-    copied = 0
-    while copied < copy_size:
-      step = min(copy_size - copied, self.max_copy_size)
-      self.q(self.sdma.SDMA_OP_COPY | self.sdma.SDMA_PKT_COPY_LINEAR_HEADER_SUB_OP(self.sdma.SDMA_SUBOP_COPY_LINEAR),
-             self.sdma.SDMA_PKT_COPY_LINEAR_COUNT_COUNT(step - 1), 0, *data64_le(src + copied), *data64_le(dest + copied))
-      copied += step
+class SDMAOps(FastEnum): COPY = auto(); POLL_REGMEM = auto(); FENCE = auto(); TRAP = auto(); TIMESTAMP = auto()
 
-  def wait(self, x):
-    self.q(self.sdma.SDMA_OP_POLL_REGMEM | self.sdma.SDMA_PKT_POLL_REGMEM_HEADER_FUNC(WAIT_REG_MEM_FUNCTION_GEQ) | \
-           self.sdma.SDMA_PKT_POLL_REGMEM_HEADER_MEM_POLL(1), *data64_le(self.get_dev_addr(x.src[0])), x.src[1], 0xffffffff,
-           self.sdma.SDMA_PKT_POLL_REGMEM_DW5_INTERVAL(0x04) | self.sdma.SDMA_PKT_POLL_REGMEM_DW5_RETRY_COUNT(0xfff))
+def sdma_copy(ctx, dst, src, copy):
+  src_addr, dst_addr = make_getaddr(src, ctx.device), make_getaddr(dst, ctx.device)
+  return UOp(Ops.LINEAR, dtypes.void, tuple([make_ins(SDMAOps.COPY,
+     ctx.sdma.SDMA_OP_COPY | ctx.sdma.SDMA_PKT_COPY_LINEAR_HEADER_SUB_OP(ctx.sdma.SDMA_SUBOP_COPY_LINEAR),
+     ctx.sdma.SDMA_PKT_COPY_LINEAR_COUNT_COUNT(min(copy.arg - off, ctx.max_copy_size) - 1), 0,
+     *data64_le(src_addr + off), *data64_le(dst_addr + off)) for off in range(0, copy.arg, ctx.max_copy_size)]))
 
-  def store(self, x):
-    fence_flags = self.sdma.SDMA_PKT_FENCE_HEADER_MTYPE(3) if self.dev.target[0] != 9 else 0
-    self.q(self.sdma.SDMA_OP_FENCE | fence_flags, *data64_le(self.get_dev_addr(x.src[0])), x.src[1])
-    self.q(self.sdma.SDMA_OP_TRAP, 0)
+def sdma_wait(ctx, dst, val):
+  op = ctx.sdma.SDMA_OP_POLL_REGMEM | ctx.sdma.SDMA_PKT_POLL_REGMEM_HEADER_FUNC(WAIT_REG_MEM_FUNCTION_GEQ) \
+     | ctx.sdma.SDMA_PKT_POLL_REGMEM_HEADER_MEM_POLL(1)
+  return make_ins(SDMAOps.POLL_REGMEM, op, *data64_le(make_getaddr(dst, ctx.device)), val, 0xffffffff,
+    ctx.sdma.SDMA_PKT_POLL_REGMEM_DW5_INTERVAL(0x04) | ctx.sdma.SDMA_PKT_POLL_REGMEM_DW5_RETRY_COUNT(0xfff))
 
-  def timestamp(self, x):
-    self.q(self.sdma.SDMA_OP_TIMESTAMP | self.sdma.SDMA_PKT_TIMESTAMP_GET_HEADER_SUB_OP(self.sdma.SDMA_SUBOP_TIMESTAMP_GET_GLOBAL),
-           *data64_le(self.get_dev_addr(x.src[0])))
+def sdma_store(ctx, dst, val):
+  op = ctx.sdma.SDMA_OP_FENCE | (ctx.sdma.SDMA_PKT_FENCE_HEADER_MTYPE(3) if ctx.target[0] != 9 else 0)
+  return UOp(Ops.LINEAR, dtypes.void, (
+    make_ins(SDMAOps.FENCE, op, *data64_le(make_getaddr(dst, ctx.device)), val), make_ins(SDMAOps.TRAP, ctx.sdma.SDMA_OP_TRAP, 0)))
 
-def amd_lower_sdma(linear, devs):
-  enc = AMDCopyQueue(Device[devs[0]])
-  graph_rewrite(linear.replace(src=tuple(UOp(Ops.LINEAR, dtypes.void, (cmd,)) for cmd in linear.src)), amd_inner_sdma_pm, ctx=enc, name="amd: encode sdma")
-  return enc.uop(dev=devs if len(devs) > 1 else devs[0], tag="copy")
+def sdma_timestamp(ctx, dst):
+  op = ctx.sdma.SDMA_OP_TIMESTAMP | ctx.sdma.SDMA_PKT_TIMESTAMP_GET_HEADER_SUB_OP(ctx.sdma.SDMA_SUBOP_TIMESTAMP_GET_GLOBAL)
+  return make_ins(SDMAOps.TIMESTAMP, op, *data64_le(make_getaddr(dst, ctx.device)))
 
-amd_inner_sdma_pm = PatternMatcher([
-  (UPat(Ops.LINEAR, src=(UPat(Ops.WAIT, name="x"),)), lambda ctx, x: ctx.wait(x)),
-  (UPat(Ops.LINEAR, src=(UPat(Ops.BARRIER, name="x"),)), lambda ctx, x: None),
-  (UPat(Ops.LINEAR, src=(UPat(Ops.COPY, name="x"),)), lambda ctx, x: ctx.copy(x)),
-  (UPat(Ops.LINEAR, src=(UPat(Ops.CUSTOM_FUNCTION, arg="timestamp", name="x"),)), lambda ctx, x: ctx.timestamp(x)),
-  (UPat(Ops.LINEAR, src=(UPat(Ops.STORE, src=(UPat((Ops.BUFFER, Ops.PARAM)), UPat()), name="x"),)), lambda ctx, x: ctx.store(x)),
+pm_sdma_opsel = PatternMatcher([
+  (UPat(Ops.BARRIER), lambda: UOp(Ops.NOOP, dtypes.void, ())),
+  (UPat(Ops.WAIT, src=(UPat(name="dst"), UPat(name="val"))), sdma_wait),
+  (UPat(Ops.COPY, src=(UPat(name="dst"), UPat(name="src")), name="copy"), sdma_copy),
+  (UPat(Ops.CUSTOM_FUNCTION, arg="timestamp", src=(UPat(name="dst"),)), sdma_timestamp),
+  (UPat(Ops.STORE, src=(UPat((Ops.BUFFER, Ops.PARAM), name="dst"), UPat(name="val"))), sdma_store),
 ])
 
-def amd_submit_sdma(cmdbuf, devs):
+def sdma_submit(cmdbuf, devs):
   # the cmdbuf to submit + the patch writes that fill it
   size_dw, zero = cmdbuf.src[0].arg // dtypes.uint32.itemsize, UOp.const(dtypes.int, 0)
 
@@ -244,6 +238,9 @@ def amd_submit_sdma(cmdbuf, devs):
   # ring the doorbell once the writes have landed
   flush = UOp.barrier(zero_tail, copy_to_ring, bump_put_ptr, bump_wptr)
   return doorbell.after(flush).index(zero, dtype=doorbell.dtype.ptr()).store(next_put_b)
+
+pm_sdma_submit = PatternMatcher([(UPat(Ops.LINEAR, name="lin"),
+  lambda lin: sdma_submit(assembly(lin, to_tuple(lin.arg[0]), "copy"), to_tuple(lin.arg[0])))])
 
 @dataclass(frozen=True)
 class AMDProgramData:
@@ -376,7 +373,8 @@ def _mock(iface, name=None): return type(name or f"MOCK{iface.__name__}", (iface
 def encode_queue(q:UOp) -> UOp|None:
   if not (isinstance(q.arg, tuple) and len(q.arg) == 2 and isinstance(q.arg[1], str) and q.arg[1].startswith(("COMPUTE", "COPY"))): return None
   devs = to_tuple(q.arg[0])
-  return amd_submit_pm4(amd_lower_pm4(q, devs), devs) if q.arg[1].startswith("COMPUTE") else amd_submit_sdma(amd_lower_sdma(q, devs), devs)
+  if q.arg[1].startswith("COMPUTE"): return amd_submit_pm4(amd_lower_pm4(q, devs), devs)
+  return pm_sdma_submit.rewrite(graph_rewrite(q, pm_sdma_opsel + pm_flatten_linear, walk=True, ctx=Device[devs[0]], name="sdma: opsel"))
 
 pm_lower = PatternMatcher([
   (UPat(Ops.CUSTOM_FUNCTION, arg="submit", src=(UPat(Ops.LINEAR, name="q"),)), encode_queue),
