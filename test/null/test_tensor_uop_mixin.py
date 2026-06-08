@@ -10,6 +10,9 @@ def _strip_unique(u: UOp) -> UOp: return graph_rewrite(u, _strip_unique_pm)
 def _t(*shape):
   return Tensor.arange(math.prod(shape)).reshape(*shape)
 
+def _ti(data):  # int32 index tensor
+  return Tensor(data, dtype=dtypes.int32)
+
 # Tensor().func().uop should be the same as UOp.func()
 def _check(tc: unittest.TestCase, t: Tensor, fn):
   tc.assertIs(fn(t).uop, fn(t.uop), f"\ntensor.uop = {fn(t).uop}\nuop = {fn(t.uop)}")
@@ -109,6 +112,44 @@ class TestTensorUOpGetitem(unittest.TestCase):
   def test_mixed_slice_int(self):   _check(self, _t(2, 3, 4), lambda x: x[0:2, -1, 1:3])
   def test_mixed_slice_slice(self): _check(self, _t(3, 4, 5), lambda x: x[1:3, :, 0:2])
   def test_high_rank_combo(self):   _check(self, _t(4, 5, 6), lambda x: x[1:3, :, -1, None])
+
+  # ---- advanced indexing: UOp index on UOp must match Tensor index on Tensor (same uop) ----
+  def _check_adv(self, t, idx):
+    # idx is a Tensor or a tuple mixing Tensor index arrays with slice/int/None/Ellipsis
+    ui = idx.uop if isinstance(idx, Tensor) else (tuple(i.uop if isinstance(i,Tensor) else i for i in idx) if isinstance(idx, tuple) else idx)
+    self.assertIs(t[idx].uop, t.uop[ui])
+
+  def test_adv_single(self):           self._check_adv(_t(5), _ti([2,1,0,1,2]))
+  def test_adv_negative(self):         self._check_adv(_t(5), _ti([-1,-2,0]))
+  def test_adv_out_of_bounds(self):    self._check_adv(_t(5), _ti([4,7,2]))           # oob -> 0
+  def test_adv_2d_dim0(self):          self._check_adv(_t(3,4), _ti([2,0,1]))
+  def test_adv_2d_index_array(self):   self._check_adv(_t(4,5), _ti([[0,1],[2,3]]))   # shaped index
+  def test_adv_two_consecutive(self):  self._check_adv(_t(3,4), (_ti([2,0,1]), _ti([1,2,3])))  # linear path
+  def test_adv_two_broadcast(self):    self._check_adv(_t(3,4), (_ti([2,0,1]), _ti([[1],[2],[3]])))
+  def test_adv_three_consecutive(self):self._check_adv(_t(3,4,5), (_ti([2,0]), _ti([1,3]), _ti([4,2])))
+  def test_adv_after_slice(self):      self._check_adv(_t(2,3,4), (slice(None), _ti([2,0,1])))
+  def test_adv_non_consec_permute(self): self._check_adv(_t(2,3,4), (_ti([1,0]), slice(None), _ti([2,0])))
+  def test_adv_idx_then_int(self):     self._check_adv(_t(3,4), (_ti([2,0,1]), 2))
+  def test_adv_int_then_idx(self):     self._check_adv(_t(3,4), (1, _ti([2,0,1])))
+  def test_adv_idx_then_none(self):    self._check_adv(_t(3,4), (_ti([2,0,1]), None))
+  def test_adv_none_then_idx(self):    self._check_adv(_t(3,4), (None, _ti([2,0,1])))
+  def test_adv_ellipsis_then_idx(self):self._check_adv(_t(2,3,4), (Ellipsis, _ti([2,0,1])))
+  def test_adv_idx_slice_mix(self):    self._check_adv(_t(4,5,6), (_ti([1,3]), slice(1,4), _ti([2,0])))
+
+  # bool index is unsupported
+  def test_adv_bool_index_rejected(self):
+    with self.assertRaises(IndexError): _t(5)[_t(5) > 2]
+    with self.assertRaises(IndexError): _t(5).uop[(_t(5) > 2).uop]
+
+  # python list/tuple indices
+  def test_adv_python_list(self):
+    self.assertIs(_strip_unique(_t(5)[[2,1,0]].uop), _strip_unique(_t(5).uop[[2,1,0]]))
+  def test_adv_python_list_negative(self):
+    self.assertIs(_strip_unique(_t(5)[[-1,-2,0]].uop), _strip_unique(_t(5).uop[[-1,-2,0]]))
+  def test_adv_python_list_nested(self):
+    self.assertIs(_strip_unique(_t(3,4)[[0,1],[2,0]].uop), _strip_unique(_t(3,4).uop[[0,1],[2,0]]))
+  def test_adv_python_list_2d_index(self):
+    self.assertIs(_strip_unique(_t(4,5)[[[0,1],[2,3]]].uop), _strip_unique(_t(4,5).uop[[[0,1],[2,3]]]))
 
 class TestTensorUOpCumalu(unittest.TestCase):
   def test_cumsum_1d(self):       _check(self, _t(5), lambda x: x.cumsum())
