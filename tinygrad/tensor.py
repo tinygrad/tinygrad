@@ -377,7 +377,7 @@ class Tensor(OpMixin):
     if not isinstance(self.device, str): raise RuntimeError("can't shard a multi-device tensor")
     if len(devices) == 1: return self.to(devices[0])
     devices = cast(tuple[str, ...], canonicalize_device(devices))
-    uop = self.uop.shard(devices, self._resolve_dim(axis)) if axis is not None else self.uop.copy_to_device(devices)
+    uop = self.uop.shard(devices, None if axis is None else self._resolve_dim(axis))
     return Tensor(uop).is_param_(self.is_param)
 
   def shard_(self, devices:tuple[str, ...], axis:int|None=None) -> Tensor:
