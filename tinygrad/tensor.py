@@ -10,7 +10,7 @@ from tinygrad.helpers import argfix, flatten, prod, all_int, round_up, getenv, f
 from tinygrad.helpers import resolve_pool_pads, IMAGE, FLOAT16, WINO, Metadata, TRACEMETA, is_numpy_ndarray, TracingKey, cpu_profile
 from tinygrad.helpers import suppress_finalizing, disable_gc
 from tinygrad.uop.ops import UOp, Ops, sint, all_metadata, _index_to_concrete_int, Variable, _broadcast_shape
-from tinygrad.mixin import OpMixin
+from tinygrad.mixin.rand import RandMixin
 from tinygrad.schedule import create_linear_with_vars
 from tinygrad.device import Buffer, canonicalize_device
 from tinygrad.engine.realize import run_linear
@@ -59,7 +59,7 @@ def _apply_winograd_matrix(mat, t:Tensor, dims:int) -> Tensor:
   assert isinstance(ret, Tensor), "sum didn't return a Tensor"
   return ret
 
-class Tensor(OpMixin):
+class Tensor(RandMixin):
   """
   A `Tensor` is a multi-dimensional matrix containing elements of a single data type.
 
