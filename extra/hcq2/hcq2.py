@@ -3,7 +3,7 @@ from typing import cast, Callable, TypeVar, Generic, Any, TYPE_CHECKING
 import struct, functools, time, collections, importlib, itertools, weakref
 from dataclasses import replace
 if TYPE_CHECKING: from tinygrad.engine.realize import ExecContext
-from tinygrad.helpers import DEV, getenv, select_first_inited, select_by_name, suppress_finalizing, mv_address, round_up, DEBUG, dedup, pluralize
+from tinygrad.helpers import DEV, getenv, select_first_inited, select_by_name, suppress_finalizing, mv_address, DEBUG, dedup, pluralize
 from tinygrad.device import Device, Buffer, BufferSpec, Compiled, LRUAllocator, MultiBuffer
 from tinygrad.uop.ops import Ops, sint, UOp, UPat, PatternMatcher, KernelInfo, graph_rewrite, track_rewrites, GroupOp
 from tinygrad.uop.symbolic import symbolic_simple, symbolic
@@ -109,7 +109,7 @@ class HCQAllocator(LRUAllocator[HCQDeviceType], Generic[HCQDeviceType]):
 
   def _unmap(self, mb):
     self.dev.synchronize()
-    self.dev.iface.dev_impl.mm.unmap_range(int(mb.va_addr), round_up(mb.size, 0x1000))
+    self.dev.iface.free(mb)
 
   def _offset(self, buf, size:int, offset:int) -> HCQ2Buffer: return buf.offset(offset=offset, size=size)
 
@@ -393,7 +393,7 @@ def encode_cmdbuf(submit:UOp, lin:UOp) -> UOp|None:
 pm_encode_cmdbufs = PatternMatcher([(UPat(Ops.CUSTOM_FUNCTION, arg="submit", src=(UPat(Ops.LINEAR, name="lin"),), name="submit"), encode_cmdbuf)])
 
 # *****************
-# 4.2. lift patches to the command buffer (root)
+# 5.2. lift patches to the command buffer (root)
 
 def lift_patches_to_cmdbuf(cmdbuf:UOp) -> UOp|None:
   if not (patches:=dedup(u for store in cmdbuf.src[1:] for u in store.toposort() if u.op is Ops.AFTER)): return None
@@ -404,7 +404,7 @@ pm_lift_patches_to_cmdbuf = PatternMatcher([
 ])
 
 # *****************
-# 5. bufferize placeholders: replace placeholders with real buffers.
+# 6. bufferize placeholders: replace placeholders with real buffers.
 
 def bufferize_buf(buf:UOp) -> UOp|None:
   if buf.tag is None: return None
@@ -413,7 +413,7 @@ def bufferize_buf(buf:UOp) -> UOp|None:
 pm_bufferize = PatternMatcher([(UPat(Ops.BUFFER, name="buf"), bufferize_buf)])
 
 # *****************
-# 6.1. capture buffers reachable from each hcq call as BIND, so we don't drop their refs
+# 7.1. capture buffers reachable from each hcq call as BIND, so we don't drop their refs
 
 def hold_call_buffers(call:UOp) -> UOp|None:
   if not (bufs:=tuple(dedup(u for u in call.src[0].toposort() if u.op is Ops.BUFFER and u not in call.src))): return None
@@ -421,7 +421,7 @@ def hold_call_buffers(call:UOp) -> UOp|None:
 pm_hold_call_buffers = PatternMatcher([(UPat(Ops.CALL, tag="hcq", name="call"), hold_call_buffers)])
 
 # *****************
-# 6.2. resolve patches
+# 7.2. resolve patches
 
 def push_stack(op, s): return UOp(Ops.STACK, op.dtype.scalar().vec(len(s.src)),
   tuple(op.replace(dtype=op.dtype.scalar(), src=tuple(x if y is s else y for y in op.src)) for x in s.src))
@@ -456,7 +456,7 @@ pm_resolve_patches = PatternMatcher([
 ]) + symbolic_simple
 
 # *****************
-# 7. callify hcq programs
+# 8. callify hcq programs
 
 def to_param(bufs:list[UOp], ref:UOp) -> UOp:
   bufs.append(ref)
