@@ -98,4 +98,3 @@ __device__ inline static void atomic_pk_add_bf16_with_warpid(const GL &dst, cons
         }.template operator()<Ns>(), ...);
     }(std::make_index_sequence<RT::height>{});
 }
-
