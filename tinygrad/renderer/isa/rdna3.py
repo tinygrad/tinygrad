@@ -29,45 +29,20 @@ from tinygrad.renderer.amd.elf import assemble_linear
 # TODO: need some way to represent Register ranges in constraint mechanisms/regalloc
 # ex. kernarg ptr is s[0:1]
 # - maybe its just done via tag constraints and Op.DEFINE_REG args specific to this isa
+
+
+# How to handle loaidng int o range of registers?
+# Need to be able to represent contiguous reg constraints ex. any pair of 32 bit sgprs
 VGPRS = tuple(Register(f"v{i}", i) for i in range(256))
-SGPRS = tuple(Register(f"s{i}", i) for i in range(256))
-WGIDS = tuple(Register(f"s{i}", i) for i in (2, 3, 4)))
+SGPRS = tuple(Register(f"s{i}", i) for i in range(106))
+# Unless the Target Properties column of AMDGPU Processors specifies otherwise, a separate VGPR register is used per work-item ID.
+WGIDS, WIIDS = tuple(SGPRS[2:5]), tuple(VGPRS[:3])
+# s[0:1] reserved for kernarg ptr
+GP_SGPRS, GP_VGPRS = tuple(SGPRS[4:]), tuple(VGPRS[2:])
 
-def map_addrspace(x:UOp, local_ins,global_ins) -> UOp|None:
-  return local_ins if x.addrspace == AddrSpace.LOCAL else global_ins if x.addrspace == AddrSpace.GLOBAL else None
+def map_addrspace(x:UOp, local_ins,global_ins) -> UOp|None: return local_ins if x.addrspace == AddrSpace.LOCAL else global_ins if x.addrspace == AddrSpace.GLOBAL else None
+def def_reg(dt, reg:Register): return UOp(Ops.DEFINE_REG, dt, tag=(reg,))
 
-def _to_sgpr(v:UOp) -> UOp: return v.ins(RDNA3Ops.s_mov_b32, src=(v,), tag=SGPR_PAIRS)
-def _to_vgpr(v:UOp) -> UOp: return v.ins(RDNA3Ops.v_mov_b32_e32, src=(v,), tag=VGPRS)
-
-# https://llvm.org/docs/AMDGPUUsage.html#initial-kernel-execution-state
-def def_reg(dt, reg:Register|tuple[Register,...], nregs:int=1): return UOp(Ops.DEFINE_REG, dt, args=nregs, tag=reg if isinstance(reg, tuple) else (reg,))
-def abi(ctx:IselContext, x:UOp) -> UOp|None:
-  i = ctx.func_args.index(x)
-  if x.op is Ops.SPECIAL:
-    dim = int(x.arg[-1])
-    if x.arg[0] == 'g': return x.ins(RDNA3Ops.s_mov_b32, src=(def_reg(dtypes.int, WGIDS[dim])), tag=SGPRS)
-    else: return x.ins(RDNA3Ops.v_mov_b32_e32, src=(def_reg(dtypes.int, VGPRS[dim])))
-def _size(x:UOp): return 8 if x.op == Ops.PARAM else 4
-  offs = sum(_size(u) for u in ctx.func_args[:i])
-# return x.ins(RDNA3Ops.s_load_b64, src=(def_reg(dtypes.uint64, KERNARG_PTR),UOp.const(dtypes.uint32, offs)), tag=SGPR_PAIRS)
-
-def fold_address(x:UOp) -> tuple[UOp, UOp, UOp]:
-  if x.op is not Ops.INDEX: return (x, UOp(Ops.NOOP), UOp.const(dtypes.int16, 0))
-  def _offs(v:int) -> UOp:
-    # TODO: handle overflow
-    return UOp.const(dtypes.int16, ((1 << 13) - 1) & v)
-  # Either 64 bit address in VGPR or 32 bit VGOR offset and 32 bit SGPR base
-  # - start with saddr mode, implement full 64 bit addresing by emitting vaddr add op?
-  # assume base is wave unfiorm, use saddr mode
-  base, idx = x.src
-  # TODO: saddr should be representing as adjacent SGPRS?? ex. s[5:6]
-  base = _to_sgpr(base.cast(dtypes.uint64)) # 64 bit SGPR
-  disp_scale = base.dtype.itemsize if isinstance(base.dtype, PtrDType) else 1
-  if idx.op is Ops.CONST: return (base, UOp(Ops.NOOP), _offs(idx.arg * disp_scale))
-  if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: return (base, _to_vgpr(idx.src[0].cast(dtypes.uint32)), _offs(idx.src[1].arg * disp_scale))
-  return (base, _to_vgpr(idx.cast(dtypes.uint32)), _offs(0))
-
-# VGPR only allocation baseline, SGPRs only needed for abi, special cases and eventually wave uniformity optimization?
 def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
   # real registers
   if x.op is Ops.DEFINE_REG and x.tag is not None: return None
@@ -78,8 +53,32 @@ def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
   # allocate vreg definitions
   defs = []
   if isinstance(x.tag, tuple): defs = [ctx.vreg(x.tag)]
-  else: defs = [ctx.vreg(VGPRS)]
+  else: defs = [ctx.vreg(GP_VGPRS)]
   return x.replace(tag=tuple(defs))
+
+# https://llvm.org/docs/AMDGPUUsage.html#initial-kernel-execution-state
+def abi(ctx:IselContext, x:UOp) -> UOp|None:
+  i = ctx.func_args.index(x)
+  if x.op is Ops.SPECIAL:
+    dim = int(x.arg[-1])
+    return def_reg(dtypes.int, WGIDS[dim] if x.arg[0] == 'g' else WIIDS[dim])
+  offs = sum(8 if u.op == Ops.PARAM else 4 for u in ctx.func_args[:i])
+  # pin kernarg ptr and contiguous gp sgprsfor load
+  return x.ins(RDNA3Ops.s_load_b64,
+               src=(def_reg(dtypes.uint32, SGPRS[0]), def_reg(dtypes.uint32, SGPRS[1]),
+                    UOp.const(dtypes.uint32, offs).rtag()),
+               tag=(ctx.vreg(GP_SGPRS[2*i]), ctx.vreg(GP_SGPRS[i+2*i])))
+
+def fold_address(x:UOp) -> tuple[UOp, UOp, UOp]:
+  if x.op is not Ops.INDEX: return (x, UOp(Ops.NOOP), UOp.const(dtypes.int16, 0))
+  def _offs(v:int) -> UOp:
+    # TODO: handle overflow
+    return UOp.const(dtypes.int16, ((1 << 13) - 1) & v).rtag()
+  base, idx = x.src
+  disp_scale = base.dtype.itemsize if isinstance(base.dtype, PtrDType) else 1
+  if idx.op is Ops.CONST: return (base, UOp(Ops.NOOP), _offs(idx.arg * disp_scale))
+  if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: return (base, idx.src[0].cast(dtypes.uint32), _offs(idx.src[1].arg * disp_scale))
+  return (base, idx.cast(dtypes.uint32), _offs(0))
 
 dts = dtypes.ints + (dtypes.bool, dtypes.float16, dtypes.float32, dtypes.float64)
 dt_16bit = tuple(dt.vec(l) for dt in dts for l in [2,1] if l*dt.itemsize == 2 and dt not in dtypes.int16s)
@@ -87,27 +86,75 @@ dt_32bit = tuple(dt.vec(l) for dt in dts for l in [4,2,1] if l*dt.itemsize == 4 
 dt_64bit = tuple(dt.vec(l) for dt in dts for l in [8,4,2,1] if l*dt.itemsize == 8 and dt not in dtypes.int64s)
 dt_128bit = tuple(dt.vec(l) for dt in dts for l in [16,8,4,2,1] if l*dt.itemsize == 16)
 
+"""
+First principles thinking:
+
+- regalloc + renderer stubs handles loading register values
+- need widened vregs for instructions like global_load_b64/b128 etc.. v[4:8]
+- start with pinned pairs
+
+Target program input AST:
+
+Tensor.empty(3,3) + Tensor.empty(3,3)
+
+c0 = UOp(Ops.PARAM, dtypes.float.ptr(9), (), ParamArg(0))
+c2 = UOp.special(3, 'lidx0', dtype=dtypes.int)
+c3 = UOp.special(3, 'gidx0', dtype=dtypes.int)
+c5 = c2+c3*UOp.const(dtypes.int, 3)
+c7 = UOp(Ops.PARAM, dtypes.float.ptr(9), (), ParamArg(1))
+c9 = c7.index(c5, ptr=True).load()
+c10 = UOp(Ops.PARAM, dtypes.float.ptr(9), (), ParamArg(2))
+c12 = c10.index(c5, ptr=True).load()
+c13 = c9+c12
+c15 = c0.index(c5, ptr=True).store(c13).end(c3, c2)
+
+handwritten asm:
+
+kernel:
+    s_load_b64 s[0:1], s[0:1], 0x0 # load kernarg ptr
+    s_load_b64 s[5:6], s[0:1], 0x8 # load ptr to param 1
+    s_load_b64 s[7:8], s[0:1], 0x16 # load ptr to param 2
+
+    # c2+c3*UOp.const(dtypes.int, 3)
+    v_add_nc_i32 v[3], s[]
+"""
+
+# Load consts wave uniform??
+
+V_ADD = {
+  dtypes.float16 : RDNA3Ops.v_add_f16_e32,  dtypes.float32 : RDNA3Ops.v_add_f32_e32,
+  dtypes.float64 : RDNA3Ops.v_add_f64,      dtypes.int32 : RDNA3Ops.v_add_nc_i32,
+  dtypes.uint32 : RDNA3Ops.v_add_nc_u32_e32,
+}
+
+V_MUL = {
+  dtypes.float16 : RDNA3Ops.v_mul_f16_e32,  dtypes.float32 : RDNA3Ops.v_mul_f32_e32,
+  dtypes.float64 : RDNA3Ops.v_mul_f64,      dtypes.int32 : RDNA3Ops.v_mul_i32_i24_e32,
+  dtypes.uint32 : RDNA3Ops.v_mul_u32_u24_e32,
+}
+
+
 isel_matcher = PatternMatcher([
   # function abi
   (UPat((Ops.SPECIAL, Ops.PARAM, Ops.DEFINE_VAR), name="x"), abi),
 
   # alu ops
-  ((UPat(dtype=dtypes.float32) + UPat()).named("x"), lambda x: x.ins(RDNA3Ops.v_add_f32_e32)),
-  ((UPat(dtype=dtypes.int32) + UPat().named("x")), lambda x: x.ins(RDNA3Ops.v_add_nc_i32)),
+  ((UPat() + UPat()).named("x"), lambda x: x.ins(V_ADD[x.dtype])),
+  ((UPat() * UPat()).named("x"), lambda x: x.ins(V_MUL[x.dtype])),
 
   # mem ops
   (UPat(Ops.LOAD, dt_32bit, name="x", src=(UPat(name="idx"))), lambda x,idx: x.ins(RDNA3Ops.global_load_b32, src=fold_address(idx))),
-  (UPat(Ops.LOAD, dt_64bit, name="x", src=(UPat(name="idx"))), lambda x,idx: x.ins(RDNA3Ops.global_load_b64, src=fold_address(idx))),
-  (UPat(Ops.LOAD, dt_128bit, name="x", src=(UPat(name="idx"))), lambda x,idx: x.ins(RDNA3Ops.global_load_b128, src=fold_address(idx))),
-  (UPat(Ops.STORE, dt_32bit, name="x", src=(UPat(name="idx"))), lambda x,idx: x.ins(RDNA3Ops.global_store_b32, src=fold_address(idx))),
-  (UPat(Ops.STORE, dt_64bit, name="x", src=(UPat(name="idx"))), lambda x,idx: x.ins(RDNA3Ops.global_store_b64, src=fold_address(idx))),
-  (UPat(Ops.STORE, dt_128bit, name="x", src=(UPat(name="idx"))), lambda x,idx: x.ins(RDNA3Ops.global_store_b128, src=fold_address(idx))),
+  (UPat.var("a").store(UPat.var("b", dtype=dt_32bit), name="x"), lambda a,b,x: x.ins(RDNA3Ops.global_store_b32, src=fold_address(a) + (b,))),
 
   # allocate virtual registers
   (UPat((Ops.INS, Ops.DEFINE_REG, Ops.DEFINE_LOCAL), name="x"), alloc_vregs)
 ])
 
 class RDNA3Renderer(ISARenderer):
+  device = "AMD"
+  pre_isel_matcher = PatternMatcher([])
+  isel_matcher = isel_matcher
+  post_regalloc_matcher = PatternMatcher([])
   def __init__(self, target:Target):
     super().__init__(target)
     from tinygrad.runtime.support.compiler_amd import AMDLLVMCompiler
@@ -117,7 +164,34 @@ class RDNA3Renderer(ISARenderer):
     # TODO: global load flush pass, insert s_waitcnt_vmcnt(0) before first ALU op that consumes result
     # TODO: before s_load use s_waitcnt lgkmnct(0)
     pass
-    # return assemble_linear(prg, lin, "rdna3")
+
+  def asm_str(self, uops:list[UOp], function_name:str) -> str:
+    asm = [f"{function_name}:"]
+    def _format_op(x:UOp) -> str: return str(x.arg.args[0]).split('.')[-1].lower()
+    def _format_operands(x:UOp) -> str:
+      fmap = {
+        Ops.CONST : lambda x: hex(x.arg),
+        Ops.DEFINE_REG : lambda x: x.tag[0].name
+      }
+      s = []
+      if x.tag is not None:
+        if len(x.tag) > 1:
+          i = x.tag[0].index
+          s.append(f"{x.tag[0].name[0]}[{i}:{i+len(x.tag)}]")
+        else:
+          s.append(x.tag[0].name)
+      for o in x.src:
+        print(o.op)
+        if o.op in fmap:
+          print(fmap[o.op](o))
+          s.append(fmap[o.op](o))
+      return ','.join(s)
+    for u in uops:
+      if u.op is not Ops.INS: continue
+      asm.append(f"{_format_op(u)} {_format_operands(u)}")
+    return "\n".join(asm)
 
   def render(self, uops:list[UOp]) -> str:
-    pass
+    binary = bytearray()
+    for u in uops:
+      if u.op is not Ops.INS: continue

@@ -21,7 +21,7 @@ class IselContext:
     self.func_args = sorted([u for u in self.uses if u.op in arg_order], key=lambda k: (arg_order[k.op], k.arg))
 
   def vreg(self, cons:tuple[Register, ...]|Register):
-    return Register(f"v{next(self.reg_n)}", 0, _cons=cons if isinstance(cons, tuple) else (cons,))
+    return Register(f"vr{next(self.reg_n)}", 0, _cons=cons if isinstance(cons, tuple) else (cons,))
 
 @dataclass
 class PreRegAllocContext:
