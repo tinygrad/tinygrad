@@ -266,7 +266,7 @@ runs:
     - name: Install gpuocelot
       if: inputs.ocelot == 'true'
       shell: bash
-      run: sudo curl --output-dir /usr/lib/ -fLO https://github.com/tinygrad/gpuocelot/releases/download/v0.1.0/libgpuocelot.${{ runner.os == 'Linux' && 'so' || 'dylib' }}
+      run: sudo curl --output-dir /usr/local/lib -fLO https://github.com/tinygrad/gpuocelot/releases/download/v0.1.0/libgpuocelot.${{ runner.os == 'Linux' && 'so' || 'dylib' }}
 
     # **** WebGPU ****
 
