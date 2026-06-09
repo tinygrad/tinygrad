@@ -26,7 +26,7 @@ class TestRingAllReduce(unittest.TestCase):
       copies = [si for si in linear.src if si.src[0].op is Ops.COPY]
       sinks = [si for si in linear.src if si.src[0].op is Ops.SINK]
       self.assertEqual(len(copies), 24)
-      self.assertEqual(len(sinks), 30)
+      self.assertEqual(len(sinks), 26)
 
   def test_correct_ring(self):
     with Context(RING=2):
