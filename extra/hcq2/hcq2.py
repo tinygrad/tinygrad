@@ -3,7 +3,7 @@ from typing import cast, Callable, TypeVar, Generic, Any, TYPE_CHECKING
 import struct, functools, time, collections, importlib, itertools, weakref
 from dataclasses import replace
 if TYPE_CHECKING: from tinygrad.engine.realize import ExecContext
-from tinygrad.helpers import DEV, getenv, select_first_inited, select_by_name, suppress_finalizing, mv_address, round_up, DEBUG, dedup, pluralize
+from tinygrad.helpers import DEV, getenv, select_first_inited, select_by_name, suppress_finalizing, mv_address, DEBUG, dedup, pluralize
 from tinygrad.device import Device, Buffer, BufferSpec, Compiled, LRUAllocator, MultiBuffer
 from tinygrad.uop.ops import Ops, sint, UOp, UPat, PatternMatcher, KernelInfo, graph_rewrite, track_rewrites, GroupOp
 from tinygrad.uop.symbolic import symbolic_simple, symbolic
@@ -109,7 +109,7 @@ class HCQAllocator(LRUAllocator[HCQDeviceType], Generic[HCQDeviceType]):
 
   def _unmap(self, mb):
     self.dev.synchronize()
-    self.dev.iface.dev_impl.mm.unmap_range(int(mb.va_addr), round_up(mb.size, 0x1000))
+    self.dev.iface.free(mb)
 
   def _offset(self, buf, size:int, offset:int) -> HCQ2Buffer: return buf.offset(offset=offset, size=size)
 
@@ -138,34 +138,27 @@ def unwrap_after(uop):
   while uop.op is Ops.AFTER: uop = uop.src[0]
   return uop
 
+def make_getaddr(u, dev=None):
+  if unwrap_after(u).op not in (Ops.BUFFER, Ops.SLICE, Ops.BINARY, Ops.MSTACK, Ops.MSELECT): return u
+  return UOp(Ops.GETADDR, dtypes.uint64, src=(u, UOp(Ops.DEVICE, arg=dev or to_tuple(u.device)[0])))
+
+def make_ins(op, *srcs):
+  return UOp(Ops.INS, dtypes.void, tuple(UOp.const(dtypes.uint32, s) if isinstance(s, int) else s.cast(dtypes.uint32) for s in srcs), op)
+
+def make_cmdbuf(lin, devs, tag):
+  blob, patches = b'', []
+  for s in (s for ins in lin.src for s in ins.src):
+    if s.op is not Ops.CONST: patches.append((len(blob), s))
+    blob += struct.pack(f'<{s.dtype.fmt}', s.arg if s.op is Ops.CONST else 0x0)
+  buf = UOp.new_buffer(devs if len(devs) > 1 else devs[0], len(blob), dtypes.uint8).rtag(tag)
+  stores = [buf.index(UOp.const(dtypes.int, off), dtype=buf.dtype.ptr()).cast(s.dtype.ptr()).store(s) for off, s in patches]
+  return buf.after(buf.store(UOp(Ops.BINARY, dtypes.void, src=(), arg=blob)), *stores)
+
 def make_mstack(uops): return uops[0] if len(uops) == 1 else UOp(Ops.MSTACK, uops[0].dtype, tuple(uops))
 
 def make_signal(devs, queue=None, sentinel=False):
   return UOp.new_buffer(devs, 1, dtypes.uint64).rtag("sentinel_signal" if sentinel else (queue, "timeline_signal") if queue else "timeline_signal")
 def make_signal_value(devs, queue=None): return UOp.new_buffer(devs, 1, dtypes.uint64).rtag((queue, "timeline_value") if queue else "timeline_value")
-
-class HCQEncoder:
-  def __init__(self): self.blob, self.patches = b'', []
-
-  def get_dev_addr(self, uop:UOp) -> UOp:
-    if unwrap_after(uop).op not in (Ops.BUFFER, Ops.SLICE, Ops.BINARY, Ops.MSTACK, Ops.MSELECT): return uop
-    return UOp(Ops.GETADDR, dtypes.uint64, src=(uop, UOp(Ops.DEVICE, arg=self.dev.device)))
-
-  def append(self, *data, dtype=dtypes.uint32):
-    for d in data:
-      if isinstance(d, int): self.blob += struct.pack(f'<{dtype.fmt}', d)
-      else:
-        self.patches.append((len(self.blob), self.get_dev_addr(d), dtype))
-        self.blob += struct.pack(f'<{dtype.fmt}', 0)
-
-  def q(self, *values): self.append(*values)
-
-  def uop(self, dev:str|tuple[str, ...], tag:str|None=None) -> UOp:
-    buf = UOp.new_buffer(dev, len(self.blob), dtypes.uint8)
-    if tag: buf = buf.rtag(tag)
-    blob_uop = UOp(Ops.BINARY, dtypes.void, src=(), arg=self.blob)
-    stores = [buf.index(UOp.const(dtypes.int, off), dtype=buf.dtype.ptr()).cast(dt.ptr()).store(val.cast(dt)) for off, val, dt in self.patches]
-    return buf.after(buf.store(blob_uop), *stores)
 
 # *****************
 # 0. helpers
@@ -393,7 +386,7 @@ def encode_cmdbuf(submit:UOp, lin:UOp) -> UOp|None:
 pm_encode_cmdbufs = PatternMatcher([(UPat(Ops.CUSTOM_FUNCTION, arg="submit", src=(UPat(Ops.LINEAR, name="lin"),), name="submit"), encode_cmdbuf)])
 
 # *****************
-# 4.2. lift patches to the command buffer (root)
+# 5.2. lift patches to the command buffer (root)
 
 def lift_patches_to_cmdbuf(cmdbuf:UOp) -> UOp|None:
   if not (patches:=dedup(u for store in cmdbuf.src[1:] for u in store.toposort() if u.op is Ops.AFTER)): return None
@@ -404,7 +397,7 @@ pm_lift_patches_to_cmdbuf = PatternMatcher([
 ])
 
 # *****************
-# 5. bufferize placeholders: replace placeholders with real buffers.
+# 6. bufferize placeholders: replace placeholders with real buffers.
 
 def bufferize_buf(buf:UOp) -> UOp|None:
   if buf.tag is None: return None
@@ -413,7 +406,7 @@ def bufferize_buf(buf:UOp) -> UOp|None:
 pm_bufferize = PatternMatcher([(UPat(Ops.BUFFER, name="buf"), bufferize_buf)])
 
 # *****************
-# 6.1. capture buffers reachable from each hcq call as BIND, so we don't drop their refs
+# 7.1. capture buffers reachable from each hcq call as BIND, so we don't drop their refs
 
 def hold_call_buffers(call:UOp) -> UOp|None:
   if not (bufs:=tuple(dedup(u for u in call.src[0].toposort() if u.op is Ops.BUFFER and u not in call.src))): return None
@@ -421,7 +414,7 @@ def hold_call_buffers(call:UOp) -> UOp|None:
 pm_hold_call_buffers = PatternMatcher([(UPat(Ops.CALL, tag="hcq", name="call"), hold_call_buffers)])
 
 # *****************
-# 6.2. resolve patches
+# 7.2. resolve patches
 
 def push_stack(op, s): return UOp(Ops.STACK, op.dtype.scalar().vec(len(s.src)),
   tuple(op.replace(dtype=op.dtype.scalar(), src=tuple(x if y is s else y for y in op.src)) for x in s.src))
@@ -456,7 +449,7 @@ pm_resolve_patches = PatternMatcher([
 ]) + symbolic_simple
 
 # *****************
-# 7. callify hcq programs
+# 8. callify hcq programs
 
 def to_param(bufs:list[UOp], ref:UOp) -> UOp:
   bufs.append(ref)
