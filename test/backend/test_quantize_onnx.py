@@ -1,6 +1,6 @@
 # ruff: noqa: E501
 import numpy as np
-import unittest
+import tempfile, unittest
 from tinygrad import Tensor, Context, Device, dtypes, UOp
 from tinygrad.uop.ops import Ops
 from tinygrad.codegen.opt import Opt, OptOps
@@ -57,8 +57,9 @@ def get_quantized_model(sz):
       self.cnt += 1
       if self.cnt == 100: return None
       return {"input": np.random.uniform(size=(sz, sz)).astype(np.float32)}
-  out_file = "/tmp/test_out.onnx"
-  quantize_static(create_gemm_model("/tmp/test_in.onnx", sz, sz, sz), out_file,
+  tmpdir = tempfile.mkdtemp()
+  out_file = f"{tmpdir}/test_out.onnx"
+  quantize_static(create_gemm_model(f"{tmpdir}/test_in.onnx", sz, sz, sz), out_file,
                   FakeDataReader(), quant_format=QuantFormat.QDQ, per_channel=False, reduce_range=False,
                   activation_type=QuantType.QUInt8, weight_type=QuantType.QInt8,
                   extra_options={"ActivationSymmetric": False})
