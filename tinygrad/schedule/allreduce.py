@@ -44,7 +44,7 @@ def handle_allreduce(buf:UOp, red:UOp) -> UOp|None:
   copied_chunks:list[UOp] = []
   for i,rc in enumerate(reduced_chunks):
     if isinstance(red.src[1].arg, str): copied_chunks.append(rc.copy_to_device(red.src[1].arg))
-    elif use_all2all: copied_chunks.append(UOp.mstack(*(rc if j == i else rc.copy_to_device(buf.device[j]) for j in range(ndev))))
+    elif use_all2all: copied_chunks.append(UOp.mstack(*(rc.copy_to_device(buf.device[j]) for j in range(ndev))))
     else:
       chain:list[UOp] = [rc]
       for step in range(ndev-1):
