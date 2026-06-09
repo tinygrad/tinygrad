@@ -3,7 +3,7 @@ from typing import cast, Callable, TypeVar, Generic, Any, TYPE_CHECKING
 import struct, functools, time, collections, importlib, itertools, weakref
 from dataclasses import replace
 if TYPE_CHECKING: from tinygrad.engine.realize import ExecContext
-from tinygrad.helpers import DEV, getenv, select_first_inited, select_by_name, suppress_finalizing, mv_address, round_up, DEBUG, dedup, pluralize
+from tinygrad.helpers import DEV, getenv, select_first_inited, select_by_name, suppress_finalizing, mv_address, DEBUG, dedup, pluralize
 from tinygrad.device import Device, Buffer, BufferSpec, Compiled, LRUAllocator, MultiBuffer
 from tinygrad.uop.ops import Ops, sint, UOp, UPat, PatternMatcher, KernelInfo, graph_rewrite, track_rewrites, GroupOp
 from tinygrad.uop.symbolic import symbolic_simple, symbolic
@@ -109,7 +109,7 @@ class HCQAllocator(LRUAllocator[HCQDeviceType], Generic[HCQDeviceType]):
 
   def _unmap(self, mb):
     self.dev.synchronize()
-    self.dev.iface.dev_impl.mm.unmap_range(int(mb.va_addr), round_up(mb.size, 0x1000))
+    self.dev.iface.free(mb)
 
   def _offset(self, buf, size:int, offset:int) -> HCQ2Buffer: return buf.offset(offset=offset, size=size)
 
@@ -138,34 +138,27 @@ def unwrap_after(uop):
   while uop.op is Ops.AFTER: uop = uop.src[0]
   return uop
 
+def make_getaddr(u, dev=None):
+  if unwrap_after(u).op not in (Ops.BUFFER, Ops.SLICE, Ops.BINARY, Ops.MSTACK, Ops.MSELECT): return u
+  return UOp(Ops.GETADDR, dtypes.uint64, src=(u, UOp(Ops.DEVICE, arg=dev or to_tuple(u.device)[0])))
+
+def make_ins(op, *srcs):
+  return UOp(Ops.INS, dtypes.void, tuple(UOp.const(dtypes.uint32, s) if isinstance(s, int) else s.cast(dtypes.uint32) for s in srcs), op)
+
+def make_cmdbuf(lin, devs, tag):
+  blob, patches = b'', []
+  for s in (s for ins in lin.src for s in ins.src):
+    if s.op is not Ops.CONST: patches.append((len(blob), s))
+    blob += struct.pack(f'<{s.dtype.fmt}', s.arg if s.op is Ops.CONST else 0x0)
+  buf = UOp.new_buffer(devs if len(devs) > 1 else devs[0], len(blob), dtypes.uint8).rtag(tag)
+  stores = [buf.index(UOp.const(dtypes.int, off), dtype=buf.dtype.ptr()).cast(s.dtype.ptr()).store(s) for off, s in patches]
+  return buf.after(buf.store(UOp(Ops.BINARY, dtypes.void, src=(), arg=blob)), *stores)
+
 def make_mstack(uops): return uops[0] if len(uops) == 1 else UOp(Ops.MSTACK, uops[0].dtype, tuple(uops))
 
 def make_signal(devs, queue=None, sentinel=False):
   return UOp.new_buffer(devs, 1, dtypes.uint64).rtag("sentinel_signal" if sentinel else (queue, "timeline_signal") if queue else "timeline_signal")
 def make_signal_value(devs, queue=None): return UOp.new_buffer(devs, 1, dtypes.uint64).rtag((queue, "timeline_value") if queue else "timeline_value")
-
-class HCQEncoder:
-  def __init__(self): self.blob, self.patches = b'', []
-
-  def get_dev_addr(self, uop:UOp) -> UOp:
-    if unwrap_after(uop).op not in (Ops.BUFFER, Ops.SLICE, Ops.BINARY, Ops.MSTACK, Ops.MSELECT): return uop
-    return UOp(Ops.GETADDR, dtypes.uint64, src=(uop, UOp(Ops.DEVICE, arg=self.dev.device)))
-
-  def append(self, *data, dtype=dtypes.uint32):
-    for d in data:
-      if isinstance(d, int): self.blob += struct.pack(f'<{dtype.fmt}', d)
-      else:
-        self.patches.append((len(self.blob), self.get_dev_addr(d), dtype))
-        self.blob += struct.pack(f'<{dtype.fmt}', 0)
-
-  def q(self, *values): self.append(*values)
-
-  def uop(self, dev:str|tuple[str, ...], tag:str|None=None) -> UOp:
-    buf = UOp.new_buffer(dev, len(self.blob), dtypes.uint8)
-    if tag: buf = buf.rtag(tag)
-    blob_uop = UOp(Ops.BINARY, dtypes.void, src=(), arg=self.blob)
-    stores = [buf.index(UOp.const(dtypes.int, off), dtype=buf.dtype.ptr()).cast(dt.ptr()).store(val.cast(dt)) for off, val, dt in self.patches]
-    return buf.after(buf.store(blob_uop), *stores)
 
 # *****************
 # 0. helpers
@@ -225,7 +218,7 @@ pm_prep_runtime = PatternMatcher([
     name="call", allow_any_len=True), prep_program),
 
   # lower kernargs (PROGRAM.src[0] is now AFTER(BUFFER, COPY) — the lowered program image)
-  (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, src=(UPat(Ops.AFTER),), name="prg"),), name="call", allow_any_len=True), prep_kernargs),
+  (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, src=(UPat(Ops.BUFFER).or_after(),), name="prg"),), name="call", allow_any_len=True), prep_kernargs),
 ])
 
 # *****************
@@ -233,22 +226,21 @@ pm_prep_runtime = PatternMatcher([
 
 def make_submit(*cmds, devs:str|tuple[str, ...], queue:str) -> UOp:
   devs:tuple[str, ...] = to_tuple(devs)
-  cmds = tuple([cmd.replace(arg=(devs, queue)).rtag("hcq_cmd") if cmd.op is Ops.CALL else cmd for cmd in cmds])
-  queue = UOp(Ops.LINEAR, dtypes.void, src=cmds, arg=(devs, queue))
-  return UOp(Ops.CUSTOM_FUNCTION, dtypes.void, src=(queue,), arg="submit")
+  return UOp(Ops.CUSTOM_FUNCTION, dtypes.void, src=(UOp(Ops.LINEAR, dtypes.void, src=tuple(cmds), arg=(devs, queue)),), arg="submit")
 
 def lower_program(call:UOp, prg:UOp) -> UOp:
-  return make_submit(prg.call(*call.src[1:]), devs=call.src[1].device, queue="COMPUTE:0").sink().call().rtag("hcq")
+  return make_submit(prg, devs=call.src[1].device, queue="COMPUTE:0").sink().call(*call.src[1:]).rtag(("hcq", tuple(prg.arg[1].outs)))
 
 def lower_copy(call:UOp, copy:UOp) -> UOp|None:
   dst, src = call.src[1], call.src[2]
   if (hcq_dev:=next((b.device for b in (dst, src) if b.device.split(":")[0] in HCQ_DEVS), None)) is None: return None
 
   cp_op = UOp(Ops.COPY, dtypes.void, src=(dst, src), arg=src.buffer.nbytes)
-  return make_submit(cp_op.call(*call.src[1:]), devs=hcq_dev, queue="COPY:0").sink().call().rtag("hcq")
+  return make_submit(cp_op, devs=hcq_dev, queue="COPY:0").sink().call(*call.src[1:]).rtag(("hcq", (0,)))
 
 pm_lower_ops = PatternMatcher([
-  (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, src=(UPat(Ops.AFTER), UPat(Ops.AFTER)), name="prg"),), name="call", allow_any_len=True), lower_program),
+  (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, src=(UPat(Ops.BUFFER).or_after(), UPat(Ops.BUFFER).or_after()), name="prg"),),
+    name="call", allow_any_len=True), lower_program),
   (UPat(Ops.CALL, src=(UPat(Ops.COPY, name="copy"),), name="call", allow_any_len=True), lower_copy),
 ])
 
@@ -272,35 +264,42 @@ class DepsCtx:
   opid:itertools.count = field(default_factory=lambda: itertools.count(0))
   last_per_queue:weakref.WeakValueDictionary[tuple[Any, str], UOp] = field(default_factory=weakref.WeakValueDictionary)
 
-def schedule_inner_sync(ctx:DepsCtx, call:UOp) -> UOp:
-  refs = [b.buffer for b in get_call_arg_uops(call)]
-  write_bufs = ast.arg[1].outs if (ast:=call.src[0]).op is Ops.PROGRAM else (0,)
+def schedule_inner_sync(ctx:DepsCtx, linear:UOp) -> UOp:
+  new_src = []
+  for call in linear.src:
+    if not isinstance(call.tag, tuple) or not call.tag[0] == "hcq":
+      new_src.append(call)
+      continue
 
-  # tag carries (queue arg, opid)
-  ctx.last_per_queue[call.arg[0]] = (op:=call.src[0].rtag((call.arg, next(ctx.opid))))
+    q = get_submit(call.src[0]).src[0]
+    new_q = ctx.last_per_queue[q.arg] = q.rtag(next(ctx.opid))
 
-  deps = []
-  for lane in range(len(refs[0].bufs) if isinstance(refs[0], MultiBuffer) else 1):
-    deps += ctx.deps.access_resources([b.bufs[lane] if isinstance(b, MultiBuffer) else b for b in refs], write_bufs, op)
-  return op.after(*dps).rtag("deps") if (dps:=dedup(deps)) else op
-pm_schedule_inner_sync = PatternMatcher([(UPat(Ops.CALL, tag="hcq_cmd", name="call", allow_any_len=True), schedule_inner_sync)])
+    deps = []
+    refs = [b.buffer for b in get_call_arg_uops(call)]
+    for lane in range(len(refs[0].bufs) if isinstance(refs[0], MultiBuffer) else 1):
+      deps += ctx.deps.access_resources([b.bufs[lane] if isinstance(b, MultiBuffer) else b for b in refs], call.tag[1], new_q)
+
+    new_q = new_q.after(*dps).rtag("deps") if (dps:=dedup(deps)) else new_q
+    new_src.append(call.replace(src=(call.src[0].substitute({q:new_q}), *call.src[1:]), tag="hcq"))
+  return linear.replace(src=tuple(new_src))
+pm_schedule_inner_sync = PatternMatcher([(UPat(Ops.LINEAR, name="linear"), schedule_inner_sync)])
 
 # *****************
 # 3.2. finalizer
 
 def make_finalizer(queues:list[UOp], nbump:int) -> UOp:
-  devs = tuple(dedup([d for q in queues for d in to_tuple(q.tag[0][0])]))
+  devs = tuple(dedup([d for q in queues for d in to_tuple(q.arg[0])]))
   zero = UOp.const(dtypes.int, 0)
   tl = make_signal_value(devs)
 
   submit = make_submit(make_signal(devs).store(tl.index(zero) + 1), devs=devs, queue="COMPUTE:0")
 
-  upd = [(tl, 1)] + [(make_signal_value(devs, queue=qn), nbump) for qn in dedup([q.tag[0][1] for q in queues])]
+  upd = [(tl, 1)] + [(make_signal_value(devs, queue=qn), nbump) for qn in dedup([q.arg[1] for q in queues])]
   return UOp.barrier(*[s.after(submit).index(zero, dtype=s.dtype.ptr()).store(s.index(zero) + inc) for s, inc in upd]).sink().call().rtag("hcq")
 
 def add_finalizer(ctx:DepsCtx, linear:UOp) -> UOp:
   parts:dict[str, list[UOp]] = collections.defaultdict(list)
-  for d, q in ctx.last_per_queue.items(): parts[d[0].split(':')[0]].append(q)
+  for d, q in ctx.last_per_queue.items(): parts[to_tuple(d[0])[0].split(':')[0]].append(q)
 
   nbump = next(ctx.opid)
   return linear.replace(src=linear.src + tuple([make_finalizer(queues, nbump) for queues in parts.values()]))
@@ -310,26 +309,25 @@ pm_add_finalizer = PatternMatcher([(UPat(Ops.LINEAR, name="linear"), add_finaliz
 # 3.3. lower loads/stores
 
 def add_loads(ctx:set[int], deps:UOp) -> UOp:
-  cur_devs = to_tuple((cur:=deps.src[0]).tag[0][0])
+  cur_devs = to_tuple((cur:=deps.src[0]).arg[0])
 
   waits = []
-  for (devs, queue), opid in [dq.tag for dq in deps.src[1:]]:
-    ctx.add(opid) # mark op to update signal.
+  for dep in deps.src[1:]:
+    devs, queue = dep.arg
+    ctx.add(dep.tag) # mark op to update signal.
 
     sig = make_mstack([make_signal(d, queue=queue, sentinel=d not in devs) for d in cur_devs])
     val = make_signal_value(cur_devs, queue=queue).index(UOp.const(dtypes.int, 0))
-    waits.append(sig.wait(val + opid))
-  return UOp(Ops.LINEAR, dtypes.void, (*waits, cur), arg=cur.tag[0])
+    waits.append(sig.wait(val + dep.tag))
+  return cur.replace(src=tuple(waits) + cur.src)
 pm_add_inner_loads = PatternMatcher([(UPat(Ops.AFTER, tag="deps", name="deps"), add_loads)])
 
 def add_stores(ctx:set[int], submit:UOp, q:UOp) -> UOp:
-  new_src = []
-  for op in q.src:
-    new_src.append(op.rtag(None) if op.tag else op)
-    if op.tag and op.tag[1] in ctx:
-      (devs, queue), opid = op.tag
-      new_src.append(make_signal(devs, queue=queue).store(make_signal_value(devs, queue=queue).index(UOp.const(dtypes.int, 0)) + opid))
-  return submit.replace(src=(q.replace(src=tuple(new_src)),))
+  src = q.src
+  if q.tag in ctx:
+    devs, queue = q.arg
+    src += (make_signal(devs, queue=queue).store(make_signal_value(devs, queue=queue).index(UOp.const(dtypes.int, 0)) + q.tag),)
+  return submit.replace(src=(q.replace(src=src, tag=None),))
 pm_add_inner_stores = PatternMatcher([(UPat(Ops.CUSTOM_FUNCTION, arg="submit", src=(UPat(Ops.LINEAR, name="q"),), name="submit"), add_stores)])
 
 # *****************
@@ -393,7 +391,7 @@ def encode_cmdbuf(submit:UOp, lin:UOp) -> UOp|None:
 pm_encode_cmdbufs = PatternMatcher([(UPat(Ops.CUSTOM_FUNCTION, arg="submit", src=(UPat(Ops.LINEAR, name="lin"),), name="submit"), encode_cmdbuf)])
 
 # *****************
-# 4.2. lift patches to the command buffer (root)
+# 5.2. lift patches to the command buffer (root)
 
 def lift_patches_to_cmdbuf(cmdbuf:UOp) -> UOp|None:
   if not (patches:=dedup(u for store in cmdbuf.src[1:] for u in store.toposort() if u.op is Ops.AFTER)): return None
@@ -404,7 +402,7 @@ pm_lift_patches_to_cmdbuf = PatternMatcher([
 ])
 
 # *****************
-# 5. bufferize placeholders: replace placeholders with real buffers.
+# 6. bufferize placeholders: replace placeholders with real buffers.
 
 def bufferize_buf(buf:UOp) -> UOp|None:
   if buf.tag is None: return None
@@ -413,7 +411,7 @@ def bufferize_buf(buf:UOp) -> UOp|None:
 pm_bufferize = PatternMatcher([(UPat(Ops.BUFFER, name="buf"), bufferize_buf)])
 
 # *****************
-# 6.1. capture buffers reachable from each hcq call as BIND, so we don't drop their refs
+# 7.1. capture buffers reachable from each hcq call as BIND, so we don't drop their refs
 
 def hold_call_buffers(call:UOp) -> UOp|None:
   if not (bufs:=tuple(dedup(u for u in call.src[0].toposort() if u.op is Ops.BUFFER and u not in call.src))): return None
@@ -421,7 +419,7 @@ def hold_call_buffers(call:UOp) -> UOp|None:
 pm_hold_call_buffers = PatternMatcher([(UPat(Ops.CALL, tag="hcq", name="call"), hold_call_buffers)])
 
 # *****************
-# 6.2. resolve patches
+# 7.2. resolve patches
 
 def push_stack(op, s): return UOp(Ops.STACK, op.dtype.scalar().vec(len(s.src)),
   tuple(op.replace(dtype=op.dtype.scalar(), src=tuple(x if y is s else y for y in op.src)) for x in s.src))
@@ -456,7 +454,7 @@ pm_resolve_patches = PatternMatcher([
 ]) + symbolic_simple
 
 # *****************
-# 7. callify hcq programs
+# 8. callify hcq programs
 
 def to_param(bufs:list[UOp], ref:UOp) -> UOp:
   bufs.append(ref)
@@ -479,9 +477,9 @@ def hcq_schedule(linear:UOp) -> UOp:
   linear = graph_rewrite(linear, pm_prep_runtime, name="prepare runtime")
 
   linear = graph_rewrite(linear, pm_lower_ops, name="lower ops into hcq ir")
-  linear = graph_rewrite(linear, pm_schedule_inner_sync, ctx=(deps_ctx:=DepsCtx()), walk=True, name="schedule inner sync", enter_calls=True)
+  linear = graph_rewrite(linear, pm_schedule_inner_sync, ctx=(deps_ctx:=DepsCtx()), name="schedule inner sync")
   linear = graph_rewrite(linear, pm_add_finalizer, ctx=deps_ctx, walk=True, name="add finalizer")
-  linear = graph_rewrite(linear, pm_add_inner_loads + pm_flatten_linear, ctx=(waited:=set()), walk=True, name="add loads", enter_calls=True)
+  linear = graph_rewrite(linear, pm_add_inner_loads, ctx=(waited:=set()), walk=True, name="add loads", enter_calls=True)
   linear = graph_rewrite(linear, pm_add_inner_stores, ctx=waited, walk=True, name="add stores", enter_calls=True)
   linear = graph_rewrite(linear, pm_merge_queues, name="merge queues")
   linear = graph_rewrite(linear, pm_add_global_sync, ctx=set(), walk=True, name="add global sync", enter_calls=True)
