@@ -404,10 +404,6 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     if x.dtype == y.dtype or any(isinstance(d, PtrDType) for d in (x.dtype, y.dtype)): return x, y
     return x.cast(out_dtype := least_upper_dtype(x.dtype, y.dtype)), y.cast(out_dtype)
 
-  def _binop(self, op:Ops, x, reverse:bool) -> Self:
-    lhs, rhs = self._broadcasted(x, reverse)
-    return lhs.alu(op, rhs)
-
   def dot(self, w:Self, dtype:DTypeLike|None=None) -> Self:
     """
     Performs dot product between two tensors.
@@ -1304,9 +1300,9 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     ```
     """
     axis = tuple(range(-len(k_ := make_tuple(kernel_size, 2)), 0))
-    pads = resolve_pool_pads(padding, len(k_))
-    if ceil_mode: pads = self._apply_ceil_mode(pads, k_, stride if stride is not None else k_, dilation)
     s_ = stride if stride is not None else k_
+    pads = resolve_pool_pads(padding, len(k_))
+    if ceil_mode: pads = self._apply_ceil_mode(pads, k_, s_, dilation)
     pooled = self._pad_constant(((0,0),)*(self.ndim-len(k_)) + flat_to_grouped(pads), self.dtype.min)._pool(k_, s_, dilation)
     if not return_indices: return pooled.max(axis)
     spatial_sz = int(prod(spatial_shape := self.shape[-len(k_):]))

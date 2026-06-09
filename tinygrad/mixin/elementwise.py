@@ -20,7 +20,8 @@ class ElementwiseMixin(DTypeMixin, CreationMixin):
     return self.const_like(x) if not isinstance(x, ElementwiseMixin) else x
 
   def _binop(self, op: Ops, x: Self | ConstType, reverse: bool) -> Self:
-    return self.ufix(x).alu(op, self) if reverse else self.alu(op, self.ufix(x))
+    lhs, rhs = self._broadcasted(x, reverse)
+    return lhs.alu(op, rhs)
 
   def usum(self, *uops) -> Self: return functools.reduce(operator.or_ if self.dtype is dtypes.bool else operator.add, argfix(*uops), self)
   def uprod(self, *uops) -> Self: return functools.reduce(operator.and_ if self.dtype is dtypes.bool else operator.mul, argfix(*uops), self)
