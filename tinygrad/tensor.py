@@ -551,14 +551,8 @@ class Tensor(RandMixin):
     if not all_int(shape:=argfix(*shape)) or not all(s >= 0 for s in shape): raise ValueError(f"invalid input {shape=}")
     if device is not None and not isinstance(device, str): raise ValueError(f"rand only supports single device, got {device=}")
     device = cast(str, canonicalize_device(device))
-
-    # if shape has 0, return zero tensor
-    if (numel := prod(shape)) == 0: return Tensor.zeros(shape, device=device, dtype=dt)
-    num = ceildiv(numel * dt.itemsize, 4)
-    key, counter = Tensor._next_counter(device, num)
-    bits = Tensor.random_bits(key, counter, num)
-    out = Tensor._bits_to_rand(bits, shape, dt)
-    return out.contiguous() if contiguous else out
+    key, counter = Tensor._next_counter(device, ceildiv(prod(shape) * dt.itemsize, 4))
+    return Tensor._rand(key, counter, shape, dt, contiguous=contiguous)
 
   # ***** creation helper functions *****
 
