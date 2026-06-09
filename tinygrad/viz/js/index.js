@@ -281,7 +281,12 @@ function selectShape(key) {
 // scaling function for time to pixels
 const timelineScale = () => d3.scaleLinear().domain([data.first, data.dur]).range([0, canvasDims()[0]]);
 
-function timeAtCycle(clk) {
+function formatNanoseconds(ns) {
+  const remNs = Math.round(ns % 1000);
+  return ns/1000>1 ? formatMicroseconds(ns / 1000, true) + (remNs ? ` ${remNs}ns` : "") : Math.round(ns)+"ns";
+}
+
+function nsAtCycle(clk) {
   if (clk < data.instSt || clk > data.instEt || data.tracks.get("Shader Clock") == null) return "-";
   let cur = data.instSt, ns = 0, freq = null;
   // walk through all frequency changes and accumulate time in nanoseconds
@@ -296,8 +301,12 @@ function timeAtCycle(clk) {
   }
   // ending cycles use the last known frequency
   if (cur < clk) ns += (clk - cur) * 1e9 / freq;
-  const remNs = Math.round(ns % 1000);
-  return ns/1000>1 ? formatMicroseconds(ns / 1000, true) + (remNs ? ` ${remNs}ns` : "") : Math.round(ns)+"ns";
+  return ns;
+}
+
+function timeAtCycle(clk) {
+  const ns = nsAtCycle(clk);
+  return ns === "-" ? ns : formatNanoseconds(ns);
 }
 
 function getZoomIdentity() {
@@ -418,10 +427,24 @@ async function renderProfiler(path, opts) {
   const dur = u32(), tracePeak = u64(), indexLen = u32(), layoutsLen = u32(); data.dur = dur;
   const textDecoder = new TextDecoder("utf-8");
   const { strings, dtypeSize, markers, ...extData } = JSON.parse(textDecoder.decode(new Uint8Array(buf, offset, indexLen))); offset += indexLen;
+  markers.sort((a, b) => a.ts - b.ts);
   for (const [k,v] of Object.entries(extData)) data[k] = v;
   // place devices on the y axis and set vertical positions
   const [tickSize, padding, baseOffset] = [5, 8, markers.length ? 14 : 0];
-  const secondaryTick = opts.unit == "clk" ? timeAtCycle : null;
+  const markerRelativeTime = (tick, st, et) => {
+    let marker = null;
+    for (const m of markers) {
+      if (m.ts > tick) break;
+      marker = m;
+    }
+    if (marker == null) return "-";
+    if (opts.unit == "clk") {
+      const ns = nsAtCycle(tick), markerNs = nsAtCycle(marker.ts);
+      if (ns !== "-" && markerNs !== "-") return formatNanoseconds(ns-markerNs);
+    }
+    return formatTime(tick-marker.ts, et-st <= 1e3);
+  };
+  const secondaryTick = markers.length ? markerRelativeTime : opts.unit == "clk" ? timeAtCycle : null;
   const axisHeight = secondaryTick != null ? tickSize*2+(padding*2) : tickSize;
   const deviceList = profiler.append("div").attr("id", "device-list").style("padding-top", axisHeight+padding+baseOffset+"px");
   const canvas = profiler.append("canvas").attr("id", "timeline").node();
@@ -699,10 +722,19 @@ async function renderProfiler(path, opts) {
       ctx.textBaseline = "top";
       ctx.fillText(label, labelX, y+tickSize);
       lastLabelEnd = labelX + ctx.measureText(label).width + 4;
-      if (secondaryTick != null) {
+    }
+    if (secondaryTick != null) {
+      lastLabelEnd = -Infinity;
+      const secondaryTicks = markers.length ? Array.from(new Set([...xscale.ticks().filter(Number.isInteger), ...markers.map(m => m.ts).filter(ts => ts >= st && ts <= et)])).sort((a, b) => a-b)
+                                          : xscale.ticks().filter(Number.isInteger);
+      for (const tick of secondaryTicks) {
+        const x = xscale(tick);
         drawLine(ctx, [x, x], [y, y-tickSize]);
-        const label = secondaryTick(tick, st, et); ctx.fillText(label, labelX, 0);
-        lastLabelEnd = Math.max(lastLabelEnd, labelX + ctx.measureText(label).width + 4);
+        const labelX = x+ctx.lineWidth+2;
+        if (labelX <= lastLabelEnd) continue;
+        const label = secondaryTick(tick, st, et);
+        ctx.fillText(label, labelX, 0);
+        lastLabelEnd = labelX + ctx.measureText(label).width + 4;
       }
     }
     if (data.axes.y != null) {
