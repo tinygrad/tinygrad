@@ -17,6 +17,17 @@ class TestRingAllReduce(unittest.TestCase):
       # copy topology forms a ring
       self.assertEqual(len(set(pairs)), N)
 
+  def test_schedule_all2all(self):
+    with Context(ALL2ALL=2):
+      N = 4
+      ds = tuple(f"CPU:{i}" for i in range(N))
+      t = Tensor.empty(N, N*100).shard(ds, axis=0).realize()
+      linear = t.sum(0).mul(2.0).contiguous().linear_with_vars()[0]
+      copies = [si for si in linear.src if si.src[0].op is Ops.COPY]
+      sinks = [si for si in linear.src if si.src[0].op is Ops.SINK]
+      self.assertEqual(len(copies), 24)
+      self.assertEqual(len(sinks), 30)
+
   def test_correct_ring(self):
     with Context(RING=2):
       N = 4
