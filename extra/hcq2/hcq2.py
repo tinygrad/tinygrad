@@ -218,7 +218,7 @@ pm_prep_runtime = PatternMatcher([
     name="call", allow_any_len=True), prep_program),
 
   # lower kernargs (PROGRAM.src[0] is now AFTER(BUFFER, COPY) — the lowered program image)
-  (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, src=(UPat(Ops.AFTER),), name="prg"),), name="call", allow_any_len=True), prep_kernargs),
+  (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, src=(UPat(Ops.BUFFER).or_after(),), name="prg"),), name="call", allow_any_len=True), prep_kernargs),
 ])
 
 # *****************
@@ -241,7 +241,8 @@ def lower_copy(call:UOp, copy:UOp) -> UOp|None:
   return make_submit(cp_op.call(*call.src[1:]), devs=hcq_dev, queue="COPY:0").sink().call().rtag("hcq")
 
 pm_lower_ops = PatternMatcher([
-  (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, src=(UPat(Ops.AFTER), UPat(Ops.AFTER)), name="prg"),), name="call", allow_any_len=True), lower_program),
+  (UPat(Ops.CALL, src=(UPat(Ops.PROGRAM, src=(UPat(Ops.BUFFER).or_after(), UPat(Ops.BUFFER).or_after()), name="prg"),),
+    name="call", allow_any_len=True), lower_program),
   (UPat(Ops.CALL, src=(UPat(Ops.COPY, name="copy"),), name="call", allow_any_len=True), lower_copy),
 ])
 
