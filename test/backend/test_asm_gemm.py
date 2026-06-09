@@ -230,6 +230,54 @@ def has_hipcc():
 @unittest.skipUnless(has_hipcc(), "FP8 gemm requires hipcc to compile")
 class TestGemmLlamaFP8(TestGemmLlama): dtype = FP8_DTYPE
 
+# mxfp8: 1x32 block scaling along K, e8m0 scales packed iteration-major (K/128, dim) uint32
+def quantize_mxfp8(x:Tensor) -> tuple[Tensor, Tensor, Tensor]:
+  rows, K = x.shape
+  scale_K, k_iters = K // 32, K // 128
+  xb = x.reshape(rows, scale_K, 32).float()
+  amax = xb.abs().max(axis=-1)
+  e8 = (amax.log2().floor() + 127).clamp(0, 254)
+  e8 = (amax == 0).where(Tensor.zeros_like(e8), e8).cast(dtypes.uint8)
+  xq = (xb * (127.0 - e8.cast(dtypes.float32)).exp2().reshape(rows, scale_K, 1)).cast(FP8_DTYPE).reshape(rows, K)
+  packed = e8.reshape(rows, k_iters, 4).bitcast(dtypes.uint32).reshape(rows, k_iters).permute(1, 0)
+  return xq.contiguous(), e8, packed.contiguous()
+
+def dequant_mxfp8(xq:Tensor, e8:Tensor) -> Tensor:
+  rows, K = xq.shape
+  scale = (e8.cast(dtypes.float32) - 127.0).exp2()
+  return (xq.float().reshape(rows, K // 32, 32) * scale.reshape(rows, K // 32, 1)).reshape(rows, K)
+
+def run_mxfp8_gemm(M:int, N:int, K:int) -> None:
+  import functools
+  from extra.gemm.cdna_asm_gemm import custom_hk_mxfp8_gemm
+  Tensor.manual_seed(0)
+  a = (Tensor.randn(M, K, dtype=dtypes.float) * 0.5).realize()
+  b = (Tensor.randn(N, K, dtype=dtypes.float) * 0.5).realize()
+  a_q, a_e8, a_si = quantize_mxfp8(a)
+  b_q, b_e8, b_si = quantize_mxfp8(b)
+  Tensor.realize(a_q, a_e8, a_si, b_q, b_e8, b_si)
+
+  out = Tensor.invalids(1, M, N, dtype=dtypes.bfloat16, device=a.device)
+  tst = out.custom_kernel(a_q.unsqueeze(0), b_q, a_si, b_si, fxn=functools.partial(custom_hk_mxfp8_gemm, dname=a.device))[0].squeeze(0)
+  ref_mx = dequant_mxfp8(a_q, a_e8) @ dequant_mxfp8(b_q, b_e8).T
+  ref = a @ b.T
+  Tensor.realize(tst, ref_mx, ref)
+  if a.device.startswith("NULL"): return
+  err_mx = ((tst.float() - ref_mx).abs().mean() / ref_mx.abs().mean()).item()
+  err = ((tst.float() - ref).abs().mean() / ref.abs().mean()).item()
+  assert err_mx < 1e-2, f"kernel vs mxfp8 reference rel err {err_mx}"
+  assert err < 6e-2, f"kernel vs fp32 rel err {err}"
+
+@unittest.skipUnless(has_hipcc(), "MXFP8 gemm requires hipcc to compile")
+class TestGemmMXFP8(unittest.TestCase):
+  def setUp(self):
+    if not is_cdna4() or DEV.interface.startswith("MOCK"): self.skipTest("mxfp8 gemm is only for cdna4")
+  def test_simple(self): run_mxfp8_gemm(N:=getenv("N", 256), N, 2*128)
+  def test_rect(self): run_mxfp8_gemm(512, 256, 512)
+  def test_llama_ffn(self): run_mxfp8_gemm(8192, 14336, 4096)
+  def test_llama_ffn2(self): run_mxfp8_gemm(8192, 4096, 14336)
+  def test_llama_qkv(self): run_mxfp8_gemm(8192, 4096, 4096)
+
 class TestMagicGu(unittest.TestCase):
   def test_magicgu_matches_old(self):
     from extra.gemm.cdna_asm_gemm import _magicgu_mulhi, TILE_M, TILE_N, TILE_K
