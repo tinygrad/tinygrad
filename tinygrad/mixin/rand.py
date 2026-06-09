@@ -24,7 +24,7 @@ class RandMixin(OpMixin):
       counts0 = cls.arange(ceildiv(chunk_num, 2), dtype=dtypes.uint32)
       counts1 = counts0 + ceildiv(chunk_num, 2)
       bits.append(cls._threefry_random_bits(new_key, counts0, counts1)[:chunk_num])
-    return bits[0].cat(*bits[1:])
+    return bits[0].cat(*bits[1:]) if bits else counter[0:0]
 
   @staticmethod
   def _bits_to_rand(bits, shape:tuple[int, ...], dtype:DType):
@@ -33,3 +33,9 @@ class RandMixin(OpMixin):
     uint_bits = bits.bitcast(uint_dtype)
     float_one_bits = uint_bits.const_like(1).cast(dtype).bitcast(uint_dtype)
     return uint_bits.rshift(dtype.bitsize - nmant).bitwise_or(float_one_bits).bitcast(dtype)[:prod(shape)].sub(1).reshape(shape)
+
+  @classmethod
+  def _rand(cls, key:Self, counter:Self, shape:tuple[int, ...], dtype:DType, contiguous:bool=True) -> Self:
+    bits = cls.random_bits(key, counter, ceildiv(prod(shape) * dtype.itemsize, 4))
+    out = cls._bits_to_rand(bits, shape, dtype)
+    return out.contiguous() if contiguous else out
