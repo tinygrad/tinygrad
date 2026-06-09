@@ -1,18 +1,11 @@
-import ctypes, ctypes.util
+import ctypes
+from tinygrad.runtime.support import c
 
-def _try_dlopen_gpuocelot():
-  GPUOCELOT_PATHS = [ctypes.util.find_library("gpuocelot")] if ctypes.util.find_library("gpuocelot") is not None else []
-  GPUOCELOT_PATHS += ["libgpuocelot.so", "/usr/local/lib/libgpuocelot.so",
-                      "libgpuocelot.dylib", "/usr/local/lib/libgpuocelot.dylib", "/opt/homebrew/lib/libgpuocelot.dylib"]
-  for path in GPUOCELOT_PATHS:
-    try:
-      gpuocelot_lib = ctypes.CDLL(path)
-      gpuocelot_lib.ptx_run.argtypes = [ctypes.c_char_p, ctypes.c_int, ctypes.POINTER(ctypes.c_void_p), ctypes.c_int, ctypes.c_int,
-        ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int]
-    except OSError: pass
-    else: return gpuocelot_lib
-  print("Could not find libgpuocelot.so")
-  return None
+gpuocelot_lib = c.DLL("ocelot", "gpuocelot")
+@gpuocelot_lib.bind(None, ctypes.c_char_p, ctypes.c_int, ctypes.POINTER(ctypes.c_void_p), ctypes.c_int, ctypes.c_int, ctypes.c_int,
+                    ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int)
+def ptx_run(source:bytes, n_args:int, args:c.POINTER[ctypes.c_void_p], blck_x:int, blck_y:int, blck_z:int,
+            grid_x:int, grid_y:int, grid_z:int, shared_mem_size:int): pass
 
 class PythonRemu:
   """Python RDNA3/RDNA4 emulator wrapper used by mockgpu."""

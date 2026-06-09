@@ -134,7 +134,17 @@ __device__ static inline void bin_map(T0 &dst, const T1 &src, const typename bas
 
     [&]<std::size_t... Rs>(std::index_sequence<Rs...>) {
         ([&]<std::size_t R>() {
-            op::template op<ducks::art::get_nth_range_t<registers_T0, R>::lo, ducks::art::get_nth_range_t<registers_T1, R>::lo>(param);
+            constexpr int GPR0 = ducks::art::get_nth_range_t<registers_T0, R>::lo;
+            constexpr int GPR1 = ducks::art::get_nth_range_t<registers_T1, R>::lo;
+            if constexpr ((R % 2) == 0) {
+                if constexpr ((R + 1) < registers_T0::size) {
+                    op::template op_pk2<GPR0, GPR1>(param);
+                }
+                else {
+                    op::template op<GPR0, GPR1>(param);
+                }
+            }
+            // Odd indices are skipped because they're processed by op_pk2 in the previous even iteration
         }.template operator()<Rs>(), ...);
     }(std::make_index_sequence<registers_T0::size>{});
 }
@@ -156,7 +166,17 @@ __device__ static inline void bin_map(T0 &dst, const T1 &src, const typename bas
 
         [&]<std::size_t... Rs>(std::index_sequence<Rs...>) {
             ([&]<std::size_t R>() {
-              op::template op<ducks::art::get_nth_range_t<registers_T0, R>::lo, ducks::art::get_nth_range_t<registers_T1, R>::lo>(param);
+                constexpr int GPR0 = ducks::art::get_nth_range_t<registers_T0, R>::lo;
+                constexpr int GPR1 = ducks::art::get_nth_range_t<registers_T1, R>::lo;
+                if constexpr ((R % 2) == 0) {
+                    if constexpr ((R + 1) < registers_T0::size) {
+                        op::template op_pk2<GPR0, GPR1>(param);
+                    }
+                    else {
+                        op::template op<GPR0, GPR1>(param);
+                    }
+                }
+                // Odd indices are skipped because they're processed by op_pk2 in the previous even iteration
             }.template operator()<Rs>(), ...);
         }(std::make_index_sequence<registers_T0::size>{});
     };
@@ -205,7 +225,18 @@ __device__ static inline void bin_map(T0 &dst, const T1 &lhs, const T2 &rhs) {
 
     [&]<std::size_t... Rs>(std::index_sequence<Rs...>) {
         ([&]<std::size_t R>() {
-        op::template op<ducks::art::get_nth_range_t<registers_T0, R>::lo, ducks::art::get_nth_range_t<registers_T1, R>::lo, ducks::art::get_nth_range_t<registers_T2, R>::lo>();
+            constexpr int GPR0 = ducks::art::get_nth_range_t<registers_T0, R>::lo;
+            constexpr int GPR1 = ducks::art::get_nth_range_t<registers_T1, R>::lo;
+            constexpr int GPR2 = ducks::art::get_nth_range_t<registers_T2, R>::lo;
+            if constexpr ((R % 2) == 0) {
+                if constexpr ((R + 1) < registers_T0::size) {
+                    op::template op_pk2<GPR0, GPR1, GPR2>();
+                }
+                else {
+                    op::template op<GPR0, GPR1, GPR2>();
+                }
+            }
+            // Odd indices are skipped because they're processed by op_pk2 in the previous even iteration
         }.template operator()<Rs>(), ...);
     }(std::make_index_sequence<registers_T0::size>{});
 }
@@ -234,7 +265,18 @@ __device__ static inline void bin_map(T0 &dst, const T1 &lhs, const T2 &rhs) {
 
         [&]<std::size_t... Rs>(std::index_sequence<Rs...>) {
             ([&]<std::size_t R>() {
-              op::template op<ducks::art::get_nth_range_t<registers_T0, R>::lo, ducks::art::get_nth_range_t<registers_T1, R>::lo, ducks::art::get_nth_range_t<registers_T2, R>::lo>();
+                constexpr int GPR0 = ducks::art::get_nth_range_t<registers_T0, R>::lo;
+                constexpr int GPR1 = ducks::art::get_nth_range_t<registers_T1, R>::lo;
+                constexpr int GPR2 = ducks::art::get_nth_range_t<registers_T2, R>::lo;
+                if constexpr ((R % 2) == 0) {
+                    if constexpr ((R + 1) < registers_T0::size) {
+                        op::template op_pk2<GPR0, GPR1, GPR2>();
+                    }
+                    else {
+                        op::template op<GPR0, GPR1, GPR2>();
+                    }
+                }
+                // Odd indices are skipped because they're processed by op_pk2 in the previous even iteration
             }.template operator()<Rs>(), ...);
         }(std::make_index_sequence<registers_T0::size>{});
     };
@@ -362,6 +404,16 @@ __device__ static inline void mul(T0 &dst, const T1 &lhs, const U &rhs) {
 template<ducks::art::all T0, ducks::art::all T1, typename U>
 __device__ static inline void mul(T0 &dst, const T1 &lhs, const U &rhs) {
     bin_map<macros::mul, T0, T1>(dst, lhs, rhs);
+}
+
+template<ducks::art::all T0, ducks::art::all T1, typename U>
+__device__ static inline void mul_vgpr(T0 &dst, const T1 &lhs, const U &rhs) {
+    bin_map<macros::mul_vgpr, T0, T1>(dst, lhs, rhs);
+}
+
+template<int N, int M, ducks::art::all T0, ducks::art::all T1, typename U>
+__device__ static inline void mul_vgpr(T0 &dst, const T1 &lhs, const U &rhs) {
+    bin_map<N, M, macros::mul_vgpr, T0, T1>(dst, lhs, rhs);
 }
 
 /**
