@@ -158,152 +158,405 @@ __device__ __forceinline__ void clobber_gpr() {
 #undef CLOBBER_AREG_CASE
 #undef CLOBBER_VREG_CASE
 
-template<int GPR_START>
-__device__ __forceinline__ void ds_read_b128(const uint32_t smem_ptr, const int offset) {
+__device__ __forceinline__ constexpr uint32_t max_ds_inst_offset()
+{
+  // DS ops contain 2 8-bits instruction offset.
+  // For non-pk2 instructions like ds_read_b32, the 2 fields are regarded as 1.
+  // For pk2 instructions like ds_read2_b32, max offset is limited by 8 bits.
+  return (1u << 16) - 1;
+}
 
+__device__ __forceinline__ constexpr uint32_t max_ds_pk2_inst_offset()
+{
+  // DS ops contain 2 8-bits instruction offset.
+  // For non-pk2 instructions like ds_read_b32, the 2 fields are regarded as a whole.
+  // For pk2 instructions like ds_read2_b32, max offset is limited by 8 bits.
+  return (1u << 8) - 1;
+}
+
+__device__ __forceinline__ constexpr uint32_t max_mubuf_inst_offset()
+{
+  // MUBUF ops contain 1 12-bits instruction offset.
+  return (1u << 12) - 1;
+}
+
+template<int GPR_START>
+__device__ __forceinline__ void ds_read_b32(const uint32_t smem_ptr, const int i_offset) {
+  // AGPRS
+  if constexpr (GPR_START >= 256) {
+    asm volatile("ds_read_b32 a[%0], %1 offset:%2"
+      :
+      : "n"(GPR_START - 256), "v"(smem_ptr), "i"(i_offset)
+      : "memory");
+  // VGPRS
+  } else {
+    asm volatile("ds_read_b32 v[%0], %1 offset:%2"
+      :
+      : "n"(GPR_START), "v"(smem_ptr), "i"(i_offset)
+      : "memory");
+  }
+}
+
+template <typename T>
+__device__ __forceinline__ void ds_read_b32(T& dst, const uint32_t smem_ptr, const int i_offset) {
+  static_assert(sizeof(T) == sizeof(uint32_t));
+  asm volatile("ds_read_b32 %0, %1 offset:%2"
+    : "=v"(dst)
+    : "v"(smem_ptr), "i"(i_offset)
+    : "memory");
+}
+
+template <typename T = u32x2>
+__device__ __forceinline__ T ds_read_b64(const uint32_t smem_ptr, const int i_offset) {
+  static_assert(sizeof(T) == sizeof(uint32_t) * 2);
+  T result;
+  asm volatile("ds_read_b64 %0, %1 offset:%2"
+    : "=v"(result)
+    : "v"(smem_ptr), "i"(i_offset)
+    : "memory");
+  return result;
+}
+
+template<int GPR_START>
+__device__ __forceinline__ void ds_read_b64(const uint32_t smem_ptr, const int i_offset) {
+  constexpr int GPR_END = GPR_START + 1;
+  // AGPRS
+  if constexpr (GPR_START >= 256) {
+    asm volatile("ds_read_b64 a[%0:%1], %2 offset:%3"
+      :
+      : "n"(GPR_START - 256), "n"(GPR_END - 256), "v"(smem_ptr), "i"(i_offset)
+      : "memory");
+  // VGPRS
+  } else {
+    asm volatile("ds_read_b64 v[%0:%1], %2 offset:%3"
+      :
+      : "n"(GPR_START), "n"(GPR_END), "v"(smem_ptr), "i"(i_offset)
+      : "memory");
+  }
+}
+
+template<int GPR_START>
+__device__ __forceinline__ void ds_read_b64_tr_b4(const uint32_t smem_ptr, const int i_offset) {
+  constexpr int GPR_END = GPR_START + 1;
+  if constexpr (GPR_START >= 256) {
+    asm volatile("ds_read_b64_tr_b4 a[%0:%1], %2 offset:%3"
+      :
+      : "n"(GPR_START - 256), "n"(GPR_END - 256), "v"(smem_ptr), "i"(i_offset)
+      : "memory");
+  } else {
+    asm volatile("ds_read_b64_tr_b4 v[%0:%1], %2 offset:%3"
+      :
+      : "n"(GPR_START), "n"(GPR_END), "v"(smem_ptr), "i"(i_offset)
+      : "memory");
+  }
+}
+
+template<int GPR_START>
+__device__ __forceinline__ void ds_read_b64_tr_b8(const uint32_t smem_ptr, const int i_offset) {
+  constexpr int GPR_END = GPR_START + 1;
+  if constexpr (GPR_START >= 256) {
+    asm volatile("ds_read_b64_tr_b8 a[%0:%1], %2 offset:%3"
+      :
+      : "n"(GPR_START - 256), "n"(GPR_END - 256), "v"(smem_ptr), "i"(i_offset)
+      : "memory");
+  } else {
+    asm volatile("ds_read_b64_tr_b8 v[%0:%1], %2 offset:%3"
+      :
+      : "n"(GPR_START), "n"(GPR_END), "v"(smem_ptr), "i"(i_offset)
+      : "memory");
+  }
+}
+
+template<int GPR_START>
+__device__ __forceinline__ void ds_read_b64_tr_b16(const uint32_t smem_ptr, const int i_offset) {
+  constexpr int GPR_END = GPR_START + 1;
+  if constexpr (GPR_START >= 256) {
+    asm volatile("ds_read_b64_tr_b16 a[%0:%1], %2 offset:%3"
+      :
+      : "n"(GPR_START - 256), "n"(GPR_END - 256), "v"(smem_ptr), "i"(i_offset)
+      : "memory");
+  } else {
+    asm volatile("ds_read_b64_tr_b16 v[%0:%1], %2 offset:%3"
+      :
+      : "n"(GPR_START), "n"(GPR_END), "v"(smem_ptr), "i"(i_offset)
+      : "memory");
+  }
+}
+
+template <typename T = u32x4>
+__device__ __forceinline__ T ds_read_b128(const uint32_t smem_ptr, const int i_offset) {
+  static_assert(sizeof(T) == sizeof(uint32_t) * 4);
+  T result;
+  asm volatile("ds_read_b128 %0, %1 offset:%2"
+    : "=v"(result)
+    : "v"(smem_ptr), "i"(i_offset)
+    : "memory");
+  return result;
+}
+
+template<int GPR_START>
+__device__ __forceinline__ void ds_read_b128(const uint32_t smem_ptr, const int i_offset) {
   constexpr int GPR_END = GPR_START + 3;
   // AGPRS
   if constexpr (GPR_START >= 256) {
     asm volatile("ds_read_b128 a[%0:%1], %2 offset:%3"
       :
-      : "n"(GPR_START - 256), "n"(GPR_END - 256), "v"(smem_ptr), "i"(offset)
+      : "n"(GPR_START - 256), "n"(GPR_END - 256), "v"(smem_ptr), "i"(i_offset)
       : "memory");
   // VGPRS
   } else {
     asm volatile("ds_read_b128 v[%0:%1], %2 offset:%3"
       :
-      : "n"(GPR_START), "n"(GPR_END), "v"(smem_ptr), "i"(offset)
+      : "n"(GPR_START), "n"(GPR_END), "v"(smem_ptr), "i"(i_offset)
       : "memory");
   }
 }
 
 template<int GPR_START>
-__device__ __forceinline__ void ds_read_b64_tr_b16(const uint32_t smem_ptr, const int offset) {
-  constexpr int GPR_END = GPR_START + 1;
-
+__device__ __forceinline__ void ds_write_b32(const uint32_t smem_ptr, const int i_offset) {
   if constexpr (GPR_START >= 256) {
-    asm volatile("ds_read_b64_tr_b16 a[%0:%1], %2 offset:%3"
+    asm volatile("ds_write_b32 %0, a[%1], offset:%2"
       :
-      : "n"(GPR_START - 256), "n"(GPR_END - 256), "v"(smem_ptr), "i"(offset)
+      : "v"(smem_ptr), "n"(GPR_START - 256), "i"(i_offset)
       : "memory");
   } else {
-    asm volatile("ds_read_b64_tr_b16 v[%0:%1], %2 offset:%3"
+    asm volatile("ds_write_b32 %0, v[%1], offset:%2"
       :
-      : "n"(GPR_START), "n"(GPR_END), "v"(smem_ptr), "i"(offset)
+      : "v"(smem_ptr), "n"(GPR_START), "i"(i_offset)
       : "memory");
   }
 }
 
+template <typename T>
+__device__ __forceinline__ void ds_write_b32(const T& val, const uint32_t smem_ptr, const int i_offset = 0) {
+  static_assert(sizeof(T) == sizeof(uint32_t));
+  asm volatile("ds_write_b32 %0, %1 offset:%2"
+    :
+    : "v"(smem_ptr), "v"(val), "i"(i_offset)
+    : "memory");
+}
+
 template<int GPR_START>
-__device__ __forceinline__ void ds_write_b64(const uint32_t smem_ptr, const int offset) {
+__device__ __forceinline__ void ds_write_b64(const uint32_t smem_ptr, const int i_offset) {
   if constexpr (GPR_START >= 256) {
     asm volatile("ds_write_b64 %0, a[%1:%2], offset:%3"
       :
-      : "v"(smem_ptr), "n"(GPR_START - 256), "n"(GPR_START + 1 - 256), "i"(offset)
+      : "v"(smem_ptr), "n"(GPR_START - 256), "n"(GPR_START + 1 - 256), "i"(i_offset)
       : "memory");
   } else {
     asm volatile("ds_write_b64 %0, v[%1:%2], offset:%3"
       :
-      : "v"(smem_ptr), "n"(GPR_START), "n"(GPR_START + 1), "i"(offset)
+      : "v"(smem_ptr), "n"(GPR_START), "n"(GPR_START + 1), "i"(i_offset)
       : "memory");
   }
+}
+
+template <typename T>
+__device__ __forceinline__ void ds_write_b64(const T& val, const uint32_t smem_ptr, const int i_offset = 0) {
+  static_assert(sizeof(T) == 2 * sizeof(uint32_t));
+  asm volatile("ds_write_b64 %0, %1 offset:%2"
+    :
+    : "v"(smem_ptr), "v"(val), "i"(i_offset)
+    : "memory");
+}
+
+template<int GPR_START>
+__device__ __forceinline__ void ds_write_b128(const uint32_t smem_ptr, const int i_offset = 0) {
+  if constexpr (GPR_START >= 256) {
+    asm volatile("ds_write_b128 %0, a[%1:%2], offset:%3"
+      :
+      : "v"(smem_ptr), "n"(GPR_START - 256), "n"(GPR_START + 3 - 256), "i"(i_offset)
+      : "memory");
+  } else {
+    asm volatile("ds_write_b128 %0, v[%1:%2], offset:%3"
+      :
+      : "v"(smem_ptr), "n"(GPR_START), "n"(GPR_START + 3), "i"(i_offset)
+      : "memory");
+  }
+}
+
+template<typename T>
+__device__ __forceinline__ void ds_write_b128(const T& value, const uint32_t smem_ptr, const int i_offset = 0) {
+  static_assert(sizeof(T) == sizeof(u32x4));
+  asm volatile("ds_write_b128 %0, %1 offset:%2"
+    :
+    : "v"(smem_ptr), "v"(value), "i"(i_offset)
+    : "memory");
+}
+
+template<int GPR_START>
+__device__ __forceinline__ void buffer_load_dword(const buffer_resource& br, const uint32_t v_offset, const uint32_t s_offset = 0, const int i_offset = 0) {
+  if constexpr (GPR_START >= 256) {
+    asm volatile("buffer_load_dword a[%0], %1, %2, %3 offen offset:%4"
+      :
+      : "n"(GPR_START - 256), "v"(v_offset), "s"(*(const i32x4*)&br), "s"(s_offset), "i"(i_offset)
+      : "memory");
+  } else {
+    asm volatile("buffer_load_dword v[%0], %1, %2, %3 offen offset:%4"
+      :
+      : "n"(GPR_START), "v"(v_offset), "s"(*(const i32x4*)&br), "s"(s_offset), "i"(i_offset)
+      : "memory");
+  }
+}
+
+template<typename T = uint32_t>
+__device__ __forceinline__ T buffer_load_dword(
+  const buffer_resource& br, const uint32_t v_offset, const uint32_t s_offset = 0, const uint32_t i_offset = 0) {
+  static_assert(sizeof(T) == sizeof(uint32_t));
+  T result;
+  asm volatile("buffer_load_dword %0, %1, %2, %3 offen offset:%4"
+    : "=v"(result)
+    : "v"(v_offset), "s"(*(const i32x4*)&br), "s"(s_offset), "i"(i_offset)
+    : "memory");
+  return result;
+}
+
+template<int GPR_START>
+__device__ __forceinline__ void buffer_load_dwordx2(const buffer_resource& br, const uint32_t v_offset, const uint32_t s_offset = 0, const int i_offset = 0) {
+  if constexpr (GPR_START >= 256) {
+    asm volatile("buffer_load_dwordx2 a[%0:%1], %2, %3, %4 offen offset:%5"
+      :
+      : "n"(GPR_START - 256), "n"(GPR_START + 1 - 256), "v"(v_offset), "s"(*(const i32x4*)&br), "s"(s_offset), "i"(i_offset)
+      : "memory");
+  } else {
+    asm volatile("buffer_load_dwordx2 v[%0:%1], %2, %3, %4 offen offset:%5"
+      :
+      : "n"(GPR_START), "n"(GPR_START + 1), "v"(v_offset), "s"(*(const i32x4*)&br), "s"(s_offset), "i"(i_offset)
+      : "memory");
+  }
+}
+
+template<typename T = u32x2>
+__device__ __forceinline__ T buffer_load_dwordx2(
+  const buffer_resource& br, const uint32_t v_offset, const uint32_t s_offset = 0, const uint32_t i_offset = 0) {
+  static_assert(sizeof(T) == sizeof(uint32_t) * 2);
+  T result;
+  asm volatile("buffer_load_dwordx2 %0, %1, %2, %3 offen offset:%4"
+    : "=v"(result)
+    : "v"(v_offset), "s"(*(const i32x4*)&br), "s"(s_offset), "i"(i_offset)
+    : "memory");
+  return result;
+}
+
+template<int GPR_START>
+__device__ __forceinline__ void buffer_load_dwordx4(const buffer_resource& br, const uint32_t v_offset, const uint32_t s_offset = 0, const int i_offset = 0) {
+  if constexpr (GPR_START >= 256) {
+    asm volatile("buffer_load_dwordx4 a[%0:%1], %2, %3, %4 offen offset:%5"
+      :
+      : "n"(GPR_START - 256), "n"(GPR_START + 3 - 256), "v"(v_offset), "s"(*(const i32x4*)&br), "s"(s_offset), "i"(i_offset)
+      : "memory");
+  } else {
+    asm volatile("buffer_load_dwordx4 v[%0:%1], %2, %3, %4 offen offset:%5"
+      :
+      : "n"(GPR_START), "n"(GPR_START + 3), "v"(v_offset), "s"(*(const i32x4*)&br), "s"(s_offset), "i"(i_offset)
+      : "memory");
+  }
+}
+
+template<typename T = u32x4>
+__device__ __forceinline__ T buffer_load_dwordx4(
+  const buffer_resource& br, const uint32_t v_offset, const uint32_t s_offset = 0, const uint32_t i_offset = 0) {
+  static_assert(sizeof(T) == sizeof(uint32_t) * 4);
+  T result;
+  asm volatile("buffer_load_dwordx4 %0, %1, %2, %3 offen offset:%4"
+    : "=v"(result)
+    : "v"(v_offset), "s"(*(const i32x4*)&br), "s"(s_offset), "i"(i_offset)
+    : "memory");
+  return result;
 }
 
 template<int GPR>
-__device__ __forceinline__ void buffer_store_dword(buffer_resource& br, const uint32_t byte_offset) {
-
+__device__ __forceinline__ void buffer_store_dword(const buffer_resource& br, const uint32_t v_offset, const uint32_t s_offset = 0, const int i_offset = 0) {
   // AGPRS
   if constexpr (GPR >= 256) {
-    asm volatile("buffer_store_dword a[%0], %1, %2, 0 offen"
+    asm volatile("buffer_store_dword a[%0], %1, %2, %3 offen offset:%4"
       :
-      : "n"(GPR - 256), "v"(byte_offset), "s"(*(i32x4*)&br)
+      : "n"(GPR - 256), "v"(v_offset), "s"(*(const i32x4*)&br), "s"(s_offset), "i"(i_offset)
       : "memory");
   // VGPRS
   } else {
-    asm volatile("buffer_store_dword v[%0], %1, %2, 0 offen"
+    asm volatile("buffer_store_dword v[%0], %1, %2, %3 offen offset:%4"
       :
-      : "n"(GPR), "v"(byte_offset), "s"(*(i32x4*)&br)
+      : "n"(GPR), "v"(v_offset), "s"(*(const i32x4*)&br), "s"(s_offset), "i"(i_offset)
       : "memory");
   }
 }
 
-template<int GPR_START>
-__device__ __forceinline__ void buffer_store_dwordx2(buffer_resource& br, const uint32_t byte_offset) {
+template<typename T = u32x2>
+__device__ __forceinline__ void buffer_store_dword(
+  const T& value, const buffer_resource& br, const uint32_t v_offset, const uint32_t s_offset = 0, const uint32_t i_offset = 0) {
+  static_assert(sizeof(T) == sizeof(uint32_t) * 2);
+  asm volatile("buffer_store_dword %0, %1, %2, %3 offen offset:%4"
+    :
+    : "v"(value), "v"(v_offset), "s"(*(const i32x4*)&br), "s"(s_offset), "i"(i_offset)
+    : "memory");
+}
 
+template<int GPR_START>
+__device__ __forceinline__ void buffer_store_dwordx2(const buffer_resource& br, const uint32_t v_offset, const uint32_t s_offset = 0, const int i_offset = 0) {
   // AGPRS
   if constexpr (GPR_START >= 256) {
-    asm volatile("buffer_store_dwordx2 a[%0:%1], %2, %3, 0 offen"
+    asm volatile("buffer_store_dwordx2 a[%0:%1], %2, %3, %4 offen offset:%5"
       :
-      : "n"(GPR_START - 256), "n"(GPR_START + 1 - 256), "v"(byte_offset), "s"(*(i32x4*)&br)
+      : "n"(GPR_START - 256), "n"(GPR_START + 1 - 256), "v"(v_offset), "s"(*(const i32x4*)&br), "s"(s_offset), "i"(i_offset)
       : "memory");
   // VGPRS
   } else {
-    asm volatile("buffer_store_dwordx2 v[%0:%1], %2, %3, 0 offen"
+    asm volatile("buffer_store_dwordx2 v[%0:%1], %2, %3, %4 offen offset:%5"
       :
-      : "n"(GPR_START), "n"(GPR_START + 1), "v"(byte_offset), "s"(*(i32x4*)&br)
+      : "n"(GPR_START), "n"(GPR_START + 1), "v"(v_offset), "s"(*(const i32x4*)&br), "s"(s_offset), "i"(i_offset)
       : "memory");
   }
 }
 
-template<int GPR_START>
-__device__ __forceinline__ void buffer_store_dwordx4(buffer_resource& br, const uint32_t byte_offset) {
+template<typename T = u32x2>
+__device__ __forceinline__ void buffer_store_dwordx2(
+  const T& value, const buffer_resource& br, const uint32_t v_offset, const uint32_t s_offset = 0, const uint32_t i_offset = 0) {
+  static_assert(sizeof(T) == sizeof(uint32_t) * 2);
+  asm volatile("buffer_store_dwordx2 %0, %1, %2, %3 offen offset:%4"
+    :
+    : "v"(value), "v"(v_offset), "s"(*(const i32x4*)&br), "s"(s_offset), "i"(i_offset)
+    : "memory");
+}
 
+template<int GPR_START>
+__device__ __forceinline__ void buffer_store_dwordx4(const buffer_resource& br, const uint32_t v_offset, const uint32_t s_offset = 0, const int i_offset = 0) {
   // AGPRS
   if constexpr (GPR_START >= 256) {
-    asm volatile("buffer_store_dwordx4 a[%0:%1], %2, %3, 0 offen"
+    asm volatile("buffer_store_dwordx4 a[%0:%1], %2, %3, %4 offen offset:%5"
       :
-      : "n"(GPR_START - 256), "n"(GPR_START + 3 - 256), "v"(byte_offset), "s"(*(i32x4*)&br)
+      : "n"(GPR_START - 256), "n"(GPR_START + 3 - 256), "v"(v_offset), "s"(*(const i32x4*)&br), "s"(s_offset), "i"(i_offset)
       : "memory");
   // VGPRS
   } else {
-    asm volatile("buffer_store_dwordx4 v[%0:%1], %2, %3, 0 offen"
+    asm volatile("buffer_store_dwordx4 v[%0:%1], %2, %3, %4 offen offset:%5"
       :
-      : "n"(GPR_START), "n"(GPR_START + 3), "v"(byte_offset), "s"(*(i32x4*)&br)
+      : "n"(GPR_START), "n"(GPR_START + 3), "v"(v_offset), "s"(*(const i32x4*)&br), "s"(s_offset), "i"(i_offset)
       : "memory");
   }
 }
 
-template<int GPR_START>
-__device__ __forceinline__ void buffer_load_dwordx4(buffer_resource& br, const uint32_t byte_offset) {
-  if constexpr (GPR_START >= 256) {
-    asm volatile("buffer_load_dwordx4 a[%0:%1], %2, %3, 0 offen offset:%4"
-      :
-      : "n"(GPR_START - 256), "n"(GPR_START + 3 - 256), "v"(byte_offset), "s"(*(i32x4*)&br), "i"(0)
-      : "memory");
-  } else {
-    asm volatile("buffer_load_dwordx4 v[%0:%1], %2, %3, 0 offen offset:%4"
-      :
-      : "n"(GPR_START), "n"(GPR_START + 3), "v"(byte_offset), "s"(*(i32x4*)&br), "i"(0)
-      : "memory");
-  }
-}
-
-template<int GPR_START>
-__device__ __forceinline__ void buffer_load_dwordx2(buffer_resource& br, const uint32_t byte_offset) {
-  if constexpr (GPR_START >= 256) {
-    asm volatile("buffer_load_dwordx2 a[%0:%1], %2, %3, 0 offen offset:%4"
-      :
-      : "n"(GPR_START - 256), "n"(GPR_START + 1 - 256), "v"(byte_offset), "s"(*(i32x4*)&br), "i"(0)
-      : "memory");
-  } else {
-    asm volatile("buffer_load_dwordx2 v[%0:%1], %2, %3, 0 offen offset:%4"
-      :
-      : "n"(GPR_START), "n"(GPR_START + 1), "v"(byte_offset), "s"(*(i32x4*)&br), "i"(0)
-      : "memory");
-  }
+template<typename T = u32x4>
+__device__ __forceinline__ void buffer_store_dwordx4(
+  const T& value, const buffer_resource& br, const uint32_t v_offset, const uint32_t s_offset = 0, const uint32_t i_offset = 0) {
+  static_assert(sizeof(T) == sizeof(uint32_t) * 4);
+  asm volatile("buffer_store_dwordx4 %0, %1, %2, %3 offen offset:%4"
+    :
+    : "v"(value), "v"(v_offset), "s"(*(const i32x4*)&br), "s"(s_offset), "i"(i_offset)
+    : "memory");
 }
 
 template<int GPR>
-__device__ __forceinline__ void buffer_atomic_pk_add_bf16(buffer_resource& br, const uint32_t byte_offset) {
+__device__ __forceinline__ void buffer_atomic_pk_add_bf16(const buffer_resource& br, const uint32_t v_offset, const uint32_t s_offset = 0, const int i_offset = 0) {
   if constexpr (GPR >= 256) {
-    asm volatile("buffer_atomic_pk_add_bf16 a[%0], %1, %2, 0 offen"
+    asm volatile("buffer_atomic_pk_add_bf16 a[%0], %1, %2, %3 offen offset:%4"
       :
-      : "n"(GPR - 256), "v"(byte_offset), "s"(*(i32x4*)&br)
+      : "n"(GPR - 256), "v"(v_offset), "s"(*(const i32x4*)&br), "s"(s_offset), "i"(i_offset)
       : "memory");
   } else {
-    asm volatile("buffer_atomic_pk_add_bf16 v[%0], %1, %2, 0 offen"
+    asm volatile("buffer_atomic_pk_add_bf16 v[%0], %1, %2, %3 offen offset:%4"
       :
-      : "n"(GPR), "v"(byte_offset), "s"(*(i32x4*)&br)
+      : "n"(GPR), "v"(v_offset), "s"(*(const i32x4*)&br), "s"(s_offset), "i"(i_offset)
       : "memory");
   }
 }
@@ -468,6 +721,75 @@ __device__ __forceinline__ void mfma_f32_32x32x16_bf16() {
   }
 }
 
+template<int GPR_START_A, int GPR_START_B, int GPR_START_C, int GPR_START_D>
+__device__ __forceinline__ void mfma_f32_16x16x32_fp8_fp8() {
+  if constexpr (GPR_START_D >= 256 && GPR_START_A >= 256 && GPR_START_B >= 256 && GPR_START_C >= 256) {
+    asm volatile("v_mfma_f32_16x16x32_fp8_fp8 a[%0:%1], a[%2:%3], a[%4:%5], a[%6:%7]"
+      :
+      : "n"(GPR_START_D - 256), "n"(GPR_START_D + 3 - 256), "n"(GPR_START_A - 256), "n"(GPR_START_A + 1 - 256), "n"(GPR_START_B - 256), "n"(GPR_START_B + 1 - 256), "n"(GPR_START_C - 256), "n"(GPR_START_C + 3 - 256));
+  } else if constexpr (GPR_START_D >= 256 && GPR_START_A >= 256 && GPR_START_B >= 256 && GPR_START_C < 256) {
+    asm volatile("v_mfma_f32_16x16x32_fp8_fp8 a[%0:%1], a[%2:%3], a[%4:%5], v[%6:%7]"
+      :
+      : "n"(GPR_START_D - 256), "n"(GPR_START_D + 3 - 256), "n"(GPR_START_A - 256), "n"(GPR_START_A + 1 - 256), "n"(GPR_START_B - 256), "n"(GPR_START_B + 1 - 256), "n"(GPR_START_C), "n"(GPR_START_C + 3));
+  } else if constexpr (GPR_START_D >= 256 && GPR_START_A >= 256 && GPR_START_B < 256 && GPR_START_C >= 256) {
+    asm volatile("v_mfma_f32_16x16x32_fp8_fp8 a[%0:%1], a[%2:%3], v[%4:%5], a[%6:%7]"
+      :
+      : "n"(GPR_START_D - 256), "n"(GPR_START_D + 3 - 256), "n"(GPR_START_A - 256), "n"(GPR_START_A + 1 - 256), "n"(GPR_START_B), "n"(GPR_START_B + 1), "n"(GPR_START_C - 256), "n"(GPR_START_C + 3 - 256));
+  } else if constexpr (GPR_START_D >= 256 && GPR_START_A < 256 && GPR_START_B >= 256 && GPR_START_C >= 256) {
+    asm volatile("v_mfma_f32_16x16x32_fp8_fp8 a[%0:%1], v[%2:%3], a[%4:%5], a[%6:%7]"
+      :
+      : "n"(GPR_START_D - 256), "n"(GPR_START_D + 3 - 256), "n"(GPR_START_A), "n"(GPR_START_A + 1), "n"(GPR_START_B - 256), "n"(GPR_START_B + 1 - 256), "n"(GPR_START_C - 256), "n"(GPR_START_C + 3 - 256));
+  } else if constexpr (GPR_START_D < 256 && GPR_START_A >= 256 && GPR_START_B >= 256 && GPR_START_C >= 256) {
+    asm volatile("v_mfma_f32_16x16x32_fp8_fp8 v[%0:%1], a[%2:%3], a[%4:%5], a[%6:%7]"
+      :
+      : "n"(GPR_START_D), "n"(GPR_START_D + 3), "n"(GPR_START_A - 256), "n"(GPR_START_A + 1 - 256), "n"(GPR_START_B - 256), "n"(GPR_START_B + 1 - 256), "n"(GPR_START_C - 256), "n"(GPR_START_C + 3 - 256));
+  } else if constexpr (GPR_START_D < 256 && GPR_START_A >= 256 && GPR_START_B >= 256 && GPR_START_C < 256) {
+    asm volatile("v_mfma_f32_16x16x32_fp8_fp8 v[%0:%1], a[%2:%3], a[%4:%5], v[%6:%7]"
+      :
+      : "n"(GPR_START_D), "n"(GPR_START_D + 3), "n"(GPR_START_A - 256), "n"(GPR_START_A + 1 - 256), "n"(GPR_START_B - 256), "n"(GPR_START_B + 1 - 256), "n"(GPR_START_C), "n"(GPR_START_C + 3));
+  } else if constexpr (GPR_START_D < 256 && GPR_START_A >= 256 && GPR_START_B < 256 && GPR_START_C >= 256) {
+    asm volatile("v_mfma_f32_16x16x32_fp8_fp8 v[%0:%1], a[%2:%3], v[%4:%5], a[%6:%7]"
+      :
+      : "n"(GPR_START_D), "n"(GPR_START_D + 3), "n"(GPR_START_A - 256), "n"(GPR_START_A + 1 - 256), "n"(GPR_START_B), "n"(GPR_START_B + 1), "n"(GPR_START_C - 256), "n"(GPR_START_C + 3 - 256));
+  } else if constexpr (GPR_START_D < 256 && GPR_START_A < 256 && GPR_START_B >= 256 && GPR_START_C >= 256) {
+    asm volatile("v_mfma_f32_16x16x32_fp8_fp8 v[%0:%1], v[%2:%3], a[%4:%5], a[%6:%7]"
+      :
+      : "n"(GPR_START_D), "n"(GPR_START_D + 3), "n"(GPR_START_A), "n"(GPR_START_A + 1), "n"(GPR_START_B - 256), "n"(GPR_START_B + 1 - 256), "n"(GPR_START_C - 256), "n"(GPR_START_C + 3 - 256));
+  } else if constexpr (GPR_START_D >= 256 && GPR_START_A < 256 && GPR_START_B >= 256 && GPR_START_C < 256) {
+    asm volatile("v_mfma_f32_16x16x32_fp8_fp8 a[%0:%1], v[%2:%3], a[%4:%5], v[%6:%7]"
+      :
+      : "n"(GPR_START_D - 256), "n"(GPR_START_D + 3 - 256), "n"(GPR_START_A), "n"(GPR_START_A + 1), "n"(GPR_START_B - 256), "n"(GPR_START_B + 1 - 256), "n"(GPR_START_C), "n"(GPR_START_C + 3));
+  } else if constexpr (GPR_START_D >= 256 && GPR_START_A < 256 && GPR_START_B < 256 && GPR_START_C >= 256) {
+    asm volatile("v_mfma_f32_16x16x32_fp8_fp8 a[%0:%1], v[%2:%3], v[%4:%5], a[%6:%7]"
+      :
+      : "n"(GPR_START_D - 256), "n"(GPR_START_D + 3 - 256), "n"(GPR_START_A), "n"(GPR_START_A + 1), "n"(GPR_START_B), "n"(GPR_START_B + 1), "n"(GPR_START_C - 256), "n"(GPR_START_C + 3 - 256));
+  } else if constexpr (GPR_START_D >= 256 && GPR_START_A >= 256 && GPR_START_B < 256 && GPR_START_C < 256) {
+    asm volatile("v_mfma_f32_16x16x32_fp8_fp8 a[%0:%1], a[%2:%3], v[%4:%5], v[%6:%7]"
+      :
+      : "n"(GPR_START_D - 256), "n"(GPR_START_D + 3 - 256), "n"(GPR_START_A - 256), "n"(GPR_START_A + 1 - 256), "n"(GPR_START_B), "n"(GPR_START_B + 1), "n"(GPR_START_C), "n"(GPR_START_C + 3));
+  } else if constexpr (GPR_START_D < 256 && GPR_START_A >= 256 && GPR_START_B < 256 && GPR_START_C < 256) {
+    asm volatile("v_mfma_f32_16x16x32_fp8_fp8 v[%0:%1], a[%2:%3], v[%4:%5], v[%6:%7]"
+      :
+      : "n"(GPR_START_D), "n"(GPR_START_D + 3), "n"(GPR_START_A - 256), "n"(GPR_START_A + 1 - 256), "n"(GPR_START_B), "n"(GPR_START_B + 1), "n"(GPR_START_C), "n"(GPR_START_C + 3));
+  } else if constexpr (GPR_START_D < 256 && GPR_START_A < 256 && GPR_START_B >= 256 && GPR_START_C < 256) {
+    asm volatile("v_mfma_f32_16x16x32_fp8_fp8 v[%0:%1], v[%2:%3], a[%4:%5], v[%6:%7]"
+      :
+      : "n"(GPR_START_D), "n"(GPR_START_D + 3), "n"(GPR_START_A), "n"(GPR_START_A + 1), "n"(GPR_START_B - 256), "n"(GPR_START_B + 1 - 256), "n"(GPR_START_C), "n"(GPR_START_C + 3));
+  } else if constexpr (GPR_START_D < 256 && GPR_START_A < 256 && GPR_START_B < 256 && GPR_START_C >= 256) {
+    asm volatile("v_mfma_f32_16x16x32_fp8_fp8 v[%0:%1], v[%2:%3], v[%4:%5], a[%6:%7]"
+      :
+      : "n"(GPR_START_D), "n"(GPR_START_D + 3), "n"(GPR_START_A), "n"(GPR_START_A + 1), "n"(GPR_START_B), "n"(GPR_START_B + 1), "n"(GPR_START_C - 256), "n"(GPR_START_C + 3 - 256));
+  } else if constexpr (GPR_START_D >= 256 && GPR_START_A < 256 && GPR_START_B < 256 && GPR_START_C < 256) {
+    asm volatile("v_mfma_f32_16x16x32_fp8_fp8 a[%0:%1], v[%2:%3], v[%4:%5], v[%6:%7]"
+      :
+      : "n"(GPR_START_D - 256), "n"(GPR_START_D + 3 - 256), "n"(GPR_START_A), "n"(GPR_START_A + 1), "n"(GPR_START_B), "n"(GPR_START_B + 1), "n"(GPR_START_C), "n"(GPR_START_C + 3));
+  } else {
+    asm volatile("v_mfma_f32_16x16x32_fp8_fp8 v[%0:%1], v[%2:%3], v[%4:%5], v[%6:%7]"
+      :
+      : "n"(GPR_START_D), "n"(GPR_START_D + 3), "n"(GPR_START_A), "n"(GPR_START_A + 1), "n"(GPR_START_B), "n"(GPR_START_B + 1), "n"(GPR_START_C), "n"(GPR_START_C + 3));
+  }
+}
+
 template<int GPR_START_A, int GPR_START_B, int GPR_START_D>
 __device__ __forceinline__ void mfma_f32_16x16x32_bf16_zero_accum() {
   if constexpr (GPR_START_D >= 256 && GPR_START_A >= 256 && GPR_START_B >= 256) {
@@ -542,6 +864,43 @@ __device__ __forceinline__ void mfma_f32_32x32x16_bf16_zero_accum() {
   }
 }
 
+template<int GPR_START_A, int GPR_START_B, int GPR_START_D>
+__device__ __forceinline__ void mfma_f32_16x16x32_fp8_fp8_zero_accum() {
+  if constexpr (GPR_START_D >= 256 && GPR_START_A >= 256 && GPR_START_B >= 256) {
+    asm volatile("v_mfma_f32_16x16x32_fp8_fp8 a[%0:%1], a[%2:%3], a[%4:%5], 0"
+      :
+      : "n"(GPR_START_D - 256), "n"(GPR_START_D + 3 - 256), "n"(GPR_START_A - 256), "n"(GPR_START_A + 1 - 256), "n"(GPR_START_B - 256), "n"(GPR_START_B + 1 - 256));
+  } else if constexpr (GPR_START_D < 256 && GPR_START_A >= 256 && GPR_START_B >= 256) {
+    asm volatile("v_mfma_f32_16x16x32_fp8_fp8 v[%0:%1], a[%2:%3], a[%4:%5], 0"
+      :
+      : "n"(GPR_START_D), "n"(GPR_START_D + 3), "n"(GPR_START_A - 256), "n"(GPR_START_A + 1 - 256), "n"(GPR_START_B - 256), "n"(GPR_START_B + 1 - 256));
+  } else if constexpr (GPR_START_D >= 256 && GPR_START_A < 256 && GPR_START_B >= 256) {
+    asm volatile("v_mfma_f32_16x16x32_fp8_fp8 a[%0:%1], v[%2:%3], a[%4:%5], 0"
+      :
+      : "n"(GPR_START_D - 256), "n"(GPR_START_D + 3 - 256), "n"(GPR_START_A), "n"(GPR_START_A + 1), "n"(GPR_START_B - 256), "n"(GPR_START_B + 1 - 256));
+  } else if constexpr (GPR_START_D >= 256 && GPR_START_A >= 256 && GPR_START_B < 256) {
+    asm volatile("v_mfma_f32_16x16x32_fp8_fp8 a[%0:%1], a[%2:%3], v[%4:%5], 0"
+      :
+      : "n"(GPR_START_D - 256), "n"(GPR_START_D + 3 - 256), "n"(GPR_START_A - 256), "n"(GPR_START_A + 1 - 256), "n"(GPR_START_B), "n"(GPR_START_B + 1));
+  } else if constexpr (GPR_START_D < 256 && GPR_START_A >= 256 && GPR_START_B < 256) {
+    asm volatile("v_mfma_f32_16x16x32_fp8_fp8 v[%0:%1], a[%2:%3], v[%4:%5], 0"
+      :
+      : "n"(GPR_START_D), "n"(GPR_START_D + 3), "n"(GPR_START_A - 256), "n"(GPR_START_A + 1 - 256), "n"(GPR_START_B), "n"(GPR_START_B + 1));
+  } else if constexpr (GPR_START_D < 256 && GPR_START_A < 256 && GPR_START_B >= 256) {
+    asm volatile("v_mfma_f32_16x16x32_fp8_fp8 v[%0:%1], v[%2:%3], a[%4:%5], 0"
+      :
+      : "n"(GPR_START_D), "n"(GPR_START_D + 3), "n"(GPR_START_A), "n"(GPR_START_A + 1), "n"(GPR_START_B - 256), "n"(GPR_START_B + 1 - 256));
+  } else if constexpr (GPR_START_D >= 256 && GPR_START_A < 256 && GPR_START_B < 256) {
+    asm volatile("v_mfma_f32_16x16x32_fp8_fp8 a[%0:%1], v[%2:%3], v[%4:%5], 0"
+      :
+      : "n"(GPR_START_D - 256), "n"(GPR_START_D + 3 - 256), "n"(GPR_START_A), "n"(GPR_START_A + 1), "n"(GPR_START_B), "n"(GPR_START_B + 1));
+  } else {
+    asm volatile("v_mfma_f32_16x16x32_fp8_fp8 v[%0:%1], v[%2:%3], v[%4:%5], 0"
+      :
+      : "n"(GPR_START_D), "n"(GPR_START_D + 3), "n"(GPR_START_A), "n"(GPR_START_A + 1), "n"(GPR_START_B), "n"(GPR_START_B + 1));
+  }
+}
+
 template<int GPR0_START, int GPR1_START, int GPR>
 __device__ __forceinline__ void v_subrev_f32_dpp() {
 
@@ -592,11 +951,29 @@ __device__ __forceinline__ void v_accvgpr_read_b32() {
     : "n"(GPR0), "n"(GPR1 - 256));
 }
 
-template<int GPR>
-__device__ __forceinline__ void v_mov_b32(const uint32_t value) {
+template<int GPR, typename T>
+__device__ __forceinline__ void v_mov_b32_up2p(const T value) {
+  static_assert(sizeof(T) == sizeof(uint32_t));
   asm volatile("v_mov_b32 v[%0], %1"
     : 
-    : "n"(GPR), "i"(value));
+    : "n"(GPR), "v"(value));
+}
+
+template <int GPR, typename T = uint32_t>
+__device__ __forceinline__ T v_mov_b32_p2up() {
+  static_assert(sizeof(T) == sizeof(uint32_t));
+  T r;
+  if constexpr (GPR < 256) {
+    asm volatile("v_mov_b32 %0, v[%1]"
+      : "=v"(r)
+      : "n"(GPR));
+  }
+  else {
+    asm volatile("v_accvgpr_read_b32 %0, a[%1]"
+      : "=v"(r)
+      : "n"(GPR - 256));
+  }
+  return r;
 }
 
 template<int GPR0, int GPR1>
@@ -612,8 +989,9 @@ __device__ __forceinline__ void v_cndmask_b32_e64(uint64_t mask) {
     : 
     : "n"(GPR0), "n"(GPR1), "n"(GPR2), "s"(mask));
 }
+
 /**
- * @brief Multiplication operation on explicit registers.
+ * @brief Multiplication operation on explicit registers and immediate operand.
  */
 struct mul {
   template<int GPR0, int GPR1> 
@@ -628,6 +1006,12 @@ struct mul {
     }
   }
 
+  template<int GPR0, int GPR1> 
+  static __device__ inline void op_pk2(const float &param) {
+    op<GPR0, GPR1>(param);
+    op<GPR0 + 1, GPR1 + 1>(param);
+  }
+
   template<int GPR0, int GPR1, int GPR2>
   static __device__ inline void op() {
     if constexpr (GPR0 < 256 && GPR1 < 256 && GPR2 < 256) {
@@ -638,7 +1022,43 @@ struct mul {
       static_assert(false, "Invalid operand for instruction: v_mul_f32_e32");
     }
   }
+
+  template<int GPR0, int GPR1, int GPR2>
+  static __device__ inline void op_pk2() {
+    if constexpr (GPR0 < (256 - 1) && GPR1 < (256 - 1) && GPR2 < (256 - 1)) {
+      asm volatile("v_pk_mul_f32 v[%0:%1], v[%4:%5], v[%2:%3]"
+        : 
+        : "n"(GPR0), "n"(GPR0 + 1), "n"(GPR1), "n"(GPR1 + 1), "n"(GPR2), "n"(GPR2 + 1));
+    } else {
+      static_assert(false, "Invalid operand for instruction: v_pk_mul_f32");
+    }
+  }
 }; 
+
+ struct mul_vgpr {
+  template<int GPR0, int GPR1> 
+  static __device__ inline void op(const float &param) {
+    if constexpr (GPR0 < 256 && GPR1 < 256) {
+      asm volatile("v_mul_f32_e32 v[%0], %2, v[%1]"
+        : 
+        : "n"(GPR0), "n"(GPR1), "v"(param));
+    } else {
+      static_assert(false, "Invalid operand for instruction: v_mul_f32_e32");
+    }
+  }
+
+  template<int GPR0, int GPR1> 
+  static __device__ inline void op_pk2(const float &param) {
+    if constexpr (GPR0 < (256 - 1) && GPR1 < (256 - 1)) {
+      const float2 param2 = {param, param};
+      asm volatile("v_pk_mul_f32 v[%0:%1], %4, v[%2:%3]"
+        : 
+        : "n"(GPR0), "n"(GPR0 + 1), "n"(GPR1), "n"(GPR1 + 1), "v"(param2));
+    } else {
+      static_assert(false, "Invalid operand for instruction: v_pk_mul_f32");
+    }
+  }
+};
 
 struct exp2 {
   template<int GPR0, int GPR1> 

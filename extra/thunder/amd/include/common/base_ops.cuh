@@ -216,6 +216,59 @@ template<> __device__ inline bf16_2 relu::op<bf16_2>(const bf16_2 &x) { return _
 template<> __device__ inline half   relu::op<half>  (const half &x  ) { return __hmax(x, base_types::constants<half>::zero());    }
 template<> __device__ inline half_2 relu::op<half_2>(const half_2 &x) { return half_2{__hmax(x.x, base_types::constants<half>::zero()), 
                                                                                      __hmax(x.y, base_types::constants<half>::zero())}; }
+
+
+constexpr float SQRT_2_OVER_PI   = 0.7978845608028654f;
+constexpr float GELU_COEFF       = 0.044715f;
+constexpr float GELU_INNER_COEFF = GELU_COEFF * SQRT_2_OVER_PI;
+constexpr float DGELU_COEFF      = 3.0f * GELU_COEFF * SQRT_2_OVER_PI;
+
+static __device__ inline float fast_tanh(float x) {
+    x = fmaxf(fminf(x, 20.f), -20.f);
+    float e2x = __builtin_amdgcn_exp2f(x * 2.8853900817779268f);
+    return (e2x - 1.0f) * __frcp_rn(e2x + 1.0f);
+}
+
+/**
+ * @brief Gaussian Error Linear Unit (GELU) activation.
+ *
+ * Computes the GELU approximation: x * 0.5 * (1 + tanh(sqrt(2/pi) * (x + 0.044715 * x^3))).
+ *
+ * @tparam T The data type of the input and output values.
+ * @param x[in] The input value.
+ * @return The GELU activation applied to the input.
+ */
+struct gelu {
+    template<typename T> static __device__ inline T op(const T &x);
+};
+template<> __device__ inline float gelu::op<float>(const float &x) {
+    return x * (0.5f + 0.5f * fast_tanh(x * (SQRT_2_OVER_PI + GELU_INNER_COEFF * x * x)));
+}
+template<> __device__ inline float2 gelu::op<float2>(const float2 &x) {
+    return float2{gelu::op<float>(x.x), gelu::op<float>(x.y)};
+}
+
+/**
+ * @brief Derivative of the GELU activation.
+ *
+ * Computes the derivative of the GELU approximation with respect to the input.
+ *
+ * @tparam T The data type of the input and output values.
+ * @param x[in] The input value.
+ * @return The derivative of GELU evaluated at the input.
+ */
+struct dgelu {
+    template<typename T> static __device__ inline T op(const T &x);
+};
+template<> __device__ inline float dgelu::op<float>(const float &x) {
+    float tanh_out = fast_tanh(SQRT_2_OVER_PI * x * (1.f + GELU_COEFF * x * x));
+    return 0.5f * x * ((1.f - tanh_out * tanh_out) * (SQRT_2_OVER_PI + DGELU_COEFF * x * x)) +
+           0.5f * (1.f + tanh_out);
+}
+template<> __device__ inline float2 dgelu::op<float2>(const float2 &x) {
+    return float2{dgelu::op<float>(x.x), dgelu::op<float>(x.y)};
+}
+
 /**
  * @brief Copy operation.
  *
