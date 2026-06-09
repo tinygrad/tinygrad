@@ -21,7 +21,7 @@
   * @param idx[in] The index of the tile to load data from.
   */
  
- template<int axis, ducks::art::all RT, ducks::gl::all GL, ducks::coord::tile COORD=coord<RT>>
+ template<int axis, int elem_offset=0, ducks::art::all RT, ducks::gl::all GL, ducks::coord::tile COORD=coord<RT>>
  __device__ inline static void load(RT &dst, const GL &src, const COORD &idx, const COORD &warp_idx) {
      using T2 = RT::dtype;
      constexpr int packing = base_types::packing<typename RT::dtype>::num();
@@ -42,22 +42,48 @@
      buffer_resource br = make_buffer_resource(as_u64, buffer_size, 0x00020000);
  
      int warp_offset = src.idx(warp_idx.template unit_coord<axis, 3>());
+     int thr_offset = (row_offset * row_stride + col_offset + warp_offset) * sizeof(U);
  
      // Compile-time loop to load data into the tile
      auto perform_load_at = [&]<int N, int M, int K>() {
          using tile_range = ducks::art::get_nth_range_t<typename RT::register_ranges, N * RT::width + M>;
          const int register_offset = K * RT::registers_per_stride;
+
+         constexpr int col = RT::base_tile_cols*M + K * RT::base_tile_elements_per_stride_group;
+         constexpr int row = RT::base_tile_rows*N;
+         const int k_row_offset = row * row_stride * sizeof(U);
  
-         const int col = RT::base_tile_cols*M + col_offset + K * RT::base_tile_elements_per_stride_group;
-         const int row = RT::base_tile_rows*N + row_offset;
-         const int offset = (row*row_stride + col + warp_offset) * sizeof(U);
- 
-         if constexpr (std::is_same_v<U2, bf16_2>) {
-             if constexpr (RT::base_tile_stride == 8) {
-                 macros::buffer_load_dwordx4<tile_range::lo + register_offset>(br, offset);
-             } else if constexpr (RT::base_tile_stride == 4) {
-                 macros::buffer_load_dwordx2<tile_range::lo + register_offset>(br, offset);
-             }
+         constexpr int stride_in_bytes = RT::base_tile_stride * sizeof(U);
+         constexpr int offset_in_bytes = (elem_offset + col) * sizeof(U);
+         constexpr int start_gpr = tile_range::lo + register_offset;
+
+         if constexpr (offset_in_bytes <= macros::max_mubuf_inst_offset()) {
+            if constexpr (stride_in_bytes == (sizeof(int32_t) * 4)) {
+                macros::buffer_load_dwordx4<start_gpr>(br, thr_offset + k_row_offset, 0, offset_in_bytes);
+            }
+            else if constexpr (stride_in_bytes == (sizeof(int32_t) * 2)) {
+                macros::buffer_load_dwordx2<start_gpr>(br, thr_offset + k_row_offset, 0, offset_in_bytes);
+            }
+            else if constexpr (stride_in_bytes == sizeof(int32_t)) {
+                macros::buffer_load_dword<start_gpr>(br, thr_offset + k_row_offset, 0, offset_in_bytes);
+            }
+            else {
+                static_assert(false, "Encounter unsupported format in ops/warp/memory/tile/assembly/global_to_register.cuh\n");
+            }
+         }
+         else {
+            if constexpr (stride_in_bytes == (sizeof(int32_t) * 4)) {
+                macros::buffer_load_dwordx4<start_gpr>(br, thr_offset + offset_in_bytes + k_row_offset, 0, 0);
+            }
+            else if constexpr (stride_in_bytes == (sizeof(int32_t) * 2)) {
+                macros::buffer_load_dwordx2<start_gpr>(br, thr_offset + offset_in_bytes + k_row_offset, 0, 0);
+            }
+            else if constexpr (stride_in_bytes == sizeof(int32_t)) {
+                macros::buffer_load_dword<start_gpr>(br, thr_offset + offset_in_bytes + k_row_offset, 0, 0);
+            }
+            else {
+                static_assert(false, "Encounter unsupported format in ops/warp/memory/tile/assembly/global_to_register.cuh\n");
+            }
          }
      };
  
@@ -74,12 +100,11 @@
              }(std::make_index_sequence<RT::width>{});
          }.template operator()<Ns>(), ...);
      }(std::make_index_sequence<RT::height>{});
-     
  }
  
  template<ducks::art::all RT, ducks::gl::all GL, ducks::coord::tile COORD=coord<RT>>
  __device__ inline static void load(RT &dst, const GL &src, const COORD &idx, const COORD &warp_idx) {
-     load<2, RT, GL>(dst, src, idx, warp_idx);
+     load<2, 0, RT, GL>(dst, src, idx, warp_idx);
  }
  
  /**

@@ -473,6 +473,28 @@ __device__ static inline void relu(T &dst, const T &src) {
     unary_map<base_ops::relu, T>(dst, src);
 }
 /**
+ * @brief Applies the GELU function (tanh approximation) to each element of a tile.
+ *
+ * @tparam T Tile type.
+ * @param dst[out] Destination tile where the result is stored.
+ * @param src[in] Source tile to apply the GELU function on.
+ */
+template<ducks::rt::all T>
+__device__ static inline void gelu(T &dst, const T &src) {
+    unary_map<base_ops::gelu, T>(dst, src);
+}
+/**
+ * @brief Applies the GELU derivative to each element of a tile.
+ *
+ * @tparam T Tile type.
+ * @param dst[out] Destination tile where the result is stored.
+ * @param src[in] Source tile to apply the GELU derivative on.
+ */
+template<ducks::rt::all T>
+__device__ static inline void dgelu(T &dst, const T &src) {
+    unary_map<base_ops::dgelu, T>(dst, src);
+}
+/**
  * @brief Copies the elements from one tile to another.
  *
  * @tparam T Destination tile type.

@@ -90,5 +90,6 @@ concept all = requires {
 template<size_t _length> using sv_bf = sv<bf16,  _length>;
 template<size_t _length> using sv_hf = sv<half,  _length>;
 template<size_t _length> using sv_fl = sv<float, _length>;
+template<size_t _length> using sv_fp8e4m3 = sv<fp8e4m3, _length>;
 
 } // namespace kittens
