@@ -259,17 +259,20 @@ class TestCustomKernel(unittest.TestCase):
   def test_gemm_qkv(self):
     B, N, K_DIM, H_KV, REP, D = 2, 7, 6, 2, 2, 6
     H, QKV = H_KV * REP, H_KV * (REP + 2) * D
+
     x = Tensor.empty(B*N, K_DIM)
     w = Tensor.empty(K_DIM, QKV)
-    qkv = Tensor.empty(B*N, QKV, device=Device.DEFAULT)
-    #qkv = (x @ w).contiguous()
+    qkv = Tensor.empty(B*N, QKV)
+
     qkv = Tensor.custom_kernel(qkv, x, w, fxn=custom_gemm)[0]
-    qkv = qkv.reshape(B, N, QKV)
     qkv = qkv.reshape(B, N, H_KV, REP + 2, D)
-    q = qkv[:, :, :, :REP, :].reshape(B, N, H, D)
-    k = qkv[:, :, :, REP, :].reshape(B, N, H_KV, D)
-    v = qkv[:, :, :, REP + 1, :].reshape(B, N, H_KV, D)
-    out = Tensor.scaled_dot_product_attention(q, k, v)
+
+    q = qkv[:, :, :, :REP, :].reshape(B, N, H, D).transpose(1, 2)
+    k = qkv[:, :, :, REP, :].transpose(1, 2)
+    v = qkv[:, :, :, REP + 1, :].transpose(1, 2)
+
+    out = q.scaled_dot_product_attention(k, v, enable_gqa=True)
+
     GlobalCounters.reset()
     out.realize()
     self.assertEqual(GlobalCounters.kernel_count, 5)

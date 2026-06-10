@@ -46,8 +46,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     from tinygrad.uop.ops import UOp
     new_shape = argfix(shape)
     dt = to_dtype(dtype) if dtype is not None else None
-    if isinstance(fill_value, UOp): val = cls.const(dt or fill_value.dtype, fill_value)
-    else: val = cls.const(dt or dtypes.from_py(fill_value), fill_value)
+    val = cls.const(dt or (fill_value.dtype if isinstance(fill_value, UOp) else dtypes.from_py(fill_value)), fill_value)
     val = val.reshape((1,)*len(new_shape)).expand(new_shape)
     return val.clone(device=device) if buffer else val
 
@@ -56,9 +55,6 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
   def _getitem(self, indices, v=None) -> Self:
     from tinygrad.uop.ops import UOp
     def is_adv(i): return isinstance(i,(list,tuple)) or (isinstance(i,type(self)) and (not isinstance(i,UOp) or i.shape != ()))
-    # view-only indexing (no Tensor/list indices, no setitem) is handled by MovementMixin.__getitem__
-    if v is None and not any(is_adv(i) for i in (indices if isinstance(indices,tuple) else (indices,))):
-      return super().__getitem__(indices)
     # wrap single index into a list
     if (isinstance(indices, list) and all_int(indices)) or not isinstance(indices, (tuple, list)): indices = [indices]
     indices_parsed, dim = [], 0
@@ -403,10 +399,6 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     # ptr dtypes aren't in the promo lattice
     if x.dtype == y.dtype or any(isinstance(d, PtrDType) for d in (x.dtype, y.dtype)): return x, y
     return x.cast(out_dtype := least_upper_dtype(x.dtype, y.dtype)), y.cast(out_dtype)
-
-  def _binop(self, op:Ops, x, reverse:bool) -> Self:
-    lhs, rhs = self._broadcasted(x, reverse)
-    return lhs.alu(op, rhs)
 
   def dot(self, w:Self, dtype:DTypeLike|None=None) -> Self:
     """
@@ -765,7 +757,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     base = ret[..., -1]._cumalu(-1, op)._pad_constant((None,)*(ret.ndim-2) + ((1, -1),), value)
     base = base.unsqueeze(-1).expand(*base.shape, ret.shape[-1])
     def fix(x: Self) -> Self: return x.flatten(start_dim=-2)[..., -s:].transpose(axis,-1)
-    return getattr(fix(ret), {Ops.ADD: "add", Ops.MAX: "maximum", Ops.MUL: "mul"}[op])(fix(base))
+    return fix(ret).alu(op, fix(base))
 
   def cumsum(self, axis:int=0) -> Self:
     """
@@ -1304,9 +1296,9 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     ```
     """
     axis = tuple(range(-len(k_ := make_tuple(kernel_size, 2)), 0))
-    pads = resolve_pool_pads(padding, len(k_))
-    if ceil_mode: pads = self._apply_ceil_mode(pads, k_, stride if stride is not None else k_, dilation)
     s_ = stride if stride is not None else k_
+    pads = resolve_pool_pads(padding, len(k_))
+    if ceil_mode: pads = self._apply_ceil_mode(pads, k_, s_, dilation)
     pooled = self._pad_constant(((0,0),)*(self.ndim-len(k_)) + flat_to_grouped(pads), self.dtype.min)._pool(k_, s_, dilation)
     if not return_indices: return pooled.max(axis)
     spatial_sz = int(prod(spatial_shape := self.shape[-len(k_):]))
