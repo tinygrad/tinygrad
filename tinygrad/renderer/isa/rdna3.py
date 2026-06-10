@@ -19,6 +19,38 @@ import tinygrad.runtime.autogen.amd.rdna3.ins as RDNA3Ops
 # - look at amd/elf.py  for kernel launching semantics/metadata
 # - exec masking??
 
+"""
+First principles thinking:
+
+- regalloc + renderer stubs handles loading register values
+- need widened vregs for instructions like global_load_b64/b128 etc.. v[4:8]
+- start with pinned pairs
+
+- goal, ensure UOp src operands come in order of instruction encoding to satisfy isa, makes encoding easier
+  - look at vop2()
+  - explicitly emit register moves if necessary
+- where should register fusion happen? at encoding step probably not in izsel_matcher
+
+Target program input AST:
+
+Tensor.empty(3,3) + Tensor.empty(3,3)
+
+c0 = UOp(Ops.PARAM, dtypes.float.ptr(9), (), ParamArg(0))
+c2 = UOp.special(3, 'lidx0', dtype=dtypes.int)
+c3 = UOp.special(3, 'gidx0', dtype=dtypes.int)
+c5 = c2+c3*UOp.const(dtypes.int, 3)
+c7 = UOp(Ops.PARAM, dtypes.float.ptr(9), (), ParamArg(1))
+c9 = c7.index(c5, ptr=True).load()
+c10 = UOp(Ops.PARAM, dtypes.float.ptr(9), (), ParamArg(2))
+c12 = c10.index(c5, ptr=True).load()
+c13 = c9+c12
+c15 = c0.index(c5, ptr=True).store(c13).end(c3, c2)
+
+handwritten asm:
+
+kernel:
+"""
+
 VGPRS = tuple(Register(f"v{i}", i) for i in range(256))
 SGPRS = tuple(Register(f"s{i}", i) for i in range(106))
 # Unless the Target Properties column of AMDGPU Processors specifies otherwise, a separate VGPR register is used per work-item ID.
@@ -74,35 +106,6 @@ dt_32bit = tuple(dt.vec(l) for dt in dts for l in [4,2,1] if l*dt.itemsize == 4 
 dt_64bit = tuple(dt.vec(l) for dt in dts for l in [8,4,2,1] if l*dt.itemsize == 8 and dt not in dtypes.int64s)
 dt_128bit = tuple(dt.vec(l) for dt in dts for l in [16,8,4,2,1] if l*dt.itemsize == 16)
 
-"""
-First principles thinking:
-
-- regalloc + renderer stubs handles loading register values
-- need widened vregs for instructions like global_load_b64/b128 etc.. v[4:8]
-- start with pinned pairs
-
-Target program input AST:
-
-Tensor.empty(3,3) + Tensor.empty(3,3)
-
-c0 = UOp(Ops.PARAM, dtypes.float.ptr(9), (), ParamArg(0))
-c2 = UOp.special(3, 'lidx0', dtype=dtypes.int)
-c3 = UOp.special(3, 'gidx0', dtype=dtypes.int)
-c5 = c2+c3*UOp.const(dtypes.int, 3)
-c7 = UOp(Ops.PARAM, dtypes.float.ptr(9), (), ParamArg(1))
-c9 = c7.index(c5, ptr=True).load()
-c10 = UOp(Ops.PARAM, dtypes.float.ptr(9), (), ParamArg(2))
-c12 = c10.index(c5, ptr=True).load()
-c13 = c9+c12
-c15 = c0.index(c5, ptr=True).store(c13).end(c3, c2)
-
-handwritten asm:
-
-kernel:
-"""
-
-# Load consts wave uniform??
-
 V_ADD = {
   dtypes.float16 : RDNA3Ops.v_add_f16_e32,  dtypes.float32 : RDNA3Ops.v_add_f32_e32,
   dtypes.float64 : RDNA3Ops.v_add_f64,      dtypes.int32 : RDNA3Ops.v_add_nc_i32,
@@ -115,6 +118,18 @@ V_MUL = {
   dtypes.uint32 : RDNA3Ops.v_mul_u32_u24_e32,
 }
 
+# ensure at least 1 operand is stored in a VGPR (src1), def_reg otherwise??
+def is_sgpr(x:UOp) -> bool: return x.tag[0].cons[0].name[0] == "s"
+def is_imm(x:UOp) -> bool: return x.tag == True
+def is_vgpr(x:UOp) -> bool: return x.tag is not None and (not is_imm(x)) and x.tag[0].cons[0].name[0] == "v"
+def to_vgpr(x:UOp): return x if is_vgpr(x) else x.ins(RDNA3Ops.v_mov_b32_e32, src=(x,), tag=None) # tag=None forces vreg GP_VGPR alloc
+
+# ensures vsrc1 is a vgpr operand
+def vop2(x:UOp):
+  a, b = x.src
+  if is_vgpr(b): return (a, b)
+  elif is_vgpr(a): return (b, a)
+  else: return (a, to_vgpr(b))
 
 isel_matcher = PatternMatcher([
   # rtag every const, masks tag type as non Register to ensure it doesn't get treated as one
@@ -124,8 +139,8 @@ isel_matcher = PatternMatcher([
   (UPat((Ops.SPECIAL, Ops.PARAM, Ops.DEFINE_VAR), name="x"), abi),
 
   # alu ops
-  ((UPat() + UPat()).named("x"), lambda x: x.ins(V_ADD[x.dtype])),
-  ((UPat() * UPat()).named("x"), lambda x: x.ins(V_MUL[x.dtype])),
+  ((UPat() + UPat()).named("x"), lambda x: x.ins(V_ADD[x.dtype], src=vop2(x))),
+  ((UPat() * UPat()).named("x"), lambda x: x.ins(V_MUL[x.dtype], src=vop2(x))),
 
   # mem ops
   (UPat(Ops.LOAD, dt_32bit, name="x", src=(UPat(name="idx"))), lambda x,idx: x.ins(RDNA3Ops.global_load_b32, src=fold_address(idx))),
@@ -144,7 +159,6 @@ def encode(x:UOp) -> bytes|None:
     r = _route(rr[0])
     if len(rr) > 1: return r[rr[0].index:rr[0].index+len(rr)-1]
     else: return r[rr[0].index]
-  def _fuseable(a,b): return isinstance(a.tag, tuple) and isinstance(b.tag, tuple)
   oprs, fields = x.src, [_fuse(x.tag)]
   if group == "SMEM":
     assert oprs[-1].op == Ops.CONST
@@ -152,6 +166,9 @@ def encode(x:UOp) -> bytes|None:
     fields.extend([_fuse(sbase), dsl_null, oprs[-1].arg])
     ret = enc(*fields)
     return ret.to_bytes()
+  elif group == "VOP2":
+    pass
+
 
 class RDNA3Renderer(ISARenderer):
   device = "AMD"
