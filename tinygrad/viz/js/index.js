@@ -64,9 +64,7 @@ function addTags(root, path) {
   else root.selectAll("text").data(d => [d]).join("text").text(d => d.text).attr("dy", "0.35em");
 }
 
-let anchor = null;
-const graphLabelText = label => Array.isArray(label) ? label.flat(Infinity).map(x => x?.st ?? x).join("") : parseColors(label ?? "").map(x => x.st).join("");
-
+anchor = null;
 const drawGraph = (data) => {
   const g = dagre.graphlib.json.read(data);
   // draw nodes
@@ -74,37 +72,21 @@ const drawGraph = (data) => {
   const callCount = g.graph().callCount;
   const nodes = d3.select("#nodes").selectAll("g").data(g.nodes().map(id => g.node(id)), d => d).join("g").attr("class", d => d.className ?? "node")
     .attr("transform", d => `translate(${d.x},${d.y})`).on("click", (e,d) => {
-      highlightGraphNode(d, e.target);
+      const parents = g.predecessors(d.id);
+      const children = g.successors(d.id);
+      if (parents == null && children == null) return;
+      const src = [...parents, ...children, d.id];
+      nodes.classed("highlight", n => src.includes(n.id)).classed("child", n => children.includes(n.id));
+      if (!e.target.classList.contains("token")) labels.selectAll("rect.bg").classed("highlight", false);
+      const matchEdge = (v, w) => (v===d.id && children.includes(w)) ? "highlight child " : (parents.includes(v) && w===d.id) ? "highlight " : "";
+      d3.select("#edges").selectAll("path.edgePath").attr("class", e => matchEdge(e.v, e.w)+"edgePath");
+      d3.select("#edge-labels").selectAll("g.port").attr("class",  (_, i, n) => matchEdge(...n[i].id.split("-"))+"port");
       e.stopPropagation();
     });
   nodes.selectAll("rect").data(d => [d]).join("rect").attr("width", d => d.width).attr("height", d => d.height).attr("fill", d => d.color)
     .attr("x", d => -d.width/2).attr("y", d => -d.height/2).classed("node", true);
   const STROKE_WIDTH = 1.4, textSpace = g.graph().textSpace;
   const labels = nodes.selectAll("g.label").data(d => [d]).join("g").attr("class", "label");
-  const highlightGraphNode = (d, target) => {
-    const parents = g.predecessors(d.id);
-    const children = g.successors(d.id);
-    if (parents == null && children == null) return;
-    const src = [...parents, ...children, d.id];
-    nodes.classed("highlight", n => src.includes(n.id)).classed("child", n => children.includes(n.id));
-    if (!target?.classList.contains("token")) labels.selectAll("rect.bg").classed("highlight", false);
-    const matchEdge = (v, w) => (v===d.id && children.includes(w)) ? "highlight child " : (parents.includes(v) && w===d.id) ? "highlight " : "";
-    d3.select("#edges").selectAll("path.edgePath").attr("class", e => matchEdge(e.v, e.w)+"edgePath");
-    d3.select("#edge-labels").selectAll("g.port").attr("class",  (_, i, n) => matchEdge(...n[i].id.split("-"))+"port");
-  };
-  d3.select("#graph-find-index").selectAll("div").data(g.nodes().map(id => g.node(id)), d => d.id).join(
-    enter => enter.append("div").attr("hidden", "until-found").text(d => graphLabelText(d.label)),
-    update => update.attr("hidden", "until-found").text(d => graphLabelText(d.label)), exit => exit.remove()
-  ).on("beforematch", (e, d) => {
-    const target = e.currentTarget;
-    d3.selectAll(".highlight").classed("highlight", false);
-    highlightGraphNode(d, nodes.filter(n => n.id === d.id).select("rect.node").node());
-    const svg = d3.select("#graph-svg");
-    const z = d3.zoomTransform(svg.node()), R = graphRect();
-    const k = Math.max(z.k, Math.min(2, R.width/(d.width*2), R.height/(d.height*2)));
-    svg.call(svgZoom.transform, d3.zoomIdentity.translate(R.x+R.width/2-d.x*k, R.y+R.height/2-d.y*k).scale(k));
-    setTimeout(() => target?.setAttribute("hidden", "until-found"), 100);
-  });
   labels.attr("transform", d => `translate(${d.labelX-d.labelWidth/2}, -${d.labelHeight/2+STROKE_WIDTH*2})`);
   const rectGroup = labels.selectAll("g.rect-group").data(d => [d]).join("g").attr("class", "rect-group");
   const tokens = labels.selectAll("g.text-group").data(d => [d]).join("g").attr("class", "text-group").selectAll("text").data(d => {
@@ -299,12 +281,7 @@ function selectShape(key) {
 // scaling function for time to pixels
 const timelineScale = () => d3.scaleLinear().domain([data.first, data.dur]).range([0, canvasDims()[0]]);
 
-function formatNanoseconds(ns) {
-  const remNs = Math.round(ns % 1000);
-  return ns/1000>1 ? formatMicroseconds(ns / 1000, true) + (remNs ? ` ${remNs}ns` : "") : Math.round(ns)+"ns";
-}
-
-function nsAtCycle(clk) {
+function timeAtCycle(clk) {
   if (clk < data.instSt || clk > data.instEt || data.tracks.get("Shader Clock") == null) return "-";
   let cur = data.instSt, ns = 0, freq = null;
   // walk through all frequency changes and accumulate time in nanoseconds
@@ -319,12 +296,8 @@ function nsAtCycle(clk) {
   }
   // ending cycles use the last known frequency
   if (cur < clk) ns += (clk - cur) * 1e9 / freq;
-  return ns;
-}
-
-function timeAtCycle(clk) {
-  const ns = nsAtCycle(clk);
-  return ns === "-" ? ns : formatNanoseconds(ns);
+  const remNs = Math.round(ns % 1000);
+  return ns/1000>1 ? formatMicroseconds(ns / 1000, true) + (remNs ? ` ${remNs}ns` : "") : Math.round(ns)+"ns";
 }
 
 function getZoomIdentity() {
@@ -445,24 +418,10 @@ async function renderProfiler(path, opts) {
   const dur = u32(), tracePeak = u64(), indexLen = u32(), layoutsLen = u32(); data.dur = dur;
   const textDecoder = new TextDecoder("utf-8");
   const { strings, dtypeSize, markers, ...extData } = JSON.parse(textDecoder.decode(new Uint8Array(buf, offset, indexLen))); offset += indexLen;
-  markers.sort((a, b) => a.ts - b.ts);
   for (const [k,v] of Object.entries(extData)) data[k] = v;
   // place devices on the y axis and set vertical positions
   const [tickSize, padding, baseOffset] = [5, 8, markers.length ? 14 : 0];
-  const markerRelativeTime = (tick, st, et) => {
-    let marker = null;
-    for (const m of markers) {
-      if (m.ts > tick) break;
-      marker = m;
-    }
-    if (marker == null) return "-";
-    if (opts.unit == "clk") {
-      const ns = nsAtCycle(tick), markerNs = nsAtCycle(marker.ts);
-      if (ns !== "-" && markerNs !== "-") return formatNanoseconds(ns-markerNs);
-    }
-    return formatTime(tick-marker.ts, et-st <= 1e3);
-  };
-  const secondaryTick = markers.length ? markerRelativeTime : opts.unit == "clk" ? timeAtCycle : null;
+  const secondaryTick = opts.unit == "clk" ? timeAtCycle : null;
   const axisHeight = secondaryTick != null ? tickSize*2+(padding*2) : tickSize;
   const deviceList = profiler.append("div").attr("id", "device-list").style("padding-top", axisHeight+padding+baseOffset+"px");
   const canvas = profiler.append("canvas").attr("id", "timeline").node();
@@ -740,19 +699,10 @@ async function renderProfiler(path, opts) {
       ctx.textBaseline = "top";
       ctx.fillText(label, labelX, y+tickSize);
       lastLabelEnd = labelX + ctx.measureText(label).width + 4;
-    }
-    if (secondaryTick != null) {
-      lastLabelEnd = -Infinity;
-      const secondaryTicks = markers.length ? Array.from(new Set([...xscale.ticks().filter(Number.isInteger), ...markers.map(m => m.ts).filter(ts => ts >= st && ts <= et)])).sort((a, b) => a-b)
-                                          : xscale.ticks().filter(Number.isInteger);
-      for (const tick of secondaryTicks) {
-        const x = xscale(tick);
+      if (secondaryTick != null) {
         drawLine(ctx, [x, x], [y, y-tickSize]);
-        const labelX = x+ctx.lineWidth+2;
-        if (labelX <= lastLabelEnd) continue;
-        const label = secondaryTick(tick, st, et);
-        ctx.fillText(label, labelX, 0);
-        lastLabelEnd = labelX + ctx.measureText(label).width + 4;
+        const label = secondaryTick(tick, st, et); ctx.fillText(label, labelX, 0);
+        lastLabelEnd = Math.max(lastLabelEnd, labelX + ctx.measureText(label).width + 4);
       }
     }
     if (data.axes.y != null) {
@@ -846,14 +796,6 @@ const vizZoomFilter = e => (!e.ctrlKey || e.type === 'wheel' || e.type === 'mous
 const svgZoom = d3.zoom().filter(vizZoomFilter).on("zoom", (e) => d3.select("#render").attr("transform", e.transform));
 d3.select("#graph-svg").call(svgZoom);
 
-const graphRect = () => {
-  const mainRect = rect(".main-container");
-  const x0 = rect(".ctx-list-parent").right;
-  const x1 = rect(".metadata-parent").left;
-  const pad = 16;
-  return { x:x0+pad, y:mainRect.top+pad, width:(x1>0 ? x1-x0 : mainRect.width)-2*pad, height:mainRect.height-2*pad };
-};
-
 // zoom to fit into view
 document.getElementById("zoom-to-fit-btn").addEventListener("click", () => {
   const canvas = d3.select("#timeline");
@@ -862,7 +804,11 @@ document.getElementById("zoom-to-fit-btn").addEventListener("click", () => {
   }
   const svg = d3.select("#graph-svg");
   svg.call(svgZoom.transform, d3.zoomIdentity);
-  const R = graphRect();
+  const mainRect = rect(".main-container");
+  const x0 = rect(".ctx-list-parent").right;
+  const x1 = rect(".metadata-parent").left;
+  const pad = 16;
+  const R = { x: x0+pad, y: mainRect.top+pad, width: (x1>0 ? x1-x0 : mainRect.width)-2*pad, height: mainRect.height-2*pad };
   const r = rect("#render");
   if (r.width === 0) return;
   const scale = Math.min(R.width/r.width, R.height/r.height);

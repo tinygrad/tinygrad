@@ -315,20 +315,6 @@
     display: none;
     font-size: 10px;
   }
-  #graph-find-index {
-    position: fixed;
-    left: 0;
-    top: 0;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    pointer-events: none;
-    opacity: 0;
-  }
-  #graph-find-index [hidden="until-found"] {
-    display: block;
-    contain: layout;
-  }
   #device-list > div {
     overflow-x: auto;
     overflow-y: hidden;
@@ -428,7 +414,6 @@
     <div id="progress-message"></div>
     <div class="container ctx-list-parent"><div class="ctx-list"></div></div>
     <div class="view" id="profiler"></div>
-    <div id="graph-find-index"></div>
     <div class="view" id="graph">
       <svg id="graph-svg" preserveAspectRatio="xMidYMid meet">
         <g id="render">
