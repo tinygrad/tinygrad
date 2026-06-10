@@ -126,6 +126,7 @@ class Qwen3VLVis():
     return image_embeds, hidden_states, deepstack_feature_lists
 
   def prefill_img(self, lang, image, start_pos):
+    if type(image) == bytes: image = cv2.cvtColor(cv2.imdecode(np.frombuffer(image, np.uint8), cv2.IMREAD_COLOR), cv2.COLOR_BGR2RGB)
     if image.shape[:2] != self.res:
       target_h, target_w = self.res[:2]
       s = min(target_w / image.shape[1], target_h / image.shape[0])
@@ -263,10 +264,7 @@ def DO_POST(self):
       if "image" in msg:
         ids.extend([0] * (self.server.vis.toks_per_img + 8))
         if i == len(body["messages"]) - 1:
-          img_data = base64.b64decode(msg["image"].split(',')[1])
-          image = cv2.imdecode(np.frombuffer(img_data, np.uint8), cv2.IMREAD_COLOR)
-          image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-          self.server.vis.prefill_img(lang=self.server.model, image=image, start_pos=\
+          self.server.vis.prefill_img(lang=self.server.model, image=base64.b64decode(msg["image"].split(',')[1]), start_pos=\
           Variable("pos", 0, self.server.model.max_context).bind(len(self.server.model._cached_tokens)))
           if i > 0: self.server.model._cached_tokens.extend(tok.end_turn()) # todo!
           self.server.model._cached_tokens.extend([0] * (self.server.vis.toks_per_img + vis.prefix.shape[0] + vis.suffix.shape[0]))
