@@ -66,8 +66,7 @@ def prefill(vis, lang, image, start_pos):
 
   # f"<|im_start|>user\n<|vision_start|><|image_pad|><|vision_end|>\n<|im_end|>\n" fill size of img with image token
   # <|im_end|>\n<|im_start|>assistant\n
-  num_image_tokens = int((grid_h*grid_w) / 4) # todo clean
-  input_ids = Tensor.cat(vis.prefix, Tensor.zeros(num_image_tokens), vis.suffix).unsqueeze(0).cast(dtypes.int)
+  input_ids = Tensor.cat(vis.prefix, Tensor.zeros(vis.toks_per_img), vis.suffix).unsqueeze(0).cast(dtypes.int)
 
   image_embeds, hidden_states, deepstack_feature_lists = vis(pixel_values, [grid_h, grid_w])
   hidden_states = lang.token_embd(input_ids).cast(dtypes.float)
