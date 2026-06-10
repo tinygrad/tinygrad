@@ -183,7 +183,7 @@ runs:
         fi
         # **** AMD ****
         if [[ "${{ inputs.amd }}" == "true" ]]; then
-          pkgs+=" comgr liburing-dev"
+          pkgs+=" comgr"
         fi
         # **** WebGPU (dependencies for software-based vulkan) ****
         if [[ "${{ inputs.webgpu }}" == "true" ]]; then
