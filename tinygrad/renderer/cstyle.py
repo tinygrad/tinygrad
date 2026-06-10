@@ -163,14 +163,11 @@ class CStyleLanguage(Renderer):
     return prg if prefix is None else "\n".join(prefix)+f"\n{prg}"
 
   def render_index(self, x:UOp, buf:UOp, idx:UOp):
-    if buf.addrspace == AddrSpace.REG and buf.op not in {Ops.AFTER, Ops.BUFFER}:
+    if buf.addrspace == AddrSpace.REG:
       # this is lane access in C
       assert idx.op is Ops.CONST, f"{idx.op} must be CONST"
       return self[buf]+(f"[{idx.arg}]" if buf.max_numel() > self.gep_arr_threshold else f".{'xyzwabcd'[idx.arg]}")
-    ptr = f"({self[buf]}+{strip_parens(self[idx]) if idx.arg == Ops.ADD else self[idx]})"
-    if buf.addrspace != AddrSpace.REG: return ptr
-    # REG buffers have no LOAD, so the access is rendered at the INDEX. the cast handles vector access, same as render_access
-    return f"(*(({self.render_type(x)}*)({ptr})))" if x.max_numel() > 1 else f"(*{ptr})"
+    return f"({self[buf]}+{strip_parens(self[idx]) if idx.arg == Ops.ADD else self[idx]})"
 
   def render_buffer(self, x:UOp):
     shp = x.src[0].as_shape
@@ -186,7 +183,7 @@ class CStyleLanguage(Renderer):
   def _render_dtype(self, dtype:DType, sz:int=1, addrspace=AddrSpace.REG, mutable=True):
     if isinstance(dtype, ImageDType): return f"{'write_only' if mutable else 'read_only'} image2d_t"
     prefix, suffix = "", ""
-    if addrspace in (AddrSpace.LOCAL, AddrSpace.GLOBAL):
+    if addrspace in (AddrSpace.LOCAL, AddrSpace.GLOBAL, AddrSpace.MEMREG):
       if addrspace == AddrSpace.LOCAL and self.smem_prefix_for_cast: prefix = self.smem_prefix
       if addrspace == AddrSpace.GLOBAL: prefix = self.buffer_prefix
       suffix = "*"
@@ -196,10 +193,8 @@ class CStyleLanguage(Renderer):
 
   def render_type(self, u:UOp): return self._render_dtype(u.dtype, u.max_numel(), u.addrspace)
   def render_access(self, u:UOp):
-    if u.addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL):
-      if u.max_numel() > 1: return f"*(({self.render_type(u)})({self[u]}))"
-      else: return f"*{self[u]}"
-    return self[u]
+    if u.max_numel() > 1: return f"*(({self.render_type(u)})({self[u]}))"
+    else: return f"*{self[u]}"
   def render_cast(self, u:UOp, val:str) -> str: return f"({self.render_type(u)})({val})"
 
   # LEGACY
