@@ -272,7 +272,7 @@ class TestCustomKernel(unittest.TestCase):
     out = Tensor.scaled_dot_product_attention(q, k, v)
     GlobalCounters.reset()
     out.realize()
-    self.assertEqual(GlobalCounters.kernel_count, 6)
+    self.assertEqual(GlobalCounters.kernel_count, 5)
 
   def test_multi_after_schedule_order(self):
     """Test correct scheduling order when custom_kernel has multiple outputs.
