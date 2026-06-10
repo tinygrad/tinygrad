@@ -266,14 +266,18 @@ runs:
     - name: Install gpuocelot
       if: inputs.ocelot == 'true'
       shell: bash
-      run: sudo curl --create-dirs --output-dir /usr/local/lib -fLO https://github.com/tinygrad/gpuocelot/releases/download/v0.1.0/libgpuocelot.${{ runner.os == 'Linux' && 'so' || 'dylib' }}
+      run: |
+        sudo mkdir -p /usr/local/lib
+        sudo curl --output-dir /usr/local/lib -fLO https://github.com/tinygrad/gpuocelot/releases/download/v0.1.0/libgpuocelot.${{ runner.os == 'Linux' && 'so' || 'dylib' }}
 
     # **** WebGPU ****
 
     - name: Install WebGPU dawn
       if: inputs.webgpu == 'true'
       shell: bash
-      run: sudo curl --create-dirs --output-dir /usr/local/lib -fLO https://github.com/wpmed92/pydawn/releases/download/v0.1.6/libwebgpu_dawn.${{ runner.os == 'Linux' && 'so' || 'dylib' }}
+      run: |
+        sudo mkdir -p /usr/local/lib
+        sudo curl --output-dir /usr/local/lib -fLO https://github.com/wpmed92/pydawn/releases/download/v0.1.6/libwebgpu_dawn.${{ runner.os == 'Linux' && 'so' || 'dylib' }}
 
     # **** LLVM ****
 
