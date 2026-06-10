@@ -185,7 +185,7 @@ class TestLinearizer(unittest.TestCase):
     opts_to_apply = [Opt(op=OptOps.GROUP, axis=0, arg=8), Opt(op=OptOps.LOCAL, axis=0, arg=4), Opt(op=OptOps.UPCAST, axis=0, arg=4)]
     program = to_program(replace_opts(r.schedule_linear().src[-1].src[0], opts_to_apply), renderer=Device[Device.DEFAULT].renderer)
 
-    stores = [u for u in tuple(program.src[2].src) if u.op is Ops.STORE and u.src[0].addrspace != AddrSpace.REG]
+    stores = [u for u in tuple(program.src[2].src) if u.op is Ops.STORE and u.src[0].addrspace != AddrSpace.MEMREG]
 
     # the first store is to lds and can be upcasted
     assert stores[0].src[1].max_numel() == 4

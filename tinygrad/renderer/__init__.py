@@ -30,7 +30,8 @@ class Estimates:
       for u in uops:
         if u.op in {Ops.LOAD, Ops.STORE}:
           # if u.src[0] is INDEX, we have to include the buffer since it might be an AFTER
-          dont_count = dont_count.union((UOp.sink(*u.src[0].src[1:]) if u.src[0].op in {Ops.INDEX, Ops.SHRINK} else u.src[0]).toposort(range_gate))
+          idx = u.src[0].src[0] if u.src[0].op is Ops.CAST and u.src[0].src[0].op in {Ops.INDEX, Ops.SHRINK} else u.src[0]
+          dont_count = dont_count.union((UOp.sink(*idx.src[1:]) if idx.op in {Ops.INDEX, Ops.SHRINK} else idx).toposort(range_gate))
           # TODO: is this correct? this all needs to be cleaned up
           if len(u.src) > 2: dont_count = dont_count.union(u.src[2].toposort())
         elif u.op is Ops.IF:
