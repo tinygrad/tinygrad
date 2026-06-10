@@ -46,8 +46,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     from tinygrad.uop.ops import UOp
     new_shape = argfix(shape)
     dt = to_dtype(dtype) if dtype is not None else None
-    if isinstance(fill_value, UOp): val = cls.const(dt or fill_value.dtype, fill_value)
-    else: val = cls.const(dt or dtypes.from_py(fill_value), fill_value)
+    val = cls.const(dt or (fill_value.dtype if isinstance(fill_value, UOp) else dtypes.from_py(fill_value)), fill_value)
     val = val.reshape((1,)*len(new_shape)).expand(new_shape)
     return val.clone(device=device) if buffer else val
 
@@ -56,9 +55,6 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
   def _getitem(self, indices, v=None) -> Self:
     from tinygrad.uop.ops import UOp
     def is_adv(i): return isinstance(i,(list,tuple)) or (isinstance(i,type(self)) and (not isinstance(i,UOp) or i.shape != ()))
-    # view-only indexing (no Tensor/list indices, no setitem) is handled by MovementMixin.__getitem__
-    if v is None and not any(is_adv(i) for i in (indices if isinstance(indices,tuple) else (indices,))):
-      return super().__getitem__(indices)
     # wrap single index into a list
     if (isinstance(indices, list) and all_int(indices)) or not isinstance(indices, (tuple, list)): indices = [indices]
     indices_parsed, dim = [], 0
