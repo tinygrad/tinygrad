@@ -256,6 +256,28 @@ class TestCustomKernel(unittest.TestCase):
     err = (O_custom - O_ref).square().max()
     self.assertLess(err.item(), 1e-6)
 
+  def test_gemm_qkv(self):
+    B, N, K_DIM, H_KV, REP, D = 2, 7, 6, 2, 2, 6
+    H, QKV = H_KV * REP, H_KV * (REP + 2) * D
+
+    x = Tensor.empty(B*N, K_DIM)
+    w = Tensor.empty(K_DIM, QKV)
+    qkv = Tensor.empty(B*N, QKV)
+
+    qkv = Tensor.custom_kernel(qkv, x, w, fxn=custom_gemm)[0]
+    #qkv = (x @ w).contiguous()
+    qkv = qkv.reshape(B, N, H_KV, REP + 2, D)
+
+    q = qkv[:, :, :, :REP, :].reshape(B, N, H, D).transpose(1, 2)
+    k = qkv[:, :, :, REP, :].transpose(1, 2)
+    v = qkv[:, :, :, REP + 1, :].transpose(1, 2)
+
+    out = q.scaled_dot_product_attention(k, v, enable_gqa=True)
+
+    GlobalCounters.reset()
+    out.realize()
+    self.assertEqual(GlobalCounters.kernel_count, 6)
+
   def test_multi_after_schedule_order(self):
     """Test correct scheduling order when custom_kernel has multiple outputs.
 
