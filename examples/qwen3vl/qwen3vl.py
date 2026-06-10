@@ -1,15 +1,13 @@
 from tinygrad import Tensor, TinyJit, dtypes, nn, Variable
 from tinygrad.llm.gguf import gguf_load
-from tinygrad.helpers import fetch
+from tinygrad.helpers import fetch, Context, DEBUG
 from tinygrad.nn.state import load_state_dict
-import cv2
-
 import argparse, json, typing, base64, pathlib
-from tinygrad.llm.cli import models, SimpleTokenizer, LLMServer, Handler
-from tinygrad.helpers import Context, DEBUG
+from tinygrad.llm.cli import SimpleTokenizer, LLMServer, Handler
 from tinygrad.llm.model import Transformer
 from tinygrad.uop.ops import UOp, Ops
 import numpy as np
+import cv2
 
 #https://github.com/huggingface/transformers/blob/1316cd76c0ce328228e08d55dc257484961b074c/src/transformers/models/qwen3_vl/modeling_qwen3_vl.py#L129
 def rotate_half(x):
@@ -134,10 +132,10 @@ class Qwen3VLVis():
   @TinyJit
   def prefill(self, lang, image, start_pos):
     image = image.permute(2, 0, 1)
-    height, width = image.shape[-2:]
     image = image.unsqueeze(0).float()
     image = ((image / 255) - Tensor(self.image_mean).view(1, 3, 1, 1)) / Tensor(self.image_std).view(1, 3, 1, 1)
     channels = 3
+    height, width = image.shape[-2:]
     # https://github.com/huggingface/transformers/blob/4ae05b0fba41860adaaeb708774fc1f48c92c049/src/transformers/models/qwen2_vl/image_processing_qwen2_vl.py#L195
     grid_h, grid_w = height // self.patch_size, width // self.patch_size
     image = image.reshape(
