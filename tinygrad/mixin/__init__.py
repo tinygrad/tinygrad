@@ -757,7 +757,7 @@ class OpMixin(ElementwiseMixin, ReduceMixin):
     base = ret[..., -1]._cumalu(-1, op)._pad_constant((None,)*(ret.ndim-2) + ((1, -1),), value)
     base = base.unsqueeze(-1).expand(*base.shape, ret.shape[-1])
     def fix(x: Self) -> Self: return x.flatten(start_dim=-2)[..., -s:].transpose(axis,-1)
-    return getattr(fix(ret), {Ops.ADD: "add", Ops.MAX: "maximum", Ops.MUL: "mul"}[op])(fix(base))
+    return fix(ret).alu(op, fix(base))
 
   def cumsum(self, axis:int=0) -> Self:
     """
