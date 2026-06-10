@@ -3,7 +3,6 @@ from tinygrad.helpers import Target
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher
 from tinygrad.renderer.isa import ISARenderer, IselContext, Register
 import tinygrad.runtime.autogen.amd.rdna3.ins as RDNA3Ops
-from tinygrad.renderer.amd.elf import assemble_linear
 
 # Baseline functionality: add 2 tensors (a + b)
 # Requirements:
@@ -12,12 +11,6 @@ from tinygrad.renderer.amd.elf import assemble_linear
 # - ds ops, load/store lowering and address folding
 # - alu ins
 # - ins encoding
-#
-# Implement:
-# - abi(), make kernel parameters/variable definitions match abi
-# - fold_address(), extract rdna3 style addressing information out of load/store op?
-# - alloc_vregs(), allocate virtual registers according to ops
-#   - hardware register allocation is performed via codegen/late/regalloc.py, linear scan
 # 
 # Notes:
 # - AMD memory/SALU are async. Need s_waitcnt after global_load
@@ -26,13 +19,6 @@ from tinygrad.renderer.amd.elf import assemble_linear
 # - look at amd/elf.py  for kernel launching semantics/metadata
 # - exec masking??
 
-# TODO: need some way to represent Register ranges in constraint mechanisms/regalloc
-# ex. kernarg ptr is s[0:1]
-# - maybe its just done via tag constraints and Op.DEFINE_REG args specific to this isa
-
-
-# How to handle loaidng int o range of registers?
-# Need to be able to represent contiguous reg constraints ex. any pair of 32 bit sgprs
 VGPRS = tuple(Register(f"v{i}", i) for i in range(256))
 SGPRS = tuple(Register(f"s{i}", i) for i in range(106))
 # Unless the Target Properties column of AMDGPU Processors specifies otherwise, a separate VGPR register is used per work-item ID.
@@ -40,9 +26,8 @@ WGIDS, WIIDS = tuple(SGPRS[2:5]), tuple(VGPRS[:3])
 # s[0:1] reserved for kernarg ptr
 GP_SGPRS, GP_VGPRS = tuple(SGPRS[4:]), tuple(VGPRS[2:])
 
-def map_addrspace(x:UOp, local_ins,global_ins) -> UOp|None: return local_ins if x.addrspace == AddrSpace.LOCAL else global_ins if x.addrspace == AddrSpace.GLOBAL else None
+# def map_addrspace(x:UOp, local_ins,global_ins) -> UOp|None: return local_ins if x.addrspace == AddrSpace.LOCAL else global_ins if x.addrspace == AddrSpace.GLOBAL else None
 def def_reg(dt, reg:Register): return UOp(Ops.DEFINE_REG, dt, tag=(reg,))
-
 def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
   # real registers
   if x.op is Ops.DEFINE_REG and x.tag is not None: return None
@@ -52,6 +37,7 @@ def alloc_vregs(ctx:IselContext, x:UOp) -> UOp|None:
   if isinstance(x.tag, tuple) and x.tag[0]._cons: return None
   # allocate vreg definitions
   defs = []
+  # don't generally allocate to SGPRS, only works wave uniform possible future optim
   if isinstance(x.tag, tuple): defs = [ctx.vreg(x.tag)]
   else: defs = [ctx.vreg(GP_VGPRS)]
   return x.replace(tag=tuple(defs))
@@ -67,7 +53,7 @@ def abi(ctx:IselContext, x:UOp) -> UOp|None:
   return x.ins(RDNA3Ops.s_load_b64,
                src=(def_reg(dtypes.uint32, SGPRS[0]), def_reg(dtypes.uint32, SGPRS[1]),
                     UOp.const(dtypes.uint32, offs).rtag()),
-               tag=(ctx.vreg(GP_SGPRS[2*i]), ctx.vreg(GP_SGPRS[i+2*i])))
+               tag=(ctx.vreg(GP_SGPRS[2*i]), ctx.vreg(GP_SGPRS[2*i+1])))
 
 def fold_address(x:UOp) -> tuple[UOp, UOp, UOp]:
   if x.op is not Ops.INDEX: return (x, UOp(Ops.NOOP), UOp.const(dtypes.int16, 0))
@@ -75,10 +61,12 @@ def fold_address(x:UOp) -> tuple[UOp, UOp, UOp]:
     # TODO: handle overflow
     return UOp.const(dtypes.int16, ((1 << 13) - 1) & v).rtag()
   base, idx = x.src
+  # TODO: handle multi-register index ex. 64 bit SGPR pair
   disp_scale = base.dtype.itemsize if isinstance(base.dtype, PtrDType) else 1
   if idx.op is Ops.CONST: return (base, UOp(Ops.NOOP), _offs(idx.arg * disp_scale))
-  if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: return (base, idx.src[0].cast(dtypes.uint32), _offs(idx.src[1].arg * disp_scale))
-  return (base, idx.cast(dtypes.uint32), _offs(0))
+  # NOTE: dont cast for now so I dont need to impl cast alu
+  if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: return (base, idx.src[0], _offs(idx.src[1].arg * disp_scale))
+  return (base, idx, _offs(0))
 
 dts = dtypes.ints + (dtypes.bool, dtypes.float16, dtypes.float32, dtypes.float64)
 dt_16bit = tuple(dt.vec(l) for dt in dts for l in [2,1] if l*dt.itemsize == 2 and dt not in dtypes.int16s)
@@ -111,12 +99,6 @@ c15 = c0.index(c5, ptr=True).store(c13).end(c3, c2)
 handwritten asm:
 
 kernel:
-    s_load_b64 s[0:1], s[0:1], 0x0 # load kernarg ptr
-    s_load_b64 s[5:6], s[0:1], 0x8 # load ptr to param 1
-    s_load_b64 s[7:8], s[0:1], 0x16 # load ptr to param 2
-
-    # c2+c3*UOp.const(dtypes.int, 3)
-    v_add_nc_i32 v[3], s[]
 """
 
 # Load consts wave uniform??
@@ -135,6 +117,9 @@ V_MUL = {
 
 
 isel_matcher = PatternMatcher([
+  # rtag every const, masks tag type as non Register to ensure it doesn't get treated as one
+  (UPat.cvar("x"), lambda x: x.rtag() if not x.tag else None),
+
   # function abi
   (UPat((Ops.SPECIAL, Ops.PARAM, Ops.DEFINE_VAR), name="x"), abi),
 
@@ -150,6 +135,24 @@ isel_matcher = PatternMatcher([
   (UPat((Ops.INS, Ops.DEFINE_REG, Ops.DEFINE_LOCAL), name="x"), alloc_vregs)
 ])
 
+def encode(x:UOp) -> bytes|None:
+  from tinygrad.renderer.amd.dsl import v as dsl_v, s as dsl_s, NULL as dsl_null
+  enc, group = x.arg, x.arg.func.__name__
+  print(group)
+  def _route(r:Register): return dsl_v if r.name[0] == "v" else dsl_s
+  def _fuse(rr:tuple[Register,...]):
+    r = _route(rr[0])
+    if len(rr) > 1: return r[rr[0].index:rr[0].index+len(rr)-1]
+    else: return r[rr[0].index]
+  def _fuseable(a,b): return isinstance(a.tag, tuple) and isinstance(b.tag, tuple)
+  oprs, fields = x.src, [_fuse(x.tag)]
+  if group == "SMEM":
+    assert oprs[-1].op == Ops.CONST
+    sbase = oprs[0].tag if len(oprs) == 2 else oprs[0].tag + oprs[1].tag
+    fields.extend([_fuse(sbase), dsl_null, oprs[-1].arg])
+    ret = enc(*fields)
+    return ret.to_bytes()
+
 class RDNA3Renderer(ISARenderer):
   device = "AMD"
   pre_isel_matcher = PatternMatcher([])
@@ -160,6 +163,10 @@ class RDNA3Renderer(ISARenderer):
     from tinygrad.runtime.support.compiler_amd import AMDLLVMCompiler
     self.compiler = AMDLLVMCompiler(arch="rdna3")
 
+  # hack for now
+  def stack_pointer(self) -> UOp: return def_reg(dtypes.uint32, GP_SGPRS[-1])
+  def spill(self, disp:UOp, x:UOp) -> UOp: return x
+  def fill(self, disp:UOp, x:UOp, reg:Register) -> UOp: return x
   def asm(self, prg:UOp, lin:UOp) -> bytes:
     # TODO: global load flush pass, insert s_waitcnt_vmcnt(0) before first ALU op that consumes result
     # TODO: before s_load use s_waitcnt lgkmnct(0)
@@ -168,30 +175,33 @@ class RDNA3Renderer(ISARenderer):
   def asm_str(self, uops:list[UOp], function_name:str) -> str:
     asm = [f"{function_name}:"]
     def _format_op(x:UOp) -> str: return str(x.arg.args[0]).split('.')[-1].lower()
-    def _format_operands(x:UOp) -> str:
+    def _format_operands(x:UOp, fuse_src) -> str:
       fmap = {
         Ops.CONST : lambda x: hex(x.arg),
-        Ops.DEFINE_REG : lambda x: x.tag[0].name
+        Ops.DEFINE_REG : lambda x: x.tag[0].name,
+        Ops.INS : lambda x: x.tag[0].name
       }
       s = []
       if x.tag is not None:
         if len(x.tag) > 1:
           i = x.tag[0].index
           s.append(f"{x.tag[0].name[0]}[{i}:{i+len(x.tag)}]")
-        else:
-          s.append(x.tag[0].name)
-      for o in x.src:
-        print(o.op)
-        if o.op in fmap:
-          print(fmap[o.op](o))
-          s.append(fmap[o.op](o))
-      return ','.join(s)
+        else: s.append(x.tag[0].name)
+      if fuse_src:
+        a = x.src[0].tag[0]
+        s.append(f"{a.name[0]}[{a.index}:{a.index+1}]")
+      for o in x.src if not fuse_src else x.src[2:]:
+        if o.op in fmap: s.append(fmap[o.op](o))
+        else: print(o.op)
+      return ', '.join(s)
     for u in uops:
       if u.op is not Ops.INS: continue
-      asm.append(f"{_format_op(u)} {_format_operands(u)}")
-    return "\n".join(asm)
+      asm.append(f"{(fop := _format_op(u))} {_format_operands(u, "64" in fop)}")
+    return "\n\t".join(asm)
 
   def render(self, uops:list[UOp]) -> str:
     binary = bytearray()
     for u in uops:
       if u.op is not Ops.INS: continue
+      binary.extend(encode(u))
+    return binary.hex()
