@@ -97,8 +97,6 @@ def __getattr__(nm):
       return load("io_uring", ["{}/liburing.h", "{}/usr/include/linux/io_uring.h", "{}/usr/include/asm-generic/unistd.h"],
                   args=["-I{}/usr/include"], srcs=[linux_headers_deb, liburing_src], rules=[('__NR', 'NR')],
                   preprocess=lambda path: subprocess.run(f"ar x {linux_headers_deb.split('/')[-1]} && tar xf data.tar.xz", cwd=path, shell=True, check=True))
-    case "ib": return load("ib", ["/usr/include/infiniband/verbs.h", "/usr/include/infiniband/verbs_api.h",
-                                  "/usr/include/infiniband/ib_user_ioctl_verbs.h", "/usr/include/rdma/ib_user_verbs.h"], dll="'ibverbs'", errno=True)
     case "llvm": return load("llvm", lambda: [system("llvm-config-20 --includedir")+"/llvm-c/**/*.h"], dll=llvm_lib,
                              args=lambda: system("llvm-config-20 --cflags").split(), recsym=True, prolog=["from tinygrad.helpers import WIN, OSX"])
     case "pci": return load("pci", ["{}/usr/include/linux/pci_regs.h"], srcs=linux_headers_deb,
