@@ -177,10 +177,6 @@ class CStyleLanguage(Renderer):
     lanes = 1
     prefix = f"{self.smem_align}{self.smem_prefix}" if x.addrspace == AddrSpace.LOCAL else ""
     suffix = f"[{shp[0]}]" if len(shp) else ""
-    if len(shp) > 1:
-      # for DEFINE_REG, if it's a 2-D shape it's the number of lanes
-      assert isinstance(shp[1], int)
-      lanes = shp[1]
     return f"{prefix}{self._render_dtype(x.dtype, sz=lanes)} {self[x]}{suffix};"
 
   def _render_dtype(self, dtype:DType, sz:int=1, addrspace=AddrSpace.REG, mutable=True):
