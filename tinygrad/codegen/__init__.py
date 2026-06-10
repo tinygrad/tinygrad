@@ -13,7 +13,7 @@ from tinygrad.dtype import dtypes, PtrDType, ImageDType, AddrSpace
 
 # import all pattern matchers here
 from tinygrad.codegen.gpudims import pm_add_gpudims
-from tinygrad.uop.symbolic import sym, symbolic_simple, gep_pushing, symbolic, pm_move_where_on_load, pm_clean_up_group_sink
+from tinygrad.uop.symbolic import sym, symbolic_simple, gep_pushing, symbolic, pm_move_where_on_load, pm_clean_up_group_sink, pm_remove_invalid
 from tinygrad.uop.decompositions import get_late_rewrite_patterns, get_transcendental_patterns, pm_dtype_decomps
 from tinygrad.codegen.late.expander import expander, pm_pre_expander, pm_group_for_reduce
 from tinygrad.codegen.late.devectorizer import load_store_folding, load_store_indexing, devectorize_buf_and_index, devectorize_alu, pm_reduce, \
@@ -89,8 +89,8 @@ def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
 
   # **** optimizations are done, now we lower to actual code ****
 
-  # add loads
-  sink = graph_rewrite(sink, pm_add_loads, name="** add loads (code)")
+  # add loads and remove invalids
+  sink = graph_rewrite(sink, pm_add_loads+pm_remove_invalid, name="** add loads (code)")
 
   # create image buffers
   if IMAGE and ren.target.device in {"QCOM", "CL", "PYTHON", "NULL"}:
