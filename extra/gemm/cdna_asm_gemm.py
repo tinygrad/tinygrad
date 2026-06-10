@@ -2670,6 +2670,24 @@ def custom_hk_mxfp8_gemm(C:UOp, A:UOp, B:UOp, scale_A:UOp, scale_B:UOp, *, dname
   return UOp(Ops.PROGRAM, src=(sink, UOp(Ops.DEVICE, arg=dname), UOp(Ops.LINEAR, src=(*sink.src, sink)), UOp(Ops.SOURCE, arg=src),
                                UOp(Ops.BINARY, arg=lib)))
 
+def quantize_mxfp8(x:Tensor) -> tuple[Tensor, Tensor, Tensor]:
+  # 1x32 block scaling along the last axis
+  rows, K = x.shape
+  scale_K, k_iters = K // 32, K // 128
+  amax = x.detach().float().reshape(rows, scale_K, 32).abs().max(axis=-1)
+  e8 = (amax.log2().floor() + 127).clamp(0, 254)
+  e8 = (amax == 0).where(Tensor.zeros_like(e8), e8).cast(dtypes.uint8)
+  qscale = (127.0 - e8.cast(dtypes.float32)).exp2().reshape(rows, scale_K, 1).expand(rows, scale_K, 32).reshape(rows, K)
+  x_scaled = x.float() * qscale
+  x_clamped = x_scaled + (x_scaled.detach().clamp(-448.0, 448.0) - x_scaled.detach())  # STE
+  packed = e8.reshape(rows, k_iters, 4).bitcast(dtypes.uint32).reshape(rows, k_iters).permute(1, 0)
+  return x_clamped.cast(FP8_DTYPE), e8, packed.contiguous()
+
+def _mx_block_scale(e8:Tensor) -> Tensor:
+  # dequant scale 2^(e8-127) broadcast back to element shape
+  rows, scale_K = e8.shape
+  return (e8.cast(dtypes.float32) - 127.0).exp2().reshape(rows, scale_K, 1).expand(rows, scale_K, 32).reshape(rows, scale_K*32)
+
 counters = {"used":0, "todos":[]}
 def todo(msg:str) -> bool: counters["todos"].append(msg); return False
 def _asm_gemm_report():
@@ -2857,7 +2875,7 @@ def custom_gemm_bw(gradient:UOp, kernel:UOp, n_scales:int=2, has_grad_amax:bool=
 # ** main gemm function
 
 def asm_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, w_scale:Tensor|None=None, grad_amax_state:Tensor|None=None,
-             w_post_scale:Tensor|None=None) -> Tensor:
+             w_post_scale:Tensor|None=None, mx:bool=False) -> Tensor:
   assert can_use_asm_gemm(a, b), f"{counters['todos'][-1]}"
   counters["used"] += 1
   unfold_batch = a.ndim == 3 and isinstance(a.device, tuple) and a.uop.axis == 2 and b.uop.axis == 0
@@ -2889,8 +2907,22 @@ def asm_gemm(a:Tensor, b:Tensor, x_scale:Tensor|None=None, w_scale:Tensor|None=N
   renderer = Device[dname:=(a.device[0] if is_multi else a.device)].renderer
   dname, arch = dname.split(":")[0], renderer.target.arch
   if arch.startswith("gfx950") and getenv("USE_ASM", 1):
+    if mx:
+      # mxfp8 1x32 block scaling on both operands
+      a_q, a_e8, a_si = quantize_mxfp8(a.reshape(-1, a.shape[-1]))
+      b_q, b_e8, b_si = quantize_mxfp8(b.T)
+      def mx_bw(gradient:UOp, kernel:UOp):
+        g = Tensor(gradient, device=a.device)[:a.shape[0]].reshape(a.shape[0]*a.shape[1], b.shape[1]).cast(dtypes.bfloat16)
+        grad_a = asm_gemm(g, b.detach().T, mx=True)
+        grad_b = asm_gemm(g.T, a.detach().reshape(-1, a.shape[-1]), mx=True)
+        grad_a = (grad_a * _mx_block_scale(a_e8)).reshape(a.shape)
+        grad_b = grad_b * _mx_block_scale(b_e8)
+        if w_post_scale is not None: grad_b = grad_b / w_post_scale.detach().reshape(-1, 1)
+        return (None, grad_a.uop, grad_b.uop, None, None)
+      fxn = functools.partial(custom_hk_mxfp8_gemm, dname=dname)
+      out = Tensor.custom_kernel(out, a_q.reshape(a.shape), b_q, a_si, b_si, fxn=fxn, grad_fxn=mx_bw)[0]
     # fp8 gemm computes a@b.T, kernel multiplies output by x_scale * w_scale before bf16 store
-    if a.dtype == FP8_DTYPE:
+    elif a.dtype == FP8_DTYPE:
       scales = tuple(s for s in (x_scale, w_scale) if s is not None)
       scale_mode = (1 if x_scale is not None else 0) | (2 if w_scale is not None else 0)
       extra = ([grad_amax_state] if grad_amax_state is not None else []) + ([w_post_scale] if w_post_scale is not None else [])
