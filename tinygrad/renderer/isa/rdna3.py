@@ -56,7 +56,7 @@ SGPRS = tuple(Register(f"s{i}", i) for i in range(106))
 # Unless the Target Properties column of AMDGPU Processors specifies otherwise, a separate VGPR register is used per work-item ID.
 WGIDS, WIIDS = tuple(SGPRS[2:5]), tuple(VGPRS[:3])
 # s[0:1] reserved for kernarg ptr
-GP_SGPRS, GP_VGPRS = tuple(SGPRS[4:]), tuple(VGPRS[2:])
+GP_SGPRS, GP_VGPRS = tuple(SGPRS[4:]), tuple(VGPRS[3:])
 
 # def map_addrspace(x:UOp, local_ins,global_ins) -> UOp|None: return local_ins if x.addrspace == AddrSpace.LOCAL else global_ins if x.addrspace == AddrSpace.GLOBAL else None
 def def_reg(dt, reg:Register): return UOp(Ops.DEFINE_REG, dt, tag=(reg,))
@@ -87,24 +87,34 @@ def abi(ctx:IselContext, x:UOp) -> UOp|None:
                     UOp.const(dtypes.uint32, offs).rtag()),
                tag=(ctx.vreg(GP_SGPRS[2*i]), ctx.vreg(GP_SGPRS[2*i+1])))
 
-def fold_address(x:UOp) -> tuple[UOp, UOp, UOp]:
-  if x.op is not Ops.INDEX: return (x, UOp(Ops.NOOP), UOp.const(dtypes.int16, 0))
-  def _offs(v:int) -> UOp:
-    # TODO: handle overflow
-    return UOp.const(dtypes.int16, ((1 << 13) - 1) & v).rtag()
-  base, idx = x.src
-  # TODO: handle multi-register index ex. 64 bit SGPR pair
-  disp_scale = base.dtype.itemsize if isinstance(base.dtype, PtrDType) else 1
-  if idx.op is Ops.CONST: return (base, UOp(Ops.NOOP), _offs(idx.arg * disp_scale))
-  # NOTE: dont cast for now so I dont need to impl cast alu
-  if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: return (base, idx.src[0], _offs(idx.src[1].arg * disp_scale))
-  return (base, idx, _offs(0))
-
 dts = dtypes.ints + (dtypes.bool, dtypes.float16, dtypes.float32, dtypes.float64)
 dt_16bit = tuple(dt.vec(l) for dt in dts for l in [2,1] if l*dt.itemsize == 2 and dt not in dtypes.int16s)
 dt_32bit = tuple(dt.vec(l) for dt in dts for l in [4,2,1] if l*dt.itemsize == 4 and dt not in dtypes.int32s)
 dt_64bit = tuple(dt.vec(l) for dt in dts for l in [8,4,2,1] if l*dt.itemsize == 8 and dt not in dtypes.int64s)
 dt_128bit = tuple(dt.vec(l) for dt in dts for l in [16,8,4,2,1] if l*dt.itemsize == 16)
+
+def is_sgpr(x:UOp) -> bool: return x.tag[0].cons[0].name[0] == "s"
+def is_imm(x:UOp) -> bool: return x.tag == True
+def is_vgpr(x:UOp) -> bool: return x.tag is not None and (not is_imm(x)) and x.tag[0].cons[0].name[0] == "v"
+def to_vgpr(x:UOp):
+  if is_vgpr(x): return x
+  # TODO: different move instruction based on dtype size?
+  return x.ins(RDNA3Ops.v_mov_b32_e32, src=(x,), tag=None) # tag=None forces vreg GP_VGPR alloc
+
+def fold_address(x:UOp) -> tuple[UOp, UOp, UOp]: # returns addr, data, saddr (offset=0x0)
+  if x.op is not Ops.INDEX: return (x, UOp(Ops.NOOP), UOp.const(dtypes.int16, 0))
+  def _offs(v:int) -> UOp: return UOp.const(dtypes.int16, ((1 << 13) - 1) & v).rtag() # TODO: handle overflow
+  # def _const(v:int) -> UOp: return UOp.const(dtypes.int32, v)
+  base, idx = x.src
+  # TODO: handle multi-register index ex. 64 bit SGPR pair
+  disp_scale = base.dtype.itemsize if isinstance(base.dtype, PtrDType) else 1
+  if idx.op is Ops.CONST: return (UOp(Ops.NOOP), base, _offs(idx.arg * disp_scale))
+  # NOTE: dont cast for now so I dont need to impl cast alu
+  if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: return (idx.src[0], base, _offs(idx.src[1].arg * disp_scale))
+
+  # For now dont use immediate offset (set to 0x0)
+  # lane relative offsets need to be stored in vgpr
+  return (idx, base, _offs(0))
 
 V_ADD = {
   dtypes.float16 : RDNA3Ops.v_add_f16_e32,  dtypes.float32 : RDNA3Ops.v_add_f32_e32,
@@ -118,18 +128,14 @@ V_MUL = {
   dtypes.uint32 : RDNA3Ops.v_mul_u32_u24_e32,
 }
 
-# ensure at least 1 operand is stored in a VGPR (src1), def_reg otherwise??
-def is_sgpr(x:UOp) -> bool: return x.tag[0].cons[0].name[0] == "s"
-def is_imm(x:UOp) -> bool: return x.tag == True
-def is_vgpr(x:UOp) -> bool: return x.tag is not None and (not is_imm(x)) and x.tag[0].cons[0].name[0] == "v"
-def to_vgpr(x:UOp): return x if is_vgpr(x) else x.ins(RDNA3Ops.v_mov_b32_e32, src=(x,), tag=None) # tag=None forces vreg GP_VGPR alloc
-
 # ensures vsrc1 is a vgpr operand
-def vop2(x:UOp):
+def legalize_vop2(x:UOp):
+  if x.arg.func is not RDNA3Ops.VOP2: return None
+  if any(s.tag is None for s in x.src): return None
   a, b = x.src
-  if is_vgpr(b): return (a, b)
-  elif is_vgpr(a): return (b, a)
-  else: return (a, to_vgpr(b))
+  if is_vgpr(b): return None
+  if is_vgpr(a): return x.replace(src=(b,a))
+  return x.replace(src=((a, to_vgpr(b))))
 
 isel_matcher = PatternMatcher([
   # rtag every const, masks tag type as non Register to ensure it doesn't get treated as one
@@ -139,36 +145,67 @@ isel_matcher = PatternMatcher([
   (UPat((Ops.SPECIAL, Ops.PARAM, Ops.DEFINE_VAR), name="x"), abi),
 
   # alu ops
-  ((UPat() + UPat()).named("x"), lambda x: x.ins(V_ADD[x.dtype], src=vop2(x))),
-  ((UPat() * UPat()).named("x"), lambda x: x.ins(V_MUL[x.dtype], src=vop2(x))),
+  ((UPat() + UPat()).named("x"), lambda x: x.ins(V_ADD[x.dtype])),
+  ((UPat() * UPat()).named("x"), lambda x: x.ins(V_MUL[x.dtype])),
 
   # mem ops
   (UPat(Ops.LOAD, dt_32bit, name="x", src=(UPat(name="idx"))), lambda x,idx: x.ins(RDNA3Ops.global_load_b32, src=fold_address(idx))),
+  # store value b in addr a?
   (UPat.var("a").store(UPat.var("b", dtype=dt_32bit), name="x"), lambda a,b,x: x.ins(RDNA3Ops.global_store_b32, src=fold_address(a) + (b,))),
 
   # allocate virtual registers
-  (UPat((Ops.INS, Ops.DEFINE_REG, Ops.DEFINE_LOCAL), name="x"), alloc_vregs)
+  (UPat((Ops.INS, Ops.DEFINE_REG, Ops.DEFINE_LOCAL), name="x"), alloc_vregs),
+
+  # normalize and satisfy operand orders/reg types
+  (UPat(Ops.INS, name="x"), legalize_vop2),
 ])
 
-def encode(x:UOp) -> bytes|None:
+from tinygrad.renderer.amd.dsl import Inst
+def encode(x:UOp) -> tuple[Inst, bytes]:
   from tinygrad.renderer.amd.dsl import v as dsl_v, s as dsl_s, NULL as dsl_null
-  enc, group = x.arg, x.arg.func.__name__
-  print(group)
+  enc, group, opc = x.arg, x.arg.func.__name__, x.arg.args[0].name.lower()
   def _route(r:Register): return dsl_v if r.name[0] == "v" else dsl_s
+  def _immorreg(x:UOp):
+    if x.op == Ops.CONST: return x.arg
+    else: return _route(x.tag[0])[x.tag[0].index]
   def _fuse(rr:tuple[Register,...]):
     r = _route(rr[0])
     if len(rr) > 1: return r[rr[0].index:rr[0].index+len(rr)-1]
     else: return r[rr[0].index]
-  oprs, fields = x.src, [_fuse(x.tag)]
+  oprs, fields = x.src, [_fuse(x.tag)] if x.tag is not None else []
   if group == "SMEM":
     assert oprs[-1].op == Ops.CONST
     sbase = oprs[0].tag if len(oprs) == 2 else oprs[0].tag + oprs[1].tag
     fields.extend([_fuse(sbase), dsl_null, oprs[-1].arg])
     ret = enc(*fields)
-    return ret.to_bytes()
-  elif group == "VOP2":
-    pass
+  elif group == "GLOBAL":
+    vaddr, base, offs = oprs[0], oprs[1], oprs[2]
+    kw = dict(addr=_immorreg(vaddr), saddr=_fuse(base.tag), offset=_immorreg(offs))
+    if x.tag is None: kw["data"]=_fuse(oprs[3].tag)
+    else: kw["vdst"]=_fuse(x.tag)
+    ret = enc(**kw)
+  elif "VOP" in group:
+    fields.extend([_immorreg(u) for u in oprs])
+    ret = enc(*fields)
+  elif group == "SOPK":
+    fields.extend([dsl_null, oprs[0].arg])
+    ret = enc(*fields)
+  else:
+    raise NotImplementedError("instruction type encoding unsupported")
+  return ret, ret.to_bytes()
 
+# insert s_waitcnt where necessary to sync async ops across wave ex. global load
+def inswaits(uops:list[UOp]):
+  # v1 naive just insert s_waitcnt vmcnt(0) after every s/global load
+  # v2 use s_waitcnt vmcnt(N) on usage boundaries, detect when loaded register is used again
+  nuops = []
+  for u in uops:
+    nuops.append(u)
+    if u.op is not Ops.INS: continue
+    opc = u.arg.args[0].name.lower()
+    if "load" in opc:
+      nuops.append(UOp(Ops.INS, arg=RDNA3Ops.s_waitcnt_vmcnt, src=(UOp.const(dtypes.uint16, 0),)))
+  return nuops
 
 class RDNA3Renderer(ISARenderer):
   device = "AMD"
@@ -191,34 +228,15 @@ class RDNA3Renderer(ISARenderer):
 
   def asm_str(self, uops:list[UOp], function_name:str) -> str:
     asm = [f"{function_name}:"]
-    def _format_op(x:UOp) -> str: return str(x.arg.args[0]).split('.')[-1].lower()
-    def _format_operands(x:UOp, fuse_src) -> str:
-      fmap = {
-        Ops.CONST : lambda x: hex(x.arg),
-        Ops.DEFINE_REG : lambda x: x.tag[0].name,
-        Ops.INS : lambda x: x.tag[0].name
-      }
-      s = []
-      if x.tag is not None:
-        if len(x.tag) > 1:
-          i = x.tag[0].index
-          s.append(f"{x.tag[0].name[0]}[{i}:{i+len(x.tag)}]")
-        else: s.append(x.tag[0].name)
-      if fuse_src:
-        a = x.src[0].tag[0]
-        s.append(f"{a.name[0]}[{a.index}:{a.index+1}]")
-      for o in x.src if not fuse_src else x.src[2:]:
-        if o.op in fmap: s.append(fmap[o.op](o))
-        else: print(o.op)
-      return ', '.join(s)
+    uops = inswaits(uops)
     for u in uops:
       if u.op is not Ops.INS: continue
-      asm.append(f"{(fop := _format_op(u))} {_format_operands(u, "64" in fop)}")
+      asm.append(str(encode(u)[0]))
     return "\n\t".join(asm)
 
   def render(self, uops:list[UOp]) -> str:
     binary = bytearray()
     for u in uops:
       if u.op is not Ops.INS: continue
-      binary.extend(encode(u))
+      binary.extend(encode(u)[1])
     return binary.hex()
