@@ -265,7 +265,6 @@ class TestCustomKernel(unittest.TestCase):
     qkv = Tensor.empty(B*N, QKV)
 
     qkv = Tensor.custom_kernel(qkv, x, w, fxn=custom_gemm)[0]
-    #qkv = (x @ w).contiguous()
     qkv = qkv.reshape(B, N, H_KV, REP + 2, D)
 
     q = qkv[:, :, :, :REP, :].reshape(B, N, H, D).transpose(1, 2)
@@ -276,7 +275,7 @@ class TestCustomKernel(unittest.TestCase):
 
     GlobalCounters.reset()
     out.realize()
-    self.assertEqual(GlobalCounters.kernel_count, 6)
+    self.assertEqual(GlobalCounters.kernel_count, 5)
 
   def test_multi_after_schedule_order(self):
     """Test correct scheduling order when custom_kernel has multiple outputs.
