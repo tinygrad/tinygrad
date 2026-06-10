@@ -270,7 +270,7 @@ def DO_POST(self):
           prefill_img(vis=self.server.vis, lang=self.server.model, image=image, start_pos=\
           Variable("pos", 0, self.server.model.max_context).bind(len(self.server.model._cached_tokens)))
           if i > 0: self.server.model._cached_tokens.extend(tok.end_turn()) # todo!
-          self.server.model._cached_tokens.extend([0] * (self.server.vis.toks_per_img + 8))
+          self.server.model._cached_tokens.extend([0] * (self.server.vis.toks_per_img + vis.prefix.shape[0] + vis.suffix.shape[0]))
       ids += tok.role(msg["role"])
       content = msg["content"]
       if isinstance(content, str): ids += tok.encode(content)
