@@ -37,7 +37,7 @@ jobs:
         llvm: 'true'
         pydeps: 'pyyaml mako'
     - name: Install autogen support packages
-      run: sudo apt-get install -y --no-install-recommends libclang-20-dev llvm-20-dev hip-dev libusb-1.0-0-dev libdrm-dev
+      run: sudo apt-get install -y --no-install-recommends libclang-20-dev llvm-20-dev hip-dev libusb-1.0-0-dev libdrm-dev liburing-dev
     - name: Regenerate autogen files
       run: |
         find tinygrad/runtime/autogen -type f -name "*.py" -not -path "*/amd/*" -not -name "__init__.py" -not -name "comgr.py" -not -name "metal.py" -not -name "iokit.py" -not -name "corefoundation.py" -not -name "libclang.py" -delete
