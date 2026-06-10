@@ -1,7 +1,7 @@
 from tinygrad.dtype import DType, dtypes, truncate, AddrSpace
 from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat
 from tinygrad.renderer.cstyle import CStyleLanguage, base_rewrite, extra_pm
-from tinygrad.helpers import strip_parens
+from tinygrad.helpers import ceildiv, strip_parens
 
 def _mask(dt:DType): return 0xFF if dt.itemsize == 1 else 0xFFFF
 
@@ -31,8 +31,8 @@ def is_packed(x:UOp):
   if x.op is Ops.LOAD: dt, addrspace = x.dtype, x.src[0].addrspace
   elif x.op is Ops.STORE: dt, addrspace = x.src[1].dtype, x.src[0].addrspace
   else: dt, addrspace = x.dtype, x.addrspace
-  return dt.itemsize < 4 and dt != dtypes.half and addrspace != AddrSpace.REG
-def _packed_size(u:UOp): return u.max_numel() // (4//u.dtype.itemsize) if is_packed(u) else u.max_numel()
+  return dt.itemsize < 4 and dt != dtypes.half and addrspace in (AddrSpace.GLOBAL, AddrSpace.LOCAL)
+def _packed_size(u:UOp): return ceildiv(u.max_numel(), 4//u.dtype.itemsize) if is_packed(u) else u.max_numel()
 def is_nan(a):
   bs, (exp, mant) = a.dtype.bitsize, dtypes.finfo(a.dtype)
   return (a.bitcast(getattr(dtypes, f"uint{bs}")) & ((1 << (bs - 1)) - 1)) > (((1 << exp) - 1) << mant)
