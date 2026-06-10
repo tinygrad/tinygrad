@@ -74,12 +74,6 @@ const drawGraph = (data) => {
   const callCount = g.graph().callCount;
   const nodes = d3.select("#nodes").selectAll("g").data(g.nodes().map(id => g.node(id)), d => d).join("g").attr("class", d => d.className ?? "node")
     .attr("transform", d => `translate(${d.x},${d.y})`).on("click", (e,d) => {
-      if (d.callNode) {
-        if (state.callSrcMask.has(d.id)) state.callSrcMask.delete(d.id); else state.callSrcMask.add(d.id);
-        if (state.callSrcMask.size >= callCount) { showCallSrc.toggle.checked = !showCallSrc.toggle.checked; state.callSrcMask.clear(); }
-        e.stopPropagation();
-        return setState({});
-      }
       highlightGraphNode(d, e.target);
       e.stopPropagation();
     });
