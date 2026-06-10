@@ -144,7 +144,6 @@ class Qwen3VLVis():
     load_state_dict(self, state_dict)
     #https://github.com/huggingface/transformers/blob/15bb519bd4277f4ab5309154aedf3c231e8b4ca8/src/transformers/models/qwen3_vl/modeling_qwen3_vl.py#L98
     self.inv_freq = 1.0 / (10000.0 ** (Tensor.arange(0, 32, 2, dtype=dtypes.float) / 32))
-    
     # format for images: #https://arxiv.org/pdf/2409.12191
     self.prefix = Tensor(tok.encode("<|im_start|>user\n<|vision_start|>"))
     self.suffix = Tensor(tok.encode("<|vision_end|>\n<|im_end|>\n"))
