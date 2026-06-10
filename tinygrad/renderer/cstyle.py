@@ -46,8 +46,8 @@ base_rewrite = PatternMatcher([
   (UPat(Ops.CONST, name="x"), lambda ctx,x: str(x.arg)),
 
   # SHRINK/INDEX
-  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var('idx'))), lambda ctx,**kwargs: ctx.render_index(**kwargs)),
-  (UPat(Ops.SHRINK, src=(UPat.var("buf"), UPat.var('idx'), UPat.cvar())), lambda ctx,**kwargs: ctx.render_index(**kwargs)),
+  (UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var('idx')), name="x"), lambda ctx,**kwargs: ctx.render_index(**kwargs)),
+  (UPat(Ops.SHRINK, src=(UPat.var("buf"), UPat.var('idx'), UPat.cvar()), name="x"), lambda ctx,**kwargs: ctx.render_index(**kwargs)),
   (UPat(Ops.STACK, name="x"),
    lambda ctx,x: f"{ctx.float4.replace('float4', ctx.render_type(x))}" + \
                  f"{ctx.float4_style[0]}{','.join([ctx[y] for y in x.src])}{ctx.float4_style[1]}"),
@@ -162,17 +162,15 @@ class CStyleLanguage(Renderer):
     [") {\n" + tmp] + ['\n'.join(kernel), "\n}"])
     return prg if prefix is None else "\n".join(prefix)+f"\n{prg}"
 
-  def render_index(self, buf:UOp, idx:UOp):
-    if buf.addrspace == AddrSpace.REG:
-      if buf.op not in {Ops.AFTER, Ops.BUFFER}:
-        # this is lane access in C
-        assert idx.op is Ops.CONST, f"{idx.op} must be CONST"
-        return self[buf]+(f"[{idx.arg}]" if buf.max_numel() > self.gep_arr_threshold else f".{'xyzwabcd'[idx.arg]}")
-      else:
-        # in C this doesn't have to be const
-        return f"{self[buf]}[{self[idx]}]"
-    else:
-      return f"({self[buf]}+{strip_parens(self[idx]) if idx.arg == Ops.ADD else self[idx]})"
+  def render_index(self, x:UOp, buf:UOp, idx:UOp):
+    if buf.addrspace == AddrSpace.REG and buf.op not in {Ops.AFTER, Ops.BUFFER}:
+      # this is lane access in C
+      assert idx.op is Ops.CONST, f"{idx.op} must be CONST"
+      return self[buf]+(f"[{idx.arg}]" if buf.max_numel() > self.gep_arr_threshold else f".{'xyzwabcd'[idx.arg]}")
+    ptr = f"({self[buf]}+{strip_parens(self[idx]) if idx.arg == Ops.ADD else self[idx]})"
+    if buf.addrspace != AddrSpace.REG: return ptr
+    # REG buffers have no LOAD, so the access is rendered at the INDEX. the cast handles vector access, same as render_access
+    return f"(*(({self.render_type(x)}*)({ptr})))" if x.max_numel() > 1 else f"(*{ptr})"
 
   def render_buffer(self, x:UOp):
     shp = x.src[0].as_shape
