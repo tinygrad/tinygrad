@@ -44,6 +44,8 @@ pm_remove_vec_dtypes = PatternMatcher([
   # replace DEFINE_LOCAL/DEFINE_REG with BUFFER
   (UPat((Ops.DEFINE_LOCAL, Ops.DEFINE_REG), name="x"), lambda x:
    x.replace(op=Ops.BUFFER, arg=ParamArg(x.arg, addrspace=AddrSpace.LOCAL if x.op == Ops.DEFINE_LOCAL else AddrSpace.MEMREG))),
+  # cast to nothing is nothing
+  (UPat(Ops.CAST, name="x"), lambda x: x.src[0] if x.src[0].dtype == x.dtype else None),
 ])+pm_clean_up_group_sink
 
 def full_rewrite_to_sink(ast:UOp, ren:Renderer, optimize:bool=True) -> UOp:
