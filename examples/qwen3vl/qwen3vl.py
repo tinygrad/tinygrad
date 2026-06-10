@@ -11,11 +11,6 @@ from tinygrad.llm.model import Transformer
 from tinygrad.uop.ops import UOp, Ops
 import numpy as np
 
-
-def prewarm(vis, lang):
-  for _ in range(2):
-    vis.prefill(lang=lang, image=Tensor.rand(*vis.res, 3).cast(dtypes.uint8), start_pos=Variable("pos", 0, lang.max_context).bind(42))
-
 #https://github.com/huggingface/transformers/blob/1316cd76c0ce328228e08d55dc257484961b074c/src/transformers/models/qwen3_vl/modeling_qwen3_vl.py#L129
 def rotate_half(x):
   x1 = x[..., : x.shape[-1] // 2]
@@ -311,9 +306,10 @@ if __name__ == "__main__":
 
   # warmup the JIT
   with Context(DEBUG=max(DEBUG.value, 1)):
-    for _ in range(2): list(zip(range(2), model.generate([0])))
     vis = Qwen3VLVis(size=args.size, tok=tok)
-    prewarm(vis=vis, lang=model)
+    for _ in range(2):
+      list(zip(range(2), model.generate([0])))
+      vis.prefill(lang=model, image=Tensor.rand(*vis.res, 3).cast(dtypes.uint8), start_pos=Variable("pos", 0, model.max_context).bind(42))
     model._cached_tokens = [] # warmup adds two toks
 
   Handler.do_POST = DO_POST
