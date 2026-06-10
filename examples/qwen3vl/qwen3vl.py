@@ -77,6 +77,8 @@ class Qwen3VLVis():
     kv, state_dict = gguf_load(fetch(f"https://huggingface.co/Qwen/Qwen3-VL-{size}-Instruct-GGUF/resolve/main/mmproj-Qwen3VL-{size}-Instruct-F16.gguf"))
     self.merge_size = kv["clip.vision.spatial_merge_size"]
     self.patch_size = kv["clip.vision.patch_size"]
+    self.image_mean = kv["clip.vision.image_mean"]
+    self.image_std = kv["clip.vision.image_std"]
     self.feed_forward_length = kv["clip.vision.feed_forward_length"]
     self.v = Qwen3VisBlocks(kv=kv, weights=state_dict)
     self.mm = [nn.Linear(*state_dict["mm.0.weight"].shape[::-1], bias=True), None, nn.Linear(*state_dict["mm.2.weight"].shape[::-1], bias=True)]
@@ -134,13 +136,11 @@ class Qwen3VLVis():
     image = image.permute(2, 0, 1)
     height, width = image.shape[-2:]
     image = image.unsqueeze(0).float()
-    image = image.interpolate(size=(height, width))
-    resized_height, resized_width = image.shape[-2:]
-    patches = (image - 127.5) / 127.5 # todo use mean and std
+    image = ((image / 255) - Tensor(self.image_mean).view(1, 3, 1, 1)) / Tensor(self.image_std).view(1, 3, 1, 1)
     channels = 3
     # https://github.com/huggingface/transformers/blob/4ae05b0fba41860adaaeb708774fc1f48c92c049/src/transformers/models/qwen2_vl/image_processing_qwen2_vl.py#L195
-    grid_h, grid_w = resized_height // self.patch_size, resized_width // self.patch_size
-    patches = patches.reshape(
+    grid_h, grid_w = height // self.patch_size, width // self.patch_size
+    image = image.reshape(
         channels,
         grid_h // self.merge_size,
         self.merge_size,
@@ -149,9 +149,9 @@ class Qwen3VLVis():
         self.merge_size,
         self.patch_size,
     )
-    patches = patches.permute(1, 4, 2, 5, 0, 3, 6)
+    image = image.permute(1, 4, 2, 5, 0, 3, 6)
     pixel_values = (
-        patches.unsqueeze(5)
+        image.unsqueeze(5)
         .expand(-1, -1, -1, -1, -1, self.merge_size, -1, -1)
         .reshape(
             grid_h * grid_w,
@@ -160,10 +160,7 @@ class Qwen3VLVis():
     )
     pixel_values = pixel_values.cast(dtypes.bfloat16)
 
-    # f"<|im_start|>user\n<|vision_start|><|image_pad|><|vision_end|>\n<|im_end|>\n" fill size of img with image token
-    # <|im_end|>\n<|im_start|>assistant\n
     input_ids = Tensor.cat(self.prefix, Tensor.zeros(self.toks_per_img), self.suffix).unsqueeze(0).cast(dtypes.int)
-
     image_embeds, hidden_states, deepstack_feature_lists = self(pixel_values, [grid_h, grid_w])
     hidden_states = lang.token_embd(input_ids).cast(dtypes.float)
     hidden_states[:, self.prefix.shape[0]:-self.suffix.shape[0], :] = image_embeds.unsqueeze(0)
