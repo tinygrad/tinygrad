@@ -174,8 +174,7 @@ class HCQInfo:
   outs:tuple[int, ...] = ()
 
   @staticmethod
-  def from_call(call:UOp) -> HCQInfo:
-    return HCQInfo(get_call_name(call, get_call_arg_uops(call)), estimate_uop(call), get_call_outs_ins(call)[0])
+  def from_call(call:UOp) -> HCQInfo: return HCQInfo(get_call_name(call, get_call_arg_uops(call)), estimate_uop(call), get_call_outs_ins(call)[0])
 
 # *****************
 # 1.1. prep runtimes: staging copies
