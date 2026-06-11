@@ -33,6 +33,7 @@ def get_call_name(call:UOp, bufs:list[Buffer], var_vals:dict[str, int]|None=None
   if ast.op is Ops.COPY: return colored(f"copy {_uop_sz_to_str(arg_uops[0]):>10}, {bufs[0].device[:7]:>7s} <- {bufs[1].device[:7]:7s}", "yellow")
   if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "encdec": return colored(f"enc/dec {_uop_sz_to_str(arg_uops[0])}", "yellow")
   if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "graph": return colored(f"batched {len(ast.src[0].src)}", "cyan")
+  if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "hcq": return call.arg.aux.name
   raise NotImplementedError("get_call_name is not implemented")
 
 # **************** Stat ****************
@@ -44,6 +45,7 @@ def estimate_uop(call:UOp) -> Estimates:
     nbytes = prod(call.src[1].shape) * call.src[1].dtype.itemsize
     return Estimates(lds=nbytes, mem=nbytes)
   if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "graph": return get_graph_runtime(ast).estimates
+  if ast.op is Ops.CUSTOM_FUNCTION and ast.arg == "hcq": return call.arg.aux.estimates
   return Estimates()
 
 first_run_cache:set[bytes] = set()
