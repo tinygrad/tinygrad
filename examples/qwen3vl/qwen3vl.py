@@ -89,7 +89,7 @@ class Qwen3VLVis():
     self.suffix = Tensor(tok.encode("<|vision_end|>\n<|im_end|>\n"))
 
   # https://github.com/huggingface/transformers/blob/15bb519bd4277f4ab5309154aedf3c231e8b4ca8/src/transformers/models/qwen3_vl/modeling_qwen3_vl.py#L679
-  def __call__(self, pixel_values, image_grid_size):
+  def forward(self, pixel_values, image_grid_size):
     grid_hs, grid_ws = image_grid_size    
     idx_tensor, weight_tensor = get_vision_bilinear_indices_and_weights(h=grid_hs, w=grid_ws, num_grid_per_side=self.v.num_grid_per_side, merge_size=self.merge_size)
     pos_ids = get_vision_position_ids(h=grid_hs, w=grid_ws, merge_size=self.merge_size)
@@ -120,7 +120,7 @@ class Qwen3VLVis():
     image_embeds = self.mm[2](image_embeds)
     return image_embeds, hidden_states, deepstack_feature_lists
 
-  def prefill_img(self, lang, image, start_pos):
+  def __call__(self, lang, image, start_pos):
     if type(image) == bytes: image = cv2.cvtColor(cv2.imdecode(np.frombuffer(image, np.uint8), cv2.IMREAD_COLOR), cv2.COLOR_BGR2RGB)
     if image.shape[:2] != self.res:
       target_h, target_w = self.res[:2]
@@ -159,7 +159,7 @@ class Qwen3VLVis():
     pixel_values = pixel_values.cast(dtypes.bfloat16)
 
     input_ids = Tensor.cat(self.prefix, Tensor.zeros(self.toks_per_img), self.suffix).unsqueeze(0).cast(dtypes.int)
-    image_embeds, hidden_states, deepstack_feature_lists = self(pixel_values, [grid_h, grid_w])
+    image_embeds, hidden_states, deepstack_feature_lists = self.forward(pixel_values, [grid_h, grid_w])
     hidden_states = lang.token_embd(input_ids).cast(dtypes.float)
     hidden_states[:, self.prefix.shape[0]:-self.suffix.shape[0], :] = image_embeds.unsqueeze(0)
     
@@ -254,7 +254,7 @@ def DO_POST(self):
       if "image" in msg:
         ids.extend([0] * (self.server.vis.toks_per_img + 8))
         if i == len(body["messages"]) - 1:
-          self.server.vis.prefill_img(lang=self.server.model, image=base64.b64decode(msg["image"].split(',')[1]), start_pos=\
+          self.server.vis(lang=self.server.model, image=base64.b64decode(msg["image"].split(',')[1]), start_pos=\
           Variable("pos", 0, self.server.model.max_context).bind(len(self.server.model._cached_tokens)))
           if i > 0: self.server.model._cached_tokens.extend(tok.end_turn()) # todo!
           self.server.model._cached_tokens.extend([0] * (self.server.vis.toks_per_img + vis.prefix.shape[0] + vis.suffix.shape[0]))
