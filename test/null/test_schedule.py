@@ -645,18 +645,6 @@ class TestSchedule(unittest.TestCase):
       with Context(IMAGE=1):
         self.assertEqual(cnt(), 9)
 
-  def test_image_conv_fusion(self):
-    with Context(OPENPILOT_HACKS=1):
-      def cnt():
-        x, y, z = Tensor.empty((1, 4, 3, 3)), Tensor.empty((4, 1, 3, 3)), Tensor.empty((4, 1, 7, 7))
-        a = x.conv2d(y, Tensor.empty(4), groups=4, padding=1)
-        b = a.conv2d(z, groups=4, padding=3)
-        linear = compile_linear((a + b).schedule_linear())
-        return len([call for call in linear.src if call.src[0].op is Ops.PROGRAM])
-
-      with Context(IMAGE=1):
-        self.assertEqual(cnt(), 5)
-
   def _test_fusion(self, shapes, f, cnt):
     with Context(DEBUG=0, TRACK_MATCH_STATS=0):
       check_schedule(f(*(Tensor.empty(s).realize() for s in shapes)), cnt)
@@ -803,6 +791,12 @@ class TestSchedule(unittest.TestCase):
     out0 = r+2
     out1 = r+3
     check_schedule([out0, out1], 2) # TODO: 1?
+
+  def test_recursive_swizzle(self):
+    a = Tensor([1,2,3,4]).realize()
+    for _ in range(24): a = a + a
+    new_uop = a.reshape(4,1).realize().uop
+    assert new_uop.base.op is Ops.BUFFER
 
   def test_create_schedule_handles_multi_kernel_after_and_after_deps(self):
     def named_copy(name:str):

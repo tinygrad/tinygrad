@@ -2,15 +2,14 @@
 # schedule confirms the right things are capable of fusing
 # NOTE: this has overlap with external_test_opt.py
 
-import gc, unittest, functools
+import unittest
 import numpy as np
 from typing import cast
-from hypothesis import assume, given, strategies as strat
+from hypothesis import given, strategies as strat
 
 from tinygrad import nn, dtypes, Device, Tensor, Variable
-from tinygrad.dtype import DType
 from tinygrad.uop.ops import UOp, Ops, UPat
-from tinygrad.helpers import DEBUG, DEV, OSX, GlobalCounters, Context, getenv, all_same, temp
+from tinygrad.helpers import DEBUG, DEV, GlobalCounters, Context, getenv, all_same, temp
 from tinygrad.engine.realize import compile_linear, run_linear
 
 supported_dtypes = Device[Device.DEFAULT].renderer.supported_dtypes()
