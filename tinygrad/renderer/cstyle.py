@@ -176,12 +176,13 @@ class CStyleLanguage(Renderer):
     suffix = f"[{shp[0]}]" if len(shp) else ""
     return f"{prefix}{self._render_dtype(x.dtype, sz=lanes)} {self[x]}{suffix};"
 
-  def _render_dtype(self, dtype:DType, sz:int=1, addrspace=AddrSpace.REG, mutable=True):
+  def _render_dtype(self, dtype:DType, sz:int=1, addrspace=AddrSpace.REG, mutable=True, override_ptr=False):
     if isinstance(dtype, ImageDType): return f"{'write_only' if mutable else 'read_only'} image2d_t"
     prefix, suffix = "", ""
     if addrspace in (AddrSpace.LOCAL, AddrSpace.GLOBAL):
       if addrspace == AddrSpace.LOCAL and self.smem_prefix_for_cast: prefix = self.smem_prefix
       if addrspace == AddrSpace.GLOBAL: prefix = self.buffer_prefix
+    if addrspace in (AddrSpace.LOCAL, AddrSpace.GLOBAL) or override_ptr:
       suffix = "*"
     if sz > 1:
       return prefix + self.type_map.get(scalar:=dtype.scalar(), scalar.name).replace(" ", "_") + str(sz) + suffix
@@ -189,7 +190,7 @@ class CStyleLanguage(Renderer):
 
   def render_type(self, u:UOp): return self._render_dtype(u.dtype, u.max_numel(), u.addrspace)
   def render_access(self, u:UOp):
-    if u.max_numel() > 1: return f"*(({self.render_type(u)})({self[u]}))"
+    if u.max_numel() > 1: return f"*(({self._render_dtype(u.dtype, u.max_numel(), u.addrspace, override_ptr=True)})({self[u]}))"
     else: return f"*{self[u]}"
   def render_cast(self, u:UOp, val:str) -> str: return f"({self.render_type(u)})({val})"
 
