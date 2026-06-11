@@ -175,7 +175,7 @@ class HCQInfo:
 
   @staticmethod
   def from_call(call:UOp) -> HCQInfo:
-    return HCQInfo(get_call_name(call, [b.buffer for b in get_call_arg_uops(call)]), estimate_uop(call), get_call_outs_ins(call)[0])
+    return HCQInfo(get_call_name(call, list(get_call_arg_uops(call))), estimate_uop(call), get_call_outs_ins(call)[0])
 
 # *****************
 # 1.1. prep runtimes: staging copies
