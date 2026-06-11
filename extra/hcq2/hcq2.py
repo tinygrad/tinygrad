@@ -175,7 +175,7 @@ class HCQInfo:
 
   @staticmethod
   def from_call(call:UOp) -> HCQInfo:
-    return HCQInfo(get_call_name(call, list(get_call_arg_uops(call))), estimate_uop(call), get_call_outs_ins(call)[0])
+    return HCQInfo(get_call_name(call, get_call_arg_uops(call)), estimate_uop(call), get_call_outs_ins(call)[0])
 
 # *****************
 # 1.1. prep runtimes: staging copies
@@ -353,7 +353,7 @@ def merge_sinks(old_sink:UOp, new_sink:UOp) -> UOp:
 
 def merge_queues(linear:UOp) -> UOp:
   new_src:list[UOp] = []
-  opened_qs:dict[tuple[tuple[str, ...], str], tuple[UOp, HCQInfo|None]] = {} # (devs, queue) -> (sink, aux), kept in submit order
+  opened_qs:dict[tuple[tuple[str, ...], str], tuple[UOp, HCQInfo]] = {} # (devs, queue) -> (sink, aux), kept in submit order
 
   for call in linear.src:
     if call.tag != "hcq":
