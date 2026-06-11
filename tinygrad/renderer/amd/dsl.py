@@ -267,6 +267,10 @@ def _canonical_name(name: str) -> str | None:
   if name in ('data', 'vdata', 'data0', 'vsrc'): return 'data'
   return None
 
+class InsOp(functools.partial):
+  def _key(self): return (self.func.__name__, *[int(a) for a in self.args])
+  def __lt__(self, other): return self._key() < other._key()
+
 class Inst:
   _fields: list[tuple[str, BitField]]
   _base_size: int
