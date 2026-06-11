@@ -5,45 +5,9 @@ from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher
 from tinygrad.renderer.isa import ISARenderer, IselContext, Register
 import tinygrad.runtime.autogen.amd.rdna3.ins as RDNA3Ops
 
-# Baseline functionality: add 2 tensors (a + b)
-# Requirements:
-# - abi/kernargs
-# - register allocation
-# - ds ops, load/store lowering and address folding
-# - alu ins
-# - ins encoding
-# 
-# Notes:
-# - AMD memory/SALU are async. Need s_waitcnt after global_load
-#   - implement as flush pass after isel matching
-# - Wave front size is set to 32 in amd/elf.py
-# - look at amd/elf.py  for kernel launching semantics/metadata
-# - exec masking??
-# - regalloc + renderer stubs handles loading register values
-# - need widened vregs for instructions like global_load_b64/b128 etc.. v[4:8]
-# - start with pinned pairs
-# - goal, ensure UOp src operands come in order of instruction encoding to satisfy isa, makes encoding easier
-#   - look at vop2()
-#   - explicitly emit register moves if necessary
-# - where should register fusion happen? at encoding step probably not in izsel_matcher
-#
-#
-# Timeline:
-# [DONE] hack together a functional fp32 gemm kernel, first get Tensor.ones add working (kernarg loading/storing)
-# (2) Clean up as much code as possible, especially encoding, abi, post regalloc pass, load syncs etc..
-# (3) Start the rest of the isa, write some test cases for diverse kernels (.where, casts, ranges, etc...)
-# (4) Pain and suffering
-# (5) perf! (may require hardware)
-
-
 VGPRS = tuple(Register(f"v{i}", i) for i in range(256))
 SGPRS = tuple(Register(f"s{i}", i) for i in range(106))
-# Unless the Target Properties column of AMDGPU Processors specifies otherwise, a separate VGPR register is used per work-item ID.
-# work item ids packed into v[0]? 10 bytes each
-# need to use v_bfe_u32 (bitfield extract)
-# v_bfe vdst, src, field offset, field size
-WGIDS, WIIDS = tuple(SGPRS[2:5]), (VGPRS[0],)
-# s[0:1] reserved for kernarg ptr
+KERNARG_PTR, WGIDS, WIIDS = tuple(SGPRS[:2]), tuple(SGPRS[2:5]), (VGPRS[0],)
 GP_SGPRS, GP_VGPRS = tuple(SGPRS[4:]), tuple(VGPRS[1:])
 
 def _const(dt, v:int) -> UOp: return UOp.const(dt,v)
@@ -71,9 +35,9 @@ def abi(ctx:IselContext, x:UOp) -> UOp|None:
     if x.arg[0] == 'g': return def_reg(dtypes.int, WGIDS[dim])
     else: return x.ins(RDNA3Ops.v_bfe_u32, src=(def_reg(dtypes.uint32, WIIDS[0]), _const(dtypes.uint32, 10 * dim), _const(dtypes.uint32, 10)))
   offs = sum(8 if u.op == Ops.PARAM else 4 for u in ctx.func_args[:i])
-  # pin kernarg ptr and contiguous gp sgprsfor load
+  # pin kernarg ptr and contiguous gp sgprs for load
   return x.ins(RDNA3Ops.s_load_b64,
-               src=(def_reg(dtypes.uint32, SGPRS[0]), def_reg(dtypes.uint32, SGPRS[1]),
+               src=(def_reg(dtypes.uint32, KERNARG_PTR[0]), def_reg(dtypes.uint32, KERNARG_PTR[1]),
                     UOp.const(dtypes.uint32, offs).rtag()),
                tag=(ctx.vreg(GP_SGPRS[2*i]), ctx.vreg(GP_SGPRS[2*i+1])))
 
@@ -109,41 +73,16 @@ def fold_address(x:UOp) -> tuple[UOp, UOp, UOp]: # returns addr, data, saddr (of
   if idx.op is Ops.CONST: return (UOp(Ops.NOOP), base, _offs(idx.arg * disp_scale))
   # NOTE: dont cast for now so I dont need to impl cast alu
   if idx.op is Ops.ADD and idx.src[1].op is Ops.CONST: return (idx.src[0] << shft, base, _offs(idx.src[1].arg * disp_scale))
-
-  # TODO: adressing is in elements not bytes, logical shift needed ex. v_lshlrev_b32 by 2
-
   # For now dont use immediate offset (set to 0x0)
   # lane relative offsets need to be stored in vgpr
   return (idx << shft, base, _offs(0))
 
-V_ADD = {
-  dtypes.float16 : RDNA3Ops.v_add_f16_e32,  dtypes.float32 : RDNA3Ops.v_add_f32_e32,
-  dtypes.float64 : RDNA3Ops.v_add_f64,      dtypes.int32 : RDNA3Ops.v_add_nc_i32,
-  dtypes.uint32 : RDNA3Ops.v_add_nc_u32_e32,
-}
-
-V_SUB = {
-  dtypes.float16 : RDNA3Ops.v_sub_f16_e32,  dtypes.float32 : RDNA3Ops.v_sub_f32_e32,
-  dtypes.int32 : RDNA3Ops.v_sub_nc_i32, dtypes.uint32 : RDNA3Ops.v_sub_nc_u32_e32,
-}
-
-V_MUL = {
-  dtypes.float16 : RDNA3Ops.v_mul_f16_e32,  dtypes.float32 : RDNA3Ops.v_mul_f32_e32,
-  dtypes.float64 : RDNA3Ops.v_mul_f64,      dtypes.int32 : RDNA3Ops.v_mul_i32_i24_e32,
-  dtypes.uint32 : RDNA3Ops.v_mul_u32_u24_e32,
-}
-
-V_SQRT = {
-  dtypes.float16 : RDNA3Ops.v_sqrt_f16_e32, dtypes.float32 : RDNA3Ops.v_sqrt_f32_e32,
-  dtypes.float64 : RDNA3Ops.v_sqrt_f64_e32
-}
-
-V_CMPLT = {
-  dtypes.float16 : RDNA3Ops.v_cmp_lt_f16_e32, dtypes.float32 : RDNA3Ops.v_cmp_lt_f32_e32,
-  dtypes.float64 : RDNA3Ops.v_cmp_lt_f64_e32, dtypes.uint32 : RDNA3Ops.v_cmp_lt_u32_e32,
-  dtypes.int32 : RDNA3Ops.v_cmp_lt_i32_e32, dtypes.int16: RDNA3Ops.v_cmp_lt_i16_e32,
-  dtypes.uint16 : RDNA3Ops.v_cmp_lt_u16_e32
-}
+V_ADD =   { dtypes.float16:RDNA3Ops.v_add_f16_e32,  dtypes.float32:RDNA3Ops.v_add_f32_e32, dtypes.float64:RDNA3Ops.v_add_f64,   dtypes.int32:RDNA3Ops.v_add_nc_i32,       dtypes.uint32:RDNA3Ops.v_add_nc_u32_e32,  }
+V_SUB =   { dtypes.float16:RDNA3Ops.v_sub_f16_e32,  dtypes.float32:RDNA3Ops.v_sub_f32_e32, dtypes.int32:RDNA3Ops.v_sub_nc_i32,  dtypes.uint32:RDNA3Ops.v_sub_nc_u32_e32,  }
+V_MUL =   { dtypes.float16:RDNA3Ops.v_mul_f16_e32,  dtypes.float32:RDNA3Ops.v_mul_f32_e32, dtypes.float64:RDNA3Ops.v_mul_f64,   dtypes.int32:RDNA3Ops.v_mul_i32_i24_e32,  dtypes.uint32:RDNA3Ops.v_mul_u32_u24_e32, }
+V_SQRT =  { dtypes.float16:RDNA3Ops.v_sqrt_f16_e32, dtypes.float32:RDNA3Ops.v_sqrt_f32_e32, dtypes.float64:RDNA3Ops.v_sqrt_f64_e32 }
+V_CMPLT = { dtypes.float16:RDNA3Ops.v_cmp_lt_f16_e32, dtypes.float32:RDNA3Ops.v_cmp_lt_f32_e32, dtypes.float64:RDNA3Ops.v_cmp_lt_f64_e32, dtypes.uint32:RDNA3Ops.v_cmp_lt_u32_e32,
+  dtypes.int32:RDNA3Ops.v_cmp_lt_i32_e32, dtypes.int16:RDNA3Ops.v_cmp_lt_i16_e32, dtypes.uint16:RDNA3Ops.v_cmp_lt_u16_e32 }
 
 # ensures vsrc1 is a vgpr operand
 def legalize_vop2(x:UOp):
@@ -176,16 +115,8 @@ isel_matcher = PatternMatcher([
   # ((UPat.var("a") < UPat()).named("x"), foo),
 
   # where ops
-  # I think the problem is the condition always gets folded into where src?
-  # somehow need to do comparison in same step? doe sit need post regalloc?
-  # (UPat(Ops.WHERE, src=(UPat(), UPat.var("a"), UPat.var("b")), name="x"), bar),
   (UPat(Ops.CMPLT, name="m").where(UPat.var("a", dtype=dt_32bit), UPat().var("b")).named("x"),
     lambda m,a,b,x: x.ins(RDNA3Ops.v_cndmask_b32_e32, src=(a,b,m.ins(V_CMPLT[a.dtype], dtype=dtypes.void)))),
-
-  # TODO: conditional moves ex. (a < b).where(x, y)
-  # Does conditional move need to be in post regalloc pass?
-  # Store cmp in src and then rewrite line to call cmp instruction right before cndmask
-
 
   # mem ops
   (UPat(Ops.LOAD, dt_32bit, name="x", src=(UPat(name="idx"))), lambda x,idx: x.ins(RDNA3Ops.global_load_b32, src=fold_address(idx))),
@@ -247,7 +178,6 @@ def fillinsts(x:UOp):
 
 post_regalloc_matcher = PatternMatcher([
   (UPat(Ops.SINK, name="x"), lambda x: (x, [x.ins(RDNA3Ops.s_endpgm())])),
-
 
   # strip everything but Ops.INS to bypass render rewrite
   (UPat((Ops.DEFINE_REG, Ops.CONST), name="x"), lambda ctx,x: (x,[])),
