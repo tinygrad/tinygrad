@@ -51,8 +51,8 @@ z3_renderer = PatternMatcher([
 ])
 
 def uops_to_z3(solver:z3.Solver, *uops: UOp) -> list[z3.ExprRef]:
-  # gate on any upstream INDEX as a replacement for PtrDType
-  lst = list(UOp.sink(*uops).toposort(gate=lambda x: x.op is not Ops.INDEX and \
+  # gate on upstream AFTER/BUFFER as a replacement for PtrDType, but keep INDEX as an unknown LOAD
+  lst = list(UOp.sink(*uops).toposort(gate=lambda x: x.op not in {Ops.AFTER, Ops.BUFFER, Ops.PARAM} and \
                                       (x.dtype.scalar() in dtypes.ints+(dtypes.bool, dtypes.weakint) or x.op is Ops.SINK)))[:-1]
   z3map: dict[UOp, z3.ExprRef] = {}
   for u in lst:

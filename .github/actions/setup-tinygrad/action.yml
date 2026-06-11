@@ -137,7 +137,7 @@ runs:
 
     # ******************* apt *******************
     - name: Setup apt
-      if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.ocelot == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true' || inputs.qemu == 'true')
+      if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true' || inputs.qemu == 'true')
       shell: bash
       run: |
         sudo chown -R $USER:$USER /var/cache/apt/archives
@@ -169,7 +169,7 @@ runs:
         echo "deb http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-20 main" | sudo tee /etc/apt/sources.list.d/llvm.list
 
     - name: Compute Package List + Hash
-      if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.ocelot == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true' || inputs.qemu == 'true')
+      if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true' || inputs.qemu == 'true')
       id: apt-pkgs
       shell: bash
       run: |
@@ -183,16 +183,11 @@ runs:
         fi
         # **** AMD ****
         if [[ "${{ inputs.amd }}" == "true" ]]; then
-          pkgs+=" hsa-rocr comgr hsa-rocr-dev liburing-dev libibverbs-dev libc6-dev"
-        fi
-        # **** ocelot (dependencies) ****
-        if [[ "${{ inputs.ocelot }}" == "true" ]]; then
-          pkgs+=" git g++ cmake ninja-build llvm-15-dev zlib1g-dev libglew-dev \
-            flex bison libfl-dev libboost-thread-dev libboost-filesystem-dev libzstd-dev"
+          pkgs+=" comgr"
         fi
         # **** WebGPU (dependencies for software-based vulkan) ****
         if [[ "${{ inputs.webgpu }}" == "true" ]]; then
-          pkgs+=" libgl1 libglx-mesa0 libgl1-mesa-dri libxcb-xfixes0-dev mesa-vulkan-drivers"
+          pkgs+=" mesa-vulkan-drivers"
         fi
         # **** LLVM ****
         if [[ "${{ inputs.llvm }}" == "true" ]]; then
@@ -207,20 +202,20 @@ runs:
         echo "hash=$(echo -n "$pkgs" | sha256sum | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
     - name: Cache apt (PR)
-      if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.ocelot == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true' || inputs.qemu == 'true') && github.event_name == 'pull_request'
+      if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true' || inputs.qemu == 'true') && github.event_name == 'pull_request'
       uses: actions/cache/restore@v4
       with:
         path: /var/cache/apt/archives/
         key: ${{ runner.os }}-${{ runner.arch }}-apt-${{ steps.apt-pkgs.outputs.hash }}-${{ env.CACHE_VERSION }}
     - name: Cache apt
-      if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.ocelot == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true' || inputs.qemu == 'true') && github.event_name != 'pull_request'
+      if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true' || inputs.qemu == 'true') && github.event_name != 'pull_request'
       uses: actions/cache@v5
       with:
         path: /var/cache/apt/archives/
         key: ${{ runner.os }}-${{ runner.arch }}-apt-${{ steps.apt-pkgs.outputs.hash }}-${{ env.CACHE_VERSION }}
 
     - name: Run apt Update + Install
-      if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.ocelot == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true' || inputs.qemu == 'true')
+      if: runner.os == 'Linux' && (inputs.opencl == 'true' || inputs.amd == 'true' || inputs.webgpu == 'true' || inputs.llvm == 'true' || inputs.qemu == 'true')
       shell: bash
       run: |
         sudo apt -qq update || true
@@ -268,78 +263,21 @@ runs:
         sudo ldconfig
 
     # **** gpuocelot ****
-
-    - name: Install gpuocelot dependencies (MacOS)
-      if: inputs.ocelot == 'true' && runner.os == 'macOS'
-      shell: bash
-      run: |
-        pkgs=(cmake ninja llvm@15 zlib glew flex bison boost@1.85 zstd ncurses)
-        for f in "${pkgs[@]}"; do
-          brew ls --versions "$f" >/dev/null 2>&1 || brew install --quiet "$f"
-        done
-
-        # Fix boost 1.85 for gpuocelot
-        ln -s /opt/homebrew/opt/boost@1.85 /opt/homebrew/opt/boost || true
-        ln -s /opt/homebrew/opt/boost/lib/libboost_atomic-mt.dylib /opt/homebrew/opt/boost/lib/libboost_atomic.dylib || true
-        ln -s /opt/homebrew/opt/boost/lib/libboost_thread-mt.dylib /opt/homebrew/opt/boost/lib/libboost_thread.dylib || true
-    - name: Cache gpuocelot (PR)
-      if: inputs.ocelot == 'true' && github.event_name == 'pull_request'
-      id: cache-build-pr
-      uses: actions/cache/restore@v4
-      env:
-        cache-name: cache-gpuocelot-build-1
-      with:
-        path: ${{ github.workspace }}/gpuocelot/ocelot
-        key: ${{ runner.os }}-gpuocelot-f463259669c69abce7b3a0567b6c284f348d0f32-rebuild-${{ env.CACHE_VERSION }}
-    - name: Cache gpuocelot
-      if: inputs.ocelot == 'true' && github.event_name != 'pull_request'
-      id: cache-build
-      uses: actions/cache@v5
-      env:
-        cache-name: cache-gpuocelot-build-1
-      with:
-        path: ${{ github.workspace }}/gpuocelot/ocelot
-        key: ${{ runner.os }}-gpuocelot-f463259669c69abce7b3a0567b6c284f348d0f32-rebuild-${{ env.CACHE_VERSION }}
-    - name: Clone/compile gpuocelot
-      if: inputs.ocelot == 'true' && steps.cache-build-pr.outputs.cache-hit != 'true' && steps.cache-build.outputs.cache-hit != 'true'
-      shell: bash
-      run: |
-        git clone --recurse-submodules https://github.com/tinygrad/gpuocelot.git ${{ github.workspace }}/gpuocelot
-        cd ${{ github.workspace }}/gpuocelot/ocelot
-        git checkout f463259669c69abce7b3a0567b6c284f348d0f32
-        mkdir build
-        cd build
-
-        CMAKE_ARGS="-Wno-dev -G Ninja -DOCELOT_BUILD_TOOLS=OFF -DCMAKE_BUILD_ALWAYS=0 -DBUILD_TESTS_CUDA=OFF -DCMAKE_POLICY_VERSION_MINIMUM=3.5"
-        if [[ "${{ runner.os }}" == "macOS" ]]; then
-          CMAKE_ARGS="$CMAKE_ARGS -DBoost_INCLUDE_DIR=$(brew --prefix boost)/include -DBoost_LIBRARY_DIR=$(brew --prefix boost)/lib"
-        else
-          CMAKE_ARGS="$CMAKE_ARGS -DLLVM_DIR=$(llvm-config-15 --cmakedir)"
-        fi
-
-        cmake .. $CMAKE_ARGS
-        ninja
     - name: Install gpuocelot
       if: inputs.ocelot == 'true'
       shell: bash
       run: |
-        cd ${{ github.workspace }}/gpuocelot/ocelot/build
-        sudo cp libgpuocelot.${{ runner.os == 'macOS' && 'dylib' || 'so' }} /usr/${{ runner.os == 'macOS' && 'local/' || '' }}lib/
+        sudo mkdir -p /usr/local/lib
+        sudo curl --output-dir /usr/local/lib -fLO https://github.com/tinygrad/gpuocelot/releases/download/v0.1.0/libgpuocelot.${{ runner.os == 'Linux' && 'so' || 'dylib' }}
 
     # **** WebGPU ****
 
-    - name: Install WebGPU dawn (Linux)
-      if: inputs.webgpu == 'true' && runner.os == 'Linux'
+    - name: Install WebGPU dawn
+      if: inputs.webgpu == 'true'
       shell: bash
       run: |
-        sudo curl -fL https://github.com/wpmed92/pydawn/releases/download/v0.1.6/libwebgpu_dawn.so -o /usr/local/lib/libwebgpu_dawn.so
-        sudo ldconfig
-    - name: Install WebGPU dawn (macOS)
-      if: inputs.webgpu == 'true' && runner.os == 'macOS'
-      shell: bash
-      run: |
-        brew tap wpmed92/dawn
-        brew install dawn
+        sudo mkdir -p /usr/local/lib
+        sudo curl --output-dir /usr/local/lib -fLO https://github.com/wpmed92/pydawn/releases/download/v0.1.6/libwebgpu_dawn.${{ runner.os == 'Linux' && 'so' || 'dylib' }}
 
     # **** LLVM ****
 
